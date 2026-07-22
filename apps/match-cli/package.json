@@ -1,0 +1,13 @@
+{
+  "name": "@story-fm/match-cli",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@story-fm/agents": "workspace:*",
+    "@story-fm/domain": "workspace:*",
+    "@story-fm/llm": "workspace:*",
+    "@story-fm/sim": "workspace:*",
+    "zod": "^3.24.1"
+  }
+}

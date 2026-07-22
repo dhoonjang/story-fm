@@ -1,0 +1,284 @@
+import type { MatchEvent, MatchPhase, MatchSide, Team } from "@story-fm/domain";
+import { TEAM_EVENT_TYPES } from "@story-fm/domain";
+
+/**
+ * 경기 장부 — LLM(매치 티어)이 창발적으로 생성한 사건을 검증해 기록하는
+ * 결정적 코어 (결정 #14, match-sim.md §4). 창발 출력이 검증 없이 게임
+ * 상태가 되는 일은 없다 (AGENTS.md 6-4).
+ */
+
+export interface TeamLedger {
+  onPitch: string[];
+  bench: string[];
+  subsUsed: number;
+  /** 교체 기회(창) — 같은 분(分)의 연속 교체는 한 창, 하프타임(45′)은 창 미소모 */
+  subWindows: number;
+  lastSubMinute: number | null;
+  /** 선수별 경고 수 — 경고 2회는 자동 퇴장 */
+  yellows: Record<string, number>;
+}
+
+export interface MatchLedgerState {
+  minute: number;
+  phase: MatchPhase;
+  score: { home: number; away: number };
+  events: MatchEvent[];
+  home: TeamLedger;
+  away: TeamLedger;
+  sentOff: string[];
+}
+
+export type ApplyResult =
+  | { ok: true; state: MatchLedgerState }
+  | { ok: false; errors: string[] };
+
+/** 하드 상한 — 비상식 방지 (match-sim.md §4). 수치는 balance.md에서 튜닝 */
+export const LEDGER_LIMITS = {
+  maxGoalsPerTeam: 6,
+  maxEventsPerBatch: 20,
+  maxSubs: 5,
+  maxSubWindows: 3,
+} as const;
+
+export function createLedger(home: Team, away: Team): MatchLedgerState {
+  const side = (t: Team): TeamLedger => ({
+    onPitch: [...t.startingXI],
+    bench: [...t.bench],
+    subsUsed: 0,
+    subWindows: 0,
+    lastSubMinute: null,
+    yellows: {},
+  });
+  return {
+    minute: 0,
+    phase: "first_half",
+    score: { home: 0, away: 0 },
+    events: [],
+    home: side(home),
+    away: side(away),
+    sentOff: [],
+  };
+}
+
+function deepClone(state: MatchLedgerState): MatchLedgerState {
+  return structuredClone(state);
+}
+
+function label(i: number, ev: MatchEvent): string {
+  return `이벤트 #${i + 1}(${ev.minute}′ ${ev.type})`;
+}
+
+/**
+ * 이벤트 배치를 검증하며 적용한다 — 원자적: 하나라도 실패하면 전체 반려.
+ * 오류 메시지는 한국어로 — LLM이 읽고 수정 재기록한다 (Zod 재시도와 동일 패턴).
+ */
+export function applyEvents(state: MatchLedgerState, incoming: MatchEvent[]): ApplyResult {
+  if (incoming.length === 0) {
+    return { ok: false, errors: ["빈 이벤트 배치 — 기록할 사건이 없습니다"] };
+  }
+  if (incoming.length > LEDGER_LIMITS.maxEventsPerBatch) {
+    return {
+      ok: false,
+      errors: [`한 번에 최대 ${LEDGER_LIMITS.maxEventsPerBatch}개 이벤트만 기록할 수 있습니다`],
+    };
+  }
+  if (state.phase === "finished") {
+    return { ok: false, errors: ["경기가 이미 종료되었습니다 — 추가 기록 불가"] };
+  }
+
+  const next = deepClone(state);
+
+  for (let i = 0; i < incoming.length; i++) {
+    const ev = incoming[i];
+    if (!ev) continue;
+    // 하프타임은 강제 정지점 — 같은 배치에 하프타임 이후 사건이 오면 반려
+    // (한 턴에 경기 전체를 밀어붙이는 것을 코어가 막는다, overview §4)
+    const prev = i > 0 ? incoming[i - 1] : null;
+    if (prev?.type === "half_time") {
+      return {
+        ok: false,
+        errors: [
+          `${label(i, ev)}: 하프타임은 정지점입니다 — 이후 사건은 다음 진행에서 기록하세요`,
+        ],
+      };
+    }
+    const err = applyOne(next, ev, i);
+    if (err) return { ok: false, errors: [err] };
+    next.events.push(ev);
+    next.minute = Math.max(next.minute, ev.minute);
+  }
+  return { ok: true, state: next };
+}
+
+function teamOf(state: MatchLedgerState, side: MatchSide): TeamLedger {
+  return side === "home" ? state.home : state.away;
+}
+
+function applyOne(state: MatchLedgerState, ev: MatchEvent, i: number): string | null {
+  // 공통: 시간 순증 + 종료 이후 금지
+  if (state.phase === "finished") {
+    return `${label(i, ev)}: 경기 종료(full_time) 이후의 이벤트는 기록할 수 없습니다`;
+  }
+  if (ev.minute < state.minute) {
+    return `${label(i, ev)}: 시간 역행 — 현재 ${state.minute}′보다 이른 시각입니다`;
+  }
+
+  // 팀 귀속 요구
+  if (TEAM_EVENT_TYPES.has(ev.type) && !ev.team) {
+    return `${label(i, ev)}: 이 이벤트 타입은 team("home"|"away")이 필요합니다`;
+  }
+
+  const side = ev.team ? teamOf(state, ev.team) : null;
+
+  const requireOnPitch = (playerId: string): string | null => {
+    if (!side || !ev.team) return null;
+    if (state.sentOff.includes(playerId)) {
+      return `${label(i, ev)}: "${playerId}"는 퇴장당해 그라운드에 없습니다`;
+    }
+    if (!side.onPitch.includes(playerId)) {
+      return `${label(i, ev)}: "${playerId}"는 ${ev.team} 팀의 그라운드 위 선수가 아닙니다`;
+    }
+    return null;
+  };
+
+  switch (ev.type) {
+    case "kickoff": {
+      if (state.events.some((e) => e.type === "kickoff")) {
+        return `${label(i, ev)}: 킥오프는 이미 기록되었습니다`;
+      }
+      break;
+    }
+
+    case "goal": {
+      if (!side || !ev.team) return `${label(i, ev)}: goal은 team이 필요합니다`;
+      const scorer = ev.actors[0];
+      if (!scorer) return `${label(i, ev)}: 득점자(actors[0])가 필요합니다`;
+      for (const actor of ev.actors) {
+        const err = requireOnPitch(actor);
+        if (err) return err;
+      }
+      const nextScore = state.score[ev.team] + 1;
+      if (nextScore > LEDGER_LIMITS.maxGoalsPerTeam) {
+        return `${label(i, ev)}: 팀당 ${LEDGER_LIMITS.maxGoalsPerTeam}골 상한 초과 — 비상식적 스코어입니다`;
+      }
+      state.score[ev.team] = nextScore;
+      break;
+    }
+
+    case "shot":
+    case "save":
+    case "chance":
+    case "foul":
+    case "injury": {
+      for (const actor of ev.actors) {
+        const err = requireOnPitch(actor);
+        if (err) return err;
+      }
+      break;
+    }
+
+    case "yellow_card": {
+      const player = ev.actors[0];
+      if (!player) return `${label(i, ev)}: 경고 대상(actors[0])이 필요합니다`;
+      const err = requireOnPitch(player);
+      if (err) return err;
+      if (!side) return `${label(i, ev)}: team이 필요합니다`;
+      side.yellows[player] = (side.yellows[player] ?? 0) + 1;
+      if ((side.yellows[player] ?? 0) >= 2) {
+        // 경고 누적 퇴장
+        side.onPitch = side.onPitch.filter((id) => id !== player);
+        state.sentOff.push(player);
+      }
+      break;
+    }
+
+    case "red_card": {
+      const player = ev.actors[0];
+      if (!player) return `${label(i, ev)}: 퇴장 대상(actors[0])이 필요합니다`;
+      const err = requireOnPitch(player);
+      if (err) return err;
+      if (!side) return `${label(i, ev)}: team이 필요합니다`;
+      side.onPitch = side.onPitch.filter((id) => id !== player);
+      state.sentOff.push(player);
+      break;
+    }
+
+    case "substitution": {
+      if (!side || !ev.team) return `${label(i, ev)}: substitution은 team이 필요합니다`;
+      const [out, into] = ev.actors;
+      if (!out || !into) {
+        return `${label(i, ev)}: actors는 [나가는 선수, 들어오는 선수] 2명이어야 합니다`;
+      }
+      if (side.subsUsed >= LEDGER_LIMITS.maxSubs) {
+        return `${label(i, ev)}: 교체 ${LEDGER_LIMITS.maxSubs}명 소진 — 더 교체할 수 없습니다`;
+      }
+      // 교체 기회(창) 검증 — 같은 분의 연속 교체는 한 창, 하프타임(45′)은 미소모
+      const isHalfTimeSub = ev.minute === 45 || ev.minute === 46;
+      const opensNewWindow = !isHalfTimeSub && side.lastSubMinute !== ev.minute;
+      if (opensNewWindow && side.subWindows >= LEDGER_LIMITS.maxSubWindows) {
+        return `${label(i, ev)}: 교체 기회 ${LEDGER_LIMITS.maxSubWindows}회 소진 (하프타임 제외)`;
+      }
+      const outErr = requireOnPitch(out);
+      if (outErr) return outErr;
+      if (!side.bench.includes(into)) {
+        return `${label(i, ev)}: "${into}"는 ${ev.team} 벤치에 없습니다`;
+      }
+      if (state.sentOff.includes(into)) {
+        return `${label(i, ev)}: "${into}"는 퇴장당해 투입할 수 없습니다`;
+      }
+      side.onPitch = side.onPitch.filter((id) => id !== out).concat(into);
+      side.bench = side.bench.filter((id) => id !== into);
+      side.subsUsed += 1;
+      if (opensNewWindow) side.subWindows += 1;
+      if (!isHalfTimeSub) side.lastSubMinute = ev.minute;
+      break;
+    }
+
+    case "half_time": {
+      if (state.phase !== "first_half") {
+        return `${label(i, ev)}: 하프타임은 전반에만 올 수 있습니다 (현재 ${state.phase})`;
+      }
+      if (ev.minute < 45) {
+        return `${label(i, ev)}: 하프타임은 45′ 이후여야 합니다`;
+      }
+      state.phase = "second_half";
+      break;
+    }
+
+    case "full_time": {
+      if (state.phase !== "second_half") {
+        return `${label(i, ev)}: 경기 종료는 후반에만 올 수 있습니다 (현재 ${state.phase} — 먼저 half_time을 기록하세요)`;
+      }
+      if (ev.minute < 90) {
+        return `${label(i, ev)}: 경기 종료는 90′ 이후여야 합니다`;
+      }
+      state.phase = "finished";
+      break;
+    }
+  }
+  return null;
+}
+
+/** 장부 요약 — 매치 티어 LLM 컨텍스트용 한국어 스냅샷 (match-sim.md §2) */
+export function describeLedger(
+  state: MatchLedgerState,
+  names: { home: string; away: string },
+): string {
+  const phaseKo =
+    state.phase === "first_half" ? "전반" : state.phase === "second_half" ? "후반" : "경기 종료";
+  const lines = [
+    `[경기 장부] ${names.home} ${state.score.home} : ${state.score.away} ${names.away} — ${state.minute}′ (${phaseKo})`,
+    `교체: 홈 ${state.home.subsUsed}/${LEDGER_LIMITS.maxSubs}, 어웨이 ${state.away.subsUsed}/${LEDGER_LIMITS.maxSubs}` +
+      (state.sentOff.length > 0 ? ` · 퇴장: ${state.sentOff.join(", ")}` : ""),
+  ];
+  const recent = state.events.slice(-8);
+  if (recent.length > 0) {
+    lines.push(
+      "최근 이벤트: " +
+        recent
+          .map((e) => `${e.minute}′ ${e.type}${e.actors.length ? `(${e.actors.join("→")})` : ""}`)
+          .join(", "),
+    );
+  }
+  return lines.join("\n");
+}

@@ -1,0 +1,16 @@
+{
+  "name": "@story-fm/agents",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.112.4",
+    "@story-fm/domain": "workspace:*",
+    "@story-fm/engine": "workspace:*",
+    "@story-fm/llm": "workspace:*",
+    "zod": "^3.24.1"
+  }
+}
