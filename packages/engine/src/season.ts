@@ -332,7 +332,7 @@ export function transitionSeason(state: GameState): string[] {
   // 새 시즌은 7월 1일(프리시즌·여름 이적창 개장)에서 시작한다
   state.date = nextCalendar.preseasonStart;
   const windows = buildTransferWindows(nextSeason);
-  const matches = buildMatches(nextSeason, state.teams.map((t) => t.id), nextCalendar.start);
+  const matches = buildMatches(nextSeason, state.teams.map((t) => t.id), state.seed);
   state.windows = windows;
   state.matches = matches;
   state.schedule = buildScheduleEntries(matches, windows, state.userTeamId);

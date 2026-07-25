@@ -49,7 +49,10 @@ describe("지식 수준 파생", () => {
   it("맞대결에서 실제로 뛴 선수만 seen이 된다 (벤치에만 앉은 선수는 아니다)", () => {
     const state = createTestGame(11);
     advanceAndPlay(state); // 첫 경기를 끝까지
-    const played = state.matches.find((m) => m.result && m.homeTeamId && m.awayTeamId)!;
+    // 우리가 치른 경기 — 같은 날 다른 팀 경기도 시뮬되므로 유저 경기를 명시적으로 찾는다
+    const played = state.matches.find(
+      (m) => m.result && (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+    )!;
     const userIsHome = played.homeTeamId === state.userTeamId;
     const opponentId = userIsHome ? played.awayTeamId : played.homeTeamId;
     const lineup = (userIsHome ? played.result!.awayLineup : played.result!.homeLineup) ?? [];
@@ -66,6 +69,9 @@ describe("지식 수준 파생", () => {
   it("우리가 없던 경기의 선수는 seen이 되지 않는다 (남의 경기는 못 본다)", () => {
     const state = createTestGame(11);
     advanceAndPlay(state);
+    // 우리 경기는 금요일 개막전일 수 있다 — 라운드가 끝나도록 며칠 더 보내
+    // 타 팀 경기(간이 시뮬)가 치러지게 한다
+    advanceTime(state, { days: 5 });
     const otherMatch = state.matches.find(
       (m) =>
         m.result &&

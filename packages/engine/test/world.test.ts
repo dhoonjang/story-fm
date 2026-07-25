@@ -3,7 +3,6 @@ import { GamePlayerSchema, TeamTacticsSchema, naturalPositionOf } from "@story-f
 import {
   TEAM_CATALOG,
   buildMatches,
-  buildSeasonCalendar,
   buildTransferWindows,
   interpretBackgroundHeuristic,
   ONBOARDING_TOTAL,
@@ -69,9 +68,12 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
     expect(state.date >= (summer?.opensOn ?? "")).toBe(true);
   });
 
-  it("리그 개막은 8월 중순 토요일", () => {
+  it("리그 개막은 8월 중순 금요일 밤 (실제 EPL처럼 개막전 1경기가 금요일)", () => {
     expect(state.calendar.start.startsWith("2026-08")).toBe(true);
-    expect(new Date(`${state.calendar.start}T00:00:00Z`).getUTCDay()).toBe(6);
+    expect(new Date(`${state.calendar.start}T00:00:00Z`).getUTCDay()).toBe(5);
+    // 개막일에 정확히 1경기 — 나머지 라운드는 주말에 흩어진다
+    const openerDay = state.matches.filter((m) => m.date === state.calendar.start);
+    expect(openerDay).toHaveLength(1);
   });
 
   it("팀·선수·전술·재정·계약이 인스턴스화된다", () => {
@@ -139,8 +141,7 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
 describe("시즌 일정 (일정 축)", () => {
   it("38라운드 더블 라운드로빈 — 팀당 38경기, 홈 19 어웨이 19", () => {
     const ids = TEAM_CATALOG.map((t) => t.id);
-    const cal = buildSeasonCalendar(1);
-    const matches = buildMatches(1, ids, cal.start);
+    const matches = buildMatches(1, ids);
     expect(matches).toHaveLength(380);
     for (const id of ids) {
       const mine = matches.filter((m) => m.homeTeamId === id || m.awayTeamId === id);

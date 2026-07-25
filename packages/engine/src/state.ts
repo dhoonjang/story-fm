@@ -562,7 +562,7 @@ export function createGame(input: CreateGameInput): GameState {
 
   // 일정 — 경기 380 + 이적창 개장/폐장
   const windows = buildTransferWindows(season);
-  const matches = buildMatches(season, teams.map((t) => t.id), calendar.start);
+  const matches = buildMatches(season, teams.map((t) => t.id), seed);
   const schedule = buildScheduleEntries(matches, windows, input.userTeamId);
   // 게임은 여름 창이 열린 7/1에 시작한다 — 그 개장 엔트리는 이미 소화된 상태
   for (const entry of schedule) {
