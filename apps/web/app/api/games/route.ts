@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   createGame,
   interpretBackgroundHeuristic,
+  listGameSummaries,
   saveGame,
   TEAM_CATALOG,
 } from "@story-fm/engine";
@@ -16,9 +17,9 @@ const CreateSchema = z.object({
   seed: z.number().int().optional(),
 });
 
-/** 팀 카탈로그 — 온보딩 팀 선택용 */
+/** 팀 카탈로그(새 게임 팀 선택) + 저장된 게임 목록(랜딩) */
 export function GET() {
-  return NextResponse.json({ teams: TEAM_CATALOG });
+  return NextResponse.json({ teams: TEAM_CATALOG, games: listGameSummaries() });
 }
 
 /** 새 게임 생성 — 배경 직접 입력 → 능력치 배분 (결정 #11) */

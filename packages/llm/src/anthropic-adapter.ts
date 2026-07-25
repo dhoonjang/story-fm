@@ -2,12 +2,90 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { TierConfig } from "./config";
 import type { GameLLM, GameToolSpec, TurnRequest, TurnResult, TurnUsage } from "./game-llm";
 
-/** 한 턴 안에서 tool call 왕복 허용 횟수 — 폭주 방지 가드 */
-const MAX_TOOL_ITERATIONS = 6;
+/** 한 턴 안에서 tool call 왕복 허용 횟수 — 조회 + 실행이 같이 도므로 여유를 둔다 */
+const MAX_TOOL_ITERATIONS = 8;
+
+/** 요청당 캐시 브레이크포인트 상한 (Anthropic 제약) */
+const MAX_BREAKPOINTS = 4;
 
 /**
- * Anthropic 어댑터 — 시스템 프롬프트 캐싱(cache_control), adaptive thinking,
+ * role:"system" 중간 메시지를 거부한 모델 — 한 번 400을 맞으면 이후 폴백으로 고정한다.
+ * (Opus 4.8은 지원, 프로바이더/모델을 갈아탈 때를 대비한 안전장치)
+ */
+const midSystemUnsupported = new Set<string>();
+
+/** SDK 타입에 아직 없는 오퍼레이터 채널 — 런타임은 지원한다 (Opus 4.8) */
+type SystemTurn = { role: "system"; content: string };
+type TurnMessage = Anthropic.MessageParam | SystemTurn;
+
+const CACHE: Anthropic.CacheControlEphemeral = { type: "ephemeral" };
+
+/**
+ * 이력 정규화 — 문자열 content를 텍스트 블록으로 바꾼다.
+ *
+ * 왜 필요한가: 캐시는 프리픽스 바이트가 완전히 일치해야 적중한다. 어떤 턴엔
+ * 문자열, 다른 턴엔 블록 배열로 같은 메시지를 보내면 매 턴 캐시가 깨진다.
+ * 모양을 한 곳에서 고정해 둔다.
+ */
+function normalizeHistory(history: Anthropic.MessageParam[]): Anthropic.MessageParam[] {
+  const out: Anthropic.MessageParam[] = [];
+  for (const m of history) {
+    if (typeof m.content !== "string") {
+      out.push(m);
+      continue;
+    }
+    const text = m.content.trim();
+    if (text.length === 0) continue; // 빈 텍스트 블록은 API가 거부한다
+    out.push({ role: m.role, content: [{ type: "text", text: m.content }] });
+  }
+  return out;
+}
+
+/**
+ * upto 이하에서 캐시 브레이크포인트를 붙일 수 있는 마지막 메시지에 마커를 심은 복사본.
+ * 원본 이력은 절대 건드리지 않는다 — 마커가 세이브에 누적되면 다음 턴 요청이
+ * 브레이크포인트 상한(4개)을 넘겨 400이 된다.
+ */
+function withBreakpoint(messages: TurnMessage[], upto: number): TurnMessage[] {
+  // 항상 복사한다 — 요청 파라미터가 이후에도 변이되는 배열을 참조하면 안 된다
+  const copy = [...messages];
+  for (let i = Math.min(upto, copy.length - 1); i >= 0; i--) {
+    const target = copy[i]!;
+    if (target.role === "system" || !Array.isArray(target.content)) continue;
+    const blocks = target.content;
+    const last = blocks[blocks.length - 1];
+    // thinking 계열 블록엔 cache_control을 붙일 수 없다
+    if (!last || last.type === "thinking" || last.type === "redacted_thinking") continue;
+    copy[i] = {
+      ...target,
+      content: [...blocks.slice(0, -1), { ...last, cache_control: CACHE }],
+    } as Anthropic.MessageParam;
+    break;
+  }
+  return copy;
+}
+
+/**
+ * role:"system" 중간 메시지를 거부한 400인가.
+ * 관측된 두 형태를 모두 잡는다 —
+ *   "messages.0: use the top-level 'system' parameter"
+ *   "role 'system' is not supported on this model"
+ */
+function isMidSystemRejection(err: unknown): boolean {
+  if (!(err instanceof Anthropic.APIError) || err.status !== 400) return false;
+  const message = err.message ?? "";
+  return /system/i.test(message) && /(role|messages\.\d+|not supported)/i.test(message);
+}
+
+/**
+ * Anthropic 어댑터 — 캐시 계층(도구+시스템 / 명부·패킷 / 이력), adaptive thinking,
  * tool call 루프(검증 실패 시 is_error로 재시도 유도)를 처리한다.
+ *
+ * 캐시 배치 (실측 기준: 도구+시스템 프리픽스만 5천 토큰 규모):
+ *   tools → system 블록들(각 브레이크포인트) → 이력(마지막에 증분 브레이크포인트)
+ *   → 이번 턴 유저 발화 → 상태 스냅샷(role:"system")
+ * 앞의 세 구간은 캐시 read(0.1×), 뒤 두 구간만 정가로 읽힌다.
+ *
  * DeepSeek 어댑터가 추가되어도 GameLLM 계약(출력 문법·tool call·Zod 검증)은
  * 동일해야 한다 (economy.md §3).
  */
@@ -30,10 +108,28 @@ export class AnthropicGameLLM implements GameLLM {
       input_schema: t.inputSchema,
     }));
 
-    const messages: Anthropic.MessageParam[] = [
-      ...req.history,
-      { role: "user", content: req.user },
-    ];
+    // 시스템 블록 — 앞이 더 안정적. 이력 마커 몫으로 1개를 남긴다
+    const systemTexts = (Array.isArray(req.system) ? req.system : [req.system]).filter(
+      (s) => s.trim().length > 0,
+    );
+    const system: Anthropic.TextBlockParam[] = systemTexts.map((text, i) => ({
+      type: "text",
+      text,
+      ...(i < MAX_BREAKPOINTS - 1 ? { cache_control: CACHE } : {}),
+    }));
+
+    const baseHistory = normalizeHistory(req.history);
+    /** 상태 스냅샷을 오퍼레이터 채널로 넣을지 (미지원 모델은 유저 메시지에 접어 넣는다) */
+    let useSystemNote = req.stateNote !== undefined && !midSystemUnsupported.has(this.config.model);
+    const buildMessages = (withNote: boolean): TurnMessage[] => {
+      const user =
+        withNote || !req.stateNote ? req.user : `${req.stateNote}\n\n${req.user}`;
+      const msgs: TurnMessage[] = [...baseHistory, { role: "user", content: user }];
+      if (withNote && req.stateNote) msgs.push({ role: "system", content: req.stateNote });
+      return msgs;
+    };
+
+    let messages = buildMessages(useSystemNote);
     const usage: TurnUsage = {
       inputTokens: 0,
       outputTokens: 0,
@@ -46,21 +142,40 @@ export class AnthropicGameLLM implements GameLLM {
     let stopReason: string | null = null;
 
     for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
-      const response = await this.client.messages.create({
+      // 증분 캐시 — 첫 요청은 이력 끝까지, 이후 반복은 직전 메시지까지 캐시한다
+      const markUpto = iter === 0 ? baseHistory.length - 1 : messages.length - 1;
+      const params: Anthropic.MessageCreateParamsNonStreaming = {
         model: this.config.model,
         max_tokens: req.maxTokens ?? this.config.maxTokens,
         thinking: { type: "adaptive" },
-        system: [
-          {
-            type: "text",
-            text: req.system,
-            // 안정 프리픽스 캐싱 — 경기 내내 시스템은 불변 (economy.md §4)
-            cache_control: { type: "ephemeral" },
-          },
-        ],
+        system,
         ...(toolDefs.length > 0 ? { tools: toolDefs } : {}),
-        messages,
-      });
+        messages: withBreakpoint(messages, markUpto) as Anthropic.MessageParam[],
+      };
+
+      // onText가 있으면 스트리밍으로 받아 텍스트 델타를 즉시 흘려보낸다.
+      // 도구 루프·이력 위생은 최종 메시지 기준으로 동일하게 처리한다.
+      let response: Anthropic.Message;
+      try {
+        if (req.onText) {
+          const stream = this.client.messages.stream(params);
+          const onText = req.onText;
+          stream.on("text", (delta) => onText(delta));
+          response = await stream.finalMessage();
+        } else {
+          response = await this.client.messages.create(params);
+        }
+      } catch (err) {
+        // 중간 시스템 메시지 미지원 모델 — 폴백으로 전환해 같은 반복을 재시도
+        if (iter === 0 && useSystemNote && isMidSystemRejection(err)) {
+          midSystemUnsupported.add(this.config.model);
+          useSystemNote = false;
+          messages = buildMessages(false);
+          iter--;
+          continue;
+        }
+        throw err;
+      }
 
       usage.inputTokens += response.usage.input_tokens;
       usage.outputTokens += response.usage.output_tokens;
@@ -120,6 +235,9 @@ export class AnthropicGameLLM implements GameLLM {
       }
     }
 
-    return { text, history: messages, usage, toolCallCount, stopReason };
+    // 상태 스냅샷은 이력에 남기지 않는다 — 매 턴 새로 주입되므로 누적되면
+    // 지난 날짜·지난 스코어가 이력에 쌓여 모델을 혼란시킨다.
+    const history = messages.filter((m): m is Anthropic.MessageParam => m.role !== "system");
+    return { text, history, usage, toolCallCount, stopReason };
   }
 }

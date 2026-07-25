@@ -1,16 +1,19 @@
+import type { MatchRecord, ScheduleEntry, TransferWindow } from "@story-fm/domain";
+
 /**
- * 시즌 캘린더 — 더블 라운드로빈 38라운드 일정 생성 (game-loop.md §2).
- * 날짜는 ISO 문자열(YYYY-MM-DD)로 다루고, 시간대 이슈를 피하기 위해
- * UTC 기준으로만 계산한다.
+ * 시즌 캘린더 (v6) — 게임은 7월 1일(여름 이적창 개장)에 시작해 프리시즌을 보내고
+ * 8월 중순 개막전으로 들어간다. 경기·훈련·이적창이 모두 SCHEDULE_ENTRY 단일 축에
+ * 등록되고, 경기 실체는 MATCH가 갖는다 (game-loop.md §2).
+ *
+ * 날짜는 ISO 문자열(YYYY-MM-DD), 시간대 이슈를 피해 UTC로만 계산한다.
  */
 
-export interface Fixture {
-  round: number;
-  date: string; // YYYY-MM-DD
-  homeId: string;
-  awayId: string;
-  /** 결과 — 경기 전에는 null */
-  result: { homeGoals: number; awayGoals: number; scorers: string[] } | null;
+export interface SeasonCalendar {
+  season: number;
+  /** 게임/시즌 시작일 = 7월 1일 (여름 창 개장과 동시) */
+  preseasonStart: string;
+  /** 리그 개막일 — 8월 중순 토요일 */
+  start: string;
 }
 
 export function addDays(iso: string, days: number): string {
@@ -23,24 +26,99 @@ export function dayOfWeek(iso: string): number {
   return new Date(`${iso}T00:00:00Z`).getUTCDay(); // 0=일
 }
 
-/** 원형(circle method) 라운드로빈 → 홈/어웨이 더블 라운드 */
-export function buildFixtures(teamIds: string[], seasonStart: string): Fixture[] {
+export function diffDays(a: string, b: string): number {
+  return Math.round(
+    (new Date(`${b}T00:00:00Z`).getTime() - new Date(`${a}T00:00:00Z`).getTime()) / 86_400_000,
+  );
+}
+
+/** 시즌 n의 기준 연도 — 시즌 1 = 2026 */
+export function seasonYear(season: number): number {
+  return 2026 + (season - 1);
+}
+
+/**
+ * 라운드 기준 토요일에서의 요일 오프셋 — 실제 EPL처럼 주말 부근(금~월)에
+ * 경기를 분산한다. (round, 경기 인덱스)로 결정적 선택.
+ */
+const WEEKEND_OFFSETS = [0, 1, 0, 1, -1, 1, 0, 2]; // 토·일 위주, 금(-1)·월(+2) 가끔
+
+/** 요일별 킥오프 시각 — 토 이중 슬롯, 일 이중 슬롯, 금·월 야간 */
+const KICKOFF_BY_DOW: Record<number, string[]> = {
+  6: ["15:00", "17:30"], // 토
+  0: ["14:00", "16:30"], // 일
+  5: ["20:00"], // 금
+  1: ["20:00"], // 월
+};
+
+function fixtureDate(seasonStart: string, round: number, indexInRound: number): string {
+  const saturday = addDays(seasonStart, (round - 1) * 7);
+  const offset = WEEKEND_OFFSETS[(round * 3 + indexInRound) % WEEKEND_OFFSETS.length] ?? 0;
+  return addDays(saturday, offset);
+}
+
+function kickoffTime(date: string, indexInRound: number): string {
+  const slots = KICKOFF_BY_DOW[dayOfWeek(date)] ?? ["15:00"];
+  return slots[indexInRound % slots.length]!;
+}
+
+export function buildSeasonCalendar(season: number): SeasonCalendar {
+  const year = seasonYear(season);
+  let start = `${year}-08-15`;
+  while (dayOfWeek(start) !== 6) start = addDays(start, 1); // 토요일(6)로 스냅
+  return { season, preseasonStart: `${year}-07-01`, start };
+}
+
+/** 시즌 이적창 2개 — 여름은 게임 시작(7/1)과 동시 개장, 개막 후 9월 초 폐장 */
+export function buildTransferWindows(season: number): TransferWindow[] {
+  const year = seasonYear(season);
+  return [
+    {
+      id: `w-${season}-summer`,
+      season,
+      kind: "summer",
+      opensOn: `${year}-07-01`,
+      closesOn: `${year}-09-01`,
+    },
+    {
+      id: `w-${season}-winter`,
+      season,
+      kind: "winter",
+      opensOn: `${year + 1}-01-01`,
+      closesOn: `${year + 1}-02-01`,
+    },
+  ];
+}
+
+/**
+ * 원형(circle method) 라운드로빈 → 홈/어웨이 더블 라운드. 38라운드 380경기.
+ */
+export function buildMatches(season: number, teamIds: string[], seasonStart: string): MatchRecord[] {
   const n = teamIds.length;
   if (n % 2 !== 0) throw new Error("팀 수는 짝수여야 합니다");
   const rounds = n - 1;
   const half = n / 2;
   const rotation = [...teamIds];
-  const fixtures: Fixture[] = [];
+  const first: MatchRecord[] = [];
 
   for (let r = 0; r < rounds; r++) {
-    const date = addDays(seasonStart, r * 7);
     for (let i = 0; i < half; i++) {
       const a = rotation[i];
       const b = rotation[n - 1 - i];
       if (!a || !b) continue;
       // 홈 균형을 위해 라운드 짝홀로 교대
-      const [homeId, awayId] = r % 2 === 0 ? [a, b] : [b, a];
-      fixtures.push({ round: r + 1, date, homeId, awayId, result: null });
+      const [homeTeamId, awayTeamId] = r % 2 === 0 ? [a, b] : [b, a];
+      const round = r + 1;
+      const date = fixtureDate(seasonStart, round, i);
+      first.push({
+        id: `m-${season}-${round}-${homeTeamId}`,
+        season,
+        round,
+        date,
+        homeTeamId,
+        awayTeamId,
+        result: null,
+      });
     }
     // 첫 팀 고정, 나머지 회전
     const fixed = rotation[0];
@@ -49,57 +127,98 @@ export function buildFixtures(teamIds: string[], seasonStart: string): Fixture[]
     rotation.splice(0, rotation.length, fixed as string, ...rest);
   }
 
-  // 후반기: 홈/어웨이 반전
-  const secondLeg: Fixture[] = fixtures.map((f) => ({
-    round: f.round + rounds,
-    date: addDays(seasonStart, (f.round + rounds - 1) * 7),
-    homeId: f.awayId,
-    awayId: f.homeId,
-    result: null,
-  }));
+  // 후반기: 홈/어웨이 반전 (전반기와 다른 오프셋 패턴으로 재분산)
+  const second: MatchRecord[] = first.map((m, idx) => {
+    const round = m.round + rounds;
+    return {
+      id: `m-${season}-${round}-${m.awayTeamId}`,
+      season,
+      round,
+      date: fixtureDate(seasonStart, round, idx % half),
+      homeTeamId: m.awayTeamId,
+      awayTeamId: m.homeTeamId,
+      result: null,
+    };
+  });
 
-  return [...fixtures, ...secondLeg];
+  return [...first, ...second];
 }
 
-export interface TransferWindow {
-  open: string;
-  close: string;
+/** 경기·이적창 일정 엔트리 생성 — 훈련 엔트리는 스킬이 따로 만든다 */
+export function buildScheduleEntries(
+  matches: MatchRecord[],
+  windows: TransferWindow[],
+  userTeamId: string,
+): ScheduleEntry[] {
+  const entries: ScheduleEntry[] = [];
+  // 같은 날 여러 경기 → 킥오프 시간을 분산
+  const perDate = new Map<string, number>();
+  for (const m of matches) {
+    const idx = perDate.get(m.date) ?? 0;
+    perDate.set(m.date, idx + 1);
+    const involvesUser = m.homeTeamId === userTeamId || m.awayTeamId === userTeamId;
+    entries.push({
+      id: `se-${m.id}`,
+      date: m.date,
+      time: kickoffTime(m.date, idx),
+      type: "match",
+      refId: m.id,
+      teamId: involvesUser ? userTeamId : null,
+      status: "scheduled",
+    });
+  }
+  for (const w of windows) {
+    entries.push({
+      id: `se-${w.id}-open`,
+      date: w.opensOn,
+      time: "00:00",
+      type: "window-open",
+      refId: w.id,
+      teamId: null,
+      status: "scheduled",
+    });
+    entries.push({
+      id: `se-${w.id}-close`,
+      date: w.closesOn,
+      time: "23:59",
+      type: "window-close",
+      refId: w.id,
+      teamId: null,
+      status: "scheduled",
+    });
+  }
+  return sortEntries(entries);
 }
 
-export interface SeasonCalendar {
-  season: number;
-  start: string;
-  fixtures: Fixture[];
-  windows: { summer: TransferWindow; winter: TransferWindow };
+export function sortEntries(entries: ScheduleEntry[]): ScheduleEntry[] {
+  return [...entries].sort((a, b) =>
+    a.date < b.date ? -1 : a.date > b.date ? 1 : a.time < b.time ? -1 : a.time > b.time ? 1 : 0,
+  );
 }
 
-/** season 1 → 2026-08-15 시작, 이후 시즌은 1년씩 밀린다 */
-export function buildSeasonCalendar(season: number, teamIds: string[]): SeasonCalendar {
-  const year = 2026 + (season - 1);
-  const start = `${year}-08-15`;
-  return {
-    season,
-    start,
-    fixtures: buildFixtures(teamIds, start),
-    windows: {
-      summer: { open: `${year}-07-01`, close: `${year}-09-01` },
-      winter: { open: `${year + 1}-01-01`, close: `${year + 1}-01-31` },
-    },
-  };
+export function windowOpenOn(windows: TransferWindow[], date: string): TransferWindow | null {
+  return windows.find((w) => date >= w.opensOn && date <= w.closesOn) ?? null;
 }
 
-export function isWindowOpen(cal: SeasonCalendar, date: string): boolean {
-  const inRange = (w: TransferWindow) => date >= w.open && date <= w.close;
-  return inRange(cal.windows.summer) || inRange(cal.windows.winter);
+export function matchesOn(matches: MatchRecord[], date: string): MatchRecord[] {
+  return matches.filter((m) => m.date === date);
 }
 
-export function fixturesOn(cal: SeasonCalendar, date: string): Fixture[] {
-  return cal.fixtures.filter((f) => f.date === date);
+export function nextMatchFor(
+  matches: MatchRecord[],
+  teamId: string,
+  date: string,
+): MatchRecord | null {
+  return (
+    matches
+      .filter(
+        (m) => (m.homeTeamId === teamId || m.awayTeamId === teamId) && !m.result && m.date >= date,
+      )
+      .sort((a, b) => (a.date < b.date ? -1 : 1))[0] ?? null
+  );
 }
 
-export function nextFixtureFor(cal: SeasonCalendar, teamId: string, date: string): Fixture | null {
-  const upcoming = cal.fixtures
-    .filter((f) => f.result === null && (f.homeId === teamId || f.awayId === teamId) && f.date >= date)
-    .sort((a, b) => (a.date < b.date ? -1 : 1));
-  return upcoming[0] ?? null;
+/** 시즌 마지막 경기일 — 달력 뷰의 시즌 종료 표기 */
+export function seasonEndDate(matches: MatchRecord[]): string | null {
+  return matches.reduce<string | null>((max, m) => (max === null || m.date > max ? m.date : max), null);
 }

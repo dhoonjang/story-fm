@@ -5,3 +5,24 @@ coverage/
 .env
 .env.*
 .DS_Store
+
+# 빌드 산출물 — Next 빌드 캐시(수십 MB)와 TS 증분 정보. 재생성되므로 커밋하지 않는다.
+.next/
+*.tsbuildinfo
+.turbo/
+
+# 테스트 산출물 — Playwright 실행 결과·리포트·트레이스
+test-results/
+playwright-report/
+blob-report/
+.playwright-mcp/
+
+# 게임 세이브 — 로컬 플레이 데이터. 커밋·git clean 대상에서 제외해
+# 업데이트·브랜치 전환에도 유저 게임이 날아가지 않게 한다.
+.data/
+*.json.tmp
+*.json.bak
+
+# Claude Code 로컬 설정 — 개인 권한·환경은 공유하지 않는다.
+# (.claude/launch.json 같은 프로젝트 공용 설정은 커밋한다)
+.claude/settings.local.json

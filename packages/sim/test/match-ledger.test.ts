@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { MatchEvent } from "@story-fm/domain";
 import { applyEvents, createLedger, describeLedger } from "@story-fm/sim";
-import { makeTeam } from "./helpers";
+import { makeLedgerSide, makeSquad } from "./helpers";
 
-const home = makeTeam("hm", 80);
-const away = makeTeam("aw", 75);
+const homeSquad = makeSquad("hm", 80);
+const awaySquad = makeSquad("aw", 75);
+const home = makeLedgerSide(homeSquad);
+const away = makeLedgerSide(awaySquad);
 
 const ev = (partial: Partial<MatchEvent> & Pick<MatchEvent, "minute" | "type">): MatchEvent => ({
   actors: [],

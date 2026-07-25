@@ -1,6 +1,14 @@
-import type { MatchEvent, StrengthPacket, Team } from "@story-fm/domain";
+import type { GamePlayer, MatchEvent, StrengthPacket } from "@story-fm/domain";
+import { positionGroupOfPlayer } from "@story-fm/domain";
 import type { MatchScriptSegment } from "./state";
 import { makeRng, randInt } from "./rng";
+
+/** 시뮬 입력 — 라인업은 전술 배치(TACTIC_ASSIGNMENT)에서 조립해 넘긴다 */
+export interface SimSquad {
+  teamId: string;
+  /** 선발 11명 (이미 부상·정지 필터를 거친 상태) */
+  starters: GamePlayer[];
+}
 
 /**
  * 간이 시뮬 — 타 팀 간 경기(결정 #5)와 mock 캐스터의 경기 스크립트 생성에
@@ -8,13 +16,9 @@ import { makeRng, randInt } from "./rng";
  * mock 모드에선 이 스크립트가 사건의 원천이 된다.
  */
 
-function squadStrength(team: Team): number {
-  const byId = new Map(team.players.map((p) => [p.id, p]));
-  const xi = team.startingXI
-    .map((id) => byId.get(id))
-    .filter((p): p is NonNullable<typeof p> => Boolean(p));
-  if (xi.length === 0) return 60;
-  return xi.reduce((s, p) => s + p.attributes.overall, 0) / xi.length;
+function squadStrength(squad: SimSquad): number {
+  if (squad.starters.length === 0) return 60;
+  return squad.starters.reduce((s, p) => s + p.attributes.overall, 0) / squad.starters.length;
 }
 
 /** 포아송 근사 샘플 (역변환) */
@@ -29,13 +33,11 @@ function samplePoisson(rng: () => number, lambda: number): number {
   return k - 1;
 }
 
-function pickScorer(rng: () => number, team: Team): string {
-  const byId = new Map(team.players.map((p) => [p.id, p]));
-  const candidates = team.startingXI
-    .map((id) => byId.get(id))
-    .filter((p): p is NonNullable<typeof p> => p !== undefined && p.positionGroup !== "GK");
+function pickScorer(rng: () => number, squad: SimSquad): string {
+  const candidates = squad.starters.filter((p) => positionGroupOfPlayer(p) !== "GK");
+  if (candidates.length === 0) return squad.starters[0]?.id ?? `${squad.teamId}-unknown`;
   const weights = candidates.map((p) =>
-    p.positionGroup === "FW" ? p.attributes.shooting * 3 : p.attributes.shooting,
+    positionGroupOfPlayer(p) === "FW" ? p.attributes.shooting * 3 : p.attributes.shooting,
   );
   const total = weights.reduce((s, w) => s + w, 0);
   let roll = rng() * total;
@@ -53,7 +55,7 @@ export interface QuickResult {
 }
 
 /** 타 팀 간 경기 결과 — 결과·득점자만 (match-sim.md §7) */
-export function quickSimulate(home: Team, away: Team, seed: number, channel: string): QuickResult {
+export function quickSimulate(home: SimSquad, away: SimSquad, seed: number, channel: string): QuickResult {
   const rng = makeRng(seed, `quick:${channel}`);
   const sh = squadStrength(home) * 1.06; // 홈 어드밴티지
   const sa = squadStrength(away);
@@ -83,8 +85,8 @@ function causeFromPacket(packet: StrengthPacket, side: "home" | "away"): string[
  */
 export function generateMatchScript(
   packet: StrengthPacket,
-  home: Team,
-  away: Team,
+  home: SimSquad,
+  away: SimSquad,
   seed: number,
   channel: string,
 ): MatchScriptSegment[] {

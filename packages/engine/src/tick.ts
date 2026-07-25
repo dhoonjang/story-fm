@@ -1,90 +1,229 @@
-import { addDays, dayOfWeek, fixturesOn, nextFixtureFor } from "./calendar";
-import { recomputeOverall } from "./generate";
-import { quickSimulate } from "./quick-sim";
-import { endSeason, allFixturesDone } from "./season";
-import { pushNarrative, teamById, userTeam, type GameState } from "./state";
+import type { GamePlayer, ScheduleEntry, TrainAttr, TrainingSession } from "@story-fm/domain";
+import { ageOf, naturalPositionOf } from "@story-fm/domain";
+import { addDays, dayOfWeek, matchesOn, nextMatchFor, windowOpenOn } from "./calendar";
+import { TEAM_CATALOG, teamCatalogById } from "./data/team-catalog";
+import { quickSimulate, type SimSquad } from "./quick-sim";
+import { allMatchesDone, endSeason } from "./season";
+import {
+  activeSuspension,
+  assignmentsOf,
+  ensureSeasonStat,
+  isInjured,
+  openInjury,
+  playerById,
+  playersOf,
+  pushNarrative,
+  recomputeOverall,
+  recordFinance,
+  recordGrowth,
+  teamName,
+  teamShortName,
+  userPlayers,
+  weeklyWagesOf,
+  type GameState,
+} from "./state";
 import { makeRng, pick, randInt } from "./rng";
 
 /**
  * advance_time — 캘린더 시계가 흐르는 유일한 경로 (game-loop.md §3).
- * 하루 단위 tick(§4)을 결정적으로 적용하고, 감독의 결정이 필요한
- * 이벤트(경기일)에서 멈춘다.
+ * 하루 단위 tick을 결정적으로 적용하고, 감독의 결정이 필요한 이벤트에서 멈춘다.
+ *
+ * v6: 훈련·경기·이적창이 모두 SCHEDULE_ENTRY로 등록돼 있으므로, 하루의 처리는
+ * "그 날짜의 엔트리를 시간 순으로 소화"하는 일이 된다. 성장·부상·징계·주급은
+ * 각각 기록 테이블에 남는다 (로그 없는 변화 없음).
  */
 
 export interface AdvanceOutcome {
   ok: boolean;
   digest: string[];
-  /** attention = 감독의 결정이 필요한 이벤트(부상 발생 등)에서 멈춤 (game-loop §3) */
+  /** attention = 감독의 결정이 필요한 이벤트(부상 발생 등)에서 멈춤 */
   stopped: "matchday" | "reached" | "season_end" | "blocked" | "attention";
 }
 
-const AGE_FACTOR = (age: number) => (age <= 21 ? 1.5 : age <= 27 ? 1 : age <= 30 ? 0.5 : 0);
-const XP_THRESHOLD = 25;
+/** 나이별 성장 속도 — 성장에 필요한 세션 수 (적으면 빠르게 성장). 31+는 성장 없음 */
+function sessionsNeeded(age: number): number | null {
+  if (age <= 21) return 3;
+  if (age <= 27) return 4;
+  if (age <= 30) return 8;
+  return null;
+}
 
-const FOCUS_ATTR: Record<string, "shooting" | "defending" | "passing" | "physical"> = {
-  set_pieces: "shooting",
-  shooting: "shooting",
-  defending: "defending",
-  passing: "passing",
-  fitness: "physical",
+const ATTR_KO: Record<string, string> = {
+  pace: "스피드",
+  shooting: "슈팅",
+  passing: "패스",
+  dribbling: "드리블",
+  defending: "수비",
+  physical: "피지컬",
+  goalkeeping: "골키핑",
+  tactical: "전술 적응",
+  recovery: "회복",
 };
+const TRAINABLE_ATTRS = new Set([
+  "pace", "shooting", "passing", "dribbling", "defending", "physical", "goalkeeping",
+]);
 
-/** 훈련 XP 적립 → 임계 도달 시 능력치 +1 (attribute-model.md §3) */
-function applyTrainingDay(state: GameState, digest: string[]): void {
-  const team = userTeam(state);
-  const focusAttr = FOCUS_ATTR[state.training.teamFocus] ?? "passing";
-  const individualMap = new Map(state.training.individual.map((i) => [i.playerId, i.focus]));
+/** 월별 재정 상수 (£) — 팀 tier 기준. balance.md 초안 수치 */
+const TV_MONTHLY: Record<1 | 2 | 3 | 4, number> = { 1: 13_000_000, 2: 12_000_000, 3: 11_000_000, 4: 10_000_000 };
+const SPONSOR_MONTHLY: Record<1 | 2 | 3 | 4, number> = { 1: 6_000_000, 2: 4_000_000, 3: 2_500_000, 4: 1_500_000 };
+const OPEX_MONTHLY: Record<1 | 2 | 3 | 4, number> = { 1: 6_000_000, 2: 5_000_000, 3: 4_000_000, 4: 3_000_000 };
 
-  for (const player of team.players) {
-    if (player.state.injury !== "none") continue;
-    const factor = AGE_FACTOR(player.age);
-    if (factor === 0) continue;
+const INJURY_PARTS = ["햄스트링", "발목", "무릎", "종아리", "허벅지", "어깨", "허리"];
 
-    const xp = (state.playerXP[player.id] ??= {});
-    const gains: Array<[string, number]> = [[focusAttr, 2 * factor]];
-    const personal = individualMap.get(player.id);
-    if (personal) gains.push([personal, 6 * factor]);
+function tierOf(teamId: string): 1 | 2 | 3 | 4 {
+  return teamCatalogById(teamId)?.tier ?? 3;
+}
 
-    for (const [attr, amount] of gains) {
-      xp[attr] = (xp[attr] ?? 0) + amount;
-      const attrs = player.attributes as unknown as Record<string, number>;
-      if ((xp[attr] ?? 0) >= XP_THRESHOLD && (attrs[attr] ?? 99) < player.attributes.potential) {
-        xp[attr] = (xp[attr] ?? 0) - XP_THRESHOLD;
-        attrs[attr] = (attrs[attr] ?? 0) + 1;
-        recomputeOverall(player); // 성장이 전력 평가 전체에 반영되도록
-        digest.push(`훈련 성과: ${player.name} ${attr} ${attrs[attr]}`);
+export function entriesOn(state: GameState, date: string): ScheduleEntry[] {
+  return state.schedule
+    .filter((e) => e.date === date)
+    .sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
+}
+
+function sessionById(state: GameState, id: string): TrainingSession | null {
+  return state.trainingSessions.find((s) => s.id === id) ?? null;
+}
+
+/** 부상 발생 — INJURY row 생성 (현재 부상 = returnedOn null) */
+export function openInjuryFor(
+  state: GameState,
+  player: GamePlayer,
+  cause: "match" | "training",
+  rng: () => number,
+): { days: number; part: string } {
+  const severity = rng() < 0.72 ? "minor" : rng() < 0.93 ? "moderate" : "major";
+  const days =
+    severity === "minor" ? randInt(rng, 4, 12) : severity === "moderate" ? randInt(rng, 15, 40) : randInt(rng, 60, 140);
+  const part = pick(rng, INJURY_PARTS);
+  state.injuries.push({
+    id: `inj-${player.id}-${state.date}`,
+    gamePlayerId: player.id,
+    bodyPart: part,
+    severity,
+    cause,
+    occurredOn: state.date,
+    expectedReturn: addDays(state.date, days),
+    returnedOn: null,
+    note: cause === "training" ? "훈련 중 부상" : "경기 중 부상",
+  });
+  return { days, part };
+}
+
+/**
+ * 훈련 세션 하나 적용 — focus의 능력치는 세션 누적으로 성장, tactical은 전술 적응도,
+ * recovery는 회복. 성장은 반드시 GrowthEntry로 기록된다 (trainXP 폐지).
+ * @returns 실제 훈련(회복 전용 아님)이면 true — 부상 판정 대상
+ */
+function applySession(
+  state: GameState,
+  digest: string[],
+  session: TrainingSession,
+  entry: ScheduleEntry,
+): boolean {
+  const players = userPlayers(state).filter((p) => !isInjured(state, p.id));
+  const attrs = session.focus.filter((f) => TRAINABLE_ATTRS.has(f));
+  const isTactical = session.focus.includes("tactical");
+  const isRecoveryOnly = session.focus.length > 0 && session.focus.every((f) => f === "recovery");
+  const assignments = assignmentsOf(state, state.userTeamId);
+
+  for (const player of players) {
+    if (session.focus.includes("recovery")) {
+      player.state.fatigue = Math.max(0, player.state.fatigue - 10);
+    }
+    // 전술 훈련 — 배치된 선수의 전술 적응도 상승
+    if (isTactical) {
+      const a = assignments.find((x) => x.playerId === player.id);
+      if (a && a.familiarity < 99) {
+        const before = a.familiarity;
+        a.familiarity = Math.min(99, a.familiarity + 2);
+        recordGrowth(state, player.id, entry.id, "training", "tactical", a.familiarity - before);
       }
+    }
+    const needed = sessionsNeeded(ageOf(player.birthdate, state.date));
+    if (needed === null || attrs.length === 0) continue;
+
+    const pattrs = player.attributes as unknown as Record<string, number>;
+    for (const attr of attrs) {
+      if ((pattrs[attr] ?? 99) >= player.attributes.potential) continue;
+      // 마지막 성장 이후 이 능력치를 겨냥한 세션 수 — 로그에서 파생 (trainXP 대체)
+      const done = trainedSessionsFor(state, player.id, attr);
+      if (done + 1 < needed) continue;
+      pattrs[attr] = (pattrs[attr] ?? 0) + 1;
+      recomputeOverall(player);
+      recordGrowth(state, player.id, entry.id, "training", attr, 1, `${session.label}의 성과`);
+      digest.push(`훈련 성과: ${player.name} ${ATTR_KO[attr] ?? attr} ${pattrs[attr]}`);
+    }
+  }
+  return !isRecoveryOnly;
+}
+
+/**
+ * 마지막 성장 이후 그 능력치를 겨냥한 완료 훈련 세션 수 — trainXP를 대체하는 파생값.
+ * 성장 로그의 마지막 기록 날짜 이후, focus에 해당 능력치가 든 done 엔트리를 센다.
+ */
+function trainedSessionsFor(state: GameState, playerId: string, attr: string): number {
+  const last = [...state.growthLog]
+    .reverse()
+    .find((g) => g.gamePlayerId === playerId && g.target === attr);
+  const since = last?.date ?? "0000-00-00";
+  let count = 0;
+  for (const e of state.schedule) {
+    if (e.type !== "training" || e.status !== "done" || e.date <= since) continue;
+    const s = sessionById(state, e.refId);
+    if (s && s.focus.includes(attr as TrainAttr)) count++;
+  }
+  return count;
+}
+
+/** 부상 복귀 처리 — 예상 복귀일이 지나면 returnedOn을 기록해 이력으로 닫는다 */
+function resolveInjuries(state: GameState, digest: string[]): void {
+  for (const injury of state.injuries) {
+    if (injury.returnedOn !== null) continue;
+    if (state.date < injury.expectedReturn) continue;
+    injury.returnedOn = state.date;
+    const player = playerById(state, injury.gamePlayerId);
+    if (player && player.teamId === state.userTeamId) {
+      digest.push(`부상 복귀: ${player.name} (${injury.bodyPart})`);
     }
   }
 }
 
-/** @returns 감독의 결정이 필요한 이벤트(부상·불만 발생)가 있으면 true */
+/**
+ * 스카우트 파견 완료 — dueOn에 도달한 리포트를 닫고 보고한다.
+ * 완료 이후 그 선수의 능력치 안개가 걷힌다 (scouting.ts).
+ */
+function resolveScouting(state: GameState, digest: string[]): void {
+  for (const report of state.scoutReports) {
+    if (report.completedOn !== null) continue;
+    if (state.date < report.dueOn) continue;
+    report.completedOn = state.date;
+    const player = playerById(state, report.gamePlayerId);
+    if (!player) continue;
+    digest.push(
+      `스카우트 보고서 도착: ${player.name} (${teamName(player.teamId)}) — 능력치를 정확히 파악했다`,
+    );
+    pushNarrative(state, `${player.name} 스카우트 보고서 입수`, 2);
+  }
+}
+
+/** @returns 감독의 결정이 필요한 이벤트(부상·불만)가 있으면 true */
 function dailyTick(state: GameState, digest: string[]): boolean {
   let needsAttention = false;
-  const team = userTeam(state);
+  const players = userPlayers(state);
   const dow = dayOfWeek(state.date);
-  const recovery = new Set(state.training.recovery);
   const rng = makeRng(state.seed, `tick:${state.date}`);
-  const issuePlayers = new Set(state.issues.map((i) => i.playerId));
+  const issuePlayers = new Set(state.issues.map((i) => i.gamePlayerId));
+  const todays = entriesOn(state, state.date);
+  const trainingEntries = todays.filter((e) => e.type === "training" && e.status === "scheduled");
+  const idleDay = trainingEntries.length === 0;
 
-  for (const player of team.players) {
-    // 1. 피로 회복 — 회복조는 가속
-    const recover = recovery.has(player.id) ? 14 : 8;
-    player.state.fatigue = Math.max(0, player.state.fatigue - recover);
+  resolveInjuries(state, digest);
+  resolveScouting(state, digest);
 
-    // 2. 부상 경과
-    const days = state.injuryDays[player.id];
-    if (days !== undefined) {
-      if (days <= 1) {
-        delete state.injuryDays[player.id];
-        player.state.injury = "none";
-        digest.push(`부상 복귀: ${player.name}`);
-      } else {
-        state.injuryDays[player.id] = days - 1;
-      }
-    }
-
-    // 4~5. 폼·사기 흐름 — 방치된 불만 선수는 계속 떨어진다 (game-loop §4-5)
+  for (const player of players) {
+    // 피로 회복 — 훈련 없는 날은 회복 가속
+    player.state.fatigue = Math.max(0, player.state.fatigue - (idleDay ? 14 : 8));
+    // 폼·사기 흐름 — 방치된 불만 선수는 계속 떨어진다 (game-loop §4-5)
     if (dow === 1 && player.state.form !== 0) {
       player.state.form += player.state.form > 0 ? -1 : 1;
     }
@@ -95,41 +234,58 @@ function dailyTick(state: GameState, digest: string[]): boolean {
     }
   }
 
-  // 3. 훈련 (평일, 경기일 제외)
-  const isMatchday = fixturesOn(state.calendar, state.date).length > 0;
-  if (dow >= 1 && dow <= 5 && !isMatchday) {
-    applyTrainingDay(state, digest);
+  // 훈련 세션 적용 — 등록된 엔트리만 (기본 훈련 없음)
+  let hardSessions = 0;
+  for (const entry of trainingEntries) {
+    const session = sessionById(state, entry.refId);
+    entry.status = "done";
+    if (!session) continue;
+    if (applySession(state, digest, session, entry)) hardSessions++;
+  }
 
-    // 8. 훈련 부상 — 소확률, 피로 가중 (결정적 시드)
-    const candidates = team.players.filter((p) => p.state.injury === "none");
-    if (candidates.length > 0 && rng() < 0.015) {
+  // 훈련 부상 — 실제 훈련 세션 수에 비례, 피로 가중 (결정적 시드)
+  if (hardSessions > 0) {
+    const candidates = players.filter((p) => !isInjured(state, p.id));
+    if (candidates.length > 0 && rng() < 0.009 * hardSessions) {
       const victim = pick(rng, candidates);
-      const duration = randInt(rng, 5, 12) + (victim.state.fatigue > 70 ? 4 : 0);
-      victim.state.injury = "minor";
-      state.injuryDays[victim.id] = duration;
-      digest.push(`훈련 중 부상: ${victim.name} — 약 ${duration}일 결장 예상`);
-      pushNarrative(state, `${victim.name} 훈련 중 부상 (${duration}일)`, 3);
-      needsAttention = true; // 부상 발생은 감독 결정 필요 이벤트 (game-loop §3)
+      const { days, part } = openInjuryFor(state, victim, "training", rng);
+      digest.push(`훈련 중 부상: ${victim.name} — ${part}, 약 ${days}일 결장 예상`);
+      pushNarrative(state, `${victim.name} 훈련 중 ${part} 부상 (${days}일)`, 3);
+      needsAttention = true;
     }
   }
 
-  // 7. 주급 (금요일)
-  if (dow === 5) {
-    state.finance.balance -= state.finance.weeklyWages;
+  // 주급 (월요일) — 활성 계약 합에서 파생, 전 팀에 적용
+  if (dow === 1) {
+    for (const team of state.teams) {
+      const wages = weeklyWagesOf(state, team.id);
+      if (wages > 0) recordFinance(state, team.id, "expense", "선수단 주급", wages);
+    }
   }
 
-  // 8-2. 벤치 불만 발생 — 월요일, 고평가 벤치 자원 (간이)
-  if (dow === 1 && rng() < 0.15) {
-    const benched = team.players.filter(
-      (p) =>
-        !team.startingXI.includes(p.id) &&
-        p.attributes.overall >= 78 &&
-        !issuePlayers.has(p.id),
+  // 월초 정산 — 중계권·스폰서 수입, 구단 운영비
+  if (state.date.endsWith("-01")) {
+    for (const team of state.teams) {
+      const tier = tierOf(team.id);
+      recordFinance(state, team.id, "income", "중계권 배분", TV_MONTHLY[tier]);
+      recordFinance(state, team.id, "income", "스폰서십", SPONSOR_MONTHLY[tier]);
+      recordFinance(state, team.id, "expense", "구단 운영비", OPEX_MONTHLY[tier]);
+    }
+  }
+
+  // 벤치 불만 발생 — 월요일, 고평가 비선발 자원 (간이).
+  // 리그 개막 후에만 — 프리시즌엔 아직 "출전 기회"를 논할 경기가 없다 (v6)
+  if (dow === 1 && state.date >= state.calendar.start && rng() < 0.15) {
+    const starters = new Set(
+      assignmentsOf(state, state.userTeamId, "starting").map((a) => a.playerId),
+    );
+    const benched = players.filter(
+      (p) => !starters.has(p.id) && p.attributes.overall >= 78 && !issuePlayers.has(p.id),
     );
     if (benched.length > 0) {
       const gripe = pick(rng, benched);
       state.issues.push({
-        playerId: gripe.id,
+        gamePlayerId: gripe.id,
         kind: "unhappy",
         note: "출전 기회 불만",
         since: state.date,
@@ -139,40 +295,87 @@ function dailyTick(state: GameState, digest: string[]): boolean {
       needsAttention = true;
     }
   }
+
+  // 이적창 개장·폐장 안내
+  for (const entry of todays) {
+    if (entry.type !== "window-open" && entry.type !== "window-close") continue;
+    entry.status = "done";
+    const w = state.windows.find((x) => x.id === entry.refId);
+    if (!w) continue;
+    const kindKo = w.kind === "summer" ? "여름" : "겨울";
+    digest.push(
+      entry.type === "window-open"
+        ? `${kindKo} 이적시장이 열렸다 (${w.opensOn} ~ ${w.closesOn})`
+        : `${kindKo} 이적시장이 닫혔다`,
+    );
+    pushNarrative(state, `${kindKo} 이적시장 ${entry.type === "window-open" ? "개장" : "마감"}`, 3);
+  }
+
   return needsAttention;
 }
 
+/** 간이 시뮬 입력 조립 — 전술 배치에서 가용 선발을 뽑는다 */
+export function simSquadOf(state: GameState, teamId: string): SimSquad {
+  const squad = playersOf(state, teamId);
+  const byId = new Map(squad.map((p) => [p.id, p]));
+  const starters = assignmentsOf(state, teamId, "starting")
+    .map((a) => byId.get(a.playerId))
+    .filter((p): p is GamePlayer => p !== undefined && !isInjured(state, p.id));
+  // 부상·정지로 빈 자리는 OVR 상위 가용 선수로 메운다 (AI 팀의 자동 운영)
+  if (starters.length < 11) {
+    const used = new Set(starters.map((p) => p.id));
+    const fill = squad
+      .filter((p) => !used.has(p.id) && !isInjured(state, p.id))
+      .sort((a, b) => b.attributes.overall - a.attributes.overall);
+    for (const p of fill) {
+      if (starters.length >= 11) break;
+      starters.push(p);
+    }
+  }
+  return { teamId, starters };
+}
+
 /** 해당 날짜의 타 팀 경기 간이 시뮬 (결정 #5) */
-function simulateOtherFixtures(state: GameState, digest: string[]): void {
-  for (const fixture of fixturesOn(state.calendar, state.date)) {
-    if (fixture.result) continue;
-    if (fixture.homeId === state.userTeamId || fixture.awayId === state.userTeamId) continue;
-    const result = quickSimulate(
-      teamById(state, fixture.homeId),
-      teamById(state, fixture.awayId),
-      state.seed,
-      `${state.season}:${fixture.round}:${fixture.homeId}-${fixture.awayId}`,
-    );
-    fixture.result = {
-      homeGoals: result.homeGoals,
-      awayGoals: result.awayGoals,
-      scorers: result.scorers,
+function simulateOtherMatches(state: GameState, digest: string[]): void {
+  const played: string[] = [];
+  for (const match of matchesOn(state.matches, state.date)) {
+    if (match.result) continue;
+    if (match.homeTeamId === state.userTeamId || match.awayTeamId === state.userTeamId) continue;
+    const squads = {
+      home: simSquadOf(state, match.homeTeamId),
+      away: simSquadOf(state, match.awayTeamId),
     };
-  }
-  const played = fixturesOn(state.calendar, state.date).filter(
-    (f) => f.result && f.homeId !== state.userTeamId && f.awayId !== state.userTeamId,
-  );
-  if (played.length > 0) {
-    digest.push(
-      `라운드 결과: ` +
-        played
-          .map(
-            (f) =>
-              `${teamById(state, f.homeId).shortName} ${f.result?.homeGoals}-${f.result?.awayGoals} ${teamById(state, f.awayId).shortName}`,
-          )
-          .join(", "),
+    const result = quickSimulate(
+      squads.home,
+      squads.away,
+      state.seed,
+      `${state.season}:${match.round}:${match.homeTeamId}-${match.awayTeamId}`,
+    );
+    match.result = {
+      ...result,
+      // 출전 명단도 남긴다 — 누가 뛰었는지는 장부 사실이다
+      homeLineup: squads.home.starters.map((p) => p.id),
+      awayLineup: squads.away.starters.map((p) => p.id),
+    };
+    // 출전·득점 기록 — AI 팀도 시즌 스탯을 쌓아야 득점왕 등이 성립한다
+    for (const side of ["home", "away"] as const) {
+      const teamId = side === "home" ? match.homeTeamId : match.awayTeamId;
+      for (const p of squads[side].starters) {
+        ensureSeasonStat(state, p.id, teamId).apps += 1;
+      }
+      for (const s of result.scorers) {
+        const [sSide, id] = s.split(":", 2) as [string, string];
+        if (sSide !== side || !id) continue;
+        ensureSeasonStat(state, id, teamId).goals += 1;
+      }
+    }
+    const entry = state.schedule.find((e) => e.type === "match" && e.refId === match.id);
+    if (entry) entry.status = "done";
+    played.push(
+      `${teamShortName(match.homeTeamId)} ${result.homeGoals}-${result.awayGoals} ${teamShortName(match.awayTeamId)}`,
     );
   }
+  if (played.length > 0) digest.push(`라운드 결과: ${played.join(", ")}`);
 }
 
 export function advanceTime(
@@ -188,38 +391,32 @@ export function advanceTime(
   }
 
   const digest: string[] = [];
-  const maxDays = typeof until === "object" ? Math.min(until.days, 30) : 60;
+  const maxDays = typeof until === "object" ? Math.min(until.days, 30) : 90;
 
   for (let d = 0; d < maxDays; d++) {
     // 시즌 종료 체크 — 남은 경기가 없으면 시즌 리뷰 + 전환
-    if (allFixturesDone(state)) {
-      const lines = endSeason(state);
-      digest.push(...lines);
+    if (allMatchesDone(state)) {
+      digest.push(...endSeason(state));
       return { ok: true, digest, stopped: "season_end" };
     }
 
     state.date = addDays(state.date, 1);
     const needsAttention = dailyTick(state, digest);
-    simulateOtherFixtures(state, digest);
+    simulateOtherMatches(state, digest);
 
-    const userFixture = fixturesOn(state.calendar, state.date).find(
-      (f) => !f.result && (f.homeId === state.userTeamId || f.awayId === state.userTeamId),
+    const userMatch = matchesOn(state.matches, state.date).find(
+      (m) => !m.result && (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
     );
-    if (userFixture) {
+    if (userMatch) {
       state.phase = "matchday";
-      const opponentId =
-        userFixture.homeId === state.userTeamId ? userFixture.awayId : userFixture.homeId;
+      const home = userMatch.homeTeamId === state.userTeamId;
       digest.push(
-        `경기일 — R${userFixture.round} ${userFixture.homeId === state.userTeamId ? "홈" : "원정"} vs ${teamById(state, opponentId).name}`,
+        `경기일 — R${userMatch.round} ${home ? "홈" : "원정"} vs ${teamName(home ? userMatch.awayTeamId : userMatch.homeTeamId)}`,
       );
       return { ok: true, digest, stopped: "matchday" };
     }
 
-    // needsManager 정지 — 부상·불만 발생은 감독에게 마이크를 넘긴다 (game-loop §3)
-    if (needsAttention) {
-      return { ok: true, digest, stopped: "attention" };
-    }
-
+    if (needsAttention) return { ok: true, digest, stopped: "attention" };
     if (typeof until === "object" && d + 1 >= until.days) {
       return { ok: true, digest, stopped: "reached" };
     }
@@ -228,9 +425,49 @@ export function advanceTime(
   return { ok: true, digest, stopped: "reached" };
 }
 
-export function describeNextFixture(state: GameState): string {
-  const next = nextFixtureFor(state.calendar, state.userTeamId, state.date);
-  if (!next) return "남은 일정이 없습니다 — 시즌 마무리 국면입니다.";
-  const opponentId = next.homeId === state.userTeamId ? next.awayId : next.homeId;
-  return `다음 경기: R${next.round} ${next.date} ${next.homeId === state.userTeamId ? "홈" : "원정"} vs ${teamById(state, opponentId).name}`;
+/** 프리시즌·이적창 상태 요약 — GM 컨텍스트·브리핑용 */
+export function describeWindowState(state: GameState): string {
+  const open = windowOpenOn(state.windows, state.date);
+  const preseason = state.date < state.calendar.start;
+  const parts: string[] = [];
+  if (preseason) {
+    parts.push(`프리시즌 (개막 ${state.calendar.start})`);
+  }
+  if (open) {
+    const kindKo = open.kind === "summer" ? "여름" : "겨울";
+    parts.push(`${kindKo} 이적시장 열림 (~${open.closesOn})`);
+  } else {
+    parts.push("이적시장 닫힘");
+  }
+  return parts.join(" · ");
 }
+
+export function describeNextFixture(state: GameState): string {
+  const next = nextMatchFor(state.matches, state.userTeamId, state.date);
+  if (!next) return "남은 일정이 없습니다 — 시즌 마무리 국면입니다.";
+  const home = next.homeTeamId === state.userTeamId;
+  return `다음 경기: R${next.round} ${next.date} ${home ? "홈" : "원정"} vs ${teamName(home ? next.awayTeamId : next.homeTeamId)}`;
+}
+
+/** 정지 소화 — 유저 팀 경기가 끝날 때 호출 (경기 단위로 차감) */
+export function serveSuspensions(state: GameState, playerIds: string[]): void {
+  for (const id of playerIds) {
+    const s = activeSuspension(state, id);
+    if (!s) continue;
+    s.served += 1;
+    if (s.served >= s.lengthMatches) s.status = "done";
+  }
+}
+
+/** 현재 부상 요약 (유저 팀) — 브리핑·뷰용 */
+export function injuryReport(state: GameState): string[] {
+  return userPlayers(state)
+    .map((p) => {
+      const inj = openInjury(state, p.id);
+      if (!inj) return null;
+      return `${p.name} (${naturalPositionOf(p).position}) — ${inj.bodyPart} ${inj.severity}, 복귀 예상 ${inj.expectedReturn}`;
+    })
+    .filter((x): x is string => x !== null);
+}
+
+export { TEAM_CATALOG };

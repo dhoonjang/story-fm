@@ -1,7 +1,7 @@
 /**
- * EPL 20팀 카탈로그 (결정 #1). tier가 절차 생성 능력치의 기준선이 된다.
- * 선수는 절차 생성(합성) — EA FC 데이터 파이프라인(data-sourcing.md §4)
- * 전까지의 임시 시드다 (implementation-notes.md 참고).
+ * EPL 20팀 카탈로그 (결정 #1) — 2024-25 시즌 구성(20팀 모두 EPL 재적).
+ * 선수는 실선수 시드(epl-players.ts)가 우선이고, tier는 시드가 없는 팀의
+ * 절차 생성 기준선 + 보드 기대치·유스 능력 기준으로 쓰인다.
  */
 export interface TeamCatalogEntry {
   id: string;
@@ -41,3 +41,10 @@ export const TIER_BASE: Record<1 | 2 | 3 | 4, number> = {
   3: 76,
   4: 72,
 };
+
+const BY_ID = new Map(TEAM_CATALOG.map((t) => [t.id, t]));
+
+/** 팀 정체성 조회 — 게임 팀 엔티티는 이름을 갖지 않으므로 표시명은 여기서 온다 */
+export function teamCatalogById(id: string): TeamCatalogEntry | null {
+  return BY_ID.get(id) ?? null;
+}

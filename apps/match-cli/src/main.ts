@@ -10,7 +10,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { TeamSchema, TacticsSpecSchema, type MatchEvent } from "@story-fm/domain";
+import { GamePlayerSchema, TacticsSpecSchema, type MatchEvent } from "@story-fm/domain";
+import { naturalPositionOf } from "@story-fm/domain";
 import {
   applyEvents,
   buildStrengthPacket,
@@ -38,18 +39,53 @@ const managerNote = flag("note") ?? "측면을 적극적으로 쓰고, 전방 �
 
 // ---- 픽스처 로드 ----
 const here = path.dirname(fileURLToPath(import.meta.url));
-const FixtureSchema = z.object({
-  home: z.object({ team: TeamSchema, tactics: TacticsSpecSchema, managerTactics: z.number() }),
-  away: z.object({ team: TeamSchema, tactics: TacticsSpecSchema, managerTactics: z.number() }),
+const SideSchema = z.object({
+  teamId: z.string(),
+  teamName: z.string(),
+  players: z.array(GamePlayerSchema),
+  /** 선발 11 (선수 id) — 나머지는 벤치 */
+  startingIds: z.array(z.string()).length(11),
+  tactics: TacticsSpecSchema,
+  managerTactics: z.number(),
 });
+const FixtureSchema = z.object({ home: SideSchema, away: SideSchema });
+
+/** 픽스처 → 패킷 입력 (배치 포지션은 주 포지션으로 근사) */
+function toSideInput(side: z.infer<typeof SideSchema>) {
+  const byId = new Map(side.players.map((p) => [p.id, p] as const));
+  const slot = (id: string) => {
+    const player = byId.get(id);
+    if (!player) return null;
+    const pos = naturalPositionOf(player);
+    return { player, position: pos.position, proficiency: pos.proficiency };
+  };
+  const starters = side.startingIds.flatMap((id) => {
+    const s = slot(id);
+    return s ? [s] : [];
+  });
+  const bench = side.players
+    .filter((p) => !side.startingIds.includes(p.id))
+    .flatMap((p) => {
+      const s = slot(p.id);
+      return s ? [s] : [];
+    });
+  return {
+    teamId: side.teamId,
+    teamName: side.teamName,
+    starters,
+    bench,
+    tactics: side.tactics,
+    managerTactics: side.managerTactics,
+  };
+}
 const fixture = FixtureSchema.parse(
   JSON.parse(readFileSync(path.join(here, "../fixtures/teams.json"), "utf8")),
 );
 
-const names = { home: fixture.home.team.name, away: fixture.away.team.name };
+const names = { home: fixture.home.teamName, away: fixture.away.teamName };
 
 // ---- ① 전력 분석 (코어, 결정적) ----
-const packet = buildStrengthPacket(fixture.home, fixture.away);
+const packet = buildStrengthPacket(toSideInput(fixture.home), toSideInput(fixture.away));
 
 console.log("═══ 전력 분석 패킷 ═══");
 console.log(packet.summary);
@@ -65,7 +101,11 @@ if (dry) {
 }
 
 // ---- ② 경기 장부 + log_match_events 도구 ----
-let ledger: MatchLedgerState = createLedger(fixture.home.team, fixture.away.team);
+const ledgerSide = (side: z.infer<typeof SideSchema>) => ({
+  onPitch: [...side.startingIds],
+  bench: side.players.filter((p) => !side.startingIds.includes(p.id)).map((p) => p.id),
+});
+let ledger: MatchLedgerState = createLedger(ledgerSide(fixture.home), ledgerSide(fixture.away));
 const tool = makeLogMatchEventsTool((events: MatchEvent[]) => {
   const result = applyEvents(ledger, events);
   if (!result.ok) return { ok: false, message: result.errors.join("\n") };

@@ -4,28 +4,44 @@ import type {
   Matchup,
   MatchupZone,
   Player,
+  PositionGroup,
   SidePacket,
   StrengthPacket,
   TacticsSpec,
-  Team,
   ZoneStrength,
 } from "@story-fm/domain";
+import { positionGroupOf, positionGroupOfPlayer } from "@story-fm/domain";
 import { stateModifier } from "./state-modifier";
 
+/** 배치된 선수 — 전술 배치(TACTIC_ASSIGNMENT)에서 조립해 넘긴다 */
+export interface LineupSlot {
+  player: Player;
+  /** 이 경기에서 맡는 포지션 (주 포지션과 다를 수 있다) */
+  position: string;
+  /** 그 포지션 적응도 0~99 — 낯선 자리면 기여가 깎인다 */
+  proficiency: number;
+}
+
 export interface SideInput {
-  team: Team;
+  teamId: string;
+  teamName: string;
+  /** 선발 11 — 이미 부상·정지 필터를 거친 상태 */
+  starters: LineupSlot[];
+  bench: LineupSlot[];
   tactics: TacticsSpec;
   /** 감독 전술 능력치 (0~99) → 전술 소화율 (attribute-model.md §7) */
   managerTactics: number;
+  /** 선수단 전술 적응도 팩터 (0~1, 기본 1) — 낮으면 전력이 소폭 깎인다 */
+  familiarity?: number;
 }
 
 /** 포지션 그룹별 존 기여 점수 — 유효 능력치의 가중합 */
-function zoneScore(p: Player): number {
+function zoneScore(p: Player, group: PositionGroup): number {
   const m = stateModifier(p.state);
   const a = p.attributes;
-  switch (p.positionGroup) {
+  switch (group) {
     case "GK":
-      return (a.goalkeeping ?? a.overall) * m;
+      return a.goalkeeping * m;
     case "DF":
       return (a.defending * 0.5 + a.physical * 0.25 + a.pace * 0.25) * m;
     case "MF":
@@ -39,12 +55,14 @@ function mean(xs: number[]): number {
   return xs.length === 0 ? 0 : xs.reduce((s, x) => s + x, 0) / xs.length;
 }
 
-function starters(team: Team): Player[] {
-  const byId = new Map(team.players.map((p) => [p.id, p]));
-  return team.startingXI.flatMap((id) => {
-    const p = byId.get(id);
-    return p ? [p] : [];
-  });
+/** 배치 포지션 → 존 그룹. 선수의 주 포지션이 아니라 "맡은 자리"가 기준이다 */
+function slotGroup(slot: LineupSlot): PositionGroup {
+  return positionGroupOf(slot.position) ?? positionGroupOfPlayer(slot.player);
+}
+
+/** 포지션 적응도 팩터 — 90+ 온전, 낮으면 최대 12%까지 깎인다 */
+function profFactor(proficiency: number): number {
+  return 0.88 + Math.min(1, Math.max(0, proficiency) / 90) * 0.12;
 }
 
 /** 전술 소화율 — 같은 지시도 감독에 따라 팀에 스며드는 정도가 다르다 (0.92~1.08) */
@@ -52,20 +70,21 @@ export function tacticalFit(managerTactics: number): number {
   return round2(0.92 + (managerTactics / 99) * 0.16);
 }
 
-function buildZones(players: Player[], tactics: TacticsSpec, fit: number): ZoneStrength {
-  const gk = players.filter((p) => p.positionGroup === "GK");
-  const df = players.filter((p) => p.positionGroup === "DF");
-  const mf = players.filter((p) => p.positionGroup === "MF");
-  const fw = players.filter((p) => p.positionGroup === "FW");
+function buildZones(slots: LineupSlot[], tactics: TacticsSpec, fit: number): ZoneStrength {
+  const scoreOf = (s: LineupSlot) => zoneScore(s.player, slotGroup(s)) * profFactor(s.proficiency);
+  const inGroup = (g: PositionGroup) => slots.filter((s) => slotGroup(s) === g).map(scoreOf);
+  const gk = inGroup("GK");
+  const df = inGroup("DF");
+  const mf = inGroup("MF");
+  const fw = inGroup("FW");
 
   // mentality가 공수 무게를, pressing이 중원 강도를 옮긴다 (초안 계수 — balance.md)
   const mentalityShift = (tactics.mentality - 3) * 0.03;
   const pressingBoost = (tactics.pressing - 3) * 0.02;
 
-  const attack = mean(fw.map(zoneScore)) * (1 + mentalityShift) * fit;
-  const midfield = mean(mf.map(zoneScore)) * (1 + pressingBoost) * fit;
-  const defense =
-    (mean(df.map(zoneScore)) * 0.85 + mean(gk.map(zoneScore)) * 0.15) * (1 - mentalityShift) * fit;
+  const attack = mean(fw) * (1 + mentalityShift) * fit;
+  const midfield = mean(mf) * (1 + pressingBoost) * fit;
+  const defense = (mean(df) * 0.85 + mean(gk) * 0.15) * (1 - mentalityShift) * fit;
 
   return { attack: round2(attack), midfield: round2(midfield), defense: round2(defense) };
 }
@@ -94,32 +113,24 @@ function round2(x: number): number {
   return Math.round(x * 100) / 100;
 }
 
-function roster(team: Team, ids: string[]) {
-  const byId = new Map(team.players.map((p) => [p.id, p]));
-  return ids.flatMap((id) => {
-    const p = byId.get(id);
-    return p ? [{ id: p.id, name: p.name, position: p.position }] : [];
-  });
+function roster(slots: LineupSlot[]) {
+  return slots.map((s) => ({ id: s.player.id, name: s.player.name, position: s.position }));
 }
 
-function keyPoints(home: Team, away: Team): string[] {
+function keyPoints(homeXI: LineupSlot[], awayXI: LineupSlot[]): string[] {
   const points: string[] = [];
-  const fastestFw = (t: Team) =>
-    starters(t)
-      .filter((p) => p.positionGroup === "FW")
-      .sort((x, y) => y.attributes.pace - x.attributes.pace)[0];
-  const slowestDf = (t: Team) =>
-    starters(t)
-      .filter((p) => p.positionGroup === "DF")
-      .sort((x, y) => x.attributes.pace - y.attributes.pace)[0];
+  const fastestFw = (xi: LineupSlot[]) =>
+    xi.filter((s) => slotGroup(s) === "FW").sort((x, y) => y.player.attributes.pace - x.player.attributes.pace)[0]?.player;
+  const slowestDf = (xi: LineupSlot[]) =>
+    xi.filter((s) => slotGroup(s) === "DF").sort((x, y) => x.player.attributes.pace - y.player.attributes.pace)[0]?.player;
 
-  const pairs: Array<[Team, Team, string]> = [
-    [home, away, "홈"],
-    [away, home, "어웨이"],
+  const pairs: Array<[LineupSlot[], LineupSlot[], string]> = [
+    [homeXI, awayXI, "홈"],
+    [awayXI, homeXI, "어웨이"],
   ];
-  for (const [atkTeam, defTeam, label] of pairs) {
-    const fw = fastestFw(atkTeam);
-    const df = slowestDf(defTeam);
+  for (const [atkXI, defXI, label] of pairs) {
+    const fw = fastestFw(atkXI);
+    const df = slowestDf(defXI);
     if (fw && df && fw.attributes.pace - df.attributes.pace >= 10) {
       points.push(
         `${label} 측면 스피드 미스매치: ${fw.name}(pace ${fw.attributes.pace}) vs ${df.name}(pace ${df.attributes.pace})`,
@@ -137,21 +148,27 @@ export function buildStrengthPacket(homeIn: SideInput, awayIn: SideInput): Stren
   const homeFit = tacticalFit(homeIn.managerTactics);
   const awayFit = tacticalFit(awayIn.managerTactics);
 
+  // 전술 적응도가 낮으면 존 전력이 소폭 깎인다 (소화율 fit에 팩터로 합성)
+  const homeZoneFit = homeFit * (homeIn.familiarity ?? 1);
+  const awayZoneFit = awayFit * (awayIn.familiarity ?? 1);
+  const homeXI = homeIn.starters;
+  const awayXI = awayIn.starters;
+
   const home: SidePacket = {
-    teamId: homeIn.team.id,
-    teamName: homeIn.team.name,
-    zones: buildZones(starters(homeIn.team), homeIn.tactics, homeFit),
+    teamId: homeIn.teamId,
+    teamName: homeIn.teamName,
+    zones: buildZones(homeXI, homeIn.tactics, homeZoneFit),
     tacticalFit: homeFit,
-    lineup: roster(homeIn.team, homeIn.team.startingXI),
-    bench: roster(homeIn.team, homeIn.team.bench),
+    lineup: roster(homeIn.starters),
+    bench: roster(homeIn.bench),
   };
   const away: SidePacket = {
-    teamId: awayIn.team.id,
-    teamName: awayIn.team.name,
-    zones: buildZones(starters(awayIn.team), awayIn.tactics, awayFit),
+    teamId: awayIn.teamId,
+    teamName: awayIn.teamName,
+    zones: buildZones(awayXI, awayIn.tactics, awayZoneFit),
     tacticalFit: awayFit,
-    lineup: roster(awayIn.team, awayIn.team.startingXI),
-    bench: roster(awayIn.team, awayIn.team.bench),
+    lineup: roster(awayIn.starters),
+    bench: roster(awayIn.bench),
   };
 
   const zonesDef: Array<[MatchupZone, number, number]> = [
@@ -196,5 +213,5 @@ export function buildStrengthPacket(homeIn: SideInput, awayIn: SideInput): Stren
     matchups.map((m) => m.why).join(" / ") +
     ` — 기대 득점 ${expectedGoals.home} : ${expectedGoals.away}, ${verdict}.`;
 
-  return { home, away, matchups, keyPoints: keyPoints(homeIn.team, awayIn.team), guide: { expectedGoals, upsetChance }, summary };
+  return { home, away, matchups, keyPoints: keyPoints(homeXI, awayXI), guide: { expectedGoals, upsetChance }, summary };
 }

@@ -1,7 +1,456 @@
 {
-  "_note": "프로토타입 픽스처 — 능력치는 손으로 넣은 어림값. 정식 시드 데이터는 data-sourcing.md §4 파이프라인으로 교체 예정 (EA FC 데이터셋, 라이선스 부채 원장 관리)",
   "home": {
-    "managerTactics": 58,
+    "teamId": "arsenal",
+    "teamName": "아스날",
+    "players": [
+      {
+        "id": "raya",
+        "name": "다비드 라야",
+        "attributes": {
+          "pace": 55,
+          "shooting": 30,
+          "passing": 70,
+          "dribbling": 50,
+          "defending": 40,
+          "physical": 72,
+          "goalkeeping": 85,
+          "overall": 85,
+          "potential": 86
+        },
+        "state": {
+          "form": 1,
+          "morale": 68,
+          "fatigue": 15
+        },
+        "teamId": "arsenal",
+        "birthdate": "1997-01-01",
+        "positions": [
+          {
+            "position": "GK",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "white",
+        "name": "벤 화이트",
+        "attributes": {
+          "pace": 78,
+          "shooting": 55,
+          "passing": 76,
+          "dribbling": 74,
+          "defending": 81,
+          "physical": 76,
+          "overall": 82,
+          "potential": 83,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": 0,
+          "morale": 65,
+          "fatigue": 20
+        },
+        "teamId": "arsenal",
+        "birthdate": "1999-01-01",
+        "positions": [
+          {
+            "position": "RB",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "saliba",
+        "name": "윌리암 살리바",
+        "attributes": {
+          "pace": 84,
+          "shooting": 40,
+          "passing": 78,
+          "dribbling": 72,
+          "defending": 89,
+          "physical": 86,
+          "overall": 89,
+          "potential": 92,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": 1,
+          "morale": 70,
+          "fatigue": 12
+        },
+        "teamId": "arsenal",
+        "birthdate": "2002-01-01",
+        "positions": [
+          {
+            "position": "CB",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "gabriel",
+        "name": "가브리엘 마갈량이스",
+        "attributes": {
+          "pace": 80,
+          "shooting": 45,
+          "passing": 74,
+          "dribbling": 65,
+          "defending": 87,
+          "physical": 88,
+          "overall": 87,
+          "potential": 88,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": 1,
+          "morale": 70,
+          "fatigue": 15
+        },
+        "teamId": "arsenal",
+        "birthdate": "1999-01-01",
+        "positions": [
+          {
+            "position": "CB",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "calafiori",
+        "name": "리카르도 칼라피오리",
+        "attributes": {
+          "pace": 79,
+          "shooting": 60,
+          "passing": 78,
+          "dribbling": 76,
+          "defending": 80,
+          "physical": 79,
+          "overall": 81,
+          "potential": 87,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": 0,
+          "morale": 66,
+          "fatigue": 18
+        },
+        "teamId": "arsenal",
+        "birthdate": "2003-01-01",
+        "positions": [
+          {
+            "position": "LB",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "rice",
+        "name": "데클란 라이스",
+        "attributes": {
+          "pace": 77,
+          "shooting": 72,
+          "passing": 83,
+          "dribbling": 79,
+          "defending": 84,
+          "physical": 86,
+          "overall": 89,
+          "potential": 91,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": 2,
+          "morale": 74,
+          "fatigue": 18
+        },
+        "teamId": "arsenal",
+        "birthdate": "2000-01-01",
+        "positions": [
+          {
+            "position": "DM",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "odegaard",
+        "name": "마르틴 외데고르",
+        "attributes": {
+          "pace": 74,
+          "shooting": 80,
+          "passing": 90,
+          "dribbling": 87,
+          "defending": 58,
+          "physical": 66,
+          "overall": 88,
+          "potential": 89,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": 1,
+          "morale": 72,
+          "fatigue": 20
+        },
+        "teamId": "arsenal",
+        "birthdate": "2000-01-01",
+        "positions": [
+          {
+            "position": "AM",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "merino",
+        "name": "미켈 메리노",
+        "attributes": {
+          "pace": 68,
+          "shooting": 74,
+          "passing": 80,
+          "dribbling": 75,
+          "defending": 78,
+          "physical": 84,
+          "overall": 83,
+          "potential": 83,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": 0,
+          "morale": 64,
+          "fatigue": 22
+        },
+        "teamId": "arsenal",
+        "birthdate": "1997-01-01",
+        "positions": [
+          {
+            "position": "CM",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "saka",
+        "name": "부카요 사카",
+        "attributes": {
+          "pace": 88,
+          "shooting": 84,
+          "passing": 84,
+          "dribbling": 89,
+          "defending": 55,
+          "physical": 72,
+          "overall": 89,
+          "potential": 93,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": 2,
+          "morale": 76,
+          "fatigue": 16
+        },
+        "teamId": "arsenal",
+        "birthdate": "2003-01-01",
+        "positions": [
+          {
+            "position": "RW",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "havertz",
+        "name": "카이 하베르츠",
+        "attributes": {
+          "pace": 78,
+          "shooting": 81,
+          "passing": 79,
+          "dribbling": 80,
+          "defending": 60,
+          "physical": 82,
+          "overall": 84,
+          "potential": 85,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": 0,
+          "morale": 66,
+          "fatigue": 20
+        },
+        "teamId": "arsenal",
+        "birthdate": "2000-01-01",
+        "positions": [
+          {
+            "position": "ST",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "martinelli",
+        "name": "가브리엘 마르티넬리",
+        "attributes": {
+          "pace": 90,
+          "shooting": 79,
+          "passing": 76,
+          "dribbling": 85,
+          "defending": 50,
+          "physical": 74,
+          "overall": 84,
+          "potential": 88,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": -1,
+          "morale": 60,
+          "fatigue": 18
+        },
+        "teamId": "arsenal",
+        "birthdate": "2002-01-01",
+        "positions": [
+          {
+            "position": "LW",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "trossard",
+        "name": "레안드로 트로사르",
+        "attributes": {
+          "pace": 80,
+          "shooting": 80,
+          "passing": 79,
+          "dribbling": 84,
+          "defending": 45,
+          "physical": 68,
+          "overall": 82,
+          "potential": 82,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": 1,
+          "morale": 65,
+          "fatigue": 10
+        },
+        "teamId": "arsenal",
+        "birthdate": "1996-01-01",
+        "positions": [
+          {
+            "position": "LW",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "timber",
+        "name": "유리엔 팀버",
+        "attributes": {
+          "pace": 81,
+          "shooting": 45,
+          "passing": 77,
+          "dribbling": 76,
+          "defending": 84,
+          "physical": 78,
+          "overall": 83,
+          "potential": 87,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": 0,
+          "morale": 63,
+          "fatigue": 8
+        },
+        "teamId": "arsenal",
+        "birthdate": "2002-01-01",
+        "positions": [
+          {
+            "position": "CB",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "nwaneri",
+        "name": "이선 은와네리",
+        "attributes": {
+          "pace": 79,
+          "shooting": 78,
+          "passing": 77,
+          "dribbling": 84,
+          "defending": 42,
+          "physical": 60,
+          "overall": 78,
+          "potential": 90,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": 1,
+          "morale": 70,
+          "fatigue": 5
+        },
+        "teamId": "arsenal",
+        "birthdate": "2008-01-01",
+        "positions": [
+          {
+            "position": "AM",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      }
+    ],
+    "startingIds": [
+      "raya",
+      "white",
+      "saliba",
+      "gabriel",
+      "calafiori",
+      "rice",
+      "odegaard",
+      "merino",
+      "saka",
+      "havertz",
+      "martinelli"
+    ],
     "tactics": {
       "formation": "4-3-3",
       "mentality": 4,
@@ -12,32 +461,460 @@
       "passStyle": "short",
       "playerInstructions": []
     },
-    "team": {
-      "id": "arsenal",
-      "name": "아스날",
-      "shortName": "ARS",
-      "startingXI": ["raya", "white", "saliba", "gabriel", "calafiori", "rice", "odegaard", "merino", "saka", "havertz", "martinelli"],
-      "bench": ["trossard", "timber", "nwaneri"],
-      "players": [
-        { "id": "raya", "name": "다비드 라야", "age": 29, "positionGroup": "GK", "position": "GK", "attributes": { "pace": 55, "shooting": 30, "passing": 70, "dribbling": 50, "defending": 40, "physical": 72, "goalkeeping": 85, "overall": 85, "potential": 86 }, "state": { "form": 1, "morale": 68, "fatigue": 15, "injury": "none" } },
-        { "id": "white", "name": "벤 화이트", "age": 27, "positionGroup": "DF", "position": "RB", "attributes": { "pace": 78, "shooting": 55, "passing": 76, "dribbling": 74, "defending": 81, "physical": 76, "overall": 82, "potential": 83 }, "state": { "form": 0, "morale": 65, "fatigue": 20, "injury": "none" } },
-        { "id": "saliba", "name": "윌리암 살리바", "age": 24, "positionGroup": "DF", "position": "CB", "attributes": { "pace": 84, "shooting": 40, "passing": 78, "dribbling": 72, "defending": 89, "physical": 86, "overall": 89, "potential": 92 }, "state": { "form": 1, "morale": 70, "fatigue": 12, "injury": "none" } },
-        { "id": "gabriel", "name": "가브리엘 마갈량이스", "age": 27, "positionGroup": "DF", "position": "CB", "attributes": { "pace": 80, "shooting": 45, "passing": 74, "dribbling": 65, "defending": 87, "physical": 88, "overall": 87, "potential": 88 }, "state": { "form": 1, "morale": 70, "fatigue": 15, "injury": "none" } },
-        { "id": "calafiori", "name": "리카르도 칼라피오리", "age": 23, "positionGroup": "DF", "position": "LB", "attributes": { "pace": 79, "shooting": 60, "passing": 78, "dribbling": 76, "defending": 80, "physical": 79, "overall": 81, "potential": 87 }, "state": { "form": 0, "morale": 66, "fatigue": 18, "injury": "none" } },
-        { "id": "rice", "name": "데클란 라이스", "age": 26, "positionGroup": "MF", "position": "DM", "attributes": { "pace": 77, "shooting": 72, "passing": 83, "dribbling": 79, "defending": 84, "physical": 86, "overall": 89, "potential": 91 }, "state": { "form": 2, "morale": 74, "fatigue": 18, "injury": "none" } },
-        { "id": "odegaard", "name": "마르틴 외데고르", "age": 26, "positionGroup": "MF", "position": "AM", "attributes": { "pace": 74, "shooting": 80, "passing": 90, "dribbling": 87, "defending": 58, "physical": 66, "overall": 88, "potential": 89 }, "state": { "form": 1, "morale": 72, "fatigue": 20, "injury": "none" } },
-        { "id": "merino", "name": "미켈 메리노", "age": 29, "positionGroup": "MF", "position": "CM", "attributes": { "pace": 68, "shooting": 74, "passing": 80, "dribbling": 75, "defending": 78, "physical": 84, "overall": 83, "potential": 83 }, "state": { "form": 0, "morale": 64, "fatigue": 22, "injury": "none" } },
-        { "id": "saka", "name": "부카요 사카", "age": 23, "positionGroup": "FW", "position": "RW", "attributes": { "pace": 88, "shooting": 84, "passing": 84, "dribbling": 89, "defending": 55, "physical": 72, "overall": 89, "potential": 93 }, "state": { "form": 2, "morale": 76, "fatigue": 16, "injury": "none" } },
-        { "id": "havertz", "name": "카이 하베르츠", "age": 26, "positionGroup": "FW", "position": "ST", "attributes": { "pace": 78, "shooting": 81, "passing": 79, "dribbling": 80, "defending": 60, "physical": 82, "overall": 84, "potential": 85 }, "state": { "form": 0, "morale": 66, "fatigue": 20, "injury": "none" } },
-        { "id": "martinelli", "name": "가브리엘 마르티넬리", "age": 24, "positionGroup": "FW", "position": "LW", "attributes": { "pace": 90, "shooting": 79, "passing": 76, "dribbling": 85, "defending": 50, "physical": 74, "overall": 84, "potential": 88 }, "state": { "form": -1, "morale": 60, "fatigue": 18, "injury": "none" } },
-        { "id": "trossard", "name": "레안드로 트로사르", "age": 30, "positionGroup": "FW", "position": "LW", "attributes": { "pace": 80, "shooting": 80, "passing": 79, "dribbling": 84, "defending": 45, "physical": 68, "overall": 82, "potential": 82 }, "state": { "form": 1, "morale": 65, "fatigue": 10, "injury": "none" } },
-        { "id": "timber", "name": "유리엔 팀버", "age": 24, "positionGroup": "DF", "position": "CB", "attributes": { "pace": 81, "shooting": 45, "passing": 77, "dribbling": 76, "defending": 84, "physical": 78, "overall": 83, "potential": 87 }, "state": { "form": 0, "morale": 63, "fatigue": 8, "injury": "none" } },
-        { "id": "nwaneri", "name": "이선 은와네리", "age": 18, "positionGroup": "MF", "position": "AM", "attributes": { "pace": 79, "shooting": 78, "passing": 77, "dribbling": 84, "defending": 42, "physical": 60, "overall": 78, "potential": 90 }, "state": { "form": 1, "morale": 70, "fatigue": 5, "injury": "none" } }
-      ]
-    }
+    "managerTactics": 58
   },
   "away": {
-    "managerTactics": 72,
+    "teamId": "chelsea",
+    "teamName": "첼시",
+    "players": [
+      {
+        "id": "sanchez",
+        "name": "로베르트 산체스",
+        "attributes": {
+          "pace": 52,
+          "shooting": 25,
+          "passing": 68,
+          "dribbling": 45,
+          "defending": 38,
+          "physical": 80,
+          "goalkeeping": 80,
+          "overall": 80,
+          "potential": 81
+        },
+        "state": {
+          "form": 0,
+          "morale": 62,
+          "fatigue": 14
+        },
+        "teamId": "chelsea",
+        "birthdate": "1999-01-01",
+        "positions": [
+          {
+            "position": "GK",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "james",
+        "name": "리스 제임스",
+        "attributes": {
+          "pace": 82,
+          "shooting": 70,
+          "passing": 84,
+          "dribbling": 80,
+          "defending": 83,
+          "physical": 84,
+          "overall": 84,
+          "potential": 87,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": 0,
+          "morale": 66,
+          "fatigue": 24
+        },
+        "teamId": "chelsea",
+        "birthdate": "2001-01-01",
+        "positions": [
+          {
+            "position": "RB",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "fofana",
+        "name": "웨슬리 포파나",
+        "attributes": {
+          "pace": 83,
+          "shooting": 35,
+          "passing": 70,
+          "dribbling": 68,
+          "defending": 84,
+          "physical": 82,
+          "overall": 83,
+          "potential": 87,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": 0,
+          "morale": 64,
+          "fatigue": 16
+        },
+        "teamId": "chelsea",
+        "birthdate": "2002-01-01",
+        "positions": [
+          {
+            "position": "CB",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "colwill",
+        "name": "레비 콜윌",
+        "attributes": {
+          "pace": 76,
+          "shooting": 40,
+          "passing": 78,
+          "dribbling": 72,
+          "defending": 83,
+          "physical": 81,
+          "overall": 82,
+          "potential": 88,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": 1,
+          "morale": 67,
+          "fatigue": 14
+        },
+        "teamId": "chelsea",
+        "birthdate": "2004-01-01",
+        "positions": [
+          {
+            "position": "CB",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "cucurella",
+        "name": "마르크 쿠쿠레야",
+        "attributes": {
+          "pace": 61,
+          "shooting": 50,
+          "passing": 76,
+          "dribbling": 76,
+          "defending": 82,
+          "physical": 77,
+          "overall": 82,
+          "potential": 83,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": 1,
+          "morale": 68,
+          "fatigue": 18
+        },
+        "teamId": "chelsea",
+        "birthdate": "2000-01-01",
+        "positions": [
+          {
+            "position": "LB",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "caicedo",
+        "name": "모이세스 카이세도",
+        "attributes": {
+          "pace": 76,
+          "shooting": 68,
+          "passing": 81,
+          "dribbling": 80,
+          "defending": 86,
+          "physical": 86,
+          "overall": 87,
+          "potential": 90,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": 2,
+          "morale": 72,
+          "fatigue": 18
+        },
+        "teamId": "chelsea",
+        "birthdate": "2003-01-01",
+        "positions": [
+          {
+            "position": "DM",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "enzo",
+        "name": "엔소 페르난데스",
+        "attributes": {
+          "pace": 72,
+          "shooting": 74,
+          "passing": 86,
+          "dribbling": 80,
+          "defending": 74,
+          "physical": 78,
+          "overall": 85,
+          "potential": 89,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": 1,
+          "morale": 69,
+          "fatigue": 20
+        },
+        "teamId": "chelsea",
+        "birthdate": "2002-01-01",
+        "positions": [
+          {
+            "position": "CM",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "palmer",
+        "name": "콜 파머",
+        "attributes": {
+          "pace": 76,
+          "shooting": 87,
+          "passing": 86,
+          "dribbling": 87,
+          "defending": 48,
+          "physical": 70,
+          "overall": 88,
+          "potential": 92,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": 2,
+          "morale": 74,
+          "fatigue": 16
+        },
+        "teamId": "chelsea",
+        "birthdate": "2003-01-01",
+        "positions": [
+          {
+            "position": "AM",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "madueke",
+        "name": "노니 마두에케",
+        "attributes": {
+          "pace": 87,
+          "shooting": 78,
+          "passing": 72,
+          "dribbling": 85,
+          "defending": 40,
+          "physical": 74,
+          "overall": 81,
+          "potential": 86,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": 1,
+          "morale": 66,
+          "fatigue": 15
+        },
+        "teamId": "chelsea",
+        "birthdate": "2003-01-01",
+        "positions": [
+          {
+            "position": "RW",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "neto",
+        "name": "페드로 네투",
+        "attributes": {
+          "pace": 88,
+          "shooting": 76,
+          "passing": 78,
+          "dribbling": 86,
+          "defending": 42,
+          "physical": 68,
+          "overall": 82,
+          "potential": 85,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": 0,
+          "morale": 64,
+          "fatigue": 17
+        },
+        "teamId": "chelsea",
+        "birthdate": "2001-01-01",
+        "positions": [
+          {
+            "position": "LW",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "jackson",
+        "name": "니콜라스 잭슨",
+        "attributes": {
+          "pace": 87,
+          "shooting": 79,
+          "passing": 70,
+          "dribbling": 80,
+          "defending": 40,
+          "physical": 80,
+          "overall": 82,
+          "potential": 86,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": 0,
+          "morale": 63,
+          "fatigue": 16
+        },
+        "teamId": "chelsea",
+        "birthdate": "2002-01-01",
+        "positions": [
+          {
+            "position": "ST",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "gusto",
+        "name": "말로 귀스토",
+        "attributes": {
+          "pace": 84,
+          "shooting": 55,
+          "passing": 76,
+          "dribbling": 78,
+          "defending": 79,
+          "physical": 76,
+          "overall": 80,
+          "potential": 86,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": 0,
+          "morale": 62,
+          "fatigue": 8
+        },
+        "teamId": "chelsea",
+        "birthdate": "2004-01-01",
+        "positions": [
+          {
+            "position": "RB",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "lavia",
+        "name": "로메오 라비아",
+        "attributes": {
+          "pace": 74,
+          "shooting": 65,
+          "passing": 80,
+          "dribbling": 79,
+          "defending": 79,
+          "physical": 77,
+          "overall": 80,
+          "potential": 88,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": 0,
+          "morale": 61,
+          "fatigue": 6
+        },
+        "teamId": "chelsea",
+        "birthdate": "2005-01-01",
+        "positions": [
+          {
+            "position": "DM",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      },
+      {
+        "id": "nkunku",
+        "name": "크리스토퍼 은쿤쿠",
+        "attributes": {
+          "pace": 81,
+          "shooting": 83,
+          "passing": 78,
+          "dribbling": 84,
+          "defending": 45,
+          "physical": 72,
+          "overall": 83,
+          "potential": 84,
+          "goalkeeping": 22
+        },
+        "state": {
+          "form": 0,
+          "morale": 60,
+          "fatigue": 6
+        },
+        "teamId": "chelsea",
+        "birthdate": "1999-01-01",
+        "positions": [
+          {
+            "position": "ST",
+            "proficiency": 90,
+            "isNatural": true
+          }
+        ],
+        "catalogId": null,
+        "isCaptain": false
+      }
+    ],
+    "startingIds": [
+      "sanchez",
+      "james",
+      "fofana",
+      "colwill",
+      "cucurella",
+      "caicedo",
+      "enzo",
+      "palmer",
+      "madueke",
+      "neto",
+      "jackson"
+    ],
     "tactics": {
       "formation": "4-2-3-1",
       "mentality": 3,
@@ -48,28 +925,6 @@
       "passStyle": "mixed",
       "playerInstructions": []
     },
-    "team": {
-      "id": "chelsea",
-      "name": "첼시",
-      "shortName": "CHE",
-      "startingXI": ["sanchez", "james", "fofana", "colwill", "cucurella", "caicedo", "enzo", "palmer", "madueke", "neto", "jackson"],
-      "bench": ["gusto", "lavia", "nkunku"],
-      "players": [
-        { "id": "sanchez", "name": "로베르트 산체스", "age": 27, "positionGroup": "GK", "position": "GK", "attributes": { "pace": 52, "shooting": 25, "passing": 68, "dribbling": 45, "defending": 38, "physical": 80, "goalkeeping": 80, "overall": 80, "potential": 81 }, "state": { "form": 0, "morale": 62, "fatigue": 14, "injury": "none" } },
-        { "id": "james", "name": "리스 제임스", "age": 25, "positionGroup": "DF", "position": "RB", "attributes": { "pace": 82, "shooting": 70, "passing": 84, "dribbling": 80, "defending": 83, "physical": 84, "overall": 84, "potential": 87 }, "state": { "form": 0, "morale": 66, "fatigue": 24, "injury": "none" } },
-        { "id": "fofana", "name": "웨슬리 포파나", "age": 24, "positionGroup": "DF", "position": "CB", "attributes": { "pace": 83, "shooting": 35, "passing": 70, "dribbling": 68, "defending": 84, "physical": 82, "overall": 83, "potential": 87 }, "state": { "form": 0, "morale": 64, "fatigue": 16, "injury": "none" } },
-        { "id": "colwill", "name": "레비 콜윌", "age": 22, "positionGroup": "DF", "position": "CB", "attributes": { "pace": 76, "shooting": 40, "passing": 78, "dribbling": 72, "defending": 83, "physical": 81, "overall": 82, "potential": 88 }, "state": { "form": 1, "morale": 67, "fatigue": 14, "injury": "none" } },
-        { "id": "cucurella", "name": "마르크 쿠쿠레야", "age": 26, "positionGroup": "DF", "position": "LB", "attributes": { "pace": 61, "shooting": 50, "passing": 76, "dribbling": 76, "defending": 82, "physical": 77, "overall": 82, "potential": 83 }, "state": { "form": 1, "morale": 68, "fatigue": 18, "injury": "none" } },
-        { "id": "caicedo", "name": "모이세스 카이세도", "age": 23, "positionGroup": "MF", "position": "DM", "attributes": { "pace": 76, "shooting": 68, "passing": 81, "dribbling": 80, "defending": 86, "physical": 86, "overall": 87, "potential": 90 }, "state": { "form": 2, "morale": 72, "fatigue": 18, "injury": "none" } },
-        { "id": "enzo", "name": "엔소 페르난데스", "age": 24, "positionGroup": "MF", "position": "CM", "attributes": { "pace": 72, "shooting": 74, "passing": 86, "dribbling": 80, "defending": 74, "physical": 78, "overall": 85, "potential": 89 }, "state": { "form": 1, "morale": 69, "fatigue": 20, "injury": "none" } },
-        { "id": "palmer", "name": "콜 파머", "age": 23, "positionGroup": "MF", "position": "AM", "attributes": { "pace": 76, "shooting": 87, "passing": 86, "dribbling": 87, "defending": 48, "physical": 70, "overall": 88, "potential": 92 }, "state": { "form": 2, "morale": 74, "fatigue": 16, "injury": "none" } },
-        { "id": "madueke", "name": "노니 마두에케", "age": 23, "positionGroup": "FW", "position": "RW", "attributes": { "pace": 87, "shooting": 78, "passing": 72, "dribbling": 85, "defending": 40, "physical": 74, "overall": 81, "potential": 86 }, "state": { "form": 1, "morale": 66, "fatigue": 15, "injury": "none" } },
-        { "id": "neto", "name": "페드로 네투", "age": 25, "positionGroup": "FW", "position": "LW", "attributes": { "pace": 88, "shooting": 76, "passing": 78, "dribbling": 86, "defending": 42, "physical": 68, "overall": 82, "potential": 85 }, "state": { "form": 0, "morale": 64, "fatigue": 17, "injury": "none" } },
-        { "id": "jackson", "name": "니콜라스 잭슨", "age": 24, "positionGroup": "FW", "position": "ST", "attributes": { "pace": 87, "shooting": 79, "passing": 70, "dribbling": 80, "defending": 40, "physical": 80, "overall": 82, "potential": 86 }, "state": { "form": 0, "morale": 63, "fatigue": 16, "injury": "none" } },
-        { "id": "gusto", "name": "말로 귀스토", "age": 22, "positionGroup": "DF", "position": "RB", "attributes": { "pace": 84, "shooting": 55, "passing": 76, "dribbling": 78, "defending": 79, "physical": 76, "overall": 80, "potential": 86 }, "state": { "form": 0, "morale": 62, "fatigue": 8, "injury": "none" } },
-        { "id": "lavia", "name": "로메오 라비아", "age": 21, "positionGroup": "MF", "position": "DM", "attributes": { "pace": 74, "shooting": 65, "passing": 80, "dribbling": 79, "defending": 79, "physical": 77, "overall": 80, "potential": 88 }, "state": { "form": 0, "morale": 61, "fatigue": 6, "injury": "none" } },
-        { "id": "nkunku", "name": "크리스토퍼 은쿤쿠", "age": 27, "positionGroup": "FW", "position": "ST", "attributes": { "pace": 81, "shooting": 83, "passing": 78, "dribbling": 84, "defending": 45, "physical": 72, "overall": 83, "potential": 84 }, "state": { "form": 0, "morale": 60, "fatigue": 6, "injury": "none" } }
-      ]
-    }
+    "managerTactics": 72
   }
 }

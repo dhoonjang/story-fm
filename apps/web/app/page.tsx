@@ -1,100 +1,123 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
-interface TeamEntry {
+interface GameSummary {
   id: string;
-  name: string;
-  shortName: string;
-  tier: number;
+  teamName: string;
+  managerName: string;
+  season: number;
+  date: string;
+  phase: string;
+  createdAt: string;
 }
 
-const TIER_LABEL: Record<number, string> = {
-  1: "우승권",
-  2: "유럽권",
-  3: "중위권",
-  4: "잔류권",
+const PHASE_LABEL: Record<string, string> = {
+  idle: "일상",
+  matchday: "경기일",
+  match: "경기 중",
 };
 
-export default function OnboardingPage() {
+export default function HomePage() {
   const router = useRouter();
-  const [teams, setTeams] = useState<TeamEntry[]>([]);
-  const [teamId, setTeamId] = useState<string | null>(null);
-  const [name, setName] = useState("");
-  const [background, setBackground] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [games, setGames] = useState<GameSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetch("/api/games")
-      .then((r) => r.json())
-      .then((data) => setTeams(data.teams ?? []))
-      .catch(() => setError("팀 목록을 불러오지 못했습니다"));
+  const load = useCallback(() => {
+    let cancelled = false;
+    async function run(attempt: number) {
+      try {
+        const r = await fetch("/api/games");
+        if (!r.ok) throw new Error(String(r.status));
+        const data = await r.json();
+        if (!cancelled) setGames(data.games ?? []);
+      } catch {
+        if (cancelled) return;
+        if (attempt < 4) setTimeout(() => run(attempt + 1), 1200);
+        else setError("게임 목록을 불러오지 못했습니다 — 새로고침해 주세요");
+      }
+    }
+    run(0);
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  async function start() {
-    if (!teamId || !name.trim() || !background.trim()) return;
-    setBusy(true);
-    setError(null);
+  useEffect(() => load(), [load]);
+
+  async function remove(id: string, label: string) {
+    if (!window.confirm(`"${label}" 세이브를 삭제할까요? 되돌릴 수 없습니다.`)) return;
+    setDeleting(id);
     try {
-      const res = await fetch("/api/games", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ teamId, managerName: name.trim(), background: background.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "생성 실패");
-      router.push(`/game/${data.id}`);
+      const res = await fetch(`/api/games/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("삭제 실패");
+      setGames((gs) => (gs ?? []).filter((g) => g.id !== id));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      setBusy(false);
+    } finally {
+      setDeleting(null);
     }
   }
 
   return (
     <main className="onboarding">
-      <h1>story-fm</h1>
-      <p className="tagline">슬라이더 대신 대화로 팀을 이끈다 — 매 시즌이 한 편의 드라마가 되는 AI 풋볼 매니저</p>
-
-      <h2>1. 지휘할 팀을 선택하세요</h2>
-      <div className="team-grid" data-testid="team-grid">
-        {teams.map((t) => (
-          <button
-            key={t.id}
-            className={`team-card${teamId === t.id ? " selected" : ""}`}
-            onClick={() => setTeamId(t.id)}
-            data-testid={`team-${t.id}`}
-          >
-            <div>{t.name}</div>
-            <div className="tier">보드 기대: {TIER_LABEL[t.tier] ?? "?"}</div>
-          </button>
-        ))}
+      <div className="home-head">
+        <div>
+          <h1>story-fm</h1>
+          <p className="tagline">말로 지휘하는 AI 풋볼 매니저 — 이어서 하거나 새로 시작하세요</p>
+        </div>
+        <div className="home-head-actions">
+          <Link href="/admin" className="ghost-btn" data-testid="admin-link">
+            선수 DB 어드민
+          </Link>
+          <Link href="/new" className="primary-btn" data-testid="new-game">
+            + 새 게임
+          </Link>
+        </div>
       </div>
 
-      <h2>2. 당신은 누구입니까?</h2>
-      <input
-        type="text"
-        placeholder="감독 이름"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        data-testid="manager-name"
-      />
-      <textarea
-        placeholder="배경을 자유롭게 적어주세요 — 예: K리그에서 뛰다 은퇴한 수비수. 데이터 분석 회사를 거쳐 지도자의 길로. (이 서술이 리더십·전술·협상·미디어 능력치의 초기 배분을 결정합니다)"
-        value={background}
-        onChange={(e) => setBackground(e.target.value)}
-        data-testid="manager-background"
-      />
-      <button
-        className="primary-btn"
-        onClick={start}
-        disabled={busy || !teamId || !name.trim() || !background.trim()}
-        data-testid="start-game"
-      >
-        {busy ? "부임 준비 중..." : "부임하기"}
-      </button>
+      <h2>내 게임</h2>
       {error && <p className="error-text">{error}</p>}
+      {games === null && !error && <div className="empty">불러오는 중…</div>}
+      {games !== null && games.length === 0 && (
+        <div className="empty" data-testid="no-games">
+          아직 진행 중인 게임이 없습니다 — <Link href="/new" className="back-link">새 게임</Link>으로 커리어를 시작하세요.
+        </div>
+      )}
+
+      <div className="game-list" data-testid="game-list">
+        {(games ?? []).map((g) => (
+          <div
+            key={g.id}
+            className="game-card"
+            onClick={() => router.push(`/game/${g.id}`)}
+            data-testid={`game-${g.id}`}
+          >
+            <div className="game-card-main">
+              <div className="game-card-team">{g.teamName}</div>
+              <div className="game-card-sub">
+                {g.managerName} 감독 · 시즌 {g.season} · {g.date}
+              </div>
+            </div>
+            <span className="phase">{PHASE_LABEL[g.phase] ?? g.phase}</span>
+            <button
+              className="game-del"
+              onClick={(e) => {
+                e.stopPropagation();
+                remove(g.id, `${g.teamName} / ${g.managerName}`);
+              }}
+              disabled={deleting === g.id}
+              data-testid={`delete-${g.id}`}
+              title="세이브 삭제"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
     </main>
   );
 }

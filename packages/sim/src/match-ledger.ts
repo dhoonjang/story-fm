@@ -1,4 +1,4 @@
-import type { MatchEvent, MatchPhase, MatchSide, Team } from "@story-fm/domain";
+import type { MatchEvent, MatchPhase, MatchSide } from "@story-fm/domain";
 import { TEAM_EVENT_TYPES } from "@story-fm/domain";
 
 /**
@@ -40,9 +40,15 @@ export const LEDGER_LIMITS = {
   maxSubWindows: 3,
 } as const;
 
-export function createLedger(home: Team, away: Team): MatchLedgerState {
-  const side = (t: Team): TeamLedger => ({
-    onPitch: [...t.startingXI],
+/** 경기 시작 명단 — 전술 배치에서 조립해 넘긴다 (팀 엔티티가 라인업을 갖지 않는다) */
+export interface LedgerSide {
+  onPitch: string[];
+  bench: string[];
+}
+
+export function createLedger(home: LedgerSide, away: LedgerSide): MatchLedgerState {
+  const side = (t: LedgerSide): TeamLedger => ({
+    onPitch: [...t.onPitch],
     bench: [...t.bench],
     subsUsed: 0,
     subWindows: 0,

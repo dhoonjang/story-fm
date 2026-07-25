@@ -1,15 +1,42 @@
-import type { MatchEvent, Team } from "@story-fm/domain";
+import type { GamePlayer, MatchEvent, MatchRecord, TacticAssignment } from "@story-fm/domain";
+import { naturalPositionOf, positionGroupOf } from "@story-fm/domain";
 import {
   applyEvents,
   buildStrengthPacket,
   createLedger,
+  type LineupSlot,
   type MatchLedgerState,
 } from "@story-fm/sim";
-import { fixturesOn } from "./calendar";
+import { matchesOn } from "./calendar";
+import { teamCatalogById } from "./data/team-catalog";
 import { generateMatchScript } from "./quick-sim";
 import { grantManagerXP } from "./skills";
-import { pushNarrative, teamById, userTeam, type GameState, type MatchScriptSegment } from "./state";
+import { openInjuryFor, serveSuspensions, simSquadOf } from "./tick";
+import {
+  activeSuspension,
+  assignmentsOf,
+  ensureSeasonStat,
+  isInjured,
+  isSuspended,
+  groupOf,
+  playerById,
+  playersOf,
+  proficiencyAt,
+  pushNarrative,
+  recordFinance,
+  recordGrowth,
+  seasonYellowsOf,
+  tacticsOf,
+  teamName,
+  teamShortName,
+  userPlayers,
+  FAMILIARITY_BASELINE,
+  MATCHDAY_BENCH,
+  type GameState,
+  type MatchScriptSegment,
+} from "./state";
 import { makeRng } from "./rng";
+import { YELLOWS_PER_SUSPENSION } from "@story-fm/domain";
 
 /** 경기 흐름 — 시작 · 이벤트 반영 · 마무리 (overview §4, match-sim.md) */
 
@@ -18,90 +45,142 @@ export interface FlowResult {
   message: string;
 }
 
-export function userSide(state: GameState): "home" | "away" {
-  const fixture = state.pendingMatch?.fixture;
-  if (!fixture) return "home";
-  return fixture.homeId === state.userTeamId ? "home" : "away";
+function currentMatch(state: GameState): MatchRecord {
+  const id = state.pendingMatch?.matchId;
+  const match = id ? state.matches.find((m) => m.id === id) : null;
+  if (!match) throw new Error("진행 중인 경기가 없습니다");
+  return match;
 }
 
-function sideTeams(state: GameState): { home: Team; away: Team } {
-  const fixture = state.pendingMatch?.fixture;
-  if (!fixture) throw new Error("진행 중인 경기가 없습니다");
-  return { home: teamById(state, fixture.homeId), away: teamById(state, fixture.awayId) };
+export function userSide(state: GameState): "home" | "away" {
+  if (!state.pendingMatch) return "home";
+  const match = state.matches.find((m) => m.id === state.pendingMatch?.matchId);
+  return match && match.awayTeamId === state.userTeamId ? "away" : "home";
+}
+
+/** 배치 + 선수 → 패킷 입력 슬롯. 온필드 id 목록으로 필터해 교체·퇴장을 반영한다 */
+function slotsFor(state: GameState, teamId: string, ids: string[]): LineupSlot[] {
+  const assignments = new Map(
+    assignmentsOf(state, teamId).map((a) => [a.playerId, a] as const),
+  );
+  const squad = new Map(playersOf(state, teamId).map((p) => [p.id, p] as const));
+  return ids.flatMap((id) => {
+    const player = squad.get(id);
+    if (!player) return [];
+    const assignment = assignments.get(id);
+    const position = assignment?.position ?? naturalPositionOf(player).position;
+    return [{ player, position, proficiency: proficiencyAt(player, position) }];
+  });
+}
+
+/** 팀 평균 전술 적응도 → 전력 팩터 (0.85~1.0) */
+function familiarityFactor(state: GameState, teamId: string, onPitch: string[]): number {
+  const assignments = new Map(assignmentsOf(state, teamId).map((a) => [a.playerId, a] as const));
+  const vals = onPitch.map((id) => assignments.get(id)?.familiarity ?? FAMILIARITY_BASELINE);
+  const avg = vals.length ? vals.reduce((s, x) => s + x, 0) / vals.length : FAMILIARITY_BASELINE;
+  return 0.85 + 0.15 * (avg / 99);
+}
+
+function managerTacticsOf(state: GameState, teamId: string): number {
+  if (teamId === state.userTeamId) return state.manager.attributes.tactics;
+  return state.teams.find((t) => t.id === teamId)?.aiManagerTacticsRating ?? 65;
 }
 
 /**
  * 전력 분석 패킷 (재)계산 — 전술 변경·교체 시에도 호출 (match-sim.md §2).
- * 경기 중에는 장부의 현재 온필드 명단으로 계산한다 — 교체·퇴장이 존
- * 전력에 반영되어야 한다 (리뷰 발견).
+ * 경기 중에는 장부의 현재 온필드 명단으로 계산한다 (교체·퇴장 반영).
  */
 export function refreshPacket(state: GameState): void {
-  const match = state.pendingMatch;
-  if (!match) return;
-  const { home, away } = sideTeams(state);
-  const managerOf = (teamId: string) =>
-    teamId === state.userTeamId
-      ? state.manager.attributes.tactics
-      : (state.aiManagerTactics[teamId] ?? 65);
-  // 온필드 기준 라인업 (킥오프 직후엔 startingXI와 동일)
-  const liveHome = { ...home, startingXI: [...match.ledger.home.onPitch] };
-  const liveAway = { ...away, startingXI: [...match.ledger.away.onPitch] };
-  match.packet = buildStrengthPacket(
-    {
-      team: liveHome,
-      tactics: state.tactics[home.id] ?? { ...state.tactics[state.userTeamId]! },
-      managerTactics: managerOf(home.id),
-    },
-    {
-      team: liveAway,
-      tactics: state.tactics[away.id] ?? { ...state.tactics[state.userTeamId]! },
-      managerTactics: managerOf(away.id),
-    },
+  const pending = state.pendingMatch;
+  if (!pending) return;
+  const match = currentMatch(state);
+  const build = (teamId: string, ledgerSide: { onPitch: string[]; bench: string[] }) => ({
+    teamId,
+    teamName: teamName(teamId),
+    starters: slotsFor(state, teamId, ledgerSide.onPitch),
+    bench: slotsFor(state, teamId, ledgerSide.bench),
+    tactics: tacticsOf(state, teamId).spec,
+    managerTactics: managerTacticsOf(state, teamId),
+    familiarity: familiarityFactor(state, teamId, ledgerSide.onPitch),
+  });
+  pending.packet = buildStrengthPacket(
+    build(match.homeTeamId, pending.ledger.home),
+    build(match.awayTeamId, pending.ledger.away),
   );
 }
 
 /**
- * 킥오프 전 라인업 위생 — 부상·출장 정지 선수를 선발에서 자동 대체하고
- * 벤치에서도 제외한다 (리뷰 발견: 경기 경로 부상 검증 공백).
+ * 킥오프 라인업 조립 — 배치(starting)에서 가용 선수를 뽑고, 부상·정지로 빈 자리는
+ * 같은 그룹 우선으로 자동 대체한다. GK 자리는 반드시 GK 그룹으로 채운다.
  */
-function sanitizeUserLineup(state: GameState): { replaced: string[]; error: string | null } {
-  const team = userTeam(state);
-  const unavailable = (id: string): boolean => {
-    const p = team.players.find((x) => x.id === id);
-    if (!p) return true;
-    return p.state.injury !== "none" || (state.suspensions[p.id] ?? 0) > 0;
-  };
+function assembleUserLineup(
+  state: GameState,
+): { onPitch: string[]; bench: string[]; replaced: string[]; error: string | null } {
+  const tactics = tacticsOf(state, state.userTeamId);
+  const roster = userPlayers(state);
+  const byId = new Map(roster.map((p) => [p.id, p] as const));
+  const unavailable = (id: string) => isInjured(state, id) || isSuspended(state, id);
 
+  const starters = tactics.assignments.filter((a) => a.role === "starting");
+  const onPitch: string[] = [];
   const replaced: string[] = [];
-  const xi = [...team.startingXI];
-  for (let i = 0; i < xi.length; i++) {
-    const id = xi[i];
-    if (!id || !unavailable(id)) continue;
-    const out = team.players.find((p) => p.id === id);
-    const candidates = team.players
-      .filter((p) => !xi.includes(p.id) && !unavailable(p.id))
-      .sort((a, b) => {
-        const groupA = a.positionGroup === out?.positionGroup ? 0 : 1;
-        const groupB = b.positionGroup === out?.positionGroup ? 0 : 1;
-        return groupA - groupB || b.attributes.overall - a.attributes.overall;
-      })
-      // GK 자리는 반드시 GK로 채운다
-      .filter((p) => out?.positionGroup !== "GK" || p.positionGroup === "GK");
-    const substitute = candidates[0];
-    if (!substitute) {
+  const taken = new Set<string>();
+
+  for (const a of starters) {
+    const slotGroup = positionGroupOf(a.position) ?? "MF";
+    const current = byId.get(a.playerId);
+    if (current && !unavailable(a.playerId)) {
+      onPitch.push(a.playerId);
+      taken.add(a.playerId);
+      continue;
+    }
+    // 대체 — 슬롯 적응도·그룹 일치·OVR 순
+    const candidate = roster
+      .filter((p) => !taken.has(p.id) && !unavailable(p.id))
+      .filter((p) => (slotGroup === "GK" ? groupOf(p) === "GK" : groupOf(p) !== "GK"))
+      .sort(
+        (x, y) =>
+          proficiencyAt(y, a.position) - proficiencyAt(x, a.position) ||
+          y.attributes.overall - x.attributes.overall,
+      )[0];
+    if (!candidate) {
       return {
+        onPitch,
+        bench: [],
         replaced,
-        error: `${out?.name ?? id}을(를) 대체할 가용 선수가 없습니다 — 스쿼드가 소진되었습니다`,
+        error: `${current?.name ?? a.playerId}을(를) 대체할 가용 선수가 없습니다 — 스쿼드가 소진되었습니다`,
       };
     }
-    xi[i] = substitute.id;
-    replaced.push(`${out?.name ?? id} → ${substitute.name}`);
+    onPitch.push(candidate.id);
+    taken.add(candidate.id);
+    replaced.push(`${current?.name ?? a.playerId} → ${candidate.name}`);
   }
-  team.startingXI = xi;
-  team.bench = team.players
-    .filter((p) => !xi.includes(p.id) && !unavailable(p.id))
-    .map((p) => p.id);
-  return { replaced, error: null };
+
+  // 벤치 — 배치된 벤치 우선, 부족하면 가용 상위로 채움 (GK 1명 확보)
+  const benchIds: string[] = [];
+  for (const a of tactics.assignments.filter((x) => x.role === "bench")) {
+    if (taken.has(a.playerId) || unavailable(a.playerId) || !byId.has(a.playerId)) continue;
+    benchIds.push(a.playerId);
+    taken.add(a.playerId);
+  }
+  const rest = roster
+    .filter((p) => !taken.has(p.id) && !unavailable(p.id))
+    .sort((a, b) => b.attributes.overall - a.attributes.overall);
+  if (!benchIds.some((id) => groupOf(byId.get(id)!) === "GK")) {
+    const gk = rest.find((p) => groupOf(p) === "GK");
+    if (gk) {
+      benchIds.push(gk.id);
+      taken.add(gk.id);
+    }
+  }
+  for (const p of rest) {
+    if (benchIds.length >= MATCHDAY_BENCH) break;
+    if (taken.has(p.id)) continue;
+    benchIds.push(p.id);
+    taken.add(p.id);
+  }
+
+  return { onPitch, bench: benchIds.slice(0, MATCHDAY_BENCH), replaced, error: null };
 }
 
 export function startMatch(state: GameState): FlowResult {
@@ -109,23 +188,39 @@ export function startMatch(state: GameState): FlowResult {
   if (state.phase !== "matchday") {
     return { ok: false, message: "오늘은 경기일이 아닙니다 — 먼저 경기일로 이동하세요" };
   }
-  const fixture = fixturesOn(state.calendar, state.date).find(
-    (f) => !f.result && (f.homeId === state.userTeamId || f.awayId === state.userTeamId),
+  const match = matchesOn(state.matches, state.date).find(
+    (m) => !m.result && (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
   );
-  if (!fixture) return { ok: false, message: "오늘 예정된 경기를 찾지 못했습니다" };
+  if (!match) return { ok: false, message: "오늘 예정된 경기를 찾지 못했습니다" };
 
-  const sanitized = sanitizeUserLineup(state);
-  if (sanitized.error) return { ok: false, message: sanitized.error };
-  const serving = Object.entries(state.suspensions)
-    .filter(([, games]) => games > 0)
-    .map(([id]) => id);
+  const lineup = assembleUserLineup(state);
+  if (lineup.error) return { ok: false, message: lineup.error };
 
-  const home = teamById(state, fixture.homeId);
-  const away = teamById(state, fixture.awayId);
+  // 이번 경기에 정지를 소화하는 선수 (경기 단위 차감)
+  const serving = userPlayers(state)
+    .filter((p) => isSuspended(state, p.id))
+    .map((p) => p.id);
+
+  const userIsHome = match.homeTeamId === state.userTeamId;
+  const opponentId = userIsHome ? match.awayTeamId : match.homeTeamId;
+  const aiSquad = simSquadOf(state, opponentId);
+  const aiIds = aiSquad.starters.map((p) => p.id);
+  const aiBench = playersOf(state, opponentId)
+    .filter((p) => !aiIds.includes(p.id) && !isInjured(state, p.id))
+    .sort((a, b) => b.attributes.overall - a.attributes.overall)
+    .slice(0, MATCHDAY_BENCH)
+    .map((p) => p.id);
+
+  const userSideLedger = { onPitch: lineup.onPitch, bench: lineup.bench };
+  const aiSideLedger = { onPitch: aiIds, bench: aiBench };
+
   state.pendingMatch = {
-    fixture,
+    matchId: match.id,
     packet: null as never, // 바로 아래 refreshPacket이 채운다
-    ledger: createLedger(home, away),
+    ledger: createLedger(
+      userIsHome ? userSideLedger : aiSideLedger,
+      userIsHome ? aiSideLedger : userSideLedger,
+    ),
     script: null,
     scriptCursor: 0,
     casterHistory: [],
@@ -134,15 +229,22 @@ export function startMatch(state: GameState): FlowResult {
   state.phase = "match";
   refreshPacket(state);
 
-  // mock 캐스터용 스크립트 — 실모드에선 캐스터 LLM이 사건을 만들므로 미사용
+  // mock 캐스터용 스크립트 — 실모드에선 캐스터 LLM이 사건을 만든다
+  const squadOf = (teamId: string, ids: string[]) => ({
+    teamId,
+    starters: ids
+      .map((id) => playerById(state, id))
+      .filter((p): p is GamePlayer => p !== null),
+  });
   state.pendingMatch.script = generateMatchScript(
     state.pendingMatch.packet,
-    home,
-    away,
+    squadOf(match.homeTeamId, state.pendingMatch.ledger.home.onPitch),
+    squadOf(match.awayTeamId, state.pendingMatch.ledger.away.onPitch),
     state.seed,
-    `${state.season}:${fixture.round}:user`,
+    `${state.season}:${match.round}:user`,
   );
-  return { ok: true, message: "킥오프 준비 완료" };
+  const note = lineup.replaced.length > 0 ? ` (자동 대체: ${lineup.replaced.join(", ")})` : "";
+  return { ok: true, message: `킥오프 준비 완료${note}` };
 }
 
 /** 캐스터(LLM/mock)가 만든 사건을 장부 검증으로 반영 */
@@ -170,13 +272,12 @@ export function substitutePlayer(
   if (!match || state.phase !== "match") {
     return { ok: false, message: "교체는 경기 중에만 가능합니다" };
   }
-  // 부상·출장 정지 선수는 투입 불가 (장부는 도메인 상태를 모름 — 엔진 경계에서 검증)
-  const team = userTeam(state);
-  const incoming = team.players.find((p) => p.id === input.in);
-  if (incoming && incoming.state.injury !== "none") {
+  const roster = userPlayers(state);
+  const incoming = roster.find((p) => p.id === input.in);
+  if (incoming && isInjured(state, incoming.id)) {
     return { ok: false, message: `${incoming.name}은(는) 부상 중이라 투입할 수 없습니다` };
   }
-  if ((state.suspensions[input.in] ?? 0) > 0) {
+  if (isSuspended(state, input.in)) {
     return { ok: false, message: `${incoming?.name ?? input.in}은(는) 출장 정지 중입니다` };
   }
   const result = applyMatchEvents(state, [
@@ -189,7 +290,9 @@ export function substitutePlayer(
     },
   ]);
   if (result.ok) refreshPacket(state); // 교체가 존 전력에 반영되도록
-  return result.ok ? { ok: true, message: `교체 완료 — ${input.out} → ${input.in}` } : result;
+  const outName = roster.find((p) => p.id === input.out)?.name ?? input.out;
+  const inName = incoming?.name ?? input.in;
+  return result.ok ? { ok: true, message: `교체 완료 — ${outName} OUT, ${inName} IN` } : result;
 }
 
 /**
@@ -231,43 +334,61 @@ export function advanceMockSegment(
   return { ok: true, segment: remapped, message: result.message };
 }
 
+const TICKET: Record<1 | 2 | 3 | 4, number> = {
+  1: 4_500_000, 2: 3_500_000, 3: 2_500_000, 4: 1_800_000,
+};
+
 /** 경기 후 반영 — 사건은 창발, 반영은 공식 (match-sim.md §6) */
 export function finalizeMatch(state: GameState): string[] {
-  const match = state.pendingMatch;
-  if (!match) return [];
-  const { ledger, fixture } = match;
+  const pending = state.pendingMatch;
+  if (!pending) return [];
+  const match = currentMatch(state);
+  const { ledger } = pending;
   const digest: string[] = [];
   const side = userSide(state);
   const userGoals = side === "home" ? ledger.score.home : ledger.score.away;
   const oppGoals = side === "home" ? ledger.score.away : ledger.score.home;
   const outcome = userGoals > oppGoals ? "win" : userGoals === oppGoals ? "draw" : "loss";
 
-  // 결과 기록 — 저장/로드 후 pendingMatch.fixture가 사본일 수 있으므로
-  // 반드시 캘린더 원본을 찾아서 쓴다
-  const calendarFixture =
-    state.calendar.fixtures.find(
-      (f) =>
-        f.round === fixture.round && f.homeId === fixture.homeId && f.awayId === fixture.awayId,
-    ) ?? fixture;
-  calendarFixture.result = {
+  /**
+   * 그라운드를 밟은 선수 — 교체 투입·퇴장까지 포함한다.
+   * 우리 팀은 출전 기록·성장 반영에, 상대 팀은 "직접 뛰는 걸 봤다"는
+   * 스카우팅 지식(scouting.ts)의 근거로 쓰인다.
+   */
+  const participantsOf = (which: "home" | "away"): string[] => {
+    const teamId = which === "home" ? match.homeTeamId : match.awayTeamId;
+    const set = new Set(ledger[which].onPitch);
+    for (const e of ledger.events) {
+      if (e.type === "substitution" && e.team === which) {
+        for (const a of e.actors) set.add(a);
+      }
+    }
+    for (const id of ledger.sentOff) {
+      if (playerById(state, id)?.teamId === teamId) set.add(id);
+    }
+    return [...set];
+  };
+  const homeLineup = participantsOf("home");
+  const awayLineup = participantsOf("away");
+
+  // 결과를 MATCH에 기록하고 일정 엔트리를 닫는다
+  match.result = {
     homeGoals: ledger.score.home,
     awayGoals: ledger.score.away,
     scorers: ledger.events
       .filter((e) => e.type === "goal")
       .map((e) => `${e.team}:${e.actors[0] ?? "?"}`),
+    homeLineup,
+    awayLineup,
   };
+  const entry = state.schedule.find((e) => e.type === "match" && e.refId === match.id);
+  if (entry) entry.status = "done";
 
-  const team = userTeam(state);
-  const started = new Set(ledger[side === "home" ? "home" : "away"].onPitch);
-  for (const e of ledger.events) {
-    if (e.type === "substitution" && e.team === side) {
-      for (const a of e.actors) started.add(a);
-    }
-  }
-  // 퇴장 선수도 출전했다 — onPitch에서 빠졌어도 반영 누락 금지 (리뷰 발견)
-  for (const id of ledger.sentOff) {
-    if (team.players.some((p) => p.id === id)) started.add(id);
-  }
+  const roster = userPlayers(state);
+  const assignments = new Map(
+    assignmentsOf(state, state.userTeamId).map((a) => [a.playerId, a] as const),
+  );
+  const played = new Set(side === "home" ? homeLineup : awayLineup);
 
   const moraleDelta = outcome === "win" ? 4 : outcome === "draw" ? 1 : -4;
   const formDelta = outcome === "win" ? 1 : outcome === "loss" ? -1 : 0;
@@ -275,68 +396,109 @@ export function finalizeMatch(state: GameState): string[] {
     .filter((e) => e.type === "goal" && e.team === side)
     .flatMap((e) => e.actors);
 
-  for (const player of team.players) {
-    if (!started.has(player.id)) continue;
-    const stats = (state.seasonStats[player.id] ??= { goals: 0, apps: 0 });
-    stats.apps += 1;
+  for (const player of roster) {
+    if (!played.has(player.id)) continue;
+    ensureSeasonStat(state, player.id, player.teamId).apps += 1;
     player.state.fatigue = Math.min(100, player.state.fatigue + 34);
     player.state.morale = Math.max(0, Math.min(100, player.state.morale + moraleDelta));
     player.state.form = Math.max(-3, Math.min(3, player.state.form + formDelta));
+
+    // 실전이 전술 적응·포지션 적응을 끌어올린다 — 성장 로그로 남긴다
+    const assignment = assignments.get(player.id);
+    if (assignment && assignment.familiarity < 99) {
+      const before = assignment.familiarity;
+      assignment.familiarity = Math.min(99, assignment.familiarity + 8);
+      recordGrowth(state, player.id, entry?.id ?? null, "match", "tactical", assignment.familiarity - before);
+    }
+    const pos = assignment?.position ?? naturalPositionOf(player).position;
+    const slot = player.positions.find((p) => p.position === pos);
+    if (slot) {
+      if (slot.proficiency < 99) {
+        slot.proficiency = Math.min(99, slot.proficiency + 1);
+        recordGrowth(state, player.id, entry?.id ?? null, "match", `pos:${pos}`, 1, "실전 경험");
+      }
+    } else {
+      // 처음 맡은 자리 — 경험이 쌓이기 시작한다
+      player.positions.push({ position: pos, proficiency: proficiencyAt(player, pos), isNatural: false });
+      recordGrowth(state, player.id, entry?.id ?? null, "match", `pos:${pos}`, 1, "새 포지션 경험");
+    }
   }
   for (const scorerId of userScorers) {
-    const stats = (state.seasonStats[scorerId] ??= { goals: 0, apps: 0 });
-    stats.goals += 1;
-    const player = team.players.find((p) => p.id === scorerId);
-    if (player) player.state.form = Math.min(3, player.state.form + 1);
+    const player = roster.find((p) => p.id === scorerId);
+    if (!player) continue;
+    ensureSeasonStat(state, scorerId, player.teamId).goals += 1;
+    player.state.form = Math.min(3, player.state.form + 1);
   }
 
-  // 출장 정지 소화·부여 — 결장자는 1경기 차감, 이번 경기 징계는 다음 경기부터
-  for (const id of match.servingSuspension ?? []) {
-    const remaining = (state.suspensions[id] ?? 1) - 1;
-    if (remaining <= 0) delete state.suspensions[id];
-    else state.suspensions[id] = remaining;
-  }
+  // 정지 소화 — 이번 경기 결장자는 1경기 차감
+  serveSuspensions(state, pending.servingSuspension ?? []);
+
+  // 카드 → BOOKING, 누적/퇴장 → SUSPENSION
   for (const e of ledger.events) {
     if (e.team !== side || !e.actors[0]) continue;
-    const player = team.players.find((p) => p.id === e.actors[0]);
+    const player = roster.find((p) => p.id === e.actors[0]);
     if (!player) continue;
+    if (e.type !== "yellow_card" && e.type !== "red_card") continue;
+    state.bookings.push({
+      gamePlayerId: player.id,
+      matchId: match.id,
+      season: state.season,
+      card: e.type === "yellow_card" ? "yellow" : "red",
+      minute: e.minute,
+    });
     if (e.type === "yellow_card") {
-      const total = (state.seasonYellows[player.id] = (state.seasonYellows[player.id] ?? 0) + 1);
-      if (total % 5 === 0) {
-        state.suspensions[player.id] = (state.suspensions[player.id] ?? 0) + 1;
-        digest.push(`${player.name} 경고 누적 ${total}회 — 다음 경기 출장 정지 (game-loop §5)`);
+      const total = seasonYellowsOf(state, player.id, state.season);
+      if (total > 0 && total % YELLOWS_PER_SUSPENSION === 0) {
+        state.suspensions.push({
+          id: `sus-${player.id}-${match.id}`,
+          gamePlayerId: player.id,
+          cause: "yellows",
+          issuedOn: state.date,
+          lengthMatches: 1,
+          served: 0,
+          status: "active",
+        });
+        digest.push(`${player.name} 경고 누적 ${total}회 — 다음 경기 출장 정지`);
       }
-    }
-    if (e.type === "red_card") {
-      state.suspensions[player.id] = (state.suspensions[player.id] ?? 0) + 1;
+    } else {
+      state.suspensions.push({
+        id: `sus-${player.id}-${match.id}-red`,
+        gamePlayerId: player.id,
+        cause: "red",
+        issuedOn: state.date,
+        lengthMatches: 1,
+        served: 0,
+        status: "active",
+      });
       digest.push(`${player.name} 퇴장 — 다음 경기 출장 정지`);
     }
   }
 
-  // 경기 중 부상 확정 — RNG 채널에 시즌 포함 (시즌 간 난수열 중복 방지)
-  const rng = makeRng(state.seed, `injury:${state.season}:${fixture.round}`);
+  // 경기 중 부상 확정 → INJURY row
+  const rng = makeRng(state.seed, `injury:${state.season}:${match.round}`);
   for (const e of ledger.events) {
-    if (e.type === "injury" && e.team === side && e.actors[0]) {
-      const player = team.players.find((p) => p.id === e.actors[0]);
-      if (player) {
-        player.state.injury = "minor";
-        state.injuryDays[player.id] = 5 + Math.floor(rng() * 8);
-        digest.push(`부상: ${player.name}`);
-      }
-    }
+    if (e.type !== "injury" || e.team !== side || !e.actors[0]) continue;
+    const player = roster.find((p) => p.id === e.actors[0]);
+    if (!player || isInjured(state, player.id)) continue;
+    const { days, part } = openInjuryFor(state, player, "match", rng);
+    digest.push(`부상: ${player.name} — ${part}, 약 ${days}일 결장 예상`);
   }
 
-  // 재정·평판·감독 XP
-  if (side === "home") state.finance.balance += 3_500_000;
+  // 재정 — 홈 경기 입장 수입 (원장 기록)
+  if (side === "home") {
+    const tier = teamCatalogById(state.userTeamId)?.tier ?? 3;
+    recordFinance(
+      state,
+      state.userTeamId,
+      "income",
+      `홈 입장 수입 (R${match.round} vs ${teamShortName(match.awayTeamId)})`,
+      TICKET[tier],
+    );
+  }
+
   const repDelta = outcome === "win" ? 2 : outcome === "loss" ? -2 : 0;
-  state.manager.reputation.board = Math.max(
-    0,
-    Math.min(100, state.manager.reputation.board + repDelta),
-  );
-  state.manager.reputation.squad = Math.max(
-    0,
-    Math.min(100, state.manager.reputation.squad + repDelta),
-  );
+  state.manager.reputation.board = Math.max(0, Math.min(100, state.manager.reputation.board + repDelta));
+  state.manager.reputation.squad = Math.max(0, Math.min(100, state.manager.reputation.squad + repDelta));
 
   const messages: string[] = [];
   if (outcome === "win") {
@@ -351,12 +513,12 @@ export function finalizeMatch(state: GameState): string[] {
     if (msg) messages.push(msg);
   }
 
-  const opponentId = side === "home" ? fixture.awayId : fixture.homeId;
+  const opponentId = side === "home" ? match.awayTeamId : match.homeTeamId;
   const scoreline = `${ledger.score.home}:${ledger.score.away}`;
   const outcomeKo = outcome === "win" ? "승리" : outcome === "draw" ? "무승부" : "패배";
   pushNarrative(
     state,
-    `R${fixture.round} vs ${teamById(state, opponentId).name} ${scoreline} ${outcomeKo}`,
+    `R${match.round} vs ${teamName(opponentId)} ${scoreline} ${outcomeKo}`,
     outcome === "win" ? 4 : 3,
   );
   digest.push(`최종 스코어 ${scoreline} — ${outcomeKo}`, ...messages);
@@ -365,3 +527,5 @@ export function finalizeMatch(state: GameState): string[] {
   state.pendingMatch = null;
   return digest;
 }
+
+export { activeSuspension, type TacticAssignment };
