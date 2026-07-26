@@ -31,7 +31,7 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
     const loaded = loadGame(state.id);
     expect(loaded).not.toBeNull();
     expect(loaded?.season).toBe(3);
-    expect(loaded?.teams.length).toBe(20);
+    expect(loaded?.teams.length).toBe(96);
   });
 
   it("저장 시 직전 세이브를 .bak으로 백업한다", () => {

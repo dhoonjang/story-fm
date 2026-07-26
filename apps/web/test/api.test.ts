@@ -43,7 +43,7 @@ describe("API — 온보딩부터 경기까지", () => {
   it("팀 카탈로그와 게임 목록을 제공한다", async () => {
     const res = getCatalog();
     const data = await res.json();
-    expect(data.teams).toHaveLength(20);
+    expect(data.teams).toHaveLength(96);
     expect(Array.isArray(data.games)).toBe(true);
   });
 
@@ -231,7 +231,7 @@ describe("API — 온보딩부터 경기까지", () => {
       edited: boolean;
       ageRef: string;
     };
-    expect(list.teams).toHaveLength(20);
+    expect(list.teams).toHaveLength(96);
     expect(list.ageRef).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     const row = list.teams[0]!.players[0]!;
     expect(row.overall).toBeGreaterThan(0); // 파생값 동행

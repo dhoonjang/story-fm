@@ -57,11 +57,13 @@ export function saveGame(state: GameState): void {
 }
 
 /**
- * 세이브 스키마 버전 — v6 정규화(카탈로그/게임 분리, 일정 축, 기록 테이블)로
- * 전면 개편되어 이전 포맷과 호환되지 않는다. 구버전 세이브는 로드를 거부하고
- * 목록에서 건너뛴다 (부분 마이그레이션이 조용히 깨진 상태를 만드는 것보다 낫다).
+ * 세이브 스키마 버전.
+ * 2 = v6 정규화(카탈로그/게임 분리, 일정 축, 기록 테이블)
+ * 3 = 다중 리그 (MATCH.competitionId, 리그별 순위표)
+ * 구버전 세이브는 로드를 거부하고 목록에서 건너뛴다 — 부분 마이그레이션이
+ * 조용히 깨진 상태를 만드는 것보다 낫다.
  */
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 /** 로드 시 버전·필수 필드 검사. 통과하지 못하면 null (목록에서 스킵) */
 function validate(raw: unknown): GameState | null {

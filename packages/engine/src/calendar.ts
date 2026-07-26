@@ -1,4 +1,6 @@
 import type { MatchRecord, ScheduleEntry, TransferWindow } from "@story-fm/domain";
+import { LEAGUE_CATALOG } from "./data/league-catalog";
+import { teamsOfLeague } from "./data/team-catalog";
 import { makeRng } from "./rng";
 
 /**
@@ -314,11 +316,31 @@ function shuffled<T>(items: readonly T[], seed: number, channel: string): T[] {
  * seed를 주면 세이브·시즌마다 대진이 달라진다. 팀 순서를 고정하면 모든 게임이
  * 매 시즌 똑같은 대진표를 쓰게 된다 — 실제 리그도 시즌마다 새로 추첨한다.
  */
-export function buildMatches(season: number, teamIds: string[], seed = 0): MatchRecord[] {
+/**
+ * 라운드 수에 맞춘 기준 날짜 — 18팀 리그는 34라운드다.
+ * 모자란 만큼 **주중 라운드부터** 덜어낸다 (18팀 리그는 휴식기를 메울 필요가
+ * 적다). 개막 라운드와 최종 라운드는 항상 유지한다.
+ */
+function anchorsFor(season: number, rounds: number): Matchweek[] {
+  const keep = [...buildMatchweekDates(season)];
+  for (const kind of ["midweek", "weekend"] as const) {
+    for (let i = keep.length - 2; i > 0 && keep.length > rounds; i--) {
+      if (keep[i]!.kind === kind) keep.splice(i, 1);
+    }
+  }
+  return keep.slice(0, rounds).map((w, i) => ({ ...w, round: i + 1 }));
+}
+
+export function buildMatches(
+  season: number,
+  teamIds: string[],
+  seed = 0,
+  competitionId = "epl",
+): MatchRecord[] {
   const n = teamIds.length;
   if (n % 2 !== 0) throw new Error("팀 수는 짝수여야 합니다");
-  const weeks = buildMatchweekDates(season);
-  const first = firstHalfPairs(shuffled(teamIds, seed, `fixtures:${season}`));
+  const weeks = anchorsFor(season, (n - 1) * 2);
+  const first = firstHalfPairs(shuffled(teamIds, seed, `fixtures:${season}:${competitionId}`));
   const half = first.length; // n - 1
 
   // 후반기 순서 — 20팀은 탐색으로 찾은 배열, 그 외는 절반 회전으로 대체
@@ -337,8 +359,9 @@ export function buildMatches(season: number, teamIds: string[], seed = 0): Match
     const week = weeks[r]!;
     pairs.forEach(([homeTeamId, awayTeamId], i) => {
       matches.push({
-        id: `m-${season}-${week.round}-${homeTeamId}`,
+        id: `m-${competitionId}-${season}-${week.round}-${homeTeamId}`,
         season,
+        competitionId,
         round: week.round,
         date: slotFor(week, i).date,
         homeTeamId,
@@ -370,6 +393,20 @@ export function slotFor(week: Matchweek, indexInRound: number): { date: string; 
   );
   const [offset, time] = slots[order[indexInRound % slots.length]!]!;
   return { date: addDays(week.date, offset), time };
+}
+
+/**
+ * 전 리그 일정 — 리그마다 자체 대회 일정을 갖는다 (20팀 38라운드, 18팀 34라운드).
+ * 같은 캘린더 골격을 공유하므로 A매치 휴식기·박싱데이가 리그를 가로질러 맞는다.
+ */
+export function buildAllLeagueMatches(season: number, seed: number): MatchRecord[] {
+  const out: MatchRecord[] = [];
+  for (const league of LEAGUE_CATALOG) {
+    const teamIds = teamsOfLeague(league.id).map((t) => t.id);
+    if (teamIds.length < 2) continue;
+    out.push(...buildMatches(season, teamIds, seed, league.id));
+  }
+  return out;
 }
 
 /** 경기·이적창 일정 엔트리 생성 — 훈련 엔트리는 스킬이 따로 만든다 */

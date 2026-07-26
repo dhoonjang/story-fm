@@ -44,6 +44,11 @@ export type MatchResult = z.infer<typeof MatchResultSchema>;
 export const MatchRecordSchema = z.object({
   id: z.string().min(1),
   season: z.number().int(),
+  /**
+   * 소속 대회 — 리그 id(league-catalog) 또는 컵 대회 id.
+   * 순위표는 대회별로 따로 계산되고, 여러 리그가 동시에 진행된다.
+   */
+  competitionId: z.string().min(1),
   round: z.number().int().min(1),
   date: DateString,
   homeTeamId: z.string().min(1),

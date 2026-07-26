@@ -1,6 +1,7 @@
 export * from "./rng";
 export * from "./paths";
 export * from "./data/team-catalog";
+export * from "./data/league-catalog";
 export * from "./catalog";
 export * from "./generate";
 export * from "./calendar";

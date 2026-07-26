@@ -35,14 +35,14 @@ import {
 } from "@story-fm/domain";
 import type { MatchLedgerState } from "@story-fm/sim";
 import {
-  buildMatches,
+  buildAllLeagueMatches,
   buildScheduleEntries,
   buildSeasonCalendar,
   buildTransferWindows,
   type SeasonCalendar,
 } from "./calendar";
 import { overallFor, playerCatalog } from "./catalog";
-import { TEAM_CATALOG, teamCatalogById } from "./data/team-catalog";
+import { TEAM_CATALOG, leagueOfTeam, teamCatalogById } from "./data/team-catalog";
 import { makeRng, randInt } from "./rng";
 
 /** 채팅 턴 — 도구 호출 기록 포함 (UI가 스킬 칩으로 렌더) */
@@ -562,8 +562,16 @@ export function createGame(input: CreateGameInput): GameState {
 
   // 일정 — 경기 380 + 이적창 개장/폐장
   const windows = buildTransferWindows(season);
-  const matches = buildMatches(season, teams.map((t) => t.id), seed);
-  const schedule = buildScheduleEntries(matches, windows, input.userTeamId);
+  // 전 리그 일정 — 다른 리그도 같은 캘린더 골격으로 동시에 진행된다
+  const matches = buildAllLeagueMatches(season, seed);
+  // 일정 축(SCHEDULE_ENTRY)은 **감독의 달력**이다 — 유저 대회 경기만 등록한다.
+  // 타 리그 경기는 state.matches에만 있고 tick이 간이 시뮬로 소화한다.
+  const userLeague = leagueOfTeam(input.userTeamId);
+  const schedule = buildScheduleEntries(
+    matches.filter((m) => m.competitionId === userLeague),
+    windows,
+    input.userTeamId,
+  );
   // 게임은 여름 창이 열린 7/1에 시작한다 — 그 개장 엔트리는 이미 소화된 상태
   for (const entry of schedule) {
     if (entry.type === "window-open" && entry.date === calendar.preseasonStart) {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GamePlayerSchema, TeamTacticsSchema, naturalPositionOf } from "@story-fm/domain";
 import {
-  TEAM_CATALOG,
+  teamsOfLeague,
   buildMatches,
   buildTransferWindows,
   interpretBackgroundHeuristic,
@@ -17,9 +17,9 @@ import { createTestGame } from "./helpers";
 describe("선수 카탈로그 (불변 초기치 DB)", () => {
   const catalog = playerCatalog();
 
-  it("20팀 · 600명+ · 전역 id 유일", () => {
-    expect(new Set(catalog.map((e) => e.teamId)).size).toBe(20);
-    expect(catalog.length).toBeGreaterThanOrEqual(600);
+  it("5대 리그 96팀 · 3,800명+ · 전역 id 유일", () => {
+    expect(new Set(catalog.map((e) => e.teamId)).size).toBe(96);
+    expect(catalog.length).toBeGreaterThanOrEqual(3800);
     expect(new Set(catalog.map((e) => e.id)).size).toBe(catalog.length);
   });
 
@@ -72,15 +72,18 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
     expect(state.calendar.start.startsWith("2026-08")).toBe(true);
     expect(new Date(`${state.calendar.start}T00:00:00Z`).getUTCDay()).toBe(5);
     // 개막일에 정확히 1경기 — 나머지 라운드는 주말에 흩어진다
-    const openerDay = state.matches.filter((m) => m.date === state.calendar.start);
+    // 리그마다 금요일 개막전이 1경기씩 (5개 리그 = 5경기)
+    const openerDay = state.matches.filter(
+      (m) => m.date === state.calendar.start && m.competitionId === "epl",
+    );
     expect(openerDay).toHaveLength(1);
   });
 
   it("팀·선수·전술·재정·계약이 인스턴스화된다", () => {
-    expect(state.teams).toHaveLength(20);
-    expect(state.players.length).toBeGreaterThanOrEqual(600);
-    expect(state.tactics).toHaveLength(20);
-    expect(state.finances).toHaveLength(20);
+    expect(state.teams).toHaveLength(96);
+    expect(state.players.length).toBeGreaterThanOrEqual(3800);
+    expect(state.tactics).toHaveLength(96);
+    expect(state.finances).toHaveLength(96);
     expect(state.contracts).toHaveLength(state.players.length);
     for (const p of state.players) {
       expect(() => GamePlayerSchema.parse(p)).not.toThrow();
@@ -134,13 +137,13 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
       const roster = playersOf(state, id);
       return roster.reduce((s, p) => s + p.attributes.overall, 0) / roster.length;
     };
-    expect(avg("arsenal")).toBeGreaterThan(avg("southampton") + 3);
+    expect(avg("arsenal")).toBeGreaterThan(avg("hull") + 3);
   });
 });
 
 describe("시즌 일정 (일정 축)", () => {
   it("38라운드 더블 라운드로빈 — 팀당 38경기, 홈 19 어웨이 19", () => {
-    const ids = TEAM_CATALOG.map((t) => t.id);
+    const ids = teamsOfLeague("epl").map((t) => t.id);
     const matches = buildMatches(1, ids);
     expect(matches).toHaveLength(380);
     for (const id of ids) {

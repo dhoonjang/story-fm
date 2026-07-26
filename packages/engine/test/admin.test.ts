@@ -37,10 +37,10 @@ afterEach(() => {
 });
 
 describe("카탈로그 조회", () => {
-  it("20팀 · 600명+ · 파생값(나이·OVR·주 포지션)을 함께 준다", () => {
+  it("96팀 · 3,800명+ · 파생값(나이·OVR·주 포지션)을 함께 준다", () => {
     const teams = adminCatalog();
-    expect(teams).toHaveLength(20);
-    expect(teams.reduce((s, t) => s + t.players.length, 0)).toBeGreaterThanOrEqual(600);
+    expect(teams).toHaveLength(96);
+    expect(teams.reduce((s, t) => s + t.players.length, 0)).toBeGreaterThanOrEqual(3800);
     const row = teams[0]!.players[0]!;
     expect(row.age).toBe(ageOf(row.birthdate, CATALOG_AGE_REF));
     expect(row.overall).toBeGreaterThan(0);

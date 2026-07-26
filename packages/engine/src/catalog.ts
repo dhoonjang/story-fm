@@ -126,24 +126,42 @@ export function slugifyName(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-/** 절차 생성 폴백 스쿼드 템플릿 — 시드 데이터가 없는 팀용 (18인) */
+/**
+ * 절차 생성 스쿼드 구성 — **1군 28명 + 아카데미 14명 = 42명**.
+ *
+ * 클럽당 최소 40명을 채운다. 앞 28명이 1군(포지션별 주전+백업)이고, 뒤 14명은
+ * 유망주 자리다 — 실선수 시드가 들어와도 아카데미는 계속 합성 가명으로 채운다
+ * (실존 유소년에게 가상 서사를 입히지 않는다는 결정, narrative.md §7).
+ */
 const FALLBACK_TEMPLATE: string[] = [
-  "GK", "GK",
-  "RB", "RCB", "CB", "LCB", "LB", "RWB",
-  "DM", "CDM", "RCM", "CM", "LCM", "AM",
-  "RW", "ST", "LW", "CF",
+  // 1군 28명 — GK 3, DF 9, MF 10, FW 6
+  "GK", "GK", "GK",
+  "RB", "RB", "RCB", "CB", "CB", "LCB", "LB", "LB", "RWB",
+  "DM", "CDM", "CDM", "RCM", "CM", "CM", "LCM", "AM", "CAM", "RM",
+  "RW", "RW", "ST", "ST", "LW", "CF",
+  // 아카데미 14명 — 어린 자원, 포지션은 넓게
+  "GK", "RB", "CB", "LCB", "LB",
+  "DM", "CM", "CM", "AM", "LM",
+  "RW", "LW", "ST", "CF",
 ];
 
+/** 아카데미로 취급하는 인덱스 시작점 (나이 하한이 낮고 잠재력 폭이 크다) */
+const ACADEMY_FROM = 28;
+
 function fallbackEntries(teamId: string, tier: 1 | 2 | 3 | 4): PlayerCatalogEntry[] {
-  const base = TIER_BASE[tier];
+  const tierBase = TIER_BASE[tier];
   return FALLBACK_TEMPLATE.map((position, i) => {
     const rng = makeRng(hashOf(`${teamId}:${i}`), `catalog:${teamId}:${i}`);
     const group = positionGroupOf(position) ?? "MF";
     const nameEn = `${pick(rng, FIRST_NAMES)} ${pick(rng, LAST_NAMES)}`;
+    // 아카데미는 1군보다 한참 낮게 출발한다 (잠재력은 아래에서 크게 잡는다)
+    const base = i >= ACADEMY_FROM ? tierBase - randInt(rng, 12, 20) : tierBase;
     const v = (d = 6) => clamp99(base + randInt(rng, -d, d));
     const strong = () => clamp99(base + randInt(rng, 0, 8));
     const weak = () => clamp99(base + randInt(rng, -18, -8));
-    const age = randInt(rng, 18, 33);
+    // 아카데미 자원은 어리고, 능력치는 낮지만 잠재력 폭이 크다
+    const academy = i >= ACADEMY_FROM;
+    const age = academy ? randInt(rng, 16, 20) : randInt(rng, 19, 33);
     const attrs =
       group === "GK"
         ? { pace: weak(), shooting: weak(), passing: v(), dribbling: weak(), defending: v(), physical: v(), goalkeeping: strong() }
@@ -166,7 +184,8 @@ function fallbackEntries(teamId: string, tier: 1 | 2 | 3 | 4): PlayerCatalogEntr
       defending: attrs.defending,
       physical: attrs.physical,
       goalkeeping: group === "GK" ? attrs.goalkeeping : derivedGoalkeeping(nameEn, attrs.physical),
-      potential: clamp99(base + randInt(rng, 2, 14)),
+      // 아카데미는 잠재력 폭이 크다 — 유스 발굴의 재미가 여기서 나온다
+      potential: clamp99(base + (academy ? randInt(rng, 8, 28) : randInt(rng, 2, 14))),
     } satisfies PlayerCatalogEntry;
   });
 }

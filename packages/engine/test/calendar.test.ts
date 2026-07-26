@@ -8,7 +8,7 @@ import {
   buildTransferWindows,
   dayOfWeek,
   diffDays,
-  TEAM_CATALOG,
+  teamsOfLeague,
 } from "@story-fm/engine";
 import type { MatchRecord } from "@story-fm/domain";
 import { createTestGame } from "./helpers";
@@ -18,7 +18,8 @@ import { createTestGame } from "./helpers";
  * 여기 불변식이 깨지면 "매주 기계적으로 도는 가짜 일정"으로 되돌아간 것이다.
  */
 
-const ids = TEAM_CATALOG.map((t) => t.id);
+// 캘린더 테스트는 EPL 한 리그만 본다 (리그마다 자체 일정을 갖는다)
+const ids = teamsOfLeague("epl").map((t) => t.id);
 const DOW_KO = ["일", "월", "화", "수", "목", "금", "토"];
 
 /** 팀의 경기를 날짜순으로 */
@@ -191,7 +192,7 @@ describe("중계 슬롯", () => {
   });
 
   it("주말 라운드는 금~월에 흩어진다", () => {
-    const round2 = matchEntries.filter((e) => e.refId.startsWith("m-1-2-"));
+    const round2 = matchEntries.filter((e) => e.refId.startsWith("m-epl-1-2-"));
     const dows = new Set(round2.map((e) => DOW_KO[dayOfWeek(e.date)]));
     expect(dows.size).toBeGreaterThanOrEqual(3);
   });

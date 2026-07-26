@@ -59,7 +59,8 @@ describe("advance_time — 시간은 스킬로만 흐른다 (game-loop §3)", ()
     const others = round1.filter(
       (m) => m.homeTeamId !== state.userTeamId && m.awayTeamId !== state.userTeamId,
     );
-    expect(others.length).toBe(9);
+    // 유저 리그(EPL)의 나머지 9경기 — 다른 리그 경기도 같은 날 함께 시뮬된다
+    expect(others.filter((m) => m.competitionId === "epl").length).toBe(9);
     for (const m of others) {
       if (m.date <= state.date) expect(m.result).not.toBeNull();
     }

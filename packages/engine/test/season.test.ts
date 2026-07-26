@@ -31,7 +31,7 @@ describe("간이 시뮬 분포 (결정 #5) — 전력이 결과에 반영된다"
   it("강팀이 약팀을 상대로 다수 표본에서 우세하다", () => {
     const state = createTestGame(3);
     const strong = simSquad(state, "mancity");
-    const weak = simSquad(state, "southampton");
+    const weak = simSquad(state, "hull");
     let strongWins = 0;
     let weakWins = 0;
     for (let i = 0; i < 200; i++) {
