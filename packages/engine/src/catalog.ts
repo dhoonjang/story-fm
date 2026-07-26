@@ -149,8 +149,53 @@ const FALLBACK_TEMPLATE: string[] = [
 /** 아카데미로 취급하는 인덱스 시작점 (나이 하한이 낮고 잠재력 폭이 크다) */
 const ACADEMY_FROM = 28;
 
-/** 클럽당 최소 스쿼드 인원 — 실선수 시드가 모자라면 합성 아카데미로 채운다 */
+/** 클럽당 최소 스쿼드 인원 — 실선수 시드가 모자라면 합성 선수로 채운다 */
 export const MIN_SQUAD = 40;
+
+/** 포지션군 목표 인원 — 시드가 모자랄 때 **어느 자리를** 메울지 정한다 */
+const GROUP_TARGET: Record<PositionGroup, number> = { GK: 3, DF: 9, MF: 9, FW: 5 };
+
+/** 템플릿 각 자리의 포지션군 (보충 대상 선택용) */
+const TEMPLATE_GROUPS: PositionGroup[] = FALLBACK_TEMPLATE.map(
+  (p) => positionGroupOf(p) ?? "MF",
+);
+
+/**
+ * 하한 보충 — 실선수 시드가 MIN_SQUAD에 못 미칠 때 합성 선수를 붙인다.
+ *
+ * 순서가 중요하다. 실제 1군이 얇은 클럽(예: 브레스트 21명)에 아카데미만 붙이면
+ * 센터백 2명으로 시즌을 시작하게 된다. 그래서 **부족한 포지션군을 1군급으로 먼저**
+ * 메우고, 남는 자리를 아카데미로 채운다.
+ */
+function topUpEntries(
+  teamId: string,
+  tier: 1 | 2 | 3 | 4,
+  seeds: readonly RealPlayerSeed[],
+): PlayerCatalogEntry[] {
+  const short = MIN_SQUAD - seeds.length;
+  if (short <= 0) return [];
+  const all = fallbackEntries(teamId, tier);
+  const have: Record<string, number> = { GK: 0, DF: 0, MF: 0, FW: 0 };
+  for (const s of seeds) have[s.positionGroup] = (have[s.positionGroup] ?? 0) + 1;
+
+  const out: PlayerCatalogEntry[] = [];
+  const used = new Set<number>();
+  // ① 부족한 포지션군을 1군급으로 (뒤쪽 = 로테이션 자리부터 가져온다)
+  for (let i = ACADEMY_FROM - 1; i >= 0 && out.length < short; i--) {
+    const g = TEMPLATE_GROUPS[i]!;
+    if ((have[g] ?? 0) >= GROUP_TARGET[g]) continue;
+    have[g] = (have[g] ?? 0) + 1;
+    used.add(i);
+    out.push(all[i]!);
+  }
+  // ② 나머지는 아카데미 유망주로
+  for (let i = ACADEMY_FROM; i < all.length && out.length < short; i++) out.push(all[i]!);
+  // ③ 그래도 모자라면 남은 1군급으로
+  for (let i = 0; i < ACADEMY_FROM && out.length < short; i++) {
+    if (!used.has(i)) out.push(all[i]!);
+  }
+  return out;
+}
 
 function fallbackEntries(teamId: string, tier: 1 | 2 | 3 | 4): PlayerCatalogEntry[] {
   const tierBase = TIER_BASE[tier];
@@ -212,14 +257,9 @@ function buildFromSeed(): PlayerCatalogEntry[] {
         used.add(slug);
         entries.push(entryFromSeed(team.id, s, slug));
       }
-      // 실선수 1군이 하한에 못 미치면 합성 아카데미로 보충한다.
+      // 실선수 1군이 하한에 못 미치면 합성 선수로 보충한다.
       // 유소년은 실명을 쓰지 않는 결정(narrative.md §7)과도 맞는 방향이다.
-      const short = MIN_SQUAD - seeds.length;
-      if (short > 0) {
-        entries.push(
-          ...fallbackEntries(team.id, team.tier).slice(ACADEMY_FROM, ACADEMY_FROM + short),
-        );
-      }
+      entries.push(...topUpEntries(team.id, team.tier, seeds));
     } else {
       entries.push(...fallbackEntries(team.id, team.tier));
     }
