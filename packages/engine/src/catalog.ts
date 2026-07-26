@@ -3,6 +3,7 @@ import type { PlayerCatalogEntry, PlayerPosition, PositionGroup } from "@story-f
 import { positionGroupOf } from "@story-fm/domain";
 import { catalogPath, dataDir } from "./paths";
 import { REAL_SQUADS, type RealPlayerSeed } from "./data/epl-players";
+import { EU_SQUADS } from "./data/eu-squads";
 import { TEAM_CATALOG, TIER_BASE } from "./data/team-catalog";
 import { FIRST_NAMES, LAST_NAMES } from "./data/names";
 import { makeRng, pick, randInt } from "./rng";
@@ -194,10 +195,13 @@ function fallbackEntries(teamId: string, tier: 1 | 2 | 3 | 4): PlayerCatalogEntr
 }
 
 /** 시드에서 파생한 기본 카탈로그 (결정적) */
+/** 실선수 스쿼드 — EPL + 유럽 4대 리그. 시드가 없는 클럽은 절차 생성으로 채운다 */
+const ALL_SQUADS: Record<string, readonly RealPlayerSeed[]> = { ...REAL_SQUADS, ...EU_SQUADS };
+
 function buildFromSeed(): PlayerCatalogEntry[] {
   const entries: PlayerCatalogEntry[] = [];
   for (const team of TEAM_CATALOG) {
-    const seeds = REAL_SQUADS[team.id];
+    const seeds = ALL_SQUADS[team.id];
     if (seeds && seeds.length > 0) {
       const used = new Set<string>();
       for (const s of seeds) {
