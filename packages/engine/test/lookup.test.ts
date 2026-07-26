@@ -17,10 +17,21 @@ import { createTestGame } from "./helpers";
  * 가장 중요한 검증: **타 팀 선수의 참값 수치가 새어나가지 않는다.**
  */
 
-/** 결과 문자열에 그 선수의 참값 능력치 숫자가 들어 있는가 */
-function leaksTrueRatings(message: string, attrs: Record<string, number>): boolean {
+/**
+ * 그 선수 행에 참값 능력치가 새어나갔는가 — 나이·출전·득점처럼 **공개해도 되는**
+ * 숫자는 먼저 지우고 남은 숫자만 본다 (안 지우면 나이와 능력치가 우연히 겹쳐 오탐).
+ */
+function leaksTrueRatings(message: string, playerId: string, attrs: Record<string, number>): boolean {
+  const row = message.split("\n").find((l) => l.includes(playerId));
+  if (!row) return false;
+  const scrubbed = row
+    .replace(new RegExp(playerId, "g"), "")
+    .replace(/\d+세/g, "")
+    .replace(/출전\d+/g, "")
+    .replace(/득점\d+/g, "")
+    .replace(/~\d{4}-\d{2}-\d{2}/g, "");
   const keys = ["pace", "shooting", "passing", "dribbling", "defending", "physical"] as const;
-  return keys.some((k) => new RegExp(`\\b${attrs[k]}\\b`).test(message));
+  return keys.some((k) => new RegExp(`\\b${attrs[k]}\\b`).test(scrubbed));
 }
 
 describe("search_players", () => {
@@ -38,7 +49,7 @@ describe("search_players", () => {
     const res = searchPlayers(state, { team: "chelsea", limit: 15 });
     expect(res.ok).toBe(true);
     expect(res.message).not.toMatch(/OVR\d+/);
-    expect(leaksTrueRatings(res.message, target.attributes)).toBe(false);
+    expect(leaksTrueRatings(res.message, target.id, target.attributes)).toBe(false);
   });
 
   it("포지션·나이·이름 필터와 상한이 걸린다", () => {
@@ -83,7 +94,7 @@ describe("get_player", () => {
     expect(res.message).toContain("오차");
     expect(res.message).toContain("강점");
     expect(res.message).not.toContain("POT");
-    expect(leaksTrueRatings(res.message, other.attributes)).toBe(false);
+    expect(leaksTrueRatings(res.message, other.id, other.attributes)).toBe(false);
   });
 
   it("스카우팅을 마치면 같은 선수가 정확한 수치로 바뀐다", () => {

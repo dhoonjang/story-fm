@@ -148,6 +148,9 @@ const FALLBACK_TEMPLATE: string[] = [
 /** 아카데미로 취급하는 인덱스 시작점 (나이 하한이 낮고 잠재력 폭이 크다) */
 const ACADEMY_FROM = 28;
 
+/** 클럽당 최소 스쿼드 인원 — 실선수 시드가 모자라면 합성 아카데미로 채운다 */
+export const MIN_SQUAD = 40;
+
 function fallbackEntries(teamId: string, tier: 1 | 2 | 3 | 4): PlayerCatalogEntry[] {
   const tierBase = TIER_BASE[tier];
   return FALLBACK_TEMPLATE.map((position, i) => {
@@ -204,6 +207,14 @@ function buildFromSeed(): PlayerCatalogEntry[] {
         while (used.has(slug)) slug = `${slugifyName(s.nameEn)}-${n++}`;
         used.add(slug);
         entries.push(entryFromSeed(team.id, s, slug));
+      }
+      // 실선수 1군이 하한에 못 미치면 합성 아카데미로 보충한다.
+      // 유소년은 실명을 쓰지 않는 결정(narrative.md §7)과도 맞는 방향이다.
+      const short = MIN_SQUAD - seeds.length;
+      if (short > 0) {
+        entries.push(
+          ...fallbackEntries(team.id, team.tier).slice(ACADEMY_FROM, ACADEMY_FROM + short),
+        );
       }
     } else {
       entries.push(...fallbackEntries(team.id, team.tier));
