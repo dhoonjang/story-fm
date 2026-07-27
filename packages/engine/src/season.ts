@@ -128,6 +128,17 @@ export function allMatchesDone(state: GameState): boolean {
     .every((m) => m.result !== null);
 }
 
+/**
+ * 시즌 예산 보충 (£) — 등급별. 실측 순이익(tier 1 +£40M · 2 +£35M · 3 −£15M ·
+ * 4 −£9M)과 같은 자리에 둔다. 큰 영입은 여기에 **판매 대금**을 얹어야 가능하다.
+ */
+export const SEASON_BUDGET_TOPUP: Record<number, number> = {
+  1: 45_000_000,
+  2: 30_000_000,
+  3: 18_000_000,
+  4: 12_000_000,
+};
+
 /** 보드 기대치 — 팀 tier가 난이도를 만든다 (game-loop §1) */
 function boardExpectation(teamId: string): { target: number; label: string } {
   const tier = teamCatalogById(teamId)?.tier ?? 3;
@@ -420,8 +431,11 @@ export function transitionSeason(state: GameState): string[] {
   for (const s of state.suspensions) if (s.status === "active") s.status = "done";
   state.phase = "idle";
   state.pendingMatch = null;
+  // 이적 예산 보충 — 등급별. 일률 £15M이면 시즌 2부터 68~72 OVR밖에 못 사서
+  // 이적 루프가 첫 여름 이후 죽는다. 등급별 순이익과 같은 자리에 뒀다
+  // (docs/decisions/0002-transfer-market-balance.md). 나머지는 선수 판매로 만든다.
   for (const finance of state.finances) {
-    finance.transferBudget += 15_000_000;
+    finance.transferBudget += SEASON_BUDGET_TOPUP[teamCatalogById(finance.teamId)?.tier ?? 3] ?? 0;
   }
 
   digest.push(
