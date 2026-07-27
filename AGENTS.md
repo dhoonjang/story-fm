@@ -207,7 +207,8 @@ packages/
   본선 → 결승까지 2차전제(합계 득점, 같으면 승부차기)로 진행된다. 결승은 중립
   단판. 대진은 미리 못 짜므로 **직전 단계가 끝나면 다음 단계를 편성하는** 진행형
   상태 기계다(`advanceEuroKnockouts`). 우승·트로피는 시즌 리뷰가 확정한다.
-  상금은 아직 없다.
+  상금은 참가비·승무 수당·단계 진출·우승으로 나뉘고 중복 지급은 원장 항목명으로
+  막는다 (금액은 `CupCatalogEntry.prize` — 밸런스 임시값).
 - **이적·계약** — `TRANSFER`가 이적·임대·자유·유스 콜업·은퇴까지 모든 팀 변경을
   기록하는 원장(`GAME_PLAYER.teamId`는 현재값일 뿐). `CONTRACT`가 주급의
   원본이고, 팀 주급 총액은 활성 계약의 합(파생).
@@ -229,7 +230,7 @@ ERD와 설계 근거는 docs/design/implementation-notes.md에 정리했다.
 - `apps/web` — Next.js 채팅 UI + 오피스 뷰(스쿼드 전술판·달력·재정·순위·커리어)
   + API + `/admin` **선수 카탈로그 편집** (게임과 무관한 초기치 DB — 편집은 새 게임에만
   반영되고 진행 중 세이브는 영향 없음)
-- 테스트: Vitest 258 (유닛·API 통합) + Playwright e2e 3. `pnpm test` / `pnpm e2e`
+- 테스트: Vitest 265 (유닛·API 통합) + Playwright e2e 3. `pnpm test` / `pnpm e2e`
 
 ### LLM 입력 (요약 — 상세는 docs/design/llm-io.md)
 
@@ -258,8 +259,7 @@ ERD와 설계 근거는 docs/design/implementation-notes.md에 정리했다.
 (`SAVE_VERSION=2` 미달 파일은 목록에서 스킵). 구조 변경 시 `.data` 초기화가
 필요하면 사용자에게 먼저 확인한다.
 
-미구현(다음 마일스톤): **대항전 상금**(녹아웃·트로피까지 구현됨),
-**이적·계약 협상 스킬**(v6 구조는 준비됨 — TRANSFER에 status를 얹으면 오퍼/합의
+미구현(다음 마일스톤): **이적·계약 협상 스킬**(v6 구조는 준비됨 — TRANSFER에 status를 얹으면 오퍼/합의
 흐름이 된다. 스카우팅으로 "누구를 노릴지"까지는 이미 가능하다), 미디어·보드,
 페르소나 시스템, 서사 아크, 토큰 예산 상한
 — docs/design/implementation-notes.md 참고.

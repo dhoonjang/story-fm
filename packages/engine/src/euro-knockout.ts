@@ -9,6 +9,7 @@ import {
   type CupCatalogEntry,
 } from "./data/cup-catalog";
 import { knockoutDates } from "./europe";
+import { payLeaguePhasePrizes, payStagePrizes } from "./euro-prize";
 import { makeRng } from "./rng";
 import { playersOf, pushNarrative, teamName, teamShortName, type GameState } from "./state";
 import { computeStandings } from "./season";
@@ -214,6 +215,7 @@ function createStage(
   });
   state.matches.push(...created);
   registerUserEntries(state, created);
+  payStagePrizes(state, cup.id, stage, pairs.flat(), digest);
 
   const short = competitionShortName(cup.id);
   const label = stageLabel(stage, 1, false);
@@ -281,6 +283,8 @@ function pairUp(teams: string[]): Array<[string, string]> {
 export function advanceEuroKnockouts(state: GameState, digest: string[]): void {
   for (const cup of CUP_CATALOG) {
     if (!euroLeaguePhaseDone(state, cup.id)) continue;
+    // 참가비·승무 수당 — 리그 페이즈가 끝나면 한 번에 정산된다
+    payLeaguePhasePrizes(state, cup.id, digest);
     const stages = knockoutStages(cup);
     const seeds = leaguePhaseSeeds(state, cup.id);
     let previousWinners: string[] | null = null;

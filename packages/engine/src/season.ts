@@ -10,6 +10,7 @@ import { TEAM_CATALOG, leagueOfTeam, teamCatalogById } from "./data/team-catalog
 import { CUP_CATALOG, competitionShortName, isCup } from "./data/cup-catalog";
 import { leagueName } from "./data/league-catalog";
 import { euroChampion, euroStageMatches } from "./euro-knockout";
+import { payWinnerPrize } from "./euro-prize";
 import { europeanEntrants } from "./europe";
 import { buildSeasonFixtures, isUserFixture } from "./fixtures";
 import { generateYouthPlayer } from "./generate";
@@ -170,6 +171,7 @@ function reviewEuropeanCampaign(state: GameState): string[] {
   for (const cup of CUP_CATALOG) {
     const champion = euroChampion(state, cup.id);
     if (!champion) continue;
+    payWinnerPrize(state, cup.id, champion, digest);
     const finalMatch = euroStageMatches(state, cup.id, "final")[0];
     const ours =
       finalMatch !== undefined &&

@@ -11,6 +11,7 @@ export * from "./scouting";
 export * from "./lookup";
 export * from "./europe";
 export * from "./euro-knockout";
+export * from "./euro-prize";
 export * from "./fixtures";
 export * from "./onboarding";
 export * from "./quick-sim";

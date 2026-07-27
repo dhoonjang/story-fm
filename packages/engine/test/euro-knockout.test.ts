@@ -19,6 +19,8 @@ import {
   stageLabel,
   advanceTime,
   buildOfficeViews,
+  financeOf,
+  payWinnerPrize,
 } from "@story-fm/engine";
 import { createTestGame, playMockMatch } from "./helpers";
 
@@ -362,3 +364,91 @@ function stageDepth(cup: (typeof CUP_CATALOG)[number], stage: string): number {
   const main = knockoutStages(cup).filter((s) => s !== "playoff");
   return main.indexOf(stage as (typeof main)[number]) + 1;
 }
+
+describe("상금", () => {
+  it("리그 페이즈 정산은 참가비 + 승/무 수당이고 한 번만 들어온다", () => {
+    const state = createTestGame(42);
+    const cup = cupCatalogById("ucl")!;
+    const before = financeOf(state, state.userTeamId).balance;
+    // 우리 팀 경기를 3승 2무 3패로 채운다 (나머지는 홈 승)
+    const ours = leaguePhaseOf(state, "ucl").filter(
+      (m) => m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId,
+    );
+    ours.forEach((m, i) => {
+      const home = m.homeTeamId === state.userTeamId;
+      const win = i < 3;
+      const draw = i >= 3 && i < 5;
+      m.result = draw
+        ? { homeGoals: 1, awayGoals: 1, scorers: [] }
+        : win === home
+          ? { homeGoals: 2, awayGoals: 0, scorers: [] }
+          : { homeGoals: 0, awayGoals: 2, scorers: [] };
+    });
+    fillResults(leaguePhaseOf(state, "ucl"));
+
+    const digest: string[] = [];
+    advanceEuroKnockouts(state, digest);
+    const expected = cup.prize.participation + 3 * cup.prize.win + 2 * cup.prize.draw;
+    const ledger = financeOf(state, state.userTeamId).ledger.filter((e) =>
+      e.label.includes("리그 페이즈 상금"),
+    );
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]!.amount).toBe(expected);
+    expect(digest.some((d) => d.includes("리그 페이즈 상금"))).toBe(true);
+
+    // 여러 번 호출해도 다시 주지 않는다
+    const balance = financeOf(state, state.userTeamId).balance;
+    advanceEuroKnockouts(state, []);
+    advanceEuroKnockouts(state, []);
+    expect(financeOf(state, state.userTeamId).balance).toBe(balance);
+    expect(balance).toBeGreaterThan(before);
+  });
+
+  it("단계마다 진출 상금이 그 단계의 팀 전원에게 들어간다", () => {
+    const state = createTestGame(42);
+    const cup = cupCatalogById("ucl")!;
+    runKnockouts(state, "ucl");
+    // 항목명은 정확히 비교한다 — "준결승 진출 상금"은 "결승 진출 상금"을 포함한다
+    const paidFor = (stage: "r16" | "qf" | "sf" | "final") => {
+      const label = `UCL ${stageLabel(stage, 1, false)} 진출 상금 (S1)`;
+      return state.finances.filter((f) => f.ledger.some((e) => e.label === label)).length;
+    };
+    expect(paidFor("r16")).toBe(16);
+    expect(paidFor("qf")).toBe(8);
+    expect(paidFor("sf")).toBe(4);
+    expect(paidFor("final")).toBe(2);
+    // 금액은 카탈로그 값 그대로
+    const anyR16 = state.finances
+      .flatMap((f) => f.ledger)
+      .find((e) => e.label === "UCL 16강 진출 상금 (S1)");
+    expect(anyR16?.amount).toBe(cup.prize.stage.r16);
+  });
+
+  it("우승 상금은 시즌 리뷰에서 우승 팀에게만 간다", () => {
+    const state = createTestGame(42);
+    runKnockouts(state, "ucl");
+    const champion = euroChampion(state, "ucl")!;
+    const cup = cupCatalogById("ucl")!;
+    payWinnerPrize(state, "ucl", champion, []);
+    payWinnerPrize(state, "ucl", champion, []); // 두 번 불러도 한 번만
+    const paid = state.finances.filter((f) =>
+      f.ledger.some((e) => e.label === "UCL 우승 상금 (S1)"),
+    );
+    expect(paid).toHaveLength(1);
+    expect(paid[0]!.teamId).toBe(champion);
+    expect(
+      paid[0]!.ledger.filter((e) => e.label === "UCL 우승 상금 (S1)").map((e) => e.amount),
+    ).toEqual([cup.prize.winner]);
+  });
+
+  it("우승 경로 총액이 tier 1 시즌 수입의 3분의 1 수준이다 (밸런스 기준선)", () => {
+    const cup = cupCatalogById("ucl")!;
+    const stages = Object.values(cup.prize.stage).reduce((s, v) => s + (v ?? 0), 0);
+    // 5승 2무 1패로 우승했을 때
+    const total =
+      cup.prize.participation + 5 * cup.prize.win + 2 * cup.prize.draw + stages + cup.prize.winner;
+    const seasonIncome = 12 * (13_000_000 + 6_000_000); // 중계권 + 스폰서 (tier 1)
+    expect(total / seasonIncome).toBeGreaterThan(0.2);
+    expect(total / seasonIncome).toBeLessThan(0.4);
+  });
+});

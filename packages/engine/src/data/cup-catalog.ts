@@ -38,6 +38,23 @@ export interface CupCatalogEntry {
    */
   directSlots: number;
   playoffSlots: number;
+  /**
+   * 상금 (£) — 참가비 + 리그 페이즈 성적 + 단계 진출 + 우승.
+   *
+   * ⚠️ **밸런스 임시값.** 실제 UEFA 배분의 비율(UCL : UEL : UECL ≈ 1 : 0.2 : 0.1)을
+   * 따르되 우리 경제 규모에 맞춰 눌렀다. 기준: tier 1 구단의 시즌 중계권+스폰서
+   * 수입이 약 £228m이고, UCL 우승 경로 총액이 그것의 3분의 1 정도(£64m)가 되게
+   * 잡았다. 실제 리그도 UCL 상금이 국내 중계권 수입에 근접하는 규모다.
+   * 수치 조정은 이 표만 고치면 된다 (docs/design/economy.md).
+   */
+  prize: {
+    participation: number;
+    win: number;
+    draw: number;
+    /** 이 단계에 진출하면 받는 금액 (플레이오프 포함) */
+    stage: Partial<Record<MatchStage, number>>;
+    winner: number;
+  };
 }
 
 export const CUP_CATALOG: readonly CupCatalogEntry[] = [
@@ -50,6 +67,13 @@ export const CUP_CATALOG: readonly CupCatalogEntry[] = [
     slots: { epl: 5, laliga: 5, seriea: 5, bundesliga: 5, ligue1: 4 },
     directSlots: 8,
     playoffSlots: 16,
+    prize: {
+      participation: 12_000_000,
+      win: 1_500_000,
+      draw: 500_000,
+      stage: { playoff: 2_000_000, r16: 6_000_000, qf: 8_000_000, sf: 10_000_000, final: 12_000_000 },
+      winner: 8_000_000,
+    },
   },
   {
     id: "uel",
@@ -60,6 +84,13 @@ export const CUP_CATALOG: readonly CupCatalogEntry[] = [
     slots: { epl: 4, laliga: 3, seriea: 3, bundesliga: 3, ligue1: 3 },
     directSlots: 4,
     playoffSlots: 8,
+    prize: {
+      participation: 3_500_000,
+      win: 500_000,
+      draw: 150_000,
+      stage: { playoff: 700_000, qf: 2_000_000, sf: 3_000_000, final: 3_500_000 },
+      winner: 3_000_000,
+    },
   },
   {
     id: "uecl",
@@ -70,6 +101,13 @@ export const CUP_CATALOG: readonly CupCatalogEntry[] = [
     slots: { epl: 2, laliga: 2, seriea: 2, bundesliga: 2, ligue1: 2 },
     directSlots: 2,
     playoffSlots: 4,
+    prize: {
+      participation: 2_000_000,
+      win: 300_000,
+      draw: 100_000,
+      stage: { playoff: 400_000, sf: 1_200_000, final: 1_600_000 },
+      winner: 2_000_000,
+    },
   },
 ];
 
