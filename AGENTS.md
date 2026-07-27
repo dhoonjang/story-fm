@@ -199,7 +199,9 @@ packages/
   시드로 추첨하므로 게임·시즌마다 다르다.
 - **유럽 대항전 — 리그 페이즈** — UCL 24 · UEL 16 · UECL 10팀(5대 리그 배정분만).
   티켓은 **지난 시즌 리그 최종 순위**로 배정되고(첫 시즌만 구단 등급), 배정 결과는
-  파생으로 되돌릴 수 없으므로 `state.euroEntrants`에 저장한다.
+  파생으로 되돌릴 수 없으므로 `state.euroEntrants`에 저장한다. 추첨은 원형 편성의
+  **자리 배치**를 언덕오르기로 고르는 방식이라(같은 리그 회피 100점 · 포트 편차 1점)
+  편성 불변식을 그대로 두고 대진 품질만 올린다.
   단일 순위표라 리그와 같은 `computeStandings(state, cupId)`로 계산된다.
   리그 주중 라운드는 예약된 대항전 주중 8개를 비켜 가고, 그래도 붙는 주말
   금·월 슬롯은 **같은 라운드 안에서 맞바꿔** 푼다 — 어떤 팀도 이틀 연속 뛰지
@@ -233,7 +235,7 @@ ERD와 설계 근거는 docs/design/implementation-notes.md에 정리했다.
 - `apps/web` — Next.js 채팅 UI + 오피스 뷰(스쿼드 전술판·달력·재정·순위·커리어)
   + API + `/admin` **선수 카탈로그 편집** (게임과 무관한 초기치 DB — 편집은 새 게임에만
   반영되고 진행 중 세이브는 영향 없음)
-- 테스트: Vitest 269 (유닛·API 통합) + Playwright e2e 3. `pnpm test` / `pnpm e2e`
+- 테스트: Vitest 275 (유닛·API 통합) + Playwright e2e 3. `pnpm test` / `pnpm e2e`
 
 ### LLM 입력 (요약 — 상세는 docs/design/llm-io.md)
 

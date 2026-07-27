@@ -12,6 +12,8 @@ import {
   euroCompetitionOf,
   euroMatchdayDates,
   europeanEntrants,
+  euroPotCount,
+  euroPots,
   isCup,
   isUserFixture,
   leagueOfTeam,
@@ -144,6 +146,65 @@ describe("대항전 리그 페이즈 편성", () => {
       // UCL은 화·수, 유로파·컨퍼런스는 목요일
       const dow = new Date(`${m.date}T00:00:00Z`).getUTCDay();
       expect(m.competitionId === "ucl" ? [2, 3] : [4], `${m.id} 요일`).toContain(dow);
+    }
+  });
+
+  it("같은 리그끼리는 거의 만나지 않는다 (실제 대회의 협회 회피)", () => {
+    for (const seed of [42, 7, 1007]) {
+      const entrants = buildEuroEntrants(1, seed);
+      const all = buildAllEuroMatches(1, seed, entrants);
+      for (const cup of CUP_CATALOG) {
+        const mine = all.filter((m) => m.competitionId === cup.id);
+        const same = mine.filter(
+          (m) => leagueOfTeam(m.homeTeamId) === leagueOfTeam(m.awayTeamId),
+        );
+        // 축소된 규모(UCL 24팀 중 5팀이 잉글랜드)에선 0이 항상 가능하지 않아
+        // 무거운 벌점으로 누른다 — 실측 최악이 대회당 1건이라 상한을 2로 잡는다
+        expect(same.length, `seed ${seed} ${cup.id}`).toBeLessThanOrEqual(2);
+        const perTeam = new Map<string, number>();
+        for (const m of same) {
+          for (const t of [m.homeTeamId, m.awayTeamId]) perTeam.set(t, (perTeam.get(t) ?? 0) + 1);
+        }
+        expect(Math.max(0, ...perTeam.values()), `seed ${seed} ${cup.id} 한 팀 반복`).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it("한 전력대(포트)에 상대가 몰리지 않는다", () => {
+    // 이상값은 포트마다 2경기지만, 원형 편성의 자리 배치로 정확한 균등 분할이
+    // 항상 가능하지는 않다 (8-정규 그래프의 균등 분할 문제). 같은 리그 회피를
+    // 우선 벌점으로 두고 포트 분포는 최선 노력이라, 여기서는 **편중 상한**만 고정한다.
+    for (const seed of [42, 7, 1007]) {
+      const entrants = buildEuroEntrants(1, seed);
+      const all = buildAllEuroMatches(1, seed, entrants);
+      for (const cup of CUP_CATALOG) {
+        const list = entrantsOf(entrants, cup.id);
+        const pots = euroPots(cup.id, seed, list);
+        for (const teamId of list) {
+          const opponents = all
+            .filter(
+              (m) =>
+                m.competitionId === cup.id &&
+                (m.homeTeamId === teamId || m.awayTeamId === teamId),
+            )
+            .map((m) => (m.homeTeamId === teamId ? m.awayTeamId : m.homeTeamId));
+          expect(opponents).toHaveLength(cup.matchesPerTeam);
+          const perPot = new Map<number, number>();
+          for (const opp of opponents) {
+            const pot = pots.get(opp) ?? 0;
+            perPot.set(pot, (perPot.get(pot) ?? 0) + 1);
+          }
+          // 이상값(경기수/포트수)보다 크게 몰리지 않는다 — 절반 + 1이 상한
+          expect(
+            Math.max(...perPot.values()),
+            `seed ${seed} ${cup.id} ${teamId} 편중`,
+          ).toBeLessThanOrEqual(cup.matchesPerTeam / 2 + 1);
+          // 4개 포트 대회는 한 포트를 아예 안 만나는 일이 드물어야 한다
+          if (euroPotCount(list.length) === 4) {
+            expect(perPot.size, `seed ${seed} ${cup.id} ${teamId} 포트 누락`).toBeGreaterThanOrEqual(3);
+          }
+        }
+      }
     }
   });
 

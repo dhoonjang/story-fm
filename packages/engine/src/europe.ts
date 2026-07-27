@@ -1,7 +1,8 @@
 import type { MatchRecord } from "@story-fm/domain";
 import { addDays, dayOfWeek, firstHalfPairs } from "./calendar";
 import { CUP_CATALOG, cupCatalogById } from "./data/cup-catalog";
-import { teamCatalogById, teamsOfLeague } from "./data/team-catalog";
+import { leagueCatalogById } from "./data/league-catalog";
+import { leagueOfTeam, teamCatalogById, teamsOfLeague } from "./data/team-catalog";
 import { makeRng } from "./rng";
 import { seasonYear } from "./calendar";
 
@@ -216,25 +217,128 @@ export function entrantsOf(entrants: EuroEntry[], cupId: string): string[] {
 // ── 리그 페이즈 편성 ────────────────────────────────────
 
 /**
- * 참가 클럽을 강약이 섞이도록 배열한다.
- *
- * 실제 대회는 4개 포트에서 각 2팀씩 뽑지만, 여기서는 등급순으로 정렬한 뒤
- * **강-약을 번갈아 끼워** 배치한다. 그러면 아래 서킬 편성이 자연스럽게 강팀과
- * 약팀을 섞는다. 진짜 포트 추첨과 같은 리그 회피 규칙은 다음 단계.
+ * 전력대(포트) — 강한 순으로 균등 분할. 추첨 품질 검증·표시에 쓴다.
  */
-function seedOrder(teamIds: string[], seed: number, cupId: string): string[] {
+/**
+ * 전력대(포트) — 강한 순으로 균등 분할. 실제 대회는 UEFA 계수로 4개 포트를 나누고
+ * 각 포트에서 2팀씩 만나게 한다. 우리는 구단 등급 + 리그 계수로 대신한다.
+ */
+/**
+ * 포트 수 — 실제 대회는 언제나 4개 포트다. 참가 규모가 4로 나뉘면 4개,
+ * 아니면 2개로 쪼갠다 (포트 크기가 들쭉날쭉하면 균등 분배가 더 어려워진다).
+ */
+export function euroPotCount(size: number): number {
+  return size % 4 === 0 ? 4 : 2;
+}
+
+/** 이 대회의 전력대 배정 — 추첨 품질 검증·표시용 */
+export function euroPots(cupId: string, seed: number, teamIds: string[]): Map<string, number> {
+  return potsOf(teamIds, seed, cupId, euroPotCount(teamIds.length));
+}
+
+function potsOf(teamIds: string[], seed: number, cupId: string, potCount: number): Map<string, number> {
+  const rng = makeRng(seed, `pots:${cupId}`);
+  const jitter = new Map(teamIds.map((id) => [id, rng()] as const));
+  const strength = (id: string) => {
+    const team = teamCatalogById(id);
+    const league = leagueCatalogById(team?.leagueId ?? "")?.coefficient ?? 5;
+    return (team?.tier ?? 3) * 10 + league;
+  };
+  const sorted = [...teamIds].sort(
+    (a, b) => strength(a) - strength(b) || jitter.get(a)! - jitter.get(b)!,
+  );
+  const size = Math.ceil(sorted.length / potCount);
+  return new Map(sorted.map((id, i) => [id, Math.min(potCount - 1, Math.floor(i / size))]));
+}
+
+/** 원형 편성이 만드는 **위치 쌍** — 팀과 무관한 구조다 (누구를 어디 앉힐지가 추첨) */
+function ringPairs(n: number, rounds: number): Array<[number, number]> {
+  const labels = Array.from({ length: n }, (_, i) => String(i));
+  return firstHalfPairs(labels)
+    .slice(0, rounds)
+    .flatMap((round) => round.map(([a, b]) => [Number(a), Number(b)] as [number, number]));
+}
+
+/** 같은 리그 대결 한 건의 벌점 — 포트 편차보다 훨씬 무겁게 (실제 대회는 금지) */
+const SAME_LEAGUE_PENALTY = 100;
+
+/**
+ * 이 배치의 추첨 품질 — 낮을수록 좋다.
+ * ① 같은 리그끼리 붙는 대결 ② 포트별 상대 수가 고르지 않은 정도.
+ */
+function drawCost(
+  order: string[],
+  pairs: Array<[number, number]>,
+  pots: Map<string, number>,
+  potCount: number,
+  perPot: number,
+): number {
+  let cost = 0;
+  const seen = order.map(() => new Array<number>(potCount).fill(0));
+  for (const [i, j] of pairs) {
+    const a = order[i]!;
+    const b = order[j]!;
+    if (leagueOfTeam(a) === leagueOfTeam(b)) cost += SAME_LEAGUE_PENALTY;
+    const rowI = seen[i]!;
+    const rowJ = seen[j]!;
+    const potB = pots.get(b) ?? 0;
+    const potA = pots.get(a) ?? 0;
+    rowI[potB] = (rowI[potB] ?? 0) + 1;
+    rowJ[potA] = (rowJ[potA] ?? 0) + 1;
+  }
+  for (const counts of seen) {
+    for (const c of counts) cost += Math.abs(c - perPot);
+  }
+  return cost;
+}
+
+/**
+ * 추첨 — 참가 클럽을 원형 편성의 자리에 앉힌다.
+ *
+ * 대진은 **자리**가 정하므로(위 `ringPairs`) 추첨은 "누구를 어느 자리에"의 문제다.
+ * 강약을 번갈아 끼운 배치에서 시작해 **자리 두 개를 맞바꾸는 언덕오르기**로
+ * 같은 리그 대결을 없애고 포트 분포를 고른다. 자리만 바꾸므로 편성 불변식은
+ * 그대로 남는다 — 라운드마다 완전 매칭, 팀당 경기 수·홈 절반 모두 자리에 딸린 값이다.
+ *
+ * 실제 대회의 "같은 협회 클럽과는 만나지 않는다"를 하드 제약으로 걸면 축소된
+ * 규모(UCL 24팀 중 5팀이 잉글랜드)에서 해가 없을 수 있어 무거운 벌점으로 둔다.
+ */
+function drawOrder(teamIds: string[], seed: number, cupId: string, rounds: number): string[] {
   const rng = makeRng(seed, `ring:${cupId}`);
   const byStrength = [...teamIds].sort((a, b) => {
     const ta = teamCatalogById(a)?.tier ?? 3;
     const tb = teamCatalogById(b)?.tier ?? 3;
     return ta - tb || (rng() < 0.5 ? -1 : 1);
   });
-  const out: string[] = [];
+  const order: string[] = [];
   for (let i = 0, j = byStrength.length - 1; i <= j; i++, j--) {
-    out.push(byStrength[i]!);
-    if (i !== j) out.push(byStrength[j]!);
+    order.push(byStrength[i]!);
+    if (i !== j) order.push(byStrength[j]!);
   }
-  return out;
+
+  const potCount = euroPotCount(order.length);
+  const pots = potsOf(teamIds, seed, cupId, potCount);
+  const pairs = ringPairs(order.length, rounds);
+  const perPot = rounds / potCount;
+
+  let cost = drawCost(order, pairs, pots, potCount, perPot);
+  for (let pass = 0; pass < 40 && cost > 0; pass++) {
+    let improved = false;
+    for (let i = 0; i < order.length; i++) {
+      for (let j = i + 1; j < order.length; j++) {
+        [order[i], order[j]] = [order[j]!, order[i]!];
+        const next = drawCost(order, pairs, pots, potCount, perPot);
+        if (next < cost) {
+          cost = next;
+          improved = true;
+        } else {
+          [order[i], order[j]] = [order[j]!, order[i]!]; // 되돌린다
+        }
+      }
+    }
+    if (!improved) break;
+  }
+  return order;
 }
 
 /**
@@ -262,7 +366,7 @@ export function buildEuroLeaguePhase(
   const rounds = cup.matchesPerTeam;
   if (entrants.length < rounds + 1) return [];
 
-  const allRounds = firstHalfPairs(seedOrder(entrants, seed, cupId));
+  const allRounds = firstHalfPairs(drawOrder(entrants, seed, cupId, rounds));
   const dates = euroMatchdayDates(season);
   const slots = EURO_SLOTS[cupId] ?? EURO_SLOTS.ucl!;
 
