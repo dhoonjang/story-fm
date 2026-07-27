@@ -137,15 +137,30 @@ function daysBetween(a: string, b: string): number {
 
 // ── 참가 배정 ───────────────────────────────────────────
 
+/** 리그별 최종 순위 — 팀 id를 1위부터 나열 (대항전 티켓의 원본) */
+export type LeagueTables = Record<string, string[]>;
+
+/** 이번 시즌 대항전 참가 팀 — 추첨은 이미 일어난 사실이라 세이브에 남는다 */
+export interface EuroEntry {
+  cupId: string;
+  teams: string[];
+}
+
 /**
  * 리그 내 서열 — 대항전 티켓 배정 기준.
  *
- * ⚠️ 현재는 **구단 등급(tier) + 시드 타이브레이크**로 줄을 세운다. 지난 시즌
- * 최종 순위로 배정하는 것이 옳지만, `endSeason`이 `state.matches`를 새 시즌으로
- * 교체하면서 지난 시즌 표가 사라진다. 리그별 최종 순위를 기록으로 남기는 작업이
- * 선행되어야 한다 (implementation-notes에 남김).
+ * **지난 시즌 리그 최종 순위**가 있으면 그것을 쓴다 (4위로 마치면 다음 시즌 UCL —
+ * 감독의 동기가 여기서 나온다). 첫 시즌은 지난 시즌이 없으므로 구단 등급(tier)
+ * + 시드 타이브레이크로 줄을 세운다.
  */
-function rankedTeams(leagueId: string, season: number, seed: number): string[] {
+function rankedTeams(
+  leagueId: string,
+  season: number,
+  seed: number,
+  tables: LeagueTables | null,
+): string[] {
+  const previous = tables?.[leagueId];
+  if (previous && previous.length > 0) return previous;
   const rng = makeRng(seed, `euro:${leagueId}:${season}`);
   return teamsOfLeague(leagueId)
     .map((t) => ({ id: t.id, key: t.tier * 100 + Math.floor(rng() * 90) }))
@@ -164,16 +179,38 @@ function slotsAbove(cupId: string, leagueId: string): number {
 }
 
 /** 이 대회의 참가 클럽 — 리그별 배정분을 순위 순으로 가져온다 */
-export function europeanEntrants(cupId: string, season: number, seed: number): string[] {
+export function europeanEntrants(
+  cupId: string,
+  season: number,
+  seed: number,
+  tables: LeagueTables | null = null,
+): string[] {
   const cup = cupCatalogById(cupId);
   if (!cup) return [];
   const out: string[] = [];
   for (const [leagueId, count] of Object.entries(cup.slots)) {
-    const ranked = rankedTeams(leagueId, season, seed);
+    const ranked = rankedTeams(leagueId, season, seed, tables);
     const from = slotsAbove(cupId, leagueId);
     out.push(...ranked.slice(from, from + count));
   }
   return out;
+}
+
+/** 전 대항전 배정 — 새 게임·시즌 전환이 한 번 계산해 세이브에 남긴다 */
+export function buildEuroEntrants(
+  season: number,
+  seed: number,
+  tables: LeagueTables | null = null,
+): EuroEntry[] {
+  return CUP_CATALOG.map((cup) => ({
+    cupId: cup.id,
+    teams: europeanEntrants(cup.id, season, seed, tables),
+  }));
+}
+
+/** 세이브에 남은 이번 시즌 참가 팀 */
+export function entrantsOf(entrants: EuroEntry[], cupId: string): string[] {
+  return entrants.find((e) => e.cupId === cupId)?.teams ?? [];
 }
 
 // ── 리그 페이즈 편성 ────────────────────────────────────
@@ -215,10 +252,10 @@ export function buildEuroLeaguePhase(
   cupId: string,
   season: number,
   seed: number,
+  entrants: string[],
 ): MatchRecord[] {
   const cup = cupCatalogById(cupId);
   if (!cup) return [];
-  const entrants = europeanEntrants(cupId, season, seed);
   if (entrants.length % 2 !== 0) {
     throw new Error(`${cupId}: 참가 ${entrants.length}팀 — 리그 페이즈는 짝수여야 한다`);
   }
@@ -269,18 +306,15 @@ function shuffled<T>(items: readonly T[], seed: number, channel: string): T[] {
 }
 
 /** 전 대항전 리그 페이즈 — 새 시즌 생성·전환에서 함께 만든다 */
-export function buildAllEuroMatches(season: number, seed: number): MatchRecord[] {
-  return CUP_CATALOG.flatMap((cup) => buildEuroLeaguePhase(cup.id, season, seed));
+export function buildAllEuroMatches(
+  season: number,
+  seed: number,
+  entrants: EuroEntry[],
+): MatchRecord[] {
+  return entrants.flatMap((e) => buildEuroLeaguePhase(e.cupId, season, seed, e.teams));
 }
 
 /** 이 팀이 이번 시즌 나가는 대항전 (없으면 null) — 브리핑·서사용 */
-export function euroCompetitionOf(
-  teamId: string,
-  season: number,
-  seed: number,
-): string | null {
-  for (const cup of CUP_CATALOG) {
-    if (europeanEntrants(cup.id, season, seed).includes(teamId)) return cup.id;
-  }
-  return null;
+export function euroCompetitionOf(entrants: EuroEntry[], teamId: string): string | null {
+  return entrants.find((e) => e.teams.includes(teamId))?.cupId ?? null;
 }

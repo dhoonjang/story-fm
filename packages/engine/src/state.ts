@@ -43,6 +43,7 @@ import {
 } from "./calendar";
 import { overallFor, playerCatalog } from "./catalog";
 import { TEAM_CATALOG, teamCatalogById } from "./data/team-catalog";
+import { buildEuroEntrants, type EuroEntry } from "./europe";
 import { buildSeasonFixtures, isUserFixture } from "./fixtures";
 import { makeRng, randInt } from "./rng";
 
@@ -108,6 +109,14 @@ export interface GameState {
   matches: MatchRecord[];
   trainingSessions: TrainingSession[];
   windows: TransferWindow[];
+
+  // ── 대회 ──
+  /**
+   * 이번 시즌 대항전 참가 팀 — **추첨은 이미 일어난 사실**이라 세이브에 남는다.
+   * 첫 시즌은 구단 등급으로, 이후는 지난 시즌 리그 최종 순위로 배정된다
+   * (`buildEuroEntrants`). 파생으로 되돌릴 수 없는 값이므로 저장한다.
+   */
+  euroEntrants: EuroEntry[];
 
   // ── 기록 ──
   injuries: Injury[];
@@ -571,7 +580,8 @@ export function createGame(input: CreateGameInput): GameState {
   // 일정 — 전 리그 + 유럽 대항전 경기 + 이적창 개장/폐장
   const windows = buildTransferWindows(season);
   // 다른 리그도 같은 캘린더 골격으로 동시에 진행된다
-  const matches = buildSeasonFixtures(season, seed);
+  const euroEntrants = buildEuroEntrants(season, seed);
+  const matches = buildSeasonFixtures(season, seed, euroEntrants);
   // 일정 축(SCHEDULE_ENTRY)은 **감독의 달력**이다 — 유저 리그 전체 + 유저 팀
   // 대항전 경기만 등록한다. 타 리그·타 팀 대항전은 state.matches에만 있고
   // tick이 간이 시뮬로 소화한다.
@@ -610,6 +620,8 @@ export function createGame(input: CreateGameInput): GameState {
     matches,
     trainingSessions: [],
     windows,
+
+    euroEntrants,
 
     injuries: [],
     bookings: [],

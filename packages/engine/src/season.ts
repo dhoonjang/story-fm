@@ -8,10 +8,10 @@ import {
 } from "./calendar";
 import { TEAM_CATALOG, leagueOfTeam, teamCatalogById } from "./data/team-catalog";
 import { CUP_CATALOG, competitionShortName, isCup } from "./data/cup-catalog";
-import { leagueName } from "./data/league-catalog";
+import { LEAGUE_CATALOG, leagueName } from "./data/league-catalog";
 import { euroChampion, euroStageMatches } from "./euro-knockout";
 import { payWinnerPrize } from "./euro-prize";
-import { europeanEntrants } from "./europe";
+import { buildEuroEntrants, entrantsOf, type LeagueTables } from "./europe";
 import { buildSeasonFixtures, isUserFixture } from "./fixtures";
 import { generateYouthPlayer } from "./generate";
 import {
@@ -56,7 +56,7 @@ export function computeStandings(
   competitionId = leagueOfTeam(state.userTeamId),
 ): StandingRow[] {
   const members = isCup(competitionId)
-    ? europeanEntrants(competitionId, state.season, state.seed)
+    ? entrantsOf(state.euroEntrants, competitionId)
     : state.teams.filter((t) => leagueOfTeam(t.id) === competitionId).map((t) => t.id);
   const rows = new Map<string, StandingRow>();
   for (const teamId of members) {
@@ -399,7 +399,14 @@ export function transitionSeason(state: GameState): string[] {
   // 새 시즌은 7월 1일(프리시즌·여름 이적창 개장)에서 시작한다
   state.date = nextCalendar.preseasonStart;
   const windows = buildTransferWindows(nextSeason);
-  const matches = buildSeasonFixtures(nextSeason, state.seed);
+  // 대항전 티켓 — **지난 시즌(=지금 끝난 시즌) 리그 최종 순위**로 배정한다.
+  // state.matches가 곧 새 시즌으로 교체되므로 그 전에 표를 읽어야 한다.
+  const finalTables: LeagueTables = {};
+  for (const league of LEAGUE_CATALOG) {
+    finalTables[league.id] = computeStandings(state, league.id).map((r) => r.teamId);
+  }
+  state.euroEntrants = buildEuroEntrants(nextSeason, state.seed, finalTables);
+  const matches = buildSeasonFixtures(nextSeason, state.seed, state.euroEntrants);
   state.windows = windows;
   state.matches = matches;
   state.schedule = buildScheduleEntries(

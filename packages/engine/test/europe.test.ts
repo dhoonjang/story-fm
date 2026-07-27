@@ -3,7 +3,9 @@ import {
   CUP_CATALOG,
   buildAllEuroMatches,
   buildAllLeagueMatches,
+  buildEuroEntrants,
   buildSeasonFixtures,
+  entrantsOf,
   computeStandings,
   cupCatalogById,
   diffDays,
@@ -25,6 +27,9 @@ import { advanceAndPlay, createTestGame } from "./helpers";
  * 편성은 대회 규모가 커도 구조적으로 성립해야 한다. 특히 "한 팀이 같은 라운드에
  * 두 번 나오는" 실패는 예전에 실제로 났던 버그다 (간선 색칠 문제 — europe.ts 주석).
  */
+/** 첫 시즌 배정 — 지난 시즌이 없으므로 구단 등급 기준 */
+const ENTRANTS = buildEuroEntrants(1, 42);
+
 describe("대항전 참가 배정", () => {
   it("리그별 티켓 수만큼, 상위 대회와 겹치지 않게 배정된다", () => {
     for (const cup of CUP_CATALOG) {
@@ -43,6 +48,45 @@ describe("대항전 참가 배정", () => {
     expect(new Set(all).size).toBe(all.length);
   });
 
+  it("지난 시즌 리그 최종 순위가 다음 시즌 티켓을 정한다", () => {
+    const state = createTestGame(42);
+    // 우리 리그를 인위적으로 끝내고 최종 순위를 만든다 (홈 승으로 전부 채움)
+    for (const m of state.matches) {
+      if (m.season !== state.season) continue;
+      m.result = { homeGoals: m.homeTeamId === state.userTeamId ? 5 : 1, awayGoals: 0, scorers: [] };
+    }
+    const finalTable = computeStandings(state, "epl").map((r) => r.teamId);
+    expect(finalTable[0], "홈 5골이면 우리 팀이 1위").toBe(state.userTeamId);
+
+    transitionSeason(state);
+
+    // UCL 잉글랜드 티켓 5장은 최종 1~5위에게 간다
+    const ucl = entrantsOf(state.euroEntrants, "ucl").filter((id) => leagueOfTeam(id) === "epl");
+    expect(ucl).toEqual(finalTable.slice(0, 5));
+    // 유로파는 그다음 4장, 컨퍼런스는 그다음 2장 — 겹치지 않는다
+    const uel = entrantsOf(state.euroEntrants, "uel").filter((id) => leagueOfTeam(id) === "epl");
+    const uecl = entrantsOf(state.euroEntrants, "uecl").filter((id) => leagueOfTeam(id) === "epl");
+    expect(uel).toEqual(finalTable.slice(5, 9));
+    expect(uecl).toEqual(finalTable.slice(9, 11));
+  });
+
+  it("첫 시즌은 지난 순위가 없으니 구단 등급으로 배정된다", () => {
+    const withoutTables = buildEuroEntrants(1, 42);
+    const withTables = buildEuroEntrants(2, 42, {
+      epl: teamsOfLeague("epl")
+        .map((t) => t.id)
+        .reverse(),
+    });
+    // 지난 순위를 주면 배정이 그것을 따른다 (등급 기준과 달라진다)
+    expect(entrantsOf(withTables, "ucl").filter((id) => leagueOfTeam(id) === "epl")).toEqual(
+      teamsOfLeague("epl")
+        .map((t) => t.id)
+        .reverse()
+        .slice(0, 5),
+    );
+    expect(entrantsOf(withoutTables, "ucl")).not.toEqual(entrantsOf(withTables, "ucl"));
+  });
+
   it("배정은 시드에 따라 갈리고 같은 시드면 같다", () => {
     expect(europeanEntrants("ucl", 1, 42)).toEqual(europeanEntrants("ucl", 1, 42));
     expect(europeanEntrants("ucl", 1, 42)).not.toEqual(europeanEntrants("ucl", 1, 7));
@@ -50,15 +94,15 @@ describe("대항전 참가 배정", () => {
 
   it("euroCompetitionOf는 그 팀이 나가는 대회를 되돌린다", () => {
     const ucl = europeanEntrants("ucl", 1, 42)[0]!;
-    expect(euroCompetitionOf(ucl, 1, 42)).toBe("ucl");
+    expect(euroCompetitionOf(ENTRANTS, ucl)).toBe("ucl");
     const inEurope = new Set(CUP_CATALOG.flatMap((c) => europeanEntrants(c.id, 1, 42)));
     const outsider = teamsOfLeague("epl").find((t) => !inEurope.has(t.id));
-    if (outsider) expect(euroCompetitionOf(outsider.id, 1, 42)).toBeNull();
+    if (outsider) expect(euroCompetitionOf(ENTRANTS, outsider.id)).toBeNull();
   });
 });
 
 describe("대항전 리그 페이즈 편성", () => {
-  const matches = buildAllEuroMatches(1, 42);
+  const matches = buildAllEuroMatches(1, 42, buildEuroEntrants(1, 42));
 
   it("대회마다 팀당 정해진 경기 수 · 홈 절반 · 상대는 모두 다르다", () => {
     for (const cup of CUP_CATALOG) {
@@ -105,7 +149,7 @@ describe("대항전 리그 페이즈 편성", () => {
 
   it("시즌·시드마다 대진이 달라지되 재현 가능하다", () => {
     const key = (season: number, seed: number) =>
-      buildAllEuroMatches(season, seed)
+      buildAllEuroMatches(season, seed, buildEuroEntrants(season, seed))
         .map((m) => `${m.date}|${m.homeTeamId}|${m.awayTeamId}`)
         .join(",");
     expect(key(1, 42)).toBe(key(1, 42));
@@ -121,7 +165,7 @@ describe("리그 일정과의 공존", () => {
       [2, 7],
       [3, 1007],
     ] as const) {
-      const fixtures = buildSeasonFixtures(season, seed);
+      const fixtures = buildSeasonFixtures(season, seed, buildEuroEntrants(season, seed));
       const byTeam = new Map<string, string[]>();
       for (const m of fixtures) {
         for (const teamId of [m.homeTeamId, m.awayTeamId]) {
@@ -155,7 +199,7 @@ describe("리그 일정과의 공존", () => {
       else slotsBefore.set(key, [`${m.date} ${m.time}`]);
     }
 
-    const swaps = relaxEuroAdjacency(league, buildAllEuroMatches(1, 42));
+    const swaps = relaxEuroAdjacency(league, buildAllEuroMatches(1, 42, buildEuroEntrants(1, 42)));
     expect(swaps).toBeGreaterThan(0); // 실제로 붙는 자리가 있다 (교환이 필요하다)
 
     // 대진·라운드는 그대로, 라운드가 쓰는 슬롯 집합도 그대로 — 자리만 맞바뀐다
@@ -209,7 +253,7 @@ describe("게임 연결", () => {
   });
 
   it("우리 팀이 대항전에 나가면 그 경기도 달력에 있다", () => {
-    const cup = euroCompetitionOf(state.userTeamId, state.season, state.seed);
+    const cup = euroCompetitionOf(state.euroEntrants, state.userTeamId);
     expect(cup, "테스트 팀(arsenal)은 대항전에 나가야 한다").not.toBeNull();
     const ours = state.schedule.filter(
       (e) => e.type === "match" && e.refId.startsWith(`m-${cup}-`),
@@ -232,7 +276,7 @@ describe("게임 연결", () => {
 
   it("우리 팀 대항전 경기도 경기일로 열리고 결과가 장부에 남는다", () => {
     const playing = createTestGame(42);
-    const cup = euroCompetitionOf(playing.userTeamId, playing.season, playing.seed)!;
+    const cup = euroCompetitionOf(playing.euroEntrants, playing.userTeamId)!;
     const ourCupMatches = () =>
       playing.matches.filter(
         (m) =>
@@ -259,7 +303,7 @@ describe("게임 연결", () => {
     const cups = next.matches.filter((m) => isCup(m.competitionId));
     expect(cups.length).toBeGreaterThan(0);
     expect(cups.every((m) => m.season === 2 && m.result === null)).toBe(true);
-    const cup = euroCompetitionOf(next.userTeamId, next.season, next.seed);
+    const cup = euroCompetitionOf(next.euroEntrants, next.userTeamId);
     if (cup) {
       const entries = next.schedule.filter(
         (e) => e.type === "match" && e.refId.startsWith(`m-${cup}-`),

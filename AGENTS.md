@@ -198,6 +198,8 @@ packages/
   역경기는 8라운드 이후, 후반기는 전반기의 미러가 아니다. 대진은 세이브
   시드로 추첨하므로 게임·시즌마다 다르다.
 - **유럽 대항전 — 리그 페이즈** — UCL 24 · UEL 16 · UECL 10팀(5대 리그 배정분만).
+  티켓은 **지난 시즌 리그 최종 순위**로 배정되고(첫 시즌만 구단 등급), 배정 결과는
+  파생으로 되돌릴 수 없으므로 `state.euroEntrants`에 저장한다.
   단일 순위표라 리그와 같은 `computeStandings(state, cupId)`로 계산된다.
   리그 주중 라운드는 예약된 대항전 주중 8개를 비켜 가고, 그래도 붙는 주말
   금·월 슬롯은 **같은 라운드 안에서 맞바꿔** 푼다 — 어떤 팀도 이틀 연속 뛰지
@@ -223,14 +225,14 @@ ERD와 설계 근거는 docs/design/implementation-notes.md에 정리했다.
 - `packages/domain` — 카탈로그/게임 스키마 + 기록·일정 테이블 타입 (Zod)
 - `packages/sim` — 전력 분석 패킷(배치 포지션·적응도 반영) + 경기 장부 검증
 - `packages/engine` — 카탈로그 빌드·인스턴스화·일정 축·tick·스킬·경기·시즌
-  전환·저장(SAVE_VERSION 2)·오피스 뷰·어드민 + **스카우팅(안개)·읽기 전용 조회**
+  전환·저장(SAVE_VERSION 4)·오피스 뷰·어드민 + **스카우팅(안개)·읽기 전용 조회**
 - `packages/llm` — GameLLM 인터페이스 + Opus 어댑터 (전 티어 Opus, 결정 #12).
   **입력 3층 캐시 계층**(고정 / 레퍼런스 / 이력)과 `role:"system"` 상태 채널
 - `packages/agents` — GM 오케스트레이터 (실모드 Opus tool loop + **mock 모드**)
 - `apps/web` — Next.js 채팅 UI + 오피스 뷰(스쿼드 전술판·달력·재정·순위·커리어)
   + API + `/admin` **선수 카탈로그 편집** (게임과 무관한 초기치 DB — 편집은 새 게임에만
   반영되고 진행 중 세이브는 영향 없음)
-- 테스트: Vitest 265 (유닛·API 통합) + Playwright e2e 3. `pnpm test` / `pnpm e2e`
+- 테스트: Vitest 267 (유닛·API 통합) + Playwright e2e 3. `pnpm test` / `pnpm e2e`
 
 ### LLM 입력 (요약 — 상세는 docs/design/llm-io.md)
 
@@ -256,7 +258,7 @@ ERD와 설계 근거는 docs/design/implementation-notes.md에 정리했다.
 라이선스 부채는 data-sourcing.md §7).
 
 ⚠️ **세이브 호환성** — v6는 스키마 전면 개편이라 이전 세이브를 로드하지 않는다
-(`SAVE_VERSION=2` 미달 파일은 목록에서 스킵). 구조 변경 시 `.data` 초기화가
+(`SAVE_VERSION=4` 미달 파일은 목록에서 스킵). 구조 변경 시 `.data` 초기화가
 필요하면 사용자에게 먼저 확인한다.
 
 미구현(다음 마일스톤): **이적·계약 협상 스킬**(v6 구조는 준비됨 — TRANSFER에 status를 얹으면 오퍼/합의

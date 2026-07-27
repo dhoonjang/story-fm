@@ -94,6 +94,7 @@ export interface CalendarEntryView {
 
 /** 대항전 뷰 — 리그 페이즈 순위표 + 녹아웃 브래킷 (우리 팀 대회만) */
 export interface EuropeView {
+  competitionId: string;
   competition: string;
   short: string;
   standings: StandingRow[];
@@ -193,7 +194,7 @@ function isUserMatch(state: GameState, matchId: string): boolean {
  * 뷰를 여는 것이 게임 상태를 바꾸는 셈이 된다 — 판정은 tick·경기 종료가 한다).
  */
 function buildEuropeView(state: GameState): EuropeView | null {
-  const cupId = euroCompetitionOf(state.userTeamId, state.season, state.seed);
+  const cupId = euroCompetitionOf(state.euroEntrants, state.userTeamId);
   const cup = cupId ? cupCatalogById(cupId) : null;
   if (!cupId || !cup) return null;
 
@@ -248,6 +249,7 @@ function buildEuropeView(state: GameState): EuropeView | null {
   }
 
   return {
+    competitionId: cupId,
     competition: competitionName(cupId),
     short: competitionShortName(cupId),
     standings,

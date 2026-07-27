@@ -46,7 +46,7 @@ export function createTestGame(seed = 42, teamId = "arsenal"): GameState {
  * 대항전 출전 여부는 시드에 따라 갈리므로 하드코딩하지 않고 파생한다.
  */
 export function userFixtureCount(state: GameState): number {
-  const cup = euroCompetitionOf(state.userTeamId, state.season, state.seed);
+  const cup = euroCompetitionOf(state.euroEntrants, state.userTeamId);
   return 38 + (cup ? (cupCatalogById(cup)?.matchesPerTeam ?? 0) : 0);
 }
 

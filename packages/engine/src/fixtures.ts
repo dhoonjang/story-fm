@@ -1,7 +1,7 @@
 import type { MatchRecord } from "@story-fm/domain";
 import { buildAllLeagueMatches, diffDays } from "./calendar";
 import { leagueOfTeam } from "./data/team-catalog";
-import { buildAllEuroMatches } from "./europe";
+import { buildAllEuroMatches, type EuroEntry } from "./europe";
 
 /**
  * 시즌 편성의 단일 입구 — 리그 + 대항전을 함께 만들고 충돌을 푼다.
@@ -11,9 +11,13 @@ import { buildAllEuroMatches } from "./europe";
  * 화요일·목요일과 하루 차이로 붙는다. 대항전에 나가는 팀에게 월→화, 목→금은
  * 실제 리그가 절대 내지 않는 일정이다. 그래서 편성 후 슬롯을 맞바꿔 푼다.
  */
-export function buildSeasonFixtures(season: number, seed: number): MatchRecord[] {
+export function buildSeasonFixtures(
+  season: number,
+  seed: number,
+  entrants: EuroEntry[],
+): MatchRecord[] {
   const league = buildAllLeagueMatches(season, seed);
-  const euro = buildAllEuroMatches(season, seed);
+  const euro = buildAllEuroMatches(season, seed, entrants);
   relaxEuroAdjacency(league, euro);
   return [...league, ...euro];
 }

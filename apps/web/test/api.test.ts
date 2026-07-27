@@ -15,7 +15,7 @@ import {
   PATCH as catalogPatch,
   DELETE as catalogDelete,
 } from "../app/api/admin/catalog/player/[playerId]/route";
-import { cupCatalogById, euroCompetitionOf } from "@story-fm/engine";
+import { cupCatalogById } from "@story-fm/engine";
 import type { GamePayload } from "../lib/store";
 
 /** API 통합 테스트 — 라우트 핸들러를 직접 호출 (mock GM 모드) */
@@ -138,8 +138,11 @@ describe("API — 온보딩부터 경기까지", () => {
     const game = (await created.json()) as GamePayload;
     const cal = game.views.calendar;
     const matches = cal.entries.filter((e) => e.type === "match");
-    const cup = euroCompetitionOf("liverpool", 1, 5);
-    expect(matches).toHaveLength(38 + (cup ? (cupCatalogById(cup)?.matchesPerTeam ?? 0) : 0));
+    // 리그 38 + 대항전 (출전 대회는 세이브의 배정에서 나온다 — 뷰가 알려준다)
+    const cup = game.views.schedule.europe;
+    expect(matches).toHaveLength(
+      38 + (cup ? (cupCatalogById(cup.competitionId)?.matchesPerTeam ?? 0) : 0),
+    );
     expect(matches.every((e) => e.result === null)).toBe(true);
     expect(matches.filter((e) => e.isNext)).toHaveLength(1);
     expect(cal.seasonStart <= cal.seasonEnd).toBe(true);
