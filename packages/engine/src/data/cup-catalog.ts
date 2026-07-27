@@ -10,9 +10,13 @@
  * **5대 리그 배정분만** 참가한다 (UCL 24 · UEL 16 · UECL 10 = 50클럽).
  * 하위 리그를 추가하면 아약스·벤피카·셀틱 같은 실제 참가 팀으로 36팀을 채운다.
  */
+import { leagueName } from "./league-catalog";
+
 export interface CupCatalogEntry {
   id: string;
   name: string;
+  /** 달력·일지에 붙는 짧은 표기 */
+  short: string;
   /** 리그 페이즈 참가 팀 수 */
   size: number;
   /** 팀당 리그 페이즈 경기 수 (홈 절반·원정 절반) */
@@ -32,6 +36,7 @@ export const CUP_CATALOG: readonly CupCatalogEntry[] = [
   {
     id: "ucl",
     name: "UEFA 챔피언스리그",
+    short: "UCL",
     size: 24,
     matchesPerTeam: 8,
     slots: { epl: 5, laliga: 5, seriea: 5, bundesliga: 5, ligue1: 4 },
@@ -41,6 +46,7 @@ export const CUP_CATALOG: readonly CupCatalogEntry[] = [
   {
     id: "uel",
     name: "UEFA 유로파리그",
+    short: "UEL",
     size: 16,
     matchesPerTeam: 6,
     slots: { epl: 4, laliga: 3, seriea: 3, bundesliga: 3, ligue1: 3 },
@@ -50,6 +56,7 @@ export const CUP_CATALOG: readonly CupCatalogEntry[] = [
   {
     id: "uecl",
     name: "UEFA 컨퍼런스리그",
+    short: "UECL",
     size: 10,
     matchesPerTeam: 6,
     slots: { epl: 2, laliga: 2, seriea: 2, bundesliga: 2, ligue1: 2 },
@@ -64,7 +71,15 @@ export function cupCatalogById(id: string): CupCatalogEntry | null {
   return BY_ID.get(id) ?? null;
 }
 
-/** 대회 표시명 — 리그든 컵이든 competitionId로 이름을 얻는다 */
 export function isCup(competitionId: string): boolean {
   return BY_ID.has(competitionId);
+}
+
+/** 대회 표시명 — 리그든 컵이든 competitionId 하나로 이름을 얻는다 */
+export function competitionName(competitionId: string): string {
+  return BY_ID.get(competitionId)?.name ?? leagueName(competitionId);
+}
+
+export function competitionShortName(competitionId: string): string {
+  return BY_ID.get(competitionId)?.short ?? leagueName(competitionId);
 }

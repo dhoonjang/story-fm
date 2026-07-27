@@ -11,7 +11,7 @@ import {
   teamsOfLeague,
 } from "@story-fm/engine";
 import type { MatchRecord } from "@story-fm/domain";
-import { createTestGame } from "./helpers";
+import { createTestGame, userFixtureCount } from "./helpers";
 
 /**
  * 시즌 일정 — 실제 EPL 캘린더 골격을 재현했는지 검증한다.
@@ -225,23 +225,27 @@ describe("달력 뷰 반영", () => {
     const state = createTestGame(42);
     const views = buildOfficeViews(state);
     const fixtures = views.calendar.entries.filter((e) => e.type === "match");
-    expect(fixtures).toHaveLength(38); // 유저 팀 경기만
+    expect(fixtures).toHaveLength(userFixtureCount(state)); // 유저 팀 경기만 (리그+대항전)
 
-    const boxing = fixtures.find((e) => e.date === "2026-12-26");
-    const midweek = fixtures.filter((e) => dayOfWeek(e.date) === 3);
+    // 리그 경기만 골라 본다 — 대항전은 주중에 자기 슬롯(18:45/21:00)을 쓴다
+    const league = fixtures.filter((e) => e.id.startsWith("se-m-epl-"));
+    expect(league).toHaveLength(38);
+
+    const boxing = league.find((e) => e.date === "2026-12-26");
+    const midweek = league.filter((e) => dayOfWeek(e.date) === 3);
     // 유저 팀이 박싱데이에 뛰지 않을 수도 있으니 둘 중 하나는 반드시 있다
     expect(Boolean(boxing) || midweek.length > 0).toBe(true);
     for (const e of midweek) expect(["19:30", "20:15"]).toContain(e.time);
 
     // 시즌이 8월에 시작해 5월에 끝난다
-    expect(fixtures[0]!.date.slice(0, 7)).toBe("2026-08");
-    expect(fixtures[37]!.date.slice(0, 7)).toBe("2027-05");
+    expect(league[0]!.date.slice(0, 7)).toBe("2026-08");
+    expect(league[37]!.date.slice(0, 7)).toBe("2027-05");
   });
 
   it("휴식기에는 유저 팀 경기가 없다 (2주 공백이 실제로 생긴다)", () => {
     const state = createTestGame(42);
     const dates = buildOfficeViews(state)
-      .calendar.entries.filter((e) => e.type === "match")
+      .calendar.entries.filter((e) => e.type === "match" && e.id.startsWith("se-m-epl-"))
       .map((e) => e.date);
     const gaps = dates.slice(1).map((d, i) => diffDays(dates[i]!, d));
     expect(Math.max(...gaps)).toBeGreaterThanOrEqual(13);

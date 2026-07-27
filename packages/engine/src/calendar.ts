@@ -363,12 +363,14 @@ export function buildMatches(
   rounds.forEach((pairs, r) => {
     const week = weeks[r]!;
     pairs.forEach(([homeTeamId, awayTeamId], i) => {
+      const slot = slotFor(week, i);
       matches.push({
         id: `m-${competitionId}-${season}-${week.round}-${homeTeamId}`,
         season,
         competitionId,
         round: week.round,
-        date: slotFor(week, i).date,
+        date: slot.date,
+        time: slot.time,
         homeTeamId,
         awayTeamId,
         result: null,
@@ -421,19 +423,13 @@ export function buildScheduleEntries(
   userTeamId: string,
 ): ScheduleEntry[] {
   const entries: ScheduleEntry[] = [];
-  const season = matches[0]?.season ?? 1;
-  const weekByRound = new Map(buildMatchweekDates(season).map((w) => [w.round, w] as const));
-  // 라운드 내 순번을 그대로 써서 buildMatches와 같은 슬롯을 얻는다
-  const indexInRound = new Map<number, number>();
   for (const m of matches) {
-    const i = indexInRound.get(m.round) ?? 0;
-    indexInRound.set(m.round, i + 1);
-    const week = weekByRound.get(m.round);
     const involvesUser = m.homeTeamId === userTeamId || m.awayTeamId === userTeamId;
     entries.push({
       id: `se-${m.id}`,
       date: m.date,
-      time: week ? slotFor(week, i).time : "15:00",
+      // 킥오프는 경기가 갖는다 — 엔트리는 비추기만 한다 (재계산하면 어긋난다)
+      time: m.time ?? "15:00",
       type: "match",
       refId: m.id,
       teamId: involvesUser ? userTeamId : null,

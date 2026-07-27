@@ -35,14 +35,14 @@ import {
 } from "@story-fm/domain";
 import type { MatchLedgerState } from "@story-fm/sim";
 import {
-  buildAllLeagueMatches,
   buildScheduleEntries,
   buildSeasonCalendar,
   buildTransferWindows,
   type SeasonCalendar,
 } from "./calendar";
 import { overallFor, playerCatalog } from "./catalog";
-import { TEAM_CATALOG, leagueOfTeam, teamCatalogById } from "./data/team-catalog";
+import { TEAM_CATALOG, teamCatalogById } from "./data/team-catalog";
+import { buildSeasonFixtures, isUserFixture } from "./fixtures";
 import { makeRng, randInt } from "./rng";
 
 /** 채팅 턴 — 도구 호출 기록 포함 (UI가 스킬 칩으로 렌더) */
@@ -560,15 +560,15 @@ export function createGame(input: CreateGameInput): GameState {
     status: "active",
   }));
 
-  // 일정 — 경기 380 + 이적창 개장/폐장
+  // 일정 — 전 리그 + 유럽 대항전 경기 + 이적창 개장/폐장
   const windows = buildTransferWindows(season);
-  // 전 리그 일정 — 다른 리그도 같은 캘린더 골격으로 동시에 진행된다
-  const matches = buildAllLeagueMatches(season, seed);
-  // 일정 축(SCHEDULE_ENTRY)은 **감독의 달력**이다 — 유저 대회 경기만 등록한다.
-  // 타 리그 경기는 state.matches에만 있고 tick이 간이 시뮬로 소화한다.
-  const userLeague = leagueOfTeam(input.userTeamId);
+  // 다른 리그도 같은 캘린더 골격으로 동시에 진행된다
+  const matches = buildSeasonFixtures(season, seed);
+  // 일정 축(SCHEDULE_ENTRY)은 **감독의 달력**이다 — 유저 리그 전체 + 유저 팀
+  // 대항전 경기만 등록한다. 타 리그·타 팀 대항전은 state.matches에만 있고
+  // tick이 간이 시뮬로 소화한다.
   const schedule = buildScheduleEntries(
-    matches.filter((m) => m.competitionId === userLeague),
+    matches.filter((m) => isUserFixture(m, input.userTeamId)),
     windows,
     input.userTeamId,
   );

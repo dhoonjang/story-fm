@@ -2,6 +2,7 @@ import type { GamePlayer, ScheduleEntry, TrainAttr, TrainingSession } from "@sto
 import { ageOf, naturalPositionOf } from "@story-fm/domain";
 import { addDays, dayOfWeek, matchesOn, nextMatchFor, windowOpenOn } from "./calendar";
 import { TEAM_CATALOG, teamCatalogById } from "./data/team-catalog";
+import { competitionShortName } from "./data/cup-catalog";
 import { quickSimulate, type SimSquad } from "./quick-sim";
 import { allMatchesDone, endSeason } from "./season";
 import {
@@ -411,7 +412,7 @@ export function advanceTime(
       state.phase = "matchday";
       const home = userMatch.homeTeamId === state.userTeamId;
       digest.push(
-        `경기일 — R${userMatch.round} ${home ? "홈" : "원정"} vs ${teamName(home ? userMatch.awayTeamId : userMatch.homeTeamId)}`,
+        `경기일 — ${competitionShortName(userMatch.competitionId)} R${userMatch.round} ${home ? "홈" : "원정"} vs ${teamName(home ? userMatch.awayTeamId : userMatch.homeTeamId)}`,
       );
       return { ok: true, digest, stopped: "matchday" };
     }
@@ -446,7 +447,7 @@ export function describeNextFixture(state: GameState): string {
   const next = nextMatchFor(state.matches, state.userTeamId, state.date);
   if (!next) return "남은 일정이 없습니다 — 시즌 마무리 국면입니다.";
   const home = next.homeTeamId === state.userTeamId;
-  return `다음 경기: R${next.round} ${next.date} ${home ? "홈" : "원정"} vs ${teamName(home ? next.awayTeamId : next.homeTeamId)}`;
+  return `다음 경기: ${competitionShortName(next.competitionId)} R${next.round} ${next.date} ${home ? "홈" : "원정"} vs ${teamName(home ? next.awayTeamId : next.homeTeamId)}`;
 }
 
 /** 정지 소화 — 유저 팀 경기가 끝날 때 호출 (경기 단위로 차감) */

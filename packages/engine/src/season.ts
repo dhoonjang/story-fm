@@ -1,13 +1,15 @@
 import type { GamePlayer, PositionGroup } from "@story-fm/domain";
 import { ageOf, naturalPositionOf } from "@story-fm/domain";
 import {
-  buildAllLeagueMatches,
   buildScheduleEntries,
   buildSeasonCalendar,
   buildTransferWindows,
   seasonYear,
 } from "./calendar";
 import { TEAM_CATALOG, leagueOfTeam, teamCatalogById } from "./data/team-catalog";
+import { isCup } from "./data/cup-catalog";
+import { europeanEntrants } from "./europe";
+import { buildSeasonFixtures, isUserFixture } from "./fixtures";
 import { generateYouthPlayer } from "./generate";
 import {
   buildAssignments,
@@ -41,20 +43,24 @@ export interface StandingRow {
 }
 
 /**
- * 리그 순위표 — **대회별로** 계산한다. 생략하면 유저 팀의 리그.
- * 여러 리그가 동시에 진행되므로 팀·경기를 모두 그 리그로 좁혀야 한다.
+ * 순위표 — **대회별로** 계산한다. 생략하면 유저 팀의 리그.
+ *
+ * 여러 리그가 동시에 진행되므로 팀·경기를 모두 그 대회로 좁혀야 한다. 대항전
+ * 리그 페이즈도 단일 순위표라 같은 함수로 계산된다 — 참가 팀만 배정에서 가져온다.
  */
 export function computeStandings(
   state: GameState,
-  leagueId = leagueOfTeam(state.userTeamId),
+  competitionId = leagueOfTeam(state.userTeamId),
 ): StandingRow[] {
+  const members = isCup(competitionId)
+    ? europeanEntrants(competitionId, state.season, state.seed)
+    : state.teams.filter((t) => leagueOfTeam(t.id) === competitionId).map((t) => t.id);
   const rows = new Map<string, StandingRow>();
-  for (const team of state.teams) {
-    if (leagueOfTeam(team.id) !== leagueId) continue;
-    rows.set(team.id, {
-      teamId: team.id,
-      name: teamName(team.id),
-      shortName: teamShortName(team.id),
+  for (const teamId of members) {
+    rows.set(teamId, {
+      teamId,
+      name: teamName(teamId),
+      shortName: teamShortName(teamId),
       played: 0,
       wins: 0,
       draws: 0,
@@ -67,7 +73,7 @@ export function computeStandings(
   }
   for (const match of state.matches) {
     if (!match.result || match.season !== state.season) continue;
-    if (match.competitionId !== leagueId) continue;
+    if (match.competitionId !== competitionId) continue;
     const home = rows.get(match.homeTeamId);
     const away = rows.get(match.awayTeamId);
     if (!home || !away) continue;
@@ -348,12 +354,11 @@ export function transitionSeason(state: GameState): string[] {
   // 새 시즌은 7월 1일(프리시즌·여름 이적창 개장)에서 시작한다
   state.date = nextCalendar.preseasonStart;
   const windows = buildTransferWindows(nextSeason);
-  const matches = buildAllLeagueMatches(nextSeason, state.seed);
-  const userLeague = leagueOfTeam(state.userTeamId);
+  const matches = buildSeasonFixtures(nextSeason, state.seed);
   state.windows = windows;
   state.matches = matches;
   state.schedule = buildScheduleEntries(
-    matches.filter((m) => m.competitionId === userLeague),
+    matches.filter((m) => isUserFixture(m, state.userTeamId)),
     windows,
     state.userTeamId,
   );

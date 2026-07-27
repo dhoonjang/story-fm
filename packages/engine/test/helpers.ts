@@ -3,6 +3,8 @@ import {
   advanceTime,
   assignmentsOf,
   createGame,
+  cupCatalogById,
+  euroCompetitionOf,
   finalizeMatch,
   interpretBackgroundHeuristic,
   isInjured,
@@ -37,6 +39,15 @@ export function createTestGame(seed = 42, teamId = "arsenal"): GameState {
     background,
     attributes: interpretBackgroundHeuristic(background),
   });
+}
+
+/**
+ * 유저 팀의 시즌 경기 수 — 리그 38 + 대항전 리그 페이즈.
+ * 대항전 출전 여부는 시드에 따라 갈리므로 하드코딩하지 않고 파생한다.
+ */
+export function userFixtureCount(state: GameState): number {
+  const cup = euroCompetitionOf(state.userTeamId, state.season, state.seed);
+  return 38 + (cup ? (cupCatalogById(cup)?.matchesPerTeam ?? 0) : 0);
 }
 
 /** 경기일 상태에서 mock 스크립트로 경기를 끝까지 치른다 */

@@ -42,6 +42,29 @@ export function euroMatchdayDates(season: number): string[] {
   });
 }
 
+/**
+ * 대항전 킥오프 슬롯 — [기준 수요일로부터의 일수, 킥오프].
+ *
+ * UCL은 실제처럼 화·수로 쪼개고, 유로파·컨퍼런스는 목요일에 모은다. 킥오프는
+ * 18:45 / 21:00 두 슬롯. 리그와 마찬가지로 **날짜와 시간을 함께** 정한다.
+ */
+const EURO_SLOTS: Record<string, Array<readonly [number, string]>> = {
+  ucl: [
+    [-1, "18:45"],
+    [-1, "21:00"],
+    [0, "18:45"],
+    [0, "21:00"],
+  ],
+  uel: [
+    [1, "18:45"],
+    [1, "21:00"],
+  ],
+  uecl: [
+    [1, "18:45"],
+    [1, "21:00"],
+  ],
+};
+
 /** 이 날짜가 대항전 주중인가 — 리그 주중 라운드가 피해야 하는 자리 */
 export function isEuroWeek(season: number, date: string): boolean {
   return euroMatchdayDates(season).some((d) => Math.abs(daysBetween(d, date)) <= 2);
@@ -145,29 +168,45 @@ export function buildEuroLeaguePhase(
 
   const allRounds = firstHalfPairs(seedOrder(entrants, seed, cupId));
   const dates = euroMatchdayDates(season);
-  // 대회별 요일 — UCL은 화·수, 유로파·컨퍼런스는 하루 뒤 (한 팀이 이틀 연속 뛰지 않게)
-  const dayOffset = cupId === "ucl" ? 0 : 1;
+  const slots = EURO_SLOTS[cupId] ?? EURO_SLOTS.ucl!;
 
   const matches: MatchRecord[] = [];
   allRounds.slice(0, rounds).forEach((pairs, idx) => {
     const round = idx + 1;
     const anchor = dates[idx % dates.length]!;
-    // 같은 대항전 주 안에서 절반은 하루 앞당겨 흩는다
-    const date = addDays(anchor, dayOffset + (round % 2 === 0 ? -1 : 0));
-    for (const [homeTeamId, awayTeamId] of pairs) {
+    // 라운드 안에서 경기를 슬롯에 고르게 흩는다 (라운드마다 순서를 다시 섞는다)
+    const order = shuffled(
+      Array.from({ length: slots.length }, (_, i) => i),
+      round,
+      `euro-slots:${cupId}`,
+    );
+    pairs.forEach(([homeTeamId, awayTeamId], i) => {
+      const [offset, time] = slots[order[i % slots.length]!]!;
       matches.push({
         id: `m-${cupId}-${season}-${round}-${homeTeamId}`,
         season,
         competitionId: cupId,
         round,
-        date,
+        date: addDays(anchor, offset),
+        time,
         homeTeamId,
         awayTeamId,
         result: null,
       });
-    }
+    });
   });
   return matches;
+}
+
+/** 시드 기반 결정적 셔플 — 같은 (seed, channel)이면 항상 같은 순서 */
+function shuffled<T>(items: readonly T[], seed: number, channel: string): T[] {
+  const rng = makeRng(seed, channel);
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [out[i], out[j]] = [out[j]!, out[i]!];
+  }
+  return out;
 }
 
 /** 전 대항전 리그 페이즈 — 새 시즌 생성·전환에서 함께 만든다 */

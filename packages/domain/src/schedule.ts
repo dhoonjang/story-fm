@@ -51,6 +51,11 @@ export const MatchRecordSchema = z.object({
   competitionId: z.string().min(1),
   round: z.number().int().min(1),
   date: DateString,
+  /**
+   * 킥오프 (HH:mm) — 날짜와 **함께** 결정되므로 경기가 직접 갖는다.
+   * SCHEDULE_ENTRY의 time은 이 값을 그대로 비춘다. 구 세이브에는 없어 옵셔널.
+   */
+  time: z.string().regex(/^\d{2}:\d{2}$/).optional(),
   homeTeamId: z.string().min(1),
   awayTeamId: z.string().min(1),
   /** null = 미진행 */

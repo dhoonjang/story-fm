@@ -10,6 +10,7 @@ export * from "./state";
 export * from "./scouting";
 export * from "./lookup";
 export * from "./europe";
+export * from "./fixtures";
 export * from "./onboarding";
 export * from "./quick-sim";
 export * from "./skills";

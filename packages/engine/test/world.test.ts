@@ -12,7 +12,7 @@ import {
   activeContract,
   weeklyWagesOf,
 } from "@story-fm/engine";
-import { createTestGame } from "./helpers";
+import { createTestGame, userFixtureCount } from "./helpers";
 
 describe("선수 카탈로그 (불변 초기치 DB)", () => {
   const catalog = playerCatalog();
@@ -160,7 +160,8 @@ describe("시즌 일정 (일정 축)", () => {
   it("경기·이적창이 SCHEDULE_ENTRY로 등록된다 (시간 포함)", () => {
     const state = createTestGame();
     const matchEntries = state.schedule.filter((e) => e.type === "match");
-    expect(matchEntries).toHaveLength(380);
+    // 우리 리그 380경기 전체 + 우리 팀 대항전 경기 (남의 대항전은 달력에 없다)
+    expect(matchEntries).toHaveLength(380 + (userFixtureCount(state) - 38));
     for (const e of matchEntries) expect(e.time).toMatch(/^\d{2}:\d{2}$/);
     // 이적창 개장·폐장 = 창 2개 × 2
     expect(state.schedule.filter((e) => e.type === "window-open")).toHaveLength(2);

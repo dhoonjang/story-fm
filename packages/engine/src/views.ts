@@ -1,6 +1,7 @@
 import type { AssignmentRole, ScheduleType } from "@story-fm/domain";
 import { ageOf, naturalPositionOf, slotOfTime } from "@story-fm/domain";
 import { nextMatchFor, seasonEndDate } from "./calendar";
+import { competitionShortName, isCup } from "./data/cup-catalog";
 import { computeStandings, type StandingRow } from "./season";
 import {
   activeContract,
@@ -271,7 +272,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
           time: e.time,
           type: e.type,
           status: e.status,
-          title: `R${m.round} ${home ? "홈" : "원정"} vs ${opponent}`,
+          title: `${isCup(m.competitionId) ? `${competitionShortName(m.competitionId)} ` : ""}R${m.round} ${home ? "홈" : "원정"} vs ${opponent}`,
           detail,
           result,
           win,
@@ -381,7 +382,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
     .slice(-5)
     .map(
       (m) =>
-        `R${m.round} ${teamShortName(m.homeTeamId)} ${m.result?.homeGoals}-${m.result?.awayGoals} ${teamShortName(m.awayTeamId)}`,
+        `${isCup(m.competitionId) ? `${competitionShortName(m.competitionId)} ` : ""}R${m.round} ${teamShortName(m.homeTeamId)} ${m.result?.homeGoals}-${m.result?.awayGoals} ${teamShortName(m.awayTeamId)}`,
     );
 
   const lastRecord = state.seasonRecords[state.seasonRecords.length - 1];
@@ -424,7 +425,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       standings,
       userPosition,
       next: next
-        ? `R${next.round} ${next.date} ${next.homeTeamId === userTeamId ? "홈" : "원정"} vs ${teamName(next.homeTeamId === userTeamId ? next.awayTeamId : next.homeTeamId)}`
+        ? `${isCup(next.competitionId) ? `${competitionShortName(next.competitionId)} ` : ""}R${next.round} ${next.date} ${next.homeTeamId === userTeamId ? "홈" : "원정"} vs ${teamName(next.homeTeamId === userTeamId ? next.awayTeamId : next.homeTeamId)}`
         : null,
       recentResults,
     },

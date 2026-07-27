@@ -7,7 +7,14 @@ import {
   setTraining,
   userPlayers,
 } from "@story-fm/engine";
-import { advanceAndPlay, advanceDays, advanceTime, createTestGame, playMockMatch } from "./helpers";
+import {
+  advanceAndPlay,
+  advanceDays,
+  advanceTime,
+  createTestGame,
+  playMockMatch,
+  userFixtureCount,
+} from "./helpers";
 
 describe("오피스 뷰 — 스쿼드", () => {
   it("나이·포지션 목록·계약·배치가 파생 표시된다", () => {
@@ -57,8 +64,8 @@ describe("오피스 뷰 — 달력 (일정 축)", () => {
 
     expect(cal.today).toBe("2026-07-01");
     expect(cal.preseasonStart).toBe("2026-07-01");
-    // 유저 팀 경기만 (38경기)
-    expect(cal.entries.filter((e) => e.type === "match")).toHaveLength(38);
+    // 유저 팀 경기만 (리그 38 + 대항전)
+    expect(cal.entries.filter((e) => e.type === "match")).toHaveLength(userFixtureCount(state));
     const training = cal.entries.find((e) => e.type === "training");
     expect(training?.time).toBe("10:00");
     expect(training?.title).toContain("패스 훈련");
