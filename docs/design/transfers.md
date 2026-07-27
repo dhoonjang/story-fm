@@ -1,0 +1,247 @@
+# 이적·계약 협상 (Transfers & Contracts)
+
+> 상태: **설계 제안 — 검토 대기.** 구현 전이다. 확정되면 이 문서가 단일 소스가 되고
+> AGENTS.md 2장에 요약을 옮긴다.
+
+감독이 말로 협상하고, **코어가 딜 성공 확률을 결정적으로 계산**하고, 그 숫자를
+근거로 **LLM이 상대편이 되어 판정**한다. 장부(이적료·계약·재정)는 코어가 지킨다.
+
+---
+
+## 1. 경계 — 누가 무엇을 정하는가
+
+| | 코어 (결정적) | LLM (창발적) |
+|---|---|---|
+| 시장가·요구액·주급 기대치 | ✅ 공식 | ❌ |
+| **딜 성공 확률 + 근거 분해** | ✅ `dealOdds()` | ❌ |
+| 감독 발화 해석 (누구를·얼마에) | ❌ | ✅ |
+| 오퍼 수락/역제안/결렬 **판정** | ❌ (검증만) | ✅ 확률을 근거로 |
+| 이적료·계약·재정 반영 | ✅ 스킬 | ❌ |
+| 서사 (에이전트의 말, 단장의 태도) | ❌ | ✅ |
+
+LLM이 판정하는 이유: 상대 구단·에이전트는 각자 동기를 가진 에이전트다(비전 1장).
+"4200만을 기대하지만 감독이 UCL 진출권과 출전 보장을 얹었다"는 판단은 공식으로
+환원하면 재미가 빠진다. 대신 **확률이 판단의 앵커**이고, 확률에서 크게 벗어난
+판정은 분포 모니터링에서 드러난다 (§6).
+
+### 확률을 재굴릴 수 없게 하는 장치
+LLM이 판정하면 감독이 같은 조건으로 계속 물어보는 우회가 생긴다. 셋으로 막는다.
+
+1. **오퍼는 시간을 쓴다** — 응답은 2~4일 뒤 (`respondsOn`). 즉답 없음.
+2. **오퍼 횟수 상한** — 한 협상당 3회. 넘으면 코어가 거부한다.
+3. **결렬은 잠금** — `rejected`면 그 창에서 같은 선수에게 다시 오퍼할 수 없다.
+
+이 셋이 "마감일 드라마"(game-loop.md 미해결 항목)를 만든다 — 창이 닫히기 3일 전엔
+한 번의 오퍼가 마지막 기회다.
+
+---
+
+## 2. 데이터 모델
+
+`TRANSFER`는 **원장(사실)** 그대로 둔다. 진행 중 협상은 별도 테이블이다 —
+"완료된 이동"과 "합의 안 된 흥정"을 한 테이블에 섞으면 원장이 더러워진다.
+
+```
+NEGOTIATION (협상)
+  id
+  gamePlayerId
+  kind          "buy" | "sell" | "renew"        ← 1차 범위. 임대는 다음
+  counterpartTeamId | null                       ← renew는 null (상대가 선수 본인)
+  windowId | null                                ← renew는 창 밖에서도 가능
+  openedOn, expiresOn                            ← 창 마감 또는 개설 +14일
+  status        "open" | "agreed" | "rejected" | "expired" | "completed"
+  rounds        NegotiationRound[]
+```
+```
+NegotiationRound (오퍼 한 번 = 한 row, 서사의 원천)
+  date, by: "us" | "them"
+  fee, weeklyWage, contractYears
+  respondsOn                    ← 상대 응답 예정일 (us 오퍼만)
+  probability                   ← 오퍼 시점에 코어가 계산한 확률 (사후 검증용)
+  verdict | null                ← "accept" | "counter" | "reject" (them 응답)
+  note                          ← LLM이 쓴 한 줄 (에이전트의 말)
+```
+
+`status="agreed"` → **수락 스킬**이 `TRANSFER` + `CONTRACT` + 재정 원장을 쓴다.
+그때 `status="completed"`. 합의와 완료를 분리하는 이유: 구단 합의 후 개인 조건
+합의가 남고(실제 이적도 두 단계다), 그 사이에 감독이 물러설 수 있다.
+
+세이브에 저장한다 — 협상은 며칠에 걸쳐 진행되고 파생으로 되돌릴 수 없다.
+
+---
+
+## 3. 코어가 뱉는 것 — `dealOdds()`
+
+```ts
+dealOdds(state, { playerId, kind, fee, weeklyWage, years }): DealOdds
+```
+```ts
+interface DealOdds {
+  probability: number;        // 0~100 — 이 조건이 받아들여질 확률
+  marketValue: number;        // 코어가 본 시장가
+  askingPrice: number;        // 상대가 기대하는 값
+  wageExpectation: number;    // 선수가 원하는 주급
+  factors: Factor[];          // 확률 기여 분해 — { label, delta, why }
+  blockers: string[];         // 확률과 무관하게 막는 것
+}
+```
+
+**`factors`가 핵심이다.** 확률만 주면 LLM이 "왜"를 지어낸다. 분해해서 주면 판정도
+서사도 근거를 갖는다 (디자인 원칙 2 — 납득 가능한 결과).
+
+```
+확률 34%
+  +  기본            50   요구액의 71%를 제시
+  − 요구액 미달     -28   상대는 £42M을 기대한다
+  +  주급 충족       +9   선수 기대(£180k)를 넘겼다
+  +  대항전 출전권   +6   UCL에 나가는 팀이다
+  − 출전 경쟁       -11   같은 포지션에 82 OVR 주전이 있다
+  +  감독 협상력     +8   협상 71
+차단: (없음)
+```
+
+### 3.1 시장가 — 결정적 공식
+
+```
+marketValue = base(overall)
+            × ageCurve(age, potential)
+            × formBonus(form, 최근 출전·득점)
+            × contractFactor(계약 잔여)
+            × leagueFactor(리그 계수)
+```
+
+| 요소 | 규칙 |
+|---|---|
+| `base` | 주급 곡선과 같은 계열: `(ovr/40)^4.2 × 6,000 × 450` — 85 OVR ≈ £66M |
+| `ageCurve` | 24~27 ×1.0 · 21 이하는 잠재력 반영 최대 ×1.35 · 30 ×0.6 · 33 ×0.3 |
+| `formBonus` | 폼 ±3 → ×0.9~1.12 |
+| `contractFactor` | 3년+ ×1.0 · 2년 ×0.85 · 1년 ×0.45 · 만료 **자유계약(이적료 0)** |
+| `leagueFactor` | 리그 계수 1~5 → ×1.1 ~ ×0.85 |
+
+`askingPrice = marketValue × sellerStance`, `sellerStance`는 상대 사정:
+주전 여부(+), 같은 포지션 과잉(−), 재정난(−), 계약 1년 남음(−), 우리와 라이벌(+).
+
+### 3.2 확률 — 두 관문의 곱
+
+```
+p_club   = σ( (fee / askingPrice − 1) × 6  + sellerPressure )
+p_player = σ( (wage / wageExpectation − 1) × 5 + playerPull )
+probability = p_club × p_player × urgency(창 마감까지 남은 일수)
+```
+- `sellerPressure` — 파는 쪽이 팔아야 할 이유 (재정·잉여·계약 만료 임박)
+- `playerPull` — 선수가 오고 싶은 이유 (우리 평판·대항전·출전 기회·리그 격차·감독 평판)
+- 감독의 `negotiation` 능력치가 두 항에 계수로 들어간다 (결정 #13)
+
+### 3.3 정보 비대칭 — 확률에도 안개가 낀다
+
+우리가 보는 숫자는 **지식 수준**(scouting.ts)에 따라 흐려진다. 스카우팅이 협상에서
+값을 갖는 지점이다.
+
+| 지식 | 시장가·확률 |
+|---|---|
+| `own` / `scouted` | 정확한 숫자 |
+| `seen` (직접 상대해 봄) | ±10%p 밴드 — "반반쯤 보인다" |
+| `rumoured` (평판뿐) | ±20%p 밴드 — 숫자 없이 라벨만 |
+
+오차는 시드 해시로 결정적이다 (같은 질문에 같은 답 — 기존 안개 규칙과 동일).
+
+---
+
+## 4. 스킬 (상태 변경) · 조회 도구 (읽기 전용)
+
+| 도구 | 종류 | 하는 일 |
+|---|---|---|
+| `deal_odds` | 조회 | 위 `DealOdds`. **상태를 바꾸지 않는다** |
+| `list_negotiations` | 조회 | 진행 중 협상 요약 |
+| `send_offer` | 스킬 | 협상 개설(없으면) + 오퍼 라운드 기록 + `respondsOn` 설정 |
+| `respond_offer` | 스킬 | **상대 판정** — accept/counter/reject + 한 줄 근거. GM이 상대편이 되어 호출 |
+| `accept_deal` | 스킬 | `agreed` 협상을 실행 — TRANSFER·CONTRACT·재정 반영 |
+| `withdraw_offer` | 스킬 | 협상 철회 (status → rejected) |
+
+### `respond_offer`의 코어 검증
+LLM이 판정하지만 코어가 **가능한 판정만** 받는다.
+
+- `probability`가 5% 미만이면 `accept` 거부 — "그 값에 팔 구단은 없다"
+- `counter`의 역제안액은 `[fee, askingPrice × 1.15]` 안이어야 한다 (터무니없는 부르기 차단)
+- 오퍼 횟수·창·결렬 잠금 위반은 거부
+- 판정은 `respondsOn` 이후에만 (미리 답할 수 없다)
+
+### `accept_deal`의 코어 검증
+- 창 열림 (`buy`/`sell`), 협상 `status="agreed"`
+- **이적 예산** ≥ 이적료 (game-loop.md §검증 범위: 예산·주급만)
+- 파는 쪽 스쿼드 최소 인원 유지 (포지션군 하한 — 기존 `GROUP_TARGET` 재사용)
+- 선수 소속이 협상 상대와 일치 (그 사이 다른 팀이 데려갔으면 무효)
+
+실행:
+```
+TRANSFER row (fee, windowId, type="transfer"|"free")
+기존 CONTRACT status="ended" → 새 CONTRACT (weeklyWage, years)
+재정: 우리 지출 + 상대 수입, transferBudget 차감
+GAME_PLAYER.teamId 변경 → 새 팀 배치는 예비 스쿼드 (감독이 라인업에 넣는다)
+NARRATIVE_NOTE (salience 4)
+```
+
+---
+
+## 5. 흐름
+
+```
+감독  "저 9번 3천만에 데려올 수 있나?"
+  GM → deal_odds(fee=30M)         코어: 34% · 요구 £42M · 주급 기대 £180k · factors
+  GM  "3천만은 어렵습니다. 상대는 4200만을 기대하고, 주급도 18만은 맞춰줘야…"
+
+감독  "4천만까지 써봐. 주급은 19만."
+  GM → deal_odds(40M, 190k)       코어: 61%
+  GM → send_offer(...)            코어: 협상 개설 · 응답 예정 3일 뒤
+  GM  "오퍼 넣었습니다. 사흘 안에 답이 옵니다."
+
+(advance_time 3일)
+  tick: 응답 예정일 도달 → 감독에게 알림 (attention 정지)
+  GM → deal_odds(재계산)          코어: 61% (조건 그대로)
+  GM → respond_offer("counter", fee=44M)   ← GM이 상대 단장이 되어 판정
+  GM  "4400만이면 놓아준다고 합니다. 마감이 나흘 남았습니다."
+
+감독  "받아."
+  GM → send_offer(44M) → (2일) → respond_offer("accept")
+  GM → accept_deal()              코어: TRANSFER·CONTRACT·재정 기록
+  GM  "계약 완료. 예산은 £4600만 남았습니다."
+```
+
+`sell`(우리 선수를 원하는 오퍼)은 방향만 바뀐다 — tick이 AI 구단의 오퍼를
+`them` 라운드로 만들고(감독의 결정이 필요한 이벤트 = attention 정지), 감독이
+수락하면 `accept_deal`이 반대로 실행된다.
+
+---
+
+## 6. 검증 — 분포 모니터링
+
+LLM이 판정하므로 시드 재현으로는 못 잡는다. AGENTS 6장 4의 원칙대로 **분포**를 본다.
+
+- `NegotiationRound.probability`와 실제 `verdict`를 함께 저장한다
+- 확률대별 수락률을 집계하는 스크립트: 20~40% 구간에서 수락률이 70%면 LLM이
+  후한 것이고, 프롬프트를 고친다
+- **mock 모드는 결정적** — `probability ≥ 50`이면 수락, `≥ 25`면 역제안, 아니면 결렬.
+  테스트는 전부 mock으로 돈다 (LLM 없이 협상 전체 흐름을 검증)
+- 코어 공식 단위 테스트: 시장가 곡선(나이·계약 잔여·리그), 확률 단조성
+  (제시액이 오르면 확률이 내려가지 않는다), 안개 밴드의 결정성
+
+---
+
+## 7. 1차 범위에서 빼는 것
+
+- **임대** (`loan`) — 구조는 `kind`에 자리를 뒀다
+- **AI ↔ AI 이적** — 타 구단끼리의 시장 (game-loop.md 남은 질문 #17). 없으면
+  스쿼드가 고정돼 몰입이 깎이지만, 감독 협상 루프를 먼저 세운다
+- **에이전트 수수료·보너스 조항·바이백** — 서사 재료로는 매력적이지만 장부가 복잡해진다
+- **선수단 등록 제한(25인·홈그로운)** — game-loop.md에서 이미 제외로 정했다
+
+---
+
+## 8. 확인이 필요한 밸런스 수치
+
+| 항목 | 제안 | 근거 |
+|---|---|---|
+| 시장가 계수 | 주급 × 450 (85 OVR ≈ £66M) | tier 1 이적 예산 £90M로 최상급 1명 + 보강 |
+| 오퍼 응답 | 2~4일 | 창 30~60일 안에 3~4번의 협상 사이클 |
+| 오퍼 횟수 상한 | 협상당 3회 | 흥정은 되고 난사는 안 되는 선 |
+| 확률 기울기 | 요구액 대비 ±10%가 확률 ±15%p | 흥정이 의미를 갖는 민감도 |
