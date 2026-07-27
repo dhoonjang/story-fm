@@ -291,6 +291,26 @@ textarea {
   border-color: var(--danger);
   color: var(--danger);
 }
+.admin-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 12px 0 4px;
+}
+.admin-pager .mini-btn:disabled {
+  opacity: 0.35;
+}
+.admin-page-info {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  margin: 0 4px;
+}
+.admin-page-info .ai.num {
+  width: 56px;
+}
 .admin-add {
   background: var(--panel);
   border: 1px solid var(--accent-2);

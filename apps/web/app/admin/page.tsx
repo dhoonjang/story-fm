@@ -60,6 +60,9 @@ const POSITIONS = [
 
 type Draft = Record<string, number | string>;
 
+const PAGE_SIZES = [25, 50, 100, 200] as const;
+const DEFAULT_PAGE_SIZE = 50;
+
 export default function AdminPage() {
   const [teams, setTeams] = useState<CatalogTeam[]>([]);
   const [edited, setEdited] = useState(false);
@@ -71,6 +74,8 @@ export default function AdminPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
+  const [page, setPage] = useState(1);
 
   const applyResponse = useCallback((data: { teams: CatalogTeam[]; edited?: boolean; ageRef?: string }) => {
     setTeams(data.teams ?? []);
@@ -107,6 +112,18 @@ export default function AdminPage() {
       return true;
     });
   }, [flat, teamFilter, query]);
+
+  /** 필터·검색·페이지 크기가 바뀌면 첫 페이지로 */
+  useEffect(() => setPage(1), [teamFilter, query, pageSize]);
+
+  // 삭제 등으로 목록이 줄어 현재 페이지가 사라졌으면 마지막 페이지로 접는다.
+  const pageCount = Math.max(1, Math.ceil(visible.length / pageSize));
+  const current = Math.min(page, pageCount);
+  const from = (current - 1) * pageSize;
+  const paged = useMemo(
+    () => visible.slice(from, from + pageSize),
+    [visible, from, pageSize],
+  );
 
   function draftOf(p: CatalogPlayer): Draft {
     return (
@@ -234,7 +251,23 @@ export default function AdminPage() {
           onChange={(e) => setQuery(e.target.value)}
           data-testid="admin-search"
         />
-        <span className="admin-count">{visible.length}명</span>
+        <span className="admin-count" data-testid="admin-count">
+          {visible.length === 0
+            ? "0명"
+            : `${(from + 1).toLocaleString()}–${(from + paged.length).toLocaleString()} / ${visible.length.toLocaleString()}명`}
+        </span>
+        <select
+          value={pageSize}
+          onChange={(e) => setPageSize(Number(e.target.value))}
+          data-testid="admin-page-size"
+          aria-label="페이지당 선수 수"
+        >
+          {PAGE_SIZES.map((n) => (
+            <option key={n} value={n}>
+              {n}명씩
+            </option>
+          ))}
+        </select>
         <button
           className="primary-btn"
           onClick={() => setShowAdd((s) => !s)}
@@ -278,7 +311,7 @@ export default function AdminPage() {
             </tr>
           </thead>
           <tbody>
-            {visible.map((p) => {
+            {paged.map((p) => {
               const d = draftOf(p);
               const dirty = !!drafts[p.id];
               return (
@@ -361,6 +394,59 @@ export default function AdminPage() {
           </tbody>
         </table>
       </div>
+
+      {visible.length > 0 && (
+        <nav className="admin-pager" data-testid="admin-pager" aria-label="페이지 이동">
+          <button
+            className="mini-btn"
+            onClick={() => setPage(1)}
+            disabled={current === 1}
+            data-testid="admin-page-first"
+          >
+            ‹‹
+          </button>
+          <button
+            className="mini-btn"
+            onClick={() => setPage(current - 1)}
+            disabled={current === 1}
+            data-testid="admin-page-prev"
+          >
+            이전
+          </button>
+          <span className="admin-page-info" data-testid="admin-page-info">
+            <input
+              className="ai num"
+              type="number"
+              min={1}
+              max={pageCount}
+              value={current}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                if (Number.isFinite(n)) setPage(Math.min(Math.max(1, Math.trunc(n)), pageCount));
+              }}
+              aria-label="페이지 번호"
+              data-testid="admin-page-input"
+            />
+            <span className="muted"> / {pageCount}</span>
+          </span>
+          <button
+            className="mini-btn"
+            onClick={() => setPage(current + 1)}
+            disabled={current === pageCount}
+            data-testid="admin-page-next"
+          >
+            다음
+          </button>
+          <button
+            className="mini-btn"
+            onClick={() => setPage(pageCount)}
+            disabled={current === pageCount}
+            data-testid="admin-page-last"
+          >
+            ››
+          </button>
+        </nav>
+      )}
     </main>
   );
 }
