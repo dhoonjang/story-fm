@@ -2,6 +2,7 @@ import type { MatchRecord, ScheduleEntry, TransferWindow } from "@story-fm/domai
 import { LEAGUE_CATALOG } from "./data/league-catalog";
 import { teamsOfLeague } from "./data/team-catalog";
 import { makeRng } from "./rng";
+import { isEuroWeek } from "./europe";
 
 /**
  * 시즌 캘린더 (v6) — 게임은 7월 1일(여름 이적창 개장)에 시작해 프리시즌을 보내고
@@ -219,7 +220,8 @@ export function buildMatchweekDates(season: number): Matchweek[] {
       `${y}-${pad(w.to[0])}-${pad(w.to[1])}`,
       3, // 수요일
     );
-    if (midweek) push(midweek, "midweek");
+    // 대항전 주중은 리그가 비켜준다 — 실제 리그도 UCL 주에 주중 경기를 넣지 않는다
+    if (midweek && !isEuroWeek(season, midweek)) push(midweek, "midweek");
   }
 
   anchors.sort((a, b) => (a.date < b.date ? -1 : 1));
@@ -274,8 +276,11 @@ export function buildTransferWindows(season: number): TransferWindow[] {
  */
 const SECOND_HALF_ORDER_20 = [5, 12, 2, 13, 1, 6, 17, 18, 10, 15, 9, 14, 4, 7, 16, 0, 3, 8, 11];
 
-/** 전반기 대진 — 원형(circle method) + 홈/어웨이 교대로 브레이크를 최소화한다 */
-function firstHalfPairs(teamIds: string[]): Array<Array<[string, string]>> {
+/**
+ * 원형(circle method) 라운드로빈 + 홈/어웨이 교대 — **각 라운드가 완전 매칭**이다.
+ * 리그 전반기 편성이자 대항전 리그 페이즈의 기반 (europe.ts).
+ */
+export function firstHalfPairs(teamIds: string[]): Array<Array<[string, string]>> {
   const n = teamIds.length;
   const fixed = n - 1;
   const rounds: Array<Array<[string, string]>> = [];
