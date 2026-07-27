@@ -1,13 +1,25 @@
 import type { MatchEvent } from "@story-fm/domain";
 import {
+  acceptDeal,
   advanceMockSegment,
   advanceTime,
+  answerIncomingOffer,
   applyTeamTalk,
   applyTalkToPlayer,
+  arrivedResponses,
   buildOfficeViews,
+  dealOdds,
+  describeNegotiations,
   describeNextFixture,
+  describeOdds,
   finalizeMatch,
+  incomingOffer,
+  incomingOffers,
+  pendingOffer,
   playerById,
+  respondOffer,
+  sendOffer,
+  suggestTerms,
   setCaptain,
   setTactics,
   setTraining,
@@ -130,9 +142,11 @@ const WEEKDAY_KEYWORDS: Array<[RegExp, string]> = [
   [/토요일/u, "6"],
 ];
 
-function detectPlayer(state: GameState, message: string) {
-  // 이름 조각(2자 이상)으로 탐색 — 성/이름 어느 쪽이든
-  for (const player of userPlayers(state)) {
+function detectPlayer(state: GameState, message: string, scope: "ours" | "all" = "ours") {
+  // 이름 조각(2자 이상)으로 탐색 — 성/이름 어느 쪽이든.
+  // 이적 이야기는 타 팀 선수를 지목하므로 scope="all"로 전체를 본다.
+  const pool = scope === "all" ? [...userPlayers(state), ...state.players] : userPlayers(state);
+  for (const player of pool) {
     const parts = [player.name, ...player.name.split(" ")];
     if (parts.some((part) => part.length >= 2 && message.includes(part))) return player;
   }
@@ -273,6 +287,83 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
       text: result.ok
         ? `@수석코치: *수첩에 받아 적는다* ${result.message}. 세션에 반영합니다.`
         : `@수석코치: ${result.message}`,
+      toolCalls: calls,
+    };
+  }
+
+  // ── 이적 협상 (mock) — 판정은 확률로 결정적으로 한다 (설계 §6) ──
+  // 실모드에서는 LLM이 상대편이 되어 판정하지만, mock은 테스트가 재현 가능해야
+  // 하므로 확률 구간으로 가른다: 50% 이상 수락 · 25% 이상 역제안 · 아니면 결렬.
+  if (/협상|오퍼|이적|영입|매각|팔|사자|데려/u.test(msg)) {
+    const incoming = incomingOffers(state)[0];
+    // ① 받은 오퍼가 있으면 그것부터 — 감독의 뜻을 읽는다
+    if (incoming) {
+      const offer = incomingOffer(incoming)!;
+      const player = playerById(state, incoming.gamePlayerId);
+      const verdict = /거절|안 팔|안팔|거부/u.test(msg)
+        ? "reject"
+        : /더|올려|비싸|높여/u.test(msg)
+          ? "counter"
+          : "accept";
+      const input = {
+        negotiationId: incoming.id,
+        verdict,
+        ...(verdict === "counter" ? { fee: Math.round(offer.fee * 1.25) } : {}),
+      } as const;
+      const result = answerIncomingOffer(state, input);
+      calls.push({ name: "answer_incoming_offer", summary: result.message, input });
+      let text = `@수석코치: ${result.message}`;
+      if (result.ok && verdict === "accept") {
+        const done = acceptDeal(state, incoming.id);
+        calls.push({ name: "accept_deal", summary: done.message });
+        text = `@수석코치: ${done.message}`;
+      }
+      return {
+        text: `@: *${player?.name ?? ""} 건으로 사무실 전화가 울린다*\n${text}`,
+        toolCalls: calls,
+      };
+    }
+
+    // ② 답이 도착한 우리 오퍼가 있으면 상대편이 되어 판정한다
+    const arrived = arrivedResponses(state)[0];
+    if (arrived) {
+      const offer = pendingOffer(arrived)!;
+      const verdict =
+        offer.probability >= 50 ? "accept" : offer.probability >= 25 ? "counter" : "reject";
+      const input = {
+        negotiationId: arrived.id,
+        verdict,
+        note: verdict === "accept" ? "그 값이면 놓아준다" : "그 값으로는 어렵다",
+      } as const;
+      const result = respondOffer(state, input);
+      calls.push({ name: "respond_offer", summary: result.message, input });
+      let text = `@수석코치: ${result.message}`;
+      if (result.ok && verdict === "accept") {
+        const done = acceptDeal(state, arrived.id);
+        calls.push({ name: "accept_deal", summary: done.message });
+        text += `\n@수석코치: ${done.message}`;
+      }
+      return { text, toolCalls: calls };
+    }
+
+    // ③ 감독이 지목한 선수에게 오퍼를 넣는다 — 금액은 코어의 기본값
+    const wanted = detectPlayer(state, msg, "all");
+    if (wanted && wanted.teamId !== state.userTeamId) {
+      const terms = suggestTerms(state, wanted.id);
+      if (terms) {
+        const odds = dealOdds(state, terms);
+        const result = sendOffer(state, terms);
+        calls.push({ name: "send_offer", summary: result.message, input: terms });
+        return {
+          text: result.ok
+            ? `@수석코치: ${describeOdds(odds).split("\n")[0]}. ${result.message}`
+            : `@수석코치: ${result.message}`,
+          toolCalls: calls,
+        };
+      }
+    }
+    return {
+      text: `@수석코치: ${describeNegotiations(state)}`,
       toolCalls: calls,
     };
   }

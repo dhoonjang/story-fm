@@ -3,7 +3,7 @@ import path from "node:path";
 import { z } from "zod";
 import { dataDir } from "@story-fm/engine";
 
-export type SkillGroup = "진행" | "전술·훈련" | "대화·서사" | "조회" | "경기";
+export type SkillGroup = "진행" | "전술·훈련" | "대화·서사" | "조회" | "경기" | "이적";
 
 export interface SkillCatalogEntry {
   name: string;
@@ -139,6 +139,61 @@ export const SKILL_CATALOG = [
     readOnly: false,
     description:
       "타 팀 선수에게 스카우트를 파견한다. 며칠 뒤 보고서가 완료되면 능력치를 정확히 파악하지만 잠재력은 공개되지 않는다. 진지한 영입 검토나 상대 핵심 분석에 사용하며 동시 파견 한도가 있다.",
+  },
+  {
+    name: "deal_odds",
+    label: "딜 성공 확률",
+    group: "이적",
+    readOnly: true,
+    description:
+      "이 조건이면 이적이 성사될지 코어가 계산한 확률과 그 근거(요구액·주급 기대치·기여 항목)를 준다. 상태를 바꾸지 않으므로 감독에게 답하기 전에 반드시 확인하라. kind를 sell로 주면 매각 방향(사는 쪽이 그 값을 낼지·선수가 떠날지)으로 계산한다.",
+  },
+  {
+    name: "list_negotiations",
+    label: "협상 목록",
+    group: "이적",
+    readOnly: true,
+    description:
+      "진행 중인 협상을 요약한다. negotiationId를 주면 오퍼 이력과 현재 확률 근거까지 자세히 본다.",
+  },
+  {
+    name: "send_offer",
+    label: "오퍼 전송",
+    group: "이적",
+    readOnly: false,
+    description:
+      "타 팀 선수에게 이적 오퍼를 넣는다. 감독이 승인한 금액으로만 보내고, 넣기 전에 deal_odds로 확률을 확인하라. 답은 며칠 뒤에 온다 — 같은 조건을 반복하면 상대가 지쳐 확률이 떨어진다.",
+  },
+  {
+    name: "respond_offer",
+    label: "상대 판정",
+    group: "이적",
+    readOnly: false,
+    description:
+      "**상대 구단·에이전트가 되어** 우리 오퍼에 답한다 (accept·counter·reject). deal_odds의 확률과 근거를 앵커로 삼아 판정하고, note에 상대의 말을 한 줄 남긴다. counter는 우리 제시액 이상 요구액 +15% 이하만 가능하다.",
+  },
+  {
+    name: "answer_incoming_offer",
+    label: "받은 오퍼 답변",
+    group: "이적",
+    readOnly: false,
+    description:
+      "AI 구단이 우리 선수에게 넣은 오퍼에 감독의 뜻대로 답한다 (accept·counter·reject). counter는 받은 금액보다 높아야 하고, 그러면 사는 쪽이 판정할 차례가 된다.",
+  },
+  {
+    name: "accept_deal",
+    label: "계약 확정",
+    group: "이적",
+    readOnly: false,
+    description:
+      "합의된 협상을 실행한다 — 이적료·계약·재정·소속이 함께 반영된다. 합의만으로는 이적이 아니므로 감독의 확인을 받고 호출하라.",
+  },
+  {
+    name: "withdraw_offer",
+    label: "협상 철회",
+    group: "이적",
+    readOnly: false,
+    description: "진행 중인 협상에서 물러난다. 그 창에서 같은 선수에게 다시 오퍼할 수 없다.",
   },
   {
     name: "log_match_events",

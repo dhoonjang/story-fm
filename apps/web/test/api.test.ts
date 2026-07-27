@@ -25,6 +25,7 @@ import {
   PUT as skillsPut,
   DELETE as skillsReset,
 } from "../app/api/admin/skills/route";
+import { SKILL_CATALOG } from "@story-fm/agents";
 import { cupCatalogById } from "@story-fm/engine";
 import type { GamePayload } from "../lib/store";
 
@@ -394,7 +395,9 @@ describe("API — 온보딩부터 경기까지", () => {
       edited: boolean;
     };
     expect(initial.edited).toBe(false);
-    expect(initial.skills).toHaveLength(17);
+    // 도구가 늘어도 깨지지 않게 카탈로그와 맞춘다 (숫자를 박으면 기능 추가마다 손댄다)
+    expect(initial.skills).toHaveLength(SKILL_CATALOG.length);
+    expect(initial.skills.some((skill) => skill.name === "deal_odds")).toBe(true);
     expect(initial.skills.find((skill) => skill.name === "get_player")?.readOnly).toBe(true);
 
     const descriptions = Object.fromEntries(

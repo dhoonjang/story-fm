@@ -19,8 +19,18 @@ import {
   playerCard,
   playerName,
   refreshPacket,
+  acceptDeal,
+  answerIncomingOffer,
+  dealOdds,
+  describeNegotiation,
+  describeNegotiations,
+  describeOdds,
+  respondOffer,
   scoutPlayer,
   scoutingSummary,
+  sendOffer,
+  suggestTerms,
+  withdrawOffer,
   searchPlayers,
   setCaptain,
   setLineup,
@@ -69,6 +79,7 @@ export const GM_SYSTEM = `당신은 스토리 기반 풋볼 매니저의 게임 
 2. 모호하거나 규칙 위반인 지시는 실행하지 말고 픽션 안에서 반문하라. 예) "@수석코치: 성호는 부상 중인데, 그래도 선발로 쓰시겠습니까?".
 3. **모르는 것을 지어내지 마라.** 주어지는 것은 스쿼드 명부(id·이름·주포지션)와 상태 요약뿐이다. 그 밖의 사실 — 능력치·컨디션·계약·성장, 타 팀 선수, 순위표, 지난·앞으로의 일정 — 은 반드시 조회 도구로 확인한 뒤 답하라. 기억이나 인상으로 수치·이름을 만들어내는 것은 절대 하면 안된다.
 4. 시간은 advance_time으로만 흐른다. 대화에 따라 시간이 적절히 흐르도록 advance_time을 사용해라.
+5. **이적 협상의 판정은 확률에 근거하라.** 금액을 논하기 전에 deal_odds로 성사 확률과 근거를 확인하고, 감독에게는 그 근거를 말로 풀어 전하라("상대는 4200만을 기대합니다"). 우리 오퍼에 답할 때(respond_offer)는 **상대 구단 단장이 되어** 그 확률대로 판정하라 — 확률이 높으면 대체로 받아들이고, 낮으면 역제안하거나 거절한다. 확률을 무시한 판정은 하지 않는다.
 
 # 진행
 - 감독이 진행을 원하면 advance_time 을 사용하고 그동안 진행된 일들 중 중요한 내용을 골라서 보고하라.
@@ -443,6 +454,134 @@ export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpe
       z.object({ playerId: z.string().min(1) }),
       (input) => scoutPlayer(state, input.playerId),
     ),
+
+    // ── 이적 협상 — 확률은 코어가, 판정은 GM이 (docs/design/transfers.md) ──
+    read(
+      "deal_odds",
+      descriptions.deal_odds,
+      obj(
+        {
+          playerId: str,
+          fee: int(0, 500_000_000),
+          weeklyWage: int(0, 2_000_000),
+          years: int(1, 6),
+          kind: { type: "string", enum: ["buy", "sell"] },
+        },
+        ["playerId"],
+      ),
+      z.object({
+        playerId: z.string().min(1),
+        fee: z.number().min(0).optional(),
+        weeklyWage: z.number().min(0).optional(),
+        years: z.number().int().min(1).max(6).optional(),
+        kind: z.enum(["buy", "sell"]).optional(),
+      }),
+      (input) => {
+        // 금액을 말하지 않았으면 기본값(요구액·주급 기대치)으로 본다
+        const suggested = suggestTerms(state, input.playerId);
+        if (!suggested) return { ok: false, message: `"${input.playerId}" 선수를 찾지 못했습니다` };
+        const odds = dealOdds(state, {
+          ...suggested,
+          ...(input.fee !== undefined ? { fee: input.fee } : {}),
+          ...(input.weeklyWage !== undefined ? { weeklyWage: input.weeklyWage } : {}),
+          ...(input.years !== undefined ? { years: input.years } : {}),
+          ...(input.kind ? { kind: input.kind } : {}),
+        });
+        return { ok: true, message: describeOdds(odds) };
+      },
+    ),
+    read(
+      "list_negotiations",
+      descriptions.list_negotiations,
+      obj({ negotiationId: str }, []),
+      z.object({ negotiationId: z.string().min(1).optional() }),
+      (input) => ({
+        ok: true,
+        message: input.negotiationId
+          ? describeNegotiation(state, input.negotiationId)
+          : describeNegotiations(state),
+      }),
+    ),
+    wrap(
+      "send_offer",
+      descriptions.send_offer,
+      obj(
+        {
+          playerId: str,
+          fee: int(0, 500_000_000),
+          weeklyWage: int(0, 2_000_000),
+          years: int(1, 6),
+        },
+        ["playerId", "fee", "weeklyWage"],
+      ),
+      z.object({
+        playerId: z.string().min(1),
+        fee: z.number().min(0),
+        weeklyWage: z.number().min(0),
+        years: z.number().int().min(1).max(6).optional(),
+      }),
+      (input) =>
+        sendOffer(state, {
+          playerId: input.playerId,
+          fee: input.fee,
+          weeklyWage: input.weeklyWage,
+          years: input.years ?? 4,
+        }),
+    ),
+    wrap(
+      "respond_offer",
+      descriptions.respond_offer,
+      obj(
+        {
+          negotiationId: str,
+          verdict: { type: "string", enum: ["accept", "counter", "reject"] },
+          fee: int(0, 500_000_000),
+          weeklyWage: int(0, 2_000_000),
+          note: str,
+        },
+        ["negotiationId", "verdict"],
+      ),
+      z.object({
+        negotiationId: z.string().min(1),
+        verdict: z.enum(["accept", "counter", "reject"]),
+        fee: z.number().min(0).optional(),
+        weeklyWage: z.number().min(0).optional(),
+        note: z.string().max(200).optional(),
+      }),
+      (input) => respondOffer(state, input),
+    ),
+    wrap(
+      "answer_incoming_offer",
+      descriptions.answer_incoming_offer,
+      obj(
+        {
+          negotiationId: str,
+          verdict: { type: "string", enum: ["accept", "counter", "reject"] },
+          fee: int(0, 500_000_000),
+        },
+        ["negotiationId", "verdict"],
+      ),
+      z.object({
+        negotiationId: z.string().min(1),
+        verdict: z.enum(["accept", "counter", "reject"]),
+        fee: z.number().min(0).optional(),
+      }),
+      (input) => answerIncomingOffer(state, input),
+    ),
+    wrap(
+      "accept_deal",
+      descriptions.accept_deal,
+      obj({ negotiationId: str }, ["negotiationId"]),
+      z.object({ negotiationId: z.string().min(1) }),
+      (input) => acceptDeal(state, input.negotiationId),
+    ),
+    wrap(
+      "withdraw_offer",
+      descriptions.withdraw_offer,
+      obj({ negotiationId: str }, ["negotiationId"]),
+      z.object({ negotiationId: z.string().min(1) }),
+      (input) => withdrawOffer(state, input.negotiationId),
+    ),
   ];
 }
 
@@ -544,6 +683,11 @@ export function buildGmStateNote(state: GameState): string {
       : `예정 훈련 없음 — 감독이 지시해야 등록된다`,
     alerts.length > 0 ? `주의: ${alerts.join(" · ")}` : `주의: 없음`,
   ];
+  // 협상은 있을 때만 — 없으면 한 줄도 쓰지 않는다 (매 턴 정가로 읽히는 블록이다)
+  const negotiations = describeNegotiations(state);
+  if (!negotiations.startsWith("진행 중인 협상 없음")) {
+    lines.push(`협상:\n${negotiations}`);
+  }
   const recent = state.narrative.slice(-4).map((n) => `${n.date} ${n.text}`);
   if (recent.length > 0) lines.push(`최근 사건: ${recent.join(" / ")}`);
   return lines.join("\n");

@@ -1,10 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  addDays,
   createGame,
+  financeOf,
+  generateIncomingOffers,
+  incomingOffers,
   interpretBackgroundHeuristic,
+  openNegotiationFor,
+  pendingOffer,
+  playerById,
+  suggestTerms,
   tacticsOf,
-  userPlayers,
   type GameState,
+  userPlayers,
 } from "@story-fm/engine";
 import { buildOnboardingTurn, runMockGmTurn } from "@story-fm/agents";
 
@@ -130,5 +138,48 @@ describe("mock GM — 유저 여정 시나리오", () => {
     expectGmGrammar(turn.text);
     expect(turn.toolCalls).toHaveLength(0);
     expect(turn.text).toContain("다음 경기");
+  });
+});
+
+describe("mock GM — 이적 협상", () => {
+  it("선수를 지목하면 오퍼를 넣고, 답이 오면 확률대로 판정한다", () => {
+    const state = newGame(42);
+    // 살 수 있는 상대 팀 선수를 하나 고른다
+    const budget = financeOf(state, state.userTeamId).transferBudget;
+    const wanted = state.players.find((p) => {
+      if (p.teamId === state.userTeamId) return false;
+      const terms = suggestTerms(state, p.id);
+      return terms !== null && terms.fee > 1_000_000 && terms.fee < budget * 0.5;
+    })!;
+
+    const sent = runMockGmTurn(state, `${wanted.name} 데려오자`);
+    expect(sent.toolCalls.map((c) => c.name)).toContain("send_offer");
+    const negotiation = openNegotiationFor(state, wanted.id)!;
+    expect(negotiation).toBeDefined();
+
+    // 답이 오는 날로 이동한 뒤 다시 물으면 상대편이 되어 판정한다
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+    const answered = runMockGmTurn(state, "협상 어떻게 됐나");
+    expect(answered.toolCalls.map((c) => c.name)).toContain("respond_offer");
+    expect(["agreed", "rejected", "open", "completed"]).toContain(negotiation.status);
+    // 수락됐다면 계약까지 확정한다 (mock은 확률 50% 이상에서 수락)
+    if (pendingOffer(negotiation) === null && negotiation.status === "completed") {
+      expect(playerById(state, wanted.id)!.teamId).toBe(state.userTeamId);
+    }
+  });
+
+  it("받은 오퍼는 감독의 말에 따라 거절·역제안·수락된다", () => {
+    const state = newGame(42);
+    const digest: string[] = [];
+    for (let i = 0; i < 60 && incomingOffers(state).length === 0; i++) {
+      state.date = addDays(state.date, 1);
+      generateIncomingOffers(state, digest);
+    }
+    const incoming = incomingOffers(state)[0]!;
+    expect(incoming).toBeDefined();
+
+    const refused = runMockGmTurn(state, "그 오퍼는 거절해");
+    expect(refused.toolCalls.map((c) => c.name)).toContain("answer_incoming_offer");
+    expect(incoming.status).toBe("rejected");
   });
 });
