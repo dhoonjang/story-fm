@@ -45,6 +45,10 @@ describe("시장가", () => {
   it("나이·계약 잔여·리그가 값을 움직인다", () => {
     const state = createTestGame(42);
     const player = pick(state, 78);
+    // 기준선은 **긴 계약**에서 잡는다 — 시드 계약이 1년 미만이면 아래 단축 비교가
+    // 같은 계수(0.45)에 걸려 무의미해진다
+    const contract = activeContract(state, player.id)!;
+    contract.until = `${Number(state.date.slice(0, 4)) + 4}-06-30`;
     const baseline = marketValueOf(state, player);
 
     // 서른셋은 절반 이하
@@ -52,13 +56,10 @@ describe("시장가", () => {
     expect(marketValueOf(state, old)).toBeLessThan(baseline * 0.6);
 
     // 계약이 곧 끝나면 값이 빠지고, 만료되면 이적료가 0이다
-    const contract = activeContract(state, player.id)!;
-    const until = contract.until;
     contract.until = `${state.date.slice(0, 4)}-12-31`;
     expect(marketValueOf(state, player)).toBeLessThan(baseline);
     contract.until = state.date;
     expect(marketValueOf(state, player)).toBe(0);
-    contract.until = until;
   });
 
   it("유망주는 잠재력만큼 프리미엄이 붙는다", () => {

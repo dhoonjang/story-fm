@@ -1,9 +1,10 @@
 import type { GamePlayer, ScheduleEntry, TrainAttr, TrainingSession } from "@story-fm/domain";
-import { ageOf, naturalPositionOf } from "@story-fm/domain";
+import { ATTRIBUTE_AXES, ageOf, naturalPositionOf } from "@story-fm/domain";
 import { addDays, dayOfWeek, matchesOn, nextMatchFor, windowOpenOn } from "./calendar";
 import { TEAM_CATALOG, teamCatalogById } from "./data/team-catalog";
 import { competitionShortName, stageLabel } from "./data/cup-catalog";
 import { advanceEuroKnockouts } from "./euro-knockout";
+import { arrivedResponses, expireNegotiations, pendingOffer } from "./negotiation";
 import { quickSimulate, type SimSquad } from "./quick-sim";
 import { allMatchesDone, endSeason } from "./season";
 import {
@@ -63,9 +64,8 @@ const ATTR_KO: Record<string, string> = {
   tactical: "전술 적응",
   recovery: "회복",
 };
-const TRAINABLE_ATTRS = new Set([
-  "pace", "shooting", "passing", "dribbling", "defending", "physical", "goalkeeping",
-]);
+/** 훈련으로 올릴 수 있는 축 — 15축 전부 (tactical·recovery는 능력치가 아니다) */
+const TRAINABLE_ATTRS = new Set<string>(ATTRIBUTE_AXES);
 
 /** 월별 재정 상수 (£) — 팀 tier 기준. balance.md 초안 수치 */
 const TV_MONTHLY: Record<1 | 2 | 3 | 4, number> = { 1: 13_000_000, 2: 12_000_000, 3: 11_000_000, 4: 10_000_000 };
@@ -298,6 +298,18 @@ function dailyTick(state: GameState, digest: string[]): boolean {
       pushNarrative(state, `${gripe.name} 출전 불만`, 3);
       needsAttention = true;
     }
+  }
+
+  // 협상 — 기한 경과 처리 + 상대의 답 도착 알림 (감독의 결정이 필요한 이벤트)
+  expireNegotiations(state, digest);
+  for (const negotiation of arrivedResponses(state)) {
+    const player = playerById(state, negotiation.gamePlayerId);
+    const offer = pendingOffer(negotiation);
+    if (!player || !offer) continue;
+    digest.push(
+      `📨 ${teamName(negotiation.counterpartTeamId ?? "")}에서 ${player.name} 오퍼(£${(offer.fee / 1_000_000).toFixed(1)}M)에 대한 답이 도착했습니다`,
+    );
+    needsAttention = true;
   }
 
   // 이적창 개장·폐장 안내
