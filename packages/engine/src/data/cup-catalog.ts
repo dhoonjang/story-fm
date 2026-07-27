@@ -10,6 +10,7 @@
  * **5대 리그 배정분만** 참가한다 (UCL 24 · UEL 16 · UECL 10 = 50클럽).
  * 하위 리그를 추가하면 아약스·벤피카·셀틱 같은 실제 참가 팀으로 36팀을 채운다.
  */
+import type { MatchStage } from "@story-fm/domain";
 import { leagueName } from "./league-catalog";
 
 export interface CupCatalogEntry {
@@ -27,9 +28,16 @@ export interface CupCatalogEntry {
    * UCL 5장(잉글랜드·스페인·이탈리아·독일) + 4장(프랑스)은 실제 배정과 같다.
    */
   slots: Record<string, number>;
-  /** 리그 페이즈 통과 — 상위 n팀은 16강 직행, 그 아래 m팀은 플레이오프 */
-  directTo16: number;
-  playoffTeams: number;
+  /**
+   * 리그 페이즈 통과 — 상위 `directSlots`팀은 본선 직행, 그 아래 `playoffSlots`팀은
+   * 플레이오프(2차전제)를 거친다. 나머지는 탈락이다.
+   *
+   * 본선 대진 수는 `directSlots + playoffSlots / 2`이고 **2의 거듭제곱**이어야
+   * 한다 (테스트로 고정). 실제 UCL은 36팀 = 8직행 + 16플레이오프 + 12탈락이고,
+   * 우리는 5대 리그 배정분만 참가하므로 24 = 8 + 16 + 0이다.
+   */
+  directSlots: number;
+  playoffSlots: number;
 }
 
 export const CUP_CATALOG: readonly CupCatalogEntry[] = [
@@ -40,8 +48,8 @@ export const CUP_CATALOG: readonly CupCatalogEntry[] = [
     size: 24,
     matchesPerTeam: 8,
     slots: { epl: 5, laliga: 5, seriea: 5, bundesliga: 5, ligue1: 4 },
-    directTo16: 8,
-    playoffTeams: 16,
+    directSlots: 8,
+    playoffSlots: 16,
   },
   {
     id: "uel",
@@ -50,8 +58,8 @@ export const CUP_CATALOG: readonly CupCatalogEntry[] = [
     size: 16,
     matchesPerTeam: 6,
     slots: { epl: 4, laliga: 3, seriea: 3, bundesliga: 3, ligue1: 3 },
-    directTo16: 4,
-    playoffTeams: 8,
+    directSlots: 4,
+    playoffSlots: 8,
   },
   {
     id: "uecl",
@@ -60,8 +68,8 @@ export const CUP_CATALOG: readonly CupCatalogEntry[] = [
     size: 10,
     matchesPerTeam: 6,
     slots: { epl: 2, laliga: 2, seriea: 2, bundesliga: 2, ligue1: 2 },
-    directTo16: 2,
-    playoffTeams: 8,
+    directSlots: 2,
+    playoffSlots: 4,
   },
 ];
 
@@ -82,4 +90,39 @@ export function competitionName(competitionId: string): string {
 
 export function competitionShortName(competitionId: string): string {
   return BY_ID.get(competitionId)?.short ?? leagueName(competitionId);
+}
+
+/** 본선 대진 수 — 직행 + 플레이오프 승자 */
+export function knockoutBracketSize(cup: CupCatalogEntry): number {
+  return cup.directSlots + cup.playoffSlots / 2;
+}
+
+/**
+ * 이 대회가 치르는 단계 순서 — 플레이오프부터 결승까지.
+ * 본선 대진 수가 대회 규모마다 달라서(UCL 16 · UEL 8 · UECL 4) 시작 단계도 다르다.
+ */
+export function knockoutStages(cup: CupCatalogEntry): MatchStage[] {
+  const bracket = knockoutBracketSize(cup);
+  const main: MatchStage[] = [];
+  if (bracket >= 16) main.push("r16");
+  if (bracket >= 8) main.push("qf");
+  if (bracket >= 4) main.push("sf");
+  main.push("final");
+  return cup.playoffSlots > 0 ? ["playoff", ...main] : main;
+}
+
+const STAGE_KO: Record<MatchStage, string> = {
+  league: "리그 페이즈",
+  playoff: "플레이오프",
+  r16: "16강",
+  qf: "8강",
+  sf: "준결승",
+  final: "결승",
+};
+
+/** 단계 표기 — 달력·일지·브리핑에 쓴다 (2차전제는 차수까지) */
+export function stageLabel(stage: MatchStage, round = 1, twoLegged = true): string {
+  if (stage === "league") return `R${round}`;
+  if (stage === "final" || !twoLegged) return STAGE_KO[stage];
+  return `${STAGE_KO[stage]} ${round}차전`;
 }

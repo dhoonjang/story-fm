@@ -38,8 +38,20 @@ export const MatchResultSchema = z.object({
    */
   homeLineup: z.array(z.string()).optional(),
   awayLineup: z.array(z.string()).optional(),
+  /**
+   * 승부차기 — 녹아웃에서 합계가 같을 때만. 정규시간 스코어는 위 goals에 남고
+   * 승자는 이 값으로 갈린다 (2021년부터 원정 다득점 규칙은 없다).
+   */
+  penalties: z.object({ home: z.number().int().min(0), away: z.number().int().min(0) }).optional(),
 });
 export type MatchResult = z.infer<typeof MatchResultSchema>;
+
+/**
+ * 대회 단계 — 리그(정규 라운드)와 녹아웃. 없으면 리그로 본다(구 세이브 호환).
+ * 녹아웃은 `round`가 차수(1차전/2차전)를 가리킨다 — 결승은 단판이라 항상 1.
+ */
+export const MatchStageSchema = z.enum(["league", "playoff", "r16", "qf", "sf", "final"]);
+export type MatchStage = z.infer<typeof MatchStageSchema>;
 
 export const MatchRecordSchema = z.object({
   id: z.string().min(1),
@@ -49,8 +61,11 @@ export const MatchRecordSchema = z.object({
    * 순위표는 대회별로 따로 계산되고, 여러 리그가 동시에 진행된다.
    */
   competitionId: z.string().min(1),
+  stage: MatchStageSchema.optional(),
   round: z.number().int().min(1),
   date: DateString,
+  /** 중립 경기장 — 결승. 홈 어드밴티지를 주지 않는다 */
+  neutral: z.boolean().optional(),
   /**
    * 킥오프 (HH:mm) — 날짜와 **함께** 결정되므로 경기가 직접 갖는다.
    * SCHEDULE_ENTRY의 time은 이 값을 그대로 비춘다. 구 세이브에는 없어 옵셔널.

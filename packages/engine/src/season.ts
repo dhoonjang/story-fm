@@ -7,7 +7,9 @@ import {
   seasonYear,
 } from "./calendar";
 import { TEAM_CATALOG, leagueOfTeam, teamCatalogById } from "./data/team-catalog";
-import { isCup } from "./data/cup-catalog";
+import { CUP_CATALOG, competitionShortName, isCup } from "./data/cup-catalog";
+import { leagueName } from "./data/league-catalog";
+import { euroChampion, euroStageMatches } from "./euro-knockout";
 import { europeanEntrants } from "./europe";
 import { buildSeasonFixtures, isUserFixture } from "./fixtures";
 import { generateYouthPlayer } from "./generate";
@@ -74,6 +76,8 @@ export function computeStandings(
   for (const match of state.matches) {
     if (!match.result || match.season !== state.season) continue;
     if (match.competitionId !== competitionId) continue;
+    // 녹아웃은 순위표에 들어가지 않는다 — 리그 페이즈만 줄을 세운다
+    if ((match.stage ?? "league") !== "league") continue;
     const home = rows.get(match.homeTeamId);
     const away = rows.get(match.awayTeamId);
     if (!home || !away) continue;
@@ -107,13 +111,19 @@ export function computeStandings(
 }
 
 /**
- * 시즌 종료 판정 — **유저 리그** 기준. 다른 리그는 며칠 차이로 끝날 수 있으므로
- * 전 리그를 기다리면 시즌 전환이 어중간하게 늦춰진다.
+ * 시즌 종료 판정 — **유저 리그 + 유럽 대항전** 기준. 다른 리그는 며칠 차이로 끝날
+ * 수 있으므로 전 리그를 기다리면 시즌 전환이 어중간하게 늦춰진다.
+ *
+ * 대항전을 기다리는 이유: 결승은 리그 최종전 **다음 토요일**이다. 리그만 보면
+ * 결승을 치르지 않은 채 시즌이 넘어가 우승 팀이 없는 대회가 남는다.
  */
 export function allMatchesDone(state: GameState): boolean {
   const league = leagueOfTeam(state.userTeamId);
   return state.matches
-    .filter((m) => m.season === state.season && m.competitionId === league)
+    .filter(
+      (m) =>
+        m.season === state.season && (m.competitionId === league || isCup(m.competitionId)),
+    )
     .every((m) => m.result !== null);
 }
 
@@ -149,6 +159,38 @@ function checkAchievements(state: GameState, position: number, row: StandingRow)
   if (tier === 4 && position <= 17) add("survivor", "생존왕", "잔류권 팀을 안전하게 지켜냈다");
 }
 
+/**
+ * 대항전 결산 — 우승/준우승을 트로피·평판에 반영한다.
+ *
+ * 결승은 리그 최종전 다음 토요일이라 `allMatchesDone`이 그것까지 기다린다.
+ * 시즌 리뷰가 우승을 확정하는 단일 지점이다 (매일 tick에서 중복 보고하지 않는다).
+ */
+function reviewEuropeanCampaign(state: GameState): string[] {
+  const digest: string[] = [];
+  for (const cup of CUP_CATALOG) {
+    const champion = euroChampion(state, cup.id);
+    if (!champion) continue;
+    const finalMatch = euroStageMatches(state, cup.id, "final")[0];
+    const ours =
+      finalMatch !== undefined &&
+      (finalMatch.homeTeamId === state.userTeamId || finalMatch.awayTeamId === state.userTeamId);
+    if (champion === state.userTeamId) {
+      state.trophies.push({ season: state.season, competition: cup.name, teamId: champion });
+      state.manager.reputation.media = Math.min(100, state.manager.reputation.media + 10);
+      state.manager.reputation.board = Math.min(100, state.manager.reputation.board + 10);
+      digest.push(`🏆 ${cup.name} 우승! 유럽 정상에 올랐다`);
+      pushNarrative(state, `${cup.name} 우승`, 5);
+    } else if (ours) {
+      state.manager.reputation.media = Math.min(100, state.manager.reputation.media + 4);
+      digest.push(`${competitionShortName(cup.id)} 준우승 — 결승에서 ${teamName(champion)}에 무너졌다`);
+      pushNarrative(state, `${competitionShortName(cup.id)} 준우승`, 4);
+    } else {
+      digest.push(`${competitionShortName(cup.id)} 우승: ${teamName(champion)}`);
+    }
+  }
+  return digest;
+}
+
 /** 시즌 리뷰 — 보드 평가·트로피·업적을 감독 커리어에 적재 */
 export function reviewSeason(state: GameState): string[] {
   const digest: string[] = [];
@@ -170,11 +212,12 @@ export function reviewSeason(state: GameState): string[] {
   if (position === 1) {
     state.trophies.push({
       season: state.season,
-      competition: "프리미어리그",
+      competition: leagueName(leagueOfTeam(state.userTeamId)),
       teamId: state.userTeamId,
     });
-    digest.push("🏆 프리미어리그 우승! 트로피 보관함에 추가되었다");
+    digest.push(`🏆 ${leagueName(leagueOfTeam(state.userTeamId))} 우승! 트로피 보관함에 추가되었다`);
   }
+  digest.push(...reviewEuropeanCampaign(state));
   checkAchievements(state, position, row);
 
   state.seasonRecords.push({

@@ -63,15 +63,23 @@ const BLANK_WEEKENDS: Array<{ label: string; from: number; to: number }> = [
 /**
  * 주중 라운드 후보 — 실제 EPL이 주중 경기를 넣는 시기 순.
  * 휴식기로 잃은 라운드를 여기서 메운다. 필요한 만큼만 앞에서 채운다.
+ *
+ * 창을 넉넉히 둔 이유: 대항전이 주중 16회(리그 페이즈 8 + 녹아웃 8)를 예약하고
+ * 리그는 그 주를 비켜 가므로, 후보가 빠듯하면 38라운드를 채우지 못한다.
+ * 각 창 안에서 **대항전 주가 아닌 수요일**을 찾아 쓴다.
  */
 const MIDWEEK_WINDOWS: Array<{ from: [number, number]; to: [number, number] }> = [
   { from: [1, 20], to: [1, 28] },
-  { from: [4, 7], to: [4, 15] },
-  { from: [2, 10], to: [2, 18] },
-  { from: [12, 8], to: [12, 16] },
-  { from: [3, 10], to: [3, 18] },
   { from: [4, 21], to: [4, 29] },
   { from: [9, 22], to: [9, 30] },
+  { from: [12, 16], to: [12, 23] },
+  { from: [2, 24], to: [3, 3] },
+  { from: [1, 6], to: [1, 13] },
+  { from: [3, 17], to: [3, 24] },
+  { from: [10, 28], to: [11, 4] },
+  { from: [11, 11], to: [11, 18] },
+  { from: [12, 2], to: [12, 9] },
+  { from: [5, 12], to: [5, 19] },
 ];
 
 /**
@@ -213,15 +221,15 @@ export function buildMatchweekDates(season: number): Matchweek[] {
   // 휴식기로 잃은 라운드를 주중 경기로 메운다
   for (const w of MIDWEEK_WINDOWS) {
     if (anchors.length >= 37) break;
-    const y = w.from[0] >= 8 ? year : year + 1;
     const pad = (n: number) => String(n).padStart(2, "0");
-    const midweek = firstDowInRange(
-      `${y}-${pad(w.from[0])}-${pad(w.from[1])}`,
-      `${y}-${pad(w.to[0])}-${pad(w.to[1])}`,
-      3, // 수요일
-    );
-    // 대항전 주중은 리그가 비켜준다 — 실제 리그도 UCL 주에 주중 경기를 넣지 않는다
-    if (midweek && !isEuroWeek(season, midweek)) push(midweek, "midweek");
+    const at = (md: [number, number]) =>
+      `${md[0] >= 8 ? year : year + 1}-${pad(md[0])}-${pad(md[1])}`;
+    // 창 안의 수요일을 차례로 본다 — 대항전 주중은 리그가 비켜준다
+    // (실제 리그도 UCL 주에 주중 경기를 넣지 않는다)
+    for (let d = at(w.from); d <= at(w.to); d = addDays(d, 1)) {
+      if (dayOfWeek(d) !== 3 || isEuroWeek(season, d)) continue;
+      if (push(d, "midweek")) break;
+    }
   }
 
   anchors.sort((a, b) => (a.date < b.date ? -1 : 1));

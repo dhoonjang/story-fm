@@ -65,9 +65,68 @@ const EURO_SLOTS: Record<string, Array<readonly [number, string]>> = {
   ],
 };
 
+/**
+ * 녹아웃 경기일 — 단계별 [1차전, 2차전] 기준 날짜. 실제 UCL 일정 골격을 따른다
+ * (플레이오프 2월 → 16강 3월 초 → 8강 4월 초 → 준결승 4월 말·5월 초).
+ *
+ * 전부 **수요일**에 둔다. 리그 주중 라운드는 이 주를 비켜 가고(`isEuroWeek`),
+ * 주말 라운드는 금~월에만 열리므로 수요일은 앞뒤로 최소 이틀이 남는다 — 리그
+ * 페이즈처럼 화·목으로 흩으면 월→화, 목→금 연전이 생겨 맞교환이 필요해진다.
+ * (실제 대회는 화·수로 쪼개지만, 축소된 규모에선 한 날에 몰아도 8경기다.)
+ */
+const KNOCKOUT_MATCHDAYS: Record<string, Array<[number, number]>> = {
+  playoff: [
+    [2, 10],
+    [2, 17],
+  ],
+  r16: [
+    [3, 3],
+    [3, 10],
+  ],
+  qf: [
+    [4, 7],
+    [4, 14],
+  ],
+  sf: [
+    [4, 28],
+    [5, 5],
+  ],
+};
+
+function wednesdayOn(season: number, [month, day]: [number, number]): string {
+  const year = seasonYear(season) + (month >= 8 ? 0 : 1);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  let date = `${year}-${pad(month)}-${pad(day)}`;
+  while (dayOfWeek(date) !== 3) date = addDays(date, 1);
+  return date;
+}
+
+/**
+ * 이 단계의 경기일 — 2차전제는 [1차전, 2차전], 결승은 단판 하나.
+ *
+ * 결승은 리그 최종전(5월 마지막 일요일) **다음 토요일**이다. 실제 UCL 결승도
+ * 도메스틱 시즌이 끝난 뒤에 열린다. 시즌 전환은 7/1이므로 6월 초는 비어 있다.
+ */
+export function knockoutDates(season: number, stage: string): string[] {
+  if (stage === "final") {
+    let last = `${seasonYear(season) + 1}-05-31`;
+    while (dayOfWeek(last) !== 0) last = addDays(last, -1);
+    return [addDays(last, 6)];
+  }
+  return (KNOCKOUT_MATCHDAYS[stage] ?? []).map((anchor) => wednesdayOn(season, anchor));
+}
+
+/** 대항전이 예약한 주중 전부 — 리그 페이즈 8회 + 녹아웃 8회 */
+export function reservedEuroDates(season: number): string[] {
+  return [
+    ...euroMatchdayDates(season),
+    ...Object.keys(KNOCKOUT_MATCHDAYS).flatMap((stage) => knockoutDates(season, stage)),
+  ];
+}
+
 /** 이 날짜가 대항전 주중인가 — 리그 주중 라운드가 피해야 하는 자리 */
 export function isEuroWeek(season: number, date: string): boolean {
-  return euroMatchdayDates(season).some((d) => Math.abs(daysBetween(d, date)) <= 2);
+  return reservedEuroDates(season).some((d) => Math.abs(daysBetween(d, date)) <= 2);
 }
 
 function daysBetween(a: string, b: string): number {

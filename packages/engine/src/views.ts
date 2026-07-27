@@ -1,7 +1,7 @@
 import type { AssignmentRole, ScheduleType } from "@story-fm/domain";
 import { ageOf, naturalPositionOf, slotOfTime } from "@story-fm/domain";
 import { nextMatchFor, seasonEndDate } from "./calendar";
-import { competitionShortName, isCup } from "./data/cup-catalog";
+import { competitionShortName, isCup, stageLabel } from "./data/cup-catalog";
 import { computeStandings, type StandingRow } from "./season";
 import {
   activeContract,
@@ -272,7 +272,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
           time: e.time,
           type: e.type,
           status: e.status,
-          title: `${isCup(m.competitionId) ? `${competitionShortName(m.competitionId)} ` : ""}R${m.round} ${home ? "홈" : "원정"} vs ${opponent}`,
+          title: `${isCup(m.competitionId) ? `${competitionShortName(m.competitionId)} ` : ""}${stageLabel(m.stage ?? "league", m.round)} ${m.neutral ? "중립" : home ? "홈" : "원정"} vs ${opponent}`,
           detail,
           result,
           win,
@@ -382,7 +382,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
     .slice(-5)
     .map(
       (m) =>
-        `${isCup(m.competitionId) ? `${competitionShortName(m.competitionId)} ` : ""}R${m.round} ${teamShortName(m.homeTeamId)} ${m.result?.homeGoals}-${m.result?.awayGoals} ${teamShortName(m.awayTeamId)}`,
+        `${isCup(m.competitionId) ? `${competitionShortName(m.competitionId)} ` : ""}${stageLabel(m.stage ?? "league", m.round)} ${teamShortName(m.homeTeamId)} ${m.result?.homeGoals}-${m.result?.awayGoals} ${teamShortName(m.awayTeamId)}${m.result?.penalties ? ` (승부차기 ${m.result.penalties.home}-${m.result.penalties.away})` : ""}`,
     );
 
   const lastRecord = state.seasonRecords[state.seasonRecords.length - 1];
@@ -425,7 +425,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       standings,
       userPosition,
       next: next
-        ? `${isCup(next.competitionId) ? `${competitionShortName(next.competitionId)} ` : ""}R${next.round} ${next.date} ${next.homeTeamId === userTeamId ? "홈" : "원정"} vs ${teamName(next.homeTeamId === userTeamId ? next.awayTeamId : next.homeTeamId)}`
+        ? `${isCup(next.competitionId) ? `${competitionShortName(next.competitionId)} ` : ""}${stageLabel(next.stage ?? "league", next.round)} ${next.date} ${next.neutral ? "중립" : next.homeTeamId === userTeamId ? "홈" : "원정"} vs ${teamName(next.homeTeamId === userTeamId ? next.awayTeamId : next.homeTeamId)}`
         : null,
       recentResults,
     },

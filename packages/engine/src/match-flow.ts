@@ -35,6 +35,7 @@ import {
   type GameState,
   type MatchScriptSegment,
 } from "./state";
+import { competitionShortName, stageLabel } from "./data/cup-catalog";
 import { makeRng } from "./rng";
 import { YELLOWS_PER_SUSPENSION } from "@story-fm/domain";
 
@@ -241,7 +242,7 @@ export function startMatch(state: GameState): FlowResult {
     squadOf(match.homeTeamId, state.pendingMatch.ledger.home.onPitch),
     squadOf(match.awayTeamId, state.pendingMatch.ledger.away.onPitch),
     state.seed,
-    `${state.season}:${match.round}:user`,
+    `${state.season}:${match.competitionId}:${match.stage ?? "league"}:${match.round}:user`,
   );
   const note = lineup.replaced.length > 0 ? ` (자동 대체: ${lineup.replaced.join(", ")})` : "";
   return { ok: true, message: `킥오프 준비 완료${note}` };
@@ -475,7 +476,7 @@ export function finalizeMatch(state: GameState): string[] {
   }
 
   // 경기 중 부상 확정 → INJURY row
-  const rng = makeRng(state.seed, `injury:${state.season}:${match.round}`);
+  const rng = makeRng(state.seed, `injury:${state.season}:${match.competitionId}:${match.stage ?? "league"}:${match.round}`);
   for (const e of ledger.events) {
     if (e.type !== "injury" || e.team !== side || !e.actors[0]) continue;
     const player = roster.find((p) => p.id === e.actors[0]);
@@ -484,14 +485,14 @@ export function finalizeMatch(state: GameState): string[] {
     digest.push(`부상: ${player.name} — ${part}, 약 ${days}일 결장 예상`);
   }
 
-  // 재정 — 홈 경기 입장 수입 (원장 기록)
-  if (side === "home") {
+  // 재정 — 홈 경기 입장 수입 (원장 기록). 중립 경기(결승)는 우리 수입이 아니다
+  if (side === "home" && !match.neutral) {
     const tier = teamCatalogById(state.userTeamId)?.tier ?? 3;
     recordFinance(
       state,
       state.userTeamId,
       "income",
-      `홈 입장 수입 (R${match.round} vs ${teamShortName(match.awayTeamId)})`,
+      `홈 입장 수입 (${competitionShortName(match.competitionId)} ${stageLabel(match.stage ?? "league", match.round)} vs ${teamShortName(match.awayTeamId)})`,
       TICKET[tier],
     );
   }
@@ -518,7 +519,7 @@ export function finalizeMatch(state: GameState): string[] {
   const outcomeKo = outcome === "win" ? "승리" : outcome === "draw" ? "무승부" : "패배";
   pushNarrative(
     state,
-    `R${match.round} vs ${teamName(opponentId)} ${scoreline} ${outcomeKo}`,
+    `${competitionShortName(match.competitionId)} ${stageLabel(match.stage ?? "league", match.round)} vs ${teamName(opponentId)} ${scoreline} ${outcomeKo}`,
     outcome === "win" ? 4 : 3,
   );
   digest.push(`최종 스코어 ${scoreline} — ${outcomeKo}`, ...messages);
