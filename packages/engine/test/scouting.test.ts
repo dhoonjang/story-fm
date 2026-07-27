@@ -12,6 +12,12 @@ import {
   OBSERVATION_MARGIN,
   SCOUT_ATTRS,
   type GameState,
+  ADAPTATION_DAYS,
+  adaptationDaysLeft,
+  knowledgeNote,
+  playerById,
+  buildOfficeViews,
+  addDays,
 } from "@story-fm/engine";
 import { SCOUT_CONCURRENT_LIMIT, SCOUT_DAYS } from "@story-fm/domain";
 import { advanceAndPlay, createTestGame } from "./helpers";
@@ -207,5 +213,79 @@ describe("스카우트 파견 규칙", () => {
   it("없는 선수는 반려한다", () => {
     const state = createTestGame(11);
     expect(scoutPlayer(state, "ghost-player").ok).toBe(false);
+  });
+});
+
+describe("적응 기간 — 영입 직후엔 스카우트 수준의 오차가 남는다", () => {
+  /** 타 팀 선수를 우리 팀으로 옮기고 TRANSFER 원장에 남긴다 (협상 스킬의 결과만 모사) */
+  function signPlayer(state: ReturnType<typeof createTestGame>, playerId: string) {
+    const player = playerById(state, playerId)!;
+    const fromTeamId = player.teamId;
+    player.teamId = state.userTeamId;
+    state.transfers.push({
+      id: `t-${playerId}`,
+      gamePlayerId: playerId,
+      windowId: null,
+      fromTeamId,
+      toTeamId: state.userTeamId,
+      date: state.date,
+      type: "transfer",
+      fee: 0,
+    });
+  }
+
+  it("영입 당일은 adapting — 우리 선수인데도 수치를 단정하지 못한다", () => {
+    const state = createTestGame(11);
+    const target = anyOpponent(state);
+    signPlayer(state, target.id);
+
+    expect(knowledgeOf(state, target.id)).toBe("adapting");
+    for (const attr of scoutedAttributes(state, target)) {
+      expect(attr.exact, `${attr.key}는 적응 중엔 확정되지 않는다`).toBeNull();
+    }
+    // 오차 폭은 스카우트 수준과 같다
+    for (const axis of SCOUT_ATTRS) {
+      const limit = OBSERVATION_MARGIN[AXIS_OBSERVABILITY[axis]].adapting;
+      const observed = observedRating(state, target.id, axis, target.attributes[axis]);
+      expect(Math.abs(observed - target.attributes[axis])).toBeLessThanOrEqual(limit);
+    }
+    // 잠재력은 안다 — 메디컬·훈련 데이터는 우리 것이다
+    expect(potentialView(state, target)).toContain("POT");
+    expect(knowledgeNote(state, target.id)).toContain("적응 중");
+  });
+
+  it("적응 기간이 지나면 own — 수치가 정확해진다", () => {
+    const state = createTestGame(11);
+    const target = anyOpponent(state);
+    signPlayer(state, target.id);
+    // 날짜만 밀어 적응 기간을 넘긴다 (advanceTime은 경기일에서 멈추므로 직접 이동)
+    state.date = addDays(state.date, ADAPTATION_DAYS);
+
+    expect(knowledgeOf(state, target.id)).toBe("own");
+    for (const attr of scoutedAttributes(state, target)) {
+      expect(attr.exact).not.toBeNull();
+    }
+    expect(adaptationDaysLeft(state, target.id)).toBe(0);
+  });
+
+  it("원소속 선수는 적응 기간이 없다 — 이미 함께해 온 선수다", () => {
+    const state = createTestGame(11);
+    for (const p of userPlayers(state)) {
+      expect(knowledgeOf(state, p.id)).toBe("own");
+      expect(adaptationDaysLeft(state, p.id)).toBe(0);
+    }
+  });
+
+  it("오피스 스쿼드 뷰도 적응 중 선수는 추정치를 보여준다", () => {
+    const state = createTestGame(11);
+    const target = anyOpponent(state);
+    const trueOverall = target.attributes.overall;
+    signPlayer(state, target.id);
+    const row = buildOfficeViews(state).squad.players.find((p) => p.id === target.id)!;
+    expect(row.adaptationDaysLeft).toBeGreaterThan(0);
+    // 종합은 판단 계열을 포함하므로 분석형 오차 — 참값과 다를 수 있어야 안개가 작동한다
+    expect(Math.abs(row.overall - trueOverall)).toBeLessThanOrEqual(
+      OBSERVATION_MARGIN.analytical.adapting,
+    );
   });
 });

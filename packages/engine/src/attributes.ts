@@ -117,7 +117,7 @@ export function deriveAxes(
   const stamina = clamp99(
     strength * 0.75 +
       pace * 0.2 +
-      bias(slot, { FB: 6, CM: 5, W: 3, DM: 2, ST: 0, CB: -2, AM: 1, GK: -22 }) +
+      bias(slot, { FB: 6, CM: 5, W: 3, DM: 2, ST: 0, CB: -2, AM: 1, GK: -8 }) +
       jitter(nameEn, "stamina", 4),
   );
 
@@ -134,12 +134,14 @@ export function deriveAxes(
       jitter(nameEn, "kicking", 6),
   );
 
+  // 패스 정확도와 시야는 상관은 있지만 같은 것이 아니다 — "정확하지만 상상력 없는"
+  // 선수가 나오도록 종속을 낮추고 편차를 키운다 (라이스 vs 외데고르)
   const vision = clamp99(
-    passing * 0.85 +
-      dribbling * 0.1 -
-      4 +
+    passing * 0.7 +
+      dribbling * 0.2 +
+      2 +
       bias(slot, { AM: 8, CM: 5, DM: 2, W: 0, FB: -2, ST: -2, CB: -6, GK: -12 }) +
-      jitter(nameEn, "vision", 5),
+      jitter(nameEn, "vision", 9),
   );
 
   // 수비 자리는 수비 지표에서, 공격 자리는 마무리 지표에서 끌어온다
@@ -153,20 +155,24 @@ export function deriveAxes(
   const ageBonus = age >= 30 ? 5 : age >= 27 ? 3 : age <= 21 ? -6 : age <= 23 ? -3 : 0;
   const composure = clamp99(50 + (level - 60) * 1.05 + ageBonus + jitter(nameEn, "composure", 6));
 
+  // 성향은 실력과 독립적이어야 재미가 있다 — 약하지만 거친 선수, 강하지만 얌전한 선수.
+  // 그래서 능력 기여를 낮추고 개인 편차를 크게 잡는다.
   const aggression = clamp99(
-    tackling * 0.35 +
-      strength * 0.3 +
-      18 +
+    tackling * 0.2 +
+      strength * 0.2 +
+      32 +
       bias(slot, { CB: 6, DM: 6, FB: 2, CM: 2, ST: 0, W: -2, AM: -4, GK: -10 }) +
-      jitter(nameEn, "aggression", 8),
+      jitter(nameEn, "aggression", 14),
   );
 
+  // 나이·수준과 함께 오르지만, 다른 축과 같은 0~99 스케일에서 읽혀야 한다
+  // (어린 선수도 30대, 베테랑 주장은 70대 — 성향이라 편차를 크게 잡는다)
   const leadership = clamp99(
-    20 +
-      Math.min(28, Math.max(0, age - 18) * 1.8) +
-      (level - 70) * 0.8 +
-      bias(slot, { GK: 3, CB: 3, DM: 2, CM: 0, FB: 0, AM: 0, W: -2, ST: 0 }) +
-      jitter(nameEn, "leadership", 9),
+    32 +
+      Math.min(22, Math.max(0, age - 18) * 1.3) +
+      (level - 70) * 0.5 +
+      bias(slot, { GK: 4, CB: 3, DM: 2, CM: 0, FB: 0, AM: 0, W: -2, ST: 0 }) +
+      jitter(nameEn, "leadership", 11),
   );
 
   return {

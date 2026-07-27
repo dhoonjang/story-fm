@@ -136,14 +136,17 @@ zoneScore(sim)       = roleFit × 상태보정 × 포지션적응도팩터
 
 ## 3. 관측 가능성 — 히든 레이어의 대체물
 
-지식 수준(선수 단위 4단계)은 [scouting.ts](../../packages/engine/src/scouting.ts)
-그대로 두고, **축마다 좁힐 수 있는 한계를 다르게** 준다.
+지식 수준(선수 단위 **5단계** — [scouting.ts](../../packages/engine/src/scouting.ts))에
+**축마다 좁힐 수 있는 한계**를 곱한다.
 
-| 계층 | 축 | own | scouted | seen | rumoured |
-| --- | --- | --- | --- | --- | --- |
-| **관측형** — 몸과 발로 실행하는 것 | pace, stamina, strength, aerial, dribbling, passing, kicking, tackling, aggression, goalkeeping | 0 | **±1** | ±3 | ±6 |
-| **분석형** — 머리와 마음으로 판단하는 것 | finishing, vision, positioning, composure, leadership | 0 | **±3** | ±6 | ±10 |
-| `potential` | — | 공개 | 미지 | 미지 | 미지 |
+| 계층 | 축 | own | **adapting** | scouted | seen | rumoured |
+| --- | --- | --- | --- | --- | --- | --- |
+| **관측형** — 몸과 발로 실행하는 것 | pace, stamina, strength, aerial, dribbling, passing, kicking, tackling, aggression, goalkeeping | 0 | **±1** | ±1 | ±3 | ±6 |
+| **분석형** — 머리와 마음으로 판단하는 것 | finishing, vision, positioning, composure, leadership | 0 | **±3** | ±3 | ±6 | ±10 |
+| `potential` | — | 공개 | **공개** | 미지 | 미지 | 미지 |
+
+종합(`overall`)은 판단 계열 축을 포함하는 합성값이므로 **분석형** 오차를 쓴다 —
+종합 평가가 실행 계열보다 정확할 수는 없다.
 
 두 가지가 이 표의 요점이다.
 
@@ -162,6 +165,20 @@ zoneScore(sim)       = roleFit × 상태보정 × 포지션적응도팩터
 - 오차가 큰 축은 숫자를 주지 않고 **밴드 라벨**로만 노출한다 (§7).
 - 기존 `KNOWLEDGE_MARGIN`(seen ±3 · rumoured ±6)이 그대로 관측형 계층이 된다 —
   분석형만 새로 넓어지고, `scouted`에 ±1/±3이 추가된다.
+
+### adapting — 영입 직후 적응 기간 (6주)
+
+계약서에 사인해도 바로 다 알게 되지는 않는다. **우리 팀에 온 지
+`ADAPTATION_DAYS`(42일) 안인 선수는 우리 선수여도 스카우트 수준의 오차가 남는다.**
+지식 수준은 `TRANSFER` 원장의 마지막 영입 기록에서 파생하므로(게임 시작 스쿼드는
+기록이 없어 처음부터 `own`) 별도 저장이 없다.
+
+- 오피스 스쿼드 뷰도 이 기간엔 **추정치**를 보여준다(행에 "적응 중" 표식) —
+  화면이 참값을 흘리면 안개가 무의미해진다.
+- **잠재력은 공개**한다 — 메디컬·훈련 데이터는 이미 우리 것이다. 능력치는
+  "경기장에서 보이는 것"이지만 성장 여력은 구단이 측정한다.
+- 협상 확률·몸값은 흐리지 않는다(`ODDS_MARGIN`) — 계약 조건은 계약서에 적혀 있다.
+- 코어(장부·판정·전력 패킷)는 여전히 참값으로 계산한다. 감독만 모른다.
 
 ---
 
@@ -242,8 +259,14 @@ zoneScore(sim)       = roleFit × 상태보정 × 포지션적응도팩터
 | `finishing` ← `shooting` · `tackling` ← `defending` · `strength` ← `physical` | 이름 정리 |
 | `stamina`·`aerial`·`kicking`·`vision`·`positioning`·`composure`·`aggression`·`leadership` | **① 파생 시드 → ② 실측 교체** |
 
-- **1단계 (파생)** — 기존 축 + 포지션 + 나이에서 **결정적으로** 파생하고
-  `derived` 플래그를 남긴다. 게임 메커니즘이 데이터 작업에 막히지 않게.
+- **1단계 (파생)** — 기존 축 + 포지션 + 나이에서 **결정적으로** 파생한다
+  (`attributes.ts`의 `DERIVED_AXES`가 부채 목록이다). 게임 메커니즘이 데이터
+  작업에 막히지 않게.
+  파생값은 두 가지를 지킨다: ① 자리별 지문이 실제로 갈려야 하고(공중볼 CB 76 >
+  W 48, 체력 FB 73, 시야 AM 72, 킥력 DM 71), ② **원천 축의 복사본이 아니어야**
+  한다. 특히 `aggression`은 성향이므로 능력 종속을 낮게(r≈0.6) 두고 개인 편차를
+  크게 잡는다 — "약하지만 거친 선수"가 나와야 축이 의미를 갖는다. `vision`도
+  `passing`과 완전히 붙으면(초기 r=0.87) 라이스와 외데고르를 구분하지 못한다.
 - **2단계 (실측)** — 기존 시드를 만든 방법(멀티에이전트 + 웹 교차검증)으로
   채워 파생값을 교체한다. 8축 × 2,673명이라 별도 마일스톤.
   `leadership`은 공개 소스가 가장 얇아 마지막까지 파생으로 남을 수 있다.
@@ -289,9 +312,6 @@ zoneScore(sim)       = roleFit × 상태보정 × 포지션적응도팩터
 ## 10. 미해결
 
 - 포지션 가중치 지문·관측 오차 폭 튜닝 (→ `balance.md`, 시뮬 프로토타입 후)
-- **갓 영입한 선수의 적응 기간** — own이어도 분석형 축(`composure`·`leadership`)은
-  몇 주간 오차를 남길지. 이적 리스크 서사를 더 살리는 장치지만 지식 수준을
-  "소속 기간"으로 확장해야 한다
 - 스카우트 리포트의 **깊이** — 오래 파견하면 분석형 오차(±3)가 더 좁혀지는가
   (현재 `ScoutReport`는 완료 여부만 갖는다)
 - 상태 보정 계수·성장 속도 튜닝

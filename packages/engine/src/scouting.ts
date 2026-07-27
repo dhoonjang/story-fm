@@ -1,5 +1,6 @@
 import type { AttributeAxis, GamePlayer, ScoutReport } from "@story-fm/domain";
 import { ATTRIBUTE_AXES, AXIS_KO, naturalPositionOf } from "@story-fm/domain";
+import { diffDays } from "./calendar";
 import { hashChannel } from "./rng";
 import { playerById, teamName, type GameState } from "./state";
 
@@ -26,10 +27,19 @@ import { playerById, teamName, type GameState } from "./state";
  * 지식 수준은 저장하지 않고 기록(MATCH 출전 명단 · SCOUT_REPORT)에서 파생한다.
  */
 
-export type Knowledge = "own" | "scouted" | "seen" | "rumoured";
+export type Knowledge = "own" | "adapting" | "scouted" | "seen" | "rumoured";
+
+/**
+ * 영입 직후 적응 기간 — 데려온 선수는 **바로 다 알게 되지 않는다**.
+ * 우리 선수여도 이 기간 동안은 스카우트 수준의 오차가 남는다. 그래서 영입이
+ * 도박이 되고, "훈련장에서 보니 소문과 다르다"는 서사가 생긴다.
+ * (게임 시작 시 원소속 선수는 이미 함께해 온 선수라 적응 기간이 없다)
+ */
+export const ADAPTATION_DAYS = 42;
 
 export const KNOWLEDGE_KO: Record<Knowledge, string> = {
   own: "우리 선수",
+  adapting: "적응 중인 새 영입",
   scouted: "스카우팅 완료",
   seen: "직접 상대해 본 선수",
   rumoured: "평판으로만 아는 선수",
@@ -70,11 +80,16 @@ export const AXIS_OBSERVABILITY: Record<AttributeAxis, Observability> = {
  * 리포트는 정답 공개가 아니라 오차를 좁히는 행위다.
  */
 export const OBSERVATION_MARGIN: Record<Observability, Record<Knowledge, number>> = {
-  observable: { own: 0, scouted: 1, seen: 3, rumoured: 6 },
-  analytical: { own: 0, scouted: 3, seen: 6, rumoured: 10 },
+  // adapting은 스카우트 수준을 유지한다 — 계약서에 사인해도 아직 우리 선수가 아니다
+  observable: { own: 0, adapting: 1, scouted: 1, seen: 3, rumoured: 6 },
+  analytical: { own: 0, adapting: 3, scouted: 3, seen: 6, rumoured: 10 },
 };
 
-/** 이 축을 그 지식 수준에서 얼마나 틀리게 아는가 */
+/**
+ * 이 축을 그 지식 수준에서 얼마나 틀리게 아는가.
+ * 축이 아닌 합성값(`"overall"`)은 판단 계열을 포함하므로 **분석형**으로 다룬다 —
+ * 종합 평가가 실행 계열보다 정확할 수는 없다.
+ */
 export function marginFor(axis: string, knowledge: Knowledge): number {
   const layer = AXIS_OBSERVABILITY[axis as AttributeAxis] ?? "analytical";
   return OBSERVATION_MARGIN[layer][knowledge];
@@ -124,10 +139,40 @@ export function hasSeenPlay(state: GameState, playerId: string): boolean {
   return false;
 }
 
+/**
+ * 이 선수가 우리 팀에 들어온 날 — TRANSFER 원장의 마지막 영입 기록.
+ * 원소속(게임 시작 스쿼드)은 기록이 없으므로 null.
+ */
+export function joinedUserTeamOn(state: GameState, playerId: string): string | null {
+  let latest: string | null = null;
+  for (const t of state.transfers) {
+    if (t.gamePlayerId !== playerId) continue;
+    if (t.toTeamId !== state.userTeamId) continue;
+    if (latest === null || t.date > latest) latest = t.date;
+  }
+  return latest;
+}
+
+/** 아직 적응 중인가 — 영입 후 ADAPTATION_DAYS 안 */
+export function isAdapting(state: GameState, playerId: string): boolean {
+  const joined = joinedUserTeamOn(state, playerId);
+  if (joined === null) return false;
+  return diffDays(joined, state.date) < ADAPTATION_DAYS;
+}
+
+/** 적응이 끝나기까지 남은 일수 (적응 중이 아니면 0) */
+export function adaptationDaysLeft(state: GameState, playerId: string): number {
+  const joined = joinedUserTeamOn(state, playerId);
+  if (joined === null) return 0;
+  return Math.max(0, ADAPTATION_DAYS - diffDays(joined, state.date));
+}
+
 export function knowledgeOf(state: GameState, playerId: string): Knowledge {
   const player = playerById(state, playerId);
   if (!player) return "rumoured";
-  if (player.teamId === state.userTeamId) return "own";
+  if (player.teamId === state.userTeamId) {
+    return isAdapting(state, playerId) ? "adapting" : "own";
+  }
   if (isScouted(state, playerId)) return "scouted";
   if (hasSeenPlay(state, playerId)) return "seen";
   return "rumoured";
@@ -201,9 +246,13 @@ export function overallView(state: GameState, player: GamePlayer): string {
   return ratingLabel(observed);
 }
 
-/** 잠재력 — 우리 선수만 안다. 스카우팅을 마쳐도 성장 여력은 단정할 수 없다 */
+/**
+ * 잠재력 — 우리 선수만 안다. 스카우팅을 마쳐도 성장 여력은 단정할 수 없다.
+ * 적응 중인 영입도 우리 선수다 (메디컬·훈련 데이터를 본다) — 능력치와 달리 공개.
+ */
 export function potentialView(state: GameState, player: GamePlayer): string {
-  return knowledgeOf(state, player.id) === "own"
+  const knowledge = knowledgeOf(state, player.id);
+  return knowledge === "own" || knowledge === "adapting"
     ? `POT${player.attributes.potential}`
     : "미지 (성장 여력은 판단 불가)";
 }
@@ -220,6 +269,14 @@ export function knowledgeNote(state: GameState, playerId: string): string {
   const knowledge = knowledgeOf(state, playerId);
   const margin = KNOWLEDGE_MARGIN[knowledge];
   if (knowledge === "own") return "우리 선수 — 모든 수치가 정확하다";
+  if (knowledge === "adapting") {
+    const left = adaptationDaysLeft(state, playerId);
+    return (
+      `막 영입한 선수 — 아직 적응 중이라 훈련장에서 본 게 전부다(실행 ±${margin} · ` +
+      `판단 ±${OBSERVATION_MARGIN.analytical.adapting}). 약 ${left}일 뒤엔 확실히 알게 된다. ` +
+      `잠재력은 안다(메디컬·훈련 데이터)`
+    );
+  }
   const open = openScoutReport(state, playerId);
   const pending = open ? ` · 스카우트 파견 중 (보고 예정 ${open.dueOn})` : "";
   const analytical = OBSERVATION_MARGIN.analytical[knowledge];

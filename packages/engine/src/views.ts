@@ -10,6 +10,7 @@ import {
   stageLabel,
 } from "./data/cup-catalog";
 import { euroCompetitionOf } from "./europe";
+import { adaptationDaysLeft, observedRating } from "./scouting";
 import { euroStageMatches } from "./euro-knockout";
 import { computeStandings, type StandingRow } from "./season";
 import {
@@ -50,6 +51,8 @@ interface SquadViewRowMeta {
   positions: SquadPositionView[];
   overall: number;
   potential: number;
+  /** 적응 중인 새 영입이면 남은 일수 — 0이면 수치가 정확하다 (안개 §3) */
+  adaptationDaysLeft: number;
   form: number;
   morale: number;
   fatigue: number;
@@ -278,10 +281,14 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         position: natural.position,
         positionGroup: groupOf(p),
         positions: p.positions.map((x) => ({ ...x })),
-        overall: p.attributes.overall,
-        // 우리 스쿼드 화면은 15축 숫자를 그대로 보여준다 (결정 #2 — 오피스는 정확)
-        ...(Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, p.attributes[a]])) as AxisValues),
+        overall: observedRating(state, p.id, "overall", p.attributes.overall),
+        // 오피스는 우리 선수의 숫자를 그대로 보여준다 (결정 #2). 단 **적응 중인 새
+        // 영입**은 스카우트 수준의 오차가 남는다 — 훈련장에서 본 게 전부다.
+        ...(Object.fromEntries(
+          ATTRIBUTE_AXES.map((a) => [a, observedRating(state, p.id, a, p.attributes[a])]),
+        ) as AxisValues),
         potential: p.attributes.potential,
+        adaptationDaysLeft: adaptationDaysLeft(state, p.id),
         form: p.state.form,
         morale: p.state.morale,
         fatigue: p.state.fatigue,

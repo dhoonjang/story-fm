@@ -222,7 +222,7 @@ export function weightsFor(position: string): AxisValues {
  * world.test.ts가 분포를 고정한다)
  */
 const RAW_PIVOT: Record<WeightSlot, number> = {
-  GK: 60.1, CB: 65.3, FB: 66.2, DM: 65.3, CM: 63.9, AM: 66.3, W: 65.4, ST: 66.8,
+  GK: 60.7, CB: 65.4, FB: 66.2, DM: 65.5, CM: 64.4, AM: 66.6, W: 65.8, ST: 66.9,
 };
 const CALIBRATION_MEAN = 69;
 /** 되펴는 정도 — 6축 시절 분포(평균 70 · p90 79 · 최대 94)에 맞춘 값 */

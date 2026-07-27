@@ -197,7 +197,11 @@ export interface SellContext {
 }
 
 /** 안개 밴드 — 지식 수준이 낮으면 확률·금액이 흐려진다 (결정적) */
-const ODDS_MARGIN: Record<Knowledge, number> = { own: 0, scouted: 0, seen: 10, rumoured: 20 };
+// adapting(막 영입한 우리 선수)은 이미 우리 것이라 협상 흐림이 없다 —
+// 능력치 관측과 달리 몸값·계약 조건은 계약서에 적혀 있다
+const ODDS_MARGIN: Record<Knowledge, number> = {
+  own: 0, adapting: 0, scouted: 0, seen: 10, rumoured: 20,
+};
 
 function fuzz(seed: number, key: string, value: number, margin: number): number {
   if (margin === 0) return value;

@@ -1415,3 +1415,11 @@ textarea {
 .admin-table td.axis-group {
   border-left: 1px solid var(--border);
 }
+
+/* 적응 중인 영입 — 수치가 추정치임을 알리는 표식 */
+.squad-table .est {
+  color: var(--muted);
+  font-size: 11px;
+  margin-left: 2px;
+  vertical-align: super;
+}

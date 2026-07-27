@@ -434,7 +434,10 @@ export function SquadView({
                   {p.name}
                 </td>
                 <td>{p.position}</td>
-                <td>{p.overall}</td>
+                <td title={p.adaptationDaysLeft > 0 ? "적응 중 — 아직 정확한 수치가 아니다" : undefined}>
+                  {p.overall}
+                  {p.adaptationDaysLeft > 0 && <span className="est">?</span>}
+                </td>
                 <td className="hide-sm" title="전술 적응도">{p.familiarity}</td>
                 <td>{p.form > 0 ? `+${p.form}` : p.form}</td>
                 <td>{p.morale}</td>
@@ -445,6 +448,11 @@ export function SquadView({
                   {p.suspended > 0 && <span className="badge warn">정지 {p.suspended}</span>}
                   {p.suspended > 0 && <span className="badge warn">정지</span>}
                   {p.hasIssue && <span className="badge warn">불만</span>}
+                  {p.adaptationDaysLeft > 0 && (
+                    <span className="badge" title={`적응 완료까지 약 ${p.adaptationDaysLeft}일 — 수치는 추정치다`}>
+                      적응 중
+                    </span>
+                  )}
                   <span className="badge">{p.role}</span>
                 </td>
               </tr>
