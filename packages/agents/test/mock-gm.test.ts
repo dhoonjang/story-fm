@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  activeContract,
   addDays,
   createGame,
   financeOf,
@@ -9,6 +10,7 @@ import {
   openNegotiationFor,
   pendingOffer,
   playerById,
+  playersOf,
   suggestTerms,
   tacticsOf,
   type GameState,
@@ -181,5 +183,27 @@ describe("mock GM — 이적 협상", () => {
     const refused = runMockGmTurn(state, "그 오퍼는 거절해");
     expect(refused.toolCalls.map((c) => c.name)).toContain("answer_incoming_offer");
     expect(incoming.status).toBe("rejected");
+  });
+});
+
+describe("mock GM — 재계약", () => {
+  it("재계약을 제안하고, 답이 오면 선수 본인이 되어 판정한다", () => {
+    const state = newGame(42);
+    const player = playersOf(state, state.userTeamId)[0]!;
+    activeContract(state, player.id)!.until = addDays(state.date, 120);
+
+    const proposed = runMockGmTurn(state, `${player.name} 재계약 하자`);
+    expect(proposed.toolCalls.map((c) => c.name)).toContain("open_renewal");
+    const renewal = state.negotiations.find((n) => n.kind === "renew")!;
+    expect(renewal).toBeDefined();
+    expect(renewal.counterpartTeamId).toBeNull();
+
+    state.date = pendingOffer(renewal)!.respondsOn!;
+    const answered = runMockGmTurn(state, `${player.name} 재계약 어떻게 됐나`);
+    expect(answered.toolCalls.map((c) => c.name)).toContain("respond_offer");
+    // 기대 주급대로 제안했으므로 대체로 수락된다
+    if (renewal.status === "completed") {
+      expect(activeContract(state, player.id)!.until > addDays(state.date, 120)).toBe(true);
+    }
   });
 });

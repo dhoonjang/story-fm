@@ -25,6 +25,8 @@ import {
   describeNegotiation,
   describeNegotiations,
   describeOdds,
+  expiringContracts,
+  openRenewal,
   respondOffer,
   scoutPlayer,
   scoutingSummary,
@@ -576,6 +578,21 @@ export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpe
       (input) => acceptDeal(state, input.negotiationId),
     ),
     wrap(
+      "open_renewal",
+      descriptions.open_renewal,
+      obj({ playerId: str, weeklyWage: int(0, 2_000_000), years: int(1, 6) }, [
+        "playerId",
+        "weeklyWage",
+        "years",
+      ]),
+      z.object({
+        playerId: z.string().min(1),
+        weeklyWage: z.number().min(0),
+        years: z.number().int().min(1).max(6),
+      }),
+      (input) => openRenewal(state, input),
+    ),
+    wrap(
       "withdraw_offer",
       descriptions.withdraw_offer,
       obj({ negotiationId: str }, ["negotiationId"]),
@@ -670,6 +687,16 @@ export function buildGmStateNote(state: GameState): string {
     suspended.length > 0 ? `정지 ${suspended.length} (${suspended.join(", ")})` : null,
     unhappy.length > 0 ? `불만 ${unhappy.length} (${unhappy.join(", ")})` : null,
     ...scoutingSummary(state),
+    // 만료 임박 계약 — 재계약 서사의 씨앗. 놓치면 자유계약으로 떠난다
+    (() => {
+      const expiring = expiringContracts(state, 180);
+      return expiring.length > 0
+        ? `계약 만료 임박 ${expiring.length} (${expiring
+            .slice(0, 3)
+            .map((row) => `${row.player.name}~${row.contract.until}`)
+            .join(", ")}${expiring.length > 3 ? " …" : ""})`
+        : null;
+    })(),
   ].filter((x): x is string => x !== null);
 
   const lines = [

@@ -196,6 +196,14 @@ export const SKILL_CATALOG = [
     description: "진행 중인 협상에서 물러난다. 그 창에서 같은 선수에게 다시 오퍼할 수 없다.",
   },
   {
+    name: "open_renewal",
+    label: "재계약 제안",
+    group: "이적",
+    readOnly: false,
+    description:
+      "우리 선수에게 재계약을 제안한다 (주급·연수). 이적창과 무관하게 언제든 가능하고, 상대는 구단이 아니라 선수 본인이다. 제안 전에 deal_odds(kind=renew)로 확률을 확인하라. 선수가 주급을 더 요구하면 그 값으로 다시 제안하면 된다.",
+  },
+  {
     name: "log_match_events",
     label: "경기 사건 기록",
     group: "경기",

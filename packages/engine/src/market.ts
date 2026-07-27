@@ -185,10 +185,11 @@ export interface DealTerms {
   /** 계약 연수 */
   years: number;
   /**
-   * 영입인가 매각인가 — 기본은 영입.
-   * 매각이면 관문이 뒤집힌다: **사는 쪽이 그 값을 낼까** + **선수가 떠날까**.
+   * 영입·매각·재계약 — 기본은 영입.
+   * 매각이면 관문이 뒤집히고(**사는 쪽이 낼까** + **선수가 떠날까**),
+   * 재계약은 관문이 하나다 (**선수가 남을까**) — 이적료가 없다.
    */
-  kind?: "buy" | "sell";
+  kind?: "buy" | "sell" | "renew";
 }
 
 /** 매각 상대 — 우리가 부른 값을 낼 구단 (오퍼를 넣은 쪽) */
@@ -200,7 +201,11 @@ export interface SellContext {
 // adapting(막 영입한 우리 선수)은 이미 우리 것이라 협상 흐림이 없다 —
 // 능력치 관측과 달리 몸값·계약 조건은 계약서에 적혀 있다
 const ODDS_MARGIN: Record<Knowledge, number> = {
-  own: 0, adapting: 0, scouted: 0, seen: 10, rumoured: 20,
+  own: 0,
+  adapting: 0,
+  scouted: 0,
+  seen: 10,
+  rumoured: 20,
 };
 
 function fuzz(seed: number, key: string, value: number, margin: number): number {
@@ -244,6 +249,11 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
       blockers.push(`${player.name}은(는) 우리 선수가 아닙니다`);
     }
     if (!window) blockers.push("이적시장이 닫혀 있습니다");
+  } else if (terms.kind === "renew") {
+    // 재계약은 이적창과 무관하다 — 상대가 선수 본인이기 때문이다
+    if (player.teamId !== state.userTeamId) {
+      blockers.push(`${player.name}은(는) 우리 선수가 아닙니다`);
+    }
   } else {
     if (player.teamId === state.userTeamId) {
       blockers.push(`${player.name}은(는) 이미 우리 선수입니다`);
@@ -259,6 +269,9 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
 
   if (terms.kind === "sell") {
     return sellOdds(state, terms, player, blockers, knowledge);
+  }
+  if (terms.kind === "renew") {
+    return renewOdds(state, terms, player, blockers, knowledge);
   }
 
   /**
@@ -540,6 +553,137 @@ function sellOdds(
     wageExpectation,
     knowledge,
     fuzzy: false, // 우리 선수라 안개가 없다
+    factors,
+    blockers,
+  };
+}
+
+/**
+ * 재계약 때 선수가 원하는 주급 — 이적 때보다 기준이 높다.
+ *
+ * 남아 달라는 쪽이 우리이므로 협상력이 선수에게 있다. 계약이 얼마 남지 않을수록
+ * (다른 팀과 자유계약으로 갈 수 있으므로) 더 부른다.
+ */
+export function renewalExpectation(state: GameState, player: GamePlayer): number {
+  const current = activeContract(state, player.id)?.weeklyWage ?? 0;
+  const byRating = Math.pow(Math.max(40, player.attributes.overall) / 40, 4.2) * 6_000;
+  const yearsLeft = contractYearsLeft(state, player.id);
+  // 만료가 가까우면 몸값을 더 부른다 (1년 미만 ×1.25 · 2년 미만 ×1.15)
+  const leverage = yearsLeft < 1 ? 1.25 : yearsLeft < 2 ? 1.15 : 1.05;
+  return Math.round((Math.max(current, byRating) * leverage) / 1_000) * 1_000;
+}
+
+/**
+ * 재계약 확률 — 관문이 하나다. **선수가 남을까.**
+ *
+ * 주급이 기준이고, 출전 기회·사기·팀의 위상(대항전)·감독 평판이 붙는다.
+ * 이적료가 없으므로 흥정은 오직 주급과 연수로 한다. 노장에게 긴 계약을 주면
+ * 반갑지만 구단엔 부담이고, 젊은 선수는 짧은 계약을 싫어한다.
+ */
+function renewOdds(
+  state: GameState,
+  terms: DealTerms,
+  player: GamePlayer,
+  blockers: string[],
+  knowledge: Knowledge,
+): DealOdds {
+  const expectation = renewalExpectation(state, player);
+  const contributions: Array<{ score: number; label: string; why: string }> = [];
+
+  const wageRatio = expectation > 0 ? terms.weeklyWage / expectation : 1;
+  contributions.push({
+    score: (wageRatio - 1) * 6,
+    label: "제시 주급",
+    why: `재계약 기대는 £${Math.round(expectation / 1_000)}k/주 (제시액은 그 ${Math.round(wageRatio * 100)}%)`,
+  });
+
+  const age = ageOf(player.birthdate, state.date);
+  if (age >= 31 && terms.years >= 3) {
+    contributions.push({
+      score: 0.6,
+      label: "계약 연수",
+      why: `${age}세에 ${terms.years}년 — 남은 커리어를 보장받는 조건이다`,
+    });
+  } else if (age <= 23 && terms.years <= 2) {
+    contributions.push({
+      score: -0.4,
+      label: "계약 연수",
+      why: `${age}세에 ${terms.years}년은 짧다 — 더 긴 미래를 원한다`,
+    });
+  }
+
+  const blockedBy = betterAtPosition(state, state.userTeamId, player);
+  if (blockedBy === 0) {
+    contributions.push({ score: 0.5, label: "출전 기회", why: "이 자리의 주전이다" });
+  } else if (blockedBy >= 2) {
+    contributions.push({
+      score: -0.6,
+      label: "출전 기회",
+      why: `같은 자리에 더 나은 선수가 ${blockedBy}명 있다 — 출전을 걱정한다`,
+    });
+  }
+  if (player.state.morale < 45) {
+    contributions.push({
+      score: -0.7,
+      label: "선수의 사기",
+      why: `사기 ${player.state.morale} — 팀에 남을 마음이 옅다`,
+    });
+  } else if (player.state.morale >= 75) {
+    contributions.push({
+      score: 0.4,
+      label: "선수의 사기",
+      why: `사기 ${player.state.morale} — 팀 분위기에 만족한다`,
+    });
+  }
+  const ourCup = euroCompetitionOf(state.euroEntrants, state.userTeamId);
+  if (ourCup) {
+    contributions.push({
+      score: 0.35,
+      label: "대항전 출전권",
+      why: "유럽에 나가는 팀에 남는 것이다",
+    });
+  }
+  const reputation = (state.manager.reputation.media + state.manager.reputation.squad) / 2;
+  if (Math.abs(reputation - 50) >= 10) {
+    contributions.push({
+      score: (reputation - 50) / 60,
+      label: "감독 평판",
+      why: `언론·선수단 평판 ${Math.round(reputation)}`,
+    });
+  }
+  const negotiation = state.manager.attributes.negotiation;
+  if (Math.abs(negotiation - 50) >= 5) {
+    contributions.push({
+      score: (negotiation - 50) / 100,
+      label: "감독 협상력",
+      why: `협상 ${negotiation}`,
+    });
+  }
+
+  const sum = (skip?: number) =>
+    contributions.reduce((acc, c, i) => acc + (i === skip ? 0 : c.score), MEETS_ASKING_SCORE);
+  // 관문이 하나이므로 확률은 시그모이드 하나다 (곱하지 않는다)
+  const raw = sigmoid(sum()) * 100;
+  const factors: DealFactor[] = [
+    {
+      label: "기준",
+      delta: Math.round(sigmoid(MEETS_ASKING_SCORE) * 100),
+      why: "재계약 기대 주급을 그대로 맞췄을 때",
+    },
+    ...contributions.map((c, i) => ({
+      label: c.label,
+      delta: Math.round(raw - sigmoid(sum(i)) * 100),
+      why: c.why,
+    })),
+  ];
+
+  return {
+    probability: Math.max(0, Math.min(100, Math.round(raw))),
+    marketValue: marketValueOf(state, player),
+    askingPrice: 0, // 재계약에 이적료는 없다
+    wageExpectation: expectation,
+    knowledge,
+    fuzzy: false,
     factors,
     blockers,
   };

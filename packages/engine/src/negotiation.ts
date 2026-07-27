@@ -7,6 +7,7 @@ import {
   describeOdds,
   marketValueOf,
   oddsLabel,
+  renewalExpectation,
   responseDelayDays,
   wageExpectationOf,
   type DealTerms,
@@ -42,6 +43,8 @@ const MAX_ROUNDS = 8;
 const MIN_ACCEPT_PROBABILITY = 5;
 /** 역제안 상한 — 요구액의 이 배수를 넘게 부를 수 없다 */
 const COUNTER_CEILING = 1.15;
+/** 재계약 요구 주급 상한 — 기대치의 이 배수 (선수도 무리한 요구는 하지 않는다) */
+const RENEW_WAGE_CEILING = 1.4;
 /** 협상 유효기간 — 창 마감이 더 이르면 그쪽이 먼저 온다 */
 const NEGOTIATION_DAYS = 14;
 
@@ -198,6 +201,7 @@ export function respondOffer(
     fee: offer.fee,
     weeklyWage: offer.weeklyWage,
     years: offer.contractYears,
+    kind: negotiation.kind,
   });
 
   if (input.verdict === "accept" && odds.probability < MIN_ACCEPT_PROBABILITY) {
@@ -209,13 +213,33 @@ export function respondOffer(
 
   // 역제안 범위 검증을 **기록보다 먼저** 한다. 거부된 판정이 오퍼를 답한 것으로
   // 표시해 버리면 협상이 답할 수 없는 상태로 굳는다.
-  const asking = askingPriceFor(state, player);
+  const renewing = negotiation.kind === "renew";
+  const asking = renewing ? 0 : askingPriceFor(state, player);
   const ceiling = Math.round(asking * COUNTER_CEILING);
-  const counterFee = input.verdict === "counter" ? Math.round(input.fee ?? asking) : 0;
-  if (input.verdict === "counter" && (counterFee < offer.fee || counterFee > ceiling)) {
+  const counterFee = !renewing && input.verdict === "counter" ? Math.round(input.fee ?? asking) : 0;
+  if (
+    !renewing &&
+    input.verdict === "counter" &&
+    (counterFee < offer.fee || counterFee > ceiling)
+  ) {
     return {
       ok: false,
       message: `역제안은 ${money(offer.fee)} 이상 ${money(ceiling)} 이하여야 합니다`,
+    };
+  }
+  // 재계약의 역제안은 **주급**을 부른다 — 우리 제시액 이상, 기대치의 1.4배 이하
+  const wageCeiling = Math.round(renewalExpectation(state, player) * RENEW_WAGE_CEILING);
+  const counterWageDemand = renewing
+    ? Math.round(input.weeklyWage ?? renewalExpectation(state, player))
+    : 0;
+  if (
+    renewing &&
+    input.verdict === "counter" &&
+    (counterWageDemand <= offer.weeklyWage || counterWageDemand > wageCeiling)
+  ) {
+    return {
+      ok: false,
+      message: `요구 주급은 ${wageOf(offer.weeklyWage)} 초과 ${wageOf(wageCeiling)} 이하여야 합니다`,
     };
   }
 
@@ -240,6 +264,25 @@ export function respondOffer(
   }
 
   // 역제안 — 상대가 부르는 값 (범위는 위에서 이미 검증했다)
+  if (renewing) {
+    negotiation.rounds.push({
+      date: state.date,
+      by: "them",
+      fee: 0,
+      weeklyWage: counterWageDemand,
+      contractYears: offer.contractYears,
+      respondsOn: null,
+      probability: odds.probability,
+      verdict: "counter",
+      note: input.note,
+    });
+    return {
+      ok: true,
+      message:
+        `${player.name}은(는) 주급 ${wageOf(counterWageDemand)}을 원합니다. ` +
+        `그 조건으로 다시 제안하면 받아들일 것입니다`,
+    };
+  }
   const counterWage = Math.round(
     input.weeklyWage ?? Math.max(offer.weeklyWage, wageExpectationOf(state, player)),
   );
@@ -472,6 +515,140 @@ export function answerIncomingOffer(
   };
 }
 
+// ── 재계약 — 상대가 선수 본인이다 ─────────────────────────
+
+/** 이 안에 계약이 끝나는 우리 선수 — 재계약 서사의 씨앗 */
+export function expiringContracts(state: GameState, withinDays = 180) {
+  const limit = addDays(state.date, withinDays);
+  return playersOf(state, state.userTeamId)
+    .map((player) => ({ player, contract: activeContract(state, player.id) }))
+    .filter(
+      (row): row is { player: GamePlayer; contract: NonNullable<typeof row.contract> } =>
+        row.contract !== null && row.contract.until <= limit,
+    )
+    .sort((a, b) => (a.contract.until < b.contract.until ? -1 : 1));
+}
+
+/**
+ * 재계약 협상을 연다 — 상대는 구단이 아니라 **선수 본인**이다.
+ *
+ * 이적창과 무관하게 언제든 가능하다. 관문이 하나(선수가 남을까)이므로 흥정은
+ * 주급과 연수로만 한다. 답은 며칠 뒤에 오고, 같은 조건 반복은 여기서도 닳는다.
+ */
+export function openRenewal(
+  state: GameState,
+  input: { playerId: string; weeklyWage: number; years: number },
+): SkillResult {
+  const player = playerById(state, input.playerId);
+  if (!player) return { ok: false, message: `"${input.playerId}"라는 선수를 찾지 못했습니다` };
+  if (player.teamId !== state.userTeamId) {
+    return { ok: false, message: `${player.name}은(는) 우리 선수가 아닙니다` };
+  }
+  const terms: DealTerms = {
+    playerId: input.playerId,
+    fee: 0,
+    weeklyWage: input.weeklyWage,
+    years: input.years,
+    kind: "renew",
+  };
+  const odds = dealOdds(state, terms);
+  if (odds.blockers.length > 0) {
+    return { ok: false, message: `재계약 협상을 열 수 없습니다 — ${odds.blockers.join(" / ")}` };
+  }
+  const existing = state.negotiations.find(
+    (n) => n.gamePlayerId === input.playerId && n.kind === "renew" && n.status === "open",
+  );
+  if (existing) {
+    const waiting = pendingOffer(existing);
+    if (waiting && waiting.respondsOn !== null && waiting.respondsOn > state.date) {
+      return {
+        ok: false,
+        message: `${player.name} 재계약 제안은 답을 기다리는 중입니다 (${waiting.respondsOn} 예정)`,
+      };
+    }
+    if (existing.rounds.length >= MAX_ROUNDS) {
+      return { ok: false, message: `${player.name}과의 대화가 겉돌고 있습니다 — 시간을 두세요` };
+    }
+  }
+  const negotiation: Negotiation =
+    existing ??
+    (() => {
+      const created: Negotiation = {
+        id: `neg-renew-${input.playerId}-${state.date}`,
+        gamePlayerId: input.playerId,
+        kind: "renew",
+        counterpartTeamId: null, // 상대는 선수 본인이다
+        windowId: null, // 이적창과 무관
+        openedOn: state.date,
+        expiresOn: addDays(state.date, NEGOTIATION_DAYS),
+        status: "open",
+        rounds: [],
+      };
+      state.negotiations.push(created);
+      return created;
+    })();
+
+  const repeats = negotiation.rounds.filter((r) => r.by === "us").length;
+  const respondsOn = addDays(
+    state.date,
+    responseDelayDays(state, terms, odds.probability, repeats),
+  );
+  negotiation.rounds.push({
+    date: state.date,
+    by: "us",
+    fee: 0,
+    weeklyWage: input.weeklyWage,
+    contractYears: input.years,
+    respondsOn,
+    probability: odds.probability,
+    verdict: null,
+  });
+  const until = activeContract(state, player.id)?.until;
+  return {
+    ok: true,
+    message:
+      `${player.name}에게 재계약 제안 — 주급 ${wageOf(input.weeklyWage)} · ${input.years}년` +
+      `${until ? ` (현 계약 ${until} 만료)` : ""}. 성사 확률 ${odds.probability}%, 답은 ${respondsOn} 예정입니다`,
+  };
+}
+
+/** 재계약 실행 — 팀이 바뀌지 않으므로 TRANSFER는 남기지 않는다 (원장은 이동의 기록이다) */
+function executeRenewal(
+  state: GameState,
+  negotiation: Negotiation,
+  agreed: Negotiation["rounds"][number],
+): SkillResult {
+  const player = playerById(state, negotiation.gamePlayerId);
+  if (!player) return { ok: false, message: "선수를 찾지 못했습니다" };
+  if (player.teamId !== state.userTeamId) {
+    negotiation.status = "expired";
+    return { ok: false, message: `${player.name}은(는) 이미 우리 선수가 아닙니다` };
+  }
+  const previous = activeContract(state, player.id);
+  if (previous) previous.status = "ended";
+  state.contracts.push({
+    id: `c-${player.id}-renew-${state.date}`,
+    gamePlayerId: player.id,
+    teamId: state.userTeamId,
+    weeklyWage: agreed.weeklyWage,
+    since: state.date,
+    until: `${seasonYear(state.season) + agreed.contractYears}-06-30`,
+    status: "active",
+  });
+  negotiation.status = "completed";
+  pushNarrative(
+    state,
+    `${player.name} 재계약 — 주급 ${wageOf(agreed.weeklyWage)} ${agreed.contractYears}년`,
+    4,
+  );
+  return {
+    ok: true,
+    message:
+      `${player.name} 재계약 완료 — 주급 ${wageOf(agreed.weeklyWage)}, ` +
+      `${seasonYear(state.season) + agreed.contractYears}-06-30까지. 주급 총액이 늘어납니다`,
+  };
+}
+
 /**
  * 합의를 실행한다 — 여기서 장부가 움직인다.
  *
@@ -492,6 +669,7 @@ export function acceptDeal(state: GameState, negotiationId: string): SkillResult
   if (!agreed) return { ok: false, message: "합의된 조건을 찾지 못했습니다" };
 
   if (negotiation.kind === "sell") return executeSale(state, negotiation, agreed);
+  if (negotiation.kind === "renew") return executeRenewal(state, negotiation, agreed);
 
   // 그 사이 다른 팀이 데려갔으면 무효다
   if (player.teamId !== negotiation.counterpartTeamId) {
@@ -681,8 +859,11 @@ export function describeNegotiations(state: GameState): string {
     .map((n) => {
       const player = playerById(state, n.gamePlayerId);
       const last = n.rounds[n.rounds.length - 1];
-      const who = `${player?.name ?? n.gamePlayerId}(${teamName(n.counterpartTeamId ?? "")})`;
-      const direction = n.kind === "sell" ? "매각" : "영입";
+      const who =
+        n.kind === "renew"
+          ? `${player?.name ?? n.gamePlayerId}`
+          : `${player?.name ?? n.gamePlayerId}(${teamName(n.counterpartTeamId ?? "")})`;
+      const direction = n.kind === "sell" ? "매각" : n.kind === "renew" ? "재계약" : "영입";
       if (n.status === "agreed") return `${n.id} ${who} ${direction} — 합의됨, 확정 대기`;
       if (!last) return `${n.id} ${who} ${direction} — 오퍼 없음`;
       if (last.by === "them") {

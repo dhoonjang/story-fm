@@ -12,7 +12,10 @@ import {
   describeNegotiations,
   describeNextFixture,
   describeOdds,
+  expiringContracts,
   finalizeMatch,
+  openRenewal,
+  renewalExpectation,
   incomingOffer,
   incomingOffers,
   pendingOffer,
@@ -286,6 +289,56 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
     return {
       text: result.ok
         ? `@수석코치: *수첩에 받아 적는다* ${result.message}. 세션에 반영합니다.`
+        : `@수석코치: ${result.message}`,
+      toolCalls: calls,
+    };
+  }
+
+  // 재계약 — 상대가 선수 본인이므로 이적 분기보다 먼저 본다
+  if (/재계약|계약 연장|계약을 연장|잡아|남겨/u.test(msg)) {
+    const who = detectPlayer(state, msg) ?? expiringContracts(state, 365)[0]?.player ?? null;
+    if (!who) {
+      return {
+        text: `@수석코치: 지금 계약이 급한 선수는 없습니다.`,
+        toolCalls: calls,
+      };
+    }
+    const renewal = state.negotiations.find(
+      (n) => n.gamePlayerId === who.id && n.kind === "renew" && n.status === "open",
+    );
+    const waiting = renewal ? pendingOffer(renewal) : null;
+    // 답이 도착했으면 선수 본인이 되어 확률대로 판정한다
+    if (renewal && waiting && waiting.respondsOn !== null && waiting.respondsOn <= state.date) {
+      const verdict =
+        waiting.probability >= 50 ? "accept" : waiting.probability >= 25 ? "counter" : "reject";
+      const input = {
+        negotiationId: renewal.id,
+        verdict,
+        ...(verdict === "counter"
+          ? { weeklyWage: Math.round(renewalExpectation(state, who) * 1.15) }
+          : {}),
+        note: verdict === "accept" ? "여기 남겠습니다" : "조건을 더 봐야겠습니다",
+      } as const;
+      const result = respondOffer(state, input);
+      calls.push({ name: "respond_offer", summary: result.message, input });
+      let text = `@${who.name}: ${result.message}`;
+      if (result.ok && verdict === "accept") {
+        const done = acceptDeal(state, renewal.id);
+        calls.push({ name: "accept_deal", summary: done.message });
+        text += `\n@수석코치: ${done.message}`;
+      }
+      return { text, toolCalls: calls };
+    }
+    const input = {
+      playerId: who.id,
+      weeklyWage: renewalExpectation(state, who),
+      years: 3,
+    };
+    const result = openRenewal(state, input);
+    calls.push({ name: "open_renewal", summary: result.message, input });
+    return {
+      text: result.ok
+        ? `@: *${who.name}의 에이전트와 마주 앉는다*\n@수석코치: ${result.message}`
         : `@수석코치: ${result.message}`,
       toolCalls: calls,
     };

@@ -222,6 +222,11 @@ packages/
 - **이적·계약** — `TRANSFER`가 이적·임대·자유·유스 콜업·은퇴까지 모든 팀 변경을
   기록하는 원장(`GAME_PLAYER.teamId`는 현재값일 뿐). `CONTRACT`가 주급의
   원본이고, 팀 주급 총액은 활성 계약의 합(파생).
+- **협상은 원장과 분리** — `NEGOTIATION`(+오퍼 라운드)이 진행 중 흥정을 갖고,
+  합의가 확정될 때 비로소 `TRANSFER`·`CONTRACT`가 쓰인다. 영입·매각·재계약 3방향.
+  **코어가 딜 성공 확률과 근거를 결정적으로 계산**하고(`market.ts`), 수락·역제안·
+  결렬 **판정은 LLM**이 그 확률을 앵커로 한다 — 코어는 가능한 판정만 받는다
+  (docs/design/transfers.md · ADR 0002).
 - **소유 관계** — `FINANCE`(+원장)는 팀에, `SEASON_RECORD`/`TROPHY`/
   `ACHIEVEMENT`는 감독에 소속. 일지(diary)는 저장하지 않고 기록 테이블에서
   파생하며, `NARRATIVE_NOTE`만 GM 기억으로 남는다.
@@ -240,7 +245,7 @@ ERD와 설계 근거는 docs/design/implementation-notes.md에 정리했다.
 - `apps/web` — Next.js 채팅 UI + 오피스 뷰(스쿼드 전술판·달력·재정·순위·커리어)
   + API + `/admin` **선수 카탈로그 편집** (게임과 무관한 초기치 DB — 편집은 새 게임에만
   반영되고 진행 중 세이브는 영향 없음)
-- 테스트: Vitest 275 (유닛·API 통합) + Playwright e2e 3. `pnpm test` / `pnpm e2e`
+- 테스트: Vitest 342 (유닛·API 통합) + Playwright e2e 3. `pnpm test` / `pnpm e2e`
 
 ### LLM 입력 (요약 — 상세는 docs/design/llm-io.md)
 

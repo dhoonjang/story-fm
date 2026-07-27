@@ -3,24 +3,27 @@ import type { GameState } from "@story-fm/engine";
 import {
   acceptDeal,
   activeContract,
-  answerIncomingOffer,
-  generateIncomingOffers,
-  incomingOffer,
-  incomingOffers,
-  marketValueOf,
   addDays,
   advanceTime,
+  answerIncomingOffer,
   arrivedResponses,
   askingPriceFor,
   dealOdds,
   describeNegotiation,
   describeNegotiations,
   expireNegotiations,
+  expiringContracts,
   financeOf,
+  generateIncomingOffers,
+  incomingOffer,
+  incomingOffers,
+  marketValueOf,
   openNegotiationFor,
+  openRenewal,
   pendingOffer,
   playerById,
   playersOf,
+  renewalExpectation,
   respondOffer,
   sendOffer,
   suggestTerms,
@@ -449,5 +452,140 @@ describe("매각 — 들어오는 오퍼", () => {
     const wrong = answerIncomingOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
     expect(wrong.ok).toBe(false);
     expect(wrong.message).toContain("들어온 오퍼가 아닙니다");
+  });
+});
+
+describe("재계약 — 상대가 선수 본인이다", () => {
+  /** 계약이 곧 끝나는 우리 선수 하나를 만든다 */
+  function expiringPlayer(state: GameState) {
+    const player = playersOf(state, state.userTeamId)[0]!;
+    activeContract(state, player.id)!.until = addDays(state.date, 120);
+    return player;
+  }
+
+  it("만료가 다가온 계약을 뽑아 준다", () => {
+    const state = createTestGame(42);
+    const player = expiringPlayer(state);
+    const rows = expiringContracts(state, 180);
+    expect(rows.some((r) => r.player.id === player.id)).toBe(true);
+    // 먼 계약은 걸리지 않는다
+    expect(expiringContracts(state, 30).some((r) => r.player.id === player.id)).toBe(false);
+  });
+
+  it("이적창과 무관하게 열리고, 관문이 하나다 (선수가 남을까)", () => {
+    const state = createTestGame(42);
+    const player = expiringPlayer(state);
+    // 창을 모두 닫아도 재계약은 가능하다
+    for (const w of state.windows) w.closesOn = state.date;
+    state.date = addDays(state.date, 1);
+
+    const expectation = renewalExpectation(state, player);
+    const odds = dealOdds(state, {
+      playerId: player.id,
+      fee: 0,
+      weeklyWage: expectation,
+      years: 3,
+      kind: "renew",
+    });
+    expect(odds.blockers).toHaveLength(0);
+    expect(odds.askingPrice).toBe(0); // 이적료가 없다
+    expect(odds.probability).toBeGreaterThan(45);
+
+    const result = openRenewal(state, { playerId: player.id, weeklyWage: expectation, years: 3 });
+    expect(result.ok, result.message).toBe(true);
+    const negotiation = state.negotiations.find((n) => n.kind === "renew")!;
+    expect(negotiation.counterpartTeamId).toBeNull();
+    expect(negotiation.windowId).toBeNull();
+    expect(negotiation.rounds[0]!.fee).toBe(0);
+  });
+
+  it("주급을 올리면 확률이 오르고, 만료가 가까우면 기대치가 높아진다", () => {
+    const state = createTestGame(42);
+    const player = expiringPlayer(state);
+    const base = { playerId: player.id, fee: 0, years: 3, kind: "renew" as const };
+    const expectation = renewalExpectation(state, player);
+    const low = dealOdds(state, { ...base, weeklyWage: Math.round(expectation * 0.7) }).probability;
+    const high = dealOdds(state, {
+      ...base,
+      weeklyWage: Math.round(expectation * 1.3),
+    }).probability;
+    expect(high).toBeGreaterThan(low);
+
+    // 계약이 3년 남았을 때보다 4개월 남았을 때 더 부른다
+    const contract = activeContract(state, player.id)!;
+    contract.until = addDays(state.date, 1200);
+    const relaxed = renewalExpectation(state, player);
+    contract.until = addDays(state.date, 120);
+    expect(renewalExpectation(state, player)).toBeGreaterThan(relaxed);
+  });
+
+  it("선수가 주급을 더 요구하면 그 값으로 다시 제안해 합의한다", () => {
+    const state = createTestGame(42);
+    const player = expiringPlayer(state);
+    const expectation = renewalExpectation(state, player);
+    openRenewal(state, {
+      playerId: player.id,
+      weeklyWage: Math.round(expectation * 0.8),
+      years: 3,
+    });
+    const negotiation = state.negotiations.find((n) => n.kind === "renew")!;
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+
+    // 이적료 범위 검증에 걸리지 않고, 주급 상한을 넘으면 거부된다
+    const absurd = respondOffer(state, {
+      negotiationId: negotiation.id,
+      verdict: "counter",
+      weeklyWage: expectation * 5,
+    });
+    expect(absurd.ok).toBe(false);
+
+    const demanded = Math.round(expectation * 1.15);
+    const countered = respondOffer(state, {
+      negotiationId: negotiation.id,
+      verdict: "counter",
+      weeklyWage: demanded,
+      note: "그 정도는 받아야죠",
+    });
+    expect(countered.ok, countered.message).toBe(true);
+    expect(negotiation.rounds[negotiation.rounds.length - 1]!.weeklyWage).toBe(demanded);
+
+    // 요구대로 다시 제안하면 받아들인다
+    expect(openRenewal(state, { playerId: player.id, weeklyWage: demanded, years: 3 }).ok).toBe(
+      true,
+    );
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+    const accepted = respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
+    expect(accepted.ok, accepted.message).toBe(true);
+    expect(negotiation.status).toBe("agreed");
+  });
+
+  it("확정하면 계약만 새로 쓰고 이적 원장은 남기지 않는다", () => {
+    const state = createTestGame(42);
+    const player = expiringPlayer(state);
+    const expectation = renewalExpectation(state, player);
+    const oldContract = activeContract(state, player.id)!;
+    const transfersBefore = state.transfers.length;
+
+    openRenewal(state, {
+      playerId: player.id,
+      weeklyWage: Math.round(expectation * 1.2),
+      years: 4,
+    });
+    const negotiation = state.negotiations.find((n) => n.kind === "renew")!;
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+    expect(respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" }).ok).toBe(true);
+
+    const done = acceptDeal(state, negotiation.id);
+    expect(done.ok, done.message).toBe(true);
+    expect(negotiation.status).toBe("completed");
+
+    // 팀이 바뀌지 않으므로 원장(TRANSFER)은 그대로다
+    expect(state.transfers).toHaveLength(transfersBefore);
+    expect(oldContract.status).toBe("ended");
+    const fresh = activeContract(state, player.id)!;
+    expect(fresh.teamId).toBe(state.userTeamId);
+    expect(fresh.weeklyWage).toBe(Math.round(expectation * 1.2));
+    expect(fresh.until > oldContract.until).toBe(true);
+    expect(playerById(state, player.id)!.teamId).toBe(state.userTeamId);
   });
 });
