@@ -250,12 +250,21 @@ describe("API — 온보딩부터 경기까지", () => {
         nameEn: "New Guy",
         birthdate: "2007-03-01",
         position: "ST",
+        // 능력치 15축 전부 (API가 요구한다)
         pace: 82,
-        shooting: 78,
-        passing: 66,
+        stamina: 74,
+        strength: 70,
+        aerial: 68,
+        finishing: 78,
         dribbling: 80,
-        defending: 35,
-        physical: 70,
+        passing: 66,
+        kicking: 62,
+        tackling: 35,
+        vision: 60,
+        positioning: 76,
+        composure: 70,
+        aggression: 58,
+        leadership: 40,
         goalkeeping: 20,
         potential: 88,
       }),
@@ -272,15 +281,15 @@ describe("API — 온보딩부터 경기까지", () => {
       added.teams.find((t) => t.teamId === "brighton")!.players.some((p) => p.id === newId),
     ).toBe(true);
 
-    // 편집 — 슈팅 99
-    const patchRes = await catalogPatch(json({ shooting: 99 }), pparams(newId));
+    // 편집 — 결정력 99
+    const patchRes = await catalogPatch(json({ finishing: 99 }), pparams(newId));
     expect(patchRes.status).toBe(200);
     const patched = (await patchRes.json()) as {
-      teams: Array<{ teamId: string; players: Array<{ id: string; shooting: number }> }>;
+      teams: Array<{ teamId: string; players: Array<{ id: string; finishing: number }> }>;
     };
     expect(
       patched.teams.find((t) => t.teamId === "brighton")!.players.find((p) => p.id === newId)!
-        .shooting,
+        .finishing,
     ).toBe(99);
 
     // 카탈로그 편집은 이미 진행 중인 게임에 영향이 없다
@@ -312,8 +321,10 @@ describe("API — 온보딩부터 경기까지", () => {
         nameKo: "x",
         birthdate: "2005-01-01",
         position: "CM",
-        pace: 60, shooting: 60, passing: 60, dribbling: 60,
-        defending: 60, physical: 60, goalkeeping: 18, potential: 70,
+        pace: 60, stamina: 60, strength: 60, aerial: 60,
+        finishing: 60, dribbling: 60, passing: 60, kicking: 60, tackling: 60,
+        vision: 60, positioning: 60, composure: 60, aggression: 60, leadership: 60,
+        goalkeeping: 18, potential: 70,
       }),
     );
     expect(badTeam.status).toBe(400);

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { ATTRIBUTE_AXES } from "@story-fm/domain";
 import {
   adminCatalog,
   adminRemoveCatalogPlayer,
@@ -9,6 +10,8 @@ import {
 } from "@story-fm/engine";
 
 const attr = z.number().int().min(1).max(99).optional();
+/** 능력치 15축 — 도메인 상수에서 스키마를 펼친다 (축이 늘면 여기도 자동으로) */
+const axisFields = Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, attr]));
 const PatchSchema = z.object({
   nameKo: z.string().min(1).max(40).optional(),
   nameEn: z.string().min(1).max(60).optional(),
@@ -17,13 +20,7 @@ const PatchSchema = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/, "출생년월일 형식(YYYY-MM-DD)이 올바르지 않습니다")
     .optional(),
   position: z.string().min(1).optional(),
-  pace: attr,
-  shooting: attr,
-  passing: attr,
-  dribbling: attr,
-  defending: attr,
-  physical: attr,
-  goalkeeping: attr,
+  ...axisFields,
   potential: attr,
   /** 가능 포지션 전체 교체 (멀티 포지션 편집) */
   positions: z

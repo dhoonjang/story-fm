@@ -39,7 +39,7 @@ import {
   TEAM_TALK_OUTCOMES,
   type GameState,
 } from "@story-fm/engine";
-import { naturalPositionOf, slotOfTime } from "@story-fm/domain";
+import { ATTRIBUTE_AXES, naturalPositionOf, slotOfTime } from "@story-fm/domain";
 import { AnthropicGameLLM, TIERS, type GameToolSpec } from "@story-fm/llm";
 import { MATCH_CASTER_SYSTEM, makeLogMatchEventsTool } from "./match-caster";
 import { runMockGmTurn } from "./mock-gm";
@@ -103,8 +103,9 @@ export const GM_SYSTEM = `당신은 story-fm의 게임 마스터(GM)다. 유저�
 - 기본 훈련은 없다. 감독이 지시해야만 훈련이 등록된다. 미등록 요일/세션은 자율 회복.
 - 하루는 오전(am)·오후(pm) 두 세션. 요일 반복(weekly) 또는 특정 날짜(byDate)로 지정.
 - 감독의 자연어 훈련("측면 크로스 반복", "가볍게 회복 러닝")을 네가 해석해 label에
-  원문에 가깝게 담고, focus에 관련 능력치(pace/shooting/passing/dribbling/defending/
-  physical), 전술 훈련이면 tactical, 회복이면 recovery를 넣어라.
+  원문에 가깝게 담고, focus에 관련 능력치 15축 중 해당하는 것을 넣어라. 전술 훈련이면
+  tactical, 회복이면 recovery. 예: "측면 크로스 반복" → kicking·passing,
+  "박스 안 마무리" → finishing·positioning, "압박 강도 올리기" → stamina·aggression.
 - 임의로 매일·전 세션을 채우지 말고, 감독이 말한 범위만 지정하라.
 
 # 전술과 적응도
@@ -125,7 +126,7 @@ const str = { type: "string" };
 const int = (min: number, max: number) => ({ type: "integer", minimum: min, maximum: max });
 
 // 훈련 세션 스키마 (set_training) — 자유 label + focus 대상
-const TRAIN_FOCUS = ["pace", "shooting", "passing", "dribbling", "defending", "physical", "goalkeeping", "tactical", "recovery"] as const;
+const TRAIN_FOCUS = [...ATTRIBUTE_AXES, "tactical", "recovery"] as const;
 const SLOT_ENUM = { type: "string", enum: ["am", "pm"] } as const;
 const FOCUS_ARRAY = { type: "array", items: { type: "string", enum: [...TRAIN_FOCUS] } } as const;
 
@@ -290,10 +291,11 @@ export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpe
         "훈련 세션을 지정한다. 기본 훈련은 없으니 감독이 말한 것만 등록된다.",
         "요일 반복(weekly, 키 '0'~'6', 0=일)이나 특정 날짜(byDate, 키 YYYY-MM-DD)에,",
         "하루 오전(am)·오후(pm) 세션을 따로 설정한다. 각 세션은 label(자연어 훈련 설명)과",
-        "focus(효과 대상 배열)를 갖는다. focus 값: pace/shooting/passing/dribbling/defending/",
-        "physical(6대 능력치), tactical(전술 적응도 상승), recovery(회복만). 감독의 자연어 훈련을",
+        "focus(효과 대상 배열)를 갖는다. focus 값: 능력치 15축(pace/stamina/strength/aerial/",
+        "finishing/dribbling/passing/kicking/tackling/vision/positioning/composure/aggression/",
+        "leadership/goalkeeping) + tactical(전술 적응도 상승) + recovery(회복만). 감독의 자연어 훈련을",
         "네가 해석해 label에 원문에 가깝게, focus에 해당 능력치를 담아라. 세션을 null로 주면 비운다.",
-        "예: '월·수 오전은 세트피스 반복' → weekly:{'1':{am:{label:'세트피스 반복',focus:['passing','shooting']}},'3':{am:{...}}}.",
+        "예: '월·수 오전은 세트피스 반복' → weekly:{'1':{am:{label:'세트피스 반복',focus:['kicking','finishing']}},'3':{am:{...}}}.",
       ].join(" "),
       obj(
         {

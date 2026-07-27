@@ -1,5 +1,6 @@
 import type {
   Achievement,
+  AxisValues,
   Booking,
   Contract,
   GamePlayer,
@@ -28,6 +29,7 @@ import type {
   Trophy,
 } from "@story-fm/domain";
 import {
+  ATTRIBUTE_AXES,
   DEFAULT_TACTICS,
   FORMATION_SLOTS,
   naturalPositionOf,
@@ -195,9 +197,9 @@ export function groupOf(player: GamePlayer): PositionGroup {
   return positionGroupOfPlayer(player);
 }
 
-/** 능력치 변경 후 overall 재계산 — 주 포지션 그룹 공식 */
+/** 능력치 변경 후 overall 재계산 — 주 포지션 **가중치** 공식 */
 export function recomputeOverall(player: GamePlayer): void {
-  player.attributes.overall = overallFor(groupOf(player), player.attributes);
+  player.attributes.overall = overallFor(naturalPositionOf(player).position, player.attributes);
   if (player.attributes.potential < player.attributes.overall) {
     player.attributes.potential = player.attributes.overall;
   }
@@ -449,14 +451,9 @@ function instantiatePlayers(seed: number): GamePlayer[] {
       birthdate: entry.birthdate,
       positions: entry.positions.map((p) => ({ ...p })),
       attributes: {
-        pace: entry.pace,
-        shooting: entry.shooting,
-        passing: entry.passing,
-        dribbling: entry.dribbling,
-        defending: entry.defending,
-        physical: entry.physical,
-        goalkeeping: entry.goalkeeping,
-        overall: 50,
+        // 카탈로그의 15축을 그대로 복사 (2-레이어 분리 — 이후 변화는 GAME_PLAYER에만)
+        ...(Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, entry[a]])) as AxisValues),
+        overall: 50, // 아래 recomputeOverall이 주 포지션 가중치로 채운다
         potential: entry.potential,
       },
       state: {

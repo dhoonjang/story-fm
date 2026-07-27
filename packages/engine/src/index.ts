@@ -3,6 +3,7 @@ export * from "./paths";
 export * from "./data/team-catalog";
 export * from "./data/league-catalog";
 export * from "./data/cup-catalog";
+export * from "./attributes";
 export * from "./catalog";
 export * from "./generate";
 export * from "./calendar";

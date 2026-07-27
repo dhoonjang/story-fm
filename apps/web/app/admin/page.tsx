@@ -13,20 +13,13 @@ interface CatalogPosition {
   proficiency: number;
   isNatural: boolean;
 }
-interface CatalogPlayer {
+interface CatalogPlayer extends Record<(typeof ATTRS)[number], number> {
   id: string;
   teamId: string;
   nameKo: string;
   nameEn: string;
   birthdate: string;
   positions: CatalogPosition[];
-  pace: number;
-  shooting: number;
-  passing: number;
-  dribbling: number;
-  defending: number;
-  physical: number;
-  goalkeeping: number;
   potential: number;
   /** 서버 파생 (읽기 전용) */
   age: number;
@@ -40,18 +33,32 @@ interface CatalogTeam {
   players: CatalogPlayer[];
 }
 
+/** 능력치 15축 — 순서는 신체 4 / 기술 5 / 정신 5 / GK 1 (attribute-model.md §1) */
 const ATTRS = [
-  "pace", "shooting", "passing", "dribbling", "defending", "physical", "goalkeeping",
+  "pace", "stamina", "strength", "aerial",
+  "finishing", "dribbling", "passing", "kicking", "tackling",
+  "vision", "positioning", "composure", "aggression", "leadership",
+  "goalkeeping",
 ] as const;
 const ATTR_KO: Record<string, string> = {
   pace: "스피드",
-  shooting: "슈팅",
-  passing: "패스",
+  stamina: "체력",
+  strength: "몸싸움",
+  aerial: "공중볼",
+  finishing: "결정력",
   dribbling: "드리블",
-  defending: "수비",
-  physical: "피지컬",
+  passing: "패스",
+  kicking: "킥력",
+  tackling: "태클",
+  vision: "시야",
+  positioning: "위치선정",
+  composure: "침착성",
+  aggression: "적극성",
+  leadership: "리더십",
   goalkeeping: "골키핑",
 };
+/** 축 묶음 경계 — 표 헤더에 구분선을 넣어 15칼럼을 읽을 수 있게 한다 */
+const GROUP_START = new Set(["pace", "finishing", "vision", "goalkeeping"]);
 const POSITIONS = [
   "GK", "RB", "RWB", "RCB", "CB", "LCB", "LB", "LWB",
   "DM", "CDM", "RCM", "CM", "LCM", "AM", "CAM", "RM", "LM",
@@ -213,6 +220,13 @@ export default function AdminPage() {
           <h1>선수 카탈로그 어드민</h1>
         </div>
         <div className="admin-head-actions">
+          <Link
+            href="/admin/prompts"
+            className="ghost-btn admin-nav-link"
+            data-testid="admin-prompts-link"
+          >
+            기본 프롬프트
+          </Link>
           {edited && <span className="badge warn" data-testid="catalog-edited">편집됨</span>}
           <button
             className="ghost-btn"
@@ -303,7 +317,9 @@ export default function AdminPage() {
               <th>가능 포지션</th>
               <th>생년월일</th>
               {ATTRS.map((a) => (
-                <th key={a} title={ATTR_KO[a]}>{ATTR_KO[a]}</th>
+                <th key={a} title={ATTR_KO[a]} className={GROUP_START.has(a) ? "axis-group" : undefined}>
+                  {ATTR_KO[a]}
+                </th>
               ))}
               <th>OVR</th>
               <th>POT</th>
@@ -352,7 +368,7 @@ export default function AdminPage() {
                     <span className="muted">{p.age}세</span>
                   </td>
                   {ATTRS.map((a) => (
-                    <td key={a}>
+                    <td key={a} className={GROUP_START.has(a) ? "axis-group" : undefined}>
                       <input
                         className="ai num"
                         type="number"

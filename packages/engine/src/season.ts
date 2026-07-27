@@ -1,5 +1,6 @@
 import type { GamePlayer, PositionGroup } from "@story-fm/domain";
-import { ageOf, naturalPositionOf } from "@story-fm/domain";
+import { ATTRIBUTE_AXES, ageOf, naturalPositionOf } from "@story-fm/domain";
+import { agingDelta } from "./attributes";
 import {
   buildScheduleEntries,
   buildSeasonCalendar,
@@ -275,14 +276,20 @@ export function transitionSeason(state: GameState): string[] {
 
     for (const player of squad) {
       const age = ageOf(player.birthdate, judgeDate);
-      // 30+ 쇠퇴 — pace·physical 우선 (attribute-model §3)
-      if (age >= 30) {
-        const dPace = randInt(rng, 1, 3);
-        const dPhys = randInt(rng, 0, 2);
-        player.attributes.pace = Math.max(20, player.attributes.pace - dPace);
-        player.attributes.physical = Math.max(20, player.attributes.physical - dPhys);
-        recomputeOverall(player);
+      // 축별 노화 곡선 (attribute-model.md §5) — 다리가 먼저 죽고 머리는 늦게까지 자란다.
+      // 늦게 자라는 축은 potential 상한을 넘지 않는다.
+      let aged = false;
+      for (const axis of ATTRIBUTE_AXES) {
+        const delta = agingDelta(axis, age);
+        if (delta === 0) continue;
+        // 기대값에 ±1 흔들기 — 같은 나이라도 선수마다 갈린다
+        const rolled = delta < 0 ? delta + randInt(rng, 0, 1) : delta;
+        if (rolled === 0) continue;
+        const cap = rolled > 0 ? Math.min(99, player.attributes.potential) : 99;
+        player.attributes[axis] = Math.max(20, Math.min(cap, player.attributes[axis] + rolled));
+        aged = true;
       }
+      if (aged) recomputeOverall(player);
       if (age >= 35 || (age >= 33 && player.attributes.overall < 72)) {
         retirees.push(player.id);
       }

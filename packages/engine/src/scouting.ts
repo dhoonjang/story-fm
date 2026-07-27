@@ -1,17 +1,20 @@
-import type { GamePlayer, ScoutReport } from "@story-fm/domain";
-import { naturalPositionOf } from "@story-fm/domain";
+import type { AttributeAxis, GamePlayer, ScoutReport } from "@story-fm/domain";
+import { ATTRIBUTE_AXES, AXIS_KO, naturalPositionOf } from "@story-fm/domain";
 import { hashChannel } from "./rng";
 import { playerById, teamName, type GameState } from "./state";
 
 /**
  * 스카우팅 지식 — 정보 비대칭(안개)의 단일 소스.
  *
- * 규약 (결정: 선수 단위 4단계):
- * | 수준       | 조건                                   | 능력치        | 잠재력 |
- * | own       | 우리 팀 선수                            | 정확          | 공개   |
- * | scouted   | 스카우트 리포트 완료                      | 정확          | 미지   |
- * | seen      | 우리와의 경기에 **실제로 출전**한 걸 봤다    | ±3 오차       | 미지   |
- * | rumoured  | 그 외 (리그 평판·소문)                    | ±6 오차       | 미지   |
+ * 규약 (선수 단위 4단계 × 축 단위 2계층 — attribute-model.md §3):
+ * | 수준       | 조건                                   | 관측형 | 분석형 | 잠재력 |
+ * | own       | 우리 팀 선수                            | 정확   | 정확   | 공개   |
+ * | scouted   | 스카우트 리포트 완료                      | ±1    | ±3    | 미지   |
+ * | seen      | 우리와의 경기에 **실제로 출전**한 걸 봤다    | ±3    | ±6    | 미지   |
+ * | rumoured  | 그 외 (리그 평판·소문)                    | ±6    | ±10   | 미지   |
+ *
+ * 히든 능력치를 두지 않는 대신 **축마다 좁힐 수 있는 한계**를 다르게 준다.
+ * 그래서 "데려와 봐야 확실히 아는 선수"가 생긴다.
  *
  * 두 가지를 엄격히 지킨다.
  * 1. **결정적** — 오차는 (seed, playerId, 능력치) 해시에서 나온다. 같은 질문에
@@ -32,34 +35,59 @@ export const KNOWLEDGE_KO: Record<Knowledge, string> = {
   rumoured: "평판으로만 아는 선수",
 };
 
-/** 지식 수준별 능력치 관측 오차 (0 = 정확) */
-export const KNOWLEDGE_MARGIN: Record<Knowledge, number> = {
-  own: 0,
-  scouted: 0,
-  seen: 3,
-  rumoured: 6,
+/**
+ * 축의 **관측 가능성** — 히든 레이어의 대체물 (attribute-model.md §3).
+ * 경계선은 *실행 vs 판단*이다: 몸과 발로 하는 건 경기에서 드러나고,
+ * 머리와 마음으로 하는 건 표본이 필요하다.
+ */
+export type Observability = "observable" | "analytical";
+
+export const AXIS_OBSERVABILITY: Record<AttributeAxis, Observability> = {
+  // 관측형 — 패스 성공률·파울 수처럼 한 경기에도 드러난다
+  pace: "observable",
+  stamina: "observable",
+  strength: "observable",
+  aerial: "observable",
+  dribbling: "observable",
+  passing: "observable",
+  kicking: "observable",
+  tackling: "observable",
+  aggression: "observable",
+  // GK는 매 경기 슛을 받으니 표본이 빨리 쌓인다
+  goalkeeping: "observable",
+  // 분석형 — 결정력은 경기당 유효 슈팅이 2~3회뿐이고, 위치선정·시야는 화면 밖에서
+  // 일어나며, 침착성·리더십은 큰 경기와 라커룸에서만 확인된다
+  finishing: "analytical",
+  vision: "analytical",
+  positioning: "analytical",
+  composure: "analytical",
+  leadership: "analytical",
 };
 
-export const SCOUT_ATTRS = [
-  "pace",
-  "shooting",
-  "passing",
-  "dribbling",
-  "defending",
-  "physical",
-  "goalkeeping",
-] as const;
-export type ScoutAttr = (typeof SCOUT_ATTRS)[number];
-
-export const ATTR_KO: Record<ScoutAttr, string> = {
-  pace: "스피드",
-  shooting: "슈팅",
-  passing: "패스",
-  dribbling: "드리블",
-  defending: "수비",
-  physical: "피지컬",
-  goalkeeping: "골키핑",
+/**
+ * 지식 수준 × 관측 계층 → 관측 오차 (0 = 정확).
+ * **스카우팅은 완벽하지 않다** — 관측형도 ±1이 남고, 분석형은 ±3이 남는다.
+ * 리포트는 정답 공개가 아니라 오차를 좁히는 행위다.
+ */
+export const OBSERVATION_MARGIN: Record<Observability, Record<Knowledge, number>> = {
+  observable: { own: 0, scouted: 1, seen: 3, rumoured: 6 },
+  analytical: { own: 0, scouted: 3, seen: 6, rumoured: 10 },
 };
+
+/** 이 축을 그 지식 수준에서 얼마나 틀리게 아는가 */
+export function marginFor(axis: string, knowledge: Knowledge): number {
+  const layer = AXIS_OBSERVABILITY[axis as AttributeAxis] ?? "analytical";
+  return OBSERVATION_MARGIN[layer][knowledge];
+}
+
+/** 종합(overall)의 오차 — 축 평균 성격이라 관측형 기준을 쓴다 */
+export const KNOWLEDGE_MARGIN: Record<Knowledge, number> = OBSERVATION_MARGIN.observable;
+
+/** 안개를 씌워 노출하는 축 — 15축 전부 */
+export const SCOUT_ATTRS = ATTRIBUTE_AXES;
+export type ScoutAttr = AttributeAxis;
+
+export const ATTR_KO: Record<ScoutAttr, string> = AXIS_KO;
 
 // ── 지식 수준 파생 ──────────────────────────────────────
 
@@ -122,7 +150,7 @@ export function observedRating(
   trueValue: number,
   knowledge = knowledgeOf(state, playerId),
 ): number {
-  const margin = KNOWLEDGE_MARGIN[knowledge];
+  const margin = marginFor(attr, knowledge);
   if (margin === 0) return trueValue;
   const offset = offsetFor(state.seed, playerId, attr, margin);
   return Math.max(1, Math.min(99, trueValue + offset));
@@ -150,16 +178,16 @@ export interface ScoutedAttribute {
   label: string;
 }
 
-/** 능력치 7축을 지식 수준에 맞춰 노출 */
+/** 능력치 15축을 지식 수준 × 축별 관측 가능성에 맞춰 노출 */
 export function scoutedAttributes(state: GameState, player: GamePlayer): ScoutedAttribute[] {
   const knowledge = knowledgeOf(state, player.id);
-  const exactKnown = KNOWLEDGE_MARGIN[knowledge] === 0;
   return SCOUT_ATTRS.map((key) => {
     const observed = observedRating(state, player.id, key, player.attributes[key], knowledge);
     return {
       key,
       ko: ATTR_KO[key],
-      exact: exactKnown ? player.attributes[key] : null,
+      // 축마다 다르다 — 스카우팅을 마쳐도 분석형은 숫자를 주지 않는다
+      exact: marginFor(key, knowledge) === 0 ? player.attributes[key] : null,
       label: ratingLabel(observed),
     };
   });
@@ -192,13 +220,21 @@ export function knowledgeNote(state: GameState, playerId: string): string {
   const knowledge = knowledgeOf(state, playerId);
   const margin = KNOWLEDGE_MARGIN[knowledge];
   if (knowledge === "own") return "우리 선수 — 모든 수치가 정확하다";
-  if (knowledge === "scouted") {
-    return "스카우팅 완료 — 능력치는 정확하나 잠재력은 알 수 없다";
-  }
-  const source = knowledge === "seen" ? "직접 상대해 봤다" : "리그 평판·소문 수준";
   const open = openScoutReport(state, playerId);
   const pending = open ? ` · 스카우트 파견 중 (보고 예정 ${open.dueOn})` : "";
-  return `${source} — 평가에 오차가 있다(±${margin}). 단정하지 말고 인상으로 말하라${pending}`;
+  const analytical = OBSERVATION_MARGIN.analytical[knowledge];
+  if (knowledge === "scouted") {
+    return (
+      `스카우팅 완료 — 실행 계열(스피드·패스·태클 등)은 거의 정확하나(±${margin}), ` +
+      `판단 계열(결정력·시야·위치선정·침착성·리더십)은 ±${analytical} 오차가 남는다. ` +
+      `잠재력은 알 수 없다${pending}`
+    );
+  }
+  const source = knowledge === "seen" ? "직접 상대해 봤다" : "리그 평판·소문 수준";
+  return (
+    `${source} — 평가에 오차가 있다(실행 ±${margin} · 판단 ±${analytical}). ` +
+    `단정하지 말고 인상으로 말하라${pending}`
+  );
 }
 
 /** 강점·약점 지목 — seen 이상에서만 의미가 있다 (관측값 기준) */

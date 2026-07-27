@@ -1,6 +1,7 @@
-import type { PlayerCatalogEntry, PlayerPosition } from "@story-fm/domain";
-import { ageOf, naturalPositionOf, positionGroupOf } from "@story-fm/domain";
+import type { AxisValues, PlayerCatalogEntry, PlayerPosition } from "@story-fm/domain";
+import { ATTRIBUTE_AXES, ageOf, naturalPositionOf, positionGroupOf } from "@story-fm/domain";
 import {
+  CATALOG_AGE_REF,
   derivePositions,
   overallFor,
   playerCatalog,
@@ -23,12 +24,9 @@ import { TEAM_CATALOG, teamCatalogById } from "./data/team-catalog";
  */
 
 const clamp99 = (x: number) => Math.max(1, Math.min(99, Math.round(x)));
-const NUMERIC_ATTRS = [
-  "pace", "shooting", "passing", "dribbling", "defending", "physical", "goalkeeping", "potential",
-] as const;
+/** 어드민이 직접 편집하는 수치 필드 — 15축 + 잠재력 */
+const NUMERIC_ATTRS = [...ATTRIBUTE_AXES, "potential"] as const;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-/** 카탈로그 나이 표시 기준 — 시즌 1 개막일 (게임 날짜와 무관하게 고정) */
-export const CATALOG_AGE_REF = "2026-08-15";
 
 export interface AdminResult {
   ok: boolean;
@@ -36,7 +34,7 @@ export interface AdminResult {
   playerId?: string;
 }
 
-export interface CatalogPlayerInput {
+interface CatalogPlayerInputMeta {
   /** 표시 이름 (한글) */
   nameKo: string;
   /** 로마자 — id 슬러그·파생값의 기준 */
@@ -44,23 +42,12 @@ export interface CatalogPlayerInput {
   birthdate: string;
   /** 주 포지션 */
   position: string;
-  pace: number;
-  shooting: number;
-  passing: number;
-  dribbling: number;
-  defending: number;
-  physical: number;
-  goalkeeping: number;
   potential: number;
 }
+/** 15축을 평면 필드로 받는다 (어드민 폼과 1:1) */
+export type CatalogPlayerInput = CatalogPlayerInputMeta & AxisValues;
 
-export type CatalogPlayerPatch = Partial<
-  Pick<
-    CatalogPlayerInput,
-    | "nameKo" | "nameEn" | "birthdate" | "position" | "pace" | "shooting" | "passing"
-    | "dribbling" | "defending" | "physical" | "goalkeeping" | "potential"
-  >
->;
+export type CatalogPlayerPatch = Partial<CatalogPlayerInput>;
 
 /** 어드민 목록 행 — 파생값(나이·OVR·주 포지션)을 표시용으로 함께 담는다 */
 export interface CatalogPlayerRow extends PlayerCatalogEntry {
@@ -81,11 +68,10 @@ export interface CatalogTeam {
 
 function toRow(entry: PlayerCatalogEntry): CatalogPlayerRow {
   const natural = naturalPositionOf(entry);
-  const group = positionGroupOf(natural.position) ?? "MF";
   return {
     ...entry,
     age: ageOf(entry.birthdate, CATALOG_AGE_REF),
-    overall: overallFor(group, entry),
+    overall: overallFor(natural.position, entry),
     position: natural.position,
   };
 }
@@ -212,15 +198,10 @@ export function adminAddCatalogPlayer(teamId: string, input: CatalogPlayerInput)
   const entries = playerCatalog().map((e) => ({ ...e, positions: e.positions.map((p) => ({ ...p })) }));
   const nameEn = (input.nameEn || input.nameKo).trim();
   const id = uniqueId(entries, teamId, slugifyName(nameEn) || `p${entries.length + 1}`);
-  const attrs = {
-    pace: clamp99(input.pace),
-    shooting: clamp99(input.shooting),
-    passing: clamp99(input.passing),
-    dribbling: clamp99(input.dribbling),
-    defending: clamp99(input.defending),
-    physical: clamp99(input.physical),
-    goalkeeping: clamp99(input.goalkeeping),
-  };
+  const attrs = Object.fromEntries(
+    ATTRIBUTE_AXES.map((a) => [a, clamp99(input[a])]),
+  ) as AxisValues;
+  const overall = overallFor(code, attrs);
   const entry: PlayerCatalogEntry = {
     id,
     teamId,
@@ -230,13 +211,13 @@ export function adminAddCatalogPlayer(teamId: string, input: CatalogPlayerInput)
     // 시드 선수와 같은 공식으로 파생한다 — 같은 자리 묶음(CB↔RCB/LCB)까지 채워진다
     positions: derivePositions(nameEn, code),
     ...attrs,
-    potential: Math.max(clamp99(input.potential), overallFor(group, attrs)),
+    potential: Math.max(clamp99(input.potential), overall),
   };
   entries.push(entry);
   saveCatalog(entries);
   return {
     ok: true,
-    message: `${entry.nameKo} 카탈로그에 추가 (${teamCatalogById(teamId)?.name}, OVR ${overallFor(group, attrs)})`,
+    message: `${entry.nameKo} 카탈로그에 추가 (${teamCatalogById(teamId)?.name}, OVR ${overall})`,
     playerId: id,
   };
 }

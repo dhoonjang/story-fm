@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import type { PlayerCatalogEntry, PlayerPosition, PositionGroup } from "@story-fm/domain";
-import { clusterOf, positionGroupOf, sideOf } from "@story-fm/domain";
+import type { AxisValues, PlayerCatalogEntry, PlayerPosition, PositionGroup } from "@story-fm/domain";
+import { ageOf, clusterOf, positionGroupOf, roleFit, sideOf } from "@story-fm/domain";
+import { deriveAxes } from "./attributes";
 import { catalogPath, dataDir } from "./paths";
 import { REAL_SQUADS, type RealPlayerSeed } from "./data/epl-players";
 import { EU_SQUADS } from "./data/eu-squads";
@@ -31,13 +32,10 @@ function hashOf(text: string): number {
 }
 
 /**
- * 필드 플레이어의 goalkeeping — 15~40 사이. 피지컬이 좋은 선수가 약간 높게
- * (GK 퇴장 시 대신 서는 선수 선택에 미세한 근거가 된다).
+ * 카탈로그 나이 기준일 — 능력치·나이 파생의 고정점.
+ * (게임 중 나이는 플레이 날짜 기준으로 계산한다 — `ageOf`)
  */
-function derivedGoalkeeping(nameEn: string, physical: number): number {
-  const base = 15 + (hashOf(`gk:${nameEn}`) % 16); // 15~30
-  return clamp99(base + Math.round((physical - 60) / 8));
-}
+export const CATALOG_AGE_REF = "2026-08-15";
 
 /**
  * 포지션 인접 관계 — 멀티 포지션 파생의 근거 (**다른 라인·다른 역할**로의 확장).
@@ -132,7 +130,6 @@ export function derivePositions(nameEn: string, natural: string): PlayerPosition
 }
 
 function entryFromSeed(teamId: string, s: RealPlayerSeed, slug: string): PlayerCatalogEntry {
-  const isGk = s.positionGroup === "GK";
   return {
     id: `${teamId}-${slug}`,
     teamId,
@@ -140,15 +137,8 @@ function entryFromSeed(teamId: string, s: RealPlayerSeed, slug: string): PlayerC
     nameEn: s.nameEn,
     birthdate: s.birthdate,
     positions: derivePositions(s.nameEn, s.position),
-    pace: clamp99(s.pace),
-    shooting: clamp99(s.shooting),
-    passing: clamp99(s.passing),
-    dribbling: clamp99(s.dribbling),
-    defending: clamp99(s.defending),
-    physical: clamp99(s.physical),
-    goalkeeping: isGk
-      ? clamp99(s.goalkeeping ?? 70)
-      : derivedGoalkeeping(s.nameEn, s.physical),
+    // 시드는 6축 + GK — 15축은 여기서 파생한다 (attributes.ts, 부채는 §8 2단계)
+    ...deriveAxes(s.nameEn, s.position, s, ageOf(s.birthdate, CATALOG_AGE_REF)),
     potential: clamp99(s.potential),
   };
 }
@@ -266,13 +256,8 @@ function fallbackEntries(teamId: string, tier: 1 | 2 | 3 | 4): PlayerCatalogEntr
       nameEn,
       birthdate: `${2026 - age}-${String(randInt(rng, 1, 12)).padStart(2, "0")}-${String(randInt(rng, 1, 28)).padStart(2, "0")}`,
       positions: derivePositions(nameEn, position),
-      pace: attrs.pace,
-      shooting: attrs.shooting,
-      passing: attrs.passing,
-      dribbling: attrs.dribbling,
-      defending: attrs.defending,
-      physical: attrs.physical,
-      goalkeeping: group === "GK" ? attrs.goalkeeping : derivedGoalkeeping(nameEn, attrs.physical),
+      // 합성 선수도 실선수와 같은 파생 공식을 거친다 (일관성)
+      ...deriveAxes(nameEn, position, attrs, age),
       // 아카데미는 잠재력 폭이 크다 — 유스 발굴의 재미가 여기서 나온다
       potential: clamp99(base + (academy ? randInt(rng, 8, 28) : randInt(rng, 2, 14))),
     } satisfies PlayerCatalogEntry;
@@ -364,18 +349,10 @@ export function catalogOfTeam(teamId: string): PlayerCatalogEntry[] {
   return playerCatalog().filter((e) => e.teamId === teamId);
 }
 
-/** overall 파생 — 주 포지션 그룹 공식. 능력치가 바뀔 때마다 재계산한다 */
-export function overallFor(group: PositionGroup, a: {
-  pace: number; shooting: number; passing: number; dribbling: number;
-  defending: number; physical: number; goalkeeping: number;
-}): number {
-  const core =
-    group === "GK"
-      ? [a.goalkeeping]
-      : group === "DF"
-        ? [a.defending, a.physical, a.pace]
-        : group === "MF"
-          ? [a.passing, a.dribbling, a.defending]
-          : [a.shooting, a.pace, a.dribbling];
-  return clamp99(core.reduce((s, x) => s + x, 0) / core.length);
+/**
+ * overall 파생 — **주 포지션 가중치**로 계산한 15축 가중 평균 (FM의 CA 역할).
+ * 능력치가 바뀔 때마다 재계산한다. 자리별 적합도가 필요하면 `roleFit`을 직접 쓴다.
+ */
+export function overallFor(position: string, axes: AxisValues): number {
+  return roleFit(axes, position);
 }

@@ -8,7 +8,8 @@ import {
   scoutPlayer,
   scoutedAttributes,
   userPlayers,
-  KNOWLEDGE_MARGIN,
+  AXIS_OBSERVABILITY,
+  OBSERVATION_MARGIN,
   SCOUT_ATTRS,
   type GameState,
 } from "@story-fm/engine";
@@ -84,7 +85,7 @@ describe("지식 수준 파생", () => {
     expect(knowledgeOf(state, someone)).toBe("rumoured");
   });
 
-  it("스카우팅이 끝나면 능력치는 정확해지지만 잠재력은 계속 미지다", () => {
+  it("스카우팅을 마쳐도 판단 계열 축은 오차가 남는다 (히든 레이어 대체물)", () => {
     const state = createTestGame(11);
     const target = anyOpponent(state);
     expect(scoutPlayer(state, target.id).ok).toBe(true);
@@ -92,10 +93,32 @@ describe("지식 수준 파생", () => {
 
     advanceTime(state, { days: SCOUT_DAYS });
     expect(knowledgeOf(state, target.id)).toBe("scouted");
+    // 관측형(실행 계열)도 ±1 — 리포트는 정답 공개가 아니라 오차를 좁히는 행위다
     for (const attr of scoutedAttributes(state, target)) {
-      expect(attr.exact).not.toBeNull();
+      expect(attr.exact, `${attr.key}는 스카우팅으로도 확정되지 않는다`).toBeNull();
+      const observed = observedRating(state, target.id, attr.key, target.attributes[attr.key], "scouted");
+      const limit = AXIS_OBSERVABILITY[attr.key] === "observable" ? 1 : 3;
+      expect(Math.abs(observed - target.attributes[attr.key])).toBeLessThanOrEqual(limit);
     }
     expect(potentialView(state, target)).toContain("미지");
+  });
+
+  it("분석형 축이 관측형보다 넓게 틀린다 — 계층이 실제로 다르게 작동한다", () => {
+    const state = createTestGame(11);
+    const errorOf = (layer: "observable" | "analytical", knowledge: "seen" | "rumoured") => {
+      let sum = 0;
+      let n = 0;
+      for (const p of playersOf(state, "chelsea")) {
+        for (const axis of SCOUT_ATTRS) {
+          if (AXIS_OBSERVABILITY[axis] !== layer) continue;
+          sum += Math.abs(observedRating(state, p.id, axis, p.attributes[axis], knowledge) - p.attributes[axis]);
+          n++;
+        }
+      }
+      return sum / n;
+    };
+    expect(errorOf("analytical", "seen")).toBeGreaterThan(errorOf("observable", "seen"));
+    expect(errorOf("analytical", "rumoured")).toBeGreaterThan(errorOf("observable", "rumoured"));
   });
 });
 
@@ -108,15 +131,16 @@ describe("관측 오차", () => {
     expect(second).toEqual(first);
   });
 
-  it("rumoured는 ±6, seen은 ±3 안에 머문다", () => {
+  it("오차는 축의 계층별 상한 안에 머문다 (관측형 ±3/±6 · 분석형 ±6/±10)", () => {
     const state = createTestGame(11);
     for (const p of playersOf(state, "chelsea")) {
       for (const attr of SCOUT_ATTRS) {
         const trueValue = p.attributes[attr];
         const rumoured = observedRating(state, p.id, attr, trueValue, "rumoured");
         const seen = observedRating(state, p.id, attr, trueValue, "seen");
-        expect(Math.abs(rumoured - trueValue)).toBeLessThanOrEqual(KNOWLEDGE_MARGIN.rumoured);
-        expect(Math.abs(seen - trueValue)).toBeLessThanOrEqual(KNOWLEDGE_MARGIN.seen);
+        const layer = AXIS_OBSERVABILITY[attr];
+        expect(Math.abs(rumoured - trueValue)).toBeLessThanOrEqual(OBSERVATION_MARGIN[layer].rumoured);
+        expect(Math.abs(seen - trueValue)).toBeLessThanOrEqual(OBSERVATION_MARGIN[layer].seen);
         expect(rumoured).toBeGreaterThanOrEqual(1);
         expect(rumoured).toBeLessThanOrEqual(99);
       }

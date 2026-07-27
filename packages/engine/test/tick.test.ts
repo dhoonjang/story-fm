@@ -79,26 +79,26 @@ describe("advance_time — 시간은 스킬로만 흐른다 (game-loop §3)", ()
     const state = createTestGame(11);
     const roster = userPlayers(state);
     const young = roster.find((p) => ageOf(p.birthdate, state.date) <= 21) ?? roster[0]!;
-    const before = young.attributes.shooting;
+    const before = young.attributes.finishing;
     // 평일 오전·오후 슈팅 훈련 등록 (기본 훈련 없음 → 스킬이 일정을 만든다)
     setTraining(state, {
       repeatWeekly: [1, 2, 3, 4, 5].flatMap((dow) => [
-        { dow, slot: "am" as const, label: "슈팅 마무리", focus: ["shooting" as const] },
-        { dow, slot: "pm" as const, label: "슈팅 마무리", focus: ["shooting" as const] },
+        { dow, slot: "am" as const, label: "슈팅 마무리", focus: ["finishing" as const] },
+        { dow, slot: "pm" as const, label: "슈팅 마무리", focus: ["finishing" as const] },
       ]),
       weeks: 3,
     });
     expect(state.schedule.filter((e) => e.type === "training").length).toBeGreaterThan(10);
 
     let guard = 20;
-    while (guard-- > 0 && young.attributes.shooting === before) {
+    while (guard-- > 0 && young.attributes.finishing === before) {
       const r = advanceTime(state, { days: 3 });
       if (!r.ok || r.stopped === "matchday") break;
     }
-    expect(young.attributes.shooting).toBeGreaterThanOrEqual(before);
-    if (young.attributes.shooting > before) {
+    expect(young.attributes.finishing).toBeGreaterThanOrEqual(before);
+    if (young.attributes.finishing > before) {
       const log = state.growthLog.filter(
-        (g) => g.gamePlayerId === young.id && g.target === "shooting",
+        (g) => g.gamePlayerId === young.id && g.target === "finishing",
       );
       expect(log.length).toBeGreaterThan(0);
       expect(log[0]?.source).toBe("training");

@@ -1,6 +1,7 @@
 import type { GamePlayer, PositionGroup } from "@story-fm/domain";
 import { FIRST_NAMES, LAST_NAMES } from "./data/names";
 import { TIER_BASE } from "./data/team-catalog";
+import { deriveAxes } from "./attributes";
 import { derivePositions, overallFor, slugifyName } from "./catalog";
 import { makeRng, pick, randInt } from "./rng";
 
@@ -53,7 +54,9 @@ export function generateYouthPlayer(
   const age = randInt(rng, 17, 19);
   const month = randInt(rng, 1, 12);
   const day = randInt(rng, 1, 28);
-  const overall = overallFor(group, attrs);
+  // 시드 6축 → 15축 (실선수 카탈로그와 같은 파생 공식)
+  const axes = deriveAxes(`${nameEn}-${slugifyName(teamId)}-${season}-${index}`, position, attrs, age);
+  const overall = overallFor(position, axes);
 
   return {
     id: `${teamId}-y${season}-${index}`,
@@ -63,7 +66,7 @@ export function generateYouthPlayer(
     birthdate: `${refYear - age}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
     positions: derivePositions(`${nameEn}-${slugifyName(teamId)}-${season}-${index}`, position),
     attributes: {
-      ...attrs,
+      ...axes,
       overall,
       // 유스의 매력은 성장 여지 — 잠재치를 크게 준다
       potential: clamp99(overall + randInt(rng, 8, 18)),

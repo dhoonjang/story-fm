@@ -37,7 +37,7 @@ function pickScorer(rng: () => number, squad: SimSquad): string {
   const candidates = squad.starters.filter((p) => positionGroupOfPlayer(p) !== "GK");
   if (candidates.length === 0) return squad.starters[0]?.id ?? `${squad.teamId}-unknown`;
   const weights = candidates.map((p) =>
-    positionGroupOfPlayer(p) === "FW" ? p.attributes.shooting * 3 : p.attributes.shooting,
+    positionGroupOfPlayer(p) === "FW" ? p.attributes.finishing * 3 : p.attributes.finishing,
   );
   const total = weights.reduce((s, w) => s + w, 0);
   let roll = rng() * total;

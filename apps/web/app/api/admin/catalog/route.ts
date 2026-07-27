@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { ATTRIBUTE_AXES } from "@story-fm/domain";
 import {
   adminAddCatalogPlayer,
   adminCatalog,
@@ -28,13 +29,8 @@ const AddSchema = z.object({
   nameEn: z.string().max(60).optional(),
   birthdate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "출생년월일 형식(YYYY-MM-DD)이 올바르지 않습니다"),
   position: z.string().min(1),
-  pace: attr,
-  shooting: attr,
-  passing: attr,
-  dribbling: attr,
-  defending: attr,
-  physical: attr,
-  goalkeeping: attr,
+  // 능력치 15축 — 도메인 상수에서 펼친다
+  ...(Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, attr])) as Record<string, typeof attr>),
   potential: attr,
 });
 

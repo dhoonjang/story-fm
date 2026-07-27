@@ -30,7 +30,7 @@ function leaksTrueRatings(message: string, playerId: string, attrs: Record<strin
     .replace(/출전\d+/g, "")
     .replace(/득점\d+/g, "")
     .replace(/~\d{4}-\d{2}-\d{2}/g, "");
-  const keys = ["pace", "shooting", "passing", "dribbling", "defending", "physical"] as const;
+  const keys = ["pace", "finishing", "passing", "dribbling", "tackling", "strength"] as const;
   return keys.some((k) => new RegExp(`\\b${attrs[k]}\\b`).test(scrubbed));
 }
 
@@ -97,14 +97,15 @@ describe("get_player", () => {
     expect(leaksTrueRatings(res.message, other.id, other.attributes)).toBe(false);
   });
 
-  it("스카우팅을 마치면 같은 선수가 정확한 수치로 바뀐다", () => {
+  it("스카우팅을 마치면 오차가 좁혀지지만 여전히 라벨로 말한다", () => {
     const state = createTestGame(22);
     const other = playersOf(state, "chelsea")[0]!;
     scoutPlayer(state, other.id);
     advanceTime(state, { days: SCOUT_DAYS });
     const res = playerCard(state, other.id);
     expect(res.message).toContain("스카우팅 완료");
-    expect(res.message).toContain(`${other.attributes.pace}`);
+    // 우리 선수가 아니면 숫자를 주지 않는다 — 오차가 ±1이라도 단정하지 않는다
+    expect(leaksTrueRatings(res.message, other.id, other.attributes)).toBe(false);
     expect(res.message).not.toContain("POT"); // 잠재력은 여전히 미지
   });
 

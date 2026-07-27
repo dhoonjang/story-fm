@@ -7,6 +7,8 @@ import type {
   TrainAttr,
 } from "@story-fm/domain";
 import {
+  ATTRIBUTE_AXES,
+  AXIS_KO,
   FORMATION_SLOTS,
   POSITION_GROUPS,
   SCOUT_CONCURRENT_LIMIT,
@@ -348,15 +350,12 @@ export function setPlayerInstruction(
 
 // ---- 훈련: 스킬이 일정 엔트리를 직접 생성한다 (규칙 테이블 없음) ----
 
-const TRAIN_ATTRS: TrainAttr[] = [
-  "pace", "shooting", "passing", "dribbling", "defending", "physical",
-  "goalkeeping", "tactical", "recovery",
-];
+const TRAIN_ATTRS: TrainAttr[] = [...ATTRIBUTE_AXES, "tactical", "recovery"];
 const WEEKDAY_KO = ["일", "월", "화", "수", "목", "금", "토"];
 const TRAIN_ATTR_KO: Record<string, string> = {
-  pace: "스피드", shooting: "슈팅", passing: "패스", dribbling: "드리블",
-  defending: "수비", physical: "피지컬", goalkeeping: "골키핑",
-  tactical: "전술", recovery: "회복",
+  ...AXIS_KO,
+  tactical: "전술",
+  recovery: "회복",
 };
 
 export interface TrainingPlanInput {

@@ -10,7 +10,7 @@ import type {
   TacticsSpec,
   ZoneStrength,
 } from "@story-fm/domain";
-import { positionGroupOf, positionGroupOfPlayer } from "@story-fm/domain";
+import { positionGroupOf, positionGroupOfPlayer, roleFit } from "@story-fm/domain";
 import { stateModifier } from "./state-modifier";
 
 /** 배치된 선수 — 전술 배치(TACTIC_ASSIGNMENT)에서 조립해 넘긴다 */
@@ -35,20 +35,13 @@ export interface SideInput {
   familiarity?: number;
 }
 
-/** 포지션 그룹별 존 기여 점수 — 유효 능력치의 가중합 */
-function zoneScore(p: Player, group: PositionGroup): number {
-  const m = stateModifier(p.state);
-  const a = p.attributes;
-  switch (group) {
-    case "GK":
-      return a.goalkeeping * m;
-    case "DF":
-      return (a.defending * 0.5 + a.physical * 0.25 + a.pace * 0.25) * m;
-    case "MF":
-      return (a.passing * 0.4 + a.dribbling * 0.2 + a.physical * 0.2 + a.defending * 0.2) * m;
-    case "FW":
-      return (a.shooting * 0.35 + a.pace * 0.3 + a.dribbling * 0.25 + a.physical * 0.1) * m;
-  }
+/**
+ * 존 기여 점수 — **맡은 자리의 가중치**로 계산한 15축 가중합 × 상태 보정.
+ * 포지션군별 하드코딩 공식이 아니라 POSITION_WEIGHTS(도메인) 하나에서 나온다
+ * (attribute-model.md §2 — overall·roleFit·존 점수의 단일 소스).
+ */
+function zoneScore(p: Player, position: string): number {
+  return roleFit(p.attributes, position) * stateModifier(p.state);
 }
 
 function mean(xs: number[]): number {
@@ -71,7 +64,7 @@ export function tacticalFit(managerTactics: number): number {
 }
 
 function buildZones(slots: LineupSlot[], tactics: TacticsSpec, fit: number): ZoneStrength {
-  const scoreOf = (s: LineupSlot) => zoneScore(s.player, slotGroup(s)) * profFactor(s.proficiency);
+  const scoreOf = (s: LineupSlot) => zoneScore(s.player, s.position) * profFactor(s.proficiency);
   const inGroup = (g: PositionGroup) => slots.filter((s) => slotGroup(s) === g).map(scoreOf);
   const gk = inGroup("GK");
   const df = inGroup("DF");

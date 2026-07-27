@@ -1,5 +1,5 @@
-import type { AssignmentRole, ScheduleType } from "@story-fm/domain";
-import { ageOf, naturalPositionOf, slotOfTime } from "@story-fm/domain";
+import type { AssignmentRole, AxisValues, ScheduleType } from "@story-fm/domain";
+import { ATTRIBUTE_AXES, ageOf, naturalPositionOf, slotOfTime } from "@story-fm/domain";
 import { nextMatchFor, seasonEndDate } from "./calendar";
 import {
   competitionName,
@@ -37,7 +37,9 @@ export interface SquadPositionView {
   isNatural: boolean;
 }
 
-export interface SquadViewRow {
+/** 스쿼드 행 = 메타 + 15축 (오피스 뷰는 우리 선수라 숫자를 그대로 준다) */
+export type SquadViewRow = SquadViewRowMeta & AxisValues;
+interface SquadViewRowMeta {
   id: string;
   name: string;
   age: number;
@@ -47,13 +49,6 @@ export interface SquadViewRow {
   /** 가능 포지션 전체 + 적응도 */
   positions: SquadPositionView[];
   overall: number;
-  pace: number;
-  shooting: number;
-  passing: number;
-  dribbling: number;
-  defending: number;
-  physical: number;
-  goalkeeping: number;
   potential: number;
   form: number;
   morale: number;
@@ -284,13 +279,8 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         positionGroup: groupOf(p),
         positions: p.positions.map((x) => ({ ...x })),
         overall: p.attributes.overall,
-        pace: p.attributes.pace,
-        shooting: p.attributes.shooting,
-        passing: p.attributes.passing,
-        dribbling: p.attributes.dribbling,
-        defending: p.attributes.defending,
-        physical: p.attributes.physical,
-        goalkeeping: p.attributes.goalkeeping,
+        // 우리 스쿼드 화면은 15축 숫자를 그대로 보여준다 (결정 #2 — 오피스는 정확)
+        ...(Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, p.attributes[a]])) as AxisValues),
         potential: p.attributes.potential,
         form: p.state.form,
         morale: p.state.morale,

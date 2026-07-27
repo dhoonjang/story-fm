@@ -106,12 +106,16 @@ function advanceMatchTurn(state: GameState, calls: GmToolCall[]): string {
 
 // mock은 자연어를 정교히 해석하지 못하므로 키워드→focus로 간이 매핑 (e2e·오프라인용)
 const FOCUS_KEYWORDS: Array<[RegExp, TrainAttr[]]> = [
-  [/세트\s?피스/u, ["passing", "shooting"]],
-  [/슈팅|골\s?결정력|마무리/u, ["shooting"]],
-  [/수비|조직력/u, ["defending", "tactical"]],
+  [/세트\s?피스|프리킥|코너/u, ["kicking", "finishing"]],
+  [/슈팅|골\s?결정력|마무리/u, ["finishing"]],
+  [/공중볼|헤더|제공권/u, ["aerial"]],
+  [/수비|조직력/u, ["tackling", "positioning", "tactical"]],
   [/전술/u, ["tactical"]],
-  [/패스|점유|빌드업/u, ["passing"]],
-  [/체력|피지컬|피트니스|러닝/u, ["physical"]],
+  [/크로스|측면|롱볼|전환/u, ["kicking", "passing"]],
+  [/패스|점유|빌드업/u, ["passing", "vision"]],
+  [/드리블|돌파|1대1/u, ["dribbling"]],
+  [/스피드|스프린트|가속/u, ["pace"]],
+  [/체력|피지컬|피트니스|러닝/u, ["stamina", "strength"]],
   [/회복|휴식|리커버리/u, ["recovery"]],
 ];
 const WEEKDAY_KEYWORDS: Array<[RegExp, string]> = [

@@ -177,8 +177,13 @@ packages/
 - `PLAYER_CATALOG` / `TEAM_CATALOG` — 모든 게임이 공유하는 초기치. 새 게임
   시작 시에만 읽고, `GAME_PLAYER`/`GAME_TEAM`으로 인스턴스화된다
   (`catalogId`로 출처 링크, 유스 등 생성 선수는 null).
-- **선수** — `GAME_PLAYER`는 능력치 7축(6축 + goalkeeping은 **전 선수 보유**,
-  예외 분기 없음)·컨디션·주장 여부를 갖는다. 나이는 저장하지 않고
+- **선수** — `GAME_PLAYER`는 **능력치 15축**(신체 4 · 기술 5 · 정신 5 · GK 1 —
+  전 선수가 15축 전부 보유, 예외 분기 없음)·컨디션·주장 여부를 갖는다.
+  축의 의미는 **포지션 가중치**(`POSITION_WEIGHTS`, 자리별 0~3)가 정한다 —
+  `overall`·자리 적합도(`roleFit`)·시뮬 존 점수가 모두 이 테이블 하나에서 나온다.
+  히든 능력치는 두지 않고 대신 **축별 관측 가능성**(관측형/분석형)으로 안개를
+  만든다 — 스카우팅을 마쳐도 판단 계열(결정력·시야·위치선정·침착성·리더십)은
+  오차가 남는다 (→ docs/design/attribute-model.md). 나이는 저장하지 않고
   `birthdate`에서 계산(`ageOf`). 부속 테이블: `PLAYER_POSITION`(가능 포지션 +
   포지션 적응도, `isNatural`이 주 포지션)·`INJURY`(부위·심각도·원인 이력,
   `returnedOn=null`이 현재 부상)·`BOOKING`/`SUSPENSION`(징계 이력)·

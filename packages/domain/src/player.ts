@@ -56,22 +56,199 @@ export function sideOf(position: string): "R" | "L" | null {
 }
 
 /**
- * 6축 + goalkeeping + overall/potential.
- * goalkeeping은 전 선수 필수 — 필드 플레이어도 낮은 값을 갖는다 (예외 분기 금지).
- * overall은 주 포지션 그룹 공식의 파생 캐시, potential은 성장 상한.
+ * 능력치 15축 (attribute-model.md §1) — 전 선수가 15축 **전부**를 갖는다.
+ * 포지션별 예외 분기는 없다: 어떤 축이 그 선수에게 의미 있는지는
+ * POSITION_WEIGHTS(§2)가 정한다. goalkeeping도 필드 플레이어가 낮은 값으로 보유.
  */
+export const ATTRIBUTE_AXES = [
+  // 신체 4
+  "pace", "stamina", "strength", "aerial",
+  // 기술 5
+  "finishing", "dribbling", "passing", "kicking", "tackling",
+  // 정신 5
+  "vision", "positioning", "composure", "aggression", "leadership",
+  // GK 1
+  "goalkeeping",
+] as const;
+export type AttributeAxis = (typeof ATTRIBUTE_AXES)[number];
+
+export const AXIS_KO: Record<AttributeAxis, string> = {
+  pace: "스피드",
+  stamina: "체력",
+  strength: "몸싸움",
+  aerial: "공중볼",
+  finishing: "결정력",
+  dribbling: "드리블",
+  passing: "패스",
+  kicking: "킥력",
+  tackling: "태클",
+  vision: "시야",
+  positioning: "위치선정",
+  composure: "침착성",
+  aggression: "적극성",
+  leadership: "리더십",
+  goalkeeping: "골키핑",
+};
+
+/** 축 묶음 — UI 그룹 헤더·조회 도구 요약용 */
+export const AXIS_GROUPS = {
+  physical: ["pace", "stamina", "strength", "aerial"],
+  technical: ["finishing", "dribbling", "passing", "kicking", "tackling"],
+  mental: ["vision", "positioning", "composure", "aggression", "leadership"],
+  goalkeeping: ["goalkeeping"],
+} as const satisfies Record<string, readonly AttributeAxis[]>;
+
+export const AXIS_GROUP_KO: Record<keyof typeof AXIS_GROUPS, string> = {
+  physical: "신체",
+  technical: "기술",
+  mental: "정신",
+  goalkeeping: "GK",
+};
+
+/** overall은 POSITION_WEIGHTS 가중합의 파생 캐시, potential은 성장 상한 */
 export const PlayerAttributesSchema = z.object({
-  pace: RatingSchema,
-  shooting: RatingSchema,
-  passing: RatingSchema,
-  dribbling: RatingSchema,
-  defending: RatingSchema,
-  physical: RatingSchema,
-  goalkeeping: RatingSchema,
+  ...(Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, RatingSchema])) as Record<
+    AttributeAxis,
+    typeof RatingSchema
+  >),
   overall: RatingSchema,
   potential: RatingSchema,
 });
 export type PlayerAttributes = z.infer<typeof PlayerAttributesSchema>;
+
+/** 15축만 담은 값 묶음 — overall·potential 없이 계산에 쓰는 입력 타입 */
+export type AxisValues = Record<AttributeAxis, number>;
+
+// ── 포지션 가중치 (attribute-model.md §2) ───────────────
+
+/**
+ * 가중치를 매기는 **자리** — 22개 포지션 코드를 8종으로 접는다.
+ * 좌우 분화(RCB/LCB)나 표기 차이(DM/CDM)는 요구 역량이 같으므로 같은 슬롯을 쓴다.
+ */
+export type WeightSlot = "GK" | "CB" | "FB" | "DM" | "CM" | "AM" | "W" | "ST";
+
+const SLOT_OF_POSITION: Record<string, WeightSlot> = {
+  GK: "GK",
+  RCB: "CB", CB: "CB", LCB: "CB",
+  RB: "FB", LB: "FB", RWB: "FB", LWB: "FB",
+  DM: "DM", CDM: "DM",
+  RCM: "CM", CM: "CM", LCM: "CM",
+  AM: "AM", CAM: "AM",
+  RM: "W", LM: "W", RW: "W", LW: "W",
+  SS: "ST", ST: "ST", CF: "ST",
+};
+
+export function weightSlotOf(position: string): WeightSlot {
+  return SLOT_OF_POSITION[position.toUpperCase()] ?? "CM";
+}
+
+/**
+ * 자리별 축 중요도 — 3(핵심) / 2(중요) / 1(보조), 나열되지 않은 축은 0(무관).
+ * 초안 값 (attribute-model.md §2 지문 — balance.md에서 튜닝).
+ *
+ * ⚠️ `aggression`·`leadership`은 어디서도 낮게 잡는다. **전력(overall)에는 거의
+ * 기여하지 않지만 게임에는 크게 작용한다** — 파울·퇴장, 주장 지명, 팀토크 전파,
+ * 라커룸 이슈는 이 가중치와 무관한 별도 경로다.
+ */
+const SLOT_TIERS: Record<WeightSlot, { key: AttributeAxis[]; important: AttributeAxis[]; minor: AttributeAxis[] }> = {
+  GK: {
+    key: ["goalkeeping", "composure", "positioning"],
+    important: ["aerial", "kicking", "passing"],
+    minor: ["strength", "leadership"],
+  },
+  CB: {
+    key: ["strength", "aerial", "tackling", "positioning"],
+    important: ["pace", "passing", "composure", "aggression"],
+    minor: ["stamina", "dribbling", "kicking", "leadership"],
+  },
+  FB: {
+    key: ["pace", "stamina"],
+    important: ["strength", "dribbling", "passing", "kicking", "tackling", "positioning"],
+    minor: ["aerial", "vision", "composure", "aggression"],
+  },
+  DM: {
+    key: ["passing", "kicking", "tackling", "positioning"],
+    important: ["stamina", "strength", "aerial", "vision", "composure", "aggression"],
+    minor: ["pace", "dribbling", "leadership"],
+  },
+  CM: {
+    key: ["passing", "stamina", "vision"],
+    important: ["pace", "strength", "dribbling", "kicking", "tackling", "positioning", "composure"],
+    minor: ["aerial", "finishing", "aggression", "leadership"],
+  },
+  AM: {
+    key: ["vision", "dribbling", "passing"],
+    important: ["pace", "stamina", "finishing", "kicking", "positioning", "composure"],
+    minor: ["strength", "aggression"],
+  },
+  W: {
+    key: ["pace", "dribbling"],
+    important: ["stamina", "finishing", "passing", "vision", "positioning"],
+    minor: ["strength", "kicking", "composure", "aggression"],
+  },
+  ST: {
+    key: ["pace", "finishing", "positioning", "composure"],
+    important: ["strength", "aerial", "dribbling", "stamina"],
+    minor: ["passing", "kicking", "vision", "aggression"],
+  },
+};
+
+function expandTiers(tiers: { key: AttributeAxis[]; important: AttributeAxis[]; minor: AttributeAxis[] }): AxisValues {
+  const w = Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, 0])) as AxisValues;
+  for (const a of tiers.key) w[a] = 3;
+  for (const a of tiers.important) w[a] = 2;
+  for (const a of tiers.minor) w[a] = 1;
+  return w;
+}
+
+/** 자리 → 축별 가중치 (0~3). `overall`·`roleFit`·시뮬 존 점수의 단일 소스 */
+export const POSITION_WEIGHTS: Record<WeightSlot, AxisValues> = Object.fromEntries(
+  (Object.keys(SLOT_TIERS) as WeightSlot[]).map((slot) => [slot, expandTiers(SLOT_TIERS[slot])]),
+) as Record<WeightSlot, AxisValues>;
+
+export function weightsFor(position: string): AxisValues {
+  return POSITION_WEIGHTS[weightSlotOf(position)];
+}
+
+/**
+ * 자리별 스케일 보정 — **축이 15개면 가중 평균은 중앙으로 수렴한다.**
+ * 어떤 월드클래스도 15축 전부가 최상급이지는 않으므로(그게 현실적이다) 원값의
+ * 상단이 눌린다. 그대로 두면 "90+ 월드클래스" 밴드(§7)가 영구히 비어버리고,
+ * 자리마다 눌리는 정도도 달라(GK가 가장 심하다) 포지션 간 비교가 깨진다.
+ *
+ * 그래서 **자리별 기준점에서 스케일을 되편다**: 기준점은 시드 카탈로그의 자리별
+ * 원값 평균(측정값), 목표는 공통 평균 69. 순서를 바꾸지 않는 단조 변환이라
+ * 선수 간 서열은 그대로다. (측정값이므로 파생 공식이 바뀌면 함께 갱신 —
+ * world.test.ts가 분포를 고정한다)
+ */
+const RAW_PIVOT: Record<WeightSlot, number> = {
+  GK: 60.1, CB: 65.3, FB: 66.2, DM: 65.3, CM: 63.9, AM: 66.3, W: 65.4, ST: 66.8,
+};
+const CALIBRATION_MEAN = 69;
+/** 되펴는 정도 — 6축 시절 분포(평균 70 · p90 79 · 최대 94)에 맞춘 값 */
+const CALIBRATION_GAIN = 1.3;
+
+/**
+ * 이 자리에서의 전력 — 15축의 가중 평균에 자리별 보정을 적용한 0~99 값.
+ * 같은 선수라도 자리에 따라 다른 값이 나온다: 라이스를 DM에 두면 tackling·
+ * positioning이 3배로 잡히고, AM에 올리면 vision·dribbling이 지배한다.
+ */
+export function roleFit(axes: AxisValues, position: string): number {
+  const slot = weightSlotOf(position);
+  const w = POSITION_WEIGHTS[slot];
+  let sum = 0;
+  let total = 0;
+  for (const axis of ATTRIBUTE_AXES) {
+    const weight = w[axis];
+    if (weight === 0) continue;
+    sum += axes[axis] * weight;
+    total += weight;
+  }
+  if (total === 0) return 0;
+  const raw = sum / total;
+  const calibrated = CALIBRATION_MEAN + (raw - RAW_PIVOT[slot]) * CALIBRATION_GAIN;
+  return Math.max(1, Math.min(99, Math.round(calibrated)));
+}
 
 /** 빠르게 변하는 컨디션 — 부상은 별도 INJURY 테이블 (attribute-model.md §2) */
 export const PlayerStateSchema = z.object({
@@ -115,8 +292,11 @@ export type GamePlayer = z.infer<typeof GamePlayerSchema>;
 /** 관례상 짧은 별칭 — 코드 전반에서 Player로 쓴다 */
 export type Player = GamePlayer;
 
-/** 선수 카탈로그 (PLAYER_CATALOG) — 모든 게임이 공유하는 불변 초기치 DB */
-export interface PlayerCatalogEntry {
+/**
+ * 선수 카탈로그 (PLAYER_CATALOG) — 모든 게임이 공유하는 불변 초기치 DB.
+ * 15축을 평면 필드로 갖는다 (overall은 파생이라 저장하지 않는다).
+ */
+export interface PlayerCatalogMeta {
   id: string;
   /** 시드 시점 소속 팀 (TEAM_CATALOG) */
   teamId: string;
@@ -125,16 +305,10 @@ export interface PlayerCatalogEntry {
   birthdate: string;
   /** 가능 포지션 + 적응도 초기치 → 게임 시작 시 그대로 복사 */
   positions: PlayerPosition[];
-  pace: number;
-  shooting: number;
-  passing: number;
-  dribbling: number;
-  defending: number;
-  physical: number;
-  goalkeeping: number;
-  /** 성장 상한 — overall은 파생이라 저장하지 않는다 */
+  /** 성장 상한 */
   potential: number;
 }
+export type PlayerCatalogEntry = PlayerCatalogMeta & AxisValues;
 
 /** 주 포지션 (isNatural) — 검증 레이어가 정확히 1개를 보장한다 */
 export function naturalPositionOf(player: Pick<GamePlayer, "positions">): PlayerPosition {

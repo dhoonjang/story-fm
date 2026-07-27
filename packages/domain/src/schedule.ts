@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ATTRIBUTE_AXES } from "./player";
 
 /**
  * 일정 축 (v6) — 경기·훈련·이적창이 날짜+시간의 단일 축에 등록된다.
@@ -79,20 +80,11 @@ export const MatchRecordSchema = z.object({
 export type MatchRecord = z.infer<typeof MatchRecordSchema>;
 
 /**
- * 훈련 효과 대상 — 6대 능력치 + 전술 적응도(tactical) + 회복(recovery).
+ * 훈련 효과 대상 — 능력치 15축 + 전술 적응도(tactical) + 회복(recovery).
  * GM(LLM)이 자연어 훈련을 이 focus 목록으로 해석하고, 코어가 효과를 준다.
+ * (15축이므로 "측면 크로스 반복" → kicking·passing 처럼 해상도가 올라간다)
  */
-export const TrainAttrSchema = z.enum([
-  "pace",
-  "shooting",
-  "passing",
-  "dribbling",
-  "defending",
-  "physical",
-  "goalkeeping",
-  "tactical",
-  "recovery",
-]);
+export const TrainAttrSchema = z.enum([...ATTRIBUTE_AXES, "tactical", "recovery"]);
 export type TrainAttr = z.infer<typeof TrainAttrSchema>;
 
 /** 훈련 세션 (TRAINING_SESSION) — 자유서술 label + 코어가 쓰는 focus */

@@ -80,7 +80,7 @@ describe("오피스 뷰 — 달력 (일정 축)", () => {
     expect("diary" in state).toBe(false);
 
     setTraining(state, {
-      repeatWeekly: [{ dow: 2, slot: "am", label: "체력 훈련", focus: ["physical"] }],
+      repeatWeekly: [{ dow: 2, slot: "am", label: "체력 훈련", focus: ["strength"] }],
       weeks: 2,
     });
     advanceDays(state, 9);

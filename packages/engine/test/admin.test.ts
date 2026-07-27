@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { ageOf, naturalPositionOf } from "@story-fm/domain";
+import { ATTRIBUTE_AXES, ageOf, naturalPositionOf } from "@story-fm/domain";
 import {
   adminAddCatalogPlayer,
   adminCatalog,
@@ -15,6 +15,7 @@ import {
   playerCatalog,
   playersOf,
   CATALOG_AGE_REF,
+  type CatalogPlayerInput,
 } from "@story-fm/engine";
 import { createTestGame } from "./helpers";
 
@@ -35,6 +36,17 @@ afterEach(() => {
   delete process.env.STORY_FM_DATA_DIR;
   rmSync(dir, { recursive: true, force: true });
 });
+
+/** 어드민 추가 입력 — 15축을 전부 채워야 하므로 기본값 위에 덮어쓴다 */
+function addInput(over: Partial<CatalogPlayerInput> & Pick<CatalogPlayerInput, "nameKo" | "position">): CatalogPlayerInput {
+  return {
+    nameEn: over.nameKo,
+    birthdate: "2005-01-01",
+    potential: 80,
+    ...(Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, 60])) as Record<string, number>),
+    ...over,
+  } as CatalogPlayerInput;
+}
 
 describe("카탈로그 조회", () => {
   it("96팀 · 3,800명+ · 파생값(나이·OVR·주 포지션)을 함께 준다", () => {
@@ -58,7 +70,7 @@ describe("카탈로그 조회", () => {
 describe("카탈로그 편집", () => {
   it("능력치를 편집하면 파일에 저장되고 OVR 파생이 갱신된다", () => {
     const target = adminCatalog()[0]!.players.find((p) => p.position !== "GK")!;
-    const res = adminUpdateCatalogPlayer(target.id, { pace: 99, shooting: 99, dribbling: 99 });
+    const res = adminUpdateCatalogPlayer(target.id, { pace: 99, finishing: 99, dribbling: 99 });
     expect(res.ok).toBe(true);
 
     const after = adminCatalog()
@@ -116,20 +128,20 @@ describe("카탈로그 편집", () => {
 
   it("새 선수를 추가하면 카탈로그가 늘어난다", () => {
     const before = playerCatalog().length;
-    const res = adminAddCatalogPlayer("arsenal", {
+    const res = adminAddCatalogPlayer("arsenal", addInput({
       nameKo: "김유망",
       nameEn: "Kim Prospect",
       birthdate: "2008-01-01",
       position: "AM",
       pace: 80,
-      shooting: 70,
+      finishing: 70,
       passing: 78,
       dribbling: 82,
-      defending: 40,
-      physical: 60,
+      tackling: 40,
+      strength: 60,
       goalkeeping: 20,
       potential: 88,
-    });
+    }));
     expect(res.ok).toBe(true);
     expect(playerCatalog().length).toBe(before + 1);
     const added = playerCatalog().find((e) => e.id === res.playerId)!;
@@ -139,20 +151,20 @@ describe("카탈로그 편집", () => {
   });
 
   it("같은 이름을 두 번 추가해도 id가 충돌하지 않는다", () => {
-    const base = {
+    const base: CatalogPlayerInput = addInput({
       nameKo: "동명이인",
       nameEn: "Same Name",
       birthdate: "2004-01-01",
       position: "CB",
       pace: 60,
-      shooting: 40,
+      finishing: 40,
       passing: 60,
       dribbling: 55,
-      defending: 70,
-      physical: 72,
+      tackling: 70,
+      strength: 72,
       goalkeeping: 18,
       potential: 75,
-    };
+    });
     const a = adminAddCatalogPlayer("arsenal", base);
     const b = adminAddCatalogPlayer("arsenal", base);
     expect(a.playerId).not.toBe(b.playerId);
@@ -214,20 +226,20 @@ describe("게임 격리 — 카탈로그 편집은 새 게임에만 반영된다
   });
 
   it("카탈로그에 추가한 선수는 새 게임의 스쿼드에 들어온다", () => {
-    const res = adminAddCatalogPlayer("arsenal", {
+    const res = adminAddCatalogPlayer("arsenal", addInput({
       nameKo: "신규유망주",
       nameEn: "New Prospect",
       birthdate: "2007-05-05",
       position: "ST",
       pace: 85,
-      shooting: 80,
+      finishing: 80,
       passing: 65,
       dribbling: 82,
-      defending: 35,
-      physical: 70,
+      tackling: 35,
+      strength: 70,
       goalkeeping: 22,
       potential: 92,
-    });
+    }));
     expect(res.ok).toBe(true);
     const game = createTestGame(33);
     const added = playersOf(game, "arsenal").find((p) => p.id === res.playerId);

@@ -344,6 +344,78 @@ textarea {
   width: 64px;
   text-align: center;
 }
+.admin-nav-link {
+  text-decoration: none;
+  white-space: nowrap;
+}
+.prompt-admin {
+  max-width: 1600px;
+}
+.prompt-hint {
+  max-width: 960px;
+  margin-bottom: 16px;
+}
+.prompt-save {
+  padding: 7px 18px;
+  border-radius: 8px;
+}
+.prompt-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.prompt-card {
+  min-width: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+}
+.prompt-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.prompt-card-head h2 {
+  font-size: 16px;
+}
+.prompt-card-head p,
+.prompt-card-head > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.prompt-card-head > span {
+  flex-shrink: 0;
+}
+.prompt-card textarea {
+  display: block;
+  width: 100%;
+  min-height: 66vh;
+  resize: vertical;
+  background: #0b0f14;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 12px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  tab-size: 2;
+}
+.prompt-card textarea:focus {
+  outline: none;
+  border-color: var(--accent-2);
+}
+@media (max-width: 960px) {
+  .prompt-grid {
+    grid-template-columns: 1fr;
+  }
+  .prompt-card textarea {
+    min-height: 55vh;
+  }
+}
 .onboarding-top {
   margin-bottom: 12px;
 }
@@ -1336,4 +1408,10 @@ textarea {
 }
 .ai.date {
   width: 118px;
+}
+
+/* 15축 표의 묶음 경계 — 신체 / 기술 / 정신 / GK */
+.admin-table th.axis-group,
+.admin-table td.axis-group {
+  border-left: 1px solid var(--border);
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { naturalPositionOf } from "@story-fm/domain";
+import { naturalPositionOf, roleFit } from "@story-fm/domain";
 import {
   applyNarrativeEvent,
   applyTalkToPlayer,
@@ -172,10 +172,8 @@ describe("포지션 스킬 (멀티 포지션)", () => {
     expect(naturalPositionOf(df).position).toBe("ST");
     expect(df.positions.filter((p) => p.isNatural)).toHaveLength(1);
     expect(groupOf(df)).toBe("FW");
-    // FW 공식으로 재산정
-    expect(df.attributes.overall).toBe(
-      Math.round((df.attributes.shooting + df.attributes.pace + df.attributes.dribbling) / 3),
-    );
+    // ST 자리 가중치로 재산정 (15축 가중합 — attribute-model.md §2)
+    expect(df.attributes.overall).toBe(roleFit(df.attributes, "ST"));
   });
 
   it("처음 맡는 포지션은 낮은 적응도로 추가된다", () => {
@@ -258,7 +256,7 @@ describe("훈련 스킬 = 일정 생성 (규칙 테이블 없음)", () => {
     const state = createTestGame();
     const res = setTraining(state, {
       sessions: [
-        { date: "2026-07-06", slot: "am", label: "세트피스 반복", focus: ["passing", "shooting"] },
+        { date: "2026-07-06", slot: "am", label: "세트피스 반복", focus: ["passing", "finishing"] },
       ],
     });
     expect(res.ok).toBe(true);
@@ -273,7 +271,7 @@ describe("훈련 스킬 = 일정 생성 (규칙 테이블 없음)", () => {
   it("요일 반복은 지정 주 수만큼 엔트리로 펼쳐진다", () => {
     const state = createTestGame();
     const res = setTraining(state, {
-      repeatWeekly: [{ dow: 1, slot: "pm", label: "체력 훈련", focus: ["physical"] }],
+      repeatWeekly: [{ dow: 1, slot: "pm", label: "체력 훈련", focus: ["strength"] }],
       weeks: 4,
     });
     expect(res.ok).toBe(true);
@@ -315,7 +313,7 @@ describe("훈련 스킬 = 일정 생성 (규칙 테이블 없음)", () => {
       sessions: [{ date: "2026-07-08", slot: "am", label: "첫 지시", focus: ["passing"] }],
     });
     setTraining(state, {
-      sessions: [{ date: "2026-07-08", slot: "am", label: "바뀐 지시", focus: ["shooting"] }],
+      sessions: [{ date: "2026-07-08", slot: "am", label: "바뀐 지시", focus: ["finishing"] }],
     });
     const entries = state.schedule.filter((e) => e.type === "training" && e.date === "2026-07-08");
     expect(entries).toHaveLength(1);
