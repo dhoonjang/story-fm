@@ -7,6 +7,8 @@ import { advanceEuroKnockouts } from "./euro-knockout";
 import { quickSimulate, type SimSquad } from "./quick-sim";
 import { allMatchesDone, endSeason } from "./season";
 import {
+  MATCH_FATIGUE,
+  groupOf,
   activeSuspension,
   assignmentsOf,
   ensureSeasonStat,
@@ -316,7 +318,23 @@ function dailyTick(state: GameState, digest: string[]): boolean {
   return needsAttention;
 }
 
-/** 간이 시뮬 입력 조립 — 전술 배치에서 가용 선발을 뽑는다 */
+/**
+ * 로테이션 기준 — 이 이상 지친 선발은 신선한 대체 자원에게 자리를 내준다.
+ * 한 경기가 +34, 회복이 하루 8~14이므로 주중·주말 연전을 두 번 소화하면 걸린다.
+ */
+const ROTATION_FATIGUE = 62;
+/** 대체가 허용되는 기량 손실 — 이보다 떨어지면 지쳐도 그냥 뛴다 */
+const ROTATION_OVR_DROP = 8;
+/** 대체 자원은 최소 이만큼 더 신선해야 한다 */
+const ROTATION_FRESHER = 25;
+
+/**
+ * 간이 시뮬 입력 조립 — 전술 배치에서 가용 선발을 뽑는다.
+ *
+ * 부상·정지로 빈 자리를 메우고, **지친 선발은 로테이션**한다. 대항전에 나가는
+ * 팀은 주중 경기가 늘어 이 부담을 실제로 지고, 그 대가는 약해진 라인업이다
+ * (유저 팀은 감독이 직접 라인업을 짜므로 이 함수를 쓰지 않는다).
+ */
 export function simSquadOf(state: GameState, teamId: string): SimSquad {
   const squad = playersOf(state, teamId);
   const byId = new Map(squad.map((p) => [p.id, p]));
@@ -333,6 +351,27 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
       if (starters.length >= 11) break;
       starters.push(p);
     }
+  }
+
+  // 로테이션 — 지친 선발을 같은 포지션군의 신선한 자원으로 바꾼다
+  const used = new Set(starters.map((p) => p.id));
+  for (let i = 0; i < starters.length; i++) {
+    const tired = starters[i]!;
+    if (tired.state.fatigue < ROTATION_FATIGUE) continue;
+    const replacement = squad
+      .filter(
+        (p) =>
+          !used.has(p.id) &&
+          !isInjured(state, p.id) &&
+          groupOf(p) === groupOf(tired) &&
+          p.attributes.overall >= tired.attributes.overall - ROTATION_OVR_DROP &&
+          p.state.fatigue <= tired.state.fatigue - ROTATION_FRESHER,
+      )
+      .sort((a, b) => b.attributes.overall - a.attributes.overall)[0];
+    if (!replacement) continue;
+    starters[i] = replacement;
+    used.delete(tired.id);
+    used.add(replacement.id);
   }
   return { teamId, starters };
 }
@@ -369,6 +408,12 @@ function simulateOtherMatches(state: GameState, digest: string[]): void {
         const [sSide, id] = s.split(":", 2) as [string, string];
         if (sSide !== side || !id) continue;
         ensureSeasonStat(state, id, teamId).goals += 1;
+      }
+    }
+    // 피로 — AI 팀도 경기마다 쌓인다. 대항전 주중 경기가 리그 라인업을 흔든다
+    for (const side of ["home", "away"] as const) {
+      for (const p of squads[side].starters) {
+        p.state.fatigue = Math.min(100, p.state.fatigue + MATCH_FATIGUE);
       }
     }
     const entry = state.schedule.find((e) => e.type === "match" && e.refId === match.id);

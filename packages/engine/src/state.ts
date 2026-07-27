@@ -310,6 +310,9 @@ export function userFinance(state: GameState): TeamFinance {
   return financeOf(state, state.userTeamId);
 }
 
+/** 한 경기의 피로 누적 — 유저 팀·AI 팀 모두 같은 값을 쓴다 (회복은 하루 8~14) */
+export const MATCH_FATIGUE = 34;
+
 export function recordFinance(
   state: GameState,
   teamId: string,

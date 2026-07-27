@@ -210,7 +210,8 @@ packages/
   단판. 대진은 미리 못 짜므로 **직전 단계가 끝나면 다음 단계를 편성하는** 진행형
   상태 기계다(`advanceEuroKnockouts`). 우승·트로피는 시즌 리뷰가 확정한다.
   상금은 참가비·승무 수당·단계 진출·우승으로 나뉘고 중복 지급은 원장 항목명으로
-  막는다 (금액은 `CupCatalogEntry.prize` — 밸런스 임시값).
+  막는다 (금액은 `CupCatalogEntry.prize` — 밸런스 임시값). 주중 경기의 대가는
+  피로다 — AI 팀도 경기당 피로가 쌓이고 지친 선발은 자동 로테이션된다.
 - **이적·계약** — `TRANSFER`가 이적·임대·자유·유스 콜업·은퇴까지 모든 팀 변경을
   기록하는 원장(`GAME_PLAYER.teamId`는 현재값일 뿐). `CONTRACT`가 주급의
   원본이고, 팀 주급 총액은 활성 계약의 합(파생).
@@ -232,7 +233,7 @@ ERD와 설계 근거는 docs/design/implementation-notes.md에 정리했다.
 - `apps/web` — Next.js 채팅 UI + 오피스 뷰(스쿼드 전술판·달력·재정·순위·커리어)
   + API + `/admin` **선수 카탈로그 편집** (게임과 무관한 초기치 DB — 편집은 새 게임에만
   반영되고 진행 중 세이브는 영향 없음)
-- 테스트: Vitest 267 (유닛·API 통합) + Playwright e2e 3. `pnpm test` / `pnpm e2e`
+- 테스트: Vitest 269 (유닛·API 통합) + Playwright e2e 3. `pnpm test` / `pnpm e2e`
 
 ### LLM 입력 (요약 — 상세는 docs/design/llm-io.md)
 

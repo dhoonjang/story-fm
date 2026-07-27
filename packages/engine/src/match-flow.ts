@@ -19,6 +19,7 @@ import {
   isInjured,
   isSuspended,
   groupOf,
+  MATCH_FATIGUE,
   playerById,
   playersOf,
   proficiencyAt,
@@ -401,7 +402,7 @@ export function finalizeMatch(state: GameState): string[] {
   for (const player of roster) {
     if (!played.has(player.id)) continue;
     ensureSeasonStat(state, player.id, player.teamId).apps += 1;
-    player.state.fatigue = Math.min(100, player.state.fatigue + 34);
+    player.state.fatigue = Math.min(100, player.state.fatigue + MATCH_FATIGUE);
     player.state.morale = Math.max(0, Math.min(100, player.state.morale + moraleDelta));
     player.state.form = Math.max(-3, Math.min(3, player.state.form + formDelta));
 

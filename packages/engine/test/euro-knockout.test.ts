@@ -21,6 +21,10 @@ import {
   buildOfficeViews,
   financeOf,
   payWinnerPrize,
+  euroCompetitionOf,
+  entrantsOf,
+  simSquadOf,
+  playerById,
 } from "@story-fm/engine";
 import { createTestGame, playMockMatch } from "./helpers";
 
@@ -450,5 +454,46 @@ describe("상금", () => {
     const seasonIncome = 12 * (13_000_000 + 6_000_000); // 중계권 + 스폰서 (tier 1)
     expect(total / seasonIncome).toBeGreaterThan(0.2);
     expect(total / seasonIncome).toBeLessThan(0.4);
+  });
+});
+
+describe("주중 경기 부담 (로테이션)", () => {
+  it("AI 팀도 경기마다 피로가 쌓이고, 지친 선발은 로테이션된다", () => {
+    const state = createTestGame(42);
+    const cup = euroCompetitionOf(state.euroEntrants, state.userTeamId)!;
+    // 우리 팀이 아닌 대항전 참가 팀을 하나 고른다 (간이 시뮬 대상)
+    const rival = entrantsOf(state.euroEntrants, cup).find((id) => id !== state.userTeamId)!;
+
+    const before = simSquadOf(state, rival).starters.map((p) => p.id);
+    expect(before).toHaveLength(11);
+    // 선발 전원을 로테이션 기준 위로 지치게 만든다
+    for (const id of before) playerById(state, id)!.state.fatigue = 80;
+
+    const after = simSquadOf(state, rival).starters;
+    expect(after).toHaveLength(11);
+    const changed = after.filter((p) => !before.includes(p.id));
+    expect(changed.length, "지친 선발 일부가 교체된다").toBeGreaterThan(0);
+    // 대체 자원은 신선하고 기량 낙폭이 제한된다
+    for (const p of changed) expect(p.state.fatigue).toBeLessThanOrEqual(80 - 25);
+  });
+
+  it("간이 시뮬을 치른 AI 팀 선발은 피로가 오른다", () => {
+    const state = createTestGame(42);
+    const digest: string[] = [];
+    const fatigueBefore = new Map(state.players.map((p) => [p.id, p.state.fatigue]));
+    // 첫 리그 라운드까지 전진 — 우리 경기가 아닌 경기들이 간이 시뮬로 소화된다
+    let guard = 20;
+    while (guard-- > 0) {
+      const advanced = advanceTime(state, { days: 7 });
+      digest.push(...advanced.digest);
+      if (state.matches.some((m) => m.result)) break;
+      if (advanced.stopped === "matchday") break;
+    }
+    const played = state.matches.filter((m) => m.result);
+    expect(played.length, "간이 시뮬이 돌았다").toBeGreaterThan(0);
+    const tired = state.players.filter(
+      (p) => p.state.fatigue > (fatigueBefore.get(p.id) ?? 0) + 20,
+    );
+    expect(tired.length, "경기를 뛴 선수들의 피로가 올랐다").toBeGreaterThan(0);
   });
 });
