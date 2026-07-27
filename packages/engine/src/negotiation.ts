@@ -1,14 +1,17 @@
-import type { Negotiation, NegotiationVerdict } from "@story-fm/domain";
+import type { GamePlayer, Negotiation, NegotiationVerdict } from "@story-fm/domain";
+import { naturalPositionOf } from "@story-fm/domain";
 import { addDays, seasonYear, windowOpenOn } from "./calendar";
 import {
   askingPriceFor,
   dealOdds,
   describeOdds,
+  marketValueOf,
   oddsLabel,
   responseDelayDays,
   wageExpectationOf,
   type DealTerms,
 } from "./market";
+import { makeRng } from "./rng";
 import type { SkillResult } from "./skills";
 import {
   activeContract,
@@ -259,6 +262,216 @@ export function respondOffer(
   };
 }
 
+// ── 매각 — AI 구단이 우리 선수에게 오퍼를 넣는다 ──────────
+
+/** 하루에 오퍼가 들어올 확률 (이적창 열린 날) */
+const INCOMING_OFFER_CHANCE = 0.08;
+/** 동시에 들어와 있을 수 있는 오퍼 수 — 감독이 감당할 만큼만 */
+const MAX_INCOMING = 3;
+
+/** 답을 기다리는 상대 오퍼 (우리가 판정해야 하는 것) */
+export function incomingOffer(negotiation: Negotiation) {
+  const last = negotiation.rounds[negotiation.rounds.length - 1];
+  return last && last.by === "them" && last.verdict === null ? last : null;
+}
+
+/** 우리에게 온 오퍼들 — 감독의 결정을 기다린다 */
+export function incomingOffers(state: GameState): Negotiation[] {
+  return state.negotiations.filter(
+    (n) => n.kind === "sell" && n.status === "open" && incomingOffer(n) !== null,
+  );
+}
+
+/**
+ * 들어오는 오퍼 생성 — tick이 매일 부른다.
+ *
+ * 아무 선수에게나 오지 않는다. **자리가 막혀 있거나 사기가 낮은 선수**, 그리고
+ * 값이 나가는 선수에게 온다 (실제로도 에이전트가 그런 선수를 움직인다).
+ * 사는 구단은 그 자리가 우리보다 약하고 예산이 되는 곳에서 고른다.
+ */
+export function generateIncomingOffers(state: GameState, digest: string[]): void {
+  const window = windowOpenOn(state.windows, state.date);
+  if (!window) return;
+  if (incomingOffers(state).length >= MAX_INCOMING) return;
+
+  const rng = makeRng(state.seed, `incoming:${state.date}`);
+  if (rng() > INCOMING_OFFER_CHANCE) return;
+
+  const squad = playersOf(state, state.userTeamId);
+  const candidates = squad
+    .filter((p) => {
+      if (openNegotiationFor(state, p.id)) return false;
+      if (state.negotiations.some((n) => n.gamePlayerId === p.id && n.status !== "expired"))
+        return false;
+      return marketValueOf(state, p) > 1_000_000;
+    })
+    // 자리가 막힌 선수·사기가 낮은 선수가 먼저 눈에 띈다
+    .map((p) => ({
+      player: p,
+      appeal:
+        marketValueOf(state, p) / 1_000_000 +
+        (p.state.morale < 45 ? 12 : 0) +
+        betterAtPositionInSquad(state, p) * 8,
+    }))
+    .sort((a, b) => b.appeal - a.appeal);
+  if (candidates.length === 0) return;
+
+  // 상위 후보 중에서 시드로 하나 — 늘 같은 선수만 노려지지 않게 한다
+  const pool = candidates.slice(0, 8);
+  const chosen = pool[Math.floor(rng() * pool.length)]!.player;
+  const buyer = pickBuyer(state, chosen, rng);
+  if (!buyer) return;
+
+  const marketValue = marketValueOf(state, chosen);
+  // 처음엔 시장가보다 낮게 부른다 (75~100%) — 흥정의 여지를 남긴다
+  const fee = Math.round((marketValue * (0.75 + rng() * 0.25)) / 100_000) * 100_000;
+  const wage = Math.round(wageExpectationOf(state, chosen) * (1.05 + rng() * 0.2));
+  const negotiation: Negotiation = {
+    id: `neg-in-${chosen.id}-${state.date}`,
+    gamePlayerId: chosen.id,
+    kind: "sell",
+    counterpartTeamId: buyer,
+    windowId: window.id,
+    openedOn: state.date,
+    expiresOn: minDate(addDays(state.date, NEGOTIATION_DAYS), window.closesOn),
+    status: "open",
+    rounds: [
+      {
+        date: state.date,
+        by: "them",
+        fee,
+        weeklyWage: wage,
+        contractYears: 4,
+        respondsOn: null,
+        probability: dealOdds(state, {
+          playerId: chosen.id,
+          fee,
+          weeklyWage: wage,
+          years: 4,
+          kind: "sell",
+        }).probability,
+        verdict: null,
+      },
+    ],
+  };
+  state.negotiations.push(negotiation);
+  digest.push(
+    `📩 ${teamName(buyer)}가 ${chosen.name} 영입 오퍼를 넣었습니다 — ${money(fee)} (기한 ${negotiation.expiresOn})`,
+  );
+  pushNarrative(state, `${teamName(buyer)}의 ${chosen.name} 오퍼 (${money(fee)})`, 3);
+}
+
+/** 우리 스쿼드에서 그 자리를 더 잘 보는 선수 수 — 오퍼가 올 만한 선수 판별 */
+function betterAtPositionInSquad(state: GameState, player: { id: string }): number {
+  const target = playerById(state, player.id);
+  if (!target) return 0;
+  const position = naturalPositionOf(target).position;
+  return playersOf(state, state.userTeamId).filter(
+    (p) =>
+      p.id !== target.id &&
+      naturalPositionOf(p).position === position &&
+      p.attributes.overall > target.attributes.overall,
+  ).length;
+}
+
+/** 오퍼를 넣을 구단 — 그 자리가 우리보다 약하고 예산이 되는 곳 */
+function pickBuyer(state: GameState, player: GamePlayer, rng: () => number): string | null {
+  const position = naturalPositionOf(player).position;
+  const value = marketValueOf(state, player);
+  const options = state.teams
+    .filter((team) => {
+      if (team.id === state.userTeamId) return false;
+      const finance = state.finances.find((f) => f.teamId === team.id);
+      if (!finance || finance.transferBudget < value) return false;
+      // 그 자리에 우리 선수보다 나은 자원이 없는 팀이 노린다
+      return !playersOf(state, team.id).some(
+        (p) =>
+          naturalPositionOf(p).position === position &&
+          p.attributes.overall >= player.attributes.overall,
+      );
+    })
+    .map((t) => t.id);
+  if (options.length === 0) return null;
+  return options[Math.floor(rng() * options.length)] ?? null;
+}
+
+/**
+ * 감독이 들어온 오퍼에 답한다 — 수락·거절·역제안(더 부르기).
+ *
+ * 역제안하면 **사는 쪽이 판정할 차례**가 된다 (`respond_offer`로 GM이 상대편이
+ * 되어 답한다). 우리가 부른 값이 상대 상한을 넘으면 확률이 떨어진다.
+ */
+export function answerIncomingOffer(
+  state: GameState,
+  input: { negotiationId: string; verdict: NegotiationVerdict; fee?: number },
+): SkillResult {
+  const negotiation = state.negotiations.find((n) => n.id === input.negotiationId);
+  if (!negotiation)
+    return { ok: false, message: `협상 "${input.negotiationId}"을 찾지 못했습니다` };
+  if (negotiation.kind !== "sell") {
+    return { ok: false, message: "들어온 오퍼가 아닙니다 — 우리가 넣은 오퍼는 상대가 답합니다" };
+  }
+  if (negotiation.status !== "open") {
+    return { ok: false, message: `이미 끝난 협상입니다 (${negotiation.status})` };
+  }
+  const offer = incomingOffer(negotiation);
+  if (!offer) return { ok: false, message: "답할 오퍼가 없습니다" };
+  const player = playerById(state, negotiation.gamePlayerId);
+  if (!player) return { ok: false, message: "선수를 찾지 못했습니다" };
+
+  if (input.verdict === "reject") {
+    offer.verdict = "reject";
+    negotiation.status = "rejected";
+    return {
+      ok: true,
+      message: `${teamName(negotiation.counterpartTeamId ?? "")}의 ${player.name} 오퍼를 거절했습니다`,
+    };
+  }
+
+  if (input.verdict === "accept") {
+    const shortfall = squadShortfall(state, state.userTeamId, player);
+    if (shortfall) return { ok: false, message: `우리 ${shortfall}` };
+    offer.verdict = "accept";
+    negotiation.status = "agreed";
+    return {
+      ok: true,
+      message: `${player.name} 매각에 합의했습니다 — ${money(offer.fee)}. 계약을 확정하세요`,
+    };
+  }
+
+  // 역제안 — 우리가 더 부른다. 상대 상한을 넘으면 확률이 떨어질 뿐 막지는 않는다
+  const demanded = Math.round(input.fee ?? Math.round(marketValueOf(state, player) * 1.1));
+  if (demanded <= offer.fee) {
+    return { ok: false, message: `역제안은 받은 오퍼(${money(offer.fee)})보다 높아야 합니다` };
+  }
+  offer.verdict = "counter";
+  const terms = {
+    playerId: player.id,
+    fee: demanded,
+    weeklyWage: offer.weeklyWage,
+    years: offer.contractYears,
+    kind: "sell" as const,
+  };
+  const odds = dealOdds(state, terms);
+  const respondsOn = addDays(state.date, responseDelayDays(state, terms, odds.probability));
+  negotiation.rounds.push({
+    date: state.date,
+    by: "us",
+    fee: demanded,
+    weeklyWage: offer.weeklyWage,
+    contractYears: offer.contractYears,
+    respondsOn,
+    probability: odds.probability,
+    verdict: null,
+  });
+  return {
+    ok: true,
+    message:
+      `${player.name} 값으로 ${money(demanded)}을 불렀습니다 (성사 확률 ${odds.probability}%) — ` +
+      `답은 ${respondsOn} 예정입니다`,
+  };
+}
+
 /**
  * 합의를 실행한다 — 여기서 장부가 움직인다.
  *
@@ -277,6 +490,8 @@ export function acceptDeal(state: GameState, negotiationId: string): SkillResult
 
   const agreed = [...negotiation.rounds].reverse().find((r) => r.verdict === "accept");
   if (!agreed) return { ok: false, message: "합의된 조건을 찾지 못했습니다" };
+
+  if (negotiation.kind === "sell") return executeSale(state, negotiation, agreed);
 
   // 그 사이 다른 팀이 데려갔으면 무효다
   if (player.teamId !== negotiation.counterpartTeamId) {
@@ -358,6 +573,83 @@ export function acceptDeal(state: GameState, negotiationId: string): SkillResult
   };
 }
 
+/**
+ * 매각 실행 — 영입의 거울상. 선수가 떠나고 돈이 들어온다.
+ *
+ * 판매 대금은 잔고와 **이적 예산에 함께** 들어간다 (ADR 0002) — 팔지 않으면 큰
+ * 영입이 없다는 규칙이 여기서 성립한다.
+ */
+function executeSale(
+  state: GameState,
+  negotiation: Negotiation,
+  agreed: Negotiation["rounds"][number],
+): SkillResult {
+  const player = playerById(state, negotiation.gamePlayerId);
+  if (!player) return { ok: false, message: "선수를 찾지 못했습니다" };
+  if (player.teamId !== state.userTeamId) {
+    negotiation.status = "expired";
+    return { ok: false, message: `${player.name}은(는) 이미 우리 선수가 아닙니다` };
+  }
+  const buyerTeamId = negotiation.counterpartTeamId;
+  if (!buyerTeamId) return { ok: false, message: "사는 구단을 알 수 없습니다" };
+  const window = windowOpenOn(state.windows, state.date);
+  if (!window) return { ok: false, message: "이적시장이 닫혀 있어 매각을 확정할 수 없습니다" };
+  const shortfall = squadShortfall(state, state.userTeamId, player);
+  if (shortfall) return { ok: false, message: `우리 ${shortfall}` };
+
+  state.transfers.push({
+    id: `tr-${player.id}-${state.date}`,
+    gamePlayerId: player.id,
+    windowId: window.id,
+    fromTeamId: state.userTeamId,
+    toTeamId: buyerTeamId,
+    date: state.date,
+    type: agreed.fee > 0 ? "transfer" : "free",
+    fee: agreed.fee,
+    note: `${teamName(state.userTeamId)} → ${teamName(buyerTeamId)}`,
+  });
+
+  const previous = activeContract(state, player.id);
+  if (previous) previous.status = "ended";
+  state.contracts.push({
+    id: `c-${player.id}-${state.date}`,
+    gamePlayerId: player.id,
+    teamId: buyerTeamId,
+    weeklyWage: agreed.weeklyWage,
+    since: state.date,
+    until: `${seasonYear(state.season) + agreed.contractYears}-06-30`,
+    status: "active",
+  });
+
+  const ourFinance = state.finances.find((f) => f.teamId === state.userTeamId);
+  if (agreed.fee > 0) {
+    recordFinance(state, state.userTeamId, "income", `이적료 — ${player.name} 매각`, agreed.fee);
+    recordFinance(state, buyerTeamId, "expense", `이적료 — ${player.name} 영입`, agreed.fee);
+    if (ourFinance) ourFinance.transferBudget += agreed.fee;
+    const theirFinance = state.finances.find((f) => f.teamId === buyerTeamId);
+    if (theirFinance) theirFinance.transferBudget -= agreed.fee;
+  }
+
+  releaseFromTactics(state, state.userTeamId, player.id);
+  const wasCaptain = player.isCaptain;
+  player.isCaptain = false;
+  player.teamId = buyerTeamId;
+  negotiation.status = "completed";
+
+  pushNarrative(
+    state,
+    `${player.name} 매각 — ${teamName(buyerTeamId)}로 ${money(agreed.fee)}`,
+    wasCaptain ? 5 : 4,
+  );
+  const captainNote = wasCaptain ? " 주장이 떠났습니다 — 새 주장을 지명하세요." : "";
+  return {
+    ok: true,
+    message:
+      `${player.name}을(를) ${teamName(buyerTeamId)}로 보냈습니다 — ${money(agreed.fee)}.` +
+      `${captainNote} 이적 예산 ${money(ourFinance?.transferBudget ?? 0)}`,
+  };
+}
+
 /** 협상 철회 — 감독이 물러선다 */
 export function withdrawOffer(state: GameState, negotiationId: string): SkillResult {
   const negotiation = state.negotiations.find((n) => n.id === negotiationId);
@@ -390,9 +682,14 @@ export function describeNegotiations(state: GameState): string {
       const player = playerById(state, n.gamePlayerId);
       const last = n.rounds[n.rounds.length - 1];
       const who = `${player?.name ?? n.gamePlayerId}(${teamName(n.counterpartTeamId ?? "")})`;
-      if (n.status === "agreed") return `${n.id} ${who} — 합의됨, 확정 대기`;
-      if (!last) return `${n.id} ${who} — 오퍼 없음`;
-      if (last.by === "them") return `${n.id} ${who} — 역제안 ${money(last.fee)} 도착`;
+      const direction = n.kind === "sell" ? "매각" : "영입";
+      if (n.status === "agreed") return `${n.id} ${who} ${direction} — 합의됨, 확정 대기`;
+      if (!last) return `${n.id} ${who} ${direction} — 오퍼 없음`;
+      if (last.by === "them") {
+        return n.kind === "sell"
+          ? `${n.id} ${who} 매각 — 상대 오퍼 ${money(last.fee)} 도착, 답이 필요합니다`
+          : `${n.id} ${who} 영입 — 역제안 ${money(last.fee)} 도착`;
+      }
       const waiting =
         last.respondsOn !== null && last.respondsOn > state.date
           ? `답 ${last.respondsOn} 예정`

@@ -7,14 +7,7 @@ import {
   setTraining,
   userPlayers,
 } from "@story-fm/engine";
-import {
-  advanceAndPlay,
-  advanceDays,
-  advanceTime,
-  createTestGame,
-  playMockMatch,
-  userFixtureCount,
-} from "./helpers";
+import { advanceAndPlay, advanceDays, advanceToMatchday, createTestGame, playMockMatch, userFixtureCount } from "./helpers";
 
 describe("오피스 뷰 — 스쿼드", () => {
   it("나이·포지션 목록·계약·배치가 파생 표시된다", () => {
@@ -174,8 +167,8 @@ describe("id → 이름 치환", () => {
 describe("경기 흐름 통합", () => {
   it("경기일 → 경기 → idle로 돌아오고 결과가 남는다", () => {
     const state = createTestGame(23);
-    const r = advanceTime(state, "next_match");
-    expect(r.stopped).toBe("matchday");
+    advanceToMatchday(state);
+    expect(state.phase).toBe("matchday");
     // 경기일에 도달했으면 경기를 치러야 시간이 다시 흐른다
     const digest = playMockMatch(state);
     expect(digest.some((d) => d.includes("최종 스코어"))).toBe(true);

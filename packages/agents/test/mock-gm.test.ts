@@ -36,6 +36,16 @@ describe("mock GM — 유저 여정 시나리오", () => {
     expect(turn.text).toContain("다음 경기");
   });
 
+  it("온보딩 폴백은 같은 시드로 재현되고 다른 시드에선 장면이 달라진다", () => {
+    expect(buildOnboardingTurn(newGame(42)).text).toBe(buildOnboardingTurn(newGame(42)).text);
+    const openings = new Set(
+      [1, 2, 3, 4, 5, 6, 7, 8].map(
+        (seed) => buildOnboardingTurn(newGame(seed)).text.split("\n")[0],
+      ),
+    );
+    expect(openings.size).toBeGreaterThan(1);
+  });
+
   it("훈련 지시 → set_training 스킬이 세션을 등록한다", () => {
     const state = newGame();
     const turn = runMockGmTurn(state, "월요일 오전은 세트피스 반복 훈련 잡아줘");
@@ -73,9 +83,15 @@ describe("mock GM — 유저 여정 시나리오", () => {
   it("진행 → 경기일 → 경기 시작 → 계속으로 경기 종료까지 완주한다", () => {
     const state = newGame(7);
 
+    // 이적 오퍼·부상 같은 attention 정지는 감독의 결정을 기다리며 멈춘다 —
+    // 경기일에 닿을 때까지 다시 진행시킨다 (감독이 실제로 하는 일과 같다)
     const advanced = runMockGmTurn(state, "다음 경기로 가자");
     expectGmGrammar(advanced.text);
     expect(advanced.toolCalls.map((c) => c.name)).toContain("advance_time");
+    let toMatchday = 30;
+    while (state.phase !== "matchday" && toMatchday-- > 0) {
+      runMockGmTurn(state, "다음 경기로 가자");
+    }
     expect(state.phase).toBe("matchday");
 
     const kickoff = runMockGmTurn(state, "경기 시작");

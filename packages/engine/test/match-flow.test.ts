@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   advanceMockSegment,
-  advanceTime,
   assignmentsOf,
   finalizeMatch,
   groupOf,
@@ -16,7 +15,7 @@ import {
   userPlayers,
   userSide,
 } from "@story-fm/engine";
-import { createTestGame, playMockMatch } from "./helpers";
+import { advanceToMatchday, createTestGame, playMockMatch } from "./helpers";
 
 describe("경기 흐름 (overview §4)", () => {
   it("경기일이 아니면 시작할 수 없다", () => {
@@ -26,7 +25,7 @@ describe("경기 흐름 (overview §4)", () => {
 
   it("킥오프 → 세그먼트 진행 → 종료 반영까지 완주한다", () => {
     const state = createTestGame();
-    advanceTime(state, "next_match");
+    advanceToMatchday(state);
     const digest = playMockMatch(state);
 
     expect(state.phase).toBe("idle");
@@ -51,7 +50,7 @@ describe("경기 흐름 (overview §4)", () => {
 
   it("경기 중 전술 변경은 패킷을 재계산한다", () => {
     const state = createTestGame();
-    advanceTime(state, "next_match");
+    advanceToMatchday(state);
     startMatch(state);
     const before = state.pendingMatch?.packet.home.zones.attack ?? 0;
     setTactics(state, { mentality: 5 });
@@ -66,7 +65,7 @@ describe("경기 흐름 (overview §4)", () => {
 
   it("패킷 라인업이 배치 포지션을 그대로 쓴다 (v6)", () => {
     const state = createTestGame();
-    advanceTime(state, "next_match");
+    advanceToMatchday(state);
     startMatch(state);
     const packet = state.pendingMatch!.packet;
     const side = userSide(state) === "home" ? packet.home : packet.away;
@@ -84,7 +83,7 @@ describe("경기 흐름 (overview §4)", () => {
 
   it("경기 중 교체가 장부에 반영되고, 스크립트 득점자는 재매핑된다", () => {
     const state = createTestGame();
-    advanceTime(state, "next_match");
+    advanceToMatchday(state);
     startMatch(state);
     const match = state.pendingMatch;
     if (!match) throw new Error("no match");
@@ -112,7 +111,7 @@ describe("경기 흐름 (overview §4)", () => {
   it("저장/로드를 거쳐도 경기를 이어가고 결과가 남는다", () => {
     process.env.STORY_FM_DATA_DIR = `/tmp/story-fm-test-${Math.random().toString(36).slice(2)}`;
     const state = createTestGame(99);
-    advanceTime(state, "next_match");
+    advanceToMatchday(state);
     startMatch(state);
     advanceMockSegment(state);
     saveGame(state);
@@ -140,7 +139,7 @@ describe("경기 흐름 (overview §4)", () => {
 describe("회귀: 부상·정지 선수는 경기에 나설 수 없다", () => {
   it("킥오프 시 부상 선발은 자동 대체되고 벤치에서도 빠진다", () => {
     const state = createTestGame();
-    advanceTime(state, "next_match");
+    advanceToMatchday(state);
     const starter = assignmentsOf(state, state.userTeamId, "starting")[3]!;
     state.injuries.push({
       id: "inj-r1",
@@ -164,7 +163,7 @@ describe("회귀: 부상·정지 선수는 경기에 나설 수 없다", () => {
 
   it("부상 선수 교체 투입은 반려된다", () => {
     const state = createTestGame();
-    advanceTime(state, "next_match");
+    advanceToMatchday(state);
     startMatch(state);
     const side = userSide(state);
     const ledger = side === "home" ? state.pendingMatch!.ledger.home : state.pendingMatch!.ledger.away;

@@ -10,13 +10,18 @@ import {
   userPlayers,
   weeklyWagesOf,
 } from "@story-fm/engine";
-import { advanceDays, createTestGame } from "./helpers";
+import { advanceDays, advanceToMatchday, createTestGame } from "./helpers";
 
 describe("advance_time — 시간은 스킬로만 흐른다 (game-loop §3)", () => {
   it("프리시즌에서 다음 경기일까지 전진하면 개막전에서 멈춘다", () => {
     const state = createTestGame();
     expect(state.date).toBe("2026-07-01"); // 7/1 프리시즌 시작
-    const result = advanceTime(state, "next_match");
+    // attention 정지(부상·이적 오퍼)는 넘긴다 — 결국 경기일에서 멈춘다
+    let result = advanceTime(state, "next_match");
+    let guard = 30;
+    while (result.stopped === "attention" && guard-- > 0) {
+      result = advanceTime(state, "next_match");
+    }
     expect(result.ok).toBe(true);
     expect(result.stopped).toBe("matchday");
     expect(state.phase).toBe("matchday");
@@ -46,7 +51,7 @@ describe("advance_time — 시간은 스킬로만 흐른다 (game-loop §3)", ()
 
   it("경기일에는 시간이 흐르지 않는다 — 경기가 우선", () => {
     const state = createTestGame();
-    advanceTime(state, "next_match");
+    advanceToMatchday(state);
     const blocked = advanceTime(state, { days: 1 });
     expect(blocked.ok).toBe(false);
     expect(blocked.stopped).toBe("blocked");
@@ -54,7 +59,7 @@ describe("advance_time — 시간은 스킬로만 흐른다 (game-loop §3)", ()
 
   it("타 팀 경기는 각자 날짜에 간이 시뮬되고 시즌 스탯이 쌓인다", () => {
     const state = createTestGame();
-    advanceTime(state, "next_match");
+    advanceToMatchday(state);
     const round1 = state.matches.filter((m) => m.round === 1);
     const others = round1.filter(
       (m) => m.homeTeamId !== state.userTeamId && m.awayTeamId !== state.userTeamId,

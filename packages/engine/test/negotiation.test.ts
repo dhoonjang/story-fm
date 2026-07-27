@@ -3,6 +3,11 @@ import type { GameState } from "@story-fm/engine";
 import {
   acceptDeal,
   activeContract,
+  answerIncomingOffer,
+  generateIncomingOffers,
+  incomingOffer,
+  incomingOffers,
+  marketValueOf,
   addDays,
   advanceTime,
   arrivedResponses,
@@ -312,5 +317,137 @@ describe("시간이 흐르면", () => {
     expect(detail).toContain(player.name);
     expect(detail).toContain("우리"); // 오퍼 이력
     expect(detail).toMatch(/기준|성사/); // 확률 근거가 붙는다
+  });
+});
+
+describe("매각 — 들어오는 오퍼", () => {
+  /** 오퍼가 들어올 때까지 날짜를 넘긴다 (확률적이지만 시드로 결정적) */
+  function waitForIncoming(state: GameState, days = 60) {
+    const digest: string[] = [];
+    for (let i = 0; i < days && incomingOffers(state).length === 0; i++) {
+      state.date = addDays(state.date, 1);
+      generateIncomingOffers(state, digest);
+    }
+    return { negotiation: incomingOffers(state)[0], digest };
+  }
+
+  it("이적창이 열려 있을 때 우리 선수에게 오퍼가 들어온다", () => {
+    const state = createTestGame(42);
+    const { negotiation, digest } = waitForIncoming(state);
+    expect(negotiation, "60일 안에 오퍼가 하나는 들어온다").toBeDefined();
+    expect(negotiation!.kind).toBe("sell");
+    expect(digest.some((d) => d.includes("오퍼를 넣었습니다"))).toBe(true);
+
+    const offer = incomingOffer(negotiation!)!;
+    expect(offer.by).toBe("them");
+    expect(offer.verdict).toBeNull();
+    expect(offer.fee).toBeGreaterThan(0);
+
+    // 대상은 우리 선수, 상대는 그 자리가 우리보다 약한 구단
+    const player = playerById(state, negotiation!.gamePlayerId)!;
+    expect(player.teamId).toBe(state.userTeamId);
+    expect(negotiation!.counterpartTeamId).not.toBe(state.userTeamId);
+  });
+
+  it("창이 닫혀 있으면 오퍼가 들어오지 않는다", () => {
+    const state = createTestGame(42);
+    for (const w of state.windows) w.closesOn = state.date; // 전부 닫는다
+    state.date = addDays(state.date, 1);
+    const digest: string[] = [];
+    for (let i = 0; i < 30; i++) {
+      state.date = addDays(state.date, 1);
+      generateIncomingOffers(state, digest);
+    }
+    expect(incomingOffers(state)).toHaveLength(0);
+  });
+
+  it("매각 확률은 관문이 뒤집힌다 — 많이 부르면 떨어진다", () => {
+    const state = createTestGame(42);
+    const { negotiation } = waitForIncoming(state);
+    const player = playerById(state, negotiation!.gamePlayerId)!;
+    const base = { playerId: player.id, weeklyWage: 100_000, years: 4, kind: "sell" as const };
+    const value = marketValueOf(state, player);
+
+    const cheap = dealOdds(state, { ...base, fee: Math.round(value * 0.6) }).probability;
+    const fair = dealOdds(state, { ...base, fee: Math.round(value * 1.1) }).probability;
+    const greedy = dealOdds(state, { ...base, fee: Math.round(value * 2) }).probability;
+    expect(cheap).toBeGreaterThan(fair);
+    expect(fair).toBeGreaterThan(greedy);
+    // 우리 선수라 안개가 없다
+    expect(dealOdds(state, { ...base, fee: value }).fuzzy).toBe(false);
+  });
+
+  it("거절·역제안·수락이 모두 가능하고, 역제안은 받은 값보다 높아야 한다", () => {
+    const state = createTestGame(42);
+    const { negotiation } = waitForIncoming(state);
+    const offer = incomingOffer(negotiation!)!;
+
+    const tooLow = answerIncomingOffer(state, {
+      negotiationId: negotiation!.id,
+      verdict: "counter",
+      fee: Math.round(offer.fee * 0.9),
+    });
+    expect(tooLow.ok).toBe(false);
+
+    const countered = answerIncomingOffer(state, {
+      negotiationId: negotiation!.id,
+      verdict: "counter",
+      fee: Math.round(offer.fee * 1.3),
+    });
+    expect(countered.ok, countered.message).toBe(true);
+    // 역제안하면 사는 쪽이 답할 차례가 된다
+    expect(negotiation!.status).toBe("open");
+    const ours = negotiation!.rounds[negotiation!.rounds.length - 1]!;
+    expect(ours.by).toBe("us");
+    expect(ours.respondsOn! > state.date).toBe(true);
+  });
+
+  it("수락하면 선수가 떠나고 이적료가 예산으로 들어온다", () => {
+    const state = createTestGame(42);
+    const { negotiation } = waitForIncoming(state);
+    const offer = incomingOffer(negotiation!)!;
+    const player = playerById(state, negotiation!.gamePlayerId)!;
+    const buyerTeamId = negotiation!.counterpartTeamId!;
+    const budgetBefore = financeOf(state, state.userTeamId).transferBudget;
+    const squadBefore = playersOf(state, state.userTeamId).length;
+
+    const answered = answerIncomingOffer(state, {
+      negotiationId: negotiation!.id,
+      verdict: "accept",
+    });
+    expect(answered.ok, answered.message).toBe(true);
+    expect(negotiation!.status).toBe("agreed");
+    // 합의만으로는 떠나지 않는다
+    expect(playerById(state, player.id)!.teamId).toBe(state.userTeamId);
+
+    const done = acceptDeal(state, negotiation!.id);
+    expect(done.ok, done.message).toBe(true);
+    expect(negotiation!.status).toBe("completed");
+
+    expect(playerById(state, player.id)!.teamId).toBe(buyerTeamId);
+    expect(playersOf(state, state.userTeamId)).toHaveLength(squadBefore - 1);
+    // 판매 대금은 잔고와 이적 예산에 함께 들어간다 (ADR 0002)
+    expect(financeOf(state, state.userTeamId).transferBudget).toBe(budgetBefore + offer.fee);
+    expect(
+      financeOf(state, state.userTeamId).ledger.some(
+        (e) => e.kind === "income" && e.label.includes(player.name),
+      ),
+    ).toBe(true);
+    // 원장은 방향이 반대다
+    const transfer = state.transfers.find((t) => t.gamePlayerId === player.id)!;
+    expect(transfer.fromTeamId).toBe(state.userTeamId);
+    expect(transfer.toTeamId).toBe(buyerTeamId);
+    // 계약도 새 팀으로 넘어간다
+    expect(activeContract(state, player.id)!.teamId).toBe(buyerTeamId);
+  });
+
+  it("우리가 넣은 오퍼는 answerIncomingOffer로 답할 수 없다", () => {
+    const state = createTestGame(42);
+    const player = target(state);
+    sendOffer(state, offerFor(state, player.id));
+    const negotiation = openNegotiationFor(state, player.id)!;
+    const wrong = answerIncomingOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
+    expect(wrong.ok).toBe(false);
+    expect(wrong.message).toContain("들어온 오퍼가 아닙니다");
   });
 });

@@ -50,6 +50,22 @@ export function userFixtureCount(state: GameState): number {
   return 38 + (cup ? (cupCatalogById(cup)?.matchesPerTeam ?? 0) : 0);
 }
 
+/**
+ * 경기일까지 전진 — attention 정지(부상·이적 오퍼 등)는 넘긴다.
+ * `advanceTime` 한 번으로는 경기일에 닿지 않는다: 감독의 결정이 필요한 사건이
+ * 중간에 멈춰 세우기 때문이다 (그게 정상 동작이다).
+ */
+export function advanceToMatchday(state: GameState): void {
+  let guard = 30;
+  while (guard-- > 0) {
+    const advanced = advanceTime(state, "next_match");
+    if (!advanced.ok) throw new Error(advanced.digest.join(" / "));
+    if (advanced.stopped === "attention") continue;
+    return;
+  }
+  throw new Error("attention 정지가 반복되어 경기일에 도달하지 못했습니다");
+}
+
 /** 경기일 상태에서 mock 스크립트로 경기를 끝까지 치른다 */
 export function playMockMatch(state: GameState): string[] {
   const started = startMatch(state);

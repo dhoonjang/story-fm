@@ -184,6 +184,16 @@ export interface DealTerms {
   weeklyWage: number;
   /** 계약 연수 */
   years: number;
+  /**
+   * 영입인가 매각인가 — 기본은 영입.
+   * 매각이면 관문이 뒤집힌다: **사는 쪽이 그 값을 낼까** + **선수가 떠날까**.
+   */
+  kind?: "buy" | "sell";
+}
+
+/** 매각 상대 — 우리가 부른 값을 낼 구단 (오퍼를 넣은 쪽) */
+export interface SellContext {
+  buyerTeamId: string;
 }
 
 /** 안개 밴드 — 지식 수준이 낮으면 확률·금액이 흐려진다 (결정적) */
@@ -225,15 +235,26 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
   const window = windowOpenOn(state.windows, state.date);
   const freeAgent = contractYearsLeft(state, player.id) <= 0;
 
-  if (player.teamId === state.userTeamId) {
-    blockers.push(`${player.name}은(는) 이미 우리 선수입니다`);
+  if (terms.kind === "sell") {
+    if (player.teamId !== state.userTeamId) {
+      blockers.push(`${player.name}은(는) 우리 선수가 아닙니다`);
+    }
+    if (!window) blockers.push("이적시장이 닫혀 있습니다");
+  } else {
+    if (player.teamId === state.userTeamId) {
+      blockers.push(`${player.name}은(는) 이미 우리 선수입니다`);
+    }
+    if (!window && !freeAgent) {
+      blockers.push("이적시장이 닫혀 있습니다");
+    }
+    const budget = financeOf(state, state.userTeamId).transferBudget;
+    if (terms.fee > budget) {
+      blockers.push(`이적 예산을 넘습니다 — 가용 £${(budget / 1_000_000).toFixed(1)}M`);
+    }
   }
-  if (!window && !freeAgent) {
-    blockers.push("이적시장이 닫혀 있습니다");
-  }
-  const budget = financeOf(state, state.userTeamId).transferBudget;
-  if (terms.fee > budget) {
-    blockers.push(`이적 예산을 넘습니다 — 가용 £${(budget / 1_000_000).toFixed(1)}M`);
+
+  if (terms.kind === "sell") {
+    return sellOdds(state, terms, player, blockers, knowledge);
   }
 
   /**
@@ -408,6 +429,120 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     blockers,
   };
 }
+
+/**
+ * 매각 확률 — 관문이 뒤집힌다.
+ *
+ * ① **사는 쪽이 그 값을 낼까** — 우리가 부르는 값이 상대의 상한을 넘으면 떨어진다.
+ *    상한은 시장가 기준이다(구단은 시장가를 크게 넘겨 사지 않는다).
+ * ② **선수가 떠날까** — 우리 팀에서 주전이면 버티고, 자리가 막혀 있으면 떠나려 한다.
+ *    이 관문 때문에 "핵심을 팔아 돈을 만드는" 선택이 공짜가 아니다.
+ */
+function sellOdds(
+  state: GameState,
+  terms: DealTerms,
+  player: GamePlayer,
+  blockers: string[],
+  knowledge: Knowledge,
+): DealOdds {
+  const marketValue = marketValueOf(state, player);
+  const buyerCeiling = Math.round(marketValue * BUYER_CEILING_MULTIPLE);
+  const wageExpectation = wageExpectationOf(state, player);
+  const contributions: Array<{
+    gate: "club" | "player";
+    score: number;
+    label: string;
+    why: string;
+  }> = [];
+
+  const feeRatio = terms.fee > 0 ? buyerCeiling / terms.fee : 2;
+  contributions.push({
+    gate: "club",
+    score: (feeRatio - 1) * 8,
+    label: "우리가 부른 값",
+    why: `사는 쪽이 낼 수 있는 상한은 £${(buyerCeiling / 1_000_000).toFixed(1)}M 정도다 (부른 값은 그 ${Math.round((terms.fee / Math.max(1, buyerCeiling)) * 100)}%)`,
+  });
+
+  const blockedBy = betterAtPosition(state, state.userTeamId, player);
+  if (blockedBy === 0) {
+    contributions.push({
+      gate: "player",
+      score: -0.8,
+      label: "선수의 의지",
+      why: `우리 ${naturalPositionOf(player).position} 자리의 주전이다 — 떠날 이유가 없다`,
+    });
+  } else if (blockedBy >= 2) {
+    contributions.push({
+      gate: "player",
+      score: 0.7,
+      label: "선수의 의지",
+      why: `자리가 막혀 있다 (더 나은 선수 ${blockedBy}명) — 출전 기회를 찾는다`,
+    });
+  }
+  if (player.state.morale < 45) {
+    contributions.push({
+      gate: "player",
+      score: 0.5,
+      label: "선수의 사기",
+      why: `사기 ${player.state.morale} — 팀에 남을 마음이 옅다`,
+    });
+  }
+  const yearsLeft = contractYearsLeft(state, player.id);
+  if (yearsLeft < 1) {
+    contributions.push({
+      gate: "player",
+      score: 0.4,
+      label: "계약 잔여",
+      why: "계약이 1년도 남지 않아 붙잡을 명분이 약하다",
+    });
+  }
+  const negotiation = state.manager.attributes.negotiation;
+  if (Math.abs(negotiation - 50) >= 5) {
+    contributions.push({
+      gate: "club",
+      score: (negotiation - 50) / 100,
+      label: "감독 협상력",
+      why: `협상 ${negotiation}`,
+    });
+  }
+
+  const sumOf = (gate: "club" | "player", skip: ReadonlySet<number>) =>
+    contributions.reduce(
+      (acc, c, i) => acc + (c.gate === gate && !skip.has(i) ? c.score : 0),
+      MEETS_ASKING_SCORE,
+    );
+  const NONE: ReadonlySet<number> = new Set();
+  const chance = (skip: ReadonlySet<number> = NONE) =>
+    sigmoid(sumOf("club", skip)) * sigmoid(sumOf("player", skip)) * 100;
+  const raw = chance();
+
+  const factors: DealFactor[] = [
+    {
+      label: "기준",
+      delta: Math.round(sigmoid(MEETS_ASKING_SCORE) ** 2 * 100),
+      why: "상대 상한에 맞춰 부르고 선수도 떠날 뜻이 있을 때",
+    },
+    ...contributions.map((c, i) => ({
+      label: c.label,
+      delta: Math.round(raw - chance(new Set([i]))),
+      why: c.why,
+    })),
+  ];
+
+  return {
+    probability: Math.max(0, Math.min(100, Math.round(raw))),
+    marketValue,
+    askingPrice: buyerCeiling,
+    wageExpectation,
+    knowledge,
+    fuzzy: false, // 우리 선수라 안개가 없다
+    factors,
+    blockers,
+  };
+}
+
+/** 사는 쪽이 낼 수 있는 상한 — 시장가의 이 배수 (구단은 시장가를 크게 넘기지 않는다) */
+const BUYER_CEILING_MULTIPLE = 1.15;
 
 /** 이 선수에게 같은 조건으로 몇 번 제안했는가 — 인내심 감쇠의 근거 */
 export function sameTermsRepeats(state: GameState, terms: DealTerms): number {

@@ -4,7 +4,13 @@ import { addDays, dayOfWeek, matchesOn, nextMatchFor, windowOpenOn } from "./cal
 import { TEAM_CATALOG, teamCatalogById } from "./data/team-catalog";
 import { competitionShortName, stageLabel } from "./data/cup-catalog";
 import { advanceEuroKnockouts } from "./euro-knockout";
-import { arrivedResponses, expireNegotiations, pendingOffer } from "./negotiation";
+import {
+  arrivedResponses,
+  expireNegotiations,
+  generateIncomingOffers,
+  incomingOffers,
+  pendingOffer,
+} from "./negotiation";
 import { quickSimulate, type SimSquad } from "./quick-sim";
 import { allMatchesDone, endSeason } from "./season";
 import {
@@ -300,8 +306,11 @@ function dailyTick(state: GameState, digest: string[]): boolean {
     }
   }
 
-  // 협상 — 기한 경과 처리 + 상대의 답 도착 알림 (감독의 결정이 필요한 이벤트)
+  // 협상 — 기한 경과 처리 + 들어오는 오퍼 + 상대의 답 도착 (감독의 결정이 필요한 이벤트)
   expireNegotiations(state, digest);
+  const incomingBefore = incomingOffers(state).length;
+  generateIncomingOffers(state, digest);
+  if (incomingOffers(state).length > incomingBefore) needsAttention = true;
   for (const negotiation of arrivedResponses(state)) {
     const player = playerById(state, negotiation.gamePlayerId);
     const offer = pendingOffer(negotiation);
