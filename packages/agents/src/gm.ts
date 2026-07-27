@@ -39,10 +39,12 @@ import {
   TEAM_TALK_OUTCOMES,
   type GameState,
 } from "@story-fm/engine";
-import { ATTRIBUTE_AXES, naturalPositionOf, slotOfTime } from "@story-fm/domain";
-import { AnthropicGameLLM, TIERS, type GameToolSpec } from "@story-fm/llm";
+import { naturalPositionOf, slotOfTime, ATTRIBUTE_AXES } from "@story-fm/domain";
+import { AnthropicGameLLM, TIERS, type GameLLM, type GameToolSpec } from "@story-fm/llm";
 import { MATCH_CASTER_SYSTEM, makeLogMatchEventsTool } from "./match-caster";
-import { runMockGmTurn } from "./mock-gm";
+import { buildOnboardingTurn, runMockGmTurn } from "./mock-gm";
+import { resolveSystemPrompts } from "./prompt-store";
+import { resolveSkillDescriptions } from "./skill-descriptions";
 import type { GmToolCall, GmTurnResult } from "./gm-types";
 
 /**
@@ -51,7 +53,7 @@ import type { GmToolCall, GmTurnResult } from "./gm-types";
  * 두 모드는 같은 엔진 스킬 경로만 사용한다 — 상태 변경의 유일한 통로.
  */
 
-export const GM_SYSTEM = `당신은 story-fm의 게임 마스터(GM)다. 유저는 프리미어리그 감독을 연기하고,
+export const GM_SYSTEM = `당신은 스토리 기반 풋볼 매니저의 게임 마스터(GM)다. 유저는 축구팀 감독을 연기하고,
 당신은 나머지 세계 전부 — 수석코치, 선수, 구단주, 기자 — 를 연기한다.
 
 # 출력 문법 (반드시 준수)
@@ -60,62 +62,22 @@ export const GM_SYSTEM = `당신은 story-fm의 게임 마스터(GM)다. 유저�
 - 화자 없는 내레이션은 \`@:\` 로 시작한다. 행동·연출은 *별표*.
 - 모든 텍스트 줄은 @로 시작한다. GM은 감독을 절대 연기하지 않는다.
 - 서사·대사에서 선수는 항상 이름으로 지칭한다. 선수 id는 도구 호출의
-  입력값에만 쓴다 (컨텍스트의 "id 이름" 목록 참고).
+  입력값에만 쓴다.
 
 # 철칙
-1. 자유 텍스트로는 게임 상태를 1비트도 바꿀 수 없다 — 모든 변경은 도구 호출.
-2. 판정형 도구(team_talk, talk_to_player)의 outcome은 감독 발화의 (a) 맥락
-   적합성 (b) 설득 근거 (c) 대상 성향 수용성으로 판정하라. 잘한 말은 잘
-   먹혀야 한다 — 랜덤이 아니다. 변화량은 시스템이 계산한다.
-3. 모호하거나 규칙 위반인 지시는 실행하지 말고 픽션 안에서 반문하라
-   ("성호는 부상 중인데, 그래도 선발로 쓰시겠습니까?").
-4. 도구가 오류를 돌려주면 이유에 맞게 수정하거나 감독에게 되물어라.
-5. **모르는 것을 지어내지 마라.** 주어지는 것은 스쿼드 명부(id·이름·주포지션)와
-   상태 요약뿐이다. 그 밖의 사실 — 능력치·컨디션·계약·성장, 타 팀 선수,
-   순위표, 지난·앞으로의 일정 — 은 반드시 조회 도구로 확인한 뒤 답하라.
-   기억이나 인상으로 수치·이름을 만들어내는 것은 최악의 실패다.
-6. 시간은 advance_time으로만 흐른다. 대화가 길어져도 세계는 멈춰 있다.
-
-# 조회 (읽기 전용 도구)
-- search_players: 조건으로 선수를 찾는다 (우리 팀 / 특정 팀 / 리그 전체).
-  "쓸 만한 왼쪽 윙어 있나?", "피로한 선수 누구야?" 같은 질문의 출발점.
-- get_player: 한 선수의 상세. 감독이 특정 선수를 언급하면 먼저 이걸 본다.
-- get_team: 상대 팀 프로필 — 순위·최근 5경기·전술·주력 선수. 경기 전 브리핑의 근거.
-- get_league: 순위표와 일정.
-- 조회는 값이 싸다. 확신이 없으면 추측하지 말고 조회하라. 여러 개를 한 번에
-  호출해도 된다.
-
-# 정보 비대칭 (안개)
-- 우리 선수는 모든 수치를 정확히 안다. 타 팀 선수는 그렇지 않다.
-- 조회 결과에 "평판"·"직접 관전"으로 표시된 선수는 평가에 오차가 있다.
-  단정하지 말고 스카우트의 어법으로 말하라 — "제가 본 바로는", "평이 좋습니다만".
-- scout_player로 스카우트를 보내면 며칠 뒤 능력치를 정확히 파악한다.
-  단 잠재력은 끝까지 알 수 없다 — 성장 여력은 누구도 단정하지 못한다.
-- 감독이 타 팀 선수를 진지하게 검토하면 스카우트 파견을 권하라.
+1. 판정형 도구(team_talk, talk_to_player)의 outcome은 감독 발화의 (a) 맥락 적합성 (b) 설득 근거 (c) 대상 성향 수용성으로 판정하라. 말을 잘했을 때 좋은 변화가 발생해야한다.
+2. 모호하거나 규칙 위반인 지시는 실행하지 말고 픽션 안에서 반문하라. 예) "@수석코치: 성호는 부상 중인데, 그래도 선발로 쓰시겠습니까?".
+3. **모르는 것을 지어내지 마라.** 주어지는 것은 스쿼드 명부(id·이름·주포지션)와 상태 요약뿐이다. 그 밖의 사실 — 능력치·컨디션·계약·성장, 타 팀 선수, 순위표, 지난·앞으로의 일정 — 은 반드시 조회 도구로 확인한 뒤 답하라. 기억이나 인상으로 수치·이름을 만들어내는 것은 절대 하면 안된다.
+4. 시간은 advance_time으로만 흐른다. 대화에 따라 시간이 적절히 흐르도록 advance_time을 사용해라.
 
 # 진행
-- 감독이 진행을 원하면 advance_time → 다이제스트를 서사 가치 순으로 골라
-  보고하라 (전부 나열 금지). 경기일 도달 시 브리핑으로 마무리.
-- 경기일에 감독이 준비되면 start_match. 이후 경기 장면은 별도 진행을 따른다.
+- 감독이 진행을 원하면 advance_time 을 사용하고 그동안 진행된 일들 중 중요한 내용을 골라서 보고하라.
 - 방치된 불만 선수, 다가오는 일정 같은 긴장 요소를 자연스럽게 흘려라.
 
-# 훈련 (set_training)
-- 기본 훈련은 없다. 감독이 지시해야만 훈련이 등록된다. 미등록 요일/세션은 자율 회복.
-- 하루는 오전(am)·오후(pm) 두 세션. 요일 반복(weekly) 또는 특정 날짜(byDate)로 지정.
-- 감독의 자연어 훈련("측면 크로스 반복", "가볍게 회복 러닝")을 네가 해석해 label에
-  원문에 가깝게 담고, focus에 관련 능력치 15축 중 해당하는 것을 넣어라. 전술 훈련이면
-  tactical, 회복이면 recovery. 예: "측면 크로스 반복" → kicking·passing,
-  "박스 안 마무리" → finishing·positioning, "압박 강도 올리기" → stamina·aggression.
-- 임의로 매일·전 세션을 채우지 말고, 감독이 말한 범위만 지정하라.
-
-# 전술과 적응도
-- 컨텍스트의 "현재 전술"과 선수별 "적응"을 근거로 답하라. 전술을 바꾸면 적응도가
-  떨어져 한동안 전력이 준다 — 큰 변경은 그 대가를 감독에게 짚어줘라.
-
 # 언어
-한국어. 진지한 스포츠 드라마의 톤. 실존 인물 폄하 금지.
-채팅에서는 능력치 숫자를 읊지 않는다 — 스카우트처럼 서술하라 (결정 #2).
-"슈팅 84" 대신 "리그 정상급 왼발". 숫자는 오피스 뷰의 몫이다.`;
+한국어. 진지한 스포츠 드라마의 톤.
+채팅에서는 능력치 숫자를 읊지 않는다 — 스카우트처럼 서술하라.
+"슈팅 84" 대신 "리그 정상급 왼발".`;
 
 const obj = (
   properties: Record<string, unknown>,
@@ -132,6 +94,7 @@ const FOCUS_ARRAY = { type: "array", items: { type: "string", enum: [...TRAIN_FO
 
 /** 실모드 GM의 스킬 도구 바인딩 — 엔진 함수를 GameToolSpec으로 감싼다 */
 export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpec[] {
+  const descriptions = resolveSkillDescriptions().descriptions;
   const record = (name: string, result: { ok: boolean; message: string }, input?: unknown) => {
     if (result.ok) calls.push({ name, summary: result.message, input });
     return result;
@@ -188,24 +151,23 @@ export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpe
   return [
     wrap(
       "advance_time",
-      "다음 경기일(next_match) 또는 지정 일수만큼 시간을 전진시킨다. 시간이 흐르는 유일한 경로.",
+      descriptions.advance_time,
       obj({ until: { type: "string", enum: ["next_match"] }, days: int(1, 30) }, []),
-      z.object({ until: z.literal("next_match").optional(), days: z.number().int().min(1).max(30).optional() }),
+      z.object({
+        until: z.literal("next_match").optional(),
+        days: z.number().int().min(1).max(30).optional(),
+      }),
       (input) => {
         const result = advanceTime(state, input.days ? { days: input.days } : "next_match");
         return { ok: result.ok, message: result.digest.join("\n") || "진행 완료" };
       },
     ),
-    wrap(
-      "start_match",
-      "경기일에 킥오프를 준비한다. 이후 advance_match로 경기가 진행된다.",
-      obj({}, []),
-      z.object({}),
-      () => startMatch(state),
+    wrap("start_match", descriptions.start_match, obj({}, []), z.object({}), () =>
+      startMatch(state),
     ),
     wrap(
       "set_lineup",
-      "선발 11명과 각자의 포지션을 확정한다 (GK 포지션 1명 필수, 부상·정지 선수 불가). position은 생략 가능(포메이션 기본 슬롯).",
+      descriptions.set_lineup,
       obj(
         {
           starting: {
@@ -241,14 +203,14 @@ export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpe
     ),
     wrap(
       "set_captain",
-      "주장을 지명한다.",
+      descriptions.set_captain,
       obj({ playerId: str }, ["playerId"]),
       z.object({ playerId: z.string() }),
       (input) => setCaptain(state, input.playerId),
     ),
     wrap(
       "set_tactics",
-      "팀 전술을 변경한다. 경기 중이면 다음 진행부터 반영된다.",
+      descriptions.set_tactics,
       obj(
         {
           formation: { type: "string", enum: ["4-4-2", "4-3-3", "4-2-3-1", "3-5-2", "5-4-1"] },
@@ -280,23 +242,14 @@ export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpe
     ),
     wrap(
       "set_player_instruction",
-      "선수별 개인 지시를 준다.",
+      descriptions.set_player_instruction,
       obj({ playerId: str, note: str }, ["playerId", "note"]),
       z.object({ playerId: z.string(), note: z.string().min(1) }),
       (input) => setPlayerInstruction(state, input),
     ),
     wrap(
       "set_training",
-      [
-        "훈련 세션을 지정한다. 기본 훈련은 없으니 감독이 말한 것만 등록된다.",
-        "요일 반복(weekly, 키 '0'~'6', 0=일)이나 특정 날짜(byDate, 키 YYYY-MM-DD)에,",
-        "하루 오전(am)·오후(pm) 세션을 따로 설정한다. 각 세션은 label(자연어 훈련 설명)과",
-        "focus(효과 대상 배열)를 갖는다. focus 값: 능력치 15축(pace/stamina/strength/aerial/",
-        "finishing/dribbling/passing/kicking/tackling/vision/positioning/composure/aggression/",
-        "leadership/goalkeeping) + tactical(전술 적응도 상승) + recovery(회복만). 감독의 자연어 훈련을",
-        "네가 해석해 label에 원문에 가깝게, focus에 해당 능력치를 담아라. 세션을 null로 주면 비운다.",
-        "예: '월·수 오전은 세트피스 반복' → weekly:{'1':{am:{label:'세트피스 반복',focus:['kicking','finishing']}},'3':{am:{...}}}.",
-      ].join(" "),
+      descriptions.set_training,
       obj(
         {
           sessions: {
@@ -358,7 +311,7 @@ export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpe
     ),
     wrap(
       "team_talk",
-      "팀 전체에게 말한 감독 발화의 판정을 기록한다. outcome은 발화의 질에 대한 당신의 판정.",
+      descriptions.team_talk,
       obj(
         {
           occasion: { type: "string", enum: ["pre", "half", "post", "daily"] },
@@ -376,7 +329,7 @@ export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpe
     ),
     wrap(
       "talk_to_player",
-      "개인 면담 판정을 기록한다. 불만 이슈가 있으면 해소된다.",
+      descriptions.talk_to_player,
       obj(
         {
           playerId: str,
@@ -394,16 +347,21 @@ export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpe
     ),
     wrap(
       "substitute",
-      "경기 중 교체 (정지점에서만).",
+      descriptions.substitute,
       obj({ out: str, in: str }, ["out", "in"]),
       z.object({ out: z.string(), in: z.string() }),
       (input) => substitutePlayer(state, input),
     ),
     wrap(
       "apply_narrative_event",
-      "서사 이벤트의 상태 반영 — 사기·폼만, 한도 내 (능력치 접근 불가).",
+      descriptions.apply_narrative_event,
       obj(
-        { playerIds: { type: "array", items: str }, moraleDelta: int(-5, 5), formDelta: int(-1, 1), note: str },
+        {
+          playerIds: { type: "array", items: str },
+          moraleDelta: int(-5, 5),
+          formDelta: int(-1, 1),
+          note: str,
+        },
         ["playerIds", "note"],
       ),
       z.object({
@@ -418,12 +376,7 @@ export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpe
     // ── 조회 (읽기 전용) — 컨텍스트에 없는 사실은 전부 여기로 ──
     read(
       "search_players",
-      [
-        "조건으로 선수를 찾는다. 감독이 포지션·역할·상태를 묻거나 후보를 추릴 때 호출하라",
-        '("왼쪽 윙어 누가 있나", "피로 심한 선수", "브라이턴에 쓸 만한 미드필더").',
-        'team을 "mine"으로 주면 우리 팀, 팀 id·이름을 주면 그 팀, 생략하면 리그 전체를 훑는다.',
-        "우리 팀은 정확한 수치가, 타 팀은 안개가 낀 평가가 돌아온다.",
-      ].join(" "),
+      descriptions.search_players,
       obj(
         {
           team: str,
@@ -453,31 +406,21 @@ export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpe
     ),
     read(
       "get_player",
-      [
-        "선수 한 명의 상세 정보. 감독이 특정 선수를 언급하면 답하기 전에 먼저 호출하라.",
-        "우리 선수는 능력치·컨디션·계약·포지션 적응도·최근 성장까지, 타 팀 선수는",
-        "지식 수준에 따라 흐릿한 평가가 돌아온다. id는 명부나 search_players에서 얻는다.",
-      ].join(" "),
+      descriptions.get_player,
       obj({ playerId: str }, ["playerId"]),
       z.object({ playerId: z.string().min(1) }),
       (input) => playerCard(state, input.playerId),
     ),
     read(
       "get_team",
-      [
-        "팀 프로필 — 순위·전적·전술·최근 5경기·주력 선수. 다음 상대를 브리핑하거나",
-        "감독이 다른 팀을 물을 때 호출하라. 경기 전 스카우팅 리포트 역할을 한다.",
-      ].join(" "),
+      descriptions.get_team,
       obj({ team: str }, ["team"]),
       z.object({ team: z.string().min(1) }),
       (input) => teamProfile(state, input.team),
     ),
     read(
       "get_league",
-      [
-        'view="standings"면 리그 순위표, view="fixtures"면 일정(지난 결과 + 예정)을 준다.',
-        "순위·승점·일정을 물으면 기억으로 답하지 말고 이 도구로 확인하라.",
-      ].join(" "),
+      descriptions.get_league,
       obj(
         {
           view: { type: "string", enum: ["standings", "fixtures"] },
@@ -495,11 +438,7 @@ export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpe
     ),
     wrap(
       "scout_player",
-      [
-        "타 팀 선수에게 스카우트를 보낸다. 며칠 뒤 보고서가 도착하면 그 선수의 능력치를",
-        "정확히 파악한다(잠재력은 여전히 미지). 감독이 영입을 진지하게 검토하거나",
-        "상대 핵심을 파악하고 싶어할 때 호출하라. 동시 파견 인원에는 한도가 있다.",
-      ].join(" "),
+      descriptions.scout_player,
       obj({ playerId: str }, ["playerId"]),
       z.object({ playerId: z.string().min(1) }),
       (input) => scoutPlayer(state, input.playerId),
@@ -522,14 +461,34 @@ export function buildGmReference(state: GameState): string {
     .map(({ p, pos }) => `${p.id}|${p.name}|${pos}${p.isCaptain ? "|주장" : ""}`);
   const m = state.manager;
   return [
-    `[감독] ${m.name} — ${m.background}`,
+    `[감독 프로필]`,
+    `이름: ${m.name}`,
+    `배경: ${m.background}`,
     `능력: 리더십${m.attributes.leadership} 전술${m.attributes.tactics} 협상${m.attributes.negotiation} 미디어${m.attributes.media}`,
     `평판: 보드${m.reputation.board} 미디어${m.reputation.media} 선수단${m.reputation.squad}`,
+    `감독 발화 화자 형식: @${m.name}: <발화> — 당신은 이 화자를 대신 연기하지 않는다.`,
     ``,
     `[${teamName(state.userTeamId)} 선수 명부] id|이름|주포지션 — 도구 입력엔 id, 서사엔 이름을 쓴다`,
     ...rows,
     ``,
     `이 명부에 능력치는 없다. 수치·컨디션·계약이 필요하면 get_player / search_players를 호출하라.`,
+  ].join("\n");
+}
+
+/** 유저의 자연어를 모델이 읽는 감독 화자 형식으로 감싼다. */
+export function buildManagerMessage(state: GameState, message: string): string {
+  return `@${state.manager.name}: ${message}`;
+}
+
+/** 경기 캐시 레퍼런스 — 감독 화자 식별 + 현재 전력 분석 패킷. */
+export function buildMatchReference(state: GameState): string {
+  return [
+    `[감독]`,
+    `이름: ${state.manager.name}`,
+    `감독 발화 화자 형식: @${state.manager.name}: <발화>`,
+    ``,
+    `[전력 분석 패킷 — 킥오프 시점 고정]`,
+    JSON.stringify(state.pendingMatch?.packet),
   ].join("\n");
 }
 
@@ -553,9 +512,7 @@ export function buildGmStateNote(state: GameState): string {
       return inj ? `${p.name} ${inj.bodyPart}~${inj.expectedReturn}` : null;
     })
     .filter((x): x is string => x !== null);
-  const suspended = players
-    .filter((p) => isSuspended(state, p.id))
-    .map((p) => p.name);
+  const suspended = players.filter((p) => isSuspended(state, p.id)).map((p) => p.name);
   const unhappy = state.issues.map((i) => playerName(state, i.gamePlayerId));
 
   const training = state.schedule
@@ -619,7 +576,9 @@ export function buildLedgerNote(state: GameState): string {
 const HISTORY_KEEP = 12;
 const HISTORY_STEP = 6;
 
-export function buildGmHistory(state: GameState): Array<{ role: "user" | "assistant"; content: string }> {
+export function buildGmHistory(
+  state: GameState,
+): Array<{ role: "user" | "assistant"; content: string }> {
   const upto = Math.max(0, state.chat.length - 1); // 방금 push된 이번 발화는 제외
   const start = Math.max(
     0,
@@ -627,7 +586,7 @@ export function buildGmHistory(state: GameState): Array<{ role: "user" | "assist
   );
   return state.chat.slice(start, upto).map((turn) => ({
     role: turn.role === "user" ? ("user" as const) : ("assistant" as const),
-    content: turn.text,
+    content: turn.role === "user" ? buildManagerMessage(state, turn.text) : turn.text,
   }));
 }
 
@@ -637,6 +596,56 @@ export function resolveLlmMode(): LlmMode {
   const forced = process.env.LLM_MODE;
   if (forced === "mock" || forced === "real") return forced;
   return process.env.ANTHROPIC_API_KEY ? "real" : "mock";
+}
+
+const ONBOARDING_INSTRUCTION = [
+  `[오퍼레이터 지시 — 새 게임 첫 장면]`,
+  `지금은 감독의 부임 첫날이다. 아래 상태와 레퍼런스를 바탕으로 매번 새롭게 4~7줄의 도입 장면을 써라.`,
+  `- 구단의 공간·날씨·현장 분위기 중 하나로 짧게 시작하고, 이전과 같은 상투적 문구를 반복하지 마라.`,
+  `- @수석코치가 자신을 소개하되 감독의 배경을 그대로 길게 인용하지 말고 자연스럽게 반영하라.`,
+  `- 여름 이적시장 또는 프리시즌, 스쿼드에서 확인되는 인물, 다음 경기 중 최소 두 가지를 짚어라.`,
+  `- 마지막은 훈련·전술·선수단 점검·이적 중 무엇부터 할지 감독에게 열린 질문을 던져라.`,
+  `- 감독의 대사나 속마음을 대신 쓰지 말고, 도구를 호출하거나 상태를 바꾸지 마라.`,
+].join("\n");
+
+function isValidOnboardingText(state: GameState, text: string): boolean {
+  const lines = text.split("\n").filter((line) => line.trim().length > 0);
+  return (
+    lines.length >= 3 &&
+    lines.length <= 12 &&
+    lines.every((line) => line.startsWith("@")) &&
+    lines.some((line) => line.startsWith("@수석코치:")) &&
+    !lines.some((line) => line.startsWith(`@${state.manager.name}:`))
+  );
+}
+
+/**
+ * 새 게임 첫 장면.
+ * 실모드는 현재 어드민 GM 프롬프트로 매번 생성하고, mock/호출 실패/문법 위반은
+ * 시드 기반 규칙 장면으로 폴백해 새 게임 생성 자체가 실패하지 않게 한다.
+ */
+export async function runOnboardingTurn(state: GameState, llm?: GameLLM): Promise<GmTurnResult> {
+  const fallback = buildOnboardingTurn(state);
+  if (resolveLlmMode() === "mock") return fallback;
+
+  try {
+    const activePrompts = resolveSystemPrompts({
+      gm: GM_SYSTEM,
+      match: MATCH_CASTER_SYSTEM,
+    }).prompts;
+    const result = await (llm ?? new AnthropicGameLLM(TIERS.gm)).runTurn({
+      system: [activePrompts.gm, buildGmReference(state)],
+      history: [],
+      user: buildManagerMessage(state, "*새 감독으로서 구단에 첫 출근한다*"),
+      stateNote: `${ONBOARDING_INSTRUCTION}\n\n${buildGmStateNote(state)}`,
+      maxTokens: 1_200,
+    });
+    const text = humanizePlayerIds(state, result.text.trim());
+    if (!isValidOnboardingText(state, text)) return fallback;
+    return { text, toolCalls: [], usage: result.usage };
+  } catch {
+    return fallback;
+  }
 }
 
 /** 실모드 — 일상은 GM 티어, 경기 장면은 매치 캐스터 프롬프트로 라우팅 */
@@ -666,9 +675,13 @@ async function runRealGmTurn(
    * 마지막 층만 매 턴 정가로 읽힌다 (docs/design/llm-io.md).
    *   ① 고정 프롬프트           ② 레퍼런스(명부·패킷)     ③ 발화 + 상태 스냅샷
    */
+  const activePrompts = resolveSystemPrompts({
+    gm: GM_SYSTEM,
+    match: MATCH_CASTER_SYSTEM,
+  }).prompts;
   const system = inMatch
-    ? [MATCH_CASTER_SYSTEM, `[전력 분석 패킷 — 킥오프 시점 고정]\n${JSON.stringify(state.pendingMatch?.packet)}`]
-    : [GM_SYSTEM, buildGmReference(state)];
+    ? [activePrompts.match, buildMatchReference(state)]
+    : [activePrompts.gm, buildGmReference(state)];
   const stateNote = inMatch ? buildLedgerNote(state) : buildGmStateNote(state);
   const history = inMatch
     ? ((state.pendingMatch?.casterHistory ?? []) as never)
@@ -677,7 +690,7 @@ async function runRealGmTurn(
   const result = await llm.runTurn({
     system,
     history,
-    user: `[감독]\n${message}`,
+    user: buildManagerMessage(state, message),
     stateNote,
     tools,
     onText,

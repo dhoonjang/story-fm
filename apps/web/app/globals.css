@@ -26,7 +26,11 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family:
-    "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", -apple-system, sans-serif;
+    "Pretendard",
+    "Apple SD Gothic Neo",
+    "Noto Sans KR",
+    -apple-system,
+    sans-serif;
   font-size: 14px;
   line-height: 1.55;
 }
@@ -408,12 +412,102 @@ textarea {
   outline: none;
   border-color: var(--accent-2);
 }
+.skill-admin-section {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+}
+.skill-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 16px;
+}
+.skill-section-head h2 {
+  font-size: 20px;
+  margin-bottom: 5px;
+}
+.skill-section-head p {
+  max-width: 760px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.skill-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.skill-card {
+  min-width: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+}
+.skill-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 9px;
+}
+.skill-card-head h3 {
+  font-size: 14px;
+  margin-bottom: 2px;
+}
+.skill-card-head code {
+  color: var(--accent-2);
+  font-size: 11px;
+}
+.skill-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+.skill-badges span {
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 10px;
+}
+.skill-card textarea {
+  display: block;
+  width: 100%;
+  min-height: 108px;
+  resize: vertical;
+  background: #0b0f14;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  padding: 9px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.skill-card textarea:focus {
+  outline: none;
+  border-color: var(--accent-2);
+}
+.skill-char-count {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 10px;
+  text-align: right;
+}
 @media (max-width: 960px) {
   .prompt-grid {
     grid-template-columns: 1fr;
   }
   .prompt-card textarea {
     min-height: 55vh;
+  }
+  .skill-section-head {
+    flex-direction: column;
+  }
+  .skill-grid {
+    grid-template-columns: 1fr;
   }
 }
 .onboarding-top {
@@ -442,7 +536,9 @@ textarea {
   border-radius: 12px;
   padding: 14px 16px;
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
 }
 .game-card:hover {
   border-color: var(--accent-2);
@@ -888,7 +984,10 @@ textarea {
   border: 1.5px solid var(--border);
   color: var(--text);
   cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s,
+    transform 0.1s;
 }
 .pitch-chip:hover {
   border-color: var(--accent-2);

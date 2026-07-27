@@ -13,6 +13,8 @@ import {
   setTraining,
   startMatch,
   isInjured,
+  makeRng,
+  pick,
   substitutePlayer,
   teamName,
   userPlayers,
@@ -164,7 +166,8 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
     if (/교체/u.test(msg)) {
       const roster = userPlayers(state);
       const side = userSide(state);
-      const ledgerSide = side === "home" ? state.pendingMatch?.ledger.home : state.pendingMatch?.ledger.away;
+      const ledgerSide =
+        side === "home" ? state.pendingMatch?.ledger.home : state.pendingMatch?.ledger.away;
       const onPitch = ledgerSide?.onPitch ?? [];
       const bench = ledgerSide?.bench ?? [];
       const mentioned = roster.filter((p) =>
@@ -180,7 +183,11 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
       const subId = sub?.id ?? benchOutfield ?? bench[0];
       if (out && subId) {
         const result = substitutePlayer(state, { out: out.id, in: subId });
-        calls.push({ name: "substitute", summary: result.message, input: { out: out.id, in: subId } });
+        calls.push({
+          name: "substitute",
+          summary: result.message,
+          input: { out: out.id, in: subId },
+        });
         return {
           text: result.ok
             ? `@: *교체 준비 — ${out.name} OUT, ${playerName(state, subId)} IN*\n@수석코치: 반영했습니다. "계속"이라고 하시면 경기를 진행합니다.`
@@ -283,9 +290,7 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
   if (/면담|얘기 좀|불러/u.test(msg)) {
     const target = detectPlayer(state, msg);
     if (!target) {
-      const issues = state.issues
-        .map((i) => playerName(state, i.gamePlayerId))
-        .join(", ");
+      const issues = state.issues.map((i) => playerName(state, i.gamePlayerId)).join(", ");
       return {
         text: `@수석코치: 누구와 면담할까요?${issues ? ` 지금 불만이 쌓인 선수: ${issues}` : ""}`,
         toolCalls: calls,
@@ -349,7 +354,9 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
   return {
     text:
       `@수석코치: ${describeNextFixture(state)}` +
-      (issues.length > 0 ? `\n@수석코치: ${issues.join(", ")}의 불만이 쌓이고 있습니다 — 면담을 권합니다.` : "") +
+      (issues.length > 0
+        ? `\n@수석코치: ${issues.join(", ")}의 불만이 쌓이고 있습니다 — 면담을 권합니다.`
+        : "") +
       `\n@수석코치: 훈련 지시, 전술 변경, 면담, 아니면 "다음 경기로 가자"라고 말씀해 주세요.`,
     toolCalls: calls,
   };
@@ -362,21 +369,57 @@ const AXIS_KO: Record<string, string> = {
   media: "미디어 감각",
 };
 
-/** 온보딩 첫 모델 턴 — 부임 첫날 (game-loop §1). 숫자 대신 서술 (결정 #2) */
+const ONBOARDING_SCENES = [
+  (team: string) =>
+    `@: *${team} 트레이닝 센터 정문. 새 감독을 기다리던 카메라 셔터가 일제히 터진다*`,
+  (team: string) =>
+    `@: *이른 아침의 ${team} 훈련장. 잔디에 물기가 남은 가운데 첫 출근 차량이 멈춰 선다*`,
+  (team: string) =>
+    `@: *${team} 홈구장 선수 통로. 아직 빈 관중석 너머로 새 시즌 준비 소리가 울린다*`,
+  (team: string) =>
+    `@: *${team} 구단 사무동. 벽을 채운 역대 시즌 사진 앞에서 새 감독의 첫날이 시작된다*`,
+  (team: string) =>
+    `@: *여름 이적시장 첫날, ${team} 구단 전화가 쉴 새 없이 울리는 가운데 감독실 문이 열린다*`,
+] as const;
+
+const ONBOARDING_WELCOMES = [
+  (name: string) =>
+    `@수석코치: ${name} 감독님, 기다리고 있었습니다. 오늘부터 제가 가장 가까운 자리에서 돕겠습니다.`,
+  (name: string) =>
+    `@수석코치: 어서 오십시오, ${name} 감독님. 수석코치입니다. 첫날부터 결정할 일이 적지 않습니다.`,
+  (name: string) =>
+    `@수석코치: ${name} 감독님, 드디어 뵙는군요. 이곳의 분위기와 선수단 사정은 제가 솔직하게 말씀드리겠습니다.`,
+  (name: string) =>
+    `@수석코치: 환영합니다, ${name} 감독님. 구단은 새 출발을 준비했고, 선수단은 감독님의 첫마디를 기다리고 있습니다.`,
+] as const;
+
+const ONBOARDING_CLOSERS = [
+  `@수석코치: 먼저 선수단을 들여다보시겠습니까, 아니면 이번 주 훈련 방향부터 정하시겠습니까?`,
+  `@수석코치: 이적시장, 훈련, 전술 가운데 무엇부터 손대시겠습니까?`,
+  `@수석코치: 감독님의 첫 결정은 무엇입니까 — 선수단 점검부터 할까요, 훈련장으로 바로 나갈까요?`,
+  `@수석코치: 개막까지 시간을 어떻게 쓰실지 말씀해 주십시오. 제가 바로 준비하겠습니다.`,
+] as const;
+
+/** 온보딩 폴백 — mock/LLM 실패에서도 월드 시드에 따라 첫 장면과 어조가 달라진다. */
 export function buildOnboardingTurn(state: GameState): GmTurnResult {
   const views = buildOfficeViews(state);
   const attrs = state.manager.attributes;
+  const rng = makeRng(state.seed, "onboarding-copy");
+  const team = teamName(state.userTeamId);
   const topAxes = (Object.entries(attrs) as Array<[string, number]>)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 2)
     .map(([axis]) => AXIS_KO[axis] ?? axis);
   return {
     text: [
-      `@: *${teamName(state.userTeamId)} 트레이닝 센터. 새 감독의 첫 출근길, 카메라 플래시가 터진다*`,
-      `@수석코치: 어서 오십시오, ${state.manager.name} 감독님. 수석코치입니다. 함께 일하게 되어 영광입니다.`,
-      `@수석코치: 배경을 들었습니다 — "${state.manager.background}". 보드는 특히 감독님의 ${topAxes.join("과 ")}을 높이 샀습니다. 정확한 평가는 오피스 커리어 탭에서 보실 수 있습니다.`,
-      `@수석코치: 스쿼드의 축은 ${views.squad.players.slice(0, 3).map((p) => p.name).join(", ")}입니다. ${describeNextFixture(state)}`,
-      `@수석코치: 훈련 방향부터 잡을까요, 아니면 바로 개막전 준비로 갈까요?`,
+      pick(rng, ONBOARDING_SCENES)(team),
+      pick(rng, ONBOARDING_WELCOMES)(state.manager.name),
+      `@수석코치: "${state.manager.background}"이라는 이력도 검토했습니다. 보드는 특히 감독님의 ${topAxes.join("과 ")}을 높이 샀습니다.`,
+      `@수석코치: 스쿼드의 축은 ${views.squad.players
+        .slice(0, 3)
+        .map((p) => p.name)
+        .join(", ")}입니다. ${describeNextFixture(state)}`,
+      pick(rng, ONBOARDING_CLOSERS),
     ].join("\n"),
     toolCalls: [],
   };

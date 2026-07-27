@@ -15,6 +15,16 @@ import {
   PATCH as catalogPatch,
   DELETE as catalogDelete,
 } from "../app/api/admin/catalog/player/[playerId]/route";
+import {
+  GET as promptsGet,
+  PUT as promptsPut,
+  DELETE as promptsReset,
+} from "../app/api/admin/prompts/route";
+import {
+  GET as skillsGet,
+  PUT as skillsPut,
+  DELETE as skillsReset,
+} from "../app/api/admin/skills/route";
 import { cupCatalogById } from "@story-fm/engine";
 import type { GamePayload } from "../lib/store";
 
@@ -54,7 +64,9 @@ describe("API — 온보딩부터 경기까지", () => {
     );
     const game = (await created.json()) as GamePayload;
 
-    const listed = await (getCatalog().json() as Promise<{ games: Array<{ id: string; teamName: string }> }>);
+    const listed = await (getCatalog().json() as Promise<{
+      games: Array<{ id: string; teamName: string }>;
+    }>);
     const found = listed.games.find((g) => g.id === game.id);
     expect(found?.teamName).toBe("에버튼");
 
@@ -180,10 +192,7 @@ describe("API — 온보딩부터 경기까지", () => {
         slot.position = players.find((p) => p.id === slot.playerId)!.position;
       }
     }
-    const res = await postLineup(
-      json({ starting, bench, formation: "3-5-2" }),
-      params(game.id),
-    );
+    const res = await postLineup(json({ starting, bench, formation: "3-5-2" }), params(game.id));
     expect(res.status).toBe(200);
     const updated = (await res.json()) as GamePayload;
     const changed = updated.views.squad.players.find((p) => p.id === target.id);
@@ -232,7 +241,10 @@ describe("API — 온보딩부터 경기까지", () => {
     // 조회 — 20팀 카탈로그 + 편집 여부
     const listRes = catalogGet();
     const list = (await listRes.json()) as {
-      teams: Array<{ teamId: string; players: Array<{ id: string; overall: number; age: number }> }>;
+      teams: Array<{
+        teamId: string;
+        players: Array<{ id: string; overall: number; age: number }>;
+      }>;
       edited: boolean;
       ageRef: string;
     };
@@ -321,10 +333,14 @@ describe("API — 온보딩부터 경기까지", () => {
         nameKo: "x",
         birthdate: "2005-01-01",
         position: "CM",
-        pace: 60, stamina: 60, strength: 60, aerial: 60,
-        finishing: 60, dribbling: 60, passing: 60, kicking: 60, tackling: 60,
-        vision: 60, positioning: 60, composure: 60, aggression: 60, leadership: 60,
-        goalkeeping: 18, potential: 70,
+        pace: 60,
+        finishing: 60,
+        passing: 60,
+        dribbling: 60,
+        tackling: 60,
+        strength: 60,
+        goalkeeping: 18,
+        potential: 70,
       }),
     );
     expect(badTeam.status).toBe(400);
@@ -334,5 +350,74 @@ describe("API — 온보딩부터 경기까지", () => {
     expect(resetRes.status).toBe(200);
     const reset = (await resetRes.json()) as { edited: boolean };
     expect(reset.edited).toBe(false);
+  });
+
+  it("프롬프트 어드민 — 조회·편집·검증·기본값 복원", async () => {
+    const initial = (await promptsGet().json()) as {
+      prompts: { gm: string; match: string };
+      edited: boolean;
+    };
+    expect(initial.edited).toBe(false);
+    expect(initial.prompts.gm).toContain("게임 마스터");
+    expect(initial.prompts.match).toContain("경기 마스터");
+
+    const custom = {
+      gm: `${initial.prompts.gm}\n\n# 어드민 테스트\n응답은 간결하게.`,
+      match: `${initial.prompts.match}\n\n# 어드민 테스트\n정지점을 명확히 표시하라.`,
+    };
+    const saveRes = await promptsPut(json(custom));
+    expect(saveRes.status).toBe(200);
+    const saved = (await saveRes.json()) as {
+      prompts: { gm: string; match: string };
+      edited: boolean;
+    };
+    expect(saved.edited).toBe(true);
+    expect(saved.prompts).toEqual(custom);
+    expect(((await promptsGet().json()) as typeof saved).prompts).toEqual(custom);
+
+    const invalid = await promptsPut(json({ gm: " ", match: custom.match }));
+    expect(invalid.status).toBe(400);
+
+    const resetRes = promptsReset();
+    expect(resetRes.status).toBe(200);
+    const reset = (await resetRes.json()) as {
+      prompts: { gm: string; match: string };
+      edited: boolean;
+    };
+    expect(reset.edited).toBe(false);
+    expect(reset.prompts).toEqual(initial.prompts);
+  });
+
+  it("스킬 설명 어드민 — 조회·편집·검증·기본값 복원", async () => {
+    const initial = (await skillsGet().json()) as {
+      skills: Array<{ name: string; description: string; readOnly: boolean }>;
+      edited: boolean;
+    };
+    expect(initial.edited).toBe(false);
+    expect(initial.skills).toHaveLength(17);
+    expect(initial.skills.find((skill) => skill.name === "get_player")?.readOnly).toBe(true);
+
+    const descriptions = Object.fromEntries(
+      initial.skills.map((skill) => [skill.name, skill.description]),
+    );
+    descriptions.advance_time += "\n어드민 테스트 설명";
+    const saveRes = await skillsPut(json({ descriptions }));
+    expect(saveRes.status).toBe(200);
+    const saved = (await saveRes.json()) as typeof initial;
+    expect(saved.edited).toBe(true);
+    expect(saved.skills.find((skill) => skill.name === "advance_time")?.description).toContain(
+      "어드민 테스트 설명",
+    );
+
+    const invalid = await skillsPut(json({ descriptions: { advance_time: "하나만 있음" } }));
+    expect(invalid.status).toBe(400);
+
+    const resetRes = skillsReset();
+    expect(resetRes.status).toBe(200);
+    const reset = (await resetRes.json()) as typeof initial;
+    expect(reset.edited).toBe(false);
+    expect(reset.skills.find((skill) => skill.name === "advance_time")?.description).not.toContain(
+      "어드민 테스트 설명",
+    );
   });
 });

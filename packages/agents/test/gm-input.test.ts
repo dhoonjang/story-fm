@@ -9,13 +9,18 @@ import {
   type GameState,
 } from "@story-fm/engine";
 import {
+  DEFAULT_SKILL_DESCRIPTIONS,
   GM_SYSTEM,
   buildGmHistory,
+  buildManagerMessage,
+  buildMatchReference,
   buildGmReference,
   buildGmStateNote,
   buildGmTools,
+  runOnboardingTurn,
   type GmToolCall,
 } from "@story-fm/agents";
+import type { GameLLM, TurnRequest } from "@story-fm/llm";
 
 /**
  * GM 입력 조립 — 캐시 계층의 경계가 지켜지는지 검증한다 (docs/design/llm-io.md).
@@ -41,7 +46,8 @@ describe("레퍼런스 블록 (캐시되는 시스템 블록)", () => {
     const squad = userPlayers(state);
     expect(squad.length).toBeGreaterThanOrEqual(30);
     for (const p of squad) expect(ref).toContain(`${p.id}|${p.name}|`);
-    expect(ref).toContain("김감독");
+    expect(ref).toContain("이름: 김감독");
+    expect(ref).toContain("@김감독: <발화>");
   });
 
   it("능력치·컨디션을 담지 않는다 — 상세는 조회 도구의 몫", () => {
@@ -112,10 +118,62 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
   });
 });
 
+describe("새 게임 첫 장면", () => {
+  it("실모드는 감독·구단 컨텍스트로 GM에게 매번 생성시킨다", async () => {
+    const state = game();
+    let request: TurnRequest | undefined;
+    const llm: GameLLM = {
+      runTurn: async (input) => {
+        request = input;
+        return {
+          text: [
+            "@: *비가 갠 아침, 아스날 훈련장 문이 열린다*",
+            "@수석코치: 김감독님, 선수단이 첫 미팅을 기다리고 있습니다.",
+            "@수석코치: 여름 이적시장과 개막전 준비를 함께 정리하겠습니다.",
+            "@수석코치: 훈련과 선수단 점검 중 무엇부터 시작할까요?",
+          ].join("\n"),
+          history: [],
+          usage: {
+            inputTokens: 100,
+            outputTokens: 80,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+          },
+          toolCallCount: 0,
+          stopReason: "end_turn",
+        };
+      },
+    };
+    const previousMode = process.env.LLM_MODE;
+    process.env.LLM_MODE = "real";
+    try {
+      const turn = await runOnboardingTurn(state, llm);
+      expect(turn.text).toContain("비가 갠 아침");
+      expect(turn.usage?.outputTokens).toBe(80);
+    } finally {
+      if (previousMode === undefined) delete process.env.LLM_MODE;
+      else process.env.LLM_MODE = previousMode;
+    }
+
+    expect(request?.user).toBe("@김감독: *새 감독으로서 구단에 첫 출근한다*");
+    expect(request?.stateNote).toContain("매번 새롭게 4~7줄");
+    expect(request?.stateNote).toContain(state.date);
+    expect(request?.system).toEqual([
+      expect.stringContaining("게임 마스터"),
+      expect.stringContaining("이름: 김감독"),
+    ]);
+  });
+});
+
 describe("이력 창 — 시작점을 STEP 단위로만 옮긴다", () => {
   const push = (state: GameState, n: number) => {
     for (let i = 0; i < n; i++) {
-      state.chat.push({ role: i % 2 === 0 ? "user" : "model", text: `턴 ${i}`, toolCalls: [], at: state.date });
+      state.chat.push({
+        role: i % 2 === 0 ? "user" : "model",
+        text: `턴 ${i}`,
+        toolCalls: [],
+        at: state.date,
+      });
     }
   };
 
@@ -125,6 +183,18 @@ describe("이력 창 — 시작점을 STEP 단위로만 옮긴다", () => {
     const history = buildGmHistory(state);
     expect(history).toHaveLength(4);
     expect(history[3]?.content).toBe("턴 3");
+  });
+
+  it("현재·과거 유저 발화를 @감독이름: 형식으로 만든다", () => {
+    const state = game();
+    expect(buildManagerMessage(state, "측면을 더 적극적으로 써.")).toBe(
+      "@김감독: 측면을 더 적극적으로 써.",
+    );
+    push(state, 5);
+    const history = buildGmHistory(state);
+    expect(history[0]?.content).toBe("@김감독: 턴 0");
+    expect(history[2]?.content).toBe("@김감독: 턴 2");
+    expect(buildMatchReference(state)).toContain("감독 발화 화자 형식: @김감독: <발화>");
   });
 
   it("연속된 턴에서 시작점이 매번 미끄러지지 않는다", () => {
@@ -167,10 +237,11 @@ describe("도구 구성", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("시스템 프롬프트가 조회·안개 규약을 담는다", () => {
+  it("시스템 프롬프트는 핵심 철칙만, 스킬 사용법은 별도 설명에 둔다", () => {
     expect(GM_SYSTEM).toContain("지어내지 마라");
-    expect(GM_SYSTEM).toContain("search_players");
-    expect(GM_SYSTEM).toContain("scout_player");
-    expect(GM_SYSTEM).not.toContain("도구 불필요");
+    expect(GM_SYSTEM).not.toContain("search_players");
+    expect(GM_SYSTEM).not.toContain("set_training");
+    expect(DEFAULT_SKILL_DESCRIPTIONS.search_players).toContain("선수를 찾는다");
+    expect(DEFAULT_SKILL_DESCRIPTIONS.set_training).toContain("훈련");
   });
 });

@@ -21,10 +21,12 @@ import {
 } from "@story-fm/sim";
 import { AnthropicGameLLM, TIERS, type TurnUsage } from "@story-fm/llm";
 import {
+  GM_SYSTEM,
   MATCH_CASTER_SYSTEM,
   buildContinueMessage,
   buildKickoffMessage,
   makeLogMatchEventsTool,
+  resolveSystemPrompts,
 } from "@story-fm/agents";
 
 // ---- 인자 파싱 (프로토타입 수준) ----
@@ -118,6 +120,10 @@ const tool = makeLogMatchEventsTool((events: MatchEvent[]) => {
 
 // ---- ③ 매치 티어 LLM 진행 루프 ----
 const llm = new AnthropicGameLLM(TIERS.match);
+const matchSystem = resolveSystemPrompts({
+  gm: GM_SYSTEM,
+  match: MATCH_CASTER_SYSTEM,
+}).prompts.match;
 const totalUsage: TurnUsage = {
   inputTokens: 0,
   outputTokens: 0,
@@ -131,7 +137,7 @@ let userMessage = buildKickoffMessage(packet, managerNote);
 for (let turn = 1; turn <= maxTurns && ledger.phase !== "finished"; turn++) {
   console.log(`\n═══ 진행 턴 ${turn} ═══`);
   const result = await llm.runTurn({
-    system: MATCH_CASTER_SYSTEM,
+    system: matchSystem,
     history,
     user: userMessage,
     tools: [tool],

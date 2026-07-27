@@ -7,7 +7,7 @@ import {
   saveGame,
   TEAM_CATALOG,
 } from "@story-fm/engine";
-import { buildOnboardingTurn } from "@story-fm/agents";
+import { runOnboardingTurn } from "@story-fm/agents";
 import { toPayload } from "@/lib/store";
 
 const CreateSchema = z.object({
@@ -26,7 +26,10 @@ export function GET() {
 export async function POST(request: Request) {
   const body = CreateSchema.safeParse(await request.json());
   if (!body.success) {
-    return NextResponse.json({ error: body.error.issues[0]?.message ?? "입력 오류" }, { status: 400 });
+    return NextResponse.json(
+      { error: body.error.issues[0]?.message ?? "입력 오류" },
+      { status: 400 },
+    );
   }
   const { teamId, managerName, background, seed } = body.data;
   if (!TEAM_CATALOG.some((t) => t.id === teamId)) {
@@ -41,7 +44,7 @@ export async function POST(request: Request) {
     attributes: interpretBackgroundHeuristic(background),
   });
 
-  const intro = buildOnboardingTurn(state);
+  const intro = await runOnboardingTurn(state);
   state.chat.push({ role: "model", text: intro.text, toolCalls: intro.toolCalls, at: state.date });
   saveGame(state);
 
