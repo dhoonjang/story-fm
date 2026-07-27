@@ -9,6 +9,7 @@ export * from "./calendar";
 export * from "./state";
 export * from "./scouting";
 export * from "./lookup";
+export * from "./market";
 export * from "./europe";
 export * from "./euro-knockout";
 export * from "./euro-prize";

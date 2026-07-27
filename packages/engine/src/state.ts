@@ -13,6 +13,7 @@ import type {
   PlayerIssue,
   PositionGroup,
   ScheduleEntry,
+  Negotiation,
   ScoutReport,
   SeasonRecord,
   SeasonStat,
@@ -128,6 +129,8 @@ export interface GameState {
   issues: PlayerIssue[];
   /** 스카우트 파견·완료 이력 — 타 팀 선수 안개의 근거 (scouting.ts) */
   scoutReports: ScoutReport[];
+  /** 진행 중 협상 — 며칠에 걸쳐 오퍼가 오가므로 파생으로 되돌릴 수 없다 */
+  negotiations: Negotiation[];
 
   // ── 감독 ──
   manager: Manager;
@@ -634,6 +637,7 @@ export function createGame(input: CreateGameInput): GameState {
     seasonStats: [],
     issues: [],
     scoutReports: [],
+    negotiations: [],
 
     manager: {
       name: input.managerName,

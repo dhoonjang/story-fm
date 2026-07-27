@@ -104,6 +104,50 @@ export const TransferSchema = z.object({
 });
 export type Transfer = z.infer<typeof TransferSchema>;
 
+// ── 협상 (진행 중 흥정 — 완료된 이동은 TRANSFER) ────────
+/**
+ * 협상은 **원장이 아니다.** TRANSFER가 "일어난 이동"이라면 NEGOTIATION은 "합의되지
+ * 않은 흥정"이고, 둘을 한 테이블에 섞으면 원장이 더러워진다. 합의(`agreed`) 뒤
+ * 수락 스킬이 TRANSFER·CONTRACT·재정을 쓰고 그때 `completed`가 된다.
+ * (docs/design/transfers.md)
+ */
+export const NegotiationKindSchema = z.enum(["buy", "sell", "renew"]);
+export type NegotiationKind = z.infer<typeof NegotiationKindSchema>;
+
+export const NegotiationVerdictSchema = z.enum(["accept", "counter", "reject"]);
+export type NegotiationVerdict = z.infer<typeof NegotiationVerdictSchema>;
+
+/** 오퍼 한 번 = 한 row. 서사의 원천이자 확률 검증(분포 모니터링)의 근거다 */
+export const NegotiationRoundSchema = z.object({
+  date: DateString,
+  by: z.enum(["us", "them"]),
+  fee: z.number().min(0),
+  weeklyWage: z.number().min(0),
+  contractYears: z.number().int().min(1).max(6),
+  /** 상대 응답 예정일 — 우리 오퍼만 가진다 (상황에서 나온 지연) */
+  respondsOn: DateString.nullable(),
+  /** 이 오퍼 시점에 코어가 계산한 확률 — 사후에 LLM 판정의 분포를 볼 수 있다 */
+  probability: z.number().min(0).max(100),
+  /** 상대의 판정 (them 라운드) */
+  verdict: NegotiationVerdictSchema.nullable(),
+  note: z.string().optional(),
+});
+export type NegotiationRound = z.infer<typeof NegotiationRoundSchema>;
+
+export const NegotiationSchema = z.object({
+  id: z.string().min(1),
+  gamePlayerId: z.string().min(1),
+  kind: NegotiationKindSchema,
+  /** renew는 null — 상대가 선수 본인이다 */
+  counterpartTeamId: z.string().min(1).nullable(),
+  windowId: z.string().min(1).nullable(),
+  openedOn: DateString,
+  expiresOn: DateString,
+  status: z.enum(["open", "agreed", "rejected", "expired", "completed"]),
+  rounds: z.array(NegotiationRoundSchema),
+});
+export type Negotiation = z.infer<typeof NegotiationSchema>;
+
 // ── 성장 로그 ─────────────────────────────────────────
 export const GrowthSourceSchema = z.enum(["training", "match"]);
 export type GrowthSource = z.infer<typeof GrowthSourceSchema>;
