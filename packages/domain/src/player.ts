@@ -19,6 +19,43 @@ export function positionGroupOf(position: string): PositionGroup | null {
 }
 
 /**
+ * **사실상 같은 자리** 묶음 — 좌우·중앙 분화나 표기만 다르고 요구 역량은 같다.
+ * CB를 94로 소화하는 센터백은 RCB·LCB도 그만큼 해낸다(주발 쪽이 아니면 아주 조금
+ * 낮은 정도). 그래서 이들은 "인접 포지션"이 아니라 적응도를 거의 공유하는
+ * 동일 자리로 다룬다 — 파생(derivePositions)과 폴백(proficiencyAt) 양쪽에서.
+ */
+export const POSITION_CLUSTERS: readonly (readonly string[])[] = [
+  ["RCB", "CB", "LCB"],
+  ["RCM", "CM", "LCM"],
+  ["DM", "CDM"],
+  ["AM", "CAM"],
+];
+
+/** 이 포지션이 속한 동일 자리 묶음 (없으면 null) */
+export function clusterOf(position: string): readonly string[] | null {
+  const code = position.toUpperCase();
+  return POSITION_CLUSTERS.find((c) => c.includes(code)) ?? null;
+}
+
+/** 두 포지션이 사실상 같은 자리인가 (같은 코드는 제외 — 호출부에서 정확 매칭이 우선) */
+export function sameCluster(a: string, b: string): boolean {
+  const cluster = clusterOf(a);
+  return cluster !== null && cluster.includes(b.toUpperCase());
+}
+
+/** 포지션 코드의 좌우 축 — 중앙(CB·CM·DM·AM 등)은 null */
+export function sideOf(position: string): "R" | "L" | null {
+  const code = position.toUpperCase();
+  if (code === "RCB" || code === "RCM" || code === "RB" || code === "RWB" || code === "RM" || code === "RW") {
+    return "R";
+  }
+  if (code === "LCB" || code === "LCM" || code === "LB" || code === "LWB" || code === "LM" || code === "LW") {
+    return "L";
+  }
+  return null;
+}
+
+/**
  * 6축 + goalkeeping + overall/potential.
  * goalkeeping은 전 선수 필수 — 필드 플레이어도 낮은 값을 갖는다 (예외 분기 금지).
  * overall은 주 포지션 그룹 공식의 파생 캐시, potential은 성장 상한.

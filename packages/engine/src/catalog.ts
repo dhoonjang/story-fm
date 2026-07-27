@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import type { PlayerCatalogEntry, PlayerPosition, PositionGroup } from "@story-fm/domain";
-import { positionGroupOf } from "@story-fm/domain";
+import { clusterOf, positionGroupOf, sideOf } from "@story-fm/domain";
 import { catalogPath, dataDir } from "./paths";
 import { REAL_SQUADS, type RealPlayerSeed } from "./data/epl-players";
 import { EU_SQUADS } from "./data/eu-squads";
@@ -39,23 +39,27 @@ function derivedGoalkeeping(nameEn: string, physical: number): number {
   return clamp99(base + Math.round((physical - 60) / 8));
 }
 
-/** 포지션 인접 관계 — 멀티 포지션 파생의 근거 (같은 라인·대칭 위치) */
+/**
+ * 포지션 인접 관계 — 멀티 포지션 파생의 근거 (**다른 라인·다른 역할**로의 확장).
+ * 좌우·중앙 분화만 다른 자리(CB↔RCB/LCB, CM↔RCM/LCM 등)는 여기가 아니라
+ * POSITION_CLUSTERS가 다룬다 — 인접이 아니라 사실상 같은 자리이기 때문이다.
+ */
 const POSITION_NEIGHBORS: Record<string, string[]> = {
   GK: [],
   RB: ["RWB", "RCB", "RM"],
   RWB: ["RB", "RM"],
-  RCB: ["CB", "RB"],
-  CB: ["RCB", "LCB", "DM"],
-  LCB: ["CB", "LB"],
+  RCB: ["RB", "DM"],
+  CB: ["DM"],
+  LCB: ["LB", "DM"],
   LB: ["LWB", "LCB", "LM"],
   LWB: ["LB", "LM"],
-  DM: ["CDM", "CM", "CB"],
-  CDM: ["DM", "CM"],
-  RCM: ["CM", "RM"],
-  CM: ["RCM", "LCM", "CDM", "AM"],
-  LCM: ["CM", "LM"],
-  AM: ["CAM", "CM", "SS"],
-  CAM: ["AM", "CM"],
+  DM: ["CM", "CB"],
+  CDM: ["CM", "CB"],
+  RCM: ["RM", "CDM", "AM"],
+  CM: ["CDM", "AM"],
+  LCM: ["LM", "CDM", "AM"],
+  AM: ["CM", "SS"],
+  CAM: ["CM", "SS"],
   RM: ["RW", "RCM", "RB"],
   LM: ["LW", "LCM", "LB"],
   RW: ["RM", "CF", "LW"],
@@ -66,18 +70,54 @@ const POSITION_NEIGHBORS: Record<string, string[]> = {
 };
 
 /**
- * 가능 포지션 목록 — 주 포지션은 88~96, 인접 1~2곳은 62~80.
+ * 주발 — 시드 데이터에 주발 정보가 없어 이름 해시로 결정적으로 파생한다.
+ * 좌우 미러 포지션의 **미세한** 적응도 차이에만 쓰인다(그 밖의 계산엔 영향 없음).
+ * 왼쪽 자리가 주 포지션인 선수는 왼발일 확률을 높게 잡는다 — 실측 대신 근사.
+ */
+function footOf(nameEn: string, natural: string): "R" | "L" {
+  const leftChance = sideOf(natural) === "L" ? 70 : 20;
+  return hashOf(`foot:${nameEn}`) % 100 < leftChance ? "L" : "R";
+}
+
+/**
+ * 같은 묶음 안에서 주 포지션 대비 감점 — 최대 3.
+ * 중앙↔좌우 이동은 사실상 같은 자리라 감점 없고, 반대발 쪽 자리만 살짝 낮다.
+ */
+function clusterPenalty(natural: string, target: string, foot: "R" | "L"): number {
+  const side = sideOf(target);
+  if (side === null || side === sideOf(natural)) return 0; // 중앙 또는 자기 쪽
+  return side === foot ? 1 : 3; // 주발 쪽이면 거의 그대로, 반대발 쪽은 살짝
+}
+
+/**
+ * 가능 포지션 목록 — 주 포지션은 88~96.
+ * 같은 묶음(CB↔RCB/LCB 등)은 주 포지션에서 0~3만 낮고, 그 밖의 인접 1~2곳은 62~80.
  * 결정적(이름 해시)이라 카탈로그가 시드와 무관하게 안정적이다.
  */
 export function derivePositions(nameEn: string, natural: string): PlayerPosition[] {
   const code = natural.toUpperCase();
   const h = hashOf(`pos:${nameEn}`);
-  const positions: PlayerPosition[] = [
-    { position: code, proficiency: 88 + (h % 9), isNatural: true },
-  ];
-  const neighbors = POSITION_NEIGHBORS[code] ?? [];
+  const base = 88 + (h % 9);
+  const positions: PlayerPosition[] = [{ position: code, proficiency: base, isNatural: true }];
   // GK는 전문 포지션 — 부포지션을 주지 않는다
-  if (code === "GK" || neighbors.length === 0) return positions;
+  if (code === "GK") return positions;
+
+  // ① 사실상 같은 자리는 모두 갖고, 적응도도 거의 같다
+  const foot = footOf(nameEn, code);
+  for (const pos of clusterOf(code) ?? []) {
+    if (pos === code) continue;
+    positions.push({
+      position: pos,
+      proficiency: clamp99(base - clusterPenalty(code, pos, foot)),
+      isNatural: false,
+    });
+  }
+
+  // ② 다른 라인·역할로의 확장은 중간 적응도로 1~2곳
+  const neighbors = (POSITION_NEIGHBORS[code] ?? []).filter(
+    (p) => !positions.some((x) => x.position === p),
+  );
+  if (neighbors.length === 0) return positions;
   const count = 1 + (h % 2); // 1~2곳
   for (let i = 0; i < count && i < neighbors.length; i++) {
     const pos = neighbors[(h + i * 7) % neighbors.length]!;

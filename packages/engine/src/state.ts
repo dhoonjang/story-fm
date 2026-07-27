@@ -32,6 +32,7 @@ import {
   naturalPositionOf,
   positionGroupOf,
   positionGroupOfPlayer,
+  sameCluster,
 } from "@story-fm/domain";
 import type { MatchLedgerState } from "@story-fm/sim";
 import {
@@ -228,8 +229,15 @@ export function squadFamiliarity(state: GameState, teamId: string): number {
 
 /** 이 선수가 그 포지션에서 갖는 적응도 (없으면 그룹 인접도 기반 추정) */
 export function proficiencyAt(player: GamePlayer, position: string): number {
-  const exact = player.positions.find((p) => p.position === position.toUpperCase());
+  const code = position.toUpperCase();
+  const exact = player.positions.find((p) => p.position === code);
   if (exact) return exact.proficiency;
+  // 사실상 같은 자리(CB↔RCB/LCB 등)는 가진 적응도에서 살짝만 깎는다 — 좌우 분화는
+  // 자리가 달라진 게 아니다. 목록에 묶음이 다 없는 선수(어드민 추가 등)를 위한 폴백.
+  const cluster = player.positions.filter((p) => sameCluster(p.position, code));
+  if (cluster.length > 0) {
+    return Math.max(...cluster.map((p) => p.proficiency)) - 2;
+  }
   const targetGroup = positionGroupOf(position);
   const natural = naturalPositionOf(player);
   const sameGroup = positionGroupOf(natural.position) === targetGroup;

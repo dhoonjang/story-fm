@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { GamePlayerSchema, TeamTacticsSchema, naturalPositionOf } from "@story-fm/domain";
+import {
+  GamePlayerSchema,
+  TeamTacticsSchema,
+  clusterOf,
+  naturalPositionOf,
+  sameCluster,
+} from "@story-fm/domain";
 import {
   teamsOfLeague,
   buildMatches,
@@ -49,6 +55,36 @@ describe("선수 카탈로그 (불변 초기치 DB)", () => {
     const outfield = catalog.filter((e) => naturalPositionOf(e).position !== "GK");
     const multi = outfield.filter((e) => e.positions.length > 1);
     expect(multi.length).toBeGreaterThan(outfield.length * 0.8);
+  });
+
+  it("사실상 같은 자리(CB↔RCB/LCB 등)는 적응도가 거의 같다", () => {
+    let compared = 0;
+    for (const e of catalog) {
+      const nat = naturalPositionOf(e);
+      const cluster = clusterOf(nat.position);
+      if (!cluster) continue;
+      // 묶음 전체를 갖고 있어야 한다 — 좌우 분화는 다른 자리가 아니다
+      for (const code of cluster) {
+        const own = e.positions.find((p) => p.position === code);
+        expect(own, `${e.nameEn} (${nat.position}) 에 ${code} 없음`).toBeDefined();
+        expect(nat.proficiency - own!.proficiency).toBeLessThanOrEqual(3);
+        expect(own!.proficiency).toBeLessThanOrEqual(nat.proficiency);
+        compared++;
+      }
+    }
+    expect(compared).toBeGreaterThan(1000); // 중앙 계열이 카탈로그의 큰 몫
+  });
+
+  it("묶음 밖 확장 포지션은 여전히 뚜렷하게 낮다", () => {
+    // 적응도가 "다 비슷해지는" 반대 방향 붕괴를 막는다
+    const outside = catalog.flatMap((e) => {
+      const nat = naturalPositionOf(e);
+      return e.positions
+        .filter((p) => !p.isNatural && !sameCluster(nat.position, p.position))
+        .map((p) => nat.proficiency - p.proficiency);
+    });
+    expect(outside.length).toBeGreaterThan(1000);
+    expect(Math.min(...outside)).toBeGreaterThan(3);
   });
 
   it("결정적이다 — 같은 카탈로그가 반복 호출에도 동일", () => {

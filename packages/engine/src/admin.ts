@@ -1,6 +1,7 @@
 import type { PlayerCatalogEntry, PlayerPosition } from "@story-fm/domain";
 import { ageOf, naturalPositionOf, positionGroupOf } from "@story-fm/domain";
 import {
+  derivePositions,
   overallFor,
   playerCatalog,
   resetCatalog,
@@ -226,7 +227,8 @@ export function adminAddCatalogPlayer(teamId: string, input: CatalogPlayerInput)
     nameKo: input.nameKo.trim(),
     nameEn,
     birthdate: input.birthdate,
-    positions: [{ position: code, proficiency: 88, isNatural: true }],
+    // 시드 선수와 같은 공식으로 파생한다 — 같은 자리 묶음(CB↔RCB/LCB)까지 채워진다
+    positions: derivePositions(nameEn, code),
     ...attrs,
     potential: Math.max(clamp99(input.potential), overallFor(group, attrs)),
   };
