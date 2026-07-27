@@ -18,6 +18,7 @@ import {
   isCup,
   stageLabel,
   advanceTime,
+  buildOfficeViews,
 } from "@story-fm/engine";
 import { createTestGame, playMockMatch } from "./helpers";
 
@@ -268,6 +269,54 @@ describe("게임 상태 반영", () => {
       const lines = digest.filter((d) => d.includes(`UCL ${label} `) && /통과|탈락/.test(d));
       expect(lines.length, `${label}: ${lines.join(" | ")}`).toBeLessThanOrEqual(1);
     }
+  });
+});
+
+describe("오피스 뷰", () => {
+  it("우리 대회의 리그 페이즈 순위표와 브래킷이 함께 나온다", () => {
+    const state = createTestGame(42);
+    fillResults(leaguePhaseOf(state, "ucl"));
+    advanceEuroKnockouts(state, []);
+    const europe = buildOfficeViews(state).schedule.europe;
+    expect(europe, "아스날은 UCL에 나간다").not.toBeNull();
+    expect(europe!.short).toBe("UCL");
+    expect(europe!.standings).toHaveLength(cupCatalogById("ucl")!.size);
+    expect(europe!.ourPosition).toBeGreaterThan(0);
+    expect(europe!.directSlots).toBe(8);
+    expect(europe!.playoffCutoff).toBe(24);
+
+    const playoff = europe!.bracket.find((b) => b.stage === "playoff");
+    expect(playoff!.ties).toHaveLength(8);
+    expect(playoff!.ties.every((t) => t.score === null)).toBe(true); // 아직 안 열렸다
+    // 아스날은 직행이라 플레이오프에 없다
+    expect(playoff!.ties.some((t) => t.ours)).toBe(false);
+  });
+
+  it("합계와 승부차기가 브래킷에 그대로 보인다", () => {
+    const state = createTestGame(42);
+    runKnockouts(state, "ucl");
+    const europe = buildOfficeViews(state).schedule.europe!;
+    const finalStage = europe.bracket.find((b) => b.stage === "final")!;
+    expect(finalStage.ties).toHaveLength(1);
+    expect(finalStage.ties[0]!.score).toMatch(/^\d+-\d+/);
+    for (const stage of europe.bracket) {
+      for (const tie of stage.ties) {
+        if (tie.score?.includes("승부차기")) expect(tie.score).toMatch(/승부차기 \d+-\d+/);
+      }
+    }
+  });
+
+  it("뷰를 여는 것이 게임 상태를 바꾸지 않는다", () => {
+    const state = createTestGame(42);
+    fillResults(leaguePhaseOf(state, "ucl"));
+    advanceEuroKnockouts(state, []);
+    // 합계 동점으로 만들고 승부차기는 아직 기록하지 않은 상태
+    const legs = euroStageMatches(state, "ucl", "playoff").filter((m) => /-p0-/.test(m.id));
+    legs[0]!.result = { homeGoals: 1, awayGoals: 1, scorers: [] };
+    legs[1]!.result = { homeGoals: 0, awayGoals: 0, scorers: [] };
+    const before = JSON.stringify(state);
+    buildOfficeViews(state);
+    expect(JSON.stringify(state)).toBe(before);
   });
 });
 

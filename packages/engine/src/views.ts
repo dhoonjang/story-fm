@@ -1,7 +1,16 @@
 import type { AssignmentRole, ScheduleType } from "@story-fm/domain";
 import { ageOf, naturalPositionOf, slotOfTime } from "@story-fm/domain";
 import { nextMatchFor, seasonEndDate } from "./calendar";
-import { competitionShortName, isCup, stageLabel } from "./data/cup-catalog";
+import {
+  competitionName,
+  competitionShortName,
+  cupCatalogById,
+  isCup,
+  knockoutStages,
+  stageLabel,
+} from "./data/cup-catalog";
+import { euroCompetitionOf } from "./europe";
+import { euroStageMatches } from "./euro-knockout";
 import { computeStandings, type StandingRow } from "./season";
 import {
   activeContract,
@@ -83,6 +92,22 @@ export interface CalendarEntryView {
   isNext: boolean;
 }
 
+/** 대항전 뷰 — 리그 페이즈 순위표 + 녹아웃 브래킷 (우리 팀 대회만) */
+export interface EuropeView {
+  competition: string;
+  short: string;
+  standings: StandingRow[];
+  ourPosition: number;
+  /** 리그 페이즈 통과 기준 — 직행 / 플레이오프 경계 (순위표에 선을 긋는다) */
+  directSlots: number;
+  playoffCutoff: number;
+  bracket: Array<{
+    stage: string;
+    label: string;
+    ties: Array<{ home: string; away: string; score: string | null; ours: boolean; won: boolean | null }>;
+  }>;
+}
+
 export interface OfficeViews {
   squad: {
     manager: {
@@ -125,6 +150,8 @@ export interface OfficeViews {
     userPosition: number;
     next: string | null;
     recentResults: string[];
+    /** 우리 팀이 나가는 유럽 대항전 — 출전하지 않으면 null */
+    europe: EuropeView | null;
   };
   career: {
     trophies: Array<{ competition: string; season: number; teamName: string }>;
@@ -157,6 +184,78 @@ function isUserMatch(state: GameState, matchId: string): boolean {
   const m = state.matches.find((x) => x.id === matchId);
   if (!m) return false;
   return m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId;
+}
+
+/**
+ * 대항전 뷰 — 우리 팀이 나가는 대회의 리그 페이즈 순위표와 녹아웃 브래킷.
+ *
+ * 읽기 전용이다. 승부차기는 이미 장부에 기록된 것만 읽는다 (여기서 판정하면
+ * 뷰를 여는 것이 게임 상태를 바꾸는 셈이 된다 — 판정은 tick·경기 종료가 한다).
+ */
+function buildEuropeView(state: GameState): EuropeView | null {
+  const cupId = euroCompetitionOf(state.userTeamId, state.season, state.seed);
+  const cup = cupId ? cupCatalogById(cupId) : null;
+  if (!cupId || !cup) return null;
+
+  const standings = computeStandings(state, cupId);
+  const bracket: EuropeView["bracket"] = [];
+  for (const stage of knockoutStages(cup)) {
+    const matches = euroStageMatches(state, cupId, stage);
+    if (matches.length === 0) continue;
+    const byPair = new Map<string, typeof matches>();
+    for (const m of matches) {
+      const pair = /-p(\d+)-/.exec(m.id)?.[1] ?? "0";
+      const legs = byPair.get(pair);
+      if (legs) legs.push(m);
+      else byPair.set(pair, [m]);
+    }
+    const ties = [...byPair.values()].map((legs) => {
+      const decider = legs[legs.length - 1]!;
+      const home = decider.homeTeamId;
+      const away = decider.awayTeamId;
+      const ours = home === state.userTeamId || away === state.userTeamId;
+      const played = legs.filter((m) => m.result);
+      let score: string | null = null;
+      let won: boolean | null = null;
+      if (played.length === legs.length) {
+        const agg = new Map<string, number>();
+        for (const leg of played) {
+          agg.set(leg.homeTeamId, (agg.get(leg.homeTeamId) ?? 0) + leg.result!.homeGoals);
+          agg.set(leg.awayTeamId, (agg.get(leg.awayTeamId) ?? 0) + leg.result!.awayGoals);
+        }
+        const h = agg.get(home) ?? 0;
+        const a = agg.get(away) ?? 0;
+        const pens = decider.result?.penalties;
+        score = pens ? `${h}-${a} (승부차기 ${pens.home}-${pens.away})` : `${h}-${a}`;
+        const winner = pens
+          ? pens.home > pens.away
+            ? home
+            : away
+          : h === a
+            ? null
+            : h > a
+              ? home
+              : away;
+        if (ours && winner) won = winner === state.userTeamId;
+      } else if (played.length > 0) {
+        // 1차전만 끝난 대진 — 진행 중임을 스코어로 보인다
+        const leg = played[0]!;
+        score = `1차전 ${leg.result!.homeGoals}-${leg.result!.awayGoals}`;
+      }
+      return { home: teamName(home), away: teamName(away), score, ours, won };
+    });
+    bracket.push({ stage, label: stageLabel(stage, 1, false), ties });
+  }
+
+  return {
+    competition: competitionName(cupId),
+    short: competitionShortName(cupId),
+    standings,
+    ourPosition: standings.findIndex((r) => r.teamId === state.userTeamId) + 1,
+    directSlots: cup.directSlots,
+    playoffCutoff: cup.directSlots + cup.playoffSlots,
+    bracket,
+  };
 }
 
 export function buildOfficeViews(state: GameState): OfficeViews {
@@ -221,6 +320,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
 
   const standings = computeStandings(state);
   const userPosition = standings.findIndex((r) => r.teamId === userTeamId) + 1;
+  const europe = buildEuropeView(state);
   const next = nextMatchFor(state.matches, userTeamId, state.date);
 
   // ── 일정 뷰 (유저 팀 관련 경기 + 훈련 + 이적창) ──
@@ -428,6 +528,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         ? `${isCup(next.competitionId) ? `${competitionShortName(next.competitionId)} ` : ""}${stageLabel(next.stage ?? "league", next.round)} ${next.date} ${next.neutral ? "중립" : next.homeTeamId === userTeamId ? "홈" : "원정"} vs ${teamName(next.homeTeamId === userTeamId ? next.awayTeamId : next.homeTeamId)}`
         : null,
       recentResults,
+      europe,
     },
     career: {
       trophies: state.trophies.map((t) => ({

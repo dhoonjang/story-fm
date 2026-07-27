@@ -743,6 +743,89 @@ export function StandingsView({
           ))}
         </tbody>
       </table>
+      {schedule.europe && <EuropeSection europe={schedule.europe} teamName={teamName} />}
+    </div>
+  );
+}
+
+// ── 유럽 대항전 — 리그 페이즈 순위표 + 녹아웃 브래킷 ────
+function EuropeSection({
+  europe,
+  teamName,
+}: {
+  europe: NonNullable<OfficeViews["schedule"]["europe"]>;
+  teamName: string;
+}) {
+  return (
+    <div data-testid="europe">
+      <div className="section-title">
+        {europe.competition}
+        {europe.ourPosition > 0 && ` — 리그 페이즈 ${europe.ourPosition}위`}
+      </div>
+      <table data-testid="europe-standings">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>팀</th>
+            <th>경기</th>
+            <th>승</th>
+            <th>무</th>
+            <th>패</th>
+            <th>득실</th>
+            <th>승점</th>
+          </tr>
+        </thead>
+        <tbody>
+          {europe.standings.map((row, i) => (
+            <tr
+              key={row.teamId}
+              className={[
+                row.name === teamName ? "me" : "",
+                // 직행 / 플레이오프 경계에 선을 긋는다
+                i + 1 === europe.directSlots || i + 1 === europe.playoffCutoff ? "cut" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            >
+              <td>{i + 1}</td>
+              <td className="team-cell">{row.name}</td>
+              <td>{row.played}</td>
+              <td>{row.wins}</td>
+              <td>{row.draws}</td>
+              <td>{row.losses}</td>
+              <td>{row.goalDiff > 0 ? `+${row.goalDiff}` : row.goalDiff}</td>
+              <td>
+                <b>{row.points}</b>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="euro-legend">
+        1~{europe.directSlots}위 본선 직행 · {europe.directSlots + 1}~{europe.playoffCutoff}위
+        플레이오프
+      </div>
+      {europe.bracket.map((stage) => (
+        <div key={stage.stage} className="euro-stage">
+          <div className="section-title">{stage.label}</div>
+          {stage.ties.map((tie, i) => (
+            <div
+              key={i}
+              className={`euro-tie${tie.ours ? " ours" : ""}`}
+              data-testid={tie.ours ? "euro-tie-ours" : undefined}
+            >
+              <span className="euro-teams">
+                {tie.home} vs {tie.away}
+              </span>
+              <span className="euro-score">
+                {tie.score ?? "예정"}
+                {tie.won === true && " ✓"}
+                {tie.won === false && " ✕"}
+              </span>
+            </div>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }

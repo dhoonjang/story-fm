@@ -1221,6 +1221,31 @@ textarea {
   margin: 16px 0 8px;
 }
 
+/* 유럽 대항전 — 통과 경계선·브래킷 */
+.view-scroll tr.cut td {
+  border-bottom: 1px solid var(--accent-2);
+}
+.euro-legend {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+.euro-tie {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
+  padding: 4px 6px;
+  border-bottom: 1px solid rgba(42, 51, 66, 0.5);
+}
+.euro-tie.ours {
+  background: rgba(74, 222, 128, 0.07);
+}
+.euro-tie .euro-score {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 /* ── 반응형 (모바일) ─────────────────────────── */
 .hide-sm {
   display: inline;

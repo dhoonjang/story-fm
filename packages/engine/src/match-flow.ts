@@ -36,6 +36,7 @@ import {
   type MatchScriptSegment,
 } from "./state";
 import { competitionShortName, stageLabel } from "./data/cup-catalog";
+import { advanceEuroKnockouts } from "./euro-knockout";
 import { makeRng } from "./rng";
 import { YELLOWS_PER_SUSPENSION } from "@story-fm/domain";
 
@@ -526,6 +527,9 @@ export function finalizeMatch(state: GameState): string[] {
 
   state.phase = "idle";
   state.pendingMatch = null;
+  // 우리 경기로 대항전 대진이 결판났을 수 있다 — 다음 tick을 기다리지 않고 정리한다
+  // (승부차기 판정·다음 단계 편성이 바로 달력에 오른다)
+  advanceEuroKnockouts(state, digest);
   return digest;
 }
 
