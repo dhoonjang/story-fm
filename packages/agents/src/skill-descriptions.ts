@@ -170,7 +170,7 @@ export const SKILL_CATALOG = [
     group: "이적",
     readOnly: false,
     description:
-      "**상대 구단·에이전트가 되어** 우리 오퍼에 답한다 (accept·counter·reject). deal_odds의 확률과 근거를 앵커로 삼아 판정하고, note에 상대의 말을 한 줄 남긴다. counter는 우리 제시액 이상 요구액 +15% 이하만 가능하다.",
+      "**상대 구단·에이전트가 되어** 우리 오퍼(영입·재계약)에 답한다 (accept·counter·reject). 답이 도착한 협상은 서사만 쓰지 말고 반드시 이 도구로 판정을 기록해야 다음 단계로 간다. deal_odds의 확률과 근거를 앵커로 삼고, note에 상대의 말을 한 줄 남긴다. counter는 영입이면 fee(우리 제시액 이상·요구액 +15% 이하), 재계약이면 weeklyWage(우리 제시액 초과·기대치 1.4배 이하)를 준다.",
   },
   {
     name: "answer_incoming_offer",
