@@ -284,7 +284,7 @@ describe("오피스 뷰", () => {
     const state = createTestGame(42);
     fillResults(leaguePhaseOf(state, "ucl"));
     advanceEuroKnockouts(state, []);
-    const europe = buildOfficeViews(state).schedule.europe;
+    const europe = buildOfficeViews(state).competitions.list.find((c) => c.kind === "cup")?.europe ?? null;
     expect(europe, "아스날은 UCL에 나간다").not.toBeNull();
     expect(europe!.short).toBe("UCL");
     expect(europe!.standings).toHaveLength(cupCatalogById("ucl")!.size);
@@ -302,7 +302,7 @@ describe("오피스 뷰", () => {
   it("합계와 승부차기가 브래킷에 그대로 보인다", () => {
     const state = createTestGame(42);
     runKnockouts(state, "ucl");
-    const europe = buildOfficeViews(state).schedule.europe!;
+    const europe = buildOfficeViews(state).competitions.list.find((c) => c.kind === "cup")!.europe!;
     const finalStage = europe.bracket.find((b) => b.stage === "final")!;
     expect(finalStage.ties).toHaveLength(1);
     expect(finalStage.ties[0]!.score).toMatch(/^\d+-\d+/);

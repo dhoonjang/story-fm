@@ -1,4 +1,4 @@
-import type { AssignmentRole, AxisValues, ScheduleType } from "@story-fm/domain";
+import type { AssignmentRole, AxisValues, MatchRecord, ScheduleType } from "@story-fm/domain";
 import {
   ATTRIBUTE_AXES,
   FINANCE_CATEGORY_KO,
@@ -8,7 +8,7 @@ import {
 } from "@story-fm/domain";
 import { nextMatchFor, seasonEndDate } from "./calendar";
 import { clubProfile } from "./data/club-profile";
-import { teamCatalogById } from "./data/team-catalog";
+import { leagueOfTeam, teamCatalogById } from "./data/team-catalog";
 import { categoryOf, currentMonthSummary, psrStatus, seasonWageRatio } from "./finance";
 import {
   competitionName,
@@ -116,6 +116,54 @@ export interface CalendarEntryView {
   isNext: boolean;
 }
 
+/** 대회 일정의 한 경기 */
+export interface CompetitionMatchView {
+  id: string;
+  date: string;
+  time: string;
+  homeName: string;
+  awayName: string;
+  homeShort: string;
+  awayShort: string;
+  /** 결과 — 미진행이면 null. 승부차기는 괄호로 붙는다 */
+  score: string | null;
+  /** 우리 팀 경기 */
+  ours: boolean;
+  /** 우리 경기의 결과 (아니면 null) */
+  win: "W" | "D" | "L" | null;
+  neutral: boolean;
+}
+
+/** 라운드/단계 하나 — 대회 일정의 묶음 단위 */
+export interface CompetitionRoundView {
+  key: string;
+  label: string;
+  /** 이 라운드의 시작일 (표시·정렬용) */
+  date: string;
+  matches: CompetitionMatchView[];
+  /** 오늘에 가장 가까운 라운드 — UI가 기본으로 펼친다 */
+  current: boolean;
+}
+
+/**
+ * 대회 하나 — 순위표 + 라운드별 일정 (+ 대항전이면 브래킷).
+ * 우리가 나가는 대회만 만든다 (감독의 관심 범위 = 우리 리그 + 우리 대항전).
+ */
+export interface CompetitionView {
+  id: string;
+  name: string;
+  short: string;
+  kind: "league" | "cup";
+  standings: StandingRow[];
+  /** 우리 순위 (0 = 순위표에 없음) */
+  userPosition: number;
+  /** 이 대회의 다음 우리 경기 요약 */
+  next: string | null;
+  rounds: CompetitionRoundView[];
+  /** 대항전 전용 — 통과 경계선과 녹아웃 브래킷 */
+  europe: EuropeView | null;
+}
+
 /** 대항전 뷰 — 리그 페이즈 순위표 + 녹아웃 브래킷 (우리 팀 대회만) */
 export interface EuropeView {
   competitionId: string;
@@ -182,13 +230,13 @@ export interface OfficeViews {
       noncash: boolean;
     }>;
   };
-  schedule: {
-    standings: StandingRow[];
-    userPosition: number;
+  /** 대회 — 우리 리그 + 우리 대항전. 대회별 순위표와 일정이 한 자리에 (§2.4) */
+  competitions: {
+    /** 대회 무관 — 다음 경기 한 줄 요약 */
     next: string | null;
     recentResults: string[];
-    /** 우리 팀이 나가는 유럽 대항전 — 출전하지 않으면 null */
-    europe: EuropeView | null;
+    /** 탭 순서: 우리 리그 → 우리 대항전 */
+    list: CompetitionView[];
   };
   career: {
     trophies: Array<{ competition: string; season: number; teamName: string }>;
@@ -296,6 +344,108 @@ function buildEuropeView(state: GameState): EuropeView | null {
   };
 }
 
+/** 경기 결과 표기 — 승부차기까지 (미진행이면 null) */
+function scoreOf(match: MatchRecord): string | null {
+  if (!match.result) return null;
+  const { homeGoals, awayGoals, penalties } = match.result;
+  const pens = penalties ? ` (승부차기 ${penalties.home}-${penalties.away})` : "";
+  return `${homeGoals}-${awayGoals}${pens}`;
+}
+
+/** 우리 경기의 승패 — 승부차기가 있으면 그것이 결론이다 */
+function outcomeFor(state: GameState, match: MatchRecord): "W" | "D" | "L" | null {
+  const home = match.homeTeamId === state.userTeamId;
+  if (!match.result || (!home && match.awayTeamId !== state.userTeamId)) return null;
+  const { homeGoals, awayGoals, penalties } = match.result;
+  const mine = home ? homeGoals : awayGoals;
+  const theirs = home ? awayGoals : homeGoals;
+  if (mine !== theirs) return mine > theirs ? "W" : "L";
+  if (penalties) {
+    const myPens = home ? penalties.home : penalties.away;
+    const theirPens = home ? penalties.away : penalties.home;
+    if (myPens !== theirPens) return myPens > theirPens ? "W" : "L";
+  }
+  return "D";
+}
+
+/**
+ * 대회 하나의 뷰 — 순위표 + 라운드별 일정.
+ *
+ * 라운드 묶음은 `(stage, round)`로 만든다. 리그는 stage가 없어 `R3`이 곧 라운드고,
+ * 대항전은 리그 페이즈(R1~8) 뒤에 2차전제 녹아웃 단계가 붙는다. `current`는 오늘
+ * 이후 첫 라운드(전부 끝났으면 마지막)로, UI가 여기서부터 보여준다.
+ */
+function buildCompetitionView(state: GameState, competitionId: string): CompetitionView {
+  const cup = isCup(competitionId);
+  const matches = state.matches
+    .filter((m) => m.competitionId === competitionId && m.season === state.season)
+    .sort((a, b) =>
+      a.date < b.date ? -1 : a.date > b.date ? 1 : (a.time ?? "").localeCompare(b.time ?? ""),
+    );
+
+  const order = new Map<string, number>();
+  for (const stage of ["league", "playoff", "r16", "qf", "sf", "final"]) {
+    order.set(stage, order.size);
+  }
+  const grouped = new Map<string, CompetitionRoundView>();
+  for (const m of matches) {
+    const stage = m.stage ?? "league";
+    const key = `${stage}:${m.round}`;
+    const label = cup
+      ? stage === "league"
+        ? `리그 페이즈 ${m.round}R`
+        : stageLabel(stage, m.round)
+      : `${m.round}라운드`;
+    const round = grouped.get(key) ?? { key, label, date: m.date, matches: [], current: false };
+    round.matches.push({
+      id: m.id,
+      date: m.date,
+      time: m.time ?? "15:00",
+      homeName: teamName(m.homeTeamId),
+      awayName: teamName(m.awayTeamId),
+      homeShort: teamShortName(m.homeTeamId),
+      awayShort: teamShortName(m.awayTeamId),
+      score: scoreOf(m),
+      ours: m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId,
+      win: outcomeFor(state, m),
+      neutral: m.neutral === true,
+    });
+    if (m.date < round.date) round.date = m.date;
+    grouped.set(key, round);
+  }
+
+  const rounds = [...grouped.values()].sort((a, b) => {
+    const [aStage, aRound] = a.key.split(":") as [string, string];
+    const [bStage, bRound] = b.key.split(":") as [string, string];
+    return (
+      (order.get(aStage) ?? 9) - (order.get(bStage) ?? 9) || Number(aRound) - Number(bRound)
+    );
+  });
+  // 오늘 이후 첫 라운드 = 지금 보고 싶은 라운드 (전부 끝났으면 마지막)
+  const currentIndex = rounds.findIndex((r) => r.matches.some((m) => m.date >= state.date));
+  const current = rounds[currentIndex >= 0 ? currentIndex : rounds.length - 1];
+  if (current) current.current = true;
+
+  const standings = computeStandings(state, competitionId);
+  const nextOurs = matches.find(
+    (m) =>
+      !m.result && (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+  );
+  return {
+    id: competitionId,
+    name: competitionName(competitionId),
+    short: competitionShortName(competitionId),
+    kind: cup ? "cup" : "league",
+    standings,
+    userPosition: standings.findIndex((r) => r.teamId === state.userTeamId) + 1,
+    next: nextOurs
+      ? `${nextOurs.date} ${nextOurs.neutral ? "중립" : nextOurs.homeTeamId === state.userTeamId ? "홈" : "원정"} vs ${teamName(nextOurs.homeTeamId === state.userTeamId ? nextOurs.awayTeamId : nextOurs.homeTeamId)}`
+      : null,
+    rounds,
+    europe: cup ? buildEuropeView(state) : null,
+  };
+}
+
 export function buildOfficeViews(state: GameState): OfficeViews {
   const userTeamId = state.userTeamId;
   const squad = playersOf(state, userTeamId);
@@ -355,9 +505,12 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       a.role === b.role ? b.overall - a.overall : roleRank[a.role] - roleRank[b.role],
     );
 
-  const standings = computeStandings(state);
-  const userPosition = standings.findIndex((r) => r.teamId === userTeamId) + 1;
-  const europe = buildEuropeView(state);
+  // 대회 탭 — 우리 리그 먼저, 그 뒤에 우리가 나가는 대항전
+  const ourLeague = leagueOfTeam(userTeamId);
+  const ourCup = euroCompetitionOf(state.euroEntrants, userTeamId);
+  const competitionList = [ourLeague, ...(ourCup ? [ourCup] : [])].map((id) =>
+    buildCompetitionView(state, id),
+  );
   const next = nextMatchFor(state.matches, userTeamId, state.date);
 
   // ── 일정 뷰 (유저 팀 관련 경기 + 훈련 + 이적창) ──
@@ -613,14 +766,12 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       reports,
       feed,
     },
-    schedule: {
-      standings,
-      userPosition,
+    competitions: {
       next: next
         ? `${isCup(next.competitionId) ? `${competitionShortName(next.competitionId)} ` : ""}${stageLabel(next.stage ?? "league", next.round)} ${next.date} ${next.neutral ? "중립" : next.homeTeamId === userTeamId ? "홈" : "원정"} vs ${teamName(next.homeTeamId === userTeamId ? next.awayTeamId : next.homeTeamId)}`
         : null,
       recentResults,
-      europe,
+      list: competitionList,
     },
     career: {
       trophies: state.trophies.map((t) => ({

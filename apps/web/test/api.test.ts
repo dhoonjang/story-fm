@@ -139,9 +139,10 @@ describe("API — 온보딩부터 경기까지", () => {
     expect(current.phase).toBe("idle");
 
     // 순위표에 유저 경기 결과 반영
-    const me = current.views.schedule.standings.find((r) => r.teamId === "arsenal");
+    const league = current.views.competitions.list[0]!;
+    const me = league.standings.find((r) => r.teamId === "arsenal");
     expect(me?.played).toBe(1);
-    expect(current.views.schedule.recentResults.length).toBeGreaterThan(0);
+    expect(current.views.competitions.recentResults.length).toBeGreaterThan(0);
   });
 
   it("달력 뷰가 유저 팀 일정(리그 38 + 대항전)을 담는다", async () => {
@@ -152,10 +153,8 @@ describe("API — 온보딩부터 경기까지", () => {
     const cal = game.views.calendar;
     const matches = cal.entries.filter((e) => e.type === "match");
     // 리그 38 + 대항전 (출전 대회는 세이브의 배정에서 나온다 — 뷰가 알려준다)
-    const cup = game.views.schedule.europe;
-    expect(matches).toHaveLength(
-      38 + (cup ? (cupCatalogById(cup.competitionId)?.matchesPerTeam ?? 0) : 0),
-    );
+    const cup = game.views.competitions.list.find((c) => c.kind === "cup");
+    expect(matches).toHaveLength(38 + (cup ? (cupCatalogById(cup.id)?.matchesPerTeam ?? 0) : 0));
     expect(matches.every((e) => e.result === null)).toBe(true);
     expect(matches.filter((e) => e.isNext)).toHaveLength(1);
     expect(cal.seasonStart <= cal.seasonEnd).toBe(true);

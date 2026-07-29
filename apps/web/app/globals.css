@@ -1517,6 +1517,127 @@ textarea {
   white-space: nowrap;
 }
 
+/* ── 대회 뷰 — 대회 탭 · 라운드 선택기 · 일정 목록 ────────── */
+.comp-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  margin-bottom: 12px;
+}
+.comp-tabs button {
+  flex: 0 0 auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12.5px;
+  padding: 6px 14px;
+}
+.comp-tabs button.active {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--panel-2);
+}
+.comp-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+.comp-head span {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+.round-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.round-nav button {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 5px 10px;
+}
+.round-nav button:disabled {
+  color: var(--muted);
+  opacity: 0.4;
+}
+.round-nav select {
+  flex: 1;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 6px 8px;
+  font-size: 12.5px;
+}
+.fixture-list {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.fixture {
+  display: grid;
+  grid-template-columns: 74px 1fr 110px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  border-bottom: 1px solid var(--border);
+}
+.fixture:last-child {
+  border-bottom: none;
+}
+.fixture.ours {
+  background: rgba(74, 222, 128, 0.07);
+}
+.fixture .when {
+  color: var(--muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.fixture .side {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fixture .side.away {
+  text-align: right;
+}
+.fixture .mid {
+  text-align: center;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.fixture .mid.played {
+  color: var(--text);
+  font-weight: 700;
+}
+.fixture .wdl {
+  margin-left: 5px;
+  font-size: 11px;
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.fixture .wdl.W {
+  color: var(--accent);
+}
+.fixture .wdl.L {
+  color: var(--danger);
+}
+.fixture .wdl.D {
+  color: var(--muted);
+}
+
 /* ── 반응형 (모바일) ─────────────────────────── */
 .hide-sm {
   display: inline;
@@ -1561,6 +1682,21 @@ textarea {
   .fin-cols {
     grid-template-columns: 1fr;
     gap: 8px;
+  }
+  /* 좁은 화면에선 카테고리를 접고 상세·금액만 (가로 스크롤 금지) */
+  .fin-feed-row {
+    grid-template-columns: 38px 1fr auto;
+  }
+  .fin-feed-row .cat {
+    display: none;
+  }
+  /* 일정은 날짜를 줄이고 팀명 폭을 양보한다 (킥오프 시각은 .hide-sm로 숨는다) */
+  .fixture {
+    grid-template-columns: 44px 1fr 78px 1fr auto;
+    gap: 6px;
+  }
+  .fixture .when {
+    font-size: 11px;
   }
   .pitch-chip {
     min-width: 52px;

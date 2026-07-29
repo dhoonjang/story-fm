@@ -759,126 +759,219 @@ export function FinanceView({ finance }: { finance: OfficeViews["finance"] }) {
   );
 }
 
-// ── 순위·최근 결과 ──────────────────────────────────────
-export function StandingsView({
-  schedule,
+// ── 대회 — 대회별 탭 · 순위표 · 라운드별 일정 ──────────────
+type Competition = OfficeViews["competitions"]["list"][number];
+
+/** 순위표 — 리그는 그대로, 대항전은 통과 경계선을 긋는다 */
+function StandingsTable({
+  competition,
   teamName,
 }: {
-  schedule: OfficeViews["schedule"];
+  competition: Competition;
   teamName: string;
 }) {
+  const europe = competition.europe;
   return (
-    <div data-testid="view-schedule">
-      {schedule.next && (
-        <div className="manager-card">
-          <div className="bg">다음 경기</div>
-          <div>{schedule.next}</div>
-        </div>
-      )}
-      {schedule.recentResults.length > 0 && (
-        <>
-          <div className="section-title">최근 결과</div>
-          {schedule.recentResults.map((r, i) => (
-            <div key={i} style={{ fontSize: 12.5, padding: "2px 0" }}>
-              {r}
-            </div>
-          ))}
-        </>
-      )}
-      <div className="section-title">리그 순위</div>
-      <table data-testid="standings">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>팀</th>
-            <th>경기</th>
-            <th>승</th>
-            <th>무</th>
-            <th>패</th>
-            <th>득실</th>
-            <th>승점</th>
+    <table data-testid={competition.kind === "cup" ? "europe-standings" : "standings"}>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>팀</th>
+          <th>경기</th>
+          <th>승</th>
+          <th>무</th>
+          <th>패</th>
+          <th>득실</th>
+          <th>승점</th>
+        </tr>
+      </thead>
+      <tbody>
+        {competition.standings.map((row, i) => (
+          <tr
+            key={row.teamId}
+            className={[
+              row.name === teamName ? "me" : "",
+              europe && (i + 1 === europe.directSlots || i + 1 === europe.playoffCutoff)
+                ? "cut"
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+          >
+            <td>{i + 1}</td>
+            <td className="team-cell">{row.name}</td>
+            <td>{row.played}</td>
+            <td>{row.wins}</td>
+            <td>{row.draws}</td>
+            <td>{row.losses}</td>
+            <td>{row.goalDiff > 0 ? `+${row.goalDiff}` : row.goalDiff}</td>
+            <td>
+              <b>{row.points}</b>
+            </td>
           </tr>
-        </thead>
-        <tbody>
-          {schedule.standings.map((row, i) => (
-            <tr key={row.teamId} className={row.name === teamName ? "me" : ""}>
-              <td>{i + 1}</td>
-              <td className="team-cell">{row.name}</td>
-              <td>{row.played}</td>
-              <td>{row.wins}</td>
-              <td>{row.draws}</td>
-              <td>{row.losses}</td>
-              <td>{row.goalDiff > 0 ? `+${row.goalDiff}` : row.goalDiff}</td>
-              <td>
-                <b>{row.points}</b>
-              </td>
-            </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/** 라운드 하나의 경기 목록 — 라운드 선택기로 오간다 */
+function RoundFixtures({ competition }: { competition: Competition }) {
+  const rounds = competition.rounds;
+  const currentIndex = Math.max(
+    0,
+    rounds.findIndex((r) => r.current),
+  );
+  const [picked, setPicked] = useState<number | null>(null);
+  // 대회를 바꾸면 선택을 놓아 그 대회의 현재 라운드로 돌아간다
+  const [ownerId, setOwnerId] = useState(competition.id);
+  if (ownerId !== competition.id) {
+    setOwnerId(competition.id);
+    setPicked(null);
+  }
+  const index = Math.min(picked ?? currentIndex, rounds.length - 1);
+  const round = rounds[index];
+  if (!round) return <div className="empty">아직 편성된 일정이 없습니다</div>;
+
+  return (
+    <div data-testid="round-fixtures">
+      <div className="round-nav">
+        <button
+          onClick={() => setPicked(Math.max(0, index - 1))}
+          disabled={index === 0}
+          aria-label="이전 라운드"
+        >
+          ◀
+        </button>
+        <select
+          value={index}
+          onChange={(e) => setPicked(Number(e.target.value))}
+          data-testid="round-select"
+        >
+          {rounds.map((r, i) => (
+            <option value={i} key={r.key}>
+              {r.label}
+              {r.current ? " (현재)" : ""}
+            </option>
           ))}
-        </tbody>
-      </table>
-      {schedule.europe && <EuropeSection europe={schedule.europe} teamName={teamName} />}
+        </select>
+        <button
+          onClick={() => setPicked(Math.min(rounds.length - 1, index + 1))}
+          disabled={index === rounds.length - 1}
+          aria-label="다음 라운드"
+        >
+          ▶
+        </button>
+      </div>
+      <div className="fixture-list">
+        {round.matches.map((m) => (
+          <div className={`fixture${m.ours ? " ours" : ""}`} key={m.id}>
+            <span className="when">
+              {m.date.slice(5)} <span className="hide-sm">{m.time}</span>
+            </span>
+            <span className="side home">{m.homeName}</span>
+            <span className={`mid${m.score ? " played" : ""}`}>
+              {m.score ?? "vs"}
+              {m.win && <b className={`wdl ${m.win}`}>{m.win}</b>}
+            </span>
+            <span className="side away">{m.awayName}</span>
+            {m.neutral && <span className="fin-tag">중립</span>}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
-// ── 유럽 대항전 — 리그 페이즈 순위표 + 녹아웃 브래킷 ────
-function EuropeSection({
-  europe,
+export function CompetitionsView({
+  competitions,
   teamName,
 }: {
-  europe: NonNullable<OfficeViews["schedule"]["europe"]>;
+  competitions: OfficeViews["competitions"];
   teamName: string;
+}) {
+  const list = competitions.list;
+  const [activeId, setActiveId] = useState(list[0]?.id ?? "");
+  const active = list.find((c) => c.id === activeId) ?? list[0];
+
+  return (
+    <div data-testid="view-competitions">
+      {competitions.next && (
+        <div className="manager-card">
+          <div className="bg">다음 경기</div>
+          <div>{competitions.next}</div>
+        </div>
+      )}
+
+      {list.length > 1 && (
+        <div className="comp-tabs" data-testid="comp-tabs">
+          {list.map((c) => (
+            <button
+              key={c.id}
+              className={active?.id === c.id ? "active" : ""}
+              onClick={() => setActiveId(c.id)}
+              data-testid={`comp-tab-${c.id}`}
+            >
+              {c.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {!active && <div className="empty">참가 중인 대회가 없습니다</div>}
+      {active && (
+        <>
+          <div className="comp-head">
+            <b>{active.name}</b>
+            <span>
+              {active.userPosition > 0
+                ? `${active.kind === "cup" ? "리그 페이즈 " : ""}${active.userPosition}위`
+                : "순위 없음"}
+              {active.next ? ` · 다음 ${active.next}` : " · 남은 경기 없음"}
+            </span>
+          </div>
+
+          <div className="section-title">순위</div>
+          <StandingsTable competition={active} teamName={teamName} />
+          {active.europe && (
+            <div className="euro-legend">
+              1~{active.europe.directSlots}위 본선 직행 · {active.europe.directSlots + 1}~
+              {active.europe.playoffCutoff}위 플레이오프
+            </div>
+          )}
+
+          {active.europe && active.europe.bracket.length > 0 && (
+            <BracketSection bracket={active.europe.bracket} />
+          )}
+
+          <div className="section-title">일정</div>
+          <RoundFixtures competition={active} />
+
+          {competitions.recentResults.length > 0 && (
+            <>
+              <div className="section-title">우리 팀 최근 결과 (전 대회)</div>
+              {competitions.recentResults.map((r, i) => (
+                <div key={i} style={{ fontSize: 12.5, padding: "2px 0" }}>
+                  {r}
+                </div>
+              ))}
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** 녹아웃 브래킷 — 단계별 대진 (2차전 합계는 엔진이 계산해 넘긴다) */
+function BracketSection({
+  bracket,
+}: {
+  bracket: NonNullable<Competition["europe"]>["bracket"];
 }) {
   return (
     <div data-testid="europe">
-      <div className="section-title">
-        {europe.competition}
-        {europe.ourPosition > 0 && ` — 리그 페이즈 ${europe.ourPosition}위`}
-      </div>
-      <table data-testid="europe-standings">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>팀</th>
-            <th>경기</th>
-            <th>승</th>
-            <th>무</th>
-            <th>패</th>
-            <th>득실</th>
-            <th>승점</th>
-          </tr>
-        </thead>
-        <tbody>
-          {europe.standings.map((row, i) => (
-            <tr
-              key={row.teamId}
-              className={[
-                row.name === teamName ? "me" : "",
-                // 직행 / 플레이오프 경계에 선을 긋는다
-                i + 1 === europe.directSlots || i + 1 === europe.playoffCutoff ? "cut" : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
-            >
-              <td>{i + 1}</td>
-              <td className="team-cell">{row.name}</td>
-              <td>{row.played}</td>
-              <td>{row.wins}</td>
-              <td>{row.draws}</td>
-              <td>{row.losses}</td>
-              <td>{row.goalDiff > 0 ? `+${row.goalDiff}` : row.goalDiff}</td>
-              <td>
-                <b>{row.points}</b>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="euro-legend">
-        1~{europe.directSlots}위 본선 직행 · {europe.directSlots + 1}~{europe.playoffCutoff}위
-        플레이오프
-      </div>
-      {europe.bracket.map((stage) => (
+      {bracket.map((stage) => (
         <div key={stage.stage} className="euro-stage">
           <div className="section-title">{stage.label}</div>
           {stage.ties.map((tie, i) => (

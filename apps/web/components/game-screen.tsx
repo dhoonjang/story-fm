@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { GamePayload } from "@/lib/store";
 import { ChatTurnView } from "./chat";
-import { SquadView, CalendarView, FinanceView, StandingsView, CareerView } from "./office";
+import { SquadView, CalendarView, FinanceView, CompetitionsView, CareerView } from "./office";
 
 const PHASE_LABEL: Record<string, string> = {
   idle: "일상",
@@ -16,7 +16,7 @@ const TABS = [
   { key: "스쿼드", icon: "👥" },
   { key: "달력", icon: "📅" },
   { key: "재정", icon: "💰" },
-  { key: "순위", icon: "📊" },
+  { key: "대회", icon: "🏆" },
   { key: "커리어", icon: "🏅" },
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
@@ -270,9 +270,9 @@ export function GameScreen({ gameId }: { gameId: string }) {
             <FinanceView finance={game.views.finance} />
           </div>
         )}
-        {tab === "순위" && (
+        {tab === "대회" && (
           <div className="view-scroll">
-            <StandingsView schedule={game.views.schedule} teamName={game.teamName} />
+            <CompetitionsView competitions={game.views.competitions} teamName={game.teamName} />
           </div>
         )}
         {tab === "커리어" && (

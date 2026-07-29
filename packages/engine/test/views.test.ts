@@ -127,12 +127,69 @@ describe("오피스 뷰 — 재정·순위·커리어", () => {
   it("순위는 한글 팀명으로, 커리어는 감독 소속 기록으로 나온다", () => {
     const state = createTestGame();
     const views = buildOfficeViews(state);
-    expect(views.schedule.standings).toHaveLength(20);
-    for (const row of views.schedule.standings) {
+    const league = views.competitions.list[0]!;
+    expect(league.kind).toBe("league");
+    expect(league.standings).toHaveLength(20);
+    for (const row of league.standings) {
       expect(row.name).not.toMatch(/^[a-z]+$/); // id가 아니라 한글명
     }
     expect(views.career.seasons).toHaveLength(0); // 첫 시즌 진행 중
     expect(views.career.trophies).toHaveLength(0);
+  });
+
+  it("대회 뷰는 우리 리그 + 우리 대항전이고 라운드별 일정을 담는다", () => {
+    const state = createTestGame();
+    const list = buildOfficeViews(state).competitions.list;
+
+    // 우리 리그가 먼저, 그 뒤에 우리가 나가는 대항전
+    expect(list[0]!.kind).toBe("league");
+    expect(list[0]!.id).toBe("epl");
+    expect(list.filter((c) => c.kind === "cup").length).toBeLessThanOrEqual(1);
+    for (const c of list.slice(1)) expect(c.kind).toBe("cup");
+
+    const league = list[0]!;
+    expect(league.rounds).toHaveLength(38);
+    expect(league.rounds[0]!.label).toBe("1라운드");
+    // 라운드마다 10경기(20팀), 전 팀의 경기가 모두 들어간다
+    for (const round of league.rounds) expect(round.matches).toHaveLength(10);
+    expect(league.rounds.every((r) => r.matches.filter((m) => m.ours).length === 1)).toBe(true);
+    // 시작 시점엔 결과가 없고 현재 라운드는 딱 하나
+    expect(league.rounds.flatMap((r) => r.matches).every((m) => m.score === null)).toBe(true);
+    expect(league.rounds.filter((r) => r.current)).toHaveLength(1);
+    expect(league.rounds.find((r) => r.current)!.key).toBe("league:1");
+    expect(league.next).toContain("vs");
+  });
+
+  it("경기를 치르면 대회 일정에 스코어와 승패가 남는다", () => {
+    const state = createTestGame(17);
+    advanceAndPlay(state);
+    const list = buildOfficeViews(state).competitions.list;
+    const played = list
+      .flatMap((c) => c.rounds)
+      .flatMap((r) => r.matches)
+      .filter((m) => m.ours && m.score !== null);
+    expect(played).toHaveLength(1);
+    expect(played[0]!.score).toMatch(/^\d+-\d+/);
+    expect(["W", "D", "L"]).toContain(played[0]!.win);
+    // 현재 라운드 = 아직 지나지 않은 경기가 남은 첫 라운드 (우리 경기만 끝났어도
+    // 같은 라운드의 다른 경기가 남아 있으면 그 라운드가 현재다)
+    const league = list[0]!;
+    const current = league.rounds.find((r) => r.current)!;
+    expect(current.matches.some((m) => m.date >= state.date)).toBe(true);
+    for (const round of league.rounds.slice(0, league.rounds.indexOf(current))) {
+      expect(round.matches.every((m) => m.date < state.date)).toBe(true);
+    }
+  });
+
+  it("대항전 탭은 리그 페이즈 순위표와 통과 경계선을 갖는다", () => {
+    const state = createTestGame();
+    const cup = buildOfficeViews(state).competitions.list.find((c) => c.kind === "cup");
+    if (!cup) return; // 시드에 따라 대항전에 못 나갈 수 있다
+    expect(cup.europe).not.toBeNull();
+    expect(cup.europe!.directSlots).toBeGreaterThan(0);
+    expect(cup.standings.length).toBeGreaterThanOrEqual(cup.europe!.playoffCutoff);
+    // 리그 페이즈 라운드가 먼저 오고 녹아웃 단계가 뒤에 붙는다
+    expect(cup.rounds[0]!.label).toContain("리그 페이즈");
   });
 
   it("이적 이력 뷰가 유저 팀 관련 이동을 담는다", () => {

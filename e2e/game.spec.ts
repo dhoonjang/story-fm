@@ -83,10 +83,17 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await expect(page.getByTestId("view-finance")).toContainText("월간 재정 보고서");
   await expect(page.getByTestId("view-finance")).toContainText("진행 중");
 
-  await page.getByTestId("tab-순위").click();
-  const myRow = page.locator("tr.me");
+  // ── 대회 탭 — 대회별 순위 + 라운드별 일정 ──
+  await page.getByTestId("tab-대회").click();
+  const myRow = page.getByTestId("standings").locator("tr.me");
   await expect(myRow).toContainText("아스날"); // 팀명은 한글로
   await expect(myRow.locator("td").nth(2)).toHaveText("1"); // 1경기 소화
+  // 라운드별 일정 — 우리 경기가 표시되고 라운드를 오갈 수 있다
+  const fixtures = page.getByTestId("round-fixtures");
+  await expect(fixtures.locator(".fixture.ours")).toHaveCount(1);
+  await page.getByTestId("round-select").selectOption({ index: 0 });
+  await expect(fixtures.locator(".fixture")).toHaveCount(10); // 20팀 = 라운드당 10경기
+  await expect(fixtures.locator(".fixture.ours .mid.played")).toHaveCount(1); // 1라운드는 치렀다
 
   await page.getByTestId("tab-커리어").click();
   await expect(page.getByTestId("view-career")).toContainText("김테스트 감독");
