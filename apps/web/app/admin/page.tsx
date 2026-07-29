@@ -307,11 +307,14 @@ export default function AdminPage() {
       {msg && <div className="admin-msg ok" data-testid="admin-msg">{msg}</div>}
       {err && <div className="admin-msg err" data-testid="admin-err">{err}</div>}
 
+      <p className="admin-scroll-hint">
+        좌우로 스크롤하면 능력치 15축이 모두 보입니다 — 이름과 저장 버튼은 고정됩니다.
+      </p>
       <div className="admin-table-wrap">
         <table className="admin-table">
           <thead>
             <tr>
-              <th>팀</th>
+              <th className="hide-sm">팀</th>
               <th>이름</th>
               <th>주 포지션</th>
               <th>가능 포지션</th>
@@ -332,7 +335,9 @@ export default function AdminPage() {
               const dirty = !!drafts[p.id];
               return (
                 <tr key={p.id} className={dirty ? "dirty" : ""} data-testid={`admin-row-${p.id}`}>
-                  <td className="admin-team">{p.teamName}</td>
+                  <td className="admin-team hide-sm">
+                    <span title={p.teamName}>{p.teamName}</span>
+                  </td>
                   <td>
                     <input
                       className="ai name"
@@ -351,12 +356,18 @@ export default function AdminPage() {
                       ))}
                     </select>
                   </td>
-                  <td className="admin-poslist">
-                    {p.positions.map((x) => (
-                      <span key={x.position} className={x.isNatural ? "pos natural" : "pos"}>
-                        {x.position} {x.proficiency}
-                      </span>
-                    ))}
+                  <td
+                    className="admin-poslist"
+                    title={p.positions.map((x) => `${x.position} ${x.proficiency}`).join(" · ")}
+                  >
+                    {/* td를 flex로 만들면 표 열 정렬이 깨진다 — 안쪽 div가 담는다 */}
+                    <div className="pos-chips">
+                      {p.positions.map((x) => (
+                        <span key={x.position} className={x.isNatural ? "pos natural" : "pos"}>
+                          {x.position} {x.proficiency}
+                        </span>
+                      ))}
+                    </div>
                   </td>
                   <td className="admin-birth">
                     <input
@@ -387,6 +398,7 @@ export default function AdminPage() {
                     />
                   </td>
                   <td className="admin-actions">
+                    <div className="row-actions">
                     <button
                       className="mini-btn save"
                       disabled={!dirty || busy === p.id}
@@ -403,6 +415,7 @@ export default function AdminPage() {
                     >
                       ✕
                     </button>
+                    </div>
                   </td>
                 </tr>
               );

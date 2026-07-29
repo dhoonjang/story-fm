@@ -149,6 +149,12 @@ textarea {
 .home-head-actions .ghost-btn {
   text-decoration: none;
   white-space: nowrap;
+  /* 어드민 진입점 — 유일한 문이라 배경에 묻히지 않게 테두리·글자에 색을 준다 */
+  border-color: var(--accent-2);
+  color: var(--accent-2);
+}
+.home-head-actions .ghost-btn:hover {
+  background: var(--panel);
 }
 
 /* ── 선수 DB 어드민 ─────────────────────────── */
@@ -225,7 +231,10 @@ textarea {
 }
 .admin-table {
   width: 100%;
-  border-collapse: collapse;
+  /* collapse면 sticky 셀의 배경·테두리가 다른 셀 내용 아래로 깔려 글자가 겹친다
+     (Chrome의 알려진 동작) — separate + spacing 0으로 같은 모양을 유지한다 */
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 12.5px;
   white-space: nowrap;
 }
@@ -237,14 +246,55 @@ textarea {
   border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
+  z-index: 3;
   background: var(--panel);
 }
 .admin-table td {
   padding: 5px 6px;
   border-bottom: 1px solid rgba(42, 51, 66, 0.5);
+  /* sticky 열이 투명하면 스크롤된 열이 밑에서 비쳐 보인다 — 불투명 배경 필수 */
+  background: var(--bg);
 }
 .admin-table tr.dirty td {
-  background: rgba(96, 165, 250, 0.08);
+  /* 반투명(rgba)이면 고정 열 아래로 다른 열이 겹쳐 보이므로 불투명 색으로 */
+  background: #171e2a;
+}
+
+/**
+ * 좌우 고정 열 — 능력치 15축이라 표가 화면보다 넓다. **이름**(왼쪽)과
+ * 저장·삭제(오른쪽)를 고정해, 오른쪽 축을 보러 스크롤해도 "누구의 값인지"와
+ * "어디서 저장하는지"를 잃지 않게 한다.
+ *
+ * 고정은 이름 열 하나만 한다. 팀 열까지 고정하려면 이름 열의 `left`를 팀 열
+ * 폭에 맞춰야 하는데, td의 min-width는 표 열 계산에서 무시돼 폭이 내용에 따라
+ * 변하고(=틈이 생긴다) 짧은 셀은 행 높이를 채우지 않아 그 틈으로 스크롤된 열이
+ * 비친다. 팀은 필터·검색으로 찾으면 되므로 이름만 붙잡는 편이 튼튼하다.
+ */
+.admin-table th:nth-child(2),
+.admin-table td:nth-child(2) {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  box-shadow: 6px 0 8px -6px rgba(0, 0, 0, 0.7);
+}
+.admin-table th:last-child,
+.admin-table td:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 4;
+  box-shadow: -6px 0 8px -6px rgba(0, 0, 0, 0.7);
+}
+.admin-team span {
+  display: inline-block;
+  max-width: 92px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+.admin-scroll-hint {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 6px;
 }
 .admin-team {
   color: var(--muted);
@@ -274,10 +324,6 @@ textarea {
   border-radius: 6px;
   padding: 4px;
   font-size: 12px;
-}
-.admin-actions {
-  display: flex;
-  gap: 4px;
 }
 .mini-btn {
   border: 1px solid var(--border);
@@ -1678,9 +1724,12 @@ textarea {
 }
 
 /* ── 반응형 (모바일) ─────────────────────────── */
-.hide-sm {
-  display: inline;
-}
+/**
+ * `.hide-sm`은 좁은 화면에서 숨기는 용도다. 예전엔 기본값으로 `display: inline`을
+ * 줬는데, 이걸 `<td>`/`<th>`에 붙이면 셀이 표 셀이 아니게 되어 열 폭·행 높이
+ * 계산에서 빠진다(짧은 셀·어긋난 테두리·무시되는 min-width). 기본 display는
+ * 요소의 것을 그대로 두고 숨김만 담당한다.
+ */
 @media (max-width: 640px) {
   .hide-sm {
     display: none !important;
@@ -1729,6 +1778,10 @@ textarea {
   .fin-feed-row .cat {
     display: none;
   }
+  /* 어드민 표 — 좁은 화면에선 이름 입력을 줄여 능력치 열에 폭을 넘긴다 */
+  .ai.name {
+    width: 92px;
+  }
   /* 일정은 날짜를 줄이고 팀명 폭을 양보한다 (킥오프 시각은 .hide-sm로 숨는다) */
   .fixture {
     grid-template-columns: 44px 1fr 78px 1fr auto;
@@ -1754,11 +1807,24 @@ textarea {
   align-items: center;
   gap: 8px;
 }
-.admin-poslist {
+/* 칩·버튼 묶음은 td가 아니라 안쪽 div가 flex를 맡는다 — td에 display:flex를
+   주면 표가 셀을 익명 래퍼로 감싸 열 정렬과 sticky 계산이 깨진다 */
+.admin-poslist .pos-chips,
+.admin-actions .row-actions {
   display: flex;
-  flex-wrap: wrap;
   gap: 3px;
-  max-width: 160px;
+}
+/* 칩이 줄바꿈하면 행이 4배로 길어지고, 고정 열 셀은 행 높이를 채우지 않아
+   그 틈으로 스크롤된 열이 비친다. 한 줄로 눌러 행 높이를 고르게 유지하고
+   넘치는 포지션은 td의 title(툴팁)로 전부 보여준다 */
+.admin-poslist .pos-chips {
+  flex-wrap: nowrap;
+  overflow: hidden;
+  max-width: 190px;
+}
+.admin-actions .row-actions {
+  gap: 4px;
+  flex-wrap: nowrap;
 }
 .admin-poslist .pos {
   font-size: 10px;
