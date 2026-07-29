@@ -5,7 +5,8 @@ import {
   stageLabel,
   type CupCatalogEntry,
 } from "./data/cup-catalog";
-import { financeOf, recordFinance, type GameState } from "./state";
+import { financeOf, type GameState } from "./state";
+import { categoryOf, payOnce } from "./finance";
 
 /**
  * 대항전 상금 — 참가비·리그 페이즈 성적·단계 진출·우승.
@@ -14,23 +15,29 @@ import { financeOf, recordFinance, type GameState } from "./state";
  * 정한다. 실제 대회처럼 참가만 해도 큰돈이 들어오고, 한 단계 올라갈 때마다
  * 더해진다. 리그와 마찬가지로 96팀 모두에게 적용한다 (재정은 팀에 소속).
  *
- * 같은 상금을 두 번 주지 않기 위해 **원장의 항목명**을 확인한다. 상태에 플래그를
- * 더 두지 않는 편이 낫다 — 지급은 이미 원장에 남으므로 원장이 곧 사실이다.
+ * 중복 지급은 `FINANCE.prizesPaid`의 키로 막는다. 예전엔 원장의 항목명을 봤지만,
+ * 원장은 최근 3개월만 남기고 AI 팀은 아예 쌓지 않으므로(club-finance §4.4·§4.5)
+ * "원장이 곧 사실"이 성립하지 않는다 — 지급 사실은 따로 들고 있어야 한다.
  */
-
-/** 이 항목이 이미 지급됐는가 — 원장이 사실의 원본 */
-function alreadyPaid(state: GameState, teamId: string, label: string): boolean {
-  return financeOf(state, teamId).ledger.some((e) => e.label === label);
-}
-
-function payOnce(state: GameState, teamId: string, label: string, amount: number): boolean {
-  if (amount <= 0 || alreadyPaid(state, teamId, label)) return false;
-  recordFinance(state, teamId, "income", label, amount);
-  return true;
-}
 
 function prizeLabel(cup: CupCatalogEntry, season: number, what: string): string {
   return `${competitionShortName(cup.id)} ${what} 상금 (S${season})`;
+}
+
+function payPrize(
+  state: GameState,
+  teamId: string,
+  cupId: string,
+  label: string,
+  amount: number,
+): boolean {
+  return payOnce(state, teamId, label, {
+    kind: "income",
+    category: "prize",
+    label,
+    amount,
+    ref: { type: "competition", id: cupId },
+  });
 }
 
 /**
@@ -60,7 +67,7 @@ export function payLeaguePhasePrizes(state: GameState, cupId: string, digest: st
   }
   for (const [teamId, bonus] of earned) {
     const total = cup.prize.participation + bonus;
-    if (payOnce(state, teamId, label, total) && teamId === state.userTeamId) {
+    if (payPrize(state, teamId, cupId, label, total) && teamId === state.userTeamId) {
       digest.push(`💰 ${label} ${formatMoney(total)} 입금`);
     }
   }
@@ -79,7 +86,7 @@ export function payStagePrizes(
   if (!cup || amount <= 0) return;
   const label = prizeLabel(cup, state.season, `${stageLabel(stage, 1, false)} 진출`);
   for (const teamId of new Set(teams)) {
-    if (payOnce(state, teamId, label, amount) && teamId === state.userTeamId) {
+    if (payPrize(state, teamId, cupId, label, amount) && teamId === state.userTeamId) {
       digest.push(`💰 ${label} ${formatMoney(amount)} 입금`);
     }
   }
@@ -95,16 +102,21 @@ export function payWinnerPrize(
   const cup = cupCatalogById(cupId);
   if (!cup) return;
   const label = prizeLabel(cup, state.season, "우승");
-  if (payOnce(state, champion, label, cup.prize.winner) && champion === state.userTeamId) {
+  if (payPrize(state, champion, cupId, label, cup.prize.winner) && champion === state.userTeamId) {
     digest.push(`💰 ${label} ${formatMoney(cup.prize.winner)} 입금`);
   }
 }
 
-/** 이 팀이 이번 시즌 대항전에서 번 총액 — 브리핑·검증용 (원장에서 파생) */
+/**
+ * 이 팀이 이번 시즌 대항전에서 번 총액 — 브리핑·검증용.
+ * 상세 원장을 갖는 유저 팀만 정확하다 (AI 팀은 잔고만 갱신된다).
+ */
 export function euroPrizeTotal(state: GameState, teamId: string): number {
   const suffix = `(S${state.season})`;
   return financeOf(state, teamId)
-    .ledger.filter((e) => e.label.includes("상금") && e.label.endsWith(suffix))
+    .ledger.filter(
+      (e) => categoryOf(e) === "prize" && e.label.endsWith(suffix) && e.label.includes("상금"),
+    )
     .reduce((sum, e) => sum + e.amount, 0);
 }
 

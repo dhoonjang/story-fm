@@ -115,12 +115,13 @@ describe("오피스 뷰 — 재정·순위·커리어", () => {
     expect(views.finance.transferBudget).toBeGreaterThan(0);
   });
 
-  it("월별 원장 집계가 시간 경과로 쌓인다", () => {
+  it("이번 달 재정 집계와 실시간 피드가 시간 경과로 쌓인다", () => {
     const state = createTestGame();
     advanceDays(state, 10);
-    const months = buildOfficeViews(state).finance.months;
-    expect(months.length).toBeGreaterThan(0);
-    expect(months[0]?.expense.some((e) => e.label === "선수단 주급")).toBe(true);
+    const finance = buildOfficeViews(state).finance;
+    expect(finance.current.expense.some((e) => e.category === "player_wages")).toBe(true);
+    expect(finance.feed.length).toBeGreaterThan(0);
+    expect(finance.stadium.capacity).toBeGreaterThan(0);
   });
 
   it("순위는 한글 팀명으로, 커리어는 감독 소속 기록으로 나온다", () => {

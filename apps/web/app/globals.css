@@ -1299,6 +1299,101 @@ textarea {
 .fin-line.muted {
   color: var(--muted);
 }
+.fin-meta {
+  font-size: 12px;
+  color: var(--muted);
+  margin: -4px 0 8px;
+}
+.fin-meta .warn,
+.fin-psr .warn {
+  color: var(--gold);
+}
+.fin-meta .danger,
+.fin-psr .danger,
+.finance-card .danger {
+  color: var(--danger);
+}
+.fin-note {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  border-left: 2px solid var(--border);
+  padding-left: 8px;
+}
+.fin-tag {
+  display: inline-block;
+  margin-left: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0 4px;
+  vertical-align: middle;
+}
+.fin-tag.danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.fin-sub {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.fin-psr,
+.fin-board {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+/* 실시간 재정 활동 — 날짜 · 카테고리 · 상세 · 금액 */
+.fin-feed {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.fin-feed-row {
+  display: grid;
+  grid-template-columns: 42px 92px 1fr auto;
+  gap: 10px;
+  align-items: baseline;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  border-bottom: 1px solid var(--border);
+}
+.fin-feed-row:last-child {
+  border-bottom: none;
+}
+.fin-feed-row .date,
+.fin-feed-row .cat {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.fin-feed-row .label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fin-feed-row .amt {
+  font-weight: 700;
+  white-space: nowrap;
+}
+.fin-feed-row .amt.plus {
+  color: var(--accent);
+}
+.fin-feed-row .amt.minus {
+  color: var(--danger);
+}
 .badge {
   display: inline-block;
   font-size: 11px;

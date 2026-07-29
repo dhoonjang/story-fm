@@ -81,6 +81,9 @@ function validate(raw: unknown): GameState | null {
   }
   // 스키마 진화 — 나중에 추가된 테이블은 빈 배열로 채운다 (원칙 4)
   s.scoutReports ??= [];
+  // 구단 재정 v1 (ADR 0004) — 보고서는 다음 달 1일부터 쌓인다. 기존 원장 엔트리는
+  // category가 없으므로 집계에서 "기타"로 읽힌다 (finance.ts categoryOf).
+  s.financeReports ??= [];
   return raw as GameState;
 }
 

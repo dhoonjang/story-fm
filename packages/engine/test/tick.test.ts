@@ -138,8 +138,14 @@ describe("advance_time — 시간은 스킬로만 흐른다 (game-loop §3)", ()
     const before = finance.balance;
     const wages = weeklyWagesOf(state, state.userTeamId);
     advanceDays(state, 8); // 최소 한 번의 월요일 포함
-    expect(finance.balance).toBeLessThan(before);
-    expect(finance.ledger.some((l) => l.label === "선수단 주급" && l.amount === wages)).toBe(true);
+    const paid = finance.ledger.filter((l) => l.label === "선수단 주급");
+    expect(paid.length).toBeGreaterThanOrEqual(1);
+    for (const entry of paid) expect(entry.amount).toBe(wages);
+    // 잔고는 원장 전체와 맞는다 — 같은 기간에 중계권·스폰서 수입도 들어온다
+    const net = finance.ledger
+      .filter((l) => l.accounting !== "noncash")
+      .reduce((s, l) => s + (l.kind === "income" ? l.amount : -l.amount), 0);
+    expect(finance.balance).toBe(before + net);
   });
 
   it("불만 이슈가 있는 선수는 사기가 계속 떨어진다", () => {

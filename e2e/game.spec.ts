@@ -78,6 +78,10 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
 
   await page.getByTestId("tab-재정").click();
   await expect(page.getByTestId("view-finance")).toContainText("구단 잔고");
+  // 실시간 재정 활동 + 이번 달 진행 중 집계 (club-finance §7·§8)
+  await expect(page.getByTestId("fin-feed")).toContainText("선수 주급");
+  await expect(page.getByTestId("view-finance")).toContainText("월간 재정 보고서");
+  await expect(page.getByTestId("view-finance")).toContainText("진행 중");
 
   await page.getByTestId("tab-순위").click();
   const myRow = page.locator("tr.me");

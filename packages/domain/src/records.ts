@@ -207,23 +207,153 @@ export const PlayerIssueSchema = z.object({
 export type PlayerIssue = z.infer<typeof PlayerIssueSchema>;
 
 // ── 재정 ──────────────────────────────────────────────
+/**
+ * 재정 카테고리 — **집계의 안정 키**. `label`은 사람이 읽는 상세(서사 재료)일
+ * 뿐이며 항목명이 바뀌어도 과거 집계가 쪼개지지 않도록 카테고리로만 접는다.
+ * 실제 구단 회계의 매출·비용 축을 옮긴 것이다 (docs/design/club-finance.md §2).
+ */
+export const FINANCE_INCOME_CATEGORIES = [
+  "broadcast_equal",
+  "broadcast_merit",
+  "broadcast_facility",
+  "matchday",
+  "commercial",
+  "merchandising",
+  "prize",
+  "transfer_in",
+] as const;
+
+export const FINANCE_EXPENSE_CATEGORIES = [
+  "player_wages",
+  "staff_wages",
+  "bonus",
+  "matchday_opex",
+  "facility",
+  "travel_medical",
+  "agent_fee",
+  "transfer_out",
+  "amortisation",
+] as const;
+
+export const FinanceCategorySchema = z.enum([
+  ...FINANCE_INCOME_CATEGORIES,
+  ...FINANCE_EXPENSE_CATEGORIES,
+  /** 카테고리 도입 전 세이브의 원장 엔트리 */
+  "other",
+]);
+export type FinanceCategory = z.infer<typeof FinanceCategorySchema>;
+
+export const FINANCE_CATEGORY_KO: Record<FinanceCategory, string> = {
+  broadcast_equal: "중계권 균등 배분",
+  broadcast_merit: "중계권 성적 수당",
+  broadcast_facility: "생중계 수당",
+  matchday: "입장·호스피탈리티",
+  commercial: "스폰서십",
+  merchandising: "머천다이징",
+  prize: "대회 상금",
+  transfer_in: "이적료 수입",
+  player_wages: "선수 주급",
+  staff_wages: "스태프 급여",
+  bonus: "성적 보너스",
+  matchday_opex: "경기 운영비",
+  facility: "시설·아카데미",
+  travel_medical: "원정·의료",
+  agent_fee: "에이전트 수수료",
+  transfer_out: "이적료 지출",
+  amortisation: "이적료 상각",
+  other: "기타",
+};
+
 export const LedgerEntrySchema = z.object({
+  /** 카테고리 도입 전 세이브엔 없다 */
+  id: z.string().min(1).optional(),
   date: DateString,
+  /** 같은 날 여러 항목의 순서 안정용 (경기 후 항목 등) */
+  time: z.string().optional(),
   kind: z.enum(["income", "expense"]),
+  /** 집계 축. 구 세이브엔 없으므로 읽을 때 "other"로 본다 */
+  category: FinanceCategorySchema.optional(),
   label: z.string().min(1),
   /** 항상 양수 — 방향은 kind가 정한다 */
   amount: z.number().min(0),
+  /** 드릴다운·서사 연결 */
+  ref: z
+    .object({
+      type: z.enum(["match", "player", "transfer", "competition"]),
+      id: z.string().min(1),
+    })
+    .optional(),
+  /** 상각만 noncash — 현금흐름과 손익을 가른다. 없으면 cash */
+  accounting: z.enum(["cash", "noncash"]).optional(),
 });
 export type LedgerEntry = z.infer<typeof LedgerEntrySchema>;
 
-/** 팀 재정 (FINANCE) — 팀당 1개. 주급 총액은 활성 계약 합에서 파생한다 */
+/**
+ * 팀 재정 (FINANCE) — 팀당 1개. 주급 총액은 활성 계약 합에서 파생한다.
+ *
+ * `ledger`는 **유저 팀만** 상세를 쌓고 최근 3개월만 남긴다(월간 보고서가 그
+ * 이전을 요약해 보관). AI 팀은 잔고만 갱신한다 — 읽는 곳이 이적 예산·매각
+ * 압박뿐이라 엔트리를 96팀 분량으로 쌓을 이유가 없다.
+ */
 export const TeamFinanceSchema = z.object({
   teamId: z.string().min(1),
   balance: z.number(),
   transferBudget: z.number(),
   ledger: z.array(LedgerEntrySchema),
+  /**
+   * 지급 완료한 1회성 항목 키(상금 등) — 중복 지급 방지.
+   * 원장은 절단되므로 "원장이 곧 사실"에 기댈 수 없다.
+   */
+  prizesPaid: z.array(z.string()).optional(),
+  /** 보드가 이적 예산을 동결했는가 (PSR 위반) */
+  budgetFrozen: z.boolean().optional(),
 });
 export type TeamFinance = z.infer<typeof TeamFinanceSchema>;
+
+/** 월간 보고서의 카테고리 한 줄 */
+export const FinanceReportLineSchema = z.object({
+  category: FinanceCategorySchema,
+  amount: z.number(),
+  /** 그 카테고리에서 금액이 큰 항목 (드릴다운용, 최대 3건) */
+  top: z.array(z.object({ label: z.string(), amount: z.number() })),
+});
+export type FinanceReportLine = z.infer<typeof FinanceReportLineSchema>;
+
+/**
+ * 월간 재정 보고서 (FINANCE_REPORT) — 매월 1일에 지난달을 마감해 만든다.
+ * 상세 원장은 3개월 롤링으로 잘리지만 이 요약은 영구 보존되고, `openingBalance`
+ * 덕분에 잔고 재구성이 가능하다 (docs/design/club-finance.md §4.4).
+ */
+export const FinanceReportSchema = z.object({
+  id: z.string().min(1),
+  teamId: z.string().min(1),
+  /** "2026-08" */
+  month: z.string().regex(/^\d{4}-\d{2}$/),
+  season: z.number().int(),
+  openingBalance: z.number(),
+  closingBalance: z.number(),
+  income: z.array(FinanceReportLineSchema),
+  expense: z.array(FinanceReportLineSchema),
+  incomeTotal: z.number(),
+  expenseTotal: z.number(),
+  /** 통장의 변화 — 상각(noncash) 제외 */
+  cashNet: z.number(),
+  /** 장부의 변화 — 이적료 지출 제외, 상각 포함 */
+  pnlNet: z.number(),
+  /** (선수+스태프 급여) / 매출 — 구단 건강의 단일 지표 */
+  wageRatio: z.number(),
+  seasonToDate: z.object({
+    income: z.number(),
+    expense: z.number(),
+    cashNet: z.number(),
+    pnlNet: z.number(),
+  }),
+  /** 3시즌 누적 손익과 여유 — 보유 시즌이 적으면 있는 만큼 */
+  psr: z.object({ rolling3Season: z.number(), headroom: z.number() }).nullable(),
+  /** 코어가 결정적으로 붙이는 판단 재료 — GM은 이걸 서술만 한다 */
+  notes: z.array(z.string()),
+});
+export type FinanceReport = z.infer<typeof FinanceReportSchema>;
 
 // ── 감독 커리어 (정규화) ──────────────────────────────
 export const SeasonRecordSchema = z.object({

@@ -208,12 +208,14 @@ describe("API — 온보딩부터 경기까지", () => {
     expect(userTurns).toHaveLength(0);
   });
 
-  it("재정 뷰가 월별 집계·달력 뷰가 일지와 훈련 계획을 노출한다", async () => {
+  it("재정 뷰가 월간 보고서·달력 뷰가 일지와 훈련 계획을 노출한다", async () => {
     const created = await createGame(
       json({ teamId: "tottenham", managerName: "재", background: "분석가", seed: 21 }),
     );
     const game = (await created.json()) as GamePayload;
-    expect(Array.isArray(game.views.finance.months)).toBe(true);
+    expect(Array.isArray(game.views.finance.reports)).toBe(true);
+    expect(game.views.finance.current.month).toBe(game.date.slice(0, 7));
+    expect(game.views.finance.stadium.capacity).toBeGreaterThan(0);
     // 시작 시 훈련 미등록 (기본 훈련 없음)
     expect(game.views.calendar.entries.filter((e) => e.type === "training")).toHaveLength(0);
     // 주급은 계약 합에서 파생

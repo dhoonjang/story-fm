@@ -628,7 +628,64 @@ export function CalendarView({ calendar }: { calendar: OfficeViews["calendar"] }
   );
 }
 
-// ── 재정 (요약 카드 + 월별 수입/지출) ───────────────────────
+// ── 재정 (요약 카드 + 실시간 활동 + 월간 보고서) ─────────────
+type FinanceMonth = OfficeViews["finance"]["current"];
+
+const signed = (v: number) => `${v >= 0 ? "+" : "−"}${money(Math.abs(v))}`;
+
+/** 한 달 — 마감된 보고서와 진행 중인 이번 달이 같은 모양을 쓴다 */
+function FinanceMonthCard({ month }: { month: FinanceMonth }) {
+  return (
+    <div className="fin-month" data-testid={`fin-month-${month.month}`}>
+      <div className="fin-month-head">
+        <b>
+          {month.month}
+          {!month.closed && <span className="fin-tag">진행 중</span>}
+        </b>
+        <span className={month.cashNet >= 0 ? "fin-net plus" : "fin-net minus"}>
+          {signed(month.cashNet)}
+        </span>
+      </div>
+      <div className="fin-meta">
+        장부 손익 {signed(month.pnlNet)} · 급여 비중{" "}
+        <b className={month.wageRatio >= 0.75 ? "danger" : month.wageRatio >= 0.65 ? "warn" : ""}>
+          {Math.round(month.wageRatio * 100)}%
+        </b>
+      </div>
+      <div className="fin-cols">
+        <div className="fin-col">
+          <div className="fin-col-title income">수입 {money(month.incomeTotal)}</div>
+          {month.income.map((item) => (
+            <div className="fin-line" key={item.category}>
+              <span>{item.label}</span>
+              <span>{money(item.amount)}</span>
+            </div>
+          ))}
+          {month.income.length === 0 && <div className="fin-line muted">수입 없음</div>}
+        </div>
+        <div className="fin-col">
+          <div className="fin-col-title expense">지출 {money(month.expenseTotal)}</div>
+          {month.expense.map((item) => (
+            <div className="fin-line" key={item.category}>
+              <span>
+                {item.label}
+                {item.category === "amortisation" && <span className="fin-tag">장부</span>}
+              </span>
+              <span>{money(item.amount)}</span>
+            </div>
+          ))}
+          {month.expense.length === 0 && <div className="fin-line muted">지출 없음</div>}
+        </div>
+      </div>
+      {month.notes.map((note) => (
+        <div className="fin-note" key={note}>
+          {note}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function FinanceView({ finance }: { finance: OfficeViews["finance"] }) {
   return (
     <div data-testid="view-finance">
@@ -643,52 +700,60 @@ export function FinanceView({ finance }: { finance: OfficeViews["finance"] }) {
         </div>
         <div className="finance-card">
           <div className="label">이적 예산</div>
-          <div className="value">{money(finance.transferBudget)}</div>
+          <div className="value">
+            {money(finance.transferBudget)}
+            {finance.budgetFrozen && <span className="fin-tag danger">동결</span>}
+          </div>
         </div>
         <div className="finance-card">
-          <div className="label">보드 평가</div>
-          <div className="value" style={{ fontSize: 13 }}>
-            {finance.boardExpectation}
+          <div className="label">급여 비중 (시즌)</div>
+          <div className="value">
+            {Math.round(finance.wageRatio * 100)}%
+            <span className="fin-sub">
+              {finance.stadium.name} {finance.stadium.capacity.toLocaleString("en-US")}석
+            </span>
           </div>
         </div>
       </div>
 
-      <div className="section-title">월별 수입·지출</div>
-      {finance.months.length === 0 && (
-        <div className="empty">아직 정산된 내역이 없습니다 — 시간이 흐르면 주급·중계권·입장 수입이 쌓입니다.</div>
-      )}
-      {finance.months.map((m) => (
-        <div className="fin-month" key={m.month} data-testid={`fin-month-${m.month}`}>
-          <div className="fin-month-head">
-            <b>{m.month}</b>
-            <span className={m.net >= 0 ? "fin-net plus" : "fin-net minus"}>
-              {m.net >= 0 ? "+" : "−"}
-              {money(Math.abs(m.net))}
-            </span>
-          </div>
-          <div className="fin-cols">
-            <div className="fin-col">
-              <div className="fin-col-title income">수입 {money(m.incomeTotal)}</div>
-              {m.income.map((item) => (
-                <div className="fin-line" key={item.label}>
-                  <span>{item.label}</span>
-                  <span>{money(item.amount)}</span>
-                </div>
-              ))}
-              {m.income.length === 0 && <div className="fin-line muted">수입 없음</div>}
-            </div>
-            <div className="fin-col">
-              <div className="fin-col-title expense">지출 {money(m.expenseTotal)}</div>
-              {m.expense.map((item) => (
-                <div className="fin-line" key={item.label}>
-                  <span>{item.label}</span>
-                  <span>{money(item.amount)}</span>
-                </div>
-              ))}
-              {m.expense.length === 0 && <div className="fin-line muted">지출 없음</div>}
-            </div>
-          </div>
+      {finance.psr && (
+        <div className="fin-psr" data-testid="fin-psr">
+          <span>PSR (3시즌 누적 손익)</span>
+          <span>
+            {signed(finance.psr.rolling3Season)} · 여유{" "}
+            <b className={finance.psr.headroom < 0 ? "danger" : ""}>
+              {money(finance.psr.headroom)}
+            </b>
+          </span>
         </div>
+      )}
+      <div className="fin-board">보드 평가: {finance.boardExpectation}</div>
+
+      <div className="section-title">재정 활동 (실시간)</div>
+      {finance.feed.length === 0 && (
+        <div className="empty">아직 기록이 없습니다 — 시간이 흐르면 주급·중계권·입장 수입이 쌓입니다.</div>
+      )}
+      {finance.feed.length > 0 && (
+        <div className="fin-feed" data-testid="fin-feed">
+          {finance.feed.map((entry) => (
+            <div className="fin-feed-row" key={entry.id}>
+              <span className="date">{entry.date.slice(5)}</span>
+              <span className="cat">{entry.categoryLabel}</span>
+              <span className="label">{entry.label}</span>
+              <span className={entry.kind === "income" ? "amt plus" : "amt minus"}>
+                {entry.kind === "income" ? "+" : "−"}
+                {money(entry.amount)}
+                {entry.noncash && <span className="fin-tag">장부</span>}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="section-title">월간 재정 보고서</div>
+      <FinanceMonthCard month={finance.current} />
+      {finance.reports.map((month) => (
+        <FinanceMonthCard month={month} key={month.month} />
       ))}
     </div>
   );

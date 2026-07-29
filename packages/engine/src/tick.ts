@@ -1,9 +1,16 @@
 import type { GamePlayer, ScheduleEntry, TrainAttr, TrainingSession } from "@story-fm/domain";
 import { ATTRIBUTE_AXES, ageOf, naturalPositionOf } from "@story-fm/domain";
 import { addDays, dayOfWeek, matchesOn, nextMatchFor, windowOpenOn } from "./calendar";
-import { TEAM_CATALOG, teamCatalogById } from "./data/team-catalog";
+import { TEAM_CATALOG } from "./data/team-catalog";
 import { competitionShortName, stageLabel } from "./data/cup-catalog";
 import { advanceEuroKnockouts } from "./euro-knockout";
+import {
+  applyAiMatchFinance,
+  ensureMonthlyPosted,
+  payWeeklyWages,
+  recordMedicalCost,
+  runMonthlyFinance,
+} from "./finance";
 import {
   arrivedResponses,
   expireNegotiations,
@@ -25,12 +32,10 @@ import {
   playersOf,
   pushNarrative,
   recomputeOverall,
-  recordFinance,
   recordGrowth,
   teamName,
   teamShortName,
   userPlayers,
-  weeklyWagesOf,
   type GameState,
 } from "./state";
 import { makeRng, pick, randInt } from "./rng";
@@ -73,16 +78,7 @@ const ATTR_KO: Record<string, string> = {
 /** 훈련으로 올릴 수 있는 축 — 15축 전부 (tactical·recovery는 능력치가 아니다) */
 const TRAINABLE_ATTRS = new Set<string>(ATTRIBUTE_AXES);
 
-/** 월별 재정 상수 (£) — 팀 tier 기준. balance.md 초안 수치 */
-const TV_MONTHLY: Record<1 | 2 | 3 | 4, number> = { 1: 13_000_000, 2: 12_000_000, 3: 11_000_000, 4: 10_000_000 };
-const SPONSOR_MONTHLY: Record<1 | 2 | 3 | 4, number> = { 1: 6_000_000, 2: 4_000_000, 3: 2_500_000, 4: 1_500_000 };
-const OPEX_MONTHLY: Record<1 | 2 | 3 | 4, number> = { 1: 6_000_000, 2: 5_000_000, 3: 4_000_000, 4: 3_000_000 };
-
 const INJURY_PARTS = ["햄스트링", "발목", "무릎", "종아리", "허벅지", "어깨", "허리"];
-
-function tierOf(teamId: string): 1 | 2 | 3 | 4 {
-  return teamCatalogById(teamId)?.tier ?? 3;
-}
 
 export function entriesOn(state: GameState, date: string): ScheduleEntry[] {
   return state.schedule
@@ -116,6 +112,10 @@ export function openInjuryFor(
     returnedOn: null,
     note: cause === "training" ? "훈련 중 부상" : "경기 중 부상",
   });
+  // 치료비 — 부상은 재정에도 흔적을 남긴다 (club-finance §6)
+  if (player.teamId === state.userTeamId) {
+    recordMedicalCost(state, player.id, player.name, severity);
+  }
   return { days, part };
 }
 
@@ -265,23 +265,13 @@ function dailyTick(state: GameState, digest: string[]): boolean {
     }
   }
 
-  // 주급 (월요일) — 활성 계약 합에서 파생, 전 팀에 적용
-  if (dow === 1) {
-    for (const team of state.teams) {
-      const wages = weeklyWagesOf(state, team.id);
-      if (wages > 0) recordFinance(state, team.id, "expense", "선수단 주급", wages);
-    }
-  }
+  // 월초 정산 — 지난달 마감(재정 보고서) + 이번 달 정액 항목 (finance.ts).
+  // 게임/시즌이 시작하는 7월 1일엔 tick이 돌지 않으므로 첫 tick에서 보정한다
+  if (state.date.endsWith("-01")) runMonthlyFinance(state, digest);
+  else if (state.date === addDays(state.calendar.preseasonStart, 1)) ensureMonthlyPosted(state);
 
-  // 월초 정산 — 중계권·스폰서 수입, 구단 운영비
-  if (state.date.endsWith("-01")) {
-    for (const team of state.teams) {
-      const tier = tierOf(team.id);
-      recordFinance(state, team.id, "income", "중계권 배분", TV_MONTHLY[tier]);
-      recordFinance(state, team.id, "income", "스폰서십", SPONSOR_MONTHLY[tier]);
-      recordFinance(state, team.id, "expense", "구단 운영비", OPEX_MONTHLY[tier]);
-    }
-  }
+  // 주급 (월요일) — 활성 계약 합에서 파생, 전 팀에 적용
+  if (dow === 1) payWeeklyWages(state);
 
   // 벤치 불만 발생 — 월요일, 고평가 비선발 자원 (간이).
   // 리그 개막 후에만 — 프리시즌엔 아직 "출전 기회"를 논할 경기가 없다 (v6)
@@ -437,6 +427,8 @@ function simulateOtherMatches(state: GameState, digest: string[]): void {
         p.state.fatigue = Math.min(100, p.state.fatigue + MATCH_FATIGUE);
       }
     }
+    // 재정 — AI 팀도 홈 수입·중계 수당·원정 비용을 갖는다 (잔고만 갱신)
+    applyAiMatchFinance(state, match);
     const entry = state.schedule.find((e) => e.type === "match" && e.refId === match.id);
     if (entry) entry.status = "done";
     played.push(

@@ -210,6 +210,7 @@ describe("합의 실행 — 장부가 움직인다", () => {
     const fromTeamId = player.teamId;
     const ourBudget = financeOf(state, state.userTeamId).transferBudget;
     const theirBudget = financeOf(state, fromTeamId).transferBudget;
+    const theirBalance = financeOf(state, fromTeamId).balance;
     const previousContract = activeContract(state, player.id)!;
 
     const result = acceptDeal(state, negotiation.id);
@@ -235,14 +236,15 @@ describe("합의 실행 — 장부가 움직인다", () => {
     expect(financeOf(state, fromTeamId).transferBudget).toBe(theirBudget + terms.fee);
     expect(
       financeOf(state, state.userTeamId).ledger.some(
-        (e) => e.kind === "expense" && e.label.includes(player.name),
+        (e) => e.category === "transfer_out" && e.label.includes(player.name),
       ),
     ).toBe(true);
+    // 에이전트 수수료도 이적료의 10%로 함께 빠진다 (club-finance §6)
     expect(
-      financeOf(state, fromTeamId).ledger.some(
-        (e) => e.kind === "income" && e.label.includes(player.name),
-      ),
-    ).toBe(true);
+      financeOf(state, state.userTeamId).ledger.find((e) => e.category === "agent_fee")?.amount,
+    ).toBe(Math.round(terms.fee * 0.1));
+    // 파는 쪽(AI 팀)은 상세 원장을 쌓지 않는다 — 잔고로 확인한다
+    expect(financeOf(state, fromTeamId).balance).toBe(theirBalance + terms.fee);
 
     // 소속 — 새 팀에서는 예비 스쿼드다 (감독이 라인업에 넣는다)
     expect(playerById(state, player.id)!.teamId).toBe(state.userTeamId);

@@ -3,6 +3,7 @@ import type {
   AxisValues,
   Booking,
   Contract,
+  FinanceReport,
   GamePlayer,
   GameTeam,
   GrowthEntry,
@@ -63,6 +64,17 @@ export interface ChatTurn {
   at: string;
 }
 
+/**
+ * 제공자 원형 경기 이력. packages/llm의 StoredLlmHistory와 구조적으로 같은
+ * 세이브 계약이며 engine은 LLM SDK에 의존하지 않는다.
+ */
+export interface StoredCasterHistory {
+  version: 1;
+  provider: "anthropic" | "google";
+  model: string;
+  messages: unknown[];
+}
+
 export interface PendingMatch {
   matchId: string;
   packet: StrengthPacket;
@@ -70,8 +82,11 @@ export interface PendingMatch {
   /** mock 캐스터용 사전 생성 스크립트 (실모드에선 미사용) */
   script: MatchScriptSegment[] | null;
   scriptCursor: number;
-  /** 실모드 캐스터의 대화 이력 (JSON 직렬화 가능해야 함) */
-  casterHistory: unknown[];
+  /**
+   * 실모드 캐스터의 대화 이력. 새 이력은 제공자·모델 태그를 갖는다.
+   * unknown[]은 태그 도입 전 Anthropic 세이브 호환용이다.
+   */
+  casterHistory: StoredCasterHistory | unknown[];
   /** 이번 경기 정지 소화 중인 선수 — 종료 시 served +1 */
   servingSuspension: string[];
 }
@@ -105,6 +120,11 @@ export interface GameState {
   players: GamePlayer[];
   tactics: TeamTactics[];
   finances: TeamFinance[];
+  /**
+   * 월간 재정 보고서 — 매월 1일에 지난달을 마감해 쌓인다 (유저 팀만).
+   * 상세 원장은 3개월 롤링으로 잘리지만 이 요약은 영구 보존된다 (finance.ts).
+   */
+  financeReports: FinanceReport[];
   contracts: Contract[];
 
   // ── 일정 ──
@@ -317,20 +337,6 @@ export function userFinance(state: GameState): TeamFinance {
 
 /** 한 경기의 피로 누적 — 유저 팀·AI 팀 모두 같은 값을 쓴다 (회복은 하루 8~14) */
 export const MATCH_FATIGUE = 34;
-
-export function recordFinance(
-  state: GameState,
-  teamId: string,
-  kind: "income" | "expense",
-  label: string,
-  amount: number,
-): void {
-  const f = financeOf(state, teamId);
-  const value = Math.max(0, Math.round(amount));
-  f.ledger.push({ date: state.date, kind, label, amount: value });
-  f.balance += kind === "income" ? value : -value;
-  if (f.ledger.length > 600) f.ledger.splice(0, f.ledger.length - 600);
-}
 
 export function seasonStatOf(
   state: GameState,
@@ -567,7 +573,13 @@ export function createGame(input: CreateGameInput): GameState {
   // 재정 + 계약(주급의 원본)
   const finances: TeamFinance[] = TEAM_CATALOG.map((t) => {
     const f = TIER_FINANCE[t.tier] ?? TIER_FINANCE[3]!;
-    return { teamId: t.id, balance: f.balance, transferBudget: f.budget, ledger: [] };
+    return {
+      teamId: t.id,
+      balance: f.balance,
+      transferBudget: f.budget,
+      ledger: [],
+      prizesPaid: [],
+    };
   });
   const contracts: Contract[] = players.map((p, i) => ({
     id: `c-${p.id}`,
@@ -617,6 +629,7 @@ export function createGame(input: CreateGameInput): GameState {
     players,
     tactics,
     finances,
+    financeReports: [],
     contracts,
 
     schedule,

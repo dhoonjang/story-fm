@@ -261,9 +261,14 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     if (!window && !freeAgent) {
       blockers.push("이적시장이 닫혀 있습니다");
     }
-    const budget = financeOf(state, state.userTeamId).transferBudget;
-    if (terms.fee > budget) {
-      blockers.push(`이적 예산을 넘습니다 — 가용 £${(budget / 1_000_000).toFixed(1)}M`);
+    const ourFinance = financeOf(state, state.userTeamId);
+    if (ourFinance.budgetFrozen && terms.fee > 0) {
+      blockers.push("보드가 이적 예산을 동결했습니다 (PSR) — 먼저 매각해야 합니다");
+    }
+    if (terms.fee > ourFinance.transferBudget) {
+      blockers.push(
+        `이적 예산을 넘습니다 — 가용 £${(ourFinance.transferBudget / 1_000_000).toFixed(1)}M`,
+      );
     }
   }
 

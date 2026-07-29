@@ -10,6 +10,7 @@ import {
   dayOfWeek,
   describeNextFixture,
   describeWindowState,
+  financeLookup,
   financeOf,
   finalizeMatch,
   humanizePlayerIds,
@@ -432,6 +433,13 @@ export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpe
       obj({ team: str }, ["team"]),
       z.object({ team: z.string().min(1) }),
       (input) => teamProfile(state, input.team),
+    ),
+    read(
+      "get_finance",
+      descriptions.get_finance,
+      obj({ month: str }, []),
+      z.object({ month: z.string().regex(/^\d{4}-\d{2}$/).optional() }),
+      (input) => financeLookup(state, input.month),
     ),
     read(
       "get_league",

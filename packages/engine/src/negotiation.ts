@@ -1,6 +1,7 @@
 import type { GamePlayer, Negotiation, NegotiationVerdict } from "@story-fm/domain";
 import { naturalPositionOf } from "@story-fm/domain";
 import { addDays, seasonYear, windowOpenOn } from "./calendar";
+import { AGENT_FEE_RATE, recordFinance } from "./finance";
 import {
   askingPriceFor,
   dealOdds,
@@ -20,7 +21,6 @@ import {
   playerById,
   playersOf,
   pushNarrative,
-  recordFinance,
   tacticsOf,
   teamName,
   type GameState,
@@ -686,6 +686,12 @@ export function acceptDeal(state: GameState, negotiationId: string): SkillResult
   }
   const ourFinance = state.finances.find((f) => f.teamId === state.userTeamId);
   if (!ourFinance) return { ok: false, message: "재정 정보를 찾지 못했습니다" };
+  if (ourFinance.budgetFrozen && agreed.fee > 0) {
+    return {
+      ok: false,
+      message: "보드가 이적 예산을 동결했습니다 (PSR 위반) — 매각으로 예산을 만들어야 합니다",
+    };
+  }
   if (agreed.fee > ourFinance.transferBudget) {
     return {
       ok: false,
@@ -722,10 +728,31 @@ export function acceptDeal(state: GameState, negotiationId: string): SkillResult
     status: "active",
   });
 
-  // 재정 — 우리 지출·상대 수입. 예산에서도 빠진다
+  // 재정 — 우리 지출·상대 수입. 예산에서도 빠진다.
+  // 이적료는 현금에서 즉시 빠지고, 장부에는 계약기간 상각으로 잡힌다 (ADR 0004)
   if (agreed.fee > 0) {
-    recordFinance(state, state.userTeamId, "expense", `이적료 — ${player.name} 영입`, agreed.fee);
-    recordFinance(state, fromTeamId, "income", `이적료 — ${player.name} 매각`, agreed.fee);
+    const ref = { type: "player" as const, id: player.id };
+    recordFinance(state, state.userTeamId, {
+      kind: "expense",
+      category: "transfer_out",
+      label: `이적료 — ${player.name} 영입`,
+      amount: agreed.fee,
+      ref,
+    });
+    recordFinance(state, state.userTeamId, {
+      kind: "expense",
+      category: "agent_fee",
+      label: `에이전트 수수료 — ${player.name}`,
+      amount: agreed.fee * AGENT_FEE_RATE,
+      ref,
+    });
+    recordFinance(state, fromTeamId, {
+      kind: "income",
+      category: "transfer_in",
+      label: `이적료 — ${player.name} 매각`,
+      amount: agreed.fee,
+      ref,
+    });
     ourFinance.transferBudget -= agreed.fee;
     // 판매 대금은 파는 쪽의 이적 예산으로 돌아간다 (ADR 0002 — 이적 시장이 경제가 된다)
     const theirFinance = state.finances.find((f) => f.teamId === fromTeamId);
@@ -801,8 +828,21 @@ function executeSale(
 
   const ourFinance = state.finances.find((f) => f.teamId === state.userTeamId);
   if (agreed.fee > 0) {
-    recordFinance(state, state.userTeamId, "income", `이적료 — ${player.name} 매각`, agreed.fee);
-    recordFinance(state, buyerTeamId, "expense", `이적료 — ${player.name} 영입`, agreed.fee);
+    const ref = { type: "player" as const, id: player.id };
+    recordFinance(state, state.userTeamId, {
+      kind: "income",
+      category: "transfer_in",
+      label: `이적료 — ${player.name} 매각`,
+      amount: agreed.fee,
+      ref,
+    });
+    recordFinance(state, buyerTeamId, {
+      kind: "expense",
+      category: "transfer_out",
+      label: `이적료 — ${player.name} 영입`,
+      amount: agreed.fee,
+      ref,
+    });
     if (ourFinance) ourFinance.transferBudget += agreed.fee;
     const theirFinance = state.finances.find((f) => f.teamId === buyerTeamId);
     if (theirFinance) theirFinance.transferBudget -= agreed.fee;

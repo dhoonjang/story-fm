@@ -1,6 +1,15 @@
 import type { AssignmentRole, AxisValues, ScheduleType } from "@story-fm/domain";
-import { ATTRIBUTE_AXES, ageOf, naturalPositionOf, slotOfTime } from "@story-fm/domain";
+import {
+  ATTRIBUTE_AXES,
+  FINANCE_CATEGORY_KO,
+  ageOf,
+  naturalPositionOf,
+  slotOfTime,
+} from "@story-fm/domain";
 import { nextMatchFor, seasonEndDate } from "./calendar";
+import { clubProfile } from "./data/club-profile";
+import { teamCatalogById } from "./data/team-catalog";
+import { categoryOf, currentMonthSummary, psrStatus, seasonWageRatio } from "./finance";
 import {
   competitionName,
   competitionShortName,
@@ -31,6 +40,23 @@ import {
 } from "./state";
 
 /** 오피스 뷰 — 상태의 읽기 전용 프로젝션 (overview §2.4) */
+
+/** 재정의 한 달 — 마감된 보고서와 진행 중인 달이 같은 모양을 쓴다 */
+export interface FinanceMonthView {
+  month: string;
+  /** 마감 전이면 false — UI가 "진행 중"으로 표시한다 */
+  closed: boolean;
+  income: Array<{ category: string; label: string; amount: number }>;
+  expense: Array<{ category: string; label: string; amount: number }>;
+  incomeTotal: number;
+  expenseTotal: number;
+  /** 통장의 변화 (상각 제외) */
+  cashNet: number;
+  /** 장부의 변화 (이적료 지출 제외, 상각 포함) */
+  pnlNet: number;
+  wageRatio: number;
+  notes: string[];
+}
 
 export interface SquadPositionView {
   position: string;
@@ -134,14 +160,26 @@ export interface OfficeViews {
     balance: number;
     weeklyWages: number;
     transferBudget: number;
+    budgetFrozen: boolean;
     boardExpectation: string;
-    months: Array<{
-      month: string;
-      income: Array<{ label: string; amount: number }>;
-      expense: Array<{ label: string; amount: number }>;
-      incomeTotal: number;
-      expenseTotal: number;
-      net: number;
+    stadium: { name: string; capacity: number };
+    /** 급여 비중 — **시즌 누계** (급여 ÷ 매출). 한 달만 보면 프리시즌에 튄다 */
+    wageRatio: number;
+    psr: { rolling3Season: number; headroom: number } | null;
+    /** 진행 중인 이번 달 잠정 집계 */
+    current: FinanceMonthView;
+    /** 마감된 월간 보고서 — 최신 순 */
+    reports: FinanceMonthView[];
+    /** 실시간 재정 활동 — 최근 원장 (최신 순) */
+    feed: Array<{
+      id: string;
+      date: string;
+      kind: "income" | "expense";
+      category: string;
+      categoryLabel: string;
+      label: string;
+      amount: number;
+      noncash: boolean;
     }>;
   };
   schedule: {
@@ -453,27 +491,75 @@ export function buildOfficeViews(state: GameState): OfficeViews {
 
   // ── 재정 (유저 팀) ──
   const finance = financeOf(state, userTeamId);
-  const monthMap = new Map<string, { income: Map<string, number>; expense: Map<string, number> }>();
-  for (const entry of finance.ledger) {
-    const month = entry.date.slice(0, 7);
-    const bucket = monthMap.get(month) ?? { income: new Map(), expense: new Map() };
-    const sideMap = bucket[entry.kind];
-    sideMap.set(entry.label, (sideMap.get(entry.label) ?? 0) + entry.amount);
-    monthMap.set(month, bucket);
+  // 큰 금액은 일지에도 — 부상·이적처럼 "그날 있었던 일"이다 (£1M 이상 또는 잔고 1%)
+  const notable = Math.max(1_000_000, Math.abs(finance.balance) * 0.01);
+  for (const e of finance.ledger) {
+    if (e.amount < notable || e.accounting === "noncash") continue;
+    const sign = e.kind === "income" ? "+" : "−";
+    push(e.date, `💰 ${e.label} ${sign}£${(e.amount / 1_000_000).toFixed(1)}M`);
   }
-  const months = [...monthMap.entries()]
-    .sort((a, b) => (a[0] < b[0] ? 1 : -1))
-    .map(([month, bucket]) => {
-      const income = [...bucket.income.entries()]
-        .map(([label, amount]) => ({ label, amount }))
-        .sort((a, b) => b.amount - a.amount);
-      const expense = [...bucket.expense.entries()]
-        .map(([label, amount]) => ({ label, amount }))
-        .sort((a, b) => b.amount - a.amount);
-      const incomeTotal = income.reduce((s, x) => s + x.amount, 0);
-      const expenseTotal = expense.reduce((s, x) => s + x.amount, 0);
-      return { month, income, expense, incomeTotal, expenseTotal, net: incomeTotal - expenseTotal };
+  for (const report of state.financeReports) {
+    if (report.teamId !== userTeamId) continue;
+    // 보고서는 다음 달 1일에 발행된다
+    const [year, month] = report.month.split("-").map(Number) as [number, number];
+    const issued =
+      month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, "0")}-01`;
+    push(
+      issued,
+      `📊 ${report.month} 재정 보고서 — 순 ${report.cashNet >= 0 ? "+" : "−"}£${(Math.abs(report.cashNet) / 1_000_000).toFixed(1)}M`,
+    );
+  }
+  const line = (l: { category: string; amount: number }) => ({
+    category: l.category,
+    label: FINANCE_CATEGORY_KO[l.category as keyof typeof FINANCE_CATEGORY_KO] ?? l.category,
+    amount: l.amount,
+  });
+  const reports: FinanceMonthView[] = [...state.financeReports]
+    .filter((r) => r.teamId === userTeamId)
+    .sort((a, b) => (a.month < b.month ? 1 : -1))
+    .map((r) => ({
+      month: r.month,
+      closed: true,
+      income: r.income.map(line),
+      expense: r.expense.map(line),
+      incomeTotal: r.incomeTotal,
+      expenseTotal: r.expenseTotal,
+      cashNet: r.cashNet,
+      pnlNet: r.pnlNet,
+      wageRatio: r.wageRatio,
+      notes: r.notes,
+    }));
+  const now = currentMonthSummary(state);
+  const current: FinanceMonthView = {
+    month: now.month,
+    closed: false,
+    income: now.income.map(line),
+    expense: now.expense.map(line),
+    incomeTotal: now.incomeTotal,
+    expenseTotal: now.expenseTotal,
+    cashNet: now.cashNet,
+    pnlNet: now.pnlNet,
+    wageRatio: now.wageRatio,
+    notes: [],
+  };
+  // 실시간 활동 피드 — 최근 원장부터 (같은 날은 나중 기록이 위로)
+  const feed = [...finance.ledger]
+    .reverse()
+    .slice(0, 30)
+    .map((e, i) => {
+      const category = categoryOf(e);
+      return {
+        id: e.id ?? `led-${e.date}-${i}`,
+        date: e.date,
+        kind: e.kind,
+        category,
+        categoryLabel: FINANCE_CATEGORY_KO[category],
+        label: e.label,
+        amount: e.amount,
+        noncash: e.accounting === "noncash",
+      };
     });
+  const stadium = clubProfile(userTeamId, teamCatalogById(userTeamId)?.tier ?? 3);
 
   const recentResults = state.matches
     .filter((m) => m.result && (m.homeTeamId === userTeamId || m.awayTeamId === userTeamId))
@@ -517,8 +603,15 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       balance: finance.balance,
       weeklyWages: weeklyWagesOf(state, userTeamId),
       transferBudget: finance.transferBudget,
-      months,
+      budgetFrozen: finance.budgetFrozen === true,
       boardExpectation: lastRecord?.boardVerdict ?? "시즌 목표 달성",
+      stadium: { name: stadium.stadium, capacity: stadium.capacity },
+      // 시즌 누계 기준 — 한 달만 보면 프리시즌에 100%를 넘어 무의미하다
+      wageRatio: seasonWageRatio(state),
+      psr: state.financeReports.length > 0 ? psrStatus(state) : null,
+      current,
+      reports,
+      feed,
     },
     schedule: {
       standings,

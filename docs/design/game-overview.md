@@ -583,4 +583,4 @@ playerInstructions: [{ player, role, instruction }] …
 | §8 서사 | [`narrative.md`](./narrative.md) |
 | §9 LLM 티어·캐싱 | [`economy.md`](./economy.md) |
 | 밸런스 수치 튜닝 | `balance.md` (백로그 — 시뮬 프로토타입 후) |
-| §10 재정 (post-MVP 확장 시) | `club-finance.md` (백로그) |
+| 구단 재정 (매출·비용 구조, 월간 보고서) | [`club-finance.md`](./club-finance.md) |

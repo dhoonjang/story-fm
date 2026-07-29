@@ -26,10 +26,10 @@ story-fm의 **기획 단일 소스**. "무엇을 만들 것인가" — 게임 �
 | [`personas.md`](./personas.md) | 🚧 초안 | 페르소나 스키마 · 핵심/템플릿 2계층 · 감독 캐릭터 · 기억 |
 | [`narrative.md`](./narrative.md) | 🚧 초안 | 서사 메모리 · 아크 · 중계 스타일 · 다이제스트 · 에필로그 |
 | [`economy.md`](./economy.md) | 🚧 초안 | LLM 티어·캐싱 — 멀티 프로바이더 라우팅(GM=Opus, 경기=DeepSeek) · 멀티턴 캐시 |
+| [`club-finance.md`](./club-finance.md) | ✅ 구현 | **구단 재정** — 실제 매출·비용 구조 · 실시간 원장 · 월간 보고서 · 상각·PSR |
 | [`implementation-notes.md`](./implementation-notes.md) | 📓 기록 | 구현 중 판단·기획 편차 — 합성 스쿼드, mock GM 모드, 수치 초안 |
 
 ## 작성 후보 (백로그)
 
 - `balance.md` — 밸런스 수치 튜닝 (attribute-model·match-sim의 계수 확정) — 시뮬 프로토타입 후
 - `rating-model.md` — 실측 스탯 → 자체 능력치 산정 모델 (라이선스 부채 청산 장치, data-sourcing §6 ③)
-- `club-finance.md` — 구단 재정 모델 (post-MVP 확장 시)

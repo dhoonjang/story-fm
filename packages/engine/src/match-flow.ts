@@ -8,7 +8,7 @@ import {
   type MatchLedgerState,
 } from "@story-fm/sim";
 import { matchesOn } from "./calendar";
-import { teamCatalogById } from "./data/team-catalog";
+import { applyMatchFinance } from "./finance";
 import { generateMatchScript } from "./quick-sim";
 import { grantManagerXP } from "./skills";
 import { openInjuryFor, serveSuspensions, simSquadOf } from "./tick";
@@ -24,12 +24,10 @@ import {
   playersOf,
   proficiencyAt,
   pushNarrative,
-  recordFinance,
   recordGrowth,
   seasonYellowsOf,
   tacticsOf,
   teamName,
-  teamShortName,
   userPlayers,
   FAMILIARITY_BASELINE,
   MATCHDAY_BENCH,
@@ -337,10 +335,6 @@ export function advanceMockSegment(
   return { ok: true, segment: remapped, message: result.message };
 }
 
-const TICKET: Record<1 | 2 | 3 | 4, number> = {
-  1: 4_500_000, 2: 3_500_000, 3: 2_500_000, 4: 1_800_000,
-};
-
 /** 경기 후 반영 — 사건은 창발, 반영은 공식 (match-sim.md §6) */
 export function finalizeMatch(state: GameState): string[] {
   const pending = state.pendingMatch;
@@ -487,17 +481,8 @@ export function finalizeMatch(state: GameState): string[] {
     digest.push(`부상: ${player.name} — ${part}, 약 ${days}일 결장 예상`);
   }
 
-  // 재정 — 홈 경기 입장 수입 (원장 기록). 중립 경기(결승)는 우리 수입이 아니다
-  if (side === "home" && !match.neutral) {
-    const tier = teamCatalogById(state.userTeamId)?.tier ?? 3;
-    recordFinance(
-      state,
-      state.userTeamId,
-      "income",
-      `홈 입장 수입 (${competitionShortName(match.competitionId)} ${stageLabel(match.stage ?? "league", match.round)} vs ${teamShortName(match.awayTeamId)})`,
-      TICKET[tier],
-    );
-  }
+  // 재정 — 매치데이(관중)·생중계 수당·승리 수당·원정 비용 (finance.ts)
+  applyMatchFinance(state, match, outcome, digest);
 
   const repDelta = outcome === "win" ? 2 : outcome === "loss" ? -2 : 0;
   state.manager.reputation.board = Math.max(0, Math.min(100, state.manager.reputation.board + repDelta));

@@ -21,6 +21,7 @@ import {
   buildOfficeViews,
   financeOf,
   payWinnerPrize,
+  payStagePrizes,
   euroCompetitionOf,
   entrantsOf,
   simSquadOf,
@@ -412,20 +413,24 @@ describe("상금", () => {
     const state = createTestGame(42);
     const cup = cupCatalogById("ucl")!;
     runKnockouts(state, "ucl");
+    // 지급 사실은 prizesPaid 키가 갖는다 — AI 팀은 상세 원장을 쌓지 않는다.
     // 항목명은 정확히 비교한다 — "준결승 진출 상금"은 "결승 진출 상금"을 포함한다
     const paidFor = (stage: "r16" | "qf" | "sf" | "final") => {
       const label = `UCL ${stageLabel(stage, 1, false)} 진출 상금 (S1)`;
-      return state.finances.filter((f) => f.ledger.some((e) => e.label === label)).length;
+      return state.finances.filter((f) => (f.prizesPaid ?? []).includes(label)).length;
     };
     expect(paidFor("r16")).toBe(16);
     expect(paidFor("qf")).toBe(8);
     expect(paidFor("sf")).toBe(4);
     expect(paidFor("final")).toBe(2);
-    // 금액은 카탈로그 값 그대로
-    const anyR16 = state.finances
-      .flatMap((f) => f.ledger)
-      .find((e) => e.label === "UCL 16강 진출 상금 (S1)");
-    expect(anyR16?.amount).toBe(cup.prize.stage.r16);
+    // 금액은 카탈로그 값 그대로 — 상세 원장을 갖는 유저 팀에 직접 지급해 확인한다
+    const fresh = createTestGame(42);
+    payStagePrizes(fresh, "ucl", "r16", [fresh.userTeamId], []);
+    const entry = financeOf(fresh, fresh.userTeamId).ledger.find(
+      (e) => e.label === "UCL 16강 진출 상금 (S1)",
+    );
+    expect(entry?.amount).toBe(cup.prize.stage.r16);
+    expect(entry?.category).toBe("prize");
   });
 
   it("우승 상금은 시즌 리뷰에서 우승 팀에게만 간다", () => {
@@ -433,16 +438,16 @@ describe("상금", () => {
     runKnockouts(state, "ucl");
     const champion = euroChampion(state, "ucl")!;
     const cup = cupCatalogById("ucl")!;
+    const before = financeOf(state, champion).balance;
     payWinnerPrize(state, "ucl", champion, []);
     payWinnerPrize(state, "ucl", champion, []); // 두 번 불러도 한 번만
+    // 지급 사실은 prizesPaid가 갖는다 (AI 팀은 원장을 쌓지 않는다)
     const paid = state.finances.filter((f) =>
-      f.ledger.some((e) => e.label === "UCL 우승 상금 (S1)"),
+      (f.prizesPaid ?? []).includes("UCL 우승 상금 (S1)"),
     );
     expect(paid).toHaveLength(1);
     expect(paid[0]!.teamId).toBe(champion);
-    expect(
-      paid[0]!.ledger.filter((e) => e.label === "UCL 우승 상금 (S1)").map((e) => e.amount),
-    ).toEqual([cup.prize.winner]);
+    expect(financeOf(state, champion).balance - before).toBe(cup.prize.winner);
   });
 
   it("우승 경로 총액이 tier 1 시즌 수입의 3분의 1 수준이다 (밸런스 기준선)", () => {

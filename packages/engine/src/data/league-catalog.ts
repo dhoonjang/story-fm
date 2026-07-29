@@ -21,14 +21,61 @@ export interface LeagueCatalogEntry {
    * 하이브리드 전략: 5대 리그는 실선수, 그 밖은 합성 (data-sourcing.md §7).
    */
   realSquads: boolean;
+  /**
+   * 중계권 풀 배율 — **EPL 1.00 기준**. 리그 총 방송 수입 규모의 어림비이고,
+   * 균등 배분·성적 수당·생중계 수당 전부에 곱한다 (club-finance.md §5.1).
+   */
+  broadcastPool: number;
+  /** 리그 평균 티켓 단가 (£) — 매치데이 수입의 기준 */
+  avgTicketPrice: number;
 }
 
 export const LEAGUE_CATALOG: readonly LeagueCatalogEntry[] = [
-  { id: "epl", name: "프리미어리그", country: "잉글랜드", coefficient: 1, realSquads: true },
-  { id: "laliga", name: "라리가", country: "스페인", coefficient: 2, realSquads: true },
-  { id: "seriea", name: "세리에 A", country: "이탈리아", coefficient: 3, realSquads: true },
-  { id: "bundesliga", name: "분데스리가", country: "독일", coefficient: 4, realSquads: true },
-  { id: "ligue1", name: "리그 1", country: "프랑스", coefficient: 5, realSquads: true },
+  {
+    id: "epl",
+    name: "프리미어리그",
+    country: "잉글랜드",
+    coefficient: 1,
+    realSquads: true,
+    broadcastPool: 1,
+    avgTicketPrice: 45,
+  },
+  {
+    id: "laliga",
+    name: "라리가",
+    country: "스페인",
+    coefficient: 2,
+    realSquads: true,
+    broadcastPool: 0.45,
+    avgTicketPrice: 32,
+  },
+  {
+    id: "seriea",
+    name: "세리에 A",
+    country: "이탈리아",
+    coefficient: 3,
+    realSquads: true,
+    broadcastPool: 0.32,
+    avgTicketPrice: 30,
+  },
+  {
+    id: "bundesliga",
+    name: "분데스리가",
+    country: "독일",
+    coefficient: 4,
+    realSquads: true,
+    broadcastPool: 0.35,
+    avgTicketPrice: 28,
+  },
+  {
+    id: "ligue1",
+    name: "리그 1",
+    country: "프랑스",
+    coefficient: 5,
+    realSquads: true,
+    broadcastPool: 0.16,
+    avgTicketPrice: 26,
+  },
 ];
 
 const BY_ID = new Map(LEAGUE_CATALOG.map((l) => [l.id, l]));

@@ -133,6 +133,14 @@ export const SKILL_CATALOG = [
       'view="standings"는 순위표, view="fixtures"는 지난 결과와 예정 일정을 반환한다. 순위·승점·일정은 추측하지 말고 이 도구로 확인한다.',
   },
   {
+    name: "get_finance",
+    label: "재정 조회",
+    group: "조회",
+    readOnly: true,
+    description:
+      "구단 재정을 조회한다 — 잔고·이적 예산·주급 총액, 월간 재정 보고서(수입·지출 항목, 현금 순증과 장부 손익, 급여 비중, PSR 여유), 진행 중인 이번 달 잠정 집계. month를 주면 그 달 보고서만 본다(\"2026-08\"). 금액·수지는 추측하지 말고 이 도구로 확인한다.",
+  },
+  {
     name: "scout_player",
     label: "스카우트 파견",
     group: "조회",

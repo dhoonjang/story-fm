@@ -12,6 +12,7 @@ import { CUP_CATALOG, competitionShortName, isCup } from "./data/cup-catalog";
 import { LEAGUE_CATALOG, leagueName } from "./data/league-catalog";
 import { euroChampion, euroStageMatches } from "./euro-knockout";
 import { payWinnerPrize } from "./euro-prize";
+import { payLeaguePrizes, paySeasonBonuses, topUpTransferBudget } from "./finance";
 import { buildEuroEntrants, entrantsOf, type LeagueTables } from "./europe";
 import { buildSeasonFixtures, isUserFixture } from "./fixtures";
 import { generateYouthPlayer } from "./generate";
@@ -232,6 +233,9 @@ export function reviewSeason(state: GameState): string[] {
     digest.push(`🏆 ${leagueName(leagueOfTeam(state.userTeamId))} 우승! 트로피 보관함에 추가되었다`);
   }
   digest.push(...reviewEuropeanCampaign(state));
+  // 재정 — 리그 순위 상금(전 팀)과 선수단 성과 보너스
+  payLeaguePrizes(state, digest);
+  paySeasonBonuses(state, position, digest);
   checkAchievements(state, position, row);
 
   state.seasonRecords.push({
@@ -438,11 +442,13 @@ export function transitionSeason(state: GameState): string[] {
   for (const s of state.suspensions) if (s.status === "active") s.status = "done";
   state.phase = "idle";
   state.pendingMatch = null;
-  // 이적 예산 보충 — 등급별. 일률 £15M이면 시즌 2부터 68~72 OVR밖에 못 사서
+  // 이적 예산 보충 — 등급별 base. 일률 £15M이면 시즌 2부터 68~72 OVR밖에 못 사서
   // 이적 루프가 첫 여름 이후 죽는다. 등급별 순이익과 같은 자리에 뒀다
   // (docs/decisions/0002-transfer-market-balance.md). 나머지는 선수 판매로 만든다.
+  // base 위에 **재정 성과**가 얹히고, PSR 위반이면 동결된다 (ADR 0004 결정 D).
   for (const finance of state.finances) {
-    finance.transferBudget += SEASON_BUDGET_TOPUP[teamCatalogById(finance.teamId)?.tier ?? 3] ?? 0;
+    const base = SEASON_BUDGET_TOPUP[teamCatalogById(finance.teamId)?.tier ?? 3] ?? 0;
+    topUpTransferBudget(state, finance.teamId, base, digest);
   }
 
   digest.push(
