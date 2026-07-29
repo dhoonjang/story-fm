@@ -2,7 +2,9 @@ import { expect, test } from "@playwright/test";
 
 test("새 게임 첫 메시지가 부임 장면과 수석코치 브리핑으로 표시된다", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("team-grid")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("league-grid")).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId("league-epl").click();
+  await expect(page.getByTestId("team-grid")).toBeVisible();
 
   await page.getByTestId("team-arsenal").click();
   await page.getByTestId("manager-name").fill("온보딩테스트");

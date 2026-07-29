@@ -14,7 +14,9 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await expect(page).toHaveURL(/\/new$/, { timeout: 20_000 });
 
   // ── 온보딩 ──
-  await expect(page.getByTestId("team-grid")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("league-grid")).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId("league-epl").click();
+  await expect(page.getByTestId("team-grid")).toBeVisible();
   await page.getByTestId("team-arsenal").click();
   await page.getByTestId("manager-name").fill("김테스트");
   await page
@@ -90,7 +92,9 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
 
 test("면담 시나리오 — 판정형 스킬과 사기 반영", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("team-grid")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("league-grid")).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId("league-epl").click();
+  await expect(page.getByTestId("team-grid")).toBeVisible();
   await page.getByTestId("team-chelsea").click();
   await page.getByTestId("manager-name").fill("박테스트");
   await page.getByTestId("manager-background").fill("에이전트 출신 협상가");
@@ -121,7 +125,9 @@ test("면담 시나리오 — 판정형 스킬과 사기 반영", async ({ page 
 
 test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("team-grid")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("league-grid")).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId("league-epl").click();
+  await expect(page.getByTestId("team-grid")).toBeVisible();
   await page.getByTestId("team-liverpool").click();
   await page.getByTestId("manager-name").fill("정테스트");
   await page.getByTestId("manager-background").fill("전술 분석가 출신");

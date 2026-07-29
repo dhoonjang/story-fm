@@ -63,11 +63,13 @@ textarea {
   font-size: 16px;
   margin: 24px 0 12px;
 }
+.league-grid,
 .team-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 8px;
 }
+.league-card,
 .team-card {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -76,13 +78,16 @@ textarea {
   text-align: left;
   color: var(--text);
 }
+.league-card:hover,
 .team-card:hover {
   border-color: var(--accent-2);
 }
+.league-card.selected,
 .team-card.selected {
   border-color: var(--accent);
   background: var(--panel-2);
 }
+.league-card .tier,
 .team-card .tier {
   color: var(--muted);
   font-size: 12px;

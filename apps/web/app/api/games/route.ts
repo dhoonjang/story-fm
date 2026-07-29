@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   createGame,
   interpretBackgroundHeuristic,
+  LEAGUE_CATALOG,
   listGameSummaries,
   saveGame,
   TEAM_CATALOG,
@@ -17,9 +18,13 @@ const CreateSchema = z.object({
   seed: z.number().int().optional(),
 });
 
-/** 팀 카탈로그(새 게임 팀 선택) + 저장된 게임 목록(랜딩) */
+/** 리그·팀 카탈로그(새 게임 선택: 리그 → 팀) + 저장된 게임 목록(랜딩) */
 export function GET() {
-  return NextResponse.json({ teams: TEAM_CATALOG, games: listGameSummaries() });
+  return NextResponse.json({
+    leagues: LEAGUE_CATALOG,
+    teams: TEAM_CATALOG,
+    games: listGameSummaries(),
+  });
 }
 
 /** 새 게임 생성 — 배경 직접 입력 → 능력치 배분 (결정 #11) */

@@ -8,7 +8,14 @@ interface TeamEntry {
   id: string;
   name: string;
   shortName: string;
+  leagueId: string;
   tier: number;
+}
+
+interface LeagueEntry {
+  id: string;
+  name: string;
+  country: string;
 }
 
 const TIER_LABEL: Record<number, string> = {
@@ -21,6 +28,8 @@ const TIER_LABEL: Record<number, string> = {
 export default function NewGamePage() {
   const router = useRouter();
   const [teams, setTeams] = useState<TeamEntry[]>([]);
+  const [leagues, setLeagues] = useState<LeagueEntry[]>([]);
+  const [leagueId, setLeagueId] = useState<string | null>(null);
   const [teamId, setTeamId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [background, setBackground] = useState("");
@@ -35,7 +44,9 @@ export default function NewGamePage() {
         const r = await fetch("/api/games");
         if (!r.ok) throw new Error(String(r.status));
         const data = await r.json();
-        if (!cancelled) setTeams(data.teams ?? []);
+        if (cancelled) return;
+        setTeams(data.teams ?? []);
+        setLeagues(data.leagues ?? []);
       } catch {
         if (cancelled) return;
         if (attempt < 4) setTimeout(() => load(attempt + 1), 1500);
@@ -47,6 +58,14 @@ export default function NewGamePage() {
       cancelled = true;
     };
   }, []);
+
+  /** 리그를 바꾸면 다른 리그 팀 선택은 무효 — 선택은 항상 보이는 것 안에 있어야 한다 */
+  function selectLeague(id: string) {
+    setLeagueId(id);
+    setTeamId(null);
+  }
+
+  const leagueTeams = teams.filter((t) => t.leagueId === leagueId);
 
   async function start() {
     if (!teamId || !name.trim() || !background.trim()) return;
@@ -77,23 +96,44 @@ export default function NewGamePage() {
       <h1>새 게임 시작</h1>
       <p className="tagline">슬라이더 대신 대화로 팀을 이끈다 — 매 시즌이 한 편의 드라마가 되는 AI 풋볼 매니저</p>
 
-      <h2>1. 지휘할 팀을 선택하세요</h2>
-      <div className="team-grid" data-testid="team-grid">
-        {teams.length === 0 && !error && <div className="tier">팀 목록 불러오는 중…</div>}
-        {teams.map((t) => (
+      <h2>1. 어느 리그입니까?</h2>
+      <div className="league-grid" data-testid="league-grid">
+        {leagues.length === 0 && !error && <div className="tier">리그 목록 불러오는 중…</div>}
+        {leagues.map((l) => (
           <button
-            key={t.id}
-            className={`team-card${teamId === t.id ? " selected" : ""}`}
-            onClick={() => setTeamId(t.id)}
-            data-testid={`team-${t.id}`}
+            key={l.id}
+            className={`league-card${leagueId === l.id ? " selected" : ""}`}
+            onClick={() => selectLeague(l.id)}
+            data-testid={`league-${l.id}`}
           >
-            <div>{t.name}</div>
-            <div className="tier">보드 기대: {TIER_LABEL[t.tier] ?? "?"}</div>
+            <div>{l.name}</div>
+            <div className="tier">{l.country}</div>
           </button>
         ))}
       </div>
 
-      <h2>2. 당신은 누구입니까?</h2>
+      <h2>2. 지휘할 팀을 선택하세요</h2>
+      {leagueId === null ? (
+        <p className="tier" data-testid="team-grid-hint">
+          리그를 먼저 선택하세요
+        </p>
+      ) : (
+        <div className="team-grid" data-testid="team-grid">
+          {leagueTeams.map((t) => (
+            <button
+              key={t.id}
+              className={`team-card${teamId === t.id ? " selected" : ""}`}
+              onClick={() => setTeamId(t.id)}
+              data-testid={`team-${t.id}`}
+            >
+              <div>{t.name}</div>
+              <div className="tier">보드 기대: {TIER_LABEL[t.tier] ?? "?"}</div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <h2>3. 당신은 누구입니까?</h2>
       <input
         type="text"
         placeholder="감독 이름"
