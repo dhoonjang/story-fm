@@ -611,6 +611,11 @@ textarea {
 .topbar .brand {
   font-weight: 800;
   color: var(--accent);
+  text-decoration: none;
+  flex-shrink: 0;
+}
+.topbar .brand:hover {
+  text-decoration: underline;
 }
 .topbar .meta {
   color: var(--muted);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import type { GamePayload } from "@/lib/store";
 import { ChatTurnView } from "./chat";
 import { SquadView, CalendarView, FinanceView, CompetitionsView, CareerView } from "./office";
@@ -206,7 +207,10 @@ export function GameScreen({ gameId }: { gameId: string }) {
   return (
     <div className="app">
       <header className="topbar">
-        <span className="brand">story-fm</span>
+        {/* 로고 = 게임 목록으로 나가는 문 (진행 중 턴은 서버가 마무리해 저장한다) */}
+        <Link href="/" className="brand" data-testid="home-link" title="게임 목록으로">
+          story-fm
+        </Link>
         <span className="meta" data-testid="team-name">{game.teamName}</span>
         <span className="meta hide-sm">{game.managerName} 감독</span>
         <span className="meta" data-testid="game-date">

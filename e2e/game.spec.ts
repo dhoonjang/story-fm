@@ -99,6 +99,12 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await expect(page.getByTestId("view-career")).toContainText("김테스트 감독");
   await expect(page.getByTestId("view-career")).toContainText("리더십");
   await expect(page.getByTestId("view-career")).toContainText("트로피 보관함");
+
+  // ── 로고 → 게임 목록으로 나가기 (진행한 게임이 목록에 남아 있다) ──
+  await page.getByTestId("home-link").click();
+  await expect(page).toHaveURL(/localhost:\d+\/$/, { timeout: 20_000 });
+  await expect(page.getByTestId("new-game")).toBeVisible();
+  await expect(page.locator(".game-card").first()).toContainText("아스날");
 });
 
 test("면담 시나리오 — 판정형 스킬과 사기 반영", async ({ page }) => {
