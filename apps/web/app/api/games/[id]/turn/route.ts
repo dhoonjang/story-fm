@@ -20,6 +20,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
 
   const outcome = await runTurnLocked(id, body.data.message);
-  if (!outcome.ok) return NextResponse.json({ error: outcome.error }, { status: outcome.status });
+  if (!outcome.ok) {
+    // 실패한 턴은 채팅에 남지 않는다 — 클라이언트가 배너로 알리고 재시도한다
+    return NextResponse.json(
+      { error: outcome.error, ...(outcome.detail ? { detail: outcome.detail } : {}) },
+      { status: outcome.status },
+    );
+  }
   return NextResponse.json(outcome.payload);
 }

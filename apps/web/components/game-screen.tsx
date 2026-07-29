@@ -28,6 +28,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
   const [busy, setBusy] = useState(false);
   const [streamText, setStreamText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  /** 실패 원인(기술적) — 배너 툴팁으로만 보인다. 채팅·서사에는 절대 넣지 않는다 */
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -71,16 +73,23 @@ export function GameScreen({ gameId }: { gameId: string }) {
     setInput("");
     setBusy(true);
     setError(null);
+    setErrorDetail(null);
     streamAccRef.current = "";
     revealedRef.current = 0;
     pendingPayloadRef.current = null;
     setStreamText("");
-    // 낙관적 표시 — 유저 턴 먼저
-    setGame((g) =>
-      g
-        ? { ...g, chat: [...g.chat, { role: "user" as const, text: message, toolCalls: [], at: g.date }] }
-        : g,
-    );
+    // 낙관적 표시 — 유저 턴 먼저. 턴이 실패하면 이 항목을 정확히 되돌린다
+    // (서버도 실패한 턴은 저장하지 않는다 — lib/turn-runner.ts)
+    const optimistic = { role: "user" as const, text: message, toolCalls: [], at: game.date };
+    setGame((g) => (g ? { ...g, chat: [...g.chat, optimistic] } : g));
+
+    /** 턴 실패 — 낙관적 유저 턴을 지우고 입력을 되돌린다 (채팅엔 아무것도 남기지 않는다) */
+    const fail = (reason: string, detail?: string) => {
+      setGame((g) => (g ? { ...g, chat: g.chat.filter((t) => t !== optimistic) } : g));
+      setInput((cur) => (cur.trim() ? cur : message));
+      setError(reason);
+      setErrorDetail(detail ?? null);
+    };
 
     let finished = false;
     const stopPump = () => {
@@ -138,8 +147,10 @@ export function GameScreen({ gameId }: { gameId: string }) {
         body: JSON.stringify({ message }),
       });
       if (!res.ok || !res.body) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error ?? "턴 실패");
+        const data = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
+        fail(data.error ?? "턴을 처리하지 못했습니다", data.detail);
+        commit(null);
+        return;
       }
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -153,7 +164,13 @@ export function GameScreen({ gameId }: { gameId: string }) {
           const line = buffer.slice(0, nl);
           buffer = buffer.slice(nl + 1);
           if (!line.trim()) continue;
-          let evt: { type: string; text?: string; payload?: GamePayload; error?: string };
+          let evt: {
+            type: string;
+            text?: string;
+            payload?: GamePayload;
+            error?: string;
+            detail?: string;
+          };
           try {
             evt = JSON.parse(line);
           } catch {
@@ -164,14 +181,14 @@ export function GameScreen({ gameId }: { gameId: string }) {
           } else if (evt.type === "done" && evt.payload) {
             pendingPayloadRef.current = evt.payload; // 공개가 끝나면 pump가 커밋
           } else if (evt.type === "error") {
-            setError(evt.error ?? "턴 실패");
+            fail(evt.error ?? "턴을 처리하지 못했습니다", evt.detail);
           }
         }
       }
       // 스트림 종료 — done이 없었다면(에러 등) 즉시 마감
       if (!pendingPayloadRef.current) commit(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      fail("서버에 연결하지 못했습니다 — 다시 시도해 주세요.", e instanceof Error ? e.message : String(e));
       commit(null);
     }
   }, [input, busy, game, gameId]);
@@ -229,8 +246,29 @@ export function GameScreen({ gameId }: { gameId: string }) {
                 />
               )}
               {busy && !streamText && <div className="thinking">세계가 반응하는 중…</div>}
-              {error && <div className="error-text">{error}</div>}
             </div>
+            {/* 턴 실패 알림 — **게임 밖의 사건**이라 대화 흐름이 아니라 별도 띠로
+                보여준다. 세계의 화자는 이 일을 알지 못한다 (turn-runner.ts) */}
+            {error && (
+              <div className="turn-error" data-testid="turn-error" title={errorDetail ?? undefined}>
+                <span>⚠️ {error}</span>
+                <div className="turn-error-actions">
+                  <button onClick={() => send()} disabled={busy || !input.trim()}>
+                    다시 시도
+                  </button>
+                  <button
+                    className="ghost"
+                    onClick={() => {
+                      setError(null);
+                      setErrorDetail(null);
+                    }}
+                    aria-label="알림 닫기"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="chat-input">
               <textarea
                 ref={inputRef}

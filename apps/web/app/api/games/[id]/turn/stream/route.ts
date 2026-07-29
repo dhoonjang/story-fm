@@ -7,7 +7,7 @@ const TurnSchema = z.object({ message: z.string().min(1).max(1000) });
  * 스트리밍 턴 — 줄 단위 JSON(NDJSON)으로 이벤트를 흘려보낸다.
  *   {"type":"delta","text":"..."}  서사 텍스트 조각
  *   {"type":"done","payload":{...}} 최종 게임 페이로드
- *   {"type":"error","error":"..."}
+ *   {"type":"error","error":"...","detail":"..."} 실패 — 채팅에 아무것도 남지 않는다
  * 잠금·원자성은 runTurnLocked가 담당 (JSON 라우트와 동일 뮤텍스 공유).
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -31,7 +31,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           send({ type: "delta", text }),
         );
         if (outcome.ok) send({ type: "done", payload: outcome.payload });
-        else send({ type: "error", error: outcome.error });
+        else send({ type: "error", error: outcome.error, detail: outcome.detail });
       } catch (error) {
         send({ type: "error", error: error instanceof Error ? error.message : String(error) });
       } finally {

@@ -794,6 +794,40 @@ textarea {
   color: var(--muted);
   font-style: italic;
 }
+/* 턴 실패 알림 — 게임 밖 사건이므로 말풍선이 아니라 시스템 띠로 (chat.tsx와 구분) */
+.turn-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 20px;
+  border-top: 1px solid var(--danger);
+  background: rgba(248, 113, 113, 0.1);
+  color: var(--danger);
+  font-size: 12.5px;
+}
+.turn-error-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.turn-error button {
+  background: transparent;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  color: var(--danger);
+  font-size: 12px;
+  padding: 3px 10px;
+}
+.turn-error button:disabled {
+  opacity: 0.4;
+}
+.turn-error button.ghost {
+  border-color: transparent;
+  color: var(--muted);
+  padding: 3px 6px;
+}
 .chat-input {
   display: flex;
   align-items: flex-end;

@@ -255,7 +255,7 @@ ERD와 설계 근거는 docs/design/implementation-notes.md에 정리했다.
 - `apps/web` — Next.js 채팅 UI + 오피스 뷰(스쿼드 전술판·달력·재정·**대회**·커리어),
   API, `/admin` **선수 카탈로그 편집** (게임과 무관한 초기치 DB — 편집은 새 게임에만
   반영되고 진행 중 세이브는 영향 없음)
-- 테스트: Vitest 369 (유닛·API 통합) + Playwright e2e 5. `pnpm test` / `pnpm e2e`
+- 테스트: Vitest 373 (유닛·API 통합) + Playwright e2e 6. `pnpm test` / `pnpm e2e`
 
 ### LLM 입력 (요약 — 상세는 docs/design/llm-io.md)
 

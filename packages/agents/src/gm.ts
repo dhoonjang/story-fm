@@ -824,7 +824,10 @@ export async function runOnboardingTurn(state: GameState, llm?: GameLLM): Promis
     const text = humanizePlayerIds(state, result.text.trim());
     if (!isValidOnboardingText(state, text)) return fallback;
     return { text, toolCalls: [], usage: result.usage };
-  } catch {
+  } catch (error) {
+    // 부임 브리핑은 게임의 첫 장면이라 비울 수 없다 — 기본 브리핑으로 연다.
+    // 다만 실패를 조용히 삼키지는 않는다 (서버 로그에 남긴다).
+    console.error("[gm] 온보딩 턴 실패 — 기본 브리핑으로 대체:", error);
     return fallback;
   }
 }
