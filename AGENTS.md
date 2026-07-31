@@ -252,10 +252,10 @@ ERD와 설계 근거는 docs/design/implementation-notes.md에 정리했다.
 - `packages/llm` — GameLLM 인터페이스 + Opus 어댑터 (전 티어 Opus, 결정 #12).
   **입력 3층 캐시 계층**(고정 / 레퍼런스 / 이력)과 `role:"system"` 상태 채널
 - `packages/agents` — GM 오케스트레이터 (실모드 Opus tool loop + **mock 모드**)
-- `apps/web` — Next.js 채팅 UI + 오피스 뷰(스쿼드 전술판·달력·재정·**대회**·커리어),
+- `apps/web` — Next.js 채팅 UI + 오피스 뷰(스쿼드 **전술판+전술**·달력·재정·대회·커리어),
   API, `/admin` **선수 카탈로그 편집** (게임과 무관한 초기치 DB — 편집은 새 게임에만
   반영되고 진행 중 세이브는 영향 없음)
-- 테스트: Vitest 373 (유닛·API 통합) + Playwright e2e 6. `pnpm test` / `pnpm e2e`
+- 테스트: Vitest 375 (유닛·API 통합) + Playwright e2e 6. `pnpm test` / `pnpm e2e`
 
 ### LLM 입력 (요약 — 상세는 docs/design/llm-io.md)
 

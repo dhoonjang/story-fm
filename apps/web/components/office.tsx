@@ -97,9 +97,93 @@ function AttrBar({ label, value }: { label: string; value: number }) {
   );
 }
 
-// ── 스쿼드 (읽기 + 전술판 라인업 편집) ─────────────────────
+// ── 스쿼드 (전술판 · 전술 · 명단) ─────────────────────────
 type SquadRow = OfficeViews["squad"]["players"][number];
+type TacticsView = OfficeViews["squad"]["tactics"];
 type Selection = { kind: "slot"; index: number } | { kind: "bench"; id: string } | null;
+
+/** 능력치 15축 라벨 — 선택한 선수의 강점을 보여줄 때 쓴다 */
+const AXIS_KO: Record<string, string> = {
+  pace: "스피드",
+  stamina: "체력",
+  strength: "몸싸움",
+  aerial: "공중볼",
+  finishing: "결정력",
+  dribbling: "드리블",
+  passing: "패스",
+  kicking: "킥력",
+  tackling: "태클",
+  vision: "시야",
+  positioning: "위치선정",
+  composure: "침착성",
+  aggression: "적극성",
+  leadership: "리더십",
+  goalkeeping: "골키핑",
+};
+const AXES = Object.keys(AXIS_KO);
+
+/**
+ * 전술 5축 — 값 1~5의 뜻을 말로 보여준다. 슬라이더 숫자만 두면 "3이 뭔데?"가 된다.
+ * 라벨 문구는 GM이 이해하는 축(match-sim §1)과 같은 뜻이어야 한다.
+ */
+const TACTIC_AXES = [
+  {
+    key: "mentality" as const,
+    label: "멘탈리티",
+    values: ["매우 수비적", "수비적", "균형", "공격적", "매우 공격적"],
+  },
+  {
+    key: "defensiveLine" as const,
+    label: "수비 라인",
+    values: ["매우 낮게", "낮게", "보통", "높게", "매우 높게"],
+  },
+  {
+    key: "pressing" as const,
+    label: "압박",
+    values: ["최소", "약하게", "보통", "강하게", "맹렬히"],
+  },
+  {
+    key: "tempo" as const,
+    label: "템포",
+    values: ["매우 느리게", "느리게", "보통", "빠르게", "매우 빠르게"],
+  },
+  {
+    key: "width" as const,
+    label: "공격 폭",
+    values: ["매우 좁게", "좁게", "보통", "넓게", "매우 넓게"],
+  },
+];
+const PASS_STYLES = [
+  { value: "short", label: "짧은 패스" },
+  { value: "mixed", label: "혼합" },
+  { value: "direct", label: "롱볼" },
+];
+const passStyleLabel = (v: string) => PASS_STYLES.find((p) => p.value === v)?.label ?? v;
+
+/** 사실상 같은 자리 묶음 — 엔진 `proficiencyAt`의 표시용 거울 (domain POSITION_CLUSTERS) */
+const POSITION_CLUSTERS: string[][] = [
+  ["RCB", "CB", "LCB"],
+  ["RCM", "CM", "LCM"],
+  ["DM", "CDM"],
+  ["AM", "CAM"],
+];
+
+/**
+ * 이 선수가 그 자리에서 갖는 적응도(표시용) — 엔진 `proficiencyAt`과 같은 규칙:
+ * 정확 일치 → 같은 묶음(−2) → 같은 라인(55) → 생소(35).
+ */
+function fitAt(p: SquadRow, code: string): { value: number; exact: boolean } {
+  const exact = p.positions.find((x) => x.position === code);
+  if (exact) return { value: exact.proficiency, exact: true };
+  const cluster = POSITION_CLUSTERS.find((c) => c.includes(code));
+  const near = cluster ? p.positions.filter((x) => cluster.includes(x.position)) : [];
+  if (near.length > 0) {
+    return { value: Math.max(...near.map((x) => x.proficiency)) - 2, exact: false };
+  }
+  return { value: GROUP_OF[code] === p.positionGroup ? 55 : 35, exact: false };
+}
+
+const fitClass = (v: number) => (v >= 80 ? "good" : v >= 60 ? "ok" : "bad");
 
 /** 현재 선발을 레이아웃 슬롯에 배치 — 배치 포지션 정확 일치 → 그룹 일치 → 순서 */
 function assignSlots(
@@ -126,6 +210,206 @@ function assignSlots(
   return slots;
 }
 
+/** 전술 변경 폭 → 적응도 하락 (엔진 `tacticsChangeDrop`의 거울 — 저장 전에 미리 보인다) */
+function expectedDrop(before: TacticsView, after: TacticsView): number {
+  let drop = before.formation !== after.formation ? 25 : 0;
+  for (const axis of TACTIC_AXES) drop += Math.abs(before[axis.key] - after[axis.key]) * 4;
+  if (before.passStyle !== after.passStyle) drop += 6;
+  return drop;
+}
+
+/** 상태 막대 — 폼·사기·피로를 숫자와 함께 눈으로 (피로는 높을수록 나쁘다) */
+function StatBar({
+  value,
+  max = 100,
+  kind,
+}: {
+  value: number;
+  max?: number;
+  kind: "form" | "morale" | "fatigue";
+}) {
+  const pct = Math.max(0, Math.min(100, (value / max) * 100));
+  return (
+    <span className={`stat-bar ${kind}`} title={`${value}`}>
+      <span style={{ width: `${pct}%` }} />
+    </span>
+  );
+}
+
+/** 선수 상태 배지 묶음 — 표·상세·전술판이 같은 규칙을 쓴다 */
+function StatusBadges({ p }: { p: SquadRow }) {
+  return (
+    <>
+      {p.injury && (
+        <span
+          className="badge warn"
+          title={`${p.injury.bodyPart} · ${p.injury.severity} · 복귀 예상 ${p.injury.expectedReturn}`}
+        >
+          부상
+        </span>
+      )}
+      {p.suspended > 0 && <span className="badge warn">정지 {p.suspended}</span>}
+      {p.hasIssue && <span className="badge warn">불만</span>}
+      {p.adaptationDaysLeft > 0 && (
+        <span className="badge" title={`적응 완료까지 약 ${p.adaptationDaysLeft}일 — 수치는 추정치다`}>
+          적응 중
+        </span>
+      )}
+    </>
+  );
+}
+
+/** 전술 패널 — 읽기 모드에선 값의 뜻만, 편집 모드에선 5단계 선택 */
+function TacticsPanel({
+  tactics,
+  editing,
+  familiarity,
+  drop,
+  onChange,
+}: {
+  tactics: TacticsView;
+  editing: boolean;
+  familiarity: number;
+  drop: number;
+  onChange: (patch: Partial<TacticsView>) => void;
+}) {
+  return (
+    <div className="tactics-panel" data-testid="tactics-panel">
+      <div className="tactics-head">
+        <b>전술</b>
+        <span className="muted">
+          전술 적응도 {familiarity}
+          {editing && drop > 0 && (
+            <b className="drop" data-testid="tactics-drop">
+              {" "}
+              · 저장 시 −{drop}
+            </b>
+          )}
+        </span>
+      </div>
+      <div className="tactics-grid">
+        {TACTIC_AXES.map((axis) => {
+          const value = tactics[axis.key];
+          return (
+            <div className="tactic-row" key={axis.key}>
+              <span className="tactic-label">{axis.label}</span>
+              {editing ? (
+                <div className="tactic-steps" role="group" aria-label={axis.label}>
+                  {axis.values.map((label, i) => (
+                    <button
+                      key={label}
+                      className={`tactic-step${value === i + 1 ? " on" : ""}`}
+                      onClick={() => onChange({ [axis.key]: i + 1 } as Partial<TacticsView>)}
+                      title={label}
+                      data-testid={`tactic-${axis.key}-${i + 1}`}
+                    >
+                      {i + 1}
+                    </button>
+                  ))}
+                  <span className="tactic-value">{axis.values[value - 1]}</span>
+                </div>
+              ) : (
+                <span className="tactic-value read">
+                  <span className="tactic-meter">
+                    <span style={{ width: `${(value / 5) * 100}%` }} />
+                  </span>
+                  {axis.values[value - 1]}
+                </span>
+              )}
+            </div>
+          );
+        })}
+        <div className="tactic-row">
+          <span className="tactic-label">패스</span>
+          {editing ? (
+            <div className="tactic-steps" role="group" aria-label="패스 스타일">
+              {PASS_STYLES.map((s) => (
+                <button
+                  key={s.value}
+                  className={`tactic-step wide${tactics.passStyle === s.value ? " on" : ""}`}
+                  onClick={() => onChange({ passStyle: s.value })}
+                  data-testid={`tactic-pass-${s.value}`}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <span className="tactic-value read">{passStyleLabel(tactics.passStyle)}</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 선택한 선수 상세 — 그 자리 적응도와 강점 5축 */
+function PlayerDetail({ p, slotCode }: { p: SquadRow; slotCode: string | null }) {
+  const fit = slotCode ? fitAt(p, slotCode) : null;
+  const top = AXES.map((a) => ({ a, v: (p as unknown as Record<string, number>)[a] ?? 0 }))
+    .sort((x, y) => y.v - x.v)
+    .slice(0, 5);
+  return (
+    <div className="player-detail" data-testid="player-detail">
+      <div className="pd-head">
+        <b>
+          {p.isCaptain ? "Ⓒ " : ""}
+          {p.name}
+        </b>
+        <span className="muted">
+          {p.age}세 · {p.position} · OVR {p.overall}
+          {p.potential > p.overall ? ` (POT ${p.potential})` : ""}
+        </span>
+        <StatusBadges p={p} />
+      </div>
+      <div className="pd-grid">
+        {fit && (
+          <div className="pd-cell">
+            <span className="muted">{slotCode} 적응도</span>
+            <b className={`fit ${fitClass(fit.value)}`}>
+              {fit.value}
+              {!fit.exact && <span className="est" title="본 포지션이 아니라 추정치다">?</span>}
+            </b>
+          </div>
+        )}
+        <div className="pd-cell">
+          <span className="muted">폼</span>
+          <b>{p.form > 0 ? `+${p.form}` : p.form}</b>
+        </div>
+        <div className="pd-cell">
+          <span className="muted">사기</span>
+          <b>{p.morale}</b>
+        </div>
+        <div className="pd-cell">
+          <span className="muted">피로</span>
+          <b>{p.fatigue}</b>
+        </div>
+        <div className="pd-cell">
+          <span className="muted">전술 적응</span>
+          <b>{p.role === "스쿼드" ? "—" : p.familiarity}</b>
+        </div>
+        <div className="pd-cell">
+          <span className="muted">시즌</span>
+          <b>
+            {p.seasonApps}경기 {p.seasonGoals}골
+          </b>
+        </div>
+      </div>
+      <div className="pd-axes">
+        {top.map(({ a, v }) => (
+          <span className="pd-axis" key={a}>
+            {AXIS_KO[a]} <b>{v}</b>
+          </span>
+        ))}
+      </div>
+      <div className="pd-foot muted">
+        가능 포지션 {p.positions.map((x) => `${x.position} ${x.proficiency}`).join(" · ")}
+        {p.instruction ? ` · 개인 지시 "${p.instruction}"` : ""}
+      </div>
+    </div>
+  );
+}
+
 export function SquadView({
   game,
   onUpdate,
@@ -135,48 +419,62 @@ export function SquadView({
   onUpdate: (payload: GamePayload) => void;
   onGoToChat: () => void;
 }) {
-  const players = game.views.squad.players;
+  const squad = game.views.squad;
+  const players = squad.players;
   const byId = useMemo(() => new Map(players.map((p) => [p.id, p])), [players]);
   const [editing, setEditing] = useState(false);
-  const [formation, setFormation] = useState(game.views.squad.formation);
+  const [formation, setFormation] = useState(squad.formation);
+  const [tactics, setTactics] = useState<TacticsView>(squad.tactics);
   const [slots, setSlots] = useState<Array<string | null>>([]);
   const [selection, setSelection] = useState<Selection>(null);
   const [benchSet, setBenchSet] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: "role", desc: false });
 
   const MAX_BENCH = 9;
-  const layout = FORMATION_LAYOUTS[formation] ?? FORMATION_LAYOUTS["4-3-3"]!;
-  const slotSet = new Set(slots.filter(Boolean) as string[]);
+  const shownFormation = editing ? formation : squad.formation;
+  const layout = FORMATION_LAYOUTS[shownFormation] ?? FORMATION_LAYOUTS["4-3-3"]!;
+
+  // 읽기 모드의 전술판은 저장된 배치에서 그린다 (편집 상태에 의존하지 않는다)
+  const readSlots = useMemo(
+    () =>
+      assignSlots(
+        FORMATION_LAYOUTS[squad.formation] ?? FORMATION_LAYOUTS["4-3-3"]!,
+        players.filter((p) => p.role === "선발"),
+      ),
+    [players, squad.formation],
+  );
+  const boardSlots = editing ? slots : readSlots;
+  const slotSet = new Set(boardSlots.filter(Boolean) as string[]);
   const benchPlayers = players.filter((p) => !slotSet.has(p.id));
   const benchDesignated = benchPlayers.filter((p) => benchSet.has(p.id));
 
   function startEdit() {
-    const fm = FORMATIONS.includes(game.views.squad.formation)
-      ? game.views.squad.formation
-      : "4-3-3";
+    const fm = FORMATIONS.includes(squad.formation) ? squad.formation : "4-3-3";
     setFormation(fm);
-    setSlots(
-      assignSlots(FORMATION_LAYOUTS[fm]!, players.filter((p) => p.role === "선발")),
-    );
-    // 현재 매치데이 벤치(역할=벤치)를 초기 선택으로
+    setTactics(squad.tactics);
+    setSlots(assignSlots(FORMATION_LAYOUTS[fm]!, players.filter((p) => p.role === "선발")));
     setBenchSet(new Set(players.filter((p) => p.role === "벤치").map((p) => p.id)));
     setSelection(null);
     setSaveError(null);
     setEditing(true);
   }
 
+  function cancelEdit() {
+    setEditing(false);
+    setSelection(null);
+    setSaveError(null);
+    setFormation(squad.formation);
+    setTactics(squad.tactics);
+  }
+
   /** 비선발 선수를 매치데이 벤치(최대 9)로 지정/해제 — 나머지는 예비 스쿼드 */
   function toggleBench(id: string) {
     setBenchSet((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        const count = benchPlayers.filter((p) => next.has(p.id)).length;
-        if (count >= MAX_BENCH) return prev; // 벤치 정원 초과 방지
-        next.add(id);
-      }
+      if (next.has(id)) next.delete(id);
+      else if (benchPlayers.filter((p) => next.has(p.id)).length < MAX_BENCH) next.add(id);
       return next;
     });
   }
@@ -193,9 +491,23 @@ export function SquadView({
     setSelection(null);
   }
 
-  /** 선택-스왑: 슬롯↔슬롯은 자리 교환, 슬롯↔벤치는 선수 교체 */
+  /**
+   * 선택-스왑: 슬롯↔슬롯은 자리 교환, 슬롯↔벤치는 선수 교체.
+   *
+   * 이미 선발인 선수를 "벤치 쪽 선택"으로 다른 자리에 넣으면 같은 선수가 두 자리에
+   * 앉는다(명단 표에서 선발을 고른 뒤 슬롯을 누르는 경로). 그 경우는 자리 교환으로 돌린다.
+   */
   function applySwap(a: Selection, b: Selection) {
-    if (!a || !b) return;
+    if (!a || !b || !editing) return;
+    if (a.kind === "bench" && b.kind === "bench") return;
+    if (a.kind === "bench" && b.kind === "slot") {
+      const already = slots.indexOf(a.id);
+      if (already >= 0) return applySwap({ kind: "slot", index: already }, b);
+    }
+    if (b.kind === "bench" && a.kind === "slot") {
+      const already = slots.indexOf(b.id);
+      if (already >= 0) return applySwap(a, { kind: "slot", index: already });
+    }
     setSlots((prev) => {
       const next = [...prev];
       if (a.kind === "slot" && b.kind === "slot") {
@@ -209,10 +521,28 @@ export function SquadView({
       }
       return next;
     });
+    // 선발로 올라간 선수는 벤치 지정에서 빼고, 내려온 선수는 벤치에 넣는다
+    const promoted = a.kind === "bench" ? a.id : b.kind === "bench" ? b.id : null;
+    const demotedIndex = a.kind === "slot" && b.kind === "bench" ? a.index : b.kind === "slot" && a.kind === "bench" ? b.index : null;
+    const demoted = demotedIndex !== null ? (slots[demotedIndex] ?? null) : null;
+    if (promoted || demoted) {
+      setBenchSet((prev) => {
+        const next = new Set(prev);
+        if (promoted) next.delete(promoted);
+        if (demoted && next.size < MAX_BENCH) next.add(demoted);
+        return next;
+      });
+    }
     setSelection(null);
   }
 
   function clickSlot(index: number) {
+    if (!editing) {
+      // 읽기 모드에선 선택이 곧 상세 보기다
+      const id = boardSlots[index];
+      setSelection(id ? { kind: "slot", index } : null);
+      return;
+    }
     const here: Selection = { kind: "slot", index };
     if (!selection) return setSelection(here);
     if (selection.kind === "slot" && selection.index === index) return setSelection(null);
@@ -221,18 +551,44 @@ export function SquadView({
 
   function clickBench(id: string) {
     const here: Selection = { kind: "bench", id };
+    if (!editing) return setSelection(selection?.kind === "bench" && selection.id === id ? null : here);
     if (!selection) return setSelection(here);
     if (selection.kind === "bench") return setSelection(selection.id === id ? null : here);
     applySwap(selection, here);
   }
 
+  const dragData = (sel: Exclude<Selection, null>) => JSON.stringify(sel);
+  const readDrag = (e: React.DragEvent): Selection => {
+    try {
+      return JSON.parse(e.dataTransfer.getData("text/plain")) as Selection;
+    } catch {
+      return null;
+    }
+  };
+
   const gkSlotIdx = layout.findIndex((s) => s.code === "GK");
-  const gkOccupant = gkSlotIdx >= 0 ? byId.get(slots[gkSlotIdx] ?? "") : undefined;
-  const gkWarning = gkOccupant && gkOccupant.positionGroup !== "GK";
-  const unavailableInXI = slots
-    .filter((id): id is string => id !== null)
-    .map((id) => byId.get(id))
-    .filter((p): p is SquadRow => p !== undefined && !p.available);
+  const gkOccupant = gkSlotIdx >= 0 ? byId.get(boardSlots[gkSlotIdx] ?? "") : undefined;
+  const gkWarning = editing && gkOccupant && gkOccupant.positionGroup !== "GK";
+  const xi = boardSlots
+    .map((id) => (id ? byId.get(id) : undefined))
+    .filter((p): p is SquadRow => p !== undefined);
+  const unavailableInXI = xi.filter((p) => !p.available);
+  const unavailableOnBench = benchDesignated.filter((p) => !p.available);
+  const xiRating = xi.length > 0 ? Math.round(xi.reduce((s, p) => s + p.overall, 0) / xi.length) : 0;
+  const misfits = editing
+    ? boardSlots
+        .map((id, i) => ({ p: id ? byId.get(id) : undefined, code: layout[i]?.code }))
+        .filter((x) => x.p && x.code && fitAt(x.p, x.code).value < 50)
+    : [];
+  const drop = editing ? expectedDrop(squad.tactics, { ...tactics, formation }) : 0;
+
+  const selectedPlayer =
+    selection?.kind === "slot"
+      ? byId.get(boardSlots[selection.index] ?? "")
+      : selection?.kind === "bench"
+        ? byId.get(selection.id)
+        : undefined;
+  const selectedSlotCode = selection?.kind === "slot" ? (layout[selection.index]?.code ?? null) : null;
 
   async function save() {
     setSaving(true);
@@ -241,18 +597,21 @@ export function SquadView({
     const starting = slots
       .map((id, i) => (id ? { playerId: id, position: layout[i]!.code } : null))
       .filter((x): x is { playerId: string; position: string } => x !== null);
-    // 매치데이 벤치 = 유저가 지정한 선수(최대 9). 나머지 비선발은 예비 스쿼드
     const bench = benchDesignated.map((p) => ({ playerId: p.id }));
+    // 포메이션은 별도 필드로 보낸다 (라우트가 setTactics를 한 번만 호출하게)
+    const { formation: _formation, ...axes } = tactics;
+    void _formation;
     try {
       const res = await fetch(`/api/games/${game.id}/lineup`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ starting, bench, formation }),
+        body: JSON.stringify({ starting, bench, formation, tactics: axes }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "저장 실패");
       onUpdate(data);
       setEditing(false);
+      setSelection(null);
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -266,105 +625,172 @@ export function SquadView({
   return (
     <div data-testid="view-squad">
       <div className="squad-head">
-        <div className="section-title" style={{ margin: 0 }}>
-          선발 · 포메이션 {editing ? formation : game.views.squad.formation}
+        <div className="squad-summary">
+          <span>
+            <b>{shownFormation}</b> · 선발 평균 <b>{xiRating}</b>
+          </span>
+          <span className="muted">
+            매치데이 {xi.length + (editing ? benchDesignated.length : players.filter((p) => p.role === "벤치").length)}인 ·
+            스쿼드 {players.length}명
+          </span>
         </div>
-        {game.views.squad.editable && !editing && (
+        {squad.editable && !editing && (
           <button className="ghost-btn" onClick={startEdit} data-testid="edit-lineup">
-            전술판 열기
+            전술판 편집
           </button>
         )}
-        {!game.views.squad.editable && (
+        {!squad.editable && (
           <button className="ghost-btn" onClick={onGoToChat}>
             경기 중 — 채팅으로
           </button>
         )}
       </div>
 
-      {editing ? (
-        <div className="lineup-editor" data-testid="lineup-editor">
-          <div className="board-toolbar">
-            <label>
-              포메이션{" "}
-              <select
-                value={formation}
-                onChange={(e) => changeFormation(e.target.value)}
-                data-testid="formation-select"
-              >
-                {FORMATIONS.map((f) => (
-                  <option key={f} value={f}>
-                    {f}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="board-actions">
-              <button
-                className="primary-btn"
-                onClick={save}
-                disabled={saving || slots.some((s) => s === null)}
-                data-testid="save-lineup"
-              >
-                {saving ? "저장 중…" : "라인업 저장"}
-              </button>
-              <button className="ghost-btn" onClick={() => setEditing(false)} disabled={saving}>
-                취소
-              </button>
+      {(gkWarning || unavailableInXI.length > 0 || unavailableOnBench.length > 0 || misfits.length > 0 || saveError) && (
+        <div className="lineup-status warn" data-testid="lineup-status">
+          {gkWarning && <div>⚠ GK 자리에 필드 플레이어 — 저장하면 그 선수가 골키퍼가 됩니다.</div>}
+          {unavailableInXI.length > 0 && (
+            <div>⚠ 선발 불가(부상·정지): {unavailableInXI.map((p) => p.name).join(", ")} — 교체하세요.</div>
+          )}
+          {unavailableOnBench.length > 0 && (
+            <div>⚠ 벤치에 출전 불가 선수: {unavailableOnBench.map((p) => p.name).join(", ")}</div>
+          )}
+          {misfits.length > 0 && (
+            <div>
+              ⚠ 낯선 자리: {misfits.map((x) => `${x.p!.name}(${x.code})`).join(", ")} — 적응도가 낮으면 경기력이
+              떨어집니다.
             </div>
-          </div>
+          )}
+          {saveError && <div data-testid="lineup-error">{saveError}</div>}
+        </div>
+      )}
 
-          {(gkWarning || unavailableInXI.length > 0 || saveError) && (
-            <div className="lineup-status warn" data-testid="lineup-status">
-              {gkWarning && <div>⚠ GK 슬롯에 필드 플레이어 — 저장하면 그 선수가 골키퍼가 됩니다.</div>}
-              {unavailableInXI.length > 0 && (
-                <div>
-                  ⚠ 선발 불가(부상·정지): {unavailableInXI.map((p) => p.name).join(", ")} — 교체하세요.
-                </div>
-              )}
-              {saveError && <div data-testid="lineup-error">{saveError}</div>}
+      <div className="squad-layout">
+        <div className="squad-board-col">
+          {/* board-toolbar는 편집 중에만 있다 — e2e가 이 testid로 편집 모드를 본다 */}
+          {editing && (
+            <div className="board-toolbar" data-testid="lineup-editor">
+              <label>
+                포메이션{" "}
+                <select
+                  value={formation}
+                  onChange={(e) => changeFormation(e.target.value)}
+                  data-testid="formation-select"
+                >
+                  {FORMATIONS.map((f) => (
+                    <option key={f} value={f}>
+                      {f}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="board-actions">
+                <button
+                  className="primary-btn"
+                  onClick={save}
+                  disabled={saving || slots.some((s) => s === null)}
+                  data-testid="save-lineup"
+                >
+                  {saving ? "저장 중…" : "저장"}
+                </button>
+                <button className="ghost-btn" onClick={cancelEdit} disabled={saving}>
+                  취소
+                </button>
+              </div>
             </div>
           )}
 
-          <div className="pitch-board" data-testid="pitch-board">
+          <div className={`pitch-board${editing ? " editing" : ""}`} data-testid="pitch-board">
             <div className="pitch-lines" />
+            <div className="pitch-box top" />
+            <div className="pitch-box small top" />
+            <div className="pitch-box bottom" />
+            <div className="pitch-box small bottom" />
+            <span className="pitch-zone" style={{ top: "6%" }}>
+              공격
+            </span>
+            <span className="pitch-zone" style={{ top: "46%" }}>
+              중원
+            </span>
+            <span className="pitch-zone" style={{ top: "84%" }}>
+              수비
+            </span>
             {layout.map((slot, i) => {
-              const p = byId.get(slots[i] ?? "");
+              const p = byId.get(boardSlots[i] ?? "");
               const selected = selection?.kind === "slot" && selection.index === i;
+              const fit = p ? fitAt(p, slot.code) : null;
               return (
                 <button
                   key={i}
                   className={`pitch-slot ${chipClass(p, selected)}`}
                   style={{ left: `${slot.x}%`, top: `${slot.y}%` }}
                   onClick={() => clickSlot(i)}
-                  draggable
-                  onDragStart={(e) =>
-                    e.dataTransfer.setData("text/plain", JSON.stringify({ kind: "slot", index: i }))
-                  }
-                  onDragOver={(e) => e.preventDefault()}
+                  draggable={editing}
+                  onDragStart={(e) => e.dataTransfer.setData("text/plain", dragData({ kind: "slot", index: i }))}
+                  onDragOver={(e) => editing && e.preventDefault()}
                   onDrop={(e) => {
                     e.preventDefault();
-                    try {
-                      const from = JSON.parse(e.dataTransfer.getData("text/plain")) as Selection;
-                      applySwap(from, { kind: "slot", index: i });
-                    } catch {
-                      /* 무시 */
-                    }
+                    applySwap(readDrag(e), { kind: "slot", index: i });
                   }}
                   data-testid={`slot-${i}`}
+                  title={p ? `${p.name} · ${slot.code} 적응도 ${fit?.value}` : slot.code}
                 >
                   <span className="slot-pos">{slot.code}</span>
-                  <span className="slot-name">{p?.name ?? "—"}</span>
-                  <span className="slot-ovr">{p?.overall ?? ""}</span>
+                  <span className="slot-name">
+                    {p?.isCaptain ? "Ⓒ" : ""}
+                    {p?.name ?? "—"}
+                  </span>
+                  <span className="slot-meta">
+                    <b>{p?.overall ?? ""}</b>
+                    {fit && <span className={`fit ${fitClass(fit.value)}`}>{fit.value}</span>}
+                    {p && !p.available && <span className="slot-flag">✖</span>}
+                    {p?.hasIssue && <span className="slot-flag warn">!</span>}
+                  </span>
                 </button>
               );
             })}
           </div>
+          <p className="hint">
+            {editing
+              ? "선수를 탭해 선택한 뒤 다른 자리를 탭하면 자리를 바꿉니다 (드래그도 됩니다). 슬롯의 포지션이 그 선수의 배치 포지션이 되고, 자리 적응도는 칩 오른쪽 숫자입니다."
+              : "자리를 탭하면 선수 상세가 열립니다. 라인업·전술을 바꾸려면 전술판 편집을 누르세요."}
+          </p>
+        </div>
 
+        <div className="squad-side-col">
+          <TacticsPanel
+            tactics={editing ? { ...tactics, formation } : squad.tactics}
+            editing={editing}
+            familiarity={squad.familiarity}
+            drop={drop}
+            onChange={(patch) => setTactics((t) => ({ ...t, ...patch }))}
+          />
+          {selectedPlayer && <PlayerDetail p={selectedPlayer} slotCode={selectedSlotCode} />}
+        </div>
+      </div>
+
+      {editing && (
+        <>
           <div className="section-title" data-testid="bench-count">
             벤치 {benchDesignated.length}/{MAX_BENCH} · 예비 {benchPlayers.length - benchDesignated.length}
-            <span className="hint" style={{ fontWeight: 400 }}> — 탭해 선발과 교체 · 배지로 벤치/예비 지정</span>
+            <span className="hint" style={{ fontWeight: 400 }}>
+              {" "}
+              — 탭해 선발과 교체 · 배지로 벤치/예비 지정
+            </span>
           </div>
-          <div className="bench-row" onDragOver={(e) => e.preventDefault()}>
+          <div
+            className="bench-row"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              // 선발을 벤치 영역에 떨어뜨리면 그 자리를 비우는 대신 스왑 대상이 없으므로
+              // 벤치 지정만 바꾼다 (자리 교환은 칩 위에 떨어뜨려야 한다)
+              const from = readDrag(e);
+              if (from?.kind === "slot") {
+                const id = slots[from.index];
+                if (id) toggleBench(id);
+              }
+            }}
+          >
             {benchPlayers.map((p) => {
               const selected = selection?.kind === "bench" && selection.id === p.id;
               const onBench = benchSet.has(p.id);
@@ -375,20 +801,31 @@ export function SquadView({
                   tabIndex={0}
                   className={`bench-chip ${chipClass(p, selected)}${onBench ? " on-bench" : ""}`}
                   onClick={() => clickBench(p.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      clickBench(p.id);
+                    }
+                  }}
                   draggable
-                  onDragStart={(e) =>
-                    e.dataTransfer.setData("text/plain", JSON.stringify({ kind: "bench", id: p.id }))
-                  }
+                  onDragStart={(e) => e.dataTransfer.setData("text/plain", dragData({ kind: "bench", id: p.id }))}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    applySwap(readDrag(e), { kind: "bench", id: p.id });
+                  }}
                   data-testid={`bench-${p.id}`}
                 >
                   <span className="slot-pos">{p.position}</span>
                   <span className="slot-name">{p.name}</span>
-                  <span className="slot-ovr">{p.overall}</span>
-                  {!p.available && (
-                    <span className="badge warn">
-                      {p.injury ? `부상(${p.injury.bodyPart})` : `정지 ${p.suspended}경기`}
-                    </span>
-                  )}
+                  <span className="slot-meta">
+                    <b>{p.overall}</b>
+                    {!p.available && (
+                      <span className="slot-flag" title={p.injury ? `부상(${p.injury.bodyPart})` : `정지 ${p.suspended}경기`}>
+                        ✖
+                      </span>
+                    )}
+                  </span>
                   <button
                     className={`bench-toggle${onBench ? " on" : ""}`}
                     onClick={(e) => {
@@ -404,63 +841,149 @@ export function SquadView({
               );
             })}
           </div>
-          <p className="hint">
-            선수를 탭해 선택한 뒤 다른 자리를 탭하면 서로 자리를 바꿉니다(선발 편집). 슬롯의
-            포지션이 선수의 새 포지션이 되고, 그룹이 바뀌면 전력 평가(OVR)도 다시 계산됩니다.
-            아래쪽 <b>벤치/예비</b> 배지로 매치데이 18인(선발 11 + 벤치 최대 9) 안에 들 선수를
-            직접 고를 수 있습니다.
-          </p>
-        </div>
-      ) : (
-        <table className="squad-table">
-          <thead>
-            <tr>
-              <th>선수</th>
-              <th>포지션</th>
-              <th>OVR</th>
-              <th className="hide-sm">적응</th>
-              <th>폼</th>
-              <th>사기</th>
-              <th>피로</th>
-              <th className="hide-sm">골</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {players.map((p) => (
-              <tr key={p.id} className={p.role === "선발" ? "starter" : ""}>
-                <td>
-                  {p.isCaptain ? "Ⓒ " : ""}
-                  {p.name}
-                </td>
-                <td>{p.position}</td>
-                <td title={p.adaptationDaysLeft > 0 ? "적응 중 — 아직 정확한 수치가 아니다" : undefined}>
-                  {p.overall}
-                  {p.adaptationDaysLeft > 0 && <span className="est">?</span>}
-                </td>
-                <td className="hide-sm" title="전술 적응도">{p.familiarity}</td>
-                <td>{p.form > 0 ? `+${p.form}` : p.form}</td>
-                <td>{p.morale}</td>
-                <td>{p.fatigue}</td>
-                <td className="hide-sm">{p.seasonGoals}</td>
-                <td>
-                  {p.injury && <span className="badge warn" title={`${p.injury.severity} · 복귀 예상 ${p.injury.expectedReturn}`}>부상</span>}
-                  {p.suspended > 0 && <span className="badge warn">정지 {p.suspended}</span>}
-                  {p.suspended > 0 && <span className="badge warn">정지</span>}
-                  {p.hasIssue && <span className="badge warn">불만</span>}
-                  {p.adaptationDaysLeft > 0 && (
-                    <span className="badge" title={`적응 완료까지 약 ${p.adaptationDaysLeft}일 — 수치는 추정치다`}>
-                      적응 중
-                    </span>
-                  )}
-                  <span className="badge">{p.role}</span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        </>
       )}
+
+      <div className="section-title">명단 {players.length}명</div>
+      <SquadTable
+        players={players}
+        sort={sort}
+        onSort={(key) => setSort((s) => ({ key, desc: s.key === key ? !s.desc : key !== "name" }))}
+        selectedId={selectedPlayer?.id ?? null}
+        onSelect={(id) => {
+          const onBoard = boardSlots.indexOf(id);
+          const next: Selection = onBoard >= 0 ? { kind: "slot", index: onBoard } : { kind: "bench", id };
+          const same =
+            (selection?.kind === "slot" && selection.index === onBoard) ||
+            (selection?.kind === "bench" && selection.id === id);
+          setSelection(same ? null : next);
+        }}
+      />
     </div>
+  );
+}
+
+type SortKey = "role" | "name" | "position" | "overall" | "age" | "form" | "morale" | "fatigue" | "goals";
+const ROLE_ORDER: Record<string, number> = { 선발: 0, 벤치: 1, 스쿼드: 2 };
+const GROUP_ORDER: Record<string, number> = { GK: 0, DF: 1, MF: 2, FW: 3 };
+
+/** 명단 표 — 열 머리를 눌러 정렬한다. 기본은 역할 → 포지션 라인 → OVR */
+function SquadTable({
+  players,
+  sort,
+  onSort,
+  selectedId,
+  onSelect,
+}: {
+  players: SquadRow[];
+  sort: { key: SortKey; desc: boolean };
+  onSort: (key: SortKey) => void;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const rows = useMemo(() => {
+    const dir = sort.desc ? -1 : 1;
+    const value = (p: SquadRow): number | string => {
+      switch (sort.key) {
+        case "name":
+          return p.name;
+        case "position":
+          return (GROUP_ORDER[p.positionGroup] ?? 9) * 100 + p.overall;
+        case "overall":
+          return p.overall;
+        case "age":
+          return p.age;
+        case "form":
+          return p.form;
+        case "morale":
+          return p.morale;
+        case "fatigue":
+          return p.fatigue;
+        case "goals":
+          return p.seasonGoals;
+        default:
+          return (ROLE_ORDER[p.role] ?? 9) * 1000 + (GROUP_ORDER[p.positionGroup] ?? 9) * 100 - p.overall;
+      }
+    };
+    return [...players].sort((a, b) => {
+      const x = value(a);
+      const y = value(b);
+      if (typeof x === "string" || typeof y === "string") return String(x).localeCompare(String(y)) * dir;
+      return (x - y) * dir;
+    });
+  }, [players, sort]);
+
+  const th = (key: SortKey, label: string, className?: string) => (
+    <th
+      className={`${className ?? ""}${sort.key === key ? " sorted" : ""}`}
+      onClick={() => onSort(key)}
+      title="정렬"
+    >
+      {label}
+      {sort.key === key && <span className="sort-mark">{sort.desc ? "▼" : "▲"}</span>}
+    </th>
+  );
+
+  return (
+    <table className="squad-table" data-testid="squad-table">
+      <thead>
+        <tr>
+          {th("name", "선수")}
+          {th("position", "포지션")}
+          {th("age", "나이", "hide-sm")}
+          {th("overall", "OVR")}
+          <th className="hide-sm" title="이 전술에 대한 적응도">
+            적응
+          </th>
+          {th("form", "폼")}
+          {th("morale", "사기")}
+          {th("fatigue", "피로")}
+          {th("goals", "골", "hide-sm")}
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((p) => (
+          <tr
+            key={p.id}
+            className={`${p.role === "선발" ? "starter" : ""}${selectedId === p.id ? " picked" : ""}`}
+            onClick={() => onSelect(p.id)}
+            data-testid={`squad-row-${p.id}`}
+          >
+            <td>
+              {p.isCaptain ? "Ⓒ " : ""}
+              {p.name}
+            </td>
+            <td>
+              {p.position}
+              {p.assignedPosition && p.assignedPosition !== p.position && (
+                <span className="assigned" title="이 전술에서 맡는 자리">
+                  →{p.assignedPosition}
+                </span>
+              )}
+            </td>
+            <td className="hide-sm">{p.age}</td>
+            <td title={p.adaptationDaysLeft > 0 ? "적응 중 — 아직 정확한 수치가 아니다" : undefined}>
+              {p.overall}
+              {p.adaptationDaysLeft > 0 && <span className="est">?</span>}
+            </td>
+            <td className="hide-sm">{p.role === "스쿼드" ? "—" : p.familiarity}</td>
+            <td>{p.form > 0 ? `+${p.form}` : p.form}</td>
+            <td>
+              <StatBar value={p.morale} kind="morale" />
+            </td>
+            <td>
+              <StatBar value={p.fatigue} kind="fatigue" />
+            </td>
+            <td className="hide-sm">{p.seasonGoals}</td>
+            <td className="squad-badges">
+              <StatusBadges p={p} />
+              <span className="badge">{p.role}</span>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 

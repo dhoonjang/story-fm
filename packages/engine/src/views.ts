@@ -32,6 +32,7 @@ import {
   playerName,
   playersOf,
   seasonStatOf,
+  squadFamiliarity,
   tacticsOf,
   teamName,
   teamShortName,
@@ -56,6 +57,19 @@ export interface FinanceMonthView {
   pnlNet: number;
   wageRatio: number;
   notes: string[];
+}
+
+/** 팀 전술 (TACTICS) — 스쿼드 탭에서 보고 편집한다 */
+export interface TacticsView {
+  formation: string;
+  /** 1(수비적) ~ 5(공격적) */
+  mentality: number;
+  defensiveLine: number;
+  pressing: number;
+  tempo: number;
+  /** 1(중앙) ~ 5(측면) */
+  width: number;
+  passStyle: string;
 }
 
 export interface SquadPositionView {
@@ -191,7 +205,9 @@ export interface OfficeViews {
     };
     players: SquadViewRow[];
     formation: string;
-    tactics: Record<string, number | string>;
+    tactics: TacticsView;
+    /** 선발 평균 전술 적응도 — 전술을 바꾸면 떨어진다 */
+    familiarity: number;
     editable: boolean;
   };
   calendar: {
@@ -736,6 +752,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       players,
       formation: tactics.spec.formation,
       tactics: { ...tactics.spec },
+      familiarity: Math.round(squadFamiliarity(state, userTeamId)),
       editable: state.phase !== "match",
     },
     calendar: {

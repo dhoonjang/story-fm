@@ -949,13 +949,195 @@ textarea {
   padding-left: 8px;
 }
 
-/* 스쿼드 편집 */
+/* ── 스쿼드 (전술판 · 전술 · 명단) ─────────────────────── */
 .squad-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 10px;
   gap: 8px;
+}
+.squad-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+.squad-summary .muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+/* 전술판(왼쪽) + 전술·선수 상세(오른쪽) — 좁아지면 한 열로 접힌다 */
+.squad-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+  gap: 14px;
+  align-items: start;
+}
+.squad-board-col,
+.squad-side-col {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 전술 패널 */
+.tactics-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.tactics-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.tactics-head .muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+.tactics-head .drop {
+  color: var(--gold);
+}
+.tactics-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.tactic-row {
+  display: grid;
+  grid-template-columns: 66px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+.tactic-label {
+  color: var(--muted);
+}
+.tactic-steps {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+.tactic-step {
+  min-width: 24px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 2px 0;
+  font-size: 11.5px;
+}
+.tactic-step.wide {
+  min-width: auto;
+  padding: 2px 8px;
+}
+.tactic-step.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 700;
+}
+.tactic-value {
+  color: var(--text);
+  font-size: 11.5px;
+  margin-left: 4px;
+}
+.tactic-value.read {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 0;
+  font-size: 12.5px;
+}
+.tactic-meter {
+  flex-shrink: 0;
+  width: 68px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.tactic-meter span {
+  display: block;
+  height: 100%;
+  background: var(--accent-2);
+}
+
+/* 선택한 선수 상세 */
+.player-detail {
+  background: var(--panel);
+  border: 1px solid var(--accent-2);
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 12.5px;
+}
+.pd-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.pd-head .muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+.pd-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px 8px;
+  margin-bottom: 8px;
+}
+.pd-cell {
+  display: flex;
+  flex-direction: column;
+}
+.pd-cell .muted {
+  color: var(--muted);
+  font-size: 11px;
+}
+.pd-axes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.pd-axis {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.pd-axis b {
+  color: var(--text);
+}
+.pd-foot {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+/* 자리 적응도 — 색으로 한눈에 (엔진 proficiency와 같은 뜻) */
+.fit {
+  font-size: 10.5px;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 0 3px;
+}
+.fit.good {
+  color: var(--accent);
+}
+.fit.ok {
+  color: var(--gold);
+}
+.fit.bad {
+  color: var(--danger);
 }
 .ghost-btn {
   background: var(--panel-2);
@@ -1056,6 +1238,38 @@ textarea {
   top: 50%;
   border-top: 1.5px solid rgba(255, 255, 255, 0.25);
 }
+/* 페널티 박스 — 위(상대 골문)·아래(우리 골문) */
+.pitch-box {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 58%;
+  height: 16%;
+  border: 1.5px solid rgba(255, 255, 255, 0.22);
+  pointer-events: none;
+}
+.pitch-box.top {
+  top: 0;
+  border-top: none;
+}
+.pitch-box.bottom {
+  bottom: 0;
+  border-bottom: none;
+}
+.pitch-box.small {
+  width: 26%;
+  height: 6.5%;
+}
+/* 라인 이름 — 편집 중에만 옅게 (수비·미드·공격 구역 감각) */
+.pitch-zone {
+  position: absolute;
+  left: 8px;
+  color: rgba(255, 255, 255, 0.18);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  pointer-events: none;
+}
 .pitch-slot {
   position: absolute;
   transform: translate(-50%, -50%);
@@ -1108,9 +1322,24 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.slot-ovr {
+.slot-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: 10.5px;
   color: var(--muted);
+}
+.slot-meta b {
+  color: var(--text);
+  font-size: 11px;
+}
+.slot-flag {
+  color: var(--danger);
+  font-size: 9px;
+}
+.slot-flag.warn {
+  color: var(--gold);
+  font-weight: 800;
 }
 .bench-row {
   display: flex;
@@ -1142,6 +1371,58 @@ textarea {
   border-color: var(--accent-2);
   color: var(--accent-2);
   font-weight: 700;
+}
+
+/* 명단 표 — 정렬 가능한 머리글, 상태 막대 */
+.squad-table th.sorted {
+  color: var(--accent);
+}
+.squad-table th[title="정렬"] {
+  cursor: pointer;
+  user-select: none;
+}
+.squad-table .sort-mark {
+  font-size: 9px;
+  margin-left: 3px;
+}
+.squad-table tbody tr {
+  cursor: pointer;
+}
+.squad-table tbody tr:hover td {
+  background: rgba(96, 165, 250, 0.06);
+}
+.squad-table tbody tr.picked td {
+  background: rgba(96, 165, 250, 0.12);
+}
+.squad-table .assigned {
+  color: var(--accent-2);
+  font-size: 11px;
+  margin-left: 3px;
+}
+.squad-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.stat-bar {
+  display: inline-block;
+  width: 46px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--panel-2);
+  overflow: hidden;
+  vertical-align: middle;
+}
+.stat-bar span {
+  display: block;
+  height: 100%;
+  background: var(--accent-2);
+}
+.stat-bar.morale span {
+  background: var(--accent);
+}
+.stat-bar.fatigue span {
+  background: var(--gold);
 }
 
 /* 훈련 스케줄 편집 (달력 상세) */
@@ -1777,6 +2058,16 @@ textarea {
   }
   .fin-feed-row .cat {
     display: none;
+  }
+  /* 스쿼드 — 전술판과 전술 패널을 한 열로 쌓는다 */
+  .squad-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .tactic-row {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
+  .pd-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   /* 어드민 표 — 좁은 화면에선 이름 입력을 줄여 능력치 열에 폭을 넘긴다 */
   .ai.name {

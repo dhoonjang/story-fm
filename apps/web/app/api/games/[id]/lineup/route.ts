@@ -9,10 +9,23 @@ const SlotSchema = z.object({
   /** 이 전술에서 맡는 포지션 (전술판 슬롯 코드) */
   position: z.string().min(1).optional(),
 });
+const Scale5 = z.number().int().min(1).max(5);
+/** 전술판에서 함께 저장하는 팀 전술 — 슬라이더 5축 + 패스 스타일 */
+const TacticsSchema = z
+  .object({
+    mentality: Scale5,
+    defensiveLine: Scale5,
+    pressing: Scale5,
+    tempo: Scale5,
+    width: Scale5,
+    passStyle: z.enum(["short", "mixed", "direct"]),
+  })
+  .partial();
 const LineupSchema = z.object({
   starting: z.array(SlotSchema).length(11),
   bench: z.array(SlotSchema).max(12).default([]),
   formation: z.enum(["4-4-2", "4-3-3", "4-2-3-1", "3-5-2", "5-4-1"]).optional(),
+  tactics: TacticsSchema.optional(),
 });
 
 /**
@@ -44,9 +57,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       );
     }
 
-    // 포메이션 먼저 — setLineup의 슬롯 기본값이 새 포메이션 기준으로 잡히게 한다
-    if (body.data.formation) {
-      const res = setTactics(state, { formation: body.data.formation });
+    // 전술(포메이션 포함) 먼저 — setLineup의 슬롯 기본값이 새 포메이션 기준으로
+    // 잡히게 한다. 한 번만 호출해야 적응도 하락(tacticsChangeDrop)도 한 번만 적용된다
+    const spec = {
+      ...(body.data.formation ? { formation: body.data.formation } : {}),
+      ...(body.data.tactics ?? {}),
+    };
+    if (Object.keys(spec).length > 0) {
+      const res = setTactics(state, spec);
       if (!res.ok) return NextResponse.json({ error: res.message }, { status: 400 });
     }
     // v6: 전술판 배치는 TACTIC_ASSIGNMENT를 갱신한다 (주 포지션은 바꾸지 않는다)

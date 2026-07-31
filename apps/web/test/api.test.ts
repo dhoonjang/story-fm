@@ -207,6 +207,56 @@ describe("API — 온보딩부터 경기까지", () => {
     expect(userTurns).toHaveLength(0);
   });
 
+  it("전술판이 라인업과 팀 전술을 한 번에 저장한다", async () => {
+    const created = await createGame(
+      json({ teamId: "chelsea", managerName: "전술", background: "분석가", seed: 31 }),
+    );
+    const game = (await created.json()) as GamePayload;
+    const before = game.views.squad;
+    expect(before.tactics.mentality).toBe(3);
+    expect(before.familiarity).toBeGreaterThan(0);
+
+    // 현재 선발을 그대로 유지하고 전술만 바꾼다
+    const starting = before.players
+      .filter((p) => p.role === "선발")
+      .map((p) => ({ playerId: p.id, position: p.assignedPosition ?? p.position }));
+    expect(starting).toHaveLength(11);
+
+    const res = await postLineup(
+      json({
+        starting,
+        bench: [],
+        formation: before.formation,
+        tactics: { mentality: 5, pressing: 4, passStyle: "direct" },
+      }),
+      params(game.id),
+    );
+    expect(res.status).toBe(200);
+    const after = ((await res.json()) as GamePayload).views.squad;
+    expect(after.tactics.mentality).toBe(5);
+    expect(after.tactics.pressing).toBe(4);
+    expect(after.tactics.passStyle).toBe("direct");
+    // 건드리지 않은 축은 그대로
+    expect(after.tactics.tempo).toBe(before.tactics.tempo);
+    // 전술을 바꾸면 적응도가 떨어진다 (setTactics의 tacticsChangeDrop)
+    expect(after.familiarity).toBeLessThan(before.familiarity);
+  });
+
+  it("전술 값이 범위를 벗어나면 400", async () => {
+    const created = await createGame(
+      json({ teamId: "fulham", managerName: "범위", background: "분석가", seed: 32 }),
+    );
+    const game = (await created.json()) as GamePayload;
+    const starting = game.views.squad.players
+      .filter((p) => p.role === "선발")
+      .map((p) => ({ playerId: p.id, position: p.assignedPosition ?? p.position }));
+    const res = await postLineup(
+      json({ starting, bench: [], tactics: { mentality: 9 } }),
+      params(game.id),
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("재정 뷰가 월간 보고서·달력 뷰가 일지와 훈련 계획을 노출한다", async () => {
     const created = await createGame(
       json({ teamId: "tottenham", managerName: "재", background: "분석가", seed: 21 }),

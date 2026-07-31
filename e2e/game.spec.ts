@@ -44,7 +44,8 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await expect(page.getByTestId("tool-set_tactics").first()).toBeVisible({ timeout: 15_000 });
 
   // ── 경기일로 진행 (부상·불만 발생 시 중간에 멈추므로 반복) ──
-  for (let i = 0; i < 6; i++) {
+  // 정지 횟수는 세이브 시드마다 달라 넉넉히 돈다 — 6회로는 간간이 못 닿았다
+  for (let i = 0; i < 14; i++) {
     const phase = await page.getByTestId("game-phase").textContent();
     if (phase === "경기일") break;
     await input.fill("다음 경기로 가자");
@@ -194,11 +195,26 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
   await page.getByTestId("slot-10").click();
   await expect(page.getByTestId("slot-10")).toContainText(benchName ?? "");
 
+  // 명단에서 이미 선발인 선수를 고른 뒤 다른 자리를 눌러도 중복 배치되지 않는다
+  const starterName = (await page.getByTestId("slot-0").locator(".slot-name").textContent()) ?? "";
+  await page.locator(".squad-table tbody tr", { hasText: starterName.replace("Ⓒ", "") }).first().click();
+  await page.getByTestId("slot-5").click();
+  await expect(page.locator(".pitch-slot", { hasText: starterName })).toHaveCount(1);
+
+  // 전술도 전술판에서 함께 바꾼다 — 값의 뜻이 말로 보이고 적응도 하락을 미리 알려준다
+  await page.getByTestId("tactic-mentality-5").click();
+  await expect(page.getByTestId("tactics-panel")).toContainText("매우 공격적");
+  await page.getByTestId("tactic-pass-direct").click();
+  await expect(page.getByTestId("tactics-drop")).toBeVisible();
+
   // 저장 → 편집기 닫힘, 스쿼드 표에 새 선발 반영
   await page.getByTestId("save-lineup").click();
   await expect(page.getByTestId("lineup-editor")).toBeHidden({ timeout: 10_000 });
   await expect(page.getByTestId("edit-lineup")).toBeVisible();
   await expect(page.getByTestId("view-squad")).toContainText("4-4-2");
+  // 저장된 전술이 읽기 모드에 그대로 보인다
+  await expect(page.getByTestId("tactics-panel")).toContainText("매우 공격적");
+  await expect(page.getByTestId("tactics-panel")).toContainText("롱볼");
 
   // 전술판 저장은 채팅에 전송되지 않는다 (사용자 요청) — 채팅엔 훈련 지시 턴만
   await page.getByTestId("tab-채팅").click();
