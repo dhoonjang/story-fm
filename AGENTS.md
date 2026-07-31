@@ -48,9 +48,10 @@ source of truth)다. AI 에이전트와 사람 기여자 모두 이 문서를 �
 - **언어**: TypeScript (풀스택, strict 모드)
 - **런타임/프레임워크**: Next.js (App Router) + Node.js
 - **패키지 매니저**: pnpm (모노레포 워크스페이스 권장)
-- **LLM**: 역할별 멀티 프로바이더 — 메인 서사 GM·판정은 Anthropic
-  Claude(Opus), 경기 진행은 DeepSeek 계열. 티어·모델 ID는 `packages/llm`에서
-  단일 관리 (→ docs/design/economy.md)
+- **LLM**: 역할별 멀티 프로바이더 — 현재 실행 어댑터는 Anthropic Claude와
+  Google Gemini이며 코드 기본값은 전 티어 Claude(Opus). 경기 진행의 장기 후보는
+  DeepSeek 계열이다. 티어·모델 ID는 `packages/llm`에서 단일 관리
+  (→ docs/design/economy.md)
 - **상태/검증**: Zod로 LLM 입출력 스키마 검증 (구조화 출력 강제)
 - **테스트**: Vitest
 - **린트/포맷**: ESLint + Prettier
@@ -89,30 +90,34 @@ packages/
   도구 호출/JSON을 강제한다. 자유 텍스트는 내러티브 등 "사람이 읽는" 출력에만.
 - **이벤트 소싱**: 경기는 이벤트 로그로 표현한다. 내러티브·리플레이·디버깅이
   모두 이 로그에서 파생된다.
-- **페르소나 = 데이터**: 에이전트 성격/기억은 코드가 아니라 데이터(프롬프트
-  + 상태)로 다룬다.
+- **페르소나 = 데이터**: 에이전트 성격/기억은 코드가 아니라 데이터(프롬프트와
+  상태)로 다룬다.
 
 ---
 
 ## 5. 개발 규약
 
 ### 코드 스타일
+
 - TypeScript `strict: true`. `any` 금지(불가피하면 `unknown` + 좁히기).
 - 함수형·불변 우선. 부수효과는 경계(API/IO)에 격리.
 - 도메인 타입은 `packages/domain`에 모으고, 다른 패키지는 이를 import한다.
 - 파일·디렉터리는 kebab-case, 타입·컴포넌트는 PascalCase, 변수/함수는 camelCase.
 
 ### 커밋 / PR
+
 - Conventional Commits (`feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`).
 - 한 PR은 한 가지 관심사. LLM 프롬프트 변경은 별도 커밋으로 분리해 추적 가능하게.
 - 커밋/푸시는 사용자가 요청할 때만. `main` 직접 커밋 금지 — 브랜치에서 작업.
 
 ### 테스트
+
 - 시뮬레이션 코어는 **LLM 없이** 단위 테스트(시드 고정, 결정적).
 - LLM 의존 로직은 응답을 모킹하거나 스키마 검증 수준에서 테스트.
 - 새 기능엔 테스트 동반. 실패하는 테스트는 숨기지 말고 그대로 보고.
 
 ### 문서
+
 - **기획서는 `docs/design/`** 에서 관리한다. 게임 컨셉·시스템·밸런스의 단일 소스.
 - 기획·아키텍처 결정이 바뀌면 **코드보다 문서를 먼저** 갱신한다.
 - 중요한 설계 결정은 `docs/decisions/`에 ADR로 남긴다.
@@ -249,9 +254,10 @@ ERD와 설계 근거는 docs/design/implementation-notes.md에 정리했다.
 - `packages/engine` — 카탈로그 빌드·인스턴스화·일정 축·tick·스킬·경기·시즌
   전환·저장(SAVE_VERSION 6)·오피스 뷰·어드민 + **스카우팅(안개)·읽기 전용 조회**
   + **구단 재정**(`finance.ts` — 월간 보고서·상각·PSR)
-- `packages/llm` — GameLLM 인터페이스 + Opus 어댑터 (전 티어 Opus, 결정 #12).
-  **입력 3층 캐시 계층**(고정 / 레퍼런스 / 이력)과 `role:"system"` 상태 채널
-- `packages/agents` — GM 오케스트레이터 (실모드 Opus tool loop + **mock 모드**)
+- `packages/llm` — 제공자 중립 GameLLM + Anthropic/Gemini 어댑터
+  (코드 기본값은 전 티어 Opus, `LLM_PROVIDER=google`이면 Gemini 3.6 Flash).
+  **입력 3층 캐시 계층**(고정 / 레퍼런스 / 이력)과 제공자별 휘발 상태 채널
+- `packages/agents` — GM 오케스트레이터 (실모드 provider tool loop + **mock 모드**)
 - `apps/web` — Next.js 채팅 UI + 오피스 뷰(스쿼드 **전술판+전술**·달력·재정·대회·커리어),
   API, `/admin` **선수 카탈로그 편집** (게임과 무관한 초기치 DB — 편집은 새 게임에만
   반영되고 진행 중 세이브는 영향 없음)

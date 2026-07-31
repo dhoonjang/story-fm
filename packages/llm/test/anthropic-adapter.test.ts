@@ -23,7 +23,8 @@ function makeStubClient(responses: Array<Partial<Anthropic.Message>>): Anthropic
 
 /** 마지막 요청 파라미터 — 캐시 브레이크포인트·메시지 배치 검증용 */
 function lastParams(client: Anthropic): Anthropic.MessageCreateParamsNonStreaming {
-  const create = (client.messages as unknown as { create: { mock: { calls: unknown[][] } } }).create;
+  const create = (client.messages as unknown as { create: { mock: { calls: unknown[][] } } })
+    .create;
   const calls = create.mock.calls;
   return calls[calls.length - 1]![0] as Anthropic.MessageCreateParamsNonStreaming;
 }
@@ -38,6 +39,10 @@ function hasCacheMarker(content: Anthropic.MessageParam["content"]): boolean {
   return content.some(
     (b) => typeof b === "object" && "cache_control" in b && b.cache_control !== undefined,
   );
+}
+
+function storedMessages(history: { messages: unknown[] }): Anthropic.MessageParam[] {
+  return history.messages as Anthropic.MessageParam[];
 }
 
 const tierConfig = { provider: "anthropic" as const, model: "test-model", maxTokens: 1024 };
@@ -60,7 +65,9 @@ describe("AnthropicGameLLM tool 루프", () => {
       },
       {
         stop_reason: "end_turn",
-        content: [{ type: "text", text: "@수석코치: 잘 풀리고 있습니다." }] as Anthropic.ContentBlock[],
+        content: [
+          { type: "text", text: "@수석코치: 잘 풀리고 있습니다." },
+        ] as Anthropic.ContentBlock[],
       },
     ]);
 
@@ -88,8 +95,14 @@ describe("AnthropicGameLLM tool 루프", () => {
     expect(result.stopReason).toBe("end_turn");
 
     // 이력: user, assistant(tool_use), user(tool_result is_error), assistant, user(tool_result), assistant
-    expect(result.history).toHaveLength(6);
-    const firstToolResult = result.history[2];
+    const history = storedMessages(result.history);
+    expect(history).toHaveLength(6);
+    expect(result.history).toMatchObject({
+      version: 1,
+      provider: "anthropic",
+      model: "test-model",
+    });
+    const firstToolResult = history[2];
     expect(firstToolResult?.role).toBe("user");
     const blocks = firstToolResult?.content as Anthropic.ToolResultBlockParam[];
     expect(blocks[0]?.is_error).toBe(true);
@@ -99,7 +112,9 @@ describe("AnthropicGameLLM tool 루프", () => {
     const stub = makeStubClient([
       {
         stop_reason: "tool_use",
-        content: [{ type: "tool_use", id: "t1", name: "noop", input: {} }] as Anthropic.ContentBlock[],
+        content: [
+          { type: "tool_use", id: "t1", name: "noop", input: {} },
+        ] as Anthropic.ContentBlock[],
       },
       endTurn,
     ]);
@@ -129,7 +144,7 @@ describe("AnthropicGameLLM tool 루프", () => {
     const result = await llm.runTurn({ system: "sys", history: [], user: "진행" });
     expect(result.toolCallCount).toBe(0);
     expect(result.usage.inputTokens).toBe(100);
-    expect(result.history).toHaveLength(2);
+    expect(storedMessages(result.history)).toHaveLength(2);
   });
 });
 
@@ -162,7 +177,9 @@ describe("입력 조립 — 캐시 계층과 상태 채널", () => {
     expect(messages[1]).toEqual({ role: "system", content: "[상태] 2026-07-02" });
 
     // 이력에는 남기지 않는다 — 매 턴 새로 주입되므로 누적되면 지난 상태가 쌓인다
-    expect(result.history.some((m) => (m as { role: string }).role === "system")).toBe(false);
+    expect(
+      storedMessages(result.history).some((m) => (m as { role: string }).role === "system"),
+    ).toBe(false);
   });
 
   it("이력의 문자열 content를 블록으로 정규화하고 마지막 메시지에 브레이크포인트를 붙인다", async () => {
@@ -195,7 +212,7 @@ describe("입력 조립 — 캐시 계층과 상태 채널", () => {
     const result = await llm.runTurn({ system: "sys", history, user: "이번" });
 
     expect(hasCacheMarker(history[0]!.content)).toBe(false);
-    expect(hasCacheMarker(result.history[0]!.content)).toBe(false);
+    expect(hasCacheMarker(storedMessages(result.history)[0]!.content)).toBe(false);
   });
 
   it("role:system을 거부하는 모델은 유저 메시지에 접어 넣고 재시도한다", async () => {
@@ -234,6 +251,10 @@ describe("입력 조립 — 캐시 계층과 상태 채널", () => {
     expect(messages).toHaveLength(1);
     expect(messages[0]?.role).toBe("user");
     expect(messages[0]?.content).toBe("[상태] 스냅샷\n\n[감독]\n발화");
+    expect(storedMessages(result.history)[0]).toEqual({
+      role: "user",
+      content: "[감독]\n발화",
+    });
     expect(result.stopReason).toBe("end_turn");
   });
 });

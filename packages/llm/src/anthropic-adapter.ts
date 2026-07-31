@@ -1,6 +1,15 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { TierConfig } from "./config";
-import type { GameLLM, GameToolSpec, TurnRequest, TurnResult, TurnUsage } from "./game-llm";
+import type { AnthropicTierConfig } from "./config";
+import {
+  isStoredLlmHistory,
+  isTextHistoryMessage,
+  type GameLLM,
+  type GameToolSpec,
+  type TurnHistory,
+  type TurnRequest,
+  type TurnResult,
+  type TurnUsage,
+} from "./game-llm";
 
 /** 한 턴 안에서 tool call 왕복 허용 횟수 — 조회 + 실행이 같이 도므로 여유를 둔다 */
 const MAX_TOOL_ITERATIONS = 8;
@@ -39,6 +48,41 @@ function normalizeHistory(history: Anthropic.MessageParam[]): Anthropic.MessageP
     out.push({ role: m.role, content: [{ type: "text", text: m.content }] });
   }
   return out;
+}
+
+function isAnthropicMessage(value: unknown): value is Anthropic.MessageParam {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<Anthropic.MessageParam>;
+  return (
+    (candidate.role === "user" || candidate.role === "assistant") &&
+    (typeof candidate.content === "string" || Array.isArray(candidate.content))
+  );
+}
+
+/**
+ * 공통/저장 이력을 Anthropic 메시지로 복원한다.
+ *
+ * 다른 제공자·모델의 원형 이력은 섞지 않는다. 설정을 바꾼 채 진행 중 경기를
+ * 열어도 장부·패킷으로 안전하게 재개할 수 있도록 그 경우 이력만 새로 시작한다.
+ */
+function anthropicHistory(
+  history: TurnHistory,
+  config: AnthropicTierConfig,
+): Anthropic.MessageParam[] {
+  if (isStoredLlmHistory(history)) {
+    if (history.provider !== config.provider || history.model !== config.model) return [];
+    return history.messages.filter(isAnthropicMessage);
+  }
+  if (!Array.isArray(history)) return [];
+  const messages: unknown[] = history;
+  if (messages.every(isTextHistoryMessage)) {
+    return messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+    }));
+  }
+  // 태그 도입 전 경기 세이브는 Anthropic MessageParam[] 원형이었다.
+  return messages.filter(isAnthropicMessage);
 }
 
 /**
@@ -86,15 +130,15 @@ function isMidSystemRejection(err: unknown): boolean {
  *   → 이번 턴 유저 발화 → 상태 스냅샷(role:"system")
  * 앞의 세 구간은 캐시 read(0.1×), 뒤 두 구간만 정가로 읽힌다.
  *
- * DeepSeek 어댑터가 추가되어도 GameLLM 계약(출력 문법·tool call·Zod 검증)은
- * 동일해야 한다 (economy.md §3).
+ * 다른 제공자 어댑터도 GameLLM 계약(출력 문법·tool call·Zod 검증)은
+ * 동일하게 지킨다 (economy.md §3).
  */
 export class AnthropicGameLLM implements GameLLM {
   private readonly client: Anthropic;
 
   /** client 주입은 테스트용 — 기본은 환경(API 키/프로필)에서 인증을 해석한다 */
   constructor(
-    private readonly config: TierConfig,
+    private readonly config: AnthropicTierConfig,
     client?: Anthropic,
   ) {
     this.client = client ?? new Anthropic();
@@ -105,7 +149,7 @@ export class AnthropicGameLLM implements GameLLM {
     const toolDefs: Anthropic.Tool[] = tools.map((t) => ({
       name: t.name,
       description: t.description,
-      input_schema: t.inputSchema,
+      input_schema: t.inputSchema as Anthropic.Tool.InputSchema,
     }));
 
     // 시스템 블록 — 앞이 더 안정적. 이력 마커 몫으로 1개를 남긴다
@@ -118,12 +162,11 @@ export class AnthropicGameLLM implements GameLLM {
       ...(i < MAX_BREAKPOINTS - 1 ? { cache_control: CACHE } : {}),
     }));
 
-    const baseHistory = normalizeHistory(req.history);
+    const baseHistory = normalizeHistory(anthropicHistory(req.history, this.config));
     /** 상태 스냅샷을 오퍼레이터 채널로 넣을지 (미지원 모델은 유저 메시지에 접어 넣는다) */
     let useSystemNote = req.stateNote !== undefined && !midSystemUnsupported.has(this.config.model);
     const buildMessages = (withNote: boolean): TurnMessage[] => {
-      const user =
-        withNote || !req.stateNote ? req.user : `${req.stateNote}\n\n${req.user}`;
+      const user = withNote || !req.stateNote ? req.user : `${req.stateNote}\n\n${req.user}`;
       const msgs: TurnMessage[] = [...baseHistory, { role: "user", content: user }];
       if (withNote && req.stateNote) msgs.push({ role: "system", content: req.stateNote });
       return msgs;
@@ -223,14 +266,12 @@ export class AnthropicGameLLM implements GameLLM {
       if (dangling.length > 0) {
         messages.push({
           role: "user",
-          content: dangling.map(
-            (b): Anthropic.ToolResultBlockParam => ({
-              type: "tool_result",
-              tool_use_id: b.id,
-              content: "턴이 중단되어 이 도구 호출은 처리되지 않았습니다 — 필요하면 다시 호출하세요.",
-              is_error: true,
-            }),
-          ),
+          content: dangling.map((b): Anthropic.ToolResultBlockParam => ({
+            type: "tool_result",
+            tool_use_id: b.id,
+            content: "턴이 중단되어 이 도구 호출은 처리되지 않았습니다 — 필요하면 다시 호출하세요.",
+            is_error: true,
+          })),
         });
       }
     }
@@ -238,6 +279,22 @@ export class AnthropicGameLLM implements GameLLM {
     // 상태 스냅샷은 이력에 남기지 않는다 — 매 턴 새로 주입되므로 누적되면
     // 지난 날짜·지난 스코어가 이력에 쌓여 모델을 혼란시킨다.
     const history = messages.filter((m): m is Anthropic.MessageParam => m.role !== "system");
-    return { text, history, usage, toolCallCount, stopReason };
+    // role:system 미지원 폴백에서도 휘발 상태를 세이브에 남기지 않는다.
+    const currentUser = history[baseHistory.length];
+    if (!useSystemNote && currentUser?.role === "user" && typeof currentUser.content === "string") {
+      history[baseHistory.length] = { role: "user", content: req.user };
+    }
+    return {
+      text,
+      history: {
+        version: 1,
+        provider: this.config.provider,
+        model: this.config.model,
+        messages: history,
+      },
+      usage,
+      toolCallCount,
+      stopReason,
+    };
   }
 }

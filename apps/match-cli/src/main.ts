@@ -19,7 +19,7 @@ import {
   describeLedger,
   type MatchLedgerState,
 } from "@story-fm/sim";
-import { AnthropicGameLLM, TIERS, type TurnUsage } from "@story-fm/llm";
+import { createGameLLM, TIERS, type TurnHistory, type TurnUsage } from "@story-fm/llm";
 import {
   GM_SYSTEM,
   MATCH_CASTER_SYSTEM,
@@ -119,7 +119,7 @@ const tool = makeLogMatchEventsTool((events: MatchEvent[]) => {
 });
 
 // ---- ③ 매치 티어 LLM 진행 루프 ----
-const llm = new AnthropicGameLLM(TIERS.match);
+const llm = createGameLLM(TIERS.match);
 const matchSystem = resolveSystemPrompts({
   gm: GM_SYSTEM,
   match: MATCH_CASTER_SYSTEM,
@@ -131,7 +131,7 @@ const totalUsage: TurnUsage = {
   cacheWriteTokens: 0,
 };
 
-let history: Awaited<ReturnType<typeof llm.runTurn>>["history"] = [];
+let history: TurnHistory = [];
 let userMessage = buildKickoffMessage(packet, managerNote);
 
 for (let turn = 1; turn <= maxTurns && ledger.phase !== "finished"; turn++) {

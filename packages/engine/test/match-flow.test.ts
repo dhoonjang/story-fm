@@ -114,11 +114,24 @@ describe("경기 흐름 (overview §4)", () => {
     advanceToMatchday(state);
     startMatch(state);
     advanceMockSegment(state);
+    if (!state.pendingMatch) throw new Error("경기 없음");
+    state.pendingMatch.casterHistory = {
+      version: 1,
+      provider: "google",
+      model: "gemini-test",
+      messages: [
+        {
+          role: "model",
+          parts: [{ thoughtSignature: "opaque", text: "@중계: 저장 테스트" }],
+        },
+      ],
+    };
     saveGame(state);
 
     const loaded = loadGame(state.id);
     if (!loaded) throw new Error("로드 실패");
     expect(loaded.phase).toBe("match");
+    expect(loaded.pendingMatch?.casterHistory).toEqual(state.pendingMatch.casterHistory);
 
     let guard = 30;
     while (loaded.phase === "match" && guard-- > 0) {

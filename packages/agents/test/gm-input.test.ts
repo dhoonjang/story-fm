@@ -132,7 +132,12 @@ describe("새 게임 첫 장면", () => {
             "@수석코치: 여름 이적시장과 개막전 준비를 함께 정리하겠습니다.",
             "@수석코치: 훈련과 선수단 점검 중 무엇부터 시작할까요?",
           ].join("\n"),
-          history: [],
+          history: {
+            version: 1,
+            provider: "anthropic",
+            model: "test-model",
+            messages: [],
+          },
           usage: {
             inputTokens: 100,
             outputTokens: 80,

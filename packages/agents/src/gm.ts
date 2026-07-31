@@ -1,4 +1,3 @@
-import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import {
   advanceTime,
@@ -53,7 +52,14 @@ import {
   type GameState,
 } from "@story-fm/engine";
 import { naturalPositionOf, slotOfTime, ATTRIBUTE_AXES } from "@story-fm/domain";
-import { AnthropicGameLLM, TIERS, type GameLLM, type GameToolSpec } from "@story-fm/llm";
+import {
+  createGameLLM,
+  TIERS,
+  type GameLLM,
+  type GameToolSpec,
+  type JsonObjectSchema,
+  type TierConfig,
+} from "@story-fm/llm";
 import { MATCH_CASTER_SYSTEM, makeLogMatchEventsTool } from "./match-caster";
 import { buildOnboardingTurn, runMockGmTurn } from "./mock-gm";
 import { resolveSystemPrompts } from "./prompt-store";
@@ -62,7 +68,7 @@ import type { GmToolCall, GmTurnResult } from "./gm-types";
 
 /**
  * GM 오케스트레이터 (ai-manager.md) — 단일 GM, 장면 라우팅 (결정 #12).
- * 실모드: Opus tool loop. mock 모드: 규칙 기반 (mock-gm.ts).
+ * 실모드: 설정된 제공자의 tool loop. mock 모드: 규칙 기반 (mock-gm.ts).
  * 두 모드는 같은 엔진 스킬 경로만 사용한다 — 상태 변경의 유일한 통로.
  */
 
@@ -96,10 +102,11 @@ export const GM_SYSTEM = `당신은 스토리 기반 풋볼 매니저의 게임 
 채팅에서는 능력치 숫자를 읊지 않는다 — 스카우트처럼 서술하라.
 "슈팅 84" 대신 "리그 정상급 왼발".`;
 
-const obj = (
-  properties: Record<string, unknown>,
-  required: string[],
-): Anthropic.Tool.InputSchema => ({ type: "object" as const, properties, required });
+const obj = (properties: Record<string, unknown>, required: string[]): JsonObjectSchema => ({
+  type: "object",
+  properties,
+  required,
+});
 
 const str = { type: "string" };
 const int = (min: number, max: number) => ({ type: "integer", minimum: min, maximum: max });
@@ -119,7 +126,7 @@ export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpe
   const wrap = <T>(
     name: string,
     description: string,
-    inputSchema: Anthropic.Tool.InputSchema,
+    inputSchema: JsonObjectSchema,
     schema: z.ZodType<T>,
     run: (input: T) => { ok: boolean; message: string },
   ): GameToolSpec => ({
@@ -145,7 +152,7 @@ export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpe
   const read = <T>(
     name: string,
     description: string,
-    inputSchema: Anthropic.Tool.InputSchema,
+    inputSchema: JsonObjectSchema,
     schema: z.ZodType<T>,
     run: (input: T) => { ok: boolean; message: string },
   ): GameToolSpec => ({
@@ -774,10 +781,16 @@ export function buildGmHistory(
 
 export type LlmMode = "mock" | "real";
 
-export function resolveLlmMode(): LlmMode {
+function hasCredentials(config: TierConfig): boolean {
+  return config.provider === "anthropic"
+    ? Boolean(process.env.ANTHROPIC_API_KEY)
+    : Boolean(process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY);
+}
+
+export function resolveLlmMode(config: TierConfig = TIERS.gm): LlmMode {
   const forced = process.env.LLM_MODE;
   if (forced === "mock" || forced === "real") return forced;
-  return process.env.ANTHROPIC_API_KEY ? "real" : "mock";
+  return hasCredentials(config) ? "real" : "mock";
 }
 
 const ONBOARDING_INSTRUCTION = [
@@ -808,14 +821,14 @@ function isValidOnboardingText(state: GameState, text: string): boolean {
  */
 export async function runOnboardingTurn(state: GameState, llm?: GameLLM): Promise<GmTurnResult> {
   const fallback = buildOnboardingTurn(state);
-  if (resolveLlmMode() === "mock") return fallback;
+  if (resolveLlmMode(TIERS.gm) === "mock") return fallback;
 
   try {
     const activePrompts = resolveSystemPrompts({
       gm: GM_SYSTEM,
       match: MATCH_CASTER_SYSTEM,
     }).prompts;
-    const result = await (llm ?? new AnthropicGameLLM(TIERS.gm)).runTurn({
+    const result = await (llm ?? createGameLLM(TIERS.gm)).runTurn({
       system: [activePrompts.gm, buildGmReference(state)],
       history: [],
       user: buildManagerMessage(state, "*새 감독으로서 구단에 첫 출근한다*"),
@@ -841,7 +854,8 @@ async function runRealGmTurn(
 ): Promise<GmTurnResult> {
   const calls: GmToolCall[] = [];
   const inMatch = state.phase === "match";
-  const llm = new AnthropicGameLLM(inMatch ? TIERS.match : TIERS.gm);
+  const tier = inMatch ? TIERS.match : TIERS.gm;
+  const llm = createGameLLM(tier);
 
   const tools = buildGmTools(state, calls);
   if (inMatch) {
@@ -868,9 +882,7 @@ async function runRealGmTurn(
     ? [activePrompts.match, buildMatchReference(state)]
     : [activePrompts.gm, buildGmReference(state)];
   const stateNote = inMatch ? buildLedgerNote(state) : buildGmStateNote(state);
-  const history = inMatch
-    ? ((state.pendingMatch?.casterHistory ?? []) as never)
-    : (buildGmHistory(state) as never);
+  const history = inMatch ? (state.pendingMatch?.casterHistory ?? []) : buildGmHistory(state);
 
   const result = await llm.runTurn({
     system,
@@ -882,7 +894,7 @@ async function runRealGmTurn(
   });
 
   if (inMatch && state.pendingMatch) {
-    state.pendingMatch.casterHistory = result.history as unknown[];
+    state.pendingMatch.casterHistory = result.history;
     if (state.pendingMatch.ledger.phase === "finished") {
       const digest = finalizeMatch(state);
       calls.push({ name: "finalize_match", summary: digest.join(" · ") });
@@ -902,6 +914,7 @@ export async function runGmTurn(
   message: string,
   onText?: (delta: string) => void,
 ): Promise<GmTurnResult> {
-  if (resolveLlmMode() === "mock") return runMockGmTurn(state, message, onText);
+  const tier = state.phase === "match" ? TIERS.match : TIERS.gm;
+  if (resolveLlmMode(tier) === "mock") return runMockGmTurn(state, message, onText);
   return runRealGmTurn(state, message, onText);
 }

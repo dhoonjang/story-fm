@@ -1,7 +1,7 @@
 # LLM 입출력 구성 (메인 채팅 · 경기 진행)
 
-> 📐 **구현 기준 문서** · 2026-07-25 작성, 캐시 계층·안개·조회 도구 도입으로 전면 개정.
-> 코드 기준: `packages/agents/src/gm.ts`, `packages/llm/src/anthropic-adapter.ts`,
+> 📐 **구현 기준 문서** · 2026-07-28 갱신, 멀티 프로바이더 어댑터 반영.
+> 코드 기준: `packages/agents/src/gm.ts`, `packages/llm/src/{game-llm,factory,anthropic-adapter,gemini-adapter}.ts`,
 > `packages/engine/src/{scouting,lookup}.ts`. 프롬프트·컨텍스트·도구가 바뀌면 이 문서를 함께 갱신한다.
 
 story-fm의 LLM 호출은 **두 역할**뿐이다. 둘은 같은 함수(`runRealGmTurn`)에서
@@ -12,8 +12,21 @@ story-fm의 LLM 호출은 **두 역할**뿐이다. 둘은 같은 함수(`runReal
 | **GM** (메인 채팅)          | `phase !== "match"` | `GM_SYSTEM`           | `TIERS.gm`    |
 | **매치 캐스터** (경기 진행) | `phase === "match"` | `MATCH_CASTER_SYSTEM` | `TIERS.match` |
 
-모델 ID는 `packages/llm/src/config.ts`가 단일 관리한다 (현재 두 티어 모두
-`claude-opus-4-8`, `max_tokens: 4096`, `thinking: { type: "adaptive" }`).
+모델 ID는 `packages/llm/src/config.ts`가 단일 관리한다. 코드 기본값은 두 티어
+모두 `claude-opus-4-8`이고, 배포 환경에서 `LLM_PROVIDER=google`로 바꾸면 두
+티어 모두 `gemini-3.6-flash`를 사용한다. 유저에게 모델 선택 UI는 노출하지 않는다.
+인증은 Anthropic이 `ANTHROPIC_API_KEY`, Gemini가 `GOOGLE_API_KEY` 또는
+`GEMINI_API_KEY`를 사용한다.
+
+```bash
+# 코드 기본값: Anthropic
+ANTHROPIC_API_KEY=... pnpm dev
+
+# Gemini로 전환
+LLM_PROVIDER=google GOOGLE_API_KEY=... pnpm dev
+```
+
+`LLM_PROVIDER`는 프로세스 시작 시 읽으므로 변경 후 서버를 다시 시작한다.
 
 두 시스템 프롬프트의 코드 상수는 **기본값**이다. 어드민 `/admin/prompts`에서
 편집하면 `.data/system-prompts.json`에 오버라이드가 저장되고, 다음 실모드 턴부터
@@ -36,28 +49,29 @@ story-fm의 LLM 호출은 **두 역할**뿐이다. 둘은 같은 함수(`runReal
 
 ---
 
-## 1. 입력의 3층 구조 (가장 중요)
+## 1. 입력의 4층 구조 (가장 중요)
 
-입력은 **변경 빈도** 순으로 3층이다. 앞 두 층은 프롬프트 캐시에 올라가 read 단가
-(0.1×)로 읽히고, 마지막 층만 매 턴 정가로 읽힌다.
+입력은 **변경 빈도** 순으로 쌓는다. 논리적 4층은 제공자 공통이다. Anthropic은
+앞 세 층에 명시적 캐시 브레이크포인트를 두고, Gemini는 같은 안정 프리픽스를
+implicit caching 대상으로 보낸다. 캐시 할인 방식과 적중 하한은 제공자별이다.
 
 ```
-┌─ ① 고정 ────────────── tools 정의 → system 블록 1 ──── [캐시 브레이크포인트]
+┌─ ① 고정 ────────────── tools 정의 → system 블록 1 ──── [안정 프리픽스]
 │  세이브와 무관. 배포될 때까지 바이트 단위로 동일.
-├─ ② 레퍼런스 ────────── system 블록 2 ─────────────── [캐시 브레이크포인트]
+├─ ② 레퍼런스 ────────── system 블록 2 ─────────────── [안정 프리픽스]
 │  세이브마다 다르지만 거의 안 바뀜 (이적·킥오프 때만).
-├─ ③ 이력 ────────────── messages[0..n-1] ──────────── [증분 브레이크포인트]
+├─ ③ 이력 ────────────── messages[0..n-1] ──────────── [제공자 원형 보존]
 │  지난 턴들. 한번 쓰이면 불변 → 턴이 쌓일수록 캐시가 커진다.
-└─ ④ 이번 턴 ──────────── user 발화 + role:"system" 상태 스냅샷 ── 캐시 밖
+└─ ④ 이번 턴 ──────────── user 발화 + 휘발 상태 스냅샷 ────────── 캐시 밖
    매 턴 바뀌는 것만. 실측 300~400 토큰.
 ```
 
 ### 왜 이렇게 나누는가
 
-프롬프트 캐시는 **프리픽스 바이트가 완전히 일치**해야 적중한다. 그래서 배치가
-곧 비용이다. 개정 전에는 브레이크포인트가 `system` 하나뿐이어서, 이력과 컨텍스트
-전체(약 2,700 토큰)를 매 턴 정가로 다시 읽었다. 개정 후 매 턴 새로 읽는 양은
-**300~400 토큰**이다.
+프롬프트 캐시는 공통 프리픽스가 길고 안정적일수록 적중한다. 그래서 배치가 곧
+비용이다. Anthropic 실측에서는 개정 후 매 턴 새로 읽는 양이 300~400 토큰이다.
+Gemini의 implicit cache는 같은 순서 원칙을 사용하지만 동일한 수치·단가를
+보장하지 않으며 `cachedContentTokenCount`를 관측한다.
 
 이 구조를 지키는 규칙 세 가지:
 
@@ -101,21 +115,27 @@ story-fm의 LLM 호출은 **두 역할**뿐이다. 둘은 같은 함수(`runReal
 
 ---
 
-## 2. 공통 호출 계약 (`AnthropicGameLLM.runTurn`)
+## 2. 공통 호출 계약 (`GameLLM.runTurn`)
 
 ### 입력 (`TurnRequest`)
 
 ```
-system    : string | string[]   // 배열이면 앞이 더 안정적인 순서. 블록마다 브레이크포인트
-history   : MessageParam[]      // 이전 턴 이력 (thinking·tool_use 블록까지 원형 보존)
+system    : string | string[]   // 배열이면 앞이 더 안정적인 순서
+history   : TextMessage[] | StoredLlmHistory | legacy unknown[]
 user      : string              // "@<감독 이름>: <발화>"
-stateNote?: string              // 휘발성 상태 — messages 끝에 role:"system"으로
+stateNote?: string              // 휘발성 상태 — 어댑터가 제공자별 방식으로 주입
 tools     : GameToolSpec[]      // JSON Schema + Zod + 엔진 스킬 핸들러 (readOnly 플래그)
 onText?   : (delta) => void     // 주면 스트리밍 모드
 maxTokens?
 ```
 
-Anthropic 요청 조립:
+`GameToolSpec`은 제공자 SDK 타입을 노출하지 않고 `JsonObjectSchema`를 사용한다.
+`createGameLLM(TIERS.gm|match)`가 설정의 provider를 보고 구체 어댑터를 만든다.
+agents와 match-cli는 구체 SDK를 import하지 않는다.
+
+### 제공자별 요청 조립
+
+Anthropic:
 
 ```
 tools    = tools.map(...)                                   // 프리픽스 맨 앞
@@ -125,10 +145,24 @@ messages = [ ...정규화된 이력(마지막에 브레이크포인트),
              { role:"system", content: stateNote } ]         // 있을 때만
 ```
 
-### 상태 스냅샷을 왜 `role:"system"`으로 보내는가
+Gemini:
 
-Opus 4.8은 `messages` 배열에 `role:"system"` 항목을 허용한다(베타 헤더 불필요).
-셋 다 얻는다.
+```
+config.systemInstruction = system.join("\n\n")
+config.tools = [{ functionDeclarations: tools.map(...) }]
+config.thinkingConfig = { thinkingLevel:"MEDIUM" }
+chat.history = StoredLlmHistory.messages                     // Content[] 원형
+message = stateNote + "\n\n" + user
+```
+
+Gemini는 현재 턴 안에서 상태와 발화를 함께 읽지만, 반환 이력에서는 상태 부분을
+제거하고 감독 발화만 저장한다. 그래서 지난 날짜·스코어가 다음 턴에 누적되지 않는다.
+
+### 상태 스냅샷 채널
+
+Anthropic에서는 가능하면 `messages` 끝의 `role:"system"`을 사용한다. 미지원
+모델과 Gemini에서는 `상태\n\n발화`로 현재 user content에 접어 넣고 저장 전에
+상태를 걷어낸다. 공통 목표는 다음과 같다.
 
 - **캐시 보존** — 최상단 `system`을 매 턴 고쳐 쓰면 그 뒤 전체가 무효화된다.
   끝에 붙이면 앞 프리픽스가 그대로 살아 있다.
@@ -139,20 +173,21 @@ Opus 4.8은 `messages` 배열에 `role:"system"` 항목을 허용한다(베타 �
 제약과 대응:
 
 - `messages[0]`이 될 수 없고, 유저 메시지 뒤에 와야 한다 → 항상 발화 다음에 붙인다.
-- 미지원 모델은 400을 던진다 → 어댑터가 **한 번 감지하면 모델별로 기억**하고
-  이후엔 `상태\n\n발화` 형태로 유저 메시지에 접어 넣는다 (DeepSeek 전환 대비).
+- Anthropic 미지원 모델은 400을 던진다 → 어댑터가 **한 번 감지하면 모델별로
+  기억**하고 이후엔 폴백 형식을 쓴다.
 - **이력에 남기지 않는다.** 매 턴 새로 주입되므로 누적되면 지난 날짜·지난
   스코어가 이력에 쌓여 모델을 혼란시킨다. `runTurn`이 반환 이력에서 걷어낸다.
 
 ### 도구 루프
 
 1. 응답 `content`의 **text 블록**을 이어붙여 서사 텍스트로 누적한다.
-2. `assistant` 메시지를 **content 전체(thinking 포함)** 그대로 이력에 push한다.
-3. `stop_reason !== "tool_use"` 면 종료.
-4. `tool_use` 블록마다 → `spec.handle(input)`:
+2. 모델 메시지를 **원형(thinking/thought signature 포함)** 그대로 이력에 둔다.
+3. 함수 호출이 없으면 종료한다.
+4. 함수 호출마다 → `spec.handle(input)`:
    - Zod 검증 실패 → `{ ok:false, message:"입력 오류 — …" }`
    - 엔진 스킬/조회 실행 → `{ ok, message }`
-   - 결과를 `tool_result`(내용 = 한국어 message, `is_error = !ok`)로 되돌린다 → 모델이 스스로 수정 재시도.
+   - Anthropic은 `tool_result(is_error)`, Gemini는 같은 call `id`의
+     `functionResponse(output|error)`로 되돌린다 → 모델이 스스로 수정 재시도.
 5. 최대 **8회 왕복**(`MAX_TOOL_ITERATIONS`). 조회 + 실행이 한 턴에 같이 도므로
    개정 전 6회에서 늘렸다. 반복마다 브레이크포인트를 직전 메시지로 옮겨 루프
    안에서도 증분 캐시가 걸린다.
@@ -168,12 +203,18 @@ Opus 4.8은 `messages` 배열에 `role:"system"` 항목을 허용한다(베타 �
 - **미해결 tool_use 마감** — 턴이 `max_tokens` 등으로 끊겨 마지막 assistant에
   미해결 `tool_use`가 남으면 합성 `tool_result`(is_error)로 닫는다. 닫지 않으면
   이 이력을 재사용하는 다음 요청이 400으로 죽어 경기가 복구 불능이 된다.
+- **Gemini signature 보존** — `Content.parts`의 `thoughtSignature`와 함수 호출
+  위치·id를 변형하지 않는다. 공식 Chat SDK의 전체 이력을 그대로 저장한다.
+- **제공자 태그** — 반환 이력은
+  `{version:1, provider, model, messages}`다. 다른 provider/model로 설정을 바꾼
+  진행 중 경기는 원형 이력을 섞지 않고 장부·패킷을 기준으로 이력만 새로 시작한다.
+  태그 없는 배열은 이전 Anthropic 세이브로 간주한다.
 
 ### 출력 (`TurnResult`)
 
 ```
 text          // 텍스트 블록 연결 (@문법 서사)
-history       // 갱신된 이력 (role:"system" 제외) — 다음 턴에 그대로 넘긴다
+history       // 제공자·모델 태그 + 갱신된 원형 이력 — 다음 턴에 그대로 넘긴다
 usage         // input / output / cacheRead / cacheWrite 토큰 누적
 toolCallCount
 stopReason
@@ -302,8 +343,8 @@ GM의 역할, 출력 문법(@화자), 판정·반문·사실 확인·시간 진�
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ① 고정     | `MATCH_CASTER_SYSTEM` 기본값 또는 어드민 오버라이드 — 역할·출력 문법, 핵심 경기 철칙 5개(패킷·장부만 근거 · 주요 사건 기록 · 시간은 앞으로만 · 우위는 확률적 · 실제 경기 리듬), 다음 정지점까지의 진행 방식, 대화 범위, 언어 |
 | ② 레퍼런스 | 감독 이름·유저 화자 형식 + **전력 분석 패킷 JSON** — 킥오프에 고정. 존 전력·매치업·키포인트·기대득점·업셋확률·라인업                                                                                                         |
-| ③ 이력     | `state.pendingMatch.casterHistory` — 경기 내내 누적되는 Anthropic 이력 원형(thinking·tool_use·tool_result 포함). 세이브에 직렬화되므로 저장/로드 후에도 경기를 이어간다                                                      |
-| ④ 이번 턴  | `buildLedgerNote(state)` (role:"system") + `@<감독 이름>: <발화>`                                                                                                                                                            |
+| ③ 이력     | `state.pendingMatch.casterHistory` — `{provider, model, messages}`로 태깅된 제공자 원형 이력. Anthropic thinking/tool_use 또는 Gemini thoughtSignature/functionCall을 보존하며 세이브/로드 후에도 이어간다                   |
+| ④ 이번 턴  | `buildLedgerNote(state)` + `@<감독 이름>: <발화>` — 주입 채널은 제공자 어댑터가 결정                                                                                                                                         |
 
 패킷을 캐시 블록으로 올린 것이 경기 티어의 핵심 개선이다. 패킷은 3,600자
 (~2,400 토큰)인데 킥오프 이후 `set_tactics`/`substitute` 때만 갱신된다. 매 턴
