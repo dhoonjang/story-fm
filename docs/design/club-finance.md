@@ -1,11 +1,7 @@
 # 구단 재정 (Club Finance)
 
-> ✅ **v1 구현 완료** · 2026-07-30 · [game-overview §5.1·§10](./game-overview.md)의 심화
-> — 실제 구단의 매출·비용 구조를 옮긴 재정 모델. 실시간 원장 + 월간 보고서.
-> 결정 근거는 [ADR 0004](../decisions/0004-club-finance-model.md).
->
-> ⚠️ 이름이 비슷한 [`economy.md`](./economy.md)는 **LLM 티어·캐싱** 문서다.
-> 구단 살림은 이 문서가 단일 소스.
+> ✅ **v1 구현** — 실제 구단의 매출·비용 구조를 옮긴 재정 모델. 실시간 원장 +
+> 월간 보고서. 결정 근거는 [ADR 0004](../decisions/0004-club-finance-model.md).
 
 ---
 
