@@ -18,7 +18,8 @@ import type { CardMark, GoalMark, ToolCallRecord } from "@story-fm/engine";
 export type TurnMark =
   | { kind: "goal"; key: string; goal: GoalMark }
   | { kind: "card"; key: string; card: CardMark }
-  | { kind: "calls"; key: string; calls: ToolCallRecord[] };
+  | { kind: "calls"; key: string; calls: ToolCallRecord[] }
+  | { kind: "stamp"; key: string; stamp: string };
 
 /** 한 턴을 이루는 조각 — 말 묶음이거나, 그 사이에 낀 표시다 */
 export type TurnPiece = { lines: string[]; mark?: undefined } | { mark: TurnMark };
@@ -81,18 +82,28 @@ export function weaveTurn(
     goals?: readonly GoalMark[];
     cards?: readonly CardMark[];
     calls?: readonly ToolCallRecord[];
+    /** 시각 표시 — 걷어낸 헤더가 서 있던 자리 (`cutStamps`) */
+    stamps?: readonly { after: number; stamp: string }[];
     /**
-     * 앞의 몇 줄이 이미 떨어져 나갔나 — 화면은 장면 헤더를 시각 표시로 떼어
+     * 어떤 줄들이 이미 떨어져 나갔나 — 화면은 장면 헤더를 시각 표시로 떼어
      * 세우는데, 스킬의 줄 수는 그 헤더까지 세고 저장된다. 여기서 맞춰 준다.
+     * 헤더는 본문 한복판에도 서므로 **몇 줄인지**가 아니라 **어느 줄인지**를 받는다.
      */
-    dropped?: number;
+    cuts?: readonly number[];
   } = {},
 ): TurnPiece[] {
-  const dropped = parts.dropped ?? 0;
+  const cuts = parts.cuts ?? [];
+  /** 원문 줄 수 → 남은 줄 수 — 앞에서 걷어낸 만큼만 당긴다 */
+  const shift = (after: number) => after - cuts.filter((c) => c < after).length;
   const placed: Placed[] = [
+    // 시각이 먼저 선다 — 장면이 열리고 그 안에서 일이 벌어진다
+    ...(parts.stamps ?? []).map((s, i) => ({
+      mark: { kind: "stamp" as const, key: `sp${i}`, stamp: s.stamp },
+      after: s.after,
+    })),
     ...groupCalls(parts.calls ?? []).map((p) => ({
       ...p,
-      after: Math.max(0, (p.after ?? 0) - dropped),
+      after: Math.max(0, shift(p.after ?? 0)),
     })),
     ...(parts.goals ?? []).map((goal, i) => ({
       mark: { kind: "goal" as const, key: `g${i}`, goal },

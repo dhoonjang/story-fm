@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatTurn } from "@story-fm/engine";
-import { partOfDayStamp, turnStamp } from "../lib/scene-stamp";
+import { cutStamps, partOfDayStamp, turnStamp } from "../lib/scene-stamp";
 
 /**
  * 장면 시각의 눈금 — **때(오전·오후·저녁…).**
@@ -43,6 +43,36 @@ describe("partOfDayStamp", () => {
   });
 });
 
+describe("cutStamps", () => {
+  it("본문 한복판의 헤더도 걷어낸다 — 대사 사이에 날것으로 남지 않는다", () => {
+    const cut = cutStamps([
+      "판정을 먼저 하겠습니다.",
+      "[2026-07-15 AM 9:15]",
+      "@짐 랫클리프: 합의됐습니다.",
+    ]);
+    expect(cut.lines).toEqual(["판정을 먼저 하겠습니다.", "@짐 랫클리프: 합의됐습니다."]);
+    expect(cut.stamps).toEqual([{ after: 1, stamp: "2026-07-15 오전" }]);
+    expect(cut.cuts).toEqual([1]);
+  });
+
+  it("한 턴이 장면을 여럿 열면 시각도 여럿 선다", () => {
+    const cut = cutStamps([
+      "[2026-07-15 AM 9:05]",
+      "@코치: 네.",
+      "[2026-07-15 PM 3:00]",
+      "@코치: 끝났습니다.",
+    ]);
+    expect(cut.stamps.map((s) => s.stamp)).toEqual(["2026-07-15 오전", "2026-07-15 오후"]);
+    expect(cut.stamps.map((s) => s.after)).toEqual([0, 1]);
+  });
+
+  it("헤더가 없으면 줄은 그대로다", () => {
+    const cut = cutStamps(["@코치: 안녕하세요."]);
+    expect(cut.lines).toEqual(["@코치: 안녕하세요."]);
+    expect(cut.stamps).toEqual([]);
+  });
+});
+
 describe("turnStamp", () => {
   it("첫 줄의 시점 헤더를 때로 읽는다", () => {
     expect(turnStamp(modelTurn("[2026-07-02 AM 10:10]\n@코치: 안녕하세요."))).toBe(
@@ -50,11 +80,23 @@ describe("turnStamp", () => {
     );
   });
 
+  it("장면이 여럿이면 마지막 시각이 다음 턴의 기준이다", () => {
+    expect(
+      turnStamp(
+        modelTurn(
+          "판정하겠습니다.\n[2026-07-02 AM 10:10]\n@코치: 네.\n[2026-07-02 PM 8:00]\n@코치: 끝.",
+        ),
+      ),
+    ).toBe("2026-07-02 저녁");
+  });
+
   it("헤더가 없으면 null", () => {
     expect(turnStamp(modelTurn("@코치: 안녕하세요."))).toBeNull();
   });
 
   it("감독의 말에는 시각이 없다", () => {
-    expect(turnStamp({ role: "user", text: "[2026-07-02 AM 10:10]", toolCalls: [], at: "x" })).toBeNull();
+    expect(
+      turnStamp({ role: "user", text: "[2026-07-02 AM 10:10]", toolCalls: [], at: "x" }),
+    ).toBeNull();
   });
 });

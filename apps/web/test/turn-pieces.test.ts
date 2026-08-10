@@ -123,8 +123,21 @@ describe("스킬 칩은 불린 자리에 선다", () => {
 
   it("떼어 낸 헤더만큼 자리를 당긴다 — 시각 표시는 줄에서 빠졌다", () => {
     // 저장된 본문은 `[2026-08-15 AM 9:00]` 헤더를 포함해 세므로 3, 화면에서는 2다
-    expect(shape(lines, { calls: [call("talk_to_player", 3)], dropped: 1 })).toEqual([
+    expect(shape(lines, { calls: [call("talk_to_player", 3)], cuts: [0] })).toEqual([
       "@: *감독실 문이 닫힌다*",
+      "talk_to_player",
+      "@스티브 홀랜드: 사기가 올랐습니다.",
+    ]);
+  });
+
+  it("본문 한복판에서 떼어 낸 헤더는 그 뒤의 자리만 당긴다", () => {
+    // 원문 2번째 줄이 헤더였다 — 그 앞(1)은 그대로, 뒤(3)는 한 칸 당겨진다
+    expect(
+      shape(lines, { calls: [call("get_squad", 1), call("talk_to_player", 3)], cuts: [2] }),
+    ).toEqual([
+      "@: *감독실 문이 닫힌다*",
+      "get_squad",
+      "@손흥민: 믿어주셔서 감사합니다.",
       "talk_to_player",
       "@스티브 홀랜드: 사기가 올랐습니다.",
     ]);
@@ -135,6 +148,28 @@ describe("스킬 칩은 불린 자리에 선다", () => {
       "@: *감독실 문이 닫힌다*",
       "set_lineup",
     ]);
+  });
+});
+
+describe("시각 표시는 헤더가 서 있던 자리에 선다", () => {
+  const lines = ["판정을 먼저 하겠습니다.", "@짐 랫클리프: 합의됐습니다."];
+
+  it("본문 한복판의 헤더 자리에 낀다 — 맨 앞으로 올라가지 않는다", () => {
+    expect(shape(lines, { stamps: [{ after: 1, stamp: "2026-07-15 오전" }] })).toEqual([
+      "판정을 먼저 하겠습니다.",
+      "sp0",
+      "@짐 랫클리프: 합의됐습니다.",
+    ]);
+  });
+
+  it("같은 자리의 스킬보다 앞선다 — 장면이 열리고 그 안에서 일이 벌어진다", () => {
+    expect(
+      shape(lines, {
+        stamps: [{ after: 1, stamp: "2026-07-15 오전" }],
+        calls: [call("accept_deal", 2)],
+        cuts: [1],
+      }),
+    ).toEqual(["판정을 먼저 하겠습니다.", "sp0", "accept_deal", "@짐 랫클리프: 합의됐습니다."]);
   });
 });
 

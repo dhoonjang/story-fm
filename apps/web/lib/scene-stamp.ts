@@ -49,8 +49,47 @@ export function stampOfHeader(head: string): string | null {
   return HEADER_RE.test(head) ? partOfDayStamp(head.slice(1, -1).trim()) : null;
 }
 
+/** 걷어낸 시점 헤더 하나 — 남은 줄 기준으로 어디에 서 있었나 */
+export interface StampCut {
+  /** 이 줄 수만큼 지난 자리에 선다 */
+  after: number;
+  stamp: string;
+}
+
+/** 헤더를 걷어낸 본문과, 그것이 서 있던 자리들 */
+export interface CutScene {
+  lines: string[];
+  stamps: StampCut[];
+  /** 걷어낸 원문 줄의 인덱스 — 스킬 칩의 자리(`ToolCallRecord.line`)를 당길 때 쓴다 */
+  cuts: number[];
+}
+
+/**
+ * 줄 목록에서 시점 헤더를 **어디에 있든** 걷어낸다.
+ *
+ * 헤더는 첫 줄에만 오는 것이 아니다 — GM이 판정을 몇 줄 적고 나서 장면을 여는 턴에서는
+ * 헤더가 본문 한복판에 선다. 그때 걷어내지 않으면 `[2026-07-15 AM 9:15]`가 대사 사이에
+ * 날것으로 남아, 감독은 화면 문법이 아닌 프롬프트 문법을 읽는다.
+ */
+export function cutStamps(lines: readonly string[]): CutScene {
+  const kept: string[] = [];
+  const stamps: StampCut[] = [];
+  const cuts: number[] = [];
+  lines.forEach((line, i) => {
+    const stamp = stampOfHeader(line.trim());
+    if (stamp === null) {
+      kept.push(line);
+      return;
+    }
+    stamps.push({ after: kept.length, stamp });
+    cuts.push(i);
+  });
+  return { lines: kept, stamps, cuts };
+}
+
 /**
  * 앞 턴의 시각 — 목록이 **같은 시각을 다시 적지 않기 위해** 미리 읽는다.
+ * 한 턴이 여러 장면을 열었으면 **마지막** 시각이 다음 턴의 기준이다.
  *
  * ⚠️ **화자 이름은 접지 않는다.** 시각과 달리 이름은 턴마다 서야 한다 — 감독의 말과
  * 코치의 답이 번갈아 오는 화면에서, 이름이 빠진 턴은 누가 말하는지를 위쪽까지
@@ -59,6 +98,6 @@ export function stampOfHeader(head: string): string | null {
  */
 export function turnStamp(turn: ChatTurn): string | null {
   if (turn.role !== "model") return null;
-  const head = turn.text.split("\n").find((l) => l.trim().length > 0)?.trim() ?? "";
-  return stampOfHeader(head);
+  const { stamps } = cutStamps(turn.text.split("\n").filter((l) => l.trim().length > 0));
+  return stamps[stamps.length - 1]?.stamp ?? null;
 }
