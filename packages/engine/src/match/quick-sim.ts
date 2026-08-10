@@ -8,6 +8,7 @@ import {
   injuryWeight,
 } from "@story-fm/sim";
 import { makeRng } from "../core/rng";
+import { stateModifier } from "@story-fm/sim";
 
 /** 시뮬 입력 — 라인업은 전술 배치(TACTIC_ASSIGNMENT)에서 조립해 넘긴다 */
 export interface SimSquad {
@@ -36,9 +37,20 @@ export interface SimSquad {
  * 지난다. 다른 것은 해상도뿐이다 — 이쪽은 사건을 한 번에 뽑고, 저쪽은 분 단위로 민다.
  */
 
+/**
+ * 스쿼드 전력 — **구간 시뮬과 같은 잣대**로 잰다: 능력치 × 상태 보정.
+ *
+ * 예전엔 `overall` 평균만 봤다. 그러면 남의 팀은 지치든 폼이 바닥이든 늘 같은
+ * 전력이라, 로테이션도 폼도 AI 경기 결과에 닿지 않았다 — 리그의 95%가 상태를
+ * 모르는 채 굴러갔다.
+ */
 function squadStrength(squad: SimSquad): number {
   if (squad.starters.length === 0) return 60;
-  return squad.starters.reduce((s, p) => s + p.attributes.overall, 0) / squad.starters.length;
+  const total = squad.starters.reduce(
+    (s, p) => s + p.attributes.overall * stateModifier(p.state),
+    0,
+  );
+  return total / squad.starters.length;
 }
 
 /** 포아송 근사 샘플 (역변환) */
@@ -63,6 +75,15 @@ function sampleMinute(rng: () => number): number {
   const u = rng();
   return Math.max(1, Math.min(94, Math.ceil(Math.pow(u, 0.88) * 94)));
 }
+
+/**
+ * 전력비가 득점으로 번역되는 세기 — **리그 순위 분포의 손잡이**다.
+ * 리그 경기의 95%가 이 함수를 지나므로 우승 승점·강등권 승점이 여기서 정해진다.
+ */
+export const QUICK_SIM_EXPONENT = 4.5;
+/** 기준 기대 득점 — 홈이 조금 높다 (홈 어드밴티지는 전력에도 따로 곱한다) */
+export const HOME_BASE_GOALS = 1.33;
+export const AWAY_BASE_GOALS = 1.19;
 
 function outfield(players: readonly GamePlayer[]): GamePlayer[] {
   return players.filter((p) => positionGroupOfPlayer(p) !== "GK");
@@ -289,6 +310,82 @@ export interface QuickResult {
   injuries: string[];
 }
 
+/** 연장 30분 — 실제 규정(전·후반 15분) */
+export const EXTRA_TIME_MINUTES = 30;
+/** 연장의 첫 분 — 골의 분은 91~120이다 */
+const EXTRA_TIME_FIRST_MINUTE = 91;
+/**
+ * 연장의 기대 득점 — 정규 90분 대비 배율. 시간 비율(1/3)보다 낮다:
+ * 승부차기가 보이는 자리라 양 팀 다 잃지 않는 쪽으로 기운다.
+ * 이 값에서 연장에 골이 나올 확률이 절반 남짓이 된다(실측과 같은 자리).
+ */
+const EXTRA_TIME_RATE = 0.28;
+
+/** 연장 결과 — 카드·교체는 두지 않는다 (90분 장부를 쓴 쪽이 따로 있다) */
+export interface ExtraTimeResult {
+  homeGoals: number;
+  awayGoals: number;
+  /** `"home:playerId"` — 90분 결과와 같은 형식 */
+  scorers: string[];
+  /** `scorers`와 같은 순서·길이, 단독 득점은 빈 칸 */
+  assists: string[];
+  /** 91~120 */
+  goalMinutes: number[];
+}
+
+/**
+ * 연장 30분 — **녹아웃에서 90분(2차전제는 합계)이 같을 때만.**
+ *
+ * 전력 모델은 90분과 같다(`squadStrength` · `QUICK_SIM_EXPONENT`) — 눈금이 갈리면
+ * 연장에서만 약팀이 살아나거나 죽는다. 다른 것은 길이와 밀도뿐이다.
+ *
+ * @param neutral 중립 경기장(결승) — 홈 어드밴티지를 주지 않는다
+ */
+export function simulateExtraTime(
+  home: SimSquad,
+  away: SimSquad,
+  seed: number,
+  channel: string,
+  options: { neutral?: boolean } = {},
+): ExtraTimeResult {
+  const rng = makeRng(seed, `et:${channel}`);
+  const squads = { home, away };
+  const sh = squadStrength(home) * (options.neutral ? 1 : 1.06);
+  const sa = squadStrength(away);
+  const lambda = {
+    home: HOME_BASE_GOALS * Math.pow(sh / sa, QUICK_SIM_EXPONENT) * EXTRA_TIME_RATE,
+    away: AWAY_BASE_GOALS * Math.pow(sa / sh, QUICK_SIM_EXPONENT) * EXTRA_TIME_RATE,
+  };
+  const goals = {
+    home: Math.min(3, samplePoisson(rng, lambda.home)),
+    away: Math.min(3, samplePoisson(rng, lambda.away)),
+  };
+
+  const minutesOf = (n: number) =>
+    Array.from(
+      { length: n },
+      () => EXTRA_TIME_FIRST_MINUTE + Math.floor(rng() * EXTRA_TIME_MINUTES),
+    ).sort((a, b) => a - b);
+  const timeline = [
+    ...minutesOf(goals.home).map((minute) => ({ side: "home" as const, minute })),
+    ...minutesOf(goals.away).map((minute) => ({ side: "away" as const, minute })),
+  ].sort((a, b) => a.minute - b.minute);
+
+  const scorers: string[] = [];
+  const assists: string[] = [];
+  const goalMinutes: number[] = [];
+  for (const { side, minute } of timeline) {
+    const pool = squads[side].starters;
+    const scorer = pickScorer(rng, pool) ?? pool[0];
+    if (!scorer) continue;
+    scorers.push(`${side}:${scorer.id}`);
+    goalMinutes.push(minute);
+    const assister = pickAssister(rng, pool, scorer.id);
+    assists.push(assister ? `${side}:${assister.id}` : "");
+  }
+  return { homeGoals: goals.home, awayGoals: goals.away, scorers, assists, goalMinutes };
+}
+
 /** 타 팀 간 경기 결과 (match-sim.md §7) */
 export function quickSimulate(
   home: SimSquad,
@@ -317,8 +414,8 @@ export function quickSimulate(
   const sa = squadStrength(away);
   const red = { home: redFactor(cards, "home"), away: redFactor(cards, "away") };
   const base = {
-    home: 1.4 * Math.pow(sh / sa, 3),
-    away: 1.25 * Math.pow(sa / sh, 3),
+    home: HOME_BASE_GOALS * Math.pow(sh / sa, QUICK_SIM_EXPONENT),
+    away: AWAY_BASE_GOALS * Math.pow(sa / sh, QUICK_SIM_EXPONENT),
   };
   const lambdaHome = Math.min(
     3.4,

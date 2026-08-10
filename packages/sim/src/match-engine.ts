@@ -7,6 +7,7 @@ import type {
   TacticsSpec,
 } from "@story-fm/domain";
 import { positionGroupOfPlayer } from "@story-fm/domain";
+import { directiveDrain, type DirectiveInput } from "./directives";
 import { LEDGER_LIMITS, type MatchLedgerState } from "./match-ledger";
 import { conditionDrain, drainVariance } from "./stamina";
 
@@ -67,6 +68,14 @@ export interface SegmentInput {
   squads: { home: SegmentSquad; away: SegmentSquad };
   /** 양팀 전술 — 체력 소모가 지시에 따라 갈린다 (stamina.ts) */
   tactics: { home: TacticsSpec; away: TacticsSpec };
+  /**
+   * 개인 지시 — **체력 소모가 지시를 탄다** (`directiveDrain`).
+   *
+   * 존 전력은 패킷이 이미 반영했지만(`applyDirectives`) 다리는 따로 계산된다:
+   * 상대 시작점을 전담 압박한 선수는 20% 더 마르고, 뒤에 남으라는 지시를 받은
+   * 풀백은 10% 덜 마른다. 안 주면 전원 배수 1이라 **아무것도 바뀌지 않는다.**
+   */
+  directives?: { home?: readonly DirectiveInput[]; away?: readonly DirectiveInput[] };
   /**
    * 선수 id → 부상 성향 배수 (양팀 전부). 없으면 1 — 이력을 안 넘겨도 경기는 돈다.
    * 누가 다치는지만 갈릴 뿐 발생 건수는 바뀌지 않는다 (`injuryWeight`).
@@ -395,7 +404,25 @@ function stoppageTime(rng: () => number, half: 1 | 2): number {
  * 감독이 그때마다 벤치에서 일어나지는 않는다.
  */
 export function simulateSegment(input: SegmentInput): SegmentPlan {
-  const { packet, ledger, squads, tactics, rng, proneness = {}, staminaKey = "" } = input;
+  const {
+    packet,
+    ledger,
+    squads,
+    tactics,
+    rng,
+    proneness = {},
+    staminaKey = "",
+    directives,
+  } = input;
+  /**
+   * 선수 id → 지시가 얹는 소모 배수. 지시를 안 받은 선수는 여기 없고 1로 읽힌다 —
+   * 지시가 하나도 없으면 이 맵이 비어 소모 계산이 예전 그대로다.
+   */
+  const drainOf = new Map<string, number>(
+    [...(directives?.home ?? []), ...(directives?.away ?? [])].map(
+      (d) => [d.by, directiveDrain(d.kind)] as const,
+    ),
+  );
   /** 선수 id → 지금 내는 전력 (패킷이 이미 계산해 명단에 실어 보낸다) */
   const effective = new Map(
     [...packet.home.lineup, ...packet.away.lineup].map((p) => [p.id, p.effective] as const),
@@ -447,7 +474,9 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
       for (const p of squadOf(side).onPitch) {
         const position = positionOf.get(p.id) ?? "CM";
         const today = drainVariance(staminaKey && `${staminaKey}:${p.id}`);
-        fatigue[p.id] = (fatigue[p.id] ?? 0) + conditionDrain(p, position, spec, elapsed, today);
+        fatigue[p.id] =
+          (fatigue[p.id] ?? 0) +
+          conditionDrain(p, position, spec, elapsed, today, drainOf.get(p.id) ?? 1);
       }
     }
   };

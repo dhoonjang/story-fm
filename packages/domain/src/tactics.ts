@@ -626,6 +626,11 @@ export type AssignmentRole = z.infer<typeof AssignmentRoleSchema>;
  * 감독은 무슨 말이든 할 수 있고 그것을 여기에 옮기는 것은 LLM의 몫이지만,
  * 무게는 코어가 정한다 (이적 설득 `PitchClaimKind`와 같은 구조). 전술 6축이
  * 팀 전체의 성향이라면 이쪽은 **특정 상대·특정 선수를 겨눈 지시**다.
+ *
+ * 이득·대가·체력 소모의 계수는 전부 `packages/sim/src/directives.ts`의
+ * `DIRECTIVE_TUNING` 한 표에 있다. **종류를 늘리지 않는다** — 이 목록은 감독이
+ * 말할 법한 것의 목록이지 효과의 목록이 아니라서, 자연어의 다양함은 `instruction`이
+ * 받고 장부는 이 다섯으로 접힌다.
  */
 export const PLAYER_DIRECTIVE_KINDS = [
   /** 상대 한 명을 전담 마크 — 그를 지우는 대신 본업을 덜 한다 */

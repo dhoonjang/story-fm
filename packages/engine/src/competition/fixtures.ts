@@ -1,7 +1,13 @@
 import type { MatchRecord } from "@story-fm/domain";
-import { MIN_REST_HOURS, buildAllLeagueMatches, restHours } from "./calendar";
+import {
+  MIN_REST_HOURS,
+  buildAllLeagueMatches,
+  restHours,
+  type LeagueMembership,
+} from "./calendar";
 import { leagueOfTeam } from "../data/team-catalog";
 import { buildAllEuroMatches, type EuroEntry } from "./europe";
+import type { WorldScope } from "../world/scope";
 
 /**
  * 시즌 편성의 단일 입구 — 리그 + 대항전을 함께 만들고 충돌을 푼다.
@@ -15,8 +21,10 @@ export function buildSeasonFixtures(
   season: number,
   seed: number,
   entrants: EuroEntry[],
+  world?: WorldScope,
+  membership?: LeagueMembership,
 ): MatchRecord[] {
-  const league = buildAllLeagueMatches(season, seed);
+  const league = buildAllLeagueMatches(season, seed, world, membership);
   const euro = buildAllEuroMatches(season, seed, entrants);
   relaxEuroAdjacency(league, euro);
   return [...league, ...euro];
@@ -28,9 +36,14 @@ export function buildSeasonFixtures(
  * 우리 리그는 순위표를 읽기 위해 전 경기가 필요하고, 대항전은 우리 팀 경기만
  * 감독의 일정이다 (남의 UCL 경기는 장부에만 남는다).
  */
-export function isUserFixture(match: MatchRecord, userTeamId: string): boolean {
+export function isUserFixture(
+  match: MatchRecord,
+  userTeamId: string,
+  /** 감독이 지금 있는 리그 — 강등되면 카탈로그와 갈린다 (`leagueOfTeamIn`) */
+  leagueId = leagueOfTeam(userTeamId),
+): boolean {
   return (
-    match.competitionId === leagueOfTeam(userTeamId) ||
+    match.competitionId === leagueId ||
     match.homeTeamId === userTeamId ||
     match.awayTeamId === userTeamId
   );

@@ -18,7 +18,12 @@ import {
   startMatch,
   type GameState,
   squadReturnOf,
+  MINI_WORLD,
+  FAMILIARITY_DRIFT_CAP,
+  FAMILIARITY_DRIFT_PER_DAY,
+  assignmentsOf as assignmentsOfTeam,
 } from "@story-fm/engine";
+import { applyFamiliarityGain } from "@story-fm/domain";
 import type { GamePlayer } from "@story-fm/domain";
 
 /** 간이 시뮬 입력 조립 — 배치 선발에서 가용 선수를 뽑는다 (테스트용) */
@@ -34,6 +39,69 @@ export function simSquad(state: GameState, teamId: string) {
     }
   }
   return { teamId, starters };
+}
+
+/**
+ * 축소 세계의 새 게임 — 한 리그 8팀, 컵 없음 (`MINI_WORLD`).
+ *
+ * 시즌을 끝까지 도는 검증에 쓴다. 전체 세계는 한 시즌에 2,100여 경기를 굴려
+ * 파일 하나가 몇 분을 쓰는데, 같은 규칙의 작은 세계는 1초 안에 끝난다.
+ * 컵·대항전 구조를 검증하는 테스트는 그 규모가 곧 대상이므로 전체 세계를 쓴다.
+ */
+export function createMiniGame(seed = 42, teamId = "arsenal"): GameState {
+  const background = "K리그에서 뛰다 은퇴한 수비수 출신 분석가";
+  return createGame({
+    seed,
+    userTeamId: teamId,
+    managerName: "김감독",
+    background,
+    attributes: interpretBackgroundHeuristic(background, teamId),
+    world: MINI_WORLD,
+  });
+}
+
+/**
+ * 축소 세계에서 시즌 하나를 끝까지 돈다 — 유저 경기는 구간 시뮬로 치른다.
+ * @returns 시즌이 끝났으면 true (한도 안에 못 끝내면 false)
+ */
+export function playFullSeason(state: GameState, limit = 400): boolean {
+  for (let i = 0; i < limit; i++) {
+    const advanced = advanceTime(state, "next_match");
+    if (!advanced.ok) throw new Error(advanced.digest.join(" / "));
+    if (advanced.stopped === "season_end") return true;
+    if (advanced.stopped === "blocked") return false;
+    if (advanced.stopped === "matchday") {
+      drillUserTactics(state, 7);
+      playMockMatch(state);
+    }
+  }
+  return false;
+}
+
+/**
+ * 훈련하는 감독 — 감독 팀의 전술 적응도를 AI 팀과 같은 눈금으로 올린다.
+ *
+ * 실제 플레이에서는 훈련·경기 결산(LLM)이 이 자리를 채워 95·100까지 간다.
+ * mock 모드에는 그 판정이 없어서, 하네스가 이걸 하지 않으면 **감독 팀만 기준선
+ * (60)에 멎은 채** AI 팀은 80까지 붙는 세계를 측정하게 된다.
+ */
+/**
+ * 인내하는 보드 — 측정용. 경질은 시계를 멈추므로(state.dismissal) 재정·시즌
+ * 분포를 재는 하네스는 자리를 지킨 채 한 시즌을 다 돌아야 한다.
+ */
+export function keepSeat(state: GameState): void {
+  state.manager.reputation.board = 60;
+  state.manager.boardWarnings = 0;
+}
+
+export function drillUserTactics(state: GameState, days = 1): void {
+  for (const a of assignmentsOfTeam(state, state.userTeamId)) {
+    if (a.familiarity >= FAMILIARITY_DRIFT_CAP) continue;
+    a.familiarity = Math.min(
+      FAMILIARITY_DRIFT_CAP,
+      applyFamiliarityGain(a.familiarity, FAMILIARITY_DRIFT_PER_DAY * days, "training"),
+    );
+  }
 }
 
 export function createTestGame(seed = 42, teamId = "arsenal"): GameState {
@@ -97,9 +165,11 @@ export function advanceAndPlay(state: GameState): void {
   while (guard-- > 0) {
     const advanced = advanceTime(state, "next_match");
     if (!advanced.ok) throw new Error(advanced.digest.join(" / "));
-    if (advanced.stopped === "season_end") return;
+    // 경질은 시계가 멈춘 상태다 — 오류가 아니라 끝이다
+    if (advanced.stopped === "season_end" || advanced.stopped === "blocked") return;
     if (advanced.stopped === "attention") continue; // 부상·불만 보고 후 계속
     if (advanced.stopped === "matchday") {
+      drillUserTactics(state, 7); // 지난 한 주의 훈련
       playMockMatch(state);
       return;
     }

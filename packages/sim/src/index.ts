@@ -1,5 +1,6 @@
 export * from "./state-modifier";
 export * from "./strength-packet";
+export * from "./directives";
 export * from "./key-points";
 export * from "./exploits";
 export * from "./match-ledger";

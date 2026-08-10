@@ -65,8 +65,10 @@ import {
 import { overallFor, playerCatalog } from "../world/catalog";
 import { estimateSquadWages, wageSubjectOf } from "../world/wages";
 import { generateYouthPlayer } from "../world/generate";
+import { hasCups, scopedTeams, type WorldScope } from "../world/scope";
 import {
   TEAM_CATALOG,
+  type TeamCatalogEntry,
   countryOfTeam,
   defaultXiIds,
   formationOf,
@@ -373,6 +375,18 @@ export interface GameState {
   userTeamId: string;
   phase: GamePhase;
   pendingMatch: PendingMatch | null;
+  /**
+   * 이 세계의 범위 — 없으면 카탈로그 전체다(실게임·옛 세이브).
+   * 테스트가 리그·팀 수를 줄인 작은 세계를 만들 때만 채워진다 (`world/scope.ts`).
+   */
+  world?: WorldScope;
+  /**
+   * **승강 결과** — 팀 → 지금 속한 리그. 카탈로그의 `leagueId`는 불변이므로
+   * 강등·승격은 세이브 상태로만 표현된다 (`competition/promotion.ts`).
+   * 카탈로그와 같은 리그면 항목을 두지 않는다. 옛 세이브엔 없다 — 없으면
+   * 전 클럽이 카탈로그 그대로다 (optional — SAVE_VERSION 유지).
+   */
+  leagueOf?: Record<string, string>;
 
   // ── 팀·선수 ──
   teams: GameTeam[];
@@ -762,6 +776,8 @@ export interface CreateGameInput {
   managerName: string;
   background: string;
   attributes: ManagerAttributes;
+  /** 세계의 범위 — 없으면 카탈로그 전체 (`world/scope.ts`) */
+  world?: WorldScope;
 }
 
 /**
@@ -875,7 +891,8 @@ const CORE_GK = 2;
  */
 export function addMissingClubs(state: GameState): number {
   const present = new Set(state.teams.map((t) => t.id));
-  const missing = TEAM_CATALOG.filter((t) => !present.has(t.id));
+  // 축소 세계는 빠진 게 아니라 원래 없는 것이다 — 채워 넣으면 세계가 커진다
+  const missing = scopedTeams(state.world).filter((t) => !present.has(t.id));
   if (missing.length === 0) return 0;
 
   const rng = makeRng(state.seed, "backfill:ai-managers");
@@ -940,9 +957,10 @@ function buildInitialSquads(
   players: GamePlayer[],
   seed: number,
   formations: Map<string, Formation>,
+  teams: readonly TeamCatalogEntry[] = TEAM_CATALOG,
 ): void {
   const seasonStartYear = 2026;
-  for (const team of TEAM_CATALOG) {
+  for (const team of teams) {
     const squad = players
       .filter((p) => p.teamId === team.id)
       .sort((a, b) => b.attributes.overall - a.attributes.overall);
@@ -1333,18 +1351,24 @@ export function createGame(input: CreateGameInput): GameState {
   const season = 1;
   const calendar = buildSeasonCalendar(season);
   const rng = makeRng(seed, "ai-managers");
+  const world = input.world;
+  const catalogTeams = scopedTeams(world);
+  const inThisWorld = new Set(catalogTeams.map((t) => t.id));
+  if (!inThisWorld.has(input.userTeamId)) {
+    throw new Error(`이 세계에 없는 팀: ${input.userTeamId}`);
+  }
 
-  const teams: GameTeam[] = TEAM_CATALOG.map((t) => ({
+  const teams: GameTeam[] = catalogTeams.map((t) => ({
     id: t.id,
     aiManagerTacticsRating: randInt(rng, 55, 82),
     // 부임일 — 감독 시장이 "얼마나 됐나"를 여기서 잰다 (`manager-market.ts`)
     managerSince: calendar.preseasonStart,
   }));
-  const players = instantiatePlayers(seed);
+  const players = instantiatePlayers(seed, (teamId) => inThisWorld.has(teamId));
   // 구단마다 **자기 스쿼드에 맞는 모양**을 먼저 고른다 — 1·2군 분할도 이 모양의
   // 자리를 기준으로 코어를 잡으므로 순서가 여기여야 한다
   const formations = new Map<string, Formation>(
-    TEAM_CATALOG.map((t) => [
+    catalogTeams.map((t) => [
       t.id,
       pickFormation(
         players.filter((p) => p.teamId === t.id),
@@ -1353,7 +1377,7 @@ export function createGame(input: CreateGameInput): GameState {
       ),
     ]),
   );
-  buildInitialSquads(players, seed, formations);
+  buildInitialSquads(players, seed, formations, catalogTeams);
 
   // 전술·배치 — 구단의 기본 포메이션과 기본 선발로 시작한다 (팀 카탈로그)
   const tactics: TeamTactics[] = teams.map((t) => {
@@ -1379,7 +1403,7 @@ export function createGame(input: CreateGameInput): GameState {
   if (captain) captain.isCaptain = true;
 
   // 재정 + 계약(주급의 원본)
-  const finances: TeamFinance[] = TEAM_CATALOG.map((t) => {
+  const finances: TeamFinance[] = catalogTeams.map((t) => {
     const f = TIER_FINANCE[t.tier] ?? TIER_FINANCE[3]!;
     return {
       teamId: t.id,
@@ -1404,8 +1428,8 @@ export function createGame(input: CreateGameInput): GameState {
   // 일정 — 전 리그 + 유럽 대항전 경기 + 이적창 개장/폐장
   const windows = buildTransferWindows(season);
   // 다른 리그도 같은 캘린더 골격으로 동시에 진행된다
-  const euroEntrants = buildEuroEntrants(season, seed);
-  const matches = buildSeasonFixtures(season, seed, euroEntrants);
+  const euroEntrants = hasCups(world) ? buildEuroEntrants(season, seed) : [];
+  const matches = buildSeasonFixtures(season, seed, euroEntrants, world);
   // 일정 축(SCHEDULE_ENTRY)은 **감독의 달력**이다 — 유저 리그 전체 + 유저 팀
   // 대항전 경기만 등록한다. 타 리그·타 팀 대항전은 state.matches에만 있고
   // tick이 간이 시뮬로 소화한다.
@@ -1433,6 +1457,7 @@ export function createGame(input: CreateGameInput): GameState {
     userTeamId: input.userTeamId,
     phase: "idle",
     pendingMatch: null,
+    ...(world ? { world } : {}),
 
     teams,
     players,
@@ -1489,7 +1514,7 @@ export function createGame(input: CreateGameInput): GameState {
 
   // 국내 컵 1라운드 추첨일을 미리 달력에 올린다 — tick을 기다리면 부임 첫날의
   // 달력이 비어 보인다 ("리그컵 추첨이 7월 말"이라는 사실은 시작부터 알 수 있다)
-  advanceDomesticCups(state, []);
+  if (hasCups(world)) advanceDomesticCups(state, []);
   // 기본 훈련 — 감독이 부임하기 전부터 팀은 훈련하고 있었다 (training-plan.ts)
   installDefaultTraining(state);
   /**

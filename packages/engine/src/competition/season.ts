@@ -16,12 +16,14 @@ import {
   reviewDomesticCups,
 } from "./domestic-cup";
 import { hasPendingDraw } from "./draw-schedule";
-import { TOP_LEAGUES, isMarketOnlyLeague, leagueName } from "../data/league-catalog";
+import { isCupOnlyLeague, isMarketOnlyLeague, leagueName } from "../data/league-catalog";
+import { hasCups, scopedLeagues } from "../world/scope";
 import { euroChampion, euroStageMatches } from "./euro-knockout";
 import { payWinnerPrize } from "./euro-prize";
 import { payLeaguePrizes, paySeasonBonuses, topUpTransferBudget } from "../club/finance";
 import { buildEuroEntrants, entrantsOf, type LeagueTables } from "./europe";
 import { buildSeasonFixtures, isUserFixture } from "./fixtures";
+import { applyPromotionRelegation, leagueOfTeamIn, teamsOfLeagueIn } from "./promotion";
 import { generateYouthPlayer } from "../world/generate";
 import {
   buildAssignments,
@@ -62,13 +64,13 @@ export interface StandingRow {
  */
 export function computeStandings(
   state: GameState,
-  competitionId = leagueOfTeam(state.userTeamId),
+  competitionId = leagueOfTeamIn(state, state.userTeamId),
 ): StandingRow[] {
   // 이적 시장 전용 리그는 경기를 안 하므로 순위가 없다 — 국내 컵과 같은 취급
   if (isMarketOnlyLeague(competitionId)) return [];
   const members = isCup(competitionId)
     ? entrantsOf(state.euroEntrants, competitionId)
-    : state.teams.filter((t) => leagueOfTeam(t.id) === competitionId).map((t) => t.id);
+    : teamsOfLeagueIn(state, competitionId);
   const rows = new Map<string, StandingRow>();
   for (const teamId of members) {
     rows.set(teamId, {
@@ -134,10 +136,12 @@ export function allMatchesDone(state: GameState): boolean {
   // "남은 경기 없음"으로 읽고 시즌을 넘기면 결승 없는 대회가 생긴다.
   if (hasPendingDraw(state)) return false;
 
-  const league = leagueOfTeam(state.userTeamId);
+  const league = leagueOfTeamIn(state, state.userTeamId);
   // 우리 나라 국내 컵도 기다린다 — FA컵 결승을 남긴 채 시즌이 넘어가면 우승 팀이
   // 없는 대회가 생기고, 다음 시즌 유럽 티켓 한 장이 사라진다.
-  const ourCups = domesticCupsOf(state.userTeamId);
+  // 컵이 없는 세계(축소 세계)는 기다릴 대회 자체가 없다.
+  const cups = hasCups(state.world);
+  const ourCups = cups ? domesticCupsOf(state.userTeamId) : [];
   const played = state.matches.every(
     (m) =>
       m.season !== state.season ||
@@ -151,6 +155,7 @@ export function allMatchesDone(state: GameState): boolean {
   if (!played) return false;
 
   // 컵은 **우승 팀이 나와야** 끝이다 — 경기가 다 끝났어도 다음 단계가 편성 전일 수 있다
+  if (!cups) return true;
   for (const cup of ourCups) if (!domesticChampion(state, cup.id)) return false;
   for (const cup of CUP_CATALOG) if (!euroChampion(state, cup.id)) return false;
   return true;
@@ -255,11 +260,11 @@ export function reviewSeason(state: GameState): string[] {
   if (position === 1) {
     state.trophies.push({
       season: state.season,
-      competition: leagueName(leagueOfTeam(state.userTeamId)),
+      competition: leagueName(leagueOfTeamIn(state, state.userTeamId)),
       teamId: state.userTeamId,
     });
     digest.push(
-      `🏆 ${leagueName(leagueOfTeam(state.userTeamId))} 우승! 트로피 보관함에 추가되었다`,
+      `🏆 ${leagueName(leagueOfTeamIn(state, state.userTeamId))} 우승! 트로피 보관함에 추가되었다`,
     );
   }
   digest.push(...reviewEuropeanCampaign(state));
@@ -531,22 +536,37 @@ export function transitionSeason(state: GameState): string[] {
   // 순위표·컵 결과는 모두 `state.season`으로 걸러 읽으므로 **시즌을 올리기 전에**
   // 읽어야 한다. (state.matches도 곧 새 시즌으로 교체된다.)
   const finalTables: LeagueTables = {};
-  for (const league of TOP_LEAGUES) {
+  for (const league of scopedLeagues(state.world)) {
     finalTables[league.id] = computeStandings(state, league.id).map((r) => r.teamId);
   }
   const cupWinners = domesticCupWinners(state);
+  /**
+   * 승강 — 티켓과 **같은 최종 순위표**를 쓰고, 새 일정을 짜기 **전에** 자리를 바꾼다.
+   * 순서가 뒤집히면 강등된 팀이 그 리그의 다음 시즌 일정에 그대로 남는다.
+   */
+  applyPromotionRelegation(state, finalTables, digest);
 
   state.season = nextSeason;
   state.calendar = nextCalendar;
   // 새 시즌은 7월 1일(프리시즌·여름 이적창 개장)에서 시작한다
   state.date = nextCalendar.preseasonStart;
   const windows = buildTransferWindows(nextSeason);
-  state.euroEntrants = buildEuroEntrants(nextSeason, state.seed, finalTables, cupWinners);
-  const matches = buildSeasonFixtures(nextSeason, state.seed, state.euroEntrants);
+  state.euroEntrants = hasCups(state.world)
+    ? buildEuroEntrants(nextSeason, state.seed, finalTables, cupWinners)
+    : [];
+  /**
+   * 감독이 2부로 내려갔으면 **그 리그도 리그전을 돈다** — 2부는 원래 컵 참가
+   * 인원이라 일정이 없어서, 그대로 두면 강등이 곧 경기 없는 시즌이 된다.
+   */
+  const ourLeague = leagueOfTeamIn(state, state.userTeamId);
+  const matches = buildSeasonFixtures(nextSeason, state.seed, state.euroEntrants, state.world, {
+    leagueOf: state.leagueOf,
+    ...(isCupOnlyLeague(ourLeague) ? { extraLeagues: [ourLeague] } : {}),
+  });
   state.windows = windows;
   state.matches = matches;
   state.schedule = buildScheduleEntries(
-    matches.filter((m) => isUserFixture(m, state.userTeamId)),
+    matches.filter((m) => isUserFixture(m, state.userTeamId, ourLeague)),
     windows,
     state.userTeamId,
   );

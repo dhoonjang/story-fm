@@ -179,10 +179,14 @@ export function drainVariance(key: string): number {
 
 /**
  * 이 선수가 `minutes`분 동안 잃는 체력.
- * 자리 × 전술 × 자리별 전술 무게 × 지구력 × 그날의 몫.
+ * 자리 × 전술 × 자리별 전술 무게 × 지구력 × 그날의 몫 × **개인 지시**.
  *
  * @param variance `drainVariance(키)`가 낸 배수. 생략하면 계수만으로 계산한다
  *   (분포 검증·밸런스 테이블처럼 운을 빼고 봐야 하는 자리).
+ * @param directive `directiveDrain(kind)`가 낸 배수 (`directives.ts`). 전술이 팀
+ *   전체의 소모를 정한다면 이건 **그 한 명의 몫**이다 — 상대 시작점을 전담 압박하는
+ *   선수만 먼저 다리가 멈추고, 뒤에 남으라는 지시를 받은 풀백은 덜 지친다.
+ *   지시가 없으면 1이라 **아무것도 바뀌지 않는다.**
  */
 export function conditionDrain(
   player: Player,
@@ -190,6 +194,7 @@ export function conditionDrain(
   spec: TacticsSpec,
   minutes: number,
   variance = 1,
+  directive = 1,
 ): number {
   return (
     ((FULL_MATCH_DRAIN * minutes) / 90) *
@@ -197,7 +202,8 @@ export function conditionDrain(
     tacticalDrain(spec) *
     positionalTacticWeight(position, spec) *
     staminaFactor(player) *
-    variance
+    variance *
+    directive
   );
 }
 

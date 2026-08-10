@@ -25,6 +25,7 @@ export * from "./world/generate";
 export * from "./world/wages";
 export * from "./world/onboarding";
 export * from "./world/admin";
+export * from "./world/scope";
 
 // competition — 시즌 달력·리그·컵·유럽 대항전
 export * from "./competition/calendar";
@@ -34,6 +35,8 @@ export * from "./competition/europe";
 export * from "./competition/euro-knockout";
 export * from "./competition/euro-prize";
 export * from "./competition/shootout";
+export * from "./competition/extra-time";
+export * from "./competition/promotion";
 export * from "./competition/domestic-cup";
 export * from "./competition/draw-schedule";
 export * from "./competition/reschedule";
@@ -45,6 +48,8 @@ export * from "./match/ratings";
 
 // squad — 선수단 상태(폼·심경·부상·정착)와 성장·훈련·스카우팅
 export * from "./squad/form";
+export * from "./squad/slump";
+export * from "./squad/other-clubs";
 export * from "./squad/mood";
 export * from "./squad/cues";
 export * from "./squad/settling";

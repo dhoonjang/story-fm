@@ -1,3 +1,4 @@
+import { keepSeat } from "./helpers";
 import { describe, expect, it } from "vitest";
 import type { GameState } from "@story-fm/engine";
 import {
@@ -365,6 +366,7 @@ describe("밸런스 기준선", () => {
     let guard = 120;
     while (guard-- > 0) {
       const before = state.date;
+      keepSeat(state); // 재정을 재는 동안 자리는 지킨다 (경질은 시계를 멈춘다)
       advanceAndPlay(state);
       if (state.date === before || state.season > 1) break;
     }
@@ -383,7 +385,11 @@ describe("밸런스 기준선", () => {
     // ⚠️ 남은 사실: **수입 모델이 후하다.** 실제 EPL 구단의 이적 제외 순익은
     // 연 £20~60M이라 £155M은 여전히 높다. 그동안 과다 임금이 그걸 가리고 있었고,
     // 이건 주급이 아니라 수입 쪽에서 따로 잡을 일이다 (club-finance §10).
-    expect(cash).toBeGreaterThan(100_000_000);
+    //
+    // ⚠️ 하단을 £85M으로 내렸다 — 시뮬 밸런스를 고친 뒤로 **최종 순위가 시드마다
+    // 갈리기 때문**이다(우승도 중위권도 나온다). 순위 상금이 그만큼 흔들리므로
+    // 밴드가 한 시즌의 성적 하나에 걸려서는 안 된다.
+    expect(cash).toBeGreaterThan(85_000_000);
     expect(cash).toBeLessThan(175_000_000);
     // 급여 비중 — 경기가 있는 달은 실제 구단 범위 안에 든다.
     // 프리시즌 달(매치데이 수입 없음)은 자연히 높아 대상에서 뺀다
@@ -401,6 +407,7 @@ describe("밸런스 기준선", () => {
     let guard = 120;
     while (guard-- > 0) {
       const before = state.date;
+      keepSeat(state);
       advanceAndPlay(state);
       if (state.date === before || state.season > 1) break;
     }

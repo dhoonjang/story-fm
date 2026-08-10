@@ -13,13 +13,16 @@ import {
   type RecoveryKind,
 } from "@story-fm/sim";
 import { addDays, dayOfWeek, diffDays, matchesOn, nextMatchFor, windowOpenOn } from "../competition/calendar";
-import { TEAM_CATALOG, isClubTeam } from "../data/team-catalog";
+import { TEAM_CATALOG } from "../data/team-catalog";
 import { competitionShortName, competitionStageLabel } from "../data/cup-catalog";
 import { advanceDomesticCups } from "../competition/domestic-cup";
+import { hasCups } from "../world/scope";
+import { driftFamiliarity, tickOtherClubs } from "../squad/other-clubs";
+import { applyResultMood } from "../squad/slump";
 import { advanceEuroKnockouts } from "../competition/euro-knockout";
 import { applyMonthlyDevelopment } from "../squad/development";
 import { returnDueLoans, signFreeAgents } from "../market/departures";
-import { decayedForm } from "../squad/form";
+import { clampForm, decayedForm, formDeltaFromMatch } from "../squad/form";
 import type { TrainedSession } from "../squad/training-report";
 import {
   applyAiMatchFinance,
@@ -161,29 +164,6 @@ function resolveScouting(state: GameState, digest: string[]): void {
  * 회복 세션(16), 그다음 날은 완전 휴식(13), 그 밖은 본훈련(8). AI 구단도 훈련을
  * 하므로 늘 쉬는 값을 주면 반대로 남의 팀이 유리해진다.
  */
-function recoverOtherClubs(state: GameState): void {
-  const playedOn = (offset: number): Set<string> => {
-    const set = new Set<string>();
-    for (const m of matchesOn(state.matches, addDays(state.date, offset))) {
-      set.add(m.homeTeamId);
-      set.add(m.awayTeamId);
-    }
-    return set;
-  };
-  const yesterday = playedOn(-1);
-  const dayBefore = playedOn(-2);
-  for (const player of state.players) {
-    if (player.teamId === state.userTeamId) continue; // 위에서 이미 처리했다
-    if (!isClubTeam(player.teamId)) continue; // 무소속·시장 전용 리그는 경기가 없다
-    const kind: RecoveryKind = yesterday.has(player.teamId)
-      ? "recovery"
-      : dayBefore.has(player.teamId)
-        ? "idle"
-        : "training";
-    player.state.condition = clampCondition(player.state.condition + dailyRecovery(player, kind));
-  }
-}
-
 /**
  * 하루를 소화한다.
  *
@@ -258,7 +238,9 @@ function dailyTick(
     }
   }
 
-  recoverOtherClubs(state);
+  tickOtherClubs(state);
+  // 전술 적응은 감독 팀을 포함한 모든 클럽이 매일 조금씩 받는다 (other-clubs.ts)
+  driftFamiliarity(state);
 
   // 전술 적응도 — **시간이 붙인다.** 같은 전술을 유지하는 동안 매일 조금씩 손에 익고,
   // 그 숙련도는 기억(`drilled`)에 계속 갱신돼 나중에 되돌아왔을 때 되찾을 수 있다.
@@ -622,18 +604,26 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
         const assists = assisted.filter((id) => id === p.id).length;
         stat.goals += goals;
         if (assists > 0) stat.assists = (stat.assists ?? 0) + assists;
-        stat.ratingSum =
-          (stat.ratingSum ?? 0) +
-          matchRating({
-            group: positionGroupOfPlayer(p),
-            goals,
-            assists,
-            yellows: cards.filter((c) => c.playerId === p.id && c.card === "yellow").length,
-            reds: cards.filter((c) => c.playerId === p.id && c.card === "red").length,
-            conceded,
-            outcome,
-          });
+        const rating = matchRating({
+          group: positionGroupOfPlayer(p),
+          goals,
+          assists,
+          yellows: cards.filter((c) => c.playerId === p.id && c.card === "yellow").length,
+          reds: cards.filter((c) => c.playerId === p.id && c.card === "red").length,
+          conceded,
+          outcome,
+        });
+        stat.ratingSum = (stat.ratingSum ?? 0) + rating;
+        // 폼은 감독 팀만의 것이 아니다 — 같은 함수로 리그 전체가 오르내린다
+        p.state.form = clampForm(p.state.form + formDeltaFromMatch(p, rating, outcome));
       }
+      // 연패·대패·연승이 라커룸에 남기는 것 (slump.ts) — 남의 팀도 겪는다
+      applyResultMood(
+        state,
+        teamId,
+        goalsFor - conceded,
+        onField.map((p) => p.id),
+      );
     }
     /**
      * 피로 — **뛴 시간만큼, 그리고 자리와 전술이 정한 만큼.**
@@ -791,8 +781,10 @@ export function advanceTime(
     simulateOtherMatches(state, digest);
     // 녹아웃 — 직전 단계가 끝났으면 다음 단계를 편성한다.
     // 대항전을 먼저 돌려야 예약된 대항전 날짜가 컵 날짜 선택에 반영된다.
-    advanceEuroKnockouts(state, digest);
-    advanceDomesticCups(state, digest);
+    if (hasCups(state.world)) {
+      advanceEuroKnockouts(state, digest);
+      advanceDomesticCups(state, digest);
+    }
     // 경기 일정이 바뀌었으면 기본 훈련을 다시 깐다 (감독 지시 세션은 그대로).
     // ⚠️ 예전엔 "경기 수가 늘었을 때"만 불렀는데, 컵 대진은 **경기일 몇 주 전에**
     // 편성되므로 그 순간엔 3주 창 밖이라 아무 일도 일어나지 않고, 날짜가 다가와도

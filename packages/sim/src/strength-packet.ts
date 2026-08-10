@@ -8,18 +8,17 @@ import type {
   SidePacket,
   StrengthPacket,
   TacticalRead,
-  PlayerDirectiveKind,
   TacticsSpec,
   ZoneStrength,
 } from "@story-fm/domain";
 import {
   FAMILIARITY_MAX,
-  PLAYER_DIRECTIVE_KO,
   positionGroupOf,
   positionGroupOfPlayer,
   roleFit,
   tacticalSensitivityOf,
 } from "@story-fm/domain";
+import { applyDirectives, type DirectiveInput } from "./directives";
 import { applyExploits, autoExploits, exploitTargets } from "./exploits";
 import { buildKeyPoints, readKeyPoints } from "./key-points";
 import { stateModifier } from "./state-modifier";
@@ -70,14 +69,6 @@ export interface SideInput {
    * 전술 6축이 팀의 성향이라면 이쪽은 **이 경기, 저 사람**을 향한 지시다.
    */
   directives?: DirectiveInput[];
-}
-
-export interface DirectiveInput {
-  /** 지시를 받은 우리 선수 */
-  by: string;
-  kind: PlayerDirectiveKind;
-  /** 겨냥한 상대 선수 (man_mark·press_target) */
-  targetId?: string;
 }
 
 /**
@@ -334,115 +325,49 @@ export function matchIntensity(spec: TacticsSpec): number {
   );
 }
 
-// ── 개인 지시 — 감독의 말이 특정 선수·특정 상대에 닿는 자리 ──────────
-
-/** 지시 하나가 낼 수 있는 최대 폭 — **이득의 상한**이다 (대가는 아래 표에 그대로) */
-const DIRECTIVE_CAP = 0.15;
-/** 한 경기에 유효한 지시 수 — 넘으면 선수단이 다 소화하지 못한다 */
-const MAX_EFFECTIVE_DIRECTIVES = 3;
-
-function attrOf(slot: LineupSlot | undefined, pick: (p: Player["attributes"]) => number): number {
-  return slot ? pick(slot.player.attributes) : 60;
-}
-
-/** 두 능력의 차 → 0~1 성공률. 같으면 0.5, 20 차이면 거의 한쪽으로 기운다 */
-function duel(mine: number, theirs: number): number {
-  return Math.max(0.15, Math.min(0.95, 0.5 + (mine - theirs) / 40));
-}
-
-export interface DirectiveOutcome {
-  /** 지시를 내린 쪽의 존 조정 — 대가가 주로 여기 남는다 */
-  us: { attack: number; midfield: number; defense: number };
-  /** 겨냥당한 쪽의 존 조정 */
-  them: { attack: number; midfield: number; defense: number };
-  notes: string[];
-}
-
-const zeroZones = () => ({ attack: 0, midfield: 0, defense: 0 });
-
-/**
- * 개인 지시 → 존 조정. **무엇을 지시했는지는 LLM이 옮기고, 얼마나 먹히는지는 여기서 정한다.**
- *
- * 규칙은 전술 6축과 같다 — **이득에만 소화율을 곱하고 대가는 온전히 치른다.**
- * 그래서 적응이 안 된 선수단에 지시를 쏟으면 본업만 비고 이득은 안 붙는다.
- * 대상이 그라운드에 없으면(교체·미출전) 그 지시는 조용히 버려진다 — 코어가
- * 사실을 확인하는 자리이고, 없는 사람을 마크할 수는 없다.
- */
-export function applyDirectives(
-  directives: DirectiveInput[] | undefined,
-  usXI: LineupSlot[],
-  themXI: LineupSlot[],
-  uptake: number,
-): DirectiveOutcome {
-  const out: DirectiveOutcome = { us: zeroZones(), them: zeroZones(), notes: [] };
-  if (!directives || directives.length === 0) return out;
-
-  const byId = (slots: LineupSlot[], id: string) => slots.find((s) => s.player.id === id);
-  const zoneOf = (slot: LineupSlot) =>
-    slotGroup(slot) === "FW" ? "attack" : slotGroup(slot) === "DF" ? "defense" : "midfield";
-  const gain = (v: number) => Math.min(DIRECTIVE_CAP, v) * uptake;
-
-  for (const d of directives.slice(0, MAX_EFFECTIVE_DIRECTIVES)) {
-    const me = byId(usXI, d.by);
-    if (!me) continue; // 벤치에 앉은 선수에게 내린 지시는 효력이 없다
-    const target = d.targetId ? byId(themXI, d.targetId) : undefined;
-    const name = me.player.name;
-
-    if (d.kind === "man_mark" || d.kind === "press_target") {
-      if (!target) continue; // 대상이 그라운드에 없다 — 지시가 성립하지 않는다
-      const mine = attrOf(me, (a) => (a.tackling + a.positioning + a.pace) / 3);
-      const theirs = attrOf(target, (a) => (a.dribbling + a.pace + a.composure) / 3);
-      const rate = duel(mine, theirs);
-      const themZone = zoneOf(target);
-      const bite = gain(0.2 * rate);
-      // 상대를 지운다 — 잘 붙을수록 크게, 그래도 상한을 넘지 않는다
-      out.them[themZone] -= bite;
-      /**
-       * **공급을 끊으면 마무리도 준다.** xg는 공격 존과 수비 존만 보므로, 중원·후방을
-       * 지운 효과가 여기서 공격으로 옮겨 붙지 않으면 "핵심 미드필더를 봉쇄했는데 상대
-       * 기대 득점이 오히려 오르는" 일이 생긴다 (실제로 그렇게 나왔다).
-       */
-      if (themZone !== "attack") out.them.attack -= bite * 0.6;
-      /**
-       * 본업을 덜 한다 — **대가는 소화율과 무관하다.** 다만 그 선수를 지우는 게
-       * 아니라 임무를 바꾸는 것이므로 존 평균에서 한 명 몫을 넘지 않게 잡는다.
-       */
-      out.us[zoneOf(me)] -= d.kind === "man_mark" ? 0.05 : 0.03;
-      out.notes.push(
-        `${name}이(가) ${target.player.name}을(를) ${PLAYER_DIRECTIVE_KO[d.kind]} — ` +
-          `${rate >= 0.6 ? "따라붙을 만하다" : rate >= 0.4 ? "버거운 싸움이다" : "상대가 한 수 위다"}`,
-      );
-      continue;
-    }
-
-    if (d.kind === "focus_play") {
-      const quality = attrOf(me, (a) => (a.dribbling + a.passing + a.finishing) / 3);
-      out.us.attack += gain(0.16 * (quality / 80));
-      out.us.midfield -= 0.05; // 한 명에게 몰아주면 연결이 단순해진다
-      out.notes.push(`${name}에게 공격을 몰아준다 — 다른 길이 줄어든다`);
-      continue;
-    }
-
-    if (d.kind === "stay_back") {
-      out.us.defense += gain(0.08);
-      out.us.attack -= 0.06;
-      out.notes.push(`${name}은(는) 뒤에 남는다 — 수비는 두꺼워지고 공격 인원이 준다`);
-      continue;
-    }
-
-    out.us.attack += gain(0.09);
-    out.us.defense -= 0.07;
-    out.notes.push(`${name}이(가) 적극적으로 올라간다 — 뒷공간을 내준다`);
-  }
-  return out;
-}
-
 /**
  * 존 전력 — **개인 유효 전력의 평균**이다.
  *
  * 전술 적응도는 더 이상 존 전체에 곱하는 팀 계수가 아니라 개인 계수로 들어가
  * `effectiveOf` 안에 이미 반영돼 있다. 여기 남은 팀 계수는 감독 전술 소화율뿐이다.
  */
+/**
+ * 존 기여도 — 그 자리가 이 국면에 얼마나 관여하나 (가중 평균의 무게).
+ * 공격은 최전방이 주도하되 중원이 만들고, 수비는 뒷선과 골키퍼가 주도하되
+ * 중원이 거든다.
+ */
+/**
+ * 전술 지시 + 상성 + 개인 지시 + 공략이 한 존을 움직일 수 있는 폭.
+ * 자르지 않고 부드럽게 포화시키므로(tanh) 더 얹으면 언제나 조금은 더 움직인다.
+ */
+export const TACTIC_SWING = 0.18;
+
+/** 대등한 두 팀의 기대 득점 (홈·원정 계수 전) */
+export const BASE_EXPECTED_GOALS = 1.35;
+/** 선수의 질이 득점으로 번역되는 세기 — 간이 시뮬(`QUICK_SIM_EXPONENT`)과 같은 자리 */
+export const QUALITY_EXPONENT = 5.5;
+/**
+ * 판의 우열(전술·상성·개인 지시가 실린 존 매치업)이 그 위를 기울이는 세기.
+ *
+ * 존의 폭이 `TACTIC_SWING`으로 묶여 있으므로 지수를 크게 둬도 뒤집히지 않는다 —
+ * 양쪽이 반대로 극단을 잡으면 최대 1.6배까지 갈리고, 그건 10점 차 스쿼드의
+ * 질 우위(1.9배)보다 작다. **전술이 판을 흔들되 선수를 대신하지는 못한다.**
+ */
+export const MATCHUP_EXPONENT = 1.3;
+/**
+ * 90분에 이보다 적게/많이 만들지는 않는다.
+ * ⚠️ 하한은 **이변의 여지**다 — 0.45로 두면 18점 차 미스매치에서 약팀이 60경기를
+ * 치러도 한 번을 못 이긴다(테스트로 고정).
+ */
+export const MIN_EXPECTED_GOALS = 0.6;
+export const MAX_EXPECTED_GOALS = 3;
+
+const ZONE_CONTRIBUTION: Record<"attack" | "midfield" | "defense", Record<PositionGroup, number>> = {
+  attack: { FW: 1, MF: 0.45, DF: 0.1, GK: 0.02 },
+  midfield: { FW: 0.3, MF: 1, DF: 0.3, GK: 0.05 },
+  defense: { FW: 0.08, MF: 0.35, DF: 1, GK: 0.8 },
+};
+
 function buildZones(
   slots: LineupSlot[],
   fit: number,
@@ -450,11 +375,6 @@ function buildZones(
   counter: { attack: number; midfield: number; defense: number },
 ): ZoneStrength {
   const of = (g: PositionGroup) => slots.filter((s) => slotGroup(s) === g);
-  const scores = (g: PositionGroup) => of(g).map(effectiveOf);
-  const gk = scores("GK");
-  const df = scores("DF");
-  const mf = scores("MF");
-  const fw = scores("FW");
 
   /**
    * **구멍** — 다리가 멈춘 선수는 그 라인 전체의 대가가 된다 (stamina.ts).
@@ -465,13 +385,44 @@ function buildZones(
   const gapsIn = (g: PositionGroup) => of(g).filter(isGassed).length;
   const gapPenalty = (g: PositionGroup) => 1 - Math.min(0.25, gapsIn(g) * GAP_PENALTY);
 
-  const attack = mean(fw) * (1 + delta.attack + counter.attack) * fit * gapPenalty("FW");
-  const midfield = mean(mf) * (1 + delta.midfield + counter.midfield) * fit * gapPenalty("MF");
+  /**
+   * 존 전력은 **XI 전체의 가중 평균**이다 — 그 그룹만의 평균이 아니다.
+   *
+   * 그룹 평균으로 재면 포메이션이 전력을 왜곡한다: 원톱을 세운 약팀의 공격 존은
+   * 잘하는 공격수 한 명의 값이고, 스리톱을 세운 강팀은 윙어까지 평균에 들어가
+   * **약팀의 공격이 더 세게 나온다**(실측: 코번트리 88.3 > 아스날 87.3).
+   * 자리마다 그 국면에 관여하는 정도로 무게를 주면 인원 구성이 자연스럽게 반영된다.
+   */
+  const zoneOf = (kind: keyof typeof ZONE_CONTRIBUTION): number => {
+    const w = ZONE_CONTRIBUTION[kind];
+    let sum = 0;
+    let weight = 0;
+    for (const slot of slots) {
+      const g = slotGroup(slot);
+      const wg = w[g];
+      sum += effectiveOf(slot) * wg;
+      weight += wg;
+    }
+    return weight === 0 ? 0 : sum / weight;
+  };
+
+  /**
+   * 전술이 만드는 폭의 상한 — 지시와 상성을 다 합쳐도 이만큼이다.
+   *
+   * 없으면 공격적으로 세팅한 약팀의 공격 존이 강팀을 넘는다(실측: 코번트리 +17%로
+   * 아스날보다 높은 공격 존). 전술은 판을 기울이는 것이지 선수를 바꾸는 것이 아니다.
+   *
+   * ⚠️ 잘라내지 않고 **부드럽게 포화**시킨다(tanh) — 자르면 상한에 닿은 두 지시가
+   * 같은 값이 되어 "더 공격적으로"가 아무 일도 안 하게 된다.
+   */
+  const tacticShift = (raw: number) => 1 + TACTIC_SWING * Math.tanh(raw / TACTIC_SWING);
+
+  const attack =
+    zoneOf("attack") * tacticShift(delta.attack + counter.attack) * fit * gapPenalty("FW");
+  const midfield =
+    zoneOf("midfield") * tacticShift(delta.midfield + counter.midfield) * fit * gapPenalty("MF");
   const defense =
-    (mean(df) * 0.85 + mean(gk) * 0.15) *
-    (1 + delta.defense + counter.defense) *
-    fit *
-    gapPenalty("DF");
+    zoneOf("defense") * tacticShift(delta.defense + counter.defense) * fit * gapPenalty("DF");
 
   return { attack: round2(attack), midfield: round2(midfield), defense: round2(defense) };
 }
@@ -725,23 +676,54 @@ export function buildStrengthPacket(
   });
 
   /**
-   * 기대 득점 — 공격/수비 비율의 멱함수 매핑.
+   * 기대 득점 — **선수의 질**과 **판의 우열**을 곱한다.
    *
-   * **지수가 이 게임의 밸런스 손잡이다.** 1.6에서 1.3으로 내렸다: 유저 팀만
-   * 폼·사기·전술 적응도·포지션 적응도가 누적되어 자라는데(AI 팀은 안 자란다),
-   * 지수가 크면 그 6~15%의 상태 우위가 xg에서 1.5배로 증폭돼 시즌이 갈수록
-   * 발산했다 — 한 시즌 측정에서 경기당 xg가 2.46 : 0.80까지 벌어져 30승 96점
-   * 103득점 23실점이 나왔다(실제 우승팀은 85~93점·득 85~95·실 30~35).
+   * 예전엔 존 비율(공격/상대 수비) 하나였다. 그런데 존에는 전술 보정이 이미
+   * 곱해져 있어서, 공격적으로 세팅한 약팀의 공격 존이 강팀을 넘고(실측: 코번트리
+   * 88.9 > 아스날 86.3) 스쿼드의 격차가 통째로 지워졌다 — 같은 경기를 간이
+   * 시뮬은 1.90:0.96으로 보는데 구간 시뮬은 1.48:1.48로 봤다.
    *
-   * 하한도 0.25 → 0.45로 올렸다. 약팀도 90분에 반 골은 만든다 — 0.25는
-   * "아무것도 못 한다"는 뜻이고 그건 축구가 아니다.
+   * 그래서 축을 둘로 나눈다: **질**(XI 유효 전력의 비 — 간이 시뮬이 쓰는 것과
+   * 같은 축)이 기본을 정하고, **판**(존 매치업 — 전술·상성이 실린 값)이 그 위를
+   * 기울인다. 질의 지수가 크고 판의 지수가 작아서, 전술은 판을 흔들되 선수를
+   * 대신하지는 못한다.
    */
-  const xg = (atk: number, def: number, venue: number) =>
-    round2(Math.min(3.0, Math.max(0.45, 1.35 * Math.pow(atk / def, 1.3) * venue)));
+  const qualityOf = (side: SidePacket) =>
+    side.lineup.length === 0
+      ? 1
+      : side.lineup.reduce((n, l) => n + l.effective, 0) / side.lineup.length;
+  const homeQuality = qualityOf(home);
+  const awayQuality = qualityOf(away);
+
+  const xg = (quality: number, oppQuality: number, atk: number, def: number, venue: number) =>
+    round2(
+      Math.min(
+        MAX_EXPECTED_GOALS,
+        Math.max(
+          MIN_EXPECTED_GOALS,
+          BASE_EXPECTED_GOALS *
+            Math.pow(quality / oppQuality, QUALITY_EXPONENT) *
+            Math.pow(atk / def, MATCHUP_EXPONENT) *
+            venue,
+        ),
+      ),
+    );
   const neutral = options.neutral === true;
   const expectedGoals = {
-    home: xg(home.zones.attack, away.zones.defense, neutral ? 1 : HOME_XG),
-    away: xg(away.zones.attack, home.zones.defense, neutral ? 1 : AWAY_XG),
+    home: xg(
+      homeQuality,
+      awayQuality,
+      home.zones.attack,
+      away.zones.defense,
+      neutral ? 1 : HOME_XG,
+    ),
+    away: xg(
+      awayQuality,
+      homeQuality,
+      away.zones.attack,
+      home.zones.defense,
+      neutral ? 1 : AWAY_XG,
+    ),
   };
 
   const overallGap =

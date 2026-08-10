@@ -24,6 +24,7 @@ import {
 import { matchesOn } from "../competition/calendar";
 import { applyMatchFinance } from "../club/finance";
 import { clampForm, formDeltaFromMatch } from "../squad/form";
+import { applyResultMood } from "../squad/slump";
 import { matchRating, type MatchRatingBrief, type PlayerMatchBrief } from "./ratings";
 import { grantManagerXP } from "../skills";
 import { buildMatchPress, openPress } from "../club/press";
@@ -109,6 +110,17 @@ function managerTacticsOf(state: GameState, teamId: string): number {
  * 전력 분석 패킷 (재)계산 — 전술 변경·교체 시에도 호출 (match-sim.md §2).
  * 경기 중에는 장부의 현재 온필드 명단으로 계산한다 (교체·퇴장 반영).
  */
+/** 그라운드에 선 선수의 개인 지시 — 교체로 나간 선수의 지시는 따라 나간다 */
+function directivesOnPitch(state: GameState, teamId: string, onPitch: readonly string[]) {
+  return assignmentsOf(state, teamId)
+    .filter((a) => a.directive && onPitch.includes(a.playerId))
+    .map((a) => ({
+      by: a.playerId,
+      kind: a.directive!.kind,
+      ...(a.directive!.targetId ? { targetId: a.directive!.targetId } : {}),
+    }));
+}
+
 export function refreshPacket(state: GameState): void {
   const pending = state.pendingMatch;
   if (!pending) return;
@@ -135,14 +147,7 @@ export function refreshPacket(state: GameState): void {
           ...(pending.exploits ? { exploits: pending.exploits } : {}),
         }
       : {}),
-    // 개인 지시 — 그라운드에 선 선수의 것만. 교체로 나간 선수의 지시는 따라 나간다
-    directives: assignmentsOf(state, teamId)
-      .filter((a) => a.directive && ledgerSide.onPitch.includes(a.playerId))
-      .map((a) => ({
-        by: a.playerId,
-        kind: a.directive!.kind,
-        ...(a.directive!.targetId ? { targetId: a.directive!.targetId } : {}),
-      })),
+    directives: directivesOnPitch(state, teamId, ledgerSide.onPitch),
   });
   pending.packet = buildStrengthPacket(
     build(match.homeTeamId, pending.ledger.home),
@@ -394,6 +399,11 @@ export function advanceSegment(state: GameState): {
         ...squads.away.bench,
       ].map((p) => p.id),
     ),
+    // 개인 지시 — 체력 배율도 지시를 탄다 (무리한 지시는 더 지치게)
+    directives: {
+      home: directivesOnPitch(state, match.homeTeamId, pending.ledger.home.onPitch),
+      away: directivesOnPitch(state, match.awayTeamId, pending.ledger.away.onPitch),
+    },
     // 체력 소모의 그날의 몫 — 구간이 아니라 **경기** 단위로 고정된다 (stamina.ts)
     staminaKey: `${state.seed}:${match.id}`,
     rng,
@@ -911,6 +921,12 @@ export function finalizeMatch(state: GameState): string[] {
     outcome === "win" ? 4 : 3,
   );
   digest.push(`최종 스코어 ${scoreline} — ${outcomeKo}`, ...messages);
+  /**
+   * 연패·대패·연승이 라커룸에 남기는 것 (slump.ts) — 리그 전체와 같은 규칙이다.
+   * 경기 결과가 장부에 쓰인 **뒤**라야 이번 경기가 연속 기록에 들어간다.
+   */
+  const runNote = applyResultMood(state, state.userTeamId, userGoals - oppGoals, [...played]);
+  if (runNote) digest.push(runNote);
 
   // 경기 중 조정을 킥오프 상태로 — pendingMatch가 지워지기 전에 (스냅샷이 거기 있다)
   const restored = restoreTactics(state);

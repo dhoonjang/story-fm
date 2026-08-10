@@ -1,6 +1,10 @@
 import type { MatchRecord, ScheduleEntry, TransferWindow } from "@story-fm/domain";
-import { TOP_LEAGUES } from "../data/league-catalog";
-import { teamsOfLeague } from "../data/team-catalog";
+import {
+  scopedLeagues,
+  scopedTeams,
+  scopedTeamsOfLeague,
+  type WorldScope,
+} from "../world/scope";
 import { makeRng } from "../core/rng";
 import { isEuroWeek } from "./europe";
 
@@ -470,18 +474,54 @@ export function slotFor(week: Matchweek, indexInRound: number): { date: string; 
 }
 
 /**
+ * 리그 소속의 지금 값 — 승강이 있으면 세이브가 카탈로그를 덮는다
+ * (`competition/promotion.ts`). 없으면 카탈로그 그대로다.
+ */
+export interface LeagueMembership {
+  /** 팀 → 지금 속한 리그 */
+  leagueOf?: Record<string, string>;
+  /**
+   * 리그전을 도는 리그를 더 넣는다 — **강등된 감독의 2부**.
+   * 2부는 원래 컵 참가 인원일 뿐이라 일정이 없다. 감독이 거기로 내려가면 그
+   * 시즌엔 경기가 하나도 없게 되므로, 그 리그만 리그전을 돈다.
+   */
+  extraLeagues?: readonly string[];
+}
+
+/**
  * 전 리그 일정 — 리그마다 자체 대회 일정을 갖는다 (20팀 38라운드, 18팀 34라운드).
  * 같은 캘린더 골격을 공유하므로 A매치 휴식기·박싱데이가 리그를 가로질러 맞는다.
  */
-export function buildAllLeagueMatches(season: number, seed: number): MatchRecord[] {
+export function buildAllLeagueMatches(
+  season: number,
+  seed: number,
+  world?: WorldScope,
+  membership?: LeagueMembership,
+): MatchRecord[] {
   const out: MatchRecord[] = [];
+  const leagueIds = [
+    ...scopedLeagues(world).map((l) => l.id),
+    ...(membership?.extraLeagues ?? []),
+  ];
   // 2부는 리그전을 돌지 않는다 — 국내 컵 참가 인원일 뿐이다 (league-catalog §division)
-  for (const league of TOP_LEAGUES) {
-    const teamIds = teamsOfLeague(league.id).map((t) => t.id);
+  for (const leagueId of new Set(leagueIds)) {
+    const teamIds = membersOfLeague(leagueId, world, membership?.leagueOf);
     if (teamIds.length < 2) continue;
-    out.push(...buildMatches(season, teamIds, seed, league.id));
+    out.push(...buildMatches(season, teamIds, seed, leagueId));
   }
   return out;
+}
+
+/** 그 리그에서 뛰는 클럽 — 승강 결과가 있으면 그것이 카탈로그를 이긴다 */
+function membersOfLeague(
+  leagueId: string,
+  world?: WorldScope,
+  leagueOf?: Record<string, string>,
+): string[] {
+  if (!leagueOf) return scopedTeamsOfLeague(leagueId, world).map((t) => t.id);
+  return scopedTeams(world)
+    .filter((t) => (leagueOf[t.id] ?? t.leagueId) === leagueId)
+    .map((t) => t.id);
 }
 
 /** 경기·이적창 일정 엔트리 생성 — 훈련 엔트리는 스킬이 따로 만든다 */
