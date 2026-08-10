@@ -16,7 +16,64 @@ test("새 게임 첫 메시지가 부임 장면과 수석코치 브리핑으로 
   const firstTurn = page.getByTestId("model-turn").first();
   await expect(firstTurn).toBeVisible({ timeout: 30_000 });
   await expect(firstTurn).toContainText("온보딩테스트");
-  await expect(firstTurn.getByText("수석코치", { exact: true }).first()).toBeVisible();
+  // 화자 태그는 사람 이름이고 직책은 화면이 괄호로 붙인다 (personas.md)
+  await expect(firstTurn.locator(".speaker-role").first()).toHaveText("수석코치");
+  // 다만 **소개할 때 한 번만** — 같은 사람이 이어 말하는 줄엔 이름만 남는다.
+  // 온보딩은 수석코치가 연속으로 말하므로 직책은 정확히 한 번 보인다
+  await expect(firstTurn.locator(".speaker-role")).toHaveCount(1);
   await expect(firstTurn.locator(".narration")).toHaveCount(1);
   expect(await firstTurn.locator(".line").count()).toBeGreaterThanOrEqual(4);
+
+  // 입력창의 자리는 대화 길이와 무관하다 — 첫 턴 하나뿐인 지금도 바닥에 붙어 있다.
+  // (.chat-pane이 남은 높이를 채우지 않으면 메시지가 쌓일 때까지 화면 중앙에 뜬다)
+  const input = await page.getByTestId("chat-input").boundingBox();
+  const viewport = page.viewportSize();
+  expect(input).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(viewport!.height - (input!.y + input!.height)).toBeLessThan(24);
+});
+
+test("같은 시각은 다시 적지 않는다 — 화자 이름은 턴마다 선다", async ({ page }) => {
+  /**
+   * 시각이 턴마다 반복되면 시간이 흐른다는 신호가 오히려 죽는다 — 값이 바뀔 때만
+   * 세운다. **화자 이름은 반대다**: 감독의 말과 코치의 답이 번갈아 오는 화면에서
+   * 이름이 빠진 턴은 누가 말하는지를 위쪽까지 거슬러 찾아야 한다.
+   */
+  await page.goto("/new");
+  await expect(page.getByTestId("league-grid")).toBeVisible({ timeout: 30_000 });
+  await page.getByTestId("league-epl").click();
+  await page.getByTestId("team-arsenal").click();
+  await page.getByTestId("manager-name").fill("접기테스트");
+  await page.getByTestId("manager-background").fill("전술 분석가 출신");
+  await page.getByTestId("start-game").click();
+  await expect(page.getByTestId("chat-scroll")).toContainText("접기테스트", { timeout: 30_000 });
+
+  for (const msg of ["팀 분위기는 좀 어때", "알겠어", "그대로 가자"]) {
+    await page.getByTestId("chat-input").fill(msg);
+    await page.getByTestId("chat-send").click();
+    await page.waitForTimeout(1200);
+  }
+  await expect(page.getByTestId("model-turn")).toHaveCount(4, { timeout: 20_000 });
+
+  const turns = await page.getByTestId("model-turn").evaluateAll((nodes) =>
+    nodes.map((n) => ({
+      stamp: n.querySelector('[data-testid="scene-stamp"]')?.textContent?.trim() ?? null,
+      speakers: [...n.querySelectorAll(".say-who .speaker")].length,
+      says: [...n.querySelectorAll(".say")].length,
+    })),
+  );
+  // ① 같은 시각이 연달아 서지 않는다
+  const stamps = turns.map((t) => t.stamp).filter((x): x is string => x !== null);
+  for (let i = 1; i < stamps.length; i++) {
+    expect(stamps[i], "같은 시각이 연달아 섰다").not.toBe(stamps[i - 1]);
+  }
+  // ② 말한 사람이 있는 턴은 이름을 반드시 갖는다 (턴 단위로 선다)
+  for (const t of turns) {
+    if (t.says > 0) expect(t.speakers, "이름 없는 턴이 있다").toBeGreaterThan(0);
+  }
+
+  // 이름 색은 강조색이 아니다 — 턴마다 서므로 원색이면 눈이 아프다
+  expect(
+    await page.locator(".say-who .speaker").first().evaluate((n) => getComputedStyle(n).color),
+  ).toBe("rgb(204, 214, 228)"); // --silver
 });

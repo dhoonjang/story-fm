@@ -1,4 +1,4 @@
-import type { MatchEvent, MatchPhase, MatchSide } from "@story-fm/domain";
+import type { MatchEvent, MatchPhase, MatchSide, MatchStatLine } from "@story-fm/domain";
 import { TEAM_EVENT_TYPES } from "@story-fm/domain";
 
 /**
@@ -26,11 +26,35 @@ export interface MatchLedgerState {
   home: TeamLedger;
   away: TeamLedger;
   sentOff: string[];
+  /**
+   * 선수별 누적 기록 — **사건이 아닌 것들**(패스·전진 패스·슛·xg·선방).
+   *
+   * 골·도움·카드는 여기 없다: 사건 목록이 원본이고 두 벌로 두면 조용히 갈린다.
+   * 옛 세이브엔 없다(optional) — 없으면 빈 것으로 읽는다.
+   */
+  stats?: Record<string, MatchStatLine>;
 }
 
-export type ApplyResult =
-  | { ok: true; state: MatchLedgerState }
-  | { ok: false; errors: string[] };
+/** 구간이 만든 증가분을 장부에 더한다 — 패스는 사건이 아니므로 이 경로로만 쌓인다 */
+export function addStats(
+  state: MatchLedgerState,
+  add: Record<string, MatchStatLine>,
+): MatchLedgerState {
+  const stats = { ...(state.stats ?? {}) };
+  for (const [id, line] of Object.entries(add)) {
+    const before = stats[id] ?? { passes: 0, progressive: 0, shots: 0, xg: 0, saves: 0 };
+    stats[id] = {
+      passes: before.passes + line.passes,
+      progressive: before.progressive + line.progressive,
+      shots: before.shots + line.shots,
+      xg: Math.round((before.xg + line.xg) * 100) / 100,
+      saves: before.saves + line.saves,
+    };
+  }
+  return { ...state, stats };
+}
+
+export type ApplyResult = { ok: true; state: MatchLedgerState } | { ok: false; errors: string[] };
 
 /** 하드 상한 — 비상식 방지 (match-sim.md §4). 수치는 balance.md에서 튜닝 */
 export const LEDGER_LIMITS = {
@@ -95,17 +119,16 @@ export function applyEvents(state: MatchLedgerState, incoming: MatchEvent[]): Ap
   const next = deepClone(state);
 
   for (let i = 0; i < incoming.length; i++) {
-    const ev = incoming[i];
-    if (!ev) continue;
+    const raw = incoming[i];
+    if (!raw) continue;
+    const ev = sanitizeEvent(next, raw);
     // 하프타임은 강제 정지점 — 같은 배치에 하프타임 이후 사건이 오면 반려
     // (한 턴에 경기 전체를 밀어붙이는 것을 코어가 막는다, overview §4)
     const prev = i > 0 ? incoming[i - 1] : null;
     if (prev?.type === "half_time") {
       return {
         ok: false,
-        errors: [
-          `${label(i, ev)}: 하프타임은 정지점입니다 — 이후 사건은 다음 진행에서 기록하세요`,
-        ],
+        errors: [`${label(i, ev)}: 하프타임은 정지점입니다 — 이후 사건은 다음 진행에서 기록하세요`],
       };
     }
     const err = applyOne(next, ev, i);
@@ -118,6 +141,29 @@ export function applyEvents(state: MatchLedgerState, incoming: MatchEvent[]): Ap
 
 function teamOf(state: MatchLedgerState, side: MatchSide): TeamLedger {
   return side === "home" ? state.home : state.away;
+}
+
+/**
+ * 창발 출력 다듬기 — **골을 도움 때문에 무효로 만들지 않는다.**
+ *
+ * goal의 actors는 [득점자, (도움)]이다. 득점자는 장부의 뼈대라 그라운드 위에
+ * 없으면 반려하지만, 도움은 연출의 부산물이다. 중계가 벤치 선수나 상대 선수를
+ * 도움으로 적었다고 골까지 반려하면, 이미 유저에게 서술된 득점이 장부에서만
+ * 사라진다 — 그게 훨씬 나쁜 상태다. 그래서 못 믿을 도움은 조용히 떨군다
+ * (AGENTS.md 6-7 안전장치: 검증 레이어가 흡수하고 규칙은 안 깨진다).
+ */
+function sanitizeEvent(state: MatchLedgerState, ev: MatchEvent): MatchEvent {
+  if (ev.type !== "goal" || ev.actors.length <= 1 || !ev.team) return ev;
+  const side = teamOf(state, ev.team);
+  const scorer = ev.actors[0];
+  if (scorer === undefined) return ev;
+  const assist = ev.actors[1];
+  const credible =
+    assist !== undefined &&
+    assist !== scorer &&
+    side.onPitch.includes(assist) &&
+    !state.sentOff.includes(assist);
+  return { ...ev, actors: credible && assist !== undefined ? [scorer, assist] : [scorer] };
 }
 
 function applyOne(state: MatchLedgerState, ev: MatchEvent, i: number): string | null {

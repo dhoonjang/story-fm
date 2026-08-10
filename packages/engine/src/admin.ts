@@ -43,6 +43,8 @@ interface CatalogPlayerInputMeta {
   /** 주 포지션 */
   position: string;
   potential: number;
+  /** 실제 주급 (£/주). 비우면 OVR 공식으로 어림한다 */
+  weeklyWage?: number;
 }
 /** 15축을 평면 필드로 받는다 (어드민 폼과 1:1) */
 export type CatalogPlayerInput = CatalogPlayerInputMeta & AxisValues;
@@ -71,7 +73,7 @@ function toRow(entry: PlayerCatalogEntry): CatalogPlayerRow {
   return {
     ...entry,
     age: ageOf(entry.birthdate, CATALOG_AGE_REF),
-    overall: overallFor(natural.position, entry),
+    overall: overallFor(natural.position, entry, entry.positions),
     position: natural.position,
   };
 }
@@ -104,6 +106,12 @@ function applyPatch(
     const v = patch[key];
     if (v !== undefined) target[key] = clamp99(v);
   }
+  if (patch.weeklyWage !== undefined) {
+    if (!Number.isFinite(patch.weeklyWage) || patch.weeklyWage < 0) {
+      return { ok: false, message: "주급은 0 이상이어야 합니다" };
+    }
+    entry.weeklyWage = Math.round(patch.weeklyWage);
+  }
   if (patch.birthdate !== undefined) {
     if (!DATE_RE.test(patch.birthdate)) {
       return { ok: false, message: "출생년월일 형식(YYYY-MM-DD)이 올바르지 않습니다" };
@@ -131,16 +139,16 @@ function applyPatch(
   }
   // 잠재치는 파생 OVR보다 낮을 수 없다 (성장 여지 하한)
   const group = positionGroupOf(naturalPositionOf(entry).position) ?? "MF";
-  const overall = overallFor(group, entry);
+  const overall = overallFor(group, entry, entry.positions);
   if (entry.potential < overall) entry.potential = overall;
   return { ok: true };
 }
 
-export function adminUpdateCatalogPlayer(
-  playerId: string,
-  patch: CatalogPlayerPatch,
-): AdminResult {
-  const entries = playerCatalog().map((e) => ({ ...e, positions: e.positions.map((p) => ({ ...p })) }));
+export function adminUpdateCatalogPlayer(playerId: string, patch: CatalogPlayerPatch): AdminResult {
+  const entries = playerCatalog().map((e) => ({
+    ...e,
+    positions: e.positions.map((p) => ({ ...p })),
+  }));
   const entry = entries.find((e) => e.id === playerId);
   if (!entry) return { ok: false, message: `카탈로그에 없는 선수입니다: ${playerId}` };
   const res = applyPatch(entry, patch);
@@ -160,10 +168,15 @@ export function adminSetCatalogPositions(
   if (bad.length > 0) {
     return { ok: false, message: `알 수 없는 포지션: ${bad.map((b) => b.position).join(", ")}` };
   }
-  if (positions.filter((p) => p.isNatural).length !== 1) {
-    return { ok: false, message: "주 포지션(isNatural)은 정확히 1개여야 합니다" };
+  // 주 포지션은 **여럿일 수 있다** — 두 자리를 다 자기 자리로 삼는 선수가 있다.
+  // 다만 하나도 없으면 대표 자리를 못 정한다 (포지션군·화면 한 칸이 그걸 쓴다)
+  if (positions.filter((p) => p.isNatural).length < 1) {
+    return { ok: false, message: "주 포지션(isNatural)은 하나 이상이어야 합니다" };
   }
-  const entries = playerCatalog().map((e) => ({ ...e, positions: e.positions.map((p) => ({ ...p })) }));
+  const entries = playerCatalog().map((e) => ({
+    ...e,
+    positions: e.positions.map((p) => ({ ...p })),
+  }));
   const entry = entries.find((e) => e.id === playerId);
   if (!entry) return { ok: false, message: `카탈로그에 없는 선수입니다: ${playerId}` };
   entry.positions = positions.map((p) => ({
@@ -195,23 +208,28 @@ export function adminAddCatalogPlayer(teamId: string, input: CatalogPlayerInput)
     return { ok: false, message: "출생년월일 형식(YYYY-MM-DD)이 올바르지 않습니다" };
   }
 
-  const entries = playerCatalog().map((e) => ({ ...e, positions: e.positions.map((p) => ({ ...p })) }));
+  const entries = playerCatalog().map((e) => ({
+    ...e,
+    positions: e.positions.map((p) => ({ ...p })),
+  }));
   const nameEn = (input.nameEn || input.nameKo).trim();
   const id = uniqueId(entries, teamId, slugifyName(nameEn) || `p${entries.length + 1}`);
-  const attrs = Object.fromEntries(
-    ATTRIBUTE_AXES.map((a) => [a, clamp99(input[a])]),
-  ) as AxisValues;
-  const overall = overallFor(code, attrs);
+  const attrs = Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, clamp99(input[a])])) as AxisValues;
+  // 시드 선수와 같은 공식으로 파생한다 — 같은 자리 묶음(CB↔RCB/LCB)까지 채워진다
+  const positions = derivePositions(nameEn, code);
+  const overall = overallFor(code, attrs, positions);
   const entry: PlayerCatalogEntry = {
     id,
     teamId,
     nameKo: input.nameKo.trim(),
     nameEn,
     birthdate: input.birthdate,
-    // 시드 선수와 같은 공식으로 파생한다 — 같은 자리 묶음(CB↔RCB/LCB)까지 채워진다
-    positions: derivePositions(nameEn, code),
+    positions,
     ...attrs,
     potential: Math.max(clamp99(input.potential), overall),
+    ...(input.weeklyWage === undefined
+      ? {}
+      : { weeklyWage: Math.max(0, Math.round(input.weeklyWage)) }),
   };
   entries.push(entry);
   saveCatalog(entries);

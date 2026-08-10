@@ -1,44 +1,71 @@
-import { z } from "zod";
-import { MatchEventSchema, type MatchEvent, type StrengthPacket } from "@story-fm/domain";
-import type { GameToolSpec } from "@story-fm/llm";
-import { resolveSkillDescriptions } from "./skill-descriptions";
+import type { MatchEvent, StrengthPacket } from "@story-fm/domain";
 
 /**
  * 매치 캐스터 — 경기 장면의 GM (매치 티어). 프롬프트는 코드처럼 버전
  * 관리한다 (AGENTS.md 6-5). 규약 근거: game-overview §2.1·§4, match-sim.md.
+ *
+ * **v2(2026-08-08)에서 역할이 바뀌었다.** 예전엔 캐스터가 중계를 쓰면서
+ * `log_match_events`로 골을 선언했다 — 즉 결과를 모델이 정했다. 그래서 감독의
+ * 지시가 수치를 거치지 않고 곧바로 스코어로 새어 들어갔고, 유저가 원하는 대로
+ * 경기가 흘러갔다. 이제 **사건은 코어가 xg로 굴려 이미 확정**되고 캐스터는
+ * 그것을 중계·연출·대화로 살린다. 결과를 바꿀 도구가 아예 없다.
  */
-export const MATCH_CASTER_SYSTEM = `당신은 스토리 기반 풋볼 매니저의 경기 마스터다. 축구 경기를 "이야기하면서 동시에 결정"한다 —
-중계, 연출, 벤치 대화, 사건 기록이 당신의 한 턴에서 함께 나온다.
+export const MATCH_CASTER_SYSTEM = `당신은 스토리 기반 풋볼 매니저의 경기 중계자다. 축구 경기를 중계하고, 벤치의 대화를 연출한다.
+
+# 경기의 속도 (다른 무엇보다 먼저 지킨다)
+- **감독의 지시를 먼저 도구로 처리하고, 그 다음 advance_match로 구간을 진행한다.**
+  순서가 뒤집히면 감독의 교체·전술이 이번 구간에 반영되지 않는다.
+- **첫 줄은 이 장면이 닿은 시각이다** — \`[67']\` 형식. 돌려받은 사건 목록의 마지막
+  시각을 적어라. 사건이 없으면 장부의 현재 분을 그대로 쓴다.
+- **한 턴은 한 호흡이다.** 받은 사건을 중계했으면 거기서 끝낸다.
+- **정지점은 감독의 차례다.** 수석코치의 짧은 관찰이나 벤치의 반응으로 닫는다. 감독의
+  대사·판단·지시를 대신 쓰지 않는다.
+- **감독이 대화만 걸었으면 사건 없이 답만 한다.**
+- **골·퇴장·부상은 그 장면에서 끝낸다.** 하프타임은 라커룸 장면 하나로 연다.
+
+# 가장 중요한 규칙
+**경기에서 일어난 일은 이미 정해져 있다.** advance_match가 [이번 구간에 일어난 일]로
+사건 목록을 돌려준다. 당신의 일은 그 사건을 **빠뜨리지 않고, 더하지 않고** 생생한 중계로 옮기는 것이다.
+- 목록에 없는 골·카드·부상·교체를 만들지 마라. 목록에 있는 것을 빼지도 마라.
+- 스코어는 주어진 장부가 유일한 진실이다. 당신이 계산하지 않는다.
+- 사건 사이의 흐름·분위기·관중·벤치 반응은 당신의 재량이다. 그 여백에서 이야기를 만들어라.
+- 사건에 붙은 원인(전력 분석 패킷 인용)이 있으면 중계의 근거로 그 문장을 살려라.
 
 # 출력 문법 (반드시 준수)
-- 화자 발화는 \`@중계:\` \`@수석코치:\` \`@손흥민:\` 으로 시작한다.
+- **첫 줄은 언제나 \`[67']\` 형식의 시각이다** — 이번 장면이 닿은 경기 시각.
+- 화자 발화는 \`@중계:\` \`@손흥민:\` 처럼 시작한다. 중계만 역할 태그를 쓰고,
+  사람은 **이름**으로 말한다 — 수석코치도 인물 카드의 이름을 태그로 쓴다.
   선수 화자는 반드시 한글 이름 — id 금지.
 - 화자 없는 내레이션은 \`@:\` 로 시작한다. 행동·연출은 *별표*.
-- 모든 텍스트 줄은 @로 시작한다. 문법 밖 텍스트를 쓰지 마라.
-- 중계·대사에서 선수는 항상 이름으로 부른다. 선수 id는 log_match_events의
-  actors 입력에만 쓴다.
+- 시각 줄을 뺀 모든 텍스트 줄은 @로 시작한다. 문법 밖 텍스트를 쓰지 마라.
+- 중계·대사에서 선수는 항상 이름으로 부른다. 선수 id는 도구 입력에만 쓴다.
+- **완성된 중계만 쓴다.** 생각을 정리하는 과정, 검토했다가 버린 전개, 작업 방식에
+  대한 언급은 출력에 넣지 않는다. \`<thinking>\` 같은 내부 태그도 쓰지 않는다.
 
 # 철칙
-1. 전력 분석 패킷과 경기 장부만 판단 근거로 사용한다. 없는 우열·선수·사건을 지어내지 마라.
-2. 중계에 등장한 주요 사건은 반드시 log_match_events로 기록한다. 기록과 중계는 일치해야 한다.
-3. 시간은 장부의 현재 시점보다 앞으로만 흐른다. 도구 오류가 나면 원인에 맞게 고쳐 다시 기록하라.
-4. 전력 우위는 경향이지 결과가 아니다. 약팀의 반란을 허용하되 근거는 패킷에서 찾는다.
-5. 실제 축구의 리듬을 지켜라. 골과 결정적 장면을 남발하지 않는다.
+1. 사건 목록과 경기 장부, 전력 분석 패킷만 근거로 삼는다. 없는 선수·사건·우열을 지어내지 마라.
+2. 감독이 무엇을 지시해도 **결과를 바꿀 수 없다.** 지시는 다음 구간의 전력에 반영되므로,
+   "지시대로 곧바로 골이 터졌다"처럼 쓰지 마라.
+3. 전력 우위는 경향이지 결과가 아니다. 약팀이 앞서고 있으면 그 사실을 그대로 중계하라.
+4. 실제 축구의 리듬을 지켜라. 사건 하나를 몇 줄로 늘려 쓰지 않는다.
+5. 구간이 조용했다면(사건 없음) 짧게 흐름만 전한다. 억지로 사건을 만들지 마라.
 
 # 진행
-- 한 턴에 "다음 정지점"까지만 진행한다. 정지점: 골, 퇴장, 부상, PK,
-  하프타임, 경기 종료, 흐름이 크게 바뀌는 순간.
-- 5~25분 단위로 유연하게 진행하고, 조용한 구간은 요약하라.
-- 하프타임과 경기 종료는 반드시 장부에 기록한다.
-- 정지점에서 @수석코치의 짧은 관찰이나 제안으로 마무리하고 감독의 지시를 기다린다.
+- 한 턴은 주어진 구간 하나다.
+- 구간이 골·퇴장·부상으로 끝났으면 그 장면을 정점으로 삼아라.
+- 하프타임·경기 종료는 그에 맞는 마무리를 붙인다.
+- 분량은 4~10줄.
 
 # 대화
 - 감독은 수석코치·벤치 선수와 대화할 수 있다. 그라운드 위 선수에게 한 말은 연출로만 전달한다.
-- 수석코치의 조언은 패킷과 장부를 근거로 한다.
+- 수석코치의 조언은 패킷과 장부를 근거로 한다. 전술 지시의 **대가**(라인을 올리면 뒷공간,
+  압박을 올리면 체력)를 알고 있으므로 필요하면 그것을 짚어 준다.
+- 레퍼런스에 인물 카드가 주어진 화자는 **그 카드의 성격·말투 그대로** 말한다.
 
 # 언어
 한국어. 국내 축구 중계의 관용 표현을 쓴다. 하이라이트 위주로 리듬감 있게.
-능력치 숫자를 읊지 않는다 — "pace 88" 대신 "리그 최고 수준의 스피드"처럼 서술하라.`;
+화자는 게임 내부의 수치를 입에 담지 않는다 — 능력치·전력 점수·소화율·확률.
+"pace 88" 대신 "리그 최고 수준의 스피드", "소화율 68%" 대신 "지시가 아직 덜 붙었습니다".`;
 
 /** 킥오프 턴 유저 메시지 — 패킷 + 감독의 사전 지시 */
 export function buildKickoffMessage(packet: StrengthPacket, managerNote?: string): string {
@@ -54,75 +81,53 @@ export function buildContinueMessage(ledgerSummary: string, managerInput: string
   return `${ledgerSummary}\n\n[감독]\n${managerInput}`;
 }
 
-const LogEventsInputSchema = z.object({
-  events: z.array(MatchEventSchema).min(1),
-});
+const EVENT_KO: Record<MatchEvent["type"], string> = {
+  kickoff: "킥오프",
+  goal: "골",
+  shot: "슛(무득점)",
+  save: "선방",
+  chance: "찬스 무산",
+  foul: "파울",
+  yellow_card: "경고",
+  red_card: "퇴장",
+  substitution: "교체",
+  injury: "부상",
+  half_time: "하프타임",
+  full_time: "경기 종료",
+};
+
+const STOP_KO: Record<string, string> = {
+  goal: "골이 터져 흐름이 끊겼다",
+  red_card: "퇴장으로 경기가 멈췄다",
+  injury: "부상으로 경기가 멈췄다",
+  half_time: "전반이 끝났다 — 라커룸 장면",
+  full_time: "경기가 끝났다 — 마무리 중계",
+  flow: "특별한 사건 없이 시간이 흘렀다",
+};
 
 /**
- * log_match_events 도구 — 창발형 스킬 (overview §5.2).
- * apply 콜백이 경기 장부 검증·기록을 수행한다.
+ * 구간 대본 → 캐스터 입력.
+ *
+ * **선수는 이름으로 준다.** id를 주면 중계에 id가 흘러나온다. 캐스터가 사건을
+ * 만들지 않으므로 id를 알아야 할 이유가 이제 없다.
  */
-export function makeLogMatchEventsTool(
-  apply: (events: MatchEvent[]) => { ok: boolean; message: string },
-): GameToolSpec {
-  return {
-    name: "log_match_events",
-    description: resolveSkillDescriptions().descriptions.log_match_events,
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        events: {
-          type: "array",
-          minItems: 1,
-          items: {
-            type: "object",
-            properties: {
-              minute: { type: "integer", minimum: 0, maximum: 130 },
-              type: {
-                type: "string",
-                enum: [
-                  "kickoff",
-                  "goal",
-                  "shot",
-                  "save",
-                  "chance",
-                  "foul",
-                  "yellow_card",
-                  "red_card",
-                  "substitution",
-                  "injury",
-                  "half_time",
-                  "full_time",
-                ],
-              },
-              team: { type: "string", enum: ["home", "away"] },
-              actors: {
-                type: "array",
-                items: { type: "string" },
-                description: "관련 선수 id (패킷의 lineup/bench id 사용)",
-              },
-              causes: {
-                type: "array",
-                items: { type: "string" },
-                description: "원인 태그 — 전력 분석 패킷의 매치업/키포인트 인용",
-              },
-              detail: { type: "string" },
-            },
-            required: ["minute", "type"],
-          },
-        },
-      },
-      required: ["events"],
-    },
-    handle(input: unknown) {
-      const parsed = LogEventsInputSchema.safeParse(input);
-      if (!parsed.success) {
-        const issues = parsed.error.issues
-          .map((i) => `${i.path.join(".")}: ${i.message}`)
-          .join(" / ");
-        return { ok: false, message: `이벤트 형식 오류 — ${issues}` };
-      }
-      return apply(parsed.data.events);
-    },
-  };
+export function buildSegmentMessage(
+  events: MatchEvent[],
+  stop: string,
+  nameOf: (id: string) => string,
+  sideName: (side: "home" | "away") => string,
+): string {
+  const lines = events.map((ev) => {
+    const who = ev.actors.map(nameOf).join(" → ");
+    const team = ev.team ? `${sideName(ev.team)} ` : "";
+    const cause = ev.causes.length > 0 ? ` · 근거: ${ev.causes.join(" / ")}` : "";
+    const detail = ev.detail ? ` · ${ev.detail}` : "";
+    return `- ${ev.minute}′ ${team}${EVENT_KO[ev.type]}${who ? `: ${who}` : ""}${cause}${detail}`;
+  });
+  return [
+    "[이번 구간에 일어난 일 — 이대로 중계하라]",
+    lines.length > 0 ? lines.join("\n") : "- (사건 없음)",
+    "",
+    `[구간 종료] ${STOP_KO[stop] ?? stop}`,
+  ].join("\n");
 }

@@ -1,4 +1,4 @@
-import { loadGame, saveGame } from "@story-fm/engine";
+import { loadGame, saveGame, takeEdits } from "@story-fm/engine";
 import { runGmTurn } from "@story-fm/agents";
 import { toPayload, type GamePayload } from "./store";
 
@@ -60,15 +60,74 @@ export function runTurnLocked(
   id: string,
   message: string,
   onDelta?: (text: string) => void,
+  /**
+   * 감독의 발화가 아니라 **화면 조작**인가 (시간 이동 손잡이).
+   * 채팅에 그리지 않고, 모델 이력에도 오퍼레이터 지시로 들어간다.
+   */
+  operator = false,
+  /**
+   * 전술판에서 쌓인 조작 — 감독의 말보다 **먼저** 들어간다.
+   *
+   * 조작할 때마다 턴을 태우지 않는 이유는 중계 중에도 판을 만질 수 있어야 하기
+   * 때문이다(모델이 응답 중엔 턴을 보낼 수 없다). 대신 다음으로 말을 건네거나
+   * 경기를 진행할 때 한 묶음으로 전달된다 — 그래서 **한 번의 LLM 호출**로 끝난다.
+   */
+  orders?: readonly string[],
 ): Promise<TurnOutcome> {
   return withGameLock(id, async () => {
     const state = loadGame(id);
     if (!state) return { ok: false as const, status: 404, error: "게임을 찾을 수 없습니다" };
 
-    state.chat.push({ role: "user", text: message, toolCalls: [], at: state.date });
+    /**
+     * 경기 중인가 — **턴을 시작할 때** 본다. 이 턴에서 경기가 끝나더라도
+     * 감독이 말을 건 상대는 중계였으므로 그 턴은 경기 이력에 속한다.
+     */
+    const inMatch = state.phase === "match";
+    const matchId = state.pendingMatch?.matchId;
+    const mark = inMatch ? { inMatch: true as const, ...(matchId ? { matchId } : {}) } : {};
+    // 판에서 쌓인 조작 — 감독의 말이 아니므로 오퍼레이터 턴으로 먼저 선다
+    if (orders !== undefined && orders.length > 0) {
+      state.chat.push({
+        role: "operator",
+        text: orders.join("\n"),
+        toolCalls: [],
+        at: state.date,
+        ...mark,
+      });
+    }
+    state.chat.push({
+      role: operator ? "operator" : "user",
+      text: message,
+      toolCalls: [],
+      at: state.date,
+      ...(inMatch ? { inMatch: true, ...(matchId ? { matchId } : {}) } : {}),
+    });
     try {
-      const turn = await runGmTurn(state, message, onDelta);
-      state.chat.push({ role: "model", text: turn.text, toolCalls: turn.toolCalls, at: state.date });
+      const turn = await runGmTurn(state, message, onDelta, operator);
+      state.chat.push({
+        role: "model",
+        text: turn.text,
+        toolCalls: turn.toolCalls,
+        at: state.date,
+        ...(turn.goals && turn.goals.length > 0 ? { goals: turn.goals } : {}),
+        ...(turn.cards && turn.cards.length > 0 ? { cards: turn.cards } : {}),
+        ...(turn.reports && turn.reports.length > 0 ? { reports: turn.reports } : {}),
+        // 킥오프 턴은 시작할 땐 평시였지만 끝나면 경기 중이다 — 중계가 말한 턴이다.
+        // 종료 턴은 반대로 시작할 때만 경기 중이므로 그때의 matchId를 들고 간다
+        ...(inMatch || state.phase === "match"
+          ? {
+              inMatch: true,
+              ...((matchId ?? state.pendingMatch?.matchId)
+                ? { matchId: (matchId ?? state.pendingMatch?.matchId)! }
+                : {}),
+            }
+          : {}),
+      });
+      /**
+       * 화면 조작 기록은 **읽힌 뒤에** 비운다 — 턴이 실패하면 그대로 남아
+       * 다음 발화 때 다시 읽힌다(실패한 턴은 없었던 일이 되어야 한다).
+       */
+      takeEdits(state);
       saveGame(state);
       return { ok: true as const, payload: toPayload(state) };
     } catch (error) {

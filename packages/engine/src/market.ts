@@ -1,7 +1,8 @@
-import type { GamePlayer } from "@story-fm/domain";
+import type { GamePlayer, PitchClaim, PitchClaimKind } from "@story-fm/domain";
 import { ageOf, naturalPositionOf } from "@story-fm/domain";
 import { diffDays, windowOpenOn } from "./calendar";
-import { leagueCatalogById } from "./data/league-catalog";
+import { claimLabel, evaluatePitch } from "./persuasion";
+import { isMarketOnlyLeague, leagueCatalogById } from "./data/league-catalog";
 import { leagueOfTeam, teamCatalogById } from "./data/team-catalog";
 import { euroCompetitionOf } from "./europe";
 import { hashChannel } from "./rng";
@@ -14,6 +15,7 @@ import {
   teamName,
   weeklyWagesOf,
   type GameState,
+  hasIssue,
 } from "./state";
 
 /**
@@ -97,7 +99,7 @@ export function marketValueOf(state: GameState, player: GamePlayer): number {
   const value =
     base *
     ageCurve(age, player.attributes.overall, player.attributes.potential) *
-    (1 + player.state.form * 0.04) *
+    (1 + player.state.form * 0.12) *
     contractFactor(contractYearsLeft(state, player.id)) *
     leagueFactor(player.teamId);
   return Math.round(value / 100_000) * 100_000;
@@ -115,7 +117,7 @@ export function wageExpectationOf(state: GameState, player: GamePlayer): number 
  * 이 팀에서 그 자리를 더 잘 보는 선수 수 — 포지션군(GK/DF/MF/FW)은 40인 스쿼드에서
  * 너무 거칠어 "8명이 더 낫다"가 늘 나온다. 주 포지션 코드로 좁혀 센다.
  */
-function betterAtPosition(state: GameState, teamId: string, player: GamePlayer): number {
+export function betterAtPosition(state: GameState, teamId: string, player: GamePlayer): number {
   const position = naturalPositionOf(player).position;
   return playersOf(state, teamId).filter(
     (p) =>
@@ -176,6 +178,12 @@ export interface DealOdds {
   factors: DealFactor[];
   /** 확률과 무관하게 막는 것 — 하나라도 있으면 오퍼 자체가 불가능하다 */
   blockers: string[];
+  /**
+   * **판정 여유(%p)** — 확인된 설득 논거가 열어 준 폭. 확률이 이만큼 낮아도
+   * 선수·에이전트(LLM)가 "그래도 간다"고 판정할 수 있다. 확률을 올리는 게
+   * 아니라 **가능한 판정의 경계**를 넓힌다 (persuasion.ts).
+   */
+  latitude: number;
 }
 
 export interface DealTerms {
@@ -189,7 +197,19 @@ export interface DealTerms {
    * 매각이면 관문이 뒤집히고(**사는 쪽이 낼까** + **선수가 떠날까**),
    * 재계약은 관문이 하나다 (**선수가 남을까**) — 이적료가 없다.
    */
-  kind?: "buy" | "sell" | "renew";
+  kind?: "buy" | "sell" | "renew" | "loan" | "loan_out";
+  /**
+   * 매각 상대 구단 — 주면 **그 협회의 이적창**으로 판정한다.
+   * 사우디·MLS는 우리보다 늦게 닫히므로 이 값이 없으면 판정이 틀린다.
+   */
+  counterpartTeamId?: string;
+  /**
+   * 감독의 설득 논거 — 숫자로 넘을 수 없는 벽을 넘는 유일한 수단이다.
+   * 코어가 사실 대조해 인정된 것만 확률에 들어간다 (persuasion.ts).
+   */
+  pitch?: readonly PitchClaim[];
+  /** 이 협상에서 이미 인정된 논거 — 반복은 다시 쳐주지 않는다 */
+  pitched?: readonly PitchClaimKind[];
 }
 
 /** 매각 상대 — 우리가 부른 값을 낼 구단 (오퍼를 넣은 쪽) */
@@ -198,8 +218,8 @@ export interface SellContext {
 }
 
 /** 안개 밴드 — 지식 수준이 낮으면 확률·금액이 흐려진다 (결정적) */
-// adapting(막 영입한 우리 선수)은 이미 우리 것이라 협상 흐림이 없다 —
-// 능력치 관측과 달리 몸값·계약 조건은 계약서에 적혀 있다
+// 적응 중인 새 영입도 이미 우리 것이라 협상 흐림이 없다 — 능력치 관측과 달리
+// 몸값·계약 조건은 계약서에 적혀 있다
 const ODDS_MARGIN: Record<Knowledge, number> = {
   own: 0,
   adapting: 0,
@@ -234,6 +254,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     fuzzy: false,
     factors: [],
     blockers: [`"${terms.playerId}"라는 선수를 찾지 못했습니다`],
+    latitude: 0,
   };
   if (!player) return empty;
 
@@ -244,11 +265,23 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
   const window = windowOpenOn(state.windows, state.date);
   const freeAgent = contractYearsLeft(state, player.id) <= 0;
 
-  if (terms.kind === "sell") {
+  if (terms.kind === "sell" || terms.kind === "loan_out") {
     if (player.teamId !== state.userTeamId) {
       blockers.push(`${player.name}은(는) 우리 선수가 아닙니다`);
     }
-    if (!window) blockers.push("이적시장이 닫혀 있습니다");
+    /**
+     * 매각은 **사는 쪽 협회의 창**을 본다. 우리 창이 닫혀도 사우디·MLS 창이
+     * 열려 있으면 팔 수 있다 — 대신 대체 영입은 못 한다.
+     */
+    const buyerTeamId = terms.counterpartTeamId;
+    const buyerWindow = buyerTeamId ? windowOpenForTeam(state, buyerTeamId) : window;
+    if (!buyerWindow) {
+      blockers.push(
+        buyerTeamId && isMarketOnlyLeague(leagueOfTeam(buyerTeamId))
+          ? `${leagueCatalogById(leagueOfTeam(buyerTeamId))?.name ?? "상대 리그"}의 이적시장이 닫혀 있습니다`
+          : "이적시장이 닫혀 있습니다",
+      );
+    }
   } else if (terms.kind === "renew") {
     // 재계약은 이적창과 무관하다 — 상대가 선수 본인이기 때문이다
     if (player.teamId !== state.userTeamId) {
@@ -272,8 +305,13 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     }
   }
 
-  if (terms.kind === "sell") {
+  if (terms.kind === "sell" || terms.kind === "loan_out") {
+    // 임대 내보내기는 매각과 관문이 같다 — 상대가 받을까 · 선수가 갈까.
+    // 다른 건 값의 크기뿐이고 그건 `askingPrice`가 흡수한다
     return sellOdds(state, terms, player, blockers, knowledge);
+  }
+  if (terms.kind === "loan") {
+    return loanOdds(state, terms, player, blockers, knowledge);
   }
   if (terms.kind === "renew") {
     return renewOdds(state, terms, player, blockers, knowledge);
@@ -312,6 +350,18 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     });
   }
 
+  /**
+   * 감독의 설득 — **코어는 사실만 가리고 무게는 정하지 않는다.**
+   *
+   * 확인된 논거는 확률을 직접 올리지 않는다. 대신 `latitude`를 열어 두고, 그
+   * 폭 안에서 **선수·에이전트를 연기하는 LLM이 판정한다**(`respondOffer`).
+   * 거짓 주장만 코어가 결정적으로 벌한다 — 남용 방지는 결정적이어야 한다.
+   */
+  const pitch =
+    terms.pitch && terms.pitch.length > 0
+      ? evaluatePitch(state, player.id, terms.pitch, terms.pitched ?? [])
+      : null;
+
   // ② 선수 본인 — 주급·출전 기회·간판
   const wageRatio = wageExpectation > 0 ? terms.weeklyWage / wageExpectation : 1.2;
   contributions.push({
@@ -320,6 +370,27 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     label: "제시 주급",
     why: `선수 기대는 £${Math.round(wageExpectation / 1_000)}k/주 (제시액은 그 ${Math.round(wageRatio * 100)}%)`,
   });
+
+  // 이적 시장 전용 리그에서 데려오기 — 돈을 포기하고 돌아오는 결정이라 무겁다
+  if (isMarketOnlyLeague(leagueOfTeam(player.teamId))) {
+    contributions.push({
+      gate: "player",
+      score: -RETURN_RESISTANCE * 4,
+      label: "복귀 저항",
+      why: `${leagueCatalogById(leagueOfTeam(player.teamId))?.name ?? "그 리그"}의 주급을 포기해야 한다 — 돈만으로는 움직이지 않는다`,
+    });
+  }
+
+  for (const verdict of pitch?.verdicts ?? []) {
+    contributions.push({
+      gate: "player",
+      score: verdict.score,
+      label: claimLabel(verdict.kind),
+      why: verdict.verified
+        ? `${verdict.why} — 확률이 아니라 **판정 여유**를 연다 (마음이 얼마나 움직일지는 선수가 정한다)`
+        : `${verdict.why} — 신뢰를 잃는다`,
+    });
+  }
 
   const ourCup = euroCompetitionOf(state.euroEntrants, state.userTeamId);
   const theirCup = euroCompetitionOf(state.euroEntrants, player.teamId);
@@ -435,6 +506,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     Math.min(100, Math.round(fuzz(state.seed, `odds:${player.id}`, raw, margin))),
   );
   return {
+    latitude: pitch?.latitude ?? 0,
     probability: shown,
     marketValue: Math.max(
       0,
@@ -460,6 +532,136 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
  * ② **선수가 떠날까** — 우리 팀에서 주전이면 버티고, 자리가 막혀 있으면 떠나려 한다.
  *    이 관문 때문에 "핵심을 팔아 돈을 만드는" 선택이 공짜가 아니다.
  */
+/** 시즌 임대료 — 시장가의 이 비율이 상대의 기대치다 */
+export const LOAN_FEE_RATE = 0.08;
+
+/**
+ * 임대 영입 — **사는 게 아니라 빌리는 것**이라 관문이 다르다.
+ *
+ * 구단은 "이 선수를 내보내도 되나"를 보고(자리가 막혀 있으면 흔쾌히, 주전이면
+ * 절대 안 된다), 선수는 "가서 뛸 수 있나"를 본다. 돈은 임대료와 주급 분담이라
+ * 이적료보다 훨씬 작다 — 그래서 임대는 **돈이 없는 팀의 수단**이 된다.
+ */
+function loanOdds(
+  state: GameState,
+  terms: DealTerms,
+  player: GamePlayer,
+  blockers: string[],
+  knowledge: Knowledge,
+): DealOdds {
+  const marketValue = marketValueOf(state, player);
+  const expectedFee = Math.round(marketValue * LOAN_FEE_RATE);
+  const wageExpectation = wageExpectationOf(state, player);
+  const contributions: Array<{
+    gate: "club" | "player";
+    score: number;
+    label: string;
+    why: string;
+  }> = [];
+
+  const feeRatio = expectedFee > 0 ? terms.fee / expectedFee : 1;
+  contributions.push({
+    gate: "club",
+    score: (feeRatio - 1) * 3,
+    label: "임대료",
+    why: `£${(expectedFee / 1_000_000).toFixed(1)}M 정도를 기대한다 (부른 값은 그 ${Math.round(feeRatio * 100)}%)`,
+  });
+
+  // 주급을 우리가 얼마나 떠안는가 — 임대의 진짜 값은 여기 있다
+  const wageShare = wageExpectation > 0 ? terms.weeklyWage / wageExpectation : 0;
+  contributions.push({
+    gate: "club",
+    score: (wageShare - 0.5) * 2.2,
+    label: "주급 분담",
+    why: `주급 £${Math.round(wageExpectation / 1_000)}k 중 ${Math.round(wageShare * 100)}%를 우리가 낸다`,
+  });
+
+  // 그 팀에서 자리가 있는가 — 주전은 빌려주지 않는다
+  const blockedThere = betterAtPosition(state, player.teamId, player);
+  contributions.push({
+    gate: "club",
+    score: blockedThere === 0 ? -2.4 : Math.min(1.4, blockedThere * 0.7),
+    label: "그 팀에서의 자리",
+    why:
+      blockedThere === 0
+        ? `${teamName(player.teamId)}의 ${naturalPositionOf(player).position} 주전이다 — 내줄 이유가 없다`
+        : `그 자리에 더 나은 선수가 ${blockedThere}명 있다 — 내보내 뛰게 할 만하다`,
+  });
+
+  // 어릴수록 경험을 위해 내보낸다
+  const age = ageOf(player.birthdate, state.date);
+  if (age <= 21) {
+    contributions.push({
+      gate: "club",
+      score: 1.1,
+      label: "성장 임대",
+      why: `${age}세 — 실전 경험이 필요한 나이다`,
+    });
+  } else if (age >= 30) {
+    contributions.push({
+      gate: "club",
+      score: -0.5,
+      label: "나이",
+      why: `${age}세 — 임대로 키울 선수가 아니다`,
+    });
+  }
+
+  // 선수 관문 — 우리 팀에 와서 뛸 수 있나
+  const blockedHere = betterAtPosition(state, state.userTeamId, player);
+  contributions.push({
+    gate: "player",
+    score: blockedHere === 0 ? 0.9 : -Math.min(1.6, blockedHere * 0.6),
+    label: "출전 기회",
+    why:
+      blockedHere === 0
+        ? "우리 쪽 그 자리가 비어 있다 — 바로 뛴다"
+        : `우리에게 이미 더 나은 선수가 ${blockedHere}명 있다 — 벤치를 각오해야 한다`,
+  });
+
+  const negotiation = state.manager.attributes.negotiation;
+  if (Math.abs(negotiation - 50) >= 5) {
+    contributions.push({
+      gate: "club",
+      score: (negotiation - 50) / 120,
+      label: "감독 협상력",
+      why: `협상 ${negotiation}`,
+    });
+  }
+
+  const sumOf = (gate: "club" | "player", skip: ReadonlySet<number>) =>
+    contributions.reduce(
+      (acc, c, i) => acc + (c.gate === gate && !skip.has(i) ? c.score : 0),
+      MEETS_ASKING_SCORE,
+    );
+  const NONE: ReadonlySet<number> = new Set();
+  const chance = (skip: ReadonlySet<number> = NONE) =>
+    sigmoid(sumOf("club", skip)) * sigmoid(sumOf("player", skip)) * 100;
+  const raw = chance();
+
+  return {
+    latitude: 0,
+    probability: Math.max(0, Math.min(100, Math.round(raw))),
+    marketValue,
+    askingPrice: expectedFee,
+    wageExpectation,
+    blockers,
+    knowledge,
+    fuzzy: knowledge !== "own" && knowledge !== "scouted",
+    factors: [
+      {
+        label: "기준",
+        delta: Math.round(sigmoid(MEETS_ASKING_SCORE) ** 2 * 100),
+        why: "임대료를 맞추고 선수도 뛸 자리가 있을 때",
+      },
+      ...contributions.map((c, i) => ({
+        label: c.label,
+        delta: Math.round(raw - chance(new Set([i]))),
+        why: c.why,
+      })),
+    ],
+  };
+}
+
 function sellOdds(
   state: GameState,
   terms: DealTerms,
@@ -501,12 +703,13 @@ function sellOdds(
       why: `자리가 막혀 있다 (더 나은 선수 ${blockedBy}명) — 출전 기회를 찾는다`,
     });
   }
-  if (player.state.morale < 45) {
+  // 마음이 떠 있는가는 **불만**이 말한다 — 체력으로 읽으면 경기 다음 날 전원이 떠난다
+  if (hasIssue(state, player.id)) {
     contributions.push({
       gate: "player",
       score: 0.5,
-      label: "선수의 사기",
-      why: `사기 ${player.state.morale} — 팀에 남을 마음이 옅다`,
+      label: "선수의 마음",
+      why: `라커룸에 불만이 쌓여 있다 — 팀에 남을 마음이 옅다`,
     });
   }
   const yearsLeft = contractYearsLeft(state, player.id);
@@ -552,6 +755,7 @@ function sellOdds(
   ];
 
   return {
+    latitude: 0,
     probability: Math.max(0, Math.min(100, Math.round(raw))),
     marketValue,
     askingPrice: buyerCeiling,
@@ -627,17 +831,21 @@ function renewOdds(
       why: `같은 자리에 더 나은 선수가 ${blockedBy}명 있다 — 출전을 걱정한다`,
     });
   }
-  if (player.state.morale < 45) {
+  /**
+   * 재계약도 마찬가지다 — **불만과 경기력**이 마음을 말한다.
+   * 체력을 쓰던 때는 경기 다음 날 재계약 확률이 통째로 내려앉았다.
+   */
+  if (hasIssue(state, player.id)) {
     contributions.push({
       score: -0.7,
-      label: "선수의 사기",
-      why: `사기 ${player.state.morale} — 팀에 남을 마음이 옅다`,
+      label: "선수의 마음",
+      why: `라커룸에 불만이 쌓여 있다 — 팀에 남을 마음이 옅다`,
     });
-  } else if (player.state.morale >= 75) {
+  } else if (player.state.form > -0.33) {
     contributions.push({
       score: 0.4,
-      label: "선수의 사기",
-      why: `사기 ${player.state.morale} — 팀 분위기에 만족한다`,
+      label: "선수의 마음",
+      why: `불만 없이 제 경기를 하고 있다 — 팀 분위기에 만족한다`,
     });
   }
   const ourCup = euroCompetitionOf(state.euroEntrants, state.userTeamId);
@@ -683,6 +891,7 @@ function renewOdds(
   ];
 
   return {
+    latitude: 0,
     probability: Math.max(0, Math.min(100, Math.round(raw))),
     marketValue: marketValueOf(state, player),
     askingPrice: 0, // 재계약에 이적료는 없다
@@ -720,9 +929,13 @@ function near(a: number, b: number, tolerance: number): boolean {
 /**
  * 응답까지 걸리는 날수 — **상황에서 나온다** (고정 지연이 아니다).
  *
- * 헐값이면 볼 것도 없이 하루 만에 차이고, 진지한 제안은 이사회가 논의하며 며칠을
+ * 헐값이면 볼 것도 없이 즉시 차이고, 진지한 제안은 이사회가 논의하며 며칠을
  * 쓴다. 마감이 임박하면 절반으로 줄고, 같은 조건을 반복하면 상대가 지쳐 미룬다.
  * 범위 안의 실제 값은 시드 해시로 뽑아 결정적이면서도 자연스럽게 흩어진다.
+ *
+ * **0일이 나올 수 있다** — 그날 바로 답이 온다. 실제 협상도 어떤 전화는 그 자리에서
+ * 끝나고, 어떤 오퍼는 몇 주를 기다려도 소식이 없다. 최소 하루를 강제하면 모든
+ * 협상이 "내일 답 옴"으로 균질해진다.
  */
 export function responseDelayDays(
   state: GameState,
@@ -730,13 +943,35 @@ export function responseDelayDays(
   probability: number,
   repeats = 0,
 ): number {
-  const [from, to] = probability < 15 ? [1, 1] : probability >= 70 ? [1, 3] : [2, 5];
+  const [from, to] = probability < 15 ? [0, 1] : probability >= 70 ? [0, 3] : [1, 6];
   const h = hashChannel(`${state.seed}:delay:${terms.playerId}:${state.date}:${terms.fee}`);
   let days = from + (h % (to - from + 1));
+  /**
+   * 답이 한참 늦는 꼬리 — 이사회 일정이 밀리거나, 상대가 다른 딜을 먼저 정리하거나,
+   * 우리를 급하게 볼 이유가 없는 것이다. 여섯 건에 한 번쯤 나오게 다른 비트로 뽑는다.
+   *
+   * ⚠️ 부호 **없는** 시프트여야 한다. hashChannel은 `h >>> 0`이라 2^31을 넘을 수
+   * 있고, `>>`로 자르면 음수가 나와 답신일이 오늘보다 앞서 버린다.
+   */
+  if ((h >>> 8) % 6 === 0) days += 4 + ((h >>> 12) % 6);
   const window = windowOpenOn(state.windows, state.date);
   if (window && diffDays(state.date, window.closesOn) <= 3)
-    days = Math.max(1, Math.floor(days / 2));
-  return days + (repeats > 0 ? 1 : 0);
+    days = Math.max(0, Math.floor(days / 2));
+  return Math.max(0, days) + (repeats > 0 ? 1 : 0);
+}
+
+/**
+ * 답을 언제 받을지 **사람의 말로** — 날짜를 알려주지 않는다.
+ *
+ * 상대 단장이 "7월 15일에 답 드리겠습니다"라고 약속하는 협상은 없다. 날짜가 그대로
+ * 나가면 감독은 그것을 일정처럼 다루게 되고("답신일까지 대기"), 협상이 달력의 칸이
+ * 된다. 상태를 굴리는 것은 여전히 respondsOn이고, 밖으로 나가는 것만 어림이다.
+ */
+export function describeWait(days: number): string {
+  if (days <= 0) return "답이 곧바로 왔습니다";
+  if (days <= 2) return "조만간 답이 올 겁니다";
+  if (days <= 5) return "며칠은 걸릴 겁니다";
+  return "한동안 소식이 없을 수도 있습니다";
 }
 
 /** 협상 상황 한 줄 요약 — 조회 도구·상태 스냅샷용 */
@@ -752,6 +987,13 @@ export function describeOdds(odds: DealOdds): string {
     ...odds.factors.map(
       (f) => `  ${f.delta >= 0 ? "+" : "−"}${Math.abs(f.delta)} ${f.label} — ${f.why}`,
     ),
+    // 확률만 보고 포기하지 않게 — 설득이 연 폭은 확률과 **따로** 알린다
+    ...(odds.latitude > 0
+      ? [
+          `설득으로 열린 판정 여유 +${odds.latitude}%p — 확인된 논거가 있다. ` +
+            `확률이 낮아도 그 이야기가 이 선수에게 얼마나 큰지는 **당신이 판정한다**.`,
+        ]
+      : []),
   ].join("\n");
 }
 
@@ -773,3 +1015,51 @@ export function counterpartOf(state: GameState, playerId: string): string | null
 }
 
 export { teamName, teamCatalogById };
+
+// ── 이적 시장 전용 리그 (사우디·MLS) ─────────────────────
+/**
+ * **사는 쪽 협회의 창**을 본다. 등록은 사는 구단의 협회 규정을 따르므로,
+ * 우리 창이 닫힌 뒤에도 사우디는 우리 선수를 사 갈 수 있다 — 팔아도 대체
+ * 영입은 못 하는 상태가 되고, 그게 이 리그들이 만드는 가장 큰 드라마다.
+ */
+export function windowOpenForTeam(state: GameState, teamId: string, date = state.date) {
+  const leagueId = leagueOfTeam(teamId);
+  return windowOpenOn(state.windows, date, isMarketOnlyLeague(leagueId) ? leagueId : undefined);
+}
+
+/**
+ * 리그별 이적 성향 — 돈을 어떻게 쓰는가.
+ * 사우디는 시장가 위로 지르고 주급을 폭발시킨다(나이를 개의치 않는다).
+ * MLS는 이적료를 아끼고 자유계약·저가를 노린다(샐러리캡 구조의 그림자).
+ */
+export interface MarketBias {
+  /** 이적료 배율 */
+  fee: number;
+  /** 주급 배율 */
+  wage: number;
+  /** 30세 이상을 얼마나 더 좋아하는가 (1 = 차이 없음) */
+  veteranAppetite: number;
+}
+const DEFAULT_BIAS: MarketBias = { fee: 1, wage: 1, veteranAppetite: 1 };
+const LEAGUE_BIAS: Record<string, MarketBias> = {
+  saudi: { fee: 1.45, wage: 3.5, veteranAppetite: 2.2 },
+  mls: { fee: 0.75, wage: 1.3, veteranAppetite: 1.6 },
+};
+
+export function marketBiasOf(teamId: string): MarketBias {
+  return LEAGUE_BIAS[leagueOfTeam(teamId)] ?? DEFAULT_BIAS;
+}
+
+/**
+ * 복귀 저항 — 그쪽에서 큰 돈을 받는 선수는 5대 리그로 쉽게 돌아오지 않는다.
+ *
+ * 밸런스 가드이자 서사 장치다. 34세 레전드를 데려오려면 **지금 받는 주급**을
+ * 맞춰야 하고(사우디 주급은 우리 상한을 훌쩍 넘는다), 그걸 감수해도 확률이
+ * 깎인다. "돈을 포기하고 돌아온다"는 결정이 그래서 이야기가 된다.
+ */
+export const RETURN_RESISTANCE = 0.65;
+
+export function isFromMarketLeague(state: GameState, playerId: string): boolean {
+  const player = playerById(state, playerId);
+  return player !== null && isMarketOnlyLeague(leagueOfTeam(player.teamId));
+}

@@ -131,7 +131,7 @@ describe("징계 — BOOKING + SUSPENSION", () => {
 });
 
 describe("경기 성장·기록", () => {
-  it("경기를 치르면 출전 기록·전술 적응도·포지션 적응도가 로그와 함께 오른다", () => {
+  it("경기를 치르면 출전 기록·포지션 적응도가 로그와 함께 오른다", () => {
     const state = createTestGame(7);
     advanceToMatchday(state);
     const before = new Map(
@@ -145,17 +145,11 @@ describe("경기 성장·기록", () => {
     );
     expect(apps.length).toBeGreaterThanOrEqual(11);
 
-    // 전술 적응도 상승 + 성장 로그
-    const tacticalGrowth = state.growthLog.filter(
-      (g) => g.source === "match" && g.target === "tactical",
-    );
-    expect(tacticalGrowth.length).toBeGreaterThan(0);
-    for (const g of tacticalGrowth) {
-      const now = assignmentsOf(state, state.userTeamId).find(
-        (a) => a.playerId === g.gamePlayerId,
-      );
-      if (now && before.has(g.gamePlayerId)) {
-        expect(now.familiarity).toBeGreaterThan(before.get(g.gamePlayerId)!);
+    // 전술 적응도는 **경기 처리에서 오르지 않는다** — 사건 목록을 읽은 평점 판정이
+    // 함께 정한다(`applyMatchFamiliarity`). 코어만 돌린 이 테스트에선 그대로여야 한다
+    for (const a of assignmentsOf(state, state.userTeamId, "starting")) {
+      if (before.has(a.playerId)) {
+        expect(a.familiarity, `${a.playerId}: 코어가 몰래 올렸다`).toBe(before.get(a.playerId)!);
       }
     }
     // 포지션 적응도 로그 (pos:CODE)
@@ -168,8 +162,7 @@ describe("경기 성장·기록", () => {
     const state = createTestGame(9);
     advanceToMatchday(state);
     const match = state.matches.find(
-      (m) =>
-        !m.result && (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+      (m) => !m.result && (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
     )!;
     playMockMatch(state);
     expect(match.result).not.toBeNull();

@@ -30,7 +30,7 @@ import {
   wageExpectationOf,
   withdrawOffer,
 } from "@story-fm/engine";
-import { createTestGame } from "./helpers";
+import { completeDeal, createTestGame } from "./helpers";
 
 /**
  * 이적 협상 — 오퍼 → 상대 판정 → 합의 → 실행.
@@ -213,7 +213,13 @@ describe("합의 실행 — 장부가 움직인다", () => {
     const theirBalance = financeOf(state, fromTeamId).balance;
     const previousContract = activeContract(state, player.id)!;
 
-    const result = acceptDeal(state, negotiation.id);
+    // 합의는 계약이 아니다 — 메디컬을 지나야 장부가 움직인다
+    expect(acceptDeal(state, negotiation.id).ok).toBe(true);
+    expect(negotiation.medical?.status).toBe("scheduled");
+    expect(negotiation.status).toBe("agreed");
+    expect(playerById(state, player.id)!.teamId).toBe(fromTeamId);
+
+    const result = completeDeal(state, negotiation.id);
     expect(result.ok, result.message).toBe(true);
     expect(negotiation.status).toBe("completed");
 
@@ -267,9 +273,11 @@ describe("합의 실행 — 장부가 움직인다", () => {
     const state = createTestGame(42);
     const { negotiation } = agreeOn(state);
     financeOf(state, state.userTeamId).transferBudget = 0;
-    const result = acceptDeal(state, negotiation.id);
+    // 예산 검증은 **계약이 실제로 쓰이는 순간**(메디컬 통과 뒤)에 걸린다
+    const result = completeDeal(state, negotiation.id);
     expect(result.ok).toBe(false);
     expect(result.message).toContain("예산이 부족");
+    expect(negotiation.status).toBe("agreed");
   });
 });
 
@@ -425,14 +433,20 @@ describe("매각 — 들어오는 오퍼", () => {
     // 합의만으로는 떠나지 않는다
     expect(playerById(state, player.id)!.teamId).toBe(state.userTeamId);
 
-    const done = acceptDeal(state, negotiation!.id);
+    const done = completeDeal(state, negotiation!.id);
     expect(done.ok, done.message).toBe(true);
     expect(negotiation!.status).toBe("completed");
 
     expect(playerById(state, player.id)!.teamId).toBe(buyerTeamId);
     expect(playersOf(state, state.userTeamId)).toHaveLength(squadBefore - 1);
-    // 판매 대금은 잔고와 이적 예산에 함께 들어간다 (ADR 0002)
-    expect(financeOf(state, state.userTeamId).transferBudget).toBe(budgetBefore + offer.fee);
+    /**
+     * 판매 대금은 잔고와 이적 예산에 함께 들어간다 (ADR 0002).
+     * **처음 부른 값이 아니라 마지막에 합의된 값**이다 — 사는 쪽 메디컬에서
+     * 소견이 나오면 그 자리에서 깎아 다시 부르기 때문이다 (medical.ts).
+     */
+    const settled = [...negotiation!.rounds].reverse().find((r) => r.verdict === "accept")!;
+    expect(settled.fee).toBeLessThanOrEqual(offer.fee);
+    expect(financeOf(state, state.userTeamId).transferBudget).toBe(budgetBefore + settled.fee);
     expect(
       financeOf(state, state.userTeamId).ledger.some(
         (e) => e.kind === "income" && e.label.includes(player.name),

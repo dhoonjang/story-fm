@@ -3,6 +3,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import {
+  IconDatabase,
+  IconMark,
+  IconPlus,
+  IconTrash,
+} from "@/components/icons";
 
 interface GameSummary {
   id: string;
@@ -10,15 +16,8 @@ interface GameSummary {
   managerName: string;
   season: number;
   date: string;
-  phase: string;
   createdAt: string;
 }
-
-const PHASE_LABEL: Record<string, string> = {
-  idle: "일상",
-  matchday: "경기일",
-  match: "경기 중",
-};
 
 export default function HomePage() {
   const router = useRouter();
@@ -65,16 +64,23 @@ export default function HomePage() {
   return (
     <main className="onboarding">
       <div className="home-head">
-        <div>
-          <h1>story-fm</h1>
-          <p className="tagline">말로 지휘하는 AI 풋볼 매니저 — 이어서 하거나 새로 시작하세요</p>
+        <div className="home-brand">
+          <span className="home-mark">
+            <IconMark size={34} />
+          </span>
+          <div>
+            <h1>story-fm</h1>
+            <p className="tagline">말로 지휘하는 AI 풋볼 매니저</p>
+          </div>
         </div>
         <div className="home-head-actions">
           <Link href="/admin" className="ghost-btn" data-testid="admin-link">
-            ⚙ 선수 DB 어드민
+            <IconDatabase />
+            선수 DB
           </Link>
           <Link href="/new" className="primary-btn" data-testid="new-game">
-            + 새 게임
+            <IconPlus />
+            새 게임
           </Link>
         </div>
       </div>
@@ -82,9 +88,10 @@ export default function HomePage() {
       <h2>내 게임</h2>
       {error && <p className="error-text">{error}</p>}
       {games === null && !error && <div className="empty">불러오는 중…</div>}
+      {/* "+ 새 게임" 버튼이 바로 위에 있으니 빈 목록에서 다시 권하지 않는다 */}
       {games !== null && games.length === 0 && (
         <div className="empty" data-testid="no-games">
-          아직 진행 중인 게임이 없습니다 — <Link href="/new" className="back-link">새 게임</Link>으로 커리어를 시작하세요.
+          아직 진행 중인 게임이 없습니다
         </div>
       )}
 
@@ -102,7 +109,6 @@ export default function HomePage() {
                 {g.managerName} 감독 · 시즌 {g.season} · {g.date}
               </div>
             </div>
-            <span className="phase">{PHASE_LABEL[g.phase] ?? g.phase}</span>
             <button
               className="game-del"
               onClick={(e) => {
@@ -112,8 +118,9 @@ export default function HomePage() {
               disabled={deleting === g.id}
               data-testid={`delete-${g.id}`}
               title="세이브 삭제"
+              aria-label="세이브 삭제"
             >
-              ✕
+              <IconTrash />
             </button>
           </div>
         ))}

@@ -5,8 +5,8 @@ import path from "node:path";
 import {
   DEFAULT_SKILL_DESCRIPTIONS,
   buildGmTools,
+  buildMatchTools,
   loadSkillDescriptionOverrides,
-  makeLogMatchEventsTool,
   resetSkillDescriptionOverrides,
   resolveSkillDescriptions,
   saveSkillDescriptionOverrides,
@@ -39,8 +39,8 @@ describe("스킬 설명 오버라이드", () => {
   it("스킬별 설명을 저장하고 실제 도구 description에 즉시 적용한다", () => {
     const descriptions = {
       ...DEFAULT_SKILL_DESCRIPTIONS,
-      advance_time: "테스트용 시간 진행 설명",
-      log_match_events: "테스트용 경기 기록 설명",
+      set_captain: "테스트용 주장 지정 설명",
+      substitute: "테스트용 교체 설명",
     };
     saveSkillDescriptionOverrides(descriptions);
 
@@ -55,18 +55,18 @@ describe("스킬 설명 오버라이드", () => {
       background,
       attributes: interpretBackgroundHeuristic(background),
     });
-    expect(buildGmTools(state, []).find((tool) => tool.name === "advance_time")?.description).toBe(
-      descriptions.advance_time,
+    expect(buildGmTools(state, []).find((tool) => tool.name === "set_captain")?.description).toBe(
+      descriptions.set_captain,
     );
-    expect(makeLogMatchEventsTool(() => ({ ok: true, message: "ok" })).description).toBe(
-      descriptions.log_match_events,
+    expect(buildMatchTools(state, []).find((tool) => tool.name === "substitute")?.description).toBe(
+      descriptions.substitute,
     );
   });
 
   it("초기화하거나 저장 파일이 손상되면 코드 기본값으로 폴백한다", () => {
     saveSkillDescriptionOverrides({
       ...DEFAULT_SKILL_DESCRIPTIONS,
-      get_player: "편집한 선수 조회 설명",
+      search_players: "편집한 선수 조회 설명",
     });
     resetSkillDescriptionOverrides();
     expect(resolveSkillDescriptions().descriptions).toEqual(DEFAULT_SKILL_DESCRIPTIONS);

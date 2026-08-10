@@ -83,7 +83,16 @@ function addUsage(total: TurnUsage, response: GenerateContentResponse): void {
 }
 
 function thinkingLevel(level: GoogleTierConfig["thinkingLevel"]): ThinkingLevel {
-  return level === "high" ? ThinkingLevel.HIGH : ThinkingLevel.MEDIUM;
+  switch (level) {
+    case "high":
+      return ThinkingLevel.HIGH;
+    case "medium":
+      return ThinkingLevel.MEDIUM;
+    case "low":
+      return ThinkingLevel.LOW;
+    default:
+      return ThinkingLevel.MINIMAL;
+  }
 }
 
 /**
@@ -199,8 +208,9 @@ export class GeminiGameLLM implements GameLLM {
         toolCallCount++;
         const name = call.name ?? "unknown_function";
         const spec = tools.find((tool) => tool.name === name);
+        // 이 반복의 텍스트까지 누적된 뒤다 — 도구가 불린 자리가 그대로 실린다
         const outcome: ReturnType<GameToolSpec["handle"]> = spec
-          ? spec.handle(call.args ?? {})
+          ? spec.handle(call.args ?? {}, { text })
           : { ok: false, message: `알 수 없는 도구: ${name}` };
         return {
           functionResponse: {

@@ -93,8 +93,8 @@ export default function NewGamePage() {
           ← 게임 목록
         </Link>
       </div>
+      {/* 소개 문구는 목록 화면이 맡는다 — 여기까지 온 사람에겐 폼만 필요하다 */}
       <h1>새 게임 시작</h1>
-      <p className="tagline">슬라이더 대신 대화로 팀을 이끈다 — 매 시즌이 한 편의 드라마가 되는 AI 풋볼 매니저</p>
 
       <h2>1. 어느 리그입니까?</h2>
       <div className="league-grid" data-testid="league-grid">
@@ -112,7 +112,7 @@ export default function NewGamePage() {
         ))}
       </div>
 
-      <h2>2. 지휘할 팀을 선택하세요</h2>
+      <h2>2. 어느 팀을 맡습니까?</h2>
       {leagueId === null ? (
         <p className="tier" data-testid="team-grid-hint">
           리그를 먼저 선택하세요
@@ -142,7 +142,7 @@ export default function NewGamePage() {
         data-testid="manager-name"
       />
       <textarea
-        placeholder="배경을 자유롭게 적어주세요 — 예: K리그에서 뛰다 은퇴한 수비수. 데이터 분석 회사를 거쳐 지도자의 길로. (이 서술이 리더십·전술·협상·미디어 능력치의 초기 배분을 결정합니다)"
+        placeholder="예: K리그에서 뛰다 은퇴한 수비수. 데이터 분석 회사를 거쳐 지도자의 길로 — 이 서술이 초기 능력치를 정합니다"
         value={background}
         onChange={(e) => setBackground(e.target.value)}
         data-testid="manager-background"

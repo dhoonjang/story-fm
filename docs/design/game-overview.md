@@ -279,7 +279,7 @@
 
 ```
 formation, defensiveLine(낮음~높음), pressing(강도), tempo,
-width(중앙~측면), passStyle(짧게~다이렉트), mentality(수비적~공격적),
+width(중앙~측면), passStyle(짧게~길게), mentality(수비적~공격적),
 playerInstructions: [{ player, role, instruction }] …
 ```
 
@@ -396,9 +396,16 @@ playerInstructions: [{ player, role, instruction }] …
 
 #### ⑥ 미디어 · 보드
 
+> **회견의 자리는 코어가 열고, 질문은 기자가 쓴다** (`packages/engine/src/press.ts`).
+> 경기가 끝나면 매번, 큰 이적이 확정되면 그때 회견이 열린다. 코어가 넘기는 것은
+> **사실 카드**(스코어·연패·폼이 바닥인 선수·영입에 밀리는 선수)이고 질문 문장이
+> 아니다 — 모델은 그 카드 밖의 사실을 묻지 못하되, 묻는 말은 자기가 쓴다.
+> 효과의 폭은 회견의 `weight`(1~3)에 비례하는 코어 한도가 정한다.
+> 이 구조를 선수·주장·구단주로 넓히는 설계는 [approaches.md](./approaches.md).
+
 | 스킬 | 하는 일 | 유형 | 시점 | MVP |
 | --- | --- | --- | --- | --- |
-| `respond_to_media` | 기자회견·인터뷰 답변 — 스탠스가 평판·선수 사기에 반영 | 판정 | 이벤트 발생 시 | 🔽 |
+| `respond_to_media` | 기자회견 답변 — 스탠스가 평판 3축·선수 사기에 반영. `decline`이면 거절(언론 평판을 잃는다) | 판정 | 회견이 열려 있을 때 | ✅ |
 | `respond_to_board` | 구단주의 요청·경고에 대응 | 판정 | 이벤트 발생 시 | 🔽 |
 | `request_board` | 감독이 먼저 요구 — 예산 증액, 시간(신뢰) 요청 | 거래 | 일상 | 🔽 |
 

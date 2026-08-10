@@ -55,7 +55,11 @@ describe("대항전 참가 배정", () => {
     // 우리 리그를 인위적으로 끝내고 최종 순위를 만든다 (홈 승으로 전부 채움)
     for (const m of state.matches) {
       if (m.season !== state.season) continue;
-      m.result = { homeGoals: m.homeTeamId === state.userTeamId ? 5 : 1, awayGoals: 0, scorers: [] };
+      m.result = {
+        homeGoals: m.homeTeamId === state.userTeamId ? 5 : 1,
+        awayGoals: 0,
+        scorers: [],
+      };
     }
     const finalTable = computeStandings(state, "epl").map((r) => r.teamId);
     expect(finalTable[0], "홈 5골이면 우리 팀이 1위").toBe(state.userTeamId);
@@ -155,9 +159,7 @@ describe("대항전 리그 페이즈 편성", () => {
       const all = buildAllEuroMatches(1, seed, entrants);
       for (const cup of CUP_CATALOG) {
         const mine = all.filter((m) => m.competitionId === cup.id);
-        const same = mine.filter(
-          (m) => leagueOfTeam(m.homeTeamId) === leagueOfTeam(m.awayTeamId),
-        );
+        const same = mine.filter((m) => leagueOfTeam(m.homeTeamId) === leagueOfTeam(m.awayTeamId));
         // 축소된 규모(UCL 24팀 중 5팀이 잉글랜드)에선 0이 항상 가능하지 않아
         // 무거운 벌점으로 누른다 — 실측 최악이 대회당 1건이라 상한을 2로 잡는다
         expect(same.length, `seed ${seed} ${cup.id}`).toBeLessThanOrEqual(2);
@@ -165,7 +167,10 @@ describe("대항전 리그 페이즈 편성", () => {
         for (const m of same) {
           for (const t of [m.homeTeamId, m.awayTeamId]) perTeam.set(t, (perTeam.get(t) ?? 0) + 1);
         }
-        expect(Math.max(0, ...perTeam.values()), `seed ${seed} ${cup.id} 한 팀 반복`).toBeLessThanOrEqual(1);
+        expect(
+          Math.max(0, ...perTeam.values()),
+          `seed ${seed} ${cup.id} 한 팀 반복`,
+        ).toBeLessThanOrEqual(1);
       }
     }
   });
@@ -184,8 +189,7 @@ describe("대항전 리그 페이즈 편성", () => {
           const opponents = all
             .filter(
               (m) =>
-                m.competitionId === cup.id &&
-                (m.homeTeamId === teamId || m.awayTeamId === teamId),
+                m.competitionId === cup.id && (m.homeTeamId === teamId || m.awayTeamId === teamId),
             )
             .map((m) => (m.homeTeamId === teamId ? m.awayTeamId : m.homeTeamId));
           expect(opponents).toHaveLength(cup.matchesPerTeam);
@@ -201,7 +205,10 @@ describe("대항전 리그 페이즈 편성", () => {
           ).toBeLessThanOrEqual(cup.matchesPerTeam / 2 + 1);
           // 4개 포트 대회는 한 포트를 아예 안 만나는 일이 드물어야 한다
           if (euroPotCount(list.length) === 4) {
-            expect(perPot.size, `seed ${seed} ${cup.id} ${teamId} 포트 누락`).toBeGreaterThanOrEqual(3);
+            expect(
+              perPot.size,
+              `seed ${seed} ${cup.id} ${teamId} 포트 누락`,
+            ).toBeGreaterThanOrEqual(3);
           }
         }
       }

@@ -1,4 +1,10 @@
-import type { AxisValues, GamePlayer, PlayerAttributes, PositionGroup, TacticsSpec } from "@story-fm/domain";
+import type {
+  AxisValues,
+  GamePlayer,
+  PlayerAttributes,
+  PositionGroup,
+  TacticsSpec,
+} from "@story-fm/domain";
 import { ATTRIBUTE_AXES, DEFAULT_TACTICS } from "@story-fm/domain";
 import type { LedgerSide, LineupSlot, SideInput } from "@story-fm/sim";
 
@@ -27,7 +33,7 @@ export function makePlayer(
       potential: Math.min(99, base + 5),
       ...overrides,
     },
-    state: { form: 0, morale: 60, fatigue: 20, ...state },
+    state: { form: 0, condition: 75, ...state },
     isCaptain: false,
   };
 }
@@ -35,12 +41,22 @@ export function makePlayer(
 /** 4-4-2 구성 스쿼드 — 선발 11 + 벤치 4. id는 기존 테스트 관례 유지 */
 const SQUAD: Array<[slug: string, position: string, group: PositionGroup]> = [
   ["gk", "GK", "GK"],
-  ["df1", "RB", "DF"], ["df2", "RCB", "DF"], ["df3", "LCB", "DF"], ["df4", "LB", "DF"],
-  ["mf1", "RM", "MF"], ["mf2", "RCM", "MF"], ["mf3", "LCM", "MF"], ["mf4", "LM", "MF"],
-  ["fw1", "ST", "FW"], ["fw2", "ST", "FW"],
+  ["df1", "RB", "DF"],
+  ["df2", "RCB", "DF"],
+  ["df3", "LCB", "DF"],
+  ["df4", "LB", "DF"],
+  ["mf1", "RM", "MF"],
+  ["mf2", "RCM", "MF"],
+  ["mf3", "LCM", "MF"],
+  ["mf4", "LM", "MF"],
+  ["fw1", "ST", "FW"],
+  ["fw2", "ST", "FW"],
 ];
 const BENCH: Array<[slug: string, position: string, group: PositionGroup]> = [
-  ["sub-gk", "GK", "GK"], ["sub-df", "CB", "DF"], ["sub-mf", "CM", "MF"], ["sub-fw", "ST", "FW"],
+  ["sub-gk", "GK", "GK"],
+  ["sub-df", "CB", "DF"],
+  ["sub-mf", "CM", "MF"],
+  ["sub-fw", "ST", "FW"],
 ];
 
 export interface TestSquad {
@@ -63,11 +79,12 @@ export function makeSquad(
   return { teamId, starters, bench };
 }
 
-const slotsOf = (players: GamePlayer[]): LineupSlot[] =>
+const slotsOf = (players: GamePlayer[], familiarity = 99): LineupSlot[] =>
   players.map((p) => ({
     player: p,
     position: p.positions[0]!.position,
     proficiency: p.positions[0]!.proficiency,
+    familiarity,
   }));
 
 /** 전력 패킷 입력 — 배치 슬롯으로 조립 */
@@ -78,6 +95,7 @@ export function makeSide(
     managerTactics?: number;
     tactics?: Partial<TacticsSpec>;
     state?: Partial<GamePlayer["state"]>;
+    /** 전술 적응도 0~99 — 선발 전원에 같은 값을 넣는다 (기본 99 = 온전) */
     familiarity?: number;
   } = {},
 ): SideInput {
@@ -85,11 +103,10 @@ export function makeSide(
   return {
     teamId,
     teamName: teamId.toUpperCase(),
-    starters: slotsOf(squad.starters),
-    bench: slotsOf(squad.bench),
+    starters: slotsOf(squad.starters, opts.familiarity),
+    bench: slotsOf(squad.bench, opts.familiarity),
     tactics: { ...DEFAULT_TACTICS, ...(opts.tactics ?? {}) },
     managerTactics: opts.managerTactics ?? 60,
-    ...(opts.familiarity !== undefined ? { familiarity: opts.familiarity } : {}),
   };
 }
 

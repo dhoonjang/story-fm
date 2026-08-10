@@ -1,5 +1,5 @@
 import type { MatchRecord, ScheduleEntry, TransferWindow } from "@story-fm/domain";
-import { LEAGUE_CATALOG } from "./data/league-catalog";
+import { TOP_LEAGUES } from "./data/league-catalog";
 import { teamsOfLeague } from "./data/team-catalog";
 import { makeRng } from "./rng";
 import { isEuroWeek } from "./europe";
@@ -16,8 +16,39 @@ export interface SeasonCalendar {
   season: number;
   /** 게임/시즌 시작일 = 7월 1일 (여름 창 개장과 동시) */
   preseasonStart: string;
+  /**
+   * **선수단 소집일** — 이날부터 훈련이 가능하다. 그 전은 여름 휴가다.
+   *
+   * 예전엔 이 날짜가 `training-plan.ts`의 계산 함수 안에만 있어서 기본 훈련
+   * 배치만 알았다. 감독의 훈련 지시(`setTraining`)는 휴가 기간을 몰라 7월 1일에
+   * "월·수·금 훈련"을 등록하면 아무도 없는 훈련장에 세션이 깔렸다.
+   * 옛 세이브엔 없다 — 읽을 때 계산으로 채운다(`squadReturnOf`).
+   */
+  squadReturn?: string;
   /** 리그 개막일 — 8월 중순 토요일 */
   start: string;
+}
+
+/**
+ * 선수단이 돌아오는 날 = 7월 **둘째 월요일**.
+ *
+ * 실제 EPL 복귀는 7월 초~하순에 흩어져 있고(2026년 에버턴 7/10 · 다수 7/13 ·
+ * 맨시티 7/20), FIFPro는 최소 4주 회복을 권고한다.
+ */
+export function preseasonReturnDate(preseasonStart: string): string {
+  let date = preseasonStart;
+  while (dayOfWeek(date) !== 1) date = addDays(date, 1); // 첫 월요일
+  return addDays(date, 7); // 둘째 월요일
+}
+
+/** 이 세이브의 소집일 — 저장돼 있으면 그 값, 옛 세이브면 계산 */
+export function squadReturnOf(calendar: SeasonCalendar): string {
+  return calendar.squadReturn ?? preseasonReturnDate(calendar.preseasonStart);
+}
+
+/** 오늘이 아직 여름 휴가인가 — 훈련을 걸 수 없는 기간 */
+export function onSummerBreak(calendar: SeasonCalendar, date: string): boolean {
+  return date < squadReturnOf(calendar);
 }
 
 export function addDays(iso: string, days: number): string {
@@ -39,6 +70,44 @@ export function diffDays(a: string, b: string): number {
 /** 시즌 n의 기준 연도 — 시즌 1 = 2026 */
 export function seasonYear(season: number): number {
   return 2026 + (season - 1);
+}
+
+// ── 경기 간 최소 휴식 ────────────────────────────────────
+
+/**
+ * 한 팀이 두 경기를 치르는 **최소 간격 — 48시간**.
+ *
+ * 날짜(diffDays)가 아니라 **킥오프 시각**으로 재야 하는 이유가 있다. 목요일 밤
+ * 21:00 유로파를 뛴 팀에게 토요일 12:30 킥오프를 주면 날짜로는 "이틀 뒤"라 규칙을
+ * 통과하지만 실제 휴식은 **39시간 30분**이다. 실제 리그가 목요일 유럽 원정을 다녀온
+ * 클럽을 일요일로 미루는 것도 같은 이유다.
+ *
+ * 시각을 모르는 경기(`time` 없음)는 그날 낮 경기로 본다 — 없는 정보를 유리하게
+ * 가정하지 않는다.
+ */
+export const MIN_REST_HOURS = 48;
+
+const DEFAULT_KICKOFF = "15:00";
+
+/** 경기 시각을 절대 시간(ms)으로 — 시각이 없으면 낮 경기로 본다 */
+export function kickoffAt(date: string, time?: string): number {
+  return Date.parse(`${date}T${time ?? DEFAULT_KICKOFF}:00Z`);
+}
+
+/** 두 경기 사이의 휴식 시간(시간 단위, 절댓값) */
+export function restHours(
+  a: { date: string; time?: string },
+  b: { date: string; time?: string },
+): number {
+  return Math.abs(kickoffAt(b.date, b.time) - kickoffAt(a.date, a.time)) / 3_600_000;
+}
+
+/** 이 둘을 한 팀이 다 뛰면 휴식이 모자란가 */
+export function tooClose(
+  a: { date: string; time?: string },
+  b: { date: string; time?: string },
+): boolean {
+  return restHours(a, b) < MIN_REST_HOURS;
 }
 
 // ── 실제 EPL 캘린더 골격 ────────────────────────────────
@@ -243,17 +312,55 @@ export function buildMatchweekDates(season: number): Matchweek[] {
 export function buildSeasonCalendar(season: number): SeasonCalendar {
   const year = seasonYear(season);
   // 개막전은 금요일 밤 — 주말 라운드의 첫 슬롯이다
+  const preseasonStart = `${year}-07-01`;
   return {
     season,
-    preseasonStart: `${year}-07-01`,
+    preseasonStart,
+    squadReturn: preseasonReturnDate(preseasonStart),
     start: addDays(openerSaturday(year), -1),
   };
 }
 
 /** 시즌 이적창 2개 — 여름은 게임 시작(7/1)과 동시 개장, 개막 후 9월 초 폐장 */
+/**
+ * 이적 시장 전용 리그의 창 — 우리와 시기가 다르다는 것이 이 리그들의 존재 이유
+ * 절반을 차지한다 (docs/design/transfers.md).
+ *
+ * 사우디는 우리보다 **한 달 이상 늦게 닫히고**, MLS는 아예 다른 계절에 연다
+ * (북미 시즌이 봄에 시작하기 때문). 날짜는 실제 창의 어림값이다.
+ */
+const MARKET_LEAGUE_WINDOWS: Record<
+  string,
+  Array<{ kind: "summer" | "winter"; open: [number, number]; close: [number, number] }>
+> = {
+  saudi: [
+    { kind: "summer", open: [7, 1], close: [10, 6] },
+    { kind: "winter", open: [1, 8], close: [2, 6] },
+  ],
+  mls: [
+    // 북미 프리시즌 창 — 우리 시즌 한복판에 열린다
+    { kind: "winter", open: [2, 12], close: [4, 23] },
+    { kind: "summer", open: [7, 24], close: [8, 21] },
+  ],
+};
+
 export function buildTransferWindows(season: number): TransferWindow[] {
   const year = seasonYear(season);
-  return [
+  /** 시즌 안의 [월, 일] → 날짜. 7월 이후는 그 해, 그 전은 이듬해 */
+  const inSeason = (md: [number, number]) =>
+    `${md[0] >= 7 ? year : year + 1}-${String(md[0]).padStart(2, "0")}-${String(md[1]).padStart(2, "0")}`;
+  const marketWindows: TransferWindow[] = Object.entries(MARKET_LEAGUE_WINDOWS).flatMap(
+    ([leagueId, windows]) =>
+      windows.map((w) => ({
+        id: `w-${season}-${leagueId}-${w.kind}`,
+        season,
+        kind: w.kind,
+        opensOn: inSeason(w.open),
+        closesOn: inSeason(w.close),
+        leagueId,
+      })),
+  );
+  const ourWindows: TransferWindow[] = [
     {
       id: `w-${season}-summer`,
       season,
@@ -269,6 +376,7 @@ export function buildTransferWindows(season: number): TransferWindow[] {
       closesOn: `${year + 1}-02-01`,
     },
   ];
+  return [...ourWindows, ...marketWindows];
 }
 
 /**
@@ -297,9 +405,7 @@ export function firstHalfPairs(teamIds: string[]): Array<Array<[string, string]>
     // 고정 팀은 라운드 짝홀로 홈/어웨이를 번갈아 갖는다
     const opponent = r % fixed;
     pairs.push(
-      r % 2 === 0
-        ? [teamIds[fixed]!, teamIds[opponent]!]
-        : [teamIds[opponent]!, teamIds[fixed]!],
+      r % 2 === 0 ? [teamIds[fixed]!, teamIds[opponent]!] : [teamIds[opponent]!, teamIds[fixed]!],
     );
     for (let i = 1; i < n / 2; i++) {
       const a = (r + i) % fixed;
@@ -416,7 +522,8 @@ export function slotFor(week: Matchweek, indexInRound: number): { date: string; 
  */
 export function buildAllLeagueMatches(season: number, seed: number): MatchRecord[] {
   const out: MatchRecord[] = [];
-  for (const league of LEAGUE_CATALOG) {
+  // 2부는 리그전을 돌지 않는다 — 국내 컵 참가 인원일 뿐이다 (league-catalog §division)
+  for (const league of TOP_LEAGUES) {
     const teamIds = teamsOfLeague(league.id).map((t) => t.id);
     if (teamIds.length < 2) continue;
     out.push(...buildMatches(season, teamIds, seed, league.id));
@@ -445,6 +552,9 @@ export function buildScheduleEntries(
     });
   }
   for (const w of windows) {
+    // 사우디·MLS 창은 달력에 올리지 않는다 — 감독의 달력은 우리 리그의 것이다.
+    // 그 창들이 언제 닫히는지는 GM이 오퍼가 왔을 때 말해 준다
+    if (w.leagueId !== undefined) continue;
     entries.push({
       id: `se-${w.id}-open`,
       date: w.opensOn,
@@ -473,29 +583,52 @@ export function sortEntries(entries: ScheduleEntry[]): ScheduleEntry[] {
   );
 }
 
-export function windowOpenOn(windows: TransferWindow[], date: string): TransferWindow | null {
-  return windows.find((w) => date >= w.opensOn && date <= w.closesOn) ?? null;
+/**
+ * 그 날 열려 있는 창 — `leagueId`를 주면 그 리그의 창을, 안 주면 **5대 리그 공통**
+ * 창을 찾는다. 리그 창과 공통 창을 섞어 찾으면 "사우디 창이 열렸으니 우리도
+ * 영입할 수 있다"는 엉뚱한 결론이 나온다.
+ */
+export function windowOpenOn(
+  windows: TransferWindow[],
+  date: string,
+  leagueId?: string,
+): TransferWindow | null {
+  return (
+    windows.find((w) => w.leagueId === leagueId && date >= w.opensOn && date <= w.closesOn) ?? null
+  );
 }
 
 export function matchesOn(matches: MatchRecord[], date: string): MatchRecord[] {
   return matches.filter((m) => m.date === date);
 }
 
+/**
+ * 다음 경기 — 결과가 없는 가장 이른 우리 경기.
+ *
+ * @param skipId 건너뛸 경기 하나 — **지금 치르는 경기**에 쓴다. 결과는 종료
+ *   시점에 쓰이므로 경기 중에는 그게 "결과 없는 첫 경기"로 잡혀서, 화면이 다음
+ *   상대 자리에 지금 상대를 세운다. 호출부에서 배열을 걸러 넘기면 시즌 전체
+ *   경기(2,000여 건)를 뷰를 만들 때마다 복사하게 되므로 여기서 받는다.
+ */
 export function nextMatchFor(
   matches: MatchRecord[],
   teamId: string,
   date: string,
+  skipId?: string | null,
 ): MatchRecord | null {
-  return (
-    matches
-      .filter(
-        (m) => (m.homeTeamId === teamId || m.awayTeamId === teamId) && !m.result && m.date >= date,
-      )
-      .sort((a, b) => (a.date < b.date ? -1 : 1))[0] ?? null
-  );
+  let best: MatchRecord | null = null;
+  for (const m of matches) {
+    if (m.result || m.date < date || m.id === skipId) continue;
+    if (m.homeTeamId !== teamId && m.awayTeamId !== teamId) continue;
+    if (best === null || m.date < best.date) best = m;
+  }
+  return best;
 }
 
 /** 시즌 마지막 경기일 — 달력 뷰의 시즌 종료 표기 */
 export function seasonEndDate(matches: MatchRecord[]): string | null {
-  return matches.reduce<string | null>((max, m) => (max === null || m.date > max ? m.date : max), null);
+  return matches.reduce<string | null>(
+    (max, m) => (max === null || m.date > max ? m.date : max),
+    null,
+  );
 }

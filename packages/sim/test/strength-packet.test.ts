@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildStrengthPacket, tacticalFit } from "@story-fm/sim";
+import { buildStrengthPacket, tacticalFit, type SideInput } from "@story-fm/sim";
 import { makeSide } from "./helpers";
 
 describe("buildStrengthPacket", () => {
@@ -20,7 +20,7 @@ describe("buildStrengthPacket", () => {
   it("피로가 쌓이면 존 전력이 떨어진다", () => {
     const fresh = buildStrengthPacket(makeSide("str", 80), makeSide("wk", 70));
     const tired = buildStrengthPacket(
-      makeSide("str", 80, { state: { fatigue: 90 } }),
+      makeSide("str", 80, { state: { condition: 10 } }),
       makeSide("wk", 70),
     );
     expect(tired.home.zones.attack).toBeLessThan(fresh.home.zones.attack);
@@ -29,8 +29,14 @@ describe("buildStrengthPacket", () => {
 
   it("감독 전술 능력치가 높으면 전술 소화율이 오른다 (결정 #13)", () => {
     expect(tacticalFit(90)).toBeGreaterThan(tacticalFit(50));
-    const sharp = buildStrengthPacket(makeSide("str", 80, { managerTactics: 90 }), makeSide("wk", 70));
-    const dull = buildStrengthPacket(makeSide("str", 80, { managerTactics: 40 }), makeSide("wk", 70));
+    const sharp = buildStrengthPacket(
+      makeSide("str", 80, { managerTactics: 90 }),
+      makeSide("wk", 70),
+    );
+    const dull = buildStrengthPacket(
+      makeSide("str", 80, { managerTactics: 40 }),
+      makeSide("wk", 70),
+    );
     expect(sharp.home.zones.attack).toBeGreaterThan(dull.home.zones.attack);
   });
 
@@ -62,12 +68,152 @@ describe("buildStrengthPacket", () => {
   });
 
   it("전술 적응도가 낮으면 존 전력이 깎인다 (v6 배치 적응도)", () => {
-    const settled = buildStrengthPacket(makeSide("str", 80, { familiarity: 1 }), makeSide("wk", 70));
+    const settled = buildStrengthPacket(
+      makeSide("str", 80, { familiarity: 99 }),
+      makeSide("wk", 70),
+    );
     const unsettled = buildStrengthPacket(
-      makeSide("str", 80, { familiarity: 0.85 }),
+      makeSide("str", 80, { familiarity: 40 }),
       makeSide("wk", 70),
     );
     expect(unsettled.home.zones.midfield).toBeLessThan(settled.home.zones.midfield);
+  });
+
+  it("전술 적응도는 **개인** 값이다 — 한 명이 낮으면 그 선수만 깎인다", () => {
+    const side = makeSide("str", 80, { familiarity: 99 });
+    const newcomer = side.starters.find((s) => s.position === "ST")!;
+    const before = buildStrengthPacket(side, makeSide("wk", 78));
+    const beforeMe = before.home.lineup.find((p) => p.id === newcomer.player.id)!;
+
+    newcomer.familiarity = 30; // 어제 온 선수
+    const after = buildStrengthPacket(side, makeSide("wk", 78));
+    const afterMe = after.home.lineup.find((p) => p.id === newcomer.player.id)!;
+
+    expect(afterMe.effective).toBeLessThan(beforeMe.effective);
+    // 나머지 선수는 그대로다 — 예전엔 팀 평균이라 열한 명이 함께 깎였다
+    for (const p of after.home.lineup) {
+      if (p.id === newcomer.player.id) continue;
+      expect(p.effective).toBe(before.home.lineup.find((x) => x.id === p.id)!.effective);
+    }
+  });
+
+  it("자리마다 전술 적응의 무게가 다르다 — 중원이 최전방보다 크게 깎인다", () => {
+    const settled = buildStrengthPacket(
+      makeSide("str", 80, { familiarity: 99 }),
+      makeSide("wk", 78),
+    );
+    const raw = buildStrengthPacket(makeSide("str", 80, { familiarity: 30 }), makeSide("wk", 78));
+    const drop = (zone: "midfield" | "attack") =>
+      1 - raw.home.zones[zone] / settled.home.zones[zone];
+    expect(drop("midfield")).toBeGreaterThan(drop("attack"));
+    // 민감도는 패킷에 그대로 실려 나간다 (설명 가능성)
+    const mid = raw.home.lineup.find((p) => p.position === "RCM")!;
+    const st = raw.home.lineup.find((p) => p.position === "ST")!;
+    expect(mid.fit.sensitivity).toBeGreaterThan(st.fit.sensitivity);
+    expect(mid.fit.tactical).toBe(30);
+  });
+
+  it("명단에 개인 유효 전력과 그 분해가 실린다 (중계가 사람 단위로 읽는다)", () => {
+    const packet = buildStrengthPacket(makeSide("str", 80), makeSide("wk", 70));
+    for (const p of packet.home.lineup) {
+      expect(p.effective).toBeGreaterThan(0);
+      expect(p.fit.position).toBeGreaterThan(0);
+      expect(p.fit.tactical).toBeGreaterThan(0);
+      expect(p.fit.sensitivity).toBeGreaterThan(0);
+    }
+    // 존 전력은 개인 값들의 평균이다
+    const fw = packet.home.lineup.filter((p) => p.position === "ST");
+    const avg = fw.reduce((s, p) => s + p.effective, 0) / fw.length;
+    expect(packet.home.zones.attack).toBeGreaterThan(avg * 0.8);
+    expect(packet.home.zones.attack).toBeLessThan(avg * 1.2);
+  });
+
+  it("전술 6축 전부가 수치를 움직인다 — 말했는데 수치엔 없는 축이 없다", () => {
+    const base = buildStrengthPacket(makeSide("str", 80), makeSide("wk", 78));
+    const axes = ["mentality", "defensiveLine", "pressing", "tempo", "width", "passStyle"] as const;
+    for (const axis of axes) {
+      const pushed = buildStrengthPacket(
+        makeSide("str", 80, { tactics: { [axis]: 5 } }),
+        makeSide("wk", 78),
+      );
+      const moved =
+        pushed.home.zones.attack !== base.home.zones.attack ||
+        pushed.home.zones.midfield !== base.home.zones.midfield ||
+        pushed.home.zones.defense !== base.home.zones.defense;
+      expect(moved, `${axis}가 어떤 존도 움직이지 않았다`).toBe(true);
+      // 지시는 공짜가 아니다 — 이득과 대가가 함께 적힌다
+      expect(pushed.home.tactical.notes.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("지시는 이득과 대가를 함께 낸다 — 라인을 올리면 뒷공간이 열린다", () => {
+    const flat = buildStrengthPacket(
+      makeSide("str", 80, { tactics: { defensiveLine: 3 } }),
+      makeSide("wk", 78),
+    );
+    const high = buildStrengthPacket(
+      makeSide("str", 80, { tactics: { defensiveLine: 5 } }),
+      makeSide("wk", 78),
+    );
+    expect(high.home.zones.midfield).toBeGreaterThan(flat.home.zones.midfield);
+    expect(high.home.zones.defense).toBeLessThan(flat.home.zones.defense);
+  });
+
+  it("상대가 빠를수록 높은 라인의 대가가 커진다", () => {
+    const slowFront = makeSide("wk", 78);
+    const fastFront = makeSide("wk", 78);
+    fastFront.starters = fastFront.starters.map((s) =>
+      s.position === "ST"
+        ? { ...s, player: { ...s.player, attributes: { ...s.player.attributes, pace: 95 } } }
+        : s,
+    );
+    const vsSlow = buildStrengthPacket(
+      makeSide("str", 80, { tactics: { defensiveLine: 5 } }),
+      slowFront,
+    );
+    const vsFast = buildStrengthPacket(
+      makeSide("str", 80, { tactics: { defensiveLine: 5 } }),
+      fastFront,
+    );
+    expect(vsFast.home.zones.defense).toBeLessThan(vsSlow.home.zones.defense);
+  });
+
+  it("소화율이 낮으면 이득만 깎이고 대가는 남는다 — 과격한 지시가 순손실이 된다", () => {
+    // 같은 지시(전면 공격), 다른 감독. 소화율은 감독 전술 능력 + 팀 적응도에서 나온다
+    const sharp = buildStrengthPacket(
+      makeSide("str", 80, { tactics: { mentality: 5 }, managerTactics: 95, familiarity: 1 }),
+      makeSide("wk", 78),
+    );
+    const dull = buildStrengthPacket(
+      makeSide("str", 80, { tactics: { mentality: 5 }, managerTactics: 30, familiarity: 0.85 }),
+      makeSide("wk", 78),
+    );
+    expect(dull.home.tactical.uptake).toBeLessThan(sharp.home.tactical.uptake);
+
+    // 대가(수비 하락)는 두 감독이 똑같이 치른다 — 소화율과 무관하다.
+    // 그래서 못 소화하는 팀은 "공격은 덜 오르고 수비는 그대로 내려간" 상태가 된다
+    const gainSharp = sharp.home.zones.attack / sharp.home.tacticalFit;
+    const gainDull = dull.home.zones.attack / dull.home.tacticalFit;
+    const lossSharp = sharp.home.zones.defense / sharp.home.tacticalFit;
+    const lossDull = dull.home.zones.defense / dull.home.tacticalFit;
+    expect(gainDull / lossDull).toBeLessThan(gainSharp / lossSharp);
+  });
+
+  it("경기 중 누적 피로가 후반 전력을 깎는다 (교체 타이밍이 뜻을 갖는다)", () => {
+    const fresh = makeSide("str", 80);
+    const worn = makeSide("str", 80);
+    worn.starters = worn.starters.map((s) => ({ ...s, matchFatigue: 45 }));
+    const a = buildStrengthPacket(fresh, makeSide("wk", 78));
+    const b = buildStrengthPacket(worn, makeSide("wk", 78));
+    expect(b.home.zones.attack).toBeLessThan(a.home.zones.attack);
+    expect(b.guide.expectedGoals.home).toBeLessThan(a.guide.expectedGoals.home);
+  });
+
+  it("홈 어드밴티지는 기대 득점에만 붙고 중립 경기엔 없다", () => {
+    const even = buildStrengthPacket(makeSide("a", 80), makeSide("b", 80));
+    expect(even.guide.expectedGoals.home).toBeGreaterThan(even.guide.expectedGoals.away);
+    const neutral = buildStrengthPacket(makeSide("a", 80), makeSide("b", 80), { neutral: true });
+    expect(neutral.guide.expectedGoals.home).toBe(neutral.guide.expectedGoals.away);
   });
 
   it("배치 포지션이 존 계산의 기준이다 — 낯선 자리는 기여가 깎인다", () => {
@@ -80,5 +226,72 @@ describe("buildStrengthPacket", () => {
     const a = buildStrengthPacket(natural, makeSide("wk", 70));
     const b = buildStrengthPacket(misplaced, makeSide("wk", 70));
     expect(b.home.zones.attack).toBeLessThan(a.home.zones.attack);
+  });
+});
+
+/**
+ * 개인 지시 — 감독의 구체적인 말이 결과에 닿는 유일한 경로.
+ * LLM이 무엇을 지시했는지 옮기고, **얼마나 먹히는지는 여기 공식이 정한다.**
+ */
+describe("개인 지시", () => {
+  const home = (directives?: SideInput["directives"]) => {
+    const side = makeSide("us", 78);
+    return directives ? { ...side, directives } : side;
+  };
+  const away = () => makeSide("them", 78);
+
+  it("전담 마크는 상대를 지우고 마크맨의 본업을 던다", () => {
+    const target = away().starters.find((s) => s.position !== "GK")!.player.id;
+    const marker = home().starters.find((s) => s.position !== "GK")!.player.id;
+    const before = buildStrengthPacket(home(), away());
+    const after = buildStrengthPacket(
+      home([{ by: marker, kind: "man_mark", targetId: target }]),
+      away(),
+    );
+    // 상대의 그 자리가 깎인다
+    const zone = ["attack", "midfield", "defense"] as const;
+    const themDropped = zone.some((z) => after.away.zones[z] < before.away.zones[z]);
+    const usDropped = zone.some((z) => after.home.zones[z] < before.home.zones[z]);
+    expect(themDropped, "상대를 지우지 못했다").toBe(true);
+    expect(usDropped, "본업을 던 대가가 없다").toBe(true);
+  });
+
+  it("핵심을 마크하면 상대 기대 득점이 내려간다 (공급을 끊으면 마무리도 준다)", () => {
+    const target = away().starters.find((s) => s.position !== "GK")!.player.id;
+    const marker = home().starters.find((s) => s.position !== "GK")!.player.id;
+    const before = buildStrengthPacket(home(), away());
+    const after = buildStrengthPacket(
+      home([{ by: marker, kind: "man_mark", targetId: target }]),
+      away(),
+    );
+    // 중원을 지웠는데 상대 xg가 오르면 지시가 손해가 된다 (실제로 그렇게 나온 적 있다)
+    expect(after.guide.expectedGoals.away).toBeLessThanOrEqual(before.guide.expectedGoals.away);
+  });
+
+  it("그라운드에 없는 상대를 겨냥한 지시는 버려진다", () => {
+    const marker = home().starters[1]!.player.id;
+    const before = buildStrengthPacket(home(), away());
+    const after = buildStrengthPacket(
+      home([{ by: marker, kind: "man_mark", targetId: "없는-선수" }]),
+      away(),
+    );
+    expect(after.home.zones).toEqual(before.home.zones);
+    expect(after.away.zones).toEqual(before.away.zones);
+  });
+
+  it("이득에만 소화율이 곱해진다 — 소화 못 하는 팀은 대가만 치른다", () => {
+    const marker = home().starters[1]!.player.id;
+    const target = away().starters[1]!.player.id;
+    const directive = [{ by: marker, kind: "man_mark" as const, targetId: target }];
+    const skilled = buildStrengthPacket(
+      { ...makeSide("us", 78, { managerTactics: 95 }), directives: directive },
+      away(),
+    );
+    const raw = buildStrengthPacket(
+      { ...makeSide("us", 78, { managerTactics: 20, familiarity: 30 }), directives: directive },
+      away(),
+    );
+    // 잘 소화하는 팀이 상대를 더 크게 지운다
+    expect(skilled.away.zones.attack).toBeLessThan(raw.away.zones.attack);
   });
 });

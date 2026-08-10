@@ -1,5 +1,5 @@
 import type { MatchRecord } from "@story-fm/domain";
-import { buildAllLeagueMatches, diffDays } from "./calendar";
+import { MIN_REST_HOURS, buildAllLeagueMatches, restHours } from "./calendar";
 import { leagueOfTeam } from "./data/team-catalog";
 import { buildAllEuroMatches, type EuroEntry } from "./europe";
 
@@ -36,8 +36,11 @@ export function isUserFixture(match: MatchRecord, userTeamId: string): boolean {
   );
 }
 
-/** 경기 사이 최소 간격 — 이틀(=하루 이상 휴식). 같은 날·연속 이틀이 충돌이다 */
-const MIN_REST_DAYS = 2;
+/** 편성 슬롯 — 날짜와 킥오프는 늘 함께 움직인다 */
+interface Slot {
+  date: string;
+  time?: string;
+}
 
 /**
  * 대항전과 붙은 리그 슬롯을 **같은 라운드 안에서 맞바꿔** 푼다.
@@ -54,26 +57,36 @@ export function relaxEuroAdjacency(
   leagueMatches: MatchRecord[],
   euroMatches: MatchRecord[],
 ): number {
-  const euroDates = new Map<string, string[]>();
+  const euroSlots = new Map<string, Slot[]>();
   for (const m of euroMatches) {
     for (const teamId of [m.homeTeamId, m.awayTeamId]) {
-      const dates = euroDates.get(teamId);
-      if (dates) dates.push(m.date);
-      else euroDates.set(teamId, [m.date]);
+      const slots = euroSlots.get(teamId);
+      if (slots) slots.push({ date: m.date, time: m.time });
+      else euroSlots.set(teamId, [{ date: m.date, time: m.time }]);
     }
   }
-  if (euroDates.size === 0) return 0;
+  if (euroSlots.size === 0) return 0;
 
-  /** 이 경기를 그 날짜에 두면 대항전과 몇 번 부딪히는가 */
-  const clashes = (match: MatchRecord, date: string): number => {
-    let n = 0;
+  /**
+   * 이 경기를 그 슬롯에 두면 얼마나 무리인가 — **모자란 시간의 합**.
+   *
+   * ① **날짜가 아니라 킥오프 시각으로 잰다.** 목요일 21:00 유로파를 뛴 팀에게 토요일
+   *    12:30을 주면 날짜로는 이틀 뒤지만 실제 휴식은 39시간 30분이다 — 실제 리그가
+   *    목요일 유럽 원정 클럽을 일요일로 미루는 이유가 그것이다.
+   * ② **개수가 아니라 심각도로 센다.** 개수로 세면 23시간과 44시간이 똑같이 "1건"이라
+   *    금요일 경기를 일요일로 옮기는 교환이 "개선 없음"으로 거절된다. 48시간에서
+   *    모자란 만큼을 더하면 그리디가 **가장 나쁜 것부터** 푼다.
+   */
+  const clashes = (match: MatchRecord, slot: Slot): number => {
+    let short = 0;
     for (const teamId of [match.homeTeamId, match.awayTeamId]) {
-      for (const euroDate of euroDates.get(teamId) ?? []) {
-        if (Math.abs(diffDays(euroDate, date)) < MIN_REST_DAYS) n += 1;
+      for (const euro of euroSlots.get(teamId) ?? []) {
+        short += Math.max(0, MIN_REST_HOURS - restHours(euro, slot));
       }
     }
-    return n;
+    return short;
   };
+  const slotOf = (m: MatchRecord): Slot => ({ date: m.date, time: m.time });
 
   const rounds = new Map<string, MatchRecord[]>();
   for (const m of leagueMatches) {
@@ -98,12 +111,13 @@ export function relaxEuroAdjacency(
     for (let pass = 0; pass < 4; pass++) {
       let moved = 0;
       for (const a of group) {
-        if (clashes(a, a.date) === 0) continue;
+        if (clashes(a, slotOf(a)) === 0) continue;
         // ① 두 경기 맞교환
         const partner = group.find(
           (b) =>
             b !== a &&
-            clashes(a, b.date) + clashes(b, a.date) < clashes(a, a.date) + clashes(b, b.date),
+            clashes(a, slotOf(b)) + clashes(b, slotOf(a)) <
+              clashes(a, slotOf(a)) + clashes(b, slotOf(b)),
         );
         if (partner) {
           swap(a, partner);
@@ -115,8 +129,8 @@ export function relaxEuroAdjacency(
         const rotated = group.some((b) =>
           group.some((c) => {
             if (b === a || c === a || c === b) return false;
-            const before = clashes(a, a.date) + clashes(b, b.date) + clashes(c, c.date);
-            const after = clashes(a, b.date) + clashes(b, c.date) + clashes(c, a.date);
+            const before = clashes(a, slotOf(a)) + clashes(b, slotOf(b)) + clashes(c, slotOf(c));
+            const after = clashes(a, slotOf(b)) + clashes(b, slotOf(c)) + clashes(c, slotOf(a));
             if (after >= before) return false;
             swap(a, b); // a↔b 뒤 a는 b의 옛 슬롯, b는 a의 옛 슬롯
             swap(b, c); // b는 c의 옛 슬롯, c는 a의 옛 슬롯 — 3자 회전 완성

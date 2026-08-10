@@ -5,11 +5,15 @@ import type {
   LedgerEntry,
   MatchRecord,
 } from "@story-fm/domain";
-import { FINANCE_CATEGORY_KO, FINANCE_EXPENSE_CATEGORIES, FINANCE_INCOME_CATEGORIES } from "@story-fm/domain";
+import {
+  FINANCE_CATEGORY_KO,
+  FINANCE_EXPENSE_CATEGORIES,
+  FINANCE_INCOME_CATEGORIES,
+} from "@story-fm/domain";
 import { dayOfWeek } from "./calendar";
 import { clubProfile } from "./data/club-profile";
-import { leagueCatalogById } from "./data/league-catalog";
-import { competitionShortName, isCup } from "./data/cup-catalog";
+import { isMarketOnlyLeague, leagueCatalogById } from "./data/league-catalog";
+import { competitionShortName, isCup, isEuroCup } from "./data/cup-catalog";
 import { leagueOfTeam, teamCatalogById } from "./data/team-catalog";
 import { computeStandings } from "./season";
 import { financeOf, pushNarrative, teamShortName, weeklyWagesOf, type GameState } from "./state";
@@ -123,14 +127,14 @@ function poolOf(teamId: string): number {
 }
 
 /**
- * 균등 배분은 **리그 무관**이다 — 의도된 편차 (club-finance §5.1).
+ * 균등 배분에도 **리그 배율을 적용한다** (club-finance §5.1) — 실제로 각국 중계권
+ * 규모는 리그마다 크게 다르다 (리그1은 EPL의 0.16).
  *
- * 실제로는 각국 중계권 규모가 리그마다 크게 다르지만(리그1은 EPL의 0.16),
- * 우리 주급 곡선(`wageForOverall`)은 리그와 무관하게 능력치로만 정해진다. 그대로
- * 곱하면 약체 리그 구단이 EPL 수준 주급을 내면서 6분의 1 수입을 받아 파산한다.
- * 리그 격차는 **성적 수당·생중계 수당·티켓 단가**가 만들고 균등분은 바닥을 깐다.
+ * 예전엔 껐다. 주급 곡선이 리그를 몰라(능력치로만 정해져) 약체 리그 구단이 EPL 수준
+ * 주급을 내면서 6분의 1 수입을 받아 파산했기 때문이다. **주급이 리그를 알게 되면서**
+ * (wages.ts) 그 이유가 사라졌다 — 이제 수입도 리그를 안다.
  */
-const EQUAL_SHARE_LEAGUE_SCALED = false;
+const EQUAL_SHARE_LEAGUE_SCALED = true;
 
 function equalShareFactor(teamId: string): number {
   return EQUAL_SHARE_LEAGUE_SCALED ? poolOf(teamId) : 1;
@@ -165,6 +169,8 @@ export interface RecordFinanceInput {
   /** 상각만 noncash */
   accounting?: "cash" | "noncash";
   time?: string;
+  /** 서사가 만든 항목인가 (apply_finance_event) */
+  source?: "narrative";
 }
 
 /**
@@ -193,6 +199,7 @@ export function recordFinance(state: GameState, teamId: string, input: RecordFin
     amount: value,
     ...(input.ref ? { ref: input.ref } : {}),
     ...(noncash ? { accounting: "noncash" as const } : {}),
+    ...(input.source ? { source: input.source } : {}),
   });
 }
 
@@ -236,10 +243,10 @@ function leagueSizeOf(state: GameState, teamId: string): number {
 }
 
 /**
- * 이 경기가 국내 생중계로 편성됐는가 — 토요일 15:00만 비중계 (실제 블랙아웃 규약).
+ * 이 경기가 **리그 중계권 수당**의 대상인가 — 토요일 15:00만 비중계 (실제 블랙아웃 규약).
  *
- * 대항전은 **제외**한다. 유럽 경기의 방송 수입은 이미 UEFA 배분(참가비·승무 수당)에
- * 들어 있으므로 여기서 또 주면 이중 계상이다.
+ * 컵은 전부 제외한다. 대항전 방송 수입은 UEFA 배분(참가비·승무 수당)에, 국내 컵은
+ * 라운드 진출 상금에 이미 들어 있어서 여기서 또 주면 이중 계상이다.
  */
 export function isTelevised(match: MatchRecord): boolean {
   if (isCup(match.competitionId)) return false;
@@ -306,7 +313,7 @@ export function matchdayRevenue(state: GameState, match: MatchRecord): MatchdayR
   const attendance = Math.round(capacity * occupancy);
 
   const basePrice = leagueCatalogById(leagueOfTeam(teamId))?.avgTicketPrice ?? 30;
-  const price = basePrice * TICKET_TIER_FACTOR[tier] * (isCup(match.competitionId) ? 1.15 : 1);
+  const price = basePrice * TICKET_TIER_FACTOR[tier] * (isEuroCup(match.competitionId) ? 1.15 : 1);
   const gate = attendance * price;
   const income = Math.round(gate * (1 + HOSPITALITY_RATE[tier]));
 
@@ -360,7 +367,7 @@ export function applyMatchFinance(
       kind: "expense",
       category: "travel_medical",
       label: `원정 비용 (${label})`,
-      amount: isCup(match.competitionId) ? TRAVEL_EUROPE : TRAVEL_DOMESTIC,
+      amount: isEuroCup(match.competitionId) ? TRAVEL_EUROPE : TRAVEL_DOMESTIC,
       ref,
     });
   }
@@ -408,7 +415,7 @@ export function applyAiMatchFinance(state: GameState, match: MatchRecord): void 
       const price =
         (leagueCatalogById(leagueOfTeam(teamId))?.avgTicketPrice ?? 30) *
         TICKET_TIER_FACTOR[tier] *
-        (isCup(match.competitionId) ? 1.15 : 1);
+        (isEuroCup(match.competitionId) ? 1.15 : 1);
       const gate = capacity * OCCUPANCY_BASE[tier] * price * (1 + HOSPITALITY_RATE[tier]);
       recordFinance(state, teamId, {
         kind: "income",
@@ -427,7 +434,7 @@ export function applyAiMatchFinance(state: GameState, match: MatchRecord): void 
         kind: "expense",
         category: "travel_medical",
         label: "원정 비용",
-        amount: isCup(match.competitionId) ? TRAVEL_EUROPE : TRAVEL_DOMESTIC,
+        amount: isEuroCup(match.competitionId) ? TRAVEL_EUROPE : TRAVEL_DOMESTIC,
       });
     }
 
@@ -460,9 +467,28 @@ export function recordMedicalCost(
 
 // ── 주급 ────────────────────────────────────────────────
 
+/**
+ * 이적 시장 전용 구단의 상시 이적 예산 — **우리 경제 밖의 돈**이다.
+ *
+ * 사우디·MLS 클럽은 경기를 하지 않아 중계권도 매치데이 수입도 없다. 그대로
+ * 두면 레전드 주급(주 £3.4M)만 나가 한 시즌 안에 파산한다. 원장을 흉내 내는
+ * 대신 예산을 상수로 두고 재정 시뮬에서 빼는 게 정직하다 — 이 클럽들의 재정은
+ * 게임의 관심사가 아니고, 감독이 들여다볼 화면도 없다.
+ */
+export const MARKET_LEAGUE_BUDGET: Record<string, number> = {
+  saudi: 250_000_000,
+  mls: 60_000_000,
+};
+
+/** 이 구단이 우리 재정 세계 밖인가 (사우디·MLS) */
+export function isOutsideOurEconomy(teamId: string): boolean {
+  return isMarketOnlyLeague(leagueOfTeam(teamId));
+}
+
 /** 주간 주급 지급 — 전 팀 (월요일) */
 export function payWeeklyWages(state: GameState): void {
   for (const team of state.teams) {
+    if (isOutsideOurEconomy(team.id)) continue;
     const wages = weeklyWagesOf(state, team.id);
     if (wages <= 0) continue;
     recordFinance(state, team.id, {
@@ -582,6 +608,14 @@ function postMonthlyItems(state: GameState): void {
   const playerNames = new Map(state.players.map((p) => [p.id, p.name] as const));
 
   for (const team of state.teams) {
+    // 이적 시장 전용 구단은 원장 대신 상시 예산만 유지한다
+    if (isOutsideOurEconomy(team.id)) {
+      const finance = state.finances.find((f) => f.teamId === team.id);
+      if (finance) {
+        finance.transferBudget = MARKET_LEAGUE_BUDGET[leagueOfTeam(team.id)] ?? 50_000_000;
+      }
+      continue;
+    }
     const tier = tierOf(team.id);
     const pool = poolOf(team.id);
     const { commercialTier } = profileOf(team.id);
@@ -611,8 +645,7 @@ function postMonthlyItems(state: GameState): void {
     });
     // 머천다이징은 성적에 붙는다 — 최근 승률 ±10%
     const winRate = winRates.get(team.id);
-    const form =
-      winRate === undefined ? 0 : Math.max(-0.1, Math.min(0.1, (winRate - 0.4) * 0.25));
+    const form = winRate === undefined ? 0 : Math.max(-0.1, Math.min(0.1, (winRate - 0.4) * 0.25));
     recordFinance(state, team.id, {
       kind: "income",
       category: "merchandising",
@@ -852,14 +885,9 @@ export function psrStatus(state: GameState): { rolling3Season: number; headroom:
 // ── 시즌 단위 ───────────────────────────────────────────
 
 /** 우승·유럽 진출 보너스 — 시즌 리뷰에서 (주급 총액 배수) */
-export function paySeasonBonuses(
-  state: GameState,
-  position: number,
-  digest: string[],
-): void {
+export function paySeasonBonuses(state: GameState, position: number, digest: string[]): void {
   const wages = weeklyWagesOf(state, state.userTeamId);
-  const bonus =
-    position === 1 ? wages * 4 : position <= 4 ? wages * 2 : position <= 6 ? wages : 0;
+  const bonus = position === 1 ? wages * 4 : position <= 4 ? wages * 2 : position <= 6 ? wages : 0;
   if (bonus <= 0) return;
   const label = position === 1 ? "우승 보너스" : "유럽 진출 보너스";
   if (
@@ -877,6 +905,7 @@ export function paySeasonBonuses(
 /** 리그 순위 상금 — 시즌 리뷰에서 (전 팀) */
 export function payLeaguePrizes(state: GameState, digest: string[]): void {
   for (const team of state.teams) {
+    if (isOutsideOurEconomy(team.id)) continue;
     const standings = computeStandings(state, leagueOfTeam(team.id));
     const rank = standings.findIndex((r) => r.teamId === team.id) + 1;
     if (rank <= 0) continue;
@@ -940,6 +969,143 @@ export function topUpTransferBudget(
   }
 }
 
+// ── 서사가 재정에 닿는 통로 (GM 스킬) ───────────────────
+
+/**
+ * 서사 이벤트가 열 수 있는 카테고리 — **코어가 공식으로 내는 축은 닫는다.**
+ *
+ * 중계권·주급·이적료·상각·상금은 계약과 규정에서 계산되는 값이라 서사가 손대면
+ * 장부가 두 개의 진실을 갖는다. 열어 두는 것은 세상의 반응으로 흔들리는 축뿐이다 —
+ * 스폰서·굿즈·입장 수입, 시설·의료·보너스 지출.
+ */
+export const NARRATIVE_INCOME_CATEGORIES = ["commercial", "merchandising", "matchday"] as const;
+export const NARRATIVE_EXPENSE_CATEGORIES = [
+  "facility",
+  "travel_medical",
+  "bonus",
+  "matchday_opex",
+] as const;
+
+/**
+ * 서사 이벤트의 하루 상한 — **주급 총액의 배수**.
+ *
+ * 절대 금액으로 잡으면 같은 £10M이 승격팀에겐 재정을 뒤집고 빅클럽에겐 푼돈이
+ * 된다. 주급 총액은 구단 규모를 가장 잘 대신하는 값이라(맨시티 £4M/주 vs
+ * 승격팀 £1M/주) 이벤트의 무게가 어느 구단에서나 비슷해진다.
+ *
+ * **건당이 아니라 하루 누적**이다 — 건당으로 막으면 같은 장면을 여러 번 나눠
+ * 불러서 얼마든지 넘길 수 있다.
+ */
+export const NARRATIVE_FINANCE_WAGE_LIMIT = 2;
+/** 이적 예산 지원·삭감의 하루 상한 (같은 주급 배수 자) — 예산은 매출보다 큰 단위로 움직인다 */
+export const BUDGET_ADJUST_WAGE_LIMIT = 10;
+
+/** 오늘 서사가 이미 움직인 금액 */
+function narrativeSpentToday(state: GameState): number {
+  return financeOf(state, state.userTeamId)
+    .ledger.filter((e) => e.date === state.date && e.source === "narrative")
+    .reduce((sum, e) => sum + e.amount, 0);
+}
+
+export interface FinanceEventInput {
+  kind: "income" | "expense";
+  category: FinanceCategory;
+  amount: number;
+  note: string;
+}
+
+/**
+ * 서사에서 벌어진 매출·비용을 장부에 남긴다.
+ *
+ * 원장에 들어가므로 월간 보고서·급여 비중·PSR에 그대로 전파된다 — 경기가 재밌어서
+ * 굿즈가 팔린 것도, 시설 사고로 돈이 나간 것도 3시즌 뒤 PSR 여유에 남는다.
+ */
+export function applyFinanceEvent(
+  state: GameState,
+  input: FinanceEventInput,
+): { ok: boolean; message: string } {
+  const allowed: readonly string[] =
+    input.kind === "income" ? NARRATIVE_INCOME_CATEGORIES : NARRATIVE_EXPENSE_CATEGORIES;
+  if (!allowed.includes(input.category)) {
+    return {
+      ok: false,
+      message: `${input.kind === "income" ? "수입" : "지출"}으로 쓸 수 없는 항목입니다: ${input.category} (가능: ${allowed.join(", ")})`,
+    };
+  }
+
+  const cap = weeklyWagesOf(state, state.userTeamId) * NARRATIVE_FINANCE_WAGE_LIMIT;
+  const spent = narrativeSpentToday(state);
+  const amount = Math.max(0, Math.round(input.amount));
+  if (amount === 0) return { ok: false, message: "금액이 0입니다" };
+  if (spent + amount > cap) {
+    return {
+      ok: false,
+      message: `하루 한도를 넘습니다 — 오늘 ${money(spent)} 기록됨, 한도 ${money(cap)}`,
+    };
+  }
+
+  recordFinance(state, state.userTeamId, {
+    kind: input.kind,
+    category: input.category,
+    label: input.note,
+    amount,
+    source: "narrative",
+  });
+  pushNarrative(state, `${input.note} (${input.kind === "income" ? "+" : "-"}${money(amount)})`, 3);
+  return {
+    ok: true,
+    message: `${FINANCE_CATEGORY_KO[input.category]} ${input.kind === "income" ? "수입" : "지출"} ${money(amount)} — ${input.note}`,
+  };
+}
+
+/**
+ * 구단주·보드가 이적 예산을 조정한다 — **손익이 아니라 자본이다.**
+ *
+ * 원장에 넣지 않는 이유가 있다. 구단주 출자는 실제 회계에서도 매출이 아니라
+ * 자본 투입이라 PSR 계산에 들어가지 않는다. 원장에 수입으로 적으면 "구단주가
+ * 돈을 넣으면 PSR이 풀린다"가 되어 재정 규정이 통째로 무력해진다.
+ * PSR로 동결된 예산은 돈이 아니라 규정의 문제이므로 증액으로 풀 수 없다.
+ */
+export function adjustTransferBudget(
+  state: GameState,
+  input: { delta: number; note: string },
+): { ok: boolean; message: string } {
+  const finance = financeOf(state, state.userTeamId);
+  const delta = Math.round(input.delta);
+  if (delta === 0) return { ok: false, message: "금액이 0입니다" };
+  if (delta > 0 && finance.budgetFrozen) {
+    return { ok: false, message: "PSR 위반으로 이적 예산이 동결돼 있습니다 — 매각이 먼저입니다" };
+  }
+
+  /**
+   * **하루 누적**이다. 건당으로 막으면 같은 장면을 여러 번 나눠 불러 얼마든지
+   * 넘길 수 있다 — 주석은 "하루 상한"이라 적혀 있었는데 코드는 건당이었다.
+   * 이 도구로 **이적료를 흉내 내는 길**을 막는 것이 이 한도의 실제 일이다:
+   * 매각 대금은 `accept_deal`이 원장을 거쳐 넣는다.
+   */
+  const cap = weeklyWagesOf(state, state.userTeamId) * BUDGET_ADJUST_WAGE_LIMIT;
+  const movedToday =
+    finance.budgetAdjusted?.date === state.date ? finance.budgetAdjusted.amount : 0;
+  if (movedToday + Math.abs(delta) > cap) {
+    return {
+      ok: false,
+      message:
+        `하루 한도를 넘습니다 — 오늘 ${money(movedToday)} 움직였고 한도는 ${money(cap)}입니다. ` +
+        `선수를 팔아 만든 돈은 이 도구가 아니라 매각(accept_deal)이 넣습니다`,
+    };
+  }
+
+  const before = finance.transferBudget;
+  finance.transferBudget = Math.max(0, before + delta);
+  const moved = finance.transferBudget - before;
+  finance.budgetAdjusted = { date: state.date, amount: movedToday + Math.abs(moved) };
+  pushNarrative(state, `${input.note} (이적 예산 ${moved > 0 ? "+" : ""}${money(moved)})`, 3);
+  return {
+    ok: true,
+    message: `이적 예산 ${moved > 0 ? "+" : "-"}${money(Math.abs(moved))} → ${money(finance.transferBudget)} — ${input.note}`,
+  };
+}
+
 // ── 조회 (GM 도구 · 오피스) ─────────────────────────────
 
 /**
@@ -977,10 +1143,7 @@ export function currentMonthSummary(state: GameState) {
  * 재정 조회 (GM `get_finance`) — 월간 보고서 또는 이번 달 잠정 집계.
  * 컨텍스트에 상시 넣지 않고 물어볼 때만 읽는다 (llm-io 3층 규약).
  */
-export function financeLookup(
-  state: GameState,
-  month?: string,
-): { ok: boolean; message: string } {
+export function financeLookup(state: GameState, month?: string): { ok: boolean; message: string } {
   const finance = financeOf(state, state.userTeamId);
   const lines: string[] = [];
   const report = month
@@ -992,7 +1155,9 @@ export function financeLookup(
   );
 
   if (month && !report) {
-    lines.push(`${month} 보고서가 없습니다 — 발행된 달: ${state.financeReports.map((r) => r.month).join(", ") || "없음"}`);
+    lines.push(
+      `${month} 보고서가 없습니다 — 발행된 달: ${state.financeReports.map((r) => r.month).join(", ") || "없음"}`,
+    );
   }
 
   if (report) {

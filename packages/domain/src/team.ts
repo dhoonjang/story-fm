@@ -12,6 +12,13 @@ export const GameTeamSchema = z.object({
    * 입력. 유저 팀은 MANAGER.attributes.tactics를 대신 사용한다.
    */
   aiManagerTacticsRating: z.number().int().min(0).max(99),
+  /**
+   * 현재 감독의 이름·부임일 — **경질과 선임이 있는 세계**의 최소 기록
+   * (`manager-market.ts`). 옛 세이브엔 없다: 이름이 없으면 화면이 이름을 말하지
+   * 않고, 부임일이 없으면 시즌 시작에 부임한 것으로 본다 (세이브 버전 유지).
+   */
+  managerName: z.string().min(1).optional(),
+  managerSince: z.string().optional(),
 });
 export type GameTeam = z.infer<typeof GameTeamSchema>;
 /** 관례상 짧은 별칭 */

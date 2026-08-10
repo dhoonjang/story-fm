@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PitchClaimKindSchema, PitchClaimSchema } from "./persuasion";
 
 /**
  * 기록 테이블 (v6) — 선수·팀·일정에 딸린 이력.
@@ -77,6 +78,13 @@ export const TransferWindowSchema = z.object({
   kind: z.enum(["summer", "winter"]),
   opensOn: DateString,
   closesOn: DateString,
+  /**
+   * 이 창이 적용되는 리그 — 없으면 **5대 리그 공통**(우리 협회)이다.
+   * 사우디·MLS는 창이 우리보다 늦게 닫히거나 아예 다른 시기에 열린다.
+   * 등록은 사는 쪽 협회 규정을 따르므로, 우리 창이 닫힌 뒤에도 그들은
+   * 우리 선수를 사 갈 수 있다 — 팔아도 대체 영입은 못 하는 상태가 된다.
+   */
+  leagueId: z.string().min(1).optional(),
 });
 export type TransferWindow = z.infer<typeof TransferWindowSchema>;
 
@@ -111,7 +119,12 @@ export type Transfer = z.infer<typeof TransferSchema>;
  * 수락 스킬이 TRANSFER·CONTRACT·재정을 쓰고 그때 `completed`가 된다.
  * (docs/design/transfers.md)
  */
-export const NegotiationKindSchema = z.enum(["buy", "sell", "renew"]);
+/**
+ * 협상의 방향. `loan`은 **임대 영입**(남의 선수를 빌려 온다), `loan_out`은
+ * **임대 내보내기**(우리 선수를 빌려준다). 둘 다 상대가 받아 줘야 성립하므로
+ * 같은 테이블을 탄다 — 부르기(recall)만 흥정이 아니라 우리 결정이다.
+ */
+export const NegotiationKindSchema = z.enum(["buy", "sell", "renew", "loan", "loan_out"]);
 export type NegotiationKind = z.infer<typeof NegotiationKindSchema>;
 
 export const NegotiationVerdictSchema = z.enum(["accept", "counter", "reject"]);
@@ -131,8 +144,34 @@ export const NegotiationRoundSchema = z.object({
   /** 상대의 판정 (them 라운드) */
   verdict: NegotiationVerdictSchema.nullable(),
   note: z.string().optional(),
+  /**
+   * 이 오퍼에 실린 설득 논거 — **감독이 실제로 한 말**이 note에 남는다.
+   * 판정하는 LLM이 읽어야 하므로 라운드에 붙인다 (구 세이브엔 없어 optional).
+   */
+  pitch: z.array(PitchClaimSchema).optional(),
 });
 export type NegotiationRound = z.infer<typeof NegotiationRoundSchema>;
+
+/**
+ * 메디컬 — **합의와 계약 사이에 놓인 하루.**
+ *
+ * 실제 이적은 구단끼리 합의한 날 끝나지 않는다. 선수가 병원에 가고, 결과가
+ * 나오고, 그다음에 발표한다. 이 표가 없으면 "오늘 합의 → 오늘 도장 → 오늘
+ * 기자회견"이 한 장면에 담겨 이적이 서류 한 장으로 읽힌다.
+ *
+ * `flagged`는 불합격이 아니라 **소견**이다 — 데려가는 쪽이 알고도 갈지 정한다.
+ * 판정은 `injuryProneness`·현재 부상·나이에서 결정적으로 나온다 (medical.ts).
+ */
+export const MedicalSchema = z.object({
+  /** 검진일 — 합의 다음 날 이후 */
+  onDate: DateString,
+  status: z.enum(["scheduled", "passed", "flagged"]),
+  /** 소견 — 사람이 읽는 한 줄 ("오른쪽 무릎 연골에 마모 소견") */
+  note: z.string().optional(),
+  /** 감독이 소견을 알고도 밀어붙였는가 — 원장에 남는다 */
+  overridden: z.boolean().optional(),
+});
+export type Medical = z.infer<typeof MedicalSchema>;
 
 export const NegotiationSchema = z.object({
   id: z.string().min(1),
@@ -145,11 +184,26 @@ export const NegotiationSchema = z.object({
   expiresOn: DateString,
   status: z.enum(["open", "agreed", "rejected", "expired", "completed"]),
   rounds: z.array(NegotiationRoundSchema),
+  /**
+   * 이 협상에서 **사실로 확인된** 설득 논거. 같은 이야기를 반복해도 다시
+   * 쳐주지 않기 위해 누적한다 (persuasion.ts). 구 세이브엔 없어 optional.
+   */
+  pitched: z.array(PitchClaimKindSchema).optional(),
+  /**
+   * 합의 뒤 잡힌 메디컬. 재계약은 갖지 않는다 — 팀을 옮기지 않으므로 검진할
+   * 일이 없다. 구 세이브엔 없어 optional (세이브 버전을 올리지 않는다).
+   */
+  medical: MedicalSchema.optional(),
 });
 export type Negotiation = z.infer<typeof NegotiationSchema>;
 
 // ── 성장 로그 ─────────────────────────────────────────
-export const GrowthSourceSchema = z.enum(["training", "match"]);
+/**
+ * 성장의 출처. `development`는 **코어의 월간 성장·쇠퇴** — 감독 팀 1군 밖의 선수
+ * (우리 2군 · 모든 타 팀)가 나이·잠재력·난수로 조금씩 움직이는 몫이다.
+ * `reserve`는 옛 2군 개발 프로그램의 출처로, 이전 세이브의 로그에만 남아 있다.
+ */
+export const GrowthSourceSchema = z.enum(["training", "match", "reserve", "development"]);
 export type GrowthSource = z.infer<typeof GrowthSourceSchema>;
 
 /** 성장 대상 — 능력치 6축+GK, 포지션 적응도(pos:CODE), 전술 적응도(tactical) */
@@ -174,8 +228,26 @@ export const SeasonStatSchema = z.object({
   teamId: z.string().min(1),
   apps: z.number().int().min(0),
   goals: z.number().int().min(0),
+  /** 도움 — 골 이벤트의 actors[1]. 구 세이브엔 없어 optional (SAVE_VERSION 유지) */
+  assists: z.number().int().min(0).optional(),
+  /**
+   * 경기 평점의 **합계**. 시즌 평점은 여기서 파생된다(`seasonRating`) —
+   * 평균을 저장하면 경기마다 재계산해야 하고 반올림 오차가 누적된다.
+   */
+  ratingSum: z.number().min(0).optional(),
 });
 export type SeasonStat = z.infer<typeof SeasonStatSchema>;
+
+/**
+ * 시즌 평균 평점 — 출전이 없으면 null(0.0과 "기록 없음"은 다르다).
+ * 경기당 평점은 engine/ratings.ts가 장부 사실로 결정적으로 매긴다.
+ */
+export function seasonRating(
+  stat: Pick<SeasonStat, "apps" | "ratingSum"> | null | undefined,
+): number | null {
+  if (!stat || stat.apps <= 0 || stat.ratingSum === undefined) return null;
+  return Math.round((stat.ratingSum / stat.apps) * 100) / 100;
+}
 
 // ── 스카우팅 ──────────────────────────────────────────
 /**
@@ -205,6 +277,61 @@ export const PlayerIssueSchema = z.object({
   since: DateString,
 });
 export type PlayerIssue = z.infer<typeof PlayerIssueSchema>;
+
+/**
+ * 정착 이벤트 — **감독이 새 영입에게 한 일**의 원장 (settling.ts).
+ *
+ * 정착 진행도는 원래 전부 파생이다(출전 명단·훈련 일정). 그런데 면담·팀토크는
+ * 어디에도 기록이 남지 않는 사실이라 파생할 원본이 없다 — 그래서 이것만 원장에
+ * 남긴다. 감독이 무엇을 해서 이 선수가 녹아들었는지가 근거로 남는다.
+ */
+export const SettlingEventSchema = z.object({
+  gamePlayerId: z.string().min(1),
+  date: DateString,
+  kind: z.enum(["talk", "team_talk", "captain"]),
+  /** 쌓인(또는 깎인) 크레딧 */
+  credit: z.number(),
+  note: z.string().optional(),
+});
+export type SettlingEvent = z.infer<typeof SettlingEventSchema>;
+
+/**
+ * 이적 리스트 등재 — **감독이 "이 선수는 팔겠다"고 시장에 알린 사실.**
+ *
+ * 예전엔 매각이 AI가 먼저 오퍼를 넣어야만 시작됐다(하루 8%). 감독이 팔기로
+ * 마음먹어도 할 수 있는 일이 없어서, GM이 2군 강등과 예산 증액으로 매각을
+ * 흉내 내는 일이 벌어졌다 — 이야기와 장부가 갈라진다.
+ *
+ * 등재는 **호가와 함께** 한다. 값을 부르는 것이 감독의 손잡이이기 때문이다 —
+ * 싸게 내놓으면 금방 팔리고, 비싸게 부르면 아무도 안 온다.
+ */
+export const TransferListingSchema = z.object({
+  gamePlayerId: z.string().min(1),
+  /** 감독이 부르는 값 */
+  askingPrice: z.number().min(0),
+  listedOn: DateString,
+  note: z.string().max(160).optional(),
+});
+export type TransferListing = z.infer<typeof TransferListingSchema>;
+
+/**
+ * 개인 훈련 프로그램 — **팀 훈련 위에 한 선수만 겨냥해 얹는 것.**
+ *
+ * `set_training`은 팀 전체 메뉴라 "이 선수의 결정력을 손보자", "풀백을 센터백으로
+ * 전향시키자" 같은 판단이 표현되지 않았다. 축(`axis`)은 훈련 결산(LLM)의 입력이
+ * 되고, 자리(`position`)는 **코어가 결정적으로** 적응도를 올린다 — 실전보다 느리게.
+ */
+export const PlayerTrainingSchema = z.object({
+  gamePlayerId: z.string().min(1),
+  /** 겨냥한 능력치 축 — 훈련 결산에 실린다 */
+  axis: z.string().min(1).optional(),
+  /** 배우는 자리 — 적응도가 훈련일마다 조금씩 오른다 */
+  position: z.string().min(1).optional(),
+  since: DateString,
+  /** 자리 훈련이 쌓은 훈련일 수 — 일정 수마다 적응도 +1 */
+  sessions: z.number().int().min(0).optional(),
+});
+export type PlayerTraining = z.infer<typeof PlayerTrainingSchema>;
 
 // ── 재정 ──────────────────────────────────────────────
 /**
@@ -285,6 +412,11 @@ export const LedgerEntrySchema = z.object({
     .optional(),
   /** 상각만 noncash — 현금흐름과 손익을 가른다. 없으면 cash */
   accounting: z.enum(["cash", "noncash"]).optional(),
+  /**
+   * 서사가 만든 항목 — GM의 apply_finance_event로 들어온 것만 표시된다.
+   * 코어가 공식으로 낸 항목(중계권·매치데이·주급)과 섞이면 하루 상한을 셀 수 없다.
+   */
+  source: z.literal("narrative").optional(),
 });
 export type LedgerEntry = z.infer<typeof LedgerEntrySchema>;
 
@@ -307,6 +439,12 @@ export const TeamFinanceSchema = z.object({
   prizesPaid: z.array(z.string()).optional(),
   /** 보드가 이적 예산을 동결했는가 (PSR 위반) */
   budgetFrozen: z.boolean().optional(),
+  /**
+   * `adjust_transfer_budget`이 **오늘** 움직인 금액의 합 (날짜 + 절대값).
+   * 한도는 하루 누적이라 어제 것과 섞이면 안 된다 — 원장에 남지 않는 자본
+   * 이동이라 되짚을 곳이 여기밖에 없다. 옛 세이브엔 없다(optional).
+   */
+  budgetAdjusted: z.object({ date: DateString, amount: z.number() }).optional(),
 });
 export type TeamFinance = z.infer<typeof TeamFinanceSchema>;
 

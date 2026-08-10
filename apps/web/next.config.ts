@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  /**
+   * 빌드 산출물 위치 — e2e는 `NEXT_DIST_DIR`로 따로 쓴다.
+   * 개발 서버와 e2e 서버가 같은 `.next`를 공유하면 한쪽이 재컴파일할 때 다른 쪽이
+   * 읽던 청크가 사라져(ENOENT / PageNotFoundError) 테스트가 무작위로 깨진다.
+   */
+  distDir: process.env.NEXT_DIST_DIR ?? ".next",
   // 워크스페이스 패키지는 TS 소스를 그대로 export 하므로 Next가 트랜스파일한다
   transpilePackages: [
     "@story-fm/domain",

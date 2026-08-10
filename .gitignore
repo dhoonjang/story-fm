@@ -8,6 +8,8 @@ coverage/
 
 # 빌드 산출물 — Next 빌드 캐시(수십 MB)와 TS 증분 정보. 재생성되므로 커밋하지 않는다.
 .next/
+# NEXT_DIST_DIR로 갈라 놓은 빌드 디렉터리 전부 (.next-e2e, 검증용 .next-scratchNNNN …)
+.next-*/
 *.tsbuildinfo
 .turbo/
 

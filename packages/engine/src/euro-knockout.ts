@@ -1,5 +1,5 @@
 import type { MatchRecord, MatchStage } from "@story-fm/domain";
-import { sortEntries } from "./calendar";
+import { addDays, sortEntries } from "./calendar";
 import {
   CUP_CATALOG,
   competitionShortName,
@@ -8,10 +8,12 @@ import {
   stageLabel,
   type CupCatalogEntry,
 } from "./data/cup-catalog";
+import { completeDraw, drawIsDue, scheduleDraw } from "./draw-schedule";
 import { knockoutDates } from "./europe";
 import { payLeaguePhasePrizes, payStagePrizes } from "./euro-prize";
 import { makeRng } from "./rng";
-import { playersOf, pushNarrative, teamName, teamShortName, type GameState } from "./state";
+import { shootout } from "./shootout";
+import { pushNarrative, teamName, teamShortName, type GameState } from "./state";
 import { computeStandings } from "./season";
 
 /**
@@ -53,45 +55,6 @@ export function euroLeaguePhaseDone(state: GameState, cupId: string): boolean {
       m.season === state.season && m.competitionId === cupId && (m.stage ?? "league") === "league",
   );
   return phase.length > 0 && phase.every((m) => m.result !== null);
-}
-
-/** 스쿼드 평균 OVR — 승부차기 가중치 (결정적) */
-function squadRating(state: GameState, teamId: string): number {
-  const squad = playersOf(state, teamId);
-  if (squad.length === 0) return 60;
-  const top = [...squad].sort((a, b) => b.attributes.overall - a.attributes.overall).slice(0, 11);
-  return top.reduce((s, p) => s + p.attributes.overall, 0) / top.length;
-}
-
-/**
- * 승부차기 — 5킥씩, 동점이면 서든데스. 성공 확률은 스쿼드 평균에서 나오되
- * 차이를 좁게 잡는다 (승부차기는 실력이 덜 갈리는 무대다).
- */
-function shootout(
-  state: GameState,
-  home: string,
-  away: string,
-  channel: string,
-): { home: number; away: number } {
-  const rng = makeRng(state.seed, `pens:${channel}`);
-  const rate = (teamId: string) => 0.62 + Math.min(0.18, (squadRating(state, teamId) - 60) / 200);
-  const rateHome = rate(home);
-  const rateAway = rate(away);
-  let h = 0;
-  let a = 0;
-  for (let kick = 0; kick < 5; kick++) {
-    if (rng() < rateHome) h += 1;
-    if (rng() < rateAway) a += 1;
-  }
-  let guard = 20;
-  while (h === a && guard-- > 0) {
-    const scoredHome = rng() < rateHome;
-    const scoredAway = rng() < rateAway;
-    if (scoredHome) h += 1;
-    if (scoredAway) a += 1;
-  }
-  if (h === a) h += 1; // 이론적 무한루프 방지 — 장부에 무승부를 남기지 않는다
-  return { home: h, away: a };
 }
 
 /**
@@ -294,9 +257,6 @@ export function advanceEuroKnockouts(state: GameState, digest: string[]): void {
       const existing = euroStageMatches(state, cup.id, stage);
       if (existing.length === 0) {
         const previous = i > 0 ? stages[i - 1]! : null;
-        if (previous && previousWinners) {
-          reportOurTie(state, cup, previous, previousWinners, digest);
-        }
         const pairs =
           stage === "playoff"
             ? playoffPairs(cup, seeds)
@@ -307,7 +267,23 @@ export function advanceEuroKnockouts(state: GameState, digest: string[]): void {
                 ? mainDrawPairs(state, cup, seeds, previousWinners)
                 : pairUp(previousWinners);
         if (pairs.length === 0) break;
+        // 추첨은 며칠 뒤 — 그 사이 감독은 달력에서 "누가 걸릴까"를 기다린다.
+        // 결승만 예외다: 준결승 승자 둘이 곧 대진이라 뽑을 게 없다.
+        if (stage === "final") {
+          if (previous && previousWinners) {
+            reportOurTie(state, cup, previous, previousWinners, digest);
+          }
+        } else {
+          // 예약이 새로 잡히는 순간에만 직전 라운드 결과를 보고한다 (중복 방지)
+          if (scheduleEuroDraw(state, cup, stage, pairs.flat(), digest)) {
+            if (previous && previousWinners) {
+              reportOurTie(state, cup, previous, previousWinners, digest);
+            }
+          }
+          if (!drawIsDue(state, cup.id, stage)) break;
+        }
         createStage(state, cup, stage, pairs, digest);
+        completeDraw(state, cup.id, stage);
         break; // 한 번에 한 단계만 — 다음 단계는 이 단계가 끝난 뒤
       }
       const pairCount = new Set(existing.map((m) => pairOf(m))).size;
@@ -320,6 +296,29 @@ export function advanceEuroKnockouts(state: GameState, digest: string[]): void {
       previousWinners = winners;
     }
   }
+}
+
+/** 대항전 라운드 사이 추첨 — 직전 라운드가 끝나고 며칠 뒤, 늦어도 1차전 전날 */
+const EURO_DRAW_LEAD_DAYS = 4;
+
+function scheduleEuroDraw(
+  state: GameState,
+  cup: CupCatalogEntry,
+  stage: MatchStage,
+  participants: string[],
+  digest: string[],
+): boolean {
+  const firstLeg = knockoutDates(state.season, stage)[0];
+  const latest = firstLeg ? addDays(firstLeg, -1) : addDays(state.date, EURO_DRAW_LEAD_DAYS);
+  const soonest = addDays(state.date, EURO_DRAW_LEAD_DAYS);
+  const date = soonest < latest ? soonest : latest;
+  const forUser = participants.includes(state.userTeamId);
+  const created = scheduleDraw(state, cup.id, stage, date, forUser);
+  if (created && forUser) {
+    const short = competitionShortName(cup.id);
+    digest.push(`🎲 ${short} ${stageLabel(stage, 1, false)} 대진 추첨 — ${date}`);
+  }
+  return created;
 }
 
 /** 우리 팀이 뛴 단계의 결과 보고 — 다음 단계 편성과 같은 시점에 한 번만 */

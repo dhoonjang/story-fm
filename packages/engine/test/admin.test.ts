@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { ATTRIBUTE_AXES, ageOf, naturalPositionOf } from "@story-fm/domain";
+import { ATTRIBUTE_AXES, ageOf, naturalPositionOf, roleFit } from "@story-fm/domain";
 import {
+  TEAM_CATALOG,
   adminAddCatalogPlayer,
   adminCatalog,
   adminRemoveCatalogPlayer,
@@ -38,7 +39,9 @@ afterEach(() => {
 });
 
 /** 어드민 추가 입력 — 15축을 전부 채워야 하므로 기본값 위에 덮어쓴다 */
-function addInput(over: Partial<CatalogPlayerInput> & Pick<CatalogPlayerInput, "nameKo" | "position">): CatalogPlayerInput {
+function addInput(
+  over: Partial<CatalogPlayerInput> & Pick<CatalogPlayerInput, "nameKo" | "position">,
+): CatalogPlayerInput {
   return {
     nameEn: over.nameKo,
     birthdate: "2005-01-01",
@@ -49,9 +52,9 @@ function addInput(over: Partial<CatalogPlayerInput> & Pick<CatalogPlayerInput, "
 }
 
 describe("카탈로그 조회", () => {
-  it("96팀 · 3,800명+ · 파생값(나이·OVR·주 포지션)을 함께 준다", () => {
+  it("전 클럽 · 3,800명+ · 파생값(나이·OVR·주 포지션)을 함께 준다", () => {
     const teams = adminCatalog();
-    expect(teams).toHaveLength(96);
+    expect(teams).toHaveLength(TEAM_CATALOG.length);
     expect(teams.reduce((s, t) => s + t.players.length, 0)).toBeGreaterThanOrEqual(3800);
     const row = teams[0]!.players[0]!;
     expect(row.age).toBe(ageOf(row.birthdate, CATALOG_AGE_REF));
@@ -84,7 +87,26 @@ describe("카탈로그 편집", () => {
     expect(playerCatalog().find((e) => e.id === target.id)?.pace).toBe(99);
   });
 
-  it("주 포지션을 바꾸면 목록에 반영되고 OVR 공식도 바뀐다", () => {
+  it("주급을 편집하면 새 게임의 계약에 그 값이 실린다", () => {
+    const target = adminCatalog().find((t) => t.teamId === "arsenal")!.players[0]!;
+    expect(adminUpdateCatalogPlayer(target.id, { weeklyWage: 123_000 }).ok).toBe(true);
+    expect(playerCatalog().find((e) => e.id === target.id)?.weeklyWage).toBe(123_000);
+
+    const game = createTestGame(7);
+    const contract = game.contracts.find((c) => c.gamePlayerId === target.id);
+    expect(contract?.weeklyWage).toBe(123_000);
+    // 음수는 반려된다
+    expect(adminUpdateCatalogPlayer(target.id, { weeklyWage: -1 }).ok).toBe(false);
+  });
+
+  it("주 포지션을 바꿔도 종합은 안 떨어진다 — 가장 잘 맞는 자리 기준이라", () => {
+    /**
+     * 종합은 **그 선수가 가장 잘 맞는 자리에서, 기본 역할로** 낸 값이다.
+     * 그래서 센터백에게 최전방을 주 포지션으로 찍어도 종합은 센터백 값을 유지한다 —
+     * 자리 표기 하나로 선수의 등급이 흔들리면 이적·라인업 판단이 통째로 어긋난다
+     * (시드의 주 포지션 표기는 출처마다 갈린다: EA는 윙어를 LM/RM으로 적는다).
+     * 실제로 최전방에 세웠을 때의 값은 `roleFit`이 따로 낸다.
+     */
     const df = adminCatalog()
       .flatMap((t) => t.players)
       .find((p) => p.position === "CB" || p.position === "RCB")!;
@@ -96,7 +118,10 @@ describe("카탈로그 편집", () => {
       .find((p) => p.id === df.id)!;
     expect(after.position).toBe("ST");
     expect(after.positions.filter((p) => p.isNatural)).toHaveLength(1);
-    expect(after.overall).not.toBe(before); // FW 공식으로 재산정
+    // 자리를 더해도 최댓값은 내려갈 수 없다
+    expect(after.overall).toBeGreaterThanOrEqual(before);
+    // 그리고 최전방 값으로 갈아치워지지도 않는다 — 센터백은 최전방이 더 낮다
+    expect(roleFit(after, "ST")).toBeLessThan(after.overall);
   });
 
   it("가능 포지션·적응도를 직접 편집할 수 있다", () => {
@@ -110,11 +135,22 @@ describe("카탈로그 편집", () => {
     expect(after.positions).toHaveLength(2);
     expect(naturalPositionOf(after).position).toBe("CM");
 
-    // 주 포지션이 2개면 반려
+    // 주 포지션은 **여럿일 수 있다** — 두 자리를 다 자기 자리로 삼는 선수가 있다
     expect(
       adminSetCatalogPositions(target.id, [
         { position: "CM", proficiency: 90, isNatural: true },
         { position: "AM", proficiency: 80, isNatural: true },
+      ]).ok,
+    ).toBe(true);
+    const both = playerCatalog().find((e) => e.id === target.id)!;
+    expect(both.positions.filter((p) => p.isNatural)).toHaveLength(2);
+    // 대표 자리는 적응도가 높은 쪽 (화면 한 칸·포지션군이 쓴다)
+    expect(naturalPositionOf(both).position).toBe("CM");
+    // 주 포지션이 하나도 없으면 반려 — 대표 자리를 못 정한다
+    expect(
+      adminSetCatalogPositions(target.id, [
+        { position: "CM", proficiency: 90, isNatural: false },
+        { position: "AM", proficiency: 80, isNatural: false },
       ]).ok,
     ).toBe(false);
   });
@@ -128,20 +164,23 @@ describe("카탈로그 편집", () => {
 
   it("새 선수를 추가하면 카탈로그가 늘어난다", () => {
     const before = playerCatalog().length;
-    const res = adminAddCatalogPlayer("arsenal", addInput({
-      nameKo: "김유망",
-      nameEn: "Kim Prospect",
-      birthdate: "2008-01-01",
-      position: "AM",
-      pace: 80,
-      finishing: 70,
-      passing: 78,
-      dribbling: 82,
-      tackling: 40,
-      strength: 60,
-      goalkeeping: 20,
-      potential: 88,
-    }));
+    const res = adminAddCatalogPlayer(
+      "arsenal",
+      addInput({
+        nameKo: "김유망",
+        nameEn: "Kim Prospect",
+        birthdate: "2008-01-01",
+        position: "AM",
+        pace: 80,
+        finishing: 70,
+        passing: 78,
+        dribbling: 82,
+        tackling: 40,
+        strength: 60,
+        goalkeeping: 20,
+        potential: 88,
+      }),
+    );
     expect(res.ok).toBe(true);
     expect(playerCatalog().length).toBe(before + 1);
     const added = playerCatalog().find((e) => e.id === res.playerId)!;
@@ -226,27 +265,30 @@ describe("게임 격리 — 카탈로그 편집은 새 게임에만 반영된다
   });
 
   it("카탈로그에 추가한 선수는 새 게임의 스쿼드에 들어온다", () => {
-    const res = adminAddCatalogPlayer("arsenal", addInput({
-      nameKo: "신규유망주",
-      nameEn: "New Prospect",
-      birthdate: "2007-05-05",
-      position: "ST",
-      pace: 85,
-      finishing: 80,
-      passing: 65,
-      dribbling: 82,
-      tackling: 35,
-      strength: 70,
-      goalkeeping: 22,
-      potential: 92,
-    }));
+    const res = adminAddCatalogPlayer(
+      "arsenal",
+      addInput({
+        nameKo: "신규유망주",
+        nameEn: "New Prospect",
+        birthdate: "2007-05-05",
+        position: "ST",
+        pace: 85,
+        finishing: 80,
+        passing: 65,
+        dribbling: 82,
+        tackling: 35,
+        strength: 70,
+        goalkeeping: 22,
+        potential: 92,
+      }),
+    );
     expect(res.ok).toBe(true);
     const game = createTestGame(33);
     const added = playersOf(game, "arsenal").find((p) => p.id === res.playerId);
     expect(added?.name).toBe("신규유망주");
     // 계약도 함께 생성된다 (인스턴스화 경로)
-    expect(game.contracts.some((c) => c.gamePlayerId === res.playerId && c.status === "active")).toBe(
-      true,
-    );
+    expect(
+      game.contracts.some((c) => c.gamePlayerId === res.playerId && c.status === "active"),
+    ).toBe(true);
   });
 });

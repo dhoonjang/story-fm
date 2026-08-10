@@ -1,7 +1,40 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
-import type { ChatTurn, ToolCallRecord } from "@story-fm/engine";
+import type { CardMark, ChatTurn, GoalMark, ToolCallRecord } from "@story-fm/engine";
+import { stampOfHeader } from "../lib/scene-stamp";
+import { movedToRail } from "../lib/panel-hints";
+import { weaveTurn } from "../lib/turn-pieces";
+import { BROADCAST_SPEAKER, normalizeSpeaker } from "@story-fm/domain";
+import type { ScoutReportCard } from "@story-fm/domain";
+import { SKILL_LABEL } from "@/lib/skill-label";
+import type { SpeakerKind, SpeakerRole } from "@story-fm/engine";
+import {
+  IconBroadcast,
+  IconCaptain,
+  IconCoach,
+  IconJersey,
+  IconOwner,
+  IconMatch,
+  IconPerson,
+  IconReporter,
+} from "@/components/icons";
+
+/**
+ * 자리 → 아이콘 — **모든 화자가 하나씩 갖는다.**
+ *
+ * 이름만으로는 누가 코치고 누가 선수인지 매번 읽어야 안다. 아이콘이 앞에 서면
+ * 대화를 훑을 때 자리가 먼저 눈에 든다. 세이브가 자리를 모르는 화자(기자·에이전트·
+ * 남의 팀 사람)에는 **사람 아이콘**이 선다 — 틀린 직책을 다느니 "누군가 말한다"까지만
+ * 말한다. 자리는 화면이 추측하지 않는다: `speakerRoles`가 코어에서 정해 실어 보낸다.
+ */
+const KIND_ICON: Record<SpeakerKind, () => React.ReactElement> = {
+  head_coach: IconCoach,
+  owner: IconOwner,
+  reporter: IconReporter,
+  captain: IconCaptain,
+  player: IconJersey,
+};
 
 /**
  * *연출* 구간을 <em>으로 렌더.
@@ -19,73 +52,362 @@ function renderStaging(text: string) {
   });
 }
 
-/** 모델 턴 한 줄 — @화자 문법 파싱 (overview §2.1) */
-function ModelLine({ line }: { line: string }) {
-  const match = line.match(/^@([^:]*):\s?(.*)$/u);
-  if (!match) {
-    return <div className="line">{renderStaging(line)}</div>;
+/**
+ * 한 화자의 연속 발화 — 파싱된 줄을 말한 사람 단위로 묶은 것.
+ * `speaker === ""`이면 화자 없는 내레이션이다.
+ */
+interface Utterance {
+  speaker: string;
+  lines: string[];
+}
+
+/**
+ * @화자 문법을 화자 단위로 묶는다 (overview §2.1).
+ *
+ * 줄마다 이름을 다시 적으면 **대사보다 이름이 먼저 눈에 들어온다.** 대본이 그렇듯
+ * 이어 말하는 동안은 이름을 한 번만 적고 대사를 아래로 잇는다 — 그래야 대사의
+ * 시작점이 한 줄로 맞아 눈이 흐르고, 누가 말하는지도 계속 분명하다.
+ */
+function groupUtterances(lines: string[]): Utterance[] {
+  const groups: Utterance[] = [];
+  for (const line of lines) {
+    const match = line.match(/^@([^:]*):\s?(.*)$/u);
+    const speaker = match ? (match[1] ?? "") : "";
+    const content = match ? (match[2] ?? "") : line;
+    const last = groups[groups.length - 1];
+    // 화자가 있는 줄만 잇는다 — 내레이션은 저마다 독립된 장면 지문이다
+    if (last && speaker !== "" && last.speaker === speaker) last.lines.push(content);
+    else groups.push({ speaker, lines: [content] });
   }
-  const speaker = match[1] ?? "";
-  const content = match[2] ?? "";
-  if (speaker === "") {
-    return <div className="line narration">{renderStaging(content)}</div>;
-  }
-  const isBroadcast = speaker === "중계";
+  return groups;
+}
+
+/** 화자 없는 줄 — 장면 지문 */
+function NarrationLines({ lines }: { lines: string[] }) {
   return (
-    <div className={`line${isBroadcast ? " broadcast" : ""}`}>
-      <span className="speaker">{speaker}</span>
-      {renderStaging(content)}
+    <>
+      {lines.map((content, i) => (
+        <div className="line narration" key={i}>
+          {renderStaging(content)}
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** 한 사람의 발화 묶음 — 이름은 머리에 한 번, 대사는 그 아래로 */
+function UtteranceBlock({
+  utterance,
+  roles,
+}: {
+  utterance: Utterance;
+  roles?: Record<string, SpeakerRole>;
+}) {
+  const { speaker, lines } = utterance;
+  if (speaker === "") return <NarrationLines lines={lines} />;
+  const isBroadcast = speaker === BROADCAST_SPEAKER;
+  // 직책은 모델이 아니라 세이브가 안다 — 이름만 맞으면 어떤 턴에서도 함께 보인다
+  const role = roles?.[normalizeSpeaker(speaker)];
+  const Icon = isBroadcast ? IconBroadcast : role ? KIND_ICON[role.kind] : IconPerson;
+  return (
+    <div className={`say${isBroadcast ? " broadcast" : ""}`}>
+      <div className="say-who">
+        <span className="speaker-icon" aria-hidden>
+          <Icon />
+        </span>
+        <span className="speaker">{speaker}</span>
+        {/**
+         * 직함은 **칩**이다 — 괄호로 묶으면 이름과 같은 줄의 같은 글자라서
+         * 어디까지가 이름인지 눈이 한 번 더 짚는다. 테두리가 그 경계를 대신
+         * 말하면 이름만 읽고 지나갈 수 있고, 필요할 때만 직함이 눈에 든다.
+         */}
+        {role?.label && <span className="speaker-role">{role.label}</span>}
+      </div>
+      {lines.map((content, i) => (
+        <div className="line" key={i}>
+          {renderStaging(content)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * 골 카드 — **판을 뒤집은 사실을 문단 밖으로 꺼내 세운다.**
+ *
+ * 골은 경기에서 유일하게 결과를 바꾸는 사건인데, 중계 문단 한복판에 문장으로만
+ * 남으면 다음 턴 두어 개에 밀려 스크롤에 묻힌다. 감독이 나중에 위로 훑을 때
+ * 눈이 걸려야 하는 자리이므로 **줄 하나를 통째로** 준다.
+ *
+ * 카드의 내용은 전부 장부에서 온 사실이다(`ChatTurn.goals`) — 중계 문장을
+ * 되읽어 만들지 않는다. 우리 골만 강조색을 갖고 상대 골은 가라앉는다:
+ * 둘을 같은 색으로 칠하면 스코어를 읽기 전에는 누가 넣었는지 알 수 없다.
+ */
+function GoalCard({ goal }: { goal: GoalMark }) {
+  return (
+    <div className={`goal-card${goal.ours ? " ours" : ""}`} data-testid="goal-card">
+      <span className="goal-ball" aria-hidden>
+        <IconMatch size={17} />
+      </span>
+      <b className="goal-minute">{goal.minute}′</b>
+      <span className="goal-scorer">{goal.scorer}</span>
+      {goal.assist && <span className="goal-assist">도움 {goal.assist}</span>}
+      <span className="goal-score">
+        {goal.team} {goal.score.home} : {goal.score.away}
+      </span>
     </div>
   );
 }
 
 /** 스킬 칩 — 클릭하면 호출 파라미터·결과를 펼쳐 보여준다 */
+/**
+ * 스킬 칩 — **접힌 채로는 이름과 결, 펼치면 정돈된 상세.**
+ *
+ * 이름을 그대로 쓰면(`set_player_tactic`) 감독은 자기가 아는 말이 아닌 것을 읽는다.
+ * 사람이 읽는 이름은 스킬 카탈로그가 이미 갖고 있으므로 그걸 쓴다.
+ *
+ * `tone`이 있는 칩(면담·팀토크·기자회견)은 **펼치지 않아도 결이 보인다** — 잘
+ * 풀렸는지는 알아야 하지만 사기 ±N을 늘 세우면 대화가 숫자로 읽힌다.
+ */
 function ToolChip({ call }: { call: ToolCallRecord }) {
   const [open, setOpen] = useState(false);
+  const label = SKILL_LABEL[call.name] ?? call.name;
+  const tone = call.tone ? ` ${call.tone}` : "";
   return (
     <span className="tool-chip-wrap">
       <button
-        className={`tool-chip${open ? " open" : ""}`}
+        className={`tool-chip${open ? " open" : ""}${tone}`}
         onClick={() => setOpen((o) => !o)}
         data-testid={`tool-${call.name}`}
-        title="클릭하면 상세를 봅니다"
+        aria-expanded={open}
+        title={label}
       >
-        ⚙ {call.name}
+        {label}
       </button>
       {open && (
         <div className="tool-detail" data-testid={`tool-detail-${call.name}`}>
-          <div className="tool-detail-summary">{call.summary}</div>
-          {call.input !== undefined && (
-            <pre className="tool-detail-input">{JSON.stringify(call.input, null, 2)}</pre>
-          )}
+          <ToolDetail call={call} />
         </div>
       )}
     </span>
   );
 }
 
+/**
+ * 칩을 펼친 속 — **줄글을 항목으로 편다.**
+ *
+ * 스킬 결과는 `A · B · C` 꼴로 붙여 쓴 한 줄이다(코어가 그렇게 만든다). 그대로
+ * 두면 읽기 힘들고 무엇이 값이고 무엇이 설명인지 구분되지 않는다. 가운뎃점으로
+ * 끊어 항목으로 세우고, `이름 값` 꼴이면 이름을 흐리게 값을 또렷하게 나눈다.
+ *
+ * 입력(JSON)은 더 이상 그리지 않는다 — 감독이 읽을 것이 아니라 디버깅용이었고,
+ * 상세가 정돈된 뒤로는 잡음이다.
+ */
+function ToolDetail({ call }: { call: ToolCallRecord }) {
+  const lines = call.summary
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  return (
+    <>
+      {lines.map((line, i) => (
+        <div className="tool-lines" key={i}>
+          {line
+            .split(" · ")
+            .map((part) => part.trim())
+            .filter((p) => p.length > 0)
+            .map((part, j) => (
+              <span className="tool-item" key={j}>
+                {splitValue(part)}
+              </span>
+            ))}
+        </div>
+      ))}
+    </>
+  );
+}
+
+/**
+ * `사기 +4` 처럼 **이름과 값**으로 갈리면 나눠 그린다.
+ * 값이 앞에 오는 문장(`불만 해소`)은 그대로 둔다 — 억지로 쪼개면 뜻이 깨진다.
+ */
+function splitValue(part: string) {
+  const m = /^(.*?)\s+([+-]?[\d.]+%?|[+-]\d+)$/u.exec(part);
+  if (!m) return part;
+  return (
+    <>
+      <em>{m[1]}</em>
+      <b>{m[2]}</b>
+    </>
+  );
+}
+
+/**
+ * 경고·퇴장 — **다음 판단의 입력이라 문단 밖에 선다.**
+ *
+ * 골과 같은 자리를 쓰되 색과 모양이 다르다. 경고를 받은 선수를 계속 두느냐 빼느냐가
+ * 곧 교체 결정인데, 중계 문단 한복판에 문장으로만 남으면 두어 턴 뒤 스크롤에
+ * 묻힌다. 그때 감독은 "누가 경고였지"를 위로 훑어 찾아야 한다.
+ *
+ * 우리 선수만 강조된다 — 상대의 경고는 알아 두면 좋은 정보지만 **내가 손볼 자리**는
+ * 아니다. 두 번째 경고로 나가는 것과 한 번에 나가는 것은 이야기가 다르므로 갈라 적는다.
+ */
+function BookingCard({ card }: { card: CardMark }) {
+  const label =
+    card.kind === "yellow" ? "경고" : card.kind === "second_yellow" ? "경고 누적 퇴장" : "퇴장";
+  return (
+    <div
+      className={`booking-card ${card.kind}${card.ours ? " ours" : ""}`}
+      data-testid="booking-card"
+    >
+      <span className="booking-mark" aria-hidden />
+      <b className="booking-minute">{card.minute}′</b>
+      <span className="booking-player">{card.player}</span>
+      <span className="booking-kind">{label}</span>
+      <span className="booking-team">{card.team}</span>
+    </div>
+  );
+}
+
+const money = (won: number) => `£${(won / 1_000_000).toFixed(1)}M`;
+const wage = (won: number) => `£${Math.round(won / 1_000)}k`;
+
+/**
+ * 스카우팅 보고서 — **며칠을 기다려 얻은 것이므로 한 장으로 편다.**
+ *
+ * 예전엔 "보고서 도착" 한 줄이 다이제스트에 묻혀 화면에 뜨지도 않았고, 보러
+ * 가려면 선수 검색을 다시 해야 했다. 한 번 읽고 넘어갈 정보가 아니다 —
+ * 능력치·주발·잠재력·몸값이 한자리에 있어야 "지금 지를까, 더 볼까"가 판단된다.
+ *
+ * **안개는 모양으로 드러난다** — 숫자를 단정할 수 없는 축(분석형)은 흐리게 두고
+ * 물음표를 붙인다. 또렷한 숫자로 그리면 감독이 그걸 사실로 읽는다.
+ */
+function ScoutReport({ report: r }: { report: ScoutReportCard }) {
+  const groups = [...new Set(r.attributes.map((a) => a.group))];
+  return (
+    <div className="scout-report" data-testid="scout-report">
+      <div className="sr-head">
+        <span className="sr-badge">스카우팅 보고서</span>
+        <b className="sr-name">{r.name}</b>
+        <span className="sr-meta">
+          {r.team} · {r.age}세 · {r.position}
+        </span>
+        <span className="sr-ovr" title="관측된 종합">
+          {r.overall}
+        </span>
+      </div>
+
+      <div className="sr-facts">
+        <span>
+          <em>잠재력</em>
+          <b>{r.potential ? `${r.potential.low}~${r.potential.high}` : "미지"}</b>
+        </span>
+        <span>
+          <em>주발</em>
+          <b>
+            {r.foot.left >= r.foot.right ? "왼발" : "오른발"} {r.foot.left}/{r.foot.right}
+          </b>
+        </span>
+        {r.height !== null && (
+          <span>
+            <em>신체</em>
+            <b>
+              {r.height}cm{r.weight !== null && ` ${r.weight}kg`}
+            </b>
+          </span>
+        )}
+        <span>
+          <em>시장가</em>
+          <b>{money(r.marketValue)}</b>
+        </span>
+        <span>
+          <em>기대 주급</em>
+          <b>{wage(r.wageExpectation)}</b>
+        </span>
+        {r.contractUntil && (
+          <span>
+            <em>계약</em>
+            <b>{r.contractUntil}</b>
+          </span>
+        )}
+      </div>
+
+      <div className="sr-positions">
+        {r.positions.map((p) => (
+          <span className={`sr-pos${p.natural ? " natural" : ""}`} key={p.position}>
+            {p.position}
+            <i>{p.proficiency}</i>
+          </span>
+        ))}
+      </div>
+
+      {groups.map((group) => (
+        <div className="sr-group" key={group}>
+          <div className="sr-group-name">{group}</div>
+          <div className="sr-axes">
+            {r.attributes
+              .filter((a) => a.group === group)
+              .map((a) => (
+                <span className={`sr-axis${a.margin > 0 ? " fuzzy" : ""}`} key={a.key}>
+                  <em>{a.ko}</em>
+                  <b>
+                    {a.value}
+                    {/**
+                     * 흐림은 **정도로** 보인다 — 스카우팅을 마쳐도 관측형 ±1 ·
+                     * 분석형 ±3이 남는다. 단정/추정 둘로만 그리면 "리포트를 받은
+                     * 선수"와 "소문으로만 아는 선수"가 같아 보인다.
+                     */}
+                    {a.margin > 0 && <i>±{a.margin}</i>}
+                  </b>
+                </span>
+              ))}
+          </div>
+        </div>
+      ))}
+
+      <div className="sr-note">{r.note}</div>
+    </div>
+  );
+}
+
 /** 텍스트 속 선수 id → 이름 (스트리밍 델타에 id가 흘러든 경우의 안전망) */
+/** 선수 id처럼 생긴 토큰 — 사전에 없으면 그대로 둔다 (`store.ts`와 같은 규칙) */
+const ID_LIKE = /[a-z][a-z0-9]*(?:-[a-z0-9]+)+/g;
+
+/**
+ * 서사에 흘러든 선수 id를 이름으로.
+ *
+ * 예전엔 **사전의 모든 키를 순회**하며 `includes`를 돌렸다. 사전이 전 리그
+ * 5,725명이던 시절엔 턴 하나를 그리는 데 5,725번의 문자열 검색이 들었고,
+ * 그게 턴 수만큼 곱해졌다. 텍스트에서 id 모양을 찾아 사전을 조회하면
+ * 사전 크기와 무관하게 텍스트 길이에 비례한다.
+ */
 function humanize(text: string, names?: Record<string, string>): string {
   if (!names || !text.includes("-")) return text;
-  let out = text;
-  for (const id of Object.keys(names)) {
-    if (out.includes(id)) out = out.split(id).join(names[id] ?? id);
-  }
-  return out;
+  return text.replace(ID_LIKE, (token) => names[token] ?? token);
 }
+
+export { partOfDayStamp, turnStamp } from "../lib/scene-stamp";
 
 export function ChatTurnView({
   turn,
   streaming = false,
   playerNames,
+  speakerRoles,
+  prevStamp = null,
 }: {
   turn: ChatTurn;
   /** 스트리밍 중인 미완성 턴 — 마지막 미완성 줄을 보류해 파싱 깨짐 방지 */
   streaming?: boolean;
   playerNames?: Record<string, string>;
+  /** 화자 이름→직책 — `스티브 홀랜드 (수석코치)`처럼 함께 보여 준다 */
+  speakerRoles?: Record<string, SpeakerRole>;
+  /** 바로 앞 모델 턴의 시각 — 같으면 다시 적지 않는다 */
+  prevStamp?: string | null;
 }) {
   const text = useMemo(() => humanize(turn.text, playerNames), [turn.text, playerNames]);
 
+  // 감독의 말은 오른쪽 말풍선이라 그 자체로 갈린다 — 구간 표시는 모델 턴이 맡는다
   if (turn.role === "user") {
     return <div className="turn-user">{turn.text}</div>;
   }
@@ -97,20 +419,90 @@ export function ChatTurnView({
     if (/^@[^:]*$/u.test(last)) lines = lines.slice(0, -1);
   }
 
+  /**
+   * 첫 줄의 시점 헤더 — 서버가 저장 전에 걷어내지만, **스트리밍 중에는 그대로
+   * 흘러온다.** 여기서 떼어 시각 표시로 세우면 장면이 열릴 때 언제인지가 먼저 보인다.
+   */
+  const head = lines[0]?.trim() ?? "";
+  const stamp = stampOfHeader(head);
+  if (stamp !== null) lines = lines.slice(1);
+
+  /**
+   * 시각은 **바뀔 때만** 선다 — 같은 값이 턴마다 반복되면 시간이 흐른다는 신호가
+   * 오히려 죽는다. 이 선이 곧 장면의 경계다. 눈금은 **때**라(`partOfDayStamp`)
+   * 오전 내내 벌어진 장면들은 한 덩어리로 묶이고, 오후로 넘어갈 때 다시 선다.
+   * 정확한 시각은 상단 띠가 갖는다 — 같은 화면에 시계를 둘 두지 않는다.
+   */
+  const showStamp = stamp !== null && stamp !== prevStamp;
+  /**
+   * 채팅에 세울 칩 — **볼 화면이 있는 것은 레일이 알린다** (`movedToRail`).
+   *
+   * 라인업·훈련·재정처럼 장부가 바뀐 일을 채팅에도 칩으로 세우면 같은 사실이 두
+   * 곳에 나고, 무대의 주인이 서사에서 조작 로그로 넘어간다. 여기 남는 것은 **갈
+   * 화면이 없는 것들**이다 — 대화(면담·팀토크·기자회견), 진행 중인 협상,
+   * 스카우트 파견.
+   *
+   * `silent`은 스킬이 아니라 코어가 한 일이다(시계 이동).
+   * ⚠️ 이름 비교가 함께 있는 건 **이미 저장된 턴** 때문이다. 표식이 없던 시절의
+   * 기록에는 이름밖에 없어서, 그것만으로는 진행 중인 세이브에서 유령 스킬이
+   * 계속 보인다. 새 기록은 `silent`로 걸러지므로 이 목록은 자라지 않는다.
+   */
+  const shownCalls = turn.toolCalls.filter(
+    (call) =>
+      !call.silent &&
+      !movedToRail(call.name) &&
+      call.name !== "시간 경과" &&
+      call.name !== "advance_time",
+  );
+
+  /**
+   * 표시는 **벌어진 자리**에 선다 — 칩은 호출 시점의 줄 수, 골·경고는 분으로.
+   * 자리를 모르는 기록(옛 세이브)은 예전처럼 맨 앞이다.
+   * `dropped`는 시각 표시로 떼어 낸 헤더 한 줄 — 칩의 줄 수는 그것까지 세고 저장된다.
+   */
+  const pieces = weaveTurn(lines, {
+    goals: turn.goals,
+    cards: turn.cards,
+    calls: shownCalls,
+    dropped: stamp !== null ? 1 : 0,
+  });
+
   return (
-    <div className={`turn-model${streaming ? " streaming" : ""}`} data-testid="model-turn">
-      {turn.toolCalls.length > 0 && (
-        <div className="tool-chips">
-          {turn.toolCalls.map((call, i) => (
-            <ToolChip call={call} key={i} />
-          ))}
+    <div
+      className={`turn-model${streaming ? " streaming" : ""}${turn.inMatch === true ? " in-match" : ""}`}
+      data-testid="model-turn"
+    >
+      {showStamp && (
+        <div className="scene-stamp" data-testid="scene-stamp">
+          <span>{stamp}</span>
         </div>
       )}
-      <div>
-        {lines.map((line, i) => (
-          <ModelLine key={i} line={line} />
-        ))}
-      </div>
+      {pieces.map((piece, i) => {
+        if (!piece.mark) {
+          return (
+            <div className="says" key={`s${i}`}>
+              {groupUtterances(piece.lines).map((utterance, j) => (
+                <UtteranceBlock key={j} utterance={utterance} roles={speakerRoles} />
+              ))}
+            </div>
+          );
+        }
+        const mark = piece.mark;
+        if (mark.kind === "goal") return <GoalCard goal={mark.goal} key={mark.key} />;
+        if (mark.kind === "card") return <BookingCard card={mark.card} key={mark.key} />;
+        // 같은 자리에서 연달아 불린 스킬은 한 줄에 나란히 — 칩마다 문단을 끊지 않는다
+        return (
+          <div className="tool-chips" key={mark.key}>
+            {mark.calls.map((call, j) => (
+              <ToolChip call={call} key={j} />
+            ))}
+          </div>
+        );
+      })}
+      {/* 보고서는 대화 뒤 — 서류는 "이런 게 왔습니다" 다음에 놓인다 */}
+      {turn.reports?.map((report) => (
+        <ScoutReport report={report} key={report.playerId} />
+      ))}
     </div>
   );
 }

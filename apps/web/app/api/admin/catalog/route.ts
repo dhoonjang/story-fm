@@ -32,6 +32,8 @@ const AddSchema = z.object({
   // 능력치 15축 — 도메인 상수에서 펼친다
   ...(Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, attr])) as Record<string, typeof attr>),
   potential: attr,
+  /** 실제 주급 (£/주) — 비우면 OVR 공식으로 어림한다 */
+  weeklyWage: z.number().int().min(0).max(2_000_000).optional(),
 });
 
 /** 카탈로그에 새 선수 추가 */

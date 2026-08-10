@@ -47,6 +47,20 @@ function storedMessages(history: { messages: unknown[] }): Anthropic.MessagePara
 
 const tierConfig = { provider: "anthropic" as const, model: "test-model", maxTokens: 1024 };
 
+describe("AnthropicGameLLM 요청 파라미터", () => {
+  it("사고를 끄고 출력 상한을 티어 값으로 보낸다", async () => {
+    const stub = makeStubClient([endTurn]);
+    const llm = new AnthropicGameLLM(tierConfig, stub);
+    await llm.runTurn({ system: "sys", history: [], user: "안녕" });
+
+    const params = lastParams(stub);
+    // 사고는 끈다 — 상한(max_tokens)은 사고와 본문을 함께 덮으므로,
+    // 켜 두면 본문이 예산을 잃고 문장 한복판에서 잘린다
+    expect(params.thinking).toEqual({ type: "disabled" });
+    expect(params.max_tokens).toBe(tierConfig.maxTokens);
+  });
+});
+
 describe("AnthropicGameLLM tool 루프", () => {
   it("검증 실패 시 is_error를 돌려주고, 수정 재기록을 받아들인다", async () => {
     const stub = makeStubClient([

@@ -11,6 +11,7 @@
  * 하위 리그를 추가하면 아약스·벤피카·셀틱 같은 실제 참가 팀으로 36팀을 채운다.
  */
 import type { MatchStage } from "@story-fm/domain";
+import { domesticCupById, domesticStageLabel, isDomesticCup } from "./domestic-cup-catalog";
 import { leagueName } from "./league-catalog";
 
 export interface CupCatalogEntry {
@@ -117,17 +118,31 @@ export function cupCatalogById(id: string): CupCatalogEntry | null {
   return BY_ID.get(id) ?? null;
 }
 
-export function isCup(competitionId: string): boolean {
+/** 유럽 대항전인가 — 유럽 원정비·리그 페이즈 순위표처럼 **대항전 고유**의 판단에 쓴다 */
+export function isEuroCup(competitionId: string): boolean {
   return BY_ID.has(competitionId);
+}
+
+/** 컵인가 (유럽 대항전 + 국내 컵) — "리그가 아니다"를 물을 때 쓴다 */
+export function isCup(competitionId: string): boolean {
+  return BY_ID.has(competitionId) || isDomesticCup(competitionId);
 }
 
 /** 대회 표시명 — 리그든 컵이든 competitionId 하나로 이름을 얻는다 */
 export function competitionName(competitionId: string): string {
-  return BY_ID.get(competitionId)?.name ?? leagueName(competitionId);
+  return (
+    BY_ID.get(competitionId)?.name ??
+    domesticCupById(competitionId)?.name ??
+    leagueName(competitionId)
+  );
 }
 
 export function competitionShortName(competitionId: string): string {
-  return BY_ID.get(competitionId)?.short ?? leagueName(competitionId);
+  return (
+    BY_ID.get(competitionId)?.short ??
+    domesticCupById(competitionId)?.short ??
+    leagueName(competitionId)
+  );
 }
 
 /** 본선 대진 수 — 직행 + 플레이오프 승자 */
@@ -152,6 +167,7 @@ export function knockoutStages(cup: CupCatalogEntry): MatchStage[] {
 const STAGE_KO: Record<MatchStage, string> = {
   league: "리그 페이즈",
   playoff: "플레이오프",
+  r32: "1라운드",
   r16: "16강",
   qf: "8강",
   sf: "준결승",
@@ -163,4 +179,31 @@ export function stageLabel(stage: MatchStage, round = 1, twoLegged = true): stri
   if (stage === "league") return `R${round}`;
   if (stage === "final" || !twoLegged) return STAGE_KO[stage];
   return `${STAGE_KO[stage]} ${round}차전`;
+}
+
+/**
+ * 대회에 맞는 단계 표기 — 국내 컵은 대회마다 2차전제 단계가 달라서
+ * (리그컵·코파는 준결승만) 대회를 알아야 "1차전"을 붙일지 정할 수 있다.
+ * 리그 경기(`stage` 없음)는 `R3`처럼 라운드 번호가 곧 표기다.
+ */
+export function competitionStageLabel(
+  competitionId: string,
+  stage: MatchStage,
+  round = 1,
+): string {
+  const domestic = domesticCupById(competitionId);
+  if (domestic) {
+    return domesticStageLabel(domestic, stage, round, domestic.twoLegged.includes(stage));
+  }
+  // 대항전 녹아웃은 결승만 단판이다
+  return stageLabel(stage, round, stage !== "final");
+}
+
+/**
+ * 단계 **이름**만 — 차수를 붙이지 않는다.
+ * 추첨처럼 "준결승 1차전"이 아니라 "준결승"이라고 해야 맞는 자리에 쓴다.
+ */
+export function competitionStageName(competitionId: string, stage: MatchStage): string {
+  const domestic = domesticCupById(competitionId);
+  return domestic ? domesticStageLabel(domestic, stage) : stageLabel(stage, 1, false);
 }

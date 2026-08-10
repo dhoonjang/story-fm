@@ -21,6 +21,8 @@ interface CatalogPlayer extends Record<(typeof ATTRS)[number], number> {
   birthdate: string;
   positions: CatalogPosition[];
   potential: number;
+  /** 실제 주급 (£/주) — 없으면 OVR 공식으로 어림한다 */
+  weeklyWage?: number;
   /** 서버 파생 (읽기 전용) */
   age: number;
   overall: number;
@@ -42,7 +44,7 @@ const ATTRS = [
 ] as const;
 const ATTR_KO: Record<string, string> = {
   pace: "스피드",
-  stamina: "체력",
+  stamina: "지구력",
   strength: "몸싸움",
   aerial: "공중볼",
   finishing: "결정력",
@@ -139,6 +141,7 @@ export default function AdminPage() {
         birthdate: p.birthdate,
         position: p.position,
         potential: p.potential,
+        weeklyWage: p.weeklyWage ?? 0,
         ...Object.fromEntries(ATTRS.map((a) => [a, p[a]])),
       }
     );
@@ -183,6 +186,7 @@ export default function AdminPage() {
           birthdate: String(d.birthdate),
           position: String(d.position),
           potential: Number(d.potential),
+          weeklyWage: Number(d.weeklyWage) || 0,
           ...Object.fromEntries(ATTRS.map((a) => [a, Number(d[a])])),
         }),
       },
@@ -239,10 +243,11 @@ export default function AdminPage() {
         </div>
       </div>
 
-      <p className="hint" style={{ maxWidth: 900, marginBottom: 16 }}>
-        여기는 <b>게임과 무관한 초기치 DB</b>입니다 — 편집 결과는 <b>이후 새로 시작하는 게임</b>에만
-        반영되고, 진행 중인 게임은 시작 시 복사한 값으로 계속 돕니다. 나이·OVR은 저장하지 않는
-        파생값입니다{ageRef ? ` (나이는 ${ageRef} 기준 표시)` : ""}.
+      {/* 이 안내는 남긴다 — "편집이 진행 중 세이브에 안 먹는다"는 화면만 봐선 모른다 */}
+      <p className="hint admin-note">
+        편집 결과는 <b>이후 새로 시작하는 게임</b>에만 반영됩니다 — 진행 중인 게임은 시작 시 복사한
+        값으로 계속 돕니다. 나이·OVR은 파생값이라 저장하지 않습니다
+        {ageRef ? ` (나이는 ${ageRef} 기준)` : ""}.
       </p>
 
       <div className="admin-toolbar">
@@ -326,6 +331,7 @@ export default function AdminPage() {
               ))}
               <th>OVR</th>
               <th>POT</th>
+              <th title="주급 (£/주)">주급</th>
               <th></th>
             </tr>
           </thead>
@@ -395,6 +401,15 @@ export default function AdminPage() {
                       type="number"
                       value={d.potential as number}
                       onChange={(e) => setField(p.id, "potential", e.target.value)}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="ai num wage"
+                      type="number"
+                      step={1000}
+                      value={d.weeklyWage as number}
+                      onChange={(e) => setField(p.id, "weeklyWage", e.target.value)}
                     />
                   </td>
                   <td className="admin-actions">
@@ -497,7 +512,12 @@ function AddPlayerForm({
   const [position, setPosition] = useState("CM");
   const [birthdate, setBirthdate] = useState("2004-01-01");
   const [attrs, setAttrs] = useState<Record<string, number>>(
-    Object.fromEntries([...ATTRS, "potential"].map((a) => [a, a === "potential" ? 70 : 60])),
+    Object.fromEntries(
+      [...ATTRS, "potential", "weeklyWage"].map((a) => [
+        a,
+        a === "potential" ? 70 : a === "weeklyWage" ? 0 : 60,
+      ]),
+    ),
   );
   const [saving, setSaving] = useState(false);
 
@@ -515,6 +535,7 @@ function AddPlayerForm({
           position,
           ...Object.fromEntries(ATTRS.map((a) => [a, attrs[a]])),
           potential: attrs.potential,
+          weeklyWage: attrs.weeklyWage || undefined,
         }),
       });
       const data = await res.json();
@@ -588,6 +609,16 @@ function AddPlayerForm({
             type="number"
             value={attrs.potential}
             onChange={(e) => setAttrs((s) => ({ ...s, potential: Number(e.target.value) }))}
+          />
+        </label>
+        <label>
+          주급
+          <input
+            className="num wage"
+            type="number"
+            step={1000}
+            value={attrs.weeklyWage}
+            onChange={(e) => setAttrs((s) => ({ ...s, weeklyWage: Number(e.target.value) }))}
           />
         </label>
       </div>

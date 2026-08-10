@@ -190,7 +190,10 @@ export class AnthropicGameLLM implements GameLLM {
       const params: Anthropic.MessageCreateParamsNonStreaming = {
         model: this.config.model,
         max_tokens: req.maxTokens ?? this.config.maxTokens,
-        thinking: { type: "adaptive" },
+        // 사고(thinking)는 끈다 — 출력 상한을 본문이 온전히 쓰고 지연도 줄어든다.
+        // 대신 모델이 추론을 **보이는 응답에 흘릴 수** 있어(Opus 4.8의 알려진 성향)
+        // 시스템 프롬프트가 "최종 답만" 규약을 함께 건다 (GM_SYSTEM).
+        thinking: { type: "disabled" },
         system,
         ...(toolDefs.length > 0 ? { tools: toolDefs } : {}),
         messages: withBreakpoint(messages, markUpto) as Anthropic.MessageParam[],
@@ -242,8 +245,9 @@ export class AnthropicGameLLM implements GameLLM {
         if (block.type !== "tool_use") continue;
         toolCallCount++;
         const spec = tools.find((t) => t.name === block.name);
+        // 이 반복의 텍스트까지 누적된 뒤다 — 도구가 불린 자리가 그대로 실린다
         const outcome: ReturnType<GameToolSpec["handle"]> = spec
-          ? spec.handle(block.input)
+          ? spec.handle(block.input, { text })
           : { ok: false, message: `알 수 없는 도구: ${block.name}` };
         results.push({
           type: "tool_result",

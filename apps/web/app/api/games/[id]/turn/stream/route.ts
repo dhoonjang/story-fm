@@ -1,7 +1,16 @@
 import { z } from "zod";
 import { runTurnLocked } from "@/lib/turn-runner";
 
-const TurnSchema = z.object({ message: z.string().min(1).max(1000) });
+const TurnSchema = z.object({
+  message: z.string().min(1).max(1000),
+  /** 화면 조작(시간 이동 손잡이) — 감독의 발화로 취급하지 않는다 */
+  operator: z.boolean().optional(),
+  /**
+   * 전술판에서 쌓인 조작 — 이번 턴에 **함께** 실린다.
+   * 감독의 말과 갈라서 오퍼레이터 턴으로 먼저 들어간다.
+   */
+  orders: z.array(z.string().min(1).max(200)).max(12).optional(),
+});
 
 /**
  * 스트리밍 턴 — 줄 단위 JSON(NDJSON)으로 이벤트를 흘려보낸다.
@@ -27,8 +36,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     async start(controller) {
       const send = (obj: unknown) => controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
       try {
-        const outcome = await runTurnLocked(id, body.data.message, (text) =>
-          send({ type: "delta", text }),
+        const outcome = await runTurnLocked(
+          id,
+          body.data.message,
+          (text) => send({ type: "delta", text }),
+          body.data.operator === true,
+          body.data.orders,
         );
         if (outcome.ok) send({ type: "done", payload: outcome.payload });
         else send({ type: "error", error: outcome.error, detail: outcome.detail });

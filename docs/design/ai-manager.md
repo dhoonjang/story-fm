@@ -40,7 +40,7 @@ MVP는 **단일 GM 에이전트**가 모든 화자를 연기한다 (페르소나
 | --- | --- |
 | `team_talk` | inspired · encouraged · neutral · flat · backfired · feared |
 | `talk_to_player` | reassured · motivated · neutral · disappointed · angered |
-| `respond_to_media` | praised · neutral · controversy · scandal |
+| `respond_to_media` | (outcome 대신 **stance**) defend · own · criticise · bold · deflect |
 | 거래형 응답 (상대 페르소나) | accept · counter · reject (+ 사유 태그) |
 
 - `intensity: 1..3`. **변화량 = 공식(outcome, intensity, 대상 페르소나

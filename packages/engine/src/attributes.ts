@@ -103,10 +103,16 @@ export function deriveAxes(
   const dribbling = clamp99(seed.dribbling);
   const finishing = clamp99(seed.shooting);
   const tackling = clamp99(seed.defending);
-  const strength = clamp99(seed.physical);
   const goalkeeping = isGk
     ? clamp99(seed.goalkeeping ?? 70)
     : derivedGoalkeeping(nameEn, seed.physical);
+  /**
+   * 골키퍼의 몸싸움·공중볼은 시드의 `physical`에서 오면 **아무 뜻이 없다** —
+   * 그 값은 필드 6축 자리를 채우려고 밴드에서 만든 맛내기라 실측과 r=0.08이다.
+   * 골키퍼에게 실측이 있는 축은 `goalkeeping` 하나뿐이므로 거기서 끌어온다
+   * (EA 실측 회귀: 몸싸움 r=0.26, 공중볼 r=0.46 — 잡음보다 낫다).
+   */
+  const strength = isGk ? clamp99(goalkeeping * 0.348 + 37.4) : clamp99(seed.physical);
 
   /** 그 선수의 대략적 수준 — composure·leadership의 기준선 */
   const level = isGk
@@ -114,54 +120,83 @@ export function deriveAxes(
     : (pace + finishing + passing + dribbling + tackling + strength) / 6;
 
   // ── 파생 8축 ──
+  // 패스가 지구력을 예측한다 — 중원 자원이 많이 뛰기 때문이다. 빼고 재면
+  // 상관이 0.51에 그치는데 넣으면 0.64로 오른다 (EA 실측 회귀).
   const stamina = clamp99(
-    strength * 0.75 +
-      pace * 0.2 +
-      bias(slot, { FB: 6, CM: 5, W: 3, DM: 2, ST: 0, CB: -2, AM: 1, GK: -8 }) +
+    (isGk
+      ? // 골키퍼는 뛰지 않는다 — 실측 평균 33이고 실력과 상관도 거의 없다(r=0.09).
+        // 전력 가중치가 0이라 OVR엔 닿지 않지만 화면에는 보이므로 수준은 맞춘다.
+        goalkeeping * 0.129 + 23.3
+      : strength * 0.507 +
+        pace * 0.209 +
+        passing * 0.539 -
+        16.3 +
+        bias(slot, { DM: 2, CM: 1, AM: 1, FB: 0, W: 0, CB: -1, CF: -1, ST: -2 })) +
       jitter(nameEn, "stamina", 4),
   );
 
   const aerial = clamp99(
-    strength * 0.95 -
-      4 +
-      bias(slot, { CB: 10, ST: 6, GK: 6, DM: 2, CM: 0, FB: -4, AM: -6, W: -8 }) +
+    (isGk
+      ? goalkeeping * 0.503 + 24.8
+      : strength * 0.98 +
+        pace * 0.07 -
+        5.95 +
+        bias(slot, { ST: 5, CB: 3, CF: 3, FB: 0, W: 0, DM: -3, AM: -3, CM: -5 })) +
       jitter(nameEn, "aerial", 5),
   );
 
   const kicking = clamp99(
-    (isGk ? passing * 0.9 + 5 : passing * 0.85 + finishing * 0.15 - 2) +
-      bias(slot, { DM: 4, CB: 2, FB: 2, CM: 2, AM: 0, W: -2, ST: -4, GK: 0 }) +
-      jitter(nameEn, "kicking", 6),
+    (isGk ? passing * 1.49 - 20 : passing * 0.737 + finishing * 0.252 - 3.9) +
+      bias(slot, { CF: 6, CB: 3, DM: 2, CM: 0, ST: 0, AM: -1, FB: -2, W: -2, GK: 0 }) +
+      jitter(nameEn, "kicking", 5),
   );
 
   // 패스 정확도와 시야는 상관은 있지만 같은 것이 아니다 — "정확하지만 상상력 없는"
-  // 선수가 나오도록 종속을 낮추고 편차를 키운다 (라이스 vs 외데고르)
+  // 선수가 나오도록 드리블에도 기대고 편차를 남긴다 (라이스 vs 외데고르)
   const vision = clamp99(
-    passing * 0.7 +
-      dribbling * 0.2 +
-      2 +
-      bias(slot, { AM: 8, CM: 5, DM: 2, W: 0, FB: -2, ST: -2, CB: -6, GK: -12 }) +
-      jitter(nameEn, "vision", 9),
+    passing * 0.943 +
+      dribbling * 0.277 -
+      17.8 +
+      bias(slot, { ST: 3, DM: 1, CB: 0, CM: 0, AM: 0, W: -1, CF: -1, FB: -2, GK: -8 }) +
+      jitter(nameEn, "vision", 6),
   );
 
-  // 수비 자리는 수비 지표에서, 공격 자리는 마무리 지표에서 끌어온다
-  const attackShare = { GK: 0.1, CB: 0.2, FB: 0.3, DM: 0.2, CM: 0.5, AM: 0.65, W: 0.65, ST: 0.8 }[slot];
+  // 수비 자리는 수비 지표에서, 공격 자리는 마무리 지표에서 끌어온다.
+  // 골키퍼의 위치선정은 필드 지표와 무관해 골키핑에서 바로 끌어온다.
+  const attackShare = {
+    GK: 0.1,
+    CB: 0.2,
+    FB: 0.3,
+    DM: 0.2,
+    CM: 0.5,
+    AM: 0.65,
+    W: 0.65,
+    CF: 0.75,
+    ST: 0.8,
+  }[slot];
   const positioning = clamp99(
-    (isGk ? goalkeeping * 0.6 + tackling * 0.4 : tackling * (1 - attackShare) + finishing * attackShare) -
-      2 +
+    (isGk
+      ? goalkeeping * 1.3 - 26.4
+      : tackling * (1 - attackShare) +
+        finishing * attackShare +
+        bias(slot, { FB: 3, CF: 2, W: 1, CB: -1, DM: -1, CM: -1, AM: -1, ST: -1 })) +
       jitter(nameEn, "positioning", 5),
   );
 
-  const ageBonus = age >= 30 ? 5 : age >= 27 ? 3 : age <= 21 ? -6 : age <= 23 ? -3 : 0;
-  const composure = clamp99(50 + (level - 60) * 1.05 + ageBonus + jitter(nameEn, "composure", 6));
+  const composure = clamp99(
+    (isGk ? level * 0.534 + age * 0.712 - 9.1 : level * 1.054 + age * 0.59 - 14.7) +
+      bias(slot, { CF: 4, CB: 2, ST: 2, AM: 1, W: 1, DM: 0, CM: -1, FB: -4 }) +
+      jitter(nameEn, "composure", 5),
+  );
 
   // 성향은 실력과 독립적이어야 재미가 있다 — 약하지만 거친 선수, 강하지만 얌전한 선수.
-  // 그래서 능력 기여를 낮추고 개인 편차를 크게 잡는다.
+  // 그래서 능력 기여를 낮추고 개인 편차를 크게 잡는다. 다만 **수준은 실측에 맞춘다**:
+  // 종속을 낮추는 것과 전체가 낮게 깔리는 것은 다른 문제다 (예전엔 평균 10 낮았다).
   const aggression = clamp99(
     tackling * 0.2 +
       strength * 0.2 +
-      32 +
-      bias(slot, { CB: 6, DM: 6, FB: 2, CM: 2, ST: 0, W: -2, AM: -4, GK: -10 }) +
+      42 +
+      bias(slot, { DM: 5, CF: 5, CB: 3, FB: 1, CM: 1, ST: 1, AM: -4, W: -6, GK: -14 }) +
       jitter(nameEn, "aggression", 14),
   );
 
@@ -246,4 +281,77 @@ export function agingDelta(axis: AttributeAxis, age: number): number {
   if (age >= 37) return -1;
   if (age >= 24 && age <= 33) return 1;
   return 0;
+}
+
+// ── 능력치가 오르는 속도 — 잠재력·나이·현재 수준 ─────────────
+//
+// 판정(훈련·경기 결산)이 "이 선수는 한 칸 올랐다"고 말해도 **그대로 오르지는
+// 않는다.** 열여덟 살 유망주의 한 칸과 서른 살 주전의 한 칸은 같은 사건이 아니다.
+// 실제 선수의 성장을 가르는 셋을 그대로 곱한다:
+//
+//   ① **잠재력 여유** — 천장에 가까울수록 는 게 없다. 넘어선 축은 아예 안 자란다.
+//   ② **나이** — 스물셋까지가 가장 빠르고 스물여덟을 넘으면 눈에 띄게 준다.
+//      축마다 시계가 다르다(`AXIS_AGING`): 다리는 먼저 죽고 머리는 늦게까지 큰다.
+//   ③ **현재 수준** — 85를 86으로 만드는 일은 60을 61로 만드는 일보다 어렵다.
+//      ①과 겹쳐 보이지만 다른 이야기다: 잠재력 90짜리 두 선수라도 지금 70인
+//      선수와 85인 선수의 다음 한 칸은 무게가 다르다.
+//
+// 결과가 1보다 작으면 `growthCarry`에 쌓인다 — 그래서 노장도 아주 천천히는 는다.
+//
+// **내려가는 건 깎지 않는다.** 오히려 이미 꺾인 축은 더 잘 떨어진다 —
+// 판정이 "예전 같지 않다"고 말할 때 그게 서른셋의 스피드라면 그대로 받는다.
+
+/** 잠재력 여유가 이만큼이면 성장 계수가 최대 */
+const ROOM_FULL = 10;
+/** 여유의 감쇠 — 1보다 작아 여유가 조금만 있어도 완전히 멎지는 않는다 */
+const ROOM_CURVE = 0.7;
+/** 현재 수준의 감쇠가 시작되는 값과 급함 */
+const LEVEL_FLOOR = 60;
+const LEVEL_CURVE = 0.8;
+
+/** 나이대별 성장 배율 — 스물셋까지가 가장 빠르다 */
+function ageGrowthFactor(age: number): number {
+  if (age <= 18) return 1.15;
+  if (age <= 21) return 1;
+  if (age <= 24) return 0.85;
+  if (age <= 27) return 0.6;
+  if (age <= 30) return 0.4;
+  if (age <= 33) return 0.25;
+  return 0.15;
+}
+
+/**
+ * 판정 1점이 이 선수의 이 축에 실제로 남기는 값 (0 이상).
+ *
+ * 예: 18세 60(잠재력 85) → 1.15 · 24세 75(85) → 0.58 · 27세 82(85) → 0.14 ·
+ * 30세 85(88) → 0.08. 유망주는 판정 한 번에 한 칸을 얻고, 전성기를 지난 주전은
+ * 열 번을 받아야 한 칸이다.
+ */
+export function attributeGainScale(
+  axis: AttributeAxis,
+  value: number,
+  potential: number,
+  age: number,
+): number {
+  const room = potential - value;
+  if (room <= 0 || value >= 99) return 0;
+
+  const byRoom = Math.min(1, room / ROOM_FULL) ** ROOM_CURVE;
+  const byLevel = Math.min(1, (100 - value) / (100 - LEVEL_FLOOR)) ** LEVEL_CURVE;
+  // 축의 시계 — 이미 꺾이는 축은 훈련해도 덜 붙고, 늦게까지 크는 축은 조금 더 붙는다
+  const aging = agingDelta(axis, age);
+  const byAxis = aging < 0 ? 0.6 : aging > 0 ? 1.15 : 1;
+
+  return byRoom * byLevel * ageGrowthFactor(age) * byAxis;
+}
+
+/**
+ * 쇠퇴 배율 — **깎지 않는다.** 나이가 밀어내는 축이면 오히려 크게 받는다.
+ * 젊고 안 꺾이는 축의 하락은 조금 눌러 둔다(훈련 한 번에 스물둘의 패스가
+ * 나빠지지는 않는다).
+ */
+export function attributeDeclineScale(axis: AttributeAxis, age: number): number {
+  const aging = agingDelta(axis, age);
+  if (aging < 0) return 1 + Math.min(3, Math.abs(aging)) * 0.25;
+  return age <= 24 ? 0.7 : 1;
 }

@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import { TEAM_CATALOG } from "@story-fm/engine";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -27,6 +28,7 @@ import {
 } from "../app/api/admin/skills/route";
 import { SKILL_CATALOG } from "@story-fm/agents";
 import { cupCatalogById } from "@story-fm/engine";
+import { FORMATION_LAYOUTS } from "@story-fm/domain";
 import type { GamePayload } from "../lib/store";
 
 /** API 통합 테스트 — 라우트 핸들러를 직접 호출 (mock GM 모드) */
@@ -55,7 +57,9 @@ describe("API — 온보딩부터 경기까지", () => {
   it("팀 카탈로그와 게임 목록을 제공한다", async () => {
     const res = getCatalog();
     const data = await res.json();
+    // 부임 대상은 1부 96팀 — 2부 클럽은 컵 참가 전용이라 목록에 없다
     expect(data.teams).toHaveLength(96);
+    expect(data.leagues).toHaveLength(5);
     expect(Array.isArray(data.games)).toBe(true);
   });
 
@@ -207,6 +211,103 @@ describe("API — 온보딩부터 경기까지", () => {
     expect(userTurns).toHaveLength(0);
   });
 
+  it("전술판 자유 배치 — 좌표를 주면 포지션은 그 좌표에서 파생된다", async () => {
+    const created = await createGame(
+      json({ teamId: "liverpool", managerName: "자유", background: "분석가", seed: 11 }),
+    );
+    const game = (await created.json()) as GamePayload;
+    const players = game.views.squad.players;
+    const gk = players.find((p) => p.positionGroup === "GK")!;
+    const outfield = players.filter((p) => p.positionGroup !== "GK").slice(0, 10);
+    const preset = FORMATION_LAYOUTS["4-2-3-1"];
+    const starting = [gk, ...outfield].map((p, i) => ({ playerId: p.id, point: preset[i]! }));
+
+    const res = await postLineup(
+      json({ starting, bench: [], formation: "4-2-3-1" }),
+      params(game.id),
+    );
+    expect(res.status).toBe(200);
+    const after = (await res.json()) as GamePayload;
+    // 프리셋 좌표를 그대로 보냈으니 배치 코드도 프리셋 슬롯과 같아야 한다
+    const startersAfter = after.views.squad.players.filter((p) => p.role === "선발");
+    expect(startersAfter).toHaveLength(11);
+    // 더블 볼란치는 좌우로 갈린다 (중앙 라인도 왼쪽·오른쪽을 구분한다)
+    expect(
+      startersAfter.filter((p) => ["RDM", "LDM", "CDM"].includes(p.assignedPosition ?? "")),
+    ).toHaveLength(2);
+
+    // 더블 볼란치 중 한 명만 공격형 미드필더 라인까지 끌어올린다 — 볼란치 하나가
+    // 다른 자리로 넘어가는 요청 사례
+    const pivot = startersAfter.find((p) =>
+      ["RDM", "LDM", "CDM"].includes(p.assignedPosition ?? ""),
+    )!;
+    if (!pivot.assignedPoint) throw new Error("no cdm pivot point");
+    const starting2 = startersAfter.map((p) =>
+      p.id === pivot.id
+        ? { playerId: p.id, point: { x: pivot.assignedPoint!.x, y: 30 } }
+        : { playerId: p.id, point: p.assignedPoint! },
+    );
+    const res2 = await postLineup(json({ starting: starting2, bench: [] }), params(game.id));
+    expect(res2.status).toBe(200);
+    const after2 = (await res2.json()) as GamePayload;
+    const moved = after2.views.squad.players.find((p) => p.id === pivot.id)!;
+    expect(moved.assignedPosition).not.toBe("CDM");
+    expect(moved.assignedPoint!.y).toBe(30);
+    expect(after2.views.squad.formation).toBe("4-2-3-1"); // 프리셋 선택은 그대로
+    // 나머지 10명의 자리는 건드리지 않는다 (한 명만 옮긴 것이 한 명에게만 반영)
+    const unchanged = after2.views.squad.players.filter(
+      (p) => p.role === "선발" && p.id !== pivot.id,
+    );
+    for (const p of unchanged) {
+      const before = startersAfter.find((q) => q.id === p.id)!;
+      expect(p.assignedPosition, `${p.name}`).toBe(before.assignedPosition);
+    }
+  });
+
+  it("2군 선수를 라인업에 넣으면 승격·강등이 한 요청으로 처리된다", async () => {
+    const created = await createGame(
+      json({ teamId: "everton", managerName: "승격", background: "분석가", seed: 41 }),
+    );
+    const game = (await created.json()) as GamePayload;
+    const squad = game.views.squad;
+    const starters = squad.players.filter((p) => p.role === "선발");
+    const reserve = squad.players.find((p) => p.squadLevel === "reserve")!;
+    const dropped = starters.find((p) => p.positionGroup !== "GK")!;
+
+    // 2군 선수만 그대로 넣으면 반려된다 (승격이 먼저다)
+    const naive = starters.map((p) =>
+      p.id === dropped.id
+        ? { playerId: reserve.id, point: p.assignedPoint! }
+        : { playerId: p.id, point: p.assignedPoint! },
+    );
+    const rejected = await postLineup(json({ starting: naive, bench: [] }), params(game.id));
+    expect(rejected.status).toBe(400);
+
+    // 승격·강등을 함께 보내면 통과한다
+    const res = await postLineup(
+      json({
+        starting: naive,
+        bench: [],
+        squadLevels: [
+          { playerId: reserve.id, level: "first" },
+          { playerId: dropped.id, level: "reserve" },
+        ],
+      }),
+      params(game.id),
+    );
+    expect(res.status).toBe(200);
+    const after = ((await res.json()) as GamePayload).views.squad;
+    const promoted = after.players.find((p) => p.id === reserve.id)!;
+    const demoted = after.players.find((p) => p.id === dropped.id)!;
+    expect(promoted.squadLevel).toBe("first");
+    expect(promoted.role).toBe("선발");
+    expect(demoted.squadLevel).toBe("reserve");
+    expect(demoted.role).toBe("스쿼드"); // 2군은 배치에서 빠진다
+    // 한 명 올라오고 한 명 내려가므로 1군 인원은 그대로다
+    expect(after.firstTeamCount).toBe(squad.firstTeamCount);
+    expect(after.players.filter((p) => p.role === "선발")).toHaveLength(11);
+  });
+
   it("전술판이 라인업과 팀 전술을 한 번에 저장한다", async () => {
     const created = await createGame(
       json({ teamId: "chelsea", managerName: "전술", background: "분석가", seed: 31 }),
@@ -227,7 +328,7 @@ describe("API — 온보딩부터 경기까지", () => {
         starting,
         bench: [],
         formation: before.formation,
-        tactics: { mentality: 5, pressing: 4, passStyle: "direct" },
+        tactics: { mentality: 5, pressing: 4, passStyle: 5 },
       }),
       params(game.id),
     );
@@ -235,7 +336,7 @@ describe("API — 온보딩부터 경기까지", () => {
     const after = ((await res.json()) as GamePayload).views.squad;
     expect(after.tactics.mentality).toBe(5);
     expect(after.tactics.pressing).toBe(4);
-    expect(after.tactics.passStyle).toBe("direct");
+    expect(after.tactics.passStyle).toBe(5);
     // 건드리지 않은 축은 그대로
     expect(after.tactics.tempo).toBe(before.tactics.tempo);
     // 전술을 바꾸면 적응도가 떨어진다 (setTactics의 tacticsChangeDrop)
@@ -265,13 +366,25 @@ describe("API — 온보딩부터 경기까지", () => {
     expect(Array.isArray(game.views.finance.reports)).toBe(true);
     expect(game.views.finance.current.month).toBe(game.date.slice(0, 7));
     expect(game.views.finance.stadium.capacity).toBeGreaterThan(0);
-    // 시작 시 훈련 미등록 (기본 훈련 없음)
-    expect(game.views.calendar.entries.filter((e) => e.type === "training")).toHaveLength(0);
+    // 시작부터 기본 훈련이 달력에 깔려 있다 (training-plan)
+    expect(game.views.calendar.entries.filter((e) => e.type === "training").length).toBeGreaterThan(
+      0,
+    );
     // 주급은 계약 합에서 파생
     expect(game.views.finance.weeklyWages).toBeGreaterThan(0);
     expect(typeof game.views.calendar.events).toBe("object");
+    /**
+     * 이름 사전은 **우리 선수단 + 대화에 나온 id**다. 전 리그 5,700명을 실으면
+     * 168KB가 매 턴 응답에 붙고, 클라이언트가 턴마다 그 사전을 훑는다.
+     */
     expect(typeof game.playerNames).toBe("object");
-    expect(Object.keys(game.playerNames).length).toBeGreaterThanOrEqual(320);
+    const names = Object.keys(game.playerNames);
+    expect(names.length, "우리 선수단이 빠졌다").toBeGreaterThanOrEqual(20);
+    expect(names.length, "전 리그를 통째로 실었다").toBeLessThan(200);
+    // 화자 직책 — 화면이 `스티브 홀랜드 (수석코치)`로 붙일 재료 (personas.md)
+    expect(Object.values(game.speakerRoles).map((r: { label?: string }) => r.label)).toContain(
+      "수석코치",
+    );
   });
 
   it("라인업 편집 — GK 없는 선발은 400", async () => {
@@ -300,7 +413,8 @@ describe("API — 온보딩부터 경기까지", () => {
       edited: boolean;
       ageRef: string;
     };
-    expect(list.teams).toHaveLength(96);
+    // 어드민 카탈로그는 2부·이적 시장 전용 클럽까지 전부 편집 대상이다
+    expect(list.teams).toHaveLength(TEAM_CATALOG.length);
     expect(list.ageRef).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     const row = list.teams[0]!.players[0]!;
     expect(row.overall).toBeGreaterThan(0); // 파생값 동행
@@ -411,7 +525,7 @@ describe("API — 온보딩부터 경기까지", () => {
     };
     expect(initial.edited).toBe(false);
     expect(initial.prompts.gm).toContain("게임 마스터");
-    expect(initial.prompts.match).toContain("경기 마스터");
+    expect(initial.prompts.match).toContain("경기 중계자");
 
     const custom = {
       gm: `${initial.prompts.gm}\n\n# 어드민 테스트\n응답은 간결하게.`,
@@ -449,28 +563,28 @@ describe("API — 온보딩부터 경기까지", () => {
     // 도구가 늘어도 깨지지 않게 카탈로그와 맞춘다 (숫자를 박으면 기능 추가마다 손댄다)
     expect(initial.skills).toHaveLength(SKILL_CATALOG.length);
     expect(initial.skills.some((skill) => skill.name === "deal_odds")).toBe(true);
-    expect(initial.skills.find((skill) => skill.name === "get_player")?.readOnly).toBe(true);
+    expect(initial.skills.find((skill) => skill.name === "search_players")?.readOnly).toBe(true);
 
     const descriptions = Object.fromEntries(
       initial.skills.map((skill) => [skill.name, skill.description]),
     );
-    descriptions.advance_time += "\n어드민 테스트 설명";
+    descriptions.set_captain += "\n어드민 테스트 설명";
     const saveRes = await skillsPut(json({ descriptions }));
     expect(saveRes.status).toBe(200);
     const saved = (await saveRes.json()) as typeof initial;
     expect(saved.edited).toBe(true);
-    expect(saved.skills.find((skill) => skill.name === "advance_time")?.description).toContain(
+    expect(saved.skills.find((skill) => skill.name === "set_captain")?.description).toContain(
       "어드민 테스트 설명",
     );
 
-    const invalid = await skillsPut(json({ descriptions: { advance_time: "하나만 있음" } }));
+    const invalid = await skillsPut(json({ descriptions: { set_captain: "하나만 있음" } }));
     expect(invalid.status).toBe(400);
 
     const resetRes = skillsReset();
     expect(resetRes.status).toBe(200);
     const reset = (await resetRes.json()) as typeof initial;
     expect(reset.edited).toBe(false);
-    expect(reset.skills.find((skill) => skill.name === "advance_time")?.description).not.toContain(
+    expect(reset.skills.find((skill) => skill.name === "set_captain")?.description).not.toContain(
       "어드민 테스트 설명",
     );
   });

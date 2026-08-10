@@ -1,32 +1,124 @@
 import { describe, expect, it } from "vitest";
+import type { ManagerAttributes } from "@story-fm/domain";
 import {
+  FORMATIONS,
+  MANAGER_ATTRIBUTES,
+  FORMATION_SLOTS,
   GamePlayerSchema,
   TeamTacticsSchema,
   clusterOf,
   naturalPositionOf,
+  positionGroupOfPlayer,
   sameCluster,
 } from "@story-fm/domain";
 import {
+  DEFAULT_XI,
+  TEAM_CATALOG,
+  defaultXiIds,
+  pickFormation,
+  squadLevelOf,
+  isTopFlight,
+  tacticsOf,
   teamsOfLeague,
   buildMatches,
   buildTransferWindows,
+  windowOpenOn,
   interpretBackgroundHeuristic,
-  ONBOARDING_TOTAL,
+  specialtyAxesOf,
+  careerTierOf,
+  teamFloorOf,
+  SPECIALTY_BUDGET,
+  START_MIN_AXIS,
+  START_MAX_AXIS,
   playerCatalog,
   playersOf,
   assignmentsOf,
   activeContract,
+  proficiencyAt,
   weeklyWagesOf,
 } from "@story-fm/engine";
 import { createTestGame, userFixtureCount } from "./helpers";
 
+/** 스쿼드를 갖는 팀 — 무소속(`free`)은 비어 있게 시작한다 */
+const SQUAD_TEAMS = TEAM_CATALOG.filter((t) => t.leagueId !== "free");
+
 describe("선수 카탈로그 (불변 초기치 DB)", () => {
   const catalog = playerCatalog();
 
-  it("5대 리그 96팀 · 3,800명+ · 전역 id 유일", () => {
-    expect(new Set(catalog.map((e) => e.teamId)).size).toBe(96);
+  it("1부 96팀 + 2부 64팀 · 5,000명+ · 전역 id 유일", () => {
+    // 무소속(`free`)은 스쿼드를 갖지 않는다 — 방출·계약 만료로만 사람이 들어온다
+    expect(new Set(catalog.map((e) => e.teamId)).size).toBe(SQUAD_TEAMS.length);
     expect(catalog.length).toBeGreaterThanOrEqual(3800);
     expect(new Set(catalog.map((e) => e.id)).size).toBe(catalog.length);
+  });
+
+  it("실선수 시드에 표기만 다른 같은 선수가 둘 다 남지 않는다", () => {
+    // 시드를 갱신할 때 로마자 표기가 갈린 같은 선수가 둘 다 살아남는 사고가
+    // 난다 (Yarmoliuk/Yarmolyuk). id 슬러그도 생년월일도 달라서 유일성 검사엔
+    // 안 걸리므로 **이름의 편집 거리**로 본다. 절차 생성 선수(`-gen`)는
+    // 이름을 무작위 조합으로 만들어 우연한 충돌이 정상이라 제외한다.
+    const plain = (s: string) =>
+      s
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[̀-ͯ]/g, "")
+        .replace(/[^a-z]/g, "");
+    const distance = (a: string, b: string) => {
+      if (Math.abs(a.length - b.length) > 2) return 9;
+      let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+      for (let i = 1; i <= a.length; i++) {
+        const cur = [i];
+        for (let j = 1; j <= b.length; j++) {
+          cur.push(
+            Math.min(prev[j]! + 1, cur[j - 1]! + 1, prev[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1)),
+          );
+        }
+        prev = cur;
+      }
+      return prev[b.length]!;
+    };
+
+    const byTeam = new Map<string, { id: string; name: string }[]>();
+    for (const e of catalog) {
+      if (/-gen\d+$/.test(e.id)) continue;
+      const list = byTeam.get(e.teamId) ?? [];
+      list.push({ id: e.id, name: plain(e.nameEn) });
+      byTeam.set(e.teamId, list);
+    }
+    const dupes: string[] = [];
+    for (const [teamId, list] of byTeam) {
+      for (let i = 0; i < list.length; i++) {
+        for (let j = i + 1; j < list.length; j++) {
+          if (distance(list[i]!.name, list[j]!.name) <= 2) {
+            dupes.push(`${teamId}: ${list[i]!.id} ~ ${list[j]!.id}`);
+          }
+        }
+      }
+    }
+    expect(dupes).toEqual([]);
+  });
+
+  it("같은 선수가 두 클럽에 동시에 있지 않는다 (이적 뒤 원소속에 남은 행)", () => {
+    // 팀 안만 보면 이걸 못 잡는다. 여름 이적 선수를 새 구단에 넣고 **원소속에서
+    // 지우지 않으면** 한 사람이 두 팀에서 뛴다 — 실제로 5명이 그렇게 남아 있었다
+    // (트래포드·후안루·바르코·상가레·곤살로 가르시아). 동명이인과는 **생년월일**로
+    // 가른다: 이름이 같아도 생일이 다르면 다른 사람이다 (비티냐·무사 디아라).
+    const key0 = (s: string) =>
+      s
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[̀-ͯ]/g, "")
+        .replace(/[^a-z]/g, "");
+    const byPerson = new Map<string, string[]>();
+    for (const e of catalog) {
+      if (/-gen\d+$|-dev-|-y\d+-/.test(e.id)) continue;
+      const key = `${key0(e.nameEn)}|${e.birthdate}`;
+      byPerson.set(key, [...(byPerson.get(key) ?? []), e.id]);
+    }
+    const twoClubs = [...byPerson.entries()]
+      .filter(([, ids]) => ids.length > 1)
+      .map(([key, ids]) => `${key}: ${ids.join(" ⇄ ")}`);
+    expect(twoClubs).toEqual([]);
   });
 
   it("전 선수가 goalkeeping을 갖는다 — 예외 분기 없음 (v6)", () => {
@@ -36,16 +128,20 @@ describe("선수 카탈로그 (불변 초기치 DB)", () => {
     }
     // 필드 플레이어는 낮고, GK는 높다
     const gks = catalog.filter((e) => e.positions.some((p) => p.isNatural && p.position === "GK"));
-    const outfield = catalog.filter((e) => !e.positions.some((p) => p.isNatural && p.position === "GK"));
+    const outfield = catalog.filter(
+      (e) => !e.positions.some((p) => p.isNatural && p.position === "GK"),
+    );
     const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length;
     expect(mean(gks.map((e) => e.goalkeeping))).toBeGreaterThan(
       mean(outfield.map((e) => e.goalkeeping)) + 30,
     );
   });
 
-  it("주 포지션 정확히 1개 + 멀티 포지션 적응도를 갖는다", () => {
+  it("주 포지션 하나 이상 + 멀티 포지션 적응도를 갖는다", () => {
+    // 주 포지션은 **여럿일 수 있다** — 두 자리를 다 자기 자리로 삼는 선수가 있다.
+    // 시드가 자리를 하나만 들고 있어 지금 카탈로그는 전부 1개지만, 모델은 열어 둔다
     for (const e of catalog) {
-      expect(e.positions.filter((p) => p.isNatural)).toHaveLength(1);
+      expect(e.positions.filter((p) => p.isNatural).length).toBeGreaterThanOrEqual(1);
       for (const p of e.positions) {
         expect(p.proficiency).toBeGreaterThan(0);
         expect(p.proficiency).toBeLessThanOrEqual(99);
@@ -67,8 +163,16 @@ describe("선수 카탈로그 (불변 초기치 DB)", () => {
       for (const code of cluster) {
         const own = e.positions.find((p) => p.position === code);
         expect(own, `${e.nameEn} (${nat.position}) 에 ${code} 없음`).toBeDefined();
-        expect(nat.proficiency - own!.proficiency).toBeLessThanOrEqual(3);
-        expect(own!.proficiency).toBeLessThanOrEqual(nat.proficiency);
+        /**
+         * 위아래 모두 6 이내 — **주 포지션이 상한은 아니다**. 오른발 센터백은
+         * 뭉뚱그린 CB보다 RCB를 잘 본다(`footAdjust`). 한쪽만 막으면 주발 모델을
+         * 도로 금지하게 된다.
+         *
+         * 폭이 6인 이유: 보정은 두 발 차이에 비례하고(±3이 최대), 주 포지션이
+         * 이미 한쪽 끝이면(왼발 5/1 선수의 LCB) 반대편까지 3+3이 벌어진다.
+         * 약발이 좋은 선수(5/4)는 좌우 차이가 2뿐이다 — 그게 이 모델의 요점이다.
+         */
+        expect(Math.abs(nat.proficiency - own!.proficiency)).toBeLessThanOrEqual(6);
         compared++;
       }
     }
@@ -85,6 +189,19 @@ describe("선수 카탈로그 (불변 초기치 DB)", () => {
     });
     expect(outside.length).toBeGreaterThan(1000);
     expect(Math.min(...outside)).toBeGreaterThan(3);
+  });
+
+  it("인접 포지션 값이 계층 안에 있다 — 70~82 (주 포지션 88~96 아래)", () => {
+    // 하한: 프로 1군이 **바로 옆 자리**를 62로 소화한다는 건 실제 축구와 어긋난다.
+    // 상한: 그렇다고 주 포지션과 구별이 사라지면 자리 개념이 무의미해진다.
+    const outside = catalog.flatMap((e) => {
+      const nat = naturalPositionOf(e);
+      return e.positions
+        .filter((p) => !p.isNatural && !sameCluster(nat.position, p.position))
+        .map((p) => p.proficiency);
+    });
+    expect(Math.min(...outside)).toBeGreaterThanOrEqual(70);
+    expect(Math.max(...outside)).toBeLessThanOrEqual(82);
   });
 
   it("결정적이다 — 같은 카탈로그가 반복 호출에도 동일", () => {
@@ -116,14 +233,17 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
   });
 
   it("팀·선수·전술·재정·계약이 인스턴스화된다", () => {
-    expect(state.teams).toHaveLength(96);
+    // 1부 96 + 2부 64 — 2부는 리그전을 돌지 않지만 컵 참가자라 엔티티는 갖는다
+    expect(state.teams).toHaveLength(TEAM_CATALOG.length);
     expect(state.players.length).toBeGreaterThanOrEqual(3800);
-    expect(state.tactics).toHaveLength(96);
-    expect(state.finances).toHaveLength(96);
+    // 무소속 클럽은 비어 있게 시작한다
+    expect(playersOf(state, "freeagents")).toHaveLength(0);
+    expect(state.tactics).toHaveLength(TEAM_CATALOG.length);
+    expect(state.finances).toHaveLength(TEAM_CATALOG.length);
     expect(state.contracts).toHaveLength(state.players.length);
     for (const p of state.players) {
       expect(() => GamePlayerSchema.parse(p)).not.toThrow();
-      expect(p.catalogId).toBe(p.id); // 시드 선수는 카탈로그 링크를 갖는다
+      if (p.catalogId !== null) expect(p.catalogId).toBe(p.id);
     }
     for (const t of state.tactics) {
       expect(() => TeamTacticsSchema.parse(t)).not.toThrow();
@@ -132,6 +252,7 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
 
   it("팀마다 선발 11 + 벤치 배치가 있고 GK가 정확히 1명이다", () => {
     for (const team of state.teams) {
+      if (team.id === "freeagents") continue; // 클럽이 아니다
       const starters = assignmentsOf(state, team.id, "starting");
       expect(starters).toHaveLength(11);
       expect(starters.filter((a) => a.position === "GK")).toHaveLength(1);
@@ -139,6 +260,100 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
       // 배치는 모두 그 팀 선수
       const ids = new Set(playersOf(state, team.id).map((p) => p.id));
       for (const a of assignmentsOf(state, team.id)) expect(ids.has(a.playerId)).toBe(true);
+    }
+  });
+
+  it("기본 배치는 자리에 맞는 선수를 세운다 — 적응도 70 미만이 없다", () => {
+    // 시작 배치에서 "생소한 자리"가 나오면 감독이 손대기 전부터 손해를 안고 시작한다.
+    const placed = state.teams.flatMap((team) =>
+      assignmentsOf(state, team.id).map((a) => {
+        const player = playersOf(state, team.id).find((p) => p.id === a.playerId)!;
+        return { name: player.name, position: a.position, fit: proficiencyAt(player, a.position) };
+      }),
+    );
+    const worst = placed.reduce((min, x) => (x.fit < min.fit ? x : min));
+    expect(worst.fit, `${worst.name} → ${worst.position}`).toBeGreaterThanOrEqual(70);
+  });
+
+  it("구단마다 자기 모양으로 시작한다 — 리서치 값 + 스쿼드 적합", () => {
+    const topFlight = TEAM_CATALOG.filter((t) => isTopFlight(t.id));
+    // 1부는 전부 리서치한 기본 포메이션을 갖는다
+    expect(topFlight.every((t) => t.formation !== undefined)).toBe(true);
+
+    for (const team of SQUAD_TEAMS) {
+      const formation = tacticsOf(state, team.id).spec.formation;
+      expect(FORMATIONS).toContain(formation);
+      // 배치는 그 모양의 슬롯을 그대로 쓴다
+      expect(assignmentsOf(state, team.id, "starting").map((a) => a.position)).toEqual(
+        FORMATION_SLOTS[formation],
+      );
+    }
+
+    // 스쿼드 적합 판정은 **거부권**이다 — 리서치 값이 대부분 살아남아야 한다
+    const kept = topFlight.filter((t) => tacticsOf(state, t.id).spec.formation === t.formation);
+    expect(kept.length / topFlight.length).toBeGreaterThan(0.85);
+    // 한 모양으로 쏠리지도 않는다
+    const shapes = new Set(topFlight.map((t) => tacticsOf(state, t.id).spec.formation));
+    expect(shapes.size).toBeGreaterThanOrEqual(4);
+  });
+
+  it("스쿼드가 감당 못 하는 모양은 거부된다 — 수비 자원이 모자라면 백3를 안 선다", () => {
+    /**
+     * ⚠️ **센터백 수로는 못 잰다.** 예전엔 "센터백을 둘로 줄이면 백3를 버린다"로
+     * 봤는데, 주발을 실측으로 바꾸면서(대부분 5/4) 풀백의 센터백 적응도가 고르게
+     * 올라 **CB를 0으로 줄여도 백3가 채워진다**. 거부권이 죽은 게 아니라 그 스쿼드가
+     * 실제로 감당하는 것이라, 재려면 수비 자원 전체를 줄여야 한다.
+     */
+    const squad = playersOf(state, "crystalpalace").filter((p) => squadLevelOf(p) === "first");
+    // 선입견이 자기 스쿼드의 최적과 같으면 그대로 간다 (결정적)
+    const own = pickFormation(squad, undefined);
+    expect(FORMATIONS).toContain(own);
+    expect(pickFormation(squad, own)).toBe(own);
+    expect(pickFormation(squad, undefined)).toBe(own);
+
+    // 온전한 스쿼드라면 백3 선입견이 살아남는다
+    const defenders = squad.filter((p) => positionGroupOfPlayer(p) === "DF");
+    expect(defenders.length).toBeGreaterThanOrEqual(6);
+    expect(pickFormation(squad, "3-5-2")).toBe("3-5-2");
+
+    // 수비 자원을 셋으로 줄이면 같은 선입견이 뒤집힌다 —
+    // 백3는 센터백 셋에 윙백 둘까지 다섯 자리를 요구한다
+    const thinAtBack = squad.filter(
+      (p) => positionGroupOfPlayer(p) !== "DF" || defenders.indexOf(p) < 3,
+    );
+    expect(pickFormation(thinAtBack, "3-5-2")).not.toBe("3-5-2");
+  });
+
+  it("선입견은 거부권일 뿐 — 리서치 값과 다른 팀이 실제로 나온다", () => {
+    // 전부 리서치 값 그대로면 스쿼드 적합 판정이 죽은 코드라는 뜻이다
+    const flipped = TEAM_CATALOG.filter(
+      (t) => isTopFlight(t.id) && t.formation !== tacticsOf(state, t.id).spec.formation,
+    );
+    expect(flipped.length).toBeGreaterThan(0);
+  });
+
+  it("기본 선발 슬러그가 전부 카탈로그에 실재한다 (오타 방지)", () => {
+    // 슬러그가 틀리면 조용히 무시되고 라인업이 슬그머니 바뀐다 — 여기서 잡는다
+    const ids = new Set(playerCatalog().map((e) => e.id));
+    const missing: string[] = [];
+    for (const teamId of Object.keys(DEFAULT_XI)) {
+      // 이적으로 빠진 자리는 비워 둔다 (그 자리는 엔진이 채운다)
+      const xi = defaultXiIds(teamId);
+      expect(xi.length, teamId).toBeGreaterThanOrEqual(10);
+      for (const id of xi) if (!ids.has(id)) missing.push(id);
+    }
+    expect(missing).toEqual([]);
+  });
+
+  it("기본 선발이 실제 선발에 반영된다 — 팀마다 9명 이상", () => {
+    // 전원이 아닌 이유: 지정 11인은 그 구단의 실제 포메이션에서 뽑혔고,
+    // 프리셋으로 접힌 모양과 포지션군이 어긋나는 자리는 스쿼드가 메운다.
+    for (const teamId of Object.keys(DEFAULT_XI)) {
+      const wanted = new Set(defaultXiIds(teamId));
+      const started = assignmentsOf(state, teamId, "starting").filter((a) =>
+        wanted.has(a.playerId),
+      );
+      expect(started.length, teamId).toBeGreaterThanOrEqual(9);
     }
   });
 
@@ -154,17 +369,42 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
     }
   });
 
+  it("카탈로그에 실제 주급이 있으면 공식 대신 그 값이 계약에 실린다", () => {
+    const catalogWage = new Map(
+      playerCatalog()
+        .filter((e) => e.weeklyWage !== undefined)
+        .map((e) => [e.id, e.weeklyWage!] as const),
+    );
+    expect(catalogWage.size).toBeGreaterThan(500); // EPL 시드는 주급을 갖는다
+    let checked = 0;
+    for (const p of playersOf(state, state.userTeamId)) {
+      const real = p.catalogId === null ? undefined : catalogWage.get(p.catalogId);
+      if (real === undefined) continue;
+      expect(activeContract(state, p.id)?.weeklyWage).toBe(real);
+      checked += 1;
+    }
+    expect(checked).toBeGreaterThan(20);
+  });
+
   it("주장이 정확히 1명이다", () => {
     expect(playersOf(state, state.userTeamId).filter((p) => p.isCaptain)).toHaveLength(1);
   });
 
-  it("초기 상태 — 기록 테이블은 비어 있고 훈련도 없다", () => {
-    expect(state.injuries).toHaveLength(0);
+  it("초기 상태 — 기록 테이블은 부임 전 이력만 갖고 기본 훈련이 깔려 있다", () => {
+    /**
+     * 부상 표는 비어 있지 않다 — 조사된 선수의 **부임 전 이력**이 실려 있다
+     * (`injury.ts`의 `seedInjuryHistory`). 감독을 만나기 전의 몸도 사실이다.
+     * 다만 이 게임에서 벌어진 일은 아직 하나도 없다.
+     */
+    expect(state.injuries.length).toBeGreaterThan(0);
+    expect(state.injuries.every((i) => i.note === "부임 전 이력")).toBe(true);
     expect(state.bookings).toHaveLength(0);
     expect(state.suspensions).toHaveLength(0);
     expect(state.growthLog).toHaveLength(0);
-    expect(state.trainingSessions).toHaveLength(0);
-    expect(state.schedule.filter((e) => e.type === "training")).toHaveLength(0);
+    // 프리시즌 훈련이 미리 깔려 있다 — 다만 부임 첫날은 아직 여름 휴가다
+    expect(state.trainingSessions.length).toBeGreaterThan(0);
+    expect(state.schedule.some((e) => e.type === "training" && e.date === state.date)).toBe(false);
+    expect(state.schedule.some((e) => e.type === "training" && e.date > state.date)).toBe(true);
     expect(state.phase).toBe("idle");
   });
 
@@ -208,21 +448,42 @@ describe("시즌 일정 (일정 축)", () => {
   });
 
   it("이적창은 여름(7/1~9/1)·겨울(1/1~2/1)", () => {
-    const windows = buildTransferWindows(1);
+    // 우리 창은 leagueId가 없다 — 사우디·MLS는 자기 리그 창을 따로 갖는다
+    const windows = buildTransferWindows(1).filter((w) => w.leagueId === undefined);
     expect(windows.map((w) => w.kind)).toEqual(["summer", "winter"]);
     expect(windows[0]?.opensOn).toBe("2026-07-01");
     expect(windows[0]?.closesOn).toBe("2026-09-01");
     expect(windows[1]?.opensOn).toBe("2027-01-01");
   });
+
+  it("이적 시장 전용 리그는 창이 우리와 다르다 — 사우디는 늦게 닫힌다", () => {
+    const windows = buildTransferWindows(1);
+    const ours = windows.find((w) => w.leagueId === undefined && w.kind === "summer")!;
+    const saudi = windows.find((w) => w.leagueId === "saudi" && w.kind === "summer")!;
+    const mls = windows.filter((w) => w.leagueId === "mls");
+
+    // 우리 창이 닫힌 뒤에도 사우디는 열려 있다 — 팔 수는 있고 대체 영입은 못 한다
+    expect(saudi.closesOn > ours.closesOn).toBe(true);
+    expect(windowOpenOn(windows, "2026-09-20")).toBeNull();
+    expect(windowOpenOn(windows, "2026-09-20", "saudi")).not.toBeNull();
+    // 리그를 안 주면 우리 창만 본다 — 섞이면 "사우디가 열렸으니 우리도"가 된다
+    expect(windowOpenOn(windows, "2026-08-01")?.leagueId).toBeUndefined();
+    // MLS는 아예 다른 계절에 연다 (북미 시즌이 봄에 시작한다)
+    expect(mls.length).toBe(2);
+    expect(mls.some((w) => w.opensOn.includes("-02-"))).toBe(true);
+  });
 });
 
 describe("온보딩 — 배경 직접 입력 해석 (결정 #11)", () => {
-  it("합계가 항상 고정 총점이다", () => {
-    for (const bg of ["선수 출신 주장", "데이터 분석가", "에이전트로 일했다", "축구 유튜버", ""]) {
+  const sum = (a: ManagerAttributes) => MANAGER_ATTRIBUTES.reduce((t, axis) => t + a[axis], 0);
+
+  it("모든 축이 시작 범위 안에 있다", () => {
+    for (const bg of ["선수 출신 주장", "데이터 분석가", "에이전트로 일했다", "축구 유튜버", "―"]) {
       const attrs = interpretBackgroundHeuristic(bg);
-      expect(attrs.leadership + attrs.tactics + attrs.negotiation + attrs.media).toBe(
-        ONBOARDING_TOTAL,
-      );
+      for (const v of Object.values(attrs)) {
+        expect(v).toBeGreaterThanOrEqual(START_MIN_AXIS);
+        expect(v).toBeLessThanOrEqual(START_MAX_AXIS);
+      }
     }
   });
 
@@ -231,5 +492,96 @@ describe("온보딩 — 배경 직접 입력 해석 (결정 #11)", () => {
     const agent = interpretBackgroundHeuristic("선수 에이전트로 협상 경력 10년");
     expect(player.leadership).toBeGreaterThan(agent.leadership);
     expect(agent.negotiation).toBeGreaterThan(player.negotiation);
+  });
+
+  it("커리어의 격이 기준선을 정한다 — 무경력은 낮게 시작한다", () => {
+    expect(careerTierOf("특별한 경력은 없다")).toBe("none");
+    // 직함만으로는 무대를 알 수 없다 — 레벨이 안 적힌 축구 경력은 minor에서 출발한다
+    expect(careerTierOf("동네 조기축구 감독")).toBe("minor");
+    expect(careerTierOf("프리미어리그에서 뛰었던 수비수")).toBe("major");
+    expect(careerTierOf("챔피언스리그 우승 감독")).toBe("elite");
+
+    const none = interpretBackgroundHeuristic("특별한 경력은 없다");
+    const minor = interpretBackgroundHeuristic("동네 조기축구 감독");
+    const major = interpretBackgroundHeuristic("프리미어리그에서 뛰었던 수비수");
+    const elite = interpretBackgroundHeuristic("챔피언스리그를 우승한 감독");
+    expect(sum(none)).toBeLessThan(sum(minor));
+    expect(sum(minor)).toBeLessThan(sum(major));
+    expect(sum(major)).toBeLessThan(sum(elite));
+    // 무경력은 평균 34 — 성장 상한(90)까지 남은 여지가 곧 서사다
+    expect(sum(none) / MANAGER_ATTRIBUTES.length).toBeLessThan(40);
+  });
+
+  it("무대의 격을 가른다 — K리그 프로는 5대 리그와 같지 않다", () => {
+    // "프로"는 무대가 아니다. 5대 리그 밖 리그·하부·2부는 minor에 머문다
+    for (const bg of [
+      "K리그에서 뛰다 은퇴한 수비수",
+      "J리그 프로 선수 출신",
+      "MLS에서 감독으로 일했다",
+      "챔피언십(2부) 팀 감독",
+    ]) {
+      expect(careerTierOf(bg)).toBe("minor");
+    }
+    const kleague = interpretBackgroundHeuristic("K리그에서 뛰다 은퇴한 수비수");
+    const epl = interpretBackgroundHeuristic("프리미어리그에서 뛰다 은퇴한 수비수");
+    expect(sum(kleague)).toBeLessThan(sum(epl));
+
+    // 하위 무대의 성취는 인정하되 최상위와 같은 자리에 두지 않는다
+    expect(careerTierOf("K리그 우승 감독")).toBe("major");
+    expect(careerTierOf("챔피언스리그 우승 감독")).toBe("elite");
+  });
+
+  it("부임 구단의 격이 기준선의 하한을 올린다", () => {
+    const bg = "축구를 좋아하는 평범한 회사원입니다"; // 커리어 단서 없음 = 34
+    const nobody = interpretBackgroundHeuristic(bg);
+    const atBigClub = interpretBackgroundHeuristic(bg, "mancity"); // tier 1
+    const atMidTable = interpretBackgroundHeuristic(bg, "brighton"); // tier 3
+    expect(sum(nobody)).toBeLessThan(sum(atMidTable));
+    expect(sum(atMidTable)).toBeLessThan(sum(atBigClub));
+    expect(atBigClub.leadership).toBe(teamFloorOf("mancity"));
+
+    // 하한이므로 이미 그 격을 넘는 커리어는 깎이지 않는다 —
+    // 챔스 우승자가 승격팀에 부임하는 것도 그것으로 이야기가 된다
+    const legend = "챔피언스리그를 우승한 감독";
+    expect(interpretBackgroundHeuristic(legend, "ipswich")).toEqual(
+      interpretBackgroundHeuristic(legend, "mancity"),
+    );
+
+    // 알 수 없는 팀·미지정은 보정 없음
+    expect(interpretBackgroundHeuristic(bg, "없는팀")).toEqual(nobody);
+  });
+
+  it("축끼리 같은 낱말을 나눠 갖지 않는다 — 한 단어가 두 축을 올리면 예산이 샌다", () => {
+    /**
+     * `분석`이 전술과 분석 양쪽 패턴에 걸려 있던 때, "데이터 분석가" 한 마디가
+     * 두 축을 동시에 올려 특화 예산이 조용히 두 배가 됐다.
+     */
+    // 결과값으로는 못 잰다 — 같은 낱말이 커리어 등급까지 움직이면 기준선이 통째로
+    // 올라 다섯 축이 함께 오른다. 키워드 표에 직접 묻는다
+    for (const word of [
+      "분석",
+      "데이터",
+      "스카우트",
+      "전술",
+      "훈련",
+      "피지컬",
+      "에이전트",
+      "주장",
+    ]) {
+      const hit = specialtyAxesOf(word);
+      expect(hit.length, `"${word}"가 ${hit.join("·")} 를 함께 올린다`).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("키워드를 나열해도 특화 총량은 예산을 넘지 않는다", () => {
+    // 둘 다 minor 등급(무대가 안 적힌 경력) — 기준선은 같고 가산의 합만 예산으로 묶인다.
+    // 축별 반올림 때문에 합이 1~2점 흔들릴 수 있어 여유를 둔다
+    const stuffed = interpretBackgroundHeuristic(
+      "주장 출신으로 데이터 분석가이고 에이전트였으며 방송 해설도 했다",
+    );
+    const single = interpretBackgroundHeuristic("에이전트로 일했다");
+    expect(careerTierOf("에이전트로 일했다")).toBe("minor");
+    expect(sum(stuffed) - sum(single)).toBeLessThan(SPECIALTY_BUDGET);
+    expect(sum(stuffed) - MANAGER_ATTRIBUTES.length * 42).toBeLessThanOrEqual(SPECIALTY_BUDGET + 2);
   });
 });

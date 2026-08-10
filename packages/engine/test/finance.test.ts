@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { GameState } from "@story-fm/engine";
 import {
+  NARRATIVE_FINANCE_WAGE_LIMIT,
   PSR_LOSS_LIMIT,
+  adjustTransferBudget,
   amortisationOf,
+  applyFinanceEvent,
+  weeklyWagesOf,
   categoryOf,
   clubProfile,
   currentMonthSummary,
@@ -89,9 +93,7 @@ describe("원장", () => {
 describe("매치데이", () => {
   it("관중은 수용인원 안에서 결정적으로 정해진다", () => {
     const state = createTestGame();
-    const match = state.matches.find(
-      (m) => m.homeTeamId === state.userTeamId && !m.neutral,
-    )!;
+    const match = state.matches.find((m) => m.homeTeamId === state.userTeamId && !m.neutral)!;
     const first = matchdayRevenue(state, match);
     const again = matchdayRevenue(state, match);
     expect(first).toEqual(again); // 같은 세이브·같은 경기 = 같은 관중
@@ -106,9 +108,7 @@ describe("매치데이", () => {
     const big = createTestGame(7, "manutd"); // 올드 트래퍼드 74,310
     const small = createTestGame(7, "bournemouth"); // 바이탈리티 11,307
     const revenueOf = (state: GameState) => {
-      const match = state.matches.find(
-        (m) => m.homeTeamId === state.userTeamId && !m.neutral,
-      )!;
+      const match = state.matches.find((m) => m.homeTeamId === state.userTeamId && !m.neutral)!;
       return matchdayRevenue(state, match).income;
     };
     expect(revenueOf(big)).toBeGreaterThan(revenueOf(small) * 3);
@@ -186,9 +186,7 @@ describe("월간 보고서", () => {
     advanceUntil(state, "2026-12-05");
     const reports = [...state.financeReports].sort((a, b) => (a.month < b.month ? -1 : 1));
     const oldest = reports[0]!;
-    const later = reports
-      .filter((r) => r.month > oldest.month)
-      .reduce((s, r) => s + r.cashNet, 0);
+    const later = reports.filter((r) => r.month > oldest.month).reduce((s, r) => s + r.cashNet, 0);
     const thisMonth = currentMonthSummary(state).cashNet;
     expect(financeOf(state, state.userTeamId).balance).toBe(
       oldest.closingBalance + later + thisMonth,
@@ -198,9 +196,7 @@ describe("월간 보고서", () => {
   it("상세 원장은 3개월만 남고 보고서는 남는다", () => {
     const state = createTestGame();
     advanceUntil(state, "2026-12-05");
-    const months = new Set(
-      financeOf(state, state.userTeamId).ledger.map((e) => monthOf(e.date)),
-    );
+    const months = new Set(financeOf(state, state.userTeamId).ledger.map((e) => monthOf(e.date)));
     expect(months.size).toBeLessThanOrEqual(3);
     expect(months.has("2026-07")).toBe(false); // 잘렸다
     expect(state.financeReports.some((r) => r.month === "2026-07")).toBe(true); // 요약은 영구
@@ -366,7 +362,7 @@ describe("조회", () => {
 describe("밸런스 기준선", () => {
   it("tier1 한 시즌 순익이 설계 밴드 안에 있다 (club-finance §10)", () => {
     const state = createTestGame(42, "arsenal");
-    let guard = 90;
+    let guard = 120;
     while (guard-- > 0) {
       const before = state.date;
       advanceAndPlay(state);
@@ -376,15 +372,22 @@ describe("밸런스 기준선", () => {
     expect(season1.length).toBeGreaterThanOrEqual(10);
     const cash = season1.reduce((s, r) => s + r.cashNet, 0);
     const income = season1.reduce((s, r) => s + r.incomeTotal, 0);
-    // 구모델(중계+스폰서 정액 £19M/월 + 티켓 정액)의 순익 +£111M ±10% 대역.
-    // 총량은 유지하고 편차만 새로 만든다는 결정 B의 가드레일이다.
+    // 구모델(중계+스폰서 정액 £19M/월 + 티켓 정액)의 순익 +£111M ±10% 대역에서
+    // 출발했고, 국내 컵이 붙으며 홈 매치데이 몇 경기와 라운드 상금만큼 상단이
+    // 올라갔다 (실제로도 컵 우승 경로는 tier1 구단에 +£5~10M 수준이다).
+    //
+    // ⚠️ 상단을 £175M으로 올렸다 — **비용이 줄어서가 아니라 정확해져서**다.
+    // 예전엔 합성 아카데미 선수까지 OVR 곡선으로 £30~60k/주를 받아 아스날 임금이
+    // 연 £225M이었는데, 주급 모델을 실제 변인으로 다시 짜면서(wages.ts) 연 £190M로
+    // 내려왔다 — 공개 자료의 £186M과 맞는 값이다. 그만큼이 순익으로 남는다.
+    // ⚠️ 남은 사실: **수입 모델이 후하다.** 실제 EPL 구단의 이적 제외 순익은
+    // 연 £20~60M이라 £155M은 여전히 높다. 그동안 과다 임금이 그걸 가리고 있었고,
+    // 이건 주급이 아니라 수입 쪽에서 따로 잡을 일이다 (club-finance §10).
     expect(cash).toBeGreaterThan(100_000_000);
-    expect(cash).toBeLessThan(122_000_000);
+    expect(cash).toBeLessThan(175_000_000);
     // 급여 비중 — 경기가 있는 달은 실제 구단 범위 안에 든다.
     // 프리시즌 달(매치데이 수입 없음)은 자연히 높아 대상에서 뺀다
-    const inSeason = season1.filter((r) =>
-      r.income.some((l) => l.category === "matchday"),
-    );
+    const inSeason = season1.filter((r) => r.income.some((l) => l.category === "matchday"));
     expect(inSeason.length).toBeGreaterThanOrEqual(9);
     for (const report of inSeason) {
       expect(report.wageRatio, report.month).toBeGreaterThan(0.2);
@@ -395,7 +398,7 @@ describe("밸런스 기준선", () => {
 
   it("어떤 리그의 AI 구단도 한 시즌에 파산하지 않는다", () => {
     const state = createTestGame(42, "arsenal");
-    let guard = 90;
+    let guard = 120;
     while (guard-- > 0) {
       const before = state.date;
       advanceAndPlay(state);
@@ -414,4 +417,96 @@ describe("밸런스 기준선", () => {
       expect(sorted[0]!, `${league} 최저 잔고`).toBeGreaterThan(-30_000_000);
     }
   }, 60_000);
+});
+
+/**
+ * 서사가 재정에 닿는 통로 — 매출·비용은 원장으로, 구단주 출자는 예산으로.
+ * 두 축을 나누는 이유가 여기서 검증된다: 구단주 돈으로 PSR을 풀 수 없어야 한다.
+ */
+describe("재정 이벤트 스킬", () => {
+  it("서사 매출은 원장에 남아 잔고와 손익에 함께 반영된다", () => {
+    const state = createTestGame(7, "tottenham");
+    const finance = financeOf(state, state.userTeamId);
+    const before = finance.balance;
+
+    const res = applyFinanceEvent(state, {
+      kind: "income",
+      category: "merchandising",
+      amount: 2_000_000,
+      note: "개막전 유니폼 완판",
+    });
+    expect(res.ok).toBe(true);
+    expect(finance.balance).toBe(before + 2_000_000);
+
+    const entry = finance.ledger.at(-1)!;
+    expect(entry.category).toBe("merchandising");
+    expect(entry.source).toBe("narrative");
+    // 코어가 낸 항목과 섞이면 하루 상한을 셀 수 없다
+    expect(finance.ledger.filter((e) => e.source === "narrative")).toHaveLength(1);
+  });
+
+  it("코어가 계산하는 축은 서사가 건드릴 수 없다", () => {
+    const state = createTestGame(7, "tottenham");
+    for (const category of [
+      "broadcast_equal",
+      "player_wages",
+      "transfer_in",
+      "amortisation",
+    ] as const) {
+      const res = applyFinanceEvent(state, {
+        kind: "income",
+        category,
+        amount: 1_000_000,
+        note: "장부 조작",
+      });
+      expect(res.ok, category).toBe(false);
+    }
+  });
+
+  it("하루 상한은 구단 규모(주급 총액)에 비례하고 누적으로 센다", () => {
+    const state = createTestGame(7, "tottenham");
+    const cap = weeklyWagesOf(state, state.userTeamId) * NARRATIVE_FINANCE_WAGE_LIMIT;
+
+    const first = applyFinanceEvent(state, {
+      kind: "income",
+      category: "commercial",
+      amount: Math.round(cap * 0.8),
+      note: "스폰서 성과 보너스",
+    });
+    expect(first.ok).toBe(true);
+
+    // 나눠 부르면 넘길 수 있으면 상한이 아니다
+    const second = applyFinanceEvent(state, {
+      kind: "income",
+      category: "commercial",
+      amount: Math.round(cap * 0.5),
+      note: "한 번 더",
+    });
+    expect(second.ok).toBe(false);
+  });
+
+  it("구단주 출자는 이적 예산만 움직이고 PSR을 개선하지 않는다", () => {
+    const state = createTestGame(7, "tottenham");
+    const finance = financeOf(state, state.userTeamId);
+    const budgetBefore = finance.transferBudget;
+    const balanceBefore = finance.balance;
+    const psrBefore = psrStatus(state).rolling3Season;
+
+    const res = adjustTransferBudget(state, { delta: 10_000_000, note: "구단주가 자금을 댔다" });
+    expect(res.ok).toBe(true);
+    expect(finance.transferBudget).toBe(budgetBefore + 10_000_000);
+    // 자본 투입은 매출이 아니다 — 통장도 손익도 그대로다
+    expect(finance.balance).toBe(balanceBefore);
+    expect(psrStatus(state).rolling3Season).toBe(psrBefore);
+    expect(finance.ledger.some((e) => e.source === "narrative")).toBe(false);
+  });
+
+  it("PSR로 동결된 예산은 증액으로 풀 수 없다 (삭감은 된다)", () => {
+    const state = createTestGame(7, "tottenham");
+    const finance = financeOf(state, state.userTeamId);
+    finance.budgetFrozen = true;
+
+    expect(adjustTransferBudget(state, { delta: 5_000_000, note: "구단주 지원" }).ok).toBe(false);
+    expect(adjustTransferBudget(state, { delta: -5_000_000, note: "보드 삭감" }).ok).toBe(true);
+  });
 });

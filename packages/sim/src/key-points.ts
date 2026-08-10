@@ -1,0 +1,350 @@
+import type { Player, PositionGroup } from "@story-fm/domain";
+import type { LineupSlot } from "./strength-packet";
+
+/**
+ * 키포인트 — **감독이 경기 전·중에 읽어내는 것들.**
+ *
+ * 전력 숫자(존 막대·xG)는 "누가 이기고 있나"를 말하지만 **무엇을 해야 하는지**는
+ * 말하지 않는다. 실제 감독이 상대를 분석할 때 보는 건 평균값이 아니라 **어긋난
+ * 짝**이다: 우리 윙어가 저 풀백보다 빠른가, 저 센터백이 공중볼을 못 따내는가,
+ * 상대 6번이 압박에 흔들리는가.
+ *
+ * ## 축을 고른 기준
+ *
+ * 실제 전술 분석이 다루는 국면을 축으로 삼되, **코어가 이미 시뮬레이션에 쓰는
+ * 능력치로만** 만든다. 화면에만 있고 결과에 닿지 않는 정보는 감독을 속인다.
+ *
+ *   - **뒷공간** — 하이라인의 대가. 최전방 pace vs 최종 수비 pace
+ *   - **측면 1대1** — 윙어 dribbling vs 풀백 tackling (드리블 돌파)
+ *   - **공중볼** — 크로스·세트피스의 근거. aerial
+ *   - **압박 저항** — 빌드업이 상대 프레스를 견디는가. composure·passing
+ *   - **창조** — 킬패스가 어디서 나오나. vision
+ *   - **마무리** — 같은 기회에서 더 넣는가. finishing
+ *   - **골문** — 선방과 배급. goalkeeping·passing
+ *   - **수비 조직** — 라인을 지키는 눈. positioning·leadership
+ *   - **경합** — 몸싸움으로 밀어내는가. strength
+ *   - **활동량** — 90분을 버티는가. stamina
+ *   - **세트피스 키커** — 죽은 공에서 나오는 득점. kicking
+ *   - **경험** — 어린 선수가 압박에 흔들린다. composure + 나이
+ *   - **거친 선수** — 카드와 페널티의 씨앗. aggression
+ *
+ * ## 감독의 눈만큼만 보인다
+ *
+ * 전부 다 보이면 감독의 **분석**과 **전술** 능력이 화면에서 아무 뜻도 갖지 않는다.
+ *   - **분석**이 개수를 정한다 — 몇 가지를 발견하느냐.
+ *   - **전술**이 정밀도를 정한다 — "상대 왼쪽이 느리다"인가 "사카(88) vs 무뇨스(61)"인가.
+ *
+ * 자르는 순서는 `weight`(그 짝이 얼마나 벌어졌나)다. 눈이 어두워도 **가장 큰
+ * 구멍은 보인다** — 무작위로 고르면 분석 능력이 "운"이 된다.
+ */
+export interface KeyPoint {
+  /**
+   * 표적 id — **경기 안에서 안정적**이다(라인업이 그대로면 같은 id).
+   * 축 이름과 관련된 선수 id로 만들어, 교체가 일어나면 그 표적이 사라진다.
+   */
+  id: string;
+  /** 이 지점을 **가진 쪽** — 공략하는 쪽이 아니다 */
+  side: "home" | "away";
+  /** 공략이 닿는 존 */
+  zone: "attack" | "midfield" | "defense";
+  /** 정밀한 문장 — 이름과 수치까지 */
+  text: string;
+  /** 흐린 문장 — 방향만. 전술 능력이 낮으면 이쪽이 보인다 */
+  vague: string;
+  /** 벌어진 정도 — 클수록 먼저 보인다 */
+  weight: number;
+}
+
+const groupOf = (s: LineupSlot): PositionGroup => {
+  const code = s.position.replace(/^[LRC]/, "");
+  if (code === "GK") return "GK";
+  if (["CB", "B", "WB", "DF"].some((x) => code.endsWith(x))) return "DF";
+  if (["ST", "CF", "F", "W"].some((x) => code.endsWith(x))) return "FW";
+  return "MF";
+};
+
+const top = (xi: LineupSlot[], g: PositionGroup, read: (p: Player) => number) =>
+  xi
+    .filter((s) => groupOf(s) === g)
+    .sort((a, b) => read(b.player) - read(a.player))[0]?.player;
+
+const bottom = (xi: LineupSlot[], g: PositionGroup, read: (p: Player) => number) =>
+  xi
+    .filter((s) => groupOf(s) === g)
+    .sort((a, b) => read(a.player) - read(b.player))[0]?.player;
+
+const avg = (xi: LineupSlot[], g: PositionGroup, read: (p: Player) => number) => {
+  const xs = xi.filter((s) => groupOf(s) === g).map((s) => read(s.player));
+  return xs.length > 0 ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
+};
+
+/** 한쪽 팀이 상대에게 갖는 우위·약점 — 두 방향으로 각각 부른다 */
+type RawPoint = Omit<KeyPoint, "side"> & { side: "us" | "them" };
+
+function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: string): RawPoint[] {
+  const out: RawPoint[] = [];
+  const push = (
+    axis: string,
+    who: Player | undefined,
+    side: RawPoint["side"],
+    zone: KeyPoint["zone"],
+    weight: number,
+    text: string,
+    vague: string,
+  ) => {
+    if (weight > 0) out.push({ id: `${axis}:${who?.id ?? "team"}`, side, zone, weight, text, vague });
+  };
+
+  // ── 뒷공간 — 하이라인의 대가 ──
+  const fast = top(atk, "FW", (p) => p.attributes.pace);
+  const slowCB = bottom(def, "DF", (p) => p.attributes.pace);
+  if (fast && slowCB) {
+    const gap = fast.attributes.pace - slowCB.attributes.pace;
+    push(
+      "backline-pace",
+      slowCB,
+      "them",
+      "attack",
+      gap - 9,
+      `${us} 뒷공간 공략: ${fast.name}(pace ${fast.attributes.pace}) vs ${slowCB.name}(pace ${slowCB.attributes.pace})`,
+      `${them} 최종 수비가 발이 느리다 — 뒷공간이 열린다`,
+    );
+  }
+
+  // ── 측면 1대1 — 드리블 돌파 ──
+  const dribbler = top(atk, "FW", (p) => p.attributes.dribbling);
+  const weakTackler = bottom(def, "DF", (p) => p.attributes.tackling);
+  if (dribbler && weakTackler) {
+    const gap = dribbler.attributes.dribbling - weakTackler.attributes.tackling;
+    push(
+      "wing-duel",
+      weakTackler,
+      "them",
+      "attack",
+      gap - 11,
+      `${us} 1대1 우위: ${dribbler.name}(드리블 ${dribbler.attributes.dribbling}) vs ${weakTackler.name}(태클 ${weakTackler.attributes.tackling})`,
+      `${us}는 측면에서 사람을 벗겨낼 수 있다`,
+    );
+  }
+
+  // ── 공중볼 — 크로스와 세트피스 ──
+  const tall = top(atk, "FW", (p) => p.attributes.aerial);
+  const weakAir = bottom(def, "DF", (p) => p.attributes.aerial);
+  if (tall && weakAir) {
+    const gap = tall.attributes.aerial - weakAir.attributes.aerial;
+    push(
+      "aerial",
+      weakAir,
+      "them",
+      "attack",
+      gap - 11,
+      `${us} 제공권 우위: ${tall.name}(공중볼 ${tall.attributes.aerial}) vs ${weakAir.name}(${weakAir.attributes.aerial})`,
+      `${us}가 공중에서 앞선다 — 크로스와 세트피스가 통한다`,
+    );
+  }
+
+  // ── 압박 저항 — 빌드업이 프레스를 견디나 ──
+  const shaky = bottom(def, "MF", (p) => (p.attributes.composure + p.attributes.passing) / 2);
+  if (shaky) {
+    const value = (shaky.attributes.composure + shaky.attributes.passing) / 2;
+    push(
+      "press-resistance",
+      shaky,
+      "them",
+      "midfield",
+      72 - value,
+      `${them} 빌드업 약점: ${shaky.name}(침착 ${shaky.attributes.composure} · 패스 ${shaky.attributes.passing}) — 압박하면 흔들린다`,
+      `${them} 중원은 압박에 약하다`,
+    );
+  }
+
+  // ── 창조 — 킬패스가 나오는 자리 ──
+  const creator = top(atk, "MF", (p) => p.attributes.vision);
+  if (creator) {
+    push(
+      "creator",
+      creator,
+      "us",
+      "midfield",
+      creator.attributes.vision - 79,
+      `${us} 창조의 축: ${creator.name}(시야 ${creator.attributes.vision}) — 이 선수를 지우면 공격이 멎는다`,
+      `${us}의 공격은 중원 한 명에게서 시작된다`,
+    );
+  }
+
+  // ── 마무리 — 같은 기회에서 더 넣는다 ──
+  const finisher = top(atk, "FW", (p) => p.attributes.finishing);
+  if (finisher) {
+    push(
+      "finisher",
+      finisher,
+      "us",
+      "attack",
+      finisher.attributes.finishing - 81,
+      `${us} 결정력: ${finisher.name}(결정력 ${finisher.attributes.finishing}) — 한 번의 기회로 끝낸다`,
+      `${us} 최전방은 기회를 놓치지 않는다`,
+    );
+  }
+
+  // ── 골문 — 선방과 배급 ──
+  const gk = top(def, "GK", (p) => p.attributes.goalkeeping);
+  if (gk) {
+    push(
+      "keeper",
+      gk,
+      "them",
+      "attack",
+      73 - gk.attributes.goalkeeping,
+      `${them} 골문 불안: ${gk.name}(골키핑 ${gk.attributes.goalkeeping})`,
+      `${them} 골키퍼가 미덥지 않다`,
+    );
+    push(
+      "keeper-distribution",
+      gk,
+      "them",
+      "defense",
+      gk.attributes.passing - 77,
+      `${them} 골키퍼 배급: ${gk.name}(패스 ${gk.attributes.passing}) — 뒤에서부터 풀어 나온다`,
+      `${them}는 골키퍼부터 빌드업한다`,
+    );
+  }
+
+  // ── 수비 조직 — 라인을 지키는 눈 ──
+  const line = avg(def, "DF", (p) => p.attributes.positioning);
+  const leader = top(def, "DF", (p) => p.attributes.leadership);
+  if (line > 0) {
+    push(
+      "backline-shape",
+      undefined,
+      "them",
+      "attack",
+      70 - line,
+      `${them} 수비 조직: 백라인 평균 위치선정 ${Math.round(line)} — 라인이 자주 어긋난다`,
+      `${them} 수비는 짜임새가 헐겁다`,
+    );
+    if (leader && leader.attributes.leadership <= 45) {
+      push(
+        "backline-leader",
+        leader,
+        "them",
+        "attack",
+        50 - leader.attributes.leadership,
+        `${them} 백라인에 조율자가 없다 (최고 리더십 ${leader.attributes.leadership})`,
+        `${them} 수비는 서로를 부르지 않는다`,
+      );
+    }
+  }
+
+  // ── 경합 — 몸으로 밀어낸다 ──
+  const strong = top(atk, "FW", (p) => p.attributes.strength);
+  const light = bottom(def, "DF", (p) => p.attributes.strength);
+  if (strong && light) {
+    const gap = strong.attributes.strength - light.attributes.strength;
+    push(
+      "physical",
+      light,
+      "them",
+      "attack",
+      gap - 13,
+      `${us} 몸싸움 우위: ${strong.name}(힘 ${strong.attributes.strength}) vs ${light.name}(${light.attributes.strength})`,
+      `${us} 최전방이 등지고 버틴다`,
+    );
+  }
+
+  // ── 활동량 — 90분을 버티나 ──
+  const engine = avg(atk, "MF", (p) => p.attributes.stamina);
+  if (engine > 0) {
+    push(
+      "stamina",
+      undefined,
+      "us",
+      "midfield",
+      68 - engine,
+      `${us} 중원 활동량 부족: 평균 체력 ${Math.round(engine)} — 후반에 밀린다`,
+      `${us} 중원은 후반에 다리가 무거워진다`,
+    );
+  }
+
+  // ── 세트피스 키커 — 죽은 공에서 나오는 득점 ──
+  const kicker = [...atk].sort((a, b) => b.player.attributes.kicking - a.player.attributes.kicking)[0]
+    ?.player;
+  if (kicker) {
+    push(
+      "set-piece",
+      kicker,
+      "us",
+      "attack",
+      kicker.attributes.kicking - 82,
+      `${us} 세트피스 키커: ${kicker.name}(킥 ${kicker.attributes.kicking})`,
+      `${us}는 죽은 공이 위협적이다`,
+    );
+  }
+
+  // ── 거친 선수 — 카드와 페널티의 씨앗 ──
+  const rough = [...def].sort(
+    (a, b) =>
+      b.player.attributes.aggression - b.player.attributes.composure -
+      (a.player.attributes.aggression - a.player.attributes.composure),
+  )[0]?.player;
+  if (rough) {
+    push(
+      "discipline",
+      rough,
+      "them",
+      "defense",
+      rough.attributes.aggression - rough.attributes.composure - 22,
+      `${them} 카드 위험: ${rough.name}(적극성 ${rough.attributes.aggression} · 침착 ${rough.attributes.composure})`,
+      `${them}에 발끈하는 선수가 있다`,
+    );
+  }
+
+  return out;
+}
+
+/**
+ * 두 팀의 키포인트 — 양방향으로 뽑고 큰 것부터 세운다.
+ *
+ * `manager`를 주지 않으면 전부 정밀하게 돌려준다(테스트·AI 팀 경기).
+ */
+export function buildKeyPoints(
+  homeXI: LineupSlot[],
+  awayXI: LineupSlot[],
+  homeName: string,
+  awayName: string,
+): KeyPoint[] {
+  /**
+   * `sidePoints`의 `us`/`them`은 **그 방향 안에서만** 뜻이 있다 — 합치면서
+   * 절대 좌표(home/away)로 옮긴다. 이걸 빠뜨리면 공략이 반대편에 걸린다
+   * (실제로 우리가 노렸는데 상대 xG가 올랐다).
+   */
+  const absolute = (points: RawPoint[], usSide: "home" | "away"): KeyPoint[] =>
+    points.map((p) => ({
+      ...p,
+      side: p.side === "us" ? usSide : usSide === "home" ? "away" : "home",
+    }));
+  return [
+    ...absolute(sidePoints(homeXI, awayXI, homeName, awayName), "home"),
+    ...absolute(sidePoints(awayXI, homeXI, awayName, homeName), "away"),
+  ].sort((a, b) => b.weight - a.weight);
+}
+
+/** 감독이 몇 개를 발견하는가 — 분석 30이면 3개, 85면 9개 */
+function keyPointCount(analysis: number): number {
+  return Math.max(2, Math.min(10, Math.round(2 + (analysis / 99) * 8)));
+}
+
+/**
+ * 얼마나 정확히 읽는가 — **전술**이 정한다.
+ *
+ * 문턱을 넘으면 이름과 수치가 보이고, 못 넘으면 방향만 보인다. 한 경기 안에서
+ * 어떤 건 정밀하고 어떤 건 흐린 게 자연스럽다 — 크게 벌어진 짝일수록 눈이
+ * 어두워도 또렷하다.
+ */
+export function readKeyPoints(points: KeyPoint[], analysis: number, tactics: number): string[] {
+  const sharp = (tactics / 99) * 0.75;
+  return points.slice(0, keyPointCount(analysis)).map((p) => {
+    // 벌어진 폭이 큰 짝은 낮은 전술 능력으로도 또렷이 보인다
+    const clarity = sharp + Math.min(0.25, p.weight / 60);
+    return clarity >= 0.55 ? p.text : p.vague;
+  });
+}

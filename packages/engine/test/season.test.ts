@@ -3,6 +3,7 @@ import { ageOf } from "@story-fm/domain";
 import {
   activeContract,
   assignmentsOf,
+  isClubTeam,
   computeStandings,
   groupOf,
   playersOf,
@@ -55,9 +56,11 @@ describe("시즌 전환 (결정 #15, game-loop §7)", () => {
     expect(state.calendar.start.startsWith("2027-08")).toBe(true);
     expect(state.matches.every((m) => m.result === null)).toBe(true);
     expect(state.matches.every((m) => m.season === 2)).toBe(true);
-    // 새 이적창 2개 + 일정 엔트리
-    expect(state.windows.filter((w) => w.season === 2)).toHaveLength(2);
-    expect(state.windows.find((w) => w.kind === "summer")?.opensOn).toBe("2027-07-01");
+    // 새 이적창 2개 + 일정 엔트리 (사우디·MLS 창은 별도라 우리 것만 센다)
+    expect(state.windows.filter((w) => w.season === 2 && w.leagueId === undefined)).toHaveLength(2);
+    expect(
+      state.windows.find((w) => w.kind === "summer" && w.leagueId === undefined)?.opensOn,
+    ).toBe("2027-07-01");
     expect(digest.some((d) => d.includes("이적시장"))).toBe(true);
     expect(digest.some((d) => d.includes("프리시즌"))).toBe(true);
   });
@@ -90,7 +93,7 @@ describe("시즌 전환 (결정 #15, game-loop §7)", () => {
   it("유스 콜업이 TRANSFER + CONTRACT와 함께 들어온다", () => {
     const state = createTestGame(5);
     transitionSeason(state);
-    const youth = userPlayers(state).filter((p) => p.id.includes("-y"));
+    const youth = userPlayers(state).filter((p) => p.id.includes("-y2-"));
     expect(youth.length).toBeGreaterThan(0);
     for (const y of youth) {
       expect(y.catalogId).toBeNull(); // 카탈로그에 없는 생성 선수
@@ -105,6 +108,7 @@ describe("시즌 전환 (결정 #15, game-loop §7)", () => {
     const state = createTestGame(5);
     transitionSeason(state);
     for (const team of state.teams) {
+      if (!isClubTeam(team.id)) continue; // 무소속은 클럽이 아니다
       const starters = assignmentsOf(state, team.id, "starting");
       expect(starters).toHaveLength(11);
       expect(starters.filter((a) => a.position === "GK")).toHaveLength(1);
@@ -133,7 +137,8 @@ describe("시즌 전환 (결정 #15, game-loop §7)", () => {
 describe("풀 시즌 통합 — 38라운드 완주 후 커리어 기록·전환", () => {
   it("시즌을 끝까지 돌리면 SEASON_RECORD가 남고 시즌 2로 전환된다", () => {
     const state = createTestGame(21);
-    let guard = 60;
+    // 리그 38 + 대항전 + 국내 컵 2개 — 한 시즌 최대 60여 경기
+    let guard = 100;
     while (state.season === 1 && guard-- > 0) {
       advanceAndPlay(state);
     }

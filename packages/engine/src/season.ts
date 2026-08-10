@@ -1,15 +1,22 @@
 import type { GamePlayer, PositionGroup } from "@story-fm/domain";
-import { ATTRIBUTE_AXES, ageOf, naturalPositionOf } from "@story-fm/domain";
-import { agingDelta } from "./attributes";
+import { CONDITION_BASE, ageOf, naturalPositionOf } from "@story-fm/domain";
 import {
   buildScheduleEntries,
   buildSeasonCalendar,
   buildTransferWindows,
   seasonYear,
 } from "./calendar";
+import { toFreeAgency } from "./departures";
 import { TEAM_CATALOG, leagueOfTeam, teamCatalogById } from "./data/team-catalog";
-import { CUP_CATALOG, competitionShortName, isCup } from "./data/cup-catalog";
-import { LEAGUE_CATALOG, leagueName } from "./data/league-catalog";
+import { CUP_CATALOG, competitionShortName, isCup, isEuroCup } from "./data/cup-catalog";
+import {
+  domesticChampion,
+  domesticCupWinners,
+  domesticCupsOf,
+  reviewDomesticCups,
+} from "./domestic-cup";
+import { hasPendingDraw } from "./draw-schedule";
+import { TOP_LEAGUES, isMarketOnlyLeague, leagueName } from "./data/league-catalog";
 import { euroChampion, euroStageMatches } from "./euro-knockout";
 import { payWinnerPrize } from "./euro-prize";
 import { payLeaguePrizes, paySeasonBonuses, topUpTransferBudget } from "./finance";
@@ -21,15 +28,15 @@ import {
   groupOf,
   playersOf,
   pushNarrative,
-  recomputeOverall,
   tacticsOf,
   teamName,
   teamShortName,
-  wageForOverall,
   FAMILIARITY_BASELINE,
   type GameState,
 } from "./state";
+import { estimateWeeklyWage, wageSubjectOf } from "./wages";
 import { makeRng, randInt } from "./rng";
+import { installDefaultTraining } from "./training-plan";
 
 /** 시즌 리뷰·전환 — 멀티시즌 코어 (결정 #15, game-loop.md §7) */
 
@@ -57,6 +64,8 @@ export function computeStandings(
   state: GameState,
   competitionId = leagueOfTeam(state.userTeamId),
 ): StandingRow[] {
+  // 이적 시장 전용 리그는 경기를 안 하므로 순위가 없다 — 국내 컵과 같은 취급
+  if (isMarketOnlyLeague(competitionId)) return [];
   const members = isCup(competitionId)
     ? entrantsOf(state.euroEntrants, competitionId)
     : state.teams.filter((t) => leagueOfTeam(t.id) === competitionId).map((t) => t.id);
@@ -121,13 +130,30 @@ export function computeStandings(
  * 결승을 치르지 않은 채 시즌이 넘어가 우승 팀이 없는 대회가 남는다.
  */
 export function allMatchesDone(state: GameState): boolean {
+  // 아직 안 열린 추첨이 있으면 그 라운드의 경기는 **아직 존재하지도 않는다**.
+  // "남은 경기 없음"으로 읽고 시즌을 넘기면 결승 없는 대회가 생긴다.
+  if (hasPendingDraw(state)) return false;
+
   const league = leagueOfTeam(state.userTeamId);
-  return state.matches
-    .filter(
-      (m) =>
-        m.season === state.season && (m.competitionId === league || isCup(m.competitionId)),
-    )
-    .every((m) => m.result !== null);
+  // 우리 나라 국내 컵도 기다린다 — FA컵 결승을 남긴 채 시즌이 넘어가면 우승 팀이
+  // 없는 대회가 생기고, 다음 시즌 유럽 티켓 한 장이 사라진다.
+  const ourCups = domesticCupsOf(state.userTeamId);
+  const played = state.matches.every(
+    (m) =>
+      m.season !== state.season ||
+      m.result !== null ||
+      !(
+        m.competitionId === league ||
+        isEuroCup(m.competitionId) ||
+        ourCups.some((c) => c.id === m.competitionId)
+      ),
+  );
+  if (!played) return false;
+
+  // 컵은 **우승 팀이 나와야** 끝이다 — 경기가 다 끝났어도 다음 단계가 편성 전일 수 있다
+  for (const cup of ourCups) if (!domesticChampion(state, cup.id)) return false;
+  for (const cup of CUP_CATALOG) if (!euroChampion(state, cup.id)) return false;
+  return true;
 }
 
 /**
@@ -142,7 +168,7 @@ export const SEASON_BUDGET_TOPUP: Record<number, number> = {
 };
 
 /** 보드 기대치 — 팀 tier가 난이도를 만든다 (game-loop §1) */
-function boardExpectation(teamId: string): { target: number; label: string } {
+export function boardExpectation(teamId: string): { target: number; label: string } {
   const tier = teamCatalogById(teamId)?.tier ?? 3;
   return tier === 1
     ? { target: 2, label: "우승 경쟁" }
@@ -197,7 +223,9 @@ function reviewEuropeanCampaign(state: GameState): string[] {
       pushNarrative(state, `${cup.name} 우승`, 5);
     } else if (ours) {
       state.manager.reputation.media = Math.min(100, state.manager.reputation.media + 4);
-      digest.push(`${competitionShortName(cup.id)} 준우승 — 결승에서 ${teamName(champion)}에 무너졌다`);
+      digest.push(
+        `${competitionShortName(cup.id)} 준우승 — 결승에서 ${teamName(champion)}에 무너졌다`,
+      );
       pushNarrative(state, `${competitionShortName(cup.id)} 준우승`, 4);
     } else {
       digest.push(`${competitionShortName(cup.id)} 우승: ${teamName(champion)}`);
@@ -230,9 +258,12 @@ export function reviewSeason(state: GameState): string[] {
       competition: leagueName(leagueOfTeam(state.userTeamId)),
       teamId: state.userTeamId,
     });
-    digest.push(`🏆 ${leagueName(leagueOfTeam(state.userTeamId))} 우승! 트로피 보관함에 추가되었다`);
+    digest.push(
+      `🏆 ${leagueName(leagueOfTeam(state.userTeamId))} 우승! 트로피 보관함에 추가되었다`,
+    );
   }
   digest.push(...reviewEuropeanCampaign(state));
+  digest.push(...reviewDomesticCups(state));
   // 재정 — 리그 순위 상금(전 팀)과 선수단 성과 보너스
   payLeaguePrizes(state, digest);
   paySeasonBonuses(state, position, digest);
@@ -273,40 +304,65 @@ export function transitionSeason(state: GameState): string[] {
   // 나이 판정 기준 — 다음 시즌 개막일
   const judgeDate = nextCalendar.start;
 
+  /**
+   * **끝난 계약은 지운다.** 아무도 읽지 않는데(활성 계약만 조회된다) 시즌마다
+   * 2,000줄씩 쌓여 세이브와 모든 순회를 무겁게 한다. 이력이 필요한 것은
+   * `TRANSFER` 원장이고 그건 그대로 남는다.
+   */
+  state.contracts = state.contracts.filter((c) => c.status === "active");
+
+  /**
+   * 선수 색인 — **팀 루프 안에서 선형 탐색을 하지 않기 위해서다.**
+   * 계약이 시즌마다 2,000줄씩 쌓이는데 팀마다 전체를 훑고 계약마다 선수를
+   * 찾으면 시즌 하나가 2,700만 번 비교가 된다(15시즌 회귀 테스트가 잡았다).
+   * 은퇴로 빠지고 유스로 들어오는 것만 그때그때 반영한다.
+   */
+  const playerIndex = new Map(state.players.map((p) => [p.id, p]));
+  /** 팀별 활성 계약 — 팀마다 전체 계약을 훑지 않는다 */
+  const contractsByTeam = new Map<string, typeof state.contracts>();
+  for (const c of state.contracts) {
+    if (c.status !== "active") continue;
+    const list = contractsByTeam.get(c.teamId);
+    if (list) list.push(c);
+    else contractsByTeam.set(c.teamId, [c]);
+  }
+
   for (const team of state.teams) {
+    /**
+     * **무소속은 클럽이 아니다** — 은퇴만 태우고 유스 유입·배치·계약 갱신은
+     * 건너뛴다. 안 그러면 "무소속 아카데미"가 매년 신인을 찍어낸다.
+     */
+    const isFreePool = leagueOfTeam(team.id) === "free";
     const tier = teamCatalogById(team.id)?.tier ?? 3;
     const retirees: string[] = [];
     let squad = playersOf(state, team.id);
 
     for (const player of squad) {
       const age = ageOf(player.birthdate, judgeDate);
-      // 축별 노화 곡선 (attribute-model.md §5) — 다리가 먼저 죽고 머리는 늦게까지 자란다.
-      // 늦게 자라는 축은 potential 상한을 넘지 않는다.
-      let aged = false;
-      for (const axis of ATTRIBUTE_AXES) {
-        const delta = agingDelta(axis, age);
-        if (delta === 0) continue;
-        // 기대값에 ±1 흔들기 — 같은 나이라도 선수마다 갈린다
-        const rolled = delta < 0 ? delta + randInt(rng, 0, 1) : delta;
-        if (rolled === 0) continue;
-        const cap = rolled > 0 ? Math.min(99, player.attributes.potential) : 99;
-        player.attributes[axis] = Math.max(20, Math.min(cap, player.attributes[axis] + rolled));
-        aged = true;
-      }
-      if (aged) recomputeOverall(player);
+      /**
+       * ⚠️ **노화 곡선은 여기서 굴리지 않는다.** 시즌 경계에 한 번 몰아서 적용하면
+       * 5월 마지막 날과 7월 첫날 사이에 스물아홉 살 윙어의 스피드가 두세 칸 꺼져 있다 —
+       * 감독이 겪은 것 없이 숫자만 달라진다. 이제 **매달 조금씩** 움직인다
+       * (`development.ts`). 시즌 전환이 하는 건 은퇴 판정과 명단 정리뿐이다.
+       */
       if (age >= 35 || (age >= 33 && player.attributes.overall < 72)) {
         retirees.push(player.id);
       }
       // 새 시즌 리셋
       player.state.form = 0;
-      player.state.fatigue = 5;
-      player.state.morale = 62;
+      // 새 시즌 — 쉬고 돌아왔다
+      player.state.condition = CONDITION_BASE;
     }
 
     if (retirees.length > 0) {
       const retSet = new Set(retirees);
       if (team.id === state.userTeamId) {
-        digest.push(`은퇴: ${squad.filter((p) => retSet.has(p.id)).map((p) => p.name).join(", ")}`);
+        digest.push(
+          `은퇴: ${squad
+            .filter((p) => retSet.has(p.id))
+            .map((p) => p.name)
+            .join(", ")}`,
+        );
       }
       // 은퇴도 팀 변경 원장에 남는다 (toTeamId = null)
       for (const id of retirees) {
@@ -321,21 +377,57 @@ export function transitionSeason(state: GameState): string[] {
           fee: 0,
           note: "현역 은퇴",
         });
-        const contract = state.contracts.find((c) => c.gamePlayerId === id && c.status === "active");
+        const contract = state.contracts.find(
+          (c) => c.gamePlayerId === id && c.status === "active",
+        );
         if (contract) contract.status = "ended";
       }
       state.players = state.players.filter((p) => !retSet.has(p.id));
+      for (const id of retirees) playerIndex.delete(id);
       squad = squad.filter((p) => !retSet.has(p.id));
     }
 
-    // 유망주 유입 — 은퇴 수 보충 + 포지션 그룹 최소 인원 확보 (소프트락 방지)
+    /**
+     * 계약 만료 — **우리 팀은 자동 갱신하지 않는다.**
+     *
+     * 예전엔 모든 팀이 자동 갱신돼서 재계약을 한 번도 안 해도 아무도 떠나지
+     * 않았다. 그러면 `open_renewal`이 서사용 버튼이 되고 설득 논거
+     * `last_chance`("계약이 1년 남았다")도 실제 위협이 아니다.
+     *
+     * 은퇴 **바로 뒤**에 두는 이유는 아래 유망주 유입이 이 빈자리까지 세야
+     * 하기 때문이다 — 안 그러면 감독이 재계약을 놓칠 때마다 스쿼드가 마르고
+     * 열 시즌 뒤 골키퍼가 사라진다(소프트락).
+     */
+    const leavers: string[] = [];
+    if (team.id === state.userTeamId) {
+      for (const contract of contractsByTeam.get(team.id) ?? []) {
+        if (contract.status !== "active") continue;
+        if (contract.until > nextCalendar.preseasonStart) continue;
+        const player = playerIndex.get(contract.gamePlayerId);
+        if (!player) {
+          contract.status = "ended";
+          continue;
+        }
+        leavers.push(player.id);
+        toFreeAgency(state, player, "계약 만료 — 자유계약", nextCalendar.preseasonStart);
+        digest.push(`계약 만료로 떠남: ${player.name} (무소속)`);
+      }
+      if (leavers.length > 0) {
+        const gone = new Set(leavers);
+        squad = squad.filter((p) => !gone.has(p.id));
+      }
+    }
+
+    if (isFreePool) continue;
+
+    // 유망주 유입 — 은퇴·계약 만료 수 보충 + 포지션 그룹 최소 인원 확보 (소프트락 방지)
     const MIN_GROUP: Record<PositionGroup, number> = { GK: 2, DF: 5, MF: 4, FW: 4 };
     const forced: PositionGroup[] = [];
     for (const group of Object.keys(MIN_GROUP) as PositionGroup[]) {
       const have = squad.filter((p) => groupOf(p) === group).length;
       for (let k = have; k < MIN_GROUP[group]; k++) forced.push(group);
     }
-    const totalIntake = Math.max(Math.max(1, retirees.length), forced.length);
+    const totalIntake = Math.max(Math.max(1, retirees.length + leavers.length), forced.length);
     for (let i = 0; i < totalIntake; i++) {
       const youth = generateYouthPlayer(
         state.seed + 101,
@@ -347,6 +439,7 @@ export function transitionSeason(state: GameState): string[] {
         seasonYear(nextSeason),
       );
       state.players.push(youth);
+      playerIndex.set(youth.id, youth);
       squad.push(youth);
       // 유스 콜업도 원장에 (fromTeamId = null)
       state.transfers.push({
@@ -364,21 +457,35 @@ export function transitionSeason(state: GameState): string[] {
         id: `c-${youth.id}`,
         gamePlayerId: youth.id,
         teamId: team.id,
-        weeklyWage: wageForOverall(youth.attributes.overall),
+        weeklyWage: estimateWeeklyWage(
+          team.id,
+          wageSubjectOf(youth, nextCalendar.preseasonStart),
+          playersOf(state, team.id).map((p) => wageSubjectOf(p, nextCalendar.preseasonStart)),
+        ),
         since: nextCalendar.preseasonStart,
         until: `${seasonYear(nextSeason) + 3}-06-30`,
         status: "active",
       });
     }
     if (team.id === state.userTeamId && totalIntake > 0) {
-      digest.push(`유스 콜업: 신인 ${totalIntake}명이 1군에 합류했다`);
+      digest.push(`유스 합류: 신인 ${totalIntake}명이 2군 개발 스쿼드에 합류했다`);
     }
 
-    // 만료 계약 자동 갱신 (AI 운영 — 유저 팀 재계약 협상은 다음 마일스톤)
-    for (const contract of state.contracts) {
-      if (contract.status !== "active" || contract.teamId !== team.id) continue;
+    // 은퇴로 1군이 너무 얇아졌을 때만 2군 상위 자원을 자동 승격한다.
+    // 그 외 승강은 감독의 결정으로 남긴다.
+    const firstCount = () => squad.filter((p) => p.squadLevel !== "reserve").length;
+    for (const player of [...squad]
+      .filter((p) => p.squadLevel === "reserve")
+      .sort((a, b) => b.attributes.overall - a.attributes.overall)) {
+      if (firstCount() >= 20) break;
+      player.squadLevel = "first";
+    }
+
+    // 만료 계약 자동 갱신 — **AI 팀만.** 우리 팀은 위에서 이미 내보냈다
+    for (const contract of contractsByTeam.get(team.id) ?? []) {
+      if (contract.status !== "active") continue;
       if (contract.until > nextCalendar.preseasonStart) continue;
-      const player = state.players.find((p) => p.id === contract.gamePlayerId);
+      const player = playerIndex.get(contract.gamePlayerId);
       if (!player) {
         contract.status = "ended";
         continue;
@@ -388,7 +495,11 @@ export function transitionSeason(state: GameState): string[] {
         id: `c-${player.id}-${nextSeason}`,
         gamePlayerId: player.id,
         teamId: team.id,
-        weeklyWage: wageForOverall(player.attributes.overall),
+        weeklyWage: estimateWeeklyWage(
+          team.id,
+          wageSubjectOf(player, nextCalendar.preseasonStart),
+          playersOf(state, team.id).map((p) => wageSubjectOf(p, nextCalendar.preseasonStart)),
+        ),
         since: nextCalendar.preseasonStart,
         until: `${seasonYear(nextSeason) + randInt(rng, 2, 4)}-06-30`,
         status: "active",
@@ -398,7 +509,7 @@ export function transitionSeason(state: GameState): string[] {
     // 배치 재구성 — 새 스쿼드로 선발·벤치를 다시 짠다 (적응도는 기준선으로 리셋)
     const tactics = tacticsOf(state, team.id);
     tactics.assignments = buildAssignments(
-      squad,
+      squad.filter((p) => p.squadLevel !== "reserve"),
       tactics.spec.formation,
       FAMILIARITY_BASELINE,
     );
@@ -416,18 +527,21 @@ export function transitionSeason(state: GameState): string[] {
     }
   }
 
+  // 대항전 티켓 — **지금 끝난 시즌**의 리그 최종 순위와 국내 컵 우승팀으로 배정한다.
+  // 순위표·컵 결과는 모두 `state.season`으로 걸러 읽으므로 **시즌을 올리기 전에**
+  // 읽어야 한다. (state.matches도 곧 새 시즌으로 교체된다.)
+  const finalTables: LeagueTables = {};
+  for (const league of TOP_LEAGUES) {
+    finalTables[league.id] = computeStandings(state, league.id).map((r) => r.teamId);
+  }
+  const cupWinners = domesticCupWinners(state);
+
   state.season = nextSeason;
   state.calendar = nextCalendar;
   // 새 시즌은 7월 1일(프리시즌·여름 이적창 개장)에서 시작한다
   state.date = nextCalendar.preseasonStart;
   const windows = buildTransferWindows(nextSeason);
-  // 대항전 티켓 — **지난 시즌(=지금 끝난 시즌) 리그 최종 순위**로 배정한다.
-  // state.matches가 곧 새 시즌으로 교체되므로 그 전에 표를 읽어야 한다.
-  const finalTables: LeagueTables = {};
-  for (const league of LEAGUE_CATALOG) {
-    finalTables[league.id] = computeStandings(state, league.id).map((r) => r.teamId);
-  }
-  state.euroEntrants = buildEuroEntrants(nextSeason, state.seed, finalTables);
+  state.euroEntrants = buildEuroEntrants(nextSeason, state.seed, finalTables, cupWinners);
   const matches = buildSeasonFixtures(nextSeason, state.seed, state.euroEntrants);
   state.windows = windows;
   state.matches = matches;
@@ -437,6 +551,8 @@ export function transitionSeason(state: GameState): string[] {
     state.userTeamId,
   );
   state.trainingSessions = [];
+  // 새 시즌 프리시즌도 기본 훈련으로 시작한다 — 감독의 지시는 시즌과 함께 지워진다
+  installDefaultTraining(state);
   state.issues = [];
   // 시즌 단위 징계는 리셋 (경고 이력은 BOOKING에 시즌 키로 남는다)
   for (const s of state.suspensions) if (s.status === "active") s.status = "done";

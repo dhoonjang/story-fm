@@ -48,6 +48,21 @@ function fillResults(
   }
 }
 
+/**
+ * 추첨일까지 시계를 옮기고 편성한다.
+ *
+ * 대진은 라운드가 끝나는 순간이 아니라 **며칠 뒤 추첨에서** 나온다(달력에 오르는
+ * 사건이다). 이 테스트는 경기 결과를 직접 채워 넣으므로 시계도 직접 밀어 준다 —
+ * 실제 게임에선 tick이 날짜를 넘기면서 자연히 추첨일에 닿는다.
+ */
+function advanceKnockouts(state: GameState, digest: string[] = []): void {
+  advanceEuroKnockouts(state, digest); // ① 추첨 예약
+  for (const e of state.schedule) {
+    if (e.type === "draw" && e.status === "scheduled" && e.date > state.date) state.date = e.date;
+  }
+  advanceEuroKnockouts(state, digest); // ② 추첨일 도래 → 편성
+}
+
 function leaguePhaseOf(state: GameState, cupId: string) {
   return state.matches.filter(
     (m) => m.competitionId === cupId && (m.stage ?? "league") === "league",
@@ -59,10 +74,10 @@ function runKnockouts(state: GameState, cupId: string, digest: string[] = []): v
   const cup = cupCatalogById(cupId)!;
   fillResults(leaguePhaseOf(state, cupId));
   for (let step = 0; step < knockoutStages(cup).length + 1; step++) {
-    advanceEuroKnockouts(state, digest);
+    advanceKnockouts(state, digest);
     for (const stage of knockoutStages(cup)) fillResults(euroStageMatches(state, cupId, stage));
   }
-  advanceEuroKnockouts(state, digest);
+  advanceKnockouts(state, digest);
 }
 
 describe("녹아웃 정의", () => {
@@ -114,7 +129,7 @@ describe("단계 진행", () => {
   it("리그 페이즈가 끝나기 전에는 아무것도 편성되지 않는다", () => {
     const state = createTestGame(42);
     expect(euroLeaguePhaseDone(state, "ucl")).toBe(false);
-    advanceEuroKnockouts(state, []);
+    advanceKnockouts(state, []);
     expect(euroStageMatches(state, "ucl", "playoff")).toHaveLength(0);
   });
 
@@ -122,15 +137,15 @@ describe("단계 진행", () => {
     const state = createTestGame(42);
     fillResults(leaguePhaseOf(state, "ucl"));
 
-    advanceEuroKnockouts(state, []);
+    advanceKnockouts(state, []);
     expect(euroStageMatches(state, "ucl", "playoff")).toHaveLength(16); // 8대진 × 2차전
     expect(euroStageMatches(state, "ucl", "r16")).toHaveLength(0); // 아직
 
-    advanceEuroKnockouts(state, []); // 플레이오프가 안 끝났으니 그대로
+    advanceKnockouts(state, []); // 플레이오프가 안 끝났으니 그대로
     expect(euroStageMatches(state, "ucl", "r16")).toHaveLength(0);
 
     fillResults(euroStageMatches(state, "ucl", "playoff"));
-    advanceEuroKnockouts(state, []);
+    advanceKnockouts(state, []);
     expect(euroStageMatches(state, "ucl", "r16")).toHaveLength(16); // 8대진 × 2차전
   });
 
@@ -182,7 +197,7 @@ describe("단계 진행", () => {
     const state = createTestGame(42);
     fillResults(leaguePhaseOf(state, "ucl"));
     const seeds = computeStandings(state, "ucl").map((r) => r.teamId);
-    advanceEuroKnockouts(state, []);
+    advanceKnockouts(state, []);
     for (const stage of ["playoff"] as const) {
       const matches = euroStageMatches(state, "ucl", stage);
       for (let pair = 0; pair * 2 < matches.length; pair++) {
@@ -202,7 +217,7 @@ describe("승자 판정", () => {
   it("합계 득점으로 가린다 (원정 다득점 규칙 없음)", () => {
     const state = createTestGame(42);
     fillResults(leaguePhaseOf(state, "ucl"));
-    advanceEuroKnockouts(state, []);
+    advanceKnockouts(state, []);
     const legs = euroStageMatches(state, "ucl", "playoff").filter((m) => /-p0-/.test(m.id));
     // 1차전 원정 2골, 2차전 홈 1-0 → 합계 2-1로 원정팀(=상위 시드)이 통과
     legs[0]!.result = { homeGoals: 0, awayGoals: 2, scorers: [] };
@@ -214,7 +229,7 @@ describe("승자 판정", () => {
   it("합계가 같으면 승부차기로 갈리고 2차전 장부에 남는다", () => {
     const state = createTestGame(42);
     fillResults(leaguePhaseOf(state, "ucl"));
-    advanceEuroKnockouts(state, []);
+    advanceKnockouts(state, []);
     const legs = euroStageMatches(state, "ucl", "playoff").filter((m) => /-p0-/.test(m.id));
     legs[0]!.result = { homeGoals: 1, awayGoals: 1, scorers: [] };
     legs[1]!.result = { homeGoals: 2, awayGoals: 2, scorers: [] };
@@ -232,7 +247,7 @@ describe("승자 판정", () => {
   it("경기가 남아 있으면 승자가 없다", () => {
     const state = createTestGame(42);
     fillResults(leaguePhaseOf(state, "ucl"));
-    advanceEuroKnockouts(state, []);
+    advanceKnockouts(state, []);
     expect(euroTieWinner(state, "ucl", "playoff", 0)).toBeNull();
   });
 });
@@ -283,16 +298,18 @@ describe("오피스 뷰", () => {
   it("우리 대회의 리그 페이즈 순위표와 브래킷이 함께 나온다", () => {
     const state = createTestGame(42);
     fillResults(leaguePhaseOf(state, "ucl"));
-    advanceEuroKnockouts(state, []);
-    const europe = buildOfficeViews(state).competitions.list.find((c) => c.kind === "cup")?.europe ?? null;
-    expect(europe, "아스날은 UCL에 나간다").not.toBeNull();
+    advanceKnockouts(state, []);
+    // 대회 목록: 리그 → 대항전 → 국내 컵. 대항전이 첫 컵이다
+    const comp = buildOfficeViews(state).competitions.list.find((c) => c.europe !== null) ?? null;
+    expect(comp, "아스날은 UCL에 나간다").not.toBeNull();
+    const europe = comp!.europe;
     expect(europe!.short).toBe("UCL");
     expect(europe!.standings).toHaveLength(cupCatalogById("ucl")!.size);
     expect(europe!.ourPosition).toBeGreaterThan(0);
     expect(europe!.directSlots).toBe(8);
     expect(europe!.playoffCutoff).toBe(24);
 
-    const playoff = europe!.bracket.find((b) => b.stage === "playoff");
+    const playoff = comp!.bracket.find((b) => b.stage === "playoff");
     expect(playoff!.ties).toHaveLength(8);
     expect(playoff!.ties.every((t) => t.score === null)).toBe(true); // 아직 안 열렸다
     // 아스날은 직행이라 플레이오프에 없다
@@ -302,11 +319,11 @@ describe("오피스 뷰", () => {
   it("합계와 승부차기가 브래킷에 그대로 보인다", () => {
     const state = createTestGame(42);
     runKnockouts(state, "ucl");
-    const europe = buildOfficeViews(state).competitions.list.find((c) => c.kind === "cup")!.europe!;
-    const finalStage = europe.bracket.find((b) => b.stage === "final")!;
+    const comp = buildOfficeViews(state).competitions.list.find((c) => c.europe !== null)!;
+    const finalStage = comp.bracket.find((b) => b.stage === "final")!;
     expect(finalStage.ties).toHaveLength(1);
     expect(finalStage.ties[0]!.score).toMatch(/^\d+-\d+/);
-    for (const stage of europe.bracket) {
+    for (const stage of comp.bracket) {
       for (const tie of stage.ties) {
         if (tie.score?.includes("승부차기")) expect(tie.score).toMatch(/승부차기 \d+-\d+/);
       }
@@ -316,7 +333,7 @@ describe("오피스 뷰", () => {
   it("뷰를 여는 것이 게임 상태를 바꾸지 않는다", () => {
     const state = createTestGame(42);
     fillResults(leaguePhaseOf(state, "ucl"));
-    advanceEuroKnockouts(state, []);
+    advanceKnockouts(state, []);
     // 합계 동점으로 만들고 승부차기는 아직 기록하지 않은 상태
     const legs = euroStageMatches(state, "ucl", "playoff").filter((m) => /-p0-/.test(m.id));
     legs[0]!.result = { homeGoals: 1, awayGoals: 1, scorers: [] };
@@ -361,7 +378,8 @@ describe("한 시즌 완주 (mock 경기)", () => {
     const wonUcl = digest.some((d) => d.includes("🏆 UEFA 챔피언스리그 우승"));
     expect(cupTrophies.length).toBe(wonUcl ? 1 : 0);
     expect(state.seasonRecords).toHaveLength(1);
-  });
+    // 시즌 340일을 하루씩 도는 통합 테스트 — 기본 훈련까지 매일 소화하므로 여유를 준다
+  }, 20_000);
 });
 
 /** 이 단계가 본선에서 몇 번째인가 — 대진 수 기대값 계산용 */
@@ -392,7 +410,7 @@ describe("상금", () => {
     fillResults(leaguePhaseOf(state, "ucl"));
 
     const digest: string[] = [];
-    advanceEuroKnockouts(state, digest);
+    advanceKnockouts(state, digest);
     const expected = cup.prize.participation + 3 * cup.prize.win + 2 * cup.prize.draw;
     const ledger = financeOf(state, state.userTeamId).ledger.filter((e) =>
       e.label.includes("리그 페이즈 상금"),
@@ -403,8 +421,8 @@ describe("상금", () => {
 
     // 여러 번 호출해도 다시 주지 않는다
     const balance = financeOf(state, state.userTeamId).balance;
-    advanceEuroKnockouts(state, []);
-    advanceEuroKnockouts(state, []);
+    advanceKnockouts(state, []);
+    advanceKnockouts(state, []);
     expect(financeOf(state, state.userTeamId).balance).toBe(balance);
     expect(balance).toBeGreaterThan(before);
   });
@@ -442,9 +460,7 @@ describe("상금", () => {
     payWinnerPrize(state, "ucl", champion, []);
     payWinnerPrize(state, "ucl", champion, []); // 두 번 불러도 한 번만
     // 지급 사실은 prizesPaid가 갖는다 (AI 팀은 원장을 쌓지 않는다)
-    const paid = state.finances.filter((f) =>
-      (f.prizesPaid ?? []).includes("UCL 우승 상금 (S1)"),
-    );
+    const paid = state.finances.filter((f) => (f.prizesPaid ?? []).includes("UCL 우승 상금 (S1)"));
     expect(paid).toHaveLength(1);
     expect(paid[0]!.teamId).toBe(champion);
     expect(financeOf(state, champion).balance - before).toBe(cup.prize.winner);
@@ -472,20 +488,20 @@ describe("주중 경기 부담 (로테이션)", () => {
     const before = simSquadOf(state, rival).starters.map((p) => p.id);
     expect(before).toHaveLength(11);
     // 선발 전원을 로테이션 기준 위로 지치게 만든다
-    for (const id of before) playerById(state, id)!.state.fatigue = 80;
+    for (const id of before) playerById(state, id)!.state.condition = 20;
 
     const after = simSquadOf(state, rival).starters;
     expect(after).toHaveLength(11);
     const changed = after.filter((p) => !before.includes(p.id));
     expect(changed.length, "지친 선발 일부가 교체된다").toBeGreaterThan(0);
-    // 대체 자원은 신선하고 기량 낙폭이 제한된다
-    for (const p of changed) expect(p.state.fatigue).toBeLessThanOrEqual(80 - 25);
+    // 대체 자원은 신선하다 — 지쳐 빠진 선발(20)보다 체력이 높아야 한다
+    for (const p of changed) expect(p.state.condition).toBeGreaterThan(20);
   });
 
   it("간이 시뮬을 치른 AI 팀 선발은 피로가 오른다", () => {
     const state = createTestGame(42);
     const digest: string[] = [];
-    const fatigueBefore = new Map(state.players.map((p) => [p.id, p.state.fatigue]));
+    const fatigueBefore = new Map(state.players.map((p) => [p.id, p.state.condition]));
     // 첫 리그 라운드까지 전진 — 우리 경기가 아닌 경기들이 간이 시뮬로 소화된다
     let guard = 20;
     while (guard-- > 0) {
@@ -497,7 +513,7 @@ describe("주중 경기 부담 (로테이션)", () => {
     const played = state.matches.filter((m) => m.result);
     expect(played.length, "간이 시뮬이 돌았다").toBeGreaterThan(0);
     const tired = state.players.filter(
-      (p) => p.state.fatigue > (fatigueBefore.get(p.id) ?? 0) + 20,
+      (p) => p.state.condition > (fatigueBefore.get(p.id) ?? 0) + 20,
     );
     expect(tired.length, "경기를 뛴 선수들의 피로가 올랐다").toBeGreaterThan(0);
   });

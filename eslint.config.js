@@ -7,7 +7,9 @@ export default tseslint.config(
       "**/node_modules/**",
       "**/dist/**",
       "**/coverage/**",
+      // Next 빌드 산출물 — 기본 `.next` 외에 e2e·스크린샷용 distDir도 함께 (`.next-*`)
       "**/.next/**",
+      "**/.next-*/**",
       "**/next-env.d.ts",
       "test-results/**",
       "playwright-report/**",

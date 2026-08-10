@@ -10,6 +10,7 @@ import {
 } from "@story-fm/engine";
 
 const attr = z.number().int().min(1).max(99).optional();
+const wage = z.number().int().min(0).max(2_000_000).optional();
 /** 능력치 15축 — 도메인 상수에서 스키마를 펼친다 (축이 늘면 여기도 자동으로) */
 const axisFields = Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, attr]));
 const PatchSchema = z.object({
@@ -22,6 +23,8 @@ const PatchSchema = z.object({
   position: z.string().min(1).optional(),
   ...axisFields,
   potential: attr,
+  /** 실제 주급 (£/주) — 새 게임의 초기 계약에 그대로 쓰인다 */
+  weeklyWage: wage,
   /** 가능 포지션 전체 교체 (멀티 포지션 편집) */
   positions: z
     .array(

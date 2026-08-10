@@ -1,4 +1,4 @@
-export type LlmProvider = "anthropic" | "google";
+export type LlmProvider = "anthropic" | "google" | "openai";
 
 /**
  * 도구 입력에 쓰는 제공자 중립 JSON Schema.
@@ -45,7 +45,9 @@ export function isStoredLlmHistory(value: unknown): value is StoredLlmHistory {
   const candidate = value as Partial<StoredLlmHistory>;
   return (
     candidate.version === 1 &&
-    (candidate.provider === "anthropic" || candidate.provider === "google") &&
+    (candidate.provider === "anthropic" ||
+      candidate.provider === "google" ||
+      candidate.provider === "openai") &&
     typeof candidate.model === "string" &&
     Array.isArray(candidate.messages)
   );
@@ -66,12 +68,28 @@ export function isTextHistoryMessage(value: unknown): value is TextHistoryMessag
  * 어댑터가 이를 tool_result(is_error)로 되돌려 LLM이 수정 재시도하게
  * 한다 (AGENTS.md 6-2 재시도 규약).
  */
+/**
+ * 도구가 불린 **자리** — 그때까지 모델이 쓴 본문.
+ *
+ * 스킬은 장면 한복판에서 불린다: 코치가 "라인업 조정하겠습니다"라고 답한 **뒤**에
+ * `set_lineup`이 온다. 그 사실이 기록에 없으면 화면은 모든 스킬을 턴 맨 앞에
+ * 몰아 세울 수밖에 없고, 감독은 결과를 먼저 보고 장면을 거꾸로 읽는다.
+ *
+ * 델타를 세는 것으로는 안 된다 — 어댑터는 반복마다의 텍스트를 `\n`으로 이어
+ * 붙이는데 그 줄바꿈은 스트림에 흐르지 않아, 반복 경계에서 두 줄이 한 줄로
+ * 합쳐진다. 그래서 **이어 붙인 쪽**이 직접 넘긴다.
+ */
+export interface ToolCallContext {
+  /** 이 호출 직전까지 누적된 본문 — 반복 경계의 줄바꿈까지 포함한 최종 형태 */
+  text: string;
+}
+
 export interface GameToolSpec {
   name: string;
   description: string;
   /** 제공자 중립 JSON Schema — 각 어댑터가 자기 함수 선언 형식으로 변환한다. */
   inputSchema: JsonObjectSchema;
-  handle(input: unknown): { ok: boolean; message: string };
+  handle(input: unknown, context?: ToolCallContext): { ok: boolean; message: string };
   /**
    * 읽기 전용 조회 도구 — 상태를 바꾸지 않는다. 호출 기록을 스킬 칩으로
    * 남기지 않아 채팅이 조회 로그로 덮이는 것을 막는다.

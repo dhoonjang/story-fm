@@ -117,11 +117,18 @@ export function knockoutDates(season: number, stage: string): string[] {
   return (KNOCKOUT_MATCHDAYS[stage] ?? []).map((anchor) => wednesdayOn(season, anchor));
 }
 
-/** 대항전이 예약한 주중 전부 — 리그 페이즈 8회 + 녹아웃 8회 */
+/**
+ * 대항전이 예약한 날 전부 — 리그 페이즈 8회 + 녹아웃 8회 + **결승**.
+ *
+ * 결승을 빼면 안 된다. 결승 날짜는 시즌 시작에 이미 정해져 있는데(리그 최종전 다음
+ * 토요일) 그 자리를 비워 두지 않으면, 국내 컵 결승이 같은 날 같은 팀에게 잡힌다 —
+ * 한 팀이 하루에 두 결승을 뛰게 되고 그 중 하나는 영원히 소화되지 않는다.
+ */
 export function reservedEuroDates(season: number): string[] {
   return [
     ...euroMatchdayDates(season),
     ...Object.keys(KNOCKOUT_MATCHDAYS).flatMap((stage) => knockoutDates(season, stage)),
+    ...knockoutDates(season, "final"),
   ];
 }
 
@@ -169,14 +176,52 @@ function rankedTeams(
     .map((x) => x.id);
 }
 
-/** 상위 대회가 이미 가져간 티켓 수 — 유로파는 UCL 다음 순위부터 받는다 */
-function slotsAbove(cupId: string, leagueId: string): number {
-  let above = 0;
+/**
+ * 이 리그의 국내 컵 우승팀 — 대회별로 한 팀씩.
+ * (FA컵 우승 → 유로파, 리그컵 우승 → 컨퍼런스. 실제 규칙과 같다.)
+ */
+export type CupWinners = Record<string, { uel?: string; uecl?: string } | undefined>;
+
+/**
+ * 한 리그의 유럽 진출 배정 — 순위 순으로 UCL → UEL → UECL을 채우고,
+ * **국내 컵 우승팀이 순위로 못 들어왔으면** 그 대회의 마지막 자리를 내준다.
+ * 밀려난 팀은 한 단계 아래 대회의 마지막 자리로 내려가고, 맨 아래에서 밀리면
+ * 유럽에 못 간다 — 실제 규칙의 연쇄 배정과 같다.
+ *
+ * 리그별 티켓 수는 그대로라 대회 정원(UCL 24·UEL 16·UECL 10)과 짝수 제약이
+ * 흔들리지 않는다. 자리의 **주인만** 바뀐다.
+ */
+function allocateEuropeanSlots(
+  leagueId: string,
+  ranked: string[],
+  winners: { uel?: string; uecl?: string } | undefined,
+): Record<string, string[]> {
+  const alloc: Record<string, string[]> = {};
+  let cursor = 0;
   for (const cup of CUP_CATALOG) {
-    if (cup.id === cupId) break;
-    above += cup.slots[leagueId] ?? 0;
+    const count = cup.slots[leagueId] ?? 0;
+    alloc[cup.id] = ranked.slice(cursor, cursor + count);
+    cursor += count;
   }
-  return above;
+  if (!winners) return alloc;
+
+  const order = CUP_CATALOG.map((c) => c.id);
+  const qualified = new Set(order.flatMap((id) => alloc[id] ?? []));
+  for (const target of ["uel", "uecl"] as const) {
+    const winner = winners[target];
+    if (!winner || qualified.has(winner)) continue;
+    let incoming: string | null = winner;
+    for (let i = order.indexOf(target); i < order.length && incoming; i++) {
+      const list = alloc[order[i]!];
+      if (!list || list.length === 0) continue;
+      const displaced = list.pop()!;
+      list.push(incoming);
+      qualified.add(incoming);
+      qualified.delete(displaced);
+      incoming = displaced;
+    }
+  }
+  return alloc;
 }
 
 /** 이 대회의 참가 클럽 — 리그별 배정분을 순위 순으로 가져온다 */
@@ -185,14 +230,14 @@ export function europeanEntrants(
   season: number,
   seed: number,
   tables: LeagueTables | null = null,
+  cupWinners: CupWinners = {},
 ): string[] {
   const cup = cupCatalogById(cupId);
   if (!cup) return [];
   const out: string[] = [];
-  for (const [leagueId, count] of Object.entries(cup.slots)) {
+  for (const leagueId of Object.keys(cup.slots)) {
     const ranked = rankedTeams(leagueId, season, seed, tables);
-    const from = slotsAbove(cupId, leagueId);
-    out.push(...ranked.slice(from, from + count));
+    out.push(...(allocateEuropeanSlots(leagueId, ranked, cupWinners[leagueId])[cupId] ?? []));
   }
   return out;
 }
@@ -202,10 +247,11 @@ export function buildEuroEntrants(
   season: number,
   seed: number,
   tables: LeagueTables | null = null,
+  cupWinners: CupWinners = {},
 ): EuroEntry[] {
   return CUP_CATALOG.map((cup) => ({
     cupId: cup.id,
-    teams: europeanEntrants(cup.id, season, seed, tables),
+    teams: europeanEntrants(cup.id, season, seed, tables, cupWinners),
   }));
 }
 
@@ -236,7 +282,12 @@ export function euroPots(cupId: string, seed: number, teamIds: string[]): Map<st
   return potsOf(teamIds, seed, cupId, euroPotCount(teamIds.length));
 }
 
-function potsOf(teamIds: string[], seed: number, cupId: string, potCount: number): Map<string, number> {
+function potsOf(
+  teamIds: string[],
+  seed: number,
+  cupId: string,
+  potCount: number,
+): Map<string, number> {
   const rng = makeRng(seed, `pots:${cupId}`);
   const jitter = new Map(teamIds.map((id) => [id, rng()] as const));
   const strength = (id: string) => {

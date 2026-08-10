@@ -49,17 +49,22 @@ describe("시장가", () => {
     // 같은 계수(0.45)에 걸려 무의미해진다
     const contract = activeContract(state, player.id)!;
     contract.until = `${Number(state.date.slice(0, 4)) + 4}-06-30`;
-    const baseline = marketValueOf(state, player);
+    const year = Number(state.date.slice(0, 4));
+    // **나이도 고정해서 재야 한다** — `pick`은 OVR만 보고 배열에서 처음 걸리는
+    // 선수를 집으므로, 그 선수가 이미 서른이면 "서른셋과의 차이"가 나이 곡선이
+    // 아니라 두 살 차이를 재게 된다. 실제로 라인업 배치가 바뀌어 등록 순서가
+    // 흔들리자 이 테스트가 그렇게 깨졌다.
+    const at = (age: number) => ({ ...player, birthdate: `${year - age}-01-01` });
+    const baseline = marketValueOf(state, at(25));
 
-    // 서른셋은 절반 이하
-    const old = { ...player, birthdate: `${Number(state.date.slice(0, 4)) - 33}-01-01` };
-    expect(marketValueOf(state, old)).toBeLessThan(baseline * 0.6);
+    // 스물다섯 → 서른셋은 절반 이하
+    expect(marketValueOf(state, at(33))).toBeLessThan(baseline * 0.6);
 
     // 계약이 곧 끝나면 값이 빠지고, 만료되면 이적료가 0이다
     contract.until = `${state.date.slice(0, 4)}-12-31`;
-    expect(marketValueOf(state, player)).toBeLessThan(baseline);
+    expect(marketValueOf(state, at(25))).toBeLessThan(baseline);
     contract.until = state.date;
-    expect(marketValueOf(state, player)).toBe(0);
+    expect(marketValueOf(state, at(25))).toBe(0);
   });
 
   it("유망주는 잠재력만큼 프리미엄이 붙는다", () => {
@@ -200,7 +205,9 @@ describe("딜 확률", () => {
     });
     const repeated = dealOdds(state, terms);
     expect(repeated.probability).toBeLessThan(first);
-    expect(repeated.probability).toBeCloseTo(first * PATIENCE_DECAY ** 2, 0);
+    // 확률은 정수 %로 반올림돼 나오므로 한 칸(±1)까지는 감쇠 배수가 맞는 것으로 본다
+    // (`toBeCloseTo(_, 0)`의 허용 오차 0.5로는 반올림 오차를 담지 못한다)
+    expect(Math.abs(repeated.probability - first * PATIENCE_DECAY ** 2)).toBeLessThanOrEqual(1);
     expect(repeated.factors.some((f) => f.label === "상대의 인내심")).toBe(true);
 
     // 조건을 유의미하게 올리면 감쇠가 초기화된다
@@ -287,21 +294,48 @@ describe("정보 비대칭", () => {
 });
 
 describe("응답 지연 — 상황에서 나온다", () => {
-  it("헐값은 하루, 진지한 제안은 며칠", () => {
+  it("같은 조건은 같은 답, 반복하면 상대가 미룬다", () => {
     const state = createTestGame(42);
     const target = pick(state, 78);
     const terms = { playerId: target.id, fee: 1_000_000, weeklyWage: 10_000, years: 4 };
-    expect(responseDelayDays(state, terms, 5)).toBe(1);
-    const serious = responseDelayDays(state, terms, 45);
-    expect(serious).toBeGreaterThanOrEqual(2);
-    expect(serious).toBeLessThanOrEqual(5);
-    const eager = responseDelayDays(state, terms, 85);
-    expect(eager).toBeGreaterThanOrEqual(1);
-    expect(eager).toBeLessThanOrEqual(3);
-    // 같은 조건 반복이면 상대가 지쳐 미룬다
-    expect(responseDelayDays(state, terms, 45, 2)).toBe(serious + 1);
-    // 결정적이다
-    expect(responseDelayDays(state, terms, 45)).toBe(serious);
+    const once = responseDelayDays(state, terms, 45);
+    expect(responseDelayDays(state, terms, 45)).toBe(once);
+    expect(responseDelayDays(state, terms, 45, 2)).toBe(once + 1);
+  });
+
+  /**
+   * 답신 시점이 한 값에 고정되면 모든 협상이 "내일 답 옴"으로 균질해진다.
+   * 실제로는 그 자리에서 끝나는 전화도 있고, 몇 주째 소식 없는 오퍼도 있다.
+   */
+  it("즉답도 있고 한참 늦는 답도 있다", () => {
+    const state = createTestGame(42);
+    const days = Array.from({ length: 300 }, (_, i) =>
+      responseDelayDays(
+        state,
+        { playerId: `p-${i}`, fee: 20_000_000 + i * 130_000, weeklyWage: 90_000, years: 4 },
+        45,
+      ),
+    );
+    // 답신일이 오늘보다 앞설 수는 없다 (해시를 부호 있는 시프트로 자르면 음수가 나왔다)
+    expect(Math.min(...days)).toBeGreaterThanOrEqual(0);
+    expect(new Set(days).size).toBeGreaterThan(3);
+    expect(days.some((d) => d >= 7)).toBe(true);
+  });
+
+  it("헐값은 볼 것도 없이 차이고, 매력적인 오퍼는 그날 답이 오기도 한다", () => {
+    const state = createTestGame(42);
+    const terms = (i: number) => ({
+      playerId: `p-${i}`,
+      fee: 1_000_000 + i * 90_000,
+      weeklyWage: 10_000,
+      years: 4,
+    });
+    const cheap = Array.from({ length: 200 }, (_, i) => responseDelayDays(state, terms(i), 5));
+    const eager = Array.from({ length: 200 }, (_, i) => responseDelayDays(state, terms(i), 85));
+
+    expect(cheap.filter((d) => d <= 1).length / cheap.length).toBeGreaterThan(0.7);
+    expect(cheap.some((d) => d === 0)).toBe(true);
+    expect(eager.some((d) => d === 0)).toBe(true);
   });
 
   it("창 마감이 임박하면 절반으로 줄어든다", () => {
@@ -313,6 +347,6 @@ describe("응답 지연 — 상황에서 나온다", () => {
     state.date = window.closesOn;
     const rushed = responseDelayDays(state, terms, 45);
     expect(rushed).toBeLessThanOrEqual(Math.max(1, Math.floor(normal / 2)) + 1);
-    expect(rushed).toBeGreaterThanOrEqual(1);
+    expect(rushed).toBeGreaterThanOrEqual(0);
   });
 });

@@ -3,10 +3,10 @@ import { z } from "zod";
 import {
   createGame,
   interpretBackgroundHeuristic,
-  LEAGUE_CATALOG,
   listGameSummaries,
   saveGame,
   TEAM_CATALOG,
+  TOP_LEAGUES,
 } from "@story-fm/engine";
 import { runOnboardingTurn } from "@story-fm/agents";
 import { toPayload } from "@/lib/store";
@@ -18,11 +18,16 @@ const CreateSchema = z.object({
   seed: z.number().int().optional(),
 });
 
-/** 리그·팀 카탈로그(새 게임 선택: 리그 → 팀) + 저장된 게임 목록(랜딩) */
+/**
+ * 리그·팀 카탈로그(새 게임 선택: 리그 → 팀) + 저장된 게임 목록(랜딩).
+ * 2부는 국내 컵 참가 전용이라 부임 대상이 아니다 — 1부만 내려보낸다.
+ */
 export function GET() {
+  const leagues = TOP_LEAGUES;
+  const ids = new Set(leagues.map((l) => l.id));
   return NextResponse.json({
-    leagues: LEAGUE_CATALOG,
-    teams: TEAM_CATALOG,
+    leagues,
+    teams: TEAM_CATALOG.filter((t) => ids.has(t.leagueId)),
     games: listGameSummaries(),
   });
 }
@@ -37,8 +42,9 @@ export async function POST(request: Request) {
     );
   }
   const { teamId, managerName, background, seed } = body.data;
-  if (!TEAM_CATALOG.some((t) => t.id === teamId)) {
-    return NextResponse.json({ error: `알 수 없는 팀: ${teamId}` }, { status: 400 });
+  const team = TEAM_CATALOG.find((t) => t.id === teamId);
+  if (!team || !TOP_LEAGUES.some((l) => l.id === team.leagueId)) {
+    return NextResponse.json({ error: `부임할 수 없는 팀: ${teamId}` }, { status: 400 });
   }
 
   const state = createGame({
@@ -46,7 +52,8 @@ export async function POST(request: Request) {
     userTeamId: teamId,
     managerName,
     background,
-    attributes: interpretBackgroundHeuristic(background),
+    // 부임 구단도 판정에 넣는다 — 빅클럽이 뽑았다는 사실이 이력에 대한 정보다
+    attributes: interpretBackgroundHeuristic(background, teamId),
   });
 
   const intro = await runOnboardingTurn(state);

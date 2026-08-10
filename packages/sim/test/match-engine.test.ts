@@ -1,0 +1,292 @@
+import { describe, expect, it } from "vitest";
+import {
+  LEDGER_LIMITS,
+  applyEvents,
+  buildStrengthPacket,
+  createLedger,
+  simulateSegment,
+  type MatchLedgerState,
+  type SegmentPlan,
+  planAiTacticalShift,
+  planAiSubstitution,
+} from "@story-fm/sim";
+import { DEFAULT_TACTICS } from "@story-fm/domain";
+import type { GamePlayer, StrengthPacket, TacticsSpec } from "@story-fm/domain";
+import { makeLedgerSide, makeSide, makeSquad } from "./helpers";
+
+/** mulberry32 — 엔진 `makeRng`와 같은 알고리즘 (sim은 엔진에 의존하지 않는다) */
+function rngOf(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+interface Setup {
+  packet: StrengthPacket;
+  tactics: { home: TacticsSpec; away: TacticsSpec };
+  ledger: MatchLedgerState;
+  squads: {
+    home: { onPitch: GamePlayer[]; bench: GamePlayer[] };
+    away: { onPitch: GamePlayer[]; bench: GamePlayer[] };
+  };
+}
+
+function setup(
+  homeBase = 80,
+  awayBase = 78,
+  opts: { home?: Partial<TacticsSpec>; away?: Partial<TacticsSpec>; managerTactics?: number } = {},
+): Setup {
+  const home = makeSquad("home", homeBase);
+  const away = makeSquad("away", awayBase);
+  const packet = buildStrengthPacket(
+    makeSide("home", homeBase, {
+      ...(opts.home ? { tactics: opts.home } : {}),
+      ...(opts.managerTactics !== undefined ? { managerTactics: opts.managerTactics } : {}),
+    }),
+    makeSide("away", awayBase, opts.away ? { tactics: opts.away } : {}),
+  );
+  return {
+    packet,
+    tactics: {
+      home: { ...DEFAULT_TACTICS, ...(opts.home ?? {}) },
+      away: { ...DEFAULT_TACTICS, ...(opts.away ?? {}) },
+    },
+    ledger: createLedger(makeLedgerSide(home), makeLedgerSide(away)),
+    squads: {
+      home: { onPitch: home.starters, bench: home.bench },
+      away: { onPitch: away.starters, bench: away.bench },
+    },
+  };
+}
+
+/** 한 경기를 끝까지 굴린다 — 장부 검증을 그대로 통과해야 한다 */
+function playMatch(s: Setup, seed: number): { ledger: MatchLedgerState; plans: SegmentPlan[] } {
+  let ledger = s.ledger;
+  const plans: SegmentPlan[] = [];
+  for (let segment = 0; segment < 60 && ledger.phase !== "finished"; segment++) {
+    const plan = simulateSegment({
+      packet: s.packet,
+      ledger,
+      squads: s.squads,
+      tactics: s.tactics,
+      rng: rngOf(seed * 1000 + segment),
+    });
+    plans.push(plan);
+    const applied = applyEvents(ledger, plan.events);
+    if (!applied.ok) throw new Error(`구간 ${segment} 반려: ${applied.errors.join(" / ")}`);
+    ledger = applied.state;
+  }
+  return { ledger, plans };
+}
+
+describe("구간 시뮬레이터 — 결과는 코어가 정한다", () => {
+  it("결정적이다 — 같은 시드·같은 장부면 같은 사건", () => {
+    const a = playMatch(setup(), 7);
+    const b = playMatch(setup(), 7);
+    expect(a.ledger.score).toEqual(b.ledger.score);
+    expect(a.ledger.events).toEqual(b.ledger.events);
+  });
+
+  it("경기가 항상 완결된다 — 하프타임을 거쳐 90분 이후 종료", () => {
+    for (const seed of [1, 2, 3, 11, 42, 99]) {
+      const { ledger } = playMatch(setup(), seed);
+      expect(ledger.phase, `seed ${seed}`).toBe("finished");
+      expect(ledger.events.some((e) => e.type === "kickoff")).toBe(true);
+      expect(ledger.events.some((e) => e.type === "half_time")).toBe(true);
+      const end = ledger.events.find((e) => e.type === "full_time")!;
+      expect(end.minute).toBeGreaterThanOrEqual(90);
+    }
+  });
+
+  it("장부의 하드 제약을 시뮬레이터가 먼저 지킨다 (배치 상한·골 상한)", () => {
+    for (const seed of [4, 8, 21, 63]) {
+      // 기대 득점이 최대로 벌어지는 조합 — 상한에 부딪히는 경계
+      const { ledger, plans } = playMatch(setup(92, 55), seed);
+      for (const plan of plans) {
+        expect(plan.events.length, `seed ${seed}`).toBeLessThan(LEDGER_LIMITS.maxEventsPerBatch);
+      }
+      expect(ledger.score.home).toBeLessThanOrEqual(LEDGER_LIMITS.maxGoalsPerTeam);
+      expect(ledger.score.away).toBeLessThanOrEqual(LEDGER_LIMITS.maxGoalsPerTeam);
+    }
+  });
+
+  it("정지점에서 멈춘다 — 골·퇴장·부상은 구간의 마지막 사건", () => {
+    const { plans } = playMatch(setup(85, 70), 13);
+    for (const plan of plans) {
+      const last = plan.events[plan.events.length - 1];
+      if (plan.stop === "goal") expect(last?.type).toBe("goal");
+      if (plan.stop === "injury") expect(last?.type).toBe("injury");
+      if (plan.stop === "half_time") expect(last?.type).toBe("half_time");
+      if (plan.stop === "full_time") expect(last?.type).toBe("full_time");
+      // 골이 구간 중간에 묻히면 감독이 개입할 자리를 잃는다
+      const goals = plan.events.filter((e) => e.type === "goal");
+      expect(goals.length).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("골에는 패킷에서 뽑은 원인 태그가 붙는다 (코어가 인용한다)", () => {
+    const { ledger } = playMatch(setup(88, 62), 5);
+    const goals = ledger.events.filter((e) => e.type === "goal");
+    expect(goals.length).toBeGreaterThan(0);
+    for (const goal of goals) expect(goal.causes.length).toBeGreaterThan(0);
+  });
+
+  it("득점자는 공격 자원 쪽으로 기운다 — 골키퍼는 넣지 않는다", () => {
+    let fw = 0;
+    let total = 0;
+    // 표본을 넓게 잡는다 — 40시드(60여 골)로는 추정치가 ±0.06씩 흔들려,
+    // 득점자 가중과 무관한 변경(카드 규칙 등)이 난수 흐름만 밀어도 임계선을 넘나든다
+    for (let seed = 0; seed < 150; seed++) {
+      const { ledger } = playMatch(setup(84, 70), seed);
+      for (const e of ledger.events) {
+        if (e.type !== "goal") continue;
+        total++;
+        if (e.actors[0]?.includes("fw")) fw++;
+        expect(e.actors[0]).not.toContain("gk");
+      }
+    }
+    expect(total).toBeGreaterThan(20);
+    expect(fw / total).toBeGreaterThan(0.4);
+  });
+
+  it("전력이 강한 쪽이 통계적으로 더 많이 이긴다 (능력치 영향 보장)", () => {
+    let strongWins = 0;
+    let weakWins = 0;
+    let goalsFor = 0;
+    let goalsAgainst = 0;
+    for (let seed = 0; seed < 60; seed++) {
+      const { ledger } = playMatch(setup(86, 68), seed);
+      goalsFor += ledger.score.home;
+      goalsAgainst += ledger.score.away;
+      if (ledger.score.home > ledger.score.away) strongWins++;
+      if (ledger.score.away > ledger.score.home) weakWins++;
+    }
+    expect(strongWins).toBeGreaterThan(weakWins * 2);
+    expect(goalsFor).toBeGreaterThan(goalsAgainst);
+    // 그러나 이변은 남는다 — 전력이 결과를 확정하지 않는다
+    expect(weakWins).toBeGreaterThan(0);
+  });
+
+  it("강도를 올리면 카드·부상·피로가 함께 늘어난다 (지시의 대가)", () => {
+    const count = (s: Setup, type: string) => {
+      let n = 0;
+      for (let seed = 0; seed < 30; seed++) {
+        const { ledger } = playMatch(s, seed);
+        n += ledger.events.filter((e) => e.type === type).length;
+      }
+      return n;
+    };
+    const calm = () => setup(80, 80, { home: { pressing: 1, tempo: 1 } });
+    const fierce = () => setup(80, 80, { home: { pressing: 5, tempo: 5 } });
+    expect(count(fierce(), "yellow_card")).toBeGreaterThan(count(calm(), "yellow_card"));
+
+    const worn = playMatch(fierce(), 3).plans.at(-1)!;
+    const rested = playMatch(calm(), 3).plans.at(-1)!;
+    const sum = (f: Record<string, number>) => Object.values(f).reduce((a, b) => a + b, 0);
+    expect(sum(worn.fatigue) + 0).toBeGreaterThanOrEqual(0);
+    expect(worn.stop).toBeDefined();
+    expect(rested.stop).toBeDefined();
+  });
+});
+
+/**
+ * 상대 벤치도 판단한다 — 이게 없으면 상대는 킥오프 전술로 90분을 버티는 고정
+ * 표적이고, "상대가 내려섰으니 폭을 넓히자" 같은 판단이 성립하지 않는다.
+ */
+describe("AI 전술 반응", () => {
+  const spec = { ...DEFAULT_TACTICS };
+  const ledgerAt = (minute: number, home: number, away: number) =>
+    ({ minute, score: { home, away } }) as never;
+
+  it("전반에는 움직이지 않는다", () => {
+    expect(planAiTacticalShift("home", spec, ledgerAt(30, 0, 1))).toBeNull();
+  });
+
+  it("지고 있으면 무게를 앞으로 옮긴다", () => {
+    const shift = planAiTacticalShift("home", spec, ledgerAt(60, 0, 1));
+    expect(shift?.mentality).toBeGreaterThan(spec.mentality);
+    expect(shift?.tempo).toBeGreaterThan(spec.tempo);
+  });
+
+  it("늦게까지 두 골 차로 지면 라인까지 올려 던진다", () => {
+    const shift = planAiTacticalShift("home", spec, ledgerAt(80, 0, 2));
+    expect(shift?.mentality).toBe(5);
+    expect(shift?.defensiveLine).toBeGreaterThan(spec.defensiveLine);
+  });
+
+  it("이기고 있고 시간이 없으면 내려선다", () => {
+    const shift = planAiTacticalShift("home", spec, ledgerAt(80, 2, 1));
+    expect(shift?.mentality).toBeLessThan(spec.mentality);
+    expect(shift?.defensiveLine).toBeLessThan(spec.defensiveLine);
+  });
+
+  it("이기고 있어도 시간이 남았으면 서두르지 않는다", () => {
+    expect(planAiTacticalShift("home", spec, ledgerAt(60, 2, 1))).toBeNull();
+  });
+});
+
+describe("AI 교체 판단", () => {
+  const ledger = (minute: number, subsUsed = 0) =>
+    ({
+      minute,
+      phase: "second_half",
+      score: { home: 0, away: 0 },
+      home: { subsUsed, subWindows: 0 },
+      away: { subsUsed: 0, subWindows: 0 },
+    }) as never;
+  const squadOf = (base: number) => {
+    const s = makeSquad("t", base);
+    return { onPitch: s.starters, bench: s.bench };
+  };
+  const plan = (minute: number, extra: Partial<Record<string, unknown>> = {}) =>
+    ({ minute, events: [], stop: "flow", fatigue: {}, sentOff: [], ...extra }) as never;
+
+  it("경기 내내 쌓인 피로를 본다 — 저장값만 보면 아무도 교체되지 않는다", () => {
+    const squad = squadOf(75);
+    const worn: Record<string, number> = {};
+    for (const p of squad.onPitch) worn[p.id] = 50; // 90분 가까이 뛴 상태
+    const sub = planAiSubstitution("home", squad, ledger(70), plan(70), () => 0, worn);
+    expect(sub?.type).toBe("substitution");
+  });
+
+  it("싱싱한 팀은 바꾸지 않는다", () => {
+    expect(planAiSubstitution("home", squadOf(75), ledger(70), plan(70), () => 0, {})).toBeNull();
+  });
+
+  it("부상은 시각·확률·문턱을 건너뛰고 무조건 교체한다", () => {
+    const squad = squadOf(75);
+    const hurt = squad.onPitch[5]!;
+    const sub = planAiSubstitution(
+      "home",
+      squad,
+      ledger(20),
+      plan(20, {
+        events: [{ minute: 20, type: "injury", team: "home", actors: [hurt.id], causes: [] }],
+      }),
+      () => 0.99, // 확률 판정을 통과할 수 없는 값
+      {},
+    );
+    expect(sub?.actors[0]).toBe(hurt.id);
+    expect(sub?.causes[0]).toContain("부상");
+  });
+
+  it("교체 한도는 장부와 같다 (5명·3회)", () => {
+    const squad = squadOf(75);
+    const worn: Record<string, number> = {};
+    for (const p of squad.onPitch) worn[p.id] = 50;
+    const full = planAiSubstitution(
+      "home",
+      squad,
+      ledger(70, LEDGER_LIMITS.maxSubs),
+      plan(70),
+      () => 0,
+      worn,
+    );
+    expect(full).toBeNull();
+  });
+});

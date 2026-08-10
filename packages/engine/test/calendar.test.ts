@@ -113,7 +113,10 @@ describe("대진 편성", () => {
     for (const id of ids) {
       const dates = fixturesOf(matches, id).map((m) => m.date);
       for (let i = 1; i < dates.length; i++) {
-        expect(diffDays(dates[i - 1]!, dates[i]!), `${id} ${dates[i - 1]}→${dates[i]}`).toBeGreaterThanOrEqual(2);
+        expect(
+          diffDays(dates[i - 1]!, dates[i]!),
+          `${id} ${dates[i - 1]}→${dates[i]}`,
+        ).toBeGreaterThanOrEqual(2);
       }
     }
   });
@@ -148,9 +151,7 @@ describe("대진 편성", () => {
     expect(finalRound).toHaveLength(10);
     expect(new Set(finalRound.map((m) => m.date)).size).toBe(1);
     const entries = buildScheduleEntries(matches, buildTransferWindows(1), "arsenal");
-    const finalEntries = entries.filter((e) =>
-      finalRound.some((m) => e.refId === m.id),
-    );
+    const finalEntries = entries.filter((e) => finalRound.some((m) => e.refId === m.id));
     expect(new Set(finalEntries.map((e) => e.time))).toEqual(new Set(["16:00"]));
   });
 });

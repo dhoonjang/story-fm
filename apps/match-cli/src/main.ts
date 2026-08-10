@@ -17,6 +17,8 @@ import {
   buildStrengthPacket,
   createLedger,
   describeLedger,
+  planAiSubstitution,
+  simulateSegment,
   type MatchLedgerState,
 } from "@story-fm/sim";
 import { createGameLLM, TIERS, type TurnHistory, type TurnUsage } from "@story-fm/llm";
@@ -25,7 +27,7 @@ import {
   MATCH_CASTER_SYSTEM,
   buildContinueMessage,
   buildKickoffMessage,
-  makeLogMatchEventsTool,
+  buildSegmentMessage,
   resolveSystemPrompts,
 } from "@story-fm/agents";
 
@@ -102,21 +104,69 @@ if (dry) {
   process.exit(0);
 }
 
-// ---- ② 경기 장부 + log_match_events 도구 ----
+// ---- ② 경기 장부 + 구간 시뮬레이터 ----
+// 결과는 코어가 xg로 굴린다. LLM은 그 사건을 중계할 뿐이다 (match-sim.md §2).
 const ledgerSide = (side: z.infer<typeof SideSchema>) => ({
   onPitch: [...side.startingIds],
   bench: side.players.filter((p) => !side.startingIds.includes(p.id)).map((p) => p.id),
 });
 let ledger: MatchLedgerState = createLedger(ledgerSide(fixture.home), ledgerSide(fixture.away));
-const tool = makeLogMatchEventsTool((events: MatchEvent[]) => {
-  const result = applyEvents(ledger, events);
-  if (!result.ok) return { ok: false, message: result.errors.join("\n") };
-  ledger = result.state;
-  return {
-    ok: true,
-    message: `기록 완료 — ${names.home} ${ledger.score.home} : ${ledger.score.away} ${names.away}, ${ledger.minute}′ (${ledger.phase})`,
-  };
+const byId = new Map([...fixture.home.players, ...fixture.away.players].map((p) => [p.id, p]));
+const nameOf = (id: string) => byId.get(id)?.name ?? id;
+const squadOf = (side: z.infer<typeof SideSchema>, s: { onPitch: string[]; bench: string[] }) => ({
+  onPitch: s.onPitch.map((id) => byId.get(id)!).filter(Boolean),
+  bench: s.bench.map((id) => byId.get(id)!).filter(Boolean),
 });
+const seed = Number(flag("seed") ?? 42);
+/** mulberry32 — 엔진의 `makeRng`와 같은 알고리즘 (CLI는 엔진에 의존하지 않는다) */
+function makeRng(base: number, channel: string): () => number {
+  let h = 2166136261;
+  for (let i = 0; i < channel.length; i++) {
+    h ^= channel.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  let a = (base ^ (h >>> 0)) >>> 0;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+let segmentIndex = 0;
+const matchFatigue: Record<string, number> = {};
+
+/** 다음 정지점까지 굴려 장부에 반영하고, 캐스터에게 줄 대본을 돌려준다 */
+function runSegment(): { note: string; stop: string } {
+  const rng = makeRng(seed, `cli-segment:${segmentIndex}`);
+  const squads = {
+    home: squadOf(fixture.home, ledger.home),
+    away: squadOf(fixture.away, ledger.away),
+  };
+  const plan = simulateSegment({
+    packet,
+    ledger,
+    squads,
+    tactics: { home: fixture.home.tactics, away: fixture.away.tactics },
+    rng,
+  });
+  const aiSub = planAiSubstitution("away", squads.away, ledger, plan, rng);
+  const events: MatchEvent[] = aiSub ? [aiSub, ...plan.events] : plan.events;
+  const result = applyEvents(ledger, events);
+  if (!result.ok) return { note: `[진행 실패] ${result.errors.join(" / ")}`, stop: plan.stop };
+  ledger = result.state;
+  segmentIndex += 1;
+  for (const [id, add] of Object.entries(plan.fatigue)) {
+    matchFatigue[id] = Math.min(100, (matchFatigue[id] ?? 0) + add);
+  }
+  return {
+    note: buildSegmentMessage(events, plan.stop, nameOf, (side) =>
+      side === "home" ? names.home : names.away,
+    ),
+    stop: plan.stop,
+  };
+}
 
 // ---- ③ 매치 티어 LLM 진행 루프 ----
 const llm = createGameLLM(TIERS.match);
@@ -132,15 +182,21 @@ const totalUsage: TurnUsage = {
 };
 
 let history: TurnHistory = [];
-let userMessage = buildKickoffMessage(packet, managerNote);
+let finished = false;
 
-for (let turn = 1; turn <= maxTurns && ledger.phase !== "finished"; turn++) {
+for (let turn = 1; turn <= maxTurns && !finished; turn++) {
   console.log(`\n═══ 진행 턴 ${turn} ═══`);
+  // 코어가 먼저 구간을 굴린다 — 사건이 확정된 뒤에 캐스터가 중계한다
+  const segment = runSegment();
+  finished = segment.stop === "full_time";
+  const userMessage =
+    turn === 1
+      ? `${buildKickoffMessage(packet, managerNote)}\n\n${segment.note}`
+      : `${buildContinueMessage(describeLedger(ledger, names), "좋아, 계속 진행해.")}\n\n${segment.note}`;
   const result = await llm.runTurn({
     system: matchSystem,
     history,
     user: userMessage,
-    tools: [tool],
   });
   history = result.history;
   for (const key of Object.keys(totalUsage) as Array<keyof TurnUsage>) {
@@ -153,8 +209,6 @@ for (let turn = 1; turn <= maxTurns && ledger.phase !== "finished"; turn++) {
     `  (usage: in ${result.usage.inputTokens} / out ${result.usage.outputTokens} / cache-read ${result.usage.cacheReadTokens} / tool calls ${result.toolCallCount})`,
   );
 
-  // 프로토타입은 비대화형 — 항상 "계속". 대화형 개입은 다음 단계.
-  userMessage = buildContinueMessage(describeLedger(ledger, names), "좋아, 계속 진행해.");
 }
 
 // ---- ④ 결과 ----
@@ -170,6 +224,6 @@ for (const e of ledger.events) {
 console.log(
   `\n총 usage — in ${totalUsage.inputTokens} / out ${totalUsage.outputTokens} / cache-read ${totalUsage.cacheReadTokens} / cache-write ${totalUsage.cacheWriteTokens}`,
 );
-if (ledger.phase !== "finished") {
+if (!finished) {
   console.log(`(턴 제한 ${maxTurns}회로 중단 — --turns를 늘리면 끝까지 진행)`);
 }

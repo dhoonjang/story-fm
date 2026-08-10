@@ -31,6 +31,38 @@ describe("경기 장부 검증 (match-sim.md §4)", () => {
     if (!r.ok) expect(r.errors[0]).toContain("그라운드 위 선수가 아닙니다");
   });
 
+  it("도움이 실려도 골은 그대로 기록된다", () => {
+    const r = applyEvents(createLedger(home, away), [
+      ev({ minute: 12, type: "goal", team: "home", actors: ["hm-fw1", "hm-mf1"] }),
+    ]);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.state.score).toEqual({ home: 1, away: 0 });
+      expect(r.state.events[0]?.actors).toEqual(["hm-fw1", "hm-mf1"]);
+    }
+  });
+
+  it("못 믿을 도움은 떨구되 **골은 살린다** — 이미 서술된 득점이 사라지면 안 된다", () => {
+    for (const bogus of ["hm-sub-fw", "aw-fw1", "hm-fw1"]) {
+      const r = applyEvents(createLedger(home, away), [
+        ev({ minute: 12, type: "goal", team: "home", actors: ["hm-fw1", bogus] }),
+      ]);
+      expect(r.ok, `도움 "${bogus}"가 골을 반려시켰다`).toBe(true);
+      if (r.ok) {
+        expect(r.state.score).toEqual({ home: 1, away: 0 });
+        // 득점자만 남는다 (자기 자신이 도움일 수도 없다)
+        expect(r.state.events[0]?.actors).toEqual(["hm-fw1"]);
+      }
+    }
+  });
+
+  it("득점자 자체가 그라운드 밖이면 여전히 반려다 — 관용은 도움 슬롯에만", () => {
+    const r = applyEvents(createLedger(home, away), [
+      ev({ minute: 12, type: "goal", team: "home", actors: ["hm-sub-fw", "hm-mf1"] }),
+    ]);
+    expect(r.ok).toBe(false);
+  });
+
   it("퇴장당한 선수는 이후 행동할 수 없다 — 배치는 원자적으로 반려", () => {
     const r = applyEvents(createLedger(home, away), [
       ev({ minute: 30, type: "red_card", team: "home", actors: ["hm-fw1"] }),
@@ -101,9 +133,7 @@ describe("경기 장부 검증 (match-sim.md §4)", () => {
   });
 
   it("하프타임 없이 full_time은 불가하고, 순서를 지키면 종료된다", () => {
-    const noHalf = applyEvents(createLedger(home, away), [
-      ev({ minute: 92, type: "full_time" }),
-    ]);
+    const noHalf = applyEvents(createLedger(home, away), [ev({ minute: 92, type: "full_time" })]);
     expect(noHalf.ok).toBe(false);
 
     // 하프타임은 강제 정지점 — 별도 배치로 나눠야 한다

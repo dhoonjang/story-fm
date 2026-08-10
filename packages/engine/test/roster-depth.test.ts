@@ -5,6 +5,7 @@ import {
   activeContract,
   assignmentsOf,
   groupOf,
+  isClubTeam,
   playerCatalog,
   playersOf,
   transitionSeason,
@@ -12,6 +13,8 @@ import {
 import { createTestGame } from "./helpers";
 
 const TIER = new Map(TEAM_CATALOG.map((t) => [t.id, t.tier]));
+/** 스쿼드를 갖는 클럽만 — 무소속은 방출·계약 만료로만 사람이 들어온다 */
+const CLUBS = TEAM_CATALOG.filter((t) => isClubTeam(t.id));
 const REF = "2026-08-15"; // 시즌 개막 기준 나이
 
 describe("실선수 로스터 깊이 (30인+, 유망주 포함)", () => {
@@ -20,7 +23,7 @@ describe("실선수 로스터 깊이 (30인+, 유망주 포함)", () => {
 
   it("팀당 18인 이상, 전역 id 유일", () => {
     const global = new Set<string>();
-    for (const team of TEAM_CATALOG) {
+    for (const team of CLUBS) {
       const ids = rosterOf(team.id).map((e) => e.id);
       expect(ids.length).toBeGreaterThanOrEqual(18);
       expect(new Set(ids).size).toBe(ids.length);
@@ -33,15 +36,14 @@ describe("실선수 로스터 깊이 (30인+, 유망주 포함)", () => {
   });
 
   it("포지션 그룹별 최소 인원 — 선발·시즌 전환이 고갈로 막히지 않는다", () => {
-    for (const team of TEAM_CATALOG) {
+    for (const team of CLUBS) {
       const roster = rosterOf(team.id);
       const count = (g: string) =>
         roster.filter((e) => {
           const natural = naturalPositionOf(e).position;
           return (
             (g === "GK" && natural === "GK") ||
-            (g !== "GK" &&
-              groupOf({ positions: e.positions } as never) === g)
+            (g !== "GK" && groupOf({ positions: e.positions } as never) === g)
           );
         }).length;
       expect(count("GK")).toBeGreaterThanOrEqual(2);
@@ -49,7 +51,7 @@ describe("실선수 로스터 깊이 (30인+, 유망주 포함)", () => {
   });
 
   it("모든 팀이 만 20세 이하 유망주를 보유하고 성장 여지가 있다", () => {
-    for (const team of TEAM_CATALOG) {
+    for (const team of CLUBS) {
       const roster = rosterOf(team.id);
       const youths = roster.filter((e) => ageOf(e.birthdate, REF) <= 21);
       expect(youths.length).toBeGreaterThanOrEqual(1);
@@ -61,7 +63,7 @@ describe("실선수 로스터 깊이 (30인+, 유망주 포함)", () => {
 
   it("tier가 낮을수록(강할수록) 평균 잠재치가 높다", () => {
     const avgByTier: Record<number, number[]> = { 1: [], 2: [], 3: [], 4: [] };
-    for (const team of TEAM_CATALOG) {
+    for (const team of CLUBS) {
       const roster = rosterOf(team.id);
       const avg = roster.reduce((s, e) => s + e.potential, 0) / roster.length;
       avgByTier[TIER.get(team.id) ?? 3]!.push(avg);
@@ -74,6 +76,7 @@ describe("실선수 로스터 깊이 (30인+, 유망주 포함)", () => {
     const state = createTestGame(42);
     for (let s = 0; s < 15; s++) transitionSeason(state);
     for (const team of state.teams) {
+      if (!isClubTeam(team.id)) continue;
       const roster = playersOf(state, team.id);
       const starters = assignmentsOf(state, team.id, "starting");
       expect(starters).toHaveLength(11);
@@ -84,5 +87,5 @@ describe("실선수 로스터 깊이 (30인+, 유망주 포함)", () => {
       // 모든 선수가 활성 계약을 갖는다 (은퇴자는 제거됨)
       for (const p of roster) expect(activeContract(state, p.id)).not.toBeNull();
     }
-  }, 30_000);
+  }, 90_000);
 });

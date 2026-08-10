@@ -23,6 +23,9 @@ export default defineConfig({
       PORT: "3399",
       LLM_MODE: "mock",
       STORY_FM_DATA_DIR: "/tmp/story-fm-e2e",
+      // 개발 서버(.next)와 빌드 산출물을 나눠 쓴다 — 공유하면 재컴파일 때
+      // 서로의 청크를 지워 테스트가 무작위로 깨진다
+      NEXT_DIST_DIR: ".next-e2e",
     },
   },
 });
