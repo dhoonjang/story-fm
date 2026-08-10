@@ -12,6 +12,7 @@ import { completeDraw, drawIsDue, scheduleDraw } from "./draw-schedule";
 import { knockoutDates } from "./europe";
 import { payLeaguePhasePrizes, payStagePrizes } from "./euro-prize";
 import { makeRng } from "../core/rng";
+import { resolveExtraTime, tieAggregate } from "./extra-time";
 import { shootout } from "./shootout";
 import { pushNarrative, teamName, teamShortName, type GameState } from "../core/state";
 import { computeStandings } from "./season";
@@ -59,7 +60,8 @@ export function euroLeaguePhaseDone(state: GameState, cupId: string): boolean {
 
 /**
  * 대진의 승자 — 두 경기(또는 결승 한 경기)가 모두 끝났을 때만.
- * 합계가 같으면 승부차기 결과를 2차전 장부에 기록하고 그것으로 가린다.
+ * 합계가 같으면 **연장 30분**을 치르고(`extra-time.ts`), 그래도 같으면 승부차기
+ * 결과를 2차전 장부에 기록하고 그것으로 가린다.
  */
 export function euroTieWinner(
   state: GameState,
@@ -71,19 +73,22 @@ export function euroTieWinner(
   if (legs.length === 0 || legs.some((m) => !m.result)) return null;
 
   const decider = legs[legs.length - 1]!;
-  const goals = new Map<string, number>();
-  for (const leg of legs) {
-    const r = leg.result!;
-    goals.set(leg.homeTeamId, (goals.get(leg.homeTeamId) ?? 0) + r.homeGoals);
-    goals.set(leg.awayTeamId, (goals.get(leg.awayTeamId) ?? 0) + r.awayGoals);
-  }
-  const homeAgg = goals.get(decider.homeTeamId) ?? 0;
-  const awayAgg = goals.get(decider.awayTeamId) ?? 0;
-  if (homeAgg !== awayAgg) return homeAgg > awayAgg ? decider.homeTeamId : decider.awayTeamId;
+  const channel = `${cupId}:${stage}:${pair}`;
+  /** 지금 합계로 갈리는 쪽 — 같으면 null */
+  const level = () => {
+    const agg = tieAggregate(legs, decider);
+    if (agg.home === agg.away) return null;
+    return agg.home > agg.away ? decider.homeTeamId : decider.awayTeamId;
+  };
+  const regulation = level();
+  if (regulation) return regulation;
+
+  resolveExtraTime(state, decider, channel);
+  const afterExtra = level();
+  if (afterExtra) return afterExtra;
 
   const pens =
-    decider.result!.penalties ??
-    shootout(state, decider.homeTeamId, decider.awayTeamId, `${cupId}:${stage}:${pair}`);
+    decider.result!.penalties ?? shootout(state, decider.homeTeamId, decider.awayTeamId, channel);
   decider.result!.penalties = pens;
   return pens.home > pens.away ? decider.homeTeamId : decider.awayTeamId;
 }

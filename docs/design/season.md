@@ -162,9 +162,26 @@ advance_time(until):
    경고가 하나 지워진다. AI 구단은 등급별 순위 문턱 아래에서 하루 9% 확률로
    결단한다(`market/manager-market.ts`).
 
-## 8. 미해결
+## 8. 승강 (`competition/promotion.ts`)
 
-- 승강 처리 — 강등·승격이 없다 (순위표에 강등 구역 표시도 그래서 없다)
+시즌 전환에서 1부 하위 3팀과 2부 상위 3팀이 자리를 바꾼다.
+
+- **소속은 상태가 갖는다** (`state.leagueOf` — 옛 세이브엔 없어 카탈로그값). 팀
+  카탈로그의 `leagueId`는 불변이라 승강을 표현할 수 없다.
+- **승격은 전력 점수가 아니라 서열로 뽑는다** — 점수를 그대로 쓰면 방금 강등된
+  실선수 스쿼드가 절차 생성 2부 클럽보다 늘 높아 매년 같은 셋이 올라온다.
+  서열 + 시즌을 섞은 시드라 4·5위도 올라온다. 2부에 순위표가 있으면(감독이 그
+  리그에 있는 시즌) 표를 쓴다.
+- **강등된 감독의 2부도 리그전을 돈다**(`extraLeagues`) — 2부는 원래 컵 인원이라
+  일정이 없어서, 그대로 두면 강등이 곧 경기 없는 시즌이 된다.
+- 순위표 구역도 따라온다(1부 `잔류 → 강등`, 2부 `승격`). ⚠️ 구역은 1위부터
+  빈틈없이 이어야 한다 — 화면이 `rank <= through`로 찾으므로 구멍이 있으면
+  중위권이 강등으로 읽힌다.
+- ⚠️ 재정·AI 시장·감독 시장은 아직 **카탈로그 소속**을 읽는다 — 강등된 클럽이 한
+  시즌 1부 중계 수입을 받는다(파라슈트 페이먼트처럼 보이긴 한다).
+
+## 9. 미해결
+
 - 업적 정의 목록 확장
 - 오프시즌 흐름의 서사 연출(은퇴식·시상식)
 - 유스 아카데미 — 콜업은 있으나 육성 구조가 없다
@@ -174,10 +191,10 @@ advance_time(until):
 | 무엇 | 어디 |
 | --- | --- |
 | 시즌 달력·리그 편성 | `packages/engine/src/competition/calendar.ts` · `fixtures.ts` |
-| 국내 컵 · 승부차기 · 리그 연기 | `competition/domestic-cup.ts` · `shootout.ts` · `reschedule.ts` |
+| 국내 컵 · 연장·승부차기 · 리그 연기 | `competition/domestic-cup.ts` · `extra-time.ts` · `shootout.ts` · `reschedule.ts` |
 | 유럽 대항전 | `competition/europe.ts` · `euro-knockout.ts` · `euro-prize.ts` |
 | 추첨 일정 | `competition/draw-schedule.ts` |
-| 시즌 리뷰·전환 | `competition/season.ts` |
+| 시즌 리뷰·전환·승강 | `competition/season.ts` · `competition/promotion.ts` |
 | tick·시간 진행 | `packages/engine/src/core/tick.ts` · `core/dates.ts` |
 | 훈련 계획·결산 | `packages/engine/src/squad/training-plan.ts` · `training-report.ts` |
 | 온보딩 | `packages/engine/src/world/onboarding.ts` |

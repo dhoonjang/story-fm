@@ -24,7 +24,7 @@ import {
 } from "@story-fm/domain";
 import { diffDays, nextMatchFor, seasonEndDate } from "../competition/calendar";
 import { clubProfile } from "../data/club-profile";
-import { leagueOfTeam, teamCatalogById } from "../data/team-catalog";
+import { teamCatalogById } from "../data/team-catalog";
 import { categoryOf, currentMonthSummary, psrStatus, seasonWageRatio } from "../club/finance";
 import {
   CUP_CATALOG,
@@ -62,6 +62,8 @@ import { listingOf } from "../market/negotiation";
 import { marketValueOf, wageExpectationOf } from "../market/market";
 import { settlingPercent } from "../squad/settling";
 import { computeStandings, type StandingRow } from "../competition/season";
+import { RELEGATION_SLOTS, hasRelegation, leagueOfTeamIn } from "../competition/promotion";
+import { isCupOnlyLeague } from "../data/league-catalog";
 import {
   activeContract,
   activeSuspension,
@@ -756,13 +758,19 @@ function buildEuropeView(state: GameState, cupId: string): EuropeView | null {
  * 장식이 아니라 **대회 카탈로그에서 파생되는 사실**이다 — 리그별 티켓 수가 바뀌면
  * 표의 선도 따라 움직인다.
  *
- * ⚠️ **강등 구역은 없다.** 승강 처리가 아직 구현되지 않아(game-overview §16 미해결)
- * 하위 순위에 결과가 붙지 않는다. 선을 그으면 지키지 않는 약속이 된다.
+ * ⚠️ **구역은 1위부터 빈틈없이 이어져야 한다** — 화면이 "이 순위 이하"로 구역을
+ * 찾기 때문이다(`zoneAt`). 그래서 강등선 위의 중위권도 `잔류`로 이름을 갖는다.
+ * 구멍을 두면 7위가 강등 구역으로 읽힌다.
  *
  * 리그의 마지막 자리는 **국내 컵 우승팀이 순위 밖일 때 바뀔 수 있다**(europe.ts의
  * 연쇄 배정) — 경계선은 규정이고, 자리의 주인은 시즌이 끝나고 정해진다.
  */
-function buildStandingZones(competitionId: string): StandingZone[] {
+function buildStandingZones(
+  state: GameState,
+  competitionId: string,
+  /** 그 대회의 팀 수 — 강등선은 아래에서 세므로 필요하다 */
+  size: number,
+): StandingZone[] {
   // 대항전 리그 페이즈 — 통과 기준이 곧 구역이다
   if (isEuroCup(competitionId)) {
     const cup = cupCatalogById(competitionId);
@@ -780,6 +788,12 @@ function buildStandingZones(competitionId: string): StandingZone[] {
     return zones;
   }
   if (isCup(competitionId)) return []; // 국내 컵은 순위표가 없다
+  // 2부 — 티켓도 강등도 없고 위로 가는 문만 있다 (`promotion.ts`)
+  if (isCupOnlyLeague(competitionId)) {
+    return size > RELEGATION_SLOTS
+      ? [{ through: RELEGATION_SLOTS, label: "승격", kind: "promotion" }]
+      : [];
+  }
   // 리그 — 유럽 진출 티켓을 상위부터 채운다 (europe.ts의 배정 순서와 같은 규칙)
   const zones: StandingZone[] = [];
   let cursor = 0;
@@ -788,6 +802,12 @@ function buildStandingZones(competitionId: string): StandingZone[] {
     if (count === 0) continue;
     cursor += count;
     zones.push({ through: cursor, label: competitionName(cup.id), kind: cup.id });
+  }
+  // 강등 — 아래 리그가 이 세계에 실제로 있을 때만 선을 긋는다 (축소 세계엔 없다)
+  const cut = size - RELEGATION_SLOTS;
+  if (hasRelegation(state, competitionId) && cut > cursor) {
+    zones.push({ through: cut, label: "잔류", kind: "safe" });
+    zones.push({ through: size, label: "강등", kind: "relegation" });
   }
   return zones;
 }
@@ -1117,7 +1137,7 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
     short: competitionShortName(competitionId),
     kind: cup ? "cup" : "league",
     standings,
-    zones: buildStandingZones(competitionId),
+    zones: buildStandingZones(state, competitionId, standings.length),
     userPosition: standings.findIndex((r) => r.teamId === state.userTeamId) + 1,
     next: nextOurs
       ? `${nextOurs.date} ${nextOurs.neutral ? "중립" : nextOurs.homeTeamId === state.userTeamId ? "홈" : "원정"} vs ${teamName(nextOurs.homeTeamId === state.userTeamId ? nextOurs.awayTeamId : nextOurs.homeTeamId)}`
@@ -1254,7 +1274,8 @@ export function buildOfficeViews(state: GameState): OfficeViews {
     );
 
   // 대회 탭 — 우리 리그 → 우리가 나가는 대항전 → 우리 나라 국내 컵 (명성 순)
-  const ourLeague = leagueOfTeam(userTeamId);
+  // 리그는 **지금 뛰는 리그**다 — 강등되면 카탈로그와 갈린다 (`promotion.ts`)
+  const ourLeague = leagueOfTeamIn(state, userTeamId);
   const ourEuroCup = euroCompetitionOf(state.euroEntrants, userTeamId);
   const competitionList = [
     ourLeague,

@@ -78,8 +78,18 @@ export const MatchResultSchema = z.object({
   homeLineup: z.array(z.string()).optional(),
   awayLineup: z.array(z.string()).optional(),
   /**
-   * 승부차기 — 녹아웃에서 합계가 같을 때만. 정규시간 스코어는 위 goals에 남고
-   * 승자는 이 값으로 갈린다 (2021년부터 원정 다득점 규칙은 없다).
+   * **연장을 치렀다** — 90분(2차전제는 합계)이 같아 30분을 더 뛴 경기.
+   *
+   * 연장 골은 위 goals·scorers에 그대로 합쳐지고 분은 91~120이다. 무득점으로
+   * 끝난 연장은 장부에 아무 흔적을 남기지 않으므로 이 표식이 "이미 치렀다"를
+   * 뜻한다 — 없으면 대진 승자를 물을 때마다 연장이 다시 굴러간다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  aet: z.boolean().optional(),
+  /**
+   * 승부차기 — 녹아웃에서 **연장까지 치르고도** 합계가 같을 때만. 정규시간·연장
+   * 스코어는 위 goals에 남고 승자는 이 값으로 갈린다 (2021년부터 원정 다득점
+   * 규칙은 없다).
    */
   penalties: z.object({ home: z.number().int().min(0), away: z.number().int().min(0) }).optional(),
   /**

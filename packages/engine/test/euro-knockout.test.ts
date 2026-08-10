@@ -26,8 +26,9 @@ import {
   entrantsOf,
   simSquadOf,
   playerById,
+  tieAggregate,
 } from "@story-fm/engine";
-import { createTestGame, playMockMatch } from "./helpers";
+import { createTestGame, keepSeat, playMockMatch } from "./helpers";
 
 /**
  * 대항전 녹아웃 — 단계 진행·2차전 합계·승부차기·트로피.
@@ -226,22 +227,45 @@ describe("승자 판정", () => {
     expect(legs[1]!.result?.penalties).toBeUndefined();
   });
 
-  it("합계가 같으면 승부차기로 갈리고 2차전 장부에 남는다", () => {
+  it("합계가 같으면 연장을 먼저 치르고, 그래도 같으면 승부차기가 2차전 장부에 남는다", () => {
     const state = createTestGame(42);
     fillResults(leaguePhaseOf(state, "ucl"));
     advanceKnockouts(state, []);
-    const legs = euroStageMatches(state, "ucl", "playoff").filter((m) => /-p0-/.test(m.id));
-    legs[0]!.result = { homeGoals: 1, awayGoals: 1, scorers: [] };
-    legs[1]!.result = { homeGoals: 2, awayGoals: 2, scorers: [] };
+    // 대진마다 연장이 다르다 — 연장이 끝낸 대진과 승부차기까지 간 대진을 둘 다 본다
+    const pairs = new Set(
+      euroStageMatches(state, "ucl", "playoff").map((m) => Number(/-p(\d+)-/.exec(m.id)?.[1])),
+    );
+    let decidedInExtra = 0;
+    let decidedOnPenalties = 0;
+    for (const pair of pairs) {
+      const legs = euroStageMatches(state, "ucl", "playoff").filter((m) =>
+        new RegExp(`-p${pair}-`).test(m.id),
+      );
+      legs[0]!.result = { homeGoals: 1, awayGoals: 1, scorers: [] };
+      legs[1]!.result = { homeGoals: 2, awayGoals: 2, scorers: [] };
 
-    const winner = euroTieWinner(state, "ucl", "playoff", 0);
-    const pens = legs[1]!.result.penalties;
-    expect(pens, "승부차기 기록").toBeDefined();
-    expect(pens!.home).not.toBe(pens!.away);
-    expect(winner).toBe(pens!.home > pens!.away ? legs[1]!.homeTeamId : legs[1]!.awayTeamId);
-    // 같은 질문에 같은 답 — 재호출이 기록을 바꾸지 않는다
-    expect(euroTieWinner(state, "ucl", "playoff", 0)).toBe(winner);
-    expect(legs[1]!.result.penalties).toEqual(pens);
+      const winner = euroTieWinner(state, "ucl", "playoff", pair);
+      const result = legs[1]!.result;
+      expect(result.aet, "연장 표식").toBe(true); // 승부차기 앞에 연장이 있다
+      const agg = tieAggregate(legs, legs[1]!);
+      if (agg.home === agg.away) {
+        const pens = result.penalties;
+        expect(pens, "승부차기 기록").toBeDefined();
+        expect(pens!.home).not.toBe(pens!.away);
+        expect(winner).toBe(pens!.home > pens!.away ? legs[1]!.homeTeamId : legs[1]!.awayTeamId);
+        decidedOnPenalties++;
+      } else {
+        expect(result.penalties).toBeUndefined(); // 연장에서 갈렸으면 승부차기는 없다
+        expect(winner).toBe(agg.home > agg.away ? legs[1]!.homeTeamId : legs[1]!.awayTeamId);
+        decidedInExtra++;
+      }
+      // 같은 질문에 같은 답 — 재호출이 기록을 바꾸지 않는다
+      const score = { home: result.homeGoals, away: result.awayGoals };
+      expect(euroTieWinner(state, "ucl", "playoff", pair)).toBe(winner);
+      expect({ home: result.homeGoals, away: result.awayGoals }).toEqual(score);
+    }
+    expect(decidedInExtra + decidedOnPenalties).toBe(pairs.size);
+    expect(decidedOnPenalties).toBeGreaterThan(0); // 연장도 조용한 대진은 있다
   });
 
   it("경기가 남아 있으면 승자가 없다", () => {
@@ -351,6 +375,8 @@ describe("한 시즌 완주 (mock 경기)", () => {
     let guard = 500;
     let ended = false;
     while (guard-- > 0) {
+      // 대회 진행을 재는 동안 자리는 지킨다 — 경질은 시계를 멈춘다(reviewUserSeat)
+      keepSeat(state);
       const advanced = advanceTime(state, "next_match");
       digest.push(...advanced.digest);
       expect(advanced.ok, advanced.digest.join(" / ")).toBe(true);

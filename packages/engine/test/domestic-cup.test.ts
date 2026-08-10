@@ -1,3 +1,4 @@
+import { keepSeat } from "./helpers";
 import { describe, expect, it } from "vitest";
 import {
   DOMESTIC_CUP_CATALOG,
@@ -50,6 +51,8 @@ function playSeason(state: GameState): void {
   let guard = 420; // 시즌 한 바퀴(7월~6월)보다 넉넉히
   while (guard-- > 0 && !allMatchesDone(state)) {
     const before = state.date;
+    // 컵 편성을 재는 동안 자리는 지킨다 — 경질은 시계를 멈춘다(reviewUserSeat)
+    keepSeat(state);
     const advanced = advanceTime(state, { days: 1 });
     if (state.phase === "matchday") playMockMatch(state);
     if (state.date === before && advanced.stopped !== "matchday") break;

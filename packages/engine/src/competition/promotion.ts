@@ -1,0 +1,136 @@
+import { LEAGUE_CATALOG, leagueCatalogById, leagueName } from "../data/league-catalog";
+import { leagueOfTeam } from "../data/team-catalog";
+import { makeRng } from "../core/rng";
+import { computeStandings } from "./season";
+import { playersOf, pushNarrative, teamName, teamShortName, type GameState } from "../core/state";
+
+/**
+ * 승강 — 1부 하위 세 팀과 그 나라 2부 상위 세 팀이 자리를 바꾼다.
+ *
+ * 팀의 소속 리그는 카탈로그가 갖고 **불변**이므로(2-레이어 원칙) 승강은 세이브
+ * 상태(`state.leagueOf`)로만 표현된다. 리그 소속을 읽는 자리는 아직 전부가 아니라
+ * **일정 편성과 순위표**다 — 그 둘이 "어느 리그에서 뛰는가"를 정하는 곳이고,
+ * 재정·이적 시장은 여전히 카탈로그를 읽는다 (docs 미해결 항목).
+ *
+ * 2부는 리그전을 돌지 않아 순위표가 없다(`league-catalog`의 `cup-only`). 그래서
+ * 승격 팀은 **전력 + 시즌을 섞은 시드**로 뽑는다 — 다만 감독이 그 리그에 있으면
+ * 그 시즌엔 진짜 순위표가 있으므로(`buildAllLeagueMatches`의 추가 리그) 표를 쓴다.
+ */
+
+/** 강등·승격 인원 — 실제 5대 리그와 같다 */
+export const RELEGATION_SLOTS = 3;
+
+/**
+ * 승격 추첨의 폭 — 전력 **서열** 위에 얹히는 난수(자리 수).
+ *
+ * 전력을 점수 그대로 쓰면 안 된다: 방금 강등된 클럽은 실선수 스쿼드라 절차 생성
+ * 2부 클럽보다 열다섯 점쯤 높아서, 어떤 난수를 얹어도 매년 그 셋이 그대로 올라온다.
+ * 서열로 재면 눈금이 아니라 자리만 남아 4~5위도 올라올 수 있다.
+ */
+export const PROMOTION_LUCK = 4;
+
+/** 이 팀이 지금 속한 리그 — 승강이 있으면 세이브가, 없으면 카탈로그가 답한다 */
+export function leagueOfTeamIn(state: GameState, teamId: string): string {
+  return state.leagueOf?.[teamId] ?? leagueOfTeam(teamId);
+}
+
+/** 지금 그 리그에 속한 클럽 (세이브 기준) */
+export function teamsOfLeagueIn(state: GameState, leagueId: string): string[] {
+  return state.teams.filter((t) => leagueOfTeamIn(state, t.id) === leagueId).map((t) => t.id);
+}
+
+/** 국내 컵을 채우는 2부들 — 승강의 상대 리그 */
+const SECOND_TIERS = LEAGUE_CATALOG.filter((l) => l.kind === "cup-only");
+
+/** 그 리그의 아래 — 같은 나라의 2부 (없으면 null) */
+export function secondTierOf(leagueId: string): string | null {
+  const country = leagueCatalogById(leagueId)?.country;
+  if (!country) return null;
+  return SECOND_TIERS.find((l) => l.country === country)?.id ?? null;
+}
+
+/** 이 리그에 승강이 있는가 — 아래 리그가 세이브에 실제로 있어야 한다(축소 세계엔 없다) */
+export function hasRelegation(state: GameState, leagueId: string): boolean {
+  const second = secondTierOf(leagueId);
+  if (!second) return false;
+  return teamsOfLeagueIn(state, second).length >= RELEGATION_SLOTS;
+}
+
+/** 스쿼드 상위 열한 명의 평균 OVR — 2부 클럽을 줄 세우는 잣대 */
+function squadRating(state: GameState, teamId: string): number {
+  const squad = playersOf(state, teamId);
+  if (squad.length === 0) return 0;
+  const top = [...squad].sort((a, b) => b.attributes.overall - a.attributes.overall).slice(0, 11);
+  return top.reduce((s, p) => s + p.attributes.overall, 0) / top.length;
+}
+
+/** 이 리그가 이번 시즌 실제로 경기를 했는가 — 안 뛴 리그는 강등도 없다 */
+function played(state: GameState, leagueId: string): boolean {
+  return state.matches.some(
+    (m) => m.season === state.season && m.competitionId === leagueId && m.result !== null,
+  );
+}
+
+/** 올라올 세 팀 — 순위표가 있으면 그것으로, 없으면 전력 + 시즌 시드 */
+function promotedFrom(state: GameState, secondTier: string): string[] {
+  const pool = teamsOfLeagueIn(state, secondTier);
+  if (played(state, secondTier)) {
+    return computeStandings(state, secondTier)
+      .slice(0, RELEGATION_SLOTS)
+      .map((r) => r.teamId);
+  }
+  // 시즌을 채널에 섞는다 — 안 그러면 한 세이브에서 매년 같은 팀이 올라온다
+  const rng = makeRng(state.seed, `promotion:${secondTier}:${state.season}`);
+  const byStrength = [...pool].sort((a, b) => squadRating(state, b) - squadRating(state, a));
+  return byStrength
+    .map((teamId, rank) => ({ teamId, score: pool.length - rank + rng() * PROMOTION_LUCK }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, RELEGATION_SLOTS)
+    .map((x) => x.teamId);
+}
+
+function setLeague(state: GameState, teamId: string, leagueId: string): void {
+  const map = (state.leagueOf ??= {});
+  if (leagueOfTeam(teamId) === leagueId) delete map[teamId];
+  else map[teamId] = leagueId;
+}
+
+/**
+ * 승강 처리 — **시즌 전환에서 새 일정을 짜기 전에** 한 번.
+ *
+ * @param finalTables 방금 끝난 시즌의 리그별 최종 순위 (팀 id 순서).
+ *   대항전 티켓과 같은 표를 쓴다 — 순위가 두 곳에서 갈리면 안 된다.
+ */
+export function applyPromotionRelegation(
+  state: GameState,
+  finalTables: Record<string, string[]>,
+  digest: string[],
+): void {
+  const ourLeague = leagueOfTeamIn(state, state.userTeamId);
+  for (const [leagueId, table] of Object.entries(finalTables)) {
+    if (!hasRelegation(state, leagueId)) continue;
+    if (!played(state, leagueId)) continue;
+    if (table.length <= RELEGATION_SLOTS) continue;
+    const second = secondTierOf(leagueId)!;
+    // 두 목록을 **먼저** 정한다 — 방금 강등된 팀이 그 자리에서 다시 올라오지 않게
+    const down = table.slice(-RELEGATION_SLOTS);
+    const up = promotedFrom(state, second);
+    for (const teamId of down) setLeague(state, teamId, second);
+    for (const teamId of up) setLeague(state, teamId, leagueId);
+
+    if (leagueId !== ourLeague && second !== ourLeague) continue;
+    digest.push(
+      `⬇️ ${leagueName(leagueId)} 강등: ${down.map((id) => teamShortName(id)).join(" · ")}`,
+      `⬆️ ${leagueName(leagueId)} 승격: ${up.map((id) => teamShortName(id)).join(" · ")}`,
+    );
+    if (down.includes(state.userTeamId)) {
+      digest.push(
+        `${teamName(state.userTeamId)}이(가) 강등됐다 — 다음 시즌은 ${leagueName(second)}다`,
+      );
+      pushNarrative(state, `${leagueName(leagueId)} 강등 — ${leagueName(second)}로`, 5);
+    } else if (up.includes(state.userTeamId)) {
+      digest.push(`${teamName(state.userTeamId)} 승격! 다음 시즌은 ${leagueName(leagueId)}다`);
+      pushNarrative(state, `${leagueName(leagueId)} 승격`, 5);
+    }
+  }
+}

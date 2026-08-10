@@ -24,6 +24,7 @@ import { reservedEuroDates } from "./europe";
 import { payOnce } from "../club/finance";
 import { clearForCup } from "./reschedule";
 import { makeRng } from "../core/rng";
+import { resolveExtraTime, tieAggregate } from "./extra-time";
 import { shootout } from "./shootout";
 import { pushNarrative, teamName, teamShortName, type GameState } from "../core/state";
 
@@ -562,7 +563,8 @@ function createStage(
 
 /**
  * 대진의 승자 — 경기가 모두 끝났을 때만.
- * 단판은 무승부면 곧장 승부차기, 2차전제는 합계가 같을 때 승부차기다.
+ * 단판은 90분, 2차전제는 합계가 같으면 **연장 30분**을 먼저 치르고(`extra-time.ts`)
+ * 그래도 갈리지 않으면 승부차기다.
  */
 export function domesticTieWinner(
   state: GameState,
@@ -574,19 +576,22 @@ export function domesticTieWinner(
   if (legs.length === 0 || legs.some((m) => !m.result)) return null;
 
   const decider = legs[legs.length - 1]!;
-  const goals = new Map<string, number>();
-  for (const leg of legs) {
-    const r = leg.result!;
-    goals.set(leg.homeTeamId, (goals.get(leg.homeTeamId) ?? 0) + r.homeGoals);
-    goals.set(leg.awayTeamId, (goals.get(leg.awayTeamId) ?? 0) + r.awayGoals);
-  }
-  const homeAgg = goals.get(decider.homeTeamId) ?? 0;
-  const awayAgg = goals.get(decider.awayTeamId) ?? 0;
-  if (homeAgg !== awayAgg) return homeAgg > awayAgg ? decider.homeTeamId : decider.awayTeamId;
+  const channel = `${cupId}:${stage}:${pair}`;
+  /** 지금 합계로 갈리는 쪽 — 같으면 null */
+  const level = () => {
+    const agg = tieAggregate(legs, decider);
+    if (agg.home === agg.away) return null;
+    return agg.home > agg.away ? decider.homeTeamId : decider.awayTeamId;
+  };
+  const regulation = level();
+  if (regulation) return regulation;
+
+  resolveExtraTime(state, decider, channel);
+  const afterExtra = level();
+  if (afterExtra) return afterExtra;
 
   const pens =
-    decider.result!.penalties ??
-    shootout(state, decider.homeTeamId, decider.awayTeamId, `${cupId}:${stage}:${pair}`);
+    decider.result!.penalties ?? shootout(state, decider.homeTeamId, decider.awayTeamId, channel);
   decider.result!.penalties = pens;
   return pens.home > pens.away ? decider.homeTeamId : decider.awayTeamId;
 }
