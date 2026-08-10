@@ -60,8 +60,8 @@ export function describePersona(persona: Persona): string {
     `동기: ${persona.motivation}`,
     `말투: ${persona.speechStyle.note}`,
     ...persona.speechStyle.samples.map((s) => `  예) ${s}`),
-    // 직책이 아니라 이름으로 말한다 — 선수가 @손흥민:으로 말하는 것과 같다
-    `화자 태그: @${persona.characterId}: — "${PERSONA_ROLE_LABEL[persona.role]}"는 직책이지 태그가 아니다. 태그에 직책을 쓰지 마라.`,
+    // 직책이 아니라 이름으로 말한다 — 규칙은 시스템 프롬프트(출력 문법)에 한 번만 선다
+    `화자 태그: @${persona.characterId}:`,
     // 실명 인물 — 평판을 해칠 서사 금지 가드와 세트로만 운용한다 (data-sourcing.md §7)
     ...(persona.real
       ? [

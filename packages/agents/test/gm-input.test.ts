@@ -230,35 +230,85 @@ describe("새 게임 첫 장면", () => {
     expect(request?.maxTokens).toBeUndefined();
   });
 
-  it("출력 상한에 걸린 응답은 기본 브리핑으로 대체한다 (잘린 장면을 보여주지 않는다)", async () => {
-    const state = game();
-    const truncated: GameLLM = {
-      runTurn: async () => ({
-        // 문법은 멀쩡하지만 마지막 줄이 문장 한복판에서 끊겼다
-        text: [
-          "@: *이른 아침, 훈련장에 안개가 걷힌다*",
-          `@${headCoachOf(state).characterId}: 감독님, 오시느라 고생 많으셨습니다.`,
-          `@${headCoachOf(state).characterId}: 우선 선수단 면면과 전술 구상부터 점검하시겠습니까, 아니면 이적시장 목표 파`,
-        ].join("\n"),
-        history: { version: 1, provider: "anthropic", model: "test-model", messages: [] },
-        usage: { inputTokens: 100, outputTokens: 1_200, cacheReadTokens: 0, cacheWriteTokens: 0 },
-        toolCallCount: 0,
-        stopReason: "max_tokens",
-      }),
-    };
+  /** 실모드에서 첫 장면을 만들어 본다 — LLM_MODE를 되돌리는 것까지 한 자리에서 */
+  async function onboardInRealMode(state: GameState, llm: GameLLM) {
     const previousMode = process.env.LLM_MODE;
     process.env.LLM_MODE = "real";
     try {
-      const turn = await runOnboardingTurn(state, truncated);
-      expect(turn.text).not.toContain("이적시장 목표 파");
-      // 폴백은 완결된 장면이다 (mock 온보딩과 같은 규칙 장면) — 첫 줄은 시점이다
-      const lines = turn.text.split("\n");
-      expect(lines[0]).toMatch(/^\[.+\]$/u);
-      expect(lines.slice(1).every((line) => line.startsWith("@"))).toBe(true);
+      return await runOnboardingTurn(state, llm);
     } finally {
       if (previousMode === undefined) delete process.env.LLM_MODE;
       else process.env.LLM_MODE = previousMode;
     }
+  }
+
+  const scene = (state: GameState, tail: string) =>
+    [
+      "@: *이른 아침, 훈련장에 안개가 걷힌다*",
+      `@${headCoachOf(state).characterId}: 감독님, 오시느라 고생 많으셨습니다.`,
+      `@${headCoachOf(state).characterId}: ${tail}`,
+    ].join("\n");
+
+  const reply = (text: string, stopReason = "end_turn") => ({
+    text,
+    history: {
+      version: 1 as const,
+      provider: "anthropic" as const,
+      model: "test-model",
+      messages: [],
+    },
+    usage: { inputTokens: 100, outputTokens: 80, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    toolCallCount: 0,
+    stopReason,
+  });
+
+  /**
+   * **폴백 없음** — 잘린 장면·문법 위반·호출 실패는 한 번 더 부르고, 그래도 안
+   * 되면 오류가 위로 올라간다. 규칙 장면으로 덮으면 실모드가 도는 줄 알고 넘어간다
+   * (실제로 SDK가 비스트리밍을 거부하는 동안 모든 첫 장면이 규칙 장면이었다).
+   */
+  it("잘린 장면은 다시 시도하고, 두 번째가 멀쩡하면 그것으로 연다", async () => {
+    const state = game();
+    let call = 0;
+    const llm: GameLLM = {
+      runTurn: async () =>
+        ++call === 1
+          ? reply(scene(state, "이적시장 목표 파"), "max_tokens")
+          : reply(scene(state, "선수단부터 보시겠습니까.")),
+    };
+
+    const turn = await onboardInRealMode(state, llm);
+    expect(call).toBe(2);
+    expect(turn.text).toContain("선수단부터");
+  });
+
+  it("두 번 다 실패하면 오류가 올라간다 — 규칙 장면으로 덮지 않는다", async () => {
+    const state = game();
+    let call = 0;
+    const llm: GameLLM = {
+      runTurn: async () => {
+        call++;
+        throw new Error("Connection error");
+      },
+    };
+
+    await expect(onboardInRealMode(state, llm)).rejects.toThrow("Connection error");
+    expect(call).toBe(2);
+  });
+
+  it("문법을 어긴 장면도 두 번째까지 어기면 오류다", async () => {
+    const state = game();
+    let call = 0;
+    // 감독을 대신 연기한 장면 — 첫 턴부터 규약이 깨진다
+    const llm: GameLLM = {
+      runTurn: async () => {
+        call++;
+        return reply(`@${state.manager.name}: 반갑습니다, 여러분.`);
+      },
+    };
+
+    await expect(onboardInRealMode(state, llm)).rejects.toThrow("출력 문법");
+    expect(call).toBe(2);
   });
 });
 
@@ -638,16 +688,19 @@ describe("프롬프트가 허락을 구하는 말투를 가르치지 않는다",
 });
 
 /**
- * 화자 — **수석코치는 통로가 아니다.**
+ * 화자 — **자리마다 소관이 있다.**
  *
- * 부임 첫 장면이 수석코치의 인사라(온보딩 지시) 모델이 그 뒤로 자기 이력을
- * 흉내 내며 모든 소식을 그의 입으로 옮겼다. 선수도 구단주도 기자도 카드로 서
- * 있는데 세계가 비서 한 명으로 좁아진다.
+ * 코치를 "통로가 아니다"로 누르고 구단주에게 "돈과 성적"을 맡겼더니, 순위와
+ * 재정이 매 턴 상태에 실리는 탓에 훈련·라커룸 이야기까지 구단주가 열었다.
+ * 억제 대신 소관으로 적는다 — 구단주는 자기가 결정하는 일에만 나온다.
  */
 describe("장면을 여는 사람은 그 일에 가장 가까운 사람이다", () => {
-  it("수석코치를 통로로 쓰지 말라는 규칙이 프롬프트에 있다", () => {
+  it("자리마다 소관이 적혀 있다 — 구단주는 자기가 결정하는 일에만", () => {
     expect(GM_SYSTEM).toContain("그 일에 가장 가까운 사람");
-    expect(GM_SYSTEM).toContain("모든 소식이 지나가는 통로가 아니다");
+    expect(GM_SYSTEM).toContain("훈련·전술·선수단 관리는 수석코치가");
+    expect(GM_SYSTEM).toContain("구단주는 자기가 결정하는 일");
+    // 코치를 누르는 부정문은 지웠다 — 누르면 모델이 대체 화자로 구단주를 집는다
+    expect(GM_SYSTEM).not.toContain("통로가 아니다");
   });
 
   it("레퍼런스에 코치 말고도 부를 사람이 서 있다", () => {
