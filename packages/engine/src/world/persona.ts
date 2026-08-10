@@ -3,11 +3,13 @@ import {
   HEAD_COACH_ROLE_LABEL,
   PERSONA_ROLE_LABEL,
   normalizeSpeaker,
+  type Negotiation,
   type Persona,
 } from "@story-fm/domain";
 import { realCoachNameOf } from "../data/coach-seeds";
 import { realOwnerNameOf } from "../data/owner-seeds";
-import { countryOfTeam } from "../data/team-catalog";
+import { leagueCatalogById } from "../data/league-catalog";
+import { countryOfTeam, leagueOfTeam } from "../data/team-catalog";
 import { makeRng, pick } from "../core/rng";
 
 /**
@@ -125,7 +127,12 @@ const COACH_ARCHETYPES: readonly CoachArchetype[] = [
  * 때문이다. 리그 국적을 따라가면 실명이 아니어도 그 구단의 사람처럼 읽힌다.
  * 한국어 중계 문맥의 표기를 따른다.
  */
-const NAME_POOLS: Record<string, { given: readonly string[]; family: readonly string[] }> = {
+interface NamePool {
+  given: readonly string[];
+  family: readonly string[];
+}
+
+const NAME_POOLS: Record<string, NamePool> = {
   잉글랜드: {
     given: ["제임스", "토마스", "대니얼", "마이클", "올리버", "해리", "에런", "루크"],
     family: ["베넷", "콜린스", "하퍼", "그레이", "모건", "라이언", "웰스", "다우니"],
@@ -150,12 +157,17 @@ const NAME_POOLS: Record<string, { given: readonly string[]; family: readonly st
 
 const FALLBACK_POOL = NAME_POOLS["잉글랜드"]!;
 
+/** 나라 → 이름 풀. 풀이 없는 나라는 잉글랜드로 떨어진다 */
+function namePoolOf(country: string | undefined): NamePool {
+  return (country !== undefined ? NAME_POOLS[country] : undefined) ?? FALLBACK_POOL;
+}
+
 /**
  * 그 나라 사람다운 가상 이름 하나 — 수석코치·기자와 같은 풀을 쓴다.
  * 감독 시장(`manager-market.ts`)이 후임 감독의 이름을 여기서 얻는다.
  */
 export function inventPersonName(rng: () => number, teamId: string): string {
-  const pool = NAME_POOLS[countryOfTeam(teamId)] ?? FALLBACK_POOL;
+  const pool = namePoolOf(countryOfTeam(teamId));
   return `${pick(rng, pool.given)} ${pick(rng, pool.family)}`;
 }
 
@@ -173,7 +185,7 @@ export function generateHeadCoach(seed: number, teamId: string): Persona {
   const rng = makeRng(seed, `persona:head_coach:${teamId}`);
   const archetype = pick(rng, COACH_ARCHETYPES);
   const real = realCoachNameOf(teamId);
-  const pool = NAME_POOLS[countryOfTeam(teamId)] ?? FALLBACK_POOL;
+  const pool = namePoolOf(countryOfTeam(teamId));
   const name = real ?? `${pick(rng, pool.given)} ${pick(rng, pool.family)}`;
   return {
     // 화자 태그는 직책이 아니라 **이름**이다 — 선수가 @손흥민:으로 말하듯
@@ -288,7 +300,7 @@ export function generateOwner(seed: number, teamId: string): Persona {
   const rng = makeRng(seed, `persona:owner:${teamId}`);
   const archetype = pick(rng, OWNER_ARCHETYPES);
   const real = realOwnerNameOf(teamId);
-  const pool = NAME_POOLS[countryOfTeam(teamId)] ?? FALLBACK_POOL;
+  const pool = namePoolOf(countryOfTeam(teamId));
   const name = real ?? `${pick(rng, pool.given)} ${pick(rng, pool.family)}`;
   return {
     characterId: name,
@@ -308,6 +320,16 @@ export const OWNER_ARCHETYPE_LABELS = OWNER_ARCHETYPES.map((a) => a.label);
 
 /** 원형 목록 — 테스트·어드민이 전수를 훑을 때 쓴다 */
 export const HEAD_COACH_ARCHETYPES = COACH_ARCHETYPES.map((a) => a.label);
+
+/**
+ * 끝난 협상 — 나머지(`open`·`agreed`)는 아직 테이블에 사람이 앉아 있다.
+ * 종료 상태를 빼는 방향이라 상태가 하나 늘어도 화자가 조용히 사라지지 않는다.
+ */
+const CLOSED_NEGOTIATION = new Set<string>([
+  "completed",
+  "rejected",
+  "expired",
+] satisfies Negotiation["status"][]);
 
 /** 화자 사전을 만들 최소 상태 — 세이브 전체가 아니라 필요한 것만 받는다 */
 interface SpeakerSource {
@@ -389,9 +411,12 @@ export function speakerRoles(state: SpeakerSource): Record<string, SpeakerRole> 
     else put(player.name, { kind: "player" });
   }
 
-  // 협상 테이블의 상대 선수 — 남의 팀이지만 지금 대화에 앉아 있다
+  // 협상 테이블의 상대 선수 — 남의 팀이지만 지금 대화에 앉아 있다.
+  // 합의 뒤 메디컬을 기다리는 자리(`agreed`)도 아직 진행 중이다
   const negotiating = new Set(
-    (state.negotiations ?? []).filter((n) => n.status === "open").map((n) => n.gamePlayerId),
+    (state.negotiations ?? [])
+      .filter((n) => !CLOSED_NEGOTIATION.has(n.status))
+      .map((n) => n.gamePlayerId),
   );
   if (negotiating.size > 0) {
     for (const player of state.players ?? []) {
@@ -505,7 +530,8 @@ const OUTLET_NAMES: Record<string, string[]> = {
  * 팀을 넣지 않는다. 감독이 다른 팀으로 옮겨도 같은 기자를 만난다.
  */
 export function generateReporters(seed: number, teamId: string): Persona[] {
-  const pool = NAME_POOLS[countryOfTeam(teamId)] ?? FALLBACK_POOL;
+  // 이름 풀의 기준도 리그다 — 시드 채널과 어긋나면 같은 담당 기자의 이름이 갈린다
+  const pool = namePoolOf(leagueCatalogById(leagueOfTeam(teamId))?.country);
   return REPORTER_ARCHETYPES.map((archetype) => {
     const rng = makeRng(seed, `persona:reporter:${archetype.key}`);
     const name = `${pick(rng, pool.given)} ${pick(rng, pool.family)}`;

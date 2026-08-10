@@ -14,6 +14,7 @@ import {
   createGame,
   type GameState,
   reportersOf,
+  generateReporters,
 } from "@story-fm/engine";
 import { createTestGame } from "./helpers";
 
@@ -166,6 +167,43 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (personas.
     expect(speakerRoles(state)[normalizeSpeaker(outsider.name)]).toEqual({ kind: "player" });
   });
 
+  it("합의 뒤 메디컬을 기다리는 선수도 사전에 남는다 — open만 보면 자리가 사라진다", () => {
+    const state = newGame(42, "manutd");
+    const outsider = state.players.find((p) => p.teamId !== "manutd")!;
+    state.negotiations.push({
+      id: "neg-2",
+      gamePlayerId: outsider.id,
+      kind: "buy",
+      counterpartTeamId: outsider.teamId,
+      windowId: null,
+      openedOn: state.date,
+      expiresOn: state.date,
+      status: "agreed",
+      rounds: [],
+      medical: { onDate: state.date, status: "scheduled" },
+    });
+    expect(speakerRoles(state)[normalizeSpeaker(outsider.name)]).toEqual({ kind: "player" });
+  });
+
+  it("끝난 협상은 화자를 남기지 않는다", () => {
+    for (const status of ["completed", "rejected", "expired"] as const) {
+      const state = newGame(42, "manutd");
+      const outsider = state.players.find((p) => p.teamId !== "manutd")!;
+      state.negotiations.push({
+        id: `neg-${status}`,
+        gamePlayerId: outsider.id,
+        kind: "buy",
+        counterpartTeamId: outsider.teamId,
+        windowId: null,
+        openedOn: state.date,
+        expiresOn: state.date,
+        status,
+        rounds: [],
+      });
+      expect(speakerRoles(state)[normalizeSpeaker(outsider.name)], status).toBeUndefined();
+    }
+  });
+
   it("이름이 겹치면 아무것도 붙이지 않는다 — 틀린 직책보다 없는 게 낫다", () => {
     const state = newGame(42, "manutd");
     const coach = headCoachOf(state);
@@ -273,6 +311,31 @@ describe("기자 페르소나", () => {
     expect(reportersOf(createTestGame(9))[0]?.name).not.toBe(
       reportersOf(createTestGame(10))[0]?.name,
     );
+  });
+
+  it("이름 풀도 리그가 정한다 — 기존 EPL 세이브의 기자는 그대로다", () => {
+    // 회귀 잠금: 팀 기준으로 뽑던 시절과 같은 이름이어야 한다 (잉글랜드 풀)
+    expect(generateReporters(42, "arsenal").map((r) => r.name)).toEqual([
+      "대니얼 모건",
+      "대니얼 콜린스",
+      "대니얼 그레이",
+    ]);
+    // 시드 채널에 팀이 없다 — 같은 리그면 어느 구단에서든 같은 기자단
+    expect(generateReporters(42, "manutd")).toEqual(generateReporters(42, "arsenal"));
+  });
+
+  it("리그가 다르면 그 리그 국가의 이름을 쓴다", () => {
+    const epl = generateReporters(42, "arsenal").map((r) => r.name);
+    const laliga = generateReporters(42, "realmadrid").map((r) => r.name);
+    expect(laliga).not.toEqual(epl);
+    // 같은 리그의 다른 구단은 같은 사람 — 기준이 팀이 아니라 리그다
+    expect(generateReporters(42, "sevilla").map((r) => r.name)).toEqual(laliga);
+    // 2부도 같은 협회 아래다 — 세리에 B 클럽이면 이탈리아 이름 풀
+    expect(generateReporters(42, "sampdoria").map((r) => r.name)).toEqual(
+      generateReporters(42, "milan").map((r) => r.name),
+    );
+    // 이름 풀이 없는 리그(사우디)는 기본 풀로 떨어진다
+    expect(generateReporters(42, "alhilal").map((r) => r.name)).toEqual(epl);
   });
 
   it("화면에는 직책 대신 매체가 붙는다 — 아이콘이 '기자'를 이미 말한다", () => {
