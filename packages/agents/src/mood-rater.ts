@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { MOOD_BATCH, applyMoodNotes, type GameState, type MoodBrief } from "@story-fm/engine";
 import { TIERS, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
+import { retryOnce, anchorStands } from "./retry";
 
 /**
  * 심경 결산 — 코어가 낸 앵커 한 줄을 그 선수의 맥락(경기·불만·정착·폼)에 맞는
@@ -36,12 +37,7 @@ export function buildMoodPrompt(brief: MoodBrief): string {
   const rows = brief.targets.map(
     (t) => `- ${t.playerId} | ${t.name}\n    앵커: ${t.anchor}\n    사실: ${t.facts.join(" · ")}`,
   );
-  return [
-    `${brief.from} ~ ${brief.to}`,
-    "",
-    "## 대상",
-    ...rows,
-  ].join("\n");
+  return [`${brief.from} ~ ${brief.to}`, "", "## 대상", ...rows].join("\n");
 }
 
 function makeReportTool(
@@ -82,7 +78,7 @@ function makeReportTool(
 
 /**
  * 그 구간의 심경을 결산한다 — 훈련·평점 결산과 같은 자리에서 부른다.
- * 실패·타임아웃은 삼킨다 — 그때는 코어 앵커가 그대로 화면에 남는다.
+ * 한 번 다시 시도하되 **실패는 삼킨다** — 그때는 코어 앵커가 그대로 화면에 남는다.
  */
 export async function reportMood(
   state: GameState,
@@ -91,17 +87,17 @@ export async function reportMood(
 ): Promise<{ applied: number }> {
   if (brief.targets.length === 0) return { applied: 0 };
   let applied = 0;
-  try {
-    const client = llm ?? createGameLLM(TIERS.chore);
-    await client.runTurn({
-      system: MOOD_RATER_SYSTEM,
-      history: [],
-      user: buildMoodPrompt(brief),
-      tools: [makeReportTool(state, brief, (n) => (applied = n))],
-    });
-  } catch {
-    // 앵커가 남는다 — 화면에 빈 줄이 생기지 않는다
-    return { applied: 0 };
-  }
+  const client = llm ?? createGameLLM(TIERS.chore);
+  await retryOnce(
+    "rater:mood",
+    () =>
+      client.runTurn({
+        system: MOOD_RATER_SYSTEM,
+        history: [],
+        user: buildMoodPrompt(brief),
+        tools: [makeReportTool(state, brief, (n) => (applied = n))],
+      }),
+    () => applied > 0, // 이미 심경이 반영됐으면 다시 부르지 않는다
+  ).catch(anchorStands("rater:mood"));
   return { applied };
 }

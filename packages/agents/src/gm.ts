@@ -30,6 +30,7 @@ import { reportMood } from "./mood-rater";
 import { reportTraining } from "./training-rater";
 import { MATCH_CASTER_SYSTEM } from "./match-caster";
 import { buildOnboardingTurn, runMockGmTurn } from "./mock-gm";
+import { retryOnce } from "./retry";
 import { GM_SYSTEM } from "./gm-prompt";
 import { buildGmTools, buildMatchTools } from "./gm-tools";
 import {
@@ -131,16 +132,20 @@ function isValidOnboardingText(state: GameState, text: string): boolean {
 }
 
 /**
- * 새 게임 첫 장면.
- * 실모드는 GM 프롬프트로 매번 생성하고, mock/호출 실패/문법 위반은
- * 시드 기반 규칙 장면으로 폴백해 새 게임 생성 자체가 실패하지 않게 한다.
+ * 새 게임 첫 장면 — 실모드는 GM 프롬프트로 매번 생성한다.
+ *
+ * **폴백은 없다.** 호출 실패·잘린 응답·문법 위반은 한 번 다시 시도하고, 그래도
+ * 안 되면 오류를 올린다 — 규칙 장면으로 대신 채우면 실모드가 도는 줄 알고
+ * 넘어간다(실제로 SDK가 비스트리밍 요청을 거부하는 동안 모든 첫 장면이 규칙
+ * 장면이었다). `buildOnboardingTurn`은 이제 mock 모드 전용이다.
  */
 export async function runOnboardingTurn(state: GameState, llm?: GameLLM): Promise<GmTurnResult> {
-  const fallback = buildOnboardingTurn(state);
-  if (resolveLlmMode(TIERS.gm) === "mock") return fallback;
+  if (resolveLlmMode(TIERS.gm) === "mock") return buildOnboardingTurn(state);
+  const client = llm ?? createGameLLM(TIERS.gm);
 
-  try {
-    const result = await (llm ?? createGameLLM(TIERS.gm)).runTurn({
+  // 도구도 스트리밍도 없는 호출이라 다시 불러도 남는 자국이 없다
+  return retryOnce("gm:onboarding", async () => {
+    const result = await client.runTurn({
       system: [GM_SYSTEM, buildGmReference(state)],
       history: [],
       user: buildManagerMessage(state, "*새 감독으로서 구단에 첫 출근한다*"),
@@ -150,26 +155,18 @@ export async function runOnboardingTurn(state: GameState, llm?: GameLLM): Promis
     });
     // 상한에 걸린 응답은 문장이 끊겨 있다 — 문법 검사를 통과해도 걸러낸다
     if (result.stopReason === "max_tokens") {
-      console.error("[gm] 온보딩 턴이 출력 상한에 걸림 — 기본 브리핑으로 대체");
-      return fallback;
+      throw new Error("첫 장면이 출력 상한에 걸려 문장이 잘렸습니다");
     }
     const text = humanizePlayerIds(state, result.text.trim());
-    // 폴백은 조용히 일어나면 안 된다 — 첫 장면이 늘 규칙 장면으로 열리는데도
-    // 로그가 없어 실모드가 도는 줄 알았던 적이 있다
     if (!isValidOnboardingText(state, text)) {
-      console.error(`[gm] 온보딩 턴이 문법 검사에 걸림 — 기본 브리핑으로 대체:\n${text}`);
-      return fallback;
+      throw new Error(`첫 장면이 출력 문법을 어겼습니다:\n${text}`);
     }
     // 첫 장면은 시계를 옮기지 않는다 — 헤더가 없으면 세워 준다
     const stamped = parseSceneHeader(text).point
       ? text
       : `[${state.date} ${formatClock(clockOf(state))}]\n${text}`;
     return { text: stamped, toolCalls: [], usage: result.usage };
-  } catch (error) {
-    // 첫 장면은 비울 수 없다 — 폴백으로 열되 실패는 로그에 남긴다
-    console.error("[gm] 온보딩 턴 실패 — 기본 브리핑으로 대체:", error);
-    return fallback;
-  }
+  });
 }
 
 /**
@@ -248,14 +245,31 @@ async function runRealGmTurn(
   // 헤더가 날짜를 옮기기 전의 시점 — 훈련 결산이 "어느 구간이었나"를 알아야 한다
   const sceneFrom = state.date;
   const clockFrom = clockOf(state);
-  const result = await llm.runTurn({
-    system,
-    history,
-    user: operator ? buildOperatorMessage(message) : buildManagerMessage(state, message),
-    stateNote,
-    tools,
-    onText,
-  });
+  /**
+   * 재시도의 조건 — **아직 아무 자국도 남지 않았을 때만.** 도구가 돌았으면 상태가
+   * 이미 바뀌었고(이중 반영), 글자가 나갔으면 화면에 장면이 두 번 그려진다.
+   * 대부분의 실패(인증·혼잡·한도·연결)는 첫 글자보다 먼저 온다.
+   */
+  let streamed = false;
+  const trackText = onText
+    ? (delta: string) => {
+        streamed = true;
+        onText(delta);
+      }
+    : undefined;
+  const result = await retryOnce(
+    inMatch ? "gm:match" : "gm:turn",
+    () =>
+      llm.runTurn({
+        system,
+        history,
+        user: operator ? buildOperatorMessage(message) : buildManagerMessage(state, message),
+        stateNote,
+        tools,
+        onText: trackText,
+      }),
+    () => streamed || calls.some((c) => c.name !== TIME_PASSED),
+  );
 
   // 첫 줄 헤더가 시계를 움직인다 — 모델의 선언을 코어가 따라가되 그대로 믿지 않고,
   // 경기일·기한 앞에서 멈춘 뒤 그 사실을 기록으로 남긴다

@@ -25,8 +25,9 @@ export type TurnOutcome =
 /**
  * LLM 실패를 감독에게 보일 한 줄로 — **게임 밖의 사건**이므로 픽션 밖 말투로.
  * 원인 문자열은 서버 로그에만 남기고, 화면에는 대처 가능한 안내만 준다.
+ * 새 게임 첫 장면(`/api/games`)도 같은 문구를 쓴다 — 폴백 장면은 없다.
  */
-function turnErrorMessage(detail: string): string {
+export function turnErrorMessage(detail: string): string {
   const d = detail.toLowerCase();
   if (d.includes("overloaded") || d.includes("529")) {
     return "모델 서버가 혼잡합니다 — 잠시 후 다시 시도해 주세요.";

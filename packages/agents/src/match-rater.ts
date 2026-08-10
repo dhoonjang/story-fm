@@ -14,6 +14,7 @@ import {
 } from "@story-fm/engine";
 import { ATTRIBUTE_AXES } from "@story-fm/domain";
 import { TIERS, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
+import { retryOnce, anchorStands } from "./retry";
 
 /**
  * 경기 후 평점 — 코어가 장부 사실로 앵커를 박고, LLM이 사건 목록을 읽어
@@ -174,7 +175,7 @@ function makeRateTool(
 
 /**
  * 경기 후 평점 매기기 — `finalizeMatch` **뒤에** 부른다(앵커가 이미 박혀 있어야 한다).
- * 실패·타임아웃은 삼킨다. 평점 하나 때문에 경기 결과가 막히면 안 된다.
+ * 한 번 다시 시도하되 **실패는 삼킨다** — 평점 하나 때문에 경기 결과가 막히면 안 된다.
  */
 export async function rateMatchPerformances(
   state: GameState,
@@ -183,19 +184,19 @@ export async function rateMatchPerformances(
 ): Promise<{ applied: number }> {
   if (brief.players.length === 0) return { applied: 0 };
   let applied = 0;
-  try {
-    // 잡무 티어 — 값의 폭은 코어가 앵커 ±RATING_BAND로 좁게 물려 둔다.
-    // 경기마다 도는 일이라 지연이 더 아프다
-    const client = llm ?? createGameLLM(TIERS.chore);
-    await client.runTurn({
-      system: MATCH_RATER_SYSTEM,
-      history: [],
-      user: buildRatingPrompt(brief),
-      tools: [makeRateTool(state, brief.matchId, (n) => (applied = n))],
-    });
-  } catch {
-    // 앵커가 남는다 — 조용히 넘어간다
-    return { applied: 0 };
-  }
+  // 잡무 티어 — 값의 폭은 코어가 앵커 ±RATING_BAND로 좁게 물려 둔다.
+  // 경기마다 도는 일이라 지연이 더 아프다
+  const client = llm ?? createGameLLM(TIERS.chore);
+  await retryOnce(
+    "rater:match",
+    () =>
+      client.runTurn({
+        system: MATCH_RATER_SYSTEM,
+        history: [],
+        user: buildRatingPrompt(brief),
+        tools: [makeRateTool(state, brief.matchId, (n) => (applied = n))],
+      }),
+    () => applied > 0, // 이미 평점이 박혔으면 다시 부르지 않는다
+  ).catch(anchorStands("rater:match"));
   return { applied };
 }

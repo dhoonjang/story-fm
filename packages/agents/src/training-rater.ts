@@ -10,6 +10,7 @@ import {
 } from "@story-fm/engine";
 import { ATTRIBUTE_AXES, AXIS_KO } from "@story-fm/domain";
 import { TIERS, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
+import { retryOnce, anchorStands } from "./retry";
 
 /**
  * 훈련 결산 — advance_time이 넘긴 구간의 훈련을 한 묶음으로 판정한다.
@@ -167,8 +168,9 @@ function makeReportTool(
 }
 
 /**
- * 지나간 훈련을 결산한다 — `advanceTime` **뒤에** 부른다. 실패·타임아웃은 삼키되
- * 그 구간의 훈련은 아무것도 남기지 못한다 (코어가 미리 올려 두지 않으므로).
+ * 지나간 훈련을 결산한다 — `advanceTime` **뒤에** 부른다.
+ * 한 번 다시 시도하되 **실패는 삼킨다** — 그 구간의 훈련 성과는 없던 일이 된다
+ * (코어가 미리 올려 두지 않으므로).
  */
 export async function reportTraining(
   state: GameState,
@@ -177,17 +179,17 @@ export async function reportTraining(
 ): Promise<{ lines: string[] }> {
   if (brief.sessions.length === 0 || brief.subjects.length === 0) return { lines: [] };
   let lines: string[] = [];
-  try {
-    const client = llm ?? createGameLLM(TIERS.chore);
-    await client.runTurn({
-      system: TRAINING_RATER_SYSTEM,
-      history: [],
-      user: buildTrainingPrompt(brief),
-      tools: [makeReportTool(state, brief, (l) => (lines = l))],
-    });
-  } catch {
-    // 그 구간의 훈련 성과는 없던 일이 된다 — 게임은 계속 굴러간다
-    return { lines: [] };
-  }
+  const client = llm ?? createGameLLM(TIERS.chore);
+  await retryOnce(
+    "rater:training",
+    () =>
+      client.runTurn({
+        system: TRAINING_RATER_SYSTEM,
+        history: [],
+        user: buildTrainingPrompt(brief),
+        tools: [makeReportTool(state, brief, (l) => (lines = l))],
+      }),
+    () => lines.length > 0, // 이미 성과가 반영됐으면 다시 부르지 않는다
+  ).catch(anchorStands("rater:training"));
   return { lines };
 }

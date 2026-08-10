@@ -10,6 +10,7 @@ import {
 } from "@story-fm/engine";
 import { runOnboardingTurn } from "@story-fm/agents";
 import { toPayload } from "@/lib/store";
+import { turnErrorMessage } from "@/lib/turn-runner";
 
 const CreateSchema = z.object({
   teamId: z.string().min(1),
@@ -56,7 +57,19 @@ export async function POST(request: Request) {
     attributes: interpretBackgroundHeuristic(background, teamId),
   });
 
-  const intro = await runOnboardingTurn(state);
+  /**
+   * 첫 장면은 폴백 없이 모델이 쓴다 (`runOnboardingTurn`이 한 번 재시도한다).
+   * 실패하면 **게임을 만들지 않는다** — 규칙 장면으로 열어 두면 유저는 그것이
+   * 이 게임의 첫 장면인 줄 알고, 다시 시작할 기회를 잃는다.
+   */
+  let intro;
+  try {
+    intro = await runOnboardingTurn(state);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error("[games] 첫 장면 생성 실패 — 게임을 만들지 않는다:", error);
+    return NextResponse.json({ error: turnErrorMessage(detail), detail }, { status: 502 });
+  }
   state.chat.push({ role: "model", text: intro.text, toolCalls: intro.toolCalls, at: state.date });
   saveGame(state);
 

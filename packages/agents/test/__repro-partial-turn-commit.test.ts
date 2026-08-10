@@ -19,6 +19,18 @@ const usage = {
   cache_creation_input_tokens: 0,
 };
 
+/** 어댑터는 언제나 `messages.stream`으로 부른다 — 스텁도 그 표면을 흉내 낸다 */
+function streamStub(responses: Array<Record<string, unknown> | Error>): Anthropic {
+  const stream = vi.fn();
+  for (const r of responses) {
+    stream.mockReturnValueOnce({
+      on: () => undefined,
+      finalMessage: () => (r instanceof Error ? Promise.reject(r) : Promise.resolve(r)),
+    });
+  }
+  return { messages: { stream } } as unknown as Anthropic;
+}
+
 describe("실모드 턴 중간 실패 — 부분 커밋 재현", () => {
   it("도구 성공 후 후속 API 호출이 throw해도 state 변이가 남는다", async () => {
     const background = "K리그 출신 분석가";
@@ -31,9 +43,8 @@ describe("실모드 턴 중간 실패 — 부분 커밋 재현", () => {
     });
     const moraleBefore = state.players.find((p) => p.teamId === "arsenal")!.state.condition;
 
-    const create = vi
-      .fn()
-      .mockResolvedValueOnce({
+    const stub = streamStub([
+      {
         usage,
         stop_reason: "tool_use",
         content: [
@@ -45,9 +56,9 @@ describe("실모드 턴 중간 실패 — 부분 커밋 재현", () => {
             input: { occasion: "daily", outcome: "encouraged", intensity: 2 },
           },
         ],
-      })
-      .mockRejectedValueOnce(new Error("Connection error (simulated network failure)"));
-    const stub = { messages: { create } } as unknown as Anthropic;
+      },
+      new Error("Connection error (simulated network failure)"),
+    ]);
 
     const calls: GmToolCall[] = [];
     const tools = buildGmTools(state, calls);
@@ -70,28 +81,27 @@ describe("실모드 턴 중간 실패 — 부분 커밋 재현", () => {
     // 유저가 같은 메시지를 다시 보내면 team_talk이 이중 실행된다.
 
     // 재전송 시뮬레이션: 같은 도구가 다시 실행되면 사기가 또 오른다
-    const create2 = vi
-      .fn()
-      .mockResolvedValueOnce({
-        usage,
-        stop_reason: "tool_use",
-        content: [
-          {
-            type: "tool_use",
-            id: "t2",
-            name: "team_talk",
-            input: { occasion: "daily", outcome: "encouraged", intensity: 2 },
-          },
-        ],
-      })
-      .mockResolvedValueOnce({
-        usage,
-        stop_reason: "end_turn",
-        content: [{ type: "text", text: "@수석코치: 도착했습니다." }],
-      });
     const llm2 = new AnthropicGameLLM(
       { provider: "anthropic", model: "test-model", maxTokens: 1024 },
-      { messages: { create: create2 } } as unknown as Anthropic,
+      streamStub([
+        {
+          usage,
+          stop_reason: "tool_use",
+          content: [
+            {
+              type: "tool_use",
+              id: "t2",
+              name: "team_talk",
+              input: { occasion: "daily", outcome: "encouraged", intensity: 2 },
+            },
+          ],
+        },
+        {
+          usage,
+          stop_reason: "end_turn",
+          content: [{ type: "text", text: "@수석코치: 도착했습니다." }],
+        },
+      ]),
     );
     await llm2.runTurn({ system: "sys", history: [], user: "선수단에 한마디 하자", tools });
 
