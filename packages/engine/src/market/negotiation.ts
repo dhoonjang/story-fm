@@ -1,4 +1,10 @@
-import type { GamePlayer, Negotiation, NegotiationVerdict } from "@story-fm/domain";
+import type {
+  GamePlayer,
+  MarketCard,
+  MarketTerms,
+  Negotiation,
+  NegotiationVerdict,
+} from "@story-fm/domain";
 import { PITCH_CLAIM_KO, ageOf, naturalPositionOf } from "@story-fm/domain";
 import { addDays, diffDays, seasonYear, windowOpenOn } from "../competition/calendar";
 import { AGENT_FEE_RATE, recordFinance } from "../club/finance";
@@ -54,6 +60,16 @@ import {
  * 1차 범위는 **영입(buy)** 이다. 매각(sell)·재계약(renew)은 같은 테이블에 얹히도록
  * `kind`에 자리를 뒀다 — 방향만 바뀐다.
  */
+
+/**
+ * 협상 카드 — **채팅에 세울 조각.** 값은 숫자 그대로 싣고 표기는 화면이 맡는다.
+ * 조건에서 0은 없는 값이다 (재계약엔 이적료가 없고, 매각엔 주급이 없다).
+ */
+const dealTerms = (t: MarketTerms): MarketTerms => ({
+  ...(t.fee ? { fee: t.fee } : {}),
+  ...(t.weeklyWage ? { weeklyWage: t.weeklyWage } : {}),
+  ...(t.years ? { years: t.years } : {}),
+});
 
 /** 폭주 방지선 — 인내심 감쇠가 실질 제동이고 이건 상한일 뿐이다 */
 const MAX_ROUNDS = 8;
@@ -190,10 +206,14 @@ export function sendOffer(state: GameState, terms: DealTerms): SkillResult {
   });
 
   const chance = odds.fuzzy ? oddsLabel(odds.probability) : `${odds.probability}%`;
-  const pitchNote =
+  const verdicts =
     terms.pitch && terms.pitch.length > 0
-      ? ` 설득: ${evaluatePitch(state, terms.playerId, terms.pitch, prior?.pitched ?? [])
-          .verdicts.map((v) => `${PITCH_CLAIM_KO[v.kind]}(${v.verified ? "통함" : "안 통함"})`)
+      ? evaluatePitch(state, terms.playerId, terms.pitch, prior?.pitched ?? []).verdicts
+      : [];
+  const pitchNote =
+    verdicts.length > 0
+      ? ` 설득: ${verdicts
+          .map((v) => `${PITCH_CLAIM_KO[v.kind]}(${v.verified ? "통함" : "안 통함"})`)
           .join(" · ")}.`
       : "";
   const head =
@@ -202,8 +222,24 @@ export function sendOffer(state: GameState, terms: DealTerms): SkillResult {
         `우리가 낼 주급 ${wageOf(terms.weeklyWage)}.`
       : `${teamName(player.teamId)}의 ${player.name}에게 오퍼 — 이적료 ${money(terms.fee)} · ` +
         `주급 ${wageOf(terms.weeklyWage)} · ${terms.years}년.`;
+  const card: MarketCard = {
+    kind: "offer",
+    playerId: player.id,
+    playerName: player.name,
+    counterpart: teamName(player.teamId),
+    terms: dealTerms({ fee: terms.fee, weeklyWage: terms.weeklyWage, years: terms.years }),
+    odds: chance,
+    dueOn: respondsOn,
+    ...(terms.kind === "loan" ? { loan: true } : {}),
+    ...(verdicts.length > 0
+      ? {
+          pitch: verdicts.map((v) => ({ label: PITCH_CLAIM_KO[v.kind], verified: v.verified })),
+        }
+      : {}),
+  };
   return {
     ok: true,
+    payload: card,
     message: `${head}${pitchNote} 성사 가능성 ${chance}. ${describeWait(waitDays)}`,
   };
 }
@@ -358,11 +394,33 @@ export function respondOffer(
     selling ? (negotiation.counterpartTeamId ?? player.teamId) : player.teamId,
   );
 
+  /**
+   * 판정 카드의 뼈대 — 어느 갈래든 **누가 무엇에 답했나**는 같다.
+   * 우리가 낸 조건이 있어야 상대의 답이 판단거리가 된다(제시 vs 요구).
+   */
+  const verdictCard = (rest: Partial<MarketCard>): MarketCard => ({
+    kind: "verdict",
+    playerId: player.id,
+    playerName: player.name,
+    counterpart,
+    verdict: input.verdict,
+    terms: dealTerms({
+      fee: offer.fee,
+      weeklyWage: offer.weeklyWage,
+      years: offer.contractYears,
+    }),
+    odds: `${odds.probability}%`,
+    ...(loaning ? { loan: true } : {}),
+    ...(input.note ? { note: input.note } : {}),
+    ...rest,
+  });
+
   if (input.verdict === "accept") {
     negotiation.status = "agreed";
     pushNarrative(state, `${player.name} 이적 합의 (${money(offer.fee)})`, 4);
     return {
       ok: true,
+      payload: verdictCard({}),
       message: `${counterpart}가 오퍼를 받아들였습니다 — ${player.name}, ${money(offer.fee)}. 계약을 확정하세요`,
     };
   }
@@ -371,6 +429,7 @@ export function respondOffer(
     negotiation.status = "rejected";
     return {
       ok: true,
+      payload: verdictCard({}),
       message: `${counterpart}가 거절했습니다 — ${player.name} 협상은 이번 창에서 끝났습니다`,
     };
   }
@@ -390,6 +449,7 @@ export function respondOffer(
     });
     return {
       ok: true,
+      payload: verdictCard({ counterTerms: dealTerms({ weeklyWage: counterWageDemand }) }),
       message:
         `${player.name}은(는) 주급 ${wageOf(counterWageDemand)}을 원합니다. ` +
         `그 조건으로 다시 제안하면 받아들일 것입니다`,
@@ -411,6 +471,9 @@ export function respondOffer(
   });
   return {
     ok: true,
+    payload: verdictCard({
+      counterTerms: dealTerms({ fee: counterFee, weeklyWage: counterWage }),
+    }),
     message:
       `${counterpart}의 역제안 — 이적료 ${money(counterFee)} · 주급 ${wageOf(counterWage)}. ` +
       `받아들이려면 그 조건으로 오퍼를 다시 넣으세요`,
@@ -1000,8 +1063,20 @@ export function openRenewal(
     verdict: null,
   });
   const until = activeContract(state, player.id)?.until;
+  const card: MarketCard = {
+    kind: "renewal",
+    playerId: player.id,
+    playerName: player.name,
+    // 상대는 구단이 아니라 선수 본인이다 — 카드도 그렇게 말한다
+    counterpart: player.name,
+    terms: dealTerms({ weeklyWage: input.weeklyWage, years: input.years }),
+    odds: `${odds.probability}%`,
+    dueOn: respondsOn,
+    ...(until ? { note: `현 계약 ${until} 만료` } : {}),
+  };
   return {
     ok: true,
+    payload: card,
     message:
       `${player.name}에게 재계약 제안 — 주급 ${wageOf(input.weeklyWage)} · ${input.years}년` +
       `${until ? ` (현 계약 ${until} 만료)` : ""}. 성사 확률 ${odds.probability}%. ${describeWait(waitDays)}`,
@@ -1465,15 +1540,23 @@ export function withdrawOffer(state: GameState, negotiationId: string): SkillRes
    * `rejectedThisWindow`가 이번 창을 통째로 막아, 값을 깎아 다시 부르는
    * 길까지 함께 닫힌다 — 실제 이적에서 가장 흔한 결말이 그것인데도.
    */
+  const card = (note?: string): MarketCard => ({
+    kind: "withdraw",
+    playerId: negotiation.gamePlayerId,
+    playerName: who,
+    counterpart: teamName(negotiation.counterpartTeamId ?? player?.teamId ?? ""),
+    ...(note ? { note } : {}),
+  });
   if (negotiation.medical?.status === "flagged") {
     negotiation.status = "expired";
     return {
       ok: true,
+      payload: card("메디컬 소견 — 조건을 다시 짜서 부를 수는 있습니다"),
       message: `${who} 영입에서 물러섰습니다 — 메디컬 소견 때문입니다. 조건을 다시 짜서 부를 수는 있습니다`,
     };
   }
   negotiation.status = "rejected";
-  return { ok: true, message: `${who} 협상을 철회했습니다` };
+  return { ok: true, payload: card(), message: `${who} 협상을 철회했습니다` };
 }
 
 /** 메디컬 소견이 붙었을 때 사는 쪽이 깎아 부르는 폭 */

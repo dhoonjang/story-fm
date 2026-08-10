@@ -3,6 +3,7 @@ import type {
   BoardPoint,
   ManagerAttributes,
   DrilledTactics,
+  MarketCard,
   Player,
   ScheduleEntry,
   Slot,
@@ -355,6 +356,71 @@ function candidatePoint(
   return anchorOf(fallback.natural);
 }
 
+/** 한 항목에 이름을 몇 개까지 적나 — 넘치면 접는다 (요약은 한 줄이다) */
+const NAMES_SHOWN = 3;
+
+const nameList = (names: readonly string[]): string =>
+  names.slice(0, NAMES_SHOWN).join(", ") +
+  (names.length > NAMES_SHOWN ? ` 외 ${names.length - NAMES_SHOWN}명` : "");
+
+/**
+ * 배치가 **실제로 바꾼 것** — 포메이션 · 들고 나감 · 자리 이동.
+ *
+ * "라인업을 확정했습니다"는 감독이 이미 아는 것만 말한다. 무엇이 달라졌는지는
+ * 앞뒤 배치를 견줘야 아는 사실이고 그건 코어만 안다 — 그러니 코어가 적는다.
+ * 문장으로 엮지 않고 항목으로 끊는다: 화면이 ` · `로 갈라 세운다.
+ */
+function lineupChanges(
+  state: GameState,
+  prev: ReadonlyMap<string, TacticAssignment>,
+  next: readonly TacticAssignment[],
+): string[] {
+  const nameOf = (id: string) => playerName(state, id);
+  const was = [...prev.values()].filter((a) => a.role === "starting");
+  const now = next.filter((a) => a.role === "starting");
+  const pointOf = (a: TacticAssignment) => a.point ?? anchorOf(a.position);
+  // 앞선 배치가 없다면(첫 편성) 견줄 것이 없다 — 지금의 모양만 말한다
+  if (was.length === 0) return [`선발 ${now.length}명 편성 · ${shapeOf(now.map(pointOf))}`];
+
+  const parts: string[] = [];
+  const shapeBefore = shapeOf(was.map(pointOf));
+  const shapeAfter = shapeOf(now.map(pointOf));
+  if (shapeBefore !== shapeAfter) parts.push(`포메이션 ${shapeBefore} → ${shapeAfter}`);
+
+  const startedBefore = new Set(was.map((a) => a.playerId));
+  const startsNow = new Set(now.map((a) => a.playerId));
+  const added = now.filter((a) => !startedBefore.has(a.playerId));
+  const gone = was.filter((a) => !startsNow.has(a.playerId));
+  if (added.length > 0) {
+    parts.push(`선발 투입 ${nameList(added.map((a) => `${nameOf(a.playerId)} ${a.position}`))}`);
+  }
+  if (gone.length > 0) parts.push(`선발 제외 ${nameList(gone.map((a) => nameOf(a.playerId)))}`);
+
+  /**
+   * 남아 있는 선수의 **자리 이동** — 감독이 판에서 가장 자주 하는 조정이고,
+   * 인원이 그대로라 다른 항목에는 아무 흔적도 남지 않는다.
+   */
+  const moved = now.filter((a) => {
+    const old = prev.get(a.playerId);
+    return old?.role === "starting" && old.position !== a.position;
+  });
+  if (moved.length > 0) {
+    parts.push(
+      `자리 이동 ${nameList(
+        moved.map((a) => `${nameOf(a.playerId)} ${prev.get(a.playerId)!.position} → ${a.position}`),
+      )}`,
+    );
+  }
+
+  if (parts.length > 0) return parts;
+  // 선발이 그대로면 남은 차이는 명단 쪽뿐이다 — 누가 오갔는지까지는 적지 않는다
+  const squadBefore = new Set(prev.keys());
+  const squadNow = new Set(next.map((a) => a.playerId));
+  const sameSquad =
+    squadBefore.size === squadNow.size && [...squadNow].every((id) => squadBefore.has(id));
+  return [sameSquad ? "바뀐 것 없음" : "벤치 명단 조정"];
+}
+
 /**
  * 라인업 확정 — v6에서는 TACTIC_ASSIGNMENT를 갱신한다 (팀 엔티티에 배열이 없다).
  * 선발 11명·GK 1명·부상/정지 제외를 강제하고, 기존 적응도는 이어받는다.
@@ -524,6 +590,8 @@ export function setLineup(
     ...inherit(s.playerId),
   }));
 
+  // 무엇이 달라졌나는 **덮어쓰기 전에** 견준다 (`prev`가 옛 배치를 들고 있다)
+  const changes = lineupChanges(state, prev, [...startingAssignments, ...benchAssignments]);
   tactics.assignments = [...startingAssignments, ...benchAssignments];
 
   // 강등은 배치 뒤에 — 배치에서 빠진 뒤라야 2군으로 내려도 라인업이 안 깨진다
@@ -533,13 +601,7 @@ export function setLineup(
     if (!res.ok) return res;
     levelNotes.push(res.message);
   }
-  return {
-    ok: true,
-    message:
-      levelNotes.length > 0
-        ? `라인업을 확정했습니다 — ${levelNotes.join(" · ")}`
-        : "라인업을 확정했습니다",
-  };
+  return { ok: true, message: `라인업 확정 — ${[...changes, ...levelNotes].join(" · ")}` };
 }
 
 /**
@@ -1622,8 +1684,21 @@ export function scoutPlayer(state: GameState, playerId: string): SkillResult {
     dueOn,
     completedOn: null,
   });
+  /**
+   * 파견은 아직 아무 장부도 바꾸지 않았다 — 갈 화면이 없으므로 **카드**로 선다.
+   * 며칠 뒤 도착하는 보고서 카드와 같은 흐름에 놓여 "보냈다 → 왔다"가 이어진다.
+   */
+  const card: MarketCard = {
+    kind: "scout",
+    playerId,
+    playerName: player.name,
+    counterpart: teamName(player.teamId),
+    dueOn,
+    ...(done > 0 ? { note: `${done + 1}번째 — 잠재력 추정을 좁힌다` } : {}),
+  };
   return {
     ok: true,
+    payload: card,
     message:
       `${player.name}(${teamName(player.teamId)}) 스카우트 파견 — 보고 예정 ${dueOn}` +
       (done > 0 ? ` (${done + 1}번째 · 잠재력 추정을 좁힌다)` : ""),

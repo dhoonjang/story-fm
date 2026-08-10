@@ -166,6 +166,50 @@ describe("라인업 = 전술 배치 (v6)", () => {
     expect(after.assignments.find((a) => a.playerId === first.playerId)?.familiarity).toBe(77);
   });
 
+  /**
+   * 요약은 **감독이 이미 아는 말이 아니라 달라진 사실**이어야 한다 — 화면의 칩과
+   * 알림 말풍선이 이 문장만 갖고 "무엇이 바뀌었나"를 말한다.
+   */
+  it("요약이 달라진 것을 적는다 — 자리 이동·들고 나감·포메이션", () => {
+    const state = createTestGame();
+    const lineup = currentLineup(state);
+    // 벤치까지 그대로 넘긴다 — 안 넘기면 벤치가 비워지는 것도 하나의 변경이다
+    const bench = assignmentsOf(state, state.userTeamId, "bench").map((a) => ({
+      playerId: a.playerId,
+      position: a.position,
+    }));
+
+    // 아무것도 안 바꾼 저장(전술판 자동 저장) — 없는 변경을 지어내지 않는다
+    expect(setLineup(state, { starting: lineup, bench }).message).toContain("바뀐 것 없음");
+
+    // 자리 이동 — 인원이 그대로라 다른 항목에는 흔적이 남지 않는다
+    const target = lineup.find((s) => positionGroupOf(s.position) === "DF")!;
+    const moved = lineup.map((s) => (s === target ? { ...s, position: "CB" } : s));
+    const movedRes = setLineup(state, { starting: moved, bench });
+    expect(movedRes.ok).toBe(true);
+    const name = playerById(state, target.playerId)!.name;
+    if (target.position !== "CB") {
+      expect(movedRes.message).toContain(`자리 이동 ${name} ${target.position} → CB`);
+    }
+
+    // 선발 교체 — 들어온 선수는 자리까지, 빠진 선수는 이름만
+    const spare = userPlayers(state).find(
+      (p) =>
+        p.squadLevel === "first" &&
+        isAvailable(state, p.id) &&
+        !lineup.some((s) => s.playerId === p.id) &&
+        !bench.some((b) => b.playerId === p.id),
+    )!;
+    const out = moved.find((s) => positionGroupOf(s.position) !== "GK")!;
+    const swapped = moved.map((s) =>
+      s === out ? { playerId: spare.id, position: s.position } : s,
+    );
+    const swapRes = setLineup(state, { starting: swapped, bench });
+    expect(swapRes.ok).toBe(true);
+    expect(swapRes.message).toContain(`선발 투입 ${spare.name}`);
+    expect(swapRes.message).toContain(`선발 제외 ${playerById(state, out.playerId)!.name}`);
+  });
+
   it("배치 없는 선수는 예비(스쿼드) — 팀에 라인업 배열이 없다", () => {
     const state = createTestGame();
     const assigned = new Set(assignmentsOf(state, state.userTeamId).map((a) => a.playerId));

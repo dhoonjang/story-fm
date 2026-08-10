@@ -64,6 +64,13 @@ const MOCK_COUNTER_FEE_RATE = 1.25;
 /** mock 재계약 역제안 — 선수가 주급 기대치의 1.15배를 부른다 */
 const MOCK_RENEWAL_WAGE_RATE = 1.15;
 
+/**
+ * 카드를 그리는 스킬의 결과를 그대로 싣는다 — **실모드와 같은 자리에서 같은 것**.
+ * mock이 payload를 떨어뜨리면 e2e에서만 카드가 사라져 화면 회귀를 못 잡는다.
+ */
+const carry = (result: { payload?: unknown }) =>
+  result.payload === undefined ? {} : { payload: result.payload };
+
 /** 수석코치 화자 태그 — 직책이 아니라 그 사람의 이름이다 (personas.md) */
 function coach(state: GameState): string {
   return `@${headCoachOf(state).characterId}:`;
@@ -96,6 +103,13 @@ function renderSegment(state: GameState, events: MatchEvent[], stop: string): st
       `@: *하프타임 — 라커룸으로 향한다*`,
       `${coach(state)} 현재 ${scoreLine(state)}. 후반 지시를 주시면 반영하겠습니다.`,
     );
+  } else if (stop === "extra_time_start") {
+    lines.push(
+      `@중계: *90분 종료 — 승부는 연장으로 넘어갑니다.* ${scoreLine(state)}`,
+      `${coach(state)} 30분이 더 남았습니다. 교체 한 장이 더 생겼습니다.`,
+    );
+  } else if (stop === "extra_half_time") {
+    lines.push(`@중계: *연장 전반 종료.* ${scoreLine(state)}`);
   }
   return lines.join("\n");
 }
@@ -443,7 +457,7 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
         note: verdict === "accept" ? "여기 남겠습니다" : "조건을 더 봐야겠습니다",
       } as const;
       const result = respondOffer(state, input);
-      calls.push({ name: "respond_offer", summary: result.message, input });
+      calls.push({ name: "respond_offer", summary: result.message, input, ...carry(result) });
       let text = `@${who.name}: ${result.message}`;
       if (result.ok && verdict === "accept") {
         const done = acceptDeal(state, renewal.id);
@@ -458,7 +472,7 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
       years: 3,
     };
     const result = openRenewal(state, input);
-    calls.push({ name: "open_renewal", summary: result.message, input });
+    calls.push({ name: "open_renewal", summary: result.message, input, ...carry(result) });
     return {
       text: result.ok
         ? `@: *${who.name}의 에이전트와 마주 앉는다*\n${coach(state)} ${result.message}`
@@ -486,7 +500,7 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
         ...(verdict === "counter" ? { fee: Math.round(offer.fee * MOCK_COUNTER_FEE_RATE) } : {}),
       } as const;
       const result = answerIncomingOffer(state, input);
-      calls.push({ name: "respond_offer", summary: result.message, input });
+      calls.push({ name: "respond_offer", summary: result.message, input, ...carry(result) });
       let text = `${coach(state)} ${result.message}`;
       if (result.ok && verdict === "accept") {
         const done = acceptDeal(state, incoming.id);
@@ -515,7 +529,7 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
         note: verdict === "accept" ? "그 값이면 놓아준다" : "그 값으로는 어렵다",
       } as const;
       const result = respondOffer(state, input);
-      calls.push({ name: "respond_offer", summary: result.message, input });
+      calls.push({ name: "respond_offer", summary: result.message, input, ...carry(result) });
       let text = `${coach(state)} ${result.message}`;
       if (result.ok && verdict === "accept") {
         const done = acceptDeal(state, arrived.id);
@@ -532,7 +546,7 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
       if (terms) {
         const odds = dealOdds(state, terms);
         const result = sendOffer(state, terms);
-        calls.push({ name: "send_offer", summary: result.message, input: terms });
+        calls.push({ name: "send_offer", summary: result.message, input: terms, ...carry(result) });
         return {
           text: result.ok
             ? `${coach(state)} ${describeOdds(odds).split("\n")[0]}. ${result.message}`
@@ -749,7 +763,7 @@ const ONBOARDING_CLOSERS = [
     `${tag} 개막까지 시간을 어떻게 쓰실지 말씀해 주십시오. 제가 바로 준비하겠습니다.`,
 ] as const;
 
-/** 온보딩 폴백 — mock/LLM 실패에서도 월드 시드에 따라 첫 장면과 어조가 달라진다. */
+/** mock 모드의 첫 장면 — 월드 시드에 따라 장면과 어조가 달라진다 (실모드 폴백 아님). */
 export function buildOnboardingTurn(state: GameState): GmTurnResult {
   const views = buildOfficeViews(state);
   const attrs = state.manager.attributes;
