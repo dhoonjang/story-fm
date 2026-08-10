@@ -1,14 +1,9 @@
 import type { MatchEvent, StrengthPacket } from "@story-fm/domain";
 
 /**
- * 매치 캐스터 — 경기 장면의 GM (매치 티어). 프롬프트는 코드처럼 버전
- * 관리한다 (AGENTS.md 6-5). 규약 근거: game-overview §2.1·§4, match-sim.md.
- *
- * **v2(2026-08-08)에서 역할이 바뀌었다.** 예전엔 캐스터가 중계를 쓰면서
- * `log_match_events`로 골을 선언했다 — 즉 결과를 모델이 정했다. 그래서 감독의
- * 지시가 수치를 거치지 않고 곧바로 스코어로 새어 들어갔고, 유저가 원하는 대로
- * 경기가 흘러갔다. 이제 **사건은 코어가 xg로 굴려 이미 확정**되고 캐스터는
- * 그것을 중계·연출·대화로 살린다. 결과를 바꿀 도구가 아예 없다.
+ * 매치 캐스터 — 경기 장면의 GM (매치 티어). 사건은 코어가 xg로 이미 확정하고
+ * 캐스터는 그것을 중계·연출·대화로 옮긴다 — 결과를 바꿀 도구가 없다 (match-sim.md).
+ * 프롬프트는 코드처럼 버전 관리한다 (AGENTS.md 6-5).
  */
 export const MATCH_CASTER_SYSTEM = `당신은 스토리 기반 풋볼 매니저의 경기 중계자다. 축구 경기를 중계하고, 벤치의 대화를 연출한다.
 
@@ -105,12 +100,7 @@ const STOP_KO: Record<string, string> = {
   flow: "특별한 사건 없이 시간이 흘렀다",
 };
 
-/**
- * 구간 대본 → 캐스터 입력.
- *
- * **선수는 이름으로 준다.** id를 주면 중계에 id가 흘러나온다. 캐스터가 사건을
- * 만들지 않으므로 id를 알아야 할 이유가 이제 없다.
- */
+/** 구간 대본 → 캐스터 입력. 선수는 이름으로 준다 — id를 주면 중계에 id가 흘러나온다. */
 export function buildSegmentMessage(
   events: MatchEvent[],
   stop: string,

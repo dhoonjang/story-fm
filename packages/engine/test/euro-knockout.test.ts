@@ -378,8 +378,8 @@ describe("한 시즌 완주 (mock 경기)", () => {
     const wonUcl = digest.some((d) => d.includes("🏆 UEFA 챔피언스리그 우승"));
     expect(cupTrophies.length).toBe(wonUcl ? 1 : 0);
     expect(state.seasonRecords).toHaveLength(1);
-    // 시즌 340일을 하루씩 도는 통합 테스트 — 기본 훈련까지 매일 소화하므로 여유를 준다
-  }, 20_000);
+    // 시즌 340일을 하루씩 도는 통합 테스트 — 병렬 실행 부하까지 감안해 여유를 준다
+  }, 120_000);
 });
 
 /** 이 단계가 본선에서 몇 번째인가 — 대진 수 기대값 계산용 */

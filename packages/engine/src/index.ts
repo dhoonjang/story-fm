@@ -1,5 +1,14 @@
-export * from "./rng";
-export * from "./paths";
+// @story-fm/engine 공개 API — 폴더가 도메인이다.
+
+// core — 난수·경로·날짜·게임 상태·저장·시간 진행
+export * from "./core/rng";
+export * from "./core/paths";
+export * from "./core/dates";
+export * from "./core/state";
+export * from "./core/persistence";
+export * from "./core/tick";
+
+// data — 카탈로그·시드 (불변 초기치)
 export * from "./data/team-catalog";
 export * from "./data/coach-seeds";
 export * from "./data/owner-seeds";
@@ -7,48 +16,61 @@ export * from "./data/league-catalog";
 export * from "./data/cup-catalog";
 export * from "./data/domestic-cup-catalog";
 export * from "./data/club-profile";
-export * from "./attributes";
-export * from "./catalog";
-export * from "./persona";
-export * from "./generate";
-export * from "./calendar";
-export * from "./wages";
-export * from "./state";
-export * from "./finance";
-export * from "./settling";
-export * from "./departures";
-export * from "./scouting";
-export * from "./registration";
-export * from "./persuasion";
-export * from "./form";
-export * from "./mood";
-export * from "./ratings";
-export * from "./lookup";
-export * from "./market";
-export * from "./ai-market";
-export * from "./manager-market";
-export * from "./negotiation";
-export * from "./cues";
-export * from "./press";
-export * from "./europe";
-export * from "./euro-knockout";
-export * from "./euro-prize";
-export * from "./shootout";
-export * from "./domestic-cup";
-export * from "./reschedule";
-export * from "./draw-schedule";
-export * from "./fixtures";
-export * from "./onboarding";
-export * from "./quick-sim";
+
+// world — 새 게임의 세계 구축 (능력치 파생·카탈로그 빌드·생성·주급·인물)
+export * from "./world/attributes";
+export * from "./world/catalog";
+export * from "./world/persona";
+export * from "./world/generate";
+export * from "./world/wages";
+export * from "./world/onboarding";
+export * from "./world/admin";
+
+// competition — 시즌 달력·리그·컵·유럽 대항전
+export * from "./competition/calendar";
+export * from "./competition/fixtures";
+export * from "./competition/season";
+export * from "./competition/europe";
+export * from "./competition/euro-knockout";
+export * from "./competition/euro-prize";
+export * from "./competition/shootout";
+export * from "./competition/domestic-cup";
+export * from "./competition/draw-schedule";
+export * from "./competition/reschedule";
+
+// match — 경기 진행·간이 시뮬·평점·징계
+export * from "./match/match-flow";
+export * from "./match/quick-sim";
+export * from "./match/ratings";
+
+// squad — 선수단 상태(폼·심경·부상·정착)와 성장·훈련·스카우팅
+export * from "./squad/form";
+export * from "./squad/mood";
+export * from "./squad/cues";
+export * from "./squad/settling";
+export * from "./squad/injury";
+export * from "./squad/development";
+export * from "./squad/registration";
+export * from "./squad/scouting";
+export * from "./squad/training-plan";
+export * from "./squad/training-report";
+
+// market — 이적 시장·협상·메디컬·감독 시장
+export * from "./market/market";
+export * from "./market/negotiation";
+export * from "./market/ai-market";
+export * from "./market/medical";
+export * from "./market/departures";
+export * from "./market/manager-market";
+export * from "./market/persuasion";
+
+// club — 구단 재정·기자회견
+export * from "./club/finance";
+export * from "./club/press";
+
+// skills — 감독 지시(GM 도구)의 실행부
 export * from "./skills";
-export * from "./training-plan";
-export * from "./development";
-export * from "./injury";
-export * from "./medical";
-export * from "./tick";
-export * from "./training-report";
-export * from "./match-flow";
-export * from "./season";
-export * from "./persistence";
-export * from "./views";
-export * from "./admin";
+
+// views — 오피스 뷰·읽기 전용 조회
+export * from "./views/views";
+export * from "./views/lookup";

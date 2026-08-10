@@ -56,6 +56,14 @@ import type { CardMark, GoalMark } from "@story-fm/engine";
  * 아니라 "시나리오가 끝까지 도는가"를 보장하는 것이 목적이다.
  */
 
+/** mock 협상 판정 문턱 — 성사 확률이 이 이상이면 수락, 다음 구간이면 역제안 */
+const MOCK_ACCEPT_PROB = 50;
+const MOCK_COUNTER_PROB = 25;
+/** mock 역제안 — 이적료는 받은 오퍼의 1.25배로 되부른다 */
+const MOCK_COUNTER_FEE_RATE = 1.25;
+/** mock 재계약 역제안 — 선수가 주급 기대치의 1.15배를 부른다 */
+const MOCK_RENEWAL_WAGE_RATE = 1.15;
+
 /** 수석코치 화자 태그 — 직책이 아니라 그 사람의 이름이다 (personas.md) */
 function coach(state: GameState): string {
   return `@${headCoachOf(state).characterId}:`;
@@ -121,11 +129,8 @@ function renderEvent(state: GameState, ev: MatchEvent): string[] {
 }
 
 /**
- * 경기 진행 — **실모드와 같은 코어 함수**(`advanceSegment`)를 쓴다.
- *
- * 예전엔 mock만 사전 생성 스크립트를 재생하고 실모드는 LLM이 사건을 만들어서,
- * 테스트가 검증하는 경기와 실제로 플레이되는 경기가 다른 물건이었다. 이제
- * 차이는 "누가 이야기하는가"뿐이다 — 여기선 템플릿, 실모드에선 캐스터 LLM.
+ * 경기 진행 — 실모드와 같은 코어 함수(`advanceSegment`)로 굴린다.
+ * 두 모드의 차이는 화자뿐이다 — 여기선 템플릿, 실모드에선 캐스터 LLM.
  */
 function advanceMatchTurn(
   state: GameState,
@@ -225,12 +230,8 @@ export function runMockGmTurn(
   onText?: (delta: string) => void,
 ): GmTurnResult {
   const computed = computeMockGmTurn(state, message);
-  /**
-   * 실모드와 같은 모양으로 첫 줄에 시점을 세운다.
-   *
-   * mock은 규칙 기반이라 시계를 **자기가 직접** 옮긴다(advanceTime 호출) —
-   * 헤더는 파싱 대상이 아니라 화면을 실모드와 같게 만드는 표시일 뿐이다.
-   */
+  // 실모드와 같은 모양으로 첫 줄에 시점을 세운다 — mock은 시계를 직접 옮기므로
+  // (advanceTime) 헤더는 파싱 대상이 아니라 표시일 뿐이다
   const stamp =
     state.phase === "match"
       ? `[${state.pendingMatch?.ledger.minute ?? 0}']`
@@ -238,11 +239,8 @@ export function runMockGmTurn(
   const result: GmTurnResult = {
     ...computed,
     text: computed.text ? `${stamp}\n${computed.text}` : computed.text,
-    /**
-     * 스킬이 불린 자리는 **본문 기준**으로 적혀 있다 — 헤더가 여기서 붙으므로
-     * 한 줄씩 민다. 실모드는 헤더까지 포함해 세므로(모델이 직접 쓴다) 이 보정으로
-     * 두 모드의 눈금이 같아진다.
-     */
+    // ⚠️ 스킬 자리(line)는 본문 기준이다 — 여기서 헤더가 붙으므로 한 줄씩 밀어야
+    // 실모드(헤더 포함 셈)와 눈금이 같다
     toolCalls: computed.toolCalls.map((call) =>
       call.line === undefined || !computed.text ? call : { ...call, line: call.line + 1 },
     ),
@@ -370,10 +368,8 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
     };
   }
 
-  /**
-   * 훈련을 **없애는** 지시가 먼저다 — "훈련 쉬자"는 `/훈련/`에도 걸리므로,
-   * 순서를 뒤집으면 "휴식"이라는 이름의 훈련이 등록된다.
-   */
+  // 훈련을 없애는 지시가 먼저다 — "훈련 쉬자"는 /훈련/에도 걸려, 순서를 뒤집으면
+  // "휴식"이라는 이름의 훈련이 등록된다
   if (/쉬|휴식|훈련\s*(취소|빼|없애|지워)/u.test(msg)) {
     const dows = WEEKDAY_KEYWORDS.filter(([re]) => re.test(msg)).map(([, d]) => Number(d));
     // "내일"이 없으면 오늘 하루 — 범위는 좁은 쪽이 기본이다 (clearTraining)
@@ -433,12 +429,16 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
     // 답이 도착했으면 선수 본인이 되어 확률대로 판정한다
     if (renewal && waiting && waiting.respondsOn !== null && waiting.respondsOn <= state.date) {
       const verdict =
-        waiting.probability >= 50 ? "accept" : waiting.probability >= 25 ? "counter" : "reject";
+        waiting.probability >= MOCK_ACCEPT_PROB
+          ? "accept"
+          : waiting.probability >= MOCK_COUNTER_PROB
+            ? "counter"
+            : "reject";
       const input = {
         negotiationId: renewal.id,
         verdict,
         ...(verdict === "counter"
-          ? { weeklyWage: Math.round(renewalExpectation(state, who) * 1.15) }
+          ? { weeklyWage: Math.round(renewalExpectation(state, who) * MOCK_RENEWAL_WAGE_RATE) }
           : {}),
         note: verdict === "accept" ? "여기 남겠습니다" : "조건을 더 봐야겠습니다",
       } as const;
@@ -467,9 +467,8 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
     };
   }
 
-  // ── 이적 협상 (mock) — 판정은 확률로 결정적으로 한다 (설계 §6) ──
-  // 실모드에서는 LLM이 상대편이 되어 판정하지만, mock은 테스트가 재현 가능해야
-  // 하므로 확률 구간으로 가른다: 50% 이상 수락 · 25% 이상 역제안 · 아니면 결렬.
+  // ── 이적 협상 (mock) — 실모드는 LLM이 상대편이 되어 판정하지만 mock은 테스트
+  // 재현성을 위해 확률 구간으로 가른다 (수락 / 역제안 / 결렬)
   if (/협상|오퍼|이적|영입|매각|팔|사자|데려/u.test(msg)) {
     const incoming = incomingOffers(state)[0];
     // ① 받은 오퍼가 있으면 그것부터 — 감독의 뜻을 읽는다
@@ -484,7 +483,7 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
       const input = {
         negotiationId: incoming.id,
         verdict,
-        ...(verdict === "counter" ? { fee: Math.round(offer.fee * 1.25) } : {}),
+        ...(verdict === "counter" ? { fee: Math.round(offer.fee * MOCK_COUNTER_FEE_RATE) } : {}),
       } as const;
       const result = answerIncomingOffer(state, input);
       calls.push({ name: "respond_offer", summary: result.message, input });
@@ -505,7 +504,11 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
     if (arrived) {
       const offer = pendingOffer(arrived)!;
       const verdict =
-        offer.probability >= 50 ? "accept" : offer.probability >= 25 ? "counter" : "reject";
+        offer.probability >= MOCK_ACCEPT_PROB
+          ? "accept"
+          : offer.probability >= MOCK_COUNTER_PROB
+            ? "counter"
+            : "reject";
       const input = {
         negotiationId: arrived.id,
         verdict,
@@ -657,16 +660,9 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
     msg,
   );
   if (wantsAdvance && !isQuestion) {
-    /**
-     * 얼마나 넘기는지도 말에서 읽는다 — 화면의 시간 이동 버튼이 "하루만 넘기자",
-     * "일주일 뒤로 넘기자"를 그대로 보내기 때문이다. 전부 next_match로 처리하면
-     * 프리시즌에 하루를 누른 감독이 개막까지 날아간다.
-     */
-    /**
-     * 손잡이가 날짜를 적어 보내면(`시간 진행 — 다음 경기 (2026-09-03)`) 그 날까지
-     * 간다. 실모드에서는 GM이 그 날짜를 헤더에 옮겨 적고 `applyScenePoint`가
-     * 처리하는데, mock은 시계를 자기가 옮기므로 여기서 같은 뜻을 낸다.
-     */
+    // 얼마나 넘기는지도 말에서 읽는다 — 버튼 문장을 그대로 받으므로 전부
+    // next_match로 처리하면 프리시즌에 하루를 누른 감독이 개막까지 날아간다.
+    // 날짜가 적혀 오면 그날까지 간다 (실모드에선 applyScenePoint가 하는 일)
     const dated = /\((\d{4}-\d{2}-\d{2})\)/u.exec(msg)?.[1] ?? null;
     const days = dated
       ? Math.max(1, diffDays(state.date, dated))
@@ -771,8 +767,7 @@ export function buildOnboardingTurn(state: GameState): GmTurnResult {
       `[${state.date} ${formatClock(clockOf(state))}]`,
       pick(rng, ONBOARDING_SCENES)(team),
       pick(rng, ONBOARDING_WELCOMES)(state.manager.name, tag, persona.name),
-      // 첫 만남에 사람이 먼저 보인다 — 이 코치가 어떤 유형인지 (personas.md).
-      // 동기(motivation)는 3인칭 서술이라 대사로 옮기지 않는다 — 그건 LLM 레퍼런스의 몫
+      // 코치의 사람됨을 첫 만남에 밝힌다 — motivation은 3인칭 서술이라 대사로 옮기지 않는다
       `${tag} 저에 대해서는 ${persona.traits.join(" · ")} — 그렇게들 말합니다.`,
       `${tag} "${state.manager.background}"이라는 이력도 검토했습니다. 보드는 특히 감독님의 ${topAxes.join("과 ")}을 높이 샀습니다.`,
       `${tag} 스쿼드의 축은 ${views.squad.players
@@ -786,11 +781,8 @@ export function buildOnboardingTurn(state: GameState): GmTurnResult {
 }
 
 /**
- * mock 기자의 질문 — **사실 카드를 그대로 되읽는다.**
- *
- * 실모드에서는 GM이 사실로 질문을 쓰지만(approaches.md §1) mock은 규칙 기반이라
- * 문장을 지을 수 없다. 대신 사실을 그대로 읽고 물음표만 붙인다 — mock이 그럴듯한
- * 기사 문장을 흉내 내면 실모드의 출력 품질을 가늠할 때 착시가 생긴다.
+ * mock 기자의 질문 — 사실 카드를 그대로 되읽는다. mock이 그럴듯한 기사 문장을
+ * 흉내 내면 실모드의 출력 품질을 가늠할 때 착시가 생긴다.
  */
 function mockQuestion(press: PressConference): string {
   const fact = press.facts.find((f) => f.sharp) ?? press.facts[0];

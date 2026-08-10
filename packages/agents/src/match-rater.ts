@@ -16,14 +16,9 @@ import { ATTRIBUTE_AXES } from "@story-fm/domain";
 import { TIERS, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
 
 /**
- * 경기 후 평점 — **코어가 기준선을 박고, LLM이 입체를 더한다.**
- *
- * 골·도움·카드만 보는 공식은 "90분 내내 상대 10번을 지운 6번"과 "아무것도 하지
- * 않은 6번"을 구분하지 못한다. 그래서 경기가 끝나면 장부 사실 + 중계 사건을
- * 함께 읽고 평점을 다시 매긴다. 다만 코어 앵커에서 ±RATING_BAND를 못 벗어난다 —
- * 협상 판정과 같은 구조다(ADR 0002).
- *
- * 실패하면 아무것도 하지 않는다. 앵커가 그대로 남으므로 경기는 언제나 완결된다.
+ * 경기 후 평점 — 코어가 장부 사실로 앵커를 박고, LLM이 사건 목록을 읽어
+ * 앵커 ±RATING_BAND 안에서 다시 매긴다 (협상 판정과 같은 구조 — ADR 0002).
+ * 실패하면 앵커가 그대로 남으므로 경기는 언제나 완결된다.
  */
 export const MATCH_RATER_SYSTEM = `당신은 방금 끝난 축구 경기를 채점하는 분석가다.
 
@@ -189,13 +184,8 @@ export async function rateMatchPerformances(
   if (brief.players.length === 0) return { applied: 0 };
   let applied = 0;
   try {
-    /**
-     * **잡무 티어다** — 훈련 결산과 같은 성격의 일이기 때문이다.
-     *
-     * 입력은 사건 목록과 명단, 출력은 구조화된 표 하나이고, 값의 폭은 코어가
-     * 앵커 ±${RATING_BAND}로 좁게 물려 둔다. 서사를 쓰지 않으므로 큰 모델이
-     * 낼 수 있는 차이가 결과에 닿지 않는다 — 경기마다 도는 일이라 지연이 더 아프다.
-     */
+    // 잡무 티어 — 값의 폭은 코어가 앵커 ±RATING_BAND로 좁게 물려 둔다.
+    // 경기마다 도는 일이라 지연이 더 아프다
     const client = llm ?? createGameLLM(TIERS.chore);
     await client.runTurn({
       system: MATCH_RATER_SYSTEM,
