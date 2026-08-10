@@ -2,11 +2,13 @@
 
 import { Fragment, useMemo, useState } from "react";
 import type { CardMark, ChatTurn, GoalMark, ToolCallRecord } from "@story-fm/engine";
-import { stampOfHeader } from "../lib/scene-stamp";
-import { movedToRail } from "../lib/panel-hints";
+import { cutStamps } from "../lib/scene-stamp";
+import { hasRailHint } from "../lib/panel-hints";
 import { weaveTurn } from "../lib/turn-pieces";
 import { BROADCAST_SPEAKER, normalizeSpeaker } from "@story-fm/domain";
-import type { ScoutReportCard } from "@story-fm/domain";
+import type { MarketCard, ScoutReportCard } from "@story-fm/domain";
+import { MarketCardView, marketCardOf } from "@/components/market-card";
+import { money, wage } from "@/lib/money";
 import { SKILL_LABEL } from "@/lib/skill-label";
 import type { SpeakerKind, SpeakerRole } from "@story-fm/engine";
 import {
@@ -159,32 +161,47 @@ function GoalCard({ goal }: { goal: GoalMark }) {
   );
 }
 
-/** 스킬 칩 — 클릭하면 호출 파라미터·결과를 펼쳐 보여준다 */
 /**
- * 스킬 칩 — **접힌 채로는 이름과 결, 펼치면 정돈된 상세.**
+ * 스킬 칩 — **접힌 채로는 이름과 결, 누르면 상세.**
  *
  * 이름을 그대로 쓰면(`set_player_tactic`) 감독은 자기가 아는 말이 아닌 것을 읽는다.
  * 사람이 읽는 이름은 스킬 카탈로그가 이미 갖고 있으므로 그걸 쓴다.
  *
  * `tone`이 있는 칩(면담·팀토크·기자회견)은 **펼치지 않아도 결이 보인다** — 잘
  * 풀렸는지는 알아야 하지만 사기 ±N을 늘 세우면 대화가 숫자로 읽힌다.
+ *
+ * **상세가 열리는 자리는 갈 화면이 있는지가 정한다.** 장부를 바꾼 스킬은 레일
+ * 말풍선을 다시 세운다(`onReveal`) — 같은 사실을 칩 아래에 또 펼치면 두 곳에 난다.
+ * 레일이 없는 동안(경기 중)에는 그 칩도 제자리에서 펼친다: 부를 말풍선이 없다.
  */
-function ToolChip({ call }: { call: ToolCallRecord }) {
+function ToolChip({
+  call,
+  onReveal,
+  revealed = false,
+}: {
+  call: ToolCallRecord;
+  onReveal?: (call: ToolCallRecord) => void;
+  revealed?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const label = SKILL_LABEL[call.name] ?? call.name;
   const tone = call.tone ? ` ${call.tone}` : "";
+  const toRail = onReveal !== undefined && hasRailHint(call.name);
+  const shown = toRail ? revealed : open;
   return (
     <span className="tool-chip-wrap">
       <button
-        className={`tool-chip${open ? " open" : ""}${tone}`}
-        onClick={() => setOpen((o) => !o)}
+        className={`tool-chip${shown ? " open" : ""}${tone}`}
+        onClick={() => (toRail ? onReveal(call) : setOpen((o) => !o))}
         data-testid={`tool-${call.name}`}
-        aria-expanded={open}
+        aria-expanded={shown}
         title={label}
+        /* 이 클릭은 말풍선을 닫는 "다른 쪽"이 아니다 — game-screen의 바깥 클릭 감시가 읽는다 */
+        data-hint-keep={toRail ? "" : undefined}
       >
         {label}
       </button>
-      {open && (
+      {!toRail && open && (
         <div className="tool-detail" data-testid={`tool-detail-${call.name}`}>
           <ToolDetail call={call} />
         </div>
@@ -268,9 +285,6 @@ function BookingCard({ card }: { card: CardMark }) {
     </div>
   );
 }
-
-const money = (won: number) => `£${(won / 1_000_000).toFixed(1)}M`;
-const wage = (won: number) => `£${Math.round(won / 1_000)}k`;
 
 /**
  * 스카우팅 보고서 — **며칠을 기다려 얻은 것이므로 한 장으로 편다.**
@@ -395,6 +409,8 @@ export function ChatTurnView({
   playerNames,
   speakerRoles,
   prevStamp = null,
+  onRevealHint,
+  revealedCall = null,
 }: {
   turn: ChatTurn;
   /** 스트리밍 중인 미완성 턴 — 마지막 미완성 줄을 보류해 파싱 깨짐 방지 */
@@ -404,6 +420,10 @@ export function ChatTurnView({
   speakerRoles?: Record<string, SpeakerRole>;
   /** 바로 앞 모델 턴의 시각 — 같으면 다시 적지 않는다 */
   prevStamp?: string | null;
+  /** 장부 칩을 눌렀다 — 레일 말풍선을 다시 세운다 (레일이 서 있을 때만 온다) */
+  onRevealHint?: (call: ToolCallRecord) => void;
+  /** 지금 말풍선이 서 있는 호출 — 그 칩만 펼친 모양이 된다 */
+  revealedCall?: ToolCallRecord | null;
 }) {
   const text = useMemo(() => humanize(turn.text, playerNames), [turn.text, playerNames]);
 
@@ -414,33 +434,36 @@ export function ChatTurnView({
 
   let lines = text.split("\n").filter((line) => line.trim().length > 0);
   if (streaming && lines.length > 0) {
-    // 아직 `@화자:`의 콜론이 도착하지 않은 마지막 줄은 다음 델타까지 보류
+    // 아직 콜론/닫는 괄호가 도착하지 않은 마지막 줄은 다음 델타까지 보류 —
+    // 안 그러면 `@김`이나 `[2026-07-15 AM 9:1`이 한 프레임 날것으로 보인다
     const last = lines[lines.length - 1] ?? "";
-    if (/^@[^:]*$/u.test(last)) lines = lines.slice(0, -1);
+    if (/^@[^:]*$/u.test(last) || /^\[[^\]]*$/u.test(last)) lines = lines.slice(0, -1);
   }
 
   /**
-   * 첫 줄의 시점 헤더 — 서버가 저장 전에 걷어내지만, **스트리밍 중에는 그대로
-   * 흘러온다.** 여기서 떼어 시각 표시로 세우면 장면이 열릴 때 언제인지가 먼저 보인다.
-   */
-  const head = lines[0]?.trim() ?? "";
-  const stamp = stampOfHeader(head);
-  if (stamp !== null) lines = lines.slice(1);
-
-  /**
-   * 시각은 **바뀔 때만** 선다 — 같은 값이 턴마다 반복되면 시간이 흐른다는 신호가
-   * 오히려 죽는다. 이 선이 곧 장면의 경계다. 눈금은 **때**라(`partOfDayStamp`)
-   * 오전 내내 벌어진 장면들은 한 덩어리로 묶이고, 오후로 넘어갈 때 다시 선다.
+   * 시점 헤더를 걷어내 시각 표시로 세운다 — **첫 줄만이 아니다.** GM이 판정을 몇 줄
+   * 적고 나서 장면을 여는 턴에서는 헤더가 본문 한복판에 서고, 그때 걷어내지 않으면
+   * `[2026-07-15 AM 9:15]`가 대사 사이에 날것으로 남는다.
+   *
+   * 시각은 **바뀔 때만** 선다 — 같은 값이 반복되면 시간이 흐른다는 신호가 오히려
+   * 죽는다. 이 선이 곧 장면의 경계다. 눈금은 **때**라(`partOfDayStamp`) 오전 내내
+   * 벌어진 장면들은 한 덩어리로 묶이고, 오후로 넘어갈 때 다시 선다.
    * 정확한 시각은 상단 띠가 갖는다 — 같은 화면에 시계를 둘 두지 않는다.
    */
-  const showStamp = stamp !== null && stamp !== prevStamp;
+  const cut = cutStamps(lines);
+  lines = cut.lines;
+  let seen = prevStamp;
+  const stamps = cut.stamps.filter((s) => {
+    if (s.stamp === seen) return false;
+    seen = s.stamp;
+    return true;
+  });
   /**
-   * 채팅에 세울 칩 — **볼 화면이 있는 것은 레일이 알린다** (`movedToRail`).
+   * 채팅에 세울 칩 — **감독이 시킨 일은 다 여기 남는다.**
    *
-   * 라인업·훈련·재정처럼 장부가 바뀐 일을 채팅에도 칩으로 세우면 같은 사실이 두
-   * 곳에 나고, 무대의 주인이 서사에서 조작 로그로 넘어간다. 여기 남는 것은 **갈
-   * 화면이 없는 것들**이다 — 대화(면담·팀토크·기자회견), 진행 중인 협상,
-   * 스카우트 파견.
+   * 장부를 바꾼 스킬도 칩으로 선다: 레일 말풍선은 다음 클릭에 닫히고, 그 뒤에
+   * "방금 뭘 바꿨더라"를 되짚을 자리가 채팅뿐이다. 칩을 누르면 그 말풍선이 다시
+   * 선다(`onRevealHint`) — 상세를 칩 아래에 또 펼치지는 않는다.
    *
    * `silent`은 스킬이 아니라 코어가 한 일이다(시계 이동).
    * ⚠️ 이름 비교가 함께 있는 건 **이미 저장된 턴** 때문이다. 표식이 없던 시절의
@@ -448,23 +471,20 @@ export function ChatTurnView({
    * 계속 보인다. 새 기록은 `silent`로 걸러지므로 이 목록은 자라지 않는다.
    */
   const shownCalls = turn.toolCalls.filter(
-    (call) =>
-      !call.silent &&
-      !movedToRail(call.name) &&
-      call.name !== "시간 경과" &&
-      call.name !== "advance_time",
+    (call) => !call.silent && call.name !== "시간 경과" && call.name !== "advance_time",
   );
 
   /**
    * 표시는 **벌어진 자리**에 선다 — 칩은 호출 시점의 줄 수, 골·경고는 분으로.
    * 자리를 모르는 기록(옛 세이브)은 예전처럼 맨 앞이다.
-   * `dropped`는 시각 표시로 떼어 낸 헤더 한 줄 — 칩의 줄 수는 그것까지 세고 저장된다.
+   * `cuts`는 시각 표시로 떼어 낸 헤더 줄들 — 칩의 줄 수는 그것까지 세고 저장된다.
    */
   const pieces = weaveTurn(lines, {
     goals: turn.goals,
     cards: turn.cards,
     calls: shownCalls,
-    dropped: stamp !== null ? 1 : 0,
+    stamps,
+    cuts: cut.cuts,
   });
 
   return (
@@ -472,11 +492,6 @@ export function ChatTurnView({
       className={`turn-model${streaming ? " streaming" : ""}${turn.inMatch === true ? " in-match" : ""}`}
       data-testid="model-turn"
     >
-      {showStamp && (
-        <div className="scene-stamp" data-testid="scene-stamp">
-          <span>{stamp}</span>
-        </div>
-      )}
       {pieces.map((piece, i) => {
         if (!piece.mark) {
           return (
@@ -488,15 +503,42 @@ export function ChatTurnView({
           );
         }
         const mark = piece.mark;
+        if (mark.kind === "stamp")
+          return (
+            <div className="scene-stamp" data-testid="scene-stamp" key={mark.key}>
+              <span>{mark.stamp}</span>
+            </div>
+          );
         if (mark.kind === "goal") return <GoalCard goal={mark.goal} key={mark.key} />;
         if (mark.kind === "card") return <BookingCard card={mark.card} key={mark.key} />;
-        // 같은 자리에서 연달아 불린 스킬은 한 줄에 나란히 — 칩마다 문단을 끊지 않는다
+        /**
+         * 스킬 결과가 서는 길은 둘이다 — **갈 장부가 있으면 칩, 없으면 카드.**
+         * 카드를 그리는 호출은 칩을 세우지 않는다: 같은 사실이 두 번 나면 카드가
+         * 칩의 부연처럼 읽힌다.
+         */
+        const cards = mark.calls
+          .map((call) => marketCardOf(call.payload))
+          .filter((card): card is MarketCard => card !== null);
+        const chips = mark.calls.filter((call) => marketCardOf(call.payload) === null);
         return (
-          <div className="tool-chips" key={mark.key}>
-            {mark.calls.map((call, j) => (
-              <ToolChip call={call} key={j} />
+          <Fragment key={mark.key}>
+            {/* 같은 자리에서 연달아 불린 스킬은 한 줄에 나란히 — 칩마다 문단을 끊지 않는다 */}
+            {chips.length > 0 && (
+              <div className="tool-chips">
+                {chips.map((call, j) => (
+                  <ToolChip
+                    call={call}
+                    key={j}
+                    onReveal={onRevealHint}
+                    revealed={call === revealedCall}
+                  />
+                ))}
+              </div>
+            )}
+            {cards.map((card, j) => (
+              <MarketCardView card={card} key={j} />
             ))}
-          </div>
+          </Fragment>
         );
       })}
       {/* 보고서는 대화 뒤 — 서류는 "이런 게 왔습니다" 다음에 놓인다 */}

@@ -1407,6 +1407,18 @@ export function defaultRoleOf(position: string): string {
   return ROLE_DEFS[weightSlotOf(position)][0]!.id;
 }
 
+/**
+ * 역할 한글 이름 → 약칭 (`컴플리트 포워드` → `CF`).
+ *
+ * 좁은 자리에서 역할을 부르는 이름은 **전술판과 같아야 한다** — 같은 역할이
+ * 화면마다 다른 말로 불리면 같은 것인지 알 수 없다.
+ */
+export const ROLE_ABBR: ReadonlyMap<string, string> = new Map(
+  Object.values(ROLE_DEFS)
+    .flat()
+    .map((r) => [r.ko, r.abbr]),
+);
+
 /** 자리+역할 → 축 가중치. 모르는 역할 id는 기본 역할로 떨어진다 */
 export function roleWeights(position: string, role?: string): AxisValues {
   const slot = weightSlotOf(position);
@@ -1705,7 +1717,6 @@ export function ageOf(birthdate: string, onDate: string): number {
   if (m < 0 || (m === 0 && d.getUTCDate() < b.getUTCDate())) age -= 1;
   return age;
 }
-
 
 // ── 스카우팅 보고서 — 채팅이 카드로 그리는 구조체 ──────
 

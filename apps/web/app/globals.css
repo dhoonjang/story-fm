@@ -87,6 +87,21 @@
 
   /** 상태 전이 — 같은 속도를 써야 화면이 한 몸으로 움직인다 */
   --ease: 0.16s ease;
+  /**
+   * 무대가 갈리고 다시 붙는 시간 — 색이 바뀌는 것보다 느리다(움직이는 게 화면의
+   * 절반이라 `--ease`로 하면 튀는 것처럼 보인다).
+   * ⚠️ `PANEL_ANIM_MS` (game-screen.tsx)와 같은 값이어야 한다 — 접히는 동안
+   * 장부 내용을 그려 두는 시간이다.
+   */
+  --panel-anim: 260ms;
+  /**
+   * 전술판 아래 **붙은 전술 줄의 높이** — 패딩 12+12에 한 줄 21.
+   * 판은 3:4라 남는 높이에서 폭을 되짚는데, 그때 먼저 빼는 몫이다
+   * (`.board-stack` 폭 계산). 줄이 두 줄로 흐르면 그만큼 어긋난다.
+   */
+  --board-foot: 45px;
+  /* 끝에서 잦아드는 곡선 — 밀려 나가는 게 아니라 자리를 잡는 느낌이 된다 */
+  --ease-panel: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 html,
@@ -520,86 +535,16 @@ textarea {
   text-decoration: none;
   white-space: nowrap;
 }
-.prompt-admin {
+.skill-admin {
   max-width: 1600px;
 }
-.prompt-hint {
+.skill-hint {
   max-width: 960px;
   margin-bottom: 16px;
 }
-.prompt-save {
+.skill-save {
   padding: 7px 18px;
   border-radius: var(--r-sm);
-}
-.prompt-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
-}
-.prompt-card {
-  min-width: 0;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: 14px;
-}
-.prompt-card-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
-}
-.prompt-card-head h2 {
-  font-size: var(--fs-lg);
-}
-.prompt-card-head p,
-.prompt-card-head > span {
-  color: var(--muted);
-  font-size: var(--fs-sm);
-}
-.prompt-card-head > span {
-  flex-shrink: 0;
-}
-.prompt-card textarea {
-  display: block;
-  width: 100%;
-  min-height: 66vh;
-  resize: vertical;
-  background: #0b0f14;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  color: var(--text);
-  padding: 12px;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: var(--fs-sm);
-  line-height: 1.55;
-  tab-size: 2;
-}
-.prompt-card textarea:focus {
-  outline: none;
-  border-color: var(--accent-2);
-}
-.skill-admin-section {
-  margin-top: 28px;
-  padding-top: 24px;
-  border-top: 1px solid var(--border);
-}
-.skill-section-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 20px;
-  margin-bottom: 16px;
-}
-.skill-section-head h2 {
-  font-size: var(--fs-xl);
-  margin-bottom: 5px;
-}
-.skill-section-head p {
-  max-width: 760px;
-  color: var(--muted);
-  font-size: var(--fs-md);
 }
 .skill-grid {
   display: grid;
@@ -665,15 +610,6 @@ textarea {
   text-align: right;
 }
 @media (max-width: 960px) {
-  .prompt-grid {
-    grid-template-columns: 1fr;
-  }
-  .prompt-card textarea {
-    min-height: 55vh;
-  }
-  .skill-section-head {
-    flex-direction: column;
-  }
   .skill-grid {
     grid-template-columns: 1fr;
   }
@@ -779,8 +715,13 @@ textarea {
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   /* 줄이 넘칠 땐 **왼쪽 정보가 줄어든다** — 이동 수단(아이콘 줄)은 화면이 좁아도
-     끝까지 남아야 한다. 이걸 안 걸면 좁은 화면에서 띠가 페이지를 옆으로 늘린다 */
-  overflow: hidden;
+     끝까지 남아야 한다. 이걸 안 걸면 좁은 화면에서 띠가 페이지를 옆으로 늘린다.
+     세로는 잘라선 안 된다 — 아이콘 말풍선이 띠 아래로 나와야 읽힌다 */
+  overflow-x: clip;
+  overflow-y: visible;
+  /* 말풍선이 무대 위에 그려지도록 — 무대 안에도 z-index를 쓰는 자리가 있다 */
+  position: relative;
+  z-index: 30;
 }
 /* 로고 마크 — 글자 대신 마크 하나. 상단 띠에서 유일하게 색을 쓰는 자리다 */
 .topbar .brand {
@@ -808,15 +749,20 @@ textarea {
    남긴다(화면에 조작 안내를 깔지 않는다는 규칙). 선택 상태는 밝기로 알린다 —
    어두운 화면에서 그림자는 보이지 않고 밝기만 보인다. */
 .rail {
+  /* 말풍선 꼬리가 이 두 값으로 아이콘 자리를 되짚는다 — 한 곳에서만 고친다 */
+  --rail-btn: 34px;
+  --rail-gap: 2px;
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--rail-gap);
   flex-shrink: 0;
+  /* 장부 알림이 줄 오른쪽 끝에 맞춰 걸린다 */
+  position: relative;
 }
 .rail button {
-  width: 34px;
-  height: 34px;
+  width: var(--rail-btn);
+  height: var(--rail-btn);
   display: grid;
   place-items: center;
   background: none;
@@ -831,48 +777,64 @@ textarea {
   color: var(--text);
   background: var(--panel-2);
 }
-/* 장부 알림 — 아이콘 아래 말풍선. **읽으면 사라진다** */
-.rail-slot {
+/* 점 하나로 "여기가 바뀌었다" — 말풍선이 사라져도 아이콘은 남아야 한다.
+   띠와 같은 색 테두리를 둘러 아이콘 획과 붙어도 점으로 읽힌다 */
+.rail button.hinted {
   position: relative;
-  display: inline-flex;
 }
-/* 점 하나로 "여기가 바뀌었다" — 말풍선이 사라져도 아이콘은 남아야 한다 */
 .rail button.hinted::after {
   content: "";
   position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 6px;
-  height: 6px;
+  top: 4px;
+  right: 4px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--accent);
+  box-shadow: 0 0 0 2px var(--panel);
 }
-.rail-hint {
+/**
+ * 장부 알림 — **아이콘 줄 아래 한 장.** 다음 클릭에 닫히고, 채팅 칩으로 다시 선다.
+ *
+ * 아이콘마다 띄우지 않는 이유는 마크업 쪽에 적어 두었다. 폭은 `max-content`로
+ * 잡는다 — 자리잡음 상자가 34px짜리 아이콘이면 `max-width`만으로는 글자가
+ * 한 자씩 세로로 쌓인다.
+ */
+.rail-hints {
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + 8px);
   right: 0;
   z-index: 20;
-  max-width: 260px;
-  padding: 6px 9px;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 2 * var(--sp-4)));
+  /* 꼬리가 짚는 아이콘까지는 몸통이 닿아야 한다 — 짧은 알림 한 줄이면 카드가
+     꼬리보다 좁아져 화살표만 따로 떠 있게 된다 */
+  min-width: calc(
+    var(--tail-slot, 0) * (var(--rail-btn) + var(--rail-gap)) + var(--rail-btn) / 2 + 20px
+  );
+  padding: var(--sp-2) var(--sp-3);
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  box-shadow: 0 10px 24px -14px rgb(0 0 0 / 0.9);
-  font-size: var(--fs-2xs);
-  line-height: 1.45;
-  color: var(--muted);
-  white-space: normal;
+  border-radius: var(--r-md);
+  box-shadow: 0 14px 32px -18px rgb(0 0 0 / 0.95);
   text-align: left;
   /* 알림은 읽히기 위한 것이지 눌리기 위한 것이 아니다 — 아이콘이 조작을 맡는다 */
   pointer-events: none;
   animation: hint-in 180ms var(--ease);
 }
-/* 꼬리 — 어느 아이콘의 말인지 모양으로 잇는다 */
-.rail-hint::before {
+/**
+ * 꼬리 — **어느 아이콘의 말인가.**
+ *
+ * 카드는 줄 아래 한 장이지만 꼬리는 첫 장부의 아이콘을 짚는다. `--tail-slot`은
+ * 그 아이콘이 줄 오른쪽 끝에서 몇 칸 왼쪽인지(`RailHints`가 센다).
+ */
+.rail-hints::after {
   content: "";
   position: absolute;
   top: -5px;
-  right: 12px;
+  right: calc(
+    var(--tail-slot, 0) * (var(--rail-btn) + var(--rail-gap)) + var(--rail-btn) / 2 - 4px
+  );
   width: 8px;
   height: 8px;
   background: var(--panel-2);
@@ -880,19 +842,88 @@ textarea {
   border-top: 1px solid var(--border);
   transform: rotate(45deg);
 }
-/* 여러 건이면 줄로 쌓인다 — 한 줄로 이으면 무엇이 몇 건인지 안 읽힌다 */
-.rail-hint-line {
-  display: block;
-}
-.rail-hint-line + .rail-hint-line {
-  margin-top: 3px;
-  padding-top: 3px;
+/* 장부 하나 — 머리(어느 장부)와 몸(무엇이 바뀌었나) */
+.rail-hint + .rail-hint {
+  margin-top: var(--sp-2);
+  padding-top: var(--sp-2);
   border-top: 1px solid var(--border);
 }
-.rail-hint i {
+.rail-hint-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 3px;
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.02em;
+  color: var(--accent);
+}
+.rail-hint-head svg {
+  width: 12px;
+  height: 12px;
+}
+.rail-hint-body {
   display: block;
-  margin-top: 3px;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--text);
+}
+/**
+ * 한 줄 = **갈래 아이콘 + 무슨 일**. 문장만 세 줄 쌓으면 글자 벽이 되어 무엇이
+ * 몇 건인지 안 읽힌다. 줄마다 테두리를 그으면 이번엔 표처럼 보이므로, 갈래를
+ * 아이콘으로 세우고 접힌 줄은 그 아이콘 아래로 들여쓴다.
+ */
+.rail-hint-line {
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  gap: 6px;
+  align-items: start;
+}
+.rail-hint-line + .rail-hint-line {
+  margin-top: 5px;
+}
+.rail-hint-mark {
+  display: grid;
+  place-items: center;
+  /* 첫 글자 줄에 맞춰 앉힌다 — 아이콘이 글자보다 작아 그냥 두면 떠 보인다 */
+  height: calc(var(--fs-xs) * 1.5);
+  color: var(--dim);
+}
+.rail-hint-mark svg {
+  width: 13px;
+  height: 13px;
+}
+/**
+ * 사족은 한 톤 낮춰 아래로 — 본문에 붙이면 정작 바뀐 것이 안 보인다.
+ * 다만 그 안에서도 **수치는 값이다**: 항목과 숫자만 한 단 올려 세운다.
+ */
+.rail-hint-what i {
+  display: block;
   font-style: normal;
+  font-size: var(--fs-2xs);
+  line-height: 1.4;
+  color: var(--dim);
+}
+.rail-hint-what i em {
+  font-style: normal;
+  color: var(--muted);
+}
+/* 오르내린 수치 — 숫자 하나가 방향을 말한다 */
+.rail-hint-what b {
+  font-weight: 600;
+}
+.rail-hint-what b.up {
+  color: var(--accent);
+}
+.rail-hint-what b.down {
+  color: var(--danger);
+}
+/* 접어 둔 나머지 — 줄들과 같은 자리에서 시작한다 */
+.rail-hint-body > i {
+  display: block;
+  margin-top: 5px;
+  padding-left: 20px;
+  font-style: normal;
+  font-size: var(--fs-2xs);
   color: var(--dim);
 }
 @keyframes hint-in {
@@ -903,8 +934,12 @@ textarea {
 }
 @media (max-width: 700px) {
   /* 좁은 화면에선 말풍선이 화면을 덮는다 — 점만 남긴다 */
-  .rail-hint {
+  .rail-hints {
     display: none;
+  }
+  /* 감독이 칩을 눌러 부른 것은 예외다 — 부른 것을 안 보여줄 이유가 없다 */
+  .rail-hints.pinned {
+    display: block;
   }
 }
 
@@ -960,42 +995,71 @@ textarea {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  /* 킥오프 — 화면이 갈리는 순간이라 짧게 연출한다 */
-  animation: split-in 0.22s var(--ease-out, ease-out);
+  /* 전술판이 채팅 위로 얹힐 때 이 칸을 기준으로 삼는다 — 오른쪽 칸의
+     `overflow: hidden`은 이 자리(containing block) 바깥이라 잘라내지 않는다 */
+  position: relative;
 }
-@keyframes split-in {
-  from {
-    opacity: 0.4;
-    transform: translateY(6px);
-  }
+/**
+ * 오른쪽 칸 — **경기 판이든 장부든 같은 자리, 같은 폭.**
+ *
+ * 예전엔 둘이 서로 다른 마크업이라 킥오프 때마다 무대가 통째로 갈아엎어졌다.
+ * 담는 그릇을 하나로 두면 안에 무엇이 들든 여닫는 몸짓이 같아진다.
+ */
+.stage-right {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  /* 접히는 동안 내용이 칸 밖으로 새지 않게 */
+  overflow: hidden;
+  border-left: 1px solid var(--border);
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+/**
+ * 내용은 **칸이 어느 정도 벌어진 뒤에** 든다. 폭 0에서부터 글자가 서면 열리는
+ * 내내 줄바꿈이 다시 잡히는 게 그대로 보인다 — 그 구간을 투명하게 지난다.
+ */
+.stage-split.open > .stage-right {
+  opacity: 1;
+  transition: opacity 170ms ease-out 90ms;
 }
 .stage-board {
-  animation: board-in 0.22s ease-out;
-}
-@keyframes board-in {
-  from {
-    opacity: 0;
-    transform: translateX(14px);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .stage-split,
-  .stage-board {
-    animation: none;
-  }
-}
-.stage-board {
+  flex: 1;
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
   /* 스크롤바 자리를 미리 비워 둔다 — 내용이 길어지는 순간 열이 흔들리지 않는다 */
   scrollbar-gutter: stable;
   padding: var(--sp-4);
-  border-left: 1px solid var(--border);
 }
-.stage-split .chat-pane {
-  max-width: none;
+/**
+ * 탭이 바뀐 자리 — **흐려졌다 든다.**
+ *
+ * 판세와 명단은 생김새가 아주 달라서 즉시 갈리면 화면이 깜빡인 것처럼 보이고,
+ * 무엇이 바뀐 건지는 눈이 따로 찾아야 한다. 한 호흡이면 충분하다.
+ */
+.board-tab,
+.stage-right .view-scroll {
+  animation: tab-in 180ms ease-out;
+}
+/**
+ * ⚠️ **투명도만 쓴다 — 움직이지 않는다.**
+ *
+ * `transform`을 쓰면 도는 180ms 동안 이 덩어리가 자손 `position: fixed`의
+ * 기준이 되고, 무엇보다 안쪽 좌표가 그만큼 어긋난다. 전술판은 칩을 끌어
+ * 놓는 자리라 그 어긋남이 그대로 배치 오차가 된다(탭을 열자마자 끌면).
+ */
+@keyframes tab-in {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .board-tab,
+  .stage-right .view-scroll {
+    animation: none;
+  }
 }
 /**
  * 좁은 화면의 경기 상단 — **탭 줄이 먼저다.**
@@ -1009,20 +1073,6 @@ textarea {
   }
   .rail.match-rail button {
     width: 34px;
-  }
-}
-
-/* 992px 미만 — 판이 채팅 **위로** 접혀 오른다 (좌우로 가르면 둘 다 못 읽는다) */
-@media (max-width: 991px) {
-  .stage-split {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(0, auto) minmax(0, 1fr);
-  }
-  .stage-board {
-    order: -1;
-    border-left: none;
-    border-bottom: 1px solid var(--border);
-    max-height: 46vh;
   }
 }
 
@@ -1227,40 +1277,399 @@ textarea {
  * 창을 줄일 때마다 다시 그린다. 마크업은 언제나 둘이고 좁을 때 한 열이 접힌다 —
  * 접히는 것이라 스크롤 위치와 쓰던 입력이 그대로 남는다.
  */
+/**
+ * **칸은 늘 둘이고, 닫혀 있을 땐 오른쪽 폭이 0이다.**
+ *
+ * 열 때만 오른쪽 칸을 만들면 격자 트랙이 없다 생겼다 해서 폭을 이어서 애니메이션할
+ * 수 없고, 채팅이 화면 가운데에서 왼쪽 반쪽으로 **툭** 튄다. 트랙을 붙박이로 두면
+ * 그 이동이 폭 하나의 변화가 되어 그대로 미끄러진다.
+ */
 .stage-split.panel-split {
-  /* 탭을 누를 때마다 화면 전체가 들썩이지 않게 — 킥오프와 달리 되풀이되는 조작이다 */
-  animation: none;
+  /* 두 트랙의 **꼴이 같아야** 폭이 보간된다 — 한쪽만 `0fr`로 적으면 이어지지
+     않고 툭 끊긴다 (minmax()와 단일 flex는 서로 다른 값으로 친다) */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0fr);
+  transition: grid-template-columns var(--panel-anim) var(--ease-panel);
 }
-.stage-split.panel-split > .panel {
-  border-left: 1px solid var(--border);
+.stage-split.panel-split.open {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 /** 읽는 폭은 넓은 화면에서도 그대로 — 반쪽이 780을 넘으면 가운데로 모은다 */
 .stage-split.panel-split > .chat-pane {
   max-width: 780px;
+  /* 판이 얹히고 걷힐 때 대화가 가라앉았다 떠오른다 — 아래 `board-open`이 값을 준다 */
+  transition: opacity var(--panel-anim) var(--ease-panel);
 }
 /**
- * 전술판을 펼치면 채팅을 덮는다 — **판은 폭이 곧 쓸모다.**
- * 반쪽에 밀어 넣으면 판이 200px로 눌려 칩을 끌 자리가 없다.
+ * 판이 서는 몸짓 — **오른쪽에서 밀려 나온다.**
+ *
+ * 손잡이가 오른쪽 칸의 요약 줄에 있으므로, 판이 그 아래에서 빠져나와 왼쪽에 자리를
+ * 잡는 것이 누른 자리와 이어진다. 제자리에서 떠오르면(예전 `tab-in`) 어디서 온
+ * 것인지가 없어 화면에 한 장이 갑자기 생긴 것처럼 보인다.
+ *
+ * 닫는 몸짓은 없다 — 접히는 순간 판은 흐름에서 빠지므로(`folded`) 되돌릴 자리가
+ * 남지 않는다. 여는 쪽만 말해도 관계는 충분히 읽힌다.
  */
-.stage-split.panel-split.board-open {
-  grid-template-columns: minmax(0, 1fr);
-}
-.stage-split.panel-split.board-open > .chat-pane {
-  display: none;
+@keyframes board-slide-in {
+  from {
+    opacity: 0;
+    /* 제 폭만큼 오른쪽 — 명단 아래에 통째로 들어가 있다가 왼쪽으로 빠져나온다 */
+    transform: translateX(100%);
+  }
 }
 /**
- * 1200px 미만 — 나란히 두면 **둘 다 못 읽는다.** 채팅은 한 줄이 스무 자로 끊기고
- * 명단 표(560px)는 가로로 스크롤된다. 그 아래에서는 장부가 무대를 대신한다.
+ * 전술판을 펼치면 **채팅 위로 한 장이 얹힌다** — 무대 구조는 그대로다.
+ *
+ * 판은 폭이 곧 쓸모라 반쪽에 밀어 넣으면 200px로 눌려 칩을 끌 자리가 없다. 그래서
+ * 전에는 채팅 열을 지우고 판이 그 자리를 받았는데, 그러면 여닫을 때마다 무대가
+ * 2열↔1열로 갈아엎어져 **명단 열의 폭이 바뀌고 요약 줄 오른쪽 끝에 선 손잡이가
+ * 그때마다 옆으로 뛴다** — 방금 누른 버튼이 손 밑에서 도망간다.
+ *
+ * 얹는 방식은 오른쪽 칸을 건드리지 않는다: 명단도 손잡이도 있던 자리 그대로고,
+ * 판은 왼쪽 절반을 덮었다가 닫는 순간 그 아래 대화를 그대로 되돌려준다. 오른쪽
+ * 칸이 접힌 모습(`folded`)과 같아지는 것도 그래서다 — 판이 흐름에서 빠졌으니
+ * 명단만 남은 것과 같은 화면이어야 한다.
+ *
+ * 활성 폭이 둘로 갈린다: 경기 무대는 992부터 반반이고(장부와 달리 덮지 않는다)
+ * 장부는 1200부터다. 그 아래에서는 얹을 채팅 칸이 애초에 옆에 없다.
  */
-@media (max-width: 1199px) {
-  .stage-split.panel-split {
+@media (min-width: 1200px) {
+  .stage-split.panel-split.with-ledger.open.board-open .squad-head,
+  .stage-split.panel-split.with-ledger.open.board-open .squad-layout {
     grid-template-columns: minmax(0, 1fr);
   }
-  .stage-split.panel-split > .chat-pane {
-    display: none;
+  /**
+   * 미끄러져 들어오는 판은 **명단 아래를 지난다.**
+   *
+   * 손잡이가 오른쪽 칸에 있으므로 판은 그 뒤에서 빠져나와야 누른 자리와 이어진다.
+   * 위를 그냥 지나가면 명단 행 위에 칩이 겹쳐 흐르는 것으로 보인다 — 덮는 쪽이
+   * 불투명해야 판이 그 아래로 사라진다.
+   */
+  .stage-split.panel-split.with-ledger.open.board-open .squad-head,
+  .stage-split.panel-split.with-ledger.open.board-open .squad-side-col {
+    position: relative;
+    z-index: 30;
+    background: var(--bg);
   }
-  .stage-split.panel-split > .panel {
+  .stage-split.panel-split.with-ledger.open.board-open .squad-summary {
+    padding-bottom: 8px;
+  }
+  .stage-split.panel-split.with-ledger.open.board-open .squad-board-col {
+    position: absolute;
+    /**
+     * **명단에 붙는 서랍** — 오버레이 사이드바다.
+     *
+     * `right: 50%`가 명단 패널의 왼쪽 변이고 거기에 딱 붙는다. 위아래는 무대를
+     * 꽉 채운다 — 사이드바는 높이를 나누지 않는다. 폭은 채팅 칸(무대의 절반)의
+     * **8할**이라, 남는 2할에 가라앉은 대화가 계속 보인다: 판이 잠깐 그 위에
+     * 나와 있을 뿐이고 접으면 돌아갈 자리라는 것이 그 띠로 읽힌다.
+     */
+    inset: 0 50% 0 auto;
+    width: min(40%, 820px);
+    z-index: 20;
+    padding: var(--sp-5);
+    gap: 0;
+    background: var(--bg);
+    /* 붙는 쪽엔 이음매를 두지 않는다 — 명단 패널의 테두리가 이미 그 선이다 */
+    border-left: 1px solid var(--border);
+    border-radius: var(--r-md) 0 0 var(--r-md);
+    /* 그림자는 **왼쪽으로** 떨어진다 — 서랍이 그쪽으로 나와 있다는 표시다 */
+    box-shadow: -16px 0 34px rgba(0, 0, 0, 0.45);
+    animation: board-slide-in var(--panel-anim) var(--ease-panel);
+    /* 덩어리가 남는 높이에서 제 폭을 되짚을 수 있게 */
+    container-type: size;
+  }
+  /**
+   * 전술 줄은 **판과 같은 식으로** 폭을 정한다.
+   *
+   * 칸을 꽉 채우면 세로가 짧은 화면에서 판만 줄어(3:4가 높이에 눌린다) 줄이 판보다
+   * 한 뼘 넓어진다. 판의 폭은 `min(100cqw, 75cqh')`이고 여기서 `cqh'`는 이 줄과
+   * 그 위 간격을 뺀 높이라, 같은 값을 여기서 다시 센다 — `--board-foot`가 그 몫이다.
+   */
+  /**
+   * ── 판 + 전술 줄 = **한 덩어리** ─────────────────────────
+   *
+   * 둘이 따로 떠 있으면 "판을 보는 화면"인지 "전술을 고치는 화면"인지가 흐리다.
+   * 한 테두리 안에 위아래로 붙이면 줄이 판의 손잡이로 읽힌다.
+   *
+   * 폭은 **세로에서 되짚는다**: 판은 3:4라 남는 높이가 폭의 상한을 정하고
+   * (`(100cqh - 줄 높이) × 0.75`), 그 값이 곧 덩어리의 폭이다. 판을 칸에 맞추고
+   * 줄만 따로 재던 예전 방식은 세로가 짧아질 때마다 둘의 폭이 어긋났다.
+   */
+  .stage-split.panel-split.with-ledger.open.board-open .board-stack {
+    display: flex;
+    flex-direction: column;
+    /* 펼친 눈금이 이 안에서 판 위로 올라온다 */
+    position: relative;
+    /* 남는 자리를 위아래·좌우가 고르게 나눠 갖는다 — 덩어리는 늘 가운데.
+       서랍이 넓어졌으니 상한도 그만큼 올린다 — 안 그러면 8할까지 편 자리에
+       예전 폭(559.5)의 판만 서고 나머지가 빈 여백이 된다 */
+    margin: auto;
+    width: min(100cqw, calc((100cqh - var(--board-foot)) * 0.75), 720px);
+    max-height: 100%;
+    /* 그림자는 서랍이 갖는다 — 그 위에 또 띄우면 판이 두 겹으로 떠 보인다 */
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    /* 모서리를 자식이 넘지 않게 — 판의 초록이 각진 채로 삐져나온다 */
+    overflow: hidden;
+  }
+  /* 판은 이제 **폭이 먼저**다 — 남는 높이를 재던 계산은 덩어리가 이미 했다 */
+  .stage-split.panel-split.with-ledger.open.board-open .board-stack .pitch-wrap {
+    flex: none;
+    container-type: normal;
+  }
+  .stage-split.panel-split.with-ledger.open.board-open .board-stack .pitch-board {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 3 / 4;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+  }
+  /* 줄은 판에 이어 붙는다 — 제 테두리 대신 사이의 선 하나만 남긴다 */
+  .stage-split.panel-split.with-ledger.open.board-open .board-stack .tactics-panel,
+  .stage-split.panel-split.with-ledger.open.board-open .board-stack .mv-tactics {
+    width: 100%;
+    margin: 0;
+    border: none;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+  }
+  /**
+   * 눈금을 펼치면 **판 위로 서랍이 올라온다.**
+   *
+   * 흐름에 그대로 두면 여섯 축이 덩어리의 세로를 통째로 더 먹는데, 덩어리 폭은
+   * 접힌 한 줄을 기준으로 이미 정해져 있어 아래가 잘려 나갔다. 고치는 동안 필요한
+   * 것은 눈금이고 판은 그 뒤에 있으면 되므로, 자리를 뺏지 않고 덮는다.
+   */
+  .stage-split.panel-split.with-ledger.open.board-open .board-stack .tactics-panel.open {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 2;
+    max-height: 100%;
+    overflow-y: auto;
+    background: var(--panel);
+  }
+  /**
+   * 판이 얹힌 동안의 **채팅 — 지우지 않고 가라앉힌다.**
+   *
+   * 예전엔 `visibility: hidden`으로 통째로 껐다. 그러면 판을 켜는 순간 왼쪽이 빈
+   * 바탕이 되어 방금까지 흐르던 중계가 어디로 갔는지가 화면에 없었다. 흐릿하게
+   * 남아 있으면 그 자리가 **돌아갈 곳**이라는 게 보이고, 판이 잠깐 그 위에 얹혀
+   * 있을 뿐이라는 것도 함께 읽힌다.
+   *
+   * 손은 닿지 않는다 — 가라앉은 대화를 눌러 봐야 그 위에 판이 있다.
+   */
+  .stage-split.panel-split.with-ledger.open.board-open > .chat-pane {
+    opacity: 0.2;
+    pointer-events: none;
+  }
+}
+@media (min-width: 992px) {
+  .stage-split.panel-split.with-board.open.board-open .squad-head,
+  .stage-split.panel-split.with-board.open.board-open .squad-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /**
+   * 미끄러져 들어오는 판은 **명단 아래를 지난다.**
+   *
+   * 손잡이가 오른쪽 칸에 있으므로 판은 그 뒤에서 빠져나와야 누른 자리와 이어진다.
+   * 위를 그냥 지나가면 명단 행 위에 칩이 겹쳐 흐르는 것으로 보인다 — 덮는 쪽이
+   * 불투명해야 판이 그 아래로 사라진다.
+   */
+  .stage-split.panel-split.with-board.open.board-open .squad-head,
+  .stage-split.panel-split.with-board.open.board-open .squad-side-col {
+    position: relative;
+    z-index: 30;
+    background: var(--bg);
+  }
+  .stage-split.panel-split.with-board.open.board-open .squad-summary {
+    padding-bottom: 8px;
+  }
+  .stage-split.panel-split.with-board.open.board-open .squad-board-col {
+    position: absolute;
+    /**
+     * **명단에 붙는 서랍** — 오버레이 사이드바다.
+     *
+     * `right: 50%`가 명단 패널의 왼쪽 변이고 거기에 딱 붙는다. 위아래는 무대를
+     * 꽉 채운다 — 사이드바는 높이를 나누지 않는다. 폭은 채팅 칸(무대의 절반)의
+     * **8할**이라, 남는 2할에 가라앉은 대화가 계속 보인다: 판이 잠깐 그 위에
+     * 나와 있을 뿐이고 접으면 돌아갈 자리라는 것이 그 띠로 읽힌다.
+     */
+    inset: 0 50% 0 auto;
+    width: min(40%, 820px);
+    z-index: 20;
+    padding: var(--sp-5);
+    gap: 0;
+    background: var(--bg);
+    /* 붙는 쪽엔 이음매를 두지 않는다 — 명단 패널의 테두리가 이미 그 선이다 */
+    border-left: 1px solid var(--border);
+    border-radius: var(--r-md) 0 0 var(--r-md);
+    /* 그림자는 **왼쪽으로** 떨어진다 — 서랍이 그쪽으로 나와 있다는 표시다 */
+    box-shadow: -16px 0 34px rgba(0, 0, 0, 0.45);
+    animation: board-slide-in var(--panel-anim) var(--ease-panel);
+    /* 덩어리가 남는 높이에서 제 폭을 되짚을 수 있게 */
+    container-type: size;
+  }
+  /**
+   * 전술 줄은 **판과 같은 식으로** 폭을 정한다.
+   *
+   * 칸을 꽉 채우면 세로가 짧은 화면에서 판만 줄어(3:4가 높이에 눌린다) 줄이 판보다
+   * 한 뼘 넓어진다. 판의 폭은 `min(100cqw, 75cqh')`이고 여기서 `cqh'`는 이 줄과
+   * 그 위 간격을 뺀 높이라, 같은 값을 여기서 다시 센다 — `--board-foot`가 그 몫이다.
+   */
+  /**
+   * ── 판 + 전술 줄 = **한 덩어리** ─────────────────────────
+   *
+   * 둘이 따로 떠 있으면 "판을 보는 화면"인지 "전술을 고치는 화면"인지가 흐리다.
+   * 한 테두리 안에 위아래로 붙이면 줄이 판의 손잡이로 읽힌다.
+   *
+   * 폭은 **세로에서 되짚는다**: 판은 3:4라 남는 높이가 폭의 상한을 정하고
+   * (`(100cqh - 줄 높이) × 0.75`), 그 값이 곧 덩어리의 폭이다. 판을 칸에 맞추고
+   * 줄만 따로 재던 예전 방식은 세로가 짧아질 때마다 둘의 폭이 어긋났다.
+   */
+  .stage-split.panel-split.with-board.open.board-open .board-stack {
+    display: flex;
+    flex-direction: column;
+    /* 펼친 눈금이 이 안에서 판 위로 올라온다 */
+    position: relative;
+    /* 남는 자리를 위아래·좌우가 고르게 나눠 갖는다 — 덩어리는 늘 가운데.
+       서랍이 넓어졌으니 상한도 그만큼 올린다 — 안 그러면 8할까지 편 자리에
+       예전 폭(559.5)의 판만 서고 나머지가 빈 여백이 된다 */
+    margin: auto;
+    width: min(100cqw, calc((100cqh - var(--board-foot)) * 0.75), 720px);
+    max-height: 100%;
+    /* 그림자는 서랍이 갖는다 — 그 위에 또 띄우면 판이 두 겹으로 떠 보인다 */
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    /* 모서리를 자식이 넘지 않게 — 판의 초록이 각진 채로 삐져나온다 */
+    overflow: hidden;
+  }
+  /* 판은 이제 **폭이 먼저**다 — 남는 높이를 재던 계산은 덩어리가 이미 했다 */
+  .stage-split.panel-split.with-board.open.board-open .board-stack .pitch-wrap {
+    flex: none;
+    container-type: normal;
+  }
+  .stage-split.panel-split.with-board.open.board-open .board-stack .pitch-board {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 3 / 4;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+  }
+  /* 줄은 판에 이어 붙는다 — 제 테두리 대신 사이의 선 하나만 남긴다 */
+  .stage-split.panel-split.with-board.open.board-open .board-stack .tactics-panel,
+  .stage-split.panel-split.with-board.open.board-open .board-stack .mv-tactics {
+    width: 100%;
+    margin: 0;
+    border: none;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+  }
+  /**
+   * 눈금을 펼치면 **판 위로 서랍이 올라온다.**
+   *
+   * 흐름에 그대로 두면 여섯 축이 덩어리의 세로를 통째로 더 먹는데, 덩어리 폭은
+   * 접힌 한 줄을 기준으로 이미 정해져 있어 아래가 잘려 나갔다. 고치는 동안 필요한
+   * 것은 눈금이고 판은 그 뒤에 있으면 되므로, 자리를 뺏지 않고 덮는다.
+   */
+  .stage-split.panel-split.with-board.open.board-open .board-stack .tactics-panel.open {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 2;
+    max-height: 100%;
+    overflow-y: auto;
+    background: var(--panel);
+  }
+  /**
+   * 판이 얹힌 동안의 **채팅 — 지우지 않고 가라앉힌다.**
+   *
+   * 예전엔 `visibility: hidden`으로 통째로 껐다. 그러면 판을 켜는 순간 왼쪽이 빈
+   * 바탕이 되어 방금까지 흐르던 중계가 어디로 갔는지가 화면에 없었다. 흐릿하게
+   * 남아 있으면 그 자리가 **돌아갈 곳**이라는 게 보이고, 판이 잠깐 그 위에 얹혀
+   * 있을 뿐이라는 것도 함께 읽힌다.
+   *
+   * 손은 닿지 않는다 — 가라앉은 대화를 눌러 봐야 그 위에 판이 있다.
+   */
+  .stage-split.panel-split.with-board.open.board-open > .chat-pane {
+    opacity: 0.2;
+    pointer-events: none;
+  }
+}
+/**
+ * ── 1200px 미만의 장부 — **나누지 않고 덮는다** ─────────────
+ *
+ * 나란히 두면 둘 다 못 읽는다: 채팅은 한 줄이 스무 자로 끊기고 명단 표(560px)는
+ * 가로로 스크롤된다. 그렇다고 채팅을 지우면(예전 방식) 장부를 여는 순간 대화가
+ * 사라져 "방금 코치가 뭐라고 했더라"를 확인할 곳이 없어진다.
+ *
+ * 그래서 **같은 칸에 겹쳐 두고 오른쪽에서 밀어 넣는다.** 채팅은 그 아래 그대로
+ * 남아 있고, 닫으면 있던 자리에서 다시 드러난다 — 스크롤도 쓰던 입력도 그대로다.
+ */
+@media (max-width: 1199px) {
+  .stage-split.panel-split.with-ledger,
+  .stage-split.panel-split.with-ledger.open {
+    grid-template-columns: minmax(0, 1fr);
+    transition: none;
+    /* 화면 밖에 대기 중인 칸이 페이지를 옆으로 늘리지 않게 */
+    overflow: hidden;
+  }
+  .stage-split.panel-split.with-ledger > .chat-pane,
+  .stage-split.panel-split.with-ledger > .stage-right {
+    grid-area: 1 / 1;
+  }
+  .stage-split.panel-split.with-ledger > .stage-right {
+    z-index: 10;
+    /* 덮는 쪽은 **불투명해야** 한다 — 아래 대화가 비치면 표가 읽히지 않는다 */
+    background: var(--bg);
     border-left: none;
+    box-shadow: var(--shadow-pop);
+    opacity: 1;
+    transform: translateX(100%);
+    transition: transform var(--panel-anim) var(--ease-panel);
+    /* 대기 중인 칸이 아래 채팅의 손잡이를 가로채지 않게 */
+    pointer-events: none;
+  }
+  .stage-split.panel-split.with-ledger.open > .stage-right {
+    transform: none;
+    pointer-events: auto;
+  }
+}
+/**
+ * 992px 미만의 **경기** — 판이 채팅 위로 접혀 오른다 (좌우로 가르면 둘 다 못 읽는다).
+ *
+ * 장부와 달리 덮지 않는다: 경기 중에는 판세를 보면서 지시해야 하고, 덮어 버리면
+ * 중계가 흐르는 동안 감독이 판을 여닫으며 따라가야 한다.
+ *
+ * ⚠️ 반반을 정하는 `.panel-split.open`과 특이도가 같으므로 **뒤에 와야** 이긴다.
+ */
+@media (max-width: 991px) {
+  .stage-split.panel-split.with-board,
+  .stage-split.panel-split.with-board.open {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, auto) minmax(0, 1fr);
+    transition: none;
+  }
+  .stage-split.panel-split.with-board > .stage-right {
+    order: -1;
+    border-left: none;
+    border-bottom: 1px solid var(--border);
+    max-height: 46vh;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stage-split.panel-split,
+  .stage-split.panel-split > .chat-pane,
+  .stage-split > .stage-right {
+    transition: none;
+  }
+  /* 판은 미끄러지지 않고 제자리에 선다 — 가라앉은 채팅은 그대로다 */
+  .stage-split.panel-split.board-open .squad-board-col {
+    animation: none;
   }
 }
 .view-scroll {
@@ -1714,6 +2123,149 @@ textarea {
 .booking-team {
   margin-left: auto;
   font-size: var(--fs-2xs);
+}
+
+/**
+ * 협상·스카우트 카드 — **대화 옆에 놓인 조건표.**
+ *
+ * 보고서(`.scout-report`)보다 작고 골 카드보다 크다: 며칠을 기다려 얻은 서류도
+ * 아니고 문단 밖으로 튀어야 할 사건도 아니지만, 금액이 두 벌(제시·요구) 서므로
+ * 줄로 나눠야 견줄 수 있다. 왼쪽 선의 색이 답의 결을 말한다 — 금액을 읽기 전에
+ * 잘 됐는지가 보여야 스크롤을 훑을 때 눈이 걸린다.
+ */
+.market-card {
+  --deal: var(--accent-2);
+  margin: var(--sp-2) 0;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--deal);
+  border-radius: var(--r-md);
+  animation: goal-in 0.28s var(--ease) both;
+}
+.market-card.accept {
+  --deal: var(--accent);
+}
+.market-card.reject {
+  --deal: var(--danger);
+}
+.market-card.counter {
+  --deal: var(--gold);
+}
+.mc-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.mc-icon {
+  align-self: center;
+  color: var(--deal);
+  line-height: 0;
+}
+.mc-badge {
+  font-size: var(--fs-3xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--deal) 16%, transparent);
+  color: var(--deal);
+}
+.mc-who {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--text);
+}
+.mc-counterpart {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+/* 성사 가능성은 오른쪽 끝 — 카드마다 같은 자리라야 세로로 훑힌다 */
+.mc-odds {
+  margin-left: auto;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--deal);
+  font-variant-numeric: tabular-nums;
+}
+/* 조건 두 벌 — 제시와 요구가 **같은 격자**에 서야 차이가 눈에 든다 */
+.mc-terms {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 14px;
+  margin-top: 5px;
+  font-size: var(--fs-xs);
+}
+.mc-terms span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.mc-terms em {
+  font-style: normal;
+  color: var(--dim);
+}
+.mc-terms b {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+/* 갈래 이름(제시/요구)은 고정 폭 — 두 줄의 값이 같은 자리에서 시작한다 */
+.mc-side {
+  width: 2.4em;
+  flex-shrink: 0;
+  color: var(--muted) !important;
+}
+.mc-terms.demand b {
+  color: var(--gold);
+}
+/* 설득 논거 — 통한 것만 또렷하다. 안 통한 말은 꺼진 칩으로 남는다 */
+.mc-pitch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.mc-pitch span {
+  font-size: var(--fs-3xs);
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--dim);
+}
+.mc-pitch span.on {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  color: var(--accent);
+}
+.mc-foot {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 6px;
+  font-size: var(--fs-2xs);
+}
+.mc-due {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.mc-due em {
+  font-style: normal;
+  color: var(--dim);
+}
+.mc-due b {
+  color: var(--muted);
+  font-weight: 600;
+}
+.mc-note {
+  color: var(--muted);
+}
+/* 상대의 한마디 — 코어의 사실이 아니라 사람의 말이므로 기울여 앉힌다 */
+.mc-note.said {
+  font-style: italic;
 }
 
 .goal-card {
@@ -2235,24 +2787,35 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 
-/* 오피스 뷰 (전체화면 탭 콘텐츠) */
-.view-scroll table {
+/**
+ * 표의 바탕 — **오른쪽 칸에 무엇이 서든 같다.**
+ *
+ * 같은 뷰(대회·스쿼드)가 장부로도(`.view-scroll`) 경기 탭으로도(`.board-tab`)
+ * 서는데, 예전엔 이 규칙이 장부 쪽에만 걸려 있었다. 경기 중에 연 순위표·명단은
+ * `border-collapse`도 칸 여백도 없이 브라우저 기본 표로 떨어졌다 — 같은 화면이
+ * 어디서 열렸느냐에 따라 다르게 생기면 감독은 둘을 다른 것으로 읽는다.
+ */
+.view-scroll table,
+.board-tab table {
   width: 100%;
   border-collapse: collapse;
   font-size: var(--fs-sm);
 }
-.view-scroll th {
+.view-scroll th,
+.board-tab th {
   text-align: left;
   color: var(--muted);
   font-weight: 500;
   padding: 6px 6px;
   border-bottom: 1px solid var(--border);
 }
-.view-scroll td {
+.view-scroll td,
+.board-tab td {
   padding: 7px 6px;
   border-bottom: 1px solid rgba(42, 51, 66, 0.5);
 }
-.view-scroll tr.me td {
+.view-scroll tr.me td,
+.board-tab tr.me td {
   background: rgba(74, 222, 128, 0.07);
 }
 
@@ -2333,27 +2896,22 @@ textarea {
  * 판을 접으면 **명단만 남는다** — 머리글도 한 열이 되어 책갈피가 명단 바로 위에
  * 선다. 두 열짜리 격자를 그대로 두면 왼쪽에 빈 400px이 남고 책갈피가 그 옆에 뜬다.
  *
- * ⚠️ **접힘은 채팅이 옆에 설 만큼 넓을 때만 뜻이 있다.** 그 아래에서는 장부가
- * 무대를 통째로 쓰므로 판을 접어 봐야 얻는 자리가 없고, 명단만 늘어나 열 사이가
- * 벌어진다. 그래서 손잡이도 그 폭에서만 선다 — 눌러도 아무 일이 없는 버튼을
- * 남겨 두지 않는다.
+ * 폭을 가리지 않는다 — 좁은 화면에서도 판은 화면의 절반을 먹으므로, 명단만 보려는
+ * 감독에겐 접는 것이 그대로 이득이다. 손잡이가 어느 폭에서나 서 있어야 "여기선 왜
+ * 안 보이지"가 생기지 않는다.
+ *
+ * 붙는 자리는 `.squad-view`만이 아니다 — 경기 중 상대 팀 탭도 같은 골격
+ * (`.squad-layout`)을 쓰므로 같은 규칙으로 접힌다.
  */
-@media (min-width: 1200px) {
-  .squad-view.folded .squad-board-col {
-    display: none;
-  }
-  .squad-view.folded .squad-head,
-  .squad-view.folded .squad-layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .squad-view.folded .squad-summary {
-    padding-bottom: 8px;
-  }
+.folded .squad-board-col {
+  display: none;
 }
-@media (max-width: 1199px) {
-  .board-toggle {
-    display: none;
-  }
+.folded .squad-head,
+.folded .squad-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+.folded .squad-summary {
+  padding-bottom: 8px;
 }
 /**
  * 스쿼드 화면의 뼈대 — 머리글은 고정, 그 아래가 남는 높이를 다 쓴다.
@@ -2390,6 +2948,13 @@ textarea {
   gap: 14px;
   align-items: stretch;
 }
+/**
+ * 판과 전술 줄을 묶는 래퍼 — 평소에는 **없는 셈 친다.**
+ * 채팅 위에 얹힐 때만(오버레이) 실제 상자가 되어 둘을 한 장으로 붙인다.
+ */
+.board-stack {
+  display: contents;
+}
 .squad-board-col,
 .squad-side-col {
   min-width: 0;
@@ -2422,12 +2987,75 @@ textarea {
   border-radius: var(--r-md);
   padding: 12px 14px;
 }
+/**
+ * 머리 줄이 곧 손잡이다 — **누르면 눈금이 열린다.**
+ *
+ * 접힌 채로도 여섯 축의 지금 값을 다 적으므로 "보려고" 펼칠 일이 없다.
+ * 눈금 서른 칸은 고칠 때만 쓰는 것이라, 접혀 있는 동안 그 높이는 전술판이 갖는다.
+ */
+/**
+ * 세 칸짜리 격자다 — **이름 · 값들 · 꺾쇠.**
+ *
+ * 흐름(flex)으로 두면 값이 길어져 두 줄이 되는 순간 꺾쇠가 마지막 줄 끝으로
+ * 끌려 내려가고, 접었다 펴는 사이 손잡이가 아래위로 움직인다. 칸을 고정하면
+ * 값이 몇 줄이 되든 꺾쇠는 오른쪽 위 제자리에 있다.
+ */
 .tactics-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+/* 꺾쇠는 줄 끝에 — 펼쳐지면 위를 본다 */
+.tactics-head > svg {
+  grid-column: 3;
+  color: var(--muted);
+  transition:
+    transform var(--ease),
+    color var(--ease);
+}
+.tactics-panel.open .tactics-head {
   margin-bottom: 8px;
+}
+.tactics-panel.open .tactics-head > svg {
+  transform: rotate(180deg);
+}
+.tactics-head:hover > svg {
+  color: var(--text);
+}
+/**
+ * 접혔을 때의 여섯 축 — **읽는 값이라 테두리를 갖지 않는다.**
+ * 눈금 버튼과 같은 모양이면 눌러도 되는 것처럼 보인다.
+ */
+.tactics-brief {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 5px;
+  min-width: 0;
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+/* 축 이름은 값을 이고 있는 꼬리표다 — 값보다 흐리고 작아야 값이 먼저 읽힌다 */
+.tactics-brief i {
+  margin-right: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+}
+.tactics-brief > span + span::before {
+  content: "·";
+  margin-right: 5px;
+  color: var(--muted);
+  opacity: 0.5;
 }
 .tactics-head .muted {
   color: var(--muted);
@@ -3114,6 +3742,59 @@ textarea {
   width: 26%;
   height: 6.5%;
 }
+/**
+ * ── 전술 선 — **값이 곧 자리다** ──────────────────────────
+ *
+ * 판의 흰 선(하프라인·박스)보다 옅게 긋는다. 이건 경기장의 일부가 아니라 지금 이
+ * 팀이 서기로 한 방식이라, 같은 굵기로 그으면 어느 것이 규칙이고 어느 것이 선택인지
+ * 흐려진다. 눈금을 만지면 선이 미끄러져 따라간다.
+ */
+.pitch-tactics {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.tac-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  transition: top 200ms var(--ease-panel);
+}
+/* 수비 라인 — 우리 최종선. 실선이라 "여기까지가 우리 블록"이 분명하다 */
+.tac-line.def {
+  border-top: 1.5px solid rgba(255, 255, 255, 0.42);
+}
+/* 압박 시작선 — 여기부터 쫓는다. 실선이 아닌 이유는 자리가 아니라 **약속**이라서다 */
+.tac-line.press {
+  border-top: 1.5px dashed rgba(255, 255, 255, 0.28);
+}
+/* 우리가 지키는 구역 — 수비 라인 아래. 선 하나보다 블록의 깊이가 먼저 읽힌다 */
+.tac-block {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.05);
+  transition: top 200ms var(--ease-panel);
+}
+/* 공격 폭 — 좌우로 얼마나 벌리나 */
+.tac-width {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1.5px dashed rgba(255, 255, 255, 0.15);
+  border-right: 1.5px dashed rgba(255, 255, 255, 0.15);
+  transition:
+    left 200ms var(--ease-panel),
+    right 200ms var(--ease-panel);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tac-line,
+  .tac-block,
+  .tac-width {
+    transition: none;
+  }
+}
 /* 라인 이름 — 편집 중에만 옅게 (수비·미드·공격 구역 감각) */
 .pitch-zone {
   position: absolute;
@@ -3405,6 +4086,13 @@ textarea {
 /* 칸이 좁아도 표가 글자 단위로 접히지 않게 — 최소 폭을 주고 가로 스크롤에 맡긴다 */
 .roster-scroll .squad-table {
   min-width: 560px;
+  /**
+   * ⚠️ `collapse`면 셀의 테두리가 **셀 밖 절반까지** 그려진다. 행의 왼쪽 칸 띠(2px)가
+   * 표의 왼쪽 선 위로 반쯤 삐져나와, 스크롤할 때 붙박이 머리글 왼쪽에 색선이 스쳤다.
+   * `separate` + 간격 0이면 테두리가 셀 안에 들어와 머리글 배경이 그 자리를 덮는다.
+   */
+  border-collapse: separate;
+  border-spacing: 0;
 }
 .roster-scroll .squad-table td,
 .roster-scroll .squad-table th {
@@ -3452,28 +4140,16 @@ textarea {
   padding-left: 0;
 }
 /**
- * 칸 구역 머리 — **표 안의 소제목.**
+ * 칸이 갈리는 자리 — **선 하나.**
  *
- * 왼쪽 색 띠가 "무슨 칸인지"까지 말해 주지는 못한다(색과 뜻을 잇는 범례가 없다).
- * 여기 한 줄이 그 몫을 하고, 띠는 각 행이 어디 속하는지를 계속 이어 준다.
+ * 예전엔 "선발·벤치·예비"를 글자로 세웠는데, 표 안에 소제목이 셋 생겨 이름을 훑는
+ * 눈이 매번 걸렸다. 어느 칸인지는 행의 왼쪽 선 색이 이미 말한다 — 여기 필요한 건
+ * 경계가 어디인가뿐이라 빈 줄에 선만 긋는다.
  */
 .squad-table tbody tr.tier-head td {
-  padding: var(--sp-3) var(--sp-2) 4px;
+  padding: 5px 0 0;
   border-bottom: 1px solid var(--border);
-  font-size: var(--fs-2xs);
-  letter-spacing: 0.08em;
-  color: var(--muted);
   background: none;
-}
-/* 첫 구역은 표 머리 바로 아래라 위 여백을 줄인다 */
-.squad-table tbody tr.tier-head:first-child td {
-  padding-top: 4px;
-}
-.squad-table tbody tr.tier-head[data-tier="start"] td {
-  color: var(--accent);
-}
-.squad-table tbody tr.tier-head[data-tier="bench"] td {
-  color: var(--accent-2);
 }
 .squad-table tbody tr.t-start td:first-child {
   border-left-color: var(--accent);
@@ -4252,11 +4928,13 @@ textarea {
 /* 순위 구역 — 챔스·유로파 진출권(리그), 본선 직행·플레이오프(대항전).
    4위와 5위의 차이는 한 계단이 아니라 대회가 갈리는 선이라 표에 그린다.
    ⚠️ 강등 구역은 없다 — 승강 처리가 미구현이라 그으면 지키지 않는 약속이 된다 */
-.view-scroll tr.cut td {
+.view-scroll tr.cut td,
+.board-tab tr.cut td {
   border-bottom: 1px solid var(--border);
 }
 /* 순위 칸 왼쪽의 색 띠 — 레이아웃을 밀지 않도록 inset 그림자로 긋는다 */
-.view-scroll tr.zone td:first-child {
+.view-scroll tr.zone td:first-child,
+.board-tab tr.zone td:first-child {
   box-shadow: inset 3px 0 0 var(--zone-color);
 }
 .zone-ucl,
@@ -4540,7 +5218,7 @@ textarea {
   .tactics-panel {
     padding: 8px 10px;
   }
-  .tactics-head {
+  .tactics-panel.open .tactics-head {
     margin-bottom: 5px;
   }
   .tactics-grid {
@@ -4887,12 +5565,20 @@ textarea {
   font-weight: 600;
 }
 
-/* 팀 합계 — 선수별로 열을 세우는 대신 한 줄로 (열한 행이 숫자밭이 되지 않게) */
+/**
+ * 팀 합계 — 선수별로 열을 세우는 대신 한 줄로 (열한 행이 숫자밭이 되지 않게).
+ *
+ * 명단 머리의 **오른쪽 끝**에 선다 — 우리 팀의 "벤치 9/9 · 예비 7"과 같은 자리다
+ * (`.roster-counts`와 같은 이유로 `margin-left: auto`로 못박는다).
+ */
 .mv-totals {
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: baseline;
+  margin-left: auto;
   gap: 2px 12px;
-  padding: 2px 2px 6px;
+  padding-bottom: 7px;
   font-size: var(--fs-2xs);
   color: var(--dim);
 }
@@ -5132,18 +5818,38 @@ textarea {
 }
 
 /**
- * 상대 팀 탭 — **우리 팀 탭과 같은 골격**을 쓴다 (`.squad-layout`).
- * 높이 사슬(`height:100%` → `flex:1` → `container-type: size`)이 끊기면
- * 전술판이 `100cqh`를 0으로 읽어 판이 손바닥만 해진다.
+ * 상대 팀 탭 — **우리 팀 탭과 같은 마크업**(`.squad-view`)을 쓴다. 뼈대·간격·접힘은
+ * 스쿼드 쪽 규칙이 그대로 맡고, 여기서는 **다른 것만** 적는다.
+ *
+ * 다른 것은 조작뿐이다: 상대 명단은 훑는 것이지 고르는 것이 아니라서 행이 손에
+ * 반응하지 않는다. 읽는 것과 누르는 것은 생김새가 달라야 한다.
  */
-.match-view.opponent {
-  height: 100%;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
+/**
+ * 상대 전술은 **접히지 않는다** — 읽기 전용 게이지라 여섯 축이 늘 서 있다.
+ * 덩어리 폭을 세로에서 되짚을 때 빼는 몫도 그만큼 크다(우리 쪽 한 줄 요약과 다르다).
+ * 이 몫이 실제보다 작으면 덩어리가 표를 잘라낸다.
+ */
+.squad-view.opponent {
+  --board-foot: 220px;
 }
-.match-view.opponent .squad-side-col {
-  overflow: auto;
+.squad-view.opponent .squad-table tbody tr {
+  cursor: default;
+}
+.squad-view.opponent .squad-table tbody tr:hover td {
+  background: none;
+}
+/* 상대 명단의 팀 이름표 — 책갈피 자리에 서지만 누를 수 없다 */
+.squad-view.opponent .roster-tab {
+  cursor: default;
+}
+/* 열이 여덟이 아니라 넷이다 — 우리 표의 최소 폭(560)을 그대로 쓰면 남는 폭이
+   빈 칸으로 벌어지고, 좁을 때는 있지도 않은 열 때문에 가로로 스크롤된다 */
+.squad-view.opponent .roster-scroll .squad-table {
+  min-width: 320px;
+}
+/* 다리가 멈춘 행 — 왼쪽 색 띠가 칸을 말하고, 이 색이 "지금 구멍"을 말한다 */
+.squad-view.opponent .squad-table tbody tr.gassed .row-name {
+  color: var(--danger);
 }
 /* 전력 옆의 오차 — 명단에서도 안개가 보여야 한다 (칩은 좁아 툴팁에 맡긴다) */
 .mv-eff-margin {
@@ -5217,72 +5923,21 @@ textarea {
   color: var(--accent);
 }
 
-/* 그라운드 위 선수 — 전력과 남은 다리 */
-.mv-pitch {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 14px;
-}
-.mv-side {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: 10px 12px;
-}
-.mv-side.ours {
-  border-color: rgba(74, 222, 128, 0.35);
-}
-.mv-side-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  font-size: var(--fs-sm);
-  margin-bottom: 6px;
-}
-.mv-side-head span {
-  color: var(--muted);
-  font-size: var(--fs-xs);
-}
-.mv-players {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--fs-sm);
-}
-.mv-players td {
-  padding: 3px 4px;
-  border-top: 1px solid rgba(42, 51, 66, 0.4);
-}
-.mv-players tr.gassed {
-  background: rgba(248, 113, 113, 0.08);
-}
-.mv-pos {
-  color: var(--muted);
-  width: 42px;
-  font-size: var(--fs-xs);
-}
-.mv-name {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 130px;
-}
-.mv-eff {
-  width: 46px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-}
-/* 체력 — 명단과 같은 축(높을수록 좋다). 바닥나면 색으로 먼저 알린다 */
-.mv-cond {
-  width: 70px;
-}
+/**
+ * 체력 — 명단과 같은 축(높을수록 좋다). 바닥나면 색으로 먼저 알린다.
+ *
+ * 폭도 우리 명단의 막대(`.stat-bar`)와 같다 — 두 탭을 오갈 때 같은 길이가 같은
+ * 뜻이어야 한다. 다른 것은 **끝이 어디인지 모른다는 사실**을 얹는 안개뿐이다.
+ */
 .mv-cond-bar {
   position: relative;
-  display: block;
+  display: inline-block;
+  width: 46px;
   height: 6px;
   border-radius: var(--r-xs);
   background: var(--panel-2);
   overflow: hidden;
+  vertical-align: middle;
 }
 .mv-cond-bar span {
   position: absolute;
@@ -5302,18 +5957,4 @@ textarea {
 }
 .mv-cond-bar span.spent {
   background: var(--danger);
-}
-.mv-gap {
-  width: 36px;
-  font-size: var(--fs-2xs);
-  font-weight: 700;
-  color: var(--danger);
-}
-.mv-bench {
-  margin-top: 8px;
-  padding-top: 6px;
-  border-top: 1px solid rgba(42, 51, 66, 0.5);
-  font-size: var(--fs-xs);
-  color: var(--muted);
-  line-height: 1.5;
 }

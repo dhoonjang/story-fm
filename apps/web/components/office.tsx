@@ -29,7 +29,7 @@ import {
 } from "@story-fm/domain";
 import type { GamePayload } from "@/lib/store";
 import { slotOverallOf } from "@/lib/slot-overall";
-import { IconBoard } from "@/components/icons";
+import { IconBoard, IconChevron } from "@/components/icons";
 
 const money = (n: number) => `£${(n / 1e6).toFixed(1)}M`;
 
@@ -131,39 +131,97 @@ const AXIS_GROUP_ORDER = ["physical", "technical", "mental", "goalkeeping"] as c
 /**
  * 전술 5축 — 값 1~5의 뜻을 말로 보여준다. 슬라이더 숫자만 두면 "3이 뭔데?"가 된다.
  * 라벨 문구는 GM이 이해하는 축(match-sim §1)과 같은 뜻이어야 한다.
+ *
+ * `brief`는 접힌 줄에 값과 **함께** 세우는 이름이다. "맹렬히"만 적혀 있으면 그게
+ * 압박인지 템포인지 알 수 없어 툴팁을 하나씩 짚어야 했다. 축 이름을 그대로 쓰면
+ * 여섯 쌍이 한 줄을 넘기므로 여기서만 짧게 줄인다.
  */
 const TACTIC_AXES = [
   {
     key: "mentality" as const,
     label: "멘탈리티",
+    brief: "멘탈",
     values: ["매우 수비적", "수비적", "균형", "공격적", "매우 공격적"],
   },
   {
     key: "defensiveLine" as const,
     label: "수비 라인",
+    brief: "라인",
     values: ["매우 낮게", "낮게", "보통", "높게", "매우 높게"],
   },
   {
     key: "pressing" as const,
     label: "압박",
+    brief: "압박",
     values: ["최소", "약하게", "보통", "강하게", "맹렬히"],
   },
   {
     key: "tempo" as const,
     label: "템포",
+    brief: "템포",
     values: ["매우 느리게", "느리게", "보통", "빠르게", "매우 빠르게"],
   },
   {
     key: "width" as const,
     label: "공격 폭",
+    brief: "폭",
     values: ["매우 좁게", "좁게", "보통", "넓게", "매우 넓게"],
   },
   {
     key: "passStyle" as const,
     label: "패스",
+    brief: "패스",
     values: ["매우 짧게", "짧게", "혼합", "길게", "매우 길게"],
   },
 ];
+
+/**
+ * ── 전술을 판 위에 긋는다 ──────────────────────────────────
+ *
+ * 낱말로만 적힌 전술은 "높게"가 얼마나 높은지, "넓게"가 어디까지인지를 감독이
+ * 머릿속에서 판으로 옮겨야 한다. 값이 곧 선의 자리가 되면 그 번역이 사라지고,
+ * 눈금을 만질 때 선이 따라 움직이니 무엇을 바꾸는 중인지도 보인다.
+ *
+ * 좌표는 판 기준 %(위가 상대 골문). 이 눈금은 **화면의 감각**일 뿐 시뮬레이션
+ * 수치가 아니다 — 경기 판정은 코어가 전력 패킷으로 따로 한다 (match-sim.md).
+ */
+/**
+ * 눈금은 **기본 배치의 칩 자리에 맞춰** 잡았다 — 보통(3)일 때 수비 라인은 센터백
+ * 높이(75%)에, 폭은 윙어 자리(14%/86%)에 선다. 선이 칩과 어긋나 있으면 그림이
+ * 배치를 설명하지 못하고 따로 도는 장식이 된다.
+ */
+const DEF_LINE_TOP = (v: number) => 87 - (v - 1) * 6;
+const PRESS_LINE_TOP = (v: number) => 70 - (v - 1) * 11;
+const WIDTH_INSET = (v: number) => 24 - (v - 1) * 5;
+
+/**
+ * 판 위의 전술 선 — 수비 라인 · 압박 시작선 · 공격 폭.
+ *
+ * 여섯 축 중 셋만 긋는다. 이 셋은 **자리를 뜻하는 축**이라 판 위에 그대로 앉지만,
+ * 템포·패스는 공간이 아니라 속도와 거리라 선으로 그으면 뜻이 어긋난다. 멘탈리티는
+ * 칩이 어디 서 있는지가 이미 말한다.
+ *
+ * 압박선은 늘 수비 라인보다 위다 — 압박은 그 앞에서 시작하는 것이라, 눈금이
+ * 뒤집혀도(낮은 압박 + 높은 라인) 선이 교차하면 그림이 거짓말이 된다.
+ */
+export function PitchTactics({
+  tactics,
+}: {
+  /** 자리를 뜻하는 세 축만 받는다 — 우리 판(`TacticsView`)과 상대 판이 같이 쓴다 */
+  tactics: { defensiveLine: number; pressing: number; width: number };
+}) {
+  const def = DEF_LINE_TOP(tactics.defensiveLine);
+  const press = Math.min(PRESS_LINE_TOP(tactics.pressing), def - 6);
+  const inset = WIDTH_INSET(tactics.width);
+  return (
+    <div className="pitch-tactics" aria-hidden>
+      <span className="tac-width" style={{ left: `${inset}%`, right: `${inset}%` }} />
+      <span className="tac-block" style={{ top: `${def}%` }} />
+      <span className="tac-line press" style={{ top: `${press}%` }} />
+      <span className="tac-line def" style={{ top: `${def}%` }} />
+    </div>
+  );
+}
 
 /**
  * 이 선수가 그 자리에서 갖는 적응도(표시용) — 규칙은 domain의 `positionProficiency`
@@ -398,7 +456,15 @@ function StatusBadges({ p }: { p: SquadRow }) {
   );
 }
 
-/** 전술 패널 — 읽기 모드에선 값의 뜻만, 편집 모드에선 5단계 선택 */
+/**
+ * 전술 패널 — **접히면 지금 값, 펼치면 눈금.**
+ *
+ * 판을 보는 동안 필요한 건 "지금 어떻게 서 있나"까지고, 그건 여섯 낱말로 다 적힌다.
+ * 눈금 서른 칸은 고칠 때만 쓰는 것이라 늘 펼쳐 둘 이유가 없다 — 접혀 있는 동안
+ * 그 높이(229px)는 전술판이 갖는다.
+ *
+ * 읽기 모드(경기 중 잠김)에서도 접힌다. 펼쳤을 때 눈금 대신 게이지가 나올 뿐이다.
+ */
 function TacticsPanel({
   tactics,
   editing,
@@ -408,47 +474,68 @@ function TacticsPanel({
   editing: boolean;
   onChange: (patch: Partial<TacticsView>) => void;
 }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div className="tactics-panel" data-testid="tactics-panel">
+    <div className={`tactics-panel${open ? " open" : ""}`} data-testid="tactics-panel">
       {/* 팀 총합 적응도는 두지 않는다 — 그런 값은 없다. 적응도는 **선수마다** 다르고
           여기 있던 숫자는 선발 11인의 평균일 뿐이었다. 누가 이 전술을 아직 못 따라오는지는
           오른쪽 명단이 선수별로 말한다 */}
-      <div className="tactics-head">
+      <button
+        className="tactics-head"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        data-testid="tactics-toggle"
+      >
         <b>전술</b>
-      </div>
-      <div className="tactics-grid">
-        {TACTIC_AXES.map((axis) => {
-          const value = tactics[axis.key];
-          return (
-            <div className="tactic-row" key={axis.key}>
-              <span className="tactic-label">{axis.label}</span>
-              {editing ? (
-                <div className="tactic-steps" role="group" aria-label={axis.label}>
-                  {axis.values.map((label, i) => (
-                    <button
-                      key={label}
-                      className={`tactic-step${value === i + 1 ? " on" : ""}`}
-                      onClick={() => onChange({ [axis.key]: i + 1 } as Partial<TacticsView>)}
-                      title={label}
-                      data-testid={`tactic-${axis.key}-${i + 1}`}
-                    >
-                      {i + 1}
-                    </button>
-                  ))}
-                  <span className="tactic-value">{axis.values[value - 1]}</span>
-                </div>
-              ) : (
-                <span className="tactic-value read">
-                  <span className="tactic-meter">
-                    <span style={{ width: `${(value / 5) * 100}%` }} />
+        {/* 접혔을 때만 — 펼치면 축마다 같은 낱말이 옆에 서므로 두 번 적는 셈이 된다.
+            값 앞에 축 이름을 붙인다: "맹렬히"만으로는 압박인지 템포인지 모른다 */}
+        {!open && (
+          <span className="tactics-brief">
+            {TACTIC_AXES.map((axis) => (
+              <span key={axis.key} title={axis.label}>
+                <i>{axis.brief}</i>
+                {axis.values[tactics[axis.key] - 1]}
+              </span>
+            ))}
+          </span>
+        )}
+        <IconChevron size={13} />
+      </button>
+      {open && (
+        <div className="tactics-grid">
+          {TACTIC_AXES.map((axis) => {
+            const value = tactics[axis.key];
+            return (
+              <div className="tactic-row" key={axis.key}>
+                <span className="tactic-label">{axis.label}</span>
+                {editing ? (
+                  <div className="tactic-steps" role="group" aria-label={axis.label}>
+                    {axis.values.map((label, i) => (
+                      <button
+                        key={label}
+                        className={`tactic-step${value === i + 1 ? " on" : ""}`}
+                        onClick={() => onChange({ [axis.key]: i + 1 } as Partial<TacticsView>)}
+                        title={label}
+                        data-testid={`tactic-${axis.key}-${i + 1}`}
+                      >
+                        {i + 1}
+                      </button>
+                    ))}
+                    <span className="tactic-value">{axis.values[value - 1]}</span>
+                  </div>
+                ) : (
+                  <span className="tactic-value read">
+                    <span className="tactic-meter">
+                      <span style={{ width: `${(value / 5) * 100}%` }} />
+                    </span>
+                    {axis.values[value - 1]}
                   </span>
-                  {axis.values[value - 1]}
-                </span>
-              )}
-            </div>
-          );
-        })}
-      </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -1337,8 +1424,9 @@ export function SquadView({
   const onSwapInRow = useStable(swapWithRow);
   const onRoleRow = useStable(chooseRole);
   const onMoveSquadRow = useStable(moveSquad);
+  // 새 기준은 큰 값부터 보는 게 자연스럽다 — 칸 순(기본)만 위에서 아래로 읽는다
   const onSortRow = useStable((key: SortKey) =>
-    setSort((prev) => ({ key, desc: prev.key === key ? !prev.desc : key !== "name" })),
+    setSort((prev) => ({ key, desc: prev.key === key ? !prev.desc : key !== "role" })),
   );
 
   async function moveSquad(playerId: string, level: "first" | "reserve") {
@@ -1617,115 +1705,122 @@ export function SquadView({
             </p>
           )}
 
-          {/* 전술판은 남는 높이에 맞춰 줄어든다 — 감싸는 칸이 그 높이를 알려 준다 */}
-          <div className="pitch-wrap">
-            <div
-              ref={boardRef}
-              className={`pitch-board${usable ? " editing" : ""}`}
-              data-testid="pitch-board"
-            >
-              <div className="pitch-lines" />
-              <div className="pitch-box top" />
-              <div className="pitch-box small top" />
-              <div className="pitch-box bottom" />
-              <div className="pitch-box small bottom" />
-              <span className="pitch-zone" style={{ top: "6%" }}>
-                공격
-              </span>
-              <span className="pitch-zone" style={{ top: "46%" }}>
-                중원
-              </span>
-              <span className="pitch-zone" style={{ top: "84%" }}>
-                수비
-              </span>
-              {boardSlots.map((slot, i) => {
-                const p = slot ? byId.get(slot.playerId) : undefined;
-                // 끌고 있는 칩은 미리보기 좌표로 그린다 (놓기 전엔 실제 배치를 안 바꾼다)
-                const dragging = dragIndex === i;
-                const point = dragging && dragPoint ? dragPoint : slot?.point;
-                const code = point ? positionAtPoint(point) : null;
-                /**
-                 * 칩의 전력은 **좌표에서 즉시** 나온다 — 서버가 준 값은 저장된 배치
-                 * 기준이라 자동 저장(600ms 디바운스)과 왕복이 끝나야 바뀌는데, 끌어
-                 * 놓고 한 박자 뒤에 숫자가 따라오면 "이 자리로 옮기면 얼마가 되나"를
-                 * 손으로 더듬어 볼 수가 없다.
-                 *
-                 * ⚠️ 계산은 **명단과 같은 함수**(`slotOverallOf`)다. 여기서만 `roleFit`을
-                 * 다시 굴리던 때는 같은 선수의 OVR이 칩과 명단에서 달랐다.
-                 */
-                const liveOverall = p ? slotOverallOf(p, code, roleOf(p)) : null;
-                const selected = selection?.kind === "slot" && selection.index === i;
-                /**
-                 * 맡은 역할 — **기본 역할이 아닐 때만** 칩에 뜬다.
-                 * 전원에게 붙이면 열한 칩이 다 같은 말(센터백·풀백·윙어)을 달고 있어
-                 * 읽히지 않는다. 감독이 실제로 **고른** 것만 보이면 판을 훑을 때
-                 * 그 선택이 눈에 남는다. 표기는 FM 약칭(BPD·IWB·RGA)이다 —
-                 * 칩에 들어갈 만큼 짧으면서 감독이 이미 아는 말이다.
-                 */
-                const liveRole = p ? roleOf(p) : undefined;
-                const roleTag =
-                  p && code && liveRole && liveRole !== defaultRoleOf(code)
-                    ? (rolesFor(code).find((r) => r.id === liveRole) ?? null)
-                    : null;
-                if (!point) return null;
-                return (
-                  <button
-                    key={i}
-                    className={`pitch-slot ${chipClass(p, selected, code)}${dragging ? " dragging" : ""}`}
-                    style={{ left: `${point.x}%`, top: `${point.y}%` }}
-                    onPointerDown={(e) => onSlotPointerDown(i, e)}
-                    onClick={() => {
-                      // 경기 중(비활성)엔 포인터 드래그를 걸지 않으므로 여기서 상세를 연다
-                      if (!live) clickSlot(i);
-                    }}
-                    data-testid={`slot-${i}`}
-                    title={
-                      p
-                        ? // 명단 OVR 칸의 툴팁과 **같은 두 줄**이다 — 같은 숫자를
-                          // 두 화면에서 다른 말로 설명하면 규칙이 없어 보인다
-                          [
-                            `${p.name}`,
-                            `${code} 자리 기준 ${liveOverall ?? p.overall} — 경기에서 쓰이는 값입니다`,
-                            liveOverall !== null && liveOverall !== p.overall
-                              ? `주 포지션(${p.position}) 기준 ${p.overall}`
-                              : null,
-                          ]
-                            .filter(Boolean)
-                            .join("\n")
-                        : (code ?? "")
-                    }
-                  >
-                    <span className="slot-pos">
-                      {code}
-                      {roleTag && (
-                        <em className="slot-role" title={`${roleTag.ko} — ${roleTag.desc}`}>
-                          {roleTag.abbr}
-                        </em>
-                      )}
-                    </span>
-                    <span className="slot-name">
-                      {p?.isCaptain ? "Ⓒ" : ""}
-                      {p ? chipName(p.name) : "—"}
-                    </span>
-                    <span className="slot-meta">
-                      {/* 칩은 "그 자리에 선 선수"라 주 포지션 값이 아니라 자리 값이 맞다.
+          {/**
+           * 판과 전술 줄은 **한 덩어리다** — 채팅 위에 얹힐 때 둘이 한 장으로 붙는다.
+           * 평소 레이아웃에서는 `display: contents`라 이 래퍼가 없는 것과 같다.
+           */}
+          <div className="board-stack">
+            {/* 전술판은 남는 높이에 맞춰 줄어든다 — 감싸는 칸이 그 높이를 알려 준다 */}
+            <div className="pitch-wrap">
+              <div
+                ref={boardRef}
+                className={`pitch-board${usable ? " editing" : ""}`}
+                data-testid="pitch-board"
+              >
+                <div className="pitch-lines" />
+                <div className="pitch-box top" />
+                <div className="pitch-box small top" />
+                <div className="pitch-box bottom" />
+                <div className="pitch-box small bottom" />
+                <PitchTactics tactics={board.tactics} />
+                <span className="pitch-zone" style={{ top: "6%" }}>
+                  공격
+                </span>
+                <span className="pitch-zone" style={{ top: "46%" }}>
+                  중원
+                </span>
+                <span className="pitch-zone" style={{ top: "84%" }}>
+                  수비
+                </span>
+                {boardSlots.map((slot, i) => {
+                  const p = slot ? byId.get(slot.playerId) : undefined;
+                  // 끌고 있는 칩은 미리보기 좌표로 그린다 (놓기 전엔 실제 배치를 안 바꾼다)
+                  const dragging = dragIndex === i;
+                  const point = dragging && dragPoint ? dragPoint : slot?.point;
+                  const code = point ? positionAtPoint(point) : null;
+                  /**
+                   * 칩의 전력은 **좌표에서 즉시** 나온다 — 서버가 준 값은 저장된 배치
+                   * 기준이라 자동 저장(600ms 디바운스)과 왕복이 끝나야 바뀌는데, 끌어
+                   * 놓고 한 박자 뒤에 숫자가 따라오면 "이 자리로 옮기면 얼마가 되나"를
+                   * 손으로 더듬어 볼 수가 없다.
+                   *
+                   * ⚠️ 계산은 **명단과 같은 함수**(`slotOverallOf`)다. 여기서만 `roleFit`을
+                   * 다시 굴리던 때는 같은 선수의 OVR이 칩과 명단에서 달랐다.
+                   */
+                  const liveOverall = p ? slotOverallOf(p, code, roleOf(p)) : null;
+                  const selected = selection?.kind === "slot" && selection.index === i;
+                  /**
+                   * 맡은 역할 — **기본 역할이 아닐 때만** 칩에 뜬다.
+                   * 전원에게 붙이면 열한 칩이 다 같은 말(센터백·풀백·윙어)을 달고 있어
+                   * 읽히지 않는다. 감독이 실제로 **고른** 것만 보이면 판을 훑을 때
+                   * 그 선택이 눈에 남는다. 표기는 FM 약칭(BPD·IWB·RGA)이다 —
+                   * 칩에 들어갈 만큼 짧으면서 감독이 이미 아는 말이다.
+                   */
+                  const liveRole = p ? roleOf(p) : undefined;
+                  const roleTag =
+                    p && code && liveRole && liveRole !== defaultRoleOf(code)
+                      ? (rolesFor(code).find((r) => r.id === liveRole) ?? null)
+                      : null;
+                  if (!point) return null;
+                  return (
+                    <button
+                      key={i}
+                      className={`pitch-slot ${chipClass(p, selected, code)}${dragging ? " dragging" : ""}`}
+                      style={{ left: `${point.x}%`, top: `${point.y}%` }}
+                      onPointerDown={(e) => onSlotPointerDown(i, e)}
+                      onClick={() => {
+                        // 경기 중(비활성)엔 포인터 드래그를 걸지 않으므로 여기서 상세를 연다
+                        if (!live) clickSlot(i);
+                      }}
+                      data-testid={`slot-${i}`}
+                      title={
+                        p
+                          ? // 명단 OVR 칸의 툴팁과 **같은 두 줄**이다 — 같은 숫자를
+                            // 두 화면에서 다른 말로 설명하면 규칙이 없어 보인다
+                            [
+                              `${p.name}`,
+                              `${code} 자리 기준 ${liveOverall ?? p.overall} — 경기에서 쓰이는 값입니다`,
+                              liveOverall !== null && liveOverall !== p.overall
+                                ? `주 포지션(${p.position}) 기준 ${p.overall}`
+                                : null,
+                            ]
+                              .filter(Boolean)
+                              .join("\n")
+                          : (code ?? "")
+                      }
+                    >
+                      <span className="slot-pos">
+                        {code}
+                        {roleTag && (
+                          <em className="slot-role" title={`${roleTag.ko} — ${roleTag.desc}`}>
+                            {roleTag.abbr}
+                          </em>
+                        )}
+                      </span>
+                      <span className="slot-name">
+                        {p?.isCaptain ? "Ⓒ" : ""}
+                        {p ? chipName(p.name) : "—"}
+                      </span>
+                      <span className="slot-meta">
+                        {/* 칩은 "그 자리에 선 선수"라 주 포지션 값이 아니라 자리 값이 맞다.
                           자리를 못 보는 선수라는 사실은 옆의 적응도 게이지가 이미 말하므로
                           숫자에 따로 표식을 붙이지 않는다 — 툴팁이 주 포지션 값을 갖는다. */}
-                      {/* 이 자리에서 내는 전력 하나만 둔다. 자리가 안 맞으면 이 숫자가
+                        {/* 이 자리에서 내는 전력 하나만 둔다. 자리가 안 맞으면 이 숫자가
                           이미 낮다 — 옆에 "포지션 적응도"를 따로 세우면 감독이 두 축을
                           머리로 합쳐야 한다 (적응도는 하나다) */}
-                      <b>{p ? (liveOverall ?? p.overall) : ""}</b>
-                      {p && <Margin observation={p.observation} />}
-                      {p && !p.available && <span className="slot-flag">✖</span>}
-                      {p?.hasIssue && <span className="slot-flag warn">!</span>}
-                    </span>
-                  </button>
-                );
-              })}
+                        <b>{p ? (liveOverall ?? p.overall) : ""}</b>
+                        {p && <Margin observation={p.observation} />}
+                        {p && !p.available && <span className="slot-flag">✖</span>}
+                        {p?.hasIssue && <span className="slot-flag warn">!</span>}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
 
-          <TacticsPanel tactics={board.tactics} editing={usable} onChange={changeTactics} />
+            <TacticsPanel tactics={board.tactics} editing={usable} onChange={changeTactics} />
+          </div>
         </div>
 
         <div className="squad-side-col">
@@ -1736,7 +1831,15 @@ export function SquadView({
   );
 }
 
-type SortKey = "role" | "name" | "position" | "overall" | "age" | "form" | "condition" | "rating";
+/**
+ * 정렬 기준 — `role`이 **기본이자 돌아오는 자리**다 (칸 → 라인 → OVR).
+ *
+ * 이름순은 없앴다. 다른 기준으로 흩어 놓은 명단을 **칸 순으로 되돌릴 손잡이가
+ * 없었고**, 스물몇 명짜리 표에서 이름으로 찾는 일은 칸으로 찾는 일보다 드물다 —
+ * 첫 칸(선수)이 그 되돌리는 자리를 맡는다.
+ */
+type SortKey =
+  "role" | "position" | "overall" | "age" | "adaptation" | "form" | "condition" | "rating";
 const ROLE_ORDER: Record<string, number> = { 선발: 0, 벤치: 1, 스쿼드: 2 };
 /**
  * 칸 순서 — 정렬의 기준은 **지금 화면의 칸**이다.
@@ -1788,8 +1891,9 @@ function SquadTable({
     const dir = sort.desc ? -1 : 1;
     const value = (p: SquadRow): number | string => {
       switch (sort.key) {
-        case "name":
-          return p.name;
+        case "adaptation":
+          // 배치가 없는 선수(스쿼드)에겐 적응도가 없다 — 0이 아니라 맨 아래다
+          return p.role === "스쿼드" ? -1 : p.adaptation;
         case "position":
           return (GROUP_ORDER[p.positionGroup] ?? 9) * 100 + p.overall;
         case "overall":
@@ -1820,10 +1924,11 @@ function SquadTable({
     });
   }, [players, sort, tierOf, tierKey]);
 
-  const th = (key: SortKey, label: string, className?: string) => (
+  const th = (key: SortKey, label: string, className?: string, title?: string) => (
     <th
       className={`sortable ${className ?? ""}${sort.key === key ? " sorted" : ""}`}
       onClick={() => onSort(key)}
+      title={title}
     >
       {label}
       {sort.key === key && <span className="sort-mark">{sort.desc ? "▼" : "▲"}</span>}
@@ -1834,13 +1939,12 @@ function SquadTable({
     <table className="squad-table" data-testid="squad-table">
       <thead>
         <tr>
-          {th("name", "선수")}
+          {/* 첫 칸이 **기본 정렬로 돌아오는 자리**다 — 흩어 놓은 명단을 칸 순으로 되돌린다 */}
+          {th("role", "선수", undefined, "칸 순으로 (선발 → 벤치 → 예비)")}
           {th("position", "포지션")}
           {th("age", "나이", "hide-sm")}
           {th("overall", "OVR")}
-          <th className="hide-sm" title="지금 맡은 자리에서 이 전술을 얼마나 소화하는가">
-            적응
-          </th>
+          {th("adaptation", "적응", "hide-sm", "지금 맡은 자리에서 이 전술을 얼마나 소화하는가")}
           {th("form", "폼")}
           {th("condition", "체력")}
           {th("rating", "평점", "hide-sm")}
@@ -1850,22 +1954,23 @@ function SquadTable({
         {rows.map((p, i) => (
           <Fragment key={p.id}>
             {/*
-             * 칸이 바뀌는 자리에 **구역 이름**을 세운다.
+             * 칸이 바뀌는 자리에 **선 하나**를 긋는다 — 이름은 적지 않는다.
              *
-             * 왼쪽 선 색만으로는 "저 파란 선이 무슨 뜻인지"를 알 수 없었다 — 2px
-             * 띠는 표의 가장자리처럼 보여서 선발과 벤치의 경계가 눈에 안 들어온다.
-             * 순위표가 진출권 구역을 다루는 방식과 같다: 경계선 + 이름.
+             * "선발·벤치·예비"를 글자로 세우면 표 안에 소제목이 셋 생겨 이름을
+             * 훑는 눈이 매번 걸린다. 어느 칸인지는 행의 왼쪽 선 색이 이미 말하고,
+             * 여기 필요한 건 **경계가 어디인가**뿐이다.
              * **칸 순으로 정렬했을 때만** 성립하므로(다른 기준이면 칸이 흩어진다)
              * 그때만 그린다.
              */}
             {tierOf &&
               sort.key === "role" &&
-              !sort.desc &&
+              i > 0 &&
               tierOf(p.id) !== tierOf(rows[i - 1]?.id ?? "") && (
                 /* 색은 `data-tier`가 고른다 — `t-*`를 쓰면 "그 칸의 **행**"을
-                 가리키는 셀렉터에 머리까지 걸려 첫 선수 대신 머리가 잡힌다 */
+                 가리키는 셀렉터에 머리까지 걸려 첫 선수 대신 머리가 잡힌다.
+                 첫 칸에는 긋지 않는다 — 표 머리 바로 아래에 선이 하나 더 서는 꼴이다 */
                 <tr className="tier-head" data-tier={TIER_SLUG[tierOf(p.id)]} aria-hidden>
-                  <td colSpan={8}>{tierOf(p.id)}</td>
+                  <td colSpan={8} />
                 </tr>
               )}
             <tr

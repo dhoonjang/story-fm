@@ -1,7 +1,10 @@
 "use client";
 
+import { Fragment } from "react";
 import type { OfficeViews } from "@story-fm/engine";
 import { anchorOf, positionGroupOf, separateBoardPoints } from "@story-fm/domain";
+import { IconBoard } from "@/components/icons";
+import { PitchTactics } from "./office";
 
 type Match = NonNullable<OfficeViews["match"]>;
 type MatchPlayer = Match["onPitch"]["home"][number];
@@ -33,33 +36,87 @@ export function MatchOverview({ match }: { match: Match }) {
 }
 
 /**
- * 상대 팀 — **우리 팀 탭과 같은 구성, 다른 정확도.**
+ * 상대 팀 — **우리 팀 탭과 같은 뼈대, 다른 정확도.**
  *
- * 판 → 전술 → 명단 순으로 우리 쪽과 똑같이 읽힌다. 구성을 맞춰 두는 이유는
- * 감독이 두 화면을 오가며 비교하기 때문이다 — 배치가 다르면 눈이 매번 다시
- * 자리를 찾는다. 다른 것은 **정확도뿐**이다: 전력은 안개를 지나 흐리고
- * (`SquadViewRow.observation`과 같은 채널), 체력은 폭이 넓다.
+ * 마크업까지 우리 쪽(`SquadView`)과 같은 것을 쓴다: `squad-head`(요약 · 전술판
+ * 손잡이 · 명단 머리) → `squad-layout`(왼쪽 판+전술 · 오른쪽 명단). 예전엔 상대만
+ * 따로 짠 표(`mv-side`)를 세워서, 같은 자리에 있어야 할 것들이 두 탭에서 다른
+ * 높이·다른 모양으로 서고 접힘도 따로 놀았다.
  *
- * 조작은 없다. 상대 판은 읽는 것이지 고치는 것이 아니다.
+ * 다른 것은 **아는 것뿐**이다. 나이·적응·폼·평점은 남의 팀에서 알 수 없으니 열이
+ * 없고, 전력은 오차를 달고(`±`) 체력은 값이 아니라 구간이다. 조작도 없다 —
+ * 상대 판은 읽는 것이지 고치는 것이 아니다.
  */
-export function MatchOpponent({ match }: { match: Match }) {
+export function MatchOpponent({
+  match,
+  boardOpen = true,
+  onToggleBoard,
+}: {
+  match: Match;
+  /** 전술판이 펼쳐져 있나 — 우리 팀 탭과 **같은 손잡이·같은 상태**를 쓴다 */
+  boardOpen?: boolean;
+  onToggleBoard?: () => void;
+}) {
   const ourSide = match.home.ours ? "home" : "away";
   const them = ourSide === "home" ? "away" : "home";
   const players = match.onPitch[them];
+  const bench = match.bench[them];
+  const subs = match.subs[them];
+  const tactics = match.tactics[them];
+  /** 선발 평균 — 우리 쪽 요약과 같은 숫자다. 다만 이 값들은 안개를 지난 추정이다 */
+  const xiRating = players.length
+    ? Math.round(players.reduce((s, p) => s + p.effective, 0) / players.length)
+    : 0;
   return (
-    <div className="match-view opponent" data-testid="view-match-opponent">
+    <div
+      className={`squad-view opponent${boardOpen ? "" : " folded"}`}
+      data-testid="view-match-opponent"
+    >
+      <div className="squad-head">
+        <div className="squad-summary">
+          <span>
+            <b data-testid="opp-shape">{tactics.formation}</b> · 선발 평균 <b>{xiRating}</b>
+          </span>
+          <span className="muted">
+            교체 {subs.used}/5 · 기회 {subs.windows}/3
+          </span>
+          {onToggleBoard && (
+            <button
+              className={`board-toggle${boardOpen ? " on" : ""}`}
+              onClick={onToggleBoard}
+              aria-pressed={boardOpen}
+              data-testid="opp-board-toggle"
+              title="전술판"
+            >
+              <IconBoard />
+              전술판
+            </button>
+          )}
+        </div>
+        <div className="roster-head">
+          {/* 우리 쪽 1군·2군 책갈피가 서는 자리 — 상대는 나눌 명단이 하나라 이름표다.
+              누르는 것이 아니므로 button이 아니다 */}
+          <div className="roster-tabs">
+            <span className="roster-tab on">
+              {match[them].name}
+              <span className="roster-tab-n">{players.length + bench.length}</span>
+            </span>
+          </div>
+          <TeamTotals players={players} />
+        </div>
+      </div>
       <div className="squad-layout">
         <div className="squad-board-col">
-          <OpponentBoard players={players} />
-          <SideTactics tactics={match.tactics[them]} />
+          {/* 우리 쪽과 같은 덩어리 — 판과 전술이 한 장으로 붙는다 (SquadView 참고) */}
+          <div className="board-stack">
+            <OpponentBoard players={players} tactics={tactics} />
+            <SideTactics tactics={tactics} />
+          </div>
         </div>
         <div className="squad-side-col">
-          <Side
-            title={match[them].name}
-            players={players}
-            bench={match.bench[them]}
-            subs={match.subs[them]}
-          />
+          <div className="roster-scroll">
+            <OpponentTable players={players} bench={bench} />
+          </div>
         </div>
       </div>
     </div>
@@ -247,7 +304,13 @@ function Dots({ value, align, title }: { value: number; align: "left" | "right";
  * 분리 함수**(`separateBoardPoints`)를 지나게 해서 라인을 넘지 않는 선에서
  * 좌우로만 벌린다.
  */
-function OpponentBoard({ players }: { players: MatchPlayer[] }) {
+function OpponentBoard({
+  players,
+  tactics,
+}: {
+  players: MatchPlayer[];
+  tactics: Match["tactics"]["home"];
+}) {
   const points = separateBoardPoints(players.map((p) => anchorOf(p.position)));
   return (
     <div className="pitch-wrap">
@@ -257,6 +320,8 @@ function OpponentBoard({ players }: { players: MatchPlayer[] }) {
         <div className="pitch-box small top" />
         <div className="pitch-box bottom" />
         <div className="pitch-box small bottom" />
+        {/* 상대도 같은 선을 긋는다 — 어디까지 내려서고 어디서부터 쫓는지가 판에 보인다 */}
+        <PitchTactics tactics={tactics} />
         <span className="pitch-zone" style={{ top: "6%" }}>
           공격
         </span>
@@ -397,68 +462,78 @@ function TeamTotals({ players }: { players: MatchPlayer[] }) {
   );
 }
 
-function Side({
-  title,
-  players,
-  bench,
-  subs,
-  ours = false,
-}: {
-  title: string;
-  players: MatchPlayer[];
-  bench: MatchPlayer[];
-  subs: { used: number; windows: number };
-  ours?: boolean;
-}) {
+/**
+ * 상대 명단 — **우리 명단(`SquadTable`)과 같은 표**다.
+ *
+ * 같은 클래스를 쓰므로 행 높이·구역 머리·왼쪽 칸 색 띠가 두 탭에서 정확히 겹친다.
+ * 정렬 손잡이는 없다 — 상대 명단은 훑는 것이지 다루는 것이 아니고, 자리 순으로
+ * 서 있어야 왼쪽 판과 같은 순서로 읽힌다.
+ *
+ * 열이 넷뿐인 것은 아는 것이 넷뿐이기 때문이다. 우리 표에서 나이·적응·폼·평점은
+ * `hide-sm`으로 좁을 때 접히는 열이라, 좁은 화면에서는 두 표가 같은 열을 세운다.
+ */
+function OpponentTable({ players, bench }: { players: MatchPlayer[]; bench: MatchPlayer[] }) {
+  const groups = [
+    { slug: "start", rows: players },
+    { slug: "bench", rows: bench },
+  ].filter((g) => g.rows.length > 0);
   return (
-    <div className={`mv-side ${ours ? "ours" : ""}`}>
-      <div className="mv-side-head">
-        <b>{title}</b>
-        <span>
-          교체 {subs.used}/5 · 기회 {subs.windows}/3
-        </span>
-      </div>
-      <TeamTotals players={players} />
-      <table className="mv-players">
-        <tbody>
-          {players.map((p) => (
-            <tr
-              key={p.id}
-              className={p.gassed ? "gassed" : ""}
-              data-testid={`mv-player-${p.id}`}
-              title={statLine(p.tally)}
-            >
-              <td className="mv-pos">{p.position}</td>
-              <td className="mv-name">
-                {p.name}
-                <Tally t={p.tally} />
-              </td>
-              {/* 전력 옆의 ± — 이 숫자를 얼마나 믿을 수 있나. 우리 선수는 붙지 않는다 */}
-              <td
-                className="mv-eff"
-                title={
-                  p.margin > 0
-                    ? `지금 이 자리에서 내는 전력 — ±${p.margin} 오차 (스카우팅하면 좁아진다)`
-                    : "지금 이 자리에서 내는 전력"
-                }
+    <table className="squad-table" data-testid="opponent-table">
+      <thead>
+        <tr>
+          <th>선수</th>
+          <th>포지션</th>
+          <th>OVR</th>
+          <th>체력</th>
+        </tr>
+      </thead>
+      <tbody>
+        {groups.map((g, gi) => (
+          <Fragment key={g.slug}>
+            {/* 칸이 갈리는 자리는 **선 하나** — 우리 표와 같다(이름은 왼쪽 선 색이 말한다) */}
+            {gi > 0 && (
+              <tr className="tier-head" data-tier={g.slug} aria-hidden>
+                <td colSpan={4} />
+              </tr>
+            )}
+            {g.rows.map((p) => (
+              <tr
+                key={p.id}
+                className={`row-tier t-${g.slug}${p.gassed ? " gassed" : ""}`}
+                data-testid={`mv-player-${p.id}`}
+                title={statLine(p.tally)}
               >
-                {p.effective}
-                {p.margin > 0 && <i className="mv-eff-margin">±{p.margin}</i>}
-              </td>
-              <td className="mv-cond">
-                <ConditionBar c={p.condition} gassed={p.gassed} />
-              </td>
-              <td className="mv-gap">{p.gassed ? "구멍" : ""}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {bench.length > 0 && (
-        <div className="mv-bench">
-          벤치 {bench.map((b) => `${b.name}(${b.position})`).join(" · ")}
-        </div>
-      )}
-    </div>
+                <td className="squad-name">
+                  <span className="row-name">{p.name}</span>
+                  {/* 다리가 멈춘 선수 — 우리 표의 상태 표식(부상·정지)과 같은 자리·같은 모양 */}
+                  {p.gassed && (
+                    <span className="tag st alert" title="다리가 멈췄다 — 이 자리에 구멍이 나 있다">
+                      구멍
+                    </span>
+                  )}
+                  <Tally t={p.tally} />
+                </td>
+                <td>{p.position}</td>
+                {/* 전력 옆의 ± — 이 숫자를 얼마나 믿을 수 있나. 우리 선수는 붙지 않는다 */}
+                <td
+                  title={
+                    p.margin > 0
+                      ? `지금 이 자리에서 내는 전력 — ±${p.margin} 오차 (스카우팅하면 좁아진다)`
+                      : "지금 이 자리에서 내는 전력"
+                  }
+                >
+                  {p.effective}
+                  {p.margin > 0 && <i className="mv-eff-margin">±{p.margin}</i>}
+                </td>
+                <td>
+                  <ConditionBar c={p.condition} gassed={p.gassed} />
+                </td>
+              </tr>
+            ))}
+          </Fragment>
+        ))}
+      </tbody>
+    </table>
   );
 }
 

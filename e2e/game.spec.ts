@@ -14,20 +14,27 @@ import { expect, test, type Page } from "@playwright/test";
  * **비선발을 선발로 올린 직후** 크게 갈렸다 — 명단은 종합값 그대로인데 칩만
  * 자리 값으로 뛰었다. 지금은 두 곳이 `slotOverallOf` 하나를 부른다.
  */
+/** 전술판 손잡이를 눌러 판을 펼친다 — 이미 펼쳐져 있으면 그대로 둔다 */
+async function pressBoardToggle(page: Page, testId = "board-toggle") {
+  const toggle = page.getByTestId(testId);
+  if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click();
+}
+
+/** 접힌 전술 패널을 펼친다 — 눈금(1~5 버튼)은 펼쳤을 때만 있다 */
+async function openTactics(page: Page) {
+  const toggle = page.getByTestId("tactics-toggle");
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+}
+
 /**
  * 스쿼드 화면을 열고 **전술판까지 펼친다.**
  *
- * 넓은 화면(≥1200)에서는 장부가 채팅 옆에 서므로 스쿼드는 **명단만** 먼저
- * 보인다 — 반쪽에 밀어 넣은 전술판은 칩을 끌 자리가 없기 때문이다. 판을 만지는
- * 테스트는 손잡이를 눌러 화면을 통째로 받아야 한다. 좁은 화면에서는 손잡이가
- * 서지 않고 판이 처음부터 보이므로 그대로 지나간다.
+ * 스쿼드는 어느 폭에서나 **명단만** 먼저 보인다 — 판은 폭도 높이도 크게 먹으므로
+ * 감독이 부를 때 선다. 판을 만지는 테스트는 손잡이를 눌러 받아야 한다.
  */
 async function openBoard(page: Page) {
   await page.getByTestId("tab-스쿼드").click();
-  const toggle = page.getByTestId("board-toggle");
-  if (await toggle.isVisible()) {
-    if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click();
-  }
+  await pressBoardToggle(page);
   await expect(page.getByTestId("pitch-board")).toBeVisible();
 }
 
@@ -97,14 +104,21 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await input.fill("평일 오전은 세트피스 반복 훈련 잡아줘");
   await page.getByTestId("chat-send").click();
   /**
-   * 장부가 바뀐 일은 **채팅이 아니라 그 화면 쪽에서** 알린다 — 훈련은 달력
-   * 아이콘 아래 말풍선으로 선다. 채팅에 칩으로도 세우면 같은 사실이 두 곳에 난다.
+   * 장부가 바뀐 일은 **그 화면 쪽에서** 알린다 — 훈련은 달력 아이콘 아래 말풍선으로
+   * 선다. 그 지시는 채팅에도 칩으로 남는다: 알림은 다음 클릭에 닫히므로 되짚을
+   * 자리가 있어야 한다.
    */
   await expect(page.getByTestId("hint-달력")).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByTestId("tool-set_training")).toHaveCount(0);
+  const trainChip = page.getByTestId("tool-set_training").first();
+  await expect(trainChip).toBeVisible();
   // 답이 끝나면 커서가 입력칸으로 돌아온다 — 감독은 대개 이어서 말한다
   await expect(page.getByTestId("chat-input")).toBeEnabled();
   await expect(page.getByTestId("chat-input")).toBeFocused();
+  // 다른 쪽을 누르면 알림은 닫히고, 칩을 누르면 그 말풍선이 다시 선다
+  await page.getByTestId("chat-scroll").click({ position: { x: 4, y: 4 } });
+  await expect(page.getByTestId("hint-달력")).toHaveCount(0);
+  await trainChip.click();
+  await expect(page.getByTestId("hint-달력")).toBeVisible();
   /**
    * 기다리는 동안은 **말로 적지 않는다** — "세계가 반응하는 중…"을 띄우던 때는
    * 매 턴 같은 문장이 대화 사이에 끼어 대사인 척했다. 점 세 개면 충분하다.
@@ -165,6 +179,15 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await expect(page.getByTestId("mtab-달력")).toHaveCount(0);
   await page.getByTestId("mtab-대회").click();
   await expect(page.getByTestId("next-fixture")).toBeVisible();
+  /**
+   * 대회 뷰는 **어디서 열리든 같은 표**다 — 경기 탭이든 장부든.
+   * 표의 바탕(`border-collapse` · 칸 여백)이 장부 쪽에만 걸려 있던 때는, 경기 중에
+   * 연 순위표만 브라우저 기본 표로 떨어져 같은 화면이 두 얼굴을 가졌다.
+   */
+  await expect(page.getByTestId("standings")).toBeVisible();
+  await expect(
+    page.getByTestId("standings").evaluate((el) => getComputedStyle(el).borderCollapse),
+  ).resolves.toBe("collapse");
 
   /**
    * 판세 = 존 + 키포인트 한 화면. 전술 6축은 여기 없다 — 전술판이 갖는다
@@ -181,11 +204,49 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await page.getByTestId("mtab-팀").click();
   await page.getByTestId("side-theirs").click();
   await expect(page.getByTestId("view-match-opponent")).toBeVisible();
+  /**
+   * 상대 명단은 **우리 명단과 같은 표**다 — 같은 클래스, 같은 구역 경계선.
+   * 마크업이 갈리면 두 탭에서 같은 것이 다른 높이·다른 모양으로 서고, 감독은
+   * 오갈 때마다 눈으로 자리를 다시 찾는다.
+   */
+  const oppTable = page.getByTestId("opponent-table");
+  await expect(oppTable).toHaveClass(/squad-table/);
+  await expect(oppTable.locator("tbody tr.row-tier.t-start")).toHaveCount(11);
+  // 칸이 갈리는 자리는 **선 하나**다 — 이름(선발·벤치)은 적지 않는다
+  const oppDividers = oppTable.locator("tbody tr.tier-head");
+  expect(await oppDividers.count()).toBeGreaterThan(0);
+  await expect(oppDividers.first()).toHaveText("");
+  // 상대 명단은 훑는 것이지 고르는 것이 아니다 — 우리 표와 달리 손에 반응하지 않는다
+  await expect(
+    oppTable
+      .locator("tbody tr.row-tier")
+      .first()
+      .evaluate((el) => getComputedStyle(el).cursor),
+  ).resolves.toBe("default");
+  // 경기 중에도 명단이 먼저다 — 판은 손잡이를 눌러야 선다 (양쪽 탭이 같은 상태를 쓴다)
+  await expect(page.getByTestId("opponent-board")).not.toBeVisible();
+  await pressBoardToggle(page, "opp-board-toggle");
   await expect(page.getByTestId("opponent-board")).toBeVisible();
   await expect(page.locator("#__next, body").locator(".pitch-slot.theirs")).toHaveCount(11);
   // 상대 전술은 읽기 전용 — 우리 쪽에만 있는 조작 버튼이 여기엔 없다
   await expect(page.getByTestId("match-tactics")).toBeVisible();
   await expect(page.getByTestId("tactic-pressing-5")).toHaveCount(0);
+  /**
+   * 판을 펼치면 **채팅 자리 위에 한 장이 얹힌다** — 대화는 지워지지 않고 가라앉는다.
+   * 그 자리가 돌아갈 곳이라는 게 보여야 하므로 흐릿하게 남고, 손은 닿지 않는다.
+   * 접으면 있던 자리에서 그대로 다시 떠오른다.
+   */
+  // 값이 260ms에 걸쳐 잦아든다 — 한 번 읽고 끝내면 지나가는 중간값을 집는다
+  const chatDim = () =>
+    page.locator(".chat-pane").evaluate((el) => Number(getComputedStyle(el).opacity));
+  await expect(page.getByTestId("chat-scroll")).toBeVisible();
+  await expect.poll(chatDim).toBeLessThan(0.5);
+  await expect
+    .poll(() => page.locator(".chat-pane").evaluate((el) => getComputedStyle(el).pointerEvents))
+    .toBe("none");
+  await page.getByTestId("opp-board-toggle").click();
+  await expect.poll(chatDim).toBe(1);
+  await pressBoardToggle(page, "opp-board-toggle");
 
   /*
    * 전술판 — **자동 저장은 막히지만 판은 살아 있다.**
@@ -193,6 +254,7 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
    * 우리 팀 6축은 여기서 **고칠 수 있다** (경기 중에는 그것이 지시가 된다).
    */
   await page.getByTestId("side-ours").click();
+  await openTactics(page);
   await expect(page.getByTestId("tactic-pressing-5")).toBeVisible();
   await expect(page.locator(".pitch-slot")).toHaveCount(11);
   await expect(page.getByTestId("view-squad")).toHaveAttribute("data-save", "locked");
@@ -319,12 +381,45 @@ test("면담 시나리오 — 판정형 스킬과 사기 반영", async ({ page 
   await input.fill(`${shortName} 면담 좀 하자`);
   await page.getByTestId("chat-send").click();
   /**
-   * 면담은 **채팅에 남는다** — 갈 화면이 없고, 결과가 곧 대화이기 때문이다.
-   * 다만 펼치지 않아도 잘 풀렸는지는 보여야 하므로 칩이 결(`good`/`bad`)을 갖는다.
+   * 면담은 칩으로 남고, 바뀐 것(사기·심경)은 **스쿼드 말풍선**이 알린다.
+   * 펼치지 않아도 잘 풀렸는지는 보여야 하므로 칩이 결(`good`/`bad`)을 갖는다.
    */
   const chip = page.getByTestId("tool-talk_to_player").first();
   await expect(chip).toBeVisible({ timeout: 15_000 });
   await expect(chip).toHaveClass(/good|bad/);
+  await expect(page.getByTestId("hint-스쿼드")).toBeVisible();
+});
+
+/**
+ * 협상은 **카드**다 — 진행 중인 흥정은 어느 장부에도 실리지 않아서 레일이 알릴
+ * 수 없고, 금액 두 벌(제시·요구)과 확률은 칩 속에 접어 두면 매번 펼쳐야 한다.
+ */
+test("협상은 카드로 선다 — 재계약 제안", async ({ page }) => {
+  await page.goto("/new");
+  await expect(page.getByTestId("league-grid")).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId("league-epl").click();
+  await expect(page.getByTestId("team-grid")).toBeVisible();
+  await page.getByTestId("team-arsenal").click();
+  await page.getByTestId("manager-name").fill("협테스트");
+  await page.getByTestId("manager-background").fill("스카우트 출신");
+  await page.getByTestId("start-game").click();
+  await expect(page.getByTestId("chat-scroll")).toContainText("협테스트", { timeout: 30_000 });
+
+  // 계약이 급한 선수에게 재계약 제안 — mock GM이 코어의 기대 주급으로 연다
+  const input = page.getByTestId("chat-input");
+  await input.fill("계약 만료 다가오는 선수 재계약 하자");
+  await page.getByTestId("chat-send").click();
+
+  const card = page.getByTestId("market-renewal").first();
+  await expect(card).toBeVisible({ timeout: 15_000 });
+  // 카드가 조건과 기한을 갖는다 (칩을 펼쳐 읽던 것들)
+  await expect(card).toContainText("주급");
+  await expect(card).toContainText("기간");
+  await expect(card).toContainText("답");
+  // 같은 사실이 칩으로 또 서지 않는다 — 카드가 칩의 부연처럼 읽히면 안 된다
+  await expect(page.getByTestId("tool-open_renewal")).toHaveCount(0);
+  // 카드는 말풍선이 아니다 — 협상은 어느 장부에도 실리지 않는다
+  await expect(page.locator(".rail-hints")).toHaveCount(0);
 });
 
 test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
@@ -547,12 +642,49 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
   await expect(page.locator(".squad-table thead")).not.toContainText("피로");
   await firstRow.click();
   await expect(page.locator(".detail-row")).toHaveCount(0);
+
+  /**
+   * 정렬 — **첫 칸(선수)이 기본으로 돌아오는 자리다.**
+   *
+   * 다른 기준으로 흩어 놓으면 칸 순으로 되돌릴 손잡이가 없었다. 적응 칸도
+   * 누를 수 있어야 한다(예전엔 정렬 대상이 아니었다).
+   */
+  const heads = page.locator(".squad-table thead th");
+  const firstName = async () =>
+    (
+      (await page
+        .locator(".squad-table tbody tr.row-tier:not(.detail-row) .row-name")
+        .first()
+        .textContent()) ?? ""
+    ).replace("Ⓒ", "");
+  const byTier = await firstName();
+  // 칸 경계선은 칸 순일 때만 선다
+  expect(await page.locator(".squad-table tbody tr.tier-head").count()).toBeGreaterThan(0);
+  await heads.filter({ hasText: "적응" }).click();
+  await expect(heads.filter({ hasText: "적응" })).toHaveClass(/sorted/);
+  await expect(page.locator(".squad-table tbody tr.tier-head")).toHaveCount(0);
+  // 적응도 내림차순 — 첫 행의 게이지가 마지막 행보다 크다
+  const fitAt = async (nth: number) => {
+    const label = await page
+      .locator(".squad-table tbody tr.row-tier:not(.detail-row)")
+      .nth(nth)
+      .locator(".fit-gauge")
+      .getAttribute("aria-label");
+    return Number(/(\d+)/.exec(label ?? "")?.[1] ?? "0");
+  };
+  expect(await fitAt(0)).toBeGreaterThanOrEqual(await fitAt(5));
+  // 선수 칸을 누르면 칸 순으로 돌아온다
+  await heads.filter({ hasText: "선수" }).click();
+  expect(await firstName()).toBe(byTier);
+  expect(await page.locator(".squad-table tbody tr.tier-head").count()).toBeGreaterThan(0);
+
   // 전술판 칩을 눌러도 같은 자리(명단)에서 상세가 열린다
   await page.getByTestId("slot-0").click();
   await expect(page.locator(".detail-row")).toHaveCount(1);
 
   /*
    * 전술도 같은 화면에서 바꾼다 — 값의 뜻이 말로 보인다.
+   * 접힌 패널은 지금 값만 적고, 눈금은 **고치려고 펼쳤을 때** 나온다.
    *
    * **적응도는 선수마다 다르다** — 팀 총합 같은 값은 화면에 없으므로 한 명을
    * 골라 따라간다. 명단 첫 행이 아니라 **전술판 첫 칩**에서 이름을 읽는 이유는
@@ -572,6 +704,9 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
   };
   const famBefore = await famOf();
   expect(famBefore, "적응도를 읽지 못했다").not.toBeNaN();
+  // 접혀 있을 땐 여섯 축의 지금 값만 — 눈금은 아직 없다
+  await expect(page.getByTestId("tactic-mentality-5")).toHaveCount(0);
+  await openTactics(page);
   await page.getByTestId("tactic-mentality-5").click();
   await expect(page.getByTestId("tactics-panel")).toContainText("매우 공격적");
   await expect(page.getByTestId("view-squad")).toHaveAttribute("data-save", "saved", {

@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { GamePayload } from "@/lib/store";
-import type { ChatTurn } from "@story-fm/engine";
+import type { ChatTurn, ToolCallRecord } from "@story-fm/engine";
 import { ChatTurnView, turnStamp } from "./chat";
-import { panelHintsOf } from "@/lib/panel-hints";
+import { hintsOfCall, panelHintsOf, type PanelHint } from "@/lib/panel-hints";
+import { RailHints } from "./rail-hints";
 import { SquadView, CalendarView, FinanceView, CompetitionsView, CareerView } from "./office";
 import { MatchClock, MatchHeadline, MatchOpponent, MatchOverview } from "./match-view";
 import {
@@ -64,6 +65,12 @@ type Panel = (typeof PANELS)[number]["key"];
  * 넣을까"가 다른 화면에 있었다. 달력은 90분 안에 볼 것이 아니다 — 그때 궁금한
  * 일정은 **다음 경기 하나**뿐이라 대회 탭 아래로 옮겼다.
  */
+/**
+ * 장부 칸이 열리고 접히는 시간 — **CSS의 `--panel-anim`과 같은 값이어야 한다.**
+ * 접히는 동안은 내용을 그려 두고(빈 칸이 접히면 화면이 툭 꺼진다) 이만큼 뒤에 지운다.
+ */
+const PANEL_ANIM_MS = 260;
+
 const MATCH_PANELS = [
   { key: "판세", Icon: IconMatch },
   { key: "팀", Icon: IconBoard },
@@ -142,6 +149,21 @@ export function GameScreen({ gameId }: { gameId: string }) {
   /** 열린 장부 뷰 — null이면 무대(채팅 / 경기+채팅)가 보인다 */
   const [panel, setPanel] = useState<Panel | null>(null);
   /**
+   * 화면에 **그려 두는** 장부 — 닫힌 뒤에도 열이 접히는 동안은 남는다.
+   *
+   * `panel`을 그대로 쓰면 닫는 순간 내용이 먼저 사라져 빈 칸이 접히는 꼴이 된다.
+   * 접힘이 끝나고 나서 지운다.
+   */
+  const [shownPanel, setShownPanel] = useState<Panel | null>(null);
+  useEffect(() => {
+    if (panel !== null) {
+      setShownPanel(panel);
+      return;
+    }
+    const t = setTimeout(() => setShownPanel(null), PANEL_ANIM_MS);
+    return () => clearTimeout(t);
+  }, [panel]);
+  /**
    * 전술판을 펼쳐 두었나 — **스쿼드가 채팅 옆에 설 수 있는지를 가른다.**
    *
    * 스쿼드가 통째로 반쪽에 들어오면 전술판이 200px로 눌려 아무 쓸모가 없다.
@@ -149,10 +171,32 @@ export function GameScreen({ gameId }: { gameId: string }) {
    * 판을 만지는 것은 그 자체로 하나의 일이다. 그래서 명단이 먼저 서고, 판을
    * 펼치면 그때 화면을 통째로 쓴다. 선택은 기억한다 — 탭을 오갈 때마다 접히면
    * 판을 쓰는 감독이 매번 다시 편다.
+   *
+   * **경기 중 팀 탭도 같은 상태를 쓴다.** 무대의 반쪽에 판을 밀어 넣으면 명단이
+   * 눌려 누구를 뺄지 읽을 수 없고, 정지점마다 급한 건 대개 체력과 평점이다.
+   * 우리 팀·상대 팀이 한 상태를 나눠 갖는 이유는 둘이 같은 구성이기 때문이다 —
+   * 한쪽만 접히면 탭을 옮길 때마다 화면이 다른 모양이 된다.
    */
   const [boardOpen, setBoardOpen] = useState(false);
-  /** 읽은 장부 알림 — 그 화면을 연 순간부터 다시 세우지 않는다 */
+  /** 읽은 장부 알림 — 그 화면을 연 순간부터 다시 세우지 않는다 (다음 턴에 풀린다) */
   const [seenHints, setSeenHints] = useState<string[]>([]);
+  /**
+   * 알림을 닫았나 — **다음 클릭 한 번**이면 닫힌다.
+   *
+   * 알림은 지나가는 것이지 화면에 상주하는 것이 아니다. 놓쳐도 그 지시는 채팅에
+   * 칩으로 남아 있어서 눌러 다시 부를 수 있다(`pinnedHint`).
+   */
+  const [hintsClosed, setHintsClosed] = useState(false);
+  /** 채팅 칩이 다시 불러낸 말풍선 — 자동 알림과 같은 자리에 선다 */
+  const [pinnedHint, setPinnedHint] = useState<{
+    call: ToolCallRecord;
+    hints: PanelHint[];
+  } | null>(null);
+  /** 칩을 눌렀다 — 같은 칩을 다시 누르면 닫는다 (칩이 곧 손잡이다) */
+  const revealHint = useCallback((call: ToolCallRecord) => {
+    setHintsClosed(true);
+    setPinnedHint((prev) => (prev?.call === call ? null : { call, hints: hintsOfCall(call) }));
+  }, []);
   /**
    * 전술판에서 쌓인 조작 — 다음 턴에 함께 나간다 (대기 목록을 화면에 그리지는
    * 않는다: 판 자체가 바뀐 모습이 곧 표시다).
@@ -181,6 +225,48 @@ export function GameScreen({ gameId }: { gameId: string }) {
         : [],
     [game, panel, seenHints],
   );
+  /**
+   * **GM이 말한 횟수** — 알림이 새로 서는 기준이다.
+   *
+   * 채팅 길이로 재면 안 된다: 감독이 보내는 순간 낙관적 유저 턴이 먼저 들어가고
+   * (`send`), 턴이 실패하면 도로 빠진다. 그때마다 리셋이 돌면 **닫아 둔 직전
+   * 알림이 되살아났다가** 답이 오면 다시 바뀐다 — 그게 말풍선이 깜빡이는 이유다.
+   * 알림은 세계가 무언가 한 뒤에만 새로 선다.
+   */
+  const modelTurns = useMemo(
+    () => game?.chat.reduce((n, t) => n + (t.role === "model" ? 1 : 0), 0) ?? 0,
+    [game],
+  );
+  /**
+   * 새 턴이 오면 알림은 처음부터 — 방금 벌어진 일은 다시 알려야 한다.
+   * 이전 턴에 읽은 표식(`seenHints`)도 여기서 풀린다: 그건 그 알림을 읽었다는
+   * 뜻이었고, 새 지시는 새 알림이다.
+   *
+   * 이걸 `useEffect`로 미루면 리셋 전 한 프레임이 그려진다 — 지난 턴에 읽은
+   * 알림이 잠깐 사라졌다 다시 뜬다. 렌더 중에 맞추면 그 프레임이 없다.
+   */
+  const [hintTurn, setHintTurn] = useState(0);
+  if (hintTurn !== modelTurns) {
+    setHintTurn(modelTurns);
+    setHintsClosed(false);
+    setPinnedHint(null);
+    setSeenHints([]);
+  }
+  /**
+   * **다른 쪽을 누르면 닫힌다.** 말풍선은 조작 대상이 아니라 지나가는 알림이라
+   * 닫는 ✕를 달지 않는다 — 감독이 다음 무엇을 누르든 그게 곧 "읽었다"다.
+   * 칩(`data-hint-keep`)만 예외다: 그 클릭은 말풍선을 부르는 손잡이다.
+   */
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      const el = e.target instanceof Element ? e.target : null;
+      if (el?.closest("[data-hint-keep]")) return;
+      setPinnedHint((p) => (p === null ? p : null));
+      setHintsClosed((c) => (c ? c : true));
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, []);
   const [input, setInput] = useState("");
   /** 시간 손잡이의 선택지가 펼쳐져 있는가 — 입력이 비었을 때만 열 수 있다 */
   const [skipOpen, setSkipOpen] = useState(false);
@@ -247,6 +333,11 @@ export function GameScreen({ gameId }: { gameId: string }) {
   useEffect(() => {
     const now = game?.views.match?.matchId ?? null;
     if (wasInMatch.current !== null && now === null) setFinished(wasInMatch.current);
+    /**
+     * 킥오프 — 열어 두었던 장부를 닫는다. 90분 동안 오른쪽 칸의 주인은 판이고,
+     * 그때 상단 줄은 경기 탭으로 바뀌어 있어 **장부를 닫을 손잡이 자체가 없다**.
+     */
+    if (wasInMatch.current === null && now !== null) setPanel(null);
     wasInMatch.current = now;
   }, [game?.views.match?.matchId]);
 
@@ -314,8 +405,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
         if (finished) return;
         finished = true;
         stopPump();
-        // 새 턴이 왔으니 지난 알림의 "읽음"은 무효다 — 이번 턴 것을 다시 세운다
-        if (payload) setSeenHints([]);
+        // 지난 알림의 "읽음"은 새 GM 턴이 들어오는 렌더에서 함께 풀린다 (`hintTurn`)
         if (payload) setGame(payload);
         setStreamText("");
         setBusy(false);
@@ -457,7 +547,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
         : "훈련 지시, 전술 변경, 면담… 감독으로서 말하세요";
 
   /** 폭이 곧 가독성인 뷰 — 전술판+명단·열두 달 격자는 900px 안에 넣을 수 없다 */
-  const wide = panel === "스쿼드" || panel === "달력";
+  const wide = shownPanel === "스쿼드" || shownPanel === "달력";
 
   /**
    * 다음 경기 날짜 — 시간 이동 버튼이 목표 시점을 **그대로 적어 보내려고** 쓴다.
@@ -481,6 +571,32 @@ export function GameScreen({ gameId }: { gameId: string }) {
    * 화면에 없다. 배너로 적지 않고 **창의 결**로 알린다.
    */
   const inMatch = game.views.match !== null;
+  /**
+   * 오른쪽 칸에 무엇이 서는가 — **경기 판이 우선이고 장부가 그것을 덮는다.**
+   * 경기 중에 장부를 열면(달력·재정) 판 대신 장부가 선다: 그때 감독이 보려는 건
+   * 그쪽이고, 판세는 상단의 경기 머리가 계속 이고 있다.
+   */
+  const showBoard = inMatch && panel === null;
+  /** 오른쪽 칸이 열려 있는가 — 폭이 0인지 반쪽인지를 가른다 */
+  const rightOpen = showBoard || panel !== null;
+  /**
+   * 전술판이 **채팅 자리까지 받아야 하는가** — 판이 서 있는 화면에서만 참이다.
+   *
+   * 반쪽에 밀어 넣은 판은 200px로 눌려 칩을 끌 자리도, 열한 개를 읽을 자리도 없다.
+   * 경기 중 팀 탭이든 오피스의 스쿼드 탭이든 판을 펼치는 몸짓은 같은 것이라
+   * 결과도 같아야 한다 — 다른 탭(판세·대회·달력)에서는 켜 둔 상태여도 아무 일이
+   * 없어야 하므로 지금 무엇이 서 있는지를 함께 본다.
+   */
+  const boardTakesStage = boardOpen && (showBoard ? matchTab === "팀" : shownPanel === "스쿼드");
+  /**
+   * 레일에 세울 말풍선 — **처음엔 그 턴에 바뀐 장부 전부, 칩을 누르면 그 하나만.**
+   *
+   * 자동 알림은 "방금 무엇이 달라졌나"를 한 번에 알리는 것이라 탭별로 묶어 한 장에
+   * 쌓는다(시간이 흘러 다음 장으로 넘어가지 않는다 — 감독이 눈을 뗀 사이에 지나간다).
+   * 칩은 그 지시 하나를 가리키므로 그 장부만 선다(`hintsOfCall`).
+   * 경기 중에는 장부 레일이 서지 않으므로 칩도 제자리에서 펼친다(`onRevealHint` 없음).
+   */
+  const shownHints = pinnedHint ? pinnedHint.hints : hintsClosed ? [] : hints;
 
   const chatPane = (
     <section className={`chat-pane${inMatch ? " broadcasting" : ""}`}>
@@ -505,6 +621,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
                 playerNames={game.playerNames}
                 speakerRoles={game.speakerRoles}
                 prevStamp={prevStamp}
+                onRevealHint={inMatch ? undefined : revealHint}
+                revealedCall={pinnedHint?.call ?? null}
               />
             );
             prevStamp = turnStamp(turn) ?? prevStamp;
@@ -758,40 +876,32 @@ export function GameScreen({ gameId }: { gameId: string }) {
               <IconChat />
             </button>
             <span className="rail-sep" />
-            {PANELS.map(({ key, Icon }) => {
-              const hint = hints.find((h) => h.panel === key);
-              return (
-                <span className="rail-slot" key={key}>
-                  <button
-                    className={`${panel === key ? "active" : ""}${hint ? " hinted" : ""}`}
-                    onClick={() => {
-                      setSeenHints((seen) => (seen.includes(key) ? seen : [...seen, key]));
-                      setPanel(panel === key ? null : key);
-                    }}
-                    data-testid={`tab-${key}`}
-                    title={key}
-                    aria-label={hint ? `${key} — ${hint.lines.join(", ")}` : key}
-                  >
-                    <Icon />
-                  </button>
-                  {/**
-                   * 바뀐 장부를 알리는 말풍선 — **읽으면 사라진다.**
-                   * 채팅에 카드로 그리면 무대의 주인이 서사에서 대시보드로 넘어가고,
-                   * 아무 표시도 없으면 지시가 먹혔는지 확인하러 탭을 열어야 한다.
-                   */}
-                  {hint && (
-                    <span className="rail-hint" data-testid={`hint-${key}`} role="status">
-                      {hint.lines.map((line, i) => (
-                        <span className="rail-hint-line" key={i}>
-                          {line}
-                        </span>
-                      ))}
-                      {hint.more > 0 && <i>외 {hint.more}건</i>}
-                    </span>
-                  )}
-                </span>
-              );
-            })}
+            {PANELS.map(({ key, Icon }) => (
+              <button
+                key={key}
+                className={`${panel === key ? "active" : ""}${hints.some((h) => h.panel === key) ? " hinted" : ""}`}
+                onClick={() => {
+                  setSeenHints((seen) => (seen.includes(key) ? seen : [...seen, key]));
+                  setPanel(panel === key ? null : key);
+                }}
+                data-testid={`tab-${key}`}
+                title={key}
+                aria-label={key}
+              >
+                <Icon />
+              </button>
+            ))}
+            {/**
+             * 바뀐 장부를 알리는 말풍선 — **다음 클릭에 닫히고, 칩으로 다시 부른다.**
+             *
+             * 아무 표시도 없으면 지시가 먹혔는지 확인하러 탭을 열어야 한다. 그렇다고
+             * 상주하면 알림이 화면의 일부가 되어 신호가 죽는다. 놓쳐도 그 지시는
+             * 채팅에 칩으로 남아 있어 눌러 되부를 수 있다(`pinnedHint`).
+             *
+             * 아이콘 위의 점이 "여기가 바뀌었다"를 남긴다 — 말풍선을 닫아도 남는다.
+             * 카드 자체의 생김새는 `RailHints`가 갖는다.
+             */}
+            <RailHints hints={shownHints} pinned={pinnedHint !== null} />
           </nav>
         )}
       </header>
@@ -838,121 +948,146 @@ export function GameScreen({ gameId }: { gameId: string }) {
       )}
 
       <main className="stage">
-        {/* 무대 — 경기 중에는 판세와 중계가 나란히 선다. 감독은 왼쪽에서 읽고
-            오른쪽에 지시한다 (탭을 오가며 상황을 기억하지 않아도 된다) */}
-        {panel === null &&
-          (game.views.match ? (
-            /* 경기 — **채팅이 왼쪽**이다. 감독이 읽고 말하는 자리가 주인이다 */
-            <div className="stage-split">
-              {chatPane}
-              <div className="stage-board" data-testid="stage-board">
-                {matchTab === "판세" && <MatchOverview match={game.views.match} />}
-                {matchTab === "팀" && (
-                  <>
-                    {/**
-                     * **구성은 같고 정확도만 다르다** — 양쪽 다 판 → 전술 → 명단
-                     * 순으로 읽힌다. 배치를 맞춰 둬야 감독이 오갈 때 눈이 매번
-                     * 자리를 다시 찾지 않는다. 상대 쪽은 안개를 지나고 조작이 없다.
-                     */}
-                    <div className="side-tabs" role="tablist">
-                      {(["ours", "theirs"] as const).map((s2) => (
-                        <button
-                          key={s2}
-                          role="tab"
-                          aria-selected={squadSide === s2}
-                          className={`side-tab${squadSide === s2 ? " on" : ""}`}
-                          onClick={() => setSquadSide(s2)}
-                          data-testid={`side-${s2}`}
-                        >
-                          {s2 === "ours" ? "우리 팀" : "상대 팀"}
-                        </button>
-                      ))}
-                    </div>
-                    {squadSide === "ours" ? (
-                      <SquadView
-                        game={game}
-                        onUpdate={setGame}
-                        onGoToChat={() => setMatchTab("판세")}
-                        onOrder={(text) => {
-                          ordersRef.current = [...ordersRef.current, text];
-                        }}
-                      />
-                    ) : (
-                      <MatchOpponent match={game.views.match} />
-                    )}
-                  </>
-                )}
-                {matchTab === "대회" && (
-                  <CompetitionsView
-                    competitions={game.views.competitions}
-                    teamName={game.teamName}
-                  />
-                )}
-              </div>
-            </div>
-          ) : (
-            chatPane
-          ))}
-
         {/**
-         * 장부 뷰 — **채팅을 대신하지 않고 나눠 쓴다.**
+         * ── 무대는 **하나의 갈림**이다 ──────────────────────────
          *
-         * 예전에는 패널이 무대를 통째로 덮었다. 그러면 명단을 확인하려고 연 순간
-         * 대화가 사라지고, 감독은 "방금 코치가 뭐라고 했더라"를 확인하러 다시 채팅을
-         * 열어야 한다. 폭만 있으면 둘 다 서 있는 게 맞다 — 경기 중 무대가 이미
-         * 그렇게 갈린다.
+         * 왼쪽은 언제나 채팅, 오른쪽은 그때 필요한 것(경기 판 / 장부)이고, 닫혀
+         * 있을 땐 폭이 0이다. 예전에는 경기 무대와 장부 무대가 서로 다른 마크업이라
+         * 킥오프·탭 조작마다 채팅이 통째로 다시 그려지며 **툭** 튀었다 — 격자 트랙이
+         * 없다 생겼다 하면 폭을 이어서 애니메이션할 수도 없다.
          *
-         * **갈림은 CSS가 정한다.** 화면 폭을 자바스크립트로 재면 첫 렌더가 서버와
-         * 어긋나고 창을 줄일 때마다 다시 그린다. 마크업은 언제나 둘이고, 좁은
-         * 화면에서는 채팅 열이 접힌다(사라지는 게 아니라 접히는 것이라 스크롤
-         * 위치와 쓰던 입력이 그대로 남는다).
+         * 오른쪽에 무엇이 들었는지는 `with-board`/`with-ledger`가 CSS에 알린다:
+         * 좁은 화면에서 판은 채팅 **위로 얹히고**(경기는 판세를 계속 봐야 한다)
+         * 장부는 채팅을 **덮는다**(반반이 성립하지 않는 폭이라).
          */}
-        {panel !== null && (
-          <div
-            className={`stage-split panel-split${panel === "스쿼드" && boardOpen ? " board-open" : ""}`}
+        <div
+          className={`stage-split panel-split${rightOpen ? " open" : ""}${
+            showBoard ? " with-board" : " with-ledger"
+          }${boardTakesStage ? " board-open" : ""}`}
+        >
+          {chatPane}
+          <section
+            className="stage-right"
+            aria-hidden={!rightOpen}
+            /* 접힌 칸은 화면에도 손에도 없다 — 폭 0짜리 표에 탭 포커스가 빠지지 않게 */
+            inert={!rightOpen}
           >
-            {chatPane}
-            <section className={wide ? "panel wide" : "panel"} data-testid={`panel-${panel}`}>
-              {/* 폭은 뷰가 정한다 — 전술판+명단(스쿼드)과 열두 달 격자(달력)는
-                  본문 900px 안에 넣으면 읽을 수가 없다 */}
-              <div
-                className={`view-scroll${wide ? " wide" : ""}${panel === "스쿼드" ? " fill" : ""}`}
-              >
-                {panel === "스쿼드" && (
-                  <SquadView
-                    game={game}
-                    onUpdate={setGame}
-                    onGoToChat={() => setPanel(null)}
-                    boardOpen={boardOpen}
-                    onToggleBoard={() => setBoardOpen((open) => !open)}
-                    /*
-                     * 경기 중 전술판 조작 — **지시로 보낸다.** 판에서 손을 뗀 순간
-                     * 채팅으로 돌아가 중계를 보게 한다: 지시의 결과는 거기서 나온다.
-                     */
-                    onOrder={
-                      game.views.match
-                        ? (text) => {
+            {showBoard && game.views.match ? (
+              <div className="stage-board" data-testid="stage-board">
+                {/* 탭이 바뀌면 이 덩어리가 새로 서며 흐려졌다 든다 — 판세와 명단은
+                    생김새가 아주 달라서 즉시 갈리면 무엇이 바뀐 건지 읽히지 않는다 */}
+                <div className="board-tab" key={matchTab}>
+                  {matchTab === "판세" && <MatchOverview match={game.views.match} />}
+                  {matchTab === "팀" && (
+                    <>
+                      {/**
+                       * **구성은 같고 정확도만 다르다** — 양쪽 다 판 → 전술 → 명단
+                       * 순으로 읽힌다. 배치를 맞춰 둬야 감독이 오갈 때 눈이 매번
+                       * 자리를 다시 찾지 않는다. 상대 쪽은 안개를 지나고 조작이 없다.
+                       */}
+                      <div className="side-tabs" role="tablist">
+                        {(["ours", "theirs"] as const).map((s2) => (
+                          <button
+                            key={s2}
+                            role="tab"
+                            aria-selected={squadSide === s2}
+                            className={`side-tab${squadSide === s2 ? " on" : ""}`}
+                            onClick={() => setSquadSide(s2)}
+                            data-testid={`side-${s2}`}
+                          >
+                            {s2 === "ours" ? "우리 팀" : "상대 팀"}
+                          </button>
+                        ))}
+                      </div>
+                      {squadSide === "ours" ? (
+                        /*
+                         * 경기 중에도 **명단이 먼저**다 — 오피스의 스쿼드 탭과 같은
+                         * 손잡이를 쓴다. 무대의 반쪽에 판을 밀어 넣으면 명단 표가
+                         * 눌려 누구를 뺄지 읽을 수가 없고, 정지점마다 급한 건 대개
+                         * 체력과 평점이다. 판은 필요할 때 펼친다.
+                         */
+                        <SquadView
+                          game={game}
+                          onUpdate={setGame}
+                          onGoToChat={() => setMatchTab("판세")}
+                          boardOpen={boardOpen}
+                          onToggleBoard={() => setBoardOpen((open) => !open)}
+                          onOrder={(text) => {
                             ordersRef.current = [...ordersRef.current, text];
-                          }
-                        : undefined
-                    }
-                  />
-                )}
-                {panel === "달력" && <CalendarView calendar={game.views.calendar} />}
-                {panel === "재정" && <FinanceView finance={game.views.finance} />}
-                {panel === "대회" && (
-                  <CompetitionsView
-                    competitions={game.views.competitions}
-                    teamName={game.teamName}
-                  />
-                )}
-                {panel === "커리어" && (
-                  <CareerView squad={game.views.squad} career={game.views.career} />
-                )}
+                          }}
+                        />
+                      ) : (
+                        <MatchOpponent
+                          match={game.views.match}
+                          boardOpen={boardOpen}
+                          onToggleBoard={() => setBoardOpen((open) => !open)}
+                        />
+                      )}
+                    </>
+                  )}
+                  {matchTab === "대회" && (
+                    <CompetitionsView
+                      competitions={game.views.competitions}
+                      teamName={game.teamName}
+                    />
+                  )}
+                </div>
               </div>
-            </section>
-          </div>
-        )}
+            ) : (
+              /**
+               * 장부 뷰 — **채팅을 대신하지 않고 나눠 쓴다.**
+               *
+               * 예전에는 패널이 무대를 통째로 덮었다. 그러면 명단을 확인하려고 연 순간
+               * 대화가 사라지고, 감독은 "방금 코치가 뭐라고 했더라"를 확인하러 다시
+               * 채팅을 열어야 한다. 폭만 있으면 둘 다 서 있는 게 맞다.
+               */
+              <div
+                className={wide ? "panel wide" : "panel"}
+                data-testid={panel !== null ? `panel-${panel}` : undefined}
+              >
+                {/* 폭은 뷰가 정한다 — 전술판+명단(스쿼드)과 열두 달 격자(달력)는
+                    본문 900px 안에 넣으면 읽을 수가 없다.
+                    `key`로 장부마다 새로 세운다 — 탭을 옮길 때 흐려졌다 든다 */}
+                <div
+                  key={shownPanel ?? "none"}
+                  className={`view-scroll${wide ? " wide" : ""}${shownPanel === "스쿼드" ? " fill" : ""}`}
+                >
+                  {shownPanel === "스쿼드" && (
+                    <SquadView
+                      game={game}
+                      onUpdate={setGame}
+                      onGoToChat={() => setPanel(null)}
+                      boardOpen={boardOpen}
+                      onToggleBoard={() => setBoardOpen((open) => !open)}
+                      /*
+                       * 경기 중 전술판 조작 — **지시로 보낸다.** 판에서 손을 뗀 순간
+                       * 채팅으로 돌아가 중계를 보게 한다: 지시의 결과는 거기서 나온다.
+                       */
+                      onOrder={
+                        game.views.match
+                          ? (text) => {
+                              ordersRef.current = [...ordersRef.current, text];
+                            }
+                          : undefined
+                      }
+                    />
+                  )}
+                  {shownPanel === "달력" && <CalendarView calendar={game.views.calendar} />}
+                  {shownPanel === "재정" && <FinanceView finance={game.views.finance} />}
+                  {shownPanel === "대회" && (
+                    <CompetitionsView
+                      competitions={game.views.competitions}
+                      teamName={game.teamName}
+                    />
+                  )}
+                  {shownPanel === "커리어" && (
+                    <CareerView squad={game.views.squad} career={game.views.career} />
+                  )}
+                </div>
+              </div>
+            )}
+          </section>
+        </div>
       </main>
     </div>
   );
