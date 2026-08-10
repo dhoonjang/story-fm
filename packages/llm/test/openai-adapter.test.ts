@@ -27,6 +27,31 @@ function makeStubClient(responses: unknown[]) {
   return { client: { chat: { completions: { create } } } as never, sent, create };
 }
 
+/** 스트리밍 chunk 하나 — 실제 응답과 같은 모양 */
+function chunk(delta: Record<string, unknown>, finish: string | null = null) {
+  return { choices: [{ index: 0, delta, finish_reason: finish }] };
+}
+
+/**
+ * ⚠️ 사용량은 `stream_options.include_usage`가 붙여 주는 **마지막 chunk**에만 실리고
+ * 그 chunk의 `choices`는 빈 배열이다.
+ */
+const usageChunk = { choices: [], usage };
+
+/** 요청마다 chunk 목록 하나를 async iterable로 돌려주는 stub */
+function makeStreamClient(streams: unknown[][]) {
+  const sent: Array<Record<string, unknown>> = [];
+  const create = vi.fn(async (params: Record<string, unknown>) => {
+    sent.push({ ...params, messages: [...(params.messages as unknown[])] });
+    const next = streams.shift();
+    if (!next) throw new Error("stub 스트림 부족");
+    return (async function* () {
+      for (const c of next) yield c;
+    })();
+  });
+  return { client: { chat: { completions: { create } } } as never, sent };
+}
+
 describe("OpenAI 어댑터 — 잡무 티어", () => {
   it("함수 도구를 쓰려면 추론이 꺼져 있어야 한다", async () => {
     const { client, sent } = makeStubClient([completion({ role: "assistant", content: "됐다" })]);
@@ -45,7 +70,11 @@ describe("OpenAI 어댑터 — 잡무 티어", () => {
     const tool: GameToolSpec = {
       name: "report_mood",
       description: "심경",
-      inputSchema: { type: "object", properties: { notes: { type: "array" } }, required: ["notes"] },
+      inputSchema: {
+        type: "object",
+        properties: { notes: { type: "array" } },
+        required: ["notes"],
+      },
       handle: () => ({ ok: true, message: "ok" }),
     };
     await new OpenAiGameLLM(tierConfig, client).runTurn({
@@ -111,7 +140,9 @@ describe("OpenAI 어댑터 — 잡무 티어", () => {
       ],
     });
     const second = sent[1]?.messages as Array<{ role: string; content?: unknown }>;
-    expect(second.some((m) => m.role === "tool" && String(m.content).startsWith("오류"))).toBe(true);
+    expect(second.some((m) => m.role === "tool" && String(m.content).startsWith("오류"))).toBe(
+      true,
+    );
   });
 
   it("인자가 깨져도 던지지 않고 그 사실을 되돌려 준다", async () => {
@@ -186,5 +217,199 @@ describe("OpenAI 어댑터 — 잡무 티어", () => {
       cacheReadTokens: 25,
       cacheWriteTokens: 0,
     });
+  });
+});
+
+/**
+ * 스트리밍은 **Chat Completions 위에** 붙였다 — 막고 있던 것은 스트리밍이 아니라
+ * 추론 + 함수 도구의 조합이고, Responses API로 갈아타면 저장 이력의 모양이 통째로
+ * 바뀌어 이미 `openai` 태그가 붙은 세이브가 버려진다.
+ */
+describe("OpenAI 어댑터 — 스트리밍", () => {
+  it("텍스트 델타를 도착 즉시 흘려보내고 합쳐서 돌려준다", async () => {
+    const { client } = makeStreamClient([
+      [
+        chunk({ role: "assistant", content: "@수석코치: " }),
+        chunk({ content: "훈련을 " }),
+        chunk({ content: "마쳤습니다." }),
+        chunk({}, "stop"),
+        usageChunk,
+      ],
+    ]);
+    const deltas: string[] = [];
+    const result = await new OpenAiGameLLM(tierConfig, client).runTurn({
+      system: "S",
+      history: [],
+      user: "결산",
+      onText: (delta) => deltas.push(delta),
+    });
+
+    expect(deltas).toEqual(["@수석코치: ", "훈련을 ", "마쳤습니다."]);
+    expect(result.text).toBe("@수석코치: 훈련을 마쳤습니다.");
+    expect(result.stopReason).toBe("stop");
+  });
+
+  /**
+   * include_usage가 없으면 스트리밍 응답의 usage가 통째로 비어 계측·예산이
+   * 이 티어를 못 본다 (usage-meter).
+   */
+  it("사용량 chunk를 받으려고 include_usage를 켠다", async () => {
+    const { client, sent } = makeStreamClient([[chunk({ content: "됐다" }, "stop"), usageChunk]]);
+    const result = await new OpenAiGameLLM(tierConfig, client).runTurn({
+      system: "S",
+      history: [],
+      user: "결산",
+      onText: () => {},
+    });
+
+    expect(sent[0]?.stream).toBe(true);
+    expect(sent[0]?.stream_options).toEqual({ include_usage: true });
+    expect(result.usage).toEqual({
+      inputTokens: 100,
+      outputTokens: 40,
+      cacheReadTokens: 25,
+      cacheWriteTokens: 0,
+    });
+  });
+
+  it("스트림이 끊겨 사용량 chunk가 안 와도 던지지 않는다", async () => {
+    const { client } = makeStreamClient([[chunk({ content: "됐다" }, "stop")]]);
+    const result = await new OpenAiGameLLM(tierConfig, client).runTurn({
+      system: "S",
+      history: [],
+      user: "결산",
+      onText: () => {},
+    });
+    expect(result.text).toBe("됐다");
+    expect(result.usage.inputTokens).toBe(0);
+  });
+
+  /**
+   * 도구 호출은 **`index`가 자리를 정한다** — id·이름은 첫 조각에만 실리고
+   * `arguments`는 문자 단위로 쪼개져 온다.
+   */
+  it("조각난 도구 호출을 이어 붙여 실행한다", async () => {
+    const { client, sent } = makeStreamClient([
+      [
+        chunk({
+          role: "assistant",
+          tool_calls: [
+            {
+              index: 0,
+              id: "call_1",
+              type: "function",
+              function: { name: "report_", arguments: "" },
+            },
+          ],
+        }),
+        chunk({ tool_calls: [{ index: 0, function: { name: "mood" } }] }),
+        chunk({ tool_calls: [{ index: 0, function: { arguments: '{"notes"' } }] }),
+        chunk({ tool_calls: [{ index: 0, function: { arguments: ":[]}" } }] }),
+        chunk({}, "tool_calls"),
+        usageChunk,
+      ],
+      [chunk({ content: "끝" }, "stop"), usageChunk],
+    ]);
+    const handle = vi.fn(() => ({ ok: true, message: "심경 3명 반영" }));
+    const result = await new OpenAiGameLLM(tierConfig, client).runTurn({
+      system: "S",
+      history: [],
+      user: "결산",
+      tools: [
+        { name: "report_mood", description: "심경", inputSchema: { type: "object" }, handle },
+      ],
+      onText: () => {},
+    });
+
+    expect(handle).toHaveBeenCalledWith({ notes: [] }, { text: "" });
+    expect(result.toolCallCount).toBe(1);
+    expect(result.text).toBe("끝");
+
+    // 조립한 모델 턴이 완성 응답과 같은 모양으로 이력에 실린다
+    const second = sent[1]?.messages as Array<{
+      role: string;
+      tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
+      content?: unknown;
+      tool_call_id?: string;
+    }>;
+    const assistant = second.find((m) => m.role === "assistant");
+    expect(assistant?.tool_calls?.[0]).toEqual({
+      id: "call_1",
+      type: "function",
+      function: { name: "report_mood", arguments: '{"notes":[]}' },
+    });
+    expect(
+      second.some(
+        (m) => m.role === "tool" && m.tool_call_id === "call_1" && m.content === "심경 3명 반영",
+      ),
+    ).toBe(true);
+  });
+
+  it("병렬 도구 호출이 교대로 도착해도 자리별로 조립된다", async () => {
+    const { client } = makeStreamClient([
+      [
+        chunk({
+          tool_calls: [
+            { index: 0, id: "c0", type: "function", function: { name: "a", arguments: "" } },
+            { index: 1, id: "c1", type: "function", function: { name: "b", arguments: "" } },
+          ],
+        }),
+        chunk({ tool_calls: [{ index: 1, function: { arguments: '{"n":2' } }] }),
+        chunk({ tool_calls: [{ index: 0, function: { arguments: '{"n":1' } }] }),
+        chunk({ tool_calls: [{ index: 1, function: { arguments: "}" } }] }),
+        chunk({ tool_calls: [{ index: 0, function: { arguments: "}" } }] }),
+        chunk({}, "tool_calls"),
+        usageChunk,
+      ],
+      [chunk({ content: "끝" }, "stop"), usageChunk],
+    ]);
+    const seen: Array<[string, unknown]> = [];
+    const spec = (name: string) => ({
+      name,
+      description: name,
+      inputSchema: { type: "object" as const },
+      handle: (input: unknown) => {
+        seen.push([name, input]);
+        return { ok: true, message: "ok" };
+      },
+    });
+    const result = await new OpenAiGameLLM(tierConfig, client).runTurn({
+      system: "S",
+      history: [],
+      user: "결산",
+      tools: [spec("a"), spec("b")],
+      onText: () => {},
+    });
+
+    expect(result.toolCallCount).toBe(2);
+    expect(seen).toEqual([
+      ["a", { n: 1 }],
+      ["b", { n: 2 }],
+    ]);
+  });
+
+  it("스트림에서도 도구가 불린 자리(누적 본문)를 그대로 넘긴다", async () => {
+    const { client } = makeStreamClient([
+      [
+        chunk({ content: "@수석코치: 조정하겠습니다." }),
+        chunk({
+          tool_calls: [
+            { index: 0, id: "c", type: "function", function: { name: "t", arguments: "{}" } },
+          ],
+        }),
+        chunk({}, "tool_calls"),
+        usageChunk,
+      ],
+      [chunk({ content: "끝" }, "stop"), usageChunk],
+    ]);
+    const handle = vi.fn(() => ({ ok: true, message: "ok" }));
+    await new OpenAiGameLLM(tierConfig, client).runTurn({
+      system: "S",
+      history: [],
+      user: "결산",
+      tools: [{ name: "t", description: "t", inputSchema: { type: "object" }, handle }],
+      onText: () => {},
+    });
+    expect(handle).toHaveBeenCalledWith({}, { text: "@수석코치: 조정하겠습니다." });
   });
 });

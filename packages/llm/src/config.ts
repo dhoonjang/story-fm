@@ -17,6 +17,14 @@ export type TierName = "gm" | "match" | "chore";
 interface BaseTierConfig {
   model: string;
   maxTokens: number;
+  /**
+   * 이 설정이 어느 티어의 것인가 — **계측이 붙는 자리다** (`usage-meter`).
+   *
+   * `tierConfig()`가 유일한 원본이라 실행 경로에는 언제나 실려 있고, 어댑터를
+   * 직접 만드는 테스트가 손으로 쓴 설정에는 없다(그쪽은 stub 클라이언트라
+   * 잴 호출 자체가 없다). 없으면 팩토리가 감싸지 않는다.
+   */
+  tier?: TierName;
 }
 
 export interface AnthropicTierConfig extends BaseTierConfig {
@@ -168,10 +176,10 @@ export function tierConfig(name: TierName, env: LlmEnv = process.env): TierConfi
   const model = MODELS[provider][name] ?? MODELS[TIER_PROVIDER[name]][name] ?? "";
   const maxTokens = name === "chore" ? CHORE_MAX_TOKENS : MAX_TOKENS;
   if (provider === "google") {
-    return { provider: "google", model, maxTokens, thinkingLevel: THINKING_LEVEL };
+    return { provider: "google", model, maxTokens, tier: name, thinkingLevel: THINKING_LEVEL };
   }
-  if (provider === "openai") return { provider: "openai", model, maxTokens };
-  return { provider: "anthropic", model, maxTokens };
+  if (provider === "openai") return { provider: "openai", model, maxTokens, tier: name };
+  return { provider: "anthropic", model, maxTokens, tier: name };
 }
 
 export const TIERS: Record<TierName, TierConfig> = {

@@ -33,6 +33,17 @@ describe("티어별 프로바이더", () => {
     expect(tiers.chore?.model).toBe("gpt-5.6-luna");
   });
 
+  /**
+   * 계측이 붙는 자리 — 설정이 자기 티어 이름을 들고 다녀야 팩토리가 호출을
+   * 티어별로 적을 수 있다 (`usage-meter`). `tierConfig()`가 유일한 원본이다.
+   */
+  it("설정은 자기 티어 이름을 들고 다닌다", () => {
+    const tiers = tiersWith({ ANTHROPIC_API_KEY: "a", GOOGLE_API_KEY: "g", OPENAI_API_KEY: "o" });
+    expect(tiers.gm?.tier).toBe("gm");
+    expect(tiers.match?.tier).toBe("match");
+    expect(tiers.chore?.tier).toBe("chore");
+  });
+
   it("LLM_PROVIDER가 전 티어를 갈아엎지 않는다", () => {
     const tiers = tiersWith({
       ANTHROPIC_API_KEY: "a",

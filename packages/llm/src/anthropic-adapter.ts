@@ -199,18 +199,19 @@ export class AnthropicGameLLM implements GameLLM {
         messages: withBreakpoint(messages, markUpto) as Anthropic.MessageParam[],
       };
 
-      // onText가 있으면 스트리밍으로 받아 텍스트 델타를 즉시 흘려보낸다.
-      // 도구 루프·이력 위생은 최종 메시지 기준으로 동일하게 처리한다.
+      /**
+       * **언제나 스트리밍으로 받는다.** SDK는 `max_tokens`가 21,333을 넘는
+       * 비스트리밍 요청을 보내기도 전에 거부한다("Streaming is required…" —
+       * `calculateNonstreamingTimeout`). 티어 상한이 64,000이라 화면에 흘릴
+       * 곳이 없는 호출(온보딩·결산)이 전부 그 자리에서 실패했다.
+       * onText는 델타를 받을지만 가른다 — 최종 메시지는 어느 쪽이든 같다.
+       */
       let response: Anthropic.Message;
       try {
-        if (req.onText) {
-          const stream = this.client.messages.stream(params);
-          const onText = req.onText;
-          stream.on("text", (delta) => onText(delta));
-          response = await stream.finalMessage();
-        } else {
-          response = await this.client.messages.create(params);
-        }
+        const stream = this.client.messages.stream(params);
+        const onText = req.onText;
+        if (onText) stream.on("text", (delta) => onText(delta));
+        response = await stream.finalMessage();
       } catch (err) {
         // 중간 시스템 메시지 미지원 모델 — 폴백으로 전환해 같은 반복을 재시도
         if (iter === 0 && useSystemNote && isMidSystemRejection(err)) {
@@ -223,10 +224,15 @@ export class AnthropicGameLLM implements GameLLM {
         throw err;
       }
 
-      usage.inputTokens += response.usage.input_tokens;
+      // ⚠️ Anthropic의 input_tokens는 캐시 read/write를 **빼고** 보고한다.
+      // 계약은 "이 호출이 읽은 입력 전부"라(TurnUsage) 여기서 되돌려 놓는다 —
+      // 안 그러면 캐시가 잘 먹을수록 inputTokens가 줄어 히트율이 1을 넘는다.
+      const cacheRead = response.usage.cache_read_input_tokens ?? 0;
+      const cacheWrite = response.usage.cache_creation_input_tokens ?? 0;
+      usage.inputTokens += response.usage.input_tokens + cacheRead + cacheWrite;
       usage.outputTokens += response.usage.output_tokens;
-      usage.cacheReadTokens += response.usage.cache_read_input_tokens ?? 0;
-      usage.cacheWriteTokens += response.usage.cache_creation_input_tokens ?? 0;
+      usage.cacheReadTokens += cacheRead;
+      usage.cacheWriteTokens += cacheWrite;
       stopReason = response.stop_reason;
 
       for (const block of response.content) {

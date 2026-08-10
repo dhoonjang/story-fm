@@ -76,6 +76,8 @@ function functionCalls(content: Content | undefined): FunctionCall[] {
 
 function addUsage(total: TurnUsage, response: GenerateContentResponse): void {
   const usage = response.usageMetadata;
+  // promptTokenCount는 캐시분(cachedContentTokenCount)을 이미 품고 있다 —
+  // 계약이 요구하는 "입력 전부"와 같은 값이라 그대로 더한다.
   total.inputTokens += usage?.promptTokenCount ?? 0;
   total.outputTokens += usage?.candidatesTokenCount ?? 0;
   total.cacheReadTokens += usage?.cachedContentTokenCount ?? 0;

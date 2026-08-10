@@ -13,19 +13,48 @@ const usage = {
   cache_creation_input_tokens: 0,
 };
 
-function makeStubClient(responses: Array<Partial<Anthropic.Message>>): Anthropic {
-  const create = vi.fn();
+/**
+ * 어댑터는 **언제나 스트리밍으로** 부른다 (SDK가 큰 max_tokens의 비스트리밍
+ * 요청을 거부한다) — 스텁도 `messages.stream`을 흉내 낸다. `create`는 두되
+ * 부르면 터지게 해서, 비스트리밍 경로가 되살아나면 테스트가 먼저 깨진다.
+ */
+function fakeStream(final: () => Promise<Anthropic.Message>, deltas: string[] = []) {
+  return {
+    on(event: string, handler: (delta: string) => void) {
+      if (event === "text") for (const d of deltas) handler(d);
+      return this;
+    },
+    finalMessage: final,
+  };
+}
+
+function makeStubClient(
+  responses: Array<Partial<Anthropic.Message> | Error>,
+  deltas: string[] = [],
+): Anthropic {
+  const stream = vi.fn();
   for (const r of responses) {
-    create.mockResolvedValueOnce({ usage, ...r });
+    stream.mockReturnValueOnce(
+      fakeStream(
+        () =>
+          r instanceof Error
+            ? Promise.reject(r)
+            : Promise.resolve({ usage, ...r } as Anthropic.Message),
+        deltas,
+      ),
+    );
   }
-  return { messages: { create } } as unknown as Anthropic;
+  const create = vi.fn(() => {
+    throw new Error("비스트리밍 경로는 쓰지 않는다");
+  });
+  return { messages: { stream, create } } as unknown as Anthropic;
 }
 
 /** 마지막 요청 파라미터 — 캐시 브레이크포인트·메시지 배치 검증용 */
 function lastParams(client: Anthropic): Anthropic.MessageCreateParamsNonStreaming {
-  const create = (client.messages as unknown as { create: { mock: { calls: unknown[][] } } })
-    .create;
-  const calls = create.mock.calls;
+  const stream = (client.messages as unknown as { stream: { mock: { calls: unknown[][] } } })
+    .stream;
+  const calls = stream.mock.calls;
   return calls[calls.length - 1]![0] as Anthropic.MessageCreateParamsNonStreaming;
 }
 
@@ -58,6 +87,68 @@ describe("AnthropicGameLLM 요청 파라미터", () => {
     // 켜 두면 본문이 예산을 잃고 문장 한복판에서 잘린다
     expect(params.thinking).toEqual({ type: "disabled" });
     expect(params.max_tokens).toBe(tierConfig.maxTokens);
+  });
+
+  /**
+   * 화면에 흘릴 곳이 없는 호출(온보딩·결산)도 스트리밍으로 부른다.
+   * SDK는 `max_tokens`가 21,333을 넘으면 비스트리밍 요청을 보내기 전에 거부하고
+   * (`calculateNonstreamingTimeout`), 티어 상한은 64,000이다 — 예전엔 그 자리에서
+   * 온보딩이 매번 실패해 첫 장면이 늘 규칙 기반 폴백으로 열렸다.
+   */
+  it("onText가 없어도 스트리밍으로 부른다 — 큰 출력 상한에서 비스트리밍은 거부된다", async () => {
+    const stub = makeStubClient([endTurn]);
+    const llm = new AnthropicGameLLM({ ...tierConfig, maxTokens: 64_000 }, stub);
+    const result = await llm.runTurn({ system: "sys", history: [], user: "안녕" });
+
+    expect(result.text).toContain("알겠습니다");
+    // create를 부르면 스텁이 터진다 — 통과했다는 건 스트리밍만 썼다는 뜻
+    expect(
+      (stub.messages as unknown as { create: { mock: { calls: unknown[] } } }).create.mock.calls,
+    ).toHaveLength(0);
+  });
+
+  it("onText를 주면 텍스트 델타가 그대로 흘러나온다", async () => {
+    const stub = makeStubClient([endTurn], ["@수석코치: ", "알겠습니다."]);
+    const deltas: string[] = [];
+    await new AnthropicGameLLM(tierConfig, stub).runTurn({
+      system: "sys",
+      history: [],
+      user: "안녕",
+      onText: (d) => deltas.push(d),
+    });
+
+    expect(deltas).toEqual(["@수석코치: ", "알겠습니다."]);
+  });
+
+  /**
+   * ⚠️ Anthropic은 `input_tokens`에서 캐시 read/write를 **빼고** 보고한다.
+   * 계약은 "이 호출이 읽은 입력 전부"라(TurnUsage) 어댑터가 되돌려 놓는다 —
+   * 그대로 두면 캐시가 잘 먹을수록 분모가 줄어 히트율이 1을 넘는다.
+   */
+  it("사용량의 입력은 캐시 몫까지 합친 값이다", async () => {
+    const stub = makeStubClient([
+      {
+        usage: {
+          input_tokens: 100,
+          output_tokens: 50,
+          cache_read_input_tokens: 800,
+          cache_creation_input_tokens: 120,
+        } as Anthropic.Usage,
+        ...endTurn,
+      },
+    ]);
+    const result = await new AnthropicGameLLM(tierConfig, stub).runTurn({
+      system: "sys",
+      history: [],
+      user: "안녕",
+    });
+
+    expect(result.usage).toEqual({
+      inputTokens: 1020,
+      outputTokens: 50,
+      cacheReadTokens: 800,
+      cacheWriteTokens: 120,
+    });
   });
 });
 
@@ -230,8 +321,7 @@ describe("입력 조립 — 캐시 계층과 상태 채널", () => {
   });
 
   it("role:system을 거부하는 모델은 유저 메시지에 접어 넣고 재시도한다", async () => {
-    const create = vi.fn();
-    create.mockRejectedValueOnce(
+    const stub = makeStubClient([
       // 실제 400 형태 — 에러 본문이 메시지에 그대로 실린다
       new AnthropicSdk.APIError(
         400,
@@ -245,9 +335,8 @@ describe("입력 조립 — 캐시 계층과 상태 채널", () => {
         undefined,
         undefined,
       ),
-    );
-    create.mockResolvedValueOnce({ usage, ...endTurn });
-    const stub = { messages: { create } } as unknown as Anthropic;
+      endTurn,
+    ]);
 
     const llm = new AnthropicGameLLM(
       { provider: "anthropic", model: "legacy-model", maxTokens: 512 },
@@ -260,7 +349,9 @@ describe("입력 조립 — 캐시 계층과 상태 채널", () => {
       stateNote: "[상태] 스냅샷",
     });
 
-    expect(create).toHaveBeenCalledTimes(2);
+    expect(
+      (stub.messages as unknown as { stream: { mock: { calls: unknown[][] } } }).stream.mock.calls,
+    ).toHaveLength(2);
     const messages = lastParams(stub).messages as Array<{ role: string; content: string }>;
     expect(messages).toHaveLength(1);
     expect(messages[0]?.role).toBe("user");
