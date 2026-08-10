@@ -224,13 +224,6 @@ export default function AdminPage() {
           <h1>선수 카탈로그 어드민</h1>
         </div>
         <div className="admin-head-actions">
-          <Link
-            href="/admin/prompts"
-            className="ghost-btn admin-nav-link"
-            data-testid="admin-prompts-link"
-          >
-            기본 프롬프트
-          </Link>
           {edited && <span className="badge warn" data-testid="catalog-edited">편집됨</span>}
           <button
             className="ghost-btn"

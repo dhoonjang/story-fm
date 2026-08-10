@@ -69,7 +69,7 @@ import {
 } from "@story-fm/domain";
 import type { GameToolSpec, JsonObjectSchema, ToolCallContext } from "@story-fm/llm";
 import { buildSegmentMessage } from "./match-caster";
-import { resolveSkillDescriptions } from "./skill-descriptions";
+import { skillDescriptions } from "./skill-descriptions";
 import type { GmToolCall } from "./gm-types";
 
 const obj = (properties: Record<string, unknown>, required: string[]): JsonObjectSchema => ({
@@ -111,7 +111,7 @@ function writtenLines(text: string): number {
 
 /** 실모드 GM의 스킬 도구 바인딩 — 엔진 함수를 GameToolSpec으로 감싼다 */
 export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpec[] {
-  const descriptions = resolveSkillDescriptions().descriptions;
+  const descriptions = skillDescriptions();
   const record = (
     name: string,
     result: { ok: boolean; message: string; payload?: unknown; tone?: "good" | "bad" },
@@ -1022,7 +1022,7 @@ export function buildMatchTools(
   goals: GoalMark[] = [],
   cards: CardMark[] = [],
 ): GameToolSpec[] {
-  const descriptions = resolveSkillDescriptions().descriptions;
+  const descriptions = skillDescriptions();
   return [
     ...buildGmTools(state, calls).filter((t) => MATCH_TOOL_NAMES.has(t.name)),
     makeAdvanceMatchTool(state, calls, goals, cards, descriptions.advance_match),

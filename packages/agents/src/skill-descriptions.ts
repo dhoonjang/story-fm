@@ -1,8 +1,3 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import path from "node:path";
-import { z } from "zod";
-import { dataDir } from "@story-fm/engine";
-
 export type SkillGroup = "진행" | "전술·훈련" | "대화·서사" | "조회" | "경기" | "이적" | "재정";
 
 export interface SkillCatalogEntry {
@@ -318,72 +313,7 @@ export const DEFAULT_SKILL_DESCRIPTIONS = Object.fromEntries(
   SKILL_CATALOG.map((skill) => [skill.name, skill.description]),
 ) as SkillDescriptions;
 
-export interface ResolvedSkillDescriptions {
-  descriptions: SkillDescriptions;
-  edited: boolean;
-}
-
-const StoredSkillDescriptionsSchema = z.object({
-  version: z.literal(1),
-  descriptions: z.record(z.string().min(1)),
-});
-
-/** 스킬 설명 오버라이드 파일 — 시스템 프롬프트와 별도로 관리한다. */
-export function skillDescriptionsPath(): string {
-  return path.join(dataDir(), "skill-descriptions.json");
-}
-
-/** 저장된 설명 중 현재 코드에 존재하는 스킬만 읽는다. */
-export function loadSkillDescriptionOverrides(): Partial<SkillDescriptions> | null {
-  const file = skillDescriptionsPath();
-  if (!existsSync(file)) return null;
-  try {
-    const parsed = StoredSkillDescriptionsSchema.safeParse(
-      JSON.parse(readFileSync(file, "utf8")) as unknown,
-    );
-    if (!parsed.success) return null;
-    const overrides: Partial<SkillDescriptions> = {};
-    for (const name of SKILL_NAMES) {
-      const description = parsed.data.descriptions[name];
-      if (description !== undefined) overrides[name] = description;
-    }
-    return overrides;
-  } catch {
-    return null;
-  }
-}
-
-/** 코드 기본값과 저장된 편집본을 합쳐 이번 LLM 턴에 사용할 설명을 만든다. */
-export function resolveSkillDescriptions(
-  defaults: SkillDescriptions = DEFAULT_SKILL_DESCRIPTIONS,
-): ResolvedSkillDescriptions {
-  const overrides = loadSkillDescriptionOverrides();
-  if (!overrides) return { descriptions: defaults, edited: false };
-  const descriptions = { ...defaults, ...overrides };
-  return {
-    descriptions,
-    edited: SKILL_NAMES.some((name) => descriptions[name] !== defaults[name]),
-  };
-}
-
-/** 모든 현재 스킬 설명을 원자적으로 저장한다. */
-export function saveSkillDescriptionOverrides(descriptions: SkillDescriptions): void {
-  for (const name of SKILL_NAMES) {
-    if (descriptions[name].trim().length === 0) {
-      throw new Error(`빈 스킬 설명: ${name}`);
-    }
-  }
-  const parsed = StoredSkillDescriptionsSchema.parse({ version: 1, descriptions });
-  const dir = dataDir();
-  mkdirSync(dir, { recursive: true });
-  const file = skillDescriptionsPath();
-  const tmp = `${file}.tmp`;
-  writeFileSync(tmp, JSON.stringify(parsed, null, 2), "utf8");
-  renameSync(tmp, file);
-}
-
-/** 저장된 스킬 설명 편집본을 삭제하고 코드 기본값으로 되돌린다. */
-export function resetSkillDescriptionOverrides(): void {
-  const file = skillDescriptionsPath();
-  if (existsSync(file)) rmSync(file);
+/** 이번 LLM 턴에 실릴 도구 설명 — 코드가 유일한 원본이다 (llm.md §7). */
+export function skillDescriptions(): SkillDescriptions {
+  return DEFAULT_SKILL_DESCRIPTIONS;
 }

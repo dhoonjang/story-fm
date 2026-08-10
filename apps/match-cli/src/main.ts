@@ -23,12 +23,10 @@ import {
 } from "@story-fm/sim";
 import { createGameLLM, TIERS, type TurnHistory, type TurnUsage } from "@story-fm/llm";
 import {
-  GM_SYSTEM,
   MATCH_CASTER_SYSTEM,
   buildContinueMessage,
   buildKickoffMessage,
   buildSegmentMessage,
-  resolveSystemPrompts,
 } from "@story-fm/agents";
 
 // ---- 인자 파싱 (프로토타입 수준) ----
@@ -170,10 +168,6 @@ function runSegment(): { note: string; stop: string } {
 
 // ---- ③ 매치 티어 LLM 진행 루프 ----
 const llm = createGameLLM(TIERS.match);
-const matchSystem = resolveSystemPrompts({
-  gm: GM_SYSTEM,
-  match: MATCH_CASTER_SYSTEM,
-}).prompts.match;
 const totalUsage: TurnUsage = {
   inputTokens: 0,
   outputTokens: 0,
@@ -194,7 +188,7 @@ for (let turn = 1; turn <= maxTurns && !finished; turn++) {
       ? `${buildKickoffMessage(packet, managerNote)}\n\n${segment.note}`
       : `${buildContinueMessage(describeLedger(ledger, names), "좋아, 계속 진행해.")}\n\n${segment.note}`;
   const result = await llm.runTurn({
-    system: matchSystem,
+    system: MATCH_CASTER_SYSTEM,
     history,
     user: userMessage,
   });

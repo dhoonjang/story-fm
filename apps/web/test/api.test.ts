@@ -16,17 +16,6 @@ import {
   PATCH as catalogPatch,
   DELETE as catalogDelete,
 } from "../app/api/admin/catalog/player/[playerId]/route";
-import {
-  GET as promptsGet,
-  PUT as promptsPut,
-  DELETE as promptsReset,
-} from "../app/api/admin/prompts/route";
-import {
-  GET as skillsGet,
-  PUT as skillsPut,
-  DELETE as skillsReset,
-} from "../app/api/admin/skills/route";
-import { SKILL_CATALOG } from "@story-fm/agents";
 import { cupCatalogById } from "@story-fm/engine";
 import { FORMATION_LAYOUTS } from "@story-fm/domain";
 import type { GamePayload } from "../lib/store";
@@ -518,74 +507,4 @@ describe("API — 온보딩부터 경기까지", () => {
     expect(reset.edited).toBe(false);
   });
 
-  it("프롬프트 어드민 — 조회·편집·검증·기본값 복원", async () => {
-    const initial = (await promptsGet().json()) as {
-      prompts: { gm: string; match: string };
-      edited: boolean;
-    };
-    expect(initial.edited).toBe(false);
-    expect(initial.prompts.gm).toContain("게임 마스터");
-    expect(initial.prompts.match).toContain("경기 중계자");
-
-    const custom = {
-      gm: `${initial.prompts.gm}\n\n# 어드민 테스트\n응답은 간결하게.`,
-      match: `${initial.prompts.match}\n\n# 어드민 테스트\n정지점을 명확히 표시하라.`,
-    };
-    const saveRes = await promptsPut(json(custom));
-    expect(saveRes.status).toBe(200);
-    const saved = (await saveRes.json()) as {
-      prompts: { gm: string; match: string };
-      edited: boolean;
-    };
-    expect(saved.edited).toBe(true);
-    expect(saved.prompts).toEqual(custom);
-    expect(((await promptsGet().json()) as typeof saved).prompts).toEqual(custom);
-
-    const invalid = await promptsPut(json({ gm: " ", match: custom.match }));
-    expect(invalid.status).toBe(400);
-
-    const resetRes = promptsReset();
-    expect(resetRes.status).toBe(200);
-    const reset = (await resetRes.json()) as {
-      prompts: { gm: string; match: string };
-      edited: boolean;
-    };
-    expect(reset.edited).toBe(false);
-    expect(reset.prompts).toEqual(initial.prompts);
-  });
-
-  it("스킬 설명 어드민 — 조회·편집·검증·기본값 복원", async () => {
-    const initial = (await skillsGet().json()) as {
-      skills: Array<{ name: string; description: string; readOnly: boolean }>;
-      edited: boolean;
-    };
-    expect(initial.edited).toBe(false);
-    // 도구가 늘어도 깨지지 않게 카탈로그와 맞춘다 (숫자를 박으면 기능 추가마다 손댄다)
-    expect(initial.skills).toHaveLength(SKILL_CATALOG.length);
-    expect(initial.skills.some((skill) => skill.name === "deal_odds")).toBe(true);
-    expect(initial.skills.find((skill) => skill.name === "search_players")?.readOnly).toBe(true);
-
-    const descriptions = Object.fromEntries(
-      initial.skills.map((skill) => [skill.name, skill.description]),
-    );
-    descriptions.set_captain += "\n어드민 테스트 설명";
-    const saveRes = await skillsPut(json({ descriptions }));
-    expect(saveRes.status).toBe(200);
-    const saved = (await saveRes.json()) as typeof initial;
-    expect(saved.edited).toBe(true);
-    expect(saved.skills.find((skill) => skill.name === "set_captain")?.description).toContain(
-      "어드민 테스트 설명",
-    );
-
-    const invalid = await skillsPut(json({ descriptions: { set_captain: "하나만 있음" } }));
-    expect(invalid.status).toBe(400);
-
-    const resetRes = skillsReset();
-    expect(resetRes.status).toBe(200);
-    const reset = (await resetRes.json()) as typeof initial;
-    expect(reset.edited).toBe(false);
-    expect(reset.skills.find((skill) => skill.name === "set_captain")?.description).not.toContain(
-      "어드민 테스트 설명",
-    );
-  });
 });

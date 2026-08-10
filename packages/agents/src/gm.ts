@@ -30,7 +30,6 @@ import { reportMood } from "./mood-rater";
 import { reportTraining } from "./training-rater";
 import { MATCH_CASTER_SYSTEM } from "./match-caster";
 import { buildOnboardingTurn, runMockGmTurn } from "./mock-gm";
-import { resolveSystemPrompts } from "./prompt-store";
 import { GM_SYSTEM } from "./gm-prompt";
 import { buildGmTools, buildMatchTools } from "./gm-tools";
 import {
@@ -133,7 +132,7 @@ function isValidOnboardingText(state: GameState, text: string): boolean {
 
 /**
  * 새 게임 첫 장면.
- * 실모드는 현재 어드민 GM 프롬프트로 매번 생성하고, mock/호출 실패/문법 위반은
+ * 실모드는 GM 프롬프트로 매번 생성하고, mock/호출 실패/문법 위반은
  * 시드 기반 규칙 장면으로 폴백해 새 게임 생성 자체가 실패하지 않게 한다.
  */
 export async function runOnboardingTurn(state: GameState, llm?: GameLLM): Promise<GmTurnResult> {
@@ -141,12 +140,8 @@ export async function runOnboardingTurn(state: GameState, llm?: GameLLM): Promis
   if (resolveLlmMode(TIERS.gm) === "mock") return fallback;
 
   try {
-    const activePrompts = resolveSystemPrompts({
-      gm: GM_SYSTEM,
-      match: MATCH_CASTER_SYSTEM,
-    }).prompts;
     const result = await (llm ?? createGameLLM(TIERS.gm)).runTurn({
-      system: [activePrompts.gm, buildGmReference(state)],
+      system: [GM_SYSTEM, buildGmReference(state)],
       history: [],
       user: buildManagerMessage(state, "*새 감독으로서 구단에 첫 출근한다*"),
       stateNote: `${ONBOARDING_INSTRUCTION}\n\n${buildGmStateNote(state)}`,
@@ -159,7 +154,12 @@ export async function runOnboardingTurn(state: GameState, llm?: GameLLM): Promis
       return fallback;
     }
     const text = humanizePlayerIds(state, result.text.trim());
-    if (!isValidOnboardingText(state, text)) return fallback;
+    // 폴백은 조용히 일어나면 안 된다 — 첫 장면이 늘 규칙 장면으로 열리는데도
+    // 로그가 없어 실모드가 도는 줄 알았던 적이 있다
+    if (!isValidOnboardingText(state, text)) {
+      console.error(`[gm] 온보딩 턴이 문법 검사에 걸림 — 기본 브리핑으로 대체:\n${text}`);
+      return fallback;
+    }
     // 첫 장면은 시계를 옮기지 않는다 — 헤더가 없으면 세워 준다
     const stamped = parseSceneHeader(text).point
       ? text
@@ -228,13 +228,9 @@ async function runRealGmTurn(
 
   // 입력은 안정성 순 3층 — ① 고정 프롬프트 ② 레퍼런스 ③ 발화+상태 스냅샷.
   // 앞 두 층만 캐시 프리픽스(0.1×)다 (docs/design/llm-io.md)
-  const activePrompts = resolveSystemPrompts({
-    gm: GM_SYSTEM,
-    match: MATCH_CASTER_SYSTEM,
-  }).prompts;
   const system = inMatch
-    ? [activePrompts.match, buildMatchReference(state)]
-    : [activePrompts.gm, buildGmReference(state)];
+    ? [MATCH_CASTER_SYSTEM, buildMatchReference(state)]
+    : [GM_SYSTEM, buildGmReference(state)];
   const stateNote = inMatch
     ? buildLedgerNote(state)
     : buildGmStateNote(
