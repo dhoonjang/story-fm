@@ -20,7 +20,7 @@ import { createTestGame } from "./helpers";
 
 /**
  * 이적 시장 전용 리그 (사우디·MLS) — 경기를 하지 않고 이적 시장에만 존재한다.
- * 설계 근거는 docs/transfers.md.
+ * 설계 근거는 docs/simulation/transfer.md.
  */
 
 const marketTeams = () => TEAM_CATALOG.filter((t) => isMarketOnlyLeague(t.leagueId));

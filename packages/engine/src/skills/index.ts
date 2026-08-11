@@ -923,7 +923,7 @@ export function setCaptain(state: GameState, playerId: string): SkillResult {
   };
 }
 
-// ── 전술 적응도 (docs/tactics-familiarity.md) ──────
+// ── 전술 적응도 (docs/data/player.md) ──────
 //
 // 적응도는 "이 전술을 팀이 얼마나 손에 익혔나"다. 세 가지가 이 값을 움직인다:
 //   ① 시간 — 같은 전술을 유지하면 매일 조금씩 몸에 붙는다 (훈련·경기는 더 크게)

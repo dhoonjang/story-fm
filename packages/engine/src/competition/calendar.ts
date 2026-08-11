@@ -281,7 +281,7 @@ export function buildSeasonCalendar(season: number): SeasonCalendar {
 /** 시즌 이적창 2개 — 여름은 게임 시작(7/1)과 동시 개장, 개막 후 9월 초 폐장 */
 /**
  * 이적 시장 전용 리그의 창 — 우리와 시기가 다르다는 것이 이 리그들의 존재 이유
- * 절반을 차지한다 (docs/transfers.md).
+ * 절반을 차지한다 (docs/simulation/transfer.md).
  *
  * 사우디는 우리보다 **한 달 이상 늦게 닫히고**, MLS는 아예 다른 계절에 연다
  * (북미 시즌이 봄에 시작하기 때문). 날짜는 실제 창의 어림값이다.

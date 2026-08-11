@@ -46,7 +46,7 @@ export interface CupCatalogEntry {
    * 따르되 우리 경제 규모에 맞춰 눌렀다. 기준: tier 1 구단의 시즌 중계권+스폰서
    * 수입이 약 £228m이고, UCL 우승 경로 총액이 그것의 3분의 1 정도(£64m)가 되게
    * 잡았다. 실제 리그도 UCL 상금이 국내 중계권 수입에 근접하는 규모다.
-   * 수치 조정은 이 표만 고치면 된다 (docs/economy.md).
+   * 수치 조정은 이 표만 고치면 된다 (docs/data/competition.md).
    */
   prize: {
     participation: number;

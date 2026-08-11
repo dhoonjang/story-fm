@@ -35,7 +35,7 @@ import { normalizeSpeaker } from "@story-fm/domain";
 import type { GameLLM, TurnRequest } from "@story-fm/llm";
 
 /**
- * GM 입력 조립 — 캐시 계층의 경계가 지켜지는지 검증한다 (docs/llm-io.md).
+ * GM 입력 조립 — 캐시 계층의 경계가 지켜지는지 검증한다 (docs/llm/agents.md).
  *   레퍼런스 = 거의 안 바뀜(캐시) · 상태 스냅샷 = 매 턴 바뀜(캐시 밖)
  * 이 경계가 무너지면(레퍼런스에 날짜가 새거나, 순서가 흔들리면) 캐시가 조용히 죽는다.
  */

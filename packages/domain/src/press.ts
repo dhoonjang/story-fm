@@ -51,7 +51,7 @@ export type PressFactKind = z.infer<typeof PressFactKindSchema>;
  * ② 화자의 성격이 문장에 닿지 못하며 ③ 맥락(더비인가, 감독이 어제 뭐라 했나)이
  * 반영되지 않는다. 코어가 지켜야 할 것은 **사실**이지 문장이 아니다 —
  * 무엇이 사실인지는 코어가 정하고, 그것을 어떻게 묻는지는 기자가 정한다
- * (→ docs/design/approaches.md §1).
+ * (→ docs/data/people.md §1).
  *
  * `about`이 있으면 **그 선수에 대한 사실**이다 — 감독의 답이 그 선수의 사기에
  * 직접 닿는다. 공개적으로 감쌀 수도, 공개적으로 자를 수도 있는 자리다.

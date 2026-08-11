@@ -52,7 +52,7 @@ function rotate(state: GameState): void {
  * 밸런스 하네스 — 전체 세계에서 한 시즌을 돌려 분포를 잰다.
  *
  * 시드 하나에 몇 분이 걸려 CI에서는 돌리지 않는다. 밸런스 상수를 만졌으면
- * 직접 돌려 기준선(docs/match-sim.md §7)과 대조한다:
+ * 직접 돌려 기준선(docs/simulation/match.md §7)과 대조한다:
  *
  *   BALANCE=1 pnpm vitest run packages/engine/test/balance-harness.test.ts --reporter=verbose
  */
