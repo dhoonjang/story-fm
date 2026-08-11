@@ -24,7 +24,7 @@ import {
   type TrainingBrief,
 } from "@story-fm/engine";
 import type { ScoutReportCard } from "@story-fm/domain";
-import { createGameLLM, TIERS, type GameLLM, type TierConfig } from "@story-fm/llm";
+import { agentConfig, createGameLLM, hasKey, type GameLLM } from "@story-fm/llm";
 import { rateMatchPerformances } from "./match-rater";
 import { reportMood } from "./mood-rater";
 import { reportTraining } from "./training-rater";
@@ -93,16 +93,10 @@ function arrivedReports(state: GameState, before: ReadonlySet<string>): ScoutRep
 
 export type LlmMode = "mock" | "real";
 
-function hasCredentials(config: TierConfig): boolean {
-  return config.provider === "anthropic"
-    ? Boolean(process.env.ANTHROPIC_API_KEY)
-    : Boolean(process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY);
-}
-
-export function resolveLlmMode(config: TierConfig = TIERS.gm): LlmMode {
+export function resolveLlmMode(): LlmMode {
   const forced = process.env.LLM_MODE;
   if (forced === "mock" || forced === "real") return forced;
-  return hasCredentials(config) ? "real" : "mock";
+  return hasKey(agentConfig("gm").provider) ? "real" : "mock";
 }
 
 /**
@@ -140,8 +134,9 @@ function isValidOnboardingText(state: GameState, text: string): boolean {
  * 장면이었다). `buildOnboardingTurn`은 이제 mock 모드 전용이다.
  */
 export async function runOnboardingTurn(state: GameState, llm?: GameLLM): Promise<GmTurnResult> {
-  if (resolveLlmMode(TIERS.gm) === "mock") return buildOnboardingTurn(state);
-  const client = llm ?? createGameLLM(TIERS.gm);
+  const config = agentConfig("gm");
+  if (resolveLlmMode() === "mock") return buildOnboardingTurn(state);
+  const client = llm ?? createGameLLM(config);
 
   // 도구도 스트리밍도 없는 호출이라 다시 불러도 남는 자국이 없다
   return retryOnce("gm:onboarding", async () => {
@@ -178,7 +173,7 @@ async function rateMood(state: GameState, from: string): Promise<void> {
   if (brief) await reportMood(state, brief);
 }
 
-/** 실모드 — 일상은 GM 티어, 경기 장면은 매치 캐스터 프롬프트로 라우팅 */
+/** 실모드 — 일상은 GM, 경기 장면은 매치 캐스터 설정으로 라우팅 */
 async function runRealGmTurn(
   state: GameState,
   message: string,
@@ -187,8 +182,8 @@ async function runRealGmTurn(
 ): Promise<GmTurnResult> {
   const calls: GmToolCall[] = [];
   const inMatch = state.phase === "match";
-  const tier = inMatch ? TIERS.match : TIERS.gm;
-  const llm = createGameLLM(tier);
+  const config = agentConfig(inMatch ? "match-caster" : "gm");
+  const llm = createGameLLM(config);
 
   const pendingTraining: TrainingBrief[] = [];
   /** 이번 턴에 들어간 골 — 장부의 사건에서 만든다 (중계 문장을 되읽지 않는다) */
@@ -347,7 +342,7 @@ async function runRealGmTurn(
   // 출력 상한에 잘린 턴은 이미 스트리밍으로 나가 되돌릴 수 없다 — 원인만 로그에 남긴다
   if (result.stopReason === "max_tokens") {
     console.error(
-      `[gm] 응답이 출력 상한(${tier.maxTokens})에 걸려 잘렸습니다 — 티어 maxTokens를 올려야 합니다`,
+      `[gm] 응답이 출력 상한(${config.maxTokens})에 걸려 잘렸습니다 — config/llm.yml의 max_tokens를 올려야 합니다`,
     );
   }
   // 선수 id를 이름으로 바꾸고 헤더를 되붙여 저장한다 — ⚠️ 헤더를 떼면 화면
@@ -378,7 +373,6 @@ export async function runGmTurn(
   /** 감독의 발화가 아니라 화면 조작인가 (시간 이동 손잡이) */
   operator = false,
 ): Promise<GmTurnResult> {
-  const tier = state.phase === "match" ? TIERS.match : TIERS.gm;
-  if (resolveLlmMode(tier) === "mock") return runMockGmTurn(state, message, onText);
+  if (resolveLlmMode() === "mock") return runMockGmTurn(state, message, onText);
   return runRealGmTurn(state, message, onText, operator);
 }

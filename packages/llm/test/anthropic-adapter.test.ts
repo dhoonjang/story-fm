@@ -74,19 +74,24 @@ function storedMessages(history: { messages: unknown[] }): Anthropic.MessagePara
   return history.messages as Anthropic.MessageParam[];
 }
 
-const tierConfig = { provider: "anthropic" as const, model: "test-model", maxTokens: 1024 };
+const testConfig = {
+  agent: "gm" as const,
+  provider: "anthropic" as const,
+  model: "test-model",
+  maxTokens: 1024,
+};
 
 describe("AnthropicGameLLM 요청 파라미터", () => {
   it("사고를 끄고 출력 상한을 티어 값으로 보낸다", async () => {
     const stub = makeStubClient([endTurn]);
-    const llm = new AnthropicGameLLM(tierConfig, stub);
+    const llm = new AnthropicGameLLM(testConfig, stub);
     await llm.runTurn({ system: "sys", history: [], user: "안녕" });
 
     const params = lastParams(stub);
     // 사고는 끈다 — 상한(max_tokens)은 사고와 본문을 함께 덮으므로,
     // 켜 두면 본문이 예산을 잃고 문장 한복판에서 잘린다
     expect(params.thinking).toEqual({ type: "disabled" });
-    expect(params.max_tokens).toBe(tierConfig.maxTokens);
+    expect(params.max_tokens).toBe(testConfig.maxTokens);
   });
 
   /**
@@ -97,7 +102,7 @@ describe("AnthropicGameLLM 요청 파라미터", () => {
    */
   it("onText가 없어도 스트리밍으로 부른다 — 큰 출력 상한에서 비스트리밍은 거부된다", async () => {
     const stub = makeStubClient([endTurn]);
-    const llm = new AnthropicGameLLM({ ...tierConfig, maxTokens: 64_000 }, stub);
+    const llm = new AnthropicGameLLM({ ...testConfig, maxTokens: 64_000 }, stub);
     const result = await llm.runTurn({ system: "sys", history: [], user: "안녕" });
 
     expect(result.text).toContain("알겠습니다");
@@ -110,7 +115,7 @@ describe("AnthropicGameLLM 요청 파라미터", () => {
   it("onText를 주면 텍스트 델타가 그대로 흘러나온다", async () => {
     const stub = makeStubClient([endTurn], ["@수석코치: ", "알겠습니다."]);
     const deltas: string[] = [];
-    await new AnthropicGameLLM(tierConfig, stub).runTurn({
+    await new AnthropicGameLLM(testConfig, stub).runTurn({
       system: "sys",
       history: [],
       user: "안녕",
@@ -137,7 +142,7 @@ describe("AnthropicGameLLM 요청 파라미터", () => {
         ...endTurn,
       },
     ]);
-    const result = await new AnthropicGameLLM(tierConfig, stub).runTurn({
+    const result = await new AnthropicGameLLM(testConfig, stub).runTurn({
       system: "sys",
       history: [],
       user: "안녕",
@@ -190,7 +195,7 @@ describe("AnthropicGameLLM tool 루프", () => {
       },
     };
 
-    const llm = new AnthropicGameLLM(tierConfig, stub);
+    const llm = new AnthropicGameLLM(testConfig, stub);
     const result = await llm.runTurn({ system: "sys", history: [], user: "진행", tools: [tool] });
 
     expect(handled).toHaveLength(2); // 실패 1회 + 성공 1회
@@ -229,7 +234,7 @@ describe("AnthropicGameLLM tool 루프", () => {
       inputSchema: { type: "object" as const, properties: {} },
       handle: () => ({ ok: true, message: "완료" }),
     };
-    const llm = new AnthropicGameLLM(tierConfig, stub);
+    const llm = new AnthropicGameLLM(testConfig, stub);
     await llm.runTurn({ system: "sys", history: [], user: "진행", tools: [tool] });
 
     // 2회차 요청: 직전 tool_result 메시지가 캐시 경계
@@ -245,7 +250,7 @@ describe("AnthropicGameLLM tool 루프", () => {
         content: [{ type: "text", text: "@: *경기장이 조용하다*" }] as Anthropic.ContentBlock[],
       },
     ]);
-    const llm = new AnthropicGameLLM(tierConfig, stub);
+    const llm = new AnthropicGameLLM(testConfig, stub);
     const result = await llm.runTurn({ system: "sys", history: [], user: "진행" });
     expect(result.toolCallCount).toBe(0);
     expect(result.usage.inputTokens).toBe(100);
@@ -256,7 +261,7 @@ describe("AnthropicGameLLM tool 루프", () => {
 describe("입력 조립 — 캐시 계층과 상태 채널", () => {
   it("시스템 블록마다 캐시 브레이크포인트를 잡는다", async () => {
     const stub = makeStubClient([endTurn]);
-    const llm = new AnthropicGameLLM(tierConfig, stub);
+    const llm = new AnthropicGameLLM(testConfig, stub);
     await llm.runTurn({ system: ["고정 프롬프트", "선수 명부"], history: [], user: "안녕" });
 
     const system = lastParams(stub).system as Anthropic.TextBlockParam[];
@@ -268,7 +273,7 @@ describe("입력 조립 — 캐시 계층과 상태 채널", () => {
 
   it("상태 스냅샷은 messages 끝의 role:system으로 붙고, 유저 발화와 섞이지 않는다", async () => {
     const stub = makeStubClient([endTurn]);
-    const llm = new AnthropicGameLLM(tierConfig, stub);
+    const llm = new AnthropicGameLLM(testConfig, stub);
     const result = await llm.runTurn({
       system: "sys",
       history: [],
@@ -289,7 +294,7 @@ describe("입력 조립 — 캐시 계층과 상태 채널", () => {
 
   it("이력의 문자열 content를 블록으로 정규화하고 마지막 메시지에 브레이크포인트를 붙인다", async () => {
     const stub = makeStubClient([endTurn]);
-    const llm = new AnthropicGameLLM(tierConfig, stub);
+    const llm = new AnthropicGameLLM(testConfig, stub);
     await llm.runTurn({
       system: "sys",
       history: [
@@ -310,7 +315,7 @@ describe("입력 조립 — 캐시 계층과 상태 채널", () => {
 
   it("원본 이력에 캐시 마커를 남기지 않는다 (세이브에 누적되면 브레이크포인트 상한 초과)", async () => {
     const stub = makeStubClient([endTurn]);
-    const llm = new AnthropicGameLLM(tierConfig, stub);
+    const llm = new AnthropicGameLLM(testConfig, stub);
     const history: Anthropic.MessageParam[] = [
       { role: "user", content: [{ type: "text", text: "지난 발화" }] },
     ];
@@ -339,7 +344,7 @@ describe("입력 조립 — 캐시 계층과 상태 채널", () => {
     ]);
 
     const llm = new AnthropicGameLLM(
-      { provider: "anthropic", model: "legacy-model", maxTokens: 512 },
+      { agent: "gm", provider: "anthropic", model: "legacy-model", maxTokens: 512 },
       stub,
     );
     const result = await llm.runTurn({

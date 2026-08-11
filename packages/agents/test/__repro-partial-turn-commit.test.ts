@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-import type Anthropic from "@anthropic-ai/sdk";
 import { createGame, interpretBackgroundHeuristic } from "@story-fm/engine";
 import { AnthropicGameLLM } from "@story-fm/llm";
 import { buildGmTools } from "@story-fm/agents";
@@ -20,7 +19,7 @@ const usage = {
 };
 
 /** 어댑터는 언제나 `messages.stream`으로 부른다 — 스텁도 그 표면을 흉내 낸다 */
-function streamStub(responses: Array<Record<string, unknown> | Error>): Anthropic {
+function streamStub(responses: Array<Record<string, unknown> | Error>): never {
   const stream = vi.fn();
   for (const r of responses) {
     stream.mockReturnValueOnce({
@@ -28,7 +27,7 @@ function streamStub(responses: Array<Record<string, unknown> | Error>): Anthropi
       finalMessage: () => (r instanceof Error ? Promise.reject(r) : Promise.resolve(r)),
     });
   }
-  return { messages: { stream } } as unknown as Anthropic;
+  return { messages: { stream } } as never;
 }
 
 describe("실모드 턴 중간 실패 — 부분 커밋 재현", () => {
@@ -63,7 +62,7 @@ describe("실모드 턴 중간 실패 — 부분 커밋 재현", () => {
     const calls: GmToolCall[] = [];
     const tools = buildGmTools(state, calls);
     const llm = new AnthropicGameLLM(
-      { provider: "anthropic", model: "test-model", maxTokens: 1024 },
+      { agent: "gm", provider: "anthropic", model: "test-model", maxTokens: 1024 },
       stub,
     );
 
@@ -82,7 +81,7 @@ describe("실모드 턴 중간 실패 — 부분 커밋 재현", () => {
 
     // 재전송 시뮬레이션: 같은 도구가 다시 실행되면 사기가 또 오른다
     const llm2 = new AnthropicGameLLM(
-      { provider: "anthropic", model: "test-model", maxTokens: 1024 },
+      { agent: "gm", provider: "anthropic", model: "test-model", maxTokens: 1024 },
       streamStub([
         {
           usage,

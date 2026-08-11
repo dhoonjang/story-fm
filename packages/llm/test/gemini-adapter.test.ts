@@ -2,7 +2,8 @@ import { FinishReason, type Content, type GenerateContentResponse, type Part } f
 import { describe, expect, it, vi } from "vitest";
 import { GeminiGameLLM, type GameToolSpec } from "@story-fm/llm";
 
-const tierConfig = {
+const testConfig = {
+  agent: "match-caster" as const,
   provider: "google" as const,
   model: "gemini-test",
   maxTokens: 1024,
@@ -90,7 +91,7 @@ describe("GeminiGameLLM", () => {
       },
     };
 
-    const llm = new GeminiGameLLM(tierConfig, stub.client as never);
+    const llm = new GeminiGameLLM(testConfig, stub.client as never);
     const result = await llm.runTurn({
       system: ["고정 프롬프트", "전력 패킷"],
       history: [],
@@ -146,7 +147,7 @@ describe("GeminiGameLLM", () => {
     const mismatched = makeStubClient([
       response({ role: "model", parts: [{ text: "@수석코치: 새 이력입니다." }] }),
     ]);
-    const llm = new GeminiGameLLM(tierConfig, mismatched.client as never);
+    const llm = new GeminiGameLLM(testConfig, mismatched.client as never);
     await llm.runTurn({
       system: "sys",
       history: {
@@ -163,7 +164,7 @@ describe("GeminiGameLLM", () => {
     const plain = makeStubClient([
       response({ role: "model", parts: [{ text: "@수석코치: 이어갑니다." }] }),
     ]);
-    const plainLlm = new GeminiGameLLM(tierConfig, plain.client as never);
+    const plainLlm = new GeminiGameLLM(testConfig, plain.client as never);
     await plainLlm.runTurn({
       system: "sys",
       history: [{ role: "assistant", content: "@수석코치: 부임을 환영합니다." }],
@@ -199,7 +200,7 @@ describe("GeminiGameLLM", () => {
       };
     });
     const deltas: string[] = [];
-    const llm = new GeminiGameLLM(tierConfig, { chats: { create } } as never);
+    const llm = new GeminiGameLLM(testConfig, { chats: { create } } as never);
     const result = await llm.runTurn({
       system: "sys",
       history: [],
@@ -267,7 +268,7 @@ describe("GeminiGameLLM", () => {
       inputSchema: { type: "object", properties: {} },
       handle: () => ({ ok: true, message: "완료" }),
     };
-    const llm = new GeminiGameLLM(tierConfig, { chats: { create } } as never);
+    const llm = new GeminiGameLLM(testConfig, { chats: { create } } as never);
     const result = await llm.runTurn({
       system: "sys",
       history: [],

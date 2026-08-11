@@ -1769,3 +1769,32 @@ tick을 타지 않고 `MatchRecord.result`만 채워 검증한다 — 회견은 
 
 검증: `apps/web/test/skill-surface.test.ts` — 조작형 스킬이 둘 중 한 길에
 있는지 카탈로그 전체로 확인한다. 새 스킬이 어느 길도 없이 들어오면 실패한다.
+
+## 에이전트별 LLM 모델 설정 (2026-08-11 — 사용자 요청)
+
+`gm`·`match`·`chore` 티어와 제공자별 모델 표를 코드에 두던 구조를 걷어냈다.
+`config/llm.yml`이 모델 배치의 유일한 원본이고, 실제 호출 주체 다섯 개가 각자
+`provider`·`model`·`max_tokens`를 가진다:
+
+| 에이전트 | 현재 모델 |
+| --- | --- |
+| `gm` | Google `gemini-3.6-flash` |
+| `match-caster` | Google `gemini-3.6-flash` |
+| `match-rater` | Google `gemini-3.5-flash-lite` |
+| `training-rater` | Google `gemini-3.5-flash-lite` |
+| `mood-rater` | Google `gemini-3.5-flash-lite` |
+
+- 설정은 시작할 때 YAML 파싱 뒤 Zod로 전체 검증한다. 에이전트 누락·빈 모델·잘못된
+  출력 상한은 호출 전에 실패한다.
+- 제공자 키가 없다고 다른 제공자로 폴백하지 않는다. mock/real 자동 판정은 `gm`의
+  설정된 제공자 키로 한 번 정하고, real 안의 각 에이전트는 자기 제공자 키를 정확히
+  요구한다.
+- 사용량 장부도 `byTier`를 없애고 다섯 에이전트별로 나눴다. 토큰 상한 뒤 건너뛸 수
+  있는 것은 코어 앵커가 있는 세 rater뿐이고, GM·캐스터는 계속 돈다.
+- 제공자 선택 환경변수는 제거했다. 모델 교체는 YAML 한 파일만 바꾼다.
+
+검증: typecheck·ESLint 통과, LLM/agents 136개 통과, 전체 Vitest 1,281개 통과
+(3개 skip). Next production build는 YAML을 포함해 컴파일됐고, 이후 기존
+`apps/web/app/api/admin/catalog/route.ts`의 `CatalogPlayerInput` 타입 오류에서 멈췄다.
+`pnpm match --dry`도 설정 로드 뒤 기존 `teams.json` 픽스처가 v6 선수 스키마의
+필드를 갖추지 못한 오류에서 멈췄다.

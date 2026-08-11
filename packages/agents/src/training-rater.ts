@@ -9,14 +9,14 @@ import {
   type TrainingBrief,
 } from "@story-fm/engine";
 import { ATTRIBUTE_AXES, AXIS_KO } from "@story-fm/domain";
-import { TIERS, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
+import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
 import { retryOnce, anchorStands } from "./retry";
 
 /**
  * 훈련 결산 — advance_time이 넘긴 구간의 훈련을 한 묶음으로 판정한다.
  * 코어는 적응도를 건드리지 않는다 — 실제로 얼마나 스몄는지는 여기서만 정한다.
  * 세션마다 부르지 않는다 — 훈련엔 사건 목록이 없어 하루치로는 판단 거리가 없다.
- * 티어는 chore — 값의 폭을 코어가 좁게 물려 둬 모델이 무뎌도 게임이 흔들리지 않는다.
+ * 값의 폭은 코어가 좁게 물려 둬 모델이 무뎌도 게임이 흔들리지 않는다.
  */
 export const TRAINING_RATER_SYSTEM = `당신은 축구 구단의 훈련장을 지켜본 코치다.
 
@@ -179,16 +179,18 @@ export async function reportTraining(
 ): Promise<{ lines: string[] }> {
   if (brief.sessions.length === 0 || brief.subjects.length === 0) return { lines: [] };
   let lines: string[] = [];
-  const client = llm ?? createGameLLM(TIERS.chore);
+  let client = llm;
   await retryOnce(
     "rater:training",
-    () =>
-      client.runTurn({
+    () => {
+      client ??= createGameLLM(agentConfig("training-rater"));
+      return client.runTurn({
         system: TRAINING_RATER_SYSTEM,
         history: [],
         user: buildTrainingPrompt(brief),
         tools: [makeReportTool(state, brief, (l) => (lines = l))],
-      }),
+      });
+    },
     () => lines.length > 0, // 이미 성과가 반영됐으면 다시 부르지 않는다
   ).catch(anchorStands("rater:training"));
   return { lines };

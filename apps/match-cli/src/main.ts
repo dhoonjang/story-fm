@@ -1,5 +1,5 @@
 /**
- * 경기 세로 관통 프로토타입 — 전력 분석 패킷(코어) → 매치 티어 LLM 진행 →
+ * 경기 세로 관통 프로토타입 — 전력 분석 패킷(코어) → 매치 캐스터 LLM 진행 →
  * 장부 검증(코어)의 한 사이클을 실제로 돌려본다 (match-sim.md).
  *
  *   pnpm match --dry          패킷·장부만 출력 (LLM 호출 없음)
@@ -21,7 +21,7 @@ import {
   simulateSegment,
   type MatchLedgerState,
 } from "@story-fm/sim";
-import { createGameLLM, TIERS, type TurnHistory, type TurnUsage } from "@story-fm/llm";
+import { agentConfig, createGameLLM, type TurnHistory, type TurnUsage } from "@story-fm/llm";
 import {
   MATCH_CASTER_SYSTEM,
   buildContinueMessage,
@@ -166,8 +166,8 @@ function runSegment(): { note: string; stop: string } {
   };
 }
 
-// ---- ③ 매치 티어 LLM 진행 루프 ----
-const llm = createGameLLM(TIERS.match);
+// ---- ③ 매치 캐스터 LLM 진행 루프 ----
+const llm = createGameLLM(agentConfig("match-caster"));
 const totalUsage: TurnUsage = {
   inputTokens: 0,
   outputTokens: 0,
@@ -202,7 +202,6 @@ for (let turn = 1; turn <= maxTurns && !finished; turn++) {
   console.log(
     `  (usage: in ${result.usage.inputTokens} / out ${result.usage.outputTokens} / cache-read ${result.usage.cacheReadTokens} / tool calls ${result.toolCallCount})`,
   );
-
 }
 
 // ---- ④ 결과 ----

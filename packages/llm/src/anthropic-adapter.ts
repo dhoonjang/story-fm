@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { AnthropicTierConfig } from "./config";
+import type { AnthropicAgentConfig } from "./config";
 import {
   isStoredLlmHistory,
   isTextHistoryMessage,
@@ -67,7 +67,7 @@ function isAnthropicMessage(value: unknown): value is Anthropic.MessageParam {
  */
 function anthropicHistory(
   history: TurnHistory,
-  config: AnthropicTierConfig,
+  config: AnthropicAgentConfig,
 ): Anthropic.MessageParam[] {
   if (isStoredLlmHistory(history)) {
     if (history.provider !== config.provider || history.model !== config.model) return [];
@@ -138,7 +138,7 @@ export class AnthropicGameLLM implements GameLLM {
 
   /** client 주입은 테스트용 — 기본은 환경(API 키/프로필)에서 인증을 해석한다 */
   constructor(
-    private readonly config: AnthropicTierConfig,
+    private readonly config: AnthropicAgentConfig,
     client?: Anthropic,
   ) {
     this.client = client ?? new Anthropic();
@@ -202,7 +202,7 @@ export class AnthropicGameLLM implements GameLLM {
       /**
        * **언제나 스트리밍으로 받는다.** SDK는 `max_tokens`가 21,333을 넘는
        * 비스트리밍 요청을 보내기도 전에 거부한다("Streaming is required…" —
-       * `calculateNonstreamingTimeout`). 티어 상한이 64,000이라 화면에 흘릴
+       * `calculateNonstreamingTimeout`). 설정 상한이 64,000이라 화면에 흘릴
        * 곳이 없는 호출(온보딩·결산)이 전부 그 자리에서 실패했다.
        * onText는 델타를 받을지만 가른다 — 최종 메시지는 어느 쪽이든 같다.
        */
