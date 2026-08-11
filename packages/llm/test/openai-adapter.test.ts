@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { OpenAiGameLLM, isStoredLlmHistory, type GameToolSpec } from "@story-fm/llm";
 
-const tierConfig = { provider: "openai" as const, model: "gpt-test", maxTokens: 1024 };
+const testConfig = {
+  agent: "mood-rater" as const,
+  provider: "openai" as const,
+  model: "gpt-test",
+  maxTokens: 1024,
+};
 
 const usage = {
   prompt_tokens: 100,
@@ -52,15 +57,15 @@ function makeStreamClient(streams: unknown[][]) {
   return { client: { chat: { completions: { create } } } as never, sent };
 }
 
-describe("OpenAI 어댑터 — 잡무 티어", () => {
+describe("OpenAI 어댑터", () => {
   it("함수 도구를 쓰려면 추론이 꺼져 있어야 한다", async () => {
     const { client, sent } = makeStubClient([completion({ role: "assistant", content: "됐다" })]);
-    const llm = new OpenAiGameLLM(tierConfig, client);
+    const llm = new OpenAiGameLLM(testConfig, client);
     await llm.runTurn({ system: "시스템", history: [], user: "안녕" });
     /**
      * GPT-5.6 계열은 Chat Completions에서 **추론을 켠 채로 함수 도구를 쓸 수 없다**.
-     * 잡무 티어는 원래 사고를 최소로 두는 자리라 제약과 설계가 어긋나지 않지만,
-     * 이 값이 조용히 바뀌면 결산이 전부 400을 맞는다.
+     * 현재 어댑터는 사고를 최소로 둔다. 이 값이 조용히 바뀌면 함수 도구 호출이
+     * 400을 맞는다.
      */
     expect(sent[0]?.reasoning_effort).toBe("none");
   });
@@ -77,7 +82,7 @@ describe("OpenAI 어댑터 — 잡무 티어", () => {
       },
       handle: () => ({ ok: true, message: "ok" }),
     };
-    await new OpenAiGameLLM(tierConfig, client).runTurn({
+    await new OpenAiGameLLM(testConfig, client).runTurn({
       system: "시스템",
       history: [],
       user: "결산",
@@ -100,7 +105,7 @@ describe("OpenAI 어댑터 — 잡무 티어", () => {
       completion({ role: "assistant", content: "끝" }),
     ]);
     const handle = vi.fn(() => ({ ok: true, message: "심경 3명 반영" }));
-    const result = await new OpenAiGameLLM(tierConfig, client).runTurn({
+    const result = await new OpenAiGameLLM(testConfig, client).runTurn({
       system: "시스템",
       history: [],
       user: "결산",
@@ -126,7 +131,7 @@ describe("OpenAI 어댑터 — 잡무 티어", () => {
       completion({ role: "assistant", content: "", tool_calls: [call] }, "tool_calls"),
       completion({ role: "assistant", content: "다시 했다" }),
     ]);
-    await new OpenAiGameLLM(tierConfig, client).runTurn({
+    await new OpenAiGameLLM(testConfig, client).runTurn({
       system: "시스템",
       history: [],
       user: "결산",
@@ -152,7 +157,7 @@ describe("OpenAI 어댑터 — 잡무 티어", () => {
       completion({ role: "assistant", content: "고쳤다" }),
     ]);
     const handle = vi.fn(() => ({ ok: true, message: "ok" }));
-    const result = await new OpenAiGameLLM(tierConfig, client).runTurn({
+    const result = await new OpenAiGameLLM(testConfig, client).runTurn({
       system: "시스템",
       history: [],
       user: "결산",
@@ -166,7 +171,7 @@ describe("OpenAI 어댑터 — 잡무 티어", () => {
 
   it("상태 스냅샷은 developer 롤로 넣고 이력에는 남기지 않는다", async () => {
     const { client, sent } = makeStubClient([completion({ role: "assistant", content: "됐다" })]);
-    const result = await new OpenAiGameLLM(tierConfig, client).runTurn({
+    const result = await new OpenAiGameLLM(testConfig, client).runTurn({
       system: "시스템",
       history: [],
       user: "안녕",
@@ -188,7 +193,7 @@ describe("OpenAI 어댑터 — 잡무 티어", () => {
       completion({ role: "assistant", content: "a" }),
       completion({ role: "assistant", content: "b" }),
     ]);
-    const llm = new OpenAiGameLLM(tierConfig, client);
+    const llm = new OpenAiGameLLM(testConfig, client);
     const first = await llm.runTurn({ system: "S", history: [], user: "1" });
     expect(isStoredLlmHistory(first.history)).toBe(true);
     expect(first.history.provider).toBe("openai");
@@ -206,7 +211,7 @@ describe("OpenAI 어댑터 — 잡무 티어", () => {
 
   it("사용량을 집계한다 — 캐시 생성 토큰은 없다(자동 캐시)", async () => {
     const { client } = makeStubClient([completion({ role: "assistant", content: "됐다" })]);
-    const result = await new OpenAiGameLLM(tierConfig, client).runTurn({
+    const result = await new OpenAiGameLLM(testConfig, client).runTurn({
       system: "S",
       history: [],
       user: "1",
@@ -237,7 +242,7 @@ describe("OpenAI 어댑터 — 스트리밍", () => {
       ],
     ]);
     const deltas: string[] = [];
-    const result = await new OpenAiGameLLM(tierConfig, client).runTurn({
+    const result = await new OpenAiGameLLM(testConfig, client).runTurn({
       system: "S",
       history: [],
       user: "결산",
@@ -251,11 +256,11 @@ describe("OpenAI 어댑터 — 스트리밍", () => {
 
   /**
    * include_usage가 없으면 스트리밍 응답의 usage가 통째로 비어 계측·예산이
-   * 이 티어를 못 본다 (usage-meter).
+   * 이 에이전트를 못 본다 (usage-meter).
    */
   it("사용량 chunk를 받으려고 include_usage를 켠다", async () => {
     const { client, sent } = makeStreamClient([[chunk({ content: "됐다" }, "stop"), usageChunk]]);
-    const result = await new OpenAiGameLLM(tierConfig, client).runTurn({
+    const result = await new OpenAiGameLLM(testConfig, client).runTurn({
       system: "S",
       history: [],
       user: "결산",
@@ -274,7 +279,7 @@ describe("OpenAI 어댑터 — 스트리밍", () => {
 
   it("스트림이 끊겨 사용량 chunk가 안 와도 던지지 않는다", async () => {
     const { client } = makeStreamClient([[chunk({ content: "됐다" }, "stop")]]);
-    const result = await new OpenAiGameLLM(tierConfig, client).runTurn({
+    const result = await new OpenAiGameLLM(testConfig, client).runTurn({
       system: "S",
       history: [],
       user: "결산",
@@ -311,7 +316,7 @@ describe("OpenAI 어댑터 — 스트리밍", () => {
       [chunk({ content: "끝" }, "stop"), usageChunk],
     ]);
     const handle = vi.fn(() => ({ ok: true, message: "심경 3명 반영" }));
-    const result = await new OpenAiGameLLM(tierConfig, client).runTurn({
+    const result = await new OpenAiGameLLM(testConfig, client).runTurn({
       system: "S",
       history: [],
       user: "결산",
@@ -373,7 +378,7 @@ describe("OpenAI 어댑터 — 스트리밍", () => {
         return { ok: true, message: "ok" };
       },
     });
-    const result = await new OpenAiGameLLM(tierConfig, client).runTurn({
+    const result = await new OpenAiGameLLM(testConfig, client).runTurn({
       system: "S",
       history: [],
       user: "결산",
@@ -403,7 +408,7 @@ describe("OpenAI 어댑터 — 스트리밍", () => {
       [chunk({ content: "끝" }, "stop"), usageChunk],
     ]);
     const handle = vi.fn(() => ({ ok: true, message: "ok" }));
-    await new OpenAiGameLLM(tierConfig, client).runTurn({
+    await new OpenAiGameLLM(testConfig, client).runTurn({
       system: "S",
       history: [],
       user: "결산",

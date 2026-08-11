@@ -1,12 +1,12 @@
 import { z } from "zod";
 import { MOOD_BATCH, applyMoodNotes, type GameState, type MoodBrief } from "@story-fm/engine";
-import { TIERS, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
+import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
 import { retryOnce, anchorStands } from "./retry";
 
 /**
  * 심경 결산 — 코어가 낸 앵커 한 줄을 그 선수의 맥락(경기·불만·정착·폼)에 맞는
  * 결로 다시 쓴다. 다른 결산과 같은 계약: 실패하면 앵커가 남아 빈 줄이 생기지
- * 않는다. 사실 검증은 코어가 하므로(`applyMoodNotes`) 티어는 chore로 충분하다.
+ * 않는다. 사실 검증은 코어가 한다(`applyMoodNotes`).
  */
 export const MOOD_RATER_SYSTEM = `당신은 선수단을 매일 보는 구단 사람이다.
 
@@ -87,16 +87,18 @@ export async function reportMood(
 ): Promise<{ applied: number }> {
   if (brief.targets.length === 0) return { applied: 0 };
   let applied = 0;
-  const client = llm ?? createGameLLM(TIERS.chore);
+  let client = llm;
   await retryOnce(
     "rater:mood",
-    () =>
-      client.runTurn({
+    () => {
+      client ??= createGameLLM(agentConfig("mood-rater"));
+      return client.runTurn({
         system: MOOD_RATER_SYSTEM,
         history: [],
         user: buildMoodPrompt(brief),
         tools: [makeReportTool(state, brief, (n) => (applied = n))],
-      }),
+      });
+    },
     () => applied > 0, // 이미 심경이 반영됐으면 다시 부르지 않는다
   ).catch(anchorStands("rater:mood"));
   return { applied };

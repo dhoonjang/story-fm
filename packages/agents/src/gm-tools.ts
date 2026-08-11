@@ -698,7 +698,7 @@ export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpe
       (input) => scoutPlayer(state, input.playerId),
     ),
 
-    // ── 이적 협상 — 확률은 코어가, 판정은 GM이 (docs/design/transfers.md) ──
+    // ── 이적 협상 — 확률은 코어가, 판정은 GM이 (docs/simulation/transfer.md) ──
     read(
       "deal_odds",
       descriptions.deal_odds,

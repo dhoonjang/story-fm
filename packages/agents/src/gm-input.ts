@@ -1,6 +1,6 @@
 /**
  * GM 입력 빌더 — 레퍼런스(캐시층)·상태 스냅샷·경기 장부 노트·장면 헤더 파서·
- * 대화 이력 창. 입력은 변경 빈도 순 3층이다 (docs/design/llm-io.md).
+ * 대화 이력 창. 입력은 변경 빈도 순 3층이다 (docs/llm-io.md).
  */
 import {
   clockOf,
@@ -33,12 +33,7 @@ import {
   type GameState,
   type ScenePoint,
 } from "@story-fm/engine";
-import {
-  naturalPositionOf,
-  PERSONA_ROLE_LABEL,
-  slotOfTime,
-  type Persona,
-} from "@story-fm/domain";
+import { naturalPositionOf, PERSONA_ROLE_LABEL, slotOfTime, type Persona } from "@story-fm/domain";
 
 /** 경기 브리핑에 그대로 싣는 직전 평시 감독 발화 수 */
 const MATCH_BRIEF_TURNS = 3;
@@ -432,6 +427,85 @@ function toClock(meridiem: string | undefined, hour: string, minute: string): st
 function clockFromHeader(meridiem: string | undefined, hour?: string, minute?: string): string {
   if (hour && minute) return toClock(meridiem, hour, minute);
   return PART_OF_DAY[(meridiem ?? "").toLowerCase()] ?? "09:00";
+}
+
+/**
+ * 장면에 설 수 있는 줄인가 — 출력 문법이 허락하는 것은 셋뿐이다:
+ * 시점 헤더(맨 앞 하나), `@`로 시작하는 화자·내레이션, 빈 줄(문단 간격).
+ */
+function keepsSceneLine(line: string, headerSeen: boolean): boolean {
+  const trimmed = line.trim();
+  if (trimmed.length === 0) return true;
+  if (trimmed.startsWith("@")) return true;
+  return !headerSeen && trimmed.startsWith("[");
+}
+
+/**
+ * 장면 위생 — **도구 앞에 흘린 작업 서술과 두 번째 시점 헤더를 걷어낸다.**
+ *
+ * 도구를 부르는 턴에서 모델은 반복마다 "…확인하겠습니다" 한 줄과 헤더를 새로
+ * 찍는다(프롬프트로 몇 번을 눌러도 남는 습성이다). 그 줄들은 장면이 아니라
+ * 작업 로그인데 화면에는 코치의 말과 나란히 선다.
+ *
+ * ⚠️ **@ 줄이 하나도 없으면 손대지 않는다** — 규약을 통째로 어긴 응답까지
+ * 지우면 빈 턴이 되어 무슨 일이 있었는지조차 사라진다.
+ */
+export function sanitizeSceneText(text: string): string {
+  const lines = text.split("\n");
+  if (!lines.some((line) => line.trim().startsWith("@"))) return text;
+  let headerSeen = false;
+  const kept: string[] = [];
+  for (const line of lines) {
+    if (!keepsSceneLine(line, headerSeen)) continue;
+    if (line.trim().startsWith("[")) headerSeen = true;
+    kept.push(line);
+  }
+  // 걷어낸 자리에 남은 빈 줄이 겹치지 않게 (문단 간격은 하나면 족하다)
+  return kept
+    .join("\n")
+    .replace(/\n{3,}/gu, "\n\n")
+    .trim();
+}
+
+/**
+ * 스트리밍에도 같은 위생을 건다 — 걸러진 줄이 화면에 잠깐 떴다 사라지면
+ * 그것대로 눈에 띈다. 줄의 **첫 글자**만 보면 판정되므로, 지연되는 것은
+ * 줄 앞머리뿐이고 그다음 델타는 그대로 흘러간다.
+ */
+export function filterSceneStream(emit: (delta: string) => void): (delta: string) => void {
+  let pending = ""; // 아직 판정하지 못한 줄 앞머리 (공백만 들어온 상태)
+  let keeping: boolean | null = null; // 이 줄을 내보내는가 — null이면 판정 전
+  let headerSeen = false;
+
+  const startLine = () => {
+    pending = "";
+    keeping = null;
+  };
+  const feedLine = (chunk: string) => {
+    if (keeping === false) return;
+    if (keeping === true) {
+      emit(chunk);
+      return;
+    }
+    pending += chunk;
+    if (pending.trim().length === 0) return; // 아직 공백뿐 — 판정 보류
+    keeping = keepsSceneLine(pending, headerSeen);
+    if (pending.trim().startsWith("[")) headerSeen = true;
+    if (keeping) emit(pending);
+    pending = "";
+  };
+
+  return (delta: string) => {
+    const parts = delta.split("\n");
+    parts.forEach((part, i) => {
+      if (i > 0) {
+        // 줄바꿈은 살아남은 줄에만 붙인다 — 걸러진 줄은 자리도 남기지 않는다
+        if (keeping !== false) emit("\n");
+        startLine();
+      }
+      if (part.length > 0) feedLine(part);
+    });
+  };
 }
 
 export interface ParsedScene {

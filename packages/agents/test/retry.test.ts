@@ -3,7 +3,7 @@ import { retryOnce, anchorStands } from "../src/retry";
 
 /**
  * 실패 계약 — **한 번 더 부르고, 그다음은 갈린다** (llm.md §9).
- * 장면(GM·중계·첫 장면)은 오류를 올리고, 잡무 결산은 앵커를 남긴다.
+ * 장면(GM·중계·첫 장면)은 오류를 올리고, 결산 에이전트는 앵커를 남긴다.
  */
 describe("retryOnce — 폴백 대신 한 번의 재시도", () => {
   it("성공하면 그대로 돌려주고 다시 부르지 않는다", async () => {
@@ -35,7 +35,7 @@ describe("retryOnce — 폴백 대신 한 번의 재시도", () => {
   });
 });
 
-/** 잡무 결산은 폴백이 있다 — 결산 하나 때문에 경기·시간 진행이 막히면 안 된다 */
+/** 결산에는 폴백이 있다 — 결산 하나 때문에 경기·시간 진행이 막히면 안 된다 */
 describe("anchorStands — 결산 실패는 삼키고 앵커를 남긴다", () => {
   it("두 번 다 실패해도 호출부는 계속 간다 (조용히는 아니다 — 로그를 남긴다)", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);

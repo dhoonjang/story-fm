@@ -46,7 +46,9 @@ import {
   type GameState,
 } from "@story-fm/engine";
 import type { TrainAttr } from "@story-fm/domain";
-import { positionGroupOfPlayer } from "@story-fm/domain";
+import { positionGroupOfPlayer,
+  MANAGER_ATTRIBUTE_KO,
+} from "@story-fm/domain";
 import { TIME_PASSED, type GmToolCall, type GmTurnResult } from "./gm-types";
 import type { CardMark, GoalMark } from "@story-fm/engine";
 
@@ -721,14 +723,6 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
   };
 }
 
-const AXIS_KO: Record<string, string> = {
-  leadership: "리더십",
-  tactics: "전술 이해",
-  negotiation: "협상력",
-  training: "훈련 설계",
-  analysis: "분석 감각",
-};
-
 const ONBOARDING_SCENES = [
   (team: string) =>
     `@: *${team} 트레이닝 센터 정문. 새 감독을 기다리던 카메라 셔터가 일제히 터진다*`,
@@ -774,7 +768,7 @@ export function buildOnboardingTurn(state: GameState): GmTurnResult {
   const topAxes = (Object.entries(attrs) as Array<[string, number]>)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 2)
-    .map(([axis]) => AXIS_KO[axis] ?? axis);
+    .map(([axis]) => MANAGER_ATTRIBUTE_KO[axis as keyof typeof MANAGER_ATTRIBUTE_KO] ?? axis);
   return {
     text: [
       // 첫 장면도 시점을 세우고 연다 — 실모드와 같은 문법이다

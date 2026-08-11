@@ -8,7 +8,7 @@ import {
   type GenerateContentResponse,
   type Part,
 } from "@google/genai";
-import type { GoogleTierConfig } from "./config";
+import type { GoogleAgentConfig } from "./config";
 import {
   isStoredLlmHistory,
   isTextHistoryMessage,
@@ -41,7 +41,7 @@ function isGeminiContent(value: unknown): value is Content {
  * 저장된 같은 모델의 payload는 변환하지 않는다. 다른 제공자·모델에서 넘어온
  * 경기라면 장부와 전력 패킷을 기준으로 대화 이력만 새로 시작한다.
  */
-function geminiHistory(history: TurnHistory, config: GoogleTierConfig): Content[] {
+function geminiHistory(history: TurnHistory, config: GoogleAgentConfig): Content[] {
   if (isStoredLlmHistory(history)) {
     if (history.provider !== config.provider || history.model !== config.model) return [];
     return history.messages.filter(isGeminiContent);
@@ -84,7 +84,7 @@ function addUsage(total: TurnUsage, response: GenerateContentResponse): void {
   // Gemini의 implicit cache는 별도 cache creation 토큰을 보고하지 않는다.
 }
 
-function thinkingLevel(level: GoogleTierConfig["thinkingLevel"]): ThinkingLevel {
+function thinkingLevel(level: GoogleAgentConfig["thinkingLevel"]): ThinkingLevel {
   switch (level) {
     case "high":
       return ThinkingLevel.HIGH;
@@ -108,7 +108,7 @@ export class GeminiGameLLM implements GameLLM {
   private readonly client: GeminiClient;
 
   constructor(
-    private readonly config: GoogleTierConfig,
+    private readonly config: GoogleAgentConfig,
     client?: GeminiClient,
   ) {
     const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;

@@ -13,7 +13,7 @@ import {
   type MatchRatingBrief,
 } from "@story-fm/engine";
 import { ATTRIBUTE_AXES } from "@story-fm/domain";
-import { TIERS, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
+import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
 import { retryOnce, anchorStands } from "./retry";
 
 /**
@@ -184,18 +184,20 @@ export async function rateMatchPerformances(
 ): Promise<{ applied: number }> {
   if (brief.players.length === 0) return { applied: 0 };
   let applied = 0;
-  // 잡무 티어 — 값의 폭은 코어가 앵커 ±RATING_BAND로 좁게 물려 둔다.
+  // 이 에이전트의 값은 코어가 앵커 ±RATING_BAND로 좁게 물려 둔다.
   // 경기마다 도는 일이라 지연이 더 아프다
-  const client = llm ?? createGameLLM(TIERS.chore);
+  let client = llm;
   await retryOnce(
     "rater:match",
-    () =>
-      client.runTurn({
+    () => {
+      client ??= createGameLLM(agentConfig("match-rater"));
+      return client.runTurn({
         system: MATCH_RATER_SYSTEM,
         history: [],
         user: buildRatingPrompt(brief),
         tools: [makeRateTool(state, brief.matchId, (n) => (applied = n))],
-      }),
+      });
+    },
     () => applied > 0, // 이미 평점이 박혔으면 다시 부르지 않는다
   ).catch(anchorStands("rater:match"));
   return { applied };

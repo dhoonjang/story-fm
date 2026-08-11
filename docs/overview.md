@@ -166,7 +166,7 @@
 | | [simulation/transfer.md](simulation/transfer.md) | 협상 · 설득 · 메디컬 · AI 시장 · 주급 |
 | | [simulation/finance.md](simulation/finance.md) | 수입·지출 · 상각 · PSR · 강등의 타격 |
 | | [simulation/career.md](simulation/career.md) | 감독 능력치 · 평판 · 보드 · 트로피 |
-| **LLM** | [llm/models.md](llm/models.md) | 티어 라우팅 · 어댑터 · 토큰 예산 |
+| **LLM** | [llm/models.md](llm/models.md) | 에이전트별 모델 설정 · 어댑터 · 토큰 예산 |
 | | [llm/agents.md](llm/agents.md) | GM · 중계 · 결산 라터 · 입력 3층 |
 | | [llm/prompts.md](llm/prompts.md) | 출력 문법 · 스킬 표면 · 프롬프트 규약 |
 

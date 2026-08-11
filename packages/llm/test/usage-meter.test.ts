@@ -15,7 +15,7 @@ import {
   recordSkip,
   recordUsage,
   resetLlmUsage,
-  tierAllowed,
+  agentAllowed,
   type GameLLM,
   type TurnResult,
   type TurnUsage,
@@ -50,20 +50,20 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("누적 — 세션 전체와 티어별", () => {
-  it("호출을 티어별로도 합계로도 센다", () => {
+describe("누적 — 세션 전체와 에이전트별", () => {
+  it("호출을 에이전트별로도 합계로도 센다", () => {
     let ledger = emptyLedger();
     ledger = recordUsage(ledger, "gm", usageOf({ inputTokens: 100, outputTokens: 20 }));
-    ledger = recordUsage(ledger, "chore", usageOf({ inputTokens: 30, outputTokens: 5 }));
-    ledger = recordUsage(ledger, "chore", usageOf({ inputTokens: 30, outputTokens: 5 }));
+    ledger = recordUsage(ledger, "training-rater", usageOf({ inputTokens: 30, outputTokens: 5 }));
+    ledger = recordUsage(ledger, "training-rater", usageOf({ inputTokens: 30, outputTokens: 5 }));
 
     expect(ledger.calls).toBe(3);
     expect(ledger.usage.inputTokens).toBe(160);
-    expect(ledger.byTier.gm.calls).toBe(1);
-    expect(ledger.byTier.chore.calls).toBe(2);
-    expect(ledger.byTier.chore.usage.outputTokens).toBe(10);
-    // 안 부른 티어는 0으로 남는다 — 없는 칸이 아니라 빈 칸이다
-    expect(ledger.byTier.match.calls).toBe(0);
+    expect(ledger.byAgent.gm.calls).toBe(1);
+    expect(ledger.byAgent["training-rater"].calls).toBe(2);
+    expect(ledger.byAgent["training-rater"].usage.outputTokens).toBe(10);
+    // 안 부른 에이전트는 0으로 남는다 — 없는 칸이 아니라 빈 칸이다
+    expect(ledger.byAgent["match-caster"].calls).toBe(0);
   });
 
   it("장부를 되돌려 주고 원본은 그대로다 — 순수 함수", () => {
@@ -71,13 +71,13 @@ describe("누적 — 세션 전체와 티어별", () => {
     const after = recordUsage(before, "gm", usageOf({ inputTokens: 10 }));
     expect(before.calls).toBe(0);
     expect(after.calls).toBe(1);
-    expect(after.byTier.gm).not.toBe(before.byTier.gm);
+    expect(after.byAgent.gm).not.toBe(before.byAgent.gm);
   });
 
   it("건너뛴 호출도 적는다 — 안 적으면 결산이 왜 비었는지 알 수 없다", () => {
-    const ledger = recordSkip(emptyLedger(), "chore");
+    const ledger = recordSkip(emptyLedger(), "mood-rater");
     expect(ledger.skipped).toBe(1);
-    expect(ledger.byTier.chore.skipped).toBe(1);
+    expect(ledger.byAgent["mood-rater"].skipped).toBe(1);
     // 건너뛴 것은 호출이 아니다
     expect(ledger.calls).toBe(0);
   });
@@ -122,10 +122,10 @@ describe("캐시 히트율 — 프리픽스가 살아 있는가", () => {
     expect(cacheAlerts(ledger)).toEqual(["gm"]);
   });
 
-  it("짧은 입력은 신호가 아니다 — 잡무 결산은 애초에 캐시가 안 걸린다", () => {
+  it("짧은 입력은 신호가 아니다 — 결산은 애초에 캐시가 안 걸릴 수 있다", () => {
     let ledger = emptyLedger();
     for (let i = 0; i < 5; i++) {
-      ledger = recordUsage(ledger, "chore", usageOf({ inputTokens: 300, outputTokens: 50 }));
+      ledger = recordUsage(ledger, "mood-rater", usageOf({ inputTokens: 300, outputTokens: 50 }));
     }
     expect(cacheAlerts(ledger)).toEqual([]);
   });
@@ -142,7 +142,7 @@ describe("예산 상한 읽기", () => {
     expect(parseTokenBudget({ LLM_TOKEN_BUDGET: "   " })).toBeNull();
   });
 
-  it("숫자가 아니거나 0 이하면 무제한 — 오타로 잡무가 멎는 것보다 낫다", () => {
+  it("숫자가 아니거나 0 이하면 무제한 — 오타로 결산이 멎는 것보다 낫다", () => {
     expect(parseTokenBudget({ LLM_TOKEN_BUDGET: "많이" })).toBeNull();
     expect(parseTokenBudget({ LLM_TOKEN_BUDGET: "0" })).toBeNull();
     expect(parseTokenBudget({ LLM_TOKEN_BUDGET: "-5" })).toBeNull();
@@ -160,30 +160,30 @@ describe("상한 정책 — 게임 진행을 막지 않는다", () => {
     );
   });
 
-  it("무제한이면 어느 티어도 막지 않는다", () => {
+  it("무제한이면 어느 에이전트도 막지 않는다", () => {
     const verdict = budgetVerdict(
       recordUsage(emptyLedger(), "gm", usageOf({ inputTokens: 10 ** 9 })),
       null,
     );
     expect(verdict.over).toBe(false);
-    expect(tierAllowed("chore", verdict)).toBe(true);
+    expect(agentAllowed("mood-rater", verdict)).toBe(true);
   });
 
   /**
    * 상한을 넘겨도 **서사와 중계는 계속 돈다** — 그 자리에는 대신 세울 값이 없다.
-   * 끊기는 것은 앵커라는 폴백이 이미 있는 잡무뿐이다 (llm.md §5).
+   * 끊기는 것은 앵커라는 폴백이 이미 있는 결산뿐이다 (llm.md §5).
    */
-  it("상한을 넘기면 잡무만 끊고 GM·중계는 돌린다", () => {
+  it("상한을 넘기면 결산만 끊고 GM·중계는 돌린다", () => {
     const ledger = recordUsage(
       emptyLedger(),
-      "chore",
+      "training-rater",
       usageOf({ inputTokens: 900, outputTokens: 200 }),
     );
     const verdict = budgetVerdict(ledger, 1000);
     expect(verdict.over).toBe(true);
-    expect(tierAllowed("chore", verdict)).toBe(false);
-    expect(tierAllowed("gm", verdict)).toBe(true);
-    expect(tierAllowed("match", verdict)).toBe(true);
+    expect(agentAllowed("training-rater", verdict)).toBe(false);
+    expect(agentAllowed("gm", verdict)).toBe(true);
+    expect(agentAllowed("match-caster", verdict)).toBe(true);
   });
 
   it("상한 아래면 아무도 막지 않는다", () => {
@@ -195,19 +195,22 @@ describe("상한 정책 — 게임 진행을 막지 않는다", () => {
     const verdict = budgetVerdict(ledger, 1000);
     expect(verdict.over).toBe(false);
     expect(verdict.ratio).toBeCloseTo(0.11);
-    expect(tierAllowed("chore", verdict)).toBe(true);
+    expect(agentAllowed("match-rater", verdict)).toBe(true);
   });
 });
 
 describe("meterLlm — 계약이 같으므로 부르는 쪽은 감싼 줄 모른다", () => {
   it("호출마다 세션 장부에 적는다", async () => {
-    const llm = meterLlm(stubLlm(usageOf({ inputTokens: 200, outputTokens: 40 })), "chore");
+    const llm = meterLlm(
+      stubLlm(usageOf({ inputTokens: 200, outputTokens: 40 })),
+      "training-rater",
+    );
     await llm.runTurn({ system: "S", history: [], user: "결산" });
     await llm.runTurn({ system: "S", history: [], user: "결산" });
 
     expect(llmUsage().calls).toBe(2);
-    expect(llmUsage().byTier.chore.usage.inputTokens).toBe(400);
-    expect(llmUsage().byTier.gm.calls).toBe(0);
+    expect(llmUsage().byAgent["training-rater"].usage.inputTokens).toBe(400);
+    expect(llmUsage().byAgent.gm.calls).toBe(0);
   });
 
   it("결과는 그대로 통과시킨다", async () => {
@@ -218,15 +221,15 @@ describe("meterLlm — 계약이 같으므로 부르는 쪽은 감싼 줄 모른
   });
 
   /**
-   * 상한을 넘긴 잡무는 **부르지 않고 던진다** — 결산은 원래 실패를 삼키고 코어
+   * 상한을 넘긴 결산은 **부르지 않고 던진다** — 결산은 원래 실패를 삼키고 코어
    * 앵커를 남기는 계약이라(training/match/mood-rater), 그 경로로 그대로 떨어진다.
    */
-  it("상한을 넘기면 잡무는 아예 부르지 않는다", async () => {
+  it("상한을 넘기면 결산은 아예 부르지 않는다", async () => {
     const calls = { count: 0 };
     const env = { LLM_TOKEN_BUDGET: "150" };
     const llm = meterLlm(
       stubLlm(usageOf({ inputTokens: 100, outputTokens: 60 }), calls),
-      "chore",
+      "match-rater",
       env,
     );
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -239,7 +242,7 @@ describe("meterLlm — 계약이 같으므로 부르는 쪽은 감싼 줄 모른
     );
     // 부르지 않았다 — 건너뛴 것으로 장부에 남는다
     expect(calls.count).toBe(1);
-    expect(llmUsage().byTier.chore.skipped).toBe(1);
+    expect(llmUsage().byAgent["match-rater"].skipped).toBe(1);
   });
 
   it("상한을 넘겨도 GM은 계속 돈다 — 경고만 남긴다", async () => {
@@ -259,7 +262,7 @@ describe("meterLlm — 계약이 같으므로 부르는 쪽은 감싼 줄 모른
 });
 
 describe("describeUsage", () => {
-  it("합계와 실제로 돈 티어만 한 줄로 적는다", () => {
+  it("합계와 실제로 돈 에이전트만 한 줄로 적는다", () => {
     let ledger = emptyLedger();
     ledger = recordUsage(
       ledger,
@@ -270,7 +273,7 @@ describe("describeUsage", () => {
     expect(line).toContain("합계 1회");
     expect(line).toContain("gm 1회");
     expect(line).toContain("캐시 90%");
-    // 안 돈 티어는 줄을 차지하지 않는다
+    // 안 돈 에이전트는 줄을 차지하지 않는다
     expect(line).not.toContain("match");
   });
 });

@@ -1,7 +1,7 @@
 import type { MatchEvent, StrengthPacket } from "@story-fm/domain";
 
 /**
- * 매치 캐스터 — 경기 장면의 GM (매치 티어). 사건은 코어가 xg로 이미 확정하고
+ * 매치 캐스터 — 경기 장면의 GM. 사건은 코어가 xg로 이미 확정하고
  * 캐스터는 그것을 중계·연출·대화로 옮긴다 — 결과를 바꿀 도구가 없다 (match-sim.md).
  * 프롬프트는 코드처럼 버전 관리한다 (AGENTS.md 6-5).
  */

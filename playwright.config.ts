@@ -2,7 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 /**
  * e2e — mock GM 모드로 LLM 없이 전체 시나리오를 브라우저에서 검증한다.
- * 실모드(Opus) 시나리오는 스모크로 별도 수행 (ANTHROPIC_API_KEY 필요).
+ * 실모드 시나리오는 스모크로 별도 수행 (config/llm.yml의 GM 제공자 키 필요).
  *
  * 포트 3399는 e2e 전용 — 개발용 플레이 서버(3311, 실모드일 수 있음)를
  * reuseExistingServer가 재사용해 mock 기대가 깨지는 사고를 방지한다.

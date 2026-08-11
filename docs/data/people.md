@@ -36,7 +36,7 @@ Persona {
 - **인물 카드는 레퍼런스 층(캐시 프리픽스)에 실린다** — 세이브당 고정이라 매 턴
   정가로 읽히지 않는다. 일상은 `buildGmReference`(코치·구단주·기자단 카드), 경기는
   `buildMatchReference`(코치 카드)가 같은 카드를 넣는다 — 벤치에서 건네는 한마디도
-  같은 사람의 것이어야 한다 (→ llm.md).
+  같은 사람의 것이어야 한다 (→ ../llm/agents.md).
 - **선수 명부도 화자 목록이다** — 명부 헤더가 "이 이름들이 모두 화자다"이고, GM
   철칙이 "카드가 있는 화자는 카드대로 말한다. 카드가 없는 사람도 말한다"를 못
   박는다. 명부가 조회 표로 읽히면 이름이 한 번 불린 선수만 계속 말한다.
@@ -218,7 +218,7 @@ Persona {
 
 규칙만으로는 늘 같은 문장이 나온다 — 같은 "불만"도 벤치의 고참과 이적 요청을
 넣은 주전이 다르다. 그래서 훈련·평점 결산이 도는 **같은 자리**(시간 진행 뒤 ·
-경기 종료 뒤 평점 다음)에서 같은 싼 티어(chore)로 돈다.
+경기 종료 뒤 평점 다음)에서 같은 결산 에이전트로 돈다.
 
 - 대상은 **그 구간에 사건이 있었던 선수 최대 8명**(`MOOD_BATCH`) — 3일 내 경기
   출전(가중 3)·불만(4)·정착 중(2)·폼 양 끝(2)으로 고른다. 부상·정지 선수는 뺀다 —
@@ -316,7 +316,7 @@ Persona {
 | 장면을 여는 사람 규칙 · 철칙 | `packages/agents/src/gm-prompt.ts` |
 | 기자회견 (사실 카드 스키마 · 스탠스 효과) | `packages/domain/src/press.ts` · `packages/engine/src/club/press.ts` |
 | 심경 앵커 · 결산 검사 | `packages/engine/src/squad/mood.ts` |
-| 심경 결산 (LLM, chore 티어) | `packages/agents/src/mood-rater.ts` |
+| 심경 결산 (LLM) | `packages/agents/src/mood-rater.ts` |
 | 선수 근황 | `packages/engine/src/squad/cues.ts` |
 | 서사 메모리 | `packages/domain/src/records.ts` (`NarrativeNote`) · `packages/engine/src/core/state.ts` (`pushNarrative`) |
 | 화자 아이콘 · 직책 칩 | `apps/web/components/chat.tsx` · `icons.tsx` |

@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import type { OpenAiTierConfig } from "./config";
+import type { OpenAiAgentConfig } from "./config";
 import {
   isStoredLlmHistory,
   isTextHistoryMessage,
@@ -58,7 +58,7 @@ function isChatMessage(value: unknown): value is ChatMessage {
  * 반쪽만 살아남으면 다음 요청이 통째로 400을 맞는다. 텍스트 이력(`TextHistoryMessage`)은
  * 그대로 옮길 수 있다.
  */
-function openaiHistory(history: TurnHistory, config: OpenAiTierConfig): ChatMessage[] {
+function openaiHistory(history: TurnHistory, config: OpenAiAgentConfig): ChatMessage[] {
   if (isStoredLlmHistory(history)) {
     if (history.provider !== config.provider || history.model !== config.model) return [];
     return history.messages.filter(isChatMessage);
@@ -143,21 +143,16 @@ async function collectStream(
 }
 
 /**
- * OpenAI 어댑터 — **잡무 티어(`chore`)를 위해 붙였다.**
- *
- * 결산(훈련·경기 평점·심경)은 자주 돌면서 서사를 쓰지 않는 판정이라, 값이 아니라
- * **빈도**가 비용을 만든다. GPT-5.6 Luna가 그 자리에서 가장 싸다
- * (입력 $0.20 / 출력 $1.20 per 1M — Gemini 3.5 Flash-Lite의 $0.30 / $2.50 대비).
+ * OpenAI 어댑터 — 어떤 에이전트든 YAML 설정으로 선택할 수 있다.
  *
  * ⚠️ **Chat Completions + 함수 도구는 `reasoning_effort: "none"`이어야 한다.**
  * GPT-5.6 계열은 추론을 켠 채로 함수 도구를 쓰려면 `/v1/responses`를 써야 하는데,
- * 우리 잡무 티어는 애초에 사고를 최소로 두는 자리라(config의 `THINKING_LEVEL`)
- * 그 제약이 설계와 어긋나지 않는다. 서사 티어를 이쪽으로 옮기게 되면 그때는
- * Responses API로 갈아타야 한다.
+ * 현재는 사고를 최소로 두므로 이 제약이 설계와 어긋나지 않는다. 서사 에이전트에서
+ * 추론이 필요해지면 Responses API로 갈아타야 한다.
  *
  * **스트리밍은 Chat Completions 위에 붙였다** — Responses API로 갈아타지 않았다.
- * 막고 있던 것은 스트리밍이 아니라 **추론 + 함수 도구**의 조합이라, 사고를
- * 최소로 두는 잡무 티어에서는 두 API의 차이가 없다. 반면 갈아타면 저장 이력의
+ * 막고 있던 것은 스트리밍이 아니라 **추론 + 함수 도구**의 조합이라, 사고를 최소로
+ * 두는 현재 설정에서는 두 API의 차이가 없다. 반면 갈아타면 저장 이력의
  * 모양이 통째로 바뀌어(messages[] → input item[]) 이미 `openai` 태그가 붙은
  * 세이브가 버려진다 — 얻는 것 없이 치르는 대가다. 서사를 이쪽으로 옮겨 추론이
  * 필요해지는 날, 그때 Responses로 간다.
@@ -166,7 +161,7 @@ export class OpenAiGameLLM implements GameLLM {
   private readonly client: OpenAiClient;
 
   constructor(
-    private readonly config: OpenAiTierConfig,
+    private readonly config: OpenAiAgentConfig,
     client?: OpenAiClient,
   ) {
     const apiKey = process.env.OPENAI_API_KEY;
@@ -227,7 +222,7 @@ export class OpenAiGameLLM implements GameLLM {
       let turn: Assistant;
       if (req.onText) {
         // ⚠️ include_usage가 없으면 스트리밍 응답의 usage가 통째로 비어
-        // 계측·예산이 이 티어를 못 본다 (usage-meter).
+        // 계측·예산이 이 에이전트를 못 본다 (usage-meter).
         const stream = await this.client.chat.completions.create({
           ...body,
           stream: true,

@@ -47,9 +47,9 @@
 - **언어**: TypeScript (풀스택, strict 모드)
 - **런타임/프레임워크**: Next.js (App Router) + Node.js
 - **패키지 매니저**: pnpm (모노레포 워크스페이스)
-- **LLM**: 역할별 멀티 프로바이더 — 티어가 제공자를 고른다(GM=Claude Opus ·
-  경기 중계=Gemini Flash Lite · 잡무=GPT Luna). 티어·모델 ID는 `packages/llm`
-  단일 관리 (→ [docs/llm.md](./docs/llm.md))
+- **LLM**: 역할별 멀티 프로바이더 — **에이전트마다** 제공자와 모델을 독립 설정한다.
+  설정과 모델 ID는 `config/llm.yml`이 단일 원본
+  (→ [docs/llm/models.md](./docs/llm/models.md))
 - **상태/검증**: Zod (LLM 입출력 구조화 강제)
 - **테스트**: Vitest + Playwright / **린트**: ESLint + Prettier
 
@@ -117,8 +117,8 @@ packages/
 
 ## 6. LLM 통합 규약 (가장 중요)
 
-1. **모델 ID 하드코딩 금지** — `packages/llm` 설정에서 단일 관리, 역할별 티어
-   라우팅. 프로바이더 차이는 어댑터가 흡수한다 (→ llm.md).
+1. **모델 ID 하드코딩 금지** — `config/llm.yml`에서 에이전트별 제공자·모델을
+   단일 관리한다. 프로바이더 차이는 `packages/llm` 어댑터가 흡수한다 (→ llm/models.md).
 2. **구조화 출력은 Zod로 검증**하고 실패 시 재시도. 파싱 실패를 게임 상태에
    반영하지 않는다.
 3. **컨텍스트 위생** — 입력은 변경 빈도 순 3층(고정/레퍼런스/이력)으로 쌓아
