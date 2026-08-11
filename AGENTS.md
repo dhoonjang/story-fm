@@ -7,7 +7,7 @@
 이 문서는 프로젝트의 **비전**과 **개발 규약**을 담는 단일 소스다. AI 에이전트와
 사람 기여자 모두 이 문서를 기준으로 작업한다. `CLAUDE.md`는 이 문서를 참조한다.
 **게임이 실제로 어떻게 돌아가는지는 [docs/](./docs/README.md)이
-원본이다** — [game-overview.md](./docs/game-overview.md)부터 읽는다.
+원본이다** — [game-overview.md](./docs/overview.md)부터 읽는다.
 
 ---
 
@@ -56,7 +56,10 @@
 ### 디렉터리 구조
 
 ```
-docs/              # 기획서 — 지금 이 게임이 어떻게 동작하는가. README.md가 지도
+docs/              # 기획서 — 지금 이 게임이 어떻게 동작하는가 (README.md가 지도)
+  data/            #   무엇이 존재하는가 — 선수·팀·대회·인물·세이브
+  simulation/      #   무엇이 일어나는가 — 경기·시즌·이적·재정·커리어
+  llm/             #   그것을 어떻게 말하는가 — 모델·에이전트·프롬프트
 apps/
   web/             # Next.js — 채팅 UI · 오피스 뷰 · API · /admin
 packages/
@@ -142,18 +145,14 @@ packages/
 - **범위를 지킨다** — 요청받은 것만. 큰 리팩터링·새 의존성은 먼저 제안.
 - **결과를 정직하게 보고한다** — 테스트가 실패하면 출력과 함께 그대로.
 
-| 주제 | 문서 |
-| --- | --- |
-| 게임 전체 구조·루프·화면 | [docs/game-overview.md](./docs/game-overview.md) |
-| 선수 15축·역할·폼·성장·적응도·안개 | [attribute-model.md](./docs/attribute-model.md) |
-| 경기 시뮬·체력·평점 | [match-sim.md](./docs/match-sim.md) |
-| 달력·컵·유럽·훈련·tick·시즌 전환 | [season.md](./docs/season.md) |
-| 이적·협상·설득·AI 시장 | [transfers.md](./docs/transfers.md) |
-| 구단 재정 | [club-finance.md](./docs/club-finance.md) |
-| 페르소나·기자회견·심경 | [people.md](./docs/people.md) |
-| LLM 티어·입출력·스킬 표면 | [llm.md](./docs/llm.md) |
-| 데이터 출처·라이선스 | [data-sourcing.md](./docs/data-sourcing.md) |
-| 데이터 모델 · ERD · 세이브 호환 | [data-model.md](./docs/data-model.md) |
+**[docs/](./docs/README.md)가 게임 명세의 단일 소스다** — 폴더가 곧 층이다.
+
+| 폴더 | 무엇 | 문서 |
+| --- | --- | --- |
+| — | 전체 구조·한 턴의 경로·게임 루프 | [overview.md](./docs/overview.md) |
+| `data/` | 무엇이 존재하는가 | [game-state](./docs/data/game-state.md) · [player](./docs/data/player.md) · [team](./docs/data/team.md) · [competition](./docs/data/competition.md) · [people](./docs/data/people.md) · [sources](./docs/data/sources.md) |
+| `simulation/` | 무엇이 일어나는가 | [match](./docs/simulation/match.md) · [season](./docs/simulation/season.md) · [transfer](./docs/simulation/transfer.md) · [finance](./docs/simulation/finance.md) · [career](./docs/simulation/career.md) |
+| `llm/` | 그것을 어떻게 말하는가 | [models](./docs/llm/models.md) · [agents](./docs/llm/agents.md) · [prompts](./docs/llm/prompts.md) |
 
 ## 현재 상태
 

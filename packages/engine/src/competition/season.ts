@@ -582,7 +582,7 @@ export function transitionSeason(state: GameState): string[] {
   // 이적 예산 보충 — 등급별 base. 일률 £15M이면 시즌 2부터 68~72 OVR밖에 못 사서
   // 이적 루프가 첫 여름 이후 죽는다. 등급별 순이익과 같은 자리에 뒀다
   // (docs/decisions/0002-transfer-market-balance.md). 나머지는 선수 판매로 만든다.
-  // base 위에 **재정 성과**가 얹히고, PSR 위반이면 동결된다 (ADR 0004 결정 D).
+  // base 위에 **재정 성과**가 얹히고, PSR 위반이면 동결된다.
   for (const finance of state.finances) {
     const base = SEASON_BUDGET_TOPUP[teamCatalogById(finance.teamId)?.tier ?? 3] ?? 0;
     topUpTransferBudget(state, finance.teamId, base, digest);

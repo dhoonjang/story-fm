@@ -55,7 +55,7 @@ import {
  *
  * 코어의 역할은 **가능한 것만 통과시키는 것**이다. 확률은 `market.ts`가 계산하고
  * 수락/역제안/결렬 판정은 LLM이 하지만, 창이 닫혔는지·예산이 되는지·미리 답한 것은
- * 아닌지는 여기서 막는다 (docs/transfers.md §4).
+ * 아닌지는 여기서 막는다 (docs/simulation/transfer.md §4).
  *
  * 1차 범위는 **영입(buy)** 이다. 매각(sell)·재계약(renew)은 같은 테이블에 얹히도록
  * `kind`에 자리를 뒀다 — 방향만 바뀐다.
@@ -1363,7 +1363,7 @@ export function executeDeal(state: GameState, negotiation: Negotiation): SkillRe
   });
 
   // 재정 — 우리 지출·상대 수입. 예산에서도 빠진다.
-  // 이적료는 현금에서 즉시 빠지고, 장부에는 계약기간 상각으로 잡힌다 (ADR 0004)
+  // 이적료는 현금에서 즉시 빠지고, 장부에는 계약기간 상각으로 잡힌다
   if (agreed.fee > 0) {
     const ref = { type: "player" as const, id: player.id };
     recordFinance(state, state.userTeamId, {
@@ -1388,7 +1388,7 @@ export function executeDeal(state: GameState, negotiation: Negotiation): SkillRe
       ref,
     });
     ourFinance.transferBudget -= agreed.fee;
-    // 판매 대금은 파는 쪽의 이적 예산으로 돌아간다 (ADR 0002 — 이적 시장이 경제가 된다)
+    // 판매 대금은 파는 쪽의 이적 예산으로 돌아간다
     const theirFinance = state.finances.find((f) => f.teamId === fromTeamId);
     if (theirFinance) theirFinance.transferBudget += agreed.fee;
   }
@@ -1430,7 +1430,7 @@ export function executeDeal(state: GameState, negotiation: Negotiation): SkillRe
 /**
  * 매각 실행 — 영입의 거울상. 선수가 떠나고 돈이 들어온다.
  *
- * 판매 대금은 잔고와 **이적 예산에 함께** 들어간다 (ADR 0002) — 팔지 않으면 큰
+ * 판매 대금은 잔고와 **이적 예산에 함께** 들어간다 — 팔지 않으면 큰
  * 영입이 없다는 규칙이 여기서 성립한다.
  */
 function executeSale(

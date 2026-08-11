@@ -449,7 +449,7 @@ describe("overall 분포 — 밴드 의미가 유지된다", () => {
      * ⚠️ 그 다른 질문의 답은 지금 **아니오**다: 90+ 59명 중 40명이 합성이고
      * 알이티하드의 33세 골키퍼가 96으로 나온다(실선수 최고 발베르데 95보다 높다).
      * `fallbackEntries`가 tier 기준선(2등급=80)에 `+randInt(0,8)`을 얹는 탓이다.
-     * 밸런스 사안이라 여기서 고치지 않고 남긴다 (implementation-notes).
+     * 밸런스 사안이라 여기서 고치지 않고 남긴다.
      */
     const real = playerCatalog()
       .filter((e) => !/-gen\d+$|-dev-|-y\d+-/.test(e.id))

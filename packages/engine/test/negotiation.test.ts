@@ -440,7 +440,7 @@ describe("매각 — 들어오는 오퍼", () => {
     expect(playerById(state, player.id)!.teamId).toBe(buyerTeamId);
     expect(playersOf(state, state.userTeamId)).toHaveLength(squadBefore - 1);
     /**
-     * 판매 대금은 잔고와 이적 예산에 함께 들어간다 (ADR 0002).
+     * 판매 대금은 잔고와 이적 예산에 함께 들어간다.
      * **처음 부른 값이 아니라 마지막에 합의된 값**이다 — 사는 쪽 메디컬에서
      * 소견이 나오면 그 자리에서 깎아 다시 부르기 때문이다 (medical.ts).
      */

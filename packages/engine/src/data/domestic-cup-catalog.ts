@@ -44,7 +44,7 @@ export interface DomesticCupEntry {
   prestige: 1 | 2;
   /**
    * 2차전제로 치르는 단계. 나머지는 전부 단판이고, 단판이 비기면 승부차기다
-   * (실제 리그컵도 8강까지는 연장 없이 바로 승부차기다).
+   * (우리 구현은 단판 동점이면 연장 30분을 먼저 치른다 (simulation/match.md)).
    */
   twoLegged: MatchStage[];
   /**

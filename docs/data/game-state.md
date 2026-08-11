@@ -5,9 +5,9 @@
 정규화된 테이블 집합이고, 계산으로 되돌릴 수 있는 값은 저장하지 않는다.
 
 이 문서는 **무엇이 어디에 있는가**를 다룬다. 각 값의 의미와 공식은 주제 문서에
-있다 — 선수 능력치는 [attribute-model.md](./attribute-model.md), 경기 장부는
-[match-sim.md](./match-sim.md), 협상은 [transfers.md](./transfers.md), 재정은
-[club-finance.md](./club-finance.md), 일정은 [season.md](./season.md).
+있다 — 선수 능력치는 [player.md](player.md), 경기 장부는
+[../simulation/match.md](../simulation/match.md), 협상은 [../simulation/transfer.md](../simulation/transfer.md), 재정은
+[../simulation/finance.md](../simulation/finance.md), 일정은 [../simulation/season.md](../simulation/season.md).
 
 ## 1. 2-레이어
 
@@ -54,7 +54,7 @@
 - `LeagueCatalogEntry.kind`가 그 리그가 게임에서 하는 일을 정한다 —
   `playable`(5대 리그) · `cup-only`(2부, 컵만) · `market-only`(사우디·MLS, 경기 없음) ·
   `free`(무소속 — 리그가 아니라 리그 밖).
-- 데이터 출처와 라이선스는 [data-sourcing.md](./data-sourcing.md).
+- 데이터 출처와 라이선스는 [sources.md](sources.md).
 
 ## 3. 게임 세이브 — 엔티티 지도
 

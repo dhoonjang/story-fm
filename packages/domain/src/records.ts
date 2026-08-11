@@ -117,7 +117,7 @@ export type Transfer = z.infer<typeof TransferSchema>;
  * 협상은 **원장이 아니다.** TRANSFER가 "일어난 이동"이라면 NEGOTIATION은 "합의되지
  * 않은 흥정"이고, 둘을 한 테이블에 섞으면 원장이 더러워진다. 합의(`agreed`) 뒤
  * 수락 스킬이 TRANSFER·CONTRACT·재정을 쓰고 그때 `completed`가 된다.
- * (docs/transfers.md)
+ * (docs/simulation/transfer.md)
  */
 /**
  * 협상의 방향. `loan`은 **임대 영입**(남의 선수를 빌려 온다), `loan_out`은
@@ -266,7 +266,7 @@ export const ScoutReportSchema = z.object({
 });
 export type ScoutReport = z.infer<typeof ScoutReportSchema>;
 
-/** 스카우트 파견 소요 일수 · 동시 파견 한도 (잠정 수치 — implementation-notes) */
+/** 스카우트 파견 소요 일수 · 동시 파견 한도 (잠정 수치) */
 export const SCOUT_DAYS = 7;
 export const SCOUT_CONCURRENT_LIMIT = 3;
 
@@ -337,7 +337,7 @@ export type PlayerTraining = z.infer<typeof PlayerTrainingSchema>;
 /**
  * 재정 카테고리 — **집계의 안정 키**. `label`은 사람이 읽는 상세(서사 재료)일
  * 뿐이며 항목명이 바뀌어도 과거 집계가 쪼개지지 않도록 카테고리로만 접는다.
- * 실제 구단 회계의 매출·비용 축을 옮긴 것이다 (docs/club-finance.md §2).
+ * 실제 구단 회계의 매출·비용 축을 옮긴 것이다 (docs/simulation/finance.md §2).
  */
 export const FINANCE_INCOME_CATEGORIES = [
   "broadcast_equal",
@@ -477,7 +477,7 @@ export type FinanceReportLine = z.infer<typeof FinanceReportLineSchema>;
 /**
  * 월간 재정 보고서 (FINANCE_REPORT) — 매월 1일에 지난달을 마감해 만든다.
  * 상세 원장은 3개월 롤링으로 잘리지만 이 요약은 영구 보존되고, `openingBalance`
- * 덕분에 잔고 재구성이 가능하다 (docs/club-finance.md §4.4).
+ * 덕분에 잔고 재구성이 가능하다 (docs/simulation/finance.md §4.4).
  */
 export const FinanceReportSchema = z.object({
   id: z.string().min(1),

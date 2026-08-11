@@ -14,7 +14,7 @@ LLM 판정은 "무엇이 남았나"까지만 말한다.
 | 전술 적응도 | `TACTIC_ASSIGNMENT.familiarity` | 0~100 | 이 전술이 몸에 붙었는가 | 훈련·경기 결산 · 전술 변경 (§7) |
 
 경기에서 셋은 곱으로 만난다 — `effective = roleFit × 상태 × 포지션 적응도 ×
-전술 적응도` ([match-sim.md](./match-sim.md) §1.1).
+전술 적응도` ([../simulation/match.md](../simulation/match.md) §1.1).
 
 ## 1. 15축 — 신체 4 · 기술 5 · 정신 5 · GK 1
 
@@ -207,13 +207,13 @@ LAM/RAM · LF/RF · LST/RST.
 사기와 피로를 따로 저장하지 않는다 — 감독이 판단에 쓰는 것은 "이 선수 지금 쓸
 만한가" 하나다. 경기가 깎고, 휴식·훈련 강도가 채우고, 팀토크·면담이 올리고,
 방치된 불만이 매일 갉는다. 소모·회복·구멍·로테이션 수치는
-[match-sim.md](./match-sim.md) §3.
+[../simulation/match.md](../simulation/match.md) §3.
 
 - ⚠️ **체력에서 감정을 읽지 않는다.** 경기 한 판이 30~50을 가져가 경기 다음 날은
   누구나 바닥이다 — `condition < N`을 "마음이 떴다"로 읽으면 이긴 다음 날 선수단
   전원이 침울해지고 이적 판정·재계약·오퍼까지 오염된다. 마음의 근거는
   `hasIssue`(라커룸 불만)·폼·정착·출전 기회이고, 체력은 감정어 없이 사실로만
-  쓴다. 심경 한 줄의 계약은 [people.md](./people.md).
+  쓴다. 심경 한 줄의 계약은 [people.md](people.md).
 - 왜 낮은지는 심경 한 줄(`describeMood` 앵커 + mood-rater 재작성)이 말한다.
 
 ## 6. 성장·쇠퇴
@@ -240,7 +240,7 @@ LAM/RAM · LF/RF · LST/RST.
 | 경기 결산 | −2 ~ 8 | 0~11명 | 제한 없음 |
 
 판정이 없으면(mock·모델 실패·검증 탈락) 그 구간은 아무것도 남기지 않는다 —
-게임은 계속 굴러간다. 잦은 이벤트라 싼 티어를 쓴다 ([llm.md](./llm.md)).
+게임은 계속 굴러간다. 잦은 이벤트라 싼 티어를 쓴다 ([llm.md](../llm/agents.md)).
 
 ### 6.2 판정 한 칸이 그대로 오르지 않는다 (`attributeGainScale`)
 
@@ -447,7 +447,7 @@ LAM/RAM · LF/RF · LST/RST.
   값"으로 읽는다.
 - ⚠️ **다리가 멈춘 건 안개가 못 가린다** — 추정 구간은 구멍 문턱(`GAP_CONDITION`
   22)을 넘지 않고, 구멍 키포인트에 소진 수치를 적지 않는다(흐린 값이 문장으로
-  샌다). 화면 표현은 [match-sim.md](./match-sim.md) §8.
+  샌다). 화면 표현은 [../simulation/match.md](../simulation/match.md) §8.
 - 경기 밖(스쿼드·조회 도구)의 우리 선수 체력은 정확하다.
 
 ### 9.3 정착 (`adapting` · `engine/squad/settling.ts`)
@@ -488,7 +488,7 @@ LAM/RAM · LF/RF · LST/RST.
 - **채팅(GM)**: 숫자를 읊지 않고 밴드로 — 90+ 월드클래스 · 85~89 리그 최상위권 ·
   80~84 정상급 · 75~79 준수한 주전감 · 70~74 스쿼드 자원 · ≤69 유망주/백업.
 - 조회 도구(`get_player`)는 15축을 쏟지 않고 가중치 상위 축 + 특징 축만 요약한다
-  ([llm.md](./llm.md)).
+  ([llm.md](../llm/agents.md)).
 
 ## 11. 감독 능력치 — 5축
 
@@ -501,7 +501,7 @@ LAM/RAM · LF/RF · LST/RST.
 | 리더십 | 팀토크·면담 변화량 — 주장의 선수 `leadership`과 곱해져 전파 |
 | 전술 | 전술 소화율(uptake) — 지시가 존 전력에 실리는 강도 (match-sim §1.1) |
 | 훈련 | 훈련 결산의 성장 폭 |
-| 협상 | 거래 판정 — 수락 문턱·역제안 폭 ([transfers.md](./transfers.md)) |
+| 협상 | 거래 판정 — 수락 문턱·역제안 폭 ([../simulation/transfer.md](../simulation/transfer.md)) |
 | 분석 | 스카우트·키포인트 해상도 — 안개(§9)가 좁아지는 정도 |
 
 - ⚠️ `media`는 능력치에서 뺐다(대응 스킬 하나에만 걸린 축). **평판
@@ -531,7 +531,7 @@ LAM/RAM · LF/RF · LST/RST.
   원천의 복사본이면 축을 늘린 의미가 없다(`aggression` r≈0.6 유지). 회귀는
   `attributes.test.ts`의 눈금 가드·연동 가드가 막는다. 현재 |오차|≤2 65%.
 - 스카우트 리포트의 깊이 — 분석형 오차(±3)를 더 좁히는 수단이 없다.
-- 자체 능력치 산정 모델 — 라이선스 부채 청산 장치 ([data-sourcing.md](./data-sourcing.md) §7).
+- 자체 능력치 산정 모델 — 라이선스 부채 청산 장치 ([sources.md](sources.md) §7).
 - 가중치 지문·오차 폭·상태 계수 튜닝 — 분포 모니터링 하네스 미자동화.
 - 감독 능력치 상한 도달 시나리오(전 축 90+)의 게임감.
 
@@ -547,7 +547,7 @@ LAM/RAM · LF/RF · LST/RST.
 | 안개·잠재력·경기 중 체력 (`observationMargin`·`readCondition`·`observedFit`) | `packages/engine/src/squad/scouting.ts` |
 | 정착 (`settlingOf`·`SETTLING_EVENT`) | `packages/engine/src/squad/settling.ts` |
 | 결산 반영 (`applyAttributeStep`·`positionGain`) | `packages/engine/src/squad/training-report.ts` · `packages/engine/src/match/ratings.ts` |
-| 심경 (`describeMood`·`MOOD_BATCH`) | `packages/engine/src/squad/mood.ts` ([people.md](./people.md)) |
+| 심경 (`describeMood`·`MOOD_BATCH`) | `packages/engine/src/squad/mood.ts` ([people.md](people.md)) |
 | 전력 팩터 (`PROFICIENCY_SPREAD`·`FAMILIARITY_SPREAD`)·상태 보정 | `packages/sim/src/strength-packet.ts` · `state-modifier.ts` |
 | 합성 주발 표집 (`syntheticFoot`) | `packages/engine/src/world/catalog.ts` |
 | 감독 초기값 (`specialtyAxesOf`) | `packages/engine/src/world/onboarding.ts` |

@@ -60,7 +60,7 @@ export function matchRating(f: MatchRatingFacts): number {
  *
  * 그래서 경기가 끝나면 LLM이 장부 사실 + 중계 사건을 함께 읽고 평점을 다시
  * 매긴다. 다만 **코어 평점이 앵커**다 — LLM은 이 폭 안에서만 움직일 수 있다.
- * 협상 판정과 같은 구조다(ADR 0002): 코어가 근거를 계산하고, LLM은 그 위에서
+ * 협상 판정과 같은 구조다: 코어가 근거를 계산하고, LLM은 그 위에서
  * 판단하며, 코어는 가능한 판정만 받는다.
  */
 export const RATING_BAND = 1.2;

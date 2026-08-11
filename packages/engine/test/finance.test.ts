@@ -24,7 +24,7 @@ import {
 import { advanceAndPlay, advanceDays, createTestGame } from "./helpers";
 
 /**
- * 구단 재정 (club-finance.md · ADR 0004) — 원장·월간 보고서·상각·PSR.
+ * 구단 재정 (club-finance.md) — 원장·월간 보고서·상각·PSR.
  * 모든 계산은 결정적이므로 LLM 없이 검증된다.
  */
 

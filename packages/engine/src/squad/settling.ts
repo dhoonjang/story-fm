@@ -61,7 +61,7 @@ export const EVENT_CREDIT: Record<SettlingEvent["kind"], number> = {
 };
 
 /**
- * **무게는 GM이 정하고, 경계는 코어가 쥔다** (ADR 0002 · 경기 평점과 같은 구조).
+ * **무게는 GM이 정하고, 경계는 코어가 쥔다** (경기 평점과 같은 구조).
  *
  * 같은 "격려"라도 통역을 붙여 준 이야기와 지나가며 한 말은 다르다. 그 차이는
  * outcome·intensity 두 눈금으로 표현되지 않으므로, GM이 그 대화가 실제로

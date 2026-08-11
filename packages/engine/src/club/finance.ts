@@ -21,7 +21,7 @@ import { financeOf, pushNarrative, teamShortName, weeklyWagesOf, type GameState 
 import { makeRng } from "../core/rng";
 
 /**
- * 구단 재정 — 실제 구단의 매출·비용 구조 (docs/club-finance.md · ADR 0004).
+ * 구단 재정 — 실제 구단의 매출·비용 구조 (docs/simulation/finance.md).
  *
  * 이 파일이 **재정 상수와 공식의 유일한 자리**다. tick·경기·협상은 여기 함수만
  * 부른다. 모든 계산은 결정적이며(난수는 시드 해시뿐) LLM은 개입하지 않는다 —
@@ -1016,7 +1016,7 @@ export function payLeaguePrizes(state: GameState, digest: string[]): void {
 }
 
 /**
- * 시즌 이적 예산 보충 — 등급별 base(ADR 0002)에 **재정 성과**를 얹는다.
+ * 시즌 이적 예산 보충 — 등급별 base에 **재정 성과**를 얹는다.
  * PSR 여유가 없으면 동결한다 (결정 D — 승점은 건드리지 않는다).
  */
 export function topUpTransferBudget(
