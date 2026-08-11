@@ -244,8 +244,14 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await expect
     .poll(() => page.locator(".chat-pane").evaluate((el) => getComputedStyle(el).pointerEvents))
     .toBe("none");
-  await page.getByTestId("opp-board-toggle").click();
+  /**
+   * 가라앉은 대화를 **누르면 닫힌다** — 서랍 밖을 눌러 닫는 몸짓이라 안내가 없다.
+   * 손이 닿는 곳은 덮개(`board-scrim`)이지 아래 채팅이 아니다.
+   */
+  await expect(page.getByTestId("board-scrim")).toBeVisible();
+  await page.getByTestId("board-scrim").click({ position: { x: 40, y: 300 } });
   await expect.poll(chatDim).toBe(1);
+  await expect(page.getByTestId("opp-board-toggle")).toHaveAttribute("aria-pressed", "false");
   await pressBoardToggle(page, "opp-board-toggle");
 
   /*

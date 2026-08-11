@@ -3,6 +3,7 @@
 import { Fragment } from "react";
 import type { OfficeViews } from "@story-fm/engine";
 import { anchorOf, positionGroupOf, separateBoardPoints } from "@story-fm/domain";
+import { pitchPointOf, spreadMarkers, type PitchPoint } from "@/lib/pitch-layout";
 import { IconBoard } from "@/components/icons";
 import { PitchTactics } from "./office";
 
@@ -139,7 +140,12 @@ export function MatchOpponent({
 export function MatchClock({ match }: { match: Match }) {
   return (
     <span className="match-clock" data-testid="match-clock">
-      {match.competition} {match.stage} · <b>{match.minute}′</b> {match.phase}
+      {/* 좁아지면 대회·라운드가 접힌다 — 그때 급한 건 **몇 분인가**이고, 무슨
+          경기인지는 바로 아래 스코어보드가 두 팀 이름으로 이미 말한다 */}
+      <span className="abbr">
+        {match.competition} {match.stage} ·{" "}
+      </span>
+      <b>{match.minute}′</b> {match.phase}
     </span>
   );
 }
@@ -163,11 +169,19 @@ export function MatchHeadline({ match }: { match: Match }) {
 function Scoreboard({ match }: { match: Match }) {
   return (
     <div className="mv-score" data-testid="match-score">
-      <span className={`mv-team ${match.home.ours ? "ours" : ""}`}>{match.home.name}</span>
+      {/* 칩이 어느 쪽이 홈인지 말한다 — 이름만으로는 매번 헷갈린다.
+          칩은 줄의 **바깥쪽** 끝에 서고, 안쪽은 이름과 스코어가 붙어 읽힌다 */}
+      <span className={`mv-team ${match.home.ours ? "ours" : ""}`}>
+        <i className="mv-ground">Home</i>
+        {match.home.name}
+      </span>
       <b className="mv-goals">
         {match.score.home} : {match.score.away}
       </b>
-      <span className={`mv-team away ${match.away.ours ? "ours" : ""}`}>{match.away.name}</span>
+      <span className={`mv-team away ${match.away.ours ? "ours" : ""}`}>
+        {match.away.name}
+        <i className="mv-ground">Away</i>
+      </span>
       {/* 퇴장 — 인원이 왜 줄었는지 화면이 설명해야 한다. 표에서 사라진 이름을
           감독이 스스로 추리하게 두면 안 된다 */}
       {match.sentOff.length > 0 && (
@@ -179,37 +193,146 @@ function Scoreboard({ match }: { match: Match }) {
   );
 }
 
+/** 화면에 그리는 순서 — 왼쪽이 우리 골문, 오른쪽이 상대 골문 */
+const BANDS = [
+  { key: "defense", label: "우리 진영" },
+  { key: "midfield", label: "중원" },
+  { key: "attack", label: "상대 진영" },
+] as const;
+/** 위에서 아래로 — 우리가 공격 방향을 바라볼 때의 왼쪽·가운데·오른쪽 */
+const LANES = [
+  { key: "left", label: "좌" },
+  { key: "center", label: "중" },
+  { key: "right", label: "우" },
+] as const;
+
+/** 우열의 크기 — 존 라벨(`edgeOf`)과 같은 밴드를 쓴다 */
+function edgeClass(ours: number, theirs: number): string {
+  const ratio = theirs > 0 ? ours / theirs : 1;
+  const abs = ratio >= 1 ? ratio : 1 / ratio;
+  if (abs < 1.04) return "even";
+  const size = abs >= 1.18 ? "big" : abs >= 1.08 ? "clear" : "slight";
+  return `${ratio > 1 ? "up" : "down"} ${size}`;
+}
+
 /**
- * 존 막대 — 세 전선의 우열을 **길이로** 견준다.
+ * 스물두 명의 자리 — **두 팀을 한 번에 놓는다.**
  *
- * 숫자를 나란히 두면 어느 쪽이 큰지 세어야 한다. 막대는 한눈에 읽힌다.
- * 기대 득점은 그 판세의 요약이라 아래에 한 줄로 붙인다.
+ * 팀별로 따로 놓으면 홈 최전방과 원정 최종 수비가 같은 자리에 겹친다(둘은 실제로
+ * 같은 곳에서 맞선다). 한 배열로 모아 밀어내야 상대와도 겹치지 않는다.
+ *
+ * 팀 안의 겹침(코드만 보면 센터백 둘이 한 점)은 전술판과 **같은 방식**으로 먼저
+ * 푼다 — `separateBoardPoints`. 번호는 세이브에 등번호가 없어 자리로 매긴다:
+ * 골키퍼가 1번이고 그다음은 자기 골문에서 먼 순서라, 어느 포메이션에서도 번호로
+ * 라인을 안다.
+ */
+function placeBothSides(match: Match): {
+  player: MatchPlayer;
+  no: number;
+  at: PitchPoint;
+}[] {
+  const sides = (["home", "away"] as const).flatMap((side) => {
+    const players = match.onPitch[side];
+    const board = separateBoardPoints(players.map((p) => anchorOf(p.position)));
+    return players
+      .map((player, i) => ({ player, point: board[i]! }))
+      .sort((a, b) => b.point.y - a.point.y || a.point.x - b.point.x)
+      .map((e, i) => ({ player: e.player, no: i + 1, at: pitchPointOf(e.point, side) }));
+  });
+  const spread = spreadMarkers(sides.map((s) => s.at));
+  return sides.map((s, i) => ({ ...s, at: spread[i]! }));
+}
+
+/**
+ * 판세 — **경기장 위의 아홉 칸과 스물두 명.**
+ *
+ * 세 전선을 막대 셋으로만 보여주면 "중원이 밀린다"까지만 읽힌다. 그런데 감독이
+ * 손보는 것은 자리다: 밀리는 게 왼쪽인지 가운데인지에 따라 뺄 선수도 내릴 지시도
+ * 다르다. 그래서 판세를 **경기장 모양 그대로** 펼치고, 그 위에 두 팀의 배치를
+ * 얹는다 — 밀리는 칸에 누가 서 있는지가 한 화면에서 읽힌다.
+ *
+ * **홈이 왼쪽**이다. 우리 편 기준으로 돌리면 스코어보드·득점과 좌우가 어긋나
+ * 0:1이 어느 쪽 골인지 다시 따져야 한다. 대신 색이 편을 말한다.
+ *
+ * 아홉 칸은 새 수치가 아니라 존 전력을 좌·중·우로 **나눈 것**이다
+ * (sim `zone-grid.ts`) — 화면에만 있고 결과에 닿지 않는 숫자는 감독을 속인다.
  */
 function ZoneBars({ match }: { match: Match }) {
+  const cellOf = (band: string, lane: string) =>
+    match.grid.find((c) => c.band === band && c.lane === lane);
+  /** 그 전선 전체의 우열 — 세 칸을 합쳐 머리에 적는다 */
+  const bandEdge = (band: string) => {
+    const cells = match.grid.filter((c) => c.band === band);
+    const ours = cells.reduce((s, c) => s + c.ours, 0);
+    const theirs = cells.reduce((s, c) => s + c.theirs, 0);
+    return edgeClass(ours, theirs);
+  };
+  /** 왼쪽이 홈이므로 진영 이름도 홈 기준으로 붙는다 */
+  const bandLabel = (band: string) => {
+    if (band === "midfield") return "중원";
+    const isHomeHalf = band === "defense";
+    return isHomeHalf === match.home.ours ? "우리 진영" : "상대 진영";
+  };
   return (
     <div className="mv-zones" data-testid="match-zones">
-      {match.zones.map((z) => {
-        const total = z.home + z.away || 1;
-        const homePct = (z.home / total) * 100;
-        return (
-          <div className="mv-zone" key={z.zone}>
-            <span className="mv-zone-name">{z.label}</span>
-            {/* 막대 길이는 참값의 비율로 긋고, 읽는 숫자만 반올림한다 */}
-            <span className="mv-bar" title={`${Math.round(z.home)} vs ${Math.round(z.away)}`}>
-              <span
-                className={`mv-bar-home ${z.edge === "home" ? "lead" : ""}`}
-                style={{ width: `${homePct}%` }}
-              />
-              <span className={`mv-bar-away ${z.edge === "away" ? "lead" : ""}`} />
-            </span>
-            <span className="mv-zone-edge">
-              {z.edge === "even" ? "팽팽" : `${z.edge === "home" ? "홈" : "원정"} ${z.size}`}
-            </span>
-          </div>
-        );
-      })}
+      {/* 기대 득점 — 판세의 결론이라 판 위에 크게 선다. 순서는 스코어와 같은 홈 : 원정 */}
       <div className="mv-xg">
-        기대 득점 <b>{match.expectedGoals.home}</b> : <b>{match.expectedGoals.away}</b>
+        <span className="mv-xg-label">기대 득점</span>
+        <span className="mv-xg-score">
+          <b className={match.expectedGoals.home >= match.expectedGoals.away ? "lead" : ""}>
+            {match.expectedGoals.home.toFixed(2)}
+          </b>
+          <i>:</i>
+          <b className={match.expectedGoals.away > match.expectedGoals.home ? "lead" : ""}>
+            {match.expectedGoals.away.toFixed(2)}
+          </b>
+        </span>
+      </div>
+      <div className="mv-pitch">
+        <div className="mv-pitch-head" aria-hidden>
+          {BANDS.map((b) => (
+            <span className={`mv-band ${bandEdge(b.key)}`} key={b.key}>
+              {bandLabel(b.key)}
+            </span>
+          ))}
+        </div>
+        <div className="mv-pitch-field">
+          {LANES.map((lane) =>
+            BANDS.map((band) => {
+              const c = cellOf(band.key, lane.key);
+              if (!c) return null;
+              const diff = Math.round(c.ours - c.theirs);
+              return (
+                <span
+                  className={`mv-cell ${edgeClass(c.ours, c.theirs)}`}
+                  key={`${band.key}:${lane.key}`}
+                  title={`${bandLabel(band.key)} ${lane.label} — 우리 ${Math.round(c.ours)} vs 상대 ${Math.round(c.theirs)}`}
+                >
+                  {diff > 0 ? `+${diff}` : diff}
+                </span>
+              );
+            }),
+          )}
+          {/* 경기장 선 — 읽는 값이 아니라 자리를 알려주는 그림이다 */}
+          <span className="mv-pitch-lines" aria-hidden />
+          {/* 배치 — 밀리는 칸에 누가 서 있는지 */}
+          <div className="mv-pitch-players">
+            {placeBothSides(match).map(({ player, no, at }) => (
+              <span
+                className={`mv-marker${player.ours ? " ours" : ""}${player.gassed ? " gassed" : ""}`}
+                key={player.id}
+                style={{ left: `${at.left}%`, top: `${at.top}%` }}
+                title={`${no}. ${player.name} (${player.position}) — 전력 ${player.effective}${player.gassed ? " · 다리가 멈췄다" : ""}`}
+              >
+                {no}
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="mv-pitch-foot" aria-hidden>
+          <span>{match.home.short} 골문</span>
+          <span>{match.away.short} 골문</span>
+        </div>
       </div>
     </div>
   );
@@ -221,13 +344,18 @@ function ZoneBars({ match }: { match: Match }) {
  * 코어가 조건을 확인해 발동한 것만 온다(`tactical-counters.ts`). 감독이 손볼
  * 자리가 여기 있으므로 화면에서 가장 눈에 띄어야 한다.
  */
-function KeyPoints({ points }: { points: string[] }) {
+function KeyPoints({ points }: { points: Match["keyPoints"] }) {
   if (points.length === 0) return null;
   return (
     <div className="mv-keys" data-testid="match-keys">
       {points.map((p, i) => (
-        <div className={`mv-key ${p.includes("구멍") ? "gap" : ""}`} key={i}>
-          {p}
+        /**
+         * 우리에게 이로운 줄은 파랑, 불리한 줄은 빨강 — **누구 얘기인지는 코어가
+         * 정한다.** 예전엔 문장에 "구멍"이 들었는지로 갈랐는데, 그 구멍이 우리
+         * 것인지 상대 것인지는 문장만 봐선 알 수 없었다.
+         */
+        <div className={`mv-key${p.ours === null ? "" : p.ours ? " good" : " bad"}`} key={i}>
+          {p.text}
         </div>
       ))}
     </div>

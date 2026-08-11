@@ -345,6 +345,19 @@ export function separateBoardPoints(points: readonly BoardPoint[], pinned = -1):
 }
 
 /**
+ * 전선 셋의 자리 — **전술판 y 기준**(자기 골문이 100, 상대 골문이 0).
+ *
+ * 판세 격자가 칸을 놓는 자리(`center`)이자, 경기 화면이 선수를 그 칸 안에
+ * 앉히는 근거(`edge`)다. 두 곳이 다른 경계를 쓰면 공격수가 중원 칸에 서는
+ * 그림이 나온다 — 값은 여기 하나뿐이다.
+ */
+export const PITCH_BANDS = {
+  center: { defense: 77, midfield: 47, attack: 20 },
+  /** 밴드가 갈리는 y — 이웃한 두 중심의 가운데 */
+  edge: { defenseMid: 62, midAttack: 33.5 },
+} as const;
+
+/**
  * 코드의 기본 좌표 — 좌표 없는 배치(채팅으로 지시한 라인업, 이전 세이브)를
  * 전술판에 올릴 때 쓴다. 각 칸의 중심이라 `positionAtPoint`로 되접으면 제자리다.
  */
@@ -757,7 +770,6 @@ export const TacticAssignmentSchema = z.object({
     .optional(),
 });
 export type TacticAssignment = z.infer<typeof TacticAssignmentSchema>;
-
 
 // ── 적응도 기억에서 "새 전술의 출발점" 구하기 ─────────────
 //

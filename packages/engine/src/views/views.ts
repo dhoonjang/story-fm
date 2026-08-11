@@ -41,7 +41,7 @@ import { domesticCupsOf } from "../competition/domestic-cup";
 import { drawParts, drawTitle } from "../competition/draw-schedule";
 import { euroCompetitionOf } from "../competition/europe";
 import { formAngle, formLabel, formTone } from "../squad/form";
-import { GAP_CONDITION } from "@story-fm/sim";
+import { GAP_CONDITION, zoneGrid } from "@story-fm/sim";
 import { moodOf } from "../squad/mood";
 import { isHomegrownFor, occupiesSquadList, squadRegistrationOf } from "../squad/registration";
 import {
@@ -417,7 +417,7 @@ export interface BracketStageView {
 
 /**
  * 순위표 구역 — 그 순위에 무슨 뜻이 붙는가 (챔스 진출·본선 직행 등).
- * 대회 카탈로그의 티켓 수에서 파생되며, **강등은 승강 미구현이라 없다**.
+ * 대회 카탈로그의 티켓 수에서 파생되고, 강등·승격 구역은 승강 규칙에서 나온다.
  */
 export interface StandingZone {
   /** 이 구역이 끝나는 순위 (1부터, 포함) */
@@ -532,8 +532,25 @@ export interface MatchView {
   }[];
   /** 90분 기대 득점 — 지금 판세의 요약 숫자 */
   expectedGoals: { home: number; away: number };
-  /** 발동한 상성·구멍·미스매치 — 감독이 지금 손볼 자리 */
-  keyPoints: string[];
+  /**
+   * 판세 격자 — 세 전선을 좌·중·우로 쪼갠 9칸.
+   *
+   * **자리는 홈 기준**이다: `defense`가 홈의 진영, `attack`이 홈이 공격하는 쪽.
+   * 화면이 홈을 왼쪽에 두므로 스코어보드·득점과 좌우가 늘 같다.
+   * **값은 우리 편 기준**이라 색은 우리가 이기는 칸에서 밝아진다.
+   * 각 줄 세 칸의 평균은 그 줄의 존 전력과 같다 (sim `zone-grid.ts`).
+   */
+  grid: {
+    band: "defense" | "midfield" | "attack";
+    lane: "left" | "center" | "right";
+    ours: number;
+    theirs: number;
+  }[];
+  /**
+   * 발동한 상성·구멍·미스매치 — 감독이 지금 손볼 자리.
+   * `ours`는 **우리 편에 이로운 줄인가**다 (모르면 `null` — 옛 세이브의 진행 중 경기).
+   */
+  keyPoints: { text: string; ours: boolean | null }[];
   /**
    * 지금 노리고 있는 지점의 설명 — 화면이 "공략 중"으로 표시한다.
    * 감독이 지시한 것이 판에 반영되고 있다는 유일한 증거다.
@@ -859,6 +876,7 @@ const ZONE_KO: Record<"attack" | "midfield" | "defense", string> = {
   midfield: "중원",
   defense: "홈 수비 ← 어웨이 공격",
 };
+
 const EDGE_SIZE_KO: Record<string, string> = {
   slight: "근소",
   clear: "뚜렷",
@@ -867,6 +885,8 @@ const EDGE_SIZE_KO: Record<string, string> = {
 const MATCH_PHASE_KO: Record<string, string> = {
   first_half: "전반",
   second_half: "후반",
+  extra_first: "연장 전반",
+  extra_second: "연장 후반",
   finished: "종료",
 };
 
@@ -1047,7 +1067,30 @@ function buildMatchView(state: GameState): MatchView | null {
         };
       }),
     expectedGoals: { ...packet.guide.expectedGoals },
-    keyPoints: packet.keyPoints,
+    /**
+     * 자리는 홈 기준 그대로 두고 **값만 우리 편으로 접는다.**
+     *
+     * 좌우까지 우리 기준으로 돌리면 같은 화면 안에서 스코어보드(홈-원정)와
+     * 경기장(우리-상대)의 방향이 어긋난다 — 0:1이 어느 쪽 골인지 다시 따져야 한다.
+     */
+    grid: zoneGrid(packet).map((c) => {
+      const weAreHome = match.homeTeamId === state.userTeamId;
+      return {
+        band: c.band,
+        lane: c.lane,
+        ours: weAreHome ? c.home : c.away,
+        theirs: weAreHome ? c.away : c.home,
+      };
+    }),
+    /**
+     * 유불리는 **우리 편 기준**으로 접어서 넘긴다 — 화면이 홈/원정 중 어느 쪽이
+     * 우리인지 다시 따지지 않아도 되게. 편을 모르는 옛 세이브는 `null`이다.
+     */
+    keyPoints: packet.keyPoints.map((text, i) => {
+      const favours = packet.keyPointSides?.[i];
+      const ourSide = match.homeTeamId === state.userTeamId ? "home" : "away";
+      return { text, ours: favours === undefined ? null : favours === ourSide };
+    }),
     exploiting: (pending.exploits ?? [])
       .map((id) => packet.targets.find((t) => t.id === id)?.label)
       .filter((x): x is string => x !== undefined),

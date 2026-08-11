@@ -32,12 +32,14 @@
     "**/*.ts",
     "**/*.tsx",
     ".next-e2e/types/**/*.ts",
+    ".next-hintcheck/types/**/*.ts",
+    ".next-prod/types/**/*.ts",
     ".next-scratch3407/types/**/*.ts",
     ".next-scratch3409/types/**/*.ts",
     ".next-shot/types/**/*.ts",
     ".next/types/**/*.ts",
     "next-env.d.ts",
-    ".next-prod/types/**/*.ts"
+    ".next-scratch3411/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

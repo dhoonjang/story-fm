@@ -178,6 +178,31 @@ export function GameScreen({ gameId }: { gameId: string }) {
    * 한쪽만 접히면 탭을 옮길 때마다 화면이 다른 모양이 된다.
    */
   const [boardOpen, setBoardOpen] = useState(false);
+  /**
+   * 서랍이 **나가는 중인가** — 닫는 몸짓을 위한 유예다.
+   *
+   * 접는 순간 판을 흐름에서 빼면(`folded`) 화면에서 툭 사라져 어디로 갔는지가
+   * 남지 않는다. 열 때와 같은 시간(`PANEL_ANIM_MS`)만큼 더 그려 두고, 그동안
+   * 오른쪽으로 미끄러져 나간다. 장부 칸이 접히는 동안 내용을 남겨 두는 것
+   * (`shownPanel`)과 같은 장치다.
+   */
+  const [boardClosing, setBoardClosing] = useState(false);
+  const boardCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toggleBoard = useCallback(() => {
+    if (boardCloseTimer.current) clearTimeout(boardCloseTimer.current);
+    setBoardOpen((open) => {
+      // 나가는 도중에 다시 부르면 그 자리에서 되돌아온다 — 유예를 취소한다
+      if (open) {
+        setBoardClosing(true);
+        boardCloseTimer.current = setTimeout(() => setBoardClosing(false), PANEL_ANIM_MS);
+      } else setBoardClosing(false);
+      return !open;
+    });
+  }, []);
+  useEffect(
+    () => () => void (boardCloseTimer.current && clearTimeout(boardCloseTimer.current)),
+    [],
+  );
   /** 읽은 장부 알림 — 그 화면을 연 순간부터 다시 세우지 않는다 (다음 턴에 풀린다) */
   const [seenHints, setSeenHints] = useState<string[]>([]);
   /**
@@ -587,7 +612,9 @@ export function GameScreen({ gameId }: { gameId: string }) {
    * 결과도 같아야 한다 — 다른 탭(판세·대회·달력)에서는 켜 둔 상태여도 아무 일이
    * 없어야 하므로 지금 무엇이 서 있는지를 함께 본다.
    */
-  const boardTakesStage = boardOpen && (showBoard ? matchTab === "팀" : shownPanel === "스쿼드");
+  const boardOnStage = showBoard ? matchTab === "팀" : shownPanel === "스쿼드";
+  /** 나가는 중에도 서랍은 그려져 있어야 한다 — 그동안 오른쪽으로 미끄러진다 */
+  const boardTakesStage = (boardOpen || boardClosing) && boardOnStage;
   /**
    * 레일에 세울 말풍선 — **처음엔 그 턴에 바뀐 장부 전부, 칩을 누르면 그 하나만.**
    *
@@ -597,6 +624,39 @@ export function GameScreen({ gameId }: { gameId: string }) {
    * 경기 중에는 장부 레일이 서지 않으므로 칩도 제자리에서 펼친다(`onRevealHint` 없음).
    */
   const shownHints = pinnedHint ? pinnedHint.hints : hintsClosed ? [] : hints;
+
+  /**
+   * ── 같은 화면은 **한 번만 적는다** ─────────────────────────
+   *
+   * 스쿼드도 대회도 경기 탭과 장부 양쪽에 선다. 두 자리에 각각 써 두었더니 한쪽만
+   * 고칠 때마다 두 화면이 조금씩 갈라졌다 — 경기 중의 전술판이 오피스의 것과 다른
+   * 물건이 되어 갔다. 무엇을 넘길지는 여기서 한 번 정하고, 아래 두 자리는 그것을
+   * 놓기만 한다. 다른 것은 **돌아갈 자리**뿐이라 그것만 받는다.
+   */
+  const squadView = (goBack: () => void) => (
+    <SquadView
+      game={game}
+      onUpdate={setGame}
+      onGoToChat={goBack}
+      /* 나가는 중에도 판은 흐름에 남아 있어야 미끄러질 수 있다 */
+      boardOpen={boardOpen || boardClosing}
+      onToggleBoard={toggleBoard}
+      /*
+       * 경기 중 전술판 조작 — **지시로 보낸다.** 판에서 손을 뗀 순간 채팅으로
+       * 돌아가 중계를 보게 한다: 지시의 결과는 거기서 나온다.
+       */
+      onOrder={
+        inMatch
+          ? (text) => {
+              ordersRef.current = [...ordersRef.current, text];
+            }
+          : undefined
+      }
+    />
+  );
+  const competitionsView = (
+    <CompetitionsView competitions={game.views.competitions} teamName={game.teamName} />
+  );
 
   const chatPane = (
     <section className={`chat-pane${inMatch ? " broadcasting" : ""}`}>
@@ -829,20 +889,40 @@ export function GameScreen({ gameId }: { gameId: string }) {
         <Link href="/" className="brand" data-testid="home-link" title="게임 목록으로">
           <IconMark />
         </Link>
-        <span className="meta" data-testid="team-name">
-          {game.teamName}
-        </span>
-        <span className="meta hide-sm">{game.managerName} 감독</span>
-        {/* 시즌 번호는 여기 두지 않는다 — 상단 바에서 매 순간 필요한 건 **지금이
-            언제인가**뿐이고, 몇 번째 시즌인지는 커리어·대회 화면이 갖는다 */}
-        {/* 경기 중에는 **경기 시계**가 이 자리를 쓴다 — 그때 필요한 시각은 그것이다 */}
-        {game.views.match ? (
-          <MatchClock match={game.views.match} />
-        ) : (
-          <span className="meta" data-testid="game-date">
-            {game.date} {game.timeOfDay}
+        {/**
+         * 내가 누구이고 지금이 언제인가 — **제목 한 줄 + 각주 한 줄.**
+         *
+         * 셋을 같은 크기·같은 회색으로 나란히 늘어놓았던 때는 어느 것이 무엇인지
+         * 눈이 매번 세 덩어리를 다 읽어야 했다. 구단이 제목이고 감독과 시각은 그
+         * 각주다 — 굵기와 색으로 층을 두면 훑을 때 하나만 읽힌다.
+         *
+         * 좁아지면 두 줄로 갈린다(`.topbar-sub`). 지우지는 않는다 — 셋 다 화면이
+         * 바뀌어도 그대로여야 하는 좌표다. 대신 **줄임말이 붙는다**: 직함(감독)과
+         * 연도, 경기 중이면 대회 이름까지. 이름과 날짜 자체는 남는다.
+         */}
+        <div className="topbar-meta">
+          <span className="meta topbar-club" data-testid="team-name">
+            {game.teamName}
           </span>
-        )}
+          <span className="topbar-sub">
+            <span className="meta">
+              {game.managerName}
+              <span className="abbr"> 감독</span>
+            </span>
+            {/* 시즌 번호는 여기 두지 않는다 — 상단 바에서 매 순간 필요한 건 **지금이
+                언제인가**뿐이고, 몇 번째 시즌인지는 커리어·대회 화면이 갖는다 */}
+            {/* 경기 중에는 **경기 시계**가 이 자리를 쓴다 — 그때 필요한 시각은 그것이다 */}
+            {game.views.match ? (
+              <MatchClock match={game.views.match} />
+            ) : (
+              <span className="meta" data-testid="game-date">
+                {/* 연도는 좁아지면 접힌다 — 한 시즌 안에서 바뀌는 건 월·일이다 */}
+                <span className="abbr">{game.date.slice(0, 5)}</span>
+                {game.date.slice(5)} {game.timeOfDay}
+              </span>
+            )}
+          </span>
+        </div>
         {/*
          * 장부 뷰 — 무대의 주인은 채팅이므로 오른쪽 끝에 아이콘 줄로만 둔다.
          * **경기 중에는 서지 않는다** — 재정·커리어는 90분 안에 갈 곳이 아니고,
@@ -963,9 +1043,19 @@ export function GameScreen({ gameId }: { gameId: string }) {
         <div
           className={`stage-split panel-split${rightOpen ? " open" : ""}${
             showBoard ? " with-board" : " with-ledger"
-          }${boardTakesStage ? " board-open" : ""}`}
+          }${boardTakesStage ? " board-open" : ""}${boardClosing ? " board-closing" : ""}`}
         >
           {chatPane}
+          {/* 가라앉은 대화를 덮는 판 — 누르면 서랍이 닫힌다. 서랍이 설 수 없는
+              폭에서는 CSS가 걷어 낸다(`--drawer`) — 채팅을 가로막을 뿐이므로 */}
+          {boardTakesStage && !boardClosing && (
+            <button
+              className="board-scrim"
+              onClick={toggleBoard}
+              aria-label="전술판 닫기"
+              data-testid="board-scrim"
+            />
+          )}
           <section
             className="stage-right"
             aria-hidden={!rightOpen}
@@ -976,7 +1066,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
               <div className="stage-board" data-testid="stage-board">
                 {/* 탭이 바뀌면 이 덩어리가 새로 서며 흐려졌다 든다 — 판세와 명단은
                     생김새가 아주 달라서 즉시 갈리면 무엇이 바뀐 건지 읽히지 않는다 */}
-                <div className="board-tab" key={matchTab}>
+                <div className="board-tab ledger-body" key={matchTab}>
                   {matchTab === "판세" && <MatchOverview match={game.views.match} />}
                   {matchTab === "팀" && (
                     <>
@@ -1006,31 +1096,17 @@ export function GameScreen({ gameId }: { gameId: string }) {
                          * 눌려 누구를 뺄지 읽을 수가 없고, 정지점마다 급한 건 대개
                          * 체력과 평점이다. 판은 필요할 때 펼친다.
                          */
-                        <SquadView
-                          game={game}
-                          onUpdate={setGame}
-                          onGoToChat={() => setMatchTab("판세")}
-                          boardOpen={boardOpen}
-                          onToggleBoard={() => setBoardOpen((open) => !open)}
-                          onOrder={(text) => {
-                            ordersRef.current = [...ordersRef.current, text];
-                          }}
-                        />
+                        squadView(() => setMatchTab("판세"))
                       ) : (
                         <MatchOpponent
                           match={game.views.match}
-                          boardOpen={boardOpen}
-                          onToggleBoard={() => setBoardOpen((open) => !open)}
+                          boardOpen={boardOpen || boardClosing}
+                          onToggleBoard={toggleBoard}
                         />
                       )}
                     </>
                   )}
-                  {matchTab === "대회" && (
-                    <CompetitionsView
-                      competitions={game.views.competitions}
-                      teamName={game.teamName}
-                    />
-                  )}
+                  {matchTab === "대회" && competitionsView}
                 </div>
               </div>
             ) : (
@@ -1050,36 +1126,12 @@ export function GameScreen({ gameId }: { gameId: string }) {
                     `key`로 장부마다 새로 세운다 — 탭을 옮길 때 흐려졌다 든다 */}
                 <div
                   key={shownPanel ?? "none"}
-                  className={`view-scroll${wide ? " wide" : ""}${shownPanel === "스쿼드" ? " fill" : ""}`}
+                  className={`view-scroll ledger-body${wide ? " wide" : ""}${shownPanel === "스쿼드" ? " fill" : ""}`}
                 >
-                  {shownPanel === "스쿼드" && (
-                    <SquadView
-                      game={game}
-                      onUpdate={setGame}
-                      onGoToChat={() => setPanel(null)}
-                      boardOpen={boardOpen}
-                      onToggleBoard={() => setBoardOpen((open) => !open)}
-                      /*
-                       * 경기 중 전술판 조작 — **지시로 보낸다.** 판에서 손을 뗀 순간
-                       * 채팅으로 돌아가 중계를 보게 한다: 지시의 결과는 거기서 나온다.
-                       */
-                      onOrder={
-                        game.views.match
-                          ? (text) => {
-                              ordersRef.current = [...ordersRef.current, text];
-                            }
-                          : undefined
-                      }
-                    />
-                  )}
+                  {shownPanel === "스쿼드" && squadView(() => setPanel(null))}
                   {shownPanel === "달력" && <CalendarView calendar={game.views.calendar} />}
                   {shownPanel === "재정" && <FinanceView finance={game.views.finance} />}
-                  {shownPanel === "대회" && (
-                    <CompetitionsView
-                      competitions={game.views.competitions}
-                      teamName={game.teamName}
-                    />
-                  )}
+                  {shownPanel === "대회" && competitionsView}
                   {shownPanel === "커리어" && (
                     <CareerView squad={game.views.squad} career={game.views.career} />
                   )}
