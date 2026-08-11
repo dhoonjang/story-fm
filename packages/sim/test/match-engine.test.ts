@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  EXTRA_TIME_SUBS,
   LEDGER_LIMITS,
   applyEvents,
   buildStrengthPacket,
@@ -64,8 +65,17 @@ function setup(
   };
 }
 
-/** 한 경기를 끝까지 굴린다 — 장부 검증을 그대로 통과해야 한다 */
-function playMatch(s: Setup, seed: number): { ledger: MatchLedgerState; plans: SegmentPlan[] } {
+/**
+ * 한 경기를 끝까지 굴린다 — 장부 검증을 그대로 통과해야 한다.
+ *
+ * @param extraTime 90분이 비기면 연장으로 가는 경기인가 (녹아웃). 코어가 정하는
+ *   값이라 여기서는 인자로 흉내 낸다 — 구간 시뮬은 대회를 모른다.
+ */
+function playMatch(
+  s: Setup,
+  seed: number,
+  extraTime = false,
+): { ledger: MatchLedgerState; plans: SegmentPlan[] } {
   let ledger = s.ledger;
   const plans: SegmentPlan[] = [];
   for (let segment = 0; segment < 60 && ledger.phase !== "finished"; segment++) {
@@ -74,6 +84,8 @@ function playMatch(s: Setup, seed: number): { ledger: MatchLedgerState; plans: S
       ledger,
       squads: s.squads,
       tactics: s.tactics,
+      // 지금 스코어가 같아야 연장이다 — 코어의 `needsExtraTime`이 하는 판단
+      toExtraTime: extraTime && ledger.score.home === ledger.score.away,
       rng: rngOf(seed * 1000 + segment),
     });
     plans.push(plan);
@@ -198,6 +210,90 @@ describe("구간 시뮬레이터 — 결과는 코어가 정한다", () => {
  * 상대 벤치도 판단한다 — 이게 없으면 상대는 킥오프 전술로 90분을 버티는 고정
  * 표적이고, "상대가 내려섰으니 폭을 넓히자" 같은 판단이 성립하지 않는다.
  */
+describe("연장 — 구간 시뮬이 120분까지 간다", () => {
+  /** 그 경기의 마지막 사건이 종료인가 + 연장을 지났는가 */
+  const shapeOf = (ledger: MatchLedgerState) => ({
+    entered: ledger.events.some((e) => e.type === "extra_time_start"),
+    end: ledger.events.find((e) => e.type === "full_time"),
+    level: ledger.score.home === ledger.score.away,
+  });
+
+  it("리그처럼 연장이 없는 경기는 90분에 끝난다 — 비겨도 그대로다", () => {
+    let draws = 0;
+    for (let seed = 0; seed < 40; seed++) {
+      const { ledger } = playMatch(setup(80, 80), seed);
+      const shape = shapeOf(ledger);
+      expect(shape.entered, `seed ${seed}`).toBe(false);
+      expect(shape.end!.minute).toBeLessThan(100); // 90 + 추가시간
+      if (shape.level) draws++;
+    }
+    // 무승부가 한 번도 안 나왔다면 이 테스트는 아무것도 증명하지 못한다
+    expect(draws).toBeGreaterThan(0);
+  });
+
+  it("녹아웃이 비기면 연장으로 가고, 120분까지 장부가 이어진다", () => {
+    let extraTimes = 0;
+    for (let seed = 0; seed < 40 && extraTimes < 5; seed++) {
+      const { ledger } = playMatch(setup(80, 80), seed, true);
+      const shape = shapeOf(ledger);
+      expect(ledger.phase, `seed ${seed}`).toBe("finished");
+      if (!shape.entered) {
+        // 90분에 갈렸다 — 연장이 없어야 한다
+        expect(shape.level, `seed ${seed}`).toBe(false);
+        continue;
+      }
+      extraTimes++;
+      // 연장 두 하프를 모두 지나고 120′ 이후에 끝난다
+      expect(ledger.events.some((e) => e.type === "extra_half_time"), `seed ${seed}`).toBe(true);
+      expect(shape.end!.minute, `seed ${seed}`).toBeGreaterThanOrEqual(120);
+      const start = ledger.events.find((e) => e.type === "extra_time_start")!;
+      expect(start.minute).toBeGreaterThanOrEqual(90);
+    }
+    expect(extraTimes).toBeGreaterThan(0);
+  });
+
+  it("연장 30분은 90분보다 성기다 — 분당 골이 낮다", () => {
+    let regulation = 0;
+    let extra = 0;
+    let extraMinutes = 0;
+    let matches = 0;
+    for (let seed = 0; seed < 120; seed++) {
+      const { ledger } = playMatch(setup(80, 80), seed, true);
+      matches++;
+      for (const e of ledger.events) {
+        if (e.type !== "goal") continue;
+        if (e.minute > 90) extra++;
+        else regulation++;
+      }
+      if (ledger.events.some((x) => x.type === "extra_time_start")) extraMinutes += 30;
+    }
+    expect(extraMinutes).toBeGreaterThan(100); // 표본이 있어야 한다
+    const perMinuteRegulation = regulation / (matches * 90);
+    const perMinuteExtra = extra / extraMinutes;
+    // 눈금은 0.84배 — 난수 폭을 감안해 넉넉히 잡는다
+    expect(perMinuteExtra).toBeLessThan(perMinuteRegulation);
+    expect(perMinuteExtra).toBeGreaterThan(perMinuteRegulation * 0.3);
+  });
+
+  /**
+   * 연장 피로 — 같은 시드로 두 번 굴린다. 난수 채널이 같으므로 90분까지는 **똑같은
+   * 경기**이고, 갈리는 건 그 뒤 30분뿐이다. 그래서 차이가 곧 연장의 대가다.
+   */
+  it("연장에도 다리는 계속 마른다 — 30분치가 그대로 더 들어간다", () => {
+    const drain = (plans: SegmentPlan[]) =>
+      plans.reduce((acc, p) => acc + Object.values(p.fatigue).reduce((a, b) => a + b, 0), 0);
+    let compared = false;
+    for (let seed = 0; seed < 40 && !compared; seed++) {
+      const withExtra = playMatch(setup(80, 80), seed, true);
+      if (!withExtra.ledger.events.some((e) => e.type === "extra_time_start")) continue;
+      const ninety = playMatch(setup(80, 80), seed, false);
+      expect(drain(withExtra.plans)).toBeGreaterThan(drain(ninety.plans));
+      compared = true;
+    }
+    expect(compared, "연장까지 간 시드를 찾지 못했다").toBe(true);
+  });
+});
+
 describe("AI 전술 반응", () => {
   const spec = { ...DEFAULT_TACTICS };
   const ledgerAt = (minute: number, home: number, away: number) =>
@@ -288,5 +384,49 @@ describe("AI 교체 판단", () => {
       worn,
     );
     expect(full).toBeNull();
+  });
+
+  it("연장에서는 한 장이 더 있다 — 장부와 같은 함수를 본다", () => {
+    const squad = squadOf(75);
+    const worn: Record<string, number> = {};
+    for (const p of squad.onPitch) worn[p.id] = 50;
+    const inExtra = (subsUsed: number) =>
+      ({
+        minute: 100,
+        phase: "extra_first",
+        score: { home: 0, away: 0 },
+        home: { subsUsed, subWindows: 0 },
+        away: { subsUsed: 0, subWindows: 0 },
+      }) as never;
+    // 90분의 한도(5)를 다 쓴 팀도 연장에서는 한 번 더 움직일 수 있다
+    expect(
+      planAiSubstitution("home", squad, inExtra(LEDGER_LIMITS.maxSubs), plan(100), () => 0, worn),
+    ).not.toBeNull();
+    expect(
+      planAiSubstitution(
+        "home",
+        squad,
+        inExtra(LEDGER_LIMITS.maxSubs + EXTRA_TIME_SUBS),
+        plan(100),
+        () => 0,
+        worn,
+      ),
+    ).toBeNull();
+  });
+
+  it("연장 개시도 벤치가 판을 다시 짜는 자리다 — 문턱이 하프타임과 같다", () => {
+    const squad = squadOf(75);
+    const worn: Record<string, number> = {};
+    // 하프타임 문턱(28)은 넘고 평시 문턱(40)은 못 넘는 정도
+    for (const p of squad.onPitch) worn[p.id] = 32 - (100 - p.state.condition);
+    const breakStop = planAiSubstitution(
+      "home",
+      squad,
+      ledger(92),
+      plan(92, { stop: "extra_time_start" }),
+      () => 0.99, // 확률 판정은 통과하지 못하는 값 — 정지점 자체가 자격이어야 한다
+      worn,
+    );
+    expect(breakStop?.type).toBe("substitution");
   });
 });

@@ -64,14 +64,10 @@ const groupOf = (s: LineupSlot): PositionGroup => {
 };
 
 const top = (xi: LineupSlot[], g: PositionGroup, read: (p: Player) => number) =>
-  xi
-    .filter((s) => groupOf(s) === g)
-    .sort((a, b) => read(b.player) - read(a.player))[0]?.player;
+  xi.filter((s) => groupOf(s) === g).sort((a, b) => read(b.player) - read(a.player))[0]?.player;
 
 const bottom = (xi: LineupSlot[], g: PositionGroup, read: (p: Player) => number) =>
-  xi
-    .filter((s) => groupOf(s) === g)
-    .sort((a, b) => read(a.player) - read(b.player))[0]?.player;
+  xi.filter((s) => groupOf(s) === g).sort((a, b) => read(a.player) - read(b.player))[0]?.player;
 
 const avg = (xi: LineupSlot[], g: PositionGroup, read: (p: Player) => number) => {
   const xs = xi.filter((s) => groupOf(s) === g).map((s) => read(s.player));
@@ -92,7 +88,8 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
     text: string,
     vague: string,
   ) => {
-    if (weight > 0) out.push({ id: `${axis}:${who?.id ?? "team"}`, side, zone, weight, text, vague });
+    if (weight > 0)
+      out.push({ id: `${axis}:${who?.id ?? "team"}`, side, zone, weight, text, vague });
   };
 
   // ── 뒷공간 — 하이라인의 대가 ──
@@ -266,8 +263,9 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
   }
 
   // ── 세트피스 키커 — 죽은 공에서 나오는 득점 ──
-  const kicker = [...atk].sort((a, b) => b.player.attributes.kicking - a.player.attributes.kicking)[0]
-    ?.player;
+  const kicker = [...atk].sort(
+    (a, b) => b.player.attributes.kicking - a.player.attributes.kicking,
+  )[0]?.player;
   if (kicker) {
     push(
       "set-piece",
@@ -283,7 +281,8 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
   // ── 거친 선수 — 카드와 페널티의 씨앗 ──
   const rough = [...def].sort(
     (a, b) =>
-      b.player.attributes.aggression - b.player.attributes.composure -
+      b.player.attributes.aggression -
+      b.player.attributes.composure -
       (a.player.attributes.aggression - a.player.attributes.composure),
   )[0]?.player;
   if (rough) {
@@ -333,6 +332,13 @@ function keyPointCount(analysis: number): number {
   return Math.max(2, Math.min(10, Math.round(2 + (analysis / 99) * 8)));
 }
 
+/** 감독의 눈에 실제로 잡힌 지점 — 문장과 **누가 이 약점을 가졌나** */
+export interface ShownPoint {
+  text: string;
+  /** 이 약점을 가진 쪽 — 이로운 쪽은 그 반대다 */
+  side: "home" | "away";
+}
+
 /**
  * 얼마나 정확히 읽는가 — **전술**이 정한다.
  *
@@ -340,11 +346,11 @@ function keyPointCount(analysis: number): number {
  * 어떤 건 정밀하고 어떤 건 흐린 게 자연스럽다 — 크게 벌어진 짝일수록 눈이
  * 어두워도 또렷하다.
  */
-export function readKeyPoints(points: KeyPoint[], analysis: number, tactics: number): string[] {
+export function readKeyPoints(points: KeyPoint[], analysis: number, tactics: number): ShownPoint[] {
   const sharp = (tactics / 99) * 0.75;
   return points.slice(0, keyPointCount(analysis)).map((p) => {
     // 벌어진 폭이 큰 짝은 낮은 전술 능력으로도 또렷이 보인다
     const clarity = sharp + Math.min(0.25, p.weight / 60);
-    return clarity >= 0.55 ? p.text : p.vague;
+    return { text: clarity >= 0.55 ? p.text : p.vague, side: p.side };
   });
 }

@@ -15,6 +15,7 @@ import { clubProfile } from "../data/club-profile";
 import { isMarketOnlyLeague, leagueCatalogById } from "../data/league-catalog";
 import { competitionShortName, isCup, isEuroCup } from "../data/cup-catalog";
 import { leagueOfTeam, teamCatalogById } from "../data/team-catalog";
+import { leagueOfTeamIn } from "../competition/promotion";
 import { computeStandings } from "../competition/season";
 import { financeOf, pushNarrative, teamShortName, weeklyWagesOf, type GameState } from "../core/state";
 import { makeRng } from "../core/rng";
@@ -47,6 +48,27 @@ const BROADCAST_MONTHS = 12;
 const BROADCAST_MERIT_STEP = 2_400_000;
 /** 생중계로 편성된 경기당 수당 */
 const BROADCAST_FACILITY_PER_MATCH = 1_100_000;
+
+/**
+ * **파라슈트 페이먼트** — 강등 클럽이 떠나온 리그에서 받는 낙하산.
+ *
+ * 실제 EPL은 강등 뒤 3년간 순수 중계 몫의 55/45/20%를 준다(승격 1시즌 만에
+ * 다시 내려간 팀은 2년). 우리 균등 배분(£110M)은 중앙 상업 몫까지 흡수한
+ * 값이라 같은 금액이 되도록 비율을 조금 낮춰 잡는다.
+ *
+ * 이게 없으면 강등이 곧 파산이다 — 실제로 챔피언십의 재정 기준선을 올려
+ * 놓는 것이 이 돈이고, 강등 팀의 40%가 한 시즌 만에 돌아오는 이유이기도 하다.
+ */
+const PARACHUTE_RATE: readonly number[] = [0.45, 0.36, 0.16];
+/** 승격 1시즌 만에 다시 강등되면 2년만 받는다 */
+const PARACHUTE_YEARS_SHORT = 2;
+
+/**
+ * 강등이 상업 수입에 오는 데는 시간이 걸린다 — 스폰서 계약은 그날 끝나지 않는다.
+ * 실측(리즈 −10% · 레스터 −26%)이 그 폭이고, **파라슈트가 끝나는 3년차와 겹쳐**
+ * 이중 절벽이 된다.
+ */
+const RELEGATED_COMMERCIAL: readonly number[] = [-0.1, -0.25, -0.35];
 
 /** 상업(스폰서십) 월 정액 — 브랜드 규모별 */
 const COMMERCIAL_MONTHLY: Record<1 | 2 | 3 | 4, number> = {
@@ -122,8 +144,8 @@ function profileOf(teamId: string) {
   return clubProfile(teamId, tierOf(teamId));
 }
 
-function poolOf(teamId: string): number {
-  return leagueCatalogById(leagueOfTeam(teamId))?.broadcastPool ?? 0.3;
+function poolOf(state: GameState, teamId: string): number {
+  return leagueCatalogById(leagueOfTeamIn(state, teamId))?.broadcastPool ?? 0.3;
 }
 
 /**
@@ -136,8 +158,8 @@ function poolOf(teamId: string): number {
  */
 const EQUAL_SHARE_LEAGUE_SCALED = true;
 
-function equalShareFactor(teamId: string): number {
-  return EQUAL_SHARE_LEAGUE_SCALED ? poolOf(teamId) : 1;
+function equalShareFactor(state: GameState, teamId: string): number {
+  return EQUAL_SHARE_LEAGUE_SCALED ? poolOf(state, teamId) : 1;
 }
 
 const money = (amount: number) =>
@@ -230,7 +252,12 @@ export function payOnce(
 function previousRankOf(state: GameState, teamId: string): number {
   if (teamId === state.userTeamId) {
     const last = [...state.seasonRecords].reverse().find((r) => r.teamId === teamId);
-    if (last) return last.position;
+    /**
+     * ⚠️ **리그가 바뀌었으면 그 순위는 쓸 수 없다** — 챔피언십 1위와 프리미어리그
+     * 1위는 같은 수당이 아니다. 승격·강등한 시즌은 등급 어림으로 되돌린다.
+     */
+    const sameLeague = last?.leagueId === undefined || last.leagueId === leagueOfTeamIn(state, teamId);
+    if (last && sameLeague) return last.position;
   }
   const tier = tierOf(teamId);
   return tier === 1 ? 3 : tier === 2 ? 7 : tier === 3 ? 12 : 17;
@@ -238,8 +265,8 @@ function previousRankOf(state: GameState, teamId: string): number {
 
 /** 리그 팀 수 — 성적 수당의 계단 수 (18팀 리그는 계단이 짧다) */
 function leagueSizeOf(state: GameState, teamId: string): number {
-  const league = leagueOfTeam(teamId);
-  return Math.max(2, state.teams.filter((t) => leagueOfTeam(t.id) === league).length);
+  const league = leagueOfTeamIn(state, teamId);
+  return Math.max(2, state.teams.filter((t) => leagueOfTeamIn(state, t.id) === league).length);
 }
 
 /**
@@ -280,7 +307,7 @@ export function matchdayRevenue(state: GameState, match: MatchRecord): MatchdayR
   let occupancy = OCCUPANCY_BASE[tier];
 
   // 순위 — 상위권일수록 표가 팔린다 (순위표가 아직 없으면 보정 없음)
-  const standings = computeStandings(state, leagueOfTeam(teamId));
+  const standings = computeStandings(state, leagueOfTeamIn(state, teamId));
   const rank = standings.findIndex((r) => r.teamId === teamId) + 1;
   if (rank > 0) occupancy += ((11 - rank) / 10) * 0.04;
 
@@ -312,7 +339,7 @@ export function matchdayRevenue(state: GameState, match: MatchRecord): MatchdayR
   occupancy = Math.max(0.45, Math.min(1, occupancy));
   const attendance = Math.round(capacity * occupancy);
 
-  const basePrice = leagueCatalogById(leagueOfTeam(teamId))?.avgTicketPrice ?? 30;
+  const basePrice = leagueCatalogById(leagueOfTeamIn(state, teamId))?.avgTicketPrice ?? 30;
   const price = basePrice * TICKET_TIER_FACTOR[tier] * (isEuroCup(match.competitionId) ? 1.15 : 1);
   const gate = attendance * price;
   const income = Math.round(gate * (1 + HOSPITALITY_RATE[tier]));
@@ -378,7 +405,7 @@ export function applyMatchFinance(
       kind: "income",
       category: "broadcast_facility",
       label: `생중계 수당 (${label})`,
-      amount: BROADCAST_FACILITY_PER_MATCH * poolOf(teamId),
+      amount: BROADCAST_FACILITY_PER_MATCH * poolOf(state, teamId),
       ref,
     });
   }
@@ -413,7 +440,7 @@ export function applyAiMatchFinance(state: GameState, match: MatchRecord): void 
     if (side === "home" && !match.neutral) {
       const { capacity } = profileOf(teamId);
       const price =
-        (leagueCatalogById(leagueOfTeam(teamId))?.avgTicketPrice ?? 30) *
+        (leagueCatalogById(leagueOfTeamIn(state, teamId))?.avgTicketPrice ?? 30) *
         TICKET_TIER_FACTOR[tier] *
         (isEuroCup(match.competitionId) ? 1.15 : 1);
       const gate = capacity * OCCUPANCY_BASE[tier] * price * (1 + HOSPITALITY_RATE[tier]);
@@ -443,7 +470,7 @@ export function applyAiMatchFinance(state: GameState, match: MatchRecord): void 
         kind: "income",
         category: "broadcast_facility",
         label: "생중계 수당",
-        amount: BROADCAST_FACILITY_PER_MATCH * poolOf(teamId),
+        amount: BROADCAST_FACILITY_PER_MATCH * poolOf(state, teamId),
       });
     }
   }
@@ -597,12 +624,56 @@ export function ensureMonthlyPosted(state: GameState): void {
   if (!posted) postMonthlyItems(state);
 }
 
+/**
+ * 이번 시즌 이 클럽이 받는 파라슈트의 시즌 총액 (없으면 0).
+ * 연차가 지나면 0이 되고, 승격했으면 애초에 걸려 있지 않다.
+ */
+export function parachuteSeasonAmount(state: GameState, teamId: string): number {
+  const finance = state.finances.find((f) => f.teamId === teamId);
+  const drop = finance?.parachute;
+  if (!drop) return 0;
+  const year = state.season - drop.startSeason; // 0 = 1년차
+  if (year < 0 || year >= drop.years) return 0;
+  const rate = PARACHUTE_RATE[year] ?? 0;
+  const pool = leagueCatalogById(drop.fromLeagueId)?.broadcastPool ?? 1;
+  return BROADCAST_EQUAL_SEASON * pool * rate;
+}
+
+/**
+ * 강등 클럽에 파라슈트를 세운다 — 시즌 전환에서 부른다.
+ * 직전 강등에서 아직 받는 중이었으면(승격 1시즌 만의 재강등) 햇수가 짧아진다.
+ */
+export function startParachute(state: GameState, teamId: string, fromLeagueId: string): void {
+  const finance = state.finances.find((f) => f.teamId === teamId);
+  if (!finance) return;
+  const stillFalling = parachuteSeasonAmount(state, teamId) > 0;
+  finance.parachute = {
+    fromLeagueId,
+    startSeason: state.season + 1,
+    years: stillFalling ? PARACHUTE_YEARS_SHORT : PARACHUTE_RATE.length,
+  };
+}
+
+/** 승격하면 낙하산은 그 자리에서 끝난다 — 1부 배분과 겹쳐 받을 수 없다 */
+export function stopParachute(state: GameState, teamId: string): void {
+  const finance = state.finances.find((f) => f.teamId === teamId);
+  if (finance) delete finance.parachute;
+}
+
+/** 강등 뒤 몇 해가 지났나 — 상업 수입 감소가 이 값을 본다 (없으면 null) */
+function relegatedYear(state: GameState, teamId: string): number | null {
+  const drop = state.finances.find((f) => f.teamId === teamId)?.parachute;
+  if (!drop) return null;
+  const year = state.season - drop.startSeason;
+  return year >= 0 && year < RELEGATED_COMMERCIAL.length ? year : null;
+}
+
 function postMonthlyItems(state: GameState): void {
   // 96팀 × 전 경기 순회를 피한다 (월초 정산은 전 팀에 적용된다)
   const winRates = recentWinRates(state, 6);
   const leagueSizes = new Map<string, number>();
   for (const t of state.teams) {
-    const league = leagueOfTeam(t.id);
+    const league = leagueOfTeamIn(state, t.id);
     leagueSizes.set(league, (leagueSizes.get(league) ?? 0) + 1);
   }
   const playerNames = new Map(state.players.map((p) => [p.id, p.name] as const));
@@ -617,17 +688,17 @@ function postMonthlyItems(state: GameState): void {
       continue;
     }
     const tier = tierOf(team.id);
-    const pool = poolOf(team.id);
+    const pool = poolOf(state, team.id);
     const { commercialTier } = profileOf(team.id);
 
     recordFinance(state, team.id, {
       kind: "income",
       category: "broadcast_equal",
       label: "중계권 균등 배분",
-      amount: (BROADCAST_EQUAL_SEASON * equalShareFactor(team.id)) / BROADCAST_MONTHS,
+      amount: (BROADCAST_EQUAL_SEASON * equalShareFactor(state, team.id)) / BROADCAST_MONTHS,
     });
     const rank = previousRankOf(state, team.id);
-    const size = leagueSizes.get(leagueOfTeam(team.id)) ?? 20;
+    const size = leagueSizes.get(leagueOfTeamIn(state, team.id)) ?? 20;
     const steps = Math.max(1, size + 1 - rank);
     recordFinance(state, team.id, {
       kind: "income",
@@ -636,12 +707,30 @@ function postMonthlyItems(state: GameState): void {
       amount: (BROADCAST_MERIT_STEP * steps * pool) / BROADCAST_MONTHS,
     });
 
-    // 상업 — 대항전 참가·우승 조항 (지난 시즌 성적의 결과)
+    /**
+     * 파라슈트 — 강등의 완충. 균등 배분과 **같은 항목**으로 적자 없이 흐르되
+     * 라벨로 갈린다(감독이 "이 돈이 언제 끊기나"를 원장에서 읽어야 한다).
+     */
+    const parachute = parachuteSeasonAmount(state, team.id);
+    if (parachute > 0) {
+      recordFinance(state, team.id, {
+        kind: "income",
+        category: "broadcast_equal",
+        label: "파라슈트 페이먼트",
+        amount: parachute / BROADCAST_MONTHS,
+      });
+    }
+
+    // 상업 — 대항전 참가·우승 조항 (지난 시즌 성적의 결과) + 강등 후 지연 감소
+    const droppedYear = relegatedYear(state, team.id);
+    const relegationCut = droppedYear === null ? 0 : (RELEGATED_COMMERCIAL[droppedYear] ?? 0);
     recordFinance(state, team.id, {
       kind: "income",
       category: "commercial",
       label: "스폰서십",
-      amount: COMMERCIAL_MONTHLY[commercialTier] * (1 + commercialClause(state, team.id)),
+      amount:
+        COMMERCIAL_MONTHLY[commercialTier] *
+        (1 + commercialClause(state, team.id) + relegationCut),
     });
     // 머천다이징은 성적에 붙는다 — 최근 승률 ±10%
     const winRate = winRates.get(team.id);
@@ -910,7 +999,7 @@ export function payLeaguePrizes(state: GameState, digest: string[]): void {
     const rank = standings.findIndex((r) => r.teamId === team.id) + 1;
     if (rank <= 0) continue;
     const size = leagueSizeOf(state, team.id);
-    const amount = (size + 1 - rank) * 700_000 * poolOf(team.id);
+    const amount = (size + 1 - rank) * 700_000 * poolOf(state, team.id);
     if (
       payOnce(state, team.id, `league-prize:S${state.season}`, {
         kind: "income",

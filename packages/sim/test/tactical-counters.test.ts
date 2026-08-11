@@ -173,6 +173,47 @@ describe("전술 상성 — 두 전술이 서로를 만난다", () => {
     expect(packet.keyPoints.length).toBeGreaterThan(1);
     for (const note of packet.keyPoints) expect(note.length).toBeGreaterThan(5);
   });
+
+  /**
+   * 화면은 키포인트를 **우리 편 기준으로** 색칠한다. 문장은 팀 이름으로 시작할 뿐
+   * 유불리를 말하지 않으므로(같은 팀 이름이 가해자로도 피해자로도 온다) 편은
+   * 코어가 실어 보내야 한다.
+   */
+  it("대가는 치른 쪽의 반대편에 이롭다 — 하이라인 뒤가 열리면 상대가 웃는다", () => {
+    const fast = tweak(makeSide("them", 78), isFW, { pace: 94 });
+    const packet = buildStrengthPacket(
+      makeSide("us", 80, { tactics: T({ defensiveLine: 5 }) }),
+      fast,
+    );
+    expect(packet.keyPointSides).toHaveLength(packet.keyPoints.length);
+    const behind = packet.keyPoints.findIndex((k) => k.includes("높은 라인 뒤가 열린다"));
+    expect(behind).toBeGreaterThanOrEqual(0);
+    expect(packet.keyPointSides![behind]).toBe("away");
+  });
+
+  it("이득은 얻은 쪽에 이롭다 — 압박이 상대 빌드업을 끊는다", () => {
+    const shortShaky = makeSide("them", 78, { tactics: T({ passStyle: 1 }) });
+    tweak(shortShaky, isDF, { passing: 55, composure: 55 });
+    tweak(shortShaky, (p) => !isDF(p) && !isFW(p), { composure: 55, dribbling: 55, passing: 55 });
+    const packet = buildStrengthPacket(
+      makeSide("us", 80, { tactics: T({ pressing: 5 }) }),
+      shortShaky,
+    );
+    const trap = packet.keyPoints.findIndex((k) => k.includes("높은 곳에서 끊는다"));
+    expect(trap).toBeGreaterThanOrEqual(0);
+    expect(packet.keyPointSides![trap]).toBe("home");
+  });
+
+  it("구멍은 그 팀의 것이다 — 상대 다리가 멈추면 우리에게 이롭다", () => {
+    const gassed = makeSide("them", 78);
+    gassed.starters = gassed.starters.map((s) =>
+      s.position === "LB" ? { ...s, matchFatigue: 70 } : s,
+    );
+    const packet = buildStrengthPacket(makeSide("us", 78), gassed);
+    const gap = packet.keyPoints.findIndex((k) => k.includes("구멍"));
+    expect(gap).toBeGreaterThanOrEqual(0);
+    expect(packet.keyPointSides![gap]).toBe("home");
+  });
 });
 
 describe("체력 — 자리와 전술이 함께 정한다", () => {

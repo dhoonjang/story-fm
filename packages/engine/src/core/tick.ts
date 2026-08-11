@@ -566,7 +566,7 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
       `${state.season}:${match.competitionId}:${match.stage ?? "league"}:${match.round}:${match.homeTeamId}-${match.awayTeamId}`,
     );
     // 부상·카드·교체는 각자의 표가 갖는다 — 경기 결과에 섞어 넣지 않는다
-    const { injuries: hurt, cards, subs, ...scoreline } = result;
+    const { injuries: hurt, cards, subs, possession, ...scoreline } = result;
     /** 실제로 그라운드를 밟은 선수 — 교체 투입까지 (스카우팅 지식의 원본이다) */
     const played11 = (side: "home" | "away") => [
       ...squads[side].starters.map((p) => p.id),
@@ -659,7 +659,8 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
         // 그날의 몫 — 유저 경기와 같은 키 모양이라 리그 전체가 한 규칙을 쓴다
         const today = drainVariance(`${state.seed}:${match.id}:${p.id}`);
         p.state.condition = clampCondition(
-          p.state.condition - conditionDrain(p, position, spec, minutes, today),
+          p.state.condition -
+            conditionDrain(p, position, spec, minutes, today, 1, possession[side]),
         );
       }
     }

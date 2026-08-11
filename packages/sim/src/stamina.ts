@@ -188,6 +188,20 @@ export function drainVariance(key: string): number {
  *   선수만 먼저 다리가 멈추고, 뒤에 남으라는 지시를 받은 풀백은 덜 지친다.
  *   지시가 없으면 1이라 **아무것도 바뀌지 않는다.**
  */
+/**
+ * **공을 쫓는 팀이 더 뛴다** — 점유의 대가이자 중원 우위의 보상.
+ *
+ * 실제로 공 없는 팀은 고강도 주행이 눈에 띄게 늘어난다(수비 블록을 옮기고
+ * 압박을 나가는 것이 전부 공 없을 때의 일이다). 점유 0.5가 기준이고 양 끝
+ * (0.35 / 0.65)에서 ±12%가 된다.
+ */
+export const CHASE_DRAIN = 0.8;
+
+/** 점유(0~1)가 이 팀의 소모에 곱하는 배율 */
+export function chaseFactor(possession: number): number {
+  return 1 + (0.5 - possession) * CHASE_DRAIN;
+}
+
 export function conditionDrain(
   player: Player,
   position: string,
@@ -195,6 +209,7 @@ export function conditionDrain(
   minutes: number,
   variance = 1,
   directive = 1,
+  possession = 0.5,
 ): number {
   return (
     ((FULL_MATCH_DRAIN * minutes) / 90) *
@@ -203,7 +218,8 @@ export function conditionDrain(
     positionalTacticWeight(position, spec) *
     staminaFactor(player) *
     variance *
-    directive
+    directive *
+    chaseFactor(possession)
   );
 }
 

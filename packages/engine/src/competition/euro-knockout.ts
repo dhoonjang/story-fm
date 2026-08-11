@@ -12,7 +12,7 @@ import { completeDraw, drawIsDue, scheduleDraw } from "./draw-schedule";
 import { knockoutDates } from "./europe";
 import { payLeaguePhasePrizes, payStagePrizes } from "./euro-prize";
 import { makeRng } from "../core/rng";
-import { resolveExtraTime, tieAggregate } from "./extra-time";
+import { pairOf, resolveExtraTime, tieAggregate } from "./extra-time";
 import { shootout } from "./shootout";
 import { pushNarrative, teamName, teamShortName, type GameState } from "../core/state";
 import { computeStandings } from "./season";
@@ -34,9 +34,6 @@ function knockoutId(cupId: string, season: number, stage: MatchStage, pair: numb
   return `m-${cupId}-${season}-${stage}-p${pair}-l${leg}`;
 }
 
-function pairOf(match: MatchRecord): number {
-  return Number(/-p(\d+)-l\d+$/.exec(match.id)?.[1] ?? 0);
-}
 
 /** 이 대회 이 단계의 경기 — 대진 번호, 그다음 차수 순 */
 export function euroStageMatches(

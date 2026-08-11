@@ -88,6 +88,8 @@ const EVENT_KO: Record<MatchEvent["type"], string> = {
   substitution: "교체",
   injury: "부상",
   half_time: "하프타임",
+  extra_time_start: "연장 돌입",
+  extra_half_time: "연장 하프타임",
   full_time: "경기 종료",
 };
 
@@ -96,6 +98,8 @@ const STOP_KO: Record<string, string> = {
   red_card: "퇴장으로 경기가 멈췄다",
   injury: "부상으로 경기가 멈췄다",
   half_time: "전반이 끝났다 — 라커룸 장면",
+  extra_time_start: "90분이 승부를 못 가렸다 — 연장으로 간다",
+  extra_half_time: "연장 전반이 끝났다",
   full_time: "경기가 끝났다 — 마무리 중계",
   flow: "특별한 사건 없이 시간이 흘렀다",
 };

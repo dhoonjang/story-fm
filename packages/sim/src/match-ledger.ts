@@ -1,5 +1,5 @@
 import type { MatchEvent, MatchPhase, MatchSide, MatchStatLine } from "@story-fm/domain";
-import { TEAM_EVENT_TYPES } from "@story-fm/domain";
+import { PHASE_END, TEAM_EVENT_TYPES, isExtraTime } from "@story-fm/domain";
 
 /**
  * 경기 장부 — LLM(매치 티어)이 창발적으로 생성한 사건을 검증해 기록하는
@@ -64,6 +64,28 @@ export const LEDGER_LIMITS = {
   maxSubWindows: 3,
 } as const;
 
+/**
+ * 연장에 얹히는 교체 — 실제 규정대로 **1명·1회**가 더 생긴다.
+ *
+ * 창(window)도 함께 늘려야 뜻이 있다: 명수만 늘리면 이미 세 번을 쓴 팀은
+ * 그 한 장을 쓸 자리가 없다.
+ */
+export const EXTRA_TIME_SUBS = 1;
+
+/**
+ * 이 국면의 교체 한도 — 90분은 5인/3회, 연장은 6인/4회.
+ *
+ * 장부 검증과 AI 판단(`planAiSubstitution`)이 **같은 함수**를 본다. 두 곳이 각자
+ * 상수를 읽으면 AI가 쓸 수 있다고 여긴 교체를 장부가 반려해 경기가 멈춘다.
+ */
+export function subLimitsOf(phase: MatchPhase): { maxSubs: number; maxSubWindows: number } {
+  const extra = isExtraTime(phase) ? EXTRA_TIME_SUBS : 0;
+  return {
+    maxSubs: LEDGER_LIMITS.maxSubs + extra,
+    maxSubWindows: LEDGER_LIMITS.maxSubWindows + extra,
+  };
+}
+
 /** 경기 시작 명단 — 전술 배치에서 조립해 넘긴다 (팀 엔티티가 라인업을 갖지 않는다) */
 export interface LedgerSide {
   onPitch: string[];
@@ -99,6 +121,17 @@ function label(i: number, ev: MatchEvent): string {
 }
 
 /**
+ * 경기가 멈춰 서는 사건 — 감독이 개입할 자리라 **여기서 배치가 끊긴다.**
+ * 연장 개시도 같다: 90분이 끝난 그 자리에서 벤치가 판을 다시 짠다.
+ */
+const BREAK_KO: Record<string, string> = {
+  half_time: "하프타임",
+  extra_time_start: "연장 개시",
+  extra_half_time: "연장 하프타임",
+};
+const BREAK_EVENTS: ReadonlySet<string> = new Set(Object.keys(BREAK_KO));
+
+/**
  * 이벤트 배치를 검증하며 적용한다 — 원자적: 하나라도 실패하면 전체 반려.
  * 오류 메시지는 한국어로 — LLM이 읽고 수정 재기록한다 (Zod 재시도와 동일 패턴).
  */
@@ -122,13 +155,15 @@ export function applyEvents(state: MatchLedgerState, incoming: MatchEvent[]): Ap
     const raw = incoming[i];
     if (!raw) continue;
     const ev = sanitizeEvent(next, raw);
-    // 하프타임은 강제 정지점 — 같은 배치에 하프타임 이후 사건이 오면 반려
+    // 휴식 시간은 강제 정지점 — 같은 배치에 그 이후 사건이 오면 반려
     // (한 턴에 경기 전체를 밀어붙이는 것을 코어가 막는다, overview §4)
     const prev = i > 0 ? incoming[i - 1] : null;
-    if (prev?.type === "half_time") {
+    if (prev && BREAK_EVENTS.has(prev.type)) {
       return {
         ok: false,
-        errors: [`${label(i, ev)}: 하프타임은 정지점입니다 — 이후 사건은 다음 진행에서 기록하세요`],
+        errors: [
+          `${label(i, ev)}: ${BREAK_KO[prev.type]}은(는) 정지점입니다 — 이후 사건은 다음 진행에서 기록하세요`,
+        ],
       };
     }
     const err = applyOne(next, ev, i);
@@ -261,14 +296,16 @@ function applyOne(state: MatchLedgerState, ev: MatchEvent, i: number): string | 
       if (!out || !into) {
         return `${label(i, ev)}: actors는 [나가는 선수, 들어오는 선수] 2명이어야 합니다`;
       }
-      if (side.subsUsed >= LEDGER_LIMITS.maxSubs) {
-        return `${label(i, ev)}: 교체 ${LEDGER_LIMITS.maxSubs}명 소진 — 더 교체할 수 없습니다`;
+      // 연장이면 한 장이 더 있다 (6인/4회) — 국면이 한도를 정한다
+      const limits = subLimitsOf(state.phase);
+      if (side.subsUsed >= limits.maxSubs) {
+        return `${label(i, ev)}: 교체 ${limits.maxSubs}명 소진 — 더 교체할 수 없습니다`;
       }
-      // 교체 기회(창) 검증 — 같은 분의 연속 교체는 한 창, 하프타임(45′)은 미소모
+      // 교체 기회(창) 검증 — 같은 분의 연속 교체는 한 창, 휴식 시간은 미소모
       const isHalfTimeSub = ev.minute === 45 || ev.minute === 46;
       const opensNewWindow = !isHalfTimeSub && side.lastSubMinute !== ev.minute;
-      if (opensNewWindow && side.subWindows >= LEDGER_LIMITS.maxSubWindows) {
-        return `${label(i, ev)}: 교체 기회 ${LEDGER_LIMITS.maxSubWindows}회 소진 (하프타임 제외)`;
+      if (opensNewWindow && side.subWindows >= limits.maxSubWindows) {
+        return `${label(i, ev)}: 교체 기회 ${limits.maxSubWindows}회 소진 (하프타임 제외)`;
       }
       const outErr = requireOnPitch(out);
       if (outErr) return outErr;
@@ -290,19 +327,47 @@ function applyOne(state: MatchLedgerState, ev: MatchEvent, i: number): string | 
       if (state.phase !== "first_half") {
         return `${label(i, ev)}: 하프타임은 전반에만 올 수 있습니다 (현재 ${state.phase})`;
       }
-      if (ev.minute < 45) {
-        return `${label(i, ev)}: 하프타임은 45′ 이후여야 합니다`;
+      if (ev.minute < PHASE_END.first_half) {
+        return `${label(i, ev)}: 하프타임은 ${PHASE_END.first_half}′ 이후여야 합니다`;
       }
       state.phase = "second_half";
       break;
     }
 
-    case "full_time": {
+    /**
+     * 연장 개시 — 90분이 끝났지만 경기는 끝나지 않았다.
+     * `full_time` 자리를 대신 차지하므로 후반에서만 올 수 있다.
+     */
+    case "extra_time_start": {
       if (state.phase !== "second_half") {
-        return `${label(i, ev)}: 경기 종료는 후반에만 올 수 있습니다 (현재 ${state.phase} — 먼저 half_time을 기록하세요)`;
+        return `${label(i, ev)}: 연장은 후반이 끝난 뒤에만 시작합니다 (현재 ${state.phase})`;
       }
-      if (ev.minute < 90) {
-        return `${label(i, ev)}: 경기 종료는 90′ 이후여야 합니다`;
+      if (ev.minute < PHASE_END.second_half) {
+        return `${label(i, ev)}: 연장 개시는 ${PHASE_END.second_half}′ 이후여야 합니다`;
+      }
+      state.phase = "extra_first";
+      break;
+    }
+
+    case "extra_half_time": {
+      if (state.phase !== "extra_first") {
+        return `${label(i, ev)}: 연장 하프타임은 연장 전반에만 올 수 있습니다 (현재 ${state.phase})`;
+      }
+      if (ev.minute < PHASE_END.extra_first) {
+        return `${label(i, ev)}: 연장 하프타임은 ${PHASE_END.extra_first}′ 이후여야 합니다`;
+      }
+      state.phase = "extra_second";
+      break;
+    }
+
+    case "full_time": {
+      if (state.phase !== "second_half" && state.phase !== "extra_second") {
+        return `${label(i, ev)}: 경기 종료는 후반 또는 연장 후반에만 올 수 있습니다 (현재 ${state.phase} — 먼저 half_time을 기록하세요)`;
+      }
+      // 연장을 치른 경기의 종료는 120′ 이후다
+      const earliest = PHASE_END[state.phase];
+      if (ev.minute < earliest) {
+        return `${label(i, ev)}: 경기 종료는 ${earliest}′ 이후여야 합니다`;
       }
       state.phase = "finished";
       break;
@@ -311,16 +376,25 @@ function applyOne(state: MatchLedgerState, ev: MatchEvent, i: number): string | 
   return null;
 }
 
+/** 국면의 한국어 이름 — 장부 요약이 읽는 이름이자 화면이 쓰는 이름과 같은 눈금 */
+const PHASE_KO: Record<MatchPhase, string> = {
+  first_half: "전반",
+  second_half: "후반",
+  extra_first: "연장 전반",
+  extra_second: "연장 후반",
+  finished: "경기 종료",
+};
+
 /** 장부 요약 — 매치 티어 LLM 컨텍스트용 한국어 스냅샷 (match-sim.md §2) */
 export function describeLedger(
   state: MatchLedgerState,
   names: { home: string; away: string },
 ): string {
-  const phaseKo =
-    state.phase === "first_half" ? "전반" : state.phase === "second_half" ? "후반" : "경기 종료";
+  const phaseKo = PHASE_KO[state.phase] ?? "경기 종료";
+  const limits = subLimitsOf(state.phase);
   const lines = [
     `[경기 장부] ${names.home} ${state.score.home} : ${state.score.away} ${names.away} — ${state.minute}′ (${phaseKo})`,
-    `교체: 홈 ${state.home.subsUsed}/${LEDGER_LIMITS.maxSubs}, 어웨이 ${state.away.subsUsed}/${LEDGER_LIMITS.maxSubs}` +
+    `교체: 홈 ${state.home.subsUsed}/${limits.maxSubs}, 어웨이 ${state.away.subsUsed}/${limits.maxSubs}` +
       (state.sentOff.length > 0 ? ` · 퇴장: ${state.sentOff.join(", ")}` : ""),
   ];
   const recent = state.events.slice(-8);

@@ -2,6 +2,7 @@ import { LEAGUE_CATALOG, leagueCatalogById, leagueName } from "../data/league-ca
 import { leagueOfTeam } from "../data/team-catalog";
 import { makeRng } from "../core/rng";
 import { computeStandings } from "./season";
+import { startParachute, stopParachute } from "../club/finance";
 import { playersOf, pushNarrative, teamName, teamShortName, type GameState } from "../core/state";
 
 /**
@@ -115,8 +116,16 @@ export function applyPromotionRelegation(
     // 두 목록을 **먼저** 정한다 — 방금 강등된 팀이 그 자리에서 다시 올라오지 않게
     const down = table.slice(-RELEGATION_SLOTS);
     const up = promotedFrom(state, second);
-    for (const teamId of down) setLeague(state, teamId, second);
-    for (const teamId of up) setLeague(state, teamId, leagueId);
+    for (const teamId of down) {
+      setLeague(state, teamId, second);
+      // 낙하산 — 강등의 완충이자 챔피언십 재정 기준선의 정체 (club-finance)
+      startParachute(state, teamId, leagueId);
+    }
+    for (const teamId of up) {
+      setLeague(state, teamId, leagueId);
+      // 승격하면 1부 배분을 다시 받으므로 낙하산은 끝난다 (이중 수령 금지)
+      stopParachute(state, teamId);
+    }
 
     if (leagueId !== ourLeague && second !== ourLeague) continue;
     digest.push(

@@ -155,7 +155,8 @@ export const LEAGUE_CATALOG: readonly LeagueCatalogEntry[] = [
     kind: "cup-only",
     coefficient: 1,
     realSquads: false,
-    broadcastPool: 0.08,
+    // 실측: 비파라슈트 구단 연 £11M ÷ EPL 최하위 £109M ≈ 0.10
+    broadcastPool: 0.1,
     avgTicketPrice: 24,
   },
   {

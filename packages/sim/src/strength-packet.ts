@@ -1,6 +1,7 @@
 import type {
   EdgeSide,
   EdgeSize,
+  MatchSide,
   Matchup,
   MatchupZone,
   Player,
@@ -342,6 +343,31 @@ export function matchIntensity(spec: TacticsSpec): number {
  */
 export const TACTIC_SWING = 0.18;
 
+/**
+ * 점유가 갈릴 수 있는 폭 — 중원을 아무리 지배해도 65%가 한계다.
+ * 실제 최상위 점유 팀이 한 시즌 평균 65% 언저리다.
+ */
+export const POSSESSION_MIN = 0.35;
+export const POSSESSION_MAX = 0.65;
+/**
+ * 점유가 기대 득점에 실리는 세기.
+ *
+ * 중원 우위는 **공을 쥐는 것**으로 나타나고, 공을 쥔 팀이 더 자주 상대 문 앞에
+ * 선다. 지수를 작게 두는 이유는 이 축이 이미 두 번 세어질 여지가 있어서다 —
+ * 미드필더의 질은 XI 평균(질 축)에도, 존 가중 평균(판 축)에도 들어 있다.
+ * 여기서 더하는 것은 **점유라는 별개의 사실**이 만드는 몫이다.
+ */
+export const POSSESSION_EXPONENT = 0.5;
+
+/**
+ * 이 팀이 공을 쥐는 비율 — 중원 우위가 정한다.
+ * 두 시뮬(구간·간이)과 패스 배분이 **같은 함수**를 쓴다.
+ */
+export function possessionShare(midfield: number, oppMidfield: number): number {
+  const raw = midfield / Math.max(1, midfield + oppMidfield);
+  return Math.max(POSSESSION_MIN, Math.min(POSSESSION_MAX, raw));
+}
+
 /** 대등한 두 팀의 기대 득점 (홈·원정 계수 전) */
 export const BASE_EXPECTED_GOALS = 1.35;
 /** 선수의 질이 득점으로 번역되는 세기 — 간이 시뮬(`QUICK_SIM_EXPONENT`)과 같은 자리 */
@@ -362,7 +388,10 @@ export const MATCHUP_EXPONENT = 1.3;
 export const MIN_EXPECTED_GOALS = 0.6;
 export const MAX_EXPECTED_GOALS = 3;
 
-const ZONE_CONTRIBUTION: Record<"attack" | "midfield" | "defense", Record<PositionGroup, number>> = {
+const ZONE_CONTRIBUTION: Record<
+  "attack" | "midfield" | "defense",
+  Record<PositionGroup, number>
+> = {
   attack: { FW: 1, MF: 0.45, DF: 0.1, GK: 0.02 },
   midfield: { FW: 0.3, MF: 1, DF: 0.3, GK: 0.05 },
   defense: { FW: 0.08, MF: 0.35, DF: 1, GK: 0.8 },
@@ -435,14 +464,21 @@ function buildZones(
  * (engine/scouting.ts §체력). 여기 소진 수치를 적어 두면 화면 한쪽에서 흐린
  * 값이 다른 쪽에서 또렷하게 새어 나온다.
  */
-function gapNotes(slots: LineupSlot[], teamName: string): string[] {
-  return slots
-    .filter(isGassed)
-    .map(
-      (s) =>
-        `${teamName} ${s.position}에 구멍: ${s.player.name}의 다리가 멈췄다 — 교체하지 않으면 그 자리가 계속 열린다`,
-    );
+function gapNotes(slots: LineupSlot[], teamName: string, side: MatchSide): KeyNote[] {
+  return slots.filter(isGassed).map((s) => ({
+    text: `${teamName} ${s.position}에 구멍: ${s.player.name}의 다리가 멈췄다 — 교체하지 않으면 그 자리가 계속 열린다`,
+    // 구멍은 그 팀의 것이다 — 이로운 쪽은 반대편
+    favours: other(side),
+  }));
 }
+
+/** 키포인트 한 줄과 **그것이 이롭게 작용하는 쪽** */
+interface KeyNote {
+  text: string;
+  favours: MatchSide;
+}
+
+const other = (side: MatchSide): MatchSide => (side === "home" ? "away" : "home");
 
 /**
  * 우열 라벨 — 문턱이 좁으면 지시 한 칸이 "팽팽하다"를 "뚜렷한 우위"로 뒤집는다.
@@ -599,7 +635,10 @@ export function buildStrengthPacket(
    * 표적 목록은 키포인트에서 나오고, 감독이 실제로 본 문장을 label로 갖는다 —
    * 흐리게 본 감독은 흐린 표적을 노린다. AI 팀은 자기 등급만큼 스스로 고른다.
    */
-  const targets = exploitTargets(rawPoints, shownPoints);
+  const targets = exploitTargets(
+    rawPoints,
+    shownPoints.map((p) => p.text),
+  );
   const homeExploit = applyExploits(
     homeIn.exploits ??
       (homeIn.managerAnalysis === undefined
@@ -695,7 +734,14 @@ export function buildStrengthPacket(
   const homeQuality = qualityOf(home);
   const awayQuality = qualityOf(away);
 
-  const xg = (quality: number, oppQuality: number, atk: number, def: number, venue: number) =>
+  const xg = (
+    quality: number,
+    oppQuality: number,
+    atk: number,
+    def: number,
+    share: number,
+    venue: number,
+  ) =>
     round2(
       Math.min(
         MAX_EXPECTED_GOALS,
@@ -704,10 +750,17 @@ export function buildStrengthPacket(
           BASE_EXPECTED_GOALS *
             Math.pow(quality / oppQuality, QUALITY_EXPONENT) *
             Math.pow(atk / def, MATCHUP_EXPONENT) *
+            Math.pow(share / 0.5, POSSESSION_EXPONENT) *
             venue,
         ),
       ),
     );
+
+  /** 점유 — 중원 우위가 공을 쥔다. 기대 득점과 체력 소모가 함께 이 값을 본다 */
+  const possession = {
+    home: possessionShare(home.zones.midfield, away.zones.midfield),
+    away: possessionShare(away.zones.midfield, home.zones.midfield),
+  };
   const neutral = options.neutral === true;
   const expectedGoals = {
     home: xg(
@@ -715,6 +768,7 @@ export function buildStrengthPacket(
       awayQuality,
       home.zones.attack,
       away.zones.defense,
+      possession.home,
       neutral ? 1 : HOME_XG,
     ),
     away: xg(
@@ -722,6 +776,7 @@ export function buildStrengthPacket(
       homeQuality,
       away.zones.attack,
       home.zones.defense,
+      possession.away,
       neutral ? 1 : AWAY_XG,
     ),
   };
@@ -743,28 +798,36 @@ export function buildStrengthPacket(
     matchups.map((m) => m.why).join(" / ") +
     ` — 기대 득점 ${expectedGoals.home} : ${expectedGoals.away}, ${verdict}.`;
 
+  /**
+   * 키포인트 = **발동한 상성**(전술이 만난 결과) + 구멍(교체 신호) + 전술 미스매치.
+   * 상성이 앞에 온다 — 감독이 지금 무엇을 바꿔야 하는지가 먼저다. 상성과 구멍은
+   * **눈에 보이는 사실**이라 그대로 서고, 미스매치는 감독이 분석해서 찾아내는
+   * 것이라 그의 눈만큼만 보인다 (`readKeyPoints`).
+   *
+   * 문장과 편은 **여기 한 곳에서** 갈라진다 — 따로 모으면 순서가 어긋난다.
+   */
+  const keyNotes: KeyNote[] = [
+    ...counters.notes.map((n) => ({ text: n.text, favours: n.favours })),
+    ...gapNotes(homeXI, home.teamName, "home"),
+    ...gapNotes(awayXI, away.teamName, "away"),
+    // 미스매치의 `side`는 그 약점을 **가진** 쪽이다 (key-points.ts)
+    ...shownPoints.map((p) => ({ text: p.text, favours: other(p.side) })),
+  ];
+
   return {
     home,
     away,
     matchups,
+    keyPoints: keyNotes.map((n) => n.text),
     /**
-     * 키포인트 = **발동한 상성**(전술이 만난 결과) + 구멍(교체 신호) + 선수 미스매치.
-     * 상성이 앞에 온다 — 감독이 지금 무엇을 바꿔야 하는지가 먼저다.
+     * 같은 줄이 **누구에게 이로운가** — 화면이 우리 편 기준으로 색을 고른다.
+     * 문장에서 되짚으면("…강요당한다"가 누구 얘기인지) 틀리기 쉬워 코어가 실어 보낸다.
      */
-    /**
-     * 키포인트 = **발동한 상성**(전술이 만난 결과) + 구멍(교체 신호) + 전술 미스매치.
-     * 상성과 구멍은 **눈에 보이는 사실**이라 그대로 서고, 미스매치는 감독이
-     * 분석해서 찾아내는 것이라 그의 눈만큼만 보인다 (`readKeyPoints`).
-     */
-    keyPoints: [
-      ...counters.notes,
-      ...gapNotes(homeXI, home.teamName),
-      ...gapNotes(awayXI, away.teamName),
-      ...shownPoints,
-    ],
+    keyPointSides: keyNotes.map((n) => n.favours),
     targets,
     guide: {
       expectedGoals,
+      possession,
       upsetChance,
       intensity: {
         home: matchIntensity(homeIn.tactics),

@@ -18,11 +18,14 @@ import {
  *
  * 유럽 대항전과 국내 컵이 같은 문을 쓴다 (승부차기와 같은 자리). 단판은 90분이
  * 같을 때, 2차전제는 **합계가 같을 때만** — 1차전 무승부는 연장이 아니다.
+ * 그 판정은 이 파일의 `needsExtraTime` 하나가 갖는다: 대회마다 따로 판단하면
+ * 어느 하나만 고쳐도 두 대회의 규칙이 조용히 갈린다.
  *
- * 연장은 90분 장부가 이미 닫힌 뒤에 굴러간다. 그래서 코어가 결정적으로 굴리고
- * 결과를 그 경기 장부에 이어 붙인다 — 유저 경기도 마찬가지다(구간 시뮬은 90분에서
- * 끝난다). 감독이 연장 30분을 지휘하지는 못하지만, **리그가 우리만의 규칙으로
- * 돌지는 않는다**: 우리 컵 8강도 남의 8강도 같은 함수를 지난다.
+ * **감독의 경기는 여기를 지나지 않는다.** 구간 시뮬이 120분까지 가므로
+ * (`match-engine.ts`의 `extra_first`·`extra_second`) 연장의 교체·카드·부상이
+ * 다 장부에 남고, 그 경기는 `MatchResult.aet` 표식이 붙어 이 함수를 통과한다 —
+ * 그게 **이중 적용의 문지기**다. 나머지 2,000여 경기는 여기서 한 번에 굴러간다:
+ * 우리 컵 8강도 남의 8강도 같은 규칙을 지난다.
  */
 
 /**
@@ -32,6 +35,63 @@ import {
  * 유저 경기의 명단은 종료 시점 온필드가 앞에 오고, 간이 시뮬은 선발이 앞에 온다.
  */
 const EXTRA_TIME_XI = 11;
+
+/**
+ * 대진 번호 — 녹아웃 경기 id에 박혀 있다 (`...-p{대진}-l{차수}`).
+ *
+ * 국내 컵과 대항전이 같은 규칙으로 id를 만들므로 여기 한 벌만 둔다.
+ */
+export function pairOf(match: MatchRecord): number {
+  return Number(/-p(\d+)-l\d+$/.exec(match.id)?.[1] ?? 0);
+}
+
+/** 이 경기가 속한 대진의 모든 차전 — 차수 순. 녹아웃이 아니면 자기 자신뿐이다 */
+function tieLegs(state: GameState, match: MatchRecord): MatchRecord[] {
+  const pair = pairOf(match);
+  return state.matches
+    .filter(
+      (m) =>
+        m.season === match.season &&
+        m.competitionId === match.competitionId &&
+        m.stage === match.stage &&
+        pairOf(m) === pair,
+    )
+    .sort((a, b) => a.round - b.round);
+}
+
+/**
+ * **이 경기 뒤에 연장이 붙는가** — 연장 판정의 단일 지점.
+ *
+ * 리그·친선·대항전 리그 페이즈는 무승부로 그냥 끝난다(`stage`가 없거나 `league`).
+ * 녹아웃은 **마지막 다리**(단판 또는 2차전)에서, 그리고 **합계가 같을 때만** 간다 —
+ * 1차전 무승부는 연장이 아니다.
+ *
+ * 진행 중인 경기(장부 스코어)와 이미 끝난 경기(`result`)를 같은 잣대로 재려고
+ * 스코어를 인자로 받는다. 없으면 저장된 결과를 읽는다.
+ */
+export function needsExtraTime(
+  state: GameState,
+  match: MatchRecord,
+  score?: { home: number; away: number },
+): boolean {
+  const stage = match.stage ?? "league";
+  if (stage === "league") return false;
+
+  const legs = tieLegs(state, match);
+  // 2차전제의 1차전은 비겨도 연장이 없다 — 승부는 마지막 다리가 가린다
+  if (legs.length > 0 && legs[legs.length - 1]!.id !== match.id) return false;
+
+  const now =
+    score ?? (match.result ? { home: match.result.homeGoals, away: match.result.awayGoals } : null);
+  if (!now) return false;
+
+  // 앞 차전에서 넘어온 합계 — 이 경기의 홈·원정 기준으로 뒤집어 더한다
+  const carry = tieAggregate(
+    legs.filter((m) => m.id !== match.id),
+    match,
+  );
+  return carry.home + now.home === carry.away + now.away;
+}
 
 /** 대진 합계 — 마지막 경기(단판·2차전)의 홈·원정 기준 */
 export function tieAggregate(
@@ -80,13 +140,16 @@ function appendGoals(
  * 연장 30분을 치른다 — 이미 치른 경기면 아무 일도 하지 않는다(`aet`).
  *
  * 대진 승자를 묻는 자리에서 호출되므로 **멱등**이어야 한다: 화면이 브래킷을
- * 그릴 때마다 연장이 다시 굴러가면 스코어가 계속 자란다.
+ * 그릴 때마다 연장이 다시 굴러가면 스코어가 계속 자란다. 감독이 구간 시뮬로
+ * 직접 치른 연장에도 `aet`가 붙어 있으므로 여기서 두 번 굴러가지 않는다.
  *
  * @returns 이번 호출에서 연장을 치렀으면 true
  */
 export function resolveExtraTime(state: GameState, decider: MatchRecord, channel: string): boolean {
   const result = decider.result;
   if (!result || result.aet) return false;
+  // 연장이 필요한 경기인지도 같은 문에서 묻는다 — 호출부마다 따로 판단하지 않는다
+  if (!needsExtraTime(state, decider)) return false;
 
   const xi = {
     home: extraTimeXi(state, decider.homeTeamId, result.homeLineup),

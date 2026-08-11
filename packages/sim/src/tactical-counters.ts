@@ -521,12 +521,19 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
   },
 ];
 
+/** 발동한 상성 한 줄 — 문장과 **누구에게 이로운가** */
+export interface CounterNote {
+  text: string;
+  /** 이 상성이 이롭게 작용하는 쪽 — 이득은 받은 팀에, 대가는 그 반대편에 */
+  favours: MatchSide;
+}
+
 export interface CounterResult {
   /** 존별 가산 (배율에 더한다) */
   home: { attack: number; midfield: number; defense: number };
   away: { attack: number; midfield: number; defense: number };
   /** 발동한 상성의 문장 — 키포인트로 나간다 (빈 문자열은 짝 효과라 제외) */
-  notes: string[];
+  notes: CounterNote[];
 }
 
 /**
@@ -550,7 +557,9 @@ export function evaluateCounters(home: CounterContext, away: CounterContext): Co
       bucket.attack += (e.attack ?? 0) * scale;
       bucket.midfield += (e.midfield ?? 0) * scale;
       bucket.defense += (e.defense ?? 0) * scale;
-      if (e.why) result.notes.push(e.why);
+      // 대가(`cost`)는 받은 팀이 손해를 보는 것이므로 이로운 쪽은 반대편이다
+      const favours: MatchSide = e.kind === "gain" ? e.side : e.side === "home" ? "away" : "home";
+      if (e.why) result.notes.push({ text: e.why, favours });
     }
   };
   for (const counter of COUNTERS) {

@@ -284,6 +284,7 @@ export function reviewSeason(state: GameState): string[] {
     goalsFor: row.goalsFor,
     goalsAgainst: row.goalsAgainst,
     boardVerdict: verdict,
+    leagueId: leagueOfTeamIn(state, state.userTeamId),
   });
 
   digest.push(

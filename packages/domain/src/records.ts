@@ -445,6 +445,23 @@ export const TeamFinanceSchema = z.object({
    * 이동이라 되짚을 곳이 여기밖에 없다. 옛 세이브엔 없다(optional).
    */
   budgetAdjusted: z.object({ date: DateString, amount: z.number() }).optional(),
+  /**
+   * **파라슈트 페이먼트** — 강등 클럽이 떠나온 리그에서 받는 낙하산.
+   *
+   * 강등 시즌 전환에서 세워지고 해마다 줄다가 사라진다. 승격하면 그 자리에서
+   * 끝난다 — 다시 1부 배분을 받으므로 이중 수령이 된다.
+   * 옛 세이브엔 없다 (optional — 세이브 버전 유지).
+   */
+  parachute: z
+    .object({
+      /** 떠나온 리그 — 배분 규모의 기준 */
+      fromLeagueId: z.string().min(1),
+      /** 강등된 다음 시즌 번호 (1년차) */
+      startSeason: z.number().int().positive(),
+      /** 받는 햇수 — 보통 3년, 승격 1시즌 만의 재강등이면 2년 */
+      years: z.number().int().positive(),
+    })
+    .optional(),
 });
 export type TeamFinance = z.infer<typeof TeamFinanceSchema>;
 
@@ -505,6 +522,12 @@ export const SeasonRecordSchema = z.object({
   goalsFor: z.number().int().min(0),
   goalsAgainst: z.number().int().min(0),
   boardVerdict: z.string(),
+  /**
+   * 그 시즌에 뛴 리그 — 승강이 생기면서 필요해졌다. 순위만으로는 챔피언십 1위와
+   * 프리미어리그 1위를 가를 수 없어 성적 수당이 잘못 붙는다.
+   * 옛 세이브엔 없다 (optional).
+   */
+  leagueId: z.string().min(1).optional(),
 });
 export type SeasonRecord = z.infer<typeof SeasonRecordSchema>;
 

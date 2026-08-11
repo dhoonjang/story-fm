@@ -3,12 +3,13 @@ import { positionGroupOfPlayer } from "@story-fm/domain";
 import {
   BOOKED_AGAIN_WEIGHT,
   CARDS_PER_MATCH,
+  EXTRA_TIME_GOAL_SHARE,
   INJURY_PER_MATCH,
   STRAIGHT_RED_CHANCE,
   injuryWeight,
 } from "@story-fm/sim";
 import { makeRng } from "../core/rng";
-import { stateModifier } from "@story-fm/sim";
+import { POSSESSION_EXPONENT, possessionShare, stateModifier } from "@story-fm/sim";
 
 /** 시뮬 입력 — 라인업은 전술 배치(TACTIC_ASSIGNMENT)에서 조립해 넘긴다 */
 export interface SimSquad {
@@ -44,6 +45,18 @@ export interface SimSquad {
  * 전력이라, 로테이션도 폼도 AI 경기 결과에 닿지 않았다 — 리그의 95%가 상태를
  * 모르는 채 굴러갔다.
  */
+/**
+ * 중원 전력 — 점유를 정한다. 미드필더가 없는 명단(부상 등)은 전체 평균으로 본다.
+ */
+function midfieldStrength(squad: SimSquad): number {
+  const mids = squad.starters.filter((p) => positionGroupOfPlayer(p) === "MF");
+  const pool = mids.length > 0 ? mids : squad.starters;
+  if (pool.length === 0) return 60;
+  return (
+    pool.reduce((s, p) => s + p.attributes.overall * stateModifier(p.state), 0) / pool.length
+  );
+}
+
 function squadStrength(squad: SimSquad): number {
   if (squad.starters.length === 0) return 60;
   const total = squad.starters.reduce(
@@ -308,6 +321,8 @@ export interface QuickResult {
   subs: QuickSub[];
   /** 이 경기에서 다친 선수 — `"home:playerId"` 형식. 기간·심각도는 호출부가 굴린다 */
   injuries: string[];
+  /** 공을 쥔 비율 — 호출부가 체력 정산에 쓴다 (공 없는 팀이 더 뛴다) */
+  possession: { home: number; away: number };
 }
 
 /** 연장 30분 — 실제 규정(전·후반 15분) */
@@ -318,8 +333,12 @@ const EXTRA_TIME_FIRST_MINUTE = 91;
  * 연장의 기대 득점 — 정규 90분 대비 배율. 시간 비율(1/3)보다 낮다:
  * 승부차기가 보이는 자리라 양 팀 다 잃지 않는 쪽으로 기운다.
  * 이 값에서 연장에 골이 나올 확률이 절반 남짓이 된다(실측과 같은 자리).
+ *
+ * ⚠️ **눈금은 구간 시뮬이 갖는다** (`EXTRA_TIME_GOAL_SHARE`) — 감독의 연장은
+ * 그쪽이 120분까지 굴리므로, 여기에 같은 숫자를 따로 적어 두면 어느 한쪽만 고쳐도
+ * 우리 연장만 조용하거나 시끄러워진다 (카드·부상 상수와 같은 이유).
  */
-const EXTRA_TIME_RATE = 0.28;
+const EXTRA_TIME_RATE = EXTRA_TIME_GOAL_SHARE;
 
 /** 연장 결과 — 카드·교체는 두지 않는다 (90분 장부를 쓴 쪽이 따로 있다) */
 export interface ExtraTimeResult {
@@ -412,10 +431,21 @@ export function quickSimulate(
 
   const sh = squadStrength(home) * 1.06; // 홈 어드밴티지
   const sa = squadStrength(away);
+  // 점유 — 구간 시뮬과 **같은 함수**로 중원 우위를 옮긴다 (sim/strength-packet.ts)
+  const possession = {
+    home: possessionShare(midfieldStrength(home), midfieldStrength(away)),
+    away: possessionShare(midfieldStrength(away), midfieldStrength(home)),
+  };
   const red = { home: redFactor(cards, "home"), away: redFactor(cards, "away") };
   const base = {
-    home: HOME_BASE_GOALS * Math.pow(sh / sa, QUICK_SIM_EXPONENT),
-    away: AWAY_BASE_GOALS * Math.pow(sa / sh, QUICK_SIM_EXPONENT),
+    home:
+      HOME_BASE_GOALS *
+      Math.pow(sh / sa, QUICK_SIM_EXPONENT) *
+      Math.pow(possession.home / 0.5, POSSESSION_EXPONENT),
+    away:
+      AWAY_BASE_GOALS *
+      Math.pow(sa / sh, QUICK_SIM_EXPONENT) *
+      Math.pow(possession.away / 0.5, POSSESSION_EXPONENT),
   };
   const lambdaHome = Math.min(
     3.4,
@@ -482,5 +512,6 @@ export function quickSimulate(
     cards,
     subs,
     injuries,
+    possession,
   };
 }

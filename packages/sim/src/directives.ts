@@ -346,7 +346,8 @@ export function applyDirectives(
  */
 const NOTE_KO: Record<PlayerDirectiveKind, (name: string, target?: string) => string> = {
   man_mark: (n, t) => `${n}이(가) ${t}을(를) ${PLAYER_DIRECTIVE_KO.man_mark}, 본업을 던다`,
-  press_target: (n, t) => `${n}이(가) ${t}을(를) ${PLAYER_DIRECTIVE_KO.press_target}, 자리를 비운다`,
+  press_target: (n, t) =>
+    `${n}이(가) ${t}을(를) ${PLAYER_DIRECTIVE_KO.press_target}, 자리를 비운다`,
   focus_play: (n) => `${n}에게 공격을 몰아준다, 다른 길이 줄어든다`,
   stay_back: (n) => `${n}은(는) 뒤에 남는다, 앞의 인원이 준다`,
   join_attack: (n) => `${n}이(가) 적극적으로 올라간다, 뒷공간을 내준다`,

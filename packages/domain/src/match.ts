@@ -16,6 +16,16 @@ export const MatchEventTypeSchema = z.enum([
   "substitution",
   "injury",
   "half_time",
+  /**
+   * **연장 개시** — 정규 90분이 끝났는데 승부가 남았다.
+   *
+   * `full_time`을 대신한다: 90분이 끝났다는 사실은 같지만 경기는 끝나지 않았다.
+   * 녹아웃의 마지막 다리에서 합계가 같을 때만 기록되고, 그 판정은 코어가 한다
+   * (`engine/competition/extra-time.ts`의 `needsExtraTime`).
+   */
+  "extra_time_start",
+  /** 연장 전반 종료 — 하프타임과 같은 정지점이다 */
+  "extra_half_time",
   "full_time",
 ]);
 export type MatchEventType = z.infer<typeof MatchEventTypeSchema>;
@@ -75,5 +85,41 @@ export const MatchStatLineSchema = z.object({
 });
 export type MatchStatLine = z.infer<typeof MatchStatLineSchema>;
 
-export const MatchPhaseSchema = z.enum(["first_half", "second_half", "finished"]);
+/**
+ * 경기의 국면 — 시계가 어디에 있는가.
+ *
+ * 연장 두 하프가 뒤에 붙어도 **옛 세이브는 그대로 읽힌다**: enum에 값을 더하는 것은
+ * 이미 저장된 값의 유효성을 건드리지 않는다 (SAVE_VERSION 유지).
+ */
+export const MatchPhaseSchema = z.enum([
+  "first_half",
+  "second_half",
+  "extra_first",
+  "extra_second",
+  "finished",
+]);
 export type MatchPhase = z.infer<typeof MatchPhaseSchema>;
+
+/** 공이 굴러가는 국면 — 종료를 뺀 넷. 구간 시뮬레이터가 이 표로 시계를 민다 */
+export type PlayPhase = Exclude<MatchPhase, "finished">;
+
+/** 각 국면이 끝나는 시각(추가시간 전) — 45 · 90 · 105 · 120 */
+export const PHASE_END: Record<PlayPhase, number> = {
+  first_half: 45,
+  second_half: 90,
+  extra_first: 105,
+  extra_second: 120,
+};
+
+/** 각 국면이 시작하는 시각 */
+export const PHASE_START: Record<PlayPhase, number> = {
+  first_half: 0,
+  second_half: 45,
+  extra_first: 90,
+  extra_second: 105,
+};
+
+/** 연장 국면인가 — 교체 한도·발생률이 여기서 갈린다 */
+export function isExtraTime(phase: MatchPhase): boolean {
+  return phase === "extra_first" || phase === "extra_second";
+}

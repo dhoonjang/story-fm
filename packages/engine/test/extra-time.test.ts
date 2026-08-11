@@ -1,15 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
   EXTRA_TIME_MINUTES,
+  advanceSegment,
   domesticTieWinner,
   euroTieWinner,
+  finalizeMatch,
+  needsExtraTime,
   playersOf,
   resolveExtraTime,
   simulateExtraTime,
+  startMatch,
+  substitutePlayer,
   tieAggregate,
+  userPlayers,
+  userSide,
   type GameState,
 } from "@story-fm/engine";
 import type { MatchRecord, MatchStage } from "@story-fm/domain";
+import { groupOf } from "@story-fm/engine";
 import { createTestGame, simSquad } from "./helpers";
 
 /**
@@ -245,6 +253,230 @@ describe("녹아웃 무승부 — 연장을 먼저 치르고 그래도 비기면
       (s) => s.gamePlayerId === scored && s.season === state.season,
     );
     expect(stat?.goals).toBeGreaterThanOrEqual(1);
+  });
+});
+
+/**
+ * **연장 판정은 한 곳에서만 난다** (`needsExtraTime`). 리그와 컵, 1차전과 2차전,
+ * 유저 경기와 남의 경기가 전부 이 함수를 지난다 — 두 곳이 따로 판단하면 어느 한쪽만
+ * 고쳐도 규칙이 조용히 갈린다.
+ */
+describe("연장이 필요한 경기인가 — 단일 판정", () => {
+  it("리그 경기는 비겨도 그냥 끝난다", () => {
+    const state = world();
+    const league = state.matches.find((m) => (m.stage ?? "league") === "league");
+    expect(league).toBeDefined();
+    expect(needsExtraTime(state, league!, { home: 1, away: 1 })).toBe(false);
+    expect(needsExtraTime(state, league!, { home: 0, away: 0 })).toBe(false);
+  });
+
+  it("녹아웃 단판은 동점일 때만 연장이다", () => {
+    const state = world();
+    const [tie] = stageTie(state, "facup", "qf", 400, [
+      { home: "arsenal", away: "chelsea", homeGoals: 0, awayGoals: 0 },
+    ]);
+    expect(needsExtraTime(state, tie!, { home: 1, away: 1 })).toBe(true);
+    expect(needsExtraTime(state, tie!, { home: 2, away: 1 })).toBe(false);
+  });
+
+  it("2차전제는 마지막 다리에서 **합계**로만 묻는다 — 1차전 무승부는 연장이 아니다", () => {
+    const state = world();
+    const legs = stageTie(state, "ucl", "sf", 400, [
+      { home: "mancity", away: "liverpool", homeGoals: 1, awayGoals: 1 },
+      { home: "liverpool", away: "mancity", homeGoals: 0, awayGoals: 0 },
+    ]);
+    const [first, second] = legs;
+    // 1차전은 비겨도 연장이 없다 — 승부는 마지막 다리가 가린다
+    expect(needsExtraTime(state, first!, { home: 1, away: 1 })).toBe(false);
+    // 2차전 0-0이면 합계 1-1 → 연장. 1-0이면 합계 2-1 → 아니다
+    expect(needsExtraTime(state, second!, { home: 0, away: 0 })).toBe(true);
+    expect(needsExtraTime(state, second!, { home: 1, away: 0 })).toBe(false);
+  });
+});
+
+/**
+ * 감독이 지휘하는 연장 — 구간 시뮬이 120분까지 간다.
+ *
+ * 여기서 재는 것은 "코어가 조용히 굴리지 않는가"다: 감독이 그 30분에 교체할 수
+ * 있고, 그 경기의 장부에 연장이 남고, 그래서 `resolveExtraTime`이 같은 경기를
+ * 다시 굴리지 않는다.
+ */
+describe("유저 경기의 연장 (match-sim.md §2)", () => {
+  /** 감독의 컵 경기 하나를 오늘 자리에 세운다 — 킥오프 직전 상태 */
+  function stageUserCupMatch(state: GameState, pair: number, opponent = "chelsea"): MatchRecord {
+    const match: MatchRecord = {
+      id: `m-facup-${state.season}-qf-p${pair}-l1`,
+      season: state.season,
+      competitionId: "facup",
+      stage: "qf",
+      round: 1,
+      date: state.date,
+      time: "15:00",
+      homeTeamId: state.userTeamId,
+      awayTeamId: opponent,
+      result: null,
+    };
+    state.matches.push(match);
+    state.phase = "matchday";
+    return match;
+  }
+
+  /** 그 경기를 끝까지 치른다 — 정지점마다 감독이 끼어들 자리를 준다 */
+  function playUserMatch(state: GameState, atStop?: (stop: string) => void): void {
+    const started = startMatch(state);
+    if (!started.ok) throw new Error(started.message);
+    let guard = 80;
+    while (state.phase === "match" && guard-- > 0) {
+      const step = advanceSegment(state);
+      if (!step.ok) throw new Error(step.message);
+      if (step.plan) atStop?.(step.plan.stop);
+      if (step.plan?.stop === "full_time") {
+        finalizeMatch(state);
+        return;
+      }
+    }
+    throw new Error("경기가 끝나지 않았습니다");
+  }
+
+  interface Played {
+    match: MatchRecord;
+    pair: number;
+    /** 연장 개시 시점 / 경기 종료 시점의 누적 피로 합 */
+    fatigueAtExtra: number;
+    fatigueAtEnd: number;
+    /** 감독이 연장에서 교체할 수 있었는가 */
+    subInExtra: boolean;
+  }
+
+  /**
+   * 컵 경기를 여럿 치러 **연장까지 간 경기만** 모은다 — 대진 번호가 난수 채널이라
+   * 번호를 바꾸면 다른 경기가 나온다. 연장에 들어서면 감독이 교체를 시도한다.
+   *
+   * 한 번만 굴리고 여러 검증이 나눠 쓴다 — 세계 생성이 이 파일 시간의 대부분이고,
+   * 같은 경기를 여러 각도에서 보는 편이 검증도 촘촘하다.
+   */
+  let collected: { state: GameState; runs: Played[] } | null = null;
+  function extraTimeWorld(): { state: GameState; runs: Played[] } {
+    if (collected) return collected;
+    const state = createTestGame(23);
+    const runs: Played[] = [];
+    for (let pair = 500; pair < 560; pair++) {
+      // 앞 시도의 소모를 지우고 시작한다 — 한 세계를 여러 경기가 나눠 쓴다
+      for (const p of playersOf(state, "arsenal")) p.state.condition = 100;
+      for (const p of playersOf(state, "chelsea")) p.state.condition = 100;
+      const match = stageUserCupMatch(state, pair);
+      let fatigueAtExtra = 0;
+      let fatigueAtEnd = 0;
+      let subInExtra = false;
+      playUserMatch(state, (stop) => {
+        const pending = state.pendingMatch;
+        if (!pending) return;
+        const worn = Object.values(pending.matchFatigue ?? {}).reduce((a, b) => a + b, 0);
+        fatigueAtEnd = worn;
+        if (stop !== "extra_time_start") return;
+        fatigueAtExtra = worn;
+        // **감독이 연장에서 교체한다** — 이 기능의 전부가 여기에 있다
+        const side = userSide(state);
+        const mine = side === "home" ? pending.ledger.home : pending.ledger.away;
+        const out = mine.onPitch.find((id) => {
+          const p = userPlayers(state).find((x) => x.id === id);
+          return p !== undefined && groupOf(p) !== "GK";
+        });
+        const into = mine.bench[0];
+        if (out && into) subInExtra = substitutePlayer(state, { out, in: into }).ok;
+      });
+      if (!match.result?.aet) continue;
+      runs.push({ match, pair, fatigueAtExtra, fatigueAtEnd, subInExtra });
+      // 갈린 경기와 승부차기로 간 경기를 둘 다 볼 만큼만 모은다
+      if (runs.length >= 6) break;
+    }
+    // 이 아래 검증들이 아무것도 증명하지 못하는 상태를 그냥 지나치지 않는다
+    expect(runs.length, "연장까지 가는 경기를 찾지 못했습니다").toBeGreaterThanOrEqual(3);
+    return (collected = { state, runs });
+  }
+  const extraTimeRuns = () => extraTimeWorld().runs;
+
+  it("녹아웃 무승부는 연장으로 이어지고, 감독이 그 사이에 교체한다", () => {
+    for (const run of extraTimeRuns()) {
+      // 연장을 치른 표식 — 무득점이어도 남는다
+      expect(run.match.result!.aet).toBe(true);
+      // 연장 골은 91′~120′(+추가시간)에 찍힌다
+      for (const minute of run.match.result!.goalMinutes ?? []) {
+        expect(minute).toBeLessThanOrEqual(125);
+      }
+      // 그 30분에 감독이 손을 댈 수 있었다 — 코어가 조용히 굴리던 자리다
+      expect(run.subInExtra, `pair ${run.pair}`).toBe(true);
+    }
+  });
+
+  it("연장 30분치 피로가 더 쌓인다 — 90분에서 멈추지 않는다", () => {
+    for (const run of extraTimeRuns()) {
+      expect(run.fatigueAtExtra).toBeGreaterThan(0);
+      // 연장 30분은 90분의 3분의 1이다 — 그만큼 다리가 더 마른다
+      expect(run.fatigueAtEnd, `pair ${run.pair}`).toBeGreaterThan(run.fatigueAtExtra * 1.15);
+    }
+  });
+
+  it("연장에서 갈리면 승부차기가 없고, 그대로 비기면 승부차기가 가린다", () => {
+    const { state, runs } = extraTimeWorld();
+    let decidedInExtra = 0;
+    let wentToPenalties = 0;
+    for (const run of runs) {
+      const winner = domesticTieWinner(state, "facup", "qf", run.pair);
+      expect(winner).not.toBeNull();
+      expect([run.match.homeTeamId, run.match.awayTeamId]).toContain(winner);
+      const result = run.match.result!;
+      if (result.homeGoals === result.awayGoals) {
+        expect(result.penalties, `pair ${run.pair}`).toBeDefined();
+        expect(result.penalties!.home).not.toBe(result.penalties!.away);
+        wentToPenalties++;
+      } else {
+        expect(result.penalties, `pair ${run.pair}`).toBeUndefined();
+        decidedInExtra++;
+      }
+    }
+    // 두 갈래가 다 나와야 이 검증이 뜻을 갖는다
+    expect(decidedInExtra).toBeGreaterThan(0);
+    expect(wentToPenalties).toBeGreaterThan(0);
+  });
+
+  it("연장을 치른 경기는 코어가 다시 굴리지 않는다 — `aet`가 문지기다", () => {
+    const { state, runs } = extraTimeWorld();
+    for (const run of runs) {
+      const before = { ...run.match.result! };
+      expect(resolveExtraTime(state, run.match, `facup:qf:${run.pair}`)).toBe(false);
+      for (let i = 0; i < 3; i++) domesticTieWinner(state, "facup", "qf", run.pair);
+      expect(run.match.result!.homeGoals).toBe(before.homeGoals);
+      expect(run.match.result!.awayGoals).toBe(before.awayGoals);
+      expect(run.match.result!.scorers).toHaveLength(before.scorers.length);
+    }
+  });
+
+  it("리그 경기는 비겨도 90분에 끝난다 — 연장 표식이 붙지 않는다", () => {
+    const state = createTestGame(23);
+    let draws = 0;
+    for (let round = 900; round < 912; round++) {
+      for (const p of playersOf(state, "arsenal")) p.state.condition = 100;
+      const match: MatchRecord = {
+        id: `m-league-${state.season}-r${round}`,
+        season: state.season,
+        competitionId: "epl",
+        round,
+        date: state.date,
+        time: "15:00",
+        homeTeamId: state.userTeamId,
+        awayTeamId: "chelsea",
+        result: null,
+      };
+      state.matches.push(match);
+      state.phase = "matchday";
+      playUserMatch(state);
+      expect(match.result!.aet).toBeUndefined();
+      for (const minute of match.result!.goalMinutes ?? []) expect(minute).toBeLessThan(100);
+      if (match.result!.homeGoals === match.result!.awayGoals) draws++;
+    }
+    // 무승부가 한 번도 안 나왔다면 이 테스트는 아무것도 증명하지 못한다
+    expect(draws).toBeGreaterThan(0);
   });
 });
 

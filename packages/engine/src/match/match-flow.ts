@@ -53,6 +53,7 @@ import {
 import { competitionShortName, competitionStageLabel } from "../data/cup-catalog";
 import { advanceDomesticCups } from "../competition/domestic-cup";
 import { advanceEuroKnockouts } from "../competition/euro-knockout";
+import { needsExtraTime } from "../competition/extra-time";
 import { recordCard } from "./discipline";
 import { makeRng } from "../core/rng";
 
@@ -406,6 +407,11 @@ export function advanceSegment(state: GameState): {
     },
     // 체력 소모의 그날의 몫 — 구간이 아니라 **경기** 단위로 고정된다 (stamina.ts)
     staminaKey: `${state.seed}:${match.id}`,
+    /**
+     * 90분이 지금 스코어로 끝나면 연장으로 가는가 — **컵을 아는 건 코어뿐**이다.
+     * 구간 시뮬은 대회도 대진도 모르고 이 답만 받는다 (extra-time.ts).
+     */
+    toExtraTime: needsExtraTime(state, match, pending.ledger.score),
     rng,
   });
 
@@ -441,7 +447,8 @@ export function advanceSegment(state: GameState): {
    */
   const aiTeamId = aiSide === "home" ? match.homeTeamId : match.awayTeamId;
   const aiNow = pending.aiTactics ?? tacticsOf(state, aiTeamId).spec;
-  const shift = planAiTacticalShift(aiSide, aiNow, pending.ledger, plan.stop === "half_time");
+  // 라커룸에서 판을 다시 짜는 자리 — 하프타임과 연장의 두 휴식이 같다
+  const shift = planAiTacticalShift(aiSide, aiNow, pending.ledger, isBreak(plan.stop));
   if (shift) pending.aiTactics = { ...aiNow, ...shift };
   const worn = (pending.matchFatigue ??= {});
   for (const [id, add] of Object.entries(plan.fatigue)) {
@@ -509,14 +516,27 @@ export function advanceMatchTo(
   };
 }
 
+/** 벤치가 판을 다시 짜는 정지점 — 하프타임 · 연장 개시 · 연장 하프타임 */
+function isBreak(stop: SegmentStop): boolean {
+  return stop === "half_time" || stop === "extra_time_start" || stop === "extra_half_time";
+}
+
+/** 뒤에 사건을 붙일 수 없는 사건 — 장부가 그 자리에서 배치를 끊는다 */
+const STOP_EVENTS: ReadonlySet<MatchEvent["type"]> = new Set([
+  "goal",
+  "half_time",
+  "extra_time_start",
+  "extra_half_time",
+  "full_time",
+]);
+
 /**
- * 정지 사건(골·하프타임·종료) **앞에** 끼워 넣는다 — 하프타임 뒤에 오는 사건은
- * 장부가 반려하고, 골 뒤에 붙은 교체는 "골 먹고 바로 뺐다"로 읽혀 부자연스럽다.
+ * 정지 사건(골·하프타임·연장 개시·종료) **앞에** 끼워 넣는다 — 그 뒤에 오는
+ * 사건은 장부가 반려하고, 골 뒤에 붙은 교체는 "골 먹고 바로 뺐다"로 읽혀
+ * 부자연스럽다.
  */
 function insertBeforeStop(events: MatchEvent[], extra: MatchEvent): MatchEvent[] {
-  const stopIndex = events.findIndex(
-    (e) => e.type === "goal" || e.type === "half_time" || e.type === "full_time",
-  );
+  const stopIndex = events.findIndex((e) => STOP_EVENTS.has(e.type));
   const at = stopIndex < 0 ? events.length : stopIndex;
   const minute = Math.min(extra.minute, events[at]?.minute ?? extra.minute);
   const clamped = { ...extra, minute: Math.max(minute, events[at - 1]?.minute ?? 0) };
@@ -569,6 +589,16 @@ export function substitutePlayer(state: GameState, input: { out: string; in: str
 }
 
 /**
+ * 이 경기가 연장까지 갔는가 — **장부의 사건이 원본**이다.
+ *
+ * `phase`로 재지 않는 이유: 경기가 끝나면 `finished`가 되어 90분에 끝난 경기와
+ * 구분되지 않는다. 연장 개시는 지워지지 않는 사실이라 그것을 읽는다.
+ */
+function wentToExtraTime(ledger: { events: readonly MatchEvent[] }): boolean {
+  return ledger.events.some((e) => e.type === "extra_time_start");
+}
+
+/**
  * 평점 브리프 — 진행 중인 장부에서 "누가 무엇을 했는지"를 뽑아낸다.
  *
  * `finalizeMatch`가 기준 평점을 박을 때 쓰고, 경기 후 LLM 평점의 입력으로도
@@ -606,7 +636,8 @@ export function buildRatingBrief(state: GameState): MatchRatingBrief | null {
     if (e.actors[0]) wentOff.set(e.actors[0], e.minute);
     if (e.actors[1]) cameOn.set(e.actors[1], e.minute);
   }
-  const FULL_TIME = 90;
+  /** 이 경기의 길이 — 연장을 치렀으면 120분이다 (출전 시간이 평점의 기준값이다) */
+  const FULL_TIME = wentToExtraTime(ledger) ? 120 : 90;
   const minutesOf = (id: string): number => {
     const on = cameOn.get(id);
     const off = wentOff.get(id);
@@ -726,6 +757,12 @@ export function finalizeMatch(state: GameState): string[] {
     goalMinutes: goalEvents.map((e) => e.minute),
     homeLineup,
     awayLineup,
+    /**
+     * **연장을 치렀다는 표식** — 무득점 연장은 스코어에 흔적을 안 남기므로 이 값이
+     * 유일한 증거다. 그리고 이게 이중 적용의 문지기다: 대진 승자를 묻는 자리에서
+     * `resolveExtraTime`이 이 경기를 다시 굴리지 않는다 (extra-time.ts).
+     */
+    ...(wentToExtraTime(ledger) ? { aet: true } : {}),
   };
   const entry = state.schedule.find((e) => e.type === "match" && e.refId === match.id);
   if (entry) entry.status = "done";
@@ -913,7 +950,10 @@ export function finalizeMatch(state: GameState): string[] {
   }
 
   const opponentId = side === "home" ? match.awayTeamId : match.homeTeamId;
-  const scoreline = `${ledger.score.home}:${ledger.score.away}`;
+  // 120분을 뛴 경기는 그 사실이 스코어 옆에 남아야 한다 — 무득점 연장은 흔적이 없다
+  const scoreline = `${ledger.score.home}:${ledger.score.away}${
+    wentToExtraTime(ledger) ? " (연장)" : ""
+  }`;
   const outcomeKo = outcome === "win" ? "승리" : outcome === "draw" ? "무승부" : "패배";
   pushNarrative(
     state,

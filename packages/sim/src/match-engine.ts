@@ -2,13 +2,14 @@ import type {
   MatchEvent,
   MatchSide,
   MatchStatLine,
+  PlayPhase,
   Player,
   StrengthPacket,
   TacticsSpec,
 } from "@story-fm/domain";
-import { positionGroupOfPlayer } from "@story-fm/domain";
+import { PHASE_END, PHASE_START, positionGroupOfPlayer } from "@story-fm/domain";
 import { directiveDrain, type DirectiveInput } from "./directives";
-import { LEDGER_LIMITS, type MatchLedgerState } from "./match-ledger";
+import { LEDGER_LIMITS, subLimitsOf, type MatchLedgerState } from "./match-ledger";
 import { conditionDrain, drainVariance } from "./stamina";
 
 /**
@@ -35,6 +36,10 @@ export type SegmentStop =
   | "red_card"
   | "injury"
   | "half_time"
+  /** 90분이 끝났는데 승부가 남았다 — 연장으로 들어가기 전의 정지점 */
+  | "extra_time_start"
+  /** 연장 전반 종료 */
+  | "extra_half_time"
   | "full_time"
   /** 사건 없이 흐름만 흘렀다 — 25분 상한 */
   | "flow";
@@ -87,6 +92,17 @@ export interface SegmentInput {
    * 경기 내내 같은 값이어야 한다 (`drainVariance`). 없으면 계수만으로 계산한다.
    */
   staminaKey?: string;
+  /**
+   * **지금 스코어로 90분이 끝나면 연장으로 이어지는가.**
+   *
+   * 구간 시뮬은 대회를 모른다 — 녹아웃인지, 2차전 합계가 같은지는 코어(engine)의
+   * `needsExtraTime`이 정하고 그 답만 여기로 온다. 리그 경기는 언제나 false라
+   * 무승부로 그냥 끝난다.
+   *
+   * 구간 안에서 스코어가 바뀌면 이 값이 낡을 텐데, **골은 언제나 구간을 끝낸다** —
+   * 90분 종료에 닿는 구간에는 골이 없으므로 호출 시점의 스코어가 곧 종료 스코어다.
+   */
+  toExtraTime?: boolean;
   /** 결정적 난수 — 호출부가 (시드, 경기, 구간 번호)로 만든다 */
   rng: () => number;
 }
@@ -391,10 +407,32 @@ function causesFor(packet: StrengthPacket, side: MatchSide): string[] {
   return note ? [note] : ["중원 주도권 싸움"];
 }
 
-/** 추가시간 — 전반 1~4분, 후반 2~6분. 결정적으로 뽑는다 */
-function stoppageTime(rng: () => number, half: 1 | 2): number {
-  return half === 1 ? 1 + Math.floor(rng() * 4) : 2 + Math.floor(rng() * 5);
+/**
+ * 추가시간 — 전반 1~4분, 후반 2~6분, **연장 하프는 1~2분**. 결정적으로 뽑는다.
+ * 연장이 짧은 건 15분짜리 하프라 멈춰 있던 시간도 그만큼 적기 때문이다.
+ */
+function stoppageTime(rng: () => number, phase: PlayPhase): number {
+  if (phase === "first_half") return 1 + Math.floor(rng() * 4);
+  if (phase === "second_half") return 2 + Math.floor(rng() * 5);
+  return 1 + Math.floor(rng() * 2);
 }
+
+/**
+ * 연장 30분의 기대 득점 — **정규 90분 대비 배율.** 시간 비율(1/3)보다 낮다:
+ * 지친 다리로 뛰는 시간이고 승부차기가 보이는 자리라 양 팀 다 잃지 않는 쪽으로 기운다.
+ *
+ * 간이 시뮬(`engine/quick-sim.ts`의 `EXTRA_TIME_RATE`)과 **같은 눈금**이다 —
+ * 갈리면 우리 연장만 조용하거나 시끄러워진다.
+ */
+export const EXTRA_TIME_GOAL_SHARE = 0.28;
+
+/**
+ * 연장의 **분당** 발생률 배수 — 30분에 90분의 0.28배를 내려면 분당은 0.84배다.
+ * 카드·부상은 그대로 둔다: 지친 다리는 덜 뛰지만 덜 거칠지는 않다.
+ */
+const EXTRA_TIME_DENSITY =
+  (EXTRA_TIME_GOAL_SHARE * PHASE_END.second_half) /
+  (PHASE_END.extra_second - PHASE_END.second_half);
 
 /**
  * 다음 정지점까지 굴린다 — 코어가 사건을 확정하고 장부에 넣을 이벤트를 돌려준다.
@@ -442,12 +480,20 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
   };
   rates.injury.home *= avgProneness("home");
   rates.injury.away *= avgProneness("away");
-  const half: 1 | 2 = ledger.phase === "first_half" ? 1 : 2;
-  const halfEnd = half === 1 ? 45 : 90;
-  const limit = halfEnd + stoppageTime(rng, half);
+  /** 지금 굴리는 국면 — 종료된 장부는 호출부가 이미 막는다 */
+  const phase: PlayPhase = ledger.phase === "finished" ? "second_half" : ledger.phase;
+  if (phase === "extra_first" || phase === "extra_second") {
+    // 연장은 골이 성기다 — 슛도 골에서 파생하므로 함께 내린다
+    for (const side of ["home", "away"] as const) {
+      rates.goal[side] *= EXTRA_TIME_DENSITY;
+      rates.shot[side] *= EXTRA_TIME_DENSITY;
+    }
+  }
+  const halfEnd = PHASE_END[phase];
+  const limit = halfEnd + stoppageTime(rng, phase);
 
   const started = ledger.events.some((e) => e.type === "kickoff");
-  let t = Math.max(ledger.minute, half === 2 ? 45 : 0);
+  let t = Math.max(ledger.minute, PHASE_START[phase]);
   if (!started) {
     events.push({ minute: 0, type: "kickoff", actors: [], causes: [] });
     t = 0;
@@ -471,12 +517,14 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
        * 같은 값이다 — 구간마다 다시 굴리면 평균으로 상쇄된다.
        */
       const spec = tactics[side];
+      // 공을 쫓는 팀이 더 뛴다 — 중원에서 밀리면 체력으로도 치른다 (stamina.ts)
+      const share = packet.guide.possession[side];
       for (const p of squadOf(side).onPitch) {
         const position = positionOf.get(p.id) ?? "CM";
         const today = drainVariance(staminaKey && `${staminaKey}:${p.id}`);
         fatigue[p.id] =
           (fatigue[p.id] ?? 0) +
-          conditionDrain(p, position, spec, elapsed, today, drainOf.get(p.id) ?? 1);
+          conditionDrain(p, position, spec, elapsed, today, drainOf.get(p.id) ?? 1, share);
       }
     }
   };
@@ -531,10 +579,8 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
       const players = squad.onPitch.filter((p) => !gone.has(p.id));
       if (players.length === 0) continue;
       const spec = tactics[side];
-      // 점유 — 중원 우위가 공을 갖는다 (0.35~0.65)
-      const mid = packet[side].zones.midfield;
-      const theirMid = packet[side === "home" ? "away" : "home"].zones.midfield;
-      const share = Math.max(0.35, Math.min(0.65, mid / Math.max(1, mid + theirMid)));
+      // 점유는 패킷이 갖는다 — 기대 득점·체력과 같은 값을 써야 갈리지 않는다
+      const share = packet.guide.possession[side];
       // 템포가 높으면 같은 시간에 더 많이 주고받는다
       // 기준(3)이 1.0이어야 한다 — 0.8을 깔면 아무 지시도 안 한 팀이 손해를 본다
       const tempo = 1 + (spec.tempo - 3) * 0.09;
@@ -583,12 +629,20 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
       // 추가시간은 구간마다 새로 뽑히므로(난수 채널이 다르다) 앞 구간이 이미 지나간
       // 시각보다 이른 종료가 나올 수 있다. 장부는 시간 역행을 반려하므로 여기서 막는다
       const minute = Math.max(Math.ceil(limit), ledger.minute, halfEnd);
-      if (half === 1) {
-        events.push({ minute, type: "half_time", actors: [], causes: [] });
-        return finish("half_time", minute);
-      }
-      events.push({ minute, type: "full_time", actors: [], causes: [] });
-      return finish("full_time", minute);
+      /**
+       * 국면이 끝나는 방식은 넷이다 — 하프타임 · **연장 개시** · 연장 하프타임 · 종료.
+       * 90분 뒤에 연장이 붙는지는 코어가 이미 정해서 넘겨준다(`toExtraTime`).
+       */
+      const closing: SegmentStop & MatchEvent["type"] =
+        phase === "first_half"
+          ? "half_time"
+          : phase === "extra_first"
+            ? "extra_half_time"
+            : phase === "second_half" && input.toExtraTime === true
+              ? "extra_time_start"
+              : "full_time";
+      events.push({ minute, type: closing, actors: [], causes: [] });
+      return finish(closing, minute);
     }
     if (t - from >= MAX_SEGMENT_MINUTES || events.length >= MAX_SEGMENT_EVENTS) {
       return finish("flow", Math.max(Math.floor(t), ledger.minute));
@@ -704,6 +758,13 @@ const SUB_FATIGUE_HALFTIME = 28;
 /** 정지점마다 교체를 검토할 확률 — 58분 이후 구간이 두셋뿐이라 낮으면 기회 자체가 없다 */
 const SUB_CHANCE = 0.8;
 
+/** 벤치가 판을 다시 짜는 정지점 — 문턱이 낮아진다 (장부의 `BREAK_EVENTS`와 같은 자리) */
+const BREAK_STOPS: ReadonlySet<SegmentStop> = new Set<SegmentStop>([
+  "half_time",
+  "extra_time_start",
+  "extra_half_time",
+]);
+
 /**
  * AI 팀의 교체 판단 — 코어가 결정적으로 한다.
  *
@@ -724,7 +785,9 @@ export function planAiSubstitution(
   worn: Record<string, number> = {},
 ): MatchEvent | null {
   const team = side === "home" ? ledger.home : ledger.away;
-  if (team.subsUsed >= LEDGER_LIMITS.maxSubs || team.subWindows >= LEDGER_LIMITS.maxSubWindows) {
+  // 연장이면 한 장이 더 있다 — 장부와 **같은 함수**를 본다 (6인/4회)
+  const limits = subLimitsOf(ledger.phase);
+  if (team.subsUsed >= limits.maxSubs || team.subWindows >= limits.maxSubWindows) {
     return null;
   }
 
@@ -763,11 +826,12 @@ export function planAiSubstitution(
   }
 
   /**
-   * 하프타임은 벤치가 판을 다시 짜는 자리다 — 실제 경기의 교체가 가장 많이
+   * 휴식 시간은 벤치가 판을 다시 짜는 자리다 — 실제 경기의 교체가 가장 많이
    * 몰리는 시점이고, 여기서 움직이지 않으면 상대는 후반 내내 같은 팀이다.
+   * 연장 개시·연장 하프타임도 같다: 90분을 뛴 다리를 그대로 30분 더 세우지 않는다.
    */
-  const halftime = plan.stop === "half_time";
-  if (!halftime && (plan.minute < 58 || rng() > SUB_CHANCE)) return null;
+  const atBreak = BREAK_STOPS.has(plan.stop);
+  if (!atBreak && (plan.minute < 58 || rng() > SUB_CHANCE)) return null;
 
   /**
    * 교체는 이 구간의 **앞쪽**에 끼워지므로, 뺄 선수가 구간의 다른 사건에 등장하면
@@ -781,8 +845,8 @@ export function planAiSubstitution(
   const tired = [...squad.onPitch]
     .filter((p) => positionGroupOfPlayer(p) !== "GK" && !busy.has(p.id) && !gone.has(p.id))
     .sort((a, b) => tiredness(b) - tiredness(a))[0];
-  // 하프타임엔 문턱을 낮춘다 — 전반에 이미 다리가 무거운 선수는 그때 바꾼다
-  if (!tired || tiredness(tired) < (halftime ? SUB_FATIGUE_HALFTIME : SUB_FATIGUE)) return null;
+  // 휴식 시간엔 문턱을 낮춘다 — 전반에 이미 다리가 무거운 선수는 그때 바꾼다
+  if (!tired || tiredness(tired) < (atBreak ? SUB_FATIGUE_HALFTIME : SUB_FATIGUE)) return null;
 
   const replacement = bestOf(positionGroupOfPlayer(tired), new Set([...busy, ...gone]));
   if (!replacement) return null;
