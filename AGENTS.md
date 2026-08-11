@@ -6,8 +6,8 @@
 
 이 문서는 프로젝트의 **비전**과 **개발 규약**을 담는 단일 소스다. AI 에이전트와
 사람 기여자 모두 이 문서를 기준으로 작업한다. `CLAUDE.md`는 이 문서를 참조한다.
-**게임이 실제로 어떻게 돌아가는지는 [docs/design/](./docs/design/README.md)이
-원본이다** — [game-overview.md](./docs/design/game-overview.md)부터 읽는다.
+**게임이 실제로 어떻게 돌아가는지는 [docs/](./docs/README.md)이
+원본이다** — [game-overview.md](./docs/game-overview.md)부터 읽는다.
 
 ---
 
@@ -49,16 +49,14 @@
 - **패키지 매니저**: pnpm (모노레포 워크스페이스)
 - **LLM**: 역할별 멀티 프로바이더 — 티어가 제공자를 고른다(GM=Claude Opus ·
   경기 중계=Gemini Flash Lite · 잡무=GPT Luna). 티어·모델 ID는 `packages/llm`
-  단일 관리 (→ [docs/design/llm.md](./docs/design/llm.md))
+  단일 관리 (→ [docs/llm.md](./docs/llm.md))
 - **상태/검증**: Zod (LLM 입출력 구조화 강제)
 - **테스트**: Vitest + Playwright / **린트**: ESLint + Prettier
 
 ### 디렉터리 구조
 
 ```
-docs/
-  design/          # 기획서(GDD) — 단일 소스. README.md가 지도
-  decisions/       # ADR
+docs/              # 기획서 — 지금 이 게임이 어떻게 동작하는가. README.md가 지도
 apps/
   web/             # Next.js — 채팅 UI · 오피스 뷰 · API · /admin
 packages/
@@ -111,9 +109,8 @@ packages/
 
 ### 문서
 
-- 기획·아키텍처가 바뀌면 **코드보다 문서를 먼저** 갱신한다 (`docs/design/`).
-- 중요한 설계 결정은 `docs/decisions/`에 ADR로.
-- 구현 판단·기획 편차는 implementation-notes.md에 기록한다.
+- 기획·아키텍처가 바뀌면 **코드보다 문서를 먼저** 갱신한다 (`docs/`).
+- 문서는 **지금 상태만** 적는다 — 결정 로그·변경 이력은 남기지 않는다(그건 git이 한다).
 
 ## 6. LLM 통합 규약 (가장 중요)
 
@@ -147,16 +144,16 @@ packages/
 
 | 주제 | 문서 |
 | --- | --- |
-| 게임 전체 구조·루프·화면 | [docs/design/game-overview.md](./docs/design/game-overview.md) |
-| 선수 15축·역할·폼·성장·적응도·안개 | [attribute-model.md](./docs/design/attribute-model.md) |
-| 경기 시뮬·체력·평점 | [match-sim.md](./docs/design/match-sim.md) |
-| 달력·컵·유럽·훈련·tick·시즌 전환 | [season.md](./docs/design/season.md) |
-| 이적·협상·설득·AI 시장 | [transfers.md](./docs/design/transfers.md) |
-| 구단 재정 | [club-finance.md](./docs/design/club-finance.md) |
-| 페르소나·기자회견·심경 | [people.md](./docs/design/people.md) |
-| LLM 티어·입출력·스킬 표면 | [llm.md](./docs/design/llm.md) |
-| 데이터 출처·라이선스 | [data-sourcing.md](./docs/design/data-sourcing.md) |
-| ERD·세이브 호환·결정 로그 | [implementation-notes.md](./docs/design/implementation-notes.md) |
+| 게임 전체 구조·루프·화면 | [docs/game-overview.md](./docs/game-overview.md) |
+| 선수 15축·역할·폼·성장·적응도·안개 | [attribute-model.md](./docs/attribute-model.md) |
+| 경기 시뮬·체력·평점 | [match-sim.md](./docs/match-sim.md) |
+| 달력·컵·유럽·훈련·tick·시즌 전환 | [season.md](./docs/season.md) |
+| 이적·협상·설득·AI 시장 | [transfers.md](./docs/transfers.md) |
+| 구단 재정 | [club-finance.md](./docs/club-finance.md) |
+| 페르소나·기자회견·심경 | [people.md](./docs/people.md) |
+| LLM 티어·입출력·스킬 표면 | [llm.md](./docs/llm.md) |
+| 데이터 출처·라이선스 | [data-sourcing.md](./docs/data-sourcing.md) |
+| 데이터 모델 · ERD · 세이브 호환 | [data-model.md](./docs/data-model.md) |
 
 ## 현재 상태
 

@@ -147,7 +147,7 @@
   [transfers.md](./transfers.md)
 - 재정: 원장 + 월간 보고서, 이적료는 현금 즉시·장부 상각. [club-finance.md](./club-finance.md)
 - 세이브 호환: 새 테이블은 로드 시 빈 배열, 새 필드는 optional — 버전을 올리지
-  않는 것이 원칙. ERD와 상세는 [implementation-notes.md](./implementation-notes.md)
+  않는 것이 원칙. 엔티티·ERD·세이브 규칙은 [data-model.md](./data-model.md)
 
 ## 5. 세계의 규모
 
@@ -184,5 +184,4 @@
 | 인물·서사 (페르소나·회견·심경) | [people.md](./people.md) |
 | LLM (티어·어댑터·입력·스킬 표면) | [llm.md](./llm.md) |
 | 데이터 출처·라이선스 | [data-sourcing.md](./data-sourcing.md) |
-| ERD·세이브 호환·결정 로그 | [implementation-notes.md](./implementation-notes.md) |
-| 중요한 설계 결정 (ADR) | [../decisions/](../decisions/) |
+| 데이터 모델 · ERD · 세이브 호환 | [data-model.md](./data-model.md) |

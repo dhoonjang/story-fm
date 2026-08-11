@@ -32,6 +32,29 @@ export { dataDir };
  *    (git clean 포함)에도 세이브가 남는다.
  */
 
+/**
+ * 없으면 빈 배열로 채우는 필드 — 순수한 목록·이력이라 "비어 있음"이 곧 유효한
+ * 초기 상태다. 반대로 `players`·`teams`처럼 없으면 세이브가 깨진 것은 위의
+ * 필수 목록이 막는다.
+ */
+const ARRAY_FIELDS = [
+  "trainingSessions",
+  "negotiations",
+  "injuries",
+  "bookings",
+  "suspensions",
+  "transfers",
+  "growthLog",
+  "seasonStats",
+  "issues",
+  "euroEntrants",
+  "seasonRecords",
+  "trophies",
+  "achievements",
+  "narrative",
+  "chat",
+] as const;
+
 function paths(id: string) {
   const dir = dataDir();
   return {
@@ -95,15 +118,20 @@ function validate(raw: unknown): GameState | null {
   for (const key of required) {
     if (s[key] === undefined || s[key] === null) return null;
   }
-  // 스키마 진화 — 나중에 추가된 테이블은 빈 배열로 채운다 (원칙 4)
+  /**
+   * 스키마 진화 — 배열 필드는 없으면 빈 배열로 채운다 (세이브 호환 원칙).
+   * ⚠️ `GameState`에 새 배열을 추가하면 **여기에도 넣어야 한다** — 안 그러면
+   * 옛 세이브에서 `undefined`로 남아 첫 접근에서 터진다.
+   */
+  for (const key of ARRAY_FIELDS) s[key] ??= [];
   s.scoutReports ??= [];
   s.settlingEvents ??= [];
   s.transferList ??= [];
   s.playerTraining ??= [];
   s.pressConferences ??= [];
   s.aiDeals ??= [];
-  // 구단 재정 v1 (ADR 0004) — 보고서는 다음 달 1일부터 쌓인다. 기존 원장 엔트리는
-  // category가 없으므로 집계에서 "기타"로 읽힌다 (finance.ts categoryOf).
+  // 재정 보고서는 다음 달 1일부터 쌓인다. 옛 원장 엔트리는 category가 없어
+  // 집계에서 "기타"로 읽힌다 (finance.ts categoryOf).
   s.financeReports ??= [];
   /**
    * 감독 능력치 4축 → 5축 (`media` → `analysis`, `training` 추가).
