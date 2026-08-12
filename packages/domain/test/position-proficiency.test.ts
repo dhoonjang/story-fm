@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ADAPTATION_GAUGE_BAND,
   ADAPTATION_IMPACT,
   PROFICIENCY_FACTOR_FLOOR,
   PROFICIENCY_FLOOR,
@@ -128,22 +129,38 @@ describe("positionProficiency", () => {
 });
 
 describe("adaptationOf", () => {
-  it("경기 팩터와 같은 기본 영향 폭을 쓴다", () => {
+  it("경기 팩터는 최대 폭, 게이지는 실제로 방문하는 폭으로 섞는다", () => {
     expect(ADAPTATION_IMPACT).toEqual({ position: 0.9, tactical: 0.15 });
     expect(PROFICIENCY_FACTOR_FLOOR).toBe(0.1);
     expect(PROFICIENCY_LOG_SCALE).toBe(5);
     expect(PROFICIENCY_FLOOR).toBe(25);
     expect(PROFICIENCY_MIN).toBe(0);
     expect(PROFICIENCY_MAX).toBe(99);
-    expect(adaptationWeightsOf("AM").position).toBeCloseTo(6 / 7);
-    expect(adaptationWeightsOf("AM").tactical).toBeCloseTo(1 / 7);
+    // 바닥값 25 위에 남은 폭만 자리의 몫이다 — 1 − profFactor(25)
+    expect(ADAPTATION_GAUGE_BAND.position).toBeCloseTo(0.368663);
+    expect(ADAPTATION_GAUGE_BAND.tactical).toBe(0.15);
+    // 전술 축이 게이지에서 3분의 1 몫은 갖는다 (민감도 1.0 자리)
+    expect(adaptationWeightsOf("AM").tactical).toBeCloseTo(0.289);
+    expect(adaptationWeightsOf("CM").tactical).toBeCloseTo(0.363);
+    expect(adaptationWeightsOf("ST").tactical).toBeCloseTo(0.196);
   });
 
-  it("경기에서 온전한 두 값은 화면에서도 100이다", () => {
+  it("두 축이 온전하면 100이다", () => {
     expect(adaptationOf(99, 100, "ST")).toBe(100);
   });
 
-  it("포지션 준비도는 로그 곡선이라 낮은 구간을 벌리고 높은 구간은 평평하다", () => {
+  it("게이지는 저장값을 그대로 섞는다 — 로그 곡선을 씌우지 않는다", () => {
+    // 필드 플레이어를 골문에(바닥값 25) 세우면 낮게 읽혀야 한다
+    expect(adaptationOf(25, 60, "GK")).toBeLessThan(40);
+    // 주 포지션 + 드릴된 전술은 90 위
+    expect(adaptationOf(92, 90, "CM")).toBeGreaterThan(90);
+  });
+
+  it("전술을 급격히 바꾸면 게이지가 눈에 보이게 떨어진다", () => {
+    expect(adaptationOf(92, 90, "CM") - adaptationOf(92, 45, "CM")).toBeGreaterThan(10);
+  });
+
+  it("포지션 준비도(경기 팩터)는 로그 곡선이라 낮은 구간을 벌리고 높은 구간은 평평하다", () => {
     expect(proficiencyReadiness(0)).toBe(0.1);
     expect(proficiencyReadiness(99)).toBe(1);
     expect(proficiencyReadiness(1)).toBeCloseTo(0.154067);

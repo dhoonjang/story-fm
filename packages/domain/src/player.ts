@@ -44,6 +44,9 @@ export function positionGroupOf(position: string): PositionGroup | null {
   return POSITION_GROUPS[position.toUpperCase()] ?? null;
 }
 
+/** 라인의 앞뒤 순서 — 자리를 옮길 때 **몇 개의 라인을 넘는지** 세는 데 쓴다 */
+export const POSITION_LINE_ORDER: Record<PositionGroup, number> = { GK: 0, DF: 1, MF: 2, FW: 3 };
+
 /**
  * **사실상 같은 자리** 묶음 — 좌우·중앙 분화나 표기만 다르고 요구 역량은 같다.
  * CB를 94로 소화하는 센터백은 RCB·LCB도 그만큼 해낸다(주발 쪽이 아니면 아주 조금

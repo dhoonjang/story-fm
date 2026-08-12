@@ -5,9 +5,11 @@ import {
   clusterOf,
   footAdjust,
   isMirrorPair,
+  POSITION_LINE_ORDER,
   positionGroupOf,
   tacticalSensitivityOf,
   type Foot,
+  type PositionGroup,
 } from "./player";
 import { normalizedLogCurve, reflectedLogCurve } from "./log-curves";
 
@@ -450,8 +452,12 @@ export function positionDistance(a: string, b: string): number {
  * 좌우 반대 풀백(거리 78)은 31점 깎인다.
  */
 const DISTANCE_PENALTY = 0.4;
-/** 라인(GK/DF/MF/FW)을 넘을 때의 추가 감점 — 요구 역량 자체가 달라진다 */
-const LINE_PENALTY = 10;
+/**
+ * 라인(GK/DF/MF/FW)을 넘을 때의 추가 감점 — **넘은 라인 수만큼** 걷는다.
+ * 한 칸이든 두 칸이든 같은 값이면 센터백을 최전방에 세우는 대가가 한 칸 올리는
+ * 것과 같아진다 (CB→ST 54, CB→DM 73 — 자리를 바꿔 세우는 값이 너무 싸다).
+ */
+const LINE_PENALTY = 12;
 /** 클러스터(사실상 같은 자리) 감점 — 좌우 분화 정도만 */
 const CLUSTER_PENALTY = 2;
 /**
@@ -492,21 +498,34 @@ export function proficiencyReadiness(proficiency: number): number {
 }
 
 /**
+ * 게이지가 재는 폭 — **게임이 실제로 방문하는 구간**이다.
+ * 자리는 바닥값(`PROFICIENCY_FLOOR`) 아래로 내려가지 않으므로 최대 감점 폭
+ * (`ADAPTATION_IMPACT.position` 90%p)이 아니라 그 위에 남은 폭만 쓴다. 이론상의
+ * 폭으로 섞으면 전술 축의 무게가 10%까지 눌려 급격한 전술 변경이 게이지에 안 보인다.
+ */
+export const ADAPTATION_GAUGE_BAND = {
+  position: 1 - proficiencyReadiness(PROFICIENCY_FLOOR),
+  tactical: ADAPTATION_IMPACT.tactical,
+} as const;
+
+/**
  * 그 자리에서 두 적응도가 차지하는 표시 가중치.
  * 전술 쪽은 경기와 똑같이 자리 민감도를 기본 15%p에 곱한다.
  */
 export function adaptationWeightsOf(position: string): { position: number; tactical: number } {
-  const positionImpact = ADAPTATION_IMPACT.position;
-  const tacticalImpact = ADAPTATION_IMPACT.tactical * tacticalSensitivityOf(position);
+  const positionImpact = ADAPTATION_GAUGE_BAND.position;
+  const tacticalImpact = ADAPTATION_GAUGE_BAND.tactical * tacticalSensitivityOf(position);
   const total = positionImpact + tacticalImpact;
   return { position: positionImpact / total, tactical: tacticalImpact / total };
 }
 
 /**
- * **적응도 하나로 합친 표시값** — "이 선수가 지금 이 자리·이 전술에서 얼마나 준비됐나".
+ * **적응도 하나로 합친 표시값** — "이 선수가 지금 이 자리·이 전술을 아는가".
  *
- * 포지션은 경기와 같은 로그 곡선으로 정규화하고, 두 팩터의 최대 감점 폭에
- * 비례해 섞는다. 경기 계산은 이 값을 쓰지 않고 `profFactor × famFactor`를 적용한다.
+ * ⚠️ 두 축의 **저장값을 그대로** 섞는다. 경기 팩터(`profFactor`)의 로그 곡선을
+ * 여기 씌우면 바닥값 25가 63으로 읽혀 골문에 세운 공격수도 60이 넘는다 — 그 곡선은
+ * "전력의 몇 %를 내는가"의 답이고 게이지의 질문은 그게 아니다.
+ * 경기 계산은 이 값을 쓰지 않고 `profFactor × famFactor`를 각각 적용한다.
  */
 export function adaptationOf(
   positionProficiency: number,
@@ -514,7 +533,7 @@ export function adaptationOf(
   position: string,
 ): number {
   const weights = adaptationWeightsOf(position);
-  const positionReadiness = proficiencyReadiness(positionProficiency);
+  const positionReadiness = Math.min(1, Math.max(0, positionProficiency) / PROFICIENCY_MAX);
   const tacticalReadiness = Math.min(1, Math.max(0, familiarity) / FAMILIARITY_MAX);
   return Math.round(
     (positionReadiness * weights.position + tacticalReadiness * weights.tactical) * 100,
@@ -531,6 +550,12 @@ export function adaptationOf(
  * (거리 78)가 같은 라인이라 더 높게 나오는 역전이 생긴다. 자유 배치에서는 자리가
  * 코드가 아니라 좌표로 정해지므로 거리가 유일하게 일관된 척도다.
  */
+/** 두 라인 사이에 놓인 경계의 수 — 아는 코드가 아니면 다르면 한 칸으로 센다 */
+function linesBetween(from: PositionGroup | null, to: PositionGroup | null): number {
+  if (!from || !to) return from === to ? 0 : 1;
+  return Math.abs(POSITION_LINE_ORDER[from] - POSITION_LINE_ORDER[to]);
+}
+
 export function positionProficiency(
   positions: ReadonlyArray<{ position: string; proficiency: number }>,
   target: string,
@@ -573,7 +598,7 @@ export function positionProficiency(
     if ((heldCode === "GK") !== (code === "GK")) continue;
     const penalty =
       Math.round(positionDistance(heldCode, code) * DISTANCE_PENALTY) +
-      (positionGroupOf(heldCode) === targetGroup ? 0 : LINE_PENALTY);
+      LINE_PENALTY * linesBetween(positionGroupOf(heldCode), targetGroup);
     best = Math.max(best, held.proficiency - penalty);
   }
   return clampRating(best + adjust);
