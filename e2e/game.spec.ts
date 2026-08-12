@@ -144,9 +144,17 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   // 시간이 흘렀다는 증거는 위의 phase(=matchday)이고, 칩은 감독이 부른 것만 선다
   await expect(page.getByTestId("tool-시간 경과")).toHaveCount(0);
 
-  // ── 킥오프 — **버튼이다.** 그날 할 일이 그것 하나라 타이핑하게 두지 않는다 ──
-  await expect(page.getByTestId("kickoff")).toBeVisible();
-  await page.getByTestId("kickoff").click();
+  /**
+   * ── 킥오프는 **두 걸음**이다 ──────────────────────────
+   * GM이 `start_match`로 문을 열고(판이 서고 판세가 계산된다), 감독이 입장
+   * 확인 창을 눌러야 공이 구른다. 문이 열린 것만으로 중계가 시작되면 안 된다.
+   */
+  await input.fill("경기 시작하자");
+  await page.getByTestId("chat-send").click();
+  await expect(page.getByTestId("kickoff-gate")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("chat-scroll")).not.toContainText("중계");
+  await page.getByTestId("kickoff-enter").click();
+  await expect(page.getByTestId("kickoff-gate")).toHaveCount(0, { timeout: 20_000 });
   await expect(page.getByTestId("chat-scroll")).toContainText("킥오프", { timeout: 20_000 });
   await expect(page.getByTestId("chat-scroll")).toContainText("중계");
 

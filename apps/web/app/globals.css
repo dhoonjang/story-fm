@@ -1195,28 +1195,87 @@ textarea {
 }
 
 /**
- * 킥오프 — 경기일에 입력창 위로 서는 하나뿐인 버튼.
- * 그날 할 일이 그것 하나라 눈에 띄어야 하고, 다른 손잡이와 나란히 서지 않는다.
+ * 입장 확인 — 경기의 문. 종료 화면과 한 쌍이라 같은 무게로 화면을 덮는다.
  */
-.kickoff-row {
-  display: flex;
-  justify-content: center;
-  padding: 0 var(--sp-4) var(--sp-3);
+.kickoff-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-6);
+  background: rgb(4 8 13 / 0.72);
+  backdrop-filter: blur(4px);
+  animation: fulltime-in 160ms var(--ease-panel) both;
 }
-.kickoff {
-  display: inline-flex;
+.kickoff-card {
+  display: flex;
+  flex-direction: column;
+  width: min(400px, 100%);
+  padding: var(--sp-6);
+  text-align: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 0.42);
+}
+.kickoff-tag {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+}
+/**
+ * 대진 — **홈이 위, 원정이 아래**로 세운다. 팀 이름은 두 글자부터 열 글자까지
+ * 제각각이라 좌우로 늘어놓으면 긴 쪽만 접혀 한쪽이 두 줄이 된다.
+ * 우리 쪽만 또렷하고 상대는 한 걸음 물러선다.
+ */
+.kickoff-teams {
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: var(--sp-2);
-  padding: 10px 22px;
-  background: var(--accent);
-  color: #06220f;
-  border: none;
-  border-radius: var(--r-pill);
-  font-size: var(--fs-md);
+  gap: var(--sp-1);
+  margin-top: var(--sp-4);
+  font-size: var(--fs-xl);
+  line-height: 1.3;
+  /* 한국어는 어절로 끊는다 — 없으면 "맨체스터 유나 / 이티드"가 된다 */
+  word-break: keep-all;
+}
+.kickoff-teams b {
+  color: var(--muted);
+  font-weight: 600;
+}
+.kickoff-teams b.ours {
+  color: var(--text);
   font-weight: 700;
 }
-.kickoff:hover {
-  filter: brightness(1.08);
+.kickoff-teams i {
+  color: var(--dim);
+  font-size: var(--fs-2xs);
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+}
+.kickoff-where {
+  margin-top: var(--sp-4);
+  color: var(--dim);
+  font-size: var(--fs-sm);
+}
+.kickoff-card .primary-btn {
+  margin-top: var(--sp-6);
+}
+/* 열리자마자 포커스가 앉는 자리 — accent 위라 링은 밝은 쪽으로 */
+.kickoff-card .primary-btn:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+@media (max-width: 479px) {
+  .kickoff-gate {
+    padding: var(--sp-4);
+  }
+  .kickoff-card {
+    padding: var(--sp-5);
+  }
 }
 
 /**
@@ -1244,7 +1303,7 @@ textarea {
   padding: var(--sp-6);
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: var(--r-lg);
+  border-radius: var(--r-md);
   box-shadow: 0 24px 64px rgb(0 0 0 / 0.42);
 }
 .fulltime-header {
@@ -1314,7 +1373,8 @@ textarea {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .fulltime {
+  .fulltime,
+  .kickoff-gate {
     animation: none;
   }
 }
