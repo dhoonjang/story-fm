@@ -91,18 +91,18 @@ MD+1 회복 · MD+2 완전 휴식 · MD-2 전술 · MD-1 경기 준비 · 그 �
 ```
 advance_time(until):
   for day in (today .. until):
-    dailyTick(day)      # 회복·부상 경과·훈련·폼·사기·시장·재정·타 팀 경기
+    dailyTick(day)      # 회복·부상 경과·훈련·폼·시장·재정·타 팀 경기
     if 감독의 결정이 필요한 일: break   # 그 날짜에서 정지
   return digest          # 그 사이 벌어진 일 — 상태 스냅샷으로 GM에 전달
 ```
 
 **시계를 세우는 것은 오늘이 지나면 기회가 없어지는 일뿐:**
 
-| 멈춘다 | 멈추지 않는다 (다이제스트로만) |
-| --- | --- |
-| 경기일 도달 · 시즌 종료 | 훈련 완료·성장·부상 발생 |
-| 오늘이 기한인 협상 | 들어온 오퍼·응답 도착·메디컬 결과 |
-| | 벤치 불만·계약 만료 예고·타 팀 결과·재정 흐름 |
+| 멈춘다                  | 멈추지 않는다 (다이제스트로만)                |
+| ----------------------- | --------------------------------------------- |
+| 경기일 도달 · 시즌 종료 | 훈련 완료·성장·부상 발생                      |
+| 오늘이 기한인 협상      | 들어온 오퍼·응답 도착·메디컬 결과             |
+|                         | 벤치 불만·계약 만료 예고·타 팀 결과·재정 흐름 |
 
 ⚠️ 오퍼 한 통마다 시계를 세우면 감독에게 시간을 흘릴 방법이 없다 — 하루 뒤에
 처리해도 결과가 같은 일은 브리핑으로 쌓인다. 협상 기한만 예외인 이유는 넘기면
@@ -155,13 +155,13 @@ advance_time(until):
 
 ## 코드 위치
 
-| 무엇 | 어디 |
-| --- | --- |
-| 시즌 달력·리그 편성 | `packages/engine/src/competition/calendar.ts` · `fixtures.ts` |
+| 무엇                                | 어디                                                                              |
+| ----------------------------------- | --------------------------------------------------------------------------------- |
+| 시즌 달력·리그 편성                 | `packages/engine/src/competition/calendar.ts` · `fixtures.ts`                     |
 | 국내 컵 · 연장·승부차기 · 리그 연기 | `competition/domestic-cup.ts` · `extra-time.ts` · `shootout.ts` · `reschedule.ts` |
-| 유럽 대항전 | `competition/europe.ts` · `euro-knockout.ts` · `euro-prize.ts` |
-| 추첨 일정 | `competition/draw-schedule.ts` |
-| 시즌 리뷰·전환·승강 | `competition/season.ts` · `competition/promotion.ts` |
-| tick·시간 진행 | `packages/engine/src/core/tick.ts` · `core/dates.ts` |
-| 훈련 계획·결산 | `packages/engine/src/squad/training-plan.ts` · `training-report.ts` |
-| 온보딩 | `packages/engine/src/world/onboarding.ts` |
+| 유럽 대항전                         | `competition/europe.ts` · `euro-knockout.ts` · `euro-prize.ts`                    |
+| 추첨 일정                           | `competition/draw-schedule.ts`                                                    |
+| 시즌 리뷰·전환·승강                 | `competition/season.ts` · `competition/promotion.ts`                              |
+| tick·시간 진행                      | `packages/engine/src/core/tick.ts` · `core/dates.ts`                              |
+| 훈련 계획·결산                      | `packages/engine/src/squad/training-plan.ts` · `training-report.ts`               |
+| 온보딩                              | `packages/engine/src/world/onboarding.ts`                                         |
