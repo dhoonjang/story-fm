@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { LoadingInline } from "@/components/loading";
 
 interface TeamEntry {
   id: string;
@@ -98,7 +99,11 @@ export default function NewGamePage() {
 
       <h2>1. 어느 리그입니까?</h2>
       <div className="league-grid" data-testid="league-grid">
-        {leagues.length === 0 && !error && <div className="tier">리그 목록 불러오는 중…</div>}
+        {leagues.length === 0 && !error && (
+          <div className="list-loading">
+            <LoadingInline />
+          </div>
+        )}
         {leagues.map((l) => (
           <button
             key={l.id}

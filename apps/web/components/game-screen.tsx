@@ -9,6 +9,7 @@ import { hintsOfCall, panelHintsOf, type PanelHint } from "@/lib/panel-hints";
 import { chatForActiveMatch } from "@/lib/match-chat";
 import { mergeMatchOrders, type MatchBoardOrder } from "@/lib/match-orders";
 import { RailHints } from "./rail-hints";
+import { Loading } from "./loading";
 import { SquadView, CalendarView, FinanceView, CompetitionsView, CareerView } from "./office";
 import { MatchClock, MatchHeadline, MatchOpponent, MatchOverview } from "./match-view";
 import {
@@ -596,8 +597,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
 
   if (!game)
     return (
-      <main className="onboarding">
-        <p>불러오는 중...</p>
+      <main className="loading-page">
+        <Loading size={34} />
       </main>
     );
 
