@@ -550,6 +550,7 @@ function statLine(t: MatchPlayer["tally"]): string {
     t.assists > 0 ? `도움 ${t.assists}` : null,
     t.shots > 0 ? `슛 ${t.shots}` : null,
     t.xg > 0 ? `xG ${t.xg.toFixed(2)}` : null,
+    t.scoringExpectation > 0 ? `기대득점 ${t.scoringExpectation.toFixed(2)}` : null,
     t.saves > 0 ? `선방 ${t.saves}` : null,
     `패스 ${t.passes}`,
     `전진 ${t.progressive}`,
@@ -572,9 +573,10 @@ function TeamTotals({ players }: { players: MatchPlayer[] }) {
       progressive: acc.progressive + p.tally.progressive,
       shots: acc.shots + p.tally.shots,
       xg: acc.xg + p.tally.xg,
+      scoringExpectation: acc.scoringExpectation + p.tally.scoringExpectation,
       saves: acc.saves + p.tally.saves,
     }),
-    { passes: 0, progressive: 0, shots: 0, xg: 0, saves: 0 },
+    { passes: 0, progressive: 0, shots: 0, xg: 0, scoringExpectation: 0, saves: 0 },
   );
   if (sum.passes === 0 && sum.shots === 0) return null;
   return (
@@ -590,6 +592,9 @@ function TeamTotals({ players }: { players: MatchPlayer[] }) {
       </span>
       <span title="이 경기에서 만든 기회의 질 — 팀 합계">
         xG <b>{sum.xg.toFixed(2)}</b>
+      </span>
+      <span>
+        결정력 반영 <b>{sum.scoringExpectation.toFixed(2)}</b>
       </span>
       <span>
         선방 <b>{sum.saves}</b>

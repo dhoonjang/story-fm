@@ -53,7 +53,7 @@ export const MatchEventSchema = z.object({
   causes: z.array(z.string()).default([]),
   detail: z.string().optional(),
   /**
-   * **이 슛의 질** — 기대 득점 0~1. `shot`·`chance`·`goal`에만 붙는다.
+   * **이 슛의 질** — 기대 득점 0~1. `shot`·`goal`에만 붙는다.
    *
    * 팀 단위 xg(`guide.expectedGoals`)는 경기 전 예측이고, 이건 **실제로 만든 장면**의
    * 값이다. 둘을 견주면 "기회를 얼마나 만들었나"와 "그걸 얼마나 넣었나"가 갈린다 —
@@ -61,6 +61,10 @@ export const MatchEventSchema = z.object({
    * 옛 세이브엔 없다 (optional).
    */
   xg: z.number().min(0).max(1).optional(),
+  /** 결정력을 반영한 이 슛의 실제 골 확률. */
+  goalProbability: z.number().min(0).max(1).optional(),
+  /** 골도 독립 사건이 아니라 슈팅 결과다. */
+  shotOutcome: z.enum(["goal", "saved", "blocked", "off_target"]).optional(),
 });
 export type MatchEvent = z.infer<typeof MatchEventSchema>;
 
@@ -81,6 +85,8 @@ export const MatchStatLineSchema = z.object({
   shots: z.number().int().min(0),
   /** 그 선수가 만든 기대 득점의 합 */
   xg: z.number().min(0),
+  /** 실제 슈터의 결정력을 반영한 골 확률 합. 옛 세이브는 0으로 읽는다. */
+  scoringExpectation: z.number().min(0).default(0),
   saves: z.number().int().min(0),
 });
 export type MatchStatLine = z.infer<typeof MatchStatLineSchema>;

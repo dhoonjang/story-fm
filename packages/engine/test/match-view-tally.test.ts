@@ -53,7 +53,12 @@ describe("경기 중 기록", () => {
     const view = buildOfficeViews(state).match;
     if (!view) return;
 
-    const rows = [...view.onPitch.home, ...view.onPitch.away, ...view.bench.home, ...view.bench.away];
+    const rows = [
+      ...view.onPitch.home,
+      ...view.onPitch.away,
+      ...view.bench.home,
+      ...view.bench.away,
+    ];
     const events = state.pendingMatch!.ledger.events;
     const countOf = (type: string, id: string) =>
       events.filter((e) => e.type === type && e.actors[0] === id).length;
@@ -74,7 +79,12 @@ describe("경기 중 기록", () => {
     if (!view) return;
     const events = state.pendingMatch!.ledger.events;
     const assisted = events.filter((e) => e.type === "goal" && e.actors[1]);
-    const rows = [...view.onPitch.home, ...view.onPitch.away, ...view.bench.home, ...view.bench.away];
+    const rows = [
+      ...view.onPitch.home,
+      ...view.onPitch.away,
+      ...view.bench.home,
+      ...view.bench.away,
+    ];
     const total = rows.reduce((sum, p) => sum + p.tally.assists, 0);
     // 명단 밖(교체로 나간 선수)의 도움은 표에 없으므로 합이 더 클 수는 없다
     expect(total).toBeLessThanOrEqual(assisted.length);
@@ -130,16 +140,19 @@ describe("흐름의 양 — 사건이 아닌 기록", () => {
     const view = buildOfficeViews(state).match;
     if (!view) return;
     const events = state.pendingMatch!.ledger.events;
-    const shots = events.filter((e) => e.type === "shot" || e.type === "goal" || e.type === "chance");
+    const shots = events.filter((e) => e.type === "shot" || e.type === "goal");
     if (shots.length === 0) return;
     for (const e of shots) {
       expect(e.xg, `${e.minute}' ${e.type} xg 없음`).toBeDefined();
       expect(e.xg!).toBeGreaterThan(0);
       expect(e.xg!).toBeLessThanOrEqual(1);
+      expect(e.goalProbability).toBeDefined();
     }
-    // 팀 xG 합 ≈ 사건 xg 합 (반올림 오차만큼만 어긋난다)
-    const rows = [...view.onPitch.home, ...view.onPitch.away, ...view.bench.home, ...view.bench.away];
-    const fromRows = rows.reduce((s, p) => s + p.tally.xg, 0);
+    // 교체로 이미 나간 선수까지 포함한 장부 xG 합 ≈ 사건 xG 합
+    const fromRows = Object.values(state.pendingMatch!.ledger.stats ?? {}).reduce(
+      (sum, line) => sum + line.xg,
+      0,
+    );
     const fromEvents = shots.reduce((s, e) => s + (e.xg ?? 0), 0);
     expect(Math.abs(fromRows - fromEvents)).toBeLessThan(0.5);
   });

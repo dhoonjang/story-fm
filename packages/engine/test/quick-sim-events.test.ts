@@ -5,7 +5,9 @@ import {
   allMatchesDone,
   isSuspended,
   playersOf,
+  quickMinuteOf,
   quickSimulate,
+  quickStrengthFactor,
   seasonYellowsOf,
   simSquadOf,
   type GameState,
@@ -33,19 +35,53 @@ function seasonOf(seed: number): GameState {
 }
 
 describe("골의 분", () => {
+  it("정규화 로그 분포라 전반 46% · 후반 54%에 가깝다", () => {
+    const samples = Array.from({ length: 10_000 }, (_, i) => quickMinuteOf((i + 0.5) / 10_000));
+    const firstHalf = samples.filter((minute) => minute <= 45).length / samples.length;
+    expect(firstHalf).toBeCloseTo(0.46, 2);
+  });
+
   it("득점자와 같은 길이로, 시간 순으로 남는다", () => {
     const state = createTestGame(3);
     for (let i = 0; i < 60; i++) {
-      const r = quickSimulate(
-        simSquadOf(state, "mancity"),
-        simSquadOf(state, "hull"),
-        900 + i,
-        `min:${i}`,
-      );
+      const squads = { home: simSquadOf(state, "mancity"), away: simSquadOf(state, "hull") };
+      const r = quickSimulate(squads.home, squads.away, 900 + i, `min:${i}`);
       expect(r.goalMinutes).toHaveLength(r.scorers.length);
+      expect(r.assists).toHaveLength(r.scorers.length);
+      expect(r.homeShots).toBeGreaterThanOrEqual(r.homeGoals);
+      expect(r.awayShots).toBeGreaterThanOrEqual(r.awayGoals);
       for (const m of r.goalMinutes) {
         expect(m).toBeGreaterThanOrEqual(1);
         expect(m).toBeLessThanOrEqual(94);
+      }
+      const activeIds = (side: "home" | "away", minute: number) => {
+        // 분 단위 기록에는 같은 분 안의 선후가 없다. 같은 분 교체는 나간 선수와
+        // 들어온 선수 둘 다 득점 장면 후보일 수 있고, 퇴장도 그 장면 뒤일 수 있다.
+        const sideSubs = r.subs.filter((sub) => sub.side === side);
+        const off = new Set(sideSubs.filter((sub) => sub.minute < minute).map((sub) => sub.out));
+        const on = new Set(sideSubs.filter((sub) => sub.minute <= minute).map((sub) => sub.in));
+        const red = new Set(
+          r.cards
+            .filter((card) => card.side === side && card.card === "red" && card.minute < minute)
+            .map((card) => card.playerId),
+        );
+        return new Set(
+          [
+            ...squads[side].starters
+              .filter((player) => !off.has(player.id))
+              .map((player) => player.id),
+            ...(squads[side].bench ?? [])
+              .filter((player) => on.has(player.id))
+              .map((player) => player.id),
+          ].filter((id) => !red.has(id)),
+        );
+      };
+      for (let goal = 0; goal < r.scorers.length; goal++) {
+        const [side, scorerId] = r.scorers[goal]!.split(":") as ["home" | "away", string];
+        const active = activeIds(side, r.goalMinutes[goal]!);
+        expect(active.has(scorerId)).toBe(true);
+        const assistId = r.assists[goal]?.split(":")[1];
+        if (assistId) expect(active.has(assistId)).toBe(true);
       }
       // 장부는 시간 순이다 — 화면이 "23′ 손흥민"을 순서대로 읽는다
       const sorted = [...r.goalMinutes].sort((a, b) => a - b);
@@ -62,6 +98,13 @@ describe("골의 분", () => {
     for (const m of scoring) {
       expect(m.result!.goalMinutes, m.id).toHaveLength(m.result!.scorers.length);
     }
+  });
+});
+
+describe("간이 시뮬 전력 로그", () => {
+  it("대등하면 1이고 반대 전력비끼리 역수다", () => {
+    expect(quickStrengthFactor(75, 75)).toBe(1);
+    expect(quickStrengthFactor(90, 75) * quickStrengthFactor(75, 90)).toBeCloseTo(1, 10);
   });
 });
 
@@ -98,9 +141,7 @@ describe("카드·퇴장", () => {
     const others = state.players.filter(
       (p) => p.teamId !== state.userTeamId && p.teamId !== "free",
     );
-    const booked = state.bookings.filter((b) =>
-      others.some((p) => p.id === b.gamePlayerId),
-    );
+    const booked = state.bookings.filter((b) => others.some((p) => p.id === b.gamePlayerId));
     expect(booked.length).toBeGreaterThan(500);
     // 누적 정지도 남의 팀에 걸린다
     const theirSuspensions = state.suspensions.filter((s) =>

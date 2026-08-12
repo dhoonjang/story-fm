@@ -255,9 +255,13 @@ LAM/RAM · LF/RF · LST/RST.
 실제 상승 = 판정(±1) × 잠재력 여유(천장에 닿으면 0)
                     × 나이(≤18 ×1.15 … 25~27 ×0.6 … 34+ ×0.15, 축마다 시계가 다르다)
                     × 현재 수준(85→86은 60→61보다 무겁다 — 잠재력 여유와 다른 항이다)
+
+N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
+잠재력 여유 = N((potential−value)/10, 2)
+현재 수준   = N((100−value)/40, 1)
 ```
 
-18세 60(잠재 85)은 판정 한 번에 한 칸, 30세 85(88)는 열세 번을 받아야 한 칸이다.
+18세 60(잠재 85)은 판정 한 번에 한 칸, 30세 85(88)는 열두 번을 받아야 한 칸이다.
 
 - ⚠️ **못 채운 몫은 `growthCarry`에 쌓인다.** 이 그릇이 없으면 곡선이 늘 1보다
   작은 노장은 아무리 훈련해도 영영 그대로다. **한 번에 한 칸까지만** 반영해 밀린
@@ -306,6 +310,10 @@ LAM/RAM · LF/RF · LST/RST.
 판정이 낸 값이 **현재 위치만큼 깎여 들어간다** — 아래 구간(훈련 ≤65 · 경기 ≤62)은
 판정 그대로라 한 달이면 80에 닿고, 위로 갈수록 무뎌진다. **훈련만으로 95까지,
 100은 경기의 몫**이다(시즌 실측: 벤치 95 · 로테이션 99 · 주전 100).
+
+위쪽 감쇠는 정규화 로그의 좌우를 뒤집은 `R(x,s)=1−N(1−x,s)`다. `x`는 남은
+여유의 비율이고 훈련은 `s=2.5`, 경기는 `s=3.5`를 쓴다. 시작과 천장은 정확히
+0·1에 붙고, 위로 갈수록 완만하게 느려진다.
 
 - **적응도의 천장 100은 닿을 수 있어야 한다** — 능력치 99가 "세계 최고"라는
   상대적 자리인 것과 달리 100은 "완전히 붙었다"는 상태다.
@@ -388,14 +396,16 @@ LAM/RAM · LF/RF · LST/RST.
 - 폴백이 **전술판 거리**(`positionDistance`)를 쓰는 이유: 라인 경계만 보면
   ST→CAM이 RB→LB보다 생소하게 나오는 역전이 생기고, 자유 배치에서 자리는 코드가
   아니라 좌표라 거리가 유일하게 일관된 척도다.
-- ⚠️ **감점 폭이 전술 적응도보다 크다** — `PROFICIENCY_SPREAD` 30%p >
+- ⚠️ **감점 폭이 전술 적응도보다 크다** — `PROFICIENCY_SPREAD` 90%p >
   `FAMILIARITY_SPREAD` 15%p. 전술은 몇 주면 익히지만 자리는 커리어가 만든다.
   12%p였을 때는 배치 최적화가 10번을 6번에 세우고도 합이 높다고 계산했다.
 - ⚠️ 이 팩터는 sim이 단일 소스로 갖고(`strength-packet.ts`) 엔진의 배치 채점
   (`slotStrength`)도 같은 함수를 부른다 — 복제하면 "배치가 고른 자리"와 "경기가
   계산하는 자리"가 갈린다.
-- 명단 게이지는 자리×전술을 합친 `adaptationOf`, 전술판 칩은 포지션 적응도만
-  그린다 — 전술 적응도는 팀 전체에 걸린 상수라 칩마다 섞으면 자리 비교가 흐려진다.
+- 명단 게이지는 자리×전술을 합친 표시용 `adaptationOf`다. 포지션은 경기와 같은
+  로그 곡선으로 0~99를 정규화하고, 최대 감점 폭 `90 : 15×자리 민감도`로 섞는다
+  (AM 약 86:14 · CM 약 81:19 · ST 약 91:9). 경기 계산은 이 합산값을 쓰지 않고
+  `profFactor × famFactor`를 각각 적용한다. 전술판 칩에는 적응 게이지를 두지 않는다.
 
 ## 9. 안개 — 관측 가능성 (히든 능력치의 대체물)
 
@@ -530,7 +540,8 @@ LAM/RAM · LF/RF · LST/RST.
 | 정착 (`settlingOf`·`SETTLING_EVENT`)                                                                                            | `packages/engine/src/squad/settling.ts`                                                 |
 | 결산 반영 (`applyAttributeStep`·`positionGain`)                                                                                 | `packages/engine/src/squad/training-report.ts` · `packages/engine/src/match/ratings.ts` |
 | 심경 (`describeMood`·`MOOD_BATCH`)                                                                                              | `packages/engine/src/squad/mood.ts` ([people.md](people.md))                            |
-| 전력 팩터 (`PROFICIENCY_SPREAD`·`FAMILIARITY_SPREAD`)·상태 보정                                                                 | `packages/sim/src/strength-packet.ts` · `state-modifier.ts`                             |
+| 적응도 영향 폭(`ADAPTATION_IMPACT`)·화면 합산(`adaptationOf`)                                                                   | `packages/domain/src/tactics.ts`                                                        |
+| 전력 팩터 (`profFactor`·`famFactor`)·상태 보정                                                                                  | `packages/sim/src/strength-packet.ts` · `state-modifier.ts`                             |
 | 합성 주발 표집 (`syntheticFoot`)                                                                                                | `packages/engine/src/world/catalog.ts`                                                  |
 | 감독 초기값 (`specialtyAxesOf`)                                                                                                 | `packages/engine/src/world/onboarding.ts`                                               |
 | 화면의 안개 파생 (`slotOverall`)                                                                                                | `apps/web/lib/slot-overall.ts`                                                          |

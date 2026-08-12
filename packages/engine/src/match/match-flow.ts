@@ -822,6 +822,14 @@ export function finalizeMatch(state: GameState): string[] {
   };
   const homeLineup = participantsOf("home");
   const awayLineup = participantsOf("away");
+  const statSum = (
+    ids: readonly string[],
+    read: (line: NonNullable<typeof ledger.stats>[string]) => number,
+  ) =>
+    ids.reduce((sum, id) => {
+      const line = ledger.stats?.[id];
+      return sum + (line ? read(line) : 0);
+    }, 0);
 
   // 결과를 MATCH에 기록하고 일정 엔트리를 닫는다
   const goalEvents = ledger.events.filter((e) => e.type === "goal");
@@ -833,6 +841,12 @@ export function finalizeMatch(state: GameState): string[] {
     assists: goalEvents.map((e) => (e.actors[1] ? `${e.team}:${e.actors[1]}` : "")),
     // 분도 같은 순서로 — 장부에 이미 있는 사실이라 버릴 이유가 없다
     goalMinutes: goalEvents.map((e) => e.minute),
+    homeShots: statSum(homeLineup, (line) => line.shots),
+    awayShots: statSum(awayLineup, (line) => line.shots),
+    homeXg: statSum(homeLineup, (line) => line.xg),
+    awayXg: statSum(awayLineup, (line) => line.xg),
+    homeExpectedGoals: statSum(homeLineup, (line) => line.scoringExpectation),
+    awayExpectedGoals: statSum(awayLineup, (line) => line.scoringExpectation),
     homeLineup,
     awayLineup,
     /**

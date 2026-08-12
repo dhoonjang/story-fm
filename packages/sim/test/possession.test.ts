@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CHASE_DRAIN,
-  POSSESSION_EXPONENT,
+  POSSESSION_LOG_SENSITIVITY,
   POSSESSION_MAX,
   POSSESSION_MIN,
   buildStrengthPacket,
@@ -9,7 +9,7 @@ import {
   conditionDrain,
   possessionShare,
 } from "@story-fm/sim";
-import { DEFAULT_TACTICS } from "@story-fm/domain";
+import { DEFAULT_TACTICS, logRatioFactor } from "@story-fm/domain";
 import { makeSide, makeSquad } from "./helpers";
 
 describe("점유 — 중원 우위가 공을 쥔다", () => {
@@ -37,9 +37,13 @@ describe("점유 — 중원 우위가 공을 쥔다", () => {
   });
 
   it("점유가 기대 득점에 실린다 — 쥔 쪽은 오르고 쫓는 쪽은 내린다", () => {
-    // 존은 XI 가중 평균이라 중원만 따로 만들 수 없어 지수 계약을 직접 검증한다
-    expect(Math.pow(possessionShare(78, 62) / 0.5, POSSESSION_EXPONENT)).toBeGreaterThan(1);
-    expect(Math.pow(possessionShare(62, 78) / 0.5, POSSESSION_EXPONENT)).toBeLessThan(1);
+    // 존은 XI 가중 평균이라 중원만 따로 만들 수 없어 로그 계약을 직접 검증한다
+    expect(
+      logRatioFactor(possessionShare(78, 62) / 0.5, POSSESSION_LOG_SENSITIVITY),
+    ).toBeGreaterThan(1);
+    expect(logRatioFactor(possessionShare(62, 78) / 0.5, POSSESSION_LOG_SENSITIVITY)).toBeLessThan(
+      1,
+    );
   });
 
   it("패킷의 점유 두 몫은 서로의 거울이다", () => {

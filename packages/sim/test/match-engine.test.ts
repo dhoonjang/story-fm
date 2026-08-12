@@ -115,15 +115,14 @@ describe("구간 시뮬레이터 — 결과는 코어가 정한다", () => {
     }
   });
 
-  it("장부의 하드 제약을 시뮬레이터가 먼저 지킨다 (배치 상한·골 상한)", () => {
+  it("장부의 배치 크기를 지키되 슈팅·득점 분포는 자르지 않는다", () => {
     for (const seed of [4, 8, 21, 63]) {
-      // 기대 득점이 최대로 벌어지는 조합 — 상한에 부딪히는 경계
       const { ledger, plans } = playMatch(setup(92, 55), seed);
       for (const plan of plans) {
         expect(plan.events.length, `seed ${seed}`).toBeLessThan(LEDGER_LIMITS.maxEventsPerBatch);
       }
-      expect(ledger.score.home).toBeLessThanOrEqual(LEDGER_LIMITS.maxGoalsPerTeam);
-      expect(ledger.score.away).toBeLessThanOrEqual(LEDGER_LIMITS.maxGoalsPerTeam);
+      expect(ledger.score.home).toBeGreaterThanOrEqual(0);
+      expect(ledger.score.away).toBeGreaterThanOrEqual(0);
     }
   });
 
@@ -145,7 +144,12 @@ describe("구간 시뮬레이터 — 결과는 코어가 정한다", () => {
     const { ledger } = playMatch(setup(88, 62), 5);
     const goals = ledger.events.filter((e) => e.type === "goal");
     expect(goals.length).toBeGreaterThan(0);
-    for (const goal of goals) expect(goal.causes.length).toBeGreaterThan(0);
+    for (const goal of goals) {
+      expect(goal.causes.length).toBeGreaterThan(0);
+      expect(goal.shotOutcome).toBe("goal");
+      expect(goal.xg).toBeGreaterThan(0);
+      expect(goal.goalProbability).toBeGreaterThan(0);
+    }
   });
 
   it("득점자는 공격 자원 쪽으로 기운다 — 골키퍼는 넣지 않는다", () => {
@@ -171,7 +175,7 @@ describe("구간 시뮬레이터 — 결과는 코어가 정한다", () => {
     let weakWins = 0;
     let goalsFor = 0;
     let goalsAgainst = 0;
-    for (let seed = 0; seed < 60; seed++) {
+    for (let seed = 0; seed < 200; seed++) {
       const { ledger } = playMatch(setup(86, 68), seed);
       goalsFor += ledger.score.home;
       goalsAgainst += ledger.score.away;
@@ -244,7 +248,10 @@ describe("연장 — 구간 시뮬이 120분까지 간다", () => {
       }
       extraTimes++;
       // 연장 두 하프를 모두 지나고 120′ 이후에 끝난다
-      expect(ledger.events.some((e) => e.type === "extra_half_time"), `seed ${seed}`).toBe(true);
+      expect(
+        ledger.events.some((e) => e.type === "extra_half_time"),
+        `seed ${seed}`,
+      ).toBe(true);
       expect(shape.end!.minute, `seed ${seed}`).toBeGreaterThanOrEqual(120);
       const start = ledger.events.find((e) => e.type === "extra_time_start")!;
       expect(start.minute).toBeGreaterThanOrEqual(90);
@@ -252,7 +259,7 @@ describe("연장 — 구간 시뮬이 120분까지 간다", () => {
     expect(extraTimes).toBeGreaterThan(0);
   });
 
-  it("연장 30분은 90분보다 성기다 — 분당 골이 낮다", () => {
+  it("연장 30분은 90분보다 성기다 — 분당 슈팅이 낮다", () => {
     let regulation = 0;
     let extra = 0;
     let extraMinutes = 0;
@@ -260,9 +267,14 @@ describe("연장 — 구간 시뮬이 120분까지 간다", () => {
     for (let seed = 0; seed < 120; seed++) {
       const { ledger } = playMatch(setup(80, 80), seed, true);
       matches++;
+      let enteredExtraTime = false;
       for (const e of ledger.events) {
-        if (e.type !== "goal") continue;
-        if (e.minute > 90) extra++;
+        if (e.type === "extra_time_start") {
+          enteredExtraTime = true;
+          continue;
+        }
+        if (e.type !== "goal" && e.type !== "shot") continue;
+        if (enteredExtraTime) extra++;
         else regulation++;
       }
       if (ledger.events.some((x) => x.type === "extra_time_start")) extraMinutes += 30;
@@ -270,7 +282,7 @@ describe("연장 — 구간 시뮬이 120분까지 간다", () => {
     expect(extraMinutes).toBeGreaterThan(100); // 표본이 있어야 한다
     const perMinuteRegulation = regulation / (matches * 90);
     const perMinuteExtra = extra / extraMinutes;
-    // 눈금은 0.84배 — 난수 폭을 감안해 넉넉히 잡는다
+    // 눈금은 0.84배 — 다운스트림 골 표본이 아니라 직접 슈팅 발생률을 잰다
     expect(perMinuteExtra).toBeLessThan(perMinuteRegulation);
     expect(perMinuteExtra).toBeGreaterThan(perMinuteRegulation * 0.3);
   });
@@ -310,7 +322,12 @@ describe("AI 전술 반응", () => {
   });
 
   it("실제 선수 재배치 없이 포메이션 이름만 바꾸지 않는다", () => {
-    const shift = planAiTacticalShift("home", { ...spec, formation: "5-4-1" }, ledgerAt(45, 0, 1), true);
+    const shift = planAiTacticalShift(
+      "home",
+      { ...spec, formation: "5-4-1" },
+      ledgerAt(45, 0, 1),
+      true,
+    );
     expect(shift?.formation).toBeUndefined();
   });
 

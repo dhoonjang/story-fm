@@ -1,5 +1,5 @@
 import type { PacketPlayer, StrengthPacket } from "@story-fm/domain";
-import { anchorOf, PITCH_BANDS } from "@story-fm/domain";
+import { anchorOf, logRatioFactor, PITCH_BANDS } from "@story-fm/domain";
 
 /**
  * 판세 격자 — **세 전선을 좌·중·우로 한 번 더 쪼갠 것.**
@@ -38,6 +38,9 @@ const BAND_Y: Record<GridBand, number> = PITCH_BANDS.center;
  */
 const REACH = 46;
 
+/** 지역 공략 효율의 로그 민감도 — 최종 계수는 ±4%로 한 번 더 제한한다. */
+export const REGIONAL_LOG_SENSITIVITY = 0.12;
+
 /**
  * 사람이 적은 칸의 감점 폭 — 최대 이만큼만 깎는다.
  *
@@ -48,7 +51,12 @@ const REACH = 46;
 const THIN_PENALTY = 0.18;
 
 /** 그 칸에서 실제로 뛰는 전력 — 가까운 선수일수록 크게 친다 */
-function presence(players: readonly PacketPlayer[], lane: GridLane, band: GridBand): number {
+function presence(
+  players: readonly PacketPlayer[],
+  lane: GridLane,
+  band: GridBand,
+  metric: "effective" | "creation",
+): number {
   let weight = 0;
   let sum = 0;
   for (const p of players) {
@@ -57,7 +65,7 @@ function presence(players: readonly PacketPlayer[], lane: GridLane, band: GridBa
     const w = Math.max(0, 1 - d / REACH);
     if (w === 0) continue;
     weight += w;
-    sum += w * p.effective;
+    sum += w * (metric === "creation" ? (p.creationEffective ?? p.effective) : p.effective);
   }
   if (weight === 0) return 0;
   // 그 자리에 사람이 얼마나 붙어 있나 — 얇으면 조금 깎인다
@@ -101,14 +109,18 @@ const FACING_BAND: Record<GridBand, GridBand> = {
  * `left`는 홈의 왼쪽. 각 칸의 `away`는 그 자리에서 마주 선 원정의 전력이라
  * 이미 거울로 뒤집혀 있다.
  */
-export function zoneGrid(packet: StrengthPacket): GridCell[] {
+export function zoneGrid(
+  packet: StrengthPacket,
+  metric: "effective" | "creation" = "effective",
+): GridCell[] {
   const sideCells = (side: "home" | "away") => {
     const players = packet[side].lineup;
-    const zones = packet[side].zones;
+    const zones =
+      metric === "creation" ? (packet[side].creationZones ?? packet[side].zones) : packet[side].zones;
     const out = new Map<string, number>();
     for (const band of GRID_BANDS) {
       const raw = GRID_LANES.map((lane) => {
-        const base = presence(players, lane, band);
+        const base = presence(players, lane, band, metric);
         const plan = packet[side].regional?.find(
           (entry) => entry.band === band && entry.lane === lane,
         );
@@ -159,6 +171,6 @@ export function regionalAttackFactor(grid: readonly GridCell[], side: "home" | "
   // 상대보다 더 정확히 약한 레인을 찾은 몫만 서로 반대 방향으로 붙는다.
   const ours = routeQuality(side);
   const theirs = routeQuality(side === "home" ? "away" : "home");
-  const factor = Math.pow(ours / Math.max(0.01, theirs), 0.12);
+  const factor = logRatioFactor(ours / Math.max(0.01, theirs), REGIONAL_LOG_SENSITIVITY);
   return Math.max(0.96, Math.min(1.04, factor));
 }

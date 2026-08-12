@@ -1,9 +1,86 @@
 import { describe, expect, it } from "vitest";
 import { ATTRIBUTE_AXES } from "@story-fm/domain";
-import { buildStrengthPacket, tacticalFit, type SideInput } from "@story-fm/sim";
+import {
+  FAMILIARITY_SPREAD,
+  PROFICIENCY_SPREAD,
+  buildStrengthPacket,
+  famFactor,
+  profFactor,
+  tacticalFit,
+  type SideInput,
+} from "@story-fm/sim";
 import { makeSide } from "./helpers";
 
+describe("적응도 전력 팩터", () => {
+  it("포지션 0은 0.1이고 로그 곡선이 1≈0.2, 25≈0.6을 근사한다", () => {
+    expect(PROFICIENCY_SPREAD).toBe(0.9);
+    expect(profFactor(0)).toBe(0.1);
+    expect(profFactor(1)).toBeCloseTo(0.154067);
+    expect(profFactor(25)).toBeCloseTo(0.631337);
+    expect(profFactor(90)).toBeCloseTo(0.973159);
+    expect(profFactor(99)).toBe(1);
+  });
+
+  it("높은 구간은 평평해서 85와 95의 전력 차이는 4%p 안팎이다", () => {
+    expect(profFactor(95) - profFactor(85)).toBeGreaterThan(0);
+    expect(profFactor(95) - profFactor(85)).toBeLessThan(0.05);
+  });
+
+  it("전술은 기본 15%p에 자리 민감도를 곱한다", () => {
+    expect(FAMILIARITY_SPREAD).toBe(0.15);
+    expect(famFactor(0, "CM")).toBeCloseTo(0.79);
+    expect(famFactor(0, "ST")).toBeCloseTo(0.91);
+    expect(famFactor(100, "CM")).toBe(1);
+  });
+});
+
 describe("buildStrengthPacket", () => {
+  it("팀 총량을 먼저 나누지 않고 선수×경로 기대값의 합으로 만든다", () => {
+    const packet = buildStrengthPacket(makeSide("a", 75), makeSide("b", 75), { neutral: true });
+    for (const side of ["home", "away"] as const) {
+      const profiles = packet.guide.shotProfiles![side];
+      const shots = profiles.reduce((sum, profile) => sum + profile.expectedShots, 0);
+      const xg = profiles.reduce((sum, profile) => sum + profile.chanceXg, 0);
+      const goals = profiles.reduce((sum, profile) => sum + profile.expectedGoals, 0);
+      expect(shots).toBeCloseTo(packet.guide.expectedShots![side], 1);
+      expect(xg).toBeCloseTo(packet.guide.chanceXg![side], 1);
+      expect(goals).toBeCloseTo(packet.guide.expectedGoals[side], 1);
+      expect(profiles.every((profile) => profile.routes.length === 3)).toBe(true);
+    }
+  });
+
+  it("결정력은 슈팅 접근에 작게 이롭고, 기회 xG 자체는 바꾸지 않는다", () => {
+    const side = (finishing: number) => {
+      const input = makeSide("a", 75);
+      // 자동 공략은 높은 결정력을 전술 표적으로 삼을 수 있다. 여기서는 그 간접
+      // 효과를 끄고 슈팅 모델의 명시적인 결정력 항만 비교한다.
+      input.managerAnalysis = 65;
+      input.exploits = [];
+      const striker = input.starters.find((slot) => slot.position === "ST")!;
+      striker.player.attributes.finishing = finishing;
+      return input;
+    };
+    const opponent = () => {
+      const input = makeSide("b", 75);
+      input.exploits = [];
+      return input;
+    };
+    const low = buildStrengthPacket(side(40), opponent(), { neutral: true });
+    const high = buildStrengthPacket(side(90), opponent(), { neutral: true });
+    const strikerId = high.home.lineup.find((player) => player.position === "ST")!.id;
+    const lowProfile = low.guide.shotProfiles!.home.find(
+      (profile) => profile.playerId === strikerId,
+    )!;
+    const highProfile = high.guide.shotProfiles!.home.find(
+      (profile) => profile.playerId === strikerId,
+    )!;
+    expect(highProfile.expectedShots).toBeGreaterThan(lowProfile.expectedShots);
+    expect(highProfile.expectedShots / lowProfile.expectedShots).toBeLessThan(1.2);
+    expect(highProfile.routes.map((route) => route.meanXg)).toEqual(
+      lowProfile.routes.map((route) => route.meanXg),
+    );
+    expect(highProfile.expectedGoals).toBeGreaterThan(lowProfile.expectedGoals);
+  });
   it("강팀이 모든 존과 기대 득점에서 우위를 가진다", () => {
     const packet = buildStrengthPacket(makeSide("str", 85), makeSide("wk", 65));
     expect(packet.home.zones.attack).toBeGreaterThan(packet.away.zones.attack);

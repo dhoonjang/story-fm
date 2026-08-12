@@ -166,6 +166,12 @@ export function resolveExtraTime(state: GameState, decider: MatchRecord, channel
   result.aet = true;
   result.homeGoals += extra.homeGoals;
   result.awayGoals += extra.awayGoals;
+  result.homeShots = (result.homeShots ?? 0) + extra.homeShots;
+  result.awayShots = (result.awayShots ?? 0) + extra.awayShots;
+  result.homeXg = (result.homeXg ?? 0) + extra.homeXg;
+  result.awayXg = (result.awayXg ?? 0) + extra.awayXg;
+  result.homeExpectedGoals = (result.homeExpectedGoals ?? 0) + extra.homeExpectedGoals;
+  result.awayExpectedGoals = (result.awayExpectedGoals ?? 0) + extra.awayExpectedGoals;
   appendGoals(result, extra);
 
   // 연장 골도 시즌 기록이다 — 출전(apps)은 90분에 이미 쌓였으므로 골·도움만 얹는다

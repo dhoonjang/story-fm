@@ -1,5 +1,6 @@
 import type {
   MatchEvent,
+  PlayerShotRoute,
   MatchSide,
   MatchStatLine,
   PlayPhase,
@@ -9,8 +10,9 @@ import type {
 } from "@story-fm/domain";
 import { PHASE_END, PHASE_START, positionGroupOfPlayer } from "@story-fm/domain";
 import { directiveDrain, type DirectiveInput } from "./directives";
-import { LEDGER_LIMITS, subLimitsOf, type MatchLedgerState } from "./match-ledger";
+import { subLimitsOf, type MatchLedgerState } from "./match-ledger";
 import { conditionDrain, drainVariance } from "./stamina";
+import { sampleShot } from "./shot-model";
 
 /**
  * 구간 시뮬레이터 — **경기 결과를 정하는 곳**.
@@ -19,7 +21,7 @@ import { conditionDrain, drainVariance } from "./stamina";
  * 결과가 "패킷이라는 권고 × 모델의 준수 의지"였고, 감독의 지시가 수치를 거치지
  * 않고 곧바로 스코어로 새어 들어갔다. 이제 순서를 뒤집는다:
  *
- *   패킷(기대 득점) → **코어가 구간을 굴려 사건을 확정** → 장부 기록 → LLM이 중계
+ *   패킷(선수×경로 슈팅 분포) → **코어가 슛·xG·결정력·결과를 확정** → 장부 → LLM 중계
  *
  * LLM은 결과를 만들지 않고 이미 일어난 일을 이야기한다. 감독의 지시는
  * `buildStrengthPacket`을 통해서만 결과에 닿는다 — 그 경로가 유일해야 지시가
@@ -117,14 +119,6 @@ const MAX_SEGMENT_MINUTES = 25;
 const MAX_SEGMENT_EVENTS = 15;
 
 /**
- * 사건 발생률 (분당) — 기대 득점에서 파생한다.
- *
- * 실제 축구의 비율을 기준선으로 잡았다: 골 1.4 / 유효슛+찬스 ~11 / 파울 ~22 /
- * 경고 ~3.5 / 부상 0.15 per match. 골률만 패킷에서 오고 나머지는 골률과 강도에
- * 비례한다 — 압박·템포를 올리면 카드와 부상이 함께 늘어나는 게 그 대가다.
- */
-const SHOTS_PER_GOAL = 7;
-/**
  * 경기당 기대 카드 수 — 양팀 합. **카드 빈도의 단일 손잡이다.**
  *
  * 간이 시뮬(`engine/quick-sim.ts`)도 이 값에서 나온다 — 두 시뮬레이터가 다른
@@ -146,20 +140,20 @@ export const CARDS_PER_MATCH = 3.4;
 export const INJURY_PER_MATCH = 0.1;
 
 interface Rates {
-  goal: { home: number; away: number };
   shot: { home: number; away: number };
   card: { home: number; away: number };
   injury: { home: number; away: number };
 }
 
 function ratesOf(packet: StrengthPacket): Rates {
-  const xg = packet.guide.expectedGoals;
+  const shots = packet.guide.expectedShots ?? {
+    home: packet.guide.shotProfiles?.home.reduce((sum, p) => sum + p.expectedShots, 0) ?? 0,
+    away: packet.guide.shotProfiles?.away.reduce((sum, p) => sum + p.expectedShots, 0) ?? 0,
+  };
   const it = packet.guide.intensity;
   const per = (v: number) => v / 90;
   return {
-    goal: { home: per(xg.home), away: per(xg.away) },
-    // 슛·찬스는 골의 부산물 — 골률이 낮은 팀도 두드리기는 한다
-    shot: { home: per(xg.home * SHOTS_PER_GOAL), away: per(xg.away * SHOTS_PER_GOAL) },
+    shot: { home: per(shots.home), away: per(shots.away) },
     // 카드·부상은 **자기 강도**에 비례한다 (거칠게 밀어붙이면 자기가 카드를 받는다)
     card: {
       home: per(CARDS_PER_MATCH * 0.5 * it.home),
@@ -172,13 +166,11 @@ function ratesOf(packet: StrengthPacket): Rates {
   };
 }
 
-type EventKind = "goal" | "shot" | "card" | "injury";
+type EventKind = "shot" | "card" | "injury";
 
 /** 가중 추첨 — 사건 종류와 팀을 한 번에 고른다 */
 function pickEvent(rng: () => number, rates: Rates): { kind: EventKind; side: MatchSide } {
   const table: Array<{ kind: EventKind; side: MatchSide; weight: number }> = [
-    { kind: "goal", side: "home", weight: rates.goal.home },
-    { kind: "goal", side: "away", weight: rates.goal.away },
     { kind: "shot", side: "home", weight: rates.shot.home },
     { kind: "shot", side: "away", weight: rates.shot.away },
     { kind: "card", side: "home", weight: rates.card.home },
@@ -198,8 +190,6 @@ function pickEvent(rng: () => number, rates: Rates): { kind: EventKind; side: Ma
 
 function totalRate(rates: Rates): number {
   return (
-    rates.goal.home +
-    rates.goal.away +
     rates.shot.home +
     rates.shot.away +
     rates.card.home +
@@ -226,29 +216,23 @@ function weightedPick(
   return candidates[candidates.length - 1]!;
 }
 
+function weightedRoute(
+  rng: () => number,
+  routes: readonly PlayerShotRoute[],
+): PlayerShotRoute | null {
+  if (routes.length === 0) return null;
+  const total = routes.reduce((sum, route) => sum + Math.max(0, route.expectedShots), 0);
+  if (total <= 0) return null;
+  let roll = rng() * total;
+  for (const route of routes) {
+    roll -= Math.max(0, route.expectedShots);
+    if (roll <= 0) return route;
+  }
+  return routes[routes.length - 1] ?? null;
+}
+
 const outfield = (squad: SegmentSquad, gone: ReadonlySet<string> = new Set()) =>
   squad.onPitch.filter((p) => positionGroupOfPlayer(p) !== "GK" && !gone.has(p.id));
-
-/**
- * 득점자 — 결정력 × 자리 가중 × **그 선수가 지금 내는 전력**.
- *
- * 유효 전력을 섞는 이유: 낯선 자리에 세워졌거나 전술이 안 익은 선수, 지친 선수는
- * 골을 넣을 확률도 낮아야 한다. 그러지 않으면 감독의 배치가 스코어에는 닿아도
- * **누가 넣는가**에는 닿지 않아, 중계가 늘 같은 이름을 부른다.
- */
-function pickScorer(
-  rng: () => number,
-  squad: SegmentSquad,
-  gone?: ReadonlySet<string>,
-  effective?: ReadonlyMap<string, number>,
-): Player | null {
-  return weightedPick(rng, outfield(squad, gone), (p) => {
-    const group = positionGroupOfPlayer(p);
-    const positional = group === "FW" ? 3 : group === "MF" ? 1.2 : 0.4;
-    const form = (effective?.get(p.id) ?? 70) / 70;
-    return p.attributes.finishing * positional * form;
-  });
-}
 
 /** 도움 — 시야·패스. 모든 골에 붙지는 않는다 (단독 돌파·PK) */
 const ASSIST_RATE = 0.68;
@@ -280,33 +264,9 @@ function daring(p: Player): number {
   return Math.max(0.65, Math.min(1.4, 0.7 + (drive - 45) / 67));
 }
 
-/**
- * 슛 하나의 **기대 득점** — 결정력과 자리, 그리고 그 장면의 종류가 정한다.
- *
- * 찬스(마무리 전)는 낮고 실제 슛은 그보다 높으며 들어간 슛은 더 높다 — 다만
- * **낮은 xg를 넣는 일도 있어야** 한다(0.05를 밀어 넣는 골이 축구엔 늘 있다).
- * 그래서 종류로 구간을 정하고 그 안에서 흔든다.
- */
-function shotXg(
-  rng: () => number,
-  kind: "chance" | "shot" | "goal",
-  shooter: Player | null,
-): number {
-  const finishing = (shooter?.attributes.finishing ?? 60) / 99;
-  /**
-   * 눈금은 실제 축구에 맞춘다 — **슛 하나의 평균 xG는 0.1 언저리**이고, 들어간
-   * 슛이라고 크게 높지 않다(0.3 안팎). 여기가 부풀면 슛 세 개에 xG 1.7 같은
-   * 값이 나와 "기회를 얼마나 만들었나"라는 물음 자체가 무의미해진다.
-   */
-  const base = kind === "chance" ? 0.02 : kind === "shot" ? 0.04 : 0.12;
-  const spread = kind === "chance" ? 0.06 : kind === "shot" ? 0.14 : 0.34;
-  const value = base + rng() * spread * (0.7 + finishing * 0.6);
-  return Math.round(Math.min(0.95, value) * 100) / 100;
-}
-
 /** 빈 기록 한 줄 */
 function emptyLine(): MatchStatLine {
-  return { passes: 0, progressive: 0, shots: 0, xg: 0, saves: 0 };
+  return { passes: 0, progressive: 0, shots: 0, xg: 0, scoringExpectation: 0, saves: 0 };
 }
 
 function pickAssister(
@@ -424,14 +384,14 @@ function stoppageTime(rng: () => number, phase: PlayPhase): number {
  * 간이 시뮬(`engine/quick-sim.ts`의 `EXTRA_TIME_RATE`)과 **같은 눈금**이다 —
  * 갈리면 우리 연장만 조용하거나 시끄러워진다.
  */
-export const EXTRA_TIME_GOAL_SHARE = 0.28;
+export const EXTRA_TIME_SHOT_SHARE = 0.28;
 
 /**
  * 연장의 **분당** 발생률 배수 — 30분에 90분의 0.28배를 내려면 분당은 0.84배다.
  * 카드·부상은 그대로 둔다: 지친 다리는 덜 뛰지만 덜 거칠지는 않다.
  */
 const EXTRA_TIME_DENSITY =
-  (EXTRA_TIME_GOAL_SHARE * PHASE_END.second_half) /
+  (EXTRA_TIME_SHOT_SHARE * PHASE_END.second_half) /
   (PHASE_END.extra_second - PHASE_END.second_half);
 
 /**
@@ -461,10 +421,6 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
       (d) => [d.by, directiveDrain(d.kind)] as const,
     ),
   );
-  /** 선수 id → 지금 내는 전력 (패킷이 이미 계산해 명단에 실어 보낸다) */
-  const effective = new Map(
-    [...packet.home.lineup, ...packet.away.lineup].map((p) => [p.id, p.effective] as const),
-  );
   const events: MatchEvent[] = [];
   const fatigue: Record<string, number> = {};
   const rates = ratesOf(packet);
@@ -483,9 +439,8 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
   /** 지금 굴리는 국면 — 종료된 장부는 호출부가 이미 막는다 */
   const phase: PlayPhase = ledger.phase === "finished" ? "second_half" : ledger.phase;
   if (phase === "extra_first" || phase === "extra_second") {
-    // 연장은 골이 성기다 — 슛도 골에서 파생하므로 함께 내린다
+    // 연장은 슈팅 생성 자체가 성기다. 골은 그 슈팅의 결과로만 나온다.
     for (const side of ["home", "away"] as const) {
-      rates.goal[side] *= EXTRA_TIME_DENSITY;
       rates.shot[side] *= EXTRA_TIME_DENSITY;
     }
   }
@@ -536,8 +491,13 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
      */
     if (events.length === 0) {
       const side: MatchSide =
-        rng() * (rates.goal.home + rates.goal.away) < rates.goal.home ? "home" : "away";
-      const who = pickScorer(rng, squadOf(side), gone, effective);
+        rng() * (rates.shot.home + rates.shot.away) < rates.shot.home ? "home" : "away";
+      const profiles = packet.guide.shotProfiles?.[side] ?? [];
+      const who = weightedPick(
+        rng,
+        outfield(squadOf(side), gone),
+        (player) => profiles.find((profile) => profile.playerId === player.id)?.expectedShots ?? 0,
+      );
       events.push({
         minute: Math.max(1, minute),
         type: "chance",
@@ -616,8 +576,6 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
     away: { ...ledger.away.yellows },
   };
   const gone = new Set<string>(ledger.sentOff);
-  /** 이 구간에 넣은 골 — 장부 상한 검사에 쓴다 */
-  const scored: Record<MatchSide, number> = { home: 0, away: 0 };
   const rate = totalRate(rates);
 
   // 사건 사이의 시간은 지수분포 — 발생률이 높으면 사건이 촘촘해진다
@@ -652,51 +610,42 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
     const drawn = pickEvent(rng, rates);
     const side = drawn.side;
     const squad = squadOf(side);
-    // 장부의 팀당 골 상한을 시뮬레이터가 먼저 안다 — 넘길 골은 슛으로 바꾼다.
-    // (모르면 배치가 통째로 반려돼 경기가 그 자리에서 멈춘다)
-    const cap =
-      ledger.score[side] + scored[side] >= LEDGER_LIMITS.maxGoalsPerTeam && drawn.kind === "goal";
-    const kind: EventKind = cap ? "shot" : drawn.kind;
-
-    if (kind === "goal") {
-      const scorer = pickScorer(rng, squad, gone, effective);
-      if (!scorer) continue;
-      const assister = pickAssister(rng, squad, scorer.id, gone);
-      const xg = shotXg(rng, "goal", scorer);
-      events.push({
-        minute,
-        type: "goal",
-        team: side,
-        actors: assister ? [scorer.id, assister.id] : [scorer.id],
-        causes: causesFor(packet, side),
-        xg,
-      });
-      const line = lineOf(scorer.id);
-      line.shots += 1;
-      line.xg = Math.round((line.xg + xg) * 100) / 100;
-      scored[side] += 1;
-      return finish("goal", minute);
-    }
+    const kind: EventKind = drawn.kind;
 
     if (kind === "shot") {
-      const shooter = pickScorer(rng, squad, gone, effective);
+      const profiles = packet.guide.shotProfiles?.[side] ?? [];
+      const candidates = outfield(squad, gone);
+      const shooter = weightedPick(
+        rng,
+        candidates,
+        (player) => profiles.find((profile) => profile.playerId === player.id)?.expectedShots ?? 0,
+      );
       if (!shooter) continue;
-      // 슛과 찬스(마무리 전 단계), 그리고 그중 일부는 GK 선방으로 이어진다
-      const isShot = rng() < 0.62;
-      const xg = shotXg(rng, isShot ? "shot" : "chance", shooter);
+      const profile = profiles.find((item) => item.playerId === shooter.id);
+      if (!profile) continue;
+      const route = weightedRoute(rng, profile.routes);
+      if (!route) continue;
+      const sampled = sampleShot(rng, route, shooter.attributes.finishing);
+      const isGoal = sampled.outcome === "goal";
+      const assister = isGoal ? pickAssister(rng, squad, shooter.id, gone) : null;
       events.push({
         minute,
-        type: isShot ? "shot" : "chance",
+        type: isGoal ? "goal" : "shot",
         team: side,
-        actors: [shooter.id],
-        causes: [],
-        xg,
+        actors: isGoal && assister ? [shooter.id, assister.id] : [shooter.id],
+        causes: isGoal ? causesFor(packet, side) : [],
+        xg: sampled.xg,
+        goalProbability: sampled.goalProbability,
+        shotOutcome: sampled.outcome,
       });
       const line = lineOf(shooter.id);
-      // 찬스는 마무리 전 단계라 슛으로 세지 않는다 — xg는 만들어 낸 몫이라 쌓는다
-      if (isShot) line.shots += 1;
-      line.xg = Math.round((line.xg + xg) * 100) / 100;
-      if (isShot && rng() < 0.45) {
+      line.shots += 1;
+      line.xg += sampled.xg;
+      line.scoringExpectation += sampled.goalProbability;
+      if (isGoal) {
+        return finish("goal", minute);
+      }
+      if (sampled.outcome === "saved") {
         const keeper = squadOf(side === "home" ? "away" : "home").onPitch.find(
           (p) => positionGroupOfPlayer(p) === "GK" && !gone.has(p.id),
         );

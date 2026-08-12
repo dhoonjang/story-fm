@@ -116,7 +116,7 @@ describe("경기 장부 검증 (match-sim.md §4)", () => {
     }
   });
 
-  it("팀당 6골 상한 — 7번째 골은 반려된다", () => {
+  it("득점 결과를 임의 상한으로 자르지 않는다 — 7번째 골도 기록된다", () => {
     let state = createLedger(home, away);
     for (let n = 0; n < 6; n++) {
       const r = applyEvents(state, [
@@ -128,8 +128,8 @@ describe("경기 장부 검증 (match-sim.md §4)", () => {
     const seventh = applyEvents(state, [
       ev({ minute: 80, type: "goal", team: "home", actors: ["hm-fw1"] }),
     ]);
-    expect(seventh.ok).toBe(false);
-    if (!seventh.ok) expect(seventh.errors[0]).toContain("상한");
+    expect(seventh.ok).toBe(true);
+    if (seventh.ok) expect(seventh.state.score.home).toBe(7);
   });
 
   it("하프타임 없이 full_time은 불가하고, 순서를 지키면 종료된다", () => {

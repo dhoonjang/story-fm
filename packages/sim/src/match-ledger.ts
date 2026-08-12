@@ -42,12 +42,21 @@ export function addStats(
 ): MatchLedgerState {
   const stats = { ...(state.stats ?? {}) };
   for (const [id, line] of Object.entries(add)) {
-    const before = stats[id] ?? { passes: 0, progressive: 0, shots: 0, xg: 0, saves: 0 };
+    const before = stats[id] ?? {
+      passes: 0,
+      progressive: 0,
+      shots: 0,
+      xg: 0,
+      scoringExpectation: 0,
+      saves: 0,
+    };
     stats[id] = {
       passes: before.passes + line.passes,
       progressive: before.progressive + line.progressive,
       shots: before.shots + line.shots,
       xg: Math.round((before.xg + line.xg) * 100) / 100,
+      scoringExpectation:
+        Math.round(((before.scoringExpectation ?? 0) + line.scoringExpectation) * 100) / 100,
       saves: before.saves + line.saves,
     };
   }
@@ -58,7 +67,6 @@ export type ApplyResult = { ok: true; state: MatchLedgerState } | { ok: false; e
 
 /** 하드 상한 — 비상식 방지 (match-sim.md §4). 수치는 balance.md에서 튜닝 */
 export const LEDGER_LIMITS = {
-  maxGoalsPerTeam: 6,
   maxEventsPerBatch: 20,
   maxSubs: 5,
   maxSubWindows: 3,
@@ -244,11 +252,7 @@ function applyOne(state: MatchLedgerState, ev: MatchEvent, i: number): string | 
         const err = requireOnPitch(actor);
         if (err) return err;
       }
-      const nextScore = state.score[ev.team] + 1;
-      if (nextScore > LEDGER_LIMITS.maxGoalsPerTeam) {
-        return `${label(i, ev)}: 팀당 ${LEDGER_LIMITS.maxGoalsPerTeam}골 상한 초과 — 비상식적 스코어입니다`;
-      }
-      state.score[ev.team] = nextScore;
+      state.score[ev.team] += 1;
       break;
     }
 

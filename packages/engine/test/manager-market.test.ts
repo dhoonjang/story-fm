@@ -4,6 +4,7 @@ import {
   allMatchesDone,
   computeStandings,
   isTopFlight,
+  reviewUserSeat,
   USER_WARNINGS_BEFORE_SACK,
   type GameState,
 } from "@story-fm/engine";
@@ -58,22 +59,44 @@ describe("AI 구단은 성적으로 감독을 자른다", () => {
   it("잔류가 기대인 구단도 잘릴 수 있다 — 차이로만 재면 하위 팀은 영원히 안 잘린다", () => {
     // tier 4(잔류 기대)는 꼴찌를 해도 기대 순위와의 차이가 3뿐이라, 예전 규칙에선
     // **강등권 구단의 감독이 절대 안 잘렸다**. 지금은 등급마다 자리를 직접 적는다
-    const lower = state.teams.filter(
-      (t) => isTopFlight(t.id) && t.managerName !== undefined,
-    );
+    const lower = state.teams.filter((t) => isTopFlight(t.id) && t.managerName !== undefined);
     expect(lower.length).toBeGreaterThan(0);
   });
 });
 
 describe("감독도 잘린다 — 다만 경고가 먼저다", () => {
   it("성적이 기대에 못 미치면 보드가 경고하고, 끝내 경질된다", () => {
-    // 아스날(tier 1 — 우승 경쟁 기대)을 mock으로 돌리면 중위권에 머문다
     const state = createTestGame(7);
-    playSeason(state);
-    // 경고가 쌓였거나 경질됐거나 — 둘 중 하나는 반드시 일어난다
-    const warned = (state.manager.boardWarnings ?? 0) > 0 || state.dismissal !== undefined;
-    expect(warned).toBe(true);
-  }, 300_000);
+    // 경기 모델의 밸런스에 기대지 않고, 우승 경쟁 팀이 12연패한 장부를 만든다.
+    // 경고 시스템의 테스트가 슈팅 모델 보정에 따라 우연히 통과·실패하면 안 된다.
+    const ours = state.matches
+      .filter(
+        (m) =>
+          m.competitionId === "epl" &&
+          (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+      )
+      .slice(0, 12);
+    for (const match of ours) {
+      match.result = {
+        homeGoals: match.homeTeamId === state.userTeamId ? 0 : 1,
+        awayGoals: match.awayTeamId === state.userTeamId ? 0 : 1,
+        scorers: [],
+      };
+    }
+
+    state.date = "2027-01-01";
+    expect(reviewUserSeat(state, [])).toBe(false);
+    expect(state.manager.boardWarnings).toBe(1);
+
+    state.date = "2027-02-01";
+    expect(reviewUserSeat(state, [])).toBe(false);
+    expect(state.manager.boardWarnings).toBe(2);
+
+    state.manager.reputation.board = 25;
+    state.date = "2027-03-04";
+    expect(reviewUserSeat(state, [])).toBe(true);
+    expect(state.dismissal?.teamId).toBe(state.userTeamId);
+  });
 
   it("경질되면 시계가 멈춘다 — 더 이상 그 구단의 사람이 아니다", () => {
     const state = createTestGame(7);

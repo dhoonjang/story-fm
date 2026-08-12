@@ -1,9 +1,9 @@
 /**
  * 전력 분석 패킷 — 코어가 결정적으로 계산하는 **경기의 판세**.
  *
- * v2(2026-08-07)부터 이 패킷은 "LLM에게 주는 힌트"가 아니라 **결과를 정하는
- * 수치**다. 기대 득점(`guide.expectedGoals`)이 구간 시뮬레이터의 발생률이 되고,
- * 사건(골·카드·부상)은 코어가 굴린다. LLM은 그 사건을 중계·연출한다
+ * 이 패킷은 "LLM에게 주는 힌트"가 아니라 **결과를 정하는 수치**다. 선수×경로
+ * 슈팅 프로필(`guide.shotProfiles`)이 두 시뮬레이터의 발생률 원본이고, 사건은
+ * 코어가 굴린다. LLM은 그 사건을 중계·연출한다
  * (match-sim.md §1·§2). 숫자와 한국어 해석을 함께 담는 이유는 그대로다 —
  * 중계와 원인 태그가 같은 문장을 인용해야 "왜 그렇게 됐는지"가 설명된다.
  */
@@ -66,20 +66,49 @@ export interface PacketPlayer {
   roleId?: string;
   /** 이 자리에서 지금 내는 전력 (상태·적응도 반영) */
   effective: number;
+  /**
+   * 기회 생성에 쓰는 전력. 실제 결정력은 리그 기준값으로 치환하고 나머지
+   * 역할·상태·적응도만 반영한다 — 결정력의 슈팅 접근 효과는 별도 항에서 한 번만 센다.
+   */
+  creationEffective?: number;
   fit: {
     /** 포지션 적응도 0~99 */
     position: number;
-    /** 전술 적응도 0~99 */
+    /** 전술 적응도 0~100 */
     tactical: number;
     /** 이 자리가 전술 적응에 얼마나 민감한가 (0.6~1.4) */
     sensitivity: number;
   };
 }
 
+export type ShotRoute = "left" | "center" | "right";
+
+/** 한 선수가 한 공격 경로에서 갖는 90분 슈팅 분포. */
+export interface PlayerShotRoute {
+  route: ShotRoute;
+  /** 이 경로에서의 90분 기대 슈팅 수 — 포아송 강도. */
+  expectedShots: number;
+  /** 이 경로에서 만들어지는 슛 하나의 평균 기회 xG. */
+  meanXg: number;
+}
+
+/** 팀 총량을 나누지 않고 선수×지역에서 직접 만든 슈팅 프로필. */
+export interface PlayerShotProfile {
+  playerId: string;
+  routes: PlayerShotRoute[];
+  expectedShots: number;
+  /** 생성 레이어의 기대값 Σ(경로 기대 슈팅 × 평균 xG). */
+  chanceXg: number;
+  /** 결정력을 반영한 기대 득점. */
+  expectedGoals: number;
+}
+
 export interface SidePacket {
   teamId: string;
   teamName: string;
   zones: ZoneStrength;
+  /** 결정력을 중립화한 기회 생성용 존 전력. */
+  creationZones?: ZoneStrength;
   /** 감독 전술 능력치가 만든 전술 소화율 계수 (attribute-model.md §7) */
   tacticalFit: number;
   /** 전술 지시의 반영 — 적용률과 이득·대가 (설명 가능성) */
@@ -139,11 +168,14 @@ export interface StrengthPacket {
    */
   targets: ExploitTarget[];
   guide: {
-    /**
-     * 90분 기대 득점 — **구간 시뮬레이터의 분당 발생률 원본**이다(÷90).
-     * 힌트가 아니라 결과를 만드는 수치다.
-     */
+    /** 선수별 프로필의 결정력 반영 기대 득점을 합친 90분 판독값. */
     expectedGoals: { home: number; away: number };
+    /** 선수×경로 기대 슈팅의 합. 새 패킷은 항상 갖고, 진행 중인 옛 세이브에는 없다. */
+    expectedShots?: { home: number; away: number };
+    /** 결정력을 넣기 전 기회 xG의 합. */
+    chanceXg?: { home: number; away: number };
+    /** 선수별·공격 경로별 슈팅 분포 — 구간/간이 시뮬의 공통 원본. */
+    shotProfiles?: { home: PlayerShotProfile[]; away: PlayerShotProfile[] };
     /**
      * 공을 쥐는 비율 (0.35~0.65) — **중원 우위가 정한다.**
      * 기대 득점에 실리고, 공 없는 팀의 체력 소모를 키운다.

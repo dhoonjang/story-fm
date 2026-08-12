@@ -316,7 +316,7 @@ describe("적응도 — 포지션과 전술을 하나로", () => {
     // 합친 값은 두 축 사이 — 어느 쪽으로도 튀지 않는다
     expect(row.adaptation).toBeGreaterThan(Math.min(row.familiarity, row.positionFit) - 1);
     expect(row.adaptation).toBeLessThan(Math.max(row.familiarity, row.positionFit) + 1);
-    expect(row.adaptation).toBe(adaptationOf(row.positionFit, row.familiarity));
+    expect(row.adaptation).toBe(adaptationOf(row.positionFit, row.familiarity, target.position));
   });
 
   it("전술 적응이 오르면 합친 값도 오른다 (같은 자리에서)", () => {

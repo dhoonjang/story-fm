@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { clusterOf, positionDistance, positionProficiency } from "../src/index";
+import {
+  ADAPTATION_IMPACT,
+  PROFICIENCY_FACTOR_FLOOR,
+  PROFICIENCY_FLOOR,
+  PROFICIENCY_LOG_SCALE,
+  PROFICIENCY_MAX,
+  PROFICIENCY_MIN,
+  adaptationOf,
+  adaptationWeightsOf,
+  clusterOf,
+  positionDistance,
+  positionProficiency,
+  proficiencyReadiness,
+} from "../src/index";
 
 /**
  * 포지션 적응도의 단일 규칙 (attribute-model.md §1) — 엔진 `proficiencyAt`과 웹
@@ -15,6 +28,7 @@ const held = (position: string, proficiency: number) => [{ position, proficiency
 describe("positionProficiency", () => {
   it("보유한 자리는 그 값을 그대로 준다", () => {
     expect(positionProficiency(held("RW", 91), "RW")).toBe(91);
+    expect(positionProficiency(held("RW", 1), "RW")).toBe(1);
     expect(positionProficiency(held("rw", 91), "RW")).toBe(91); // 대소문자 무관
   });
 
@@ -110,5 +124,34 @@ describe("positionProficiency", () => {
     expect(clusterOf("LB")).toContain("LWB");
     expect(clusterOf("RM")).toContain("RW");
     expect(clusterOf("LM")).toContain("LW");
+  });
+});
+
+describe("adaptationOf", () => {
+  it("경기 팩터와 같은 기본 영향 폭을 쓴다", () => {
+    expect(ADAPTATION_IMPACT).toEqual({ position: 0.9, tactical: 0.15 });
+    expect(PROFICIENCY_FACTOR_FLOOR).toBe(0.1);
+    expect(PROFICIENCY_LOG_SCALE).toBe(5);
+    expect(PROFICIENCY_FLOOR).toBe(25);
+    expect(PROFICIENCY_MIN).toBe(0);
+    expect(PROFICIENCY_MAX).toBe(99);
+    expect(adaptationWeightsOf("AM").position).toBeCloseTo(6 / 7);
+    expect(adaptationWeightsOf("AM").tactical).toBeCloseTo(1 / 7);
+  });
+
+  it("경기에서 온전한 두 값은 화면에서도 100이다", () => {
+    expect(adaptationOf(99, 100, "ST")).toBe(100);
+  });
+
+  it("포지션 준비도는 로그 곡선이라 낮은 구간을 벌리고 높은 구간은 평평하다", () => {
+    expect(proficiencyReadiness(0)).toBe(0.1);
+    expect(proficiencyReadiness(99)).toBe(1);
+    expect(proficiencyReadiness(1)).toBeCloseTo(0.154067);
+    expect(proficiencyReadiness(25)).toBeCloseTo(0.631337);
+    expect(proficiencyReadiness(95) - proficiencyReadiness(85)).toBeLessThan(0.05);
+  });
+
+  it("전술 적응 부족은 중원이 최전방보다 크게 보인다", () => {
+    expect(adaptationOf(90, 40, "CM")).toBeLessThan(adaptationOf(90, 40, "ST"));
   });
 });

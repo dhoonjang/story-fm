@@ -6,8 +6,10 @@ import {
   footAdjust,
   isMirrorPair,
   positionGroupOf,
+  tacticalSensitivityOf,
   type Foot,
 } from "./player";
+import { normalizedLogCurve, reflectedLogCurve } from "./log-curves";
 
 /**
  * 적응도의 저장 형태 — **소수를 담는다** (`RatingSchema`는 정수라 여기 쓸 수 없다).
@@ -419,23 +421,66 @@ const CLUSTER_PENALTY = 2;
  * 바닥값 — 아무리 생소해도 프로 선수는 이만큼은 한다.
  * 필드↔골문 경계도 이 값을 쓴다(거리로 잴 수 없는, 사실상 다른 종목이다).
  */
-const PROFICIENCY_FLOOR = 25;
+export const PROFICIENCY_FLOOR = 25;
+
+/** 포지션 적응도 스키마의 하한. 로그 곡선은 이 값부터 시작한다. */
+export const PROFICIENCY_MIN = 0;
+
+/** 포지션 적응도의 저장 상한. 이 값에서만 `profFactor`가 정확히 1이다. */
+export const PROFICIENCY_MAX = 99;
+
+/** 적응도 0도 프로 선수의 최소 기여는 남긴다. */
+export const PROFICIENCY_FACTOR_FLOOR = 0.1;
+
+/** 로그 곡선의 휨을 정하는 눈금. 작을수록 초반이 더 가파르다. */
+export const PROFICIENCY_LOG_SCALE = 5;
+
+/** 경기에서 두 적응도가 만들 수 있는 기본 최대 감점 폭 — 화면과 sim의 공통 원본. */
+export const ADAPTATION_IMPACT = {
+  position: 1 - PROFICIENCY_FACTOR_FLOOR,
+  tactical: 0.15,
+} as const;
 
 /**
- * **적응도 하나로 합친 값** — "이 선수가 지금 이 자리·이 전술에서 얼마나 준비됐나".
- *
- * 두 축은 성질이 다르지만 결과에는 **같은 방식으로**(그 선수의 전력에 곱해져)
- * 닿는다. 폭도 비슷하다 — 포지션 적응은 0.88~1.00(12%p), 전술 적응은
- * 0.85~1.00(15%p). 그래서 화면 한 칸에 합칠 때는 **영향 폭에 비례해** 섞는다.
- * 눈금 하나가 어느 축에서 오든 전력에 같은 무게가 되도록.
- *
- * 분해한 값은 툴팁이 말한다 — 합친 수치만 두면 "왜 낮은지"를 알 수 없다.
+ * 포지션 적응도의 표시·전력 공통 곡선 — 스키마 하한 0에서 0.1, 상한 99에서 1.
+ * `log1p` 곡선이라 초반은 가파르고 높은 구간은 평평하다.
  */
-export const ADAPTATION_WEIGHTS = { position: 12 / 27, tactical: 15 / 27 } as const;
+export function proficiencyReadiness(proficiency: number): number {
+  const clamped = Math.min(PROFICIENCY_MAX, Math.max(PROFICIENCY_MIN, proficiency));
+  return (
+    PROFICIENCY_FACTOR_FLOOR +
+    (1 - PROFICIENCY_FACTOR_FLOOR) *
+      normalizedLogCurve(clamped / PROFICIENCY_MAX, PROFICIENCY_MAX / PROFICIENCY_LOG_SCALE)
+  );
+}
 
-export function adaptationOf(positionProficiency: number, familiarity: number): number {
+/**
+ * 그 자리에서 두 적응도가 차지하는 표시 가중치.
+ * 전술 쪽은 경기와 똑같이 자리 민감도를 기본 15%p에 곱한다.
+ */
+export function adaptationWeightsOf(position: string): { position: number; tactical: number } {
+  const positionImpact = ADAPTATION_IMPACT.position;
+  const tacticalImpact = ADAPTATION_IMPACT.tactical * tacticalSensitivityOf(position);
+  const total = positionImpact + tacticalImpact;
+  return { position: positionImpact / total, tactical: tacticalImpact / total };
+}
+
+/**
+ * **적응도 하나로 합친 표시값** — "이 선수가 지금 이 자리·이 전술에서 얼마나 준비됐나".
+ *
+ * 포지션은 경기와 같은 로그 곡선으로 정규화하고, 두 팩터의 최대 감점 폭에
+ * 비례해 섞는다. 경기 계산은 이 값을 쓰지 않고 `profFactor × famFactor`를 적용한다.
+ */
+export function adaptationOf(
+  positionProficiency: number,
+  familiarity: number,
+  position: string,
+): number {
+  const weights = adaptationWeightsOf(position);
+  const positionReadiness = proficiencyReadiness(positionProficiency);
+  const tacticalReadiness = Math.min(1, Math.max(0, familiarity) / FAMILIARITY_MAX);
   return Math.round(
-    positionProficiency * ADAPTATION_WEIGHTS.position + familiarity * ADAPTATION_WEIGHTS.tactical,
+    (positionReadiness * weights.position + tacticalReadiness * weights.tactical) * 100,
   );
 }
 
@@ -497,7 +542,7 @@ export function positionProficiency(
   return clampRating(best + adjust);
 }
 
-const clampRating = (v: number) => Math.max(PROFICIENCY_FLOOR, Math.min(99, Math.round(v)));
+const clampRating = (v: number) => Math.max(PROFICIENCY_MIN, Math.min(99, Math.round(v)));
 
 /** 포메이션 프리셋 — 자유 배치의 **출발점**. 좌표가 코드를 정하므로 code는 파생 */
 export const FORMATION_LAYOUTS: Record<Formation, ReadonlyArray<BoardPoint>> = {
@@ -714,7 +759,7 @@ export const TacticAssignmentSchema = z.object({
    */
   roleId: z.string().min(1).optional(),
   /**
-   * 이 전술에 대한 적응도 0~99 — 훈련(tactical)·출전으로 상승, 전술 변경 시 하락.
+   * 이 전술에 대한 적응도 0~100 — 훈련(tactical)·출전으로 상승, 전술 변경 시 하락.
    *
    * **소수다.** 위로 갈수록 한 번의 판정이 1보다 작아지므로(`applyFamiliarityGain`)
    * 정수로 자르면 90 위에서 아무리 훈련해도 값이 멈춘다. 화면은 반올림해 보여 준다.
@@ -816,14 +861,16 @@ const GAIN_EARLY_BOOST = 1;
 /** 이 값을 판정이 올려 주는 경로 — 훈련장인가 경기장인가 */
 export type FamiliaritySource = "training" | "match";
 
-const GAIN_CURVE: Record<FamiliaritySource, { fullUpto: number; ceiling: number; curve: number }> =
-  {
-    // 훈련 — 65까지 전액, 위로 갈수록 무뎌지고 96 언저리가 사실상 천장이다.
-    // 95까지는 훈련장에서도 닿는다: 감독이 한 전술을 파고들면 보상이 있어야 한다
-    training: { fullUpto: 65, ceiling: 98, curve: 1.55 },
-    // 경기 — 62까지 전액, 위에서도 남아 있어 100을 여는 유일한 문이다
-    match: { fullUpto: 62, ceiling: FAMILIARITY_MAX + 4, curve: 1.7 },
-  };
+const GAIN_CURVE: Record<
+  FamiliaritySource,
+  { fullUpto: number; ceiling: number; logScale: number }
+> = {
+  // 훈련 — 65까지 전액, 위로 갈수록 무뎌지고 96 언저리가 사실상 천장이다.
+  // 95까지는 훈련장에서도 닿는다: 감독이 한 전술을 파고들면 보상이 있어야 한다
+  training: { fullUpto: 65, ceiling: 98, logScale: 2.5 },
+  // 경기 — 62까지 전액, 위에서도 남아 있어 100을 여는 유일한 문이다
+  match: { fullUpto: 62, ceiling: FAMILIARITY_MAX + 4, logScale: 3.5 },
+};
 
 /**
  * 전술을 얼마나 빨리 읽는가 — 시야·위치선정·침착성의 평균 (대략 40~90).
@@ -858,8 +905,8 @@ const UPTAKE_MAX = 1;
 /**
  * 지금 위치에서 판정 1점이 실제로 얼마가 되는가 — 위로 갈수록 0에 수렴한다.
  *
- * (흡수율 1 기준) 훈련: 65 이하 1.00 · 80 0.39 · 90 0.11 · 95 0.02 · 98 이상 0.
- * 경기: 62 이하 1.00 · 80 0.39 · 90 0.15 · 95 0.07 · 99 0.03.
+ * (흡수율 1 기준) 훈련: 65 이하 1.00 · 80 0.39 · 90 0.15 · 95 0.05 · 98 이상 0.
+ * 경기: 62 이하 1.00 · 80 0.39 · 90 0.20 · 95 0.12 · 99 0.06.
  *
  * `uptake`(`tacticalUptake`)를 주면 **선수마다 갈린다** — 전술을 잘 읽는 선수는
  * 같은 훈련에서 더 많이 **가져간다**(흡수율 0.68~1.0). 아래 구간에서 그대로
@@ -871,14 +918,14 @@ export function familiarityGainScale(
   source: FamiliaritySource,
   uptake?: number,
 ): number {
-  const { fullUpto, ceiling, curve } = GAIN_CURVE[source];
+  const { fullUpto, ceiling, logScale } = GAIN_CURVE[source];
   const byPlayer =
     uptake === undefined
       ? 1 // 안 주면 흡수율을 따지지 않는다 — 코어 규칙(상한·단조성)은 그대로다
       : Math.max(UPTAKE_MIN, Math.min(UPTAKE_MAX, 1 + (uptake - UPTAKE_PIVOT) * UPTAKE_SLOPE));
   if (current <= fullUpto) return GAIN_EARLY_BOOST * byPlayer;
   const room = (ceiling - current) / (ceiling - fullUpto);
-  return GAIN_EARLY_BOOST * byPlayer * Math.max(0, room) ** curve;
+  return GAIN_EARLY_BOOST * byPlayer * reflectedLogCurve(room, logScale);
 }
 
 /**

@@ -24,7 +24,8 @@ function rotate(state: GameState): void {
   const used = new Set(starters.map((a) => a.playerId));
   for (const slot of starters) {
     const tired = byId.get(slot.playerId);
-    const unavailable = !tired || isInjured(state, slot.playerId) || isSuspended(state, slot.playerId);
+    const unavailable =
+      !tired || isInjured(state, slot.playerId) || isSuspended(state, slot.playerId);
     if (!unavailable && tired && 100 - tired.state.condition < 30) continue;
     const pick = squad
       .filter(
@@ -65,12 +66,27 @@ function line(state: GameState, label: string): string {
     (m) => m.result && m.competitionId === league && m.season === state.season,
   );
   const goals = played.reduce((n, m) => n + m.result!.homeGoals + m.result!.awayGoals, 0);
+  const shots = played.reduce(
+    (n, m) => n + (m.result!.homeShots ?? 0) + (m.result!.awayShots ?? 0),
+    0,
+  );
+  const chanceXg = played.reduce(
+    (n, m) => n + (m.result!.homeXg ?? 0) + (m.result!.awayXg ?? 0),
+    0,
+  );
+  const expectedGoals = played.reduce(
+    (n, m) => n + (m.result!.homeExpectedGoals ?? 0) + (m.result!.awayExpectedGoals ?? 0),
+    0,
+  );
+  const perMatch = Math.max(1, played.length);
   const champ = table[0];
   return (
     `[${label}] 우리 ${idx + 1}위 ${us?.points ?? 0}점 ` +
     `${us?.wins ?? 0}승${us?.draws ?? 0}무${us?.losses ?? 0}패 ${us?.goalsFor ?? 0}:${us?.goalsAgainst ?? 0} · ` +
     `우승 ${champ?.teamId ?? "?"} ${champ?.points ?? 0}점 ${champ?.goalsFor ?? 0}:${champ?.goalsAgainst ?? 0} · ` +
-    `평균 득점 ${(goals / Math.max(1, played.length)).toFixed(2)} (${played.length}경기)`
+    `평균 슈팅 ${(shots / perMatch).toFixed(2)} · xG ${(chanceXg / perMatch).toFixed(2)} · ` +
+    `결정력 반영 ${(expectedGoals / perMatch).toFixed(2)} · 득점 ${(goals / perMatch).toFixed(2)} ` +
+    `(${played.length}경기)`
   );
 }
 
@@ -92,6 +108,7 @@ describe.skipIf(!process.env.BALANCE)("밸런스 하네스 (전체 세계)", () 
           drillUserTactics(state, 7);
           rotate(state);
           playMockMatch(state);
+          if (state.season === 1) last = line(state, `시드 ${seed}`);
         }
       }
       console.log(last + note);

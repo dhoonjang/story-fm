@@ -1,4 +1,4 @@
-import { ageOf, type GamePlayer } from "@story-fm/domain";
+import { ageOf, normalizedLogCurve, type GamePlayer } from "@story-fm/domain";
 import { addDays, diffDays, seasonYear, windowOpenOn } from "../competition/calendar";
 import { isClubTeam, isTopFlight, leagueOfTeam } from "../data/team-catalog";
 import { isMarketOnlyLeague } from "../data/league-catalog";
@@ -454,8 +454,7 @@ function planLoan(
   if (squadLevel(host) > squadLevel(squad) - 2) return null;
   if (host.filter((p) => groupOf(p) === groupOf(target)).length >= 7) return null;
   // 받는 쪽이 분담할 주급도 형편 안이어야 한다
-  const share =
-    (activeContract(state, target.id)?.weeklyWage ?? 0) * loanWageShare(toId);
+  const share = (activeContract(state, target.id)?.weeklyWage ?? 0) * loanWageShare(toId);
   if (weeklyWagesOf(state, toId) + share > clubWageBudget(toId) * WAGE_HEADROOM) return null;
 
   ledger.committed.add(target.id);
@@ -557,18 +556,20 @@ function planWeek(state: GameState, rng: () => number): AiDeal[] {
         ? planLoan(state, squads, clubs, ledger, rng)
         : planTransfer(state, squads, clubs, ledger, rng);
     if (!deal) continue;
-    /**
-     * 날짜 배분 — 균등하게 흩되 **마감 주에는 뒤로 쏠린다**(제곱으로 눌러
-     * 마지막 이틀에 몰린다). 실제 데드라인 데이의 모양이다.
-     */
+    /** 날짜 배분 — 마감 주에는 정규화 로그로 뒤쪽에 몰린다. */
     const u = rng();
-    const offset = Math.min(span, Math.floor((deadlineWeek ? Math.sqrt(u) : u) * (span + 1)));
+    const offset = Math.min(
+      span,
+      Math.floor((deadlineWeek ? normalizedLogCurve(u, DEADLINE_LOG_SCALE) : u) * (span + 1)),
+    );
     deals.push({ ...deal, date: addDays(state.date, offset) });
   }
   return deals;
 }
 
 const WEEK = 7;
+/** 마감 주 거래일 분포의 로그 눈금 — 기존 데드라인 집중도를 유지한다. */
+const DEADLINE_LOG_SCALE = 8;
 
 function minDate(a: string, b: string): string {
   return a < b ? a : b;
