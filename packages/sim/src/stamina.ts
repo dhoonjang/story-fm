@@ -82,7 +82,7 @@ function staminaFactor(player: Player): number {
 }
 
 /**
- * 90분 온전히 뛴 스트라이커가 기준 전술에서 쌓는 피로.
+ * 90분 온전히 뛴 스트라이커가 기준 전술에서 쌓는 활동량.
  *
  * ⚠️ **경기 하나가 선수를 거의 비워야 한다.** 34였을 땐 90분을 뛰고도 62가
  * 남았고, 회복이 사흘이면 100을 채워서 **로테이션이라는 판단 자체가 없었다** —
@@ -91,6 +91,16 @@ function staminaFactor(player: Player): number {
  * 센터백 −51, 골키퍼 −12이고 지구력이 그 위에서 ±25%를 가른다.
  */
 const FULL_MATCH_DRAIN = 60;
+
+/**
+ * 활동량을 남은 체력으로 바꾸는 감쇠 눈금.
+ *
+ * `remaining = start × exp(-load / scale)`이라 `log(remaining)`은 활동량에 따라
+ * 선형으로 줄어든다. 체력이 낮을수록 같은 활동량이 가져가는 절대 체력은 작아져
+ * 0으로 직선 낙하하지 않는다. 37.2는 지구력 70 공격수가 체력 100에서 기본 전술로
+ * 풀타임을 뛰었을 때 약 25를 남기는 눈금이다.
+ */
+const CONDITION_DECAY_SCALE = 37.2;
 
 /**
  * **하루 회복 — 소모와 같은 축(`stamina`)이 정한다.**
@@ -209,8 +219,9 @@ export function conditionDrain(
   variance = 1,
   directive = 1,
   possession = 0.5,
+  availableCondition = player.state.condition,
 ): number {
-  return (
+  const load =
     ((FULL_MATCH_DRAIN * minutes) / 90) *
     positionalDrain(position) *
     tacticalDrain(spec) *
@@ -218,8 +229,9 @@ export function conditionDrain(
     staminaFactor(player) *
     variance *
     directive *
-    chaseFactor(possession)
-  );
+    chaseFactor(possession);
+  const available = Math.max(0, Math.min(100, availableCondition));
+  return available * (1 - Math.exp(-load / CONDITION_DECAY_SCALE));
 }
 
 /**

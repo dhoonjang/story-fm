@@ -449,6 +449,7 @@ export function advanceSegment(state: GameState): {
     },
     // 체력 소모의 그날의 몫 — 구간이 아니라 **경기** 단위로 고정된다 (stamina.ts)
     staminaKey: `${state.seed}:${match.id}`,
+    accumulatedFatigue: pending.matchFatigue ?? {},
     /**
      * 90분이 지금 스코어로 끝나면 연장으로 가는가 — **컵을 아는 건 코어뿐**이다.
      * 구간 시뮬은 대회도 대진도 모르고 이 답만 받는다 (extra-time.ts).
