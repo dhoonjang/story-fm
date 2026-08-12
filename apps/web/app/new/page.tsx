@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { LoadingInline } from "@/components/loading";
+import { LeagueGridSkeleton } from "@/components/skeleton";
+import { Loading } from "@/components/loading";
 
 interface TeamEntry {
   id: string;
@@ -87,6 +88,20 @@ export default function NewGamePage() {
     }
   }
 
+  /**
+   * 부임을 누른 뒤 — **폼은 물러나고 게임 화면과 같은 로딩이 선다.**
+   *
+   * 세계를 만드는 데 걸리는 동안 폼을 그대로 두면 감독 이름·배경이 아직 고칠 수
+   * 있는 것처럼 보이고, 버튼 글자만 바뀌는 것으로는 화면이 넘어갔다는 느낌이
+   * 없다. 여기서 선 로딩이 `/game/[id]`의 로딩으로 이어져 한 몸으로 읽힌다.
+   */
+  if (busy)
+    return (
+      <main className="loading-page">
+        <Loading size={34} />
+      </main>
+    );
+
   return (
     <main className="onboarding">
       <div className="onboarding-top">
@@ -98,24 +113,23 @@ export default function NewGamePage() {
       <h1>새 게임 시작</h1>
 
       <h2>1. 어느 리그입니까?</h2>
-      <div className="league-grid" data-testid="league-grid">
-        {leagues.length === 0 && !error && (
-          <div className="list-loading">
-            <LoadingInline />
-          </div>
-        )}
-        {leagues.map((l) => (
-          <button
-            key={l.id}
-            className={`league-card${leagueId === l.id ? " selected" : ""}`}
-            onClick={() => selectLeague(l.id)}
-            data-testid={`league-${l.id}`}
-          >
-            <div>{l.name}</div>
-            <div className="tier">{l.country}</div>
-          </button>
-        ))}
-      </div>
+      {leagues.length === 0 && !error ? (
+        <LeagueGridSkeleton />
+      ) : (
+        <div className="league-grid" data-testid="league-grid">
+          {leagues.map((l) => (
+            <button
+              key={l.id}
+              className={`league-card${leagueId === l.id ? " selected" : ""}`}
+              onClick={() => selectLeague(l.id)}
+              data-testid={`league-${l.id}`}
+            >
+              <div>{l.name}</div>
+              <div className="tier">{l.country}</div>
+            </button>
+          ))}
+        </div>
+      )}
 
       <h2>2. 어느 팀을 맡습니까?</h2>
       {leagueId === null ? (
@@ -152,13 +166,14 @@ export default function NewGamePage() {
         onChange={(e) => setBackground(e.target.value)}
         data-testid="manager-background"
       />
+      {/* 누르는 순간 화면이 로딩으로 넘어가므로 버튼에 기다리는 글자를 두지 않는다 */}
       <button
         className="primary-btn"
         onClick={start}
         disabled={busy || !teamId || !name.trim() || !background.trim()}
         data-testid="start-game"
       >
-        {busy ? "부임 준비 중..." : "부임하기"}
+        부임하기
       </button>
       {error && <p className="error-text">{error}</p>}
     </main>
