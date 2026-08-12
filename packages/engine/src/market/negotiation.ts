@@ -34,6 +34,7 @@ import {
 } from "./medical";
 import { canRegisterFor } from "../squad/registration";
 import { assignSquadNumber } from "../squad/numbers";
+import { USER_WAGE_HEADROOM, wageRoomOf } from "../world/wages";
 import { marketBiasOf, windowOpenForTeam } from "./market";
 import { evaluatePitch, latitudeOf } from "./persuasion";
 import { makeRng } from "../core/rng";
@@ -47,6 +48,7 @@ import {
   playersOf,
   pushNarrative,
   teamName,
+  weeklyWagesOf,
   type GameState,
   hasIssue,
 } from "../core/state";
@@ -89,6 +91,33 @@ const wageOf = (amount: number) => `£${Math.round(amount / 1_000)}k`;
 /** 이 선수와 진행 중인 협상 */
 export function openNegotiationFor(state: GameState, playerId: string): Negotiation | null {
   return state.negotiations.find((n) => n.gamePlayerId === playerId && n.status === "open") ?? null;
+}
+
+/** 지금 이 선수를 두고 살아 있는 협상 — 답을 기다리거나 확정만 남은 것 */
+function liveNegotiationFor(state: GameState, playerId: string): Negotiation | null {
+  return (
+    state.negotiations.find(
+      (n) => n.gamePlayerId === playerId && (n.status === "open" || n.status === "agreed"),
+    ) ?? null
+  );
+}
+
+/**
+ * 거절이 식는 데 걸리는 시간 — 이만큼은 같은 선수에게 오퍼가 다시 붙지 않는다.
+ *
+ * 창 단위로 재지 않는 이유: 매각의 창은 **사는 쪽 협회의 것**이라 우리 창이 닫힌
+ * 동안에도 사우디·MLS가 노린다. "이번 창"을 우리 달력으로 재면 그 기간 내내
+ * 모든 거절이 영구 배제처럼 굴러간다.
+ */
+const REJECT_COOLDOWN_DAYS = 30;
+
+/** 최근에 거절로 끝난 협상이 있는가 — 시장이 잠시 물러나 있을 이유다 */
+function recentlyRejected(state: GameState, playerId: string): boolean {
+  return state.negotiations.some((n) => {
+    if (n.gamePlayerId !== playerId || n.status !== "rejected") return false;
+    const on = n.rounds[n.rounds.length - 1]?.date ?? n.openedOn;
+    return diffDays(on, state.date) < REJECT_COOLDOWN_DAYS;
+  });
 }
 
 /** 이번 창에서 이미 결렬된 협상 — 같은 선수에게 다시 오퍼할 수 없다 */
@@ -191,19 +220,10 @@ export function sendOffer(state: GameState, terms: DealTerms): SkillResult {
     negotiation.pitched = [...new Set([...(negotiation.pitched ?? []), ...accepted])];
   }
 
-  const repeats = negotiation.rounds.filter((r) => r.by === "us").length;
-  const waitDays = responseDelayDays(state, terms, odds.probability, repeats);
-  const respondsOn = addDays(state.date, waitDays);
-  negotiation.rounds.push({
-    date: state.date,
-    by: "us",
-    fee: terms.fee,
-    weeklyWage: terms.weeklyWage,
-    contractYears: terms.years,
-    respondsOn,
-    probability: odds.probability,
-    verdict: null,
-    ...(terms.pitch && terms.pitch.length > 0 ? { pitch: [...terms.pitch] } : {}),
+  const { waitDays, respondsOn } = pushOurRound(state, negotiation, terms, odds.probability, {
+    // 같은 조건을 되풀이하면 상대가 지친다 — 답이 그만큼 늦어진다
+    repeats: negotiation.rounds.filter((r) => r.by === "us").length,
+    ...(terms.pitch ? { pitch: terms.pitch } : {}),
   });
 
   const chance = odds.fuzzy ? oddsLabel(odds.probability) : `${odds.probability}%`;
@@ -252,11 +272,133 @@ export function sendOffer(state: GameState, terms: DealTerms): SkillResult {
  * 확률이 바닥인데 수락할 수 없고, 역제안을 터무니없이 부를 수 없다.
  */
 /**
+ * 답할 오퍼를 집는다 — **두 방향이 같은 문을 지난다.**
+ *
+ * `pick`이 방향을 정한다: 우리 오퍼면 `pendingOffer`, 들어온 오퍼면 `incomingOffer`.
+ * 여기서 막는 것은 방향과 무관하게 같은 것들뿐이다 — 없는 협상, 이미 끝난 협상,
+ * 답할 오퍼가 없는 협상, 사라진 선수. 방향마다 다른 관문(우리 오퍼는 답이 올
+ * 날짜가 지나야 한다)은 각 갈래가 따로 지킨다.
+ *
+ * `guard`는 **협상을 찾은 직후** 걸린다 — 방향을 잘못 짚은 호출에는 "답할 오퍼가
+ * 없다"가 아니라 그 이유를 돌려줘야 GM이 옳은 쪽으로 다시 부를 수 있다.
+ */
+function answerTarget(
+  state: GameState,
+  negotiationId: string,
+  pick: (n: Negotiation) => Negotiation["rounds"][number] | null,
+  noOfferMessage: string,
+  guard?: (n: Negotiation) => string | null,
+):
+  | { ok: false; message: string }
+  | {
+      ok: true;
+      negotiation: Negotiation;
+      offer: Negotiation["rounds"][number];
+      player: GamePlayer;
+    } {
+  const negotiation = state.negotiations.find((n) => n.id === negotiationId);
+  if (!negotiation) {
+    return { ok: false, message: `협상 "${negotiationId}"을 찾지 못했습니다` };
+  }
+  const blocked = guard?.(negotiation);
+  if (blocked !== undefined && blocked !== null) return { ok: false, message: blocked };
+  if (negotiation.status !== "open") {
+    return { ok: false, message: `이미 끝난 협상입니다 (${negotiation.status})` };
+  }
+  const offer = pick(negotiation);
+  if (!offer) return { ok: false, message: noOfferMessage };
+  const player = playerById(state, negotiation.gamePlayerId);
+  if (!player) return { ok: false, message: "선수를 찾지 못했습니다" };
+  return { ok: true, negotiation, offer, player };
+}
+
+/**
+ * 협상의 상대 이름 — **매각이면 `player.teamId`가 아니다.**
+ * 파는 국면에서 선수는 아직 우리 소속이라, 상대는 사려는 구단이다.
+ */
+function counterpartOf(negotiation: Negotiation, player: GamePlayer): string {
+  const selling = negotiation.kind === "sell" || negotiation.kind === "loan_out";
+  return teamName(selling ? (negotiation.counterpartTeamId ?? player.teamId) : player.teamId);
+}
+
+/**
+ * 판정 카드 — **누가 무엇에 답했나.** 두 방향이 같은 뼈대를 쓴다.
+ *
+ * 답한 대상 오퍼의 조건이 `terms`(제시)이고 되부른 조건이 `counterTerms`(요구)다.
+ * 우리가 낸 조건이 있어야 상대의 답이 판단거리가 된다 — 그 반대도 마찬가지다.
+ */
+function verdictCardOf(input: {
+  player: GamePlayer;
+  counterpart: string;
+  verdict: NegotiationVerdict;
+  offer: Negotiation["rounds"][number];
+  probability: number;
+  loan?: boolean;
+  note?: string;
+  counterTerms?: MarketTerms;
+  dueOn?: string;
+}): MarketCard {
+  return {
+    kind: "verdict",
+    playerId: input.player.id,
+    playerName: input.player.name,
+    counterpart: input.counterpart,
+    verdict: input.verdict,
+    terms: dealTerms({
+      fee: input.offer.fee,
+      weeklyWage: input.offer.weeklyWage,
+      years: input.offer.contractYears,
+    }),
+    odds: `${input.probability}%`,
+    ...(input.loan === true ? { loan: true } : {}),
+    ...(input.note ? { note: input.note } : {}),
+    ...(input.counterTerms ? { counterTerms: input.counterTerms } : {}),
+    ...(input.dueOn ? { dueOn: input.dueOn } : {}),
+  };
+}
+
+/**
+ * **우리가 조건을 내고 답을 기다린다** — 오퍼든 역제안이든 두 걸음이 같다:
+ * 며칠 걸릴지 셈하고, 라운드를 쌓는다.
+ *
+ * 확률은 부르는 쪽이 이미 재어 두었으므로(`sendOffer`는 관문 검사에, 역제안은
+ * 카드에 쓴다) 여기서 다시 굴리지 않는다 — 같은 값을 두 번 재면 설득 누적처럼
+ * 중간에 바뀐 상태에서 다른 숫자가 나온다.
+ */
+function pushOurRound(
+  state: GameState,
+  negotiation: Negotiation,
+  terms: DealTerms,
+  probability: number,
+  opts: { repeats?: number; note?: string; pitch?: DealTerms["pitch"] } = {},
+): { waitDays: number; respondsOn: string } {
+  const waitDays = responseDelayDays(state, terms, probability, opts.repeats ?? 0);
+  const respondsOn = addDays(state.date, waitDays);
+  negotiation.rounds.push({
+    date: state.date,
+    by: "us",
+    fee: terms.fee,
+    weeklyWage: terms.weeklyWage,
+    contractYears: terms.years,
+    respondsOn,
+    probability,
+    verdict: null,
+    ...(opts.note ? { note: opts.note } : {}),
+    ...(opts.pitch && opts.pitch.length > 0 ? { pitch: [...opts.pitch] } : {}),
+  });
+  return { waitDays, respondsOn };
+}
+
+/**
  * 오퍼에 답한다 — **누가 답할 차례인지는 협상이 안다.**
  *
  * 우리가 넣은 오퍼면 GM이 상대 구단·선수가 되어 판정하고, 들어온 오퍼면 감독의
  * 뜻대로 답한다. 예전엔 도구가 둘(`respond_offer`/`answer_incoming_offer`)이라
  * GM이 방향을 헷갈리면 "답할 오퍼가 없습니다"만 돌려받고 협상이 멈췄다.
+ *
+ * 아래 두 갈래는 **방향만 다르다** — 관문·판정 카드·라운드 쌓기는 위의 세 헬퍼가
+ * 함께 갖는다. 예전엔 각자 적어 두어서, 한쪽만 고칠 때마다 같은 협상이 어느 쪽에서
+ * 답했느냐에 따라 다르게 굴렀다 (들어온 오퍼는 판정 카드가 아예 없었다).
  */
 export function answerOffer(
   state: GameState,
@@ -288,22 +430,21 @@ export function respondOffer(
     note?: string;
   },
 ): SkillResult {
-  const negotiation = state.negotiations.find((n) => n.id === input.negotiationId);
-  if (!negotiation)
-    return { ok: false, message: `협상 "${input.negotiationId}"을 찾지 못했습니다` };
-  if (negotiation.status !== "open") {
-    return { ok: false, message: `이미 끝난 협상입니다 (${negotiation.status})` };
-  }
-  const offer = pendingOffer(negotiation);
-  if (!offer) return { ok: false, message: "답할 오퍼가 없습니다 — 먼저 오퍼를 넣어야 합니다" };
+  const target = answerTarget(
+    state,
+    input.negotiationId,
+    pendingOffer,
+    "답할 오퍼가 없습니다 — 먼저 오퍼를 넣어야 합니다",
+  );
+  if (!target.ok) return target;
+  const { negotiation, offer, player } = target;
+  // 우리 오퍼만의 관문 — 상대는 답할 날이 오기 전에 답하지 않는다
   if (offer.respondsOn !== null && offer.respondsOn > state.date) {
     return {
       ok: false,
       message: `아직 답이 오지 않았습니다 — ${describeWait(diffDays(state.date, offer.respondsOn))}`,
     };
   }
-  const player = playerById(state, negotiation.gamePlayerId);
-  if (!player) return { ok: false, message: "선수를 찾지 못했습니다" };
 
   const odds = dealOdds(state, {
     playerId: negotiation.gamePlayerId,
@@ -390,29 +531,17 @@ export function respondOffer(
   offer.verdict = input.verdict;
   if (input.note) offer.note = input.note;
 
-  // 매각이면 상대는 **사는 구단**이다 (player.teamId는 아직 우리 팀이다)
-  const counterpart = teamName(
-    selling ? (negotiation.counterpartTeamId ?? player.teamId) : player.teamId,
-  );
-
-  /**
-   * 판정 카드의 뼈대 — 어느 갈래든 **누가 무엇에 답했나**는 같다.
-   * 우리가 낸 조건이 있어야 상대의 답이 판단거리가 된다(제시 vs 요구).
-   */
+  const counterpart = counterpartOf(negotiation, player);
   const verdictCard = (rest: Partial<MarketCard>): MarketCard => ({
-    kind: "verdict",
-    playerId: player.id,
-    playerName: player.name,
-    counterpart,
-    verdict: input.verdict,
-    terms: dealTerms({
-      fee: offer.fee,
-      weeklyWage: offer.weeklyWage,
-      years: offer.contractYears,
+    ...verdictCardOf({
+      player,
+      counterpart,
+      verdict: input.verdict,
+      offer,
+      probability: odds.probability,
+      loan: loaning,
+      ...(input.note ? { note: input.note } : {}),
     }),
-    odds: `${odds.probability}%`,
-    ...(loaning ? { loan: true } : {}),
-    ...(input.note ? { note: input.note } : {}),
     ...rest,
   });
 
@@ -649,17 +778,8 @@ export function offerPlayerOut(
       return created;
     })();
 
-  const repeats = negotiation.rounds.filter((r) => r.by === "us").length;
-  const waitDays = responseDelayDays(state, terms, odds.probability, repeats);
-  negotiation.rounds.push({
-    date: state.date,
-    by: "us",
-    fee,
-    weeklyWage,
-    contractYears: years,
-    respondsOn: addDays(state.date, waitDays),
-    probability: odds.probability,
-    verdict: null,
+  const { waitDays } = pushOurRound(state, negotiation, terms, odds.probability, {
+    repeats: negotiation.rounds.filter((r) => r.by === "us").length,
   });
   const chance = odds.fuzzy ? oddsLabel(odds.probability) : `${odds.probability}%`;
   const head = input.loan
@@ -701,9 +821,17 @@ export function generateIncomingOffers(state: GameState, digest: string[]): void
   if (!anyWindowOpen) return;
 
   const rng = makeRng(state.seed, `incoming:${state.date}`);
+  /**
+   * 지금 오퍼가 붙을 수 있는 선수인가 — **살아 있는 협상과 최근의 거절만** 막는다.
+   *
+   * 예전엔 `status !== "expired"`인 협상이 하나라도 있으면 뺐다. 협상 기록은
+   * 시즌이 바뀌어도 지워지지 않으므로 그 조건은 **영구 배제**였다: 오퍼를 한 번
+   * 거절하면 그 선수는 두 번 다시 오퍼를 못 받고, 직접 영입한 선수는 `completed`
+   * 이력 때문에 애초에 팔 수 없었다 — 나중에 팔릴 자원이 정확히 배제됐다.
+   * 이적 리스트에 올려도 같은 필터를 지나므로 등재가 아무 일도 하지 않았다.
+   */
   const free = (p: GamePlayer) =>
-    !openNegotiationFor(state, p.id) &&
-    !state.negotiations.some((n) => n.gamePlayerId === p.id && n.status !== "expired");
+    liveNegotiationFor(state, p.id) === null && !recentlyRejected(state, p.id);
 
   /**
    * **등재된 선수가 먼저다.** 감독이 값을 부르며 내놓은 선수에게는 확률이 다르게
@@ -901,44 +1029,81 @@ function pickBuyer(state: GameState, player: GamePlayer, rng: () => number): str
 /**
  * 감독이 들어온 오퍼에 답한다 — 수락·거절·역제안(더 부르기).
  *
- * 역제안하면 **사는 쪽이 판정할 차례**가 된다 (`respond_offer`로 GM이 상대편이
- * 되어 답한다). 우리가 부른 값이 상대 상한을 넘으면 확률이 떨어진다.
+ * `answerOffer`의 **반대 방향 갈래**다. 관문·판정 카드·라운드 쌓기는 `respondOffer`와
+ * 같은 헬퍼를 쓰고, 다른 것은 방향뿐이다: 답하는 사람이 감독이라 답할 날을 기다리지
+ * 않고, 되부른 조건이 `by: "us"` 라운드로 쌓여 **사는 쪽이 판정할 차례**가 된다.
  */
 export function answerIncomingOffer(
   state: GameState,
-  input: { negotiationId: string; verdict: NegotiationVerdict; fee?: number },
+  input: {
+    negotiationId: string;
+    verdict: NegotiationVerdict;
+    fee?: number;
+    weeklyWage?: number;
+    note?: string;
+  },
 ): SkillResult {
-  const negotiation = state.negotiations.find((n) => n.id === input.negotiationId);
-  if (!negotiation)
-    return { ok: false, message: `협상 "${input.negotiationId}"을 찾지 못했습니다` };
-  if (negotiation.kind !== "sell") {
-    return { ok: false, message: "들어온 오퍼가 아닙니다 — 우리가 넣은 오퍼는 상대가 답합니다" };
-  }
-  if (negotiation.status !== "open") {
-    return { ok: false, message: `이미 끝난 협상입니다 (${negotiation.status})` };
-  }
-  const offer = incomingOffer(negotiation);
-  if (!offer) return { ok: false, message: "답할 오퍼가 없습니다" };
-  const player = playerById(state, negotiation.gamePlayerId);
-  if (!player) return { ok: false, message: "선수를 찾지 못했습니다" };
+  const target = answerTarget(
+    state,
+    input.negotiationId,
+    incomingOffer,
+    "답할 오퍼가 없습니다",
+    (n) =>
+      n.kind === "sell" ? null : "들어온 오퍼가 아닙니다 — 우리가 넣은 오퍼는 상대가 답합니다",
+  );
+  if (!target.ok) return target;
+  const { negotiation, offer, player } = target;
+  const counterpart = counterpartOf(negotiation, player);
+  /**
+   * 확률은 **받은 오퍼가 성사될 가능성**이다 — 수락·거절 카드가 읽는 값이 그것이다.
+   * 역제안은 되부른 값으로 다시 재므로 아래에서 따로 굴린다.
+   */
+  const onTable = {
+    playerId: player.id,
+    fee: offer.fee,
+    weeklyWage: offer.weeklyWage,
+    years: offer.contractYears,
+    kind: "sell" as const,
+    ...(negotiation.counterpartTeamId ? { counterpartTeamId: negotiation.counterpartTeamId } : {}),
+  };
 
   if (input.verdict === "reject") {
+    // 메디컬 재협상 여부는 상대가 적어 둔 메모로 갈린다 — 감독의 메모로 덮지 않는다
+    const card = verdictCardOf({
+      player,
+      counterpart,
+      verdict: "reject",
+      offer,
+      probability: dealOdds(state, onTable).probability,
+      ...(input.note ? { note: input.note } : {}),
+    });
     offer.verdict = "reject";
     negotiation.status = "rejected";
     return {
       ok: true,
-      message: `${teamName(negotiation.counterpartTeamId ?? "")}의 ${player.name} 오퍼를 거절했습니다`,
+      payload: card,
+      message: `${counterpart}의 ${player.name} 오퍼를 거절했습니다`,
     };
   }
 
   if (input.verdict === "accept") {
     const shortfall = squadShortfall(state, state.userTeamId, player);
     if (shortfall) return { ok: false, message: `우리 ${shortfall}` };
+    const renegotiated = offer.note?.startsWith("메디컬 소견") === true;
+    const card = verdictCardOf({
+      player,
+      counterpart,
+      verdict: "accept",
+      offer,
+      probability: dealOdds(state, onTable).probability,
+      ...(input.note ? { note: input.note } : {}),
+    });
     offer.verdict = "accept";
     negotiation.status = "agreed";
     return {
       ok: true,
-      message: offer.note?.startsWith("메디컬 소견")
+      payload: card,
+      message: renegotiated
         ? `${player.name} 메디컬 재협상안을 수락했습니다 — ${money(offer.fee)}. 계약을 확정하세요`
         : `${player.name} 매각에 합의했습니다 — ${money(offer.fee)}. 계약을 확정하세요`,
     };
@@ -949,30 +1114,25 @@ export function answerIncomingOffer(
   if (demanded <= offer.fee) {
     return { ok: false, message: `역제안은 받은 오퍼(${money(offer.fee)})보다 높아야 합니다` };
   }
+  const wage = Math.round(input.weeklyWage ?? offer.weeklyWage);
   offer.verdict = "counter";
-  const terms = {
-    playerId: player.id,
-    fee: demanded,
-    weeklyWage: offer.weeklyWage,
-    years: offer.contractYears,
-    kind: "sell" as const,
-    ...(negotiation.counterpartTeamId ? { counterpartTeamId: negotiation.counterpartTeamId } : {}),
-  };
+  const terms = { ...onTable, fee: demanded, weeklyWage: wage };
   const odds = dealOdds(state, terms);
-  const waitDays = responseDelayDays(state, terms, odds.probability);
-  const respondsOn = addDays(state.date, waitDays);
-  negotiation.rounds.push({
-    date: state.date,
-    by: "us",
-    fee: demanded,
-    weeklyWage: offer.weeklyWage,
-    contractYears: offer.contractYears,
-    respondsOn,
-    probability: odds.probability,
-    verdict: null,
+  const { waitDays, respondsOn } = pushOurRound(state, negotiation, terms, odds.probability, {
+    ...(input.note ? { note: input.note } : {}),
   });
   return {
     ok: true,
+    payload: verdictCardOf({
+      player,
+      counterpart,
+      verdict: "counter",
+      offer,
+      probability: odds.probability,
+      counterTerms: dealTerms({ fee: demanded, weeklyWage: wage }),
+      dueOn: respondsOn,
+      ...(input.note ? { note: input.note } : {}),
+    }),
     message:
       `${player.name} 값으로 ${money(demanded)}을 불렀습니다 (성사 확률 ${odds.probability}%) — ` +
       describeWait(waitDays),
@@ -1052,18 +1212,8 @@ export function openRenewal(
       return created;
     })();
 
-  const repeats = negotiation.rounds.filter((r) => r.by === "us").length;
-  const waitDays = responseDelayDays(state, terms, odds.probability, repeats);
-  const respondsOn = addDays(state.date, waitDays);
-  negotiation.rounds.push({
-    date: state.date,
-    by: "us",
-    fee: 0,
-    weeklyWage: input.weeklyWage,
-    contractYears: input.years,
-    respondsOn,
-    probability: odds.probability,
-    verdict: null,
+  const { waitDays, respondsOn } = pushOurRound(state, negotiation, terms, odds.probability, {
+    repeats: negotiation.rounds.filter((r) => r.by === "us").length,
   });
   const until = activeContract(state, player.id)?.until;
   const card: MarketCard = {
@@ -1144,6 +1294,18 @@ function executeLoanIn(
   if (!contract) return { ok: false, message: `${player.name}은(는) 계약이 없습니다` };
   const until = minDate(`${seasonYear(state.season) + 1}-06-30`, contract.until);
 
+  /**
+   * **합의와 실행 사이에 세상이 바뀐다** — 창이 닫히고, 예산이 마르고, 임금이 찬다.
+   * 영입은 이 재검사를 지나는데(`executeDeal`) 임대만 빠져 있었다: 오퍼 시점의
+   * `dealOdds`만 보고 통과해, 창 마감 뒤에도 임대가 성립했다.
+   */
+  const gate = affordabilityGate(state, {
+    fee: agreed.fee,
+    weeklyWage: agreed.weeklyWage,
+    what: "임대",
+  });
+  if (gate) return gate;
+
   if (agreed.fee > 0) {
     const ref = { type: "player" as const, id: player.id };
     recordFinance(state, state.userTeamId, {
@@ -1178,8 +1340,13 @@ function executeLoanIn(
   player.teamId = state.userTeamId;
   player.squadNumber = undefined;
   assignSquadNumber(state.players, player);
-  player.squadLevel = "first";
   player.loan = { fromTeamId: from, until, wageShare };
+  /**
+   * 등록 명단은 **임대에도 걸린다.** 계약의 종류가 아니라 명단의 자리 문제라,
+   * 영입에만 걸어 두면 자리가 없을 때 임대가 우회로가 된다 (team.md §5).
+   */
+  const slot = canRegisterFor(state, player, state.userTeamId);
+  player.squadLevel = slot.ok ? "first" : "reserve";
   negotiation.status = "completed";
 
   pushNarrative(state, `${player.name} 임대 영입 (${teamName(from)} · ${until}까지)`, 4);
@@ -1187,7 +1354,8 @@ function executeLoanIn(
     ok: true,
     message:
       `${player.name}을(를) ${teamName(from)}에서 임대로 데려왔습니다 — ${until}까지 · ` +
-      `임대료 ${money(agreed.fee)} · 주급 ${Math.round(wageShare * 100)}% 부담`,
+      `임대료 ${money(agreed.fee)} · 주급 ${Math.round(wageShare * 100)}% 부담` +
+      (slot.ok ? "" : ` ⚠ ${slot.reason} — 2군으로 들어왔습니다`),
   };
 }
 
@@ -1297,6 +1465,52 @@ function passMedicalGate(
   return null;
 }
 
+/**
+ * **데려올 수 있는 형편인가** — 영입·임대가 함께 지나는 문.
+ *
+ * 오퍼를 넣을 때 `dealOdds`가 이미 본 것들이지만, 합의부터 실행까지는 며칠이
+ * 걸리고 그사이 창이 닫히거나 다른 영입이 예산을 먹는다. 실행 직전에 다시 본다.
+ *
+ * @returns 못 데려오면 감독에게 돌려줄 이유, 괜찮으면 null
+ */
+function affordabilityGate(
+  state: GameState,
+  deal: { fee: number; weeklyWage: number; what: "영입" | "임대"; skipWindow?: boolean },
+): SkillResult | null {
+  if (deal.skipWindow !== true && !windowOpenOn(state.windows, state.date)) {
+    return { ok: false, message: `이적시장이 닫혀 있어 ${deal.what}을 확정할 수 없습니다` };
+  }
+  const finance = state.finances.find((f) => f.teamId === state.userTeamId);
+  if (!finance) return { ok: false, message: "재정 정보를 찾지 못했습니다" };
+  if (finance.budgetFrozen && deal.fee > 0) {
+    return {
+      ok: false,
+      message: "보드가 이적 예산을 동결했습니다 (PSR 위반) — 매각으로 예산을 만들어야 합니다",
+    };
+  }
+  if (deal.fee > finance.transferBudget) {
+    return {
+      ok: false,
+      message: `이적 예산이 부족합니다 — 필요 ${money(deal.fee)} / 가용 ${money(finance.transferBudget)}`,
+    };
+  }
+  const room = wageRoomOf(
+    state.userTeamId,
+    weeklyWagesOf(state, state.userTeamId),
+    USER_WAGE_HEADROOM,
+  );
+  if (deal.weeklyWage > room) {
+    return {
+      ok: false,
+      message:
+        room <= 0
+          ? "주급 여력이 없습니다 — 임금 총액이 이미 구단 한도를 넘었습니다"
+          : `주급 여력이 부족합니다 — 주당 ${wageOf(room)}까지 가능합니다`,
+    };
+  }
+  return null;
+}
+
 /** 합의된 조건을 장부로 옮긴다 — 메디컬을 통과한 뒤에만 불린다 */
 export function executeDeal(state: GameState, negotiation: Negotiation): SkillResult {
   const player = playerById(state, negotiation.gamePlayerId);
@@ -1319,24 +1533,21 @@ export function executeDeal(state: GameState, negotiation: Negotiation): SkillRe
     };
   }
   const window = windowOpenOn(state.windows, state.date);
+  // 무소속은 창과 무관하다 — 계약이 없는 선수는 언제든 데려온다
   const freeAgent = !activeContract(state, player.id);
+  const ourFinance = state.finances.find((f) => f.teamId === state.userTeamId);
+  if (!ourFinance) return { ok: false, message: "재정 정보를 찾지 못했습니다" };
   if (!window && !freeAgent) {
     return { ok: false, message: "이적시장이 닫혀 있어 계약을 확정할 수 없습니다" };
   }
-  const ourFinance = state.finances.find((f) => f.teamId === state.userTeamId);
-  if (!ourFinance) return { ok: false, message: "재정 정보를 찾지 못했습니다" };
-  if (ourFinance.budgetFrozen && agreed.fee > 0) {
-    return {
-      ok: false,
-      message: "보드가 이적 예산을 동결했습니다 (PSR 위반) — 매각으로 예산을 만들어야 합니다",
-    };
-  }
-  if (agreed.fee > ourFinance.transferBudget) {
-    return {
-      ok: false,
-      message: `이적 예산이 부족합니다 — 필요 ${money(agreed.fee)} / 가용 ${money(ourFinance.transferBudget)}`,
-    };
-  }
+  const gate = affordabilityGate(state, {
+    fee: agreed.fee,
+    weeklyWage: agreed.weeklyWage,
+    what: "영입",
+    // 창은 위에서 무소속까지 감안해 이미 봤다
+    skipWindow: true,
+  });
+  if (gate) return gate;
   const sellerShort = squadShortfall(state, player.teamId, player);
   if (sellerShort) return { ok: false, message: `${teamName(player.teamId)}가 ${sellerShort}` };
 
@@ -1457,6 +1668,24 @@ function executeSale(
   if (!window) return { ok: false, message: "이적시장이 닫혀 있어 매각을 확정할 수 없습니다" };
   const shortfall = squadShortfall(state, state.userTeamId, player);
   if (shortfall) return { ok: false, message: `우리 ${shortfall}` };
+  /**
+   * **사는 쪽도 돈이 있어야 한다.** 오퍼가 붙을 때 `pickBuyer`가 본 것은 그때의
+   * 시장가였고, 감독의 역제안은 그 위로 얼마든 부를 수 있다 — 그사이 그 구단이
+   * 다른 영입에 예산을 썼을 수도 있다. 검사 없이 빼면 상대 예산이 음수가 된다.
+   *
+   * 못 내면 협상이 **무산**된다(`expired`) — 결렬(`rejected`)로 적으면 이번 창에
+   * 다시 팔 길까지 닫힌다. 값을 낮춰 다시 붙는 것이 실제로도 흔한 결말이다.
+   */
+  const buyerFinance = state.finances.find((f) => f.teamId === buyerTeamId);
+  if (agreed.fee > 0 && buyerFinance && agreed.fee > buyerFinance.transferBudget) {
+    negotiation.status = "expired";
+    return {
+      ok: false,
+      message:
+        `${teamName(buyerTeamId)}가 ${money(agreed.fee)}를 마련하지 못했습니다 — ` +
+        `가용 ${money(buyerFinance.transferBudget)}. 이 건은 무산됐습니다`,
+    };
+  }
 
   state.transfers.push({
     id: `tr-${player.id}-${state.date}`,

@@ -20,6 +20,8 @@ import { openInjury, playerById, teamName, pushNarrative, type GameState } from 
 /** 검진에 걸리는 날 — 합의 다음 날부터 이틀 안 (실제 메디컬도 하루 이틀이다) */
 const MEDICAL_DAYS_MIN = 1;
 const MEDICAL_DAYS_MAX = 2;
+/** 소견이 붙은 뒤 감독이 결정할 시간 — 강행·철회·재협상을 고를 최소한의 여유 */
+const MEDICAL_DECISION_DAYS = 3;
 
 /** 아무 이력 없는 스물다섯 살이 소견을 받을 확률 */
 const FLAG_BASE = 0.05;
@@ -167,6 +169,20 @@ export function resolveMedical(
   if (flagged) {
     medical.status = "flagged";
     medical.note = concernOf(state, player);
+    /**
+     * **소견은 판단거리라서 판단할 시간이 있어야 한다.**
+     *
+     * `scheduleMedical`은 검진일까지만 기한을 늘려 둔다. 소견이 검진일에 붙으면
+     * 그날이 곧 마지막 날이라, 강행·철회·재협상 중 무엇도 고르지 못한 채 다음
+     * tick의 `expireNegotiations`가 협상을 지웠다 — 감독이 할 수 있는 일이 없는
+     * 소멸이다. 파는 쪽은 더 눈에 띈다: 사는 구단이 깎아 다시 부른 값에 답할
+     * 차례가 왔는데 답할 날이 없다.
+     *
+     * 창이 닫힌 뒤로 넘어갈 수도 있지만 그래도 낫다 — 그때는 계약이 막히는
+     * 이유를 화면이 말해 주고(`이적시장이 닫혀 있어…`) 철회는 여전히 고를 수 있다.
+     */
+    const decideBy = addDays(state.date, MEDICAL_DECISION_DAYS);
+    if (negotiation.expiresOn < decideBy) negotiation.expiresOn = decideBy;
   } else {
     medical.status = "passed";
   }

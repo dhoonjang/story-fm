@@ -7,6 +7,7 @@ import { leagueOfTeam, teamCatalogById } from "../data/team-catalog";
 import { euroCompetitionOf } from "../competition/europe";
 import { hashChannel } from "../core/rng";
 import { knowledgeOf, KNOWLEDGE_KO, type Knowledge } from "../squad/scouting";
+import { USER_WAGE_HEADROOM, wageRoomOf } from "../world/wages";
 import {
   activeContract,
   financeOf,
@@ -301,6 +302,23 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     if (terms.fee > ourFinance.transferBudget) {
       blockers.push(
         `이적 예산을 넘습니다 — 가용 £${(ourFinance.transferBudget / 1_000_000).toFixed(1)}M`,
+      );
+    }
+    /**
+     * **주급 여력** — 이적료를 낼 수 있어도 매주 나갈 돈이 없으면 못 데려온다.
+     * AI 시장이 지키는 것과 같은 자다(`wageRoomOf`) — 예전엔 이 관문이 AI에만
+     * 걸려 있어서 감독만 임금 총액을 무제한으로 불릴 수 있었다.
+     */
+    const room = wageRoomOf(
+      state.userTeamId,
+      weeklyWagesOf(state, state.userTeamId),
+      USER_WAGE_HEADROOM,
+    );
+    if (terms.weeklyWage > room) {
+      blockers.push(
+        room <= 0
+          ? "주급 여력이 없습니다 — 임금 총액이 이미 구단 한도를 넘었습니다"
+          : `주급 여력을 넘습니다 — 주당 £${Math.round(room / 1_000)}k까지 가능합니다`,
       );
     }
   }

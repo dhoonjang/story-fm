@@ -97,6 +97,37 @@ export function clubWageBudget(teamId: string): number {
   return TOP_CLUB_WEEKLY * TIER_FACTOR[team.tier] * BRAND_FACTOR[brand] * league;
 }
 
+/**
+ * 주급 여력 — **새 계약을 얹고도 구단 임금 예산 안인가.**
+ *
+ * 현금만 보면 이적료는 못 내도 주급은 낼 수 있는 것처럼 보인다. 이적료는 한 번
+ * 나가지만 주급은 매주 나가므로 파산의 실제 경로는 대개 이쪽이다.
+ */
+export const WAGE_HEADROOM = 1.1;
+
+/**
+ * 감독의 구단에 걸리는 천장 — **AI보다 헐겁다.**
+ *
+ * ⚠️ `clubWageBudget`은 주급을 **추정하기 위한** 모델이지 실측 스쿼드가 지키는
+ * 상한이 아니다. 시작 시점 실측: 아스날 1.14 · 맨시티 1.17 · 본머스 1.26배로
+ * 이미 예산 위에 앉아 있다. AI의 1.1을 그대로 감독에게 걸면 **첫날부터 모든
+ * 영입이 막힌다**(여력이 음수다). AI가 멀쩡한 건 넘은 구단이 그냥 안 사기
+ * 때문이고, 감독에게 같은 침묵은 게임이 멈추는 것과 같다.
+ *
+ * 그래서 관측된 띠(≤1.26) 위에 천장을 둔다 — 정상적인 영입은 지나가고,
+ * 계속 얹기만 하는 것은 막힌다. 이 관문의 일은 규율이 아니라 **폭주 방지**다.
+ */
+export const USER_WAGE_HEADROOM = 1.35;
+
+/** 이 구단이 지금 주급 총액 위에 얼마를 더 얹을 수 있나 (음수면 이미 넘었다) */
+export function wageRoomOf(
+  teamId: string,
+  currentWeekly: number,
+  headroom: number = WAGE_HEADROOM,
+): number {
+  return clubWageBudget(teamId) * headroom - currentWeekly;
+}
+
 // ── 개인 지분 ───────────────────────────────────────────
 
 /**
