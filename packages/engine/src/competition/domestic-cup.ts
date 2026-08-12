@@ -142,9 +142,41 @@ function dateIn(season: number, [month, day]: [number, number]): string {
   return `${year}-${pad(month)}-${pad(day)}`;
 }
 
-/** 이 단계의 목표 날짜 — 시즌 해를 붙인 실제 대회 일정 골격 */
-function stageTarget(season: number, cup: DomesticCupEntry, stage: MatchStage): string {
-  return dateIn(season, cup.windows[stage]);
+/**
+ * 이 단계의 목표 날짜 — 시즌 해를 붙인 실제 대회 일정 골격.
+ *
+ * ⚠️ **결승만 요일을 그 시즌에 맞춘다.** 카탈로그의 값은 고정 월·일이라 해가 바뀌면
+ * 요일이 밀리는데, 결승은 서는 요일이 둘뿐이라(토·일) 그 밀림이 치명적이다 — 쿠프
+ * 결승 5/22는 2027년엔 토요일이지만 2028년엔 월요일이고, 그때 앞으로만 훑으면
+ * 리그 최종 라운드와 대항전 결승이 막고 선 5월 말을 지나 **6월로 넘어간다**
+ * (실측: 쿠프·포칼 결승이 6/10에 앉아 시즌 밖으로 밀려났다).
+ *
+ * 다른 라운드는 설 수 있는 요일이 넷이라(화·수·토·일) 앞으로 하루이틀만 훑으면
+ * 자리가 나온다 — 굳이 당기지 않는다.
+ */
+export function stageTarget(season: number, cup: DomesticCupEntry, stage: MatchStage): string {
+  const target = dateIn(season, cup.windows[stage]);
+  return stage === "final" ? snapToWeekday(target, finalWeekdaysOf(cup)) : target;
+}
+
+/** 이 대회의 결승이 설 수 있는 요일 (0=일) — 규정이자 편성의 제약 */
+export function finalWeekdays(cup: DomesticCupEntry): number[] {
+  return [...finalWeekdaysOf(cup)];
+}
+
+/**
+ * 가장 가까운 허용 요일로 옮긴다 — 같은 거리면 뒤쪽.
+ * 사흘 안에서만 움직이므로 대회 골격은 그대로다.
+ */
+function snapToWeekday(date: string, weekdays: Set<number>): string {
+  if (weekdays.has(dayOfWeek(date))) return date;
+  for (let i = 1; i <= 3; i++) {
+    for (const offset of [i, -i]) {
+      const moved = addDays(date, offset);
+      if (weekdays.has(dayOfWeek(moved))) return moved;
+    }
+  }
+  return date;
 }
 
 /** 이 팀이 이 컵에서 아직 살아 있는가 — 추첨을 감독의 달력에 올릴지 정한다 */

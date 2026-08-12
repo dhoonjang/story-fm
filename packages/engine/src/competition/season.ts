@@ -9,12 +9,8 @@ import {
 import { toFreeAgency } from "../market/departures";
 import { TEAM_CATALOG, leagueOfTeam, teamCatalogById } from "../data/team-catalog";
 import { CUP_CATALOG, competitionShortName, isCup, isEuroCup } from "../data/cup-catalog";
-import {
-  domesticChampion,
-  domesticCupWinners,
-  domesticCupsOf,
-  reviewDomesticCups,
-} from "./domestic-cup";
+import { DOMESTIC_CUP_CATALOG } from "../data/domestic-cup-catalog";
+import { domesticChampion, domesticCupWinners, reviewDomesticCups } from "./domestic-cup";
 import { hasPendingDraw } from "./draw-schedule";
 import { isCupOnlyLeague, isMarketOnlyLeague, leagueName } from "../data/league-catalog";
 import { hasCups, scopedLeagues } from "../world/scope";
@@ -126,11 +122,16 @@ export function computeStandings(
 }
 
 /**
- * 시즌 종료 판정 — **유저 리그 + 유럽 대항전** 기준. 다른 리그는 며칠 차이로 끝날
- * 수 있으므로 전 리그를 기다리면 시즌 전환이 어중간하게 늦춰진다.
+ * 시즌 종료 판정 — **유저 리그 + 모든 컵** 기준. 다른 *리그*는 며칠 차이로 끝날 수
+ * 있으므로 전 리그를 기다리면 시즌 전환이 어중간하게 늦춰진다.
  *
- * 대항전을 기다리는 이유: 결승은 리그 최종전 **다음 토요일**이다. 리그만 보면
- * 결승을 치르지 않은 채 시즌이 넘어가 우승 팀이 없는 대회가 남는다.
+ * 컵을 기다리는 이유: 결승은 리그 최종전 **다음 주말**이다. 리그만 보면 결승을
+ * 치르지 않은 채 시즌이 넘어가 우승 팀이 없는 대회가 남는다.
+ *
+ * ⚠️ **국내 컵도 나라를 가리지 않는다.** 예전엔 우리 나라 컵만 기다렸는데, 그러면
+ * 쿠프 드 프랑스·DFB-포칼 결승이 안 치러진 채 시즌이 넘어가 우승 팀도 상금도 없이
+ * 사라졌다(실측: 시즌 2에서 두 대회). 그 나라 유럽 티켓 한 장이 순위만으로 나가고,
+ * 컵을 든 팀은 아무것도 받지 못한다. 대항전을 전부 기다리는 것과 같은 이유다.
  */
 export function allMatchesDone(state: GameState): boolean {
   // 아직 안 열린 추첨이 있으면 그 라운드의 경기는 **아직 존재하지도 않는다**.
@@ -138,11 +139,9 @@ export function allMatchesDone(state: GameState): boolean {
   if (hasPendingDraw(state)) return false;
 
   const league = leagueOfTeamIn(state, state.userTeamId);
-  // 우리 나라 국내 컵도 기다린다 — FA컵 결승을 남긴 채 시즌이 넘어가면 우승 팀이
-  // 없는 대회가 생기고, 다음 시즌 유럽 티켓 한 장이 사라진다.
   // 컵이 없는 세계(축소 세계)는 기다릴 대회 자체가 없다.
   const cups = hasCups(state.world);
-  const ourCups = cups ? domesticCupsOf(state.userTeamId) : [];
+  const domesticCups = cups ? DOMESTIC_CUP_CATALOG : [];
   const played = state.matches.every(
     (m) =>
       m.season !== state.season ||
@@ -150,14 +149,14 @@ export function allMatchesDone(state: GameState): boolean {
       !(
         m.competitionId === league ||
         isEuroCup(m.competitionId) ||
-        ourCups.some((c) => c.id === m.competitionId)
+        domesticCups.some((c) => c.id === m.competitionId)
       ),
   );
   if (!played) return false;
 
   // 컵은 **우승 팀이 나와야** 끝이다 — 경기가 다 끝났어도 다음 단계가 편성 전일 수 있다
   if (!cups) return true;
-  for (const cup of ourCups) if (!domesticChampion(state, cup.id)) return false;
+  for (const cup of domesticCups) if (!domesticChampion(state, cup.id)) return false;
   for (const cup of CUP_CATALOG) if (!euroChampion(state, cup.id)) return false;
   return true;
 }
