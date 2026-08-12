@@ -28,6 +28,7 @@ import {
   type BoardPoint,
 } from "@story-fm/domain";
 import type { GamePayload } from "@/lib/store";
+import type { MatchBoardOrder } from "@/lib/match-orders";
 import { slotOverallOf } from "@/lib/slot-overall";
 import { IconBoard, IconChevron } from "@/components/icons";
 
@@ -641,6 +642,20 @@ function PlayerDetail({
 }) {
   const axes = p as unknown as Record<string, number>;
   /**
+   * 역할은 서버 행이 아니라 **지금 전술판의 자리**에서 읽는다.
+   *
+   * 자리를 끌어 옮긴 직후에는 `slotCode`만 먼저 바뀌고 `p.roleOptions`는 자동 저장
+   * 응답 전까지 이전 자리의 목록이다. 그 값을 그대로 그리면 포지션 칩은 CM인데
+   * 역할은 DM(앵커·하프백)인 모순이 생긴다.
+   */
+  const roleOptions = slotCode ? rolesFor(slotCode) : p.roleOptions;
+  const requestedRole = roleId ?? p.roleId;
+  const activeRole = roleOptions.some((r) => r.id === requestedRole)
+    ? requestedRole
+    : slotCode
+      ? defaultRoleOf(slotCode)
+      : null;
+  /**
    * 포지션 칩 — 보유 목록에 **지금 맡은 자리**를 합친다.
    *
    * 예전엔 목록에 없는 자리를 "추정치(?)"로 따로 붙였는데, 적응도는
@@ -795,13 +810,13 @@ function PlayerDetail({
           {/* 세부 역할 — **자리 위에 얹히는 축**이다. 같은 센터백이라도 노넌센스와
             볼 플레잉은 요구 역량이 다르고, 그 차이는 옆의 자리 전력이 곧바로 답한다.
             자리를 옮기면 목록이 통째로 바뀐다 (그 자리에 없는 역할은 고를 수 없다) */}
-          {p.roleOptions.length > 1 && (
+          {roleOptions.length > 1 && (
             <div className="pd-roles">
               <span className="pd-axis-group-name">역할</span>
               <div className="pd-role-list">
-                {p.roleOptions.map((r) => (
+                {roleOptions.map((r) => (
                   <button
-                    className={`pd-role${r.id === (roleId ?? p.roleId) ? " on" : ""}`}
+                    className={`pd-role${r.id === activeRole ? " on" : ""}`}
                     key={r.id}
                     type="button"
                     title={r.desc}
@@ -946,7 +961,7 @@ export function SquadView({
    * 지금은 판에서 조작하면 그것이 **오퍼레이터 지시**가 되어 GM이 받는다 —
    * 시간 이동 손잡이와 같은 경로다.
    */
-  onOrder?: (text: string) => void;
+  onOrder?: (order: MatchBoardOrder) => void;
 }) {
   const squad = game.views.squad;
   const players = squad.players;
@@ -981,6 +996,8 @@ export function SquadView({
   const [selection, setSelection] = useState<Selection>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  /** 경기 중 판에서 만들었지만 아직 다음 진행 턴으로 보내지 않은 작업 사본 */
+  const [advisoryPending, setAdvisoryPending] = useState(false);
   const [squadFilter, setSquadFilter] = useState<"first" | "reserve">("first");
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: "role", desc: false });
 
@@ -1057,6 +1074,7 @@ export function SquadView({
   useEffect(() => {
     if (revRef.current !== savedRevRef.current) return;
     setBoard(serverBoard);
+    setAdvisoryPending(false);
   }, [serverBoard]);
 
   // 탭을 떠나 언마운트될 때 예약된 저장을 흘려보낸다 (마지막 조작을 잃지 않게)
@@ -1146,10 +1164,30 @@ export function SquadView({
       const [key, value] = Object.entries(patch)[0] ?? [];
       const axis = TACTIC_AXES.find((a) => a.key === key);
       if (!axis || typeof value !== "number") return;
-      return onOrder?.(`전술 변경 — ${axis.label} ${axis.values[value - 1] ?? value}`);
+      setBoard({ ...board, tactics: { ...board.tactics, [axis.key]: value } });
+      setAdvisoryPending(true);
+      return onOrder?.({ kind: "tactic", axis: axis.key, value });
     }
     if (!live) return;
     commit({ ...board, tactics: { ...board.tactics, ...patch } });
+  }
+
+  /** 새 자리에서도 유효한 역할은 유지하고, 호환되지 않을 때만 기본 역할로 바꾼다. */
+  function resetRolesForMovedPlayers(next: BoardState): BoardState {
+    const previousPosition = new Map(
+      board.occupants.map((id, i) => [id, positionAtPoint(board.points[i]!)]),
+    );
+    const roles = { ...next.roles };
+    next.occupants.forEach((id, i) => {
+      const position = positionAtPoint(next.points[i]!);
+      if (
+        previousPosition.get(id) !== position &&
+        !rolesFor(position).some((role) => role.id === roles[id])
+      ) {
+        roles[id] = defaultRoleOf(position);
+      }
+    });
+    return { ...next, roles };
   }
 
   /**
@@ -1187,7 +1225,7 @@ export function SquadView({
       bench = bench.filter((x) => x !== incoming.id);
       if (bench.length < MAX_BENCH) bench.push(outgoing);
     }
-    commit({ ...board, occupants, bench });
+    commit(resetRolesForMovedPlayers({ ...board, occupants, bench }));
   }
 
   /**
@@ -1197,7 +1235,24 @@ export function SquadView({
   function repositionSlot(index: number, point: BoardPoint) {
     const points = [...board.points];
     points[index] = snapToBoard(point);
-    commit({ ...board, points: separateBoardPoints(points, index) });
+    const next = resetRolesForMovedPlayers({
+      ...board,
+      points: separateBoardPoints(points, index),
+    });
+    if (advisory) {
+      const playerId = board.occupants[index];
+      const target = next.points[index];
+      if (!playerId || !target) return;
+      setBoard(next);
+      setAdvisoryPending(true);
+      return onOrder?.({
+        kind: "position",
+        playerId,
+        position: positionAtPoint(target),
+        point: target,
+      });
+    }
+    if (live) commit(next);
   }
 
   /**
@@ -1248,10 +1303,17 @@ export function SquadView({
       // 경기 중에 뜻이 있는 맞바꿈은 **그라운드 ↔ 벤치** 하나뿐이다
       const [outId, inId] = board.occupants.includes(aId) ? [aId, rowId] : [rowId, aId];
       if (!board.occupants.includes(outId) || board.occupants.includes(inId)) return;
+      const occupants = [...board.occupants];
+      const slot = occupants.indexOf(outId);
+      if (slot < 0) return;
+      occupants[slot] = inId;
+      const bench = board.bench.filter((id) => id !== inId);
+      if (bench.length < MAX_BENCH) bench.push(outId);
+      // 장부를 직접 저장하지 않는다. 다음 진행 턴의 substitute 검증 전까지는 작업 사본이다.
+      setBoard(resetRolesForMovedPlayers({ ...board, occupants, bench }));
+      setAdvisoryPending(true);
       setSelection(null);
-      return onOrder?.(
-        `교체 — ${byId.get(outId)?.name ?? outId} → ${byId.get(inId)?.name ?? inId}`,
-      );
+      return onOrder?.({ kind: "substitution", out: outId, in: inId });
     }
     if (!live || !selection) return;
     const aId = selection.kind === "slot" ? board.occupants[selection.index] : selection.id;
@@ -1299,7 +1361,7 @@ export function SquadView({
   const DRAG_THRESHOLD_PX = 4;
 
   function onSlotPointerDown(index: number, e: React.PointerEvent) {
-    if (!live || e.button !== 0 || !board.occupants[index]) return;
+    if (!usable || e.button !== 0 || !board.occupants[index]) return;
     const startX = e.clientX;
     const startY = e.clientY;
     const origin = board.points[index]!;
@@ -1356,7 +1418,7 @@ export function SquadView({
           Math.abs(q.x - dropPoint.x) < CHIP_SIZE.w / 2 &&
           Math.abs(q.y - dropPoint.y) < CHIP_SIZE.h / 2,
       );
-      if (onto >= 0) applySwap({ kind: "slot", index }, { kind: "slot", index: onto });
+      if (onto >= 0 && live) applySwap({ kind: "slot", index }, { kind: "slot", index: onto });
       else repositionSlot(index, dropPoint);
     };
 
@@ -1456,12 +1518,9 @@ export function SquadView({
    */
   function chooseRole(playerId: string, role: string) {
     if (advisory) {
-      const name = byId.get(playerId)?.name ?? playerId;
-      const code = board.occupants.includes(playerId)
-        ? positionAtPoint(board.points[board.occupants.indexOf(playerId)]!)
-        : null;
-      const label = rolesFor(code ?? "CM").find((r) => r.id === role)?.ko ?? role;
-      return onOrder?.(`역할 — ${name}을(를) ${label}로`);
+      setBoard({ ...board, roles: { ...board.roles, [playerId]: role } });
+      setAdvisoryPending(true);
+      return onOrder?.({ kind: "role", playerId, role });
     }
     if (!live) return;
     // 상세를 열어 둔 채 고른다 — 역할은 비교하며 바꾸는 값이다
@@ -1576,7 +1635,19 @@ export function SquadView({
     <div
       className={`squad-view${boardOpen ? "" : " folded"}`}
       data-testid="view-squad"
-      data-save={!live ? "locked" : saving ? "saving" : dirty ? "dirty" : "saved"}
+      data-save={
+        advisory
+          ? advisoryPending
+            ? "pending"
+            : "ready"
+          : !live
+            ? "locked"
+            : saving
+              ? "saving"
+              : dirty
+                ? "dirty"
+                : "saved"
+      }
     >
       <div className="squad-head">
         <div className="squad-summary">
@@ -1586,6 +1657,11 @@ export function SquadView({
           </span>
           {/* 1군·2군 인원은 오른쪽 명단 탭이 이미 세어 준다 — 여기선 매치데이 인원만 */}
           <span className="muted">매치데이 {xi.length + benchDesignated.length}인</span>
+          {advisoryPending && (
+            <span className="reg-chip" data-testid="match-orders-pending">
+              다음 진행에 반영
+            </span>
+          )}
           {/* 등록 명단 — 영입·승격의 진짜 벽이라 늘 보여야 한다 (U21은 명단 밖) */}
           <span
             className={`reg-chip${squad.registration.issues.length > 0 ? " over" : ""}`}
@@ -1769,8 +1845,8 @@ export function SquadView({
                       style={{ left: `${point.x}%`, top: `${point.y}%` }}
                       onPointerDown={(e) => onSlotPointerDown(i, e)}
                       onClick={() => {
-                        // 경기 중(비활성)엔 포인터 드래그를 걸지 않으므로 여기서 상세를 연다
-                        if (!live) clickSlot(i);
+                        // 완전히 잠긴 판만 포인터 핸들러가 없으므로 여기서 상세를 연다
+                        if (!usable) clickSlot(i);
                       }}
                       data-testid={`slot-${i}`}
                       title={
@@ -1799,6 +1875,9 @@ export function SquadView({
                       </span>
                       <span className="slot-name">
                         {p?.isCaptain ? "Ⓒ" : ""}
+                        {p?.squadNumber !== null && p?.squadNumber !== undefined && (
+                          <i className="shirt-no">{p.squadNumber}</i>
+                        )}
                         {p ? chipName(p.name) : "—"}
                       </span>
                       <span className="slot-meta">
@@ -2014,6 +2093,11 @@ function SquadTable({
                 {/* 이름은 자체 요소로 — 같은 칸에 화살표·표식·배지가 함께 서므로
                     "이 행의 선수 이름"을 읽을 자리가 하나 있어야 한다 */}
                 <span className="row-name">
+                  {p.squadNumber !== null && (
+                    <i className="shirt-no" title={`${p.squadNumber}번`}>
+                      {p.squadNumber}
+                    </i>
+                  )}
                   {p.isCaptain ? "Ⓒ " : ""}
                   {p.name}
                 </span>

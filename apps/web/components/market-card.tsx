@@ -143,16 +143,18 @@ export function MarketCardView({ card }: { card: MarketCard }) {
   );
 }
 
-/**
- * 이 호출이 카드로 서는가 — **`payload`가 카드면 칩을 세우지 않는다.**
- *
- * 옛 세이브에는 payload가 없다(그때는 칩이었다). 모양을 확인하고 아니면 null을
- * 돌려 칩으로 폴백한다 — 저장된 값을 믿고 그리다 화면이 죽는 일이 없게.
- */
-export function marketCardOf(payload: unknown): MarketCard | null {
-  if (typeof payload !== "object" || payload === null) return null;
-  const card = payload as Partial<MarketCard>;
-  if (typeof card.kind !== "string" || !(card.kind in KIND_ICON)) return null;
-  if (typeof card.playerName !== "string" || typeof card.counterpart !== "string") return null;
-  return card as MarketCard;
+/** payload가 없던 옛 세이브의 오퍼 판정 — 펼치는 칩 대신 결과 한 줄만 남긴다. */
+export function OfferVerdictCard({ summary, tone }: { summary: string; tone?: "good" | "bad" }) {
+  const medicalRenegotiation = summary.includes("메디컬 재협상");
+  return (
+    <div
+      className={`market-card compact${tone === "good" ? " accept" : tone === "bad" ? " reject" : ""}`}
+      data-testid="market-verdict-legacy"
+    >
+      <div className="mc-head">
+        <span className="mc-badge">{medicalRenegotiation ? "메디컬 재협상" : "오퍼 판정"}</span>
+        <span className="mc-summary">{summary}</span>
+      </div>
+    </div>
+  );
 }

@@ -6,6 +6,8 @@ import type { GamePayload } from "@/lib/store";
 import type { ChatTurn, ToolCallRecord } from "@story-fm/engine";
 import { ChatTurnView, turnStamp } from "./chat";
 import { hintsOfCall, panelHintsOf, type PanelHint } from "@/lib/panel-hints";
+import { chatForActiveMatch } from "@/lib/match-chat";
+import { mergeMatchOrders, type MatchBoardOrder } from "@/lib/match-orders";
 import { RailHints } from "./rail-hints";
 import { SquadView, CalendarView, FinanceView, CompetitionsView, CareerView } from "./office";
 import { MatchClock, MatchHeadline, MatchOpponent, MatchOverview } from "./match-view";
@@ -226,7 +228,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
    * 전술판에서 쌓인 조작 — 다음 턴에 함께 나간다 (대기 목록을 화면에 그리지는
    * 않는다: 판 자체가 바뀐 모습이 곧 표시다).
    */
-  const ordersRef = useRef<string[]>([]);
+  const ordersRef = useRef<MatchBoardOrder[]>([]);
   /**
    * 방금 끝난 경기 — **종료 화면**을 세운다.
    *
@@ -239,6 +241,22 @@ export function GameScreen({ gameId }: { gameId: string }) {
   const [matchTab, setMatchTab] = useState<MatchTab>("판세");
   /** 선수 탭의 하위 갈래 — 우리 팀과 상대는 담는 게 같고 정확도만 다르다 */
   const [squadSide, setSquadSide] = useState<"ours" | "theirs">("ours");
+  /** 자연어 포메이션 변경 뒤에는 진행하지 않고 우리 전술판을 검토 화면으로 연다. */
+  useEffect(() => {
+    const turn = game?.chat.at(-1);
+    if (!turn || turn.role !== "model" || turn.inMatch !== true) return;
+    const changedFormation = turn.toolCalls.some((call) => {
+      if (call.name !== "set_player_tactic" || !call.input || typeof call.input !== "object")
+        return false;
+      const input = call.input as { position?: unknown; point?: unknown };
+      return typeof input.position === "string" || input.point !== undefined;
+    });
+    if (!changedFormation) return;
+    setMatchTab("팀");
+    setSquadSide("ours");
+    setBoardClosing(false);
+    setBoardOpen(true);
+  }, [game?.chat]);
   /**
    * 마지막 턴이 바꾼 장부 — 아이콘 줄에 말풍선으로 선다.
    * 이미 연 화면은 빼고(`seenHints`), 지금 보고 있는 화면도 뺀다.
@@ -384,7 +402,9 @@ export function GameScreen({ gameId }: { gameId: string }) {
        * 한 번의 교체 판단이 여러 번의 왕복이 된다. 판은 언제든 만지되 그 변화는
        * 감독이 다음으로 말을 건네거나 경기를 진행할 때 한 묶음으로 전달된다.
        */
-      const orders = ordersRef.current;
+      // 실패 뒤 복원된 옛 대기열도 전송 직전에 다시 접는다. 같은 자리·역할을
+      // 여러 번 만진 기록이 과거 배열에 남아 있어도 마지막 선택 하나만 보낸다.
+      const orders = mergeMatchOrders([], ordersRef.current);
       ordersRef.current = [];
       if (text === undefined) setInput("");
       setBusy(true);
@@ -402,15 +422,22 @@ export function GameScreen({ gameId }: { gameId: string }) {
        * 것이라, 화면에는 진행 결과만 나타나야 한다. 기다리는 동안은 `busy`가
        * 띄우는 점 세 개(`.thinking`)가 이미 말해 준다.
        */
+      const activeMatchId = game.views.match?.matchId;
       const optimistic = operator
         ? null
-        : { role: "user" as const, text: message, toolCalls: [], at: game.date };
+        : {
+            role: "user" as const,
+            text: message,
+            toolCalls: [],
+            at: game.date,
+            ...(activeMatchId ? { inMatch: true as const, matchId: activeMatchId } : {}),
+          };
       if (optimistic) setGame((g) => (g ? { ...g, chat: [...g.chat, optimistic] } : g));
 
       /** 턴 실패 — 낙관적 유저 턴을 지우고 입력을 되돌린다 (채팅엔 아무것도 남기지 않는다) */
       const fail = (reason: string, detail?: string) => {
         // 실패한 턴은 없었던 일이 된다 — 지시도 대기함으로 돌려놓는다
-        if (orders.length > 0) ordersRef.current = [...orders, ...ordersRef.current];
+        if (orders.length > 0) ordersRef.current = mergeMatchOrders(orders, ordersRef.current);
         if (optimistic) {
           setGame((g) => (g ? { ...g, chat: g.chat.filter((t) => t !== optimistic) } : g));
         }
@@ -550,8 +577,9 @@ export function GameScreen({ gameId }: { gameId: string }) {
    * 화면이 통째로 죽는다 (실제로 그랬다).
    */
   const lastStamp = useMemo(() => {
-    for (let i = (game?.chat.length ?? 0) - 1; i >= 0; i--) {
-      const stamp = turnStamp(game!.chat[i]!);
+    const visible = chatForActiveMatch(game?.chat ?? [], game?.views.match?.matchId ?? null);
+    for (let i = visible.length - 1; i >= 0; i--) {
+      const stamp = turnStamp(visible[i]!);
       if (stamp) return stamp;
     }
     return null;
@@ -596,6 +624,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
    * 화면에 없다. 배너로 적지 않고 **창의 결**로 알린다.
    */
   const inMatch = game.views.match !== null;
+  /** 중계 화면은 코어의 별도 `casterHistory`와 같은 경계로 현재 경기만 보여 준다. */
+  const visibleChat = chatForActiveMatch(game.chat, game.views.match?.matchId ?? null);
   /**
    * 오른쪽 칸에 무엇이 서는가 — **경기 판이 우선이고 장부가 그것을 덮는다.**
    * 경기 중에 장부를 열면(달력·재정) 판 대신 장부가 선다: 그때 감독이 보려는 건
@@ -647,8 +677,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
        */
       onOrder={
         inMatch
-          ? (text) => {
-              ordersRef.current = [...ordersRef.current, text];
+          ? (order) => {
+              ordersRef.current = mergeMatchOrders(ordersRef.current, [order]);
             }
           : undefined
       }
@@ -688,7 +718,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
             prevStamp = turnStamp(turn) ?? prevStamp;
             return node;
           };
-          return groupMatchTurns(game.chat).map((block, bi) => {
+          return groupMatchTurns(visibleChat).map((block, bi) => {
             if (block.kind === "turn") return render(block.turn, block.at);
             const log = game.matchLogs[block.matchId];
             // 진행 중인 경기(결과가 아직 없다)는 접지 않는다 — 지금 보고 있는 것이다
@@ -995,26 +1025,42 @@ export function GameScreen({ gameId }: { gameId: string }) {
        * 짧게 보여주고 닫는다 — 자세한 건 대회·달력이 갖는다.
        */}
       {finished !== null && game.matchLogs[finished] && (
-        <div className="fulltime" data-testid="fulltime">
+        <div
+          className="fulltime"
+          data-testid="fulltime"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="fulltime-heading"
+        >
           <div className="fulltime-card">
-            <span className="fulltime-tag">경기 종료</span>
-            <b className="fulltime-score">{game.matchLogs[finished].score}</b>
-            <span className="fulltime-title">{game.matchLogs[finished].title}</span>
+            <header className="fulltime-header">
+              <span className="fulltime-tag" id="fulltime-heading">
+                경기 종료
+              </span>
+              <b className="fulltime-score">{game.matchLogs[finished].score}</b>
+              <span className="fulltime-title">{game.matchLogs[finished].title}</span>
+            </header>
             {game.matchLogs[finished].goals.length > 0 && (
-              <div className="fulltime-goals">
-                {game.matchLogs[finished].goals.map((g, i) => (
-                  <span key={i}>{g}</span>
-                ))}
-              </div>
+              <section className="fulltime-section">
+                <h3>득점 기록</h3>
+                <div className="fulltime-goals">
+                  {game.matchLogs[finished].goals.map((g, i) => (
+                    <span key={i}>{g}</span>
+                  ))}
+                </div>
+              </section>
             )}
             {game.matchLogs[finished].best.length > 0 && (
-              <div className="fulltime-best">
-                {game.matchLogs[finished].best.map((b) => (
-                  <span key={b.name}>
-                    {b.name} <b>{b.rating.toFixed(1)}</b>
-                  </span>
-                ))}
-              </div>
+              <section className="fulltime-section">
+                <h3>평점 상위</h3>
+                <div className="fulltime-best">
+                  {game.matchLogs[finished].best.map((b) => (
+                    <span key={b.name}>
+                      {b.name} <b>{b.rating.toFixed(1)}</b>
+                    </span>
+                  ))}
+                </div>
+              </section>
             )}
             <button
               className="primary-btn"
@@ -1037,8 +1083,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
          * 없다 생겼다 하면 폭을 이어서 애니메이션할 수도 없다.
          *
          * 오른쪽에 무엇이 들었는지는 `with-board`/`with-ledger`가 CSS에 알린다:
-         * 좁은 화면에서 판은 채팅 **위로 얹히고**(경기는 판세를 계속 봐야 한다)
-         * 장부는 채팅을 **덮는다**(반반이 성립하지 않는 폭이라).
+         * 경기 판은 좁은 화면에서도 채팅 **옆에 서고**, 장부만 채팅을 **덮는다**.
          */}
         <div
           className={`stage-split panel-split${rightOpen ? " open" : ""}${

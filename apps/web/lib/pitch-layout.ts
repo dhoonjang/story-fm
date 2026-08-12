@@ -32,7 +32,9 @@ function bandedLeft(y: number): number {
   const { defenseMid, midAttack } = PITCH_BANDS.edge;
   if (y >= defenseMid) return ((100 - y) / (100 - defenseMid)) * (100 / 3);
   if (y >= midAttack) return 100 / 3 + ((defenseMid - y) / (defenseMid - midAttack)) * (100 / 3);
-  return 200 / 3 + ((midAttack - y) / midAttack) * (100 / 3);
+  // 최전방은 골키퍼까지 밀어 넣지 않는다. 마지막 12%는 수비 라인 뒤 공간과
+  // 골키퍼의 자리로 남겨 ST가 상대 GK 위에 겹쳐 보이지 않게 한다.
+  return 200 / 3 + ((midAttack - y) / midAttack) * (100 / 3 - 12);
 }
 
 /** 마커가 경기장 밖으로 잘리지 않게 안쪽으로 들이는 여백(%) */

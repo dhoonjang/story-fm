@@ -1,14 +1,17 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import type { CardMark, ChatTurn, GoalMark, ToolCallRecord } from "@story-fm/engine";
 import { cutStamps } from "../lib/scene-stamp";
 import { hasRailHint } from "../lib/panel-hints";
 import { weaveTurn } from "../lib/turn-pieces";
 import { BROADCAST_SPEAKER, normalizeSpeaker } from "@story-fm/domain";
-import type { MarketCard, ScoutReportCard } from "@story-fm/domain";
-import { MarketCardView, marketCardOf } from "@/components/market-card";
+import type { ScoutReportCard } from "@story-fm/domain";
+import { MarketCardView, OfferVerdictCard } from "@/components/market-card";
+import { splitMarketCalls } from "@/lib/market-calls";
 import { money, wage } from "@/lib/money";
+import { ratingTone, scoutMargin, scoutValue } from "@/lib/scout-report-display";
 import { SKILL_LABEL } from "@/lib/skill-label";
 import type { SpeakerKind, SpeakerRole } from "@story-fm/engine";
 import {
@@ -287,17 +290,31 @@ function BookingCard({ card }: { card: CardMark }) {
 }
 
 /**
+ * 능력치 막대의 바닥 — 프로 선수의 축은 여기 아래로 잘 내려가지 않는다.
+ * 0에서 시작하면 열다섯 줄이 모두 반쯤 차 보여 강점과 약점이 뭉갠다.
+ */
+const BAR_FLOOR = 25;
+
+const barPct = (value: number) =>
+  Math.max(0, Math.min(100, ((value - BAR_FLOOR) / (99 - BAR_FLOOR)) * 100));
+
+/**
  * 스카우팅 보고서 — **며칠을 기다려 얻은 것이므로 한 장으로 편다.**
  *
  * 예전엔 "보고서 도착" 한 줄이 다이제스트에 묻혀 화면에 뜨지도 않았고, 보러
  * 가려면 선수 검색을 다시 해야 했다. 한 번 읽고 넘어갈 정보가 아니다 —
  * 능력치·주발·잠재력·몸값이 한자리에 있어야 "지금 지를까, 더 볼까"가 판단된다.
  *
- * **안개는 모양으로 드러난다** — 숫자를 단정할 수 없는 축(분석형)은 흐리게 두고
- * 물음표를 붙인다. 또렷한 숫자로 그리면 감독이 그걸 사실로 읽는다.
+ * **안개는 모양으로 드러난다.** 종합과 잠재력은 아예 등급으로 말하고(스카우트가
+ * 가져온 숫자에는 늘 ±가 붙는다), 축은 막대 끝이 오차만큼 번진다. 또렷한 숫자
+ * 하나로 그리면 감독이 그걸 사실로 읽는다.
  */
 function ScoutReport({ report: r }: { report: ScoutReportCard }) {
   const groups = [...new Set(r.attributes.map((a) => a.group))];
+  const overall = scoutValue(r.overall);
+  const overallMargin = scoutMargin(r.overall);
+  const potentialLow = r.potential ? scoutValue(r.potential.low) : null;
+  const potentialHigh = r.potential ? scoutValue(r.potential.high) : null;
   return (
     <div className="scout-report" data-testid="scout-report">
       <div className="sr-head">
@@ -306,15 +323,33 @@ function ScoutReport({ report: r }: { report: ScoutReportCard }) {
         <span className="sr-meta">
           {r.team} · {r.age}세 · {r.position}
         </span>
-        <span className="sr-ovr" title="관측된 종합">
-          {r.overall}
+        <span
+          className="sr-ovr"
+          data-rating={overall === null ? undefined : ratingTone(overall)}
+          title={
+            overall === null
+              ? undefined
+              : overallMargin > 0
+                ? `가장 잘 맞는 자리 기준 종합 추정치 ${overall} ±${overallMargin}`
+                : `가장 잘 맞는 자리 기준 종합 ${overall}`
+          }
+        >
+          <em>종합</em>
+          <b>
+            {overall ?? "—"}
+            {overallMargin > 0 && <i>±{overallMargin}</i>}
+          </b>
         </span>
       </div>
 
       <div className="sr-facts">
         <span>
           <em>잠재력</em>
-          <b>{r.potential ? `${r.potential.low}~${r.potential.high}` : "미지"}</b>
+          <b title={r.potential ? "잠재력 추정 구간" : "성장 여력을 짐작할 근거가 없다"}>
+            {potentialLow !== null && potentialHigh !== null
+              ? `${potentialLow}~${potentialHigh}`
+              : "미지"}
+          </b>
         </span>
         <span>
           <em>주발</em>
@@ -350,36 +385,47 @@ function ScoutReport({ report: r }: { report: ScoutReportCard }) {
         {r.positions.map((p) => (
           <span className={`sr-pos${p.natural ? " natural" : ""}`} key={p.position}>
             {p.position}
-            <i>{p.proficiency}</i>
           </span>
         ))}
       </div>
 
-      {groups.map((group) => (
-        <div className="sr-group" key={group}>
-          <div className="sr-group-name">{group}</div>
-          <div className="sr-axes">
+      <div className="sr-groups">
+        {groups.map((group) => (
+          <div className="sr-group" key={group}>
+            <div className="sr-group-name">{group}</div>
             {r.attributes
               .filter((a) => a.group === group)
               .map((a) => (
-                <span className={`sr-axis${a.margin > 0 ? " fuzzy" : ""}`} key={a.key}>
+                <span
+                  className={`sr-axis${a.margin > 0 ? " fuzzy" : ""}`}
+                  key={a.key}
+                  data-rating={ratingTone(a.value)}
+                >
                   <em>{a.ko}</em>
+                  {/**
+                   * 막대는 **확실한 몫까지 채우고 오차만큼 번진다** — 스카우팅을
+                   * 마쳐도 관측형 ±1 · 분석형 ±3이 남는다. 단정/추정 둘로만 그리면
+                   * "리포트를 받은 선수"와 "소문으로만 아는 선수"가 같아 보인다.
+                   */}
+                  <span
+                    className="sr-bar"
+                    aria-hidden
+                    style={
+                      {
+                        "--fill": barPct(a.value - a.margin),
+                        "--fog": barPct(a.value + a.margin) - barPct(a.value - a.margin),
+                      } as CSSProperties
+                    }
+                  />
                   <b>
                     {a.value}
-                    {/**
-                     * 흐림은 **정도로** 보인다 — 스카우팅을 마쳐도 관측형 ±1 ·
-                     * 분석형 ±3이 남는다. 단정/추정 둘로만 그리면 "리포트를 받은
-                     * 선수"와 "소문으로만 아는 선수"가 같아 보인다.
-                     */}
-                    {a.margin > 0 && <i>±{a.margin}</i>}
+                    {a.margin > 0 && <i className="est">±{a.margin}</i>}
                   </b>
                 </span>
               ))}
           </div>
-        </div>
-      ))}
-
-      <div className="sr-note">{r.note}</div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -516,10 +562,7 @@ export function ChatTurnView({
          * 카드를 그리는 호출은 칩을 세우지 않는다: 같은 사실이 두 번 나면 카드가
          * 칩의 부연처럼 읽힌다.
          */
-        const cards = mark.calls
-          .map((call) => marketCardOf(call.payload))
-          .filter((card): card is MarketCard => card !== null);
-        const chips = mark.calls.filter((call) => marketCardOf(call.payload) === null);
+        const { cards, verdicts, chips } = splitMarketCalls(mark.calls);
         return (
           <Fragment key={mark.key}>
             {/* 같은 자리에서 연달아 불린 스킬은 한 줄에 나란히 — 칩마다 문단을 끊지 않는다 */}
@@ -537,6 +580,9 @@ export function ChatTurnView({
             )}
             {cards.map((card, j) => (
               <MarketCardView card={card} key={j} />
+            ))}
+            {verdicts.map((call, j) => (
+              <OfferVerdictCard summary={call.summary} tone={call.tone} key={j} />
             ))}
           </Fragment>
         );

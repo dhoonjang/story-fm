@@ -39,6 +39,12 @@ describe("경기장 위의 자리 — 밴드가 격자와 맞는다", () => {
     expect(gk.top).toBeLessThan(100);
   });
 
+  it("스트라이커는 상대 골키퍼 앞 수비선 부근에 선다", () => {
+    const striker = pitchPointOf(anchorOf("ST"), "home");
+    const keeper = pitchPointOf(anchorOf("GK"), "away");
+    expect(keeper.left - striker.left).toBeGreaterThan(6);
+  });
+
   it("밴드 경계는 격자와 같은 값을 쓴다", () => {
     // 경계 바로 양쪽이 다른 칸에 떨어져야 한다
     const justBehind = pitchPointOf({ x: 50, y: PITCH_BANDS.edge.midAttack + 0.5 }, "home");

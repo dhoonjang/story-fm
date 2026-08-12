@@ -394,6 +394,31 @@ test("면담 시나리오 — 판정형 스킬과 사기 반영", async ({ page 
   await expect(chip).toBeVisible({ timeout: 15_000 });
   await expect(chip).toHaveClass(/good|bad/);
   await expect(page.getByTestId("hint-스쿼드")).toBeVisible();
+
+  /**
+   * 휴대폰 폭 — **좌표는 지우지 않는다.**
+   *
+   * 구단·감독·지금은 화면이 바뀌어도 그대로여야 하는 값이라, 좁아지면 군말만
+   * 줄이고(직함·연도) 아이콘 줄이 자기 줄을 받는다. 예전엔 감독 이름과 날짜를
+   * 차례로 `display: none` 했고, 그러다 띠가 격자 칸보다 넓어져 **아이콘 줄의
+   * 마지막 칸이 잘렸다** — 그 둘을 함께 지킨다.
+   */
+  await page.setViewportSize({ width: 375, height: 812 });
+  await expect(page.getByTestId("team-name")).toBeVisible();
+  await expect(page.getByTestId("game-date")).toBeVisible();
+  await expect(page.locator(".topbar-sub")).toContainText("박테스트");
+  const fits = await page.evaluate(() => {
+    const bar = document.querySelector(".topbar")!;
+    const last = [...bar.querySelectorAll(".rail button")].at(-1)!;
+    return {
+      barClipped: bar.scrollWidth > bar.clientWidth + 1,
+      // 마지막 칸이 띠 안에 온전히 들어와 있나 — 잘리면 오른쪽이 넘친다
+      lastBtnRight: Math.round(last.getBoundingClientRect().right),
+      barRight: Math.round(bar.getBoundingClientRect().right),
+    };
+  });
+  expect(fits.barClipped).toBe(false);
+  expect(fits.lastBtnRight).toBeLessThanOrEqual(fits.barRight);
 });
 
 /**

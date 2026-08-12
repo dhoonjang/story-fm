@@ -222,9 +222,8 @@ function edgeClass(ours: number, theirs: number): string {
  * 같은 곳에서 맞선다). 한 배열로 모아 밀어내야 상대와도 겹치지 않는다.
  *
  * 팀 안의 겹침(코드만 보면 센터백 둘이 한 점)은 전술판과 **같은 방식**으로 먼저
- * 푼다 — `separateBoardPoints`. 번호는 세이브에 등번호가 없어 자리로 매긴다:
- * 골키퍼가 1번이고 그다음은 자기 골문에서 먼 순서라, 어느 포메이션에서도 번호로
- * 라인을 안다.
+ * 푼다 — `separateBoardPoints`. 마커 숫자는 실제 등번호를 쓰고, 공식 번호가 아직
+ * 없는 선수만 자리 순번으로 폴백한다.
  */
 function placeBothSides(match: Match): {
   player: MatchPlayer;
@@ -233,11 +232,15 @@ function placeBothSides(match: Match): {
 }[] {
   const sides = (["home", "away"] as const).flatMap((side) => {
     const players = match.onPitch[side];
-    const board = separateBoardPoints(players.map((p) => anchorOf(p.position)));
+    const board = separateBoardPoints(players.map((p) => p.point ?? anchorOf(p.position)));
     return players
       .map((player, i) => ({ player, point: board[i]! }))
       .sort((a, b) => b.point.y - a.point.y || a.point.x - b.point.x)
-      .map((e, i) => ({ player: e.player, no: i + 1, at: pitchPointOf(e.point, side) }));
+      .map((e, i) => ({
+        player: e.player,
+        no: e.player.squadNumber ?? i + 1,
+        at: pitchPointOf(e.point, side),
+      }));
   });
   const spread = spreadMarkers(sides.map((s) => s.at));
   return sides.map((s, i) => ({ ...s, at: spread[i]! }));
@@ -322,7 +325,9 @@ function ZoneBars({ match }: { match: Match }) {
                 className={`mv-marker${player.ours ? " ours" : ""}${player.gassed ? " gassed" : ""}`}
                 key={player.id}
                 style={{ left: `${at.left}%`, top: `${at.top}%` }}
-                title={`${no}. ${player.name} (${player.position}) — 전력 ${player.effective}${player.gassed ? " · 다리가 멈췄다" : ""}`}
+                title={`${player.squadNumber === null ? "임시 " : ""}${no}번 · ${player.name} (${player.position}) — 전력 ${player.effective}${player.gassed ? " · 다리가 멈췄다" : ""}`}
+                aria-label={`${no}번 ${player.name}, ${player.position}, 전력 ${player.effective}`}
+                tabIndex={0}
               >
                 {no}
               </span>
@@ -477,7 +482,10 @@ function OpponentBoard({
               ].join("\n")}
             >
               <span className="slot-pos">{p.position}</span>
-              <span className="slot-name">{chipName(p.name)}</span>
+              <span className="slot-name">
+                {p.squadNumber !== null && <i className="shirt-no">{p.squadNumber}</i>}
+                {chipName(p.name)}
+              </span>
               <span className="slot-meta">
                 <b>{p.effective}</b>
                 {p.margin > 0 && <i className="slot-margin">±{p.margin}</i>}

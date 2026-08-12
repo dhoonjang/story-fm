@@ -9,7 +9,31 @@ const TurnSchema = z.object({
    * 전술판에서 쌓인 조작 — 이번 턴에 **함께** 실린다.
    * 감독의 말과 갈라서 오퍼레이터 턴으로 먼저 들어간다.
    */
-  orders: z.array(z.string().min(1).max(200)).max(12).optional(),
+  // 선발 11명의 자리와 역할을 한 번에 다시 짜면 최대 22개가 자연스럽게 생긴다.
+  orders: z
+    .array(
+      z.discriminatedUnion("kind", [
+        z.object({
+          kind: z.literal("position"),
+          playerId: z.string().min(1),
+          position: z.string(),
+          point: z.object({ x: z.number().min(0).max(100), y: z.number().min(0).max(100) }),
+        }),
+        z.object({ kind: z.literal("role"), playerId: z.string().min(1), role: z.string().min(1) }),
+        z.object({
+          kind: z.literal("substitution"),
+          out: z.string().min(1),
+          in: z.string().min(1),
+        }),
+        z.object({
+          kind: z.literal("tactic"),
+          axis: z.enum(["mentality", "defensiveLine", "pressing", "tempo", "width", "passStyle"]),
+          value: z.number().int().min(1).max(5),
+        }),
+      ]),
+    )
+    .max(64)
+    .optional(),
 });
 
 /**
@@ -29,7 +53,19 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return json({ error: "잘못된 요청 본문입니다" }, 400);
   }
   const body = TurnSchema.safeParse(raw);
-  if (!body.success) return json({ error: "메시지가 필요합니다" }, 400);
+  if (!body.success) {
+    const messageIssue = body.error.issues.some((issue) => issue.path[0] === "message");
+    const detail = body.error.issues
+      .map((issue) => `${issue.path.join(".") || "요청"}: ${issue.message}`)
+      .join(" / ");
+    return json(
+      {
+        error: messageIssue ? "메시지가 필요합니다" : "전술판 지시가 올바르지 않습니다",
+        detail,
+      },
+      400,
+    );
+  }
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({

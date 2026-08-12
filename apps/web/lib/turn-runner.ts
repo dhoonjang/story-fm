@@ -1,6 +1,46 @@
-import { loadGame, saveGame, takeEdits } from "@story-fm/engine";
+import {
+  loadGame,
+  refreshPacket,
+  saveGame,
+  setPlayerTactic,
+  setTactics,
+  substitutePlayer,
+  takeEdits,
+  type GameState,
+} from "@story-fm/engine";
 import { runGmTurn } from "@story-fm/agents";
 import { toPayload, type GamePayload } from "./store";
+import type { MatchBoardOrder } from "./match-orders";
+
+function applyMatchBoardOrder(state: GameState, order: MatchBoardOrder) {
+  switch (order.kind) {
+    case "position":
+      return setPlayerTactic(state, {
+        playerId: order.playerId,
+        position: order.position,
+        point: order.point,
+      });
+    case "role":
+      return setPlayerTactic(state, { playerId: order.playerId, role: order.role });
+    case "substitution":
+      return substitutePlayer(state, { out: order.out, in: order.in });
+    case "tactic":
+      switch (order.axis) {
+        case "mentality":
+          return setTactics(state, { mentality: order.value });
+        case "defensiveLine":
+          return setTactics(state, { defensiveLine: order.value });
+        case "pressing":
+          return setTactics(state, { pressing: order.value });
+        case "tempo":
+          return setTactics(state, { tempo: order.value });
+        case "width":
+          return setTactics(state, { width: order.value });
+        case "passStyle":
+          return setTactics(state, { passStyle: order.value });
+      }
+  }
+}
 
 /**
  * 게임별 턴 직렬화 — 같은 게임의 동시 요청(턴·라인업 편집)이 저장을 서로
@@ -73,7 +113,7 @@ export function runTurnLocked(
    * 때문이다(모델이 응답 중엔 턴을 보낼 수 없다). 대신 다음으로 말을 건네거나
    * 경기를 진행할 때 한 묶음으로 전달된다 — 그래서 **한 번의 LLM 호출**로 끝난다.
    */
-  orders?: readonly string[],
+  orders?: readonly MatchBoardOrder[],
 ): Promise<TurnOutcome> {
   return withGameLock(id, async () => {
     const state = loadGame(id);
@@ -86,11 +126,26 @@ export function runTurnLocked(
     const inMatch = state.phase === "match";
     const matchId = state.pendingMatch?.matchId;
     const mark = inMatch ? { inMatch: true as const, ...(matchId ? { matchId } : {}) } : {};
-    // 판에서 쌓인 조작 — 감독의 말이 아니므로 오퍼레이터 턴으로 먼저 선다
+    // 판에서 쌓인 조작은 LLM이 다시 해석하지 않는다. 구조화된 ID·값을 코어 스킬로
+    // 먼저 적용하고, 모델에는 이미 반영된 사실만 넘긴다.
+    const appliedOrders: string[] = [];
     if (orders !== undefined && orders.length > 0) {
+      for (const order of orders) {
+        const result = applyMatchBoardOrder(state, order);
+        if (!result.ok) {
+          return {
+            ok: false as const,
+            status: 400,
+            error: "전술판 지시를 반영하지 못했습니다",
+            detail: result.message,
+          };
+        }
+        appliedOrders.push(`전술판 적용 완료 — ${result.message} (다시 적용하지 말 것)`);
+      }
+      refreshPacket(state);
       state.chat.push({
         role: "operator",
-        text: orders.join("\n"),
+        text: appliedOrders.join("\n"),
         toolCalls: [],
         at: state.date,
         ...mark,
@@ -104,7 +159,7 @@ export function runTurnLocked(
       ...(inMatch ? { inMatch: true, ...(matchId ? { matchId } : {}) } : {}),
     });
     try {
-      const turn = await runGmTurn(state, message, onDelta, operator);
+      const turn = await runGmTurn(state, message, onDelta, operator, appliedOrders);
       state.chat.push({
         role: "model",
         text: turn.text,
