@@ -419,6 +419,22 @@ describe("도구 구성", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("시간 이동 중 방금 도착한 오퍼는 같은 턴에 판정하지 못한다", () => {
+    const state = game();
+    const calls: GmToolCall[] = [];
+    const negotiationId = "neg-just-arrived";
+    const tools = buildGmTools(state, calls, {
+      deferNegotiationIds: new Set([negotiationId]),
+    });
+    const respond = tools.find((t) => t.name === "respond_offer")!;
+
+    const res = respond.handle({ negotiationId, verdict: "accept" });
+
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain("감독에게 조건을 먼저 보고");
+    expect(calls).toHaveLength(0);
+  });
+
   it("스킬이 불린 자리를 남긴다 — 화면이 장면 중간에 칩을 세운다", () => {
     const state = game();
     const calls: GmToolCall[] = [];
@@ -446,6 +462,13 @@ describe("도구 구성", () => {
     expect(GM_SYSTEM).not.toContain("set_training");
     expect(DEFAULT_SKILL_DESCRIPTIONS.search_players).toContain("선수를 찾는다");
     expect(DEFAULT_SKILL_DESCRIPTIONS.set_training).toContain("훈련");
+  });
+
+  it("GM은 사용자의 감독 발화와 행동을 대신 쓰지 않는다", () => {
+    expect(GM_SYSTEM).toContain("감독은 사용자 입력에만 존재한다");
+    expect(GM_SYSTEM).toContain("감독 이름을 화자 태그로 쓰지 않는다");
+    expect(GM_SYSTEM).toContain("사용자 발화를 인용·요약·보충");
+    expect(GM_SYSTEM).toContain("환경의 반응만");
   });
 });
 
