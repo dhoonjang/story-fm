@@ -819,7 +819,7 @@ test("전술판 자유 배치 — 드래그로 한 자리만 세밀하게 조정
   // (배치 순서는 구단·시드마다 달라 `slot-1`이 9번일 수도 있다)
   const movingId = await page.evaluate(() => {
     const el = [...document.querySelectorAll(".pitch-slot")].find(
-      (e) => e.querySelector(".slot-pos")?.textContent !== "ST",
+      (e) => e.querySelector(".slot-code")?.textContent !== "ST",
     );
     return el?.getAttribute("data-testid") ?? "";
   });
@@ -850,7 +850,7 @@ test("전술판 자유 배치 — 드래그로 한 자리만 세밀하게 조정
 
   const slot1 = page.getByTestId(movingId);
   const beforeShape = await page.getByTestId("shape").textContent();
-  const beforeCode = await slot1.locator(".slot-pos").textContent();
+  const beforeCode = await slot1.locator(".slot-code").textContent();
   const beforeName = await slot1.locator(".slot-name").textContent();
   const chip = (await slot1.boundingBox())!;
   await page.mouse.move(chip.x + chip.width / 2, chip.y + chip.height / 2);
@@ -862,7 +862,7 @@ test("전술판 자유 배치 — 드래그로 한 자리만 세밀하게 조정
 
   await expect(page.locator(".pitch-chip.dragging")).toHaveCount(0);
   // 좌표가 옮겨졌으니 그 자리의 포지션 코드도 달라진다 (좌표가 포지션의 원본)
-  await expect(slot1.locator(".slot-pos")).not.toHaveText(beforeCode ?? "");
+  await expect(slot1.locator(".slot-code")).not.toHaveText(beforeCode ?? "");
   // 교환이 아니라 이동이므로 그 자리의 선수는 그대로다
   await expect(slot1.locator(".slot-name")).toHaveText(beforeName ?? "");
 
@@ -897,7 +897,7 @@ test("전술판 자유 배치 — 드래그로 한 자리만 세밀하게 조정
   // 9번을 조금 끌어내리면 CF가 된다 (요구 역량이 다른 자리 — 정통 9번이 아닌 전방)
   const st = page
     .locator(".pitch-slot")
-    .filter({ has: page.locator(".slot-pos", { hasText: /^ST$/ }) });
+    .filter({ has: page.locator(".slot-code", { hasText: /^ST$/ }) });
   await expect(st).toHaveCount(1);
   // 앞선 재배치로 이미 CF가 생겼을 수 있다 — 개수가 아니라 **이 선수**가 CF가
   // 됐는지를 본다 (시작 포메이션이 구단마다 달라 빈 자리 위치도 달라진다)
@@ -915,7 +915,7 @@ test("전술판 자유 배치 — 드래그로 한 자리만 세밀하게 조정
     page
       .locator(".pitch-slot")
       .filter({ has: page.locator(".slot-name", { hasText: stName }) })
-      .locator(".slot-pos"),
+      .locator(".slot-code"),
   ).toHaveText("CF");
   await expect(st).toHaveCount(0);
   // 명단의 포지션 열은 지금 맡은 자리를 그대로 보여준다 (저장 반영 후 CF)
@@ -937,13 +937,13 @@ test("전술판 자유 배치 — 드래그로 한 자리만 세밀하게 조정
 
   // 탭을 떠났다 돌아와도 옮긴 자리가 그대로다 (서버가 좌표를 기록했다)
   const movedName = (beforeName ?? "").replace("Ⓒ", "").trim();
-  const movedCode = await slot1.locator(".slot-pos").textContent();
+  const movedCode = await slot1.locator(".slot-code").textContent();
   await page.getByTestId("tab-달력").click();
   await page.getByTestId("tab-스쿼드").click();
   await expect(page.locator(".pitch-slot")).toHaveCount(11);
   const persisted = page.locator(".pitch-slot", { hasText: movedName });
   await expect(persisted).toHaveCount(1);
-  await expect(persisted.locator(".slot-pos")).toHaveText(movedCode ?? "");
+  await expect(persisted.locator(".slot-code")).toHaveText(movedCode ?? "");
 
   await expectOvrConsistent(page);
 });

@@ -4218,7 +4218,9 @@ textarea {
   width: 13cqw;
   min-width: 0;
   max-width: none;
-  padding: 0.8cqw 0.9cqw;
+  /* 좌우 여백은 **글자에 준다** — 칩 폭은 겹침 판정에 묶여 늘릴 수 없으니, 안에서
+     빼앗을 수 있는 것은 패딩뿐이다. 다섯 자짜리 성(페르난데스)이 이 4px로 산다 */
+  padding: 0.8cqw 0.45cqw;
   border-radius: 1.7cqw;
   gap: 0;
   /* 포인터 드래그가 스크롤·확대로 가로채이지 않게 */
@@ -4236,12 +4238,47 @@ textarea {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
   transform: translate(-50%, -50%) scale(1.08);
 }
+/**
+ * 자리 줄 — 번호 · 자리 · (역할). 자간을 벌리지 않는다: 0.5px씩 세 곳이면 역할
+ * 약칭이 칩 밖으로 밀린다.
+ *
+ * **좁아지면 접는다.** 판이 채팅 옆에 설 때 칩은 52px까지 줄어드는데, 그 폭에
+ * 세 조각을 한 줄로 넣을 방법은 없다(글자를 6px로 만드는 것은 방법이 아니다).
+ * 역할 약칭이 아래로 내려가고 칩이 한 줄만큼 높아진다 — 넘쳐서 이름 위로
+ * 겹치던 것보다 낫다.
+ */
 .pitch-slot .slot-pos {
-  font-size: clamp(7px, 2.1cqw, 10px);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  font-size: clamp(7px, 2.05cqw, 9.5px);
+  gap: 0 2px;
+  max-width: 100%;
+  letter-spacing: 0;
 }
 .pitch-slot .slot-name {
-  font-size: clamp(8px, 2.4cqw, 11.5px);
+  font-size: clamp(8px, 2.3cqw, 11px);
   max-width: 100%;
+}
+/* 자리 줄의 등번호 — 자리(금색)와 **다른 층**이라 색을 나눠 갖지 않는다.
+   여기서는 여백을 스스로 만들지 않는다 (`.slot-pos`의 gap이 그 몫이다) */
+.pitch-slot .slot-pos .shirt-no {
+  min-width: 0;
+  margin-right: 0;
+  color: var(--silver);
+  font-size: 0.95em;
+}
+/* 역할 약칭 — 판 위에서는 번호·자리와 한 줄을 나눠 쓰므로 표보다 작다 */
+.pitch-slot .slot-role {
+  font-size: clamp(6px, 1.7cqw, 8.5px);
+  padding: 0 2px;
+}
+/* 주장 표식 — 이름 앞의 한 글자. 이름과 같은 크기로 두면 성 한 자를 먹는다.
+   작아진 만큼 색은 원색으로 — 옅은 금색은 이 크기에서 그냥 회색 점이 된다 */
+.slot-cap {
+  font-size: 0.82em;
+  font-weight: 400;
+  color: var(--gold);
 }
 .shirt-no {
   display: inline-block;

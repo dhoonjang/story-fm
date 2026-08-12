@@ -473,6 +473,10 @@ export interface MatchPlayerView {
   name: string;
   /** 현재 소속팀 등번호. 아직 배정되지 않았으면 null */
   squadNumber: number | null;
+  /** 나이 — 안개를 지나지 않는다 (등번호와 같이 90분 동안 보이는 사실) */
+  age: number;
+  /** 이번 시즌 평점, 출전이 없으면 null — 공개 기록이라 상대도 같은 값이다 */
+  seasonRating: number | null;
   position: string;
   /** 경기 패킷이 계산에 사용한 실제 전술판 좌표. */
   point?: import("@story-fm/domain").BoardPoint;
@@ -1005,6 +1009,8 @@ function buildMatchView(state: GameState): MatchView | null {
       id: entry.id,
       name: entry.name,
       squadNumber: p?.squadNumber ?? null,
+      age: p ? ageOf(p.birthdate, state.date) : 0,
+      seasonRating: seasonRating(seasonStatOf(state, entry.id)),
       position: entry.position,
       ...(entry.point ? { point: entry.point } : {}),
       effective: Math.max(1, Math.round(entry.effective) + observation.overallOffset),

@@ -31,14 +31,12 @@ import type { GamePayload } from "@/lib/store";
 import type { MatchBoardOrder } from "@/lib/match-orders";
 import { slotOverallOf } from "@/lib/slot-overall";
 import { IconBoard, IconChevron } from "@/components/icons";
+import { PitchChip, PitchGround } from "./pitch";
 
 const money = (n: number) => `£${(n / 1e6).toFixed(1)}M`;
 
 /** 전술판 슬롯 하나 — 좌표가 원본, 포지션 코드는 `positionAtPoint`의 파생 (domain tactics.ts) */
 type BoardSlot = { playerId: string; point: BoardPoint } | null;
-
-/** 칩에 쓰는 이름 — 성(마지막 어절)만. 좁은 칩에서 "카이 하베…"보다 "하베르츠"가 읽힌다 */
-const chipName = (name: string) => name.trim().split(/\s+/).at(-1) ?? name;
 
 /**
  * 감독 능력치 5축 — **오각형**.
@@ -185,44 +183,10 @@ const TACTIC_AXES = [
  *
  * 좌표는 판 기준 %(위가 상대 골문). 이 눈금은 **화면의 감각**일 뿐 시뮬레이션
  * 수치가 아니다 — 경기 판정은 코어가 전력 패킷으로 따로 한다 (match-sim.md).
- */
-/**
- * 눈금은 **기본 배치의 칩 자리에 맞춰** 잡았다 — 보통(3)일 때 수비 라인은 센터백
- * 높이(75%)에, 폭은 윙어 자리(14%/86%)에 선다. 선이 칩과 어긋나 있으면 그림이
- * 배치를 설명하지 못하고 따로 도는 장식이 된다.
- */
-const DEF_LINE_TOP = (v: number) => 87 - (v - 1) * 6;
-const PRESS_LINE_TOP = (v: number) => 70 - (v - 1) * 11;
-const WIDTH_INSET = (v: number) => 24 - (v - 1) * 5;
-
-/**
- * 판 위의 전술 선 — 수비 라인 · 압박 시작선 · 공격 폭.
  *
- * 여섯 축 중 셋만 긋는다. 이 셋은 **자리를 뜻하는 축**이라 판 위에 그대로 앉지만,
- * 템포·패스는 공간이 아니라 속도와 거리라 선으로 그으면 뜻이 어긋난다. 멘탈리티는
- * 칩이 어디 서 있는지가 이미 말한다.
- *
- * 압박선은 늘 수비 라인보다 위다 — 압박은 그 앞에서 시작하는 것이라, 눈금이
- * 뒤집혀도(낮은 압박 + 높은 라인) 선이 교차하면 그림이 거짓말이 된다.
+ * 선을 긋는 것은 `pitch.tsx`의 그라운드다 (우리 판·상대 판이 같이 쓴다). 여기
+ * `TacticsPanel`은 그 값을 **만지는** 자리다.
  */
-export function PitchTactics({
-  tactics,
-}: {
-  /** 자리를 뜻하는 세 축만 받는다 — 우리 판(`TacticsView`)과 상대 판이 같이 쓴다 */
-  tactics: { defensiveLine: number; pressing: number; width: number };
-}) {
-  const def = DEF_LINE_TOP(tactics.defensiveLine);
-  const press = Math.min(PRESS_LINE_TOP(tactics.pressing), def - 6);
-  const inset = WIDTH_INSET(tactics.width);
-  return (
-    <div className="pitch-tactics" aria-hidden>
-      <span className="tac-width" style={{ left: `${inset}%`, right: `${inset}%` }} />
-      <span className="tac-block" style={{ top: `${def}%` }} />
-      <span className="tac-line press" style={{ top: `${press}%` }} />
-      <span className="tac-line def" style={{ top: `${def}%` }} />
-    </div>
-  );
-}
 
 /**
  * 이 선수가 그 자리에서 갖는 적응도(표시용) — 규칙은 domain의 `positionProficiency`
@@ -1541,7 +1505,7 @@ export function SquadView({
   const chipClass = (p: SquadRow | undefined, selected: boolean, code: string | null) => {
     const group = code ? (positionGroupOf(code) ?? null) : null;
     return (
-      `pitch-chip${group ? ` g-${group.toLowerCase()}` : ""}` +
+      `${group ? `g-${group.toLowerCase()}` : ""}` +
       `${selected ? " selected" : ""}${p && !p.available ? " unavailable" : ""}`
     );
   };
@@ -1786,117 +1750,93 @@ export function SquadView({
            * 평소 레이아웃에서는 `display: contents`라 이 래퍼가 없는 것과 같다.
            */}
           <div className="board-stack">
-            {/* 전술판은 남는 높이에 맞춰 줄어든다 — 감싸는 칸이 그 높이를 알려 준다 */}
-            <div className="pitch-wrap">
-              <div
-                ref={boardRef}
-                className={`pitch-board${usable ? " editing" : ""}`}
-                data-testid="pitch-board"
-              >
-                <div className="pitch-lines" />
-                <div className="pitch-box top" />
-                <div className="pitch-box small top" />
-                <div className="pitch-box bottom" />
-                <div className="pitch-box small bottom" />
-                <PitchTactics tactics={board.tactics} />
-                <span className="pitch-zone" style={{ top: "6%" }}>
-                  공격
-                </span>
-                <span className="pitch-zone" style={{ top: "46%" }}>
-                  중원
-                </span>
-                <span className="pitch-zone" style={{ top: "84%" }}>
-                  수비
-                </span>
-                {boardSlots.map((slot, i) => {
-                  const p = slot ? byId.get(slot.playerId) : undefined;
-                  // 끌고 있는 칩은 미리보기 좌표로 그린다 (놓기 전엔 실제 배치를 안 바꾼다)
-                  const dragging = dragIndex === i;
-                  const point = dragging && dragPoint ? dragPoint : slot?.point;
-                  const code = point ? positionAtPoint(point) : null;
-                  /**
-                   * 칩의 전력은 **좌표에서 즉시** 나온다 — 서버가 준 값은 저장된 배치
-                   * 기준이라 자동 저장(600ms 디바운스)과 왕복이 끝나야 바뀌는데, 끌어
-                   * 놓고 한 박자 뒤에 숫자가 따라오면 "이 자리로 옮기면 얼마가 되나"를
-                   * 손으로 더듬어 볼 수가 없다.
-                   *
-                   * ⚠️ 계산은 **명단과 같은 함수**(`slotOverallOf`)다. 여기서만 `roleFit`을
-                   * 다시 굴리던 때는 같은 선수의 OVR이 칩과 명단에서 달랐다.
-                   */
-                  const liveOverall = p ? slotOverallOf(p, code, roleOf(p)) : null;
-                  const selected = selection?.kind === "slot" && selection.index === i;
-                  /**
-                   * 맡은 역할 — **기본 역할이 아닐 때만** 칩에 뜬다.
-                   * 전원에게 붙이면 열한 칩이 다 같은 말(센터백·풀백·윙어)을 달고 있어
-                   * 읽히지 않는다. 감독이 실제로 **고른** 것만 보이면 판을 훑을 때
-                   * 그 선택이 눈에 남는다. 표기는 FM 약칭(BPD·IWB·RGA)이다 —
-                   * 칩에 들어갈 만큼 짧으면서 감독이 이미 아는 말이다.
-                   */
-                  const liveRole = p ? roleOf(p) : undefined;
-                  const roleTag =
-                    p && code && liveRole && liveRole !== defaultRoleOf(code)
-                      ? (rolesFor(code).find((r) => r.id === liveRole) ?? null)
-                      : null;
-                  if (!point) return null;
-                  return (
-                    <button
-                      key={i}
-                      className={`pitch-slot ${chipClass(p, selected, code)}${dragging ? " dragging" : ""}`}
-                      style={{ left: `${point.x}%`, top: `${point.y}%` }}
-                      onPointerDown={(e) => onSlotPointerDown(i, e)}
-                      onClick={() => {
-                        // 완전히 잠긴 판만 포인터 핸들러가 없으므로 여기서 상세를 연다
-                        if (!usable) clickSlot(i);
-                      }}
-                      data-testid={`slot-${i}`}
-                      title={
-                        p
-                          ? // 명단 OVR 칸의 툴팁과 **같은 두 줄**이다 — 같은 숫자를
-                            // 두 화면에서 다른 말로 설명하면 규칙이 없어 보인다
-                            [
-                              `${p.name}`,
-                              `${code} 자리 기준 ${liveOverall ?? p.overall} — 경기에서 쓰이는 값입니다`,
-                              liveOverall !== null && liveOverall !== p.overall
-                                ? `주 포지션(${p.position}) 기준 ${p.overall}`
-                                : null,
-                            ]
-                              .filter(Boolean)
-                              .join("\n")
-                          : (code ?? "")
-                      }
-                    >
-                      <span className="slot-pos">
-                        {code}
-                        {roleTag && (
-                          <em className="slot-role" title={`${roleTag.ko} — ${roleTag.desc}`}>
-                            {roleTag.abbr}
-                          </em>
-                        )}
-                      </span>
-                      <span className="slot-name">
-                        {p?.isCaptain ? "Ⓒ" : ""}
-                        {p?.squadNumber !== null && p?.squadNumber !== undefined && (
-                          <i className="shirt-no">{p.squadNumber}</i>
-                        )}
-                        {p ? chipName(p.name) : "—"}
-                      </span>
-                      <span className="slot-meta">
-                        {/* 칩은 "그 자리에 선 선수"라 주 포지션 값이 아니라 자리 값이 맞다.
-                          자리를 못 보는 선수라는 사실은 옆의 적응도 게이지가 이미 말하므로
-                          숫자에 따로 표식을 붙이지 않는다 — 툴팁이 주 포지션 값을 갖는다. */}
-                        {/* 이 자리에서 내는 전력 하나만 둔다. 자리가 안 맞으면 이 숫자가
-                          이미 낮다 — 옆에 "포지션 적응도"를 따로 세우면 감독이 두 축을
-                          머리로 합쳐야 한다 (적응도는 하나다) */}
-                        <b>{p ? (liveOverall ?? p.overall) : ""}</b>
-                        {p && <Margin observation={p.observation} />}
-                        {p && !p.available && <span className="slot-flag">✖</span>}
-                        {p?.hasIssue && <span className="slot-flag warn">!</span>}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            {/* 그라운드와 칩은 상대 판과 **같은 컴포넌트**다 (pitch.tsx) — 상태만 얹는다 */}
+            <PitchGround
+              boardRef={boardRef}
+              variant={usable ? "editing" : undefined}
+              testId="pitch-board"
+              tactics={board.tactics}
+            >
+              {boardSlots.map((slot, i) => {
+                const p = slot ? byId.get(slot.playerId) : undefined;
+                // 끌고 있는 칩은 미리보기 좌표로 그린다 (놓기 전엔 실제 배치를 안 바꾼다)
+                const dragging = dragIndex === i;
+                const point = dragging && dragPoint ? dragPoint : slot?.point;
+                const code = point ? positionAtPoint(point) : null;
+                /**
+                 * 칩의 전력은 **좌표에서 즉시** 나온다 — 서버가 준 값은 저장된 배치
+                 * 기준이라 자동 저장(600ms 디바운스)과 왕복이 끝나야 바뀌는데, 끌어
+                 * 놓고 한 박자 뒤에 숫자가 따라오면 "이 자리로 옮기면 얼마가 되나"를
+                 * 손으로 더듬어 볼 수가 없다.
+                 *
+                 * ⚠️ 계산은 **명단과 같은 함수**(`slotOverallOf`)다. 여기서만 `roleFit`을
+                 * 다시 굴리던 때는 같은 선수의 OVR이 칩과 명단에서 달랐다.
+                 */
+                const liveOverall = p ? slotOverallOf(p, code, roleOf(p)) : null;
+                const selected = selection?.kind === "slot" && selection.index === i;
+                /**
+                 * 맡은 역할 — **기본 역할이 아닐 때만** 칩에 뜬다.
+                 * 전원에게 붙이면 열한 칩이 다 같은 말(센터백·풀백·윙어)을 달고 있어
+                 * 읽히지 않는다. 감독이 실제로 **고른** 것만 보이면 판을 훑을 때
+                 * 그 선택이 눈에 남는다. 표기는 FM 약칭(BPD·IWB·RGA)이다 —
+                 * 칩에 들어갈 만큼 짧으면서 감독이 이미 아는 말이다.
+                 */
+                const liveRole = p ? roleOf(p) : undefined;
+                const roleTag =
+                  p && code && liveRole && liveRole !== defaultRoleOf(code)
+                    ? (rolesFor(code).find((r) => r.id === liveRole) ?? null)
+                    : null;
+                if (!point) return null;
+                return (
+                  <PitchChip
+                    key={i}
+                    as="button"
+                    variant={`${chipClass(p, selected, code)}${dragging ? " dragging" : ""}`}
+                    style={{ left: `${point.x}%`, top: `${point.y}%` }}
+                    onPointerDown={(e) => onSlotPointerDown(i, e)}
+                    onClick={() => {
+                      // 완전히 잠긴 판만 포인터 핸들러가 없으므로 여기서 상세를 연다
+                      if (!usable) clickSlot(i);
+                    }}
+                    testId={`slot-${i}`}
+                    title={
+                      p
+                        ? // 명단 OVR 칸의 툴팁과 **같은 두 줄**이다 — 같은 숫자를
+                          // 두 화면에서 다른 말로 설명하면 규칙이 없어 보인다
+                          [
+                            `${p.name}`,
+                            `${code} 자리 기준 ${liveOverall ?? p.overall} — 경기에서 쓰이는 값입니다`,
+                            liveOverall !== null && liveOverall !== p.overall
+                              ? `주 포지션(${p.position}) 기준 ${p.overall}`
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join("\n")
+                        : (code ?? "")
+                    }
+                    code={code}
+                    squadNumber={p?.squadNumber}
+                    roleTag={roleTag}
+                    captain={p?.isCaptain}
+                    name={p?.name ?? null}
+                    /* 칩은 "그 자리에 선 선수"라 주 포지션 값이 아니라 자리 값이 맞다.
+                         자리가 안 맞으면 이 숫자가 이미 낮다 — 옆에 "포지션 적응도"를
+                         따로 세우면 감독이 두 축을 머리로 합쳐야 한다 (적응도는 하나다).
+                         툴팁이 주 포지션 값을 갖는다 */
+                    ovr={p ? (liveOverall ?? p.overall) : ""}
+                    metaExtra={
+                      p && (
+                        <>
+                          <Margin observation={p.observation} />
+                          {!p.available && <span className="slot-flag">✖</span>}
+                          {p.hasIssue && <span className="slot-flag warn">!</span>}
+                        </>
+                      )
+                    }
+                  />
+                );
+              })}
+            </PitchGround>
 
             <TacticsPanel tactics={board.tactics} editing={usable} onChange={changeTactics} />
           </div>

@@ -5,7 +5,7 @@ import type { OfficeViews } from "@story-fm/engine";
 import { anchorOf, positionGroupOf, separateBoardPoints } from "@story-fm/domain";
 import { pitchPointOf, spreadMarkers, type PitchPoint } from "@/lib/pitch-layout";
 import { IconBoard } from "@/components/icons";
-import { PitchTactics } from "./office";
+import { PitchChip, PitchGround } from "./pitch";
 
 type Match = NonNullable<OfficeViews["match"]>;
 type MatchPlayer = Match["onPitch"]["home"][number];
@@ -44,9 +44,10 @@ export function MatchOverview({ match }: { match: Match }) {
  * 따로 짠 표(`mv-side`)를 세워서, 같은 자리에 있어야 할 것들이 두 탭에서 다른
  * 높이·다른 모양으로 서고 접힘도 따로 놀았다.
  *
- * 다른 것은 **아는 것뿐**이다. 나이·적응·폼·평점은 남의 팀에서 알 수 없으니 열이
- * 없고, 전력은 오차를 달고(`±`) 체력은 값이 아니라 구간이다. 조작도 없다 —
- * 상대 판은 읽는 것이지 고치는 것이 아니다.
+ * 다른 것은 **아는 것뿐**이다. 적응·폼은 남의 팀에서 읽을 수 없으니 열이 없고,
+ * 전력은 오차를 달고(`±`) 체력은 값이 아니라 구간이다. 등번호·나이·시즌 평점은
+ * 안개 밖의 공개 사실이라 우리 표와 같이 선다. 조작도 없다 — 상대 판은 읽는
+ * 것이지 고치는 것이 아니다.
  */
 export function MatchOpponent({
   match,
@@ -446,60 +447,34 @@ function OpponentBoard({
 }) {
   const points = separateBoardPoints(players.map((p) => anchorOf(p.position)));
   return (
-    <div className="pitch-wrap">
-      <div className="pitch-board" data-testid="opponent-board">
-        <div className="pitch-lines" />
-        <div className="pitch-box top" />
-        <div className="pitch-box small top" />
-        <div className="pitch-box bottom" />
-        <div className="pitch-box small bottom" />
-        {/* 상대도 같은 선을 긋는다 — 어디까지 내려서고 어디서부터 쫓는지가 판에 보인다 */}
-        <PitchTactics tactics={tactics} />
-        <span className="pitch-zone" style={{ top: "6%" }}>
-          공격
-        </span>
-        <span className="pitch-zone" style={{ top: "46%" }}>
-          중원
-        </span>
-        <span className="pitch-zone" style={{ top: "84%" }}>
-          수비
-        </span>
-        {players.map((p, i) => {
-          const point = points[i]!;
-          const group = positionGroupOf(p.position);
-          return (
-            <span
-              key={p.id}
-              // 우리 판의 칩과 **같은 클래스**를 쓴다 — 크기·색·포지션군 구분이
-              // 두 화면에서 갈리면 나란히 견줄 수가 없다
-              className={`pitch-slot pitch-chip theirs${group ? ` g-${group.toLowerCase()}` : ""}${p.gassed ? " gassed" : ""}`}
-              style={{ left: `${point.x}%`, top: `${point.y}%` }}
-              data-testid={`opp-slot-${p.id}`}
-              title={[
-                p.name,
-                `${p.position} 자리 기준 ${p.effective}${p.margin > 0 ? ` (±${p.margin})` : ""}`,
-                `${p.condition.label} — 체력 ${p.condition.low}~${p.condition.high}`,
-              ].join("\n")}
-            >
-              <span className="slot-pos">{p.position}</span>
-              <span className="slot-name">
-                {p.squadNumber !== null && <i className="shirt-no">{p.squadNumber}</i>}
-                {chipName(p.name)}
-              </span>
-              <span className="slot-meta">
-                <b>{p.effective}</b>
-                {p.margin > 0 && <i className="slot-margin">±{p.margin}</i>}
-              </span>
-            </span>
-          );
-        })}
-      </div>
-    </div>
+    /* 상대도 같은 그라운드에 같은 칩으로 선다 — 두 판이 한 컴포넌트를 쓰므로
+       한쪽만 손질돼 서로 다른 모양이 되는 일이 없다 (pitch.tsx) */
+    <PitchGround testId="opponent-board" tactics={tactics}>
+      {players.map((p, i) => {
+        const point = points[i]!;
+        const group = positionGroupOf(p.position);
+        return (
+          <PitchChip
+            key={p.id}
+            variant={`theirs${group ? ` g-${group.toLowerCase()}` : ""}${p.gassed ? " gassed" : ""}`}
+            style={{ left: `${point.x}%`, top: `${point.y}%` }}
+            testId={`opp-slot-${p.id}`}
+            title={[
+              p.name,
+              `${p.position} 자리 기준 ${p.effective}${p.margin > 0 ? ` (±${p.margin})` : ""}`,
+              `${p.condition.label} — 체력 ${p.condition.low}~${p.condition.high}`,
+            ].join("\n")}
+            code={p.position}
+            squadNumber={p.squadNumber}
+            name={p.name}
+            ovr={p.effective}
+            metaExtra={p.margin > 0 && <i className="slot-margin">±{p.margin}</i>}
+          />
+        );
+      })}
+    </PitchGround>
   );
 }
-
-/** 칩에는 성만 — 전체 이름은 두 줄로 접혀 판이 어수선해진다 */
-const chipName = (name: string) => name.trim().split(/\s+/).at(-1) ?? name;
 
 /**
  * 득점 기록 — **스코어 옆에 이름이 선다.**
@@ -610,8 +585,10 @@ function TeamTotals({ players }: { players: MatchPlayer[] }) {
  * 정렬 손잡이는 없다 — 상대 명단은 훑는 것이지 다루는 것이 아니고, 자리 순으로
  * 서 있어야 왼쪽 판과 같은 순서로 읽힌다.
  *
- * 열이 넷뿐인 것은 아는 것이 넷뿐이기 때문이다. 우리 표에서 나이·적응·폼·평점은
- * `hide-sm`으로 좁을 때 접히는 열이라, 좁은 화면에서는 두 표가 같은 열을 세운다.
+ * 없는 열은 **모르는 것**뿐이다 — 적응·폼은 남의 팀에서 읽을 수 없다. 등번호·
+ * 나이·시즌 평점은 90분 동안 보이는 공개 사실이라 우리 표와 같은 자리·같은
+ * 표기로 선다. 우리 표에서 나이·평점은 `hide-sm`으로 좁을 때 접히는 열이라,
+ * 좁은 화면에서는 두 표가 같은 열을 세운다.
  */
 function OpponentTable({ players, bench }: { players: MatchPlayer[]; bench: MatchPlayer[] }) {
   const groups = [
@@ -624,8 +601,10 @@ function OpponentTable({ players, bench }: { players: MatchPlayer[]; bench: Matc
         <tr>
           <th>선수</th>
           <th>포지션</th>
+          <th className="hide-sm">나이</th>
           <th>OVR</th>
           <th>체력</th>
+          <th className="hide-sm">평점</th>
         </tr>
       </thead>
       <tbody>
@@ -634,7 +613,7 @@ function OpponentTable({ players, bench }: { players: MatchPlayer[]; bench: Matc
             {/* 칸이 갈리는 자리는 **선 하나** — 우리 표와 같다(이름은 왼쪽 선 색이 말한다) */}
             {gi > 0 && (
               <tr className="tier-head" data-tier={g.slug} aria-hidden>
-                <td colSpan={4} />
+                <td colSpan={6} />
               </tr>
             )}
             {g.rows.map((p) => (
@@ -645,7 +624,15 @@ function OpponentTable({ players, bench }: { players: MatchPlayer[]; bench: Matc
                 title={statLine(p.tally)}
               >
                 <td className="squad-name">
-                  <span className="row-name">{p.name}</span>
+                  {/* 등번호는 이름 앞에 — 우리 명단·전술판 칩과 같은 자리·같은 모양 */}
+                  <span className="row-name">
+                    {p.squadNumber !== null && (
+                      <i className="shirt-no" title={`${p.squadNumber}번`}>
+                        {p.squadNumber}
+                      </i>
+                    )}
+                    {p.name}
+                  </span>
                   {/* 다리가 멈춘 선수 — 우리 표의 상태 표식(부상·정지)과 같은 자리·같은 모양 */}
                   {p.gassed && (
                     <span className="tag st alert" title="다리가 멈췄다 — 이 자리에 구멍이 나 있다">
@@ -655,6 +642,7 @@ function OpponentTable({ players, bench }: { players: MatchPlayer[]; bench: Matc
                   <Tally t={p.tally} />
                 </td>
                 <td>{p.position}</td>
+                <td className="hide-sm">{p.age}</td>
                 {/* 전력 옆의 ± — 이 숫자를 얼마나 믿을 수 있나. 우리 선수는 붙지 않는다 */}
                 <td
                   title={
@@ -668,6 +656,10 @@ function OpponentTable({ players, bench }: { players: MatchPlayer[]; bench: Matc
                 </td>
                 <td>
                   <ConditionBar c={p.condition} gassed={p.gassed} />
+                </td>
+                {/* 시즌 평점 — 공개 기록이라 우리 명단과 같은 숫자·같은 소수 자리다 */}
+                <td className="hide-sm">
+                  {typeof p.seasonRating === "number" ? p.seasonRating.toFixed(2) : "—"}
                 </td>
               </tr>
             ))}
