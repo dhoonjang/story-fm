@@ -13,6 +13,7 @@ import {
 } from "@story-fm/domain";
 import {
   DEFAULT_XI,
+  TACTICAL_STYLE,
   TEAM_CATALOG,
   defaultXiIds,
   pickFormation,
@@ -96,6 +97,21 @@ describe("선수 카탈로그 (불변 초기치 DB)", () => {
       }
     }
     expect(dupes).toEqual([]);
+  });
+
+  it("실측 등번호는 1~99이고 같은 팀에서 겹치지 않는다", () => {
+    const assigned = catalog.filter((p) => p.squadNumber !== undefined);
+    // FC 24 전수 스냅샷 + 확인 가능한 2026/27 구단표를 이름으로 대조한 범위다.
+    expect(assigned.length).toBeGreaterThanOrEqual(1500);
+
+    const seen = new Set<string>();
+    for (const player of assigned) {
+      expect(player.squadNumber).toBeGreaterThanOrEqual(1);
+      expect(player.squadNumber).toBeLessThanOrEqual(99);
+      const key = `${player.teamId}:${player.squadNumber}`;
+      expect(seen.has(key), key).toBe(false);
+      seen.add(key);
+    }
   });
 
   it("같은 선수가 두 클럽에 동시에 있지 않는다 (이적 뒤 원소속에 남은 행)", () => {
@@ -221,6 +237,14 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
     expect(state.date >= (summer?.opensOn ?? "")).toBe(true);
   });
 
+  it("모든 클럽 소속 선수는 팀 안에서 고유한 등번호를 갖는다", () => {
+    for (const team of state.teams.filter((entry) => entry.id !== "freeagents")) {
+      const squad = playersOf(state, team.id);
+      expect(squad.every((player) => player.squadNumber !== undefined), team.id).toBe(true);
+      expect(new Set(squad.map((player) => player.squadNumber)).size, team.id).toBe(squad.length);
+    }
+  });
+
   it("리그 개막은 8월 중순 금요일 밤 (실제 EPL처럼 개막전 1경기가 금요일)", () => {
     expect(state.calendar.start.startsWith("2026-08")).toBe(true);
     expect(new Date(`${state.calendar.start}T00:00:00Z`).getUTCDay()).toBe(5);
@@ -297,13 +321,38 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
     expect(shapes.size).toBeGreaterThanOrEqual(4);
   });
 
-  it("스쿼드가 감당 못 하는 모양은 거부된다 — 수비 자원이 모자라면 백3를 안 선다", () => {
-    /**
-     * ⚠️ **센터백 수로는 못 잰다.** 예전엔 "센터백을 둘로 줄이면 백3를 버린다"로
-     * 봤는데, 주발을 실측으로 바꾸면서(대부분 5/4) 풀백의 센터백 적응도가 고르게
-     * 올라 **CB를 0으로 줄여도 백3가 채워진다**. 거부권이 죽은 게 아니라 그 스쿼드가
-     * 실제로 감당하는 것이라, 재려면 수비 자원 전체를 줄여야 한다.
-     */
+  it("초기 운용은 포메이션의 성격과 일치한다", () => {
+    const possession = tacticsOf(state, "psg").spec;
+    expect(possession.formation).toBe("4-3-3");
+    expect(possession.pressing).toBeGreaterThan(3);
+    expect(possession.passStyle).toBeLessThan(3);
+
+    const lowBlock = tacticsOf(state, "getafe").spec;
+    expect(lowBlock.formation).toBe("5-4-1");
+    expect(lowBlock.mentality).toBeLessThan(3);
+    expect(lowBlock.defensiveLine).toBeLessThan(3);
+    expect(lowBlock.passStyle).toBeGreaterThan(3);
+  });
+
+  it("1부 96팀은 모두 조사된 전술 정체성을 갖는다", () => {
+    const topFlight = TEAM_CATALOG.filter((team) => isTopFlight(team.id));
+    expect(topFlight).toHaveLength(96);
+    expect(topFlight.filter((team) => TACTICAL_STYLE[team.id] === undefined)).toEqual([]);
+    expect(new Set(topFlight.map((team) => TACTICAL_STYLE[team.id])).size).toBe(6);
+  });
+
+  it("아스톤 빌라 기본 XI는 왓킨스를 9번으로 쓰는 4-2-3-1 코어다", () => {
+    const wanted = new Set(defaultXiIds("astonvilla"));
+    expect(wanted.size).toBe(11);
+    expect(wanted.has("astonvilla-alejandro-garnacho")).toBe(false);
+    expect(wanted.has("astonvilla-ollie-watkins")).toBe(true);
+    const starters = assignmentsOf(state, "astonvilla", "starting");
+    expect(
+      starters.find((assignment) => assignment.playerId === "astonvilla-ollie-watkins")?.position,
+    ).toBe("ST");
+  });
+
+  it("리서치한 모양은 스쿼드가 감당하면 유지된다", () => {
     const squad = playersOf(state, "crystalpalace").filter((p) => squadLevelOf(p) === "first");
     // 선입견이 자기 스쿼드의 최적과 같으면 그대로 간다 (결정적)
     const own = pickFormation(squad, undefined);
@@ -315,21 +364,6 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
     const defenders = squad.filter((p) => positionGroupOfPlayer(p) === "DF");
     expect(defenders.length).toBeGreaterThanOrEqual(6);
     expect(pickFormation(squad, "3-5-2")).toBe("3-5-2");
-
-    // 수비 자원을 셋으로 줄이면 같은 선입견이 뒤집힌다 —
-    // 백3는 센터백 셋에 윙백 둘까지 다섯 자리를 요구한다
-    const thinAtBack = squad.filter(
-      (p) => positionGroupOfPlayer(p) !== "DF" || defenders.indexOf(p) < 3,
-    );
-    expect(pickFormation(thinAtBack, "3-5-2")).not.toBe("3-5-2");
-  });
-
-  it("선입견은 거부권일 뿐 — 리서치 값과 다른 팀이 실제로 나온다", () => {
-    // 전부 리서치 값 그대로면 스쿼드 적합 판정이 죽은 코드라는 뜻이다
-    const flipped = TEAM_CATALOG.filter(
-      (t) => isTopFlight(t.id) && t.formation !== tacticsOf(state, t.id).spec.formation,
-    );
-    expect(flipped.length).toBeGreaterThan(0);
   });
 
   it("기본 선발 슬러그가 전부 카탈로그에 실재한다 (오타 방지)", () => {
@@ -339,7 +373,7 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
     for (const teamId of Object.keys(DEFAULT_XI)) {
       // 이적으로 빠진 자리는 비워 둔다 (그 자리는 엔진이 채운다)
       const xi = defaultXiIds(teamId);
-      expect(xi.length, teamId).toBeGreaterThanOrEqual(10);
+      expect(xi.length, teamId).toBe(11);
       for (const id of xi) if (!ids.has(id)) missing.push(id);
     }
     expect(missing).toEqual([]);

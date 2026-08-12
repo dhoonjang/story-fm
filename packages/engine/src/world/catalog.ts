@@ -318,6 +318,7 @@ function entryFromSeed(teamId: string, s: RealPlayerSeed, slug: string): PlayerC
     teamId,
     nameKo: s.nameKo,
     nameEn: s.nameEn,
+    ...(s.squadNumber === undefined ? {} : { squadNumber: s.squadNumber }),
     birthdate: s.birthdate,
     positions,
     foot: footOf(s.nameEn, s.position, s),

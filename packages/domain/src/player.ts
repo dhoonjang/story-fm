@@ -1500,14 +1500,10 @@ export const PlayerStateSchema = z.object({
   /**
    * **체력 0~100** — 지금 이 선수가 낼 수 있는 상태. 높을수록 좋다.
    *
-   * 예전엔 사기(0~100, 높을수록 좋음)와 피로(0~100, 높을수록 나쁨)를 따로 뒀다.
-   * 두 축을 가르면 "잘 쉬었지만 불만인 선수"를 표현할 수 있지만, 감독이 화면에서
-   * 읽는 것도 판단에 쓰는 것도 결국 "이 선수 지금 쓸 만한가" 하나였다 — 화면은
-   * 이미 둘을 합쳐 보여주고 있었고(옛 `conditionOf`), 두 축이 갈려 있다는 사실은
-   * 코드 안에만 있었다. 이제 저장도 하나다.
+   * 몸의 준비 상태만 나타낸다. 심리적 사기 효과는 `form`으로 환산하므로
+   * "잘 쉬었지만 폼이 꺾인 선수"와 "지쳤지만 기세가 오른 선수"가 함께 성립한다.
    *
-   * 움직이는 경로는 여럿이다 — 경기·훈련이 깎고, 휴식·회복이 채우고, 팀토크·면담이
-   * 올리고, 방치된 불만이 매일 갉는다. 왜 낮은지는 `describeMood`가 말한다.
+   * 경기·훈련이 깎고 휴식·회복이 채운다. 왜 낮은지는 `describeMood`가 말한다.
    * 옛 세이브는 로드할 때 두 값을 합쳐 옮긴다 (`persistence.ts`).
    */
   condition: z.number().int().min(0).max(100),
@@ -1588,6 +1584,8 @@ export const GamePlayerSchema = z.object({
    */
   squadLevel: z.enum(["first", "reserve"]).optional(),
   name: z.string().min(1),
+  /** 현재 소속팀의 등번호. 미배정·구 세이브·자유계약 선수는 없음 */
+  squadNumber: z.number().int().min(1).max(99).optional(),
   /** 출생년월일 (YYYY-MM-DD). 나이는 플레이 날짜 기준으로 계산 (ageOf) */
   birthdate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   positions: z.array(PlayerPositionSchema).min(1),
@@ -1646,6 +1644,8 @@ export interface PlayerCatalogMeta {
   teamId: string;
   nameKo: string;
   nameEn: string;
+  /** 시드 시점 소속팀의 등번호. 번호가 공식 배정되지 않았으면 생략 */
+  squadNumber?: number;
   birthdate: string;
   /** 가능 포지션 + 적응도 초기치 → 게임 시작 시 그대로 복사 */
   positions: PlayerPosition[];
@@ -1719,11 +1719,27 @@ export function ageOf(birthdate: string, onDate: string): number {
 
 // ── 스카우팅 보고서 — 채팅이 카드로 그리는 구조체 ──────
 
+/**
+ * 안개 아래의 값을 **말로** 자른 것 — 등급.
+ *
+ * 관측값에 ±N이 붙어 있는 숫자를 또렷하게 그리면 감독이 그걸 사실로 읽는다.
+ * 등급은 그 폭을 품는 단위라 단정하지 않고도 "어느 정도인가"에 답한다.
+ * `tier`는 화면이 색을 고르는 키다 (engine `RATING_TIERS`).
+ */
+export interface ScoutGrade {
+  label: string;
+  tier: string;
+  /** 등급을 매긴 관측값 — 툴팁·정렬용. 화면의 얼굴은 어디까지나 `label`이다 */
+  value: number;
+}
+
 export interface ScoutAttributeView {
   key: string;
   ko: string;
   /** 관측값 — 안개가 있으면 참값이 아니다 */
   value: number;
+  /** 등급 키 — 막대의 색이 이걸 따른다 (`ScoutGrade.tier`와 같은 표) */
+  tier: string;
   /** 숫자를 단정할 수 있는가 — 우리 선수일 때만 참 */
   exact: boolean;
   /**
@@ -1747,8 +1763,14 @@ export interface ScoutReportCard {
   foot: Foot;
   height: number | null;
   weight: number | null;
-  overall: number;
-  potential: { low: number; high: number; margin: number } | null;
+  /**
+   * 종합 — **가장 잘 맞는 자리에서 기본 역할로 낸 15축 가중 평균**(`bestOverall`),
+   * 거기에 안개를 씌운 값이다. 몸값·잠재력·폼은 섞이지 않는다.
+   * 스카우트가 가져온 숫자에는 늘 ±가 붙으므로 얼굴은 등급이다.
+   */
+  overall: ScoutGrade & { margin: number };
+  /** 잠재력 — 폭의 양 끝을 등급으로. 짐작할 근거조차 없으면 null */
+  potential: { low: ScoutGrade; high: ScoutGrade } | null;
   attributes: ScoutAttributeView[];
   /** 지금 이 선수를 데려오려면 — 코어가 계산한 값 */
   marketValue: number;

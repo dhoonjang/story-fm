@@ -36,9 +36,11 @@ describe("무소속 — 클럽이 아니라 클럽이 없는 상태", () => {
   it("방출하면 무소속이 된다 — 계약이 끊긴다", () => {
     const state = createTestGame(11);
     const target = spare(state);
+    target.squadNumber = 77;
     releasePlayer(state, { playerId: target.id });
     expect(state.players.find((p) => p.id === target.id)!.teamId).toBe(FREE_AGENT_TEAM);
     expect(activeContract(state, target.id)).toBeNull();
+    expect(target.squadNumber).toBeUndefined();
     expect(freeAgents(state).some((p) => p.id === target.id)).toBe(true);
   });
 
