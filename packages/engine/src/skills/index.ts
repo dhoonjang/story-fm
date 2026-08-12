@@ -30,6 +30,7 @@ import {
   anchorOf,
   shapeOf,
   clampToBoard,
+  movePoint,
   naturalPositionOf,
   positionAtPoint,
   positionGroupOf,
@@ -678,17 +679,19 @@ export function setPlayerTactic(
     playerId: string;
     position?: string;
     point?: BoardPoint;
+    move?: { lane?: "left" | "center" | "right"; band?: "defense" | "midfield" | "attack" };
     role?: string;
     /** 개인 지시 — 자유 서술 + 선택적 종류·대상 */
     instruction?: { note: string; kind?: PlayerDirectiveKind; targetId?: string };
   },
 ): SkillResult {
   const notes: string[] = [];
-  if (input.position !== undefined || input.point !== undefined) {
+  if (input.position !== undefined || input.point !== undefined || input.move !== undefined) {
     const res = movePlayerSlot(state, {
       playerId: input.playerId,
       ...(input.position ? { position: input.position } : {}),
       ...(input.point ? { point: input.point } : {}),
+      ...(input.move ? { move: input.move } : {}),
     });
     // 이미 그 자리면 넘어간다 — 역할·지시만 바꾸는 호출을 막지 않는다
     if (!res.ok && !res.message.includes("이미")) return res;
@@ -718,15 +721,20 @@ export function setPlayerTactic(
  */
 export function movePlayerSlot(
   state: GameState,
-  input: { playerId: string; position?: string; point?: BoardPoint },
+  input: {
+    playerId: string;
+    position?: string;
+    /** 전술판 좌표 — **화면의 드래그**가 쓴다 */
+    point?: BoardPoint;
+    /** 이름으로 부르는 이동 — 말로 지시하는 쪽(LLM)이 쓴다 */
+    move?: { lane?: "left" | "center" | "right"; band?: "defense" | "midfield" | "attack" };
+  },
 ): SkillResult {
   const player = userPlayerById(state, input.playerId);
   if (!player) return { ok: false, message: `"${input.playerId}"는 우리 팀 선수가 아닙니다` };
-  if (!input.position && !input.point) return { ok: false, message: "자리나 좌표가 필요합니다" };
-  const point = input.point ? clampToBoard(input.point) : anchorOf(input.position!);
-  const code = input.point ? positionAtPoint(point) : input.position!.toUpperCase();
-  if (!positionGroupOf(code)) {
-    return { ok: false, message: `알 수 없는 포지션: ${input.position}` };
+  const named = input.move && (input.move.lane || input.move.band) ? input.move : undefined;
+  if (!input.position && !input.point && !named) {
+    return { ok: false, message: "옮길 자리(position)나 방향(move)이 필요합니다" };
   }
   const tactics = userTactics(state);
   const assignment = tactics.assignments.find((a) => a.playerId === player.id);
@@ -736,7 +744,18 @@ export function movePlayerSlot(
       message: `${player.name}은(는) 지금 그라운드에 없습니다 — 교체(substitute)로 넣어야 합니다`,
     };
   }
-  const currentPoint = assignment.point ?? anchorOf(assignment.position);
+  const from = assignment.point ?? anchorOf(assignment.position);
+  // 지정하지 않은 축은 지금 자리를 그대로 쓴다 — "왼쪽으로"는 앞뒤를 안 건드린다
+  const point = named
+    ? movePoint(from, named)
+    : input.point
+      ? clampToBoard(input.point)
+      : anchorOf(input.position!);
+  const code = input.position && !named ? input.position.toUpperCase() : positionAtPoint(point);
+  if (!positionGroupOf(code)) {
+    return { ok: false, message: `알 수 없는 포지션: ${input.position}` };
+  }
+  const currentPoint = from;
   if (assignment.position === code && currentPoint.x === point.x && currentPoint.y === point.y) {
     return { ok: false, message: `${player.name}은(는) 이미 ${code}입니다` };
   }
@@ -1261,8 +1280,28 @@ export function setPlayerInstruction(
   }
 
   assignment.instruction = input.note;
-  const label = input.kind ? ` [${PLAYER_DIRECTIVE_KO[input.kind]}${targetNote}]` : "";
-  return { ok: true, message: `${player.name} 개인 지시 — "${input.note}"${label}` };
+  if (!input.kind) {
+    /**
+     * **`kind` 없는 지시는 판에 닿지 않는다** — 그러면 그렇다고 말해야 한다.
+     *
+     * 시뮬로 가는 것은 `directive.kind`뿐이고(`match-flow.ts`의 `directivesOnPitch`)
+     * `instruction`은 화면과 스냅샷에만 남는다. 예전엔 이 갈래도 그냥 성공으로
+     * 답해서, GM이 "지시가 먹혔다"로 서사를 쓰고 판은 아무것도 안 하는 **거짓
+     * 성공**이 됐다. 감독이 원인을 알 수 없는 종류의 어긋남이다.
+     */
+    return {
+      ok: true,
+      message:
+        `${player.name}에게 "${input.note}" — 말로 전했습니다. ` +
+        `이 지시는 판에 반영되지 않습니다: 판을 움직이려면 kind를 함께 보내세요 ` +
+        `(${Object.values(PLAYER_DIRECTIVE_KO).join(" · ")}). ` +
+        `자리를 옮기는 지시라면 move, 지역을 겨냥한 지시라면 set_match_plan입니다`,
+    };
+  }
+  return {
+    ok: true,
+    message: `${player.name} 개인 지시 — "${input.note}" [${PLAYER_DIRECTIVE_KO[input.kind]}${targetNote}]`,
+  };
 }
 
 // ---- 훈련: 스킬이 일정 엔트리를 직접 생성한다 (규칙 테이블 없음) ----

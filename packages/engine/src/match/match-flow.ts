@@ -421,6 +421,20 @@ export function advanceSegment(state: GameState): {
     away: squadFor(match.awayTeamId, pending.ledger.away),
   };
 
+  /**
+   * **굴리기 직전에 판을 다시 계산한다.**
+   *
+   * 예전엔 판을 고치는 스킬마다 각자 `refreshPacket`을 불렀고, 셋(교체·공략·지역
+   * 전술)은 부르고 둘(`set_tactics`·`set_player_tactic`)은 안 불렀다. 그래서 전술을
+   * 바꾸고 곧바로 진행하면 그 구간은 절반만 새 전술이었다 — 6축과 개인 지시는
+   * 아래 인자로 새로 가는데 존 전력·소화율은 옛 패킷 값이었다.
+   *
+   * 스킬마다 기억하게 하는 대신 **여기 한 곳**에서 본다. 어느 경로로 상태가
+   * 바뀌었든 굴러가는 판은 지금 상태다. 구간이 끝난 뒤에도 한 번 더 부르는 이유는
+   * 그때 쌓인 피로가 다음 스냅샷에 실려야 하기 때문이다.
+   */
+  refreshPacket(state);
+
   const segment = pending.segment ?? 0;
   const channel = `segment:${state.season}:${match.id}:${segment}`;
   const rng = makeRng(state.seed, channel);
@@ -636,6 +650,9 @@ export function substitutePlayer(state: GameState, input: { out: string; in: str
   return result.ok ? { ok: true, message: `교체 완료 — ${outName} OUT, ${inName} IN` } : result;
 }
 
+/** 동시에 걸 수 있는 지역 플랜 수 — 공략(`MAX_EXPLOITS`)과 같은 이유의 상한이다 */
+export const MAX_REGIONAL_PLANS = 2;
+
 /** 자연어 세부 전술을 경기 전용 지역 플랜으로 기록한다. */
 export function setRegionalPlan(
   state: GameState,
@@ -657,14 +674,25 @@ export function setRegionalPlan(
   const plans = [...(pending.regionalPlans ?? [])];
   const same = plans.findIndex((plan) => plan.band === input.band && plan.lane === input.lane);
   const next = { ...input, note };
+  /**
+   * 자리가 모자라면 가장 오래된 것이 밀린다 — **밀린 사실을 말한다.**
+   * 조용히 버리면 감독은 아까 내린 지시가 아직 걸려 있는 줄 알고, GM은 그것을
+   * 전제로 다음 장면을 쓴다. 공략(`setExploits`)은 잘릴 때 그 사실을 밝힌다.
+   */
+  let dropped: (typeof plans)[number] | undefined;
   if (same >= 0) plans[same] = next;
   else {
-    if (plans.length >= 2) plans.shift();
+    if (plans.length >= MAX_REGIONAL_PLANS) dropped = plans.shift();
     plans.push(next);
   }
   pending.regionalPlans = plans;
   refreshPacket(state);
-  return { ok: true, message: `지역 전술 적용 — ${note}` };
+  return {
+    ok: true,
+    message:
+      `지역 전술 적용 — ${note}` +
+      (dropped ? ` (동시에 ${MAX_REGIONAL_PLANS}곳까지 — "${dropped.note}"가 밀려났습니다)` : ""),
+  };
 }
 
 /**

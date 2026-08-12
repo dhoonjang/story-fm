@@ -367,6 +367,42 @@ export function buildLedgerNote(state: GameState): string {
           : []),
       ]
     : [];
+  /**
+   * **지금 내가 무엇을 걸어 뒀는가** — 되비추지 않으면 도구를 옳게 부를 수 없다.
+   *
+   * 경기 중에는 이 블록만 실리고 평시 스냅샷(6축이 적힌 줄)은 안 실린다. 그런데
+   * `set_tactics`는 "현재 값과 다른 축만" 보내라 하고, `set_match_plan`은 동시
+   * 두 곳까지이며, `set_player_tactic`은 "생략한 항목은 기존 값 유지"다 — 셋 다
+   * 지금 값을 알아야 성립하는 규칙인데 그 값이 화면에 없었다. 그래서 "압박 올려"에
+   * 모델이 숫자를 지어냈다.
+   */
+  const ourTactics = tacticsOf(state, state.userTeamId).spec;
+  const assignments = tacticsOf(state, state.userTeamId).assignments.filter(
+    (a) => a.role === "starting" && (a.directive || a.instruction || a.roleId),
+  );
+  const standingLines = [
+    ``,
+    `[지금 걸어 둔 것 — 바꾸려면 그 도구를 부른다]`,
+    `전술 ${ourTactics.formation} · 멘탈${ourTactics.mentality} 라인${ourTactics.defensiveLine} ` +
+      `압박${ourTactics.pressing} 템포${ourTactics.tempo} 폭${ourTactics.width} 패스${ourTactics.passStyle}` +
+      ` (set_tactics — 감독이 말한 축만 바꾼다)`,
+    pending.regionalPlans && pending.regionalPlans.length > 0
+      ? `지역 전술: ${pending.regionalPlans
+          .map((r) => `${r.band}/${r.lane} ${r.intent} "${r.note}"`)
+          .join(" · ")} (동시에 2곳까지 — 셋째를 걸면 가장 오래된 것이 밀린다)`
+      : `지역 전술: 없음`,
+    assignments.length > 0
+      ? `개인 지시·역할: ${assignments
+          .map(
+            (a) =>
+              `${playerName(state, a.playerId)}(${a.position}` +
+              `${a.roleId ? ` ${a.roleId}` : ""}` +
+              `${a.directive ? ` [${a.directive.kind}]` : ""}` +
+              `${a.instruction && !a.directive ? ` "말로만: ${a.instruction}"` : ""})`,
+          )
+          .join(", ")}`
+      : `개인 지시·역할: 없음`,
+  ];
   // 사건은 싣지 않는다 — 구간은 감독 지시가 반영된 뒤 호출 안에서 advance_match가
   // 굴린다. 이 블록은 그 직전의 장부다
   return [
@@ -377,6 +413,7 @@ export function buildLedgerNote(state: GameState): string {
     `어웨이 온필드: ${withNames(ledger.away.onPitch)}`,
     `어웨이 벤치: ${withNames(ledger.away.bench)} (교체 ${ledger.away.subsUsed}/5)`,
     ledger.sentOff.length > 0 ? `퇴장: ${withNames(ledger.sentOff)}` : "",
+    ...standingLines,
     ...packetLines,
   ]
     .filter(Boolean)

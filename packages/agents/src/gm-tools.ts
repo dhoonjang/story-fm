@@ -282,10 +282,22 @@ export function buildGmTools(
       obj(
         {
           playerId: str,
-          point: {
+          /**
+           * 좌표(x·y)는 **화면의 드래그**가 쓰는 값이라 도구에 두지 않는다.
+           * 판을 못 보는 쪽에 절대 좌표를 요구하면 지어낸 숫자에서 포지션 코드가
+           * 파생돼 포메이션이 조용히 바뀐다 — 감독이 원인을 알 수 없는 어긋남이다.
+           */
+          move: {
             type: "object",
-            properties: { x: num(0, 100, "좌우"), y: num(0, 100, "전후") },
-            required: ["x", "y"],
+            description: "방향으로 옮긴다 — 지정하지 않은 축은 지금 자리를 그대로 쓴다",
+            properties: {
+              lane: { type: "string", enum: ["left", "center", "right"], description: "좌·중·우" },
+              band: {
+                type: "string",
+                enum: ["defense", "midfield", "attack"],
+                description: "우리 진영·중원·상대 진영",
+              },
+            },
           },
           position: { type: "string", description: "옮길 자리 (이미 그라운드에 있는 선수만)" },
           role: { type: "string", description: "그 자리의 세부 역할 (FM 역할명)" },
@@ -303,8 +315,11 @@ export function buildGmTools(
       ),
       z.object({
         playerId: z.string(),
-        point: z
-          .object({ x: z.number().min(0).max(100), y: z.number().min(0).max(100) })
+        move: z
+          .object({
+            lane: z.enum(["left", "center", "right"]).optional(),
+            band: z.enum(["defense", "midfield", "attack"]).optional(),
+          })
           .optional(),
         position: z.string().optional(),
         role: z.string().optional(),

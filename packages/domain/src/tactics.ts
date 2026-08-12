@@ -401,6 +401,43 @@ export function anchorOf(position: string): BoardPoint {
   return POSITION_ANCHORS[position.toUpperCase()] ?? POSITION_ANCHORS.CM!;
 }
 
+/**
+ * 이름으로 부르는 이동 — **좌표를 지어내지 않고 자리를 옮긴다.**
+ *
+ * 전술판 좌표(x·y)는 손으로 끌 때의 것이지 말로 지시할 때의 것이 아니다. 화면
+ * 없이 지시하는 쪽(LLM)은 그 선수가 지금 어디 있는지도, 눈금이 무슨 뜻인지도
+ * 모르는 채 절대 좌표를 지어내야 했고, `positionAtPoint`가 그 추측에서 포지션
+ * 코드를 파생시켜 포메이션이 조용히 바뀌었다.
+ *
+ * 여기서는 감독이 실제로 쓰는 말과 같은 눈금으로 받는다 — 좌·중·우와
+ * 우리 진영·중원·상대 진영. 지정하지 않은 축은 **지금 자리를 그대로 쓴다**:
+ * "왼쪽으로 벌려"는 앞뒤를 건드리지 않는다.
+ *
+ * 눈금은 지역 전술(`RegionalLane`·`RegionalBand`)과 같은 낱말이다 — 한 경기
+ * 안에서 두 도구가 다른 말로 같은 자리를 가리키면 감독도 모델도 헷갈린다.
+ */
+const MOVE_LANE_X: Record<"left" | "center" | "right", number> = {
+  left: 12,
+  center: 50,
+  right: 88,
+};
+/** 우리 진영·중원·상대 진영의 대표 y — 골키퍼 라인(y>=88)은 넘지 않는다 */
+const MOVE_BAND_Y: Record<"defense" | "midfield" | "attack", number> = {
+  defense: 76,
+  midfield: 50,
+  attack: 22,
+};
+
+export function movePoint(
+  from: BoardPoint,
+  move: { lane?: "left" | "center" | "right"; band?: "defense" | "midfield" | "attack" },
+): BoardPoint {
+  return clampToBoard({
+    x: move.lane ? MOVE_LANE_X[move.lane] : from.x,
+    y: move.band ? MOVE_BAND_Y[move.band] : from.y,
+  });
+}
+
 /** 두 자리의 전술판 거리 (0~100 좌표계) — 적응도 감점의 기준 */
 export function positionDistance(a: string, b: string): number {
   const p = anchorOf(a);

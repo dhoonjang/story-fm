@@ -27,7 +27,7 @@ export const SKILL_CATALOG = [
     group: "전술·훈련",
     readOnly: false,
     description:
-      "선발 11명과 벤치를 정한다. 좌표(point)나 포지션 코드로 자리를 지정할 수 있고, 지정하지 않은 선수의 자리는 건드리지 않는다. squadLevels로 1·2군 이동을 같은 요청에 실어라 — 2군 선수를 선발에 넣으려면 그 배열에 first로 함께 적는다.",
+      "선발 11명과 벤치를 정한다. 자리는 포지션 코드로 지정하고, 지정하지 않은 선수의 자리는 건드리지 않는다. squadLevels로 1·2군 이동을 같은 요청에 실어라 — 2군 선수를 선발에 넣으려면 그 배열에 first로 함께 적는다.",
   },
   {
     name: "set_captain",
@@ -56,7 +56,7 @@ export const SKILL_CATALOG = [
     group: "전술·훈련",
     readOnly: false,
     description:
-      "한 선수의 좌표·자리·역할·개인 지시 중 감독이 명시한 항목만 바꾼다. point는 자유 전술판 좌표이고 position은 표준 자리다. 생략한 항목은 기존 값을 유지한다. 이미 그라운드에 있는 선수만 옮기며 벤치 선수를 넣으려면 substitute를 쓴다. 좌·중·우와 우리 진영·중원·상대 진영을 지정한 자연어 지시는 해당 선수의 point로 옮긴다. 자연어 포메이션 변경은 get_squad로 현재 배치를 본 뒤 목표 모양에 꼭 필요한 최소 선수만 이동한다. 감독이 역할 변경을 명시하지 않았으면 role을 보내지 않고, 개인 지시를 명시하지 않았으면 instruction을 보내지 않는다. 프리셋을 적용하거나 전원을 자동 재배치하지 않는다. 배치를 바꾼 턴에는 advance_match를 부르지 않고 전술판 검토를 기다린다.",
+      '한 선수의 자리·역할·개인 지시 중 감독이 명시한 항목만 바꾼다. 생략한 항목은 기존 값을 유지한다. 이미 그라운드에 있는 선수만 옮기며 벤치 선수를 넣으려면 substitute를 쓴다. **자리를 옮길 때는 move를 쓴다** — lane은 좌·중·우, band는 우리 진영·중원·상대 진영이고, 지정하지 않은 축은 지금 자리를 그대로 쓴다("왼쪽으로 벌려"는 lane만 보낸다). 특정 자리로 바꾸라는 지시("오른쪽 풀백으로")만 position에 코드를 적는다. **individual instruction은 kind를 함께 보내야 판이 움직인다** — man_mark·press_target(대상 targetId 필수)·focus_play·stay_back·join_attack 중 하나로 옮기고, 그 다섯에 담기지 않는 말이면 지역을 겨냥한 지시인지 보고 set_match_plan을 쓴다. kind 없이 note만 보내면 그 말은 서사에만 남고 경기에는 반영되지 않는다. 자연어 포메이션 변경은 get_squad로 현재 배치를 본 뒤 목표 모양에 꼭 필요한 최소 선수만 이동한다. 프리셋을 적용하거나 전원을 자동 재배치하지 않는다. 배치를 바꾼 턴에는 advance_match를 부르지 않고 전술판 검토를 기다린다.',
   },
   {
     name: "exploit_point",

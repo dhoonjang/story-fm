@@ -12,6 +12,7 @@ import {
   setLineup,
   setRegionalPlan,
   setPlayerInstruction,
+  setPlayerTactic,
   setTactics,
   tacticsOf,
   startMatch,
@@ -422,5 +423,111 @@ describe("경기 후 전술 복원", () => {
       (a) => a.playerId === target.playerId,
     );
     expect(after?.familiarity).toBe(before);
+  });
+});
+
+/**
+ * match 스킬 표면 점검에서 나온 다섯 가지 — **감독의 말이 판에 닿는 길**을 고정한다.
+ * (docs/simulation/match.md의 분업: 무엇을 지시했는지는 LLM, 얼마나 먹히는지는 코어)
+ */
+describe("지시가 판에 닿는 길", () => {
+  /**
+   * `kind` 없는 개인 지시는 시뮬로 가지 않는다(`directivesOnPitch`가 `directive`만
+   * 읽는다). 예전엔 그래도 성공으로 답해 GM이 "먹혔다"로 서사를 썼다 — 거짓 성공이다.
+   */
+  it("kind 없는 개인 지시는 판에 반영되지 않는다고 밝힌다", () => {
+    const state = createTestGame();
+    advanceToMatchday(state);
+    startMatch(state);
+    const starter = assignmentsOf(state, state.userTeamId, "starting")[0]!;
+
+    const vague = setPlayerInstruction(state, {
+      playerId: starter.playerId,
+      note: "상황 봐서 알아서 움직여",
+    });
+    expect(vague.ok).toBe(true);
+    expect(vague.message).toContain("반영되지 않습니다");
+    expect(
+      assignmentsOf(state, state.userTeamId).find((a) => a.playerId === starter.playerId)
+        ?.directive,
+      "판으로 가는 지시는 만들어지지 않는다",
+    ).toBeUndefined();
+
+    // kind가 붙으면 그 말이 판으로 간다
+    const sharp = setPlayerInstruction(state, {
+      playerId: starter.playerId,
+      note: "앞으로 나가라",
+      kind: "join_attack",
+    });
+    expect(sharp.ok).toBe(true);
+    expect(sharp.message).not.toContain("반영되지 않습니다");
+    expect(
+      assignmentsOf(state, state.userTeamId).find((a) => a.playerId === starter.playerId)?.directive
+        ?.kind,
+    ).toBe("join_attack");
+  });
+
+  /**
+   * **좌표를 지어내지 않고 자리를 옮긴다.** 지정하지 않은 축은 지금 자리를 그대로
+   * 쓴다 — "왼쪽으로 벌려"가 앞뒤까지 바꾸면 감독이 하지 않은 지시가 된다.
+   */
+  it("이름으로 부르는 이동 — 지정한 축만 움직인다", () => {
+    const state = createTestGame();
+    advanceToMatchday(state);
+    startMatch(state);
+    // 중앙 미드필더 하나를 골라 왼쪽으로만 벌린다
+    const mid = assignmentsOf(state, state.userTeamId, "starting").find((a) =>
+      ["CM", "CDM", "CAM", "LCM", "RCM"].includes(a.position),
+    );
+    if (!mid) return;
+    const before = mid.point ?? { x: 50, y: 50 };
+
+    const moved = setPlayerTactic(state, { playerId: mid.playerId, move: { lane: "left" } });
+    expect(moved.ok, moved.message).toBe(true);
+    const after = assignmentsOf(state, state.userTeamId).find(
+      (a) => a.playerId === mid.playerId,
+    )!.point!;
+    expect(after.x).toBeLessThan(before.x);
+    expect(after.y, "앞뒤는 건드리지 않는다").toBe(before.y);
+  });
+
+  /**
+   * **굴리기 직전에 판을 다시 계산한다.**
+   *
+   * 예전엔 `set_tactics`가 `refreshPacket`을 부르지 않아, 전술을 바꾸고 곧바로
+   * 진행하면 그 구간이 옛 판으로 굴렀다. 결과 패킷만 보면 구간이 끝난 뒤의 갱신
+   * 때문에 차이가 안 보이므로, **수동 갱신이 결과를 바꾸는지**로 잰다: 굴리기 전에
+   * 이미 갱신하고 있다면 한 번 더 부르는 것은 아무것도 바꾸지 못한다.
+   */
+  it("전술을 바꾸고 곧바로 진행해도 그 구간이 새 전술로 구른다", () => {
+    const play = (refreshFirst: boolean) => {
+      const state = createTestGame(11);
+      advanceToMatchday(state);
+      startMatch(state);
+      const spec = tacticsOf(state, state.userTeamId).spec;
+      setTactics(state, { ...spec, defensiveLine: 5, pressing: 5, mentality: 5, tempo: 5 });
+      if (refreshFirst) refreshPacket(state);
+      const step = advanceSegment(state);
+      return JSON.stringify({ stats: step.plan?.stats, score: state.pendingMatch?.ledger.score });
+    };
+    // 수동 갱신을 한 쪽과 안 한 쪽이 **같아야** 한다 — 안 그러면 굴리기 전 갱신이 없는 것이다
+    expect(play(false)).toBe(play(true));
+  });
+
+  /** 자리가 모자라 밀려난 지역 전술은 그 사실을 말한다 */
+  it("세 번째 지역 전술은 무엇이 밀렸는지 밝힌다", () => {
+    const state = createTestGame();
+    advanceToMatchday(state);
+    startMatch(state);
+    const plan = (lane: "left" | "center" | "right", note: string) =>
+      setRegionalPlan(state, { band: "attack", lane, intent: "overload", note });
+
+    expect(plan("left", "왼쪽에 사람을 더 붙여라").ok).toBe(true);
+    expect(plan("right", "오른쪽도 밀어라").ok).toBe(true);
+    const third = plan("center", "가운데로 모아라");
+    expect(third.ok).toBe(true);
+    expect(third.message).toContain("밀려났습니다");
+    expect(third.message).toContain("왼쪽에 사람을 더 붙여라");
+    expect(state.pendingMatch!.regionalPlans).toHaveLength(2);
   });
 });
