@@ -12,9 +12,9 @@ import {
 } from "@story-fm/domain";
 import { dayOfWeek } from "../competition/calendar";
 import { clubProfile } from "../data/club-profile";
-import { isMarketOnlyLeague, leagueCatalogById } from "../data/league-catalog";
+import { isMarketOnlyLeague, isTopLeague, leagueCatalogById } from "../data/league-catalog";
 import { competitionShortName, isCup, isEuroCup } from "../data/cup-catalog";
-import { leagueOfTeam, teamCatalogById } from "../data/team-catalog";
+import { isClubTeam, leagueOfTeam, teamCatalogById } from "../data/team-catalog";
 import { leagueOfTeamIn } from "../competition/promotion";
 import { computeStandings } from "../competition/season";
 import {
@@ -522,7 +522,8 @@ export function isOutsideOurEconomy(teamId: string): boolean {
 /** 주간 주급 지급 — 전 팀 (월요일) */
 export function payWeeklyWages(state: GameState): void {
   for (const team of state.teams) {
-    if (isOutsideOurEconomy(team.id)) continue;
+    // 무소속은 구단이 아니다 — 자유계약 선수가 모인 자리라 낼 주급도 받을 수입도 없다
+    if (!isClubTeam(team.id) || isOutsideOurEconomy(team.id)) continue;
     const wages = weeklyWagesOf(state, team.id);
     if (wages <= 0) continue;
     recordFinance(state, team.id, {
@@ -686,6 +687,12 @@ function postMonthlyItems(state: GameState): void {
   const playerNames = new Map(state.players.map((p) => [p.id, p.name] as const));
 
   for (const team of state.teams) {
+    /**
+     * **무소속은 구단이 아니다.** 리그 밖의 자리(`isClubTeam`)라 시설도 아카데미도
+     * 이자도 없다. 예전엔 여기서 걸러지지 않아 자유계약 선수단이 매달 시설비와
+     * 이자를 내며 적자를 쌓았다 — 세 시즌에 −£6M이었다.
+     */
+    if (!isClubTeam(team.id)) continue;
     // 이적 시장 전용 구단은 원장 대신 상시 예산만 유지한다
     if (isOutsideOurEconomy(team.id)) {
       const finance = state.finances.find((f) => f.teamId === team.id);
@@ -748,6 +755,26 @@ function postMonthlyItems(state: GameState): void {
       amount: MERCHANDISING_MONTHLY[commercialTier] * (1 + form),
     });
 
+    /**
+     * 리그전을 굴리지 않는 리그는 홈 경기가 없어 매치데이가 0이다 — 그 몫을
+     * 같은 공식으로 되돌린다. 굴리는 리그는 0이라 아무 일도 일어나지 않는다.
+     */
+    const unplayed = unplayedLeagueMatchdayMonthly(state, team.id);
+    if (unplayed > 0) {
+      recordFinance(state, team.id, {
+        kind: "income",
+        category: "matchday",
+        label: "리그 홈경기 수입",
+        amount: unplayed,
+      });
+      recordFinance(state, team.id, {
+        kind: "expense",
+        category: "matchday_opex",
+        label: "리그 경기 운영비",
+        amount: unplayed * MATCHDAY_OPEX_RATE,
+      });
+    }
+
     // 스태프 급여 — 월 선수 급여 대비
     recordFinance(state, team.id, {
       kind: "expense",
@@ -780,6 +807,31 @@ function postMonthlyItems(state: GameState): void {
       });
     }
   }
+}
+
+/**
+ * 리그전을 굴리지 않는 리그의 **매치데이 대체 수입** (월할).
+ *
+ * ⚠️ 2부(컵 전용)는 리그 일정을 만들지 않는다 — 국내 컵을 채우는 배경이라 경기를
+ * 시뮬하지 않는 것이 구현 결정이다. 그런데 그 결정이 재정에는 **수입원 하나가
+ * 통째로 빠진 것**으로 나타났다: 주급·스태프·시설·이자는 매달 내면서 홈 경기가
+ * 없어 매치데이가 0이다. 세 시즌을 굴리면 serieB·리그2의 중간 잔고가 −£16M으로
+ * 가라앉았다 — 재정 기준선 테스트가 한 시즌만 봐서 잡히지 않던 자리다.
+ *
+ * 값은 **새 상수가 아니라 기존 모델에서 파생한다** — 그 리그를 뛰었다면 받았을
+ * 홈 경기 수입을 같은 공식(수용인원 × 기본 점유율 × 티켓가 × 호스피탈리티)으로
+ * 계산해 열두 달로 나눈다. 임의 금액을 새로 만들면 밸런스의 근거가 사라진다.
+ */
+const UNPLAYED_HOME_MATCHES = 19;
+
+function unplayedLeagueMatchdayMonthly(state: GameState, teamId: string): number {
+  const league = leagueOfTeamIn(state, teamId);
+  if (isTopLeague(league)) return 0;
+  const tier = tierOf(teamId);
+  const { capacity } = profileOf(teamId);
+  const price = (leagueCatalogById(league)?.avgTicketPrice ?? 30) * TICKET_TIER_FACTOR[tier];
+  const perMatch = capacity * OCCUPANCY_BASE[tier] * price * (1 + HOSPITALITY_RATE[tier]);
+  return (perMatch * UNPLAYED_HOME_MATCHES) / BROADCAST_MONTHS;
 }
 
 /** 스폰서 계약의 성과 조항 — 이번 시즌 대항전 참가와 지난 시즌 우승에서 파생 */

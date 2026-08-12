@@ -551,3 +551,78 @@ describe("재정 이벤트 스킬", () => {
     expect(adjustTransferBudget(state, { delta: -5_000_000, note: "보드 삭감" }).ok).toBe(true);
   });
 });
+
+/**
+ * 재정 점검에서 나온 구조적 결함 둘 — **한 시즌만 보면 안 보이는 자리**다.
+ * 시작 잔고가 커서 첫 시즌에는 적자가 드러나지 않고, 세 시즌을 굴려야 가라앉는다.
+ */
+describe("재정이 도는 범위", () => {
+  /** 그 달의 정액 항목이 붙을 때까지 하루씩 넘긴다 (월초 정산) */
+  function postAMonth(state: GameState): void {
+    advanceDays(state, 40);
+  }
+
+  it("무소속은 구단이 아니므로 재정이 돌지 않는다", () => {
+    const state = createTestGame(42, "arsenal");
+    const free = state.teams.find((t) => leagueOfTeam(t.id) === "free");
+    expect(free, "무소속 자리가 있다").toBeDefined();
+    const before = financeOf(state, free!.id).balance;
+
+    postAMonth(state);
+
+    /**
+     * 예전엔 `postMonthlyItems`가 전 팀을 돌며 시설비·이자를 물려, 자유계약 선수단이
+     * 매달 적자를 쌓았다(세 시즌에 −£6M). 클럽이 아닌 자리는 낼 것도 받을 것도 없다.
+     */
+    expect(financeOf(state, free!.id).balance, "무소속 잔고는 움직이지 않는다").toBe(before);
+  });
+
+  /**
+   * 2부는 국내 컵을 채우는 배경이라 리그 일정을 만들지 않는다 — 그 구현 결정이
+   * 재정에서는 **수입원 하나가 통째로 빠진 것**으로 나타났다. 주급·스태프·시설·이자는
+   * 매달 내는데 홈 경기가 없어 매치데이가 0이었고, 세 시즌을 굴리면 serieB·리그2의
+   * 중간 잔고가 −£16M으로 가라앉았다.
+   *
+   * 한 시즌으로 재는 이유: 달 단위로 보면 주급 지급일(월요일)과 월초 정산의 정렬에
+   * 따라 부호가 흔들린다. 한 시즌이 이 결함이 드러나는 가장 짧은 창이다.
+   */
+  it("리그전을 굴리지 않는 리그도 한 시즌을 버틴다", () => {
+    const state = createTestGame(42, "arsenal");
+    const seconds = state.teams
+      .filter((t) =>
+        ["championship", "serieb", "bundesliga2", "segunda"].includes(leagueOfTeam(t.id)),
+      )
+      .map((t) => t.id);
+    expect(seconds.length).toBeGreaterThan(10);
+    const before = new Map(seconds.map((id) => [id, financeOf(state, id).balance] as const));
+
+    let guard = 120;
+    while (guard-- > 0) {
+      const at = state.date;
+      keepSeat(state);
+      advanceAndPlay(state);
+      if (state.date === at || state.season > 1) break;
+    }
+
+    const deltas = seconds.map((id) => financeOf(state, id).balance - before.get(id)!);
+    const sorted = [...deltas].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)]!;
+    /**
+     * ⚠️ **아직 균형이 아니다.** 실측: 이 보정 전 −£13.2M/시즌 → 보정 후 −£5.8M.
+     * 절반 넘게 메웠지만 남은 몫이 있고, 원인은 수입이 아니라 지출 쪽이다 —
+     * `SECOND_DIVISION_WAGE_LEVEL`이 모든 2부에 같은 값이라 챔피언십과 리그2가
+     * 같은 주급을 낸다(둘 다 £350k/주). 수입은 리그 배율을 타는데 지출은 안 탄다.
+     * 그건 64개 구단의 생성 주급을 바꾸는 밸런스 결정이라 여기서 하지 않았다.
+     *
+     * 그래서 이 테스트가 지키는 것은 **균형이 아니라 수입원의 존재**다. 이 선이
+     * 깨지면 보정이 사라졌다는 뜻이다.
+     */
+    expect(median, "2부 한 시즌 수지 중간값").toBeGreaterThan(-8_000_000);
+
+    // 리그전을 굴리는 리그에는 이 보정이 붙지 않는다 — 매치데이는 경기가 만든다
+    expect(
+      financeOf(state, state.userTeamId).ledger.some((e) => e.label === "리그 홈경기 수입"),
+      "1부는 경기에서 매치데이를 번다",
+    ).toBe(false);
+  }, 60_000);
+});
