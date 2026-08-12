@@ -62,7 +62,7 @@ import {
   seasonYear,
   type SeasonCalendar,
 } from "../competition/calendar";
-import { overallFor, playerCatalog } from "../world/catalog";
+import { defaultXiIds, overallFor, playerCatalog } from "../world/catalog";
 import { estimateSquadWages, wageSubjectOf } from "../world/wages";
 import { generateYouthPlayer } from "../world/generate";
 import { ensureSquadNumbers } from "../squad/numbers";
@@ -71,7 +71,6 @@ import {
   TEAM_CATALOG,
   type TeamCatalogEntry,
   countryOfTeam,
-  defaultXiIds,
   formationOf,
   isTopFlight,
   tacticalStyleOf,
@@ -968,6 +967,8 @@ function buildInitialSquads(
   teams: readonly TeamCatalogEntry[] = TEAM_CATALOG,
 ): void {
   const seasonStartYear = 2026;
+  // 2군을 메울 유스가 여기서 태어난다 — id는 세계 전체에서 유일해야 한다
+  const takenIds = new Set(players.map((p) => p.id));
   for (const team of teams) {
     const squad = players
       .filter((p) => p.teamId === team.id)
@@ -1075,8 +1076,16 @@ function buildInitialSquads(
     }
     const reserveCount = squad.filter((p) => p.squadLevel === "reserve").length;
     for (let i = reserveCount; i < RESERVE_TEAM_SIZE; i++) {
-      const youth = generateYouthPlayer(seed + 17, team.id, 0, i, team.tier, undefined, 2026);
-      youth.id = `${team.id}-dev-${i}`;
+      const youth = generateYouthPlayer(
+        seed + 17,
+        team.id,
+        0,
+        i,
+        team.tier,
+        takenIds,
+        undefined,
+        2026,
+      );
       youth.squadLevel = "reserve";
       players.push(youth);
     }

@@ -2,7 +2,8 @@ import type { GamePlayer, PositionGroup } from "@story-fm/domain";
 import { FIRST_NAMES, LAST_NAMES } from "../data/names";
 import { TIER_BASE } from "../data/team-catalog";
 import { deriveAxes } from "./attributes";
-import { derivePositions, overallFor, physiqueOf, slugifyName, syntheticFoot } from "./catalog";
+import { derivePositions, overallFor, physiqueOf, syntheticFoot } from "./catalog";
+import { claimPlayerId, slugifyName } from "./player-id";
 import { makeRng, pick, randInt } from "../core/rng";
 
 /**
@@ -26,6 +27,8 @@ export function generateYouthPlayer(
   season: number,
   index: number,
   tier: 1 | 2 | 3 | 4,
+  /** 이미 쓰인 선수 id — 새 id를 여기에 등록하며 고른다 */
+  taken: Set<string>,
   /** 지정 시 그 그룹으로 — GK 고갈 방지 등 (리뷰 발견) */
   forceGroup?: PositionGroup,
   /** 합류 연도 (유스는 시즌 개막 연도 기준 17~19세) */
@@ -47,7 +50,10 @@ export function generateYouthPlayer(
    */
   const base = TIER_BASE[tier] - 24;
 
-  const nameEn = `${pick(rng, FIRST_NAMES)} ${pick(rng, LAST_NAMES)}`;
+  const first = pick(rng, FIRST_NAMES);
+  const last = pick(rng, LAST_NAMES);
+  const nameEn = `${first.en} ${last.en}`;
+  const nameKo = `${first.ko} ${last.ko}`;
   const v = (d = 6) => clamp99(base + randInt(rng, -d, d));
   const strong = () => clamp99(base + randInt(rng, 0, 8));
   const weak = () => clamp99(base + randInt(rng, -18, -8));
@@ -96,6 +102,7 @@ export function generateYouthPlayer(
   const age = randInt(rng, 17, 19);
   const month = randInt(rng, 1, 12);
   const day = randInt(rng, 1, 28);
+  const birthdate = `${refYear - age}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   // 시드 6축 → 15축 (실선수 카탈로그와 같은 파생 공식)
   const axes = deriveAxes(
     `${nameEn}-${slugifyName(teamId)}-${season}-${index}`,
@@ -106,12 +113,12 @@ export function generateYouthPlayer(
   const overall = overallFor(position, axes);
 
   return {
-    id: `${teamId}-y${season}-${index}`,
+    id: claimPlayerId(nameEn, birthdate, taken),
     catalogId: null,
     teamId,
     squadLevel: "reserve",
-    name: nameEn,
-    birthdate: `${refYear - age}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+    name: nameKo,
+    birthdate,
     positions: derivePositions(`${nameEn}-${slugifyName(teamId)}-${season}-${index}`, position),
     // 적응도 파생과 **같은 키**로 주발을 뽑는다 — 어긋나면 목록 값과 폴백이 갈린다
     foot: syntheticFoot(`${nameEn}-${slugifyName(teamId)}-${season}-${index}`, position),
@@ -127,5 +134,3 @@ export function generateYouthPlayer(
     isCaptain: false,
   };
 }
-
-export { slugifyName } from "./catalog";

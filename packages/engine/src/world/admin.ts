@@ -8,8 +8,8 @@ import {
   resetCatalog,
   saveCatalog,
   seedCatalog,
-  slugifyName,
 } from "./catalog";
+import { claimPlayerId } from "./player-id";
 import { TEAM_CATALOG, teamCatalogById } from "../data/team-catalog";
 
 /**
@@ -188,14 +188,6 @@ export function adminSetCatalogPositions(
   return { ok: true, message: `${entry.nameKo} 포지션 갱신`, playerId };
 }
 
-function uniqueId(entries: PlayerCatalogEntry[], teamId: string, base: string): string {
-  const used = new Set(entries.map((e) => e.id));
-  let id = `${teamId}-${base}`;
-  let n = 2;
-  while (used.has(id)) id = `${teamId}-${base}-${n++}`;
-  return id;
-}
-
 export function adminAddCatalogPlayer(teamId: string, input: CatalogPlayerInput): AdminResult {
   if (!teamCatalogById(teamId)) return { ok: false, message: `알 수 없는 팀: ${teamId}` };
   if (!input.nameKo || input.nameKo.trim().length === 0) {
@@ -213,7 +205,7 @@ export function adminAddCatalogPlayer(teamId: string, input: CatalogPlayerInput)
     positions: e.positions.map((p) => ({ ...p })),
   }));
   const nameEn = (input.nameEn || input.nameKo).trim();
-  const id = uniqueId(entries, teamId, slugifyName(nameEn) || `p${entries.length + 1}`);
+  const id = claimPlayerId(nameEn, input.birthdate, new Set(entries.map((e) => e.id)));
   const attrs = Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, clamp99(input[a])])) as AxisValues;
   // 시드 선수와 같은 공식으로 파생한다 — 같은 자리 묶음(CB↔RCB/LCB)까지 채워진다
   const positions = derivePositions(nameEn, code);

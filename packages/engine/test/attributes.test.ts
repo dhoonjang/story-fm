@@ -59,7 +59,7 @@ describe("파생 축이 실측 축과 같은 눈금에 있다", () => {
    * 개별 정확도는 여기서 못 지키지만 **집단의 눈금**은 지킬 수 있다 — 파생 축의
    * 평균이 실측 축의 평균에서 크게 떨어지면 같은 종류의 사고다.
    */
-  const real = playerCatalog().filter((e) => isTopFlight(e.teamId) && !/-gen\d+$/.test(e.id));
+  const real = playerCatalog().filter((e) => isTopFlight(e.teamId) && !e.synthetic);
   const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length;
 
   it("파생 축 평균이 실측 축 평균에서 8을 넘게 벗어나지 않는다", () => {
@@ -452,7 +452,7 @@ describe("overall 분포 — 밴드 의미가 유지된다", () => {
      * 밸런스 사안이라 여기서 고치지 않고 남긴다.
      */
     const real = playerCatalog()
-      .filter((e) => !/-gen\d+$|-dev-|-y\d+-/.test(e.id))
+      .filter((e) => !e.synthetic)
       .map((e) => roleFit(e, naturalPositionOf(e).position));
     const worldClass = real.filter((x) => x >= 90).length;
     expect(worldClass).toBeGreaterThan(0);

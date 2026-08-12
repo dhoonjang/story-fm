@@ -56,7 +56,7 @@ describe("약발 — 실측이 원본, 모르는 실존 선수만 4", () => {
 
   it("절차 생성 선수는 실측 분포를 따른다 — 대조할 실물이 없으니까", () => {
     // 전원 4로 두면 합성 선수만 통째로 양발잡이가 되어 다른 세계가 된다
-    const gen = cat.filter((e) => /-gen\d+$|-dev-|-y\d+-/.test(e.id));
+    const gen = cat.filter((e) => e.synthetic === true);
     expect(gen.length).toBeGreaterThan(500);
     expect(share(gen, 3)).toBeGreaterThan(0.45);
     expect(share(gen, 4)).toBeLessThan(0.35);

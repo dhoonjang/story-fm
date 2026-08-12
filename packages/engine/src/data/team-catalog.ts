@@ -1361,9 +1361,15 @@ export const DEFAULT_XI: Record<string, readonly string[]> = {
   ],
 };
 
-/** 팀의 기본 선발 슬러그 → 카탈로그 id (팀 접두어를 붙인다) */
-export function defaultXiIds(teamId: string): string[] {
-  return (DEFAULT_XI[teamId] ?? []).map((slug) => `${teamId}-${slug}`);
+/**
+ * 팀의 기본 선발 — **이름 슬러그**로 적는다.
+ *
+ * 선수 id는 소속 클럽과 무관해졌으므로(`world/player-id.ts`) 여기서 id를 조립할
+ * 수 없다. 슬러그를 실제 id로 옮기는 일은 카탈로그를 아는 쪽이 한다 —
+ * `world/catalog.ts`의 `defaultXiIds`.
+ */
+export function defaultXiSlugs(teamId: string): readonly string[] {
+  return DEFAULT_XI[teamId] ?? [];
 }
 
 /** 팀의 기본 포메이션 — 2부 클럽처럼 값이 없으면 기본 전술의 것을 쓴다 */

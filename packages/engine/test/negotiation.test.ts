@@ -303,7 +303,8 @@ describe("시간이 흐르면", () => {
     const respondsOn = pendingOffer(negotiation)!.respondsOn!;
 
     expect(arrivedResponses(state)).toHaveLength(0); // 아직 오지 않았다
-    let guard = 10;
+    // 답신은 최장 보름까지 늦는다 (`responseDelayDays`의 긴 꼬리) — 그보다 넉넉히
+    let guard = 20;
     let stopped = "";
     while (guard-- > 0 && state.date < respondsOn) {
       const advanced = advanceTime(state, { days: 1 });

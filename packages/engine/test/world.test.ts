@@ -15,7 +15,10 @@ import {
   DEFAULT_XI,
   TACTICAL_STYLE,
   TEAM_CATALOG,
+  catalogOfTeam,
   defaultXiIds,
+  defaultXiSlugs,
+  slugifyName,
   pickFormation,
   squadLevelOf,
   isTopFlight,
@@ -56,7 +59,7 @@ describe("선수 카탈로그 (불변 초기치 DB)", () => {
   it("실선수 시드에 표기만 다른 같은 선수가 둘 다 남지 않는다", () => {
     // 시드를 갱신할 때 로마자 표기가 갈린 같은 선수가 둘 다 살아남는 사고가
     // 난다 (Yarmoliuk/Yarmolyuk). id 슬러그도 생년월일도 달라서 유일성 검사엔
-    // 안 걸리므로 **이름의 편집 거리**로 본다. 절차 생성 선수(`-gen`)는
+    // 안 걸리므로 **이름의 편집 거리**로 본다. 절차 생성 선수(`synthetic`)는
     // 이름을 무작위 조합으로 만들어 우연한 충돌이 정상이라 제외한다.
     const plain = (s: string) =>
       s
@@ -81,7 +84,7 @@ describe("선수 카탈로그 (불변 초기치 DB)", () => {
 
     const byTeam = new Map<string, { id: string; name: string }[]>();
     for (const e of catalog) {
-      if (/-gen\d+$/.test(e.id)) continue;
+      if (e.synthetic) continue;
       const list = byTeam.get(e.teamId) ?? [];
       list.push({ id: e.id, name: plain(e.nameEn) });
       byTeam.set(e.teamId, list);
@@ -127,7 +130,7 @@ describe("선수 카탈로그 (불변 초기치 DB)", () => {
         .replace(/[^a-z]/g, "");
     const byPerson = new Map<string, string[]>();
     for (const e of catalog) {
-      if (/-gen\d+$|-dev-|-y\d+-/.test(e.id)) continue;
+      if (e.synthetic) continue;
       const key = `${key0(e.nameEn)}|${e.birthdate}`;
       byPerson.set(key, [...(byPerson.get(key) ?? []), e.id]);
     }
@@ -344,12 +347,12 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
   it("아스톤 빌라 기본 XI는 왓킨스를 9번으로 쓰는 4-2-3-1 코어다", () => {
     const wanted = new Set(defaultXiIds("astonvilla"));
     expect(wanted.size).toBe(11);
-    expect(wanted.has("astonvilla-alejandro-garnacho")).toBe(false);
-    expect(wanted.has("astonvilla-ollie-watkins")).toBe(true);
+    expect(wanted.has("alejandro-garnacho")).toBe(false);
+    expect(wanted.has("ollie-watkins")).toBe(true);
     const starters = assignmentsOf(state, "astonvilla", "starting");
-    expect(
-      starters.find((assignment) => assignment.playerId === "astonvilla-ollie-watkins")?.position,
-    ).toBe("ST");
+    expect(starters.find((assignment) => assignment.playerId === "ollie-watkins")?.position).toBe(
+      "ST",
+    );
   });
 
   it("리서치한 모양은 스쿼드가 감당하면 유지된다", () => {
@@ -368,13 +371,13 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
 
   it("기본 선발 슬러그가 전부 카탈로그에 실재한다 (오타 방지)", () => {
     // 슬러그가 틀리면 조용히 무시되고 라인업이 슬그머니 바뀐다 — 여기서 잡는다
-    const ids = new Set(playerCatalog().map((e) => e.id));
     const missing: string[] = [];
     for (const teamId of Object.keys(DEFAULT_XI)) {
-      // 이적으로 빠진 자리는 비워 둔다 (그 자리는 엔진이 채운다)
-      const xi = defaultXiIds(teamId);
-      expect(xi.length, teamId).toBe(11);
-      for (const id of xi) if (!ids.has(id)) missing.push(id);
+      const have = new Set(catalogOfTeam(teamId).map((e) => slugifyName(e.nameEn)));
+      for (const slug of defaultXiSlugs(teamId)) {
+        if (!have.has(slug)) missing.push(`${teamId}: ${slug}`);
+      }
+      expect(defaultXiIds(teamId).length, teamId).toBe(11);
     }
     expect(missing).toEqual([]);
   });

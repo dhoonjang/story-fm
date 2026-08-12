@@ -26,12 +26,14 @@ import {
   TEAM_CATALOG,
   TIER_BASE,
   countryOfTeam,
+  defaultXiSlugs,
   isTopFlight,
   strengthBase,
 } from "../data/team-catalog";
 import { isMarketOnlyLeague } from "../data/league-catalog";
 import { FIRST_NAMES, LAST_NAMES } from "../data/names";
 import { makeRng, pick, randInt } from "../core/rng";
+import { claimPlayerId, slugifyName } from "./player-id";
 
 /**
  * 선수 카탈로그 (PLAYER_CATALOG) — 모든 게임이 공유하는 불변 초기치 DB.
@@ -290,31 +292,33 @@ export function derivePositions(nameEn: string, natural: string): PlayerPosition
  * 종류의 데이터 부채로 다루고(data-sourcing.md §7), 시드에 `homegrown`이
  * 명시돼 있으면 그것을 우선한다.
  *
- * 대체 규칙은 id 해시로 나라별 목표 비율을 맞춘다 — 1부는 명단의 약 40%,
+ * 대체 규칙은 이름·생일 해시로 나라별 목표 비율을 맞춘다 — 1부는 명단의 약 40%,
  * 2부는 약 75%가 자국에서 자란다(실제 챔피언십이 그렇다). 결정적이라
  * 같은 세이브에서 같은 선수는 언제나 같은 자격을 갖는다.
  */
 const HOMEGROWN_RATE: Record<1 | 2, number> = { 1: 40, 2: 75 };
 
 function deriveHomegrownCountry(
-  id: string,
+  who: { nameEn: string; birthdate: string },
   teamId: string,
   seeded: boolean | undefined,
 ): string | undefined {
   const country = countryOfTeam(teamId);
   if (seeded !== undefined) return seeded ? country : undefined;
   const division = isTopFlight(teamId) ? 1 : 2;
-  return hashOf(`homegrown:${id}`) % 100 < HOMEGROWN_RATE[division] ? country : undefined;
+  const key = `homegrown:${who.nameEn}:${who.birthdate}`;
+  return hashOf(key) % 100 < HOMEGROWN_RATE[division] ? country : undefined;
 }
 
-function entryFromSeed(teamId: string, s: RealPlayerSeed, slug: string): PlayerCatalogEntry {
-  const id = `${teamId}-${slug}`;
-  const homegrownCountry = deriveHomegrownCountry(id, teamId, s.homegrown);
+/** 아직 id가 없는 카탈로그 엔트리 — id는 전 구단을 다 만든 뒤 한 번에 배정한다 */
+type CatalogDraft = Omit<PlayerCatalogEntry, "id">;
+
+function entryFromSeed(teamId: string, s: RealPlayerSeed): CatalogDraft {
+  const homegrownCountry = deriveHomegrownCountry(s, teamId, s.homegrown);
   // 시드는 6축 + GK — 15축은 여기서 파생한다 (attributes.ts, 부채는 §8 2단계)
   const axes = deriveAxes(s.nameEn, s.position, s, ageOf(s.birthdate, CATALOG_AGE_REF));
   const positions = derivePositions(s.nameEn, s.position);
   return {
-    id,
     teamId,
     nameKo: s.nameKo,
     nameEn: s.nameEn,
@@ -335,27 +339,6 @@ function entryFromSeed(teamId: string, s: RealPlayerSeed, slug: string): PlayerC
     ...(homegrownCountry === undefined ? {} : { homegrownCountry }),
     ...(s.weeklyWage === undefined ? {} : { weeklyWage: s.weeklyWage }),
   };
-}
-
-/** 로마자 이름 → id 슬러그. NFD로 발음 구별 부호를 벗기고 비분해 문자는 수동 매핑 */
-const SLUG_CHAR: Record<string, string> = {
-  ø: "o",
-  đ: "d",
-  ð: "d",
-  ł: "l",
-  ß: "ss",
-  æ: "ae",
-  œ: "oe",
-  þ: "th",
-};
-export function slugifyName(name: string): string {
-  return name
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[øđðłßæœþ]/g, (c) => SLUG_CHAR[c] ?? "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
 }
 
 /**
@@ -466,14 +449,14 @@ function topUpEntries(
   teamId: string,
   tier: 1 | 2 | 3 | 4,
   seeds: readonly RealPlayerSeed[],
-): PlayerCatalogEntry[] {
+): CatalogDraft[] {
   const short = MIN_SQUAD - seeds.length;
   if (short <= 0) return [];
   const all = fallbackEntries(teamId, tier);
   const have: Record<string, number> = { GK: 0, DF: 0, MF: 0, FW: 0 };
   for (const s of seeds) have[s.positionGroup] = (have[s.positionGroup] ?? 0) + 1;
 
-  const out: PlayerCatalogEntry[] = [];
+  const out: CatalogDraft[] = [];
   const used = new Set<number>();
   // ① 부족한 포지션군을 1군급으로 (뒤쪽 = 로테이션 자리부터 가져온다)
   for (let i = ACADEMY_FROM - 1; i >= 0 && out.length < short; i--) {
@@ -496,14 +479,17 @@ function fallbackEntries(
   teamId: string,
   tier: 1 | 2 | 3 | 4,
   options: { template?: string[]; base?: number; academyFrom?: number } = {},
-): PlayerCatalogEntry[] {
+): CatalogDraft[] {
   const tierBase = options.base ?? TIER_BASE[tier];
   const template = options.template ?? FALLBACK_TEMPLATE;
   const academyFrom = options.academyFrom ?? ACADEMY_FROM;
   return template.map((position, i) => {
     const rng = makeRng(hashOf(`${teamId}:${i}`), `catalog:${teamId}:${i}`);
     const group = positionGroupOf(position) ?? "MF";
-    const nameEn = `${pick(rng, FIRST_NAMES)} ${pick(rng, LAST_NAMES)}`;
+    const first = pick(rng, FIRST_NAMES);
+    const last = pick(rng, LAST_NAMES);
+    const nameEn = `${first.en} ${last.en}`;
+    const nameKo = `${first.ko} ${last.ko}`;
     // 아카데미는 1군보다 한참 낮게 출발한다 (잠재력은 아래에서 크게 잡는다)
     const base = i >= academyFrom ? tierBase - randInt(rng, 12, 20) : tierBase;
     const v = (d = 6) => clamp99(base + randInt(rng, -d, d));
@@ -552,17 +538,22 @@ function fallbackEntries(
                 physical: v(),
                 goalkeeping: 0,
               };
-    const id = `${teamId}-gen${i + 1}`;
     const foot = syntheticFoot(nameEn, position);
+    const birthdate = `${2026 - age}-${String(randInt(rng, 1, 12)).padStart(2, "0")}-${String(randInt(rng, 1, 28)).padStart(2, "0")}`;
     // 아카데미 자원은 그 클럽이 키운 선수다 — 정의상 홈그로운
-    const homegrownCountry = deriveHomegrownCountry(id, teamId, academy ? true : undefined);
+    const homegrownCountry = deriveHomegrownCountry(
+      { nameEn, birthdate },
+      teamId,
+      academy ? true : undefined,
+    );
     return {
-      id,
       teamId,
       foot,
-      nameKo: nameEn,
+      nameKo,
       nameEn,
-      birthdate: `${2026 - age}-${String(randInt(rng, 1, 12)).padStart(2, "0")}-${String(randInt(rng, 1, 28)).padStart(2, "0")}`,
+      // 실존 시드가 아니다 — 이 사실을 id 모양으로 알아내던 코드가 있었다
+      synthetic: true,
+      birthdate,
       positions: derivePositions(nameEn, position),
       // 합성 선수도 실선수와 같은 파생 공식을 거친다 (일관성)
       ...deriveAxes(nameEn, position, attrs, age),
@@ -570,7 +561,7 @@ function fallbackEntries(
       // 아카데미는 잠재력 폭이 크다 — 유스 발굴의 재미가 여기서 나온다
       potential: clamp99(base + (academy ? randInt(rng, 8, 28) : randInt(rng, 2, 14))),
       ...(homegrownCountry === undefined ? {} : { homegrownCountry }),
-    } satisfies PlayerCatalogEntry;
+    } satisfies CatalogDraft;
   });
 }
 
@@ -608,7 +599,7 @@ const MARKET_LEAGUE_TEMPLATE: string[] = [
 ];
 
 function buildFromSeed(): PlayerCatalogEntry[] {
-  const entries: PlayerCatalogEntry[] = [];
+  const entries: CatalogDraft[] = [];
   for (const team of TEAM_CATALOG) {
     /**
      * **무소속은 비어 있게 시작한다.** 클럽이 아니라 클럽이 없는 상태라
@@ -619,14 +610,7 @@ function buildFromSeed(): PlayerCatalogEntry[] {
     // 2부와 달리 전력 감점이 없다 (약한 리그가 아니라 경기를 안 하는 리그다)
     if (isMarketOnlyLeague(team.leagueId)) {
       const seeds = ALL_SQUADS[team.id] ?? [];
-      const used = new Set<string>();
-      for (const seed of seeds) {
-        let slug = slugifyName(seed.nameEn) || `p${used.size + 1}`;
-        let n = 2;
-        while (used.has(slug)) slug = `${slugifyName(seed.nameEn)}-${n++}`;
-        used.add(slug);
-        entries.push(entryFromSeed(team.id, seed, slug));
-      }
+      for (const seed of seeds) entries.push(entryFromSeed(team.id, seed));
       entries.push(
         ...fallbackEntries(team.id, team.tier, {
           template: MARKET_LEAGUE_TEMPLATE,
@@ -649,15 +633,7 @@ function buildFromSeed(): PlayerCatalogEntry[] {
     }
     const seeds = ALL_SQUADS[team.id];
     if (seeds && seeds.length > 0) {
-      const used = new Set<string>();
-      for (const s of seeds) {
-        let slug = slugifyName(s.nameEn) || `p${used.size + 1}`;
-        // 같은 팀 내 슬러그 충돌 방지 (동명이인)
-        let n = 2;
-        while (used.has(slug)) slug = `${slugifyName(s.nameEn)}-${n++}`;
-        used.add(slug);
-        entries.push(entryFromSeed(team.id, s, slug));
-      }
+      for (const s of seeds) entries.push(entryFromSeed(team.id, s));
       // 실선수 1군이 하한에 못 미치면 합성 선수로 보충한다.
       // 유소년은 실명을 쓰지 않는 결정(narrative.md §7)과도 맞는 방향이다.
       entries.push(...topUpEntries(team.id, team.tier, seeds));
@@ -665,7 +641,13 @@ function buildFromSeed(): PlayerCatalogEntry[] {
       entries.push(...fallbackEntries(team.id, team.tier));
     }
   }
-  return entries;
+  /**
+   * id 배정은 **맨 마지막에 한 번에** 한다. 보충 후보를 만들었다가 버리는
+   * 경로(`topUpEntries`)가 있어, 만드는 자리에서 배정하면 버려진 후보가 이름을
+   * 선점해 실제로 남은 선수가 괜히 뒤 번호를 받는다.
+   */
+  const taken = new Set<string>();
+  return entries.map((e) => ({ id: claimPlayerId(e.nameEn, e.birthdate, taken), ...e }));
 }
 
 /**
@@ -705,7 +687,7 @@ export function playerCatalog(): PlayerCatalogEntry[] {
 function backfillHomegrown(entries: PlayerCatalogEntry[]): PlayerCatalogEntry[] {
   if (entries.some((e) => e.homegrownCountry !== undefined)) return entries;
   return entries.map((e) => {
-    const country = deriveHomegrownCountry(e.id, e.teamId, undefined);
+    const country = deriveHomegrownCountry(e, e.teamId, undefined);
     return country === undefined ? e : { ...e, homegrownCountry: country };
   });
 }
@@ -737,6 +719,19 @@ export function seedCatalog(): PlayerCatalogEntry[] {
 
 export function catalogOfTeam(teamId: string): PlayerCatalogEntry[] {
   return playerCatalog().filter((e) => e.teamId === teamId);
+}
+
+/**
+ * 구단 지정 선발 → 카탈로그 id. 그 팀 명단에서 **이름으로** 찾는다.
+ *
+ * 명단에 없는 이름은 조용히 빠진다 — 시드가 갱신돼 떠난 선수가 남아 있어도
+ * 새 게임이 그 id를 지정 선발로 물고 늘어지지 않게 한다.
+ */
+export function defaultXiIds(teamId: string): string[] {
+  const byName = new Map(catalogOfTeam(teamId).map((e) => [slugifyName(e.nameEn), e.id]));
+  return defaultXiSlugs(teamId)
+    .map((slug) => byName.get(slug))
+    .filter((id): id is string => id !== undefined);
 }
 
 /**
