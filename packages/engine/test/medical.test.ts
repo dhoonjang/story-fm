@@ -268,5 +268,12 @@ describe("우리가 파는 쪽이면 상대가 값을 깎는다", () => {
     expect(cut).not.toBeNull();
     expect(cut!.fee).toBeLessThan(fee);
     expect(digest.join(" ")).toContain("깎아 다시");
+
+    const accepted = answerIncomingOffer(state, {
+      negotiationId: negotiation.id,
+      verdict: "accept",
+    });
+    expect(accepted.ok, accepted.message).toBe(true);
+    expect(accepted.message).toContain("메디컬 재협상");
   });
 });

@@ -65,6 +65,7 @@ import {
 import { overallFor, playerCatalog } from "../world/catalog";
 import { estimateSquadWages, wageSubjectOf } from "../world/wages";
 import { generateYouthPlayer } from "../world/generate";
+import { ensureSquadNumbers } from "../squad/numbers";
 import { hasCups, scopedTeams, type WorldScope } from "../world/scope";
 import {
   TEAM_CATALOG,
@@ -73,6 +74,7 @@ import {
   defaultXiIds,
   formationOf,
   isTopFlight,
+  tacticalStyleOf,
   teamCatalogById,
   isClubTeam,
 } from "../data/team-catalog";
@@ -259,6 +261,13 @@ export interface PendingMatch {
    * 옛 세이브엔 없다 — optional이라 세이브 버전을 올리지 않는다.
    */
   exploits?: string[];
+  /** 자연어로 지정한 경기 전용 지역 플랜 — 같은 지역은 마지막 지시가 이긴다. */
+  regionalPlans?: Array<{
+    band: import("@story-fm/domain").RegionalBand;
+    lane: import("@story-fm/domain").RegionalLane;
+    intent: import("@story-fm/domain").RegionalIntent;
+    note: string;
+  }>;
   /**
    * 경기 중 소모한 체력 (선수 id → 0~100). 경기 중에는 저장된 `state.condition`에서
    * 빼서 보고, **경기가 끝나면 이 값 그대로 정산된다**(`finalizeMatch`) — 화면에서
@@ -833,6 +842,7 @@ function instantiatePlayers(seed: number, only?: (teamId: string) => boolean): G
       teamId: entry.teamId,
       squadLevel: "first",
       name: entry.nameKo,
+      ...(entry.squadNumber === undefined ? {} : { squadNumber: entry.squadNumber }),
       birthdate: entry.birthdate,
       positions: entry.positions.map((p) => ({ ...p })),
       ...(entry.homegrownCountry === undefined ? {} : { homegrownCountry: entry.homegrownCountry }),
@@ -906,6 +916,7 @@ export function addMissingClubs(state: GameState): number {
     // 무소속은 스쿼드도 배치도 갖지 않는다 — 팀 엔티티만 있으면 된다
     if (!isClubTeam(team.id)) continue;
     const squad = added.filter((p) => p.teamId === team.id);
+    ensureSquadNumbers(squad);
     for (const player of squad) player.squadLevel = "first";
     state.players.push(...squad);
     state.contracts.push(
@@ -929,10 +940,7 @@ export function addMissingClubs(state: GameState): number {
     });
     state.tactics.push({
       teamId: team.id,
-      spec: {
-        ...DEFAULT_TACTICS,
-        formation: pickFormation(squad, team.formation, defaultXiIds(team.id)),
-      },
+      spec: initialTactics(team.id, pickFormation(squad, team.formation, defaultXiIds(team.id))),
       assignments: buildAssignments(
         squad,
         pickFormation(squad, team.formation, defaultXiIds(team.id)),
@@ -1075,44 +1083,73 @@ function buildInitialSquads(
   }
 }
 
-/**
- * 슬롯을 채운다 — 앞에서부터 최고점을 고른 뒤 **짝 교환**으로 다듬는다.
- *
- * 그리디만 쓰면 그 자리를 볼 줄 아는 **유일한 선수**가 앞 슬롯에 끌려가 뒷자리가
- * 무너진다(헐: 유일한 RB 코일이 오른쪽을 겸하는 센터백에게 밀려 왼쪽 풀백에 섰다).
- * 두 배치를 맞바꿔 합이 오르면 바꾼다 — 11×11이라 비용은 없다시피 하고 결정적이다.
- */
+/** 슬롯 전체의 적합도 합이 최대가 되게 선수를 배치한다 (직사각형 Hungarian). */
 function fillSlots(
   pool: GamePlayer[],
   slots: readonly string[],
   score: (p: GamePlayer, slot: string) => number,
 ): GamePlayer[] {
-  const used = new Set<string>();
-  const chosen: GamePlayer[] = [];
-  for (const slot of slots) {
-    const best = pool
-      .filter((p) => !used.has(p.id))
-      .map((p) => ({ p, s: score(p, slot) }))
-      .sort((a, b) => b.s - a.s)[0];
-    if (!best) break;
-    used.add(best.p.id);
-    chosen.push(best.p);
-  }
-  for (let pass = 0; pass < 3; pass++) {
-    let moved = false;
-    for (let a = 0; a < chosen.length; a++) {
-      for (let b = a + 1; b < chosen.length; b++) {
-        const now = score(chosen[a]!, slots[a]!) + score(chosen[b]!, slots[b]!);
-        const swapped = score(chosen[b]!, slots[a]!) + score(chosen[a]!, slots[b]!);
-        if (swapped > now) {
-          [chosen[a], chosen[b]] = [chosen[b]!, chosen[a]!];
-          moved = true;
+  const rowCount = Math.min(slots.length, pool.length);
+  if (rowCount === 0) return [];
+  const maxScore = Math.max(
+    ...slots.slice(0, rowCount).flatMap((slot) => pool.map((player) => score(player, slot))),
+  );
+  const u = Array<number>(rowCount + 1).fill(0);
+  const v = Array<number>(pool.length + 1).fill(0);
+  const matchedRow = Array<number>(pool.length + 1).fill(0);
+  const previousColumn = Array<number>(pool.length + 1).fill(0);
+
+  for (let row = 1; row <= rowCount; row++) {
+    matchedRow[0] = row;
+    let column = 0;
+    const minimum = Array<number>(pool.length + 1).fill(Infinity);
+    const used = Array<boolean>(pool.length + 1).fill(false);
+    do {
+      used[column] = true;
+      const currentRow = matchedRow[column]!;
+      let delta = Infinity;
+      let nextColumn = 0;
+      for (let candidate = 1; candidate <= pool.length; candidate++) {
+        if (used[candidate]) continue;
+        const cost =
+          maxScore -
+          score(pool[candidate - 1]!, slots[currentRow - 1]!) -
+          u[currentRow]! -
+          v[candidate]!;
+        if (cost < minimum[candidate]!) {
+          minimum[candidate] = cost;
+          previousColumn[candidate] = column;
+        }
+        if (minimum[candidate]! < delta) {
+          delta = minimum[candidate]!;
+          nextColumn = candidate;
         }
       }
-    }
-    if (!moved) break;
+      for (let candidate = 0; candidate <= pool.length; candidate++) {
+        if (used[candidate]) {
+          const matched = matchedRow[candidate]!;
+          u[matched] = u[matched]! + delta;
+          v[candidate] = v[candidate]! - delta;
+        } else {
+          minimum[candidate] = minimum[candidate]! - delta;
+        }
+      }
+      column = nextColumn;
+    } while (matchedRow[column] !== 0);
+
+    do {
+      const previous = previousColumn[column]!;
+      matchedRow[column] = matchedRow[previous]!;
+      column = previous;
+    } while (column !== 0);
   }
-  return chosen;
+
+  const result = Array<GamePlayer>(rowCount);
+  for (let column = 1; column <= pool.length; column++) {
+    const row = matchedRow[column]!;
+    if (row > 0) result[row - 1] = pool[column - 1]!;
+  }
+  return result;
 }
 
 /**
@@ -1211,6 +1248,119 @@ function memoFit(): (p: GamePlayer, slot: string) => number {
   };
 }
 
+/** 포메이션이 의도하는 공간 사용과 모순되지 않는 초기 운용값. */
+function initialTactics(
+  teamId: string,
+  formation: Formation,
+): import("@story-fm/domain").TacticsSpec {
+  switch (tacticalStyleOf(teamId)) {
+    case "possession":
+      return {
+        formation,
+        mentality: 4,
+        defensiveLine: 4,
+        pressing: 4,
+        tempo: 3,
+        width: 4,
+        passStyle: 2,
+      };
+    case "high-press":
+      return {
+        formation,
+        mentality: 4,
+        defensiveLine: 4,
+        pressing: 5,
+        tempo: 4,
+        width: 3,
+        passStyle: 3,
+      };
+    case "transition":
+      return {
+        formation,
+        mentality: 3,
+        defensiveLine: 3,
+        pressing: 3,
+        tempo: 4,
+        width: 4,
+        passStyle: 4,
+      };
+    case "direct":
+      return {
+        formation,
+        mentality: 3,
+        defensiveLine: 3,
+        pressing: 3,
+        tempo: 4,
+        width: 4,
+        passStyle: 5,
+      };
+    case "low-block":
+      return {
+        formation,
+        mentality: 2,
+        defensiveLine: 2,
+        pressing: 2,
+        tempo: 3,
+        width: 3,
+        passStyle: 4,
+      };
+    case "balanced":
+      break;
+  }
+  switch (formation) {
+    case "4-3-3":
+      return {
+        formation,
+        mentality: 4,
+        defensiveLine: 4,
+        pressing: 4,
+        tempo: 3,
+        width: 4,
+        passStyle: 2,
+      };
+    case "4-2-3-1":
+      return {
+        formation,
+        mentality: 3,
+        defensiveLine: 3,
+        pressing: 4,
+        tempo: 3,
+        width: 3,
+        passStyle: 2,
+      };
+    case "4-4-2":
+      return {
+        formation,
+        mentality: 3,
+        defensiveLine: 3,
+        pressing: 3,
+        tempo: 4,
+        width: 4,
+        passStyle: 4,
+      };
+    case "3-5-2":
+      return {
+        formation,
+        mentality: 3,
+        defensiveLine: 3,
+        pressing: 3,
+        tempo: 3,
+        width: 4,
+        passStyle: 3,
+      };
+    case "5-4-1":
+      return {
+        formation,
+        mentality: 2,
+        defensiveLine: 2,
+        pressing: 3,
+        tempo: 3,
+        width: 3,
+        passStyle: 4,
+      };
+  }
+}
+
 /**
  * 구단이 **어떤 모양으로 서야 가장 센가** — 5개 프리셋을 채워 보고 고른다.
  *
@@ -1233,10 +1383,17 @@ export function pickFormation(
   const xi = squad.filter((p) => wanted.has(p.id));
   const pool = xi.length >= 10 ? xi : squad;
   const fit = memoFit();
+  if (prior) {
+    const placed = fillSlots(pool, FORMATION_SLOTS[prior], fit);
+    const feasible = placed.every(
+      (player, index) => proficiencyAt(player, FORMATION_SLOTS[prior][index]!) >= XI_BONUS_FLOOR,
+    );
+    if (feasible) return prior;
+  }
   let best: Formation = prior ?? DEFAULT_TACTICS.formation;
   let bestScore = -Infinity;
   for (const formation of FORMATIONS) {
-    const score = shapeStrength(pool, formation, fit) + (formation === prior ? PRIOR_EDGE : 0);
+    const score = shapeStrength(pool, formation, fit);
     if (score > bestScore) {
       bestScore = score;
       best = formation;
@@ -1244,18 +1401,6 @@ export function pickFormation(
   }
   return best;
 }
-
-/**
- * 리서치 값이 버티는 폭 — 11자리 합이 이만큼(자리당 약 1.8점) 더 세야 뒤집는다.
- * 존 기여 점수 합은 팀당 700~950쯤이라 2~3%다.
- *
- * 16이었다가 20으로 올렸다. 포지션 적응도의 감점 폭을 12%p → 30%p로 키우면서
- * (`PROFICIENCY_SPREAD`) 모양 간 점수 차가 함께 벌어졌기 때문이다 — 같은 16으로
- * 두면 리서치 값이 상대적으로 가벼워져 뒤집히는 팀이 5 → 9로 늘고, 실제 보도로
- * 확인한 값(무리뉴의 4-2-3-1)까지 스쿼드 채점에 밀렸다. 폭을 키운 만큼 함께
- * 올려 **뒤집힘 수를 원래 수준(1부 96팀 중 5팀)으로** 되돌린 값이다.
- */
-const PRIOR_EDGE = 20;
 
 /** 지정 선발 가산이 붙는 최소 적응도 — "그 자리를 볼 수는 있다"의 문턱.
  *  기본 배치 가드(적응도 70 미만 금지)와 같은 눈금이다 — 가산이 그 가드를 뚫으면
@@ -1277,9 +1422,14 @@ export function buildAssignments(
   familiarity: number,
   available: (id: string) => boolean = () => true,
   preferred?: readonly string[],
+  customLayout?: {
+    slots: readonly string[];
+    points: readonly import("@story-fm/domain").BoardPoint[];
+  },
 ): TacticAssignment[] {
-  const slots = FORMATION_SLOTS[formation];
-  const layout = FORMATION_LAYOUTS[formation];
+  // 프리셋은 새 게임 초기화 전용이다. 시즌 중 재구성은 저장된 실제 좌표를 넘긴다.
+  const slots = customLayout?.slots ?? FORMATION_SLOTS[formation];
+  const layout = customLayout?.points ?? FORMATION_LAYOUTS[formation];
   const used = new Set<string>();
   const assignments: TacticAssignment[] = [];
   const pool = squad.filter((p) => available(p.id));
@@ -1378,13 +1528,14 @@ export function createGame(input: CreateGameInput): GameState {
     ]),
   );
   buildInitialSquads(players, seed, formations, catalogTeams);
+  ensureSquadNumbers(players);
 
   // 전술·배치 — 구단의 기본 포메이션과 기본 선발로 시작한다 (팀 카탈로그)
   const tactics: TeamTactics[] = teams.map((t) => {
     const formation = formations.get(t.id) ?? formationOf(t.id);
     return {
       teamId: t.id,
-      spec: { ...DEFAULT_TACTICS, formation },
+      spec: initialTactics(t.id, formation),
       assignments: buildAssignments(
         players.filter((p) => p.teamId === t.id && squadLevelOf(p) === "first"),
         formation,

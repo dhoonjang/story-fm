@@ -119,9 +119,9 @@ describe("기자회견 — 한도와 대가", () => {
   it("지목된 선수는 팀 전체보다 크게 움직인다", () => {
     const state = createTestGame(29);
     const target = userPlayers(state)[0]!;
-    target.state.condition = 60;
+    target.state.form = 0;
     const others = userPlayers(state).filter((p) => p.id !== target.id);
-    for (const p of others) p.state.condition = 60;
+    for (const p of others) p.state.form = 0;
 
     const conference = fakeConference({
       facts: [{ kind: "slump", text: `${target.name} 폼 바닥`, about: target.id, sharp: true }],
@@ -133,7 +133,7 @@ describe("기자회견 — 한도와 대가", () => {
     expect(effect.targetName).toBe(target.name);
     // 공개 비판은 팀도 식히지만 당사자는 그 위에 더 얹힌다
     expect(effect.target).toBeLessThan(0);
-    expect(target.state.condition).toBeLessThan(others[0]!.state.condition);
+    expect(target.state.form).toBeLessThan(others[0]!.state.form);
   });
 
   it("한도는 weight에 비례한다 — 같은 스탠스도 큰 자리에서 더 크게 남는다", () => {

@@ -1,5 +1,5 @@
 import type { GamePlayer, PositionGroup } from "@story-fm/domain";
-import { CONDITION_BASE, ageOf, naturalPositionOf } from "@story-fm/domain";
+import { CONDITION_BASE, ageOf, anchorOf, naturalPositionOf } from "@story-fm/domain";
 import {
   buildScheduleEntries,
   buildSeasonCalendar,
@@ -25,6 +25,7 @@ import { buildEuroEntrants, entrantsOf, type LeagueTables } from "./europe";
 import { buildSeasonFixtures, isUserFixture } from "./fixtures";
 import { applyPromotionRelegation, leagueOfTeamIn, teamsOfLeagueIn } from "./promotion";
 import { generateYouthPlayer } from "../world/generate";
+import { assignSquadNumber } from "../squad/numbers";
 import {
   buildAssignments,
   groupOf,
@@ -445,6 +446,7 @@ export function transitionSeason(state: GameState): string[] {
         seasonYear(nextSeason),
       );
       state.players.push(youth);
+      assignSquadNumber(state.players, youth);
       playerIndex.set(youth.id, youth);
       squad.push(youth);
       // 유스 콜업도 원장에 (fromTeamId = null)
@@ -514,10 +516,35 @@ export function transitionSeason(state: GameState): string[] {
 
     // 배치 재구성 — 새 스쿼드로 선발·벤치를 다시 짠다 (적응도는 기준선으로 리셋)
     const tactics = tacticsOf(state, team.id);
+    const currentLayout = tactics.assignments.filter((a) => a.role === "starting");
+    const layoutSlots = currentLayout.map((a) => a.position);
+    const layoutPoints = currentLayout.map((a) => a.point ?? anchorOf(a.position));
+    // 옛 세이브나 얇은 컵 팀의 배치가 11칸 미만이면 선수들의 실제 주 포지션으로 채운다.
+    // 프리셋 폴백은 쓰지 않는다.
+    for (const player of [...squad].sort((a, b) => b.attributes.overall - a.attributes.overall)) {
+      if (layoutSlots.length >= 11) break;
+      const position = naturalPositionOf(player).position;
+      layoutSlots.push(position);
+      layoutPoints.push(anchorOf(position));
+    }
+    if (!layoutSlots.some((position) => position === "GK")) {
+      const goalkeeper = squad.find((player) => groupOf(player) === "GK");
+      if (goalkeeper) {
+        const index = Math.min(10, Math.max(0, layoutSlots.length - 1));
+        layoutSlots[index] = "GK";
+        layoutPoints[index] = anchorOf("GK");
+      }
+    }
     tactics.assignments = buildAssignments(
       squad.filter((p) => p.squadLevel !== "reserve"),
       tactics.spec.formation,
       FAMILIARITY_BASELINE,
+      undefined,
+      undefined,
+      {
+        slots: layoutSlots.slice(0, 11),
+        points: layoutPoints.slice(0, 11),
+      },
     );
   }
 

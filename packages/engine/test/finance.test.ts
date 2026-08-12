@@ -431,6 +431,40 @@ describe("밸런스 기준선", () => {
  * 두 축을 나누는 이유가 여기서 검증된다: 구단주 돈으로 PSR을 풀 수 없어야 한다.
  */
 describe("재정 이벤트 스킬", () => {
+  it("£10k 미만의 일상 비용은 원장과 잔고에서 무시한다", () => {
+    const state = createTestGame(7, "tottenham");
+    const finance = financeOf(state, state.userTeamId);
+    const balanceBefore = finance.balance;
+    const ledgerBefore = finance.ledger.length;
+
+    const res = applyFinanceEvent(state, {
+      kind: "expense",
+      category: "bonus",
+      amount: 9_999,
+      note: "선수단 회식비",
+    });
+
+    expect(res.ok).toBe(false);
+    expect(finance.balance).toBe(balanceBefore);
+    expect(finance.ledger).toHaveLength(ledgerBefore);
+  });
+
+  it("£10k부터는 서사 재정 이벤트로 기록할 수 있다", () => {
+    const state = createTestGame(7, "tottenham");
+    const finance = financeOf(state, state.userTeamId);
+    const balanceBefore = finance.balance;
+
+    const res = applyFinanceEvent(state, {
+      kind: "expense",
+      category: "bonus",
+      amount: 10_000,
+      note: "선수단 공식 포상",
+    });
+
+    expect(res.ok).toBe(true);
+    expect(finance.balance).toBe(balanceBefore - 10_000);
+  });
+
   it("서사 매출은 원장에 남아 잔고와 손익에 함께 반영된다", () => {
     const state = createTestGame(7, "tottenham");
     const finance = financeOf(state, state.userTeamId);

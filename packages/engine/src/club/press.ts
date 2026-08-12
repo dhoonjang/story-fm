@@ -6,11 +6,11 @@ import type {
   PressStance,
   PressTrigger,
 } from "@story-fm/domain";
-import { clampCondition, isNaturalAt, naturalPositionOf } from "@story-fm/domain";
+import { isNaturalAt, naturalPositionOf } from "@story-fm/domain";
 import type { GameState } from "../core/state";
 import { playersOf, pushNarrative, teamName, userPlayers } from "../core/state";
 import { makeRng, pick } from "../core/rng";
-import { formLabel } from "../squad/form";
+import { clampForm, formLabel, moraleToForm } from "../squad/form";
 import type { SkillResult } from "../skills";
 
 /**
@@ -319,8 +319,7 @@ export function applyPressOutcome(
   // 팀 전체 — 라커룸도 회견을 본다
   const team = Math.round(row.team * band * lead);
   if (team !== 0) {
-    for (const p of userPlayers(state))
-      p.state.condition = clampCondition(p.state.condition + team);
+    for (const p of userPlayers(state)) p.state.form = clampForm(p.state.form + moraleToForm(team));
   }
 
   /**
@@ -334,7 +333,7 @@ export function applyPressOutcome(
     : null;
   const target = targetPlayer ? Math.round(row.target * band * lead) : 0;
   if (targetPlayer && target !== 0) {
-    targetPlayer.state.condition = clampCondition(targetPlayer.state.condition + target);
+    targetPlayer.state.form = clampForm(targetPlayer.state.form + moraleToForm(target));
   }
 
   return { board, media, squad, target, targetName: targetPlayer?.name ?? null, team };

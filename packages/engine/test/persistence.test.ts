@@ -36,6 +36,22 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
     expect(loaded?.teams.length).toBe(TEAM_CATALOG.length);
   });
 
+  it("등번호 없는 기존 세이브는 실측 시드를 먼저 복원한다", () => {
+    const state = createTestGame(81);
+    saveGame(state);
+    const file = path.join(dataDir(), `${state.id}.json`);
+    const raw = JSON.parse(readFileSync(file, "utf8")) as {
+      players: Array<{ name: string; squadNumber?: number }>;
+    };
+    for (const player of raw.players) delete player.squadNumber;
+    writeFileSync(file, JSON.stringify(raw), "utf8");
+
+    const loaded = loadGame(state.id)!;
+    const bruno = loaded.players.find((player) => player.name === "브루누 페르난데스");
+    expect(bruno?.teamId).toBe("manutd");
+    expect(bruno?.squadNumber).toBe(8);
+  });
+
   /**
    * 컵이 없던 시절의 세이브를 흉내 낸다 — 2부 클럽도, 추첨 엔트리도 없는 상태.
    * 로드가 둘 다 복구해야 감독의 달력이 열자마자 채워진다 (tick을 기다리지 않는다).

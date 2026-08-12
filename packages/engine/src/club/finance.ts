@@ -17,7 +17,13 @@ import { competitionShortName, isCup, isEuroCup } from "../data/cup-catalog";
 import { leagueOfTeam, teamCatalogById } from "../data/team-catalog";
 import { leagueOfTeamIn } from "../competition/promotion";
 import { computeStandings } from "../competition/season";
-import { financeOf, pushNarrative, teamShortName, weeklyWagesOf, type GameState } from "../core/state";
+import {
+  financeOf,
+  pushNarrative,
+  teamShortName,
+  weeklyWagesOf,
+  type GameState,
+} from "../core/state";
 import { makeRng } from "../core/rng";
 
 /**
@@ -256,7 +262,8 @@ function previousRankOf(state: GameState, teamId: string): number {
      * ⚠️ **리그가 바뀌었으면 그 순위는 쓸 수 없다** — 챔피언십 1위와 프리미어리그
      * 1위는 같은 수당이 아니다. 승격·강등한 시즌은 등급 어림으로 되돌린다.
      */
-    const sameLeague = last?.leagueId === undefined || last.leagueId === leagueOfTeamIn(state, teamId);
+    const sameLeague =
+      last?.leagueId === undefined || last.leagueId === leagueOfTeamIn(state, teamId);
     if (last && sameLeague) return last.position;
   }
   const tier = tierOf(teamId);
@@ -729,8 +736,7 @@ function postMonthlyItems(state: GameState): void {
       category: "commercial",
       label: "스폰서십",
       amount:
-        COMMERCIAL_MONTHLY[commercialTier] *
-        (1 + commercialClause(state, team.id) + relegationCut),
+        COMMERCIAL_MONTHLY[commercialTier] * (1 + commercialClause(state, team.id) + relegationCut),
     });
     // 머천다이징은 성적에 붙는다 — 최근 승률 ±10%
     const winRate = winRates.get(team.id);
@@ -1086,6 +1092,8 @@ export const NARRATIVE_EXPENSE_CATEGORIES = [
  * 불러서 얼마든지 넘길 수 있다.
  */
 export const NARRATIVE_FINANCE_WAGE_LIMIT = 2;
+/** 장부에 남길 서사 재정 이벤트의 최소 단위 — 일상 비용은 게임 재정에서 무시한다. */
+export const NARRATIVE_FINANCE_MIN_AMOUNT = 10_000;
 /** 이적 예산 지원·삭감의 하루 상한 (같은 주급 배수 자) — 예산은 매출보다 큰 단위로 움직인다 */
 export const BUDGET_ADJUST_WAGE_LIMIT = 10;
 
@@ -1125,7 +1133,12 @@ export function applyFinanceEvent(
   const cap = weeklyWagesOf(state, state.userTeamId) * NARRATIVE_FINANCE_WAGE_LIMIT;
   const spent = narrativeSpentToday(state);
   const amount = Math.max(0, Math.round(input.amount));
-  if (amount === 0) return { ok: false, message: "금액이 0입니다" };
+  if (amount < NARRATIVE_FINANCE_MIN_AMOUNT) {
+    return {
+      ok: false,
+      message: `£10k 미만의 일상 비용은 재정 장부에서 무시합니다`,
+    };
+  }
   if (spent + amount > cap) {
     return {
       ok: false,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_TACTICS,
   naturalPositionOf,
   positionAtPoint,
   positionGroupOf,
@@ -22,6 +23,7 @@ import {
   setPlayerInstruction,
   setPlayerPosition,
   setPlayerRole,
+  setPlayerTactic,
   setTactics,
   settleTactics,
   squadFamiliarity,
@@ -47,12 +49,19 @@ function currentLineup(state: ReturnType<typeof createTestGame>) {
 describe("판정형 스킬 — 변화량은 공식이 정한다 (overview §7)", () => {
   it("팀토크: outcome×intensity×리더십 계수로 사기가 움직인다", () => {
     const state = createTestGame();
-    const before = userPlayers(state).map((p) => p.state.condition);
+    const before = userPlayers(state).map((p) => ({
+      form: p.state.form,
+      condition: p.state.condition,
+    }));
     const result = applyTeamTalk(state, { occasion: "pre", outcome: "inspired", intensity: 3 });
     expect(result.ok).toBe(true);
-    const after = userPlayers(state).map((p) => p.state.condition);
+    const after = userPlayers(state).map((p) => ({
+      form: p.state.form,
+      condition: p.state.condition,
+    }));
     for (let i = 0; i < before.length; i++) {
-      expect(after[i]).toBeGreaterThan(before[i] ?? 0);
+      expect(after[i]!.form).toBeGreaterThan(before[i]!.form);
+      expect(after[i]!.condition).toBe(before[i]!.condition);
     }
   });
 
@@ -63,10 +72,13 @@ describe("판정형 스킬 — 변화량은 공식이 정한다 (overview §7)",
     high.manager.attributes.leadership = 90;
     const target = userPlayers(low)[0]!;
     const targetHigh = userPlayers(high)[0]!;
-    const m0 = target.state.condition;
+    const lowBefore = target.state.form;
+    const highBefore = targetHigh.state.form;
     applyTeamTalk(low, { occasion: "pre", outcome: "inspired", intensity: 2 });
     applyTeamTalk(high, { occasion: "pre", outcome: "inspired", intensity: 2 });
-    expect(targetHigh.state.condition - m0).toBeGreaterThanOrEqual(target.state.condition - m0);
+    expect(targetHigh.state.form - highBefore).toBeGreaterThanOrEqual(
+      target.state.form - lowBefore,
+    );
   });
 
   it("면담은 불만 이슈를 해소한다", () => {
@@ -309,15 +321,11 @@ describe("set_lineup은 조정해 둔 좌표를 건드리지 않는다", () => {
     expect(after.point).toEqual(tuned);
   });
 
-  it("포메이션을 바꾸면 그때는 프리셋으로 되깔린다 — 명확한 변경일 때만", () => {
+  it("포메이션 이름을 보내도 프리셋으로 좌표를 덮지 않는다", () => {
     const { state, before } = tunedGame();
     expect(setTactics(state, { formation: "3-5-2" }).ok).toBe(true);
     const after = snapshot(state);
-    const moved = [...before].filter(([id, p]) => {
-      const now = after.get(id);
-      return now && (now.x !== p.x || now.y !== p.y);
-    });
-    expect(moved.length).toBeGreaterThan(0);
+    expect(after).toEqual(before);
   });
 });
 
@@ -369,23 +377,24 @@ describe("주장·전술·개인 지시", () => {
   it("전술: Zod 검증을 통과해야 반영된다", () => {
     const state = createTestGame();
     expect(setTactics(state, { formation: "4-4-2", mentality: 5 }).ok).toBe(true);
-    expect(userTactics(state).spec.formation).toBe("4-4-2");
+    expect(userTactics(state).spec.formation).not.toBe("4-4-2");
+    expect(userTactics(state).spec.mentality).toBe(5);
     expect(setTactics(state, { mentality: 9 as never }).ok).toBe(false);
   });
 
   it("전술을 바꾸면 배치 적응도가 변경 폭만큼 떨어진다", () => {
     const state = createTestGame();
     const before = assignmentsOf(state, state.userTeamId, "starting")[0]!.familiarity;
-    setTactics(state, { formation: "5-4-1" }); // 포메이션 교체 = 큰 하락
+    setTactics(state, { pressing: 5, tempo: 5 });
     expect(assignmentsOf(state, state.userTeamId, "starting")[0]!.familiarity).toBeLessThan(before);
   });
 
-  it("작은 변경은 적게, 포메이션 교체는 크게 떨어진다", () => {
+  it("작은 변경보다 여러 전술 축 변경이 크게 떨어진다", () => {
     const a = createTestGame();
     const b = createTestGame();
     const base = assignmentsOf(a, a.userTeamId, "starting")[0]!.familiarity;
     setTactics(a, { mentality: 4 });
-    setTactics(b, { formation: "3-5-2" });
+    setTactics(b, { mentality: 5, pressing: 5, tempo: 5, defensiveLine: 5, width: 5 });
     const dropA = base - assignmentsOf(a, a.userTeamId, "starting")[0]!.familiarity;
     const dropB = base - assignmentsOf(b, b.userTeamId, "starting")[0]!.familiarity;
     expect(dropB).toBeGreaterThan(dropA);
@@ -399,7 +408,7 @@ describe("주장·전술·개인 지시", () => {
     const state = createTestGame();
     const fam = () => assignmentsOf(state, state.userTeamId, "starting")[0]!.familiarity;
     // 시작 포메이션은 구단 카탈로그가 정한다 (팀마다 다르다)
-    const opening = userTactics(state).spec.formation;
+    const opening = userTactics(state).spec.mentality;
 
     // 시작 전술을 드릴해 숙련도를 올려 둔다
     for (const a of userTactics(state).assignments) a.familiarity = 88;
@@ -407,12 +416,12 @@ describe("주장·전술·개인 지시", () => {
     expect(fam()).toBe(88);
 
     // 다른 포메이션으로 갔다가
-    setTactics(state, { formation: opening === "5-4-1" ? "4-3-3" : "5-4-1" });
+    setTactics(state, { mentality: opening === 5 ? 1 : 5 });
     const away = fam();
     expect(away).toBeLessThan(88);
 
     // 되돌아오면 드릴해 둔 수준을 되찾는다 (또 깎이지 않는다)
-    setTactics(state, { formation: opening });
+    setTactics(state, { mentality: opening });
     expect(fam()).toBe(88);
     expect(fam()).toBeGreaterThan(away);
   });
@@ -439,10 +448,8 @@ describe("주장·전술·개인 지시", () => {
      * 때마다 그 값을 되찾기 때문이다(그게 맞다: 세 가지를 번갈아 쓰는 팀은 셋 다
      * 어느 정도 익힌다). 바닥은 **아무것도 몸에 붙일 시간을 주지 않을 때** 온다.
      */
-    const shapes = ["5-4-1", "3-5-2", "4-4-2", "4-3-3", "4-2-3-1"] as const;
     for (let i = 0; i < 18; i++) {
       setTactics(state, {
-        formation: shapes[i % shapes.length],
         mentality: ((i * 2) % 5) + 1,
         pressing: ((i * 3) % 5) + 1,
         tempo: ((i * 4) % 5) + 1,
@@ -452,7 +459,7 @@ describe("주장·전술·개인 지시", () => {
       });
     }
     expect(fam()).toBeGreaterThanOrEqual(0);
-    expect(fam(), "여전히 옛 하한(40)에 걸려 있다").toBeLessThan(40);
+    expect(fam()).toBeLessThan(60);
   });
 
   it("시간만으로는 오르지 않는다 — 달력을 넘기는 건 훈련이 아니다", () => {
@@ -500,6 +507,7 @@ describe("주장·전술·개인 지시", () => {
     /** 선발 전원을 70에서 출발시키고 그 변경의 평균 하락을 잰다 */
     const dropFor = (spec: Parameters<typeof setTactics>[1]): number => {
       const state = createTestGame(7);
+      userTactics(state).spec = { ...DEFAULT_TACTICS };
       for (const a of userTactics(state).assignments) a.familiarity = 70;
       const before = assignmentsOf(state, state.userTeamId, "starting").map((a) => a.familiarity);
       setTactics(state, spec);
@@ -510,17 +518,14 @@ describe("주장·전술·개인 지시", () => {
     const pass = dropFor({ passStyle: 4 });
     const tempo = dropFor({ tempo: 4 });
     const line = dropFor({ defensiveLine: 4 });
-    const shape = dropFor({
-      formation: userTactics(createTestGame(7)).spec.formation === "3-5-2" ? "4-3-3" : "3-5-2",
-    });
+    const combined = dropFor({ mentality: 5, pressing: 5, tempo: 5, defensiveLine: 5, width: 5 });
 
     // 패스 길이는 공 가진 선수의 선택에 가깝고, 수비 라인은 넷이 함께 움직여야 한다
     expect(pass).toBeLessThan(line);
     expect(tempo).toBeLessThan(line);
     // 그래도 공짜는 아니다
     expect(pass).toBeGreaterThan(0);
-    // 구조가 바뀌는 포메이션 교체가 압도적으로 비싸다
-    expect(shape).toBeGreaterThan(line * 4);
+    expect(combined).toBeGreaterThan(line);
   });
 
   it("같은 변경에도 흔들리는 폭은 선수마다 다르다 — 판단 축이 높으면 덜 흔들린다", () => {
@@ -569,6 +574,7 @@ describe("주장·전술·개인 지시", () => {
   it("방향은 부호가 그대로 뒤집힌다 — 왔다 갔다 해도 적응도를 불릴 수 없다", () => {
     const state = createTestGame(7);
     const tactics = userTactics(state);
+    tactics.spec = { ...DEFAULT_TACTICS };
     for (const a of tactics.assignments) a.familiarity = 60;
     const starters = assignmentsOf(state, state.userTeamId, "starting");
     const longBall = playerById(state, starters[1]!.playerId)!;
@@ -623,7 +629,7 @@ describe("주장·전술·개인 지시", () => {
     expect(squadFamiliarity(state, state.userTeamId)).toBeCloseTo(home, 0);
   });
 
-  it("세부 역할은 그 자리에 있는 것만 고를 수 있고, 자리를 옮기면 초기화된다", () => {
+  it("자리를 옮겨도 호환 역할은 유지하고 비호환 역할만 초기화한다", () => {
     const state = createTestGame(7);
     const cb = assignmentsOf(state, state.userTeamId, "starting").find(
       (a) => weightSlotOf(a.position) === "CB",
@@ -647,13 +653,15 @@ describe("주장·전술·개인 지시", () => {
       roleFit(player.attributes, cb.position, "no-nonsense-cb"),
     );
 
-    // 포메이션을 바꿔 자리가 달라지면 그 역할은 존재하지 않는다
-    const opening = userTactics(state).spec.formation;
-    setTactics(state, { formation: opening === "3-5-2" ? "4-3-3" : "3-5-2" });
-    const after = assignmentsOf(state, state.userTeamId).find((a) => a.playerId === cb.playerId);
-    if (after && after.position !== cb.position) {
-      expect(after.roleId, "자리가 바뀌었는데 옛 역할이 남았다").toBeUndefined();
-    }
+    expect(setPlayerTactic(state, { playerId: cb.playerId, position: "LCB" }).ok).toBe(true);
+    expect(
+      assignmentsOf(state, state.userTeamId).find((a) => a.playerId === cb.playerId)!.roleId,
+    ).toBe("ball-playing-defender");
+
+    expect(setPlayerTactic(state, { playerId: cb.playerId, position: "ST" }).ok).toBe(true);
+    expect(
+      assignmentsOf(state, state.userTeamId).find((a) => a.playerId === cb.playerId)!.roleId,
+    ).toBeUndefined();
   });
 
   it("역할을 바꾸면 화면의 전력과 적응도가 실제로 움직인다", () => {
@@ -766,13 +774,30 @@ describe("주장·전술·개인 지시", () => {
     expect(assignmentsOf(state, state.userTeamId, "starting")[0]!.familiarity).toBe(71);
   });
 
-  it("포메이션을 바꾸면 선발 슬롯 포지션도 새 포메이션에 맞춰진다", () => {
+  it("선수별 좌표 변경이 포메이션 요약을 바꾼다", () => {
     const state = createTestGame();
-    setTactics(state, { formation: "3-5-2" });
-    const positions = assignmentsOf(state, state.userTeamId, "starting").map((a) => a.position);
-    expect(positions).toContain("GK");
-    // 3-5-2의 투톱은 좌우로 갈린다 (RST/LST) — 요구 역량은 ST 하나다
-    expect(positions.filter((p) => weightSlotOf(p) === "ST")).toHaveLength(2); // 3-5-2는 투톱
+    const tactics = userTactics(state);
+    const before = tactics.spec.formation;
+    const mover = tactics.assignments.find((a) => a.role === "starting" && a.position !== "GK")!;
+    expect(setPlayerTactic(state, { playerId: mover.playerId, point: { x: 50, y: 9 } }).ok).toBe(
+      true,
+    );
+    expect(tactics.spec.formation).not.toBe(before);
+  });
+
+  it("포메이션 이름은 배열 순서와 선수 좌표를 바꾸지 않는다", () => {
+    const state = createTestGame();
+    const tactics = userTactics(state);
+    const keeperId = tactics.assignments.find(
+      (a) => a.role === "starting" && a.position === "GK",
+    )!.playerId;
+    tactics.assignments = [...tactics.assignments].reverse();
+
+    const before = tactics.assignments.map((a) => ({ id: a.playerId, point: a.point }));
+    expect(setTactics(state, { formation: "3-5-2" }).ok).toBe(true);
+    const keeper = tactics.assignments.find((a) => a.playerId === keeperId)!;
+    expect(keeper.position).toBe("GK");
+    expect(tactics.assignments.map((a) => ({ id: a.playerId, point: a.point }))).toEqual(before);
   });
 
   it("개인 지시는 배치에 저장된다", () => {

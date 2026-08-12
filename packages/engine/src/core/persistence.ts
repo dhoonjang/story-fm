@@ -15,6 +15,8 @@ import { advanceDomesticCups } from "../competition/domestic-cup";
 import { dataDir } from "./paths";
 import type { GamePhase, GameState } from "./state";
 import { ensurePersonas } from "../world/persona";
+import { ensureSquadNumbers } from "../squad/numbers";
+import { playerCatalog } from "../world/catalog";
 import { addMissingClubs, teamName } from "./state";
 
 export { dataDir };
@@ -213,6 +215,25 @@ function validate(raw: unknown): GameState | null {
   // 국내 컵이 존재하지 않는 팀으로 대진을 짜거나 아예 돌지 않는다 (state.ts).
   // 진행 중인 게임에 영향은 없다 — 이 클럽들은 리그전을 돌지 않는다.
   addMissingClubs(state);
+  /**
+   * 등번호 도입 전 세이브는 번호가 전부 비어 있다. 그 상태에서 포지션 관례부터
+   * 적용하면 브루누 페르난데스처럼 카탈로그에 공식 8번이 있어도 임의 번호를 받는다.
+   * 현재 소속이 시드 소속과 같은 선수는 실측값을 먼저 복원하고, 이적한 선수와
+   * 미확인·생성 선수만 아래의 결정적 배정에 맡긴다.
+   */
+  const catalogNumber = new Map(
+    playerCatalog().map((player) => [
+      player.id,
+      { teamId: player.teamId, squadNumber: player.squadNumber },
+    ]),
+  );
+  for (const player of state.players) {
+    const seed = player.catalogId ? catalogNumber.get(player.catalogId) : undefined;
+    player.squadNumber =
+      seed?.teamId === player.teamId ? seed.squadNumber : undefined;
+  }
+  // 공식 번호를 먼저 보존하고, 남은 빈칸과 혹시 생긴 중복만 채운다.
+  ensureSquadNumbers(state.players);
   // 국내 컵 따라잡기 — 컵 편성은 tick에서 도는데, 컵이 없던 세이브를 **열기만**
   // 해서는 tick이 돌지 않아 달력이 계속 비어 보인다. 새 게임이 생성 시점에
   // 부르는 것과 같은 함수를 로드에서도 한 번 부른다 (결정적·멱등이라 안전하다).

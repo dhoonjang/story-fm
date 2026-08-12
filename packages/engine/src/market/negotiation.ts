@@ -33,6 +33,7 @@ import {
   scheduleMedical,
 } from "./medical";
 import { canRegisterFor } from "../squad/registration";
+import { assignSquadNumber } from "../squad/numbers";
 import { marketBiasOf, windowOpenForTeam } from "./market";
 import { evaluatePitch, latitudeOf } from "./persuasion";
 import { makeRng } from "../core/rng";
@@ -937,7 +938,9 @@ export function answerIncomingOffer(
     negotiation.status = "agreed";
     return {
       ok: true,
-      message: `${player.name} 매각에 합의했습니다 — ${money(offer.fee)}. 계약을 확정하세요`,
+      message: offer.note?.startsWith("메디컬 소견")
+        ? `${player.name} 메디컬 재협상안을 수락했습니다 — ${money(offer.fee)}. 계약을 확정하세요`
+        : `${player.name} 매각에 합의했습니다 — ${money(offer.fee)}. 계약을 확정하세요`,
     };
   }
 
@@ -1173,6 +1176,8 @@ function executeLoanIn(
     note: `임대 영입 (복귀 ${until} · 주급 분담 ${Math.round(wageShare * 100)}%)`,
   });
   player.teamId = state.userTeamId;
+  player.squadNumber = undefined;
+  assignSquadNumber(state.players, player);
   player.squadLevel = "first";
   player.loan = { fromTeamId: from, until, wageShare };
   negotiation.status = "completed";
@@ -1396,6 +1401,8 @@ export function executeDeal(state: GameState, negotiation: Negotiation): SkillRe
   // 소속 이동 — 새 팀에서는 예비 스쿼드다 (감독이 라인업에 넣는다)
   releaseFromTactics(state, fromTeamId, player.id);
   player.teamId = state.userTeamId;
+  player.squadNumber = undefined;
+  assignSquadNumber(state.players, player);
   player.isCaptain = false;
   /**
    * 등록 명단에 자리가 없으면 **2군으로 들어온다.** 실제로도 명단이 찬 채로
@@ -1503,6 +1510,8 @@ function executeSale(
   const wasCaptain = player.isCaptain;
   player.isCaptain = false;
   player.teamId = buyerTeamId;
+  player.squadNumber = undefined;
+  assignSquadNumber(state.players, player);
   player.squadLevel = "first";
   negotiation.status = "completed";
 

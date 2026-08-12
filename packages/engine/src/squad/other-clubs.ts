@@ -36,6 +36,8 @@ function recoveryKindOf(state: GameState, teamId: string): RecoveryKind {
     matchesOn(state.matches, addDays(state.date, offset)).some(
       (m) => m.homeTeamId === teamId || m.awayTeamId === teamId,
     );
+  // 감독 팀은 경기 당일 훈련을 취소하고 idle 회복을 받는다. 간이 시뮬 팀도 같다.
+  if (playedOn(0)) return "idle";
   if (playedOn(-1)) return "recovery";
   if (playedOn(-2)) return "idle";
   return "training";

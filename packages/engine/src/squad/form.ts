@@ -28,6 +28,9 @@ import type { GamePlayer } from "@story-fm/domain";
 export const FORM_MIN = -1;
 export const FORM_MAX = 1;
 
+/** 사기 1점이 기존 condition 1점과 같은 즉시 전력 폭(0.25%)을 내도록 폼으로 옮긴다. */
+export const moraleToForm = (morale: number): number => Math.round((morale / 36) * 1000) / 1000;
+
 /**
  * 폼의 중립점 — **평점 분포의 중앙**이지 평점 공식의 기준선(6.0)이 아니다.
  *

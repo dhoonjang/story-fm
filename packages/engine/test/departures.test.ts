@@ -71,10 +71,15 @@ describe("임대 — 전력을 내주고 성장을 산다", () => {
   it("보내면 상대 팀 선수가 되고 복귀일이 남는다", () => {
     const state = createTestGame(11);
     const target = spare(state);
+    target.squadNumber = 77;
     const res = loanPlayer(state, { playerId: target.id, teamId: "chelsea" });
     expect(res.ok, res.message).toBe(true);
     const after = state.players.find((p) => p.id === target.id)!;
     expect(after.teamId).toBe("chelsea");
+    expect(after.squadNumber).toBeTypeOf("number");
+    expect(
+      playersOf(state, "chelsea").filter((p) => p.squadNumber === after.squadNumber),
+    ).toHaveLength(1);
     expect(after.loan!.fromTeamId).toBe(state.userTeamId);
     expect(after.loan!.wageShare).toBe(DEFAULT_LOAN_WAGE_SHARE);
     expect(loanedOut(state).some((p) => p.id === target.id)).toBe(true);
@@ -109,10 +114,15 @@ describe("임대 — 전력을 내주고 성장을 산다", () => {
     const state = createTestGame(11);
     const target = spare(state);
     loanPlayer(state, { playerId: target.id, teamId: "chelsea" });
+    target.squadNumber = 88;
     const res = recallLoan(state, { playerId: target.id });
     expect(res.ok, res.message).toBe(true);
     const after = state.players.find((p) => p.id === target.id)!;
     expect(after.teamId).toBe(state.userTeamId);
+    expect(after.squadNumber).toBeTypeOf("number");
+    expect(
+      playersOf(state, state.userTeamId).filter((p) => p.squadNumber === after.squadNumber),
+    ).toHaveLength(1);
     expect(after.squadLevel).toBe("reserve");
     expect(after.loan).toBeUndefined();
   });

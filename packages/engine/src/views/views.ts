@@ -3,6 +3,7 @@ import type {
   AxisValues,
   BoardPoint,
   MatchRecord,
+  PacketPlayer,
   Foot,
   ScheduleType,
   SquadRegistration,
@@ -52,12 +53,14 @@ import {
   knowledgeNote,
   observationMargin,
   potentialBand,
+  ratingLabel,
+  ratingTier,
   readCondition,
   scoutedAttributes,
   type ConditionRead,
   type Observation,
 } from "../squad/scouting";
-import type { ScoutReportCard } from "@story-fm/domain";
+import type { ScoutGrade, ScoutReportCard } from "@story-fm/domain";
 import { listingOf } from "../market/negotiation";
 import { marketValueOf, wageExpectationOf } from "../market/market";
 import { settlingPercent } from "../squad/settling";
@@ -169,6 +172,8 @@ export type SquadViewRow = SquadViewRowMeta & AxisValues;
 interface SquadViewRowMeta {
   id: string;
   name: string;
+  /** 현재 소속팀 등번호. 아직 배정되지 않았으면 null */
+  squadNumber: number | null;
   age: number;
   /** 주 포지션 */
   position: string;
@@ -464,7 +469,11 @@ export interface MatchTally {
 export interface MatchPlayerView {
   id: string;
   name: string;
+  /** 현재 소속팀 등번호. 아직 배정되지 않았으면 null */
+  squadNumber: number | null;
   position: string;
+  /** 경기 패킷이 계산에 사용한 실제 전술판 좌표. */
+  point?: import("@story-fm/domain").BoardPoint;
   /**
    * 이 자리에서 지금 내는 전력 (상태·적응도 반영) — **정수로 반올림해 넘긴다.**
    * 코어는 소수로 셈하지만 감독이 89.7과 89.6을 견줄 일은 없고, 명단의 OVR·
@@ -961,7 +970,13 @@ function buildMatchView(state: GameState): MatchView | null {
     }
   }
   const player = (
-    entry: { id: string; name: string; position: string; effective: number },
+    entry: {
+      id: string;
+      name: string;
+      position: string;
+      point?: import("@story-fm/domain").BoardPoint;
+      effective: number;
+    },
     teamId: string,
   ): MatchPlayerView => {
     const p = playerById(state, entry.id);
@@ -980,7 +995,9 @@ function buildMatchView(state: GameState): MatchView | null {
     return {
       id: entry.id,
       name: entry.name,
+      squadNumber: p?.squadNumber ?? null,
       position: entry.position,
+      ...(entry.point ? { point: entry.point } : {}),
       effective: Math.max(1, Math.round(entry.effective) + observation.overallOffset),
       margin: observation.margin,
       condition,
@@ -1001,13 +1018,21 @@ function buildMatchView(state: GameState): MatchView | null {
     };
   };
   const rowsOf = (
-    entries: ReadonlyArray<{ id: string; name: string; position: string; effective: number }>,
+    entries: ReadonlyArray<{
+      id: string;
+      name: string;
+      position: string;
+      point?: import("@story-fm/domain").BoardPoint;
+      effective: number;
+    }>,
     ids: readonly string[],
     teamId: string,
   ) => entries.filter((e) => ids.includes(e.id)).map((e) => player(e, teamId));
 
   const tacticsOfSide = (teamId: string, tactical: { uptake: number; notes: string[] }) => ({
-    ...tacticsOf(state, teamId).spec,
+    ...(teamId !== state.userTeamId && pending.aiTactics
+      ? pending.aiTactics
+      : tacticsOf(state, teamId).spec),
     uptake: tactical.uptake,
     notes: tactical.notes,
   });
@@ -1197,6 +1222,24 @@ export function buildOfficeViews(state: GameState): OfficeViews {
   const squad = playersOf(state, userTeamId);
   const tactics = tacticsOf(state, userTeamId);
   const assignments = new Map(tactics.assignments.map((a) => [a.playerId, a] as const));
+  const livePacket =
+    state.phase === "match" && state.pendingMatch
+      ? state.pendingMatch.packet.home.teamId === userTeamId
+        ? state.pendingMatch.packet.home
+        : state.pendingMatch.packet.away
+      : null;
+  const liveSlots = new Map<string, { entry: PacketPlayer; role: "starting" | "bench" }>(
+    livePacket
+      ? [
+          ...livePacket.lineup.map(
+            (entry) => [entry.id, { entry, role: "starting" as const }] as const,
+          ),
+          ...livePacket.bench.map(
+            (entry) => [entry.id, { entry, role: "bench" as const }] as const,
+          ),
+        ]
+      : [],
+  );
   const issues = new Set(state.issues.map((i) => i.gamePlayerId));
 
   // 선발의 전술판 좌표 — 좌표 없는 배치(구 세이브·채팅 지시)는 코드 기본 좌표로 그리는데,
@@ -1210,6 +1253,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
   const players: SquadViewRow[] = squad
     .map((p) => {
       const assignment = assignments.get(p.id);
+      const liveSlot = liveSlots.get(p.id);
       const injury = openInjury(state, p.id);
       const suspension = activeSuspension(state, p.id);
       const contract = activeContract(state, p.id);
@@ -1233,12 +1277,14 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       // 그래야 감독이 역할을 바꿨을 때 화면의 숫자가 그 자리에서 곧바로 답한다.
       const slotFit = (position: string, role?: string) =>
         observedFit(observed, observation, position, role);
-      const assignedSlot = assignment?.position ?? null;
+      const assignedSlot = liveSlot?.entry.position ?? assignment?.position ?? null;
+      const assignedRoleId = liveSlot?.entry.roleId ?? assignment?.roleId;
       const shownOverall = observedOverall(p.attributes.overall, observation);
-      const slotValue = assignedSlot ? slotFit(assignedSlot, assignment?.roleId) : null;
+      const slotValue = assignedSlot ? slotFit(assignedSlot, assignedRoleId) : null;
       return {
         id: p.id,
         name: p.name,
+        squadNumber: p.squadNumber ?? null,
         age: ageOf(p.birthdate, state.date),
         position: natural.position,
         positionGroup: groupOf(p),
@@ -1273,18 +1319,24 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         recentRatings: recentRatingsOf(state, p.id),
         condition: p.state.condition,
         mood: moodOf(state, p),
-        role: (assignment ? ROLE_KO[assignment.role] : "스쿼드") as SquadViewRow["role"],
-        assignedPosition: assignment?.position ?? null,
-        roleId: assignment ? (assignment.roleId ?? defaultRoleOf(assignment.position)) : null,
-        roleOptions: assignment
-          ? rolesFor(assignment.position).map((r) => ({
+        role: (livePacket
+          ? liveSlot
+            ? ROLE_KO[liveSlot.role]
+            : "스쿼드"
+          : assignment
+            ? ROLE_KO[assignment.role]
+            : "스쿼드") as SquadViewRow["role"],
+        assignedPosition: assignedSlot,
+        roleId: assignedSlot ? (assignedRoleId ?? defaultRoleOf(assignedSlot)) : null,
+        roleOptions: assignedSlot
+          ? rolesFor(assignedSlot).map((r) => ({
               id: r.id,
               ko: r.ko,
               abbr: r.abbr,
               desc: r.desc,
             }))
           : [],
-        assignedPoint: pointOf.get(p.id) ?? null,
+        assignedPoint: liveSlot?.entry.point ?? pointOf.get(p.id) ?? null,
         // 저장은 소수지만 화면은 눈금이다 — 87.4와 87.7을 감독이 구분할 일은 없다
         familiarity: Math.round(assignment?.familiarity ?? 60),
         positionFit: proficiencyAt(p, assignedSlot ?? natural.position),
@@ -1777,6 +1829,14 @@ export { assignmentsOf };
 export function scoutReportCard(state: GameState, playerId: string): ScoutReportCard | null {
   const p = playerById(state, playerId);
   if (!p) return null;
+  const grade = (value: number): ScoutGrade => ({
+    label: ratingLabel(value),
+    tier: ratingTier(value),
+    value,
+  });
+  // 필드 플레이어의 골키핑은 어디에도 쓰이지 않는다 — 보고서에 두면 줄만 잡아먹는다
+  const isKeeper = naturalPositionOf(p).position === "GK";
+  const band = potentialBand(state, p);
   const groupOfAxis = (axis: string): string => {
     for (const [key, axes] of Object.entries(AXIS_GROUPS)) {
       if ((axes as readonly string[]).includes(axis)) {
@@ -1799,16 +1859,25 @@ export function scoutReportCard(state: GameState, playerId: string): ScoutReport
     foot: p.foot ?? { left: 3, right: 3 },
     height: p.height ?? null,
     weight: p.weight ?? null,
-    overall: observedRating(state, p.id, "overall", p.attributes.overall),
-    potential: potentialBand(state, p),
-    attributes: scoutedAttributes(state, p).map((a) => ({
-      key: a.key,
-      ko: a.ko,
-      value: a.exact ?? observedRating(state, p.id, a.key, p.attributes[a.key] as number),
-      exact: a.exact !== null,
-      margin: observationMargin(state, p.id, a.key),
-      group: groupOfAxis(a.key),
-    })),
+    overall: {
+      ...grade(observedRating(state, p.id, "overall", p.attributes.overall)),
+      margin: observationMargin(state, p.id, "overall"),
+    },
+    potential: band ? { low: grade(band.low), high: grade(band.high) } : null,
+    attributes: scoutedAttributes(state, p)
+      .filter((a) => a.key !== "goalkeeping" || isKeeper)
+      .map((a) => {
+        const value = a.exact ?? observedRating(state, p.id, a.key, p.attributes[a.key] as number);
+        return {
+          key: a.key,
+          ko: a.ko,
+          value,
+          tier: ratingTier(value),
+          exact: a.exact !== null,
+          margin: observationMargin(state, p.id, a.key),
+          group: groupOfAxis(a.key),
+        };
+      }),
     marketValue: marketValueOf(state, p),
     wageExpectation: wageExpectationOf(state, p),
     contractUntil: activeContract(state, p.id)?.until ?? null,

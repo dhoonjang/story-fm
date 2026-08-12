@@ -5,6 +5,7 @@ import { leagueOfTeam } from "../data/team-catalog";
 import { recordFinance } from "../club/finance";
 import { estimateWeeklyWage, wageSubjectOf } from "../world/wages";
 import { makeRng } from "../core/rng";
+import { assignSquadNumber } from "../squad/numbers";
 import type { SkillResult } from "../skills";
 import {
   activeContract,
@@ -76,6 +77,7 @@ export function toFreeAgency(
   state.playerTraining = state.playerTraining.filter((t) => t.gamePlayerId !== player.id);
   player.isCaptain = false;
   player.teamId = FREE_AGENT_TEAM;
+  player.squadNumber = undefined;
   player.squadLevel = "first";
   player.loan = undefined;
   state.transfers.push({
@@ -187,6 +189,8 @@ export function loanPlayer(
   state.transferList = state.transferList.filter((l) => l.gamePlayerId !== player.id);
   player.isCaptain = false;
   player.teamId = destination.id;
+  player.squadNumber = undefined;
+  assignSquadNumber(state.players, player);
   player.squadLevel = "first";
   player.loan = { fromTeamId: state.userTeamId, until, wageShare };
   state.transfers.push({
@@ -260,6 +264,8 @@ function returnFromLoan(state: GameState, player: GamePlayer): void {
     note: "임대 복귀",
   });
   player.teamId = loan.fromTeamId;
+  player.squadNumber = undefined;
+  assignSquadNumber(state.players, player);
   player.squadLevel = "reserve";
   player.loan = undefined;
 }
@@ -404,5 +410,7 @@ function signWithClub(
     status: "active",
   });
   player.teamId = teamId;
+  player.squadNumber = undefined;
+  assignSquadNumber(state.players, player);
   player.squadLevel = "first";
 }

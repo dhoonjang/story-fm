@@ -120,7 +120,7 @@ export function observationMargin(
   return Math.round(base * (1 - a.progress));
 }
 
-/** 종합(overall)의 오차 — 축 평균 성격이라 관측형 기준을 쓴다 */
+/** 실행 계열의 오차 — 안개 안내문이 "무엇까지 믿어도 되나"를 말할 때 쓴다 */
 export const KNOWLEDGE_MARGIN: Record<Knowledge, number> = OBSERVATION_MARGIN.observable;
 
 /** 안개를 씌워 노출하는 축 — 15축 전부 */
@@ -198,7 +198,6 @@ export function observedRating(
   return Math.max(1, Math.min(99, trueValue + offset));
 }
 
-
 /**
  * **감독이 이 선수를 얼마나 정확히 아는가** — 화면과 서버가 같은 계산을 하기 위한 묶음.
  *
@@ -262,17 +261,34 @@ export function observedOverall(storedOverall: number, observation: Observation)
 const clampRating = (value: number) => Math.max(1, Math.min(99, Math.round(value)));
 
 /**
+ * 등급 — 수치를 말로 자르는 **단일 자.** GM이 읊는 말과 화면이 그리는 등급이
+ * 같은 표를 읽어야, 같은 선수를 두고 둘이 다른 말을 하지 않는다.
+ */
+export const RATING_TIERS = [
+  { key: "world", min: 90, ko: "월드클래스" },
+  { key: "elite", min: 85, ko: "리그 최정상" },
+  { key: "first", min: 78, ko: "정상급" },
+  { key: "squad", min: 70, ko: "준주전급" },
+  { key: "par", min: 60, ko: "리그 평균" },
+  { key: "below", min: 50, ko: "평균 이하" },
+  { key: "weak", min: 0, ko: "약점" },
+] as const;
+
+export type RatingTier = (typeof RATING_TIERS)[number]["key"];
+
+const tierOfRating = (value: number) => RATING_TIERS.find((t) => value >= t.min) ?? RATING_TIERS[6];
+
+/** 등급 키 — 화면이 색을 고르는 자리 */
+export function ratingTier(value: number): RatingTier {
+  return tierOfRating(value).key;
+}
+
+/**
  * 수치 → 서술 라벨. 채팅에서 능력치 숫자를 읊지 않는다는 결정 #2와 맞물려,
  * 안개가 있는 선수는 숫자 대신 이 라벨만 GM에게 전달한다.
  */
 export function ratingLabel(value: number): string {
-  if (value >= 90) return "월드클래스";
-  if (value >= 85) return "리그 최정상";
-  if (value >= 78) return "정상급";
-  if (value >= 70) return "준주전급";
-  if (value >= 60) return "리그 평균";
-  if (value >= 50) return "평균 이하";
-  return "약점";
+  return tierOfRating(value).ko;
 }
 
 export interface ScoutedAttribute {

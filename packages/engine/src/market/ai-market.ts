@@ -18,6 +18,7 @@ import {
   type GameState,
 } from "../core/state";
 import { clubWageBudget, estimateWeeklyWage, wageSubjectOf } from "../world/wages";
+import { assignSquadNumber } from "../squad/numbers";
 
 /**
  * 남의 팀끼리의 이적 시장 — **세계가 감독 없이도 돈다.**
@@ -273,6 +274,8 @@ function moveClub(
   releaseFromTactics(state, fromTeamId, player.id);
   squads.move(player, toTeamId);
   player.teamId = toTeamId;
+  player.squadNumber = undefined;
+  assignSquadNumber(state.players, player);
   player.isCaptain = false;
   player.squadLevel = "first";
 }
@@ -497,6 +500,8 @@ function settle(state: GameState, deal: AiDeal, rng: () => number): GamePlayer |
     });
     releaseFromTactics(state, fromId, player.id);
     player.teamId = deal.toTeamId;
+    player.squadNumber = undefined;
+    assignSquadNumber(state.players, player);
     player.squadLevel = "first";
     player.isCaptain = false;
     // 계약은 원소속에 남는다 — 복귀는 이 값이 파생시킨다 (`returnDueLoans`)

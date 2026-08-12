@@ -20,7 +20,6 @@ import {
   tacticalUptake as uptakeOf,
   PLAYER_DIRECTIVE_KO,
   type PlayerDirectiveKind,
-  FORMATION_LAYOUTS,
   MATCHDAY_SQUAD,
   POSITION_GROUPS,
   SCOUT_CONCURRENT_LIMIT,
@@ -45,7 +44,7 @@ import {
   withCurrentDrilled,
 } from "@story-fm/domain";
 import { addDays, diffDays, sortEntries, squadReturnOf } from "../competition/calendar";
-import { clampForm } from "../squad/form";
+import { clampForm, moraleToForm } from "../squad/form";
 import { canRegisterFor, registrationLine, squadRegistrationOf } from "../squad/registration";
 import { SCOUT_REPEAT_LIMIT, completedScoutReports } from "../squad/scouting";
 import { creditSettling, settlingAnchor, settlingOf } from "../squad/settling";
@@ -218,7 +217,7 @@ export function applyTeamTalk(
   const delta = Math.round(base * (input.intensity / 2) * leadershipFactor(state));
   const bounded = Math.max(-6, Math.min(6, delta)); // 이벤트당 한도 (overview §7)
   for (const p of userPlayers(state)) {
-    p.state.condition = clampCondition(p.state.condition + bounded);
+    p.state.form = clampForm(p.state.form + moraleToForm(bounded));
   }
   // 라커룸 앞에서 한 말은 **아직 겉도는 새 영입**에게 특히 크게 남는다 (settling.ts)
   const settlingAnchorValue = settlingAnchor("team_talk", { intensity: input.intensity });
@@ -269,7 +268,7 @@ export function applyTalkToPlayer(
   const base = TALK_BASE[input.outcome];
   const delta = Math.round(base * (input.intensity / 2) * leadershipFactor(state));
   const bounded = Math.max(-8, Math.min(8, delta));
-  player.state.condition = clampCondition(player.state.condition + bounded);
+  player.state.form = clampForm(player.state.form + moraleToForm(bounded));
 
   // 면담은 방치 이슈를 해소한다 (game-loop §4-5)
   const hadIssue = state.issues.some((i) => i.gamePlayerId === player.id);
@@ -488,8 +487,6 @@ export function setLineup(
         .join(", ")}`,
     };
   }
-  // 프리셋은 **자리가 없을 때만** 쓰는 마지막 수단이다 (배열 순서로 자리를 정하지 않는다)
-  const preset = FORMATION_LAYOUTS[tactics.spec.formation];
   // 기존 적응도·지시는 이어받는다 (배치가 바뀌어도 학습이 사라지지 않게)
   const prev = new Map(tactics.assignments.map((a) => [a.playerId, a]));
 
@@ -516,12 +513,11 @@ export function setLineup(
   // "코드 = positionAtPoint(point)" 불변식이 깨지지 않는다. 밀려서 코드 표기가 바뀌는
   // 경우(CB 둘 → LCB/RCB, DM → CDM)는 모두 같은 자리라 전력에 영향이 없다.
   const startPoints = separateBoardPoints(
-    starting.map((s, i) => {
+    starting.map((s) => {
       const before = prev.get(s.playerId);
       const isNewcomer = !s.point && !s.position && before?.role !== "starting";
       return candidatePoint(s, before, {
         ...(isNewcomer && vacated[nextVacant] ? { inherited: vacated[nextVacant++]! } : {}),
-        ...(preset[i] ? { preset: preset[i]! } : {}),
         natural: naturalPositionOf(userPlayerById(state, s.playerId)!).position,
       });
     }),
@@ -558,7 +554,7 @@ export function setLineup(
    */
   const inherit = (playerId: string, code?: string) => {
     const old = prev.get(playerId);
-    const keepRole = old?.roleId && code && old.position === code;
+    const keepRole = old?.roleId && code && rolesFor(code).some((role) => role.id === old.roleId);
     return {
       familiarity: old?.familiarity ?? newcomerFamiliarity,
       ...(old?.instruction ? { instruction: old.instruction } : {}),
@@ -593,6 +589,8 @@ export function setLineup(
   // 무엇이 달라졌나는 **덮어쓰기 전에** 견준다 (`prev`가 옛 배치를 들고 있다)
   const changes = lineupChanges(state, prev, [...startingAssignments, ...benchAssignments]);
   tactics.assignments = [...startingAssignments, ...benchAssignments];
+  // 호환 필드는 실제 좌표에서 읽는다. 이 값으로 다시 프리셋을 적용하지 않는다.
+  tactics.spec.formation = shapeOf(startPoints) as TacticsSpec["formation"];
 
   // 강등은 배치 뒤에 — 배치에서 빠진 뒤라야 2군으로 내려도 라인업이 안 깨진다
   for (const move of input.squadLevels ?? []) {
@@ -679,14 +677,19 @@ export function setPlayerTactic(
   input: {
     playerId: string;
     position?: string;
+    point?: BoardPoint;
     role?: string;
     /** 개인 지시 — 자유 서술 + 선택적 종류·대상 */
     instruction?: { note: string; kind?: PlayerDirectiveKind; targetId?: string };
   },
 ): SkillResult {
   const notes: string[] = [];
-  if (input.position !== undefined) {
-    const res = movePlayerSlot(state, { playerId: input.playerId, position: input.position });
+  if (input.position !== undefined || input.point !== undefined) {
+    const res = movePlayerSlot(state, {
+      playerId: input.playerId,
+      ...(input.position ? { position: input.position } : {}),
+      ...(input.point ? { point: input.point } : {}),
+    });
     // 이미 그 자리면 넘어간다 — 역할·지시만 바꾸는 호출을 막지 않는다
     if (!res.ok && !res.message.includes("이미")) return res;
     if (res.ok) notes.push(res.message);
@@ -715,11 +718,13 @@ export function setPlayerTactic(
  */
 export function movePlayerSlot(
   state: GameState,
-  input: { playerId: string; position: string },
+  input: { playerId: string; position?: string; point?: BoardPoint },
 ): SkillResult {
   const player = userPlayerById(state, input.playerId);
   if (!player) return { ok: false, message: `"${input.playerId}"는 우리 팀 선수가 아닙니다` };
-  const code = input.position.toUpperCase();
+  if (!input.position && !input.point) return { ok: false, message: "자리나 좌표가 필요합니다" };
+  const point = input.point ? clampToBoard(input.point) : anchorOf(input.position!);
+  const code = input.point ? positionAtPoint(point) : input.position!.toUpperCase();
   if (!positionGroupOf(code)) {
     return { ok: false, message: `알 수 없는 포지션: ${input.position}` };
   }
@@ -731,12 +736,25 @@ export function movePlayerSlot(
       message: `${player.name}은(는) 지금 그라운드에 없습니다 — 교체(substitute)로 넣어야 합니다`,
     };
   }
-  if (assignment.position === code) {
+  const currentPoint = assignment.point ?? anchorOf(assignment.position);
+  if (assignment.position === code && currentPoint.x === point.x && currentPoint.y === point.y) {
     return { ok: false, message: `${player.name}은(는) 이미 ${code}입니다` };
   }
   const before = assignment.position;
+  if (
+    assignment.position !== code &&
+    assignment.roleId &&
+    !rolesFor(code).some((role) => role.id === assignment.roleId)
+  ) {
+    delete assignment.roleId;
+  }
   assignment.position = code;
-  assignment.point = anchorOf(code);
+  assignment.point = point;
+  tactics.spec.formation = shapeOf(
+    tactics.assignments
+      .filter((a) => a.role === "starting")
+      .map((a) => a.point ?? anchorOf(a.position)),
+  ) as TacticsSpec["formation"];
   const fit = player.positions.find((p) => p.position === code)?.proficiency ?? null;
   return {
     ok: true,
@@ -1143,7 +1161,9 @@ function retuneFamiliarity(
 
 export function setTactics(state: GameState, spec: Partial<TacticsSpec>): SkillResult {
   const tactics = userTactics(state);
-  const parsed = TacticsSpecSchema.safeParse({ ...tactics.spec, ...spec });
+  const { formation: _catalogPreset, ...axes } = spec;
+  void _catalogPreset;
+  const parsed = TacticsSpecSchema.safeParse({ ...tactics.spec, ...axes });
   if (!parsed.success) {
     return {
       ok: false,
@@ -1160,7 +1180,6 @@ export function setTactics(state: GameState, spec: Partial<TacticsSpec>): SkillR
   const wasAt = currentFamiliarity(tactics);
   // 떠나기 전에 각자 지금까지 쌓은 숙련도를 기억에 남긴다 (되돌아올 때 되찾는다)
   rememberTactics(tactics, state.date);
-  const formationChanged = before.formation !== parsed.data.formation;
   tactics.spec = parsed.data;
 
   /**
@@ -1181,24 +1200,10 @@ export function setTactics(state: GameState, spec: Partial<TacticsSpec>): SkillR
    * 수 있는 일이 교체뿐인 게임이 된다.
    *
    * 그래도 0은 아니다 — 갑자기 바뀐 지시를 못 따라가는 선수는 늘 있고,
-   * 포메이션까지 갈아엎는 것은 여전히 비싸다(구조가 바뀌므로 거리 자체가 크다).
+   * 좌표·역할 변경은 각 배치와 역할 적합도 경로에서 별도로 값을 치른다.
    */
   const inMatch = state.phase === "match";
   retuneFamiliarity(state, tactics, before, parsed.data, inMatch ? IN_MATCH_FAMILIARITY_LOSS : 1);
-
-  // 포메이션이 바뀌면 선발 슬롯을 새 프리셋 좌표로 되돌린다 (자유 배치도 초기화)
-  if (formationChanged) {
-    const layout = FORMATION_LAYOUTS[parsed.data.formation];
-    const starters = tactics.assignments.filter((a) => a.role === "starting");
-    starters.forEach((a, i) => {
-      const point = layout[i];
-      if (!point) return;
-      a.point = point;
-      const code = positionAtPoint(point);
-      if (a.position !== code) delete a.roleId; // 자리가 바뀌면 그 역할은 없다
-      a.position = code;
-    });
-  }
 
   // 감독에게 보이는 건 팀 눈금이다 — 개인값의 평균(파생)
   const now = currentFamiliarity(tactics);
