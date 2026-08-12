@@ -325,6 +325,15 @@ export function transitionSeason(state: GameState): string[] {
    * 은퇴로 빠지고 유스로 들어오는 것만 그때그때 반영한다.
    */
   const playerIndex = new Map(state.players.map((p) => [p.id, p]));
+  /**
+   * 새 유스가 쓸 수 없는 id — **떠난 사람 것까지 포함한다.** 은퇴하면 명단에서
+   * 빠지지만 원장에는 남으므로, 그 id를 신인에게 다시 주면 두 사람의 기록이
+   * 한 사람 것으로 합쳐진다.
+   */
+  const takenIds = new Set<string>([
+    ...state.players.map((p) => p.id),
+    ...state.transfers.map((t) => t.gamePlayerId),
+  ]);
   /** 팀별 활성 계약 — 팀마다 전체 계약을 훑지 않는다 */
   const contractsByTeam = new Map<string, typeof state.contracts>();
   for (const c of state.contracts) {
@@ -442,6 +451,7 @@ export function transitionSeason(state: GameState): string[] {
         nextSeason,
         i,
         tier,
+        takenIds,
         forced[i],
         seasonYear(nextSeason),
       );

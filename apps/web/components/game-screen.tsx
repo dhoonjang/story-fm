@@ -9,6 +9,7 @@ import { hintsOfCall, panelHintsOf, type PanelHint } from "@/lib/panel-hints";
 import { chatForActiveMatch } from "@/lib/match-chat";
 import { mergeMatchOrders, type MatchBoardOrder } from "@/lib/match-orders";
 import { RailHints } from "./rail-hints";
+import { Loading } from "./loading";
 import { SquadView, CalendarView, FinanceView, CompetitionsView, CareerView } from "./office";
 import { MatchClock, MatchHeadline, MatchOpponent, MatchOverview } from "./match-view";
 import {
@@ -148,6 +149,15 @@ const TIME_SKIPS = [
 
 export function GameScreen({ gameId }: { gameId: string }) {
   const [game, setGame] = useState<GamePayload | null>(null);
+  /**
+   * 지금 화면에 선 경기 — **입장 전에는 아직 평시다.**
+   *
+   * `start_match`는 판을 세울 뿐이라 코어의 `phase`는 이미 경기지만, 화면은
+   * 감독이 입장 확인 창을 지날 때 바뀐다. 그때까지 뒤에 남는 것은 오피스이고,
+   * 감독은 마지막으로 명단을 훑거나 마음을 바꿀 수 있다.
+   */
+  const pendingMatch = game?.views.match ?? null;
+  const liveMatch = pendingMatch?.beforeKickoff === true ? null : pendingMatch;
   /** 열린 장부 뷰 — null이면 무대(채팅 / 경기+채팅)가 보인다 */
   const [panel, setPanel] = useState<Panel | null>(null);
   /**
@@ -374,7 +384,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
 
   /** 경기가 끝나는 순간을 잡는다 — 판세가 사라지면 그 경기의 종료 화면을 연다 */
   useEffect(() => {
-    const now = game?.views.match?.matchId ?? null;
+    const now = liveMatch?.matchId ?? null;
     if (wasInMatch.current !== null && now === null) setFinished(wasInMatch.current);
     /**
      * 킥오프 — 열어 두었던 장부를 닫는다. 90분 동안 오른쪽 칸의 주인은 판이고,
@@ -382,7 +392,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
      */
     if (wasInMatch.current === null && now !== null) setPanel(null);
     wasInMatch.current = now;
-  }, [game?.views.match?.matchId]);
+  }, [liveMatch?.matchId]);
 
   /**
    * 턴 전송 — `text`를 주면 입력창 대신 그 문장을 보낸다 (시간 이동 버튼).
@@ -422,7 +432,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
        * 것이라, 화면에는 진행 결과만 나타나야 한다. 기다리는 동안은 `busy`가
        * 띄우는 점 세 개(`.thinking`)가 이미 말해 준다.
        */
-      const activeMatchId = game.views.match?.matchId;
+      const activeMatchId = liveMatch?.matchId;
       const optimistic = operator
         ? null
         : {
@@ -577,7 +587,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
    * 화면이 통째로 죽는다 (실제로 그랬다).
    */
   const lastStamp = useMemo(() => {
-    const visible = chatForActiveMatch(game?.chat ?? [], game?.views.match?.matchId ?? null);
+    const visible = chatForActiveMatch(game?.chat ?? [], liveMatch?.matchId ?? null);
     for (let i = visible.length - 1; i >= 0; i--) {
       const stamp = turnStamp(visible[i]!);
       if (stamp) return stamp;
@@ -587,8 +597,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
 
   if (!game)
     return (
-      <main className="onboarding">
-        <p>불러오는 중...</p>
+      <main className="loading-page">
+        <Loading size={34} />
       </main>
     );
 
@@ -623,9 +633,9 @@ export function GameScreen({ gameId }: { gameId: string }) {
    * 교체·전술). 같은 창에서 같은 모양으로 흐르면 지금 누구에게 말하고 있는지가
    * 화면에 없다. 배너로 적지 않고 **창의 결**로 알린다.
    */
-  const inMatch = game.views.match !== null;
+  const inMatch = liveMatch !== null;
   /** 중계 화면은 코어의 별도 `casterHistory`와 같은 경계로 현재 경기만 보여 준다. */
-  const visibleChat = chatForActiveMatch(game.chat, game.views.match?.matchId ?? null);
+  const visibleChat = chatForActiveMatch(game.chat, liveMatch?.matchId ?? null);
   /**
    * 오른쪽 칸에 무엇이 서는가 — **경기 판이 우선이고 장부가 그것을 덮는다.**
    * 경기 중에 장부를 열면(달력·재정) 판 대신 장부가 선다: 그때 감독이 보려는 건
@@ -792,25 +802,6 @@ export function GameScreen({ gameId }: { gameId: string }) {
         </div>
       )}
       {/**
-       * 경기일 — **킥오프는 버튼이다.**
-       *
-       * 감독이 "경기 시작"이라고 타이핑해야 했다. 오늘 할 일이 그것 하나뿐인
-       * 날인데 그걸 문장으로 적게 두면, 화면은 감독이 무엇을 해야 하는지 알면서도
-       * 말해 주지 않는 셈이다. 오퍼레이터 조작이라 채팅에 감독 발화로 남지 않는다.
-       */}
-      {game.phase === "matchday" && !busy && (
-        <div className="kickoff-row">
-          <button
-            className="kickoff"
-            onClick={() => void send("경기 시작", true)}
-            data-testid="kickoff"
-          >
-            <IconPlay size={16} />
-            경기 시작
-          </button>
-        </div>
-      )}
-      {/**
        * 시간 이동 — **자주 하는 지시라 손이 아니라 눈에 둔다.**
        *
        * 매번 "다음 경기로 가자"를 타이핑하게 두면 GM이 대신 "시간을 보내시겠습니까?"
@@ -913,7 +904,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
   return (
     /* `data-phase` — 화면에 단계를 적지 않는 대신 e2e가 읽는 자리. 감독에게는
        달력·채팅이 이미 말해 주므로 배지가 자리를 차지할 이유가 없었다 */
-    <div className={`app${game.views.match ? " in-match" : ""}`} data-phase={game.phase}>
+    <div className={`app${liveMatch ? " in-match" : ""}`} data-phase={game.phase}>
       <header className="topbar">
         {/* 로고 = 게임 목록으로 나가는 문 (진행 중 턴은 서버가 마무리해 저장한다) */}
         <Link href="/" className="brand" data-testid="home-link" title="게임 목록으로">
@@ -942,8 +933,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
             {/* 시즌 번호는 여기 두지 않는다 — 상단 바에서 매 순간 필요한 건 **지금이
                 언제인가**뿐이고, 몇 번째 시즌인지는 커리어·대회 화면이 갖는다 */}
             {/* 경기 중에는 **경기 시계**가 이 자리를 쓴다 — 그때 필요한 시각은 그것이다 */}
-            {game.views.match ? (
-              <MatchClock match={game.views.match} />
+            {liveMatch ? (
+              <MatchClock match={liveMatch} />
             ) : (
               <span className="meta" data-testid="game-date">
                 {/* 연도는 좁아지면 접힌다 — 한 시즌 안에서 바뀌는 건 월·일이다 */}
@@ -958,7 +949,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
          * **경기 중에는 서지 않는다** — 재정·커리어는 90분 안에 갈 곳이 아니고,
          * 화면이 통째로 경기의 것이 되어야 지금 무엇을 하는 중인지가 분명하다.
          */}
-        {game.views.match !== null && (
+        {liveMatch !== null && (
           <nav className="rail match-rail" aria-label="경기 화면 이동">
             {MATCH_PANELS.map(({ key, Icon }) => (
               <button
@@ -974,7 +965,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
             ))}
           </nav>
         )}
-        {game.views.match === null && (
+        {liveMatch === null && (
           <nav className="rail" aria-label="화면 이동">
             <button
               className={panel === null ? "active" : ""}
@@ -1016,7 +1007,52 @@ export function GameScreen({ gameId }: { gameId: string }) {
         )}
       </header>
       {/* 경기 머리 — 어느 탭을 보든 스코어·시계·득점자는 사라지지 않는다 */}
-      {game.views.match && <MatchHeadline match={game.views.match} />}
+      {liveMatch && <MatchHeadline match={liveMatch} />}
+      {/**
+       * 입장 확인 — **경기의 문.**
+       *
+       * `start_match`는 판을 세울 뿐이고 공은 감독이 들어갈 때 구른다. 예전엔
+       * 경기일 내내 입력창 위에 "경기 시작" 버튼이 상주했는데, 그러면 그날의
+       * 대화가 무슨 이야기로 흐르든 화면은 늘 같은 손잡이 하나를 들이밀었다.
+       * 지금은 GM이 문을 열었을 때만 이 창이 서고, 이것이 유일한 출구다 —
+       * 닫는 손잡이를 두면 되돌아간 자리에서 다시 열 방법이 없다.
+       */}
+      {pendingMatch?.beforeKickoff === true && (
+        <div
+          className="kickoff-gate"
+          data-testid="kickoff-gate"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="kickoff-heading"
+        >
+          <div className="kickoff-card">
+            <span className="kickoff-tag" id="kickoff-heading">
+              {pendingMatch.competition} · {pendingMatch.stage}
+            </span>
+            <div className="kickoff-teams">
+              <b className={pendingMatch.home.ours ? "ours" : undefined}>
+                {pendingMatch.home.name}
+              </b>
+              <i>vs</i>
+              <b className={pendingMatch.away.ours ? "ours" : undefined}>
+                {pendingMatch.away.name}
+              </b>
+            </div>
+            <span className="kickoff-where">
+              {pendingMatch.home.ours ? "홈" : "원정"} · {game.date}
+            </span>
+            <button
+              className="primary-btn"
+              autoFocus
+              disabled={busy}
+              onClick={() => void send("경기장 입장", true)}
+              data-testid="kickoff-enter"
+            >
+              경기장 입장
+            </button>
+          </div>
+        </div>
+      )}
       {/**
        * 종료 화면 — **휘슬과 평시 사이의 한 걸음.**
        *
@@ -1107,12 +1143,12 @@ export function GameScreen({ gameId }: { gameId: string }) {
             /* 접힌 칸은 화면에도 손에도 없다 — 폭 0짜리 표에 탭 포커스가 빠지지 않게 */
             inert={!rightOpen}
           >
-            {showBoard && game.views.match ? (
+            {showBoard && liveMatch ? (
               <div className="stage-board" data-testid="stage-board">
                 {/* 탭이 바뀌면 이 덩어리가 새로 서며 흐려졌다 든다 — 판세와 명단은
                     생김새가 아주 달라서 즉시 갈리면 무엇이 바뀐 건지 읽히지 않는다 */}
                 <div className="board-tab ledger-body" key={matchTab}>
-                  {matchTab === "판세" && <MatchOverview match={game.views.match} />}
+                  {matchTab === "판세" && <MatchOverview match={liveMatch} />}
                   {matchTab === "팀" && (
                     <>
                       {/**
@@ -1144,7 +1180,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
                         squadView(() => setMatchTab("판세"))
                       ) : (
                         <MatchOpponent
-                          match={game.views.match}
+                          match={liveMatch}
                           boardOpen={boardOpen || boardClosing}
                           onToggleBoard={toggleBoard}
                         />

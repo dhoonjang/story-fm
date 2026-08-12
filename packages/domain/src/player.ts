@@ -1644,6 +1644,11 @@ export interface PlayerCatalogMeta {
   teamId: string;
   nameKo: string;
   nameEn: string;
+  /**
+   * 실존 시드가 아니라 절차 생성으로 채운 사람 — 아카데미·2부 스쿼드가 그렇다.
+   * id에는 아무 표시가 없으므로(선수 id는 출신도 소속도 담지 않는다) 여기서 안다.
+   */
+  synthetic?: boolean;
   /** 시드 시점 소속팀의 등번호. 번호가 공식 배정되지 않았으면 생략 */
   squadNumber?: number;
   birthdate: string;

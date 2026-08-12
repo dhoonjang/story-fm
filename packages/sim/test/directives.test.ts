@@ -255,8 +255,7 @@ describe("개인 지시 — 선수의 역량을 탄다", () => {
     const d: DirectiveInput = { by: FULLBACK, kind: "stay_back" };
     const dangerous = withAndWithout({ pace: 95, dribbling: 92, finishing: 90 }, d);
     const harmless = withAndWithout({ pace: 45, dribbling: 42, finishing: 40 }, d);
-    const cost = (r: typeof dangerous) =>
-      -shift(r.on.home.zones.attack, r.off.home.zones.attack);
+    const cost = (r: typeof dangerous) => -shift(r.on.home.zones.attack, r.off.home.zones.attack);
     expect(cost(harmless)).toBeLessThan(cost(dangerous));
   });
 });
@@ -305,10 +304,7 @@ describe("개인 지시 — 효과는 작다", () => {
 
   it("네 번째 지시부터는 선수단이 소화하지 못한다", () => {
     const three = buildStrengthPacket(us(ALL), them());
-    const four = buildStrengthPacket(
-      us([...ALL, { by: "us-df4", kind: "stay_back" }]),
-      them(),
-    );
+    const four = buildStrengthPacket(us([...ALL, { by: "us-df4", kind: "stay_back" }]), them());
     expect(four.home.zones).toEqual(three.home.zones);
     expect(DIRECTIVE_TUNING.MAX_EFFECTIVE).toBe(3);
   });
@@ -328,7 +324,7 @@ describe("개인 지시 — 체력도 지시를 탄다", () => {
     expect(directiveDrain("press_target")).toBeGreaterThan(directiveDrain("man_mark"));
   });
 
-  it("conditionDrain이 그 배수를 그대로 태운다", () => {
+  it("conditionDrain이 활동량 배수를 태우되 바닥에서는 절대 소모가 둔화된다", () => {
     const p = makeSquad("x", 78).starters.find((s) => s.positions[0]!.position === "RCM")!;
     const flat = conditionDrain(p, "RCM", DEFAULT_TACTICS, 90);
     const pressing = conditionDrain(
@@ -339,7 +335,8 @@ describe("개인 지시 — 체력도 지시를 탄다", () => {
       1,
       directiveDrain("press_target"),
     );
-    expect(pressing).toBeCloseTo(flat * directiveDrain("press_target"), 6);
+    expect(pressing).toBeGreaterThan(flat);
+    expect(pressing).toBeLessThan(flat * directiveDrain("press_target"));
   });
 
   it("구간 시뮬레이터에서 지시받은 선수만 더 마른다", () => {

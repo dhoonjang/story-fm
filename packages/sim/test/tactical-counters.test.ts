@@ -270,11 +270,7 @@ describe("체력 — 자리와 전술이 함께 정한다", () => {
     );
   });
 
-  /**
-   * **90분은 선수를 거의 비운다.** 상한이 65였을 땐 만땅으로 시작해도 62가 남아
-   * 사흘이면 다 찼고, 그래서 로테이션이라는 판단이 게임에 없었다. 중앙 미드필더는
-   * 가장 많이 뛰는 자리라 온전히 소화하면 바닥 근처에 닿아야 한다.
-   */
+  /** 중앙 미드필더는 가장 많이 뛰되 감쇠 곡선 덕분에 0으로 직선 낙하하지 않는다. */
   it("90분 소모가 현실적인 범위 안이다 (기준 전술 · 평균 지구력)", () => {
     const p = makeSide("us", 78).starters.find((s) => s.position === "RCM")!.player;
     const full = conditionDrain(p, "RCM", DEFAULT_TACTICS, 90);
@@ -283,17 +279,18 @@ describe("체력 — 자리와 전술이 함께 정한다", () => {
     expect(full).toBeLessThan(90);
     // 맹렬한 압박으로 90분을 뛰면 혼자서도 한계에 닿는다
     const brutal = conditionDrain(p, "RCM", { ...DEFAULT_TACTICS, pressing: 5, tempo: 5 }, 90);
-    expect(brutal).toBeGreaterThan(full * 1.25);
+    expect(brutal).toBeGreaterThan(full);
+    expect(brutal).toBeLessThan(full * 1.25);
   });
 
   it("골키퍼의 풀타임 소모는 낮은 지구력에도 현저히 작다", () => {
     const base = makeSide("us", 78).starters.find((s) => s.position === "GK")!.player;
     const keeper = { ...base, attributes: { ...base.attributes, stamina: 30 } };
-    // 가장 무거운 날에 점유율까지 낮아도 한 경기 소모가 20을 넘지 않는다.
+    // 가장 무거운 날에 점유율까지 낮아도 필드 플레이어보다 현저히 덜 지친다.
     const drain = conditionDrain(keeper, "GK", DEFAULT_TACTICS, 90, 1.12, 1, 0.35);
-    expect(drain).toBeLessThan(20);
+    expect(drain).toBeLessThan(35);
     expect(drain).toBeLessThan(
-      conditionDrain(keeper, "RCM", DEFAULT_TACTICS, 90, 1.12, 1, 0.35) / 5,
+      conditionDrain(keeper, "RCM", DEFAULT_TACTICS, 90, 1.12, 1, 0.35) / 2,
     );
   });
 

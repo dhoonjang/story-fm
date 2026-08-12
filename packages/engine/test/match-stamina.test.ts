@@ -108,6 +108,28 @@ describe("경기 체력 — 소모", () => {
 });
 
 describe("경기 체력 — 회복", () => {
+  it("지구력 70 공격수는 체력 100에서 풀타임 뒤 20~30을 남긴다", () => {
+    const player = {
+      attributes: { stamina: 70 },
+      state: { condition: 100 },
+    } as unknown as Parameters<typeof conditionDrain>[0];
+    const remaining = 100 - conditionDrain(player, "ST", DEFAULT_TACTICS, 90);
+    expect(remaining).toBeGreaterThanOrEqual(20);
+    expect(remaining).toBeLessThanOrEqual(30);
+  });
+
+  it("감쇠 곡선은 경기를 나눈 구간 수와 무관하다", () => {
+    const player = {
+      attributes: { stamina: 70 },
+      state: { condition: 100 },
+    } as unknown as Parameters<typeof conditionDrain>[0];
+    const whole = conditionDrain(player, "ST", DEFAULT_TACTICS, 90);
+    const first = conditionDrain(player, "ST", DEFAULT_TACTICS, 45);
+    const second = conditionDrain(player, "ST", DEFAULT_TACTICS, 45, 1, 1, 0.5, 100 - first);
+    expect(first + second).toBeCloseTo(whole, 9);
+    expect(second).toBeLessThan(first);
+  });
+
   it("지구력 60 중앙 미드필더는 60분 뒤 체력 60 아래로 내려간다", () => {
     const player = {
       attributes: { stamina: 60 },
@@ -141,7 +163,7 @@ describe("경기 체력 — 회복", () => {
     expect(afterWeek).toBeGreaterThanOrEqual(95);
   });
 
-  it("지구력 90 중앙 미드필더는 가장 무거운 풀타임 뒤 40을 남기고 3일 뒤 85로 돌아온다", () => {
+  it("지구력 90 중앙 미드필더도 가장 무거운 풀타임 뒤 바닥에서 0으로 직선 낙하하지 않는다", () => {
     const player = {
       attributes: { stamina: 90 },
       state: { condition: 100 },
@@ -152,8 +174,9 @@ describe("경기 체력 — 회복", () => {
       afterMatch,
     );
 
-    expect(afterMatch).toBeGreaterThanOrEqual(40);
-    expect(afterThreeDays).toBeGreaterThanOrEqual(85);
+    expect(afterMatch).toBeGreaterThanOrEqual(15);
+    expect(afterMatch).toBeLessThanOrEqual(30);
+    expect(afterThreeDays).toBeGreaterThanOrEqual(60);
   });
 
   it("회복 집중 주간은 지구력 50 중앙 미드필더를 7일 안에 완전히 회복시킨다", () => {

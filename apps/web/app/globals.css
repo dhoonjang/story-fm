@@ -219,16 +219,19 @@ textarea {
 }
 
 /* ── 게임 목록 (랜딩) ─────────────────────── */
+/* 정체성과 내용을 가르는 한 줄 — 위는 이 게임이 무엇인지, 아래는 내 게임이다 */
 .home-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 24px;
+  gap: var(--sp-4);
+  padding-bottom: var(--sp-5);
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: var(--sp-2);
 }
 .home-head h1 {
   font-size: var(--fs-2xl);
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 /* 로고 마크 + 이름 — 게임 화면 상단 띠와 같은 정체성이 첫 화면에도 선다 */
 .home-brand {
@@ -244,9 +247,10 @@ textarea {
 /* 제목 아래 첫 구획 — 온보딩용 tagline 여백(32)까지 겹쳐 80px가 비어 있었다 */
 .home-brand .tagline {
   margin-bottom: 0;
+  font-size: var(--fs-md);
 }
 .home-head + h2 {
-  margin-top: var(--sp-2);
+  margin-top: var(--sp-5);
 }
 .home-head .primary-btn {
   flex-shrink: 0;
@@ -268,16 +272,20 @@ textarea {
   padding: var(--sp-2) var(--sp-4);
   font-size: var(--fs-md);
   line-height: 1.2;
+  border-radius: var(--r-sm);
 }
+/* 어드민은 **곁문**이다 — 색을 주면 초록 "새 게임"과 둘 다 주인공이 되어 어디로
+   가야 하는지가 흐려진다. 테두리로 문이라는 것만 알린다 */
 .home-head-actions .ghost-btn {
   text-decoration: none;
   white-space: nowrap;
-  /* 어드민 진입점 — 유일한 문이라 배경에 묻히지 않게 테두리·글자에 색을 준다 */
-  border-color: var(--accent-2);
-  color: var(--accent-2);
+  background: none;
+  color: var(--muted);
 }
 .home-head-actions .ghost-btn:hover {
-  background: var(--panel);
+  background: var(--panel-2);
+  border-color: var(--border);
+  color: var(--text);
 }
 @media (max-width: 560px) {
   .home-head {
@@ -636,66 +644,102 @@ textarea {
 .game-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 8px;
+  gap: var(--sp-2);
 }
 .game-card {
   display: flex;
   align-items: center;
-  gap: 12px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  padding: 14px 16px;
-  cursor: pointer;
   transition:
-    border-color 0.15s,
-    background 0.15s;
+    border-color var(--ease),
+    background var(--ease);
 }
-.game-card:hover {
+/**
+ * 카드가 밝아지는 것은 **본문 링크에 손이 올라왔을 때만**이다. 카드 전체를
+ * hover 대상으로 두면 삭제 버튼으로 가는 손에도 "여는 신호"가 켜져, 지우려는
+ * 순간에 카드가 열릴 것처럼 보인다.
+ */
+.game-card:has(.game-card-body:hover),
+.game-card:has(.game-card-body:focus-visible) {
   border-color: var(--accent-2);
   background: var(--panel-2);
+}
+.game-card-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  color: inherit;
+  text-decoration: none;
+  border-radius: var(--r-md);
+  outline: none;
 }
 .game-card-main {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 .game-card-team {
   font-size: var(--fs-lg);
   font-weight: 700;
-}
-.game-card-sub {
-  color: var(--muted);
-  font-size: var(--fs-sm);
-  margin-top: 2px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* 삭제 — 카드 안의 **유일한 다른 조작**이라 테두리를 갖는다.
-   평소엔 흐리게 두고 카드에 손이 올라왔을 때만 또렷해진다 — 목록을 훑는 동안
-   빨간 버튼이 줄줄이 서 있으면 지우는 화면처럼 보인다. */
-.game-del {
+.game-card-sub {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 어디까지 왔는가 — 팀·감독(왼쪽)과 축을 나눠 오른쪽에 세운다. 한 줄에 점으로
+   이어 붙이면 네 값이 한 덩이로 읽혀 무엇도 눈에 걸리지 않는다 */
+.game-card-when {
   flex-shrink: 0;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+.game-card-season {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--silver);
+}
+.game-card-date {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+/**
+ * 삭제 — 평소엔 꺼진 색으로 서 있고, 자기 위에 손이 올라올 때만 붉게 켜진다.
+ * 테두리를 켜고 끄던 때는 카드에 손만 스쳐도 없던 상자가 튀어나와, 목록을
+ * 훑는 동안 화면이 깜빡였다. 색과 원형 바탕만 바꾼다 — 자리는 움직이지 않는다.
+ */
+.game-del {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  margin-right: var(--sp-3);
   background: none;
-  border: 1px solid transparent;
+  border: none;
   color: var(--dim);
-  border-radius: var(--r-sm);
+  border-radius: 50%;
   width: 32px;
   height: 32px;
   transition:
     color var(--ease),
-    border-color var(--ease);
+    background var(--ease);
 }
-.game-card:hover .game-del {
-  border-color: var(--border);
-  color: var(--muted);
-}
-.game-del:hover {
-  border-color: var(--danger);
+.game-del:hover:not(:disabled),
+.game-del:focus-visible {
+  background: rgba(248, 113, 113, 0.13);
   color: var(--danger);
 }
 .game-del:disabled {
@@ -1195,28 +1239,87 @@ textarea {
 }
 
 /**
- * 킥오프 — 경기일에 입력창 위로 서는 하나뿐인 버튼.
- * 그날 할 일이 그것 하나라 눈에 띄어야 하고, 다른 손잡이와 나란히 서지 않는다.
+ * 입장 확인 — 경기의 문. 종료 화면과 한 쌍이라 같은 무게로 화면을 덮는다.
  */
-.kickoff-row {
-  display: flex;
-  justify-content: center;
-  padding: 0 var(--sp-4) var(--sp-3);
+.kickoff-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-6);
+  background: rgb(4 8 13 / 0.72);
+  backdrop-filter: blur(4px);
+  animation: fulltime-in 160ms var(--ease-panel) both;
 }
-.kickoff {
-  display: inline-flex;
+.kickoff-card {
+  display: flex;
+  flex-direction: column;
+  width: min(400px, 100%);
+  padding: var(--sp-6);
+  text-align: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 0.42);
+}
+.kickoff-tag {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+}
+/**
+ * 대진 — **홈이 위, 원정이 아래**로 세운다. 팀 이름은 두 글자부터 열 글자까지
+ * 제각각이라 좌우로 늘어놓으면 긴 쪽만 접혀 한쪽이 두 줄이 된다.
+ * 우리 쪽만 또렷하고 상대는 한 걸음 물러선다.
+ */
+.kickoff-teams {
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: var(--sp-2);
-  padding: 10px 22px;
-  background: var(--accent);
-  color: #06220f;
-  border: none;
-  border-radius: var(--r-pill);
-  font-size: var(--fs-md);
+  gap: var(--sp-1);
+  margin-top: var(--sp-4);
+  font-size: var(--fs-xl);
+  line-height: 1.3;
+  /* 한국어는 어절로 끊는다 — 없으면 "맨체스터 유나 / 이티드"가 된다 */
+  word-break: keep-all;
+}
+.kickoff-teams b {
+  color: var(--muted);
+  font-weight: 600;
+}
+.kickoff-teams b.ours {
+  color: var(--text);
   font-weight: 700;
 }
-.kickoff:hover {
-  filter: brightness(1.08);
+.kickoff-teams i {
+  color: var(--dim);
+  font-size: var(--fs-2xs);
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+}
+.kickoff-where {
+  margin-top: var(--sp-4);
+  color: var(--dim);
+  font-size: var(--fs-sm);
+}
+.kickoff-card .primary-btn {
+  margin-top: var(--sp-6);
+}
+/* 열리자마자 포커스가 앉는 자리 — accent 위라 링은 밝은 쪽으로 */
+.kickoff-card .primary-btn:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+@media (max-width: 479px) {
+  .kickoff-gate {
+    padding: var(--sp-4);
+  }
+  .kickoff-card {
+    padding: var(--sp-5);
+  }
 }
 
 /**
@@ -1244,7 +1347,7 @@ textarea {
   padding: var(--sp-6);
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: var(--r-lg);
+  border-radius: var(--r-md);
   box-shadow: 0 24px 64px rgb(0 0 0 / 0.42);
 }
 .fulltime-header {
@@ -1314,7 +1417,8 @@ textarea {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .fulltime {
+  .fulltime,
+  .kickoff-gate {
     animation: none;
   }
 }
@@ -2813,6 +2917,90 @@ textarea {
     animation: none;
     opacity: 0.5;
   }
+}
+
+/**
+ * 불러오는 중 — **마크가 숨 쉬고, 바깥을 호 하나가 돈다.**
+ *
+ * 점 세 개(`.thinking`)는 대화 흐름 안에서 다음 말을 기다리는 신호다. 이쪽은
+ * 화면 자체가 아직 없는 시간 — 그 자리에는 게임의 얼굴이 서는 게 맞다.
+ * 글자는 쓰지 않는다(낭독기에는 `role="status"`의 이름으로 전한다).
+ */
+.loading {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+}
+.loading-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  /* 한 조각만 색을 줘서 돌고 있음이 보인다 — 전체가 초록이면 정지한 원과 같다 */
+  border-top-color: var(--accent);
+  animation: loading-spin 900ms linear infinite;
+}
+.loading-mark {
+  display: flex;
+  color: var(--accent);
+  animation: loading-breathe 1.6s ease-in-out infinite;
+}
+@keyframes loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes loading-breathe {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: scale(0.92);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .loading-ring,
+  .loading-mark {
+    animation: none;
+  }
+}
+/* 화면이 통째로 오는 중 — 가운데에 홀로 선다 */
+.loading-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  height: 100dvh;
+}
+/**
+ * 한 구획이 오는 중 — **호 하나.** 마크 없는 축소판이다.
+ *
+ * 목록 한 칸을 기다리는 자리에 로고를 세우면 그게 화면의 사건이 된다. 글자
+ * 크기의 원이면 "이 자리에 곧 뭐가 온다"는 말은 이미 다 한 것이다.
+ */
+.loading-inline {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  animation: loading-spin 700ms linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .loading-inline {
+    animation: none;
+  }
+}
+/* 목록이 오는 중 — 제목과 같은 축(왼쪽)에 선다. 자리가 목록의 첫 줄이다.
+   `.empty`와 같은 여백이라 목록이 도착할 때 줄이 튀지 않는다 */
+.list-loading {
+  padding: 10px 0;
 }
 
 /**

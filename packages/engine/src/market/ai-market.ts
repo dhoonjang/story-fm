@@ -17,7 +17,7 @@ import {
   weeklyWagesOf,
   type GameState,
 } from "../core/state";
-import { clubWageBudget, estimateWeeklyWage, wageSubjectOf } from "../world/wages";
+import { WAGE_HEADROOM, clubWageBudget, estimateWeeklyWage, wageSubjectOf } from "../world/wages";
 import { assignSquadNumber } from "../squad/numbers";
 
 /**
@@ -72,13 +72,6 @@ const MAX_SQUAD = 52;
  */
 const CASH_FLOOR_TOP = -10_000_000;
 const CASH_FLOOR_OTHER = 0;
-/**
- * 주급 여력 — 새 계약을 얹고도 구단 임금 예산(`clubWageBudget`)의 이 배율 안이어야 한다.
- *
- * 현금만 보면 **이적료는 못 내도 주급은 낼 수 있는 것처럼** 보인다. 이적료는 한 번
- * 나가지만 주급은 매주 나가므로, 파산의 실제 경로는 대개 이쪽이다.
- */
-const WAGE_HEADROOM = 1.1;
 /** 수준 차 — 이보다 크게 벌어지면 애초에 거래가 성립하지 않는다 */
 const LEVEL_BAND = 7;
 /** 감독의 달력·브리핑에 올릴 만한 이적 — 이 아래는 조용히 지나간다 */

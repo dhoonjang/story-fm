@@ -706,7 +706,15 @@ describe("프롬프트가 허락을 구하는 말투를 가르치지 않는다",
 
   it("경기의 문은 도구 설명 한 곳만 지킨다", () => {
     expect(GM_SYSTEM).not.toContain("start_match");
-    expect(DEFAULT_SKILL_DESCRIPTIONS.start_match).toContain("감독이 들어가자고 할 때");
+    expect(DEFAULT_SKILL_DESCRIPTIONS.start_match).toContain("되묻지 말고 부른다");
+  });
+
+  /**
+   * 킥오프는 **두 걸음**이다 — 도구가 문을 열고, 감독이 걸어 들어간다.
+   * 도구를 부른 턴에 중계까지 쓰면 입장 확인 창이 이미 시작된 경기 위에 뜬다.
+   */
+  it("도구를 부른 턴에 중계를 쓰지 말라고 적혀 있다", () => {
+    expect(DEFAULT_SKILL_DESCRIPTIONS.start_match).toContain("킥오프·중계는 쓰지 않는다");
   });
 });
 

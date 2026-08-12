@@ -19,6 +19,7 @@ export * from "./data/club-profile";
 
 // world — 새 게임의 세계 구축 (능력치 파생·카탈로그 빌드·생성·주급·인물)
 export * from "./world/attributes";
+export * from "./world/player-id";
 export * from "./world/catalog";
 export * from "./world/persona";
 export * from "./world/generate";

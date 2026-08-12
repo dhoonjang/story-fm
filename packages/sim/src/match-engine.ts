@@ -94,6 +94,8 @@ export interface SegmentInput {
    * 경기 내내 같은 값이어야 한다 (`drainVariance`). 없으면 계수만으로 계산한다.
    */
   staminaKey?: string;
+  /** 이전 구간까지 누적된 경기 중 체력 소모 — 감쇠 곡선의 현재 출발점이다. */
+  accumulatedFatigue?: Readonly<Record<string, number>>;
   /**
    * **지금 스코어로 90분이 끝나면 연장으로 이어지는가.**
    *
@@ -410,6 +412,7 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
     rng,
     proneness = {},
     staminaKey = "",
+    accumulatedFatigue = {},
     directives,
   } = input;
   /**
@@ -477,9 +480,22 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
       for (const p of squadOf(side).onPitch) {
         const position = positionOf.get(p.id) ?? "CM";
         const today = drainVariance(staminaKey && `${staminaKey}:${p.id}`);
+        const available = Math.max(
+          0,
+          p.state.condition - (accumulatedFatigue[p.id] ?? 0) - (fatigue[p.id] ?? 0),
+        );
         fatigue[p.id] =
           (fatigue[p.id] ?? 0) +
-          conditionDrain(p, position, spec, elapsed, today, drainOf.get(p.id) ?? 1, share);
+          conditionDrain(
+            p,
+            position,
+            spec,
+            elapsed,
+            today,
+            drainOf.get(p.id) ?? 1,
+            share,
+            available,
+          );
       }
     }
   };

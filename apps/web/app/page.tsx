@@ -1,14 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
-import {
-  IconDatabase,
-  IconMark,
-  IconPlus,
-  IconTrash,
-} from "@/components/icons";
+import { IconDatabase, IconMark, IconPlus, IconTrash } from "@/components/icons";
+import { LoadingInline } from "@/components/loading";
 
 interface GameSummary {
   id: string;
@@ -20,7 +15,6 @@ interface GameSummary {
 }
 
 export default function HomePage() {
-  const router = useRouter();
   const [games, setGames] = useState<GameSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -63,10 +57,10 @@ export default function HomePage() {
 
   return (
     <main className="onboarding">
-      <div className="home-head">
+      <header className="home-head">
         <div className="home-brand">
           <span className="home-mark">
-            <IconMark size={34} />
+            <IconMark size={30} />
           </span>
           <div>
             <h1>story-fm</h1>
@@ -79,15 +73,18 @@ export default function HomePage() {
             선수 DB
           </Link>
           <Link href="/new" className="primary-btn" data-testid="new-game">
-            <IconPlus />
-            새 게임
+            <IconPlus />새 게임
           </Link>
         </div>
-      </div>
+      </header>
 
       <h2>내 게임</h2>
       {error && <p className="error-text">{error}</p>}
-      {games === null && !error && <div className="empty">불러오는 중…</div>}
+      {games === null && !error && (
+        <div className="list-loading">
+          <LoadingInline />
+        </div>
+      )}
       {/* "+ 새 게임" 버튼이 바로 위에 있으니 빈 목록에서 다시 권하지 않는다 */}
       {games !== null && games.length === 0 && (
         <div className="empty" data-testid="no-games">
@@ -97,24 +94,22 @@ export default function HomePage() {
 
       <div className="game-list" data-testid="game-list">
         {(games ?? []).map((g) => (
-          <div
-            key={g.id}
-            className="game-card"
-            onClick={() => router.push(`/game/${g.id}`)}
-            data-testid={`game-${g.id}`}
-          >
-            <div className="game-card-main">
-              <div className="game-card-team">{g.teamName}</div>
-              <div className="game-card-sub">
-                {g.managerName} 감독 · 시즌 {g.season} · {g.date}
-              </div>
-            </div>
+          <div key={g.id} className="game-card">
+            {/* 카드를 여는 것은 링크다 — 가운데 클릭·키보드가 그냥 되고, 삭제
+                버튼과 조작이 겹치지 않는다 */}
+            <Link className="game-card-body" href={`/game/${g.id}`} data-testid={`game-${g.id}`}>
+              <span className="game-card-main">
+                <span className="game-card-team">{g.teamName}</span>
+                <span className="game-card-sub">{g.managerName} 감독</span>
+              </span>
+              <span className="game-card-when">
+                <span className="game-card-season">시즌 {g.season}</span>
+                <span className="game-card-date">{g.date}</span>
+              </span>
+            </Link>
             <button
               className="game-del"
-              onClick={(e) => {
-                e.stopPropagation();
-                remove(g.id, `${g.teamName} / ${g.managerName}`);
-              }}
+              onClick={() => remove(g.id, `${g.teamName} / ${g.managerName}`)}
               disabled={deleting === g.id}
               data-testid={`delete-${g.id}`}
               title="세이브 삭제"

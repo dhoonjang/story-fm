@@ -387,24 +387,20 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
       if (!started.ok) return { text: `${coach(state)} ${started.message}`, toolCalls: calls };
       calls.push({ name: "start_match", summary: started.message });
       const packet = state.pendingMatch?.packet;
+      // 킥오프는 여기서 굴리지 않는다 — 공은 감독이 입장 확인 창을 누를 때 구른다
       const briefing = packet
         ? [
             `${coach(state)} 전력 분석입니다 — ${packet.summary}`,
             ...packet.keyPoints.map((k) => `${coach(state)} ★ ${k}`),
           ].join("\n")
         : "";
-      const goals: GoalMark[] = [];
-      const cards: CardMark[] = [];
-      const first = advanceMatchTurn(state, calls, goals, cards);
       return {
-        text: [briefing, first].filter(Boolean).join("\n"),
+        text: [`@: *터널 앞, 선수단이 도열한다*`, briefing].filter(Boolean).join("\n"),
         toolCalls: calls,
-        ...(goals.length > 0 ? { goals } : {}),
-        ...(cards.length > 0 ? { cards } : {}),
       };
     }
     return {
-      text: `${coach(state)} 오늘은 경기일입니다. "경기 시작"이라고 하시면 킥오프합니다. 라인업·전술 변경도 지금 가능합니다.`,
+      text: `${coach(state)} 오늘은 경기일입니다. 라인업·전술을 점검하시고 준비되면 말씀하십시오.`,
       toolCalls: calls,
     };
   }
@@ -541,6 +537,12 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
         negotiationId: incoming.id,
         verdict,
         ...(verdict === "counter" ? { fee: Math.round(offer.fee * MOCK_COUNTER_FEE_RATE) } : {}),
+        note:
+          verdict === "accept"
+            ? "그 값이면 보내겠습니다"
+            : verdict === "reject"
+              ? "팔 생각이 없습니다"
+              : "그 값으로는 못 보냅니다",
       } as const;
       const result = answerIncomingOffer(state, input);
       calls.push({ name: "respond_offer", summary: result.message, input, ...carry(result) });
@@ -739,7 +741,7 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
     const digestText = result.digest.map((d) => `${coach(state)} ${d}`).join("\n");
     const closer =
       result.stopped === "matchday"
-        ? `\n${coach(state)} 라인업과 전술을 점검하시고, "경기 시작"으로 킥오프하시죠.`
+        ? `\n${coach(state)} 오늘이 경기일입니다. 라인업과 전술을 점검하시죠.`
         : result.stopped === "attention"
           ? `\n${coach(state)} 오늘이 기한인 협상이 있어 여기서 멈췄습니다. 정리하고 나서 "계속 가자"고 하시면 더 진행합니다.`
           : result.stopped === "season_end"

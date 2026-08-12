@@ -110,14 +110,17 @@ describe("시즌 전환 (결정 #15, game-loop §7)", () => {
   it("유스 콜업이 TRANSFER + CONTRACT와 함께 들어온다", () => {
     const state = createTestGame(5);
     transitionSeason(state);
-    const youth = userPlayers(state).filter((p) => p.id.includes("-y2-"));
-    expect(youth.length).toBeGreaterThan(0);
-    for (const y of youth) {
-      expect(y.catalogId).toBeNull(); // 카탈로그에 없는 생성 선수
-      expect(activeContract(state, y.id)).not.toBeNull();
-      const tr = state.transfers.find((t) => t.gamePlayerId === y.id && t.type === "youth");
-      expect(tr?.fromTeamId).toBeNull();
-      expect(tr?.toTeamId).toBe(state.userTeamId);
+    // 콜업은 원장에서 찾는다 — id 모양으로는 유스를 알 수 없다 (id에 출신이 없다)
+    const calledUp = state.transfers.filter(
+      (t) => t.type === "youth" && t.toTeamId === state.userTeamId,
+    );
+    expect(calledUp.length).toBeGreaterThan(0);
+    for (const tr of calledUp) {
+      const y = userPlayers(state).find((p) => p.id === tr.gamePlayerId);
+      expect(y, tr.gamePlayerId).toBeTruthy();
+      expect(y!.catalogId).toBeNull(); // 카탈로그에 없는 생성 선수
+      expect(activeContract(state, y!.id)).not.toBeNull();
+      expect(tr.fromTeamId).toBeNull();
     }
   });
 
