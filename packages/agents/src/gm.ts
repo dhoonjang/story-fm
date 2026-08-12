@@ -16,6 +16,7 @@ import {
   headCoachOf,
   humanizePlayerIds,
   minutesOfClock,
+  pendingVerdicts,
   scoutReportCard,
   type AdvanceOutcome,
   type CardMark,
@@ -179,6 +180,7 @@ async function runRealGmTurn(
   message: string,
   onText?: (delta: string) => void,
   operator = false,
+  operatorOrders?: readonly string[],
 ): Promise<GmTurnResult> {
   const calls: GmToolCall[] = [];
   const inMatch = state.phase === "match";
@@ -195,10 +197,9 @@ async function runRealGmTurn(
   const pendingReports = new Set(
     state.scoutReports.filter((r) => r.completedOn === null).map((r) => r.gamePlayerId),
   );
-  const tools = inMatch ? buildMatchTools(state, calls, goals, cards) : buildGmTools(state, calls);
-
   // 손잡이로 넘긴 시간은 모델보다 먼저 흐른다 — 코어가 먼저 굴리고 "그 사이
   // 벌어진 일"을 상태에 실어, 모델은 도착한 자리에서 보고한다
+  const pendingBeforeSkip = new Set(pendingVerdicts(state).map((v) => v.negotiation.id));
   const skip = !inMatch && operator ? parseTimeSkip(message) : null;
   const skipFrom = state.date;
   const skipped = skip ? advanceForSkip(state, skip) : null;
@@ -217,6 +218,17 @@ async function runRealGmTurn(
     });
     if (brief) pendingTraining.push(brief);
   }
+  /** 시간 이동 중 새로 생긴 오퍼는 이번 장면에서 보고만 하고 감독의 답을 기다린다. */
+  const deferNegotiationIds = new Set(
+    skipped
+      ? pendingVerdicts(state)
+          .map((v) => v.negotiation.id)
+          .filter((id) => !pendingBeforeSkip.has(id))
+      : [],
+  );
+  const tools = inMatch
+    ? buildMatchTools(state, calls, goals, cards, { progressionOnly: operator })
+    : buildGmTools(state, calls, { deferNegotiationIds });
 
   // 입력은 안정성 순 3층 — ① 고정 프롬프트 ② 레퍼런스 ③ 발화+상태 스냅샷.
   // 앞 두 층만 캐시 프리픽스(0.1×)다 (docs/design/llm-io.md)
@@ -258,7 +270,10 @@ async function runRealGmTurn(
       llm.runTurn({
         system,
         history,
-        user: operator ? buildOperatorMessage(message) : buildManagerMessage(state, message),
+        user: [
+          ...(operatorOrders ?? []).map((order) => buildOperatorMessage(`전술판 조작 — ${order}`)),
+          operator ? buildOperatorMessage(message) : buildManagerMessage(state, message),
+        ].join("\n"),
         stateNote,
         tools,
         onText: trackText,
@@ -372,7 +387,15 @@ export async function runGmTurn(
   onText?: (delta: string) => void,
   /** 감독의 발화가 아니라 화면 조작인가 (시간 이동 손잡이) */
   operator = false,
+  /** 전술판 조작 — mock도 실제 GM처럼 이번 턴의 오퍼레이터 지시를 읽는다. */
+  operatorOrders?: readonly string[],
 ): Promise<GmTurnResult> {
-  if (resolveLlmMode() === "mock") return runMockGmTurn(state, message, onText);
-  return runRealGmTurn(state, message, onText, operator);
+  if (resolveLlmMode() === "mock") {
+    const mockMessage =
+      !operator && operatorOrders && operatorOrders.length > 0
+        ? `${operatorOrders.join("\n")}\n${message}`
+        : message;
+    return runMockGmTurn(state, mockMessage, onText);
+  }
+  return runRealGmTurn(state, message, onText, operator, operatorOrders);
 }

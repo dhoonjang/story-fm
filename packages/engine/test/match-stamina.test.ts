@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { assignmentsOf, playerById, userPlayers } from "@story-fm/engine";
-import { RECOVERY_BASE, recoveryFactor } from "@story-fm/sim";
-import { weightSlotOf } from "@story-fm/domain";
+import { assignmentsOf, playerById, tacticsOf, userPlayers } from "@story-fm/engine";
+import { conditionDrain, dailyRecovery, RECOVERY_BASE, recoveryFactor } from "@story-fm/sim";
+import { DEFAULT_TACTICS, weightSlotOf } from "@story-fm/domain";
 import { advanceDays, advanceToMatchday, createTestGame, playMockMatch } from "./helpers";
 
 /**
@@ -18,9 +18,15 @@ function startersOf(state: ReturnType<typeof createTestGame>) {
     .map((a) => ({ id: a.playerId, position: a.position }));
 }
 
+function createNeutralGame() {
+  const state = createTestGame(9, "manutd");
+  tacticsOf(state, state.userTeamId).spec = { ...DEFAULT_TACTICS };
+  return state;
+}
+
 describe("경기 체력 — 소모", () => {
   it("90분을 뛰면 바닥 근처로 간다 — 만땅으로 시작해도", () => {
-    const state = createTestGame(9, "manutd");
+    const state = createNeutralGame();
     advanceToMatchday(state);
     const starters = startersOf(state);
     for (const s of starters) playerById(state, s.id)!.state.condition = 100;
@@ -39,11 +45,11 @@ describe("경기 체력 — 소모", () => {
     const mean = outfield.reduce((a, b) => a + b, 0) / outfield.length;
     expect(mean).toBeLessThan(45);
     // 가장 많이 뛴 자리(중원·측면)는 바닥 근처다
-    expect(Math.min(...outfield)).toBeLessThan(35);
+    expect(Math.min(...outfield)).toBeLessThan(40);
   });
 
   it("자리가 소모를 가른다 — 골키퍼와 중원이 같이 지치지 않는다", () => {
-    const state = createTestGame(9, "manutd");
+    const state = createNeutralGame();
     advanceToMatchday(state);
     const starters = startersOf(state);
     for (const s of starters) playerById(state, s.id)!.state.condition = 100;
@@ -64,7 +70,7 @@ describe("경기 체력 — 소모", () => {
   });
 
   it("교체로 들어온 선수는 뛴 만큼만 지친다 — 상수로 뭉개지 않는다", () => {
-    const state = createTestGame(9, "manutd");
+    const state = createNeutralGame();
     advanceToMatchday(state);
     for (const p of userPlayers(state)) p.state.condition = 100;
 
@@ -82,7 +88,7 @@ describe("경기 체력 — 소모", () => {
   });
 
   it("우리와 붙은 상대도 대가를 치른다 — 우리만 지치지 않는다", () => {
-    const state = createTestGame(9, "manutd");
+    const state = createNeutralGame();
     advanceToMatchday(state);
     const match = state.matches.find(
       (m) => !m.result && (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
@@ -102,8 +108,70 @@ describe("경기 체력 — 소모", () => {
 });
 
 describe("경기 체력 — 회복", () => {
+  it("지구력 60 중앙 미드필더는 60분 뒤 체력 60 아래로 내려간다", () => {
+    const player = {
+      attributes: { stamina: 60 },
+      state: { condition: 100 },
+    } as unknown as Parameters<typeof conditionDrain>[0];
+    const condition = 100 - conditionDrain(player, "RCM", DEFAULT_TACTICS, 60);
+    expect(condition).toBeLessThanOrEqual(60);
+  });
+
+  it("지구력 60 중앙 미드필더는 풀타임 뒤 만 7일에 체력 95 이상으로 돌아온다", () => {
+    const player = {
+      attributes: { stamina: 60 },
+      state: { condition: 100 },
+    } as unknown as Parameters<typeof conditionDrain>[0];
+    // 평균보다 가장 무거운 날(+12%)까지 포함해도 주 1경기 계약을 지킨다.
+    const afterMatch = 100 - conditionDrain(player, "RCM", DEFAULT_TACTICS, 90, 1.12);
+    const week = [
+      "recovery",
+      "idle",
+      "training",
+      "training",
+      "training",
+      "training",
+      "idle",
+    ] as const;
+    const afterWeek = week.reduce(
+      (condition, kind) => Math.min(100, condition + dailyRecovery(player, kind)),
+      afterMatch,
+    );
+
+    expect(afterWeek).toBeGreaterThanOrEqual(95);
+  });
+
+  it("지구력 90 중앙 미드필더는 가장 무거운 풀타임 뒤 40을 남기고 3일 뒤 85로 돌아온다", () => {
+    const player = {
+      attributes: { stamina: 90 },
+      state: { condition: 100 },
+    } as unknown as Parameters<typeof conditionDrain>[0];
+    const afterMatch = 100 - conditionDrain(player, "RCM", DEFAULT_TACTICS, 90, 1.12);
+    const afterThreeDays = (["recovery", "idle", "training"] as const).reduce(
+      (condition, kind) => Math.min(100, condition + dailyRecovery(player, kind)),
+      afterMatch,
+    );
+
+    expect(afterMatch).toBeGreaterThanOrEqual(40);
+    expect(afterThreeDays).toBeGreaterThanOrEqual(85);
+  });
+
+  it("회복 집중 주간은 지구력 50 중앙 미드필더를 7일 안에 완전히 회복시킨다", () => {
+    const player = {
+      attributes: { stamina: 50 },
+      state: { condition: 100 },
+    } as unknown as Parameters<typeof conditionDrain>[0];
+    const afterMatch = 100 - conditionDrain(player, "RCM", DEFAULT_TACTICS, 90, 1.12);
+    const afterWeek = Array.from({ length: 7 }).reduce<number>(
+      (condition) => Math.min(100, condition + dailyRecovery(player, "recovery")),
+      afterMatch,
+    );
+
+    expect(afterWeek).toBe(100);
+  });
+
   it("사흘로는 다 못 채운다 — 3일 뒤 경기에 로테이션이 필요해진다", () => {
-    const state = createTestGame(9, "manutd");
+    const state = createNeutralGame();
     advanceToMatchday(state);
     const starters = startersOf(state).filter((s) => s.position !== "GK");
     for (const s of starters) playerById(state, s.id)!.state.condition = 100;
@@ -112,8 +180,8 @@ describe("경기 체력 — 회복", () => {
     advanceDays(state, 3);
 
     const after = starters.map((s) => playerById(state, s.id)!.state.condition);
-    // 가장 많이 뛰는 자리(측면·중원)는 확실히 못 돌아온다 — 그대로 쓰면 대가가 있다
-    expect(Math.min(...after)).toBeLessThan(75);
+    // 가장 많이 뛰는 자리(측면·중원)는 완전히 돌아오지 않는다 — 그대로 쓰면 대가가 있다
+    expect(Math.min(...after)).toBeLessThan(85);
     // 그렇다고 못 뛸 몸은 아니다. 감독이 고를 수 있는 구간이어야 판단이 생긴다
     expect(Math.min(...after)).toBeGreaterThan(40);
     // 센터백은 버틴다 — 연전을 누가 견디는지가 자리마다 갈려야 로테이션이 판단이 된다
@@ -135,7 +203,7 @@ describe("경기 체력 — 회복", () => {
   });
 
   it("지구력이 회복 속도도 가른다 — 같은 자리라도 사흘 뒤가 다르다", () => {
-    const state = createTestGame(9, "manutd");
+    const state = createNeutralGame();
     advanceToMatchday(state);
     // **같은 자리끼리** 견준다 — 자리가 다르면 소모 배율이 섞여 지구력의 몫이 흐려진다
     const starters = startersOf(state).filter((s) => s.position !== "GK");
@@ -157,7 +225,7 @@ describe("경기 체력 — 회복", () => {
   });
 
   it("일주일이면 온전히 돌아온다 — 주 1경기 리듬은 로테이션을 강요하지 않는다", () => {
-    const state = createTestGame(9, "manutd");
+    const state = createNeutralGame();
     advanceToMatchday(state);
     const starters = startersOf(state).filter((s) => s.position !== "GK");
     for (const s of starters) playerById(state, s.id)!.state.condition = 100;

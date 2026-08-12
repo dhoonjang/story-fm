@@ -29,6 +29,7 @@ import {
   sendOffer,
   suggestTerms,
   setCaptain,
+  setPlayerTactic,
   setTactics,
   setTraining,
   clearTraining,
@@ -46,9 +47,7 @@ import {
   type GameState,
 } from "@story-fm/engine";
 import type { TrainAttr } from "@story-fm/domain";
-import { positionGroupOfPlayer,
-  MANAGER_ATTRIBUTE_KO,
-} from "@story-fm/domain";
+import { positionGroupOfPlayer, MANAGER_ATTRIBUTE_KO } from "@story-fm/domain";
 import { TIME_PASSED, type GmToolCall, type GmTurnResult } from "./gm-types";
 import type { CardMark, GoalMark } from "@story-fm/engine";
 
@@ -275,6 +274,48 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
 
   // ── 경기 중 ──────────────────────────────────────────
   if (state.phase === "match") {
+    const positionOrders = [...msg.matchAll(/자리 변경 — (.+?)을\(를\) ([A-Z]+)로/gu)];
+    const roleOrders = [...msg.matchAll(/역할 변경 — (.+?)을\(를\) .+?\(([a-z0-9_-]+)\)로/gu)];
+    if (positionOrders.length > 0 || roleOrders.length > 0) {
+      const roster = userPlayers(state);
+      const positionResults = positionOrders.map((order) => {
+        const name = order[1]?.trim() ?? "";
+        const position = order[2] ?? "";
+        const player = roster.find((candidate) => candidate.name === name);
+        if (!player) return `${name}: 선수를 찾을 수 없습니다`;
+        const input = { playerId: player.id, position };
+        const result = setPlayerTactic(state, input);
+        calls.push({ name: "set_player_tactic", summary: result.message, input });
+        return result.message;
+      });
+      const roleResults = roleOrders.map((order) => {
+        const name = order[1]?.trim() ?? "";
+        const role = order[2] ?? "";
+        const player = roster.find((candidate) => candidate.name === name);
+        if (!player) return `${name}: 선수를 찾을 수 없습니다`;
+        const input = { playerId: player.id, role };
+        const result = setPlayerTactic(state, input);
+        calls.push({ name: "set_player_tactic", summary: result.message, input });
+        return result.message;
+      });
+      const results = [...positionResults, ...roleResults];
+      return {
+        text: `${coach(state)} 전술판 변경을 반영했습니다. ${results.join(" · ")}`,
+        toolCalls: calls,
+      };
+    }
+    const formationMatch = msg.match(/([345])-\d(-\d)?(-\d)?/u);
+    if (formationMatch && /전술|포메이션|바꾸|변경|가자|쓰자/u.test(msg)) {
+      const input = { formation: formationMatch[0] as never };
+      const result = setTactics(state, input);
+      calls.push({ name: "set_tactics", summary: result.message, input });
+      return {
+        text: result.ok
+          ? `${coach(state)} 전술판에 새 배치를 올렸습니다. 자리와 역할을 확인하신 뒤 진행해 주십시오.`
+          : `${coach(state)} ${result.message}`,
+        toolCalls: calls,
+      };
+    }
     if (/교체/u.test(msg)) {
       const roster = userPlayers(state);
       const side = userSide(state);

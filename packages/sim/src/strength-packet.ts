@@ -1,4 +1,5 @@
 import type {
+  BoardPoint,
   EdgeSide,
   EdgeSize,
   MatchSide,
@@ -6,6 +7,9 @@ import type {
   MatchupZone,
   Player,
   PositionGroup,
+  RegionalBand,
+  RegionalIntent,
+  RegionalLane,
   SidePacket,
   StrengthPacket,
   TacticalRead,
@@ -25,12 +29,17 @@ import { buildKeyPoints, readKeyPoints } from "./key-points";
 import { stateModifier } from "./state-modifier";
 import { buildCounterContext, evaluateCounters, type CounterResult } from "./tactical-counters";
 import { GAP_PENALTY, GAP_THRESHOLD } from "./stamina";
+import { regionalAttackFactor, zoneGrid } from "./zone-grid";
 
 /** 배치된 선수 — 전술 배치(TACTIC_ASSIGNMENT)에서 조립해 넘긴다 */
 export interface LineupSlot {
   player: Player;
   /** 이 경기에서 맡는 포지션 (주 포지션과 다를 수 있다) */
   position: string;
+  /** 프리셋이 아닌 실제 전술판 좌표 */
+  point?: BoardPoint;
+  /** 실제 세부 역할 — 없으면 그 자리 기본 역할 */
+  roleId?: string;
   /** 그 포지션 적응도 0~99 — 낯선 자리면 기여가 깎인다 */
   proficiency: number;
   /**
@@ -70,6 +79,12 @@ export interface SideInput {
    * 전술 6축이 팀의 성향이라면 이쪽은 **이 경기, 저 사람**을 향한 지시다.
    */
   directives?: DirectiveInput[];
+  regional?: Array<{
+    band: RegionalBand;
+    lane: RegionalLane;
+    intent: RegionalIntent;
+    note: string;
+  }>;
 }
 
 /**
@@ -84,7 +99,7 @@ function zoneScore(slot: LineupSlot): number {
         condition: Math.max(0, slot.player.state.condition - slot.matchFatigue),
       }
     : slot.player.state;
-  return roleFit(slot.player.attributes, slot.position) * stateModifier(state);
+  return roleFit(slot.player.attributes, slot.position, slot.roleId) * stateModifier(state);
 }
 
 function mean(xs: number[]): number {
@@ -397,6 +412,31 @@ const ZONE_CONTRIBUTION: Record<
   defense: { FW: 0.08, MF: 0.35, DF: 1, GK: 0.8 },
 };
 
+/** 실제 전후 좌표를 기존 네 라인의 기여도로 연속 변환한다. */
+function pointLineMix(slot: LineupSlot): Record<PositionGroup, number> {
+  const y = slot.point?.y;
+  const out: Record<PositionGroup, number> = { GK: 0, DF: 0, MF: 0, FW: 0 };
+  if (y === undefined) return out;
+  const anchors = [
+    { y: 92, group: "GK" as const },
+    { y: 76, group: "DF" as const },
+    { y: 47, group: "MF" as const },
+    { y: 18, group: "FW" as const },
+  ];
+  if (y >= anchors[0]!.y) return { ...out, GK: 1 };
+  if (y <= anchors[anchors.length - 1]!.y) return { ...out, FW: 1 };
+  for (let i = 0; i < anchors.length - 1; i++) {
+    const back = anchors[i]!;
+    const front = anchors[i + 1]!;
+    if (y > back.y || y < front.y) continue;
+    const forward = (back.y - y) / (back.y - front.y);
+    out[back.group] = 1 - forward;
+    out[front.group] = forward;
+    return out;
+  }
+  return out;
+}
+
 function buildZones(
   slots: LineupSlot[],
   fit: number,
@@ -427,8 +467,13 @@ function buildZones(
     let sum = 0;
     let weight = 0;
     for (const slot of slots) {
-      const g = slotGroup(slot);
-      const wg = w[g];
+      const mix = pointLineMix(slot);
+      const wg = slot.point
+        ? (Object.keys(mix) as PositionGroup[]).reduce(
+            (sum, group) => sum + mix[group] * w[group],
+            0,
+          )
+        : w[slotGroup(slot)];
       sum += effectiveOf(slot) * wg;
       weight += wg;
     }
@@ -523,6 +568,8 @@ function roster(slots: LineupSlot[]) {
     id: s.player.id,
     name: s.player.name,
     position: s.position,
+    ...(s.point ? { point: s.point } : {}),
+    ...(s.roleId ? { roleId: s.roleId } : {}),
     effective: effectiveOf(s),
     fit: {
       position: s.proficiency,
@@ -684,6 +731,15 @@ export function buildStrengthPacket(
     zones: buildZones(homeXI, homeFit, homeDelta, counters.home),
     tacticalFit: homeFit,
     tactical: readOf(homeUptake, homeDelta),
+    ...(homeIn.regional && homeIn.regional.length > 0
+      ? {
+          regional: homeIn.regional.map((plan) => ({
+            ...plan,
+            id: `${plan.band}:${plan.lane}`,
+            uptake: homeUptake,
+          })),
+        }
+      : {}),
     lineup: roster(homeIn.starters),
     bench: roster(homeIn.bench),
   };
@@ -693,6 +749,15 @@ export function buildStrengthPacket(
     zones: buildZones(awayXI, awayFit, awayDelta, counters.away),
     tacticalFit: awayFit,
     tactical: readOf(awayUptake, awayDelta),
+    ...(awayIn.regional && awayIn.regional.length > 0
+      ? {
+          regional: awayIn.regional.map((plan) => ({
+            ...plan,
+            id: `${plan.band}:${plan.lane}`,
+            uptake: awayUptake,
+          })),
+        }
+      : {}),
     lineup: roster(awayIn.starters),
     bench: roster(awayIn.bench),
   };
@@ -761,6 +826,11 @@ export function buildStrengthPacket(
     home: possessionShare(home.zones.midfield, away.zones.midfield),
     away: possessionShare(away.zones.midfield, home.zones.midfield),
   };
+  const grid = zoneGrid({ home, away } as StrengthPacket);
+  const regional = {
+    home: regionalAttackFactor(grid, "home"),
+    away: regionalAttackFactor(grid, "away"),
+  };
   const neutral = options.neutral === true;
   const expectedGoals = {
     home: xg(
@@ -769,7 +839,7 @@ export function buildStrengthPacket(
       home.zones.attack,
       away.zones.defense,
       possession.home,
-      neutral ? 1 : HOME_XG,
+      (neutral ? 1 : HOME_XG) * regional.home,
     ),
     away: xg(
       awayQuality,
@@ -777,7 +847,7 @@ export function buildStrengthPacket(
       away.zones.attack,
       home.zones.defense,
       possession.away,
-      neutral ? 1 : AWAY_XG,
+      (neutral ? 1 : AWAY_XG) * regional.away,
     ),
   };
 
@@ -812,6 +882,14 @@ export function buildStrengthPacket(
     ...gapNotes(awayXI, away.teamName, "away"),
     // 미스매치의 `side`는 그 약점을 **가진** 쪽이다 (key-points.ts)
     ...shownPoints.map((p) => ({ text: p.text, favours: other(p.side) })),
+    ...(home.regional ?? []).map((plan) => ({
+      text: `${home.teamName} 지역 플랜: ${plan.note}`,
+      favours: "home" as const,
+    })),
+    ...(away.regional ?? []).map((plan) => ({
+      text: `${away.teamName} 지역 플랜: ${plan.note}`,
+      favours: "away" as const,
+    })),
   ];
 
   return {

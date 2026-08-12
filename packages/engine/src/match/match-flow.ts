@@ -1,10 +1,19 @@
-import type { GamePlayer, MatchEvent, MatchRecord, TacticAssignment } from "@story-fm/domain";
+import type {
+  GamePlayer,
+  MatchEvent,
+  MatchRecord,
+  RegionalBand,
+  RegionalIntent,
+  RegionalLane,
+  TacticAssignment,
+} from "@story-fm/domain";
 import {
   ageOf,
   clampCondition,
   naturalPositionOf,
   positionGroupOf,
   positionGroupOfPlayer,
+  TacticsSpecSchema,
   tacticsSignature,
 } from "@story-fm/domain";
 import type { SkillResult } from "../skills";
@@ -82,15 +91,47 @@ function slotsFor(state: GameState, teamId: string, ids: string[]): LineupSlot[]
   const assignments = new Map(assignmentsOf(state, teamId).map((a) => [a.playerId, a] as const));
   const squad = new Map(playersOf(state, teamId).map((p) => [p.id, p] as const));
   const worn = state.pendingMatch?.matchFatigue ?? {};
+  const idSet = new Set(ids);
+  const replacementSlots = assignmentsOf(state, teamId, "starting")
+    .filter((assignment) => !idSet.has(assignment.playerId))
+    .map((assignment) => ({
+      position: assignment.position,
+      ...(assignment.point ? { point: assignment.point } : {}),
+      ...(assignment.roleId ? { roleId: assignment.roleId } : {}),
+    }));
+  const replacementSetup = new Map<string, (typeof replacementSlots)[number]>();
+  for (const id of ids) {
+    const assignment = assignments.get(id);
+    if (assignment?.role === "starting") continue;
+    const player = squad.get(id);
+    if (!player || replacementSlots.length === 0) continue;
+    const best = replacementSlots
+      .map((setup, index) => ({
+        index,
+        setup,
+        fit: proficiencyAt(player, setup.position),
+      }))
+      .sort((a, b) => b.fit - a.fit || a.index - b.index)[0]!;
+    replacementSetup.set(id, best.setup);
+    replacementSlots.splice(best.index, 1);
+  }
   return ids.flatMap((id) => {
     const player = squad.get(id);
     if (!player) return [];
     const assignment = assignments.get(id);
-    const position = assignment?.position ?? naturalPositionOf(player).position;
+    const inherited = replacementSetup.get(id);
+    const position =
+      inherited?.position ?? assignment?.position ?? naturalPositionOf(player).position;
     return [
       {
         player,
         position,
+        ...((inherited?.point ?? assignment?.point)
+          ? { point: (inherited?.point ?? assignment?.point)! }
+          : {}),
+        ...((inherited?.roleId ?? assignment?.roleId)
+          ? { roleId: (inherited?.roleId ?? assignment?.roleId)! }
+          : {}),
         proficiency: proficiencyAt(player, position),
         // 전술 적응도는 **개인 값**이다 — 팀 평균으로 뭉개면 어제 온 선수와
         // 3년 뛴 선수가 같은 정도로 전술을 소화하는 셈이 된다
@@ -146,6 +187,7 @@ export function refreshPacket(state: GameState): void {
           managerAnalysis: state.manager.attributes.analysis,
           // 감독이 겨냥한 지점 — 없는 id는 패킷이 조용히 버린다 (exploits.ts)
           ...(pending.exploits ? { exploits: pending.exploits } : {}),
+          ...(pending.regionalPlans ? { regional: pending.regionalPlans } : {}),
         }
       : {}),
     directives: directivesOnPitch(state, teamId, ledgerSide.onPitch),
@@ -449,7 +491,12 @@ export function advanceSegment(state: GameState): {
   const aiNow = pending.aiTactics ?? tacticsOf(state, aiTeamId).spec;
   // 라커룸에서 판을 다시 짜는 자리 — 하프타임과 연장의 두 휴식이 같다
   const shift = planAiTacticalShift(aiSide, aiNow, pending.ledger, isBreak(plan.stop));
-  if (shift) pending.aiTactics = { ...aiNow, ...shift };
+  if (shift) {
+    // AI의 런타임 전술도 사람과 같은 스키마를 지난다. 배치 변경 없이 포메이션
+    // 이름만 바꾸거나 범위를 벗어난 축을 세이브에 남기지 않는다.
+    const guarded = TacticsSpecSchema.safeParse({ ...aiNow, ...shift, formation: aiNow.formation });
+    pending.aiTactics = guarded.success ? guarded.data : aiNow;
+  }
   const worn = (pending.matchFatigue ??= {});
   for (const [id, add] of Object.entries(plan.fatigue)) {
     worn[id] = Math.min(100, (worn[id] ?? 0) + add);
@@ -586,6 +633,37 @@ export function substitutePlayer(state: GameState, input: { out: string; in: str
   const outName = roster.find((p) => p.id === input.out)?.name ?? input.out;
   const inName = incoming?.name ?? input.in;
   return result.ok ? { ok: true, message: `교체 완료 — ${outName} OUT, ${inName} IN` } : result;
+}
+
+/** 자연어 세부 전술을 경기 전용 지역 플랜으로 기록한다. */
+export function setRegionalPlan(
+  state: GameState,
+  input: {
+    band: RegionalBand;
+    lane: RegionalLane;
+    intent: RegionalIntent;
+    note: string;
+  },
+): FlowResult {
+  const pending = state.pendingMatch;
+  if (!pending || state.phase !== "match") {
+    return { ok: false, message: "지역 전술은 경기 중에만 지정할 수 있습니다" };
+  }
+  const note = input.note.trim();
+  if (note.length === 0 || note.length > 120) {
+    return { ok: false, message: "지역 전술 설명은 1~120자로 적어야 합니다" };
+  }
+  const plans = [...(pending.regionalPlans ?? [])];
+  const same = plans.findIndex((plan) => plan.band === input.band && plan.lane === input.lane);
+  const next = { ...input, note };
+  if (same >= 0) plans[same] = next;
+  else {
+    if (plans.length >= 2) plans.shift();
+    plans.push(next);
+  }
+  pending.regionalPlans = plans;
+  refreshPacket(state);
+  return { ok: true, message: `지역 전술 적용 — ${note}` };
 }
 
 /**
@@ -773,7 +851,6 @@ export function finalizeMatch(state: GameState): string[] {
   );
   const played = new Set(side === "home" ? homeLineup : awayLineup);
 
-  const moraleDelta = outcome === "win" ? 4 : outcome === "draw" ? 1 : -4;
   /**
    * 폼은 **개인 평점**이 만든다 (form.ts). 앵커는 아래에서 박지만 브리프에 이미
    * 들어 있으므로 여기서 읽는다 — 팀 결과만 보던 예전 모델은 이긴 경기에 부진한
@@ -798,10 +875,8 @@ export function finalizeMatch(state: GameState): string[] {
   for (const player of roster) {
     if (!played.has(player.id)) continue;
     ensureSeasonStat(state, player.id, player.teamId).apps += 1;
-    // 뛴 만큼 체력을 깎고, 결과(승·무·패)가 그 위에 얹힌다
-    player.state.condition = clampCondition(
-      player.state.condition - (drained[player.id] ?? 0) + moraleDelta,
-    );
+    // 체력은 몸의 소모만 정산한다. 승패의 심리 효과는 formDeltaFromMatch가 맡는다.
+    player.state.condition = clampCondition(player.state.condition - (drained[player.id] ?? 0));
     player.state.form = clampForm(
       player.state.form + formDeltaFromMatch(player, anchorOfPlayer.get(player.id), outcome),
     );
@@ -835,14 +910,11 @@ export function finalizeMatch(state: GameState): string[] {
    * 때문이다. 그래서 우리를 상대한 클럽만 주중 연전을 공짜로 소화했다.
    * 구간 시뮬이 양 팀 소모를 함께 쌓아 두므로 같은 장부에서 함께 정산한다.
    */
-  const oppMorale = -moraleDelta;
   const oppIds = new Set(side === "home" ? awayLineup : homeLineup);
   for (const id of oppIds) {
     const player = playerById(state, id);
     if (!player || player.teamId === state.userTeamId) continue;
-    player.state.condition = clampCondition(
-      player.state.condition - (drained[id] ?? 0) + oppMorale,
-    );
+    player.state.condition = clampCondition(player.state.condition - (drained[id] ?? 0));
   }
 
   // 골은 이미 평점(앵커)에 크게 반영돼 있다 — 폼을 또 올리면 이중 계산이고,

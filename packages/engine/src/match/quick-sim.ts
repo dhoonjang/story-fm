@@ -95,8 +95,8 @@ function sampleMinute(rng: () => number): number {
  */
 export const QUICK_SIM_EXPONENT = 4.5;
 /** 기준 기대 득점 — 홈이 조금 높다 (홈 어드밴티지는 전력에도 따로 곱한다) */
-export const HOME_BASE_GOALS = 1.33;
-export const AWAY_BASE_GOALS = 1.19;
+export const HOME_BASE_GOALS = 1.28;
+export const AWAY_BASE_GOALS = 1.14;
 
 function outfield(players: readonly GamePlayer[]): GamePlayer[] {
   return players.filter((p) => positionGroupOfPlayer(p) !== "GK");

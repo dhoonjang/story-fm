@@ -309,6 +309,11 @@ describe("AI 전술 반응", () => {
     expect(shift?.tempo).toBeGreaterThan(spec.tempo);
   });
 
+  it("실제 선수 재배치 없이 포메이션 이름만 바꾸지 않는다", () => {
+    const shift = planAiTacticalShift("home", { ...spec, formation: "5-4-1" }, ledgerAt(45, 0, 1), true);
+    expect(shift?.formation).toBeUndefined();
+  });
+
   it("늦게까지 두 골 차로 지면 라인까지 올려 던진다", () => {
     const shift = planAiTacticalShift("home", spec, ledgerAt(80, 0, 2));
     expect(shift?.mentality).toBe(5);

@@ -41,10 +41,29 @@ export interface TacticalRead {
   notes: string[];
 }
 
+export type RegionalBand = "defense" | "midfield" | "attack";
+export type RegionalLane = "left" | "center" | "right";
+export type RegionalIntent = "overload" | "press" | "protect" | "transition";
+
+/** 자연어 세부 전술을 코어가 검증해 경기 패킷에 남긴 지역 플랜. */
+export interface RegionalInstruction {
+  id: string;
+  band: RegionalBand;
+  lane: RegionalLane;
+  intent: RegionalIntent;
+  note: string;
+  /** 팀 전술 소화율이 적용된 실제 강도. */
+  uptake: number;
+}
+
 export interface PacketPlayer {
   id: string;
   name: string;
   position: string;
+  /** 실제 전술판 좌표 — 없으면 position의 기본 좌표를 사용한다. */
+  point?: import("./tactics").BoardPoint;
+  /** 이 경기에서 수행하는 세부 역할. */
+  roleId?: string;
   /** 이 자리에서 지금 내는 전력 (상태·적응도 반영) */
   effective: number;
   fit: {
@@ -65,6 +84,8 @@ export interface SidePacket {
   tacticalFit: number;
   /** 전술 지시의 반영 — 적용률과 이득·대가 (설명 가능성) */
   tactical: TacticalRead;
+  /** 이 경기에만 유효한 지역별 세부 전술. */
+  regional?: RegionalInstruction[];
   /**
    * 그라운드 위 선수 명단 — id·이름·자리에 **그 선수가 지금 내는 전력**까지.
    *

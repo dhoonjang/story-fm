@@ -48,6 +48,24 @@ function turnTools(state: GameState, goals: GoalMark[] = [], calls: GmToolCall[]
 }
 
 describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
+  it("계속 버튼 턴은 경기 진행만 허용하고 모델 임의 교체를 막는다", () => {
+    const state = matchState();
+    const names = buildMatchTools(state, [], [], [], { progressionOnly: true }).map(
+      (tool) => tool.name,
+    );
+
+    expect(names).toContain("advance_match");
+    expect(names).not.toContain("substitute");
+    expect(names).not.toContain("set_tactics");
+    expect(names).not.toContain("set_player_tactic");
+    expect(names).not.toContain("set_match_plan");
+  });
+
+  it("감독의 자연어 경기 지시에는 검증된 지역 전술 도구가 열린다", () => {
+    const state = matchState();
+    expect(buildMatchTools(state, []).map((tool) => tool.name)).toContain("set_match_plan");
+  });
+
   it("도구를 부르기 전에는 경기가 한 발도 나가지 않는다", () => {
     const state = matchState();
     const minute = state.pendingMatch!.ledger.minute;
@@ -93,6 +111,24 @@ describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
     expect(again.message).toContain("이미 진행");
   });
 
+  it("포메이션을 바꾼 턴은 전술판 검토를 위해 진행하지 않는다", () => {
+    const state = matchState();
+    const minute = state.pendingMatch!.ledger.minute;
+    const { use } = turnTools(state);
+
+    const side = userSide(state);
+    const mover = state.pendingMatch!.ledger[side].onPitch[10]!;
+    expect(use("set_player_tactic", { playerId: mover, position: "CB" }).ok).toBe(true);
+    const blocked = use("advance_match");
+    expect(blocked.ok).toBe(false);
+    expect(blocked.message).toContain("전술판 검토");
+    expect(state.pendingMatch!.ledger.minute).toBe(minute);
+
+    // 검토 뒤 다음 턴에는 바뀐 포메이션으로 정상 진행한다.
+    expect(turnTools(state).use("advance_match").ok).toBe(true);
+    expect(state.pendingMatch!.ledger.minute).toBeGreaterThan(minute);
+  });
+
   it("장부 블록은 사건을 싣지 않는다 — 사건은 진행 도구가 돌려준다", () => {
     const state = matchState();
     const { use } = turnTools(state);
@@ -134,8 +170,6 @@ describe("골 표식", () => {
     const score = state.pendingMatch!.ledger.score;
     // 우리 골 표식의 수 = 우리 쪽 스코어 (색을 가르는 근거가 장부와 같다)
     expect(goals.filter((g) => g.ours)).toHaveLength(score[ours]);
-    expect(goals.filter((g) => !g.ours)).toHaveLength(
-      score[ours === "home" ? "away" : "home"],
-    );
+    expect(goals.filter((g) => !g.ours)).toHaveLength(score[ours === "home" ? "away" : "home"]);
   });
 });

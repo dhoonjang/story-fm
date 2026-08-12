@@ -52,7 +52,7 @@ function presence(players: readonly PacketPlayer[], lane: GridLane, band: GridBa
   let weight = 0;
   let sum = 0;
   for (const p of players) {
-    const at = anchorOf(p.position);
+    const at = p.point ?? anchorOf(p.position);
     const d = Math.hypot(at.x - LANE_X[lane], at.y - BAND_Y[band]);
     const w = Math.max(0, 1 - d / REACH);
     if (w === 0) continue;
@@ -107,7 +107,17 @@ export function zoneGrid(packet: StrengthPacket): GridCell[] {
     const zones = packet[side].zones;
     const out = new Map<string, number>();
     for (const band of GRID_BANDS) {
-      const raw = GRID_LANES.map((lane) => presence(players, lane, band));
+      const raw = GRID_LANES.map((lane) => {
+        const base = presence(players, lane, band);
+        const plan = packet[side].regional?.find(
+          (entry) => entry.band === band && entry.lane === lane,
+        );
+        if (!plan) return base;
+        const intentWeight = plan.intent === "overload" || plan.intent === "protect" ? 0.06 : 0.045;
+        // 기존 배치가 이미 한 칸에만 잡혀도 지시가 사라지지 않게, 줄 전력의 작은
+        // 몫을 목표 칸에 더한 뒤 같은 줄 안에서 다시 정규화한다.
+        return base + zones[band] * intentWeight * plan.uptake;
+      });
       const fixed = normalize(raw, zones[band]);
       GRID_LANES.forEach((lane, i) => out.set(`${band}:${lane}`, fixed[i]!));
     }
@@ -123,4 +133,32 @@ export function zoneGrid(packet: StrengthPacket): GridCell[] {
       away: awayCells.get(`${FACING_BAND[band]}:${MIRROR_LANE[lane]}`) ?? 0,
     })),
   );
+}
+
+/** 좌·중·우 공간 우위를 득점률에 연결하는 제한된 계수. */
+export function regionalAttackFactor(grid: readonly GridCell[], side: "home" | "away"): number {
+  const routeQuality = (forSide: "home" | "away") => {
+    const band = forSide === "home" ? "attack" : "defense";
+    const cells = grid.filter((cell) => cell.band === band);
+    if (cells.length !== GRID_LANES.length) return 1;
+    const lanes = cells.map((cell) => ({
+      attack: forSide === "home" ? cell.home : cell.away,
+      defense: forSide === "home" ? cell.away : cell.home,
+    }));
+    const totalAttack = lanes.reduce((sum, lane) => sum + lane.attack, 0);
+    if (totalAttack <= 0) return 1;
+    const routedRatio = lanes.reduce(
+      (sum, lane) => sum + (lane.attack / totalAttack) * (lane.attack / Math.max(1, lane.defense)),
+      0,
+    );
+    const meanAttack = totalAttack / lanes.length;
+    const meanDefense = lanes.reduce((sum, lane) => sum + lane.defense, 0) / lanes.length;
+    return routedRatio / Math.max(0.01, meanAttack / Math.max(1, meanDefense));
+  };
+  // 양 팀이 같은 방식으로 공간을 쓰면 리그의 기본 득점률을 올리지 않는다.
+  // 상대보다 더 정확히 약한 레인을 찾은 몫만 서로 반대 방향으로 붙는다.
+  const ours = routeQuality(side);
+  const theirs = routeQuality(side === "home" ? "away" : "home");
+  const factor = Math.pow(ours / Math.max(0.01, theirs), 0.12);
+  return Math.max(0.96, Math.min(1.04, factor));
 }

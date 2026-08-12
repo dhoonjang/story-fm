@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildStrengthPacket, zoneGrid, GRID_BANDS, GRID_LANES } from "@story-fm/sim";
+import { buildStrengthPacket, regionalAttackFactor, zoneGrid, GRID_BANDS, GRID_LANES } from "@story-fm/sim";
 import { DEFAULT_TACTICS, type TacticsSpec } from "@story-fm/domain";
 import { makeSide } from "./helpers";
 import type { SideInput } from "@story-fm/sim";
@@ -73,5 +73,14 @@ describe("판세 격자 — 존을 좌·중·우로 쪼갠다", () => {
     expect(cellOf(grid, "attack", "left").away).toBeGreaterThan(
       cellOf(grid, "attack", "right").away,
     );
+  });
+
+  it("약한 측면에 공격력을 모으면 9칸 우위가 득점 계수에 닿는다", () => {
+    const home = makeSide("us", 78);
+    const away = boost(makeSide("them", 78), "RB", 45);
+    const target = home.starters.find((slot) => slot.position === "ST")!;
+    target.point = { x: 12, y: 18 };
+    const packet = buildStrengthPacket(home, away);
+    expect(regionalAttackFactor(zoneGrid(packet), "home")).toBeGreaterThan(1);
   });
 });

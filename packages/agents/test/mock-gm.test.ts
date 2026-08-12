@@ -85,11 +85,12 @@ describe("mock GM — 유저 여정 시나리오", () => {
     }
   });
 
-  it("전술 변경 발화 → set_tactics", () => {
+  it("포메이션 이름은 프리셋을 적용하지 않고 전술 축만 반영한다", () => {
     const state = newGame();
+    const before = tacticsOf(state, state.userTeamId).spec.formation;
     const turn = runMockGmTurn(state, "4-4-2로 바꾸고 공격적으로 가자");
     expect(turn.toolCalls.map((c) => c.name)).toContain("set_tactics");
-    expect(tacticsOf(state, state.userTeamId).spec.formation).toBe("4-4-2");
+    expect(tacticsOf(state, state.userTeamId).spec.formation).toBe(before);
     expect(tacticsOf(state, state.userTeamId).spec.mentality).toBe(4);
   });
 

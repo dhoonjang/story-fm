@@ -27,7 +27,7 @@ import { weightSlotOf } from "@story-fm/domain";
 
 /** 자리별 소모 배율 — 위 주행거리 표를 1.0(스트라이커) 기준으로 정규화했다 */
 const POSITIONAL_DRAIN: Record<ReturnType<typeof weightSlotOf>, number> = {
-  GK: 0.35,
+  GK: 0.2,
   CB: 0.85,
   FB: 1.2,
   DM: 1.15,
@@ -76,9 +76,9 @@ function positionalTacticWeight(position: string, spec: TacticsSpec): number {
   return Math.max(0.7, w);
 }
 
-/** 지구력 배율 — 99면 25% 덜 지치고, 40이면 22% 더 지친다 */
+/** 지구력 배율 — 90이면 풀타임을 버티고, 60이면 60분부터 기량이 떨어진다. */
 function staminaFactor(player: Player): number {
-  return 1.3 - (player.attributes.stamina / 99) * 0.55;
+  return 1.39 - (player.attributes.stamina / 99) * 0.75;
 }
 
 /**
@@ -88,7 +88,7 @@ function staminaFactor(player: Player): number {
  * 남았고, 회복이 사흘이면 100을 채워서 **로테이션이라는 판단 자체가 없었다** —
  * 주중 경기가 낀 주에 누구를 쉬게 할지가 이 게임의 큰 결정 중 하나인데
  * 감독이 그걸 고민할 이유가 사라졌다. 지금은 중앙 미드필더가 −75, 풀백 −72,
- * 센터백 −51, 골키퍼 −21이고 지구력이 그 위에서 ±25%를 가른다.
+ * 센터백 −51, 골키퍼 −12이고 지구력이 그 위에서 ±25%를 가른다.
  */
 const FULL_MATCH_DRAIN = 60;
 
@@ -98,15 +98,14 @@ const FULL_MATCH_DRAIN = 60;
  * 지구력이 "덜 지친다"만 뜻하면 반쪽이다. 실제로 그 축이 가르는 건 **연전을
  * 버티는가**이고, 그건 회복 속도의 문제이기도 하다.
  *
- * ⚠️ 다만 **회복은 소모보다 훨씬 덜 갈라야 한다**(±10% vs ±25%). 한 축이 양쪽에
+ * ⚠️ 다만 **회복은 소모보다 훨씬 덜 갈라야 한다**. 한 축이 양쪽에
  * 곱으로 걸리면 격차가 복리로 벌어져서, ±20%였을 땐 지구력 30과 99가 사흘 뒤에
  * 54와 94로 갈렸다 — 지구력 하나가 다른 열네 축을 덮는다. 회복은 소모가 만든
  * 차이를 **거들 뿐**이어야 한다.
  *
- * 기준값은 **주 1경기 리듬에 맞춰** 잡혀 있다. 기본 마이크로사이클(MD+1 회복 ·
- * MD+2 휴식 · 본훈련 ×4 · 경기 당일)이 엿새에 +74를 돌려주므로 90분 뛴
- * 미드필더도 다음 주말엔 다시 만땅이다. 반대로 **사흘이면 +42밖에 못 갚아**
- * 60대에서 킥오프를 맞는다 — 로테이션이라는 결정이 여기서 생긴다.
+ * 기준값은 **주 1경기 리듬에 맞춰** 잡혀 있다. 지구력 60은 7일 뒤 95 이상으로
+ * 돌아오고, 지구력 90은 회복·휴식·본훈련을 거친 3일 뒤 85 이상으로 돌아온다.
+ * 낮은 지구력 선수와 고강도 전술은 같은 연전을 그대로 소화하지 못한다.
  *
  * ⚠️ 회복이 이보다 낮으면 주 1경기만으로도 시즌 내내 조금씩 내려가 12월쯤
  * 스쿼드 전체가 바닥에 눕는다. 한 경기의 대가는 **다음 경기까지** 갚을 수
@@ -114,7 +113,7 @@ const FULL_MATCH_DRAIN = 60;
  */
 export const RECOVERY_BASE = {
   /** 본훈련이 있는 날 — 회복하며 동시에 쓴다 */
-  training: 8,
+  training: 11,
   /** 훈련 없는 날 · 휴식 세션 · 경기 당일 */
   idle: 13,
   /** 회복 세션(MD+1)을 잡은 날 — 감독이 회복에 하루를 쓴 보상 */
@@ -122,9 +121,9 @@ export const RECOVERY_BASE = {
 } as const;
 export type RecoveryKind = keyof typeof RECOVERY_BASE;
 
-/** 회복 배율 — 지구력 99면 10% 빨리, 30이면 7% 느리게 (소모 쪽 ±25%의 절반 아래) */
+/** 회복 배율 — 지구력 90이면 3일 연전을 버틸 만큼 빠르되 소모 차이보다 작다. */
 export function recoveryFactor(player: Player): number {
-  return 0.9 + (player.attributes.stamina / 99) * 0.2;
+  return 0.84 + (player.attributes.stamina / 99) * 0.33;
 }
 
 /** 오늘 이 선수가 되찾는 체력 */

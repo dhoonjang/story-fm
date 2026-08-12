@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   advanceSegment,
   assignmentsOf,
+  buildOfficeViews,
   isClubTeam,
   finalizeMatch,
   groupOf,
@@ -9,6 +10,7 @@ import {
   refreshPacket,
   saveGame,
   setLineup,
+  setRegionalPlan,
   setPlayerInstruction,
   setTactics,
   tacticsOf,
@@ -19,6 +21,7 @@ import {
   userSide,
 } from "@story-fm/engine";
 import { advanceToMatchday, createTestGame, playMockMatch } from "./helpers";
+import { zoneGrid } from "@story-fm/sim";
 
 describe("경기 흐름 (overview §4)", () => {
   it("경기일이 아니면 시작할 수 없다", () => {
@@ -47,12 +50,17 @@ describe("경기 흐름 (overview §4)", () => {
      */
     const played = state.seasonStats.filter((s) => s.teamId === state.userTeamId && s.apps > 0);
     expect(played.length).toBeGreaterThanOrEqual(11);
-    const conditions = played
+    const participants = played
       .map((s) => userPlayers(state).find((x) => x.id === s.gamePlayerId))
-      .filter((p) => p !== undefined)
-      .map((p) => p.state.condition);
-    // 90분을 뛰고도 멀쩡한 선수는 없다 — 이 경기의 대가가 장부에 남는다
-    expect(Math.max(...conditions)).toBeLessThan(80);
+      .filter((p) => p !== undefined);
+    const conditions = participants.map((p) => p.state.condition);
+    // 필드 플레이어는 90분의 대가가 남고, 골키퍼도 작지만 실제 소모가 있다.
+    expect(
+      Math.max(...participants.filter((p) => groupOf(p) !== "GK").map((p) => p.state.condition)),
+    ).toBeLessThan(80);
+    expect(
+      Math.max(...participants.filter((p) => groupOf(p) === "GK").map((p) => p.state.condition)),
+    ).toBeLessThan(95);
     // 자리마다 갈린다 (골키퍼는 덜, 중원·측면은 많이) — 하나로 뭉개지지 않는다
     expect(Math.max(...conditions) - Math.min(...conditions)).toBeGreaterThan(15);
   });
@@ -155,6 +163,10 @@ describe("경기 흐름 (overview §4)", () => {
 
     expect(substitutePlayer(state, { out, in: sub }).ok).toBe(true);
 
+    const board = buildOfficeViews(state).squad.players;
+    expect(board.find((player) => player.id === sub)?.role).toBe("선발");
+    expect(board.find((player) => player.id === out)?.role).not.toBe("선발");
+
     let guard = 30;
     while (state.phase === "match" && guard-- > 0) {
       const step = advanceSegment(state);
@@ -162,6 +174,42 @@ describe("경기 흐름 (overview §4)", () => {
       if (step.plan?.stop === "full_time") finalizeMatch(state);
     }
     expect(state.phase).toBe("idle");
+  });
+
+  it("자연어 지역 전술은 패킷 키포인트와 9칸 판세에 함께 반영된다", () => {
+    const state = createTestGame();
+    advanceToMatchday(state);
+    startMatch(state);
+    const side = userSide(state);
+    const packetSide = () =>
+      side === "home" ? state.pendingMatch!.packet.home : state.pendingMatch!.packet.away;
+    const before = packetSide();
+    // 격자는 홈 시점 좌표라 원정의 왼쪽 공격은 홈의 오른쪽 수비 칸에 나타난다.
+    const gridBand = side === "home" ? "attack" : "defense";
+    const gridLane = side === "home" ? "left" : "right";
+    const beforeLeft = zoneGrid(state.pendingMatch!.packet).find(
+      (cell) => cell.band === gridBand && cell.lane === gridLane,
+    )![side];
+
+    expect(
+      setRegionalPlan(state, {
+        band: "attack",
+        lane: "left",
+        intent: "overload",
+        note: "왼쪽 하프스페이스에 수적 우위를 만든다",
+      }).ok,
+    ).toBe(true);
+
+    const after = packetSide();
+    expect(after.regional?.[0]?.note).toContain("하프스페이스");
+    expect(
+      state.pendingMatch!.packet.keyPoints.some((point) => point.includes("하프스페이스")),
+    ).toBe(true);
+    expect(
+      zoneGrid(state.pendingMatch!.packet).find(
+        (cell) => cell.band === gridBand && cell.lane === gridLane,
+      )![side],
+    ).toBeGreaterThan(beforeLeft);
   });
 
   it("저장/로드를 거쳐도 경기를 이어가고 결과가 남는다", () => {

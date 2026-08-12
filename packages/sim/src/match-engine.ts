@@ -876,7 +876,7 @@ export function planAiTacticalShift(
   side: MatchSide,
   current: TacticsSpec,
   ledger: MatchLedgerState,
-  /** 라커룸에서 판을 다시 짜는 자리 — 포메이션까지 바꿀 수 있다 */
+  /** 라커룸에서 강도를 다시 정하는 자리 */
   halftime = false,
 ): Partial<TacticsSpec> | null {
   const minute = ledger.minute;
@@ -896,16 +896,8 @@ export function planAiTacticalShift(
     if ((urgent || halftime) && diff <= -2) {
       push.defensiveLine = Math.min(5, current.defensiveLine + 1);
     }
-    /**
-     * **하프타임에 지고 있으면 모양까지 바꾼다.** 45분을 보고도 같은 그림으로
-     * 나오는 벤치는 없다 — 뒤를 줄이고 앞을 늘리는 쪽으로 간다. 구조가 바뀌므로
-     * 적응도 대가가 크지만, 어차피 지고 있는 팀은 그 값을 치를 이유가 있다.
-     */
     if (halftime) {
       push.pressing = Math.min(5, current.pressing + 1);
-      if (current.formation === "5-4-1") push.formation = "4-4-2";
-      else if (current.formation === "4-2-3-1") push.formation = "4-3-3";
-      else if (current.formation === "3-5-2") push.formation = "4-3-3";
     }
     return push;
   }

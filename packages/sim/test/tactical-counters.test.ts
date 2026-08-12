@@ -278,12 +278,23 @@ describe("체력 — 자리와 전술이 함께 정한다", () => {
   it("90분 소모가 현실적인 범위 안이다 (기준 전술 · 평균 지구력)", () => {
     const p = makeSide("us", 78).starters.find((s) => s.position === "RCM")!.player;
     const full = conditionDrain(p, "RCM", DEFAULT_TACTICS, 90);
-    expect(full).toBeGreaterThan(60);
+    expect(full).toBeGreaterThan(55);
     // 다만 한 경기로 0이 되지는 않는다 — 그건 압박·연전이 겹쳤을 때의 자리다
     expect(full).toBeLessThan(90);
     // 맹렬한 압박으로 90분을 뛰면 혼자서도 한계에 닿는다
     const brutal = conditionDrain(p, "RCM", { ...DEFAULT_TACTICS, pressing: 5, tempo: 5 }, 90);
     expect(brutal).toBeGreaterThan(full * 1.25);
+  });
+
+  it("골키퍼의 풀타임 소모는 낮은 지구력에도 현저히 작다", () => {
+    const base = makeSide("us", 78).starters.find((s) => s.position === "GK")!.player;
+    const keeper = { ...base, attributes: { ...base.attributes, stamina: 30 } };
+    // 가장 무거운 날에 점유율까지 낮아도 한 경기 소모가 20을 넘지 않는다.
+    const drain = conditionDrain(keeper, "GK", DEFAULT_TACTICS, 90, 1.12, 1, 0.35);
+    expect(drain).toBeLessThan(20);
+    expect(drain).toBeLessThan(
+      conditionDrain(keeper, "RCM", DEFAULT_TACTICS, 90, 1.12, 1, 0.35) / 5,
+    );
   });
 
   it("구멍: 다리가 멈춘 선수를 안 빼면 그 라인이 통째로 열린다", () => {

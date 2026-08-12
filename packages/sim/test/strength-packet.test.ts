@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ATTRIBUTE_AXES } from "@story-fm/domain";
 import { buildStrengthPacket, tacticalFit, type SideInput } from "@story-fm/sim";
 import { makeSide } from "./helpers";
 
@@ -15,6 +16,45 @@ describe("buildStrengthPacket", () => {
     const a = buildStrengthPacket(makeSide("str", 80), makeSide("wk", 70));
     const b = buildStrengthPacket(makeSide("str", 80), makeSide("wk", 70));
     expect(a).toEqual(b);
+  });
+
+  it("자유 배치 좌표가 같은 포지션 코드 안에서도 존 기여를 바꾼다", () => {
+    const back = makeSide("str", 80);
+    const front = makeSide("str", 80);
+    const targetBack = back.starters.find((s) => s.position === "RCM")!;
+    const targetFront = front.starters.find((s) => s.position === "RCM")!;
+    for (const axis of ATTRIBUTE_AXES) {
+      targetBack.player.attributes[axis] = 99;
+      targetFront.player.attributes[axis] = 99;
+    }
+    targetBack.point = { x: 50, y: 58 };
+    targetFront.point = { x: 50, y: 30 };
+
+    const backPacket = buildStrengthPacket(back, makeSide("wk", 78));
+    const frontPacket = buildStrengthPacket(front, makeSide("wk", 78));
+    expect(frontPacket.home.zones.attack).toBeGreaterThan(backPacket.home.zones.attack);
+    expect(backPacket.home.zones.defense).toBeGreaterThan(frontPacket.home.zones.defense);
+  });
+
+  it("세부 역할이 실제 개인 전력 계산에 들어간다", () => {
+    const builder = makeSide("str", 80);
+    const stopper = makeSide("str", 80);
+    const tune = (side: SideInput, roleId: string) => {
+      const cb = side.starters.find((s) => s.position === "RCB")!;
+      cb.player.attributes.passing = 99;
+      cb.player.attributes.vision = 99;
+      cb.player.attributes.tackling = 40;
+      cb.roleId = roleId;
+    };
+    tune(builder, "ball-playing-defender");
+    tune(stopper, "no-nonsense-cb");
+
+    const a = buildStrengthPacket(builder, makeSide("wk", 78));
+    const b = buildStrengthPacket(stopper, makeSide("wk", 78));
+    const id = builder.starters.find((s) => s.position === "RCB")!.player.id;
+    expect(a.home.lineup.find((p) => p.id === id)!.effective).not.toBe(
+      b.home.lineup.find((p) => p.id === id)!.effective,
+    );
   });
 
   it("피로가 쌓이면 존 전력이 떨어진다", () => {

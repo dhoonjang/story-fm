@@ -5,8 +5,10 @@ import {
   firstTeamPlayers,
   playersOf,
   simSquadOf,
+  tickOtherClubs,
   type GameState,
 } from "@story-fm/engine";
+import { dailyRecovery } from "@story-fm/sim";
 import { createTestGame, playMockMatch } from "./helpers";
 
 /**
@@ -38,6 +40,20 @@ function topCondition(state: GameState, teamId: string, n: number): number {
 }
 
 describe("타 팀도 매일 회복한다", () => {
+  it("간이 시뮬 팀도 경기 당일에는 훈련일이 아닌 휴식 회복을 받는다", () => {
+    const state = createTestGame(7);
+    const match = state.matches.find(
+      (m) => m.homeTeamId !== state.userTeamId && m.awayTeamId !== state.userTeamId,
+    )!;
+    state.date = match.date;
+    const player = playersOf(state, match.homeTeamId)[0]!;
+    player.state.condition = 50;
+
+    tickOtherClubs(state);
+
+    expect(player.state.condition).toBe(Math.round(50 + dailyRecovery(player, "idle")));
+  });
+
   it("경기 다음 날부터 체력이 오른다 — 깎이기만 하지 않는다", () => {
     const state = createTestGame(7);
     // 첫 라운드를 치른 팀 하나를 잡는다 (우리 팀 제외)
@@ -82,7 +98,9 @@ describe("타 팀도 매일 회복한다", () => {
     );
     const them = rivals.reduce((a, b) => a + b, 0) / rivals.length;
     // 예전엔 이 차이가 20점을 넘었다 (우리 100 · 상대 77)
-    expect(Math.abs(us - them), `우리 ${us.toFixed(1)} vs 상대 ${them.toFixed(1)}`).toBeLessThan(10);
+    expect(Math.abs(us - them), `우리 ${us.toFixed(1)} vs 상대 ${them.toFixed(1)}`).toBeLessThan(
+      10,
+    );
   }, 200_000);
 });
 

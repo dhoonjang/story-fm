@@ -40,6 +40,7 @@ import {
   setCaptain,
   setExploits,
   setLineup,
+  setRegionalPlan,
   setPlayerTactic,
   setPlayerTraining,
   setTactics,
@@ -53,6 +54,7 @@ import {
   TEAM_TALK_OUTCOMES,
   teamName,
   teamProfile,
+  shapeOfTactics,
   userSide,
   withdrawOffer,
   type CardMark,
@@ -110,7 +112,11 @@ function writtenLines(text: string): number {
 }
 
 /** 실모드 GM의 스킬 도구 바인딩 — 엔진 함수를 GameToolSpec으로 감싼다 */
-export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpec[] {
+export function buildGmTools(
+  state: GameState,
+  calls: GmToolCall[],
+  options?: { deferNegotiationIds?: ReadonlySet<string> },
+): GameToolSpec[] {
   const descriptions = skillDescriptions();
   const record = (
     name: string,
@@ -245,7 +251,6 @@ export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpe
       descriptions.set_tactics,
       obj(
         {
-          formation: { type: "string", enum: ["4-4-2", "4-3-3", "4-2-3-1", "3-5-2", "5-4-1"] },
           mentality: int(1, 5),
           defensiveLine: int(1, 5),
           pressing: int(1, 5),
@@ -257,7 +262,6 @@ export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpe
       ),
       z
         .object({
-          formation: z.enum(["4-4-2", "4-3-3", "4-2-3-1", "3-5-2", "5-4-1"]),
           mentality: z.number().int().min(1).max(5),
           defensiveLine: z.number().int().min(1).max(5),
           pressing: z.number().int().min(1).max(5),
@@ -278,6 +282,11 @@ export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpe
       obj(
         {
           playerId: str,
+          point: {
+            type: "object",
+            properties: { x: num(0, 100, "좌우"), y: num(0, 100, "전후") },
+            required: ["x", "y"],
+          },
           position: { type: "string", description: "옮길 자리 (이미 그라운드에 있는 선수만)" },
           role: { type: "string", description: "그 자리의 세부 역할 (FM 역할명)" },
           instruction: {
@@ -294,6 +303,9 @@ export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpe
       ),
       z.object({
         playerId: z.string(),
+        point: z
+          .object({ x: z.number().min(0).max(100), y: z.number().min(0).max(100) })
+          .optional(),
         position: z.string().optional(),
         role: z.string().optional(),
         instruction: z
@@ -321,6 +333,26 @@ export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpe
       ),
       z.object({ targetIds: z.array(z.string().min(1)).min(1).max(4) }),
       (input) => setExploits(state, input),
+    ),
+    wrap(
+      "set_match_plan",
+      descriptions.set_match_plan,
+      obj(
+        {
+          band: { type: "string", enum: ["defense", "midfield", "attack"] },
+          lane: { type: "string", enum: ["left", "center", "right"] },
+          intent: { type: "string", enum: ["overload", "press", "protect", "transition"] },
+          note: { type: "string", description: "감독의 세부 전술을 한 줄로 보존" },
+        },
+        ["band", "lane", "intent", "note"],
+      ),
+      z.object({
+        band: z.enum(["defense", "midfield", "attack"]),
+        lane: z.enum(["left", "center", "right"]),
+        intent: z.enum(["overload", "press", "protect", "transition"]),
+        note: z.string().min(1).max(120),
+      }),
+      (input) => setRegionalPlan(state, input),
     ),
     wrap(
       "set_training",
@@ -540,7 +572,7 @@ export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpe
             type: "string",
             enum: [...NARRATIVE_INCOME_CATEGORIES, ...NARRATIVE_EXPENSE_CATEGORIES],
           },
-          amount: int(1, 500_000_000),
+          amount: int(10_000, 500_000_000),
           note: str,
         },
         ["kind", "category", "amount", "note"],
@@ -548,7 +580,7 @@ export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpe
       z.object({
         kind: z.enum(["income", "expense"]),
         category: z.enum([...NARRATIVE_INCOME_CATEGORIES, ...NARRATIVE_EXPENSE_CATEGORIES]),
-        amount: z.number().min(1),
+        amount: z.number().min(10_000),
         note: z.string().min(1),
       }),
       (input) => applyFinanceEvent(state, input),
@@ -849,7 +881,13 @@ export function buildGmTools(state: GameState, calls: GmToolCall[]): GameToolSpe
         weeklyWage: z.number().min(0).optional(),
         note: z.string().max(200).optional(),
       }),
-      (input) => answerOffer(state, input),
+      (input) =>
+        options?.deferNegotiationIds?.has(input.negotiationId)
+          ? {
+              ok: false,
+              message: "방금 도착한 오퍼는 감독에게 조건을 먼저 보고하고 다음 지시를 기다리세요",
+            }
+          : answerOffer(state, input),
     ),
     wrap(
       "accept_deal",
@@ -927,6 +965,7 @@ const MATCH_TOOL_NAMES = new Set([
   "set_player_tactic",
   "set_tactics",
   "exploit_point",
+  "set_match_plan",
   "team_talk",
   "talk_to_player",
   "get_squad",
@@ -947,6 +986,7 @@ function makeAdvanceMatchTool(
 ): GameToolSpec {
   // 한 턴은 한 구간이다 — 두 번째 호출은 코어가 막는다 (프롬프트가 아니라 규칙)
   let advanced = false;
+  const shapeBefore = shapeOfTactics(state);
   return {
     name: "advance_match",
     description,
@@ -958,6 +998,15 @@ function makeAdvanceMatchTool(
       }
       if (advanced) {
         return { ok: false, message: "이번 턴의 구간은 이미 진행했습니다 — 여기까지 중계하세요" };
+      }
+      const changedFormation =
+        shapeOfTactics(state) !== shapeBefore &&
+        calls.some((call) => call.name === "set_player_tactic");
+      if (changedFormation) {
+        return {
+          ok: false,
+          message: "포메이션 변경은 전술판 검토 뒤 다음 턴에 진행해야 합니다",
+        };
       }
       const before = { ...pending.ledger.score };
       const step = advanceMatchTo(state, pending.ledger.minute + 1);
@@ -1021,10 +1070,14 @@ export function buildMatchTools(
   calls: GmToolCall[],
   goals: GoalMark[] = [],
   cards: CardMark[] = [],
+  options: { progressionOnly?: boolean } = {},
 ): GameToolSpec[] {
   const descriptions = skillDescriptions();
+  const allowed = options.progressionOnly
+    ? new Set(["get_squad", "search_players"])
+    : MATCH_TOOL_NAMES;
   return [
-    ...buildGmTools(state, calls).filter((t) => MATCH_TOOL_NAMES.has(t.name)),
+    ...buildGmTools(state, calls).filter((t) => allowed.has(t.name)),
     makeAdvanceMatchTool(state, calls, goals, cards, descriptions.advance_match),
   ];
 }
