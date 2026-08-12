@@ -98,13 +98,13 @@ describe("mock GM — 유저 여정 시나리오", () => {
     const state = newGame();
     const player = userPlayers(state)[3];
     if (!player) throw new Error("no player");
-    const before = player.state.condition;
+    const before = player.state.form;
     // 이름 조각은 2자 이상이어야 선수를 지목한다 (mock GM detectPlayer) —
     // "벤 화이트"처럼 이름이 한 글자인 선수는 성으로 부른다
     const call = player.name.split(" ").reduce((a, b) => (b.length > a.length ? b : a));
     const turn = runMockGmTurn(state, `${call} 면담 좀 하자`);
     expect(turn.toolCalls.map((c) => c.name)).toContain("talk_to_player");
-    expect(player.state.condition).toBeGreaterThan(before);
+    expect(player.state.form).toBeGreaterThan(before);
   });
 
   it("진행 → 경기일 → 경기 시작 → 계속으로 경기 종료까지 완주한다", () => {

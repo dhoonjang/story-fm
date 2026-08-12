@@ -40,7 +40,7 @@ describe("실모드 턴 중간 실패 — 부분 커밋 재현", () => {
       background,
       attributes: interpretBackgroundHeuristic(background),
     });
-    const moraleBefore = state.players.find((p) => p.teamId === "arsenal")!.state.condition;
+    const moraleBefore = state.players.find((p) => p.teamId === "arsenal")!.state.form;
 
     const stub = streamStub([
       {
@@ -72,7 +72,7 @@ describe("실모드 턴 중간 실패 — 부분 커밋 재현", () => {
 
     // 버그 핵심: throw했는데도 사기가 이미 올라 있다 (롤백 없음)
     expect(calls.map((c) => c.name)).toContain("team_talk");
-    const moraleAfterFailure = state.players.find((p) => p.teamId === "arsenal")!.state.condition;
+    const moraleAfterFailure = state.players.find((p) => p.teamId === "arsenal")!.state.form;
     expect(moraleAfterFailure).not.toBe(moraleBefore);
 
     // turn route(apps/web/app/api/games/[id]/turn/route.ts)의 catch는
@@ -105,7 +105,7 @@ describe("실모드 턴 중간 실패 — 부분 커밋 재현", () => {
     await llm2.runTurn({ system: "sys", history: [], user: "선수단에 한마디 하자", tools });
 
     // 이중 실행 — 같은 팀토크가 두 번 반영됐다
-    expect(state.players.find((p) => p.teamId === "arsenal")!.state.condition).not.toBe(
+    expect(state.players.find((p) => p.teamId === "arsenal")!.state.form).not.toBe(
       moraleAfterFailure,
     );
   });
