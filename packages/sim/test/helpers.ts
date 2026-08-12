@@ -95,7 +95,7 @@ export function makeSide(
     managerTactics?: number;
     tactics?: Partial<TacticsSpec>;
     state?: Partial<GamePlayer["state"]>;
-    /** 전술 적응도 0~99 — 선발 전원에 같은 값을 넣는다 (기본 99 = 온전) */
+    /** 전술 적응도 0~100 — 선발 전원에 같은 값을 넣는다 (기본 99) */
     familiarity?: number;
   } = {},
 ): SideInput {

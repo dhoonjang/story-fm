@@ -1134,7 +1134,7 @@ export function SquadView({
           assignedPosition: code,
           slotOverall: slotOverallOf(p, code, role),
           positionFit: fit,
-          adaptation: adaptationOf(fit, p.familiarity),
+          adaptation: adaptationOf(fit, p.familiarity, code ?? p.assignedPosition ?? p.position),
         };
       }),
     [players, board.occupants, board.points, board.roles],

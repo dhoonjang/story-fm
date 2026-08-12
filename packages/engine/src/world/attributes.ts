@@ -1,5 +1,5 @@
 import type { AttributeAxis, AxisValues, WeightSlot } from "@story-fm/domain";
-import { weightSlotOf } from "@story-fm/domain";
+import { normalizedLogCurve, weightSlotOf } from "@story-fm/domain";
 
 /**
  * 15축 파생 — 능력치 모델의 데이터 계층 (attribute-model.md §8).
@@ -303,11 +303,11 @@ export function agingDelta(axis: AttributeAxis, age: number): number {
 
 /** 잠재력 여유가 이만큼이면 성장 계수가 최대 */
 const ROOM_FULL = 10;
-/** 여유의 감쇠 — 1보다 작아 여유가 조금만 있어도 완전히 멎지는 않는다 */
-const ROOM_CURVE = 0.7;
+/** 여유의 로그 눈금 — 여유가 조금만 있어도 완전히 멎지는 않는다 */
+const ROOM_LOG_SCALE = 2;
 /** 현재 수준의 감쇠가 시작되는 값과 급함 */
 const LEVEL_FLOOR = 60;
-const LEVEL_CURVE = 0.8;
+const LEVEL_LOG_SCALE = 1;
 
 /** 나이대별 성장 배율 — 스물셋까지가 가장 빠르다 */
 function ageGrowthFactor(age: number): number {
@@ -323,9 +323,9 @@ function ageGrowthFactor(age: number): number {
 /**
  * 판정 1점이 이 선수의 이 축에 실제로 남기는 값 (0 이상).
  *
- * 예: 18세 60(잠재력 85) → 1.15 · 24세 75(85) → 0.58 · 27세 82(85) → 0.14 ·
- * 30세 85(88) → 0.08. 유망주는 판정 한 번에 한 칸을 얻고, 전성기를 지난 주전은
- * 열 번을 받아야 한 칸이다.
+ * 예: 18세 60(잠재력 85) → 1.15 · 24세 75(85) → 0.68 · 27세 82(85) → 0.16 ·
+ * 30세 85(88) → 0.09. 유망주는 판정 한 번에 한 칸을 얻고, 전성기를 지난 주전은
+ * 열 번 넘게 받아야 한 칸이다.
  */
 export function attributeGainScale(
   axis: AttributeAxis,
@@ -336,8 +336,8 @@ export function attributeGainScale(
   const room = potential - value;
   if (room <= 0 || value >= 99) return 0;
 
-  const byRoom = Math.min(1, room / ROOM_FULL) ** ROOM_CURVE;
-  const byLevel = Math.min(1, (100 - value) / (100 - LEVEL_FLOOR)) ** LEVEL_CURVE;
+  const byRoom = normalizedLogCurve(room / ROOM_FULL, ROOM_LOG_SCALE);
+  const byLevel = normalizedLogCurve((100 - value) / (100 - LEVEL_FLOOR), LEVEL_LOG_SCALE);
   // 축의 시계 — 이미 꺾이는 축은 훈련해도 덜 붙고, 늦게까지 크는 축은 조금 더 붙는다
   const aging = agingDelta(axis, age);
   const byAxis = aging < 0 ? 0.6 : aging > 0 ? 1.15 : 1;

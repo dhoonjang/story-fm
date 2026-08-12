@@ -1,5 +1,5 @@
 import type { GamePlayer } from "@story-fm/domain";
-import { positionGroupOfPlayer } from "@story-fm/domain";
+import { logRatioFactor, normalizedLogCurve, positionGroupOfPlayer } from "@story-fm/domain";
 import {
   BOOKED_AGAIN_WEIGHT,
   CARDS_PER_MATCH,
@@ -9,7 +9,7 @@ import {
   injuryWeight,
 } from "@story-fm/sim";
 import { makeRng } from "../core/rng";
-import { POSSESSION_EXPONENT, possessionShare, stateModifier } from "@story-fm/sim";
+import { POSSESSION_LOG_SENSITIVITY, possessionShare, stateModifier } from "@story-fm/sim";
 
 /** 시뮬 입력 — 라인업은 전술 배치(TACTIC_ASSIGNMENT)에서 조립해 넘긴다 */
 export interface SimSquad {
@@ -52,9 +52,7 @@ function midfieldStrength(squad: SimSquad): number {
   const mids = squad.starters.filter((p) => positionGroupOfPlayer(p) === "MF");
   const pool = mids.length > 0 ? mids : squad.starters;
   if (pool.length === 0) return 60;
-  return (
-    pool.reduce((s, p) => s + p.attributes.overall * stateModifier(p.state), 0) / pool.length
-  );
+  return pool.reduce((s, p) => s + p.attributes.overall * stateModifier(p.state), 0) / pool.length;
 }
 
 function squadStrength(squad: SimSquad): number {
@@ -85,15 +83,30 @@ function samplePoisson(rng: () => number, lambda: number): number {
  * 분포로 두면 90분 내내 같은 밀도라 추가시간의 결승골 같은 게 나오지 않는다.
  */
 function sampleMinute(rng: () => number): number {
-  const u = rng();
-  return Math.max(1, Math.min(94, Math.ceil(Math.pow(u, 0.88) * 94)));
+  return quickMinuteOf(rng());
+}
+
+/** 골 시각 분포의 로그 눈금 — 전반 약 46%, 후반 약 54%. */
+export const QUICK_MINUTE_LOG_SCALE = 0.2;
+
+/** 0~1 균등 난수를 후반이 조금 더 붐비는 1~94분으로 옮긴다. */
+export function quickMinuteOf(unit: number): number {
+  return Math.max(
+    1,
+    Math.min(94, Math.ceil(normalizedLogCurve(unit, QUICK_MINUTE_LOG_SCALE) * 94)),
+  );
 }
 
 /**
  * 전력비가 득점으로 번역되는 세기 — **리그 순위 분포의 손잡이**다.
  * 리그 경기의 95%가 이 함수를 지나므로 우승 승점·강등권 승점이 여기서 정해진다.
  */
-export const QUICK_SIM_EXPONENT = 4.5;
+export const QUICK_SIM_LOG_SENSITIVITY = 6;
+
+/** 간이 시뮬의 스쿼드 전력비를 기대 득점 계수로 옮긴다. */
+export function quickStrengthFactor(ours: number, theirs: number): number {
+  return logRatioFactor(ours / Math.max(0.01, theirs), QUICK_SIM_LOG_SENSITIVITY);
+}
 /** 기준 기대 득점 — 홈이 조금 높다 (홈 어드밴티지는 전력에도 따로 곱한다) */
 export const HOME_BASE_GOALS = 1.28;
 export const AWAY_BASE_GOALS = 1.14;
@@ -235,8 +248,7 @@ function planSubs(
       // 다들 멀쩡해도 대개는 쓴다 (교체 없는 경기는 실제로 거의 없다)
       if (rng() > SUB_ANYWAY) continue;
     }
-    const outPlayer =
-      tired ?? outfield(squad.starters).filter((p) => !off.has(p.id))[0] ?? null;
+    const outPlayer = tired ?? outfield(squad.starters).filter((p) => !off.has(p.id))[0] ?? null;
     if (!outPlayer) return;
     const replacement = bench
       .filter((p) => !used.has(p.id))
@@ -355,7 +367,7 @@ export interface ExtraTimeResult {
 /**
  * 연장 30분 — **녹아웃에서 90분(2차전제는 합계)이 같을 때만.**
  *
- * 전력 모델은 90분과 같다(`squadStrength` · `QUICK_SIM_EXPONENT`) — 눈금이 갈리면
+ * 전력 모델은 90분과 같다(`squadStrength` · `QUICK_SIM_LOG_SENSITIVITY`) — 눈금이 갈리면
  * 연장에서만 약팀이 살아나거나 죽는다. 다른 것은 길이와 밀도뿐이다.
  *
  * @param neutral 중립 경기장(결승) — 홈 어드밴티지를 주지 않는다
@@ -372,8 +384,8 @@ export function simulateExtraTime(
   const sh = squadStrength(home) * (options.neutral ? 1 : 1.06);
   const sa = squadStrength(away);
   const lambda = {
-    home: HOME_BASE_GOALS * Math.pow(sh / sa, QUICK_SIM_EXPONENT) * EXTRA_TIME_RATE,
-    away: AWAY_BASE_GOALS * Math.pow(sa / sh, QUICK_SIM_EXPONENT) * EXTRA_TIME_RATE,
+    home: HOME_BASE_GOALS * quickStrengthFactor(sh, sa) * EXTRA_TIME_RATE,
+    away: AWAY_BASE_GOALS * quickStrengthFactor(sa, sh) * EXTRA_TIME_RATE,
   };
   const goals = {
     home: Math.min(3, samplePoisson(rng, lambda.home)),
@@ -440,21 +452,15 @@ export function quickSimulate(
   const base = {
     home:
       HOME_BASE_GOALS *
-      Math.pow(sh / sa, QUICK_SIM_EXPONENT) *
-      Math.pow(possession.home / 0.5, POSSESSION_EXPONENT),
+      quickStrengthFactor(sh, sa) *
+      logRatioFactor(possession.home / 0.5, POSSESSION_LOG_SENSITIVITY),
     away:
       AWAY_BASE_GOALS *
-      Math.pow(sa / sh, QUICK_SIM_EXPONENT) *
-      Math.pow(possession.away / 0.5, POSSESSION_EXPONENT),
+      quickStrengthFactor(sa, sh) *
+      logRatioFactor(possession.away / 0.5, POSSESSION_LOG_SENSITIVITY),
   };
-  const lambdaHome = Math.min(
-    3.4,
-    Math.max(0.35, base.home * red.home.own * red.away.opponent),
-  );
-  const lambdaAway = Math.min(
-    3.4,
-    Math.max(0.35, base.away * red.away.own * red.home.opponent),
-  );
+  const lambdaHome = Math.min(3.4, Math.max(0.35, base.home * red.home.own * red.away.opponent));
+  const lambdaAway = Math.min(3.4, Math.max(0.35, base.away * red.away.own * red.home.opponent));
   const goals = {
     home: Math.min(6, samplePoisson(rng, lambdaHome)),
     away: Math.min(6, samplePoisson(rng, lambdaAway)),
@@ -469,9 +475,7 @@ export function quickSimulate(
     const cameOn = new Set(
       subs.filter((s) => s.side === side && s.minute <= minute).map((s) => s.in),
     );
-    const gone = new Set(
-      [...sentOff].filter(([, m]) => m <= minute).map(([id]) => id),
-    );
+    const gone = new Set([...sentOff].filter(([, m]) => m <= minute).map(([id]) => id));
     return [
       ...squad.starters.filter((p) => !wentOff.has(p.id) && !gone.has(p.id)),
       ...(squad.bench ?? []).filter((p) => cameOn.has(p.id) && !gone.has(p.id)),

@@ -1,7 +1,38 @@
 import { describe, expect, it } from "vitest";
 import { ATTRIBUTE_AXES } from "@story-fm/domain";
-import { buildStrengthPacket, tacticalFit, type SideInput } from "@story-fm/sim";
+import {
+  FAMILIARITY_SPREAD,
+  PROFICIENCY_SPREAD,
+  buildStrengthPacket,
+  famFactor,
+  profFactor,
+  tacticalFit,
+  type SideInput,
+} from "@story-fm/sim";
 import { makeSide } from "./helpers";
+
+describe("적응도 전력 팩터", () => {
+  it("포지션 0은 0.1이고 로그 곡선이 1≈0.2, 25≈0.6을 근사한다", () => {
+    expect(PROFICIENCY_SPREAD).toBe(0.9);
+    expect(profFactor(0)).toBe(0.1);
+    expect(profFactor(1)).toBeCloseTo(0.154067);
+    expect(profFactor(25)).toBeCloseTo(0.631337);
+    expect(profFactor(90)).toBeCloseTo(0.973159);
+    expect(profFactor(99)).toBe(1);
+  });
+
+  it("높은 구간은 평평해서 85와 95의 전력 차이는 4%p 안팎이다", () => {
+    expect(profFactor(95) - profFactor(85)).toBeGreaterThan(0);
+    expect(profFactor(95) - profFactor(85)).toBeLessThan(0.05);
+  });
+
+  it("전술은 기본 15%p에 자리 민감도를 곱한다", () => {
+    expect(FAMILIARITY_SPREAD).toBe(0.15);
+    expect(famFactor(0, "CM")).toBeCloseTo(0.79);
+    expect(famFactor(0, "ST")).toBeCloseTo(0.91);
+    expect(famFactor(100, "CM")).toBe(1);
+  });
+});
 
 describe("buildStrengthPacket", () => {
   it("강팀이 모든 존과 기대 득점에서 우위를 가진다", () => {

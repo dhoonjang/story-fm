@@ -5,7 +5,9 @@ import {
   allMatchesDone,
   isSuspended,
   playersOf,
+  quickMinuteOf,
   quickSimulate,
+  quickStrengthFactor,
   seasonYellowsOf,
   simSquadOf,
   type GameState,
@@ -33,6 +35,12 @@ function seasonOf(seed: number): GameState {
 }
 
 describe("골의 분", () => {
+  it("정규화 로그 분포라 전반 46% · 후반 54%에 가깝다", () => {
+    const samples = Array.from({ length: 10_000 }, (_, i) => quickMinuteOf((i + 0.5) / 10_000));
+    const firstHalf = samples.filter((minute) => minute <= 45).length / samples.length;
+    expect(firstHalf).toBeCloseTo(0.46, 2);
+  });
+
   it("득점자와 같은 길이로, 시간 순으로 남는다", () => {
     const state = createTestGame(3);
     for (let i = 0; i < 60; i++) {
@@ -62,6 +70,13 @@ describe("골의 분", () => {
     for (const m of scoring) {
       expect(m.result!.goalMinutes, m.id).toHaveLength(m.result!.scorers.length);
     }
+  });
+});
+
+describe("간이 시뮬 전력 로그", () => {
+  it("대등하면 1이고 반대 전력비끼리 역수다", () => {
+    expect(quickStrengthFactor(75, 75)).toBe(1);
+    expect(quickStrengthFactor(90, 75) * quickStrengthFactor(75, 90)).toBeCloseTo(1, 10);
   });
 });
 
@@ -98,9 +113,7 @@ describe("카드·퇴장", () => {
     const others = state.players.filter(
       (p) => p.teamId !== state.userTeamId && p.teamId !== "free",
     );
-    const booked = state.bookings.filter((b) =>
-      others.some((p) => p.id === b.gamePlayerId),
-    );
+    const booked = state.bookings.filter((b) => others.some((p) => p.id === b.gamePlayerId));
     expect(booked.length).toBeGreaterThan(500);
     // 누적 정지도 남의 팀에 걸린다
     const theirSuspensions = state.suspensions.filter((s) =>

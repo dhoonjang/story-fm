@@ -1,5 +1,5 @@
 import type { PacketPlayer, StrengthPacket } from "@story-fm/domain";
-import { anchorOf, PITCH_BANDS } from "@story-fm/domain";
+import { anchorOf, logRatioFactor, PITCH_BANDS } from "@story-fm/domain";
 
 /**
  * 판세 격자 — **세 전선을 좌·중·우로 한 번 더 쪼갠 것.**
@@ -37,6 +37,9 @@ const BAND_Y: Record<GridBand, number> = PITCH_BANDS.center;
  * 좌우 칸 간격이 33이라, 옆 칸에는 절반쯤 흘러가고 대각선 끝까지는 닿지 않는다.
  */
 const REACH = 46;
+
+/** 지역 공략 효율의 로그 민감도 — 최종 계수는 ±4%로 한 번 더 제한한다. */
+export const REGIONAL_LOG_SENSITIVITY = 0.12;
 
 /**
  * 사람이 적은 칸의 감점 폭 — 최대 이만큼만 깎는다.
@@ -159,6 +162,6 @@ export function regionalAttackFactor(grid: readonly GridCell[], side: "home" | "
   // 상대보다 더 정확히 약한 레인을 찾은 몫만 서로 반대 방향으로 붙는다.
   const ours = routeQuality(side);
   const theirs = routeQuality(side === "home" ? "away" : "home");
-  const factor = Math.pow(ours / Math.max(0.01, theirs), 0.12);
+  const factor = logRatioFactor(ours / Math.max(0.01, theirs), REGIONAL_LOG_SENSITIVITY);
   return Math.max(0.96, Math.min(1.04, factor));
 }

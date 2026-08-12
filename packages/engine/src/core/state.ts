@@ -613,7 +613,17 @@ export function squadFamiliarity(state: GameState, teamId: string): number {
  * 계산해야 하는데, 웹은 엔진(`node:fs` 의존)을 값으로 import할 수 없다.
  * 여기서 다시 내보내 엔진 소비자는 경로를 바꾸지 않는다.
  */
-export { ADAPTATION_WEIGHTS, adaptationOf } from "@story-fm/domain";
+export {
+  ADAPTATION_IMPACT,
+  PROFICIENCY_FACTOR_FLOOR,
+  PROFICIENCY_FLOOR,
+  PROFICIENCY_LOG_SCALE,
+  PROFICIENCY_MAX,
+  PROFICIENCY_MIN,
+  adaptationOf,
+  adaptationWeightsOf,
+  proficiencyReadiness,
+} from "@story-fm/domain";
 
 /**
  * 이 선수가 그 포지션에서 갖는 적응도. 규칙은 domain의 `positionProficiency` 하나뿐

@@ -69,7 +69,7 @@ export interface PacketPlayer {
   fit: {
     /** 포지션 적응도 0~99 */
     position: number;
-    /** 전술 적응도 0~99 */
+    /** 전술 적응도 0~100 */
     tactical: number;
     /** 이 자리가 전술 적응에 얼마나 민감한가 (0.6~1.4) */
     sensitivity: number;

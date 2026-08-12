@@ -1343,6 +1343,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         adaptation: adaptationOf(
           proficiencyAt(p, assignedSlot ?? natural.position),
           assignment?.familiarity ?? FAMILIARITY_BASELINE,
+          assignedSlot ?? natural.position,
         ),
         instruction: assignment?.instruction ?? null,
         isCaptain: p.isCaptain,

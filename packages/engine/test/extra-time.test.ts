@@ -387,8 +387,14 @@ describe("유저 경기의 연장 (match-sim.md §2)", () => {
       });
       if (!match.result?.aet) continue;
       runs.push({ match, pair, fatigueAtExtra, fatigueAtEnd, subInExtra });
-      // 갈린 경기와 승부차기로 간 경기를 둘 다 볼 만큼만 모은다
-      if (runs.length >= 6) break;
+      // 갈린 경기와 승부차기로 간 경기가 둘 다 나올 때까지 결정적 채널을 넓힌다
+      const hasDecided = runs.some(
+        (run) => run.match.result!.homeGoals !== run.match.result!.awayGoals,
+      );
+      const hasDraw = runs.some(
+        (run) => run.match.result!.homeGoals === run.match.result!.awayGoals,
+      );
+      if (runs.length >= 3 && hasDecided && hasDraw) break;
     }
     // 이 아래 검증들이 아무것도 증명하지 못하는 상태를 그냥 지나치지 않는다
     expect(runs.length, "연장까지 가는 경기를 찾지 못했습니다").toBeGreaterThanOrEqual(3);
@@ -455,7 +461,7 @@ describe("유저 경기의 연장 (match-sim.md §2)", () => {
   it("리그 경기는 비겨도 90분에 끝난다 — 연장 표식이 붙지 않는다", () => {
     const state = createTestGame(23);
     let draws = 0;
-    for (let round = 900; round < 912; round++) {
+    for (let round = 900; round < 916; round++) {
       for (const p of playersOf(state, "arsenal")) p.state.condition = 100;
       const match: MatchRecord = {
         id: `m-league-${state.season}-r${round}`,

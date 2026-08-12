@@ -17,9 +17,12 @@ import type {
   ZoneStrength,
 } from "@story-fm/domain";
 import {
+  ADAPTATION_IMPACT,
   FAMILIARITY_MAX,
+  logRatioFactor,
   positionGroupOf,
   positionGroupOfPlayer,
+  proficiencyReadiness,
   roleFit,
   tacticalSensitivityOf,
 } from "@story-fm/domain";
@@ -112,18 +115,18 @@ function slotGroup(slot: LineupSlot): PositionGroup {
 }
 
 /**
- * 포지션 적응도의 감점 폭 — 90+면 온전, 바닥이면 이만큼 깎인다.
+ * 포지션 적응도의 전력 곡선 — 0은 0.1, 1은 약 0.15, 25는 약 0.63, 99면 온전하다.
  *
  * **12%p였을 때는 자리를 몰라도 거의 손해가 없었다.** 그 폭으로는 `roleFit`
  * 차이 몇 점을 못 이겨서, 배치 최적화가 브루누 페르난데스(주 AM)를 수비형
  * 미드필더에 세우고도 팀 합이 더 높다고 계산했다 — 실제 축구에서 10번을 6번에
- * 두는 대가는 그보다 훨씬 크다. 30%p면 적응도 40인 자리는 0.75가 되어,
- * "이 선수가 좋다"만으로는 낯선 자리를 정당화할 수 없다.
+ * 두는 대가는 그보다 훨씬 크다. 지금은 정규화 로그 곡선으로 낮은 값은 크게
+ * 벌리고 85→95 같은 높은 구간의 차이는 4%p 안에 묶는다.
  *
  * 전술 적응도(`FAMILIARITY_SPREAD` 15%p)보다 큰 것이 맞다 — 전술은 훈련으로
  * 몇 주면 익히지만 자리는 커리어가 만든다.
  */
-export const PROFICIENCY_SPREAD = 0.3;
+export const PROFICIENCY_SPREAD = ADAPTATION_IMPACT.position;
 
 /**
  * 포지션 적응도 팩터 — **전력에 곱해지는 단일 규칙**.
@@ -131,11 +134,11 @@ export const PROFICIENCY_SPREAD = 0.3;
  * 고른 자리"와 "경기가 실제로 계산하는 자리"가 조용히 갈린다.
  */
 export function profFactor(proficiency: number): number {
-  return 1 - PROFICIENCY_SPREAD + Math.min(1, Math.max(0, proficiency) / 90) * PROFICIENCY_SPREAD;
+  return proficiencyReadiness(proficiency);
 }
 
 /** 전술 적응도의 기본 감점 폭 — 자리 민감도가 이 폭을 키우거나 줄인다 */
-const FAMILIARITY_SPREAD = 0.15;
+export const FAMILIARITY_SPREAD = ADAPTATION_IMPACT.tactical;
 
 /**
  * 전술 적응도 팩터 — **개인 값**에 **자리 민감도**를 곱해 적용한다.
@@ -145,7 +148,7 @@ const FAMILIARITY_SPREAD = 0.15;
  * 오는지 알 수 없었다. 이제 각자 자기 적응도만큼 깎이고, **중원은 크게 최전방은
  * 작게** 깎인다 (`TACTICAL_SENSITIVITY` — 같은 어긋남이라도 자리마다 대가가 다르다).
  *
- * 적응도 99면 어느 자리든 1.0. 40이면 중원(1.4) 0.875 · 스트라이커(0.6) 0.946.
+ * 적응도 100이면 어느 자리든 1.0. 40이면 중원(1.4) 0.874 · 스트라이커(0.6) 0.946.
  */
 export function famFactor(familiarity: number, position: string): number {
   const gap = 1 - Math.min(1, Math.max(0, familiarity) / FAMILIARITY_MAX);
@@ -194,11 +197,14 @@ export function tacticalFit(managerTactics: number): number {
  * 받으면 순손실이 난다. 감독 전술 능력이 자라거나 팀이 전술에 익숙해지면 같은
  * 지시가 점점 더 통한다 — 그게 감독 성장의 체감이다.
  *
- * @param squadFamiliarity 선발 평균 전술 적응도 0~99. **지시는 팀 전체가 함께
+ * @param squadFamiliarity 선발 평균 전술 적응도 0~100. **지시는 팀 전체가 함께
  *   소화하는 것**이라 여기만은 평균이 맞다 — 개인 전력은 각자 자기 값으로 깎인다.
  */
-export function instructionUptake(managerTactics: number, squadFamiliarity = 99): number {
-  const fam = Math.max(0, Math.min(1, squadFamiliarity / 99));
+export function instructionUptake(
+  managerTactics: number,
+  squadFamiliarity = FAMILIARITY_MAX,
+): number {
+  const fam = Math.max(0, Math.min(1, squadFamiliarity / FAMILIARITY_MAX));
   return round2(0.45 + 0.35 * (managerTactics / 99) + 0.2 * fam);
 }
 
@@ -368,11 +374,11 @@ export const POSSESSION_MAX = 0.65;
  * 점유가 기대 득점에 실리는 세기.
  *
  * 중원 우위는 **공을 쥐는 것**으로 나타나고, 공을 쥔 팀이 더 자주 상대 문 앞에
- * 선다. 지수를 작게 두는 이유는 이 축이 이미 두 번 세어질 여지가 있어서다 —
+ * 선다. 로그 민감도를 작게 두는 이유는 이 축이 이미 두 번 세어질 여지가 있어서다 —
  * 미드필더의 질은 XI 평균(질 축)에도, 존 가중 평균(판 축)에도 들어 있다.
  * 여기서 더하는 것은 **점유라는 별개의 사실**이 만드는 몫이다.
  */
-export const POSSESSION_EXPONENT = 0.5;
+export const POSSESSION_LOG_SENSITIVITY = 0.5;
 
 /**
  * 이 팀이 공을 쥐는 비율 — 중원 우위가 정한다.
@@ -385,16 +391,15 @@ export function possessionShare(midfield: number, oppMidfield: number): number {
 
 /** 대등한 두 팀의 기대 득점 (홈·원정 계수 전) */
 export const BASE_EXPECTED_GOALS = 1.35;
-/** 선수의 질이 득점으로 번역되는 세기 — 간이 시뮬(`QUICK_SIM_EXPONENT`)과 같은 자리 */
-export const QUALITY_EXPONENT = 5.5;
+/** 선수의 질이 득점으로 번역되는 세기 — 간이 시뮬의 로그 민감도와 같은 자리 */
+export const QUALITY_LOG_SENSITIVITY = 8;
 /**
  * 판의 우열(전술·상성·개인 지시가 실린 존 매치업)이 그 위를 기울이는 세기.
  *
- * 존의 폭이 `TACTIC_SWING`으로 묶여 있으므로 지수를 크게 둬도 뒤집히지 않는다 —
- * 양쪽이 반대로 극단을 잡으면 최대 1.6배까지 갈리고, 그건 10점 차 스쿼드의
- * 질 우위(1.9배)보다 작다. **전술이 판을 흔들되 선수를 대신하지는 못한다.**
+ * 존의 폭이 `TACTIC_SWING`으로 묶여 있고 로그 반응도 극단을 누른다.
+ * **전술이 판을 흔들되 선수를 대신하지는 못한다.**
  */
-export const MATCHUP_EXPONENT = 1.3;
+export const MATCHUP_LOG_SENSITIVITY = 1.3;
 /**
  * 90분에 이보다 적게/많이 만들지는 않는다.
  * ⚠️ 하한은 **이변의 여지**다 — 0.45로 두면 18점 차 미스매치에서 약팀이 60경기를
@@ -586,8 +591,8 @@ function frontlinePace(slots: LineupSlot[]): number {
 }
 
 /**
- * 홈 어드밴티지 — 기대 득점에만 곱한다. 존 전력에 곱하면 xg 지수(1.6제곱)에
- * 증폭돼 과해진다. 결승 등 중립 경기는 적용하지 않는다.
+ * 홈 어드밴티지 — 기대 득점에만 곱한다. 존 전력에 곱하면 로그 비율 계수에서
+ * 다시 반영돼 과해진다. 결승 등 중립 경기는 적용하지 않는다.
  */
 const HOME_XG = 1.08;
 const AWAY_XG = 0.95;
@@ -789,8 +794,8 @@ export function buildStrengthPacket(
    *
    * 그래서 축을 둘로 나눈다: **질**(XI 유효 전력의 비 — 간이 시뮬이 쓰는 것과
    * 같은 축)이 기본을 정하고, **판**(존 매치업 — 전술·상성이 실린 값)이 그 위를
-   * 기울인다. 질의 지수가 크고 판의 지수가 작아서, 전술은 판을 흔들되 선수를
-   * 대신하지는 못한다.
+   * 기울인다. 질의 로그 민감도가 크고 판의 민감도가 작아서, 전술은 판을 흔들되
+   * 선수를 대신하지는 못한다.
    */
   const qualityOf = (side: SidePacket) =>
     side.lineup.length === 0
@@ -813,9 +818,9 @@ export function buildStrengthPacket(
         Math.max(
           MIN_EXPECTED_GOALS,
           BASE_EXPECTED_GOALS *
-            Math.pow(quality / oppQuality, QUALITY_EXPONENT) *
-            Math.pow(atk / def, MATCHUP_EXPONENT) *
-            Math.pow(share / 0.5, POSSESSION_EXPONENT) *
+            logRatioFactor(quality / oppQuality, QUALITY_LOG_SENSITIVITY) *
+            logRatioFactor(atk / def, MATCHUP_LOG_SENSITIVITY) *
+            logRatioFactor(share / 0.5, POSSESSION_LOG_SENSITIVITY) *
             venue,
         ),
       ),

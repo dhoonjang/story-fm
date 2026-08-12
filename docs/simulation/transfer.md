@@ -8,12 +8,12 @@
 
 ## 1. 협상의 갈래
 
-| 방향 | 시작 | 비고 |
-| --- | --- | --- |
-| 영입 | `send_offer` (kind=buy) | 이적료 + 주급 제시 |
-| 매각 | 이적 리스트 등재(`TRANSFER_LIST`) · 특정 구단 제안(`offer_player`) · AI가 먼저 노림 | 리스트 등재 선수는 하루 34%로 오퍼가 붙고 호가가 비쌀수록 더디다 |
-| 재계약 | `openRenewal` | 만료 전 언제든 |
-| 임대 | `send_offer` kind=loan(빌려옴) / loan_out(빌려줌) | **양쪽 다 흥정** — 같은 협상 테이블 |
+| 방향   | 시작                                                                                | 비고                                                             |
+| ------ | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| 영입   | `send_offer` (kind=buy)                                                             | 이적료 + 주급 제시                                               |
+| 매각   | 이적 리스트 등재(`TRANSFER_LIST`) · 특정 구단 제안(`offer_player`) · AI가 먼저 노림 | 리스트 등재 선수는 하루 34%로 오퍼가 붙고 호가가 비쌀수록 더디다 |
+| 재계약 | `openRenewal`                                                                       | 만료 전 언제든                                                   |
+| 임대   | `send_offer` kind=loan(빌려옴) / loan_out(빌려줌)                                   | **양쪽 다 흥정** — 같은 협상 테이블                              |
 
 - 오퍼 판정은 누가 답할 차례인지 협상이 안다(`respond_offer`).
 - **매각의 역제안은 깎아 부르는 것**(시장가 55% 이상 · 우리 호가 미만).
@@ -52,8 +52,8 @@
 **가격의 기준점은 상수 하나다** — `MARKET_VALUE_AT_84`(84 OVR 정점기 선수의
 시장가 £65M)이고 곡선 `(ovr−55)^2.6` 전체가 여기에 비례한다.
 
-| OVR | 90 | 86 | 84 | 80 | 76 | 72 | 68 | 64 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| OVR    | 90    | 86   | 84   | 80   | 76   | 72   | 68  | 64  |
+| ------ | ----- | ---- | ---- | ---- | ---- | ---- | --- | --- |
 | 시장가 | £106M | £77M | £65M | £44M | £28M | £16M | £8M | £3M |
 
 이 눈금은 **스쿼드 가치**에 맞춘 것이다(아스날 40인 £1,331M ≈ 실제 £1.1bn대,
@@ -106,7 +106,7 @@ tick이 매일 시장을 굴린다 — 1부 클럽당 시즌 이적 3.4건 · �
   방향 유출 — 파는 것과 임대 수취는 그대로). 사우디도 현금 바닥을 지킨다.
 - ⚠️ **계획은 주 1회, 실행은 날짜별로 흩는다**(`state.aiDeals`) — 실행 시점에
   재검사하므로 그사이 다치거나 이미 옮긴 딜은 조용히 무산된다. 마감 주에는
-  날짜가 뒤로 쏠린다(제곱 분포) — 마감일에 54건이 몰린다.
+  `N(u,8)=ln(1+8u)/ln(9)` 분포로 날짜가 뒤로 쏠린다 — 마감일에 거래가 몰린다.
 - **재정 3축을 함께 본다** — 이적 예산 · 현금 바닥 · **주급 여력**(한도의
   1.1배). 파산의 실제 경로는 매주 나가는 주급이다.
 - 하루 스쿼드 색인(`indexSquads`)이 없으면 tick이 37→86ms로 뛴다.
@@ -162,12 +162,12 @@ tick이 매일 시장을 굴린다 — 1부 클럽당 시즌 이적 3.4건 · �
 
 ## 코드 위치
 
-| 무엇 | 어디 |
-| --- | --- |
-| 시장가·딜 확률·근거 | `packages/engine/src/market/market.ts` |
-| 협상·오퍼·재계약·메디컬 실행 | `market/negotiation.ts` · `market/medical.ts` |
-| 설득 | `market/persuasion.ts` (+ `domain/persuasion.ts`) |
-| AI 시장·무소속·AI 재계약 | `market/ai-market.ts` · `market/departures.ts` |
-| 감독 시장·유저 경질 | `market/manager-market.ts` |
-| 주급 | `packages/engine/src/world/wages.ts` |
-| 등록 명단 | `packages/domain/src/squad-rules.ts` · `engine/src/squad/registration.ts` |
+| 무엇                         | 어디                                                                      |
+| ---------------------------- | ------------------------------------------------------------------------- |
+| 시장가·딜 확률·근거          | `packages/engine/src/market/market.ts`                                    |
+| 협상·오퍼·재계약·메디컬 실행 | `market/negotiation.ts` · `market/medical.ts`                             |
+| 설득                         | `market/persuasion.ts` (+ `domain/persuasion.ts`)                         |
+| AI 시장·무소속·AI 재계약     | `market/ai-market.ts` · `market/departures.ts`                            |
+| 감독 시장·유저 경질          | `market/manager-market.ts`                                                |
+| 주급                         | `packages/engine/src/world/wages.ts`                                      |
+| 등록 명단                    | `packages/domain/src/squad-rules.ts` · `engine/src/squad/registration.ts` |
