@@ -44,16 +44,44 @@ describe("골의 분", () => {
   it("득점자와 같은 길이로, 시간 순으로 남는다", () => {
     const state = createTestGame(3);
     for (let i = 0; i < 60; i++) {
-      const r = quickSimulate(
-        simSquadOf(state, "mancity"),
-        simSquadOf(state, "hull"),
-        900 + i,
-        `min:${i}`,
-      );
+      const squads = { home: simSquadOf(state, "mancity"), away: simSquadOf(state, "hull") };
+      const r = quickSimulate(squads.home, squads.away, 900 + i, `min:${i}`);
       expect(r.goalMinutes).toHaveLength(r.scorers.length);
+      expect(r.assists).toHaveLength(r.scorers.length);
+      expect(r.homeShots).toBeGreaterThanOrEqual(r.homeGoals);
+      expect(r.awayShots).toBeGreaterThanOrEqual(r.awayGoals);
       for (const m of r.goalMinutes) {
         expect(m).toBeGreaterThanOrEqual(1);
         expect(m).toBeLessThanOrEqual(94);
+      }
+      const activeIds = (side: "home" | "away", minute: number) => {
+        // 분 단위 기록에는 같은 분 안의 선후가 없다. 같은 분 교체는 나간 선수와
+        // 들어온 선수 둘 다 득점 장면 후보일 수 있고, 퇴장도 그 장면 뒤일 수 있다.
+        const sideSubs = r.subs.filter((sub) => sub.side === side);
+        const off = new Set(sideSubs.filter((sub) => sub.minute < minute).map((sub) => sub.out));
+        const on = new Set(sideSubs.filter((sub) => sub.minute <= minute).map((sub) => sub.in));
+        const red = new Set(
+          r.cards
+            .filter((card) => card.side === side && card.card === "red" && card.minute < minute)
+            .map((card) => card.playerId),
+        );
+        return new Set(
+          [
+            ...squads[side].starters
+              .filter((player) => !off.has(player.id))
+              .map((player) => player.id),
+            ...(squads[side].bench ?? [])
+              .filter((player) => on.has(player.id))
+              .map((player) => player.id),
+          ].filter((id) => !red.has(id)),
+        );
+      };
+      for (let goal = 0; goal < r.scorers.length; goal++) {
+        const [side, scorerId] = r.scorers[goal]!.split(":") as ["home" | "away", string];
+        const active = activeIds(side, r.goalMinutes[goal]!);
+        expect(active.has(scorerId)).toBe(true);
+        const assistId = r.assists[goal]?.split(":")[1];
+        if (assistId) expect(active.has(assistId)).toBe(true);
       }
       // 장부는 시간 순이다 — 화면이 "23′ 손흥민"을 순서대로 읽는다
       const sorted = [...r.goalMinutes].sort((a, b) => a - b);

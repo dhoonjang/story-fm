@@ -166,6 +166,8 @@ export function resolveExtraTime(state: GameState, decider: MatchRecord, channel
   result.aet = true;
   result.homeGoals += extra.homeGoals;
   result.awayGoals += extra.awayGoals;
+  result.homeShots = (result.homeShots ?? 0) + extra.homeShots;
+  result.awayShots = (result.awayShots ?? 0) + extra.awayShots;
   result.homeXg = (result.homeXg ?? 0) + extra.homeXg;
   result.awayXg = (result.awayXg ?? 0) + extra.awayXg;
   result.homeExpectedGoals = (result.homeExpectedGoals ?? 0) + extra.homeExpectedGoals;

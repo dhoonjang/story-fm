@@ -19,7 +19,6 @@ import {
   type LineupSlot,
 } from "@story-fm/sim";
 import { makeRng } from "../core/rng";
-import { POSSESSION_LOG_SENSITIVITY, possessionShare, stateModifier } from "@story-fm/sim";
 
 /** 시뮬 입력 — 라인업은 전술 배치(TACTIC_ASSIGNMENT)에서 조립해 넘긴다 */
 export interface SimSquad {
@@ -51,32 +50,6 @@ export interface SimSquad {
  * 지금은 **카드·퇴장·교체·골의 분**까지 여기서 나오고 정지는 같은 문(`discipline.ts`)을
  * 지난다. 다른 것은 해상도뿐이다 — 이쪽은 사건을 한 번에 뽑고, 저쪽은 분 단위로 민다.
  */
-
-/**
- * 스쿼드 전력 — **구간 시뮬과 같은 잣대**로 잰다: 능력치 × 상태 보정.
- *
- * 예전엔 `overall` 평균만 봤다. 그러면 남의 팀은 지치든 폼이 바닥이든 늘 같은
- * 전력이라, 로테이션도 폼도 AI 경기 결과에 닿지 않았다 — 리그의 95%가 상태를
- * 모르는 채 굴러갔다.
- */
-/**
- * 중원 전력 — 점유를 정한다. 미드필더가 없는 명단(부상 등)은 전체 평균으로 본다.
- */
-function midfieldStrength(squad: SimSquad): number {
-  const mids = squad.starters.filter((p) => positionGroupOfPlayer(p) === "MF");
-  const pool = mids.length > 0 ? mids : squad.starters;
-  if (pool.length === 0) return 60;
-  return pool.reduce((s, p) => s + p.attributes.overall * stateModifier(p.state), 0) / pool.length;
-}
-
-function squadStrength(squad: SimSquad): number {
-  if (squad.starters.length === 0) return 60;
-  const total = squad.starters.reduce(
-    (s, p) => s + p.attributes.overall * stateModifier(p.state),
-    0,
-  );
-  return total / squad.starters.length;
-}
 
 /**
  * 사건의 분 — **후반이 조금 더 붐빈다.**
@@ -151,6 +124,8 @@ function rollCards(
   rng: () => number,
   squad: SimSquad,
   side: "home" | "away",
+  plannedSubs: readonly QuickSub[],
+  validSubs: QuickSub[],
   into: QuickCard[],
 ): void {
   const count = samplePoisson(rng, CARDS_PER_MATCH / 2);
@@ -161,8 +136,21 @@ function rollCards(
   const minutes = Array.from({ length: count }, () => sampleMinute(rng)).sort((a, b) => a - b);
   const yellows = new Set<string>();
   const sentOff = new Set<string>();
+  const pendingSubs = plannedSubs
+    .filter((sub) => sub.side === side)
+    .sort((a, b) => a.minute - b.minute);
+  let nextSub = 0;
+  const applySubsUntil = (minute: number) => {
+    while (nextSub < pendingSubs.length && pendingSubs[nextSub]!.minute <= minute) {
+      const sub = pendingSubs[nextSub++]!;
+      if (!sentOff.has(sub.out)) validSubs.push(sub);
+    }
+  };
   for (const minute of minutes) {
-    const pool = outfield(squad.starters).filter((p) => !sentOff.has(p.id));
+    applySubsUntil(minute);
+    const pool = outfield(playersAt(squad, side, minute, validSubs)).filter(
+      (p) => !sentOff.has(p.id),
+    );
     const booked = weightedPick(
       rng,
       pool,
@@ -183,20 +171,7 @@ function rollCards(
     yellows.add(booked.id);
     into.push({ side, playerId: booked.id, card: "yellow", minute });
   }
-}
-
-/**
- * 퇴장의 대가 — 남은 시간만큼 자기 기대 득점이 줄고 상대의 것이 는다.
- * 실측은 한 명이 빠진 팀이 남은 시간 동안 득점 0.7배·실점 1.35배쯤이다.
- */
-const RED_OWN = 0.3;
-const RED_OPPONENT = 0.35;
-
-function redFactor(cards: readonly QuickCard[], side: "home" | "away") {
-  const red = cards.find((c) => c.side === side && c.card === "red");
-  if (!red) return { own: 1, opponent: 1 };
-  const rest = Math.max(0, (90 - red.minute) / 90);
-  return { own: 1 - RED_OWN * rest, opponent: 1 + RED_OPPONENT * rest };
+  applySubsUntil(Infinity);
 }
 
 /**
@@ -216,13 +191,12 @@ function planSubs(
   rng: () => number,
   squad: SimSquad,
   side: "home" | "away",
-  sentOff: ReadonlySet<string>,
   into: QuickSub[],
 ): void {
   const bench = (squad.bench ?? []).filter((p) => positionGroupOfPlayer(p) !== "GK");
   if (bench.length === 0) return;
   const used = new Set<string>();
-  const off = new Set<string>(sentOff);
+  const off = new Set<string>();
   // ⚠️ 한도는 **이 팀의 교체 수**로 센다 — 공용 배열 길이로 세면 홈이 다 쓰고
   // 원정은 한 명도 못 바꾼다 (실제로 그랬다: 원정 교체 0)
   let made = 0;
@@ -322,6 +296,8 @@ export interface QuickResult {
   injuries: string[];
   /** 공을 쥔 비율 — 호출부가 체력 정산에 쓴다 (공 없는 팀이 더 뛴다) */
   possession: { home: number; away: number };
+  homeShots: number;
+  awayShots: number;
   homeXg: number;
   awayXg: number;
   homeExpectedGoals: number;
@@ -338,6 +314,7 @@ interface QuickShot {
   side: "home" | "away";
   minute: number;
   shooterId: string;
+  assistId?: string;
   xg: number;
   goalProbability: number;
   outcome: "goal" | "saved" | "blocked" | "off_target";
@@ -370,6 +347,27 @@ function slotsAt(
   });
 }
 
+/** 그 분에 실제로 그라운드에 있는 선수 — 카드·슈팅·도움이 함께 쓴다. */
+function playersAt(
+  squad: SimSquad,
+  side: "home" | "away",
+  minute: number,
+  subs: readonly QuickSub[],
+  sentOffAt: ReadonlyMap<string, number> = new Map(),
+): GamePlayer[] {
+  const sideSubs = subs.filter((sub) => sub.side === side && sub.minute <= minute);
+  const wentOff = new Set(sideSubs.map((sub) => sub.out));
+  const cameOn = new Set(sideSubs.map((sub) => sub.in));
+  return [
+    ...squad.starters.filter(
+      (player) => !wentOff.has(player.id) && (sentOffAt.get(player.id) ?? Infinity) > minute,
+    ),
+    ...(squad.bench ?? []).filter(
+      (player) => cameOn.has(player.id) && (sentOffAt.get(player.id) ?? Infinity) > minute,
+    ),
+  ];
+}
+
 function shotTimeline(
   rng: () => number,
   squads: { home: SimSquad; away: SimSquad },
@@ -382,28 +380,15 @@ function shotTimeline(
 ): { shots: QuickShot[]; possession: { home: number; away: number } } {
   const sentOff = new Map<string, number>();
   for (const card of cards) if (card.card === "red") sentOff.set(card.playerId, card.minute);
-  const onPitchAt = (side: "home" | "away", minute: number): GamePlayer[] => {
-    const squad = squads[side];
-    const wentOff = new Set(
-      subs.filter((sub) => sub.side === side && sub.minute <= minute).map((sub) => sub.out),
-    );
-    const cameOn = new Set(
-      subs.filter((sub) => sub.side === side && sub.minute <= minute).map((sub) => sub.in),
-    );
-    const gone = new Set([...sentOff].filter(([, at]) => at <= minute).map(([id]) => id));
-    return [
-      ...squad.starters.filter((player) => !wentOff.has(player.id) && !gone.has(player.id)),
-      ...(squad.bench ?? []).filter((player) => cameOn.has(player.id) && !gone.has(player.id)),
-    ];
-  };
 
   const boundaries = new Set<number>([from, to]);
   if (from < 45 && to > 45) boundaries.add(45);
-  for (const card of cards) if (card.card === "red" && card.minute > from && card.minute < to) boundaries.add(card.minute);
+  for (const card of cards)
+    if (card.card === "red" && card.minute > from && card.minute < to) boundaries.add(card.minute);
   for (const sub of subs) if (sub.minute > from && sub.minute < to) boundaries.add(sub.minute);
   const times = [...boundaries].sort((a, b) => a - b);
   const shots: QuickShot[] = [];
-  let weightedPossession = { home: 0, away: 0 };
+  const weightedPossession = { home: 0, away: 0 };
   let totalMinutes = 0;
 
   for (let index = 0; index < times.length - 1; index++) {
@@ -411,17 +396,20 @@ function shotTimeline(
     const end = times[index + 1]!;
     const minutes = end - start;
     if (minutes <= 0) continue;
-    const intervalDensity =
-      from === 0 && to === 94 ? (end <= 45 ? 0.92 : 48.6 / 49) : density;
+    const intervalDensity = from === 0 && to === 94 ? (end <= 45 ? 0.92 : 48.6 / 49) : density;
     const active = {
-      home: onPitchAt("home", start + Number.EPSILON),
-      away: onPitchAt("away", start + Number.EPSILON),
+      home: playersAt(squads.home, "home", start, subs, sentOff),
+      away: playersAt(squads.away, "away", start, subs, sentOff),
     };
     const packet = buildStrengthPacket(
       {
         teamId: squads.home.teamId,
         teamName: squads.home.teamId,
-        starters: slotsAt(squads.home, active.home, subs.filter((sub) => sub.side === "home")),
+        starters: slotsAt(
+          squads.home,
+          active.home,
+          subs.filter((sub) => sub.side === "home"),
+        ),
         bench: [],
         tactics: squads.home.tactics ?? DEFAULT_TACTICS,
         managerTactics: squads.home.managerTactics ?? 65,
@@ -429,7 +417,11 @@ function shotTimeline(
       {
         teamId: squads.away.teamId,
         teamName: squads.away.teamId,
-        starters: slotsAt(squads.away, active.away, subs.filter((sub) => sub.side === "away")),
+        starters: slotsAt(
+          squads.away,
+          active.away,
+          subs.filter((sub) => sub.side === "away"),
+        ),
         bench: [],
         tactics: squads.away.tactics ?? DEFAULT_TACTICS,
         managerTactics: squads.away.managerTactics ?? 65,
@@ -446,16 +438,16 @@ function shotTimeline(
         const shooter = byId.get(profile.playerId);
         if (!shooter) continue;
         for (const route of profile.routes) {
-          const count = samplePoisson(
-            rng,
-            route.expectedShots * (minutes / 90) * intervalDensity,
-          );
+          const count = samplePoisson(rng, route.expectedShots * (minutes / 90) * intervalDensity);
           for (let shot = 0; shot < count; shot++) {
             const result = sampleShot(rng, route, shooter.attributes.finishing);
+            const assister =
+              result.outcome === "goal" ? pickAssister(rng, active[side], shooter.id) : null;
             shots.push({
               side,
               minute: Math.max(1, Math.ceil(start + rng() * minutes)),
               shooterId: shooter.id,
+              assistId: assister?.id,
               ...result,
             });
           }
@@ -485,6 +477,8 @@ export interface ExtraTimeResult {
   assists: string[];
   /** 91~120 */
   goalMinutes: number[];
+  homeShots: number;
+  awayShots: number;
   homeXg: number;
   awayXg: number;
   homeExpectedGoals: number;
@@ -494,8 +488,8 @@ export interface ExtraTimeResult {
 /**
  * 연장 30분 — **녹아웃에서 90분(2차전제는 합계)이 같을 때만.**
  *
- * 전력 모델은 90분과 같다(`squadStrength` · `QUICK_SIM_LOG_SENSITIVITY`) — 눈금이 갈리면
- * 연장에서만 약팀이 살아나거나 죽는다. 다른 것은 길이와 밀도뿐이다.
+ * 전력 모델은 90분과 같은 선수×지역 패킷이다. 눈금이 갈리면 연장에서만 약팀이
+ * 살아나거나 죽는다. 다른 것은 길이와 밀도뿐이다.
  *
  * @param neutral 중립 경기장(결승) — 홈 어드밴티지를 주지 않는다
  */
@@ -523,14 +517,13 @@ export function simulateExtraTime(
   const scorers: string[] = [];
   const assists: string[] = [];
   const goalMinutes: number[] = [];
-  for (const { side, minute, shooterId } of timeline) {
+  for (const { side, minute, shooterId, assistId } of timeline) {
     const pool = squads[side].starters;
     const scorer = pool.find((player) => player.id === shooterId);
     if (!scorer) continue;
     scorers.push(`${side}:${scorer.id}`);
     goalMinutes.push(minute);
-    const assister = pickAssister(rng, pool, scorer.id);
-    assists.push(assister ? `${side}:${assister.id}` : "");
+    assists.push(assistId ? `${side}:${assistId}` : "");
   }
   const sum = (side: "home" | "away", read: (shot: QuickShot) => number) =>
     sampled.shots
@@ -542,6 +535,8 @@ export function simulateExtraTime(
     scorers,
     assists,
     goalMinutes,
+    homeShots: sampled.shots.filter((shot) => shot.side === "home").length,
+    awayShots: sampled.shots.filter((shot) => shot.side === "away").length,
     homeXg: sum("home", (shot) => shot.xg),
     awayXg: sum("away", (shot) => shot.xg),
     homeExpectedGoals: sum("home", (shot) => shot.goalProbability),
@@ -559,19 +554,15 @@ export function quickSimulate(
   const rng = makeRng(seed, `quick:${channel}`);
   const squads = { home, away };
 
-  /**
-   * 굴리는 순서는 **경기가 흐르는 순서**다 — 카드가 먼저 나와야 퇴장이 스코어에
-   * 닿고, 교체가 먼저 정해져야 후반 골의 득점자 후보에 교체 투입 선수가 들어간다.
-   */
-  const cards: QuickCard[] = [];
-  rollCards(rng, home, "home", cards);
-  rollCards(rng, away, "away", cards);
-  const sentOff = new Map<string, number>();
-  for (const c of cards) if (c.card === "red") sentOff.set(c.playerId, c.minute);
+  /** 교체 시점을 먼저 잡고, 그 타임라인 위에서 카드와 슈팅을 차례로 굴린다. */
+  const plannedSubs: QuickSub[] = [];
+  planSubs(rng, home, "home", plannedSubs);
+  planSubs(rng, away, "away", plannedSubs);
 
+  const cards: QuickCard[] = [];
   const subs: QuickSub[] = [];
-  planSubs(rng, home, "home", new Set(sentOff.keys()), subs);
-  planSubs(rng, away, "away", new Set(sentOff.keys()), subs);
+  rollCards(rng, home, "home", plannedSubs, subs, cards);
+  rollCards(rng, away, "away", plannedSubs, subs, cards);
 
   const sampled = shotTimeline(rng, squads, cards, subs, 0, 94, 1, false);
   const possession = sampled.possession;
@@ -580,21 +571,19 @@ export function quickSimulate(
   const goalMinutes: number[] = [];
   for (const shot of sampled.shots.filter((item) => item.outcome === "goal")) {
     const { side, minute } = shot;
-    const pool = [
-      ...squads[side].starters,
-      ...(squads[side].bench ?? []),
-    ];
+    const pool = [...squads[side].starters, ...(squads[side].bench ?? [])];
     const scorer = pool.find((player) => player.id === shot.shooterId);
     if (!scorer) continue;
     scorers.push(`${side}:${scorer.id}`);
     goalMinutes.push(minute);
-    const assister = pickAssister(rng, pool, scorer.id);
-    assists.push(assister ? `${side}:${assister.id}` : "");
+    assists.push(shot.assistId ? `${side}:${shot.assistId}` : "");
   }
 
   const injuries: string[] = [];
-  rollInjury(rng, home, "home", injuries);
-  rollInjury(rng, away, "away", injuries);
+  // 부상은 슈팅 수에 따라 난수 소비 위치가 밀리지 않는 독립 채널에서 뽑는다.
+  const injuryRng = makeRng(seed, `quick:${channel}:injury`);
+  rollInjury(injuryRng, home, "home", injuries);
+  rollInjury(injuryRng, away, "away", injuries);
   const sum = (side: "home" | "away", read: (shot: QuickShot) => number) =>
     sampled.shots
       .filter((shot) => shot.side === side)
@@ -609,6 +598,8 @@ export function quickSimulate(
     subs,
     injuries,
     possession,
+    homeShots: sampled.shots.filter((shot) => shot.side === "home").length,
+    awayShots: sampled.shots.filter((shot) => shot.side === "away").length,
     homeXg: sum("home", (shot) => shot.xg),
     awayXg: sum("away", (shot) => shot.xg),
     homeExpectedGoals: sum("home", (shot) => shot.goalProbability),

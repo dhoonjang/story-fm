@@ -70,6 +70,9 @@ export const MatchResultSchema = z.object({
    * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   goalMinutes: z.array(z.number().int().min(0)).optional(),
+  /** 실제 슈팅 수 — 옛 경기에는 없다. */
+  homeShots: z.number().int().min(0).optional(),
+  awayShots: z.number().int().min(0).optional(),
   /** 실제 슈팅의 기회 xG 합 — 옛 경기에는 없다. */
   homeXg: z.number().min(0).optional(),
   awayXg: z.number().min(0).optional(),

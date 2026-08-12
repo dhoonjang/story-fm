@@ -1,6 +1,5 @@
 import type {
   MatchEvent,
-  PlayerShotProfile,
   PlayerShotRoute,
   MatchSide,
   MatchStatLine,
@@ -22,7 +21,7 @@ import { sampleShot } from "./shot-model";
  * 결과가 "패킷이라는 권고 × 모델의 준수 의지"였고, 감독의 지시가 수치를 거치지
  * 않고 곧바로 스코어로 새어 들어갔다. 이제 순서를 뒤집는다:
  *
- *   패킷(기대 득점) → **코어가 구간을 굴려 사건을 확정** → 장부 기록 → LLM이 중계
+ *   패킷(선수×경로 슈팅 분포) → **코어가 슛·xG·결정력·결과를 확정** → 장부 → LLM 중계
  *
  * LLM은 결과를 만들지 않고 이미 일어난 일을 이야기한다. 감독의 지시는
  * `buildStrengthPacket`을 통해서만 결과에 닿는다 — 그 경로가 유일해야 지시가
@@ -491,7 +490,8 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
      * 두드린 흔적 하나(chance)를 남긴다. 골 확률에는 영향이 없다.
      */
     if (events.length === 0) {
-      const side: MatchSide = rng() * (rates.shot.home + rates.shot.away) < rates.shot.home ? "home" : "away";
+      const side: MatchSide =
+        rng() * (rates.shot.home + rates.shot.away) < rates.shot.home ? "home" : "away";
       const profiles = packet.guide.shotProfiles?.[side] ?? [];
       const who = weightedPick(
         rng,
@@ -626,8 +626,8 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
       const route = weightedRoute(rng, profile.routes);
       if (!route) continue;
       const sampled = sampleShot(rng, route, shooter.attributes.finishing);
-      const assister = pickAssister(rng, squad, shooter.id, gone);
       const isGoal = sampled.outcome === "goal";
+      const assister = isGoal ? pickAssister(rng, squad, shooter.id, gone) : null;
       events.push({
         minute,
         type: isGoal ? "goal" : "shot",

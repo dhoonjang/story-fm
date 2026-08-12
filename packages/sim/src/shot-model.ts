@@ -1,7 +1,7 @@
 import type { PlayerShotRoute } from "@story-fm/domain";
 
-/** 결정력 65가 기회 xG를 그대로 실현하는 리그 기준점. */
-export const FINISHING_PIVOT = 65;
+/** 슈팅 가중 리그 평균 75가 기회 xG를 그대로 실현하는 기준점. */
+export const FINISHING_PIVOT = 75;
 /** 0~99 능력치를 기준점 주변의 대칭 눈금으로 옮기는 폭. */
 export const FINISHING_SCALE = 34;
 /** 같은 기회의 골 오즈를 결정력이 움직이는 세기. */

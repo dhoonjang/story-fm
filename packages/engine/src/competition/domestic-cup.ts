@@ -111,7 +111,6 @@ function tieId(cupId: string, season: number, stage: MatchStage, pair: number, l
   return `m-${cupId}-${season}-${stage}-p${pair}-l${leg}`;
 }
 
-
 /** 이 컵 이 단계의 경기 — 대진 번호, 그다음 차수 순 */
 export function domesticStageMatches(
   state: GameState,
@@ -311,6 +310,17 @@ function pickTieDate(
       }
     }
     if (picked) {
+      // 결승은 가까운 창에서 휴식이 모자란 자리를 찾았다고 곧장 확정하지 않는다.
+      // 다음 넓은 창에는 리그 최종전 뒤의 온전한 주말이 있을 수 있다. 여기서
+      // 확정하면 결승 다음 날 최종 라운드를 치르는 대진이 결과에 따라 생긴다.
+      if (
+        options.isFinal &&
+        pass.days === restWindow &&
+        pickedScore !== null &&
+        pickedScore.rest < MIN_REST_HOURS
+      ) {
+        continue;
+      }
       // 휴식이 모자란 자리밖에 없으면 **리그를 한 번 더 비켜세워** 본다.
       // 실제 리그가 하는 일이고(컵 진출로 인한 연기), 성공하면 48시간이 살아난다.
       if (scoreAt(picked).rest < MIN_REST_HOURS) {

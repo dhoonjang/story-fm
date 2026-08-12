@@ -35,13 +35,30 @@ describe("간이 시뮬 분포 (결정 #5) — 전력이 결과에 반영된다"
     const weak = simSquad(state, "hull");
     let strongWins = 0;
     let weakWins = 0;
+    let inReferenceBand = 0;
+    let belowReferenceBand = 0;
+    let aboveReferenceBand = 0;
+    let expectedGoals = 0;
+    let actualGoals = 0;
     for (let i = 0; i < 200; i++) {
       const r = quickSimulate(strong, weak, 1000 + i, `dist:${i}`);
       if (r.homeGoals > r.awayGoals) strongWins++;
       else if (r.homeGoals < r.awayGoals) weakWins++;
+      for (const shots of [r.homeShots, r.awayShots]) {
+        if (shots < 6) belowReferenceBand++;
+        else if (shots > 22) aboveReferenceBand++;
+        else inReferenceBand++;
+      }
+      expectedGoals += r.homeExpectedGoals + r.awayExpectedGoals;
+      actualGoals += r.homeGoals + r.awayGoals;
     }
     expect(strongWins).toBeGreaterThan(weakWins * 1.5);
     expect(weakWins).toBeGreaterThan(0); // 업셋도 존재해야 한다
+    // 6~22는 결과 제한이 아니라 분포 QA용 실제 축구 참고 구간이다. 양쪽 꼬리는 살아 있다.
+    expect(inReferenceBand / 400).toBeGreaterThan(0.7);
+    expect(belowReferenceBand).toBeGreaterThan(0);
+    expect(aboveReferenceBand).toBeGreaterThan(0);
+    expect(actualGoals / 200).toBeCloseTo(expectedGoals / 200, 0);
   });
 });
 

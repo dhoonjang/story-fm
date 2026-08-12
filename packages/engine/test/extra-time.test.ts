@@ -462,7 +462,12 @@ describe("유저 경기의 연장 (match-sim.md §2)", () => {
     const state = createTestGame(23);
     let draws = 0;
     for (let round = 900; round < 916; round++) {
-      for (const p of playersOf(state, "arsenal")) p.state.condition = 100;
+      for (const teamId of ["arsenal", "chelsea"]) {
+        for (const p of playersOf(state, teamId)) {
+          p.state.condition = 100;
+          p.state.form = 0;
+        }
+      }
       const match: MatchRecord = {
         id: `m-league-${state.season}-r${round}`,
         season: state.season,

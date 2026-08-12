@@ -52,15 +52,28 @@ describe("buildStrengthPacket", () => {
   it("결정력은 슈팅 접근에 작게 이롭고, 기회 xG 자체는 바꾸지 않는다", () => {
     const side = (finishing: number) => {
       const input = makeSide("a", 75);
+      // 자동 공략은 높은 결정력을 전술 표적으로 삼을 수 있다. 여기서는 그 간접
+      // 효과를 끄고 슈팅 모델의 명시적인 결정력 항만 비교한다.
+      input.managerAnalysis = 65;
+      input.exploits = [];
       const striker = input.starters.find((slot) => slot.position === "ST")!;
       striker.player.attributes.finishing = finishing;
       return input;
     };
-    const low = buildStrengthPacket(side(40), makeSide("b", 75), { neutral: true });
-    const high = buildStrengthPacket(side(90), makeSide("b", 75), { neutral: true });
+    const opponent = () => {
+      const input = makeSide("b", 75);
+      input.exploits = [];
+      return input;
+    };
+    const low = buildStrengthPacket(side(40), opponent(), { neutral: true });
+    const high = buildStrengthPacket(side(90), opponent(), { neutral: true });
     const strikerId = high.home.lineup.find((player) => player.position === "ST")!.id;
-    const lowProfile = low.guide.shotProfiles!.home.find((profile) => profile.playerId === strikerId)!;
-    const highProfile = high.guide.shotProfiles!.home.find((profile) => profile.playerId === strikerId)!;
+    const lowProfile = low.guide.shotProfiles!.home.find(
+      (profile) => profile.playerId === strikerId,
+    )!;
+    const highProfile = high.guide.shotProfiles!.home.find(
+      (profile) => profile.playerId === strikerId,
+    )!;
     expect(highProfile.expectedShots).toBeGreaterThan(lowProfile.expectedShots);
     expect(highProfile.expectedShots / lowProfile.expectedShots).toBeLessThan(1.2);
     expect(highProfile.routes.map((route) => route.meanXg)).toEqual(

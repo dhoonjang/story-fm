@@ -429,15 +429,15 @@ export const ROUTE_SHOT_LOG_WEIGHT = 0.75;
 /** 결정력 자체가 슈팅 접근에 주는 작은 효과. */
 export const FINISHING_ACCESS_LOG_WEIGHT = 0.1;
 /** 기회 생성 전력이 선수별 슈팅량에 닿는 세기. */
-export const CREATION_SKILL_LOG_WEIGHT = 0.55;
+export const CREATION_SKILL_LOG_WEIGHT = 0.75;
 /** 대등한 경로에서 슈팅 하나의 평균 기회 xG. */
-export const BASE_SHOT_XG = 0.075;
+export const BASE_SHOT_XG = 0.072;
 /** 최종 공격 지역 우위가 슈팅 질에 닿는 세기. */
 export const ROUTE_XG_LOGIT_WEIGHT = 0.7;
 /** 선수의 전진 위치가 슈팅 질에 닿는 세기. */
 export const SHOT_DEPTH_XG_LOGIT_WEIGHT = 0.65;
 /** 위치선정·돌파·공중볼이 슈팅 질에 닿는 세기. */
-export const CHANCE_SKILL_XG_LOGIT_WEIGHT = 0.35;
+export const CHANCE_SKILL_XG_LOGIT_WEIGHT = 0.45;
 
 const ZONE_CONTRIBUTION: Record<
   "attack" | "midfield" | "defense",
@@ -721,8 +721,7 @@ function buildPlayerShotProfiles(
           POSSESSION_SHOT_LOG_WEIGHT * possessionLogit +
           ROUTE_SHOT_LOG_WEIGHT * pathEdge +
           CREATION_SKILL_LOG_WEIGHT * Math.log(creation / CREATION_EFFECTIVE_PIVOT) +
-          FINISHING_ACCESS_LOG_WEIGHT *
-            ((attrs.finishing - FINISHING_PIVOT) / FINISHING_SCALE) +
+          FINISHING_ACCESS_LOG_WEIGHT * ((attrs.finishing - FINISHING_PIVOT) / FINISHING_SCALE) +
           Math.log(venue);
         const expectedShots = Math.exp(logShots);
         const meanXg = sigmoid(
@@ -735,14 +734,10 @@ function buildPlayerShotProfiles(
         return { route, expectedShots, meanXg };
       });
       const expectedShots = routes.reduce((sum, route) => sum + route.expectedShots, 0);
-      const chanceXg = routes.reduce(
-        (sum, route) => sum + route.expectedShots * route.meanXg,
-        0,
-      );
+      const chanceXg = routes.reduce((sum, route) => sum + route.expectedShots * route.meanXg, 0);
       const expectedGoals = routes.reduce(
         (sum, route) =>
-          sum +
-          route.expectedShots * finishingGoalProbability(route.meanXg, attrs.finishing),
+          sum + route.expectedShots * finishingGoalProbability(route.meanXg, attrs.finishing),
         0,
       );
       return {
@@ -762,9 +757,9 @@ function buildPlayerShotProfiles(
 /**
  * 전력 분석 패킷 생성 — 결정적 순수 함수. 같은 입력이면 항상 같은 패킷.
  *
- * v2부터 이 패킷의 `guide.expectedGoals`가 **구간 시뮬레이터의 분당 발생률**이
- * 된다(match-engine.ts). 즉 감독의 지시는 이 함수를 통해서만 결과에 닿는다 —
- * "말했는데 수치엔 없는" 경로를 남기지 않는 것이 이 설계의 핵심이다.
+ * `guide.shotProfiles`가 구간·간이 시뮬레이터의 공통 발생률 원본이다. 즉 감독의
+ * 지시는 이 함수를 통해서만 결과에 닿는다 — "말했는데 수치엔 없는" 경로를
+ * 남기지 않는 것이 이 설계의 핵심이다.
  */
 export function buildStrengthPacket(
   homeIn: SideInput,
