@@ -5,12 +5,14 @@ import type {
   MatchSide,
   Matchup,
   MatchupZone,
+  PlayerShotProfile,
   Player,
   PositionGroup,
   RegionalBand,
   RegionalIntent,
   RegionalLane,
   SidePacket,
+  ShotRoute,
   StrengthPacket,
   TacticalRead,
   TacticsSpec,
@@ -18,12 +20,13 @@ import type {
 } from "@story-fm/domain";
 import {
   ADAPTATION_IMPACT,
+  anchorOf,
   FAMILIARITY_MAX,
-  logRatioFactor,
   positionGroupOf,
   positionGroupOfPlayer,
   proficiencyReadiness,
   roleFit,
+  roleWeights,
   tacticalSensitivityOf,
 } from "@story-fm/domain";
 import { applyDirectives, type DirectiveInput } from "./directives";
@@ -32,7 +35,8 @@ import { buildKeyPoints, readKeyPoints } from "./key-points";
 import { stateModifier } from "./state-modifier";
 import { buildCounterContext, evaluateCounters, type CounterResult } from "./tactical-counters";
 import { GAP_PENALTY, GAP_THRESHOLD } from "./stamina";
-import { regionalAttackFactor, zoneGrid } from "./zone-grid";
+import { finishingGoalProbability, FINISHING_PIVOT, FINISHING_SCALE } from "./shot-model";
+import { GRID_LANES, zoneGrid } from "./zone-grid";
 
 /** 배치된 선수 — 전술 배치(TACTIC_ASSIGNMENT)에서 조립해 넘긴다 */
 export interface LineupSlot {
@@ -166,6 +170,29 @@ export function famFactor(familiarity: number, position: string): number {
 export function effectiveOf(slot: LineupSlot): number {
   return round2(
     zoneScore(slot) *
+      profFactor(slot.proficiency) *
+      famFactor(slot.familiarity ?? FAMILIARITY_BASELINE, slot.position),
+  );
+}
+
+/**
+ * 기회 생성 전력 — 실제 결정력은 리그 기준값으로 치환한다.
+ *
+ * `roleFit`에 결정력이 들어 있는 채로 선수별 슈팅량을 만들고, 다시 명시적인
+ * 결정력 접근 효과를 더하면 같은 축을 두 번 센다. 역할이 요구하는 슈팅 책임은
+ * `roleWeights(...).finishing`으로 남기되 선수의 실제 수치는 여기서 제거한다.
+ */
+export function creationEffectiveOf(slot: LineupSlot): number {
+  const state = slot.matchFatigue
+    ? {
+        ...slot.player.state,
+        condition: Math.max(0, slot.player.state.condition - slot.matchFatigue),
+      }
+    : slot.player.state;
+  const attributes = { ...slot.player.attributes, finishing: FINISHING_PIVOT };
+  return round2(
+    roleFit(attributes, slot.position, slot.roleId) *
+      stateModifier(state) *
       profFactor(slot.proficiency) *
       famFactor(slot.familiarity ?? FAMILIARITY_BASELINE, slot.position),
   );
@@ -389,24 +416,28 @@ export function possessionShare(midfield: number, oppMidfield: number): number {
   return Math.max(POSSESSION_MIN, Math.min(POSSESSION_MAX, raw));
 }
 
-/** 대등한 두 팀의 기대 득점 (홈·원정 계수 전) */
-export const BASE_EXPECTED_GOALS = 1.35;
-/** 선수의 질이 득점으로 번역되는 세기 — 간이 시뮬의 로그 민감도와 같은 자리 */
-export const QUALITY_LOG_SENSITIVITY = 8;
-/**
- * 판의 우열(전술·상성·개인 지시가 실린 존 매치업)이 그 위를 기울이는 세기.
- *
- * 존의 폭이 `TACTIC_SWING`으로 묶여 있고 로그 반응도 극단을 누른다.
- * **전술이 판을 흔들되 선수를 대신하지는 못한다.**
- */
-export const MATCHUP_LOG_SENSITIVITY = 1.3;
-/**
- * 90분에 이보다 적게/많이 만들지는 않는다.
- * ⚠️ 하한은 **이변의 여지**다 — 0.45로 두면 18점 차 미스매치에서 약팀이 60경기를
- * 치러도 한 번을 못 이긴다(테스트로 고정).
- */
-export const MIN_EXPECTED_GOALS = 0.6;
-export const MAX_EXPECTED_GOALS = 3;
+/** 평균적인 위치·역할·판에서 선수 한 명이 갖는 90분 기대 슈팅. */
+export const PLAYER_SHOT_BASE = 1.1;
+/** 실제 전술판의 전진 깊이가 슈팅량에 닿는 세기. */
+export const SHOT_DEPTH_LOG_WEIGHT = 2.3;
+/** 역할의 결정력 요구가 슈팅 책임으로 번역되는 세기. */
+export const ROLE_SHOT_LOG_WEIGHT = 0.45;
+/** 점유가 공격 노출에 닿는 세기. */
+export const POSSESSION_SHOT_LOG_WEIGHT = 0.32;
+/** 후방→중원→공격 경로 우위의 슈팅량 영향. */
+export const ROUTE_SHOT_LOG_WEIGHT = 0.75;
+/** 결정력 자체가 슈팅 접근에 주는 작은 효과. */
+export const FINISHING_ACCESS_LOG_WEIGHT = 0.1;
+/** 기회 생성 전력이 선수별 슈팅량에 닿는 세기. */
+export const CREATION_SKILL_LOG_WEIGHT = 0.55;
+/** 대등한 경로에서 슈팅 하나의 평균 기회 xG. */
+export const BASE_SHOT_XG = 0.075;
+/** 최종 공격 지역 우위가 슈팅 질에 닿는 세기. */
+export const ROUTE_XG_LOGIT_WEIGHT = 0.7;
+/** 선수의 전진 위치가 슈팅 질에 닿는 세기. */
+export const SHOT_DEPTH_XG_LOGIT_WEIGHT = 0.65;
+/** 위치선정·돌파·공중볼이 슈팅 질에 닿는 세기. */
+export const CHANCE_SKILL_XG_LOGIT_WEIGHT = 0.35;
 
 const ZONE_CONTRIBUTION: Record<
   "attack" | "midfield" | "defense",
@@ -447,6 +478,7 @@ function buildZones(
   fit: number,
   delta: ZoneDelta,
   counter: { attack: number; midfield: number; defense: number },
+  readEffective: (slot: LineupSlot) => number = effectiveOf,
 ): ZoneStrength {
   const of = (g: PositionGroup) => slots.filter((s) => slotGroup(s) === g);
 
@@ -479,7 +511,7 @@ function buildZones(
             0,
           )
         : w[slotGroup(slot)];
-      sum += effectiveOf(slot) * wg;
+      sum += readEffective(slot) * wg;
       weight += wg;
     }
     return weight === 0 ? 0 : sum / weight;
@@ -563,6 +595,10 @@ function round2(x: number): number {
   return Math.round(x * 100) / 100;
 }
 
+function round4(x: number): number {
+  return Math.round(x * 10_000) / 10_000;
+}
+
 /**
  * 명단 — id·이름·자리에 **그 선수가 지금 내는 전력**을 함께 싣는다.
  * 중계 LLM이 "누가 살아 있고 누가 안 돌아가는가"를 존 평균이 아니라 사람 단위로
@@ -576,6 +612,7 @@ function roster(slots: LineupSlot[]) {
     ...(s.point ? { point: s.point } : {}),
     ...(s.roleId ? { roleId: s.roleId } : {}),
     effective: effectiveOf(s),
+    creationEffective: creationEffectiveOf(s),
     fit: {
       position: s.proficiency,
       tactical: s.familiarity ?? FAMILIARITY_BASELINE,
@@ -589,13 +626,6 @@ function frontlinePace(slots: LineupSlot[]): number {
   const fw = slots.filter((s) => slotGroup(s) === "FW").map((s) => s.player.attributes.pace);
   return fw.length > 0 ? mean(fw) : 70;
 }
-
-/**
- * 홈 어드밴티지 — 기대 득점에만 곱한다. 존 전력에 곱하면 로그 비율 계수에서
- * 다시 반영돼 과해진다. 결승 등 중립 경기는 적용하지 않는다.
- */
-const HOME_XG = 1.08;
-const AWAY_XG = 0.95;
 
 export interface PacketOptions {
   /** 중립 경기(결승) — 홈 어드밴티지를 주지 않는다 */
@@ -613,6 +643,120 @@ export interface PacketOptions {
 /** 경기 중 지시의 소화율 보정 — 남은 거리의 절반을 메운다 (0.82 → 0.91) */
 function inMatchUptake(uptake: number, inMatch: boolean): number {
   return inMatch ? uptake + (1 - uptake) * 0.5 : uptake;
+}
+
+const SHOT_LANE_X: Record<ShotRoute, number> = { left: 17, center: 50, right: 83 };
+const MIRROR_SHOT_ROUTE: Record<ShotRoute, ShotRoute> = {
+  left: "right",
+  center: "center",
+  right: "left",
+};
+const ROUTE_PATH_WEIGHTS = { defense: 0.15, midfield: 0.3, attack: 0.55 } as const;
+const ROUTE_REACH = 30;
+const ROLE_SHOT_WEIGHT_PIVOT = 1;
+const CREATION_EFFECTIVE_PIVOT = 65;
+const CHANCE_SKILL_PIVOT = 65;
+const CHANCE_SKILL_SCALE = 34;
+const SHOT_DEPTH_PIVOT = 0.5;
+const HOME_SHOT_EXPOSURE = 1.06;
+const AWAY_SHOT_EXPOSURE = 0.96;
+
+const sigmoid = (z: number): number => 1 / (1 + Math.exp(-z));
+const logit = (p: number): number => Math.log(p / (1 - p));
+
+/**
+ * 선수×좌/중/우 경로의 슈팅 강도를 직접 만든다.
+ * 팀 총량은 입력이 아니며 이 배열을 마지막에 합한 파생값이다.
+ */
+function buildPlayerShotProfiles(
+  packet: Pick<StrengthPacket, "home" | "away">,
+  side: MatchSide,
+  slots: readonly LineupSlot[],
+  possession: number,
+  venue: number,
+): PlayerShotProfile[] {
+  const grid = zoneGrid(packet as StrengthPacket, "creation");
+  const relativeCell = (route: ShotRoute, band: "defense" | "midfield" | "attack") => {
+    const globalRoute = side === "home" ? route : MIRROR_SHOT_ROUTE[route];
+    const globalBand =
+      side === "home" ? band : band === "attack" ? "defense" : band === "defense" ? "attack" : band;
+    return grid.find((cell) => cell.lane === globalRoute && cell.band === globalBand);
+  };
+  const edgeAt = (route: ShotRoute, band: "defense" | "midfield" | "attack") => {
+    const cell = relativeCell(route, band);
+    if (!cell) return 0;
+    const ours = side === "home" ? cell.home : cell.away;
+    const theirs = side === "home" ? cell.away : cell.home;
+    return Math.log(Math.max(Number.EPSILON, ours) / Math.max(Number.EPSILON, theirs));
+  };
+  const possessionLogit = logit(possession) - logit(0.5);
+
+  return slots
+    .filter((slot) => slotGroup(slot) !== "GK")
+    .map((slot): PlayerShotProfile => {
+      const point = slot.point ?? anchorOf(slot.position);
+      const depth = 1 - point.y / 100;
+      const roleShotWeight = roleWeights(slot.position, slot.roleId).finishing;
+      const creation = creationEffectiveOf(slot);
+      const attrs = slot.player.attributes;
+      const chanceSkill =
+        attrs.positioning * 0.4 + attrs.dribbling * 0.25 + attrs.pace * 0.2 + attrs.aerial * 0.15;
+      const rawRouteWeights = GRID_LANES.map((route) => ({
+        route,
+        weight: 1 / (1 + Math.abs(point.x - SHOT_LANE_X[route]) / ROUTE_REACH),
+      }));
+      const routeWeightSum = rawRouteWeights.reduce((sum, item) => sum + item.weight, 0);
+
+      const routes = rawRouteWeights.map(({ route, weight }) => {
+        const pathEdge =
+          ROUTE_PATH_WEIGHTS.defense * edgeAt(route, "defense") +
+          ROUTE_PATH_WEIGHTS.midfield * edgeAt(route, "midfield") +
+          ROUTE_PATH_WEIGHTS.attack * edgeAt(route, "attack");
+        const routeShare = weight / routeWeightSum;
+        const logShots =
+          Math.log(PLAYER_SHOT_BASE) +
+          Math.log(routeShare) +
+          SHOT_DEPTH_LOG_WEIGHT * (depth - SHOT_DEPTH_PIVOT) +
+          ROLE_SHOT_LOG_WEIGHT * Math.log(roleShotWeight / ROLE_SHOT_WEIGHT_PIVOT) +
+          POSSESSION_SHOT_LOG_WEIGHT * possessionLogit +
+          ROUTE_SHOT_LOG_WEIGHT * pathEdge +
+          CREATION_SKILL_LOG_WEIGHT * Math.log(creation / CREATION_EFFECTIVE_PIVOT) +
+          FINISHING_ACCESS_LOG_WEIGHT *
+            ((attrs.finishing - FINISHING_PIVOT) / FINISHING_SCALE) +
+          Math.log(venue);
+        const expectedShots = Math.exp(logShots);
+        const meanXg = sigmoid(
+          logit(BASE_SHOT_XG) +
+            ROUTE_XG_LOGIT_WEIGHT * edgeAt(route, "attack") +
+            SHOT_DEPTH_XG_LOGIT_WEIGHT * (depth - SHOT_DEPTH_PIVOT) +
+            CHANCE_SKILL_XG_LOGIT_WEIGHT *
+              ((chanceSkill - CHANCE_SKILL_PIVOT) / CHANCE_SKILL_SCALE),
+        );
+        return { route, expectedShots, meanXg };
+      });
+      const expectedShots = routes.reduce((sum, route) => sum + route.expectedShots, 0);
+      const chanceXg = routes.reduce(
+        (sum, route) => sum + route.expectedShots * route.meanXg,
+        0,
+      );
+      const expectedGoals = routes.reduce(
+        (sum, route) =>
+          sum +
+          route.expectedShots * finishingGoalProbability(route.meanXg, attrs.finishing),
+        0,
+      );
+      return {
+        playerId: slot.player.id,
+        routes: routes.map((route) => ({
+          ...route,
+          expectedShots: round4(route.expectedShots),
+          meanXg: round4(route.meanXg),
+        })),
+        expectedShots: round4(expectedShots),
+        chanceXg: round4(chanceXg),
+        expectedGoals: round4(expectedGoals),
+      };
+    });
 }
 
 /**
@@ -734,6 +878,7 @@ export function buildStrengthPacket(
     teamId: homeIn.teamId,
     teamName: homeIn.teamName,
     zones: buildZones(homeXI, homeFit, homeDelta, counters.home),
+    creationZones: buildZones(homeXI, homeFit, homeDelta, counters.home, creationEffectiveOf),
     tacticalFit: homeFit,
     tactical: readOf(homeUptake, homeDelta),
     ...(homeIn.regional && homeIn.regional.length > 0
@@ -752,6 +897,7 @@ export function buildStrengthPacket(
     teamId: awayIn.teamId,
     teamName: awayIn.teamName,
     zones: buildZones(awayXI, awayFit, awayDelta, counters.away),
+    creationZones: buildZones(awayXI, awayFit, awayDelta, counters.away, creationEffectiveOf),
     tacticalFit: awayFit,
     tactical: readOf(awayUptake, awayDelta),
     ...(awayIn.regional && awayIn.regional.length > 0
@@ -784,76 +930,47 @@ export function buildStrengthPacket(
     };
   });
 
-  /**
-   * 기대 득점 — **선수의 질**과 **판의 우열**을 곱한다.
-   *
-   * 예전엔 존 비율(공격/상대 수비) 하나였다. 그런데 존에는 전술 보정이 이미
-   * 곱해져 있어서, 공격적으로 세팅한 약팀의 공격 존이 강팀을 넘고(실측: 코번트리
-   * 88.9 > 아스날 86.3) 스쿼드의 격차가 통째로 지워졌다 — 같은 경기를 간이
-   * 시뮬은 1.90:0.96으로 보는데 구간 시뮬은 1.48:1.48로 봤다.
-   *
-   * 그래서 축을 둘로 나눈다: **질**(XI 유효 전력의 비 — 간이 시뮬이 쓰는 것과
-   * 같은 축)이 기본을 정하고, **판**(존 매치업 — 전술·상성이 실린 값)이 그 위를
-   * 기울인다. 질의 로그 민감도가 크고 판의 민감도가 작아서, 전술은 판을 흔들되
-   * 선수를 대신하지는 못한다.
-   */
-  const qualityOf = (side: SidePacket) =>
-    side.lineup.length === 0
-      ? 1
-      : side.lineup.reduce((n, l) => n + l.effective, 0) / side.lineup.length;
-  const homeQuality = qualityOf(home);
-  const awayQuality = qualityOf(away);
-
-  const xg = (
-    quality: number,
-    oppQuality: number,
-    atk: number,
-    def: number,
-    share: number,
-    venue: number,
-  ) =>
-    round2(
-      Math.min(
-        MAX_EXPECTED_GOALS,
-        Math.max(
-          MIN_EXPECTED_GOALS,
-          BASE_EXPECTED_GOALS *
-            logRatioFactor(quality / oppQuality, QUALITY_LOG_SENSITIVITY) *
-            logRatioFactor(atk / def, MATCHUP_LOG_SENSITIVITY) *
-            logRatioFactor(share / 0.5, POSSESSION_LOG_SENSITIVITY) *
-            venue,
-        ),
-      ),
-    );
-
-  /** 점유 — 중원 우위가 공을 쥔다. 기대 득점과 체력 소모가 함께 이 값을 본다 */
+  /** 점유 — 중원 우위가 선수별 공격 노출과 체력 소모에 함께 들어간다. */
   const possession = {
-    home: possessionShare(home.zones.midfield, away.zones.midfield),
-    away: possessionShare(away.zones.midfield, home.zones.midfield),
-  };
-  const grid = zoneGrid({ home, away } as StrengthPacket);
-  const regional = {
-    home: regionalAttackFactor(grid, "home"),
-    away: regionalAttackFactor(grid, "away"),
+    home: possessionShare(
+      home.creationZones?.midfield ?? home.zones.midfield,
+      away.creationZones?.midfield ?? away.zones.midfield,
+    ),
+    away: possessionShare(
+      away.creationZones?.midfield ?? away.zones.midfield,
+      home.creationZones?.midfield ?? home.zones.midfield,
+    ),
   };
   const neutral = options.neutral === true;
-  const expectedGoals = {
-    home: xg(
-      homeQuality,
-      awayQuality,
-      home.zones.attack,
-      away.zones.defense,
+  const shotProfiles = {
+    home: buildPlayerShotProfiles(
+      { home, away },
+      "home",
+      homeXI,
       possession.home,
-      (neutral ? 1 : HOME_XG) * regional.home,
+      neutral ? 1 : HOME_SHOT_EXPOSURE,
     ),
-    away: xg(
-      awayQuality,
-      homeQuality,
-      away.zones.attack,
-      home.zones.defense,
+    away: buildPlayerShotProfiles(
+      { home, away },
+      "away",
+      awayXI,
       possession.away,
-      (neutral ? 1 : AWAY_XG) * regional.away,
+      neutral ? 1 : AWAY_SHOT_EXPOSURE,
     ),
+  };
+  const sumProfiles = (side: MatchSide, read: (profile: PlayerShotProfile) => number) =>
+    shotProfiles[side].reduce((sum, profile) => sum + read(profile), 0);
+  const expectedShots = {
+    home: round2(sumProfiles("home", (profile) => profile.expectedShots)),
+    away: round2(sumProfiles("away", (profile) => profile.expectedShots)),
+  };
+  const chanceXg = {
+    home: round2(sumProfiles("home", (profile) => profile.chanceXg)),
+    away: round2(sumProfiles("away", (profile) => profile.chanceXg)),
+  };
+  const expectedGoals = {
+    home: round2(sumProfiles("home", (profile) => profile.expectedGoals)),
+    away: round2(sumProfiles("away", (profile) => profile.expectedGoals)),
   };
 
   const overallGap =
@@ -910,6 +1027,9 @@ export function buildStrengthPacket(
     targets,
     guide: {
       expectedGoals,
+      expectedShots,
+      chanceXg,
+      shotProfiles,
       possession,
       upsetChance,
       intensity: {

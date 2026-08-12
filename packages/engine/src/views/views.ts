@@ -464,6 +464,8 @@ export interface MatchTally {
   progressive: number;
   /** 그 선수가 만든 기대 득점의 합 — 슛의 질이다 */
   xg: number;
+  /** 실제 슈터의 결정력을 반영한 골 확률 합. */
+  scoringExpectation: number;
 }
 
 export interface MatchPlayerView {
@@ -933,6 +935,7 @@ function buildMatchView(state: GameState): MatchView | null {
       passes: 0,
       progressive: 0,
       xg: 0,
+      scoringExpectation: 0,
     };
     tallies.set(id, fresh);
     return fresh;
@@ -948,6 +951,7 @@ function buildMatchView(state: GameState): MatchView | null {
     t.passes = line.passes;
     t.progressive = line.progressive;
     t.xg = line.xg;
+    t.scoringExpectation = line.scoringExpectation ?? 0;
   }
   for (const event of ledger.events) {
     const [first, second] = event.actors;
@@ -1014,6 +1018,7 @@ function buildMatchView(state: GameState): MatchView | null {
         passes: 0,
         progressive: 0,
         xg: 0,
+        scoringExpectation: 0,
       },
     };
   };

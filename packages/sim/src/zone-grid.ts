@@ -51,7 +51,12 @@ export const REGIONAL_LOG_SENSITIVITY = 0.12;
 const THIN_PENALTY = 0.18;
 
 /** 그 칸에서 실제로 뛰는 전력 — 가까운 선수일수록 크게 친다 */
-function presence(players: readonly PacketPlayer[], lane: GridLane, band: GridBand): number {
+function presence(
+  players: readonly PacketPlayer[],
+  lane: GridLane,
+  band: GridBand,
+  metric: "effective" | "creation",
+): number {
   let weight = 0;
   let sum = 0;
   for (const p of players) {
@@ -60,7 +65,7 @@ function presence(players: readonly PacketPlayer[], lane: GridLane, band: GridBa
     const w = Math.max(0, 1 - d / REACH);
     if (w === 0) continue;
     weight += w;
-    sum += w * p.effective;
+    sum += w * (metric === "creation" ? (p.creationEffective ?? p.effective) : p.effective);
   }
   if (weight === 0) return 0;
   // 그 자리에 사람이 얼마나 붙어 있나 — 얇으면 조금 깎인다
@@ -104,14 +109,18 @@ const FACING_BAND: Record<GridBand, GridBand> = {
  * `left`는 홈의 왼쪽. 각 칸의 `away`는 그 자리에서 마주 선 원정의 전력이라
  * 이미 거울로 뒤집혀 있다.
  */
-export function zoneGrid(packet: StrengthPacket): GridCell[] {
+export function zoneGrid(
+  packet: StrengthPacket,
+  metric: "effective" | "creation" = "effective",
+): GridCell[] {
   const sideCells = (side: "home" | "away") => {
     const players = packet[side].lineup;
-    const zones = packet[side].zones;
+    const zones =
+      metric === "creation" ? (packet[side].creationZones ?? packet[side].zones) : packet[side].zones;
     const out = new Map<string, number>();
     for (const band of GRID_BANDS) {
       const raw = GRID_LANES.map((lane) => {
-        const base = presence(players, lane, band);
+        const base = presence(players, lane, band, metric);
         const plan = packet[side].regional?.find(
           (entry) => entry.band === band && entry.lane === lane,
         );

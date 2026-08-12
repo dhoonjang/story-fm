@@ -8,3 +8,4 @@ export * from "./tactical-counters";
 export * from "./stamina";
 export * from "./match-engine";
 export * from "./zone-grid";
+export * from "./shot-model";

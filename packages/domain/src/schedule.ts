@@ -70,6 +70,12 @@ export const MatchResultSchema = z.object({
    * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   goalMinutes: z.array(z.number().int().min(0)).optional(),
+  /** 실제 슈팅의 기회 xG 합 — 옛 경기에는 없다. */
+  homeXg: z.number().min(0).optional(),
+  awayXg: z.number().min(0).optional(),
+  /** 실제 슈터의 결정력을 반영한 골 확률 합. */
+  homeExpectedGoals: z.number().min(0).optional(),
+  awayExpectedGoals: z.number().min(0).optional(),
   /**
    * 실제로 그라운드를 밟은 선수 id (교체 투입·퇴장 포함).
    * "감독이 직접 뛰는 걸 본 선수"(스카우팅 지식 L2)의 파생 원본이다.

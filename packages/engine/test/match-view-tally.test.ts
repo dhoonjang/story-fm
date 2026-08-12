@@ -130,12 +130,13 @@ describe("흐름의 양 — 사건이 아닌 기록", () => {
     const view = buildOfficeViews(state).match;
     if (!view) return;
     const events = state.pendingMatch!.ledger.events;
-    const shots = events.filter((e) => e.type === "shot" || e.type === "goal" || e.type === "chance");
+    const shots = events.filter((e) => e.type === "shot" || e.type === "goal");
     if (shots.length === 0) return;
     for (const e of shots) {
       expect(e.xg, `${e.minute}' ${e.type} xg 없음`).toBeDefined();
       expect(e.xg!).toBeGreaterThan(0);
       expect(e.xg!).toBeLessThanOrEqual(1);
+      expect(e.goalProbability).toBeDefined();
     }
     // 팀 xG 합 ≈ 사건 xg 합 (반올림 오차만큼만 어긋난다)
     const rows = [...view.onPitch.home, ...view.onPitch.away, ...view.bench.home, ...view.bench.away];

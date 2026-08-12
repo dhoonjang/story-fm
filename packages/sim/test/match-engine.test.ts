@@ -115,15 +115,14 @@ describe("구간 시뮬레이터 — 결과는 코어가 정한다", () => {
     }
   });
 
-  it("장부의 하드 제약을 시뮬레이터가 먼저 지킨다 (배치 상한·골 상한)", () => {
+  it("장부의 배치 크기를 지키되 슈팅·득점 분포는 자르지 않는다", () => {
     for (const seed of [4, 8, 21, 63]) {
-      // 기대 득점이 최대로 벌어지는 조합 — 상한에 부딪히는 경계
       const { ledger, plans } = playMatch(setup(92, 55), seed);
       for (const plan of plans) {
         expect(plan.events.length, `seed ${seed}`).toBeLessThan(LEDGER_LIMITS.maxEventsPerBatch);
       }
-      expect(ledger.score.home).toBeLessThanOrEqual(LEDGER_LIMITS.maxGoalsPerTeam);
-      expect(ledger.score.away).toBeLessThanOrEqual(LEDGER_LIMITS.maxGoalsPerTeam);
+      expect(ledger.score.home).toBeGreaterThanOrEqual(0);
+      expect(ledger.score.away).toBeGreaterThanOrEqual(0);
     }
   });
 
@@ -145,7 +144,12 @@ describe("구간 시뮬레이터 — 결과는 코어가 정한다", () => {
     const { ledger } = playMatch(setup(88, 62), 5);
     const goals = ledger.events.filter((e) => e.type === "goal");
     expect(goals.length).toBeGreaterThan(0);
-    for (const goal of goals) expect(goal.causes.length).toBeGreaterThan(0);
+    for (const goal of goals) {
+      expect(goal.causes.length).toBeGreaterThan(0);
+      expect(goal.shotOutcome).toBe("goal");
+      expect(goal.xg).toBeGreaterThan(0);
+      expect(goal.goalProbability).toBeGreaterThan(0);
+    }
   });
 
   it("득점자는 공격 자원 쪽으로 기운다 — 골키퍼는 넣지 않는다", () => {

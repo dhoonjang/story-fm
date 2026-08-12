@@ -67,6 +67,7 @@ import {
   isSuspended,
   MATCHDAY_BENCH,
   playerById,
+  proficiencyAt,
   pushNarrative,
   squadLevelOf,
   tacticsOf,
@@ -459,9 +460,21 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
    * 이제 리그 전체가 카드를 받으므로 이 문도 함께 닫아야 규칙이 하나가 된다.
    */
   const available = (p: GamePlayer) => !isInjured(state, p.id) && !isSuspended(state, p.id);
-  const starters = assignmentsOf(state, teamId, "starting")
+  const startingAssignments = assignmentsOf(state, teamId, "starting");
+  const starters = startingAssignments
     .map((a) => byId.get(a.playerId))
     .filter((p): p is GamePlayer => p !== undefined && available(p));
+  const slotSetups = starters.map((player) => {
+    const assignment = startingAssignments.find((item) => item.playerId === player.id);
+    const position = assignment?.position ?? naturalPositionOf(player).position;
+    return {
+      position,
+      ...(assignment?.point ? { point: assignment.point } : {}),
+      ...(assignment?.roleId ? { roleId: assignment.roleId } : {}),
+      proficiency: proficiencyAt(player, position),
+      familiarity: assignment?.familiarity ?? 60,
+    };
+  });
   // 부상·정지로 빈 자리는 OVR 상위 가용 선수로 메운다 (AI 팀의 자동 운영)
   if (starters.length < 11) {
     const used = new Set(starters.map((p) => p.id));
@@ -471,6 +484,12 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
     for (const p of fill) {
       if (starters.length >= 11) break;
       starters.push(p);
+      const natural = naturalPositionOf(p);
+      slotSetups.push({
+        position: natural.position,
+        proficiency: natural.proficiency,
+        familiarity: 60,
+      });
     }
   }
 
@@ -522,6 +541,12 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
   return {
     teamId,
     starters,
+    slots: starters.map((player, index) => ({ player, ...slotSetups[index]! })),
+    tactics: tacticsOf(state, teamId).spec,
+    managerTactics:
+      teamId === state.userTeamId
+        ? state.manager.attributes.tactics
+        : state.teams.find((team) => team.id === teamId)?.aiManagerTacticsRating ?? 65,
     bench,
     proneness: pronenessOf(
       state,

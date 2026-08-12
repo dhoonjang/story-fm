@@ -35,6 +35,39 @@ describe("적응도 전력 팩터", () => {
 });
 
 describe("buildStrengthPacket", () => {
+  it("팀 총량을 먼저 나누지 않고 선수×경로 기대값의 합으로 만든다", () => {
+    const packet = buildStrengthPacket(makeSide("a", 75), makeSide("b", 75), { neutral: true });
+    for (const side of ["home", "away"] as const) {
+      const profiles = packet.guide.shotProfiles![side];
+      const shots = profiles.reduce((sum, profile) => sum + profile.expectedShots, 0);
+      const xg = profiles.reduce((sum, profile) => sum + profile.chanceXg, 0);
+      const goals = profiles.reduce((sum, profile) => sum + profile.expectedGoals, 0);
+      expect(shots).toBeCloseTo(packet.guide.expectedShots![side], 1);
+      expect(xg).toBeCloseTo(packet.guide.chanceXg![side], 1);
+      expect(goals).toBeCloseTo(packet.guide.expectedGoals[side], 1);
+      expect(profiles.every((profile) => profile.routes.length === 3)).toBe(true);
+    }
+  });
+
+  it("결정력은 슈팅 접근에 작게 이롭고, 기회 xG 자체는 바꾸지 않는다", () => {
+    const side = (finishing: number) => {
+      const input = makeSide("a", 75);
+      const striker = input.starters.find((slot) => slot.position === "ST")!;
+      striker.player.attributes.finishing = finishing;
+      return input;
+    };
+    const low = buildStrengthPacket(side(40), makeSide("b", 75), { neutral: true });
+    const high = buildStrengthPacket(side(90), makeSide("b", 75), { neutral: true });
+    const strikerId = high.home.lineup.find((player) => player.position === "ST")!.id;
+    const lowProfile = low.guide.shotProfiles!.home.find((profile) => profile.playerId === strikerId)!;
+    const highProfile = high.guide.shotProfiles!.home.find((profile) => profile.playerId === strikerId)!;
+    expect(highProfile.expectedShots).toBeGreaterThan(lowProfile.expectedShots);
+    expect(highProfile.expectedShots / lowProfile.expectedShots).toBeLessThan(1.2);
+    expect(highProfile.routes.map((route) => route.meanXg)).toEqual(
+      lowProfile.routes.map((route) => route.meanXg),
+    );
+    expect(highProfile.expectedGoals).toBeGreaterThan(lowProfile.expectedGoals);
+  });
   it("강팀이 모든 존과 기대 득점에서 우위를 가진다", () => {
     const packet = buildStrengthPacket(makeSide("str", 85), makeSide("wk", 65));
     expect(packet.home.zones.attack).toBeGreaterThan(packet.away.zones.attack);
