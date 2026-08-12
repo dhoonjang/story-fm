@@ -387,6 +387,16 @@ export function startMatch(state: GameState): FlowResult {
 }
 
 /**
+ * 감독이 경기장에 들어섰다 — 입장 확인 창이 닫히고 **킥오프 턴**이 열린다.
+ *
+ * 이 턴에는 아무 사건도 굴리지 않는다. 캐스터가 라커룸에서 이어지는 목소리로
+ * 첫 휘슬만 열고, 구간은 감독이 다음으로 진행할 때부터 간다.
+ */
+export function markEntered(state: GameState): void {
+  if (state.pendingMatch) state.pendingMatch.entered = true;
+}
+
+/**
  * 다음 정지점까지 코어가 굴린다 — **경기 결과가 정해지는 단일 지점**.
  *
  * mock과 실모드가 같은 함수를 쓴다. 차이는 사건을 누가 *이야기하는가*뿐이다

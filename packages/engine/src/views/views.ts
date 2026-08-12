@@ -521,8 +521,8 @@ export interface MatchView {
   /** "전반" · "후반" · "종료" */
   phase: string;
   /**
-   * 아직 킥오프 전인가 — `start_match`는 준비만 하고 **감독이 입장할 때** 공이 구른다.
-   * 화면은 이 값으로 입장 확인 창을 세운다.
+   * 아직 경기장에 들어서기 전인가 — `start_match`는 준비만 하고 **감독이 문을 지날 때**
+   * 화면이 경기로 넘어간다. 화면은 이 값으로 입장 확인 창을 세운다.
    */
   beforeKickoff: boolean;
   /** 존별 전력 — 막대로 견준다 */
@@ -1064,7 +1064,7 @@ function buildMatchView(state: GameState): MatchView | null {
     score: { ...ledger.score },
     minute: ledger.minute,
     phase: MATCH_PHASE_KO[ledger.phase] ?? ledger.phase,
-    beforeKickoff: pending.segment === 0,
+    beforeKickoff: pending.entered !== true,
     /**
      * 매치업은 **맞붙는 두 값**을 견준다 — 공격 존은 우리 공격 대 상대 **수비**다.
      * 같은 존끼리 비교하면(공격 vs 공격) 아무 뜻이 없다.

@@ -35,6 +35,7 @@ import {
   clearTraining,
   addDays,
   diffDays,
+  markEntered,
   startMatch,
   isInjured,
   headCoachOf,
@@ -274,6 +275,25 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
 
   // ── 경기 중 ──────────────────────────────────────────
   if (state.phase === "match") {
+    /**
+     * 킥오프 턴 — **첫 휘슬만.** 감독이 들어선 그 한 턴은 사건을 굴리지 않는다.
+     * 실모드에서 캐스터가 도구 없이 여는 자리와 같은 자리다 (gm.ts의 `kickoff`).
+     */
+    if (state.pendingMatch?.entered !== true) {
+      markEntered(state);
+      const record = state.matches.find((m) => m.id === state.pendingMatch?.matchId);
+      const fixture = record
+        ? `${teamName(record.homeTeamId)} 대 ${teamName(record.awayTeamId)}`
+        : "양 팀";
+      return {
+        text: [
+          `@: *터널을 나선 스물두 명이 자리를 잡는다*`,
+          `@중계: ${fixture}, 곧 킥오프입니다.`,
+          `@중계: 주심이 휘슬을 입에 뭅니다.`,
+        ].join("\n"),
+        toolCalls: calls,
+      };
+    }
     const positionOrders = [...msg.matchAll(/자리 변경 — (.+?)을\(를\) ([A-Z]+)로/gu)];
     const roleOrders = [...msg.matchAll(/역할 변경 — (.+?)을\(를\) .+?\(([a-z0-9_-]+)\)로/gu)];
     if (positionOrders.length > 0 || roleOrders.length > 0) {

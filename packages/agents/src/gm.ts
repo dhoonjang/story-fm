@@ -15,6 +15,7 @@ import {
   formatClock,
   headCoachOf,
   humanizePlayerIds,
+  markEntered,
   minutesOfClock,
   pendingVerdicts,
   scoutReportCard,
@@ -184,6 +185,14 @@ async function runRealGmTurn(
 ): Promise<GmTurnResult> {
   const calls: GmToolCall[] = [];
   const inMatch = state.phase === "match";
+  /**
+   * 킥오프 턴 — **경기의 첫 호흡.** 감독이 경기장에 들어선 그 한 턴이다.
+   *
+   * 도구를 주지 않아 구간이 굴러갈 수 없고, 패킷도 싣지 않는다. 대신 평시 이력을
+   * 그대로 넘겨(`relevantTurns`) 라커룸에서 이어지는 목소리로 첫 휘슬만 연다.
+   * 예전엔 입장과 동시에 20분이 지나가 감독이 킥오프를 본 적이 없었다.
+   */
+  const kickoff = inMatch && state.pendingMatch?.entered !== true;
   const config = agentConfig(inMatch ? "match-caster" : "gm");
   const llm = createGameLLM(config);
 
@@ -226,9 +235,12 @@ async function runRealGmTurn(
           .filter((id) => !pendingBeforeSkip.has(id))
       : [],
   );
-  const tools = inMatch
-    ? buildMatchTools(state, calls, goals, cards, { progressionOnly: operator })
-    : buildGmTools(state, calls, { deferNegotiationIds });
+  const tools = kickoff
+    ? // 첫 호흡엔 손이 없다 — 도구를 주면 모델은 곧장 구간을 굴려 킥오프를 지나친다
+      []
+    : inMatch
+      ? buildMatchTools(state, calls, goals, cards, { progressionOnly: operator })
+      : buildGmTools(state, calls, { deferNegotiationIds });
 
   // 입력은 안정성 순 3층 — ① 고정 프롬프트 ② 레퍼런스 ③ 발화+상태 스냅샷.
   // 앞 두 층만 캐시 프리픽스(0.1×)다 (docs/design/llm-io.md)
@@ -236,7 +248,7 @@ async function runRealGmTurn(
     ? [MATCH_CASTER_SYSTEM, buildMatchReference(state)]
     : [GM_SYSTEM, buildGmReference(state)];
   const stateNote = inMatch
-    ? buildLedgerNote(state)
+    ? buildLedgerNote(state, { withPacket: !kickoff })
     : buildGmStateNote(
         state,
         skipped
@@ -247,7 +259,9 @@ async function runRealGmTurn(
             }
           : null,
       );
-  const history = inMatch ? (state.pendingMatch?.casterHistory ?? []) : buildGmHistory(state);
+  // 킥오프 턴의 이력은 경기 전 대화다 — `relevantTurns`가 그 한 턴만 평시로 읽는다
+  const history =
+    inMatch && !kickoff ? (state.pendingMatch?.casterHistory ?? []) : buildGmHistory(state);
 
   // 헤더가 날짜를 옮기기 전의 시점 — 훈련 결산이 "어느 구간이었나"를 알아야 한다
   const sceneFrom = state.date;
@@ -336,6 +350,8 @@ async function runRealGmTurn(
 
   if (inMatch && state.pendingMatch) {
     state.pendingMatch.casterHistory = result.history;
+    // 첫 휘슬을 불었다 — 이 뒤로는 패킷과 도구를 쥔 보통의 진행 턴이다
+    if (kickoff) markEntered(state);
     if (state.pendingMatch.ledger.phase === "finished") {
       // 브리프는 장부가 살아 있을 때만 만들 수 있다 — finalizeMatch가 지우기 전에
       const brief = buildRatingBrief(state);

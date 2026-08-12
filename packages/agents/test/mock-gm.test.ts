@@ -122,16 +122,25 @@ describe("mock GM — 유저 여정 시나리오", () => {
     }
     expect(state.phase).toBe("matchday");
 
-    // 킥오프는 두 걸음 — 도구가 문을 열고(판만 선다), 감독이 걸어 들어간다
-    const kickoff = runMockGmTurn(state, "경기 시작");
-    expectGmGrammar(kickoff.text);
-    expect(kickoff.toolCalls.map((c) => c.name)).toContain("start_match");
-    expect(kickoff.text).not.toContain("@중계:");
-    expect(state.pendingMatch?.segment).toBe(0);
+    // 킥오프는 세 걸음 — 도구가 문을 열고, 감독이 들어서고, 그다음 공이 구른다
+    const opened = runMockGmTurn(state, "경기 시작");
+    expectGmGrammar(opened.text);
+    expect(opened.toolCalls.map((c) => c.name)).toContain("start_match");
+    expect(opened.text).not.toContain("@중계:");
+    expect(state.pendingMatch?.entered).not.toBe(true);
 
+    // 입장 턴은 첫 휘슬만 — 사건은 아직 없다
     const entered = runMockGmTurn(state, "경기장 입장");
     expectGmGrammar(entered.text);
     expect(entered.text).toContain("@중계:");
+    expect(state.pendingMatch?.entered).toBe(true);
+    expect(state.pendingMatch?.segment).toBe(0);
+    expect(entered.goals ?? []).toHaveLength(0);
+
+    // 구간은 그다음부터 간다
+    const first = runMockGmTurn(state, "계속");
+    expectGmGrammar(first.text);
+    expect(state.pendingMatch?.segment ?? 0).toBeGreaterThan(0);
 
     let guard = 20;
     while (state.phase === "match" && guard-- > 0) {

@@ -318,27 +318,34 @@ export function buildGmStateNote(state: GameState, passed?: TimePassed | null): 
 /**
  * 경기 장부 + 현재 판세 — 매 턴 갱신되는 휘발성 블록. 패킷도 여기(캐시 밖)에
  * 담되 JSON을 통째로 붓지 않고 캐스터가 실제로 읽는 것만 요약한다.
+ *
+ * `withPacket: false`는 **킥오프 턴**이다 — 아직 아무 일도 일어나지 않았는데
+ * 판세를 쥐여 주면 첫 마디부터 우열을 읊는다. 그때 필요한 것은 대진과 선발뿐이다.
  */
-export function buildLedgerNote(state: GameState): string {
+export function buildLedgerNote(state: GameState, options: { withPacket?: boolean } = {}): string {
   const pending = state.pendingMatch;
   const ledger = pending?.ledger;
   if (!ledger || !pending) return "";
+  const packet = options.withPacket === false ? null : pending.packet;
   // 온필드 명단에 개인 전력(패킷의 effective)을 붙인다 — 존 평균만으론 "누가 안 도는가"가 안 보인다
   const effective = new Map(
+    [...(packet?.home.lineup ?? []), ...(packet?.away.lineup ?? [])].map((p) => [p.id, p] as const),
+  );
+  /** 킥오프 턴엔 자리만 — 전력 수치는 패킷과 함께 다음 턴에 온다 */
+  const position = new Map(
     [...(pending.packet?.home.lineup ?? []), ...(pending.packet?.away.lineup ?? [])].map(
-      (p) => [p.id, p] as const,
+      (p) => [p.id, p.position] as const,
     ),
   );
   const withNames = (ids: readonly string[] | undefined): string =>
     (ids ?? [])
       .map((id) => {
         const p = effective.get(id);
-        return p
-          ? `${id}(${playerName(state, id)} ${p.position} ${p.effective})`
-          : `${id}(${playerName(state, id)})`;
+        if (p) return `${id}(${playerName(state, id)} ${p.position} ${p.effective})`;
+        const at = position.get(id);
+        return at ? `${id}(${playerName(state, id)} ${at})` : `${id}(${playerName(state, id)})`;
       })
       .join(", ");
-  const packet = pending.packet;
   const packetLines = packet
     ? [
         ``,
@@ -598,7 +605,11 @@ const HISTORY_STEP = 6;
  * buildMatchBrief·matchDigest가 잇는다.
  */
 function relevantTurns(state: GameState): typeof state.chat {
-  const inMatch = state.phase === "match";
+  /**
+   * 킥오프 멘트 턴은 아직 **라커룸의 연장**이다 — 경기 이력이 비어 있고 첫 마디를
+   * 여는 근거는 경기 전 대화(팀토크·브리핑)다. 그래서 그 한 턴만 평시로 읽는다.
+   */
+  const inMatch = state.phase === "match" && state.pendingMatch?.entered === true;
   const here = state.pendingMatch?.matchId;
   return state.chat.filter((t) =>
     inMatch

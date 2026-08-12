@@ -145,9 +145,10 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await expect(page.getByTestId("tool-시간 경과")).toHaveCount(0);
 
   /**
-   * ── 킥오프는 **두 걸음**이다 ──────────────────────────
-   * GM이 `start_match`로 문을 열고(판이 서고 판세가 계산된다), 감독이 입장
-   * 확인 창을 눌러야 공이 구른다. 문이 열린 것만으로 중계가 시작되면 안 된다.
+   * ── 킥오프는 **세 걸음**이다 ──────────────────────────
+   * GM이 `start_match`로 문을 열고(판이 서고 판세가 계산된다), 감독이 입장 확인
+   * 창을 지나면 중계가 첫 휘슬만 연다. 공이 구르는 것은 그다음 진행부터다 —
+   * 예전엔 입장과 동시에 20분이 지나가 감독이 킥오프를 본 적이 없었다.
    */
   await input.fill("경기 시작하자");
   await page.getByTestId("chat-send").click();
@@ -157,6 +158,8 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await expect(page.getByTestId("kickoff-gate")).toHaveCount(0, { timeout: 20_000 });
   await expect(page.getByTestId("chat-scroll")).toContainText("킥오프", { timeout: 20_000 });
   await expect(page.getByTestId("chat-scroll")).toContainText("중계");
+  // 첫 휘슬 턴은 시계를 움직이지 않는다 — 0분에서 감독의 차례로 돌아온다
+  await expect(page.getByTestId("match-clock").locator("b")).toHaveText("0′", { timeout: 10_000 });
 
   /**
    * 중계 판세 — 스코어는 **화면에 붙어 있고**, 선수 기록은 실시간으로 붙는다.
