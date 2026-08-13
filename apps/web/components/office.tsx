@@ -2114,6 +2114,12 @@ function isoOf(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** "2026-09-01" → "9월 1일" — 달 제목과 같은 표기(앞자리 0 없이) */
+function korDay(iso: string): string {
+  const [, month, day] = iso.split("-");
+  return `${Number(month)}월 ${Number(day)}일`;
+}
+
 type CalEntry = OfficeViews["calendar"]["entries"][number];
 type CalEvent = OfficeViews["calendar"]["events"][string][number];
 
@@ -2305,7 +2311,7 @@ export function CalendarView({ calendar }: { calendar: OfficeViews["calendar"] }
         <span className={openWindow ? "cal-focus open" : "cal-focus"}>
           {openWindow ? (
             <>
-              {openWindow.kind} 이적시장 <b>~{openWindow.closesOn.slice(5)}</b>
+              {openWindow.kind} 이적시장 <b>{korDay(openWindow.closesOn)}까지</b>
             </>
           ) : (
             "이적시장 닫힘"

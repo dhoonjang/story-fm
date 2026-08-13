@@ -4952,7 +4952,6 @@ textarea {
 }
 .cal-focus b {
   color: var(--text);
-  font-variant-numeric: tabular-nums;
 }
 .cal-months {
   display: grid;
