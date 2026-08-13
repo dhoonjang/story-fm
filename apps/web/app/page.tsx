@@ -82,8 +82,9 @@ export default function HomePage() {
       {error && <p className="error-text">{error}</p>}
       {/* "+ 새 게임" 버튼이 바로 위에 있으니 빈 목록에서 다시 권하지 않는다 */}
       {games !== null && games.length === 0 && (
-        <div className="empty" data-testid="no-games">
-          아직 진행 중인 게임이 없습니다
+        <div className="empty home-empty" data-testid="no-games">
+          <IconMark size={22} />
+          아직 게임이 없습니다
         </div>
       )}
 

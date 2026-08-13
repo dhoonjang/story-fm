@@ -646,6 +646,21 @@ textarea {
   flex-direction: column;
   gap: var(--sp-2);
 }
+/* 게임이 없을 때 — 카드가 들어올 자리를 점선으로 비워 둔다. 정렬은 `.empty`의
+   원칙대로 왼쪽(제목·카드와 같은 축), 마크는 머리줄의 초록 마크와 층을 가르려 --dim */
+.empty.home-empty {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-5) var(--sp-4);
+  border: 1px dashed var(--border);
+  border-radius: var(--r-md);
+  font-size: var(--fs-md);
+}
+.home-empty svg {
+  flex-shrink: 0;
+  color: var(--dim);
+}
 .game-card {
   display: flex;
   align-items: center;
@@ -4675,9 +4690,28 @@ textarea {
 .cal-legend .section-title {
   margin: 0;
 }
+/* 이적창 표식 — 라벨은 색, 마감일은 굵기로 두 층으로 갈라 읽게 한다.
+   닫혔을 땐 꺼진 테두리: 초록은 "지금 할 수 있는 일"의 자리다 */
 .cal-focus {
-  font-size: var(--fs-sm);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.cal-focus.open {
+  background: rgba(74, 222, 128, 0.08);
+  border-color: rgba(74, 222, 128, 0.35);
   color: var(--accent);
+}
+.cal-focus b {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
 }
 .cal-months {
   display: grid;

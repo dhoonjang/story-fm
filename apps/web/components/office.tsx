@@ -2300,11 +2300,16 @@ export function CalendarView({ calendar }: { calendar: OfficeViews["calendar"] }
     <div data-testid="view-calendar">
       <div className="cal-legend">
         <span className="section-title">시즌 일정</span>
-        {/* 이적창 상태만 — 훈련 지시 안내는 빈 날 상세에서만 말한다 */}
-        <span className="cal-focus">
-          {openWindow
-            ? `${openWindow.kind} 이적시장 열림 (~${openWindow.closesOn})`
-            : "이적시장 닫힘"}
+        {/* 이적창 상태만 — 훈련 지시 안내는 빈 날 상세에서만 말한다.
+            "열림"은 적지 않는다 — 마감일이 붙어 있고 칩이 초록이면 그게 열림이다 */}
+        <span className={openWindow ? "cal-focus open" : "cal-focus"}>
+          {openWindow ? (
+            <>
+              {openWindow.kind} 이적시장 <b>~{openWindow.closesOn.slice(5)}</b>
+            </>
+          ) : (
+            "이적시장 닫힘"
+          )}
         </span>
       </div>
 
