@@ -48,12 +48,18 @@ Create every independent task first, start every worker, then wait.
 
 ## 4. Wait and settle
 
+Always run the wait in the background. A foreground wait locks the conductor out of
+the conversation for its whole timeout — the user cannot ask anything until it returns.
+
 ```bash
+# Bash tool: run_in_background: true
 orca orchestration check --wait --types worker_done,escalation,question --timeout-ms 900000 --json
 ```
 
 - A timeout or `{count:0}` is a checkpoint. Keep rolling the wait; coding tasks take
   15–60 minutes. Do not substitute `terminal wait --for tui-idle` polling.
+- While waiting, answer the user's questions and do read-only inspection. A request
+  that edits files becomes a new task with deps — never edit as the conductor.
 - Answer a `question` with `orca orchestration reply --id <msg_id> --body <answer> --json`.
   Ask the user first when the call is theirs.
 - Process every message in a Delivery before `--ack <delivery_id>`.
@@ -64,8 +70,12 @@ orca orchestration check --wait --types worker_done,escalation,question --timeou
 
 Workers share one worktree.
 
-- Port 3000 is the user's dev server. Assign each worker a different port.
-- Isolate verification saves with `STORY_FM_DATA_DIR=<tmp>`. Never touch
+- Port 3000 is the user's server; it hot-reloads worker edits from the shared worktree.
+- **Give every worker that runs `pnpm e2e` its own `E2E_SLOT` (1–9), and say which.**
+  The slot forks port, `NEXT_DIST_DIR`, and `STORY_FM_DATA_DIR` together, so slotted
+  runs are concurrent-safe. Leaving it unset means the shared default slot (3399) —
+  two workers there share one server and one save directory.
+- Isolate non-e2e verification saves with `STORY_FM_DATA_DIR=<tmp>`. Never touch
   `apps/web/.data`.
 - No git commits, pushes, stashes, or branch operations.
 - Follow AGENTS.md. Korean comments; update `docs/` before code when behavior changes.

@@ -5,8 +5,8 @@ import {
   interpretBackgroundHeuristic,
   listGameSummaries,
   saveGame,
-  TEAM_CATALOG,
-  TOP_LEAGUES,
+  teamCatalog,
+  topLeagues,
 } from "@story-fm/engine";
 import { runOnboardingTurn } from "@story-fm/agents";
 import { toPayload } from "@/lib/store";
@@ -24,11 +24,11 @@ const CreateSchema = z.object({
  * 2부는 국내 컵 참가 전용이라 부임 대상이 아니다 — 1부만 내려보낸다.
  */
 export function GET() {
-  const leagues = TOP_LEAGUES;
+  const leagues = topLeagues();
   const ids = new Set(leagues.map((l) => l.id));
   return NextResponse.json({
     leagues,
-    teams: TEAM_CATALOG.filter((t) => ids.has(t.leagueId)),
+    teams: teamCatalog().filter((t) => ids.has(t.leagueId)),
     games: listGameSummaries(),
   });
 }
@@ -43,8 +43,8 @@ export async function POST(request: Request) {
     );
   }
   const { teamId, managerName, background, seed } = body.data;
-  const team = TEAM_CATALOG.find((t) => t.id === teamId);
-  if (!team || !TOP_LEAGUES.some((l) => l.id === team.leagueId)) {
+  const team = teamCatalog().find((t) => t.id === teamId);
+  if (!team || !topLeagues().some((l) => l.id === team.leagueId)) {
     return NextResponse.json({ error: `부임할 수 없는 팀: ${teamId}` }, { status: 400 });
   }
 

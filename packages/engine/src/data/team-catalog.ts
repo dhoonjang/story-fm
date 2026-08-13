@@ -18,7 +18,9 @@
  */
 import type { Formation } from "@story-fm/domain";
 import { DEFAULT_TACTICS } from "@story-fm/domain";
-import { LEAGUE_CATALOG, isCupOnlyLeague, isTopLeague, leagueCatalogById } from "./league-catalog";
+import { leagueCatalog, isCupOnlyLeague, isTopLeague, leagueCatalogById } from "./league-catalog";
+import { catalogSource } from "./catalog-source";
+import { readTeamOverride } from "./team-override";
 
 export interface TeamCatalogEntry {
   id: string;
@@ -72,8 +74,11 @@ export interface TeamCatalogEntry {
 export type TacticalStyle =
   "possession" | "high-press" | "transition" | "direct" | "low-block" | "balanced";
 
-/** 2026-27 감독과 주전 구조를 전술 6축으로 옮기기 위한 구단별 운용 정체성. */
-export const TACTICAL_STYLE: Readonly<Record<string, TacticalStyle>> = {
+/**
+ * 2026-27 감독과 주전 구조를 전술 6축으로 옮기기 위한 구단별 운용 정체성.
+ * 시드다 — 지금 값은 `tacticalStyles()`가 답한다 (어드민 편집본 우선).
+ */
+export const TACTICAL_STYLE_SEED: Readonly<Record<string, TacticalStyle>> = {
   arsenal: "possession",
   mancity: "possession",
   manutd: "high-press",
@@ -172,11 +177,21 @@ export const TACTICAL_STYLE: Readonly<Record<string, TacticalStyle>> = {
   lemans: "balanced",
 };
 
-export function tacticalStyleOf(teamId: string): TacticalStyle {
-  return TACTICAL_STYLE[teamId] ?? "balanced";
+const styles = catalogSource<Readonly<Record<string, TacticalStyle>>>(
+  () => readTeamOverride()?.tacticalStyle ?? TACTICAL_STYLE_SEED,
+);
+
+/** 지금 유효한 구단별 운용 정체성 표 */
+export function tacticalStyles(): Readonly<Record<string, TacticalStyle>> {
+  return styles();
 }
 
-export const TEAM_CATALOG: readonly TeamCatalogEntry[] = [
+export function tacticalStyleOf(teamId: string): TacticalStyle {
+  return styles()[teamId] ?? "balanced";
+}
+
+/** 팀 카탈로그 시드 — 편집 전 원본. 읽는 자리는 `teamCatalog()`를 쓴다 */
+export const TEAM_CATALOG_SEED: readonly TeamCatalogEntry[] = [
   // ── 프리미어리그 (잉글랜드) ──
   {
     id: "arsenal",
@@ -1036,21 +1051,30 @@ export const TIER_BASE: Record<1 | 2 | 3 | 4, number> = {
  */
 export const SECOND_DIVISION_PENALTY = 9;
 
-const BY_ID = new Map(TEAM_CATALOG.map((t) => [t.id, t]));
+const teams = catalogSource<readonly TeamCatalogEntry[]>(
+  () => readTeamOverride()?.teams ?? TEAM_CATALOG_SEED,
+);
+
+/** 지금 유효한 팀 카탈로그 — 오버라이드가 있으면 그것, 없으면 시드 */
+export function teamCatalog(): readonly TeamCatalogEntry[] {
+  return teams();
+}
+
+const byId = catalogSource(() => new Map(teamCatalog().map((t) => [t.id, t])));
 
 /** 팀 정체성 조회 — 게임 팀 엔티티는 이름을 갖지 않으므로 표시명은 여기서 온다 */
 export function teamCatalogById(id: string): TeamCatalogEntry | null {
-  return BY_ID.get(id) ?? null;
+  return byId().get(id) ?? null;
 }
 
 /** 리그 소속 팀 — 리그별 일정·순위표의 참가자 목록 */
 export function teamsOfLeague(leagueId: string): TeamCatalogEntry[] {
-  return TEAM_CATALOG.filter((t) => t.leagueId === leagueId);
+  return teamCatalog().filter((t) => t.leagueId === leagueId);
 }
 
 /** 이 팀이 속한 리그 id */
 export function leagueOfTeam(teamId: string): string {
-  return BY_ID.get(teamId)?.leagueId ?? "epl";
+  return byId().get(teamId)?.leagueId ?? "epl";
 }
 
 /** 이 팀이 속한 나라 — 홈그로운 판정(협회 기준)의 근거 */
@@ -1379,6 +1403,6 @@ export function formationOf(teamId: string): Formation {
 
 /** 같은 나라의 전 클럽 (1부 + 2부) — 국내 컵 참가 명단의 원본 */
 export function clubsOfCountry(country: string): TeamCatalogEntry[] {
-  const leagues = new Set(LEAGUE_CATALOG.filter((l) => l.country === country).map((l) => l.id));
-  return TEAM_CATALOG.filter((t) => leagues.has(t.leagueId));
+  const leagues = new Set(leagueCatalog().filter((l) => l.country === country).map((l) => l.id));
+  return teamCatalog().filter((t) => leagues.has(t.leagueId));
 }

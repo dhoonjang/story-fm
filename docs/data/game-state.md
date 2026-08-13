@@ -49,8 +49,14 @@
 
 - `PLAYER_CATALOG`은 시드에서 **결정적으로 파생**된다(`deriveAxes`) — 저장된 표가
   아니라 함수의 결과이고, `overall`은 아예 갖지 않는다(파생).
-- 어드민 편집은 `.data/player-catalog.json` **오버라이드 파일**로 저장되고,
-  있으면 그것이 시드 파생을 대신한다(`saveCatalog`/`resetCatalog`).
+- 어드민 편집은 **오버라이드 파일**로 저장되고, 있으면 그것이 코드의 시드를
+  대신한다 — 선수는 `.data/player-catalog.json`, 팀·전술 성향·구단 프로필은
+  `.data/team-catalog.json`, 리그는 `.data/league-catalog.json`, 컵(유럽 + 국내)은
+  `.data/cup-catalog.json`. 넷 다 원자적 쓰기이고, 읽는 자리는 상수가 아니라
+  접근자 함수를 쓴다(`playerCatalog()` · `teamCatalog()` · `leagueCatalog()` ·
+  `cupCatalog()` · `domesticCupCatalog()`) — 모듈 로드 시점에 굳으면 편집이
+  새 게임에 닿지 않는다. 편집 범위와 검증 불변식은 [team.md](team.md) §1 ·
+  [competition.md](competition.md) §1.
 - `LeagueCatalogEntry.kind`가 그 리그가 게임에서 하는 일을 정한다 —
   `playable`(5대 리그) · `cup-only`(2부, 컵만) · `market-only`(사우디·MLS, 경기 없음) ·
   `free`(무소속 — 리그가 아니라 리그 밖).
@@ -363,4 +369,5 @@ tmp → rename의 원자적 교체이고, 교체 전에 직전 세이브를 `.ba
 | 카탈로그 원본 | `packages/engine/src/data/` |
 | 파생 — 순위표 · 등록 · 안개 · 정착 | `competition/season.ts` · `squad/registration.ts` · `squad/scouting.ts` · `squad/settling.ts` |
 | 승강 (`leagueOf`) | `packages/engine/src/competition/promotion.ts` |
-| 어드민 카탈로그 편집 | `packages/engine/src/world/admin.ts` · `apps/web/app/admin/` |
+| 어드민 카탈로그 편집 | `packages/engine/src/world/admin.ts`(선수) · `admin-team.ts` · `admin-competition.ts` · `apps/web/app/admin/` |
+| 카탈로그 오버라이드 배관 · 불변식 | `packages/engine/src/data/catalog-source.ts` · `world/catalog-invariants.ts` |

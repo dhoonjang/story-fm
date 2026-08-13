@@ -1,4 +1,4 @@
-import { TOP_LEAGUES } from "../data/league-catalog";
+import { topLeagues } from "../data/league-catalog";
 import { leagueOfTeam, teamCatalogById } from "../data/team-catalog";
 import { inventPersonName } from "../world/persona";
 import { makeRng, randInt } from "../core/rng";
@@ -73,7 +73,7 @@ const USER_BOARD_FLOOR = 25;
 /** 그 팀이 리그에서 몇 위인가 (1부만 — 2부는 리그전이 없다) */
 function positionOf(state: GameState, teamId: string): { position: number; played: number } | null {
   const leagueId = leagueOfTeam(teamId);
-  if (!TOP_LEAGUES.some((l) => l.id === leagueId)) return null;
+  if (!topLeagues().some((l) => l.id === leagueId)) return null;
   const table = computeStandings(state, leagueId);
   const index = table.findIndex((r) => r.teamId === teamId);
   if (index < 0) return null;

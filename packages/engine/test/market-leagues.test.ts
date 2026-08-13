@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { ageOf } from "@story-fm/domain";
 import {
-  MARKET_LEAGUES,
+  marketLeagues,
   MARKET_LEAGUE_BUDGET,
-  TEAM_CATALOG,
+  teamCatalog,
   buildTransferWindows,
   computeStandings,
   dealOdds,
@@ -23,11 +23,11 @@ import { createTestGame } from "./helpers";
  * 설계 근거는 docs/simulation/transfer.md.
  */
 
-const marketTeams = () => TEAM_CATALOG.filter((t) => isMarketOnlyLeague(t.leagueId));
+const marketTeams = () => teamCatalog().filter((t) => isMarketOnlyLeague(t.leagueId));
 
 describe("세계에서의 자리 — 경기를 하지 않는다", () => {
   it("두 리그가 등록돼 있고 클럽이 붙어 있다", () => {
-    expect(MARKET_LEAGUES.map((l) => l.id).sort()).toEqual(["mls", "saudi"]);
+    expect(marketLeagues().map((l) => l.id).sort()).toEqual(["mls", "saudi"]);
     expect(marketTeams().length).toBeGreaterThanOrEqual(8);
   });
 
@@ -40,7 +40,7 @@ describe("세계에서의 자리 — 경기를 하지 않는다", () => {
 
   it("순위표에 오르지 않고 국내 컵에도 안 들어간다", () => {
     const state = createTestGame();
-    for (const league of MARKET_LEAGUES) {
+    for (const league of marketLeagues()) {
       expect(computeStandings(state, league.id)).toEqual([]);
     }
     const ids = new Set(marketTeams().map((t) => t.id));

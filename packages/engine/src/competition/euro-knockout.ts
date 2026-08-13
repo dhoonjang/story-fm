@@ -1,7 +1,7 @@
 import type { MatchRecord, MatchStage } from "@story-fm/domain";
 import { addDays, sortEntries } from "./calendar";
 import {
-  CUP_CATALOG,
+  cupCatalog,
   competitionShortName,
   cupCatalogById,
   knockoutStages,
@@ -246,7 +246,7 @@ function pairUp(teams: string[]): Array<[string, string]> {
  * 우승·트로피는 시즌 리뷰가 맡는다 (`reviewSeason` — 결승은 리그 종료 뒤에 열린다).
  */
 export function advanceEuroKnockouts(state: GameState, digest: string[]): void {
-  for (const cup of CUP_CATALOG) {
+  for (const cup of cupCatalog()) {
     if (!euroLeaguePhaseDone(state, cup.id)) continue;
     // 참가비·승무 수당 — 리그 페이즈가 끝나면 한 번에 정산된다
     payLeaguePhasePrizes(state, cup.id, digest);

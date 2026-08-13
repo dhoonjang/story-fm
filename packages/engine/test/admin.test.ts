@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { ATTRIBUTE_AXES, ageOf, naturalPositionOf, roleFit } from "@story-fm/domain";
 import {
-  TEAM_CATALOG,
+  teamCatalog,
   adminAddCatalogPlayer,
   adminCatalog,
   adminRemoveCatalogPlayer,
@@ -54,7 +54,7 @@ function addInput(
 describe("카탈로그 조회", () => {
   it("전 클럽 · 3,800명+ · 파생값(나이·OVR·주 포지션)을 함께 준다", () => {
     const teams = adminCatalog();
-    expect(teams).toHaveLength(TEAM_CATALOG.length);
+    expect(teams).toHaveLength(teamCatalog().length);
     expect(teams.reduce((s, t) => s + t.players.length, 0)).toBeGreaterThanOrEqual(3800);
     const row = teams[0]!.players[0]!;
     expect(row.age).toBe(ageOf(row.birthdate, CATALOG_AGE_REF));

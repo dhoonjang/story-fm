@@ -2,7 +2,7 @@ import type { GamePlayer } from "@story-fm/domain";
 import { ageOf, naturalPositionOf, weightSlotOf, type WeightSlot } from "@story-fm/domain";
 import { clubProfile } from "../data/club-profile";
 import { isTopLeague, leagueCatalogById } from "../data/league-catalog";
-import { TEAM_CATALOG, teamCatalogById } from "../data/team-catalog";
+import { teamCatalog, teamCatalogById } from "../data/team-catalog";
 
 /**
  * 주급 모델 — **구단 예산을 스쿼드에 나눈다** (club-finance.md).
@@ -89,7 +89,7 @@ function leagueWageLevel(leagueId: string): number {
 
 /** 구단의 주간 임금 예산 (£/주) — 리그 수준 × 성적 등급 × 브랜드 규모 */
 export function clubWageBudget(teamId: string): number {
-  const team = teamCatalogById(teamId) ?? TEAM_CATALOG[0]!;
+  const team = teamCatalogById(teamId) ?? teamCatalog()[0]!;
   const brand = clubProfile(teamId, team.tier).commercialTier;
   const level = leagueWageLevel(team.leagueId);
   // 브랜드가 클수록 리그 배율이 1에 가까워진다

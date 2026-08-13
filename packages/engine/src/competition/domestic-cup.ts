@@ -9,7 +9,7 @@ import {
   tooClose,
 } from "./calendar";
 import {
-  DOMESTIC_CUP_CATALOG,
+  domesticCupCatalog,
   DOMESTIC_CUP_SIZE,
   DOMESTIC_STAGES,
   domesticCupById,
@@ -732,7 +732,7 @@ function cupRunsThisSeason(state: GameState, cup: DomesticCupEntry): boolean {
  * 우승·트로피는 시즌 리뷰가 확정한다 (`reviewDomesticCups`).
  */
 export function advanceDomesticCups(state: GameState, digest: string[]): void {
-  for (const cup of DOMESTIC_CUP_CATALOG) {
+  for (const cup of domesticCupCatalog()) {
     if (!cupRunsThisSeason(state, cup)) continue;
     let previousWinners: string[] | null = null;
 
@@ -856,7 +856,7 @@ function syncCupRounds(state: GameState): void {
  */
 export function reviewDomesticCups(state: GameState): string[] {
   const digest: string[] = [];
-  for (const cup of DOMESTIC_CUP_CATALOG) {
+  for (const cup of domesticCupCatalog()) {
     const champion = domesticChampion(state, cup.id);
     if (!champion) continue;
     const runnerUp = domesticRunnerUp(state, cup.id);
@@ -907,7 +907,7 @@ export function domesticCupWinners(
   state: GameState,
 ): Record<string, { uel?: string; uecl?: string }> {
   const out: Record<string, { uel?: string; uecl?: string }> = {};
-  for (const cup of DOMESTIC_CUP_CATALOG) {
+  for (const cup of domesticCupCatalog()) {
     const champion = domesticChampion(state, cup.id);
     if (!champion) continue;
     // 티켓은 그 나라 1부 리그의 몫에서 나간다 — 2부 클럽이 우승해도 마찬가지다

@@ -36,6 +36,38 @@ TeamCatalogEntry {
 - 스쿼드는 실선수 시드가 있으면 그것으로, 없으면 `tier` 기준선에서 절차 생성된다
   — 카탈로그에 팀을 추가하면 명단이 저절로 채워진다.
 
+### 오버라이드 — 어드민 편집 (`.data/team-catalog.json`)
+
+코드의 표는 **시드**(`TEAM_CATALOG_SEED`)이고, 데이터 디렉터리에 오버라이드 파일이
+있으면 그것이 시드를 대신한다. 선수 카탈로그(`.data/player-catalog.json`)와 같은
+구조다 — 원자적 쓰기(tmp → rename), 편집은 **이후 새로 시작하는 게임**의 초기치가
+되고 진행 중인 세이브는 영향받지 않는다.
+
+읽는 자리는 상수가 아니라 **접근자 함수**를 쓴다 — `teamCatalog()` ·
+`tacticalStyles()` · `clubProfiles()`. 파생 맵(`teamCatalogById` 등)도 데이터
+디렉터리와 편집 세대를 키로 삼는 lazy 캐시라, 모듈 로드 시점에 굳지 않는다.
+
+편집 가능 범위는 **구조 필드까지 전부**다.
+
+| 표 | 편집 가능 | 편집 불가 |
+| --- | --- | --- |
+| `TeamCatalogEntry` | `name` `shortName` `leagueId` `tier` `formation` | `id` |
+| `TACTICAL_STYLE` | 구단별 운용 정체성 6종 | — |
+| `CLUB_PROFILES` | `stadium` `capacity` `commercialTier` | — |
+| `DEFAULT_XI` | — (선수 카탈로그와 얽혀 있다) | 전부 |
+
+세 표는 **한 파일에 함께** 저장된다. 갈라 두면 팀을 추가할 때 이름은 있는데 구장이
+없는 중간 상태가 생긴다.
+
+팀 추가·삭제는 선수 카탈로그도 함께 맞춘다 — **선수 편집본이 있을 때만**이다.
+편집본이 없으면 선수 카탈로그는 팀 카탈로그에서 매번 새로 파생되므로 손댈 것이 없고,
+있으면 그 파일이 진실이라 추가한 팀의 스쿼드를 절차 생성해 붙이고 지운 팀의 선수를
+빼낸다.
+
+저장은 §8의 불변식을 먼저 확인하고, 어기면 한국어 메시지로 거절한다. 다만 국내 컵
+32클럽만은 **경고**다 — 어기면 컵이 열리지 않을 뿐 크래시가 아니고, 막으면 클럽을
+한 팀도 더하거나 뺄 수 없다.
+
 ### `GAME_TEAM`이 얇은 이유
 
 세이브의 팀 엔티티에는 **세 필드뿐**이다: `aiManagerTacticsRating`(AI 감독의 전술
@@ -243,7 +275,11 @@ WorldScope { leagues, teamsPerLeague, cups, markets }
   표현되는 것이 그 결과다 — `leagueId`를 덮어쓰면 다음 게임의 리그 구성이 함께
   흔들린다.
 - **리그당 팀 수는 짝수다.** 홀수면 라운드마다 한 팀이 쉬어 편성에 부전승이 생긴다
-  (축소 세계도 `teamsPerLeague`를 짝수로 내린다).
+  (축소 세계도 `teamsPerLeague`를 짝수로 내린다). 리그전을 도는 리그는 2~20팀이다 —
+  달력이 38라운드 골격이라 20팀을 넘으면 배치할 매치위크가 모자란다.
+- **어드민 편집도 이 불변식을 지킨다.** 팀의 `leagueId` 변경·추가·삭제는 저장
+  시점에 막힌다(`world/catalog-invariants.ts`) — 어기면 실패가 편집한 순간이 아니라
+  한참 뒤 새 게임을 시작할 때 터진다.
 - **나라별 1부 + 2부는 정확히 32클럽이다.** 국내 컵 브래킷이 2의 거듭제곱이어야
   부전승이 없고, 32가 아니면 그 시즌 컵이 통째로 열리지 않는다.
 - **무소속은 클럽이 아니다.** 스쿼드·전력·순위표·재정을 도는 순회는 `isClubTeam`
@@ -279,6 +315,9 @@ WorldScope { leagues, teamsPerLeague, cups, markets }
 | 팀 카탈로그 · 체급 · 지정 선발             | `packages/engine/src/data/team-catalog.ts`             |
 | 리그 카탈로그 (`kind` · 계수 · 중계권)     | `packages/engine/src/data/league-catalog.ts`           |
 | 구단 프로필 (구장 · 브랜드)                | `packages/engine/src/data/club-profile.ts`             |
+| 카탈로그 오버라이드 (읽기·쓰기·캐시)       | `packages/engine/src/data/catalog-source.ts` · `team-override.ts` |
+| 팀 어드민 (조회 · 편집 · 추가 · 삭제)      | `packages/engine/src/world/admin-team.ts`              |
+| 카탈로그 불변식 (순수)                     | `packages/engine/src/world/catalog-invariants.ts`      |
 | 등록 명단 규칙 (순수)                      | `packages/domain/src/squad-rules.ts`                   |
 | 등록 명단 — 상태에 붙이는 층               | `packages/engine/src/squad/registration.ts`            |
 | 팀 엔티티 (Zod)                            | `packages/domain/src/team.ts`                          |

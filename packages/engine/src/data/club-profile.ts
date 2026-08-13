@@ -13,14 +13,20 @@
  *   격차의 원인이므로 tier로 뭉개면 클럽이 구분되지 않는다.
  *
  * 등재되지 않은 팀(어드민 추가 등)은 tier 기준 폴백을 쓴다.
+ *
+ * 아래 표는 **시드**다 — 어드민 편집본은 팀 오버라이드 파일에 함께 실린다
+ * (`data/team-override.ts`). 지금 값은 `clubProfiles()`가 답한다.
  */
+import { catalogSource } from "./catalog-source";
+import { readTeamOverride } from "./team-override";
+
 export interface ClubProfile {
   stadium: string;
   capacity: number;
   commercialTier: 1 | 2 | 3 | 4;
 }
 
-export const CLUB_PROFILES: Record<string, ClubProfile> = {
+export const CLUB_PROFILES_SEED: Record<string, ClubProfile> = {
   // ── 프리미어리그 ──
   arsenal: { stadium: "에미레이츠 스타디움", capacity: 60_704, commercialTier: 1 },
   mancity: { stadium: "에티하드 스타디움", capacity: 61_000, commercialTier: 1 },
@@ -136,6 +142,15 @@ const TIER_FALLBACK: Record<1 | 2 | 3 | 4, ClubProfile> = {
   4: { stadium: "홈 구장", capacity: 22_000, commercialTier: 4 },
 };
 
+const profiles = catalogSource<Record<string, ClubProfile>>(
+  () => readTeamOverride()?.clubProfiles ?? CLUB_PROFILES_SEED,
+);
+
+/** 지금 유효한 구단 프로필 표 */
+export function clubProfiles(): Record<string, ClubProfile> {
+  return profiles();
+}
+
 export function clubProfile(teamId: string, tier: 1 | 2 | 3 | 4): ClubProfile {
-  return CLUB_PROFILES[teamId] ?? TIER_FALLBACK[tier];
+  return profiles()[teamId] ?? TIER_FALLBACK[tier];
 }

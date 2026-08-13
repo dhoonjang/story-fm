@@ -16,6 +16,9 @@ export * from "./data/league-catalog";
 export * from "./data/cup-catalog";
 export * from "./data/domestic-cup-catalog";
 export * from "./data/club-profile";
+export * from "./data/catalog-source";
+export * from "./data/team-override";
+export * from "./data/cup-override";
 
 // world — 새 게임의 세계 구축 (능력치 파생·카탈로그 빌드·생성·주급·인물)
 export * from "./world/attributes";
@@ -26,6 +29,9 @@ export * from "./world/generate";
 export * from "./world/wages";
 export * from "./world/onboarding";
 export * from "./world/admin";
+export * from "./world/admin-team";
+export * from "./world/admin-competition";
+export * from "./world/catalog-invariants";
 export * from "./world/scope";
 
 // competition — 시즌 달력·리그·컵·유럽 대항전

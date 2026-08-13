@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  DOMESTIC_CUP_CATALOG,
+  domesticCupCatalog,
   advanceTime,
   allMatchesDone,
   domesticChampion,
@@ -23,7 +23,7 @@ const dayOf = (iso: string) => new Date(`${iso}T00:00:00Z`).getUTCDay();
 describe("결승 목표일은 그 시즌의 요일에 맞는다", () => {
   it("어느 시즌에도 대회가 허용한 요일에 앉는다", () => {
     for (let season = 1; season <= 8; season++) {
-      for (const cup of DOMESTIC_CUP_CATALOG) {
+      for (const cup of domesticCupCatalog()) {
         const target = stageTarget(season, cup, "final");
         expect(finalWeekdays(cup), `${cup.id} S${season} 목표 ${target}`).toContain(dayOf(target));
       }
@@ -32,7 +32,7 @@ describe("결승 목표일은 그 시즌의 요일에 맞는다", () => {
 
   it("옮기더라도 사흘 안이다 — 대회 골격은 그대로다", () => {
     for (let season = 1; season <= 8; season++) {
-      for (const cup of DOMESTIC_CUP_CATALOG) {
+      for (const cup of domesticCupCatalog()) {
         const [month, day] = cup.windows.final;
         const target = stageTarget(season, cup, "final");
         const raw = Date.UTC(Number(target.slice(0, 4)), month - 1, day);
@@ -84,13 +84,13 @@ describe("두 시즌을 이어 돌려도 컵이 끝난다", () => {
   it("여섯 국내 컵이 모두 우승 팀을 낸다 — 나라를 가리지 않는다", () => {
     // 우리 나라 컵만 기다리면 쿠프·포칼 결승이 안 치러진 채 시즌이 넘어가고,
     // 그 나라 유럽 티켓 한 장이 순위만으로 나간다
-    for (const cup of DOMESTIC_CUP_CATALOG) {
+    for (const cup of domesticCupCatalog()) {
       expect(domesticChampion(state, cup.id), `${cup.id} 우승 팀 없음`).toBeTruthy();
     }
   });
 
   it("결승은 두 번째 시즌에도 규정 요일에 선다", () => {
-    for (const cup of DOMESTIC_CUP_CATALOG) {
+    for (const cup of domesticCupCatalog()) {
       const final = domesticStageMatches(state, cup.id, "final")[0];
       expect(final, `${cup.id} 결승 없음`).toBeTruthy();
       expect(finalWeekdays(cup), `${cup.id} 결승 ${final!.date}`).toContain(dayOf(final!.date));

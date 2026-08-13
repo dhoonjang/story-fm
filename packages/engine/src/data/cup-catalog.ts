@@ -13,6 +13,8 @@
 import type { MatchStage } from "@story-fm/domain";
 import { domesticCupById, domesticStageLabel, isDomesticCup } from "./domestic-cup-catalog";
 import { leagueName } from "./league-catalog";
+import { catalogSource } from "./catalog-source";
+import { readCupOverride } from "./cup-override";
 
 export interface CupCatalogEntry {
   id: string;
@@ -58,7 +60,8 @@ export interface CupCatalogEntry {
   };
 }
 
-export const CUP_CATALOG: readonly CupCatalogEntry[] = [
+/** 대항전 카탈로그 시드 — 편집 전 원본. 읽는 자리는 `cupCatalog()`를 쓴다 */
+export const CUP_CATALOG_SEED: readonly CupCatalogEntry[] = [
   {
     id: "ucl",
     name: "UEFA 챔피언스리그",
@@ -112,26 +115,35 @@ export const CUP_CATALOG: readonly CupCatalogEntry[] = [
   },
 ];
 
-const BY_ID = new Map(CUP_CATALOG.map((c) => [c.id, c]));
+const cups = catalogSource<readonly CupCatalogEntry[]>(
+  () => readCupOverride()?.europe ?? CUP_CATALOG_SEED,
+);
+
+/** 지금 유효한 대항전 카탈로그 — 오버라이드가 있으면 그것, 없으면 시드 */
+export function cupCatalog(): readonly CupCatalogEntry[] {
+  return cups();
+}
+
+const byId = catalogSource(() => new Map(cupCatalog().map((c) => [c.id, c])));
 
 export function cupCatalogById(id: string): CupCatalogEntry | null {
-  return BY_ID.get(id) ?? null;
+  return byId().get(id) ?? null;
 }
 
 /** 유럽 대항전인가 — 유럽 원정비·리그 페이즈 순위표처럼 **대항전 고유**의 판단에 쓴다 */
 export function isEuroCup(competitionId: string): boolean {
-  return BY_ID.has(competitionId);
+  return byId().has(competitionId);
 }
 
 /** 컵인가 (유럽 대항전 + 국내 컵) — "리그가 아니다"를 물을 때 쓴다 */
 export function isCup(competitionId: string): boolean {
-  return BY_ID.has(competitionId) || isDomesticCup(competitionId);
+  return byId().has(competitionId) || isDomesticCup(competitionId);
 }
 
 /** 대회 표시명 — 리그든 컵이든 competitionId 하나로 이름을 얻는다 */
 export function competitionName(competitionId: string): string {
   return (
-    BY_ID.get(competitionId)?.name ??
+    byId().get(competitionId)?.name ??
     domesticCupById(competitionId)?.name ??
     leagueName(competitionId)
   );
@@ -139,7 +151,7 @@ export function competitionName(competitionId: string): string {
 
 export function competitionShortName(competitionId: string): string {
   return (
-    BY_ID.get(competitionId)?.short ??
+    byId().get(competitionId)?.short ??
     domesticCupById(competitionId)?.short ??
     leagueName(competitionId)
   );

@@ -10,7 +10,7 @@ import {
   seedCatalog,
 } from "./catalog";
 import { claimPlayerId } from "./player-id";
-import { TEAM_CATALOG, teamCatalogById } from "../data/team-catalog";
+import { teamCatalog, teamCatalogById } from "../data/team-catalog";
 
 /**
  * 선수 카탈로그 어드민 — **게임과 무관한 초기치 DB만** 편집한다 (v6 2-레이어).
@@ -81,7 +81,7 @@ function toRow(entry: PlayerCatalogEntry): CatalogPlayerRow {
 /** 전 팀 카탈로그 (어드민 목록) */
 export function adminCatalog(): CatalogTeam[] {
   const entries = playerCatalog();
-  return TEAM_CATALOG.map((t) => ({
+  return teamCatalog().map((t) => ({
     teamId: t.id,
     teamName: t.name,
     tier: t.tier,

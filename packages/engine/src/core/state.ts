@@ -68,7 +68,7 @@ import { generateYouthPlayer } from "../world/generate";
 import { ensureSquadNumbers } from "../squad/numbers";
 import { hasCups, scopedTeams, type WorldScope } from "../world/scope";
 import {
-  TEAM_CATALOG,
+  teamCatalog,
   type TeamCatalogEntry,
   countryOfTeam,
   formationOf,
@@ -982,7 +982,7 @@ function buildInitialSquads(
   players: GamePlayer[],
   seed: number,
   formations: Map<string, Formation>,
-  teams: readonly TeamCatalogEntry[] = TEAM_CATALOG,
+  teams: readonly TeamCatalogEntry[] = teamCatalog(),
 ): void {
   const seasonStartYear = 2026;
   // 2군을 메울 유스가 여기서 태어난다 — id는 세계 전체에서 유일해야 한다
@@ -1522,7 +1522,7 @@ export const MATCHDAY_BENCH = 9;
 
 export function createGame(input: CreateGameInput): GameState {
   const seed = input.seed ?? randInt(makeRng(Date.now() % 2 ** 31, "seed"), 1, 2 ** 30);
-  if (!TEAM_CATALOG.some((t) => t.id === input.userTeamId)) {
+  if (!teamCatalog().some((t) => t.id === input.userTeamId)) {
     throw new Error(`알 수 없는 팀: ${input.userTeamId}`);
   }
   const season = 1;

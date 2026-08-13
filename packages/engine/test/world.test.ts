@@ -13,8 +13,8 @@ import {
 } from "@story-fm/domain";
 import {
   DEFAULT_XI,
-  TACTICAL_STYLE,
-  TEAM_CATALOG,
+  tacticalStyles,
+  teamCatalog,
   catalogOfTeam,
   defaultXiIds,
   defaultXiSlugs,
@@ -44,7 +44,7 @@ import {
 import { createTestGame, userFixtureCount } from "./helpers";
 
 /** 스쿼드를 갖는 팀 — 무소속(`free`)은 비어 있게 시작한다 */
-const SQUAD_TEAMS = TEAM_CATALOG.filter((t) => t.leagueId !== "free");
+const SQUAD_TEAMS = teamCatalog().filter((t) => t.leagueId !== "free");
 
 describe("선수 카탈로그 (불변 초기치 DB)", () => {
   const catalog = playerCatalog();
@@ -261,12 +261,12 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
 
   it("팀·선수·전술·재정·계약이 인스턴스화된다", () => {
     // 1부 96 + 2부 64 — 2부는 리그전을 돌지 않지만 컵 참가자라 엔티티는 갖는다
-    expect(state.teams).toHaveLength(TEAM_CATALOG.length);
+    expect(state.teams).toHaveLength(teamCatalog().length);
     expect(state.players.length).toBeGreaterThanOrEqual(3800);
     // 무소속 클럽은 비어 있게 시작한다
     expect(playersOf(state, "freeagents")).toHaveLength(0);
-    expect(state.tactics).toHaveLength(TEAM_CATALOG.length);
-    expect(state.finances).toHaveLength(TEAM_CATALOG.length);
+    expect(state.tactics).toHaveLength(teamCatalog().length);
+    expect(state.finances).toHaveLength(teamCatalog().length);
     expect(state.contracts).toHaveLength(state.players.length);
     for (const p of state.players) {
       expect(() => GamePlayerSchema.parse(p)).not.toThrow();
@@ -303,7 +303,7 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
   });
 
   it("구단마다 자기 모양으로 시작한다 — 리서치 값 + 스쿼드 적합", () => {
-    const topFlight = TEAM_CATALOG.filter((t) => isTopFlight(t.id));
+    const topFlight = teamCatalog().filter((t) => isTopFlight(t.id));
     // 1부는 전부 리서치한 기본 포메이션을 갖는다
     expect(topFlight.every((t) => t.formation !== undefined)).toBe(true);
 
@@ -338,10 +338,10 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
   });
 
   it("1부 96팀은 모두 조사된 전술 정체성을 갖는다", () => {
-    const topFlight = TEAM_CATALOG.filter((team) => isTopFlight(team.id));
+    const topFlight = teamCatalog().filter((team) => isTopFlight(team.id));
     expect(topFlight).toHaveLength(96);
-    expect(topFlight.filter((team) => TACTICAL_STYLE[team.id] === undefined)).toEqual([]);
-    expect(new Set(topFlight.map((team) => TACTICAL_STYLE[team.id])).size).toBe(6);
+    expect(topFlight.filter((team) => tacticalStyles()[team.id] === undefined)).toEqual([]);
+    expect(new Set(topFlight.map((team) => tacticalStyles()[team.id])).size).toBe(6);
   });
 
   it("아스톤 빌라 기본 XI는 왓킨스를 9번으로 쓰는 4-2-3-1 코어다", () => {

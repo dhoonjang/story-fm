@@ -32,6 +32,8 @@
  * 대진표 확정형), **홈 배정 규정**, 그리고 **우승팀의 유럽 진출권**.
  */
 import type { MatchStage } from "@story-fm/domain";
+import { catalogSource } from "./catalog-source";
+import { readCupOverride } from "./cup-override";
 
 export interface DomesticCupEntry {
   id: string;
@@ -139,12 +141,13 @@ export function domesticStageLabel(
   round = 1,
   twoLegged = false,
 ): string {
-  const entry = typeof cup === "string" ? BY_ID.get(cup) : cup;
+  const entry = typeof cup === "string" ? byId().get(cup) : cup;
   const base = entry?.stageNames?.[stage] ?? STAGE_KO[stage] ?? stage;
   return twoLegged && stage !== "final" ? `${base} ${round}차전` : base;
 }
 
-export const DOMESTIC_CUP_CATALOG: readonly DomesticCupEntry[] = [
+/** 국내 컵 카탈로그 시드 — 편집 전 원본. 읽는 자리는 `domesticCupCatalog()`를 쓴다 */
+export const DOMESTIC_CUP_CATALOG_SEED: readonly DomesticCupEntry[] = [
   {
     id: "facup",
     name: "FA컵",
@@ -369,19 +372,28 @@ export const DOMESTIC_CUP_CATALOG: readonly DomesticCupEntry[] = [
   },
 ];
 
-const BY_ID = new Map(DOMESTIC_CUP_CATALOG.map((c) => [c.id, c]));
+const cups = catalogSource<readonly DomesticCupEntry[]>(
+  () => readCupOverride()?.domestic ?? DOMESTIC_CUP_CATALOG_SEED,
+);
+
+/** 지금 유효한 국내 컵 카탈로그 — 오버라이드가 있으면 그것, 없으면 시드 */
+export function domesticCupCatalog(): readonly DomesticCupEntry[] {
+  return cups();
+}
+
+const byId = catalogSource(() => new Map(domesticCupCatalog().map((c) => [c.id, c])));
 
 export function domesticCupById(id: string): DomesticCupEntry | null {
-  return BY_ID.get(id) ?? null;
+  return byId().get(id) ?? null;
 }
 
 export function isDomesticCup(competitionId: string): boolean {
-  return BY_ID.has(competitionId);
+  return byId().has(competitionId);
 }
 
 /** 이 나라의 국내 컵 — 명성 순 (잉글랜드는 FA컵 → 리그컵) */
 export function domesticCupsOfCountry(country: string): DomesticCupEntry[] {
-  return DOMESTIC_CUP_CATALOG.filter((c) => c.country === country).sort(
-    (a, b) => a.prestige - b.prestige,
-  );
+  return domesticCupCatalog()
+    .filter((c) => c.country === country)
+    .sort((a, b) => a.prestige - b.prestige);
 }

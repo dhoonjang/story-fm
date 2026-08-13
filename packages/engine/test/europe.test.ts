@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  CUP_CATALOG,
+  cupCatalog,
   buildAllEuroMatches,
   buildAllLeagueMatches,
   buildEuroEntrants,
@@ -34,7 +34,7 @@ const ENTRANTS = buildEuroEntrants(1, 42);
 
 describe("대항전 참가 배정", () => {
   it("리그별 티켓 수만큼, 상위 대회와 겹치지 않게 배정된다", () => {
-    for (const cup of CUP_CATALOG) {
+    for (const cup of cupCatalog()) {
       const entrants = europeanEntrants(cup.id, 1, 42);
       expect(entrants, cup.id).toHaveLength(cup.size);
       expect(new Set(entrants).size, cup.id).toBe(cup.size);
@@ -46,7 +46,7 @@ describe("대항전 참가 배정", () => {
       }
     }
     // 한 팀이 두 대회에 동시에 나가지 않는다
-    const all = CUP_CATALOG.flatMap((c) => europeanEntrants(c.id, 1, 42));
+    const all = cupCatalog().flatMap((c) => europeanEntrants(c.id, 1, 42));
     expect(new Set(all).size).toBe(all.length);
   });
 
@@ -101,7 +101,7 @@ describe("대항전 참가 배정", () => {
   it("euroCompetitionOf는 그 팀이 나가는 대회를 되돌린다", () => {
     const ucl = europeanEntrants("ucl", 1, 42)[0]!;
     expect(euroCompetitionOf(ENTRANTS, ucl)).toBe("ucl");
-    const inEurope = new Set(CUP_CATALOG.flatMap((c) => europeanEntrants(c.id, 1, 42)));
+    const inEurope = new Set(cupCatalog().flatMap((c) => europeanEntrants(c.id, 1, 42)));
     const outsider = teamsOfLeague("epl").find((t) => !inEurope.has(t.id));
     if (outsider) expect(euroCompetitionOf(ENTRANTS, outsider.id)).toBeNull();
   });
@@ -111,7 +111,7 @@ describe("대항전 리그 페이즈 편성", () => {
   const matches = buildAllEuroMatches(1, 42, buildEuroEntrants(1, 42));
 
   it("대회마다 팀당 정해진 경기 수 · 홈 절반 · 상대는 모두 다르다", () => {
-    for (const cup of CUP_CATALOG) {
+    for (const cup of cupCatalog()) {
       const mine = matches.filter((m) => m.competitionId === cup.id);
       expect(mine, cup.id).toHaveLength((cup.size * cup.matchesPerTeam) / 2);
       for (const teamId of europeanEntrants(cup.id, 1, 42)) {
@@ -131,7 +131,7 @@ describe("대항전 리그 페이즈 편성", () => {
   });
 
   it("라운드마다 각 팀이 정확히 한 경기 — 같은 날 두 경기가 없다", () => {
-    for (const cup of CUP_CATALOG) {
+    for (const cup of cupCatalog()) {
       const mine = matches.filter((m) => m.competitionId === cup.id);
       for (let round = 1; round <= cup.matchesPerTeam; round++) {
         const inRound = mine.filter((m) => m.round === round);
@@ -157,7 +157,7 @@ describe("대항전 리그 페이즈 편성", () => {
     for (const seed of [42, 7, 1007]) {
       const entrants = buildEuroEntrants(1, seed);
       const all = buildAllEuroMatches(1, seed, entrants);
-      for (const cup of CUP_CATALOG) {
+      for (const cup of cupCatalog()) {
         const mine = all.filter((m) => m.competitionId === cup.id);
         const same = mine.filter((m) => leagueOfTeam(m.homeTeamId) === leagueOfTeam(m.awayTeamId));
         // 축소된 규모(UCL 24팀 중 5팀이 잉글랜드)에선 0이 항상 가능하지 않아
@@ -182,7 +182,7 @@ describe("대항전 리그 페이즈 편성", () => {
     for (const seed of [42, 7, 1007]) {
       const entrants = buildEuroEntrants(1, seed);
       const all = buildAllEuroMatches(1, seed, entrants);
-      for (const cup of CUP_CATALOG) {
+      for (const cup of cupCatalog()) {
         const list = entrantsOf(entrants, cup.id);
         const pots = euroPots(cup.id, seed, list);
         for (const teamId of list) {
@@ -298,7 +298,7 @@ describe("게임 연결", () => {
   it("createGame이 리그와 대항전을 함께 편성한다", () => {
     const cups = state.matches.filter((m) => isCup(m.competitionId));
     expect(cups.length).toBe(
-      CUP_CATALOG.reduce((sum, c) => sum + (c.size * c.matchesPerTeam) / 2, 0),
+      cupCatalog().reduce((sum, c) => sum + (c.size * c.matchesPerTeam) / 2, 0),
     );
     expect(state.matches.every((m) => m.time !== undefined)).toBe(true);
   });

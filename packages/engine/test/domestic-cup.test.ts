@@ -1,8 +1,8 @@
 import { keepSeat } from "./helpers";
 import { describe, expect, it } from "vitest";
 import {
-  DOMESTIC_CUP_CATALOG,
-  TEAM_CATALOG,
+  domesticCupCatalog,
+  teamCatalog,
   DOMESTIC_CUP_SIZE,
   DOMESTIC_STAGES,
   addMissingClubs,
@@ -113,7 +113,7 @@ function minRestHours(state: GameState): { hours: number; where: string } {
 
 describe("컵 카탈로그 — 32강 브래킷이 성립한다", () => {
   it("나라마다 1부+2부 32클럽 · 컵 참가 명단이 정확히 32팀", () => {
-    for (const cup of DOMESTIC_CUP_CATALOG) {
+    for (const cup of domesticCupCatalog()) {
       const entrants = domesticCupEntrants(cup.id);
       expect(entrants).toHaveLength(DOMESTIC_CUP_SIZE);
       expect(new Set(entrants).size).toBe(DOMESTIC_CUP_SIZE);
@@ -302,8 +302,8 @@ describe("추첨 전에도 라운드 날짜는 달력에 있다 — 단, 확보�
 
 describe("실제 대회 규정을 따른다", () => {
   it("추첨 방식이 둘 — 코파 이탈리아만 시즌 초에 대진표가 확정된다", () => {
-    const perRound = DOMESTIC_CUP_CATALOG.filter((c) => c.drawStyle === "per-round");
-    const fixed = DOMESTIC_CUP_CATALOG.filter((c) => c.drawStyle === "fixed-bracket");
+    const perRound = domesticCupCatalog().filter((c) => c.drawStyle === "per-round");
+    const fixed = domesticCupCatalog().filter((c) => c.drawStyle === "fixed-bracket");
     expect(fixed.map((c) => c.id)).toEqual(["coppaitalia"]);
     expect(perRound.length).toBe(5);
   });
@@ -337,7 +337,7 @@ describe("실제 대회 규정을 따른다", () => {
   it("결승 요일도 대회 규정이다 — 넷은 주말, 코파 이탈리아만 수요일 밤", () => {
     const state = createTestGame(7);
     playSeason(state);
-    for (const cup of DOMESTIC_CUP_CATALOG) {
+    for (const cup of domesticCupCatalog()) {
       const final = domesticStageMatches(state, cup.id, "final")[0];
       if (!final) continue;
       const dow = new Date(`${final.date}T00:00:00Z`).getUTCDay();
@@ -348,7 +348,7 @@ describe("실제 대회 규정을 따른다", () => {
   it("32강은 하루에 몰지 않고 이틀에 흩는다 (실제 컵의 화·수 / 토·일)", () => {
     const state = createTestGame(7);
     playSeason(state);
-    for (const cup of DOMESTIC_CUP_CATALOG) {
+    for (const cup of domesticCupCatalog()) {
       const dates = new Set(domesticStageMatches(state, cup.id, "r32").map((m) => m.date));
       expect(dates.size, `${cup.id} 1라운드가 ${dates.size}일`).toBeGreaterThanOrEqual(2);
       // 그렇다고 늘어져서도 안 된다 — 한 라운드가 2주를 넘기면 대회가 흐물흐물해진다
@@ -389,7 +389,7 @@ describe("컵은 1부가 들어오는 라운드에서 시작한다", () => {
   } as const;
 
   it("첫 라운드 이름이 실제 진입 라운드다 — 리그컵·FA컵은 3라운드", () => {
-    for (const cup of DOMESTIC_CUP_CATALOG) {
+    for (const cup of domesticCupCatalog()) {
       const expected = ENTRY[cup.id as keyof typeof ENTRY];
       expect(competitionStageLabel(cup.id, "r32"), cup.id).toBe(expected.label);
       // 그 라운드의 목표 달도 실제 대회 시기다
@@ -398,7 +398,7 @@ describe("컵은 1부가 들어오는 라운드에서 시작한다", () => {
   });
 
   it("8강부터는 이름이 규모와 맞는다 — 대회마다 다르지 않다", () => {
-    for (const cup of DOMESTIC_CUP_CATALOG) {
+    for (const cup of domesticCupCatalog()) {
       expect(competitionStageLabel(cup.id, "qf"), cup.id).toBe("8강");
       expect(competitionStageLabel(cup.id, "final"), cup.id).toBe("결승");
     }
@@ -425,7 +425,7 @@ describe("컵은 1부가 들어오는 라운드에서 시작한다", () => {
   it("모든 1부 클럽이 같은 라운드에서 시작한다 — 부전승도 예선도 없다", () => {
     const state = createTestGame(7);
     playSeason(state);
-    for (const cup of DOMESTIC_CUP_CATALOG) {
+    for (const cup of domesticCupCatalog()) {
       const opening = domesticStageMatches(state, cup.id, "r32");
       const teams = new Set(opening.flatMap((m) => [m.homeTeamId, m.awayTeamId]));
       expect(teams.size, `${cup.id} 첫 라운드 참가`).toBe(DOMESTIC_CUP_SIZE);
@@ -442,7 +442,7 @@ describe("기존 세이브 — 2부 클럽 채워 넣기", () => {
       .filter((t) => !isTopFlight(t.id) && isClubTeam(t.id))
       .map((t) => t.id);
     expect(second.length).toBe(
-      TEAM_CATALOG.filter((t) => !isTopFlight(t.id) && isClubTeam(t.id)).length,
+      teamCatalog().filter((t) => !isTopFlight(t.id) && isClubTeam(t.id)).length,
     );
     const drop = new Set(second);
     state.teams = state.teams.filter((t) => !drop.has(t.id));
@@ -481,7 +481,7 @@ describe("기존 세이브 — 2부 클럽 채워 넣기", () => {
     const state = createTestGame(5);
     state.date = "2027-02-01"; // 전 컵의 1라운드 추첨이 지난 시점
     advanceDomesticCups(state, []);
-    for (const cup of DOMESTIC_CUP_CATALOG) {
+    for (const cup of domesticCupCatalog()) {
       expect(domesticStageMatches(state, cup.id, "r32"), cup.id).toHaveLength(0);
     }
   });
@@ -577,7 +577,7 @@ describe("여러 시드로 한 시즌 완주 — 편성이 게임을 멈추지 �
         d.setUTCDate(d.getUTCDate() - 1);
         return d.toISOString().slice(0, 10);
       };
-      for (const cup of DOMESTIC_CUP_CATALOG) {
+      for (const cup of domesticCupCatalog()) {
         const final = domesticStageMatches(state, cup.id, "final")[0];
         if (!final) continue;
         const dow = new Date(`${final.date}T00:00:00Z`).getUTCDay();

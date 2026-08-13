@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ageOf, naturalPositionOf } from "@story-fm/domain";
 import {
-  TEAM_CATALOG,
+  teamCatalog,
   activeContract,
   assignmentsOf,
   groupOf,
@@ -12,9 +12,9 @@ import {
 } from "@story-fm/engine";
 import { createTestGame } from "./helpers";
 
-const TIER = new Map(TEAM_CATALOG.map((t) => [t.id, t.tier]));
+const TIER = new Map(teamCatalog().map((t) => [t.id, t.tier]));
 /** 스쿼드를 갖는 클럽만 — 무소속은 방출·계약 만료로만 사람이 들어온다 */
-const CLUBS = TEAM_CATALOG.filter((t) => isClubTeam(t.id));
+const CLUBS = teamCatalog().filter((t) => isClubTeam(t.id));
 const REF = "2026-08-15"; // 시즌 개막 기준 나이
 
 describe("실선수 로스터 깊이 (30인+, 유망주 포함)", () => {

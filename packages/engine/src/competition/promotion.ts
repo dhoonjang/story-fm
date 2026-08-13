@@ -1,4 +1,4 @@
-import { LEAGUE_CATALOG, leagueCatalogById, leagueName } from "../data/league-catalog";
+import { leagueCatalog, leagueCatalogById, leagueName } from "../data/league-catalog";
 import { leagueOfTeam } from "../data/team-catalog";
 import { makeRng } from "../core/rng";
 import { computeStandings } from "./season";
@@ -41,13 +41,13 @@ export function teamsOfLeagueIn(state: GameState, leagueId: string): string[] {
 }
 
 /** 국내 컵을 채우는 2부들 — 승강의 상대 리그 */
-const SECOND_TIERS = LEAGUE_CATALOG.filter((l) => l.kind === "cup-only");
+const secondTiers = () => leagueCatalog().filter((l) => l.kind === "cup-only");
 
 /** 그 리그의 아래 — 같은 나라의 2부 (없으면 null) */
 export function secondTierOf(leagueId: string): string | null {
   const country = leagueCatalogById(leagueId)?.country;
   if (!country) return null;
-  return SECOND_TIERS.find((l) => l.country === country)?.id ?? null;
+  return secondTiers().find((l) => l.country === country)?.id ?? null;
 }
 
 /** 이 리그에 승강이 있는가 — 아래 리그가 세이브에 실제로 있어야 한다(축소 세계엔 없다) */

@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "no
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
-  TEAM_CATALOG,
+  teamCatalog,
   dataDir,
   deleteGame,
   isTopFlight,
@@ -33,7 +33,7 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
     const loaded = loadGame(state.id);
     expect(loaded).not.toBeNull();
     expect(loaded?.season).toBe(3);
-    expect(loaded?.teams.length).toBe(TEAM_CATALOG.length);
+    expect(loaded?.teams.length).toBe(teamCatalog().length);
   });
 
   it("등번호 없는 기존 세이브는 실측 시드를 먼저 복원한다", () => {
@@ -68,7 +68,7 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
     saveGame(state);
 
     const loaded = loadGame(state.id)!;
-    expect(loaded.teams.length).toBe(TEAM_CATALOG.length);
+    expect(loaded.teams.length).toBe(teamCatalog().length);
     const draws = loaded.schedule.filter((e) => e.type === "draw");
     // 여섯 대회 모두 1라운드 추첨이 예약된다 (진행 상태 기계의 게이트)
     expect(draws).toHaveLength(6);

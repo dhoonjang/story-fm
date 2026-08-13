@@ -1,6 +1,6 @@
 import type { MatchRecord } from "@story-fm/domain";
 import { addDays, dayOfWeek, firstHalfPairs } from "./calendar";
-import { CUP_CATALOG, cupCatalogById } from "../data/cup-catalog";
+import { cupCatalog, cupCatalogById } from "../data/cup-catalog";
 import { leagueCatalogById } from "../data/league-catalog";
 import { leagueOfTeam, teamCatalogById, teamsOfLeague } from "../data/team-catalog";
 import { makeRng } from "../core/rng";
@@ -198,14 +198,14 @@ function allocateEuropeanSlots(
 ): Record<string, string[]> {
   const alloc: Record<string, string[]> = {};
   let cursor = 0;
-  for (const cup of CUP_CATALOG) {
+  for (const cup of cupCatalog()) {
     const count = cup.slots[leagueId] ?? 0;
     alloc[cup.id] = ranked.slice(cursor, cursor + count);
     cursor += count;
   }
   if (!winners) return alloc;
 
-  const order = CUP_CATALOG.map((c) => c.id);
+  const order = cupCatalog().map((c) => c.id);
   const qualified = new Set(order.flatMap((id) => alloc[id] ?? []));
   for (const target of ["uel", "uecl"] as const) {
     const winner = winners[target];
@@ -249,7 +249,7 @@ export function buildEuroEntrants(
   tables: LeagueTables | null = null,
   cupWinners: CupWinners = {},
 ): EuroEntry[] {
-  return CUP_CATALOG.map((cup) => ({
+  return cupCatalog().map((cup) => ({
     cupId: cup.id,
     teams: europeanEntrants(cup.id, season, seed, tables, cupWinners),
   }));

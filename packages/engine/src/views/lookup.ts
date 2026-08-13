@@ -23,22 +23,22 @@ import {
   squadRegistrationOf,
 } from "../squad/registration";
 import {
-  CUP_CATALOG,
+  cupCatalog,
   competitionName,
   competitionShortName,
   competitionStageLabel,
   isCup,
 } from "../data/cup-catalog";
 import {
-  DOMESTIC_CUP_CATALOG,
+  domesticCupCatalog,
   DOMESTIC_STAGES,
   domesticStageLabel,
   isDomesticCup,
 } from "../data/domestic-cup-catalog";
-import { MARKET_LEAGUES, TOP_LEAGUES } from "../data/league-catalog";
+import { marketLeagues, topLeagues } from "../data/league-catalog";
 import { domesticCupEntrants, domesticStageMatches } from "../competition/domestic-cup";
 import { drawParts, drawTitle } from "../competition/draw-schedule";
-import { TEAM_CATALOG, leagueOfTeam, teamCatalogById } from "../data/team-catalog";
+import { teamCatalog, leagueOfTeam, teamCatalogById } from "../data/team-catalog";
 import { computeStandings } from "../competition/season";
 import {
   attributeLine,
@@ -130,12 +130,12 @@ function resolveTeam(state: GameState, team?: string): Resolved {
 
   const alias = TEAM_ALIASES[key];
   if (alias) return { ok: true, teamId: alias };
-  const exact = TEAM_CATALOG.find(
+  const exact = teamCatalog().find(
     (t) => t.id === key || norm(t.shortName) === key || norm(t.name) === key,
   );
   if (exact) return { ok: true, teamId: exact.id };
 
-  const partial = TEAM_CATALOG.filter((t) => norm(t.name).includes(key) || t.id.includes(key));
+  const partial = teamCatalog().filter((t) => norm(t.name).includes(key) || t.id.includes(key));
   if (partial.length === 1) return { ok: true, teamId: partial[0]!.id };
   if (partial.length > 1) {
     const names = partial
@@ -179,12 +179,12 @@ function resolveCompetitionId(competition: string): string | null {
   const alias = COMPETITION_ALIASES[key];
   if (alias) return alias;
   const pool = [
-    ...TOP_LEAGUES.map((l) => ({ id: l.id, name: l.name, short: l.name, country: l.country })),
+    ...topLeagues().map((l) => ({ id: l.id, name: l.name, short: l.name, country: l.country })),
     // 이적 시장 전용 리그 — 경기는 없지만 **선수를 찾을 수는 있어야 한다**.
     // 여기 없으면 "사우디에 누가 있지?"에 모델이 답할 방법이 없어 지어낸다
-    ...MARKET_LEAGUES.map((l) => ({ id: l.id, name: l.name, short: l.name, country: l.country })),
-    ...CUP_CATALOG.map((c) => ({ id: c.id, name: c.name, short: c.short, country: "" })),
-    ...DOMESTIC_CUP_CATALOG.map((c) => ({ id: c.id, name: c.name, short: c.short, country: "" })),
+    ...marketLeagues().map((l) => ({ id: l.id, name: l.name, short: l.name, country: l.country })),
+    ...cupCatalog().map((c) => ({ id: c.id, name: c.name, short: c.short, country: "" })),
+    ...domesticCupCatalog().map((c) => ({ id: c.id, name: c.name, short: c.short, country: "" })),
   ];
   const exact = pool.find(
     (c) => c.id === key || norm(c.short) === key || norm(c.name) === key || norm(c.country) === key,
@@ -194,7 +194,9 @@ function resolveCompetitionId(competition: string): string | null {
   return partial.length === 1 ? partial[0]!.id : null;
 }
 
-const COMPETITION_HINT = `리그(${TOP_LEAGUES.map((l) => l.id).join("·")}) · 이적 시장 전용(${MARKET_LEAGUES.map((l) => l.id).join("·")}) · 대항전(${CUP_CATALOG.map((c) => c.id).join("·")}) · 국내 컵(${DOMESTIC_CUP_CATALOG.map((c) => c.id).join("·")})`;
+/** 대회 id 힌트 — 카탈로그가 편집될 수 있으므로 부를 때 만든다 */
+const competitionHint = () =>
+  `리그(${topLeagues().map((l) => l.id).join("·")}) · 이적 시장 전용(${marketLeagues().map((l) => l.id).join("·")}) · 대항전(${cupCatalog().map((c) => c.id).join("·")}) · 국내 컵(${domesticCupCatalog().map((c) => c.id).join("·")})`;
 
 /** 우리 팀 선수 한 줄 — 정확 수치 (오피스 뷰가 이미 보여주는 정보) */
 function ourRow(state: GameState, p: GamePlayer): string {
@@ -292,7 +294,7 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
     if (!competitionId) {
       return {
         ok: false,
-        message: `"${input.competition}"라는 대회를 찾지 못했습니다 — ${COMPETITION_HINT}`,
+        message: `"${input.competition}"라는 대회를 찾지 못했습니다 — ${competitionHint()}`,
       };
     }
     inCompetition = new Set(
@@ -300,7 +302,7 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
         ? domesticCupEntrants(competitionId)
         : isCup(competitionId)
           ? entrantsOf(state.euroEntrants, competitionId)
-          : TEAM_CATALOG.filter((t) => t.leagueId === competitionId).map((t) => t.id),
+          : teamCatalog().filter((t) => t.leagueId === competitionId).map((t) => t.id),
     );
   }
 
@@ -905,7 +907,7 @@ function standingsView(state: GameState, input: LeagueViewInput): LookupResult {
     if (!resolved) {
       return {
         ok: false,
-        message: `"${input.competition}"라는 대회를 찾지 못했습니다 — ${COMPETITION_HINT}`,
+        message: `"${input.competition}"라는 대회를 찾지 못했습니다 — ${competitionHint()}`,
       };
     }
     competitionId = resolved;
@@ -977,7 +979,7 @@ function fixturesView(state: GameState, input: LeagueViewInput): LookupResult {
     if (!competitionId) {
       return {
         ok: false,
-        message: `"${input.competition}"라는 대회를 찾지 못했습니다 — ${COMPETITION_HINT}`,
+        message: `"${input.competition}"라는 대회를 찾지 못했습니다 — ${competitionHint()}`,
       };
     }
   } else if (teamId === null) {

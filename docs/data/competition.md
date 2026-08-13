@@ -34,6 +34,28 @@
 - `isCup`(유럽 + 국내) · `isEuroCup`(대항전 고유) · `isDomesticCup`이 판단의 문이고,
   대회 표시명은 `competitionName` 하나가 리그·컵 구분 없이 답한다.
 
+### 오버라이드 — 어드민 편집
+
+코드의 세 표는 **시드**(`LEAGUE_CATALOG_SEED` · `CUP_CATALOG_SEED` ·
+`DOMESTIC_CUP_CATALOG_SEED`)이고, 데이터 디렉터리에 오버라이드 파일이 있으면 그것이
+시드를 대신한다. 팀 카탈로그와 같은 구조다 ([team.md](team.md) §1) — 원자적 쓰기,
+편집은 **새 게임에만** 반영, 읽는 자리는 접근자 함수(`leagueCatalog()` ·
+`cupCatalog()` · `domesticCupCatalog()`).
+
+| 파일 | 담는 것 | 편집 가능 |
+| --- | --- | --- |
+| `.data/league-catalog.json` | `LeagueCatalogEntry[]` | `name` `country` `kind` `coefficient` `realSquads` `broadcastPool` `avgTicketPrice` (id 제외) |
+| `.data/cup-catalog.json` | `{ europe, domestic }` | 대항전: `name` `short` `size` `matchesPerTeam` `slots` `directSlots` `playoffSlots` `prize` · 국내 컵: 전 필드 (id 제외) |
+
+유럽 대항전과 국내 컵이 **한 파일**을 쓰는 이유: 대항전 티켓과 국내 컵 우승 티켓이
+서로를 참조하므로, 반쪽만 바뀐 스냅샷이 생기면 안 된다.
+
+저장은 §7의 불변식을 먼저 확인하고 어기면 한국어 메시지로 거절한다 —
+컵 규모의 홀짝, 본선 대진 수가 2의 거듭제곱인가, 티켓 합이 참가 팀 수와 맞는가,
+존재하지 않는 리그에 티켓을 주지 않는가, 리그전을 도는 리그의 팀 수가 짝수인가.
+**나라별 32클럽만은 경고**다 — 어기면 컵이 안 열릴 뿐이고, 막으면 클럽을 한 팀도
+더하거나 뺄 수 없다.
+
 ## 2. 리그
 
 - **순위 규칙**(`computeStandings`) — 승점(승 3 · 무 1) → 골득실 → 다득점.
@@ -237,6 +259,11 @@
 - **대항전 리그 페이즈 참가 팀은 짝수여야 한다.** 홀수면 라운드마다 한 팀이 쉬어
   편성이 무너진다 — 티켓 표를 고칠 때 합을 함께 본다.
 - **본선 대진 수는 2의 거듭제곱이다** — `directSlots + playoffSlots / 2`.
+- **리그전을 도는 리그는 2~20팀의 짝수다.** 홀수면 라운드로빈이 부전승을 만들고,
+  20팀을 넘으면 38라운드 골격에 배치할 매치위크가 모자란다.
+- **어드민 편집도 이 불변식을 지킨다** — 저장 시점에 막힌다
+  (`world/catalog-invariants.ts`). 어기면 실패가 편집한 순간이 아니라 새 게임을
+  시작할 때 터진다.
 - **한 번 시작한 컵은 끝까지 간다.** 시작 문턱(32팀·추첨일)을 매 tick의 게이트로
   쓰면 시즌 중반에 대회가 통째로 멈춘다.
 - **시즌은 모든 컵이 우승 팀을 낸 뒤에 끝난다** — 국내 컵도 나라를 가리지 않는다
@@ -276,6 +303,9 @@
 | 리그 카탈로그 | `packages/engine/src/data/league-catalog.ts` |
 | 유럽 대항전 카탈로그 (규모·티켓·상금) | `packages/engine/src/data/cup-catalog.ts` |
 | 국내 컵 카탈로그 (진입 라운드·추첨·홈 배정·날짜) | `packages/engine/src/data/domestic-cup-catalog.ts` |
+| 카탈로그 오버라이드 (읽기·쓰기·캐시) | `packages/engine/src/data/catalog-source.ts` · `cup-override.ts` |
+| 리그·컵 어드민 (조회 · 편집 · 추가 · 삭제) | `packages/engine/src/world/admin-competition.ts` |
+| 카탈로그 불변식 (순수) | `packages/engine/src/world/catalog-invariants.ts` |
 | 순위표 · 진출권 구역 | `packages/engine/src/competition/season.ts` · `views/views.ts` |
 | 국내 컵 진행 | `packages/engine/src/competition/domestic-cup.ts` |
 | 대항전 배정 · 리그 페이즈 편성 | `packages/engine/src/competition/europe.ts` |

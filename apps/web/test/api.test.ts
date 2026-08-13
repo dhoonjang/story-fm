@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { TEAM_CATALOG } from "@story-fm/engine";
+import { leagueCatalog, teamCatalog } from "@story-fm/engine";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -16,6 +16,26 @@ import {
   PATCH as catalogPatch,
   DELETE as catalogDelete,
 } from "../app/api/admin/catalog/player/[playerId]/route";
+import {
+  GET as teamGet,
+  POST as teamAdd,
+  DELETE as teamReset,
+} from "../app/api/admin/catalog/team/route";
+import {
+  PATCH as teamPatch,
+  DELETE as teamDelete,
+} from "../app/api/admin/catalog/team/[teamId]/route";
+import {
+  GET as leagueGet,
+  POST as leagueAdd,
+  DELETE as leagueReset,
+} from "../app/api/admin/catalog/league/route";
+import {
+  PATCH as leaguePatch,
+  DELETE as leagueDelete,
+} from "../app/api/admin/catalog/league/[leagueId]/route";
+import { GET as cupGet, DELETE as cupReset } from "../app/api/admin/catalog/cup/route";
+import { PATCH as cupPatch } from "../app/api/admin/catalog/cup/[cupId]/route";
 import { cupCatalogById } from "@story-fm/engine";
 import { FORMATION_LAYOUTS } from "@story-fm/domain";
 import type { GamePayload } from "../lib/store";
@@ -403,7 +423,7 @@ describe("API — 온보딩부터 경기까지", () => {
       ageRef: string;
     };
     // 어드민 카탈로그는 2부·이적 시장 전용 클럽까지 전부 편집 대상이다
-    expect(list.teams).toHaveLength(TEAM_CATALOG.length);
+    expect(list.teams).toHaveLength(teamCatalog().length);
     expect(list.ageRef).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     const row = list.teams[0]!.players[0]!;
     expect(row.overall).toBeGreaterThan(0); // 파생값 동행
@@ -507,4 +527,183 @@ describe("API — 온보딩부터 경기까지", () => {
     expect(reset.edited).toBe(false);
   });
 
+});
+
+describe("API — 팀·리그·컵 카탈로그 어드민", () => {
+  const tparams = (teamId: string) => ({ params: Promise.resolve({ teamId }) });
+  const lparams = (leagueId: string) => ({ params: Promise.resolve({ leagueId }) });
+  const cparams = (cupId: string) => ({ params: Promise.resolve({ cupId }) });
+  const empty = new Request("http://test.local");
+
+  interface TeamPayload {
+    ok?: boolean;
+    message?: string;
+    error?: string;
+    teams: Array<{ id: string; name: string; leagueName: string; squadSize: number }>;
+    edited: boolean;
+  }
+  interface LeaguePayload {
+    ok?: boolean;
+    message?: string;
+    error?: string;
+    leagues: Array<{ id: string; name: string; teamCount: number }>;
+    edited: boolean;
+  }
+  interface CupPayload {
+    ok?: boolean;
+    message?: string;
+    error?: string;
+    europe: Array<{ id: string; short: string; size: number }>;
+    domestic: Array<{ id: string; short: string; homeRule: string }>;
+    edited: boolean;
+  }
+
+  it("팀 — 조회·추가·편집·구조 검증·삭제·리셋", async () => {
+    const list = (await teamGet().json()) as TeamPayload;
+    expect(list.teams).toHaveLength(teamCatalog().length);
+    expect(list.edited).toBe(false);
+    // 파생값 동행 — 리그 표시명·스쿼드 규모
+    expect(list.teams[0]!.leagueName.length).toBeGreaterThan(0);
+    expect(list.teams[0]!.squadSize).toBeGreaterThan(0);
+
+    // 추가 — 2부(컵 전용)는 리그전을 돌지 않아 팀 수가 홀수여도 성립한다
+    const addRes = await teamAdd(
+      json({
+        id: "testfc",
+        name: "테스트FC",
+        shortName: "TFC",
+        leagueId: "championship",
+        tier: 4,
+        formation: "4-4-2",
+        tacticalStyle: "low-block",
+        stadium: "테스트 파크",
+        capacity: 12_000,
+        commercialTier: 4,
+      }),
+    );
+    expect(addRes.status).toBe(200);
+    const added = (await addRes.json()) as TeamPayload;
+    expect(added.edited).toBe(true);
+    expect(added.teams.some((t) => t.id === "testfc")).toBe(true);
+
+    // 편집
+    const patchRes = await teamPatch(json({ name: "테스트 유나이티드" }), tparams("testfc"));
+    expect(patchRes.status).toBe(200);
+    const patched = (await patchRes.json()) as TeamPayload;
+    expect(patched.teams.find((t) => t.id === "testfc")!.name).toBe("테스트 유나이티드");
+
+    // 타입·범위 위반은 API가 막는다 (체급 1~4)
+    const badTier = await teamPatch(json({ tier: 9 }), tparams("testfc"));
+    expect(badTier.status).toBe(400);
+
+    // 세계의 성립 조건 위반은 엔진이 막고 메시지가 그대로 온다 (1부가 홀수가 된다)
+    const badMove = await teamPatch(json({ leagueId: "epl" }), tparams("testfc"));
+    expect(badMove.status).toBe(400);
+    expect(((await badMove.json()) as TeamPayload).error).toContain("홀수");
+
+    // 없는 팀은 404가 아니라 400 + 한국어 메시지 (선수 라우트와 같은 규약)
+    const missing = await teamPatch(json({ name: "x" }), tparams("nosuchteam"));
+    expect(missing.status).toBe(400);
+
+    // 삭제
+    const delRes = await teamDelete(empty, tparams("testfc"));
+    expect(delRes.status).toBe(200);
+    expect(((await delRes.json()) as TeamPayload).teams.some((t) => t.id === "testfc")).toBe(false);
+
+    // 리셋
+    const resetRes = await teamReset();
+    expect(resetRes.status).toBe(200);
+    expect(((await resetRes.json()) as TeamPayload).edited).toBe(false);
+  });
+
+  it("리그 — 조회·추가·편집·삭제 거부·리셋", async () => {
+    const list = (await leagueGet().json()) as LeaguePayload;
+    expect(list.leagues).toHaveLength(leagueCatalog().length);
+    expect(list.edited).toBe(false);
+    expect(list.leagues.find((l) => l.id === "epl")!.teamCount).toBe(20);
+
+    // 추가 — 이적 시장 전용 리그는 경기가 없어 팀 없이도 성립한다
+    const addRes = await leagueAdd(
+      json({
+        id: "kleague",
+        name: "K리그1",
+        country: "대한민국",
+        kind: "market-only",
+        coefficient: 20,
+        realSquads: false,
+        broadcastPool: 0.04,
+        avgTicketPrice: 12,
+      }),
+    );
+    expect(addRes.status).toBe(200);
+    const added = (await addRes.json()) as LeaguePayload;
+    expect(added.edited).toBe(true);
+    expect(added.leagues.some((l) => l.id === "kleague")).toBe(true);
+
+    // 편집
+    const patchRes = await leaguePatch(json({ coefficient: 12 }), lparams("kleague"));
+    expect(patchRes.status).toBe(200);
+
+    // 범위 위반 (계수는 1 이상)
+    const badCoef = await leaguePatch(json({ coefficient: 0 }), lparams("kleague"));
+    expect(badCoef.status).toBe(400);
+
+    // 알 수 없는 종류
+    const badKind = await leaguePatch(json({ kind: "friendly" }), lparams("kleague"));
+    expect(badKind.status).toBe(400);
+
+    // 팀이 남은 리그는 지울 수 없다
+    const busy = await leagueDelete(empty, lparams("epl"));
+    expect(busy.status).toBe(400);
+    expect(((await busy.json()) as LeaguePayload).error).toContain("20팀");
+
+    // 빈 리그는 삭제된다
+    const delRes = await leagueDelete(empty, lparams("kleague"));
+    expect(delRes.status).toBe(200);
+    expect(((await delRes.json()) as LeaguePayload).leagues.some((l) => l.id === "kleague")).toBe(
+      false,
+    );
+
+    const resetRes = await leagueReset();
+    expect(resetRes.status).toBe(200);
+    expect(((await resetRes.json()) as LeaguePayload).edited).toBe(false);
+  });
+
+  it("컵 — 유럽·국내를 한 경로에서 편집하고 리셋한다", async () => {
+    const list = (await cupGet().json()) as CupPayload;
+    expect(list.europe.some((c) => c.id === "ucl")).toBe(true);
+    expect(list.domestic.some((c) => c.id === "facup")).toBe(true);
+    expect(list.edited).toBe(false);
+
+    // 유럽 대항전
+    const euro = await cupPatch(json({ short: "챔스" }), cparams("ucl"));
+    expect(euro.status).toBe(200);
+    const afterEuro = (await euro.json()) as CupPayload;
+    expect(afterEuro.edited).toBe(true);
+    expect(afterEuro.europe.find((c) => c.id === "ucl")!.short).toBe("챔스");
+
+    // 국내 컵 — 같은 경로, id로 갈린다 (homeRule은 국내 컵에만 있는 필드다)
+    const dom = await cupPatch(json({ homeRule: "seeded" }), cparams("facup"));
+    expect(dom.status).toBe(200);
+    const afterDom = (await dom.json()) as CupPayload;
+    expect(afterDom.domestic.find((c) => c.id === "facup")!.homeRule).toBe("seeded");
+
+    // 구조 위반은 엔진이 막는다 (참가 팀 수는 짝수)
+    const badSize = await cupPatch(json({ size: 25 }), cparams("ucl"));
+    expect(badSize.status).toBe(400);
+    expect(((await badSize.json()) as CupPayload).error).toContain("짝수");
+
+    // 반쪽 상금 표는 받지 않는다 (엔진이 표를 통째로 갈아끼운다)
+    const halfPrize = await cupPatch(json({ prize: { winner: 1 } }), cparams("ucl"));
+    expect(halfPrize.status).toBe(400);
+
+    const missing = await cupPatch(json({ short: "x" }), cparams("nosuchcup"));
+    expect(missing.status).toBe(400);
+
+    const resetRes = await cupReset();
+    expect(resetRes.status).toBe(200);
+    const reset = (await resetRes.json()) as CupPayload;
+    expect(reset.edited).toBe(false);
+    expect(reset.europe.find((c) => c.id === "ucl")!.short).toBe("UCL");
+  });
 });

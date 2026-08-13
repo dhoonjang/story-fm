@@ -299,10 +299,10 @@ textarea {
   }
 }
 
-/* ── 선수 DB 어드민 ─────────────────────────── */
+/* ── 카탈로그 어드민 (게임 무관 초기치 편집) ───── */
 .admin {
-  padding: 20px;
-  max-width: 1400px;
+  padding: var(--sp-5) var(--sp-4);
+  max-width: 1200px;
   margin: 0 auto;
 }
 .admin-head {
@@ -316,21 +316,50 @@ textarea {
   font-size: var(--fs-2xl);
   margin-top: 4px;
 }
-.admin-head select {
-  background: var(--panel-2);
-  border: 1px solid var(--border);
+/* 탭 — 카탈로그의 층(선수·팀·리그·컵). 고른 탭만 아래 패널과 같은 면에 선다 */
+.admin-tabs {
+  display: flex;
+  gap: var(--sp-1);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--sp-4);
+}
+.admin-tab {
+  background: none;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
+  margin-bottom: -1px;
+  padding: 8px 18px;
+  color: var(--muted);
+  font-size: var(--fs-base);
+}
+.admin-tab:hover {
   color: var(--text);
-  border-radius: var(--r-sm);
-  padding: 8px 10px;
-  font-size: var(--fs-md);
-  max-width: 320px;
+}
+.admin-tab[aria-selected="true"] {
+  background: var(--panel);
+  border-color: var(--border);
+  color: var(--text);
+  font-weight: 600;
 }
 .admin-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   flex-wrap: wrap;
-  margin-bottom: 12px;
+  margin-bottom: var(--sp-3);
+}
+.admin-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+/* 목록 위의 주된 동작 — .primary-btn의 큰 패딩은 도구 줄에서 혼자 튄다 */
+.admin-add-btn {
+  padding: 8px 16px;
+  font-size: var(--fs-md);
+  border-radius: var(--r-sm);
 }
 .admin-toolbar select,
 .admin-search {
@@ -366,82 +395,82 @@ textarea {
   border: 1px solid var(--danger);
   color: var(--danger);
 }
-.admin-table-wrap {
-  overflow-x: auto;
+/**
+ * 요약 목록 — 표는 **읽는 일만** 한다. 편집은 행을 눌러 여는 팝업이 맡는다.
+ * 15축을 표에 펼치면 화면보다 넓어져, 값을 보는 동안 "누구의 값인지"를
+ * 좌우 스크롤이 계속 잡아먹는다.
+ */
+.admin-list-wrap {
   border: 1px solid var(--border);
   border-radius: var(--r-md);
+  overflow: hidden;
 }
-.admin-table {
+.admin-list {
   width: 100%;
-  /* collapse면 sticky 셀의 배경·테두리가 다른 셀 내용 아래로 깔려 글자가 겹친다
-     (Chrome의 알려진 동작) — separate + spacing 0으로 같은 모양을 유지한다 */
-  border-collapse: separate;
-  border-spacing: 0;
-  font-size: var(--fs-sm);
-  white-space: nowrap;
+  border-collapse: collapse;
+  font-size: var(--fs-md);
 }
-.admin-table th {
+.admin-list th {
   text-align: left;
   color: var(--muted);
   font-weight: 500;
-  padding: 8px 6px;
-  border-bottom: 1px solid var(--border);
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  background: var(--panel);
-}
-.admin-table td {
-  padding: 5px 6px;
-  border-bottom: 1px solid rgba(42, 51, 66, 0.5);
-  /* sticky 열이 투명하면 스크롤된 열이 밑에서 비쳐 보인다 — 불투명 배경 필수 */
-  background: var(--bg);
-}
-.admin-table tr.dirty td {
-  /* 반투명(rgba)이면 고정 열 아래로 다른 열이 겹쳐 보이므로 불투명 색으로 */
-  background: #171e2a;
-}
-
-/**
- * 좌우 고정 열 — 능력치 15축이라 표가 화면보다 넓다. **이름**(왼쪽)과
- * 저장·삭제(오른쪽)를 고정해, 오른쪽 축을 보러 스크롤해도 "누구의 값인지"와
- * "어디서 저장하는지"를 잃지 않게 한다.
- *
- * 고정은 이름 열 하나만 한다. 팀 열까지 고정하려면 이름 열의 `left`를 팀 열
- * 폭에 맞춰야 하는데, td의 min-width는 표 열 계산에서 무시돼 폭이 내용에 따라
- * 변하고(=틈이 생긴다) 짧은 셀은 행 높이를 채우지 않아 그 틈으로 스크롤된 열이
- * 비친다. 팀은 필터·검색으로 찾으면 되므로 이름만 붙잡는 편이 튼튼하다.
- */
-.admin-table th:nth-child(2),
-.admin-table td:nth-child(2) {
-  position: sticky;
-  left: 0;
-  z-index: 4;
-  box-shadow: 6px 0 8px -6px rgba(0, 0, 0, 0.7);
-}
-.admin-table th:last-child,
-.admin-table td:last-child {
-  position: sticky;
-  right: 0;
-  z-index: 4;
-  box-shadow: -6px 0 8px -6px rgba(0, 0, 0, 0.7);
-}
-.admin-team span {
-  display: inline-block;
-  max-width: 92px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  vertical-align: middle;
-}
-.admin-scroll-hint {
-  color: var(--muted);
   font-size: var(--fs-sm);
-  margin-bottom: 6px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.admin-list td {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.admin-list tbody tr:last-child td {
+  border-bottom: none;
+}
+.admin-list th.num,
+.admin-list td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+/* 행이 곧 편집 손잡이다 — 눌리는 자리임을 커서와 배경으로 알린다 */
+.admin-list tbody tr[role="button"] {
+  cursor: pointer;
+}
+.admin-list tbody tr[role="button"]:hover,
+.admin-list tbody tr[role="button"]:focus-visible {
+  background: var(--panel-2);
+  outline: none;
+}
+.admin-list-empty td {
+  text-align: center;
+  color: var(--muted);
+  padding: var(--sp-5);
+}
+.admin-name .muted {
+  margin-left: 6px;
+  font-size: var(--fs-xs);
 }
 .admin-team {
   color: var(--muted);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .admin-ovr {
+  font-weight: 700;
+}
+.admin-pos {
+  display: inline-block;
+  min-width: 34px;
+  font-weight: 600;
+}
+.admin-pos-more {
+  margin-left: 4px;
+  font-size: var(--fs-xs);
+}
+/* 값이 그 자리에서 이미 틀렸다는 표시 (티켓 합 ≠ 참가 팀 수) */
+.admin-cell-warn {
+  color: var(--danger);
   font-weight: 700;
 }
 .ai {
@@ -457,21 +486,9 @@ textarea {
   text-align: center;
 }
 /* 주급은 £300,000까지 들어간다 — 15축 칸보다 넓게 */
-.ai.num.wage,
-.admin-add input.num.wage {
-  width: 84px;
+.ai.num.wage {
+  width: 96px;
   text-align: right;
-}
-.ai.name {
-  width: 120px;
-}
-.admin-table select {
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  color: var(--text);
-  border-radius: var(--r-sm);
-  padding: 4px;
-  font-size: var(--fs-sm);
 }
 .mini-btn {
   border: 1px solid var(--border);
@@ -514,42 +531,266 @@ textarea {
 .admin-page-info .ai.num {
   width: 56px;
 }
-.admin-add {
-  background: var(--panel);
-  border: 1px solid var(--accent-2);
-  border-radius: var(--r-md);
-  padding: 14px;
-  margin-bottom: 12px;
-}
-.admin-add-row {
+/**
+ * 편집 팝업 — 목록에서 고른 **한 항목**만 담는다.
+ * 화면 위에 겹치는 것이므로 여기서만 그림자를 쓴다 (표면 밝기 규칙의 예외).
+ */
+.admin-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(6, 8, 12, 0.72);
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 10px;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-4);
 }
-.admin-add label {
+.admin-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop);
+  width: 100%;
+  max-width: 560px;
+  /* 창은 화면을 넘지 않고, 넘치는 몫은 본문이 스크롤한다 — 머리와 발은 남는다 */
+  max-height: calc(100vh - 2 * var(--sp-5));
   display: flex;
   flex-direction: column;
-  gap: 3px;
+}
+.admin-modal.wide {
+  max-width: 860px;
+}
+.admin-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+.admin-modal-title {
+  font-size: var(--fs-lg);
+}
+.admin-modal-sub {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
   font-size: var(--fs-sm);
+}
+.admin-modal-body {
+  padding: var(--sp-4);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.admin-modal-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--border);
+}
+.admin-modal-foot .primary-btn {
+  padding: 9px 20px;
+  font-size: var(--fs-md);
+  border-radius: var(--r-sm);
+}
+/* 삭제는 저장과 같은 손이 닿지 않는 자리에 둔다 */
+.admin-modal-danger {
+  margin-left: auto;
+  color: var(--danger);
+}
+.admin-modal-danger:hover {
+  border-color: var(--danger);
+}
+
+.admin-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+.admin-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  font-size: var(--fs-xs);
   color: var(--muted);
 }
-.admin-add input,
-.admin-add select {
+.admin-field.grow {
+  flex: 1;
+  min-width: 160px;
+}
+.admin-field input,
+.admin-field select {
   background: var(--panel-2);
   border: 1px solid var(--border);
   color: var(--text);
   border-radius: var(--r-sm);
   padding: 6px 8px;
   font: inherit;
+  font-size: var(--fs-base);
 }
-.admin-add input.num {
-  width: 64px;
-  text-align: center;
+/* 표 칸 크기(.ai.num)로는 본문 글자와 증감 화살표가 같이 들어가지 못한다 */
+.admin-field .ai.num {
+  width: 76px;
+  text-align: right;
 }
-.admin-nav-link {
-  text-decoration: none;
+.admin-field .ai.num.wage {
+  width: 116px;
+}
+.admin-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+.admin-section-title {
+  font-size: var(--fs-md);
+}
+.admin-section-note {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.admin-section-head .mini-btn {
+  margin-left: auto;
+}
+
+/* 가능 포지션 — 한 줄이 한 자리다 (코드 · 적응도 · 주 표시 · 삭제) */
+.admin-pos-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.admin-pos-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.admin-pos-row select {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--r-sm);
+  padding: 4px 6px;
+  font: inherit;
+  font-size: var(--fs-md);
+}
+.admin-pos-nat {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+/* 15축 — 묶음(신체·기술·정신·GK)이 줄을 가른다 */
+.admin-axis-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.admin-axis-group-name {
+  display: block;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  margin-bottom: var(--sp-1);
+}
+.admin-axes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
+  gap: var(--sp-1) var(--sp-2);
+}
+.admin-axis {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  background: var(--panel-2);
+  border-radius: var(--r-sm);
+  padding: 3px 4px 3px 10px;
+  font-size: var(--fs-sm);
+}
+.admin-axis .ai.num {
+  background: var(--bg);
+}
+
+/* 상금·수용인원은 여덟 자리까지 간다 — 15축 칸으로는 숫자가 잘린다 */
+.admin-field .ai.num.money {
+  width: 128px;
+}
+/* 한 절 안에서 두 번째 줄로 내려가는 칸 묶음 (단계별 상금·부가 설정) */
+.admin-fields-gap {
+  margin-top: var(--sp-3);
+}
+/* 월·일처럼 한 칸이 두 수인 입력 */
+.admin-date {
+  display: flex;
+  gap: var(--sp-1);
+}
+/* 체크박스는 이름이 오른쪽에 붙는다 — .admin-field의 세로 배치를 되돌린다 */
+.admin-check {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-sm);
+  align-self: flex-end;
+  padding-bottom: 6px;
+}
+.admin-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-3);
+}
+.admin-checks .admin-check {
+  align-self: auto;
+  padding-bottom: 0;
+}
+
+/* 이름 하나에 값 몇 개가 붙는 줄 (리그별 티켓 · 라운드 목표일) */
+.admin-kv-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.admin-kv-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.admin-kv-name {
+  flex: 0 0 132px;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+.admin-kv-text {
+  flex: 1;
+  min-width: 90px;
+  max-width: 200px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--r-sm);
+  padding: 4px 6px;
+  font: inherit;
+  font-size: var(--fs-md);
+}
+/* 합계는 저장 가능한지를 미리 말한다 — 어긋나면 색이 먼저 바뀐다 */
+.admin-sum {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.admin-sum.warn {
+  color: var(--danger);
+}
+
+/* 컵 탭은 표가 둘이다 (대항전 · 국내 컵) — 두 표가 붙어 보이지 않게 */
+.admin-cup-group + .admin-cup-group {
+  margin-top: var(--sp-5);
 }
 .skill-admin {
   max-width: 1600px;
@@ -5851,61 +6092,6 @@ textarea {
   .rail .rail-sep {
     display: none;
   }
-}
-
-/* ── 카탈로그 어드민 (v6: 게임 무관 초기치 편집) ── */
-.admin-head-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-/* 칩·버튼 묶음은 td가 아니라 안쪽 div가 flex를 맡는다 — td에 display:flex를
-   주면 표가 셀을 익명 래퍼로 감싸 열 정렬과 sticky 계산이 깨진다 */
-.admin-poslist .pos-chips,
-.admin-actions .row-actions {
-  display: flex;
-  gap: 3px;
-}
-/* 칩이 줄바꿈하면 행이 4배로 길어지고, 고정 열 셀은 행 높이를 채우지 않아
-   그 틈으로 스크롤된 열이 비친다. 한 줄로 눌러 행 높이를 고르게 유지하고
-   넘치는 포지션은 td의 title(툴팁)로 전부 보여준다 */
-.admin-poslist .pos-chips {
-  flex-wrap: nowrap;
-  overflow: hidden;
-  max-width: 190px;
-}
-.admin-actions .row-actions {
-  gap: 4px;
-  flex-wrap: nowrap;
-}
-.admin-poslist .pos {
-  font-size: var(--fs-2xs);
-  padding: 1px 5px;
-  border-radius: var(--r-xs);
-  background: #1b2622;
-  color: #8ba093;
-  white-space: nowrap;
-}
-.admin-poslist .pos.natural {
-  background: rgba(63, 191, 134, 0.16);
-  color: #7fdcae;
-  font-weight: 600;
-}
-.admin-birth {
-  white-space: nowrap;
-}
-.admin-birth .muted {
-  margin-left: 4px;
-  font-size: var(--fs-xs);
-}
-.ai.date {
-  width: 118px;
-}
-
-/* 15축 표의 묶음 경계 — 신체 / 기술 / 정신 / GK */
-.admin-table th.axis-group,
-.admin-table td.axis-group {
-  border-left: 1px solid var(--border);
 }
 
 /**

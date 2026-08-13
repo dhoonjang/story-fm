@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { GameState } from "@story-fm/engine";
+import type { CupCatalogEntry, GameState } from "@story-fm/engine";
 import {
-  CUP_CATALOG,
+  cupCatalog,
   advanceEuroKnockouts,
   computeStandings,
   cupCatalogById,
@@ -83,7 +83,7 @@ function runKnockouts(state: GameState, cupId: string, digest: string[] = []): v
 
 describe("녹아웃 정의", () => {
   it("본선 대진 수는 2의 거듭제곱이다 (대회 규모가 달라도)", () => {
-    for (const cup of CUP_CATALOG) {
+    for (const cup of cupCatalog()) {
       const bracket = knockoutBracketSize(cup);
       expect(Number.isInteger(Math.log2(bracket)), `${cup.id}: ${bracket}대진`).toBe(true);
       // 직행 + 플레이오프 참가는 리그 페이즈 규모를 넘지 않는다
@@ -151,7 +151,7 @@ describe("단계 진행", () => {
   });
 
   it("대회마다 결승까지 도달하고 우승 팀이 하나 남는다", () => {
-    for (const cup of CUP_CATALOG) {
+    for (const cup of cupCatalog()) {
       const state = createTestGame(42);
       runKnockouts(state, cup.id);
       for (const stage of knockoutStages(cup)) {
@@ -409,7 +409,7 @@ describe("한 시즌 완주 (mock 경기)", () => {
 });
 
 /** 이 단계가 본선에서 몇 번째인가 — 대진 수 기대값 계산용 */
-function stageDepth(cup: (typeof CUP_CATALOG)[number], stage: string): number {
+function stageDepth(cup: CupCatalogEntry, stage: string): number {
   const main = knockoutStages(cup).filter((s) => s !== "playoff");
   return main.indexOf(stage as (typeof main)[number]) + 1;
 }

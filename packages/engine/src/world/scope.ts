@@ -1,5 +1,5 @@
-import { TOP_LEAGUES, isMarketOnlyLeague, type LeagueCatalogEntry } from "../data/league-catalog";
-import { TEAM_CATALOG, isTopFlight, type TeamCatalogEntry } from "../data/team-catalog";
+import { topLeagues, isMarketOnlyLeague, type LeagueCatalogEntry } from "../data/league-catalog";
+import { teamCatalog, isTopFlight, type TeamCatalogEntry } from "../data/team-catalog";
 
 /**
  * 이 게임에 실제로 존재하는 리그와 클럽.
@@ -40,8 +40,8 @@ export const MINI_WORLD_TWO_LEAGUES: WorldScope = {
 
 /** 리그전을 도는 리그 */
 export function scopedLeagues(scope?: WorldScope): readonly LeagueCatalogEntry[] {
-  if (!scope) return TOP_LEAGUES;
-  return TOP_LEAGUES.filter((l) => scope.leagues.includes(l.id));
+  if (!scope) return topLeagues();
+  return topLeagues().filter((l) => scope.leagues.includes(l.id));
 }
 
 /**
@@ -49,7 +49,7 @@ export function scopedLeagues(scope?: WorldScope): readonly LeagueCatalogEntry[]
  * 순서가 고정이라 같은 범위는 언제나 같은 팀 목록이다.
  */
 export function scopedTeamsOfLeague(leagueId: string, scope?: WorldScope): TeamCatalogEntry[] {
-  const all = TEAM_CATALOG.filter((t) => t.leagueId === leagueId);
+  const all = teamCatalog().filter((t) => t.leagueId === leagueId);
   if (!scope) return all;
   if (!scope.leagues.includes(leagueId)) return [];
   return all.slice(0, scope.teamsPerLeague - (scope.teamsPerLeague % 2));
@@ -62,10 +62,10 @@ export function scopedTeamsOfLeague(leagueId: string, scope?: WorldScope): TeamC
  * 갈 곳이 없으면 떠남을 표현할 수 없다.
  */
 export function scopedTeams(scope?: WorldScope): TeamCatalogEntry[] {
-  if (!scope) return [...TEAM_CATALOG];
+  if (!scope) return [...teamCatalog()];
   const out: TeamCatalogEntry[] = [];
   for (const league of scope.leagues) out.push(...scopedTeamsOfLeague(league, scope));
-  for (const team of TEAM_CATALOG) {
+  for (const team of teamCatalog()) {
     if (team.leagueId === "free") out.push(team);
     // 2부는 컵 참가 인원이다 — 컵이 없으면 존재할 이유가 없다
     else if (scope.cups && !isTopFlight(team.id) && !isMarketOnlyLeague(team.leagueId)) {

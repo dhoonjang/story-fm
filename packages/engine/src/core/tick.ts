@@ -13,7 +13,7 @@ import {
   type RecoveryKind,
 } from "@story-fm/sim";
 import { addDays, dayOfWeek, diffDays, matchesOn, nextMatchFor, windowOpenOn } from "../competition/calendar";
-import { TEAM_CATALOG } from "../data/team-catalog";
+import { teamCatalog } from "../data/team-catalog";
 import { competitionShortName, competitionStageLabel } from "../data/cup-catalog";
 import { advanceDomesticCups } from "../competition/domestic-cup";
 import { hasCups } from "../world/scope";
@@ -946,4 +946,4 @@ export function applyScenePoint(state: GameState, target: ScenePoint): SceneAdva
   };
 }
 
-export { TEAM_CATALOG };
+export { teamCatalog };

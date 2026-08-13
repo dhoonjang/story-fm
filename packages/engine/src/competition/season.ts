@@ -7,9 +7,9 @@ import {
   seasonYear,
 } from "./calendar";
 import { toFreeAgency } from "../market/departures";
-import { TEAM_CATALOG, leagueOfTeam, teamCatalogById } from "../data/team-catalog";
-import { CUP_CATALOG, competitionShortName, isCup, isEuroCup } from "../data/cup-catalog";
-import { DOMESTIC_CUP_CATALOG } from "../data/domestic-cup-catalog";
+import { teamCatalog, leagueOfTeam, teamCatalogById } from "../data/team-catalog";
+import { cupCatalog, competitionShortName, isCup, isEuroCup } from "../data/cup-catalog";
+import { domesticCupCatalog } from "../data/domestic-cup-catalog";
 import { domesticChampion, domesticCupWinners, reviewDomesticCups } from "./domestic-cup";
 import { hasPendingDraw } from "./draw-schedule";
 import { isCupOnlyLeague, isMarketOnlyLeague, leagueName } from "../data/league-catalog";
@@ -141,7 +141,7 @@ export function allMatchesDone(state: GameState): boolean {
   const league = leagueOfTeamIn(state, state.userTeamId);
   // 컵이 없는 세계(축소 세계)는 기다릴 대회 자체가 없다.
   const cups = hasCups(state.world);
-  const domesticCups = cups ? DOMESTIC_CUP_CATALOG : [];
+  const domesticCups = cups ? domesticCupCatalog() : [];
   const played = state.matches.every(
     (m) =>
       m.season !== state.season ||
@@ -157,7 +157,7 @@ export function allMatchesDone(state: GameState): boolean {
   // 컵은 **우승 팀이 나와야** 끝이다 — 경기가 다 끝났어도 다음 단계가 편성 전일 수 있다
   if (!cups) return true;
   for (const cup of domesticCups) if (!domesticChampion(state, cup.id)) return false;
-  for (const cup of CUP_CATALOG) if (!euroChampion(state, cup.id)) return false;
+  for (const cup of cupCatalog()) if (!euroChampion(state, cup.id)) return false;
   return true;
 }
 
@@ -212,7 +212,7 @@ function checkAchievements(state: GameState, position: number, row: StandingRow)
  */
 function reviewEuropeanCampaign(state: GameState): string[] {
   const digest: string[] = [];
-  for (const cup of CUP_CATALOG) {
+  for (const cup of cupCatalog()) {
     const champion = euroChampion(state, cup.id);
     if (!champion) continue;
     payWinnerPrize(state, cup.id, champion, digest);
@@ -635,5 +635,5 @@ export function endSeason(state: GameState): string[] {
   return [...reviewSeason(state), ...transitionSeason(state)];
 }
 
-export { TEAM_CATALOG };
+export { teamCatalog };
 export type { GamePlayer };

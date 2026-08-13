@@ -28,7 +28,7 @@ import { clubProfile } from "../data/club-profile";
 import { teamCatalogById } from "../data/team-catalog";
 import { categoryOf, currentMonthSummary, psrStatus, seasonWageRatio } from "../club/finance";
 import {
-  CUP_CATALOG,
+  cupCatalog,
   competitionName,
   competitionShortName,
   competitionStageLabel,
@@ -834,7 +834,7 @@ function buildStandingZones(
   // 리그 — 유럽 진출 티켓을 상위부터 채운다 (europe.ts의 배정 순서와 같은 규칙)
   const zones: StandingZone[] = [];
   let cursor = 0;
-  for (const cup of CUP_CATALOG) {
+  for (const cup of cupCatalog()) {
     const count = cup.slots[competitionId] ?? 0;
     if (count === 0) continue;
     cursor += count;

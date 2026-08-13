@@ -13,7 +13,18 @@
  * **사우디·MLS는 경기를 아예 하지 않는다** (`kind: "market-only"`). 이 게임에서
  * 그 리그들이 하는 일은 하나뿐이다 — 돈으로 선수를 흡수하고 레전드를 보관하는 것.
  * 일정·순위표·컵 어디에도 안 나오지만 선수 검색과 이적 협상에는 그대로 잡힌다.
+ *
+ * 아래 표는 **시드**다. 어드민 편집본이 있으면 `leagueCatalog()`가 그것을 돌려준다 —
+ * 리그를 읽는 자리는 상수가 아니라 접근자를 써야 편집이 새 게임에 닿는다.
  */
+import { leagueCatalogPath } from "../core/paths";
+import {
+  catalogSource,
+  clearOverride,
+  readOverride,
+  writeOverride,
+  asRecord,
+} from "./catalog-source";
 export interface LeagueCatalogEntry {
   id: string;
   /** 표시명 (한국어) */
@@ -50,7 +61,8 @@ export interface LeagueCatalogEntry {
   avgTicketPrice: number;
 }
 
-export const LEAGUE_CATALOG: readonly LeagueCatalogEntry[] = [
+/** 리그 카탈로그 시드 — 편집 전 원본. 읽는 자리는 `leagueCatalog()`를 쓴다 */
+export const LEAGUE_CATALOG_SEED: readonly LeagueCatalogEntry[] = [
   {
     id: "epl",
     name: "프리미어리그",
@@ -201,25 +213,71 @@ export const LEAGUE_CATALOG: readonly LeagueCatalogEntry[] = [
   },
 ];
 
-const BY_ID = new Map(LEAGUE_CATALOG.map((l) => [l.id, l]));
+export const LEAGUE_KINDS = ["playable", "cup-only", "market-only", "free"] as const;
+
+function isLeagueEntry(value: unknown): value is LeagueCatalogEntry {
+  const o = asRecord(value);
+  if (o === null) return false;
+  return (
+    typeof o.id === "string" &&
+    o.id.length > 0 &&
+    typeof o.name === "string" &&
+    typeof o.country === "string" &&
+    typeof o.kind === "string" &&
+    (LEAGUE_KINDS as readonly string[]).includes(o.kind) &&
+    typeof o.coefficient === "number" &&
+    typeof o.realSquads === "boolean" &&
+    typeof o.broadcastPool === "number" &&
+    typeof o.avgTicketPrice === "number"
+  );
+}
+
+const load = catalogSource<readonly LeagueCatalogEntry[]>(() => {
+  const raw = readOverride(leagueCatalogPath());
+  return Array.isArray(raw) && raw.length > 0 && raw.every(isLeagueEntry)
+    ? (raw as LeagueCatalogEntry[])
+    : LEAGUE_CATALOG_SEED;
+});
+
+/** 지금 유효한 리그 카탈로그 — 오버라이드가 있으면 그것, 없으면 시드 */
+export function leagueCatalog(): readonly LeagueCatalogEntry[] {
+  return load();
+}
+
+const byId = catalogSource(() => new Map(leagueCatalog().map((l) => [l.id, l])));
+
+/** 리그 오버라이드 저장 — 검증은 어드민(`world/admin-competition.ts`)이 먼저 한다 */
+export function saveLeagueCatalog(entries: readonly LeagueCatalogEntry[]): void {
+  writeOverride(leagueCatalogPath(), entries);
+}
+
+/** 리그를 시드 기본값으로 되돌린다 (오버라이드 파일 삭제) */
+export function resetLeagueCatalog(): readonly LeagueCatalogEntry[] {
+  clearOverride(leagueCatalogPath());
+  return leagueCatalog();
+}
+
+export function isLeagueCatalogEdited(): boolean {
+  return JSON.stringify(leagueCatalog()) !== JSON.stringify(LEAGUE_CATALOG_SEED);
+}
 
 /** 리그전을 도는 최상위 리그 — 일정 편성·감독 부임·대항전 티켓의 대상 */
-export const TOP_LEAGUES: readonly LeagueCatalogEntry[] = LEAGUE_CATALOG.filter(
-  (l) => l.kind === "playable",
-);
+export function topLeagues(): readonly LeagueCatalogEntry[] {
+  return leagueCatalog().filter((l) => l.kind === "playable");
+}
 
 /** 경기 없이 이적 시장에만 존재하는 리그 — 선수 검색의 대상은 된다 */
-export const MARKET_LEAGUES: readonly LeagueCatalogEntry[] = LEAGUE_CATALOG.filter(
-  (l) => l.kind === "market-only",
-);
+export function marketLeagues(): readonly LeagueCatalogEntry[] {
+  return leagueCatalog().filter((l) => l.kind === "market-only");
+}
 
 export function isTopLeague(id: string): boolean {
-  return BY_ID.get(id)?.kind === "playable";
+  return byId().get(id)?.kind === "playable";
 }
 
 /** 국내 컵 채우기용 2부 — 전력 기준선에 감점이 붙는다 (`strengthBase`) */
 export function isCupOnlyLeague(id: string): boolean {
-  return BY_ID.get(id)?.kind === "cup-only";
+  return byId().get(id)?.kind === "cup-only";
 }
 
 /**
@@ -227,18 +285,18 @@ export function isCupOnlyLeague(id: string): boolean {
  * 일정·순위표·컵 어디에도 안 나오지만 선수 검색과 협상에는 그대로 잡힌다.
  */
 export function isMarketOnlyLeague(id: string): boolean {
-  return BY_ID.get(id)?.kind === "market-only";
+  return byId().get(id)?.kind === "market-only";
 }
 
 /** 같은 나라의 1부 리그 — 2부 클럽을 국내 컵으로 묶을 때 쓴다 */
 export function topLeagueOfCountry(country: string): string | null {
-  return TOP_LEAGUES.find((l) => l.country === country)?.id ?? null;
+  return topLeagues().find((l) => l.country === country)?.id ?? null;
 }
 
 export function leagueCatalogById(id: string): LeagueCatalogEntry | null {
-  return BY_ID.get(id) ?? null;
+  return byId().get(id) ?? null;
 }
 
 export function leagueName(id: string): string {
-  return BY_ID.get(id)?.name ?? id;
+  return byId().get(id)?.name ?? id;
 }

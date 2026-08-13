@@ -19,11 +19,13 @@ import {
 } from "@story-fm/domain";
 import { deriveAxes } from "./attributes";
 import { catalogPath, dataDir } from "../core/paths";
+import { catalogCacheKey } from "../data/catalog-source";
 import { REAL_SQUADS, type RealPlayerSeed } from "../data/epl-players";
 import { EU_SQUADS } from "../data/eu-squads";
 import { MARKET_LEAGUE_SQUADS } from "../data/market-leagues";
 import {
-  TEAM_CATALOG,
+  teamCatalog,
+  type TeamCatalogEntry,
   TIER_BASE,
   countryOfTeam,
   defaultXiSlugs,
@@ -598,49 +600,63 @@ const MARKET_LEAGUE_TEMPLATE: string[] = [
   "ST",
 ];
 
-function buildFromSeed(): PlayerCatalogEntry[] {
-  const entries: CatalogDraft[] = [];
-  for (const team of TEAM_CATALOG) {
-    /**
-     * **무소속은 비어 있게 시작한다.** 클럽이 아니라 클럽이 없는 상태라
-     * 초기 스쿼드가 없다 — 방출·계약 만료로만 사람이 들어온다.
-     */
-    if (team.leagueId === "free") continue;
-    // 이적 시장 전용 클럽 — 레전드 시드 + 절차 생성으로 작은 스쿼드를 만든다.
-    // 2부와 달리 전력 감점이 없다 (약한 리그가 아니라 경기를 안 하는 리그다)
-    if (isMarketOnlyLeague(team.leagueId)) {
-      const seeds = ALL_SQUADS[team.id] ?? [];
-      for (const seed of seeds) entries.push(entryFromSeed(team.id, seed));
-      entries.push(
-        ...fallbackEntries(team.id, team.tier, {
-          template: MARKET_LEAGUE_TEMPLATE,
-          academyFrom: MARKET_LEAGUE_TEMPLATE.length,
-          base: strengthBase(team),
-        }),
-      );
-      continue;
-    }
-    // 2부 클럽 — 컵 전용이라 작은 스쿼드에 낮은 기준선 (`strengthBase`)
-    if (!isTopFlight(team.id)) {
-      entries.push(
-        ...fallbackEntries(team.id, team.tier, {
-          template: SECOND_DIVISION_TEMPLATE,
-          academyFrom: SECOND_DIVISION_ACADEMY_FROM,
-          base: strengthBase(team),
-        }),
-      );
-      continue;
-    }
-    const seeds = ALL_SQUADS[team.id];
-    if (seeds && seeds.length > 0) {
-      for (const s of seeds) entries.push(entryFromSeed(team.id, s));
+/**
+ * 한 클럽의 스쿼드 초안 — 실선수 시드가 있으면 그것이 우선이고, 없거나 모자라면
+ * 절차 생성으로 채운다. id는 아직 붙지 않는다 (전 클럽을 모은 뒤 한 번에 배정).
+ */
+function teamDrafts(team: TeamCatalogEntry): CatalogDraft[] {
+  /**
+   * **무소속은 비어 있게 시작한다.** 클럽이 아니라 클럽이 없는 상태라
+   * 초기 스쿼드가 없다 — 방출·계약 만료로만 사람이 들어온다.
+   */
+  if (team.leagueId === "free") return [];
+  // 이적 시장 전용 클럽 — 레전드 시드 + 절차 생성으로 작은 스쿼드를 만든다.
+  // 2부와 달리 전력 감점이 없다 (약한 리그가 아니라 경기를 안 하는 리그다)
+  if (isMarketOnlyLeague(team.leagueId)) {
+    const seeds = ALL_SQUADS[team.id] ?? [];
+    return [
+      ...seeds.map((seed) => entryFromSeed(team.id, seed)),
+      ...fallbackEntries(team.id, team.tier, {
+        template: MARKET_LEAGUE_TEMPLATE,
+        academyFrom: MARKET_LEAGUE_TEMPLATE.length,
+        base: strengthBase(team),
+      }),
+    ];
+  }
+  // 2부 클럽 — 컵 전용이라 작은 스쿼드에 낮은 기준선 (`strengthBase`)
+  if (!isTopFlight(team.id)) {
+    return fallbackEntries(team.id, team.tier, {
+      template: SECOND_DIVISION_TEMPLATE,
+      academyFrom: SECOND_DIVISION_ACADEMY_FROM,
+      base: strengthBase(team),
+    });
+  }
+  const seeds = ALL_SQUADS[team.id];
+  if (seeds && seeds.length > 0) {
+    return [
+      ...seeds.map((s) => entryFromSeed(team.id, s)),
       // 실선수 1군이 하한에 못 미치면 합성 선수로 보충한다.
       // 유소년은 실명을 쓰지 않는 결정(narrative.md §7)과도 맞는 방향이다.
-      entries.push(...topUpEntries(team.id, team.tier, seeds));
-    } else {
-      entries.push(...fallbackEntries(team.id, team.tier));
-    }
+      ...topUpEntries(team.id, team.tier, seeds),
+    ];
   }
+  return fallbackEntries(team.id, team.tier);
+}
+
+/**
+ * 어드민이 새로 만든 클럽의 스쿼드 — 편집된 선수 카탈로그에 붙일 때 쓴다.
+ * 이름 충돌을 피하려고 이미 쓰인 id를 받는다.
+ */
+export function buildTeamSquad(
+  team: TeamCatalogEntry,
+  taken: Set<string>,
+): PlayerCatalogEntry[] {
+  return teamDrafts(team).map((e) => ({ id: claimPlayerId(e.nameEn, e.birthdate, taken), ...e }));
+}
+
+function buildFromSeed(): PlayerCatalogEntry[] {
+  const entries: CatalogDraft[] = [];
+  for (const team of teamCatalog()) entries.push(...teamDrafts(team));
   /**
    * id 배정은 **맨 마지막에 한 번에** 한다. 보충 후보를 만들었다가 버리는
    * 경로(`topUpEntries`)가 있어, 만드는 자리에서 배정하면 버려진 후보가 이름을
@@ -658,11 +674,12 @@ function buildFromSeed(): PlayerCatalogEntry[] {
  * ⚠️ 진행 중인 게임에는 영향이 없다 — 게임은 시작 시 카탈로그를 복사해
  * `GAME_PLAYER`로 인스턴스화하기 때문이다 (v6 2-레이어 분리).
  */
-let cache: { dir: string; entries: PlayerCatalogEntry[] } | null = null;
+let cache: { key: string; entries: PlayerCatalogEntry[] } | null = null;
 
 export function playerCatalog(): PlayerCatalogEntry[] {
-  const dir = dataDir();
-  if (cache && cache.dir === dir) return cache.entries;
+  // 팀 카탈로그가 편집되면 시드 폴백이 달라진다 — 캐시 키가 편집 세대를 담는다
+  const key = catalogCacheKey();
+  if (cache && cache.key === key) return cache.entries;
   let entries: PlayerCatalogEntry[] | null = null;
   const file = catalogPath();
   if (existsSync(file)) {
@@ -674,7 +691,7 @@ export function playerCatalog(): PlayerCatalogEntry[] {
     }
   }
   entries ??= buildFromSeed();
-  cache = { dir, entries: backfillHomegrown(entries) };
+  cache = { key, entries: backfillHomegrown(entries) };
   return cache.entries;
 }
 
@@ -700,7 +717,7 @@ export function saveCatalog(entries: PlayerCatalogEntry[]): void {
   const tmp = `${file}.tmp`;
   writeFileSync(tmp, JSON.stringify(entries), "utf8");
   renameSync(tmp, file);
-  cache = { dir, entries };
+  cache = { key: catalogCacheKey(), entries };
 }
 
 /** 카탈로그를 시드 기본값으로 되돌린다 (오버라이드 파일 삭제) */
@@ -708,7 +725,7 @@ export function resetCatalog(): PlayerCatalogEntry[] {
   const file = catalogPath();
   if (existsSync(file)) rmSync(file);
   const entries = buildFromSeed();
-  cache = { dir: dataDir(), entries };
+  cache = { key: catalogCacheKey(), entries };
   return entries;
 }
 
