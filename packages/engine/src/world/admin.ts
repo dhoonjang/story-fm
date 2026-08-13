@@ -10,7 +10,7 @@ import {
   seedCatalog,
 } from "./catalog";
 import { claimPlayerId } from "./player-id";
-import { teamCatalog, teamCatalogById } from "../data/team-catalog";
+import { isClubTeam, teamCatalog, teamCatalogById } from "../data/team-catalog";
 
 /**
  * 선수 카탈로그 어드민 — **게임과 무관한 초기치 DB만** 편집한다 (v6 2-레이어).
@@ -235,27 +235,61 @@ export function adminAddCatalogPlayer(teamId: string, input: CatalogPlayerInput)
 /** 팀 최소 인원 — 카탈로그가 이보다 얇아지면 새 게임의 라인업을 못 채운다 */
 const MIN_TEAM_SIZE = 14;
 
+/**
+ * 선수가 지금 팀을 떠날 수 있는가 (삭제·이동 공통) — 남는 명단으로 새 게임의
+ * 라인업이 서야 한다. 무소속은 클럽이 아니라 클럽이 없는 상태이므로 하한이 없다.
+ */
+function departureBlock(
+  entries: readonly PlayerCatalogEntry[],
+  entry: PlayerCatalogEntry,
+  action: "삭제" | "이동",
+): string | null {
+  if (!isClubTeam(entry.teamId)) return null;
+  const teamSize = entries.filter((e) => e.teamId === entry.teamId).length;
+  if (teamSize <= MIN_TEAM_SIZE) {
+    return `팀 최소 인원(${MIN_TEAM_SIZE}명) 미만이 되어 ${action}할 수 없습니다 — 새 게임의 라인업을 채울 수 없습니다`;
+  }
+  // GK가 마지막 2명이면 내보낼 수 없다 (새 게임에서 GK 고갈)
+  if (naturalPositionOf(entry).position === "GK") {
+    const gks = entries.filter(
+      (e) => e.teamId === entry.teamId && naturalPositionOf(e).position === "GK",
+    ).length;
+    if (gks <= 2) return "팀 골키퍼는 2명 이상 유지해야 합니다";
+  }
+  return null;
+}
+
+/**
+ * 소속 팀 이동 — 방출은 무소속(`freeagents`)으로 옮기는 것이다.
+ * 옮겨 가는 쪽엔 상한이 없고, 떠나는 쪽만 라인업 하한을 지킨다.
+ */
+export function adminMoveCatalogPlayer(playerId: string, teamId: string): AdminResult {
+  const target = teamCatalogById(teamId);
+  if (!target) return { ok: false, message: `알 수 없는 팀: ${teamId}` };
+  const entries = playerCatalog().map((e) => ({
+    ...e,
+    positions: e.positions.map((p) => ({ ...p })),
+  }));
+  const entry = entries.find((e) => e.id === playerId);
+  if (!entry) return { ok: false, message: `카탈로그에 없는 선수입니다: ${playerId}` };
+  if (entry.teamId === teamId) {
+    return { ok: false, message: `${entry.nameKo}는 이미 ${target.name} 소속입니다` };
+  }
+  const blocked = departureBlock(entries, entry, "이동");
+  if (blocked) return { ok: false, message: blocked };
+
+  const from = teamCatalogById(entry.teamId)?.name ?? entry.teamId;
+  entry.teamId = teamId;
+  saveCatalog(entries);
+  return { ok: true, message: `${entry.nameKo} 이동 (${from} → ${target.name})`, playerId };
+}
+
 export function adminRemoveCatalogPlayer(playerId: string): AdminResult {
   const entries = playerCatalog();
   const entry = entries.find((e) => e.id === playerId);
   if (!entry) return { ok: false, message: `카탈로그에 없는 선수입니다: ${playerId}` };
-  const teamSize = entries.filter((e) => e.teamId === entry.teamId).length;
-  if (teamSize <= MIN_TEAM_SIZE) {
-    return {
-      ok: false,
-      message: `팀 최소 인원(${MIN_TEAM_SIZE}명) 미만이 되어 삭제할 수 없습니다 — 새 게임의 라인업을 채울 수 없습니다`,
-    };
-  }
-  // GK가 마지막 1명이면 삭제 불가 (새 게임에서 GK 고갈)
-  const isGk = naturalPositionOf(entry).position === "GK";
-  if (isGk) {
-    const gks = entries.filter(
-      (e) => e.teamId === entry.teamId && naturalPositionOf(e).position === "GK",
-    ).length;
-    if (gks <= 2) {
-      return { ok: false, message: "팀 골키퍼는 2명 이상 유지해야 합니다" };
-    }
-  }
+  const blocked = departureBlock(entries, entry, "삭제");
+  if (blocked) return { ok: false, message: blocked };
   saveCatalog(entries.filter((e) => e.id !== playerId));
   return { ok: true, message: `${entry.nameKo} 카탈로그에서 삭제`, playerId };
 }

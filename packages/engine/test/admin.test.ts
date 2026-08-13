@@ -7,6 +7,7 @@ import {
   teamCatalog,
   adminAddCatalogPlayer,
   adminCatalog,
+  adminMoveCatalogPlayer,
   adminRemoveCatalogPlayer,
   adminResetCatalog,
   adminSetCatalogPositions,
@@ -230,6 +231,77 @@ describe("카탈로그 편집", () => {
     expect(adminRemoveCatalogPlayer(left[0]!.id).ok).toBe(false);
 
     expect(adminRemoveCatalogPlayer("ghost").ok).toBe(false);
+  });
+
+  it("소속 팀을 옮길 수 있다 — 이동 전후 팀 이름이 메시지에 남는다", () => {
+    const target = adminCatalog()
+      .find((t) => t.teamId === "arsenal")!
+      .players.find((p) => p.position !== "GK")!;
+    const res = adminMoveCatalogPlayer(target.id, "chelsea");
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain("아스날");
+    expect(res.message).toContain("첼시");
+
+    expect(playerCatalog().find((e) => e.id === target.id)?.teamId).toBe("chelsea");
+    const teams = adminCatalog();
+    expect(teams.find((t) => t.teamId === "arsenal")!.players.some((p) => p.id === target.id)).toBe(
+      false,
+    );
+    expect(teams.find((t) => t.teamId === "chelsea")!.players.some((p) => p.id === target.id)).toBe(
+      true,
+    );
+    // 새 게임은 옮긴 팀에서 출발한다
+    expect(playersOf(createTestGame(5), "chelsea").some((p) => p.id === target.id)).toBe(true);
+  });
+
+  it("없는 팀·없는 선수·같은 팀으로의 이동은 반려된다 (카탈로그는 그대로)", () => {
+    const target = adminCatalog().find((t) => t.teamId === "arsenal")!.players[0]!;
+    expect(adminMoveCatalogPlayer(target.id, "notateam").ok).toBe(false);
+    expect(adminMoveCatalogPlayer("ghost", "chelsea").ok).toBe(false);
+    // 이미 그 팀이면 반려한다 — 아무것도 안 바뀌는 저장으로 '편집됨'을 켜지 않는다
+    expect(adminMoveCatalogPlayer(target.id, "arsenal").ok).toBe(false);
+    expect(isCatalogEdited()).toBe(false);
+  });
+
+  it("방출은 무소속으로 옮기는 것이고, 무소속에서 다시 클럽으로 돌아올 수 있다", () => {
+    const target = adminCatalog()
+      .find((t) => t.teamId === "arsenal")!
+      .players.find((p) => p.position !== "GK")!;
+    expect(adminMoveCatalogPlayer(target.id, "freeagents").ok).toBe(true);
+    expect(playerCatalog().find((e) => e.id === target.id)?.teamId).toBe("freeagents");
+
+    // 무소속은 클럽이 아니다 — 팀 최소 인원 하한이 나가는 길을 막지 않는다
+    const back = adminMoveCatalogPlayer(target.id, "brighton");
+    expect(back.ok).toBe(true);
+    expect(playerCatalog().find((e) => e.id === target.id)?.teamId).toBe("brighton");
+  });
+
+  it("이동도 삭제와 같은 하한을 지킨다 — 팀 최소 인원·GK 2명", () => {
+    const arsenal = adminCatalog().find((t) => t.teamId === "arsenal")!;
+    const gks = arsenal.players.filter((p) => p.position === "GK");
+    // GK를 2명까지 줄이면 더는 못 내보낸다
+    for (const gk of gks.slice(0, Math.max(0, gks.length - 2))) {
+      expect(adminMoveCatalogPlayer(gk.id, "freeagents").ok).toBe(true);
+    }
+    const left = adminCatalog()
+      .find((t) => t.teamId === "arsenal")!
+      .players.filter((p) => p.position === "GK");
+    expect(left).toHaveLength(2);
+    expect(adminMoveCatalogPlayer(left[0]!.id, "freeagents").ok).toBe(false);
+
+    // 명단이 최소 인원까지 얇아지면 필드 플레이어도 못 나간다
+    let outfield = adminCatalog()
+      .find((t) => t.teamId === "arsenal")!
+      .players.filter((p) => p.position !== "GK");
+    for (const p of outfield) {
+      const res = adminMoveCatalogPlayer(p.id, "freeagents");
+      if (!res.ok) break;
+    }
+    outfield = adminCatalog().find((t) => t.teamId === "arsenal")!.players;
+    expect(outfield).toHaveLength(14);
+    expect(adminMoveCatalogPlayer(outfield.find((p) => p.position !== "GK")!.id, "freeagents").ok).toBe(
+      false,
+    );
   });
 
   it("시드 기본값으로 되돌릴 수 있다", () => {

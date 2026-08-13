@@ -527,6 +527,56 @@ describe("API — 온보딩부터 경기까지", () => {
     expect(reset.edited).toBe(false);
   });
 
+  it("카탈로그 어드민 — 소속 팀 이동 (방출은 무소속으로)", async () => {
+    const pparams = (playerId: string) => ({ params: Promise.resolve({ playerId }) });
+    type CatalogList = {
+      teams: Array<{
+        teamId: string;
+        players: Array<{ id: string; position: string; finishing: number; nameKo: string }>;
+      }>;
+      edited: boolean;
+    };
+    const squadOf = (list: CatalogList, teamId: string) =>
+      list.teams.find((t) => t.teamId === teamId)!.players;
+
+    const list = (await catalogGet().json()) as CatalogList;
+    const target = squadOf(list, "arsenal").find((p) => p.position !== "GK")!;
+
+    // 이동은 다른 편집과 한 요청에 섞여 와도 된다
+    const moveRes = await catalogPatch(json({ teamId: "chelsea", finishing: 91 }), pparams(target.id));
+    expect(moveRes.status).toBe(200);
+    const moved = (await moveRes.json()) as CatalogList & { message: string };
+    expect(squadOf(moved, "arsenal").some((p) => p.id === target.id)).toBe(false);
+    expect(squadOf(moved, "chelsea").find((p) => p.id === target.id)!.finishing).toBe(91);
+    expect(moved.edited).toBe(true);
+    expect(moved.message).toContain("첼시");
+
+    // 방출 — 무소속도 팀 하나다
+    const releaseRes = await catalogPatch(json({ teamId: "freeagents" }), pparams(target.id));
+    expect(releaseRes.status).toBe(200);
+    const released = (await releaseRes.json()) as CatalogList;
+    expect(squadOf(released, "freeagents").some((p) => p.id === target.id)).toBe(true);
+
+    // 이미 그 팀이면 이동은 없던 일이고, 함께 온 편집은 그대로 반영된다
+    const sameRes = await catalogPatch(
+      json({ teamId: "freeagents", nameKo: "무소속선수" }),
+      pparams(target.id),
+    );
+    expect(sameRes.status).toBe(200);
+    const same = (await sameRes.json()) as CatalogList;
+    expect(squadOf(same, "freeagents").find((p) => p.id === target.id)!.nameKo).toBe("무소속선수");
+
+    // 없는 팀은 400 — 함께 온 편집도 반영되지 않는다
+    const badRes = await catalogPatch(
+      json({ teamId: "notateam", finishing: 12 }),
+      pparams(target.id),
+    );
+    expect(badRes.status).toBe(400);
+    const after = (await catalogGet().json()) as CatalogList;
+    expect(squadOf(after, "freeagents").find((p) => p.id === target.id)!.finishing).toBe(91);
+
+    await catalogReset();
+  });
 });
 
 describe("API — 팀·리그·컵 카탈로그 어드민", () => {
