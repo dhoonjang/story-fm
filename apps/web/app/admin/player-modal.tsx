@@ -18,6 +18,10 @@ import {
  * 편집 모드에선 **주 포지션을 따로 받지 않는다**: 가능 포지션 목록의 `주` 표시가
  * 곧 주 포지션이라, 두 칸을 나란히 두면 서버에서 한쪽이 다른 쪽을 덮어쓴다.
  * 추가 모드에선 목록이 아직 없으므로 주 포지션 하나만 받고 서버가 파생시킨다.
+ *
+ * 소속 팀은 두 모드에 다 있다 — 방출도 무소속 팀으로 옮기는 것이라 별도 손잡이가
+ * 없다. 떠나는 팀의 라인업 하한(인원·GK)은 엔진이 보므로, 거절 메시지를 이 창
+ * 안에 그대로 띄우고 창을 닫지 않는다 (고친 값을 잃지 않게).
  */
 
 const AXIS_GROUP_KEYS = Object.keys(AXIS_GROUPS) as Array<keyof typeof AXIS_GROUPS>;
@@ -60,7 +64,8 @@ export function PlayerModal({
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const teamName = player?.teamName ?? teams.find((t) => t.id === teamId)?.name ?? "";
+  // 셀렉트를 따라간다 — 머리줄이 지금 고른 소속을 말해야 저장 전에 어디로 가는지 보인다
+  const teamName = teams.find((t) => t.id === teamId)?.name ?? player?.teamName ?? "";
 
   function setPos(index: number, patch: Partial<CatalogPosition>) {
     setPositions((cur) => cur.map((p, i) => (i === index ? { ...p, ...patch } : p)));
@@ -74,7 +79,7 @@ export function PlayerModal({
   /** 저장 전 검증 — 서버가 거절할 조합을 여기서 먼저 잡는다 */
   function validate(): string | null {
     if (!nameKo.trim()) return "이름을 입력하세요";
-    if (mode === "create" && !teamId) return "팀을 고르세요";
+    if (!teamId) return "팀을 고르세요";
     if (mode === "edit") {
       if (positions.length === 0) return "가능 포지션이 최소 하나 필요합니다";
       if (!positions.some((p) => p.isNatural)) return "주 포지션을 하나 이상 지정하세요";
@@ -118,6 +123,8 @@ export function PlayerModal({
               method: "PATCH",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
+                // 지금 소속과 같으면 서버가 이동을 건너뛴다 — 늘 실어 보내도 안전하다
+                teamId,
                 nameKo: nameKo.trim(),
                 nameEn: nameEn.trim() || undefined,
                 birthdate,
@@ -229,38 +236,36 @@ export function PlayerModal({
             data-testid="player-modal-birthdate"
           />
         </label>
-        {mode === "create" ? (
-          <>
-            <label className="admin-field">
-              팀
-              <select
-                value={teamId}
-                onChange={(e) => setTeamId(e.target.value)}
-                data-testid="player-modal-team"
-              >
-                {teams.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="admin-field">
-              주 포지션
-              <select
-                value={mainPosition}
-                onChange={(e) => setMainPosition(e.target.value)}
-                data-testid="player-modal-position"
-              >
-                {POSITION_CODES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </>
-        ) : null}
+        <label className="admin-field">
+          소속 팀
+          <select
+            value={teamId}
+            onChange={(e) => setTeamId(e.target.value)}
+            data-testid="player-modal-team"
+          >
+            {teams.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {mode === "create" && (
+          <label className="admin-field">
+            주 포지션
+            <select
+              value={mainPosition}
+              onChange={(e) => setMainPosition(e.target.value)}
+              data-testid="player-modal-position"
+            >
+              {POSITION_CODES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
 
       {mode === "edit" ? (

@@ -667,7 +667,8 @@ textarea {
   align-items: center;
   gap: var(--sp-2);
 }
-.admin-pos-row select {
+.admin-pos-row select,
+.admin-squad-row select {
   background: var(--panel-2);
   border: 1px solid var(--border);
   color: var(--text);
@@ -682,6 +683,57 @@ textarea {
   gap: var(--sp-1);
   color: var(--muted);
   font-size: var(--fs-sm);
+}
+
+/**
+ * 팀 명단 — 목록의 스쿼드 칸이 그 팀의 명단 창을 여는 손잡이다(행은 팀 편집으로
+ * 간다). 한 줄이 한 선수고, 읽는 값(자리·나이·OVR) 뒤에 옮길 팀 셀렉트가 선다.
+ */
+.admin-squad-btn {
+  font-variant-numeric: tabular-nums;
+}
+.admin-squad-btn:hover,
+.admin-squad-btn:focus-visible {
+  border-color: var(--accent-2);
+  color: var(--text);
+}
+.admin-squad-rows {
+  display: flex;
+  flex-direction: column;
+}
+.admin-squad-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+.admin-squad-row:last-child {
+  border-bottom: none;
+}
+.admin-squad-row select {
+  max-width: 180px;
+}
+.admin-squad-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-md);
+}
+.admin-squad-name .muted {
+  margin-left: 6px;
+  font-size: var(--fs-xs);
+}
+.admin-squad-vals {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+.admin-squad-empty {
+  color: var(--muted);
+  font-size: var(--fs-md);
 }
 
 /* 15축 — 묶음(신체·기술·정신·GK)이 줄을 가른다 */

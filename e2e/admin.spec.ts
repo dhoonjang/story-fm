@@ -49,6 +49,61 @@ test("카탈로그 어드민이 500 없이 동작한다", async ({ page }) => {
   expect(serverErrors).toEqual([]);
 });
 
+test("선수 팝업과 팀 명단에서 소속을 옮긴다", async ({ page }) => {
+  const serverErrors: string[] = [];
+  page.on("response", (response) => {
+    if (response.status() >= 500) {
+      serverErrors.push(`${response.status()} ${response.url()}`);
+    }
+  });
+
+  await page.goto("/admin");
+  await expect(page.getByTestId("admin-count")).not.toHaveText("0명", { timeout: 20_000 });
+
+  // ── 선수 쪽 — 편집 팝업의 팀 셀렉트가 소속을 옮긴다 (방출 = 무소속으로 옮기기)
+  await page.getByTestId("admin-team-filter").selectOption("arsenal");
+  const row = page.locator(ROW).first();
+  const rowId = await row.getAttribute("data-testid");
+  const modal = page.getByTestId("player-modal");
+  await row.click();
+  await expect(modal).toBeVisible();
+  await page.getByTestId("player-modal-team").selectOption("freeagents");
+  await page.getByTestId("player-modal-save").click();
+  await expect(modal).toHaveCount(0);
+  await expect(page.getByTestId("admin-msg")).toContainText("무소속");
+  // 목록이 새 소속으로 갱신된다 — 떠난 팀에선 사라지고 무소속에서 보인다
+  await expect(page.getByTestId(rowId!)).toHaveCount(0);
+  await page.getByTestId("admin-team-filter").selectOption("freeagents");
+  await expect(page.getByTestId(rowId!)).toBeVisible();
+
+  // ── 팀 쪽 — 스쿼드 칸이 명단 창을 열고, 거기서도 소속을 옮긴다
+  await page.getByTestId("admin-tab-teams").click();
+  const squadBtn = page.getByTestId("team-squad-arsenal");
+  await expect(squadBtn).toBeVisible({ timeout: 20_000 });
+  const before = Number((await squadBtn.innerText()).replace(/\D/g, ""));
+  await squadBtn.click();
+  const squadModal = page.getByTestId("squad-modal");
+  await expect(squadModal).toBeVisible();
+  const squadRow = squadModal.locator(".admin-squad-row").first();
+  const squadRowId = await squadRow.getAttribute("data-testid");
+  await squadRow.locator("select").selectOption("freeagents");
+  await expect(page.getByTestId("squad-modal-msg")).toContainText("무소속");
+  // 옮긴 선수는 이 명단에서 빠지고, 창은 열린 채로 남는다
+  await expect(page.getByTestId(squadRowId!)).toHaveCount(0);
+  await expect(squadModal).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(squadModal).toHaveCount(0);
+  await expect(squadBtn).toHaveText(`${before - 1}명`);
+
+  // 되돌리기 — 뒤 테스트에 편집을 남기지 않는다
+  await page.getByTestId("admin-tab-players").click();
+  page.once("dialog", (d) => void d.accept());
+  await page.getByTestId("catalog-reset").click();
+  await expect(page.getByTestId("catalog-edited")).toHaveCount(0);
+
+  expect(serverErrors).toEqual([]);
+});
+
 test("팀·리그·컵 탭이 팝업으로 카탈로그를 고친다", async ({ page }) => {
   const serverErrors: string[] = [];
   page.on("response", (response) => {

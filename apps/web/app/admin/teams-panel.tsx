@@ -1,10 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { SquadModal } from "./squad-modal";
 import { TeamModal } from "./team-modal";
 import {
   TACTICAL_STYLE_KO,
   type AdminTeamRow,
+  type CatalogResponse,
+  type CatalogTeam,
   type LeagueCatalogResponse,
   type TeamCatalogResponse,
 } from "./types";
@@ -16,6 +19,10 @@ import {
  * 리그 목록을 따로 불러오는 이유: 팝업의 리그 셀렉트가 **팀이 없는 리그**까지
  * 보여야 한다 (팀을 그 리그로 옮기는 것이 정당한 편집이다). 행에서 파생하면
  * 빈 리그가 목록에서 사라진다.
+ *
+ * 한 행이 두 창을 연다: 행 자체는 팀 편집, 스쿼드 칸은 그 팀의 명단이다. 명단이
+ * 쓰는 선수 카탈로그(`/api/admin/catalog`)는 팀 목록보다 훨씬 무거워서, 명단을
+ * 처음 열 때 한 번만 받아 둔다.
  */
 
 type ModalTarget = { mode: "create" } | { mode: "edit"; team: AdminTeamRow };
@@ -33,12 +40,21 @@ export function TeamsPanel({
   const [leagueFilter, setLeagueFilter] = useState("all");
   const [query, setQuery] = useState("");
   const [target, setTarget] = useState<ModalTarget | null>(null);
+  const [squadTeam, setSquadTeam] = useState<AdminTeamRow | null>(null);
+  const [catalog, setCatalog] = useState<CatalogTeam[]>([]);
+  const [catalogLoaded, setCatalogLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   const applyResponse = useCallback((data: TeamCatalogResponse) => {
     setTeams(data.teams ?? []);
     if (data.edited !== undefined) setEdited(data.edited);
+  }, []);
+
+  /** 팀을 더하거나 지우면 선수 카탈로그도 달라진다 — 받아 둔 명단을 버린다 */
+  const dropCatalog = useCallback(() => {
+    setCatalog([]);
+    setCatalogLoaded(false);
   }, []);
 
   useEffect(() => {
@@ -61,6 +77,32 @@ export function TeamsPanel({
       .catch(() => onError("리그 목록을 불러오지 못했습니다"));
   }, [applyResponse, onError]);
 
+  // 선수 카탈로그는 명단 창이 서 있을 때만 받는다 (팀 목록보다 수십 배 크다)
+  useEffect(() => {
+    if (squadTeam === null || catalogLoaded) return;
+    fetch("/api/admin/catalog")
+      .then((r) => r.json())
+      .then((d: CatalogResponse) => {
+        if (d.error) onError(d.error);
+        else setCatalog(d.teams ?? []);
+        setCatalogLoaded(true);
+      })
+      .catch(() => {
+        onError("선수 카탈로그를 불러오지 못했습니다");
+        setCatalogLoaded(true);
+      });
+  }, [squadTeam, catalogLoaded, onError]);
+
+  /** 스쿼드 인원 — 명단을 받아 뒀으면 그쪽이 최신이다 (옮긴 즉시 줄어든다) */
+  const squadSizes = useMemo(
+    () => new Map(catalog.map((t) => [t.teamId, t.players.length])),
+    [catalog],
+  );
+  const sizeOf = useCallback(
+    (t: AdminTeamRow) => squadSizes.get(t.id) ?? t.squadSize,
+    [squadSizes],
+  );
+
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return teams.filter((t) => {
@@ -82,6 +124,7 @@ export function TeamsPanel({
       const data: TeamCatalogResponse = await res.json();
       if (!res.ok) throw new Error(data.error ?? "되돌리기 실패");
       applyResponse(data);
+      dropCatalog();
       onMessage(data.message ?? null);
     } catch (e) {
       onError(e instanceof Error ? e.message : String(e));
@@ -93,7 +136,13 @@ export function TeamsPanel({
   function openTeam(t: AdminTeamRow) {
     onMessage(null);
     onError(null);
-    setTarget({ mode: "edit", team: t });
+    setTarget({ mode: "edit", team: { ...t, squadSize: sizeOf(t) } });
+  }
+
+  function openSquad(t: AdminTeamRow) {
+    onMessage(null);
+    onError(null);
+    setSquadTeam(t);
   }
 
   return (
@@ -177,6 +226,8 @@ export function TeamsPanel({
                 aria-label={`${t.name} 편집`}
                 onClick={() => openTeam(t)}
                 onKeyDown={(e) => {
+                  // 행 안의 명단 버튼에서 올라온 키는 팀 편집을 열지 않는다
+                  if (e.target !== e.currentTarget) return;
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
                     openTeam(t);
@@ -196,7 +247,19 @@ export function TeamsPanel({
                   <span className="muted">{t.capacity.toLocaleString()}석</span>
                 </td>
                 <td className="num">{t.commercialTier}</td>
-                <td className="num">{t.squadSize}</td>
+                <td className="num">
+                  <button
+                    className="mini-btn admin-squad-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openSquad(t);
+                    }}
+                    aria-label={`${t.name} 명단`}
+                    data-testid={`team-squad-${t.id}`}
+                  >
+                    {sizeOf(t)}명
+                  </button>
+                </td>
               </tr>
             ))}
             {visible.length === 0 && (
@@ -216,10 +279,21 @@ export function TeamsPanel({
           defaultLeagueId={leagueFilter !== "all" ? leagueFilter : (leagues[0]?.id ?? "")}
           onSaved={(data) => {
             applyResponse(data);
+            dropCatalog();
             onMessage(data.message ?? null);
             setTarget(null);
           }}
           onClose={() => setTarget(null)}
+        />
+      )}
+
+      {squadTeam && (
+        <SquadModal
+          team={{ id: squadTeam.id, name: squadTeam.name, leagueName: squadTeam.leagueName }}
+          catalog={catalog}
+          loaded={catalogLoaded}
+          onMoved={(data) => setCatalog(data.teams ?? [])}
+          onClose={() => setSquadTeam(null)}
         />
       )}
     </section>
