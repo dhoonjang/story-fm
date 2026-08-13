@@ -5335,6 +5335,7 @@ textarea {
 }
 .fin-net {
   font-weight: 800;
+  font-variant-numeric: tabular-nums;
 }
 .fin-net.plus {
   color: var(--accent);
@@ -5351,6 +5352,7 @@ textarea {
   font-size: var(--fs-sm);
   font-weight: 700;
   margin-bottom: 4px;
+  font-variant-numeric: tabular-nums;
 }
 .fin-col-title.income {
   color: var(--accent);
@@ -5366,8 +5368,9 @@ textarea {
   padding: 2px 0;
   color: var(--text);
 }
-.fin-line.muted {
-  color: var(--muted);
+/* 금액은 세로로 비교된다 — 자릿수가 흔들리지 않게 */
+.fin-line > span:last-child {
+  font-variant-numeric: tabular-nums;
 }
 .fin-meta {
   font-size: var(--fs-sm);
@@ -5375,11 +5378,11 @@ textarea {
   margin: -4px 0 8px;
 }
 .fin-meta .warn,
-.fin-psr .warn {
+.fin-stat .warn {
   color: var(--gold);
 }
 .fin-meta .danger,
-.fin-psr .danger,
+.fin-stat .danger,
 .finance-card .danger {
   color: var(--danger);
 }
@@ -5405,25 +5408,37 @@ textarea {
   color: var(--danger);
   border-color: var(--danger);
 }
-.fin-sub {
-  display: block;
-  margin-top: 4px;
-  font-size: var(--fs-xs);
-  font-weight: 400;
-  color: var(--muted);
-}
-.fin-psr,
-.fin-board {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: 10px 14px;
+/* 부수 지표 — 큰 카드 아래 한 줄. **배경도 테두리도 없다**: 잔고·이적 예산이
+   화면의 주어이고, 나머지는 그 아래 딸린 사실이다. 박스를 겹겹이 두르면 어느
+   것이 중요한지가 사라진다 */
+.fin-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px 18px;
+  padding: 12px 2px 0;
   margin-top: 10px;
-  font-size: var(--fs-sm);
+  border-top: 1px solid var(--border);
+}
+.fin-stat .label {
   color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.fin-stat .value {
+  margin-top: 2px;
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+/* 말로 된 값(보드 평가·경기장)은 수치보다 작게 — 같은 크기면 숫자와 뒤섞인다 */
+.fin-stat .value.words {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+.fin-stat .sub {
+  margin-top: 2px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 /* 실시간 재정 활동 — 날짜 · 카테고리 · 상세 · 금액 */
 .fin-feed {
@@ -5449,6 +5464,9 @@ textarea {
   color: var(--muted);
   font-size: var(--fs-xs);
 }
+.fin-feed-row .date {
+  font-variant-numeric: tabular-nums;
+}
 .fin-feed-row .label {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5457,6 +5475,7 @@ textarea {
 .fin-feed-row .amt {
   font-weight: 700;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .fin-feed-row .amt.plus {
   color: var(--accent);
@@ -5623,7 +5642,7 @@ textarea {
   height: 100%;
   background: var(--accent-2);
 }
-/* 넓은 화면에선 네 장이 한 줄로 — 2×2로 두면 카드가 과하게 커져 여백만 남는다 */
+/* 잔고와 이적 예산 — 두 장이 폭을 반씩 나눈다 */
 .finance-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
@@ -5640,9 +5659,10 @@ textarea {
   font-size: var(--fs-sm);
 }
 .finance-card .value {
-  font-size: var(--fs-xl);
+  font-size: var(--fs-2xl);
   font-weight: 700;
   margin-top: 4px;
+  font-variant-numeric: tabular-nums;
 }
 .trophy-list {
   display: flex;
