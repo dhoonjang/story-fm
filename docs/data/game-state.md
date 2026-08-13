@@ -91,7 +91,7 @@
 | ↳ `PlayerState` | 폼(−1~1) · 체력(0~100) · 부상 성향 · 심경 한 줄 | `domain/player.ts` |
 | ↳ `PlayerPosition` | 가능 포지션 + 적응도 + `isNatural`(하나 이상) | `domain/player.ts` |
 | `tactics` `TeamTactics` | 팀당 1개 — `spec` + `assignments` + 팀 기억 | `domain/tactics.ts` |
-| ↳ `TacticsSpec` | 포메이션 + 전술 6축(각 1~5) | `domain/tactics.ts` |
+| ↳ `TacticsSpec` | 모양 이름(파생 — 프리셋 밖도 담는다) + 전술 6축(각 1~5) | `domain/tactics.ts` |
 | ↳ `TacticAssignment` | **라인업의 원본** — 자리·좌표·역할·적응도·개인 지시·개인 기억 | `domain/tactics.ts` |
 | ↳ `PlayerDirective` | 결과에 닿는 개인 지시 5종 (`instruction`은 사람이 읽는 말) | `domain/tactics.ts` |
 | ↳ `DrilledTactics` | 전술 지문 → 그때 도달한 적응도 (선수별) | `domain/tactics.ts` |
@@ -225,7 +225,7 @@ erDiagram
 | 값 | 어디서 나오나 | 왜 파생인가 |
 | --- | --- | --- |
 | 나이 | `ageOf(birthdate, date)` | 저장하면 생일마다 전 선수를 훑어 올려야 하고, 안 올리면 틀린다 |
-| 포메이션 이름 | `shapeOf(points)` | 좌표가 원본이다 — 칩을 옮기면 이름이 따라와야 한다 |
+| 포메이션 이름 | `shapeOf(points)` | 좌표가 원본이다 — 칩을 옮기면 이름이 따라와야 한다. 프리셋 다섯이 아니어도 된다(자유 배치는 `4-1-3-2`를 만든다) |
 | 순위표 | `computeStandings(state, competitionId)` | 경기 결과가 원본. 컵은 순위표 자체가 없어 빈 배열이다 |
 | 등록 명단 현황 | `squadRegistrationOf(state, teamId)` | 1군 명단 + 생년월일 + 홈그로운 협회에서 전부 나온다 |
 | 시즌 평점 | `seasonRating(stat)` = `ratingSum ÷ apps` | 평균을 저장하면 경기마다 재계산하고 반올림 오차가 쌓인다 |

@@ -17,7 +17,7 @@
  * 분데스리가 공식 약어에는 숫자가 들어간다 (B04·M05·S04).
  */
 import type { Formation } from "@story-fm/domain";
-import { DEFAULT_TACTICS } from "@story-fm/domain";
+import { DEFAULT_FORMATION } from "@story-fm/domain";
 import { leagueCatalog, isCupOnlyLeague, isTopLeague, leagueCatalogById } from "./league-catalog";
 import { catalogSource } from "./catalog-source";
 import { readTeamOverride } from "./team-override";
@@ -54,7 +54,7 @@ export interface TeamCatalogEntry {
    * 구단의 **기본 포메이션** — 새 게임의 초기 전술(`TACTICS.spec.formation`)이
    * 된다. 실제 클럽의 상용 시스템을 프리셋 5종으로 옮긴 값이라 백3 계열
    * (3-4-2-1·3-4-3·5-3-2)은 모두 `3-5-2`로 접힌다. 값이 없으면(2부 클럽)
-   * `DEFAULT_TACTICS.formation`을 쓴다.
+   * `DEFAULT_FORMATION`을 쓴다.
    *
    * **검증 범위 (2026-08 기준)** — 이 표는 전수 확인된 것이 아니다.
    * - **EPL 20팀: 전수 대조 완료** (FPL 2026-27 GW1 예상 라인업). 4팀을 고쳤다 —
@@ -1398,7 +1398,7 @@ export function defaultXiSlugs(teamId: string): readonly string[] {
 
 /** 팀의 기본 포메이션 — 2부 클럽처럼 값이 없으면 기본 전술의 것을 쓴다 */
 export function formationOf(teamId: string): Formation {
-  return teamCatalogById(teamId)?.formation ?? DEFAULT_TACTICS.formation;
+  return teamCatalogById(teamId)?.formation ?? DEFAULT_FORMATION;
 }
 
 /** 같은 나라의 전 클럽 (1부 + 2부) — 국내 컵 참가 명단의 원본 */

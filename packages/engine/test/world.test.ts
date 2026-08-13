@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ManagerAttributes } from "@story-fm/domain";
 import {
   FORMATIONS,
+  presetOf,
   MANAGER_ATTRIBUTES,
   FORMATION_SLOTS,
   GamePlayerSchema,
@@ -308,11 +309,12 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
     expect(topFlight.every((t) => t.formation !== undefined)).toBe(true);
 
     for (const team of SQUAD_TEAMS) {
-      const formation = tacticsOf(state, team.id).spec.formation;
+      // 새 게임의 시작 모양은 언제나 프리셋이다 (자유 배치는 감독이 판을 만진 뒤에 생긴다)
+      const formation = presetOf(tacticsOf(state, team.id).spec.formation);
       expect(FORMATIONS).toContain(formation);
       // 배치는 그 모양의 슬롯을 그대로 쓴다
       expect(assignmentsOf(state, team.id, "starting").map((a) => a.position)).toEqual(
-        FORMATION_SLOTS[formation],
+        FORMATION_SLOTS[formation!],
       );
     }
 

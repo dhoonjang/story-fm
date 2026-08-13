@@ -1,100 +1,69 @@
 ---
 name: conductor
-description: Distribute a request to Orca orchestration workers and collect their results, serializing tasks that touch the same code through task dependencies.
+description: Turn this session into a window agent and spawn a background conductor that splits the request into Orca orchestration tasks, runs workers in parallel, commits each finished unit to main, and reports back.
 ---
 
 # Conductor
 
-The invoking session is the conductor. Split the request into tasks, start workers,
-collect results. Do not edit files yourself — read-only inspection is fine.
+Two roles.
 
-## 1. Bind a Run
+- **Window agent** — this session. It only carries messages between the user and the
+  conductor, and stays free to accept a new request at any moment.
+- **Conductor agent** — a background subagent this skill starts. It splits requests into
+  tasks, runs Orca workers, commits and pushes each finished unit, cleans workers up,
+  and reports to the window agent.
 
-Once per session.
+You are the window agent. Everything below is yours; the conductor's rules live in
+`CONDUCTOR.md` next to this file.
 
-```bash
-orca orchestration run-list --json
-orca orchestration run-use --id <run_id> --json
-# none yet:
-orca orchestration run-create --objective "<objective>" --json
+## 1. Start the conductor
+
+One conductor per session. If one is already alive, skip to §2 — do not start a second.
+
+```
+Agent(
+  description: "conductor",
+  subagent_type: "general-purpose",
+  run_in_background: true,     # required — a foreground agent locks the window
+  prompt: "너는 이 세션의 지휘자 에이전트다. \
+    /Users/dhoonjang/local/story-fm/.claude/skills/conductor/CONDUCTOR.md 를 읽고 \
+    그 규약대로 일한다.\n\n첫 요청:\n<사용자 요청 원문>"
+)
 ```
 
-## 2. Create tasks
+Record the name and `agentId` from the spawn result — that is the address for §2. Pass
+the user's request verbatim; do not pre-split it, that is the conductor's job.
 
-Search which files the request touches before creating a task. `--deps` enforces only
-the order you declare — Orca does not detect that two tasks touch the same file. A
-missing dep means two workers edit one file and the later write wins.
+## 2. Queue and forward
 
-```bash
-orca orchestration task-list --brief --json          # status dispatched = in flight
-orca orchestration task-create --spec "<brief>" --json
-orca orchestration task-create --spec "<brief>" --deps '["<blocking_task_id>"]' --json
-```
+Track one bit: is the conductor **busy** or **idle**? It says so in every report
+(`STATUS: busy` / `STATUS: idle`). It starts busy; its final task-notification means idle.
 
-A dependent task stays `pending` and is absent from `--ready` until its dep reaches
-`completed`. Start its worker after it turns `ready`.
+- Idle → forward the request immediately with
+  `SendMessage(to: "<conductor name>", message: "<원문>")`.
+- Busy → hold it. Keep the pending queue as a numbered list in your reply to the user so
+  it survives context compaction, and tell the user their request is queued at position N.
+- On the next `STATUS: idle`, forward the queue as one message, oldest first.
+- **Control messages skip the queue** — stop, cancel, change of direction, or an answer to
+  a question the conductor asked. Forward those to a busy conductor at once; holding them
+  wastes work that is already running.
 
-`files_modified` on a worker's `worker_done` is the record of what it touched. Keep no
-separate ledger.
+## 3. Relay reports
 
-## 3. Start workers
+A conductor report arrives as a message. Relay it to the user in Korean, condensed — what
+changed, which commit, what is still running. Do not repeat it when the same text arrives
+again as the agent's final task-notification.
 
-```bash
-orca orchestration worker-start --task <task_id> --worktree current --agent claude --json
-```
+If a report asks a question that is the user's call, answer the user first, then forward
+their answer as a control message.
 
-Never create a worktree — a new one isolates `apps/web/.data` and reinstalls deps.
-Create every independent task first, start every worker, then wait.
+## 4. Never, as the window agent
 
-## 4. Wait and settle
-
-Always run the wait in the background. A foreground wait locks the conductor out of
-the conversation for its whole timeout — the user cannot ask anything until it returns.
-
-```bash
-# Bash tool: run_in_background: true
-orca orchestration check --wait --types worker_done,escalation,question --timeout-ms 900000 --json
-```
-
-- A timeout or `{count:0}` is a checkpoint. Keep rolling the wait; coding tasks take
-  15–60 minutes. Do not substitute `terminal wait --for tui-idle` polling.
-- While waiting, answer the user's questions and do read-only inspection. A request
-  that edits files becomes a new task with deps — never edit as the conductor.
-- Answer a `question` with `orca orchestration reply --id <msg_id> --body <answer> --json`.
-  Ask the user first when the call is theirs.
-- Process every message in a Delivery before `--ack <delivery_id>`.
-- On `worker_done`: `orca orchestration worker-release --dispatch <dispatch_id> --json`.
-  Never release over a timeout, heartbeat, or idle state.
-
-## 5. Put in every worker brief
-
-Workers share one worktree.
-
-- Port 3000 is the user's server; it hot-reloads worker edits from the shared worktree.
-- **Give every worker that runs `pnpm e2e` its own `E2E_SLOT` (1–9), and say which.**
-  The slot forks port, `NEXT_DIST_DIR`, and `STORY_FM_DATA_DIR` together, so slotted
-  runs are concurrent-safe. Leaving it unset means the shared default slot (3399) —
-  two workers there share one server and one save directory.
-- Isolate non-e2e verification saves with `STORY_FM_DATA_DIR=<tmp>`. Never touch
-  `apps/web/.data`.
-- No git commits, pushes, stashes, or branch operations.
-- Follow AGENTS.md. Korean comments; update `docs/` before code when behavior changes.
-- Run `pnpm typecheck`, `pnpm lint`, and the relevant tests. Separate pre-existing
-  failures from your own by stashing your changes and rerunning.
-- Report with:
-  ```bash
-  orca orchestration send --type worker_done --subject "<status>" \
-    --body "<what changed, findings, what remains>" --task-id <task_id> \
-    --dispatch-id <dispatch_id> --outcome succeeded --files-modified "path/a,path/b" --json
-  ```
-  Use `--outcome failed` for failure; never encode it in prose alone.
-
-## 6. Never
-
-- `worktree create`
-- Edit files as the conductor
-- Start overlapping tasks without a dep
-- `orchestration reset` during active coordination
+- Edit files, run tests, or commit. Read-only inspection to answer a question is fine;
+  anything that changes the tree goes to the conductor as a request.
+- Run `orca orchestration` commands. The Run is bound to the conductor's terminal.
+- Start a second conductor, or start workers yourself.
+- Block on a foreground wait. The window must always be able to take the next request.
 
 ---
 

@@ -1,5 +1,12 @@
 import type { GamePlayer, PositionGroup } from "@story-fm/domain";
-import { CONDITION_BASE, ageOf, anchorOf, naturalPositionOf } from "@story-fm/domain";
+import {
+  CONDITION_BASE,
+  DEFAULT_FORMATION,
+  ageOf,
+  anchorOf,
+  naturalPositionOf,
+  presetOf,
+} from "@story-fm/domain";
 import {
   buildScheduleEntries,
   buildSeasonCalendar,
@@ -546,7 +553,9 @@ export function transitionSeason(state: GameState): string[] {
     }
     tactics.assignments = buildAssignments(
       squad.filter((p) => p.squadLevel !== "reserve"),
-      tactics.spec.formation,
+      // 아래 `slots`·`points`가 실제 배치를 정한다 — 자유 배치라 모양 이름이 프리셋이
+      // 아닐 수 있고(4-1-3-2), 이 인자는 쓰이지 않는 폴백이다
+      presetOf(tactics.spec.formation) ?? DEFAULT_FORMATION,
       FAMILIARITY_BASELINE,
       undefined,
       undefined,

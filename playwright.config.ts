@@ -13,6 +13,8 @@ import { defineConfig } from "@playwright/test";
  * 동시 실행이 서로를 밟으므로 개별 변수로는 열지 않는다.
  */
 const BASE_PORT = 3399;
+// 슬롯을 늘리면 apps/web/tsconfig.json의 include에도 그 distDir을 함께 적는다 —
+// Next가 처음 보는 distDir을 tsconfig에 자동으로 덧붙여 추적 파일을 더럽힌다.
 const MAX_SLOT = 9;
 
 function readSlot(): number {
@@ -34,6 +36,12 @@ export default defineConfig({
   testDir: "./e2e",
   timeout: 90_000,
   retries: 1,
+  // 대상은 프로덕션 빌드가 아니라 **개발 서버**다 — 라우트를 처음 두드릴 때
+  // 컴파일하고(수 초), 그 서버 하나를 워커 넷이 나눠 쓴다. 그래서 클릭 한 번이
+  // 부르는 왕복이 냉간에 7초를 넘기기도 한다(컴파일 2.6s + 첫 요청 4.8s를 관측).
+  // Playwright 기본값 5초는 이 환경을 잰 값이 아니다 — 기다림만 늘리고 무엇을
+  // 확인하는지는 그대로 둔다.
+  expect: { timeout: 15_000 },
   use: {
     baseURL: url,
   },

@@ -39,7 +39,7 @@ import type {
 } from "@story-fm/domain";
 import {
   ATTRIBUTE_AXES,
-  DEFAULT_TACTICS,
+  DEFAULT_FORMATION,
   FORMATIONS,
   MATCHDAY_SQUAD,
   canRegister,
@@ -1417,7 +1417,7 @@ export function pickFormation(
     );
     if (feasible) return prior;
   }
-  let best: Formation = prior ?? DEFAULT_TACTICS.formation;
+  let best: Formation = prior ?? DEFAULT_FORMATION;
   let bestScore = -Infinity;
   for (const formation of FORMATIONS) {
     const score = shapeStrength(pool, formation, fit);

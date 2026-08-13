@@ -19,17 +19,35 @@ import { normalizedLogCurve, reflectedLogCurve } from "./log-curves";
  */
 export const FamiliaritySchema = z.number().min(0).max(100);
 
-/** 감독이 말할 법한 것만 필드로 (match-sim.md §1) */
+/**
+ * 프리셋 다섯 — **입력 어휘**다. 감독이 "4-4-2로 가자"라고 말할 때의 낱말이고,
+ * 구단 카탈로그의 리서치 값이며, 판을 다시 까는 명령(`setTactics`)의 인자다.
+ * 지금 판의 모양 이름은 여기 갇히지 않는다 (`ShapeSchema`).
+ */
 export const FormationSchema = z.enum(["4-4-2", "4-3-3", "4-2-3-1", "3-5-2", "5-4-1"]);
 export type Formation = z.infer<typeof FormationSchema>;
 /** 프리셋 전체 — 스쿼드에 맞는 모양을 고를 때 훑는다 */
 export const FORMATIONS = FormationSchema.options;
 
+/**
+ * 판의 모양 이름 — **좌표에서 읽은 파생값**이라 프리셋 다섯에 갇히지 않는다.
+ * 자유 배치는 4-1-3-2 같은 숫자를 만들고(`shapeOf`), 그것이 지금 팀의 모양이다.
+ * 프리셋으로 좁히면 자유 배치가 저장될 때마다 전술 검증이 통째로 깨진다.
+ */
+export const ShapeSchema = z.string().regex(/^\d+(-\d+)*$/, "포메이션 모양이 아닙니다");
+
+/** 이 모양 이름이 프리셋인가 — 프리셋 좌표를 꺼내야 할 때만 묻는다 */
+export function presetOf(shape: string): Formation | null {
+  const parsed = FormationSchema.safeParse(shape);
+  return parsed.success ? parsed.data : null;
+}
+
 const Scale5 = z.number().int().min(1).max(5);
 
 /** 전술 본체 (TACTICS) — 개인 지시는 배치(TacticAssignment)로 이동 */
 export const TacticsSpecSchema = z.object({
-  formation: FormationSchema,
+  /** 지금 판의 모양 — 배치 좌표의 파생값이다 (`shapeOf`) */
+  formation: ShapeSchema,
   /** 1(수비적) ~ 5(공격적) */
   mentality: Scale5,
   defensiveLine: Scale5,
@@ -42,8 +60,11 @@ export const TacticsSpecSchema = z.object({
 });
 export type TacticsSpec = z.infer<typeof TacticsSpecSchema>;
 
+/** 리서치 값이 없는 구단이 서는 모양 — 프리셋이어야 좌표를 꺼낼 수 있다 */
+export const DEFAULT_FORMATION: Formation = "4-3-3";
+
 export const DEFAULT_TACTICS: TacticsSpec = {
-  formation: "4-3-3",
+  formation: DEFAULT_FORMATION,
   mentality: 3,
   defensiveLine: 3,
   pressing: 3,

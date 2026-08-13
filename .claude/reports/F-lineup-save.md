@@ -1,0 +1,166 @@
+# [F] 명단 저장이 dirty에 머무는 버그 — 조사·수정 보고
+
+## 한 줄
+
+**뿌리는 하나였고 고쳤다**: 자유 배치가 만든 모양 이름(`4-1-3-2`)을 프리셋 5종
+열거형 필드에 써 넣어, 그 다음 저장의 전술 검증이 400으로 튕기고 자동 저장이
+영영 끝나지 않았다. 나머지 5건(api.test 3 · game.spec 2)은 **저장 버그가 아니라
+서로 어긋나는 기대**라 손대지 않고 아래에 근거를 적는다.
+
+---
+
+## 1. 고친 것 — `data-save`가 `dirty`에 머무는 진짜 원인
+
+### 증거
+
+`e2e/game.spec.ts:795` 실패 스냅샷의 화면에 저장 실패 배너가 그대로 찍혀 있었다:
+
+```
+전술 형식 오류: Invalid enum value.
+Expected '4-4-2' | '4-3-3' | '4-2-3-1' | '3-5-2' | '5-4-1', received '4-1-3-2'
+```
+
+### 경로
+
+1. `setLineup`/`movePlayerSlot`은 배치 좌표에서 모양 이름을 읽어
+   `tactics.spec.formation`에 쓴다 (`shapeOf(startPoints)`) — 설계대로다.
+   docs/data/game-state.md §5가 "포메이션 이름은 파생값"이라고 못 박고 있다.
+2. 그런데 `TacticsSpec.formation`의 스키마는 **프리셋 5종 열거형**이었다.
+   자유 배치로 칩 하나만 옮겨도 `4-1-3-2` 같은 이름이 들어가고, 저장 자체는
+   Zod를 안 지나므로 그때는 조용히 통과한다.
+3. 전술판은 **자동 저장마다 6축을 함께 보낸다**(`lineupBody`의 `tactics: axes`).
+   그래서 다음 저장은 `setTactics` → `TacticsSpecSchema.safeParse({...spec, ...axes})`
+   를 지나고, 여기서 2번이 심어 둔 `4-1-3-2`에 걸려 **400**이 난다.
+4. 클라이언트는 400이면 `savedRevRef`를 올리지 않으므로 `dirty`가 영구히 남는다.
+   되돌릴 길도 없다 — 다음 저장도 같은 값에서 같은 400을 맞는다.
+
+**첫 드래그는 저장되고 두 번째부터 막히는** 관찰과 정확히 맞는다.
+
+### 수정
+
+- `packages/domain/src/tactics.ts`
+  - `ShapeSchema`(`/^\d+(-\d+)*$/`) 추가 → `TacticsSpec.formation`이 이걸 쓴다.
+  - `FormationSchema`(프리셋 5종)는 **입력 어휘**로 남는다 — 카탈로그·`pickFormation`·
+    `FORMATION_LAYOUTS` 키. `presetOf(shape)`로 둘 사이를 건넌다.
+  - `DEFAULT_FORMATION` 상수 분리 (프리셋 타입이 필요한 자리용).
+- `packages/engine/src/skills/index.ts` — 거짓말하던 `as TacticsSpec["formation"]`
+  단언 2곳 제거. `setTactics`는 여전히 formation을 무시한다(주석으로 이유를 남김).
+- `packages/engine/src/{core/state,data/team-catalog,competition/season}.ts` —
+  프리셋 타입이 필요한 3곳을 `DEFAULT_FORMATION`/`presetOf`로 좁힘.
+- `packages/engine/test/world.test.ts` — 타입 좁히기만(어서션 불변).
+- docs: `docs/data/team.md` §6 · `docs/data/game-state.md` §5 — "저장 형식을 프리셋
+  열거형으로 좁히면 자동 저장이 영영 끝나지 않는다"를 명시.
+
+### 결과
+
+- `e2e/game.spec.ts:795` **통과** (33번 폴링 내내 dirty → 이제 saved).
+- 부작용 없음: `pnpm test` 신규 실패 0, `pnpm typecheck` 통과, lint는 기존 1건만.
+
+---
+
+## 2. 손대지 않은 것 — 서로 어긋나는 기대 5건
+
+각 건은 **지금 코드가 틀린 게 아니라 두 스펙이 서로 다른 말을 한다**. 기대를 바꾸는
+결정은 사용자 몫이라 그대로 뒀다. 셋 다 진단용 사본으로 그 줄만 지금 동작으로
+바꿔 돌려 봤고, **그 뒤 어서션은 전부 통과**했다 — 낡은 것은 그 한 줄뿐이다.
+
+### (a) `api.test.ts:215` — 포메이션은 저장된 프리셋인가, 좌표의 파생인가
+
+```ts
+postLineup({ starting: <11명 전원 포지션 코드 명시>, formation: "3-5-2" })
+expect(updated.views.squad.formation).toBe("3-5-2")   // 받는 값: "4-2-3-1"
+```
+
+명시한 11개 코드가 만드는 모양은 4-2-3-1이다. "이름은 좌표의 파생"인 세계에서
+이 요청은 **자기모순**이고 좌표가 이긴다. 라우트 주석도 프리셋은 "지정하지 않은
+슬롯의 기본값"이라 적고 있는데 이 테스트는 11명을 전부 지정한다.
+
+### (b) `api.test.ts:265` — 한 명을 올렸는데 이름은 그대로여야 하나
+
+더블 볼란치 하나를 공격형 미드 라인(y=30)으로 올린 뒤
+`expect(...formation).toBe("4-2-3-1") // 프리셋 선택은 그대로` → 받는 값 `4-1-4-1`.
+4백 + DM 1 + AM 4 + ST 1은 **정직하게 4-1-4-1**이다. 이 어서션은 "프리셋을
+저장한다"는 옛 설계의 문장이다.
+
+### (c) `api.test.ts:326` — 첼시의 기본 멘탈리티
+
+```ts
+expect(before.tactics.mentality).toBe(3)   // 받는 값: 4
+```
+
+새 게임의 초기 6축은 이제 **구단 운용 정체성**(`TACTICAL_STYLE`)에서 나온다
+(`initialTactics`). 첼시는 `possession` → 멘탈리티 4. 포메이션만 보고 3을 주던
+때의 값이 테스트에 남아 있다. 이 줄만 4로 바꾸면 그 테스트의 **본론**(6축 저장 ·
+안 건드린 축 유지 · 적응도 하락)은 전부 통과한다.
+
+### (d) `game.spec.ts:512` — 아스날은 4-2-3-1로 부임하는가
+
+받는 값 `4-3-3`. `pickFormation`이 카탈로그의 리서치 값을 **거부**했다.
+
+문제는 그 거부 조건이 문서와 다르다는 것이다. `team-catalog.ts`의 주석은
+"11개 슬롯을 적응도 70 이상으로 **채울 수 있으면** 그 값을 쓴다"인데, 코드는
+"**전력 최적 배치가 마침** 70을 넘는가"를 묻는다. 아스날 4-2-3-1은 채울 수 있다
+(실측: GK 94 · RB 93 · RCB 87 · LCB 96 · LB 94 · RDM 97 · LDM 87 · CAM 95 ·
+RW 90 · LW 83 · ST 93, 전원 70 이상). 전력만으로 채우면 라이스가 LW(66)로
+밀려 거부된다.
+
+고쳐 봤다(문턱을 넘는 자리에 가산을 주면 채우기가 "설 수 있는 배치"를 먼저 찾는다).
+`:512`는 통과했지만 **전 구단의 시작 모양이 바뀌어** 경기 결과가 흔들리고
+`packages/engine/test/domestic-cup.test.ts`("1라운드를 이기고 다음 자리가 열린다")가
+깨졌다. 밸런스에 닿는 변경이라 **되돌렸다** — 판단을 받고 싶다.
+재작성이 어렵지 않으니 필요하면 다시 올린다.
+
+### (e) `game.spec.ts:522` — 채팅으로 프리셋을 바꿀 수 있는가 (⚠️ 정면 충돌)
+
+e2e는 이렇게 적는다:
+
+```
+// 프리셋 교체는 채팅이 맡는다 — 지시하면 전술판이 그 프리셋으로 다시 깔린다
+"4-4-2로 가자" → expect(shape).toHaveText("4-4-2")
+```
+
+그런데 **유닛 테스트 4건이 정반대를 못 박고 있다**:
+
+| 파일 | 테스트 |
+| --- | --- |
+| `packages/engine/test/skills.test.ts:324` | 포메이션 이름을 보내도 프리셋으로 좌표를 덮지 않는다 (`setTactics({formation:"3-5-2"})` 후 **좌표 전부 그대로**) |
+| `packages/engine/test/skills.test.ts:377` | 전술: Zod 검증 — `spec.formation`이 `"4-4-2"`가 **아님**을 단언 |
+| `packages/engine/test/skills.test.ts:788` | 포메이션 이름은 배열 순서와 선수 좌표를 바꾸지 않는다 |
+| `packages/agents/test/mock-gm.test.ts:88` | 포메이션 이름은 프리셋을 적용하지 않고 전술 축만 반영한다 |
+
+지금 `set_tactics` 도구 스키마에는 `formation` 자체가 없다(2729a04에서 빠졌다).
+즉 **감독이 모양을 바꿀 길은 칩을 직접 끄는 것뿐**이고, mock GM은 아직
+`set_tactics({formation})`을 부르지만 스키마가 그 키를 버린다.
+
+한 번 되살려 봤다(프리셋 = 명령, 가장 가까운 슬롯으로 재배치, 이름은 결과에서
+다시 읽기). `:467`은 통과했지만 위 유닛 4건이 깨졌다. 두 스펙 중 하나는 지워야
+하므로 **되돌리고** 판단을 남긴다. 되살릴 패치는
+`.claude/reports/preset-as-command.patch`에 보관했다.
+
+### (f) 덤 — `game.spec.ts:277`(`:73` 안)
+
+`data-save`가 `"locked"`여야 한다는데 받는 값은 `"ready"`. 바로 그 위의 테스트
+주석은 "**자동 저장은 막히지만 판은 살아 있다** — 조작은 GM에게 보내는 지시가
+된다(`onOrder`)"라고 적고 있고, 그 상태의 속성값이 정확히 `ready`다(`locked`는
+지시조차 못 보내는 판). 다음 두 줄이 교체 화살표로 **지시를 보내는** 것을
+검증하므로, 테스트가 자기 주석과 어긋난 한 줄이다. 이 줄만 `ready`로 두면
+`:73`은 **끝까지 통과**한다(진단 사본으로 확인).
+
+---
+
+## 3. 지금 상태
+
+| 검증 | 결과 |
+| --- | --- |
+| `pnpm typecheck` | 통과 |
+| `pnpm lint` | 기존 1건만 (`match-flow.test.ts:187`) |
+| `pnpm test` | 7 실패 = 기존 4(skill-label 2 · skill-surface 1 · match-stamina 1) + api.test 3(위 a·b·c) |
+| `E2E_SLOT=1 pnpm e2e game.spec` | 3 통과 / 2 실패(`:73`은 f, `:467`은 d·e) — `:795`는 **이번에 고쳐서 통과** |
+
+## 4. 사용자에게 물을 것
+
+1. **(d)** `pickFormation`의 거부 조건을 문서대로("채울 수 있으면 존중") 고칠까?
+   고치면 전 구단 시작 모양이 바뀌고 시즌 시뮬 결과가 흔들린다(컵 테스트 1건 재작성 필요).
+2. **(e)** 채팅으로 프리셋을 바꾸는 길을 되살릴까, 아니면 e2e의 그 블록을 지울까?
+   되살리면 유닛 4건을, 지우면 e2e 9줄을 다시 써야 한다.
+3. **(a)(b)(c)(f)** 낡은 어서션 네 줄을 지금 동작으로 갱신해도 되나?

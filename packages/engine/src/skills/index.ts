@@ -590,8 +590,8 @@ export function setLineup(
   // 무엇이 달라졌나는 **덮어쓰기 전에** 견준다 (`prev`가 옛 배치를 들고 있다)
   const changes = lineupChanges(state, prev, [...startingAssignments, ...benchAssignments]);
   tactics.assignments = [...startingAssignments, ...benchAssignments];
-  // 호환 필드는 실제 좌표에서 읽는다. 이 값으로 다시 프리셋을 적용하지 않는다.
-  tactics.spec.formation = shapeOf(startPoints) as TacticsSpec["formation"];
+  // 모양 이름은 실제 좌표에서 읽는다 — 프리셋 다섯 밖의 숫자도 그대로 담긴다
+  tactics.spec.formation = shapeOf(startPoints);
 
   // 강등은 배치 뒤에 — 배치에서 빠진 뒤라야 2군으로 내려도 라인업이 안 깨진다
   for (const move of input.squadLevels ?? []) {
@@ -773,7 +773,7 @@ export function movePlayerSlot(
     tactics.assignments
       .filter((a) => a.role === "starting")
       .map((a) => a.point ?? anchorOf(a.position)),
-  ) as TacticsSpec["formation"];
+  );
   const fit = player.positions.find((p) => p.position === code)?.proficiency ?? null;
   return {
     ok: true,
@@ -1180,8 +1180,13 @@ function retuneFamiliarity(
 
 export function setTactics(state: GameState, spec: Partial<TacticsSpec>): SkillResult {
   const tactics = userTactics(state);
-  const { formation: _catalogPreset, ...axes } = spec;
-  void _catalogPreset;
+  /**
+   * 포메이션 이름은 **좌표의 파생값**이라 여기서 갈아 끼우지 않는다 (`shapeOf`).
+   * 이름만 바꾸면 판은 그대로인데 장부의 모양이 달라져 화면과 갈라진다 — 판을
+   * 바꾸는 것은 배치 스킬(`setLineup`·`setPlayerTactic`)의 일이다.
+   */
+  const { formation: _shapeName, ...axes } = spec;
+  void _shapeName;
   const parsed = TacticsSpecSchema.safeParse({ ...tactics.spec, ...axes });
   if (!parsed.success) {
     return {
