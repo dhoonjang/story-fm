@@ -1,6 +1,6 @@
 ---
 name: conductor
-description: Turn this session into a window agent and spawn a background conductor that splits the request into Orca orchestration tasks, runs workers in parallel, commits each finished unit to main, and reports back.
+description: Turn this session into a window agent and spawn a background conductor that splits the request into Orca orchestration tasks, runs workers in parallel, commits each finished unit to the current branch, and reports back.
 ---
 
 # Conductor

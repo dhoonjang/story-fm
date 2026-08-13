@@ -6,13 +6,14 @@ yourself — read-only inspection is fine.
 
 Load `SendMessage` first if its schema is missing: `ToolSearch("select:SendMessage")`.
 Your plain output is invisible to the window agent; only `SendMessage(to: "main", …)`
-reaches it.
+reaches it — `"main"` there is the window agent's address, never a branch name.
 
 ## 1. Bind a Run
 
 Once, before the first task.
 
 ```bash
+git rev-parse --abbrev-ref HEAD                    # the branch every unit commits to (§5)
 orca orchestration run-list --json
 orca orchestration run-use --id <run_id> --json
 # none yet:
@@ -66,6 +67,9 @@ orca orchestration check --wait --types worker_done,escalation,question --timeou
 
 ## 5. Commit each finished unit
 
+Commit to **the branch the worktree is already on** — whatever `git rev-parse --abbrev-ref
+HEAD` said when you bound the Run. Read it once and never switch it.
+
 On `worker_done` with `--outcome succeeded`, after checking the worker's report:
 
 ```bash
@@ -73,13 +77,14 @@ git status --short
 git diff -- <files_modified>                       # read the change before staging it
 git add -- <files_modified…>                       # exactly those paths, nothing else
 git commit -m "<conventional commit, 한국어 본문>"
-git push origin main
+git push origin HEAD                               # current branch — add -u if no upstream
 ```
 
 - **Never `git add -A` or `git add .`** — the worktree is shared, and everything unstaged
   belongs to workers still running.
-- **No rebase, stash, branch switch, or `pull`.** Other workers hold a dirty tree; those
-  commands destroy their work. If the push is rejected, stop pushing and report it.
+- **No rebase, stash, branch switch, `checkout`, or `pull`.** Other workers hold a dirty
+  tree; those commands destroy their work. If the push is rejected, stop pushing and report
+  it — including the branch name, so the user can see where the unit landed.
 - Commit only what the task was for. Untracked leftovers (temp saves, scratch files) are
   not part of the unit — leave them or have the worker delete them.
 - A `failed` outcome is not committed. Report it, and either re-task or ask.
@@ -101,7 +106,8 @@ every reclaimable dispatch the sweep finds; a live terminal on a completed task 
 SendMessage(to: "main", summary: "<한 줄>", message: "…\nSTATUS: busy|idle")
 ```
 
-Send one report per committed unit — what changed, the commit hash, what is still running.
+Send one report per committed unit — what changed, the commit hash and branch, what is
+still running.
 Also report a failure, a blocking question, and a rejected push, as they happen.
 
 End every message with `STATUS: busy` (work still in flight) or `STATUS: idle` (nothing
