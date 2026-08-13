@@ -8,7 +8,7 @@ import { PlayersPanel } from "./players-panel";
 import { TeamsPanel } from "./teams-panel";
 
 /**
- * 어드민 — 게임과 무관한 **초기치 DB(카탈로그)**만 편집한다.
+ * DB — 게임과 무관한 **초기치 DB(카탈로그)**만 편집한다.
  * 여기서의 변경은 이후 새로 시작하는 게임에 반영되고, 진행 중인 게임은 그대로다.
  *
  * 이 파일은 껍데기다: 탭과 공용 배너만 갖고, 층별 편집은 각 패널이 맡는다.
@@ -42,7 +42,7 @@ export default function AdminPage() {
           <Link href="/" className="back-link">
             ← 게임 목록
           </Link>
-          <h1>어드민</h1>
+          <h1>DB</h1>
         </div>
       </div>
 

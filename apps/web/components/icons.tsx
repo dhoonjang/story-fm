@@ -237,7 +237,7 @@ export function IconPlus({ size = 16 }: IconProps) {
   );
 }
 
-/** 어드민 — 데이터베이스 실린더. 어드민이 다루는 게 "표"라는 걸 그린다 */
+/** DB — 데이터베이스 실린더. 카탈로그 편집이 다루는 게 "표"라는 걸 그린다 */
 export function IconDatabase({ size = 16 }: IconProps) {
   return (
     <svg {...base(size)}>
