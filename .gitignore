@@ -12,6 +12,9 @@ coverage/
 .next-*/
 *.tsbuildinfo
 .turbo/
+# Next가 생성하는 타입 참조 — routes.d.ts 경로가 마지막에 쓴 빌드 디렉터리를 따라
+# 바뀌므로 커밋하면 계속 흔들린다. next dev/build가 다시 만든다.
+apps/web/next-env.d.ts
 
 # 테스트 산출물 — Playwright 실행 결과·리포트·트레이스
 test-results/
