@@ -70,7 +70,7 @@ export default function HomePage() {
         <div className="home-head-actions">
           <Link href="/admin" className="ghost-btn" data-testid="admin-link">
             <IconDatabase />
-            선수 DB
+            어드민
           </Link>
           <Link href="/new" className="primary-btn" data-testid="new-game">
             <IconPlus />새 게임
