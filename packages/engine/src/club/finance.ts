@@ -12,7 +12,7 @@ import {
 } from "@story-fm/domain";
 import { dayOfWeek } from "../competition/calendar";
 import { clubProfile } from "../data/club-profile";
-import { clubEconomyLevel } from "../world/wages";
+import { clubEconomyLevel, leagueEconomyLevel } from "../data/league-economy";
 import { isMarketOnlyLeague, isTopLeague, leagueCatalogById } from "../data/league-catalog";
 import { competitionShortName, isCup, isEuroCup } from "../data/cup-catalog";
 import { isClubTeam, leagueOfTeam, teamCatalogById } from "../data/team-catalog";
@@ -184,6 +184,13 @@ function profileOf(teamId: string) {
 
 function poolOf(state: GameState, teamId: string): number {
   return leagueCatalogById(leagueOfTeamIn(state, teamId))?.broadcastPool ?? 0.3;
+}
+
+/** 브랜드가 중계 몫을 끌어올리는 배수 — 경제 수준 ÷ 리그 수준 (브랜드 보정만 남긴다) */
+function brandPoolLift(teamId: string): number {
+  const league = teamCatalogById(teamId)?.leagueId ?? leagueOfTeam(teamId);
+  const level = leagueEconomyLevel(league);
+  return level > 0 ? clubEconomyLevel(teamId) / level : 1;
 }
 
 /** 시설·아카데미 월 고정비 — tier 정액에 구단 경제 수준을 곱한다 */
@@ -961,18 +968,17 @@ const UNPLAYED_HOME_MATCHES = 19;
  * 전형적인 홈 경기 수입 — 매치데이 공식의 기본값(순위·폼·상대 보정과 난수 없이).
  * 경기를 아직 하나도 치르지 않은 날에도 읽히므로 서사 이벤트 한도의 자가 된다.
  */
-function typicalHomeGate(state: GameState, teamId: string): number {
+function typicalHomeGate(teamId: string, leagueId: string): number {
   const tier = tierOf(teamId);
   const { capacity } = profileOf(teamId);
-  const price =
-    (leagueCatalogById(leagueOfTeamIn(state, teamId))?.avgTicketPrice ?? 30) *
-    TICKET_TIER_FACTOR[tier];
+  const price = (leagueCatalogById(leagueId)?.avgTicketPrice ?? 30) * TICKET_TIER_FACTOR[tier];
   return capacity * OCCUPANCY_BASE[tier] * price * (1 + HOSPITALITY_RATE[tier]);
 }
 
 function unplayedLeagueMatchdayMonthly(state: GameState, teamId: string): number {
-  if (isTopLeague(leagueOfTeamIn(state, teamId))) return 0;
-  return (typicalHomeGate(state, teamId) * UNPLAYED_HOME_MATCHES) / BROADCAST_MONTHS;
+  const league = leagueOfTeamIn(state, teamId);
+  if (isTopLeague(league)) return 0;
+  return (typicalHomeGate(teamId, league) * UNPLAYED_HOME_MATCHES) / BROADCAST_MONTHS;
 }
 
 /**
@@ -986,8 +992,26 @@ function unplayedLeagueMatchdayMonthly(state: GameState, teamId: string): number
  * 자이지 그 시즌 성적표가 아니다.
  */
 export function annualRevenueEstimate(state: GameState, teamId: string): number {
+  return catalogRevenueEstimate(teamId, leagueOfTeamIn(state, teamId));
+}
+
+/**
+ * 같은 자를 **세이브 없이** 읽는다 — 새 게임의 초기 주급이 서는 시점엔 `state`가 아직
+ * 없다(`initialWages`). 리그를 주지 않으면 카탈로그 리그로 본다. 승강은 세이브에만
+ * 있으므로 t=0에서는 두 값이 같다.
+ */
+export function catalogRevenueEstimate(teamId: string, leagueId = leagueOfTeam(teamId)): number {
   const { commercialTier } = profileOf(teamId);
-  const pool = poolOf(state, teamId);
+  /**
+   * 중계 몫에 **브랜드 보정**을 얹는다 — 리그 풀을 전 구단에 고르게 곱하면 레알이
+   * 브렌트포드와 같은 규모가 된다(실측 매출은 네 배 차이다). 실제로도 큰 브랜드는
+   * 자국 배분에서 더 큰 몫을 받고 국제 수입이 따로 붙는다. 같은 보정을 고정비·초기치가
+   * 쓰고 있어(`clubEconomyLevel`) 새 눈금이 아니다.
+   */
+  const pool = Math.min(
+    1,
+    (leagueCatalogById(leagueId)?.broadcastPool ?? 0.3) * brandPoolLift(teamId),
+  );
   const broadcast =
     (BROADCAST_EQUAL_SEASON +
       BROADCAST_MERIT_STEP * MERIT_STEPS_TYPICAL +
@@ -995,7 +1019,7 @@ export function annualRevenueEstimate(state: GameState, teamId: string): number 
     pool;
   const commercial =
     (COMMERCIAL_MONTHLY[commercialTier] + MERCHANDISING_MONTHLY[commercialTier]) * 12;
-  return broadcast + commercial + typicalHomeGate(state, teamId) * UNPLAYED_HOME_MATCHES;
+  return broadcast + commercial + typicalHomeGate(teamId, leagueId) * UNPLAYED_HOME_MATCHES;
 }
 
 /** 스폰서 계약의 성과 조항 — 이번 시즌 대항전 참가와 지난 시즌 우승에서 파생 */
@@ -1455,7 +1479,7 @@ export function narrativeEventCap(state: GameState, category: FinanceCategory): 
       return facilityCostOf(teamId) * NARRATIVE_FACILITY_FACTOR;
     case "matchday":
     case "matchday_opex":
-      return typicalHomeGate(state, teamId) * NARRATIVE_MATCHDAY_FACTOR;
+      return typicalHomeGate(teamId, leagueOfTeamIn(state, teamId)) * NARRATIVE_MATCHDAY_FACTOR;
     case "commercial":
       return COMMERCIAL_MONTHLY[profileOf(teamId).commercialTier] * NARRATIVE_COMMERCIAL_FACTOR;
     case "merchandising":

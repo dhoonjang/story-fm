@@ -79,8 +79,12 @@ describe("구단 예산 — 리그·성적·브랜드", () => {
     // 레알·바이에른은 EPL 밖이지만 EPL 중위권보다 많이 준다
     expect(clubWageBudget("realmadrid")).toBeGreaterThan(clubWageBudget("brentford"));
     expect(clubWageBudget("bayern")).toBeGreaterThan(clubWageBudget("brentford"));
-    // 같은 리그 안에서는 브랜드가 작은 구단이 훨씬 적다
-    expect(clubWageBudget("getafe")).toBeLessThan(clubWageBudget("realmadrid") * 0.4);
+    /**
+     * 같은 리그 안에서도 브랜드가 작은 구단이 훨씬 적다 — 다만 **매출 축이 격차를 좁힌다**
+     * (§6.3). 중계 균등 배분은 리그 전체가 나눠 갖는 몫이라 작은 구단에게도 바닥이 있다.
+     * 실측 0.41 — 옛 곱셈 모델에서는 0.26이었다.
+     */
+    expect(clubWageBudget("getafe")).toBeLessThan(clubWageBudget("realmadrid") * 0.45);
   });
 });
 
@@ -151,19 +155,36 @@ describe("실제 계약", () => {
    * **실측 시드도 그 리그의 급여표여야 한다.**
    *
    * 위 테스트는 실측을 쓰는 구단을 건너뛴다 — 실측이 모델과 어긋나는 것은 정상이니까.
-   * 그 구멍으로 승격팀의 **2부 시절 시드**가 지나갔다: 코번트리·헐의 주급 총액이 모델
-   * 예산의 0.43배(연 £20.4M)라 EPL 수입으로 챔피언십 급여를 내는 구단이 됐고, tier4
-   * 구단의 순익이 아스날을 넘었다(club-finance §10.3).
+   * 그 구멍으로 승격팀의 **2부 시절 시드**가 지나갔다: 코번트리·헐의 주급이 EPL 수입에
+   * 대해 챔피언십 급여였고, tier4 구단의 순익이 아스날을 넘었다(club-finance §10.3).
    *
-   * 그래서 띠를 넓게 두고 **벗어나는 것만** 잡는다 — 실측의 실제 분포는 0.75~1.30이다.
+   * 자를 천장이 아니라 **같은 리그의 중간값**으로 둔다 — 천장(매출 × 비중)은 성장 여지를
+   * 남기려고 실측 위에 서 있으므로(§6.3) 시드가 그보다 낮은 것은 정상이다. 반면
+   * "같은 리그의 다른 구단들과 자릿수가 다르다"는 낡은 값의 지문이다.
    */
-  it("실측 시드를 쓰는 구단도 그 리그의 급여 띠 안에 있다", () => {
-    for (const team of state.teams.filter((t) => isTopFlight(t.id))) {
-      const squad = playersOf(state, team.id);
-      const bill = squad.reduce((s, p) => s + (activeContract(state, p.id)?.weeklyWage ?? 0), 0);
-      const ratio = bill / clubWageBudget(team.id);
-      expect(ratio, `${team.id} 주급/모델 예산`).toBeGreaterThan(0.7);
-      expect(ratio, `${team.id} 주급/모델 예산`).toBeLessThan(1.4);
+  it("실측 시드가 같은 리그의 급여 자릿수를 벗어나지 않는다", () => {
+    const shareOf = (teamId: string) => {
+      const bill = playersOf(state, teamId).reduce(
+        (s, p) => s + (activeContract(state, p.id)?.weeklyWage ?? 0),
+        0,
+      );
+      return bill / clubWageBudget(teamId);
+    };
+    // 실측을 쓰는 리그끼리만 견준다 — 모델만 쓰는 구단은 정의상 천장에 붙어 있다
+    const seeded = state.teams
+      .filter(
+        (t) =>
+          isTopFlight(t.id) &&
+          playersOf(state, t.id).some(
+            (p) => playerCatalog().find((e) => e.id === p.catalogId)?.weeklyWage !== undefined,
+          ),
+      )
+      .map((t) => t.id);
+    const shares = seeded.map(shareOf).sort((a, b) => a - b);
+    const median = shares[Math.floor(shares.length / 2)]!;
+    for (const teamId of seeded) {
+      // 중간값의 절반 아래로 떨어지면 그 시드는 다른 리그의 급여표다
+      expect(shareOf(teamId) / median, `${teamId} 주급 비중 / 리그 중간`).toBeGreaterThan(0.5);
     }
   });
 });

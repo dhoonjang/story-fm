@@ -40,7 +40,8 @@ import {
   FAMILIARITY_BASELINE,
   type GameState,
 } from "../core/state";
-import { clubEconomyLevel, estimateWeeklyWage, wageSubjectOf } from "../world/wages";
+import { estimateWeeklyWage, wageSubjectOf } from "../world/wages";
+import { clubEconomyLevel } from "../data/league-economy";
 import { makeRng, randInt } from "../core/rng";
 import { installDefaultTraining } from "../squad/training-plan";
 

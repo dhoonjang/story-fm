@@ -64,7 +64,8 @@ import {
 } from "../competition/calendar";
 import { rankByName } from "./name-match";
 import { defaultXiIds, overallFor, playerCatalog } from "../world/catalog";
-import { clubEconomyLevel, estimateSquadWages, wageSubjectOf } from "../world/wages";
+import { estimateSquadWages, wageSubjectOf } from "../world/wages";
+import { clubEconomyLevel } from "../data/league-economy";
 import { generateYouthPlayer } from "../world/generate";
 import { ensureSquadNumbers } from "../squad/numbers";
 import { hasCups, scopedTeams, type WorldScope } from "../world/scope";

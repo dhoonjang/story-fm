@@ -1,8 +1,6 @@
 import type { GamePlayer } from "@story-fm/domain";
 import { ageOf, naturalPositionOf, weightSlotOf, type WeightSlot } from "@story-fm/domain";
-import { clubProfile } from "../data/club-profile";
-import { isTopLeague, leagueCatalog, leagueCatalogById } from "../data/league-catalog";
-import { teamCatalog, teamCatalogById } from "../data/team-catalog";
+import { catalogRevenueEstimate } from "../club/finance";
 
 /**
  * 주급 모델 — **구단 예산을 스쿼드에 나눈다** (club-finance.md).
@@ -45,84 +43,39 @@ export interface WageSubject {
 // ── 구단 예산 ───────────────────────────────────────────
 
 /**
- * 1부 최상위(성적 1등급·브랜드 1등급) 구단의 주간 임금 총액 (£).
- * EPL 실측에 맞춘 값이다 — 맨시티 £3.67M · 아스날 £3.58M.
- */
-const TOP_CLUB_WEEKLY = 3_193_000;
-
-/** 성적 등급별 배율 — 한 계단당 ×0.89 (EPL 적합) */
-const TIER_FACTOR: Record<1 | 2 | 3 | 4, number> = { 1: 1, 2: 0.89, 3: 0.79, 4: 0.7 };
-
-/** 브랜드 규모별 배율 — 한 계단당 ×0.74. 성적보다 급여를 크게 가른다 */
-const BRAND_FACTOR: Record<1 | 2 | 3 | 4, number> = { 1: 1, 2: 0.74, 3: 0.55, 4: 0.41 };
-
-/**
- * **리그 경제 수준 (EPL = 1) — 이 세계의 돈 단위.**
+ * **목표 선수 급여 비중** — 연 매출 어림 대비 주급 총액.
  *
- * 중계권 규모(`broadcastPool`)와 **다른 축이다.** 중계 수입이 적은 리그도 구단이
- * 다른 수입으로 급여와 살림을 대기 때문에 격차가 덜 벌어진다 — EPL 대비 리그 1은
- * 중계가 0.16인데 임금은 0.42다.
+ * 값의 자는 **아스날·맨시티의 실측 시드**다 — 두 구단의 주급이 매출 어림의 0.587·0.597
+ * 이고, 실측 매출로 보면 0.44로 실제 아스날(선수 급여/매출 ≈ 0.44)과 같다. 즉 시드를
+ * 신뢰할 수 있는 구단이 이미 이 비중에 앉아 있고, 어긋나 있던 것은 EPL 중하위(0.26~0.36)다.
+ * 그래서 새 눈금을 만들지 않고 **맞는 구단의 비중을 전 구단의 자로** 쓴다.
  *
- * 임금만의 자가 아니다. **시설·이자 고정비, 초기 잔고·이적 예산, 시즌 예산 base가
- * 전부 이 축을 쓴다** (club-finance.md §12.1). 수입만 리그를 알고 지출은 tier만
- * 알던 비대칭이 1부를 부풀리고 약체 리그를 가라앉히던 자리다.
+ * ⚠️ 실제 회계의 "인건비/매출 0.60~0.75"와 직접 비교하면 안 된다. 그 수치는 비선수
+ * 급여를 포함하고(우리는 `staff_wages`로 따로 얹는다) 우리 매출 어림은 상금·대항전을
+ * 빼서 실측보다 보수적이다. 두 보정을 되돌리면 같은 자리에 온다.
+ *
+ * 0.70까지 올려 보니 **모든 리그가 정의상 0.70에 앉는 대신 얇은 리그가 구조적 적자**가
+ * 됐다(리그 1 중간 잔고가 두 시즌에 −£0.6M). 고정비가 매출의 3할에 가까운 리그에서는
+ * 그만큼을 급여로 쓸 수 없다 — 그 균형은 §6.2의 몫이다.
  */
-const LEAGUE_ECONOMY_LEVEL: Record<string, number> = {
-  epl: 1,
-  laliga: 0.62,
-  seriea: 0.58,
-  bundesliga: 0.58,
-  ligue1: 0.42,
-  saudi: 0.45,
-  mls: 0.3,
-};
+const TARGET_WAGE_SHARE = 0.6;
 
 /**
- * 2부는 **그 나라 1부에서 파생한다.** 상수 하나로 묶으면 챔피언십과 리그2가 같은
- * 살림을 살게 되는데, 실제로 챔피언십의 임금 총액은 리그2의 세 배가 넘는다.
+ * **구단의 주간 임금 예산 — 연 매출의 함수다** (club-finance.md §6.3).
+ *
+ * 예전엔 `상수 × 성적 등급 × 브랜드 × 경제 수준`이었다. 네 축이 전부 카탈로그 값이라
+ * 예산이 **다섯 시즌 내내 상수**였고(£97.1M에 못 박혀 있었다), 자동 재계약이 매 시즌
+ * 인건비를 그 상수로 되돌렸다. 그래서 인건비가 +14% 움직이는 동안 잔고가 11배가 됐다
+ * — 번 돈이 나갈 축이 없었다 (§10.3의 2번).
+ *
+ * 매출 하나로 접으면 **네 축이 저절로 따라온다** — 리그(중계 풀·티켓 단가)·브랜드
+ * (상업 정액)·구장 크기가 이미 매출에 들어 있다. 상수가 늘지 않고 셋이 줄었다.
+ *
+ * 자는 `catalogRevenueEstimate` — **성적이 아니라 구단 규모**를 재는 값이다. 상금과
+ * 대항전을 넣지 않으므로 좋은 컵 여정 하나로 임금 천장이 튀지 않는다.
  */
-const SECOND_DIVISION_OF_TOP = 0.15;
-
-/**
- * 세계적 브랜드는 자국 리그 사정을 덜 탄다 — 레알·바이에른·PSG가 EPL 구단과
- * 비슷한 급여를 내는 이유다. 리그 배율을 브랜드에 따라 1 쪽으로 끌어올린다.
- */
-const BRAND_GLOBAL_LIFT: Record<1 | 2 | 3 | 4, number> = { 1: 0.55, 2: 0.3, 3: 0.12, 4: 0.05 };
-
-/** 그 나라 1부 — 2부의 경제 수준이 여기서 파생한다 */
-function topLeagueOfCountry(leagueId: string): string | null {
-  const country = leagueCatalogById(leagueId)?.country;
-  if (!country) return null;
-  return leagueCatalog().find((l) => l.country === country && isTopLeague(l.id))?.id ?? null;
-}
-
-export function leagueEconomyLevel(leagueId: string): number {
-  const listed = LEAGUE_ECONOMY_LEVEL[leagueId];
-  if (listed !== undefined) return listed;
-  if (!isTopLeague(leagueId)) {
-    const top = topLeagueOfCountry(leagueId);
-    const topLevel = top === null ? 1 : (LEAGUE_ECONOMY_LEVEL[top] ?? 1);
-    return topLevel * SECOND_DIVISION_OF_TOP;
-  }
-  return leagueCatalogById(leagueId)?.broadcastPool ?? 0.3;
-}
-
-/**
- * 이 구단의 경제 수준 — 리그 배율에 브랜드 보정을 얹은 값.
- * 임금·고정비·초기치가 모두 같은 값을 읽으므로 한 구단의 씀씀이가 한 눈금 위에 선다.
- */
-export function clubEconomyLevel(teamId: string): number {
-  const team = teamCatalogById(teamId) ?? teamCatalog()[0]!;
-  const brand = clubProfile(teamId, team.tier).commercialTier;
-  const level = leagueEconomyLevel(team.leagueId);
-  return level + (1 - level) * BRAND_GLOBAL_LIFT[brand];
-}
-
-/** 구단의 주간 임금 예산 (£/주) — 리그 수준 × 성적 등급 × 브랜드 규모 */
-export function clubWageBudget(teamId: string): number {
-  const team = teamCatalogById(teamId) ?? teamCatalog()[0]!;
-  const brand = clubProfile(teamId, team.tier).commercialTier;
-  return TOP_CLUB_WEEKLY * TIER_FACTOR[team.tier] * BRAND_FACTOR[brand] * clubEconomyLevel(teamId);
+export function clubWageBudget(teamId: string, leagueId?: string): number {
+  return (catalogRevenueEstimate(teamId, leagueId) * TARGET_WAGE_SHARE) / 52;
 }
 
 /**
