@@ -549,16 +549,59 @@ export interface AmortisationLine {
 }
 
 /**
+ * **레거시 상각의 자 — 계약 주급.**
+ *
+ * 시작 스쿼드는 이적 기록 없이 놓이므로 상각의 원본(§6.1)이 비어 있다. 그래서
+ * 상각이 £0이 되고 현금 순증과 장부 손익이 소수점까지 같아진다 — §3 결정 A의
+ * 2축 회계가 한 축으로 붕괴하고, PSR(§9.2)이 발동할 길도 함께 사라진다.
+ *
+ * 자를 시장가가 아니라 주급으로 잡는다. 취득원가는 움직이면 안 되는데 시장가는
+ * 폼·나이·잔여 계약으로 매달 흔들린다. 계약 주급은 서명 때 정해져 계약 내내
+ * 고정이고, 실제로도 상위 구단의 상각 총액과 인건비는 같은 크기로 붙어 다닌다.
+ *
+ * 0.7은 두 자를 동시에 만족하는 값이다 — 상각이 비용의 3할 안팎(실제 상위 구단과
+ * 같은 비중)이 되고, tier1 유저의 연 장부 손익이 §10.1 밴드 안에 든다.
+ */
+const LEGACY_AMORTISATION_WAGE_RATE = 0.7;
+const WEEKS_PER_MONTH = 52 / 12;
+
+/**
+ * 게임이 시작한 날 — 시작 스쿼드의 계약이 전부 이 날에 놓인다(`createGame`).
+ * 그 뒤에 맺은 계약(영입·재계약)은 전부 이보다 늦으므로 레거시와 갈린다.
+ */
+function gameStartDate(state: GameState): string {
+  let earliest = state.date;
+  for (const c of state.contracts) if (c.since < earliest) earliest = c.since;
+  return earliest;
+}
+
+/** 상각이 남아 있는가 — 계약 기간을 다 채웠으면 끝났다 */
+function amortisationMonthsLeft(state: GameState, since: string, until: string): number {
+  // 계약 기간의 개월 수 — 시작 달과 만료 달을 모두 센다
+  // (2026-07-01 ~ 2030-06-30 = 48개월)
+  const months = monthsBetween(since, until) + 1;
+  if (months <= 0) return 0;
+  return Math.max(0, months - monthsBetween(since, monthOf(state.date)));
+}
+
+/**
  * 이번 달 이적료 상각 — 활성 계약 + 이적 원장에서 **파생**한다 (자산 테이블 없음).
  *
- * 계약이 끝나거나 선수를 팔면 활성 계약이 사라지므로 상각도 자동으로 멈춘다.
- * 매각 시 장부상 잔존가 처리는 v1에서 생략한다 (club-finance §12).
+ * 두 갈래가 같은 축으로 들어온다:
+ *   게임 중 영입 — 이적료 ÷ 계약 개월수 (원본은 이적 원장)
+ *   시작 스쿼드 — 주급 × 배수 (원본은 계약 자체)
+ * 계약 시작일로 갈리므로 **한 선수가 두 갈래에 동시에 들지 않는다** — 영입한
+ * 선수의 계약은 언제나 게임 시작일보다 늦다.
  *
- * 순회 기준은 **이적 원장**이다 — 이적은 몇 건뿐이고 계약은 3천 건에 가까우므로
- * (96팀 × 30명) 계약을 훑으면 월초 정산이 팀 수만큼 느려진다.
+ * 계약이 끝나거나 선수를 팔면 활성 계약이 사라지므로 상각도 자동으로 멈춘다.
+ * 매각 시 장부상 잔존가 처리는 v1에서 생략한다 (club-finance §13).
+ *
+ * 이적 갈래의 순회 기준은 **이적 원장**이다 — 이적은 몇 건뿐이고 계약은 3천 건에
+ * 가까우므로(96팀 × 30명) 계약을 훑으면 월초 정산이 팀 수만큼 느려진다.
  */
 export function amortisationOf(state: GameState, teamId: string): AmortisationLine[] {
   const lines: AmortisationLine[] = [];
+  const bought = new Set<string>();
   for (const transfer of state.transfers) {
     if (transfer.toTeamId !== teamId || transfer.fee <= 0) continue;
     const contract = state.contracts.find(
@@ -569,13 +612,23 @@ export function amortisationOf(state: GameState, teamId: string): AmortisationLi
         c.since >= transfer.date,
     );
     if (!contract) continue;
-    // 계약 기간의 개월 수 — 시작 달과 만료 달을 모두 센다
-    // (2026-07-01 ~ 2030-06-30 = 48개월)
     const months = monthsBetween(contract.since, contract.until) + 1;
     if (months <= 0) continue;
-    // 계약 기간을 다 채웠으면 상각 완료
-    if (monthsBetween(contract.since, monthOf(state.date)) >= months) continue;
+    if (amortisationMonthsLeft(state, contract.since, contract.until) <= 0) continue;
+    bought.add(transfer.gamePlayerId);
     lines.push({ playerId: transfer.gamePlayerId, monthly: transfer.fee / months });
+  }
+
+  const start = gameStartDate(state);
+  for (const contract of state.contracts) {
+    if (contract.status !== "active" || contract.teamId !== teamId) continue;
+    // 게임 중에 맺은 계약은 이적 원장이 받는다 — 재계약도 새 이적료를 만들지 않는다
+    if (contract.since > start || bought.has(contract.gamePlayerId)) continue;
+    if (amortisationMonthsLeft(state, contract.since, contract.until) <= 0) continue;
+    lines.push({
+      playerId: contract.gamePlayerId,
+      monthly: contract.weeklyWage * WEEKS_PER_MONTH * LEGACY_AMORTISATION_WAGE_RATE,
+    });
   }
   return lines;
 }

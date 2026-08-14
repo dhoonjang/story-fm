@@ -268,6 +268,79 @@ describe("이적료 — 현금과 장부 두 축", () => {
     expect(s.cashNet).toBe(4); // 10 − 6 (상각 제외)
     expect(s.pnlNet).toBe(8); // 10 − 2 (이적료 제외)
   });
+
+  /**
+   * 레거시 상각 — 시작 스쿼드가 들고 온 장부 (club-finance §12.1).
+   * 이게 없으면 상각이 £0이라 현금과 손익이 소수점까지 같아지고, 결정 A의 2축
+   * 회계도 PSR도 죽은 코드가 된다.
+   */
+  it("시작 스쿼드도 상각을 만든다 — 이적을 한 건도 하지 않아도 두 축이 갈린다", () => {
+    const state = createTestGame(42, "arsenal");
+    const opening = financeOf(state, state.userTeamId).balance;
+    advanceUntil(state, "2026-09-03");
+
+    const entries = financeOf(state, state.userTeamId).ledger.filter(
+      (e) => categoryOf(e) === "amortisation",
+    );
+    expect(entries.length).toBeGreaterThan(0);
+    for (const entry of entries) expect(entry.accounting).toBe("noncash");
+
+    // 상각은 통장을 건드리지 않는다 — 잔고는 여전히 현금 흐름의 합이다
+    expect(financeOf(state, state.userTeamId).balance).toBe(opening + cashFlow(state));
+
+    const report = state.financeReports.find((r) => r.month === "2026-08")!;
+    expect(report.pnlNet).toBeLessThan(report.cashNet);
+    // 유상 영입이 하나도 없는데 갈렸다는 것이 이 설계의 요점이다
+    expect(
+      state.transfers.filter((t) => t.toTeamId === state.userTeamId && t.fee > 0),
+    ).toHaveLength(0);
+  });
+
+  it("레거시 상각은 주급에서 파생하고 계약이 끝나면 멈춘다", () => {
+    const state = createTestGame(42, "arsenal");
+    const mine = state.contracts.filter(
+      (c) => c.teamId === state.userTeamId && c.status === "active",
+    );
+    const before = amortisationOf(state, state.userTeamId);
+    expect(before).toHaveLength(mine.length);
+
+    // 연 상각은 연 주급의 배수다 — 구단이 커지면 상각도 같이 커진다
+    const yearly = before.reduce((s, l) => s + l.monthly, 0) * 12;
+    const wages = mine.reduce((s, c) => s + c.weeklyWage, 0) * 52;
+    expect(yearly / wages).toBeGreaterThan(0.5);
+    expect(yearly / wages).toBeLessThan(1);
+
+    // 이미 끝난 계약은 상각도 끝났다
+    const target = mine[0]!;
+    target.until = "2026-06-30";
+    const after = amortisationOf(state, state.userTeamId);
+    expect(after).toHaveLength(mine.length - 1);
+    expect(after.some((l) => l.playerId === target.gamePlayerId)).toBe(false);
+  });
+
+  it("영입한 선수는 이적 갈래로만 상각한다 — 두 번 잡히지 않는다", () => {
+    const state = createTestGame(42, "arsenal");
+    const target = state.players.find((p) => p.teamId !== state.userTeamId)!;
+    state.transfers.push({
+      id: "tr-dup",
+      gamePlayerId: target.id,
+      windowId: null,
+      fromTeamId: target.teamId,
+      toTeamId: state.userTeamId,
+      date: state.date,
+      type: "transfer",
+      fee: 48_000_000,
+    });
+    target.teamId = state.userTeamId;
+    const contract = state.contracts.find((c) => c.gamePlayerId === target.id)!;
+    contract.teamId = state.userTeamId;
+    contract.since = state.date; // 게임 시작일 = 레거시와 같은 날
+    contract.until = "2030-06-30";
+
+    const mine = amortisationOf(state, state.userTeamId).filter((l) => l.playerId === target.id);
+    expect(mine).toHaveLength(1);
+    expect(Math.round(mine[0]!.monthly)).toBe(1_000_000); // 48M / 48개월 — 이적료가 이긴다
+  });
 });
 
 describe("리그별 편차", () => {
