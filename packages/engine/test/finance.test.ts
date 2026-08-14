@@ -1,8 +1,12 @@
 import { keepSeat } from "./helpers";
 import { describe, expect, it } from "vitest";
+import type { FinanceCategory } from "@story-fm/domain";
 import type { GameState } from "@story-fm/engine";
 import {
+  NARRATIVE_EXPENSE_CATEGORIES,
   NARRATIVE_FINANCE_WAGE_LIMIT,
+  NARRATIVE_INCOME_CATEGORIES,
+  narrativeEventCap,
   PSR_LOSS_LIMIT,
   adjustTransferBudget,
   amortisationOf,
@@ -473,11 +477,11 @@ describe("재정 이벤트 스킬", () => {
     const res = applyFinanceEvent(state, {
       kind: "income",
       category: "merchandising",
-      amount: 2_000_000,
+      amount: 500_000,
       note: "개막전 유니폼 완판",
     });
     expect(res.ok).toBe(true);
-    expect(finance.balance).toBe(before + 2_000_000);
+    expect(finance.balance).toBe(before + 500_000);
 
     const entry = finance.ledger.at(-1)!;
     expect(entry.category).toBe("merchandising");
@@ -506,24 +510,108 @@ describe("재정 이벤트 스킬", () => {
 
   it("하루 상한은 구단 규모(주급 총액)에 비례하고 누적으로 센다", () => {
     const state = createTestGame(7, "tottenham");
-    const cap = weeklyWagesOf(state, state.userTeamId) * NARRATIVE_FINANCE_WAGE_LIMIT;
+    const daily = weeklyWagesOf(state, state.userTeamId) * NARRATIVE_FINANCE_WAGE_LIMIT;
+    const perEvent = narrativeEventCap(state, "commercial");
+    // 건당 상한만으론 하루를 지킬 수 없다 — 같은 장면을 나눠 부르면 넘어간다
+    expect(perEvent * 3).toBeGreaterThan(daily);
 
-    const first = applyFinanceEvent(state, {
-      kind: "income",
-      category: "commercial",
-      amount: Math.round(cap * 0.8),
-      note: "스폰서 성과 보너스",
-    });
-    expect(first.ok).toBe(true);
+    const calls = [1, 2, 3].map((i) =>
+      applyFinanceEvent(state, {
+        kind: "income",
+        category: "commercial",
+        amount: Math.floor(perEvent),
+        note: `스폰서 성과 보너스 ${i}`,
+      }),
+    );
+    expect(calls.slice(0, 2).map((r) => r.ok)).toEqual([true, true]);
+    expect(calls[2]!.ok).toBe(false);
+    expect(calls[2]!.message).toContain("하루 한도");
+  });
 
-    // 나눠 부르면 넘길 수 있으면 상한이 아니다
-    const second = applyFinanceEvent(state, {
-      kind: "income",
-      category: "commercial",
-      amount: Math.round(cap * 0.5),
-      note: "한 번 더",
-    });
-    expect(second.ok).toBe(false);
+  /**
+   * 건당 상한 — 하루 누적만 있던 시절 모델의 유일한 앵커는 "£10k 미만은 적지 마라"였고,
+   * 그 위는 아스날에서 £5.5M까지 열려 있었다. 눈금은 거절당한 값이 가르치므로
+   * 거부 메시지에 허용 상한이 실려 있는 것까지 고정한다.
+   */
+  it("카테고리별 건당 상한이 막고, 거부 메시지가 허용 상한을 알려준다", () => {
+    const money = (amount: number) =>
+      Math.abs(amount) >= 1_000_000
+        ? `£${(amount / 1_000_000).toFixed(1)}M`
+        : `£${Math.round(amount / 1000)}k`;
+
+    const categories: readonly FinanceCategory[] = [
+      ...NARRATIVE_INCOME_CATEGORIES,
+      ...NARRATIVE_EXPENSE_CATEGORIES,
+    ];
+    // 거부는 상태를 바꾸지 않으므로 한 세이브로 다 본다
+    const rejected = createTestGame(7, "arsenal");
+    for (const category of categories) {
+      const kind = (NARRATIVE_INCOME_CATEGORIES as readonly FinanceCategory[]).includes(category)
+        ? "income"
+        : "expense";
+      const cap = narrativeEventCap(rejected, category);
+
+      const over = applyFinanceEvent(rejected, {
+        kind,
+        category,
+        amount: Math.floor(cap) + 1,
+        note: "한도 밖",
+      });
+      expect(over.ok, category).toBe(false);
+      expect(over.message, category).toContain(money(cap));
+
+      // 통과는 하루 누적을 쌓으므로 카테고리마다 새 세이브에서 본다
+      const fresh = createTestGame(7, "arsenal");
+      const within = applyFinanceEvent(fresh, {
+        kind,
+        category,
+        amount: Math.floor(narrativeEventCap(fresh, category)),
+        note: "한도 안",
+      });
+      expect(within.ok, `${category}: ${within.message}`).toBe(true);
+    }
+    expect(
+      financeOf(rejected, rejected.userTeamId).ledger.some((e) => e.source === "narrative"),
+    ).toBe(false);
+  });
+
+  it("건당 상한은 구단 체급에 비례한다", () => {
+    const big = createTestGame(7, "arsenal");
+    const small = createTestGame(7, "lecce");
+
+    for (const category of [
+      "bonus",
+      "facility",
+      "matchday",
+      "commercial",
+      "merchandising",
+    ] as const) {
+      expect(narrativeEventCap(big, category), category).toBeGreaterThan(
+        narrativeEventCap(small, category),
+      );
+    }
+    // 원정·의료비는 코어에서도 구단 규모를 타지 않는다 — 같은 부상은 어디서나 같은 돈이다
+    expect(narrativeEventCap(big, "travel_medical")).toBe(
+      narrativeEventCap(small, "travel_medical"),
+    );
+
+    // 큰 구단에서 통과하는 금액이 작은 구단에서는 막힌다
+    const amount = Math.floor(narrativeEventCap(big, "bonus"));
+    expect(
+      applyFinanceEvent(big, { kind: "expense", category: "bonus", amount, note: "우승 포상" }).ok,
+    ).toBe(true);
+    expect(
+      applyFinanceEvent(small, { kind: "expense", category: "bonus", amount, note: "우승 포상" })
+        .ok,
+    ).toBe(false);
+  });
+
+  it("한도 표에 없는 카테고리는 통과하지 않고 가장 좁은 자로 떨어진다", () => {
+    const state = createTestGame(7, "arsenal");
+    const fallback = narrativeEventCap(state, "bonus");
+    // 서사에 열린 축이 아니어도 한도 함수는 무한을 돌려주지 않는다
+    expect(narrativeEventCap(state, "prize")).toBe(fallback);
+    expect(narrativeEventCap(state, "agent_fee")).toBe(fallback);
   });
 
   it("구단주 출자는 이적 예산만 움직이고 PSR을 개선하지 않는다", () => {

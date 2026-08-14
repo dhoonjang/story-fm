@@ -824,14 +824,22 @@ function postMonthlyItems(state: GameState): void {
  */
 const UNPLAYED_HOME_MATCHES = 19;
 
-function unplayedLeagueMatchdayMonthly(state: GameState, teamId: string): number {
-  const league = leagueOfTeamIn(state, teamId);
-  if (isTopLeague(league)) return 0;
+/**
+ * 전형적인 홈 경기 수입 — 매치데이 공식의 기본값(순위·폼·상대 보정과 난수 없이).
+ * 경기를 아직 하나도 치르지 않은 날에도 읽히므로 서사 이벤트 한도의 자가 된다.
+ */
+function typicalHomeGate(state: GameState, teamId: string): number {
   const tier = tierOf(teamId);
   const { capacity } = profileOf(teamId);
-  const price = (leagueCatalogById(league)?.avgTicketPrice ?? 30) * TICKET_TIER_FACTOR[tier];
-  const perMatch = capacity * OCCUPANCY_BASE[tier] * price * (1 + HOSPITALITY_RATE[tier]);
-  return (perMatch * UNPLAYED_HOME_MATCHES) / BROADCAST_MONTHS;
+  const price =
+    (leagueCatalogById(leagueOfTeamIn(state, teamId))?.avgTicketPrice ?? 30) *
+    TICKET_TIER_FACTOR[tier];
+  return capacity * OCCUPANCY_BASE[tier] * price * (1 + HOSPITALITY_RATE[tier]);
+}
+
+function unplayedLeagueMatchdayMonthly(state: GameState, teamId: string): number {
+  if (isTopLeague(leagueOfTeamIn(state, teamId))) return 0;
+  return (typicalHomeGate(state, teamId) * UNPLAYED_HOME_MATCHES) / BROADCAST_MONTHS;
 }
 
 /** 스폰서 계약의 성과 조항 — 이번 시즌 대항전 참가와 지난 시즌 우승에서 파생 */
@@ -1140,14 +1148,61 @@ export const NARRATIVE_EXPENSE_CATEGORIES = [
  * 된다. 주급 총액은 구단 규모를 가장 잘 대신하는 값이라(맨시티 £4M/주 vs
  * 승격팀 £1M/주) 이벤트의 무게가 어느 구단에서나 비슷해진다.
  *
- * **건당이 아니라 하루 누적**이다 — 건당으로 막으면 같은 장면을 여러 번 나눠
- * 불러서 얼마든지 넘길 수 있다.
+ * 카테고리별 건당 상한(`narrativeEventCap`)과 **역할이 다르다.** 건당 상한은 한 사건의
+ * 금액이 그 축에 맞는지를 보고, 이 한도는 같은 장면을 여러 번 나눠 불러 하루를 통째로
+ * 흔드는 것을 막는다. 둘 다 필요하다 — 하나만으론 다른 쪽이 열린다.
  */
 export const NARRATIVE_FINANCE_WAGE_LIMIT = 2;
 /** 장부에 남길 서사 재정 이벤트의 최소 단위 — 일상 비용은 게임 재정에서 무시한다. */
 export const NARRATIVE_FINANCE_MIN_AMOUNT = 10_000;
+/** 어떤 카테고리에서도 넘을 수 없는 절대 상한 — 도구 스키마의 바깥 울타리 */
+export const NARRATIVE_FINANCE_MAX_AMOUNT = 10_000_000;
 /** 이적 예산 지원·삭감의 하루 상한 (같은 주급 배수 자) — 예산은 매출보다 큰 단위로 움직인다 */
 export const BUDGET_ADJUST_WAGE_LIMIT = 10;
+
+// 건당 상한의 배수 — 새 금액이 아니라 같은 축의 기존 상수에서 파생한다
+/** 포상·회식 — 주급 총액 대비. `WIN_BONUS_RATE`(승리 수당)의 2.5배 = 큰 경기 하나의 무게 */
+const NARRATIVE_BONUS_WAGE_RATE = WIN_BONUS_RATE * 2.5;
+/** 원정·의료 — 최중상 치료비 두 명분. 코어의 원정·의료비가 그렇듯 구단 규모를 타지 않는다 */
+const NARRATIVE_MEDICAL_FACTOR = 2;
+/** 시설 — 월 시설비의 절반 */
+const NARRATIVE_FACILITY_FACTOR = 0.5;
+/** 매치데이 — 전형적 홈경기 수입의 3할 */
+const NARRATIVE_MATCHDAY_FACTOR = 0.3;
+/** 상업·머천다이징 — 각자의 월 정액 절반 */
+const NARRATIVE_COMMERCIAL_FACTOR = 0.5;
+
+/**
+ * 서사 이벤트 **한 건**의 상한 — 그 축이 이 구단에서 실제로 움직이는 폭.
+ *
+ * 하루 누적 한도만 있을 때 모델의 유일한 앵커는 "£10k 미만은 적지 마라"였고, 그 위는
+ * 아스날에서 하루 £5.5M까지 열려 있었다. 그래서 회식 장면에 £100k처럼 그럴듯하게
+ * 반올림한 수가 나왔다. 눈금을 가르치는 것은 프롬프트의 설명이 아니라 **거절당한 값**이라
+ * 한도를 코드에 두고 거부 메시지에 실어 보낸다 (AGENTS §6.5·§6.7).
+ *
+ * 어느 표에도 없는 카테고리는 **포상 한도로 떨어진다** — 두 체급 모두에서 가장 좁은
+ * 자라, 카테고리가 늘어도 한도 없이 통과하는 일이 없다.
+ */
+export function narrativeEventCap(state: GameState, category: FinanceCategory): number {
+  const teamId = state.userTeamId;
+  const bonusCap = weeklyWagesOf(state, teamId) * NARRATIVE_BONUS_WAGE_RATE;
+  switch (category) {
+    case "travel_medical":
+      return MEDICAL_COST.major * NARRATIVE_MEDICAL_FACTOR;
+    case "facility":
+      return FACILITY_MONTHLY[tierOf(teamId)] * NARRATIVE_FACILITY_FACTOR;
+    case "matchday":
+    case "matchday_opex":
+      return typicalHomeGate(state, teamId) * NARRATIVE_MATCHDAY_FACTOR;
+    case "commercial":
+      return COMMERCIAL_MONTHLY[profileOf(teamId).commercialTier] * NARRATIVE_COMMERCIAL_FACTOR;
+    case "merchandising":
+      return MERCHANDISING_MONTHLY[profileOf(teamId).commercialTier] * NARRATIVE_COMMERCIAL_FACTOR;
+    case "bonus":
+    default:
+      return bonusCap;
+  }
+}
 
 /** 오늘 서사가 이미 움직인 금액 */
 function narrativeSpentToday(state: GameState): number {
@@ -1182,8 +1237,6 @@ export function applyFinanceEvent(
     };
   }
 
-  const cap = weeklyWagesOf(state, state.userTeamId) * NARRATIVE_FINANCE_WAGE_LIMIT;
-  const spent = narrativeSpentToday(state);
   const amount = Math.max(0, Math.round(input.amount));
   if (amount < NARRATIVE_FINANCE_MIN_AMOUNT) {
     return {
@@ -1191,6 +1244,20 @@ export function applyFinanceEvent(
       message: `£10k 미만의 일상 비용은 재정 장부에서 무시합니다`,
     };
   }
+
+  // 건당 상한 — 거절당한 값이 눈금을 가르치므로 허용 상한을 메시지에 실어 보낸다
+  const eventCap = narrativeEventCap(state, input.category);
+  if (amount > eventCap) {
+    return {
+      ok: false,
+      message:
+        `${FINANCE_CATEGORY_KO[input.category]} 이벤트 한 건은 ${money(eventCap)}까지입니다 — ` +
+        `${money(amount)}은 이 구단에서 그 축이 움직이는 폭을 넘습니다`,
+    };
+  }
+
+  const cap = weeklyWagesOf(state, state.userTeamId) * NARRATIVE_FINANCE_WAGE_LIMIT;
+  const spent = narrativeSpentToday(state);
   if (spent + amount > cap) {
     return {
       ok: false,
