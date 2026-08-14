@@ -12,6 +12,7 @@ import {
 } from "@story-fm/domain";
 import { dayOfWeek } from "../competition/calendar";
 import { clubProfile } from "../data/club-profile";
+import { clubEconomyLevel } from "../world/wages";
 import { isMarketOnlyLeague, isTopLeague, leagueCatalogById } from "../data/league-catalog";
 import { competitionShortName, isCup, isEuroCup } from "../data/cup-catalog";
 import { isClubTeam, leagueOfTeam, teamCatalogById } from "../data/team-catalog";
@@ -54,6 +55,9 @@ const BROADCAST_MONTHS = 12;
 const BROADCAST_MERIT_STEP = 2_400_000;
 /** 생중계로 편성된 경기당 수당 */
 const BROADCAST_FACILITY_PER_MATCH = 1_100_000;
+/** 매출 어림에 쓰는 중위 구단의 자 — 20팀 리그의 중간 순위, 시즌 38경기 중 편성분 */
+const MERIT_STEPS_TYPICAL = 10;
+const TELEVISED_TYPICAL = 32;
 
 /**
  * **파라슈트 페이먼트** — 강등 클럽이 떠나온 리그에서 받는 낙하산.
@@ -103,7 +107,14 @@ const MATCHDAY_OPEX_RATE = 0.12;
 const STAFF_WAGE_RATE: Record<1 | 2 | 3 | 4, number> = { 1: 0.22, 2: 0.24, 3: 0.26, 4: 0.28 };
 /** 승리 수당 — 주급 총액 대비 */
 const WIN_BONUS_RATE = 0.1;
-/** 시설·아카데미 월 정액 */
+/**
+ * 시설·아카데미 월 정액 — **tier 정액 × 구단 경제 수준**(`facilityCostOf`).
+ *
+ * 표는 EPL 기준이다. 리그를 곱하지 않으면 세리에B 구단이 EPL tier와 같은 시설비를
+ * 내면서 리그 배율이 걸린 수입만 받아 가라앉는다 (§10.2 — 고정비가 인건비의 1.9배).
+ * tier 곡선은 그대로 둔다 — 같은 리그 안에서 작은 구단이 상대적으로 무거운 고정비를
+ * 지는 것은 실제와 같다.
+ */
 const FACILITY_MONTHLY: Record<1 | 2 | 3 | 4, number> = {
   1: 3_500_000,
   2: 2_800_000,
@@ -152,6 +163,24 @@ function profileOf(teamId: string) {
 
 function poolOf(state: GameState, teamId: string): number {
   return leagueCatalogById(leagueOfTeamIn(state, teamId))?.broadcastPool ?? 0.3;
+}
+
+/** 시설·아카데미 월 고정비 — tier 정액에 구단 경제 수준을 곱한다 */
+function facilityCostOf(teamId: string): number {
+  return FACILITY_MONTHLY[tierOf(teamId)] * clubEconomyLevel(teamId);
+}
+
+/** 이자·세금 월 고정비 — 같은 자 */
+function financeCostOf(teamId: string): number {
+  return FINANCE_COST_MONTHLY[tierOf(teamId)] * clubEconomyLevel(teamId);
+}
+
+/**
+ * 경기 성적과 무관하게 매달 나가는 돈 (시설·아카데미 + 이자·세금).
+ * 이게 인건비를 넘으면 그 리그는 구조적으로 가라앉는다 — §10.2가 세리에B에서 본 결함.
+ */
+export function monthlyFixedCostOf(teamId: string): number {
+  return facilityCostOf(teamId) + financeCostOf(teamId);
 }
 
 /**
@@ -839,13 +868,13 @@ function postMonthlyItems(state: GameState): void {
       kind: "expense",
       category: "facility",
       label: "시설·아카데미 운영",
-      amount: FACILITY_MONTHLY[tier],
+      amount: facilityCostOf(team.id),
     });
     recordFinance(state, team.id, {
       kind: "expense",
       category: "facility",
       label: "이자·세금",
-      amount: FINANCE_COST_MONTHLY[tier],
+      amount: financeCostOf(team.id),
     });
 
     // 이적료 상각 — 장부에만 (noncash)
@@ -893,6 +922,29 @@ function typicalHomeGate(state: GameState, teamId: string): number {
 function unplayedLeagueMatchdayMonthly(state: GameState, teamId: string): number {
   if (isTopLeague(leagueOfTeamIn(state, teamId))) return 0;
   return (typicalHomeGate(state, teamId) * UNPLAYED_HOME_MATCHES) / BROADCAST_MONTHS;
+}
+
+/**
+ * 이 구단의 **연 매출 어림** — 성적·관중 편차 없이 공식의 기본값만 더한 값.
+ *
+ * AI 팀은 원장을 남기지 않으므로(§4.5) 실제 매출을 읽을 방법이 없다. 그런데
+ * §10.3의 다년 불변식은 "잔고가 매출을 넘지 않는가"를 리그마다 물어야 하고,
+ * §12.3의 부채 한도도 같은 자를 쓴다. 그래서 매출의 눈금을 여기서 한 번 정한다.
+ *
+ * 상금·대항전·순위 수당의 편차는 넣지 않는다 — 이건 "이 구단이 어느 규모인가"의
+ * 자이지 그 시즌 성적표가 아니다.
+ */
+export function annualRevenueEstimate(state: GameState, teamId: string): number {
+  const { commercialTier } = profileOf(teamId);
+  const pool = poolOf(state, teamId);
+  const broadcast =
+    (BROADCAST_EQUAL_SEASON +
+      BROADCAST_MERIT_STEP * MERIT_STEPS_TYPICAL +
+      BROADCAST_FACILITY_PER_MATCH * TELEVISED_TYPICAL) *
+    pool;
+  const commercial =
+    (COMMERCIAL_MONTHLY[commercialTier] + MERCHANDISING_MONTHLY[commercialTier]) * 12;
+  return broadcast + commercial + typicalHomeGate(state, teamId) * UNPLAYED_HOME_MATCHES;
 }
 
 /** 스폰서 계약의 성과 조항 — 이번 시즌 대항전 참가와 지난 시즌 우승에서 파생 */
@@ -1243,7 +1295,7 @@ export function narrativeEventCap(state: GameState, category: FinanceCategory): 
     case "travel_medical":
       return MEDICAL_COST.major * NARRATIVE_MEDICAL_FACTOR;
     case "facility":
-      return FACILITY_MONTHLY[tierOf(teamId)] * NARRATIVE_FACILITY_FACTOR;
+      return facilityCostOf(teamId) * NARRATIVE_FACILITY_FACTOR;
     case "matchday":
     case "matchday_opex":
       return typicalHomeGate(state, teamId) * NARRATIVE_MATCHDAY_FACTOR;

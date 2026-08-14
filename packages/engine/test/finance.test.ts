@@ -3,6 +3,10 @@ import { describe, expect, it } from "vitest";
 import type { FinanceCategory } from "@story-fm/domain";
 import type { GameState } from "@story-fm/engine";
 import {
+  annualRevenueEstimate,
+  isMarketOnlyLeague,
+  monthlyFixedCostOf,
+  seasonBudgetBaseOf,
   NARRATIVE_EXPENSE_CATEGORIES,
   NARRATIVE_FINANCE_WAGE_LIMIT,
   NARRATIVE_INCOME_CATEGORIES,
@@ -501,6 +505,81 @@ describe("밸런스 기준선", () => {
       expect(sorted[0]!, `${league} 최저 잔고`).toBeGreaterThan(-30_000_000);
     }
   }, 60_000);
+
+  /**
+   * 리그 배율 — **지출과 초기치도 리그를 안다** (club-finance §12.1).
+   *
+   * 수입만 `broadcastPool`을 타고 지출은 tier만 보던 시절, 세리에B 구단의 시설·이자
+   * 고정비가 선수단 인건비의 1.9배였고 PSG가 아스날과 같은 £120M으로 시작했다.
+   * 시뮬 없이 t=0에서 재므로 어떤 상수를 건드려도 즉시 걸린다.
+   */
+  it("어느 구단도 구조적으로 매출을 넘겨 쓰지 않는다", () => {
+    const state = createTestGame(42, "arsenal");
+    for (const team of state.teams) {
+      const league = leagueOfTeam(team.id);
+      // 무소속·시장 전용 리그는 재정을 굴리지 않는다
+      if (league === "free" || isMarketOnlyLeague(league)) continue;
+      const wages = weeklyWagesOf(state, team.id) * 52;
+      if (wages <= 0) continue;
+
+      const revenue = annualRevenueEstimate(state, team.id);
+      // 인건비만으로 매출을 다 쓰면 그 구단은 아무것도 할 수 없다
+      expect(wages / revenue, `${team.id} 주급/매출`).toBeLessThan(1);
+      /**
+       * 경기를 하든 안 하든 나가는 돈이 매출의 4할을 넘으면 그 리그는 가라앉는다.
+       * 세리에B가 리그 배율 전에 0.91이었다 — tier 정액을 리그 무관하게 물던 자리다.
+       */
+      expect((monthlyFixedCostOf(team.id) * 12) / revenue, `${team.id} 고정비/매출`).toBeLessThan(
+        0.4,
+      );
+    }
+  });
+
+  it("같은 등급이어도 리그에 따라 살림의 크기가 다르다", () => {
+    const state = createTestGame(42, "arsenal");
+    // tier1 · 브랜드1이 같아도 리그가 다르면 고정비·초기치·예산이 갈린다
+    expect(monthlyFixedCostOf("psg")).toBeLessThan(monthlyFixedCostOf("arsenal"));
+    expect(seasonBudgetBaseOf("psg")).toBeLessThan(seasonBudgetBaseOf("arsenal"));
+    expect(financeOf(state, "psg").balance).toBeLessThan(financeOf(state, "arsenal").balance);
+    expect(financeOf(state, "psg").transferBudget).toBeLessThan(
+      financeOf(state, "arsenal").transferBudget,
+    );
+
+    // 2부는 그 나라 1부에서 파생한다 — 네 나라의 2부가 더 이상 같은 살림이 아니다
+    const second = ["westham", "sampdoria", "saintetienne"] as const; // 챔피언십·세리에B·리그2, 전부 tier3
+    const wages = second.map((id) => weeklyWagesOf(state, id));
+    expect(new Set(wages).size, "2부 주급이 리그마다 갈린다").toBe(second.length);
+    expect(wages[0]!).toBeGreaterThan(wages[1]!); // 챔피언십 > 세리에B
+    expect(wages[1]!).toBeGreaterThan(wages[2]!); // 세리에B > 리그2
+  });
+
+  /**
+   * 다년 불변식 (§10.3) — **지금 조일 수 있는 데까지.**
+   * 세 시즌은 리그가 가라앉는지 보이는 가장 짧은 창이다. 5시즌 가드와 상방 발산
+   * (중간 잔고 ≤ 연 매출)은 예산 이월 상한(§12.2)·대출(§12.3) 뒤에 온다.
+   */
+  it("세 시즌을 굴려도 가라앉는 리그가 없다", () => {
+    const state = createTestGame(42, "arsenal");
+    let guard = 600;
+    while (guard-- > 0) {
+      const before = state.date;
+      keepSeat(state);
+      advanceAndPlay(state);
+      if (state.date === before || state.season > 3) break;
+    }
+    expect(state.season).toBeGreaterThan(3);
+
+    const byLeague = new Map<string, number[]>();
+    for (const f of state.finances) {
+      const league = leagueOfTeam(f.teamId);
+      if (league === "free" || isMarketOnlyLeague(league)) continue;
+      byLeague.set(league, [...(byLeague.get(league) ?? []), f.balance]);
+    }
+    for (const [league, balances] of byLeague) {
+      const sorted = [...balances].sort((a, b) => a - b);
+      expect(sorted[Math.floor(sorted.length / 2)]!, `${league} 중간 잔고`).toBeGreaterThan(0);
+    }
+  }, 420_000);
 });
 
 /**

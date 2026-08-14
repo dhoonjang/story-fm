@@ -64,7 +64,7 @@ import {
 } from "../competition/calendar";
 import { rankByName } from "./name-match";
 import { defaultXiIds, overallFor, playerCatalog } from "../world/catalog";
-import { estimateSquadWages, wageSubjectOf } from "../world/wages";
+import { clubEconomyLevel, estimateSquadWages, wageSubjectOf } from "../world/wages";
 import { generateYouthPlayer } from "../world/generate";
 import { ensureSquadNumbers } from "../squad/numbers";
 import { hasCups, scopedTeams, type WorldScope } from "../world/scope";
@@ -861,13 +861,28 @@ function initialWages(players: GamePlayer[], onDate: string): Map<string, number
   return out;
 }
 
-/** 팀 tier → 시작 잔고·이적 예산 */
+/**
+ * 팀 tier → 시작 잔고·이적 예산. **EPL 기준이고 구단 경제 수준을 곱한다**
+ * (`initialFinanceOf` — club-finance.md §12.1).
+ *
+ * 곱하지 않으면 PSG가 아스날과 똑같은 £120M/£90M로 시작해 6분의 1 중계 수입으로
+ * 같은 살림을 산다. 수입만 리그를 알던 비대칭이 초기치에도 있던 자리다.
+ */
 const TIER_FINANCE: Record<number, { balance: number; budget: number }> = {
   1: { balance: 120_000_000, budget: 90_000_000 },
   2: { balance: 70_000_000, budget: 45_000_000 },
   3: { balance: 40_000_000, budget: 22_000_000 },
   4: { balance: 25_000_000, budget: 12_000_000 },
 };
+
+function initialFinanceOf(teamId: string, tier: number): { balance: number; budget: number } {
+  const base = TIER_FINANCE[tier] ?? TIER_FINANCE[4]!;
+  const level = clubEconomyLevel(teamId);
+  return {
+    balance: Math.round(base.balance * level),
+    budget: Math.round(base.budget * level),
+  };
+}
 
 /**
  * 카탈로그 → 게임 선수 인스턴스화. 새 게임에서만 호출된다.
@@ -972,7 +987,7 @@ export function addMissingClubs(state: GameState): number {
         status: "active" as const,
       })),
     );
-    const finance = TIER_FINANCE[team.tier] ?? TIER_FINANCE[4]!;
+    const finance = initialFinanceOf(team.id, team.tier);
     state.finances.push({
       teamId: team.id,
       balance: finance.balance,
@@ -1607,7 +1622,7 @@ export function createGame(input: CreateGameInput): GameState {
 
   // 재정 + 계약(주급의 원본)
   const finances: TeamFinance[] = catalogTeams.map((t) => {
-    const f = TIER_FINANCE[t.tier] ?? TIER_FINANCE[3]!;
+    const f = initialFinanceOf(t.id, t.tier);
     return {
       teamId: t.id,
       balance: f.balance,

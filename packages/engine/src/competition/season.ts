@@ -40,7 +40,7 @@ import {
   FAMILIARITY_BASELINE,
   type GameState,
 } from "../core/state";
-import { estimateWeeklyWage, wageSubjectOf } from "../world/wages";
+import { clubEconomyLevel, estimateWeeklyWage, wageSubjectOf } from "../world/wages";
 import { makeRng, randInt } from "../core/rng";
 import { installDefaultTraining } from "../squad/training-plan";
 
@@ -169,8 +169,11 @@ export function allMatchesDone(state: GameState): boolean {
 }
 
 /**
- * 시즌 예산 보충 (£) — 등급별. 실측 순이익(tier 1 +£40M · 2 +£35M · 3 −£15M ·
- * 4 −£9M)과 같은 자리에 둔다. 큰 영입은 여기에 **판매 대금**을 얹어야 가능하다.
+ * 시즌 예산 보충 (£) — 등급별. 큰 영입은 여기에 **판매 대금**을 얹어야 가능하다.
+ *
+ * 표는 **EPL 기준이고 구단 경제 수준을 곱한다**(`seasonBudgetBaseOf` —
+ * club-finance.md §12.1). 곱하지 않으면 리그 1 구단이 EPL과 같은 예산을 매 시즌
+ * 받아 이적 시장의 눈금이 리그를 잃는다.
  */
 export const SEASON_BUDGET_TOPUP: Record<number, number> = {
   1: 45_000_000,
@@ -178,6 +181,11 @@ export const SEASON_BUDGET_TOPUP: Record<number, number> = {
   3: 18_000_000,
   4: 12_000_000,
 };
+
+export function seasonBudgetBaseOf(teamId: string): number {
+  const tier = teamCatalogById(teamId)?.tier ?? 3;
+  return Math.round((SEASON_BUDGET_TOPUP[tier] ?? 0) * clubEconomyLevel(teamId));
+}
 
 /** 보드 기대치 — 팀 tier가 난이도를 만든다 (game-loop §1) */
 export function boardExpectation(teamId: string): { target: number; label: string } {
@@ -633,8 +641,7 @@ export function transitionSeason(state: GameState): string[] {
     // 월초 정산은 이미 `isClubTeam`으로 거르는데 여기만 빠져 있어, 쓰이지 않는
     // 예산이 자유계약 선수단에 매 시즌 쌓였다.
     if (!isClubTeam(finance.teamId)) continue;
-    const base = SEASON_BUDGET_TOPUP[teamCatalogById(finance.teamId)?.tier ?? 3] ?? 0;
-    topUpTransferBudget(state, finance.teamId, base, digest);
+    topUpTransferBudget(state, finance.teamId, seasonBudgetBaseOf(finance.teamId), digest);
   }
 
   digest.push(
