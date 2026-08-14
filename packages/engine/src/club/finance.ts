@@ -392,6 +392,11 @@ export function matchdayRevenue(state: GameState, match: MatchRecord): MatchdayR
 /**
  * 경기 직후 재정 반영 — 매치데이(홈)·생중계 수당·승리 수당·원정 비용.
  * `finalizeMatch`가 부른다 (경기 사건은 창발, 반영은 공식).
+ *
+ * **상대 구단의 몫도 여기서 함께 넣는다.** 간이 시뮬은 두 팀을 다 챙기는데
+ * (`applyAiMatchFinance` — tick.ts) 유저 경기는 이 함수가 유저 쪽만 기록했다.
+ * 그래서 유저가 원정 가는 시즌 열아홉 경기의 **홈 팀이 입장 수입을 못 받았다**.
+ * 그 함수가 유저 팀을 건너뛰므로 겹치지 않는다.
  */
 export function applyMatchFinance(
   state: GameState,
@@ -399,6 +404,7 @@ export function applyMatchFinance(
   outcome: "win" | "draw" | "loss",
   digest: string[],
 ): void {
+  applyAiMatchFinance(state, match);
   const teamId = state.userTeamId;
   const home = match.homeTeamId === teamId;
   const opponentId = home ? match.awayTeamId : match.homeTeamId;
@@ -1162,22 +1168,40 @@ export function paySeasonBonuses(state: GameState, position: number, digest: str
   }
 }
 
-/** 리그 순위 상금 — 시즌 리뷰에서 (전 팀) */
+/** 리그 순위 상금 — 한 계단당 */
+const LEAGUE_PRIZE_STEP = 700_000;
+
+/**
+ * 리그 순위 상금 — 시즌 리뷰에서 (전 팀).
+ *
+ * **리그는 언제나 세이브 기준**(`leagueOfTeamIn`)이다. 승강은 `state.leagueOf`로만
+ * 표현되므로(competition/promotion.ts) 카탈로그 리그로 순위표를 부르면 강등팀도
+ * 승격팀도 자기가 없는 순위표를 받아 rank 0 — **상금이 통째로 사라진다.** 순위표는
+ * 카탈로그 리그로, 리그 크기·중계 배율은 세이브 리그로 읽던 것이 어긋난 자리다.
+ */
 export function payLeaguePrizes(state: GameState, digest: string[]): void {
   for (const team of state.teams) {
     if (isOutsideOurEconomy(team.id)) continue;
-    const standings = computeStandings(state, leagueOfTeam(team.id));
+    const league = leagueOfTeamIn(state, team.id);
+    /**
+     * 리그전을 하지 않는 2부는 **순위가 없다.** 0경기 0승점 순위표는 정렬이 안정적이라
+     * 카탈로그 등재 순서가 그대로 순위가 되고, 매 시즌 같은 팀이 같은 상금을 받아
+     * 2부의 재정 서열이 영구히 굳는다. 그 리그의 수입 공백은 매치데이 대체분이 메운다
+     * (`unplayedLeagueMatchdayMonthly`).
+     */
+    if (!isTopLeague(league)) continue;
+    const standings = computeStandings(state, league);
     const rank = standings.findIndex((r) => r.teamId === team.id) + 1;
     if (rank <= 0) continue;
     const size = leagueSizeOf(state, team.id);
-    const amount = (size + 1 - rank) * 700_000 * poolOf(state, team.id);
+    const amount = (size + 1 - rank) * LEAGUE_PRIZE_STEP * poolOf(state, team.id);
     if (
       payOnce(state, team.id, `league-prize:S${state.season}`, {
         kind: "income",
         category: "prize",
         label: `리그 순위 상금 (${rank}위 · S${state.season})`,
         amount,
-        ref: { type: "competition", id: leagueOfTeam(team.id) },
+        ref: { type: "competition", id: league },
       }) &&
       team.id === state.userTeamId
     ) {

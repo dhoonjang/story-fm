@@ -4,6 +4,9 @@ import type { FinanceCategory } from "@story-fm/domain";
 import type { GameState } from "@story-fm/engine";
 import {
   annualRevenueEstimate,
+  applyMatchFinance,
+  isCup,
+  payLeaguePrizes,
   isMarketOnlyLeague,
   monthlyFixedCostOf,
   seasonBudgetBaseOf,
@@ -140,6 +143,29 @@ describe("매치데이", () => {
     // 대항전 방송 수입은 UEFA 배분에 이미 들어 있다
     const cup = state.matches.find((m) => m.competitionId === "ucl");
     if (cup) expect(isTelevised(cup)).toBe(false);
+  });
+
+  /**
+   * 유저 경기의 **상대 구단**도 경기 재정을 갖는다. 간이 시뮬은 두 팀을 다 챙기는데
+   * 유저 경기만 유저 쪽을 기록해, 유저가 원정 가는 열아홉 경기의 홈 팀이 입장 수입을
+   * 못 받고 있었다.
+   */
+  it("유저가 원정 간 경기의 홈 팀도 입장 수입을 받는다", () => {
+    const state = createTestGame();
+    const away = state.matches.find(
+      (m) => m.awayTeamId === state.userTeamId && !m.neutral && !isCup(m.competitionId),
+    )!;
+    const host = away.homeTeamId;
+    const before = financeOf(state, host).balance;
+
+    applyMatchFinance(state, away, "loss", []);
+
+    // AI 팀은 원장을 남기지 않으므로(§4.5) 잔고로 확인한다
+    expect(financeOf(state, host).balance).toBeGreaterThan(before);
+    // 유저 쪽은 원정이라 입장 수입이 없다 — 대신 원정 비용이 나간다
+    expect(
+      financeOf(state, state.userTeamId).ledger.some((e) => categoryOf(e) === "matchday"),
+    ).toBe(false);
   });
 
   it("경기 후 홈 입장 수입·운영비가 원장에 남는다", () => {
@@ -483,6 +509,46 @@ describe("PSR", () => {
     expect(budgetAfter([{ category: "matchday", amount: 40_000_000 }])).toBe(65_000_000);
     // 같은 £40M이 선수를 판 돈이면 성과가 없다 — 그 돈은 이미 예산에 들어갔다
     expect(budgetAfter([{ category: "transfer_in", amount: 40_000_000 }])).toBe(45_000_000);
+  });
+});
+
+/**
+ * 리그 순위 상금 — 리그를 어느 축으로 읽는가 (club-finance §5.1·§6).
+ * 승강은 `state.leagueOf`로만 표현되므로 카탈로그 리그로 읽으면 상금이 사라진다.
+ */
+describe("리그 순위 상금", () => {
+  const key = (season: number) => `league-prize:S${season}`;
+
+  it("승격한 구단은 새 리그의 상금을 받는다 — 리그는 세이브 기준이다", () => {
+    const state = createTestGame();
+    // 승격 한 팀 · 강등 한 팀 (승강의 유일한 표현이 이 표다)
+    state.leagueOf = { wolves: "epl", coventry: "championship" };
+
+    payLeaguePrizes(state, []);
+
+    // 올라온 팀은 1부 순위표에 있으므로 상금을 받는다
+    expect(financeOf(state, "wolves").prizesPaid).toContain(key(state.season));
+    // 남아 있는 팀도 그대로 받는다
+    expect(financeOf(state, "arsenal").prizesPaid).toContain(key(state.season));
+    // 내려간 팀은 리그전을 하지 않는 리그로 갔으므로 순위 상금이 없다
+    expect(financeOf(state, "coventry").prizesPaid ?? []).not.toContain(key(state.season));
+  });
+
+  it("리그전을 하지 않는 2부는 순위 상금을 받지 않는다", () => {
+    const state = createTestGame();
+    payLeaguePrizes(state, []);
+
+    const paidIn = (league: string) =>
+      state.finances.filter(
+        (f) =>
+          leagueOfTeam(f.teamId) === league && (f.prizesPaid ?? []).includes(key(state.season)),
+      ).length;
+
+    // 0경기 0승점 순위표는 카탈로그 등재 순서를 그대로 순위로 만든다 — 상금을 줄 수 없다
+    for (const league of ["championship", "serieb", "ligue2", "segunda", "bundesliga2"]) {
+      expect(paidIn(league), league).toBe(0);
+    }
+    expect(paidIn("epl")).toBeGreaterThan(0);
   });
 });
 
