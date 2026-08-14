@@ -57,7 +57,24 @@ export interface LeagueCatalogEntry {
    * 균등 배분·성적 수당·생중계 수당 전부에 곱한다 (club-finance.md §5.1).
    */
   broadcastPool: number;
-  /** 리그 평균 티켓 단가 (£) — 매치데이 수입의 기준 */
+  /**
+   * 리그 평균 티켓 단가 (£) — 매치데이 수입의 기준.
+   *
+   * 실효 객단가는 여기에 **체급 보정(1.3~0.8)과 호스피탈리티(35~15%)**가 얹힌 값이다
+   * (club-finance.md §5.2). 그래서 EPL 45는 아스날에서 £79, 본머스에서 £41이 된다 —
+   * 공개 자료의 £85~90·£45와 맞는 자리다.
+   *
+   * ⚠️ **비영국 리그는 EPL 대비 비율로 잡는다.** 예전 값은 EPL의 0.58~0.71이라 실제
+   * 격차(0.4~0.55)보다 좁았고, 그래서 레체 £28(실제 £11)·랑스 £37(£18)처럼 실효 객단가가
+   * 실제의 두 배를 넘었다. 실제로도 다섯 리그의 티켓 가격 차는 중계권 차보다 크다 —
+   * EPL만 유독 비싸고 분데스리가는 입석·시즌권 보조로 가장 싸다.
+   *
+   * ⚠️ **분데스리가만 실제보다 높게(0.53) 둔다** — 실제 비율은 0.44에 가깝지만, 우리
+   * 상업 수입 모델이 세계적 브랜드를 크게 낮춰 잡기 때문에(바이에른 £68M 어림 대 실측
+   * £350M 어림) 모델된 유일한 축인 매치데이까지 현실대로 깎으면 **바이에른의 임금 천장이
+   * 브렌트포드 아래로 내려간다.** 티켓을 현실로 되돌리려면 상업 수입의 눈금을 먼저
+   * 고쳐야 한다 (club-finance.md §12).
+   */
   avgTicketPrice: number;
 }
 
@@ -81,7 +98,7 @@ export const LEAGUE_CATALOG_SEED: readonly LeagueCatalogEntry[] = [
     coefficient: 2,
     realSquads: true,
     broadcastPool: 0.45,
-    avgTicketPrice: 32,
+    avgTicketPrice: 25,
   },
   {
     id: "seriea",
@@ -91,7 +108,7 @@ export const LEAGUE_CATALOG_SEED: readonly LeagueCatalogEntry[] = [
     coefficient: 3,
     realSquads: true,
     broadcastPool: 0.32,
-    avgTicketPrice: 30,
+    avgTicketPrice: 22,
   },
   {
     id: "bundesliga",
@@ -101,7 +118,7 @@ export const LEAGUE_CATALOG_SEED: readonly LeagueCatalogEntry[] = [
     coefficient: 4,
     realSquads: true,
     broadcastPool: 0.35,
-    avgTicketPrice: 28,
+    avgTicketPrice: 24,
   },
   {
     id: "ligue1",
@@ -111,7 +128,7 @@ export const LEAGUE_CATALOG_SEED: readonly LeagueCatalogEntry[] = [
     coefficient: 5,
     realSquads: true,
     broadcastPool: 0.16,
-    avgTicketPrice: 26,
+    avgTicketPrice: 18,
   },
 
   // ── 이적 시장 전용 리그 — 경기를 하지 않는다 (kind: "market-only") ──
@@ -179,7 +196,7 @@ export const LEAGUE_CATALOG_SEED: readonly LeagueCatalogEntry[] = [
     coefficient: 2,
     realSquads: false,
     broadcastPool: 0.05,
-    avgTicketPrice: 18,
+    avgTicketPrice: 15,
   },
   {
     id: "serieb",
@@ -189,7 +206,7 @@ export const LEAGUE_CATALOG_SEED: readonly LeagueCatalogEntry[] = [
     coefficient: 3,
     realSquads: false,
     broadcastPool: 0.04,
-    avgTicketPrice: 16,
+    avgTicketPrice: 13,
   },
   {
     id: "bundesliga2",
@@ -199,7 +216,7 @@ export const LEAGUE_CATALOG_SEED: readonly LeagueCatalogEntry[] = [
     coefficient: 4,
     realSquads: false,
     broadcastPool: 0.06,
-    avgTicketPrice: 17,
+    avgTicketPrice: 16,
   },
   {
     id: "ligue2",
@@ -209,7 +226,7 @@ export const LEAGUE_CATALOG_SEED: readonly LeagueCatalogEntry[] = [
     coefficient: 5,
     realSquads: false,
     broadcastPool: 0.03,
-    avgTicketPrice: 13,
+    avgTicketPrice: 11,
   },
 ];
 
