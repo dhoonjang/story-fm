@@ -1,4 +1,5 @@
 import type {
+  Contract,
   FinanceCategory,
   FinanceReport,
   FinanceReportLine,
@@ -139,6 +140,9 @@ const MEDICAL_COST: Record<"minor" | "moderate" | "major", number> = {
 };
 /** 에이전트 수수료 — 이적료 대비 */
 export const AGENT_FEE_RATE = 0.1;
+
+/** 매각 잔존가를 훑는 창 — 월초 정산이 한 달에 한 번 도므로 두 달이면 넉넉하다 */
+const WRITEOFF_WINDOW_MONTHS = 2;
 
 /** 상세 원장 보존 개월 수 — 그 이전은 월간 보고서가 요약해 보관한다 */
 const LEDGER_MONTHS_KEPT = 3;
@@ -662,36 +666,99 @@ function amortisationMonthsLeft(state: GameState, since: string, until: string):
  * 이적 갈래의 순회 기준은 **이적 원장**이다 — 이적은 몇 건뿐이고 계약은 3천 건에
  * 가까우므로(96팀 × 30명) 계약을 훑으면 월초 정산이 팀 수만큼 느려진다.
  */
+/**
+ * 이 선수가 이 팀에 온 **첫 계약** — 재계약은 새 행을 쌓고 이전 행을 `"ended"`로 남기므로
+ * 계약 이력이 세이브에 그대로 있다. 그래서 취득 시점을 새 필드 없이 되찾을 수 있다.
+ */
+function firstContractAt(state: GameState, teamId: string, playerId: string): Contract | null {
+  let first: Contract | null = null;
+  for (const c of state.contracts) {
+    if (c.gamePlayerId !== playerId || c.teamId !== teamId) continue;
+    if (first === null || c.since < first.since) first = c;
+  }
+  return first;
+}
+
+/**
+ * **취득원가와 원래 상각 기간** — 재계약이 이 둘을 바꾸지 않는다.
+ *
+ * 예전엔 레거시 갈래가 "계약 시작일 == 게임 시작일"로 판정했다. 그래서 **재계약하는
+ * 순간 그 선수의 상각이 사라졌다** — 4시즌이면 전 구단 상각이 0이 되고 유저 장부
+ * 손익이 £16.7M → £202.2M으로 올라갔다(§10.3의 3번 최대 원인). 실제 회계는 재계약으로
+ * 잔존가를 지우지 않는다.
+ */
+function acquisitionOf(
+  state: GameState,
+  teamId: string,
+  playerId: string,
+): { cost: number; months: number; since: string } | null {
+  const first = firstContractAt(state, teamId, playerId);
+  if (!first) return null;
+  const months = monthsBetween(first.since, first.until) + 1;
+  if (months <= 0) return null;
+
+  // 유상으로 데려왔으면 이적료가 취득원가다
+  const paid = state.transfers.find(
+    (t) =>
+      t.toTeamId === teamId && t.gamePlayerId === playerId && t.fee > 0 && first.since >= t.date,
+  );
+  if (paid) return { cost: paid.fee, months, since: first.since };
+
+  // 시작 스쿼드는 주급에서 파생한다 (§6.1) — 그 외(무상 이적·유스)는 장부가 없다
+  if (first.since > gameStartDate(state)) return null;
+  return {
+    cost: first.weeklyWage * WEEKS_PER_MONTH * LEGACY_AMORTISATION_WAGE_RATE * months,
+    months,
+    since: first.since,
+  };
+}
+
+/**
+ * 지금 남은 **장부상 잔존가** — 취득원가를 원래 기간에 균등 상각한 나머지.
+ * 매각 시 처분 이익(§6.1)과 월 상각이 같은 식을 쓴다.
+ */
+export function bookValueOf(
+  state: GameState,
+  teamId: string,
+  playerId: string,
+  at?: string,
+): number {
+  const acq = acquisitionOf(state, teamId, playerId);
+  if (!acq) return 0;
+  const used = monthsBetween(acq.since, monthOf(at ?? state.date));
+  return Math.max(0, acq.cost * (1 - Math.min(1, Math.max(0, used) / acq.months)));
+}
+
+/**
+ * 이번 달 이적료 상각 — 활성 계약 + 이적 원장에서 **파생**한다 (자산 테이블 없음).
+ *
+ * 취득원가는 두 갈래로 정해진다 (`acquisitionOf`):
+ *   게임 중 영입 — 이적료
+ *   시작 스쿼드 — 주급 × 배수 × 원래 계약 개월수
+ * 그 뒤는 한 길이다. 원래 계약 동안은 `취득원가 ÷ 원래 개월수`를 매달 털고,
+ * **재계약하면 그 시점의 잔존가를 새 기간에 다시 편다** — 총액은 그대로이고 연 상각은
+ * 낮아진다. 계약이 끝나거나 선수를 팔면 멈춘다.
+ */
 export function amortisationOf(state: GameState, teamId: string): AmortisationLine[] {
   const lines: AmortisationLine[] = [];
-  const bought = new Set<string>();
-  for (const transfer of state.transfers) {
-    if (transfer.toTeamId !== teamId || transfer.fee <= 0) continue;
-    const contract = state.contracts.find(
-      (c) =>
-        c.gamePlayerId === transfer.gamePlayerId &&
-        c.status === "active" &&
-        c.teamId === teamId &&
-        c.since >= transfer.date,
-    );
-    if (!contract) continue;
-    const months = monthsBetween(contract.since, contract.until) + 1;
-    if (months <= 0) continue;
-    if (amortisationMonthsLeft(state, contract.since, contract.until) <= 0) continue;
-    bought.add(transfer.gamePlayerId);
-    lines.push({ playerId: transfer.gamePlayerId, monthly: transfer.fee / months });
-  }
-
-  const start = gameStartDate(state);
   for (const contract of state.contracts) {
     if (contract.status !== "active" || contract.teamId !== teamId) continue;
-    // 게임 중에 맺은 계약은 이적 원장이 받는다 — 재계약도 새 이적료를 만들지 않는다
-    if (contract.since > start || bought.has(contract.gamePlayerId)) continue;
     if (amortisationMonthsLeft(state, contract.since, contract.until) <= 0) continue;
-    lines.push({
-      playerId: contract.gamePlayerId,
-      monthly: contract.weeklyWage * WEEKS_PER_MONTH * LEGACY_AMORTISATION_WAGE_RATE,
-    });
+
+    const acq = acquisitionOf(state, teamId, contract.gamePlayerId);
+    if (!acq || acq.cost <= 0) continue;
+
+    // 원래 계약이 아직 도는 중이면 원래 눈금 그대로
+    if (contract.since <= acq.since) {
+      lines.push({ playerId: contract.gamePlayerId, monthly: acq.cost / acq.months });
+      continue;
+    }
+    // 재계약 — 그 시점의 잔존가를 새 기간에 다시 편다
+    const residual = bookValueOf(state, teamId, contract.gamePlayerId, contract.since);
+    if (residual <= 0) continue;
+    const months = monthsBetween(contract.since, contract.until) + 1;
+    if (months <= 0) continue;
+    lines.push({ playerId: contract.gamePlayerId, monthly: residual / months });
   }
   return lines;
 }
@@ -934,6 +1001,38 @@ function postMonthlyItems(state: GameState): void {
       label: "이자·세금",
       amount: financeCostOf(team.id),
     });
+
+    /**
+     * **매각 잔존가 처리** — 팔린 선수의 남은 장부가를 털어 낸다 (§6.1).
+     *
+     * 매각 대금은 `transfer_in`으로 전액이 이익에 잡히는데, 실제 처분 이익은
+     * `매각액 − 잔존가`다. 잔존가를 지우지 않으면 **선수를 팔 때마다 장부가 좋아진다**.
+     * 매각 자리(협상·AI 시장)가 아니라 월초에 이적 원장을 훑어 넣는다 — 그쪽이 재정을
+     * `recordFinance`로 직접 적으므로 여기가 재정이 손댈 수 있는 유일한 지점이다.
+     * 현금은 건드리지 않는다(noncash).
+     */
+    const written = new Set(financeOf(state, team.id).prizesPaid ?? []);
+    for (const transfer of state.transfers) {
+      if (transfer.fromTeamId !== team.id || transfer.fee <= 0) continue;
+      // 이미 털어 낸 건은 잔존가를 계산하지도 않는다 — 계약 순회가 비싸다
+      if (written.has(`sale-writeoff:${transfer.id}`)) continue;
+      /**
+       * 최근 매각만 본다. 잔존가가 0인 건은 `payOnce`가 키를 남기지 않아 매달 다시
+       * 계산될 수 있는데, 이적 원장은 시즌마다 수백 건씩 쌓인다.
+       */
+      if (monthsBetween(monthOf(transfer.date), monthOf(state.date)) > WRITEOFF_WINDOW_MONTHS) {
+        continue;
+      }
+      const residual = bookValueOf(state, team.id, transfer.gamePlayerId, transfer.date);
+      payOnce(state, team.id, `sale-writeoff:${transfer.id}`, {
+        kind: "expense",
+        category: "amortisation",
+        label: `매각 잔존가 — ${playerNames.get(transfer.gamePlayerId) ?? transfer.gamePlayerId}`,
+        amount: residual,
+        ref: { type: "player", id: transfer.gamePlayerId },
+        accounting: "noncash",
+      });
+    }
 
     // 이적료 상각 — 장부에만 (noncash)
     for (const line of amortisationOf(state, team.id)) {

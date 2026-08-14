@@ -4,6 +4,7 @@ import type { FinanceCategory } from "@story-fm/domain";
 import type { GameState } from "@story-fm/engine";
 import {
   annualRevenueEstimate,
+  bookValueOf,
   debtLimitOf,
   debtOf,
   runMonthlyFinance,
@@ -349,6 +350,104 @@ describe("이적료 — 현금과 장부 두 축", () => {
     const after = amortisationOf(state, state.userTeamId);
     expect(after).toHaveLength(mine.length - 1);
     expect(after.some((l) => l.playerId === target.gamePlayerId)).toBe(false);
+  });
+
+  /**
+   * 재계약이 상각을 지우면 안 된다 (club-finance §6.1). 예전엔 레거시 판정이
+   * "계약 시작일 == 게임 시작일"이라 **재계약하는 순간 그 선수의 상각이 사라졌다** —
+   * 4시즌이면 전 구단 상각이 0이 되고 장부 손익이 그만큼 부풀었다.
+   */
+  it("재계약해도 상각이 이어지고, 연 상각은 낮아진다", () => {
+    const state = createTestGame(42, "arsenal");
+    // 만기가 먼 계약을 고른다 — 재계약은 만기 전에 하는 것이고, 다 지난 계약은
+    // 잔존가가 0인 게 맞다(그건 아래 테스트가 본다)
+    const target = state.contracts.find(
+      (c) => c.teamId === state.userTeamId && c.status === "active" && c.until >= "2030-06-30",
+    )!;
+    const before = amortisationOf(state, state.userTeamId).find(
+      (l) => l.playerId === target.gamePlayerId,
+    )!;
+    expect(before.monthly).toBeGreaterThan(0);
+
+    // 만기 전에 더 긴 기간으로 재계약 — 기존 행은 남고 새 행이 쌓인다
+    target.status = "ended";
+    state.contracts.push({
+      id: `${target.id}-renew`,
+      gamePlayerId: target.gamePlayerId,
+      teamId: state.userTeamId,
+      weeklyWage: target.weeklyWage * 1.2,
+      since: "2028-01-01",
+      until: "2032-06-30",
+      status: "active",
+    });
+
+    const after = amortisationOf(state, state.userTeamId).find(
+      (l) => l.playerId === target.gamePlayerId,
+    );
+    // 사라지지 않는다
+    expect(after).toBeTruthy();
+    // 남은 잔존가를 더 긴 기간에 펴므로 월 상각은 낮아진다 (총액은 그대로)
+    expect(after!.monthly).toBeLessThan(before.monthly);
+    expect(after!.monthly).toBeGreaterThan(0);
+  });
+
+  it("원래 계약 기간이 다 지나면 잔존가가 0이다", () => {
+    const state = createTestGame(42, "arsenal");
+    const target = state.contracts.find(
+      (c) => c.teamId === state.userTeamId && c.status === "active",
+    )!;
+    const value = bookValueOf(state, state.userTeamId, target.gamePlayerId);
+    expect(value).toBeGreaterThan(0);
+    // 만기 뒤로 시계를 옮기면 다 털린 상태다
+    expect(bookValueOf(state, state.userTeamId, target.gamePlayerId, "2099-01")).toBe(0);
+  });
+
+  /**
+   * 매각 대금은 `transfer_in`으로 전액이 이익에 잡힌다. 잔존가를 지우지 않으면
+   * 선수를 팔 때마다 장부가 좋아진다 — 실제 처분 이익은 `매각액 − 잔존가`다.
+   */
+  it("선수를 팔면 잔존가를 털어 낸다 — 현금은 그대로", () => {
+    const state = createTestGame(42, "arsenal");
+    const target = state.contracts.find(
+      (c) => c.teamId === state.userTeamId && c.status === "active",
+    )!;
+    const residual = bookValueOf(state, state.userTeamId, target.gamePlayerId, state.date);
+    expect(residual).toBeGreaterThan(0);
+
+    // 매각 — 계약은 끝나고 이적 원장에 남는다 (협상 흐름은 negotiation.test.ts가 본다)
+    const buyer = state.teams.find((t) => t.id !== state.userTeamId)!.id;
+    state.transfers.push({
+      id: "tr-sale",
+      gamePlayerId: target.gamePlayerId,
+      windowId: null,
+      fromTeamId: state.userTeamId,
+      toTeamId: buyer,
+      date: state.date,
+      type: "transfer",
+      fee: 30_000_000,
+    });
+    target.status = "ended";
+    const player = state.players.find((p) => p.id === target.gamePlayerId)!;
+    player.teamId = buyer;
+
+    const balanceBefore = financeOf(state, state.userTeamId).balance;
+    runMonthlyFinance(state, []);
+
+    const writeoff = financeOf(state, state.userTeamId).ledger.find((e) =>
+      e.label.startsWith("매각 잔존가"),
+    );
+    expect(writeoff).toBeTruthy();
+    expect(Math.round(writeoff!.amount)).toBe(Math.round(residual));
+    expect(writeoff!.accounting).toBe("noncash");
+    // 현금은 잔존가에 반응하지 않는다 — 그 돈은 이미 오래전에 나갔다
+    expect(financeOf(state, state.userTeamId).balance).toBeGreaterThan(balanceBefore - residual);
+
+    // 두 번 털지 않는다
+    const again: string[] = [];
+    runMonthlyFinance(state, again);
+    expect(
+      financeOf(state, state.userTeamId).ledger.filter((e) => e.label.startsWith("매각 잔존가")),
+    ).toHaveLength(1);
   });
 
   it("영입한 선수는 이적 갈래로만 상각한다 — 두 번 잡히지 않는다", () => {
