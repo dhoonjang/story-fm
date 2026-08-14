@@ -146,4 +146,24 @@ describe("실제 계약", () => {
       expect(bill, team.id).toBeLessThan(clubWageBudget(team.id) * 1.25);
     }
   });
+
+  /**
+   * **실측 시드도 그 리그의 급여표여야 한다.**
+   *
+   * 위 테스트는 실측을 쓰는 구단을 건너뛴다 — 실측이 모델과 어긋나는 것은 정상이니까.
+   * 그 구멍으로 승격팀의 **2부 시절 시드**가 지나갔다: 코번트리·헐의 주급 총액이 모델
+   * 예산의 0.43배(연 £20.4M)라 EPL 수입으로 챔피언십 급여를 내는 구단이 됐고, tier4
+   * 구단의 순익이 아스날을 넘었다(club-finance §10.3).
+   *
+   * 그래서 띠를 넓게 두고 **벗어나는 것만** 잡는다 — 실측의 실제 분포는 0.75~1.30이다.
+   */
+  it("실측 시드를 쓰는 구단도 그 리그의 급여 띠 안에 있다", () => {
+    for (const team of state.teams.filter((t) => isTopFlight(t.id))) {
+      const squad = playersOf(state, team.id);
+      const bill = squad.reduce((s, p) => s + (activeContract(state, p.id)?.weeklyWage ?? 0), 0);
+      const ratio = bill / clubWageBudget(team.id);
+      expect(ratio, `${team.id} 주급/모델 예산`).toBeGreaterThan(0.7);
+      expect(ratio, `${team.id} 주급/모델 예산`).toBeLessThan(1.4);
+    }
+  });
 });
