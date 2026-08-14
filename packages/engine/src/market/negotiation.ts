@@ -1270,6 +1270,11 @@ function executeLoanOut(
       amount: agreed.fee,
       ref,
     });
+    moveTransferBudget(state, {
+      from: negotiation.counterpartTeamId ?? state.userTeamId,
+      to: state.userTeamId,
+      amount: agreed.fee,
+    });
   }
   return { ok: true, message: `${res.message} · 임대료 ${money(agreed.fee)}` };
 }
@@ -1322,6 +1327,7 @@ function executeLoanIn(
       amount: agreed.fee,
       ref,
     });
+    moveTransferBudget(state, { from: state.userTeamId, to: from, amount: agreed.fee });
   }
 
   // 우리가 내는 주급 비율 — `weeklyWagesOf`가 이 값으로 양쪽 부담을 가른다
@@ -1466,6 +1472,28 @@ function passMedicalGate(
 }
 
 /**
+ * 이적 예산의 이동 — **돈이 오간 만큼 한도도 옮긴다.**
+ *
+ * 예산은 현금이 아니라 보드가 허가한 순 이적 지출 한도이고(finance.md §9.1),
+ * `affordabilityGate`가 검사하는 값도 이것이다. 그래서 검사한 금액은 반드시
+ * 같은 크기로 빠져야 한다 — 임대료는 관문만 지나고 차감이 없어서, 같은 예산으로
+ * 임대를 몇 번이든 반복할 수 있었다.
+ *
+ * 영입·매각·임대가 모두 이 함수를 지난다. 이적료든 임대료든 예산에서는 같은
+ * 돈이다.
+ */
+function moveTransferBudget(
+  state: GameState,
+  move: { from: string; to: string; amount: number },
+): void {
+  if (move.amount <= 0 || move.from === move.to) return;
+  const payer = state.finances.find((f) => f.teamId === move.from);
+  const payee = state.finances.find((f) => f.teamId === move.to);
+  if (payer) payer.transferBudget -= move.amount;
+  if (payee) payee.transferBudget += move.amount;
+}
+
+/**
  * **데려올 수 있는 형편인가** — 영입·임대가 함께 지나는 문.
  *
  * 오퍼를 넣을 때 `dealOdds`가 이미 본 것들이지만, 합의부터 실행까지는 며칠이
@@ -1603,10 +1631,8 @@ export function executeDeal(state: GameState, negotiation: Negotiation): SkillRe
       amount: agreed.fee,
       ref,
     });
-    ourFinance.transferBudget -= agreed.fee;
     // 판매 대금은 파는 쪽의 이적 예산으로 돌아간다
-    const theirFinance = state.finances.find((f) => f.teamId === fromTeamId);
-    if (theirFinance) theirFinance.transferBudget += agreed.fee;
+    moveTransferBudget(state, { from: state.userTeamId, to: fromTeamId, amount: agreed.fee });
   }
 
   // 소속 이동 — 새 팀에서는 예비 스쿼드다 (감독이 라인업에 넣는다)
@@ -1728,9 +1754,7 @@ function executeSale(
       amount: agreed.fee,
       ref,
     });
-    if (ourFinance) ourFinance.transferBudget += agreed.fee;
-    const theirFinance = state.finances.find((f) => f.teamId === buyerTeamId);
-    if (theirFinance) theirFinance.transferBudget -= agreed.fee;
+    moveTransferBudget(state, { from: buyerTeamId, to: state.userTeamId, amount: agreed.fee });
   }
 
   releaseFromTactics(state, state.userTeamId, player.id);

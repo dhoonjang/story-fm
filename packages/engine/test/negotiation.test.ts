@@ -841,3 +841,133 @@ describe("시장의 문 — 한쪽에만 걸려 있던 관문들", () => {
     ).toBe(true);
   });
 });
+
+/**
+ * 임대료도 이적 예산에서 움직인다 (transfer.md §2).
+ *
+ * 관문(`affordabilityGate`)이 임대료를 이적 예산으로 검사하는데 차감이 없었다 —
+ * 같은 예산으로 임대를 몇 번이든 반복할 수 있었다. 검사한 값과 빠지는 값이
+ * 같은지를 여기서 고정한다.
+ */
+describe("임대료 — 검사한 값이 빠진다", () => {
+  const LOAN_FEE = 2_000_000;
+
+  /** 합의까지 간 임대 협상을 세운다 — 관문 뒤의 장부만 보는 테스트다 */
+  function agreedLoan(
+    state: GameState,
+    input: { id: string; kind: "loan" | "loan_out"; playerId: string; counterpartTeamId: string },
+  ) {
+    const negotiation = {
+      id: input.id,
+      gamePlayerId: input.playerId,
+      kind: input.kind,
+      counterpartTeamId: input.counterpartTeamId,
+      windowId: null,
+      openedOn: state.date,
+      expiresOn: addDays(state.date, 10),
+      status: "agreed" as const,
+      medical: { onDate: state.date, status: "passed" as const },
+      rounds: [
+        {
+          date: state.date,
+          by: "us" as const,
+          fee: LOAN_FEE,
+          weeklyWage: 40_000,
+          contractYears: 1,
+          respondsOn: null,
+          probability: 60,
+          verdict: "accept" as const,
+        },
+      ],
+    };
+    state.negotiations.push(negotiation);
+    for (const w of state.windows) w.closesOn = addDays(state.date, 30);
+    return negotiation;
+  }
+
+  it("빌려오면 현금과 예산이 같은 크기로 빠진다", () => {
+    const state = createTestGame(42);
+    const player = target(state);
+    const lenderId = player.teamId;
+    const ourBudget = financeOf(state, state.userTeamId).transferBudget;
+    const ourBalance = financeOf(state, state.userTeamId).balance;
+    const theirBudget = financeOf(state, lenderId).transferBudget;
+    const theirBalance = financeOf(state, lenderId).balance;
+
+    const negotiation = agreedLoan(state, {
+      id: "neg-loan-in",
+      kind: "loan",
+      playerId: player.id,
+      counterpartTeamId: lenderId,
+    });
+    const done = acceptDeal(state, negotiation.id);
+    expect(done.ok, done.message).toBe(true);
+    expect(playerById(state, player.id)!.loan?.fromTeamId).toBe(lenderId);
+
+    expect(financeOf(state, state.userTeamId).balance).toBe(ourBalance - LOAN_FEE);
+    expect(
+      financeOf(state, state.userTeamId).transferBudget,
+      "관문이 예산으로 검사했으면 예산에서도 빠져야 한다",
+    ).toBe(ourBudget - LOAN_FEE);
+    expect(financeOf(state, lenderId).balance).toBe(theirBalance + LOAN_FEE);
+    expect(financeOf(state, lenderId).transferBudget).toBe(theirBudget + LOAN_FEE);
+  });
+
+  /** 예산이 안 빠지면 같은 돈으로 임대를 무한히 반복할 수 있었다 */
+  it("예산을 임대료만큼만 남기면 두 번째 임대가 막힌다", () => {
+    const state = createTestGame(42);
+    const first = target(state);
+    const second = state.players.find(
+      (p) => p.teamId !== state.userTeamId && p.id !== first.id && p.teamId === first.teamId,
+    );
+    expect(second, "같은 구단에서 둘을 빌려 오는 상황을 세운다").toBeDefined();
+    financeOf(state, state.userTeamId).transferBudget = LOAN_FEE;
+
+    const one = agreedLoan(state, {
+      id: "neg-loan-a",
+      kind: "loan",
+      playerId: first.id,
+      counterpartTeamId: first.teamId,
+    });
+    expect(acceptDeal(state, one.id).ok).toBe(true);
+    expect(financeOf(state, state.userTeamId).transferBudget).toBe(0);
+
+    const two = agreedLoan(state, {
+      id: "neg-loan-b",
+      kind: "loan",
+      playerId: second!.id,
+      counterpartTeamId: second!.teamId,
+    });
+    const blocked = acceptDeal(state, two.id);
+    expect(blocked.ok, "예산을 다 쓴 뒤에는 같은 임대료를 또 낼 수 없다").toBe(false);
+    expect(blocked.message).toContain("예산");
+  });
+
+  it("빌려주면 현금과 예산이 같은 크기로 들어온다", () => {
+    const state = createTestGame(42);
+    // 주전이 아닌 자원을 내보낸다 — 스쿼드 하한에 걸리지 않게
+    const ours = [...playersOf(state, state.userTeamId)].sort(
+      (a, b) => a.attributes.overall - b.attributes.overall,
+    )[0]!;
+    const borrowerId = state.players.find((p) => p.teamId !== state.userTeamId)!.teamId;
+    const ourBudget = financeOf(state, state.userTeamId).transferBudget;
+    const ourBalance = financeOf(state, state.userTeamId).balance;
+    const theirBudget = financeOf(state, borrowerId).transferBudget;
+    const theirBalance = financeOf(state, borrowerId).balance;
+
+    const negotiation = agreedLoan(state, {
+      id: "neg-loan-out",
+      kind: "loan_out",
+      playerId: ours.id,
+      counterpartTeamId: borrowerId,
+    });
+    const done = acceptDeal(state, negotiation.id);
+    expect(done.ok, done.message).toBe(true);
+    expect(playerById(state, ours.id)!.loan?.fromTeamId).toBe(state.userTeamId);
+
+    expect(financeOf(state, state.userTeamId).balance).toBe(ourBalance + LOAN_FEE);
+    expect(financeOf(state, state.userTeamId).transferBudget).toBe(ourBudget + LOAN_FEE);
+    expect(financeOf(state, borrowerId).balance).toBe(theirBalance - LOAN_FEE);
+    expect(financeOf(state, borrowerId).transferBudget).toBe(theirBudget - LOAN_FEE);
+  });
+});
