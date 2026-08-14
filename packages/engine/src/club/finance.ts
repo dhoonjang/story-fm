@@ -121,7 +121,7 @@ const FACILITY_MONTHLY: Record<1 | 2 | 3 | 4, number> = {
   3: 2_200_000,
   4: 1_600_000,
 };
-/** 이자·세금 월 정액 (부채 모델 전의 뭉갠 값 — club-finance §12) */
+/** 이자·세금 월 정액 — 기존 부채의 뭉갠 값. 새로 지는 빚의 이자는 여기 얹힌다(§9.4) */
 const FINANCE_COST_MONTHLY: Record<1 | 2 | 3 | 4, number> = {
   1: 1_500_000,
   2: 1_100_000,
@@ -146,6 +146,27 @@ const LEDGER_MONTHS_KEPT = 3;
 /** PSR — 3시즌 누적 손실 한도 (실제 EPL 규정과 같은 £105M) */
 export const PSR_LOSS_LIMIT = 105_000_000;
 const PSR_SEASONS = 3;
+
+/**
+ * **부채 = 음수 잔고.** 별도 테이블도 상환 일정도 두지 않는다 — 통장이 마이너스면
+ * 그만큼 빌린 것이고, 흑자가 나면 저절로 갚아진다. 세이브에 새 필드가 없다.
+ *
+ * 연 8%는 실제 구단의 차입 금리대(6~8%)의 상단이다. 상단을 쓰는 이유는 여기서
+ * 빌리는 구단이 이미 곤란한 구단이기 때문이고, **무이자면 음수 잔고가 공짜**여서
+ * 재정이 게임에 물리지 않는다. 금액이 아니라 비율이라 구단 규모를 저절로 탄다.
+ */
+const DEBT_INTEREST_ANNUAL = 0.08;
+
+/**
+ * 예산 동결선 — **주급 총액 × 20.** 새 자를 만들지 않고 `market.ts`가 매각 압박에
+ * 쓰는 그 자를 반대 방향으로 쓴다. 사다리가 이렇게 선다:
+ *   잔고가 주급 20주치 **아래로** 내려가면 → 매각 압박(상대가 싸게 부른다)
+ *   빚이 주급 20주치를 **넘으면**   → 보드가 지갑을 닫는다(이적 예산 동결)
+ *
+ * §10.3 불변식 4번("부채가 연 매출을 넘는 구단이 리그의 1/4 이하")보다 훨씬 이른
+ * 선이다(아스날 기준 매출의 0.22배) — 불변식에 닿기 전에 제동이 걸려야 한다.
+ */
+const DEBT_FREEZE_WAGE_WEEKS = 20;
 
 /** 급여 비중 경고선 — 게임 기준 (실제 EPL 평균은 70% 근처) */
 const WAGE_RATIO_CAUTION = 0.65;
@@ -703,6 +724,15 @@ function recentWinRates(state: GameState, window: number): Map<string, number> {
 export function runMonthlyFinance(state: GameState, digest: string[]): void {
   closeMonth(state, digest);
   postMonthlyItems(state);
+  /**
+   * 동결 판정은 **시즌 전환이 아니라 매달** 다시 본다 (§9.4). 시즌 끝에만 보면
+   * 감독이 시즌 내내 빚을 키우며 영입해도 아무 일이 없다 — 제동은 그 자리에서 걸려야
+   * 하고, 갚으면 그 자리에서 풀려야 한다.
+   */
+  for (const team of state.teams) {
+    if (!isClubTeam(team.id) || isOutsideOurEconomy(team.id)) continue;
+    refreshBudgetFreeze(state, team.id, digest);
+  }
   pruneLedger(state);
 }
 
@@ -792,6 +822,21 @@ function postMonthlyItems(state: GameState): void {
     const tier = tierOf(team.id);
     const pool = poolOf(state, team.id);
     const { commercialTier } = profileOf(team.id);
+
+    /**
+     * 빚에는 이자가 붙는다 (§9.4) — **그 달을 시작한 잔고**에 붙이므로 이번 달 수입이
+     * 들어오기 전에 먼저 뗀다. 새 카테고리를 만들지 않고 이자·세금과 같은 자리에
+     * 라벨로만 갈린다. 이자는 비용이라 손익에 잡히고 PSR로도 전파된다.
+     */
+    const interest = monthlyInterestOf(state, team.id);
+    if (interest > 0) {
+      recordFinance(state, team.id, {
+        kind: "expense",
+        category: "facility",
+        label: "부채 이자",
+        amount: interest,
+      });
+    }
 
     recordFinance(state, team.id, {
       kind: "income",
@@ -1101,6 +1146,16 @@ function buildReport(state: GameState, month: string, ledger: LedgerEntry[]): Fi
   } else if (psr.headroom < PSR_LOSS_LIMIT * 0.25) {
     notes.push(`PSR 여유 ${money(psr.headroom)} — 대형 영입 전에 매각이 필요하다`);
   }
+  // 부채는 잔고의 부호로 읽는다 — 감독이 이자를 물고 있다는 사실을 여기서 본다
+  const debt = debtOf(state, state.userTeamId);
+  if (debt > 0) {
+    const limit = debtLimitOf(state, state.userTeamId);
+    notes.push(
+      debt > limit
+        ? `부채 ${money(debt)} — 한도 ${money(limit)}를 넘어 이적 예산이 동결됐다. 연 이자 ${money(debt * DEBT_INTEREST_ANNUAL)}가 매달 나간다`
+        : `부채 ${money(debt)} (동결선 ${money(limit)}) — 연 이자 ${money(debt * DEBT_INTEREST_ANNUAL)}`,
+    );
+  }
 
   return {
     id: `fr-${state.userTeamId}-${month}`,
@@ -1140,6 +1195,48 @@ function rollingPnl(state: GameState, season: number, pending = 0): number {
       .filter((r) => r.season >= from && r.season <= season)
       .reduce((s, r) => s + r.pnlNet, 0) + pending
   );
+}
+
+// ── 부채 (§9.4) ─────────────────────────────────────────
+
+/** 이 구단이 지고 있는 빚 — 음수 잔고가 곧 부채다 */
+export function debtOf(state: GameState, teamId: string): number {
+  return Math.max(0, -financeOf(state, teamId).balance);
+}
+
+/** 빚이 이만큼을 넘으면 보드가 지갑을 닫는다 */
+export function debtLimitOf(state: GameState, teamId: string): number {
+  return weeklyWagesOf(state, teamId) * DEBT_FREEZE_WAGE_WEEKS;
+}
+
+/** 이번 달 이자 — 원금은 자본 이동이라 장부에 잡히지 않고 이자만 비용이 된다 */
+function monthlyInterestOf(state: GameState, teamId: string): number {
+  return (debtOf(state, teamId) * DEBT_INTEREST_ANNUAL) / 12;
+}
+
+/**
+ * 예산 동결 판정 — **PSR과 부채가 같은 출구를 쓴다.**
+ *
+ * PSR은 유저에게만 걸린다(AI는 보고서를 남기지 않는다). 부채는 잔고의 부호로만
+ * 읽으므로 AI에게도 그대로 걸리고, `ai-market`이 이미 `budgetFrozen`을 보고 있어
+ * 빚더미 구단이 영입을 멈춘다.
+ */
+function refreshBudgetFreeze(state: GameState, teamId: string, digest: string[]): void {
+  const finance = financeOf(state, teamId);
+  const isUser = teamId === state.userTeamId;
+  const byDebt = debtOf(state, teamId) > debtLimitOf(state, teamId);
+  const byPsr = isUser && psrStatus(state).headroom < 0;
+  const before = finance.budgetFrozen === true;
+  finance.budgetFrozen = byDebt || byPsr;
+
+  if (!isUser || finance.budgetFrozen === before) return;
+  if (finance.budgetFrozen) {
+    const reason = byPsr ? "PSR 한도를 넘겨" : `부채가 ${money(debtOf(state, teamId))}에 이르러`;
+    digest.push(`⚠️ 보드가 ${reason} 이적 예산을 동결했다 — 매각 없이는 영입할 수 없다`);
+    pushNarrative(state, `이적 예산 동결 — ${reason}`, 4);
+  } else {
+    digest.push(`보드가 이적 예산 동결을 풀었다`);
+  }
 }
 
 /** 지금까지의 3시즌 누적 손익과 여유 — 시즌 전환·보드 판정용 */
@@ -1252,17 +1349,18 @@ export function topUpTransferBudget(
   const finance = financeOf(state, teamId);
   const isUser = teamId === state.userTeamId;
 
-  if (isUser) {
-    const psr = psrStatus(state);
-    if (psr.headroom < 0) {
-      finance.budgetFrozen = true;
+  // 동결이면 보충도 없다 — PSR과 부채가 같은 출구를 쓴다 (§9.2·§9.4)
+  refreshBudgetFreeze(state, teamId, digest);
+  if (finance.budgetFrozen) {
+    if (isUser) {
+      const psr = psrStatus(state);
       digest.push(
-        `⚠️ 보드가 이적 예산을 동결했다 — 3시즌 누적 ${money(psr.rolling3Season)}로 PSR 한도를 ${money(-psr.headroom)} 넘겼다. 매각 없이는 영입할 수 없다`,
+        psr.headroom < 0
+          ? `3시즌 누적 ${money(psr.rolling3Season)}로 PSR 한도를 ${money(-psr.headroom)} 넘겼다`
+          : `부채 ${money(debtOf(state, teamId))}가 한도 ${money(debtLimitOf(state, teamId))}를 넘었다`,
       );
-      pushNarrative(state, `PSR 위반으로 이적 예산 동결`, 4);
-      return;
     }
-    finance.budgetFrozen = false;
+    return;
   }
 
   // 성과 보너스 — 지난 시즌 **운영** 손익의 절반까지 (손실이면 깎인다)
@@ -1535,9 +1633,15 @@ export function financeLookup(state: GameState, month?: string): { ok: boolean; 
     ? state.financeReports.find((r) => r.month === month)
     : [...state.financeReports].reverse()[0];
 
+  const debt = debtOf(state, state.userTeamId);
   lines.push(
     `잔고 ${money(finance.balance)} · 이적 예산 ${money(finance.transferBudget)}${finance.budgetFrozen ? " (동결)" : ""} · 주급 총액 ${money(weeklyWagesOf(state, state.userTeamId))}/주`,
   );
+  if (debt > 0) {
+    lines.push(
+      `부채 ${money(debt)} · 연 이자 ${money(debt * DEBT_INTEREST_ANNUAL)} · 동결선 ${money(debtLimitOf(state, state.userTeamId))}`,
+    );
+  }
 
   if (month && !report) {
     lines.push(

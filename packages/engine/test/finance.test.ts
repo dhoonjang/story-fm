@@ -4,6 +4,9 @@ import type { FinanceCategory } from "@story-fm/domain";
 import type { GameState } from "@story-fm/engine";
 import {
   annualRevenueEstimate,
+  debtLimitOf,
+  debtOf,
+  runMonthlyFinance,
   applyMatchFinance,
   isCup,
   payLeaguePrizes,
@@ -549,6 +552,108 @@ describe("리그 순위 상금", () => {
       expect(paidIn(league), league).toBe(0);
     }
     expect(paidIn("epl")).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * 부채 (club-finance §9.4) — 음수 잔고에 값이 붙는다.
+ * 지금 세계엔 한도까지 가는 구단이 없으므로 잔고를 손으로 밀어 경로를 고정한다.
+ */
+describe("부채", () => {
+  /** 잔고를 빚으로 밀고 한 달을 넘긴다 */
+  function intoDebt(state: GameState, teamId: string, debt: number): void {
+    financeOf(state, teamId).balance = -debt;
+  }
+
+  it("빚에는 이자가 붙고 이자·세금과 같은 항목에 들어간다", () => {
+    const state = createTestGame();
+    intoDebt(state, state.userTeamId, 50_000_000);
+    expect(debtOf(state, state.userTeamId)).toBe(50_000_000);
+
+    advanceUntil(state, "2026-09-03");
+
+    const interest = financeOf(state, state.userTeamId).ledger.filter(
+      (e) => e.label === "부채 이자",
+    );
+    expect(interest.length).toBeGreaterThan(0);
+    // 새 카테고리를 만들지 않는다 — 이자·세금과 같은 자리다
+    for (const entry of interest) expect(categoryOf(entry)).toBe("facility");
+    // 연 8%의 한 달치 — £50M이면 월 £333k 언저리에서 시작한다
+    expect(interest[0]!.amount).toBeGreaterThan(300_000);
+    expect(interest[0]!.amount).toBeLessThan(400_000);
+    // 이자는 현금이다(상각과 다르다) — 빚이 더 깊어진다
+    expect(financeOf(state, state.userTeamId).balance).toBeLessThan(0);
+  });
+
+  it("빚이 한도를 넘으면 이적 예산이 동결되고, 갚으면 풀린다", () => {
+    const state = createTestGame();
+    const limit = debtLimitOf(state, state.userTeamId);
+    expect(limit).toBeGreaterThan(0);
+
+    // 한도 안 — 아직 얼지 않는다
+    intoDebt(state, state.userTeamId, limit * 0.5);
+    const digest: string[] = [];
+    runMonthlyFinance(state, digest);
+    expect(financeOf(state, state.userTeamId).budgetFrozen).toBe(false);
+
+    // 한도 밖 — 얼고, 이유가 다이제스트에 남는다
+    intoDebt(state, state.userTeamId, limit * 1.5);
+    const frozen: string[] = [];
+    runMonthlyFinance(state, frozen);
+    expect(financeOf(state, state.userTeamId).budgetFrozen).toBe(true);
+    expect(frozen.join(" ")).toContain("부채");
+    expect(frozen.join(" ")).toContain("동결");
+
+    // 갚으면 그 자리에서 풀린다 — 시즌 전환을 기다리지 않는다
+    financeOf(state, state.userTeamId).balance = 10_000_000;
+    const thawed: string[] = [];
+    runMonthlyFinance(state, thawed);
+    expect(financeOf(state, state.userTeamId).budgetFrozen).toBe(false);
+    expect(thawed.join(" ")).toContain("동결을 풀었다");
+  });
+
+  it("동결된 구단은 시즌 전환에도 예산을 못 받는다", () => {
+    const state = createTestGame();
+    state.season = 2;
+    intoDebt(state, state.userTeamId, debtLimitOf(state, state.userTeamId) * 2);
+    const finance = financeOf(state, state.userTeamId);
+    finance.transferBudget = 20_000_000;
+
+    const digest: string[] = [];
+    topUpTransferBudget(state, state.userTeamId, 45_000_000, digest);
+
+    expect(finance.budgetFrozen).toBe(true);
+    expect(finance.transferBudget).toBe(20_000_000); // 보충 없음
+    expect(digest.join(" ")).toContain("부채");
+  });
+
+  it("AI 구단도 같은 규칙을 받는다 — 잔고의 부호로 읽는다", () => {
+    const state = createTestGame();
+    const ai = state.teams.find(
+      (t) => t.id !== state.userTeamId && leagueOfTeam(t.id) === "epl",
+    )!.id;
+    intoDebt(state, ai, debtLimitOf(state, ai) * 1.5);
+
+    runMonthlyFinance(state, []);
+
+    // `ai-market`이 이미 budgetFrozen을 보므로 빚더미 구단은 영입을 멈춘다
+    expect(financeOf(state, ai).budgetFrozen).toBe(true);
+  });
+
+  it("원금은 자본 이동이라 PSR을 풀지도 조이지도 않는다 — 이자만 손익에 잡힌다", () => {
+    const plain = createTestGame();
+    const indebted = createTestGame();
+    indebted.finances.find((f) => f.teamId === indebted.userTeamId)!.balance = -50_000_000;
+
+    advanceUntil(plain, "2026-09-03");
+    advanceUntil(indebted, "2026-09-03");
+
+    const pnlOf = (state: GameState) =>
+      state.financeReports.filter((r) => r.month === "2026-08").reduce((s, r) => s + r.pnlNet, 0);
+    // 빚을 진 쪽이 딱 이자만큼 나쁘다 — 원금 £50M은 손익에 없다
+    const gap = pnlOf(plain) - pnlOf(indebted);
+    expect(gap).toBeGreaterThan(0);
+    expect(gap).toBeLessThan(1_000_000);
   });
 });
 
