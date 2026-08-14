@@ -1095,6 +1095,28 @@ export function annualRevenueEstimate(state: GameState, teamId: string): number 
 }
 
 /**
+ * **급여에 쓸 수 있는 돈** (연, £) — 매출에서 고정비를 뺀 뒤의 몫.
+ *
+ * 예전엔 천장이 `매출 × 0.60`이었다. 여력 ×1.1이 얹히면 주급이 매출의 0.66까지
+ * 허용되는데, 거기에 스태프(주급의 22~28%)·고정비(매출의 2~3할)·경기 운영비를 더하면
+ * **매출을 넘는다.** 현금 하한은 매수 시점만 보고 부채 동결선도 매수만 막으니, 그 뒤로
+ * 잔고를 파는 것은 매주 나가는 주급이었다 — 개별 구단이 −£128M까지 내려간 경로다.
+ *
+ * 그래서 분모를 바꿨다. **먼저 고정비를 빼고**(그 돈은 급여로 쓸 수 없다) **스태프
+ * 급여까지 벗겨** 선수 주급의 몫만 돌려준다 — 주급 £1을 늘리면 실제로는 £1.24가 나간다.
+ * 고정비가 매출의 3할인 리그와 2할인 리그가 같은 비중을 쓰지 않게 되는 것이 요점이다.
+ *
+ * 0.85의 근거는 단위 9와 같다 — **아스날·맨시티가 이미 앉아 있는 값**이다
+ * (0.875·0.890). 그 두 구단의 시드를 신뢰하므로 그것을 전 구단의 자로 쓴다.
+ */
+const WAGE_AFFORDABLE_SHARE = 0.85;
+
+export function affordableWageBill(teamId: string, leagueId?: string): number {
+  const net = catalogRevenueEstimate(teamId, leagueId) - monthlyFixedCostOf(teamId) * 12;
+  return Math.max(0, net * WAGE_AFFORDABLE_SHARE) / (1 + STAFF_WAGE_RATE[tierOf(teamId)]);
+}
+
+/**
  * 같은 자를 **세이브 없이** 읽는다 — 새 게임의 초기 주급이 서는 시점엔 `state`가 아직
  * 없다(`initialWages`). 리그를 주지 않으면 카탈로그 리그로 본다. 승강은 세이브에만
  * 있으므로 t=0에서는 두 값이 같다.

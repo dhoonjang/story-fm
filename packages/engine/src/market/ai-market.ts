@@ -366,7 +366,16 @@ function planTransfer(
     wageSubjectOf(target, state.date),
     [...squads.of(buyerId), target].map((p) => wageSubjectOf(p, state.date)),
   );
-  if (weeklyWagesOf(state, buyerId) + newWage > clubWageBudget(buyerId) * WAGE_HEADROOM) {
+  /**
+   * ⚠️ **시장 전용 리그는 이 문을 지나지 않는다.** 그쪽 재정은 시뮬하지 않고(§4.5)
+   * 스쿼드는 실측 시드(호날두급 급여)를 들고 있는데 천장은 리그 중계 풀에서 나오므로
+   * 자릿수가 애초에 다르다 — 알나스르의 주급이 천장의 1.67배라 **모든 영입이 이 문에서
+   * 막혀 있었다.** "사우디가 사간다"가 조용히 죽어 있던 자리다.
+   */
+  if (
+    isTopFlight(buyerId) &&
+    weeklyWagesOf(state, buyerId) + newWage > clubWageBudget(buyerId) * WAGE_HEADROOM
+  ) {
     return null;
   }
 
