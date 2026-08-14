@@ -419,11 +419,70 @@ describe("PSR", () => {
       notes: [],
     });
     const finance = financeOf(state, state.userTeamId);
-    const budget = finance.transferBudget;
+    // 시작 예산이 base보다 크다 — 이월이 잘리는 상황인지 먼저 못박는다
+    expect(finance.transferBudget).toBeGreaterThan(45_000_000);
     topUpTransferBudget(state, state.userTeamId, 45_000_000, []);
     expect(finance.budgetFrozen).toBe(false);
-    // base 45M + 지난 시즌 손익의 절반 20M
-    expect(finance.transferBudget).toBe(budget + 65_000_000);
+    // 이월 45M(한 시즌치) + base 45M + 지난 시즌 운영 손익의 절반 20M
+    expect(finance.transferBudget).toBe(110_000_000);
+  });
+
+  /**
+   * 이월 상한 (club-finance §12.1) — `+=`로 얹기만 하던 시절 아스날 예산이
+   * £90M → 180 → 270 → 360 → 450으로 갔다. 판매로 자금을 만든다는 이적의 긴장이
+   * 사라지는 자리다.
+   */
+  it("쓰지 않은 예산은 한 시즌치만 넘어간다", () => {
+    const state = createTestGame();
+    state.season = 2;
+    const finance = financeOf(state, state.userTeamId);
+    finance.transferBudget = 500_000_000; // 네 시즌쯤 쌓아 둔 예산
+
+    const digest: string[] = [];
+    topUpTransferBudget(state, state.userTeamId, 45_000_000, digest);
+
+    // 이월 45M + base 45M (지난 시즌 보고서가 없어 성과는 0)
+    expect(finance.transferBudget).toBe(90_000_000);
+    expect(digest.join(" ")).toContain("거둬들였다");
+  });
+
+  /**
+   * 매각 대금은 협상이 타결될 때 이미 예산에 들어간다. 손익으로 또 세면 한 번 판
+   * 선수로 예산을 두 번 받는다 — 감사가 지목한 최대 150% 회수 경로다.
+   */
+  it("성과 보너스는 매각 대금을 세지 않는다", () => {
+    const report = (income: { category: FinanceCategory; amount: number }[]) => ({
+      id: "fr-test",
+      teamId: "arsenal",
+      month: "2027-05",
+      season: 1,
+      openingBalance: 0,
+      closingBalance: 0,
+      income: income.map((l) => ({ ...l, top: [] })),
+      expense: [],
+      incomeTotal: 40_000_000,
+      expenseTotal: 0,
+      cashNet: 40_000_000,
+      pnlNet: 40_000_000,
+      wageRatio: 0.5,
+      seasonToDate: { income: 0, expense: 0, cashNet: 0, pnlNet: 0 },
+      psr: null,
+      notes: [],
+    });
+    const budgetAfter = (income: { category: FinanceCategory; amount: number }[]) => {
+      const state = createTestGame();
+      state.season = 2;
+      state.financeReports.push({ ...report(income), teamId: state.userTeamId });
+      const finance = financeOf(state, state.userTeamId);
+      finance.transferBudget = 0; // 이월을 빼고 이번 보충만 본다
+      topUpTransferBudget(state, state.userTeamId, 45_000_000, []);
+      return finance.transferBudget;
+    };
+
+    // 살림으로 번 £40M — 절반이 성과로 얹힌다
+    expect(budgetAfter([{ category: "matchday", amount: 40_000_000 }])).toBe(65_000_000);
+    // 같은 £40M이 선수를 판 돈이면 성과가 없다 — 그 돈은 이미 예산에 들어갔다
+    expect(budgetAfter([{ category: "transfer_in", amount: 40_000_000 }])).toBe(45_000_000);
   });
 });
 

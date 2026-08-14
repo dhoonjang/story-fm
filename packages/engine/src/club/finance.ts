@@ -1187,7 +1187,36 @@ export function payLeaguePrizes(state: GameState, digest: string[]): void {
 }
 
 /**
- * 시즌 이적 예산 보충 — 등급별 base에 **재정 성과**를 얹는다.
+ * 이월 상한 — **한 시즌치를 넘겨 쌓을 수 없다.**
+ *
+ * `+=`로 얹기만 하던 시절 안 쓴 예산이 그대로 남고 그 위에 base와 성과가 얹혀
+ * 아스날이 £90M → 180 → 270 → 360 → 450으로 갔다(정확히 +£90M/시즌). 이적의
+ * 긴장("판매로 이적 자금을 만든다" — transfer.md §3)이 사라지는 자리다.
+ *
+ * 새 금액이 아니라 그 구단의 base에서 파생한다. 예산은 현금이 아니라 보드 허가
+ * 한도이므로(§9.1) 잘린 이월분은 어디로도 가지 않는다 — 잔고는 그대로다.
+ */
+const BUDGET_CARRY_SEASONS = 1;
+
+/**
+ * 성과 보너스의 자 — **운영 손익**(장부 손익에서 매각 대금을 뺀 것).
+ *
+ * 매각 대금은 협상이 타결될 때 이미 예산에 들어간다. 그것을 손익으로 또 세면 한 번
+ * 판 선수로 예산을 두 번 받는다 — 매각 즉시 +이적료, 다음 시즌 +최대 base다.
+ * 보드가 보상하려는 것은 장사가 아니라 **살림**이다.
+ */
+function operatingPnlOf(state: GameState, season: number): number {
+  let total = 0;
+  for (const report of state.financeReports) {
+    if (report.season !== season) continue;
+    const sold = report.income.find((l) => l.category === "transfer_in")?.amount ?? 0;
+    total += report.pnlNet - sold;
+  }
+  return total;
+}
+
+/**
+ * 시즌 이적 예산 보충 — 등급별 base에 **재정 성과**를 얹고, 이월분을 자른다.
  * PSR 여유가 없으면 동결한다 (결정 D — 승점은 건드리지 않는다).
  */
 export function topUpTransferBudget(
@@ -1212,14 +1241,20 @@ export function topUpTransferBudget(
     finance.budgetFrozen = false;
   }
 
-  // 성과 보너스 — 지난 시즌 장부 손익의 절반까지 (손실이면 깎인다)
-  const lastSeason = state.season - 1;
-  const pnl = isUser
-    ? state.financeReports.filter((r) => r.season === lastSeason).reduce((s, r) => s + r.pnlNet, 0)
-    : 0;
+  // 성과 보너스 — 지난 시즌 **운영** 손익의 절반까지 (손실이면 깎인다)
+  const pnl = isUser ? operatingPnlOf(state, state.season - 1) : 0;
   const performance = Math.max(-base * 0.5, Math.min(base, pnl * 0.5));
-  finance.transferBudget += base + performance;
 
+  // 이월은 한 시즌치까지 — 그 위는 보드가 회수한다
+  const carried = Math.min(finance.transferBudget, base * BUDGET_CARRY_SEASONS);
+  const lapsed = finance.transferBudget - carried;
+  finance.transferBudget = Math.max(0, carried + base + performance);
+
+  if (isUser && lapsed >= 1_000_000) {
+    digest.push(
+      `보드가 쓰지 않은 이적 예산 ${money(lapsed)}를 거둬들였다 — 예산은 이월되지 않는다`,
+    );
+  }
   if (isUser && Math.abs(performance) >= 1_000_000) {
     digest.push(
       performance > 0
