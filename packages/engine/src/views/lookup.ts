@@ -12,6 +12,7 @@ import {
   seasonRating,
   slotOfTime,
 } from "@story-fm/domain";
+import { rankByName } from "../core/name-match";
 import { addDays, dayOfWeek, diffDays, seasonYear, squadReturnOf } from "../competition/calendar";
 import { entrantsOf } from "../competition/europe";
 import { formLabel } from "../squad/form";
@@ -61,6 +62,7 @@ import {
   playerName,
   playersOf,
   proficiencyAt,
+  resolvePlayerRef,
   seasonStatOf,
   squadFamiliarity,
   squadLevelOf,
@@ -307,19 +309,18 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
   }
 
   const position = input.position?.toUpperCase();
-  const pool = (teamId ? playersOf(state, teamId) : state.players).filter((p) => {
+  const narrowed = (teamId ? playersOf(state, teamId) : state.players).filter((p) => {
     if (inCompetition && !inCompetition.has(p.teamId)) return false;
     if (input.squadLevel && squadLevelOf(p) !== input.squadLevel) return false;
     if (position && !p.positions.some((x) => x.position === position)) return false;
-    if (input.name && !p.name.includes(input.name) && !p.id.includes(input.name.toLowerCase())) {
-      return false;
-    }
     const age = ageOf(p.birthdate, state.date);
     if (input.minAge !== undefined && age < input.minAge) return false;
     if (input.maxAge !== undefined && age > input.maxAge) return false;
     if (input.availableOnly && !isAvailable(state, p.id)) return false;
     return true;
   });
+  // 이름은 마지막에 — 다른 조건으로 좁힌 만큼만 자모까지 내려가면 된다
+  const pool = input.name ? rankByName(input.name, narrowed).matches : narrowed;
 
   const sortBy = input.sortBy ?? "rating";
   const sorted = [...pool].sort((a, b) => {
@@ -437,12 +438,25 @@ function roleLabel(position: string, roleId?: string): string {
   return (defs.find((r) => r.id === roleId) ?? defs[0])?.ko ?? "기본";
 }
 
+/** 되물을 후보 줄 — 이름과 id를 함께 준다 (모델이 다음 호출에 쓸 것은 id다) */
+const candidateLine = (players: readonly GamePlayer[]): string =>
+  players
+    .slice(0, CANDIDATES_SHOWN)
+    .map((p) => `${p.name}(${p.id})`)
+    .join(" / ");
+
+const CANDIDATES_SHOWN = 6;
+
 export function playerCard(state: GameState, playerId: string): LookupResult {
-  const p = playerById(state, playerId);
+  // id가 정확하지 않으면 이름으로 푼다 — 모델은 감독이 부른 이름을 그대로 넣는다
+  const { player: p, candidates } = resolvePlayerRef(state.players, playerId);
   if (!p) {
     return {
       ok: false,
-      message: `"${playerId}"라는 선수를 찾지 못했습니다 — search_players로 id를 먼저 확인하라`,
+      message:
+        candidates.length > 0
+          ? `"${playerId}"는 여러 선수와 맞습니다 — ${candidateLine(candidates)}`
+          : `"${playerId}"라는 선수를 찾지 못했습니다 — search_players로 id를 먼저 확인하라`,
     };
   }
   const knowledge: Knowledge = knowledgeOf(state, p.id);

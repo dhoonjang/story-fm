@@ -62,6 +62,7 @@ import {
   seasonYear,
   type SeasonCalendar,
 } from "../competition/calendar";
+import { rankByName } from "./name-match";
 import { defaultXiIds, overallFor, playerCatalog } from "../world/catalog";
 import { estimateSquadWages, wageSubjectOf } from "../world/wages";
 import { generateYouthPlayer } from "../world/generate";
@@ -559,8 +560,32 @@ export function userPlayerById(state: GameState, id: string): GamePlayer | null 
   return p && p.teamId === state.userTeamId ? p : null;
 }
 
-export function findPlayerByName(state: GameState, fragment: string): GamePlayer | null {
-  return state.players.find((p) => p.name.includes(fragment) || p.id.includes(fragment)) ?? null;
+export interface PlayerPick {
+  /** 확신이 **하나**일 때만 채워진다 */
+  readonly player: GamePlayer | null;
+  /** 되물을 후보 — 확신이 있으면 그 하나뿐이다 */
+  readonly candidates: readonly GamePlayer[];
+}
+
+const NO_PLAYER: PlayerPick = { player: null, candidates: [] };
+
+/**
+ * id·이름으로 선수 하나를 집는다. id가 정확히 맞으면 그것, 아니면 표기 흔들림을
+ * 견디는 이름 매칭 (name-match.ts). **애매하면 고르지 않는다** — 잘못 집으면
+ * 그대로 잘못된 상태 전이가 되므로, 되묻는 편이 낫다.
+ */
+export function resolvePlayerRef(pool: readonly GamePlayer[], ref: string): PlayerPick {
+  const key = ref.trim();
+  if (key === "") return NO_PLAYER;
+  const exact = pool.find((p) => p.id === key);
+  if (exact) return { player: exact, candidates: [exact] };
+  const { matches, best } = rankByName(key, pool);
+  return { player: best, candidates: matches };
+}
+
+/** 이름으로 선수 하나 — 확신이 갈리면 null (후보까지 필요하면 resolvePlayerRef) */
+export function findPlayerByName(state: GameState, name: string): GamePlayer | null {
+  return resolvePlayerRef(state.players, name).player;
 }
 
 export function playerName(state: GameState, id: string): string {

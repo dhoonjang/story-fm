@@ -4,6 +4,7 @@
 export * from "./core/rng";
 export * from "./core/paths";
 export * from "./core/dates";
+export * from "./core/name-match";
 export * from "./core/state";
 export * from "./core/persistence";
 export * from "./core/tick";
