@@ -14,7 +14,7 @@ import {
   seasonYear,
 } from "./calendar";
 import { toFreeAgency } from "../market/departures";
-import { teamCatalog, leagueOfTeam, teamCatalogById } from "../data/team-catalog";
+import { teamCatalog, isClubTeam, leagueOfTeam, teamCatalogById } from "../data/team-catalog";
 import { cupCatalog, competitionShortName, isCup, isEuroCup } from "../data/cup-catalog";
 import { domesticCupCatalog } from "../data/domestic-cup-catalog";
 import { domesticChampion, domesticCupWinners, reviewDomesticCups } from "./domestic-cup";
@@ -629,6 +629,10 @@ export function transitionSeason(state: GameState): string[] {
   // (docs/decisions/0002-transfer-market-balance.md). 나머지는 선수 판매로 만든다.
   // base 위에 **재정 성과**가 얹히고, PSR 위반이면 동결된다.
   for (const finance of state.finances) {
+    // 무소속은 구단이 아니다 — 영입할 주체가 없으니 예산도 없다 (team.md §7).
+    // 월초 정산은 이미 `isClubTeam`으로 거르는데 여기만 빠져 있어, 쓰이지 않는
+    // 예산이 자유계약 선수단에 매 시즌 쌓였다.
+    if (!isClubTeam(finance.teamId)) continue;
     const base = SEASON_BUDGET_TOPUP[teamCatalogById(finance.teamId)?.tier ?? 3] ?? 0;
     topUpTransferBudget(state, finance.teamId, base, digest);
   }
