@@ -123,12 +123,26 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       if (!demoted.ok) return NextResponse.json({ error: demoted.message }, { status: 400 });
     }
 
-    // 역할은 **배치 뒤에** — 방금 선발이 된 선수에게도 걸 수 있어야 한다
+    /**
+     * 역할은 **배치 뒤에** — 방금 선발이 된 선수에게도 걸 수 있어야 한다.
+     *
+     * 그리고 **역할 하나의 반려가 배치를 되돌리지 않는다** (player.md §3.1).
+     * 역할은 한 요청에 묶여 오는 값 중 가장 늦게 정해지고 가장 잘 어긋나는 것이라
+     * (자리를 옮긴 직후의 화면이 보낸다) 400으로 빠져나오면 옳게 바꾼 배치까지
+     * 함께 날아가고, 화면은 같은 역할을 계속 보내 저장 불가 상태로 굳는다.
+     * 걸리는 것만 걸고, 반려는 삼키지 않고 결과로 남긴다.
+     */
+    const rejectedRoles: string[] = [];
     for (const pick of body.data.roles ?? []) {
       const applied = setPlayerRole(state, { playerId: pick.playerId, role: pick.role });
-      if (!applied.ok) return NextResponse.json({ error: applied.message }, { status: 400 });
+      if (!applied.ok) {
+        rejectedRoles.push(applied.message);
+        continue;
+      }
       recordEdit(state, `role:${pick.playerId}`, applied.message);
     }
+    // 사유는 코어가 쓴 문장 그대로다. 고정 키라 열 번 저장해도 마지막 것만 남는다
+    if (rejectedRoles.length > 0) recordEdit(state, "role:rejected", rejectedRoles.join(" · "));
 
     /**
      * 전술판 저장은 채팅 턴을 만들지 않는다 — 판을 짜는 동안 열 번을 만지는데
