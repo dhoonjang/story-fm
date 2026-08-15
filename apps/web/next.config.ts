@@ -1,6 +1,12 @@
+import path from "node:path";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  /**
+   * 모노레포 루트를 못 박는다 — 상위 디렉터리에 다른 lockfile이 있으면 Next가
+   * 그쪽을 워크스페이스 루트로 추론해 파일 트레이싱 범위를 잘못 잡는다.
+   */
+  outputFileTracingRoot: path.join(__dirname, "../.."),
   /**
    * 빌드 산출물 위치 — e2e는 `NEXT_DIST_DIR`로 따로 쓴다.
    * 개발 서버와 e2e 서버가 같은 `.next`를 공유하면 한쪽이 재컴파일할 때 다른 쪽이
