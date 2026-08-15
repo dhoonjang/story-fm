@@ -43,8 +43,39 @@ export interface CatalogPlayer extends Record<AttributeAxis, number> {
 export interface CatalogTeam {
   teamId: string;
   teamName: string;
+  /** 소속 리그 — 팀을 고르는 자리는 이걸로 묶는다 */
+  leagueId: string;
+  leagueName: string;
   tier: number;
   players: CatalogPlayer[];
+}
+
+/** 셀렉트의 `optgroup` 하나 — 리그 이름 아래 그 리그의 팀만 선다 */
+export interface TeamGroup {
+  leagueId: string;
+  leagueName: string;
+  teams: Array<{ id: string; name: string; tier: number }>;
+}
+
+/**
+ * 팀을 리그로 묶는다 — 169개 팀을 한 줄로 펴면 옮기려는 팀이 어느 리그인지도,
+ * 지금 고른 팀이 리그를 넘는 이동인지도 안 보인다.
+ *
+ * 순서는 **받은 그대로**다. 엔진의 팀 표가 이미 리그 순서(1부 5 → 시장 전용 →
+ * 무소속 → 2부 5)로 늘어서 있어, 여기서 다시 정렬하면 리그 탭·팀 탭과 순서가
+ * 갈린다. 그래서 리그가 바뀌는 자리마다 끊기만 한다.
+ */
+export function groupTeamsByLeague(teams: CatalogTeam[]): TeamGroup[] {
+  const groups: TeamGroup[] = [];
+  for (const t of teams) {
+    let last = groups[groups.length - 1];
+    if (last?.leagueId !== t.leagueId) {
+      last = { leagueId: t.leagueId, leagueName: t.leagueName, teams: [] };
+      groups.push(last);
+    }
+    last.teams.push({ id: t.teamId, name: t.teamName, tier: t.tier });
+  }
+  return groups;
 }
 
 /** 목록 행 — 팀 이름을 선수에 붙여 평평하게 편 것 */
