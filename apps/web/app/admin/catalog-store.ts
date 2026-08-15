@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  AdminLeagueRow,
+  AdminTeamRow,
   CatalogResponse,
   CupCatalogResponse,
   LeagueCatalogResponse,
@@ -65,19 +67,29 @@ function useLayer<R extends object>(
   const [data, setData] = useState<R>(empty);
   const [loaded, setLoaded] = useState(false);
   const [token, setToken] = useState(0);
+  /**
+   * 편집 응답을 받은 횟수. 다시 받는 중에 편집이 끼어들면 **나중에 도착한 GET이 더
+   * 낡았다** — 3.6MB 카탈로그는 몇 초씩 날아오므로 그 사이 고친 값이 조용히
+   * 되돌아간다. 요청을 띄운 시점의 횟수와 다르면 그 응답을 버린다.
+   */
+  const applied = useRef(0);
 
   // 응답에 없는 필드는 그대로 둔다 — `ageRef`처럼 GET만 실어 주는 값이 있다
-  const apply = useCallback((next: R) => setData((prev) => ({ ...prev, ...next })), []);
+  const apply = useCallback((next: R) => {
+    applied.current += 1;
+    setData((prev) => ({ ...prev, ...next }));
+  }, []);
   const reload = useCallback(() => setToken((n) => n + 1), []);
 
   useEffect(() => {
     let alive = true;
+    const startedAt = applied.current;
     fetch(url)
       .then((r) => r.json())
       .then((d: R & { error?: string }) => {
         if (!alive) return;
         if (d.error) onError(d.error);
-        else setData((prev) => ({ ...prev, ...d }));
+        else if (applied.current === startedAt) setData((prev) => ({ ...prev, ...d }));
         setLoaded(true);
       })
       .catch(() => {
@@ -93,6 +105,20 @@ function useLayer<R extends object>(
   // 다시 받는 동안 `loaded`는 참으로 둔다 — 이미 보여 준 목록을 "불러오는 중"으로
   // 되돌리면 화면이 한 번 비었다가 같은 값으로 다시 찬다
   return useMemo(() => ({ data, loaded, apply, reload }), [data, loaded, apply, reload]);
+}
+
+/**
+ * 다른 층이 팀에서 읽어 가는 것 — 선수 카탈로그는 팀의 이름·소속·체급을 함께 싣고,
+ * 리그의 팀 수는 소속에서 나온다. 순서까지 담는다 (팀을 리그로 묶는 순서가 표에서
+ * 그대로 온다).
+ */
+function teamIdentity(rows: AdminTeamRow[]): string {
+  return rows.map((t) => `${t.id}:${t.name}:${t.leagueId}:${t.tier}`).join("|");
+}
+
+/** 다른 층이 리그에서 읽어 가는 것 — 팀 행이 싣고 오는 리그 이름 */
+function leagueIdentity(rows: AdminLeagueRow[]): string {
+  return rows.map((l) => `${l.id}:${l.name}`).join("|");
 }
 
 export function useAdminCatalog(onError: (e: string) => void): AdminCatalog {
@@ -122,23 +148,30 @@ export function useAdminCatalog(onError: (e: string) => void): AdminCatalog {
   );
 
   /**
-   * 팀이 늘거나 줄거나 리그를 옮기면 그 팀의 명단(선수 카탈로그)과 리그의 팀 수가
-   * 함께 달라진다 — 둘 다 서버만 아는 값이라 다시 받는다.
+   * 팀이 늘거나 줄거나 이름·소속·체급이 바뀌면 그 팀의 명단(선수 카탈로그)과 리그의
+   * 팀 수가 함께 달라진다 — 둘 다 서버만 아는 값이라 다시 받는다.
+   *
+   * 살림 값(수용인원·포메이션·전술 성향·브랜드 등급)만 고친 편집은 두 층을 건드리지
+   * 않는다. 그때까지 3.6MB를 다시 받으면 탭 왕복에서 덜어낸 왕복을 편집이 도로
+   * 만들어 낸다.
    */
   const applyTeams = useCallback(
     (next: TeamCatalogResponse) => {
+      const before = teamIdentity(teams.data.teams);
       teams.apply(next);
+      if (teamIdentity(next.teams) === before) return;
       players.reload();
       leagues.reload();
     },
     [teams, players, leagues],
   );
 
-  /** 리그 이름은 팀 행에 박혀서 온다 */
+  /** 리그 이름은 팀 행에 박혀서 온다 — 계수·중계권만 고쳤으면 팀 목록은 그대로다 */
   const applyLeagues = useCallback(
     (next: LeagueCatalogResponse) => {
+      const before = leagueIdentity(leagues.data.leagues);
       leagues.apply(next);
-      teams.reload();
+      if (leagueIdentity(next.leagues) !== before) teams.reload();
     },
     [leagues, teams],
   );
