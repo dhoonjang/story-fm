@@ -89,6 +89,27 @@ describe("buildStrengthPacket", () => {
     expect(packet.matchups.find((m) => m.zone === "attack")?.edge).toBe("home");
   });
 
+  /**
+   * **퇴장은 승부에 닿아야 한다.** 존 전력이 XI의 가중 평균이라, 사람이 줄어도
+   * 평균은 그대로거나 오히려 오른다 — 예전엔 열 명이 된 팀의 상대 기대 득점이
+   * 0.01골(90분) 움직였고 그건 실측 노이즈보다 작았다.
+   */
+  it("한 명이 빠진 팀은 세 줄이 얇아진다 — 상대가 더 넣고 우리가 덜 넣는다", () => {
+    const full = makeSide("us", 78);
+    const short = makeSide("us", 78);
+    // 필드 플레이어 하나가 그라운드를 떠난다 (벤치는 그대로 — 수를 메우지 않는다)
+    short.starters = short.starters.filter((slot) => slot.position !== "RCM");
+
+    const eleven = buildStrengthPacket(full, makeSide("them", 78), { neutral: true });
+    const ten = buildStrengthPacket(short, makeSide("them", 78), { neutral: true });
+
+    for (const zone of ["attack", "midfield", "defense"] as const) {
+      expect(ten.home.zones[zone], zone).toBeLessThan(eleven.home.zones[zone]);
+    }
+    expect(ten.guide.expectedGoals.away).toBeGreaterThan(eleven.guide.expectedGoals.away * 1.1);
+    expect(ten.guide.expectedGoals.home).toBeLessThan(eleven.guide.expectedGoals.home * 0.9);
+  });
+
   it("결정적이다 — 같은 입력이면 같은 패킷", () => {
     const a = buildStrengthPacket(makeSide("str", 80), makeSide("wk", 70));
     const b = buildStrengthPacket(makeSide("str", 80), makeSide("wk", 70));

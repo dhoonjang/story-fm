@@ -500,6 +500,21 @@ function pointLineMix(slot: LineupSlot): Record<PositionGroup, number> {
   return out;
 }
 
+/** 그라운드의 정원 — 이 아래는 수적 열세다 */
+const FULL_XI = 11;
+/**
+ * 한 명이 없을 때 그 팀의 **세 줄이 함께** 얇아지는 폭 — ⚠️ 밸런스 값.
+ *
+ * 실제 축구에서 열 명이 된 팀은 남은 시간 동안 실점이 3할쯤 늘고 득점이 그만큼
+ * 준다. 이 값이 존을 깎으면 상대의 경로 우위가 그만큼 커져 슈팅 양(exp)과
+ * 질(logit) 양쪽으로 번역된다 — 별도의 퇴장 계수를 두지 않는 이유다.
+ */
+const SHORTHANDED_PENALTY = 0.12;
+/** 둘 이상 빠져도 팀이 사라지지는 않는다 — 세 명(8명 경기)에서 멈춘다 */
+const SHORTHANDED_CAP = SHORTHANDED_PENALTY * 3;
+
+const missingOf = (slots: readonly LineupSlot[]) => Math.max(0, FULL_XI - slots.length);
+
 function buildZones(
   slots: LineupSlot[],
   fit: number,
@@ -517,6 +532,16 @@ function buildZones(
    */
   const gapsIn = (g: PositionGroup) => of(g).filter(isGassed).length;
   const gapPenalty = (g: PositionGroup) => 1 - Math.min(0.25, gapsIn(g) * GAP_PENALTY);
+
+  /**
+   * **수적 열세** — 아예 없는 사람은 구멍의 극단이다 (`gapPenalty`).
+   *
+   * 존 전력이 XI의 가중 평균이라 인원이 줄어도 값이 그대로다 — 평균 이하인 선수가
+   * 나가면 오히려 오른다. 그래서 퇴장이 장부에만 남고 승부에 닿지 않았다(실측:
+   * 열 명이 된 팀의 상대 기대 득점 +0.01골/90분). 남은 열 명이 열한 명의 자리를
+   * 나눠 맡는 문제라 세 줄에 똑같이 친다.
+   */
+  const shorthanded = 1 - Math.min(SHORTHANDED_CAP, missingOf(slots) * SHORTHANDED_PENALTY);
 
   /**
    * 존 전력은 **XI 전체의 가중 평균**이다 — 그 그룹만의 평균이 아니다.
@@ -556,11 +581,23 @@ function buildZones(
   const tacticShift = (raw: number) => 1 + TACTIC_SWING * Math.tanh(raw / TACTIC_SWING);
 
   const attack =
-    zoneOf("attack") * tacticShift(delta.attack + counter.attack) * fit * gapPenalty("FW");
+    zoneOf("attack") *
+    tacticShift(delta.attack + counter.attack) *
+    fit *
+    gapPenalty("FW") *
+    shorthanded;
   const midfield =
-    zoneOf("midfield") * tacticShift(delta.midfield + counter.midfield) * fit * gapPenalty("MF");
+    zoneOf("midfield") *
+    tacticShift(delta.midfield + counter.midfield) *
+    fit *
+    gapPenalty("MF") *
+    shorthanded;
   const defense =
-    zoneOf("defense") * tacticShift(delta.defense + counter.defense) * fit * gapPenalty("DF");
+    zoneOf("defense") *
+    tacticShift(delta.defense + counter.defense) *
+    fit *
+    gapPenalty("DF") *
+    shorthanded;
 
   return { attack: round2(attack), midfield: round2(midfield), defense: round2(defense) };
 }

@@ -60,6 +60,25 @@ function playSeason(state: GameState): void {
 }
 
 /**
+ * 시즌 한 바퀴를 다 돈 세이브 — **시드마다 한 번만 굴리고 나눠 읽는다.**
+ *
+ * 같은 시드는 같은 장부를 만든다. 검증마다 다시 돌리면 이 파일이 시즌을 열 바퀴
+ * 넘게 굴리고, 그 비용이 통째로 각 테스트의 제한 시간 안에 들어가 여럿이 동시에
+ * 테스트를 돌릴 때 타임아웃으로 나타났다. 여기서 만든 세이브는 **읽기만** 하는
+ * 검증의 것이다 — 시즌을 넘기는 쪽(`transitionSeason`)은 제 세이브를 따로 만든다.
+ */
+const seasons = new Map<number, GameState>();
+
+function seasonOf(seed: number): GameState {
+  const cached = seasons.get(seed);
+  if (cached) return cached;
+  const state = createTestGame(seed);
+  playSeason(state);
+  seasons.set(seed, state);
+  return state;
+}
+
+/**
  * 한 팀이 하루에 두 경기를 갖지 않는다 — 컵 편성의 **가장 중요한 불변식**이다.
  *
  * 겹치면 tick이 그날 우리 경기 하나만 처리하고 나머지를 영원히 남긴다. 그러면
@@ -140,8 +159,7 @@ describe("컵 카탈로그 — 32강 브래킷이 성립한다", () => {
 });
 
 describe("한 시즌을 돌리면 컵이 끝까지 진행된다", () => {
-  const state = createTestGame(7);
-  playSeason(state);
+  const state = seasonOf(7);
 
   it("우리 나라 컵이 32강부터 결승까지 전부 편성·소화된다", () => {
     for (const cup of domesticCupsOf(state.userTeamId)) {
@@ -187,8 +205,7 @@ describe("한 시즌을 돌리면 컵이 끝까지 진행된다", () => {
 });
 
 describe("대진 추첨이 일정 축에 오른다", () => {
-  const state = createTestGame(7);
-  playSeason(state);
+  const state = seasonOf(7);
   const entries = buildOfficeViews(state).calendar.entries.filter((e) => e.type === "draw");
 
   it("라운드마다 추첨일이 달력에 남는다 — 경기보다 앞선 날짜로", () => {
@@ -322,8 +339,7 @@ describe("실제 대회 규정을 따른다", () => {
   });
 
   it("대진표 확정형은 추첨이 딱 한 번 — 시즌 초 대진표 확정뿐이다", () => {
-    const state = createTestGame(7);
-    playSeason(state);
+    const state = seasonOf(7);
     const refs = state.schedule.filter((e) => e.type === "draw").map((e) => e.refId);
     expect(refs.filter((r) => r.startsWith("coppaitalia:"))).toEqual(["coppaitalia:r32"]);
     // 라운드별 추첨 대회는 라운드마다 추첨이 남는다
@@ -331,8 +347,7 @@ describe("실제 대회 규정을 따른다", () => {
   }, 30_000);
 
   it("홈 배정이 대회 규정을 따른다 — 포칼은 하부 클럽, 코파 이탈리아는 시드", () => {
-    const state = createTestGame(7);
-    playSeason(state);
+    const state = seasonOf(7);
     const mixed = (cupId: string) =>
       domesticStageMatches(state, cupId, "r32").filter(
         (m) => isTopFlight(m.homeTeamId) !== isTopFlight(m.awayTeamId),
@@ -348,8 +363,7 @@ describe("실제 대회 규정을 따른다", () => {
   }, 30_000);
 
   it("결승 요일도 대회 규정이다 — 넷은 주말, 코파 이탈리아만 수요일 밤", () => {
-    const state = createTestGame(7);
-    playSeason(state);
+    const state = seasonOf(7);
     for (const cup of domesticCupCatalog()) {
       const final = domesticStageMatches(state, cup.id, "final")[0];
       if (!final) continue;
@@ -359,8 +373,7 @@ describe("실제 대회 규정을 따른다", () => {
   }, 30_000);
 
   it("32강은 하루에 몰지 않고 이틀에 흩는다 (실제 컵의 화·수 / 토·일)", () => {
-    const state = createTestGame(7);
-    playSeason(state);
+    const state = seasonOf(7);
     for (const cup of domesticCupCatalog()) {
       const dates = new Set(domesticStageMatches(state, cup.id, "r32").map((m) => m.date));
       expect(dates.size, `${cup.id} 1라운드가 ${dates.size}일`).toBeGreaterThanOrEqual(2);
@@ -374,8 +387,7 @@ describe("실제 대회 규정을 따른다", () => {
   }, 30_000);
 
   it("첫 라운드 추첨일이 실제 대회 날짜다 — FA컵 12/8, 리그컵 8월 말", () => {
-    const state = createTestGame(7);
-    playSeason(state);
+    const state = seasonOf(7);
     const dateOf = (cupId: string) =>
       state.schedule.find((e) => e.type === "draw" && e.refId === `${cupId}:r32`)?.date;
     expect(dateOf("facup")).toBe("2026-12-08");
@@ -418,8 +430,7 @@ describe("컵은 1부가 들어오는 라운드에서 시작한다", () => {
   });
 
   it("아스날의 리그컵 첫 경기는 9월 말이다 — 8월 1라운드가 아니다", () => {
-    const state = createTestGame(7);
-    playSeason(state);
+    const state = seasonOf(7);
     const first = domesticStageMatches(state, "eflcup", "r32").find(
       (m) => m.homeTeamId === "arsenal" || m.awayTeamId === "arsenal",
     )!;
@@ -436,8 +447,7 @@ describe("컵은 1부가 들어오는 라운드에서 시작한다", () => {
   }, 30_000);
 
   it("모든 1부 클럽이 같은 라운드에서 시작한다 — 부전승도 예선도 없다", () => {
-    const state = createTestGame(7);
-    playSeason(state);
+    const state = seasonOf(7);
     for (const cup of domesticCupCatalog()) {
       const opening = domesticStageMatches(state, cup.id, "r32");
       const teams = new Set(opening.flatMap((m) => [m.homeTeamId, m.awayTeamId]));
@@ -501,13 +511,13 @@ describe("기존 세이브 — 2부 클럽 채워 넣기", () => {
 });
 
 describe("컵이 리그를 비켜세운다 — 겹치면 리그가 연기된다", () => {
-  const state = createTestGame(7);
+  const state = seasonOf(7);
+  // 편성 원본은 세이브가 아니라 시드에서 나온다 — 시즌을 굴린 뒤에도 같은 표다
   const originalDates = new Map(
     buildSeasonFixtures(1, state.seed, buildEuroEntrants(1, state.seed))
       .filter((m) => m.competitionId === "epl")
       .map((m) => [m.id, m.date] as const),
   );
-  playSeason(state);
   const league = state.matches.filter((m) => m.competitionId === "epl");
   const moved = league.filter((m) => originalDates.get(m.id) !== m.date);
 
@@ -568,9 +578,8 @@ describe("여러 시드로 한 시즌 완주 — 편성이 게임을 멈추지 �
   // 시드마다 컵·대항전 진출 조합이 달라 겹침이 드러나는 자리도 달라진다.
   // 하나라도 겹치면 그 세이브는 시즌을 넘기지 못하므로 여러 시드로 돌려 본다.
   for (const seed of [7, 23, 42, 91]) {
+    const state = seasonOf(seed);
     it(`시드 ${seed} — 하루 두 경기 없이 시즌이 끝나고 결승은 주말이다`, () => {
-      const state = createTestGame(seed);
-      playSeason(state);
       expect(allMatchesDone(state), `시드 ${seed}: ${state.date}에 시즌이 안 끝났다`).toBe(true);
       expectNoDoubleBooking(state);
 
@@ -614,9 +623,11 @@ describe("여러 시드로 한 시즌 완주 — 편성이 게임을 멈추지 �
 });
 
 describe("컵 우승 → 트로피와 유럽 티켓", () => {
+  // 여기만 시즌을 **넘긴다** — 공유 세이브(`seasonOf`)를 고쳐 쓰지 않고 제 것을 만든다
+  const state = createTestGame(23);
+  playSeason(state);
+
   it("컵 우승팀은 다음 시즌 유럽 대항전에 들어간다", () => {
-    const state = createTestGame(23);
-    playSeason(state);
     reviewSeason(state);
     const winners = domesticCupWinners(state);
     expect(Object.keys(winners).length).toBeGreaterThan(0);

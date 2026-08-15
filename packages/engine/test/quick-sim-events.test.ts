@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { YELLOWS_PER_SUSPENSION } from "@story-fm/domain";
+import { YELLOWS_PER_SUSPENSION, positionGroupOfPlayer } from "@story-fm/domain";
 import {
   advanceTime,
   allMatchesDone,
@@ -22,7 +22,15 @@ import { createTestGame, playMockMatch } from "./helpers";
  * 아무도 몰랐다. 이제 카드·퇴장·교체·골의 분이 여기서도 나온다.
  */
 
+/**
+ * 한 시즌을 끝까지 돌린 세이브 — 시드마다 **한 번만** 굴리고 나눠 쓴다.
+ * 여기 테스트들은 장부를 읽기만 하고, 시즌 한 바퀴는 이 파일에서 가장 비싼 일이다.
+ */
+const seasons = new Map<number, GameState>();
+
 function seasonOf(seed: number): GameState {
+  const cached = seasons.get(seed);
+  if (cached) return cached;
   const state = createTestGame(seed);
   let guard = 420;
   while (guard-- > 0 && !allMatchesDone(state)) {
@@ -31,6 +39,7 @@ function seasonOf(seed: number): GameState {
     if (state.phase === "matchday") playMockMatch(state);
     if (state.date === before && advanced.stopped !== "matchday") break;
   }
+  seasons.set(seed, state);
   return state;
 }
 
@@ -179,31 +188,64 @@ describe("카드·퇴장", () => {
     expect(simSquadOf(state, player.teamId).starters.map((p) => p.id)).not.toContain(player.id);
   });
 
-  it("퇴장이 스코어에 닿는다 — 한 명이 빠진 팀은 더 많이 내준다", () => {
+  it("시즌마다 퇴장이 실제로 나온다 — 장부의 red가 경기와 이어진다", () => {
     const state = seasonOf(7);
-    const played = state.matches.filter((m) => m.season === state.season && m.result);
-    const reds = new Map<string, "home" | "away">();
-    for (const b of state.bookings.filter((x) => x.card === "red")) {
-      const match = played.find((m) => m.id === b.matchId);
-      if (!match) continue;
-      const player = state.players.find((p) => p.id === b.gamePlayerId);
-      if (!player) continue;
-      reds.set(match.id, player.teamId === match.homeTeamId ? "home" : "away");
+    const played = new Set(
+      state.matches.filter((m) => m.season === state.season && m.result).map((m) => m.id),
+    );
+    const reds = state.bookings.filter((b) => b.card === "red" && played.has(b.matchId));
+    expect(reds.length).toBeGreaterThan(50);
+  });
+
+  /**
+   * **퇴장은 승부에 닿는다** — 그런데 시즌 실점 평균으로는 그것이 보이지 않는다.
+   *
+   * 퇴장은 평균 50분쯤 나오고 남은 40분의 실점 증가는 0.1골 안팎인데, 경기당
+   * 실점의 표준편차는 1골이 넘는다. 시즌 하나의 퇴장 예순 경기로 두 집단(퇴장이
+   * 있던 경기 ↔ 없던 경기)의 평균을 비교하면 부호가 우연히 뒤집힌다 — 같은 코드로
+   * 1.36 vs 1.36, 1.41 vs 1.43, 1.27 vs 1.30이 나왔다. 다른 팀·다른 상대·다른
+   * 시간대가 섞인 비교라 표본을 늘려도 편향은 남는다.
+   *
+   * 그래서 **같은 판을 열한 명과 열 명으로 각각 돌린다.** 팀도 상대도 시드도 같고
+   * 다른 것은 그라운드의 사람 수뿐이다.
+   */
+  it("퇴장이 스코어에 닿는다 — 한 명이 빠진 팀은 더 많이 내주고 덜 넣는다", () => {
+    const state = createTestGame(3);
+    const MATCHES = 400;
+    const pairs: Array<[string, string]> = [
+      ["mancity", "hull"],
+      ["arsenal", "everton"],
+      ["fulham", "wolves"],
+    ];
+    const totals = { eleven: { conceded: 0, scored: 0 }, ten: { conceded: 0, scored: 0 } };
+    for (const [homeId, awayId] of pairs) {
+      const away = simSquadOf(state, awayId);
+      const eleven = simSquadOf(state, homeId);
+      // 필드 플레이어 하나가 빠진 판 — 벤치는 그대로다(교체는 수를 메우지 않는다)
+      const gone = eleven.starters.find((p) => positionGroupOfPlayer(p) === "MF")!;
+      const ten = { ...eleven, starters: eleven.starters.filter((p) => p.id !== gone.id) };
+      const run = (squad: typeof eleven) => {
+        const sum = { conceded: 0, scored: 0 };
+        for (let i = 0; i < MATCHES; i++) {
+          const r = quickSimulate(squad, away, 10_000 + i, `red:${homeId}:${i}`);
+          sum.conceded += r.awayGoals;
+          sum.scored += r.homeGoals;
+        }
+        return sum;
+      };
+      const withEleven = run(eleven);
+      const withTen = run(ten);
+      // 판마다 방향이 같아야 한다 — 어떤 상대에게만 성립하는 규칙이 아니다
+      expect(withTen.conceded, `${homeId} 실점`).toBeGreaterThan(withEleven.conceded);
+      expect(withTen.scored, `${homeId} 득점`).toBeLessThan(withEleven.scored);
+      totals.eleven.conceded += withEleven.conceded;
+      totals.eleven.scored += withEleven.scored;
+      totals.ten.conceded += withTen.conceded;
+      totals.ten.scored += withTen.scored;
     }
-    const conceded = (only: boolean) => {
-      const rows = played.filter((m) => reds.has(m.id) === only);
-      if (rows.length === 0) return 0;
-      return (
-        rows.reduce((s, m) => {
-          const side = reds.get(m.id);
-          // 퇴장이 없는 경기는 양팀 평균으로 센다
-          if (!side) return s + (m.result!.homeGoals + m.result!.awayGoals) / 2;
-          return s + (side === "home" ? m.result!.awayGoals : m.result!.homeGoals);
-        }, 0) / rows.length
-      );
-    };
-    expect(reds.size).toBeGreaterThan(50);
-    expect(conceded(true)).toBeGreaterThan(conceded(false));
+    // 크기도 잰다 — 소수점 뒤에서만 움직이면 퇴장은 장부에만 남은 것이다
+    expect(totals.ten.conceded).toBeGreaterThan(totals.eleven.conceded * 1.1);
+    expect(totals.ten.scored).toBeLessThan(totals.eleven.scored * 0.9);
   });
 });
 
