@@ -147,6 +147,41 @@ describe("감독의 상대는 점층이다", () => {
   });
 });
 
+describe("친선은 국경을 넘는다", () => {
+  const leagueOf = (teamId: string): string => teamCatalogById(teamId)!.leagueId;
+  const crossLeague = (m: MatchRecord): boolean =>
+    leagueOf(m.homeTeamId) !== leagueOf(m.awayTeamId);
+
+  it("감독의 네 상대가 모두 다른 리그다", () => {
+    for (const m of ours) {
+      expect(crossLeague(m), `${m.homeTeamId} vs ${m.awayTeamId}`).toBe(true);
+    }
+  });
+
+  it("어느 팀에서 시작하든 국내 상대는 드물다", () => {
+    // 리그·체급을 흩어 뽑는다 — 천장·바닥·중위권이 다 들어가야 시험이 성립한다
+    const sample = [0, 0.2, 0.4, 0.6, 0.8].map((at) => pool[Math.floor(pool.length * at)]!);
+    for (const teamId of sample) {
+      const list = buildFriendlyMatches(1, 42, undefined, undefined, teamId).filter(
+        (m) => m.homeTeamId === teamId || m.awayTeamId === teamId,
+      );
+      expect(list.filter(crossLeague).length, `${teamId} 국외 상대`).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it("나머지 세계의 대진도 대부분 국경을 넘는다", () => {
+    const others = friendlies.filter((m) => m.homeTeamId !== USER && m.awayTeamId !== USER);
+    const crossed = others.filter(crossLeague).length;
+    expect(crossed / others.length).toBeGreaterThan(0.8);
+  });
+
+  it("한 리그뿐인 세계에서는 그대로 국내 대진이다 — 선호지 강제가 아니다", () => {
+    const mini = buildFriendlyMatches(1, 42, MINI_WORLD, undefined, USER);
+    expect(mini.length).toBeGreaterThan(0);
+    expect(mini.every((m) => !crossLeague(m))).toBe(true);
+  });
+});
+
 describe("감독의 달력 — 우리 친선만 오른다", () => {
   it("isUserFixture가 우리 친선은 올리고 남의 친선은 올리지 않는다", () => {
     const others = friendlies.filter((m) => m.homeTeamId !== USER && m.awayTeamId !== USER);
