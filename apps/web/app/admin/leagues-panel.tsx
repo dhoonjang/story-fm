@@ -1,54 +1,44 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import type { CatalogLayer } from "./catalog-store";
 import { LeagueModal } from "./league-modal";
 import { LEAGUE_KIND_KO, type AdminLeagueRow, type LeagueCatalogResponse } from "./types";
 
 /**
  * 리그 카탈로그 패널 — 대회의 불변 정의(종류·계수·중계권·티켓 단가)를 편집한다.
  * 팀 탭과 같은 규칙이다: 목록은 요약, 편집은 팝업.
+ *
+ * 카탈로그는 페이지가 받아 쥐고 내려준다 (`catalog-store.ts`) — 여기서 받지
+ * 않는다. 편집·리셋 응답은 `onApply`로 올려보내야 다른 층까지 함께 갱신된다.
  */
 
 type ModalTarget = { mode: "create" } | { mode: "edit"; league: AdminLeagueRow };
 
 export function LeaguesPanel({
+  leagues,
+  onApply,
   onMessage,
   onError,
 }: {
+  leagues: CatalogLayer<LeagueCatalogResponse>;
+  onApply: (data: LeagueCatalogResponse) => void;
   onMessage: (m: string | null) => void;
   onError: (e: string | null) => void;
 }) {
-  const [leagues, setLeagues] = useState<AdminLeagueRow[]>([]);
-  const [edited, setEdited] = useState(false);
   const [query, setQuery] = useState("");
   const [target, setTarget] = useState<ModalTarget | null>(null);
   const [busy, setBusy] = useState(false);
-  const [loaded, setLoaded] = useState(false);
 
-  const applyResponse = useCallback((data: LeagueCatalogResponse) => {
-    setLeagues(data.leagues ?? []);
-    if (data.edited !== undefined) setEdited(data.edited);
-  }, []);
-
-  useEffect(() => {
-    fetch("/api/admin/catalog/league")
-      .then((r) => r.json())
-      .then((d: LeagueCatalogResponse) => {
-        if (d.error) onError(d.error);
-        else applyResponse(d);
-        setLoaded(true);
-      })
-      .catch(() => {
-        onError("리그 카탈로그를 불러오지 못했습니다");
-        setLoaded(true);
-      });
-  }, [applyResponse, onError]);
+  const rows = leagues.data.leagues;
+  const edited = leagues.data.edited ?? false;
+  const loaded = leagues.loaded;
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return leagues;
-    return leagues.filter((l) => `${l.id} ${l.name} ${l.country} ${l.kind}`.toLowerCase().includes(q));
-  }, [leagues, query]);
+    if (!q) return rows;
+    return rows.filter((l) => `${l.id} ${l.name} ${l.country} ${l.kind}`.toLowerCase().includes(q));
+  }, [rows, query]);
 
   async function resetLeagues() {
     if (!window.confirm("리그 편집을 모두 취소하고 시드 기본값으로 되돌릴까요?")) return;
@@ -59,7 +49,7 @@ export function LeaguesPanel({
       const res = await fetch("/api/admin/catalog/league", { method: "DELETE" });
       const data: LeagueCatalogResponse = await res.json();
       if (!res.ok) throw new Error(data.error ?? "되돌리기 실패");
-      applyResponse(data);
+      onApply(data);
       onMessage(data.message ?? null);
     } catch (e) {
       onError(e instanceof Error ? e.message : String(e));
@@ -177,7 +167,7 @@ export function LeaguesPanel({
           mode={target.mode}
           league={target.mode === "edit" ? target.league : undefined}
           onSaved={(data) => {
-            applyResponse(data);
+            onApply(data);
             onMessage(data.message ?? null);
             setTarget(null);
           }}
