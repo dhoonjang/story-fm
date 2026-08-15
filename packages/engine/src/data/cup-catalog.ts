@@ -226,6 +226,38 @@ export function competitionStageLabel(
  * 단계 **이름**만 — 차수를 붙이지 않는다.
  * 추첨처럼 "준결승 1차전"이 아니라 "준결승"이라고 해야 맞는 자리에 쓴다.
  */
+/**
+ * 대회 이름까지 붙인 경기 표기 — `EPL R3` · `FA컵 16강 1차전` · `친선`.
+ * 단계가 없는 경기(친선)는 이름만 남는다 — 빈 단계가 공백으로 새지 않게.
+ */
+export function competitionLabel(
+  competitionId: string | null,
+  stage: MatchStage,
+  round = 1,
+): string {
+  const name = competitionShortName(competitionId);
+  const label = competitionStageLabel(competitionId, stage, round);
+  return label ? `${name} ${label}` : name;
+}
+
+/**
+ * 감독의 달력·요약에 서는 표기 — `R3` · `FA컵 16강` · `친선`.
+ *
+ * `competitionLabel`과 갈리는 곳은 **리그**다. 감독은 자기 리그가 무엇인지 알고
+ * 있으므로 일정의 매 줄에 리그 이름을 붙이지 않는다. 컵과 친선은 어느 경기인지가
+ * 곧 정보라 이름이 선다.
+ */
+export function fixtureLabel(
+  competitionId: string | null,
+  stage: MatchStage,
+  round = 1,
+): string {
+  if (competitionId === null) return FRIENDLY_LABEL;
+  return isCup(competitionId)
+    ? competitionLabel(competitionId, stage, round)
+    : competitionStageLabel(competitionId, stage, round);
+}
+
 export function competitionStageName(competitionId: string | null, stage: MatchStage): string {
   if (competitionId === null) return "";
   const domestic = domesticCupById(competitionId);

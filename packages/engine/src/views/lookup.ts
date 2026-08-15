@@ -25,9 +25,9 @@ import {
 } from "../squad/registration";
 import {
   cupCatalog,
+  competitionLabel,
   competitionName,
   competitionShortName,
-  competitionStageLabel,
   isCup,
 } from "../data/cup-catalog";
 import {
@@ -797,9 +797,9 @@ function seasonLabel(state: GameState): string {
   return `${year}-${String((year + 1) % 100).padStart(2, "0")} 시즌 (시즌 ${state.season})`;
 }
 
-/** 대회·단계 태그 — "EPL R7", "UCL 8강 1차전" */
+/** 대회·단계 태그 — "EPL R7", "UCL 8강 1차전", "친선" */
 function competitionTag(m: MatchRecord): string {
-  return `${competitionShortName(m.competitionId)} ${competitionStageLabel(m.competitionId, m.stage ?? "league", m.round)}`;
+  return competitionLabel(m.competitionId, m.stage ?? "league", m.round);
 }
 
 /** 기준 팀 시점의 승패 — 정규시간이 같으면 승부차기로 갈린다 */
