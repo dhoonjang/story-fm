@@ -541,6 +541,8 @@ export function transitionSeason(state: GameState): string[] {
 
     // 배치 재구성 — 새 스쿼드로 선발·벤치를 다시 짠다 (적응도는 기준선으로 리셋)
     const tactics = tacticsOf(state, team.id);
+    // 선반도 함께 비운다 — 한쪽만 남으면 지난 시즌 값이 실려 온다 (player.md §7.3)
+    delete tactics.shelved;
     const currentLayout = tactics.assignments.filter((a) => a.role === "starting");
     const layoutSlots = currentLayout.map((a) => a.position);
     const layoutPoints = currentLayout.map((a) => a.point ?? anchorOf(a.position));
