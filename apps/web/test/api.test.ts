@@ -36,7 +36,7 @@ import {
 } from "../app/api/admin/catalog/league/[leagueId]/route";
 import { GET as cupGet, DELETE as cupReset } from "../app/api/admin/catalog/cup/route";
 import { PATCH as cupPatch } from "../app/api/admin/catalog/cup/[cupId]/route";
-import { boardExpectation, cupCatalogById } from "@story-fm/engine";
+import { boardExpectation, cupCatalogById, FRIENDLY_ROUNDS } from "@story-fm/engine";
 import { FORMATION_LAYOUTS } from "@story-fm/domain";
 import type { GamePayload, GameSlice } from "../lib/store";
 
@@ -178,23 +178,26 @@ describe("API — 온보딩부터 경기까지", () => {
     }
     expect(current.phase).toBe("idle");
 
-    // 순위표에 유저 경기 결과 반영
+    // 시즌 첫 경기는 **프리시즌 친선**이다 — 최근 결과에는 서고 순위표는 그대로다
     const league = current.views.competitions.list[0]!;
     const me = league.standings.find((r) => r.teamId === "arsenal");
-    expect(me?.played).toBe(1);
+    expect(me?.played).toBe(0);
     expect(current.views.competitions.recentResults.length).toBeGreaterThan(0);
+    expect(current.views.competitions.recentResults[0]).toContain("친선");
   });
 
-  it("달력 뷰가 유저 팀 일정(리그 38 + 대항전)을 담는다", async () => {
+  it("달력 뷰가 유저 팀 일정(친선 + 리그 38 + 대항전)을 담는다", async () => {
     const created = await createGame(
       json({ teamId: "liverpool", managerName: "정", background: "분석가", seed: 5 }),
     );
     const game = (await created.json()) as GamePayload;
     const cal = game.views.calendar;
     const matches = cal.entries.filter((e) => e.type === "match");
-    // 리그 38 + 대항전 (출전 대회는 세이브의 배정에서 나온다 — 뷰가 알려준다)
+    // 프리시즌 친선 + 리그 38 + 대항전 (출전 대회는 세이브의 배정에서 나온다 — 뷰가 알려준다)
     const cup = game.views.competitions.list.find((c) => c.kind === "cup");
-    expect(matches).toHaveLength(38 + (cup ? (cupCatalogById(cup.id)?.matchesPerTeam ?? 0) : 0));
+    expect(matches).toHaveLength(
+      FRIENDLY_ROUNDS + 38 + (cup ? (cupCatalogById(cup.id)?.matchesPerTeam ?? 0) : 0),
+    );
     expect(matches.every((e) => e.result === null)).toBe(true);
     expect(matches.filter((e) => e.isNext)).toHaveLength(1);
     expect(cal.seasonStart <= cal.seasonEnd).toBe(true);

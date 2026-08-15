@@ -8,7 +8,13 @@ import {
   recoveryFactor,
 } from "@story-fm/sim";
 import { DEFAULT_TACTICS, weightSlotOf } from "@story-fm/domain";
-import { advanceDays, advanceToMatchday, createTestGame, playMockMatch } from "./helpers";
+import {
+  advanceDays,
+  advanceToMatchday,
+  createTestGame,
+  playMockMatch,
+  playPreseason,
+} from "./helpers";
 
 /**
  * 체력의 경제 — **한 경기가 선수를 비우고, 회복은 며칠에 걸쳐 갚는다.**
@@ -214,6 +220,8 @@ describe("경기 체력 — 회복", () => {
 
   it("사흘로는 다 못 채운다 — 3일 뒤 경기에 로테이션이 필요해진다", () => {
     const state = createNeutralGame();
+    // 연전의 대가를 재는 시험이라 개막 이후를 본다 — 프리시즌은 주 1회다
+    playPreseason(state);
     advanceToMatchday(state);
     const starters = startersOf(state).filter((s) => s.position !== "GK");
     for (const s of starters) playerById(state, s.id)!.state.condition = 100;

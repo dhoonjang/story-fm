@@ -19,6 +19,7 @@ import {
   type GameState,
   squadReturnOf,
   FRIENDLY_ROUNDS,
+  isFriendly,
   MINI_WORLD,
   FAMILIARITY_DRIFT_CAP,
   FAMILIARITY_DRIFT_PER_DAY,
@@ -177,6 +178,27 @@ export function advanceAndPlay(state: GameState): void {
     throw new Error(`경기일 도달 실패: ${advanced.stopped}`);
   }
   throw new Error("attention 정지가 반복되어 경기일에 도달하지 못했습니다");
+}
+
+/**
+ * 프리시즌 친선을 다 치르고 개막 앞에 선다 — **시즌 첫 경기는 친선이다**.
+ *
+ * 리그·컵의 장부(시즌 기록·징계·순위표)를 보는 테스트는 여기를 먼저 지나야 한다.
+ * 친선은 그 장부에 한 줄도 남기지 않으므로(season.md §2), 안 지나면 "경기를
+ * 치렀는데 기록이 없다"를 보게 된다.
+ */
+export function playPreseason(state: GameState): void {
+  const nextIsFriendly = (): boolean => {
+    const next = state.matches
+      .filter(
+        (m) =>
+          !m.result && (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+      )
+      .sort((a, b) => (a.date < b.date ? -1 : 1))[0];
+    return next !== undefined && isFriendly(next);
+  };
+  let guard = FRIENDLY_ROUNDS + 2;
+  while (guard-- > 0 && nextIsFriendly()) advanceAndPlay(state);
 }
 
 /** N일을 소화할 때까지 advance (attention 정지 무시) — tick 검증용 */
