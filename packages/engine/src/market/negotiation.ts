@@ -904,7 +904,7 @@ export function generateIncomingOffers(state: GameState, digest: string[]): void
 
   const marketValue = marketValueOf(state, chosen);
   // 리그 성향 — 사우디는 시장가 위로 지르고 주급을 폭발시킨다, MLS는 아낀다
-  const bias = marketBiasOf(buyer);
+  const bias = marketBiasOf(state, buyer);
   // 처음엔 시장가보다 낮게 부른다 (75~100%) — 흥정의 여지를 남긴다
   const fee = Math.round((marketValue * (0.75 + rng() * 0.25) * bias.fee) / 100_000) * 100_000;
   const wage = Math.round(wageExpectationOf(state, chosen) * (1.05 + rng() * 0.2) * bias.wage);
@@ -960,7 +960,7 @@ function openListedOffer(
   const window = windowOpenForTeam(state, buyer);
   if (!window) return;
 
-  const bias = marketBiasOf(buyer);
+  const bias = marketBiasOf(state, buyer);
   const fee =
     Math.round((askingPrice * (1 - LISTED_DISCOUNT * rng()) * bias.fee) / 100_000) * 100_000;
   const wage = Math.round(wageExpectationOf(state, player) * (1.05 + rng() * 0.2) * bias.wage);
@@ -1034,7 +1034,7 @@ function pickBuyer(state: GameState, player: GamePlayer, rng: () => number): str
     if (covered) continue;
     // 노장 선호 — 사우디·MLS는 30세 이상에게 훨씬 적극적이다. 가중치는
     // 후보를 여러 번 넣어 표현한다 (결정적 rng 하나로 뽑기 위해)
-    const weight = age >= 30 ? Math.round(marketBiasOf(team.id).veteranAppetite * 2) : 2;
+    const weight = age >= 30 ? Math.round(marketBiasOf(state, team.id).veteranAppetite * 2) : 2;
     for (let i = 0; i < weight; i++) options.push(team.id);
   }
   if (options.length === 0) return null;
