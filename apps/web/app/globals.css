@@ -158,34 +158,192 @@ textarea {
   font-size: var(--fs-lg);
   margin: 24px 0 12px;
 }
-.league-grid,
+/* 단계 하나가 화면을 채운다 — 제목과 고르는 자리 사이가 이 화면의 유일한 간격이다 */
+.onboarding-step h1 {
+  margin-bottom: 28px;
+}
+/* 첫 화면만 가운데로 — 고리가 가운데 서므로 제목이 왼쪽에 있으면 축이 둘이 된다 */
+.onboarding-step.step-league h1 {
+  text-align: center;
+}
+/* 앞 단계에서 고른 것 — 제목 위에 얹혀 지금 어디에 서 있는지를 말한다 */
+.onboarding .step-context {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  margin-bottom: 4px;
+}
+/* 진행 표시 — 조용한 탭 세 칸이다. 지금 선 칸만 밑줄로 서고, 지나온 칸은
+   되돌아가는 길이라 손이 닿으면 글자가 밝아진다. 아직 오지 않은 칸은 흐리다.
+   화살표는 두지 않는다 — 칸의 밝기가 이미 순서를 말한다. */
+.onboarding .step-rail {
+  display: flex;
+  gap: 18px;
+  list-style: none;
+  font-size: var(--fs-sm);
+}
+.onboarding .step-rail li {
+  color: var(--muted);
+  opacity: 0.5;
+  padding-bottom: 4px;
+  border-bottom: 2px solid transparent;
+}
+.onboarding .step-rail li.done {
+  opacity: 1;
+}
+.onboarding .step-rail li.done button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--muted);
+  font: inherit;
+  transition: color 160ms var(--ease-panel);
+}
+.onboarding .step-rail li.done button:hover {
+  color: var(--text);
+}
+.onboarding .step-rail li.current {
+  opacity: 1;
+  color: var(--text);
+  font-weight: 700;
+  border-bottom-color: var(--accent);
+}
+
+/* ── 리그 고리 ───────────────────────────
+   다섯 리그가 정오각형의 꼭짓점에 선다. 판은 정사각형이고 SVG viewBox(0~100)와
+   칩의 left/top이 같은 좌표를 쓴다 — 계산은 `lib/ring.ts` 한 곳이다. */
+.league-ring {
+  position: relative;
+  width: min(520px, 100%);
+  aspect-ratio: 1;
+  margin: 0 auto;
+}
+.league-ring svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+/* 선은 판이 커져도 굵어지지 않는다 — 굵기는 화면 픽셀로 잰다 */
+.league-ring polygon {
+  vector-effect: non-scaling-stroke;
+  fill: none;
+  stroke: var(--border-soft);
+  stroke-width: 1;
+}
+.league-node {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 132px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 11px 18px;
+  color: var(--text);
+  transition:
+    border-color 160ms var(--ease-panel),
+    background 160ms var(--ease-panel),
+    box-shadow 160ms var(--ease-panel);
+}
+.league-node:hover,
+.league-node:focus-visible {
+  border-color: var(--accent);
+  background: var(--panel-2);
+  box-shadow: 0 0 0 4px rgb(from var(--accent) r g b / 12%);
+  outline: none;
+}
+.league-node.selected {
+  border-color: var(--accent);
+  background: var(--panel-2);
+}
+.league-node .node-name {
+  font-weight: 700;
+}
+.league-node .node-country {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+/* 뼈대 막대는 칩 안에서 가운데로 선다 — 카드 시절의 퍼센트 폭은 여기서 통하지 않는다 */
+.league-node .skel-league {
+  width: 84px;
+  height: 15px;
+  margin: 0;
+}
+.league-node .skel-country {
+  width: 52px;
+  height: 13px;
+  margin: 0;
+}
+/* 좁은 화면 — 고리는 그대로 두고 칩만 줄인다 (판이 정사각형이라 같이 준다) */
+@media (max-width: 560px) {
+  .league-node {
+    min-width: 0;
+    padding: 8px 10px;
+    font-size: var(--fs-md);
+  }
+}
+
 .team-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(164px, 1fr));
+  gap: 10px;
 }
-.league-card,
 .team-card {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  padding: 12px;
+  padding: 12px 14px;
   text-align: left;
   color: var(--text);
 }
-.league-card:hover,
 .team-card:hover {
   border-color: var(--accent-2);
 }
-.league-card.selected,
 .team-card.selected {
   border-color: var(--accent);
   background: var(--panel-2);
 }
-.league-card .tier,
+.team-card .team-name {
+  font-weight: 700;
+}
 .team-card .tier {
   color: var(--muted);
   font-size: var(--fs-sm);
+}
+/* 부임 확인 — 어느 팀에 어떤 기대를 안고 들어가는지가 이름을 적기 전에 선다.
+   읽는 자리라 카드가 아니라 왼쪽 선 하나로 세운다 (고르는 카드와 섞이지 않게) */
+.onboarding .appointment {
+  border-left: 3px solid var(--accent);
+  padding: 2px 0 2px 14px;
+  margin-bottom: 24px;
+}
+.onboarding .appointment-club {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+}
+.onboarding .appointment .tier {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.onboarding .field {
+  display: block;
+  margin-bottom: 20px;
+}
+.onboarding .field-label {
+  display: block;
+  font-size: var(--fs-md);
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.onboarding .field-note {
+  display: block;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  margin-bottom: 6px;
 }
 .onboarding input[type="text"],
 .onboarding textarea {
@@ -195,10 +353,9 @@ textarea {
   border-radius: var(--r-md);
   padding: 12px;
   color: var(--text);
-  margin-bottom: 12px;
 }
 .onboarding textarea {
-  min-height: 90px;
+  min-height: 108px;
   resize: vertical;
 }
 .primary-btn {
@@ -968,13 +1125,21 @@ textarea {
     grid-template-columns: 1fr;
   }
 }
+/* 돌아가는 길은 왼쪽, 어디쯤인지는 오른쪽 — 한 줄이 단계의 머리다 */
 .onboarding-top {
-  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-bottom: 32px;
 }
 .back-link {
   color: var(--accent-2);
   text-decoration: none;
   font-size: var(--fs-md);
+  background: none;
+  border: none;
+  padding: 0;
 }
 .back-link:hover {
   text-decoration: underline;

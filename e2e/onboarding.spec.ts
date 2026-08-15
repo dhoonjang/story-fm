@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test("새 게임 첫 메시지가 부임 장면과 수석코치 브리핑으로 표시된다", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("league-grid")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: 20_000 });
   await page.getByTestId("league-epl").click();
   await expect(page.getByTestId("team-grid")).toBeVisible();
 
@@ -33,6 +33,46 @@ test("새 게임 첫 메시지가 부임 장면과 수석코치 브리핑으로 
   expect(viewport!.height - (input!.y + input!.height)).toBeLessThan(24);
 });
 
+test("부임은 리그 → 팀 → 감독 한 단계씩 서고, 되돌아갈 수 있다", async ({ page }) => {
+  /**
+   * 새 게임은 설정 폼이 아니라 부임이라는 사건이다 — 한 번에 한 가지만 묻고,
+   * 고른 것은 다음 단계의 맥락으로 남는다 (season.md §1).
+   */
+  await page.goto("/new");
+  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: 20_000 });
+  // 리그를 고르기 전에는 팀도 감독도 화면에 없다 — 안내 문구로 때울 자리가 없다
+  await expect(page.getByTestId("team-grid")).toHaveCount(0);
+  await expect(page.getByTestId("manager-name")).toHaveCount(0);
+
+  await page.getByTestId("league-epl").click();
+  await expect(page.getByTestId("team-grid")).toBeVisible();
+  await expect(page.getByTestId("league-ring")).toHaveCount(0);
+  await expect(page.getByTestId("step-context")).toContainText("프리미어리그");
+
+  await page.getByTestId("team-arsenal").click();
+  // 마지막 단계는 부임 직전의 확인 — 팀과 보드 기대가 이름을 적기 전에 서 있다
+  const appointment = page.getByTestId("appointment");
+  await expect(appointment).toContainText("아스날");
+  await expect(appointment).toContainText("우승 경쟁");
+  await expect(appointment).toContainText("프리미어리그");
+  await expect(page.getByTestId("start-game")).toContainText("아스날");
+
+  // 진행 표시의 지나온 칸이 곧 되돌아가는 길이다 — 두 단계를 한 번에 건넌다
+  await page.getByTestId("step-to-league").click();
+  await expect(page.getByTestId("league-epl")).toHaveClass(/selected/);
+
+  // 왼쪽 위 한 칸씩도 같은 길 — 되돌아가면 고른 것이 그대로 서 있다
+  await page.getByTestId("league-epl").click();
+  await page.getByTestId("step-back").click();
+  await expect(page.getByTestId("league-epl")).toHaveClass(/selected/);
+  await expect(page.getByTestId("league-ring")).toBeVisible();
+
+  // 리그를 바꾸면 팀 선택은 무효 — 보이지 않는 선택은 남지 않는다
+  await page.getByTestId("league-laliga").click();
+  await expect(page.getByTestId("team-arsenal")).toHaveCount(0);
+  await expect(page.getByTestId("step-context")).toContainText("라리가");
+});
+
 test("같은 시각은 다시 적지 않는다 — 화자 이름은 턴마다 선다", async ({ page }) => {
   /**
    * 시각이 턴마다 반복되면 시간이 흐른다는 신호가 오히려 죽는다 — 값이 바뀔 때만
@@ -40,7 +80,7 @@ test("같은 시각은 다시 적지 않는다 — 화자 이름은 턴마다 �
    * 이름이 빠진 턴은 누가 말하는지를 위쪽까지 거슬러 찾아야 한다.
    */
   await page.goto("/new");
-  await expect(page.getByTestId("league-grid")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: 30_000 });
   await page.getByTestId("league-epl").click();
   await page.getByTestId("team-arsenal").click();
   await page.getByTestId("manager-name").fill("접기테스트");
