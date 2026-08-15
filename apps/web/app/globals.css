@@ -4331,6 +4331,18 @@ textarea {
   color: var(--text);
   font-weight: 700;
 }
+/* 알약이 값을 함께 말한다 — 이 역할로 바꾸면 적응도가 얼마나 움직이나.
+   이름보다 작고 옅게 뒤에 붙어 이름이 먼저 읽히고, 지금 켜진 역할에는 0이라
+   아무것도 붙지 않는다. 내려가면 경고색, 되돌아오면 강조색 */
+.pd-role-move {
+  margin-left: 5px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--danger);
+}
+.pd-role-move.up {
+  color: var(--accent);
+}
 
 /**
  * 명단 칸이 좁으면 상세를 접는다.

@@ -1399,6 +1399,19 @@ export function roleDistance(position: string, from: string, to: string): number
   return d;
 }
 
+/** 역할 거리 1당 적응도 손실 — 슬라이더 한 칸(1.5~4)과 같은 눈금에 놓는다 (초안) */
+export const ROLE_CHANGE_LOSS = 0.6;
+
+/**
+ * 역할을 바꿀 때 치르는 **전술 적응도 대가** — 도메인이 유일한 출처다.
+ *
+ * 코어와 전술판이 같은 함수를 부른다. 대가를 서버 왕복에서만 매기면 저장이 늦거나
+ * 막힌 동안 화면의 OVR은 새 역할로, 적응도는 옛 역할로 움직인다 (player.md §7.2).
+ */
+export function roleChangeCost(position: string, from: string, to: string): number {
+  return Math.round(roleDistance(position, from, to) * ROLE_CHANGE_LOSS);
+}
+
 /** 이 자리에서 고를 수 있는 세부 역할 — 첫 항목이 기본값 */
 export function rolesFor(position: string): readonly RoleDef[] {
   return ROLE_DEFS[weightSlotOf(position)];

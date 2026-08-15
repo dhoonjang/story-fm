@@ -30,6 +30,13 @@ import {
 import type { GamePayload } from "@/lib/store";
 import type { MatchBoardOrder } from "@/lib/match-orders";
 import { slotOverallOf } from "@/lib/slot-overall";
+import {
+  familiarityForRole,
+  lineupBody,
+  resetRolesForMovedPlayers,
+  roleAdaptationMove,
+  type BoardState,
+} from "@/lib/board-roles";
 import { IconBoard, IconChevron } from "@/components/icons";
 import { PitchChip, PitchGround } from "./pitch";
 import { createLineupSaver, type LineupSaveOutcome, type LineupSaver } from "./lineup-saver";
@@ -585,6 +592,9 @@ function potentialHint(band: SquadRow["potential"]): string {
   return `추정 폭 ±${band.margin} — ${confidence}. 함께 뛴 경기가 쌓이면 좁아집니다`;
 }
 
+/** 오르내림에 부호를 붙인다 — 0은 부르는 쪽이 걸러 아무것도 그리지 않는다 */
+const signedMove = (n: number) => (n > 0 ? `+${n}` : `−${Math.abs(n)}`);
+
 function PlayerDetail({
   p,
   slotCode,
@@ -613,13 +623,27 @@ function PlayerDetail({
    * 응답 전까지 이전 자리의 목록이다. 그 값을 그대로 그리면 포지션 칩은 CM인데
    * 역할은 DM(앵커·하프백)인 모순이 생긴다.
    */
-  const roleOptions = slotCode ? rolesFor(slotCode) : p.roleOptions;
+  /**
+   * 역할이 성립하는 자리 — 고른 칩이면 그 자리, 아니면 이 행이 지금 선 자리.
+   * `p`는 명단 사본이라 `assignedPosition`이 곧 판 위의 좌표에서 읽은 코드고,
+   * 판에 없으면 null이다. **자리가 없으면 역할도 없다** (player.md §3.1).
+   */
+  const rolePosition = slotCode ?? p.assignedPosition;
+  /**
+   * 목록과 값은 **같은 자리에서 읽는다.** 서버 행의 `roleOptions`는 저장된 자리
+   * 기준이라, 끌어 옮긴 직후 목록만 옛 자리 것으로 남으면 포지션 칩은 CM인데
+   * 역할은 DM(앵커·하프백)인 모순이 생기고 옆의 대가도 다른 자로 잰 값이 된다.
+   */
+  const roleOptions = rolePosition ? rolesFor(rolePosition) : p.roleOptions;
   const requestedRole = roleId ?? p.roleId;
   const activeRole = roleOptions.some((r) => r.id === requestedRole)
     ? requestedRole
-    : slotCode
-      ? defaultRoleOf(slotCode)
+    : rolePosition
+      ? defaultRoleOf(rolePosition)
       : null;
+  /** 그 역할을 고르면 적응도가 얼마나 움직이나 — 0이면 그리지 않는다 */
+  const roleMove = (role: string): number =>
+    rolePosition && activeRole ? roleAdaptationMove(p, rolePosition, activeRole, role) : 0;
   /**
    * 포지션 칩 — 보유 목록에 **지금 맡은 자리**를 합친다.
    *
@@ -779,22 +803,35 @@ function PlayerDetail({
             <div className="pd-roles">
               <span className="pd-axis-group-name">역할</span>
               <div className="pd-role-list">
-                {roleOptions.map((r) => (
-                  <button
-                    className={`pd-role${r.id === activeRole ? " on" : ""}`}
-                    key={r.id}
-                    type="button"
-                    title={r.desc}
-                    disabled={!onRole}
-                    onClick={(e) => {
-                      // 상세는 행 안에 있다 — 막지 않으면 행 토글로 새어 나가 접힌다
-                      e.stopPropagation();
-                      onRole?.(r.id);
-                    }}
-                  >
-                    {r.ko}
-                  </button>
-                ))}
+                {roleOptions.map((r) => {
+                  /**
+                   * 알약이 **값을 함께 말한다** — 고르고 나서야 알면 되돌릴 수밖에 없다.
+                   * 대가는 서버 왕복이 아니라 도메인 공식이 낸 것이라, 저장이 늦거나
+                   * 막힌 동안에도 이 숫자와 옆의 적응도가 같은 시점을 가리킨다.
+                   */
+                  const move = roleMove(r.id);
+                  return (
+                    <button
+                      className={`pd-role${r.id === activeRole ? " on" : ""}`}
+                      key={r.id}
+                      type="button"
+                      title={move === 0 ? r.desc : `${r.desc} · 적응 ${signedMove(move)}`}
+                      disabled={!onRole}
+                      onClick={(e) => {
+                        // 상세는 행 안에 있다 — 막지 않으면 행 토글로 새어 나가 접힌다
+                        e.stopPropagation();
+                        onRole?.(r.id);
+                      }}
+                    >
+                      {r.ko}
+                      {move !== 0 && (
+                        <span className={`pd-role-move${move > 0 ? " up" : ""}`}>
+                          {signedMove(move)}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -823,28 +860,6 @@ function PlayerDetail({
   );
 }
 
-/**
- * 전술판 작업 사본 — 서버 배치에서 씨를 받아 로컬에서 조작하고, 손이 멈추면 자동 저장된다.
- * 편집 모드를 두지 않으므로 화면에 보이는 게 곧 편집 대상이다.
- */
-interface BoardState {
-  /** 자리 좌표 11개 — 포지션 코드는 `positionAtPoint`의 파생 */
-  points: BoardPoint[];
-  /** points[i]에 앉은 선수 */
-  occupants: string[];
-  /** 매치데이 벤치 지정 (나머지 1군 비선발은 예비) */
-  bench: string[];
-  /** 2군 — 라인업에 넣으려면 먼저 1군으로 올라와야 한다 */
-  reserve: string[];
-  /**
-   * 감독이 고른 세부 역할 (playerId → roleId) — **서버와 다른 것만 저장에 실린다.**
-   * 알약을 누를 때마다 API를 부르면 결정 하나에 요청이 여러 번 가고, 그때마다
-   * 서버가 대가를 매길 빌미가 된다. 자동 저장이 정해진 값 하나를 보낸다.
-   */
-  roles: Record<string, string>;
-  tactics: TacticsView;
-}
-
 /** 선수가 지금 속한 칸 — 화살표 교체는 이 둘을 맞바꾸는 일이다 */
 type Tier = "선발" | "벤치" | "예비" | "2군";
 
@@ -852,40 +867,6 @@ const MAX_BENCH = 9;
 
 /** 골키퍼 자리 수 — 정확히 1이 아니면 서버가 반려하므로 저장을 보류한다 */
 const gkCountOf = (b: BoardState) => b.points.filter((p) => positionAtPoint(p) === "GK").length;
-
-function lineupBody(
-  b: BoardState,
-  serverReserve: ReadonlySet<string>,
-  serverRoles: ReadonlyMap<string, string>,
-) {
-  const { formation: _formation, ...axes } = b.tactics;
-  void _formation;
-  return {
-    // v6: 선발은 {playerId, point}로 보낸다 — 서버가 좌표에서 포지션 코드를 다시 정한다
-    starting: b.occupants.map((id, i) => ({
-      playerId: id,
-      point: b.points[i]!,
-      position: positionAtPoint(b.points[i]!),
-    })),
-    bench: b.bench.map((id) => ({ playerId: id })),
-    // 서버와 달라진 1·2군만 보낸다 (승격/강등은 라우트가 라인업과 한 요청으로 처리)
-    squadLevels: [
-      ...b.reserve
-        .filter((id) => !serverReserve.has(id))
-        .map((id) => ({ playerId: id, level: "reserve" as const })),
-      ...[...serverReserve]
-        .filter((id) => !b.reserve.includes(id))
-        .map((id) => ({ playerId: id, level: "first" as const })),
-    ],
-    // 서버와 달라진 역할만 (자동 저장 한 번에 실린다 — 클릭마다 부르지 않는다)
-    roles: Object.entries(b.roles)
-      .filter(([id, role]) => serverRoles.get(id) !== role)
-      .map(([playerId, role]) => ({ playerId, role })),
-    // 포메이션(프리셋)은 보내지 않는다 — 전술판은 좌표만 바꾸고, 프리셋 교체는
-    // 채팅의 set_tactics가 맡는다. 여기서 함께 보내면 매 저장이 전술 변경으로 읽힌다.
-    tactics: axes,
-  };
-}
 
 export function SquadView({
   game,
@@ -1094,12 +1075,19 @@ export function SquadView({
         const role = board.roles[p.id] ?? p.roleId ?? undefined;
         if (code === p.assignedPosition && role === (p.roleId ?? undefined)) return p;
         const fit = code ? positionProficiency(p.positions, code, p.foot) : p.positionFit;
+        /**
+         * 전술 적응도도 여기서 맞춘다 — 서버 값 그대로 두면 역할을 바꾼 직후
+         * OVR만 움직이고 적응도는 옛 값에 머물러, **같은 화면의 두 숫자가 다른
+         * 시점을 가리킨다** (player.md §7.2).
+         */
+        const familiarity = code && role ? familiarityForRole(p, code, role) : p.familiarity;
         return {
           ...p,
           assignedPosition: code,
           slotOverall: slotOverallOf(p, code, role),
           positionFit: fit,
-          adaptation: adaptationOf(fit, p.familiarity, code ?? p.assignedPosition ?? p.position),
+          familiarity,
+          adaptation: adaptationOf(fit, familiarity, code ?? p.assignedPosition ?? p.position),
         };
       }),
     [players, board.occupants, board.points, board.roles],
@@ -1137,24 +1125,6 @@ export function SquadView({
     commit({ ...board, tactics: { ...board.tactics, ...patch } });
   }
 
-  /** 새 자리에서도 유효한 역할은 유지하고, 호환되지 않을 때만 기본 역할로 바꾼다. */
-  function resetRolesForMovedPlayers(next: BoardState): BoardState {
-    const previousPosition = new Map(
-      board.occupants.map((id, i) => [id, positionAtPoint(board.points[i]!)]),
-    );
-    const roles = { ...next.roles };
-    next.occupants.forEach((id, i) => {
-      const position = positionAtPoint(next.points[i]!);
-      if (
-        previousPosition.get(id) !== position &&
-        !rolesFor(position).some((role) => role.id === roles[id])
-      ) {
-        roles[id] = defaultRoleOf(position);
-      }
-    });
-    return { ...next, roles };
-  }
-
   /**
    * 선택-스왑: 자리↔자리는 선수 교환(좌표는 그대로), 자리↔명단은 선수 교체.
    *
@@ -1190,7 +1160,7 @@ export function SquadView({
       bench = bench.filter((x) => x !== incoming.id);
       if (bench.length < MAX_BENCH) bench.push(outgoing);
     }
-    commit(resetRolesForMovedPlayers({ ...board, occupants, bench }));
+    commit(resetRolesForMovedPlayers(board, { ...board, occupants, bench }));
   }
 
   /**
@@ -1200,7 +1170,7 @@ export function SquadView({
   function repositionSlot(index: number, point: BoardPoint) {
     const points = [...board.points];
     points[index] = snapToBoard(point);
-    const next = resetRolesForMovedPlayers({
+    const next = resetRolesForMovedPlayers(board, {
       ...board,
       points: separateBoardPoints(points, index),
     });
@@ -1275,7 +1245,7 @@ export function SquadView({
       const bench = board.bench.filter((id) => id !== inId);
       if (bench.length < MAX_BENCH) bench.push(outId);
       // 장부를 직접 저장하지 않는다. 다음 진행 턴의 substitute 검증 전까지는 작업 사본이다.
-      setBoard(resetRolesForMovedPlayers({ ...board, occupants, bench }));
+      setBoard(resetRolesForMovedPlayers(board, { ...board, occupants, bench }));
       setAdvisoryPending(true);
       setSelection(null);
       return onOrder?.({ kind: "substitution", out: outId, in: inId });
@@ -1305,7 +1275,15 @@ export function SquadView({
     reserve = moveTo(aId, tb === "2군" ? "2군" : "예비", reserve);
     reserve = moveTo(rowId, ta === "2군" ? "2군" : "예비", reserve);
 
-    commit({ ...board, occupants, bench: bench.slice(0, MAX_BENCH), reserve });
+    // 이 경로가 이슈의 재현 경로다 — 명단 화살표로 선발을 내리면 그 선수의 역할도 함께 내려간다
+    commit(
+      resetRolesForMovedPlayers(board, {
+        ...board,
+        occupants,
+        bench: bench.slice(0, MAX_BENCH),
+        reserve,
+      }),
+    );
   }
 
   /** 화면 좌표 → 전술판 좌표(%) */

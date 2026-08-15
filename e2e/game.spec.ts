@@ -615,20 +615,17 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
     );
     expect(state.shadow).toContain("96, 165, 250"); // 밑줄만이 "여기"를 말한다
   }
-  /**
-   * 역할만 **누르는 물건**의 생김새를 갖는다 — 포지션은 테두리 없는 글자다.
-   * (커서로는 못 잰다: 상세가 행 안에 있어 행의 `pointer`를 물려받는다)
-   */
+  // 포지션은 테두리 없는 글자다 — 읽는 값이지 누르는 물건이 아니다
   const borders = await page
     .locator('[data-testid="player-detail"] .pd-pos')
     .evaluateAll((ns) => ns.map((n) => getComputedStyle(n).borderTopWidth));
   expect(new Set(borders)).toEqual(new Set(["0px"])); // 포지션은 **하나도** 테두리가 없다
-  expect(
-    await page
-      .locator('[data-testid="player-detail"] .pd-role')
-      .first()
-      .evaluate((n) => getComputedStyle(n).borderTopWidth),
-  ).not.toBe("0px");
+  /**
+   * **자리가 없으면 역할도 없다** (player.md §3.1). 이 상세는 비선발이라 알약이
+   * 아예 서지 않는다 — 주 포지션을 자리로 치고 목록을 켜 두면 감독은 코어가 받지
+   * 않는 값을 고르게 되고, 그 선택이 저장마다 따라가 라인업이 통째로 반려된다.
+   */
+  await expect(page.locator('[data-testid="player-detail"] .pd-role')).toHaveCount(0);
   // 비선발을 고르면 **선발 행**에 화살표가 뜬다 (어느 쪽을 먼저 골라도 교체가 열린다)
   // 선발 11명은 내려가는 → , 예비·2군은 올라오는 ← (칸이 다르면 전부 열린다)
   await expect(page.locator('.swap-btn:text("→")')).toHaveCount(11);
@@ -686,6 +683,13 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
   // 적응은 자리·전술을 합친 한 칸이다 (숫자가 아니라 게이지 — 값은 툴팁이 갖는다)
   await expect(page.locator(".detail-row")).toContainText("적응");
   await expect(page.locator(".detail-row .fit-gauge").first()).toBeVisible();
+  /**
+   * 선발은 자리가 있으니 역할이 있다 — 역할만 **누르는 물건**의 생김새를 갖는다.
+   * (커서로는 못 잰다: 상세가 행 안에 있어 행의 `pointer`를 물려받는다)
+   */
+  const rolePill = page.locator('[data-testid="player-detail"] .pd-role').first();
+  await expect(rolePill).toBeVisible();
+  expect(await rolePill.evaluate((n) => getComputedStyle(n).borderTopWidth)).not.toBe("0px");
   // 펼치면 15축이 전부 보이고, 체력이 왜 그런지 한 문장으로 설명한다
   await expect(page.getByTestId("player-mood")).not.toBeEmpty();
   await expect(page.locator(".detail-row .pd-axis")).toHaveCount(15);

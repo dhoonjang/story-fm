@@ -255,9 +255,19 @@ interface SquadViewRowMeta {
   /**
    * 그 자리에서 맡는 **세부 역할** — 감독이 고른 것, 없으면 그 자리의 기본 역할.
    * `roleOptions`가 고를 수 있는 목록이고, 자리를 옮기면 목록이 통째로 바뀐다.
+   *
+   * **자리가 있어야 역할이 있다** (player.md §3.1) — 벤치·예비는 `null`에 빈
+   * 목록이다. 주 포지션은 자리가 아니라서, 그 자리 기준의 역할을 켜 두면 화면이
+   * 코어가 받지 않는 값을 고르게 한다.
    */
   roleId: string | null;
   roleOptions: Array<{ id: string; ko: string; abbr: string; desc: string }>;
+  /**
+   * 오늘 역할을 손댄 흔적 (`TacticAssignment.roleMemo`) — **화면이 대가를 저장 전에
+   * 낼 수 있게** 함께 보낸다. `role`은 그날 아침의 역할(대가의 기준)이고 `paid`는
+   * 오늘 이미 깎인 총량이다. 오늘 손대지 않았으면 null이고 기준은 `roleId`다.
+   */
+  roleToday: { role: string; paid: number } | null;
   /** 전술판 좌표 (배치가 있을 때) — 자유 배치 UI의 그리기 기준 */
   assignedPoint: BoardPoint | null;
   /** 전술 적응도 — 이 전술을 얼마나 익혔나 */
@@ -1295,7 +1305,17 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       const slotFit = (position: string, role?: string) =>
         observedFit(observed, observation, position, role);
       const assignedSlot = liveSlot?.entry.position ?? assignment?.position ?? null;
-      const assignedRoleId = liveSlot?.entry.roleId ?? assignment?.roleId;
+      /**
+       * **자리가 있는가** — 역할이 성립하는 조건이다 (player.md §3.1).
+       *
+       * 벤치·예비 배치에는 좌표가 없어 `position`이 주 포지션으로 채워지는데, 그걸
+       * 자리로 치면 화면은 그 자리의 역할 목록을 켜고 코어는 그 역할을 받지 않는다 —
+       * 화면은 CF라 말하고 오류는 ST라 답하던 지점이다.
+       */
+      const slotted = (liveSlot?.role ?? assignment?.role) === "starting";
+      const assignedRoleId = slotted
+        ? (liveSlot?.entry.roleId ?? assignment?.roleId)
+        : undefined;
       const shownOverall = observedOverall(p.attributes.overall, observation);
       const slotValue = assignedSlot ? slotFit(assignedSlot, assignedRoleId) : null;
       return {
@@ -1344,15 +1364,20 @@ export function buildOfficeViews(state: GameState): OfficeViews {
             ? ROLE_KO[assignment.role]
             : "스쿼드") as SquadViewRow["role"],
         assignedPosition: assignedSlot,
-        roleId: assignedSlot ? (assignedRoleId ?? defaultRoleOf(assignedSlot)) : null,
-        roleOptions: assignedSlot
-          ? rolesFor(assignedSlot).map((r) => ({
-              id: r.id,
-              ko: r.ko,
-              abbr: r.abbr,
-              desc: r.desc,
-            }))
-          : [],
+        roleId: slotted && assignedSlot ? (assignedRoleId ?? defaultRoleOf(assignedSlot)) : null,
+        roleOptions:
+          slotted && assignedSlot
+            ? rolesFor(assignedSlot).map((r) => ({
+                id: r.id,
+                ko: r.ko,
+                abbr: r.abbr,
+                desc: r.desc,
+              }))
+            : [],
+        roleToday:
+          slotted && assignment?.roleMemo?.date === state.date
+            ? { role: assignment.roleMemo.role, paid: assignment.roleMemo.paid }
+            : null,
         assignedPoint: liveSlot?.entry.point ?? pointOf.get(p.id) ?? null,
         // 저장은 소수지만 화면은 눈금이다 — 87.4와 87.7을 감독이 구분할 일은 없다
         familiarity: Math.round(assignment?.familiarity ?? 60),
