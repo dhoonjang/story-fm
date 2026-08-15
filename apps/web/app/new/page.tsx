@@ -46,7 +46,6 @@ export default function NewGamePage() {
   const [teamId, setTeamId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [background, setBackground] = useState("");
-  const [hover, setHover] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -93,8 +92,6 @@ export default function NewGamePage() {
   const stepIndex = STEPS.findIndex((s) => s.key === step);
   const leagueTeams = teams.filter((t) => t.leagueId === leagueId).sort(byTier);
   const ring = ringPoints(leagues.length || 1);
-  /** 고리에서 지금 불이 들어온 리그 — 손이 올라간 쪽, 없으면 고른 쪽 */
-  const litLeague = hover ?? leagueId;
 
   async function start() {
     if (!teamId || !name.trim() || !background.trim()) return;
@@ -167,30 +164,20 @@ export default function NewGamePage() {
       </div>
 
       {step === "league" && (
-        <>
+        <section className="onboarding-step">
           <h1>어느 리그입니까?</h1>
           {leagues.length === 0 && !error ? (
             <LeagueRingSkeleton />
           ) : (
             /**
-             * 리그는 목록이 아니라 **고리**다 — 다섯 리그가 정오각형의 꼭짓점에 서고
-             * 손이 올라간 쪽으로만 살이 밝아진다. 어느 하나가 위가 아니라는 것을
-             * 배치가 말한다 (칸을 위아래로 쌓으면 첫 줄이 곧 서열로 읽힌다).
+             * 리그는 목록이 아니라 **고리**다 — 리그가 정n각형의 꼭짓점에 서고
+             * 한가운데는 부임이 놓일 자리로 비워 둔다. 어느 하나가 위가 아니라는
+             * 것을 배치가 말한다 (칸을 위아래로 쌓으면 첫 줄이 곧 서열로 읽힌다).
              */
             <div className="league-ring" data-testid="league-ring">
               <svg viewBox="0 0 100 100" aria-hidden>
                 <polygon className="ring-edge" points={ringPolygon(ring)} />
-                {ring.map((p, i) => (
-                  <line
-                    key={leagues[i].id}
-                    className={`ring-spoke${litLeague === leagues[i].id ? " lit" : ""}`}
-                    x1="50"
-                    y1="50"
-                    x2={p.x}
-                    y2={p.y}
-                  />
-                ))}
-                <circle className="ring-hub" cx="50" cy="50" r="7" />
+                <circle className="ring-hub" cx="50" cy="50" r="9" />
               </svg>
               <span className="ring-hub-label" aria-hidden>
                 부임
@@ -200,10 +187,6 @@ export default function NewGamePage() {
                   key={l.id}
                   className={`league-node${leagueId === l.id ? " selected" : ""}`}
                   style={{ left: `${ring[i].x}%`, top: `${ring[i].y}%` }}
-                  onMouseEnter={() => setHover(l.id)}
-                  onMouseLeave={() => setHover(null)}
-                  onFocus={() => setHover(l.id)}
-                  onBlur={() => setHover(null)}
                   onClick={() => selectLeague(l.id)}
                   data-testid={`league-${l.id}`}
                 >
@@ -213,11 +196,11 @@ export default function NewGamePage() {
               ))}
             </div>
           )}
-        </>
+        </section>
       )}
 
       {step === "team" && (
-        <>
+        <section className="onboarding-step">
           <p className="step-context" data-testid="step-context">
             {league?.name ?? ""}
             {league ? ` · ${league.country}` : ""}
@@ -238,11 +221,11 @@ export default function NewGamePage() {
               </button>
             ))}
           </div>
-        </>
+        </section>
       )}
 
       {step === "manager" && team && (
-        <>
+        <section className="onboarding-step">
           {/* 앞에서 고른 것이 여기 남아 맥락이 된다 — 마지막 단계는 부임 확인이다 */}
           <div className="appointment" data-testid="appointment">
             <div className="appointment-club">{team.name}</div>
@@ -280,7 +263,7 @@ export default function NewGamePage() {
           >
             {team.name} 감독으로 부임한다
           </button>
-        </>
+        </section>
       )}
 
       {error && <p className="error-text">{error}</p>}
