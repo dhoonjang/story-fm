@@ -1500,8 +1500,8 @@ textarea {
  */
 .rail-hint-line {
   display: grid;
-  /* `1fr`만으로는 글자 칸이 내용보다 작아지지 않는다 — 줄이지 못하면 말줄임이
-     안 먹고 카드가 320px 밖으로 늘어난다 */
+  /* `1fr`만으로는 글자 칸이 내용보다 작아지지 않는다 — 줄이지 못하면 긴 항목
+     하나가 카드를 320px 밖으로 늘인다 */
   grid-template-columns: 14px minmax(0, 1fr);
   gap: 6px;
   align-items: start;
@@ -1521,15 +1521,16 @@ textarea {
   height: 13px;
 }
 /**
- * 한 줄은 **한 줄이다** — 접히면 세 줄 상한이 뜻을 잃고 카드가 글자 벽이 된다.
- * 넘치는 줄은 말줄임으로 자른다: 무엇이 바뀌었는지는 앞머리에 있고, 전문은
- * 칩을 눌러 펼친 상세에 있다.
+ * ⚠️ **말줄임으로 자르지 않는다.** 알림은 "무엇이 바뀌었나"를 읽는 자리인데
+ * 글자를 잘라내면 정작 그 값이 `…` 뒤로 숨는다 — 벽을 없애려다 답을 없앤다.
+ *
+ * 길이는 **코어가** 잡는다: 항목은 건수와 갈래까지만 적고(`SkillBrief`), 줄이
+ * 넘치면 "외 N건"으로 접는다. 여기서는 칸을 벗어나지 않게만 두른다.
  */
 .rail-hint-what {
   min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* 긴 이름 하나가 카드를 320px 밖으로 밀지 않게 — 자르지는 않고 넘겨 싣는다 */
+  overflow-wrap: anywhere;
 }
 /* 머리줄 — 무엇을 한 스킬인가. 이어지는 항목엔 붙지 않는다 */
 .rail-hint-lead {
@@ -1551,9 +1552,6 @@ textarea {
   font-size: var(--fs-2xs);
   line-height: 1.4;
   color: var(--dim);
-  /* 사족도 한 줄 — 부모의 말줄임은 이 블록 안까지 오지 않는다 */
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .rail-hint-what i em {
   font-style: normal;
