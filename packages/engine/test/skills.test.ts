@@ -4,8 +4,11 @@ import {
   naturalPositionOf,
   positionAtPoint,
   positionGroupOf,
+  ROLE_CHANGE_LOSS,
+  roleChangeCost,
   roleDistance,
   roleFit,
+  rolesFor,
   weightSlotOf,
 } from "@story-fm/domain";
 import {
@@ -664,6 +667,38 @@ describe("주장·전술·개인 지시", () => {
     ).toBeUndefined();
   });
 
+  it("벤치 선수에겐 역할을 걸 수 없다 — 주 포지션으로 대신 검증하지 않는다", () => {
+    const state = createTestGame(7);
+    // 최전방 선수를 CF 라인으로 옮겨 CF 역할을 준다 — 선발 정상 경로는 그대로 통과한다
+    const fw = assignmentsOf(state, state.userTeamId, "starting").find((a) => a.position === "ST")!;
+    expect(setPlayerTactic(state, { playerId: fw.playerId, position: "CF" }).ok).toBe(true);
+    const onPitch = setPlayerRole(state, { playerId: fw.playerId, role: "false-nine" });
+    expect(onPitch.ok, onPitch.message).toBe(true);
+
+    // 명단 화살표로 벤치와 맞바꾼다 — 벤치 배치엔 좌표가 없어 position이 주 포지션이 된다
+    const spare = assignmentsOf(state, state.userTeamId, "bench").find((a) => a.position === "ST")!;
+    const swapped = setLineup(state, {
+      starting: currentLineup(state).map((s) =>
+        s.playerId === fw.playerId ? { ...s, playerId: spare.playerId } : s,
+      ),
+      bench: [fw.playerId],
+    });
+    expect(swapped.ok, swapped.message).toBe(true);
+    const benched = assignmentsOf(state, state.userTeamId).find((a) => a.playerId === fw.playerId)!;
+    expect(benched.role).toBe("bench");
+    expect(benched.position).toBe("ST");
+
+    const res = setPlayerRole(state, { playerId: fw.playerId, role: "false-nine" });
+    expect(res.ok, "자리 없는 배치에 역할이 걸렸다").toBe(false);
+
+    // 버그의 핵심: 주 포지션으로 대신 검증하면 화면은 CF라 말하는데 반려는 ST 목록을 내민다
+    expect(res.message).not.toContain("없는 역할입니다");
+    for (const r of rolesFor(benched.position)) {
+      expect(res.message, `주 포지션 역할 목록이 새어 나왔다: ${r.id}`).not.toContain(r.id);
+    }
+    expect(res.message).toContain("선발");
+  });
+
   it("역할을 바꾸면 화면의 전력과 적응도가 실제로 움직인다", () => {
     const state = createTestGame(7);
     const cb = assignmentsOf(state, state.userTeamId, "starting").find(
@@ -697,6 +732,11 @@ describe("주장·전술·개인 지시", () => {
     expect(far).toBeGreaterThan(near);
     // 같은 역할이면 0 — 다시 눌러도 손해가 없다
     expect(roleDistance("CB", "libero", "libero")).toBe(0);
+
+    // 대가 공식은 도메인 하나가 갖는다 — 코어와 전술판이 같은 값을 본다
+    expect(roleChangeCost("CB", "ball-playing-defender", "no-nonsense-cb")).toBe(
+      Math.round(far * ROLE_CHANGE_LOSS),
+    );
 
     const state = createTestGame(7);
     const cb = assignmentsOf(state, state.userTeamId, "starting").find(
