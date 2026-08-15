@@ -15,10 +15,13 @@ import { CARD_SKILLS, PANEL_OF, hasRailHint } from "../lib/panel-hints";
  */
 
 /**
- * 경기 중에만 부를 수 있는 스킬 — 그때는 장부 레일이 없고 경기 탭만 선다.
- * 지시가 반영된 증거는 판세 뷰가 "공략 중"으로 보여주므로 칩만 남는다.
+ * 경기 중에만 부를 수 있고 **장부에 흔적을 남기지 않는** 스킬 — 그때는 장부
+ * 레일이 아예 서지 않고(`game-screen`은 경기 중 `PANELS`를 그리지 않는다) 지시는
+ * 경기가 끝나면 사라진다. 그래서 갈 말풍선이 없다. 대신 증거는 **판세 뷰**가
+ * 세운다 — 공략은 "공략 중"으로, 지역 플랜은 패킷의 새 키포인트로 선다
+ * (`strength-packet.ts` — "지역 플랜: …"). 채팅에는 칩만 남는다.
  */
-const MATCH_ONLY = new Set(["exploit_point"]);
+const MATCH_ONLY = new Set(["exploit_point", "set_match_plan"]);
 
 /**
  * 코어가 한 일 — 늘 `silent`로 실려 칩이 되지 않는다. 경기 진행은 감독이 부른
