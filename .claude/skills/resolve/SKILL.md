@@ -2,7 +2,7 @@
 name: resolve
 description: >-
   Start work on a dhoonjang/story-fm issue — the one whose number is passed as an
-  argument, or the most urgent smallest open one if none is — in a fresh Orca
+  argument, or the most urgent oldest open one if none is — in a fresh Orca
   worktree cut off latest main, with a Claude Agent Teams session launched into it
   that writes the docs, opens the draft PR and runs the issue's tasks in parallel
   lanes. Use when the user says "다음 작업 시작해", "이슈 하나 잡고 시작해",
@@ -12,9 +12,9 @@ description: >-
 
 # Resolve the next issue
 
-Two halves. **§1–§2 you run here**: pick the issue and launch a worktree with a
-Claude Agent Teams session already in it. **§3–§7 that session runs**, inside the
-worktree, and this one stops.
+Two halves. **§1–§2-1 you run here**: pick the issue, launch a worktree with a
+Claude Agent Teams session already in it, and watch that session actually take the
+briefing. **§3–§7 that session runs**, inside the worktree, and this one stops.
 
 The checkout you were called from is never touched — it stays on `main`, and
 whatever is uncommitted there belongs to someone else.
@@ -33,10 +33,10 @@ Closed, assigned to someone else, or already carrying an open PR (`gh pr list
 make it free; two branches on one issue is the thing this check exists to
 prevent.
 
-Missing a `priority/` or `size/` label is fine here — the user chose it, and the
-labels only ever existed to let the search choose. Say they are missing and carry
-on. A missing `## 작업` list is not fine: §4 reads it. Write one yourself in §3
-before splitting anything.
+A missing `priority/` label is fine here — the user chose it, and the label only
+ever existed to let the search choose. Say it is missing and carry on. A missing
+`## 작업` list is not fine: §4 reads it. Write one yourself in §3 before splitting
+anything.
 
 Then go to §2.
 
@@ -49,21 +49,20 @@ gh issue list --state open --limit 100 --json number,title,labels,assignees,url
 Choose by this order, no judgment applied:
 
 1. **Priority** — `priority/xhigh`, else `high`, else `mid`, else `low`.
-2. **Size** within that tier — `size/s`, else `size/m`, else `size/l`.
-3. **Oldest issue number** within that cell.
+2. **Oldest issue number** within that tier. Nothing else breaks the tie — not
+   how big the `## 작업` list looks, not which one reads easier.
 
 Skip an issue if it has an assignee, or if `gh pr list --state open --search
 '<number>'` shows a PR already pointing at it — someone is on it. `orca worktree
 ps` shows what the other worktrees are already holding; an issue claimed there is
 taken too.
 
-An issue missing a `priority/` or `size/` label is not a candidate. If unlabeled
-issues exist, say so at the end so they can be triaged, but do not pick one.
+An issue missing a `priority/` label is not a candidate. If unlabeled issues
+exist, say so at the end so they can be triaged, but do not pick one.
 
 Nothing selectable → say so and stop. Do not invent work.
 
-State the pick and why it won (`priority/high` + `size/s`, oldest of two) before
-moving on.
+State the pick and why it won (`priority/high`, oldest of two) before moving on.
 
 ## 2. Launch the worktree with a team session in it
 
@@ -98,22 +97,48 @@ Read .claude/skills/resolve/SKILL.md and run it from §3 on. You are the lead in
 this worktree; the branch is not created yet.
 ```
 
-Then claim the issue so a later `resolve` skips it, and report the handoff:
+Then claim the issue so a later `resolve` skips it:
 
 ```bash
 gh issue edit <n> --add-assignee @me
 ```
 
-Report the issue, the worktree path and the terminal handle from the JSON
-(`result.agentTerminalHandle`, else `result.startupTerminal.handle`) — `orca
-terminal read --terminal <handle>` is how anyone checks on it. **Then stop.** Do
-not enter the worktree and do not start the work; the session over there owns it
-now, and two leads on one branch overwrite each other.
-
 **If the launch fails** — no `orca`, or Agent Teams undetected (it needs both the
 `orca` CLI and `claude` on PATH, and is unsupported on Windows/WSL) — fall back:
 create the worktree without `--agent`, `EnterWorktree({ path })`, and run §3
 onward yourself, solo. Say which path you took.
+
+## 2-1. Watch the briefing take hold, then stop
+
+**Launched is not started.** The prompt is injected after the session comes up,
+and a prompt that never ran leaves an empty worktree that nobody notices for an
+hour. Do not report a handoff you have not seen land.
+
+Read the agent terminal — the handle is in the JSON (`result.agentTerminalHandle`,
+else `result.startupTerminal.handle`):
+
+```bash
+orca terminal read --terminal <handle>
+```
+
+It has taken hold when the briefing text is echoed at the prompt **and** the
+session is doing something with it — a tool call, a plan, its own output. Two
+minutes in, the branch and the draft PR are the harder proof:
+
+```bash
+gh pr list --state open --search '<n>' --json number,url,isDraft
+```
+
+Give it minutes, not seconds — read again at a slower cadence rather than in a
+tight loop (foreground `sleep` is blocked; wait with `Monitor`). If the terminal
+sits at an empty prompt with the briefing unconsumed, **send it again to the same
+handle** (`orca terminal send`) — never create a second worktree for the same
+issue.
+
+Then report: the issue and why it won, the worktree path, the terminal handle,
+and what you saw the session doing. **Then stop.** Do not enter the worktree and
+do not start the work; the session over there owns it now, and two leads on one
+branch overwrite each other.
 
 ---
 
@@ -257,7 +282,8 @@ ready, lands it and tears the worktree down.
 ## Report
 
 From the launching session: the issue and why it won, the worktree path, the
-terminal handle, and that the work has been handed to the session running there.
+terminal handle, and **what you saw that session doing with the briefing** — the
+handoff is only real once it has taken hold (§2-1).
 
 From the worktree session: branch name, draft PR URL, and — if you fanned out —
 the lane table with who owns what. Then get on with the work.
