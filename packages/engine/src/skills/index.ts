@@ -82,12 +82,27 @@ export interface SkillResult {
   message: string;
   /**
    * 화면이 카드로 그릴 **구조화된 결과** — 채우는 스킬만 채운다.
-   * 없으면 UI가 칩 + 요약으로 폴백하므로, 넣지 않는 것이 기본이다.
+   * 넣지 않는 것이 기본이고, 시장 스킬만은 `MarketSkillResult`로 강제된다.
    */
   payload?: unknown;
   /** 결이 좋은가 — 대화형 스킬의 칩 색 (펼치지 않아도 알게) */
   tone?: "good" | "bad";
 }
+
+/**
+ * **시장 스킬의 반환 계약** — 성공했으면 카드가 반드시 있다.
+ *
+ * 협상·스카우트는 갈 장부가 없어서 채팅 카드가 유일한 자리다(`CARD_SKILLS`).
+ * 예전엔 `payload`가 optional이라 빠뜨려도 컴파일이 통과했고, 화면이 조용히
+ * 칩으로 폴백해 **금액·확률·기한이 줄글에 접힌 채** 아무도 모르고 지나갔다
+ * (매각 오퍼가 실제로 그랬다). 이제 성공 경로에 카드가 없으면 타입이 막는다.
+ *
+ * 실패(`ok: false`)에는 카드가 없다 — 반려 메시지가 곧 결과다.
+ */
+export type MarketSkillResult =
+  | { ok: true; payload: MarketCard; message: string; tone?: "good" | "bad" }
+  /** 실패 분기의 `payload?: undefined`는 `SkillResult`와 구조를 맞추기 위한 것이다 */
+  | { ok: false; payload?: undefined; message: string; tone?: "good" | "bad" };
 
 // ── 선수 지목 ───────────────────────────────────────────
 //
@@ -1264,8 +1279,18 @@ export function setTactics(state: GameState, spec: Partial<TacticsSpec>): SkillR
   }
 
   const wasAt = currentFamiliarity(tactics);
-  // 떠나기 전에 각자 지금까지 쌓은 숙련도를 기억에 남긴다 (되돌아올 때 되찾는다)
-  rememberTactics(tactics, state.date);
+  const inMatch = state.phase === "match";
+  /**
+   * 떠나기 전에 각자 지금까지 쌓은 숙련도를 기억에 남긴다 (되돌아올 때 되찾는다).
+   *
+   * ⚠️ **경기 중에는 적지 않는다.** 경기 중 조정은 새 전술을 배우는 것이 아니라서
+   * (아래 주석·`restoreTactics`) 적응도를 되돌리는데, 기억만 남으면 그 경기에서
+   * 잠깐 거친 조합이 **익힌 전술로 영구히** 남는다 — 나중에 평시에 그 조합으로
+   * 바꾸면 재적응 없이 그때 값을 되찾고, `DRILLED_LIMIT`을 잠식해 진짜 훈련한
+   * 기억을 밀어낸다. 킥오프 전술의 숙련도는 매일 `settleTactics`가 적고, 경기가
+   * 끝나면 전술이 킥오프 상태로 돌아오므로 다음 날 다시 적힌다 — 잃는 기억은 없다.
+   */
+  if (!inMatch) rememberTactics(tactics, state.date);
   tactics.spec = parsed.data;
 
   /**
@@ -1288,7 +1313,6 @@ export function setTactics(state: GameState, spec: Partial<TacticsSpec>): SkillR
    * 그래도 0은 아니다 — 갑자기 바뀐 지시를 못 따라가는 선수는 늘 있고,
    * 좌표·역할 변경은 각 배치와 역할 적합도 경로에서 별도로 값을 치른다.
    */
-  const inMatch = state.phase === "match";
   retuneFamiliarity(state, tactics, before, parsed.data, inMatch ? IN_MATCH_FAMILIARITY_LOSS : 1);
 
   // 감독에게 보이는 건 팀 눈금이다 — 개인값의 평균(파생)
@@ -1759,7 +1783,7 @@ export function applyNarrativeEvent(
  * 잠재력 추정을 좁힌다 — 한 번 보고 성장 여력을 단정하는 스카우트는 없다
  * (SCOUT_REPEAT_LIMIT까지 · scouting.ts 규약).
  */
-export function scoutPlayer(state: GameState, ref: string): SkillResult {
+export function scoutPlayer(state: GameState, ref: string): MarketSkillResult {
   const pick = anyPlayer(state, ref);
   if (!pick.ok) return pick;
   const player = pick.player;

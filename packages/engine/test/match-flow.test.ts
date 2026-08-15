@@ -22,6 +22,7 @@ import {
   userSide,
 } from "@story-fm/engine";
 import { advanceToMatchday, createTestGame, playMockMatch } from "./helpers";
+import { tacticsSignature } from "@story-fm/domain";
 import { zoneGrid } from "@story-fm/sim";
 
 describe("경기 흐름 (overview §4)", () => {
@@ -184,7 +185,6 @@ describe("경기 흐름 (overview §4)", () => {
     const side = userSide(state);
     const packetSide = () =>
       side === "home" ? state.pendingMatch!.packet.home : state.pendingMatch!.packet.away;
-    const before = packetSide();
     // 격자는 홈 시점 좌표라 원정의 왼쪽 공격은 홈의 오른쪽 수비 칸에 나타난다.
     const gridBand = side === "home" ? "attack" : "defense";
     const gridLane = side === "home" ? "left" : "right";
@@ -423,6 +423,38 @@ describe("경기 후 전술 복원", () => {
       (a) => a.playerId === target.playerId,
     );
     expect(after?.familiarity).toBe(before);
+  });
+
+  it("경기 중 거친 전술은 익힌 전술로 남지 않는다", () => {
+    const state = createTestGame(5);
+    advanceToMatchday(state);
+    startMatch(state);
+    const tactics = () => tacticsOf(state, state.userTeamId);
+    const kickoff = tacticsSignature(tactics().spec);
+
+    // 경기 중 두 번 바꾼다 — 하프타임에 압박을 올리고 뒤에 멘탈리티까지 여는 전형
+    setTactics(state, { pressing: 5 });
+    const midMatch = [tacticsSignature(tactics().spec)];
+    setTactics(state, { mentality: 5 });
+    midMatch.push(tacticsSignature(tactics().spec));
+    expect(new Set(midMatch).has(kickoff)).toBe(false);
+
+    let guard = 30;
+    while (state.pendingMatch && state.pendingMatch.ledger.phase !== "finished" && guard-- > 0) {
+      advanceSegment(state);
+    }
+    finalizeMatch(state);
+
+    // 그 경기의 대응은 그 경기에서 끝난다 — 기억에도 남지 않아야 한다
+    for (const a of tactics().assignments) {
+      const signatures = (a.drilled ?? []).map((d) => d.signature);
+      expect(signatures.filter((s) => midMatch.includes(s))).toEqual([]);
+    }
+    // 킥오프 전술의 기억은 그대로다 (평시 `settleTactics`가 적어 둔 것)
+    const starters = assignmentsOf(state, state.userTeamId, "starting");
+    expect(starters.every((a) => (a.drilled ?? []).some((d) => d.signature === kickoff))).toBe(
+      true,
+    );
   });
 });
 
