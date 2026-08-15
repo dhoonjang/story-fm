@@ -11,6 +11,29 @@ import {
   type ChatTurn,
 } from "@story-fm/engine";
 
+/** 응답에 실을 장부 — 라우트가 **자기가 바꾼 것만** 고른다 */
+export type ViewKey = keyof OfficeViews;
+
+/**
+ * 바뀐 뷰만 실은 응답 — 화면이 쥔 payload 위에 **뷰 단위로 얹힌다**.
+ *
+ * 전술판은 조작이 멎으면 저장하므로(`AUTOSAVE_MS`) 판을 짜는 동안 이 응답이 3초마다
+ * 나간다. 그때마다 전체 payload를 돌려주면 화면이 `setGame`으로 통째로 갈리며
+ * 채팅·순위·일정까지 다시 그려진다 — 감독은 전술판만 만졌는데.
+ */
+export interface GameSlice {
+  id: string;
+  /** 이 응답이 실은 뷰만 들어 있다 — 나머지는 화면이 쥔 것이 그대로 남는다 */
+  views: Partial<OfficeViews>;
+  /**
+   * 서버가 아는 채팅 길이 — **턴이 지나간 뒤 닿은 조각을 가르는 자다.**
+   *
+   * 저장은 턴보다 앞선 상태에서 출발하므로 늦게 닿은 조각을 그대로 얹으면 방금 받은
+   * 턴 결과를 되감는다. 조각에는 `chat`이 없으니(그게 여기 없는 이유다) 길이만 싣는다.
+   */
+  chatLength: number;
+}
+
 /** API 응답 페이로드 — 클라이언트가 소비하는 직렬화 가능한 뷰 모델 */
 export interface GamePayload {
   id: string;
@@ -126,7 +149,23 @@ function matchLogsOf(state: GameState): GamePayload["matchLogs"] {
   return logs;
 }
 
-export function toPayload(state: GameState): GamePayload {
+/**
+ * 상태를 응답으로 — **뷰를 고르면 그 뷰만 실은 조각이 나간다.**
+ *
+ * 고르지 않으면 전부다. 시간이 흐르는 길(턴)은 무엇이든 바꿀 수 있어 통째로 보내야
+ * 하지만, 라우트는 자기가 무엇을 바꿨는지 안다 — 그만큼만 내려보낸다.
+ */
+export function toPayload(state: GameState): GamePayload;
+export function toPayload(state: GameState, only: readonly ViewKey[]): GameSlice;
+export function toPayload(state: GameState, only?: readonly ViewKey[]): GamePayload | GameSlice {
+  if (only) {
+    const views = buildOfficeViews(state);
+    return {
+      id: state.id,
+      views: Object.fromEntries(only.map((key) => [key, views[key]])) as Partial<OfficeViews>,
+      chatLength: state.chat.length,
+    };
+  }
   return {
     id: state.id,
     date: state.date,

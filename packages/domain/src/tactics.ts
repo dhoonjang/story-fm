@@ -992,6 +992,17 @@ export const FAMILIARITY_MAX = 100;
 export const clampFamiliarity = (x: number): number =>
   Math.max(FAMILIARITY_MIN, Math.min(FAMILIARITY_MAX, x));
 
+/**
+ * **진짜 신입의 기준선** — 선반에도 없는 선수가 처음 판에 오를 때의 시작값.
+ *
+ * 그대로 주지는 않는다: 코어는 `min(기준선, 팀 적응도)`로 잡아
+ * (`newcomerFamiliarity`) 팀이 재적응 중일 때 신입이 고참보다 전술을 잘 아는
+ * 역전을 막는다. 전술판도 판에 올리는 순간 같은 값을 내야 하므로 domain에 산다.
+ *
+ * ⚠️ **돌아온 선수에게 물릴 값이 아니다.** 2군·예비를 다녀온 선수의 적응도는
+ * 선반(`ShelvedFamiliarity`)에 있고 그게 이긴다 (→ docs/data/player.md §7.3).
+ */
+export const FAMILIARITY_BASELINE = 60;
 /** 아래 구간에서 판정을 그대로 받는 배율 — 가속은 두지 않는다 */
 const GAIN_EARLY_BOOST = 1;
 

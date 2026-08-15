@@ -153,6 +153,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const note = lineupChangeNote(state, before);
     if (note) recordEdit(state, "lineup", note);
     saveGame(state);
-    return NextResponse.json(toPayload(state));
+    /**
+     * **바꾼 것은 스쿼드 하나다.** 전술판은 조작이 멎을 때마다 저장하므로 판을 짜는
+     * 동안 이 응답이 3초마다 나간다 — 전부를 실으면 감독은 전술판만 만졌는데
+     * 채팅·순위·일정까지 매번 다시 그려진다. `edits`는 뷰에 없고, 경기 중에는 위에서
+     * 409로 막았으니 `match`도 달라지지 않는다.
+     */
+    return NextResponse.json(toPayload(state, ["squad"]));
   });
 }

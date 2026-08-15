@@ -1224,6 +1224,25 @@ describe("적응도 왕복 — 2군 · 자리 · 천장 100", () => {
     expect(assignmentOf(state, cb.playerId)!.familiarity).toBeCloseTo(start, 6);
   });
 
+  it("선반에 있는 선수의 행은 판에 올렸을 때의 값을 미리 낸다", () => {
+    const state = createTestGame(7);
+    const cb = cbOf(state);
+    assignmentOf(state, cb.playerId)!.familiarity = 95;
+    expect(setLineup(state, { starting: without(state, cb.playerId), bench: [] }).ok).toBe(true);
+
+    const rows = buildOfficeViews(state).squad.players;
+    const shelved = rows.find((x) => x.id === cb.playerId)!;
+    // 화면이 min(60, 팀)을 스스로 계산하면 돌아온 주전을 60으로 예고했다가 튄다
+    expect(shelved.familiarityIfSlotted, "선반이 기준선을 이긴다").toBe(95);
+
+    // 선반에도 없는 선수는 그대로 진짜 신입의 기준선이다
+    const teamLevel = squadFamiliarity(state, state.userTeamId);
+    const newcomer = rows.find(
+      (x) => assignmentOf(state, x.id) === undefined && x.id !== cb.playerId,
+    )!;
+    expect(newcomer.familiarityIfSlotted).toBe(Math.round(Math.min(60, teamLevel)));
+  });
+
   it("적응도 100인 선수가 전술을 바꿨다 되돌리면 다시 100이다", () => {
     const state = createTestGame(7);
     const tactics = userTactics(state);

@@ -66,6 +66,8 @@ State the pick and why it won (`priority/high`, oldest of two) before moving on.
 
 ## 2. Launch the worktree with a team session in it
 
+Three commands, in this order. **Do not pass `--prompt`** — see below.
+
 ```bash
 git fetch origin --prune
 orca worktree create --repo name:story-fm \
@@ -73,7 +75,6 @@ orca worktree create --repo name:story-fm \
   --base-branch origin/main \
   --issue <n> \
   --agent claude-agent-teams \
-  --prompt '<briefing, below>' \
   --activate --json
 ```
 
@@ -86,16 +87,40 @@ orca worktree create --repo name:story-fm \
   up the work has Agent Teams on from its first turn and its teammates open as
   native Orca panes. Plain `--agent claude` cannot fan out later — the mode is
   fixed at launch.
-- `--prompt` is injected into that session after it starts.
 
-The briefing is short — the worktree holds the repo, so point at the skill rather
-than restating it:
+Take the handle from the JSON — `result.agentTerminalHandle`, else
+`result.startupTerminal.handle` — then **block until the TUI can accept input**:
 
+```bash
+orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 120000 --json
 ```
-Issue #<n> — <title>.
+
+This is the step that makes the handoff fast and certain. Orca's setup hook runs
+`pnpm install` in the new worktree, so the agent's prompt is not ready the moment
+`create` returns; `tui-idle` returns the instant it is, and not a second later.
+
+Then send the briefing **and submit it** — `--enter` is what presses Return:
+
+```bash
+orca terminal send --terminal <handle> --enter --json --text 'Issue #<n> — <title>.
 Read .claude/skills/resolve/SKILL.md and run it from §3 on. You are the lead in
-this worktree; the branch is not created yet.
+this worktree; the branch is not created yet.'
 ```
+
+The briefing is short on purpose — the worktree holds the repo, so point at the
+skill rather than restating it.
+
+⚠️ **`--prompt` on `worktree create` types the text but does not reliably submit
+it here.** Twice it left the briefing sitting unsent at the prompt while the
+launching session waited minutes on `terminal read`. `wait` + `send --enter` is
+the documented recipe for a launch you need to be sure of (`orca skills get
+orca-cli` → Full Handoffs), and it never needs a retry. Never pass both — a
+`--prompt` that *does* land plus a `send` is the same briefing twice.
+
+⚠️ **Do not reach for `orca orchestration` here.** Its own guide names this case:
+task dispatch, `worker_done` waits and decision gates are for **supervising** a
+worker, and `resolve` is a full ownership transfer — this session stops. Creating
+a Run and a Task would add coordinator-owned tracking state that nobody reads.
 
 Then claim the issue so a later `resolve` skips it:
 
@@ -108,32 +133,21 @@ gh issue edit <n> --add-assignee @me
 create the worktree without `--agent`, `EnterWorktree({ path })`, and run §3
 onward yourself, solo. Say which path you took.
 
-## 2-1. Watch the briefing take hold, then stop
+## 2-1. Confirm it took, then stop
 
-**Launched is not started.** The prompt is injected after the session comes up,
-and a prompt that never ran leaves an empty worktree that nobody notices for an
-hour. Do not report a handoff you have not seen land.
-
-Read the agent terminal — the handle is in the JSON (`result.agentTerminalHandle`,
-else `result.startupTerminal.handle`):
+`send --enter` returning is not proof the session read it. One read confirms:
 
 ```bash
 orca terminal read --terminal <handle>
 ```
 
-It has taken hold when the briefing text is echoed at the prompt **and** the
-session is doing something with it — a tool call, a plan, its own output. Two
-minutes in, the branch and the draft PR are the harder proof:
+It has taken hold when the briefing is echoed at the prompt **and** the session is
+doing something with it — a tool call, a plan, its own output. That shows up
+within seconds of `tui-idle`, so **one read is enough**. Do not poll `gh pr list`
+for the draft PR; that is minutes of waiting for something §3 will report anyway.
 
-```bash
-gh pr list --state open --search '<n>' --json number,url,isDraft
-```
-
-Give it minutes, not seconds — read again at a slower cadence rather than in a
-tight loop (foreground `sleep` is blocked; wait with `Monitor`). If the terminal
-sits at an empty prompt with the briefing unconsumed, **send it again to the same
-handle** (`orca terminal send`) — never create a second worktree for the same
-issue.
+If the terminal still sits at an empty prompt, send it again to the **same**
+handle — never create a second worktree for the same issue.
 
 Then report: the issue and why it won, the worktree path, the terminal handle,
 and what you saw the session doing. **Then stop.** Do not enter the worktree and
