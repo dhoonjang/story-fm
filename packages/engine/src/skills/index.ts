@@ -44,6 +44,7 @@ import {
   tacticsDistance,
   withCurrentDrilled,
 } from "@story-fm/domain";
+import { recallRole, rememberRole } from "./role-memory";
 import { addDays, diffDays, sortEntries, squadReturnOf } from "../competition/calendar";
 import { clampForm, moraleToForm } from "../squad/form";
 import { canRegisterFor, registrationLine, squadRegistrationOf } from "../squad/registration";
@@ -622,24 +623,45 @@ export function setLineup(
   const teamLevel = currentFamiliarity(tactics);
   const newcomerFamiliarity = Math.min(FAMILIARITY_BASELINE, teamLevel);
   /**
+   * **덮어쓰기 전에 지금의 역할을 기억으로 넘긴다** (→ docs/data/player.md §3.1).
+   * 배치는 여기서 통째로 다시 써지므로, 벤치·예비로 내려가는 선수의 역할은 이
+   * 한 줄이 아니면 사라진다. 자리를 지키는 선수까지 함께 적는 건 같은 값을 다시
+   * 쓰는 것뿐이다 — 기억은 언제나 "그 자리에서 마지막에 맡긴 것"이다.
+   */
+  for (const old of prev.values()) {
+    if (old.roleId) rememberRole(state, old.playerId, old.position, old.roleId);
+  }
+  /**
    * 이전 배치에서 물려받는 것 — 적응도·개인 지시, 그리고 **자리가 같을 때만 역할**.
    * 자리가 바뀌면 그 역할은 존재하지 않는다(센터백의 리베로를 윙에 데려갈 수 없다).
+   * 대신 그 자리의 **기억**이 기본 역할을 갈아끼운다 — 감독이 새로 고르면 그게 이긴다.
+   * 벤치는 자리를 갖지 않으므로 역할도 들지 않는다 (위에서 기억이 받아 갔다).
    */
-  const inherit = (playerId: string, code?: string) => {
+  const inherit = (playerId: string, position: string, slotted: boolean) => {
     const old = prev.get(playerId);
-    const keepRole = old?.roleId && code && rolesFor(code).some((role) => role.id === old.roleId);
+    const oldRole = old?.roleId;
+    const keepRole =
+      oldRole !== undefined && rolesFor(position).some((role) => role.id === oldRole);
+    const roleId = !slotted
+      ? undefined
+      : keepRole
+        ? oldRole
+        : recallRole(state, playerId, position);
+    /**
+     * **오늘 역할을 손댄 흔적은 살려 둔다.** 전술판은 조작마다 배치를 다시
+     * 쓰는데, 여기서 memo가 사라지면 저장할 때마다 "오늘 아침"이 새로 잡혀
+     * 같은 결정에 값을 여러 번 치른다 — 자동 저장에 얹은 의미가 없어진다.
+     * 장부의 기준은 (선수·자리·오늘)이라 **자리가 그대로면 벤치를 다녀와도
+     * 이어진다** — 같은 날 내렸다 되돌린 결정에 값을 두 번 물리지 않기 위해서다.
+     * 자리가 바뀌면 역할도 바뀌므로 그때는 버린다.
+     */
+    const keepMemo = old?.roleMemo !== undefined && old.position === position;
     return {
       familiarity: old?.familiarity ?? newcomerFamiliarity,
       ...(old?.instruction ? { instruction: old.instruction } : {}),
       ...(old?.directive ? { directive: old.directive } : {}),
-      ...(keepRole ? { roleId: old.roleId } : {}),
-      /**
-       * **오늘 역할을 손댄 흔적은 살려 둔다.** 전술판은 조작마다 배치를 다시
-       * 쓰는데, 여기서 memo가 사라지면 저장할 때마다 "오늘 아침"이 새로 잡혀
-       * 같은 결정에 값을 여러 번 치른다 — 자동 저장에 얹은 의미가 없어진다.
-       * 자리가 바뀌면 역할도 바뀌므로 그때는 버린다.
-       */
-      ...(keepRole && old?.roleMemo ? { roleMemo: old.roleMemo } : {}),
+      ...(roleId ? { roleId } : {}),
+      ...(keepMemo ? { roleMemo: old.roleMemo } : {}),
     };
   };
   const startingAssignments: TacticAssignment[] = starting.map((s, i) => ({
@@ -647,17 +669,20 @@ export function setLineup(
     role: "starting",
     position: startCodes[i]!,
     point: startPoints[i]!,
-    ...inherit(s.playerId, startCodes[i]!),
+    ...inherit(s.playerId, startCodes[i]!, true),
   }));
   // 벤치는 전술판에 없으므로 좌표를 두지 않는다 (선발만 자리를 갖는다)
-  const benchAssignments: TacticAssignment[] = bench.map((s) => ({
-    playerId: s.playerId,
-    role: "bench",
-    position: (
+  const benchAssignments: TacticAssignment[] = bench.map((s) => {
+    const position = (
       s.position ?? naturalPositionOf(userPlayerById(state, s.playerId)!).position
-    ).toUpperCase(),
-    ...inherit(s.playerId),
-  }));
+    ).toUpperCase();
+    return {
+      playerId: s.playerId,
+      role: "bench" as const,
+      position,
+      ...inherit(s.playerId, position, false),
+    };
+  });
 
   // 무엇이 달라졌나는 **덮어쓰기 전에** 견준다 (`prev`가 옛 배치를 들고 있다)
   const changes = lineupChanges(state, prev, [...startingAssignments, ...benchAssignments]);
@@ -835,10 +860,18 @@ export function movePlayerSlot(
   const before = assignment.position;
   if (
     assignment.position !== code &&
-    assignment.roleId &&
-    !rolesFor(code).some((role) => role.id === assignment.roleId)
+    !(assignment.roleId && rolesFor(code).some((role) => role.id === assignment.roleId))
   ) {
-    delete assignment.roleId;
+    // 버려지는 역할은 **옛 자리 기준으로** 기억에 남는다 (→ docs/data/player.md §3.1)
+    if (assignment.roleId) rememberRole(state, player.id, assignment.position, assignment.roleId);
+    /**
+     * 새 자리의 기억이 그 자리의 기본 역할을 갈아끼운다. 배치에 적어 두는 이유:
+     * 화면·전력·경기가 모두 `assignment.roleId`를 읽으므로, 기억이 배치 밖에만
+     * 남으면 같은 선수의 역할이 두 값으로 갈린다.
+     */
+    const recalled = recallRole(state, player.id, code);
+    if (recalled) assignment.roleId = recalled;
+    else delete assignment.roleId;
   }
   assignment.position = code;
   assignment.point = point;
@@ -969,6 +1002,8 @@ export function setPlayerRole(
   const cost = Math.round(roleDistance(assignment.position, memo.role, def.id) * ROLE_CHANGE_LOSS);
   const before = assignment.familiarity;
   assignment.roleId = def.id;
+  // 감독이 고른 것이 그 자리의 새 기억이다 — 벤치를 다녀와도 이 결정이 남는다
+  rememberRole(state, player.id, assignment.position, def.id);
   // 오늘 이미 낸 것과의 차액만 — 왔다 갔다 해도 누적되지 않는다
   assignment.familiarity = clampFamiliarity(before - (cost - memo.paid));
   assignment.roleMemo = { ...memo, paid: cost };

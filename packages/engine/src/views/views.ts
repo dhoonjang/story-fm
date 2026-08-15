@@ -44,6 +44,7 @@ import { euroCompetitionOf } from "../competition/europe";
 import { formAngle, formLabel, formTone } from "../squad/form";
 import { GAP_CONDITION, zoneGrid } from "@story-fm/sim";
 import { moodOf } from "../squad/mood";
+import { recallRole } from "../skills/role-memory";
 import { isHomegrownFor, occupiesSquadList, squadRegistrationOf } from "../squad/registration";
 import {
   observationOf,
@@ -1295,7 +1296,16 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       const slotFit = (position: string, role?: string) =>
         observedFit(observed, observation, position, role);
       const assignedSlot = liveSlot?.entry.position ?? assignment?.position ?? null;
-      const assignedRoleId = liveSlot?.entry.roleId ?? assignment?.roleId;
+      /**
+       * 배치에 역할이 없으면 **기억이 기본 역할보다 먼저다** (→ docs/data/player.md §3.1).
+       * 벤치 배치는 역할을 들지 않으므로, 기억을 보지 않으면 감독이 정해 둔 역할이
+       * 벤치에 앉는 순간 화면에서 기본값으로 되돌아간 것처럼 보인다.
+       * 아래 `slotOverall`도 같은 값을 쓴다 — 알약과 숫자가 갈리지 않게.
+       */
+      const assignedRoleId =
+        liveSlot?.entry.roleId ??
+        assignment?.roleId ??
+        (assignedSlot ? recallRole(state, p.id, assignedSlot) : undefined);
       const shownOverall = observedOverall(p.attributes.overall, observation);
       const slotValue = assignedSlot ? slotFit(assignedSlot, assignedRoleId) : null;
       return {
