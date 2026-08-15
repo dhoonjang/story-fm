@@ -12,6 +12,8 @@ import {
   buildOfficeViews,
   createGame,
   interpretBackgroundHeuristic,
+  setLineup,
+  setPlayerRole,
   type GameState,
   type OfficeViews,
 } from "@story-fm/engine";
@@ -60,8 +62,12 @@ function boardOf(views: OfficeViews): BoardState {
   };
 }
 
-const bodyOf = (b: BoardState, server: BoardState) =>
-  lineupBody(b, new Set(server.reserve), new Map(Object.entries(server.roles)));
+/** 화면이 되찾기에 쓰는 근거 — 서버가 준 행 그대로 (자리 없는 행도 함께 온다) */
+const rowsOf = (views: OfficeViews) =>
+  new Map(views.squad.players.map((p) => [p.id, p] as const));
+
+const bodyOf = (b: BoardState, views: OfficeViews) =>
+  lineupBody(b, new Set(boardOf(views).reserve), rowsOf(views));
 
 /** 지금 걸린 것이 아닌, 그 자리에서 고를 수 있는 역할 */
 function otherRoleFor(p: SquadRow): string {
@@ -83,19 +89,19 @@ describe("판에서 내려간 선수의 역할은 함께 내려간다", () => {
       ...server,
       roles: { ...server.roles, [benched.id]: picked },
     };
-    expect(bodyOf(chosen, server).roles).toContainEqual({ playerId: benched.id, role: picked });
+    expect(bodyOf(chosen, views).roles).toContainEqual({ playerId: benched.id, role: picked });
 
     // 2) 그 선수를 명단 화살표로 벤치와 맞바꾼다
     const sub = rows.find((p) => p.role === "벤치")!;
     const slot = chosen.occupants.indexOf(benched.id);
     const occupants = chosen.occupants.map((id) => (id === benched.id ? sub.id : id));
     const bench = [...chosen.bench.filter((id) => id !== sub.id), benched.id];
-    const next = resetRolesForMovedPlayers(chosen, { ...chosen, occupants, bench });
+    const next = resetRolesForMovedPlayers({ ...chosen, occupants, bench }, rowsOf(views));
     expect(occupants[slot]).toBe(sub.id);
 
     // 자리가 없으니 역할도 없다 — 작업 사본에서 지워지고, 저장 본문에도 실리지 않는다
     expect(next.roles[benched.id]).toBeUndefined();
-    expect(bodyOf(next, server).roles.map((r) => r.playerId)).not.toContain(benched.id);
+    expect(bodyOf(next, views).roles.map((r) => r.playerId)).not.toContain(benched.id);
     // 자리에 남은 선수들의 역할은 그대로 간다
     expect(Object.keys(next.roles).every((id) => occupants.includes(id))).toBe(true);
   });
@@ -108,13 +114,13 @@ describe("판에서 내려간 선수의 역할은 함께 내려간다", () => {
       ...server,
       roles: { ...server.roles, [benched.id]: "false-nine" },
     };
-    expect(bodyOf(leaked, server).roles.map((r) => r.playerId)).not.toContain(benched.id);
+    expect(bodyOf(leaked, views).roles.map((r) => r.playerId)).not.toContain(benched.id);
   });
 
   it("선발 열한 명의 역할만 남는다 — 배치를 만질 때마다 표가 다시 좁혀진다", () => {
     const views = buildOfficeViews(game(73));
     const server = boardOf(views);
-    const next = resetRolesForMovedPlayers(server, server);
+    const next = resetRolesForMovedPlayers(server, rowsOf(views));
     expect(Object.keys(next.roles).sort()).toEqual([...server.occupants].sort());
   });
 });
@@ -131,7 +137,8 @@ function pointWhere(ok: (code: string) => boolean): BoardPoint | null {
 
 describe("자리를 옮기면 역할이 그 자리의 것이 된다", () => {
   it("새 자리에 없는 역할은 기본 역할로 돌아간다", () => {
-    const server = boardOf(buildOfficeViews(game(74)));
+    const views = buildOfficeViews(game(74));
+    const server = boardOf(views);
     // 지금 역할이 통하지 않는 자리를 찾아 그리로 끌어 옮긴다
     const index = server.occupants.findIndex((id, i) => {
       const role = server.roles[id];
@@ -148,13 +155,14 @@ describe("자리를 옮기면 역할이 그 자리의 것이 된다", () => {
     const target = pointWhere((to) => to !== from && !rolesFor(to).some((r) => r.id === before))!;
 
     const points = server.points.map((pt, i) => (i === index ? target : pt));
-    const next = resetRolesForMovedPlayers(server, { ...server, points });
+    const next = resetRolesForMovedPlayers({ ...server, points }, rowsOf(views));
     expect(next.roles[mover]).toBe(defaultRoleOf(positionAtPoint(target)));
     expect(next.roles[mover]).not.toBe(before);
   });
 
   it("새 자리에서도 유효한 역할은 그대로 둔다", () => {
-    const server = boardOf(buildOfficeViews(game(75)));
+    const views = buildOfficeViews(game(75));
+    const server = boardOf(views);
     const index = server.occupants.findIndex((id) => server.roles[id] !== undefined);
     const mover = server.occupants[index]!;
     const before = server.roles[mover]!;
@@ -164,8 +172,104 @@ describe("자리를 옮기면 역할이 그 자리의 것이 된다", () => {
     expect(target).not.toBeNull();
 
     const points = server.points.map((pt, i) => (i === index ? target! : pt));
-    const next = resetRolesForMovedPlayers(server, { ...server, points });
+    const next = resetRolesForMovedPlayers({ ...server, points }, rowsOf(views));
     expect(next.roles[mover]).toBe(before);
+  });
+});
+
+/**
+ * 역할을 맡긴 선수를 **같은 자리 기준으로** 벤치에 내린 상태 — 코어가 기억에 적고
+ * (`rememberRole`) 오늘의 흔적을 잇는(`keepMemo`) 경로를 실제로 밟아 만든다.
+ */
+function benchedWithMemory(seed: number) {
+  const state = game(seed);
+  const before = buildOfficeViews(state).squad.players;
+  const starter = before.find(
+    (p) =>
+      p.role === "선발" &&
+      p.assignedPosition !== null &&
+      p.assignedPoint !== null &&
+      p.roleOptions.some(
+        (r) => r.id !== p.roleId && roleChangeCost(p.assignedPosition!, p.roleId!, r.id) > 0,
+      ),
+  )!;
+  const position = starter.assignedPosition!;
+  const morningRole = starter.roleId!;
+  const picked = starter.roleOptions.find(
+    (r) => r.id !== morningRole && roleChangeCost(position, morningRole, r.id) > 0,
+  )!.id;
+  const paid = roleChangeCost(position, morningRole, picked);
+  expect(setPlayerRole(state, { playerId: starter.id, role: picked }).ok).toBe(true);
+
+  // 그 자리에 벤치 하나를 대신 세우고 본인은 벤치로 — 자리는 그대로고 사람만 바뀐다
+  const sub = before.find((p) => p.role === "벤치")!;
+  const res = setLineup(state, {
+    starting: before
+      .filter((p) => p.role === "선발")
+      .map((p) => ({ playerId: p.id === starter.id ? sub.id : p.id, point: p.assignedPoint! })),
+    bench: [
+      ...before.filter((p) => p.role === "벤치" && p.id !== sub.id).map((p) => ({ playerId: p.id })),
+      // 벤치도 자리를 일러 준다 — 로테이션 화면이 보내는 값이고, 코어는 이때만 흔적을 잇는다
+      { playerId: starter.id, position },
+    ],
+  });
+  expect(res.ok).toBe(true);
+
+  const views = buildOfficeViews(state);
+  const row = views.squad.players.find((p) => p.id === starter.id)!;
+  return { views, row, subId: sub.id, position, morningRole, picked, paid };
+}
+
+describe("벤치를 다녀와도 감독의 결정이 남는다", () => {
+  it("같은 자리에 다시 넣으면 저장 없이 곧바로 기억한 역할로 선다", () => {
+    const { views, row, subId, position, picked } = benchedWithMemory(80);
+    // 자리 없는 행이라 역할은 꺼져 있고, 기억만 그 자리를 가리킨다
+    expect(row.roleId).toBeNull();
+    expect(row.roleMemory[position]).toBe(picked);
+    expect(picked).not.toBe(defaultRoleOf(position));
+
+    const board = boardOf(views);
+    const slot = board.occupants.indexOf(subId);
+    expect(positionAtPoint(board.points[slot]!)).toBe(position);
+    const occupants = board.occupants.map((id) => (id === subId ? row.id : id));
+    const bench = [...board.bench.filter((id) => id !== row.id), subId];
+    const next = resetRolesForMovedPlayers({ ...board, occupants, bench }, rowsOf(views));
+
+    // 자동 저장 응답을 기다리지 않는다 — 화면이 코어와 같은 3단으로 스스로 닿는다
+    expect(next.roles[row.id]).toBe(picked);
+  });
+
+  it("화면이 되찾은 역할은 저장 본문에 실리지 않는다 — 감독이 고른 것만 실린다", () => {
+    const { views, row, subId, position, picked } = benchedWithMemory(81);
+    const board = boardOf(views);
+    const occupants = board.occupants.map((id) => (id === subId ? row.id : id));
+    const bench = [...board.bench.filter((id) => id !== row.id), subId];
+    const next = resetRolesForMovedPlayers({ ...board, occupants, bench }, rowsOf(views));
+
+    // 코어가 setLineup의 승계에서 같은 값에 닿는다 — 보내면 "이미 X입니다"만 돌아온다
+    expect(bodyOf(next, views).roles.map((r) => r.playerId)).not.toContain(row.id);
+
+    // 감독이 다른 역할을 고르면 그때는 실린다
+    const third = rolesFor(position).find((r) => r.id !== picked)!.id;
+    const chosen = { ...next, roles: { ...next.roles, [row.id]: third } };
+    expect(bodyOf(chosen, views).roles).toContainEqual({ playerId: row.id, role: third });
+  });
+
+  it("자리가 같으면 오늘 치른 값이 이어진다 — 자리가 다르면 물러 주지 않는다", () => {
+    const { row, position, morningRole, picked, paid } = benchedWithMemory(82);
+    expect(paid).toBeGreaterThan(0);
+    // 자리 없는 행에도 오늘의 흔적이 실려 온다 (기준 자리는 assignedPosition)
+    expect(row.assignedPosition).toBe(position);
+    expect(row.roleToday).toEqual({ role: morningRole, paid });
+
+    // 아침 역할로 되돌리면 낸 값이 복구되고, 같은 역할을 다시 고르는 것은 공짜다
+    expect(familiarityForRole(row, position, morningRole)).toBe(row.familiarity + paid);
+    expect(familiarityForRole(row, position, picked)).toBe(row.familiarity);
+
+    // 다른 자리에 세우면 흔적이 닿지 않는다 — 코어 keepMemo와 같은 기준이다
+    const elsewhere = pointWhere((code) => code !== position)!;
+    const other = positionAtPoint(elsewhere);
+    expect(familiarityForRole(row, other, defaultRoleOf(other))).toBe(row.familiarity);
   });
 });
 
