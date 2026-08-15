@@ -132,6 +132,7 @@ row, 지난 일 = 그대로 이력.**
 | `settlingEvents` `SettlingEvent` | 면담·팀토크·주장 지명이 새 영입에게 남긴 크레딧 | `domain/records.ts` |
 | `transferList` `TransferListing` | 이적 리스트 등재 — 호가와 함께 | `domain/records.ts` |
 | `playerTraining` `PlayerTraining` | 개인 훈련 — 겨냥한 축·배우는 자리 | `domain/records.ts` |
+| `roleMemory` `RoleMemory` | 역할 기억 — 선수 × 자리 → 마지막에 맡긴 역할 | `domain/tactics.ts` |
 | `scoutReports` `ScoutReport` | 스카우트 파견 — `completedOn === null`이 파견 중 | `domain/records.ts` |
 
 ### 3.5 진행 중인 흥정 · 세계의 부름
@@ -197,6 +198,7 @@ erDiagram
     GAME_PLAYER ||--o{ SETTLING_EVENT : "정착"
     GAME_PLAYER ||--o| TRANSFER_LISTING : "이적 리스트"
     GAME_PLAYER ||--o| PLAYER_TRAINING : "개인 훈련"
+    GAME_PLAYER ||--o{ ROLE_MEMORY : "자리별 역할 기억"
     GAME_PLAYER ||--o| PLAYER_ISSUE : "불만"
     GAME_PLAYER ||--o{ NEGOTIATION : "흥정"
 
@@ -265,7 +267,7 @@ erDiagram
 | 무엇 | 어떻게 |
 | --- | --- |
 | 필수 테이블 검사 | `players` `teams` `tactics` `finances` `contracts` `schedule` `matches` `windows` `calendar` `manager` — 하나라도 없으면 손상으로 본다 |
-| 빈 배열 채우기 | `scoutReports` `settlingEvents` `transferList` `playerTraining` `pressConferences` `aiDeals` `financeReports` |
+| 빈 배열 채우기 | `scoutReports` `settlingEvents` `transferList` `playerTraining` `roleMemory` `pressConferences` `aiDeals` `financeReports` |
 | 감독 능력치 4축 → 5축 | `media → analysis`, `training`은 50(XP는 0)으로 채우고 `media`를 지운다 |
 | `squadLevel` 분류 | 미분류가 있을 때만 — 전술 배치 선수 + OVR 상위로 25명을 1군에 |
 | 패스 스타일 | 세 갈래 문자열 → 1~5 눈금. **전술 지문**(`drilled.signature`)까지 함께 옮긴다 |
