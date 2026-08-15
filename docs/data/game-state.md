@@ -100,6 +100,7 @@
 | `finances` `TeamFinance` | 팀당 1개 — 잔고·이적 예산·원장·낙하산 | `domain/records.ts` |
 | ↳ `LedgerEntry` | 원장 한 줄 — 유저 팀만 상세, 최근 3개월 롤링 | `domain/records.ts` |
 | `financeReports` `FinanceReport` | 월간 보고서 — 영구 보존, 매월 1일 발행 | `domain/records.ts` |
+| ↳ `highlights` | 그달의 큰 비정기 항목 — 원장이 잘려도 남는 날짜·금액 | `domain/records.ts` |
 
 ### 3.3 일정 · 대회
 
@@ -243,6 +244,7 @@ erDiagram
 | 임대 복귀 | `GamePlayer.loan{fromTeamId, until}` | `teamId`는 "지금 뛰는 팀"일 뿐 |
 | 현재 부상 · 잔여 정지 | `returnedOn === null` · `lengthMatches − served` | 닫히지 않은 row가 곧 현재다 |
 | 일지(diary) | 기록 테이블 전체 | 사건은 이미 다 남아 있다 — `NARRATIVE_NOTE`(GM 기억)만 저장한다 |
+| 이적 일지의 금액 | `TRANSFER.fee` | 이적 원장은 잘리지 않는다 — 이름 옆의 금액도 거기서 나온다 |
 | 리그 소속 | `state.leagueOf?.[id] ?? 카탈로그` | 카탈로그가 기본, 세이브는 승강이 있을 때만 덮는다 |
 
 **저장하는 파생값 둘** — 예외에는 이유가 있다.
@@ -254,6 +256,9 @@ erDiagram
   내려가고, 리그 평균이 시즌마다 위로 밀린다.
 - 같은 결로 `PlayerState.moodNote`와 `SETTLING_EVENT`도 저장한다 — 원본이 그
   구간의 대화·사건인데 그건 어디에도 표로 남지 않는다.
+- `FinanceReport.highlights`도 그렇다 — 원본인 원장이 3개월 뒤 **잘린다.** 파생할
+  원본이 사라지므로 절단 전에 큰 건만 옮겨 적는다
+  (→ [finance](../simulation/finance.md) §8.2).
 
 ## 6. 세이브 호환
 
