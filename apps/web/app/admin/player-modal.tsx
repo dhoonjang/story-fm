@@ -10,6 +10,7 @@ import {
   type CatalogPosition,
   type CatalogResponse,
   type PlayerRow,
+  type TeamGroup,
 } from "./types";
 
 /**
@@ -33,7 +34,7 @@ type Mode = "create" | "edit";
 export function PlayerModal({
   mode,
   player,
-  teams,
+  teamGroups,
   defaultTeamId,
   ageRef,
   onSaved,
@@ -42,7 +43,8 @@ export function PlayerModal({
   mode: Mode;
   /** 편집 모드에서만 있다 */
   player?: PlayerRow;
-  teams: Array<{ id: string; name: string }>;
+  /** 리그로 묶은 팀 — 셀렉트의 `optgroup` 순서 그대로다 */
+  teamGroups: TeamGroup[];
   defaultTeamId: string;
   ageRef: string;
   onSaved: (data: CatalogResponse) => void;
@@ -64,8 +66,13 @@ export function PlayerModal({
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // 셀렉트를 따라간다 — 머리줄이 지금 고른 소속을 말해야 저장 전에 어디로 가는지 보인다
-  const teamName = teams.find((t) => t.id === teamId)?.name ?? player?.teamName ?? "";
+  // 셀렉트를 따라간다 — 머리줄이 지금 고른 소속을 말해야 저장 전에 어디로 가는지 보인다.
+  // 리그까지 말하는 이유: 셀렉트가 리그로 묶여 있어도 접힌 뒤엔 팀 이름만 남는다.
+  const picked = teamGroups
+    .flatMap((g) => g.teams.map((t) => ({ ...t, leagueName: g.leagueName })))
+    .find((t) => t.id === teamId);
+  const teamName = picked?.name ?? player?.teamName ?? "";
+  const where = picked ? `${picked.leagueName} · ${picked.name}` : teamName;
 
   function setPos(index: number, patch: Partial<CatalogPosition>) {
     setPositions((cur) => cur.map((p, i) => (i === index ? { ...p, ...patch } : p)));
@@ -174,7 +181,7 @@ export function PlayerModal({
       subtitle={
         mode === "create"
           ? "카탈로그에 추가합니다 — 새로 시작하는 게임부터 반영됩니다"
-          : `${teamName} · OVR ${player?.overall} · ${player?.age}세${ageRef ? ` (${ageRef} 기준)` : ""}`
+          : `${where} · OVR ${player?.overall} · ${player?.age}세${ageRef ? ` (${ageRef} 기준)` : ""}`
       }
       onClose={onClose}
       footer={
@@ -243,10 +250,14 @@ export function PlayerModal({
             onChange={(e) => setTeamId(e.target.value)}
             data-testid="player-modal-team"
           >
-            {teams.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
+            {teamGroups.map((g) => (
+              <optgroup key={g.leagueId} label={g.leagueName}>
+                {g.teams.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
         </label>
