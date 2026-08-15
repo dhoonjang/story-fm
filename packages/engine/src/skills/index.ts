@@ -1609,6 +1609,18 @@ function briefDate(date: string): string {
   return `${Number(date.slice(5, 7))}-${date.slice(8, 10)}`;
 }
 
+/**
+ * 항목에 적는 **기간** — 연도를 떼되 **해를 넘으면 뒤에 해를 붙인다.**
+ *
+ * `clear: true`는 400일 뒤까지 비운다. 연도를 그냥 떼면 `7-01~8-05`가 되어 다섯 주로
+ * 읽히는데 실제로는 열세 달이다 — 짧게 적으려다 거짓을 적는 자리다.
+ */
+function briefSpanOf(from: string, to: string): string {
+  if (from === to) return briefDate(from);
+  const sameYear = from.slice(0, 4) === to.slice(0, 4);
+  return `${briefDate(from)}~${sameYear ? "" : `'${to.slice(2, 4)} `}${briefDate(to)}`;
+}
+
 /** 항목에 적는 훈련 갈래 — 둘에서 접는다. 닫힌 enum이라 길이가 예측된다(자유 label은 안 쓴다) */
 const FOCUS_SHOWN = 2;
 
@@ -1940,7 +1952,7 @@ export function clearTraining(state: GameState, input: ClearTrainingInput): Skil
     return { ok: true, message: "그 기간에 예정된 훈련이 없습니다" };
   }
   const span = start === to ? start : `${start}~${to}`;
-  const briefSpan = start === to ? briefDate(start) : `${briefDate(start)}~${briefDate(to)}`;
+  const briefSpan = briefSpanOf(start, to);
   return {
     ok: true,
     message: asRest

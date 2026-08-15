@@ -38,6 +38,7 @@ import {
   groupOf,
   type GameState,
   type SkillBriefItem,
+  clearTraining,
   squadReturnOf,
   addDays,
 } from "@story-fm/engine";
@@ -1006,6 +1007,11 @@ describe("스킬 요약 — 화면이 세우는 항목", () => {
       label: "휴식",
       text: expect.stringMatching(/^\d+-\d\d~\d+-\d\d \d+건$/),
     });
+
+    // 해를 넘는 기간은 연도를 떼지 않는다 — `7-01~8-05`가 다섯 주로 읽히면 거짓이다
+    const wide = clearTraining(state, { from: day, to: addDays(day, 400) });
+    expect(wide.ok).toBe(true);
+    expect(wide.brief!.items[0]!.text).toMatch(/~'\d\d /);
     cleared.brief!.items.forEach(oneLine);
   });
 
