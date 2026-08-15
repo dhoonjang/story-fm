@@ -38,7 +38,7 @@ import { GET as cupGet, DELETE as cupReset } from "../app/api/admin/catalog/cup/
 import { PATCH as cupPatch } from "../app/api/admin/catalog/cup/[cupId]/route";
 import { boardExpectation, cupCatalogById } from "@story-fm/engine";
 import { FORMATION_LAYOUTS } from "@story-fm/domain";
-import type { GamePayload } from "../lib/store";
+import type { GamePayload, GameSlice } from "../lib/store";
 
 /** API 통합 테스트 — 라우트 핸들러를 직접 호출 (mock GM 모드) */
 
@@ -50,6 +50,25 @@ const json = (body: unknown) =>
   });
 
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
+
+/**
+ * 저장 응답 — 라인업·스쿼드 라우트는 **자기가 바꾼 뷰 하나만** 싣는다.
+ * 순위표·일정·채팅이 함께 오면 그게 이 함수가 막는 회귀다.
+ */
+async function savedSlice(res: Response): Promise<GameSlice> {
+  expect(res.status).toBe(200);
+  const slice = (await res.json()) as GameSlice;
+  expect(Object.keys(slice.views)).toEqual(["squad"]);
+  return slice;
+}
+
+const savedSquad = async (res: Response) => (await savedSlice(res)).views.squad!;
+
+/** 랜딩이 보내는 요청 — 카탈로그를 묻지 않으므로 게임 목록만 온다 */
+const gameList = () =>
+  getCatalog(new Request("http://test.local/api/games")).json() as Promise<{
+    games: Array<{ id: string; teamName: string }>;
+  }>;
 
 async function turn(id: string, message: string): Promise<GamePayload> {
   const res = await postTurn(json({ message }), params(id));
@@ -63,19 +82,23 @@ beforeAll(() => {
 });
 
 describe("API — 온보딩부터 경기까지", () => {
-  it("팀 카탈로그와 게임 목록을 제공한다", async () => {
-    const res = getCatalog();
-    const data = await res.json();
+  it("팀 카탈로그는 물었을 때만 온다 — 랜딩은 게임 목록만 받는다", async () => {
+    const data = await getCatalog(new Request("http://test.local/api/games?catalog=1")).json();
     // 부임 대상은 1부 96팀 — 2부 클럽은 컵 참가 전용이라 목록에 없다
     expect(data.teams).toHaveLength(96);
     expect(data.leagues).toHaveLength(5);
-    expect(Array.isArray(data.games)).toBe(true);
     // 보드 기대는 시즌 평가가 쓰는 문구 그대로 — 화면이 tier로 따로 만들지 않는다
     const teams = data.teams as Array<{ id: string; expectation: string }>;
     expect(teams.find((t) => t.id === "arsenal")?.expectation).toBe(
       boardExpectation("arsenal").label,
     );
     expect(teams.every((t) => t.expectation.length > 0)).toBe(true);
+
+    // 랜딩이 받는 것 — 카탈로그는 한 조각도 실리지 않는다
+    const landing = await getCatalog(new Request("http://test.local/api/games")).json();
+    expect(Array.isArray(landing.games)).toBe(true);
+    expect(landing.teams).toBeUndefined();
+    expect(landing.leagues).toBeUndefined();
   });
 
   it("게임을 만들면 목록에 뜨고, 삭제하면 사라진다", async () => {
@@ -84,15 +107,13 @@ describe("API — 온보딩부터 경기까지", () => {
     );
     const game = (await created.json()) as GamePayload;
 
-    const listed = await (getCatalog().json() as Promise<{
-      games: Array<{ id: string; teamName: string }>;
-    }>);
+    const listed = await gameList();
     const found = listed.games.find((g) => g.id === game.id);
     expect(found?.teamName).toBe("에버튼");
 
     const del = await deleteGameRoute(new Request("http://test.local"), params(game.id));
     expect(del.status).toBe(200);
-    const after = await (getCatalog().json() as Promise<{ games: Array<{ id: string }> }>);
+    const after = await gameList();
     expect(after.games.some((g) => g.id === game.id)).toBe(false);
     // 삭제 후 조회는 404
     const gone = await getGame(new Request("http://test.local"), params(game.id));
@@ -211,10 +232,9 @@ describe("API — 온보딩부터 경기까지", () => {
         slot.position = players.find((p) => p.id === slot.playerId)!.position;
       }
     }
-    const res = await postLineup(json({ starting, bench }), params(game.id));
-    expect(res.status).toBe(200);
-    const updated = (await res.json()) as GamePayload;
-    const changed = updated.views.squad.players.find((p) => p.id === target.id);
+    const slice = await savedSlice(await postLineup(json({ starting, bench }), params(game.id)));
+    const updated = slice.views.squad!;
+    const changed = updated.players.find((p) => p.id === target.id);
     // 배치 포지션이 반영되고, 주 포지션은 그대로다 (v6 분리)
     expect(changed?.assignedPosition).toBe("RCM");
     expect(changed?.role).toBe("선발");
@@ -223,12 +243,11 @@ describe("API — 온보딩부터 경기까지", () => {
      * (team.md §6 · game-state.md §5). 11명을 전부 제 주 포지션에 세웠으니
      * 그 좌표가 읽히는 이름이 곧 팀의 모양이다.
      */
-    expect(updated.views.squad.formation).toBe("4-2-3-1");
+    expect(updated.formation).toBe("4-2-3-1");
     // 선발이 정확히 11명
-    expect(updated.views.squad.players.filter((p) => p.role === "선발")).toHaveLength(11);
-    // 전술판 저장은 채팅에 전송하지 않는다 (사용자 요청) — 마지막 턴은 온보딩 모델 턴 그대로
-    const userTurns = updated.chat.filter((t) => t.role === "user");
-    expect(userTurns).toHaveLength(0);
+    expect(updated.players.filter((p) => p.role === "선발")).toHaveLength(11);
+    // 전술판 저장은 채팅에 전송하지 않는다 (사용자 요청) — 대화는 온보딩 턴 그대로다
+    expect(slice.chatLength).toBe(game.chat.length);
   });
 
   it("전술판 자유 배치 — 좌표를 주면 포지션은 그 좌표에서 파생된다", async () => {
@@ -242,13 +261,13 @@ describe("API — 온보딩부터 경기까지", () => {
     const preset = FORMATION_LAYOUTS["4-2-3-1"];
     const starting = [gk, ...outfield].map((p, i) => ({ playerId: p.id, point: preset[i]! }));
 
-    const res = await postLineup(json({ starting, bench: [] }), params(game.id));
-    expect(res.status).toBe(200);
-    const after = (await res.json()) as GamePayload;
+    const after = await savedSquad(
+      await postLineup(json({ starting, bench: [] }), params(game.id)),
+    );
     // 프리셋 좌표를 그대로 보냈으니 배치 코드도 프리셋 슬롯과 같고, 좌표에서 읽는
     // 이름도 그 프리셋 이름이다
-    expect(after.views.squad.formation).toBe("4-2-3-1");
-    const startersAfter = after.views.squad.players.filter((p) => p.role === "선발");
+    expect(after.formation).toBe("4-2-3-1");
+    const startersAfter = after.players.filter((p) => p.role === "선발");
     expect(startersAfter).toHaveLength(11);
     // 더블 볼란치는 좌우로 갈린다 (중앙 라인도 왼쪽·오른쪽을 구분한다)
     expect(
@@ -266,18 +285,16 @@ describe("API — 온보딩부터 경기까지", () => {
         ? { playerId: p.id, point: { x: pivot.assignedPoint!.x, y: 30 } }
         : { playerId: p.id, point: p.assignedPoint! },
     );
-    const res2 = await postLineup(json({ starting: starting2, bench: [] }), params(game.id));
-    expect(res2.status).toBe(200);
-    const after2 = (await res2.json()) as GamePayload;
-    const moved = after2.views.squad.players.find((p) => p.id === pivot.id)!;
+    const after2 = await savedSquad(
+      await postLineup(json({ starting: starting2, bench: [] }), params(game.id)),
+    );
+    const moved = after2.players.find((p) => p.id === pivot.id)!;
     expect(moved.assignedPosition).not.toBe("CDM");
     expect(moved.assignedPoint!.y).toBe(30);
     // 볼란치 하나가 위 줄로 올라갔으니 모양도 따라 바뀐다 — 4백 + DM 1 + 미드 4 + ST 1
-    expect(after2.views.squad.formation).toBe("4-1-4-1");
+    expect(after2.formation).toBe("4-1-4-1");
     // 나머지 10명의 자리는 건드리지 않는다 (한 명만 옮긴 것이 한 명에게만 반영)
-    const unchanged = after2.views.squad.players.filter(
-      (p) => p.role === "선발" && p.id !== pivot.id,
-    );
+    const unchanged = after2.players.filter((p) => p.role === "선발" && p.id !== pivot.id);
     for (const p of unchanged) {
       const before = startersAfter.find((q) => q.id === p.id)!;
       expect(p.assignedPosition, `${p.name}`).toBe(before.assignedPosition);
@@ -315,8 +332,7 @@ describe("API — 온보딩부터 경기까지", () => {
       }),
       params(game.id),
     );
-    expect(res.status).toBe(200);
-    const after = ((await res.json()) as GamePayload).views.squad;
+    const after = await savedSquad(res);
     const promoted = after.players.find((p) => p.id === reserve.id)!;
     const demoted = after.players.find((p) => p.id === dropped.id)!;
     expect(promoted.squadLevel).toBe("first");
@@ -352,8 +368,7 @@ describe("API — 온보딩부터 경기까지", () => {
       }),
       params(game.id),
     );
-    expect(res.status).toBe(200);
-    const after = ((await res.json()) as GamePayload).views.squad;
+    const after = await savedSquad(res);
     expect(after.tactics.mentality).toBe(5);
     expect(after.tactics.pressing).toBe(4);
     expect(after.tactics.passStyle).toBe(5);
@@ -554,7 +569,10 @@ describe("API — 온보딩부터 경기까지", () => {
     const target = squadOf(list, "arsenal").find((p) => p.position !== "GK")!;
 
     // 이동은 다른 편집과 한 요청에 섞여 와도 된다
-    const moveRes = await catalogPatch(json({ teamId: "chelsea", finishing: 91 }), pparams(target.id));
+    const moveRes = await catalogPatch(
+      json({ teamId: "chelsea", finishing: 91 }),
+      pparams(target.id),
+    );
     expect(moveRes.status).toBe(200);
     const moved = (await moveRes.json()) as CatalogList & { message: string };
     expect(squadOf(moved, "arsenal").some((p) => p.id === target.id)).toBe(false);

@@ -5,7 +5,7 @@ import path from "node:path";
 import { loadGame } from "@story-fm/engine";
 import { POST as createGame } from "../app/api/games/route";
 import { POST as postLineup } from "../app/api/games/[id]/lineup/route";
-import type { GamePayload } from "../lib/store";
+import type { GamePayload, GameSlice } from "../lib/store";
 
 /**
  * 라인업 저장의 역할 반려 — player.md §3.1 「역할 하나의 반려가 배치를 되돌리지
@@ -84,7 +84,7 @@ describe("라인업 저장 — 역할 반려", () => {
 
     // 역할 하나가 반려돼도 저장은 성사되고, 배치는 요청대로 반영된다
     expect(res.status).toBe(200);
-    const after = ((await res.json()) as GamePayload).views.squad.players;
+    const after = ((await res.json()) as GameSlice).views.squad!.players;
     expect(after.find((p) => p.id === sub.id)!.role).toBe("선발");
     expect(after.find((p) => p.id === benched.id)!.role).not.toBe("선발");
     // 자리가 없으니 역할도 없다 — 되돌아온 페이로드가 곧 화면의 정정이다
@@ -119,7 +119,7 @@ describe("라인업 저장 — 역할 반려", () => {
       params(game.id),
     );
     expect(res.status).toBe(200);
-    const after = ((await res.json()) as GamePayload).views.squad.players;
+    const after = ((await res.json()) as GameSlice).views.squad!.players;
     // 배치는 반영되고, 어긋난 역할은 자리가 정해 준 값 그대로다
     expect(after.find((p) => p.id === mover.id)!.assignedPoint!.y).toBe(30);
     expect(after.find((p) => p.id === target.id)!.roleId).toBe(target.roleId);

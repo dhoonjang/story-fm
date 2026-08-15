@@ -54,7 +54,8 @@ export default function NewGamePage() {
     let cancelled = false;
     async function load(attempt: number) {
       try {
-        const r = await fetch("/api/games");
+        // 카탈로그를 묻는 건 이 화면뿐이다 — 랜딩은 저장된 게임 목록만 받는다
+        const r = await fetch("/api/games?catalog=1");
         if (!r.ok) throw new Error(String(r.status));
         const data = await r.json();
         if (cancelled) return;

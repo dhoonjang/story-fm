@@ -28,7 +28,7 @@ import {
   snapToBoard,
   type BoardPoint,
 } from "@story-fm/domain";
-import type { GamePayload } from "@/lib/store";
+import type { GamePayload, GameSlice } from "@/lib/store";
 import type { MatchBoardOrder } from "@/lib/match-orders";
 import { slotOverallOf } from "@/lib/slot-overall";
 import {
@@ -865,7 +865,8 @@ export function SquadView({
   saver: sharedSaver,
 }: {
   game: GamePayload;
-  onUpdate: (payload: GamePayload) => void;
+  /** 저장이 바꾼 뷰만 온다 — 화면이 쥔 payload에 얹는 일은 바깥이 한다 */
+  onUpdate: (slice: GameSlice) => void;
   onGoToChat: () => void;
   /**
    * 전술판을 펼쳐 두었나 — **접으면 명단만 남는다.**
