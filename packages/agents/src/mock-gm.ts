@@ -18,6 +18,7 @@ import {
   describeNextFixture,
   describeOdds,
   expiringContracts,
+  digestLines,
   finalizeMatch,
   openRenewal,
   renewalExpectation,
@@ -195,8 +196,9 @@ function advanceMatchTurn(
   }
   let text = renderSegment(state, step.plan.events, step.plan.stop);
   if (step.plan.stop === "full_time") {
+    // 모의 GM은 화면 장면이 곧 보고다 — 갈래를 나누지 않고 전부 싣는다
     const digest = finalizeMatch(state);
-    text += `\n${coach(state)} ${digest.join(" · ")}`;
+    text += `\n${coach(state)} ${digestLines(digest).join(" · ")}`;
   }
   return text;
 }

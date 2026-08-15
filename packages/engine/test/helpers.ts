@@ -9,6 +9,7 @@ import {
   runMedicals,
   cupCatalogById,
   euroCompetitionOf,
+  digestLines,
   finalizeMatch,
   interpretBackgroundHeuristic,
   isInjured,
@@ -153,7 +154,8 @@ export function playMockMatch(state: GameState): string[] {
     const step = advanceSegment(state);
     if (!step.ok) throw new Error(step.message);
     if (step.plan?.stop === "full_time") {
-      return finalizeMatch(state);
+      // 갈래를 나눈 결산을 여기선 평탄화해 돌려준다 — 이 반환을 읽는 테스트가 여럿이다
+      return digestLines(finalizeMatch(state));
     }
   }
   throw new Error("경기가 끝나지 않았습니다");
