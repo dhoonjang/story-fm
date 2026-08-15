@@ -28,7 +28,8 @@ export { dataDir };
  * 내구성 원칙 (유저 게임이 업데이트·재시작·크래시에도 살아남게):
  * 1. 쓰기는 원자적 — tmp에 먼저 쓰고 rename으로 교체. 쓰다 죽어도 본 파일 온전.
  * 2. 교체 전 직전 세이브를 `.bak`으로 복사 — 본 파일이 깨져도 복구 가능.
- * 3. 읽기는 방어적 — 파싱 실패 시 `.bak` 폴백, 그래도 안 되면 null(스킵).
+ * 3. 읽기는 방어적 — 파싱 실패 시 `.bak` 폴백, 그래도 안 되면 null(목록에는
+ *    실패 사유와 함께 남는다).
  * 4. 스키마 진화 대비 — 로드 시 누락 필드를 마이그레이션으로 채운다.
  * 5. 데이터 디렉터리(.data/)는 gitignore·빌드 산출물 밖 — 재빌드/브랜치 전환
  *    (git clean 포함)에도 세이브가 남는다.
@@ -86,7 +87,7 @@ export function saveGame(state: GameState): void {
   // 3. 원자적 교체
   renameSync(tmp, main);
   // 4. 목록용 요약 — 없거나 깨져도 목록이 본문에서 다시 만든다
-  writeSummary(state.id, summaryOf(state));
+  writeSummary(state.id, { readable: true, ...summaryOf(state) });
 }
 
 /**
@@ -94,16 +95,36 @@ export function saveGame(state: GameState): void {
  * 2 = v6 정규화(카탈로그/게임 분리, 일정 축, 기록 테이블)
  * 3 = 다중 리그 (MATCH.competitionId, 리그별 순위표)
  * 6 = 능력치 15축 + 포지션 가중치 (attribute-model.md — 6축 세이브와 비호환)
- * 구버전 세이브는 로드를 거부하고 목록에서 건너뛴다 — 부분 마이그레이션이
- * 조용히 깨진 상태를 만드는 것보다 낫다.
+ * 구버전 세이브는 로드를 거부한다 — 부분 마이그레이션이 조용히 깨진 상태를
+ * 만드는 것보다 낫다. 다만 감추지는 않는다: 목록에는 실패 사유와 함께 선다.
  */
 export const SAVE_VERSION = 6;
 
-/** 로드 시 버전·필수 필드 검사. 통과하지 못하면 null (목록에서 스킵) */
-function validate(raw: unknown): GameState | null {
-  if (!raw || typeof raw !== "object") return null;
+/** 세이브를 열지 못한 이유 — 문장은 화면이 쓴다, 코어는 사실만 싣는다 */
+export type UnreadableReason = "version" | "corrupt";
+
+interface LoadFailure {
+  ok: false;
+  reason: UnreadableReason;
+  /** 그 파일이 스스로 말하는 버전. 읽어낼 수 없으면 null */
+  saveVersion: number | null;
+  /** 파일이 갖고 있으면 그 값 (없으면 목록이 mtime으로 채운다) */
+  createdAt: string | null;
+}
+
+type LoadResult = { ok: true; state: GameState } | LoadFailure;
+
+/** 로드 시 버전·필수 필드 검사. 통과하지 못하면 사유를 그대로 돌려준다 */
+function validate(raw: unknown): LoadResult {
+  if (!raw || typeof raw !== "object") {
+    return { ok: false, reason: "corrupt", saveVersion: null, createdAt: null };
+  }
   const s = raw as Record<string, unknown>;
-  if (s.saveVersion !== SAVE_VERSION) return null;
+  const saveVersion = typeof s.saveVersion === "number" ? s.saveVersion : null;
+  const createdAt = typeof s.createdAt === "string" ? s.createdAt : null;
+  if (s.saveVersion !== SAVE_VERSION) {
+    return { ok: false, reason: "version", saveVersion, createdAt };
+  }
   // v6 필수 테이블 — 하나라도 없으면 손상으로 본다
   const required = [
     "players",
@@ -118,7 +139,9 @@ function validate(raw: unknown): GameState | null {
     "manager",
   ];
   for (const key of required) {
-    if (s[key] === undefined || s[key] === null) return null;
+    if (s[key] === undefined || s[key] === null) {
+      return { ok: false, reason: "corrupt", saveVersion, createdAt };
+    }
   }
   /**
    * 스키마 진화 — 배열 필드는 없으면 빈 배열로 채운다 (세이브 호환 원칙).
@@ -242,29 +265,37 @@ function validate(raw: unknown): GameState | null {
   // 페르소나 도입 — 수석코치가 없던 세이브를 채운다. 생성이 시드로 결정적이라
   // 그 세이브의 코치는 늘 같은 사람이고, 그래서 버전을 올리지 않아도 된다.
   ensurePersonas(state);
-  return state;
+  return { ok: true, state };
 }
 
-function readState(file: string): GameState | null {
+function readState(file: string): LoadResult {
   try {
     return validate(JSON.parse(readFileSync(file, "utf8")));
   } catch {
-    return null;
+    return { ok: false, reason: "corrupt", saveVersion: null, createdAt: null };
   }
 }
 
-export function loadGame(id: string): GameState | null {
+/**
+ * 본 파일 우선, 실패·부재 시 `.bak` 폴백 (크래시 중 손상 복구).
+ * 실패를 보고하는 것은 **둘 다 못 열었을 때**뿐이고, 그때의 사유는 먼저 시도한
+ * 파일의 것이다 — 감독이 보는 것은 본 파일이다.
+ */
+function readGame(id: string): LoadResult {
   const { main, bak } = paths(id);
-  // 본 파일 우선, 파싱 실패·부재 시 백업 폴백 (크래시 중 손상 복구)
-  if (existsSync(main)) {
-    const state = readState(main);
-    if (state) return state;
+  let failure: LoadFailure | null = null;
+  for (const file of [main, bak]) {
+    if (!existsSync(file)) continue;
+    const result = readState(file);
+    if (result.ok) return result;
+    failure ??= result;
   }
-  if (existsSync(bak)) {
-    const state = readState(bak);
-    if (state) return state;
-  }
-  return null;
+  return failure ?? { ok: false, reason: "corrupt", saveVersion: null, createdAt: null };
+}
+
+export function loadGame(id: string): GameState | null {
+  const result = readGame(id);
+  return result.ok ? result.state : null;
 }
 
 export function listGames(): string[] {
@@ -278,7 +309,7 @@ export function listGames(): string[] {
   );
 }
 
-/** 게임 목록 화면용 요약 — 저장된 게임을 최근 생성 순으로 (손상 파일은 건너뜀) */
+/** 게임 목록 화면용 요약 — 저장된 게임을 최근 생성 순으로 */
 export interface GameSummary {
   id: string;
   teamName: string;
@@ -288,6 +319,23 @@ export interface GameSummary {
   phase: GamePhase;
   createdAt: string;
 }
+
+/** 열 수 없는 세이브 — 로드는 거부하되 목록에서 감추지는 않는다 */
+export interface UnreadableGame {
+  readable: false;
+  id: string;
+  /** version = 세이브 버전 불일치, corrupt = 파싱 실패거나 필수 테이블 누락 */
+  reason: UnreadableReason;
+  /** 그 파일이 스스로 말하는 버전. 읽어낼 수 없으면 null */
+  saveVersion: number | null;
+  /** 지금 코어가 여는 SAVE_VERSION */
+  expected: number;
+  /** 파일이 갖고 있으면 그 값, 없으면 파일 mtime의 ISO 문자열 — 목록 정렬 축 */
+  createdAt: string;
+}
+
+/** 목록 한 줄 — 열리는 세이브와 못 여는 세이브가 같은 배열에 선다 */
+export type GameListEntry = ({ readable: true } & GameSummary) | UnreadableGame;
 
 function summaryOf(state: GameState): GameSummary {
   return {
@@ -316,29 +364,83 @@ function fingerprint(file: string): string | null {
   }
 }
 
-/** 사이드카 요약 — 형태가 어긋나거나 세이브가 바뀌었으면 없는 셈 친다 */
-function readSummary(id: string): GameSummary | null {
+/** 파일이 스스로 날짜를 말하지 못할 때의 정렬 축 — 파일 mtime */
+function fileTime(id: string): string {
+  const { main, bak } = paths(id);
+  for (const file of [main, bak]) {
+    try {
+      return new Date(statSync(file).mtimeMs).toISOString();
+    } catch {
+      /* 다음 파일로 */
+    }
+  }
+  return new Date(0).toISOString();
+}
+
+/**
+ * 사이드카 — 형태가 어긋나거나 세이브가 바뀌었으면 없는 셈 친다.
+ * 성공과 실패를 모두 읽는다. 실패도 캐시해야 못 여는 세이브가 목록을 열 때마다
+ * 수 MB를 다시 파싱하지 않는다.
+ */
+function readSummary(id: string): GameListEntry | null {
   const { main, meta } = paths(id);
   try {
     const raw: unknown = JSON.parse(readFileSync(meta, "utf8"));
     if (!raw || typeof raw !== "object") return null;
     const s = raw as Record<string, unknown>;
+    if (s.source !== fingerprint(main)) return null;
+    if (s.unreadable !== undefined) {
+      if (!s.unreadable || typeof s.unreadable !== "object") return null;
+      const f = s.unreadable as Record<string, unknown>;
+      if (f.reason !== "version" && f.reason !== "corrupt") return null;
+      if (typeof f.createdAt !== "string") return null;
+      if (f.saveVersion !== null && typeof f.saveVersion !== "number") return null;
+      return {
+        readable: false,
+        id,
+        reason: f.reason,
+        saveVersion: f.saveVersion,
+        expected: SAVE_VERSION,
+        createdAt: f.createdAt,
+      };
+    }
     for (const key of ["id", "teamName", "managerName", "date", "phase", "createdAt"]) {
       if (typeof s[key] !== "string") return null;
     }
     if (typeof s.season !== "number") return null;
-    if (s.source !== fingerprint(main)) return null;
-    return s as unknown as GameSummary;
+    // 지문은 파일이 바뀐 것만 잡는다 — 파일이 그대로여도 코어가 여는 버전이
+    // 올라가면 옛 성공 캐시는 거짓이 된다. 그 필드가 없는 사이드카(이 필드
+    // 도입 전에 쓰인 것)는 지금까지대로 믿는다.
+    if (s.saveVersion !== undefined && s.saveVersion !== SAVE_VERSION) return null;
+    return {
+      readable: true,
+      id: s.id as string,
+      teamName: s.teamName as string,
+      managerName: s.managerName as string,
+      season: s.season,
+      date: s.date as string,
+      phase: s.phase as GamePhase,
+      createdAt: s.createdAt as string,
+    };
   } catch {
     return null;
   }
 }
 
 /** 요약 + 지문을 사이드카에 쓴다 (best-effort — 실패해도 목록이 본문에서 만든다) */
-function writeSummary(id: string, summary: GameSummary): void {
+function writeSummary(id: string, entry: GameListEntry): void {
   const { main, meta } = paths(id);
+  const body = entry.readable
+    ? { ...entry, saveVersion: SAVE_VERSION }
+    : {
+        unreadable: {
+          reason: entry.reason,
+          saveVersion: entry.saveVersion,
+          createdAt: entry.createdAt,
+        },
+      };
   try {
-    writeFileSync(meta, JSON.stringify({ ...summary, source: fingerprint(main) }), "utf8");
+    writeFileSync(meta, JSON.stringify({ ...body, source: fingerprint(main) }), "utf8");
   } catch {
     /* 캐시 실패는 치명적이지 않음 */
   }
@@ -354,19 +456,29 @@ function writeSummary(id: string, summary: GameSummary): void {
  *
  * 사이드카가 없거나 깨졌으면(옛 세이브·손으로 넣은 파일) **본문에서 만들어
  * 채워 둔다** — 한 번 느리고 그다음부터 빠르다.
+ *
+ * 못 여는 세이브도 같은 배열에 선다 — 거부는 하되 감추지 않는다. 실패도
+ * 사이드카에 적으므로 목록을 열 때마다 본문을 다시 파싱하지 않는다.
  */
-export function listGameSummaries(): GameSummary[] {
+export function listGameSummaries(): GameListEntry[] {
   return listGames()
     .map((id) => {
       const cached = readSummary(id);
       if (cached) return cached;
-      const state = loadGame(id);
-      if (!state) return null;
-      const summary = summaryOf(state);
-      writeSummary(id, summary);
-      return summary;
+      const result = readGame(id);
+      const entry: GameListEntry = result.ok
+        ? { readable: true, ...summaryOf(result.state) }
+        : {
+            readable: false,
+            id,
+            reason: result.reason,
+            saveVersion: result.saveVersion,
+            expected: SAVE_VERSION,
+            createdAt: result.createdAt ?? fileTime(id),
+          };
+      writeSummary(id, entry);
+      return entry;
     })
-    .filter((x): x is GameSummary => x !== null)
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
 }
 

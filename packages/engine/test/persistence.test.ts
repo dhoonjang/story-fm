@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -11,8 +11,30 @@ import {
   loadGame,
   saveGame,
   SAVE_VERSION,
+  type GameListEntry,
+  type GameSummary,
+  type UnreadableGame,
 } from "@story-fm/engine";
 import { createTestGame } from "./helpers";
+
+/** 목록에서 한 줄을 집어 갈래까지 좁힌다 — 유니온이므로 테스트가 먼저 밝힌다 */
+function entryOf(id: string): GameListEntry {
+  const found = listGameSummaries().find((e) => e.id === id);
+  if (!found) throw new Error(`${id}: 목록에 서지 않았다`);
+  return found;
+}
+
+function readableOf(id: string): GameSummary {
+  const entry = entryOf(id);
+  if (!entry.readable) throw new Error(`${id}: 열리는 세이브로 서지 않았다 (${entry.reason})`);
+  return entry;
+}
+
+function unreadableOf(id: string): UnreadableGame {
+  const entry = entryOf(id);
+  if (entry.readable) throw new Error(`${id}: 못 여는 세이브로 서지 않았다`);
+  return entry;
+}
 
 let dir: string;
 
@@ -23,6 +45,9 @@ beforeAll(() => {
 afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
   delete process.env.STORY_FM_DATA_DIR;
+});
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아남는다", () => {
@@ -120,7 +145,7 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
     // 저장하면 요약도 따라 움직인다 — 목록이 옛 날짜를 보여 주면 안 된다
     state.date = "2027-01-02";
     saveGame(state);
-    expect(listGameSummaries().find((s) => s.id === state.id)?.date).toBe("2027-01-02");
+    expect(readableOf(state.id).date).toBe("2027-01-02");
   });
 
   it("세이브가 밖에서 바뀌면 캐시된 요약을 믿지 않는다", () => {
@@ -132,7 +157,7 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
     raw.date = "2028-03-04";
     writeFileSync(file, JSON.stringify(raw), "utf8");
     // 파일 지문이 달라졌으므로 본문에서 다시 읽는다
-    expect(listGameSummaries().find((s) => s.id === state.id)?.date).toBe("2028-03-04");
+    expect(readableOf(state.id).date).toBe("2028-03-04");
   });
 
   it("삭제하면 요약도 함께 사라진다", () => {
@@ -153,8 +178,85 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
     delete raw.contracts;
     writeFileSync(file, JSON.stringify(raw), "utf8");
     expect(loadGame(state.id)).toBeNull();
-    // 목록에서도 조용히 건너뛴다
-    expect(listGameSummaries().some((s) => s.id === state.id)).toBe(false);
+    // 거부는 하되 감추지 않는다 — 목록에는 사유와 함께 선다
+    const entry = unreadableOf(state.id);
+    expect(entry.reason).toBe("version"); // 버전부터 갈린다 (필수 테이블은 그다음)
+    expect(entry.saveVersion).toBeNull(); // 파일이 버전을 말하지 못한다
+    expect(entry.expected).toBe(SAVE_VERSION);
+    expect(entry.createdAt).toBe(state.createdAt);
+  });
+
+  it("버전이 맞지 않는 세이브는 두 숫자와 함께 목록에 선다", () => {
+    const state = createTestGame(44);
+    saveGame(state);
+    const file = path.join(dataDir(), `${state.id}.json`);
+    const raw = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+    raw.saveVersion = SAVE_VERSION - 1; // 한 세대 전 세이브
+    writeFileSync(file, JSON.stringify(raw), "utf8");
+
+    expect(loadGame(state.id)).toBeNull();
+    expect(unreadableOf(state.id)).toEqual({
+      readable: false,
+      id: state.id,
+      reason: "version",
+      saveVersion: SAVE_VERSION - 1,
+      expected: SAVE_VERSION,
+      createdAt: state.createdAt,
+    });
+  });
+
+  it("못 여는 세이브도 사이드카에 적혀 목록을 열 때마다 본문을 다시 파싱하지 않는다", () => {
+    const state = createTestGame(45);
+    saveGame(state);
+    const file = path.join(dataDir(), `${state.id}.json`);
+    const meta = path.join(dataDir(), `${state.id}.meta.json`);
+    const raw = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+    raw.saveVersion = SAVE_VERSION - 1;
+    writeFileSync(file, JSON.stringify(raw), "utf8");
+    rmSync(meta); // 성공 시절의 캐시는 지운다 — 실패를 처음부터 판정하게
+
+    expect(unreadableOf(state.id).reason).toBe("version"); // 1회차: 본문에서 판정
+    expect(existsSync(meta), "실패가 사이드카에 남지 않았다").toBe(true);
+
+    // 2회차는 본문을 열지 않는다 — 세이브 본문만 한 몸에 수 MB다
+    const bodySize = readFileSync(file, "utf8").length;
+    const parse = vi.spyOn(JSON, "parse");
+    expect(unreadableOf(state.id).reason).toBe("version");
+    const parsedBody = parse.mock.calls.filter(
+      (call) => typeof call[0] === "string" && call[0].length >= bodySize,
+    );
+    expect(parsedBody, "두 번째 호출이 세이브 본문을 다시 파싱했다").toHaveLength(0);
+  });
+
+  it("코어가 여는 버전이 올라가면 옛 성공 캐시를 믿지 않는다", () => {
+    const state = createTestGame(47);
+    saveGame(state);
+    const meta = path.join(dataDir(), `${state.id}.meta.json`);
+    const cached = JSON.parse(readFileSync(meta, "utf8")) as Record<string, unknown>;
+
+    // 사이드카 도입기의 옛 형태(버전 필드 없음) — 지금까지대로 그대로 믿는다
+    delete cached.saveVersion;
+    cached.date = "1999-01-01";
+    writeFileSync(meta, JSON.stringify(cached), "utf8");
+    expect(readableOf(state.id).date).toBe("1999-01-01");
+
+    // 세이브 버전이 지금 코어와 다른 캐시는 파일이 그대로여도 거짓이다
+    cached.saveVersion = SAVE_VERSION - 1;
+    writeFileSync(meta, JSON.stringify(cached), "utf8");
+    expect(readableOf(state.id).date).toBe(state.date); // 본문에서 다시 읽는다
+  });
+
+  it("실패 캐시는 파일이 바뀌면 무효가 된다 — 다시 판정한다", () => {
+    const state = createTestGame(46);
+    saveGame(state);
+    const file = path.join(dataDir(), `${state.id}.json`);
+    const body = readFileSync(file, "utf8");
+    writeFileSync(file, "not json", "utf8");
+    expect(unreadableOf(state.id).reason).toBe("corrupt");
+
+    // 파일이 제자리로 돌아오면 지문이 달라져 실패 캐시가 무효가 된다
+    writeFileSync(file, body, "utf8");
+    expect(readableOf(state.id).id).toBe(state.id);
   });
 
   it("4축 시절 감독 세이브가 5축으로 옮겨진다 (버전은 안 올린다)", () => {
@@ -206,14 +308,18 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
     expect(loadGame(`${state.id}`)).toBeNull();
   });
 
-  it("목록은 손상된 파일을 건너뛰고 나머지를 반환한다", () => {
+  it("목록은 손상된 파일도 멀쩡한 게임과 같은 배열에 세운다", () => {
     const good = createTestGame(5);
     saveGame(good);
     // 완전히 깨진(백업도 없는) 파일
     writeFileSync(path.join(dataDir(), "game-broken-xxxx.json"), "not json", "utf8");
     const summaries = listGameSummaries();
-    expect(summaries.some((s) => s.id === good.id)).toBe(true);
-    expect(summaries.some((s) => s.id === "game-broken-xxxx")).toBe(false);
+    expect(summaries.some((s) => s.readable && s.id === good.id)).toBe(true);
+    const broken = summaries.find((s) => s.id === "game-broken-xxxx");
+    expect(broken?.readable).toBe(false);
+    expect(broken).toMatchObject({ reason: "corrupt", saveVersion: null, expected: SAVE_VERSION });
+    // 파일이 날짜를 말하지 못하면 mtime이 정렬 축이 된다
+    expect(broken?.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
   it("삭제는 본 파일과 백업을 모두 제거한다", () => {
