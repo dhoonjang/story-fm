@@ -343,7 +343,9 @@ export interface CalendarEventView {
     | "yellow"
     | "red"
     | "transfer"
-    | "window";
+    | "window"
+    /** 큰 비정기 수입·지출 — 정액 항목은 서지 않는다 (docs/simulation/finance.md §8.2) */
+    | "money";
   text: string;
   /**
    * 접어 둔 상세 — 있으면 UI가 눌러서 펼친다. 성장처럼 **한 날에 스무 줄이 나오는**
