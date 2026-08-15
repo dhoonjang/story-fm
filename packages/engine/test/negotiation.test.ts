@@ -64,6 +64,16 @@ function offerFor(state: GameState, playerId: string, feeRatio = 1) {
   };
 }
 
+/** 오퍼가 들어올 때까지 날짜를 넘긴다 (확률적이지만 시드로 결정적) */
+function waitForIncoming(state: GameState, days = 60) {
+  const digest: string[] = [];
+  for (let i = 0; i < days && incomingOffers(state).length === 0; i++) {
+    state.date = addDays(state.date, 1);
+    generateIncomingOffers(state, digest);
+  }
+  return { negotiation: incomingOffers(state)[0], digest };
+}
+
 describe("오퍼", () => {
   it("협상을 개설하고 확률·응답일을 라운드에 남긴다", () => {
     const state = createTestGame(42);
@@ -340,16 +350,6 @@ describe("시간이 흐르면", () => {
 });
 
 describe("매각 — 들어오는 오퍼", () => {
-  /** 오퍼가 들어올 때까지 날짜를 넘긴다 (확률적이지만 시드로 결정적) */
-  function waitForIncoming(state: GameState, days = 60) {
-    const digest: string[] = [];
-    for (let i = 0; i < days && incomingOffers(state).length === 0; i++) {
-      state.date = addDays(state.date, 1);
-      generateIncomingOffers(state, digest);
-    }
-    return { negotiation: incomingOffers(state)[0], digest };
-  }
-
   it("이적창이 열려 있을 때 우리 선수에게 오퍼가 들어온다", () => {
     const state = createTestGame(42);
     const { negotiation, digest } = waitForIncoming(state);
@@ -971,5 +971,125 @@ describe("임대료 — 검사한 값이 빠진다", () => {
     expect(financeOf(state, state.userTeamId).transferBudget).toBe(ourBudget + LOAN_FEE);
     expect(financeOf(state, borrowerId).balance).toBe(theirBalance - LOAN_FEE);
     expect(financeOf(state, borrowerId).transferBudget).toBe(theirBudget - LOAN_FEE);
+  });
+});
+
+/**
+ * **성사 가능성은 답이 남은 카드에만 선다** (transfer.md §3).
+ *
+ * 끝난 판정에 실린 사전 확률은 다음 판단의 입력이 아니고, 거절 카드의 `71%`는
+ * 판정과 모순처럼 읽힌다. 표기는 `oddsText` 한 곳이 가지므로 안개가 낀 딜은
+ * 어느 카드에서도 또렷한 숫자를 내지 않는다.
+ */
+describe("카드의 성사 가능성", () => {
+  /** 우리가 넣은 오퍼에 상대가 답한 카드 */
+  function answeredBy(state: GameState, verdict: "accept" | "reject" | "counter"): MarketCard {
+    const player = target(state);
+    const terms = offerFor(state, player.id, 1.1);
+    const offered = sendOffer(state, terms);
+    expect(offered.ok, offered.message).toBe(true);
+    const negotiation = openNegotiationFor(state, player.id)!;
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+    const answered = respondOffer(state, {
+      negotiationId: negotiation.id,
+      verdict,
+      // 역제안은 우리 제시액 이상이어야 한다 — 같은 값을 되부르는 것이 가장 얌전하다
+      ...(verdict === "counter" ? { fee: terms.fee } : {}),
+    });
+    expect(answered.ok, `${verdict}: ${answered.message}`).toBe(true);
+    return answered.payload as MarketCard;
+  }
+
+  it("상대가 답을 끝낸 카드에는 확률이 없다 — 역제안에는 남는다", () => {
+    expect(answeredBy(createTestGame(42), "accept").odds).toBeUndefined();
+    expect(answeredBy(createTestGame(42), "reject").odds).toBeUndefined();
+    expect(answeredBy(createTestGame(42), "counter").odds).toBeTruthy();
+  });
+
+  it("감독이 답을 끝낸 카드에도 확률이 없다 — 역제안에는 남는다", () => {
+    for (const verdict of ["accept", "reject", "counter"] as const) {
+      const state = createTestGame(42);
+      const { negotiation } = waitForIncoming(state);
+      const offer = incomingOffer(negotiation!)!;
+      const answered = answerIncomingOffer(state, {
+        negotiationId: negotiation!.id,
+        verdict,
+        ...(verdict === "counter" ? { fee: Math.round(offer.fee * 1.3) } : {}),
+      });
+      expect(answered.ok, `${verdict}: ${answered.message}`).toBe(true);
+      const card = answered.payload as MarketCard;
+      if (verdict === "counter") {
+        expect(card.odds, "되부른 조건에는 답이 남았다").toBeTruthy();
+      } else {
+        expect(card.odds, `${verdict}: 끝난 판정에 확률이 남았다`).toBeUndefined();
+      }
+    }
+  });
+
+  it("답을 기다리는 카드에는 확률이 선다 — 오퍼·재계약", () => {
+    const state = createTestGame(42);
+    const player = target(state);
+    const offered = sendOffer(state, offerFor(state, player.id));
+    expect(offered.ok, offered.message).toBe(true);
+    expect((offered.payload as MarketCard).odds).toBeTruthy();
+
+    const ours = playersOf(state, state.userTeamId)[0]!;
+    activeContract(state, ours.id)!.until = addDays(state.date, 120);
+    const renewal = openRenewal(state, {
+      playerId: ours.id,
+      weeklyWage: renewalExpectation(state, ours),
+      years: 3,
+    });
+    expect(renewal.ok, renewal.message).toBe(true);
+    expect((renewal.payload as MarketCard).odds).toBeTruthy();
+  });
+
+  /**
+   * 안개는 **선수를 얼마나 아는가**에서 온다(`knowledgeOf`). 스카우트를 보내지 않은
+   * 남의 선수는 `rumoured`라 숫자를 단정하지 않고, 우리 선수는 계약서가 있어 또렷하다.
+   */
+  it("흐리게 아는 딜은 어느 카드에서도 %를 내지 않는다", () => {
+    const state = createTestGame(42);
+    const player = target(state);
+    expect(dealOdds(state, offerFor(state, player.id)).fuzzy, "남의 선수는 안개가 낀다").toBe(true);
+
+    const terms = offerFor(state, player.id, 1.1);
+    const offered = sendOffer(state, terms);
+    expect(offered.ok, offered.message).toBe(true);
+    const negotiation = openNegotiationFor(state, player.id)!;
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+    const countered = respondOffer(state, {
+      negotiationId: negotiation.id,
+      verdict: "counter",
+      fee: terms.fee,
+    });
+    expect(countered.ok, countered.message).toBe(true);
+
+    // 두 카드가 같은 어휘로 말한다 — 표기를 `oddsText` 한 곳이 갖기 때문이다
+    const LABELS = [
+      "거의 확실하다",
+      "해볼 만하다",
+      "반반이다",
+      "쉽지 않다",
+      "가망이 희박하다",
+      "사실상 불가능하다",
+    ];
+    for (const card of [offered.payload, countered.payload] as MarketCard[]) {
+      expect(card.odds).not.toContain("%");
+      expect(LABELS).toContain(card.odds);
+    }
+  });
+
+  it("우리 선수는 또렷하다 — 재계약 카드는 %로 말한다", () => {
+    const state = createTestGame(42);
+    const ours = playersOf(state, state.userTeamId)[0]!;
+    activeContract(state, ours.id)!.until = addDays(state.date, 120);
+    const renewal = openRenewal(state, {
+      playerId: ours.id,
+      weeklyWage: renewalExpectation(state, ours),
+      years: 3,
+    });
+    expect(renewal.ok, renewal.message).toBe(true);
+    expect((renewal.payload as MarketCard).odds).toContain("%");
   });
 });

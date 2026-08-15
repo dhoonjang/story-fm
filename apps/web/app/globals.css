@@ -2944,10 +2944,23 @@ textarea {
 }
 /* 성사 가능성은 오른쪽 끝 — 카드마다 같은 자리라야 세로로 훑힌다 */
 .mc-odds {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
   margin-left: auto;
+}
+/* 이름표는 값에 딸린 글자다 — 답(`.mc-due`)과 같은 결로 앉힌다 */
+.mc-odds em {
+  font-style: normal;
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+  color: var(--dim);
+}
+.mc-odds b {
   font-size: var(--fs-sm);
   font-weight: 700;
   color: var(--deal);
+  /* 숫자 표기일 때만 뜻이 있다 — 안개 딜의 문구에는 영향이 없다 */
   font-variant-numeric: tabular-nums;
 }
 /* 조건 두 벌 — 제시와 요구가 **같은 격자**에 서야 차이가 눈에 든다 */

@@ -41,8 +41,11 @@ export interface MarketCard {
   counterTerms?: MarketTerms;
   verdict?: "accept" | "reject" | "counter";
   /**
-   * 성사 가능성 — 이미 **읽을 수 있는 표기**다(`34%` 또는 `반반`).
+   * 성사 가능성 — 이미 **읽을 수 있는 표기**다(`34%` 또는 `반반이다`).
    * 안개가 남은 선수는 퍼센트를 단정하지 않으므로(scouting) 코어가 그 판단까지 해서 보낸다.
+   *
+   * **답이 남은 카드에만 싣는다** — 오퍼·역제안·재계약. 끝난 판정(수락·거절)에서
+   * 사전 확률은 다음 판단의 입력이 아니다 (transfer.md §3).
    */
   odds?: string;
   /** 답이 오는 날 · 보고가 오는 날 */
