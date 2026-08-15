@@ -23,6 +23,7 @@ import {
   financeOf,
   pushNarrative,
   teamShortName,
+  weeklyWageLinesOf,
   weeklyWagesOf,
   type GameState,
 } from "../core/state";
@@ -597,19 +598,39 @@ export function isOutsideOurEconomy(teamId: string): boolean {
   return isMarketOnlyLeague(leagueOfTeam(teamId));
 }
 
-/** 주간 주급 지급 — 전 팀 (월요일) */
+/**
+ * 주간 주급 지급 — 전 팀 (월요일).
+ *
+ * **유저 팀만 선수별로 적는다.** 원장은 유저 팀만 쌓으므로(§4.5) AI 팀에 명세를
+ * 만들면 잔고 한 번 더할 것을 스물몇 번 나눠 더하는 값만 치른다 — 96팀 × 매주다.
+ * 유저 팀 명세는 상각과 같은 모양이라 피드가 그대로 접는다 (§8.1).
+ */
 export function payWeeklyWages(state: GameState): void {
+  const playerNames = new Map(state.players.map((p) => [p.id, p.name]));
   for (const team of state.teams) {
     // 무소속은 구단이 아니다 — 자유계약 선수가 모인 자리라 낼 주급도 받을 수입도 없다
     if (!isClubTeam(team.id) || isOutsideOurEconomy(team.id)) continue;
-    const wages = weeklyWagesOf(state, team.id);
-    if (wages <= 0) continue;
-    recordFinance(state, team.id, {
-      kind: "expense",
-      category: "player_wages",
-      label: "선수단 주급",
-      amount: wages,
-    });
+    if (team.id !== state.userTeamId) {
+      const wages = weeklyWagesOf(state, team.id);
+      if (wages > 0) {
+        recordFinance(state, team.id, {
+          kind: "expense",
+          category: "player_wages",
+          label: "선수단 주급",
+          amount: wages,
+        });
+      }
+      continue;
+    }
+    for (const line of weeklyWageLinesOf(state, team.id)) {
+      recordFinance(state, team.id, {
+        kind: "expense",
+        category: "player_wages",
+        label: playerNames.get(line.gamePlayerId) ?? line.gamePlayerId,
+        amount: line.weekly,
+        ref: { type: "player", id: line.gamePlayerId },
+      });
+    }
   }
 }
 

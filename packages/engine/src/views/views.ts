@@ -160,8 +160,13 @@ export interface FinanceFeedRow {
   /** 접힌 줄이면 묶음의 합계 */
   amount: number;
   noncash: boolean;
-  /** 2건 이상 접혔을 때만 — 펼치면 나오는 대상별 명세 */
+  /** 2건 이상 접혔을 때만 — 펼치면 나오는 대상별 명세. 금액이 큰 것부터 */
   items?: Array<{ label: string; amount: number }>;
+  /**
+   * 명세가 무엇을 하나씩 세는지 — 묶인 엔트리가 모두 같은 `ref.type`일 때만.
+   * 화면이 `45명`과 `2건`을 가르는 데 쓴다.
+   */
+  itemsRef?: "match" | "player" | "transfer" | "competition";
 }
 
 /** 피드가 세우는 줄 수 — 원장 건수가 아니라 **접은 뒤의** 줄 수다 */
@@ -193,6 +198,8 @@ function foldFinanceFeed(ledger: readonly LedgerEntry[]): FinanceFeedRow[] {
     row: FinanceFeedRow;
     head: string;
     items: Array<{ label: string; amount: number }>;
+    /** 묶인 엔트리의 `ref.type` — 하나로 모이지 않으면 null */
+    refType: FinanceFeedRow["itemsRef"] | null;
   };
   const groups = new Map<string, Group>();
   const order: Group[] = [];
@@ -213,11 +220,13 @@ function foldFinanceFeed(ledger: readonly LedgerEntry[]): FinanceFeedRow[] {
     if (found) {
       found.row.amount += e.amount;
       found.items.push({ label: item, amount: e.amount });
+      if (found.refType !== (e.ref?.type ?? null)) found.refType = null;
       continue;
     }
     const group: Group = {
       key,
       head,
+      refType: e.ref?.type ?? null,
       items: [{ label: item, amount: e.amount }],
       row: {
         id: e.id ?? `led-${e.date}-${i}`,
@@ -234,10 +243,16 @@ function foldFinanceFeed(ledger: readonly LedgerEntry[]): FinanceFeedRow[] {
     groups.set(key, group);
     order.push(group);
   }
-  return order.slice(0, FINANCE_FEED_ROWS).map(({ key, row, head, items }) => {
+  return order.slice(0, FINANCE_FEED_ROWS).map(({ key, row, head, items, refType }) => {
     if (items.length < 2) return row;
-    // 접힌 줄은 항목명만 남기고 원래 라벨은 명세로 내려간다
-    return { ...row, id: `fold-${key}`, label: head, items };
+    // 접힌 줄은 항목명만 남기고 원래 라벨은 명세로 내려간다 — 큰 금액이 위로
+    return {
+      ...row,
+      id: `fold-${key}`,
+      label: head,
+      items: [...items].sort((a, b) => b.amount - a.amount),
+      ...(refType ? { itemsRef: refType } : {}),
+    };
   });
 }
 

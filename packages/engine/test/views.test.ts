@@ -221,9 +221,28 @@ describe("오피스 뷰 — 재정·순위·커리어", () => {
     expect(feed.some((row) => row.category !== "amortisation")).toBe(true);
     expect(new Set(feed.map((row) => row.id)).size).toBe(feed.length);
     // 한 건짜리 줄은 접지 않고 원장 라벨 그대로 선다
-    const wages = feed.find((row) => row.category === "player_wages")!;
-    expect(wages.items).toBeUndefined();
-    expect(wages.label).toBe("선수단 주급");
+    const staff = feed.find((row) => row.category === "staff_wages")!;
+    expect(staff.items).toBeUndefined();
+    expect(staff.label).toBe("코칭·사무 스태프 급여");
+  });
+
+  /** 주급도 선수별로 적히므로 피드에선 한 줄로 서고, 펼치면 명세가 나온다 (§8.1) */
+  it("주급은 한 줄로 서고 펼치면 선수별 주급이 큰 금액부터 나온다", () => {
+    const state = createTestGame();
+    advanceDays(state, 10);
+    const ledger = financeOf(state, state.userTeamId).ledger;
+    const feed = buildOfficeViews(state).finance.feed;
+    const rows = feed.filter((row) => row.category === "player_wages");
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      const raw = ledger.filter((e) => e.category === "player_wages" && e.date === row.date);
+      expect(row.items).toHaveLength(raw.length);
+      expect(row.amount).toBe(raw.reduce((sum, e) => sum + e.amount, 0));
+      expect(row.itemsRef).toBe("player");
+      // 명세는 큰 금액부터 — 화면이 첫 이름을 대표로 세운다
+      const amounts = row.items!.map((i) => i.amount);
+      expect([...amounts].sort((a, b) => b - a)).toEqual(amounts);
+    }
   });
 
   /**

@@ -2450,6 +2450,21 @@ const wageTone = (ratio: number) => (ratio >= 0.75 ? "danger" : ratio >= 0.65 ? 
 type FinanceFeedRow = OfficeViews["finance"]["feed"][number];
 
 /**
+ * 접힌 줄이 라벨 자리에 세우는 말.
+ *
+ * 카테고리로만 묶인 줄은 뷰가 항목명을 비워 보낸다 — 카테고리 이름을 한 행에 두 번
+ * 세우지 않기 위해서다. 그렇다고 건수만 남기면 그 자리가 아무것도 알려주지 않으므로,
+ * **가장 큰 명세의 이름과 나머지 수**로 읽게 한다 (명세는 큰 금액부터 온다).
+ */
+function feedLabel(entry: FinanceFeedRow): string {
+  const items = entry.items ?? [];
+  if (items.length < 2) return entry.label;
+  const unit = entry.itemsRef === "player" ? "명" : "건";
+  if (entry.label) return `${entry.label} ${items.length}${unit}`;
+  return `${items[0]!.label} 외 ${items.length - 1}${unit}`;
+}
+
+/**
  * 재정 활동 한 줄 — 뷰가 접어 보낸 줄이면 눌러서 명세를 편다.
  *
  * 펼침은 달력 `기록`의 `EventLine`과 같은 규칙(건수 알약 → 왼쪽 선 아래 명세)이라
@@ -2464,15 +2479,13 @@ function FinanceFeedLine({ entry }: { entry: FinanceFeedRow }) {
     <>
       <span className="date">{entry.date.slice(5)}</span>
       <span className="cat">{entry.categoryLabel}</span>
-      <span className="label">
-        {entry.label}
-        {items.length > 0 && <span className="ev-count">{items.length}</span>}
-      </span>
+      <span className="label">{feedLabel(entry)}</span>
       <span className={entry.kind === "income" ? "amt plus" : "amt minus"}>
         {sign}
         {money(entry.amount)}
         {entry.noncash && <span className="fin-tag">장부</span>}
       </span>
+      {items.length > 0 && <IconChevron size={12} />}
     </>
   );
   return (
