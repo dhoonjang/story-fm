@@ -164,8 +164,8 @@ export default function NewGamePage() {
       </div>
 
       {step === "league" && (
-        <section className="onboarding-step">
-          <h1>어느 리그입니까?</h1>
+        <section className="onboarding-step step-league">
+          <h1>어느 리그에서 시작합니까?</h1>
           {leagues.length === 0 && !error ? (
             <LeagueRingSkeleton />
           ) : (
@@ -242,7 +242,7 @@ export default function NewGamePage() {
           <label className="field">
             <span className="field-label">이력</span>
             {/* 능력치의 출처는 규칙이지 조작법이 아니다 — 적기 전에 알아야 한다 */}
-            <span className="field-note">여기 적은 이력이 초기 능력치가 된다</span>
+            <span className="field-note">여기 적은 이력이 감독의 초기 능력치가 된다</span>
             <textarea
               placeholder="예: K리그에서 뛰다 은퇴한 수비수. 데이터 분석 회사를 거쳐 지도자의 길로"
               value={background}

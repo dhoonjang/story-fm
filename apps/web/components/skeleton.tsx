@@ -40,7 +40,7 @@ export function GameListSkeleton() {
 export function LeagueRingSkeleton() {
   const points = ringPoints(5);
   return (
-    <div className="league-ring" role="status" aria-label="리그 목록 불러오는 중">
+    <div className="league-ring" role="status" aria-label="리그 불러오는 중">
       <svg viewBox="0 0 100 100" aria-hidden>
         <polygon points={ringPolygon(points)} />
       </svg>

@@ -162,37 +162,50 @@ textarea {
 .onboarding-step h1 {
   margin-bottom: 28px;
 }
+/* 첫 화면만 가운데로 — 고리가 가운데 서므로 제목이 왼쪽에 있으면 축이 둘이 된다 */
+.onboarding-step.step-league h1 {
+  text-align: center;
+}
 /* 앞 단계에서 고른 것 — 제목 위에 얹혀 지금 어디에 서 있는지를 말한다 */
 .onboarding .step-context {
   color: var(--muted);
   font-size: var(--fs-sm);
   margin-bottom: 4px;
 }
-/* 진행 표시 — 지나온 칸은 되돌아가는 길이라 눌린다. 남은 칸은 흐린 글자일 뿐이다 */
+/* 진행 표시 — 조용한 탭 세 칸이다. 지금 선 칸만 밑줄로 서고, 지나온 칸은
+   되돌아가는 길이라 손이 닿으면 글자가 밝아진다. 아직 오지 않은 칸은 흐리다.
+   화살표는 두지 않는다 — 칸의 밝기가 이미 순서를 말한다. */
 .onboarding .step-rail {
   display: flex;
-  gap: 8px;
+  gap: 18px;
   list-style: none;
-  color: var(--muted);
   font-size: var(--fs-sm);
 }
-.onboarding .step-rail li + li::before {
-  content: "→";
-  margin-right: 8px;
+.onboarding .step-rail li {
+  color: var(--muted);
+  opacity: 0.5;
+  padding-bottom: 4px;
+  border-bottom: 2px solid transparent;
+}
+.onboarding .step-rail li.done {
+  opacity: 1;
 }
 .onboarding .step-rail li.done button {
   background: none;
   border: none;
   padding: 0;
-  color: var(--accent-2);
+  color: var(--muted);
   font: inherit;
+  transition: color 160ms var(--ease-panel);
 }
 .onboarding .step-rail li.done button:hover {
-  text-decoration: underline;
+  color: var(--text);
 }
 .onboarding .step-rail li.current {
-  color: var(--accent);
+  opacity: 1;
+  color: var(--text);
   font-weight: 700;
+  border-bottom-color: var(--accent);
 }
 
 /* ── 리그 고리 ───────────────────────────
