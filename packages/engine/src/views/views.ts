@@ -266,6 +266,9 @@ interface SquadViewRowMeta {
    * 오늘 역할을 손댄 흔적 (`TacticAssignment.roleMemo`) — **화면이 대가를 저장 전에
    * 낼 수 있게** 함께 보낸다. `role`은 그날 아침의 역할(대가의 기준)이고 `paid`는
    * 오늘 이미 깎인 총량이다. 오늘 손대지 않았으면 null이고 기준은 `roleId`다.
+   *
+   * **아침의 자리를 벗어나 있으면 null이다** — 역할 목록은 자리마다 다르므로 옛
+   * 자리의 역할을 기준으로 재면 화면이 서버와 다른 값을 예고한다 (player.md §7.2).
    */
   roleToday: { role: string; paid: number } | null;
   /** 전술판 좌표 (배치가 있을 때) — 자유 배치 UI의 그리기 기준 */
@@ -1379,7 +1382,9 @@ export function buildOfficeViews(state: GameState): OfficeViews {
               }))
             : [],
         roleToday:
-          slotted && assignment?.roleMemo?.date === state.date
+          slotted &&
+          assignment?.roleMemo?.date === state.date &&
+          (assignment.roleMemo.position ?? assignedSlot) === assignedSlot
             ? { role: assignment.roleMemo.role, paid: assignment.roleMemo.paid }
             : null,
         assignedPoint: liveSlot?.entry.point ?? pointOf.get(p.id) ?? null,

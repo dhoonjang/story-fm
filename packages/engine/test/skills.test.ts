@@ -28,6 +28,7 @@ import {
   setPlayerPosition,
   setPlayerRole,
   setPlayerTactic,
+  setSquadLevel,
   setTactics,
   settleTactics,
   squadFamiliarity,
@@ -1093,5 +1094,154 @@ describe("역할 기억 — 벤치를 다녀와도 감독의 결정이 남는다
     // 아침의 역할로 되돌아오면 낸 값도 돌아온다 — 장부(roleMemo)가 벤치를 건너 이어진다
     expect(setPlayerRole(state, { playerId: cb.playerId, role: morning }).ok).toBe(true);
     expect(famOf(state, cb.playerId)).toBeCloseTo(start, 6);
+  });
+});
+
+/**
+ * 왕복 — **되돌린 것은 정확히 제자리로** (docs/data/player.md §7.2·§7.3).
+ *
+ * 적응도는 시뮬에서 곱셈 팩터로 전력에 직접 닿는다. 되돌릴 수 있어야 감독이 판을
+ * 시험하는데, 넣어 보는 행위 자체가 값을 태우면 시험하지 않는다.
+ */
+describe("적응도 왕복 — 2군 · 자리 · 천장 100", () => {
+  const cbOf = (state: GameState) =>
+    assignmentsOf(state, state.userTeamId, "starting").find(
+      (a) => weightSlotOf(a.position) === "CB",
+    )!;
+
+  const assignmentOf = (state: GameState, playerId: string) =>
+    userTactics(state).assignments.find((a) => a.playerId === playerId);
+
+  /** 그 선수를 뺀 선발 11 — 빈 자리는 예비 선수가 메운다 */
+  function without(state: GameState, playerId: string) {
+    const lineup = currentLineup(state);
+    const spare = userPlayers(state).find(
+      (p) =>
+        p.squadLevel === "first" &&
+        isAvailable(state, p.id) &&
+        !lineup.some((s) => s.playerId === p.id),
+    )!;
+    return lineup.map((s) =>
+      s.playerId === playerId ? { playerId: spare.id, position: s.position } : s,
+    );
+  }
+
+  it("2군을 다녀와도 적응도와 익힌 전술 기억을 그대로 갖고 돌아온다", () => {
+    const state = createTestGame(7);
+    const cb = cbOf(state);
+    const lineup = currentLineup(state);
+    const assignment = assignmentOf(state, cb.playerId)!;
+    assignment.familiarity = 95;
+    settleTactics(state, state.date);
+    const drilled = assignment.drilled!.map((d) => ({ ...d }));
+    expect(drilled.length).toBeGreaterThan(0);
+
+    // 배치에서 통째로 빠진다 — 여기서 값이 새면 돌아올 통로 자체가 없다
+    expect(setLineup(state, { starting: without(state, cb.playerId) }).ok).toBe(true);
+    expect(setSquadLevel(state, { playerId: cb.playerId, level: "reserve" }).ok).toBe(true);
+    expect(assignmentOf(state, cb.playerId)).toBeUndefined();
+    expect(userTactics(state).shelved?.some((s) => s.playerId === cb.playerId)).toBe(true);
+
+    expect(setSquadLevel(state, { playerId: cb.playerId, level: "first" }).ok).toBe(true);
+    expect(setLineup(state, { starting: lineup }).ok).toBe(true);
+
+    const back = assignmentOf(state, cb.playerId)!;
+    expect(back.familiarity).toBe(95);
+    expect(back.drilled).toEqual(drilled);
+    // 선반은 배치가 다시 들고 갔으므로 비어 있다
+    expect(userTactics(state).shelved?.some((s) => s.playerId === cb.playerId)).toBe(false);
+  });
+
+  it("매치데이 명단 밖으로 밀려나도 개인 기억이 살아 있다", () => {
+    const state = createTestGame(7);
+    const cb = cbOf(state);
+    const lineup = currentLineup(state);
+    assignmentOf(state, cb.playerId)!.familiarity = 88;
+    settleTactics(state, state.date);
+
+    // 선발도 벤치도 아니면 배치가 없다(예비) — 선반이 받아 간다
+    expect(setLineup(state, { starting: without(state, cb.playerId), bench: [] }).ok).toBe(true);
+    expect(assignmentOf(state, cb.playerId)).toBeUndefined();
+
+    expect(setLineup(state, { starting: lineup }).ok).toBe(true);
+    expect(assignmentOf(state, cb.playerId)!.familiarity).toBe(88);
+  });
+
+  it("라인업을 저장해도 개인 전술 기억은 배치를 따라간다", () => {
+    const state = createTestGame(7);
+    const cb = cbOf(state);
+    settleTactics(state, state.date);
+    const drilled = assignmentOf(state, cb.playerId)!.drilled!.map((d) => ({ ...d }));
+
+    expect(setLineup(state, { starting: currentLineup(state) }).ok).toBe(true);
+    expect(assignmentOf(state, cb.playerId)!.drilled).toEqual(drilled);
+  });
+
+  it("자리를 옮겼다 되돌리면 역할도 적응도도 그날 아침 값으로 닫힌다", () => {
+    const state = createTestGame(7);
+    const cb = cbOf(state);
+    const slot = cb.position;
+    const morning = cb.roleId ?? defaultRoleOf(slot);
+    const start = assignmentOf(state, cb.playerId)!.familiarity;
+    const cost = roleChangeCost(slot, morning, "libero");
+    expect(cost).toBeGreaterThan(0);
+
+    expect(setPlayerRole(state, { playerId: cb.playerId, role: "libero" }).ok).toBe(true);
+    expect(assignmentOf(state, cb.playerId)!.familiarity).toBeCloseTo(start - cost, 6);
+
+    // 자리를 벗어나면 낸 값은 되돌아온다 — 아침의 역할과 견줄 자가 없다
+    expect(setPlayerTactic(state, { playerId: cb.playerId, position: "DM" }).ok).toBe(true);
+    expect(assignmentOf(state, cb.playerId)!.familiarity).toBeCloseTo(start, 6);
+
+    // 되돌아오면 기억이 리베로를 되살리고, 그 대가를 다시 문다 (떠난 적 없는 것과 같다)
+    expect(setPlayerTactic(state, { playerId: cb.playerId, position: slot }).ok).toBe(true);
+    const back = assignmentOf(state, cb.playerId)!;
+    expect(back.roleId).toBe("libero");
+    expect(back.familiarity).toBeCloseTo(start - cost, 6);
+
+    // 아침의 역할로 되돌리면 환불이다 — 왕복 한 번에 두 배가 아니다
+    expect(setPlayerRole(state, { playerId: cb.playerId, role: morning }).ok).toBe(true);
+    expect(assignmentOf(state, cb.playerId)!.familiarity).toBeCloseTo(start, 6);
+  });
+
+  it("전술판이 자리를 옮겨도(라인업 저장) 같은 값으로 닫힌다", () => {
+    const state = createTestGame(7);
+    const cb = cbOf(state);
+    const slot = cb.position;
+    const morning = cb.roleId ?? defaultRoleOf(slot);
+    const start = assignmentOf(state, cb.playerId)!.familiarity;
+    const lineup = currentLineup(state);
+
+    expect(setPlayerRole(state, { playerId: cb.playerId, role: "libero" }).ok).toBe(true);
+    const moved = lineup.map((s) =>
+      s.playerId === cb.playerId ? { playerId: s.playerId, position: "DM" } : s,
+    );
+    expect(setLineup(state, { starting: moved }).ok).toBe(true);
+    expect(assignmentOf(state, cb.playerId)!.familiarity).toBeCloseTo(start, 6);
+
+    expect(setLineup(state, { starting: lineup }).ok).toBe(true);
+    expect(setPlayerRole(state, { playerId: cb.playerId, role: morning }).ok).toBe(true);
+    expect(assignmentOf(state, cb.playerId)!.familiarity).toBeCloseTo(start, 6);
+  });
+
+  it("적응도 100인 선수가 전술을 바꿨다 되돌리면 다시 100이다", () => {
+    const state = createTestGame(7);
+    const tactics = userTactics(state);
+    tactics.spec = { ...DEFAULT_TACTICS };
+    for (const a of tactics.assignments) a.familiarity = 100;
+    settleTactics(state, state.date);
+
+    expect(setTactics(state, { mentality: 5, pressing: 5 }).ok).toBe(true);
+    expect(squadFamiliarity(state, state.userTeamId)).toBeLessThan(100);
+
+    expect(
+      setTactics(state, {
+        mentality: DEFAULT_TACTICS.mentality,
+        pressing: DEFAULT_TACTICS.pressing,
+      }).ok,
+    ).toBe(true);
+    for (const a of tactics.assignments) {
+      expect(a.familiarity, "천장 100은 기억에도 그대로 적힌다").toBe(100);
+    }
   });
 });

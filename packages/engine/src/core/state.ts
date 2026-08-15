@@ -313,6 +313,11 @@ export interface PendingMatch {
       instruction?: string;
       directive?: import("@story-fm/domain").PlayerDirective;
       familiarity: number;
+      /**
+       * 오늘 낸 역할 대가의 장부도 함께 담는다 — 적응도만 되돌리고 `paid`를 두면
+       * 경기 뒤에 "낸 적 없는 값"을 환불받는다 (player.md §7.2). 옛 세이브엔 없다.
+       */
+      roleMemo?: import("@story-fm/domain").RoleMemo;
     }>;
   };
   /**
@@ -1782,10 +1787,14 @@ export function squadShortfall(
   return null;
 }
 
-/** 떠난 선수를 전술 배치에서 뺀다 */
+/**
+ * 떠난 선수를 전술 배치에서 뺀다 — **선반도 함께 비운다.**
+ * 적응도는 이 팀의 전술에 대한 값이라 다른 팀에서 뜻이 없다 (player.md §7.3).
+ */
 export function releaseFromTactics(state: GameState, teamId: string, playerId: string): void {
   const tactics = tacticsOf(state, teamId);
   tactics.assignments = tactics.assignments.filter((a) => a.playerId !== playerId);
+  if (tactics.shelved) tactics.shelved = tactics.shelved.filter((s) => s.playerId !== playerId);
 }
 
 // ── 화면 조작 모으기 ────────────────────────────────────

@@ -821,6 +821,35 @@ export const DrilledTacticsSchema = z.object({
 export type DrilledTactics = z.infer<typeof DrilledTacticsSchema>;
 
 /**
+ * **오늘 역할을 손댄 흔적** — 고르는 동안 벌하지 않기 위한 장부.
+ *
+ * 역할을 바꾸면 적응도가 깎이는 게 맞다(하는 일이 달라진다). 그런데 감독은 알약을
+ * 눌러 보며 고르고, 그때마다 API가 한 번씩 매기면 **결정 하나에 세 번 값을
+ * 치른다.** 아직 그 역할로 훈련도 경기도 하지 않았는데. 그래서 **그날 아침의
+ * 자리와 역할**을 기준으로 대가를 다시 계산하고, 이미 낸 만큼(`paid`)과의 차액만
+ * 가감한다. 날짜가 바뀌면 저절로 무효가 된다(하루를 보냈으면 몸에 밴 것이다).
+ *
+ * **`paid`는 "오늘 이 선수가 낸 값"이지 "이 배치가 낸 값"이 아니다** — 배치는
+ * 전술판 조작마다 다시 써지므로, 여기서 끊으면 같은 결정에 값을 두 번 문다.
+ * 자리를 옮겨 아침의 자리를 벗어나면 낸 값은 되돌아온다 (`settleRoleCost`).
+ *
+ * 자리를 함께 적는 이유: 역할 목록은 자리마다 다르고 같은 이름이 두 자리에 걸치지
+ * 않는다(→ docs/data/player.md §3.1). 자리를 빼면 DM에 선 선수의 대가를 CB의
+ * 역할과 견주게 되고, 그 자리에 없는 역할은 `roleDistance`가 조용히 기본 역할로
+ * 읽어 엉뚱한 값이 나온다.
+ */
+export const RoleMemoSchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  /** 그날 아침에 서 있던 자리 — 옛 세이브엔 없다 (없으면 지금 자리로 읽는다) */
+  position: z.string().min(1).optional(),
+  /** 그날 아침에 맡고 있던 역할 */
+  role: z.string().min(1),
+  /** 오늘 역할 변경으로 이 선수의 적응도에서 이미 깎은 총량 */
+  paid: z.number().min(0),
+});
+export type RoleMemo = z.infer<typeof RoleMemoSchema>;
+
+/**
  * 전술 배치 (TACTIC_ASSIGNMENT) — 라인업의 원본.
  * starting 정확히 11명(GK 포지션 1명), bench는 매치데이 명단, 배치 없음 = 예비.
  */
@@ -860,19 +889,6 @@ export const TacticAssignmentSchema = z.object({
    */
   directive: PlayerDirectiveSchema.optional(),
   /**
-   * **오늘 역할을 손댄 흔적** — 고르는 동안 벌하지 않기 위한 장부.
-   *
-   * 역할을 바꾸면 적응도가 깎이는 게 맞다(하는 일이 달라진다). 그런데 감독은
-   * 알약을 눌러 보며 고르고, 그때마다 API가 한 번씩 매기면 **결정 하나에
-   * 세 번 값을 치른다.** 아직 그 역할로 훈련도 경기도 하지 않았는데.
-   *
-   * 그래서 **그날 아침의 역할**을 기준으로 대가를 다시 계산하고, 이미 낸
-   * 만큼(`paid`)과의 차액만 가감한다. 왔다 갔다 해도 누적되지 않고, 원래
-   * 역할로 되돌아오면 그대로 복구된다 — 그 사이 훈련으로 오른 값은 남긴 채.
-   * 날짜가 바뀌면 저절로 무효가 된다(하루를 보냈으면 몸에 밴 것이다).
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
-   */
-  /**
    * **이 선수가 이 전술들에 대해 쌓아 둔 숙련도** — 최근 것부터.
    *
    * 기억이 팀 평균 한 숫자였을 때는 개인 보정을 넣을 수가 없었다. 평균을 벗어난
@@ -887,17 +903,28 @@ export const TacticAssignmentSchema = z.object({
    * 옛 세이브엔 없다 (optional — 없으면 팀 기억을 승계한다).
    */
   drilled: z.array(DrilledTacticsSchema).optional(),
-  roleMemo: z
-    .object({
-      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-      /** 그날 아침에 맡고 있던 역할 */
-      role: z.string().min(1),
-      /** 오늘 이 배치에서 역할 변경으로 이미 깎은 총량 */
-      paid: z.number().min(0),
-    })
-    .optional(),
+  /** 오늘 역할을 손댄 흔적 (`RoleMemo`). 옛 세이브엔 없다 — SAVE_VERSION 유지 */
+  roleMemo: RoleMemoSchema.optional(),
 });
 export type TacticAssignment = z.infer<typeof TacticAssignmentSchema>;
+
+/**
+ * 배치가 없는 동안 적응도가 머무는 자리 — **선반** (→ docs/data/player.md §7.3).
+ *
+ * 배치는 로테이션마다 다시 써지는 값이고 적응도는 선수가 몸으로 쌓은 값인데, 둘이
+ * 한 그릇에 있어 2군으로 내리거나 매치데이 명단에서 빼는 것만으로 함께 지워졌다.
+ * 배치가 사라질 때 이리로 옮기고 다시 배치될 때 되돌려 놓는다.
+ *
+ * 팀 단위(`TeamTactics`)에 두는 이유: `familiarity`는 **이 팀의 전술**에 대한
+ * 값이라 팀을 떠나면 뜻이 없다 — 나가는 자리(`releaseFromTactics`)가 하나다.
+ */
+export const ShelvedFamiliaritySchema = z.object({
+  playerId: z.string().min(1),
+  familiarity: FamiliaritySchema,
+  drilled: z.array(DrilledTacticsSchema).optional(),
+  roleMemo: RoleMemoSchema.optional(),
+});
+export type ShelvedFamiliarity = z.infer<typeof ShelvedFamiliaritySchema>;
 
 /**
  * 역할 기억 (ROLE_MEMORY) — **이 선수가 이 자리에서 마지막에 맡던 역할.**
@@ -957,6 +984,14 @@ const FAMILIARITY_MIN = 0;
  * 시즌을 완주한 주전이 닿을 수 있어야 한다.
  */
 export const FAMILIARITY_MAX = 100;
+
+/**
+ * 적응도를 구간 안에 가둔다 — **소수를 자르지 않는다** (위쪽은 소수로 쌓인다).
+ * 기억을 적는 자리와 되찾는 자리가 같은 천장을 써야 왕복이 닫힌다.
+ */
+export const clampFamiliarity = (x: number): number =>
+  Math.max(FAMILIARITY_MIN, Math.min(FAMILIARITY_MAX, x));
+
 /** 아래 구간에서 판정을 그대로 받는 배율 — 가속은 두지 않는다 */
 const GAIN_EARLY_BOOST = 1;
 
@@ -1043,7 +1078,7 @@ export function applyFamiliarityGain(
   uptake?: number,
 ): number {
   const moved = raw > 0 ? raw * familiarityGainScale(current, source, uptake) : raw;
-  return Math.max(FAMILIARITY_MIN, Math.min(FAMILIARITY_MAX, current + moved));
+  return clampFamiliarity(current + moved);
 }
 
 /**
@@ -1094,7 +1129,13 @@ export function withCurrentDrilled(
   const signature = tacticsSignature(current);
   const rest = (drilled ?? []).filter((d) => d.signature !== signature);
   return [
-    { signature, familiarity: Math.max(0, Math.min(99, Math.round(familiarity))), lastUsedOn: on },
+    {
+      signature,
+      // 천장은 `FAMILIARITY_MAX`다 — 99로 자르면 100에 닿은 선수가 전술을 한 번
+      // 스치는 것만으로 99가 되고, 되돌아와도 100을 되찾지 못한다 (§7.1)
+      familiarity: clampFamiliarity(Math.round(familiarity)),
+      lastUsedOn: on,
+    },
     ...rest,
   ];
 }
@@ -1138,7 +1179,7 @@ export function familiarityForSetup(
    */
   const exact = (drilled ?? []).find((d) => d.signature === signature);
   if (exact) {
-    return Math.max(0, Math.min(99, Math.round(exact.familiarity - fadeOf(exact.lastUsedOn))));
+    return clampFamiliarity(Math.round(exact.familiarity - fadeOf(exact.lastUsedOn)));
   }
 
   let best = FAMILIARITY_MIN;
@@ -1151,7 +1192,7 @@ export function familiarityForSetup(
       d.familiarity - fade - Math.round(distanceOf(spec, next) * TRANSFER_LOSS),
     );
   }
-  return Math.max(0, Math.min(99, Math.round(best)));
+  return clampFamiliarity(Math.round(best));
 }
 
 /** 팀의 현재 전술 + 배치 — GAME_TEAM당 1개 (프리셋 확장 여지) */
@@ -1159,6 +1200,12 @@ export const TeamTacticsSchema = z.object({
   teamId: z.string().min(1),
   spec: TacticsSpecSchema,
   assignments: z.array(TacticAssignmentSchema),
+  /**
+   * **선반** — 지금 배치가 없는 선수의 적응도·기억이 머무는 자리.
+   * 배치가 사라질 때 채우고 다시 배치될 때 비운다 (`ShelvedFamiliarity`).
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  shelved: z.array(ShelvedFamiliaritySchema).optional(),
   /**
    * 지금까지 드릴한 전술들의 기억 — 최근 것부터. optional이라 이전 세이브도 그대로
    * 로드된다(SAVE_VERSION 유지). 없으면 "아직 기억이 없다"로 읽는다.

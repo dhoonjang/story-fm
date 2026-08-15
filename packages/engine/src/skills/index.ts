@@ -16,7 +16,6 @@ import {
   ATTRIBUTE_AXES,
   AXIS_KO,
   clampCondition,
-  FAMILIARITY_MAX,
   tacticalUptake as uptakeOf,
   PLAYER_DIRECTIVE_KO,
   type PlayerDirectiveKind,
@@ -34,8 +33,8 @@ import {
   naturalPositionOf,
   positionAtPoint,
   positionGroupOf,
+  clampFamiliarity,
   defaultRoleOf,
-  roleChangeCost,
   rolesFor,
   separateBoardPoints,
   familiarityForSetup,
@@ -44,6 +43,7 @@ import {
   tacticsDistance,
   withCurrentDrilled,
 } from "@story-fm/domain";
+import { settleRoleCost, shelveFamiliarity, unshelveFamiliarity } from "./familiarity-memory";
 import { recallRole, rememberRole } from "./role-memory";
 import { addDays, diffDays, sortEntries, squadReturnOf } from "../competition/calendar";
 import { clampForm, moraleToForm } from "../squad/form";
@@ -200,9 +200,15 @@ export function setSquadLevel(
     };
   }
   player.squadLevel = "reserve";
-  userTactics(state).assignments = userTactics(state).assignments.filter(
-    (a) => a.playerId !== player.id,
-  );
+  const tactics = userTactics(state);
+  /**
+   * **배치를 지우기 전에 적응도·기억을 선반으로** (→ docs/data/player.md §7.3).
+   * 배치 안에만 두면 2군을 하루 다녀온 주전이 `min(60, 팀 적응도)`로 새로 시작하고,
+   * 돌아올 통로 자체가 지워져 영영 못 찾는다.
+   */
+  const dropped = tactics.assignments.find((a) => a.playerId === player.id);
+  if (dropped) shelveFamiliarity(tactics, dropped, state.date);
+  tactics.assignments = tactics.assignments.filter((a) => a.playerId !== player.id);
   if (player.isCaptain) player.isCaptain = false;
   pushNarrative(state, `${player.name} 2군 이동`, 2);
   return { ok: true, message: `${player.name}을(를) 2군으로 이동했습니다` };
@@ -210,8 +216,8 @@ export function setSquadLevel(
 
 // 체력 클램프는 도메인이 단일 소스 (clampCondition)
 // 폼 클램프는 form.ts가 단일 소스 — 소수를 살려야 매일 회귀가 반영된다
-/** 적응도 전용 — 천장이 100이고 **소수를 자르지 않는다**(위쪽은 소수로 쌓인다) */
-const clampFamiliarity = (x: number) => Math.max(0, Math.min(FAMILIARITY_MAX, x));
+// 적응도 클램프도 도메인이 단일 소스 (clampFamiliarity) — 기억을 적는 자리와
+// 되찾는 자리가 같은 천장을 써야 왕복이 닫힌다
 
 export const POSITION_CODES = Object.keys(POSITION_GROUPS);
 export { positionGroupOf };
@@ -632,13 +638,19 @@ export function setLineup(
     if (old.roleId) rememberRole(state, old.playerId, old.position, old.roleId);
   }
   /**
-   * 이전 배치에서 물려받는 것 — 적응도·개인 지시, 그리고 **자리가 같을 때만 역할**.
-   * 자리가 바뀌면 그 역할은 존재하지 않는다(센터백의 리베로를 윙에 데려갈 수 없다).
-   * 대신 그 자리의 **기억**이 기본 역할을 갈아끼운다 — 감독이 새로 고르면 그게 이긴다.
-   * 벤치는 자리를 갖지 않으므로 역할도 들지 않는다 (위에서 기억이 받아 갔다).
+   * 이전 배치에서 물려받는 것 — 적응도·개인 기억·개인 지시, 그리고 **자리가 같을
+   * 때만 역할**. 자리가 바뀌면 그 역할은 존재하지 않는다(센터백의 리베로를 윙에
+   * 데려갈 수 없다). 대신 그 자리의 **기억**이 기본 역할을 갈아끼운다 — 감독이 새로
+   * 고르면 그게 이긴다. 벤치는 자리를 갖지 않으므로 역할도 들지 않는다 (위에서
+   * 기억이 받아 갔다).
+   *
+   * 직전 배치가 없으면 **선반**을 본다 — 2군을 다녀왔거나 매치데이 명단 밖에 있던
+   * 선수의 적응도·기억이 거기 있다 (→ docs/data/player.md §7.3).
    */
   const inherit = (playerId: string, position: string, slotted: boolean) => {
-    const old = prev.get(playerId);
+    /** 배치가 들고 있던 것과 선반이 들고 있던 것의 공통분모 — 선반엔 자리가 없다 */
+    const old: Partial<TacticAssignment> | undefined =
+      prev.get(playerId) ?? unshelveFamiliarity(tactics, playerId);
     const oldRole = old?.roleId;
     const keepRole =
       oldRole !== undefined && rolesFor(position).some((role) => role.id === oldRole);
@@ -651,17 +663,18 @@ export function setLineup(
      * **오늘 역할을 손댄 흔적은 살려 둔다.** 전술판은 조작마다 배치를 다시
      * 쓰는데, 여기서 memo가 사라지면 저장할 때마다 "오늘 아침"이 새로 잡혀
      * 같은 결정에 값을 여러 번 치른다 — 자동 저장에 얹은 의미가 없어진다.
-     * 장부의 기준은 (선수·자리·오늘)이라 **자리가 그대로면 벤치를 다녀와도
-     * 이어진다** — 같은 날 내렸다 되돌린 결정에 값을 두 번 물리지 않기 위해서다.
-     * 자리가 바뀌면 역할도 바뀌므로 그때는 버린다.
+     * 장부의 기준은 (선수·오늘)이라 **자리를 옮겨도 따라간다** — 낸 값을 되돌릴
+     * 통로가 이것뿐이라, 여기서 버리면 왕복이 환불이 아니라 두 배가 된다.
+     * 지금 자리에 맞춘 정산은 배치가 다 선 뒤에 한 번에 한다(`settleRoleCost`).
      */
-    const keepMemo = old?.roleMemo !== undefined && old.position === position;
     return {
       familiarity: old?.familiarity ?? newcomerFamiliarity,
+      // 개인 기억은 배치보다 오래 산다 — 여기서 흘리면 저장 한 번에 통째로 사라진다
+      ...(old?.drilled ? { drilled: old.drilled } : {}),
       ...(old?.instruction ? { instruction: old.instruction } : {}),
       ...(old?.directive ? { directive: old.directive } : {}),
       ...(roleId ? { roleId } : {}),
-      ...(keepMemo ? { roleMemo: old.roleMemo } : {}),
+      ...(old?.roleMemo ? { roleMemo: old.roleMemo } : {}),
     };
   };
   const startingAssignments: TacticAssignment[] = starting.map((s, i) => ({
@@ -683,6 +696,23 @@ export function setLineup(
       ...inherit(s.playerId, position, false),
     };
   });
+
+  /**
+   * 오늘 낸 역할 대가를 **지금 자리 기준으로** 정산한다 — 선발은 그 자리의 역할로,
+   * 벤치는 자리가 없으므로 환불이다. 정산이 없으면 자리를 옮겼다 되돌리는 것만으로
+   * 같은 대가를 두 번 문다 (→ docs/data/player.md §7.2).
+   */
+  for (const a of startingAssignments) settleRoleCost(a, state.date, a);
+  for (const a of benchAssignments) settleRoleCost(a, state.date, null);
+
+  /**
+   * 명단에서 빠진 선수의 적응도·기억은 **선반으로** — 매치데이 명단 밖(예비)은
+   * 배치를 갖지 않으므로, 여기서 옮기지 않으면 다음에 뽑힐 때 신입 취급을 받는다.
+   */
+  const assigned = new Set([...startingAssignments, ...benchAssignments].map((a) => a.playerId));
+  for (const old of prev.values()) {
+    if (!assigned.has(old.playerId)) shelveFamiliarity(tactics, old, state.date);
+  }
 
   // 무엇이 달라졌나는 **덮어쓰기 전에** 견준다 (`prev`가 옛 배치를 들고 있다)
   const changes = lineupChanges(state, prev, [...startingAssignments, ...benchAssignments]);
@@ -875,6 +905,12 @@ export function movePlayerSlot(
   }
   assignment.position = code;
   assignment.point = point;
+  /**
+   * 자리가 바뀌었으니 오늘 낸 역할 대가를 다시 정산한다 — `setLineup`과 같은 함수다
+   * (→ docs/data/player.md §7.2). 두 경로가 memo를 다르게 다루면, 화면이 어느 쪽으로
+   * 저장했느냐에 따라 같은 조작의 값이 달라진다.
+   */
+  settleRoleCost(assignment, state.date, assignment);
   tactics.spec.formation = shapeOf(
     tactics.assignments
       .filter((a) => a.role === "starting")
@@ -998,18 +1034,15 @@ export function setPlayerRole(
    * 차액만 가감한다(`roleMemo`). 되돌아오면 복구되고, 그 사이 훈련으로 오른
    * 값은 남는다. 하루가 지나면 기준이 새로 잡힌다 — 몸에 밴 것이기 때문이다.
    */
-  const memo =
+  assignment.roleMemo =
     assignment.roleMemo?.date === state.date
       ? assignment.roleMemo
-      : { date: state.date, role: from, paid: 0 };
-  const cost = roleChangeCost(assignment.position, memo.role, def.id);
-  const before = assignment.familiarity;
+      : { date: state.date, position: assignment.position, role: from, paid: 0 };
   assignment.roleId = def.id;
   // 감독이 고른 것이 그 자리의 새 기억이다 — 벤치를 다녀와도 이 결정이 남는다
   rememberRole(state, player.id, assignment.position, def.id);
   // 오늘 이미 낸 것과의 차액만 — 왔다 갔다 해도 누적되지 않는다
-  assignment.familiarity = clampFamiliarity(before - (cost - memo.paid));
-  assignment.roleMemo = { ...memo, paid: cost };
+  settleRoleCost(assignment, state.date, assignment);
 
   /**
    * 결과는 **무엇을 시키기로 했는지**만 말한다 (player.md §7.2). 적응도 증감을
