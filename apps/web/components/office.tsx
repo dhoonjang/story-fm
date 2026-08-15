@@ -34,7 +34,6 @@ import {
   familiarityForRole,
   lineupBody,
   resetRolesForMovedPlayers,
-  roleAdaptationMove,
   type BoardState,
 } from "@/lib/board-roles";
 import { IconBoard, IconChevron } from "@/components/icons";
@@ -592,9 +591,6 @@ function potentialHint(band: SquadRow["potential"]): string {
   return `추정 폭 ±${band.margin} — ${confidence}. 함께 뛴 경기가 쌓이면 좁아집니다`;
 }
 
-/** 오르내림에 부호를 붙인다 — 0은 부르는 쪽이 걸러 아무것도 그리지 않는다 */
-const signedMove = (n: number) => (n > 0 ? `+${n}` : `−${Math.abs(n)}`);
-
 function PlayerDetail({
   p,
   slotCode,
@@ -632,7 +628,7 @@ function PlayerDetail({
   /**
    * 목록과 값은 **같은 자리에서 읽는다.** 서버 행의 `roleOptions`는 저장된 자리
    * 기준이라, 끌어 옮긴 직후 목록만 옛 자리 것으로 남으면 포지션 칩은 CM인데
-   * 역할은 DM(앵커·하프백)인 모순이 생기고 옆의 대가도 다른 자로 잰 값이 된다.
+   * 역할은 DM(앵커·하프백)인 모순이 생긴다.
    */
   const roleOptions = rolePosition ? rolesFor(rolePosition) : p.roleOptions;
   const requestedRole = roleId ?? p.roleId;
@@ -641,9 +637,6 @@ function PlayerDetail({
     : rolePosition
       ? defaultRoleOf(rolePosition)
       : null;
-  /** 그 역할을 고르면 적응도가 얼마나 움직이나 — 0이면 그리지 않는다 */
-  const roleMove = (role: string): number =>
-    rolePosition && activeRole ? roleAdaptationMove(p, rolePosition, activeRole, role) : 0;
   /**
    * 포지션 칩 — 보유 목록에 **지금 맡은 자리**를 합친다.
    *
@@ -803,35 +796,27 @@ function PlayerDetail({
             <div className="pd-roles">
               <span className="pd-axis-group-name">역할</span>
               <div className="pd-role-list">
-                {roleOptions.map((r) => {
-                  /**
-                   * 알약이 **값을 함께 말한다** — 고르고 나서야 알면 되돌릴 수밖에 없다.
-                   * 대가는 서버 왕복이 아니라 도메인 공식이 낸 것이라, 저장이 늦거나
-                   * 막힌 동안에도 이 숫자와 옆의 적응도가 같은 시점을 가리킨다.
-                   */
-                  const move = roleMove(r.id);
-                  return (
-                    <button
-                      className={`pd-role${r.id === activeRole ? " on" : ""}`}
-                      key={r.id}
-                      type="button"
-                      title={move === 0 ? r.desc : `${r.desc} · 적응 ${signedMove(move)}`}
-                      disabled={!onRole}
-                      onClick={(e) => {
-                        // 상세는 행 안에 있다 — 막지 않으면 행 토글로 새어 나가 접힌다
-                        e.stopPropagation();
-                        onRole?.(r.id);
-                      }}
-                    >
-                      {r.ko}
-                      {move !== 0 && (
-                        <span className={`pd-role-move${move > 0 ? " up" : ""}`}>
-                          {signedMove(move)}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
+                {/**
+                 * 알약은 **그 역할이 무슨 일을 하는지만** 말한다 (player.md §7.2).
+                 * 전환 대가를 알약마다 적으면 "이 선수에게 무엇을 시킬까"가
+                 * 가장 싼 역할 고르기로 바뀐다 — 적응도는 하루면 기준이 다시 잡힌다.
+                 */}
+                {roleOptions.map((r) => (
+                  <button
+                    className={`pd-role${r.id === activeRole ? " on" : ""}`}
+                    key={r.id}
+                    type="button"
+                    title={r.desc}
+                    disabled={!onRole}
+                    onClick={(e) => {
+                      // 상세는 행 안에 있다 — 막지 않으면 행 토글로 새어 나가 접힌다
+                      e.stopPropagation();
+                      onRole?.(r.id);
+                    }}
+                  >
+                    {r.ko}
+                  </button>
+                ))}
               </div>
             </div>
           )}

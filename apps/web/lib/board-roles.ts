@@ -1,6 +1,5 @@
 import {
   FAMILIARITY_MAX,
-  adaptationOf,
   defaultRoleOf,
   positionAtPoint,
   roleChangeCost,
@@ -15,8 +14,10 @@ import type { OfficeViews } from "@story-fm/engine";
  * **자리가 있어야 역할이 있다** (player.md §3.1). 선발만 자리를 갖고, 화면이 보내는
  * 역할도 선발 것뿐이다 — 판에서 내려간 선수의 선택은 함께 버린다.
  *
- * **대가는 고르기 전에 보인다** (§7.2). 공식의 출처는 도메인 하나(`roleChangeCost`)고,
- * 화면은 그날 아침의 역할과 이미 치른 값(`roleToday`)으로 같은 셈을 미리 낸다.
+ * **고른 역할은 명단이 곧바로 따라간다** (§7.2). 공식의 출처는 도메인
+ * 하나(`roleChangeCost`)고, 화면은 그날 아침의 역할과 이미 치른 값(`roleToday`)으로
+ * 서버와 같은 셈을 낸다 — 저장을 기다리는 동안에도 OVR과 적응도가 같은 시점을
+ * 가리킨다. **고르기 전에 대가를 말하지는 않는다.**
  */
 
 type SquadRow = OfficeViews["squad"]["players"][number];
@@ -144,25 +145,3 @@ export function familiarityForRole(
   return clampFamiliarity(p.familiarity + paid - roleChangeCost(position, base, role));
 }
 
-/**
- * 이 역할로 바꾸면 적응도가 얼마나 움직이나 — **고르기 전에** 답한다.
- *
- * `p`는 화면 기준 행이라 `familiarity`가 이미 지금 켜진 역할(`current`)의 값이다.
- * 아침 값으로 되돌린 뒤 두 역할을 같은 자로 잰다 — 명단의 적응도와 같은 눈금이다.
- */
-export function roleAdaptationMove(
-  p: Pick<SquadRow, "familiarity" | "positionFit" | "roleId" | "roleToday">,
-  position: string,
-  current: string,
-  next: string,
-): number {
-  const { base } = roleBasisOf(p, position);
-  const morning = p.familiarity + roleChangeCost(position, base, current);
-  const at = (role: string) =>
-    adaptationOf(
-      p.positionFit,
-      clampFamiliarity(morning - roleChangeCost(position, base, role)),
-      position,
-    );
-  return at(next) - at(current);
-}
