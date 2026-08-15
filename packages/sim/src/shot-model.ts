@@ -7,7 +7,7 @@ export const FINISHING_SCALE = 34;
 /** 같은 기회의 골 오즈를 결정력이 움직이는 세기. */
 export const FINISHING_LOGIT_WEIGHT = 0.55;
 /** 슈팅별 xG가 경로 평균 주변에 모이는 정도 — 작을수록 꼬리가 넓다. */
-export const SHOT_XG_CONCENTRATION = 12;
+export const SHOT_XG_CONCENTRATION = 16;
 
 /** 부동소수점 로그의 정의역만 지키는 수치 안전값 — 밸런스 상·하한이 아니다. */
 const PROBABILITY_EPSILON = Number.EPSILON;

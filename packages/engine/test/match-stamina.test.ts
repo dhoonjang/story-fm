@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { assignmentsOf, playerById, tacticsOf, userPlayers } from "@story-fm/engine";
-import { conditionDrain, dailyRecovery, RECOVERY_BASE, recoveryFactor } from "@story-fm/sim";
+import {
+  conditionDrain,
+  dailyRecovery,
+  GAP_CONDITION,
+  RECOVERY_BASE,
+  recoveryFactor,
+} from "@story-fm/sim";
 import { DEFAULT_TACTICS, weightSlotOf } from "@story-fm/domain";
 import { advanceDays, advanceToMatchday, createTestGame, playMockMatch } from "./helpers";
 
@@ -25,7 +31,7 @@ function createNeutralGame() {
 }
 
 describe("경기 체력 — 소모", () => {
-  it("90분을 뛰면 바닥 근처로 간다 — 만땅으로 시작해도", () => {
+  it("90분을 뛰면 절반 아래로 — 그래도 다리가 멈추지는 않는다", () => {
     const state = createNeutralGame();
     advanceToMatchday(state);
     const starters = startersOf(state);
@@ -40,12 +46,17 @@ describe("경기 체력 — 소모", () => {
      * 필드 플레이어는 **평균 절반 아래**로 — 이겨서 사기가 붙어도 마찬가지다.
      * ⚠️ 최댓값에 문턱을 걸지 않는다: 센터백은 원래 덜 지치고 거기에 그날의 몫
      * (`drainVariance` ±12%)이 곱해져 운 좋은 한 명이 50을 살짝 넘을 수 있다.
-     * 고정하려는 계약은 "한 경기가 스쿼드를 비운다"이지 특정 한 명의 값이 아니다.
      */
     const mean = outfield.reduce((a, b) => a + b, 0) / outfield.length;
-    expect(mean).toBeLessThan(45);
-    // 가장 많이 뛴 자리(중원·측면)는 바닥 근처다
-    expect(Math.min(...outfield)).toBeLessThan(40);
+    expect(mean).toBeLessThan(42);
+    // 가장 많이 뛴 자리(중원·측면)가 절반 아래인 것까지가 계약이다
+    expect(Math.min(...outfield)).toBeLessThan(35);
+    /**
+     * **여기가 하한이다.** 만땅으로 시작해 90분을 뛴 선수가 구멍 문턱
+     * (`GAP_CONDITION`) 아래로 내려가면 그 문턱은 예외가 아니라 상수가 되고, 후반마다
+     * 모든 라인에 구멍 키포인트가 뜬다 (stamina.ts §구멍).
+     */
+    expect(Math.min(...outfield)).toBeGreaterThan(GAP_CONDITION);
   });
 
   it("자리가 소모를 가른다 — 골키퍼와 중원이 같이 지치지 않는다", () => {
@@ -108,14 +119,14 @@ describe("경기 체력 — 소모", () => {
 });
 
 describe("경기 체력 — 회복", () => {
-  it("지구력 70 공격수는 체력 100에서 풀타임 뒤 20~30을 남긴다", () => {
+  it("지구력 70 공격수는 체력 100에서 풀타임 뒤 35~41을 남긴다", () => {
     const player = {
       attributes: { stamina: 70 },
       state: { condition: 100 },
     } as unknown as Parameters<typeof conditionDrain>[0];
     const remaining = 100 - conditionDrain(player, "ST", DEFAULT_TACTICS, 90);
-    expect(remaining).toBeGreaterThanOrEqual(20);
-    expect(remaining).toBeLessThanOrEqual(30);
+    expect(remaining).toBeGreaterThanOrEqual(35);
+    expect(remaining).toBeLessThanOrEqual(41);
   });
 
   it("감쇠 곡선은 경기를 나눈 구간 수와 무관하다", () => {
@@ -163,7 +174,12 @@ describe("경기 체력 — 회복", () => {
     expect(afterWeek).toBeGreaterThanOrEqual(95);
   });
 
-  it("지구력 90 중앙 미드필더도 가장 무거운 풀타임 뒤 바닥에서 0으로 직선 낙하하지 않는다", () => {
+  /**
+   * **가장 잘 뛰는 선수도 사흘로는 못 채운다** — 주 2경기 리듬이 로테이션을
+   * 강요한다는 계약의 상한선이다. 여기가 뚫리면 "지구력 좋은 열한 명을 그냥 계속
+   * 세운다"가 정답이 되어 로테이션이라는 결정이 사라진다.
+   */
+  it("지구력 90 중앙 미드필더도 사흘로는 완전히 회복하지 못한다", () => {
     const player = {
       attributes: { stamina: 90 },
       state: { condition: 100 },
@@ -174,9 +190,12 @@ describe("경기 체력 — 회복", () => {
       afterMatch,
     );
 
-    expect(afterMatch).toBeGreaterThanOrEqual(15);
-    expect(afterMatch).toBeLessThanOrEqual(30);
-    expect(afterThreeDays).toBeGreaterThanOrEqual(60);
+    // 바닥에서 0으로 직선 낙하하지도 않는다 — 감쇠 곡선의 몫
+    expect(afterMatch).toBeGreaterThanOrEqual(30);
+    expect(afterMatch).toBeLessThanOrEqual(36);
+    // 사흘이면 다시 뛸 만하지만 **만땅은 아니다**
+    expect(afterThreeDays).toBeGreaterThanOrEqual(74);
+    expect(afterThreeDays).toBeLessThan(85);
   });
 
   it("회복 집중 주간은 지구력 50 중앙 미드필더를 7일 안에 완전히 회복시킨다", () => {
@@ -202,13 +221,27 @@ describe("경기 체력 — 회복", () => {
     playMockMatch(state);
     advanceDays(state, 3);
 
-    const after = starters.map((s) => playerById(state, s.id)!.state.condition);
-    // 가장 많이 뛰는 자리(측면·중원)는 완전히 돌아오지 않는다 — 그대로 쓰면 대가가 있다
-    expect(Math.min(...after)).toBeLessThan(85);
+    const after = starters.map((s) => ({
+      slot: weightSlotOf(s.position),
+      condition: playerById(state, s.id)!.state.condition,
+    }));
+    const conditions = after.map((a) => a.condition);
+    // 아무도 만땅으로 돌아오지 못한다 — 그대로 열한 명을 다시 세우면 대가가 있다
+    expect(Math.max(...conditions)).toBeLessThan(90);
     // 그렇다고 못 뛸 몸은 아니다. 감독이 고를 수 있는 구간이어야 판단이 생긴다
-    expect(Math.min(...after)).toBeGreaterThan(40);
-    // 센터백은 버틴다 — 연전을 누가 견디는지가 자리마다 갈려야 로테이션이 판단이 된다
-    expect(Math.max(...after) - Math.min(...after)).toBeGreaterThan(10);
+    expect(Math.min(...conditions)).toBeGreaterThan(65);
+
+    /**
+     * **연전을 누가 견디는지가 자리마다 갈려야** 로테이션이 판단이 된다. 많이 뛰는
+     * 자리(풀백·중원·윙어)와 덜 뛰는 자리(센터백·최전방)의 사흘 뒤가 붙어 있으면
+     * 감독은 그냥 어제와 같은 열한 명을 적는다.
+     */
+    const meanOf = (slots: string[]) => {
+      const group = after.filter((a) => slots.includes(a.slot)).map((a) => a.condition);
+      expect(group.length).toBeGreaterThan(0);
+      return group.reduce((a, b) => a + b, 0) / group.length;
+    };
+    expect(meanOf(["CB", "ST", "CF"]) - meanOf(["FB", "DM", "CM", "W"])).toBeGreaterThan(5);
   });
 
   /**
@@ -257,11 +290,68 @@ describe("경기 체력 — 회복", () => {
     advanceDays(state, 6);
 
     const after = starters.map((s) => playerById(state, s.id)!.state.condition);
-    expect(Math.min(...after)).toBeGreaterThan(85);
+    // 만 7일 리듬에서는 **전원이 만땅**이다 — 여기가 무너지면 시즌 내내 계단으로 내려간다
+    expect(Math.min(...after)).toBeGreaterThan(98);
   });
 
   it("쉬는 날이 훈련일보다 많이 회복하고, 회복 세션이 가장 크다", () => {
     expect(RECOVERY_BASE.recovery).toBeGreaterThan(RECOVERY_BASE.idle);
     expect(RECOVERY_BASE.idle).toBeGreaterThan(RECOVERY_BASE.training);
+  });
+});
+
+/**
+ * **후반에 무너지는 것은 전원이 아니라 일부다.**
+ *
+ * 여기가 이 밸런스의 목적이다. 만땅으로 시작한 선수가 90분에 구멍이 나면 감독은
+ * 아무것도 판단할 수 없다 — 누굴 세워도 후반에 라인이 열리니까. 구멍은 **지구력이
+ * 낮은 선수**와 **덜 회복된 채 나온 선수**에게만 와야 하고, 그때 감독의 선택
+ * (쉬게 할까 · 미리 바꿀까)이 결과를 가른다.
+ */
+describe("경기 체력 — 후반에 무너지는 사람", () => {
+  const of = (stamina: number, condition: number) =>
+    ({ attributes: { stamina }, state: { condition } }) as unknown as Parameters<
+      typeof conditionDrain
+    >[0];
+  const conditionAt = (
+    player: Parameters<typeof conditionDrain>[0],
+    position: string,
+    minutes: number,
+  ) =>
+    player.state.condition -
+    conditionDrain(player, position, DEFAULT_TACTICS, minutes, 1, 1, 0.5, player.state.condition);
+  /** 구멍이 나는 시각 — 90분 내내 버티면 null */
+  const gapMinute = (player: Parameters<typeof conditionDrain>[0], position: string) => {
+    for (let minute = 1; minute <= 90; minute++) {
+      if (conditionAt(player, position, minute) < GAP_CONDITION) return minute;
+    }
+    return null;
+  };
+
+  it("온전한 몸으로 시작하면 자리·지구력을 통틀어 90분을 버틴다", () => {
+    for (const position of ["RCM", "RB", "RW", "ST", "RCB"]) {
+      for (const stamina of [50, 70, 90]) {
+        expect(gapMinute(of(stamina, 100), position), `${position} 지구력 ${stamina}`).toBeNull();
+      }
+    }
+    // 지구력이 좋으면 여유까지 남는다 — 문턱에 겨우 걸치는 게 아니다
+    expect(conditionAt(of(90, 100), "RCM", 90)).toBeGreaterThan(GAP_CONDITION + 10);
+  });
+
+  it("덜 회복된 채 나오면 후반에 구멍이 난다 — 사흘 만에 다시 세운 다리", () => {
+    // 사흘 뒤 중원의 실제 체력대(73 근처)와 그보다 못한 몸
+    const late = gapMinute(of(70, 73), "RCM");
+    expect(late).not.toBeNull();
+    expect(late!).toBeGreaterThan(45); // 전반이 아니라 후반이다
+    const worse = gapMinute(of(60, 70), "RCM");
+    expect(worse).not.toBeNull();
+    expect(worse!).toBeGreaterThan(45);
+    // 더 못한 몸이 더 먼저 무너진다
+    expect(worse!).toBeLessThan(late!);
+  });
+
+  it("덜 회복돼도 덜 뛰는 자리는 버틴다 — 자리마다 감독의 선택이 다르다", () => {
+    expect(gapMinute(of(70, 73), "RCB")).toBeNull();
+    expect(gapMinute(of(70, 73), "GK")).toBeNull();
   });
 });

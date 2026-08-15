@@ -439,8 +439,8 @@ describe("AI 교체 판단", () => {
   it("연장 개시도 벤치가 판을 다시 짜는 자리다 — 문턱이 하프타임과 같다", () => {
     const squad = squadOf(75);
     const worn: Record<string, number> = {};
-    // 하프타임 문턱(28)은 넘고 평시 문턱(40)은 못 넘는 정도
-    for (const p of squad.onPitch) worn[p.id] = 32 - (100 - p.state.condition);
+    // 하프타임 문턱(58)은 넘고 평시 문턱(65)은 못 넘는 정도
+    for (const p of squad.onPitch) worn[p.id] = 61 - (100 - p.state.condition);
     const breakStop = planAiSubstitution(
       "home",
       squad,

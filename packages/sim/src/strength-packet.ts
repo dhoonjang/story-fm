@@ -416,8 +416,13 @@ export function possessionShare(midfield: number, oppMidfield: number): number {
   return Math.max(POSSESSION_MIN, Math.min(POSSESSION_MAX, raw));
 }
 
-/** 평균적인 위치·역할·판에서 선수 한 명이 갖는 90분 기대 슈팅. */
-export const PLAYER_SHOT_BASE = 1.1;
+/**
+ * 평균적인 위치·역할·판에서 선수 한 명이 갖는 90분 기대 슈팅.
+ * 실제 1부 리그의 양팀 합 24~26슛에 맞춘 값이다 — 이 손잡이가 슈팅 **양**을 정하고
+ * 슛 하나의 질은 `BASE_SHOT_XG`가 따로 정한다. 둘을 반대 방향으로 움직이면
+ * 득점을 유지한 채 슈팅 수만 옮길 수 있다.
+ */
+export const PLAYER_SHOT_BASE = 0.99;
 /** 실제 전술판의 전진 깊이가 슈팅량에 닿는 세기. */
 export const SHOT_DEPTH_LOG_WEIGHT = 2.3;
 /** 역할의 결정력 요구가 슈팅 책임으로 번역되는 세기. */
@@ -426,12 +431,34 @@ export const ROLE_SHOT_LOG_WEIGHT = 0.45;
 export const POSSESSION_SHOT_LOG_WEIGHT = 0.32;
 /** 후방→중원→공격 경로 우위의 슈팅량 영향. */
 export const ROUTE_SHOT_LOG_WEIGHT = 0.75;
+/**
+ * 경로 우위가 **슈팅량**에 실릴 때 이득 쪽이 포화하는 폭 — 넓게 둬서 거의 선형이다.
+ * 이 축이 승패와 승점 분포를 만든다 (`saturateEdge`).
+ */
+export const ROUTE_SHOT_SATURATION = 0.75;
+/**
+ * 경로 우위가 **슈팅 질**에 실릴 때 포화하는 폭 — 좁게 둬서 총 득점을 잡는다.
+ * 밀어붙이는 팀은 슛을 더 많이 치되 그 슛이 점점 어려운 자리에서 나온다.
+ */
+export const ROUTE_XG_SATURATION = 0.45;
+/**
+ * 밀리는 쪽의 슈팅량이 더 크게 깎이는 배수.
+ *
+ * 실제 축구에서 전력차는 "강팀이 두 배로 친다"가 아니라 **"약팀이 절반만 친다"**로
+ * 나타난다 — 밀리는 팀은 공을 잡지 못해 슛까지 가는 장면 자체가 줄어든다. 이득
+ * 쪽만 포화시키면 강팀의 우위만 눌려 리그가 평평해지므로(우승 승점 70점대),
+ * 손해 쪽을 함께 키워 **총량은 지키고 승패의 기울기만** 세운다.
+ */
+export const ROUTE_SHOT_DEFICIT = 1.3;
 /** 결정력 자체가 슈팅 접근에 주는 작은 효과. */
 export const FINISHING_ACCESS_LOG_WEIGHT = 0.1;
 /** 기회 생성 전력이 선수별 슈팅량에 닿는 세기. */
 export const CREATION_SKILL_LOG_WEIGHT = 0.75;
-/** 대등한 경로에서 슈팅 하나의 평균 기회 xG. */
-export const BASE_SHOT_XG = 0.072;
+/**
+ * 대등한 경로에서 슈팅 하나의 평균 기회 xG.
+ * 실제 1부 리그의 슛당 xG는 0.11 언저리다(2.8골 ÷ 25슛).
+ */
+export const BASE_SHOT_XG = 0.076;
 /** 최종 공격 지역 우위가 슈팅 질에 닿는 세기. */
 export const ROUTE_XG_LOGIT_WEIGHT = 0.7;
 /** 선수의 전진 위치가 슈팅 질에 닿는 세기. */
@@ -665,6 +692,42 @@ const sigmoid = (z: number): number => 1 / (1 + Math.exp(-z));
 const logit = (p: number): number => Math.log(p / (1 - p));
 
 /**
+ * 지역 플랜이 공격 배분을 그 레인으로 끌어오는 세기 — 의도가 무게를 정한다.
+ * 소화율을 타고(`plan.uptake`) 선수의 자리 가중치에 곱해지므로, 레인을 통째로
+ * 바꾸지는 못한다 — 반대편 윙어는 여전히 자기 쪽에서 더 많이 찬다.
+ */
+export const PLAN_ROUTE_FOCUS: Record<RegionalIntent, number> = {
+  overload: 3,
+  transition: 2.1,
+  press: 1.5,
+  // 보호는 우리 공격을 옮기지 않는다 — 그 칸을 두껍게 할 뿐이다
+  protect: 0,
+};
+/** 그 줄의 플랜이 공격 경로를 정하는 정도 — 뒷선 플랜은 우리 슈팅을 옮기지 않는다. */
+const PLAN_BAND_FOCUS: Record<RegionalBand, number> = { attack: 1, midfield: 0.5, defense: 0 };
+
+/**
+ * 이득 쪽만 포화하는 경로 우위 — **양과 질에 다른 폭을 쓴다.**
+ *
+ * 같은 우위가 슈팅량(exp)과 슈팅 질(logit) 양쪽에 곱해지므로, 손대지 않으면
+ * 전력차가 벌어질수록 **총 득점이 지수로 부푼다**(86 vs 64에서 xG 합 5.15).
+ * 그런데 한 폭으로 둘을 함께 누르면 이번엔 **강팀이 약팀을 못 이긴다** — 리그가
+ * 평평해져 우승 승점이 70점대로 주저앉았다.
+ *
+ * 두 축이 만드는 것이 다르기 때문이다:
+ * - **슈팅 양**의 비대칭은 *누가 경기를 지배하는가* — 승패와 승점 분포를 정한다.
+ * - **슈팅 질**은 슛 하나가 골이 되는 비율 — 리그의 총 득점 수준을 정한다.
+ *
+ * 그래서 양은 거의 그대로 두어 기울기를 살리고(`ROUTE_SHOT_SATURATION`), 질만
+ * 좁게 포화시켜 총량을 잡는다(`ROUTE_XG_SATURATION`). 실제 축구에서도 밀어붙이는
+ * 팀은 슛을 훨씬 많이 치지만 그 슛들이 점점 더 어려운 자리에서 나온다.
+ */
+function saturateEdge(edge: number, width: number, deficit = 1): number {
+  if (edge <= 0) return edge * deficit;
+  return width * Math.tanh(edge / width);
+}
+
+/**
  * 선수×좌/중/우 경로의 슈팅 강도를 직접 만든다.
  * 팀 총량은 입력이 아니며 이 배열을 마지막에 합한 파생값이다.
  */
@@ -690,6 +753,23 @@ function buildPlayerShotProfiles(
     return Math.log(Math.max(Number.EPSILON, ours) / Math.max(Number.EPSILON, theirs));
   };
   const possessionLogit = logit(possession) - logit(0.5);
+  /**
+   * **지역 플랜은 공격이 어디로 흐르는지를 바꾼다.**
+   *
+   * "왼쪽을 파고들어라"의 실제 뜻이 그것이다 — 그 레인의 칸이 두꺼워지는 것만으로는
+   * 배분이 그대로라 이득도 손해도 나지 않는다(격자는 줄 안에서 제로섬이다).
+   * 슈팅이 그 레인으로 몰려야 그 레인의 수익률이 팀 기대 득점에 실린다: 상대가
+   * 얇은 쪽을 골랐으면 이득이고, 이미 두꺼운 쪽을 골랐으면 손해다.
+   */
+  const plans = packet[side].regional ?? [];
+  const focus = (route: ShotRoute): number =>
+    plans.reduce(
+      (sum, plan) =>
+        plan.lane === route
+          ? sum + PLAN_ROUTE_FOCUS[plan.intent] * PLAN_BAND_FOCUS[plan.band] * plan.uptake
+          : sum,
+      0,
+    );
 
   return slots
     .filter((slot) => slotGroup(slot) !== "GK")
@@ -703,7 +783,8 @@ function buildPlayerShotProfiles(
         attrs.positioning * 0.4 + attrs.dribbling * 0.25 + attrs.pace * 0.2 + attrs.aerial * 0.15;
       const rawRouteWeights = GRID_LANES.map((route) => ({
         route,
-        weight: 1 / (1 + Math.abs(point.x - SHOT_LANE_X[route]) / ROUTE_REACH),
+        weight:
+          (1 / (1 + Math.abs(point.x - SHOT_LANE_X[route]) / ROUTE_REACH)) * (1 + focus(route)),
       }));
       const routeWeightSum = rawRouteWeights.reduce((sum, item) => sum + item.weight, 0);
 
@@ -719,14 +800,14 @@ function buildPlayerShotProfiles(
           SHOT_DEPTH_LOG_WEIGHT * (depth - SHOT_DEPTH_PIVOT) +
           ROLE_SHOT_LOG_WEIGHT * Math.log(roleShotWeight / ROLE_SHOT_WEIGHT_PIVOT) +
           POSSESSION_SHOT_LOG_WEIGHT * possessionLogit +
-          ROUTE_SHOT_LOG_WEIGHT * pathEdge +
+          ROUTE_SHOT_LOG_WEIGHT * saturateEdge(pathEdge, ROUTE_SHOT_SATURATION, ROUTE_SHOT_DEFICIT) +
           CREATION_SKILL_LOG_WEIGHT * Math.log(creation / CREATION_EFFECTIVE_PIVOT) +
           FINISHING_ACCESS_LOG_WEIGHT * ((attrs.finishing - FINISHING_PIVOT) / FINISHING_SCALE) +
           Math.log(venue);
         const expectedShots = Math.exp(logShots);
         const meanXg = sigmoid(
           logit(BASE_SHOT_XG) +
-            ROUTE_XG_LOGIT_WEIGHT * edgeAt(route, "attack") +
+            ROUTE_XG_LOGIT_WEIGHT * saturateEdge(edgeAt(route, "attack"), ROUTE_XG_SATURATION) +
             SHOT_DEPTH_XG_LOGIT_WEIGHT * (depth - SHOT_DEPTH_PIVOT) +
             CHANCE_SKILL_XG_LOGIT_WEIGHT *
               ((chanceSkill - CHANCE_SKILL_PIVOT) / CHANCE_SKILL_SCALE),

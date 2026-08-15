@@ -412,3 +412,132 @@ describe("개인 지시", () => {
     expect(skilled.away.zones.attack).toBeLessThan(raw.away.zones.attack);
   });
 });
+
+/**
+ * 지역 플랜 — 자연어 세부 전술("왼쪽을 파고들어라")이 결과에 닿는 경로.
+ *
+ * 도구가 성공 메시지만 남기고 수치는 그대로였던 자리다. 격자는 줄 안에서
+ * 제로섬이라 칸을 두껍게 하는 것만으로는 아무 일도 일어나지 않는다 —
+ * **슈팅 배분이 그 레인으로 몰려야** 그 레인의 수익률이 기대 득점에 실린다.
+ */
+describe("지역 플랜", () => {
+  const withPlans = (plans: SideInput["regional"]) => {
+    const side = makeSide("us", 75);
+    return plans ? { ...side, regional: plans } : side;
+  };
+  const overload = (lane: "left" | "center" | "right"): SideInput["regional"] => [
+    { band: "attack", lane, intent: "overload", note: `${lane}을 파고들어라` },
+  ];
+  /** 상대의 한 자리만 갈아 끼운다 — 노릴 값이 있는 판을 만든다 */
+  const opponent = (position: string, to: number) => {
+    const side = makeSide("them", 75);
+    side.starters = side.starters.map((slot) =>
+      slot.position === position
+        ? {
+            ...slot,
+            player: {
+              ...slot.player,
+              attributes: Object.fromEntries(
+                ATTRIBUTE_AXES.map((axis) => [axis, to]),
+              ) as unknown as (typeof slot.player)["attributes"],
+            },
+          }
+        : slot,
+    );
+    return side;
+  };
+
+  it("플랜 하나가 기대 득점을 눈에 띄게 움직인다", () => {
+    const flat = buildStrengthPacket(withPlans(undefined), makeSide("them", 75));
+    const planned = buildStrengthPacket(withPlans(overload("center")), makeSide("them", 75));
+    const gain = planned.guide.expectedGoals.home / flat.guide.expectedGoals.home - 1;
+    // 개인 지시(join_attack +5.6%)·공략(+7.6%)보다 작고, 0이 아니다
+    expect(gain).toBeGreaterThan(0.015);
+    expect(gain).toBeLessThan(0.05);
+  });
+
+  it("두 곳을 걸면 한 곳보다 더 움직인다", () => {
+    const one = buildStrengthPacket(withPlans(overload("left")), makeSide("them", 75));
+    const two = buildStrengthPacket(
+      withPlans([
+        ...overload("left")!,
+        { band: "midfield", lane: "left", intent: "press", note: "왼쪽 중원을 물어라" },
+      ]),
+      makeSide("them", 75),
+    );
+    expect(two.guide.expectedGoals.home).toBeGreaterThan(one.guide.expectedGoals.home);
+  });
+
+  /** 요구사항 4 — 유저의 결정은 나쁜 쪽으로도 결과를 움직여야 한다 */
+  it("양방향이다 — 약한 측면을 노리면 이득, 두꺼운 측면을 노리면 손해", () => {
+    // 상대 오른쪽 풀백(= 우리 왼쪽 공격이 만나는 자리)만 세게
+    const strongRight = () => opponent("RB", 92);
+    const flat = buildStrengthPacket(withPlans(undefined), strongRight());
+    const intoStrength = buildStrengthPacket(withPlans(overload("left")), strongRight());
+    const intoWeakness = buildStrengthPacket(withPlans(overload("right")), strongRight());
+    expect(intoStrength.guide.expectedGoals.home).toBeLessThan(flat.guide.expectedGoals.home);
+    expect(intoWeakness.guide.expectedGoals.home).toBeGreaterThan(flat.guide.expectedGoals.home);
+  });
+
+  it("보호는 상대가 실제로 다니는 레인을 골라야 값을 한다", () => {
+    const them = () => makeSide("them", 75);
+    const flat = buildStrengthPacket(withPlans(undefined), them());
+    const guarded = buildStrengthPacket(
+      withPlans([{ band: "defense", lane: "center", intent: "protect", note: "가운데를 잠가라" }]),
+      them(),
+    );
+    // 상대 최전방이 중앙에 서 있으므로 가운데를 두껍게 하면 상대 기대 득점이 준다
+    expect(guarded.guide.expectedGoals.away).toBeLessThan(flat.guide.expectedGoals.away);
+  });
+});
+
+/**
+ * 전력차와 총 득점 — **강팀이 더 넣는 만큼 약팀이 덜 넣는다.**
+ *
+ * 같은 경로 우위가 슈팅량(exp)과 슈팅 질(logit)에 이중으로 곱해지던 때는
+ * 86 vs 64의 xG 합이 5.15까지 갔다(실제 축구의 상한은 3.4~3.8).
+ *
+ * 두 축을 다른 폭으로 포화시킨다 — **양**은 거의 그대로 둬서 승패의 기울기를
+ * 살리고(`ROUTE_SHOT_SATURATION`), **질**만 좁게 눌러 총량을 잡는다
+ * (`ROUTE_XG_SATURATION`). 한 폭으로 둘을 함께 누르면 총 득점과 함께 우승 승점도
+ * 주저앉아 리그가 평평해진다.
+ */
+describe("전력차와 총 기대 득점", () => {
+  const sumOf = (h: number, a: number) => {
+    const packet = buildStrengthPacket(makeSide("str", h), makeSide("wk", a));
+    const { home, away } = packet.guide.expectedGoals;
+    return { total: home + away, ratio: home / away };
+  };
+
+  it("대등한 경기의 총 기대 득점은 3.0 언저리다", () => {
+    expect(sumOf(75, 75).total).toBeGreaterThan(2.8);
+    expect(sumOf(75, 75).total).toBeLessThan(3.3);
+  });
+
+  /**
+   * ⚠️ **경계는 게임이 실제로 만나는 격차에 맞춰 둔다.**
+   *
+   * `makeSide(base)`는 15축을 전부 `base`로 채운 인공 스쿼드라 같은 OVR의 실제
+   * 선수보다 기회 생산이 세다(대등한 경기 실측 2.79 대 여기 2.91). 그러니 이
+   * 숫자는 리그 평균의 자가 아니라 **격차가 벌어질 때 총량이 어떻게 자라는가**의
+   * 자다 — 리그 검증은 하네스(`balance-harness.test.ts`)가 한다.
+   *
+   * 실제로 만나는 격차: 한 리그 안의 최대는 12(XI 평균 OVR 86.9 대 75.1),
+   * 국내 컵의 1부 대 2부가 17 언저리다. 22·30은 이 세계에 없는 조합이라
+   * 그 구간에는 "지수로 터지지 않는다"만 건다.
+   */
+  it("전력차가 벌어져도 총 기대 득점이 폭증하지 않는다", () => {
+    // 리그 안 최대 격차 — 실제 축구의 총 득점 상한(3.4~3.8) 안에 있어야 한다
+    expect(sumOf(81, 69).total).toBeLessThan(3.8);
+    // 국내 컵의 1부 대 2부
+    expect(sumOf(84, 67).total).toBeLessThan(4.2);
+    // 존재하지 않는 격차 — 그래도 선형 언저리를 넘지 않는다
+    expect(sumOf(90, 60).total).toBeLessThan(6);
+  });
+
+  it("총량은 눌러도 승부의 기울기는 남는다", () => {
+    expect(sumOf(78, 72).ratio).toBeGreaterThan(1.5);
+    expect(sumOf(82, 68).ratio).toBeGreaterThan(sumOf(78, 72).ratio);
+    expect(sumOf(86, 64).ratio).toBeGreaterThan(sumOf(82, 68).ratio);
+  });
+});

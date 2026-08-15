@@ -1,5 +1,5 @@
-import type { PacketPlayer, StrengthPacket } from "@story-fm/domain";
-import { anchorOf, logRatioFactor, PITCH_BANDS } from "@story-fm/domain";
+import type { PacketPlayer, RegionalIntent, StrengthPacket } from "@story-fm/domain";
+import { anchorOf, PITCH_BANDS } from "@story-fm/domain";
 
 /**
  * 판세 격자 — **세 전선을 좌·중·우로 한 번 더 쪼갠 것.**
@@ -19,6 +19,15 @@ import { anchorOf, logRatioFactor, PITCH_BANDS } from "@story-fm/domain";
  * 선수는 점이 아니라 영역을 맡는다. 각 선수가 자기 전술판 좌표에서 거리만큼
  * 옅어지며 이웃 칸에도 기여한다(`REACH`) — 그래서 왼쪽에 아무도 없어도 그 칸이
  * 0이 되지 않고, 가운데 선수들이 흘려 준 만큼 남는다.
+ *
+ * ## 지역 플랜이 결과에 닿는 길
+ *
+ * 격자가 줄 안에서 제로섬이라, 칸 하나를 두껍게 만드는 것만으로는 기대 득점이
+ * 움직이지 않는다 — 옆 칸에서 그만큼 잃기 때문이다. 플랜이 값을 하는 것은
+ * **슈팅이 그 레인으로 몰릴 때**다(`PLAN_ROUTE_FOCUS`, strength-packet.ts):
+ * 상대가 얇은 칸을 골랐으면 이득이고, 이미 두꺼운 칸을 골랐으면 옆 칸을 헐어
+ * 손해를 본다. 그래서 지역 플랜에는 **별도의 득점 계수가 없다** — 격자 하나가
+ * 슈팅 생성의 유일한 수치 원본이라는 §1.4의 규칙을 그대로 지킨다.
  */
 
 export type GridLane = "left" | "center" | "right";
@@ -38,8 +47,23 @@ const BAND_Y: Record<GridBand, number> = PITCH_BANDS.center;
  */
 const REACH = 46;
 
-/** 지역 공략 효율의 로그 민감도 — 최종 계수는 ±4%로 한 번 더 제한한다. */
-export const REGIONAL_LOG_SENSITIVITY = 0.12;
+/**
+ * 지역 플랜이 그 칸으로 끌어오는 전력의 몫 — 의도마다 무게가 다르다.
+ *
+ * 줄 안에서 다시 정규화되므로(`normalize`) 존 전력은 그대로다 — 목표 칸이
+ * 두꺼워진 만큼 같은 줄의 나머지 두 칸이 얇아진다. **한쪽으로 사람을 몰면
+ * 반대쪽이 빈다**는 사실이 이 한 줄에 들어 있다.
+ *
+ * 보호가 가장 큰 이유는 **공격 배분을 옮기지 않기 때문이다** — 다른 세 의도는
+ * 슈팅을 그 레인으로 끌어와서도 값을 하지만(`PLAN_ROUTE_FOCUS`) 보호는 그 칸을
+ * 두껍게 하는 것이 전부다. 상대가 실제로 다니는 레인을 골라야 값을 한다.
+ */
+export const REGIONAL_INTENT_WEIGHT: Record<RegionalIntent, number> = {
+  overload: 0.12,
+  press: 0.1,
+  protect: 0.18,
+  transition: 0.1,
+};
 
 /**
  * 사람이 적은 칸의 감점 폭 — 최대 이만큼만 깎는다.
@@ -116,7 +140,9 @@ export function zoneGrid(
   const sideCells = (side: "home" | "away") => {
     const players = packet[side].lineup;
     const zones =
-      metric === "creation" ? (packet[side].creationZones ?? packet[side].zones) : packet[side].zones;
+      metric === "creation"
+        ? (packet[side].creationZones ?? packet[side].zones)
+        : packet[side].zones;
     const out = new Map<string, number>();
     for (const band of GRID_BANDS) {
       const raw = GRID_LANES.map((lane) => {
@@ -125,10 +151,9 @@ export function zoneGrid(
           (entry) => entry.band === band && entry.lane === lane,
         );
         if (!plan) return base;
-        const intentWeight = plan.intent === "overload" || plan.intent === "protect" ? 0.06 : 0.045;
-        // 기존 배치가 이미 한 칸에만 잡혀도 지시가 사라지지 않게, 줄 전력의 작은
+        // 기존 배치가 이미 한 칸에만 잡혀도 지시가 사라지지 않게, 줄 전력의 한
         // 몫을 목표 칸에 더한 뒤 같은 줄 안에서 다시 정규화한다.
-        return base + zones[band] * intentWeight * plan.uptake;
+        return base + zones[band] * REGIONAL_INTENT_WEIGHT[plan.intent] * plan.uptake;
       });
       const fixed = normalize(raw, zones[band]);
       GRID_LANES.forEach((lane, i) => out.set(`${band}:${lane}`, fixed[i]!));
@@ -145,32 +170,4 @@ export function zoneGrid(
       away: awayCells.get(`${FACING_BAND[band]}:${MIRROR_LANE[lane]}`) ?? 0,
     })),
   );
-}
-
-/** 좌·중·우 공간 우위를 득점률에 연결하는 제한된 계수. */
-export function regionalAttackFactor(grid: readonly GridCell[], side: "home" | "away"): number {
-  const routeQuality = (forSide: "home" | "away") => {
-    const band = forSide === "home" ? "attack" : "defense";
-    const cells = grid.filter((cell) => cell.band === band);
-    if (cells.length !== GRID_LANES.length) return 1;
-    const lanes = cells.map((cell) => ({
-      attack: forSide === "home" ? cell.home : cell.away,
-      defense: forSide === "home" ? cell.away : cell.home,
-    }));
-    const totalAttack = lanes.reduce((sum, lane) => sum + lane.attack, 0);
-    if (totalAttack <= 0) return 1;
-    const routedRatio = lanes.reduce(
-      (sum, lane) => sum + (lane.attack / totalAttack) * (lane.attack / Math.max(1, lane.defense)),
-      0,
-    );
-    const meanAttack = totalAttack / lanes.length;
-    const meanDefense = lanes.reduce((sum, lane) => sum + lane.defense, 0) / lanes.length;
-    return routedRatio / Math.max(0.01, meanAttack / Math.max(1, meanDefense));
-  };
-  // 양 팀이 같은 방식으로 공간을 쓰면 리그의 기본 득점률을 올리지 않는다.
-  // 상대보다 더 정확히 약한 레인을 찾은 몫만 서로 반대 방향으로 붙는다.
-  const ours = routeQuality(side);
-  const theirs = routeQuality(side === "home" ? "away" : "home");
-  const factor = logRatioFactor(ours / Math.max(0.01, theirs), REGIONAL_LOG_SENSITIVITY);
-  return Math.max(0.96, Math.min(1.04, factor));
 }

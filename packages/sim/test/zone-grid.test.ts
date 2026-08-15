@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildStrengthPacket, regionalAttackFactor, zoneGrid, GRID_BANDS, GRID_LANES } from "@story-fm/sim";
+import { buildStrengthPacket, zoneGrid, GRID_BANDS, GRID_LANES } from "@story-fm/sim";
 import { DEFAULT_TACTICS, type TacticsSpec } from "@story-fm/domain";
 import { makeSide } from "./helpers";
 import type { SideInput } from "@story-fm/sim";
@@ -75,12 +75,40 @@ describe("판세 격자 — 존을 좌·중·우로 쪼갠다", () => {
     );
   });
 
-  it("약한 측면에 공격력을 모으면 9칸 우위가 득점 계수에 닿는다", () => {
-    const home = makeSide("us", 78);
-    const away = boost(makeSide("them", 78), "RB", 45);
-    const target = home.starters.find((slot) => slot.position === "ST")!;
-    target.point = { x: 12, y: 18 };
-    const packet = buildStrengthPacket(home, away);
-    expect(regionalAttackFactor(zoneGrid(packet), "home")).toBeGreaterThan(1);
+  it("약한 측면에 공격력을 모으면 9칸 우위가 기대 득점에 닿는다", () => {
+    // 상대 오른쪽 풀백이 약하다 — 우리 왼쪽 공격이 만나는 자리다
+    const attackAt = (x: number) => {
+      const home = makeSide("us", 78);
+      home.starters.find((slot) => slot.position === "ST")!.point = { x, y: 18 };
+      return buildStrengthPacket(home, boost(makeSide("them", 78), "RB", 45));
+    };
+    expect(attackAt(12).guide.expectedGoals.home).toBeGreaterThan(
+      attackAt(88).guide.expectedGoals.home,
+    );
+  });
+
+  /**
+   * 지역 플랜의 첫 걸음 — 목표 칸이 두꺼워지고 **같은 줄의 나머지가 얇아진다.**
+   * 줄 합이 보존되므로 이것만으로는 기대 득점이 움직이지 않는다. 그다음이
+   * 슈팅 배분이다 (strength-packet.test.ts).
+   */
+  it("지역 플랜은 목표 칸을 두껍게 하고 같은 줄의 나머지를 얇게 한다", () => {
+    const flat = zoneGrid(
+      buildStrengthPacket(makeSide("us", 78), makeSide("them", 78)),
+      "creation",
+    );
+    const planned = makeSide("us", 78);
+    planned.regional = [
+      { band: "attack", lane: "left", intent: "overload", note: "왼쪽을 파고들어라" },
+    ];
+    const grid = zoneGrid(buildStrengthPacket(planned, makeSide("them", 78)), "creation");
+    expect(cellOf(grid, "attack", "left").home).toBeGreaterThan(
+      cellOf(flat, "attack", "left").home,
+    );
+    expect(cellOf(grid, "attack", "right").home).toBeLessThan(cellOf(flat, "attack", "right").home);
+    // 줄 평균은 그대로 — 격자는 배분이지 새 전력이 아니다
+    const mean = (g: typeof grid) =>
+      GRID_LANES.reduce((s, lane) => s + cellOf(g, "attack", lane).home, 0) / GRID_LANES.length;
+    expect(mean(grid)).toBeCloseTo(mean(flat), 6);
   });
 });

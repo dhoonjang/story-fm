@@ -6,6 +6,7 @@ import {
   tacticalDrain,
   drainVariance,
   DRAIN_VARIANCE,
+  GAP_CONDITION,
 } from "@story-fm/sim";
 import { DEFAULT_TACTICS, type TacticsSpec } from "@story-fm/domain";
 import { makeSide } from "./helpers";
@@ -274,9 +275,12 @@ describe("체력 — 자리와 전술이 함께 정한다", () => {
   it("90분 소모가 현실적인 범위 안이다 (기준 전술 · 평균 지구력)", () => {
     const p = makeSide("us", 78).starters.find((s) => s.position === "RCM")!.player;
     const full = conditionDrain(p, "RCM", DEFAULT_TACTICS, 90);
-    expect(full).toBeGreaterThan(55);
-    // 다만 한 경기로 0이 되지는 않는다 — 그건 압박·연전이 겹쳤을 때의 자리다
-    expect(full).toBeLessThan(90);
+    expect(full).toBeGreaterThan(45);
+    /**
+     * 만땅으로 시작한 선수는 **구멍 문턱을 넘지 않고** 90분을 마친다 — 넘는 건
+     * 지구력이 낮거나 덜 회복된 채 나온 선수의 자리다(stamina.ts §구멍).
+     */
+    expect(100 - full).toBeGreaterThan(GAP_CONDITION);
     // 맹렬한 압박으로 90분을 뛰면 혼자서도 한계에 닿는다
     const brutal = conditionDrain(p, "RCM", { ...DEFAULT_TACTICS, pressing: 5, tempo: 5 }, 90);
     expect(brutal).toBeGreaterThan(full);

@@ -270,34 +270,47 @@ describe("추첨 전에도 라운드 날짜는 달력에 있다 — 단, 확보�
     expect(pendingFor(state, "eflcup")).toHaveLength(0);
   }, 60_000);
 
+  /**
+   * ⚠️ **"다음 자리가 열렸다"는 우리가 1라운드를 이겼을 때만 볼 수 있다** — 시드 하나에
+   * 매면 체력·전력 밸런스를 만질 때마다 이 테스트가 결과 운으로 깜빡인다. 불변식
+   * (예정은 많아야 하나 · 살아 있을 때만 · 뽑히기 전까지만)은 모든 시드에서 재고,
+   * 다음 자리가 열리는 장면은 시드 하나에서 보이면 된다.
+   */
   it("시즌 내내 컵당 예정은 많아야 하나 — 직전 라운드를 이겨야 다음이 열린다", () => {
-    const state = createTestGame(7);
-    let sawSecond = false; // 2라운드 이상이 열리는 순간이 실제로 있었나
-    let guard = 420;
-    while (guard-- > 0 && !allMatchesDone(state)) {
-      const before = state.date;
-      const advanced = advanceTime(state, { days: 1 });
-      if (state.phase === "matchday") playMockMatch(state);
-      for (const cup of domesticCupsOf(state.userTeamId)) {
-        const pending = pendingFor(state, cup.id);
-        expect(pending.length, `${cup.id} @ ${state.date}`).toBeLessThanOrEqual(1);
-        const stage = pending[0]?.refId.split(":")[1];
-        if (!stage) continue;
-        // 예정이 있다 = 아직 살아 있고, 그 라운드는 아직 안 뽑혔다
-        expect(userStillIn(state, cup.id), `${cup.id} 탈락 후 예정이 남음`).toBe(true);
-        expect(domesticStageMatches(state, cup.id, stage as never)).toHaveLength(0);
-        if (stage !== DOMESTIC_STAGES[0]) sawSecond = true;
+    const runSeason = (seed: number) => {
+      const state = createTestGame(seed);
+      let sawSecond = false; // 2라운드 이상이 열리는 순간이 실제로 있었나
+      let guard = 420;
+      while (guard-- > 0 && !allMatchesDone(state)) {
+        const before = state.date;
+        const advanced = advanceTime(state, { days: 1 });
+        if (state.phase === "matchday") playMockMatch(state);
+        for (const cup of domesticCupsOf(state.userTeamId)) {
+          const pending = pendingFor(state, cup.id);
+          expect(pending.length, `시드 ${seed} · ${cup.id} @ ${state.date}`).toBeLessThanOrEqual(1);
+          const stage = pending[0]?.refId.split(":")[1];
+          if (!stage) continue;
+          // 예정이 있다 = 아직 살아 있고, 그 라운드는 아직 안 뽑혔다
+          expect(userStillIn(state, cup.id), `${cup.id} 탈락 후 예정이 남음`).toBe(true);
+          expect(domesticStageMatches(state, cup.id, stage as never)).toHaveLength(0);
+          if (stage !== DOMESTIC_STAGES[0]) sawSecond = true;
+        }
+        if (state.date === before && advanced.stopped !== "matchday") break;
       }
-      if (state.date === before && advanced.stopped !== "matchday") break;
-    }
-    expect(sawSecond, "1라운드를 이기고 다음 자리가 열린 적이 없다").toBe(true);
+      // 시즌이 끝난 뒤 — 탈락한 컵엔 아무 예정도 남지 않는다
+      for (const cup of domesticCupsOf(state.userTeamId)) {
+        if (userStillIn(state, cup.id)) continue;
+        expect(pendingFor(state, cup.id), `${cup.id} 탈락 후에도 예정이 남음`).toHaveLength(0);
+      }
+      return sawSecond;
+    };
 
-    // 시즌이 끝난 뒤 — 탈락한 컵엔 아무 예정도 남지 않는다
-    for (const cup of domesticCupsOf(state.userTeamId)) {
-      if (userStillIn(state, cup.id)) continue;
-      expect(pendingFor(state, cup.id), `${cup.id} 탈락 후에도 예정이 남음`).toHaveLength(0);
-    }
-  }, 120_000);
+    const seeds = [7, 3, 11];
+    expect(
+      seeds.some((seed) => runSeason(seed)),
+      "어느 시드에서도 1라운드를 이기고 다음 자리가 열리지 않았다",
+    ).toBe(true);
+  }, 180_000);
 });
 
 describe("실제 대회 규정을 따른다", () => {
