@@ -1302,14 +1302,20 @@ function shapeStrength(
  * (선수 × 슬롯) 점수 캐시 — 프리셋 5개를 훑으면 같은 조합을 몇 번씩 다시 잰다.
  * `proficiencyAt`이 포지션 배열을 훑으므로 그대로 두면 새 게임 하나에 100만 번
  * 가까이 불린다 (게임 생성이 0.4초 → mock GM 테스트가 타임아웃까지 갔다).
+ *
+ * `preferred`를 주면 지정 선발 가산까지 얹은 **실제 라인업과 같은 잣대**가 된다 —
+ * 모양을 고르는 쪽과 자리를 앉히는 쪽이 다른 점수를 쓰면, 세울 수 있는 모양인데도
+ * 시험 배치에서만 미달자가 나온다.
  */
-function memoFit(): (p: GamePlayer, slot: string) => number {
+function memoFit(preferred?: ReadonlySet<string>): (p: GamePlayer, slot: string) => number {
   const cache = new Map<string, number>();
   return (p, slot) => {
     const key = `${p.id}|${slot}`;
     let v = cache.get(key);
     if (v === undefined) {
-      v = lineupFit(p, slot);
+      // 적응도는 한 번만 — `fillSlots`가 쌍 교환을 세 번 돌며 이 함수를 수만 번 부른다
+      const prof = proficiencyAt(p, slot);
+      v = lineupFit(p, slot, prof) + (preferred?.has(p.id) && prof >= XI_BONUS_FLOOR ? XI_BONUS : 0);
       cache.set(key, v);
     }
     return v;
@@ -1450,7 +1456,7 @@ export function pickFormation(
   const wanted = new Set(preferred ?? []);
   const xi = squad.filter((p) => wanted.has(p.id));
   const pool = xi.length >= 10 ? xi : squad;
-  const fit = memoFit();
+  const fit = memoFit(wanted);
   if (prior) {
     const placed = fillSlots(pool, FORMATION_SLOTS[prior], fit);
     const feasible = placed.every(
@@ -1474,6 +1480,9 @@ export function pickFormation(
  *  기본 배치 가드(적응도 70 미만 금지)와 같은 눈금이다 — 가산이 그 가드를 뚫으면
  *  안 된다 (사우스햄프턴의 마테우스 페르난데스가 적응도 64로 레프트백에 섰다). */
 const XI_BONUS_FLOOR = 70;
+
+/** 지정 선발 가산 — 적합도·OVR 차이(최대 ~110)를 확실히 덮는다. */
+const XI_BONUS = 200;
 
 /**
  * 포메이션 슬롯에 맞춰 선발 11 + 벤치 9 배치를 만든다 (적합도 우선).
@@ -1503,24 +1512,18 @@ export function buildAssignments(
   const pool = squad.filter((p) => available(p.id));
   const wanted = new Set(preferred ?? []);
 
-  // 지정 선발 가산 — 적합도·OVR 차이(최대 ~110)를 확실히 덮는다.
-  //
-  // **그 자리를 실제로 볼 수 있을 때만** 준다: 카탈로그의 기본 선발은 그 구단의
-  // 실제 포메이션에서 뽑힌 11명이라, 프리셋으로 접힌 다른 모양(4백 명단 →
-  // 3-5-2)에 그대로 밀어 넣으면 스트라이커가 윙백에 선다. 못 서는 자리는
-  // 스쿼드에서 제대로 된 자원이 채우고 밀린 선수는 벤치로 간다 — 감독이 백3로
-  // 바꿀 때 실제로 하는 일이다.
+  // 지정 선발 가산(`XI_BONUS`)은 **그 자리를 실제로 볼 수 있을 때만** 준다:
+  // 카탈로그의 기본 선발은 그 구단의 실제 포메이션에서 뽑힌 11명이라, 프리셋으로
+  // 접힌 다른 모양(4백 명단 → 3-5-2)에 그대로 밀어 넣으면 스트라이커가 윙백에
+  // 선다. 못 서는 자리는 스쿼드에서 제대로 된 자원이 채우고 밀린 선수는 벤치로
+  // 간다 — 감독이 백3로 바꿀 때 실제로 하는 일이다.
   //
   // 포지션군 일치로 재면 안 된다. 4-2-3-1의 넓은 공격 3인은 좌표상 RM/AM/LM이라
   // **미드필더군**인데 그 자리에 서는 건 윙어(FW군)다 — 군으로 막으면 풀럼의
   // 보브·케빈 같은 지정 선발이 통째로 밀려난다. 적응도로 재면 같은 질문에
   // 정확히 답하면서(스트라이커의 윙백 적응도는 40대라 여전히 막힌다) 이 오탐이
   // 사라진다.
-  const fit = (p: GamePlayer, slot: string): number => {
-    // 적응도는 한 번만 — `fillSlots`가 쌍 교환을 세 번 돌며 이 함수를 수만 번 부른다
-    const prof = proficiencyAt(p, slot);
-    return lineupFit(p, slot, prof) + (wanted.has(p.id) && prof >= XI_BONUS_FLOOR ? 200 : 0);
-  };
+  const fit = memoFit(wanted);
 
   const chosen = fillSlots(pool, slots, fit);
   for (const p of chosen) used.add(p.id);

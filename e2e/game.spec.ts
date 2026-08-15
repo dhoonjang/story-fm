@@ -78,7 +78,7 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await expect(page).toHaveURL(/\/new$/, { timeout: 20_000 });
 
   // ── 온보딩 ──
-  await expect(page.getByTestId("league-grid")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: 20_000 });
   await page.getByTestId("league-epl").click();
   await expect(page.getByTestId("team-grid")).toBeVisible();
   await page.getByTestId("team-arsenal").click();
@@ -274,7 +274,8 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await openTactics(page);
   await expect(page.getByTestId("tactic-pressing-5")).toBeVisible();
   await expect(page.locator(".pitch-slot")).toHaveCount(11);
-  await expect(page.getByTestId("view-squad")).toHaveAttribute("data-save", "locked");
+  // 자동 저장이 아니라 지시를 받는 상태 — 보낼 지시가 쌓이면 `pending`이 된다
+  await expect(page.getByTestId("view-squad")).toHaveAttribute("data-save", "ready");
   // 선수를 고르면 교체할 상대에 화살표가 뜬다 — 그 화살표가 교체 지시를 보낸다
   await page.locator(".squad-table tbody tr.row-tier.t-start:not(.detail-row)").nth(6).click();
   await expect(page.locator(".squad-table .swap-btn").first()).toBeVisible();
@@ -369,7 +370,7 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
 
 test("면담 시나리오 — 판정형 스킬과 사기 반영", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("league-grid")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: 20_000 });
   await page.getByTestId("league-epl").click();
   await expect(page.getByTestId("team-grid")).toBeVisible();
   await page.getByTestId("team-chelsea").click();
@@ -438,7 +439,7 @@ test("면담 시나리오 — 판정형 스킬과 사기 반영", async ({ page 
  */
 test("협상은 카드로 선다 — 재계약 제안", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("league-grid")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: 20_000 });
   await page.getByTestId("league-epl").click();
   await expect(page.getByTestId("team-grid")).toBeVisible();
   await page.getByTestId("team-arsenal").click();
@@ -466,7 +467,7 @@ test("협상은 카드로 선다 — 재계약 제안", async ({ page }) => {
 
 test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("league-grid")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: 20_000 });
   await page.getByTestId("league-epl").click();
   await expect(page.getByTestId("team-grid")).toBeVisible();
   await page.getByTestId("team-liverpool").click();
@@ -504,23 +505,33 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
   await expect(page.getByTestId("board-hint")).toHaveCount(0);
   await expect(page.getByTestId("squad-table")).toBeVisible();
   await expect(page.locator(".pitch-slot")).toHaveCount(11);
-  // 편집 진입 버튼도, 포메이션 셀렉트도 없다 (자리는 끌어서, 프리셋은 채팅으로)
+  // 편집 진입 버튼도, 포메이션 셀렉트도 없다 (자리는 끌어서 바꾼다)
   await expect(page.getByTestId("edit-lineup")).toHaveCount(0);
   await expect(page.getByTestId("formation-select")).toHaveCount(0);
   // 포메이션 숫자는 실제 배치에서 읽힌다 — 시작 모양은 구단 카탈로그가 정한다
-  // (아스날은 4-2-3-1로 부임한다)
+  // (리버풀은 4-2-3-1로 부임한다)
   await expect(page.getByTestId("shape")).toHaveText("4-2-3-1");
 
-  // 프리셋 교체는 채팅이 맡는다 — 지시하면 전술판이 그 프리셋으로 다시 깔린다
+  /*
+   * 채팅으로 모양을 말해도 **판은 그대로 서 있다** — 프리셋은 새 게임의 최초 배치를
+   * 만드는 데만 쓰고, 세이브가 시작된 뒤 자리를 옮기는 것은 칩을 끄는 일이다
+   * (docs/data/team.md §6). 그 지시에서 상태가 되는 것은 전술 6축뿐이다.
+   */
   await page.getByTestId("tab-채팅").click();
-  await page.getByTestId("chat-input").fill("4-4-2로 가자");
+  await page.getByTestId("chat-input").fill("4-4-2로 수비적으로 가자");
   await page.getByTestId("chat-send").click();
   await expect(page.getByTestId("hint-스쿼드")).toBeVisible({ timeout: 15_000 });
   // 그 화면을 열면 알림은 사라진다 — 읽었으면 할 일이 끝난 알림이다
-  await page.getByTestId("tab-스쿼드").click();
+  await openBoard(page);
   await expect(page.getByTestId("hint-스쿼드")).toHaveCount(0);
   await expect(page.locator(".pitch-slot")).toHaveCount(11);
-  await expect(page.getByTestId("shape")).toHaveText("4-4-2");
+  await expect(page.getByTestId("shape")).toHaveText("4-2-3-1");
+  // 멘탈리티는 지시대로 내려섰다 (리버풀은 하이프레스라 4로 부임한다)
+  await openTactics(page);
+  await expect(page.getByTestId("tactic-mentality-2")).toHaveClass(/\bon\b/);
+  // 펼친 눈금은 판 위에 얹히므로 다시 접는다 — 아래는 칩을 눌러 확인한다
+  await page.getByTestId("tactics-toggle").click();
+  await expect(page.getByTestId("tactics-panel")).not.toHaveClass(/\bopen\b/);
 
   // 칸은 **행의 왼쪽 선 색**이 말한다 — 배지 열은 없앴다
   await expect(page.getByTestId("bench-count")).toContainText("벤치");
@@ -794,7 +805,7 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
 
 test("전술판 자유 배치 — 드래그로 한 자리만 세밀하게 조정한다", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("league-grid")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: 20_000 });
   await page.getByTestId("league-epl").click();
   await expect(page.getByTestId("team-grid")).toBeVisible();
   await page.getByTestId("team-mancity").click();
@@ -958,7 +969,7 @@ test("전술판 자유 배치 — 드래그로 한 자리만 세밀하게 조정
  */
 test("전술판 편집은 턴보다 먼저 서버에 닿는다", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("league-grid")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: 20_000 });
   await page.getByTestId("league-epl").click();
   await expect(page.getByTestId("team-grid")).toBeVisible();
   await page.getByTestId("team-arsenal").click();
