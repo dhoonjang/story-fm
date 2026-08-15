@@ -205,14 +205,19 @@ describe("API — 온보딩부터 경기까지", () => {
         slot.position = players.find((p) => p.id === slot.playerId)!.position;
       }
     }
-    const res = await postLineup(json({ starting, bench, formation: "3-5-2" }), params(game.id));
+    const res = await postLineup(json({ starting, bench }), params(game.id));
     expect(res.status).toBe(200);
     const updated = (await res.json()) as GamePayload;
     const changed = updated.views.squad.players.find((p) => p.id === target.id);
     // 배치 포지션이 반영되고, 주 포지션은 그대로다 (v6 분리)
     expect(changed?.assignedPosition).toBe("RCM");
     expect(changed?.role).toBe("선발");
-    expect(updated.views.squad.formation).toBe("3-5-2");
+    /**
+     * 포메이션 이름은 **보낸 프리셋이 아니라 세운 자리에서** 나온다
+     * (team.md §6 · game-state.md §5). 11명을 전부 제 주 포지션에 세웠으니
+     * 그 좌표가 읽히는 이름이 곧 팀의 모양이다.
+     */
+    expect(updated.views.squad.formation).toBe("4-2-3-1");
     // 선발이 정확히 11명
     expect(updated.views.squad.players.filter((p) => p.role === "선발")).toHaveLength(11);
     // 전술판 저장은 채팅에 전송하지 않는다 (사용자 요청) — 마지막 턴은 온보딩 모델 턴 그대로
@@ -231,13 +236,12 @@ describe("API — 온보딩부터 경기까지", () => {
     const preset = FORMATION_LAYOUTS["4-2-3-1"];
     const starting = [gk, ...outfield].map((p, i) => ({ playerId: p.id, point: preset[i]! }));
 
-    const res = await postLineup(
-      json({ starting, bench: [], formation: "4-2-3-1" }),
-      params(game.id),
-    );
+    const res = await postLineup(json({ starting, bench: [] }), params(game.id));
     expect(res.status).toBe(200);
     const after = (await res.json()) as GamePayload;
-    // 프리셋 좌표를 그대로 보냈으니 배치 코드도 프리셋 슬롯과 같아야 한다
+    // 프리셋 좌표를 그대로 보냈으니 배치 코드도 프리셋 슬롯과 같고, 좌표에서 읽는
+    // 이름도 그 프리셋 이름이다
+    expect(after.views.squad.formation).toBe("4-2-3-1");
     const startersAfter = after.views.squad.players.filter((p) => p.role === "선발");
     expect(startersAfter).toHaveLength(11);
     // 더블 볼란치는 좌우로 갈린다 (중앙 라인도 왼쪽·오른쪽을 구분한다)
@@ -262,7 +266,8 @@ describe("API — 온보딩부터 경기까지", () => {
     const moved = after2.views.squad.players.find((p) => p.id === pivot.id)!;
     expect(moved.assignedPosition).not.toBe("CDM");
     expect(moved.assignedPoint!.y).toBe(30);
-    expect(after2.views.squad.formation).toBe("4-2-3-1"); // 프리셋 선택은 그대로
+    // 볼란치 하나가 위 줄로 올라갔으니 모양도 따라 바뀐다 — 4백 + DM 1 + 미드 4 + ST 1
+    expect(after2.views.squad.formation).toBe("4-1-4-1");
     // 나머지 10명의 자리는 건드리지 않는다 (한 명만 옮긴 것이 한 명에게만 반영)
     const unchanged = after2.views.squad.players.filter(
       (p) => p.role === "선발" && p.id !== pivot.id,
@@ -323,7 +328,8 @@ describe("API — 온보딩부터 경기까지", () => {
     );
     const game = (await created.json()) as GamePayload;
     const before = game.views.squad;
-    expect(before.tactics.mentality).toBe(3);
+    // 새 게임의 6축은 구단 운용 정체성에서 나온다 (team.md §6) — 첼시는 점유형
+    expect(before.tactics.mentality).toBe(4);
     expect(before.familiarity).toBeGreaterThan(0);
 
     // 현재 선발을 그대로 유지하고 전술만 바꾼다
@@ -336,7 +342,6 @@ describe("API — 온보딩부터 경기까지", () => {
       json({
         starting,
         bench: [],
-        formation: before.formation,
         tactics: { mentality: 5, pressing: 4, passStyle: 5 },
       }),
       params(game.id),

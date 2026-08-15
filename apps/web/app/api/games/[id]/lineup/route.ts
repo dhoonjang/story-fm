@@ -35,10 +35,14 @@ const TacticsSchema = z
     passStyle: z.number().int().min(1).max(5),
   })
   .partial();
+/**
+ * ⚠️ **포메이션 이름은 받지 않는다.** 모양은 선발 11명의 좌표에서 읽는 파생값이라
+ * (team.md §6 · game-state.md §5) 이름을 입력으로 두면 판과 장부가 갈라진다.
+ * 프리셋 열거형으로 받으면 자유 배치가 만든 `4-1-3-2`가 통째로 400이 된다.
+ */
 const LineupSchema = z.object({
   starting: z.array(SlotSchema).length(11),
   bench: z.array(SlotSchema).max(12).default([]),
-  formation: z.enum(["4-4-2", "4-3-3", "4-2-3-1", "3-5-2", "5-4-1"]).optional(),
   tactics: TacticsSchema.optional(),
   /**
    * 1·2군 이동 — 전술판에서 2군 선수를 끌어올리거나 1군을 내릴 때 함께 온다.
@@ -94,14 +98,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       signature: lineupSignature(state),
     };
 
-    // 전술(포메이션 포함) 먼저 — setLineup의 슬롯 기본값이 새 포메이션 기준으로
-    // 잡히게 한다. 한 번만 호출해야 적응도 하락(tacticsChangeDrop)도 한 번만 적용된다
-    const spec = {
-      ...(body.data.formation ? { formation: body.data.formation } : {}),
-      ...(body.data.tactics ?? {}),
-    };
-    if (Object.keys(spec).length > 0) {
-      const res = setTactics(state, spec);
+    // 전술 6축이 먼저 — 한 번만 호출해야 적응도 하락(tacticsChangeDrop)도 한 번만
+    // 적용된다. 배치가 만드는 모양 이름은 아래 setLineup이 좌표에서 다시 읽는다
+    const axes = body.data.tactics ?? {};
+    if (Object.keys(axes).length > 0) {
+      const res = setTactics(state, axes);
       if (!res.ok) return NextResponse.json({ error: res.message }, { status: 400 });
     }
     // 1·2군 이동은 **승격 먼저, 강등 나중**이다. 승격이 앞서야 그 선수를 라인업에
