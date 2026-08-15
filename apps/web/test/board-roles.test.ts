@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  adaptationOf,
   anchorOf,
   defaultRoleOf,
   positionAtPoint,
@@ -19,15 +18,14 @@ import {
   familiarityForRole,
   lineupBody,
   resetRolesForMovedPlayers,
-  roleAdaptationMove,
   type BoardState,
 } from "../lib/board-roles";
 
 /**
  * **자리가 있어야 역할이 있다** (player.md §3.1) — 전술판이 보내는 역할은 선발
- * 것뿐이고, 역할을 바꾸는 대가는 저장 전에 화면이 먼저 말한다 (§7.2).
+ * 것뿐이고, 고른 역할의 적응도는 저장을 기다리지 않고 명단이 곧바로 낸다 (§7.2).
  *
- * e2e로는 잡히지 않는다: 반려는 자동 저장 왕복 뒤에야 나타나고, 대가는 서버가
+ * e2e로는 잡히지 않는다: 반려는 자동 저장 왕복 뒤에야 나타나고, 적응도는 서버가
  * 답하기 전의 화면 값이라 렌더를 기다리는 방식으로는 무엇이 어긋났는지 못 짚는다.
  */
 
@@ -169,7 +167,7 @@ describe("자리를 옮기면 역할이 그 자리의 것이 된다", () => {
   });
 });
 
-describe("역할을 바꾸는 대가는 저장 전에 화면이 안다", () => {
+describe("고른 역할의 적응도는 저장 전에 화면이 낸다", () => {
   const starterWithChoices = (seed: number): [SquadRow, string] => {
     const rows = buildOfficeViews(game(seed)).squad.players;
     const p = rows.find(
@@ -241,26 +239,5 @@ describe("역할을 바꾸는 대가는 저장 전에 화면이 안다", () => {
     };
     // 새 자리의 기본 역할은 공짜다 — 옮긴 것만으로 적응도가 오르지도 내리지도 않는다
     expect(familiarityForRole(after, position, defaultRoleOf(position))).toBe(after.familiarity);
-  });
-
-  it("알약이 말하는 움직임이 명단의 적응도가 실제로 움직이는 폭과 같다", () => {
-    const [p, to] = starterWithChoices(78);
-    const position = p.assignedPosition!;
-    // 화면이 알약에 그리는 값
-    const move = roleAdaptationMove(p, position, p.roleId!, to);
-    // 그 역할로 바꾼 뒤 명단이 내는 값 (localRows와 같은 셈)
-    const after = adaptationOf(p.positionFit, familiarityForRole(p, position, to), position);
-    expect(p.adaptation + move).toBe(after);
-    // 지금 켜진 역할은 0이라 아무것도 그리지 않는다
-    expect(roleAdaptationMove(p, position, p.roleId!, p.roleId!)).toBe(0);
-    // 대가를 치른 자리에서 되돌아오면 값이 오른다
-    const paid = roleChangeCost(position, p.roleId!, to);
-    const changed: SquadRow = {
-      ...p,
-      roleId: to,
-      familiarity: p.familiarity - paid,
-      roleToday: { role: p.roleId!, paid },
-    };
-    expect(roleAdaptationMove(changed, position, to, p.roleId!)).toBeGreaterThanOrEqual(0);
   });
 });
