@@ -1,103 +1,67 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import type { CatalogLayer } from "./catalog-store";
 import { SquadModal } from "./squad-modal";
 import { TeamModal } from "./team-modal";
 import {
   TACTICAL_STYLE_KO,
+  type AdminLeagueRow,
   type AdminTeamRow,
   type CatalogResponse,
-  type CatalogTeam,
-  type LeagueCatalogResponse,
   type TeamCatalogResponse,
 } from "./types";
 
 /**
  * 팀 카탈로그 패널 — 선수 탭과 같은 규칙이다: 목록은 요약만 보여주고 편집은
- * 팝업이 맡는다.
+ * 팝업이 맡는다. 팀 층도 선수 카탈로그도 페이지가 쥐고 있고(`catalog-store.ts`)
+ * 이 패널은 받은 값을 그린다.
  *
- * 리그 목록을 따로 불러오는 이유: 팝업의 리그 셀렉트가 **팀이 없는 리그**까지
+ * 리그 목록이 팀 행과 따로 오는 이유: 팝업의 리그 셀렉트가 **팀이 없는 리그**까지
  * 보여야 한다 (팀을 그 리그로 옮기는 것이 정당한 편집이다). 행에서 파생하면
  * 빈 리그가 목록에서 사라진다.
  *
- * 한 행이 두 창을 연다: 행 자체는 팀 편집, 스쿼드 칸은 그 팀의 명단이다. 명단이
- * 쓰는 선수 카탈로그(`/api/admin/catalog`)는 팀 목록보다 훨씬 무거워서, 명단을
- * 처음 열 때 한 번만 받아 둔다.
+ * 한 행이 두 창을 연다: 행 자체는 팀 편집, 스쿼드 칸은 그 팀의 명단이다. 명단도
+ * 스쿼드 인원도 팀 층이 아니라 **선수 카탈로그**에서 나오므로, 명단 창에서 선수를
+ * 옮기면 뒤에 선 행의 인원이 함께 움직인다.
  */
 
 type ModalTarget = { mode: "create" } | { mode: "edit"; team: AdminTeamRow };
 
 export function TeamsPanel({
+  teams,
+  leagues,
+  catalog,
+  onApply,
+  onPlayersApply,
   onMessage,
   onError,
 }: {
+  teams: CatalogLayer<TeamCatalogResponse>;
+  leagues: AdminLeagueRow[];
+  /** 선수 카탈로그 — 명단 창과 스쿼드 인원이 쓴다 */
+  catalog: CatalogLayer<CatalogResponse>;
+  onApply: (data: TeamCatalogResponse) => void;
+  onPlayersApply: (data: CatalogResponse) => void;
   onMessage: (m: string | null) => void;
   onError: (e: string | null) => void;
 }) {
-  const [teams, setTeams] = useState<AdminTeamRow[]>([]);
-  const [leagues, setLeagues] = useState<Array<{ id: string; name: string }>>([]);
-  const [edited, setEdited] = useState(false);
   const [leagueFilter, setLeagueFilter] = useState("all");
   const [query, setQuery] = useState("");
   const [target, setTarget] = useState<ModalTarget | null>(null);
   const [squadTeam, setSquadTeam] = useState<AdminTeamRow | null>(null);
-  const [catalog, setCatalog] = useState<CatalogTeam[]>([]);
-  const [catalogLoaded, setCatalogLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [loaded, setLoaded] = useState(false);
 
-  const applyResponse = useCallback((data: TeamCatalogResponse) => {
-    setTeams(data.teams ?? []);
-    if (data.edited !== undefined) setEdited(data.edited);
-  }, []);
+  const rows = teams.data.teams;
+  const edited = teams.data.edited ?? false;
+  const loaded = teams.loaded;
 
-  /** 팀을 더하거나 지우면 선수 카탈로그도 달라진다 — 받아 둔 명단을 버린다 */
-  const dropCatalog = useCallback(() => {
-    setCatalog([]);
-    setCatalogLoaded(false);
-  }, []);
-
-  useEffect(() => {
-    fetch("/api/admin/catalog/team")
-      .then((r) => r.json())
-      .then((d: TeamCatalogResponse) => {
-        if (d.error) onError(d.error);
-        else applyResponse(d);
-        setLoaded(true);
-      })
-      .catch(() => {
-        onError("팀 카탈로그를 불러오지 못했습니다");
-        setLoaded(true);
-      });
-    fetch("/api/admin/catalog/league")
-      .then((r) => r.json())
-      .then((d: LeagueCatalogResponse) => {
-        setLeagues((d.leagues ?? []).map((l) => ({ id: l.id, name: l.name })));
-      })
-      .catch(() => onError("리그 목록을 불러오지 못했습니다"));
-  }, [applyResponse, onError]);
-
-  // 선수 카탈로그는 명단 창이 서 있을 때만 받는다 (팀 목록보다 수십 배 크다)
-  useEffect(() => {
-    if (squadTeam === null || catalogLoaded) return;
-    fetch("/api/admin/catalog")
-      .then((r) => r.json())
-      .then((d: CatalogResponse) => {
-        if (d.error) onError(d.error);
-        else setCatalog(d.teams ?? []);
-        setCatalogLoaded(true);
-      })
-      .catch(() => {
-        onError("선수 카탈로그를 불러오지 못했습니다");
-        setCatalogLoaded(true);
-      });
-  }, [squadTeam, catalogLoaded, onError]);
-
-  /** 스쿼드 인원 — 명단을 받아 뒀으면 그쪽이 최신이다 (옮긴 즉시 줄어든다) */
+  /** 스쿼드 인원 — 선수 카탈로그에서 센다 (명단 창에서 옮기면 즉시 줄어든다) */
   const squadSizes = useMemo(
-    () => new Map(catalog.map((t) => [t.teamId, t.players.length])),
-    [catalog],
+    () => new Map(catalog.data.teams.map((t) => [t.teamId, t.players.length])),
+    [catalog.data.teams],
   );
+  // 선수 카탈로그가 아직 안 왔거나 방금 만든 팀이라 거기에 없으면 팀 행이 실어 온 수로
   const sizeOf = useCallback(
     (t: AdminTeamRow) => squadSizes.get(t.id) ?? t.squadSize,
     [squadSizes],
@@ -105,14 +69,14 @@ export function TeamsPanel({
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return teams.filter((t) => {
+    return rows.filter((t) => {
       if (leagueFilter !== "all" && t.leagueId !== leagueFilter) return false;
       if (q && !`${t.id} ${t.name} ${t.shortName} ${t.stadium}`.toLowerCase().includes(q)) {
         return false;
       }
       return true;
     });
-  }, [teams, leagueFilter, query]);
+  }, [rows, leagueFilter, query]);
 
   async function resetTeams() {
     if (!window.confirm("팀 편집을 모두 취소하고 시드 기본값으로 되돌릴까요?")) return;
@@ -123,8 +87,7 @@ export function TeamsPanel({
       const res = await fetch("/api/admin/catalog/team", { method: "DELETE" });
       const data: TeamCatalogResponse = await res.json();
       if (!res.ok) throw new Error(data.error ?? "되돌리기 실패");
-      applyResponse(data);
-      dropCatalog();
+      onApply(data);
       onMessage(data.message ?? null);
     } catch (e) {
       onError(e instanceof Error ? e.message : String(e));
@@ -278,8 +241,7 @@ export function TeamsPanel({
           leagues={leagues}
           defaultLeagueId={leagueFilter !== "all" ? leagueFilter : (leagues[0]?.id ?? "")}
           onSaved={(data) => {
-            applyResponse(data);
-            dropCatalog();
+            onApply(data);
             onMessage(data.message ?? null);
             setTarget(null);
           }}
@@ -290,9 +252,9 @@ export function TeamsPanel({
       {squadTeam && (
         <SquadModal
           team={{ id: squadTeam.id, name: squadTeam.name, leagueName: squadTeam.leagueName }}
-          catalog={catalog}
-          loaded={catalogLoaded}
-          onMoved={(data) => setCatalog(data.teams ?? [])}
+          catalog={catalog.data.teams}
+          loaded={catalog.loaded}
+          onMoved={onPlayersApply}
           onClose={() => setSquadTeam(null)}
         />
       )}
