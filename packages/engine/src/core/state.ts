@@ -458,7 +458,7 @@ export interface GameState {
    *
    * 배치(`TacticAssignment.roleId`)는 로테이션마다 다시 써지므로, 벤치로 한 번
    * 내려가면 감독의 결정이 지워진다. 배치 바깥에 두어 같은 자리로 돌아왔을 때
-   * 기본값 대신 이 값에서 시작한다 (→ docs/data/player.md §3.1).
+   * 기본값 대신 이 값에서 시작한다 (→ docs/data/player.md §3.2).
    * 옛 세이브엔 없다 (로드 시 빈 배열 — 세이브 버전을 올리지 않는다).
    */
   roleMemory: RoleMemory[];

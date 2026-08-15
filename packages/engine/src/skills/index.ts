@@ -35,7 +35,7 @@ import {
   positionAtPoint,
   positionGroupOf,
   defaultRoleOf,
-  roleDistance,
+  roleChangeCost,
   rolesFor,
   separateBoardPoints,
   familiarityForSetup,
@@ -623,7 +623,7 @@ export function setLineup(
   const teamLevel = currentFamiliarity(tactics);
   const newcomerFamiliarity = Math.min(FAMILIARITY_BASELINE, teamLevel);
   /**
-   * **덮어쓰기 전에 지금의 역할을 기억으로 넘긴다** (→ docs/data/player.md §3.1).
+   * **덮어쓰기 전에 지금의 역할을 기억으로 넘긴다** (→ docs/data/player.md §3.2).
    * 배치는 여기서 통째로 다시 써지므로, 벤치·예비로 내려가는 선수의 역할은 이
    * 한 줄이 아니면 사라진다. 자리를 지키는 선수까지 함께 적는 건 같은 값을 다시
    * 쓰는 것뿐이다 — 기억은 언제나 "그 자리에서 마지막에 맡긴 것"이다.
@@ -862,7 +862,7 @@ export function movePlayerSlot(
     assignment.position !== code &&
     !(assignment.roleId && rolesFor(code).some((role) => role.id === assignment.roleId))
   ) {
-    // 버려지는 역할은 **옛 자리 기준으로** 기억에 남는다 (→ docs/data/player.md §3.1)
+    // 버려지는 역할은 **옛 자리 기준으로** 기억에 남는다 (→ docs/data/player.md §3.2)
     if (assignment.roleId) rememberRole(state, player.id, assignment.position, assignment.roleId);
     /**
      * 새 자리의 기억이 그 자리의 기본 역할을 갈아끼운다. 배치에 적어 두는 이유:
@@ -950,10 +950,10 @@ export function setPlayerTraining(
  *
  * 역할은 자리 위에 얹히는 축이다 — 같은 센터백이라도 노넌센스와 볼 플레잉은 요구
  * 역량이 다르고, 그 차이는 `roleFit`이 낸다. 그 자리에 없는 역할은 받지 않는다.
+ *
+ * ⚠️ **선발만 자리를 갖는다** — 벤치 배치의 `position`은 좌표가 아니라 주 포지션이라,
+ * 그걸로 검증하면 화면이 말하는 자리와 다른 목록으로 반려한다 (player.md §3.1).
  */
-/** 역할 거리 1당 적응도 손실 — 슬라이더 한 칸(1.5~4)과 같은 눈금에 놓는다 (초안) */
-const ROLE_CHANGE_LOSS = 0.6;
-
 export function setPlayerRole(
   state: GameState,
   input: { playerId: string; role: string },
@@ -965,6 +965,9 @@ export function setPlayerRole(
   const assignment = tactics.assignments.find((a) => a.playerId === player.id);
   if (!assignment) {
     return { ok: false, message: `${player.name}은 배치가 없습니다 — 먼저 선발·벤치에 넣으세요` };
+  }
+  if (assignment.role !== "starting") {
+    return { ok: false, message: `${player.name}은 자리가 없습니다 — 먼저 선발로 세우세요` };
   }
   const options = rolesFor(assignment.position);
   const def = options.find((r) => r.id === input.role || r.abbr === input.role);
@@ -982,7 +985,7 @@ export function setPlayerRole(
   /**
    * 역할을 바꾸면 **그 선수의 전술 적응도가 깎인다** — 자리는 그대로여도 하는 일이
    * 달라지기 때문이다. 대가는 하드코딩하지 않고 **역할 델타의 거리**에서 뽑는다
-   * (`roleDistance`): 볼 플레잉 → 리베로는 둘 다 발로 푸는 수비수라 싸고,
+   * (`roleChangeCost`): 볼 플레잉 → 리베로는 둘 다 발로 푸는 수비수라 싸고,
    * 볼 플레잉 → 노넌센스는 요구가 정반대라 비싸다.
    *
    * 팀 전체가 아니라 **그 선수만** 깎인다. 옆 사람의 역할이 바뀌었다고 내 적응도가
@@ -999,7 +1002,7 @@ export function setPlayerRole(
     assignment.roleMemo?.date === state.date
       ? assignment.roleMemo
       : { date: state.date, role: from, paid: 0 };
-  const cost = Math.round(roleDistance(assignment.position, memo.role, def.id) * ROLE_CHANGE_LOSS);
+  const cost = roleChangeCost(assignment.position, memo.role, def.id);
   const before = assignment.familiarity;
   assignment.roleId = def.id;
   // 감독이 고른 것이 그 자리의 새 기억이다 — 벤치를 다녀와도 이 결정이 남는다

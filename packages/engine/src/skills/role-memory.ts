@@ -6,7 +6,7 @@ import type { GameState } from "../core/state";
  *
  * 배치(`TacticAssignment.roleId`)는 로테이션마다 다시 써지므로 벤치로 한 번
  * 내려가면 감독의 결정이 사라진다. 배치 바깥의 이 테이블이 그 결정을 들고 있다가,
- * 같은 자리로 돌아올 때 기본 역할 대신 내어 준다 (→ docs/data/player.md §3.1).
+ * 같은 자리로 돌아올 때 기본 역할 대신 내어 준다 (→ docs/data/player.md §3.2).
  *
  * 되찾기는 **기본값을 갈아끼우는 것**이지 잠그는 게 아니다 — 감독이 새로 고르면
  * 그게 새 기억이 된다.
