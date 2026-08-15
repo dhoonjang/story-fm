@@ -16,6 +16,7 @@ import { clubProfile } from "../data/club-profile";
 import { clubEconomyLevel, leagueEconomyLevel } from "../data/league-economy";
 import { isMarketOnlyLeague, isTopLeague, leagueCatalogById } from "../data/league-catalog";
 import { competitionShortName, isCup, isEuroCup } from "../data/cup-catalog";
+import { isFriendly } from "../competition/friendly";
 import { isClubTeam, leagueOfTeam, teamCatalogById } from "../data/team-catalog";
 import { leagueOfTeamIn } from "../competition/promotion";
 import { computeStandings } from "../competition/season";
@@ -114,6 +115,15 @@ const HOSPITALITY_RATE: Record<1 | 2 | 3 | 4, number> = { 1: 0.35, 2: 0.28, 3: 0
 const TICKET_TIER_FACTOR: Record<1 | 2 | 3 | 4, number> = { 1: 1.3, 2: 1.1, 3: 0.95, 4: 0.8 };
 /** 경기 운영비 — 매치데이 수입 대비 */
 const MATCHDAY_OPEX_RATE = 0.12;
+/**
+ * 프리시즌 친선의 매치데이 — **관중과 단가 양쪽**에 붙어 게이트가 리그의 약 36%가
+ * 된다. 실제 프리시즌도 관중이 덜 들고 표가 싸다 (finance.md §5.2).
+ *
+ * 관중 배율은 점유율 하한(0.45) **clamp를 적용한 뒤에** 곱한다 — 친선을 만석
+ * 판정에 넣으면 하한이 친선의 바닥을 리그와 같은 자리에 놔 버린다.
+ */
+const FRIENDLY_ATTENDANCE_FACTOR = 0.6;
+const FRIENDLY_TICKET_FACTOR = 0.6;
 
 /** 스태프 급여 — 월 선수 급여 대비 (하위 팀일수록 상대 비중이 크다) */
 const STAFF_WAGE_RATE: Record<1 | 2 | 3 | 4, number> = { 1: 0.22, 2: 0.24, 3: 0.26, 4: 0.28 };
@@ -355,6 +365,8 @@ function leagueSizeOf(state: GameState, teamId: string): number {
  * 라운드 진출 상금에 이미 들어 있어서 여기서 또 주면 이중 계상이다.
  */
 export function isTelevised(match: MatchRecord): boolean {
+  // 친선은 리그 중계 계약 밖의 경기다 — 어느 대회에도 속하지 않으니 배분도 없다
+  if (isFriendly(match)) return false;
   if (isCup(match.competitionId)) return false;
   const time = match.time ?? "15:00";
   return !(dayOfWeek(match.date) === 6 && time === "15:00");
@@ -416,10 +428,17 @@ export function matchdayRevenue(state: GameState, match: MatchRecord): MatchdayR
   occupancy += (rng() - 0.5) * 0.04;
 
   occupancy = Math.max(0.45, Math.min(1, occupancy));
+  // 친선은 하한을 지난 뒤에 깎는다 — 프리시즌 관중을 만석 판정에 넣지 않는다
+  const friendly = isFriendly(match);
+  if (friendly) occupancy *= FRIENDLY_ATTENDANCE_FACTOR;
   const attendance = Math.round(capacity * occupancy);
 
   const basePrice = leagueCatalogById(leagueOfTeamIn(state, teamId))?.avgTicketPrice ?? 30;
-  const price = basePrice * TICKET_TIER_FACTOR[tier] * (isEuroCup(match.competitionId) ? 1.15 : 1);
+  const price =
+    basePrice *
+    TICKET_TIER_FACTOR[tier] *
+    (isEuroCup(match.competitionId) ? 1.15 : 1) *
+    (friendly ? FRIENDLY_TICKET_FACTOR : 1);
   const gate = attendance * price;
   const income = Math.round(gate * (1 + HOSPITALITY_RATE[tier]));
 
@@ -495,8 +514,8 @@ export function applyMatchFinance(
     });
   }
 
-  // 승리 수당
-  if (outcome === "win") {
+  // 승리 수당 — 걸린 것이 있는 경기에만. 친선의 승리는 수당의 대상이 아니다
+  if (outcome === "win" && !isFriendly(match)) {
     recordFinance(state, teamId, {
       kind: "expense",
       category: "bonus",
@@ -524,11 +543,15 @@ export function applyAiMatchFinance(state: GameState, match: MatchRecord): void 
 
     if (side === "home" && !match.neutral) {
       const { capacity } = profileOf(teamId);
+      const friendly = isFriendly(match);
       const price =
         (leagueCatalogById(leagueOfTeamIn(state, teamId))?.avgTicketPrice ?? 30) *
         TICKET_TIER_FACTOR[tier] *
-        (isEuroCup(match.competitionId) ? 1.15 : 1);
-      const gate = capacity * OCCUPANCY_BASE[tier] * price * (1 + HOSPITALITY_RATE[tier]);
+        (isEuroCup(match.competitionId) ? 1.15 : 1) *
+        (friendly ? FRIENDLY_TICKET_FACTOR : 1);
+      const occupancy =
+        OCCUPANCY_BASE[tier] * (friendly ? FRIENDLY_ATTENDANCE_FACTOR : 1);
+      const gate = capacity * occupancy * price * (1 + HOSPITALITY_RATE[tier]);
       recordFinance(state, teamId, {
         kind: "income",
         category: "matchday",
