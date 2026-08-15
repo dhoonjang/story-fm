@@ -371,6 +371,16 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
     expect(pickFormation(squad, "3-5-2")).toBe("3-5-2");
   });
 
+  it("지정 선발이 감당하는 리서치 모양은 새 게임에서 그대로 선다", () => {
+    // 모양 고르기의 시험 배치가 실제 라인업과 다른 잣대를 쓰면(지정 선발 가산 누락)
+    // 세울 수 있는 모양인데도 미달자가 나와 리서치 값이 조용히 버려진다
+    for (const teamId of ["arsenal", "liverpool", "tottenham"]) {
+      const prior = teamCatalog().find((t) => t.id === teamId)?.formation;
+      expect(prior).toBe("4-2-3-1");
+      expect(tacticsOf(state, teamId).spec.formation).toBe(prior);
+    }
+  });
+
   it("기본 선발 슬러그가 전부 카탈로그에 실재한다 (오타 방지)", () => {
     // 슬러그가 틀리면 조용히 무시되고 라인업이 슬그머니 바뀐다 — 여기서 잡는다
     const missing: string[] = [];
