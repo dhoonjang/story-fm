@@ -810,7 +810,8 @@ describe("밸런스 기준선", () => {
       expect(report.wageRatio, report.month).toBeLessThan(0.95);
     }
     expect(income).toBeGreaterThan(300_000_000);
-  }, 60_000);
+    // 세계 전체가 프리시즌 친선을 치르면서 한 시즌이 10%쯤 길어졌다
+  }, 120_000);
 
   it("어떤 리그의 AI 구단도 한 시즌에 파산하지 않는다", () => {
     const state = createTestGame(42, "arsenal");
@@ -833,7 +834,8 @@ describe("밸런스 기준선", () => {
       expect(median, `${league} 중간 잔고`).toBeGreaterThan(0);
       expect(sorted[0]!, `${league} 최저 잔고`).toBeGreaterThan(-30_000_000);
     }
-  }, 60_000);
+    // 세계 전체가 프리시즌 친선을 치르면서 한 시즌이 10%쯤 길어졌다
+  }, 120_000);
 
   /**
    * 리그 배율 — **지출과 초기치도 리그를 안다** (club-finance §12.1).
@@ -1198,5 +1200,6 @@ describe("재정이 도는 범위", () => {
       financeOf(state, state.userTeamId).ledger.some((e) => e.label === "리그 홈경기 수입"),
       "1부는 경기에서 매치데이를 번다",
     ).toBe(false);
-  }, 60_000);
+    // 세계 전체가 프리시즌 친선을 치르면서 한 시즌이 10%쯤 길어졌다
+  }, 120_000);
 });
