@@ -62,6 +62,7 @@ import {
   type CardMark,
   type GameState,
   type GoalMark,
+  type SkillBrief,
 } from "@story-fm/engine";
 import {
   ATTRIBUTE_AXES,
@@ -106,12 +107,85 @@ const SLOT_ENUM = { type: "string", enum: ["am", "pm"] } as const;
 const FOCUS_ARRAY = { type: "array", items: { type: "string", enum: [...TRAIN_FOCUS] } } as const;
 
 /**
+ * **훈련 이름** — 달력에 걸리는 세션 제목이지 감독의 말이 아니다.
+ *
+ * 상한도 설명도 없던 때는 감독 발화가 통째로 실려("응 그리고 훈련 싹다 갈아엎자
+ * 체력 훈련 싹 지우고, 패스 훈련에 집중하") 그 문장이 요일마다 되풀이됐다.
+ */
+const TRAINING_LABEL = 40;
+
+const LABEL_ARG = {
+  type: "string",
+  description: `훈련 이름 — 감독의 말이 아니라 달력에 걸릴 제목 (예: 압박 전환 · 세트피스). ${TRAINING_LABEL}자까지`,
+  maxLength: TRAINING_LABEL,
+} as const;
+
+const labelSchema = z.string().min(1).max(TRAINING_LABEL);
+
+/**
+ * 훈련 지정의 입력 — `set_training`만 도구 spec을 직접 만들어 쓰므로(기록을 둘로
+ * 나눈다) 스키마가 모듈 상수로 올라와 있다.
+ */
+const TRAINING_INPUT = z
+  .object({
+    sessions: z.array(
+      z.object({
+        date: z.string(),
+        slot: z.enum(["am", "pm"]),
+        label: labelSchema,
+        focus: z.array(z.enum(TRAIN_FOCUS)),
+      }),
+    ),
+    repeatWeekly: z.array(
+      z.object({
+        dow: z.number().int().min(0).max(6),
+        slot: z.enum(["am", "pm"]),
+        label: labelSchema,
+        focus: z.array(z.enum(TRAIN_FOCUS)),
+      }),
+    ),
+    weeks: z.number().int().min(1).max(20),
+    clear: z.object({
+      from: z.string().optional(),
+      to: z.string().optional(),
+      dow: z.number().int().min(0).max(6).optional(),
+      slot: z.enum(["am", "pm"]).optional(),
+      rest: z.boolean().optional(),
+    }),
+    recallSquad: z.boolean(),
+    player: z.object({
+      playerId: z.string(),
+      axis: z.enum(ATTRIBUTE_AXES).optional(),
+      position: z.string().optional(),
+      clear: z.boolean().optional(),
+    }),
+  })
+  .partial();
+
+/** 스키마를 못 지난 입력 — 모델이 무엇을 고쳐야 하는지까지 돌려준다 */
+function inputError(error: z.ZodError): { ok: false; message: string } {
+  return {
+    ok: false,
+    message: `입력 오류 — ${error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(" / ")}`,
+  };
+}
+
+/**
  * 지금까지 쓰인 본문 줄 수 — 스킬 칩이 설 자리.
  * ⚠️ 빈 줄은 세지 않는다 — 화면(`chat.tsx`)과 셈이 갈리면 칩이 한 줄씩 어긋난다.
  */
 function writtenLines(text: string): number {
   return text.split("\n").filter((line) => line.trim().length > 0).length;
 }
+
+/** 엔진 스킬이 돌려주는 것 — `SkillResult`와 같은 모양이되 도구 쪽에서 좁게 읽는다 */
+type SkillReturn = {
+  ok: boolean;
+  message: string;
+  brief?: SkillBrief;
+  payload?: unknown;
+  tone?: "good" | "bad";
+};
 
 /** 실모드 GM의 스킬 도구 바인딩 — 엔진 함수를 GameToolSpec으로 감싼다 */
 export function buildGmTools(
@@ -122,7 +196,7 @@ export function buildGmTools(
   const descriptions = skillDescriptions();
   const record = (
     name: string,
-    result: { ok: boolean; message: string; payload?: unknown; tone?: "good" | "bad" },
+    result: SkillReturn,
     input?: unknown,
     context?: ToolCallContext,
   ) => {
@@ -132,6 +206,8 @@ export function buildGmTools(
         name,
         summary: result.message,
         input,
+        // 항목 요약은 코어가 낸 그대로 실어 보낸다 — 여기서 문자열로 접으면 화면이 도로 쪼갠다
+        ...(result.brief === undefined ? {} : { brief: result.brief }),
         ...(result.payload === undefined ? {} : { payload: result.payload }),
         ...(result.tone === undefined ? {} : { tone: result.tone }),
         // 이 스킬이 불린 자리 — 화면이 장면 중간에 칩을 세운다
@@ -145,19 +221,14 @@ export function buildGmTools(
     description: string,
     inputSchema: JsonObjectSchema,
     schema: z.ZodType<T>,
-    run: (input: T) => { ok: boolean; message: string; payload?: unknown; tone?: "good" | "bad" },
+    run: (input: T) => SkillReturn,
   ): GameToolSpec => ({
     name,
     description,
     inputSchema,
     handle(input: unknown, context?: ToolCallContext) {
       const parsed = schema.safeParse(input);
-      if (!parsed.success) {
-        return {
-          ok: false,
-          message: `입력 오류 — ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(" / ")}`,
-        };
-      }
+      if (!parsed.success) return inputError(parsed.error);
       return record(name, run(parsed.data), parsed.data, context);
     },
   });
@@ -176,12 +247,7 @@ export function buildGmTools(
     readOnly: true,
     handle(input: unknown) {
       const parsed = schema.safeParse(input);
-      if (!parsed.success) {
-        return {
-          ok: false,
-          message: `입력 오류 — ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(" / ")}`,
-        };
-      }
+      if (!parsed.success) return inputError(parsed.error);
       return run(parsed.data);
     },
   });
@@ -306,7 +372,12 @@ export function buildGmTools(
           instruction: {
             type: "object",
             properties: {
-              note: { type: "string", description: "감독의 말 그대로" },
+              // 상한이 없던 때는 감독 발언이 통째로 인용돼 지시 한 줄이 단락이 됐다
+              note: {
+                type: "string",
+                description: "감독의 말 그대로 — 한 마디로 (160자까지)",
+                maxLength: 160,
+              },
               kind: { type: "string", enum: [...PLAYER_DIRECTIVE_KINDS] },
               targetId: { type: "string", description: "man_mark·press_target의 대상 선수 id" },
             },
@@ -327,7 +398,7 @@ export function buildGmTools(
         role: z.string().optional(),
         instruction: z
           .object({
-            note: z.string(),
+            note: z.string().min(1).max(160),
             kind: z.enum(PLAYER_DIRECTIVE_KINDS).optional(),
             targetId: z.string().optional(),
           })
@@ -371,16 +442,25 @@ export function buildGmTools(
       }),
       (input) => setRegionalPlan(state, input),
     ),
-    wrap(
-      "set_training",
-      descriptions.set_training,
-      obj(
+    /**
+     * 훈련 지정 — **기록이 둘로 나뉜다.**
+     *
+     * 개인 훈련과 팀 일정은 감독이 한 번에 부를 수 있지만 서로 다른 일이다. 한
+     * 기록에 이어 붙이면 말풍선 한 줄이 `홍길동 개인 훈련 — 피지컬 · 훈련 지정 —
+     * 매주 …`로 눌린다. `wrap`은 반환 하나만 기록하므로 여기만 spec을 직접 만들어
+     * `record`를 두 번 부른다 (이름은 둘 다 `set_training` — 패널·카탈로그가 그
+     * 이름으로 돈다).
+     */
+    {
+      name: "set_training",
+      description: descriptions.set_training,
+      inputSchema: obj(
         {
           sessions: {
             type: "array",
             items: {
               type: "object",
-              properties: { date: str, slot: SLOT_ENUM, label: str, focus: FOCUS_ARRAY },
+              properties: { date: str, slot: SLOT_ENUM, label: LABEL_ARG, focus: FOCUS_ARRAY },
               required: ["date", "slot", "label", "focus"],
             },
           },
@@ -391,7 +471,7 @@ export function buildGmTools(
               properties: {
                 dow: int(0, 6),
                 slot: SLOT_ENUM,
-                label: str,
+                label: LABEL_ARG,
                 focus: FOCUS_ARRAY,
               },
               required: ["dow", "slot", "label", "focus"],
@@ -425,48 +505,16 @@ export function buildGmTools(
         },
         [],
       ),
-      z
-        .object({
-          sessions: z.array(
-            z.object({
-              date: z.string(),
-              slot: z.enum(["am", "pm"]),
-              label: z.string().min(1),
-              focus: z.array(z.enum(TRAIN_FOCUS)),
-            }),
-          ),
-          repeatWeekly: z.array(
-            z.object({
-              dow: z.number().int().min(0).max(6),
-              slot: z.enum(["am", "pm"]),
-              label: z.string().min(1),
-              focus: z.array(z.enum(TRAIN_FOCUS)),
-            }),
-          ),
-          weeks: z.number().int().min(1).max(20),
-          clear: z.object({
-            from: z.string().optional(),
-            to: z.string().optional(),
-            dow: z.number().int().min(0).max(6).optional(),
-            slot: z.enum(["am", "pm"]).optional(),
-            rest: z.boolean().optional(),
-          }),
-          recallSquad: z.boolean(),
-          player: z.object({
-            playerId: z.string(),
-            axis: z.enum(ATTRIBUTE_AXES).optional(),
-            position: z.string().optional(),
-            clear: z.boolean().optional(),
-          }),
-        })
-        .partial(),
-      (input) => {
+      handle(input: unknown, context?: ToolCallContext) {
+        const parsed = TRAINING_INPUT.safeParse(input);
+        if (!parsed.success) return inputError(parsed.error);
         // 팀 일정·비우기·개인 훈련의 단일 입구 — 대상이 같으면 입구도 하나다
-        const { player, ...team } = input;
+        const { player, ...team } = parsed.data;
         const notes: string[] = [];
         if (player) {
           const r = setPlayerTraining(state, player);
           if (!r.ok) return r;
+          record("set_training", r, { player }, context);
           notes.push(r.message);
         }
         const hasTeamWork =
@@ -479,9 +527,11 @@ export function buildGmTools(
             : { ok: false, message: "무엇을 훈련할지 알려주세요" };
         }
         const r = setTraining(state, team);
+        record("set_training", r, team, context);
+        // 모델에게 돌려주는 줄은 둘을 합친 한 줄이어도 된다 — 모델은 길어도 읽는다
         return notes.length > 0 ? { ok: r.ok, message: [...notes, r.message].join(" · ") } : r;
       },
-    ),
+    },
 
     wrap(
       "team_talk",
@@ -567,7 +617,12 @@ export function buildGmTools(
           playerIds: { type: "array", items: str },
           conditionDelta: int(-5, 5),
           formDelta: int(-1, 1),
-          note: str,
+          // 이 줄은 서사 로그에 그대로 남는다 — 장면을 여기 옮겨 적을 자리가 아니다
+          note: {
+            type: "string",
+            description: "무슨 일이 있었나 — 한 줄로 (200자까지)",
+            maxLength: 200,
+          },
         },
         ["playerIds", "note"],
       ),
@@ -575,7 +630,7 @@ export function buildGmTools(
         playerIds: z.array(z.string()),
         conditionDelta: z.number().int().min(-5).max(5).optional(),
         formDelta: z.number().int().min(-1).max(1).optional(),
-        note: z.string().min(1),
+        note: z.string().min(1).max(200),
       }),
       (input) => applyNarrativeEvent(state, input),
     ),

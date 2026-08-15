@@ -70,18 +70,27 @@ export const CARD_SKILLS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * 말풍선 한 줄 — **무엇이 했고, 무엇이 바뀌었고, 그래서 어떻다.**
+ * 말풍선 한 줄 — **세 자리로 읽힌다.**
  *
- * 문장을 통째로 세우면 세 줄이 글자 벽이 된다. 갈래(`skill`)는 화면이 아이콘으로
- * 세우고, 끝에 괄호로 달린 사족(`note`)은 한 톤 낮춰 아래로 내린다.
+ * `label`(무엇에 대한 것) · `text`(바뀐 값) · `note`(그 값의 갈래). 셋을 한 문자열로
+ * 붙여 세우면 값도 갈래도 같은 굵기로 눌려 정작 무엇이 달라졌는지가 안 읽힌다 —
+ * 그래서 코어가 나눠 내고(`SkillBriefItem`) 화면은 자리마다 톤을 달리 준다.
+ *
+ * 갈래(`skill`)는 아이콘이 세우고, 여러 항목 중 **첫 줄에만** 머리줄(`head`)이 붙는다.
  */
 export interface HintLine {
   /** 어느 스킬이 남긴 줄인가 — 화면이 이걸로 아이콘을 고른다 */
   skill: string;
-  /** 무슨 일이 있었나 */
+  /** 무엇을 한 스킬인가 — 항목 여럿의 **첫 줄에만** 붙는 머리줄 */
+  head?: string;
+  /** 무엇에 대한 것인가 — 값 앞에 한 톤 낮춰 선다 (`선발 투입`) */
+  label?: string;
+  /** 바뀐 값 — 줄에서 가장 또렷한 자리 */
   text: string;
-  /** 문장 끝 괄호에 달린 부연 — 없으면 undefined */
+  /** 그 값의 갈래·부연 — 값 뒤에 한 톤 낮춰 선다 (`패스·시야`) */
   note?: string;
+  /** 같은 스킬의 이어지는 항목 — 아이콘을 다시 세우지 않는다 */
+  cont?: boolean;
 }
 
 export interface PanelHint {
@@ -136,24 +145,67 @@ export function hintsOfCall(call: ToolCallRecord): PanelHint[] {
   return hintsOfCalls([call]);
 }
 
-function hintsOfCalls(calls: readonly ToolCallRecord[]): PanelHint[] {
-  const byPanel = new Map<PanelKey, HintLine[]>();
-  for (const call of calls) {
-    if (!countable(call)) continue;
-    // 요약 첫 줄만 — 여러 줄짜리는 말풍선에 담기지 않는다
-    const summary = (call.summary.split("\n")[0] ?? call.summary).trim();
-    if (summary.length === 0) continue;
-    const note = TRAILING_NOTE.exec(summary)?.[1];
-    const line: HintLine = {
+/**
+ * 기록 하나가 세우는 줄들 — **코어가 항목으로 냈으면 항목마다 한 줄.**
+ *
+ * `brief`가 없는 것은 옛 세이브의 기록이다. 그때는 지금까지처럼 요약 문자열의
+ * 첫 줄을 세우고 끝 괄호만 사족으로 뗀다 — 화면이 문장을 더 쪼개지는 않는다.
+ */
+function linesOfCall(call: ToolCallRecord): HintLine[] {
+  const brief = call.brief;
+  if (brief) {
+    const head = brief.head.trim();
+    const items = brief.items.filter((i) => i.text.trim().length > 0);
+    // 바뀐 것을 코어가 못 적었으면 머리줄이 곧 그 줄이다 — 빈 줄을 세우지 않는다
+    if (items.length === 0) return head.length === 0 ? [] : [{ skill: call.name, text: head }];
+    return items.map((it, i) => ({
+      skill: call.name,
+      // 머리줄은 첫 항목에만 — 항목마다 되풀이하면 그게 글자 벽이다
+      ...(i === 0 && head.length > 0 ? { head } : {}),
+      ...(it.label ? { label: it.label } : {}),
+      text: it.text.trim(),
+      ...(it.note ? { note: it.note } : {}),
+      ...(i === 0 ? {} : { cont: true }),
+    }));
+  }
+  // 요약 첫 줄만 — 여러 줄짜리는 말풍선에 담기지 않는다
+  const summary = (call.summary.split("\n")[0] ?? call.summary).trim();
+  if (summary.length === 0) return [];
+  const note = TRAILING_NOTE.exec(summary)?.[1];
+  return [
+    {
       skill: call.name,
       text: summary.replace(TRAILING_NOTE, ""),
       ...(note === undefined ? {} : { note }),
-    };
+    },
+  ];
+}
+
+/** 기록 하나의 지문 — 스킬 이름과 세운 줄들. 같은 지문은 두 번 세지 않는다 */
+function signatureOf(name: string, lines: readonly HintLine[]): string {
+  return [name, ...lines.map((l) => `${l.label ?? ""}${l.text}`)].join(" ");
+}
+
+function hintsOfCalls(calls: readonly ToolCallRecord[]): PanelHint[] {
+  const byPanel = new Map<PanelKey, HintLine[]>();
+  const signatures = new Set<string>();
+  for (const call of calls) {
+    if (!countable(call)) continue;
     const panel = PANEL_OF[call.name];
     if (panel === undefined) continue;
     const lines = byPanel.get(panel) ?? [];
-    // 같은 문장이 두 번 오면(같은 스킬 반복) 한 번만 센다
-    if (!lines.some((l) => l.skill === line.skill && l.text === line.text)) lines.push(line);
+    /**
+     * 같은 결과가 두 번 오면(같은 스킬 반복) 한 번만 센다 — **기록 단위로** 거른다.
+     * 줄 단위로 거르면 머리줄만 중복으로 걸리고 이어지는 `cont` 줄은 남아, 머리도
+     * 아이콘도 없는 줄이 홀로 선다.
+     */
+    const next = linesOfCall(call);
+    if (next.length === 0) continue;
+    const seen = signatureOf(call.name, next);
+    if (!signatures.has(seen)) {
+      signatures.add(seen);
+      lines.push(...next);
+    }
     byPanel.set(panel, lines);
   }
   return [...byPanel].map(([panel, all]) => ({

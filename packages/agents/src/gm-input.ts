@@ -295,6 +295,21 @@ export function buildGmStateNote(state: GameState, passed?: TimePassed | null): 
       ].join("\n"),
     );
   }
+  /**
+   * 경기 뒤 들어온 소식 — 재정과 같은 라운드의 다른 경기·대진.
+   *
+   * 알림(대회 말풍선)에는 싣지 않는 갈래다(화면이 이미 갖고 있다). 그래도 모델은
+   * 알아야 한다 — 순위가 뒤집힌 걸 모른 채 다음 장면을 쓰면 세계가 감독의 경기
+   * 하나로 멈춘 것처럼 읽힌다. 읽기만 하고 비우지 않는다 (`takeNews`는 gm.ts).
+   */
+  const news = state.pendingNews ?? [];
+  if (news.length > 0) {
+    lines.push(
+      `경기 뒤 들어온 소식 (하나를 골라 장면으로 열어라 — 목록으로 늘어놓지 마라):\n${news
+        .map((n) => `- ${n}`)
+        .join("\n")}`,
+    );
+  }
   // 채팅 턴 없는 화면 조작(전술판·명단·역할) — 이미 반영된 사실이라 모델은 반응만 한다
   const edits = state.pendingEdits ?? [];
   if (edits.length > 0) {

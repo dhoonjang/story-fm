@@ -1491,7 +1491,8 @@ textarea {
   display: block;
   font-size: var(--fs-xs);
   line-height: 1.5;
-  color: var(--text);
+  /* 기본은 한 단 낮다 — 또렷한 것은 값(`.rail-hint-value`)뿐이다 */
+  color: var(--muted);
 }
 /**
  * 한 줄 = **갈래 아이콘 + 무슨 일**. 문장만 세 줄 쌓으면 글자 벽이 되어 무엇이
@@ -1500,7 +1501,9 @@ textarea {
  */
 .rail-hint-line {
   display: grid;
-  grid-template-columns: 14px 1fr;
+  /* `1fr`만으로는 글자 칸이 내용보다 작아지지 않는다 — 줄이지 못하면 긴 항목
+     하나가 카드를 320px 밖으로 늘인다 */
+  grid-template-columns: 14px minmax(0, 1fr);
   gap: 6px;
   align-items: start;
 }
@@ -1519,18 +1522,50 @@ textarea {
   height: 13px;
 }
 /**
- * 사족은 한 톤 낮춰 아래로 — 본문에 붙이면 정작 바뀐 것이 안 보인다.
- * 다만 그 안에서도 **수치는 값이다**: 항목과 숫자만 한 단 올려 세운다.
+ * ⚠️ **말줄임으로 자르지 않는다.** 알림은 "무엇이 바뀌었나"를 읽는 자리인데
+ * 글자를 잘라내면 정작 그 값이 `…` 뒤로 숨는다 — 벽을 없애려다 답을 없앤다.
+ *
+ * 길이는 **코어가** 잡는다: 항목은 건수와 갈래까지만 적고(`SkillBrief`), 줄이
+ * 넘치면 "외 N건"으로 접는다. 여기서는 칸을 벗어나지 않게만 두른다.
  */
-.rail-hint-what i {
-  display: block;
+.rail-hint-what {
+  min-width: 0;
+  /* 긴 이름 하나가 카드를 320px 밖으로 밀지 않게 — 자르지는 않고 넘겨 싣는다 */
+  overflow-wrap: anywhere;
+}
+/**
+ * **머리줄 · 이름 · 값 · 갈래** — 한 줄 안에서 톤으로 갈린다.
+ *
+ * 줄표(`—`)로 잇지 않는다. 훈련처럼 갈래까지 붙는 항목이면 줄표가 한 줄에 두 번
+ * 나와(`훈련 지정 — 매주 5회 × 6주 — 패스·시야`) 어디까지가 값인지 사라진다.
+ * 대신 **색과 굵기와 사이 간격**이 자리를 가른다 — 값만 또렷하고 나머지는 내려앉는다.
+ */
+.rail-hint-lead {
+  margin-right: 6px;
+  font-weight: 600;
+  color: var(--accent);
+}
+/* 무엇에 대한 것인가 — 값 앞에서 이름표 노릇만 한다 */
+.rail-hint-label {
+  margin-right: 5px;
   font-style: normal;
-  font-size: var(--fs-2xs);
-  line-height: 1.4;
   color: var(--dim);
 }
-.rail-hint-what i em {
+/* 바뀐 값 — 줄에서 유일하게 본문 색을 갖는다 */
+.rail-hint-value {
+  color: var(--text);
+}
+/**
+ * 갈래는 값 **뒤에** 한 톤 낮춰 붙는다 — 아래로 내리면 항목 하나가 두 줄을 먹어
+ * 세 줄 상한이 금세 찬다. 그 안에서도 수치는 값이라 한 단 올려 세운다.
+ */
+.rail-hint-aside {
+  margin-left: 6px;
   font-style: normal;
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+}
+.rail-hint-aside span {
   color: var(--muted);
 }
 /* 오르내린 수치 — 숫자 하나가 방향을 말한다 */
@@ -3058,7 +3093,16 @@ textarea {
   color: var(--text);
   white-space: pre-wrap;
 }
-/* 펼친 속 — 줄글을 항목으로 편다 (한 줄에 여러 값이 붙어 오므로) */
+/* 무엇을 한 스킬인가 — 항목 위에 한 줄 */
+.tool-brief-head {
+  color: var(--text);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.02em;
+}
+.tool-brief-head + .tool-lines {
+  margin-top: 5px;
+}
+/* 펼친 속 — 코어가 낸 항목을 알약으로 세운다 */
 .tool-lines {
   display: flex;
   flex-wrap: wrap;
@@ -3080,9 +3124,14 @@ textarea {
   font-size: var(--fs-xs);
   line-height: 1.5;
 }
+/* 이름표(앞)와 갈래(뒤) — 알약 안에서도 또렷한 것은 값 하나다 */
 .tool-item em {
   font-style: normal;
   color: var(--muted);
+}
+.tool-item i {
+  font-style: normal;
+  color: var(--dim);
 }
 .tool-item b {
   font-weight: 700;

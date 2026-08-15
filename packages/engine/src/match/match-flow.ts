@@ -840,15 +840,40 @@ export function buildRatingBrief(state: GameState): MatchRatingBrief | null {
   };
 }
 
+/**
+ * 경기 후 결산이 낸 줄 — **갈래로 나뉘어 있다** (docs/simulation/match.md §6).
+ *
+ * 한 덩어리 `string[]`이던 때는 우리 경기 스코어와 같은 라운드 다른 경기 전부와
+ * 재정 줄이 한 배열에 섞였고, 그게 그대로 대회 말풍선 한 줄이 되어 글자 벽이 됐다.
+ * 갈래를 코어가 나누면 화면은 `ours`만 세우고 모델은 셋을 다 읽는다.
+ */
+export interface MatchDigest {
+  /** 우리 경기 — 스코어·카드·부상·감독 XP·무드·전술 복구 */
+  ours: string[];
+  /** 매치데이 수익·수당·원정 비용 */
+  finance: string[];
+  /** 같은 라운드의 다른 경기·유럽/컵 대진·회견 개설 */
+  others: string[];
+}
+
+/** 갈래를 한 줄 목록으로 — 모델 입력·테스트처럼 전부를 읽는 자리에서 쓴다 */
+export function digestLines(digest: MatchDigest): string[] {
+  return [...digest.ours, ...digest.finance, ...digest.others];
+}
+
 /** 경기 후 반영 — 사건은 창발, 반영은 공식 (match-sim.md §6) */
-export function finalizeMatch(state: GameState): string[] {
+export function finalizeMatch(state: GameState): MatchDigest {
   const pending = state.pendingMatch;
-  if (!pending) return [];
+  if (!pending) return { ours: [], finance: [], others: [] };
   const match = currentMatch(state);
   const { ledger } = pending;
   /** 평점 브리프 — **상태를 바꾸기 전에** 만든다. 경기 후 LLM 평점의 입력이기도 하다 */
   const brief = buildRatingBrief(state);
+  /** 우리 경기 사건만 — 이 갈래가 대회 말풍선의 항목이 된다 */
   const digest: string[] = [];
+  /** 재정·다른 경기는 화면(재정·대회)이 이미 갖고 있다 — 모델만 읽는다 */
+  const financeLines: string[] = [];
+  const otherLines: string[] = [];
   const side = userSide(state);
   const userGoals = side === "home" ? ledger.score.home : ledger.score.away;
   const oppGoals = side === "home" ? ledger.score.away : ledger.score.home;
@@ -1062,7 +1087,7 @@ export function finalizeMatch(state: GameState): string[] {
   }
 
   // 재정 — 매치데이(관중)·생중계 수당·승리 수당·원정 비용 (finance.ts)
-  applyMatchFinance(state, match, outcome, digest);
+  applyMatchFinance(state, match, outcome, financeLines);
 
   const repDelta = outcome === "win" ? 2 : outcome === "loss" ? -2 : 0;
   state.manager.reputation.board = Math.max(
@@ -1119,18 +1144,18 @@ export function finalizeMatch(state: GameState): string[] {
    * 12:30에 뛰는 감독이 17:30 경기 결과를 미리 아는 일이 없도록 — 그 나머지가
    * 여기서 이어진다. 우리 경기에 결과가 박힌 뒤라 이번엔 문턱이 없다.
    */
-  simulateOtherMatches(state, digest);
+  simulateOtherMatches(state, otherLines);
   // 우리 경기로 대항전 대진이 결판났을 수 있다 — 다음 tick을 기다리지 않고 정리한다
   // (승부차기 판정·다음 단계 편성이 바로 달력에 오른다)
-  advanceEuroKnockouts(state, digest);
-  advanceDomesticCups(state, digest);
+  advanceEuroKnockouts(state, otherLines);
+  advanceDomesticCups(state, otherLines);
   /**
    * 회견은 **매 경기 뒤** 열린다 (press.ts). 이긴 경기에만 열면 회견이 상이 되고,
    * 감독이 세계에 대답할 자리가 결과에 따라 사라진다.
    */
   const press = buildMatchPress(state, match.id);
-  if (press) openPress(state, press, digest);
-  return digest;
+  if (press) openPress(state, press, otherLines);
+  return { ours: digest, finance: financeLines, others: otherLines };
 }
 
 export { activeSuspension, type TacticAssignment };
