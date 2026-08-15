@@ -614,10 +614,17 @@ export function transitionSeason(state: GameState): string[] {
    * 인원이라 일정이 없어서, 그대로 두면 강등이 곧 경기 없는 시즌이 된다.
    */
   const ourLeague = leagueOfTeamIn(state, state.userTeamId);
-  const matches = buildSeasonFixtures(nextSeason, state.seed, state.euroEntrants, state.world, {
-    leagueOf: state.leagueOf,
-    ...(isCupOnlyLeague(ourLeague) ? { extraLeagues: [ourLeague] } : {}),
-  });
+  const matches = buildSeasonFixtures(
+    nextSeason,
+    state.seed,
+    state.euroEntrants,
+    state.world,
+    {
+      leagueOf: state.leagueOf,
+      ...(isCupOnlyLeague(ourLeague) ? { extraLeagues: [ourLeague] } : {}),
+    },
+    state.userTeamId,
+  );
   state.windows = windows;
   state.matches = matches;
   state.schedule = buildScheduleEntries(

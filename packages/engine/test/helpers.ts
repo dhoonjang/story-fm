@@ -18,6 +18,7 @@ import {
   startMatch,
   type GameState,
   squadReturnOf,
+  FRIENDLY_ROUNDS,
   MINI_WORLD,
   FAMILIARITY_DRIFT_CAP,
   FAMILIARITY_DRIFT_PER_DAY,
@@ -117,12 +118,12 @@ export function createTestGame(seed = 42, teamId = "arsenal"): GameState {
 }
 
 /**
- * 유저 팀의 시즌 경기 수 — 리그 38 + 대항전 리그 페이즈.
+ * 유저 팀의 시즌 경기 수 — 프리시즌 친선 + 리그 38 + 대항전 리그 페이즈.
  * 대항전 출전 여부는 시드에 따라 갈리므로 하드코딩하지 않고 파생한다.
  */
 export function userFixtureCount(state: GameState): number {
   const cup = euroCompetitionOf(state.euroEntrants, state.userTeamId);
-  return 38 + (cup ? (cupCatalogById(cup)?.matchesPerTeam ?? 0) : 0);
+  return FRIENDLY_ROUNDS + 38 + (cup ? (cupCatalogById(cup)?.matchesPerTeam ?? 0) : 0);
 }
 
 /**

@@ -3,6 +3,7 @@ import { addDays, dayOfWeek, tooClose } from "./calendar";
 import { competitionShortName, isCup } from "../data/cup-catalog";
 import { isTopLeague } from "../data/league-catalog";
 import { reservedEuroDates } from "./europe";
+import { inCompetition } from "./friendly";
 import { teamName, type GameState } from "../core/state";
 
 /**
@@ -69,10 +70,18 @@ function seasonDeadline(state: GameState, competitionId: string): string {
   return last;
 }
 
-/** 이 경기를 연기할 수 있는가 */
-export function isPostponable(state: GameState, match: MatchRecord): boolean {
+/**
+ * 이 경기를 연기할 수 있는가 — **옮길 수 있는 경기는 반드시 대회 경기다**.
+ * 그 사실을 반환 타입에 실어, 대회 id가 필요한 뒷단계가 널을 만나지 않는다.
+ */
+export function isPostponable(
+  state: GameState,
+  match: MatchRecord,
+): match is MatchRecord & { competitionId: string } {
   if (match.result) return false; // 이미 치른 경기
   if (match.date <= state.date) return false; // 오늘·과거는 못 옮긴다
+  // 친선은 연기 대상이 아니다 — 비켜줄 컵이 없고, 프리시즌의 그 날짜가 곧 그 경기다
+  if (!inCompetition(match)) return false;
   if (isCup(match.competitionId)) return false; // 컵·대항전 날짜는 계약이다
   if (!isTopLeague(match.competitionId)) return false;
   return match.round < lastRoundOf(state, match.competitionId);

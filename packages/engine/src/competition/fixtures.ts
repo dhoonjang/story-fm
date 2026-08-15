@@ -7,15 +7,21 @@ import {
 } from "./calendar";
 import { leagueOfTeam } from "../data/team-catalog";
 import { buildAllEuroMatches, type EuroEntry } from "./europe";
+import { buildFriendlyMatches } from "./friendly";
 import type { WorldScope } from "../world/scope";
 
 /**
- * 시즌 편성의 단일 입구 — 리그 + 대항전을 함께 만들고 충돌을 푼다.
+ * 시즌 편성의 단일 입구 — 프리시즌 친선 + 리그 + 대항전을 함께 만들고 충돌을 푼다.
  *
  * 두 일정을 따로 만들면 서로를 모른다. 리그 주중 라운드는 대항전 주를 비켜주지만
  * (calendar.ts `isEuroWeek`), **주말 라운드의 금·월 슬롯**은 여전히 대항전
  * 화요일·목요일과 하루 차이로 붙는다. 대항전에 나가는 팀에게 월→화, 목→금은
  * 실제 리그가 절대 내지 않는 일정이다. 그래서 편성 후 슬롯을 맞바꿔 푼다.
+ *
+ * 친선은 개막 전에만 있어 리그·대항전과 날짜가 겹칠 수 없으므로 충돌 해소에
+ * 참여하지 않는다. 다만 **감독의 상대는 유저 팀을 알아야** 정해진다
+ * (`buildFriendlyMatches` 점층 곡선) — `userTeamId`가 없으면 곡선 없이 전력이
+ * 붙은 팀끼리만 묶인다.
  */
 export function buildSeasonFixtures(
   season: number,
@@ -23,11 +29,13 @@ export function buildSeasonFixtures(
   entrants: EuroEntry[],
   world?: WorldScope,
   membership?: LeagueMembership,
+  userTeamId?: string,
 ): MatchRecord[] {
   const league = buildAllLeagueMatches(season, seed, world, membership);
   const euro = buildAllEuroMatches(season, seed, entrants);
   relaxEuroAdjacency(league, euro);
-  return [...league, ...euro];
+  const friendly = buildFriendlyMatches(season, seed, world, membership, userTeamId);
+  return [...friendly, ...league, ...euro];
 }
 
 /**

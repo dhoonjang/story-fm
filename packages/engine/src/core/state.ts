@@ -1326,7 +1326,8 @@ function memoFit(preferred?: ReadonlySet<string>): (p: GamePlayer, slot: string)
     if (v === undefined) {
       // 적응도는 한 번만 — `fillSlots`가 쌍 교환을 세 번 돌며 이 함수를 수만 번 부른다
       const prof = proficiencyAt(p, slot);
-      v = lineupFit(p, slot, prof) + (preferred?.has(p.id) && prof >= XI_BONUS_FLOOR ? XI_BONUS : 0);
+      v =
+        lineupFit(p, slot, prof) + (preferred?.has(p.id) && prof >= XI_BONUS_FLOOR ? XI_BONUS : 0);
       cache.set(key, v);
     }
     return v;
@@ -1662,7 +1663,14 @@ export function createGame(input: CreateGameInput): GameState {
   const windows = buildTransferWindows(season);
   // 다른 리그도 같은 캘린더 골격으로 동시에 진행된다
   const euroEntrants = hasCups(world) ? buildEuroEntrants(season, seed) : [];
-  const matches = buildSeasonFixtures(season, seed, euroEntrants, world);
+  const matches = buildSeasonFixtures(
+    season,
+    seed,
+    euroEntrants,
+    world,
+    undefined,
+    input.userTeamId,
+  );
   // 일정 축(SCHEDULE_ENTRY)은 **감독의 달력**이다 — 유저 리그 전체 + 유저 팀
   // 대항전 경기만 등록한다. 타 리그·타 팀 대항전은 state.matches에만 있고
   // tick이 간이 시뮬로 소화한다.

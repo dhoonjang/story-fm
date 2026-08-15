@@ -195,6 +195,7 @@ describe("한 시즌을 돌리면 컵이 끝까지 진행된다", () => {
     const ourCupMatches = state.matches.filter(
       (m) =>
         m.season === state.season &&
+        m.competitionId !== null &&
         ourCupIds.has(m.competitionId) &&
         (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
     );
