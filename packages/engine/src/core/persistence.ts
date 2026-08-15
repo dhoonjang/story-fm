@@ -130,6 +130,7 @@ function validate(raw: unknown): GameState | null {
   s.settlingEvents ??= [];
   s.transferList ??= [];
   s.playerTraining ??= [];
+  s.roleMemory ??= [];
   s.pressConferences ??= [];
   s.aiDeals ??= [];
   // 재정 보고서는 다음 달 1일부터 쌓인다. 옛 원장 엔트리는 category가 없어

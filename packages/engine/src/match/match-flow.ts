@@ -36,6 +36,7 @@ import { clampForm, formDeltaFromMatch } from "../squad/form";
 import { applyResultMood } from "../squad/slump";
 import { matchRating, type MatchRatingBrief, type PlayerMatchBrief } from "./ratings";
 import { grantManagerXP } from "../skills";
+import { recallRole } from "../skills/role-memory";
 import { buildMatchPress, openPress } from "../club/press";
 import { easeProneness, openInjuryFor, pronenessOf } from "../squad/injury";
 import { serveSuspensions, simSquadOf, simulateOtherMatches } from "../core/tick";
@@ -122,6 +123,15 @@ function slotsFor(state: GameState, teamId: string, ids: string[]): LineupSlot[]
     const inherited = replacementSetup.get(id);
     const position =
       inherited?.position ?? assignment?.position ?? naturalPositionOf(player).position;
+    /**
+     * **교체 투입은 자리를 잇고 역할은 자기 것을 쓴다** (match.md §2).
+     * 빈 자리의 포지션·좌표는 나간 선수 것을 그대로 잇지만, 역할은 들어온 선수가
+     * 그 자리에서 맡던 것(역할 기억)이 먼저다 — 역할은 `roleFit`으로 전력에 그대로
+     * 닿으므로, 나간 사람 것을 물려주면 감독이 시킨 적 없는 값이 승부를 움직인다.
+     * 기억이 없으면 지금까지처럼 그 자리에 걸려 있던 역할을 잇는다.
+     */
+    const recalled = inherited ? recallRole(state, id, position) : undefined;
+    const roleId = recalled ?? inherited?.roleId ?? assignment?.roleId;
     return [
       {
         player,
@@ -129,9 +139,7 @@ function slotsFor(state: GameState, teamId: string, ids: string[]): LineupSlot[]
         ...((inherited?.point ?? assignment?.point)
           ? { point: (inherited?.point ?? assignment?.point)! }
           : {}),
-        ...((inherited?.roleId ?? assignment?.roleId)
-          ? { roleId: (inherited?.roleId ?? assignment?.roleId)! }
-          : {}),
+        ...(roleId ? { roleId } : {}),
         proficiency: proficiencyAt(player, position),
         // 전술 적응도는 **개인 값**이다 — 팀 평균으로 뭉개면 어제 온 선수와
         // 3년 뛴 선수가 같은 정도로 전술을 소화하는 셈이 된다

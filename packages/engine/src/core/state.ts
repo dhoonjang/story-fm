@@ -19,6 +19,7 @@ import type {
   TransferListing,
   PlayerTraining,
   PositionGroup,
+  RoleMemory,
   ScheduleEntry,
   Negotiation,
   PressConference,
@@ -452,6 +453,15 @@ export interface GameState {
   transferList: TransferListing[];
   /** 개인 훈련 프로그램 — 팀 훈련 위에 한 선수만 겨냥해 얹는다 */
   playerTraining: PlayerTraining[];
+  /**
+   * **역할 기억** — 선수 × 자리 → 마지막에 맡긴 역할.
+   *
+   * 배치(`TacticAssignment.roleId`)는 로테이션마다 다시 써지므로, 벤치로 한 번
+   * 내려가면 감독의 결정이 지워진다. 배치 바깥에 두어 같은 자리로 돌아왔을 때
+   * 기본값 대신 이 값에서 시작한다 (→ docs/data/player.md §3.2).
+   * 옛 세이브엔 없다 (로드 시 빈 배열 — 세이브 버전을 올리지 않는다).
+   */
+  roleMemory: RoleMemory[];
   /**
    * **아직 성사되지 않은 AI 이적** — 이번 주에 정해진, 날짜가 흩어진 거래
    * (`ai-market.ts`). 계획은 주 1회 세우고 실행은 그 날짜의 tick이 한다.
@@ -1706,6 +1716,7 @@ export function createGame(input: CreateGameInput): GameState {
     settlingEvents: [],
     transferList: [],
     playerTraining: [],
+    roleMemory: [],
     aiDeals: [],
     negotiations: [],
     pressConferences: [],

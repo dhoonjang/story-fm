@@ -1311,6 +1311,10 @@ export function buildOfficeViews(state: GameState): OfficeViews {
        * 벤치·예비 배치에는 좌표가 없어 `position`이 주 포지션으로 채워지는데, 그걸
        * 자리로 치면 화면은 그 자리의 역할 목록을 켜고 코어는 그 역할을 받지 않는다 —
        * 화면은 CF라 말하고 오류는 ST라 답하던 지점이다.
+       *
+       * 역할 기억(§3.2)은 여기서 보지 않는다 — 되찾기는 코어가 배치에 적어 넣는
+       * 일이고(`setLineup`의 승계), 화면이 따로 기억을 읽으면 배치에 없는 역할을
+       * 화면만 말하게 된다. 기억은 다시 선발이 될 때 `roleId`로 서서 온다.
        */
       const slotted = (liveSlot?.role ?? assignment?.role) === "starting";
       const assignedRoleId = slotted

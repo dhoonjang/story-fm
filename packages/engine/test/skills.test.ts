@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_TACTICS,
+  defaultRoleOf,
   naturalPositionOf,
   positionAtPoint,
   positionGroupOf,
@@ -944,5 +945,153 @@ describe("서사 이벤트 — 체력·폼만, 한도 내 (overview §7)", () =>
     });
     expect(result.ok).toBe(true);
     expect(player.state.condition - m0).toBeLessThanOrEqual(5);
+  });
+});
+
+/**
+ * 역할 기억 — **감독의 결정은 배치보다 오래 산다** (docs/data/player.md §3.1).
+ *
+ * 배치는 로테이션마다 다시 써지고 벤치·예비는 자리를 갖지 않는다. 기억이 없으면
+ * 감독이 고른 역할이 로테이션 한 번에 지워지고, 그 역할은 `roleFit`으로 경기
+ * 결과에 그대로 닿는다.
+ */
+describe("역할 기억 — 벤치를 다녀와도 감독의 결정이 남는다", () => {
+  /** 리베로를 고를 수 있는 선발 센터백 하나 */
+  const cbOf = (state: GameState) =>
+    assignmentsOf(state, state.userTeamId, "starting").find(
+      (a) => weightSlotOf(a.position) === "CB",
+    )!;
+
+  const assignmentOf = (state: GameState, playerId: string) =>
+    userTactics(state).assignments.find((a) => a.playerId === playerId);
+
+  const famOf = (state: GameState, playerId: string) => assignmentOf(state, playerId)!.familiarity;
+
+  const rowOf = (state: GameState, playerId: string) =>
+    buildOfficeViews(state).squad.players.find((x) => x.id === playerId)!;
+
+  /** 그 선수를 뺀 선발 11 — 빈 자리는 예비 선수가 메운다 */
+  function without(state: GameState, playerId: string) {
+    const lineup = currentLineup(state);
+    const spare = userPlayers(state).find(
+      (p) =>
+        p.squadLevel === "first" &&
+        isAvailable(state, p.id) &&
+        !lineup.some((s) => s.playerId === p.id),
+    )!;
+    return lineup.map((s) =>
+      s.playerId === playerId ? { playerId: spare.id, position: s.position } : s,
+    );
+  }
+
+  it("선발 → 벤치 → 예비 → 다시 선발: 리베로로 돌아온다", () => {
+    const state = createTestGame(7);
+    const cb = cbOf(state);
+    const slot = cb.position;
+    const lineup = currentLineup(state);
+    expect(setPlayerRole(state, { playerId: cb.playerId, role: "libero" }).ok).toBe(true);
+
+    // 벤치 — 자리가 없으니 배치는 역할을 들지 않는다
+    expect(
+      setLineup(state, {
+        starting: without(state, cb.playerId),
+        bench: [{ playerId: cb.playerId, position: slot }],
+      }).ok,
+    ).toBe(true);
+    expect(assignmentOf(state, cb.playerId)!.role).toBe("bench");
+    expect(assignmentOf(state, cb.playerId)!.roleId).toBeUndefined();
+
+    // 예비 — 배치째 사라진다
+    expect(setLineup(state, { starting: without(state, cb.playerId) }).ok).toBe(true);
+    expect(assignmentOf(state, cb.playerId)).toBeUndefined();
+
+    // 다시 선발 — 그 자리의 기본 역할이 아니라 마지막에 맡긴 역할로 선다
+    expect(setLineup(state, { starting: lineup }).ok).toBe(true);
+    const back = assignmentOf(state, cb.playerId)!;
+    expect(back.position).toBe(slot);
+    expect(back.roleId).toBe("libero");
+    expect(defaultRoleOf(slot)).not.toBe("libero");
+  });
+
+  /**
+   * 화면은 기억을 따로 읽지 않는다 (§3.1 · §3.2) — 벤치 행에는 역할이 없고,
+   * 다시 선발이 될 때 코어가 배치에 적어 넣은 값이 그대로 알약에 선다.
+   * 화면만 기억을 읽으면 장부에 없는 역할을 화면이 말하게 된다.
+   */
+  it("벤치 행엔 역할이 없고, 다시 선발이 되면 그 역할로 선다", () => {
+    const state = createTestGame(7);
+    const cb = cbOf(state);
+    const slot = cb.position;
+    const lineup = currentLineup(state);
+    setPlayerRole(state, { playerId: cb.playerId, role: "libero" });
+    const onPitch = rowOf(state, cb.playerId);
+    expect(onPitch.roleId).toBe("libero");
+
+    setLineup(state, {
+      starting: without(state, cb.playerId),
+      bench: [{ playerId: cb.playerId, position: slot }],
+    });
+    const onBench = rowOf(state, cb.playerId);
+    // 자리가 없으면 역할도 없다 — 알약도, 목록도 서지 않는다
+    expect(onBench.roleId).toBeNull();
+    expect(onBench.roleOptions).toHaveLength(0);
+
+    setLineup(state, { starting: lineup });
+    const back = rowOf(state, cb.playerId);
+    expect(back.roleId).toBe("libero");
+    expect(back.slotOverall).toBe(onPitch.slotOverall);
+  });
+
+  it("감독이 새로 고르면 그게 새 기억이다 — 되찾기는 기본값을 갈아끼울 뿐", () => {
+    const state = createTestGame(7);
+    const cb = cbOf(state);
+    const slot = cb.position;
+    const lineup = currentLineup(state);
+    setPlayerRole(state, { playerId: cb.playerId, role: "libero" });
+    setPlayerRole(state, { playerId: cb.playerId, role: "ball-playing-defender" });
+
+    setLineup(state, {
+      starting: without(state, cb.playerId),
+      bench: [{ playerId: cb.playerId, position: slot }],
+    });
+    setLineup(state, { starting: lineup });
+    expect(assignmentOf(state, cb.playerId)!.roleId).toBe("ball-playing-defender");
+  });
+
+  it("자리가 다르면 기억이 닿지 않는다 — 키는 (선수, 자리)다", () => {
+    const state = createTestGame(7);
+    const cb = cbOf(state);
+    setPlayerRole(state, { playerId: cb.playerId, role: "libero" });
+
+    const moved = currentLineup(state).map((s) =>
+      s.playerId === cb.playerId ? { playerId: s.playerId, position: "DM" } : s,
+    );
+    expect(setLineup(state, { starting: moved }).ok).toBe(true);
+    const now = assignmentOf(state, cb.playerId)!;
+    expect(weightSlotOf(now.position)).not.toBe("CB");
+    expect(now.roleId).toBeUndefined();
+    expect(rowOf(state, cb.playerId).roleId).toBe(defaultRoleOf(now.position));
+  });
+
+  it("같은 날 벤치를 다녀와도 역할 대가를 두 번 물지 않는다", () => {
+    const state = createTestGame(7);
+    const cb = cbOf(state);
+    const slot = cb.position;
+    const lineup = currentLineup(state);
+    const morning = cb.roleId ?? defaultRoleOf(slot);
+    const start = famOf(state, cb.playerId);
+
+    setPlayerRole(state, { playerId: cb.playerId, role: "libero" });
+    expect(famOf(state, cb.playerId)).toBeLessThan(start);
+
+    setLineup(state, {
+      starting: without(state, cb.playerId),
+      bench: [{ playerId: cb.playerId, position: slot }],
+    });
+    setLineup(state, { starting: lineup });
+
+    // 아침의 역할로 되돌아오면 낸 값도 돌아온다 — 장부(roleMemo)가 벤치를 건너 이어진다
+    expect(setPlayerRole(state, { playerId: cb.playerId, role: morning }).ok).toBe(true);
+    expect(famOf(state, cb.playerId)).toBeCloseTo(start, 6);
   });
 });

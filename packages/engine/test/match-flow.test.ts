@@ -7,6 +7,7 @@ import {
   finalizeMatch,
   groupOf,
   loadGame,
+  playersOf,
   refreshPacket,
   saveGame,
   setLineup,
@@ -20,9 +21,10 @@ import {
   transitionSeason,
   userPlayers,
   userSide,
+  type GameState,
 } from "@story-fm/engine";
 import { advanceToMatchday, createTestGame, playMockMatch } from "./helpers";
-import { tacticsSignature } from "@story-fm/domain";
+import { tacticsSignature, weightSlotOf } from "@story-fm/domain";
 import { zoneGrid } from "@story-fm/sim";
 
 describe("경기 흐름 (overview §4)", () => {
@@ -561,5 +563,98 @@ describe("지시가 판에 닿는 길", () => {
     expect(third.message).toContain("밀려났습니다");
     expect(third.message).toContain("왼쪽에 사람을 더 붙여라");
     expect(state.pendingMatch!.regionalPlans).toHaveLength(2);
+  });
+});
+
+/**
+ * **교체 투입은 자리를 잇고 역할은 자기 것을 쓴다** (match.md §2).
+ *
+ * 역할은 `roleFit`으로 전력에 그대로 닿는다 — 나간 선수의 역할을 물려주면 감독이
+ * 그 선수에게 시킨 적 없는 값이 승부를 움직인다.
+ */
+describe("교체 투입의 역할 (match.md §2)", () => {
+  /** 킥오프한 경기에서 [빈 자리를 만들 CB 선발, 벤치 필드 플레이어] */
+  function kickoffWithCbSub(state: GameState) {
+    advanceToMatchday(state);
+    const started = startMatch(state);
+    if (!started.ok) throw new Error(started.message);
+    const side = userSide(state);
+    const mine =
+      side === "home" ? state.pendingMatch!.ledger.home : state.pendingMatch!.ledger.away;
+    const assignments = assignmentsOf(state, state.userTeamId, "starting");
+    const out = assignments.find(
+      (a) => weightSlotOf(a.position) === "CB" && mine.onPitch.includes(a.playerId),
+    );
+    const sub = mine.bench.find((id) => {
+      const player = userPlayers(state).find((p) => p.id === id);
+      return player !== undefined && groupOf(player) !== "GK";
+    });
+    if (!out || !sub) throw new Error("CB 선발 또는 벤치 자원을 찾지 못했습니다");
+    // 감독이 그 자리에 걸어 둔 역할 — 들어오는 선수가 물려받아선 안 되는 값
+    out.roleId = "ball-playing-defender";
+    const packetSide = () =>
+      side === "home" ? state.pendingMatch!.packet.home : state.pendingMatch!.packet.away;
+    return { out, sub, packetSide };
+  }
+
+  it("역할 기억이 있는 교체 선수는 자리를 잇고 자기 역할로 뛴다", () => {
+    const state = createTestGame();
+    const { out, sub, packetSide } = kickoffWithCbSub(state);
+    // 이 선수는 그 자리에서 리베로를 맡던 사람이다 (경기 밖에서 적힌 기억)
+    state.roleMemory.push({ gamePlayerId: sub, position: out.position, roleId: "libero" });
+
+    expect(substitutePlayer(state, { out: out.playerId, in: sub }).ok).toBe(true);
+
+    const slot = packetSide().lineup.find((p) => p.id === sub);
+    expect(slot?.roleId, "감독이 그에게 시킨 역할로 뛴다").toBe("libero");
+    // 자리·좌표는 나간 선수 것을 그대로 잇는다
+    expect(slot?.position).toBe(out.position);
+    expect(slot?.point).toEqual(out.point);
+  });
+
+  it("기억이 없는 교체 선수는 그 자리에 걸려 있던 역할을 잇는다", () => {
+    const state = createTestGame();
+    const { out, sub, packetSide } = kickoffWithCbSub(state);
+    expect(state.roleMemory.some((m) => m.gamePlayerId === sub)).toBe(false);
+
+    expect(substitutePlayer(state, { out: out.playerId, in: sub }).ok).toBe(true);
+
+    const slot = packetSide().lineup.find((p) => p.id === sub);
+    expect(slot?.roleId).toBe("ball-playing-defender");
+    expect(slot?.position).toBe(out.position);
+  });
+
+  /** 다른 자리의 기억은 닿지 않는다 — 키는 (선수, 자리)다 (player.md §3.1) */
+  it("다른 자리의 역할 기억은 교체 투입에 쓰이지 않는다", () => {
+    const state = createTestGame();
+    const { out, sub, packetSide } = kickoffWithCbSub(state);
+    state.roleMemory.push({ gamePlayerId: sub, position: "DM", roleId: "anchor" });
+
+    expect(substitutePlayer(state, { out: out.playerId, in: sub }).ok).toBe(true);
+
+    expect(packetSide().lineup.find((p) => p.id === sub)?.roleId).toBe("ball-playing-defender");
+  });
+
+  /**
+   * **상대 팀은 그대로다** — `slotsFor`는 양 팀에 쓰이고, 기억이 없는 팀의 판은
+   * 이 변경 전과 같은 값이어야 한다.
+   */
+  it("역할 기억이 없으면 판이 달라지지 않는다", () => {
+    const withMemory = createTestGame();
+    const plain = createTestGame();
+    for (const state of [withMemory, plain]) {
+      advanceToMatchday(state);
+      startMatch(state);
+    }
+    // 남의 팀 선수에게 기억을 심어도 교체 전 판은 같다 (선발은 배치가 원본이다)
+    const opponentSide = userSide(withMemory) === "home" ? "away" : "home";
+    const opponentId = withMemory.pendingMatch!.packet[opponentSide].teamId;
+    for (const player of playersOf(withMemory, opponentId)) {
+      withMemory.roleMemory.push({ gamePlayerId: player.id, position: "CB", roleId: "libero" });
+    }
+    refreshPacket(withMemory);
+    expect(JSON.stringify(withMemory.pendingMatch!.packet[opponentSide].lineup)).toBe(
+      JSON.stringify(plain.pendingMatch!.packet[opponentSide].lineup),
+    );
   });
 });

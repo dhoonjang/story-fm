@@ -899,6 +899,25 @@ export const TacticAssignmentSchema = z.object({
 });
 export type TacticAssignment = z.infer<typeof TacticAssignmentSchema>;
 
+/**
+ * 역할 기억 (ROLE_MEMORY) — **이 선수가 이 자리에서 마지막에 맡던 역할.**
+ *
+ * 역할은 배치에 붙어 있고 배치는 로테이션마다 다시 써진다. 배치 안에만 두면
+ * 벤치로 한 번 내려가는 것으로 감독의 결정이 지워지고, 다시 선발이 되면 그 자리의
+ * 기본 역할부터 시작한다. 그래서 배치 **바깥**에 선수 단위로 적는다.
+ *
+ * 키가 (선수, 자리)인 이유: 역할 목록은 자리마다 다르고 같은 이름이 두 자리에
+ * 걸치지 않는다 — 자리를 벗어난 기억은 쓸 곳이 없다.
+ */
+export const RoleMemorySchema = z.object({
+  gamePlayerId: z.string().min(1),
+  /** 자리 코드 (CB·DM·ST…) — 역할은 이 자리의 목록(`rolesFor`) 안에서만 뜻이 있다 */
+  position: z.string().min(1),
+  /** 그 자리에서 마지막에 맡던 역할 (`ROLE_DEFS`의 id) */
+  roleId: z.string().min(1),
+});
+export type RoleMemory = z.infer<typeof RoleMemorySchema>;
+
 // ── 적응도 기억에서 "새 전술의 출발점" 구하기 ─────────────
 //
 // 엔진(setTactics)과 웹(저장 전 미리보기)이 **같은 함수**를 쓴다 — 규칙을 양쪽에
