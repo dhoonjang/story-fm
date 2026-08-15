@@ -15,9 +15,13 @@ import {
 /**
  * 선수 편집 창 — 목록의 요약 행에서 열린다. 추가와 편집이 같은 창을 쓴다.
  *
- * 편집 모드에선 **주 포지션을 따로 받지 않는다**: 가능 포지션 목록의 `주` 표시가
+ * 편집 모드에선 **주 포지션을 따로 받지 않는다**: 포지션 목록의 `선호` 표시가
  * 곧 주 포지션이라, 두 칸을 나란히 두면 서버에서 한쪽이 다른 쪽을 덮어쓴다.
  * 추가 모드에선 목록이 아직 없으므로 주 포지션 하나만 받고 서버가 파생시킨다.
+ *
+ * 한 줄이 묻는 것은 셋이고 서로 다른 질문이다 (player.md §4·§8) — 어느 자리인가 ·
+ * 그 자리가 **본업(선호)인가** · 그 자리를 **얼마나 아는가(적응도)**. 선호는 여럿일
+ * 수 있어 체크박스고, 적응도는 정도의 문제라 막대와 숫자를 함께 둔다.
  *
  * 소속 팀은 두 모드에 다 있다 — 방출도 무소속 팀으로 옮기는 것이라 별도 손잡이가
  * 없다. 떠나는 팀의 라인업 하한(인원·GK)은 엔진이 보므로, 거절 메시지를 이 창
@@ -81,8 +85,8 @@ export function PlayerModal({
     if (!nameKo.trim()) return "이름을 입력하세요";
     if (!teamId) return "팀을 고르세요";
     if (mode === "edit") {
-      if (positions.length === 0) return "가능 포지션이 최소 하나 필요합니다";
-      if (!positions.some((p) => p.isNatural)) return "주 포지션을 하나 이상 지정하세요";
+      if (positions.length === 0) return "포지션이 최소 하나 필요합니다";
+      if (!positions.some((p) => p.isNatural)) return "선호 포지션을 하나 이상 지정하세요";
       const codes = positions.map((p) => p.position);
       if (new Set(codes).size !== codes.length) return "같은 포지션이 두 번 들어 있습니다";
     }
@@ -271,19 +275,28 @@ export function PlayerModal({
       {mode === "edit" ? (
         <section>
           <div className="admin-section-head">
-            <b className="admin-section-title">가능 포지션</b>
-            <span className="admin-section-note">주로 표시한 자리가 주 포지션입니다 (하나 이상)</span>
+            <b className="admin-section-title">포지션</b>
             <button className="mini-btn" onClick={addPos} data-testid="player-modal-pos-add">
               + 포지션
             </button>
           </div>
           <div className="admin-pos-rows">
+            <div className="admin-pos-row admin-pos-head">
+              <span>자리</span>
+              <span>선호</span>
+              <span>적응도</span>
+              <span />
+            </div>
             {positions.map((p, i) => (
-              <div className="admin-pos-row" key={`${p.position}-${i}`} data-testid={`player-modal-pos-${i}`}>
+              <div
+                className={`admin-pos-row${p.isNatural ? " nat" : ""}`}
+                key={`${p.position}-${i}`}
+                data-testid={`player-modal-pos-${i}`}
+              >
                 <select
                   value={p.position}
                   onChange={(e) => setPos(i, { position: e.target.value })}
-                  aria-label="포지션"
+                  aria-label={`${p.position} 자리`}
                 >
                   {POSITION_CODES.map((c) => (
                     <option key={c} value={c}>
@@ -292,22 +305,32 @@ export function PlayerModal({
                   ))}
                 </select>
                 <input
-                  className="ai num"
-                  type="number"
-                  min={1}
-                  max={99}
-                  value={p.proficiency}
-                  onChange={(e) => setPos(i, { proficiency: Number(e.target.value) })}
-                  aria-label="적응도"
+                  type="checkbox"
+                  checked={p.isNatural}
+                  onChange={(e) => setPos(i, { isNatural: e.target.checked })}
+                  aria-label={`${p.position} 선호 포지션`}
+                  data-testid={`player-modal-pos-${i}-natural`}
                 />
-                <label className="admin-pos-nat">
+                {/* 막대가 값의 크기를, 숫자 칸이 정확한 값을 맡는다 — 둘 다 같은 state */}
+                <span className="admin-pos-prof">
                   <input
-                    type="checkbox"
-                    checked={p.isNatural}
-                    onChange={(e) => setPos(i, { isNatural: e.target.checked })}
+                    type="range"
+                    min={1}
+                    max={99}
+                    value={p.proficiency}
+                    onChange={(e) => setPos(i, { proficiency: Number(e.target.value) })}
+                    aria-label={`${p.position} 적응도`}
                   />
-                  주
-                </label>
+                  <input
+                    className="ai num"
+                    type="number"
+                    min={1}
+                    max={99}
+                    value={p.proficiency}
+                    onChange={(e) => setPos(i, { proficiency: Number(e.target.value) })}
+                    aria-label={`${p.position} 적응도 값`}
+                  />
+                </span>
                 <button
                   className="mini-btn del"
                   onClick={() => setPositions((cur) => cur.filter((_, j) => j !== i))}
@@ -320,7 +343,9 @@ export function PlayerModal({
           </div>
         </section>
       ) : (
-        <p className="hint">가능 포지션은 주 포지션에서 파생됩니다 — 추가한 뒤 이 창에서 편집하세요.</p>
+        <p className="hint">
+          포지션 목록은 주 포지션에서 파생됩니다 — 추가한 뒤 이 창에서 편집하세요.
+        </p>
       )}
 
       <section>

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PlayerModal } from "./player-modal";
+import { splitPositions } from "./types";
 import type { CatalogResponse, CatalogTeam, PlayerRow } from "./types";
 
 /**
@@ -14,6 +15,9 @@ const PAGE_SIZES = [25, 50, 100, 200] as const;
 const DEFAULT_PAGE_SIZE = 50;
 
 type ModalTarget = { mode: "create" } | { mode: "edit"; player: PlayerRow };
+
+/** 목록 행 — 포지션 칸이 선호·겸업으로 갈려 있어야 검색도 표시도 같은 것을 본다 */
+type ListRow = PlayerRow & ReturnType<typeof splitPositions>;
 
 export function PlayersPanel({
   onMessage,
@@ -53,15 +57,21 @@ export function PlayersPanel({
       });
   }, [applyResponse, onError]);
 
-  const flat = useMemo<PlayerRow[]>(
-    () => teams.flatMap((t) => t.players.map((p) => ({ ...p, teamName: t.teamName }))),
+  const flat = useMemo<ListRow[]>(
+    () =>
+      teams.flatMap((t) =>
+        t.players.map((p) => ({ ...p, teamName: t.teamName, ...splitPositions(p.positions) })),
+      ),
     [teams],
   );
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return flat.filter((p) => {
       if (teamFilter !== "all" && p.teamId !== teamFilter) return false;
-      if (q && !`${p.nameKo} ${p.nameEn} ${p.position} ${p.teamName}`.toLowerCase().includes(q)) {
+      // 검색은 칸에 **보이는 자리를 다** 훑는다 — 겸업으로 DM을 보는 센터백이
+      // "DM"에 안 걸리면 화면이 보여 준 것과 검색이 어긋난다
+      const codes = [...p.natural, ...p.other].join(" ");
+      if (q && !`${p.nameKo} ${p.nameEn} ${codes} ${p.teamName}`.toLowerCase().includes(q)) {
         return false;
       }
       return true;
@@ -179,7 +189,7 @@ export function PlayersPanel({
             <tr>
               <th className="hide-sm">팀</th>
               <th>이름</th>
-              <th>주 포지션</th>
+              <th>포지션</th>
               <th className="num">나이</th>
               <th className="num">OVR</th>
               <th className="num">POT</th>
@@ -207,24 +217,28 @@ export function PlayersPanel({
                   {p.nameKo}
                   <span className="muted">{p.nameEn}</span>
                 </td>
-                <td>
-                  <span className="admin-pos">{p.position}</span>
-                  {p.positions.length > 1 && (
-                    <span className="muted admin-pos-more">+{p.positions.length - 1}</span>
+                <td className="admin-pos-cell">
+                  {p.natural.map((code) => (
+                    <span className="admin-pos" key={code}>
+                      {code}
+                    </span>
+                  ))}
+                  {p.other.length > 0 && (
+                    <span className="admin-pos-more">{p.other.join(" · ")}</span>
                   )}
                 </td>
                 <td className="num">{p.age}</td>
                 <td className="num admin-ovr">{p.overall}</td>
                 <td className="num">{p.potential}</td>
-                <td className="num">
-                  {p.weeklyWage ? `£${p.weeklyWage.toLocaleString()}` : "—"}
-                </td>
+                <td className="num">{p.weeklyWage ? `£${p.weeklyWage.toLocaleString()}` : "—"}</td>
               </tr>
             ))}
             {paged.length === 0 && (
               <tr className="admin-list-empty">
                 {/* 아직 못 불러온 것과 없는 것은 다르다 — 5천 명을 받는 동안 "없다"고 하지 않는다 */}
-                <td colSpan={7}>{loaded ? "조건에 맞는 선수가 없습니다" : "카탈로그를 불러오는 중…"}</td>
+                <td colSpan={7}>
+                  {loaded ? "조건에 맞는 선수가 없습니다" : "카탈로그를 불러오는 중…"}
+                </td>
               </tr>
             )}
           </tbody>

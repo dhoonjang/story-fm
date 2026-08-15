@@ -459,13 +459,21 @@ textarea {
 .admin-ovr {
   font-weight: 700;
 }
+/**
+ * 포지션 칸 — 본업(선호)과 겸업이 **굵기·색으로** 갈린다. 칩(테두리·배경)을 씌우지
+ * 않는 이유: 이 칸은 읽는 값이고, 테두리는 이 화면에서 조작 대상의 표시다.
+ */
+.admin-pos-cell {
+  white-space: nowrap;
+}
 .admin-pos {
   display: inline-block;
   min-width: 34px;
-  font-weight: 600;
+  font-weight: 700;
 }
 .admin-pos-more {
-  margin-left: 4px;
+  margin-left: 6px;
+  color: var(--muted);
   font-size: var(--fs-xs);
 }
 /* 값이 그 자리에서 이미 틀렸다는 표시 (티켓 합 ≠ 참가 팀 수) */
@@ -656,16 +664,34 @@ textarea {
   margin-left: auto;
 }
 
-/* 가능 포지션 — 한 줄이 한 자리다 (코드 · 적응도 · 주 표시 · 삭제) */
+/**
+ * 포지션 — 한 줄이 한 자리고, 세 칸이 서로 다른 질문에 답한다
+ * (자리 · 선호인가 · 얼마나 아는가). 머리줄이 그 셋에 이름을 붙이므로 칸은 격자로
+ * 맞춘다 — 줄마다 폭이 흔들리면 라벨이 어느 칸을 가리키는지 사라진다.
+ */
 .admin-pos-rows {
   display: flex;
   flex-direction: column;
   gap: var(--sp-1);
 }
 .admin-pos-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: max-content 3rem minmax(0, 1fr) max-content;
   align-items: center;
   gap: var(--sp-2);
+  padding-left: var(--sp-2);
+  border-left: 2px solid transparent;
+}
+/* 선호(본업)는 줄째로 선다 — 체크 하나를 찾아 훑지 않게 */
+.admin-pos-row.nat {
+  border-left-color: var(--accent);
+}
+.admin-pos-row.nat select {
+  font-weight: 700;
+}
+.admin-pos-head {
+  color: var(--muted);
+  font-size: var(--fs-xs);
 }
 .admin-pos-row select,
 .admin-squad-row select {
@@ -677,12 +703,25 @@ textarea {
   font: inherit;
   font-size: var(--fs-md);
 }
-.admin-pos-nat {
+/* 여러 개를 켤 수 있는 칸이라 체크박스다 — 라디오로 바꾸면 본업이 하나로 잠긴다 */
+.admin-pos-row input[type="checkbox"] {
+  justify-self: center;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+}
+.admin-pos-prof {
   display: flex;
   align-items: center;
-  gap: var(--sp-1);
-  color: var(--muted);
-  font-size: var(--fs-sm);
+  gap: var(--sp-2);
+}
+.admin-pos-prof input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent-2);
+}
+.admin-pos-prof .num {
+  width: 52px;
 }
 
 /**
