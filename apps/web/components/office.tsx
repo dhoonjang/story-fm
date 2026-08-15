@@ -8,7 +8,6 @@ import {
   AXIS_GROUP_KO,
   AXIS_KO,
   CHIP_SIZE,
-  FAMILIARITY_BASELINE,
   anchorOf,
   conditionLabel,
   clampToBoard,
@@ -1076,11 +1075,11 @@ export function SquadView({
          * 시점을 가리킨다** (player.md §7.2).
          *
          * ⚠️ **배치가 없던 선수는 아침 값부터 다르다.** 코어는 배치되는 순간
-         * `min(기준선, 팀 적응도)`로 잡는다(`newcomerFamiliarity`) — 뷰가 주는 기준선
-         * 60을 그대로 쓰면 판에 올린 직후엔 60이었다가 저장 응답에서 혼자 내려앉는다.
+         * 선반(2군·예비를 다녀온 값)을 먼저 보고 없을 때만 `min(기준선, 팀 적응도)`를
+         * 준다 — 그 규칙은 뷰가 `familiarityIfSlotted`로 이미 매겨 준다. 화면이 다시
+         * 계산하면 돌아온 주전을 60으로 예고했다가 저장 응답에서 혼자 튄다.
          */
-        const morning =
-          p.role === "스쿼드" ? Math.min(FAMILIARITY_BASELINE, squad.familiarity) : p.familiarity;
+        const morning = p.role === "스쿼드" ? p.familiarityIfSlotted : p.familiarity;
         const familiarity =
           code && role ? familiarityForRole({ ...p, familiarity: morning }, code, role) : morning;
         return {
@@ -1092,7 +1091,7 @@ export function SquadView({
           adaptation: adaptationOf(fit, familiarity, code ?? p.assignedPosition ?? p.position),
         };
       }),
-    [players, board.occupants, board.points, board.roles, squad.familiarity],
+    [players, board.occupants, board.points, board.roles],
   );
 
   /** 감독이 고른 세부 역할의 지문 — 명단 표를 다시 그릴지 가리는 값 */

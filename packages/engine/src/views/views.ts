@@ -278,15 +278,27 @@ interface SquadViewRowMeta {
    * 낼 수 있게** 함께 보낸다. `role`은 그날 아침의 역할(대가의 기준)이고 `paid`는
    * 오늘 이미 깎인 총량이다. 오늘 손대지 않았으면 null이고 기준은 `roleId`다.
    *
-   * **자리 없는 행에도 싣는다** — 코어는 자리가 같으면 벤치를 다녀와도 흔적을
-   * 잇는데(`keepMemo`), 선발 행에만 실으면 돌아온 선수의 적응도 미리보기가
-   * 서버와 다른 자로 잰 값이 된다. 기준이 되는 자리는 `assignedPosition`이다.
+   * **자리 없는 행에도 싣는다** — 코어의 장부는 (선수·오늘)이라 벤치를 다녀와도
+   * 흔적이 이어지는데, 선발 행에만 실으면 돌아온 선수의 적응도 미리보기가 서버와
+   * 다른 자로 잰 값이 된다. 기준이 되는 자리는 `assignedPosition`이다.
+   *
+   * **아침의 자리를 벗어나 있으면 null이다** — 역할 목록은 자리마다 다르므로 옛
+   * 자리의 역할을 기준으로 재면 화면이 서버와 다른 값을 예고한다 (player.md §7.2).
    */
   roleToday: { role: string; paid: number } | null;
   /** 전술판 좌표 (배치가 있을 때) — 자유 배치 UI의 그리기 기준 */
   assignedPoint: BoardPoint | null;
   /** 전술 적응도 — 이 전술을 얼마나 익혔나 */
   familiarity: number;
+  /**
+   * **판에 올리면 될 적응도** — 배치가 없는 행에서만 `familiarity`와 다르다.
+   *
+   * 코어는 배치되는 순간 선반(2군·예비를 다녀온 값)을 먼저 보고, 없을 때만
+   * `min(기준선, 팀 적응도)`를 준다 (`newcomerFamiliarity` → player.md §7.3).
+   * 화면이 그 규칙을 스스로 계산하면 돌아온 주전을 60으로 예고했다가 저장 뒤
+   * 제 값으로 튄다 — 감독이 만들지 않은 상승이다. 규칙은 여기 하나만 둔다.
+   */
+  familiarityIfSlotted: number;
   /** 지금 맡은 자리의 포지션 적응도 (배치가 없으면 주 포지션 기준) */
   positionFit: number;
   /**
@@ -1264,6 +1276,15 @@ export function buildOfficeViews(state: GameState): OfficeViews {
   const squad = playersOf(state, userTeamId);
   const tactics = tacticsOf(state, userTeamId);
   const assignments = new Map(tactics.assignments.map((a) => [a.playerId, a] as const));
+  /**
+   * 배치가 없는 선수를 판에 올리면 코어가 줄 적응도 — **선반이 기준선을 이긴다**
+   * (→ player.md §7.3). 화면이 `min(기준선, 팀)`을 스스로 계산하면 2군을 다녀온
+   * 선수를 60으로 예고했다가 저장 응답에서 제 값으로 튄다.
+   */
+  const shelf = new Map((tactics.shelved ?? []).map((s) => [s.playerId, s] as const));
+  const ifSlotted = (playerId: string) =>
+    shelf.get(playerId)?.familiarity ??
+    Math.min(FAMILIARITY_BASELINE, squadFamiliarity(state, userTeamId));
   const livePacket =
     state.phase === "match" && state.pendingMatch
       ? state.pendingMatch.packet.home.teamId === userTeamId
@@ -1408,18 +1429,24 @@ export function buildOfficeViews(state: GameState): OfficeViews {
             : [],
         roleMemory: roleMemoryOf.get(p.id) ?? {},
         /**
-         * **자리가 없어도 싣는다.** 코어의 기준은 (선수·자리·오늘)이라 자리가
-         * 그대로면 벤치를 다녀와도 흔적이 이어진다(`keepMemo`). 선발 행에만
-         * 실으면 돌아온 선수의 적응도 미리보기가 서버와 다른 자로 잰 값이 된다.
+         * **자리가 없어도 싣는다.** 코어의 장부는 (선수·오늘)이라 벤치를 다녀와도
+         * 흔적이 이어진다. 선발 행에만 실으면 돌아온 선수의 적응도 미리보기가
+         * 서버와 다른 자로 잰 값이 된다.
+         *
+         * 다만 **아침의 자리가 아니면 싣지 않는다** — 코어는 그 자리에서만 아침의
+         * 역할과 견주고 나머지 자리에서는 낸 값을 되돌린다(`settleRoleCost`).
+         * 옛 자리의 역할을 기준으로 재면 화면이 서버가 매기지 않을 값을 예고한다.
          * 어느 자리의 흔적인지는 `assignedPosition`이 말한다.
          */
         roleToday:
-          assignment?.roleMemo?.date === state.date
+          assignment?.roleMemo?.date === state.date &&
+          (assignment.roleMemo.position ?? assignedSlot) === assignedSlot
             ? { role: assignment.roleMemo.role, paid: assignment.roleMemo.paid }
             : null,
         assignedPoint: liveSlot?.entry.point ?? pointOf.get(p.id) ?? null,
         // 저장은 소수지만 화면은 눈금이다 — 87.4와 87.7을 감독이 구분할 일은 없다
         familiarity: Math.round(assignment?.familiarity ?? 60),
+        familiarityIfSlotted: Math.round(assignment?.familiarity ?? ifSlotted(p.id)),
         positionFit: proficiencyAt(p, assignedSlot ?? natural.position),
         adaptation: adaptationOf(
           proficiencyAt(p, assignedSlot ?? natural.position),
