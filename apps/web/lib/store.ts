@@ -157,10 +157,7 @@ function matchLogsOf(state: GameState): GamePayload["matchLogs"] {
  */
 export function toPayload(state: GameState): GamePayload;
 export function toPayload(state: GameState, only: readonly ViewKey[]): GameSlice;
-export function toPayload(
-  state: GameState,
-  only?: readonly ViewKey[],
-): GamePayload | GameSlice {
+export function toPayload(state: GameState, only?: readonly ViewKey[]): GamePayload | GameSlice {
   if (only) {
     const views = buildOfficeViews(state);
     return {
