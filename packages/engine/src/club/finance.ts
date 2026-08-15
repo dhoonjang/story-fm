@@ -1045,12 +1045,19 @@ function postMonthlyItems(state: GameState): void {
       });
     }
 
-    // 이적료 상각 — 장부에만 (noncash)
+    /**
+     * 이적료 상각 — 장부에만 (noncash).
+     *
+     * 라벨은 **선수 이름만**이다. 카테고리가 이미 `이적료 분할 비용`을 찍으므로
+     * 항목명을 붙이면 한 행에 같은 말이 두 번 선다. 그래서 피드는 이 줄들을
+     * 항목명 없는 묶음으로 접고, 항목명을 가진 `매각 잔존가`는 따로 세운다
+     * (docs/simulation/finance.md §8.1).
+     */
     for (const line of amortisationOf(state, team.id)) {
       recordFinance(state, team.id, {
         kind: "expense",
         category: "amortisation",
-        label: `이적료 상각 — ${playerNames.get(line.playerId) ?? line.playerId}`,
+        label: playerNames.get(line.playerId) ?? line.playerId,
         amount: line.monthly,
         ref: { type: "player", id: line.playerId },
         accounting: "noncash",

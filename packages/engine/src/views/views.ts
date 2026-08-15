@@ -2,6 +2,7 @@ import type {
   AssignmentRole,
   AxisValues,
   BoardPoint,
+  LedgerEntry,
   MatchRecord,
   PacketPlayer,
   Foot,
@@ -138,6 +139,89 @@ export interface FinanceMonthView {
   pnlNet: number;
   wageRatio: number;
   notes: string[];
+}
+
+/**
+ * 재정 활동 피드의 한 줄 — 원장 한 건일 수도, 접힌 묶음일 수도 있다
+ * (docs/simulation/finance.md §8.1).
+ */
+export interface FinanceFeedRow {
+  id: string;
+  date: string;
+  kind: "income" | "expense";
+  category: string;
+  categoryLabel: string;
+  /**
+   * 한 건이면 원장 라벨 그대로. 접힌 줄이면 **항목명**(`매각 잔존가`) —
+   * 카테고리로만 묶인 줄(선수별 상각)은 빈 문자열이고, 카테고리 이름이 대신 말한다.
+   */
+  label: string;
+  /** 접힌 줄이면 묶음의 합계 */
+  amount: number;
+  noncash: boolean;
+  /** 2건 이상 접혔을 때만 — 펼치면 나오는 대상별 명세 */
+  items?: Array<{ label: string; amount: number }>;
+}
+
+/** 피드가 세우는 줄 수 — 원장 건수가 아니라 **접은 뒤의** 줄 수다 */
+const FINANCE_FEED_ROWS = 30;
+
+/** 원장 라벨의 `<항목명> — <대상>` 구분자 */
+const LEDGER_LABEL_SPLIT = " — ";
+
+/**
+ * 원장을 피드 줄로 접는다 — 최신 순.
+ *
+ * 상각처럼 **한 사건이 대상마다 한 줄**로 앉는 항목이 30칸을 통째로 덮지 않게,
+ * `날짜 · 수입/지출 · 카테고리 · 현금/장부 · 항목명`이 같은 엔트리를 한 줄로 묶는다.
+ * 원장 자체는 손대지 않는다 — PSR과 처분 이익이 선수별 값을 읽는다.
+ */
+function foldFinanceFeed(ledger: readonly LedgerEntry[]): FinanceFeedRow[] {
+  type Group = {
+    key: string;
+    row: FinanceFeedRow;
+    head: string;
+    items: Array<{ label: string; amount: number }>;
+  };
+  const groups = new Map<string, Group>();
+  const order: Group[] = [];
+  // 최신부터 — 같은 날은 나중 기록이 위로
+  for (const [i, e] of [...ledger].reverse().entries()) {
+    const category = categoryOf(e);
+    const cut = e.label.indexOf(LEDGER_LABEL_SPLIT);
+    const head = cut < 0 ? "" : e.label.slice(0, cut);
+    const item = cut < 0 ? e.label : e.label.slice(cut + LEDGER_LABEL_SPLIT.length);
+    const noncash = e.accounting === "noncash";
+    const key = `${e.date}|${e.kind}|${category}|${noncash}|${head}`;
+    const found = groups.get(key);
+    if (found) {
+      found.row.amount += e.amount;
+      found.items.push({ label: item, amount: e.amount });
+      continue;
+    }
+    const group: Group = {
+      key,
+      head,
+      items: [{ label: item, amount: e.amount }],
+      row: {
+        id: e.id ?? `led-${e.date}-${i}`,
+        date: e.date,
+        kind: e.kind,
+        category,
+        categoryLabel: FINANCE_CATEGORY_KO[category],
+        label: e.label,
+        amount: e.amount,
+        noncash,
+      },
+    };
+    groups.set(key, group);
+    order.push(group);
+  }
+  return order.slice(0, FINANCE_FEED_ROWS).map(({ key, row, head, items }) => {
+    if (items.length < 2) return row;
+    // 접힌 줄은 항목명만 남기고 원래 라벨은 명세로 내려간다
+    return { ...row, id: `fold-${key}`, label: head, items };
+  });
 }
 
 /** 팀 전술 (TACTICS) — 스쿼드 탭에서 보고 편집한다 */
@@ -657,17 +741,8 @@ export interface OfficeViews {
     current: FinanceMonthView;
     /** 마감된 월간 보고서 — 최신 순 */
     reports: FinanceMonthView[];
-    /** 실시간 재정 활동 — 최근 원장 (최신 순) */
-    feed: Array<{
-      id: string;
-      date: string;
-      kind: "income" | "expense";
-      category: string;
-      categoryLabel: string;
-      label: string;
-      amount: number;
-      noncash: boolean;
-    }>;
+    /** 실시간 재정 활동 — 최근 원장을 접은 줄 (최신 순, docs/simulation/finance.md §8.1) */
+    feed: FinanceFeedRow[];
   };
   /** 대회 — 우리 리그 + 우리 대항전. 대회별 순위표와 일정이 한 자리에 (§2.4) */
   competitions: {
@@ -1760,23 +1835,8 @@ export function buildOfficeViews(state: GameState): OfficeViews {
     wageRatio: now.wageRatio,
     notes: [],
   };
-  // 실시간 활동 피드 — 최근 원장부터 (같은 날은 나중 기록이 위로)
-  const feed = [...finance.ledger]
-    .reverse()
-    .slice(0, 30)
-    .map((e, i) => {
-      const category = categoryOf(e);
-      return {
-        id: e.id ?? `led-${e.date}-${i}`,
-        date: e.date,
-        kind: e.kind,
-        category,
-        categoryLabel: FINANCE_CATEGORY_KO[category],
-        label: e.label,
-        amount: e.amount,
-        noncash: e.accounting === "noncash",
-      };
-    });
+  // 실시간 활동 피드 — 접은 뒤 최근 30줄 (§8.1). 자르고 접으면 접기 전과 같아진다
+  const feed = foldFinanceFeed(finance.ledger);
   const stadium = clubProfile(userTeamId, teamCatalogById(userTeamId)?.tier ?? 3);
 
   const recentResults = state.matches
