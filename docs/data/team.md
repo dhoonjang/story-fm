@@ -345,13 +345,19 @@ WorldScope { leagues, teamsPerLeague, cups, markets }
 
 - **승강이 카탈로그를 전부 대신하지 못한다** — 재정·AI 시장·감독 시장은 여전히
   카탈로그의 `leagueId`를 읽는다 ([../simulation/season.md](../simulation/season.md) §8).
-- **승격한 2부 클럽의 스쿼드가 얇다** — 컵 전용으로 20명만 만들어지고, 1부로
-  올라와도 보충 경로가 시즌 전환의 유스 유입뿐이다.
-- **1부 96팀 중 EPL 20팀만 지정 선발을 갖는다** — 나머지 76팀은 11명을 엔진이
-  고른다. 슬롯 배치는 선수별 적응도의 전역 최댓값을 구하므로 앞 슬롯의 선택 때문에
+- **승격한 2부 클럽의 스쿼드가 얇다** — `world/catalog.ts`의
+  `SECOND_DIVISION_TEMPLATE`이 20명만 만들고, `market/ai-market.ts`의
+  `planTransfer`가 카탈로그의 `isTopFlight`로 막아 승격 뒤에도 사지 못한다
+  (유스 유입·임대·자유계약만 들어온다).
+- **1부 96팀 중 EPL 20팀만 지정 선발을 갖는다** — `data/team-catalog.ts`의
+  `DEFAULT_XI`에 20팀만 있고, 나머지 76팀은 `core/state.ts`의 `fillSlots`가 11명을
+  고른다. 슬롯 배치는 적합도 합의 전역 최댓값을 구하므로 앞 슬롯의 선택 때문에
   뒤 슬롯에 부적합한 선수가 남지 않는다. 비 EPL 지정 선발 조사는 남아 있다.
-- **2군에 경기가 없다** — 승격 전까지 출전이라는 성장 경로가 닫혀 있다.
-- **구장은 수용인원 하나로만 표현된다** — 확장·이전 같은 구단 투자 결정이 없다.
+- **2군에 경기가 없다** — `competition/fixtures.ts`의 `buildSeasonFixtures`가 리그와
+  대항전만 짜므로 1군 승격 전까지 출전이라는 성장 경로가 닫혀 있다.
+- **구장은 수용인원 하나로만 표현된다** — `data/club-profile.ts`의 `ClubProfile`은
+  세이브 밖 시드 표이고 `club/finance.ts`는 `capacity`를 입장 수입에만 쓴다
+  (시설비는 체급 상수 `facilityCostOf`). 확장·이전 같은 구단 투자 결정이 없다.
 
 ## 코드 위치
 
