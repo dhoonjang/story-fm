@@ -119,6 +119,9 @@ packages/
 - Test the sim core **without an LLM** — fixed seed, deterministic.
 - Test LLM-dependent logic with mocks, or at the schema-validation level.
 - New features ship with tests. Never hide a failing test; report it as it is.
+- **`pnpm e2e` runs at merge time only** — the `/merge` skill owns it. It is too
+  slow for the edit loop; while working, `pnpm test` / `typecheck` / `lint` are
+  the gate. Run it mid-work only when the user asks.
 - `pnpm e2e` uses port 3399, `.next-e2e` and `/tmp/story-fm-e2e`. Run **one e2e
   at a time per worktree** — a second concurrent run attaches to the first
   server through `reuseExistingServer` and the two trample each other.
