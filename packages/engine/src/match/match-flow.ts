@@ -1109,9 +1109,7 @@ export function finalizeMatch(state: GameState): string[] {
    * 연패·대패·연승이 라커룸에 남기는 것 (slump.ts) — 리그 전체와 같은 규칙이다.
    * 경기 결과가 장부에 쓰인 **뒤**라야 이번 경기가 연속 기록에 들어간다.
    */
-  const runNote = friendly
-    ? null
-    : applyResultMood(state, state.userTeamId, userGoals - oppGoals, [...played]);
+  const runNote = applyResultMood(state, state.userTeamId, userGoals - oppGoals, [...played]);
   if (runNote) digest.push(runNote);
 
   // 경기 중 조정을 킥오프 상태로 — pendingMatch가 지워지기 전에 (스냅샷이 거기 있다)
