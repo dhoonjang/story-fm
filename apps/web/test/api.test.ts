@@ -36,7 +36,7 @@ import {
 } from "../app/api/admin/catalog/league/[leagueId]/route";
 import { GET as cupGet, DELETE as cupReset } from "../app/api/admin/catalog/cup/route";
 import { PATCH as cupPatch } from "../app/api/admin/catalog/cup/[cupId]/route";
-import { cupCatalogById } from "@story-fm/engine";
+import { boardExpectation, cupCatalogById } from "@story-fm/engine";
 import { FORMATION_LAYOUTS } from "@story-fm/domain";
 import type { GamePayload } from "../lib/store";
 
@@ -70,6 +70,12 @@ describe("API — 온보딩부터 경기까지", () => {
     expect(data.teams).toHaveLength(96);
     expect(data.leagues).toHaveLength(5);
     expect(Array.isArray(data.games)).toBe(true);
+    // 보드 기대는 시즌 평가가 쓰는 문구 그대로 — 화면이 tier로 따로 만들지 않는다
+    const teams = data.teams as Array<{ id: string; expectation: string }>;
+    expect(teams.find((t) => t.id === "arsenal")?.expectation).toBe(
+      boardExpectation("arsenal").label,
+    );
+    expect(teams.every((t) => t.expectation.length > 0)).toBe(true);
   });
 
   it("게임을 만들면 목록에 뜨고, 삭제하면 사라진다", async () => {

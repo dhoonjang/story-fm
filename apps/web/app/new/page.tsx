@@ -12,6 +12,8 @@ interface TeamEntry {
   shortName: string;
   leagueId: string;
   tier: number;
+  /** 시즌 평가가 쓰는 그 문구 — 화면이 tier로 따로 만들지 않는다 */
+  expectation: string;
 }
 
 interface LeagueEntry {
@@ -20,17 +22,25 @@ interface LeagueEntry {
   country: string;
 }
 
-const TIER_LABEL: Record<number, string> = {
-  1: "우승권",
-  2: "유럽권",
-  3: "중위권",
-  4: "잔류권",
-};
+/**
+ * 부임은 한 걸음씩 좁혀 온다 — 리그를 고르면 그 리그의 팀이, 팀을 고르면 그 팀의
+ * 감독을 묻는 자리가 선다. 고르는 것이 곧 다음 단계라 "다음" 버튼은 없다.
+ */
+const STEPS = [
+  { key: "league", label: "리그" },
+  { key: "team", label: "팀" },
+  { key: "manager", label: "감독" },
+] as const;
+type Step = (typeof STEPS)[number]["key"];
+
+/** 강팀부터 — 보드 기대가 곧 난이도의 지형이다 */
+const TIER_ORDER = [1, 2, 3, 4];
 
 export default function NewGamePage() {
   const router = useRouter();
   const [teams, setTeams] = useState<TeamEntry[]>([]);
   const [leagues, setLeagues] = useState<LeagueEntry[]>([]);
+  const [wanted, setStep] = useState<Step>("league");
   const [leagueId, setLeagueId] = useState<string | null>(null);
   const [teamId, setTeamId] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -63,11 +73,26 @@ export default function NewGamePage() {
 
   /** 리그를 바꾸면 다른 리그 팀 선택은 무효 — 선택은 항상 보이는 것 안에 있어야 한다 */
   function selectLeague(id: string) {
+    if (id !== leagueId) setTeamId(null);
     setLeagueId(id);
-    setTeamId(null);
+    setStep("team");
   }
 
+  function selectTeam(id: string) {
+    setTeamId(id);
+    setStep("manager");
+  }
+
+  const league = leagues.find((l) => l.id === leagueId) ?? null;
+  const team = teams.find((t) => t.id === teamId) ?? null;
+  /** 고른 것이 사라지면(카탈로그 재적재 등) 단계도 그만큼 물러난다 — 빈 화면은 없다 */
+  const step: Step =
+    wanted === "manager" && !team ? "team" : wanted === "team" && !league ? "league" : wanted;
+  const stepIndex = STEPS.findIndex((s) => s.key === step);
   const leagueTeams = teams.filter((t) => t.leagueId === leagueId);
+  const tierGroups = TIER_ORDER.map((tier) => leagueTeams.filter((t) => t.tier === tier)).filter(
+    (group) => group.length > 0,
+  );
 
   async function start() {
     if (!teamId || !name.trim() || !background.trim()) return;
@@ -105,76 +130,130 @@ export default function NewGamePage() {
   return (
     <main className="onboarding">
       <div className="onboarding-top">
-        <Link href="/" className="back-link" data-testid="back-to-list">
-          ← 게임 목록
-        </Link>
+        {step === "league" ? (
+          <Link href="/" className="back-link" data-testid="back-to-list">
+            ← 게임 목록
+          </Link>
+        ) : (
+          <button
+            type="button"
+            className="back-link"
+            onClick={() => setStep(STEPS[stepIndex - 1].key)}
+            data-testid="step-back"
+          >
+            ← {STEPS[stepIndex - 1].label}
+          </button>
+        )}
+        {/* 진행 표시는 읽는 것이지 누르는 것이 아니다 — 돌아가는 길은 왼쪽 하나 */}
+        <ol className="step-rail" data-testid="step-rail">
+          {STEPS.map((s, i) => (
+            <li
+              key={s.key}
+              className={i === stepIndex ? "current" : i < stepIndex ? "done" : ""}
+              aria-current={i === stepIndex ? "step" : undefined}
+            >
+              {s.label}
+            </li>
+          ))}
+        </ol>
       </div>
-      {/* 소개 문구는 목록 화면이 맡는다 — 여기까지 온 사람에겐 폼만 필요하다 */}
-      <h1>새 게임 시작</h1>
 
-      <h2>1. 어느 리그입니까?</h2>
-      {leagues.length === 0 && !error ? (
-        <LeagueGridSkeleton />
-      ) : (
-        <div className="league-grid" data-testid="league-grid">
-          {leagues.map((l) => (
-            <button
-              key={l.id}
-              className={`league-card${leagueId === l.id ? " selected" : ""}`}
-              onClick={() => selectLeague(l.id)}
-              data-testid={`league-${l.id}`}
-            >
-              <div>{l.name}</div>
-              <div className="tier">{l.country}</div>
-            </button>
-          ))}
-        </div>
+      {step === "league" && (
+        <>
+          <h1>어느 리그입니까?</h1>
+          {leagues.length === 0 && !error ? (
+            <LeagueGridSkeleton />
+          ) : (
+            <div className="league-grid" data-testid="league-grid">
+              {leagues.map((l) => (
+                <button
+                  key={l.id}
+                  className={`league-card${leagueId === l.id ? " selected" : ""}`}
+                  onClick={() => selectLeague(l.id)}
+                  data-testid={`league-${l.id}`}
+                >
+                  <div>{l.name}</div>
+                  <div className="tier">{l.country}</div>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
-      <h2>2. 어느 팀을 맡습니까?</h2>
-      {leagueId === null ? (
-        <p className="tier" data-testid="team-grid-hint">
-          리그를 먼저 선택하세요
-        </p>
-      ) : (
-        <div className="team-grid" data-testid="team-grid">
-          {leagueTeams.map((t) => (
-            <button
-              key={t.id}
-              className={`team-card${teamId === t.id ? " selected" : ""}`}
-              onClick={() => setTeamId(t.id)}
-              data-testid={`team-${t.id}`}
-            >
-              <div>{t.name}</div>
-              <div className="tier">보드 기대: {TIER_LABEL[t.tier] ?? "?"}</div>
-            </button>
-          ))}
-        </div>
+      {step === "team" && (
+        <>
+          <p className="step-context" data-testid="step-context">
+            {league?.name ?? ""}
+            {league ? ` · ${league.country}` : ""}
+          </p>
+          <h1>어느 팀을 맡습니까?</h1>
+          {/* 보드 기대로 묶는다 — 팀을 고르는 일이 곧 어떤 요구를 안는 일이다 */}
+          <div data-testid="team-grid">
+            {tierGroups.map((group) => (
+              <section className="team-group" key={group[0].tier}>
+                <h2>{group[0].expectation}</h2>
+                <div className="team-grid-row">
+                  {group.map((t) => (
+                    <button
+                      key={t.id}
+                      className={`team-card${teamId === t.id ? " selected" : ""}`}
+                      onClick={() => selectTeam(t.id)}
+                      data-testid={`team-${t.id}`}
+                    >
+                      <div>{t.name}</div>
+                      <div className="tier">{t.shortName}</div>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        </>
       )}
 
-      <h2>3. 당신은 누구입니까?</h2>
-      <input
-        type="text"
-        placeholder="감독 이름"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        data-testid="manager-name"
-      />
-      <textarea
-        placeholder="예: K리그에서 뛰다 은퇴한 수비수. 데이터 분석 회사를 거쳐 지도자의 길로 — 이 서술이 초기 능력치를 정합니다"
-        value={background}
-        onChange={(e) => setBackground(e.target.value)}
-        data-testid="manager-background"
-      />
-      {/* 누르는 순간 화면이 로딩으로 넘어가므로 버튼에 기다리는 글자를 두지 않는다 */}
-      <button
-        className="primary-btn"
-        onClick={start}
-        disabled={busy || !teamId || !name.trim() || !background.trim()}
-        data-testid="start-game"
-      >
-        부임하기
-      </button>
+      {step === "manager" && team && (
+        <>
+          {/* 앞에서 고른 것이 여기 남아 맥락이 된다 — 마지막 단계는 부임 확인이다 */}
+          <div className="appointment" data-testid="appointment">
+            <div className="appointment-club">{team.name}</div>
+            <div className="tier">
+              {league?.name ?? ""} · 보드 기대: {team.expectation}
+            </div>
+          </div>
+          <h1>당신은 누구입니까?</h1>
+          <label className="field">
+            <span className="field-label">감독 이름</span>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              data-testid="manager-name"
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">이력</span>
+            {/* 능력치의 출처는 규칙이지 조작법이 아니다 — 적기 전에 알아야 한다 */}
+            <span className="field-note">여기 적은 이력이 초기 능력치가 된다</span>
+            <textarea
+              placeholder="예: K리그에서 뛰다 은퇴한 수비수. 데이터 분석 회사를 거쳐 지도자의 길로"
+              value={background}
+              onChange={(e) => setBackground(e.target.value)}
+              data-testid="manager-background"
+            />
+          </label>
+          {/* 누르는 순간 화면이 로딩으로 넘어가므로 버튼에 기다리는 글자를 두지 않는다 */}
+          <button
+            className="primary-btn"
+            onClick={start}
+            disabled={busy || !name.trim() || !background.trim()}
+            data-testid="start-game"
+          >
+            {team.name} 감독으로 부임한다
+          </button>
+        </>
+      )}
+
       {error && <p className="error-text">{error}</p>}
     </main>
   );

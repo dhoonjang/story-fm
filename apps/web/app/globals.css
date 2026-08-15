@@ -158,11 +158,45 @@ textarea {
   font-size: var(--fs-lg);
   margin: 24px 0 12px;
 }
+/* 앞 단계에서 고른 것 — 제목 위에 얹혀 지금 어디에 서 있는지를 말한다 */
+.onboarding .step-context {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  margin-bottom: 2px;
+}
+/* 진행 표시 — 지나온 칸은 남고 남은 칸은 흐리다. 누르는 것이 아니라 읽는 줄이다 */
+.onboarding .step-rail {
+  display: flex;
+  gap: 8px;
+  list-style: none;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.onboarding .step-rail li + li::before {
+  content: "→";
+  margin-right: 8px;
+}
+.onboarding .step-rail li.done {
+  color: var(--text);
+}
+.onboarding .step-rail li.current {
+  color: var(--accent);
+  font-weight: 700;
+}
 .league-grid,
-.team-grid {
+.team-grid-row {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 8px;
+}
+/* 보드 기대가 팀 묶음의 머리다 — 어느 요구를 안는 자리인지가 팀보다 먼저 읽힌다 */
+.team-group + .team-group {
+  margin-top: 20px;
+}
+.team-group h2 {
+  font-size: var(--fs-md);
+  margin: 0 0 8px;
+  color: var(--muted);
 }
 .league-card,
 .team-card {
@@ -187,6 +221,37 @@ textarea {
   color: var(--muted);
   font-size: var(--fs-sm);
 }
+/* 부임 확인 — 어느 팀에 어떤 기대를 안고 들어가는지가 이름을 적기 전에 선다.
+   읽는 자리라 카드가 아니라 왼쪽 선 하나로 세운다 (고르는 카드와 섞이지 않게) */
+.onboarding .appointment {
+  border-left: 3px solid var(--accent);
+  padding: 4px 0 4px 12px;
+  margin-bottom: 20px;
+}
+.onboarding .appointment-club {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+}
+.onboarding .appointment .tier {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.onboarding .field {
+  display: block;
+  margin-bottom: 16px;
+}
+.onboarding .field-label {
+  display: block;
+  font-size: var(--fs-md);
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.onboarding .field-note {
+  display: block;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  margin-bottom: 6px;
+}
 .onboarding input[type="text"],
 .onboarding textarea {
   width: 100%;
@@ -195,7 +260,6 @@ textarea {
   border-radius: var(--r-md);
   padding: 12px;
   color: var(--text);
-  margin-bottom: 12px;
 }
 .onboarding textarea {
   min-height: 90px;
@@ -923,13 +987,21 @@ textarea {
     grid-template-columns: 1fr;
   }
 }
+/* 돌아가는 길은 왼쪽, 어디쯤인지는 오른쪽 — 한 줄이 단계의 머리다 */
 .onboarding-top {
-  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-bottom: 20px;
 }
 .back-link {
   color: var(--accent-2);
   text-decoration: none;
   font-size: var(--fs-md);
+  background: none;
+  border: none;
+  padding: 0;
 }
 .back-link:hover {
   text-decoration: underline;
