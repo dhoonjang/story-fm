@@ -10,6 +10,7 @@ import {
   seedCatalog,
 } from "./catalog";
 import { claimPlayerId } from "./player-id";
+import { leagueName } from "../data/league-catalog";
 import { isClubTeam, teamCatalog, teamCatalogById } from "../data/team-catalog";
 
 /**
@@ -64,6 +65,10 @@ export interface CatalogPlayerRow extends PlayerCatalogEntry {
 export interface CatalogTeam {
   teamId: string;
   teamName: string;
+  /** 소속 리그 — 팀을 고르는 화면이 리그로 묶으려면 팀마다 이것이 있어야 한다 */
+  leagueId: string;
+  /** 리그 표시명 (파생 — 리그 카탈로그가 원본이다) */
+  leagueName: string;
   tier: 1 | 2 | 3 | 4;
   players: CatalogPlayerRow[];
 }
@@ -78,12 +83,19 @@ function toRow(entry: PlayerCatalogEntry): CatalogPlayerRow {
   };
 }
 
-/** 전 팀 카탈로그 (어드민 목록) */
+/**
+ * 전 팀 카탈로그 (어드민 목록).
+ *
+ * 순서는 `teamCatalog()` 그대로다 — 팀 표가 이미 리그 순서로 늘어서 있어, 화면은
+ * 이 배열을 순회하며 리그가 바뀌는 자리마다 묶기만 하면 된다.
+ */
 export function adminCatalog(): CatalogTeam[] {
   const entries = playerCatalog();
   return teamCatalog().map((t) => ({
     teamId: t.id,
     teamName: t.name,
+    leagueId: t.leagueId,
+    leagueName: leagueName(t.leagueId),
     tier: t.tier,
     players: entries.filter((e) => e.teamId === t.id).map(toRow),
   }));

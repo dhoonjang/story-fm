@@ -1,4 +1,10 @@
-import { ATTRIBUTE_AXES, POSITION_GROUPS, type AttributeAxis, type MatchStage } from "@story-fm/domain";
+import {
+  ATTRIBUTE_AXES,
+  POSITION_GROUPS,
+  mirrorBaseOf,
+  type AttributeAxis,
+  type MatchStage,
+} from "@story-fm/domain";
 import type {
   AdminLeagueRow,
   AdminTeamRow,
@@ -43,8 +49,39 @@ export interface CatalogPlayer extends Record<AttributeAxis, number> {
 export interface CatalogTeam {
   teamId: string;
   teamName: string;
+  /** 소속 리그 — 팀을 고르는 자리는 이걸로 묶는다 */
+  leagueId: string;
+  leagueName: string;
   tier: number;
   players: CatalogPlayer[];
+}
+
+/** 셀렉트의 `optgroup` 하나 — 리그 이름 아래 그 리그의 팀만 선다 */
+export interface TeamGroup {
+  leagueId: string;
+  leagueName: string;
+  teams: Array<{ id: string; name: string; tier: number }>;
+}
+
+/**
+ * 팀을 리그로 묶는다 — 169개 팀을 한 줄로 펴면 옮기려는 팀이 어느 리그인지도,
+ * 지금 고른 팀이 리그를 넘는 이동인지도 안 보인다.
+ *
+ * 순서는 **받은 그대로**다. 엔진의 팀 표가 이미 리그 순서(1부 5 → 시장 전용 →
+ * 무소속 → 2부 5)로 늘어서 있어, 여기서 다시 정렬하면 리그 탭·팀 탭과 순서가
+ * 갈린다. 그래서 리그가 바뀌는 자리마다 끊기만 한다.
+ */
+export function groupTeamsByLeague(teams: CatalogTeam[]): TeamGroup[] {
+  const groups: TeamGroup[] = [];
+  for (const t of teams) {
+    let last = groups[groups.length - 1];
+    if (last?.leagueId !== t.leagueId) {
+      last = { leagueId: t.leagueId, leagueName: t.leagueName, teams: [] };
+      groups.push(last);
+    }
+    last.teams.push({ id: t.teamId, name: t.teamName, tier: t.tier });
+  }
+  return groups;
 }
 
 /** 목록 행 — 팀 이름을 선수에 붙여 평평하게 편 것 */
@@ -66,6 +103,46 @@ export const POSITION_CODES = Object.keys(POSITION_GROUPS);
 
 export function clampAttr(v: number): number {
   return Math.min(99, Math.max(1, Math.round(Number.isFinite(v) ? v : 1)));
+}
+
+/**
+ * 목록 한 칸이 보여 줄 자리 — **선호(본업)와 겸업**으로 가른다 (player.md §4).
+ *
+ * 좌우 분화(LCB·RCB)는 부르는 이름만 다른 같은 자리라 중앙 표기로 접는다. 접지
+ * 않으면 센터백 한 명이 세 자리를 가진 것처럼 읽히고, 접은 자리 중 하나만
+ * `isNatural`이라 나머지가 겸업으로 밀린다 — 그래서 접은 뒤 **하나라도 선호면
+ * 선호**다 (`isNaturalAt`과 같은 판정).
+ *
+ * 접은 자리는 **카탈로그에 실제로 있는 코드**로 부른다 (중앙 표기로 갈아 끼우지
+ * 않는다) — 편집 창의 셀렉트에 없는 이름이 목록에만 뜨면 같은 자리를 못 찾는다.
+ * 대표는 선호 · 적응도 순으로 고른다.
+ *
+ * 두 줄 다 적응도 내림차순 — 잘 보는 자리가 앞이다.
+ */
+export function splitPositions(positions: CatalogPosition[]): {
+  natural: string[];
+  other: string[];
+} {
+  const folded = new Map<string, CatalogPosition>();
+  for (const p of positions) {
+    const key = mirrorBaseOf(p.position);
+    const cur = folded.get(key);
+    if (!cur) {
+      folded.set(key, p);
+      continue;
+    }
+    const better = p.isNatural !== cur.isNatural ? p.isNatural : p.proficiency > cur.proficiency;
+    folded.set(key, {
+      position: better ? p.position : cur.position,
+      proficiency: Math.max(cur.proficiency, p.proficiency),
+      isNatural: cur.isNatural || p.isNatural,
+    });
+  }
+  const sorted = [...folded.values()].sort((a, b) => b.proficiency - a.proficiency);
+  return {
+    natural: sorted.filter((p) => p.isNatural).map((p) => p.position),
+    other: sorted.filter((p) => !p.isNatural).map((p) => p.position),
+  };
 }
 
 /* ── 팀·리그·컵 ─────────────────────────────── */

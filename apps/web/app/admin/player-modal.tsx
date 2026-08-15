@@ -10,14 +10,19 @@ import {
   type CatalogPosition,
   type CatalogResponse,
   type PlayerRow,
+  type TeamGroup,
 } from "./types";
 
 /**
  * 선수 편집 창 — 목록의 요약 행에서 열린다. 추가와 편집이 같은 창을 쓴다.
  *
- * 편집 모드에선 **주 포지션을 따로 받지 않는다**: 가능 포지션 목록의 `주` 표시가
+ * 편집 모드에선 **주 포지션을 따로 받지 않는다**: 포지션 목록의 `선호` 표시가
  * 곧 주 포지션이라, 두 칸을 나란히 두면 서버에서 한쪽이 다른 쪽을 덮어쓴다.
  * 추가 모드에선 목록이 아직 없으므로 주 포지션 하나만 받고 서버가 파생시킨다.
+ *
+ * 한 줄이 묻는 것은 셋이고 서로 다른 질문이다 (player.md §4·§8) — 어느 자리인가 ·
+ * 그 자리가 **본업(선호)인가** · 그 자리를 **얼마나 아는가(적응도)**. 선호는 여럿일
+ * 수 있어 체크박스고, 적응도는 정도의 문제라 막대와 숫자를 함께 둔다.
  *
  * 소속 팀은 두 모드에 다 있다 — 방출도 무소속 팀으로 옮기는 것이라 별도 손잡이가
  * 없다. 떠나는 팀의 라인업 하한(인원·GK)은 엔진이 보므로, 거절 메시지를 이 창
@@ -33,7 +38,7 @@ type Mode = "create" | "edit";
 export function PlayerModal({
   mode,
   player,
-  teams,
+  teamGroups,
   defaultTeamId,
   ageRef,
   onSaved,
@@ -42,7 +47,8 @@ export function PlayerModal({
   mode: Mode;
   /** 편집 모드에서만 있다 */
   player?: PlayerRow;
-  teams: Array<{ id: string; name: string }>;
+  /** 리그로 묶은 팀 — 셀렉트의 `optgroup` 순서 그대로다 */
+  teamGroups: TeamGroup[];
   defaultTeamId: string;
   ageRef: string;
   onSaved: (data: CatalogResponse) => void;
@@ -64,8 +70,13 @@ export function PlayerModal({
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // 셀렉트를 따라간다 — 머리줄이 지금 고른 소속을 말해야 저장 전에 어디로 가는지 보인다
-  const teamName = teams.find((t) => t.id === teamId)?.name ?? player?.teamName ?? "";
+  // 셀렉트를 따라간다 — 머리줄이 지금 고른 소속을 말해야 저장 전에 어디로 가는지 보인다.
+  // 리그까지 말하는 이유: 셀렉트가 리그로 묶여 있어도 접힌 뒤엔 팀 이름만 남는다.
+  const picked = teamGroups
+    .flatMap((g) => g.teams.map((t) => ({ ...t, leagueName: g.leagueName })))
+    .find((t) => t.id === teamId);
+  const teamName = picked?.name ?? player?.teamName ?? "";
+  const where = picked ? `${picked.leagueName} · ${picked.name}` : teamName;
 
   function setPos(index: number, patch: Partial<CatalogPosition>) {
     setPositions((cur) => cur.map((p, i) => (i === index ? { ...p, ...patch } : p)));
@@ -81,8 +92,8 @@ export function PlayerModal({
     if (!nameKo.trim()) return "이름을 입력하세요";
     if (!teamId) return "팀을 고르세요";
     if (mode === "edit") {
-      if (positions.length === 0) return "가능 포지션이 최소 하나 필요합니다";
-      if (!positions.some((p) => p.isNatural)) return "주 포지션을 하나 이상 지정하세요";
+      if (positions.length === 0) return "포지션이 최소 하나 필요합니다";
+      if (!positions.some((p) => p.isNatural)) return "선호 포지션을 하나 이상 지정하세요";
       const codes = positions.map((p) => p.position);
       if (new Set(codes).size !== codes.length) return "같은 포지션이 두 번 들어 있습니다";
     }
@@ -174,7 +185,7 @@ export function PlayerModal({
       subtitle={
         mode === "create"
           ? "카탈로그에 추가합니다 — 새로 시작하는 게임부터 반영됩니다"
-          : `${teamName} · OVR ${player?.overall} · ${player?.age}세${ageRef ? ` (${ageRef} 기준)` : ""}`
+          : `${where} · OVR ${player?.overall} · ${player?.age}세${ageRef ? ` (${ageRef} 기준)` : ""}`
       }
       onClose={onClose}
       footer={
@@ -243,10 +254,14 @@ export function PlayerModal({
             onChange={(e) => setTeamId(e.target.value)}
             data-testid="player-modal-team"
           >
-            {teams.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
+            {teamGroups.map((g) => (
+              <optgroup key={g.leagueId} label={g.leagueName}>
+                {g.teams.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
         </label>
@@ -271,19 +286,28 @@ export function PlayerModal({
       {mode === "edit" ? (
         <section>
           <div className="admin-section-head">
-            <b className="admin-section-title">가능 포지션</b>
-            <span className="admin-section-note">주로 표시한 자리가 주 포지션입니다 (하나 이상)</span>
+            <b className="admin-section-title">포지션</b>
             <button className="mini-btn" onClick={addPos} data-testid="player-modal-pos-add">
               + 포지션
             </button>
           </div>
           <div className="admin-pos-rows">
+            <div className="admin-pos-row admin-pos-head">
+              <span>자리</span>
+              <span>선호</span>
+              <span>적응도</span>
+              <span />
+            </div>
             {positions.map((p, i) => (
-              <div className="admin-pos-row" key={`${p.position}-${i}`} data-testid={`player-modal-pos-${i}`}>
+              <div
+                className={`admin-pos-row${p.isNatural ? " nat" : ""}`}
+                key={`${p.position}-${i}`}
+                data-testid={`player-modal-pos-${i}`}
+              >
                 <select
                   value={p.position}
                   onChange={(e) => setPos(i, { position: e.target.value })}
-                  aria-label="포지션"
+                  aria-label={`${p.position} 자리`}
                 >
                   {POSITION_CODES.map((c) => (
                     <option key={c} value={c}>
@@ -292,22 +316,32 @@ export function PlayerModal({
                   ))}
                 </select>
                 <input
-                  className="ai num"
-                  type="number"
-                  min={1}
-                  max={99}
-                  value={p.proficiency}
-                  onChange={(e) => setPos(i, { proficiency: Number(e.target.value) })}
-                  aria-label="적응도"
+                  type="checkbox"
+                  checked={p.isNatural}
+                  onChange={(e) => setPos(i, { isNatural: e.target.checked })}
+                  aria-label={`${p.position} 선호 포지션`}
+                  data-testid={`player-modal-pos-${i}-natural`}
                 />
-                <label className="admin-pos-nat">
+                {/* 막대가 값의 크기를, 숫자 칸이 정확한 값을 맡는다 — 둘 다 같은 state */}
+                <span className="admin-pos-prof">
                   <input
-                    type="checkbox"
-                    checked={p.isNatural}
-                    onChange={(e) => setPos(i, { isNatural: e.target.checked })}
+                    type="range"
+                    min={1}
+                    max={99}
+                    value={p.proficiency}
+                    onChange={(e) => setPos(i, { proficiency: Number(e.target.value) })}
+                    aria-label={`${p.position} 적응도`}
                   />
-                  주
-                </label>
+                  <input
+                    className="ai num"
+                    type="number"
+                    min={1}
+                    max={99}
+                    value={p.proficiency}
+                    onChange={(e) => setPos(i, { proficiency: Number(e.target.value) })}
+                    aria-label={`${p.position} 적응도 값`}
+                  />
+                </span>
                 <button
                   className="mini-btn del"
                   onClick={() => setPositions((cur) => cur.filter((_, j) => j !== i))}
@@ -320,7 +354,9 @@ export function PlayerModal({
           </div>
         </section>
       ) : (
-        <p className="hint">가능 포지션은 주 포지션에서 파생됩니다 — 추가한 뒤 이 창에서 편집하세요.</p>
+        <p className="hint">
+          포지션 목록은 주 포지션에서 파생됩니다 — 추가한 뒤 이 창에서 편집하세요.
+        </p>
       )}
 
       <section>

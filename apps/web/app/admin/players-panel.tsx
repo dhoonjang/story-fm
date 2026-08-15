@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PlayerModal } from "./player-modal";
+import { groupTeamsByLeague, splitPositions } from "./types";
 import type { CatalogResponse, CatalogTeam, PlayerRow } from "./types";
 
 /**
@@ -12,8 +13,19 @@ import type { CatalogResponse, CatalogTeam, PlayerRow } from "./types";
 
 const PAGE_SIZES = [25, 50, 100, 200] as const;
 const DEFAULT_PAGE_SIZE = 50;
+/**
+ * 팀 필터 한 칸이 팀과 리그를 함께 받는다 — 셀렉트를 둘로 늘리면 "리그를 골랐는데
+ * 팀은 안 골랐다"는 중간 상태가 생긴다. 팀 id와 섞이지 않게 접두사를 붙인다.
+ */
+const LEAGUE_PREFIX = "league:";
 
 type ModalTarget = { mode: "create" } | { mode: "edit"; player: PlayerRow };
+
+/**
+ * 목록 행 — 화면이 거르고 보여 주는 값을 미리 붙여 둔다. 포지션은 선호·겸업으로
+ * 갈려 있어야 검색도 표시도 같은 것을 보고, 리그는 필터가 그걸로 거른다.
+ */
+type ListRow = PlayerRow & ReturnType<typeof splitPositions> & { leagueId: string };
 
 export function PlayersPanel({
   onMessage,
@@ -53,20 +65,50 @@ export function PlayersPanel({
       });
   }, [applyResponse, onError]);
 
-  const flat = useMemo<PlayerRow[]>(
-    () => teams.flatMap((t) => t.players.map((p) => ({ ...p, teamName: t.teamName }))),
+  const teamGroups = useMemo(() => groupTeamsByLeague(teams), [teams]);
+  const flat = useMemo<ListRow[]>(
+    () =>
+      teams.flatMap((t) =>
+        t.players.map((p) => ({
+          ...p,
+          teamName: t.teamName,
+          leagueId: t.leagueId,
+          ...splitPositions(p.positions),
+        })),
+      ),
     [teams],
   );
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const league = teamFilter.startsWith(LEAGUE_PREFIX)
+      ? teamFilter.slice(LEAGUE_PREFIX.length)
+      : null;
     return flat.filter((p) => {
-      if (teamFilter !== "all" && p.teamId !== teamFilter) return false;
-      if (q && !`${p.nameKo} ${p.nameEn} ${p.position} ${p.teamName}`.toLowerCase().includes(q)) {
+      if (league !== null) {
+        if (p.leagueId !== league) return false;
+      } else if (teamFilter !== "all" && p.teamId !== teamFilter) return false;
+      // 검색은 칸에 **보이는 자리를 다** 훑는다 — 겸업으로 DM을 보는 센터백이
+      // "DM"에 안 걸리면 화면이 보여 준 것과 검색이 어긋난다
+      const codes = [...p.natural, ...p.other].join(" ");
+      if (q && !`${p.nameKo} ${p.nameEn} ${codes} ${p.teamName}`.toLowerCase().includes(q)) {
         return false;
       }
       return true;
     });
   }, [flat, teamFilter, query]);
+
+  /**
+   * 새 선수가 들어갈 팀 — 지금 걸어 둔 필터를 따른다. 리그로 걸어 뒀으면 팀까지는
+   * 못 정하므로 그 리그의 첫 팀이다 (창에서 다시 고를 수 있다).
+   */
+  const defaultTeamId = useMemo(() => {
+    if (teamFilter.startsWith(LEAGUE_PREFIX)) {
+      const id = teamFilter.slice(LEAGUE_PREFIX.length);
+      return teamGroups.find((g) => g.leagueId === id)?.teams[0]?.id ?? "";
+    }
+    if (teamFilter !== "all") return teamFilter;
+    return teams[0]?.teamId ?? "";
+  }, [teamFilter, teamGroups, teams]);
 
   /** 필터·검색·페이지 크기가 바뀌면 첫 페이지로 */
   useEffect(() => setPage(1), [teamFilter, query, pageSize]);
@@ -118,10 +160,16 @@ export function PlayersPanel({
           aria-label="팀 필터"
         >
           <option value="all">전체 팀</option>
-          {teams.map((t) => (
-            <option key={t.teamId} value={t.teamId}>
-              {t.teamName} (T{t.tier})
-            </option>
+          {/* 리그도 하나의 선택지다 — 팀 하나로 좁히기 전에 리그를 먼저 볼 수 있어야 한다 */}
+          {teamGroups.map((g) => (
+            <optgroup key={g.leagueId} label={g.leagueName}>
+              <option value={`${LEAGUE_PREFIX}${g.leagueId}`}>{g.leagueName} 전체</option>
+              {g.teams.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name} (T{t.tier})
+                </option>
+              ))}
+            </optgroup>
           ))}
         </select>
         <input
@@ -179,7 +227,7 @@ export function PlayersPanel({
             <tr>
               <th className="hide-sm">팀</th>
               <th>이름</th>
-              <th>주 포지션</th>
+              <th>포지션</th>
               <th className="num">나이</th>
               <th className="num">OVR</th>
               <th className="num">POT</th>
@@ -207,24 +255,28 @@ export function PlayersPanel({
                   {p.nameKo}
                   <span className="muted">{p.nameEn}</span>
                 </td>
-                <td>
-                  <span className="admin-pos">{p.position}</span>
-                  {p.positions.length > 1 && (
-                    <span className="muted admin-pos-more">+{p.positions.length - 1}</span>
+                <td className="admin-pos-cell">
+                  {p.natural.map((code) => (
+                    <span className="admin-pos" key={code}>
+                      {code}
+                    </span>
+                  ))}
+                  {p.other.length > 0 && (
+                    <span className="admin-pos-more">{p.other.join(" · ")}</span>
                   )}
                 </td>
                 <td className="num">{p.age}</td>
                 <td className="num admin-ovr">{p.overall}</td>
                 <td className="num">{p.potential}</td>
-                <td className="num">
-                  {p.weeklyWage ? `£${p.weeklyWage.toLocaleString()}` : "—"}
-                </td>
+                <td className="num">{p.weeklyWage ? `£${p.weeklyWage.toLocaleString()}` : "—"}</td>
               </tr>
             ))}
             {paged.length === 0 && (
               <tr className="admin-list-empty">
                 {/* 아직 못 불러온 것과 없는 것은 다르다 — 5천 명을 받는 동안 "없다"고 하지 않는다 */}
-                <td colSpan={7}>{loaded ? "조건에 맞는 선수가 없습니다" : "카탈로그를 불러오는 중…"}</td>
+                <td colSpan={7}>
+                  {loaded ? "조건에 맞는 선수가 없습니다" : "카탈로그를 불러오는 중…"}
+                </td>
               </tr>
             )}
           </tbody>
@@ -288,8 +340,8 @@ export function PlayersPanel({
         <PlayerModal
           mode={target.mode}
           player={target.mode === "edit" ? target.player : undefined}
-          teams={teams.map((t) => ({ id: t.teamId, name: t.teamName }))}
-          defaultTeamId={teamFilter !== "all" ? teamFilter : (teams[0]?.teamId ?? "")}
+          teamGroups={teamGroups}
+          defaultTeamId={defaultTeamId}
           ageRef={ageRef}
           onSaved={(data) => {
             applyResponse(data);
