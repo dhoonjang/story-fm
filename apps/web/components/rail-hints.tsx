@@ -93,8 +93,10 @@ function HintRow({ line }: { line: HintLine }) {
   const note = line.note === undefined ? undefined : splitNote(abbreviateRoles(line.note));
   return (
     <span className="rail-hint-line">
-      <span className="rail-hint-mark">{Icon ? <Icon /> : null}</span>
+      {/* 이어지는 항목은 같은 스킬의 계속이다 — 아이콘을 다시 세우면 건수가 부풀어 보인다 */}
+      <span className="rail-hint-mark">{Icon && !line.cont ? <Icon /> : null}</span>
       <span className="rail-hint-what">
+        {line.head !== undefined && <em className="rail-hint-lead">{line.head}</em>}
         {withDelta(abbreviateRoles(line.text))}
         {note && (
           <i>

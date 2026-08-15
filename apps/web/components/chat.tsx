@@ -214,35 +214,30 @@ function ToolChip({
 }
 
 /**
- * 칩을 펼친 속 — **줄글을 항목으로 편다.**
+ * 칩을 펼친 속 — **코어가 낸 항목을 그대로 세운다.**
  *
- * 스킬 결과는 `A · B · C` 꼴로 붙여 쓴 한 줄이다(코어가 그렇게 만든다). 그대로
- * 두면 읽기 힘들고 무엇이 값이고 무엇이 설명인지 구분되지 않는다. 가운뎃점으로
- * 끊어 항목으로 세우고, `이름 값` 꼴이면 이름을 흐리게 값을 또렷하게 나눈다.
+ * 코어가 머리줄과 항목(`brief`)을 내므로 화면은 그것을 받기만 한다. 요약 문자열을
+ * 되쪼개 항목을 만들지 않는다 — 문구가 바뀔 때마다 조용히 깨지고, 사실을 내는
+ * 것은 코어의 몫이다(AGENTS.md §4). `brief`가 없는 옛 기록은 요약을 그대로 세운다.
  *
  * 입력(JSON)은 더 이상 그리지 않는다 — 감독이 읽을 것이 아니라 디버깅용이었고,
  * 상세가 정돈된 뒤로는 잡음이다.
  */
 function ToolDetail({ call }: { call: ToolCallRecord }) {
-  const lines = call.summary
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
+  const brief = call.brief;
+  if (!brief) return <div className="tool-detail-summary">{call.summary}</div>;
   return (
     <>
-      {lines.map((line, i) => (
-        <div className="tool-lines" key={i}>
-          {line
-            .split(" · ")
-            .map((part) => part.trim())
-            .filter((p) => p.length > 0)
-            .map((part, j) => (
-              <span className="tool-item" key={j}>
-                {splitValue(part)}
-              </span>
-            ))}
+      <div className="tool-brief-head">{brief.head}</div>
+      {brief.items.length > 0 && (
+        <div className="tool-lines">
+          {brief.items.map((item, i) => (
+            <span className="tool-item" key={i}>
+              {splitValue(item)}
+            </span>
+          ))}
         </div>
-      ))}
+      )}
     </>
   );
 }
