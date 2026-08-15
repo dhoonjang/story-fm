@@ -62,6 +62,7 @@ import {
   type CardMark,
   type GameState,
   type GoalMark,
+  type SkillBrief,
 } from "@story-fm/engine";
 import {
   ATTRIBUTE_AXES,
@@ -113,6 +114,15 @@ function writtenLines(text: string): number {
   return text.split("\n").filter((line) => line.trim().length > 0).length;
 }
 
+/** 엔진 스킬이 돌려주는 것 — `SkillResult`와 같은 모양이되 도구 쪽에서 좁게 읽는다 */
+type SkillReturn = {
+  ok: boolean;
+  message: string;
+  brief?: SkillBrief;
+  payload?: unknown;
+  tone?: "good" | "bad";
+};
+
 /** 실모드 GM의 스킬 도구 바인딩 — 엔진 함수를 GameToolSpec으로 감싼다 */
 export function buildGmTools(
   state: GameState,
@@ -122,7 +132,7 @@ export function buildGmTools(
   const descriptions = skillDescriptions();
   const record = (
     name: string,
-    result: { ok: boolean; message: string; payload?: unknown; tone?: "good" | "bad" },
+    result: SkillReturn,
     input?: unknown,
     context?: ToolCallContext,
   ) => {
@@ -132,6 +142,8 @@ export function buildGmTools(
         name,
         summary: result.message,
         input,
+        // 항목 요약은 코어가 낸 그대로 실어 보낸다 — 여기서 문자열로 접으면 화면이 도로 쪼갠다
+        ...(result.brief === undefined ? {} : { brief: result.brief }),
         ...(result.payload === undefined ? {} : { payload: result.payload }),
         ...(result.tone === undefined ? {} : { tone: result.tone }),
         // 이 스킬이 불린 자리 — 화면이 장면 중간에 칩을 세운다
@@ -145,7 +157,7 @@ export function buildGmTools(
     description: string,
     inputSchema: JsonObjectSchema,
     schema: z.ZodType<T>,
-    run: (input: T) => { ok: boolean; message: string; payload?: unknown; tone?: "good" | "bad" },
+    run: (input: T) => SkillReturn,
   ): GameToolSpec => ({
     name,
     description,

@@ -70,6 +70,7 @@ import {
   FAMILIARITY_BASELINE,
   MATCHDAY_BENCH,
   type GameState,
+  type SkillBrief,
 } from "../core/state";
 
 /**
@@ -80,7 +81,16 @@ import {
 
 export interface SkillResult {
   ok: boolean;
+  /** LLM에게 돌려주는 줄 — 모델이 읽을 것이므로 길어도 된다 */
   message: string;
+  /**
+   * **화면이 항목으로 세우는 요약** (`SkillBrief`) — 말풍선과 칩이 이걸 읽는다.
+   *
+   * 손댄 것을 다 이어 붙인 `message`를 화면이 되쪼개면 한 줄이 글자 벽이 된다.
+   * 여러 가지를 한 번에 바꾸는 스킬(라인업·훈련·개인 전술)은 반드시 채운다.
+   * 비우면 화면은 `message` 첫 줄을 그대로 세운다 — 한 가지만 바꾸는 스킬은 그걸로 족하다.
+   */
+  brief?: SkillBrief;
   /**
    * 화면이 카드로 그릴 **구조화된 결과** — 채우는 스킬만 채운다.
    * 넣지 않는 것이 기본이고, 시장 스킬만은 `MarketSkillResult`로 강제된다.

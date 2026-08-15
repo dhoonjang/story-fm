@@ -100,9 +100,35 @@ export interface PendingEdit {
   at: string;
 }
 
+/**
+ * **스킬 결과의 구조화 요약** — 머리줄 하나와 항목 몇 개.
+ *
+ * 예전엔 결과가 `summary` 문자열 하나였고, 화면이 그걸 ` · `로 되쪼개 항목을
+ * 만들었다. 그러면 두 가지가 깨진다: 문구가 바뀌면 화면이 조용히 어긋나고,
+ * 길이를 아무도 모르므로 말풍선 한 줄이 대여섯 줄로 접힌다.
+ *
+ * 그래서 **코어가 항목을 낸다.** 화면은 항목을 그대로 세우고 넘치면 접는다
+ * (`PanelHint.more`). `summary`는 LLM에게 돌려주는 줄로 남는다 — 모델은 길어도
+ * 읽지만 말풍선은 그렇지 않다.
+ *
+ * ⚠️ **항목 하나는 한 줄에 든다.** 건수와 갈래까지만 적고, LLM이 쓴 자유 문장은
+ * 싣지 않는다 (그 문장은 장면과 서사 로그에 이미 있다).
+ */
+export interface SkillBrief {
+  /** 무엇을 했나 — 스킬 이름값의 짧은 머리줄 (`라인업 확정`) */
+  head: string;
+  /** 무엇이 바뀌었나 — 각 항목이 말풍선 한 줄이다 */
+  items: string[];
+}
+
 export interface ToolCallRecord {
   name: string;
   summary: string;
+  /**
+   * 화면이 항목으로 세우는 요약 — 없으면 `summary` 문자열로 폴백한다
+   * (옛 세이브의 기록에는 없다).
+   */
+  brief?: SkillBrief;
   input?: unknown;
   /**
    * 그 스킬이 남긴 **구조화된 결과** — 채팅이 카드로 그린다.
@@ -486,6 +512,18 @@ export interface GameState {
    * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   pendingEdits?: PendingEdit[];
+  /**
+   * **아직 GM이 읽지 않은 경기 밖 소식** — 우리 경기 결산이 함께 굴린 것들.
+   *
+   * 경기 하나가 끝나면 코어는 그 라운드의 다른 경기·대항전 대진·재정까지 굴린다
+   * (`finalizeMatch`). 그건 감독이 확인하러 갈 화면(대회·재정)이 이미 갖고 있는
+   * 내용이라 **알림에는 싣지 않는다** — 대신 모델은 알아야 한다. 순위가 뒤집힌
+   * 걸 모른 채 다음 장면을 쓰면 세계가 감독의 경기 하나로 멈춘 것처럼 읽힌다.
+   *
+   * `pendingEdits`와 같은 규약이다 — 모아 두었다가 다음 평시 턴에 한 번 읽히고
+   * 비워진다(`takeNews`). 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  pendingNews?: string[];
   /** 스카우트 파견·완료 이력 — 타 팀 선수 안개의 근거 (scouting.ts) */
   scoutReports: ScoutReport[];
   /** 진행 중 협상 — 며칠에 걸쳐 오퍼가 오가므로 파생으로 되돌릴 수 없다 */
@@ -1813,4 +1851,22 @@ export function takeEdits(state: GameState): PendingEdit[] {
   const edits = state.pendingEdits ?? [];
   state.pendingEdits = [];
   return edits;
+}
+
+/** 모델이 읽을 소식 줄 수 상한 — 한 라운드가 다 실려도 스냅샷이 목록이 되지 않게 */
+export const PENDING_NEWS_LIMIT = 20;
+
+/** 경기 밖 소식을 모아 둔다 — 다음 평시 턴의 GM 입력에 실린다 */
+export function pushNews(state: GameState, lines: readonly string[]): void {
+  if (lines.length === 0) return;
+  const news = (state.pendingNews ??= []);
+  news.push(...lines);
+  if (news.length > PENDING_NEWS_LIMIT) news.splice(0, news.length - PENDING_NEWS_LIMIT);
+}
+
+/** 모아 둔 소식을 꺼내 비운다 — `takeEdits`와 같은 자리에서 부른다 */
+export function takeNews(state: GameState): string[] {
+  const news = state.pendingNews ?? [];
+  state.pendingNews = [];
+  return news;
 }
