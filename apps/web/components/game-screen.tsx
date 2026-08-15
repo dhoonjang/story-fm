@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import type { GamePayload } from "@/lib/store";
+import type { GamePayload, GameSlice } from "@/lib/store";
+import { mergeSlice } from "@/lib/game-slice";
 import type { ChatTurn, ToolCallRecord } from "@story-fm/engine";
 import { ChatTurnView, turnStamp } from "./chat";
 import { hintsOfCall, panelHintsOf, type PanelHint } from "@/lib/panel-hints";
@@ -252,14 +253,20 @@ export function GameScreen({ gameId }: { gameId: string }) {
   saverRef.current ??= createLineupSaver();
   const saver = saverRef.current;
   /**
-   * 라인업 저장 응답을 화면에 앉힌다 — **턴이 지나간 뒤에 도착한 것은 버린다.**
+   * 라인업 저장 응답을 화면에 앉힌다 — **온 뷰만 갈아끼우고, 턴이 지나간 뒤에
+   * 도착한 것은 버린다.**
+   *
+   * 응답은 그 라우트가 바꾼 뷰 하나만 싣는다(`GameSlice`). 나머지는 화면이 쥔 것이
+   * 그대로 남으므로 판을 짜는 동안 채팅·순위·일정이 다시 그려지지 않는다.
    *
    * 저장은 턴보다 앞선 상태에서 출발하므로, 늦게 닿으면 방금 받은 턴 결과를
-   * 통째로 되감는다. 턴은 대화를 늘리는 유일한 길이라 그 길이로 낡음을 가른다.
+   * 되감는다. 턴은 대화를 늘리는 유일한 길이라 그 길이로 낡음을 가른다.
    * 버려도 잃는 것은 없다 — 그 저장의 결과는 이미 턴 응답에 들어 있다.
    */
-  const applyLineupSave = useCallback((payload: GamePayload) => {
-    setGame((cur) => (cur && payload.chat.length < cur.chat.length ? cur : payload));
+  const applyLineupSave = useCallback((slice: GameSlice) => {
+    setGame((cur) =>
+      cur === null || slice.chatLength < cur.chat.length ? cur : mergeSlice(cur, slice),
+    );
   }, []);
   /**
    * 방금 끝난 경기 — **종료 화면**을 세운다.

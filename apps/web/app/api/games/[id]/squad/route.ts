@@ -26,6 +26,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (!result.ok) return NextResponse.json({ error: result.message }, { status: 400 });
     recordEdit(state, `squad:${body.data.playerId}`, result.message);
     saveGame(state);
-    return NextResponse.json(toPayload(state));
+    // 라인업 저장과 같다 — 1·2군 이동이 바꾸는 뷰는 스쿼드 하나다
+    return NextResponse.json(toPayload(state, ["squad"]));
   });
 }
