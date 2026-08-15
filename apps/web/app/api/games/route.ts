@@ -21,13 +21,25 @@ const CreateSchema = z.object({
 });
 
 /**
- * 리그·팀 카탈로그(새 게임 선택: 리그 → 팀) + 저장된 게임 목록(랜딩).
- * 2부는 국내 컵 참가 전용이라 부임 대상이 아니다 — 1부만 내려보낸다.
+ * 두 물음에 답한다 — **묻는 쪽이 무엇을 읽는지 고른다.**
  *
- * 보드 기대는 화면이 tier로 따로 만들지 않고 시즌 평가가 쓰는 그 문구를 그대로
- * 붙여 보낸다 — 부임 전에 읽는 기대치와 시즌 끝에 평가받는 기대치가 같은 말이어야 한다.
+ * | 요청 | 응답 | 부르는 곳 |
+ * | --- | --- | --- |
+ * | `GET /api/games` | 저장된 게임 목록 | 랜딩 (`app/page.tsx`) |
+ * | `GET /api/games?catalog=1` | 리그·팀 카탈로그 | 새 게임 (`app/new/page.tsx`) |
+ *
+ * 예전엔 한 응답에 둘 다 실었다. 랜딩은 `games`만 쓰는데 1부 96팀을
+ * `boardExpectation`까지 계산해 함께 받았다 — 목록 한 줄을 읽으려고 카탈로그
+ * 전체를 짓고 실어 보낸 셈이다.
+ *
+ * 2부는 국내 컵 참가 전용이라 부임 대상이 아니다 — 1부만 내려보낸다. 보드 기대는
+ * 화면이 tier로 따로 만들지 않고 시즌 평가가 쓰는 그 문구를 그대로 붙여 보낸다 —
+ * 부임 전에 읽는 기대치와 시즌 끝에 평가받는 기대치가 같은 말이어야 한다.
  */
-export function GET() {
+export function GET(request: Request) {
+  if (new URL(request.url).searchParams.get("catalog") !== "1") {
+    return NextResponse.json({ games: listGameSummaries() });
+  }
   const leagues = topLeagues();
   const ids = new Set(leagues.map((l) => l.id));
   return NextResponse.json({
@@ -35,7 +47,6 @@ export function GET() {
     teams: teamCatalog()
       .filter((t) => ids.has(t.leagueId))
       .map((t) => ({ ...t, expectation: boardExpectation(t.id).label })),
-    games: listGameSummaries(),
   });
 }
 
