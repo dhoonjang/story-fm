@@ -14,6 +14,7 @@ import {
   AXIS_GROUP_KO,
   AXIS_KO,
   FINANCE_CATEGORY_KO,
+  TRAIN_ATTR_KO,
   ageOf,
   anchorOf,
   defaultRoleOf,
@@ -359,8 +360,12 @@ export interface CalendarEntryView {
   match: {
     /** 대회 약칭 — 리그는 null (기본값이라 칸에 적지 않는다) */
     competition: string | null;
+    /** 단계 표기 — 리그는 라운드(`R7`), 컵은 `16강 1차전` */
+    stage: string;
     /** 상대 팀 약칭 (`LIV`) — 좁은 칸에서 풀네임은 세 줄로 접힌다 */
     opponent: string;
+    /** 상대 팀 이름 — 자리가 있는 상세 패널이 쓴다 */
+    opponentName: string;
     venue: "home" | "away" | "neutral";
     /** 우리 관점 스코어 `2-1` — 미진행이면 null */
     score: string | null;
@@ -1532,7 +1537,9 @@ export function buildOfficeViews(state: GameState): OfficeViews {
            */
           title: s?.rest === true ? `${slotKo} 휴식` : `${slotKo} 훈련 — ${s?.label ?? "훈련"}`,
           rest: s?.rest === true,
-          detail: s && s.focus.length > 0 ? s.focus.join("·") : null,
+          // 축은 감독이 읽는 이름으로 — `tactical·aggression`은 장부의 id지 표기가 아니다
+          detail:
+            s && s.focus.length > 0 ? s.focus.map((f) => TRAIN_ATTR_KO[f] ?? f).join("·") : null,
           /**
            * 소화한 훈련은 **무엇이 남았는지**를 함께 보여준다 — 그날 결산이 매긴
            * 성장 로그를 그대로 읽는다. 훈련이 달력에서 점 하나로만 지나가면
@@ -1585,20 +1592,23 @@ export function buildOfficeViews(state: GameState): OfficeViews {
           detail = scorers.length > 0 ? `득점: ${scorers.join(", ")}` : null;
         }
         const cup = isCup(m.competitionId);
+        const stage = competitionStageLabel(m.competitionId, m.stage ?? "league", m.round);
         return {
           id: e.id,
           date: e.date,
           time: e.time,
           type: e.type,
           status: e.status,
-          title: `${cup ? `${competitionShortName(m.competitionId)} ` : ""}${competitionStageLabel(m.competitionId, m.stage ?? "league", m.round)} ${m.neutral ? "중립" : home ? "홈" : "원정"} vs ${opponent}`,
+          title: `${cup ? `${competitionShortName(m.competitionId)} ` : ""}${stage} ${m.neutral ? "중립" : home ? "홈" : "원정"} vs ${opponent}`,
           detail,
           result,
           win,
           isNext: next !== null && m.id === next.id,
           match: {
             competition: cup ? competitionShortName(m.competitionId) : null,
+            stage,
             opponent: teamShortName(home ? m.awayTeamId : m.homeTeamId),
+            opponentName: opponent,
             venue: m.neutral ? "neutral" : home ? "home" : "away",
             // 칸이 좁아 정규시간 스코어만 — 승부차기 여부는 색(승/패)과 툴팁에 있다
             score: m.result

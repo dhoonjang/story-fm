@@ -118,6 +118,8 @@ describe("오피스 뷰 — 달력 (일정 축)", () => {
     expect(cal.entries.filter((e) => e.type === "match")).toHaveLength(userFixtureCount(state));
     const training = cal.entries.find((e) => e.title?.includes("패스 훈련"));
     expect(training?.time).toBe("10:00");
+    // 훈련 축은 감독이 읽는 이름으로 — 장부의 id(`passing`)가 화면까지 새지 않는다
+    expect(training?.detail).toBe("패스");
     // 이적창 엔트리
     expect(cal.entries.some((e) => e.type === "window-open")).toBe(true);
     expect(cal.windows.find((w) => w.kind === "여름")?.open).toBe(true);
