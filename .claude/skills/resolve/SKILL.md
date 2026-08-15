@@ -38,7 +38,7 @@ ever existed to let the search choose. Say it is missing and carry on. A missing
 `## 작업` list is not fine: §4 reads it. Write one yourself in §3 before splitting
 anything.
 
-Then go to §2.
+Then go to §1-1.
 
 **Nothing was named** — search:
 
@@ -63,6 +63,43 @@ exist, say so at the end so they can be triaged, but do not pick one.
 Nothing selectable → say so and stop. Do not invent work.
 
 State the pick and why it won (`priority/high`, oldest of two) before moving on.
+
+## 1-1. Look at what the open PRs already hold
+
+§1 only ever asked whether the **issue** is taken. Ask now whether its **files**
+are. One call collects every open PR's changed paths:
+
+```bash
+gh pr list --state open --limit 50 --json number,files --jq '
+  [.[] | {n: .number, f: .files[].path}]
+  | group_by(.f) | map({file: .[0].f, prs: map(.n) | sort})
+  | sort_by(-(.prs|length), .file)[]
+  | "\(.prs|length)  \(.file)  \(.prs | map("#\(.)") | join(" "))"'
+```
+
+Read it twice:
+
+- **The picked issue's paths** — the ones its `## 작업` names — are the ones that
+  matter. Every PR on those lines is a branch editing the same file right now.
+- **Lines with a count of 2 or more** are already contested. Entering one of them
+  makes a third hand on one file.
+
+If the tasks name no paths, say so and match by subsystem instead
+(`packages/engine/src/club/**` for a finance issue) — a coarse answer beats none.
+
+**Overlap is not a reason to skip.** Files overlapping is normal; starting
+without knowing is the problem. Report what you found, then judge:
+
+- **No overlap** → go to §2.
+- **Light** — no single PR shares more than two paths, and none of them is the
+  file the tasks mainly target → go to §2, carrying the list.
+- **Heavy** — one PR shares **three or more** paths, or any PR already holds the
+  file the tasks mainly target → **stop and ask the user.** Name the PR, the
+  shared files and the next candidate §1 would have picked, and let them choose
+  between the two. Never skip to the next candidate on your own; the backlog
+  order is theirs, not yours.
+
+Either way the list goes into the briefing in §2.
 
 ## 2. Launch the worktree with a team session in it
 
@@ -104,11 +141,20 @@ Then send the briefing **and submit it** — `--enter` is what presses Return:
 ```bash
 orca terminal send --terminal <handle> --enter --json --text 'Issue #<n> — <title>.
 Read .claude/skills/resolve/SKILL.md and run it from §3 on. You are the lead in
-this worktree; the branch is not created yet.'
+this worktree; the branch is not created yet.
+열린 PR이 이미 쥐고 있는 파일 — 겹치는 것을 고치기 전에 그 PR의 diff를 읽어라:
+  packages/engine/src/club/finance.ts  #34 #49
+  docs/simulation/finance.md  #34 #35 #45'
 ```
 
 The briefing is short on purpose — the worktree holds the repo, so point at the
 skill rather than restating it.
+
+The overlap lines are §1-1's output, filtered to the paths this issue touches —
+paste the lines, not a summary of them, and drop the block entirely when nothing
+overlaps. This replaces the eyeballed "주의: #N이 근처를 건드린다": a session that
+knows the file and the PR number can read that diff, and one that gets a hint
+cannot.
 
 ⚠️ **`--prompt` on `worktree create` types the text but does not reliably submit
 it here.** Twice it left the briefing sitting unsent at the prompt while the
@@ -149,8 +195,8 @@ for the draft PR; that is minutes of waiting for something §3 will report anywa
 If the terminal still sits at an empty prompt, send it again to the **same**
 handle — never create a second worktree for the same issue.
 
-Then report: the issue and why it won, the worktree path, the terminal handle,
-and what you saw the session doing. **Then stop.** Do not enter the worktree and
+Then report: the issue and why it won, the overlap §1-1 found, the worktree path,
+the terminal handle, and what you saw the session doing. **Then stop.** Do not enter the worktree and
 do not start the work; the session over there owns it now, and two leads on one
 branch overwrite each other.
 
@@ -295,9 +341,10 @@ ready, lands it and tears the worktree down.
 
 ## Report
 
-From the launching session: the issue and why it won, the worktree path, the
-terminal handle, and **what you saw that session doing with the briefing** — the
-handoff is only real once it has taken hold (§2-1).
+From the launching session: the issue and why it won, **which open PRs hold the
+same files** (§1-1, with the file names), the worktree path, the terminal handle,
+and **what you saw that session doing with the briefing** — the handoff is only
+real once it has taken hold (§2-1).
 
 From the worktree session: branch name, draft PR URL, and — if you fanned out —
 the lane table with who owns what. Then get on with the work.
