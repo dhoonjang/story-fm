@@ -300,6 +300,7 @@ function snapshotTactics(state: GameState): NonNullable<PendingMatch["tacticsBef
       ...(a.roleId ? { roleId: a.roleId } : {}),
       ...(a.instruction ? { instruction: a.instruction } : {}),
       ...(a.directive ? { directive: { ...a.directive } } : {}),
+      ...(a.roleMemo ? { roleMemo: { ...a.roleMemo } } : {}),
     })),
   };
 }
@@ -338,6 +339,10 @@ function restoreTactics(state: GameState): string | null {
     else delete a.instruction;
     if (was.directive) a.directive = { ...was.directive };
     else delete a.directive;
+    // 적응도를 킥오프로 되돌리면 장부도 함께 되돌아가야 한다 — `paid`만 남으면
+    // 경기 뒤 첫 역할 변경이 낸 적 없는 값을 환불받는다 (player.md §7.2)
+    if (was.roleMemo) a.roleMemo = { ...was.roleMemo };
+    else delete a.roleMemo;
   }
   return changed ? "경기 중 조정한 전술·개인 지시를 킥오프 전으로 되돌렸습니다" : null;
 }

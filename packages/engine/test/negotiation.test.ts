@@ -166,10 +166,12 @@ describe("상대의 판정 — 코어가 가능한 것만 받는다", () => {
     });
     expect(absurd.ok).toBe(false);
 
+    // 제시액이 호가를 웃도는 선수도 있다(제안 도우미는 성사되는 값을 부른다) —
+    // 그때 호가로 되부르면 **우리 제시액보다 낮은** 역제안이라 코어가 막는 게 맞다
     const fine = respondOffer(state, {
       negotiationId: negotiation.id,
       verdict: "counter",
-      fee: askingPriceFor(state, player),
+      fee: Math.max(askingPriceFor(state, player), terms.fee),
       note: "이 값이면 놓아준다",
     });
     expect(fine.ok, fine.message).toBe(true);

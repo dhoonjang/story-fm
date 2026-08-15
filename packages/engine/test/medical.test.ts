@@ -30,13 +30,14 @@ import { createTestGame } from "./helpers";
  * 결정적이고 성향을 탄다 ③ 소견이 붙으면 데려가는 쪽이 결정한다.
  */
 
-function target(state: GameState) {
+function target(state: GameState, nth = 0) {
   const budget = financeOf(state, state.userTeamId).transferBudget;
-  const found = state.players.find((p) => {
+  const affordable = state.players.filter((p) => {
     if (p.teamId === state.userTeamId) return false;
     const terms = suggestTerms(state, p.id);
     return terms !== null && terms.fee > 1_000_000 && terms.fee < budget * 0.6;
   });
+  const found = affordable[nth];
   if (!found) throw new Error("협상 대상을 찾지 못했습니다");
   return found;
 }
@@ -155,8 +156,8 @@ describe("검진은 결정적이고 몸을 읽는다", () => {
 
 describe("소견이 붙으면 데려가는 쪽이 결정한다", () => {
   /** 소견이 붙은 영입 협상을 만든다 — 부상 중인 선수를 사면 거의 확실하다 */
-  function flaggedBuy(state: GameState) {
-    const player = target(state);
+  function flaggedBuy(state: GameState, nth = 0) {
+    const player = target(state, nth);
     openInjuryFor(state, player, "match", () => 0.9);
     const terms = {
       playerId: player.id,
@@ -174,12 +175,24 @@ describe("소견이 붙으면 데려가는 쪽이 결정한다", () => {
     return negotiation.medical!.status === "flagged" ? { player, negotiation } : null;
   }
 
+  /**
+   * 소견이 붙는 영입 하나를 찾는다 — 검진은 결정적이지만 **누구에게 붙는지는
+   * 스쿼드를 탄다**. 카탈로그를 갱신하면 1순위 후보가 바뀌므로 후보를 넘겨 가며 찾는다.
+   */
+  function flaggedDeal() {
+    for (let nth = 0; nth < 12; nth++) {
+      const state = createTestGame(42);
+      const deal = flaggedBuy(state, nth);
+      if (deal) return { state, ...deal };
+    }
+    return null;
+  }
+
   it("소견은 계약을 막고 감독을 기다린다", () => {
-    const state = createTestGame(42);
-    const deal = flaggedBuy(state);
-    // 검진은 결정적이다 — 이 시드에서 부상 중인 선수는 반드시 소견을 받는다
-    expect(deal, "소견 경로가 돌지 않았다 — 세이브가 바뀌었으면 시드를 다시 고르라").not.toBeNull();
+    const deal = flaggedDeal();
+    expect(deal, "소견이 붙는 영입을 찾지 못했다").not.toBeNull();
     if (!deal) return;
+    const { state } = deal;
     expect(deal.negotiation.status).toBe("agreed");
     expect(deal.negotiation.medical!.note).toBeTruthy();
     expect(playerById(state, deal.player.id)!.teamId).not.toBe(state.userTeamId);
@@ -188,11 +201,10 @@ describe("소견이 붙으면 데려가는 쪽이 결정한다", () => {
   });
 
   it("강행하면 계약은 되지만 그 몸이 약하다는 사실이 남는다", () => {
-    const state = createTestGame(42);
-    const deal = flaggedBuy(state);
-    // 검진은 결정적이다 — 이 시드에서 부상 중인 선수는 반드시 소견을 받는다
-    expect(deal, "소견 경로가 돌지 않았다 — 세이브가 바뀌었으면 시드를 다시 고르라").not.toBeNull();
+    const deal = flaggedDeal();
+    expect(deal, "소견이 붙는 영입을 찾지 못했다").not.toBeNull();
     if (!deal) return;
+    const { state } = deal;
     const before = pronenessValue(playerById(state, deal.player.id)!);
     const done = acceptDeal(state, deal.negotiation.id);
     expect(done.ok, done.message).toBe(true);
@@ -202,11 +214,10 @@ describe("소견이 붙으면 데려가는 쪽이 결정한다", () => {
   });
 
   it("물러서도 그 창이 닫히지는 않는다 — 조건을 다시 짤 수 있다", () => {
-    const state = createTestGame(42);
-    const deal = flaggedBuy(state);
-    // 검진은 결정적이다 — 이 시드에서 부상 중인 선수는 반드시 소견을 받는다
-    expect(deal, "소견 경로가 돌지 않았다 — 세이브가 바뀌었으면 시드를 다시 고르라").not.toBeNull();
+    const deal = flaggedDeal();
+    expect(deal, "소견이 붙는 영입을 찾지 못했다").not.toBeNull();
     if (!deal) return;
+    const { state } = deal;
     const out = withdrawOffer(state, deal.negotiation.id);
     expect(out.ok).toBe(true);
     // 결렬(rejected)이 아니다 — 같은 창에서 다시 부를 수 있어야 한다

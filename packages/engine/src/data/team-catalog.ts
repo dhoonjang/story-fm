@@ -1205,7 +1205,8 @@ export const DEFAULT_XI: Record<string, readonly string[]> = {
     "robert-sanchez",
     "reece-james",
     "levi-colwill",
-    "trevoh-chalobah",
+    // 찰로바가 코모로 떠난 자리 (2026 여름) — 남은 센터백 중 가장 높다
+    "tosin-adarabioyo",
     "jorrel-hato",
     "moises-caicedo",
     "enzo-fernandez",
@@ -1222,7 +1223,8 @@ export const DEFAULT_XI: Record<string, readonly string[]> = {
     "lewis-hall",
     "lewis-miley",
     "joelinton",
-    "bruno-guimaraes",
+    // 브루누 기마랑이스가 아스날로 떠난 자리 (2026 여름)
+    "jacob-ramsey",
     "anthony-elanga",
     "bazoumana-toure",
     "william-osula",
@@ -1314,7 +1316,8 @@ export const DEFAULT_XI: Record<string, readonly string[]> = {
     "jefferson-lerma",
     "adam-wharton",
     "tyrick-mitchell",
-    "brennan-johnson",
+    // 브레넌 존슨이 에버턴으로 떠난 자리 (2026 여름)
+    "ismaila-sarr",
     "yeremy-pino",
     "jean-philippe-mateta",
   ],

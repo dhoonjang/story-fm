@@ -83,18 +83,23 @@ describe("선수 카탈로그 (불변 초기치 DB)", () => {
       return prev[b.length]!;
     };
 
-    const byTeam = new Map<string, { id: string; name: string }[]>();
+    const byTeam = new Map<string, { id: string; name: string; birthdate: string }[]>();
     for (const e of catalog) {
       if (e.synthetic) continue;
       const list = byTeam.get(e.teamId) ?? [];
-      list.push({ id: e.id, name: plain(e.nameEn) });
+      list.push({ id: e.id, name: plain(e.nameEn), birthdate: e.birthdate });
       byTeam.set(e.teamId, list);
     }
+    // 이름만으로는 한 팀의 다른 두 사람을 잡는다 (알라베스의 Mikel/Miguel Rodríguez).
+    // 표기가 갈린 **같은 사람**이라면 생일이 같으므로 그것까지 봐야 한 사람이다.
     const dupes: string[] = [];
     for (const [teamId, list] of byTeam) {
       for (let i = 0; i < list.length; i++) {
         for (let j = i + 1; j < list.length; j++) {
-          if (distance(list[i]!.name, list[j]!.name) <= 2) {
+          if (
+            distance(list[i]!.name, list[j]!.name) <= 2 &&
+            list[i]!.birthdate === list[j]!.birthdate
+          ) {
             dupes.push(`${teamId}: ${list[i]!.id} ~ ${list[j]!.id}`);
           }
         }

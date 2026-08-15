@@ -49,6 +49,38 @@ test("카탈로그 어드민이 500 없이 동작한다", async ({ page }) => {
   expect(serverErrors).toEqual([]);
 });
 
+test("탭을 오가도 카탈로그를 다시 받지 않는다", async ({ page }) => {
+  /** 층별 요청 수 — 카탈로그는 불변 시드라 화면이 서 있는 동안 한 번이면 된다 */
+  const calls = new Map<string, number>();
+  page.on("request", (request) => {
+    const { pathname } = new URL(request.url());
+    if (!pathname.startsWith("/api/admin/catalog")) return;
+    calls.set(pathname, (calls.get(pathname) ?? 0) + 1);
+  });
+
+  await page.goto("/admin");
+  await expect(page.getByTestId("admin-count")).not.toHaveText("0명", { timeout: 20_000 });
+  await page.getByTestId("admin-tab-teams").click();
+  await expect(page.getByTestId("team-row-arsenal")).toBeVisible({ timeout: 20_000 });
+
+  const onLoad = new Map(calls);
+  // 리그 목록은 세 패널이 각자가 아니라 페이지가 받는다 — 선수 카탈로그와 같은 횟수다
+  // (개발 서버의 StrictMode는 마운트 효과를 두 번 돌리므로 절대 횟수로 재지 않는다)
+  expect(onLoad.get("/api/admin/catalog/league")).toBe(onLoad.get("/api/admin/catalog"));
+
+  // 네 층을 한 바퀴 돌고 처음 자리로 — 패널은 언마운트되지만 카탈로그는 페이지가 쥔다
+  await page.getByTestId("admin-tab-leagues").click();
+  await expect(page.getByTestId("league-row-epl")).toBeVisible();
+  await page.getByTestId("admin-tab-cups").click();
+  await expect(page.getByTestId("cup-row-ucl")).toBeVisible();
+  await page.getByTestId("admin-tab-players").click();
+  await expect(page.locator(ROW).first()).toBeVisible();
+  await page.getByTestId("admin-tab-teams").click();
+  await expect(page.getByTestId("team-row-arsenal")).toBeVisible();
+
+  expect([...calls]).toEqual([...onLoad]);
+});
+
 test("선수 팝업과 팀 명단에서 소속을 옮긴다", async ({ page }) => {
   const serverErrors: string[] = [];
   page.on("response", (response) => {

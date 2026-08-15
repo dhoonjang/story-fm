@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ATTRIBUTE_AXES } from "./player";
+import { ATTRIBUTE_AXES, AXIS_KO } from "./player";
 
 /**
  * 일정 축 (v6) — 경기·훈련·이적창·컵 추첨이 날짜+시간의 단일 축에 등록된다.
@@ -157,6 +157,16 @@ export type MatchRecord = z.infer<typeof MatchRecordSchema>;
  */
 export const TrainAttrSchema = z.enum([...ATTRIBUTE_AXES, "tactical", "recovery"]);
 export type TrainAttr = z.infer<typeof TrainAttrSchema>;
+
+/**
+ * 훈련 대상의 표기 — 화면과 결산이 같은 이름을 쓴다.
+ * `AXIS_KO`만으로는 능력치 밖의 둘(tactical·recovery)이 영어 id 그대로 샌다.
+ */
+export const TRAIN_ATTR_KO: Record<TrainAttr, string> = {
+  ...AXIS_KO,
+  tactical: "전술",
+  recovery: "회복",
+};
 
 /** 훈련 세션 (TRAINING_SESSION) — 자유서술 label + 코어가 쓰는 focus */
 export const TrainingSessionSchema = z.object({

@@ -8,7 +8,6 @@ import {
   AXIS_GROUP_KO,
   AXIS_KO,
   CHIP_SIZE,
-  FAMILIARITY_BASELINE,
   anchorOf,
   conditionLabel,
   clampToBoard,
@@ -31,6 +30,7 @@ import {
 import type { GamePayload, GameSlice } from "@/lib/store";
 import type { MatchBoardOrder } from "@/lib/match-orders";
 import { slotOverallOf } from "@/lib/slot-overall";
+import { scheduleRowOf, type CalRowIcon, type CalScheduleRow } from "@/lib/calendar-detail";
 import {
   familiarityForRole,
   lineupBody,
@@ -1075,11 +1075,11 @@ export function SquadView({
          * 시점을 가리킨다** (player.md §7.2).
          *
          * ⚠️ **배치가 없던 선수는 아침 값부터 다르다.** 코어는 배치되는 순간
-         * `min(기준선, 팀 적응도)`로 잡는다(`newcomerFamiliarity`) — 뷰가 주는 기준선
-         * 60을 그대로 쓰면 판에 올린 직후엔 60이었다가 저장 응답에서 혼자 내려앉는다.
+         * 선반(2군·예비를 다녀온 값)을 먼저 보고 없을 때만 `min(기준선, 팀 적응도)`를
+         * 준다 — 그 규칙은 뷰가 `familiarityIfSlotted`로 이미 매겨 준다. 화면이 다시
+         * 계산하면 돌아온 주전을 60으로 예고했다가 저장 응답에서 혼자 튄다.
          */
-        const morning =
-          p.role === "스쿼드" ? Math.min(FAMILIARITY_BASELINE, squad.familiarity) : p.familiarity;
+        const morning = p.role === "스쿼드" ? p.familiarityIfSlotted : p.familiarity;
         const familiarity =
           code && role ? familiarityForRole({ ...p, familiarity: morning }, code, role) : morning;
         return {
@@ -1091,7 +1091,7 @@ export function SquadView({
           adaptation: adaptationOf(fit, familiarity, code ?? p.assignedPosition ?? p.position),
         };
       }),
-    [players, board.occupants, board.points, board.roles, squad.familiarity],
+    [players, board.occupants, board.points, board.roles],
   );
 
   /** 감독이 고른 세부 역할의 지문 — 명단 표를 다시 그릴지 가리는 값 */
@@ -2108,13 +2108,19 @@ type CalEntry = OfficeViews["calendar"]["entries"][number];
 type CalEvent = OfficeViews["calendar"]["events"][string][number];
 
 /**
+ * 일지 **와 일정**의 아이콘 — 한 패널 안에서 위아래 블록이 같은 도형을 쓴다.
+ * 그래서 `추첨`처럼 일정에만 있는 종류가 여기 함께 산다.
+ */
+type IconKind = CalEvent["kind"] | CalRowIcon;
+
+/**
  * 일지 아이콘 — **도형으로 그린다.**
  *
  * 예전엔 이모지(🏋️ 📈 🩹…)를 문자열 앞에 붙였다. 플랫폼마다 모양·너비·색이 달라
  * 줄이 흔들리고, 흑백 UI 위에서 혼자 알록달록해 시선을 뺏는다. 같은 굵기의 선으로
  * 그리면 글자와 함께 읽히고, 색은 뜻이 있을 때만(경고·퇴장·부상) 쓴다.
  */
-function EventIcon({ kind }: { kind: CalEvent["kind"] }) {
+function EventIcon({ kind }: { kind: IconKind }) {
   const line = {
     fill: "none",
     stroke: "currentColor",
@@ -2122,7 +2128,7 @@ function EventIcon({ kind }: { kind: CalEvent["kind"] }) {
     strokeLinecap: "round" as const,
     strokeLinejoin: "round" as const,
   };
-  const shapes: Record<CalEvent["kind"], React.ReactNode> = {
+  const shapes: Record<IconKind, React.ReactNode> = {
     match: (
       <>
         <circle cx="8" cy="8" r="5.6" {...line} />
@@ -2158,11 +2164,53 @@ function EventIcon({ kind }: { kind: CalEvent["kind"] }) {
         <path d="M8 3.6v8.8" {...line} />
       </>
     ),
+    // 추첨 — 둘이 만나 하나가 되는 대진표
+    draw: (
+      <>
+        <path d="M3 4.8h3M3 11.2h3" {...line} />
+        <path d="M6 4.8v6.4" {...line} />
+        <path d="M6 8h7" {...line} />
+      </>
+    ),
   };
   return (
     <svg className={`ev-icon ev-${kind}`} viewBox="0 0 16 16" aria-hidden>
       {shapes[kind]}
     </svg>
+  );
+}
+
+const VENUE_KO = { home: "홈", away: "원정", neutral: "중립" } as const;
+
+/**
+ * 일정 한 줄 — 종류가 **읽지 않고도** 갈린다.
+ * 아이콘은 일지와 같은 체계, 대회 칩은 달력 칸의 경기 칩(`cal-fx-comp`)과 같은 색,
+ * 승패는 달력 칸과 같은 세 가지 색이다. 한 패널이 세 가지 말을 하지 않도록.
+ */
+function ScheduleRow({ row }: { row: CalScheduleRow }) {
+  return (
+    <div
+      className={`cal-sched k-${row.icon}${row.pending ? " pending" : ""}${row.next ? " next" : ""}`}
+      data-testid={`cal-sched-${row.icon}`}
+    >
+      <span className="cal-sched-time">{row.time}</span>
+      <EventIcon kind={row.icon} />
+      <div className="cal-sched-body">
+        {row.competition && <span className="cal-sched-comp">{row.competition}</span>}
+        {row.stage && <span className="cal-sched-stage">{row.stage}</span>}
+        {row.venue && <span className={`cal-sched-venue ${row.venue}`}>{VENUE_KO[row.venue]}</span>}
+        <span className="cal-sched-name">{row.name}</span>
+        {row.tags.map((t) => (
+          <span className="cal-sched-tag" key={t}>
+            {t}
+          </span>
+        ))}
+        {row.result && (
+          <span className={`cal-detail-result${row.win ? ` r-${row.win}` : ""}`}>{row.result}</span>
+        )}
+      </div>
+      {row.note && <div className="cal-sched-note">{row.note}</div>}
+    </div>
   );
 }
 
@@ -2260,13 +2308,7 @@ export function CalendarView({ calendar }: { calendar: OfficeViews["calendar"] }
         <div className="cal-detail-block">
           <div className="cal-detail-title">일정</div>
           {detail.entries.map((e) => (
-            <div className="cal-detail-sub" key={e.id}>
-              {e.time} · {e.title}
-              {e.detail ? ` — ${e.detail}` : ""}
-              {/* 훈련 성과는 아래 "기록"이 접었다 펼치며 말한다 — 여기서 또 쓰면
-                  같은 화면이 같은 말을 두 번 한다. 경기 스코어는 여기가 유일하다 */}
-              {e.result && e.type !== "training" ? ` · ${e.result}` : ""}
-            </div>
+            <ScheduleRow row={scheduleRowOf(e)} key={e.id} />
           ))}
         </div>
       )}

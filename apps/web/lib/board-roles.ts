@@ -153,10 +153,11 @@ const clampFamiliarity = (x: number) => Math.max(0, Math.min(FAMILIARITY_MAX, x)
 /**
  * 대가를 재는 기준 — 그날 아침의 역할과 이미 치른 값.
  *
- * ⚠️ **자리를 옮기면 코어가 흔적을 버린다** (`setLineup`의 `keepMemo`). 장부의 기준은
- * (선수·자리·오늘)이라 **자리가 그대로면 벤치를 다녀와도 이어지고**, 자리가 바뀌면
- * 버린다. 화면이 옛 자리의 `paid`를 물리면 서버가 하지 않는 환불을 하고, 벤치 행의
- * 흔적을 놓치면 같은 날 내렸다 되돌린 결정에 값을 두 번 물린 것처럼 보인다.
+ * ⚠️ **아침의 자리에서만 흔적을 쓴다.** 장부의 기준은 (선수·오늘)이라 벤치를
+ * 다녀와도 자리를 옮겨도 이어지지만, 코어는 **아침의 자리에서만** 아침의 역할과
+ * 견주고 나머지 자리에서는 낸 값을 되돌린다(`settleRoleCost` → player.md §7.2).
+ * 뷰가 그 자리의 행에만 `roleToday`를 실어 주므로 여기서는 자리만 맞춰 보면 된다.
+ * 벤치 행의 흔적을 놓치면 같은 날 내렸다 되돌린 결정에 값을 두 번 물린 것처럼 보인다.
  */
 function roleBasisOf(
   p: Pick<SquadRow, "roleId" | "roleMemory" | "roleToday" | "assignedPosition">,
