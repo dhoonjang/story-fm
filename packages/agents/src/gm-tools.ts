@@ -107,6 +107,22 @@ const SLOT_ENUM = { type: "string", enum: ["am", "pm"] } as const;
 const FOCUS_ARRAY = { type: "array", items: { type: "string", enum: [...TRAIN_FOCUS] } } as const;
 
 /**
+ * **훈련 이름** — 달력에 걸리는 세션 제목이지 감독의 말이 아니다.
+ *
+ * 상한도 설명도 없던 때는 감독 발화가 통째로 실려("응 그리고 훈련 싹다 갈아엎자
+ * 체력 훈련 싹 지우고, 패스 훈련에 집중하") 그 문장이 요일마다 되풀이됐다.
+ */
+const TRAINING_LABEL = 40;
+
+const LABEL_ARG = {
+  type: "string",
+  description: `훈련 이름 — 감독의 말이 아니라 달력에 걸릴 제목 (예: 압박 전환 · 세트피스). ${TRAINING_LABEL}자까지`,
+  maxLength: TRAINING_LABEL,
+} as const;
+
+const labelSchema = z.string().min(1).max(TRAINING_LABEL);
+
+/**
  * 훈련 지정의 입력 — `set_training`만 도구 spec을 직접 만들어 쓰므로(기록을 둘로
  * 나눈다) 스키마가 모듈 상수로 올라와 있다.
  */
@@ -116,7 +132,7 @@ const TRAINING_INPUT = z
       z.object({
         date: z.string(),
         slot: z.enum(["am", "pm"]),
-        label: z.string().min(1),
+        label: labelSchema,
         focus: z.array(z.enum(TRAIN_FOCUS)),
       }),
     ),
@@ -124,7 +140,7 @@ const TRAINING_INPUT = z
       z.object({
         dow: z.number().int().min(0).max(6),
         slot: z.enum(["am", "pm"]),
-        label: z.string().min(1),
+        label: labelSchema,
         focus: z.array(z.enum(TRAIN_FOCUS)),
       }),
     ),
@@ -444,7 +460,7 @@ export function buildGmTools(
             type: "array",
             items: {
               type: "object",
-              properties: { date: str, slot: SLOT_ENUM, label: str, focus: FOCUS_ARRAY },
+              properties: { date: str, slot: SLOT_ENUM, label: LABEL_ARG, focus: FOCUS_ARRAY },
               required: ["date", "slot", "label", "focus"],
             },
           },
@@ -455,7 +471,7 @@ export function buildGmTools(
               properties: {
                 dow: int(0, 6),
                 slot: SLOT_ENUM,
-                label: str,
+                label: LABEL_ARG,
                 focus: FOCUS_ARRAY,
               },
               required: ["dow", "slot", "label", "focus"],
