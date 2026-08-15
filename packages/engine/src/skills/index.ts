@@ -1011,17 +1011,13 @@ export function setPlayerRole(
   assignment.familiarity = clampFamiliarity(before - (cost - memo.paid));
   assignment.roleMemo = { ...memo, paid: cost };
 
-  const moved = Math.round(before) - Math.round(assignment.familiarity);
-  return {
-    ok: true,
-    message:
-      `${player.name} ${assignment.position} 역할 → ${def.ko}` +
-      (moved > 0
-        ? ` (전술 적응도 −${moved} — 하는 일이 달라진다)`
-        : moved < 0
-          ? ` (전술 적응도 +${-moved} — 원래 하던 일로 돌아왔다)`
-          : ""),
-  };
+  /**
+   * 결과는 **무엇을 시키기로 했는지**만 말한다 (player.md §7.2). 적응도 증감을
+   * 붙이면 역할 선택이 가장 싼 역할 고르기가 된다 — 하루면 기준이 다시 잡히는
+   * 값이라 그 대가가 화면에서 가장 눈에 띌 이유가 없다. 명단의 적응도 게이지가
+   * 지금 상태를 말한다.
+   */
+  return { ok: true, message: `${player.name} ${assignment.position} 역할 → ${def.ko}` };
 }
 
 export function setPlayerPosition(
