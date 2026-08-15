@@ -232,8 +232,11 @@ function ToolDetail({ call }: { call: ToolCallRecord }) {
       {brief.items.length > 0 && (
         <div className="tool-lines">
           {brief.items.map((item, i) => (
+            // 알약 하나가 항목 하나 — 이름은 흐리게 앞, 값은 또렷하게, 갈래는 뒤에
             <span className="tool-item" key={i}>
-              {splitValue(item)}
+              {item.label !== undefined && <em>{item.label}</em>}
+              {splitValue(item.text)}
+              {item.note !== undefined && <i>{item.note}</i>}
             </span>
           ))}
         </div>

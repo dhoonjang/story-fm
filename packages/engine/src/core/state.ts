@@ -114,11 +114,27 @@ export interface PendingEdit {
  * ⚠️ **항목 하나는 한 줄에 든다.** 건수와 갈래까지만 적고, LLM이 쓴 자유 문장은
  * 싣지 않는다 (그 문장은 장면과 서사 로그에 이미 있다).
  */
+/**
+ * 항목 하나 — **값과 갈래를 갈라 낸다.**
+ *
+ * 붙여 쓰면(`매주 5회 × 6주 — 패스·시야`) 화면이 그걸 되쪼개야 하고, 안 쪼개면
+ * 값도 갈래도 같은 굵기로 눌려 무엇이 바뀌었는지가 안 읽힌다. 무엇을 강조할지는
+ * 화면이 정하되 **어디까지가 값인지는 코어만 안다** — 그래서 코어가 나눠 낸다.
+ */
+export interface SkillBriefItem {
+  /** 무엇에 대한 것인가 — 한 톤 낮춰 **앞에** 선다 (`선발 투입`, `포메이션`) */
+  label?: string;
+  /** 바뀐 값 — 항목에서 가장 또렷한 자리 (`김민재 외 2명`, `4-4-2 → 4-3-3`) */
+  text: string;
+  /** 그 값의 갈래·부연 — 한 톤 낮춰 **뒤에** 선다 (`패스·시야`, `적응도 62`) */
+  note?: string;
+}
+
 export interface SkillBrief {
   /** 무엇을 했나 — 스킬 이름값의 짧은 머리줄 (`라인업 확정`) */
   head: string;
   /** 무엇이 바뀌었나 — 각 항목이 말풍선 한 줄이다 */
-  items: string[];
+  items: SkillBriefItem[];
 }
 
 export interface ToolCallRecord {
@@ -1363,7 +1379,8 @@ function memoFit(preferred?: ReadonlySet<string>): (p: GamePlayer, slot: string)
     if (v === undefined) {
       // 적응도는 한 번만 — `fillSlots`가 쌍 교환을 세 번 돌며 이 함수를 수만 번 부른다
       const prof = proficiencyAt(p, slot);
-      v = lineupFit(p, slot, prof) + (preferred?.has(p.id) && prof >= XI_BONUS_FLOOR ? XI_BONUS : 0);
+      v =
+        lineupFit(p, slot, prof) + (preferred?.has(p.id) && prof >= XI_BONUS_FLOOR ? XI_BONUS : 0);
       cache.set(key, v);
     }
     return v;

@@ -37,6 +37,7 @@ import {
   userTactics,
   groupOf,
   type GameState,
+  type SkillBriefItem,
   squadReturnOf,
   addDays,
 } from "@story-fm/engine";
@@ -957,8 +958,10 @@ describe("서사 이벤트 — 체력·폼만, 한도 내 (overview §7)", () =>
  * ③ 달력·대회 화면이 이미 가진 자세한 내용을 옮겨 적지 않는다.
  */
 describe("스킬 요약 — 화면이 세우는 항목", () => {
+  /** 항목을 사람이 읽는 한 줄로 — 앞 이름 · 값 · 뒤 갈래 */
+  const flat = (i: SkillBriefItem) => [i.label, i.text, i.note].filter(Boolean).join(" ");
   /** 항목 하나가 말풍선 한 줄에 드는가 — 이름이 붙는 항목은 이름만큼 더 준다 */
-  const oneLine = (item: string) => expect(item.length).toBeLessThanOrEqual(24);
+  const oneLine = (i: SkillBriefItem) => expect(flat(i).length).toBeLessThanOrEqual(24);
 
   it("훈련: 요일 반복은 하나로 묶여 건수 × 주 수 + 갈래만 남는다", () => {
     const state = createTestGame();
@@ -972,9 +975,9 @@ describe("스킬 요약 — 화면이 세우는 항목", () => {
     });
     expect(res.ok).toBe(true);
     expect(res.brief?.head).toBe("훈련 지정");
-    expect(res.brief?.items).toEqual(["매주 3회 × 6주 — 태클·위치선정 외 1"]);
+    expect(res.brief?.items).toEqual([{ text: "매주 3회 × 6주", note: "태클·위치선정 외 1" }]);
     // 자유 label은 항목에 오르지 않는다 (상한이 없다) — 그 문장은 message로 GM에게 간다
-    expect(res.brief!.items.join(" ")).not.toContain("고강도");
+    expect(res.brief!.items.map(flat).join(" ")).not.toContain("고강도");
     expect(res.message).toContain("고강도");
     res.brief!.items.forEach(oneLine);
   });
@@ -991,15 +994,18 @@ describe("스킬 요약 — 화면이 세우는 항목", () => {
     });
     expect(res.ok).toBe(true);
     const short = `${Number(day.slice(5, 7))}-${day.slice(8, 10)}`;
-    expect(res.brief?.items).toEqual([`${short} 오전 외 2건 — 회복·패스`]);
+    expect(res.brief?.items).toEqual([{ text: `${short} 오전 외 2건`, note: "회복·패스" }]);
     // 연도는 적지 않는다 — 어느 해인지는 달력이 갖고 있다
-    expect(res.brief!.items[0]).not.toContain(day.slice(0, 4));
+    expect(flat(res.brief!.items[0]!)).not.toContain(day.slice(0, 4));
     res.brief!.items.forEach(oneLine);
 
     const cleared = setTraining(state, { clear: { from: day, to: addDays(day, 2) } });
     expect(cleared.ok).toBe(true);
     expect(cleared.brief?.items).toHaveLength(1);
-    expect(cleared.brief!.items[0]).toMatch(/^\d+-\d\d~\d+-\d\d 훈련 \d+건 휴식$/);
+    expect(cleared.brief!.items[0]).toEqual({
+      label: "휴식",
+      text: expect.stringMatching(/^\d+-\d\d~\d+-\d\d \d+건$/),
+    });
     cleared.brief!.items.forEach(oneLine);
   });
 
@@ -1014,7 +1020,7 @@ describe("스킬 요약 — 화면이 세우는 항목", () => {
     expect(res.ok).toBe(true);
     expect(res.message).toContain("체력");
     expect(res.brief?.items).toHaveLength(1);
-    expect(res.brief!.items[0]).not.toContain("체력");
+    expect(flat(res.brief!.items[0]!)).not.toContain("체력");
     res.brief!.items.forEach(oneLine);
   });
 
@@ -1027,7 +1033,7 @@ describe("스킬 요약 — 화면이 세우는 항목", () => {
     }));
     // 아무것도 안 바꾼 저장도 항목 하나로 답한다 (화면이 message를 되쪼개지 않는다)
     const idle = setLineup(state, { starting: lineup, bench });
-    expect(idle.brief).toEqual({ head: "라인업 확정", items: ["바뀐 것 없음"] });
+    expect(idle.brief).toEqual({ head: "라인업 확정", items: [{ text: "바뀐 것 없음" }] });
 
     const spares = userPlayers(state)
       .filter(
@@ -1047,12 +1053,12 @@ describe("스킬 요약 — 화면이 세우는 항목", () => {
     const res = setLineup(state, { starting: swapped, bench });
     expect(res.ok).toBe(true);
     expect(res.brief?.head).toBe("라인업 확정");
-    const addedItem = res.brief!.items.find((i) => i.startsWith("선발 투입"))!;
-    expect(addedItem).toMatch(/^선발 투입 [^,]+, [^,]+ 외 1명$/);
+    const addedItem = res.brief!.items.find((i) => i.label === "선발 투입")!;
+    expect(addedItem.text).toMatch(/^[^,]+, [^,]+ 외 1명$/);
     // 이름 옆의 포지션 코드는 message에만 — 자리는 전술판이 그림으로 갖고 있다
     expect(res.message).toContain(`${spares[0]!.name} ${outs[0]!.position}`);
-    expect(addedItem).not.toContain(outs[0]!.position);
-    expect(res.brief!.items.find((i) => i.startsWith("선발 제외"))).toMatch(/외 1명$/);
+    expect(addedItem.text).not.toContain(outs[0]!.position);
+    expect(res.brief!.items.find((i) => i.label === "선발 제외")!.text).toMatch(/외 1명$/);
   });
 
   it("개인 전술: 자리·역할·지시가 항목 셋으로 끊기고 인용문이 없다", () => {
@@ -1073,12 +1079,16 @@ describe("스킬 요약 — 화면이 세우는 항목", () => {
     expect(res.ok).toBe(true);
     expect(res.brief?.head).toBe(playerById(state, cb.playerId)!.name);
     expect(res.brief?.items).toHaveLength(3);
-    // 자리 항목은 "(자리 적응도 62)"가 아니라 "(적응도 62)"까지만
-    expect(res.brief!.items[0]).toMatch(/^\S+ → LCB \((적응도 \d+|해 본 적 없음)\)$/);
-    expect(res.brief!.items[1]).toBe(`LCB 역할 → ${role.ko}`);
-    expect(res.brief!.items[2]).toBe("수비 위치 유지");
+    // 적응도는 값이 아니라 갈래다 — 값 뒤에 한 톤 낮춰 선다
+    expect(res.brief!.items[0]).toEqual({
+      label: "자리",
+      text: expect.stringMatching(/^\S+ → LCB$/),
+      note: expect.stringMatching(/^(적응도 \d+|해 본 적 없음)$/),
+    });
+    expect(res.brief!.items[1]).toEqual({ label: "LCB 역할", text: role.ko });
+    expect(res.brief!.items[2]).toEqual({ text: "수비 위치 유지" });
     // 감독의 말은 message로만 간다 — 항목에 실으면 길이에 상한이 없다
-    expect(res.brief!.items.join(" ")).not.toContain("라인을 지켜라");
+    expect(res.brief!.items.map(flat).join(" ")).not.toContain("라인을 지켜라");
     expect(res.message).toContain("라인을 지켜라");
     res.brief!.items.forEach(oneLine);
   });
@@ -1093,7 +1103,7 @@ describe("스킬 요약 — 화면이 세우는 항목", () => {
     expect(res.ok).toBe(true);
     expect(res.brief).toEqual({
       head: `${playerById(state, target.playerId)!.name} 개인 지시`,
-      items: ["말로만 전함 — 판에 반영되지 않음"],
+      items: [{ text: "말로만 전함", note: "판에 반영되지 않음" }],
     });
     res.brief!.items.forEach(oneLine);
   });
@@ -1110,9 +1120,12 @@ describe("스킬 요약 — 화면이 세우는 항목", () => {
     expect(res.ok).toBe(true);
     expect(res.brief?.head).toBe("서사 이벤트");
     expect(res.brief?.items).toEqual([
-      `${players[0]!.name}, ${players[1]!.name} 외 2명 — 컨디션 −2 · 폼 +1`,
+      {
+        text: `${players[0]!.name}, ${players[1]!.name} 외 2명`,
+        note: "컨디션 −2 · 폼 +1",
+      },
     ]);
-    expect(res.brief!.items.join(" ")).not.toContain("언쟁");
+    expect(res.brief!.items.map(flat).join(" ")).not.toContain("언쟁");
     expect(res.message).toContain("언쟁");
   });
 });

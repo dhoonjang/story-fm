@@ -164,6 +164,7 @@ row, 지난 일 = 그대로 이력.**
 | `chat` `ChatTurn` | 대화 이력 — `user`/`model`/`operator` | `core/state.ts` |
 | ↳ `ToolCallRecord` | 스킬 호출 — 요약·항목(`brief`)·카드 payload·톤·`silent`·장면 안 줄 위치 | `core/state.ts` |
 | ↳ `SkillBrief` | 화면이 세우는 요약 — 머리줄 + 항목. 없는 기록은 요약 문자열로 폴백 | `core/state.ts` |
+| ↳ `SkillBriefItem` | 항목 하나 — 이름(`label`) · 값(`text`) · 갈래(`note`). 화면이 자리마다 톤을 준다 | `core/state.ts` |
 | ↳ `GoalMark` `CardMark` | 그 턴의 골·카드 — 장부의 사건이지 중계 문장의 파싱이 아니다 | `core/state.ts` |
 | `pendingEdits` `PendingEdit` | 아직 GM이 읽지 않은 화면 조작 — 같은 키는 마지막 것만 | `core/state.ts` |
 | `pendingNews` | 아직 GM이 읽지 않은 경기 밖 소식 — 결산이 함께 굴린 재정·다른 경기 | `core/state.ts` |

@@ -71,6 +71,7 @@ import {
   MATCHDAY_BENCH,
   type GameState,
   type SkillBrief,
+  type SkillBriefItem,
 } from "../core/state";
 
 /**
@@ -464,6 +465,16 @@ const briefNames = (names: readonly string[]): string =>
 const signed = (n: number): string => (n < 0 ? `−${Math.abs(n)}` : `+${n}`);
 
 /**
+ * 말풍선 항목 하나 — **앞의 이름(`label`) · 값(`text`) · 뒤의 갈래(`note`).**
+ * 빈 조각은 달지 않는다 (없는 키와 빈 문자열이 화면에서 달리 그려지지 않게).
+ */
+const item = (parts: { label?: string; text: string; note?: string }): SkillBriefItem => ({
+  ...(parts.label ? { label: parts.label } : {}),
+  text: parts.text,
+  ...(parts.note ? { note: parts.note } : {}),
+});
+
+/**
  * 배치가 **실제로 바꾼 것** — 포메이션 · 들고 나감 · 자리 이동.
  *
  * "라인업을 확정했습니다"는 감독이 이미 아는 것만 말한다. 무엇이 달라졌는지는
@@ -476,7 +487,7 @@ function lineupChanges(
   state: GameState,
   prev: ReadonlyMap<string, TacticAssignment>,
   next: readonly TacticAssignment[],
-): { notes: string[]; items: string[] } {
+): { notes: string[]; items: SkillBriefItem[] } {
   const nameOf = (id: string) => playerName(state, id);
   const was = [...prev.values()].filter((a) => a.role === "starting");
   const now = next.filter((a) => a.role === "starting");
@@ -484,17 +495,19 @@ function lineupChanges(
   // 앞선 배치가 없다면(첫 편성) 견줄 것이 없다 — 지금의 모양만 말한다
   if (was.length === 0) {
     const shape = shapeOf(now.map(pointOf));
-    return { notes: [`선발 ${now.length}명 편성 · ${shape}`], items: [`선발 편성 ${shape}`] };
+    return {
+      notes: [`선발 ${now.length}명 편성 · ${shape}`],
+      items: [item({ label: "선발 편성", text: shape })],
+    };
   }
 
   const notes: string[] = [];
-  const items: string[] = [];
+  const items: SkillBriefItem[] = [];
   const shapeBefore = shapeOf(was.map(pointOf));
   const shapeAfter = shapeOf(now.map(pointOf));
   if (shapeBefore !== shapeAfter) {
-    const line = `포메이션 ${shapeBefore} → ${shapeAfter}`;
-    notes.push(line);
-    items.push(line);
+    notes.push(`포메이션 ${shapeBefore} → ${shapeAfter}`);
+    items.push(item({ label: "포메이션", text: `${shapeBefore} → ${shapeAfter}` }));
   }
 
   const startedBefore = new Set(was.map((a) => a.playerId));
@@ -504,12 +517,14 @@ function lineupChanges(
   if (added.length > 0) {
     notes.push(`선발 투입 ${nameList(added.map((a) => `${nameOf(a.playerId)} ${a.position}`))}`);
     // 항목에는 포지션 코드를 붙이지 않는다 — 누가 어디에 섰는지는 전술판이 그림으로 갖고 있다
-    items.push(`선발 투입 ${briefNames(added.map((a) => nameOf(a.playerId)))}`);
+    items.push(
+      item({ label: "선발 투입", text: briefNames(added.map((a) => nameOf(a.playerId))) }),
+    );
   }
   if (gone.length > 0) {
     const names = gone.map((a) => nameOf(a.playerId));
     notes.push(`선발 제외 ${nameList(names)}`);
-    items.push(`선발 제외 ${briefNames(names)}`);
+    items.push(item({ label: "선발 제외", text: briefNames(names) }));
   }
 
   /**
@@ -528,7 +543,7 @@ function lineupChanges(
     // 한 명이면 어디서 어디로까지 한 줄에 든다. 여럿이면 이름만 — 자리는 판이 보여준다
     const one = moves[0]!;
     const many = briefNames(moved.map((a) => nameOf(a.playerId)));
-    items.push(`자리 이동 ${moved.length === 1 ? one : many}`);
+    items.push(item({ label: "자리 이동", text: moved.length === 1 ? one : many }));
   }
 
   if (notes.length > 0) return { notes, items };
@@ -538,7 +553,7 @@ function lineupChanges(
   const sameSquad =
     squadBefore.size === squadNow.size && [...squadNow].every((id) => squadBefore.has(id));
   const line = sameSquad ? "바뀐 것 없음" : "벤치 명단 조정";
-  return { notes: [line], items: [line] };
+  return { notes: [line], items: [item({ text: line })] };
 }
 
 /**
@@ -752,8 +767,12 @@ export function setLineup(
     if (!res.ok) return res;
   }
   const items = [...changes.items];
-  if (levelMoved.first.length > 0) items.push(`1군 승격 ${briefNames(levelMoved.first)}`);
-  if (levelMoved.reserve.length > 0) items.push(`2군 이동 ${briefNames(levelMoved.reserve)}`);
+  if (levelMoved.first.length > 0) {
+    items.push(item({ label: "1군 승격", text: briefNames(levelMoved.first) }));
+  }
+  if (levelMoved.reserve.length > 0) {
+    items.push(item({ label: "2군 이동", text: briefNames(levelMoved.reserve) }));
+  }
   return {
     ok: true,
     message: `라인업 확정 — ${[...changes.notes, ...levelNotes].join(" · ")}`,
@@ -845,7 +864,7 @@ export function setPlayerTactic(
 ): SkillResult {
   const notes: string[] = [];
   /** 항목은 하위 스킬이 각자 낸 것을 잇는다 — 세 조각이 한 줄로 엉키지 않게 */
-  const items: string[] = [];
+  const items: SkillBriefItem[] = [];
   const take = (res: SkillResult) => {
     notes.push(res.message);
     items.push(...(res.brief?.items ?? []));
@@ -963,8 +982,14 @@ export function movePlayerSlot(
       (fit === null ? " (해 본 적 없는 자리입니다)" : ` (자리 적응도 ${fit})`),
     brief: {
       head: player.name,
-      // 머리줄이 이미 이름을 들고 있다 — 항목은 자리만
-      items: [`${before} → ${code}` + (fit === null ? " (해 본 적 없음)" : ` (적응도 ${fit})`)],
+      // 머리줄이 이미 이름을 들고 있다 — 항목은 자리만, 적응도는 갈래로 뒤에
+      items: [
+        item({
+          label: "자리",
+          text: `${before} → ${code}`,
+          note: fit === null ? "해 본 적 없음" : `적응도 ${fit}`,
+        }),
+      ],
     },
   };
 }
@@ -1100,7 +1125,10 @@ export function setPlayerRole(
   return {
     ok: true,
     message: `${player.name} ${assignment.position} 역할 → ${def.ko}`,
-    brief: { head: player.name, items: [`${assignment.position} 역할 → ${def.ko}`] },
+    brief: {
+      head: player.name,
+      items: [item({ label: `${assignment.position} 역할`, text: def.ko })],
+    },
   };
 }
 
@@ -1512,7 +1540,7 @@ export function setPlayerInstruction(
       // 긴 안내는 모델 몫이다 — 감독이 알아야 할 것은 "판에 안 닿았다" 하나
       brief: {
         head: `${player.name} 개인 지시`,
-        items: ["말로만 전함 — 판에 반영되지 않음"],
+        items: [item({ text: "말로만 전함", note: "판에 반영되지 않음" })],
       },
     };
   }
@@ -1525,7 +1553,12 @@ export function setPlayerInstruction(
      */
     brief: {
       head: `${player.name} 개인 지시`,
-      items: [`${PLAYER_DIRECTIVE_KO[input.kind]}${targetNote}`],
+      items: [
+        item({
+          text: PLAYER_DIRECTIVE_KO[input.kind],
+          ...(target ? { note: `겨냥 ${target.name}` } : {}),
+        }),
+      ],
     },
   };
 }
@@ -1583,7 +1616,7 @@ function briefFocus(focus: Iterable<TrainAttr>): string {
   const kinds = [...new Set(focus)].map((f) => TRAIN_ATTR_KO[f] ?? f);
   if (kinds.length === 0) return "";
   const shown = kinds.slice(0, FOCUS_SHOWN).join("·");
-  return ` — ${shown}${kinds.length > FOCUS_SHOWN ? ` 외 ${kinds.length - FOCUS_SHOWN}` : ""}`;
+  return `${shown}${kinds.length > FOCUS_SHOWN ? ` 외 ${kinds.length - FOCUS_SHOWN}` : ""}`;
 }
 
 /** 미래(오늘 포함) 예정 훈련 엔트리만 조작 대상 — 지난 훈련은 이력이다 */
@@ -1695,7 +1728,7 @@ export function setTraining(state: GameState, input: TrainingPlanInput): SkillRe
    * 알림이 달력 화면을 옮겨 적는 자리가 된다. 조기 소집 대가·휴가 건너뜀은
    * `message`에 남아 GM이 장면으로 푼다.
    */
-  const items: string[] = [];
+  const items: SkillBriefItem[] = [];
 
   /**
    * 1) 비우기 먼저 — "월요일 훈련 다 지우고 새로" 같은 지시를 한 번에 처리.
@@ -1766,9 +1799,13 @@ export function setTraining(state: GameState, input: TrainingPlanInput): SkillRe
   if (firstDated) {
     // 날짜 세션은 첫 자리 + 나머지 건수로 접는다 — 어느 날 무엇을 하는지는 달력이 갖고 있다
     items.push(
-      `${briefDate(firstDated.date)} ${slotKo(firstDated.slot)}` +
-        (dated.length > 1 ? ` 외 ${dated.length - 1}건` : "") +
-        briefFocus(datedFocus),
+      // 이름표를 달지 않는다 — `9-03 오전`도 `매주 3회`도 어느 갈래인지를 값이 이미 말한다
+      item({
+        text:
+          `${briefDate(firstDated.date)} ${slotKo(firstDated.slot)}` +
+          (dated.length > 1 ? ` 외 ${dated.length - 1}건` : ""),
+        note: briefFocus(datedFocus),
+      }),
     );
   }
 
@@ -1805,7 +1842,12 @@ export function setTraining(state: GameState, input: TrainingPlanInput): SkillRe
     for (const f of r.focus) repeatFocus.add(f);
   }
   if (repeatPerWeek > 0) {
-    items.push(`매주 ${repeatPerWeek}회 × ${repeatWeeks}주${briefFocus(repeatFocus)}`);
+    items.push(
+      item({
+        text: `매주 ${repeatPerWeek}회 × ${repeatWeeks}주`,
+        note: briefFocus(repeatFocus),
+      }),
+    );
   }
 
   state.schedule = sortEntries(state.schedule);
@@ -1906,7 +1948,12 @@ export function clearTraining(state: GameState, input: ClearTrainingInput): Skil
       : `${span} 훈련 ${targets.length}건 취소 — 기본 훈련이 다시 편성됩니다`,
     brief: {
       head: "훈련 비우기",
-      items: [`${briefSpan} 훈련 ${targets.length}건 ${asRest ? "휴식" : "취소"}`],
+      items: [
+        item({
+          label: asRest ? "휴식" : "취소",
+          text: `${briefSpan} ${targets.length}건`,
+        }),
+      ],
     },
   };
 }
@@ -1967,7 +2014,7 @@ export function applyNarrativeEvent(
   return {
     ok: true,
     message: `서사 이벤트 반영(${touched.join(", ")}) — ${input.note}`,
-    brief: { head: "서사 이벤트", items: [`${briefNames(touched)} — ${moved}`] },
+    brief: { head: "서사 이벤트", items: [item({ text: briefNames(touched), note: moved })] },
   };
 }
 

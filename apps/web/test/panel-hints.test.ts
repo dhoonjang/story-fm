@@ -65,14 +65,17 @@ describe("항목으로 서는 말풍선", () => {
           summary: "라인업 확정 — 포메이션 4-4-2 → 4-3-3 · 선발 투입 김민재 외 2명",
           brief: {
             head: "라인업 확정",
-            items: ["포메이션 4-4-2 → 4-3-3", "선발 투입 김민재 외 2명"],
+            items: [
+              { label: "포메이션", text: "4-4-2 → 4-3-3" },
+              { label: "선발 투입", text: "김민재 외 2명" },
+            ],
           },
         },
       ]),
     ]);
     expect(hints[0]!.lines).toEqual([
-      { skill: "set_lineup", head: "라인업 확정", text: "포메이션 4-4-2 → 4-3-3" },
-      { skill: "set_lineup", text: "선발 투입 김민재 외 2명", cont: true },
+      { skill: "set_lineup", head: "라인업 확정", label: "포메이션", text: "4-4-2 → 4-3-3" },
+      { skill: "set_lineup", label: "선발 투입", text: "김민재 외 2명", cont: true },
     ]);
   });
 
@@ -82,7 +85,10 @@ describe("항목으로 서는 말풍선", () => {
         {
           name: "set_lineup",
           summary: "라인업 확정",
-          brief: { head: "라인업 확정", items: ["A", "B", "C", "D"] },
+          brief: {
+            head: "라인업 확정",
+            items: [{ text: "A" }, { text: "B" }, { text: "C" }, { text: "D" }],
+          },
         },
       ]),
     ]);
@@ -105,12 +111,37 @@ describe("항목으로 서는 말풍선", () => {
         {
           name: "set_tactics",
           summary: "전술 변경 — 4-2-3-1 (전술 적응도 +20, 익혀 둔 전술)",
-          brief: { head: "전술 변경", items: ["4-2-3-1 (전술 적응도 +20)"] },
+          brief: { head: "전술 변경", items: [{ text: "4-2-3-1 (전술 적응도 +20)" }] },
         },
       ]),
     ]);
+    // 끝 괄호를 사족으로 떼는 것은 옛 기록의 폴백 경로뿐이다 — 항목은 코어가 이미 갈라 냈다
     expect(hints[0]!.lines[0]!.text).toBe("4-2-3-1 (전술 적응도 +20)");
     expect(hints[0]!.lines[0]!.note).toBeUndefined();
+  });
+
+  it("갈래는 값과 갈라져 실린다 — 화면이 줄표를 다시 찾지 않는다", () => {
+    const hints = panelHintsOf([
+      turn([
+        {
+          name: "set_training",
+          summary: "훈련 지정 — 매주 월요일 오전=압박 전환(패스·시야) × 6주",
+          brief: {
+            head: "훈련 지정",
+            items: [{ label: "반복", text: "매주 3회 × 6주", note: "패스·시야" }],
+          },
+        },
+      ]),
+    ]);
+    expect(hints[0]!.lines).toEqual([
+      {
+        skill: "set_training",
+        head: "훈련 지정",
+        label: "반복",
+        text: "매주 3회 × 6주",
+        note: "패스·시야",
+      },
+    ]);
   });
 
   it("옛 기록은 항목이 없다 — 지금까지처럼 요약 첫 줄이 선다", () => {

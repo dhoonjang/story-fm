@@ -371,7 +371,7 @@ async function runRealGmTurn(
       calls.push({
         name: "finalize_match",
         summary: digest.ours.join(" · "),
-        brief: { head: "경기 종료", items: digest.ours },
+        brief: { head: "경기 종료", items: digest.ours.map((text) => ({ text })) },
       });
       pushNews(state, [...digest.finance, ...digest.others]);
       // 평점 — 코어 앵커 위에 LLM이 입체를 더한다. 실패해도 앵커가 남는다
