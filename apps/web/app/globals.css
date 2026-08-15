@@ -212,31 +212,11 @@ textarea {
   overflow: visible;
 }
 /* 선은 판이 커져도 굵어지지 않는다 — 굵기는 화면 픽셀로 잰다 */
-.league-ring polygon,
-.league-ring circle {
+.league-ring polygon {
   vector-effect: non-scaling-stroke;
   fill: none;
-}
-.ring-edge {
   stroke: var(--border-soft);
   stroke-width: 1;
-}
-/* 한가운데는 부임이 놓일 자리 — 고리와 잇지 않는다. 비어 있는 것이 그 자리다 */
-.league-ring .ring-hub {
-  stroke: var(--border-soft);
-  stroke-width: 1;
-  fill: none;
-}
-.ring-hub-label {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  color: var(--muted);
-  font-size: var(--fs-sm);
-  letter-spacing: 0.3em;
-  text-indent: 0.3em;
-  pointer-events: none;
 }
 .league-node {
   position: absolute;

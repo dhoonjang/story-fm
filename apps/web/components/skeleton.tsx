@@ -42,7 +42,7 @@ export function LeagueRingSkeleton() {
   return (
     <div className="league-ring" role="status" aria-label="리그 목록 불러오는 중">
       <svg viewBox="0 0 100 100" aria-hidden>
-        <polygon className="ring-edge" points={ringPolygon(points)} />
+        <polygon points={ringPolygon(points)} />
       </svg>
       {points.map((p, i) => (
         <div

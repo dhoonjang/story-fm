@@ -171,17 +171,13 @@ export default function NewGamePage() {
           ) : (
             /**
              * 리그는 목록이 아니라 **고리**다 — 리그가 정n각형의 꼭짓점에 서고
-             * 한가운데는 부임이 놓일 자리로 비워 둔다. 어느 하나가 위가 아니라는
-             * 것을 배치가 말한다 (칸을 위아래로 쌓으면 첫 줄이 곧 서열로 읽힌다).
+             * 한가운데는 비어 있다. 어느 하나가 위가 아니라는 것을 배치가 말한다
+             * (칸을 위아래로 쌓으면 첫 줄이 곧 서열로 읽힌다).
              */
             <div className="league-ring" data-testid="league-ring">
               <svg viewBox="0 0 100 100" aria-hidden>
-                <polygon className="ring-edge" points={ringPolygon(ring)} />
-                <circle className="ring-hub" cx="50" cy="50" r="9" />
+                <polygon points={ringPolygon(ring)} />
               </svg>
-              <span className="ring-hub-label" aria-hidden>
-                부임
-              </span>
               {leagues.map((l, i) => (
                 <button
                   key={l.id}
