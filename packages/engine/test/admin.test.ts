@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { ATTRIBUTE_AXES, ageOf, naturalPositionOf, roleFit } from "@story-fm/domain";
 import {
+  leagueCatalog,
+  leagueName,
   teamCatalog,
+  teamCatalogById,
   adminAddCatalogPlayer,
   adminCatalog,
   adminMoveCatalogPlayer,
@@ -64,6 +67,29 @@ describe("카탈로그 조회", () => {
     expect(row.goalkeeping).toBeGreaterThan(0); // 전 선수 GK 축
     expect(teams[0]!.teamName).toBeTruthy();
     expect(teams[0]!.tier).toBeGreaterThanOrEqual(1);
+  });
+
+  it("팀마다 소속 리그를 함께 준다 — 팀을 고르는 화면이 리그로 묶는 근거다", () => {
+    const teams = adminCatalog();
+    for (const t of teams) {
+      expect(t.leagueId).toBe(teamCatalogById(t.teamId)!.leagueId);
+      expect(t.leagueName).toBe(leagueName(t.leagueId));
+      expect(t.leagueName).not.toBe(t.leagueId); // 코드가 아니라 표시명이다
+    }
+    // 무소속도 리그처럼 이름을 갖는다 — 방출이 그 팀으로 옮기는 것이라 고를 수 있어야 한다
+    expect(teams.find((t) => t.leagueId === "free")).toBeTruthy();
+  });
+
+  it("팀 순서가 리그별로 이어져 있다 — 화면은 바뀌는 자리마다 묶기만 하면 된다", () => {
+    const seen = new Set<string>();
+    let prev = "";
+    for (const t of adminCatalog()) {
+      if (t.leagueId === prev) continue;
+      expect(seen.has(t.leagueId)).toBe(false); // 한 리그가 두 번 끊겼다 나오지 않는다
+      seen.add(t.leagueId);
+      prev = t.leagueId;
+    }
+    expect(seen.size).toBe(leagueCatalog().length);
   });
 
   it("편집 전에는 '편집됨' 플래그가 꺼져 있다", () => {
