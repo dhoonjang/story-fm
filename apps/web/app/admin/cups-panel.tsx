@@ -1,21 +1,25 @@
 "use client";
 
-import { useCallback, useEffect, useState, type KeyboardEvent } from "react";
+import { useMemo, useState, type KeyboardEvent } from "react";
+import type { CatalogLayer } from "./catalog-store";
 import { DomesticCupModal, EuroCupModal } from "./cup-modal";
 import {
   DRAW_STYLE_KO,
   EUROPEAN_TICKET_KO,
   STAGE_KO,
+  type AdminLeagueRow,
   type CupCatalogEntry,
   type CupCatalogResponse,
   type DomesticCupEntry,
-  type LeagueCatalogResponse,
 } from "./types";
 
 /**
  * 컵 카탈로그 패널 — 유럽 대항전과 국내 컵을 **갈라서** 보여준다.
  * 두 대회군은 필드가 아예 달라(리그 페이즈 vs 순수 녹아웃) 한 표에 담으면
  * 절반이 빈 칸이 된다. 오버라이드 파일은 하나라 리셋만 함께 움직인다.
+ *
+ * 컵도 리그도 페이지가 받아 쥐고 내려준다 (`catalog-store.ts`) — 여기서 받지
+ * 않는다. 편집·리셋 응답은 `onApply`로 올려보내야 다른 층까지 함께 갱신된다.
  */
 
 type ModalTarget =
@@ -28,47 +32,31 @@ function slotSum(cup: CupCatalogEntry): number {
 }
 
 export function CupsPanel({
+  cups,
+  leagues,
+  onApply,
   onMessage,
   onError,
 }: {
+  cups: CatalogLayer<CupCatalogResponse>;
+  leagues: AdminLeagueRow[];
+  onApply: (data: CupCatalogResponse) => void;
   onMessage: (m: string | null) => void;
   onError: (e: string | null) => void;
 }) {
-  const [europe, setEurope] = useState<CupCatalogEntry[]>([]);
-  const [domestic, setDomestic] = useState<DomesticCupEntry[]>([]);
-  const [leagues, setLeagues] = useState<Array<{ id: string; name: string; playable: boolean }>>([]);
-  const [edited, setEdited] = useState(false);
   const [target, setTarget] = useState<ModalTarget | null>(null);
   const [busy, setBusy] = useState(false);
-  const [loaded, setLoaded] = useState(false);
 
-  const applyResponse = useCallback((data: CupCatalogResponse) => {
-    setEurope(data.europe ?? []);
-    setDomestic(data.domestic ?? []);
-    if (data.edited !== undefined) setEdited(data.edited);
-  }, []);
+  const europe = cups.data.europe;
+  const domestic = cups.data.domestic;
+  const edited = cups.data.edited ?? false;
+  const loaded = cups.loaded;
 
-  useEffect(() => {
-    fetch("/api/admin/catalog/cup")
-      .then((r) => r.json())
-      .then((d: CupCatalogResponse) => {
-        if (d.error) onError(d.error);
-        else applyResponse(d);
-        setLoaded(true);
-      })
-      .catch(() => {
-        onError("컵 카탈로그를 불러오지 못했습니다");
-        setLoaded(true);
-      });
-    fetch("/api/admin/catalog/league")
-      .then((r) => r.json())
-      .then((d: LeagueCatalogResponse) => {
-        setLeagues(
-          (d.leagues ?? []).map((l) => ({ id: l.id, name: l.name, playable: l.kind === "playable" })),
-        );
-      })
-      .catch(() => onError("리그 목록을 불러오지 못했습니다"));
-  }, [applyResponse, onError]);
+  /** 모달의 티켓 표는 리그 행 전체가 아니라 이름과 리그전 여부만 쓴다 */
+  const leagueOptions = useMemo(
+    () => leagues.map((l) => ({ id: l.id, name: l.name, playable: l.kind === "playable" })),
+    [leagues],
+  );
 
   async function resetCups() {
     if (!window.confirm("컵 편집을 모두 취소하고 시드 기본값으로 되돌릴까요? (대항전·국내 컵 함께)")) {
@@ -81,7 +69,7 @@ export function CupsPanel({
       const res = await fetch("/api/admin/catalog/cup", { method: "DELETE" });
       const data: CupCatalogResponse = await res.json();
       if (!res.ok) throw new Error(data.error ?? "되돌리기 실패");
-      applyResponse(data);
+      onApply(data);
       onMessage(data.message ?? null);
     } catch (e) {
       onError(e instanceof Error ? e.message : String(e));
@@ -237,9 +225,9 @@ export function CupsPanel({
       {target?.kind === "euro" && (
         <EuroCupModal
           cup={target.cup}
-          leagues={leagues}
+          leagues={leagueOptions}
           onSaved={(data) => {
-            applyResponse(data);
+            onApply(data);
             onMessage(data.message ?? null);
             setTarget(null);
           }}
@@ -250,7 +238,7 @@ export function CupsPanel({
         <DomesticCupModal
           cup={target.cup}
           onSaved={(data) => {
-            applyResponse(data);
+            onApply(data);
             onMessage(data.message ?? null);
             setTarget(null);
           }}
