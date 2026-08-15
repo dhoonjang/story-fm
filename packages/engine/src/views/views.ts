@@ -152,8 +152,9 @@ export interface FinanceFeedRow {
   category: string;
   categoryLabel: string;
   /**
-   * 한 건이면 원장 라벨 그대로. 접힌 줄이면 **항목명**(`매각 잔존가`) —
-   * 카테고리로만 묶인 줄(선수별 상각)은 빈 문자열이고, 카테고리 이름이 대신 말한다.
+   * **항목명** — 접힌 줄이면 `매각 잔존가`처럼 묶음을 부르는 이름, 한 건이면 원장
+   * 라벨. 카테고리로만 묶인 줄(선수별 상각)은 빈 문자열이고 카테고리 이름이 대신
+   * 말한다 — 같은 말을 한 행에 두 번 세우지 않는다.
    */
   label: string;
   /** 접힌 줄이면 묶음의 합계 */
@@ -170,11 +171,21 @@ const FINANCE_FEED_ROWS = 30;
 const LEDGER_LABEL_SPLIT = " — ";
 
 /**
+ * 항목명 자리에 앉은 **카테고리 이름의 옛 표시명**. 라벨 규약 이전 세이브의 원장에
+ * 남아 있어, 접으면 한 행에 같은 말이 두 번 선다. 원장은 3개월 롤링이라 그만큼 지나면
+ * 저절로 빠진다 — 세이브를 고치지 않는다.
+ */
+const LEGACY_CATEGORY_HEADS = new Set(["이적료 상각"]);
+
+/**
  * 원장을 피드 줄로 접는다 — 최신 순.
  *
  * 상각처럼 **한 사건이 대상마다 한 줄**로 앉는 항목이 30칸을 통째로 덮지 않게,
  * `날짜 · 수입/지출 · 카테고리 · 현금/장부 · 항목명`이 같은 엔트리를 한 줄로 묶는다.
  * 원장 자체는 손대지 않는다 — PSR과 처분 이익이 선수별 값을 읽는다.
+ *
+ * **대상이 있는 줄만 묶는다.** `이자·세금`과 `시설·아카데미 운영`은 카테고리가 같아도
+ * 서로 다른 사건이라 각자 서야 한다 — 접히면 라벨이 사라지고 두 항목이 한 금액이 된다.
  */
 function foldFinanceFeed(ledger: readonly LedgerEntry[]): FinanceFeedRow[] {
   type Group = {
@@ -188,11 +199,16 @@ function foldFinanceFeed(ledger: readonly LedgerEntry[]): FinanceFeedRow[] {
   // 최신부터 — 같은 날은 나중 기록이 위로
   for (const [i, e] of [...ledger].reverse().entries()) {
     const category = categoryOf(e);
+    const categoryLabel = FINANCE_CATEGORY_KO[category];
     const cut = e.label.indexOf(LEDGER_LABEL_SPLIT);
-    const head = cut < 0 ? "" : e.label.slice(0, cut);
     const item = cut < 0 ? e.label : e.label.slice(cut + LEDGER_LABEL_SPLIT.length);
+    // 항목명이 카테고리 이름을 되풀이하면 없는 것으로 본다
+    const raw = cut < 0 ? "" : e.label.slice(0, cut);
+    const head = raw === categoryLabel || LEGACY_CATEGORY_HEADS.has(raw) ? "" : raw;
     const noncash = e.accounting === "noncash";
-    const key = `${e.date}|${e.kind}|${category}|${noncash}|${head}`;
+    // 대상이 있는 줄(항목명이 붙었거나 `ref`가 가리키는 줄)만 다른 줄과 묶인다
+    const groupable = cut >= 0 || e.ref !== undefined;
+    const key = groupable ? `${e.date}|${e.kind}|${category}|${noncash}|${head}` : `solo|${i}`;
     const found = groups.get(key);
     if (found) {
       found.row.amount += e.amount;
@@ -208,8 +224,9 @@ function foldFinanceFeed(ledger: readonly LedgerEntry[]): FinanceFeedRow[] {
         date: e.date,
         kind: e.kind,
         category,
-        categoryLabel: FINANCE_CATEGORY_KO[category],
-        label: e.label,
+        categoryLabel,
+        // 되풀이로 걷어 낸 항목명은 한 건짜리 줄에서도 다시 세우지 않는다
+        label: head ? e.label : item,
         amount: e.amount,
         noncash,
       },

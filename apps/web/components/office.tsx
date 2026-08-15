@@ -38,11 +38,10 @@ import {
   roleAtSlot,
   type BoardState,
 } from "@/lib/board-roles";
+import { money, moneyFine } from "@/lib/money";
 import { IconBoard, IconChevron } from "@/components/icons";
 import { PitchChip, PitchGround } from "./pitch";
 import { createLineupSaver, type LineupSaveOutcome, type LineupSaver } from "./lineup-saver";
-
-const money = (n: number) => `£${(n / 1e6).toFixed(1)}M`;
 
 /** 전술판 슬롯 하나 — 좌표가 원본, 포지션 코드는 `positionAtPoint`의 파생 (domain tactics.ts) */
 type BoardSlot = { playerId: string; point: BoardPoint } | null;
@@ -2448,6 +2447,64 @@ const percent = (ratio: number) => `${Math.round(ratio * 100)}%`;
 /** 급여 비중의 경고 색 — 시즌 누계와 월별이 같은 임계를 쓴다 */
 const wageTone = (ratio: number) => (ratio >= 0.75 ? "danger" : ratio >= 0.65 ? "warn" : "");
 
+type FinanceFeedRow = OfficeViews["finance"]["feed"][number];
+
+/**
+ * 재정 활동 한 줄 — 뷰가 접어 보낸 줄이면 눌러서 명세를 편다.
+ *
+ * 펼침은 달력 `기록`의 `EventLine`과 같은 규칙(건수 알약 → 왼쪽 선 아래 명세)이라
+ * 감독이 새로 배울 상호작용이 없다. 명세 금액만 `moneyFine`으로 읽는다 — 선수 한 명
+ * 몫의 월 상각은 백만 눈금에서 전부 `£0.0M`이 된다.
+ */
+function FinanceFeedLine({ entry }: { entry: FinanceFeedRow }) {
+  const [open, setOpen] = useState(false);
+  const items = entry.items ?? [];
+  const sign = entry.kind === "income" ? "+" : "−";
+  const cells = (
+    <>
+      <span className="date">{entry.date.slice(5)}</span>
+      <span className="cat">{entry.categoryLabel}</span>
+      <span className="label">
+        {entry.label}
+        {items.length > 0 && <span className="ev-count">{items.length}</span>}
+      </span>
+      <span className={entry.kind === "income" ? "amt plus" : "amt minus"}>
+        {sign}
+        {money(entry.amount)}
+        {entry.noncash && <span className="fin-tag">장부</span>}
+      </span>
+    </>
+  );
+  return (
+    <div className="fin-feed-line">
+      {items.length === 0 ? (
+        <div className="fin-feed-row">{cells}</div>
+      ) : (
+        <button
+          className={`fin-feed-row expandable${open ? " open" : ""}`}
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+        >
+          {cells}
+        </button>
+      )}
+      {open && (
+        <div className="fin-feed-items">
+          {items.map((item, i) => (
+            <div className="fin-feed-item" key={`${item.label}-${i}`}>
+              <span className="label">{item.label}</span>
+              <span className={entry.kind === "income" ? "amt plus" : "amt minus"}>
+                {sign}
+                {moneyFine(item.amount)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** "2026-11" → "2026년 11월" (달력의 달 제목과 같은 표기) */
 function monthLabel(month: string): string {
   const [year, mm] = month.split("-");
@@ -2561,16 +2618,7 @@ export function FinanceView({ finance }: { finance: OfficeViews["finance"] }) {
       {finance.feed.length > 0 && (
         <div className="fin-feed" data-testid="fin-feed">
           {finance.feed.map((entry) => (
-            <div className="fin-feed-row" key={entry.id}>
-              <span className="date">{entry.date.slice(5)}</span>
-              <span className="cat">{entry.categoryLabel}</span>
-              <span className="label">{entry.label}</span>
-              <span className={entry.kind === "income" ? "amt plus" : "amt minus"}>
-                {entry.kind === "income" ? "+" : "−"}
-                {money(entry.amount)}
-                {entry.noncash && <span className="fin-tag">장부</span>}
-              </span>
-            </div>
+            <FinanceFeedLine entry={entry} key={entry.id} />
           ))}
         </div>
       )}

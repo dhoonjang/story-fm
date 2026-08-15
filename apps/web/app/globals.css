@@ -5656,22 +5656,37 @@ textarea {
   border-radius: var(--r-md);
   overflow: hidden;
 }
-.fin-feed-row {
-  display: grid;
-  grid-template-columns: 42px 92px 1fr auto;
-  gap: 10px;
-  align-items: baseline;
-  padding: 7px 14px;
-  font-size: var(--fs-sm);
+.fin-feed-line {
   border-bottom: 1px solid var(--border);
 }
-.fin-feed-row:last-child {
+.fin-feed-line:last-child {
   border-bottom: none;
+}
+.fin-feed-row {
+  display: grid;
+  grid-template-columns: 42px 104px 1fr auto;
+  gap: 10px;
+  align-items: baseline;
+  width: 100%;
+  padding: 7px 14px;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+}
+.fin-feed-row.expandable {
+  cursor: pointer;
+}
+.fin-feed-row.expandable:hover {
+  background: var(--panel-2);
 }
 .fin-feed-row .date,
 .fin-feed-row .cat {
   color: var(--muted);
   font-size: var(--fs-xs);
+  white-space: nowrap;
 }
 .fin-feed-row .date {
   font-variant-numeric: tabular-nums;
@@ -5680,6 +5695,9 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.fin-feed-row .label .ev-count {
+  margin-left: 6px;
 }
 .fin-feed-row .amt {
   font-weight: 700;
@@ -5690,6 +5708,36 @@ textarea {
   color: var(--accent);
 }
 .fin-feed-row .amt.minus {
+  color: var(--danger);
+}
+/* 펼친 명세 — 날짜·카테고리 칸을 비우고 항목명 자리에 맞춰 들여쓴다 */
+.fin-feed-items {
+  padding: 2px 14px 8px 66px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.fin-feed-item {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 1px 0 1px 8px;
+  border-left: 1px solid var(--border);
+  line-height: 1.7;
+}
+.fin-feed-item .label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fin-feed-item .amt {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+.fin-feed-item .amt.plus {
+  color: var(--accent);
+}
+.fin-feed-item .amt.minus {
   color: var(--danger);
 }
 .badge {
