@@ -34,6 +34,19 @@
 - `isCup`(유럽 + 국내) · `isEuroCup`(대항전 고유) · `isDomesticCup`이 판단의 문이고,
   대회 표시명은 `competitionName` 하나가 리그·컵 구분 없이 답한다.
 
+### 친선은 대회가 아니다
+
+프리시즌 친선(`competitionId: null` — `isFriendly`)은 **이 표에 없다.** 대회 id를
+하나 더 만들어 컵처럼 취급하면 순위표·대진표·시즌 기록·상금이 전부 따라붙기
+때문이다. 표시명은 `competitionName`이 아니라 `친선` 한 단어로 고정이고, 단계
+라벨도 붙지 않는다 — `round`는 1~4의 편성 순번일 뿐 감독에게 보이지 않는다.
+
+`competitionId`가 널일 수 있다는 사실이 곧 **대회를 세는 자리마다 건너뛰라는
+표식**이다: 순위표, 시즌 종료 판정, 대회 화면·브래킷, 컵 연기(`reschedule`),
+상금·중계권 수당이 그렇다. 옛 세이브는 전부 문자열이라 그대로 통과한다
+(SAVE_VERSION 6 유지). 친선이 달력·장부에서 무엇인지는
+[../simulation/season.md](../simulation/season.md) §2.
+
 ### 오버라이드 — 어드민 편집
 
 코드의 세 표는 **시드**(`LEAGUE_CATALOG_SEED` · `CUP_CATALOG_SEED` ·

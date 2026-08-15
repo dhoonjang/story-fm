@@ -128,8 +128,14 @@ export const MatchRecordSchema = z.object({
   /**
    * 소속 대회 — 리그 id(league-catalog) 또는 컵 대회 id.
    * 순위표는 대회별로 따로 계산되고, 여러 리그가 동시에 진행된다.
+   *
+   * **널이면 어느 대회에도 속하지 않는 경기 = 프리시즌 친선**이다. 대회 id를
+   * 하나 더 만들어 컵처럼 취급하면 순위표·대진표·시즌 기록·상금이 전부
+   * 따라붙는다. 널을 넣을 수 있게 하는 것이 곧 **대회를 세는 자리마다 건너뛰라는
+   * 표식**이고, 그 자리들이 타입으로 드러난다(`isFriendly`).
+   * 옛 세이브는 전부 문자열이라 그대로 통과한다 (SAVE_VERSION 유지).
    */
-  competitionId: z.string().min(1),
+  competitionId: z.string().min(1).nullable(),
   stage: MatchStageSchema.optional(),
   round: z.number().int().min(1),
   date: DateString,
