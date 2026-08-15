@@ -164,7 +164,7 @@ textarea {
   font-size: var(--fs-sm);
   margin-bottom: 2px;
 }
-/* 진행 표시 — 지나온 칸은 남고 남은 칸은 흐리다. 누르는 것이 아니라 읽는 줄이다 */
+/* 진행 표시 — 지나온 칸은 되돌아가는 길이라 눌린다. 남은 칸은 흐린 글자일 뿐이다 */
 .onboarding .step-rail {
   display: flex;
   gap: 8px;
@@ -176,29 +176,140 @@ textarea {
   content: "→";
   margin-right: 8px;
 }
-.onboarding .step-rail li.done {
-  color: var(--text);
+.onboarding .step-rail li.done button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent-2);
+  font: inherit;
+}
+.onboarding .step-rail li.done button:hover {
+  text-decoration: underline;
 }
 .onboarding .step-rail li.current {
   color: var(--accent);
   font-weight: 700;
 }
-.league-grid,
-.team-grid-row {
+
+/* ── 리그 고리 ───────────────────────────
+   다섯 리그가 정오각형의 꼭짓점에 선다. 판은 정사각형이고 SVG viewBox(0~100)와
+   칩의 left/top이 같은 좌표를 쓴다 — 계산은 `lib/ring.ts` 한 곳이다. */
+.league-ring {
+  position: relative;
+  width: min(560px, 100%);
+  aspect-ratio: 1;
+  margin: 12px auto 0;
+}
+.league-ring svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+/* 선은 판이 커져도 굵어지지 않는다 — 굵기는 화면 픽셀로 잰다 */
+.league-ring polygon,
+.league-ring line,
+.league-ring circle {
+  vector-effect: non-scaling-stroke;
+  fill: none;
+}
+.ring-edge {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.ring-spoke {
+  stroke: var(--border-soft, var(--border));
+  stroke-width: 1;
+  transition:
+    stroke 160ms var(--ease-panel),
+    opacity 160ms var(--ease-panel);
+  opacity: 0.5;
+}
+/* 손이 올라간 살만 불이 들어온다 — 고리 전체가 아니라 그 하나가 선택이다 */
+.ring-spoke.lit {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  opacity: 1;
+}
+/* 살은 중심에서 뻗지만 한가운데는 비워 둔다 — 원판이 살을 덮어 글자가 산다 */
+.league-ring .ring-hub {
+  stroke: var(--border);
+  stroke-width: 1;
+  fill: var(--bg);
+}
+.ring-hub-label {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  pointer-events: none;
+}
+.league-node {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 128px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 10px 16px;
+  color: var(--text);
+  transition:
+    border-color 160ms var(--ease-panel),
+    background 160ms var(--ease-panel),
+    box-shadow 160ms var(--ease-panel);
+}
+.league-node:hover,
+.league-node:focus-visible {
+  border-color: var(--accent);
+  background: var(--panel-2);
+  box-shadow: 0 0 0 4px rgb(from var(--accent) r g b / 12%);
+  outline: none;
+}
+.league-node.selected {
+  border-color: var(--accent);
+  background: var(--panel-2);
+}
+.league-node .node-name {
+  font-weight: 700;
+}
+.league-node .node-country {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+/* 뼈대 막대는 칩 안에서 가운데로 선다 — 카드 시절의 퍼센트 폭은 여기서 통하지 않는다 */
+.league-node .skel-league {
+  width: 84px;
+  height: 15px;
+  margin: 0;
+}
+.league-node .skel-country {
+  width: 52px;
+  height: 13px;
+  margin: 0;
+}
+/* 좁은 화면 — 고리는 그대로 두고 칩만 줄인다 (판이 정사각형이라 같이 준다) */
+@media (max-width: 560px) {
+  .league-node {
+    min-width: 0;
+    padding: 8px 10px;
+    font-size: var(--fs-md);
+  }
+}
+
+.team-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 8px;
 }
-/* 보드 기대가 팀 묶음의 머리다 — 어느 요구를 안는 자리인지가 팀보다 먼저 읽힌다 */
-.team-group + .team-group {
-  margin-top: 20px;
-}
-.team-group h2 {
-  font-size: var(--fs-md);
-  margin: 0 0 8px;
-  color: var(--muted);
-}
-.league-card,
 .team-card {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -207,16 +318,16 @@ textarea {
   text-align: left;
   color: var(--text);
 }
-.league-card:hover,
 .team-card:hover {
   border-color: var(--accent-2);
 }
-.league-card.selected,
 .team-card.selected {
   border-color: var(--accent);
   background: var(--panel-2);
 }
-.league-card .tier,
+.team-card .team-name {
+  font-weight: 700;
+}
 .team-card .tier {
   color: var(--muted);
   font-size: var(--fs-sm);

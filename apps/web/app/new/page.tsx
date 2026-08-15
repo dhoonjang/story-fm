@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { LeagueGridSkeleton } from "@/components/skeleton";
+import { LeagueRingSkeleton } from "@/components/skeleton";
 import { Loading } from "@/components/loading";
+import { ringPoints, ringPolygon } from "@/lib/ring";
 
 interface TeamEntry {
   id: string;
@@ -33,8 +34,8 @@ const STEPS = [
 ] as const;
 type Step = (typeof STEPS)[number]["key"];
 
-/** 강팀부터 — 보드 기대가 곧 난이도의 지형이다 */
-const TIER_ORDER = [1, 2, 3, 4];
+/** 강팀부터 — 보드 기대가 곧 난이도의 지형이다. 묶지는 않는다, 순서가 말한다 */
+const byTier = (a: TeamEntry, b: TeamEntry) => a.tier - b.tier;
 
 export default function NewGamePage() {
   const router = useRouter();
@@ -45,6 +46,7 @@ export default function NewGamePage() {
   const [teamId, setTeamId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [background, setBackground] = useState("");
+  const [hover, setHover] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -89,10 +91,10 @@ export default function NewGamePage() {
   const step: Step =
     wanted === "manager" && !team ? "team" : wanted === "team" && !league ? "league" : wanted;
   const stepIndex = STEPS.findIndex((s) => s.key === step);
-  const leagueTeams = teams.filter((t) => t.leagueId === leagueId);
-  const tierGroups = TIER_ORDER.map((tier) => leagueTeams.filter((t) => t.tier === tier)).filter(
-    (group) => group.length > 0,
-  );
+  const leagueTeams = teams.filter((t) => t.leagueId === leagueId).sort(byTier);
+  const ring = ringPoints(leagues.length || 1);
+  /** 고리에서 지금 불이 들어온 리그 — 손이 올라간 쪽, 없으면 고른 쪽 */
+  const litLeague = hover ?? leagueId;
 
   async function start() {
     if (!teamId || !name.trim() || !background.trim()) return;
@@ -144,7 +146,7 @@ export default function NewGamePage() {
             ← {STEPS[stepIndex - 1].label}
           </button>
         )}
-        {/* 진행 표시는 읽는 것이지 누르는 것이 아니다 — 돌아가는 길은 왼쪽 하나 */}
+        {/* 지나온 단계는 되돌아가는 길이다 — 눌리는 칸만 글자가 살아 있다 */}
         <ol className="step-rail" data-testid="step-rail">
           {STEPS.map((s, i) => (
             <li
@@ -152,7 +154,13 @@ export default function NewGamePage() {
               className={i === stepIndex ? "current" : i < stepIndex ? "done" : ""}
               aria-current={i === stepIndex ? "step" : undefined}
             >
-              {s.label}
+              {i < stepIndex ? (
+                <button type="button" onClick={() => setStep(s.key)} data-testid={`step-to-${s.key}`}>
+                  {s.label}
+                </button>
+              ) : (
+                <span>{s.label}</span>
+              )}
             </li>
           ))}
         </ol>
@@ -162,18 +170,45 @@ export default function NewGamePage() {
         <>
           <h1>어느 리그입니까?</h1>
           {leagues.length === 0 && !error ? (
-            <LeagueGridSkeleton />
+            <LeagueRingSkeleton />
           ) : (
-            <div className="league-grid" data-testid="league-grid">
-              {leagues.map((l) => (
+            /**
+             * 리그는 목록이 아니라 **고리**다 — 다섯 리그가 정오각형의 꼭짓점에 서고
+             * 손이 올라간 쪽으로만 살이 밝아진다. 어느 하나가 위가 아니라는 것을
+             * 배치가 말한다 (칸을 위아래로 쌓으면 첫 줄이 곧 서열로 읽힌다).
+             */
+            <div className="league-ring" data-testid="league-ring">
+              <svg viewBox="0 0 100 100" aria-hidden>
+                <polygon className="ring-edge" points={ringPolygon(ring)} />
+                {ring.map((p, i) => (
+                  <line
+                    key={leagues[i].id}
+                    className={`ring-spoke${litLeague === leagues[i].id ? " lit" : ""}`}
+                    x1="50"
+                    y1="50"
+                    x2={p.x}
+                    y2={p.y}
+                  />
+                ))}
+                <circle className="ring-hub" cx="50" cy="50" r="7" />
+              </svg>
+              <span className="ring-hub-label" aria-hidden>
+                부임
+              </span>
+              {leagues.map((l, i) => (
                 <button
                   key={l.id}
-                  className={`league-card${leagueId === l.id ? " selected" : ""}`}
+                  className={`league-node${leagueId === l.id ? " selected" : ""}`}
+                  style={{ left: `${ring[i].x}%`, top: `${ring[i].y}%` }}
+                  onMouseEnter={() => setHover(l.id)}
+                  onMouseLeave={() => setHover(null)}
+                  onFocus={() => setHover(l.id)}
+                  onBlur={() => setHover(null)}
                   onClick={() => selectLeague(l.id)}
                   data-testid={`league-${l.id}`}
                 >
-                  <div>{l.name}</div>
-                  <div className="tier">{l.country}</div>
+                  <span className="node-name">{l.name}</span>
+                  <span className="node-country">{l.country}</span>
                 </button>
               ))}
             </div>
@@ -188,25 +223,19 @@ export default function NewGamePage() {
             {league ? ` · ${league.country}` : ""}
           </p>
           <h1>어느 팀을 맡습니까?</h1>
-          {/* 보드 기대로 묶는다 — 팀을 고르는 일이 곧 어떤 요구를 안는 일이다 */}
-          <div data-testid="team-grid">
-            {tierGroups.map((group) => (
-              <section className="team-group" key={group[0].tier}>
-                <h2>{group[0].expectation}</h2>
-                <div className="team-grid-row">
-                  {group.map((t) => (
-                    <button
-                      key={t.id}
-                      className={`team-card${teamId === t.id ? " selected" : ""}`}
-                      onClick={() => selectTeam(t.id)}
-                      data-testid={`team-${t.id}`}
-                    >
-                      <div>{t.name}</div>
-                      <div className="tier">{t.shortName}</div>
-                    </button>
-                  ))}
-                </div>
-              </section>
+          {/* 강팀부터 선다 — 팀을 고르는 일이 곧 어떤 요구를 안는 일이라 카드마다
+              보드 기대가 붙는다. 줄로 갈라 묶지는 않는다, 순서가 이미 말한다 */}
+          <div className="team-grid" data-testid="team-grid">
+            {leagueTeams.map((t) => (
+              <button
+                key={t.id}
+                className={`team-card${teamId === t.id ? " selected" : ""}`}
+                onClick={() => selectTeam(t.id)}
+                data-testid={`team-${t.id}`}
+              >
+                <div className="team-name">{t.name}</div>
+                <div className="tier">{t.expectation}</div>
+              </button>
             ))}
           </div>
         </>

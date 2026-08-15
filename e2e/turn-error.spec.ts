@@ -9,7 +9,7 @@ import { expect, test } from "@playwright/test";
  */
 test("LLM 실패 배너", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("league-grid")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: 20_000 });
   await page.getByTestId("league-epl").click();
   await page.getByTestId("team-arsenal").click();
   await page.getByTestId("manager-name").fill("에러확인");
