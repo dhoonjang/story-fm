@@ -1,187 +1,189 @@
 # story-fm
 
-> LLM을 코어 엔진으로 삼는 차세대 풋볼 매니저 게임.
-> 플레이어는 **AI 감독**이 되어 자연어로 팀을 지휘하고, 경기는 코어가
-> 시뮬레이션하며, 모든 순간은 AI가 생성하는 **내러티브**로 살아 움직인다.
+> A next-generation football manager game built around an LLM core.
+> The player is an **AI manager** who directs the team in natural language, the
+> core simulates the match, and every moment is brought to life by AI-generated
+> **narrative**.
 
-이 문서는 프로젝트의 **비전**과 **개발 규약**을 담는 단일 소스다. AI 에이전트와
-사람 기여자 모두 이 문서를 기준으로 작업한다. `CLAUDE.md`는 이 문서를 참조한다.
-**게임이 실제로 어떻게 돌아가는지는 [docs/](./docs/README.md)이
-원본이다** — [game-overview.md](./docs/overview.md)부터 읽는다.
+This file is the single source for the project's **vision and development
+conventions**; both AI agents and human contributors work from it. `CLAUDE.md`
+points here. **How the game actually behaves lives in
+[docs/](./docs/README.md)** — start with [overview.md](./docs/overview.md).
 
 ---
 
-## 1. 비전
+## 1. Vision
 
-전통적인 풋볼 매니저는 숫자 슬라이더와 확률 테이블의 게임이었다. story-fm은
-그것을 **언어의 게임**으로 바꾼다.
+Traditional football managers are games of sliders and probability tables.
+story-fm turns that into a **game of language**: you direct the team by talking,
+players and owners and journalists react as characters with their own motives,
+and the story — dressing-room conflict, a prospect's arc, a rivalry that festers
+— matters more than the scoreline.
 
-- **자연어 감독**: 슬라이더 대신 말로 지시한다. "후반엔 측면을 더 적극적으로
-  쓰고, 9번한테 내려와서 연결하라고 해." → AI가 전술로 해석·실행.
-- **살아있는 시뮬레이션**: 선수·구단주·기자가 고유한 성격과 동기를 가진 인물로
-  반응한다. 같은 라인업도 맥락에 따라 다르게 움직인다.
-- **내러티브 우선**: 결과(스코어)보다 **이야기**가 핵심 재미 — 라커룸 갈등,
-  유망주의 성장 서사, 라이벌과의 악연.
+### Design principles
 
-### 디자인 원칙
+1. **Language is the interface.** The UI supports it; it does not replace it.
+2. **Explainable outcomes.** Every ruling and every beat must answer "why did
+   that happen". Avoid black-box randomness.
+3. **Emergent story, exact ledger.** The LLM invents the telling; the core keeps
+   state, rules and numbers deterministic.
+4. **Quality first, cost second.** Design calls without waste (caching, context
+   hygiene), but never let cost cutting degrade the experience.
 
-1. **언어가 인터페이스다** — 핵심 상호작용은 자연어. UI는 그것을 보조한다.
-2. **납득 가능한 결과** — 판정·서사는 항상 "왜 그렇게 됐는지" 설명 가능해야
-   한다. 블랙박스 난수는 지양.
-3. **창발적 전개, 정확한 장부** — 경기와 서사는 LLM이 창발적으로 만들되,
-   상태·규칙·수치 반영은 코어가 결정적으로 지킨다.
-4. **품질이 우선, 비용은 그다음** — LLM 호출은 낭비 없이 설계하되(캐싱·컨텍스트
-   위생), 비용 절감이 경험 품질을 깎게 하지 않는다.
+## 2. The game in one paragraph
 
-## 2. 게임의 뼈대 (요약)
+**The whole game is one chat.** The user plays the manager and the GM (an LLM)
+plays the world. State changes travel exactly one path — skill (tool call) → Zod
+validation → deterministic transition — and **match results are decided by the
+core's xG-interval simulator**; the LLM only commentates, stages and adjudicates.
+A season starts on July 1 and runs preseason → league/cup/European competition →
+season rollover → next season. Data has two layers: catalog (immutable seed) and
+save (mutable state), model v6.
 
-**게임 전체가 하나의 채팅이다.** 유저는 감독을 연기하고 GM(LLM)이 세계를
-연기한다. 상태 변경은 스킬(도구 호출) → Zod 검증 → 결정적 상태 전이 경로뿐이고,
-**경기 결과도 코어의 xg 구간 시뮬레이터가 정한다** — LLM은 중계·연출·판정만.
-시즌은 7월 1일에 시작해 프리시즌 → 리그·컵·유럽 대항전 → 시즌 전환 →
-멀티시즌으로 돈다. 카탈로그(불변 초기치)와 세이브(가변 상태)의 2-레이어 데이터
-모델(v6). 상세는 문서 지도(§7) 참고.
+## 3. Stack
 
-## 3. 기술 스택
+- **Language** — TypeScript, strict, full stack
+- **Runtime** — Next.js (App Router) + Node.js
+- **Packages** — pnpm monorepo workspaces
+- **LLM** — multi-provider, configured **per agent**. `config/llm.yml` is the
+  single source for providers and model IDs (→ [docs/llm/models.md](./docs/llm/models.md))
+- **Validation** — Zod, enforcing structured LLM I/O
+- **Test** — Vitest + Playwright · **Lint** — ESLint + Prettier
 
-- **언어**: TypeScript (풀스택, strict 모드)
-- **런타임/프레임워크**: Next.js (App Router) + Node.js
-- **패키지 매니저**: pnpm (모노레포 워크스페이스)
-- **LLM**: 역할별 멀티 프로바이더 — **에이전트마다** 제공자와 모델을 독립 설정한다.
-  설정과 모델 ID는 `config/llm.yml`이 단일 원본
-  (→ [docs/llm/models.md](./docs/llm/models.md))
-- **상태/검증**: Zod (LLM 입출력 구조화 강제)
-- **테스트**: Vitest + Playwright / **린트**: ESLint + Prettier
-
-### 디렉터리 구조
+### Layout
 
 ```
-docs/              # 기획서 — 지금 이 게임이 어떻게 동작하는가 (README.md가 지도)
-  data/            #   무엇이 존재하는가 — 선수·팀·대회·인물·세이브
-  simulation/      #   무엇이 일어나는가 — 경기·시즌·이적·재정·커리어
-  llm/             #   그것을 어떻게 말하는가 — 모델·에이전트·프롬프트
+docs/              # design spec — how the game works today (README.md is the map)
+  data/            #   what exists — players, teams, competitions, people, saves
+  simulation/      #   what happens — match, season, transfer, finance, career
+  llm/             #   how it speaks — models, agents, prompts
 apps/
-  web/             # Next.js — 채팅 UI · 오피스 뷰 · API · /admin
+  web/             # Next.js — chat UI · office views · API · /admin
 packages/
-  domain/          # 도메인 모델 + Zod 스키마 (선수·전술·기록·일정·페르소나)
-  sim/             # 경기 시뮬 코어 — 전력 패킷 · xg 구간 시뮬 · 상성 · 체력
-  engine/          # 게임 엔진 — 폴더가 도메인이다:
-                   #   core/(상태·저장·tick·날짜) world/(카탈로그·생성·주급)
-                   #   competition/(달력·리그·컵·유럽) match/(경기 흐름·간이 시뮬)
-                   #   squad/(폼·심경·부상·훈련·스카우팅) market/(이적·협상)
-                   #   club/(재정·기자회견) skills/(감독 지시) views/(화면·조회)
-                   #   data/(카탈로그·시드)
-  agents/          # GM 오케스트레이터 · 중계 · 결산 라터 · mock GM
-  llm/             # 제공자 중립 GameLLM + Anthropic/Gemini/OpenAI 어댑터
+  domain/          # domain models + Zod schemas (player, tactics, records, fixtures, personas)
+  sim/             # match sim core — strength packet · xG-interval sim · matchups · stamina
+  engine/          # game engine — each folder is a domain:
+                   #   core/(state, save, tick, dates) world/(catalog, generation, wages)
+                   #   competition/(calendar, league, cup, europe) match/(match flow, quick sim)
+                   #   squad/(form, morale, injury, training, scouting) market/(transfers, negotiation)
+                   #   club/(finance, press) skills/(manager instructions) views/(screens, queries)
+                   #   data/(catalog, seed)
+  agents/          # GM orchestrator · commentary · summary writers · mock GM
+  llm/             # provider-neutral GameLLM + Anthropic/Gemini/OpenAI adapters
 ```
 
-## 4. 아키텍처 방향
+## 4. Architecture
 
-- **코어 = 판정과 장부, LLM = 이야기.** 상태 전이·수치 공식·검증은 결정적 순수
-  함수로 두어 LLM 없이 테스트한다. 경기 결과도 코어가 정하고, 감독의 지시는
-  전력 패킷을 통해서만 결과에 닿는다 (→ match-sim.md).
-- **구조화 출력 우선.** LLM에 자유 텍스트를 파싱시키지 않는다 — Zod 스키마로
-  도구 호출을 강제하고, 자유 텍스트는 사람이 읽는 서사에만.
-- **이벤트 소싱.** 경기는 이벤트 로그로 표현하고 내러티브·리플레이·디버깅이
-  거기서 파생된다.
-- **페르소나 = 데이터.** 인물의 성격·기억은 코드가 아니라 데이터(프롬프트와
-  상태)로 다룬다.
+- **The core rules and keeps the books; the LLM tells the story.** State
+  transitions, formulas and validation are deterministic pure functions, tested
+  without an LLM. The core decides match results, and the manager's instructions
+  reach those results only through the strength packet
+  (→ [docs/simulation/match.md](./docs/simulation/match.md)).
+- **Structured output first.** Never make the LLM emit free text for the code to
+  parse — force tool calls with Zod schemas, and keep free text for prose humans
+  read.
+- **Event sourcing.** A match is an event log; narrative, replay and debugging
+  all derive from it.
+- **Personas are data.** Character and memory live in prompts and state, not in
+  code.
 
-## 5. 개발 규약
+## 5. Conventions
 
-### 코드 스타일
+### Code
 
-- TypeScript `strict: true`. `any` 금지(불가피하면 `unknown` + 좁히기).
-- 함수형·불변 우선. 부수효과는 경계(API/IO)에 격리.
-- 도메인 타입은 `packages/domain`에 모으고 다른 패키지가 import한다.
-- 파일·디렉터리 kebab-case, 타입·컴포넌트 PascalCase, 변수/함수 camelCase.
-- 수치·수식은 이름 있는 상수/소함수로 — 밸런스 조정이 그 함수만 보면 되게.
-- 주석은 담백하게: 코드로 보이지 않는 제약만 짧게. 역사·정당화 서사는 문서로.
+- `strict: true`. No `any` (use `unknown` plus narrowing when unavoidable).
+- Functional and immutable by default; isolate side effects at the boundary
+  (API/IO).
+- Domain types live in `packages/domain`; other packages import from there.
+- kebab-case files and directories, PascalCase types and components, camelCase
+  values and functions.
+- Give numbers and formulas names — balance tuning should only need to read that
+  one function.
+- Comments state constraints the code cannot show. History and justification
+  belong in docs.
 
-### 커밋 / PR
+### Commits
 
 - Conventional Commits (`feat:` `fix:` `refactor:` `docs:` `test:` `chore:`).
-- 한 PR은 한 가지 관심사. **프롬프트 변경은 별도 커밋**으로 분리.
-- 커밋/푸시는 사용자가 요청할 때만. 작업 단위가 끝나면 **지금 체크아웃된 브랜치**에
-  직접 커밋하고 `git push origin HEAD` 한다 — 커밋할 브랜치를 갈아타지 않는다.
-- 공유 워크트리에서는 커밋할 경로를 명시한다 — `git add -A`/`.` 은 동시에 도는 다른
-  작업의 미완성 편집까지 쓸어 담는다. rebase·stash·브랜치 전환도 같은 이유로 금지.
+- One concern per PR — PRs are squash-merged, so one PR is one commit on main and
+  the PR title is that commit's subject. **Prompt changes go in their own PR.**
+- Commit and push only when the user asks. When a unit of work is done, commit to
+  **the branch already checked out** and `git push origin HEAD` — never switch
+  branches to commit.
+- Name the paths you add. `git add -A` / `.` sweeps up another agent's
+  half-finished edits. For the same reason: no rebase, no stash, no branch
+  switching.
 
-### 테스트
+### Tests
 
-- 시뮬 코어는 **LLM 없이** 단위 테스트(시드 고정, 결정적).
-- LLM 의존 로직은 모킹 또는 스키마 검증 수준에서 테스트.
-- 새 기능엔 테스트 동반. 실패하는 테스트는 숨기지 말고 그대로 보고.
-- `pnpm e2e`는 기본 슬롯(포트 3399 · `.next-e2e` · `/tmp/story-fm-e2e`)을 쓴다.
-  한 워크트리에서 둘 이상이 동시에 e2e를 돌려야 하면 각자 다른 슬롯을 잡는다:
-  `E2E_SLOT=1 pnpm e2e` (1~9 — 포트·빌드 산출물·세이브 디렉터리가 함께 갈라진다).
-  기본 슬롯이 이미 떠 있으면 `reuseExistingServer`가 남의 서버에 붙으니, 죽이지
-  말고 슬롯을 바꾼다.
+- Test the sim core **without an LLM** — fixed seed, deterministic.
+- Test LLM-dependent logic with mocks, or at the schema-validation level.
+- New features ship with tests. Never hide a failing test; report it as it is.
+- `pnpm e2e` uses port 3399, `.next-e2e` and `/tmp/story-fm-e2e`. Run **one e2e
+  at a time per worktree** — a second concurrent run attaches to the first
+  server through `reuseExistingServer` and the two trample each other.
+  (`E2E_SLOT=1`–`9` splits port, build output and save directory together if a
+  parallel run is genuinely needed.)
 
-### 병렬 작업 (한 워크트리, 워커 여럿)
+### Working alongside others
 
-- 워커는 커밋·푸시·stash·브랜치 조작을 하지 않는다 — 커밋은 지휘자가 한다.
-- 워커는 자기가 수정한 경로를 빠짐없이 보고한다. 지휘자는 그 경로만 `add` 한다.
-- 워커마다 다른 `E2E_SLOT`(1~9)을 배정받는다. e2e 외 검증 세이브는
-  `STORY_FM_DATA_DIR=<tmp>`로 격리하고 `apps/web/.data`는 건드리지 않는다.
-- 포트 3000은 사용자의 개발 서버다 — 공유 워크트리 편집을 핫리로드한다. 죽이지 않는다.
-- 선행 실패 테스트를 stash로 분리하지 않는다. 내가 손댄 파일을 지목하지 않는 실패는
-  고치지 말고 그대로 보고한다.
+- Ports 3000 and 3311 belong to the user's dev servers. Never kill them.
+- Isolate verification saves with `STORY_FM_DATA_DIR=<tmp>`; never touch
+  `apps/web/.data`.
+- A pre-existing failure that does not name a file you touched is not yours to
+  fix — report it as-is.
 
-### 문서
+### Docs
 
-- 기획·아키텍처가 바뀌면 **코드보다 문서를 먼저** 갱신한다 (`docs/`).
-- 문서는 **지금 상태만** 적는다 — 결정 로그·변경 이력은 남기지 않는다(그건 git이 한다).
+- When the plan or architecture changes, **update `docs/` before the code**.
+- Docs describe **the present only** — no decision logs, no change history. Git
+  does that.
 
-## 6. LLM 통합 규약 (가장 중요)
+## 6. LLM integration rules (most important)
 
-1. **모델 ID 하드코딩 금지** — `config/llm.yml`에서 에이전트별 제공자·모델을
-   단일 관리한다. 프로바이더 차이는 `packages/llm` 어댑터가 흡수한다 (→ llm/models.md).
-2. **구조화 출력은 Zod로 검증**하고 실패 시 재시도. 파싱 실패를 게임 상태에
-   반영하지 않는다.
-3. **컨텍스트 위생** — 입력은 변경 빈도 순 3층(고정/레퍼런스/이력)으로 쌓아
-   캐시 프리픽스를 지킨다. 고정층에 날짜·ID 인터폴레이션 금지.
-4. **결정성 경계** — 장부는 결정적으로, 전개는 창발적으로. 창발 출력이 검증
-   없이 게임 상태가 되는 일은 없다. LLM 판정은 언제나 **코어 앵커 ± 한도** 안.
-5. **프롬프트는 코드처럼** — 별도 파일/상수로 버전·diff 추적.
-   ⚠️ **수정은 지우는 방향이 기본** — 문제가 보이면 지시를 덧붙이지 말고 그
-   행동을 시키는 기존 문구를 먼저 지운다. 규칙만 남기고 이유·비유·중복 예시는
-   넣지 않는다 — 모델은 설명을 읽고 설명대로 쓴다.
-6. **캐싱** — 동일 입력 호출은 캐싱한다(프롬프트 캐시 포함).
-7. **안전장치** — LLM 출력이 게임 규칙을 깨지 않도록(불가능한 전술, 존재하지
-   않는 선수) 검증 레이어를 둔다.
+1. **Never hard-code a model ID.** `config/llm.yml` owns provider and model per
+   agent; `packages/llm` adapters absorb provider differences
+   (→ [docs/llm/models.md](./docs/llm/models.md)).
+2. **Validate structured output with Zod** and retry on failure. A parse failure
+   never reaches game state.
+3. **Context hygiene** — stack input in three layers by change frequency (fixed /
+   reference / history) to keep the cache prefix intact. Never interpolate dates
+   or IDs into the fixed layer.
+4. **Determinism boundary** — the ledger is deterministic, the telling is
+   emergent. Emergent output never becomes game state unvalidated, and an LLM
+   ruling always stays within **core anchor ± bound**.
+5. **Prompts are code** — separate files or constants so versions and diffs stay
+   traceable. ⚠️ **Edit by deleting first.** When the behavior is wrong, delete
+   the line that causes it before adding an instruction. Keep the rules; drop
+   reasons, analogies and redundant examples — the model reads explanations and
+   writes like them.
+6. **Cache** identical calls, prompt cache included.
+7. **Guardrails** — validate that LLM output cannot break game rules (impossible
+   tactics, players who do not exist).
 
-> Claude API 세부(모델 ID·가격·캐싱·도구 사용)는 추정하지 말고 항상 최신
-> 레퍼런스를 확인한다 (Claude Code에선 `claude-api` 스킬).
+> Never answer Claude API details (model IDs, pricing, caching, tool use) from
+> memory — check the current reference (the `claude-api` skill in Claude Code).
 
-## 7. AI 에이전트 작업 가이드 + 문서 지도
+## 7. Doc map
 
-- **작업 전**: 이 문서로 규약을 파악하고, 손댈 도메인의 설계 문서를 먼저 읽는다.
-- **작업 중**: 코어(결정적)와 LLM(비결정적)의 경계를 흐리지 않는다. 새 LLM
-  호출엔 6장 규약을 적용한다.
-- **불확실하면 질문한다** — 특히 게임 밸런스·핵심 루프에 영향 주는 결정.
-- **범위를 지킨다** — 요청받은 것만. 큰 리팩터링·새 의존성은 먼저 제안.
-- **결과를 정직하게 보고한다** — 테스트가 실패하면 출력과 함께 그대로.
+**[docs/](./docs/README.md) is the single source for what the game does** — each
+folder is a layer. Read the design doc for the domain you are touching before you
+start, and do not blur the boundary between the deterministic core and the
+non-deterministic LLM.
 
-**[docs/](./docs/README.md)가 게임 명세의 단일 소스다** — 폴더가 곧 층이다.
-
-| 폴더 | 무엇 | 문서 |
+| Folder | What | Docs |
 | --- | --- | --- |
-| — | 전체 구조·한 턴의 경로·게임 루프 | [overview.md](./docs/overview.md) |
-| `data/` | 무엇이 존재하는가 | [game-state](./docs/data/game-state.md) · [player](./docs/data/player.md) · [team](./docs/data/team.md) · [competition](./docs/data/competition.md) · [people](./docs/data/people.md) · [sources](./docs/data/sources.md) |
-| `simulation/` | 무엇이 일어나는가 | [match](./docs/simulation/match.md) · [season](./docs/simulation/season.md) · [transfer](./docs/simulation/transfer.md) · [finance](./docs/simulation/finance.md) · [career](./docs/simulation/career.md) |
-| `llm/` | 그것을 어떻게 말하는가 | [models](./docs/llm/models.md) · [agents](./docs/llm/agents.md) · [prompts](./docs/llm/prompts.md) |
+| — | Overall structure · the path of one turn · the game loop | [overview.md](./docs/overview.md) |
+| `data/` | What exists | [game-state](./docs/data/game-state.md) · [player](./docs/data/player.md) · [team](./docs/data/team.md) · [competition](./docs/data/competition.md) · [people](./docs/data/people.md) · [sources](./docs/data/sources.md) |
+| `simulation/` | What happens | [match](./docs/simulation/match.md) · [season](./docs/simulation/season.md) · [transfer](./docs/simulation/transfer.md) · [finance](./docs/simulation/finance.md) · [career](./docs/simulation/career.md) |
+| `llm/` | How it speaks | [models](./docs/llm/models.md) · [agents](./docs/llm/agents.md) · [prompts](./docs/llm/prompts.md) |
 
-## 현재 상태
+## Status
 
-🚧 **플레이 가능한 프로토타입 (데이터 모델 v6, SAVE_VERSION 6).**
-온보딩 → 채팅 지시(훈련·전술·라인업·면담·이적) → 경기(패킷→진행→검증→반영) →
-시즌 전환 → 멀티시즌이 엔드투엔드로 돈다. 5대 리그 96팀 + 컵용 2부 64팀 +
-시장 전용 리그가 있고, 국내 컵·유럽 대항전·구단 재정(PSR)·AI 이적 시장·감독
-경질까지 구현됐다. 테스트: Vitest 1,125 + Playwright e2e 7.
+🚧 **Playable prototype (data model v6, SAVE_VERSION 6).** Onboarding → chat
+instructions → match → season rollover → multi-season runs end to end. What is
+built and what is not is listed in [overview.md](./docs/overview.md) §7.
 
-- **세이브 호환 원칙**: 새 테이블은 로드 시 빈 배열, 새 필드는 optional — 세이브
-  버전을 올리지 않는 것이 기본. 구조 변경으로 `.data` 초기화가 필요하면
-  사용자에게 먼저 확인한다.
-- 주요 미구현: 보드 요청 시스템 · 세계가 먼저 말 걸기(회견 외) · 서사 아크 ·
-  승강 · AI 팀 상태 성장 · 토큰 예산 상한 (→ game-overview.md §6).
+- **Save compatibility** — new tables load as empty arrays and new fields are
+  optional; not bumping the save version is the default. If a structural change
+  requires wiping `.data`, ask the user first.
