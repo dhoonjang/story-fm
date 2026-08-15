@@ -281,10 +281,12 @@ function equalShareFactor(state: GameState, teamId: string): number {
   return EQUAL_SHARE_LEAGUE_SCALED ? poolOf(state, teamId) : 1;
 }
 
-const money = (amount: number) =>
+/** 금액 표기 — 원장·다이제스트·달력 일지가 같은 자를 쓴다 */
+export const formatMoney = (amount: number) =>
   Math.abs(amount) >= 1_000_000
     ? `£${(amount / 1_000_000).toFixed(1)}M`
     : `£${Math.round(amount / 1000)}k`;
+const money = formatMoney;
 
 export function monthOf(date: string): string {
   return date.slice(0, 7);
