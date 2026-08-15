@@ -88,7 +88,7 @@ export const LEAGUE_CATALOG_SEED: readonly LeagueCatalogEntry[] = [
     coefficient: 1,
     realSquads: true,
     broadcastPool: 1,
-    avgTicketPrice: 45,
+    avgTicketPrice: 30,
   },
   {
     id: "laliga",
@@ -98,7 +98,7 @@ export const LEAGUE_CATALOG_SEED: readonly LeagueCatalogEntry[] = [
     coefficient: 2,
     realSquads: true,
     broadcastPool: 0.45,
-    avgTicketPrice: 25,
+    avgTicketPrice: 17,
   },
   {
     id: "seriea",
@@ -108,7 +108,7 @@ export const LEAGUE_CATALOG_SEED: readonly LeagueCatalogEntry[] = [
     coefficient: 3,
     realSquads: true,
     broadcastPool: 0.32,
-    avgTicketPrice: 22,
+    avgTicketPrice: 15,
   },
   {
     id: "bundesliga",
@@ -118,7 +118,7 @@ export const LEAGUE_CATALOG_SEED: readonly LeagueCatalogEntry[] = [
     coefficient: 4,
     realSquads: true,
     broadcastPool: 0.35,
-    avgTicketPrice: 24,
+    avgTicketPrice: 13,
   },
   {
     id: "ligue1",
@@ -128,7 +128,7 @@ export const LEAGUE_CATALOG_SEED: readonly LeagueCatalogEntry[] = [
     coefficient: 5,
     realSquads: true,
     broadcastPool: 0.16,
-    avgTicketPrice: 18,
+    avgTicketPrice: 12,
   },
 
   // ── 이적 시장 전용 리그 — 경기를 하지 않는다 (kind: "market-only") ──
@@ -186,7 +186,7 @@ export const LEAGUE_CATALOG_SEED: readonly LeagueCatalogEntry[] = [
     realSquads: false,
     // 실측: 비파라슈트 구단 연 £11M ÷ EPL 최하위 £109M ≈ 0.10
     broadcastPool: 0.1,
-    avgTicketPrice: 24,
+    avgTicketPrice: 16,
   },
   {
     id: "segunda",
@@ -196,7 +196,7 @@ export const LEAGUE_CATALOG_SEED: readonly LeagueCatalogEntry[] = [
     coefficient: 2,
     realSquads: false,
     broadcastPool: 0.05,
-    avgTicketPrice: 15,
+    avgTicketPrice: 10,
   },
   {
     id: "serieb",
@@ -206,7 +206,7 @@ export const LEAGUE_CATALOG_SEED: readonly LeagueCatalogEntry[] = [
     coefficient: 3,
     realSquads: false,
     broadcastPool: 0.04,
-    avgTicketPrice: 13,
+    avgTicketPrice: 9,
   },
   {
     id: "bundesliga2",
@@ -216,7 +216,7 @@ export const LEAGUE_CATALOG_SEED: readonly LeagueCatalogEntry[] = [
     coefficient: 4,
     realSquads: false,
     broadcastPool: 0.06,
-    avgTicketPrice: 16,
+    avgTicketPrice: 11,
   },
   {
     id: "ligue2",
@@ -226,7 +226,7 @@ export const LEAGUE_CATALOG_SEED: readonly LeagueCatalogEntry[] = [
     coefficient: 5,
     realSquads: false,
     broadcastPool: 0.03,
-    avgTicketPrice: 11,
+    avgTicketPrice: 7,
   },
 ];
 

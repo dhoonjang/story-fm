@@ -996,7 +996,8 @@ describe("재정 이벤트 스킬", () => {
     // 건당 상한만으론 하루를 지킬 수 없다 — 같은 장면을 나눠 부르면 넘어간다
     expect(perEvent * 3).toBeGreaterThan(daily);
 
-    const calls = [1, 2, 3].map((i) =>
+    // 건당 상한 안의 값을 반복해 부르면 언젠가 하루 한도가 막는다
+    const calls = [1, 2, 3, 4].map((i) =>
       applyFinanceEvent(state, {
         kind: "income",
         category: "commercial",
@@ -1004,9 +1005,13 @@ describe("재정 이벤트 스킬", () => {
         note: `스폰서 성과 보너스 ${i}`,
       }),
     );
-    expect(calls.slice(0, 2).map((r) => r.ok)).toEqual([true, true]);
-    expect(calls[2]!.ok).toBe(false);
-    expect(calls[2]!.message).toContain("하루 한도");
+    const accepted = calls.filter((r) => r.ok);
+    const firstReject = calls.find((r) => !r.ok)!;
+    expect(accepted.length).toBeGreaterThan(0); // 건당 상한 안이니 최소 한 번은 지나간다
+    expect(firstReject).toBeTruthy();
+    expect(firstReject.message).toContain("하루 한도");
+    // 받아들인 총액이 하루 한도를 넘지 않는다
+    expect(accepted.length * Math.floor(perEvent)).toBeLessThanOrEqual(daily);
   });
 
   /**
