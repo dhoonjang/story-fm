@@ -263,9 +263,24 @@ interface SquadViewRowMeta {
   roleId: string | null;
   roleOptions: Array<{ id: string; ko: string; abbr: string; desc: string }>;
   /**
+   * **그 선수가 자리마다 마지막에 맡던 역할** — 자리 코드 → 역할 id
+   * (`GameState.roleMemory` → player.md §3.2).
+   *
+   * 화면이 코어 `inherit`와 **같은 순서로** 되찾기를 재현하는 근거다. 없으면
+   * 전술판은 벤치에서 올린 선수에게 기본 역할을 걸어 두었다가 자동 저장 응답이
+   * 와서야 기억한 역할로 튄다 — 감독이 누른 적 없는 변경이다.
+   *
+   * 자리 목록에서 사라진 역할은 싣지 않는다 (`recallRole`과 같은 기준).
+   */
+  roleMemory: Record<string, string>;
+  /**
    * 오늘 역할을 손댄 흔적 (`TacticAssignment.roleMemo`) — **화면이 대가를 저장 전에
    * 낼 수 있게** 함께 보낸다. `role`은 그날 아침의 역할(대가의 기준)이고 `paid`는
    * 오늘 이미 깎인 총량이다. 오늘 손대지 않았으면 null이고 기준은 `roleId`다.
+   *
+   * **자리 없는 행에도 싣는다** — 코어는 자리가 같으면 벤치를 다녀와도 흔적을
+   * 잇는데(`keepMemo`), 선발 행에만 실으면 돌아온 선수의 적응도 미리보기가
+   * 서버와 다른 자로 잰 값이 된다. 기준이 되는 자리는 `assignedPosition`이다.
    */
   roleToday: { role: string; paid: number } | null;
   /** 전술판 좌표 (배치가 있을 때) — 자유 배치 UI의 그리기 기준 */
@@ -1269,6 +1284,19 @@ export function buildOfficeViews(state: GameState): OfficeViews {
   );
   const issues = new Set(state.issues.map((i) => i.gamePlayerId));
 
+  /**
+   * 역할 기억 — 선수마다 (자리 → 역할). 화면이 코어 `inherit`의 되찾기를 같은
+   * 순서로 재현하는 근거다 (player.md §3.2). 자리 목록에서 사라진 역할은 없는
+   * 것으로 본다 — `recallRole`과 같은 기준이라 화면과 코어가 갈리지 않는다.
+   */
+  const roleMemoryOf = new Map<string, Record<string, string>>();
+  for (const memory of state.roleMemory ?? []) {
+    if (!rolesFor(memory.position).some((r) => r.id === memory.roleId)) continue;
+    const byPosition = roleMemoryOf.get(memory.gamePlayerId) ?? {};
+    byPosition[memory.position] = memory.roleId;
+    roleMemoryOf.set(memory.gamePlayerId, byPosition);
+  }
+
   // 선발의 전술판 좌표 — 좌표 없는 배치(구 세이브·채팅 지시)는 코드 기본 좌표로 그리는데,
   // 같은 코드가 둘이면 정확히 같은 점이 되므로 겹침을 풀어 준다. 저장하면 이 좌표가
   // 그대로 기록되어(setLineup) 다음 로드부터는 안정된다.
@@ -1378,8 +1406,15 @@ export function buildOfficeViews(state: GameState): OfficeViews {
                 desc: r.desc,
               }))
             : [],
+        roleMemory: roleMemoryOf.get(p.id) ?? {},
+        /**
+         * **자리가 없어도 싣는다.** 코어의 기준은 (선수·자리·오늘)이라 자리가
+         * 그대로면 벤치를 다녀와도 흔적이 이어진다(`keepMemo`). 선발 행에만
+         * 실으면 돌아온 선수의 적응도 미리보기가 서버와 다른 자로 잰 값이 된다.
+         * 어느 자리의 흔적인지는 `assignedPosition`이 말한다.
+         */
         roleToday:
-          slotted && assignment?.roleMemo?.date === state.date
+          assignment?.roleMemo?.date === state.date
             ? { role: assignment.roleMemo.role, paid: assignment.roleMemo.paid }
             : null,
         assignedPoint: liveSlot?.entry.point ?? pointOf.get(p.id) ?? null,

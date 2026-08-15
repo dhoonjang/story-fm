@@ -8,6 +8,7 @@ import {
   AXIS_GROUP_KO,
   AXIS_KO,
   CHIP_SIZE,
+  FAMILIARITY_BASELINE,
   anchorOf,
   conditionLabel,
   clampToBoard,
@@ -34,6 +35,7 @@ import {
   familiarityForRole,
   lineupBody,
   resetRolesForMovedPlayers,
+  roleAtSlot,
   type BoardState,
 } from "@/lib/board-roles";
 import { IconBoard, IconChevron } from "@/components/icons";
@@ -944,17 +946,19 @@ export function SquadView({
   /** 서버가 아는 2군 명단 — 저장할 때 "무엇이 달라졌는지"의 기준점 */
   const serverReserveRef = useRef<Set<string>>(new Set(serverBoard.reserve));
   serverReserveRef.current = new Set(serverBoard.reserve);
-  const serverRolesRef = useRef<Map<string, string>>(new Map(Object.entries(serverBoard.roles)));
-  serverRolesRef.current = new Map(Object.entries(serverBoard.roles));
+  /**
+   * 서버가 준 행 — 저장 본문이 "이 역할을 코어가 스스로 낼 수 있는가"를 재는 기준점.
+   * 기억이 들어 있어 되찾기 3단을 여기서 다시 밟을 수 있다 (player.md §3.2).
+   */
+  const rowsRef = useRef<Map<string, SquadRow>>(byId);
+  rowsRef.current = byId;
 
   const post = useCallback(
     (snapshot: BoardState) =>
       fetch(`/api/games/${game.id}/lineup`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          lineupBody(snapshot, serverReserveRef.current, serverRolesRef.current),
-        ),
+        body: JSON.stringify(lineupBody(snapshot, serverReserveRef.current, rowsRef.current)),
       }),
     [game.id],
   );
@@ -1040,7 +1044,12 @@ export function SquadView({
    * 자동 저장 왕복(3초)이 끝난 뒤에야 따라왔다. 감독이 "이 역할로 바꾸면 얼마가
    * 되나"를 손으로 더듬어 볼 수가 없다.
    */
-  const roleOf = (p: SquadRow): string | undefined => board.roles[p.id] ?? p.roleId ?? undefined;
+  const roleOf = (p: SquadRow): string | undefined => {
+    const i = board.occupants.indexOf(p.id);
+    // 자리가 없으면 역할도 없다 (player.md §3.1)
+    if (i < 0) return undefined;
+    return board.roles[p.id] ?? roleAtSlot(p, positionAtPoint(board.points[i]!));
+  };
 
   /**
    * 명단에 넘길 행 — **지금 화면의 배치·역할로 다시 맞춘 사본.**
@@ -1057,15 +1066,22 @@ export function SquadView({
       players.map((p) => {
         const idx = board.occupants.indexOf(p.id);
         const code = idx >= 0 ? positionAtPoint(board.points[idx]!) : null;
-        const role = board.roles[p.id] ?? p.roleId ?? undefined;
+        const role = board.roles[p.id] ?? (code ? roleAtSlot(p, code) : undefined);
         if (code === p.assignedPosition && role === (p.roleId ?? undefined)) return p;
         const fit = code ? positionProficiency(p.positions, code, p.foot) : p.positionFit;
         /**
          * 전술 적응도도 여기서 맞춘다 — 서버 값 그대로 두면 역할을 바꾼 직후
          * OVR만 움직이고 적응도는 옛 값에 머물러, **같은 화면의 두 숫자가 다른
          * 시점을 가리킨다** (player.md §7.2).
+         *
+         * ⚠️ **배치가 없던 선수는 아침 값부터 다르다.** 코어는 배치되는 순간
+         * `min(기준선, 팀 적응도)`로 잡는다(`newcomerFamiliarity`) — 뷰가 주는 기준선
+         * 60을 그대로 쓰면 판에 올린 직후엔 60이었다가 저장 응답에서 혼자 내려앉는다.
          */
-        const familiarity = code && role ? familiarityForRole(p, code, role) : p.familiarity;
+        const morning =
+          p.role === "스쿼드" ? Math.min(FAMILIARITY_BASELINE, squad.familiarity) : p.familiarity;
+        const familiarity =
+          code && role ? familiarityForRole({ ...p, familiarity: morning }, code, role) : morning;
         return {
           ...p,
           assignedPosition: code,
@@ -1075,7 +1091,7 @@ export function SquadView({
           adaptation: adaptationOf(fit, familiarity, code ?? p.assignedPosition ?? p.position),
         };
       }),
-    [players, board.occupants, board.points, board.roles],
+    [players, board.occupants, board.points, board.roles, squad.familiarity],
   );
 
   /** 감독이 고른 세부 역할의 지문 — 명단 표를 다시 그릴지 가리는 값 */
@@ -1145,7 +1161,7 @@ export function SquadView({
       bench = bench.filter((x) => x !== incoming.id);
       if (bench.length < MAX_BENCH) bench.push(outgoing);
     }
-    commit(resetRolesForMovedPlayers(board, { ...board, occupants, bench }));
+    commit(resetRolesForMovedPlayers({ ...board, occupants, bench }, byId));
   }
 
   /**
@@ -1155,10 +1171,10 @@ export function SquadView({
   function repositionSlot(index: number, point: BoardPoint) {
     const points = [...board.points];
     points[index] = snapToBoard(point);
-    const next = resetRolesForMovedPlayers(board, {
-      ...board,
-      points: separateBoardPoints(points, index),
-    });
+    const next = resetRolesForMovedPlayers(
+      { ...board, points: separateBoardPoints(points, index) },
+      byId,
+    );
     if (advisory) {
       const playerId = board.occupants[index];
       const target = next.points[index];
@@ -1230,7 +1246,7 @@ export function SquadView({
       const bench = board.bench.filter((id) => id !== inId);
       if (bench.length < MAX_BENCH) bench.push(outId);
       // 장부를 직접 저장하지 않는다. 다음 진행 턴의 substitute 검증 전까지는 작업 사본이다.
-      setBoard(resetRolesForMovedPlayers(board, { ...board, occupants, bench }));
+      setBoard(resetRolesForMovedPlayers({ ...board, occupants, bench }, byId));
       setAdvisoryPending(true);
       setSelection(null);
       return onOrder?.({ kind: "substitution", out: outId, in: inId });
@@ -1262,12 +1278,10 @@ export function SquadView({
 
     // 이 경로가 이슈의 재현 경로다 — 명단 화살표로 선발을 내리면 그 선수의 역할도 함께 내려간다
     commit(
-      resetRolesForMovedPlayers(board, {
-        ...board,
-        occupants,
-        bench: bench.slice(0, MAX_BENCH),
-        reserve,
-      }),
+      resetRolesForMovedPlayers(
+        { ...board, occupants, bench: bench.slice(0, MAX_BENCH), reserve },
+        byId,
+      ),
     );
   }
 
@@ -1419,24 +1433,22 @@ export function SquadView({
     setSort((prev) => ({ key, desc: prev.key === key ? !prev.desc : key !== "role" })),
   );
 
-  async function moveSquad(playerId: string, level: "first" | "reserve") {
-    setSaving(true);
-    setSaveError(null);
-    try {
-      const res = await fetch(`/api/games/${game.id}/squad`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ playerId, level }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "스쿼드 이동 실패");
-      onUpdate(data);
-      setSelection(null);
-    } catch (e) {
-      setSaveError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
-    }
+  /**
+   * 1·2군 이동 — **다른 조작과 같은 문을 지난다.**
+   *
+   * 단독 왕복이던 때는 이 버튼만 스피너가 돌았고, 판을 짜는 동안 그 한 요청이
+   * 자동 저장과 순서를 다퉜다. `lineupBody`가 서버와 달라진 `reserve`를
+   * `squadLevels` 차이로 실어 보내고, 라우트가 승격 → 배치 → 강등 순으로 처리한다.
+   */
+  function moveSquad(playerId: string, level: "first" | "reserve") {
+    if (!live) return;
+    const reserve = board.reserve.filter((x) => x !== playerId);
+    // 강등은 매치데이 벤치 지정도 함께 거둔다 — 코어가 배치에서 빼기 때문이다(`setSquadLevel`)
+    commit({
+      ...board,
+      reserve: level === "reserve" ? [...reserve, playerId] : reserve,
+      bench: level === "reserve" ? board.bench.filter((x) => x !== playerId) : board.bench,
+    });
   }
 
   /**
@@ -1513,10 +1525,18 @@ export function SquadView({
                     {benchSet.has(p.id) ? "벤치에서 빼기" : "매치데이 벤치로"}
                   </button>
                 )}
+                {/* 선발을 그대로 내리면 판이 열 명이 된다 — 코어가 배치에서 함께 빼기 때문이다.
+                옆의 벤치 지정이 선발 행에서 빠져 있는 것과 같은 이유다 */}
                 <button
                   className="ghost-btn"
-                  disabled={saving || !live}
-                  title={live ? undefined : "경기 중에는 1·2군을 옮길 수 없습니다"}
+                  disabled={!live || onPitch.has(p.id)}
+                  title={
+                    !live
+                      ? "경기 중에는 1·2군을 옮길 수 없습니다"
+                      : onPitch.has(p.id)
+                        ? "선발에서 내린 뒤에 옮길 수 있습니다"
+                        : undefined
+                  }
                   onClick={() => onMoveSquadRow(p.id, localReserve.has(p.id) ? "first" : "reserve")}
                 >
                   {localReserve.has(p.id) ? "1군 승격" : "2군 강등"}

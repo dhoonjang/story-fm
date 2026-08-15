@@ -957,6 +957,14 @@ const FAMILIARITY_MIN = 0;
  * 시즌을 완주한 주전이 닿을 수 있어야 한다.
  */
 export const FAMILIARITY_MAX = 100;
+/**
+ * 배치가 없는 선수의 기준선 — **처음 판에 오르는 선수의 시작값이기도 하다.**
+ *
+ * 다만 그대로 주지는 않는다: 코어는 `min(기준선, 팀 적응도)`로 잡아
+ * (`newcomerFamiliarity`) 팀이 재적응 중일 때 신입이 고참보다 전술을 잘 아는
+ * 역전을 막는다. 전술판도 판에 올리는 순간 같은 값을 내야 하므로 domain에 산다.
+ */
+export const FAMILIARITY_BASELINE = 60;
 /** 아래 구간에서 판정을 그대로 받는 배율 — 가속은 두지 않는다 */
 const GAIN_EARLY_BOOST = 1;
 

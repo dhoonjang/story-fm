@@ -163,3 +163,88 @@ describe("라인업 저장 — 역할 반려", () => {
     expect(editsOf(game.id).some((e) => e.key === "role:rejected")).toBe(false);
   });
 });
+
+/**
+ * 화면이 자동 저장 응답을 기다리지 않고 같은 값에 닿는 근거 — player.md §3.2.
+ * 전술판은 되찾은 역할을 저장에 싣지 않으므로, 싣지 않아도 서버가 스스로 같은
+ * 값에 닿아야 한다. 닿지 않으면 화면만 말하는 역할이 생긴다.
+ */
+describe("라인업 저장 — 역할 기억과 1·2군", () => {
+  it("화면이 되찾은 역할을 보내지 않아도 서버가 같은 값에 닿는다", async () => {
+    const game = await newGame("arsenal", 95);
+    const starters = startersOf(game);
+    const target = starters.find((p) => p.positionGroup !== "GK" && p.roleOptions.length > 1)!;
+    const sub = game.views.squad.players.find(
+      (p) => p.role !== "선발" && p.squadLevel === "first",
+    )!;
+    const slot = target.assignedPoint!;
+    const chosen = otherRoleFor(target);
+    const rowOf = (payload: GamePayload, id: string) =>
+      payload.views.squad.players.find((p) => p.id === id)!;
+
+    // ① 감독이 자리에 역할을 건다 (기본 역할이 아닌 것)
+    const chose = (await (
+      await postLineup(
+        json({
+          starting: slotsOf(starters),
+          bench: [],
+          roles: [{ playerId: target.id, role: chosen }],
+        }),
+        params(game.id),
+      )
+    ).json()) as GamePayload;
+    expect(rowOf(chose, target.id).roleId).toBe(chosen);
+    expect(chosen).not.toBe(target.roleId);
+
+    // ② 벤치로 내린다 — 자리가 없으니 역할도 없다(§3.1). 기억이 그 값을 받아 간다
+    const benched = (await (
+      await postLineup(
+        json({
+          starting: slotsOf(starters).map((s) =>
+            s.playerId === target.id ? { playerId: sub.id, point: slot } : s,
+          ),
+          bench: [{ playerId: target.id }],
+          roles: [],
+        }),
+        params(game.id),
+      )
+    ).json()) as GamePayload;
+    expect(rowOf(benched, target.id).roleId).toBeNull();
+    // 기억은 배치 바깥에 산다 — 자리 없는 행에도 실린다
+    expect(rowOf(benched, target.id).roleMemory[target.assignedPosition!]).toBe(chosen);
+
+    // ③ **같은 자리로** 되돌린다 — 역할은 한 줄도 보내지 않는다
+    const back = (await (
+      await postLineup(json({ starting: slotsOf(starters), bench: [], roles: [] }), params(game.id))
+    ).json()) as GamePayload;
+    expect(rowOf(back, target.id).roleId).toBe(chosen);
+  });
+
+  it("1·2군 이동이 라인업 저장 한 요청으로 간다", async () => {
+    const game = await newGame("liverpool", 96);
+    const squad = game.views.squad.players;
+    const starters = startersOf(game);
+    const promoted = squad.find((p) => p.squadLevel === "reserve")!;
+    const demoted = squad.find((p) => p.role !== "선발" && p.squadLevel === "first")!;
+
+    // 전술판의 1·2군 이동은 배치와 한 요청으로 간다 (team.md §5)
+    const res = await postLineup(
+      json({
+        starting: slotsOf(starters),
+        bench: [],
+        squadLevels: [
+          { playerId: promoted.id, level: "first" },
+          { playerId: demoted.id, level: "reserve" },
+        ],
+        roles: [],
+      }),
+      params(game.id),
+    );
+    expect(res.status).toBe(200);
+    const after = ((await res.json()) as GamePayload).views.squad.players;
+    expect(after.find((p) => p.id === promoted.id)!.squadLevel).toBe("first");
+    expect(after.find((p) => p.id === demoted.id)!.squadLevel).toBe("reserve");
+    // 배치는 그대로다 — 강등이 방금 짠 라인업을 흔들지 않는다(라우트의 승격→배치→강등 순)
+    expect(after.filter((p) => p.role === "선발")).toHaveLength(11);
+  });
+});

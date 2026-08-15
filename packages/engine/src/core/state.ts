@@ -41,6 +41,7 @@ import type {
 import {
   ATTRIBUTE_AXES,
   DEFAULT_FORMATION,
+  FAMILIARITY_BASELINE,
   FORMATIONS,
   MATCHDAY_SQUAD,
   canRegister,
@@ -638,8 +639,7 @@ export function assignmentFor(state: GameState, playerId: string): TacticAssignm
   return tacticsOf(state, p.teamId).assignments.find((a) => a.playerId === playerId) ?? null;
 }
 
-/** 이 선수의 전술 적응도 — 배치가 없으면 기준선 */
-export const FAMILIARITY_BASELINE = 60;
+/** 이 선수의 전술 적응도 — 배치가 없으면 기준선(`FAMILIARITY_BASELINE`, domain) */
 export function familiarityOf(state: GameState, playerId: string): number {
   return assignmentFor(state, playerId)?.familiarity ?? FAMILIARITY_BASELINE;
 }
@@ -658,6 +658,7 @@ export function squadFamiliarity(state: GameState, teamId: string): number {
  */
 export {
   ADAPTATION_IMPACT,
+  FAMILIARITY_BASELINE,
   PROFICIENCY_FACTOR_FLOOR,
   PROFICIENCY_FLOOR,
   PROFICIENCY_LOG_SCALE,
