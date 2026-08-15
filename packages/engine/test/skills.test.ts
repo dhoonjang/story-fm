@@ -433,12 +433,14 @@ describe("주장·전술·개인 지시", () => {
   it("슬라이더를 올렸다 되돌리면 잃은 만큼 돌아온다 (되돌리기가 공짜)", () => {
     const state = createTestGame();
     const fam = () => assignmentsOf(state, state.userTeamId, "starting")[0]!.familiarity;
+    // 시작 성향은 스쿼드가 정한다 — 값을 박아 두면 카탈로그가 바뀔 때 어긋난다
+    const opening = userTactics(state).spec.mentality;
     for (const a of userTactics(state).assignments) a.familiarity = 90;
     rememberTactics(userTactics(state), state.date);
 
-    setTactics(state, { mentality: 5 });
+    setTactics(state, { mentality: opening === 5 ? 1 : 5 });
     expect(fam()).toBeLessThan(90);
-    setTactics(state, { mentality: 3 });
+    setTactics(state, { mentality: opening });
     expect(fam()).toBe(90);
   });
 
@@ -542,15 +544,18 @@ describe("주장·전술·개인 지시", () => {
     };
     const starters = tactics.assignments.filter((a) => a.role === "starting");
     const sorted = [...starters].sort((a, b) => uptake(a.playerId) - uptake(b.playerId));
-    const dull = sorted[0]!;
-    const sharp = sorted[sorted.length - 1]!;
 
     setTactics(state, { pressing: 5, defensiveLine: 5 }); // 폭이 보이도록 크게 바꾼다
     // 전원이 정확히 같은 값만큼 떨어지면 그건 팀이 아니라 슬라이더의 움직임이다
     const drops = starters.map((a) => 70 - a.familiarity);
     expect(new Set(drops).size, "전원이 같은 폭으로 떨어졌다").toBeGreaterThan(1);
-    expect(70 - sharp.familiarity, "판단 축이 높은 선수가 더 흔들렸다").toBeLessThan(
-      70 - dull.familiarity,
+    // 개인 편차가 얹히므로 **양 끝 한 명씩**이 아니라 무리로 본다 — 한 명끼리
+    // 재면 스쿼드가 바뀔 때마다 뒤집힌다
+    const half = Math.floor(sorted.length / 2);
+    const mean = (xs: typeof starters) =>
+      xs.reduce((t, a) => t + (70 - a.familiarity), 0) / xs.length;
+    expect(mean(sorted.slice(-half)), "판단 축이 높은 무리가 더 흔들렸다").toBeLessThan(
+      mean(sorted.slice(0, half)),
     );
   });
 

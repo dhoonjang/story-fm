@@ -237,7 +237,9 @@ describe("녹아웃 무승부 — 연장을 먼저 치르고 그래도 비기면
   it("연장 골은 시즌 기록에도 남는다", () => {
     const state = world();
     let scored: string | null = null;
-    for (let pair = 100; pair < 112 && !scored; pair++) {
+    // 연장 골이 나올 때까지 시드를 넘긴다 — 카탈로그가 바뀌면 어느 시드에서
+    // 터지는지도 바뀌므로 폭을 넉넉히 둔다
+    for (let pair = 100; pair < 160 && !scored; pair++) {
       const legs = stageTie(state, "facup", "r16", pair, [
         { home: "arsenal", away: "chelsea", homeGoals: 0, awayGoals: 0 },
       ]);

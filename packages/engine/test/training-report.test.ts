@@ -89,6 +89,8 @@ describe("결과는 훈련 날짜별로 남는다", () => {
     // 세션마다 일정 엔트리를 가리킨다 — 성장 로그의 출처가 된다
     for (const s of brief.sessions) expect(s.entryId).toBeTruthy();
 
+    // 대상이 둘 이상이어야 날짜가 갈린다 — 스쿼드가 바뀌면 명단 길이도 바뀐다
+    expect(brief.subjects.length, "판정 대상이 둘 미만이다").toBeGreaterThan(1);
     const targets = brief.subjects.slice(0, 3);
     applyTrainingOutcomes(
       state,
@@ -98,7 +100,7 @@ describe("결과는 훈련 날짜별로 남는다", () => {
         tacticGain: 1,
         attribute: null,
         note: "",
-        date: days[i]!,
+        date: days[i % days.length]!,
       })),
     );
 

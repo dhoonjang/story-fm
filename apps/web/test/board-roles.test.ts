@@ -161,13 +161,25 @@ describe("자리를 옮기면 역할이 그 자리의 것이 된다", () => {
   it("새 자리에서도 유효한 역할은 그대로 둔다", () => {
     const views = buildOfficeViews(game(75));
     const server = boardOf(views);
-    const index = server.occupants.findIndex((id) => server.roles[id] !== undefined);
+    // 골키퍼처럼 그 역할이 한 자리에만 있는 선수도 있으므로 **옮길 수 있는**
+    // 선수를 찾는다 — 스쿼드가 바뀌면 몇 번째 선수가 그런지도 바뀐다
+    let index = -1;
+    let target: ReturnType<typeof pointWhere> = null;
+    for (let i = 0; i < server.occupants.length; i++) {
+      const id = server.occupants[i]!;
+      const role = server.roles[id];
+      if (role === undefined) continue;
+      const at = positionAtPoint(server.points[i]!);
+      const to = pointWhere((p) => p !== at && rolesFor(p).some((r) => r.id === role));
+      if (to !== null) {
+        index = i;
+        target = to;
+        break;
+      }
+    }
+    expect(index, "역할을 유지한 채 옮길 수 있는 선수가 없다").toBeGreaterThanOrEqual(0);
     const mover = server.occupants[index]!;
     const before = server.roles[mover]!;
-    const from = positionAtPoint(server.points[index]!);
-    // 자리 코드는 달라져도 그 역할이 목록에 남아 있는 좌표 (예: CB ↔ LCB)
-    const target = pointWhere((to) => to !== from && rolesFor(to).some((r) => r.id === before));
-    expect(target).not.toBeNull();
 
     const points = server.points.map((pt, i) => (i === index ? target! : pt));
     const next = resetRolesForMovedPlayers({ ...server, points }, rowsOf(views));

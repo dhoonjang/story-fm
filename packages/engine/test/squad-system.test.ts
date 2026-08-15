@@ -56,7 +56,13 @@ describe("1·2군 스쿼드", () => {
 
   it("2군 선수는 승격 전 라인업에 들어갈 수 없고, 강등하면 배치에서 빠진다", () => {
     const state = createTestGame();
-    const reserve = reservePlayers(state, state.userTeamId)[0]!;
+    // 등록 규칙(25인·홈그로운)에 막히지 않는 2군을 고른다 — 이 테스트가 보려는 건
+    // 승격 여부가 아니라 "2군은 라인업에 못 들어간다"는 규칙이다
+    const reserve = reservePlayers(state, state.userTeamId).find(
+      (p) => setSquadLevel(state, { playerId: p.id, level: "first" }).ok
+        && setSquadLevel(state, { playerId: p.id, level: "reserve" }).ok,
+    )!;
+    expect(reserve, "승격 가능한 2군이 없다").toBeDefined();
     const starters = userTactics(state)
       .assignments.filter((a) => a.role === "starting")
       .map((a) => ({ playerId: a.playerId, position: a.position }));
@@ -73,7 +79,13 @@ describe("1·2군 스쿼드", () => {
     const state = createTestGame();
     // 감독 팀 1군만 훈련·경기 결산이 판정한다. 2군은 타 팀 선수와 같은 코어 로직이다
     const first = userPlayers(state).find((p) => squadLevelOf(p) === "first")!;
-    const reserve = reservePlayers(state, state.userTeamId)[0]!;
+    // 등록 규칙(25인·홈그로운)에 막히지 않는 2군을 고른다 — 이 테스트가 보려는 건
+    // 승격 여부가 아니라 "2군은 라인업에 못 들어간다"는 규칙이다
+    const reserve = reservePlayers(state, state.userTeamId).find(
+      (p) => setSquadLevel(state, { playerId: p.id, level: "first" }).ok
+        && setSquadLevel(state, { playerId: p.id, level: "reserve" }).ok,
+    )!;
+    expect(reserve, "승격 가능한 2군이 없다").toBeDefined();
     expect(developsByCore(state, first), "1군이 코어 성장 대상이 됐다").toBe(false);
     expect(developsByCore(state, reserve), "2군이 코어 성장에서 빠졌다").toBe(true);
 

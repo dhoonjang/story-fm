@@ -1316,9 +1316,12 @@ export function weightsFor(position: string): AxisValues {
  * 가중치 모양의 문제가 된다.
  *
  * 파생 공식이나 가중치가 바뀌면 함께 갱신한다 — world.test.ts가 분포를 고정한다.
+ * **입력이 바뀌어도 마찬가지다.** 골키퍼의 `passing`이 자리 채우기용 판단값에서
+ * EA 실측 킥력으로 바뀌자(52~62 → 70~87) 원값 평균이 1.3 올라 종합이 골키핑을
+ * 넘어섰다 — GK 기준점은 그 몫을 되돌린 값이다(64.6 → 65.4).
  */
 const RAW_PIVOT: Record<WeightSlot, number> = {
-  GK: 64.6,
+  GK: 65.4,
   CB: 67.4,
   FB: 66.4,
   DM: 65.8,

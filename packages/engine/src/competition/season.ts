@@ -549,6 +549,9 @@ export function transitionSeason(state: GameState): string[] {
     for (const player of [...squad].sort((a, b) => b.attributes.overall - a.attributes.overall)) {
       if (layoutSlots.length >= 11) break;
       const position = naturalPositionOf(player).position;
+      // 골문은 하나다 — 이미 GK 칸이 있는데 또 채우면 시즌을 넘길 때마다 골키퍼
+      // 칸이 늘어난다(17시즌을 돌리면 선발 11명 중 넷이 골키퍼가 됐다).
+      if (position === "GK" && layoutSlots.includes("GK")) continue;
       layoutSlots.push(position);
       layoutPoints.push(anchorOf(position));
     }

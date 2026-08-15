@@ -496,8 +496,12 @@ describe("지역 플랜", () => {
     const flat = buildStrengthPacket(withPlans(undefined), strongRight());
     const intoStrength = buildStrengthPacket(withPlans(overload("left")), strongRight());
     const intoWeakness = buildStrengthPacket(withPlans(overload("right")), strongRight());
-    expect(intoStrength.guide.expectedGoals.home).toBeLessThan(flat.guide.expectedGoals.home);
-    expect(intoWeakness.guide.expectedGoals.home).toBeGreaterThan(flat.guide.expectedGoals.home);
+    // `expectedGoals`는 소수 둘째 자리까지라 두꺼운 쪽을 노린 손해(0.005 미만)가
+    // 반올림에 먹힌다 — 방향을 보는 자리이므로 원값(`shotProfiles`)에서 잰다
+    const xg = (p: typeof flat) =>
+      (p.guide.shotProfiles?.home ?? []).reduce((sum, s) => sum + s.expectedGoals, 0);
+    expect(xg(intoStrength)).toBeLessThan(xg(flat));
+    expect(xg(intoWeakness)).toBeGreaterThan(xg(flat));
   });
 
   it("보호는 상대가 실제로 다니는 레인을 골라야 값을 한다", () => {

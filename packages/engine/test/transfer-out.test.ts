@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   answerIncomingOffer,
   adjustTransferBudget,
+  askingPriceFor,
   incomingOffers,
   listingOf,
   offerPlayerOut,
@@ -159,14 +160,17 @@ describe("매각 제안 — 특정 구단에 직접 묻는다", () => {
     const state = createTestGame(11);
     state.date = "2026-08-01";
     const target = sellable(state);
-    offerPlayerOut(state, { playerId: target.id, teamId: buyerOf(state).id, fee: 30_000_000 });
+    // 값을 박아 두면 안 된다 — 하한이 그 선수의 시장가에 붙어 있어서, 스쿼드가
+    // 바뀌면 "하한이 우리 호가보다 높은" 빈 구간이 나온다
+    const ask = askingPriceFor(state, target);
+    offerPlayerOut(state, { playerId: target.id, teamId: buyerOf(state).id, fee: ask });
     const negotiation = openNegotiationFor(state, target.id)!;
     state.date = negotiation.rounds[0]!.respondsOn!;
 
     const raised = respondOffer(state, {
       negotiationId: negotiation.id,
       verdict: "counter",
-      fee: 35_000_000,
+      fee: Math.round(ask * 1.2),
     });
     expect(raised.ok).toBe(false);
     expect(raised.message).toContain("미만");
@@ -174,7 +178,7 @@ describe("매각 제안 — 특정 구단에 직접 묻는다", () => {
     const cut = respondOffer(state, {
       negotiationId: negotiation.id,
       verdict: "counter",
-      fee: 26_000_000,
+      fee: Math.round(ask * 0.9),
     });
     expect(cut.ok, cut.message).toBe(true);
   });
