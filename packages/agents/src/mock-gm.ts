@@ -499,9 +499,15 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
     };
     const result = setTraining(state, input);
     calls.push({ name: "set_training", summary: result.message, input, ...carry(result) });
+    /**
+     * 장면은 **도구 결과를 인용하지 않는다.** `message`는 모델이 읽고 소화할 줄이고,
+     * 무엇이 잡혔는지는 칩과 말풍선이 이미 항목으로 세운다 — 대사가 그걸 옮겨 적으면
+     * 같은 사실이 두 번, 그것도 한쪽은 글자 벽으로 선다.
+     */
+    const kinds = [...new Set(input.repeatWeekly.map((r) => r.label))].join("·");
     return {
       text: result.ok
-        ? `${coach(state)} *수첩에 받아 적는다* ${result.message}. 세션에 반영합니다.`
+        ? `${coach(state)} *수첩에 받아 적는다* ${kinds} 세션으로 주 ${input.repeatWeekly.length}회 잡았습니다.`
         : `${coach(state)} ${result.message}`,
       toolCalls: calls,
     };

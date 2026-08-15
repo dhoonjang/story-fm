@@ -84,6 +84,9 @@ describe("mock GM — 유저 여정 시나리오", () => {
     const labels = state.trainingSessions.filter((x) => !x.auto).map((x) => x.label);
     for (const label of labels) expect(said).not.toContain(label);
     expect(JSON.stringify(call.brief)).not.toContain("갈아엎자");
+    // 장면은 도구 결과를 인용하지 않는다 — 같은 사실이 대사와 말풍선에 두 번 서면 안 된다
+    expect(turn.text).not.toContain(call.summary);
+    expect(turn.text).not.toContain("매주 월요일 오전=");
   });
 
   it("훈련 지시 → set_training 스킬이 세션을 등록한다", () => {
