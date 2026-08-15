@@ -1859,3 +1859,4 @@ export function describeTactics(state: GameState): string {
 }
 
 export { MATCHDAY_BENCH, groupOf, tacticsOf };
+export { forgetRoles, recallRole, rememberRole } from "./role-memory";

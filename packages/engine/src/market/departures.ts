@@ -7,6 +7,7 @@ import { estimateWeeklyWage, wageSubjectOf } from "../world/wages";
 import { makeRng } from "../core/rng";
 import { assignSquadNumber } from "../squad/numbers";
 import type { SkillResult } from "../skills";
+import { forgetRoles } from "../skills/role-memory";
 import {
   activeContract,
   groupOf,
@@ -75,6 +76,7 @@ export function toFreeAgency(
   releaseFromTactics(state, from, player.id);
   state.transferList = state.transferList.filter((l) => l.gamePlayerId !== player.id);
   state.playerTraining = state.playerTraining.filter((t) => t.gamePlayerId !== player.id);
+  forgetRoles(state, player.id);
   player.isCaptain = false;
   player.teamId = FREE_AGENT_TEAM;
   player.squadNumber = undefined;
