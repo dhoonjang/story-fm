@@ -142,19 +142,3 @@ export function MarketCardView({ card }: { card: MarketCard }) {
     </div>
   );
 }
-
-/** payload가 없던 옛 세이브의 오퍼 판정 — 펼치는 칩 대신 결과 한 줄만 남긴다. */
-export function OfferVerdictCard({ summary, tone }: { summary: string; tone?: "good" | "bad" }) {
-  const medicalRenegotiation = summary.includes("메디컬 재협상");
-  return (
-    <div
-      className={`market-card compact${tone === "good" ? " accept" : tone === "bad" ? " reject" : ""}`}
-      data-testid="market-verdict-legacy"
-    >
-      <div className="mc-head">
-        <span className="mc-badge">{medicalRenegotiation ? "메디컬 재협상" : "오퍼 판정"}</span>
-        <span className="mc-summary">{summary}</span>
-      </div>
-    </div>
-  );
-}

@@ -32,6 +32,7 @@ import type { MatchBoardOrder } from "@/lib/match-orders";
 import { slotOverallOf } from "@/lib/slot-overall";
 import { IconBoard, IconChevron } from "@/components/icons";
 import { PitchChip, PitchGround } from "./pitch";
+import { createLineupSaver, type LineupSaveOutcome, type LineupSaver } from "./lineup-saver";
 
 const money = (n: number) => `£${(n / 1e6).toFixed(1)}M`;
 
@@ -848,14 +849,6 @@ interface BoardState {
 type Tier = "선발" | "벤치" | "예비" | "2군";
 
 const MAX_BENCH = 9;
-/**
- * 조작이 멈춘 뒤 이만큼 지나면 저장한다 — 연속 드래그·슬라이더 연타·역할 선택을
- * 한 번으로 묶는다. **판을 짜는 일은 한 번의 조작으로 끝나지 않는다**: 자리를
- * 옮기고 역할을 고르고 벤치를 바꾸는 것이 하나의 결정이라, 창을 짧게 잡으면
- * 그 결정이 요청 여러 개로 쪼개진다. 저장을 놓칠 걱정은 없다 — 탭을 떠날 때
- * 예약된 저장을 흘려보낸다.
- */
-const AUTOSAVE_MS = 3000;
 
 /** 골키퍼 자리 수 — 정확히 1이 아니면 서버가 반려하므로 저장을 보류한다 */
 const gkCountOf = (b: BoardState) => b.points.filter((p) => positionAtPoint(p) === "GK").length;
@@ -901,6 +894,7 @@ export function SquadView({
   onOrder,
   boardOpen = true,
   onToggleBoard,
+  saver: sharedSaver,
 }: {
   game: GamePayload;
   onUpdate: (payload: GamePayload) => void;
@@ -926,6 +920,13 @@ export function SquadView({
    * 시간 이동 손잡이와 같은 경로다.
    */
   onOrder?: (order: MatchBoardOrder) => void;
+  /**
+   * 자동 저장 대기열 — **화면이 쥐고 있으면 턴이 나가기 전에 비워진다.**
+   *
+   * 판이 자기 안에서만 예약을 들고 있으면 채팅은 그것을 모른 채 턴을 보내고,
+   * 서버는 옛 배치로 GM 입력을 만든다 (lineup-saver.ts).
+   */
+  saver?: LineupSaver;
 }) {
   const squad = game.views.squad;
   const players = squad.players;
@@ -968,9 +969,12 @@ export function SquadView({
   // 자동 저장 — rev는 로컬 변경 번호. 저장된 번호보다 앞서 있으면 아직 서버에 안 갔다
   const revRef = useRef(0);
   const savedRevRef = useRef(0);
-  const pendingRef = useRef<BoardState | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirty = revRef.current !== savedRevRef.current;
+  // 예약·진행 중인 저장은 판 바깥이 쥔다 — 턴이 나가기 전에 화면이 비운다.
+  // 혼자 서는 자리(테스트·판만 그리는 화면)에서는 제 것을 만들어 쓴다.
+  const ownSaverRef = useRef<LineupSaver | null>(null);
+  ownSaverRef.current ??= createLineupSaver();
+  const saver = sharedSaver ?? ownSaverRef.current;
   /** 서버가 아는 2군 명단 — 저장할 때 "무엇이 달라졌는지"의 기준점 */
   const serverReserveRef = useRef<Set<string>>(new Set(serverBoard.reserve));
   serverReserveRef.current = new Set(serverBoard.reserve);
@@ -989,27 +993,31 @@ export function SquadView({
     [game.id],
   );
 
-  const flush = useCallback(async () => {
-    timerRef.current = null;
-    const snapshot = pendingRef.current;
-    // 골키퍼가 어긋난 배치는 서버가 반려한다 — 배너로 알리고 고칠 때까지 보류
-    if (!snapshot || gkCountOf(snapshot) !== 1) return;
-    pendingRef.current = null;
-    const rev = revRef.current;
-    setSaving(true);
-    setSaveError(null);
-    try {
-      const res = await post(snapshot);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "저장 실패");
-      savedRevRef.current = rev;
-      onUpdate(data);
-    } catch (e) {
-      setSaveError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
-    }
-  }, [onUpdate, post]);
+  const save = useCallback(
+    async (snapshot: BoardState, rev: number): Promise<LineupSaveOutcome> => {
+      // 골키퍼가 어긋난 배치는 서버가 반려한다 — 보내지 않고 대기열에 남긴다.
+      // 화면은 이미 이유를 말하고 있고(`gkIssue`), 고칠 때까지 턴도 나가지 않는다.
+      if (gkCountOf(snapshot) !== 1)
+        return { ok: false, error: "GK 자리가 한 곳이 될 때까지 저장이 보류됩니다", keep: true };
+      setSaving(true);
+      setSaveError(null);
+      try {
+        const res = await post(snapshot);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "저장 실패");
+        savedRevRef.current = rev;
+        onUpdate(data);
+        return { ok: true };
+      } catch (e) {
+        const error = e instanceof Error ? e.message : String(e);
+        setSaveError(error);
+        return { ok: false, error };
+      } finally {
+        setSaving(false);
+      }
+    },
+    [onUpdate, post],
+  );
 
   /** 로컬 변경을 반영하고 저장을 예약한다 — 모든 전술판 조작이 이 문을 지난다 */
   /**
@@ -1024,13 +1032,12 @@ export function SquadView({
   const commit = useCallback(
     (next: BoardState, opts?: { keepSelection?: boolean }) => {
       revRef.current += 1;
+      const rev = revRef.current;
       setBoard(next);
       if (opts?.keepSelection !== true) setSelection(null);
-      pendingRef.current = next;
-      if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => void flush(), AUTOSAVE_MS);
+      saver.schedule(() => save(next, rev));
     },
-    [flush],
+    [save, saver],
   );
 
   // 서버 값이 바뀌면 작업 사본을 맞춘다. 저장 안 된 로컬 변경이 있으면 덮지 않는다
@@ -1041,15 +1048,9 @@ export function SquadView({
     setAdvisoryPending(false);
   }, [serverBoard]);
 
-  // 탭을 떠나 언마운트될 때 예약된 저장을 흘려보낸다 (마지막 조작을 잃지 않게)
-  useEffect(
-    () => () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-      const snapshot = pendingRef.current;
-      if (snapshot && gkCountOf(snapshot) === 1) void post(snapshot);
-    },
-    [post],
-  );
+  // 탭을 떠나 언마운트될 때 예약된 저장을 흘려보낸다 (마지막 조작을 잃지 않게).
+  // 기다리지는 않지만 대기열이 그 요청을 쥐고 있어, 곧바로 나가는 턴은 이것부터 기다린다.
+  useEffect(() => () => void saver.flush(), [saver]);
 
   const boardSlots: BoardSlot[] = board.points.map((point, i) => {
     const playerId = board.occupants[i];

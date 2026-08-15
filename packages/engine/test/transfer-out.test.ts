@@ -9,9 +9,11 @@ import {
   playersOf,
   respondOffer,
   setTransferList,
+  teamName,
   userPlayers,
   type GameState,
 } from "@story-fm/engine";
+import type { MarketCard } from "@story-fm/domain";
 import { completeDeal, createTestGame } from "./helpers";
 import { advanceDays } from "./helpers";
 
@@ -104,6 +106,53 @@ describe("매각 제안 — 특정 구단에 직접 묻는다", () => {
     expect(
       offerPlayerOut(state, { playerId: theirs.id, teamId: "arsenal", fee: 10_000_000 }).ok,
     ).toBe(false);
+  });
+
+  /**
+   * 내보내는 오퍼도 **카드로 선다.** payload가 없으면 화면이 옛 세이브로 보고
+   * 칩으로 폴백해(`apps/web/lib/market-calls.ts`) 금액·확률·기한이 줄글에 접힌다 —
+   * 들어오는 오퍼는 카드인데 내보내는 오퍼만 칩이던 자리다.
+   */
+  it("카드 payload가 실린다 — 상대는 사려는 구단이다", () => {
+    const state = createTestGame(11);
+    state.date = "2026-08-01";
+    const target = sellable(state);
+    const buyer = buyerOf(state);
+    const res = offerPlayerOut(state, {
+      playerId: target.id,
+      teamId: buyer.id,
+      fee: 30_000_000,
+      weeklyWage: 120_000,
+      years: 4,
+    });
+    expect(res.ok, res.message).toBe(true);
+    const card = res.payload as MarketCard;
+    expect(card.kind).toBe("offer");
+    expect(card.playerId).toBe(target.id);
+    expect(card.playerName).toBe(target.name);
+    // 우리가 파는 쪽이므로 상대는 선수의 지금 소속(우리)이 아니라 **사려는 구단**이다
+    expect(card.counterpart).toBe(teamName(buyer.id));
+    expect(card.counterpart).not.toBe(teamName(state.userTeamId));
+    expect(card.terms).toEqual({ fee: 30_000_000, weeklyWage: 120_000, years: 4 });
+    expect(card.odds).toBeTruthy();
+    expect(card.dueOn).toBe(openNegotiationFor(state, target.id)!.rounds[0]!.respondsOn);
+    expect(card.loan).toBeUndefined();
+  });
+
+  it("임대로 내보내면 카드가 임대로 선다", () => {
+    const state = createTestGame(11);
+    state.date = "2026-08-01";
+    const target = sellable(state);
+    const res = offerPlayerOut(state, {
+      playerId: target.id,
+      teamId: buyerOf(state).id,
+      fee: 2_000_000,
+      loan: true,
+    });
+    expect(res.ok, res.message).toBe(true);
+    const card = res.payload as MarketCard;
+    expect(card.kind).toBe("offer");
+    expect(card.loan).toBe(true);
   });
 
   it("사는 쪽의 역제안은 **깎아 부르는 것**이다 — 올려 부를 수 없다", () => {

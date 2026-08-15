@@ -947,3 +947,60 @@ test("전술판 자유 배치 — 드래그로 한 자리만 세밀하게 조정
 
   await expectOvrConsistent(page);
 });
+
+/**
+ * 전술을 바꾸고 **곧바로** 말을 걸면 — 저장이 턴보다 먼저 간다.
+ *
+ * 자동 저장은 조작이 멎기를 기다리므로, 예전에는 그 창(3초) 안에 보낸 턴이 옛 전술로
+ * 나갔다. 화면에는 바꾼 판이 그대로 보이는데 수석코치만 다른 전술을 말했다.
+ * 판을 **접기만 하고 떠나지 않는 것**이 이 시험의 핵심이다 — 탭을 옮기면 언마운트가
+ * 저장을 흘려보내 경합이 가려진다.
+ */
+test("전술판 편집은 턴보다 먼저 서버에 닿는다", async ({ page }) => {
+  await page.goto("/new");
+  await expect(page.getByTestId("league-grid")).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId("league-epl").click();
+  await expect(page.getByTestId("team-grid")).toBeVisible();
+  await page.getByTestId("team-arsenal").click();
+  await page.getByTestId("manager-name").fill("순서정");
+  await page.getByTestId("manager-background").fill("전술 분석가 출신");
+  await page.getByTestId("start-game").click();
+  await expect(page.getByTestId("chat-scroll")).toContainText("순서정", { timeout: 30_000 });
+
+  await openBoard(page);
+  await openTactics(page);
+
+  // 나간 요청과 돌아온 응답을 순서대로 적는다
+  const wire: string[] = [];
+  page.on("request", (req) => {
+    if (req.method() !== "POST") return;
+    const path = new URL(req.url()).pathname;
+    if (path.endsWith("/lineup")) wire.push("저장→");
+    else if (path.endsWith("/turn/stream")) wire.push("턴→");
+  });
+  page.on("response", (res) => {
+    if (new URL(res.url()).pathname.endsWith("/lineup")) wire.push("←저장");
+  });
+
+  await page.getByTestId("tactic-mentality-5").click();
+  await expect(page.getByTestId("tactics-panel")).toContainText("매우 공격적");
+  // 판만 접는다 — 명단은 채팅 옆에 그대로 서 있다 (저장은 아직 예약 상태)
+  await page.getByTestId("board-toggle").click();
+  await page.getByTestId("chat-input").fill("이 전술로 가자");
+  await page.getByTestId("chat-send").click();
+
+  // 저장이 끝난 뒤에야 턴이 나간다 — 그래야 세계가 지금 판으로 답한다
+  await expect
+    .poll(() => wire.filter((w) => w === "턴→").length, { timeout: 20_000 })
+    .toBeGreaterThan(0);
+  expect(wire.slice(0, 3)).toEqual(["저장→", "←저장", "턴→"]);
+  await expect(page.getByTestId("view-squad")).toHaveAttribute("data-save", "saved", {
+    timeout: 15_000,
+  });
+
+  // 턴이 끝나도 바꾼 전술 그대로다 — 늦게 도착한 저장 응답이 턴 결과를 되감지 않는다
+  await expect(page.getByTestId("chat-scroll")).toContainText("이 전술로 가자");
+  await page.getByTestId("tab-달력").click();
+  await openBoard(page);
+  await expect(page.getByTestId("tactics-panel")).toContainText("매우 공격적");
+});

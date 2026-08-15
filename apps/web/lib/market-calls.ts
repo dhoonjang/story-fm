@@ -1,4 +1,5 @@
 import type { MarketCard, MarketCardKind } from "@story-fm/domain";
+import { CARD_SKILLS } from "./panel-hints";
 
 const MARKET_CARD_KINDS: ReadonlySet<MarketCardKind> = new Set([
   "offer",
@@ -9,37 +10,64 @@ const MARKET_CARD_KINDS: ReadonlySet<MarketCardKind> = new Set([
 ]);
 
 /**
- * 이 호출이 카드로 서는가 — **`payload`가 카드면 칩을 세우지 않는다.**
- * 옛 세이브처럼 payload가 없거나 모양이 잘못됐으면 칩으로 폴백한다.
+ * 이 payload가 성한 카드인가 — **화면이 믿기 전의 마지막 확인.**
+ *
+ * 코어가 이미 타입으로 보장한다(`MarketSkillResult`: 성공이면 카드가 반드시 있다).
+ * 여기 검사는 그 계약이 깨졌을 때 **조용히 지나가지 않게** 하는 것이지, 다른 길로
+ * 흘려보내기 위한 것이 아니다 — 예전엔 이 자리가 `null`을 돌려주면 칩으로
+ * 폴백해서, 매각 오퍼가 카드를 못 받는 버그를 아무도 모르고 몇 달을 지났다.
  */
-export function marketCardOf(payload: unknown): MarketCard | null {
-  if (typeof payload !== "object" || payload === null) return null;
+function isMarketCard(payload: unknown): payload is MarketCard {
+  if (typeof payload !== "object" || payload === null) return false;
   const card = payload as Partial<MarketCard>;
   if (typeof card.kind !== "string" || !MARKET_CARD_KINDS.has(card.kind as MarketCardKind)) {
-    return null;
+    return false;
   }
-  if (typeof card.playerName !== "string" || typeof card.counterpart !== "string") return null;
-  return card as MarketCard;
+  return typeof card.playerName === "string" && typeof card.counterpart === "string";
 }
 
-/** 수락 카드가 같은 딜을 설명하면 뒤따른 계약 확정 칩만 접는다. */
+/**
+ * 스킬 결과를 **카드와 칩으로 가른다.**
+ *
+ * 가르는 기준은 payload의 모양이 아니라 **스킬 이름**이다(`CARD_SKILLS`) — 갈 장부가
+ * 없는 스킬만 카드로 선다. 모양으로 가르던 때는 카드를 실어야 할 스킬이 payload를
+ * 빠뜨려도 그냥 칩이 되어, 화면이 코어의 누락을 감췄다.
+ *
+ * `CARD_SKILLS`인데 카드가 성하지 않으면 그 호출은 **어느 쪽에도 서지 않고** 콘솔에
+ * 남는다. 칩으로 흘리면 같은 버그가 다시 숨는다.
+ */
 export function splitMarketCalls<T extends { name: string; payload?: unknown }>(
   calls: readonly T[],
 ) {
-  const cards = calls
-    .map((call) => marketCardOf(call.payload))
-    .filter((card): card is MarketCard => card !== null);
+  const cards: MarketCard[] = [];
+  const chips: T[] = [];
+  const broken: T[] = [];
+
+  for (const call of calls) {
+    if (!CARD_SKILLS.has(call.name)) {
+      chips.push(call);
+      continue;
+    }
+    if (isMarketCard(call.payload)) cards.push(call.payload);
+    else broken.push(call);
+  }
+
+  if (broken.length > 0 && typeof console !== "undefined") {
+    console.error(
+      "[market-calls] 카드로 서야 할 스킬이 성한 payload를 갖고 있지 않다:",
+      broken.map((call) => call.name),
+    );
+  }
+
+  /**
+   * 수락 카드가 같은 딜을 이미 설명하면 뒤따른 계약 확정 칩은 접는다 —
+   * 카드가 말한 것을 칩이 한 번 더 말하면 카드가 칩의 부연처럼 읽힌다.
+   */
   const hasAcceptedVerdict = cards.some(
     (card) => card.kind === "verdict" && card.verdict === "accept",
   );
-  const chips = calls.filter(
-    (call) =>
-      marketCardOf(call.payload) === null &&
-      call.name !== "respond_offer" &&
-      !(hasAcceptedVerdict && call.name === "accept_deal"),
-  );
-  const verdicts = calls.filter(
-    (call) => call.name === "respond_offer" && marketCardOf(call.payload) === null,
-  );
-  return { cards, verdicts, chips };
+  return {
+    cards,
+    chips: hasAcceptedVerdict ? chips.filter((call) => call.name !== "accept_deal") : chips,
+  };
 }

@@ -38,7 +38,7 @@ import { USER_WAGE_HEADROOM, wageRoomOf } from "../world/wages";
 import { marketBiasOf, windowOpenForTeam } from "./market";
 import { evaluatePitch, latitudeOf } from "./persuasion";
 import { makeRng } from "../core/rng";
-import type { SkillResult } from "../skills";
+import type { MarketSkillResult, SkillResult } from "../skills";
 import { buildTransferPress, openPress } from "../club/press";
 import {
   activeContract,
@@ -154,7 +154,7 @@ export function arrivedResponses(state: GameState): Negotiation[] {
  * 확률은 여기서 계산해 라운드에 **함께 저장한다.** 나중에 "확률 34%였는데 LLM이
  * 수락했다"를 집계할 수 있어야 판정의 분포를 검증할 수 있다 (설계 §6).
  */
-export function sendOffer(state: GameState, terms: DealTerms): SkillResult {
+export function sendOffer(state: GameState, terms: DealTerms): MarketSkillResult {
   const player = playerById(state, terms.playerId);
   if (!player) return { ok: false, message: `"${terms.playerId}"라는 선수를 찾지 못했습니다` };
 
@@ -409,7 +409,7 @@ export function answerOffer(
     weeklyWage?: number;
     note?: string;
   },
-): SkillResult {
+): MarketSkillResult {
   const negotiation = state.negotiations.find((n) => n.id === input.negotiationId);
   if (!negotiation) {
     return { ok: false, message: `협상 "${input.negotiationId}"을 찾지 못했습니다` };
@@ -429,7 +429,7 @@ export function respondOffer(
     weeklyWage?: number;
     note?: string;
   },
-): SkillResult {
+): MarketSkillResult {
   const target = answerTarget(
     state,
     input.negotiationId,
@@ -698,7 +698,7 @@ export function offerPlayerOut(
     /** 임대로 내보내는 제안인가 — 값은 임대료, 주급은 그쪽이 낼 몫이다 */
     loan?: boolean;
   },
-): SkillResult {
+): MarketSkillResult {
   const player = playerById(state, input.playerId);
   if (!player) return { ok: false, message: `"${input.playerId}"라는 선수를 찾지 못했습니다` };
   if (player.loan?.fromTeamId === state.userTeamId) {
@@ -778,7 +778,7 @@ export function offerPlayerOut(
       return created;
     })();
 
-  const { waitDays } = pushOurRound(state, negotiation, terms, odds.probability, {
+  const { waitDays, respondsOn } = pushOurRound(state, negotiation, terms, odds.probability, {
     repeats: negotiation.rounds.filter((r) => r.by === "us").length,
   });
   const chance = odds.fuzzy ? oddsLabel(odds.probability) : `${odds.probability}%`;
@@ -787,7 +787,22 @@ export function offerPlayerOut(
       `그쪽이 낼 주급 ${wageOf(weeklyWage)}.`
     : `${teamName(buyer.id)}에 ${player.name} 매각을 제안했습니다 — 이적료 ${money(fee)} · ` +
       `주급 ${wageOf(weeklyWage)} · ${years}년.`;
-  return { ok: true, message: `${head} 성사 가능성 ${chance}. ${describeWait(waitDays)}` };
+  const card: MarketCard = {
+    kind: "offer",
+    playerId: player.id,
+    playerName: player.name,
+    // 내보내는 오퍼의 상대는 **사려는 구단**이다 (market-card.ts의 `counterpart`)
+    counterpart: teamName(buyer.id),
+    terms: dealTerms({ fee, weeklyWage, years }),
+    odds: chance,
+    dueOn: respondsOn,
+    ...(input.loan ? { loan: true } : {}),
+  };
+  return {
+    ok: true,
+    payload: card,
+    message: `${head} 성사 가능성 ${chance}. ${describeWait(waitDays)}`,
+  };
 }
 /** 동시에 들어와 있을 수 있는 오퍼 수 — 감독이 감당할 만큼만 */
 const MAX_INCOMING = 3;
@@ -1042,7 +1057,7 @@ export function answerIncomingOffer(
     weeklyWage?: number;
     note?: string;
   },
-): SkillResult {
+): MarketSkillResult {
   const target = answerTarget(
     state,
     input.negotiationId,
@@ -1162,7 +1177,7 @@ export function expiringContracts(state: GameState, withinDays = 180) {
 export function openRenewal(
   state: GameState,
   input: { playerId: string; weeklyWage: number; years: number },
-): SkillResult {
+): MarketSkillResult {
   const player = playerById(state, input.playerId);
   if (!player) return { ok: false, message: `"${input.playerId}"라는 선수를 찾지 못했습니다` };
   if (player.teamId !== state.userTeamId) {
@@ -1789,7 +1804,7 @@ function executeSale(
 }
 
 /** 협상 철회 — 감독이 물러선다 */
-export function withdrawOffer(state: GameState, negotiationId: string): SkillResult {
+export function withdrawOffer(state: GameState, negotiationId: string): MarketSkillResult {
   const negotiation = state.negotiations.find((n) => n.id === negotiationId);
   if (!negotiation) return { ok: false, message: `협상 "${negotiationId}"을 찾지 못했습니다` };
   if (negotiation.status === "completed") {

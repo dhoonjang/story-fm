@@ -11,6 +11,7 @@ import { mergeMatchOrders, type MatchBoardOrder } from "@/lib/match-orders";
 import { RailHints } from "./rail-hints";
 import { Loading } from "./loading";
 import { SquadView, CalendarView, FinanceView, CompetitionsView, CareerView } from "./office";
+import { createLineupSaver, type LineupSaver } from "./lineup-saver";
 import { MatchClock, MatchHeadline, MatchOpponent, MatchOverview } from "./match-view";
 import {
   IconBoard,
@@ -240,6 +241,27 @@ export function GameScreen({ gameId }: { gameId: string }) {
    */
   const ordersRef = useRef<MatchBoardOrder[]>([]);
   /**
+   * 전술판의 자동 저장 대기열 — **판이 아니라 화면이 쥔다.**
+   *
+   * 전술을 바꾸고 곧바로 말을 걸면, 예약된 저장이 아직 서버에 닿지 않은 채 턴이
+   * 나가 GM은 옛 전술로 답했다(화면엔 바꾼 판이 그대로 보이므로 코치만 딴소리를
+   * 하는 것처럼 보인다). 그래서 턴을 보내기 전에 여기서 대기열을 비운다 —
+   * 판이 접혀 사라져도 예약은 이 자리에 남는다.
+   */
+  const saverRef = useRef<LineupSaver | null>(null);
+  saverRef.current ??= createLineupSaver();
+  const saver = saverRef.current;
+  /**
+   * 라인업 저장 응답을 화면에 앉힌다 — **턴이 지나간 뒤에 도착한 것은 버린다.**
+   *
+   * 저장은 턴보다 앞선 상태에서 출발하므로, 늦게 닿으면 방금 받은 턴 결과를
+   * 통째로 되감는다. 턴은 대화를 늘리는 유일한 길이라 그 길이로 낡음을 가른다.
+   * 버려도 잃는 것은 없다 — 그 저장의 결과는 이미 턴 응답에 들어 있다.
+   */
+  const applyLineupSave = useCallback((payload: GamePayload) => {
+    setGame((cur) => (cur && payload.chat.length < cur.chat.length ? cur : payload));
+  }, []);
+  /**
    * 방금 끝난 경기 — **종료 화면**을 세운다.
    *
    * 휘슬과 함께 평시 화면으로 툭 돌아가면 90분이 무엇으로 끝났는지 확인할 자리가
@@ -405,6 +427,22 @@ export function GameScreen({ gameId }: { gameId: string }) {
     async (text?: string, operator = false) => {
       const message = (text ?? input).trim();
       if (!message || busy || !game) return;
+      setBusy(true);
+      setError(null);
+      setErrorDetail(null);
+      /**
+       * 미저장 전술판 편집을 **먼저 서버에 밀어 넣는다** — 턴은 그다음이다.
+       *
+       * 자동 저장은 조작이 멎기를 기다리므로(`AUTOSAVE_MS`), 판을 만지고 곧바로 말을
+       * 걸면 서버는 옛 배치로 GM 입력을 만든다. 저장이 반려되면(GK 자리 등) 턴을
+       * 보내지 않는다 — 화면과 다른 판으로 세계가 답하느니 이유를 말하고 멈춘다.
+       */
+      const saved = await saver.flush();
+      if (saved && !saved.ok) {
+        setBusy(false);
+        setError(`전술판을 저장하지 못했습니다 — ${saved.error}`);
+        return;
+      }
       /**
        * 전술판에서 쌓인 조작 — **이번 턴에 함께 나간다.**
        *
@@ -417,9 +455,6 @@ export function GameScreen({ gameId }: { gameId: string }) {
       const orders = mergeMatchOrders([], ordersRef.current);
       ordersRef.current = [];
       if (text === undefined) setInput("");
-      setBusy(true);
-      setError(null);
-      setErrorDetail(null);
       streamAccRef.current = "";
       revealedRef.current = 0;
       pendingPayloadRef.current = null;
@@ -571,7 +606,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
         commit(null);
       }
     },
-    [input, busy, game, gameId],
+    [input, busy, game, gameId, saver],
   );
 
   if (error && !game)
@@ -676,8 +711,10 @@ export function GameScreen({ gameId }: { gameId: string }) {
   const squadView = (goBack: () => void) => (
     <SquadView
       game={game}
-      onUpdate={setGame}
+      onUpdate={applyLineupSave}
       onGoToChat={goBack}
+      /* 저장 대기열은 화면이 쥔다 — 턴은 이것이 빈 뒤에 나간다 */
+      saver={saver}
       /* 나가는 중에도 판은 흐름에 남아 있어야 미끄러질 수 있다 */
       boardOpen={boardOpen || boardClosing}
       onToggleBoard={toggleBoard}

@@ -8,7 +8,7 @@ import { hasRailHint } from "../lib/panel-hints";
 import { weaveTurn } from "../lib/turn-pieces";
 import { BROADCAST_SPEAKER, normalizeSpeaker } from "@story-fm/domain";
 import type { ScoutReportCard } from "@story-fm/domain";
-import { MarketCardView, OfferVerdictCard } from "@/components/market-card";
+import { MarketCardView } from "@/components/market-card";
 import { splitMarketCalls } from "@/lib/market-calls";
 import { money, wage } from "@/lib/money";
 import { ratingTone, scoutMargin, scoutValue } from "@/lib/scout-report-display";
@@ -562,7 +562,7 @@ export function ChatTurnView({
          * 카드를 그리는 호출은 칩을 세우지 않는다: 같은 사실이 두 번 나면 카드가
          * 칩의 부연처럼 읽힌다.
          */
-        const { cards, verdicts, chips } = splitMarketCalls(mark.calls);
+        const { cards, chips } = splitMarketCalls(mark.calls);
         return (
           <Fragment key={mark.key}>
             {/* 같은 자리에서 연달아 불린 스킬은 한 줄에 나란히 — 칩마다 문단을 끊지 않는다 */}
@@ -580,9 +580,6 @@ export function ChatTurnView({
             )}
             {cards.map((card, j) => (
               <MarketCardView card={card} key={j} />
-            ))}
-            {verdicts.map((call, j) => (
-              <OfferVerdictCard summary={call.summary} tone={call.tone} key={j} />
             ))}
           </Fragment>
         );
