@@ -18,7 +18,9 @@ import {
   markEntered,
   minutesOfClock,
   pendingVerdicts,
+  pushNews,
   scoutReportCard,
+  takeNews,
   type AdvanceOutcome,
   type CardMark,
   type GameState,
@@ -259,6 +261,11 @@ async function runRealGmTurn(
             }
           : null,
       );
+  /**
+   * 소식은 **스냅샷에 실린 그 턴에 비워진다** — `pendingEdits`와 같은 규약이다.
+   * 경기 중 스냅샷은 장부(`buildLedgerNote`)라 소식을 읽지 않으므로 그때는 남겨 둔다.
+   */
+  if (!inMatch) takeNews(state);
   // 킥오프 턴의 이력은 경기 전 대화다 — `relevantTurns`가 그 한 턴만 평시로 읽는다
   const history =
     inMatch && !kickoff ? (state.pendingMatch?.casterHistory ?? []) : buildGmHistory(state);
@@ -356,7 +363,17 @@ async function runRealGmTurn(
       // 브리프는 장부가 살아 있을 때만 만들 수 있다 — finalizeMatch가 지우기 전에
       const brief = buildRatingBrief(state);
       const digest = finalizeMatch(state);
-      calls.push({ name: "finalize_match", summary: digest.join(" · ") });
+      /**
+       * 말풍선에는 **우리 경기만** 선다 — 재정과 같은 라운드 다른 경기는 감독이
+       * 확인하러 갈 화면(재정·대회)이 이미 갖고 있다. 대신 모델은 다음 평시 턴에
+       * 셋을 다 읽는다 (`pendingNews` → `buildGmStateNote`).
+       */
+      calls.push({
+        name: "finalize_match",
+        summary: digest.ours.join(" · "),
+        brief: { head: "경기 종료", items: digest.ours.map((text) => ({ text })) },
+      });
+      pushNews(state, [...digest.finance, ...digest.others]);
       // 평점 — 코어 앵커 위에 LLM이 입체를 더한다. 실패해도 앵커가 남는다
       if (brief) {
         const rated = await rateMatchPerformances(state, brief);

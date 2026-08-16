@@ -163,9 +163,12 @@ row, 지난 일 = 그대로 이력.**
 | `personas` `Persona` | 인물 — 수석코치·구단주·기자. 성격·동기·말투+예시 대사 | `domain/persona.ts` |
 | `narrative` `NarrativeNote` | GM 기억 — 날짜·문장·중요도(1~5) | `domain/records.ts` |
 | `chat` `ChatTurn` | 대화 이력 — `user`/`model`/`operator` | `core/state.ts` |
-| ↳ `ToolCallRecord` | 스킬 호출 — 요약·카드 payload·톤·`silent`·장면 안 줄 위치 | `core/state.ts` |
+| ↳ `ToolCallRecord` | 스킬 호출 — 요약·항목(`brief`)·카드 payload·톤·`silent`·장면 안 줄 위치 | `core/state.ts` |
+| ↳ `SkillBrief` | 화면이 세우는 요약 — 머리줄 + 항목. 없는 기록은 요약 문자열로 폴백 | `core/state.ts` |
+| ↳ `SkillBriefItem` | 항목 하나 — 이름(`label`) · 값(`text`) · 갈래(`note`). 화면이 자리마다 톤을 준다 | `core/state.ts` |
 | ↳ `GoalMark` `CardMark` | 그 턴의 골·카드 — 장부의 사건이지 중계 문장의 파싱이 아니다 | `core/state.ts` |
 | `pendingEdits` `PendingEdit` | 아직 GM이 읽지 않은 화면 조작 — 같은 키는 마지막 것만 | `core/state.ts` |
+| `pendingNews` | 아직 GM이 읽지 않은 경기 밖 소식 — 결산이 함께 굴린 재정·다른 경기 | `core/state.ts` |
 
 ⚠️ **능력치 5축은 평판의 `media`와 다른 것이다** — 능력치(`leadership` `tactics`
 `training` `negotiation` `analysis`)는 감독이 가진 역량, 평판(`board` `media`

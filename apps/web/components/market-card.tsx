@@ -91,9 +91,11 @@ export function MarketCardView({ card }: { card: MarketCard }) {
         {card.counterpart !== card.playerName && (
           <span className="mc-counterpart">{card.counterpart}</span>
         )}
+        {/* 답이 남은 카드에만 선다 — 값이 없으면 이름표도 서지 않는다 */}
         {card.odds && (
-          <span className="mc-odds" title="성사 가능성">
-            {card.odds}
+          <span className="mc-odds">
+            <em>성사 가능성</em>
+            <b>{card.odds}</b>
           </span>
         )}
       </div>
