@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import { ageOf } from "@story-fm/domain";
 import {
   adaptationOf,
+  applyFinanceEvent,
   buildOfficeViews,
+  categoryOf,
   financeOf,
+  playerName,
   humanizePlayerIds,
   setTraining,
   startMatch,
@@ -170,6 +173,85 @@ describe("오피스 뷰 — 달력 (일정 축)", () => {
         .some((l) => l.kind === "match"),
     ).toBe(true);
   });
+
+  it("이적 일지 줄은 이적료를 함께 적고 무상 이동엔 금액이 없다", () => {
+    const state = createTestGame();
+    const outside = state.players.filter((p) => p.teamId !== state.userTeamId);
+    const paid = outside[0]!;
+    const free = outside[1]!;
+    state.transfers.push(
+      {
+        id: "tr-paid",
+        gamePlayerId: paid.id,
+        windowId: null,
+        fromTeamId: paid.teamId,
+        toTeamId: state.userTeamId,
+        date: state.date,
+        type: "transfer",
+        fee: 37_500_000,
+      },
+      {
+        id: "tr-free",
+        gamePlayerId: free.id,
+        windowId: null,
+        fromTeamId: free.teamId,
+        toTeamId: state.userTeamId,
+        date: state.date,
+        type: "free",
+        fee: 0,
+      },
+    );
+
+    const lines = (buildOfficeViews(state).calendar.events[state.date] ?? []).filter(
+      (l) => l.kind === "transfer",
+    );
+    expect(lines.map((l) => l.text)).toEqual([
+      `${playerName(state, paid.id)} 영입 · £37.5M`,
+      `${playerName(state, free.id)} 영입`,
+    ]);
+    // 이적료는 이 줄만 말한다 — 원장의 이적료 축은 돈 줄을 따로 세우지 않는다
+    expect(
+      (buildOfficeViews(state).calendar.events[state.date] ?? []).some((l) => l.kind === "money"),
+    ).toBe(false);
+  });
+
+  it("큰 비정기 항목만 돈 줄로 서고 정액 항목은 서지 않는다", () => {
+    const state = createTestGame();
+    advanceDays(state, 10);
+    const day = state.date;
+    const label = "훈련장 잔디 전면 교체";
+    expect(
+      applyFinanceEvent(state, {
+        kind: "expense",
+        category: "facility",
+        amount: 1_500_000,
+        note: label,
+      }).ok,
+    ).toBe(true);
+
+    const events = buildOfficeViews(state).calendar.events;
+    // 진행 중인 달은 원장에서 파생한다 — 방향이 부호로 읽힌다
+    expect((events[day] ?? []).filter((l) => l.kind === "money").map((l) => l.text)).toContain(
+      `${label} −£1.5M`,
+    );
+
+    // 매달·매경기 같은 자리에 서는 항목은 문턱을 넘어도 일지에 없다
+    const moneyTexts = Object.values(events)
+      .flat()
+      .filter((l) => l.kind === "money")
+      .map((l) => l.text);
+    const FIXED = new Set(["broadcast_equal", "commercial", "player_wages", "staff_wages"]);
+    const fixed = financeOf(state, state.userTeamId).ledger.filter(
+      (e) => FIXED.has(categoryOf(e)) && e.amount >= 1_000_000,
+    );
+    expect(fixed.length).toBeGreaterThan(0); // 문턱을 넘는 정액 항목이 실제로 쌓여 있다
+    for (const e of fixed) {
+      expect(
+        moneyTexts.some((t) => t.startsWith(e.label)),
+        e.label,
+      ).toBe(false);
+    }
+  });
 });
 
 describe("오피스 뷰 — 재정·순위·커리어", () => {
@@ -188,6 +270,97 @@ describe("오피스 뷰 — 재정·순위·커리어", () => {
     expect(finance.current.expense.some((e) => e.category === "player_wages")).toBe(true);
     expect(finance.feed.length).toBeGreaterThan(0);
     expect(finance.stadium.capacity).toBeGreaterThan(0);
+  });
+
+  it("피드는 선수별 상각을 한 줄로 접고 합계·명세가 원장과 같다", () => {
+    const state = createTestGame();
+    advanceDays(state, 10);
+    const ledger = financeOf(state, state.userTeamId).ledger;
+    const raw = ledger.filter((e) => e.category === "amortisation" && e.label !== "");
+    expect(raw.length).toBeGreaterThan(10); // 매월 1일 선수마다 한 줄
+
+    const feed = buildOfficeViews(state).finance.feed;
+    const folded = feed.filter((row) => row.category === "amortisation");
+    // 상각이 원장에선 스물몇 줄인데 피드에선 그 날짜만큼만 선다
+    expect(folded.length).toBeLessThan(raw.length);
+
+    const days = new Set(raw.map((e) => e.date));
+    for (const date of days) {
+      const perPlayer = raw.filter((e) => e.date === date && !e.label.includes(" — "));
+      const row = folded.find((r) => r.date === date && r.label === "")!;
+      expect(row.items).toHaveLength(perPlayer.length);
+      expect(row.amount).toBe(perPlayer.reduce((sum, e) => sum + e.amount, 0));
+      expect(new Set(row.items!.map((i) => i.label))).toEqual(
+        new Set(perPlayer.map((e) => e.label)),
+      );
+      expect(row.categoryLabel).toBe("이적료 분할 비용");
+      expect(row.noncash).toBe(true);
+    }
+  });
+
+  it("접은 뒤 세므로 상각이 다른 사건을 피드 밖으로 밀지 않는다", () => {
+    const state = createTestGame();
+    advanceDays(state, 10);
+    const feed = buildOfficeViews(state).finance.feed;
+    // 접기 전엔 최근 30건이 상각 한 날짜로 덮였다
+    expect(feed.some((row) => row.category !== "amortisation")).toBe(true);
+    expect(new Set(feed.map((row) => row.id)).size).toBe(feed.length);
+    // 한 건짜리 줄은 접지 않고 원장 라벨 그대로 선다
+    const staff = feed.find((row) => row.category === "staff_wages")!;
+    expect(staff.items).toBeUndefined();
+    expect(staff.label).toBe("코칭·사무 스태프 급여");
+  });
+
+  /** 주급도 선수별로 적히므로 피드에선 한 줄로 서고, 펼치면 명세가 나온다 (§8.1) */
+  it("주급은 한 줄로 서고 펼치면 선수별 주급이 큰 금액부터 나온다", () => {
+    const state = createTestGame();
+    advanceDays(state, 10);
+    const ledger = financeOf(state, state.userTeamId).ledger;
+    const feed = buildOfficeViews(state).finance.feed;
+    const rows = feed.filter((row) => row.category === "player_wages");
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      const raw = ledger.filter((e) => e.category === "player_wages" && e.date === row.date);
+      expect(row.items).toHaveLength(raw.length);
+      expect(row.amount).toBe(raw.reduce((sum, e) => sum + e.amount, 0));
+      expect(row.itemsRef).toBe("player");
+      // 명세는 큰 금액부터 — 화면이 첫 이름을 대표로 세운다
+      const amounts = row.items!.map((i) => i.amount);
+      expect([...amounts].sort((a, b) => b - a)).toEqual(amounts);
+    }
+  });
+
+  /**
+   * `이자·세금`과 `시설·아카데미 운영`은 같은 `facility`인데 서로 다른 사건이다.
+   * 묶으면 라벨이 사라지고 두 항목이 한 금액이 된다.
+   */
+  it("대상 없는 항목은 카테고리가 같아도 각자 선다", () => {
+    const state = createTestGame();
+    advanceDays(state, 10);
+    const feed = buildOfficeViews(state).finance.feed;
+    const facility = feed.filter((row) => row.category === "facility");
+    expect(facility.length).toBeGreaterThan(1);
+    for (const row of facility) {
+      expect(row.items).toBeUndefined();
+      expect(row.label).not.toBe("");
+    }
+  });
+
+  /** 라벨 규약 이전 세이브 — `이적료 상각 — 이름`이 접혀도 카테고리를 되풀이하지 않는다 */
+  it("항목명이 카테고리 이름을 되풀이하면 없는 것으로 읽는다", () => {
+    const state = createTestGame();
+    advanceDays(state, 10);
+    const finance = financeOf(state, state.userTeamId);
+    finance.ledger = finance.ledger.map((e) =>
+      e.category === "amortisation" && !e.label.includes(" — ")
+        ? { ...e, label: `이적료 상각 — ${e.label}` }
+        : e,
+    );
+    const row = buildOfficeViews(state)
+      .finance.feed.filter((r) => r.category === "amortisation")
+      .find((r) => (r.items?.length ?? 0) > 1)!;
+    expect(row.label).toBe("");
+    expect(row.items!.every((i) => !i.label.includes("이적료 상각"))).toBe(true);
   });
 
   it("순위는 한글 팀명으로, 커리어는 감독 소속 기록으로 나온다", () => {

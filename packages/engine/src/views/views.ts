@@ -2,6 +2,7 @@ import type {
   AssignmentRole,
   AxisValues,
   BoardPoint,
+  LedgerEntry,
   MatchRecord,
   PacketPlayer,
   Foot,
@@ -27,7 +28,15 @@ import {
 import { diffDays, nextMatchFor, seasonEndDate } from "../competition/calendar";
 import { clubProfile } from "../data/club-profile";
 import { teamCatalogById } from "../data/team-catalog";
-import { categoryOf, currentMonthSummary, psrStatus, seasonWageRatio } from "../club/finance";
+import {
+  categoryOf,
+  currentMonthSummary,
+  formatMoney,
+  isJournalMoney,
+  monthOf,
+  psrStatus,
+  seasonWageRatio,
+} from "../club/finance";
 import {
   cupCatalog,
   competitionLabel,
@@ -142,6 +151,121 @@ export interface FinanceMonthView {
   pnlNet: number;
   wageRatio: number;
   notes: string[];
+}
+
+/**
+ * 재정 활동 피드의 한 줄 — 원장 한 건일 수도, 접힌 묶음일 수도 있다
+ * (docs/simulation/finance.md §8.1).
+ */
+export interface FinanceFeedRow {
+  id: string;
+  date: string;
+  kind: "income" | "expense";
+  category: string;
+  categoryLabel: string;
+  /**
+   * **항목명** — 접힌 줄이면 `매각 잔존가`처럼 묶음을 부르는 이름, 한 건이면 원장
+   * 라벨. 카테고리로만 묶인 줄(선수별 상각)은 빈 문자열이고 카테고리 이름이 대신
+   * 말한다 — 같은 말을 한 행에 두 번 세우지 않는다.
+   */
+  label: string;
+  /** 접힌 줄이면 묶음의 합계 */
+  amount: number;
+  noncash: boolean;
+  /** 2건 이상 접혔을 때만 — 펼치면 나오는 대상별 명세. 금액이 큰 것부터 */
+  items?: Array<{ label: string; amount: number }>;
+  /**
+   * 명세가 무엇을 하나씩 세는지 — 묶인 엔트리가 모두 같은 `ref.type`일 때만.
+   * 화면이 `45명`과 `2건`을 가르는 데 쓴다.
+   */
+  itemsRef?: "match" | "player" | "transfer" | "competition";
+}
+
+/** 피드가 세우는 줄 수 — 원장 건수가 아니라 **접은 뒤의** 줄 수다 */
+const FINANCE_FEED_ROWS = 30;
+
+/** 원장 라벨의 `<항목명> — <대상>` 구분자 */
+const LEDGER_LABEL_SPLIT = " — ";
+
+/**
+ * 항목명 자리에 앉은 **카테고리 이름의 옛 표시명**. 라벨 규약 이전 세이브의 원장에
+ * 남아 있어, 접으면 한 행에 같은 말이 두 번 선다. 원장은 3개월 롤링이라 그만큼 지나면
+ * 저절로 빠진다 — 세이브를 고치지 않는다.
+ */
+const LEGACY_CATEGORY_HEADS = new Set(["이적료 상각"]);
+
+/**
+ * 원장을 피드 줄로 접는다 — 최신 순.
+ *
+ * 상각처럼 **한 사건이 대상마다 한 줄**로 앉는 항목이 30칸을 통째로 덮지 않게,
+ * `날짜 · 수입/지출 · 카테고리 · 현금/장부 · 항목명`이 같은 엔트리를 한 줄로 묶는다.
+ * 원장 자체는 손대지 않는다 — PSR과 처분 이익이 선수별 값을 읽는다.
+ *
+ * **대상이 있는 줄만 묶는다.** `이자·세금`과 `시설·아카데미 운영`은 카테고리가 같아도
+ * 서로 다른 사건이라 각자 서야 한다 — 접히면 라벨이 사라지고 두 항목이 한 금액이 된다.
+ */
+function foldFinanceFeed(ledger: readonly LedgerEntry[]): FinanceFeedRow[] {
+  type Group = {
+    key: string;
+    row: FinanceFeedRow;
+    head: string;
+    items: Array<{ label: string; amount: number }>;
+    /** 묶인 엔트리의 `ref.type` — 하나로 모이지 않으면 null */
+    refType: FinanceFeedRow["itemsRef"] | null;
+  };
+  const groups = new Map<string, Group>();
+  const order: Group[] = [];
+  // 최신부터 — 같은 날은 나중 기록이 위로
+  for (const [i, e] of [...ledger].reverse().entries()) {
+    const category = categoryOf(e);
+    const categoryLabel = FINANCE_CATEGORY_KO[category];
+    const cut = e.label.indexOf(LEDGER_LABEL_SPLIT);
+    const item = cut < 0 ? e.label : e.label.slice(cut + LEDGER_LABEL_SPLIT.length);
+    // 항목명이 카테고리 이름을 되풀이하면 없는 것으로 본다
+    const raw = cut < 0 ? "" : e.label.slice(0, cut);
+    const head = raw === categoryLabel || LEGACY_CATEGORY_HEADS.has(raw) ? "" : raw;
+    const noncash = e.accounting === "noncash";
+    // 대상이 있는 줄(항목명이 붙었거나 `ref`가 가리키는 줄)만 다른 줄과 묶인다
+    const groupable = cut >= 0 || e.ref !== undefined;
+    const key = groupable ? `${e.date}|${e.kind}|${category}|${noncash}|${head}` : `solo|${i}`;
+    const found = groups.get(key);
+    if (found) {
+      found.row.amount += e.amount;
+      found.items.push({ label: item, amount: e.amount });
+      if (found.refType !== (e.ref?.type ?? null)) found.refType = null;
+      continue;
+    }
+    const group: Group = {
+      key,
+      head,
+      refType: e.ref?.type ?? null,
+      items: [{ label: item, amount: e.amount }],
+      row: {
+        id: e.id ?? `led-${e.date}-${i}`,
+        date: e.date,
+        kind: e.kind,
+        category,
+        categoryLabel,
+        // 되풀이로 걷어 낸 항목명은 한 건짜리 줄에서도 다시 세우지 않는다
+        label: head ? e.label : item,
+        amount: e.amount,
+        noncash,
+      },
+    };
+    groups.set(key, group);
+    order.push(group);
+  }
+  return order.slice(0, FINANCE_FEED_ROWS).map(({ key, row, head, items, refType }) => {
+    if (items.length < 2) return row;
+    // 접힌 줄은 항목명만 남기고 원래 라벨은 명세로 내려간다 — 큰 금액이 위로
+    return {
+      ...row,
+      id: `fold-${key}`,
+      label: head,
+      items: [...items].sort((a, b) => b.amount - a.amount),
+      ...(refType ? { itemsRef: refType } : {}),
+    };
+  });
 }
 
 /** 팀 전술 (TACTICS) — 스쿼드 탭에서 보고 편집한다 */
@@ -346,7 +470,9 @@ export interface CalendarEventView {
     | "yellow"
     | "red"
     | "transfer"
-    | "window";
+    | "window"
+    /** 큰 비정기 수입·지출 — 정액 항목은 서지 않는다 (docs/simulation/finance.md §8.2) */
+    | "money";
   text: string;
   /**
    * 접어 둔 상세 — 있으면 UI가 눌러서 펼친다. 성장처럼 **한 날에 스무 줄이 나오는**
@@ -677,17 +803,8 @@ export interface OfficeViews {
     current: FinanceMonthView;
     /** 마감된 월간 보고서 — 최신 순 */
     reports: FinanceMonthView[];
-    /** 실시간 재정 활동 — 최근 원장 (최신 순) */
-    feed: Array<{
-      id: string;
-      date: string;
-      kind: "income" | "expense";
-      category: string;
-      categoryLabel: string;
-      label: string;
-      amount: number;
-      noncash: boolean;
-    }>;
+    /** 실시간 재정 활동 — 최근 원장을 접은 줄 (최신 순, docs/simulation/finance.md §8.1) */
+    feed: FinanceFeedRow[];
   };
   /** 대회 — 우리 리그 + 우리 대항전. 대회별 순위표와 일정이 한 자리에 (§2.4) */
   competitions: {
@@ -1759,17 +1876,44 @@ export function buildOfficeViews(state: GameState): OfficeViews {
           : t.toTeamId === userTeamId
             ? `${name} 영입`
             : `${name} 이적`;
-    push(t.date, { kind: "transfer", text: label });
+    // 이적료는 이 줄이 말한다 — 돈 줄을 따로 세우면 한 거래가 세 줄이 된다 (§8.2).
+    // 자유계약·유스·은퇴는 fee가 0이라 붙지 않는다.
+    push(t.date, {
+      kind: "transfer",
+      text: t.fee > 0 ? `${label} · ${formatMoney(t.fee)}` : label,
+    });
   }
 
-  /**
-   * ⚠️ **재정은 달력에 올리지 않는다.** 예전엔 큰 금액과 월간 보고서를 일지에 밀어
-   * 넣었는데, 주급·중계권처럼 **매달 같은 자리에 같은 줄**이 서서 그날 실제로
-   * 벌어진 일(부상·경고·이적)을 덮었다. 돈의 흐름은 재정 탭이 원장·보고서로
-   * 훨씬 잘 말한다.
-   */
-  // ── 재정 (유저 팀) ──
   const finance = financeOf(state, userTeamId);
+
+  /**
+   * ⚠️ **정액 항목은 달력에 올리지 않는다.** 주급·중계권처럼 매달 같은 자리에 같은
+   * 줄이 서면 그날 실제로 벌어진 일(부상·경고·이적)을 덮는다. 서는 것은 문턱을 넘는
+   * **비정기** 항목뿐이고, 그 판정은 코어가 한다 — `isJournalMoney`.
+   *
+   * 파생 원본이 둘이다: 원장은 3개월 뒤 잘리므로 **진행 중인 달만** 원장에서 읽고,
+   * 마감된 달은 보고서의 `highlights`(절단 전에 옮겨 적은 것)에서 읽는다. 마감은
+   * 지난달까지만 하므로 두 원본은 겹치지 않는다 (docs/simulation/finance.md §8.2).
+   */
+  const moneyText = (m: { kind: "income" | "expense"; label: string; amount: number }) =>
+    `${m.label} ${m.kind === "income" ? "+" : "−"}${formatMoney(m.amount)}`;
+  const openMonth = monthOf(state.date);
+  for (const e of finance.ledger) {
+    if (e.date > state.date) continue;
+    if (monthOf(e.date) !== openMonth) continue;
+    if (!isJournalMoney(e, finance.balance)) continue;
+    push(e.date, { kind: "money", text: moneyText(e) });
+  }
+  for (const r of state.financeReports) {
+    if (r.teamId !== userTeamId) continue;
+    // highlights는 마감 때 이미 걸러진 것이라 문턱을 다시 재지 않는다
+    for (const h of r.highlights ?? []) {
+      if (h.date > state.date) continue;
+      push(h.date, { kind: "money", text: moneyText(h) });
+    }
+  }
+
+  // ── 재정 (유저 팀) ──
   const line = (l: { category: string; amount: number }) => ({
     category: l.category,
     label: FINANCE_CATEGORY_KO[l.category as keyof typeof FINANCE_CATEGORY_KO] ?? l.category,
@@ -1803,23 +1947,8 @@ export function buildOfficeViews(state: GameState): OfficeViews {
     wageRatio: now.wageRatio,
     notes: [],
   };
-  // 실시간 활동 피드 — 최근 원장부터 (같은 날은 나중 기록이 위로)
-  const feed = [...finance.ledger]
-    .reverse()
-    .slice(0, 30)
-    .map((e, i) => {
-      const category = categoryOf(e);
-      return {
-        id: e.id ?? `led-${e.date}-${i}`,
-        date: e.date,
-        kind: e.kind,
-        category,
-        categoryLabel: FINANCE_CATEGORY_KO[category],
-        label: e.label,
-        amount: e.amount,
-        noncash: e.accounting === "noncash",
-      };
-    });
+  // 실시간 활동 피드 — 접은 뒤 최근 30줄 (§8.1). 자르고 접으면 접기 전과 같아진다
+  const feed = foldFinanceFeed(finance.ledger);
   const stadium = clubProfile(userTeamId, teamCatalogById(userTeamId)?.tier ?? 3);
 
   const recentResults = state.matches

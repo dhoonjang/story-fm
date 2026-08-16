@@ -119,9 +119,19 @@ packages/
 - Test the sim core **without an LLM** — fixed seed, deterministic.
 - Test LLM-dependent logic with mocks, or at the schema-validation level.
 - New features ship with tests. Never hide a failing test; report it as it is.
-- **`pnpm e2e` runs at merge time only** — the `/merge` skill owns it. It is too
-  slow for the edit loop; while working, `pnpm test` / `typecheck` / `lint` are
-  the gate. Run it mid-work only when the user asks.
+
+**The gate is CI, not your machine.** `.github/workflows/ci.yml` runs
+`typecheck` · `lint` · `pnpm test` · `pnpm e2e`, and its verdict is what
+`/merge` waits on. **It does not run while the PR is a draft** — a branch still
+being worked on burns runner minutes nobody reads. `/merge` marks the PR ready,
+and that is what starts the run it then watches.
+
+- **While working** — `pnpm typecheck` and `pnpm lint`, plus `pnpm test <path>`
+  for the file you just wrote. That is the whole local loop.
+- **Do not run the full `pnpm test` or `pnpm e2e` locally.** Both cost minutes
+  the CI runner is already paying, and the suite you would run is the one CI
+  runs. Run them locally only when the user asks, or when CI has failed and you
+  need to reproduce the failure to fix it.
 - `pnpm e2e` uses port 3399, `.next-e2e` and `/tmp/story-fm-e2e`. Run **one e2e
   at a time per worktree** — a second concurrent run attaches to the first
   server through `reuseExistingServer` and the two trample each other.

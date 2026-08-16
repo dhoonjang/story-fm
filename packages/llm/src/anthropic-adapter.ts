@@ -208,7 +208,12 @@ export class AnthropicGameLLM implements GameLLM {
        */
       let response: Anthropic.Message;
       try {
-        const stream = this.client.messages.stream(params);
+        // 시한은 요청 옵션으로 간다 — 값은 요청 하나의 상한이고, 한 턴 전체는
+        // `withDeadline`이 마감한다. 신호를 안 넘기면 시한이 지나도 소켓이 산다.
+        const stream = this.client.messages.stream(params, {
+          timeout: this.config.timeoutMs,
+          ...(req.signal ? { signal: req.signal } : {}),
+        });
         const onText = req.onText;
         if (onText) stream.on("text", (delta) => onText(delta));
         response = await stream.finalMessage();

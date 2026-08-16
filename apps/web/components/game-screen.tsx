@@ -149,6 +149,18 @@ const TIME_SKIPS = [
   },
 ] as const;
 
+/**
+ * 아무것도 오지 않은 채로 이만큼 지나면 턴을 끊는다.
+ *
+ * 서버는 도구만 도는 조용한 구간에도 하트비트를 흘리므로(turn/stream 라우트,
+ * 10초 간격) 이 시계가 끝까지 도는 것은 **연결이 죽었을 때뿐**이다. 값이 하트비트
+ * 간격보다 넉넉해야 느린 네트워크가 멀쩡한 턴을 끊지 않는다.
+ */
+const TURN_IDLE_TIMEOUT_MS = 60_000;
+
+/** 시한을 넘긴 턴 — 서버의 `turnErrorMessage`와 같은 문구를 쓴다 */
+const TURN_TIMEOUT_MESSAGE = "응답이 지연돼 턴을 취소했습니다 — 다시 시도해 주세요.";
+
 export function GameScreen({ gameId }: { gameId: string }) {
   const [game, setGame] = useState<GamePayload | null>(null);
   /**
@@ -384,6 +396,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
   const pendingPayloadRef = useRef<GamePayload | null>(null);
   const rafRef = useRef(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** 무응답 감시 시계 — 델타든 하트비트든 무엇이든 오면 되감긴다 */
+  const idleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     fetch(`/api/games/${gameId}`)
@@ -396,6 +410,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       if (intervalRef.current) clearInterval(intervalRef.current);
+      if (idleRef.current) clearTimeout(idleRef.current);
     };
   }, [gameId]);
 
@@ -499,11 +514,27 @@ export function GameScreen({ gameId }: { gameId: string }) {
       };
 
       let finished = false;
+      /**
+       * 무응답 감시 — 델타든 하트비트든 **무엇이든 도착하면 되감긴다.** 아무것도
+       * 오지 않은 채로 시한이 지나면 요청을 끊어, 기다림이 끝나지 않는 자리를
+       * 없앤다. 서버 쪽 턴과 잠금은 모델 호출마다 걸린 시한이 푼다
+       * (docs/llm/models.md §1-1) — 여기서 끊는 것은 화면의 기다림뿐이다.
+       */
+      const abort = new AbortController();
+      const stopWatch = () => {
+        if (idleRef.current) clearTimeout(idleRef.current);
+        idleRef.current = null;
+      };
+      const armWatch = () => {
+        stopWatch();
+        idleRef.current = setTimeout(() => abort.abort(), TURN_IDLE_TIMEOUT_MS);
+      };
       const stopPump = () => {
         if (rafRef.current) cancelAnimationFrame(rafRef.current);
         rafRef.current = 0;
         if (intervalRef.current) clearInterval(intervalRef.current);
         intervalRef.current = null;
+        stopWatch();
       };
       const commit = (payload: GamePayload | null) => {
         if (finished) return;
@@ -559,10 +590,12 @@ export function GameScreen({ gameId }: { gameId: string }) {
       intervalRef.current = setInterval(step, 300);
 
       try {
+        armWatch();
         const res = await fetch(`/api/games/${gameId}/turn/stream`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ message, operator, ...(orders.length > 0 ? { orders } : {}) }),
+          signal: abort.signal,
         });
         if (!res.ok || !res.body) {
           const data = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
@@ -573,9 +606,12 @@ export function GameScreen({ gameId }: { gameId: string }) {
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
+        let closed = false;
         for (;;) {
           const { value, done } = await reader.read();
           if (done) break;
+          // 하트비트도 여기로 온다 — 무엇이 왔는지 가리지 않고 시계를 되감는다
+          armWatch();
           buffer += decoder.decode(value, { stream: true });
           let nl: number;
           while ((nl = buffer.indexOf("\n")) >= 0) {
@@ -598,16 +634,27 @@ export function GameScreen({ gameId }: { gameId: string }) {
               streamAccRef.current += evt.text;
             } else if (evt.type === "done" && evt.payload) {
               pendingPayloadRef.current = evt.payload; // 공개가 끝나면 pump가 커밋
+              closed = true;
             } else if (evt.type === "error") {
               fail(evt.error ?? "턴을 처리하지 못했습니다", evt.detail);
+              closed = true;
             }
           }
         }
-        // 스트림 종료 — done이 없었다면(에러 등) 즉시 마감
+        /**
+         * 스트림이 `done`도 `error`도 없이 끊겼다 — 서버가 중간에 죽었거나
+         * 응답이 잘렸다. 그냥 마감하면 낙관적 유저 발화가 화면에만 남고(서버는
+         * 아무것도 저장하지 않았다) 감독은 무엇이 반영됐는지 알 수 없다.
+         */
+        stopWatch();
+        if (!closed) fail(TURN_TIMEOUT_MESSAGE, "스트림이 done 없이 끊겼습니다");
         if (!pendingPayloadRef.current) commit(null);
       } catch (e) {
+        // 시한을 넘겨 우리가 끊은 것과 연결이 안 된 것은 감독에게 다른 사건이다
         fail(
-          "서버에 연결하지 못했습니다 — 다시 시도해 주세요.",
+          abort.signal.aborted
+            ? TURN_TIMEOUT_MESSAGE
+            : "서버에 연결하지 못했습니다 — 다시 시도해 주세요.",
           e instanceof Error ? e.message : String(e),
         );
         commit(null);

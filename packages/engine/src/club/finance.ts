@@ -24,6 +24,7 @@ import {
   financeOf,
   pushNarrative,
   teamShortName,
+  weeklyWageLinesOf,
   weeklyWagesOf,
   type GameState,
 } from "../core/state";
@@ -168,6 +169,47 @@ const WRITEOFF_WINDOW_MONTHS = 2;
 /** 상세 원장 보존 개월 수 — 그 이전은 월간 보고서가 요약해 보관한다 */
 const LEDGER_MONTHS_KEPT = 3;
 
+/**
+ * 달력 일지에 서는 돈의 문턱 — **£1M 또는 잔고의 1%, 둘 중 낮은 쪽**.
+ *
+ * 낮은 쪽을 쓰므로 규모가 작은 구단은 자기 눈금으로 본다(잔고 £20M이면 £200k부터).
+ * 하한이 있는 이유는 빚진 구단이다 — 잔고가 0 이하면 1%도 0 이하가 되어 모든
+ * 항목이 통과한다.
+ */
+const JOURNAL_MONEY_ABSOLUTE = 1_000_000;
+const JOURNAL_MONEY_BALANCE_RATE = 0.01;
+const JOURNAL_MONEY_FLOOR = 100_000;
+
+/**
+ * 일지에 설 수 있는 카테고리 — **비정기 항목만** (docs/simulation/finance.md §8.2).
+ *
+ * 중계권·스폰서십·주급·시설·상각은 매달, 매치데이·수당·생중계는 매경기 같은
+ * 자리에 선다. 아스날의 월 중계권은 £9M이라 언제나 문턱 위인데, 그 줄이 매달 서면
+ * 일지가 글자 벽이 되어 그날 실제로 벌어진 일을 덮는다.
+ *
+ * 이적료 축(`transfer_in`·`transfer_out`·`agent_fee`)도 빠진다 — 그 자리엔 이미
+ * 이적 일지가 그날 그 이름으로 서 있고, 금액은 그 줄이 `TRANSFER.fee`에서 적는다.
+ */
+const JOURNAL_MONEY_CATEGORIES: readonly FinanceCategory[] = ["prize"];
+
+/** 이 잔고에서 일지에 설 수 있는 최소 금액 */
+export function journalMoneyThreshold(balance: number): number {
+  return Math.max(
+    JOURNAL_MONEY_FLOOR,
+    Math.min(JOURNAL_MONEY_ABSOLUTE, balance * JOURNAL_MONEY_BALANCE_RATE),
+  );
+}
+
+/**
+ * 이 원장 한 줄이 달력 일지에 서는가 — 비정기 항목이면서 문턱을 넘을 때만.
+ * 서사가 만든 항목(`apply_finance_event`)은 정의상 일회성이라 카테고리를 묻지 않는다.
+ */
+export function isJournalMoney(entry: LedgerEntry, balance: number): boolean {
+  const oneOff =
+    entry.source === "narrative" || JOURNAL_MONEY_CATEGORIES.includes(categoryOf(entry));
+  return oneOff && entry.amount >= journalMoneyThreshold(balance);
+}
+
 /** PSR — 3시즌 누적 손실 한도 (실제 EPL 규정과 같은 £105M) */
 export const PSR_LOSS_LIMIT = 105_000_000;
 const PSR_SEASONS = 3;
@@ -250,10 +292,12 @@ function equalShareFactor(state: GameState, teamId: string): number {
   return EQUAL_SHARE_LEAGUE_SCALED ? poolOf(state, teamId) : 1;
 }
 
-const money = (amount: number) =>
+/** 금액 표기 — 원장·다이제스트·달력 일지가 같은 자를 쓴다 */
+export const formatMoney = (amount: number) =>
   Math.abs(amount) >= 1_000_000
     ? `£${(amount / 1_000_000).toFixed(1)}M`
     : `£${Math.round(amount / 1000)}k`;
+const money = formatMoney;
 
 export function monthOf(date: string): string {
   return date.slice(0, 7);
@@ -629,19 +673,39 @@ export function isOutsideOurEconomy(teamId: string): boolean {
   return isMarketOnlyLeague(leagueOfTeam(teamId));
 }
 
-/** 주간 주급 지급 — 전 팀 (월요일) */
+/**
+ * 주간 주급 지급 — 전 팀 (월요일).
+ *
+ * **유저 팀만 선수별로 적는다.** 원장은 유저 팀만 쌓으므로(§4.5) AI 팀에 명세를
+ * 만들면 잔고 한 번 더할 것을 스물몇 번 나눠 더하는 값만 치른다 — 96팀 × 매주다.
+ * 유저 팀 명세는 상각과 같은 모양이라 피드가 그대로 접는다 (§8.1).
+ */
 export function payWeeklyWages(state: GameState): void {
+  const playerNames = new Map(state.players.map((p) => [p.id, p.name]));
   for (const team of state.teams) {
     // 무소속은 구단이 아니다 — 자유계약 선수가 모인 자리라 낼 주급도 받을 수입도 없다
     if (!isClubTeam(team.id) || isOutsideOurEconomy(team.id)) continue;
-    const wages = weeklyWagesOf(state, team.id);
-    if (wages <= 0) continue;
-    recordFinance(state, team.id, {
-      kind: "expense",
-      category: "player_wages",
-      label: "선수단 주급",
-      amount: wages,
-    });
+    if (team.id !== state.userTeamId) {
+      const wages = weeklyWagesOf(state, team.id);
+      if (wages > 0) {
+        recordFinance(state, team.id, {
+          kind: "expense",
+          category: "player_wages",
+          label: "선수단 주급",
+          amount: wages,
+        });
+      }
+      continue;
+    }
+    for (const line of weeklyWageLinesOf(state, team.id)) {
+      recordFinance(state, team.id, {
+        kind: "expense",
+        category: "player_wages",
+        label: playerNames.get(line.gamePlayerId) ?? line.gamePlayerId,
+        amount: line.weekly,
+        ref: { type: "player", id: line.gamePlayerId },
+      });
+    }
   }
 }
 
@@ -1077,12 +1141,19 @@ function postMonthlyItems(state: GameState): void {
       });
     }
 
-    // 이적료 상각 — 장부에만 (noncash)
+    /**
+     * 이적료 상각 — 장부에만 (noncash).
+     *
+     * 라벨은 **선수 이름만**이다. 카테고리가 이미 `이적료 분할 비용`을 찍으므로
+     * 항목명을 붙이면 한 행에 같은 말이 두 번 선다. 그래서 피드는 이 줄들을
+     * 항목명 없는 묶음으로 접고, 항목명을 가진 `매각 잔존가`는 따로 세운다
+     * (docs/simulation/finance.md §8.1).
+     */
     for (const line of amortisationOf(state, team.id)) {
       recordFinance(state, team.id, {
         kind: "expense",
         category: "amortisation",
-        label: `이적료 상각 — ${playerNames.get(line.playerId) ?? line.playerId}`,
+        label: playerNames.get(line.playerId) ?? line.playerId,
         amount: line.monthly,
         ref: { type: "player", id: line.playerId },
         accounting: "noncash",
@@ -1362,6 +1433,20 @@ function buildReport(state: GameState, month: string, ledger: LedgerEntry[]): Fi
     seasonToDate,
     psr,
     notes,
+    /**
+     * 큰 비정기 항목은 **절단 전에** 여기로 옮겨 적는다 — 그러지 않으면 3개월 뒤
+     * 남는 것이 카테고리 합계뿐이라 "그 돈이 언제 들어왔나"에 답할 자리가 없다.
+     * 문턱의 기준은 그달을 마감한 잔고다 (§8.2).
+     */
+    highlights: entries
+      .filter((e) => isJournalMoney(e, closingBalance))
+      .map((e) => ({
+        date: e.date,
+        kind: e.kind,
+        category: categoryOf(e),
+        label: e.label,
+        amount: e.amount,
+      })),
   };
 }
 

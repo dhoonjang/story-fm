@@ -1,6 +1,6 @@
 import { keepSeat } from "./helpers";
 import { describe, expect, it } from "vitest";
-import type { FinanceCategory } from "@story-fm/domain";
+import { FINANCE_CATEGORY_KO, type FinanceCategory } from "@story-fm/domain";
 import type { GameState } from "@story-fm/engine";
 import {
   annualRevenueEstimate,
@@ -22,6 +22,7 @@ import {
   adjustTransferBudget,
   amortisationOf,
   applyFinanceEvent,
+  buildOfficeViews,
   weeklyWagesOf,
   categoryOf,
   clubProfile,
@@ -35,6 +36,7 @@ import {
   psrStatus,
   summarise,
   topUpTransferBudget,
+  userPlayers,
 } from "@story-fm/engine";
 import { advanceAndPlay, advanceDays, createTestGame } from "./helpers";
 
@@ -241,6 +243,28 @@ describe("월간 보고서", () => {
     expect(state.financeReports.some((r) => r.month === "2026-07")).toBe(true); // 요약은 영구
   });
 
+  it("석 달이 지나 원장이 잘려도 큰 건의 날짜는 달력 일지에 남는다", () => {
+    const state = createTestGame();
+    const bigDate = state.date;
+    const label = "창단 기념 스폰서 보너스";
+    expect(
+      applyFinanceEvent(state, {
+        kind: "income",
+        category: "commercial",
+        amount: 2_000_000,
+        note: label,
+      }).ok,
+    ).toBe(true);
+
+    advanceUntil(state, "2026-12-05");
+
+    // 원장에서 그날은 잘려 나갔다
+    expect(financeOf(state, state.userTeamId).ledger.some((e) => e.date === bigDate)).toBe(false);
+    // 그래도 달력은 날짜와 금액을 안다 — 보고서의 highlights에서 파생하기 때문
+    const day = buildOfficeViews(state).calendar.events[bigDate] ?? [];
+    expect(day.filter((e) => e.kind === "money").map((e) => e.text)).toEqual([`${label} +£2.0M`]);
+  });
+
   it("급여 비중과 판단 재료(notes)가 붙는다", () => {
     const state = createTestGame();
     advanceUntil(state, "2026-10-03");
@@ -328,6 +352,30 @@ describe("이적료 — 현금과 장부 두 축", () => {
     expect(
       state.transfers.filter((t) => t.toTeamId === state.userTeamId && t.fee > 0),
     ).toHaveLength(0);
+  });
+
+  /**
+   * 라벨이 카테고리 이름을 되풀이하면 피드 한 행에 같은 말이 두 번 선다.
+   * 그리고 피드는 라벨의 항목명으로 묶으므로(§8.1), 선수별 상각과 `매각 잔존가`가
+   * 갈리는 자리도 여기다.
+   */
+  it("상각 원장은 선수 이름만 남기고 매각 잔존가는 항목명을 갖는다", () => {
+    const state = createTestGame(42, "arsenal");
+    const names = new Set(userPlayers(state).map((p) => p.name));
+    advanceUntil(state, "2026-09-03");
+
+    const entries = financeOf(state, state.userTeamId).ledger.filter(
+      (e) => categoryOf(e) === "amortisation",
+    );
+    expect(entries.length).toBeGreaterThan(0);
+    for (const entry of entries) {
+      if (entry.label.includes(" — ")) {
+        expect(entry.label.startsWith("매각 잔존가 — ")).toBe(true);
+        continue;
+      }
+      expect(names.has(entry.label)).toBe(true);
+      expect(entry.label).not.toContain(FINANCE_CATEGORY_KO.amortisation);
+    }
   });
 
   it("레거시 상각은 주급에서 파생하고 계약이 끝나면 멈춘다", () => {

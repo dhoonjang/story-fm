@@ -209,6 +209,13 @@ export class OpenAiGameLLM implements GameLLM {
     let toolCallCount = 0;
     let stopReason: string | null = null;
 
+    // 시한은 요청 옵션으로 간다 — 값은 요청 하나의 상한이고, 한 턴 전체는
+    // `withDeadline`이 마감한다. 신호를 안 넘기면 시한이 지나도 소켓이 산다.
+    const requestOptions = {
+      timeout: this.config.timeoutMs,
+      ...(req.signal ? { signal: req.signal } : {}),
+    };
+
     for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
       const body = {
         model: this.config.model,
@@ -223,16 +230,19 @@ export class OpenAiGameLLM implements GameLLM {
       if (req.onText) {
         // ⚠️ include_usage가 없으면 스트리밍 응답의 usage가 통째로 비어
         // 계측·예산이 이 에이전트를 못 본다 (usage-meter).
-        const stream = await this.client.chat.completions.create({
-          ...body,
-          stream: true,
-          stream_options: { include_usage: true },
-        });
+        const stream = await this.client.chat.completions.create(
+          {
+            ...body,
+            stream: true,
+            stream_options: { include_usage: true },
+          },
+          requestOptions,
+        );
         const collected = await collectStream(stream, req.onText);
         addUsage(usage, collected.usage);
         turn = collected;
       } else {
-        const response = await this.client.chat.completions.create(body);
+        const response = await this.client.chat.completions.create(body, requestOptions);
         addUsage(usage, response.usage);
         const choice = response.choices[0];
         const message = choice?.message;

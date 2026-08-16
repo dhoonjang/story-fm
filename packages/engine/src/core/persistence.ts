@@ -1,5 +1,4 @@
 import {
-  copyFileSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -9,6 +8,7 @@ import {
   writeFileSync,
   existsSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { clampCondition, migratePassStyle, migrateSignature } from "@story-fm/domain";
 import { advanceDomesticCups } from "../competition/domestic-cup";
@@ -27,12 +27,40 @@ export { dataDir };
  *
  * 내구성 원칙 (유저 게임이 업데이트·재시작·크래시에도 살아남게):
  * 1. 쓰기는 원자적 — tmp에 먼저 쓰고 rename으로 교체. 쓰다 죽어도 본 파일 온전.
- * 2. 교체 전 직전 세이브를 `.bak`으로 복사 — 본 파일이 깨져도 복구 가능.
+ * 2. 교체 전 직전 세이브를 `.bak`으로 밀어낸다 — 본 파일이 깨져도 복구 가능.
  * 3. 읽기는 방어적 — 파싱 실패 시 `.bak` 폴백, 그래도 안 되면 null(스킵).
  * 4. 스키마 진화 대비 — 로드 시 누락 필드를 마이그레이션으로 채운다.
  * 5. 데이터 디렉터리(.data/)는 gitignore·빌드 산출물 밖 — 재빌드/브랜치 전환
  *    (git clean 포함)에도 세이브가 남는다.
+ * 6. 큰 테이블은 조각 파일로 빠지고 **바뀐 조각만** 쓴다 (아래 SHARDED_TABLES).
  */
+
+/**
+ * 조각으로 빼는 테이블 — 세이브 6MB 중 5.2MB(86%)가 이 둘이고, 전술판 자동 저장은
+ * 둘 다 손대지 않는다. 3초마다 세계 전체를 다시 쓰던 자리다.
+ *
+ * 조각 파일 이름은 **내용의 해시**다. 테이블이 그대로면 같은 이름이 나오고 그
+ * 파일은 이미 디스크에 있으니 쓰지 않는다 — 어디를 고쳤는지 추적하지 않으므로
+ * "고쳤는데 조각을 안 썼다"가 성립할 수 없다. 조각은 불변이라 덮어쓰지도 않는다.
+ */
+const SHARDED_TABLES = ["players", "contracts"] as const;
+
+/** 본체가 어느 조각을 가리키는지 — `<테이블> → 내용 해시` */
+type ShardMap = Partial<Record<(typeof SHARDED_TABLES)[number], string>>;
+
+/** 조각 파일인가 — 목록이 게임으로 착각하지 않게, 청소가 남의 것을 지우지 않게 */
+const SHARD_FILE = /\.shard-[0-9a-f]+\.json$/;
+
+function shardFile(dir: string, id: string, hash: string): string {
+  return path.join(dir, `${id}.shard-${hash}.json`);
+}
+
+/** tmp에 완전히 쓴 뒤 rename — 쓰다 죽어도 반쪽 파일이 이름을 갖지 않는다 */
+function writeAtomic(file: string, contents: string): void {
+  const tmp = `${file}.tmp`;
+  writeFileSync(tmp, contents, "utf8");
+  renameSync(tmp, file);
+}
 
 /**
  * 없으면 빈 배열로 채우는 필드 — 순수한 목록·이력이라 "비어 있음"이 곧 유효한
@@ -72,21 +100,97 @@ function paths(id: string) {
 export function saveGame(state: GameState): void {
   const { dir, main, tmp, bak } = paths(state.id);
   mkdirSync(dir, { recursive: true });
-  const json = JSON.stringify({ ...state, saveVersion: SAVE_VERSION });
-  // 1. tmp에 완전히 기록 (여기서 죽으면 본 파일은 이전 상태 그대로)
-  writeFileSync(tmp, json, "utf8");
-  // 2. 직전 세이브를 백업으로 보존 (best-effort)
+  const body: Record<string, unknown> = { ...state, saveVersion: SAVE_VERSION };
+  /**
+   * 1. 조각 먼저 — 본체가 가리키기 전에 디스크에 있어야 한다. 여기서 죽으면
+   *    아무도 가리키지 않는 조각이 남을 뿐, 본체와 `.bak`은 그대로다.
+   */
+  const shards: ShardMap = {};
+  for (const table of SHARDED_TABLES) {
+    const json = JSON.stringify(state[table]);
+    const hash = createHash("sha1").update(json).digest("hex").slice(0, 16);
+    const file = shardFile(dir, state.id, hash);
+    // 이름이 곧 내용이라 이미 있으면 같은 내용이다 — 손대지 않은 5,743명을 다시 쓰지 않는다
+    if (!existsSync(file)) writeAtomic(file, json);
+    shards[table] = hash;
+    delete body[table];
+  }
+  body.shards = shards;
+  // 2. 본체를 tmp에 완전히 기록 (여기서 죽으면 본 파일은 이전 상태 그대로)
+  writeFileSync(tmp, JSON.stringify(body), "utf8");
+  // 3. 직전 세이브를 백업으로 **밀어낸다** — 복사가 아니라 rename이라 옮길 바이트가 없다
   if (existsSync(main)) {
     try {
-      copyFileSync(main, bak);
+      renameSync(main, bak);
     } catch {
       /* 백업 실패는 치명적이지 않음 — 계속 진행 */
     }
   }
-  // 3. 원자적 교체
+  // 4. 원자적 교체
   renameSync(tmp, main);
-  // 4. 목록용 요약 — 없거나 깨져도 목록이 본문에서 다시 만든다
+  // 5. 목록용 요약 — 없거나 깨져도 목록이 본문에서 다시 만든다
   writeSummary(state.id, summaryOf(state));
+  // 6. 본체도 `.bak`도 가리키지 않는 조각을 거둔다
+  pruneShards(state.id, shards);
+}
+
+/** 본체가 가리키는 조각 해시 — 읽을 수 없으면 null(그때는 아무것도 지우지 않는다) */
+function referencedShards(file: string): Set<string> | null {
+  if (!existsSync(file)) return new Set();
+  try {
+    const raw: unknown = JSON.parse(readFileSync(file, "utf8"));
+    const map = (raw as { shards?: unknown }).shards;
+    if (!map || typeof map !== "object") return new Set();
+    return new Set(Object.values(map as Record<string, unknown>).filter((h) => typeof h === "string"));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 버려진 조각 청소 — 본체와 `.bak`이 가리키는 것만 남긴다.
+ *
+ * `.bak`의 조각을 남기는 것이 폴백을 성립시킨다: 본체가 깨졌을 때 읽는 것이
+ * `.bak`인데 그 조각을 지워 버리면 폴백도 반쪽이 된다.
+ */
+function pruneShards(id: string, live: ShardMap): void {
+  const { dir, bak } = paths(id);
+  const keep = referencedShards(bak);
+  if (keep === null) return; // `.bak`을 못 읽으면 무엇이 살아 있는지 모른다 — 건드리지 않는다
+  for (const hash of Object.values(live)) keep.add(hash);
+  const prefix = `${id}.shard-`;
+  try {
+    for (const name of readdirSync(dir)) {
+      if (!name.startsWith(prefix) || !SHARD_FILE.test(name)) continue;
+      if (keep.has(name.slice(prefix.length, -".json".length))) continue;
+      rmSync(path.join(dir, name), { force: true });
+    }
+  } catch {
+    /* 청소 실패는 치명적이지 않음 — 다음 저장이 다시 거둔다 */
+  }
+}
+
+/**
+ * 조각을 본체에 붙인다. `shards`가 없으면 옛 단일 파일 세이브라 그대로 쓴다.
+ *
+ * 가리키는 조각이 하나라도 없거나 깨졌으면 **반쪽을 읽지 않고** 손상으로 답한다 —
+ * 선수 없는 세계를 넘기느니 `.bak`으로 폴백하는 것이 낫다.
+ */
+function attachShards(raw: unknown, id: string): unknown {
+  if (!raw || typeof raw !== "object") return raw;
+  const body = raw as Record<string, unknown>;
+  const map = body.shards;
+  if (!map || typeof map !== "object") return raw;
+  const { dir } = paths(id);
+  for (const [table, hash] of Object.entries(map as Record<string, unknown>)) {
+    if (typeof hash !== "string") return null;
+    const file = shardFile(dir, id, hash);
+    if (!existsSync(file)) return null;
+    body[table] = JSON.parse(readFileSync(file, "utf8"));
+  }
+  // 조각은 파일 배치일 뿐 상태가 아니다 — GameState에 남기지 않는다
+  delete body.shards;
+  return body;
 }
 
 /**
@@ -245,9 +349,9 @@ function validate(raw: unknown): GameState | null {
   return state;
 }
 
-function readState(file: string): GameState | null {
+function readState(id: string, file: string): GameState | null {
   try {
-    return validate(JSON.parse(readFileSync(file, "utf8")));
+    return validate(attachShards(JSON.parse(readFileSync(file, "utf8")), id));
   } catch {
     return null;
   }
@@ -257,11 +361,11 @@ export function loadGame(id: string): GameState | null {
   const { main, bak } = paths(id);
   // 본 파일 우선, 파싱 실패·부재 시 백업 폴백 (크래시 중 손상 복구)
   if (existsSync(main)) {
-    const state = readState(main);
+    const state = readState(id, main);
     if (state) return state;
   }
   if (existsSync(bak)) {
-    const state = readState(bak);
+    const state = readState(id, bak);
     if (state) return state;
   }
   return null;
@@ -272,8 +376,9 @@ export function listGames(): string[] {
   if (!existsSync(dir)) return [];
   return (
     readdirSync(dir)
-      // `.meta.json`은 목록용 요약 사이드카지 세이브가 아니다
-      .filter((f) => f.endsWith(".json") && !f.endsWith(".meta.json"))
+      // `.meta.json`은 목록용 요약 사이드카, `.shard-….json`은 세이브의 조각 —
+      // 둘 다 게임이 아니다
+      .filter((f) => f.endsWith(".json") && !f.endsWith(".meta.json") && !SHARD_FILE.test(f))
       .map((f) => f.replace(/\.json$/, ""))
   );
 }
@@ -371,8 +476,17 @@ export function listGameSummaries(): GameSummary[] {
 }
 
 export function deleteGame(id: string): boolean {
-  const { main, bak, meta } = paths(id);
+  const { dir, main, bak, meta } = paths(id);
   if (!existsSync(main) && !existsSync(bak)) return false;
   for (const f of [main, bak, meta]) if (existsSync(f)) rmSync(f);
+  // 조각도 함께 — 본체가 사라지면 아무도 가리키지 않는다
+  const prefix = `${id}.shard-`;
+  try {
+    for (const name of readdirSync(dir)) {
+      if (name.startsWith(prefix) && SHARD_FILE.test(name)) rmSync(path.join(dir, name), { force: true });
+    }
+  } catch {
+    /* 디렉터리를 읽지 못하면 남길 뿐 — 삭제 자체는 끝났다 */
+  }
   return true;
 }

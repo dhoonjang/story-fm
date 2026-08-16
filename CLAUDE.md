@@ -20,19 +20,21 @@ Vision, architecture and development conventions all live in
 - **Commit / push** — only when the user asks. Commit to the branch already
   checked out and `git push origin HEAD`; name the paths you add, and never
   rebase, stash or switch branches (AGENTS.md §5).
-- **e2e is a merge gate** — while working, verify with `pnpm test` / `typecheck`
-  / `lint`. `pnpm e2e` belongs to the `/merge` skill; run it mid-work only when
-  the user asks (AGENTS.md §5).
+- **CI is the gate** — while working, run `pnpm typecheck` / `pnpm lint` and
+  `pnpm test <path>` for the file you just wrote. The full `pnpm test` and
+  `pnpm e2e` run in GitHub Actions once the PR is ready (drafts are skipped); do
+  not spend minutes on them locally unless the user asks or CI failed
+  (AGENTS.md §5).
 - **Ask when unsure** — anything that moves game balance or the core loop.
 
 ## Commands
 
 ```bash
 pnpm install          # Node 26 — see .nvmrc
-pnpm test             # unit + API integration (Vitest — runs without an LLM)
+pnpm test <path>      # the one suite you just touched — the local test loop
 pnpm typecheck        # tsc --noEmit (TS 6.x — 7 breaks typescript-eslint)
 pnpm lint             # ESLint
-pnpm e2e              # Playwright e2e — /merge only, not the edit loop
+pnpm test / pnpm e2e  # full suites — CI runs these; locally only on request
 pnpm dev              # web app dev server (LLM_MODE=mock needs no API key)
 pnpm match --dry      # match CLI prototype: prints the strength packet only
 ```
