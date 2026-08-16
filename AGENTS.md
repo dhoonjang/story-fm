@@ -166,7 +166,7 @@ Vitest assigns files to shards by hashing their path, so a new test file
 reshuffles the split, and **one file is never split across shards** — the slowest
 file is the floor for its shard. That floor is `euro-knockout.test.ts`, whose one
 full-season case needs the whole world because the euro draw is what it checks.
-The suite costs 14.4 CPU-minutes over 1,586 cases (measured locally, 12 cores);
+The suite costs about 13 CPU-minutes over 1,593 cases (measured locally, 12 cores);
 `finance.test.ts`, which used to set the floor at 17.5 runner-minutes, is now a
 fifteenth of that. More shards will not move the floor; only a cheaper test will.
 Nothing is excluded from the gate: making it faster means making a test cheaper,
