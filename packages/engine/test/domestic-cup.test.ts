@@ -1,4 +1,3 @@
-import { keepSeat } from "./helpers";
 import { describe, expect, it } from "vitest";
 import {
   domesticCupCatalog,
@@ -33,12 +32,50 @@ import {
   type GameState,
 } from "@story-fm/engine";
 import type { MatchRecord } from "@story-fm/domain";
-import { createTestGame, playMockMatch } from "./helpers";
+import { createTestGame, keepSeat, playMockMatch } from "./helpers";
 
 /**
  * 국내 컵 (FA컵·리그컵·코파·포칼·쿠프) — 32강 순수 녹아웃.
  * 대회 구조·일정 충돌·유럽 티켓 연동을 LLM 없이 결정적으로 검증한다.
  */
+
+/** 그 컵의 "예정" 자리 — 대진이 뽑히기 전에 달력을 채우는 라운드 표식 */
+function pendingFor(state: GameState, cupId: string) {
+  return state.schedule.filter((e) => e.type === "cup-round" && e.refId.startsWith(`${cupId}:`));
+}
+
+/**
+ * 시즌을 굴리는 **동안에만** 볼 수 있는 것 — 지나가면 사라지는 예정 자리다.
+ *
+ * 컵 예정의 불변식(컵당 많아야 하나 · 살아 있을 때만 · 뽑히기 전까지만)은 시즌이
+ * 끝난 뒤의 세이브로는 확인할 수 없다. 예전엔 그래서 이 검증만 시즌을 세 번 더
+ * 굴렸다 — 지금은 공유 세이브를 만드는 그 진행에 같이 얹는다.
+ */
+interface PendingWatch {
+  violations: string[];
+  /** 1라운드를 이기고 **다음** 라운드 예정이 열리는 장면을 실제로 봤나 */
+  sawSecond: boolean;
+}
+
+function watchPending(state: GameState, watch: PendingWatch): void {
+  for (const cup of domesticCupsOf(state.userTeamId)) {
+    const pending = pendingFor(state, cup.id);
+    if (pending.length > 1) {
+      watch.violations.push(`${state.date} ${cup.id}: 예정이 ${pending.length}개`);
+      continue;
+    }
+    const stage = pending[0]?.refId.split(":")[1];
+    if (!stage) continue;
+    // 예정이 있다 = 아직 살아 있고, 그 라운드는 아직 안 뽑혔다
+    if (!userStillIn(state, cup.id)) {
+      watch.violations.push(`${state.date} ${cup.id}: 탈락했는데 예정이 남았다`);
+    }
+    if (domesticStageMatches(state, cup.id, stage as never).length > 0) {
+      watch.violations.push(`${state.date} ${cup.id}/${stage}: 뽑힌 라운드에 예정이 남았다`);
+    }
+    if (stage !== DOMESTIC_STAGES[0]) watch.sawSecond = true;
+  }
+}
 
 /**
  * 시즌 마지막 경기까지 돌리고 **전환 직전에 멈춘다**.
@@ -47,7 +84,7 @@ import { createTestGame, playMockMatch } from "./helpers";
  * 시즌을 전환한다. 그러면 `state.matches`가 새 시즌 것으로 갈려 방금 끝난 시즌의
  * 컵 대진을 검사할 수 없다. 매 걸음 전에 우리가 먼저 확인하면 그 문턱을 넘지 않는다.
  */
-function playSeason(state: GameState): void {
+function playSeason(state: GameState, watch?: PendingWatch): void {
   let guard = 420; // 시즌 한 바퀴(7월~6월)보다 넉넉히
   while (guard-- > 0 && !allMatchesDone(state)) {
     const before = state.date;
@@ -55,6 +92,7 @@ function playSeason(state: GameState): void {
     keepSeat(state);
     const advanced = advanceTime(state, { days: 1 });
     if (state.phase === "matchday") playMockMatch(state);
+    if (watch) watchPending(state, watch);
     if (state.date === before && advanced.stopped !== "matchday") break;
   }
 }
@@ -68,15 +106,27 @@ function playSeason(state: GameState): void {
  * 검증의 것이다 — 시즌을 넘기는 쪽(`transitionSeason`)은 제 세이브를 따로 만든다.
  */
 const seasons = new Map<number, GameState>();
+const watches = new Map<number, PendingWatch>();
 
 function seasonOf(seed: number): GameState {
   const cached = seasons.get(seed);
   if (cached) return cached;
   const state = createTestGame(seed);
-  playSeason(state);
+  const watch: PendingWatch = { violations: [], sawSecond: false };
+  playSeason(state, watch);
   seasons.set(seed, state);
+  watches.set(seed, watch);
   return state;
 }
+
+/** 그 시드의 시즌을 굴리면서 모은 컵 예정 관찰 */
+function watchOf(seed: number): PendingWatch {
+  seasonOf(seed);
+  return watches.get(seed)!;
+}
+
+/** 이 파일이 굴리는 시드 — 컵·대항전 진출 조합이 시드마다 다르다 */
+const SEEDS = [7, 23, 42, 91];
 
 /**
  * 한 팀이 하루에 두 경기를 갖지 않는다 — 컵 편성의 **가장 중요한 불변식**이다.
@@ -255,9 +305,6 @@ describe("대진 추첨이 일정 축에 오른다", () => {
 });
 
 describe("추첨 전에도 라운드 날짜는 달력에 있다 — 단, 확보한 자리만", () => {
-  const pendingFor = (state: GameState, cupId: string) =>
-    state.schedule.filter((e) => e.type === "cup-round" && e.refId.startsWith(`${cupId}:`));
-
   it("부임 첫날엔 컵마다 첫 라운드 하나씩만 — 뒷 라운드는 올라간다는 보장이 없다", () => {
     const state = createTestGame(7);
     const rounds = buildOfficeViews(state).calendar.entries.filter((e) => e.type === "cup-round");
@@ -295,37 +342,17 @@ describe("추첨 전에도 라운드 날짜는 달력에 있다 — 단, 확보�
    * 다음 자리가 열리는 장면은 시드 하나에서 보이면 된다.
    */
   it("시즌 내내 컵당 예정은 많아야 하나 — 직전 라운드를 이겨야 다음이 열린다", () => {
-    const runSeason = (seed: number) => {
-      const state = createTestGame(seed);
-      let sawSecond = false; // 2라운드 이상이 열리는 순간이 실제로 있었나
-      let guard = 420;
-      while (guard-- > 0 && !allMatchesDone(state)) {
-        const before = state.date;
-        const advanced = advanceTime(state, { days: 1 });
-        if (state.phase === "matchday") playMockMatch(state);
-        for (const cup of domesticCupsOf(state.userTeamId)) {
-          const pending = pendingFor(state, cup.id);
-          expect(pending.length, `시드 ${seed} · ${cup.id} @ ${state.date}`).toBeLessThanOrEqual(1);
-          const stage = pending[0]?.refId.split(":")[1];
-          if (!stage) continue;
-          // 예정이 있다 = 아직 살아 있고, 그 라운드는 아직 안 뽑혔다
-          expect(userStillIn(state, cup.id), `${cup.id} 탈락 후 예정이 남음`).toBe(true);
-          expect(domesticStageMatches(state, cup.id, stage as never)).toHaveLength(0);
-          if (stage !== DOMESTIC_STAGES[0]) sawSecond = true;
-        }
-        if (state.date === before && advanced.stopped !== "matchday") break;
-      }
+    for (const seed of SEEDS) {
+      expect(watchOf(seed).violations, `시드 ${seed}`).toEqual([]);
       // 시즌이 끝난 뒤 — 탈락한 컵엔 아무 예정도 남지 않는다
+      const state = seasonOf(seed);
       for (const cup of domesticCupsOf(state.userTeamId)) {
         if (userStillIn(state, cup.id)) continue;
-        expect(pendingFor(state, cup.id), `${cup.id} 탈락 후에도 예정이 남음`).toHaveLength(0);
+        expect(pendingFor(state, cup.id), `시드 ${seed} ${cup.id} 탈락 후 예정`).toHaveLength(0);
       }
-      return sawSecond;
-    };
-
-    const seeds = [7, 3, 11];
+    }
     expect(
-      seeds.some((seed) => runSeason(seed)),
+      SEEDS.some((seed) => watchOf(seed).sawSecond),
       "어느 시드에서도 1라운드를 이기고 다음 자리가 열리지 않았다",
     ).toBe(true);
   }, 180_000);
@@ -585,7 +612,7 @@ describe("컵이 리그를 비켜세운다 — 겹치면 리그가 연기된다"
 describe("여러 시드로 한 시즌 완주 — 편성이 게임을 멈추지 않는다", () => {
   // 시드마다 컵·대항전 진출 조합이 달라 겹침이 드러나는 자리도 달라진다.
   // 하나라도 겹치면 그 세이브는 시즌을 넘기지 못하므로 여러 시드로 돌려 본다.
-  for (const seed of [7, 23, 42, 91]) {
+  for (const seed of SEEDS) {
     const state = seasonOf(seed);
     it(`시드 ${seed} — 하루 두 경기 없이 시즌이 끝나고 결승은 주말이다`, () => {
       expect(allMatchesDone(state), `시드 ${seed}: ${state.date}에 시즌이 안 끝났다`).toBe(true);
@@ -631,9 +658,9 @@ describe("여러 시드로 한 시즌 완주 — 편성이 게임을 멈추지 �
 });
 
 describe("컵 우승 → 트로피와 유럽 티켓", () => {
-  // 여기만 시즌을 **넘긴다** — 공유 세이브(`seasonOf`)를 고쳐 쓰지 않고 제 것을 만든다
-  const state = createTestGame(23);
-  playSeason(state);
+  // 여기만 시즌을 **넘긴다** — 공유 세이브(`seasonOf`)를 고쳐 쓰지 않고 복제해 쓴다.
+  // 같은 시드를 다시 굴리면 같은 장부가 나오지만, 그 값이 시즌 한 바퀴다
+  const state = structuredClone(seasonOf(23));
 
   it("컵 우승팀은 다음 시즌 유럽 대항전에 들어간다", () => {
     reviewSeason(state);

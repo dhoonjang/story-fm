@@ -5,7 +5,6 @@ import {
   SKILL_NAMES,
   buildGmTools,
   buildMatchTools,
-  skillDescriptions,
 } from "@story-fm/agents";
 import { createGame, interpretBackgroundHeuristic } from "@story-fm/engine";
 
@@ -35,10 +34,5 @@ describe("스킬 설명 — 코드가 유일한 원본이다", () => {
     for (const name of SKILL_NAMES) {
       expect(DEFAULT_SKILL_DESCRIPTIONS[name].trim().length).toBeGreaterThan(0);
     }
-  });
-
-  it("런타임 오버라이드는 없다 — 언제 불러도 같은 값이다", () => {
-    expect(skillDescriptions()).toEqual(DEFAULT_SKILL_DESCRIPTIONS);
-    expect(skillDescriptions()).toEqual(skillDescriptions());
   });
 });

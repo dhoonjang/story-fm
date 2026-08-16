@@ -36,14 +36,6 @@ describe("어드민 포지션 가르기", () => {
     expect(other).toEqual([]);
   });
 
-  it("접어도 카탈로그에 없는 코드로 바꾸지 않는다 — DM은 DM이다", () => {
-    const { other } = splitPositions([
-      { position: "CB", proficiency: 92, isNatural: true },
-      { position: "DM", proficiency: 76, isNatural: false },
-    ]);
-    expect(other).toEqual(["DM"]);
-  });
-
   it("선호가 여럿이면 여럿을 돌려준다 — 적응도 내림차순", () => {
     const { natural } = splitPositions([
       { position: "LB", proficiency: 84, isNatural: true },

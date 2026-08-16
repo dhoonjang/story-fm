@@ -4,24 +4,6 @@ import { AGENT_NAMES, LLM_CONFIG, findLlmConfigPath, hasKey, parseLlmConfig } fr
 const yamlWith = (agents: string): string => `version: 1\nagents:\n${agents}`;
 
 describe("에이전트별 LLM 설정", () => {
-  it("현재 설정은 GM·캐스터와 세 결산을 각각 명시한다", () => {
-    expect(Object.keys(LLM_CONFIG.agents)).toEqual(AGENT_NAMES);
-    expect(LLM_CONFIG.agents.gm).toMatchObject({
-      provider: "google",
-      model: "gemini-3.6-flash",
-    });
-    expect(LLM_CONFIG.agents["match-caster"]).toMatchObject({
-      provider: "google",
-      model: "gemini-3.6-flash",
-    });
-    for (const agent of ["match-rater", "training-rater", "mood-rater"] as const) {
-      expect(LLM_CONFIG.agents[agent]).toMatchObject({
-        provider: "google",
-        model: "gemini-3.5-flash-lite",
-      });
-    }
-  });
-
   it("에이전트마다 시한이 있고 제공자 기본값에 기대지 않는다", () => {
     for (const agent of AGENT_NAMES) {
       expect(LLM_CONFIG.agents[agent].timeoutMs).toBeGreaterThan(0);

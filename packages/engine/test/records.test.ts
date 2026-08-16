@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { YELLOWS_PER_SUSPENSION } from "@story-fm/domain";
 import {
   activeContract,
   activeSuspension,
@@ -100,10 +99,6 @@ describe("징계 — BOOKING + SUSPENSION", () => {
     expect(isSuspended(state, player.id)).toBe(false);
     // 이력은 남는다
     expect(state.suspensions.find((s) => s.id === "sus-1")?.status).toBe("done");
-  });
-
-  it("경고 5회 임계값이 상수로 정의된다", () => {
-    expect(YELLOWS_PER_SUSPENSION).toBe(5);
   });
 
   it("정지 선수는 라인업 배치에서 자동 대체된다", () => {

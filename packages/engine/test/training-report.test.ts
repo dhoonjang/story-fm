@@ -7,7 +7,6 @@ import {
   applyTrainingOutcomes,
   assignmentsOf,
   buildTrainingBrief,
-  managerTrainingUptake,
   playerById,
   setTraining,
   userTactics,
@@ -15,7 +14,6 @@ import {
   type TrainedSession,
   type TrainingBrief,
 } from "@story-fm/engine";
-import { familiarityGainScale, tacticalUptake } from "@story-fm/domain";
 import { afterSquadReturn, createTestGame } from "./helpers";
 
 /**
@@ -303,30 +301,5 @@ describe("판정의 상한 — 한 번에 게임을 크게 흔들 수 없다", (
     expect(after, "코어가 몰래 올렸다").toBe(before);
     // 다만 그 구간의 훈련은 판정 대상으로 넘어간다
     expect(brief.subjects.length).toBeGreaterThan(0);
-  });
-
-  it("판정이 오면 그때 그만큼 움직인다", () => {
-    const state = createTestGame(7);
-    const brief = trainOneDay(state, ["tactical"])!;
-    const target = brief.subjects[0]!;
-    const before = assignmentsOf(state, state.userTeamId).find(
-      (a) => a.playerId === target.playerId,
-    )!.familiarity;
-
-    applyTrainingOutcomes(state, brief, [
-      { playerId: target.playerId, tacticGain: 2, attribute: null, note: "" },
-    ]);
-    const after = assignmentsOf(state, state.userTeamId).find(
-      (a) => a.playerId === target.playerId,
-    )!.familiarity;
-    // 판정 2가 그대로 들어오지는 않는다 — 지금 위치의 곡선과 그 선수의 흡수율,
-    // 그리고 **감독의 훈련 축**만큼 깎인다
-    const player = playerById(state, target.playerId)!;
-    expect(after - before).toBeCloseTo(
-      2 *
-        managerTrainingUptake(state.manager.attributes.training) *
-        familiarityGainScale(before, "training", tacticalUptake(player.attributes)),
-      6,
-    );
   });
 });

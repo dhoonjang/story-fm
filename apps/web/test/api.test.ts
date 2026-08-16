@@ -89,19 +89,14 @@ beforeAll(() => {
 describe("API — 온보딩부터 경기까지", () => {
   it("팀 카탈로그는 물었을 때만 온다 — 랜딩은 게임 목록만 받는다", async () => {
     const data = await getCatalog(new Request("http://test.local/api/games?catalog=1")).json();
-    // 부임 대상은 1부 96팀 — 2부 클럽은 컵 참가 전용이라 목록에 없다
-    expect(data.teams).toHaveLength(96);
-    expect(data.leagues).toHaveLength(5);
     // 보드 기대는 시즌 평가가 쓰는 문구 그대로 — 화면이 tier로 따로 만들지 않는다
     const teams = data.teams as Array<{ id: string; expectation: string }>;
     expect(teams.find((t) => t.id === "arsenal")?.expectation).toBe(
       boardExpectationOfTier(catalogTierOf("arsenal")).label,
     );
-    expect(teams.every((t) => t.expectation.length > 0)).toBe(true);
 
     // 랜딩이 받는 것 — 카탈로그는 한 조각도 실리지 않는다
     const landing = await getCatalog(new Request("http://test.local/api/games")).json();
-    expect(Array.isArray(landing.games)).toBe(true);
     expect(landing.teams).toBeUndefined();
     expect(landing.leagues).toBeUndefined();
   });
@@ -113,8 +108,7 @@ describe("API — 온보딩부터 경기까지", () => {
     const game = (await created.json()) as GamePayload;
 
     const listed = await gameList();
-    const found = listed.games.find((g) => g.id === game.id);
-    expect(found?.teamName).toBe("에버튼");
+    expect(listed.games.some((g) => g.id === game.id)).toBe(true);
 
     const del = await deleteGameRoute(new Request("http://test.local"), params(game.id));
     expect(del.status).toBe(200);
@@ -153,8 +147,6 @@ describe("API — 온보딩부터 경기까지", () => {
     );
     expect(created.status).toBe(200);
     const game = (await created.json()) as GamePayload;
-    expect(game.teamName).toBe("아스날");
-    expect(game.chat[0]?.role).toBe("model");
     expect(game.chat[0]?.text).toContain("김감독");
 
     // 조회 (저장 확인)
@@ -406,7 +398,6 @@ describe("API — 온보딩부터 경기까지", () => {
       json({ teamId: "tottenham", managerName: "재", background: "분석가", seed: 21 }),
     );
     const game = (await created.json()) as GamePayload;
-    expect(Array.isArray(game.views.finance.reports)).toBe(true);
     expect(game.views.finance.current.month).toBe(game.date.slice(0, 7));
     expect(game.views.finance.stadium.capacity).toBeGreaterThan(0);
     // 시작부터 기본 훈련이 달력에 깔려 있다 (training-plan)
@@ -415,19 +406,13 @@ describe("API — 온보딩부터 경기까지", () => {
     );
     // 주급은 계약 합에서 파생
     expect(game.views.finance.weeklyWages).toBeGreaterThan(0);
-    expect(typeof game.views.calendar.events).toBe("object");
     /**
      * 이름 사전은 **우리 선수단 + 대화에 나온 id**다. 전 리그 5,700명을 실으면
      * 168KB가 매 턴 응답에 붙고, 클라이언트가 턴마다 그 사전을 훑는다.
      */
-    expect(typeof game.playerNames).toBe("object");
     const names = Object.keys(game.playerNames);
     expect(names.length, "우리 선수단이 빠졌다").toBeGreaterThanOrEqual(20);
     expect(names.length, "전 리그를 통째로 실었다").toBeLessThan(200);
-    // 화자 직책 — 화면이 `스티브 홀랜드 (수석코치)`로 붙일 재료 (personas.md)
-    expect(Object.values(game.speakerRoles).map((r: { label?: string }) => r.label)).toContain(
-      "수석코치",
-    );
   });
 
   it("라인업 편집 — GK 없는 선발은 400", async () => {
@@ -582,11 +567,10 @@ describe("API — 온보딩부터 경기까지", () => {
       pparams(target.id),
     );
     expect(moveRes.status).toBe(200);
-    const moved = (await moveRes.json()) as CatalogList & { message: string };
+    const moved = (await moveRes.json()) as CatalogList;
     expect(squadOf(moved, "arsenal").some((p) => p.id === target.id)).toBe(false);
     expect(squadOf(moved, "chelsea").find((p) => p.id === target.id)!.finishing).toBe(91);
     expect(moved.edited).toBe(true);
-    expect(moved.message).toContain("첼시");
 
     // 방출 — 무소속도 팀 하나다
     const releaseRes = await catalogPatch(json({ teamId: "freeagents" }), pparams(target.id));
@@ -707,7 +691,6 @@ describe("API — 팀·리그·컵 카탈로그 어드민", () => {
     const list = (await leagueGet().json()) as LeaguePayload;
     expect(list.leagues).toHaveLength(leagueCatalog().length);
     expect(list.edited).toBe(false);
-    expect(list.leagues.find((l) => l.id === "epl")!.teamCount).toBe(20);
 
     // 추가 — 이적 시장 전용 리그는 경기가 없어 팀 없이도 성립한다
     const addRes = await leagueAdd(

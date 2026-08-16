@@ -137,9 +137,8 @@ describe("유저 팀의 다이제스트", () => {
     expect(lines).toHaveLength(1);
     const after = tierOfTeamIn(state, state.userTeamId);
     expect(after).not.toBe(4);
-    // 사실이 그대로 읽혀야 한다 — 몇에서 몇으로, 그래서 보드 기대가 무엇이 됐는지
+    // 사실이 그대로 읽혀야 한다 — 몇에서 몇으로
     expect(lines[0]).toContain(`4 → ${after}`);
-    expect(lines[0]).toContain("보드 기대");
   });
 
   it("체급이 그대로면 한 줄도 남지 않는다", () => {

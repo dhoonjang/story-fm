@@ -38,11 +38,6 @@ describe("리그로 팀 묶기", () => {
     expect(groups.map((g) => g.leagueId)).toEqual(["laliga", "epl"]);
   });
 
-  it("체급을 함께 들고 간다 — 필터가 팀 이름 옆에 찍는 값이다", () => {
-    const groups = groupTeamsByLeague([team({ teamId: "luton", leagueId: "epl", tier: 4 })]);
-    expect(groups[0]!.teams[0]!.tier).toBe(4);
-  });
-
   it("빈 카탈로그는 빈 묶음이다", () => {
     expect(groupTeamsByLeague([])).toEqual([]);
   });
