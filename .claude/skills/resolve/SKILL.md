@@ -316,11 +316,11 @@ git commit -m "<type>(<scope>): <lane>" -- <lane paths>
 ```
 
 A lane that comes back wrong is `SendMessage`d back to the same teammate with what
-is wrong; re-spawning loses its context. When every lane has landed, run the real
-gate yourself:
+is wrong; re-spawning loses its context. When every lane has landed, run the local
+checks yourself — once, from the lead:
 
 ```bash
-pnpm typecheck && pnpm test && pnpm lint
+pnpm typecheck && pnpm lint
 ```
 
 You own the result. A green teammate report is not a green branch.
@@ -328,8 +328,26 @@ You own the result. A green teammate report is not a green branch.
 ## 7. Finish
 
 Follow the normal conventions: deterministic core, tests alongside, named paths
-when you `git add`. `pnpm test` / `typecheck` / `lint` are the loop's gate — e2e
-belongs to `merge` (AGENTS.md §5).
+when you `git add`.
+
+**The local loop is `pnpm typecheck`, `pnpm lint`, and `pnpm test <path>` for the
+files this branch actually wrote.** Nothing else. The full `pnpm test` and
+`pnpm e2e` run in GitHub Actions on every push to this branch
+(`.github/workflows/ci.yml`) — running them here just pays for the same minutes
+twice (AGENTS.md §5).
+
+So finish like this:
+
+```bash
+pnpm typecheck && pnpm lint
+pnpm test packages/<pkg>/test/<the-file-you-wrote>.test.ts   # 새로 쓴 것만
+git commit -m "<type>(<scope>): <무엇>" -- <named paths>
+git push origin HEAD
+```
+
+Then **stop.** Do not sit and watch the CI run — `merge` is what reads its
+verdict, and a red check found there is fixed there. If you happen to see a
+failure before you hand off, say so in the report rather than silently fixing it.
 
 The PR is squash-merged, so **the PR title and body become the commit message on
 main** — keep the title a valid Conventional Commit subject and keep the body
