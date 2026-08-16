@@ -53,14 +53,33 @@ export function simSquad(state: GameState, teamId: string) {
  * (vitest는 파일마다 모듈을 새로 읽으므로 이 캐시도 파일 안에서만 산다.)
  */
 const fixtureCache = new Map<string, GameState>();
+let reuseFixtures = true;
+
+/**
+ * 원본 보관을 끄고 매번 세계를 새로 세운다 — **카탈로그를 고치는 파일만.**
+ *
+ * 보관은 "같은 인자면 같은 세계"를 전제한다. 어드민 편집은 카탈로그 자체를 바꿔
+ * 그 전제를 깬다: 편집 뒤에 시작한 게임은 편집을 반영해야 하는데, 보관된 원본은
+ * 편집 전의 세계다. 그런 파일은 첫 줄에서 이걸 부른다.
+ */
+export function rebuildEveryFixture(): void {
+  reuseFixtures = false;
+  fixtureCache.clear();
+}
 
 function fromCache(key: string, build: () => GameState): GameState {
+  if (!reuseFixtures) return build();
   let origin = fixtureCache.get(key);
   if (!origin) {
     origin = build();
     fixtureCache.set(key, origin);
   }
-  return structuredClone(origin);
+  const copy = structuredClone(origin);
+  // `createGame`이 부를 때마다 새로 찍는 두 값 — 복제본도 새로 받는다.
+  // 세이브는 id로 갈리므로, 이게 같으면 두 게임이 한 파일을 쓴다.
+  copy.id = `game-${copy.seed.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  copy.createdAt = new Date().toISOString();
+  return copy;
 }
 
 /**

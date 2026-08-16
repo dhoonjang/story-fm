@@ -22,7 +22,10 @@ import {
   CATALOG_AGE_REF,
   type CatalogPlayerInput,
 } from "@story-fm/engine";
-import { createTestGame } from "./helpers";
+import { createTestGame, rebuildEveryFixture } from "./helpers";
+
+// 카탈로그를 고치는 파일 — 편집 뒤에 시작한 게임은 편집을 반영해야 하므로 보관본을 안 쓴다
+rebuildEveryFixture();
 
 /**
  * 카탈로그 어드민 — **게임과 무관한 초기치 DB**만 편집한다 (v6).
