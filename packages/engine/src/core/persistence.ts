@@ -348,17 +348,25 @@ function validate(raw: unknown): LoadResult {
    * 적용하면 브루누 페르난데스처럼 카탈로그에 공식 8번이 있어도 임의 번호를 받는다.
    * 현재 소속이 시드 소속과 같은 선수는 실측값을 먼저 복원하고, 이적한 선수와
    * 미확인·생성 선수만 아래의 결정적 배정에 맡긴다.
+   *
+   * **번호가 있는 선수는 건드리지 않는다.** 세이브가 든 번호를 매번 지우고 다시
+   * 배정하면 이적하며 받은 번호가 세이브를 열 때마다 뒤집히고, 배정 대상이
+   * 명단 전체가 되어 로드마다 그 비용을 다시 문다.
    */
-  const catalogNumber = new Map(
-    playerCatalog().map((player) => [
-      player.id,
-      { teamId: player.teamId, squadNumber: player.squadNumber },
-    ]),
+  const unnumbered = state.players.filter(
+    (player) => player.squadNumber === undefined && player.teamId !== "freeagents",
   );
-  for (const player of state.players) {
-    const seed = player.catalogId ? catalogNumber.get(player.catalogId) : undefined;
-    player.squadNumber =
-      seed?.teamId === player.teamId ? seed.squadNumber : undefined;
+  if (unnumbered.length > 0) {
+    const catalogNumber = new Map(
+      playerCatalog().map((player) => [
+        player.id,
+        { teamId: player.teamId, squadNumber: player.squadNumber },
+      ]),
+    );
+    for (const player of unnumbered) {
+      const seed = player.catalogId ? catalogNumber.get(player.catalogId) : undefined;
+      if (seed?.teamId === player.teamId) player.squadNumber = seed.squadNumber;
+    }
   }
   // 공식 번호를 먼저 보존하고, 남은 빈칸과 혹시 생긴 중복만 채운다.
   ensureSquadNumbers(state.players);

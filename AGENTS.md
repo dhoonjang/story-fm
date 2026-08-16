@@ -107,6 +107,11 @@ packages/
 - Conventional Commits (`feat:` `fix:` `refactor:` `docs:` `test:` `chore:`).
 - One concern per PR — PRs are squash-merged, so one PR is one commit on main and
   the PR title is that commit's subject. **Prompt changes go in their own PR.**
+- **A branch's name is not a reason to make another branch.** The worktree already
+  arrives on one — work on that, whatever it is called. **There is no branch naming
+  convention here**, and a second branch cut to match the names already in the
+  history leaves the first one stranded and detaches the work from the branch Orca
+  tracks the issue by.
 - Commit and push only when the user asks. When a unit of work is done, commit to
   **the branch already checked out** and `git push origin HEAD` — never switch
   branches to commit.
@@ -153,6 +158,16 @@ is not what is being tested, and where it genuinely is, build one fixture per
 `/merge` waits on. **It does not run while the PR is a draft** — a branch still
 being worked on burns runner minutes nobody reads. `/merge` marks the PR ready,
 and that is what starts the run it then watches.
+
+**The suite does not fit one runner.** `pnpm test` is ~84 runner-minutes of CPU
+and `ubuntu-latest` has two cores, so the test gate is four jobs —
+`unit + api (i/4)`, each running `--shard=i/4 --maxWorkers=100%`. All four must
+be green; a shard is not a sample. Vitest assigns files to shards by hashing
+their path, so a new test file reshuffles the split, and **one file is never
+split across shards** — the slowest file is the floor for its shard, and today
+that is `finance.test.ts` at 17.5 minutes on the runner. More shards will not
+move that floor; only a cheaper test will. Nothing is excluded from the gate:
+making it faster means making a test cheaper, not moving it out of CI.
 
 - **While working** — `pnpm typecheck` and `pnpm lint`, plus `pnpm test <path>`
   for the file you just wrote. That is the whole local loop.
