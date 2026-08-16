@@ -315,6 +315,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
       state.userTeamId,
       weeklyWagesOf(state, state.userTeamId),
       USER_WAGE_HEADROOM,
+      state,
     );
     if (terms.weeklyWage > room) {
       blockers.push(

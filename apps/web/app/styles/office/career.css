@@ -1,0 +1,143 @@
+/* ── 커리어 — 감독 오각형 · 평판 · 트로피 ─────────────────────────── */
+
+.manager-card {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 14px;
+  margin-bottom: 14px;
+}
+.manager-card h3 {
+  margin-bottom: 6px;
+}
+.manager-card .bg {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  margin-bottom: 10px;
+}
+/**
+ * 감독 머리글 — **상자가 아니다.** 커리어 화면의 주인은 트로피·업적·시즌 기록이라
+ * 감독만 배경을 가지면 그쪽이 제일 중요해 보인다. 카드를 걷으면 폭 문제도 사라진다:
+ * 넓히면 가운데가 비고 좁히면 아래 섹션과 왼쪽 끝이 어긋나던 게 상자 때문이었다.
+ */
+.mgr-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  flex-wrap: wrap;
+  padding-bottom: 18px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.mgr-head .mgr-info {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.mgr-head h3 {
+  font-size: var(--fs-lg);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  margin-bottom: 6px;
+}
+.mgr-head .bg {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+/**
+ * 평판 — 감독의 능력이 아니라 **세계가 그를 보는 눈**이라 오각형과 같은 무게로
+ * 그리지 않는다. 다만 셋을 견주는 값이라 막대가 읽기 편하다.
+ *
+ * 위계는 세 단이다: **이름 > 배경 한 줄 > 평판 묶음**.
+ * `평판`은 값이 아니라 **묶음의 이름**이므로 한 단 작고 흐리게, 자기 줄에 놓는다 —
+ * 값들과 같은 줄에 끼워 두면 넷이 나란히 놓여 무엇이 라벨인지 안 보인다.
+ * 항목 안에서는 `이름(흐림) → 막대 → 값(밝게)`으로 시선이 흐른다.
+ */
+/**
+ * 평판만 상자에 담는다 — 이름·배경은 페이지의 머리글이고, 평판은 **딸린 수치
+ * 묶음**이라 테두리가 그 경계를 대신 말한다.
+ *
+ * ⚠️ `inline-block`이라 **내용 폭만큼만** 넓어진다. 블록으로 두면 왼쪽 열 끝까지
+ * 늘어나 상자 오른쪽이 통째로 비고, 그게 이 화면에서 카드를 걷어냈던 이유였다.
+ */
+.mgr-rep {
+  display: inline-block;
+  margin-top: 14px;
+  padding: 10px 14px 11px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+/**
+ * 상자의 제목 — 섹션 제목과 **같은 결**로 쓴다(작게·굵게·자간 넓게·밝게).
+ * `--dim`으로 뒀더니 안의 항목 라벨(`보드`·`언론`)보다도 흐려서 제목이 아니라
+ * 딸린 꼬리표로 읽혔다. 한 눈금 작을 뿐(11 vs 12) 성격은 같은 제목이다 —
+ * 상자 테두리가 이미 "안쪽"임을 말하므로 색까지 낮출 이유가 없다.
+ */
+.mgr-rep-title {
+  font-size: var(--fs-xs);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--silver);
+  margin-bottom: 9px;
+}
+.mgr-rep-items {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px 18px;
+  font-size: var(--fs-xs);
+}
+.rep-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+/* 라벨 폭을 맞춰 막대의 시작점이 항목마다 어긋나지 않게 (보드 2자 · 선수단 3자) */
+.rep-label {
+  min-width: 3.2em;
+  color: var(--muted);
+}
+.rep-bar {
+  width: 48px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+.rep-bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent-2);
+}
+.rep-item b {
+  min-width: 1.6em;
+  color: var(--text);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.mgr-head .mgr-radar {
+  flex: 0 0 auto;
+  padding: 0;
+}
+.trophy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.trophy {
+  background: var(--panel-2);
+  border: 1px solid var(--gold);
+  border-radius: var(--r-md);
+  padding: 10px 14px;
+}
+.achv {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 10px 14px;
+}
+.achv .desc {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
