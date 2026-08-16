@@ -131,6 +131,16 @@ packages/
 being worked on burns runner minutes nobody reads. `/merge` marks the PR ready,
 and that is what starts the run it then watches.
 
+**The suite does not fit one runner.** `pnpm test` is ~84 runner-minutes of CPU
+and `ubuntu-latest` has two cores, so the test gate is four jobs —
+`unit + api (i/4)`, each running `--shard=i/4 --maxWorkers=100%`. All four must
+be green; a shard is not a sample. Vitest assigns files to shards by hashing
+their path, so a new test file reshuffles the split, and **one file is never
+split across shards** — the slowest file is the floor for its shard, and today
+that is `finance.test.ts` at 17.5 minutes on the runner. More shards will not
+move that floor; only a cheaper test will. Nothing is excluded from the gate:
+making it faster means making a test cheaper, not moving it out of CI.
+
 - **While working** — `pnpm typecheck` and `pnpm lint`, plus `pnpm test <path>`
   for the file you just wrote. That is the whole local loop.
 - **Do not run the full `pnpm test` or `pnpm e2e` locally.** Both cost minutes
