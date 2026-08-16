@@ -119,6 +119,31 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
   });
 
   /**
+   * 등번호는 감독이 외우는 값이다 — 세이브를 여는 것만으로 바뀌면 안 된다.
+   *
+   * 옛 로드는 전원의 번호를 지우고 다시 배정했다. 시드 소속 그대로인 선수는
+   * 카탈로그 번호로 되돌아갔으므로, 이적하며 받은 번호도 판정도 없이 뒤집혔다.
+   */
+  it("세이브가 든 등번호는 로드가 그대로 돌려준다", () => {
+    const state = createTestGame(11);
+    const squad = state.players.filter((player) => player.teamId === state.userTeamId);
+    const used = new Set(squad.map((player) => player.squadNumber));
+    const free = Array.from({ length: 99 }, (_, i) => i + 1).find((n) => !used.has(n))!;
+    const target = squad[0]!;
+    expect(target.squadNumber).not.toBe(free);
+    target.squadNumber = free;
+    saveGame(state);
+
+    const first = loadGame(state.id)!;
+    expect(first.players.find((player) => player.id === target.id)?.squadNumber).toBe(free);
+    // 두 번째 로드도 첫 번째와 한 명도 다르지 않다
+    const second = loadGame(state.id)!;
+    expect(second.players.map((player) => player.squadNumber)).toEqual(
+      first.players.map((player) => player.squadNumber),
+    );
+  });
+
+  /**
    * 컵이 없던 시절의 세이브를 흉내 낸다 — 2부 클럽도, 추첨 엔트리도 없는 상태.
    * 로드가 둘 다 복구해야 감독의 달력이 열자마자 채워진다 (tick을 기다리지 않는다).
    */
