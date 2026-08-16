@@ -3,6 +3,7 @@ import { ageOf, naturalPositionOf } from "@story-fm/domain";
 import { diffDays, windowOpenOn } from "../competition/calendar";
 import { claimLabel, evaluatePitch } from "./persuasion";
 import { isMarketOnlyLeague, leagueCatalogById } from "../data/league-catalog";
+import { leagueEconomyLevel } from "../data/league-economy";
 import { leagueOfTeam, teamCatalogById } from "../data/team-catalog";
 import { leagueOfTeamIn } from "../competition/promotion";
 import { euroCompetitionOf } from "../competition/europe";
@@ -83,10 +84,34 @@ function contractFactor(yearsLeft: number): number {
   return 1;
 }
 
-/** 지금 뛰는 리그의 계수 — 강등되면 그 시즌부터 값이 따라 내려간다 */
+/** EPL(경제 수준 1.00)에서 뛰는 선수의 리그 보정 — 곡선 전체가 여기에 걸린다 */
+export const LEAGUE_FACTOR_AT_TOP = 1.1;
+/**
+ * 리그 격차를 얼마나 눌러 쓰는가. 경제 수준을 날것으로 곱하면 챔피언십 선수가 EPL의
+ * 15%가 된다 — 2부의 살림은 실제로 그만큼 작지만 **선수의 값은 리그가 아니라 주로
+ * 능력에서 온다.** 0.15면 어느 리그에서 강등해도 ×0.75다 (=0.15^0.15).
+ */
+export const LEAGUE_FACTOR_EXPONENT = 0.15;
+/**
+ * 경제 수준의 하한 — 리그 2(0.063)보다 아래를 두지 않는다.
+ *
+ * 어드민은 중계권 0인 리그를 만들 수 있고(`admin-competition.ts`는 0 이상만 본다),
+ * 그러면 경제 수준이 0이 되어 **그 리그 선수 전원의 몸값이 £0**이 된다.
+ */
+const LEAGUE_ECONOMY_FLOOR = 0.05;
+
+/**
+ * 지금 뛰는 리그의 보정 — 강등되면 그 시즌부터 값이 따라 내려간다.
+ *
+ * ⚠️ 눈금은 **경제 수준**이지 리그 계수가 아니다. `coefficient`는 UEFA 어림 순위라
+ * 나라 축이고 2부가 그 나라 1부와 같은 값을 갖는다 — 승강은 언제나 한 나라 안에서
+ * 일어나므로 계수로는 강등이 몸값에 닿지 않는다 (transfer.md §3).
+ */
 function leagueFactor(state: GameState, teamId: string): number {
-  const coefficient = leagueCatalogById(leagueOfTeamIn(state, teamId))?.coefficient ?? 5;
-  return 1.15 - coefficient * 0.05; // 계수 1 → 1.10, 계수 5 → 0.90
+  const economy = leagueEconomyLevel(leagueOfTeamIn(state, teamId));
+  return (
+    LEAGUE_FACTOR_AT_TOP * Math.pow(Math.max(LEAGUE_ECONOMY_FLOOR, economy), LEAGUE_FACTOR_EXPONENT)
+  );
 }
 
 /** 등급 → 기본 시장가. 84 OVR이 기준점이고 아래로 급하게 떨어진다 */
