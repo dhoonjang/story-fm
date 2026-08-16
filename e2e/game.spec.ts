@@ -838,13 +838,16 @@ test("전술판 자유 배치 — 드래그로 한 자리만 세밀하게 조정
   // ⚠️ **라인을 넘는 곳이어야 한다** — 포메이션 숫자는 라인별 인원에서 파생되므로,
   // 같은 라인 안에서 옮기면 코드만 바뀌고(ST→LF) 숫자는 그대로다. 옮길 칩이
   // 어느 라인에 서 있는지는 배치 순서에 따라 매번 다르다.
-  // 옮길 칩은 **9번이 아닌 아무 자리** — 이 테스트는 뒤에서 다시 ST를 찾아 CF로
-  // 내리므로, 첫 재배치로 ST를 라인 밖으로 빼면 그 검증이 설 자리가 없어진다.
-  // (배치 순서는 구단·시드마다 달라 `slot-1`이 9번일 수도 있다)
+  // 옮길 칩은 **9번도 골키퍼도 아닌 아무 자리** — 이 테스트는 뒤에서 다시 ST를 찾아
+  // CF로 내리므로 첫 재배치로 ST를 라인 밖으로 빼면 그 검증이 설 자리가 없어지고,
+  // **골키퍼를 필드로 올리면 "GK 자리 0곳"이라 앱이 저장을 보류한다** — 자동 저장을
+  // 검증하는 이 테스트가 그 보류에 걸려 넘어진다(앱은 맞게 동작한 것이다).
+  // (배치 순서는 구단·시드마다 달라 `slot-1`이 9번일 수도 골키퍼일 수도 있다)
   const movingId = await page.evaluate(() => {
-    const el = [...document.querySelectorAll(".pitch-slot")].find(
-      (e) => e.querySelector(".slot-code")?.textContent !== "ST",
-    );
+    const el = [...document.querySelectorAll(".pitch-slot")].find((e) => {
+      const code = e.querySelector(".slot-code")?.textContent;
+      return code !== "ST" && code !== "GK";
+    });
     return el?.getAttribute("data-testid") ?? "";
   });
   expect(movingId).not.toBe("");
