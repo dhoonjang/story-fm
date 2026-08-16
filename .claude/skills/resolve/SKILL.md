@@ -298,7 +298,10 @@ Each briefing carries, and carries nothing else:
 - **the exact paths the lane owns, and the sentence "do not edit any path outside
   this list — another agent owns it"**;
 - the design doc that governs the behavior (`docs/…`);
-- AGENTS.md conventions apply: deterministic core, no `any`, tests alongside;
+- AGENTS.md conventions apply: deterministic core, no `any`, and **a test only
+  where AGENTS.md §5 says one is earned** — a formula, an invariant, a boundary,
+  a state transition. A lane whose change is visible on screen the moment it
+  breaks writes no test, and says so when it reports;
 - **do not commit, do not push, do not run `git add`** — the lead commits;
 - verify with the narrowest thing that proves the lane (`pnpm test <path>`), not
   the full suite. `pnpm typecheck` and `pnpm lint` write shared build state; three
@@ -327,8 +330,9 @@ You own the result. A green teammate report is not a green branch.
 
 ## 7. Finish
 
-Follow the normal conventions: deterministic core, tests alongside, named paths
-when you `git add`.
+Follow the normal conventions: deterministic core, named paths when you
+`git add`, and a test only where AGENTS.md §5 says one is earned — quiet logic
+gets one, anything the screen reveals does not.
 
 **The local loop is `pnpm typecheck`, `pnpm lint`, and `pnpm test <path>` for the
 files this branch actually wrote.** Nothing else. The full `pnpm test` and

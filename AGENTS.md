@@ -116,9 +116,37 @@ packages/
 
 ### Tests
 
+**A test earns its place by catching what nobody would notice.** Deterministic
+formulas and curves, invariants, boundary conditions, state transitions — the
+things that go wrong quietly and stay wrong. Everything else costs more than it
+returns:
+
+| Write a test for | Do not |
+| --- | --- |
+| a formula, a curve, a rounding rule | a string the screen shows the moment it breaks |
+| an invariant (books balance, no duplicate ids) | what `strict` already rejects |
+| a boundary (0, cap, last day of the season) | the implementation restated line by line |
+| a state transition (offer → contract → squad) | a value the seed owns and a seed change will move |
+
+"It is a new feature" is not a reason on its own. A change whose whole behavior
+is visible on screen ships without a test; a change to a number nobody can see
+does not.
+
+**Measuring balance is not testing.** A case that plays seasons to see whether
+the numbers land in a sensible band has no fixed expectation to regress against,
+and it costs minutes. That is a harness: put it behind
+`describe.skipIf(!process.env.BALANCE)` the way
+`packages/engine/test/balance-harness.test.ts` does, and run it with `BALANCE=1`
+when you are tuning.
+
+**Fixtures cost more than the logic they carry.** `createTestGame()` builds a
+whole world — a second per call. Call the pure function directly when the world
+is not what is being tested, and where it genuinely is, build one fixture per
+`describe` and share it.
+
 - Test the sim core **without an LLM** — fixed seed, deterministic.
 - Test LLM-dependent logic with mocks, or at the schema-validation level.
-- New features ship with tests. Never hide a failing test; report it as it is.
+- Never hide a failing test; report it as it is.
 
 **The gate is CI, not your machine.** `.github/workflows/ci.yml` runs
 `typecheck` · `lint` · `pnpm test` · `pnpm e2e`, and its verdict is what
