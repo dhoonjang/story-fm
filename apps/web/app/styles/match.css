@@ -1,0 +1,621 @@
+/* ── 경기 화면 — 중계 밖에서 판세를 읽는 자리 ─────────────────────────── */
+
+/* ── 경기 화면 — 중계 밖에서 판세를 읽는 자리 ──────────────
+   순서가 곧 감독의 질문이다: 어디가 밀리나(존) → 무엇이 통하나(상성) →
+   무엇을 지시했나(전술) → 누구를 빼야 하나(체력) */
+.match-view {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* 스코어보드 — **화면에 붙어 있는다.** 판세·전술·명단을 훑느라 아래로 내려가도
+   지금 몇 대 몇인지는 늘 보여야 한다. 나머지는 그걸 설명하는 것들이다.
+   `.stage-board`가 스크롤 컨테이너라 그 기준으로 붙는다. */
+.mv-score {
+  position: sticky;
+  top: calc(var(--sp-4) * -1);
+  z-index: 3;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 4px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 12px 16px;
+  /* 아래 내용이 모서리 밖으로 비쳐 보이지 않게 — 반투명이 아니라 불투명 배경 */
+  box-shadow: 0 6px 16px -12px rgb(0 0 0 / 0.9);
+}
+
+/* 득점 기록 — 스코어 바로 아래, 한 줄로 흐른다 */
+.mv-goals-log {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 0 4px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.mv-goal i {
+  font-style: normal;
+  color: var(--dim);
+  margin-right: 3px;
+}
+.mv-goal em {
+  font-style: normal;
+  color: var(--dim);
+}
+.mv-goal.ours {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/**
+ * 팀 합계 — 선수별로 열을 세우는 대신 한 줄로 (열한 행이 숫자밭이 되지 않게).
+ *
+ * 명단 머리의 **오른쪽 끝**에 선다 — 우리 팀의 "벤치 9/9 · 예비 7"과 같은 자리다
+ * (`.roster-counts`와 같은 이유로 `margin-left: auto`로 못박는다).
+ */
+.mv-totals {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: baseline;
+  margin-left: auto;
+  gap: 2px 12px;
+  padding-bottom: 7px;
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+}
+.mv-totals b {
+  color: var(--muted);
+  font-weight: 600;
+  margin-left: 2px;
+}
+
+/* 선수 행의 기록 칩 — 골·도움·카드만 선다 (슛·선방·패스는 툴팁) */
+.mv-tally {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.mv-tally .tl {
+  font-size: var(--fs-3xs);
+  font-weight: 700;
+  line-height: 1.5;
+  padding: 0 5px;
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+}
+.mv-tally .goal {
+  background: rgb(74 222 128 / 0.16);
+  color: var(--accent);
+}
+.mv-tally .assist {
+  background: rgb(96 165 250 / 0.14);
+  color: var(--accent-2);
+}
+.mv-tally .yellow {
+  background: rgb(250 204 21 / 0.16);
+  color: #facc15;
+}
+.mv-tally .red {
+  background: rgb(248 113 113 / 0.18);
+  color: var(--danger);
+}
+/* 칩은 바깥쪽, 이름은 안쪽 — 이름과 스코어가 붙어야 한 줄로 읽힌다 */
+.mv-team {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  text-align: right;
+}
+.mv-team.away {
+  justify-content: flex-start;
+  text-align: left;
+}
+.mv-team.ours {
+  color: var(--accent);
+}
+/* Home·Away 칩 — 어느 쪽이 제 집인지. 이름을 읽는 데 방해가 되지 않게 한 단 낮춘다 */
+.mv-ground {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  font-style: normal;
+  font-size: var(--fs-3xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.mv-goals {
+  font-size: var(--fs-2xl);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 1px;
+}
+.mv-clock {
+  grid-column: 2;
+  text-align: center;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.mv-clock i {
+  font-style: normal;
+  margin-left: 3px;
+}
+.mv-comp {
+  grid-column: 3;
+  grid-row: 2;
+  text-align: left;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.mv-sentoff {
+  grid-column: 1 / -1;
+  text-align: center;
+  font-size: var(--fs-xs);
+  color: var(--danger);
+  font-weight: 600;
+}
+
+/* 존 막대 — 길이로 견준다 */
+.mv-zones {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 12px 16px;
+}
+/**
+ * 판세 격자 — **경기장을 가로로 눕히고 아홉 칸으로 나눈다.**
+ *
+ * 왼쪽이 우리 골문, 오른쪽이 상대 골문. 우리가 홈이든 원정이든 방향이 같아서
+ * "이번엔 우리가 어느 쪽이더라"를 떠올릴 일이 없다.
+ */
+.mv-pitch {
+  display: grid;
+  gap: 6px;
+}
+.mv-pitch-head {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  text-align: center;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+/* 그 전선의 우열 — 칸 색과 같은 규칙이라 머리만 봐도 어디가 밀리는지 읽힌다 */
+.mv-band {
+  padding: 3px 0;
+  border-radius: var(--r-xs);
+  border-bottom: 2px solid transparent;
+}
+.mv-band.up {
+  color: var(--accent);
+  border-bottom-color: rgb(74 222 128 / 0.5);
+}
+.mv-band.down {
+  color: var(--danger);
+  border-bottom-color: rgb(248 113 113 / 0.5);
+}
+.mv-pitch-field {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 3px;
+  /* 실제 경기장(105:68)보다 납작하게 — 세로가 커지면 판세 한 장이 화면을 먹는다 */
+  aspect-ratio: 2.4 / 1;
+  padding: 3px;
+  border-radius: var(--r-sm);
+  background: var(--panel-2);
+}
+/* 경기장 선 — 중앙선과 센터서클. 읽는 값이 아니라 자리의 그림이라 칸 위에 얹는다 */
+.mv-pitch-lines {
+  position: absolute;
+  inset: 3px;
+  z-index: 1;
+  pointer-events: none;
+  border: 1px solid rgb(226 232 240 / 0.14);
+  border-radius: 3px;
+}
+.mv-pitch-lines::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid rgb(226 232 240 / 0.14);
+}
+.mv-pitch-lines::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 17%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgb(226 232 240 / 0.14);
+  border-radius: 50%;
+}
+/**
+ * 한 칸 — 그 자리의 우열. 숫자는 전력 차이라 색과 같은 것을 말한다.
+ * 숫자는 **모서리**에 붙인다 — 가운데 두면 그 자리에 선 선수 마커가 덮는다.
+ */
+.mv-cell {
+  display: grid;
+  place-items: start;
+  padding: 3px 6px;
+  border-radius: 3px;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+  background: rgb(139 150 168 / 0.06);
+  transition: background var(--ease);
+}
+.mv-cell.up {
+  color: var(--accent);
+}
+.mv-cell.down {
+  color: var(--danger);
+}
+.mv-cell.up.slight {
+  background: rgb(74 222 128 / 0.1);
+}
+.mv-cell.up.clear {
+  background: rgb(74 222 128 / 0.17);
+}
+.mv-cell.up.big {
+  background: rgb(74 222 128 / 0.26);
+}
+.mv-cell.down.slight {
+  background: rgb(248 113 113 / 0.1);
+}
+.mv-cell.down.clear {
+  background: rgb(248 113 113 / 0.17);
+}
+.mv-cell.down.big {
+  background: rgb(248 113 113 / 0.26);
+}
+/* 어느 골문이 누구 것인지 — 방향을 못 박아 둔다 */
+.mv-pitch-foot {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+}
+/**
+ * 배치 — **번호표 스물두 개.** 밀리는 칸에 누가 서 있는지가 같은 화면에서 읽힌다.
+ * 판을 덮지 않도록 칸보다 위, 경기장 선보다도 위에 앉는다.
+ */
+.mv-pitch-players {
+  position: absolute;
+  inset: 3px;
+  z-index: 2;
+  pointer-events: none;
+}
+.mv-marker {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  /* 배경이 밝은 칸 위에서도 번호가 읽히도록 테두리로 판과 끊는다 */
+  border: 1px solid rgb(10 13 18 / 0.7);
+  background: var(--panel);
+  box-shadow: 0 1px 4px -1px rgb(0 0 0 / 0.7);
+  font-size: var(--fs-3xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  pointer-events: auto;
+}
+/* 우리 선수만 색을 갖는다 — 스물두 개가 모두 밝으면 누가 우리 편인지 안 보인다 */
+.mv-marker.ours {
+  background: var(--accent);
+  border-color: rgb(10 13 18 / 0.55);
+  color: #0b1220;
+}
+/* 다리가 멈춘 선수 — 교체 신호는 판 위에서도 보여야 한다 */
+.mv-marker.gassed {
+  outline: 2px solid var(--danger);
+  outline-offset: -1px;
+}
+/**
+ * 기대 득점 — **판세의 결론.** 아홉 칸이 말하는 것이 결국 몇 대 몇으로 끝날
+ * 판인가이므로, 격자 아래 각주가 아니라 그 위에 큰 숫자로 선다.
+ */
+.mv-xg {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.mv-xg-label,
+.mv-xg-side {
+  font-size: var(--fs-xs);
+  color: var(--dim);
+}
+.mv-xg-score {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+/* 앞선 쪽만 밝힌다 — 둘 다 밝으면 어느 쪽이 큰지 다시 세어야 한다 */
+.mv-xg-score b.lead {
+  color: var(--text);
+}
+.mv-xg-score i {
+  font-style: normal;
+  font-size: var(--fs-md);
+  color: var(--dim);
+}
+
+/* 발동한 상성 — 감독이 손볼 자리라 가장 눈에 띈다 */
+.mv-keys {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/**
+ * 키포인트 한 줄 — **우리에게 이로우면 파랑, 불리하면 빨강.**
+ * 편을 모르는 줄(옛 세이브의 진행 중 경기)은 색 없이 선다.
+ */
+.mv-key {
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  padding: 8px 12px;
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  border-left: 3px solid var(--border);
+}
+.mv-key.good {
+  border-left-color: var(--accent-2);
+  background: linear-gradient(90deg, rgb(96 165 250 / 0.1), transparent 60%), var(--panel);
+}
+.mv-key.bad {
+  border-left-color: var(--danger);
+  background: linear-gradient(90deg, rgb(248 113 113 / 0.1), transparent 60%), var(--panel);
+}
+
+/* 양팀 전술 — 축마다 양쪽 눈금을 마주 보게 */
+.mv-tactics {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 12px 16px;
+}
+.mv-tac-head,
+.mv-tac-row {
+  display: grid;
+  grid-template-columns: 1fr 92px 1fr;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--fs-sm);
+  padding: 4px 0;
+}
+.mv-tac-head {
+  padding-bottom: 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid rgba(42, 51, 66, 0.6);
+  font-weight: 700;
+}
+.mv-tac-head span:first-child {
+  text-align: right;
+}
+.mv-tac-head .ours {
+  color: var(--accent);
+}
+.mv-tac-head i {
+  font-style: normal;
+  color: var(--muted);
+  font-weight: 500;
+}
+.mv-tac-axis {
+  text-align: center;
+  color: var(--muted);
+}
+.mv-dots {
+  display: flex;
+  gap: 4px;
+}
+.mv-dots.right {
+  justify-content: flex-end;
+}
+.mv-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-xs);
+  background: var(--panel-2);
+}
+.mv-dot.on {
+  background: var(--accent-2);
+}
+
+/**
+ * 한쪽만 보는 전술 — 상대 팀 탭의 읽기 전용 6축.
+ * 양팀을 마주 보게 두던 3열(`1fr 92px 1fr`)과 달리 왼쪽부터 이름·점·말로 읽힌다.
+ */
+.mv-tactics.one {
+  margin-top: var(--sp-2);
+}
+.mv-tac-row.one {
+  grid-template-columns: 72px auto 1fr;
+  gap: 12px;
+}
+.mv-tac-row.one .mv-tac-axis {
+  text-align: left;
+}
+.mv-tac-word {
+  color: var(--text);
+  font-size: var(--fs-xs);
+}
+.mv-tactics.one .mv-tac-head {
+  grid-template-columns: 1fr auto;
+}
+.mv-tactics.one .mv-tac-head span {
+  text-align: right;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+/**
+ * 상대 팀 탭 — **우리 팀 탭과 같은 마크업**(`.squad-view`)을 쓴다. 뼈대·간격·접힘은
+ * 스쿼드 쪽 규칙이 그대로 맡고, 여기서는 **다른 것만** 적는다.
+ *
+ * 다른 것은 조작뿐이다: 상대 명단은 훑는 것이지 고르는 것이 아니라서 행이 손에
+ * 반응하지 않는다. 읽는 것과 누르는 것은 생김새가 달라야 한다.
+ */
+/**
+ * 상대 전술은 **접히지 않는다** — 읽기 전용 게이지라 여섯 축이 늘 서 있다.
+ * 덩어리 폭을 세로에서 되짚을 때 빼는 몫도 그만큼 크다(우리 쪽 한 줄 요약과 다르다).
+ * 이 몫이 실제보다 작으면 덩어리가 표를 잘라낸다.
+ */
+.squad-view.opponent {
+  --board-foot: 220px;
+}
+.squad-view.opponent .squad-table tbody tr {
+  cursor: default;
+}
+.squad-view.opponent .squad-table tbody tr:hover td {
+  background: none;
+}
+/* 상대 명단의 팀 이름표 — 책갈피 자리에 서지만 누를 수 없다 */
+.squad-view.opponent .roster-tab {
+  cursor: default;
+}
+/* 열이 여덟이 아니라 넷이다 — 우리 표의 최소 폭(560)을 그대로 쓰면 남는 폭이
+   빈 칸으로 벌어지고, 좁을 때는 있지도 않은 열 때문에 가로로 스크롤된다 */
+.squad-view.opponent .roster-scroll .squad-table {
+  min-width: 320px;
+}
+/* 다리가 멈춘 행 — 왼쪽 색 띠가 칸을 말하고, 이 색이 "지금 구멍"을 말한다 */
+.squad-view.opponent .squad-table tbody tr.gassed .row-name {
+  color: var(--danger);
+}
+/* 전력 옆의 오차 — 명단에서도 안개가 보여야 한다 (칩은 좁아 툴팁에 맡긴다) */
+.mv-eff-margin {
+  font-style: normal;
+  font-weight: 500;
+  color: var(--muted);
+  font-size: 0.8em;
+  margin-left: 2px;
+}
+
+/**
+ * 상대 칩 — 우리 판의 칩과 같은 크기·색이되 **누를 수 없다.**
+ * 읽는 값과 조작 대상은 생김새가 달라야 하므로 커서와 눌림 반응을 주지 않는다.
+ */
+.pitch-slot.theirs {
+  cursor: default;
+}
+.pitch-slot.theirs.gassed {
+  border-color: var(--danger);
+}
+/* 전력 옆의 오차 — 이 숫자를 얼마나 믿을 수 있나 (안개) */
+.slot-margin {
+  font-style: normal;
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
+/**
+ * 다음 경기 — 대회 탭 맨 아래 한 칸.
+ * 왼쪽에 **며칠 남았는지**(로테이션 판단), 오른쪽에 누구와 어디서.
+ */
+.next-fixture {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: 12px 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.next-fixture span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.nf-what {
+  text-align: right;
+}
+.next-fixture b {
+  font-size: var(--fs-lg);
+  line-height: 1.2;
+}
+.next-fixture i {
+  font-style: normal;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.nf-venue {
+  font-style: normal;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: var(--r-xs);
+  background: var(--panel-2);
+  color: var(--muted);
+  vertical-align: middle;
+}
+.nf-venue.home {
+  background: rgba(74, 222, 128, 0.16);
+  color: var(--accent);
+}
+
+/**
+ * 체력 — 명단과 같은 축(높을수록 좋다). 바닥나면 색으로 먼저 알린다.
+ *
+ * 폭도 우리 명단의 막대(`.stat-bar`)와 같다 — 두 탭을 오갈 때 같은 길이가 같은
+ * 뜻이어야 한다. 다른 것은 **끝이 어디인지 모른다는 사실**을 얹는 안개뿐이다.
+ */
+.mv-cond-bar {
+  position: relative;
+  display: inline-block;
+  width: 46px;
+  height: 6px;
+  border-radius: var(--r-xs);
+  background: var(--panel-2);
+  overflow: hidden;
+  vertical-align: middle;
+}
+.mv-cond-bar span {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: var(--accent);
+}
+.mv-cond-sure {
+  left: 0;
+}
+/* 모르는 폭 — 참값이 이 어딘가에 있다. 반투명이라 "끝이 어디인지 모른다"가 보인다 */
+.mv-cond-fog {
+  opacity: 0.28;
+}
+.mv-cond-bar span.tired {
+  background: var(--gold);
+}
+.mv-cond-bar span.spent {
+  background: var(--danger);
+}
+
