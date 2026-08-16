@@ -1,14 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { CatalogLayer } from "./catalog-store";
 import { PlayerModal } from "./player-modal";
 import { groupTeamsByLeague, splitPositions } from "./types";
-import type { CatalogResponse, CatalogTeam, PlayerRow } from "./types";
+import type { CatalogResponse, PlayerRow } from "./types";
 
 /**
  * 선수 카탈로그 패널 — 목록은 **요약만** 보여주고 편집은 팝업이 맡는다.
  * 15축까지 표에 펼치면 좌우 스크롤 없이는 읽을 수 없고, 그러면 "누구의 값인지"를
  * 스크롤이 계속 잡아먹는다.
+ *
+ * 카탈로그는 페이지가 쥐고 있다 (`catalog-store.ts`) — 이 패널은 받은 값을 그리고,
+ * 편집·리셋 응답은 `onApply`로 올려 보낸다.
  */
 
 const PAGE_SIZES = [25, 50, 100, 200] as const;
@@ -28,42 +32,27 @@ type ModalTarget = { mode: "create" } | { mode: "edit"; player: PlayerRow };
 type ListRow = PlayerRow & ReturnType<typeof splitPositions> & { leagueId: string };
 
 export function PlayersPanel({
+  catalog,
+  onApply,
   onMessage,
   onError,
 }: {
+  catalog: CatalogLayer<CatalogResponse>;
+  onApply: (data: CatalogResponse) => void;
   onMessage: (m: string | null) => void;
   onError: (e: string | null) => void;
 }) {
-  const [teams, setTeams] = useState<CatalogTeam[]>([]);
-  const [edited, setEdited] = useState(false);
-  const [ageRef, setAgeRef] = useState("");
   const [teamFilter, setTeamFilter] = useState("all");
   const [query, setQuery] = useState("");
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
   const [page, setPage] = useState(1);
   const [target, setTarget] = useState<ModalTarget | null>(null);
   const [busy, setBusy] = useState(false);
-  const [loaded, setLoaded] = useState(false);
 
-  const applyResponse = useCallback((data: CatalogResponse) => {
-    setTeams(data.teams ?? []);
-    if (data.edited !== undefined) setEdited(data.edited);
-    if (data.ageRef) setAgeRef(data.ageRef);
-  }, []);
-
-  useEffect(() => {
-    fetch("/api/admin/catalog")
-      .then((r) => r.json())
-      .then((d: CatalogResponse) => {
-        if (d.error) onError(d.error);
-        else applyResponse(d);
-        setLoaded(true);
-      })
-      .catch(() => {
-        onError("카탈로그를 불러오지 못했습니다");
-        setLoaded(true);
-      });
-  }, [applyResponse, onError]);
+  const teams = catalog.data.teams;
+  const edited = catalog.data.edited ?? false;
+  const ageRef = catalog.data.ageRef ?? "";
+  const loaded = catalog.loaded;
 
   const teamGroups = useMemo(() => groupTeamsByLeague(teams), [teams]);
   const flat = useMemo<ListRow[]>(
@@ -128,7 +117,7 @@ export function PlayersPanel({
       const res = await fetch("/api/admin/catalog", { method: "DELETE" });
       const data: CatalogResponse = await res.json();
       if (!res.ok) throw new Error(data.error ?? "되돌리기 실패");
-      applyResponse(data);
+      onApply(data);
       onMessage(data.message ?? null);
     } catch (e) {
       onError(e instanceof Error ? e.message : String(e));
@@ -344,7 +333,7 @@ export function PlayersPanel({
           defaultTeamId={defaultTeamId}
           ageRef={ageRef}
           onSaved={(data) => {
-            applyResponse(data);
+            onApply(data);
             onMessage(data.message ?? null);
             setTarget(null);
           }}

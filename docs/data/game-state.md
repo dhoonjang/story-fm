@@ -90,11 +90,12 @@
 | ↳ `PlayerAttributes` | 15축 + `overall`(파생 캐시) + `potential` | `domain/player.ts` |
 | ↳ `PlayerState` | 폼(−1~1) · 체력(0~100) · 부상 성향 · 심경 한 줄 | `domain/player.ts` |
 | ↳ `PlayerPosition` | 가능 포지션 + 적응도 + `isNatural`(하나 이상) | `domain/player.ts` |
-| `tactics` `TeamTactics` | 팀당 1개 — `spec` + `assignments` + 팀 기억 | `domain/tactics.ts` |
+| `tactics` `TeamTactics` | 팀당 1개 — `spec` + `assignments` + `shelved` + 팀 기억 | `domain/tactics.ts` |
 | ↳ `TacticsSpec` | 모양 이름(파생 — 프리셋 밖도 담는다) + 전술 6축(각 1~5) | `domain/tactics.ts` |
 | ↳ `TacticAssignment` | **라인업의 원본** — 자리·좌표·역할·적응도·개인 지시·개인 기억 | `domain/tactics.ts` |
 | ↳ `PlayerDirective` | 결과에 닿는 개인 지시 5종 (`instruction`은 사람이 읽는 말) | `domain/tactics.ts` |
 | ↳ `DrilledTactics` | 전술 지문 → 그때 도달한 적응도 (선수별) | `domain/tactics.ts` |
+| ↳ `ShelvedFamiliarity` | **배치가 없는 동안 적응도·기억이 머무는 자리** (2군·예비) | `domain/tactics.ts` |
 | `contracts` `Contract` | **주급의 원본** — 선수당 `active` 정확히 1건 | `domain/records.ts` |
 | `finances` `TeamFinance` | 팀당 1개 — 잔고·이적 예산·원장·낙하산 | `domain/records.ts` |
 | ↳ `LedgerEntry` | 원장 한 줄 — 유저 팀만 상세, 최근 3개월 롤링 | `domain/records.ts` |
@@ -162,9 +163,12 @@ row, 지난 일 = 그대로 이력.**
 | `personas` `Persona` | 인물 — 수석코치·구단주·기자. 성격·동기·말투+예시 대사 | `domain/persona.ts` |
 | `narrative` `NarrativeNote` | GM 기억 — 날짜·문장·중요도(1~5) | `domain/records.ts` |
 | `chat` `ChatTurn` | 대화 이력 — `user`/`model`/`operator` | `core/state.ts` |
-| ↳ `ToolCallRecord` | 스킬 호출 — 요약·카드 payload·톤·`silent`·장면 안 줄 위치 | `core/state.ts` |
+| ↳ `ToolCallRecord` | 스킬 호출 — 요약·항목(`brief`)·카드 payload·톤·`silent`·장면 안 줄 위치 | `core/state.ts` |
+| ↳ `SkillBrief` | 화면이 세우는 요약 — 머리줄 + 항목. 없는 기록은 요약 문자열로 폴백 | `core/state.ts` |
+| ↳ `SkillBriefItem` | 항목 하나 — 이름(`label`) · 값(`text`) · 갈래(`note`). 화면이 자리마다 톤을 준다 | `core/state.ts` |
 | ↳ `GoalMark` `CardMark` | 그 턴의 골·카드 — 장부의 사건이지 중계 문장의 파싱이 아니다 | `core/state.ts` |
 | `pendingEdits` `PendingEdit` | 아직 GM이 읽지 않은 화면 조작 — 같은 키는 마지막 것만 | `core/state.ts` |
+| `pendingNews` | 아직 GM이 읽지 않은 경기 밖 소식 — 결산이 함께 굴린 재정·다른 경기 | `core/state.ts` |
 
 ⚠️ **능력치 5축은 평판의 `media`와 다른 것이다** — 능력치(`leadership` `tactics`
 `training` `negotiation` `analysis`)는 감독이 가진 역량, 평판(`board` `media`

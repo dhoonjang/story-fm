@@ -18,6 +18,7 @@ import {
   describeNextFixture,
   describeOdds,
   expiringContracts,
+  digestLines,
   finalizeMatch,
   openRenewal,
   renewalExpectation,
@@ -46,6 +47,7 @@ import {
   userPlayers,
   userSide,
   type GameState,
+  type SkillBrief,
 } from "@story-fm/engine";
 import type { TrainAttr } from "@story-fm/domain";
 import { positionGroupOfPlayer, MANAGER_ATTRIBUTE_KO } from "@story-fm/domain";
@@ -70,8 +72,16 @@ const MOCK_RENEWAL_WAGE_RATE = 1.15;
  * 카드를 그리는 스킬의 결과를 그대로 싣는다 — **실모드와 같은 자리에서 같은 것**.
  * mock이 payload를 떨어뜨리면 e2e에서만 카드가 사라져 화면 회귀를 못 잡는다.
  */
-const carry = (result: { payload?: unknown }) =>
-  result.payload === undefined ? {} : { payload: result.payload };
+/**
+ * 스킬 결과가 기록으로 **함께 실려 가야 하는 것들** — 카드(`payload`)와 항목 요약(`brief`).
+ *
+ * 빠뜨리면 화면이 조용히 폴백한다: 카드 없이 줄글로, 항목 없이 요약 문자열로.
+ * 모의 GM은 실모드와 같은 코어 함수를 부르므로 **같은 것을 실어야** 화면이 같다.
+ */
+const carry = (result: { payload?: unknown; brief?: SkillBrief }) => ({
+  ...(result.payload === undefined ? {} : { payload: result.payload }),
+  ...(result.brief === undefined ? {} : { brief: result.brief }),
+});
 
 /** 수석코치 화자 태그 — 직책이 아니라 그 사람의 이름이다 (personas.md) */
 function coach(state: GameState): string {
@@ -195,25 +205,33 @@ function advanceMatchTurn(
   }
   let text = renderSegment(state, step.plan.events, step.plan.stop);
   if (step.plan.stop === "full_time") {
+    // 모의 GM은 화면 장면이 곧 보고다 — 갈래를 나누지 않고 전부 싣는다
     const digest = finalizeMatch(state);
-    text += `\n${coach(state)} ${digest.join(" · ")}`;
+    text += `\n${coach(state)} ${digestLines(digest).join(" · ")}`;
   }
   return text;
 }
 
 // mock은 자연어를 정교히 해석하지 못하므로 키워드→focus로 간이 매핑 (e2e·오프라인용)
-const FOCUS_KEYWORDS: Array<[RegExp, TrainAttr[]]> = [
-  [/세트\s?피스|프리킥|코너/u, ["kicking", "finishing"]],
-  [/슈팅|골\s?결정력|마무리/u, ["finishing"]],
-  [/공중볼|헤더|제공권/u, ["aerial"]],
-  [/수비|조직력/u, ["tackling", "positioning", "tactical"]],
-  [/전술/u, ["tactical"]],
-  [/크로스|측면|롱볼|전환/u, ["kicking", "passing"]],
-  [/패스|점유|빌드업/u, ["passing", "vision"]],
-  [/드리블|돌파|1대1/u, ["dribbling"]],
-  [/스피드|스프린트|가속/u, ["pace"]],
-  [/지구력|체력|피지컬|피트니스|러닝/u, ["stamina", "strength"]],
-  [/회복|휴식|리커버리/u, ["recovery"]],
+/**
+ * 훈련 키워드 → 효과 축과 **세션 이름**.
+ *
+ * 이름을 여기서 함께 고르는 이유: 예전엔 감독의 발화를 40자로 잘라 label에 넣어서
+ * `매주 월요일 오전=응 그리고 훈련 싹다 갈아엎자 체력 훈련 싹 지우고, 패스 훈련에 집중하`가
+ * 달력에도 요약에도 그대로 박혔다. label은 **달력에 걸릴 제목**이지 감독의 말이 아니다.
+ */
+const FOCUS_KEYWORDS: Array<[RegExp, TrainAttr[], string]> = [
+  [/세트\s?피스|프리킥|코너/u, ["kicking", "finishing"], "세트피스"],
+  [/슈팅|골\s?결정력|마무리/u, ["finishing"], "마무리"],
+  [/공중볼|헤더|제공권/u, ["aerial"], "제공권"],
+  [/수비|조직력/u, ["tackling", "positioning", "tactical"], "수비 조직"],
+  [/전술/u, ["tactical"], "전술 훈련"],
+  [/크로스|측면|롱볼|전환/u, ["kicking", "passing"], "측면 전환"],
+  [/패스|점유|빌드업/u, ["passing", "vision"], "빌드업"],
+  [/드리블|돌파|1대1/u, ["dribbling"], "1대1 돌파"],
+  [/스피드|스프린트|가속/u, ["pace"], "스프린트"],
+  [/지구력|체력|피지컬|피트니스|러닝/u, ["stamina", "strength"], "피지컬"],
+  [/회복|휴식|리커버리/u, ["recovery"], "회복 훈련"],
 ];
 const WEEKDAY_KEYWORDS: Array<[RegExp, string]> = [
   [/일요일/u, "0"],
@@ -305,7 +323,7 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
         if (!player) return `${name}: 선수를 찾을 수 없습니다`;
         const input = { playerId: player.id, position };
         const result = setPlayerTactic(state, input);
-        calls.push({ name: "set_player_tactic", summary: result.message, input });
+        calls.push({ name: "set_player_tactic", summary: result.message, input, ...carry(result) });
         return result.message;
       });
       const roleResults = roleOrders.map((order) => {
@@ -315,7 +333,7 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
         if (!player) return `${name}: 선수를 찾을 수 없습니다`;
         const input = { playerId: player.id, role };
         const result = setPlayerTactic(state, input);
-        calls.push({ name: "set_player_tactic", summary: result.message, input });
+        calls.push({ name: "set_player_tactic", summary: result.message, input, ...carry(result) });
         return result.message;
       });
       const results = [...positionResults, ...roleResults];
@@ -328,7 +346,7 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
     if (formationMatch && /전술|포메이션|바꾸|변경|가자|쓰자/u.test(msg)) {
       const input = { formation: formationMatch[0] as never };
       const result = setTactics(state, input);
-      calls.push({ name: "set_tactics", summary: result.message, input });
+      calls.push({ name: "set_tactics", summary: result.message, input, ...carry(result) });
       return {
         text: result.ok
           ? `${coach(state)} 전술판에 새 배치를 올렸습니다. 자리와 역할을 확인하신 뒤 진행해 주십시오.`
@@ -405,6 +423,7 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
     if (/경기 시작|킥오프|시작하자|시작해|들어가자/u.test(msg)) {
       const started = startMatch(state);
       if (!started.ok) return { text: `${coach(state)} ${started.message}`, toolCalls: calls };
+      // `startMatch`는 `FlowResult`라 실을 카드도 항목도 없다
       calls.push({ name: "start_match", summary: started.message });
       const packet = state.pendingMatch?.packet;
       // 킥오프는 여기서 굴리지 않는다 — 공은 감독이 입장 확인 창을 누를 때 구른다
@@ -432,7 +451,7 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
     const mentality = /공격적/u.test(msg) ? 4 : /수비적/u.test(msg) ? 2 : undefined;
     const input = { formation, ...(mentality ? { mentality } : {}) };
     const result = setTactics(state, input);
-    calls.push({ name: "set_tactics", summary: result.message, input });
+    calls.push({ name: "set_tactics", summary: result.message, input, ...carry(result) });
     return {
       text: result.ok
         ? `${coach(state)} *전술 보드를 고쳐 세운다* ${result.message}. 선수들에게 전달하겠습니다.`
@@ -453,7 +472,7 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
       ...(/오후/u.test(msg) ? { slot: "pm" as const } : {}),
     };
     const result = clearTraining(state, input);
-    calls.push({ name: "set_training", summary: result.message, input });
+    calls.push({ name: "set_training", summary: result.message, input, ...carry(result) });
     return {
       text: `${coach(state)} ${result.message}`,
       toolCalls: calls,
@@ -461,8 +480,10 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
   }
 
   if (/훈련|트레이닝/u.test(msg)) {
-    const focus = FOCUS_KEYWORDS.find(([re]) => re.test(msg))?.[1] ?? ["passing"];
-    const label = msg.replace(/[.!?]/g, "").slice(0, 40);
+    const matched = FOCUS_KEYWORDS.find(([re]) => re.test(msg));
+    const focus = matched?.[1] ?? ["passing"];
+    // 세션 이름은 키워드가 정한다 — 감독의 말을 잘라 넣으면 그게 달력의 제목이 된다
+    const label = matched?.[2] ?? "빌드업";
     const slot: "am" | "pm" = /오후|오후에/u.test(msg) ? "pm" : "am"; // 기본 오전
     const session = { label, focus };
     const dows = WEEKDAY_KEYWORDS.filter(([re]) => re.test(msg)).map(([, d]) => d);
@@ -477,10 +498,16 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
       })),
     };
     const result = setTraining(state, input);
-    calls.push({ name: "set_training", summary: result.message, input });
+    calls.push({ name: "set_training", summary: result.message, input, ...carry(result) });
+    /**
+     * 장면은 **도구 결과를 인용하지 않는다.** `message`는 모델이 읽고 소화할 줄이고,
+     * 무엇이 잡혔는지는 칩과 말풍선이 이미 항목으로 세운다 — 대사가 그걸 옮겨 적으면
+     * 같은 사실이 두 번, 그것도 한쪽은 글자 벽으로 선다.
+     */
+    const kinds = [...new Set(input.repeatWeekly.map((r) => r.label))].join("·");
     return {
       text: result.ok
-        ? `${coach(state)} *수첩에 받아 적는다* ${result.message}. 세션에 반영합니다.`
+        ? `${coach(state)} *수첩에 받아 적는다* ${kinds} 세션으로 주 ${input.repeatWeekly.length}회 잡았습니다.`
         : `${coach(state)} ${result.message}`,
       toolCalls: calls,
     };
@@ -520,7 +547,7 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
       let text = `@${who.name}: ${result.message}`;
       if (result.ok && verdict === "accept") {
         const done = acceptDeal(state, renewal.id);
-        calls.push({ name: "accept_deal", summary: done.message });
+        calls.push({ name: "accept_deal", summary: done.message, ...carry(done) });
         text += `\n${coach(state)} ${done.message}`;
       }
       return { text, toolCalls: calls };
@@ -569,7 +596,7 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
       let text = `${coach(state)} ${result.message}`;
       if (result.ok && verdict === "accept") {
         const done = acceptDeal(state, incoming.id);
-        calls.push({ name: "accept_deal", summary: done.message });
+        calls.push({ name: "accept_deal", summary: done.message, ...carry(done) });
         text = `${coach(state)} ${done.message}`;
       }
       return {
@@ -598,7 +625,7 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
       let text = `${coach(state)} ${result.message}`;
       if (result.ok && verdict === "accept") {
         const done = acceptDeal(state, arrived.id);
-        calls.push({ name: "accept_deal", summary: done.message });
+        calls.push({ name: "accept_deal", summary: done.message, ...carry(done) });
         text += `\n${coach(state)} ${done.message}`;
       }
       return { text, toolCalls: calls };
@@ -716,7 +743,12 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
     const target = detectPlayer(state, msg);
     if (target) {
       const result = setCaptain(state, target.id);
-      calls.push({ name: "set_captain", summary: result.message, input: { playerId: target.id } });
+      calls.push({
+        name: "set_captain",
+        summary: result.message,
+        input: { playerId: target.id },
+        ...carry(result),
+      });
       return { text: `${coach(state)} ${result.message}`, toolCalls: calls };
     }
   }

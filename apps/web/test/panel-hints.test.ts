@@ -52,6 +52,106 @@ describe("어느 화면으로 가는가", () => {
   });
 });
 
+/**
+ * 코어가 낸 **머리줄 + 항목**을 화면이 그대로 세운다 — 요약 문자열을 되쪼개지
+ * 않는다. 한 항목이 한 줄이므로 세 줄 상한이 실제로 건수를 센다.
+ */
+describe("항목으로 서는 말풍선", () => {
+  it("항목마다 한 줄 — 머리줄은 첫 줄에만 붙고 이어지는 줄은 아이콘을 다시 세우지 않는다", () => {
+    const hints = panelHintsOf([
+      turn([
+        {
+          name: "set_lineup",
+          summary: "라인업 확정 — 포메이션 4-4-2 → 4-3-3 · 선발 투입 김민재 외 2명",
+          brief: {
+            head: "라인업 확정",
+            items: [
+              { label: "포메이션", text: "4-4-2 → 4-3-3" },
+              { label: "선발 투입", text: "김민재 외 2명" },
+            ],
+          },
+        },
+      ]),
+    ]);
+    expect(hints[0]!.lines).toEqual([
+      { skill: "set_lineup", head: "라인업 확정", label: "포메이션", text: "4-4-2 → 4-3-3" },
+      { skill: "set_lineup", label: "선발 투입", text: "김민재 외 2명", cont: true },
+    ]);
+  });
+
+  it("항목이 세 줄을 넘으면 접는다 — 문장 하나로 붙어 오던 것이 이제 건수로 센다", () => {
+    const hints = panelHintsOf([
+      turn([
+        {
+          name: "set_lineup",
+          summary: "라인업 확정",
+          brief: {
+            head: "라인업 확정",
+            items: [{ text: "A" }, { text: "B" }, { text: "C" }, { text: "D" }],
+          },
+        },
+      ]),
+    ]);
+    expect(hints[0]!.lines.map((l) => l.text)).toEqual(["A", "B", "C"]);
+    expect(hints[0]!.more).toBe(1);
+  });
+
+  it("바뀐 것을 못 적었으면 머리줄이 그 줄이다", () => {
+    const hints = panelHintsOf([
+      turn([
+        { name: "clear_training", summary: "훈련 해제", brief: { head: "훈련 해제", items: [] } },
+      ]),
+    ]);
+    expect(hints[0]!.lines).toEqual([{ skill: "clear_training", text: "훈련 해제" }]);
+  });
+
+  it("항목이 있으면 요약 문자열은 보지 않는다 — 사족 괄호도 떼지 않는다", () => {
+    const hints = panelHintsOf([
+      turn([
+        {
+          name: "set_tactics",
+          summary: "전술 변경 — 4-2-3-1 (전술 적응도 +20, 익혀 둔 전술)",
+          brief: { head: "전술 변경", items: [{ text: "4-2-3-1 (전술 적응도 +20)" }] },
+        },
+      ]),
+    ]);
+    // 끝 괄호를 사족으로 떼는 것은 옛 기록의 폴백 경로뿐이다 — 항목은 코어가 이미 갈라 냈다
+    expect(hints[0]!.lines[0]!.text).toBe("4-2-3-1 (전술 적응도 +20)");
+    expect(hints[0]!.lines[0]!.note).toBeUndefined();
+  });
+
+  it("갈래는 값과 갈라져 실린다 — 화면이 줄표를 다시 찾지 않는다", () => {
+    const hints = panelHintsOf([
+      turn([
+        {
+          name: "set_training",
+          summary: "훈련 지정 — 매주 월요일 오전=압박 전환(패스·시야) × 6주",
+          brief: {
+            head: "훈련 지정",
+            items: [{ label: "반복", text: "매주 3회 × 6주", note: "패스·시야" }],
+          },
+        },
+      ]),
+    ]);
+    expect(hints[0]!.lines).toEqual([
+      {
+        skill: "set_training",
+        head: "훈련 지정",
+        label: "반복",
+        text: "매주 3회 × 6주",
+        note: "패스·시야",
+      },
+    ]);
+  });
+
+  it("옛 기록은 항목이 없다 — 지금까지처럼 요약 첫 줄이 선다", () => {
+    const hints = panelHintsOf([
+      turn([{ name: "set_lineup", summary: "라인업을 확정했습니다\n두 번째 줄" }]),
+    ]);
+    expect(hints[0]!.lines).toEqual([{ skill: "set_lineup", text: "라인업을 확정했습니다" }]);
+  });
+});
+
 describe("말풍선의 내용", () => {
   it("한 화면의 변경들이 줄로 쌓인다", () => {
     const hints = panelHintsOf([

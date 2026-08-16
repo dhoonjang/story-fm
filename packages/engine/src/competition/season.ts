@@ -541,6 +541,8 @@ export function transitionSeason(state: GameState): string[] {
 
     // 배치 재구성 — 새 스쿼드로 선발·벤치를 다시 짠다 (적응도는 기준선으로 리셋)
     const tactics = tacticsOf(state, team.id);
+    // 선반도 함께 비운다 — 한쪽만 남으면 지난 시즌 값이 실려 온다 (player.md §7.3)
+    delete tactics.shelved;
     const currentLayout = tactics.assignments.filter((a) => a.role === "starting");
     const layoutSlots = currentLayout.map((a) => a.position);
     const layoutPoints = currentLayout.map((a) => a.point ?? anchorOf(a.position));
@@ -549,6 +551,9 @@ export function transitionSeason(state: GameState): string[] {
     for (const player of [...squad].sort((a, b) => b.attributes.overall - a.attributes.overall)) {
       if (layoutSlots.length >= 11) break;
       const position = naturalPositionOf(player).position;
+      // 골문은 하나다 — 이미 GK 칸이 있는데 또 채우면 시즌을 넘길 때마다 골키퍼
+      // 칸이 늘어난다(17시즌을 돌리면 선발 11명 중 넷이 골키퍼가 됐다).
+      if (position === "GK" && layoutSlots.includes("GK")) continue;
       layoutSlots.push(position);
       layoutPoints.push(anchorOf(position));
     }

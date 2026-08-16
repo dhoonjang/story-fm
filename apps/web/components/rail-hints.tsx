@@ -87,20 +87,32 @@ function withDelta(text: string) {
   });
 }
 
+/**
+ * 한 줄 — **이름은 흐리게, 값은 또렷하게, 갈래는 뒤에 한 톤 낮춰.**
+ *
+ * 셋을 같은 톤으로 이어 붙이면 `훈련 지정 — 매주 5회 × 6주 — 패스·시야`처럼 줄표만
+ * 두 번 나오고 무엇이 값인지 안 읽힌다. 코어가 자리를 나눠 주므로(`SkillBriefItem`)
+ * 화면은 자리마다 톤만 정하면 된다.
+ *
+ * 옛 기록의 사족(`brief` 없는 폴백)만 `splitNote`를 탄다 — 그건 문장 끝에서 떼어 낸
+ * 것이라 수치와 설명이 한 덩어리다.
+ */
 function HintRow({ line }: { line: HintLine }) {
   const Icon = SKILL_ICON[line.skill];
-  // 사족 안에서도 수치는 보여야 한다 — 설명만 흐리게 눕힌다
   const note = line.note === undefined ? undefined : splitNote(abbreviateRoles(line.note));
   return (
     <span className="rail-hint-line">
-      <span className="rail-hint-mark">{Icon ? <Icon /> : null}</span>
+      {/* 이어지는 항목은 같은 스킬의 계속이다 — 아이콘을 다시 세우면 건수가 부풀어 보인다 */}
+      <span className="rail-hint-mark">{Icon && !line.cont ? <Icon /> : null}</span>
       <span className="rail-hint-what">
-        {withDelta(abbreviateRoles(line.text))}
+        {line.head !== undefined && <b className="rail-hint-lead">{line.head}</b>}
+        {line.label !== undefined && <em className="rail-hint-label">{line.label}</em>}
+        <span className="rail-hint-value">{withDelta(abbreviateRoles(line.text))}</span>
         {note && (
-          <i>
-            {note.fact !== "" && <em>{withDelta(note.fact)}</em>}
+          <em className="rail-hint-aside">
+            {note.fact !== "" && <span>{withDelta(note.fact)}</span>}
             {note.aside}
-          </i>
+          </em>
         )}
       </span>
     </span>

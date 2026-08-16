@@ -65,6 +65,30 @@ describe("mock GM — 유저 여정 시나리오", () => {
     // 시드마다 실제로 다른 세계를 만드는 게 이 테스트의 요점이라 판수를 줄이지 않는다.
   }, 60_000);
 
+  /**
+   * 모의 GM도 **실모드와 같은 것을 기록해야** 화면이 같다.
+   *
+   * 항목 요약(`brief`)을 안 실으면 말풍선이 조용히 옛 문자열로 폴백해, 요약을
+   * 고쳐도 mock으로 플레이하는 동안에는 아무것도 달라지지 않는다.
+   */
+  it("훈련 지시 → 기록이 항목 요약을 함께 싣고, 감독의 말을 세션 이름으로 쓰지 않는다", () => {
+    const state = newGame();
+    const said = "응 그리고 훈련 싹다 갈아엎자. 체력 훈련 싹 지우고, 패스 훈련에 집중하자";
+    const turn = runMockGmTurn(state, said);
+    const call = turn.toolCalls.find((c) => c.name === "set_training")!;
+    expect(call.brief?.head).toBe("훈련 지정");
+    expect(call.brief!.items.length).toBeGreaterThan(0);
+    // 요일을 몇 개로 펼치든 항목 하나로 접힌다 — 그게 말풍선 한 줄이다
+    expect(call.brief!.items).toHaveLength(1);
+    // 감독의 발화는 세션 이름이 아니다 — 달력에도 요약에도 박히면 안 된다
+    const labels = state.trainingSessions.filter((x) => !x.auto).map((x) => x.label);
+    for (const label of labels) expect(said).not.toContain(label);
+    expect(JSON.stringify(call.brief)).not.toContain("갈아엎자");
+    // 장면은 도구 결과를 인용하지 않는다 — 같은 사실이 대사와 말풍선에 두 번 서면 안 된다
+    expect(turn.text).not.toContain(call.summary);
+    expect(turn.text).not.toContain("매주 월요일 오전=");
+  });
+
   it("훈련 지시 → set_training 스킬이 세션을 등록한다", () => {
     const state = newGame();
     const turn = runMockGmTurn(state, "월요일 오전은 세트피스 반복 훈련 잡아줘");

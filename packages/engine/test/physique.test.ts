@@ -107,10 +107,12 @@ describe("신체 — 능력치와 앞뒤가 맞는다", () => {
       if (!e.height || !e.weight) continue;
       expect(e.height, e.nameEn).toBeGreaterThanOrEqual(160);
       expect(e.height, e.nameEn).toBeLessThanOrEqual(206);
-      // 실측값은 파생 범위보다 넓다 — 매과이어(194/100)와 팔머(189/72)가 양 끝이다
+      // 실측값은 파생 범위보다 넓다 — 리스 제임스(180/91)와 메슬리에(196/74)가 양 끝이다.
+      // 시드가 EA 등재값을 받을 때 이 범위를 문턱으로 쓴다(`plausible_physique`) —
+      // EA에도 191cm/60kg 같은 오류가 있어 그런 값은 파생으로 되돌린다.
       const bmi = e.weight / (e.height / 100) ** 2;
-      expect(bmi, `${e.nameEn} BMI`).toBeGreaterThan(19.5);
-      expect(bmi, `${e.nameEn} BMI`).toBeLessThan(27);
+      expect(bmi, `${e.nameEn} BMI`).toBeGreaterThan(18.5);
+      expect(bmi, `${e.nameEn} BMI`).toBeLessThan(28.5);
     }
   });
 
@@ -119,14 +121,16 @@ describe("신체 — 능력치와 앞뒤가 맞는다", () => {
   });
 
   it("주요 선수는 **실측값**을 그대로 쓴다 — 파생이 덮어쓰지 않는다", () => {
+    // 값은 EA FC 27 등재값이다 — 시드의 키·체중은 이제 출처가 하나뿐이라
+    // (sources.md §4.1) 여기 숫자도 그 표를 따라간다.
     const byName = new Map(playerCatalog().map((e) => [e.nameEn, e] as const));
     const known: Array<[string, number, number]> = [
-      ["Harry Maguire", 194, 100],
-      ["Erling Haaland", 195, 88],
+      ["Harry Maguire", 193, 100],
+      ["Erling Haaland", 195, 94],
       ["Phil Foden", 171, 70],
       ["Virgil van Dijk", 193, 92],
-      ["Cristiano Ronaldo", 187, 84],
-      ["Lionel Messi", 170, 72],
+      ["Cristiano Ronaldo", 187, 85],
+      ["Lionel Messi", 169, 67],
     ];
     for (const [name, h, w] of known) {
       const e = byName.get(name);

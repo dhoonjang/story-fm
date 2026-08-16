@@ -161,13 +161,25 @@ describe("자리를 옮기면 역할이 그 자리의 것이 된다", () => {
   it("새 자리에서도 유효한 역할은 그대로 둔다", () => {
     const views = buildOfficeViews(game(75));
     const server = boardOf(views);
-    const index = server.occupants.findIndex((id) => server.roles[id] !== undefined);
+    // 골키퍼처럼 그 역할이 한 자리에만 있는 선수도 있으므로 **옮길 수 있는**
+    // 선수를 찾는다 — 스쿼드가 바뀌면 몇 번째 선수가 그런지도 바뀐다
+    let index = -1;
+    let target: ReturnType<typeof pointWhere> = null;
+    for (let i = 0; i < server.occupants.length; i++) {
+      const id = server.occupants[i]!;
+      const role = server.roles[id];
+      if (role === undefined) continue;
+      const at = positionAtPoint(server.points[i]!);
+      const to = pointWhere((p) => p !== at && rolesFor(p).some((r) => r.id === role));
+      if (to !== null) {
+        index = i;
+        target = to;
+        break;
+      }
+    }
+    expect(index, "역할을 유지한 채 옮길 수 있는 선수가 없다").toBeGreaterThanOrEqual(0);
     const mover = server.occupants[index]!;
     const before = server.roles[mover]!;
-    const from = positionAtPoint(server.points[index]!);
-    // 자리 코드는 달라져도 그 역할이 목록에 남아 있는 좌표 (예: CB ↔ LCB)
-    const target = pointWhere((to) => to !== from && rolesFor(to).some((r) => r.id === before));
-    expect(target).not.toBeNull();
 
     const points = server.points.map((pt, i) => (i === index ? target! : pt));
     const next = resetRolesForMovedPlayers({ ...server, points }, rowsOf(views));
@@ -177,7 +189,7 @@ describe("자리를 옮기면 역할이 그 자리의 것이 된다", () => {
 
 /**
  * 역할을 맡긴 선수를 **같은 자리 기준으로** 벤치에 내린 상태 — 코어가 기억에 적고
- * (`rememberRole`) 오늘의 흔적을 잇는(`keepMemo`) 경로를 실제로 밟아 만든다.
+ * (`rememberRole`) 오늘의 흔적을 잇는(`settleRoleCost`) 경로를 실제로 밟아 만든다.
  */
 function benchedWithMemory(seed: number) {
   const state = game(seed);
@@ -253,18 +265,22 @@ describe("벤치를 다녀와도 감독의 결정이 남는다", () => {
     expect(bodyOf(chosen, views).roles).toContainEqual({ playerId: row.id, role: third });
   });
 
-  it("자리가 같으면 오늘 치른 값이 이어진다 — 자리가 다르면 물러 주지 않는다", () => {
+  it("벤치로 내려가면 오늘 낸 값이 되돌아온다 — 흔적은 남아 다시 세울 때 물린다", () => {
     const { row, position, morningRole, picked, paid } = benchedWithMemory(82);
     expect(paid).toBeGreaterThan(0);
-    // 자리 없는 행에도 오늘의 흔적이 실려 온다 (기준 자리는 assignedPosition)
+    /**
+     * 자리를 잃으면 코어가 오늘 낸 역할 대가를 되돌린다(`settleRoleCost` →
+     * player.md §7.2). 그래서 벤치 행의 적응도는 **그날 아침 값**이고 `paid`는 0이다.
+     * 흔적 자체는 남아, 같은 자리에 다시 세울 때 아침의 역할과 견줄 자가 된다.
+     */
     expect(row.assignedPosition).toBe(position);
-    expect(row.roleToday).toEqual({ role: morningRole, paid });
+    expect(row.roleToday).toEqual({ role: morningRole, paid: 0 });
 
-    // 아침 역할로 되돌리면 낸 값이 복구되고, 같은 역할을 다시 고르는 것은 공짜다
-    expect(familiarityForRole(row, position, morningRole)).toBe(row.familiarity + paid);
-    expect(familiarityForRole(row, position, picked)).toBe(row.familiarity);
+    // 아침 역할은 공짜고, 골랐던 역할은 다시 그 대가를 문다 — 왕복이 제자리로 닫힌다
+    expect(familiarityForRole(row, position, morningRole)).toBe(row.familiarity);
+    expect(familiarityForRole(row, position, picked)).toBe(row.familiarity - paid);
 
-    // 다른 자리에 세우면 흔적이 닿지 않는다 — 코어 keepMemo와 같은 기준이다
+    // 다른 자리에는 흔적이 닿지 않는다 — 역할 목록이 자리마다 다르다 (§3.1)
     const elsewhere = pointWhere((code) => code !== position)!;
     const other = positionAtPoint(elsewhere);
     expect(familiarityForRole(row, other, defaultRoleOf(other))).toBe(row.familiarity);

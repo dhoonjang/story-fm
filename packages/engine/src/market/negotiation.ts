@@ -16,7 +16,7 @@ import {
   describeOdds,
   describeWait,
   marketValueOf,
-  oddsLabel,
+  oddsText,
   renewalExpectation,
   responseDelayDays,
   wageExpectationOf,
@@ -226,7 +226,7 @@ export function sendOffer(state: GameState, terms: DealTerms): MarketSkillResult
     ...(terms.pitch ? { pitch: terms.pitch } : {}),
   });
 
-  const chance = odds.fuzzy ? oddsLabel(odds.probability) : `${odds.probability}%`;
+  const chance = oddsText(odds);
   const verdicts =
     terms.pitch && terms.pitch.length > 0
       ? evaluatePitch(state, terms.playerId, terms.pitch, prior?.pitched ?? []).verdicts
@@ -326,13 +326,18 @@ function counterpartOf(negotiation: Negotiation, player: GamePlayer): string {
  *
  * 답한 대상 오퍼의 조건이 `terms`(제시)이고 되부른 조건이 `counterTerms`(요구)다.
  * 우리가 낸 조건이 있어야 상대의 답이 판단거리가 된다 — 그 반대도 마찬가지다.
+ *
+ * **성사 가능성은 역제안에만 실린다**(`odds` — transfer.md §3). 끝난 판정에는
+ * 답할 것이 남지 않아 사전 확률이 판단의 입력이 아니고, 거절 카드에 선 높은
+ * 확률은 판정과 모순처럼 읽힌다. 그래서 값을 아예 받지 않는다.
  */
 function verdictCardOf(input: {
   player: GamePlayer;
   counterpart: string;
   verdict: NegotiationVerdict;
   offer: Negotiation["rounds"][number];
-  probability: number;
+  /** 되부른 조건이 성사될 가능성 — 역제안일 때만 (`oddsText` 표기) */
+  odds?: string;
   loan?: boolean;
   note?: string;
   counterTerms?: MarketTerms;
@@ -349,7 +354,7 @@ function verdictCardOf(input: {
       weeklyWage: input.offer.weeklyWage,
       years: input.offer.contractYears,
     }),
-    odds: `${input.probability}%`,
+    ...(input.verdict === "counter" && input.odds ? { odds: input.odds } : {}),
     ...(input.loan === true ? { loan: true } : {}),
     ...(input.note ? { note: input.note } : {}),
     ...(input.counterTerms ? { counterTerms: input.counterTerms } : {}),
@@ -538,7 +543,8 @@ export function respondOffer(
       counterpart,
       verdict: input.verdict,
       offer,
-      probability: odds.probability,
+      // 역제안만 답이 남는다 — 카드는 그때만 확률을 세운다 (`verdictCardOf`)
+      odds: oddsText(odds),
       loan: loaning,
       ...(input.note ? { note: input.note } : {}),
     }),
@@ -781,7 +787,7 @@ export function offerPlayerOut(
   const { waitDays, respondsOn } = pushOurRound(state, negotiation, terms, odds.probability, {
     repeats: negotiation.rounds.filter((r) => r.by === "us").length,
   });
-  const chance = odds.fuzzy ? oddsLabel(odds.probability) : `${odds.probability}%`;
+  const chance = oddsText(odds);
   const head = input.loan
     ? `${teamName(buyer.id)}에 ${player.name} 임대를 제안했습니다 — 임대료 ${money(fee)} · ` +
       `그쪽이 낼 주급 ${wageOf(weeklyWage)}.`
@@ -1069,10 +1075,7 @@ export function answerIncomingOffer(
   if (!target.ok) return target;
   const { negotiation, offer, player } = target;
   const counterpart = counterpartOf(negotiation, player);
-  /**
-   * 확률은 **받은 오퍼가 성사될 가능성**이다 — 수락·거절 카드가 읽는 값이 그것이다.
-   * 역제안은 되부른 값으로 다시 재므로 아래에서 따로 굴린다.
-   */
+  /** 테이블에 오른 조건 — 되부를 때 여기서 값만 갈아 확률을 다시 잰다 */
   const onTable = {
     playerId: player.id,
     fee: offer.fee,
@@ -1089,7 +1092,6 @@ export function answerIncomingOffer(
       counterpart,
       verdict: "reject",
       offer,
-      probability: dealOdds(state, onTable).probability,
       ...(input.note ? { note: input.note } : {}),
     });
     offer.verdict = "reject";
@@ -1110,7 +1112,6 @@ export function answerIncomingOffer(
       counterpart,
       verdict: "accept",
       offer,
-      probability: dealOdds(state, onTable).probability,
       ...(input.note ? { note: input.note } : {}),
     });
     offer.verdict = "accept";
@@ -1143,13 +1144,13 @@ export function answerIncomingOffer(
       counterpart,
       verdict: "counter",
       offer,
-      probability: odds.probability,
+      odds: oddsText(odds),
       counterTerms: dealTerms({ fee: demanded, weeklyWage: wage }),
       dueOn: respondsOn,
       ...(input.note ? { note: input.note } : {}),
     }),
     message:
-      `${player.name} 값으로 ${money(demanded)}을 불렀습니다 (성사 확률 ${odds.probability}%) — ` +
+      `${player.name} 값으로 ${money(demanded)}을 불렀습니다 (성사 가능성 ${oddsText(odds)}) — ` +
       describeWait(waitDays),
   };
 }
@@ -1238,7 +1239,7 @@ export function openRenewal(
     // 상대는 구단이 아니라 선수 본인이다 — 카드도 그렇게 말한다
     counterpart: player.name,
     terms: dealTerms({ weeklyWage: input.weeklyWage, years: input.years }),
-    odds: `${odds.probability}%`,
+    odds: oddsText(odds),
     dueOn: respondsOn,
     ...(until ? { note: `현 계약 ${until} 만료` } : {}),
   };
@@ -1247,7 +1248,7 @@ export function openRenewal(
     payload: card,
     message:
       `${player.name}에게 재계약 제안 — 주급 ${wageOf(input.weeklyWage)} · ${input.years}년` +
-      `${until ? ` (현 계약 ${until} 만료)` : ""}. 성사 확률 ${odds.probability}%. ${describeWait(waitDays)}`,
+      `${until ? ` (현 계약 ${until} 만료)` : ""}. 성사 가능성 ${oddsText(odds)}. ${describeWait(waitDays)}`,
   };
 }
 

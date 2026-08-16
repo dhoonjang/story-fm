@@ -3,6 +3,7 @@ import {
   advanceSegment,
   assignmentsOf,
   buildOfficeViews,
+  digestLines,
   isClubTeam,
   finalizeMatch,
   groupOf,
@@ -402,7 +403,8 @@ describe("경기 후 전술 복원", () => {
 
     expect(tactics().spec).toEqual(before);
     expect(tactics().assignments.some((a) => a.directive)).toBe(false);
-    expect(digest.some((d) => d.includes("되돌"))).toBe(true);
+    // 전술 복구는 우리 경기 사건이다 — 말풍선에 서는 갈래에 있어야 한다
+    expect(digest.ours.some((d) => d.includes("되돌"))).toBe(true);
   });
 
   it("경기 중 전술 변경이 깎은 적응도도 함께 되돌린다", () => {
@@ -459,6 +461,49 @@ describe("경기 후 전술 복원", () => {
     expect(starters.every((a) => (a.drilled ?? []).some((d) => d.signature === kickoff))).toBe(
       true,
     );
+  });
+});
+
+describe("결산 요약의 갈래 (match.md §6)", () => {
+  /** 경기를 끝까지 굴린 뒤 갈래를 그대로 받는다 — `playMockMatch`는 평탄화만 돌려준다 */
+  const finishMatch = (state: GameState) => {
+    startMatch(state);
+    let guard = 60;
+    while (state.pendingMatch && state.pendingMatch.ledger.phase !== "finished" && guard-- > 0) {
+      advanceSegment(state);
+    }
+    return finalizeMatch(state);
+  };
+
+  it("우리 경기 결과와 재정·다른 경기가 섞이지 않는다", () => {
+    const state = createTestGame();
+    advanceToMatchday(state);
+    const digest = finishMatch(state);
+
+    // 스코어·전술 복구처럼 우리 경기 사건은 ours에만 선다 (말풍선이 싣는 갈래)
+    expect(digest.ours.some((d) => d.includes("최종 스코어"))).toBe(true);
+    expect(digest.finance.some((d) => d.includes("최종 스코어"))).toBe(false);
+    expect(digest.others.some((d) => d.includes("최종 스코어"))).toBe(false);
+
+    // 재정은 재정 화면의 몫 — 말풍선에 옮겨 적지 않는다
+    expect(digest.ours.join("\n")).not.toMatch(/관중|입장 수입/u);
+    // 같은 라운드의 다른 경기는 **사라지지 않는다** — 모델이 읽을 소식으로 남는다
+    expect(digest.others.length).toBeGreaterThan(0);
+
+    // 평탄화는 한 줄도 잃지 않는다 (모델 입력·테스트가 쓰는 경로)
+    expect(digestLines(digest)).toEqual([...digest.ours, ...digest.finance, ...digest.others]);
+  });
+
+  it("말풍선에 서는 갈래는 항목마다 한 줄에 든다", () => {
+    const state = createTestGame(5);
+    advanceToMatchday(state);
+    const digest = finishMatch(state);
+
+    // 항목 하나가 말풍선 한 줄이다 — 건수와 갈래까지만 적는다
+    for (const line of digest.ours) expect(line.length).toBeLessThanOrEqual(80);
+    // 우리 경기 사건은 손에 꼽힌다. 라운드 전체가 실리던 예전엔 이 셈이 스무 줄이었다
+    expect(digest.ours.length).toBeLessThanOrEqual(12);
+    expect(digest.ours.length).toBeLessThan(digestLines(digest).length);
   });
 });
 

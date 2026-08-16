@@ -1025,6 +1025,16 @@ export function oddsLabel(probability: number): string {
   return "사실상 불가능하다";
 }
 
+/**
+ * **성사 가능성 한 조각** — 카드와 문장이 함께 쓰는 표기.
+ *
+ * 안개 분기가 부르는 자리마다 흩어져 있으면 한 곳만 고쳐도 같은 딜이 카드마다
+ * 다르게 말한다 — 한 카드는 `해볼 만하다`, 다음 카드는 `71%`.
+ */
+export function oddsText(odds: Pick<DealOdds, "probability" | "fuzzy">): string {
+  return odds.fuzzy ? oddsLabel(odds.probability) : `${odds.probability}%`;
+}
+
 /** 협상 상대 — buy는 선수의 현 소속, sell은 오퍼를 넣은 구단 */
 export function counterpartOf(state: GameState, playerId: string): string | null {
   const player = playerById(state, playerId);
