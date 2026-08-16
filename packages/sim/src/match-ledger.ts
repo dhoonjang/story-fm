@@ -3,7 +3,7 @@ import { PHASE_END, TEAM_EVENT_TYPES, isExtraTime } from "@story-fm/domain";
 
 /**
  * 경기 장부 — LLM(매치 티어)이 창발적으로 생성한 사건을 검증해 기록하는
- * 결정적 코어 (결정 #14, match-sim.md §4). 창발 출력이 검증 없이 게임
+ * 결정적 코어 (match.md §5). 창발 출력이 검증 없이 게임
  * 상태가 되는 일은 없다 (AGENTS.md 6-4).
  */
 
@@ -65,7 +65,7 @@ export function addStats(
 
 export type ApplyResult = { ok: true; state: MatchLedgerState } | { ok: false; errors: string[] };
 
-/** 하드 상한 — 비상식 방지 (match-sim.md §4). 수치는 balance.md에서 튜닝 */
+/** 하드 상한 — 비상식 방지 (match.md §5) */
 export const LEDGER_LIMITS = {
   maxEventsPerBatch: 20,
   maxSubs: 5,
@@ -389,7 +389,7 @@ const PHASE_KO: Record<MatchPhase, string> = {
   finished: "경기 종료",
 };
 
-/** 장부 요약 — 매치 티어 LLM 컨텍스트용 한국어 스냅샷 (match-sim.md §2) */
+/** 장부 요약 — 매치 티어 LLM 컨텍스트용 한국어 스냅샷 (match.md §2) */
 export function describeLedger(
   state: MatchLedgerState,
   names: { home: string; away: string },

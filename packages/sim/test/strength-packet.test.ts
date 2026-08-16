@@ -165,7 +165,7 @@ describe("buildStrengthPacket", () => {
     expect(tired.home.zones.defense).toBeLessThan(fresh.home.zones.defense);
   });
 
-  it("감독 전술 능력치가 높으면 전술 소화율이 오른다 (결정 #13)", () => {
+  it("감독 전술 능력치가 높으면 전술 소화율이 오른다 (career.md §2)", () => {
     expect(tacticalFit(90)).toBeGreaterThan(tacticalFit(50));
     const sharp = buildStrengthPacket(
       makeSide("str", 80, { managerTactics: 90 }),
