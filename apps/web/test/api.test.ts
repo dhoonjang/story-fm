@@ -424,7 +424,7 @@ describe("API — 온보딩부터 경기까지", () => {
     const names = Object.keys(game.playerNames);
     expect(names.length, "우리 선수단이 빠졌다").toBeGreaterThanOrEqual(20);
     expect(names.length, "전 리그를 통째로 실었다").toBeLessThan(200);
-    // 화자 직책 — 화면이 `스티브 홀랜드 (수석코치)`로 붙일 재료 (personas.md)
+    // 화자 직책 — 화면이 `스티브 홀랜드 (수석코치)`로 붙일 재료 (people.md §3)
     expect(Object.values(game.speakerRoles).map((r: { label?: string }) => r.label)).toContain(
       "수석코치",
     );

@@ -1,5 +1,5 @@
 /**
- * GM 오케스트레이터 (ai-manager.md) — 단일 GM, 장면 라우팅 (결정 #12).
+ * GM 오케스트레이터 — 단일 GM, 장면 라우팅 (agents.md §1·§2).
  * 실모드: 설정된 제공자의 tool loop. mock 모드: 규칙 기반 (mock-gm.ts).
  * 두 모드는 같은 엔진 스킬 경로만 사용한다 — 상태 변경의 유일한 통로.
  */
@@ -245,7 +245,7 @@ async function runRealGmTurn(
       : buildGmTools(state, calls, { deferNegotiationIds });
 
   // 입력은 안정성 순 3층 — ① 고정 프롬프트 ② 레퍼런스 ③ 발화+상태 스냅샷.
-  // 앞 두 층만 캐시 프리픽스(0.1×)다 (docs/design/llm-io.md)
+  // 앞 두 층만 캐시 프리픽스(0.1×)다 (docs/llm/agents.md §5)
   const system = inMatch
     ? [MATCH_CASTER_SYSTEM, buildMatchReference(state)]
     : [GM_SYSTEM, buildGmReference(state)];

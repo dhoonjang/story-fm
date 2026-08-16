@@ -324,7 +324,7 @@ export const DEFAULT_SKILL_DESCRIPTIONS = Object.fromEntries(
   SKILL_CATALOG.map((skill) => [skill.name, skill.description]),
 ) as SkillDescriptions;
 
-/** 이번 LLM 턴에 실릴 도구 설명 — 코드가 유일한 원본이다 (llm.md §7). */
+/** 이번 LLM 턴에 실릴 도구 설명 — 코드가 유일한 원본이다 (prompts.md §2). */
 export function skillDescriptions(): SkillDescriptions {
   return DEFAULT_SKILL_DESCRIPTIONS;
 }

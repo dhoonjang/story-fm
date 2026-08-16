@@ -57,7 +57,7 @@ export function GET(request: Request) {
   });
 }
 
-/** 새 게임 생성 — 배경 직접 입력 → 능력치 배분 (결정 #11) */
+/** 새 게임 생성 — 배경 직접 입력 → 능력치 배분 (career.md §1) */
 export async function POST(request: Request) {
   const body = CreateSchema.safeParse(await request.json());
   if (!body.success) {

@@ -566,7 +566,7 @@ export interface GameState {
 
   // ── 서사 ──
   /**
-   * 인물 — 데이터로 다루는 페르소나 (personas.md). 지금은 수석코치 하나이고,
+   * 인물 — 데이터로 다루는 페르소나 (people.md §1). 지금은 수석코치 하나이고,
    * 구단주·기자·핵심 선수가 같은 배열에 붙는다. 옛 세이브엔 없어 optional —
    * 로드 시 시드로 채운다(`ensurePersonas`)므로 세이브 버전을 올리지 않는다.
    */
@@ -955,7 +955,7 @@ function initialWages(players: GamePlayer[], onDate: string): Map<string, number
 
 /**
  * 팀 tier → 시작 잔고·이적 예산. **EPL 기준이고 구단 경제 수준을 곱한다**
- * (`initialFinanceOf` — club-finance.md §12.1).
+ * (`initialFinanceOf` — finance.md §6.2).
  *
  * 곱하지 않으면 PSG가 아스날과 똑같은 £120M/£90M로 시작해 6분의 1 중계 수입으로
  * 같은 살림을 산다. 수입만 리그를 알던 비대칭이 초기치에도 있던 자리다.
