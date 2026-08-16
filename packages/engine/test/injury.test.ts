@@ -18,6 +18,7 @@ import {
   quickSimulate,
   raiseProneness,
   simSquadOf,
+  simulateOtherMatches,
   startMatch,
   userSide,
 } from "@story-fm/engine";
@@ -162,8 +163,8 @@ describe("성향은 빈도에도 닿는다 — 유리몸 팀은 더 자주 쓰�
         if (tag === `home:${glass.id}`) hisShare++;
       }
     }
-    // 균등이면 11명 중 1명이라 약 9%
-    expect(hisShare / homeInjuries).toBeGreaterThan(0.14);
+    // 균등이면 뛴 선수(선발 11 + 교체 최대 4) 중 1명이라 7~9%
+    expect(hisShare / homeInjuries).toBeGreaterThan(0.11);
   });
 });
 
@@ -275,6 +276,63 @@ describe("부임 전 부상 이력 — 조사된 선수만", () => {
     for (let d = 0; d < 400; d += 20) {
       expect(pronenessFromDaysOut(d + 20)).toBeGreaterThan(pronenessFromDaysOut(d));
     }
+  });
+});
+
+describe("간이 시뮬 — 성향은 뛴 선수 전원에게 걸린다", () => {
+  /** 유저와 무관한 두 팀의 경기 하나 — 간이 시뮬이 소화하는 경로다 */
+  function playAiMatch(state: ReturnType<typeof createTestGame>): string[] {
+    state.matches.push({
+      id: "quick-subs",
+      season: state.season,
+      competitionId: null,
+      round: 1,
+      date: state.date,
+      time: "15:00",
+      homeTeamId: "liverpool",
+      awayTeamId: "chelsea",
+      result: null,
+    });
+    simulateOtherMatches(state, []);
+    return state.matches.find((m) => m.id === "quick-subs")!.result!.homeLineup!;
+  }
+
+  it("교체로 들어온 선수도 성향이 내려간다 — 벤치에 앉아만 있으면 그대로다", () => {
+    const state = createTestGame(11);
+    const squad = simSquadOf(state, "liverpool");
+    const starters = new Set(squad.starters.map((p) => p.id));
+    const lineup = playAiMatch(state);
+
+    const cameOn = lineup.filter((id) => !starters.has(id));
+    expect(cameOn.length).toBeGreaterThan(0);
+    for (const id of cameOn) {
+      // 그 경기에서 다친 선수는 상승이 하강을 덮는다 — 균형식대로다
+      if (isInjured(state, id)) continue;
+      expect(pronenessValue(playerById(state, id)!)).toBeLessThan(PRONENESS_BASE);
+    }
+    // 안 뛴 벤치는 손대지 않는다 — 하강이 출전이 아니라 소집에 걸리면 안 된다
+    const idle = (squad.bench ?? []).filter((p) => !lineup.includes(p.id));
+    expect(idle.length).toBeGreaterThan(0);
+    for (const p of idle) expect(p.state.injuryProneness).toBeUndefined();
+  });
+
+  it("부상 추첨도 교체 투입 선수를 후보로 센다", () => {
+    const state = createTestGame(11);
+    const home = simSquadOf(state, "chelsea");
+    const away = simSquadOf(state, "liverpool");
+    const starters = new Set([...home.starters, ...away.starters].map((p) => p.id));
+
+    let onSubs = 0;
+    let total = 0;
+    for (let i = 0; i < 200; i++) {
+      for (const tag of quickSimulate(home, away, 3000 + i, `subs:${i}`).injuries) {
+        total++;
+        if (!starters.has(tag.slice(tag.indexOf(":") + 1))) onSubs++;
+      }
+    }
+    expect(total).toBeGreaterThan(0);
+    // 선발만 뽑던 시절엔 정확히 0이었다 (뛴 열넷 중 셋 남짓이 교체 자원이다)
+    expect(onSubs).toBeGreaterThan(0);
   });
 });
 
