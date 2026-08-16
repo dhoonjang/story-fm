@@ -298,10 +298,23 @@ function tacticalDeltas(
   if (pr !== 0) {
     const stamina = squadTrait(slots, (p) => p.attributes.stamina);
     d.midfield += gain(0.03 * pr * stamina);
-    d.defense -= cost(0.015 * pr); // 전방 압박이 뚫리면 뒤가 빈다
+    /**
+     * **수비 존으로 이득이 들어오는 유일한 축이다.**
+     *
+     * 여섯 축 중 넷이 대가를 `d.defense`에서만 뗐고 어느 축도 수비에 이득을 주지
+     * 않았다 — 그래서 공격적으로 서는 팀은 수비 존만 깎였고, 리그 전체가 그렇게
+     * 서자 판세 3×3이 "우리 진영이 밀린다"를 매 경기 반복했다. 압박이 그 자리인
+     * 이유는 실제로 그렇기 때문이다: 상대의 빌드업을 **상대 진영에서** 끊으면
+     * 우리 문 앞 장면 자체가 줄어든다.
+     *
+     * ⚠️ 아래 뒷공간 대가보다 작게 둔다 — 크면 압박이 대가 없는 축이 되어 모두가
+     * 최대치로 세운다.
+     */
+    d.defense += gain(0.01 * pr);
+    d.defense -= cost(0.015 * pr); // 한 번 뚫리면 뒤가 통째로 빈다
     note(
       pr > 0
-        ? `강한 압박: 중원 주도권(체력 ${stamina >= 1 ? "충분" : "부족"}), 뒷공간 위험`
+        ? `강한 압박: 중원 주도권(체력 ${stamina >= 1 ? "충분" : "부족"}), 빌드업을 앞에서 끊되 뒷공간 위험`
         : `압박 완화: 중원을 내주고 자리를 지킨다`,
     );
   }
@@ -315,8 +328,12 @@ function tacticalDeltas(
      * 라인을 올리면 **상대의 공격 시작점이 멀어진다** — 압축의 진짜 이득은
      * 중원 장악만이 아니라 상대를 밀어내는 것이다. 이게 없으면 라인 올리기는
      * "뒷공간만 내주는 손해"가 되어 아무도 쓰지 않는 축이 된다.
+     *
+     * ⚠️ 양방향이다. 예전엔 `dl > 0`일 때만 얹어서 **내려선 팀은 공격을 잃지
+     * 않았다** — 축이 3을 기준으로 비대칭이라 리그 평균이 3이어도 공격 존만
+     * 부풀었다. 내려서면 우리 공격 시작점도 함께 멀어진다.
      */
-    if (dl > 0) d.attack += gain(0.012 * dl);
+    d.attack += gain(0.012 * dl);
     d.defense -= cost(0.03 * dl) * (dl > 0 ? paceRisk : 1);
     note(
       dl > 0
@@ -361,7 +378,13 @@ function tacticalDeltas(
   } else if (ps < 0) {
     const passing = squadTrait(slots, (p) => (p.attributes.passing + p.attributes.vision) / 2);
     d.midfield += gain(0.02 * -ps * passing);
-    note(`짧은 패스: 점유로 중원 장악 (연결 ${passing >= 1 ? "안정" : "불안"})`);
+    /**
+     * 짧게 돌리면 **문 앞까지 가는 데 걸리는 수가 늘어난다** — 롱볼의 거울이다.
+     * 예전엔 이 갈래만 대가가 없어서 여섯 축 중 유일한 공짜 이득이었고, 리그의
+     * 절반이 그 자리에 서자 공격 존이 대가 없이 함께 올랐다.
+     */
+    d.attack -= cost(0.02 * -ps);
+    note(`짧은 패스: 점유로 중원 장악 (연결 ${passing >= 1 ? "안정" : "불안"}), 전진은 느리다`);
   }
 
   return d;
@@ -458,7 +481,7 @@ export const CREATION_SKILL_LOG_WEIGHT = 0.75;
  * 대등한 경로에서 슈팅 하나의 평균 기회 xG.
  * 실제 1부 리그의 슛당 xG는 0.11 언저리다(2.8골 ÷ 25슛).
  */
-export const BASE_SHOT_XG = 0.076;
+export const BASE_SHOT_XG = 0.09;
 /** 최종 공격 지역 우위가 슈팅 질에 닿는 세기. */
 export const ROUTE_XG_LOGIT_WEIGHT = 0.7;
 /** 선수의 전진 위치가 슈팅 질에 닿는 세기. */
@@ -473,6 +496,36 @@ const ZONE_CONTRIBUTION: Record<
   attack: { FW: 1, MF: 0.45, DF: 0.1, GK: 0.02 },
   midfield: { FW: 0.3, MF: 1, DF: 0.3, GK: 0.05 },
   defense: { FW: 0.08, MF: 0.35, DF: 1, GK: 0.8 },
+};
+
+/**
+ * 세 존을 한 줄에 세우는 눈금 — ⚠️ 리그 실측에 묶인 밸런스 값.
+ *
+ * **매치업 비율의 기준선은 1이어야 한다.** 같은 전력이 맞서면 `home.attack /
+ * away.defense`가 1이어야 "우리 진영이 밀린다"가 신호가 된다. 그런데 존 값에
+ * 얹히는 두 층이 **구조적으로 공격 쪽으로만 실린다**:
+ *
+ * - **공략**(exploits.ts) — 키포인트가 드러내는 약점은 대개 상대 수비 쪽이라
+ *   14축 중 9축의 이득이 공격 존으로 들어온다. 이득을 "상대 수비를 깎는다"로
+ *   옮겨도 `공격/상대 수비` 비율은 똑같이 오르므로 **재분배로는 닫히지 않는다.**
+ * - **전술 6축**(`tacticalDeltas`) — 프리셋을 3에 맞추고 갈래를 대칭으로 만든
+ *   뒤에도 리그 평균이 공격 ×1.037로 남는다.
+ *
+ * `ZONE_CONTRIBUTION`은 기울어 있지 않다 — 두 층을 모두 끄고 편성 400경기를 재면
+ * 세 존이 1.001·1.002·1.001로 이미 같은 눈금에 선다. 그래서 보정은 가중치가
+ * 아니라 **여기, 존이 완성된 자리**에 둔다.
+ *
+ * 값은 공격과 수비에 절반씩 나눠 건다(0.957 × 1.045 ≈ 1) — 한쪽에만 걸면 화면의
+ * 막대 길이가 그쪽으로만 눌린다.
+ *
+ * **다시 재는 법**: 편성 400경기의 `home.attack / away.defense` 평균이 1에서
+ * 벗어나면 그 비율의 제곱근만큼 이 두 값을 반대로 움직인다. 전술 프리셋·공략
+ * 크기·역할 가중치를 만졌으면 반드시 다시 잰다.
+ */
+const ZONE_BASELINE: Record<"attack" | "midfield" | "defense", number> = {
+  attack: 0.957,
+  midfield: 1,
+  defense: 1.045,
 };
 
 /** 실제 전후 좌표를 기존 네 라인의 기여도로 연속 변환한다. */
@@ -582,18 +635,21 @@ function buildZones(
 
   const attack =
     zoneOf("attack") *
+    ZONE_BASELINE.attack *
     tacticShift(delta.attack + counter.attack) *
     fit *
     gapPenalty("FW") *
     shorthanded;
   const midfield =
     zoneOf("midfield") *
+    ZONE_BASELINE.midfield *
     tacticShift(delta.midfield + counter.midfield) *
     fit *
     gapPenalty("MF") *
     shorthanded;
   const defense =
     zoneOf("defense") *
+    ZONE_BASELINE.defense *
     tacticShift(delta.defense + counter.defense) *
     fit *
     gapPenalty("DF") *

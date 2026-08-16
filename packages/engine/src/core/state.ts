@@ -1431,22 +1431,37 @@ function memoFit(preferred?: ReadonlySet<string>): (p: GamePlayer, slot: string)
   };
 }
 
-/** 포메이션이 의도하는 공간 사용과 모순되지 않는 초기 운용값. */
+/**
+ * 포메이션이 의도하는 공간 사용과 모순되지 않는 초기 운용값.
+ *
+ * ⚠️ **여섯 축의 리그 평균이 3에 서야 한다.** 3이 중립이고 전술 델타는 3에서의
+ * 편차로 계산되므로(`tacticalDeltas`), 프리셋이 한쪽으로 쏠리면 **리그 전체가
+ * 같은 방향의 이득과 대가를 달고 선다**. 예전 프리셋은 여섯 축이 전부 3 이상이라
+ * (멘탈리티 3.30 · 압박 3.47 · 라인 3.30 · 템포 3.34 · 폭 3.78 · 패스 3.12) 리그
+ * 평균이 공격 +2.4 / 수비 −2.3을 달고 서서, 판세 3×3이 상대와 무관하게 "우리
+ * 진영이 밀린다"만 반복했다.
+ *
+ * 그래서 각 스타일은 **올린 축만큼 내린 축을 갖는다** — 점유는 라인과 폭을 올리는
+ * 대신 템포와 패스 길이를 내리고, 역습·롱볼은 라인과 압박을 내린다. 프리셋을
+ * 고칠 때는 리그 평균을 다시 재라(`docs/simulation/match.md` §1.2).
+ */
 function initialTactics(
   teamId: string,
   formation: Formation,
 ): import("@story-fm/domain").TacticsSpec {
   switch (tacticalStyleOf(teamId)) {
+    // 라인을 올려 압축하되 천천히 넓게 짧은 패스로 돌린다
     case "possession":
       return {
         formation,
-        mentality: 4,
+        mentality: 3,
         defensiveLine: 4,
-        pressing: 4,
-        tempo: 3,
+        pressing: 3,
+        tempo: 2,
         width: 4,
         passStyle: 2,
       };
+    // 앞으로 무게를 싣고 라인을 올려 빠르게 — 대신 좁게 압축한다
     case "high-press":
       return {
         formation,
@@ -1454,37 +1469,40 @@ function initialTactics(
         defensiveLine: 4,
         pressing: 5,
         tempo: 4,
-        width: 3,
+        width: 2,
         passStyle: 3,
       };
+    // 내려서서 기다리다 빠르고 넓게 나간다
     case "transition":
       return {
         formation,
         mentality: 3,
-        defensiveLine: 3,
-        pressing: 3,
+        defensiveLine: 2,
+        pressing: 2,
         tempo: 4,
         width: 4,
         passStyle: 4,
       };
+    // 내려서서 길게 찬다 — 폭보다 타깃이 먼저다
     case "direct":
       return {
         formation,
         mentality: 3,
-        defensiveLine: 3,
-        pressing: 3,
+        defensiveLine: 2,
+        pressing: 2,
         tempo: 4,
-        width: 4,
+        width: 3,
         passStyle: 5,
       };
+    // 전부 내린다
     case "low-block":
       return {
         formation,
         mentality: 2,
         defensiveLine: 2,
         pressing: 2,
-        tempo: 3,
-        width: 3,
+        tempo: 2,
+        width: 2,
         passStyle: 4,
       };
     case "balanced":
@@ -1494,7 +1512,7 @@ function initialTactics(
     case "4-3-3":
       return {
         formation,
-        mentality: 4,
+        mentality: 3,
         defensiveLine: 4,
         pressing: 4,
         tempo: 3,
@@ -1521,6 +1539,7 @@ function initialTactics(
         width: 4,
         passStyle: 4,
       };
+    // 윙백이 폭을 만드는 모양이라 지시로 더 벌리지 않는다 — 여섯 축 전부 중립
     case "3-5-2":
       return {
         formation,
@@ -1528,7 +1547,7 @@ function initialTactics(
         defensiveLine: 3,
         pressing: 3,
         tempo: 3,
-        width: 4,
+        width: 3,
         passStyle: 3,
       };
     case "5-4-1":
