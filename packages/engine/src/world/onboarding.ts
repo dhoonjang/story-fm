@@ -1,5 +1,5 @@
 import type { ManagerAttributes } from "@story-fm/domain";
-import { catalogTierOf } from "../core/club-tier";
+import { teamCatalogById } from "../data/team-catalog";
 
 /**
  * 온보딩 — 유저가 직접 입력한 배경(자유 텍스트)을 능력치 4축으로 배분한다
@@ -139,9 +139,13 @@ const TEAM_FLOOR: Record<1 | 2 | 3 | 4, number> = {
  *
  * 부임 **전**이라 세이브가 아직 없다 — 여기가 카탈로그 체급을 읽는 게 맞는 자리다
  * (core/club-tier.ts).
+ *
+ * ⚠️ `catalogTierOf`의 폴백(3)을 쓰지 않는다 — 그 길로 가면 오타 난 팀 이름이
+ * 중견 1부 부임과 같은 하한을 받는다. 카탈로그에 **있는** 팀만 하한을 올린다.
  */
 export function teamFloorOf(teamId: string | undefined): number {
-  return teamId ? TEAM_FLOOR[catalogTierOf(teamId)] : CAREER_BASE.none;
+  const tier = teamId ? teamCatalogById(teamId)?.tier : undefined;
+  return tier ? TEAM_FLOOR[tier] : CAREER_BASE.none;
 }
 
 /** 시작 능력치의 범위 — 성장 상한(`ATTR_CAP` 90)과 다르다. 시작부터 90은 없다 */
