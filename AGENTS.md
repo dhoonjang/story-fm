@@ -107,6 +107,11 @@ packages/
 - Conventional Commits (`feat:` `fix:` `refactor:` `docs:` `test:` `chore:`).
 - One concern per PR — PRs are squash-merged, so one PR is one commit on main and
   the PR title is that commit's subject. **Prompt changes go in their own PR.**
+- **A branch's name is not a reason to make another branch.** The worktree already
+  arrives on one — work on that, whatever it is called. **There is no branch naming
+  convention here**, and a second branch cut to match the names already in the
+  history leaves the first one stranded and detaches the work from the branch Orca
+  tracks the issue by.
 - Commit and push only when the user asks. When a unit of work is done, commit to
   **the branch already checked out** and `git push origin HEAD` — never switch
   branches to commit.
