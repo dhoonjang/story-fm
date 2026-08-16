@@ -229,6 +229,7 @@ function moveClub(
       toTeamId,
       wageSubjectOf(player, state.date),
       [...squad, player].map((p) => wageSubjectOf(p, state.date)),
+      state,
     ) * marketBiasOf(toTeamId).wage,
   );
   const years = 2 + Math.floor(input.rng() * 3);
@@ -365,6 +366,7 @@ function planTransfer(
     buyerId,
     wageSubjectOf(target, state.date),
     [...squads.of(buyerId), target].map((p) => wageSubjectOf(p, state.date)),
+    state,
   );
   /**
    * ⚠️ **시장 전용 리그는 이 문을 지나지 않는다.** 그쪽 재정은 시뮬하지 않고(§4.5)
@@ -374,7 +376,7 @@ function planTransfer(
    */
   if (
     isTopFlight(buyerId) &&
-    weeklyWagesOf(state, buyerId) + newWage > clubWageBudget(buyerId) * WAGE_HEADROOM
+    weeklyWagesOf(state, buyerId) + newWage > clubWageBudget(buyerId, undefined, state) * WAGE_HEADROOM
   ) {
     return null;
   }
@@ -457,7 +459,8 @@ function planLoan(
   if (host.filter((p) => groupOf(p) === groupOf(target)).length >= 7) return null;
   // 받는 쪽이 분담할 주급도 형편 안이어야 한다
   const share = (activeContract(state, target.id)?.weeklyWage ?? 0) * loanWageShare(toId);
-  if (weeklyWagesOf(state, toId) + share > clubWageBudget(toId) * WAGE_HEADROOM) return null;
+  if (weeklyWagesOf(state, toId) + share > clubWageBudget(toId, undefined, state) * WAGE_HEADROOM)
+    return null;
 
   ledger.committed.add(target.id);
   ledger.arrivals.set(toId, (ledger.arrivals.get(toId) ?? 0) + 1);

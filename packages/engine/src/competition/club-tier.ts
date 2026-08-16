@@ -6,11 +6,10 @@
  * tier 1로 남아 우승 경쟁을 요구받는다.
  */
 import { playersOf, teamName, type GameState } from "../core/state";
-import { tierOfTeamIn } from "../core/club-tier";
+import { boardExpectationOfTier, tierOfTeamIn } from "../core/club-tier";
 import { isCupOnlyLeague, isTopLeague } from "../data/league-catalog";
 import { clubProfiles, type ClubProfile } from "../data/club-profile";
 import { leagueOfTeamIn } from "./promotion";
-import { boardExpectationOfTier } from "./season";
 
 // ── 눈금 ──────────────────────────────────────────────
 // 밸런스를 만지려면 이 블록만 읽으면 된다.

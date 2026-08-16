@@ -30,3 +30,21 @@ export function catalogTierOf(teamId: string): 1 | 2 | 3 | 4 {
 export function tierOfTeamIn(state: GameState, teamId: string): 1 | 2 | 3 | 4 {
   return state.teams.find((t) => t.id === teamId)?.tier ?? catalogTierOf(teamId);
 }
+
+/**
+ * 체급 하나가 뜻하는 **보드 기대치** — 난이도는 별도 옵션이 아니라 이 표다
+ * (career.md §5). 세이브가 있으면 `boardExpectation(state, teamId)`(`competition/season.ts`),
+ * 부임 **전** 팀 목록처럼 세이브가 아직 없는 자리는 카탈로그 체급을 직접 넘긴다.
+ *
+ * 체급을 읽는 자리 옆에 둔다 — 시즌 롤오버의 재산정도 이 문구로 감독에게 알리므로,
+ * 시즌 모듈에 두면 `season.ts` ↔ `competition/club-tier.ts` 순환이 된다.
+ */
+export function boardExpectationOfTier(tier: 1 | 2 | 3 | 4): { target: number; label: string } {
+  return tier === 1
+    ? { target: 2, label: "우승 경쟁" }
+    : tier === 2
+      ? { target: 6, label: "유럽 대항전권(6위 이내)" }
+      : tier === 3
+        ? { target: 12, label: "중위권 안착(12위 이내)" }
+        : { target: 17, label: "잔류(17위 이내)" };
+}

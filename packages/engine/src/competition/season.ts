@@ -28,7 +28,7 @@ import { buildEuroEntrants, entrantsOf, type LeagueTables } from "./europe";
 import { buildSeasonFixtures, isUserFixture } from "./fixtures";
 import { applyPromotionRelegation, leagueOfTeamIn, teamsOfLeagueIn } from "./promotion";
 import { recomputeClubTiers } from "./club-tier";
-import { tierOfTeamIn } from "../core/club-tier";
+import { boardExpectationOfTier, tierOfTeamIn } from "../core/club-tier";
 import { generateYouthPlayer } from "../world/generate";
 import { assignSquadNumber } from "../squad/numbers";
 import {
@@ -188,24 +188,6 @@ export const SEASON_BUDGET_TOPUP: Record<number, number> = {
 export function seasonBudgetBaseOf(state: GameState, teamId: string): number {
   const tier = tierOfTeamIn(state, teamId);
   return Math.round((SEASON_BUDGET_TOPUP[tier] ?? 0) * clubEconomyLevel(teamId, tier));
-}
-
-/**
- * 보드 기대치 — 구단 체급이 난이도를 만든다 (game-loop §1).
- *
- * **두 문맥으로 갈라 둔다.** 세이브가 있으면 `boardExpectation(state, teamId)`가
- * 세이브의 체급을 읽고(team.md §2 — 어드민의 카탈로그 편집이 진행 중인 세이브의
- * 경질선을 그 자리에서 바꾸지 못하게), 부임 **전** 팀 목록처럼 세이브가 아직 없는
- * 자리는 카탈로그 체급을 직접 넘겨 `boardExpectationOfTier`를 쓴다.
- */
-export function boardExpectationOfTier(tier: 1 | 2 | 3 | 4): { target: number; label: string } {
-  return tier === 1
-    ? { target: 2, label: "우승 경쟁" }
-    : tier === 2
-      ? { target: 6, label: "유럽 대항전권(6위 이내)" }
-      : tier === 3
-        ? { target: 12, label: "중위권 안착(12위 이내)" }
-        : { target: 17, label: "잔류(17위 이내)" };
 }
 
 /** 이 세이브에서 그 구단이 지고 있는 기대 — 체급은 세이브가 갖는다 */
@@ -510,6 +492,7 @@ export function transitionSeason(state: GameState): string[] {
           team.id,
           wageSubjectOf(youth, nextCalendar.preseasonStart),
           playersOf(state, team.id).map((p) => wageSubjectOf(p, nextCalendar.preseasonStart)),
+          state,
         ),
         since: nextCalendar.preseasonStart,
         until: `${seasonYear(nextSeason) + 3}-06-30`,
@@ -548,6 +531,7 @@ export function transitionSeason(state: GameState): string[] {
           team.id,
           wageSubjectOf(player, nextCalendar.preseasonStart),
           playersOf(state, team.id).map((p) => wageSubjectOf(p, nextCalendar.preseasonStart)),
+          state,
         ),
         since: nextCalendar.preseasonStart,
         until: `${seasonYear(nextSeason) + randInt(rng, 2, 4)}-06-30`,
