@@ -164,8 +164,11 @@ describe("get_team · get_league", () => {
     const state = createTestGame(23);
     const res = leagueView(state, { view: "fixtures", count: 3 });
     expect(res.ok).toBe(true);
-    // 날짜·요일·킥오프·대회·홈원정이 한 줄에 — "R1"만으로는 언제인지 답할 수 없다
-    expect(res.message).toMatch(/예정 \d{4}-\d{2}-\d{2}\([일월화수목금토]\) \d{2}:\d{2} \S+ R\d+/);
+    // 날짜·요일·킥오프·대회·홈원정이 한 줄에 — "R1"만으로는 언제인지 답할 수 없다.
+    // 라운드는 대회가 있는 경기만 갖는다(친선은 단계가 없다)
+    expect(res.message).toMatch(
+      /예정 \d{4}-\d{2}-\d{2}\([일월화수목금토]\) \d{2}:\d{2} \S+ (홈|원정|중립) vs /,
+    );
   });
 
   it("순위표는 다른 리그·대항전도 볼 수 있고, 없는 대회는 반려한다", () => {

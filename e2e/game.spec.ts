@@ -311,11 +311,16 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await page.getByTestId("tab-스쿼드").click();
   await expect(page.getByTestId("view-squad")).toContainText("선발");
 
-  // 경기를 치렀으니 시즌 기록에 도움과 평점이 선다 (ratings.ts — 장부에서 파생)
+  /*
+   * **시즌 첫 경기는 프리시즌 친선이다** — 몸(폼·체력)에는 남고 시즌 기록에는
+   * 안 남는다(season.md §2). 그래서 여기서 도움·평점을 물으면 빈칸이 맞다.
+   * 시즌 기록이 서는 것은 개막 이후이고, 그 규칙은 단위 테스트가 지킨다
+   * (`friendly-ledger.test.ts` · `ratings.test.ts`).
+   */
   await page.locator(".squad-table tbody tr.row-tier.t-start:not(.detail-row)").first().click();
   const detail = page.getByTestId("player-detail");
-  await expect(detail).toContainText("도움");
-  await expect(detail).toContainText(/평점 \d\.\d\d/);
+  await expect(detail).toContainText("폼");
+  await expect(detail).not.toContainText("도움");
   await page.locator(".squad-table tbody tr.row-tier.t-start:not(.detail-row)").first().click();
 
   await page.getByTestId("tab-재정").click();
@@ -329,13 +334,15 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await page.getByTestId("tab-대회").click();
   const myRow = page.getByTestId("standings").locator("tr.me");
   await expect(myRow).toContainText("아스날"); // 팀명은 한글로
-  await expect(myRow.locator("td").nth(2)).toHaveText("1"); // 1경기 소화
+  // 치른 경기는 친선이라 순위표는 그대로다 — 대회를 세는 자리는 친선을 건너뛴다
+  await expect(myRow.locator("td").nth(2)).toHaveText("0");
   // 라운드별 일정 — 우리 경기가 표시되고 라운드를 오갈 수 있다
   const fixtures = page.getByTestId("round-fixtures");
   await expect(fixtures.locator(".fixture.ours")).toHaveCount(1);
   await page.getByTestId("round-select").selectOption({ index: 0 });
   await expect(fixtures.locator(".fixture")).toHaveCount(10); // 20팀 = 라운드당 10경기
-  await expect(fixtures.locator(".fixture.ours .mid.played")).toHaveCount(1); // 1라운드는 치렀다
+  // 1라운드는 아직이다 — 치른 경기는 친선이고 대회 화면에 서지 않는다
+  await expect(fixtures.locator(".fixture.ours .mid.played")).toHaveCount(0);
 
   // 국내 컵 — 순위표 없는 녹아웃이라 표 대신 브래킷이 나온다
   await page.getByTestId("comp-tab-eflcup").click();
@@ -487,9 +494,11 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
   await expect(page.getByTestId("view-calendar")).toContainText("시즌 일정");
   // 머리줄은 이적창 상태만 알린다 (조작 안내 문구 없음)
   await expect(page.getByTestId("view-calendar")).toContainText("이적시장");
+  // 시즌 첫 경기는 프리시즌 친선이다 — 대회가 없으니 라운드도 없고 이름이 곧 정보다
   await page.locator('[data-testid^="cal-fixture-"]').first().click();
   await expect(page.getByTestId("cal-detail")).toBeVisible();
-  await expect(page.getByTestId("cal-detail")).toContainText("R1");
+  await expect(page.getByTestId("cal-detail")).toContainText("친선");
+  await expect(page.getByTestId("cal-detail")).toContainText("홈");
 
   // 경기 아닌 일정은 점으로만 오른다 — 훈련은 노란 점, 추첨·이적창은 파란 점.
   // 무슨 일정인지는 칸을 눌러 여는 상세가 말한다

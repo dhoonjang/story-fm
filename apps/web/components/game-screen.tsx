@@ -1118,7 +1118,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
         >
           <div className="kickoff-card">
             <span className="kickoff-tag" id="kickoff-heading">
-              {pendingMatch.competition} · {pendingMatch.stage}
+              {/* 친선은 단계가 없다 — 가운뎃점이 홀로 남지 않게 */}
+              {[pendingMatch.competition, pendingMatch.stage].filter(Boolean).join(" · ")}
             </span>
             <div className="kickoff-teams">
               <b className={pendingMatch.home.ours ? "ours" : undefined}>

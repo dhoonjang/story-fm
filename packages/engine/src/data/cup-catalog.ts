@@ -15,6 +15,7 @@ import { domesticCupById, domesticStageLabel, isDomesticCup } from "./domestic-c
 import { leagueName } from "./league-catalog";
 import { catalogSource } from "./catalog-source";
 import { readCupOverride } from "./cup-override";
+import { FRIENDLY_LABEL } from "../competition/friendly";
 
 export interface CupCatalogEntry {
   id: string;
@@ -130,18 +131,25 @@ export function cupCatalogById(id: string): CupCatalogEntry | null {
   return byId().get(id) ?? null;
 }
 
+/**
+ * 대회 id를 묻는 문들은 **널을 받는다** — 널은 어느 대회에도 속하지 않는 경기,
+ * 곧 프리시즌 친선이다(`isFriendly` — competition/friendly.ts). 널을 여기서
+ * 막지 않으면 조회가 `leagueName(null)`까지 흘러 **친선이 리그 이름을 달고 나온다**.
+ */
+
 /** 유럽 대항전인가 — 유럽 원정비·리그 페이즈 순위표처럼 **대항전 고유**의 판단에 쓴다 */
-export function isEuroCup(competitionId: string): boolean {
-  return byId().has(competitionId);
+export function isEuroCup(competitionId: string | null): boolean {
+  return competitionId !== null && byId().has(competitionId);
 }
 
-/** 컵인가 (유럽 대항전 + 국내 컵) — "리그가 아니다"를 물을 때 쓴다 */
-export function isCup(competitionId: string): boolean {
-  return byId().has(competitionId) || isDomesticCup(competitionId);
+/** 컵인가 (유럽 대항전 + 국내 컵) — "리그가 아니다"를 물을 때 쓴다. 친선은 컵도 아니다 */
+export function isCup(competitionId: string | null): boolean {
+  return competitionId !== null && (byId().has(competitionId) || isDomesticCup(competitionId));
 }
 
 /** 대회 표시명 — 리그든 컵이든 competitionId 하나로 이름을 얻는다 */
-export function competitionName(competitionId: string): string {
+export function competitionName(competitionId: string | null): string {
+  if (competitionId === null) return FRIENDLY_LABEL;
   return (
     byId().get(competitionId)?.name ??
     domesticCupById(competitionId)?.name ??
@@ -149,7 +157,8 @@ export function competitionName(competitionId: string): string {
   );
 }
 
-export function competitionShortName(competitionId: string): string {
+export function competitionShortName(competitionId: string | null): string {
+  if (competitionId === null) return FRIENDLY_LABEL;
   return (
     byId().get(competitionId)?.short ??
     domesticCupById(competitionId)?.short ??
@@ -199,10 +208,12 @@ export function stageLabel(stage: MatchStage, round = 1, twoLegged = true): stri
  * 리그 경기(`stage` 없음)는 `R3`처럼 라운드 번호가 곧 표기다.
  */
 export function competitionStageLabel(
-  competitionId: string,
+  competitionId: string | null,
   stage: MatchStage,
   round = 1,
 ): string {
+  // 친선엔 단계가 없다 — 이름(`competitionShortName`)만으로 다 말한 경기다
+  if (competitionId === null) return "";
   const domestic = domesticCupById(competitionId);
   if (domestic) {
     return domesticStageLabel(domestic, stage, round, domestic.twoLegged.includes(stage));
@@ -215,7 +226,40 @@ export function competitionStageLabel(
  * 단계 **이름**만 — 차수를 붙이지 않는다.
  * 추첨처럼 "준결승 1차전"이 아니라 "준결승"이라고 해야 맞는 자리에 쓴다.
  */
-export function competitionStageName(competitionId: string, stage: MatchStage): string {
+/**
+ * 대회 이름까지 붙인 경기 표기 — `EPL R3` · `FA컵 16강 1차전` · `친선`.
+ * 단계가 없는 경기(친선)는 이름만 남는다 — 빈 단계가 공백으로 새지 않게.
+ */
+export function competitionLabel(
+  competitionId: string | null,
+  stage: MatchStage,
+  round = 1,
+): string {
+  const name = competitionShortName(competitionId);
+  const label = competitionStageLabel(competitionId, stage, round);
+  return label ? `${name} ${label}` : name;
+}
+
+/**
+ * 감독의 달력·요약에 서는 표기 — `R3` · `FA컵 16강` · `친선`.
+ *
+ * `competitionLabel`과 갈리는 곳은 **리그**다. 감독은 자기 리그가 무엇인지 알고
+ * 있으므로 일정의 매 줄에 리그 이름을 붙이지 않는다. 컵과 친선은 어느 경기인지가
+ * 곧 정보라 이름이 선다.
+ */
+export function fixtureLabel(
+  competitionId: string | null,
+  stage: MatchStage,
+  round = 1,
+): string {
+  if (competitionId === null) return FRIENDLY_LABEL;
+  return isCup(competitionId)
+    ? competitionLabel(competitionId, stage, round)
+    : competitionStageLabel(competitionId, stage, round);
+}
+
+export function competitionStageName(competitionId: string | null, stage: MatchStage): string {
+  if (competitionId === null) return "";
   const domestic = domesticCupById(competitionId);
   return domestic ? domesticStageLabel(domestic, stage) : stageLabel(stage, 1, false);
 }

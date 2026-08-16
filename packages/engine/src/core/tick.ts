@@ -14,7 +14,8 @@ import {
 } from "@story-fm/sim";
 import { addDays, dayOfWeek, diffDays, matchesOn, nextMatchFor, windowOpenOn } from "../competition/calendar";
 import { teamCatalog } from "../data/team-catalog";
-import { competitionShortName, competitionStageLabel } from "../data/cup-catalog";
+import { competitionLabel } from "../data/cup-catalog";
+import { isFriendly } from "../competition/friendly";
 import { advanceDomesticCups } from "../competition/domestic-cup";
 import { hasCups } from "../world/scope";
 import { driftFamiliarity, tickOtherClubs } from "../squad/other-clubs";
@@ -587,10 +588,12 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
       squads.home,
       squads.away,
       state.seed,
-      `${state.season}:${match.competitionId}:${match.stage ?? "league"}:${match.round}:${match.homeTeamId}-${match.awayTeamId}`,
+      `${state.season}:${match.competitionId ?? "friendly"}:${match.stage ?? "league"}:${match.round}:${match.homeTeamId}-${match.awayTeamId}`,
     );
     // 부상·카드·교체는 각자의 표가 갖는다 — 경기 결과에 섞어 넣지 않는다
     const { injuries: hurt, cards, subs, possession, ...scoreline } = result;
+    // 친선은 어느 대회에도 속하지 않는다 — 몸에 남는 것만 정산하고 장부는 건너뛴다
+    const friendly = isFriendly(match);
     /** 실제로 그라운드를 밟은 선수 — 교체 투입까지 (스카우팅 지식의 원본이다) */
     const played11 = (side: "home" | "away") => [
       ...squads[side].starters.map((p) => p.id),
@@ -622,12 +625,8 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
         ),
       ];
       for (const p of onField) {
-        const stat = ensureSeasonStat(state, p.id, teamId);
-        stat.apps += 1;
         const goals = scored.filter((id) => id === p.id).length;
         const assists = assisted.filter((id) => id === p.id).length;
-        stat.goals += goals;
-        if (assists > 0) stat.assists = (stat.assists ?? 0) + assists;
         const rating = matchRating({
           group: positionGroupOfPlayer(p),
           goals,
@@ -637,11 +636,23 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
           conceded,
           outcome,
         });
-        stat.ratingSum = (stat.ratingSum ?? 0) + rating;
+        // 친선은 시즌 기록에 남지 않는다 — 평점은 폼을 움직이는 데만 쓰인다
+        if (!friendly) {
+          const stat = ensureSeasonStat(state, p.id, teamId);
+          stat.apps += 1;
+          stat.goals += goals;
+          if (assists > 0) stat.assists = (stat.assists ?? 0) + assists;
+          stat.ratingSum = (stat.ratingSum ?? 0) + rating;
+        }
         // 폼은 감독 팀만의 것이 아니다 — 같은 함수로 리그 전체가 오르내린다
         p.state.form = clampForm(p.state.form + formDeltaFromMatch(p, rating, outcome));
       }
-      // 연패·대패·연승이 라커룸에 남기는 것 (slump.ts) — 남의 팀도 겪는다
+      /**
+       * 연패·대패·연승이 라커룸에 남기는 것 (slump.ts) — 남의 팀도 겪는다.
+       * 친선도 겪는다: 라커룸이 움직이는 축은 **폼**이고, 폼은 친선이 닿는
+       * 자리다(season.md §2). 유저 경기(`finalizeMatch`)와 같은 규칙이라야
+       * 프리시즌의 분위기가 리그 전체에서 하나의 눈금으로 움직인다.
+       */
       applyResultMood(
         state,
         teamId,
@@ -693,20 +704,23 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
      * **새 카드보다 먼저** 처리한다: 순서가 뒤집히면 방금 퇴장당한 선수가
      * 그 경기로 정지를 소화해 버려 다음 경기에 그대로 나온다.
      */
-    serveSuspensions(
-      state,
-      [match.homeTeamId, match.awayTeamId].flatMap((teamId) =>
-        firstTeamPlayers(state, teamId)
-          .filter((p) => isSuspended(state, p.id))
-          .map((p) => p.id),
-      ),
-    );
+    if (!friendly) {
+      serveSuspensions(
+        state,
+        [match.homeTeamId, match.awayTeamId].flatMap((teamId) =>
+          firstTeamPlayers(state, teamId)
+            .filter((p) => isSuspended(state, p.id))
+            .map((p) => p.id),
+        ),
+      );
+    }
     /**
      * 카드 → BOOKING·SUSPENSION — **유저 경기와 같은 문**(`discipline.ts`)을 지난다.
      * 그래야 누적 경고 정지가 리그 전체에 걸린다. 남의 팀 정지는 브리핑하지 않는다
      * (하루 열 경기의 카드를 나열하면 소음이다) — 조회 도구가 알려 준다.
+     * 친선의 카드는 어느 대회에도 쌓이지 않는다 — 정지는 대회가 매기는 벌이다.
      */
-    for (const card of cards) {
+    for (const card of friendly ? [] : cards) {
       recordCard(state, {
         playerId: card.playerId,
         matchId: match.id,
@@ -825,7 +839,7 @@ export function advanceTime(
       state.phase = "matchday";
       const home = userMatch.homeTeamId === state.userTeamId;
       digest.push(
-        `경기일 — ${competitionShortName(userMatch.competitionId)} ${competitionStageLabel(userMatch.competitionId, userMatch.stage ?? "league", userMatch.round)} ${userMatch.neutral ? "중립" : home ? "홈" : "원정"} vs ${teamName(home ? userMatch.awayTeamId : userMatch.homeTeamId)}`,
+        `경기일 — ${competitionLabel(userMatch.competitionId, userMatch.stage ?? "league", userMatch.round)} ${userMatch.neutral ? "중립" : home ? "홈" : "원정"} vs ${teamName(home ? userMatch.awayTeamId : userMatch.homeTeamId)}`,
       );
       return { ok: true, digest, stopped: "matchday", trained };
     }
@@ -860,7 +874,7 @@ export function describeNextFixture(state: GameState): string {
   const next = nextMatchFor(state.matches, state.userTeamId, state.date);
   if (!next) return "남은 일정이 없습니다 — 시즌 마무리 국면입니다.";
   const home = next.homeTeamId === state.userTeamId;
-  return `다음 경기: ${competitionShortName(next.competitionId)} ${competitionStageLabel(next.competitionId, next.stage ?? "league", next.round)} ${next.date} ${next.neutral ? "중립" : home ? "홈" : "원정"} vs ${teamName(home ? next.awayTeamId : next.homeTeamId)}`;
+  return `다음 경기: ${competitionLabel(next.competitionId, next.stage ?? "league", next.round)} ${next.date} ${next.neutral ? "중립" : home ? "홈" : "원정"} vs ${teamName(home ? next.awayTeamId : next.homeTeamId)}`;
 }
 
 /** 정지 소화 — 경기가 끝날 때 호출 (경기 단위로 차감). 유저 경기·타 팀 간이 시뮬 둘 다 */

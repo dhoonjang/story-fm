@@ -8,7 +8,9 @@ import {
   buildTransferWindows,
   dayOfWeek,
   diffDays,
+  squadReturnOf,
   teamsOfLeague,
+  FRIENDLY_ROUNDS,
 } from "@story-fm/engine";
 import type { MatchRecord } from "@story-fm/domain";
 import { createTestGame, userFixtureCount } from "./helpers";
@@ -250,6 +252,21 @@ describe("달력 뷰 반영", () => {
       .map((e) => e.date);
     const gaps = dates.slice(1).map((d, i) => diffDays(dates[i]!, d));
     expect(Math.max(...gaps)).toBeGreaterThanOrEqual(13);
+  });
+
+  it("프리시즌 친선이 감독의 달력에 서고 편성 불변식을 깨지 않는다", () => {
+    const state = createTestGame(42);
+    const fixtures = buildOfficeViews(state).calendar.entries.filter((e) => e.type === "match");
+    const friendly = fixtures.filter((e) => e.id.startsWith("se-m-friendly-"));
+    expect(friendly).toHaveLength(FRIENDLY_ROUNDS);
+    for (const e of friendly) {
+      expect(e.date >= squadReturnOf(state.calendar), `${e.date} 소집 전`).toBe(true);
+      expect(e.date < state.calendar.start, `${e.date} 개막 후`).toBe(true);
+    }
+    // 친선이 끼어도 우리 팀은 이틀 연속 뛰지 않는다 — 개막전 직전까지
+    const dates = fixtures.map((e) => e.date).sort();
+    const gaps = dates.slice(1).map((d, i) => diffDays(dates[i]!, d));
+    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(2);
   });
 });
 

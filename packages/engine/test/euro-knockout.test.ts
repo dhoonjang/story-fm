@@ -28,7 +28,7 @@ import {
   playerById,
   tieAggregate,
 } from "@story-fm/engine";
-import { createTestGame, keepSeat, playMockMatch } from "./helpers";
+import { createTestGame, keepSeat, playMockMatch, playPreseason } from "./helpers";
 
 /**
  * 대항전 녹아웃 — 단계 진행·2차전 합계·승부차기·트로피.
@@ -528,7 +528,9 @@ describe("주중 경기 부담 (로테이션)", () => {
     const state = createTestGame(42);
     const digest: string[] = [];
     const fatigueBefore = new Map(state.players.map((p) => [p.id, p.state.condition]));
-    // 첫 리그 라운드까지 전진 — 우리 경기가 아닌 경기들이 간이 시뮬로 소화된다
+    // 첫 리그 라운드까지 전진 — 우리 경기가 아닌 경기들이 간이 시뮬로 소화된다.
+    // 프리시즌 친선이 먼저 걸리므로 치르고 간다 (경기일엔 시계가 선다)
+    playPreseason(state);
     let guard = 20;
     while (guard-- > 0) {
       const advanced = advanceTime(state, { days: 7 });

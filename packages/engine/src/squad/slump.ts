@@ -1,6 +1,7 @@
 import type { GamePlayer } from "@story-fm/domain";
 import type { GameState } from "../core/state";
 import { playerById, playersOf } from "../core/state";
+import { isFriendly } from "../competition/friendly";
 import { clampForm } from "./form";
 
 /**
@@ -36,12 +37,22 @@ export const SLUMP_ISSUE_LOSSES = 4;
 
 export type MatchOutcome = "win" | "draw" | "loss";
 
-/** 최근 결과 — 새 경기가 앞이다 */
+/**
+ * 최근 결과 — 새 경기가 앞이다.
+ *
+ * **연속 기록은 시즌의 것이다** — 프리시즌 친선은 세지 않는다(season.md §2).
+ * 몸을 만드는 중에 하위 팀에 진 것이 연패로 쌓이면 개막 첫 주에 이미 침체인
+ * 선수단이 되고, 점층 편성이 감독을 벌주는 장치가 된다. 그 경기가 폼에 남기는
+ * 것은 `formDeltaFromMatch`와 대패 페널티가 이미 정산한다.
+ */
 export function recentOutcomes(state: GameState, teamId: string, limit: number): MatchOutcome[] {
   return state.matches
     .filter(
       (m) =>
-        m.result && m.season === state.season && (m.homeTeamId === teamId || m.awayTeamId === teamId),
+        m.result &&
+        m.season === state.season &&
+        !isFriendly(m) &&
+        (m.homeTeamId === teamId || m.awayTeamId === teamId),
     )
     .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
     .slice(0, limit)

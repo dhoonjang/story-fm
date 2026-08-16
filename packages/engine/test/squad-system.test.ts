@@ -20,7 +20,7 @@ import {
   userPlayers,
   userTactics,
 } from "../src";
-import { createTestGame } from "./helpers";
+import { createTestGame, playMockMatch } from "./helpers";
 
 describe("1·2군 스쿼드", () => {
   it("새 게임의 1군은 **등록 규칙을 지킨 채** 짜인다 (25 + U21)", () => {
@@ -91,7 +91,9 @@ describe("1·2군 스쿼드", () => {
 
     // 몇 달을 넘기면 2군에는 월간 성장 로그가 쌓인다
     for (let i = 0; i < 14; i++) {
-      advanceTime(state, { days: 7 });
+      // 프리시즌에도 경기가 있다(친선) — 경기일에 멎으면 달이 넘어가지 않는다
+      if (state.phase === "matchday") playMockMatch(state);
+      else advanceTime(state, { days: 7 });
       state.issues = [];
     }
     const ours = new Set(reservePlayers(state, state.userTeamId).map((p) => p.id));

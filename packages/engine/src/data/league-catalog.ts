@@ -288,8 +288,9 @@ export function marketLeagues(): readonly LeagueCatalogEntry[] {
   return leagueCatalog().filter((l) => l.kind === "market-only");
 }
 
-export function isTopLeague(id: string): boolean {
-  return byId().get(id)?.kind === "playable";
+export function isTopLeague(id: string | null): boolean {
+  // 널은 대회에 속하지 않는 경기(친선)다 — 리그일 리 없다
+  return id !== null && byId().get(id)?.kind === "playable";
 }
 
 /** 국내 컵 채우기용 2부 — 전력 기준선에 감점이 붙는다 (`strengthBase`) */

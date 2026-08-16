@@ -143,8 +143,9 @@ export function MatchClock({ match }: { match: Match }) {
     <span className="match-clock" data-testid="match-clock">
       {/* 좁아지면 대회·라운드가 접힌다 — 그때 급한 건 **몇 분인가**이고, 무슨
           경기인지는 바로 아래 스코어보드가 두 팀 이름으로 이미 말한다 */}
+      {/* 단계가 없는 경기(친선)는 이름만 선다 — 빈 단계가 공백으로 남지 않게 */}
       <span className="abbr">
-        {match.competition} {match.stage} ·{" "}
+        {[match.competition, match.stage].filter(Boolean).join(" ")} ·{" "}
       </span>
       <b>{match.minute}′</b> {match.phase}
     </span>

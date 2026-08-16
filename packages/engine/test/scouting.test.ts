@@ -27,7 +27,7 @@ import {
 } from "@story-fm/engine";
 import { SCOUT_CONCURRENT_LIMIT, SCOUT_DAYS } from "@story-fm/domain";
 import { GAP_CONDITION } from "@story-fm/sim";
-import { advanceAndPlay, createTestGame, settleFully } from "./helpers";
+import { advanceAndPlay, createTestGame, playMockMatch, settleFully } from "./helpers";
 
 /**
  * 정보 비대칭(안개) — 우리 선수는 정확히, 타 팀은 흐릿하게.
@@ -314,14 +314,19 @@ describe("영입 직후 — 안개는 날짜가 아니라 정착으로 걷힌다
 describe("잠재력 — 누구도 단정하지 못한다 (구간으로만 안다)", () => {
   const opponentOf = (state: GameState) => playersOf(state, "chelsea")[0]!;
 
-  /** 보고서가 닫힐 때까지 하루씩 — advanceTime은 부상·불만에 걸려 일찍 멈춘다 */
+  /**
+   * 보고서가 닫힐 때까지 하루씩 — advanceTime은 부상·불만에 걸려 일찍 멈춘다.
+   * 프리시즌에도 경기가 있으므로(친선) 경기일에 걸리면 치르고 간다 — 안 그러면
+   * 시계가 경기일에 멎어 보고서가 영영 안 닫힌다.
+   */
   const awaitReport = (state: GameState, playerId: string) => {
     for (let i = 0; i < SCOUT_DAYS * 3; i++) {
       const pending = state.scoutReports.some(
         (r) => r.gamePlayerId === playerId && r.completedOn === null,
       );
       if (!pending) return;
-      advanceTime(state, { days: 1 });
+      if (state.phase === "matchday") playMockMatch(state);
+      else advanceTime(state, { days: 1 });
     }
     throw new Error("스카우트 보고서가 닫히지 않았다");
   };

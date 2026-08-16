@@ -1238,6 +1238,40 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 /**
+ * 열 수 없는 세이브 — 열리는 카드와 **생김새가 달라야 한다.** 채워진 판 대신
+ * 점선 테두리에 빈 바탕이라 목록을 훑을 때 손이 가지 않고, 본문이 `.game-card-body`가
+ * 아니므로 위의 hover 규칙에도 걸리지 않는다 — 밝아지지 않는 것이 열리지 않는다는 말이다.
+ */
+.game-card-stale {
+  background: none;
+  border-style: dashed;
+}
+.game-card-stale-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+}
+/* 팀 이름 자리에 서는 파일 이름 — 감독이 디스크에서 찾을 단서라 잘리면 안 된다 */
+.game-card-id {
+  font-size: var(--fs-md);
+  font-weight: 700;
+  color: var(--muted);
+  word-break: break-all;
+}
+.game-card-why {
+  font-size: var(--fs-xs);
+  color: var(--dim);
+}
+.game-card-stale-tag {
+  flex-shrink: 0;
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  color: var(--danger);
+}
+/**
  * 삭제 — 평소엔 꺼진 색으로 서 있고, 자기 위에 손이 올라올 때만 붉게 켜진다.
  * 테두리를 켜고 끄던 때는 카드에 손만 스쳐도 없던 상자가 튀어나와, 목록을
  * 훑는 동안 화면이 깜빡였다. 색과 원형 바탕만 바꾼다 — 자리는 움직이지 않는다.

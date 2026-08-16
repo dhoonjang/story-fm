@@ -1748,7 +1748,14 @@ export function createGame(input: CreateGameInput): GameState {
   const windows = buildTransferWindows(season);
   // 다른 리그도 같은 캘린더 골격으로 동시에 진행된다
   const euroEntrants = hasCups(world) ? buildEuroEntrants(season, seed) : [];
-  const matches = buildSeasonFixtures(season, seed, euroEntrants, world);
+  const matches = buildSeasonFixtures(
+    season,
+    seed,
+    euroEntrants,
+    world,
+    undefined,
+    input.userTeamId,
+  );
   // 일정 축(SCHEDULE_ENTRY)은 **감독의 달력**이다 — 유저 리그 전체 + 유저 팀
   // 대항전 경기만 등록한다. 타 리그·타 팀 대항전은 state.matches에만 있고
   // tick이 간이 시뮬로 소화한다.

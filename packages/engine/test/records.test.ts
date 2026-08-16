@@ -10,7 +10,7 @@ import {
   userPlayers,
   weeklyWagesOf,
 } from "@story-fm/engine";
-import { advanceToMatchday, createTestGame, playMockMatch } from "./helpers";
+import { advanceToMatchday, createTestGame, playMockMatch, playPreseason } from "./helpers";
 
 /**
  * v6 기록 테이블 — 계약(주급)·징계(경고/정지)·성장 로그가
@@ -108,6 +108,8 @@ describe("징계 — BOOKING + SUSPENSION", () => {
 
   it("정지 선수는 라인업 배치에서 자동 대체된다", () => {
     const state = createTestGame();
+    // 정지는 대회 경기로만 소화된다 — 친선을 지나 리그 개막에서 잰다
+    playPreseason(state);
     advanceToMatchday(state);
     const starter = assignmentsOf(state, state.userTeamId, "starting")[5]!;
     state.suspensions.push({
@@ -133,6 +135,8 @@ describe("징계 — BOOKING + SUSPENSION", () => {
 describe("경기 성장·기록", () => {
   it("경기를 치르면 출전 기록·포지션 적응도가 로그와 함께 오른다", () => {
     const state = createTestGame(7);
+    // 시즌 기록을 보는 시험이라 리그 개막까지 간다 — 친선은 장부에 남지 않는다
+    playPreseason(state);
     advanceToMatchday(state);
     const before = new Map(
       assignmentsOf(state, state.userTeamId, "starting").map((a) => [a.playerId, a.familiarity]),

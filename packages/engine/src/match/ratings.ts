@@ -1,6 +1,7 @@
 import type { AttributeAxis, PositionGroup } from "@story-fm/domain";
 import { AXIS_KO, applyFamiliarityGain, tacticalUptake } from "@story-fm/domain";
 import { ensureSeasonStat, playerById, type GameState } from "../core/state";
+import { isFriendly } from "../competition/friendly";
 import { MATCH_ATTR_CAP, applyAttributeStep } from "../squad/training-report";
 
 /**
@@ -209,6 +210,8 @@ export function applyMatchRatings(
   if (!match?.result?.ratings) return { applied: 0, skipped: entries.length };
   const ratings = { ...match.result.ratings };
   const notes = { ...(match.result.ratingNotes ?? {}) };
+  // 친선 평점은 경기에만 남는다 — 앵커가 시즌 합계에 안 들어갔으니 보정분도 안 들어간다
+  const friendly = isFriendly(match);
   let applied = 0;
   let skipped = 0;
 
@@ -238,7 +241,7 @@ export function applyMatchRatings(
     const delta = bounded - current;
     ratings[entry.playerId] = bounded;
     if (entry.note) notes[entry.playerId] = entry.note.slice(0, 120);
-    if (delta !== 0) {
+    if (delta !== 0 && !friendly) {
       const stat = ensureSeasonStat(state, entry.playerId, player.teamId);
       stat.ratingSum = Math.max(0, (stat.ratingSum ?? 0) + delta);
     }
