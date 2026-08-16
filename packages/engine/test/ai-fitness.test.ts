@@ -79,42 +79,19 @@ describe("타 팀도 매일 회복한다", () => {
     const now = state.players.find((p) => p.id === worn!.id)!.state.condition;
     expect(now, "이틀이 지나도 회복이 없다").toBeGreaterThan(worn!.after);
   }, 60_000);
-
-  it("시즌을 다 돌려도 상대 스쿼드가 바닥나지 않는다", () => {
-    const state = createTestGame(7);
-    playSeason(state);
-    for (const teamId of ["mancity", "liverpool", "chelsea", "tottenham"]) {
-      // 라인업에 설 14명이 어느 시점에도 쓸 만해야 한다
-      expect(topCondition(state, teamId, 14), teamId).toBeGreaterThan(70);
-    }
-  }, 200_000);
-
-  it("우리 팀과 남의 팀의 체력 수준이 같은 눈금 안에 있다", () => {
-    const state = createTestGame(7);
-    playSeason(state);
-    const us = topCondition(state, state.userTeamId, 14);
-    const rivals = ["mancity", "liverpool", "chelsea", "tottenham", "newcastle"].map((t) =>
-      topCondition(state, t, 14),
-    );
-    const them = rivals.reduce((a, b) => a + b, 0) / rivals.length;
-    // 예전엔 이 차이가 20점을 넘었다 (우리 100 · 상대 77)
-    expect(Math.abs(us - them), `우리 ${us.toFixed(1)} vs 상대 ${them.toFixed(1)}`).toBeLessThan(
-      10,
-    );
-  }, 200_000);
 });
 
 describe("타 팀은 로테이션으로 다리를 안배한다", () => {
   it("지친 선발은 신선한 자원에게 자리를 내준다", () => {
     const state = createTestGame(7);
-    playSeason(state);
-    // 시즌을 돌린 뒤 스쿼드에 지친 선수를 심고, 그 자리가 바뀌는지 본다
+    // 스쿼드에 지친 선수를 심고 그 자리가 바뀌는지 본다 — 로테이션은 그 순간의
+    // 체력만 읽으므로(`simSquadOf`) 시즌을 굴려 피로를 쌓을 필요가 없다
     const xi = simSquadOf(state, "mancity").starters;
     const victim = xi.find((p) => p.attributes.overall < 88) ?? xi[5]!;
     victim.state.condition = 40;
     const after = simSquadOf(state, "mancity").starters.map((p) => p.id);
     expect(after, `${victim.name}이 지쳤는데도 선발`).not.toContain(victim.id);
-  }, 200_000);
+  });
 
   it("다리가 멎으면 대체 자원의 기량과 무관하게 뺀다", () => {
     const state = createTestGame(7);
@@ -132,10 +109,52 @@ describe("타 팀은 로테이션으로 다리를 안배한다", () => {
     const after = simSquadOf(state, "mancity").starters.map((p) => p.id);
     expect(after).toEqual(before);
   });
+});
+
+/**
+ * 밸런스 하네스 — 한 시즌을 다 굴려 **분포**를 잰다.
+ *
+ * 기대값이 고정값이 아니라 밴드다(체력 70 이상 · 우리와 상대의 격차 10 이내 ·
+ * 출전 18명 이상). 회귀를 잡는 것이 아니라 눈금이 사람 사는 범위에 있는지 보는
+ * 것이므로 테스트가 아니라 하네스다. 시드 하나가 몇 분을 쓴다:
+ *
+ *   BALANCE=1 pnpm vitest run packages/engine/test/ai-fitness.test.ts
+ */
+describe.skipIf(!process.env.BALANCE)("한 시즌을 돈 뒤의 체력·출전 분포", () => {
+  // 세 케이스가 한 시즌을 나눠 쓴다 — 게이트가 열렸을 때만 굴린다
+  let played: GameState | null = null;
+  const seasonState = (): GameState => {
+    if (!played) {
+      const state = createTestGame(7);
+      playSeason(state);
+      played = state;
+    }
+    return played;
+  };
+
+  it("시즌을 다 돌려도 상대 스쿼드가 바닥나지 않는다", () => {
+    const state = seasonState();
+    for (const teamId of ["mancity", "liverpool", "chelsea", "tottenham"]) {
+      // 라인업에 설 14명이 어느 시점에도 쓸 만해야 한다
+      expect(topCondition(state, teamId, 14), teamId).toBeGreaterThan(70);
+    }
+  }, 200_000);
+
+  it("우리 팀과 남의 팀의 체력 수준이 같은 눈금 안에 있다", () => {
+    const state = seasonState();
+    const us = topCondition(state, state.userTeamId, 14);
+    const rivals = ["mancity", "liverpool", "chelsea", "tottenham", "newcastle"].map((t) =>
+      topCondition(state, t, 14),
+    );
+    const them = rivals.reduce((a, b) => a + b, 0) / rivals.length;
+    // 예전엔 이 차이가 20점을 넘었다 (우리 100 · 상대 77)
+    expect(Math.abs(us - them), `우리 ${us.toFixed(1)} vs 상대 ${them.toFixed(1)}`).toBeLessThan(
+      10,
+    );
+  }, 200_000);
 
   it("한 시즌 출전이 스쿼드 전체로 퍼진다 — 열한 명이 다 뛰지 않는다", () => {
-    const state = createTestGame(7);
-    playSeason(state);
+    const state = seasonState();
     const apps = playersOf(state, "mancity")
       .map((p) => state.seasonStats.find((s) => s.gamePlayerId === p.id)?.apps ?? 0)
       .filter((n) => n > 0);
