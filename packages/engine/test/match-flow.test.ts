@@ -24,9 +24,41 @@ import {
   userSide,
   type GameState,
 } from "@story-fm/engine";
-import { advanceToMatchday, createTestGame, playMockMatch, playPreseason } from "./helpers";
+import {
+  advanceToMatchday,
+  createMiniGame,
+  createTestGame,
+  playMockMatch,
+  playPreseason,
+} from "./helpers";
 import { tacticsSignature, weightSlotOf } from "@story-fm/domain";
 import { zoneGrid } from "@story-fm/sim";
+
+/**
+ * 킥오프 직전 상태 — 시드마다 **한 번만** 만들고 복제해 나눠 쓴다.
+ *
+ * 경기일까지 미는 값(그 사이 세계의 경기를 다 소화한다)은 0.8초쯤인데 이 파일은
+ * 그 자리를 스무 번 넘게 만든다. 같은 시드·같은 지점이면 결과도 같으므로 원본은
+ * 한 번만 세우고 매번 복제한다 — `helpers.ts`가 세계를 다루는 방식과 같다.
+ */
+const kickoffCache = new Map<string, GameState>();
+let clones = 0;
+
+function atMatchday(seed = 42, opts?: { afterPreseason?: boolean }): GameState {
+  const key = `${seed}:${opts?.afterPreseason ? "league" : "first"}`;
+  let origin = kickoffCache.get(key);
+  if (!origin) {
+    origin = createTestGame(seed);
+    // 리그 개막까지 가려면 프리시즌 친선을 먼저 흘려보내야 한다
+    if (opts?.afterPreseason) playPreseason(origin);
+    advanceToMatchday(origin);
+    kickoffCache.set(key, origin);
+  }
+  const copy = structuredClone(origin);
+  // 세이브는 id로 갈린다 — 복제본이 같은 id를 쓰면 두 게임이 한 파일을 밟는다
+  copy.id = `${copy.id}-c${++clones}`;
+  return copy;
+}
 
 describe("경기 흐름 (overview §4)", () => {
   it("경기일이 아니면 시작할 수 없다", () => {
@@ -35,10 +67,8 @@ describe("경기 흐름 (overview §4)", () => {
   });
 
   it("킥오프 → 세그먼트 진행 → 종료 반영까지 완주한다", () => {
-    const state = createTestGame();
     // 시즌 기록을 보는 시험이라 리그 개막까지 간다 — 친선은 장부에 남지 않는다
-    playPreseason(state);
-    advanceToMatchday(state);
+    const state = atMatchday(42, { afterPreseason: true });
     const digest = playMockMatch(state);
 
     expect(state.phase).toBe("idle");
@@ -73,8 +103,7 @@ describe("경기 흐름 (overview §4)", () => {
   });
 
   it("경기 중 전술 변경은 패킷을 재계산한다", () => {
-    const state = createTestGame();
-    advanceToMatchday(state);
+    const state = atMatchday();
     startMatch(state);
     const before = state.pendingMatch?.packet.home.zones.attack ?? 0;
     setTactics(state, { mentality: 5 });
@@ -88,8 +117,7 @@ describe("경기 흐름 (overview §4)", () => {
   });
 
   it("패킷 라인업이 배치 포지션을 그대로 쓴다 (v6)", () => {
-    const state = createTestGame();
-    advanceToMatchday(state);
+    const state = atMatchday();
     startMatch(state);
     const packet = state.pendingMatch!.packet;
     const side = userSide(state) === "home" ? packet.home : packet.away;
@@ -106,8 +134,7 @@ describe("경기 흐름 (overview §4)", () => {
   });
 
   it("감독의 지시가 기대 득점을 바꾼다 — 결과에 닿는 경로는 패킷 하나뿐이다", () => {
-    const state = createTestGame();
-    advanceToMatchday(state);
+    const state = atMatchday();
     startMatch(state);
     const side = userSide(state);
     const xgOf = () => {
@@ -126,8 +153,7 @@ describe("경기 흐름 (overview §4)", () => {
   });
 
   it("경기 중 피로가 쌓여 후반 전력이 떨어진다", () => {
-    const state = createTestGame();
-    advanceToMatchday(state);
+    const state = atMatchday();
     startMatch(state);
     const side = userSide(state);
     const sum = (rows: ReadonlyArray<{ effective: number }>) =>
@@ -153,8 +179,7 @@ describe("경기 흐름 (overview §4)", () => {
   });
 
   it("경기 중 교체가 장부에 반영되고 경기가 끝까지 진행된다", () => {
-    const state = createTestGame();
-    advanceToMatchday(state);
+    const state = atMatchday();
     startMatch(state);
     const match = state.pendingMatch;
     if (!match) throw new Error("no match");
@@ -184,8 +209,7 @@ describe("경기 흐름 (overview §4)", () => {
   });
 
   it("자연어 지역 전술은 패킷 키포인트와 9칸 판세에 함께 반영된다", () => {
-    const state = createTestGame();
-    advanceToMatchday(state);
+    const state = atMatchday();
     startMatch(state);
     const side = userSide(state);
     const packetSide = () =>
@@ -220,8 +244,7 @@ describe("경기 흐름 (overview §4)", () => {
 
   it("저장/로드를 거쳐도 경기를 이어가고 결과가 남는다", () => {
     process.env.STORY_FM_DATA_DIR = `/tmp/story-fm-test-${Math.random().toString(36).slice(2)}`;
-    const state = createTestGame(99);
-    advanceToMatchday(state);
+    const state = atMatchday(99);
     startMatch(state);
     advanceSegment(state);
     if (!state.pendingMatch) throw new Error("경기 없음");
@@ -260,8 +283,7 @@ describe("경기 흐름 (overview §4)", () => {
 
 describe("회귀: 부상·정지 선수는 경기에 나설 수 없다", () => {
   it("킥오프 시 부상 선발은 자동 대체되고 벤치에서도 빠진다", () => {
-    const state = createTestGame();
-    advanceToMatchday(state);
+    const state = atMatchday();
     const starter = assignmentsOf(state, state.userTeamId, "starting")[3]!;
     state.injuries.push({
       id: "inj-r1",
@@ -285,8 +307,7 @@ describe("회귀: 부상·정지 선수는 경기에 나설 수 없다", () => {
   });
 
   it("부상 선수 교체 투입은 반려된다", () => {
-    const state = createTestGame();
-    advanceToMatchday(state);
+    const state = atMatchday();
     startMatch(state);
     const side = userSide(state);
     const ledger =
@@ -333,12 +354,16 @@ describe("회귀: 부상·정지 선수는 경기에 나설 수 없다", () => {
 
 describe("회귀: 장기 시즌 안정성", () => {
   it("17시즌을 전환해도 GK가 소멸하지 않고 라인업 확정이 가능하다", () => {
-    const state = createTestGame(42);
+    /**
+     * **축소 세계로 넘긴다** — 여기서 보는 것은 열일곱 번의 전환을 지나도 구단마다
+     * 골키퍼 하나가 남느냐다. 그 규칙은 구단 단위라 세계에 클럽이 여덟이든
+     * 백예순이든 같은 코드를 지난다 (전체 세계로는 이 한 케이스가 12초를 썼다).
+     */
+    const state = createMiniGame(42);
     for (let s = 0; s < 17; s++) transitionSeason(state);
+    expect(userPlayers(state).length).toBeGreaterThan(0);
     for (const team of state.teams) {
       if (!isClubTeam(team.id)) continue; // 무소속은 클럽이 아니다
-      const gks = userPlayers(state).length > 0 ? true : false;
-      expect(gks).toBe(true);
       expect(assignmentsOf(state, team.id, "starting")).toHaveLength(11);
       expect(
         assignmentsOf(state, team.id, "starting").filter((a) => a.position === "GK"),
@@ -373,8 +398,7 @@ describe("회귀: 장기 시즌 안정성", () => {
  */
 describe("경기 후 전술 복원", () => {
   it("경기 중 바꾼 전술·개인 지시가 킥오프 전으로 돌아온다", () => {
-    const state = createTestGame(5);
-    advanceToMatchday(state);
+    const state = atMatchday(5);
     startMatch(state);
     const tactics = () => tacticsOf(state, state.userTeamId);
     const before = { ...tactics().spec };
@@ -408,8 +432,7 @@ describe("경기 후 전술 복원", () => {
   });
 
   it("경기 중 전술 변경이 깎은 적응도도 함께 되돌린다", () => {
-    const state = createTestGame(5);
-    advanceToMatchday(state);
+    const state = atMatchday(5);
     startMatch(state);
 
     // 전술을 바꾸면 코어가 적응도를 깎는다 — 새 전술을 훈련해야 한다는 뜻이다.
@@ -432,8 +455,7 @@ describe("경기 후 전술 복원", () => {
   });
 
   it("경기 중 거친 전술은 익힌 전술로 남지 않는다", () => {
-    const state = createTestGame(5);
-    advanceToMatchday(state);
+    const state = atMatchday(5);
     startMatch(state);
     const tactics = () => tacticsOf(state, state.userTeamId);
     const kickoff = tacticsSignature(tactics().spec);
@@ -476,8 +498,7 @@ describe("결산 요약의 갈래 (match.md §6)", () => {
   };
 
   it("우리 경기 결과와 재정·다른 경기가 섞이지 않는다", () => {
-    const state = createTestGame();
-    advanceToMatchday(state);
+    const state = atMatchday();
     const digest = finishMatch(state);
 
     // 스코어·전술 복구처럼 우리 경기 사건은 ours에만 선다 (말풍선이 싣는 갈래)
@@ -495,8 +516,7 @@ describe("결산 요약의 갈래 (match.md §6)", () => {
   });
 
   it("말풍선에 서는 갈래는 항목마다 한 줄에 든다", () => {
-    const state = createTestGame(5);
-    advanceToMatchday(state);
+    const state = atMatchday(5);
     const digest = finishMatch(state);
 
     // 항목 하나가 말풍선 한 줄이다 — 건수와 갈래까지만 적는다
@@ -517,8 +537,7 @@ describe("지시가 판에 닿는 길", () => {
    * 읽는다). 예전엔 그래도 성공으로 답해 GM이 "먹혔다"로 서사를 썼다 — 거짓 성공이다.
    */
   it("kind 없는 개인 지시는 판에 반영되지 않는다고 밝힌다", () => {
-    const state = createTestGame();
-    advanceToMatchday(state);
+    const state = atMatchday();
     startMatch(state);
     const starter = assignmentsOf(state, state.userTeamId, "starting")[0]!;
 
@@ -553,8 +572,7 @@ describe("지시가 판에 닿는 길", () => {
    * 쓴다 — "왼쪽으로 벌려"가 앞뒤까지 바꾸면 감독이 하지 않은 지시가 된다.
    */
   it("이름으로 부르는 이동 — 지정한 축만 움직인다", () => {
-    const state = createTestGame();
-    advanceToMatchday(state);
+    const state = atMatchday();
     startMatch(state);
     // 중앙 미드필더 하나를 골라 왼쪽으로만 벌린다
     const mid = assignmentsOf(state, state.userTeamId, "starting").find((a) =>
@@ -582,8 +600,7 @@ describe("지시가 판에 닿는 길", () => {
    */
   it("전술을 바꾸고 곧바로 진행해도 그 구간이 새 전술로 구른다", () => {
     const play = (refreshFirst: boolean) => {
-      const state = createTestGame(11);
-      advanceToMatchday(state);
+      const state = atMatchday(11);
       startMatch(state);
       const spec = tacticsOf(state, state.userTeamId).spec;
       setTactics(state, { ...spec, defensiveLine: 5, pressing: 5, mentality: 5, tempo: 5 });
@@ -597,8 +614,7 @@ describe("지시가 판에 닿는 길", () => {
 
   /** 자리가 모자라 밀려난 지역 전술은 그 사실을 말한다 */
   it("세 번째 지역 전술은 무엇이 밀렸는지 밝힌다", () => {
-    const state = createTestGame();
-    advanceToMatchday(state);
+    const state = atMatchday();
     startMatch(state);
     const plan = (lane: "left" | "center" | "right", note: string) =>
       setRegionalPlan(state, { band: "attack", lane, intent: "overload", note });
@@ -622,7 +638,6 @@ describe("지시가 판에 닿는 길", () => {
 describe("교체 투입의 역할 (match.md §2)", () => {
   /** 킥오프한 경기에서 [빈 자리를 만들 CB 선발, 벤치 필드 플레이어] */
   function kickoffWithCbSub(state: GameState) {
-    advanceToMatchday(state);
     const started = startMatch(state);
     if (!started.ok) throw new Error(started.message);
     const side = userSide(state);
@@ -645,7 +660,7 @@ describe("교체 투입의 역할 (match.md §2)", () => {
   }
 
   it("역할 기억이 있는 교체 선수는 자리를 잇고 자기 역할로 뛴다", () => {
-    const state = createTestGame();
+    const state = atMatchday();
     const { out, sub, packetSide } = kickoffWithCbSub(state);
     // 이 선수는 그 자리에서 리베로를 맡던 사람이다 (경기 밖에서 적힌 기억)
     state.roleMemory.push({ gamePlayerId: sub, position: out.position, roleId: "libero" });
@@ -660,7 +675,7 @@ describe("교체 투입의 역할 (match.md §2)", () => {
   });
 
   it("기억이 없는 교체 선수는 그 자리에 걸려 있던 역할을 잇는다", () => {
-    const state = createTestGame();
+    const state = atMatchday();
     const { out, sub, packetSide } = kickoffWithCbSub(state);
     expect(state.roleMemory.some((m) => m.gamePlayerId === sub)).toBe(false);
 
@@ -673,7 +688,7 @@ describe("교체 투입의 역할 (match.md §2)", () => {
 
   /** 다른 자리의 기억은 닿지 않는다 — 키는 (선수, 자리)다 (player.md §3.1) */
   it("다른 자리의 역할 기억은 교체 투입에 쓰이지 않는다", () => {
-    const state = createTestGame();
+    const state = atMatchday();
     const { out, sub, packetSide } = kickoffWithCbSub(state);
     state.roleMemory.push({ gamePlayerId: sub, position: "DM", roleId: "anchor" });
 
@@ -687,12 +702,9 @@ describe("교체 투입의 역할 (match.md §2)", () => {
    * 이 변경 전과 같은 값이어야 한다.
    */
   it("역할 기억이 없으면 판이 달라지지 않는다", () => {
-    const withMemory = createTestGame();
-    const plain = createTestGame();
-    for (const state of [withMemory, plain]) {
-      advanceToMatchday(state);
-      startMatch(state);
-    }
+    const withMemory = atMatchday();
+    const plain = atMatchday();
+    for (const state of [withMemory, plain]) startMatch(state);
     // 남의 팀 선수에게 기억을 심어도 교체 전 판은 같다 (선발은 배치가 원본이다)
     const opponentSide = userSide(withMemory) === "home" ? "away" : "home";
     const opponentId = withMemory.pendingMatch!.packet[opponentSide].teamId;
