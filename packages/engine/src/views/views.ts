@@ -27,7 +27,7 @@ import {
 } from "@story-fm/domain";
 import { diffDays, nextMatchFor, seasonEndDate } from "../competition/calendar";
 import { clubProfile } from "../data/club-profile";
-import { teamCatalogById } from "../data/team-catalog";
+import { tierOfTeamIn } from "../core/club-tier";
 import {
   categoryOf,
   currentMonthSummary,
@@ -1949,7 +1949,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
   };
   // 실시간 활동 피드 — 접은 뒤 최근 30줄 (§8.1). 자르고 접으면 접기 전과 같아진다
   const feed = foldFinanceFeed(finance.ledger);
-  const stadium = clubProfile(userTeamId, teamCatalogById(userTeamId)?.tier ?? 3);
+  const stadium = clubProfile(userTeamId, tierOfTeamIn(state, userTeamId));
 
   const recentResults = state.matches
     .filter((m) => m.result && (m.homeTeamId === userTeamId || m.awayTeamId === userTeamId))

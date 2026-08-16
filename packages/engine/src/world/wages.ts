@@ -1,6 +1,8 @@
 import type { GamePlayer } from "@story-fm/domain";
 import { ageOf, naturalPositionOf, weightSlotOf, type WeightSlot } from "@story-fm/domain";
 import { affordableWageBill } from "../club/finance";
+// 타입만 가져온다 — 런타임에는 지워지므로 `core/state` → `world/wages` 순환이 아니다
+import type { GameState } from "../core/state";
 
 /**
  * 주급 모델 — **구단 예산을 스쿼드에 나눈다** (club-finance.md).
@@ -54,8 +56,14 @@ export interface WageSubject {
  * 스태프 급여를 벗긴 **선수 주급의 몫**을 돌려준다. 이 파일의 일은 그것을 스쿼드에
  * 나누는 것이다.
  */
-export function clubWageBudget(teamId: string, leagueId?: string): number {
-  return affordableWageBill(teamId, leagueId) / 52;
+/**
+ * `state`는 세이브 문맥에서만 넘어온다. 이 예산은 체급을 **직접** 보지 않지만
+ * 파생 경로(고정비·스태프 급여 비중)가 체급을 읽으므로, 넘기지 않으면 어드민의
+ * 체급 편집이 진행 중인 세이브의 주급 천장에 샌다 (team.md §2).
+ * 세계 생성 시점(`initialWages`)에는 세이브가 아직 없어 카탈로그가 답한다.
+ */
+export function clubWageBudget(teamId: string, leagueId?: string, state?: GameState): number {
+  return affordableWageBill(teamId, leagueId, state) / 52;
 }
 
 /**
@@ -85,8 +93,9 @@ export function wageRoomOf(
   teamId: string,
   currentWeekly: number,
   headroom: number = WAGE_HEADROOM,
+  state?: GameState,
 ): number {
-  return clubWageBudget(teamId) * headroom - currentWeekly;
+  return clubWageBudget(teamId, undefined, state) * headroom - currentWeekly;
 }
 
 // ── 개인 지분 ───────────────────────────────────────────
@@ -162,6 +171,7 @@ function roundWage(value: number): number {
 export function estimateSquadWages(
   teamId: string,
   squad: readonly WageSubject[],
+  state?: GameState,
 ): Map<string, number> {
   const out = new Map<string, number>();
   if (squad.length === 0) return out;
@@ -173,7 +183,7 @@ export function estimateSquadWages(
   );
   const shares = ordered.map((p, i) => shareOf(p, i, ordered.length));
   const total = shares.reduce((s, x) => s + x, 0) || 1;
-  const budget = clubWageBudget(teamId);
+  const budget = clubWageBudget(teamId, undefined, state);
   ordered.forEach((p, i) => out.set(p.id, roundWage((budget * shares[i]!) / total)));
   return out;
 }
@@ -186,10 +196,12 @@ export function estimateWeeklyWage(
   teamId: string,
   subject: WageSubject,
   squad: readonly WageSubject[],
+  state?: GameState,
 ): number {
   const withSelf = squad.some((p) => p.id === subject.id) ? squad : [...squad, subject];
   return (
-    estimateSquadWages(teamId, withSelf).get(subject.id) ?? roundWage(clubWageBudget(teamId) / 40)
+    estimateSquadWages(teamId, withSelf, state).get(subject.id) ??
+    roundWage(clubWageBudget(teamId, undefined, state) / 40)
   );
 }
 

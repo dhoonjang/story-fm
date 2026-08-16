@@ -39,8 +39,9 @@ import {
 import { marketLeagues, topLeagues } from "../data/league-catalog";
 import { domesticCupEntrants, domesticStageMatches } from "../competition/domestic-cup";
 import { drawParts, drawTitle } from "../competition/draw-schedule";
-import { teamCatalog, teamCatalogById } from "../data/team-catalog";
+import { teamCatalog } from "../data/team-catalog";
 import { leagueOfTeamIn, teamsOfLeagueIn } from "../competition/promotion";
+import { tierOfTeamIn } from "../core/club-tier";
 import { computeStandings } from "../competition/season";
 import {
   attributeLine,
@@ -733,7 +734,7 @@ export function teamProfile(state: GameState, team: string): LookupResult {
         ? `${rank || "?"}위 (${row.played}경기 ${row.wins}승 ${row.draws}무 ${row.losses}패 · 승점 ${row.points} · 득실 ${row.goalDiff >= 0 ? "+" : ""}${row.goalDiff})`
         : "순위 미정 (아직 경기 없음)"),
     `전술: ${tactics.spec.formation} · 멘탈리티${tactics.spec.mentality} 압박${tactics.spec.pressing} 템포${tactics.spec.tempo} 패스${tactics.spec.passStyle}`,
-    `스쿼드: ${squad.length}명 · 평균 ${avgAge.toFixed(1)}세 · 구단 등급 ${teamCatalogById(teamId)?.tier ?? "?"}`,
+    `스쿼드: ${squad.length}명 · 평균 ${avgAge.toFixed(1)}세 · 구단 등급 ${tierOfTeamIn(state, teamId)}`,
     recent.length > 0 ? `최근 5경기: ${recent.join(" / ")}` : "최근 경기 없음",
   ];
   if (teamId !== state.userTeamId) {

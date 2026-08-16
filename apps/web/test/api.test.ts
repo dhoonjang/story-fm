@@ -36,7 +36,12 @@ import {
 } from "../app/api/admin/catalog/league/[leagueId]/route";
 import { GET as cupGet, DELETE as cupReset } from "../app/api/admin/catalog/cup/route";
 import { PATCH as cupPatch } from "../app/api/admin/catalog/cup/[cupId]/route";
-import { boardExpectation, cupCatalogById, FRIENDLY_ROUNDS } from "@story-fm/engine";
+import {
+  boardExpectationOfTier,
+  catalogTierOf,
+  cupCatalogById,
+  FRIENDLY_ROUNDS,
+} from "@story-fm/engine";
 import { FORMATION_LAYOUTS } from "@story-fm/domain";
 import type { GamePayload, GameSlice } from "../lib/store";
 
@@ -90,7 +95,7 @@ describe("API — 온보딩부터 경기까지", () => {
     // 보드 기대는 시즌 평가가 쓰는 문구 그대로 — 화면이 tier로 따로 만들지 않는다
     const teams = data.teams as Array<{ id: string; expectation: string }>;
     expect(teams.find((t) => t.id === "arsenal")?.expectation).toBe(
-      boardExpectation("arsenal").label,
+      boardExpectationOfTier(catalogTierOf("arsenal")).label,
     );
     expect(teams.every((t) => t.expectation.length > 0)).toBe(true);
 

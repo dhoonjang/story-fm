@@ -1,0 +1,1499 @@
+/* ── 스쿼드 — 전술판 · 전술 · 명단 · 선수 상세 ─────────────────────────── */
+
+/* ── 스쿼드 (전술판 · 전술 · 명단) ─────────────────────── */
+/**
+ * 스쿼드 머리 — **아래 두 열과 같은 그리드**를 쓴다.
+ *
+ * 왼쪽 칸엔 판세 요약, 오른쪽 칸엔 명단의 책갈피가 선다. 책갈피를 명단 열 안에
+ * 두면 그 줄 높이만큼 표가 전술판보다 내려가 두 열의 윗변이 어긋난다 — 같은
+ * 그리드를 쓰면 책갈피는 여전히 명단 바로 위에 서면서 표와 전술판이 같은 선에서
+ * 시작한다.
+ */
+.squad-head {
+  display: grid;
+  grid-template-columns: minmax(280px, 400px) minmax(0, 1fr);
+  align-items: end;
+  gap: 14px;
+  /* 아래 여백은 **왼쪽 칸만** 갖는다 — 이 줄에 여백을 주면 책갈피와 표 사이가
+     그만큼 벌어져 탭이 명단 위에 떠 있는 것처럼 보인다 */
+  margin-bottom: 0;
+}
+/**
+ * 요약은 **한 줄**이다 — 세로로 쌓으면 머리글이 84px를 먹고, 그만큼 전술판이
+ * 눌린다(세로 768px 태블릿에선 판이 228px까지 작아졌다). 좁아지면 알아서 접힌다.
+ */
+.squad-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 12px;
+  row-gap: 2px;
+  /* 아래 여백은 이 칸만 갖는다 — 오른쪽 책갈피는 표에 그대로 닿아야 한다 */
+  padding-bottom: 10px;
+  font-size: var(--fs-md);
+}
+.squad-summary .muted {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+/**
+ * 전술판 손잡이 — **눌린 채로 남는 버튼.**
+ *
+ * 지금 판이 펼쳐져 있는지가 모양에 드러나므로 "전술판을 접었습니다" 같은 문구가
+ * 필요 없다. 요약 줄 안에 서지만 읽는 값이 아니라 조작이므로 테두리를 갖는다
+ * (읽는 것과 고르는 것은 생김새가 달라야 한다).
+ */
+.board-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 3px 9px 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition:
+    color var(--ease),
+    border-color var(--ease),
+    background var(--ease);
+}
+.board-toggle svg {
+  width: 15px;
+  height: 15px;
+}
+.board-toggle:hover {
+  color: var(--fg);
+  border-color: var(--border-strong, var(--border));
+}
+.board-toggle.on {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+/**
+ * 판을 접으면 **명단만 남는다** — 머리글도 한 열이 되어 책갈피가 명단 바로 위에
+ * 선다. 두 열짜리 격자를 그대로 두면 왼쪽에 빈 400px이 남고 책갈피가 그 옆에 뜬다.
+ *
+ * 폭을 가리지 않는다 — 좁은 화면에서도 판은 화면의 절반을 먹으므로, 명단만 보려는
+ * 감독에겐 접는 것이 그대로 이득이다. 손잡이가 어느 폭에서나 서 있어야 "여기선 왜
+ * 안 보이지"가 생기지 않는다.
+ *
+ * 붙는 자리는 `.squad-view`만이 아니다 — 경기 중 상대 팀 탭도 같은 골격
+ * (`.squad-layout`)을 쓰므로 같은 규칙으로 접힌다.
+ */
+.folded .squad-board-col {
+  display: none;
+}
+.folded .squad-head,
+.folded .squad-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+.folded .squad-summary {
+  padding-bottom: 8px;
+}
+/**
+ * 스쿼드 화면의 뼈대 — 머리글은 고정, 그 아래가 남는 높이를 다 쓴다.
+ *
+ * 예전엔 페이지 한 장이 통째로 스크롤됐다. 왼쪽 열(전술판 611 + 전술 패널 232)이
+ * 화면보다 커서, 명단을 훑으려고 굴리면 전술판이 위로 사라지고 명단의 자체 스크롤
+ * (`max-height: 72vh`)까지 겹쳐 스크롤이 두 겹으로 움직였다. 이제 화면 밖으로
+ * 넘치는 건 명단 하나뿐이다.
+ */
+/**
+ * 머리 줄과 두 열 사이에는 **간격을 두지 않는다** — 오른쪽 책갈피가 명단 표에
+ * 그대로 닿아야 한 장으로 읽힌다. 왼쪽 요약이 전술판과 떨어지는 몫은
+ * `.squad-summary`의 아래 여백이 따로 갖는다.
+ */
+.squad-view {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* 경고 줄은 위아래로 숨 쉴 자리가 필요하다 */
+.squad-view > .lineup-status {
+  margin-bottom: 10px;
+}
+
+/* 왼쪽 전술판(+전술·상세) · 오른쪽 선수 명단 — 좁아지면 한 열로 접힌다 */
+.squad-layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  /* 왼쪽 열은 전술판이 화면 높이에 눌려 좁아지는 걸 감안해 잡는다 — 460으로 두면
+     낮은 화면에서 판(327)과 열(460) 사이에 빈 폭이 손바닥만큼 남는다 */
+  grid-template-columns: minmax(280px, 400px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+}
+/**
+ * 판과 전술 줄은 **어느 화면에서나 한 덩어리다.**
+ *
+ * 예전엔 채팅 위에 얹힐 때만 붙이고 좁은 화면에서는 풀어 뒀다. 그러면 같은 두
+ * 조각이 화면 폭에 따라 다른 모양으로 선다 — 붙이는 이유는 폭이 아니라 뜻이다.
+ * 전술 줄은 판의 손잡이지 그 옆에 따로 놓인 상자가 아니다.
+ */
+.board-stack {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  /* 모서리를 자식이 넘지 않게 — 판의 초록이 각진 채로 삐져나온다 */
+  overflow: hidden;
+}
+/* 판과 줄은 제 테두리를 내려놓는다 — 덩어리가 이미 두르고 있다 */
+.board-stack .pitch-board {
+  border: none;
+  border-radius: 0;
+}
+.board-stack .tactics-panel,
+.board-stack .mv-tactics {
+  border: none;
+  /* 둘 사이의 선 하나 — 붙어 있되 어디까지가 판인지는 보인다 */
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+}
+.board-stack .mv-tactics.one {
+  margin-top: 0;
+}
+/**
+ * 눈금을 펼치면 **판 위로 미끄러져 올라온다.**
+ *
+ * 흐름에 그대로 두면 여섯 축이 덩어리의 세로를 통째로 더 먹는다. 덩어리의 폭은
+ * 접힌 한 줄을 기준으로 정해져 있으므로 아래가 잘려 나가거나, 폭을 다시 재면
+ * 판이 그만큼 작아진다 — 고치려고 연 눈금 때문에 고칠 대상이 쪼그라드는 꼴이다.
+ *
+ * **줄은 자리에 두고 눈금만 띄운다**(`bottom: 100%` — 줄의 바로 위, 곧 판의 아래).
+ * 덩어리의 높이가 판 + 줄 그대로라 여닫아도 판이 미동하지 않는다.
+ */
+.board-stack .tactics-panel {
+  position: relative;
+}
+.board-stack .tactics-panel.open .tactics-head {
+  margin-bottom: 0;
+}
+.board-stack .tactics-panel.open .tactics-grid {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  left: 0;
+  z-index: 2;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 12px 14px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  animation: tac-grid-up 170ms var(--ease-panel);
+}
+/* 아래에서 밀려 올라온다 — 손잡이(줄)에서 나온 것이 눈에 이어진다 */
+@keyframes tac-grid-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .board-stack .tactics-panel.open .tactics-grid {
+    animation: none;
+  }
+}
+.squad-board-col,
+.squad-side-col {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+/* 책갈피와 명단은 **붙어 있어야 한 장**이다 — 사이가 벌어지면 탭이 따로 논다 */
+.squad-side-col {
+  gap: 0;
+}
+/**
+ * 전술판이 앉을 자리 — 이 칸의 크기가 곧 전술판의 상한이다.
+ *
+ * `container-type: size`라 안쪽에서 `cqh`/`cqw`로 남는 높이와 폭을 둘 다 읽을 수
+ * 있다. 높이만 맞추면 폭이 열을 넘고, 폭만 맞추면 세로로 넘친다 — 둘 중 작은 쪽을
+ * 골라야 3:4 비율이 살아남는다.
+ */
+.pitch-wrap {
+  flex: 1;
+  min-height: 0;
+  container-type: size;
+}
+
+/* 전술 패널 */
+.tactics-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 12px 14px;
+}
+/**
+ * 머리 줄이 곧 손잡이다 — **누르면 눈금이 열린다.**
+ *
+ * 접힌 채로도 여섯 축의 지금 값을 다 적으므로 "보려고" 펼칠 일이 없다.
+ * 눈금 서른 칸은 고칠 때만 쓰는 것이라, 접혀 있는 동안 그 높이는 전술판이 갖는다.
+ */
+/**
+ * 세 칸짜리 격자다 — **이름 · 값들 · 꺾쇠.**
+ *
+ * 흐름(flex)으로 두면 값이 길어져 두 줄이 되는 순간 꺾쇠가 마지막 줄 끝으로
+ * 끌려 내려가고, 접었다 펴는 사이 손잡이가 아래위로 움직인다. 칸을 고정하면
+ * 값이 몇 줄이 되든 꺾쇠는 오른쪽 위 제자리에 있다.
+ */
+.tactics-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+/* 꺾쇠는 줄 끝에 — 펼쳐지면 위를 본다 */
+.tactics-head > svg {
+  grid-column: 3;
+  color: var(--muted);
+  transition:
+    transform var(--ease),
+    color var(--ease);
+}
+.tactics-panel.open .tactics-head {
+  margin-bottom: 8px;
+}
+.tactics-panel.open .tactics-head > svg {
+  transform: rotate(180deg);
+}
+.tactics-head:hover > svg {
+  color: var(--text);
+}
+/**
+ * 접혔을 때의 여섯 축 — **읽는 값이라 테두리를 갖지 않는다.**
+ * 눈금 버튼과 같은 모양이면 눌러도 되는 것처럼 보인다.
+ */
+.tactics-brief {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 5px;
+  min-width: 0;
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+/* 축 이름은 값을 이고 있는 꼬리표다 — 값보다 흐리고 작아야 값이 먼저 읽힌다 */
+.tactics-brief i {
+  margin-right: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+}
+.tactics-brief > span + span::before {
+  content: "·";
+  margin-right: 5px;
+  color: var(--muted);
+  opacity: 0.5;
+}
+.tactics-head .muted {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.tactics-head .drop {
+  color: var(--gold);
+}
+.tactics-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.tactic-row {
+  display: grid;
+  grid-template-columns: 66px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-sm);
+}
+.tactic-label {
+  color: var(--muted);
+}
+.tactic-steps {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+.tactic-step {
+  min-width: 24px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--muted);
+  border-radius: var(--r-sm);
+  padding: 2px 0;
+  font-size: var(--fs-xs);
+}
+.tactic-step.wide {
+  min-width: auto;
+  padding: 2px 8px;
+}
+.tactic-step.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 700;
+}
+.tactic-value {
+  color: var(--text);
+  font-size: var(--fs-xs);
+  margin-left: 4px;
+}
+.tactic-value.read {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 0;
+  font-size: var(--fs-sm);
+}
+.tactic-meter {
+  flex-shrink: 0;
+  width: 68px;
+  height: 5px;
+  border-radius: var(--r-xs);
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.tactic-meter span {
+  display: block;
+  height: 100%;
+  background: var(--accent-2);
+}
+
+/* 명단 행의 유일한 라인업 변경 수단 — 고른 자리로 보내는 화살표 */
+/* 화살표 자리 — 늘 같은 폭. 비어 있어도 칸을 지킨다 */
+/** 교체 화살표 자리 — 상세 카드의 왼쪽 여백도 이 값에서 나온다 */
+:root {
+  --roster-swap: 24px;
+}
+.swap-slot {
+  display: inline-flex;
+  justify-content: center;
+  width: var(--roster-swap);
+  margin-right: 4px;
+}
+/**
+ * 교체 화살표 — **중립색**이다. 칸 색(초록·파랑·회색)과 같은 색을 쓰면 "이 행이
+ * 벤치다"와 "여기로 바꿀 수 있다"가 같은 파랑으로 겹쳐 읽힌다. 상태는 색이,
+ * 조작은 모양(화살표)이 말하게 둔다.
+ */
+.swap-btn {
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: var(--r-sm);
+  padding: 0 6px;
+  font-size: var(--fs-md);
+  line-height: 17px;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+  font-weight: 700;
+}
+.swap-btn:hover {
+  border-color: var(--text);
+  background: rgba(255, 255, 255, 0.18);
+}
+.swap-btn:disabled {
+  opacity: 0.4;
+  border-color: var(--border);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+/* 지금 심경 한 줄 — 숫자 위에 얹는 설명이라 눈에 먼저 들어와야 한다 */
+.pd-mood {
+  margin: 0 0 6px;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+/* 상태 요약 — 박스 대신 한 줄 띠. 항목 사이는 얇은 선으로만 가른다 */
+/* 상세 요약 줄 끝의 조작 — 읽는 값들과 섞이지 않게 오른쪽 끝으로 민다 */
+.pd-action {
+  margin-left: auto;
+  /* 요약 줄은 baseline 정렬이라 버튼만 글자 밑선에 매달린다 — 가운데로 세운다 */
+  align-self: center;
+}
+.pd-action .ghost-btn {
+  font-size: var(--fs-xs);
+  padding: 3px var(--sp-2);
+}
+.pd-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 14px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--pd-rule);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.pd-summary > span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.pd-summary b {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+.pd-summary i {
+  font-style: normal;
+  color: var(--muted);
+}
+/* 능력치 15축 — 묶음별로 줄을 나누고, 값은 세로로 줄 맞춰 훑게 한다 */
+/* 능력치와 포지션을 한 줄에 — 축 격자가 남긴 오른쪽 여백을 포지션이 채운다 */
+/* 포지션·역할이 위, 능력치 15축이 아래 — 가로 두 열이던 때는 오른쪽 열이
+   좁아 역할 칩이 한 줄에 하나씩 쌓였다 */
+.pd-body {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 7px;
+}
+.pd-axis-groups {
+  display: flex;
+  flex-direction: column;
+}
+.pd-axis-group {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 1px 0;
+}
+/* 가로선 — 세로 구분선과 만나 묶음이 표처럼 읽힌다.
+   --border는 이 패널 위에선 거의 안 보여서 격자선만 한 단계 밝게 쓴다 */
+.pd-axis-group + .pd-axis-group {
+  border-top: 1px solid var(--pd-rule);
+}
+/* 묶음 이름은 **분류**지 축이 아니다 — 작고 굵게, 오른쪽 정렬해 축 라벨과 갈라놓는다 */
+.pd-axis-group-name {
+  flex: 0 0 32px;
+  text-align: right;
+  color: var(--muted);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+  line-height: 1.9;
+}
+/* 세로선 하나로 "분류 | 축들" 두 열을 만든다 (묶음 사이 간격 0이라 선이 이어진다) */
+.pd-axes {
+  border-left: 1px solid var(--pd-rule);
+  padding-left: 11px;
+}
+.pd-axes {
+  flex: 1;
+  display: grid;
+  /* 열 폭을 묶어야 값이 제 라벨 옆에 남는다 — 1fr로 늘리면 옆 축 라벨에 붙어 읽힌다 */
+  grid-template-columns: repeat(5, minmax(0, 98px));
+  justify-content: start;
+  gap: 1px 16px;
+}
+/* 라벨 왼쪽·값 오른쪽 — 열이 맞아 묶음이 달라도 같은 자리에서 읽힌다 */
+.pd-axis {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}
+.pd-axis-label {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pd-axis b {
+  color: var(--text);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+/* 소화 포지션 — 능력치 묶음과 같은 들여쓰기로 이어 붙인다 */
+.pd-positions {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.pd-positions .pd-axis-group-name {
+  flex: 0 0 auto;
+  text-align: left;
+  line-height: 1.7;
+}
+/* 이제 폭을 다 쓰므로 격자가 아니라 그냥 흐른다 — 칩 폭이 제각각이라 격자로
+   두면 짧은 칩(RB) 옆에 빈자리가 남는다 */
+.pd-pos-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+/* 포지션은 **읽는 것**이라 알약이 아니다 — 테두리를 벗겨 글자로 눕힌다.
+   역할(버튼)과 똑같이 생겼을 때는 눌러도 아무 일이 없어 고장처럼 보였다.
+   세 상태는 색과 굵기로 가른다: 지금 맡은 자리 · 선호 · 소화 가능 */
+.pd-pos {
+  display: inline-flex;
+  /* 게이지가 들어오면서 baseline이 맞지 않는다 — 원은 글자와 밑선을 공유하지 않는다 */
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 1px 3px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+/**
+ * **글자색은 자리의 등급, 밑줄은 지금 여기** — 두 축을 섞지 않는다.
+ *
+ *   선호            : 금색 (`--gold-soft`)
+ *   소화 가능       : 은색 (`--silver`)
+ *   익숙하지 않은 자리 : 꺼진 회색 (`--dim`) — 목록에 없는데 세워 둔 자리
+ *   지금 자리       : **파란 밑줄만** (색은 위 등급 그대로 둔다)
+ *
+ * 지금 자리라고 글자를 파랗게 바꾸면 그 자리가 선호인지 무리한 배치인지가
+ * 화면에서 사라진다 — 밑줄은 "여기"만 말하고 등급은 색이 말한다.
+ *
+ * ⚠️ 이 규칙들은 **여기 한 곳에만** 둔다. 예전엔 아래쪽에 같은 선택자가 한 벌 더
+ * 있어 위에서 무엇을 고쳐도 조용히 덮였다 — 화면은 그대로인데 코드만 바뀌었다.
+ */
+.pd-pos {
+  color: var(--silver);
+}
+.pd-pos.natural {
+  color: var(--gold-soft);
+  font-weight: 700;
+}
+.pd-pos.foreign {
+  color: var(--dim);
+  font-weight: 500;
+}
+/**
+ * 지금 서 있는 자리 — **밑줄**이다. 상자(테두리+배경)를 줬더니 옆의 역할 알약과
+ * 똑같이 "누를 수 있는 것"으로 보였다. 이 줄에서 테두리를 가진 건 역할뿐이어야
+ * 모양만으로 조작 대상이 갈린다. 밑줄은 탭처럼 "여기"를 가리키되 버튼이 아니다.
+ */
+.pd-pos.here {
+  padding: 1px 3px 3px;
+  font-weight: 800;
+  box-shadow: inset 0 -2px 0 var(--accent-2);
+}
+.pd-pos .fit-gauge {
+  width: 12px;
+  height: 12px;
+}
+/* 포지션 + 역할 — 능력치 격자 옆의 한 열. 둘은 세로로 쌓인다 */
+/* 포지션 줄과 역할 줄 — 한 덩어리로 묶여 능력치 표 위에 눕는다 */
+.pd-side {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--pd-rule);
+}
+/* 세부 역할 — 포지션 줄과 같은 결로, 고른 것만 강조한다 */
+.pd-roles {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.pd-roles .pd-axis-group-name {
+  flex: 0 0 auto;
+  text-align: left;
+  line-height: 1.7;
+}
+.pd-role-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+/* 역할만 **누르는 물건**이다 — 알약 + 손가락 커서 + 눌리는 반응.
+   포지션이 글자가 되면서 이 줄에서 테두리를 가진 건 이것뿐이라 뭐가 조작
+   대상인지가 모양만으로 갈린다 */
+.pd-role {
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    border-color 0.12s,
+    background 0.12s,
+    color 0.12s;
+}
+.pd-role:hover:not(:disabled) {
+  border-color: var(--accent-2);
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text);
+}
+.pd-role:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.pd-role:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.pd-role:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.pd-role.on {
+  border-color: var(--accent);
+  background: rgba(52, 211, 153, 0.18);
+  color: var(--text);
+  font-weight: 700;
+}
+/**
+ * 명단 칸이 좁으면 상세를 접는다.
+ *
+ * `.pd-positions`는 `flex: 1`이라 자리가 없으면 15px까지 눌리는데, 안의 포지션 칩은
+ * 51px 밑으로 안 줄어 **그대로 삐져나온다**(1024×768에서 74px). 폭이 모자라면 눌러
+ * 담을 게 아니라 아래로 내려야 한다.
+ */
+/* 축 격자(5열 566px) + 묶음 이름·구분선 44px + 여백 뒤에 포지션이 설 자리가
+   남지 않으면 아래로 내린다 (610 + 14 + 칩 한 줄 100 ≈ 740) */
+@container (max-width: 740px) {
+  .pd-body {
+    flex-direction: column;
+    gap: 9px;
+  }
+  .pd-positions {
+    padding: 8px 0 0;
+    border-left: none;
+    border-top: 1px solid var(--pd-rule);
+  }
+}
+/* 축 열 수는 **들어가는 만큼** — 한 열 98px + 간격 16px 로 계산한 문턱이다 */
+@container (max-width: 619px) {
+  .pd-axes {
+    grid-template-columns: repeat(4, minmax(0, 98px));
+  }
+}
+@container (max-width: 499px) {
+  .pd-axes {
+    grid-template-columns: repeat(3, minmax(0, 98px));
+  }
+}
+
+/* 명단에서 펼쳐지는 상세 — **선택한 행의 연장**이지 그 위에 뜬 카드가 아니다.
+   배경·구분선·글자 크기를 표와 맞추고, 왼쪽 강조 띠 하나로 주인을 표시한다 */
+/* 상세는 행 아래로 **파인 면**이다 — 색으로 튀지 않고 한 단계 가라앉아
+   "펼쳐진 속"처럼 읽힌다. 강조 띠 같은 장식은 두지 않는다 */
+.squad-table tr.detail-row td,
+.squad-table tr.detail-row:hover td {
+  padding: 0;
+  background: rgba(0, 0, 0, 0.24);
+}
+.squad-table tr.detail-row .player-detail {
+  --pd-rule: rgba(255, 255, 255, 0.09);
+  /**
+   * 왼쪽 여백은 **명단의 이름과 같은 x**에서 시작한다. 칸 여백과 선은 상세 행도
+   * 똑같이 갖고 있으므로, 이름 앞에 더 있는 것(교체 화살표 자리 + 간격)만 얹으면
+   * 정확히 맞는다. 상세는 그 행의 연장이라 글자가 어긋나면 딴 블록처럼 보인다.
+   */
+  padding: 9px 14px 12px calc(var(--roster-swap) + 4px);
+  font-size: var(--fs-sm);
+  white-space: normal;
+}
+.pd-foot {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+/**
+ * 적응도 게이지 — **채워진 원**. 숫자로 두면 OVR·나이·평점 같은 두 자리 수와
+ * 뒤섞여 세로 비교가 안 됐다. 정확한 값은 툴팁이 갖는다 (office.tsx `FitGauge`).
+ *
+ * `currentColor`로 그려 3단계 색(good/ok/bad)이 트랙·채움에 함께 먹는다.
+ * 12시에서 시계 방향으로 차야 하므로 원을 −90° 돌린다 —
+ * `stroke-dasharray`는 3시에서 시작한다.
+ */
+.fit-gauge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: -3px;
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+}
+.fit-gauge svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.fit-gauge circle {
+  fill: none;
+  stroke-width: 3.2;
+  transform: rotate(-90deg);
+  transform-origin: center;
+}
+.fit-gauge .fg-track {
+  /* 빈 부분이 보여야 "얼마나 찼는가"가 읽힌다 — 너무 옅으면 전부 꽉 찬 원으로 보인다 */
+  stroke: currentColor;
+  opacity: 0.26;
+}
+.fit-gauge .fg-fill {
+  stroke: currentColor;
+  stroke-linecap: round;
+}
+/**
+ * 10 단위 색 계단 — 붉음(못 소화) → 주황 → 노랑 → 연두 → 초록(숙달).
+ *
+ * 색상환을 그냥 도는 대신 **채도와 밝기를 함께** 움직인다. 낮은 쪽은 진하고 탁하게
+ * (눈에 걸린다), 높은 쪽은 밝고 선명하게. 그래야 "괜찮음"과 "아주 좋음"이 갈린다.
+ */
+.fit-gauge.f0,
+.fit-gauge.f1,
+.fit-gauge.f2 {
+  color: hsl(0 72% 58%);
+}
+.fit-gauge.f3 {
+  color: hsl(14 74% 58%);
+}
+.fit-gauge.f4 {
+  color: hsl(28 78% 56%);
+}
+.fit-gauge.f5 {
+  color: hsl(40 82% 55%);
+}
+.fit-gauge.f6 {
+  color: hsl(52 80% 52%);
+}
+.fit-gauge.f7 {
+  color: hsl(74 62% 48%);
+}
+.fit-gauge.f8 {
+  color: hsl(104 56% 46%);
+}
+.fit-gauge.f9 {
+  color: hsl(142 62% 45%);
+}
+
+/* 폼 화살표 — **도형 하나를 각도로 돌린다** (각도는 engine/form.ts).
+   유니코드 화살표는 단계로 끊기고 ⇑⇓만 폴백 폰트로 빠져 굵기가 어긋났다.
+   절정(+1)에서만 12시, 평소는 3시, 바닥은 6시를 본다 */
+.form-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  vertical-align: middle;
+}
+.form-arrow svg {
+  width: 18px;
+  height: 18px;
+  overflow: visible;
+  /* 폼이 조금 변해도 각도가 따라 도는 게 눈에 보인다 */
+  transition: transform 0.25s ease;
+}
+.form-arrow path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/**
+ * 색은 폼을 **연속으로** 따라간다 — `--f`(=|폼| 0~1)만큼 뜨거운 쪽으로 섞는다.
+ *
+ * 단계(up·flat·down)로 칠하던 때는 +0.19와 +0.21이 회색과 초록으로 갈렸다.
+ * 각도는 연속인데 색만 계단이면 같은 값을 두 방식으로 말하는 셈이다.
+ * `color-mix`로 섞으므로 **팔레트 토큰이 그대로 원본**이고, oklab이라 중간색이
+ * 탁해지지 않는다(sRGB로 섞으면 초록↔회색 중간이 흙빛으로 죽는다).
+ */
+.form-arrow {
+  --hot: var(--muted);
+  color: color-mix(in oklab, var(--muted), var(--hot) calc(var(--f, 0) * 100%));
+}
+.form-arrow.pos {
+  --hot: var(--accent);
+}
+.form-arrow.neg {
+  --hot: var(--danger);
+}
+
+/* 최근 경기 평점 추이 — 폼의 시간 축. 왼쪽이 오래된 경기, 오른쪽이 최근 */
+.rating-trend {
+  display: inline-flex;
+  gap: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.rt-dot {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  padding: 0 3px;
+  border-radius: var(--r-xs);
+  background: var(--panel-2);
+}
+.rt-dot.hot {
+  color: var(--accent);
+}
+.rt-dot.good {
+  color: var(--text);
+}
+.rt-dot.flat {
+  color: var(--muted);
+}
+.rt-dot.cold {
+  color: var(--danger);
+}
+.rt-empty {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.ghost-btn {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--r-sm);
+  padding: 6px 12px;
+  font-size: var(--fs-md);
+}
+.ghost-btn:hover {
+  border-color: var(--accent-2);
+}
+.ghost-btn:disabled {
+  opacity: 0.4;
+}
+.lineup-status {
+  font-size: var(--fs-md);
+  padding: 8px 12px;
+  border-radius: var(--r-sm);
+  margin-bottom: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+}
+.lineup-status.ok {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.lineup-status.warn {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+/* 전술판 */
+.board-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.board-toolbar label {
+  font-size: var(--fs-md);
+  color: var(--muted);
+}
+.board-toolbar select {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--r-sm);
+  padding: 6px 8px;
+  font-size: var(--fs-md);
+  margin-left: 4px;
+}
+.board-actions {
+  display: flex;
+  gap: 8px;
+}
+.pitch-board {
+  position: relative;
+  /* 칩 크기를 보드 폭(cqw)에 비례시키기 위한 컨테이너 기준 */
+  container-type: inline-size;
+  /* 남는 높이(100cqh)와 열 폭이 허락하는 높이(4/3 × 100cqw) 중 작은 쪽.
+     746px는 예전 상한 560px를 높이로 옮긴 값이다 (560 ÷ 0.75) */
+  height: min(100cqh, 133.333cqw, 746px);
+  width: auto;
+  aspect-ratio: 3 / 4;
+  margin: 0 auto;
+  border-radius: var(--r-md);
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 0.02) 0 12.5%,
+      rgba(0, 0, 0, 0.05) 12.5% 25%
+    ),
+    linear-gradient(to bottom, #14532d, #166534);
+  border: 1px solid #14532d;
+  overflow: hidden;
+}
+.pitch-lines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.pitch-lines::before {
+  /* 센터 서클 + 하프라인 */
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 26%;
+  aspect-ratio: 1;
+  border: 1.5px solid rgba(255, 255, 255, 0.25);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 200vmax transparent;
+}
+.pitch-lines::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 1.5px solid rgba(255, 255, 255, 0.25);
+}
+/* 페널티 박스 — 위(상대 골문)·아래(우리 골문) */
+.pitch-box {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 58%;
+  height: 16%;
+  border: 1.5px solid rgba(255, 255, 255, 0.22);
+  pointer-events: none;
+}
+.pitch-box.top {
+  top: 0;
+  border-top: none;
+}
+.pitch-box.bottom {
+  bottom: 0;
+  border-bottom: none;
+}
+.pitch-box.small {
+  width: 26%;
+  height: 6.5%;
+}
+/**
+ * ── 전술 선 — **값이 곧 자리다** ──────────────────────────
+ *
+ * 판의 흰 선(하프라인·박스)보다 옅게 긋는다. 이건 경기장의 일부가 아니라 지금 이
+ * 팀이 서기로 한 방식이라, 같은 굵기로 그으면 어느 것이 규칙이고 어느 것이 선택인지
+ * 흐려진다. 눈금을 만지면 선이 미끄러져 따라간다.
+ */
+.pitch-tactics {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.tac-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  transition: top 200ms var(--ease-panel);
+}
+/* 수비 라인 — 우리 최종선. 실선이라 "여기까지가 우리 블록"이 분명하다 */
+.tac-line.def {
+  border-top: 1.5px solid rgba(255, 255, 255, 0.42);
+}
+/* 압박 시작선 — 여기부터 쫓는다. 실선이 아닌 이유는 자리가 아니라 **약속**이라서다 */
+.tac-line.press {
+  border-top: 1.5px dashed rgba(255, 255, 255, 0.28);
+}
+/* 우리가 지키는 구역 — 수비 라인 아래. 선 하나보다 블록의 깊이가 먼저 읽힌다 */
+.tac-block {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.05);
+  transition: top 200ms var(--ease-panel);
+}
+/* 공격 폭 — 좌우로 얼마나 벌리나 */
+.tac-width {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1.5px dashed rgba(255, 255, 255, 0.15);
+  border-right: 1.5px dashed rgba(255, 255, 255, 0.15);
+  transition:
+    left 200ms var(--ease-panel),
+    right 200ms var(--ease-panel);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tac-line,
+  .tac-block,
+  .tac-width {
+    transition: none;
+  }
+}
+/* 라인 이름 — 편집 중에만 옅게 (수비·미드·공격 구역 감각) */
+.pitch-zone {
+  position: absolute;
+  left: 8px;
+  color: rgba(255, 255, 255, 0.18);
+  font-size: var(--fs-2xs);
+  font-weight: 800;
+  letter-spacing: 2px;
+  pointer-events: none;
+}
+.pitch-slot {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+}
+/**
+ * 보드 위 칩은 **보드 폭에 비례**해 크기가 정해진다 (cqw = pitch-board 폭의 1%).
+ * domain의 CHIP_SIZE(겹침 판정 기준, 14%×8%)보다 작게 유지해야 화면에서
+ * 카드가 겹치지 않는다 — 둘 중 하나만 바꾸면 판정과 그림이 어긋난다.
+ */
+.pitch-slot.pitch-chip {
+  width: 13cqw;
+  min-width: 0;
+  max-width: none;
+  /* 좌우 여백은 **글자에 준다** — 칩 폭은 겹침 판정에 묶여 늘릴 수 없으니, 안에서
+     빼앗을 수 있는 것은 패딩뿐이다. 다섯 자짜리 성(페르난데스)이 이 4px로 산다 */
+  padding: 0.8cqw 0.45cqw;
+  border-radius: 1.7cqw;
+  gap: 0;
+  /* 포인터 드래그가 스크롤·확대로 가로채이지 않게 */
+  touch-action: none;
+}
+.pitch-board.editing .pitch-slot.pitch-chip {
+  cursor: grab;
+}
+/* 끌고 있는 칩 — 손가락을 지연 없이 따라오게 transition을 끊는다 */
+.pitch-chip.dragging {
+  z-index: 5;
+  cursor: grabbing;
+  transition: none;
+  border-color: var(--accent);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  transform: translate(-50%, -50%) scale(1.08);
+}
+/**
+ * 자리 줄 — 번호 · 자리 · (역할). 자간을 벌리지 않는다: 0.5px씩 세 곳이면 역할
+ * 약칭이 칩 밖으로 밀린다.
+ *
+ * **좁아지면 접는다.** 판이 채팅 옆에 설 때 칩은 52px까지 줄어드는데, 그 폭에
+ * 세 조각을 한 줄로 넣을 방법은 없다(글자를 6px로 만드는 것은 방법이 아니다).
+ * 역할 약칭이 아래로 내려가고 칩이 한 줄만큼 높아진다 — 넘쳐서 이름 위로
+ * 겹치던 것보다 낫다.
+ */
+.pitch-slot .slot-pos {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  font-size: clamp(7px, 2.05cqw, 9.5px);
+  gap: 0 2px;
+  max-width: 100%;
+  letter-spacing: 0;
+}
+.pitch-slot .slot-name {
+  font-size: clamp(8px, 2.3cqw, 11px);
+  max-width: 100%;
+}
+/* 자리 줄의 등번호 — 자리(금색)와 **다른 층**이라 색을 나눠 갖지 않는다.
+   여기서는 여백을 스스로 만들지 않는다 (`.slot-pos`의 gap이 그 몫이다) */
+.pitch-slot .slot-pos .shirt-no {
+  min-width: 0;
+  margin-right: 0;
+  color: var(--silver);
+  font-size: 0.95em;
+}
+/* 역할 약칭 — 판 위에서는 번호·자리와 한 줄을 나눠 쓰므로 표보다 작다 */
+.pitch-slot .slot-role {
+  font-size: clamp(6px, 1.7cqw, 8.5px);
+  padding: 0 2px;
+}
+/* 주장 표식 — 이름 앞의 한 글자. 이름과 같은 크기로 두면 성 한 자를 먹는다.
+   작아진 만큼 색은 원색으로 — 옅은 금색은 이 크기에서 그냥 회색 점이 된다 */
+.slot-cap {
+  font-size: 0.82em;
+  font-weight: 400;
+  color: var(--gold);
+}
+.shirt-no {
+  display: inline-block;
+  min-width: 1.35em;
+  margin-right: 0.3em;
+  color: var(--muted);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.pitch-slot .slot-meta {
+  font-size: clamp(7px, 2cqw, 10.5px);
+  gap: 3px;
+}
+/* 전술판은 판 크기를 따라 줄어드는 컨테이너라 게이지도 함께 줄인다 */
+.pitch-slot .fit-gauge {
+  /* 이전의 두 자리 숫자와 **같은 폭**으로 — 칩이 넓어지면 전술판 배치가 통째로
+     흔들린다 (자유 배치 e2e가 그걸 잡았다) */
+  width: clamp(7px, 2.1cqw, 10.5px);
+  height: clamp(7px, 2.1cqw, 10.5px);
+}
+.pitch-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-width: 64px;
+  max-width: 86px;
+  padding: 5px 7px;
+  border-radius: var(--r-md);
+  background: rgba(14, 17, 22, 0.88);
+  border: 1.5px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s,
+    transform 0.1s;
+}
+/**
+ * **자리의 색** — 배경 톤만 바꾼다. 뒤따르는 상태 규칙이 테두리를 가져가므로
+ * 순서가 곧 우선순위다(여기서 border-color를 건드리면 선택·부상 표시를 덮는다).
+ * 톤이 옅은 건 칩 안의 글자가 먼저 읽혀야 하기 때문이다 — 색은 라인을 훑을 때
+ * 배경에서 알아채는 층이다.
+ */
+.pitch-chip.g-fw {
+  background:
+    linear-gradient(rgba(var(--pos-fw), 0.26), rgba(var(--pos-fw), 0.26)), var(--chip-base);
+  border-color: rgba(var(--pos-fw), 0.55);
+}
+/**
+ * ⚠️ 중원만 톤이 다르다 — **잔디가 초록이라서**다. 다른 색과 같은 농도로 깔면
+ * 미드필더 칩이 판에 묻혀 라인이 사라진다(실제로 그랬다). 더 밝고 진하게 얹어
+ * "잔디보다 밝은 초록"으로 갈라 세운다.
+ */
+.pitch-chip.g-mf {
+  background:
+    linear-gradient(rgba(var(--pos-mf), 0.42), rgba(var(--pos-mf), 0.42)), var(--chip-base);
+  border-color: rgba(var(--pos-mf), 0.72);
+}
+.pitch-chip.g-df {
+  background:
+    linear-gradient(rgba(var(--pos-df), 0.26), rgba(var(--pos-df), 0.26)), var(--chip-base);
+  border-color: rgba(var(--pos-df), 0.55);
+}
+.pitch-chip.g-gk {
+  background:
+    linear-gradient(rgba(var(--pos-gk), 0.24), rgba(var(--pos-gk), 0.24)), var(--chip-base);
+  border-color: rgba(var(--pos-gk), 0.55);
+}
+
+.pitch-chip:hover {
+  border-color: var(--accent-2);
+}
+.pitch-chip.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.25);
+  transform: translate(-50%, -50%) scale(1.06);
+}
+.pitch-chip.unavailable {
+  border-color: var(--danger);
+  opacity: 0.75;
+}
+.slot-pos {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--fs-2xs);
+  font-weight: 800;
+  color: var(--gold);
+  letter-spacing: 0.5px;
+}
+/**
+ * 맡은 역할 — 기본 역할이 아닐 때만 붙는 FM 약칭. 자리 코드와 같은 줄에 두되
+ * 금색을 나눠 갖지 않는다: 자리는 좌표가 정하고 역할은 감독이 고른 것이라
+ * 서로 다른 층이다.
+ *
+ * **색은 자리를 따라가고 톤만 다르다** (`.pitch-chip.g-* .slot-role`) — 카드와
+ * 같은 색을 더 진하게 얹어 "이 카드 안의 것"으로 읽힌다. 예전엔 전원이 초록
+ * 하나였다: 붉은 공격수 카드 위에서는 색이 부딪히고, 초록 중원 카드에서는
+ * 배경에 묻혀 약칭이 안 보였다.
+ */
+.slot-role {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgba(148, 163, 184, 0.24);
+  color: var(--text);
+  font-size: clamp(6px, 1.9cqw, 9px);
+  font-style: normal;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+.pitch-chip.g-fw .slot-role {
+  background: rgba(var(--pos-fw), 0.45);
+}
+.pitch-chip.g-mf .slot-role {
+  background: rgba(var(--pos-mf), 0.42);
+  color: #0f1a12;
+}
+.pitch-chip.g-df .slot-role {
+  background: rgba(var(--pos-df), 0.45);
+}
+.pitch-chip.g-gk .slot-role {
+  background: rgba(var(--pos-gk), 0.45);
+  color: #1b1706;
+}
+.slot-name {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  max-width: 80px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.slot-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-2xs);
+  color: var(--muted);
+}
+.slot-meta b {
+  color: var(--text);
+  font-size: var(--fs-xs);
+}
+.slot-flag {
+  color: var(--danger);
+  font-size: var(--fs-3xs);
+}
+.slot-flag.warn {
+  color: var(--gold);
+  font-weight: 800;
+}
+/* 명단 열(오른쪽) — 머리글 줄 + 표는 자체 스크롤이라 전술판이 항상 보인다 */
+/**
+ * 명단 머리 — **책갈피 줄이자 명단의 윗변**이다.
+ *
+ * 탭이 아래 표와 한 장으로 이어져야 "지금 보고 있는 게 1군 명단"이라는 게
+ * 모양으로 읽힌다. 그래서 밑줄을 깔고 고른 탭만 그 줄을 끊는다.
+ */
+.roster-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  /* 밑줄은 두지 않는다 — 명단 표가 바로 아래 닿아 있어 표의 윗변이 그 몫을 한다.
+     둘 다 그리면 같은 자리에 선이 두 겹 겹친다 */
+}
+.roster-tabs {
+  display: flex;
+  gap: var(--sp-1);
+  /* 탭의 밑변이 머리글의 밑줄과 정확히 겹쳐야 "끊긴 줄"이 보인다 */
+  margin-bottom: -1px;
+}
+/**
+ * 책갈피 — 고른 쪽만 밑줄을 끊고 위로 올라온다.
+ *
+ * 알약 버튼(`ghost-btn`) 두 개를 나란히 두던 때는 둘 다 "누를 수 있는 것"으로만
+ * 보이고 **무엇이 켜져 있는지**가 테두리 색 하나에 걸려 있었다. 책갈피는 켜진
+ * 쪽이 아래 표와 이어져 있어 상태가 모양 자체다.
+ */
+.roster-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  background: none;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
+  color: var(--muted);
+  font-size: var(--fs-md);
+  line-height: 1.2;
+  transition:
+    color var(--ease),
+    background var(--ease);
+}
+.roster-tab:hover {
+  color: var(--text);
+}
+.roster-tab.on {
+  /* 표 머리와 **같은 배경** — 다르면 둘이 만나는 자리에 이음매가 보인다 */
+  background: var(--panel-2);
+  border-color: var(--border);
+  color: var(--text);
+  font-weight: 700;
+  /* 켜진 탭이 **표의 윗변을 그 폭만큼 덮는다** — 그래야 탭과 명단이 한 장이 된다.
+     표가 DOM에서 뒤에 오므로 위로 끌어올리지 않으면 그 선에 가린다 */
+  position: relative;
+  z-index: 1;
+  box-shadow: 0 1px 0 0 var(--panel-2);
+}
+/* 인원수는 이름보다 한 단 작게 — 읽는 값이지 이름의 일부가 아니다 */
+.roster-tab-n {
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--muted);
+}
+.roster-tab.on .roster-tab-n {
+  color: var(--accent-2);
+}
+/* 벤치/예비 정원 — 문장이 아니라 계기판 숫자다.
+   `margin-left: auto`로 **오른쪽 끝에 못박는다** — space-between에 맡기면 옆에
+   무엇이 하나 더 서는 순간 숫자가 가운데로 밀려 머리글이 들썩인다 */
+.roster-counts {
+  margin-left: auto;
+  padding-bottom: 7px;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  white-space: nowrap;
+}
+/**
+ * 이 화면에서 유일하게 스크롤하는 곳 — 남는 높이를 다 쓰고 그 안에서만 넘친다.
+ *
+ * **선수 상세의 기준 폭이기도 하다** (`container-type: inline-size`). 상세가 얼마나
+ * 넓게 펼쳐질 수 있는지는 화면이 아니라 이 칸이 정한다 — 같은 1024px 화면이라도
+ * 2열이면 명단이 576px, 한 열이면 990px다. 뷰포트로 재면 그 차이를 못 본다.
+ */
+.roster-scroll {
+  container-type: inline-size;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  /* 책갈피가 얹히는 **왼쪽 위만 각지게** — 둥근 모서리 위에 탭이 서면 둘이
+     어긋난 곳에서 만나 종이 두 장이 겹친 것처럼 보인다 */
+  border-radius: 0 var(--r-md) var(--r-md) var(--r-md);
+}
+/* 칸이 좁아도 표가 글자 단위로 접히지 않게 — 최소 폭을 주고 가로 스크롤에 맡긴다 */
+.roster-scroll .squad-table {
+  min-width: 560px;
+  /**
+   * ⚠️ `collapse`면 셀의 테두리가 **셀 밖 절반까지** 그려진다. 행의 왼쪽 칸 띠(2px)가
+   * 표의 왼쪽 선 위로 반쯤 삐져나와, 스크롤할 때 붙박이 머리글 왼쪽에 색선이 스쳤다.
+   * `separate` + 간격 0이면 테두리가 셀 안에 들어와 머리글 배경이 그 자리를 덮는다.
+   */
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.roster-scroll .squad-table td,
+.roster-scroll .squad-table th {
+  white-space: nowrap;
+}
+.roster-scroll .squad-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel-2);
+}
+/* 명단 표 — 정렬 가능한 머리글, 상태 막대 */
+.squad-table th.sorted {
+  color: var(--accent);
+}
+.squad-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+.squad-table .sort-mark {
+  font-size: var(--fs-3xs);
+  margin-left: 3px;
+}
+.squad-table tbody tr {
+  cursor: pointer;
+}
+.squad-table tbody tr:hover td {
+  background: rgba(96, 165, 250, 0.06);
+}
+.squad-table tbody tr.picked td {
+  background: rgba(96, 165, 250, 0.1);
+}
+/**
+ * 칸(선발·벤치·예비·2군)은 **행의 왼쪽 선 색**이 말한다.
+ *
+ * 예전엔 오른쪽 끝에 배지 열을 두고 "선발"·"벤치"를 글자로 적었는데, 142px을 쓰는
+ * 열이 표 폭을 먹고 시선도 이름에서 멀었다. 색은 폭을 안 먹고 훑을 때 먼저 들어온다.
+ */
+.squad-table tbody tr.row-tier td:first-child {
+  border-left: 2px solid transparent;
+  padding-left: 8px;
+}
+/* 펼친 상세도 그 행의 연장이라 선이 이어져야 한다 (안쪽 여백은 카드가 갖는다) */
+.squad-table tbody tr.detail-row td {
+  padding-left: 0;
+}
+/**
+ * 칸이 갈리는 자리 — **선 하나.**
+ *
+ * 예전엔 "선발·벤치·예비"를 글자로 세웠는데, 표 안에 소제목이 셋 생겨 이름을 훑는
+ * 눈이 매번 걸렸다. 어느 칸인지는 행의 왼쪽 선 색이 이미 말한다 — 여기 필요한 건
+ * 경계가 어디인가뿐이라 빈 줄에 선만 긋는다.
+ */
+.squad-table tbody tr.tier-head td {
+  padding: 5px 0 0;
+  border-bottom: 1px solid var(--border);
+  background: none;
+}
+.squad-table tbody tr.t-start td:first-child {
+  border-left-color: var(--accent);
+}
+.squad-table tbody tr.t-bench td:first-child {
+  border-left-color: var(--accent-2);
+}
+.squad-table tbody tr.t-squad td:first-child {
+  border-left-color: rgba(148, 163, 184, 0.5);
+}
+.squad-table tbody tr.t-reserve td:first-child {
+  border-left-color: rgba(148, 163, 184, 0.18);
+}
+/* 이름 칸 — 교체 화살표 자리와 상태 배지를 함께 안는다 */
+/**
+ * 이름 칸 — **td에 `display: flex`를 주지 않는다.** 주면 표가 셀을 익명 래퍼로
+ * 감싸 열 폭에서 빠져나가고, 배경(선택·호버)이 내용 폭까지만 칠해져 이름 옆에
+ * 색이 갈린다. 어드민 표에서 이미 겪은 함정이라 같은 해법을 쓴다 — 정렬은
+ * 안쪽 요소들이 맡는다.
+ */
+.squad-name > * {
+  vertical-align: middle;
+}
+.squad-name .row-name {
+  margin-right: 4px;
+}
+/* 배지 열을 없앤 폭이 전부 이름으로 가면 표가 휑해진다 — 이름은 필요한 만큼만 */
+.squad-table th:first-child,
+.squad-table td:first-child {
+  width: 34%;
+}
+.stat-bar {
+  display: inline-block;
+  width: 46px;
+  height: 6px;
+  border-radius: var(--r-xs);
+  background: var(--panel-2);
+  overflow: hidden;
+  vertical-align: middle;
+}
+.stat-bar span {
+  display: block;
+  height: 100%;
+  background: var(--accent-2);
+}
+/* 체력 — 높을수록 좋다. 낮아지면 색으로도 경고한다 */
+.stat-bar.condition span {
+  background: var(--accent);
+}
+.stat-bar.condition.low span {
+  background: var(--gold);
+}
+.stat-bar.condition.bad span {
+  background: var(--danger);
+}
