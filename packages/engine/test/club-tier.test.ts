@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { leagueOfTeamIn, recomputeClubTiers, tierOfTeamIn, type GameState } from "@story-fm/engine";
+import {
+  annualRevenueEstimate,
+  catalogTierOf,
+  leagueOfTeamIn,
+  monthlyFixedCostOf,
+  recomputeClubTiers,
+  tierOfTeamIn,
+  type GameState,
+} from "@story-fm/engine";
 import { createMiniGame, createTestGame } from "./helpers";
 
 /**
@@ -138,5 +146,41 @@ describe("유저 팀의 다이제스트", () => {
     const state = createMiniGame();
     recomputeClubTiers(state); // 첫 재산정으로 값을 맞춰 둔다
     expect(recomputeClubTiers(state)).toEqual([]);
+  });
+});
+
+/**
+ * 재정도 같은 통로를 지난다 — 체급이 닿는 값이 보드 기대치만이 아니다.
+ * 고정비·매출 어림·주급 천장이 전부 여기서 갈린다 (finance.md).
+ */
+describe("재정이 세이브의 체급을 읽는다", () => {
+  it("세이브의 체급을 바꾸면 고정비·매출 어림이 따라 움직인다", () => {
+    const state = createMiniGame(7, "arsenal");
+    const team = state.teams[1]!;
+    team.tier = 1;
+    const big = {
+      fixed: monthlyFixedCostOf(team.id, state),
+      revenue: annualRevenueEstimate(state, team.id),
+    };
+    team.tier = 4;
+    expect(monthlyFixedCostOf(team.id, state)).toBeLessThan(big.fixed);
+    expect(annualRevenueEstimate(state, team.id)).toBeLessThan(big.revenue);
+  });
+
+  it("세계 생성 시점(state 없음)은 카탈로그 체급 그대로다", () => {
+    const state = createMiniGame(7, "arsenal");
+    const team = state.teams[1]!;
+    const catalogFixed = monthlyFixedCostOf(team.id);
+    team.tier = team.tier === 4 ? 1 : 4;
+    // 주급 기준선은 세이브가 서기 전에 계산된다 — 세이브를 모르므로 흔들리지 않는다
+    expect(monthlyFixedCostOf(team.id)).toBe(catalogFixed);
+    expect(catalogTierOf(team.id)).not.toBe(team.tier);
+  });
+
+  it("게임 시작 직후엔 두 문맥이 같은 값을 낸다 — 밸런스가 움직이지 않았다", () => {
+    const state = createMiniGame(7, "arsenal");
+    for (const t of state.teams) {
+      expect(monthlyFixedCostOf(t.id, state), t.id).toBeCloseTo(monthlyFixedCostOf(t.id), 6);
+    }
   });
 });
