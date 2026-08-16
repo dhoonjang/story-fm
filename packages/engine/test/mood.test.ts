@@ -7,6 +7,7 @@ import {
   applyMoodNotes,
   buildMoodBrief,
   dealOdds,
+  describeMood,
   generateIncomingOffers,
   marketValueOf,
   moodOf,
@@ -18,6 +19,29 @@ describe("체력 — 몸과 마음이 한 축이다", () => {
   it("0~100 안에 머문다", () => {
     expect(clampCondition(120)).toBe(100);
     expect(clampCondition(-5)).toBe(0);
+  });
+});
+
+describe("심경 앵커 — 눈금과 결정성", () => {
+  /**
+   * 폼 문턱은 `formLabel`과 같은 눈금을 써야 한다. 한쪽만 −1~+1로 옮겼을 때
+   * **잘나가는 선수의 심경 줄이 통째로 비었다** — 화면에 빈 칸이 서는 것으로만
+   * 드러나서 아무도 못 봤다.
+   */
+  it("폼 문턱이 formLabel과 같은 눈금이다", () => {
+    const state = createTestGame();
+    const hot = userPlayers(state)[8]!;
+    hot.state.form = 0.5; // 상승세
+    expect(describeMood(state, hot)).toContain("자신감이 붙었다");
+    const cold = userPlayers(state)[9]!;
+    cold.state.form = -0.5; // 침체
+    expect(describeMood(state, cold)).toContain("답답해한다");
+  });
+
+  it("결정적이다 — 같은 상태면 같은 문장", () => {
+    const state = createTestGame();
+    const player = userPlayers(state)[3]!;
+    expect(describeMood(state, player)).toBe(describeMood(state, player));
   });
 });
 
