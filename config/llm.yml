@@ -5,28 +5,33 @@ agents:
     provider: google
     model: gemini-3.6-flash
     max_tokens: 64000
+    timeout_ms: 180000
     thinking_level: minimal
 
   match-caster:
     provider: google
     model: gemini-3.6-flash
     max_tokens: 64000
+    timeout_ms: 180000
     thinking_level: minimal
 
   match-rater:
     provider: google
     model: gemini-3.5-flash-lite
     max_tokens: 8000
+    timeout_ms: 30000
     thinking_level: minimal
 
   training-rater:
     provider: google
     model: gemini-3.5-flash-lite
     max_tokens: 8000
+    timeout_ms: 30000
     thinking_level: minimal
 
   mood-rater:
     provider: google
     model: gemini-3.5-flash-lite
     max_tokens: 8000
+    timeout_ms: 30000
     thinking_level: minimal

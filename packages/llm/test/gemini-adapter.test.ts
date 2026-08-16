@@ -7,6 +7,7 @@ const testConfig = {
   provider: "google" as const,
   model: "gemini-test",
   maxTokens: 1024,
+  timeoutMs: 30_000,
   thinkingLevel: "medium" as const,
 };
 
@@ -59,6 +60,35 @@ function makeStubClient(responses: GenerateContentResponse[]) {
 }
 
 describe("GeminiGameLLM", () => {
+  it("설정의 시한과 중단 신호를 chat 설정에 실어 보낸다 — SDK 기본값에 기대지 않는다", async () => {
+    const stub = makeStubClient([response({ role: "model", parts: [{ text: "@수석코치: 네." }] })]);
+    const controller = new AbortController();
+    const llm = new GeminiGameLLM(testConfig, stub.client as never);
+    await llm.runTurn({
+      system: "고정 프롬프트",
+      history: [],
+      user: "@김감독: 계속.",
+      signal: controller.signal,
+    });
+
+    const created = stub.create.mock.calls[0]![0] as unknown as {
+      config: {
+        abortSignal?: AbortSignal;
+        httpOptions?: { timeout?: number };
+        systemInstruction?: string;
+        maxOutputTokens?: number;
+      };
+    };
+    expect(created.config.abortSignal).toBe(controller.signal);
+    expect(created.config.httpOptions?.timeout).toBe(testConfig.timeoutMs);
+    /**
+     * per-request config는 chat 설정을 상속하지 않고 대체한다(SDK 계약) — 시한을
+     * sendMessage 쪽에 붙였다면 여기 둘이 사라진다. 그 회귀를 이 줄이 잡는다.
+     */
+    expect(created.config.systemInstruction).toBe("고정 프롬프트");
+    expect(created.config.maxOutputTokens).toBe(testConfig.maxTokens);
+  });
+
   it("함수 호출 id·thought signature를 보존하고 검증 결과를 다시 보낸다", async () => {
     const stub = makeStubClient([
       response({

@@ -4,6 +4,12 @@ import { runTurnLocked } from "@/lib/turn-runner";
 
 const TurnSchema = z.object({ message: z.string().min(1).max(1000) });
 
+/**
+ * 응답을 붙들 수 있는 최대 시간 — 스트리밍 라우트와 같은 백스톱이다.
+ * 실제 시한은 모델 호출마다 걸려 있다 (llm/models.md §1-1).
+ */
+export const maxDuration = 300;
+
 /** 유저 턴 → GM 실행 → 모델 턴 (비스트리밍 JSON). 스트리밍은 turn/stream. */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
