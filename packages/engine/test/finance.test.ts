@@ -22,6 +22,7 @@ import {
   adjustTransferBudget,
   amortisationOf,
   applyFinanceEvent,
+  buildOfficeViews,
   weeklyWagesOf,
   categoryOf,
   clubProfile,
@@ -240,6 +241,28 @@ describe("월간 보고서", () => {
     expect(months.size).toBeLessThanOrEqual(3);
     expect(months.has("2026-07")).toBe(false); // 잘렸다
     expect(state.financeReports.some((r) => r.month === "2026-07")).toBe(true); // 요약은 영구
+  });
+
+  it("석 달이 지나 원장이 잘려도 큰 건의 날짜는 달력 일지에 남는다", () => {
+    const state = createTestGame();
+    const bigDate = state.date;
+    const label = "창단 기념 스폰서 보너스";
+    expect(
+      applyFinanceEvent(state, {
+        kind: "income",
+        category: "commercial",
+        amount: 2_000_000,
+        note: label,
+      }).ok,
+    ).toBe(true);
+
+    advanceUntil(state, "2026-12-05");
+
+    // 원장에서 그날은 잘려 나갔다
+    expect(financeOf(state, state.userTeamId).ledger.some((e) => e.date === bigDate)).toBe(false);
+    // 그래도 달력은 날짜와 금액을 안다 — 보고서의 highlights에서 파생하기 때문
+    const day = buildOfficeViews(state).calendar.events[bigDate] ?? [];
+    expect(day.filter((e) => e.kind === "money").map((e) => e.text)).toEqual([`${label} +£2.0M`]);
   });
 
   it("급여 비중과 판단 재료(notes)가 붙는다", () => {

@@ -65,18 +65,23 @@ Then push, so CI runs against what will actually land:
 git push origin HEAD
 ```
 
-## 4. Wait for CI — this is the gate
+## 4. Mark ready, then wait for CI — this is the gate
 
 `.github/workflows/ci.yml` runs `typecheck`, `lint`, the full `pnpm test` and
 `pnpm e2e` on this branch. **That run is the gate; do not re-run the suites
 locally to duplicate it** (AGENTS.md §5).
 
+**CI does not run on a draft PR.** `resolve` leaves the PR draft on purpose, so
+nothing has been verified yet when you get here — marking it ready is what starts
+the run:
+
 ```bash
+gh pr ready          # already ready → it says so; that is fine
 gh pr checks --watch --fail-fast
 ```
 
-The push in §3 starts a fresh run — make sure the checks you are reading belong
-to the commit you just pushed, not the one before it:
+Make sure the checks you are reading belong to the commit §3 pushed, not an
+earlier one:
 
 ```bash
 gh pr view --json headRefOid,statusCheckRollup
@@ -113,8 +118,9 @@ EOF
 
 ## 6. Merge
 
+The PR went ready in §4, so this is only the merge.
+
 ```bash
-gh pr ready
 gh pr merge --squash \
   --subject '<subject>' --body "$(cat <<'EOF'
 <body>

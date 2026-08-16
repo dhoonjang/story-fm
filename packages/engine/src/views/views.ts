@@ -28,7 +28,15 @@ import {
 import { diffDays, nextMatchFor, seasonEndDate } from "../competition/calendar";
 import { clubProfile } from "../data/club-profile";
 import { tierOfTeamIn } from "../core/club-tier";
-import { categoryOf, currentMonthSummary, psrStatus, seasonWageRatio } from "../club/finance";
+import {
+  categoryOf,
+  currentMonthSummary,
+  formatMoney,
+  isJournalMoney,
+  monthOf,
+  psrStatus,
+  seasonWageRatio,
+} from "../club/finance";
 import {
   cupCatalog,
   competitionName,
@@ -459,7 +467,9 @@ export interface CalendarEventView {
     | "yellow"
     | "red"
     | "transfer"
-    | "window";
+    | "window"
+    /** 큰 비정기 수입·지출 — 정액 항목은 서지 않는다 (docs/simulation/finance.md §8.2) */
+    | "money";
   text: string;
   /**
    * 접어 둔 상세 — 있으면 UI가 눌러서 펼친다. 성장처럼 **한 날에 스무 줄이 나오는**
@@ -1860,17 +1870,44 @@ export function buildOfficeViews(state: GameState): OfficeViews {
           : t.toTeamId === userTeamId
             ? `${name} 영입`
             : `${name} 이적`;
-    push(t.date, { kind: "transfer", text: label });
+    // 이적료는 이 줄이 말한다 — 돈 줄을 따로 세우면 한 거래가 세 줄이 된다 (§8.2).
+    // 자유계약·유스·은퇴는 fee가 0이라 붙지 않는다.
+    push(t.date, {
+      kind: "transfer",
+      text: t.fee > 0 ? `${label} · ${formatMoney(t.fee)}` : label,
+    });
   }
 
-  /**
-   * ⚠️ **재정은 달력에 올리지 않는다.** 예전엔 큰 금액과 월간 보고서를 일지에 밀어
-   * 넣었는데, 주급·중계권처럼 **매달 같은 자리에 같은 줄**이 서서 그날 실제로
-   * 벌어진 일(부상·경고·이적)을 덮었다. 돈의 흐름은 재정 탭이 원장·보고서로
-   * 훨씬 잘 말한다.
-   */
-  // ── 재정 (유저 팀) ──
   const finance = financeOf(state, userTeamId);
+
+  /**
+   * ⚠️ **정액 항목은 달력에 올리지 않는다.** 주급·중계권처럼 매달 같은 자리에 같은
+   * 줄이 서면 그날 실제로 벌어진 일(부상·경고·이적)을 덮는다. 서는 것은 문턱을 넘는
+   * **비정기** 항목뿐이고, 그 판정은 코어가 한다 — `isJournalMoney`.
+   *
+   * 파생 원본이 둘이다: 원장은 3개월 뒤 잘리므로 **진행 중인 달만** 원장에서 읽고,
+   * 마감된 달은 보고서의 `highlights`(절단 전에 옮겨 적은 것)에서 읽는다. 마감은
+   * 지난달까지만 하므로 두 원본은 겹치지 않는다 (docs/simulation/finance.md §8.2).
+   */
+  const moneyText = (m: { kind: "income" | "expense"; label: string; amount: number }) =>
+    `${m.label} ${m.kind === "income" ? "+" : "−"}${formatMoney(m.amount)}`;
+  const openMonth = monthOf(state.date);
+  for (const e of finance.ledger) {
+    if (e.date > state.date) continue;
+    if (monthOf(e.date) !== openMonth) continue;
+    if (!isJournalMoney(e, finance.balance)) continue;
+    push(e.date, { kind: "money", text: moneyText(e) });
+  }
+  for (const r of state.financeReports) {
+    if (r.teamId !== userTeamId) continue;
+    // highlights는 마감 때 이미 걸러진 것이라 문턱을 다시 재지 않는다
+    for (const h of r.highlights ?? []) {
+      if (h.date > state.date) continue;
+      push(h.date, { kind: "money", text: moneyText(h) });
+    }
+  }
+
+  // ── 재정 (유저 팀) ──
   const line = (l: { category: string; amount: number }) => ({
     category: l.category,
     label: FINANCE_CATEGORY_KO[l.category as keyof typeof FINANCE_CATEGORY_KO] ?? l.category,

@@ -476,6 +476,23 @@ export const FinanceReportLineSchema = z.object({
 export type FinanceReportLine = z.infer<typeof FinanceReportLineSchema>;
 
 /**
+ * 그달의 **큰 비정기 항목** — 달력 일지가 읽는다 (docs/simulation/finance.md §8.2).
+ *
+ * 원장은 3개월 뒤 잘리므로 일지가 원장에서만 파생하면 그 날짜도 함께 사라진다.
+ * 카테고리 합계(`FinanceReportLine`)는 "언제"를 말하지 못한다 — 마감할 때 문턱을
+ * 넘는 일회성 항목만 날짜째로 여기 옮겨 적는다.
+ */
+export const FinanceHighlightSchema = z.object({
+  date: DateString,
+  kind: z.enum(["income", "expense"]),
+  category: FinanceCategorySchema,
+  label: z.string().min(1),
+  /** 항상 양수 — 방향은 kind가 정한다 */
+  amount: z.number().min(0),
+});
+export type FinanceHighlight = z.infer<typeof FinanceHighlightSchema>;
+
+/**
  * 월간 재정 보고서 (FINANCE_REPORT) — 매월 1일에 지난달을 마감해 만든다.
  * 상세 원장은 3개월 롤링으로 잘리지만 이 요약은 영구 보존되고, `openingBalance`
  * 덕분에 잔고 재구성이 가능하다 (docs/simulation/finance.md §4.4).
@@ -508,6 +525,8 @@ export const FinanceReportSchema = z.object({
   psr: z.object({ rolling3Season: z.number(), headroom: z.number() }).nullable(),
   /** 코어가 결정적으로 붙이는 판단 재료 — GM은 이걸 서술만 한다 */
   notes: z.array(z.string()),
+  /** 그달의 큰 비정기 항목 — 절단 전에 옮겨 적는다. 옛 세이브엔 없다 (optional) */
+  highlights: z.array(FinanceHighlightSchema).optional(),
 });
 export type FinanceReport = z.infer<typeof FinanceReportSchema>;
 
