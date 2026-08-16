@@ -159,15 +159,18 @@ is not what is being tested, and where it genuinely is, build one fixture per
 being worked on burns runner minutes nobody reads. `/merge` marks the PR ready,
 and that is what starts the run it then watches.
 
-**The suite does not fit one runner.** `pnpm test` is ~84 runner-minutes of CPU
-and `ubuntu-latest` has two cores, so the test gate is four jobs —
-`unit + api (i/4)`, each running `--shard=i/4 --maxWorkers=100%`. All four must
-be green; a shard is not a sample. Vitest assigns files to shards by hashing
-their path, so a new test file reshuffles the split, and **one file is never
-split across shards** — the slowest file is the floor for its shard, and today
-that is `finance.test.ts` at 17.5 minutes on the runner. More shards will not
-move that floor; only a cheaper test will. Nothing is excluded from the gate:
-making it faster means making a test cheaper, not moving it out of CI.
+**The suite is sharded across runners.** `ubuntu-latest` has two cores, so the
+test gate is four jobs — `unit + api (i/4)`, each running
+`--shard=i/4 --maxWorkers=100%`. All four must be green; a shard is not a sample.
+Vitest assigns files to shards by hashing their path, so a new test file
+reshuffles the split, and **one file is never split across shards** — the slowest
+file is the floor for its shard. That floor is `euro-knockout.test.ts`, whose one
+full-season case needs the whole world because the euro draw is what it checks.
+The suite costs 14.4 CPU-minutes over 1,586 cases (measured locally, 12 cores);
+`finance.test.ts`, which used to set the floor at 17.5 runner-minutes, is now a
+fifteenth of that. More shards will not move the floor; only a cheaper test will.
+Nothing is excluded from the gate: making it faster means making a test cheaper,
+not moving it out of CI.
 
 - **While working** — `pnpm typecheck` and `pnpm lint`, plus `pnpm test <path>`
   for the file you just wrote. That is the whole local loop.
