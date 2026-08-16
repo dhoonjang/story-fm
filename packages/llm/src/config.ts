@@ -21,6 +21,14 @@ interface BaseAgentConfig {
   agent: AgentName;
   model: string;
   maxTokens: number;
+  /**
+   * `runTurn` 한 번 전체의 시한(ms) — 도구 왕복까지 포함한다.
+   *
+   * 제공자 SDK의 기본값에 맡기지 않는다: 셋이 서로 다르고 어디에도 적혀 있지
+   * 않아, 같은 설정으로 도는 어댑터 셋이 서로 다른 계약을 지키게 된다
+   * (models.md §1-1).
+   */
+  timeoutMs: number;
 }
 
 export interface AnthropicAgentConfig extends BaseAgentConfig {
@@ -43,6 +51,7 @@ const RawAgentConfigSchema = z
     provider: z.enum(["anthropic", "google", "openai"]),
     model: z.string().trim().min(1),
     max_tokens: z.number().int().positive(),
+    timeout_ms: z.number().int().positive(),
     thinking_level: z.enum(["minimal", "low", "medium", "high"]).optional(),
   })
   .strict();
@@ -70,7 +79,12 @@ export interface LlmConfig {
 }
 
 function toAgentConfig(agent: AgentName, raw: RawAgentConfig): AgentConfig {
-  const base = { agent, model: raw.model, maxTokens: raw.max_tokens };
+  const base = {
+    agent,
+    model: raw.model,
+    maxTokens: raw.max_tokens,
+    timeoutMs: raw.timeout_ms,
+  };
   if (raw.provider === "google") {
     return {
       ...base,
