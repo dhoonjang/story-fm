@@ -6,6 +6,7 @@ const testConfig = {
   provider: "openai" as const,
   model: "gpt-test",
   maxTokens: 1024,
+  timeoutMs: 30_000,
 };
 
 const usage = {
@@ -68,6 +69,21 @@ describe("OpenAI 어댑터", () => {
      * 400을 맞는다.
      */
     expect(sent[0]?.reasoning_effort).toBe("none");
+  });
+
+  it("설정의 시한과 중단 신호를 요청 옵션으로 넘긴다 — SDK 기본값에 기대지 않는다", async () => {
+    const { client, create } = makeStubClient([completion({ role: "assistant", content: "됐다" })]);
+    const llm = new OpenAiGameLLM(testConfig, client);
+    const controller = new AbortController();
+    await llm.runTurn({ system: "시스템", history: [], user: "안녕", signal: controller.signal });
+
+    const options = create.mock.calls[0]![1] as unknown as {
+      timeout?: number;
+      signal?: AbortSignal;
+    };
+    expect(options.timeout).toBe(testConfig.timeoutMs);
+    // 신호를 안 넘기면 시한이 지나도 소켓이 살아 토큰과 연결을 문다
+    expect(options.signal).toBe(controller.signal);
   });
 
   it("도구 명세를 그대로 넘긴다 — 스키마는 제공자 중립이다", async () => {
