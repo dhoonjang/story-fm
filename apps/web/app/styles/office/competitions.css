@@ -1,0 +1,191 @@
+/* ── 대회 — 순위표 · 라운드 일정 · 브래킷 ─────────────────────────── */
+
+/* 최근 결과 한 줄 */
+.recent-line {
+  font-size: var(--fs-sm);
+  padding: 2px 0;
+}
+
+/* 순위 구역 — 챔스·유로파 진출권(리그), 본선 직행·플레이오프(대항전).
+   4위와 5위의 차이는 한 계단이 아니라 대회가 갈리는 선이라 표에 그린다.
+   ⚠️ 강등 구역은 없다 — 승강 처리가 미구현이라 그으면 지키지 않는 약속이 된다 */
+.ledger-body tr.cut td {
+  border-bottom: 1px solid var(--border);
+}
+/* 순위 칸 왼쪽의 색 띠 — 레이아웃을 밀지 않도록 inset 그림자로 긋는다 */
+.ledger-body tr.zone td:first-child {
+  box-shadow: inset 3px 0 0 var(--zone-color);
+}
+.zone-ucl,
+.zone-direct {
+  --zone-color: var(--accent-2);
+}
+.zone-uel,
+.zone-playoff {
+  --zone-color: var(--gold);
+}
+.zone-uecl {
+  --zone-color: var(--accent);
+}
+.zone-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  margin-top: 6px;
+}
+.zone-key {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.zone-key::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-xs);
+  background: var(--zone-color);
+}
+/* 브래킷 한 줄 — 날짜 | 대진 | 결과. 순수 녹아웃 대회에선 이게 곧 일정표다 */
+.euro-tie {
+  display: grid;
+  grid-template-columns: 44px 1fr auto;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--fs-sm);
+  padding: 4px 6px;
+  border-bottom: 1px solid rgba(42, 51, 66, 0.5);
+}
+.euro-tie.ours {
+  background: rgba(74, 222, 128, 0.07);
+}
+.euro-tie .euro-when {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.euro-tie .euro-score {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* ── 대회 뷰 — 대회 탭 · 라운드 선택기 · 일정 목록 ────────── */
+.comp-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  margin-bottom: 12px;
+}
+.comp-tabs button {
+  flex: 0 0 auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  padding: 6px 14px;
+}
+.comp-tabs button.active {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--panel-2);
+}
+.comp-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 10px 14px;
+}
+.comp-head span {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  text-align: right;
+}
+.round-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.round-nav button {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  padding: 5px 10px;
+}
+.round-nav button:disabled {
+  color: var(--muted);
+  opacity: 0.4;
+}
+.round-nav select {
+  flex: 1;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  padding: 6px 8px;
+  font-size: var(--fs-sm);
+}
+.fixture-list {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.fixture {
+  display: grid;
+  grid-template-columns: 74px 1fr 110px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 12px;
+  font-size: var(--fs-sm);
+  border-bottom: 1px solid var(--border);
+}
+.fixture:last-child {
+  border-bottom: none;
+}
+.fixture.ours {
+  background: rgba(74, 222, 128, 0.07);
+}
+.fixture .when {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+.fixture .side {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fixture .side.away {
+  text-align: right;
+}
+.fixture .mid {
+  text-align: center;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.fixture .mid.played {
+  color: var(--text);
+  font-weight: 700;
+}
+.fixture .wdl {
+  margin-left: 5px;
+  font-size: var(--fs-xs);
+  border-radius: var(--r-xs);
+  padding: 0 4px;
+}
+.fixture .wdl.W {
+  color: var(--accent);
+}
+.fixture .wdl.L {
+  color: var(--danger);
+}
+.fixture .wdl.D {
+  color: var(--muted);
+}

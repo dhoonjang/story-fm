@@ -19,7 +19,8 @@ import {
 } from "../data/domestic-cup-catalog";
 import { leagueCatalogById, topLeagueOfCountry } from "../data/league-catalog";
 import { completeDraw, drawEntryOf, drawIsDue, drawRefId, scheduleDraw } from "./draw-schedule";
-import { clubsOfCountry, isTopFlight, leagueOfTeam, teamCatalogById } from "../data/team-catalog";
+import { clubsOfCountry, isTopFlight, leagueOfTeam } from "../data/team-catalog";
+import { tierOfTeamIn } from "../core/club-tier";
 import { reservedEuroDates } from "./europe";
 import { payOnce } from "../club/finance";
 import { clearForCup } from "./reschedule";
@@ -199,9 +200,8 @@ export function userStillIn(state: GameState, cupId: string): boolean {
  * 전력 서열 — 작을수록 강하다. 1부가 2부보다 앞서고, 같은 부에선 tier 순.
  * 홈 배정 규정(`homeRule`)의 기준이다.
  */
-function rankOf(teamId: string): number {
-  const tier = teamCatalogById(teamId)?.tier ?? 4;
-  return (isTopFlight(teamId) ? 0 : 10) + tier;
+function rankOf(state: GameState, teamId: string): number {
+  return (isTopFlight(teamId) ? 0 : 10) + tierOfTeamIn(state, teamId);
 }
 
 /**
@@ -396,9 +396,9 @@ function registerUserEntries(state: GameState, matches: MatchRecord[]): void {
  * 홈 배정 — 대회 규정을 따른다 (`homeRule`).
  * `a`는 추첨에서 먼저 뽑힌 팀이고, 결승은 중립이라 이 함수를 타지 않는다.
  */
-function homeSideOf(cup: DomesticCupEntry, a: string, b: string): string {
+function homeSideOf(state: GameState, cup: DomesticCupEntry, a: string, b: string): string {
   if (cup.homeRule === "draw") return a; // 먼저 뽑힌 팀 (FA컵·리그컵)
-  const diff = rankOf(a) - rankOf(b);
+  const diff = rankOf(state, a) - rankOf(state, b);
   if (diff === 0) return a; // 서열이 같으면 추첨 순서대로
   const underdog = diff > 0 ? a : b;
   const seeded = diff > 0 ? b : a;
@@ -417,7 +417,7 @@ function createTie(
   digest: string[],
 ): MatchRecord[] {
   const isFinal = stage === "final";
-  const home = isFinal ? a : homeSideOf(cup, a, b);
+  const home = isFinal ? a : homeSideOf(state, cup, a, b);
   const away = home === a ? b : a;
   const twoLegged = cup.twoLegged.includes(stage) && !isFinal;
   const weekdays = isFinal ? finalWeekdaysOf(cup) : CUP_WEEKDAYS;
@@ -520,7 +520,7 @@ function shuffled<T>(items: readonly T[], seed: number, channel: string): T[] {
 const SEED_SLOTS = [0, 15, 8, 7, 4, 11, 12, 3];
 
 function seededBracket(state: GameState, cup: DomesticCupEntry, teams: string[]): string[] {
-  const byStrength = [...teams].sort((a, b) => rankOf(a) - rankOf(b));
+  const byStrength = [...teams].sort((a, b) => rankOf(state, a) - rankOf(state, b));
   const seeds = byStrength.slice(0, SEED_SLOTS.length);
   const rest = shuffled(
     byStrength.slice(SEED_SLOTS.length),

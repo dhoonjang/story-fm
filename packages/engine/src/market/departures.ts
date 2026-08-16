@@ -389,6 +389,7 @@ function signWithClub(
     teamId,
     wageSubjectOf(player, state.date),
     [...squad, player].map((p) => wageSubjectOf(p, state.date)),
+    state,
   );
   const years = 1 + Math.floor(rng() * 3);
   state.transfers.push({

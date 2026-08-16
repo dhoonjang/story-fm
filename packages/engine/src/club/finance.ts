@@ -28,6 +28,7 @@ import {
   type GameState,
 } from "../core/state";
 import { makeRng } from "../core/rng";
+import { catalogTierOf, tierOfTeamIn } from "../core/club-tier";
 
 /**
  * 구단 재정 — 실제 구단의 매출·비용 구조 (docs/simulation/finance.md).
@@ -159,6 +160,47 @@ const WRITEOFF_WINDOW_MONTHS = 2;
 /** 상세 원장 보존 개월 수 — 그 이전은 월간 보고서가 요약해 보관한다 */
 const LEDGER_MONTHS_KEPT = 3;
 
+/**
+ * 달력 일지에 서는 돈의 문턱 — **£1M 또는 잔고의 1%, 둘 중 낮은 쪽**.
+ *
+ * 낮은 쪽을 쓰므로 규모가 작은 구단은 자기 눈금으로 본다(잔고 £20M이면 £200k부터).
+ * 하한이 있는 이유는 빚진 구단이다 — 잔고가 0 이하면 1%도 0 이하가 되어 모든
+ * 항목이 통과한다.
+ */
+const JOURNAL_MONEY_ABSOLUTE = 1_000_000;
+const JOURNAL_MONEY_BALANCE_RATE = 0.01;
+const JOURNAL_MONEY_FLOOR = 100_000;
+
+/**
+ * 일지에 설 수 있는 카테고리 — **비정기 항목만** (docs/simulation/finance.md §8.2).
+ *
+ * 중계권·스폰서십·주급·시설·상각은 매달, 매치데이·수당·생중계는 매경기 같은
+ * 자리에 선다. 아스날의 월 중계권은 £9M이라 언제나 문턱 위인데, 그 줄이 매달 서면
+ * 일지가 글자 벽이 되어 그날 실제로 벌어진 일을 덮는다.
+ *
+ * 이적료 축(`transfer_in`·`transfer_out`·`agent_fee`)도 빠진다 — 그 자리엔 이미
+ * 이적 일지가 그날 그 이름으로 서 있고, 금액은 그 줄이 `TRANSFER.fee`에서 적는다.
+ */
+const JOURNAL_MONEY_CATEGORIES: readonly FinanceCategory[] = ["prize"];
+
+/** 이 잔고에서 일지에 설 수 있는 최소 금액 */
+export function journalMoneyThreshold(balance: number): number {
+  return Math.max(
+    JOURNAL_MONEY_FLOOR,
+    Math.min(JOURNAL_MONEY_ABSOLUTE, balance * JOURNAL_MONEY_BALANCE_RATE),
+  );
+}
+
+/**
+ * 이 원장 한 줄이 달력 일지에 서는가 — 비정기 항목이면서 문턱을 넘을 때만.
+ * 서사가 만든 항목(`apply_finance_event`)은 정의상 일회성이라 카테고리를 묻지 않는다.
+ */
+export function isJournalMoney(entry: LedgerEntry, balance: number): boolean {
+  const oneOff =
+    entry.source === "narrative" || JOURNAL_MONEY_CATEGORIES.includes(categoryOf(entry));
+  return oneOff && entry.amount >= journalMoneyThreshold(balance);
+}
+
 /** PSR — 3시즌 누적 손실 한도 (실제 EPL 규정과 같은 £105M) */
 export const PSR_LOSS_LIMIT = 105_000_000;
 const PSR_SEASONS = 3;
@@ -190,12 +232,21 @@ const WAGE_RATIO_DANGER = 0.75;
 
 // ── 기본 유틸 ───────────────────────────────────────────
 
-function tierOf(teamId: string): 1 | 2 | 3 | 4 {
-  return teamCatalogById(teamId)?.tier ?? 3;
+/**
+ * 이 파일의 체급 통로 — **`state`가 두 문맥을 가른다.**
+ *
+ * 재정 공식은 대부분 세이브 위에서 돈다(`state`가 있다). 그런데 주급 기준선은
+ * 세계 생성 시점, 즉 세이브가 서기 **전에** 한 번 계산된다(`world/wages.ts` →
+ * `affordableWageBill`). 그래서 `state`를 마지막 optional 인자로 받아 있으면
+ * 세이브의 체급을, 없으면 카탈로그 체급을 읽는다 — 세이브가 있는데도 카탈로그를
+ * 읽으면 어드민의 체급 편집이 진행 중인 세이브의 살림에 샌다 (team.md §2).
+ */
+function tierOf(state: GameState | undefined, teamId: string): 1 | 2 | 3 | 4 {
+  return state ? tierOfTeamIn(state, teamId) : catalogTierOf(teamId);
 }
 
-function profileOf(teamId: string) {
-  return clubProfile(teamId, tierOf(teamId));
+function profileOf(state: GameState | undefined, teamId: string) {
+  return clubProfile(teamId, tierOf(state, teamId));
 }
 
 function poolOf(state: GameState, teamId: string): number {
@@ -203,28 +254,32 @@ function poolOf(state: GameState, teamId: string): number {
 }
 
 /** 브랜드가 중계 몫을 끌어올리는 배수 — 경제 수준 ÷ 리그 수준 (브랜드 보정만 남긴다) */
-function brandPoolLift(teamId: string): number {
+function brandPoolLift(state: GameState | undefined, teamId: string): number {
   const league = teamCatalogById(teamId)?.leagueId ?? leagueOfTeam(teamId);
   const level = leagueEconomyLevel(league);
-  return level > 0 ? clubEconomyLevel(teamId) / level : 1;
+  return level > 0 ? clubEconomyLevel(teamId, tierOf(state, teamId)) / level : 1;
 }
 
 /** 시설·아카데미 월 고정비 — tier 정액에 구단 경제 수준을 곱한다 */
-function facilityCostOf(teamId: string): number {
-  return FACILITY_MONTHLY[tierOf(teamId)] * clubEconomyLevel(teamId);
+function facilityCostOf(state: GameState | undefined, teamId: string): number {
+  const tier = tierOf(state, teamId);
+  return FACILITY_MONTHLY[tier] * clubEconomyLevel(teamId, tier);
 }
 
 /** 이자·세금 월 고정비 — 같은 자 */
-function financeCostOf(teamId: string): number {
-  return FINANCE_COST_MONTHLY[tierOf(teamId)] * clubEconomyLevel(teamId);
+function financeCostOf(state: GameState | undefined, teamId: string): number {
+  const tier = tierOf(state, teamId);
+  return FINANCE_COST_MONTHLY[tier] * clubEconomyLevel(teamId, tier);
 }
 
 /**
  * 경기 성적과 무관하게 매달 나가는 돈 (시설·아카데미 + 이자·세금).
  * 이게 인건비를 넘으면 그 리그는 구조적으로 가라앉는다 — §10.2가 세리에B에서 본 결함.
+ *
+ * `state`는 세이브 문맥에서만 넘어온다 (`tierOf` 주석).
  */
-export function monthlyFixedCostOf(teamId: string): number {
-  return facilityCostOf(teamId) + financeCostOf(teamId);
+export function monthlyFixedCostOf(teamId: string, state?: GameState): number {
+  return facilityCostOf(state, teamId) + financeCostOf(state, teamId);
 }
 
 /**
@@ -241,10 +296,12 @@ function equalShareFactor(state: GameState, teamId: string): number {
   return EQUAL_SHARE_LEAGUE_SCALED ? poolOf(state, teamId) : 1;
 }
 
-const money = (amount: number) =>
+/** 금액 표기 — 원장·다이제스트·달력 일지가 같은 자를 쓴다 */
+export const formatMoney = (amount: number) =>
   Math.abs(amount) >= 1_000_000
     ? `£${(amount / 1_000_000).toFixed(1)}M`
     : `£${Math.round(amount / 1000)}k`;
+const money = formatMoney;
 
 export function monthOf(date: string): string {
   return date.slice(0, 7);
@@ -339,7 +396,7 @@ function previousRankOf(state: GameState, teamId: string): number {
       last?.leagueId === undefined || last.leagueId === leagueOfTeamIn(state, teamId);
     if (last && sameLeague) return last.position;
   }
-  const tier = tierOf(teamId);
+  const tier = tierOf(state, teamId);
   return tier === 1 ? 3 : tier === 2 ? 7 : tier === 3 ? 12 : 17;
 }
 
@@ -380,8 +437,8 @@ export interface MatchdayRevenue {
  */
 export function matchdayRevenue(state: GameState, match: MatchRecord): MatchdayRevenue {
   const teamId = state.userTeamId;
-  const tier = tierOf(teamId);
-  const { capacity } = profileOf(teamId);
+  const tier = tierOf(state, teamId);
+  const { capacity } = profileOf(state, teamId);
   const opponentId = match.homeTeamId === teamId ? match.awayTeamId : match.homeTeamId;
 
   let occupancy = OCCUPANCY_BASE[tier];
@@ -406,7 +463,7 @@ export function matchdayRevenue(state: GameState, match: MatchRecord): MatchdayR
   }
 
   // 상대 매력도 · 대회 · 슬롯
-  const oppTier = tierOf(opponentId);
+  const oppTier = tierOf(state, opponentId);
   occupancy += oppTier === 1 ? 0.04 : oppTier === 2 ? 0.02 : oppTier === 4 ? -0.02 : 0;
   if (isCup(match.competitionId)) occupancy += 0.02;
   const dow = dayOfWeek(match.date);
@@ -521,10 +578,10 @@ export function applyAiMatchFinance(state: GameState, match: MatchRecord): void 
   for (const side of ["home", "away"] as const) {
     const teamId = side === "home" ? match.homeTeamId : match.awayTeamId;
     if (teamId === state.userTeamId) continue;
-    const tier = tierOf(teamId);
+    const tier = tierOf(state, teamId);
 
     if (side === "home" && !match.neutral) {
-      const { capacity } = profileOf(teamId);
+      const { capacity } = profileOf(state, teamId);
       const price =
         (leagueCatalogById(leagueOfTeamIn(state, teamId))?.avgTicketPrice ?? 30) *
         TICKET_TIER_FACTOR[tier] *
@@ -925,9 +982,9 @@ function postMonthlyItems(state: GameState): void {
       }
       continue;
     }
-    const tier = tierOf(team.id);
+    const tier = tierOf(state, team.id);
     const pool = poolOf(state, team.id);
-    const { commercialTier } = profileOf(team.id);
+    const { commercialTier } = profileOf(state, team.id);
 
     /**
      * 빚에는 이자가 붙는다 (§9.4) — **그 달을 시작한 잔고**에 붙이므로 이번 달 수입이
@@ -1025,13 +1082,13 @@ function postMonthlyItems(state: GameState): void {
       kind: "expense",
       category: "facility",
       label: "시설·아카데미 운영",
-      amount: facilityCostOf(team.id),
+      amount: facilityCostOf(state, team.id),
     });
     recordFinance(state, team.id, {
       kind: "expense",
       category: "facility",
       label: "이자·세금",
-      amount: financeCostOf(team.id),
+      amount: financeCostOf(state, team.id),
     });
 
     /**
@@ -1106,9 +1163,9 @@ const UNPLAYED_HOME_MATCHES = 19;
  * 전형적인 홈 경기 수입 — 매치데이 공식의 기본값(순위·폼·상대 보정과 난수 없이).
  * 경기를 아직 하나도 치르지 않은 날에도 읽히므로 서사 이벤트 한도의 자가 된다.
  */
-function typicalHomeGate(teamId: string, leagueId: string): number {
-  const tier = tierOf(teamId);
-  const { capacity } = profileOf(teamId);
+function typicalHomeGate(teamId: string, leagueId: string, state?: GameState): number {
+  const tier = tierOf(state, teamId);
+  const { capacity } = profileOf(state, teamId);
   const price = (leagueCatalogById(leagueId)?.avgTicketPrice ?? 30) * TICKET_TIER_FACTOR[tier];
   return capacity * OCCUPANCY_BASE[tier] * price * (1 + HOSPITALITY_RATE[tier]);
 }
@@ -1116,7 +1173,7 @@ function typicalHomeGate(teamId: string, leagueId: string): number {
 function unplayedLeagueMatchdayMonthly(state: GameState, teamId: string): number {
   const league = leagueOfTeamIn(state, teamId);
   if (isTopLeague(league)) return 0;
-  return (typicalHomeGate(teamId, league) * UNPLAYED_HOME_MATCHES) / BROADCAST_MONTHS;
+  return (typicalHomeGate(teamId, league, state) * UNPLAYED_HOME_MATCHES) / BROADCAST_MONTHS;
 }
 
 /**
@@ -1130,7 +1187,7 @@ function unplayedLeagueMatchdayMonthly(state: GameState, teamId: string): number
  * 자이지 그 시즌 성적표가 아니다.
  */
 export function annualRevenueEstimate(state: GameState, teamId: string): number {
-  return catalogRevenueEstimate(teamId, leagueOfTeamIn(state, teamId));
+  return catalogRevenueEstimate(teamId, leagueOfTeamIn(state, teamId), state);
 }
 
 /**
@@ -1150,9 +1207,11 @@ export function annualRevenueEstimate(state: GameState, teamId: string): number 
  */
 const WAGE_AFFORDABLE_SHARE = 0.85;
 
-export function affordableWageBill(teamId: string, leagueId?: string): number {
-  const net = catalogRevenueEstimate(teamId, leagueId) - monthlyFixedCostOf(teamId) * 12;
-  return Math.max(0, net * WAGE_AFFORDABLE_SHARE) / (1 + STAFF_WAGE_RATE[tierOf(teamId)]);
+/** `state`는 세이브 문맥에서만 넘어온다 (`tierOf` 주석) */
+export function affordableWageBill(teamId: string, leagueId?: string, state?: GameState): number {
+  const net =
+    catalogRevenueEstimate(teamId, leagueId, state) - monthlyFixedCostOf(teamId, state) * 12;
+  return Math.max(0, net * WAGE_AFFORDABLE_SHARE) / (1 + STAFF_WAGE_RATE[tierOf(state, teamId)]);
 }
 
 /**
@@ -1160,8 +1219,12 @@ export function affordableWageBill(teamId: string, leagueId?: string): number {
  * 없다(`initialWages`). 리그를 주지 않으면 카탈로그 리그로 본다. 승강은 세이브에만
  * 있으므로 t=0에서는 두 값이 같다.
  */
-export function catalogRevenueEstimate(teamId: string, leagueId = leagueOfTeam(teamId)): number {
-  const { commercialTier } = profileOf(teamId);
+export function catalogRevenueEstimate(
+  teamId: string,
+  leagueId = leagueOfTeam(teamId),
+  state?: GameState,
+): number {
+  const { commercialTier } = profileOf(state, teamId);
   /**
    * 중계 몫에 **브랜드 보정**을 얹는다 — 리그 풀을 전 구단에 고르게 곱하면 레알이
    * 브렌트포드와 같은 규모가 된다(실측 매출은 네 배 차이다). 실제로도 큰 브랜드는
@@ -1170,7 +1233,7 @@ export function catalogRevenueEstimate(teamId: string, leagueId = leagueOfTeam(t
    */
   const pool = Math.min(
     1,
-    (leagueCatalogById(leagueId)?.broadcastPool ?? 0.3) * brandPoolLift(teamId),
+    (leagueCatalogById(leagueId)?.broadcastPool ?? 0.3) * brandPoolLift(state, teamId),
   );
   const broadcast =
     (BROADCAST_EQUAL_SEASON +
@@ -1179,7 +1242,7 @@ export function catalogRevenueEstimate(teamId: string, leagueId = leagueOfTeam(t
     pool;
   const commercial =
     (COMMERCIAL_MONTHLY[commercialTier] + MERCHANDISING_MONTHLY[commercialTier]) * 12;
-  return broadcast + commercial + typicalHomeGate(teamId, leagueId) * UNPLAYED_HOME_MATCHES;
+  return broadcast + commercial + typicalHomeGate(teamId, leagueId, state) * UNPLAYED_HOME_MATCHES;
 }
 
 /** 스폰서 계약의 성과 조항 — 이번 시즌 대항전 참가와 지난 시즌 우승에서 파생 */
@@ -1358,6 +1421,20 @@ function buildReport(state: GameState, month: string, ledger: LedgerEntry[]): Fi
     seasonToDate,
     psr,
     notes,
+    /**
+     * 큰 비정기 항목은 **절단 전에** 여기로 옮겨 적는다 — 그러지 않으면 3개월 뒤
+     * 남는 것이 카테고리 합계뿐이라 "그 돈이 언제 들어왔나"에 답할 자리가 없다.
+     * 문턱의 기준은 그달을 마감한 잔고다 (§8.2).
+     */
+    highlights: entries
+      .filter((e) => isJournalMoney(e, closingBalance))
+      .map((e) => ({
+        date: e.date,
+        kind: e.kind,
+        category: categoryOf(e),
+        label: e.label,
+        amount: e.amount,
+      })),
   };
 }
 
@@ -1636,14 +1713,20 @@ export function narrativeEventCap(state: GameState, category: FinanceCategory): 
     case "travel_medical":
       return MEDICAL_COST.major * NARRATIVE_MEDICAL_FACTOR;
     case "facility":
-      return facilityCostOf(teamId) * NARRATIVE_FACILITY_FACTOR;
+      return facilityCostOf(state, teamId) * NARRATIVE_FACILITY_FACTOR;
     case "matchday":
     case "matchday_opex":
-      return typicalHomeGate(teamId, leagueOfTeamIn(state, teamId)) * NARRATIVE_MATCHDAY_FACTOR;
+      return (
+        typicalHomeGate(teamId, leagueOfTeamIn(state, teamId), state) * NARRATIVE_MATCHDAY_FACTOR
+      );
     case "commercial":
-      return COMMERCIAL_MONTHLY[profileOf(teamId).commercialTier] * NARRATIVE_COMMERCIAL_FACTOR;
+      return (
+        COMMERCIAL_MONTHLY[profileOf(state, teamId).commercialTier] * NARRATIVE_COMMERCIAL_FACTOR
+      );
     case "merchandising":
-      return MERCHANDISING_MONTHLY[profileOf(teamId).commercialTier] * NARRATIVE_COMMERCIAL_FACTOR;
+      return (
+        MERCHANDISING_MONTHLY[profileOf(state, teamId).commercialTier] * NARRATIVE_COMMERCIAL_FACTOR
+      );
     case "bonus":
     default:
       return bonusCap;

@@ -134,7 +134,15 @@ const TEAM_FLOOR: Record<1 | 2 | 3 | 4, number> = {
   4: 34, // 승격팀·잔류권 — 하한 없음 (배경이 전부다)
 };
 
-/** 부임 구단이 올려주는 하한 — 알 수 없는 팀이면 보정 없음 */
+/**
+ * 부임 구단이 올려주는 하한 — 알 수 없는 팀이면 보정 없음.
+ *
+ * 부임 **전**이라 세이브가 아직 없다 — 여기가 카탈로그 체급을 읽는 게 맞는 자리다
+ * (core/club-tier.ts).
+ *
+ * ⚠️ `catalogTierOf`의 폴백(3)을 쓰지 않는다 — 그 길로 가면 오타 난 팀 이름이
+ * 중견 1부 부임과 같은 하한을 받는다. 카탈로그에 **있는** 팀만 하한을 올린다.
+ */
 export function teamFloorOf(teamId: string | undefined): number {
   const tier = teamId ? teamCatalogById(teamId)?.tier : undefined;
   return tier ? TEAM_FLOOR[tier] : CAREER_BASE.none;

@@ -1543,6 +1543,7 @@ function affordabilityGate(
     state.userTeamId,
     weeklyWagesOf(state, state.userTeamId),
     USER_WAGE_HEADROOM,
+    state,
   );
   if (deal.weeklyWage > room) {
     return {

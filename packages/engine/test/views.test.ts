@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import { ageOf } from "@story-fm/domain";
 import {
   adaptationOf,
+  applyFinanceEvent,
   buildOfficeViews,
+  categoryOf,
   financeOf,
+  playerName,
   humanizePlayerIds,
   setTraining,
   startMatch,
@@ -168,6 +171,85 @@ describe("오피스 뷰 — 달력 (일정 축)", () => {
         .flat()
         .some((l) => l.kind === "match"),
     ).toBe(true);
+  });
+
+  it("이적 일지 줄은 이적료를 함께 적고 무상 이동엔 금액이 없다", () => {
+    const state = createTestGame();
+    const outside = state.players.filter((p) => p.teamId !== state.userTeamId);
+    const paid = outside[0]!;
+    const free = outside[1]!;
+    state.transfers.push(
+      {
+        id: "tr-paid",
+        gamePlayerId: paid.id,
+        windowId: null,
+        fromTeamId: paid.teamId,
+        toTeamId: state.userTeamId,
+        date: state.date,
+        type: "transfer",
+        fee: 37_500_000,
+      },
+      {
+        id: "tr-free",
+        gamePlayerId: free.id,
+        windowId: null,
+        fromTeamId: free.teamId,
+        toTeamId: state.userTeamId,
+        date: state.date,
+        type: "free",
+        fee: 0,
+      },
+    );
+
+    const lines = (buildOfficeViews(state).calendar.events[state.date] ?? []).filter(
+      (l) => l.kind === "transfer",
+    );
+    expect(lines.map((l) => l.text)).toEqual([
+      `${playerName(state, paid.id)} 영입 · £37.5M`,
+      `${playerName(state, free.id)} 영입`,
+    ]);
+    // 이적료는 이 줄만 말한다 — 원장의 이적료 축은 돈 줄을 따로 세우지 않는다
+    expect(
+      (buildOfficeViews(state).calendar.events[state.date] ?? []).some((l) => l.kind === "money"),
+    ).toBe(false);
+  });
+
+  it("큰 비정기 항목만 돈 줄로 서고 정액 항목은 서지 않는다", () => {
+    const state = createTestGame();
+    advanceDays(state, 10);
+    const day = state.date;
+    const label = "훈련장 잔디 전면 교체";
+    expect(
+      applyFinanceEvent(state, {
+        kind: "expense",
+        category: "facility",
+        amount: 1_500_000,
+        note: label,
+      }).ok,
+    ).toBe(true);
+
+    const events = buildOfficeViews(state).calendar.events;
+    // 진행 중인 달은 원장에서 파생한다 — 방향이 부호로 읽힌다
+    expect((events[day] ?? []).filter((l) => l.kind === "money").map((l) => l.text)).toContain(
+      `${label} −£1.5M`,
+    );
+
+    // 매달·매경기 같은 자리에 서는 항목은 문턱을 넘어도 일지에 없다
+    const moneyTexts = Object.values(events)
+      .flat()
+      .filter((l) => l.kind === "money")
+      .map((l) => l.text);
+    const FIXED = new Set(["broadcast_equal", "commercial", "player_wages", "staff_wages"]);
+    const fixed = financeOf(state, state.userTeamId).ledger.filter(
+      (e) => FIXED.has(categoryOf(e)) && e.amount >= 1_000_000,
+    );
+    expect(fixed.length).toBeGreaterThan(0); // 문턱을 넘는 정액 항목이 실제로 쌓여 있다
+    for (const e of fixed) {
+      expect(
+        moneyTexts.some((t) => t.startsWith(e.label)),
+        e.label,
+      ).toBe(false);
+    }
   });
 });
 
