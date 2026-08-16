@@ -10,11 +10,15 @@ import {
   domesticCupEntrants,
   isMarketOnlyLeague,
   isOutsideOurEconomy,
+  leagueCatalogById,
+  LEAGUE_FACTOR_EXPONENT,
   leagueOfTeam,
   marketBiasOf,
   marketValueOf,
   playersOf,
+  secondTierOf,
   windowOpenForTeam,
+  type GameState,
 } from "@story-fm/engine";
 import { createTestGame } from "./helpers";
 
@@ -174,11 +178,11 @@ describe("돈 성향과 복귀 저항", () => {
  * `leagueOfTeamIn`을 지나야 한다 (docs/data/game-state.md §1).
  */
 describe("시장은 세이브의 리그 소속을 본다", () => {
-  it("시장가는 지금 뛰는 리그의 계수를 쓴다", () => {
+  it("시장가는 지금 뛰는 리그의 보정을 쓴다", () => {
     const state = createTestGame();
     const player = playersOf(state, state.userTeamId)[0]!;
     const before = marketValueOf(state, player);
-    // 계수가 더 낮은 리그로 옮기면(1 → 5) 몸값이 따라 내려간다
+    // 경제 수준이 더 낮은 리그로 옮기면(EPL 1.00 → 리그 1 0.42) 몸값이 따라 내려간다
     state.leagueOf = { ...(state.leagueOf ?? {}), [state.userTeamId]: "ligue1" };
     expect(marketValueOf(state, player)).toBeLessThan(before);
   });
@@ -193,5 +197,73 @@ describe("시장은 세이브의 리그 소속을 본다", () => {
     state.leagueOf = { ...(state.leagueOf ?? {}), [state.userTeamId]: "mls" };
     expect(marketBiasOf(state, state.userTeamId)).toEqual(marketBiasOf(state, "intermiami"));
     expect(windowOpenForTeam(state, state.userTeamId)).not.toBeNull();
+  });
+});
+
+/**
+ * 몸값의 리그 보정은 **티어를 아는 축**(경제 수준)을 쓴다. 리그 계수(`coefficient`)는
+ * 나라 축이라 2부가 그 나라 1부와 같은 값이고, 승강은 언제나 한 나라 안에서 일어나므로
+ * 계수로는 강등이 몸값에 닿지 않는다 (docs/simulation/transfer.md §3).
+ */
+describe("리그 보정은 승강을 따라 움직인다", () => {
+  // 세계를 한 번만 세운다 — 리그 소속(`leagueOf`) 말고는 아무것도 건드리지 않는다
+  const state: GameState = createTestGame();
+  const home = leagueOfTeam(state.userTeamId);
+  const second = secondTierOf(home)!;
+  /** 반올림(10만 단위)이 비율을 흐리지 않도록 스쿼드 최상위를 쓴다 */
+  const player = [...playersOf(state, state.userTeamId)].sort(
+    (a, b) => b.attributes.overall - a.attributes.overall,
+  )[0]!;
+
+  /** 그 리그에서 뛴다면 이 선수는 얼마인가 */
+  const valueIn = (leagueId: string) => {
+    state.leagueOf = { ...(state.leagueOf ?? {}), [state.userTeamId]: leagueId };
+    return marketValueOf(state, player);
+  };
+
+  /** 어느 리그에서 강등해도 같은 비율이다 — 2부는 그 나라 1부의 0.15배다 */
+  const RELEGATION_RATIO = Math.pow(0.15, LEAGUE_FACTOR_EXPONENT);
+
+  it("강등하면 더 싸게, 승격하면 원래대로", () => {
+    const inTop = valueIn(home);
+    const inSecond = valueIn(second);
+    expect(inSecond).toBeLessThan(inTop);
+    expect(inSecond / inTop).toBeCloseTo(RELEGATION_RATIO, 2);
+    // 되돌아오는 것까지가 한 쌍이다 — 강등이 값을 영구히 깎으면 승격이 보상이 아니다
+    expect(valueIn(home)).toBe(inTop);
+  });
+
+  it("계수는 그대로인데도 값이 움직인다 — 나라 축이 아니라 티어 축이다", () => {
+    // 같은 나라 1·2부는 계수가 같다. 이 값에 비례시키던 때는 한 푼도 안 움직였다
+    expect(leagueCatalogById(second)!.coefficient).toBe(leagueCatalogById(home)!.coefficient);
+  });
+
+  it("눈금은 경제 수준의 거듭제곱이다 — 리그마다 문서의 표와 같은 값이 나온다", () => {
+    // 우리 팀은 EPL(경제 수준 1.00)이라 보정이 곧 기준점이고, 비율은 상대 리그의 눈금이다
+    expect(home).toBe("epl");
+    const inEpl = valueIn(home);
+
+    // transfer.md §3의 표 — 경제 수준^0.15
+    for (const [leagueId, economy] of [
+      ["laliga", 0.62],
+      ["ligue1", 0.42], // 5대 리그 중 가장 낮다 — 1부 사이의 폭은 승강보다 좁다
+      ["saudi", 0.45],
+      ["mls", 0.3],
+      ["championship", 0.15],
+      ["ligue2", 0.42 * 0.15],
+    ] as const) {
+      expect(valueIn(leagueId) / inEpl, leagueId).toBeCloseTo(
+        Math.pow(economy, LEAGUE_FACTOR_EXPONENT),
+        2,
+      );
+    }
+  });
+
+  it("시장 전용 리그는 헐값이 아니다 — 계수 20·21이 식에 딸려 들어가던 자리", () => {
+    const inEpl = valueIn(home);
+    for (const league of marketLeagues()) {
+      // 계수를 쓰던 때는 보정이 0.15·0.10이라 레전드가 동급의 7분의 1에 팔렸다
+      expect(valueIn(league.id) / inEpl, league.id).toBeGreaterThan(RELEGATION_RATIO);
+    }
   });
 });
