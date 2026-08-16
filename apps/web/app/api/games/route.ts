@@ -29,6 +29,10 @@ const CreateSchema = z.object({
  * | `GET /api/games` | 저장된 게임 목록 | 랜딩 (`app/page.tsx`) |
  * | `GET /api/games?catalog=1` | 리그·팀 카탈로그 | 새 게임 (`app/new/page.tsx`) |
  *
+ * 목록에는 **열지 못한 세이브도 실린다** (`readable: false`). 걸러 내면 디스크에
+ * 남은 파일이 화면에서 사라져 지울 길까지 없어진다 — 정렬은 코어가 이미 마쳤으니
+ * `listGameSummaries()`가 준 배열을 그대로 넘긴다.
+ *
  * 예전엔 한 응답에 둘 다 실었다. 랜딩은 `games`만 쓰는데 1부 96팀을
  * `boardExpectation`까지 계산해 함께 받았다 — 목록 한 줄을 읽으려고 카탈로그
  * 전체를 짓고 실어 보낸 셈이다.
