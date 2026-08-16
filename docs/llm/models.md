@@ -12,20 +12,20 @@
 ```yaml
 version: 1
 agents:
-  gm:            { provider: google, model: gemini-3.6-flash,      max_tokens: 64000 }
-  match-caster:  { provider: google, model: gemini-3.6-flash,      max_tokens: 64000 }
-  match-rater:   { provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000 }
-  training-rater:{ provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000 }
-  mood-rater:    { provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000 }
+  gm:            { provider: google, model: gemini-3.6-flash,      max_tokens: 64000, timeout_ms: 180000 }
+  match-caster:  { provider: google, model: gemini-3.6-flash,      max_tokens: 64000, timeout_ms: 180000 }
+  match-rater:   { provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000,  timeout_ms: 30000 }
+  training-rater:{ provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000,  timeout_ms: 30000 }
+  mood-rater:    { provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000,  timeout_ms: 30000 }
 ```
 
-| 에이전트 | 담당 | 출력 상한 |
-| --- | --- | --- |
-| `gm` | 평시 서사 · 의도 해석 · 판정 | 64,000 |
-| `match-caster` | 경기 중계 · 벤치 대화 | 64,000 |
-| `match-rater` | 경기 평점 재채점 | 8,000 |
-| `training-rater` | 훈련 결산 | 8,000 |
-| `mood-rater` | 심경 한 줄 | 8,000 |
+| 에이전트 | 담당 | 출력 상한 | 시한 |
+| --- | --- | --- | --- |
+| `gm` | 평시 서사 · 의도 해석 · 판정 | 64,000 | 180초 |
+| `match-caster` | 경기 중계 · 벤치 대화 | 64,000 | 180초 |
+| `match-rater` | 경기 평점 재채점 | 8,000 | 30초 |
+| `training-rater` | 훈련 결산 | 8,000 | 30초 |
+| `mood-rater` | 심경 한 줄 | 8,000 | 30초 |
 
 - **중계가 가벼운 이유는 사건을 코어가 정하기 때문**이다 — 모델은 xg가 굴린 결과를
   문장으로 옮길 뿐인데 90분에 스무 번 도니 지연이 곧 게임 속도다
@@ -35,6 +35,34 @@ agents:
 - **결산 셋을 따로 적는다** — 셋을 하나로 묶으면 그중 하나만 다른 모델로 보낼 수
   없다. 지금은 심경만 더 싼 곳으로 옮기는 것이 YAML 한 줄이다.
 - 제공자별 옵션(thinking level 등)은 그 에이전트 항목이 함께 갖는다.
+
+## 1-1. 시한 (`timeout_ms`)
+
+**`timeout_ms`는 `runTurn` 한 번 전체의 시한이다** — 도구 왕복 8회까지 포함한 한 턴이
+그 안에 끝나거나 실패한다. 제공자 SDK의 기본값에 맡기지 않는다: 셋이 서로 다르고
+어느 문서에도 적혀 있지 않아, 같은 설정으로 도는 세 어댑터가 서로 다른 계약을 지키게
+된다.
+
+- **시한은 팩토리가 건다** — 계측과 같은 자리다(`createGameLLM`). 모든 실호출이 그 문
+  하나를 지나므로 어댑터 셋에 같은 코드가 복제되지 않는다.
+- **어댑터는 같은 `AbortSignal`을 SDK에 넘긴다** — 거는 방식은 제공자마다 다르다
+  (Anthropic·OpenAI는 요청 옵션의 `signal`·`timeout`, Gemini는 설정의 `abortSignal`·
+  `httpOptions.timeout`). 넘기지 않으면 시한이 지나도 소켓이 그대로 살아 남는다.
+- ⚠️ **시한이 지나면 팩토리가 그 자리에서 실패를 만든다** — SDK가 신호를 무시해도
+  `runTurn`의 프로미스는 반드시 끝난다. 이것이 없으면 시한은 있으나 마나다.
+- **넘긴 호출은 이미 있는 실패 경로로 간다.** 새 상태를 만들지 않는다 — GM·중계는
+  오류가 올라가 화면이 배너로 알리고, 결산 셋은 삼키고 **코어 앵커가 남는다**
+  (agents.md §1·§4). 오류 문구는 `turnErrorMessage`의 "응답이 지연돼 턴을 취소했습니다".
+
+**왜 시한이 없으면 게임이 멎는가** — 한 게임의 턴·전술판 저장·스쿼드 편집은 프로세스
+안 뮤텍스 하나를 나눠 쓴다(`withGameLock`). 그 뮤텍스에는 시한이 없어서, 끝나지 않는
+LLM 호출 **하나**가 그 세이브의 모든 후속 요청을 영영 붙든다. 잠금에 시한을 거는 것은
+답이 아니다 — 두 요청이 같은 세이브를 동시에 쓰는 길이 열린다. 호출이 반드시 끝나면
+사슬은 저절로 풀린다.
+
+**라우트는 응답을 반드시 마감한다** — 턴 라우트 둘 다 `maxDuration`을 갖고, 스트리밍
+턴은 조용한 동안 `{"type":"ping"}`을 흘려 연결이 살아 있음을 알린다. 화면은 그 신호가
+끊기면 요청을 끊고 같은 실패 배너를 세운다 — 기다림이 끝나지 않는 자리는 없다.
 
 ## 2. 설정을 읽는 규칙
 
@@ -58,7 +86,7 @@ mock은 폴백이 아니라 **모드**이고 규칙 기반 오케스트레이터
 ## 3. 어댑터 — 제공자 중립 계약 하나 (`GameLLM`)
 
 ```
-runTurn({ system, history, user, stateNote?, tools?, maxTokens?, onText? })
+runTurn({ system, history, user, stateNote?, tools?, maxTokens?, onText?, signal? })
   → { text, history: StoredLlmHistory, usage, toolCallCount, stopReason }
 ```
 
@@ -66,15 +94,17 @@ runTurn({ system, history, user, stateNote?, tools?, maxTokens?, onText? })
 - 도구는 `GameToolSpec` — 제공자 중립 JSON Schema + `handle()`. 검증 실패·규칙 위반은
   한국어 메시지로 돌아가 모델이 고쳐 다시 부른다.
 - 한 턴의 도구 왕복 상한은 셋 다 **8회**(`MAX_TOOL_ITERATIONS`).
+- `signal`은 **팩토리가 시한에서 만들어 넣는다** — 호출하는 쪽(agents)이 주는 값이
+  아니다. 어댑터는 그 신호를 자기 SDK가 아는 자리로 옮기기만 한다 (§1-1).
 - 이력은 **제공자·모델로 태깅해 저장**한다(`StoredLlmHistory`). 태그가 다르면 그 이력은
   버리고 새로 시작한다 — 장부와 패킷이 남아 있어 경기는 이어진다.
 - `stateNote`(휘발 상태 스냅샷)는 어느 어댑터에서든 **저장 이력에 남기지 않는다**.
 
-| 어댑터 | 캐싱 | 상태 스냅샷 자리 | 사고 |
-| --- | --- | --- | --- |
-| Anthropic | `cache_control` 브레이크포인트(요청당 4개) | `role:"system"` 오퍼레이터 채널 | `thinking: disabled` |
-| Gemini | implicit (동일 프리픽스) | 유저 발화 앞에 접어 넣음 | `ThinkingLevel.MINIMAL` |
-| OpenAI | 자동 프롬프트 캐시 | `role:"developer"` | `reasoning_effort: "none"` |
+| 어댑터 | 캐싱 | 상태 스냅샷 자리 | 사고 | 시한을 거는 자리 |
+| --- | --- | --- | --- | --- |
+| Anthropic | `cache_control` 브레이크포인트(요청당 4개) | `role:"system"` 오퍼레이터 채널 | `thinking: disabled` | `messages.stream(body, { signal, timeout })` |
+| Gemini | implicit (동일 프리픽스) | 유저 발화 앞에 접어 넣음 | `ThinkingLevel.MINIMAL` | `chats.create`의 `config.abortSignal`·`httpOptions.timeout` |
+| OpenAI | 자동 프롬프트 캐시 | `role:"developer"` | `reasoning_effort: "none"` | `chat.completions.create(body, { signal, timeout })` |
 
 **Anthropic** — ⚠️ **화면에 흘릴 곳이 없어도 스트리밍으로 부른다.** SDK가
 `max_tokens > 21,333`인 비스트리밍 요청을 보내기도 전에 거부한다
@@ -132,12 +162,19 @@ chunk에만 실린다 — 그 옵션이 없으면 계측이 이 에이전트를 
 - **어댑터가 이력을 평탄화하지 않는다.** thought signature·function call id·thinking
   블록이 사라지면 다음 호출이 실패한다.
 - **키가 없으면 폴백하지 않고 실패한다** — 조용한 폴백은 설정과 실제를 갈라놓는다.
+- **시한 없는 모델 호출을 만들지 않는다.** 제공자 기본값은 셋이 다르고 적혀 있지도
+  않다 — 시한은 `config/llm.yml`에서만 온다.
+- **잠금에 시한을 걸지 않는다.** 끝나지 않는 호출은 호출 쪽에서 끝낸다 — 잠금을 시간으로
+  풀면 두 요청이 같은 세이브를 동시에 쓴다.
 
 ## 6. 미해결
 
-- 계측을 화면에 세울지 — 지금은 `llmUsage()`·`describeUsage()`로 코드에서만 읽는다.
+- 계측을 화면에 세울지 — 지금은 `usage-meter.ts`의 `llmUsage()`·`describeUsage()`로 코드에서만
+  읽고 `apps/web`에 부르는 자리가 없다.
 - OpenAI Responses API 이전 — 서사를 그쪽으로 옮겨 추론이 필요해지는 날.
-- 제공자별 캐시 적중 조건과 최소 프리픽스가 달라 히트율을 에이전트끼리 직접 비교할 수 없다.
+  `openai-adapter.ts`는 `chat.completions`만 부른다.
+- 제공자별 캐시 적중 조건과 최소 프리픽스가 달라 히트율을 에이전트끼리 직접 비교할 수 없다 —
+  `cacheHitRate`가 제공자 구분 없이 같은 비를 낸다.
 
 ## 코드 위치
 
@@ -147,7 +184,9 @@ chunk에만 실린다 — 그 옵션이 없으면 계측이 이 에이전트를 
 | 설정 로드·검증 | `packages/llm/src/config.ts` |
 | 제공자 중립 계약 | `packages/llm/src/game-llm.ts` |
 | 어댑터 3종 | `packages/llm/src/anthropic-adapter.ts` · `gemini-adapter.ts` · `openai-adapter.ts` |
-| 제공자 선택 + 계측 부착 | `packages/llm/src/factory.ts` |
+| 제공자 선택 + 계측·시한 부착 | `packages/llm/src/factory.ts` |
+| 시한 래퍼 | `packages/llm/src/deadline.ts` |
+| 턴 라우트 마감(`maxDuration`·ping) | `apps/web/app/api/games/[id]/turn/route.ts` · `turn/stream/route.ts` |
 | 설정 검증 테스트 | `packages/llm/test/agent-config.test.ts` |
 | 토큰 계측·예산 상한 | `packages/llm/src/usage-meter.ts` |
 | 모드 해석 (`LLM_MODE`) | `packages/agents/src/gm.ts` (`resolveLlmMode`) |

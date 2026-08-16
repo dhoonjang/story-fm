@@ -1,5 +1,6 @@
 import { AnthropicGameLLM } from "./anthropic-adapter";
 import { hasKey, keyNamesFor, type AgentConfig } from "./config";
+import { withDeadline } from "./deadline";
 import type { GameLLM } from "./game-llm";
 import { GeminiGameLLM } from "./gemini-adapter";
 import { OpenAiGameLLM } from "./openai-adapter";
@@ -19,9 +20,12 @@ function adapterFor(config: AgentConfig): GameLLM {
 /**
  * 제공자 선택의 단일 분기. agents 패키지는 구체 SDK/어댑터를 알지 않는다.
  *
- * **계측도 여기서 붙는다** — 모든 실호출이 이 문 하나를 지나므로, 어댑터 세 곳에
- * 같은 코드를 복제하지 않고도 세션 누적과 예산 상한이 빠짐없이 걸린다
- * (`usage-meter`). 설정의 에이전트 이름이 그대로 계측 키가 된다.
+ * **계측과 시한도 여기서 붙는다** — 모든 실호출이 이 문 하나를 지나므로, 어댑터 세
+ * 곳에 같은 코드를 복제하지 않고도 세션 누적과 예산 상한(`usage-meter`), 에이전트별
+ * 시한(`deadline`)이 빠짐없이 걸린다. 설정의 에이전트 이름이 그대로 계측 키가 된다.
+ *
+ * 순서 — 예산 판정이 바깥이다. 부르지도 않고 건너뛰는 호출에 시한을 재 봐야
+ * 소용이 없다.
  */
 export function createGameLLM(config: AgentConfig): GameLLM {
   if (!hasKey(config.provider)) {
@@ -30,5 +34,5 @@ export function createGameLLM(config: AgentConfig): GameLLM {
     );
   }
   const adapter = adapterFor(config);
-  return meterLlm(adapter, config.agent);
+  return meterLlm(withDeadline(adapter, config.agent, config.timeoutMs), config.agent);
 }
