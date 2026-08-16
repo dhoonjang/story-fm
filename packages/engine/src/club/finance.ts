@@ -493,7 +493,16 @@ export function applyMatchFinance(
     digest.push(
       `💰 관중 ${gate.attendance.toLocaleString("en-US")}명 (${Math.round(gate.occupancy * 100)}%) — 입장 수입 ${money(gate.income)}`,
     );
-  } else if (!home) {
+  } else if (!home && !isFriendly(match)) {
+    /**
+     * **친선 원정에는 비용을 매기지 않는다** — 주최 측이 부담하는 자리다.
+     *
+     * 실제 프리시즌은 초청이다: 판을 벌인 쪽이 게이트를 갖고 방문 클럽에는 출전료가
+     * 간다. 우리 모델엔 출전료가 없으므로, 방문 쪽에 정규 원정비(경기 하나 £120k)를
+     * 그대로 물리면 **한쪽만 있는 장부**가 된다. 리그전을 굴리지 않는 2부는 그 차액을
+     * 메울 리그 수입이 없어 프리시즌마다 구조적으로 깎인다 (finance.md §5.1).
+     * 새 상수를 만들지 않는 쪽이 근거가 분명하다 — 매기지 않는다.
+     */
     recordFinance(state, teamId, {
       kind: "expense",
       category: "travel_medical",
@@ -540,17 +549,16 @@ export function applyAiMatchFinance(state: GameState, match: MatchRecord): void 
     const teamId = side === "home" ? match.homeTeamId : match.awayTeamId;
     if (teamId === state.userTeamId) continue;
     const tier = tierOf(teamId);
+    const friendly = isFriendly(match);
 
     if (side === "home" && !match.neutral) {
       const { capacity } = profileOf(teamId);
-      const friendly = isFriendly(match);
       const price =
         (leagueCatalogById(leagueOfTeamIn(state, teamId))?.avgTicketPrice ?? 30) *
         TICKET_TIER_FACTOR[tier] *
         (isEuroCup(match.competitionId) ? 1.15 : 1) *
         (friendly ? FRIENDLY_TICKET_FACTOR : 1);
-      const occupancy =
-        OCCUPANCY_BASE[tier] * (friendly ? FRIENDLY_ATTENDANCE_FACTOR : 1);
+      const occupancy = OCCUPANCY_BASE[tier] * (friendly ? FRIENDLY_ATTENDANCE_FACTOR : 1);
       const gate = capacity * occupancy * price * (1 + HOSPITALITY_RATE[tier]);
       recordFinance(state, teamId, {
         kind: "income",
@@ -564,7 +572,8 @@ export function applyAiMatchFinance(state: GameState, match: MatchRecord): void 
         label: "경기 운영비",
         amount: gate * MATCHDAY_OPEX_RATE,
       });
-    } else if (side === "away") {
+    } else if (side === "away" && !friendly) {
+      // 친선 원정은 주최 측이 부담한다 — 유저 경기와 같은 규칙(`applyMatchFinance`)
       recordFinance(state, teamId, {
         kind: "expense",
         category: "travel_medical",
