@@ -1,4 +1,4 @@
-import { ageOf, normalizedLogCurve, type GamePlayer } from "@story-fm/domain";
+import { ageOf, normalizedLogCurve, FIRST_TEAM_LIMIT, type GamePlayer } from "@story-fm/domain";
 import { addDays, diffDays, seasonYear, windowOpenOn } from "../competition/calendar";
 import { isClubTeam, isTopFlight, leagueOfTeam } from "../data/team-catalog";
 import { isMarketOnlyLeague } from "../data/league-catalog";
@@ -55,13 +55,14 @@ const MIN_SQUAD = 18;
  */
 const MIN_FIRST_TEAM = 20;
 /**
- * 사는 쪽 상한 — **1군 인원으로 잰다.**
+ * 사는 쪽 상한 — **1군 인원으로 잰다.** 세계를 세울 때 등록이 지키는 상한과
+ * 같은 값이다 (`FIRST_TEAM_LIMIT`, domain/squad-rules.ts).
  *
  * ⚠️ 전체 스쿼드(2군·유스 포함)로 재면 안 된다. 1부 클럽의 전체 인원은 처음부터
  * 40~49명이라 상한 34로 두면 **거의 모든 구단이 살 수 없는 상태**가 된다 —
  * 시장이 열려도 하루 스물여섯 번의 시도가 전부 이 문에서 막혔다.
  */
-const MAX_FIRST_TEAM = 30;
+const MAX_FIRST_TEAM = FIRST_TEAM_LIMIT;
 /** 그래도 무한정 쌓이지는 않게 — 전체 인원의 최후 상한 */
 const MAX_SQUAD = 52;
 /**
@@ -487,6 +488,12 @@ function settle(state: GameState, deal: AiDeal, rng: () => number): GamePlayer |
     arrivals: new Map(),
     departures: new Map(),
   };
+  /**
+   * **사는 쪽 상한은 여기서도 본다.** 계획은 주 1회고 그 주의 장부(`ledger`)만
+   * 아는데, 지난 주에 정해져 아직 실행되지 않은 딜은 이번 주 계획에 보이지
+   * 않는다. 계획에서만 막으면 29명인 줄 알고 두 주 연속 사서 31·32명이 된다.
+   */
+  if (plannedFirstTeam(squads, deal.toTeamId, empty) >= MAX_FIRST_TEAM) return null;
 
   if (deal.kind === "loan") {
     if (player.loan) return null;
