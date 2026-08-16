@@ -87,11 +87,13 @@ const XP_BAR_H = 2.4;
 function ManagerRadar({
   attributes,
   xp,
+  xpPerLevel,
   attrCap,
 }: {
   attributes: Record<string, number | undefined>;
-  /** 축별 다음 칸까지의 진행 (0~100) */
+  /** 축별 누적 XP — `xpPerLevel`이 차면 축이 한 칸 오른다 */
   xp: Record<string, number | undefined>;
+  xpPerLevel: number;
   attrCap: number;
 }) {
   const axes = MANAGER_ATTRIBUTES;
@@ -137,7 +139,7 @@ function ManagerRadar({
            * 상한(`attrCap`)에 닿은 축은 더 자라지 않으므로 자국을 그리지 않는다.
            */
           const grows = values[i] < attrCap;
-          const progress = Math.max(0, Math.min(100, xp[a] ?? 0)) / 100;
+          const progress = Math.max(0, Math.min(1, (xp[a] ?? 0) / xpPerLevel));
           const barX =
             anchor === "middle" ? x - XP_BAR_W / 2 : anchor === "start" ? x : x - XP_BAR_W;
           return (
@@ -3088,6 +3090,7 @@ export function CareerView({
         <ManagerRadar
           attributes={squad.manager.attributes}
           xp={squad.manager.xp}
+          xpPerLevel={squad.manager.xpPerLevel}
           attrCap={squad.manager.attrCap}
         />
       </div>

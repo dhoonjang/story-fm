@@ -140,7 +140,7 @@ export function teamFloorOf(teamId: string | undefined): number {
   return tier ? TEAM_FLOOR[tier] : CAREER_BASE.none;
 }
 
-/** 시작 능력치의 범위 — 성장 상한(`ATTR_CAP` 90)과 다르다. 시작부터 90은 없다 */
+/** 시작 능력치의 범위 — 성장 상한(`MANAGER_ATTR_CAP` 90)과 다르다. 시작부터 90은 없다 */
 export const START_MIN_AXIS = 20;
 export const START_MAX_AXIS = 80;
 

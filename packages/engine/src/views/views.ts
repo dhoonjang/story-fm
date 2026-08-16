@@ -64,6 +64,7 @@ import {
 import type { ScoutGrade, ScoutReportCard } from "@story-fm/domain";
 import { listingOf } from "../market/negotiation";
 import { USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
+import { MANAGER_ATTR_CAP, MANAGER_XP_PER_LEVEL } from "../skills";
 import { marketValueOf, wageExpectationOf } from "../market/market";
 import { settlingPercent } from "../squad/settling";
 import { computeStandings, type StandingRow } from "../competition/season";
@@ -630,13 +631,6 @@ export interface MatchView {
   sentOff: string[];
 }
 
-/**
- * 감독 능력치의 성장 상한 — 원본은 `grantManagerXP`(skills/index.ts)의 `ATTR_CAP`이다.
- * 그쪽이 export하지 않아 여기서 값을 적는다. 상한에 닿은 축은 XP만 쌓이므로
- * 화면이 "자라는 중"이라고 말하면 거짓이 된다.
- */
-const MANAGER_ATTR_CAP = 90;
-
 export interface OfficeViews {
   /** 경기 중에만 채워진다 — 그 밖에는 null */
   match: MatchView | null;
@@ -655,9 +649,10 @@ export interface OfficeViews {
       warningLimit: number;
       /** 마지막 경고일 — 압박의 시계 (경고를 받은 적이 없으면 null) */
       lastWarnedOn: string | null;
-      /** 축별 누적 XP — 100이 한 칸. 훈련은 세션당 0.5라 소수로 쌓인다 */
+      /** 축별 누적 XP — 훈련은 세션당 0.5라 소수로 쌓인다 (뷰는 반올림해 싣는다) */
       xp: Record<string, number>;
-      /** 성장 상한 — 닿은 축은 XP만 쌓이고 더 자라지 않는다 */
+      /** 한 칸에 필요한 XP · 성장 상한 — 규칙 숫자의 원본은 `grantManagerXP`다 */
+      xpPerLevel: number;
       attrCap: number;
     };
     players: SquadViewRow[];
@@ -1392,9 +1387,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
        * 화면만 말하게 된다. 기억은 다시 선발이 될 때 `roleId`로 서서 온다.
        */
       const slotted = (liveSlot?.role ?? assignment?.role) === "starting";
-      const assignedRoleId = slotted
-        ? (liveSlot?.entry.roleId ?? assignment?.roleId)
-        : undefined;
+      const assignedRoleId = slotted ? (liveSlot?.entry.roleId ?? assignment?.roleId) : undefined;
       const shownOverall = observedOverall(p.attributes.overall, observation);
       const slotValue = assignedSlot ? slotFit(assignedSlot, assignedRoleId) : null;
       return {
@@ -1864,6 +1857,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         xp: Object.fromEntries(
           Object.entries(state.managerXP).map(([axis, value]) => [axis, Math.round(value)]),
         ),
+        xpPerLevel: MANAGER_XP_PER_LEVEL,
         attrCap: MANAGER_ATTR_CAP,
       },
       players,
