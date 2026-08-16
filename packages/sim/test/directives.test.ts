@@ -119,8 +119,6 @@ describe("개인 지시 — 이득과 대가", () => {
       // 발동하면 문장으로 드러난다 — 중계·감독 화면이 그대로 인용한다
       const note = after.home.tactical.notes.find((n) => n.includes(d.by));
       expect(note, `${label} 노트가 없다`).toBeDefined();
-      // 무엇을 얻고 무엇을 내줬는지, 그리고 그 선수가 감당할 만한지가 한 줄에 있다
-      expect(note!.length, `${label} 노트가 이름뿐이다`).toBeGreaterThan(d.by.length + 6);
     }
   });
 

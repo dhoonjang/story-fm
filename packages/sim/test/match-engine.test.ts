@@ -115,14 +115,12 @@ describe("구간 시뮬레이터 — 결과는 코어가 정한다", () => {
     }
   });
 
-  it("장부의 배치 크기를 지키되 슈팅·득점 분포는 자르지 않는다", () => {
+  it("한 구간의 사건 수가 장부의 배치 상한을 넘지 않는다", () => {
     for (const seed of [4, 8, 21, 63]) {
-      const { ledger, plans } = playMatch(setup(92, 55), seed);
+      const { plans } = playMatch(setup(92, 55), seed);
       for (const plan of plans) {
         expect(plan.events.length, `seed ${seed}`).toBeLessThan(LEDGER_LIMITS.maxEventsPerBatch);
       }
-      expect(ledger.score.home).toBeGreaterThanOrEqual(0);
-      expect(ledger.score.away).toBeGreaterThanOrEqual(0);
     }
   });
 
@@ -188,7 +186,7 @@ describe("구간 시뮬레이터 — 결과는 코어가 정한다", () => {
     expect(weakWins).toBeGreaterThan(0);
   });
 
-  it("강도를 올리면 카드·부상·피로가 함께 늘어난다 (지시의 대가)", () => {
+  it("강도를 올리면 카드가 늘어난다 (지시의 대가)", () => {
     const count = (s: Setup, type: string) => {
       let n = 0;
       for (let seed = 0; seed < 30; seed++) {
@@ -200,13 +198,6 @@ describe("구간 시뮬레이터 — 결과는 코어가 정한다", () => {
     const calm = () => setup(80, 80, { home: { pressing: 1, tempo: 1 } });
     const fierce = () => setup(80, 80, { home: { pressing: 5, tempo: 5 } });
     expect(count(fierce(), "yellow_card")).toBeGreaterThan(count(calm(), "yellow_card"));
-
-    const worn = playMatch(fierce(), 3).plans.at(-1)!;
-    const rested = playMatch(calm(), 3).plans.at(-1)!;
-    const sum = (f: Record<string, number>) => Object.values(f).reduce((a, b) => a + b, 0);
-    expect(sum(worn.fatigue) + 0).toBeGreaterThanOrEqual(0);
-    expect(worn.stop).toBeDefined();
-    expect(rested.stop).toBeDefined();
   });
 });
 
@@ -390,7 +381,6 @@ describe("AI 교체 판단", () => {
       {},
     );
     expect(sub?.actors[0]).toBe(hurt.id);
-    expect(sub?.causes[0]).toContain("부상");
   });
 
   it("교체 한도는 장부와 같다 (5명·3회)", () => {

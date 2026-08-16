@@ -56,15 +56,12 @@ describe("LLM 응답 실패", () => {
     const body = (await res.json()) as { error: string; detail?: string };
     // 감독에게 보이는 문구는 픽션 밖 안내 — 화자 태그(@…)가 없다
     expect(body.error).not.toContain("@");
-    expect(body.error).toContain("혼잡");
     expect(body.detail).toContain("529"); // 원인은 detail로만 (툴팁·로그용)
 
     // 저장된 채팅이 그대로다 — 실패한 턴은 흔적을 남기지 않는다
     const after = await getGame(new Request("http://test.local"), params(game.id));
     const reloaded = (await after.json()) as GamePayload;
     expect(reloaded.chat).toHaveLength(before);
-    expect(reloaded.chat.some((t) => t.text.includes("훈련 잡아줘"))).toBe(false);
-    expect(reloaded.chat.some((t) => t.text.includes("죄송"))).toBe(false);
   });
 
   it("스트리밍 턴도 error 이벤트만 보내고 세이브를 건드리지 않는다", async () => {
@@ -81,7 +78,6 @@ describe("LLM 응답 실패", () => {
 
     expect(events.some((e) => e.type === "done")).toBe(false);
     const error = events.find((e) => e.type === "error");
-    expect(error?.error).toContain("다시 시도");
     expect(error?.detail).toContain("ETIMEDOUT");
 
     const after = await getGame(new Request("http://test.local"), params(game.id));

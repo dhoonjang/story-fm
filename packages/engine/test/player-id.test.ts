@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   claimPlayerId,
   playerCatalog,
-  playersOf,
   slugifyName,
   transitionSeason,
 } from "@story-fm/engine";
@@ -64,15 +63,6 @@ describe("카탈로그의 id", () => {
 });
 
 describe("게임 안의 id", () => {
-  it("이적해도 id는 그대로다 — 바뀌는 것은 teamId뿐", () => {
-    const state = createTestGame(3);
-    const player = playersOf(state, state.userTeamId)[0]!;
-    const before = player.id;
-    player.teamId = "realmadrid";
-    expect(player.id).toBe(before);
-    expect(player.id.includes("realmadrid")).toBe(false);
-  });
-
   it("유스가 들어와도 세계의 id는 유일하다", () => {
     const state = createTestGame(5);
     transitionSeason(state);

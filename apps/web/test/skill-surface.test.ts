@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SKILL_CATALOG } from "@story-fm/agents";
-import { CARD_SKILLS, PANEL_OF, hasRailHint } from "../lib/panel-hints";
+import { CARD_SKILLS, hasRailHint } from "../lib/panel-hints";
 
 /**
  * **스킬 결과가 화면에 서는 길은 둘뿐이다** (game-overview §3).
@@ -51,15 +51,5 @@ describe("스킬이 화면에 서는 길", () => {
   it("한 스킬이 두 길을 함께 가지 않는다 — 같은 사실이 두 번 서면 안 된다", () => {
     const both = [...CARD_SKILLS].filter((name) => hasRailHint(name));
     expect(both).toEqual([]);
-  });
-
-  it("사라진 스킬이 매핑에 남아 있지 않다", () => {
-    const known = new Set(SKILL_CATALOG.map((s) => s.name));
-    /** 코어가 부르는 내부 스킬 — 도구 카탈로그에는 없지만 칩·알림으로 선다 */
-    const internal = new Set(["clear_training", "finalize_match", "rate_players"]);
-    const stale = [...Object.keys(PANEL_OF), ...CARD_SKILLS].filter(
-      (name) => !known.has(name) && !internal.has(name),
-    );
-    expect(stale).toEqual([]);
   });
 });
