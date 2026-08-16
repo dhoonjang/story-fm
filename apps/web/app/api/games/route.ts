@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
-  boardExpectation,
+  boardExpectationOfTier,
+  catalogTierOf,
   createGame,
   interpretBackgroundHeuristic,
   listGameSummaries,
@@ -33,8 +34,10 @@ const CreateSchema = z.object({
  * 전체를 짓고 실어 보낸 셈이다.
  *
  * 2부는 국내 컵 참가 전용이라 부임 대상이 아니다 — 1부만 내려보낸다. 보드 기대는
- * 화면이 tier로 따로 만들지 않고 시즌 평가가 쓰는 그 문구를 그대로 붙여 보낸다 —
- * 부임 전에 읽는 기대치와 시즌 끝에 평가받는 기대치가 같은 말이어야 한다.
+ * 화면이 tier로 따로 만들지 않고 시즌 평가가 쓰는 그 표(`boardExpectationOfTier`)를
+ * 그대로 쓴다 — 부임 전에 읽는 기대치와 시즌 끝에 평가받는 기대치가 같은 말이어야
+ * 한다. 다만 **여긴 부임 전이라 세이브가 없다**: 체급은 카탈로그가 답한다
+ * (진행 중인 세이브는 `boardExpectation(state, teamId)`가 세이브의 체급을 읽는다).
  */
 export function GET(request: Request) {
   if (new URL(request.url).searchParams.get("catalog") !== "1") {
@@ -46,7 +49,7 @@ export function GET(request: Request) {
     leagues,
     teams: teamCatalog()
       .filter((t) => ids.has(t.leagueId))
-      .map((t) => ({ ...t, expectation: boardExpectation(t.id).label })),
+      .map((t) => ({ ...t, expectation: boardExpectationOfTier(catalogTierOf(t.id)).label })),
   });
 }
 

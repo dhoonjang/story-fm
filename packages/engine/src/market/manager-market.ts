@@ -1,5 +1,6 @@
 import { topLeagues } from "../data/league-catalog";
-import { leagueOfTeam, teamCatalogById } from "../data/team-catalog";
+import { leagueOfTeam } from "../data/team-catalog";
+import { tierOfTeamIn } from "../core/club-tier";
 import { inventPersonName } from "../world/persona";
 import { makeRng, randInt } from "../core/rng";
 import { boardExpectation, computeStandings } from "../competition/season";
@@ -42,8 +43,9 @@ const SEAT: Record<number, { danger: number; sack: number }> = {
   4: { danger: 18, sack: 20 },
 };
 
-function seatOf(teamId: string): { danger: number; sack: number } {
-  return SEAT[teamCatalogById(teamId)?.tier ?? 3]!;
+/** 이 구단의 자리 — 체급은 **세이브가 갖는다**(team.md §2), 카탈로그가 아니다 */
+function seatOf(state: GameState, teamId: string): { danger: number; sack: number } {
+  return SEAT[tierOfTeamIn(state, teamId)]!;
 }
 /** 하루에 잘리는 감독 수 상한 — 리그가 하루아침에 뒤집히지 않게 */
 const SACKINGS_PER_DAY = 2;
@@ -112,7 +114,7 @@ export function runManagerMarket(state: GameState, digest: string[]): void {
     if (daysInCharge(state, team.id) < GRACE_DAYS) continue;
     const standing = seatStatus(state, team.id);
     if (!standing || standing.played < MIN_MATCHES) continue;
-    if (standing.position < seatOf(team.id).sack) continue;
+    if (standing.position < seatOf(state, team.id).sack) continue;
     /**
      * 같은 처지라고 다 잘리지는 않는다 — 구단마다 인내가 다르고, 그래야 리그가
      * 한 라운드에 우르르 감독을 바꾸지 않는다.
@@ -160,12 +162,12 @@ export function reviewUserSeat(state: GameState, digest: string[]): boolean {
   if (state.dismissal) return true;
   const standing = seatStatus(state, state.userTeamId);
   if (!standing || standing.played < USER_MIN_MATCHES) return false;
-  const seat = seatOf(state.userTeamId);
+  const seat = seatOf(state, state.userTeamId);
   const manager = state.manager;
   const warnings = manager.boardWarnings ?? 0;
 
   // 기대 위로 올라섰으면 경고가 하나 지워진다 — 되돌릴 수 있어야 압박이 이야기가 된다
-  if (standing.position <= boardExpectation(state.userTeamId).target) {
+  if (standing.position <= boardExpectation(state, state.userTeamId).target) {
     if (warnings > 0) {
       manager.boardWarnings = warnings - 1;
       digest.push(`보드가 한숨 돌렸다 — 경고 하나가 지워졌다 (${manager.boardWarnings}/3)`);
@@ -184,7 +186,7 @@ export function reviewUserSeat(state: GameState, digest: string[]): boolean {
   if (next < USER_WARNINGS_BEFORE_SACK || !sackable || board > USER_BOARD_FLOOR) {
     manager.boardWarnings = next;
     manager.reputation.board = Math.max(0, board - 6);
-    const expectation = boardExpectation(state.userTeamId);
+    const expectation = boardExpectation(state, state.userTeamId);
     digest.push(
       `⚠️ 보드가 성적을 문제 삼았다 — 기대는 ${expectation.label}인데 현재 ${standing.position}위다` +
         ` (경고 ${next}/${USER_WARNINGS_BEFORE_SACK})`,
@@ -197,7 +199,7 @@ export function reviewUserSeat(state: GameState, digest: string[]): boolean {
     on: state.date,
     season: state.season,
     teamId: state.userTeamId,
-    reason: `기대(${boardExpectation(state.userTeamId).label})에 한참 못 미쳤다`,
+    reason: `기대(${boardExpectation(state, state.userTeamId).label})에 한참 못 미쳤다`,
   };
   digest.push(`💼 경질 — ${teamName(state.userTeamId)}가 감독 계약을 해지했다`);
   pushNarrative(state, `${teamName(state.userTeamId)} 경질`, 5);

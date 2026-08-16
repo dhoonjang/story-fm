@@ -14,7 +14,7 @@ import {
   seasonYear,
 } from "./calendar";
 import { toFreeAgency } from "../market/departures";
-import { teamCatalog, isClubTeam, leagueOfTeam, teamCatalogById } from "../data/team-catalog";
+import { teamCatalog, isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import { cupCatalog, competitionShortName, isCup, isEuroCup } from "../data/cup-catalog";
 import { domesticCupCatalog } from "../data/domestic-cup-catalog";
 import { domesticChampion, domesticCupWinners, reviewDomesticCups } from "./domestic-cup";
@@ -28,6 +28,7 @@ import { buildEuroEntrants, entrantsOf, type LeagueTables } from "./europe";
 import { buildSeasonFixtures, isUserFixture } from "./fixtures";
 import { applyPromotionRelegation, leagueOfTeamIn, teamsOfLeagueIn } from "./promotion";
 import { recomputeClubTiers } from "./club-tier";
+import { tierOfTeamIn } from "../core/club-tier";
 import { generateYouthPlayer } from "../world/generate";
 import { assignSquadNumber } from "../squad/numbers";
 import {
@@ -184,14 +185,20 @@ export const SEASON_BUDGET_TOPUP: Record<number, number> = {
   4: 12_000_000,
 };
 
-export function seasonBudgetBaseOf(teamId: string): number {
-  const tier = teamCatalogById(teamId)?.tier ?? 3;
-  return Math.round((SEASON_BUDGET_TOPUP[tier] ?? 0) * clubEconomyLevel(teamId));
+export function seasonBudgetBaseOf(state: GameState, teamId: string): number {
+  const tier = tierOfTeamIn(state, teamId);
+  return Math.round((SEASON_BUDGET_TOPUP[tier] ?? 0) * clubEconomyLevel(teamId, tier));
 }
 
-/** 보드 기대치 — 팀 tier가 난이도를 만든다 (game-loop §1) */
-export function boardExpectation(teamId: string): { target: number; label: string } {
-  const tier = teamCatalogById(teamId)?.tier ?? 3;
+/**
+ * 보드 기대치 — 구단 체급이 난이도를 만든다 (game-loop §1).
+ *
+ * **두 문맥으로 갈라 둔다.** 세이브가 있으면 `boardExpectation(state, teamId)`가
+ * 세이브의 체급을 읽고(team.md §2 — 어드민의 카탈로그 편집이 진행 중인 세이브의
+ * 경질선을 그 자리에서 바꾸지 못하게), 부임 **전** 팀 목록처럼 세이브가 아직 없는
+ * 자리는 카탈로그 체급을 직접 넘겨 `boardExpectationOfTier`를 쓴다.
+ */
+export function boardExpectationOfTier(tier: 1 | 2 | 3 | 4): { target: number; label: string } {
   return tier === 1
     ? { target: 2, label: "우승 경쟁" }
     : tier === 2
@@ -199,6 +206,14 @@ export function boardExpectation(teamId: string): { target: number; label: strin
       : tier === 3
         ? { target: 12, label: "중위권 안착(12위 이내)" }
         : { target: 17, label: "잔류(17위 이내)" };
+}
+
+/** 이 세이브에서 그 구단이 지고 있는 기대 — 체급은 세이브가 갖는다 */
+export function boardExpectation(
+  state: GameState,
+  teamId: string,
+): { target: number; label: string } {
+  return boardExpectationOfTier(tierOfTeamIn(state, teamId));
 }
 
 function checkAchievements(state: GameState, position: number, row: StandingRow): void {
@@ -217,7 +232,7 @@ function checkAchievements(state: GameState, position: number, row: StandingRow)
     const player = playersOf(state, state.userTeamId).find((p) => p.id === topScorer.gamePlayerId);
     if (player) add("sharpshooter", "골잡이 조련사", `${player.name} 시즌 ${topScorer.goals}골`);
   }
-  const tier = teamCatalogById(state.userTeamId)?.tier;
+  const tier = tierOfTeamIn(state, state.userTeamId);
   if (tier === 4 && position <= 17) add("survivor", "생존왕", "잔류권 팀을 안전하게 지켜냈다");
 }
 
@@ -264,7 +279,7 @@ export function reviewSeason(state: GameState): string[] {
   const row = standings[position - 1];
   if (!row) return digest;
 
-  const expectation = boardExpectation(state.userTeamId);
+  const expectation = boardExpectation(state, state.userTeamId);
   const met = position <= expectation.target;
   const verdict = met
     ? `기대(${expectation.label})를 충족했다 — 보드가 만족한다`
@@ -365,7 +380,7 @@ export function transitionSeason(state: GameState): string[] {
      * 건너뛴다. 안 그러면 "무소속 아카데미"가 매년 신인을 찍어낸다.
      */
     const isFreePool = leagueOfTeam(team.id) === "free";
-    const tier = teamCatalogById(team.id)?.tier ?? 3;
+    const tier = tierOfTeamIn(state, team.id);
     const retirees: string[] = [];
     let squad = playersOf(state, team.id);
 
@@ -619,7 +634,9 @@ export function transitionSeason(state: GameState): string[] {
   state.date = nextCalendar.preseasonStart;
   const windows = buildTransferWindows(nextSeason);
   state.euroEntrants = hasCups(state.world)
-    ? buildEuroEntrants(nextSeason, state.seed, finalTables, cupWinners)
+    ? buildEuroEntrants(nextSeason, state.seed, finalTables, cupWinners, (id) =>
+        tierOfTeamIn(state, id),
+      )
     : [];
   /**
    * 감독이 2부로 내려갔으면 **그 리그도 리그전을 돈다** — 2부는 원래 컵 참가
@@ -654,7 +671,7 @@ export function transitionSeason(state: GameState): string[] {
     // 월초 정산은 이미 `isClubTeam`으로 거르는데 여기만 빠져 있어, 쓰이지 않는
     // 예산이 자유계약 선수단에 매 시즌 쌓였다.
     if (!isClubTeam(finance.teamId)) continue;
-    topUpTransferBudget(state, finance.teamId, seasonBudgetBaseOf(finance.teamId), digest);
+    topUpTransferBudget(state, finance.teamId, seasonBudgetBaseOf(state, finance.teamId), digest);
   }
 
   digest.push(
