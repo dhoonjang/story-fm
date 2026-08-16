@@ -332,9 +332,9 @@ when you `git add`.
 
 **The local loop is `pnpm typecheck`, `pnpm lint`, and `pnpm test <path>` for the
 files this branch actually wrote.** Nothing else. The full `pnpm test` and
-`pnpm e2e` run in GitHub Actions on every push to this branch
-(`.github/workflows/ci.yml`) — running them here just pays for the same minutes
-twice (AGENTS.md §5).
+`pnpm e2e` belong to GitHub Actions (`.github/workflows/ci.yml`), which runs them
+once `merge` marks this PR ready — running them here just pays for the same
+minutes twice (AGENTS.md §5).
 
 So finish like this:
 
@@ -345,9 +345,9 @@ git commit -m "<type>(<scope>): <무엇>" -- <named paths>
 git push origin HEAD
 ```
 
-Then **stop.** Do not sit and watch the CI run — `merge` is what reads its
-verdict, and a red check found there is fixed there. If you happen to see a
-failure before you hand off, say so in the report rather than silently fixing it.
+Then **stop.** There is no CI run to watch — the PR is a draft and the workflow
+skips drafts. `merge` starts it by marking the PR ready and reads its verdict
+there; a red check found there is fixed there.
 
 The PR is squash-merged, so **the PR title and body become the commit message on
 main** — keep the title a valid Conventional Commit subject and keep the body
