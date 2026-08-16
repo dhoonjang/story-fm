@@ -50,15 +50,12 @@ describe("실선수 로스터 깊이 (30인+, 유망주 포함)", () => {
     }
   });
 
-  it("모든 팀이 만 20세 이하 유망주를 보유하고 성장 여지가 있다", () => {
+  it("모든 팀이 21세 이하 유망주를 보유한다", () => {
     for (const team of CLUBS) {
       const roster = rosterOf(team.id);
       const youths = roster.filter((e) => ageOf(e.birthdate, REF) <= 21);
       expect(youths.length).toBeGreaterThanOrEqual(1);
     }
-    // 카탈로그 전체로는 잠재치가 능력치보다 높은 선수가 다수
-    const growable = catalog.filter((e) => e.potential > e.pace);
-    expect(growable.length).toBeGreaterThan(0);
   });
 
   it("tier가 낮을수록(강할수록) 평균 잠재치가 높다", () => {

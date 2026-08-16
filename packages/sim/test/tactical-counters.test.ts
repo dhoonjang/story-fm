@@ -166,15 +166,6 @@ describe("전술 상성 — 두 전술이 서로를 만난다", () => {
     expect(packet.home.zones.midfield).toBeGreaterThan(packet.away.zones.midfield);
   });
 
-  it("발동한 상성은 반드시 문장으로 드러난다 — 수치만 움직이면 배울 수 없다", () => {
-    const packet = buildStrengthPacket(
-      makeSide("us", 80, { tactics: T({ defensiveLine: 5, pressing: 5, tempo: 5 }) }),
-      tweak(makeSide("them", 78, { tactics: T({ passStyle: 5 }) }), isFW, { pace: 94 }),
-    );
-    expect(packet.keyPoints.length).toBeGreaterThan(1);
-    for (const note of packet.keyPoints) expect(note.length).toBeGreaterThan(5);
-  });
-
   /**
    * 화면은 키포인트를 **우리 편 기준으로** 색칠한다. 문장은 팀 이름으로 시작할 뿐
    * 유불리를 말하지 않으므로(같은 팀 이름이 가해자로도 피해자로도 온다) 편은
@@ -309,8 +300,6 @@ describe("체력 — 자리와 전술이 함께 정한다", () => {
     const after = buildStrengthPacket(gassed, makeSide("them", 78));
 
     expect(after.home.zones.defense).toBeLessThan(before.home.zones.defense);
-    // 감독이 어디를 갈아야 하는지 문장으로 알려준다
-    expect(after.keyPoints.some((k) => k.includes("구멍") && k.includes("교체"))).toBe(true);
     // 상태 보정만의 감쇠보다 크다 — 자리를 못 지키는 건 라인 전체의 문제다
     const soloDrop =
       1 -

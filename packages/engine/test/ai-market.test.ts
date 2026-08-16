@@ -30,6 +30,15 @@ function playSummer(seed = 7): GameState {
   return state;
 }
 
+/**
+ * 시드 7의 여름을 한 번만 굴려 나눠 쓴다 — 두 달을 전진시키는 데 몇 초가 든다.
+ * **읽기만 하는 케이스 전용**이다. 시계를 더 미는 케이스는 제 세이브를 만든다.
+ */
+let summer: GameState | null = null;
+function summerOnce(): GameState {
+  return (summer ??= playSummer());
+}
+
 function aiMoves(state: GameState) {
   return state.transfers.filter(
     (t) => t.fromTeamId !== state.userTeamId && t.toTeamId !== state.userTeamId,
@@ -37,7 +46,7 @@ function aiMoves(state: GameState) {
 }
 
 describe("이적창이 열리면 남의 팀끼리도 움직인다", () => {
-  const state = playSummer();
+  const state = summerOnce();
   const moves = aiMoves(state);
 
   it("여름 한 창에 이적과 임대가 함께 일어난다", () => {
@@ -132,14 +141,14 @@ describe("이적창이 열리면 남의 팀끼리도 움직인다", () => {
 
 describe("시장이 스쿼드를 무너뜨리지 않는다", () => {
   it("파는 쪽 1군은 매치데이 명단(20명) 아래로 내려가지 않는다", () => {
-    const state = playSummer();
+    const state = summerOnce();
     for (const team of state.teams.filter((t) => isTopFlight(t.id))) {
       expect(firstTeamPlayers(state, team.id).length, team.id).toBeGreaterThanOrEqual(20);
     }
   });
 
   it("사는 쪽도 무한정 쌓지 않는다", () => {
-    const state = playSummer();
+    const state = summerOnce();
     for (const team of state.teams.filter((t) => isTopFlight(t.id))) {
       expect(firstTeamPlayers(state, team.id).length, team.id).toBeLessThanOrEqual(31);
       expect(playersOf(state, team.id).length, team.id).toBeLessThanOrEqual(52);
@@ -165,7 +174,16 @@ describe("시장이 스쿼드를 무너뜨리지 않는다", () => {
   }, 60_000);
 });
 
-describe("한 시즌의 시장 규모", () => {
+/**
+ * 밸런스 하네스 — 한 시즌을 굴려 **시장의 크기**를 잰다.
+ *
+ * 기대값이 고정값이 아니라 밴드다(팀당 이적 1~6건 · 임대 0.5~4건 · 여름 비중 5할
+ * 초과). 시장이 도는지는 위의 케이스들이 보고, 여기서는 그 양이 실제 시장과 같은
+ * 자릿수인지를 본다. 한 시즌이 몇 분을 쓴다:
+ *
+ *   BALANCE=1 pnpm vitest run packages/engine/test/ai-market.test.ts
+ */
+describe.skipIf(!process.env.BALANCE)("한 시즌의 시장 규모", () => {
   it("1부 클럽당 이적 1~6건 · 임대 0.5~4건 — 실제 시장과 같은 자릿수", () => {
     const state = createTestGame(7);
     let guard = 420;

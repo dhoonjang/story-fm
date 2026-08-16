@@ -45,6 +45,44 @@ export function simSquad(state: GameState, teamId: string) {
 }
 
 /**
+ * 픽스처 원본 보관 — 같은 (seed, teamId, world)면 `createGame`의 결과도 같다.
+ *
+ * 세계를 새로 세우는 데 0.9초, 복제하는 데 0.04초다. 파일 하나가 픽스처를 수십 번
+ * 부르므로 원본은 한 번만 세우고 매번 복제해 넘긴다. 넘어가는 것은 언제나 복제본이라
+ * 테스트가 상태를 마음대로 고쳐도 다음 케이스에 새지 않는다.
+ * (vitest는 파일마다 모듈을 새로 읽으므로 이 캐시도 파일 안에서만 산다.)
+ */
+const fixtureCache = new Map<string, GameState>();
+let reuseFixtures = true;
+
+/**
+ * 원본 보관을 끄고 매번 세계를 새로 세운다 — **카탈로그를 고치는 파일만.**
+ *
+ * 보관은 "같은 인자면 같은 세계"를 전제한다. 어드민 편집은 카탈로그 자체를 바꿔
+ * 그 전제를 깬다: 편집 뒤에 시작한 게임은 편집을 반영해야 하는데, 보관된 원본은
+ * 편집 전의 세계다. 그런 파일은 첫 줄에서 이걸 부른다.
+ */
+export function rebuildEveryFixture(): void {
+  reuseFixtures = false;
+  fixtureCache.clear();
+}
+
+function fromCache(key: string, build: () => GameState): GameState {
+  if (!reuseFixtures) return build();
+  let origin = fixtureCache.get(key);
+  if (!origin) {
+    origin = build();
+    fixtureCache.set(key, origin);
+  }
+  const copy = structuredClone(origin);
+  // `createGame`이 부를 때마다 새로 찍는 두 값 — 복제본도 새로 받는다.
+  // 세이브는 id로 갈리므로, 이게 같으면 두 게임이 한 파일을 쓴다.
+  copy.id = `game-${copy.seed.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  copy.createdAt = new Date().toISOString();
+  return copy;
+}
+
+/**
  * 축소 세계의 새 게임 — 한 리그 8팀, 컵 없음 (`MINI_WORLD`).
  *
  * 시즌을 끝까지 도는 검증에 쓴다. 전체 세계는 한 시즌에 2,100여 경기를 굴려
@@ -52,14 +90,16 @@ export function simSquad(state: GameState, teamId: string) {
  * 컵·대항전 구조를 검증하는 테스트는 그 규모가 곧 대상이므로 전체 세계를 쓴다.
  */
 export function createMiniGame(seed = 42, teamId = "arsenal"): GameState {
-  const background = "K리그에서 뛰다 은퇴한 수비수 출신 분석가";
-  return createGame({
-    seed,
-    userTeamId: teamId,
-    managerName: "김감독",
-    background,
-    attributes: interpretBackgroundHeuristic(background, teamId),
-    world: MINI_WORLD,
+  return fromCache(`mini:${seed}:${teamId}`, () => {
+    const background = "K리그에서 뛰다 은퇴한 수비수 출신 분석가";
+    return createGame({
+      seed,
+      userTeamId: teamId,
+      managerName: "김감독",
+      background,
+      attributes: interpretBackgroundHeuristic(background, teamId),
+      world: MINI_WORLD,
+    });
   });
 }
 
@@ -108,14 +148,16 @@ export function drillUserTactics(state: GameState, days = 1): void {
 }
 
 export function createTestGame(seed = 42, teamId = "arsenal"): GameState {
-  const background = "K리그에서 뛰다 은퇴한 수비수 출신 분석가";
-  return createGame({
-    seed,
-    userTeamId: teamId,
-    managerName: "김감독",
-    background,
-    // 앱과 같은 경로 — 부임 구단의 격까지 넣어 판정한다
-    attributes: interpretBackgroundHeuristic(background, teamId),
+  return fromCache(`full:${seed}:${teamId}`, () => {
+    const background = "K리그에서 뛰다 은퇴한 수비수 출신 분석가";
+    return createGame({
+      seed,
+      userTeamId: teamId,
+      managerName: "김감독",
+      background,
+      // 앱과 같은 경로 — 부임 구단의 격까지 넣어 판정한다
+      attributes: interpretBackgroundHeuristic(background, teamId),
+    });
   });
 }
 

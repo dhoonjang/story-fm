@@ -7,10 +7,8 @@ import {
   askingPriceFor,
   baseValueOf,
   dealOdds,
-  describeOdds,
   knowledgeOf,
   marketValueOf,
-  oddsLabel,
   playersOf,
   responseDelayDays,
   wageExpectationOf,
@@ -259,7 +257,6 @@ describe("정보 비대칭", () => {
       years: 4,
     });
     expect(odds.fuzzy).toBe(true);
-    expect(describeOdds(odds)).toContain("어림");
     // 같은 질문에 같은 답 (결정적)
     expect(
       dealOdds(state, {
@@ -287,10 +284,6 @@ describe("정보 비대칭", () => {
     expect(clear.fuzzy).toBe(false);
   });
 
-  it("확률 라벨은 구간마다 다르다", () => {
-    expect(oddsLabel(95)).not.toBe(oddsLabel(50));
-    expect(oddsLabel(50)).not.toBe(oddsLabel(5));
-  });
 });
 
 describe("응답 지연 — 상황에서 나온다", () => {

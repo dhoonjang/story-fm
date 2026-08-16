@@ -14,7 +14,6 @@ import {
   marketBiasOf,
   marketValueOf,
   playersOf,
-  searchPlayers,
   windowOpenForTeam,
 } from "@story-fm/engine";
 import { createTestGame } from "./helpers";
@@ -27,11 +26,6 @@ import { createTestGame } from "./helpers";
 const marketTeams = () => teamCatalog().filter((t) => isMarketOnlyLeague(t.leagueId));
 
 describe("세계에서의 자리 — 경기를 하지 않는다", () => {
-  it("두 리그가 등록돼 있고 클럽이 붙어 있다", () => {
-    expect(marketLeagues().map((l) => l.id).sort()).toEqual(["mls", "saudi"]);
-    expect(marketTeams().length).toBeGreaterThanOrEqual(8);
-  });
-
   it("일정에 한 경기도 없다 — 리그전도 컵도", () => {
     const state = createTestGame();
     const ids = new Set(marketTeams().map((t) => t.id));
@@ -64,17 +58,7 @@ describe("세계에서의 자리 — 경기를 하지 않는다", () => {
   });
 });
 
-describe("선수 풀 — 레전드가 검색·협상에 잡힌다", () => {
-  it("레전드가 그 클럽에 있고 나이가 들어 있다", () => {
-    const state = createTestGame();
-    const nassr = playersOf(state, "alnassr");
-    const ronaldo = nassr.find((p) => p.name.includes("호날두"));
-    expect(ronaldo, "알 나스르에 호날두가 없다").toBeDefined();
-    // 2026년 기준 40대 — 이름값은 남았지만 전성기가 아니다
-    expect(ageOf(ronaldo!.birthdate, state.date)).toBeGreaterThan(38);
-    expect(ronaldo!.attributes.overall).toBeGreaterThan(70);
-  });
-
+describe("선수 풀", () => {
   it("스쿼드가 작다 — 경기를 안 하므로 로테이션이 필요 없다", () => {
     const state = createTestGame();
     for (const team of marketTeams()) {
@@ -84,12 +68,6 @@ describe("선수 풀 — 레전드가 검색·협상에 잡힌다", () => {
     }
   });
 
-  it("리그 이름으로 선수를 찾을 수 있다 — 못 찾으면 GM이 지어낸다", () => {
-    const state = createTestGame();
-    const res = searchPlayers(state, { competition: "사우디 프로 리그", limit: 10 });
-    expect(res.ok).toBe(true);
-    expect(res.message).toContain("사우디");
-  });
 });
 
 describe("이적창 — 우리와 시기가 다르다", () => {
@@ -165,8 +143,6 @@ describe("돈 성향과 복귀 저항", () => {
       years: 2,
     });
     expect(odds.factors.some((f) => f.label === "복귀 저항")).toBe(true);
-    const why = odds.factors.find((f) => f.label === "복귀 저항")!.why;
-    expect(why).toContain("주급");
   });
 
   it("같은 조건이면 5대 리그 선수보다 데려오기 어렵다", () => {

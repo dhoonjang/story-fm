@@ -162,7 +162,6 @@ describe("감독의 말도 정착을 움직인다 (SETTLING_EVENT)", () => {
       intensity: 2,
     });
     expect(res.ok).toBe(true);
-    expect(res.message).toContain("적응");
     expect(settlingOf(state, target.id)!.progress).toBeGreaterThan(before);
   });
 

@@ -12,7 +12,7 @@ import {
   userPlayers,
   weeklyWagesOf,
 } from "@story-fm/engine";
-import { advanceDays, advanceToMatchday, createTestGame } from "./helpers";
+import { advanceDays, advanceToMatchday, createMiniGame, createTestGame } from "./helpers";
 
 describe("advance_time — 시간은 스킬로만 흐른다 (season.md §5)", () => {
   it("프리시즌에서 다음 경기일까지 전진하면 개막전에서 멈춘다", () => {
@@ -75,7 +75,11 @@ describe("advance_time — 시간은 스킬로만 흐른다 (season.md §5)", ()
     for (const m of others) {
       if (m.date > state.date) continue;
       // 오늘 경기는 **킥오프 순서**를 탄다 — 우리보다 늦게 시작하는 경기는 아직 안 굴렀다
-      if (m.date === state.date && mineToday && (m.time ?? "15:00") >= (mineToday.time ?? "15:00")) {
+      if (
+        m.date === state.date &&
+        mineToday &&
+        (m.time ?? "15:00") >= (mineToday.time ?? "15:00")
+      ) {
         expect(m.result, `${m.id} 우리 킥오프 뒤 경기가 미리 굴렀다`).toBeNull();
         continue;
       }
@@ -296,16 +300,22 @@ describe("시간은 웬만하면 지나간다", () => {
   });
 
   it("멈춘 날에는 반드시 오늘이 기한인 협상이 있다", () => {
-    const state = createTestGame(5);
+    /**
+     * **축소 세계로 민다** — 시계가 서는 규칙은 세계의 크기와 무관하다(`tick.ts`의
+     * 같은 갈래를 탄다). 전체 세계로 한 시즌을 밀면 이 한 케이스가 30초를 넘게 쓴다.
+     */
+    const state = createMiniGame(5);
     /**
      * 한 시즌을 통째로 밀면서 **멈춘 이유를 전부 확인**한다. 부상이 나고 불만이
      * 생기고 오퍼가 들어와도 시계는 지나가야 하고, 섰다면 그 자리엔 반드시
      * 오늘이 마지막 날인 결정이 있어야 한다.
      */
     let injuries = 0;
+    let stops = 0;
     for (let i = 0; i < 120; i++) {
       const r = advanceTime(state, { days: 3 });
       if (r.stopped === "attention") {
+        stops++;
         const due = pendingVerdicts(state).filter((v) => v.negotiation.expiresOn === state.date);
         expect(due.length, `${state.date}에 기한 없는 멈춤`).toBeGreaterThan(0);
       }
@@ -315,6 +325,8 @@ describe("시간은 웬만하면 지나간다", () => {
     }
     // 부상은 실제로 났는데도 그것만으로는 서지 않았다는 것이 이 테스트의 요점이다
     expect(injuries).toBeGreaterThan(0);
+    // 한 번도 서지 않았다면 위 검사는 한 줄도 돌지 않은 것이다
+    expect(stops, "시계가 한 번도 서지 않아 멈춤의 이유를 확인하지 못했다").toBeGreaterThan(0);
   });
 
   it("오늘이 기한인 협상 앞에서는 선다 — 넘기면 사라지기 때문이다", () => {

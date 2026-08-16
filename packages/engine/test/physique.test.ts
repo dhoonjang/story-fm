@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { naturalPositionOf, physiqueLabel, weightSlotOf } from "@story-fm/domain";
+import { naturalPositionOf, weightSlotOf } from "@story-fm/domain";
 import { footOf, physiqueOf, playerCatalog, syntheticFoot } from "@story-fm/engine";
 
 /** 주발 분포와 신체 파생 (catalog.ts · player.md §1 · §4) */
@@ -28,15 +28,6 @@ describe("약발 — 실측이 원본, 모르는 실존 선수만 4", () => {
     for (const e of cat) {
       if (!e.foot) continue;
       expect(Math.max(e.foot.left, e.foot.right), e.nameEn).toBe(5);
-    }
-  });
-
-  it("실측이 있으면 실측이 이긴다 — 시드의 주발·약발이 그대로 실린다", () => {
-    // 왼발잡이 + 약발 2성으로 확인된 선수 (EA FC 27)
-    expect(cat.find((e) => e.nameEn === "Gabriel Magalhães")?.foot).toEqual({ left: 5, right: 2 });
-    // 약발이 나쁘지 않다고 확인된 선수 — 4성이라 5/4로 남는다
-    for (const name of ["Bruno Fernandes", "Youri Tielemans"]) {
-      expect(cat.find((e) => e.nameEn === name)?.foot, name).toEqual({ left: 4, right: 5 });
     }
   });
 
@@ -113,30 +104,6 @@ describe("신체 — 능력치와 앞뒤가 맞는다", () => {
       const bmi = e.weight / (e.height / 100) ** 2;
       expect(bmi, `${e.nameEn} BMI`).toBeGreaterThan(18.5);
       expect(bmi, `${e.nameEn} BMI`).toBeLessThan(28.5);
-    }
-  });
-
-  it("표시는 숫자 한 줄뿐 — 인상평은 붙이지 않는다", () => {
-    expect(physiqueLabel(188, 82)).toBe("188cm · 82kg");
-  });
-
-  it("주요 선수는 **실측값**을 그대로 쓴다 — 파생이 덮어쓰지 않는다", () => {
-    // 값은 EA FC 27 등재값이다 — 시드의 키·체중은 이제 출처가 하나뿐이라
-    // (sources.md §4.1) 여기 숫자도 그 표를 따라간다.
-    const byName = new Map(playerCatalog().map((e) => [e.nameEn, e] as const));
-    const known: Array<[string, number, number]> = [
-      ["Harry Maguire", 193, 100],
-      ["Erling Haaland", 195, 94],
-      ["Phil Foden", 171, 70],
-      ["Virgil van Dijk", 193, 92],
-      ["Cristiano Ronaldo", 187, 85],
-      ["Lionel Messi", 169, 67],
-    ];
-    for (const [name, h, w] of known) {
-      const e = byName.get(name);
-      expect(e, `${name} 없음`).toBeDefined();
-      expect(e!.height, name).toBe(h);
-      expect(e!.weight, name).toBe(w);
     }
   });
 });

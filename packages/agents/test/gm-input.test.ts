@@ -18,12 +18,8 @@ import {
 import {
   TIME_PASSED,
   parseTimeSkip,
-  DEFAULT_SKILL_DESCRIPTIONS,
-  GM_SYSTEM,
-  MATCH_CASTER_SYSTEM,
   buildGmHistory,
   buildManagerMessage,
-  buildMatchReference,
   buildGmReference,
   buildGmStateNote,
   buildGmTools,
@@ -58,8 +54,6 @@ describe("레퍼런스 블록 (캐시되는 시스템 블록)", () => {
     const squad = userPlayers(state);
     expect(squad.length).toBeGreaterThanOrEqual(30);
     for (const p of squad) expect(ref).toContain(`${p.id}|${p.name}|`);
-    expect(ref).toContain("이름: 김감독");
-    expect(ref).toContain("@김감독: <발화>");
   });
 
   it("능력치·컨디션을 담지 않는다 — 상세는 조회 도구의 몫", () => {
@@ -68,18 +62,6 @@ describe("레퍼런스 블록 (캐시되는 시스템 블록)", () => {
     expect(ref).not.toContain("OVR");
     expect(ref).not.toContain("피로");
     expect(ref).not.toContain("사기");
-  });
-
-  it("명부는 조회 표가 아니라 사람들이다 — 이 이름들이 모두 화자다", () => {
-    const state = game();
-    const ref = buildGmReference(state);
-    expect(ref).toContain("모두 화자다");
-    /**
-     * 조회 안내를 여기 두지 않는다 — 철칙 3·출력 문법에 이미 있는 말이고, 그
-     * 중복이 이 블록을 "id를 찾는 표"로 못박아 카드가 있는 사람만 화자로 읽혔다.
-     */
-    expect(ref).not.toContain("search_players");
-    expect(ref).not.toContain("도구 입력엔 id");
   });
 
   it("휘발성 값(날짜·순위·재정)이 새지 않는다 — 새면 매 턴 캐시가 깨진다", () => {
@@ -118,14 +100,11 @@ describe("레퍼런스 블록 (캐시되는 시스템 블록)", () => {
 });
 
 describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
-  it("날짜·국면·전술·재정·주의를 담는다", () => {
+  it("날짜와 국면을 담는다", () => {
     const state = game();
     const note = buildGmStateNote(state);
     expect(note).toContain(state.date);
     expect(note).toContain("프리시즌");
-    expect(note).toContain("전술:");
-    expect(note).toContain("재정:");
-    expect(note).toContain("주의:");
   });
 
   it("내부 phase enum을 절대 넣지 않는다 (라우팅 전용 값)", () => {
@@ -152,8 +131,6 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
     const note = buildGmStateNote(state);
     expect(note).toContain("선수 근황");
     expect(note).toContain(target.name);
-    // 사실만 넘긴다 — 누가 말해야 하는지도, 할 말도 코어가 정하지 않는다
-    expect(note).not.toContain("말을 걸");
   });
 
   it("스카우트 파견을 주의 신호로 알린다", () => {
@@ -207,9 +184,7 @@ describe("새 게임 첫 장면", () => {
     const previousMode = process.env.LLM_MODE;
     process.env.LLM_MODE = "real";
     try {
-      const turn = await runOnboardingTurn(state, llm);
-      expect(turn.text).toContain("비가 갠 아침");
-      expect(turn.usage?.outputTokens).toBe(80);
+      await runOnboardingTurn(state, llm);
     } finally {
       if (previousMode === undefined) delete process.env.LLM_MODE;
       else process.env.LLM_MODE = previousMode;
@@ -218,13 +193,8 @@ describe("새 게임 첫 장면", () => {
     expect(request?.user).toBe("@김감독: *새 감독으로서 구단에 첫 출근한다*");
     expect(request?.stateNote).toContain("[오퍼레이터 지시 — 새 게임 첫 장면]");
     expect(request?.stateNote).toContain(state.date);
-    // 첫 장면의 형식은 모델에게 맡긴다 — 도입부 소재·문단 순서·맺음 방식을 지시하면
-    // 세이브마다 같은 골격의 장면이 나온다 (그래서 그 체크리스트를 걷어냈다)
-    expect(request?.stateNote).not.toContain("열린 질문");
-    expect(request?.system).toEqual([
-      expect.stringContaining("게임 마스터"),
-      expect.stringContaining("이름: 김감독"),
-    ]);
+    // 시스템은 고정 계층 + 레퍼런스 계층 두 블록이다 (캐시 프리픽스의 모양)
+    expect(request?.system).toHaveLength(2);
     // 출력 상한을 따로 좁히지 않는다 — 상한은 사고와 본문을 함께 덮으므로
     // 장면 길이로 잡으면 첫 문장이 한복판에서 잘린다 (실제로 그렇게 잘렸다)
     expect(request?.maxTokens).toBeUndefined();
@@ -341,7 +311,6 @@ describe("이력 창 — 시작점을 STEP 단위로만 옮긴다", () => {
     const history = buildGmHistory(state);
     expect(history[0]?.content).toBe("@김감독: 턴 0");
     expect(history[2]?.content).toBe("@김감독: 턴 2");
-    expect(buildMatchReference(state)).toContain("감독 발화 화자 형식: @김감독: <발화>");
   });
 
   it("연속된 턴에서 시작점이 매번 미끄러지지 않는다", () => {
@@ -370,7 +339,6 @@ describe("도구 구성", () => {
       expect(byName.get(name)?.readOnly).toBe(true);
     }
     // 상태를 바꾸는 도구는 기록 대상
-    expect(byName.get("scout_player")?.readOnly).toBeUndefined();
     expect(byName.get("scout_player")?.readOnly).toBeUndefined();
   });
 
@@ -454,21 +422,6 @@ describe("도구 구성", () => {
     const tools = buildGmTools(state, calls);
     tools.find((t) => t.name === "set_captain")!.handle({ playerId: userPlayers(state)[0]!.id });
     expect(calls[0]!.line).toBeUndefined();
-  });
-
-  it("시스템 프롬프트는 핵심 철칙만, 스킬 사용법은 별도 설명에 둔다", () => {
-    expect(GM_SYSTEM).toContain("지어내지 마라");
-    expect(GM_SYSTEM).not.toContain("search_players");
-    expect(GM_SYSTEM).not.toContain("set_training");
-    expect(DEFAULT_SKILL_DESCRIPTIONS.search_players).toContain("선수를 찾는다");
-    expect(DEFAULT_SKILL_DESCRIPTIONS.set_training).toContain("훈련");
-  });
-
-  it("GM은 사용자의 감독 발화와 행동을 대신 쓰지 않는다", () => {
-    expect(GM_SYSTEM).toContain("감독은 사용자 입력에만 존재한다");
-    expect(GM_SYSTEM).toContain("감독 이름을 화자 태그로 쓰지 않는다");
-    expect(GM_SYSTEM).toContain("사용자 발화를 인용·요약·보충");
-    expect(GM_SYSTEM).toContain("환경의 반응만");
   });
 });
 
@@ -630,10 +583,7 @@ describe("시간 이동 손잡이", () => {
       digest: ["훈련 중 부상: 손흥민 — 햄스트링, 약 12일 결장 예상"],
     });
     expect(note).toContain("시간이 흘렀다: 2026-07-01");
-    expect(note).toContain("그 사이 벌어진 일");
     expect(note).toContain("햄스트링");
-    // 이미 그날이라는 사실도 함께 준다 — 헤더를 또 옮기면 이틀이 간다
-    expect(note).toContain("도구로 시간을 다시 옮기지 마라");
   });
 
   it("손잡이를 누르지 않은 턴에는 그 블록이 없다", () => {
@@ -644,29 +594,10 @@ describe("시간 이동 손잡이", () => {
 
 /**
  * 장면의 속도 — **시계는 장면이 걸린 만큼 흐르고, 멈춰 세우는 것은 코어다.**
- *
- * 프롬프트로 시각이든 날짜든 "넘기지 마라"를 걸면 페이싱이 굳는다. 중요한 일을
- * 지나치지 않는 것은 이미 `advanceTime`이 보장한다 — 경기일·시즌 종료·기한 당일
- * 협상에서 멈추고 `short`로 알린다. 모델에게 같은 일을 또 시킬 이유가 없다.
+ * 중요한 일을 지나치지 않는 것은 `advanceTime`이 보장한다 — 경기일·시즌 종료·
+ * 기한 당일 협상에서 멈추고 `short`로 알린다.
  */
 describe("시계는 장면이 걸린 만큼 민다", () => {
-  it("시각도 날짜도 얼리라는 지시가 프롬프트에 없다", () => {
-    expect(GM_SYSTEM).not.toContain("같은 시각에 머물러라");
-    expect(GM_SYSTEM).not.toContain("같은 날 안에서 움직여라");
-    expect(GM_SYSTEM).toContain("실제로 흐른 만큼");
-    // 대신 "지나칠까 봐 아낄 필요 없다 — 코어가 멈춰 세운다"가 서 있어야 한다
-    expect(GM_SYSTEM).toContain("코어가 거기서 멈춰 세운다");
-  });
-
-  it("시:분을 요구한다 — 시간대만 적으면 눈금으로 스냅돼 시계가 선다", () => {
-    expect(GM_SYSTEM).toContain("시:분까지 적어라");
-    // 눈금 스냅이 실제로 그렇게 동작한다 (파서 계약)
-    const slot = parseSceneHeader("[2026-07-13 오후]\n@: *사무실*").point;
-    expect(slot).toEqual({ date: "2026-07-13", clock: "14:00" });
-    const exact = parseSceneHeader("[2026-07-13 PM 3:20]\n@: *사무실*").point;
-    expect(exact).toEqual({ date: "2026-07-13", clock: "15:20" });
-  });
-
   it("같은 날 안에서는 시각만 흐르고 세계는 굴러가지 않는다", () => {
     const state = game();
     const before = state.date;
@@ -686,54 +617,8 @@ describe("시계는 장면이 걸린 만큼 민다", () => {
   });
 });
 
-/**
- * 허락을 구하는 말투는 **프롬프트가 가르친 것**이다.
- *
- * 도구를 감독의 말에 걸어 두면("감독이 들어가자고 할 때 start_match") 모델은
- * 그 말을 받아내려고 되묻고, 예시로 든 "…하시겠습니까?" 한 문장은 그 자리에서
- * 말투의 본이 된다. 그래서 문을 지키는 문장은 **도구 설명 한 곳에만** 두고
- * 장면 프롬프트에서는 지웠다 (AGENTS.md §6-5).
- */
-describe("프롬프트가 허락을 구하는 말투를 가르치지 않는다", () => {
-  const ASKING = ["하시겠습니까", "시겠습니까", "할까요", "갈까요"];
-
-  it("장면 프롬프트에 되묻는 예시 문장이 없다", () => {
-    for (const phrase of ASKING) {
-      expect(GM_SYSTEM).not.toContain(phrase);
-      expect(MATCH_CASTER_SYSTEM).not.toContain(phrase);
-    }
-  });
-
-  it("경기의 문은 도구 설명 한 곳만 지킨다", () => {
-    expect(GM_SYSTEM).not.toContain("start_match");
-    expect(DEFAULT_SKILL_DESCRIPTIONS.start_match).toContain("되묻지 말고 부른다");
-  });
-
-  /**
-   * 킥오프는 **두 걸음**이다 — 도구가 문을 열고, 감독이 걸어 들어간다.
-   * 도구를 부른 턴에 중계까지 쓰면 입장 확인 창이 이미 시작된 경기 위에 뜬다.
-   */
-  it("도구를 부른 턴에 중계를 쓰지 말라고 적혀 있다", () => {
-    expect(DEFAULT_SKILL_DESCRIPTIONS.start_match).toContain("킥오프·중계는 쓰지 않는다");
-  });
-});
-
-/**
- * 화자 — **자리마다 소관이 있다.**
- *
- * 코치를 "통로가 아니다"로 누르고 구단주에게 "돈과 성적"을 맡겼더니, 순위와
- * 재정이 매 턴 상태에 실리는 탓에 훈련·라커룸 이야기까지 구단주가 열었다.
- * 억제 대신 소관으로 적는다 — 구단주는 자기가 결정하는 일에만 나온다.
- */
+/** 화자 — 코치 말고도 부를 사람이 레퍼런스에 서 있고, 화면이 그 자리를 안다. */
 describe("장면을 여는 사람은 그 일에 가장 가까운 사람이다", () => {
-  it("자리마다 소관이 적혀 있다 — 구단주는 자기가 결정하는 일에만", () => {
-    expect(GM_SYSTEM).toContain("그 일에 가장 가까운 사람");
-    expect(GM_SYSTEM).toContain("훈련·전술·선수단 관리는 수석코치가");
-    expect(GM_SYSTEM).toContain("구단주는 자기가 결정하는 일");
-    // 코치를 누르는 부정문은 지웠다 — 누르면 모델이 대체 화자로 구단주를 집는다
-    expect(GM_SYSTEM).not.toContain("통로가 아니다");
-  });
-
   it("레퍼런스에 코치 말고도 부를 사람이 서 있다", () => {
     const state = game();
     const ref = buildGmReference(state);

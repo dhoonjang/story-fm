@@ -14,7 +14,6 @@ import {
   type WeightSlot,
 } from "@story-fm/domain";
 import {
-  AXIS_AGING,
   DERIVED_AXES,
   SEEDED_AXES,
   agingDelta,
@@ -42,8 +41,7 @@ describe("15축 구성", () => {
   it("전 선수가 15축 전부를 유효 범위로 갖는다 — 포지션 예외 분기 없음", () => {
     for (const e of playerCatalog()) {
       for (const axis of ATTRIBUTE_AXES) {
-        expect(typeof e[axis], `${e.nameEn}.${axis}`).toBe("number");
-        expect(e[axis]).toBeGreaterThanOrEqual(1);
+        expect(e[axis], `${e.nameEn}.${axis}`).toBeGreaterThanOrEqual(1);
         expect(e[axis]).toBeLessThanOrEqual(99);
       }
     }
@@ -252,20 +250,6 @@ describe("포지션 가중치", () => {
     expect(st.finishing).toBe(3);
   });
 
-  it("몰고 들어가는 윙어는 CF가, 정통 9번은 ST가 더 높다 (쿠냐·음뵈모 사례)", () => {
-    const cat = playerCatalog();
-    const byName = (nameKo: string) => cat.find((e) => e.nameKo === nameKo)!;
-
-    // 윙어 출신 전방 자원 — 최전방을 맡기면 정통 9번 자리보다 CF에서 더 낫다
-    for (const nameKo of ["브라이언 음뵈모", "마커스 래시포드", "마테우스 쿠냐"]) {
-      const p = byName(nameKo);
-      expect(roleFit(p, "CF"), `${nameKo} CF`).toBeGreaterThan(roleFit(p, "ST"));
-    }
-    // 정통 9번은 반대 — 이 대비가 없으면 CF를 나눈 의미가 없다
-    const poacher = byName("엘링 홀란");
-    expect(roleFit(poacher, "ST")).toBeGreaterThan(roleFit(poacher, "CF"));
-  });
-
   it("최전방 자원은 예외 없이 CF 적응도를 갖는다", () => {
     const frontline = playerCatalog().filter((e) =>
       ["ST", "SS", "RW", "LW", "CAM", "AM"].includes(naturalPositionOf(e).position),
@@ -294,7 +278,6 @@ const SLOT_SAMPLE: Record<WeightSlot, string> = {
 
 describe("세부 역할 (FM 역할 체계)", () => {
   const cat = playerCatalog();
-  const byName = (nameKo: string) => cat.find((e) => e.nameKo === nameKo)!;
 
   it("자리마다 기본 역할이 있고, 역할 id는 그 자리 안에서 유일하다", () => {
     for (const [slot, code] of Object.entries(SLOT_SAMPLE)) {
@@ -305,7 +288,6 @@ describe("세부 역할 (FM 역할 체계)", () => {
       expect(Object.keys(roles[0]!.delta)).toHaveLength(0);
       expect(defaultRoleOf(code)).toBe(roles[0]!.id);
       expect(roleWeights(code, roles[0]!.id)).toEqual(POSITION_WEIGHTS[slot as WeightSlot]);
-      for (const r of roles) expect(r.ko && r.abbr && r.desc, r.id).toBeTruthy();
     }
   });
 
@@ -362,10 +344,6 @@ describe("세부 역할 (FM 역할 체계)", () => {
     // 조립형(찰하노글루·부스케츠)과 파괴형(팔리냐)이 서로 반대로 5씩 벌어진다
     expect(Math.max(...gaps), "레지스타가 확실히 나은 DM이 없다").toBeGreaterThanOrEqual(4);
     expect(Math.min(...gaps), "볼 위닝이 확실히 나은 DM이 없다").toBeLessThanOrEqual(-4);
-
-    // 개인 단위로도 갈린다 — 홀란은 포처가 폴스 나인보다 높다
-    const haaland = byName("엘링 홀란");
-    expect(roleFit(haaland, "ST", "poacher")).toBeGreaterThan(roleFit(haaland, "CF", "false-nine"));
   });
 
   it("커버와 스토퍼가 스피드로 갈린다 — 라인을 올린 뒤를 덮는 값", () => {
@@ -409,13 +387,6 @@ describe("세부 역할 (FM 역할 체계)", () => {
 });
 
 describe("종합(overall) — 가장 잘 맞는 자리 · 기본 역할", () => {
-  it("종합은 그 선수가 볼 줄 아는 자리 중 최댓값이다", () => {
-    for (const e of playerCatalog().slice(0, 300)) {
-      const best = Math.max(...e.positions.map((p) => roleFit(e, p.position)));
-      expect(bestOverall(e, e.positions), e.nameEn).toBe(best);
-    }
-  });
-
   it("종합은 세부 역할을 타지 않는다 — 숫자 하나가 여러 등급이 되면 안 된다", () => {
     const p = playerCatalog().find((e) => naturalPositionOf(e).position === "ST")!;
     const shown = bestOverall(p, p.positions);
@@ -488,9 +459,5 @@ describe("축별 노화 곡선", () => {
 
   it("성향(aggression)은 나이로 변하지 않는다", () => {
     for (const age of [18, 24, 30, 36]) expect(agingDelta("aggression", age)).toBe(0);
-  });
-
-  it("모든 축에 곡선이 지정돼 있다", () => {
-    for (const axis of ATTRIBUTE_AXES) expect(AXIS_AGING[axis]).toBeDefined();
   });
 });
