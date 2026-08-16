@@ -169,9 +169,12 @@
 ## 10. 미해결
 
 - 적대적 교섭(이적 협상)의 별도 에이전트 분리 — 단일 GM이 양쪽을 다 연기하면 협상
-  긴장감이 무뎌진다.
-- 출력 후검증 실패 시 재생성 전략(부분 vs 전체).
-- 서사 아크·장기 기억 — `NARRATIVE_NOTE` 최근 4건만 스냅샷에 실린다.
+  긴장감이 무뎌진다. `gm-tools.ts`의 `respond_offer`가 GM 턴 안에서 양쪽을 판정하고
+  `config/llm.yml`에 협상 자리가 없다.
+- 출력 후검증 실패 시 재생성 전략(부분 vs 전체) — `retry.ts`의 `retryOnce`가 호출 전체를
+  한 번 다시 부르는 것뿐이다.
+- 서사 아크·장기 기억 — `gm-input.ts`의 `buildGmStateNote`가 `state.narrative` 최근 4건만
+  싣고 `buildGmHistory`는 12턴만 남긴다.
 
 ## 코드 위치
 

@@ -169,9 +169,12 @@ chunk에만 실린다 — 그 옵션이 없으면 계측이 이 에이전트를 
 
 ## 6. 미해결
 
-- 계측을 화면에 세울지 — 지금은 `llmUsage()`·`describeUsage()`로 코드에서만 읽는다.
+- 계측을 화면에 세울지 — 지금은 `usage-meter.ts`의 `llmUsage()`·`describeUsage()`로 코드에서만
+  읽고 `apps/web`에 부르는 자리가 없다.
 - OpenAI Responses API 이전 — 서사를 그쪽으로 옮겨 추론이 필요해지는 날.
-- 제공자별 캐시 적중 조건과 최소 프리픽스가 달라 히트율을 에이전트끼리 직접 비교할 수 없다.
+  `openai-adapter.ts`는 `chat.completions`만 부른다.
+- 제공자별 캐시 적중 조건과 최소 프리픽스가 달라 히트율을 에이전트끼리 직접 비교할 수 없다 —
+  `cacheHitRate`가 제공자 구분 없이 같은 비를 낸다.
 
 ## 코드 위치
 

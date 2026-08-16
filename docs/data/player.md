@@ -657,8 +657,10 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
 
 ## 12. 미해결
 
-- `positioning`이 수비 위치선정과 오프더볼 침투를 구분하지 못한다 — 축이 모자란
-  문제(파생 축의 구조적 평평함도 여기서 온다).
+- `positioning`이 수비 위치선정과 오프더볼 침투를 구분하지 못한다 —
+  `domain/src/player.ts`의 `ATTRIBUTE_AXES`에 축이 하나뿐이고 `deriveAxes`가
+  슬롯별 `attackShare`로 태클과 마무리를 섞어 만든다(파생 축의 구조적 평평함도
+  여기서 온다).
 - **DERIVED_AXES 8축의 실측 교체** — 현재는 시드 7축(6축+GK)에서 결정적으로
   파생한다(`deriveAxes`). `leadership`은 공개 소스가 가장 얇아 마지막까지 파생으로
   남을 수 있다.
@@ -667,9 +669,14 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
   먼저다(GK의 공중볼·힘은 `physical`이 아니라 `goalkeeping`에서). 파생 축이
   원천의 복사본이면 축을 늘린 의미가 없다(`aggression` r≈0.6 유지). 회귀는
   `attributes.test.ts`의 눈금 가드·연동 가드가 막는다. 현재 |오차|≤2 65%.
-- 스카우트 리포트의 깊이 — 분석형 오차(±3)를 더 좁히는 수단이 없다.
-- 자체 능력치 산정 모델 — 라이선스 부채 청산 장치 ([sources.md](sources.md) §7).
-- 가중치 지문·오차 폭·상태 계수 튜닝 — 분포 모니터링 하네스 미자동화.
+- 스카우트 리포트의 깊이 — `squad/scouting.ts`의
+  `OBSERVATION_MARGIN.analytical`이 `scouted`에서 3으로 고정이고, 리포트를 겹쳐도
+  좁아지는 것은 `potentialMargin`뿐이다.
+- 자체 능력치 산정 모델 — 실선수 축은 전부 `data/epl-players.ts`의
+  `RealPlayerSeed`에서 `world/catalog.ts`의 `entryFromSeed`가 파생한다. 라이선스
+  부채 청산 장치 ([sources.md](sources.md) §7).
+- 가중치 지문·오차 폭·상태 계수 튜닝 — 분포 모니터링 하네스가 없다
+  (`engine/test/balance-harness.test.ts`는 경기 결과만 본다).
 
 ## 코드 위치
 

@@ -173,8 +173,11 @@ advance_time(until):
 
 ## 8. 미해결
 
-- 오프시즌 흐름의 서사 연출(은퇴식·시상식)
-- 유스 아카데미 — 콜업은 있으나 육성 구조가 없다
+- 오프시즌 흐름의 서사 연출(은퇴식·시상식) — `competition/season.ts`의
+  `transitionSeason`이 은퇴를 원장 한 줄(`type: "retire"`)로만 남기고, 시상 자체가 없다
+- 유스 육성에 감독의 손잡이가 없다 — 2군은 `squad/development.ts`의
+  `applyMonthlyDevelopment`가 타 팀 선수와 같은 코어 곡선으로 키우고
+  (`training-report.ts`는 1군만 결산한다), 감독의 몫은 콜업뿐이다
 
 ## 코드 위치
 

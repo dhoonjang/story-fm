@@ -418,9 +418,10 @@ erDiagram
 
 ## 9. 미해결
 
-- **이벤트 소싱이 아니라 스냅샷이다.** `GameState` 전체를 매번 직렬화하므로
-  세이브 하나가 선수 5,000명을 담는다(사이드카 요약으로 목록만, 내용 주소 조각으로
-  **쓰기**만 우회하고 있다 — 직렬화 자체는 여전히 매번 돈다). 경기는 이미 이벤트
+- **이벤트 소싱이 아니라 스냅샷이다.** `core/persistence.ts`의 `saveGame`이
+  `GameState` 전체를 매번 직렬화하므로 세이브 하나가 선수 5,000명을 담는다
+  (목록만 `writeSummary`의 사이드카 요약으로, **쓰기**만 내용 주소 조각으로
+  우회하고 있다 — 직렬화 자체는 여전히 매번 돈다). 경기는 이미 이벤트
   로그이므로 나머지도 그쪽으로 옮길 여지가 있다.
 - **로드가 저장보다 열 배 비싸다.** 6MB 세이브 기준 `saveGame`은 28ms인데
   `loadGame`은 350ms이고, 그중 280ms가 `ensureSquadNumbers`다 — 미배정 선수마다
@@ -428,11 +429,13 @@ erDiagram
   왕복의 대부분이다.
 - **1부/2부 판정(`isTopFlight`)은 아직 카탈로그다.** 세계 생성과 축소 세계가 상태
   없이 부르는 자리라 §1의 두 갈래 규칙에서 빠져 있다 — 강등된 클럽이 AI 시장에서는
-  여전히 1부 구매자로 셈해진다.
+  여전히 1부 구매자로 셈해진다(`market/ai-market.ts`의 `planTransfer`).
 - **`pendingMatch.script`는 폐기된 필드**다. 구간 시뮬레이터가 사건을 그때그때
-  굴리므로 읽지 않지만 옛 세이브 호환으로 남아 있다.
-- **`GrowthSource.reserve`도 마찬가지** — 옛 2군 개발 프로그램의 출처라 이전
-  세이브의 로그에만 남는다.
+  굴리므로 `match/match-flow.ts`의 `startMatch`가 `null`을 쓸 뿐 읽는 곳이 없다
+  (`scriptCursor`도 같다).
+- **`GrowthSource.reserve`도 마찬가지** — `domain/src/records.ts`의 스키마에만
+  남고 `recordGrowth`를 부르는 곳은 `training`·`match`·`development`뿐이라 이전
+  세이브의 로그에만 있다.
 
 ## 코드 위치
 
