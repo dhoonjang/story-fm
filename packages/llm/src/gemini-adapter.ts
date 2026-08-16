@@ -128,6 +128,14 @@ export class GeminiGameLLM implements GameLLM {
       thinkingConfig: {
         thinkingLevel: thinkingLevel(this.config.thinkingLevel),
       },
+      /**
+       * 시한 — **chat 레벨 config에 넣는다.** `sendMessage`의 per-request config는
+       * chat config를 상속하지 않고 통째로 대체하므로(SDK 계약), 거기에 넣으면
+       * systemInstruction·도구·출력 상한이 함께 날아간다.
+       * 값은 요청 하나의 상한이고, 한 턴 전체는 `withDeadline`이 마감한다.
+       */
+      ...(req.signal ? { abortSignal: req.signal } : {}),
+      httpOptions: { timeout: this.config.timeoutMs },
       ...(tools.length > 0
         ? {
             tools: [

@@ -182,16 +182,23 @@
 
 ## 8. 미해결
 
-- **훈련 축이 아무 데도 안 걸린다** — 값과 화면만 서 있고 훈련 결산은 감독 능력치를 읽지
-  않는다.
-- **XP 경로가 리더십·전술에만 있다** — 훈련·협상·분석은 영원히 초기값이다. 협상을 많이
-  해도 협상가가 되지 않는다.
-- **보드 요청·목표 시스템이 없다.** 보드는 기대 표와 경고/경질만 한다 — 구단주가 무언가를
-  요구하는 길이 없다(설계는 [../data/people.md](../data/people.md)).
-- **이직 경로가 없다** — 경질이 곧 세이브의 끝이다. 스키마(`teamId`)는 준비돼 있다.
-- **업적이 다섯뿐**이고 `champion`의 설명이 리그 이름으로 하드코딩돼 있다.
-- 경고 횟수·XP·경질 상태는 화면 어디에도 없다 — digest 한 줄로만 보인다.
-- 전 축 90 도달 시나리오의 게임감이 검증되지 않았다.
+- **훈련 축이 아무 데도 안 걸린다** — `squad/training-report.ts`는 감독 능력치를 읽지
+  않고, `manager.attributes.training`을 읽는 곳은 `agents/gm-input.ts`의 프롬프트 한
+  줄뿐이다.
+- **XP 경로가 리더십·전술에만 있다** — `grantManagerXP` 호출부가 `skills/index.ts`의
+  팀토크·면담과 `match/match-flow.ts`뿐이라 훈련·협상·분석은 영원히 초기값이다. 협상을
+  많이 해도 협상가가 되지 않는다.
+- **보드 요청·목표 시스템이 없다.** `competition/season.ts`의 `boardExpectation`이
+  순위 목표 하나를 돌려주고 `market/manager-market.ts`가 경고·경질만 한다 — 구단주가
+  무언가를 요구하는 길이 없다(설계는 [../data/people.md](../data/people.md)).
+- **이직 경로가 없다** — `core/tick.ts`가 `state.dismissal`을 보면 진행을 멈출 뿐 새
+  자리를 주는 코드가 없어, 경질이 곧 세이브의 끝이다. 스키마(`teamId`)는 준비돼 있다.
+- **업적이 다섯뿐**(`competition/season.ts`의 `checkAchievements`)이고 `champion`의
+  설명이 리그 이름으로 하드코딩돼 있다.
+- 경고 횟수·XP·경질 상태는 화면 어디에도 없다 — `views/views.ts`도 `office.tsx`도
+  `boardWarnings`·`managerXP`·`dismissal`을 읽지 않아 digest 한 줄로만 보인다.
+- 전 축이 상한(`skills/index.ts`의 `ATTR_CAP` 90)에 닿은 시나리오의 게임감이 검증되지
+  않았다.
 
 ## 코드 위치
 

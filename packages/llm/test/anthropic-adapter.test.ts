@@ -58,6 +58,14 @@ function lastParams(client: Anthropic): Anthropic.MessageCreateParamsNonStreamin
   return calls[calls.length - 1]![0] as Anthropic.MessageCreateParamsNonStreaming;
 }
 
+/** 마지막 요청 옵션 — 시한·중단 신호 검증용 */
+function lastOptions(client: Anthropic): { timeout?: number; signal?: AbortSignal } {
+  const stream = (client.messages as unknown as { stream: { mock: { calls: unknown[][] } } })
+    .stream;
+  const calls = stream.mock.calls;
+  return (calls[calls.length - 1]![1] ?? {}) as { timeout?: number; signal?: AbortSignal };
+}
+
 const endTurn: Partial<Anthropic.Message> = {
   stop_reason: "end_turn",
   content: [{ type: "text", text: "@수석코치: 알겠습니다." }] as Anthropic.ContentBlock[],
@@ -79,6 +87,7 @@ const testConfig = {
   provider: "anthropic" as const,
   model: "test-model",
   maxTokens: 1024,
+  timeoutMs: 30_000,
 };
 
 describe("AnthropicGameLLM 요청 파라미터", () => {
@@ -92,6 +101,18 @@ describe("AnthropicGameLLM 요청 파라미터", () => {
     // 켜 두면 본문이 예산을 잃고 문장 한복판에서 잘린다
     expect(params.thinking).toEqual({ type: "disabled" });
     expect(params.max_tokens).toBe(testConfig.maxTokens);
+  });
+
+  it("설정의 시한과 중단 신호를 요청 옵션으로 넘긴다 — SDK 기본값에 기대지 않는다", async () => {
+    const stub = makeStubClient([endTurn]);
+    const llm = new AnthropicGameLLM(testConfig, stub);
+    const controller = new AbortController();
+    await llm.runTurn({ system: "sys", history: [], user: "안녕", signal: controller.signal });
+
+    const options = lastOptions(stub);
+    expect(options.timeout).toBe(testConfig.timeoutMs);
+    // 신호를 안 넘기면 시한이 지나도 소켓이 살아 토큰과 연결을 문다
+    expect(options.signal).toBe(controller.signal);
   });
 
   /**
@@ -344,7 +365,13 @@ describe("입력 조립 — 캐시 계층과 상태 채널", () => {
     ]);
 
     const llm = new AnthropicGameLLM(
-      { agent: "gm", provider: "anthropic", model: "legacy-model", maxTokens: 512 },
+      {
+        agent: "gm",
+        provider: "anthropic",
+        model: "legacy-model",
+        maxTokens: 512,
+        timeoutMs: 30_000,
+      },
       stub,
     );
     const result = await llm.runTurn({

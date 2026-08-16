@@ -153,9 +153,16 @@ describe("advance_time — 시간은 스킬로만 흐른다 (game-loop §3)", ()
     const before = finance.balance;
     const wages = weeklyWagesOf(state, state.userTeamId);
     advanceDays(state, 8); // 최소 한 번의 월요일 포함
-    const paid = finance.ledger.filter((l) => l.label === "선수단 주급");
-    expect(paid.length).toBeGreaterThanOrEqual(1);
-    for (const entry of paid) expect(entry.amount).toBe(wages);
+    // 유저 팀 원장은 선수별로 적힌다 (§4.2) — 한 날짜의 합이 계약 합이다
+    const paid = finance.ledger.filter((l) => l.category === "player_wages");
+    const byDate = new Map<string, number>();
+    for (const e of paid) byDate.set(e.date, (byDate.get(e.date) ?? 0) + e.amount);
+    expect(byDate.size).toBeGreaterThanOrEqual(1);
+    for (const [date, sum] of byDate) {
+      // 항목마다 반올림하므로 합계가 계약 합에서 항목 수만큼 어긋날 수 있다
+      const lines = paid.filter((e) => e.date === date).length;
+      expect(Math.abs(sum - wages), date).toBeLessThanOrEqual(lines);
+    }
     // 잔고는 원장 전체와 맞는다 — 같은 기간에 중계권·스폰서 수입도 들어온다
     const net = finance.ledger
       .filter((l) => l.accounting !== "noncash")
