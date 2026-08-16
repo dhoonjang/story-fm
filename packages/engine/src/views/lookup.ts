@@ -39,7 +39,8 @@ import {
 import { marketLeagues, topLeagues } from "../data/league-catalog";
 import { domesticCupEntrants, domesticStageMatches } from "../competition/domestic-cup";
 import { drawParts, drawTitle } from "../competition/draw-schedule";
-import { teamCatalog, leagueOfTeam, teamCatalogById } from "../data/team-catalog";
+import { teamCatalog, teamCatalogById } from "../data/team-catalog";
+import { leagueOfTeamIn, teamsOfLeagueIn } from "../competition/promotion";
 import { computeStandings } from "../competition/season";
 import {
   attributeLine,
@@ -304,7 +305,7 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
         ? domesticCupEntrants(competitionId)
         : isCup(competitionId)
           ? entrantsOf(state.euroEntrants, competitionId)
-          : teamCatalog().filter((t) => t.leagueId === competitionId).map((t) => t.id),
+          : teamsOfLeagueIn(state, competitionId),
     );
   }
 
@@ -670,7 +671,7 @@ export function teamProfile(state: GameState, team: string): LookupResult {
   const teamId = resolved.teamId;
 
   // 순위는 **그 팀의 리그** 기준 — 타 리그 팀에 우리 리그 표를 대면 순위가 없다
-  const standings = computeStandings(state, leagueOfTeam(teamId));
+  const standings = computeStandings(state, leagueOfTeamIn(state, teamId));
   const row = standings.find((r) => r.teamId === teamId);
   const rank = standings.findIndex((r) => r.teamId === teamId) + 1;
   const squad = playersOf(state, teamId);
@@ -727,7 +728,7 @@ export function teamProfile(state: GameState, team: string): LookupResult {
     .slice(0, 6);
 
   const lines = [
-    `[팀 프로필] ${teamName(teamId)} — ${competitionName(leagueOfTeam(teamId))} ` +
+    `[팀 프로필] ${teamName(teamId)} — ${competitionName(leagueOfTeamIn(state, teamId))} ` +
       (row && row.played > 0
         ? `${rank || "?"}위 (${row.played}경기 ${row.wins}승 ${row.draws}무 ${row.losses}패 · 승점 ${row.points} · 득실 ${row.goalDiff >= 0 ? "+" : ""}${row.goalDiff})`
         : "순위 미정 (아직 경기 없음)"),
@@ -915,7 +916,7 @@ function cupBracketView(state: GameState, cupId: string): LookupResult {
 }
 
 function standingsView(state: GameState, input: LeagueViewInput): LookupResult {
-  let competitionId = leagueOfTeam(state.userTeamId);
+  let competitionId = leagueOfTeamIn(state, state.userTeamId);
   if (input.competition) {
     const resolved = resolveCompetitionId(input.competition);
     if (!resolved) {
@@ -929,7 +930,7 @@ function standingsView(state: GameState, input: LeagueViewInput): LookupResult {
     // 팀을 주면 그 팀이 속한 리그의 순위표를 본다
     const team = resolveTeam(state, input.team);
     if (!team.ok) return team;
-    competitionId = leagueOfTeam(team.teamId);
+    competitionId = leagueOfTeamIn(state, team.teamId);
   }
 
   // 국내 컵은 순수 녹아웃이라 순위표가 없다 — 대신 대진표를 돌려준다
@@ -998,7 +999,7 @@ function fixturesView(state: GameState, input: LeagueViewInput): LookupResult {
     }
   } else if (teamId === null) {
     // 팀을 안 좁혔으면 5대 리그 전 경기가 쏟아진다 — 우리 리그로 기본을 잡는다
-    competitionId = leagueOfTeam(state.userTeamId);
+    competitionId = leagueOfTeamIn(state, state.userTeamId);
   }
 
   const pool = state.matches
@@ -1208,7 +1209,7 @@ export function scheduleView(state: GameState, input: ScheduleViewInput = {}): L
  * `SEASON_RECORD`가 과거의 유일한 원본이다).
  */
 export function careerView(state: GameState): LookupResult {
-  const league = leagueOfTeam(state.userTeamId);
+  const league = leagueOfTeamIn(state, state.userTeamId);
   const table = computeStandings(state, league);
   const row = table.find((r) => r.teamId === state.userTeamId);
   const rank = table.findIndex((r) => r.teamId === state.userTeamId) + 1;

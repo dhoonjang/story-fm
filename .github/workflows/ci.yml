@@ -1,0 +1,92 @@
+name: CI
+
+# 검증의 자리는 여기다 — 로컬은 lint·typecheck와 방금 쓴 코드의 좁은 테스트까지,
+# 전체 test와 e2e는 이 워크플로가 돌린다 (AGENTS.md §5).
+# 드래프트 PR에도 돈다: `resolve`가 여는 PR은 드래프트이고, `merge`는 그 결과를
+# 확인하고 나서야 ready로 올린다.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+
+# 같은 브랜치에 푸시가 이어지면 앞선 실행은 버린다 — 프라이빗 저장소라 러너 분이
+# 과금되고, 어차피 마지막 커밋의 결과만 머지 게이트로 쓴다.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    name: lint + typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      # lint는 typecheck가 깨져도 볼 값이 있다 — 한 잡에서 둘 다 끝까지 돌린다
+      - if: ${{ !cancelled() }}
+        run: pnpm lint
+
+  test:
+    name: unit + api
+    runs-on: ubuntu-latest
+    # 시즌 완주형 테스트가 있어 단독으로도 분 단위를 쓴다 (vitest.config.ts)
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # LLM 키는 주지 않는다 — 코어 테스트는 LLM 없이 도는 것이 규약이고,
+      # 키가 없어야 실제로 그런지 확인된다 (AGENTS.md §5)
+      - run: pnpm test
+
+  e2e:
+    name: e2e (playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # 브라우저 바이너리는 Playwright 버전이 바뀔 때만 새로 받는다
+      - name: Resolve playwright version
+        id: pw
+        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: pw-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ steps.pw.outputs.version }}
+      - run: pnpm exec playwright install --with-deps chromium
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+      - run: pnpm exec playwright install-deps chromium
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+
+      # playwright.config.ts가 LLM_MODE=mock·포트·데이터 디렉터리를 모두 쥔다.
+      # CI에서는 reuseExistingServer가 꺼져 매번 제 dev 서버를 띄운다.
+      - run: pnpm e2e
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
