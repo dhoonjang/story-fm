@@ -184,7 +184,9 @@ describe("mock GM — 유저 여정 시나리오", () => {
     const state = newGame(13);
     runMockGmTurn(state, "경기일로 가자");
     runMockGmTurn(state, "경기 시작");
-    if (state.phase !== "match") return; // 이미 끝났으면 스킵 (짧은 경기 시드)
+    expect(state.phase).toBe("match");
+    // **첫 인-매치 턴은 킥오프 휘슬이다** — 도구를 부르지 않는 자리라 한 턴 흘린다
+    expect(runMockGmTurn(state, "계속").toolCalls).toHaveLength(0);
     const before = userPlayers(state)[0]?.state.condition ?? 0;
     const turn = runMockGmTurn(state, "다들 잘하고 있다고 한마디 해줘");
     expect(turn.toolCalls.map((c) => c.name)).toContain("team_talk");

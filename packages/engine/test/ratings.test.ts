@@ -14,8 +14,9 @@ import {
   startMatch,
   userPlayers,
   userSide,
+  isFriendly,
 } from "@story-fm/engine";
-import { advanceToMatchday, createTestGame, playMockMatch } from "./helpers";
+import { advanceToMatchday, createTestGame, playMockMatch, playPreseason } from "./helpers";
 
 /** 경기 평점 — 장부 사실만으로 결정적으로 매긴다 (ratings.ts) */
 
@@ -148,6 +149,8 @@ describe("경기가 기록으로 남는다", () => {
 
   it("골 이벤트의 두 번째 선수는 도움이다 — 득점으로 세지 않는다", () => {
     const state = createTestGame();
+    // 시즌 기록을 보는 시험이라 리그 개막까지 간다 — 친선은 장부에 남지 않는다
+    playPreseason(state);
     advanceToMatchday(state);
     expect(startMatch(state).ok).toBe(true);
     const pending = state.pendingMatch;
@@ -280,10 +283,16 @@ describe("평점 브리프 — LLM 채점의 입력 (코어가 만든다)", () =
 describe("LLM 평점 반영 — 코어는 가능한 판정만 받는다", () => {
   const played = () => {
     const state = createTestGame();
+    // 보정분이 시즌 합계를 따라 움직이는지 보는 시험이라 리그 경기여야 한다 —
+    // 친선은 앵커도 보정분도 시즌 합계에 안 들어간다 (season.md §2)
+    playPreseason(state);
     advanceToMatchday(state);
     playMockMatch(state);
     const match = state.matches.find(
-      (m) => m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId,
+      (m) =>
+        m.result !== null &&
+        !isFriendly(m) &&
+        (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
     );
     if (!match?.result?.ratings) throw new Error("평점 없음");
     const [playerId, anchor] = Object.entries(match.result.ratings)[0] as [string, number];

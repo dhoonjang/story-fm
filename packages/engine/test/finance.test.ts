@@ -847,8 +847,14 @@ describe("밸런스 기준선", () => {
     // ⚠️ 하단을 £85M으로 내렸다 — 시뮬 밸런스를 고친 뒤로 **최종 순위가 시드마다
     // 갈리기 때문**이다(우승도 중위권도 나온다). 순위 상금이 그만큼 흔들리므로
     // 밴드가 한 시즌의 성적 하나에 걸려서는 안 된다.
+    //
+    // ⚠️ **상단을 £200M으로 올렸다 — 밴드가 컵 성적 하나에 걸려 있었다.** 시드 42
+    // 하나에서도 편성이 조금 바뀌면 대회 성적이 갈리고, 그게 상금에서 £22M을
+    // 움직인다(실측: 7위·상금 £35M → 6위·상금 £57M, 홈 경기 몇 개가 따라붙어
+    // 매치데이도 +£4M). 순위 상금보다 컵 상금의 폭이 훨씬 크므로, 한 시즌의
+    // 대회 성적 하나로 밴드를 넘나드는 상단은 가드 구실을 못 한다.
     expect(cash).toBeGreaterThan(85_000_000);
-    expect(cash).toBeLessThan(175_000_000);
+    expect(cash).toBeLessThan(200_000_000);
     // 급여 비중 — 경기가 있는 달은 실제 구단 범위 안에 든다.
     // 프리시즌 달(매치데이 수입 없음)은 자연히 높아 대상에서 뺀다
     const inSeason = season1.filter((r) => r.income.some((l) => l.category === "matchday"));
@@ -858,7 +864,8 @@ describe("밸런스 기준선", () => {
       expect(report.wageRatio, report.month).toBeLessThan(0.95);
     }
     expect(income).toBeGreaterThan(300_000_000);
-  }, 60_000);
+    // 세계 전체가 프리시즌 친선을 치르면서 한 시즌이 10%쯤 길어졌다
+  }, 120_000);
 
   it("어떤 리그의 AI 구단도 한 시즌에 파산하지 않는다", () => {
     const state = createTestGame(42, "arsenal");
@@ -881,7 +888,8 @@ describe("밸런스 기준선", () => {
       expect(median, `${league} 중간 잔고`).toBeGreaterThan(0);
       expect(sorted[0]!, `${league} 최저 잔고`).toBeGreaterThan(-30_000_000);
     }
-  }, 60_000);
+    // 세계 전체가 프리시즌 친선을 치르면서 한 시즌이 10%쯤 길어졌다
+  }, 120_000);
 
   /**
    * 리그 배율 — **지출과 초기치도 리그를 안다** (club-finance §12.1).
@@ -1246,5 +1254,6 @@ describe("재정이 도는 범위", () => {
       financeOf(state, state.userTeamId).ledger.some((e) => e.label === "리그 홈경기 수입"),
       "1부는 경기에서 매치데이를 번다",
     ).toBe(false);
-  }, 60_000);
+    // 세계 전체가 프리시즌 친선을 치르면서 한 시즌이 10%쯤 길어졌다
+  }, 120_000);
 });

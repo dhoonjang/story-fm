@@ -8,7 +8,13 @@ import {
   recoveryFactor,
 } from "@story-fm/sim";
 import { DEFAULT_TACTICS, weightSlotOf } from "@story-fm/domain";
-import { advanceDays, advanceToMatchday, createTestGame, playMockMatch } from "./helpers";
+import {
+  advanceDays,
+  advanceToMatchday,
+  createTestGame,
+  playMockMatch,
+  playPreseason,
+} from "./helpers";
 
 /**
  * 체력의 경제 — **한 경기가 선수를 비우고, 회복은 며칠에 걸쳐 갚는다.**
@@ -214,17 +220,38 @@ describe("경기 체력 — 회복", () => {
 
   it("사흘로는 다 못 채운다 — 3일 뒤 경기에 로테이션이 필요해진다", () => {
     const state = createNeutralGame();
+    // 연전의 대가를 재는 시험이라 개막 이후를 본다 — 프리시즌은 주 1회다
+    playPreseason(state);
     advanceToMatchday(state);
+    /**
+     * **배치의 선발이 그대로 뛴다는 보장은 없다** — 정지·부상은 킥오프에 자동
+     * 대체된다. 그래서 스쿼드 전원을 만땅으로 세우고, 뒤에서 **실제로 그라운드를
+     * 밟은** 선발만 잰다. 안 뛴 선수를 세면 100이 그대로 남아 시험이 뒤집힌다.
+     */
     const starters = startersOf(state).filter((s) => s.position !== "GK");
-    for (const s of starters) playerById(state, s.id)!.state.condition = 100;
+    for (const p of userPlayers(state)) p.state.condition = 100;
 
     playMockMatch(state);
+    // **방금 치른 경기**를 집는다 — 앞선 친선들도 결과를 갖고 있어 배열 순서로는 안 된다
+    const match = state.matches
+      .filter(
+        (m) => m.result && (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+      )
+      .sort((a, b) => (a.date < b.date ? -1 : 1))
+      .at(-1);
+    const lineup = new Set([
+      ...(match?.result?.homeLineup ?? []),
+      ...(match?.result?.awayLineup ?? []),
+    ]);
     advanceDays(state, 3);
 
-    const after = starters.map((s) => ({
-      slot: weightSlotOf(s.position),
-      condition: playerById(state, s.id)!.state.condition,
-    }));
+    const after = starters
+      .filter((s) => lineup.has(s.id))
+      .map((s) => ({
+        slot: weightSlotOf(s.position),
+        condition: playerById(state, s.id)!.state.condition,
+      }));
+    expect(after.length, "실제로 뛴 선발").toBeGreaterThanOrEqual(9);
     const conditions = after.map((a) => a.condition);
     // 아무도 만땅으로 돌아오지 못한다 — 그대로 열한 명을 다시 세우면 대가가 있다
     expect(Math.max(...conditions)).toBeLessThan(90);

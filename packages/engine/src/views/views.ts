@@ -39,14 +39,17 @@ import {
 } from "../club/finance";
 import {
   cupCatalog,
+  competitionLabel,
   competitionName,
   competitionShortName,
   competitionStageLabel,
   cupCatalogById,
+  fixtureLabel,
   isCup,
   isEuroCup,
   knockoutStages,
 } from "../data/cup-catalog";
+import { isFriendly } from "../competition/friendly";
 import { DOMESTIC_STAGES, domesticCupById } from "../data/domestic-cup-catalog";
 import { domesticCupsOf } from "../competition/domestic-cup";
 import { drawParts, drawTitle } from "../competition/draw-schedule";
@@ -1743,13 +1746,16 @@ export function buildOfficeViews(state: GameState): OfficeViews {
           time: e.time,
           type: e.type,
           status: e.status,
-          title: `${cup ? `${competitionShortName(m.competitionId)} ` : ""}${stage} ${m.neutral ? "중립" : home ? "홈" : "원정"} vs ${opponent}`,
+          title: `${fixtureLabel(m.competitionId, m.stage ?? "league", m.round)} ${m.neutral ? "중립" : home ? "홈" : "원정"} vs ${opponent}`,
           detail,
           result,
           win,
           isNext: next !== null && m.id === next.id,
           match: {
-            competition: cup ? competitionShortName(m.competitionId) : null,
+            // 리그 경기는 이름을 생략한다(감독은 자기 리그를 안다). 컵과 친선은
+            // 어느 경기인지가 곧 정보다
+            competition: cup || isFriendly(m) ? competitionShortName(m.competitionId) : null,
+            // 친선은 단계가 없어 빈 문자열이다 — 화면이 빈 칩을 그리지 않는다
             stage,
             opponent: teamShortName(home ? m.awayTeamId : m.homeTeamId),
             opponentName: opponent,
@@ -1951,7 +1957,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
     .slice(-5)
     .map(
       (m) =>
-        `${isCup(m.competitionId) ? `${competitionShortName(m.competitionId)} ` : ""}${competitionStageLabel(m.competitionId, m.stage ?? "league", m.round)} ${teamShortName(m.homeTeamId)} ${m.result?.homeGoals}-${m.result?.awayGoals} ${teamShortName(m.awayTeamId)}${m.result?.penalties ? ` (승부차기 ${m.result.penalties.home}-${m.result.penalties.away})` : ""}`,
+        `${fixtureLabel(m.competitionId, m.stage ?? "league", m.round)} ${teamShortName(m.homeTeamId)} ${m.result?.homeGoals}-${m.result?.awayGoals} ${teamShortName(m.awayTeamId)}${m.result?.penalties ? ` (승부차기 ${m.result.penalties.home}-${m.result.penalties.away})` : ""}`,
     );
 
   const lastRecord = state.seasonRecords[state.seasonRecords.length - 1];
@@ -2004,7 +2010,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
     },
     competitions: {
       next: next
-        ? `${isCup(next.competitionId) ? `${competitionShortName(next.competitionId)} ` : ""}${competitionStageLabel(next.competitionId, next.stage ?? "league", next.round)} ${next.date} ${next.neutral ? "중립" : next.homeTeamId === userTeamId ? "홈" : "원정"} vs ${teamName(next.homeTeamId === userTeamId ? next.awayTeamId : next.homeTeamId)}`
+        ? `${fixtureLabel(next.competitionId, next.stage ?? "league", next.round)} ${next.date} ${next.neutral ? "중립" : next.homeTeamId === userTeamId ? "홈" : "원정"} vs ${teamName(next.homeTeamId === userTeamId ? next.awayTeamId : next.homeTeamId)}`
         : null,
       nextMatch: next
         ? {
@@ -2012,7 +2018,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
             time: next.time ?? "15:00",
             // 대회 이름을 **언제나** 붙인다 — 이 카드 하나가 유일한 일정 정보라
             // "R2"만 적으면 무슨 대회의 2라운드인지 화면 어디에도 없다
-            label: `${competitionShortName(next.competitionId)} ${competitionStageLabel(next.competitionId, next.stage ?? "league", next.round)}`,
+            label: competitionLabel(next.competitionId, next.stage ?? "league", next.round),
             opponent: teamName(next.homeTeamId === userTeamId ? next.awayTeamId : next.homeTeamId),
             venue: next.neutral ? "neutral" : next.homeTeamId === userTeamId ? "home" : "away",
             inDays: Math.max(0, diffDays(state.date, next.date)),

@@ -4,6 +4,7 @@ import {
   computeStandings,
   createGame,
   interpretBackgroundHeuristic,
+  isFriendly,
   MINI_WORLD,
   MINI_WORLD_TWO_LEAGUES,
   scopedTeams,
@@ -23,17 +24,20 @@ describe("축소 세계 — 같은 규칙의 작은 세계", () => {
   it("컵이 없는 세계 — 대항전 참가도 컵 경기도 없다", () => {
     const state = createMiniGame();
     expect(state.euroEntrants).toHaveLength(0);
-    expect(state.matches.every((m) => m.competitionId === "epl")).toBe(true);
+    // 리그 경기 아니면 친선(대회 없음)뿐이다 — 컵은 한 경기도 없다
+    expect(state.matches.every((m) => m.competitionId === "epl" || isFriendly(m))).toBe(true);
   });
 
   it("리그전은 그대로 더블 라운드로빈이다", () => {
     const state = createMiniGame();
     const n = MINI_WORLD.teamsPerLeague;
-    expect(state.matches).toHaveLength(n * (n - 1));
+    // 프리시즌 친선은 리그전이 아니다 — 라운드로빈은 리그 경기만 센다
+    const league = state.matches.filter((m) => !isFriendly(m));
+    expect(league).toHaveLength(n * (n - 1));
     // 팀마다 홈·원정이 같은 수만큼
     for (const team of state.teams.filter((t) => t.id !== "freeagents")) {
-      const home = state.matches.filter((m) => m.homeTeamId === team.id).length;
-      const away = state.matches.filter((m) => m.awayTeamId === team.id).length;
+      const home = league.filter((m) => m.homeTeamId === team.id).length;
+      const away = league.filter((m) => m.awayTeamId === team.id).length;
       expect(home).toBe(n - 1);
       expect(away).toBe(n - 1);
     }
@@ -49,7 +53,7 @@ describe("축소 세계 — 같은 규칙의 작은 세계", () => {
     // 시즌 전환 — 새 일정이 깔린다
     advanceTime(state, { days: 1 });
     expect(state.season).toBe(2);
-    expect(state.matches.filter((m) => m.season === 2)).toHaveLength(
+    expect(state.matches.filter((m) => m.season === 2 && !isFriendly(m))).toHaveLength(
       MINI_WORLD.teamsPerLeague * (MINI_WORLD.teamsPerLeague - 1),
     );
   });
@@ -64,7 +68,9 @@ describe("축소 세계 — 같은 규칙의 작은 세계", () => {
       attributes: interpretBackgroundHeuristic(background, "arsenal"),
       world: MINI_WORLD_TWO_LEAGUES,
     });
-    const leagues = new Set(state.matches.map((m) => m.competitionId));
+    const leagues = new Set(
+      state.matches.filter((m) => !isFriendly(m)).map((m) => m.competitionId),
+    );
     expect([...leagues].sort()).toEqual(["epl", "laliga"]);
   });
 

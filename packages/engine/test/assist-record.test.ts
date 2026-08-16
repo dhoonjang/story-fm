@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { advanceTime, playersOf, seasonStatOf, type GameState } from "@story-fm/engine";
-import { createTestGame, playMockMatch } from "./helpers";
+import { advanceTime, isFriendly, playersOf, seasonStatOf, type GameState } from "@story-fm/engine";
+import { createTestGame, playMockMatch, playPreseason } from "./helpers";
 
 /**
  * 도움은 **장부에서 결과까지 살아남아야 한다.**
@@ -10,9 +10,13 @@ import { createTestGame, playMockMatch } from "./helpers";
  * 어디에도 없어서 "어시스트가 기록되지 않는다"로 보였다.
  */
 
-/** 경기일까지 진행해 한 경기를 끝까지 치른다 */
+/**
+ * 경기일까지 진행해 한 경기를 끝까지 치른다.
+ * 프리시즌 친선을 먼저 흘려보낸다 — 친선은 시즌 기록에 도움을 쌓지 않는다.
+ */
 function playOne(seed: number): GameState | null {
   const state = createTestGame(seed);
+  playPreseason(state);
   let guard = 12;
   while (state.phase !== "matchday" && guard-- > 0) {
     const moved = advanceTime(state, "next_match");
@@ -59,7 +63,9 @@ describe("도움이 사라지지 않는다", () => {
       const state = playOne(seed);
       if (!state) continue;
       const ours = new Set(playersOf(state, state.userTeamId).map((p) => p.id));
+      // 친선의 도움은 경기에만 남고 시즌 합계에는 안 들어간다 (season.md §2)
       const assisted = state.matches
+        .filter((m) => !isFriendly(m))
         .flatMap((m) => m.result?.assists ?? [])
         .filter((a) => a !== "")
         .map((a) => (a.includes(":") ? a.split(":", 2)[1]! : a))
