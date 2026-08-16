@@ -22,8 +22,9 @@ Vision, architecture and development conventions all live in
   rebase, stash or switch branches (AGENTS.md §5).
 - **CI is the gate** — while working, run `pnpm typecheck` / `pnpm lint` and
   `pnpm test <path>` for the file you just wrote. The full `pnpm test` and
-  `pnpm e2e` run in GitHub Actions on the PR; do not spend minutes on them
-  locally unless the user asks or CI failed (AGENTS.md §5).
+  `pnpm e2e` run in GitHub Actions once the PR is ready (drafts are skipped); do
+  not spend minutes on them locally unless the user asks or CI failed
+  (AGENTS.md §5).
 - **Ask when unsure** — anything that moves game balance or the core loop.
 
 ## Commands

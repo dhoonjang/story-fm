@@ -75,6 +75,13 @@ function EventIcon({ kind }: { kind: IconKind }) {
         <path d="M8 3.6v8.8" {...line} />
       </>
     ),
+    // 돈 — 가로로 누운 지폐. 수입/지출은 글자의 +/−가 말하므로 도형은 방향을 갖지 않는다
+    money: (
+      <>
+        <rect x="2" y="4.4" width="12" height="7.2" rx="1.4" {...line} />
+        <circle cx="8" cy="8" r="1.9" {...line} />
+      </>
+    ),
     // 추첨 — 둘이 만나 하나가 되는 대진표
     draw: (
       <>

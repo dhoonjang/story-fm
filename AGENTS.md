@@ -121,8 +121,10 @@ packages/
 - New features ship with tests. Never hide a failing test; report it as it is.
 
 **The gate is CI, not your machine.** `.github/workflows/ci.yml` runs
-`typecheck` · `lint` · `pnpm test` · `pnpm e2e` on every push to a PR branch, and
-its verdict is what `/merge` waits on.
+`typecheck` · `lint` · `pnpm test` · `pnpm e2e`, and its verdict is what
+`/merge` waits on. **It does not run while the PR is a draft** — a branch still
+being worked on burns runner minutes nobody reads. `/merge` marks the PR ready,
+and that is what starts the run it then watches.
 
 - **While working** — `pnpm typecheck` and `pnpm lint`, plus `pnpm test <path>`
   for the file you just wrote. That is the whole local loop.

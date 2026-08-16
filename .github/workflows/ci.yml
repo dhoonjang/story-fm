@@ -2,8 +2,11 @@ name: CI
 
 # 검증의 자리는 여기다 — 로컬은 lint·typecheck와 방금 쓴 코드의 좁은 테스트까지,
 # 전체 test와 e2e는 이 워크플로가 돌린다 (AGENTS.md §5).
-# 드래프트 PR에도 돈다: `resolve`가 여는 PR은 드래프트이고, `merge`는 그 결과를
-# 확인하고 나서야 ready로 올린다.
+#
+# 드래프트 PR에는 돌지 않는다 (`ready-only` 조건). 작업 중인 브랜치는 푸시가
+# 이어지는 동안 러너 분을 계속 태우는데 그 결과를 읽는 사람이 없다 — 판정이
+# 필요한 순간은 `merge`가 ready로 올릴 때 하나뿐이고, `ready_for_review`가
+# 그때 실행을 시작한다.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -16,9 +19,11 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# main push는 PR 이벤트가 아니라 draft 필드가 없다 — 앞의 항이 그걸 통과시킨다.
 jobs:
   static:
     name: lint + typecheck
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -36,6 +41,7 @@ jobs:
 
   test:
     name: unit + api
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     # 시즌 완주형 테스트가 있어 단독으로도 분 단위를 쓴다 (vitest.config.ts)
     timeout-minutes: 30
@@ -53,6 +59,7 @@ jobs:
 
   e2e:
     name: e2e (playwright)
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
