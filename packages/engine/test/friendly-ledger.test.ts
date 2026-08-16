@@ -152,21 +152,19 @@ describe("친선이 원장에 남기는 줄", () => {
     expect(added.map((e) => e.category)).toContain("bonus");
   });
 
-  it("원정 친선은 원정 비용만 나간다 — 리그와 같은 비율로", () => {
+  it("원정 친선은 장부에 한 줄도 남기지 않는다 — 주최 측이 부담한다", () => {
     const state = createTestGame();
     const before = financeOf(state, state.userTeamId).ledger.length;
     applyMatchFinance(state, userMatch(null, false), "loss", []);
-    const friendlyAway = financeOf(state, state.userTeamId).ledger.slice(before);
+    expect(financeOf(state, state.userTeamId).ledger.slice(before)).toEqual([]);
+  });
 
-    const other = createTestGame();
-    const mark = financeOf(other, other.userTeamId).ledger.length;
-    applyMatchFinance(other, userMatch("epl", false), "loss", []);
-    const leagueAway = financeOf(other, other.userTeamId)
-      .ledger.slice(mark)
-      .filter((e) => e.category === "travel_medical");
-
-    expect(friendlyAway.map((e) => e.category)).toEqual(["travel_medical"]);
-    expect(friendlyAway[0]?.amount).toBe(leagueAway[0]?.amount);
+  it("같은 경기가 리그였다면 원정 비용이 나간다", () => {
+    const state = createTestGame();
+    const before = financeOf(state, state.userTeamId).ledger.length;
+    applyMatchFinance(state, userMatch("epl", false), "loss", []);
+    const added = financeOf(state, state.userTeamId).ledger.slice(before);
+    expect(added.map((e) => e.category)).toContain("travel_medical");
   });
 });
 
