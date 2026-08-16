@@ -387,7 +387,8 @@ export const FINANCE_CATEGORY_KO: Record<FinanceCategory, string> = {
   travel_medical: "원정·의료",
   agent_fee: "에이전트 수수료",
   transfer_out: "이적료 지출",
-  amortisation: "이적료 상각",
+  /** 감독이 읽는 이름 — `이적료 지출`(한 번에 나간 현금)과 이름만으로 갈린다 */
+  amortisation: "이적료 분할 비용",
   other: "기타",
 };
 
