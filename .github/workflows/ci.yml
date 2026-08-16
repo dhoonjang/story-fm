@@ -40,11 +40,20 @@ jobs:
         run: pnpm lint
 
   test:
-    name: unit + api
+    name: unit + api (${{ matrix.shard }}/4)
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
-    # 시즌 완주형 테스트가 있어 단독으로도 분 단위를 쓴다 (vitest.config.ts)
-    timeout-minutes: 30
+    # 러너는 2코어고 vitest 기본값은 `maxWorkers = max(cpus - 1, 1)` — 그대로 두면
+    # 워커 하나로 직렬 47.5분이라 30분에 잘렸다(로컬 CPU 합 34.0분 × 러너/로컬
+    # 실측비 1.39). 코어를 둘 다 쓰고 넷으로 가르면 가장 무거운 샤드가 로컬 CPU
+    # 11.9분 = 러너 16.5분, 워커 둘이니 벽시계 ~9분이다. 예산은 그 두 배로 둔다.
+    timeout-minutes: 20
+    strategy:
+      # 한 샤드가 빨갛다고 나머지를 죽이지 않는다 — 빨간 PR은 실패를 한 번에 다
+      # 보여야 고치는 왕복이 한 번으로 끝난다
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -55,7 +64,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # LLM 키는 주지 않는다 — 코어 테스트는 LLM 없이 도는 것이 규약이고,
       # 키가 없어야 실제로 그런지 확인된다 (AGENTS.md §5)
-      - run: pnpm test
+      #
+      # 샤드는 vitest가 파일 경로 해시로 가른다 — 파일이 늘면 배분이 다시 섞이되
+      # 한 파일이 쪼개지지는 않는다. 그래서 어떻게 갈라도 가장 느린 파일
+      # (finance.test.ts, 러너 ~9분)이 그 샤드의 바닥이다.
+      - run: pnpm test -- --shard=${{ matrix.shard }}/4 --maxWorkers=100%
 
   e2e:
     name: e2e (playwright)
