@@ -17,6 +17,9 @@ import {
   adminUpdateDomesticCup,
   adminUpdateLeague,
   adminUpdateTeam,
+  boardExpectation,
+  boardExpectationOfTier,
+  catalogTierOf,
   checkEuroCupInvariants,
   checkLeagueInvariants,
   clubProfile,
@@ -28,11 +31,14 @@ import {
   isTeamCatalogEdited,
   leagueCatalog,
   leagueCatalogPath,
+  loadGame,
   playerCatalog,
+  saveGame,
   tacticalStyleOf,
   teamCatalog,
   teamCatalogPath,
   teamsOfLeague,
+  tierOfTeamIn,
   type LeagueCatalogEntry,
 } from "@story-fm/engine";
 import { createTestGame } from "./helpers";
@@ -151,6 +157,48 @@ describe("팀 편집", () => {
     expect(adminUpdateTeam("arsenal", { name: "  " }).message).toContain("이름");
     expect(adminUpdateTeam("arsenal", { capacity: 0 }).message).toContain("수용인원");
     expect(adminUpdateTeam("없는팀", { tier: 1 }).message).toContain("카탈로그에 없는 팀");
+  });
+});
+
+/**
+ * 체급은 **세이브가 갖는다** (team.md §2). 카탈로그의 값은 게임 시작의 초기치일
+ * 뿐이라, 어드민이 그것을 고쳐도 진행 중인 세이브의 보드 기대치와 경질 위험선은
+ * 움직이지 않는다 — 감독은 자기가 한 일이 아닌 이유로 자리가 흔들리지 않는다.
+ */
+describe("체급 편집과 진행 중인 세이브", () => {
+  it("카탈로그의 체급을 고쳐도 세이브의 보드 기대치가 그대로다", () => {
+    const state = createTestGame(7, "arsenal");
+    const before = tierOfTeamIn(state, state.userTeamId);
+    const expected = boardExpectation(state, state.userTeamId);
+    expect(before).toBe(1);
+
+    const res = adminUpdateTeam("arsenal", { tier: 4 });
+    expect(res.ok).toBe(true);
+    // 편집은 카탈로그에 확실히 닿았다 — 그런데도 세이브는 흔들리지 않는다
+    expect(catalogTierOf("arsenal")).toBe(4);
+
+    expect(tierOfTeamIn(state, state.userTeamId)).toBe(before);
+    expect(boardExpectation(state, state.userTeamId)).toEqual(expected);
+    /**
+     * 경질 위험선(`manager-market.ts`의 SEAT)도 같은 값 하나에서 나온다 —
+     * 그 표는 모듈 밖으로 나오지 않으므로 입력인 체급으로 확인한다.
+     */
+    expect(tierOfTeamIn(state, state.userTeamId)).not.toBe(catalogTierOf("arsenal"));
+  });
+
+  it("체급이 없는 옛 세이브는 그대로 로드되고 카탈로그로 폴백한다", () => {
+    const state = createTestGame(7, "arsenal");
+    // 옛 세이브 — GAME_TEAM에 체급이 없다 (SAVE_VERSION은 그대로)
+    for (const team of state.teams) delete team.tier;
+    saveGame(state);
+
+    const loaded = loadGame(state.id);
+    expect(loaded).not.toBeNull();
+    expect(loaded!.teams.every((t) => t.tier === undefined)).toBe(true);
+    expect(tierOfTeamIn(loaded!, "arsenal")).toBe(catalogTierOf("arsenal"));
+    expect(boardExpectation(loaded!, "arsenal")).toEqual(
+      boardExpectationOfTier(catalogTierOf("arsenal")),
+    );
   });
 });
 
@@ -339,9 +387,9 @@ describe("불변식 (순수 함수)", () => {
   it("리그전 리그는 2팀 이상 · 짝수 · 20팀 이하", () => {
     const l = [league({ id: "a" })];
     expect(checkLeagueInvariants(l, [team("t1", "a")])[0]).toContain("2팀 이상");
-    expect(checkLeagueInvariants(l, [team("t1", "a"), team("t2", "a"), team("t3", "a")])[0]).toContain(
-      "홀수",
-    );
+    expect(
+      checkLeagueInvariants(l, [team("t1", "a"), team("t2", "a"), team("t3", "a")])[0],
+    ).toContain("홀수");
     const many = Array.from({ length: 22 }, (_, i) => team(`t${i}`, "a"));
     expect(checkLeagueInvariants(l, many)[0]).toContain("38라운드");
     expect(checkLeagueInvariants(l, [team("t1", "a"), team("t2", "a")])).toEqual([]);
@@ -366,10 +414,12 @@ describe("불변식 (순수 함수)", () => {
       prize: { participation: 0, win: 0, draw: 0, stage: {}, winner: 0 },
     };
     expect(checkEuroCupInvariants([base], leagues)).toEqual([]);
-    expect(checkEuroCupInvariants([{ ...base, playoffSlots: 3 }], leagues).join()).toContain("짝수");
-    expect(
-      checkEuroCupInvariants([{ ...base, matchesPerTeam: 10 }], leagues).join(),
-    ).toContain("상대가 모자랍니다");
+    expect(checkEuroCupInvariants([{ ...base, playoffSlots: 3 }], leagues).join()).toContain(
+      "짝수",
+    );
+    expect(checkEuroCupInvariants([{ ...base, matchesPerTeam: 10 }], leagues).join()).toContain(
+      "상대가 모자랍니다",
+    );
     expect(
       checkEuroCupInvariants([{ ...base, directSlots: 6, playoffSlots: 6 }], leagues).join(),
     ).toContain("참가 팀");

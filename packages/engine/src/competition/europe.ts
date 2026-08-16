@@ -4,6 +4,7 @@ import { cupCatalog, cupCatalogById } from "../data/cup-catalog";
 import { leagueCatalogById } from "../data/league-catalog";
 import { leagueOfTeam, teamCatalogById, teamsOfLeague } from "../data/team-catalog";
 import { makeRng } from "../core/rng";
+import { catalogTierOf } from "../core/club-tier";
 import { seasonYear } from "./calendar";
 
 /**
@@ -155,6 +156,12 @@ export interface EuroEntry {
 }
 
 /**
+ * 구단 체급을 읽는 방법 — 세이브가 있는 문맥은 `tierOfTeamIn(state, id)`을 넘기고,
+ * 새 게임처럼 세이브가 없는 자리는 기본값(카탈로그)이 답한다 (core/club-tier.ts).
+ */
+export type TierLookup = (teamId: string) => 1 | 2 | 3 | 4;
+
+/**
  * 리그 내 서열 — 대항전 티켓 배정 기준.
  *
  * **지난 시즌 리그 최종 순위**가 있으면 그것을 쓴다 (4위로 마치면 다음 시즌 UCL —
@@ -166,12 +173,13 @@ function rankedTeams(
   season: number,
   seed: number,
   tables: LeagueTables | null,
+  tierOf: TierLookup,
 ): string[] {
   const previous = tables?.[leagueId];
   if (previous && previous.length > 0) return previous;
   const rng = makeRng(seed, `euro:${leagueId}:${season}`);
   return teamsOfLeague(leagueId)
-    .map((t) => ({ id: t.id, key: t.tier * 100 + Math.floor(rng() * 90) }))
+    .map((t) => ({ id: t.id, key: tierOf(t.id) * 100 + Math.floor(rng() * 90) }))
     .sort((a, b) => a.key - b.key)
     .map((x) => x.id);
 }
@@ -231,12 +239,13 @@ export function europeanEntrants(
   seed: number,
   tables: LeagueTables | null = null,
   cupWinners: CupWinners = {},
+  tierOf: TierLookup = catalogTierOf,
 ): string[] {
   const cup = cupCatalogById(cupId);
   if (!cup) return [];
   const out: string[] = [];
   for (const leagueId of Object.keys(cup.slots)) {
-    const ranked = rankedTeams(leagueId, season, seed, tables);
+    const ranked = rankedTeams(leagueId, season, seed, tables, tierOf);
     out.push(...(allocateEuropeanSlots(leagueId, ranked, cupWinners[leagueId])[cupId] ?? []));
   }
   return out;
@@ -248,10 +257,11 @@ export function buildEuroEntrants(
   seed: number,
   tables: LeagueTables | null = null,
   cupWinners: CupWinners = {},
+  tierOf: TierLookup = catalogTierOf,
 ): EuroEntry[] {
   return cupCatalog().map((cup) => ({
     cupId: cup.id,
-    teams: europeanEntrants(cup.id, season, seed, tables, cupWinners),
+    teams: europeanEntrants(cup.id, season, seed, tables, cupWinners, tierOf),
   }));
 }
 
@@ -290,10 +300,14 @@ function potsOf(
 ): Map<string, number> {
   const rng = makeRng(seed, `pots:${cupId}`);
   const jitter = new Map(teamIds.map((id) => [id, rng()] as const));
+  /**
+   * ⚠️ 여기는 **카탈로그 체급**을 읽는다 — 리그 페이즈 편성은 `buildSeasonFixtures`를
+   * 지나 들어와 세이브가 닿지 않는다. 편성은 한 번 계산해 세이브에 남으므로 진행 중인
+   * 세이브가 다시 읽지는 않는다.
+   */
   const strength = (id: string) => {
-    const team = teamCatalogById(id);
-    const league = leagueCatalogById(team?.leagueId ?? "")?.coefficient ?? 5;
-    return (team?.tier ?? 3) * 10 + league;
+    const league = leagueCatalogById(teamCatalogById(id)?.leagueId ?? "")?.coefficient ?? 5;
+    return catalogTierOf(id) * 10 + league;
   };
   const sorted = [...teamIds].sort(
     (a, b) => strength(a) - strength(b) || jitter.get(a)! - jitter.get(b)!,
@@ -356,11 +370,10 @@ function drawCost(
  */
 function drawOrder(teamIds: string[], seed: number, cupId: string, rounds: number): string[] {
   const rng = makeRng(seed, `ring:${cupId}`);
-  const byStrength = [...teamIds].sort((a, b) => {
-    const ta = teamCatalogById(a)?.tier ?? 3;
-    const tb = teamCatalogById(b)?.tier ?? 3;
-    return ta - tb || (rng() < 0.5 ? -1 : 1);
-  });
+  // 포트 배정과 같은 자리다 — 편성 문맥이라 카탈로그 체급을 읽는다 (`potsOf`)
+  const byStrength = [...teamIds].sort(
+    (a, b) => catalogTierOf(a) - catalogTierOf(b) || (rng() < 0.5 ? -1 : 1),
+  );
   const order: string[] = [];
   for (let i = 0, j = byStrength.length - 1; i <= j; i++, j--) {
     order.push(byStrength[i]!);
