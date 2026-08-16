@@ -24,7 +24,7 @@ import {
   userSide,
   type GameState,
 } from "@story-fm/engine";
-import { advanceToMatchday, createTestGame, playMockMatch } from "./helpers";
+import { advanceToMatchday, createTestGame, playMockMatch, playPreseason } from "./helpers";
 import { tacticsSignature, weightSlotOf } from "@story-fm/domain";
 import { zoneGrid } from "@story-fm/sim";
 
@@ -36,6 +36,8 @@ describe("경기 흐름 (overview §4)", () => {
 
   it("킥오프 → 세그먼트 진행 → 종료 반영까지 완주한다", () => {
     const state = createTestGame();
+    // 시즌 기록을 보는 시험이라 리그 개막까지 간다 — 친선은 장부에 남지 않는다
+    playPreseason(state);
     advanceToMatchday(state);
     const digest = playMockMatch(state);
 

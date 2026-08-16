@@ -39,6 +39,7 @@ export * from "./world/scope";
 // competition — 시즌 달력·리그·컵·유럽 대항전
 export * from "./competition/calendar";
 export * from "./competition/fixtures";
+export * from "./competition/friendly";
 export * from "./competition/season";
 export * from "./competition/europe";
 export * from "./competition/euro-knockout";

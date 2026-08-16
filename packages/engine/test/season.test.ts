@@ -6,6 +6,7 @@ import {
   isClubTeam,
   computeStandings,
   groupOf,
+  isFriendly,
   playersOf,
   quickSimulate,
   transitionSeason,
@@ -25,6 +26,15 @@ describe("순위표", () => {
     expect(standings[standings.length - 1]?.points).toBe(0);
     expect(standings[0]?.goalDiff).toBe(2);
     expect(standings[0]?.name).toBeTruthy(); // 카탈로그에서 한글 팀명
+  });
+
+  it("프리시즌 친선은 아무리 크게 이겨도 순위표에 잡히지 않는다", () => {
+    const state = createTestGame();
+    const friendlies = state.matches.filter(isFriendly);
+    expect(friendlies.length).toBeGreaterThan(0);
+    for (const m of friendlies) m.result = { homeGoals: 5, awayGoals: 0, scorers: [] };
+    const standings = computeStandings(state);
+    expect(standings.every((r) => r.played === 0 && r.points === 0)).toBe(true);
   });
 });
 
@@ -199,5 +209,7 @@ describe("풀 시즌 통합 — 38라운드 완주 후 커리어 기록·전환"
       expect(trophy?.competition).toBe("프리미어리그");
       expect(trophy?.teamId).toBe("arsenal");
     }
-  }, 60_000);
+    // 프리시즌 친선이 붙으면서 한 시즌이 10%쯤 길어졌다 — 세계 전체가 팀당 4경기를
+    // 더 치른다(약 220경기). 단독 실행 65초라 60초 한도로는 못 끝낸다.
+  }, 120_000);
 });

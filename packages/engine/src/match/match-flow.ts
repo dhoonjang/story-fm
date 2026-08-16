@@ -60,7 +60,8 @@ import {
   type GameState,
   type PendingMatch,
 } from "../core/state";
-import { competitionShortName, competitionStageLabel } from "../data/cup-catalog";
+import { competitionLabel } from "../data/cup-catalog";
+import { isFriendly } from "../competition/friendly";
 import { advanceDomesticCups } from "../competition/domestic-cup";
 import { advanceEuroKnockouts } from "../competition/euro-knockout";
 import { needsExtraTime } from "../competition/extra-time";
@@ -962,10 +963,16 @@ export function finalizeMatch(state: GameState): MatchDigest {
    * 축구의 대가도, 지구력이라는 능력치도 장부에 남지 않았다. 이제 화면에서 보던
    * 그 소모가 그대로 정산된다.
    */
+  /**
+   * **친선은 장부에 남지 않는다** (season.md §2의 닿는다/닿지 않는다 표).
+   * 몸에 남는 것(체력·폼·부상·적응도)은 그대로 정산하고, 시즌 기록·징계처럼
+   * 대회에 매달린 것만 건너뛴다.
+   */
+  const friendly = isFriendly(match);
   const drained = pending.matchFatigue ?? {};
   for (const player of roster) {
     if (!played.has(player.id)) continue;
-    ensureSeasonStat(state, player.id, player.teamId).apps += 1;
+    if (!friendly) ensureSeasonStat(state, player.id, player.teamId).apps += 1;
     // 체력은 몸의 소모만 정산한다. 승패의 심리 효과는 formDeltaFromMatch가 맡는다.
     player.state.condition = clampCondition(player.state.condition - (drained[player.id] ?? 0));
     player.state.form = clampForm(
@@ -1010,36 +1017,40 @@ export function finalizeMatch(state: GameState): MatchDigest {
 
   // 골은 이미 평점(앵커)에 크게 반영돼 있다 — 폼을 또 올리면 이중 계산이고,
   // 그게 "골 넣은 선수만 즉시 최고 폼"의 원인이었다
-  for (const scorerId of userScorers) {
-    const player = roster.find((p) => p.id === scorerId);
-    if (!player) continue;
-    ensureSeasonStat(state, scorerId, player.teamId).goals += 1;
-  }
-  for (const assisterId of userAssisters) {
-    const player = roster.find((p) => p.id === assisterId);
-    if (!player) continue;
-    const stat = ensureSeasonStat(state, assisterId, player.teamId);
-    stat.assists = (stat.assists ?? 0) + 1;
+  if (!friendly) {
+    for (const scorerId of userScorers) {
+      const player = roster.find((p) => p.id === scorerId);
+      if (!player) continue;
+      ensureSeasonStat(state, scorerId, player.teamId).goals += 1;
+    }
+    for (const assisterId of userAssisters) {
+      const player = roster.find((p) => p.id === assisterId);
+      if (!player) continue;
+      const stat = ensureSeasonStat(state, assisterId, player.teamId);
+      stat.assists = (stat.assists ?? 0) + 1;
+    }
   }
 
   // 경기 평점 — 기준선은 여기서 결정적으로 박고, 경기 후 LLM이 이 위에서 다듬는다.
   // **brief를 반드시 같은 함수로 만든다** — 앵커가 두 곳에서 따로 계산되면
   // LLM 보정의 증감 정산(applyMatchRatings)이 어긋난다
+  // 친선의 평점은 **경기에는 남고 시즌 합계에는 안 들어간다** — 감독은 프리시즌
+  // 경기의 평점을 읽어야 하지만 그것이 시즌 평균을 만들지는 않는다
   const ratings: Record<string, number> = {};
   for (const p of brief?.players ?? []) {
     ratings[p.playerId] = p.anchor;
     const player = roster.find((x) => x.id === p.playerId);
-    if (!player) continue;
+    if (!player || friendly) continue;
     const stat = ensureSeasonStat(state, p.playerId, player.teamId);
     stat.ratingSum = (stat.ratingSum ?? 0) + p.anchor;
   }
   match.result = { ...match.result, ratings };
 
-  // 정지 소화 — 이번 경기 결장자는 1경기 차감
-  serveSuspensions(state, pending.servingSuspension ?? []);
+  // 정지 소화 — 이번 경기 결장자는 1경기 차감. 친선은 대회 경기가 아니라 소화되지 않는다
+  if (!friendly) serveSuspensions(state, pending.servingSuspension ?? []);
 
-  // 카드 → BOOKING, 누적/퇴장 → SUSPENSION
-  for (const e of ledger.events) {
+  // 카드 → BOOKING, 누적/퇴장 → SUSPENSION. 친선의 카드는 어느 대회에도 쌓이지 않는다
+  for (const e of friendly ? [] : ledger.events) {
     if (e.team !== side || !e.actors[0]) continue;
     const player = roster.find((p) => p.id === e.actors[0]);
     if (!player) continue;
@@ -1064,7 +1075,7 @@ export function finalizeMatch(state: GameState): MatchDigest {
    */
   const rng = makeRng(
     state.seed,
-    `injury:${state.season}:${match.competitionId}:${match.stage ?? "league"}:${match.round}`,
+    `injury:${state.season}:${match.competitionId ?? "friendly"}:${match.stage ?? "league"}:${match.round}`,
   );
   for (const e of ledger.events) {
     if (e.type !== "injury" || !e.actors[0]) continue;
@@ -1120,7 +1131,7 @@ export function finalizeMatch(state: GameState): MatchDigest {
   const outcomeKo = outcome === "win" ? "승리" : outcome === "draw" ? "무승부" : "패배";
   pushNarrative(
     state,
-    `${competitionShortName(match.competitionId)} ${competitionStageLabel(match.competitionId, match.stage ?? "league", match.round)} vs ${teamName(opponentId)} ${scoreline} ${outcomeKo}`,
+    `${competitionLabel(match.competitionId, match.stage ?? "league", match.round)} vs ${teamName(opponentId)} ${scoreline} ${outcomeKo}`,
     outcome === "win" ? 4 : 3,
   );
   digest.push(`최종 스코어 ${scoreline} — ${outcomeKo}`, ...messages);

@@ -23,6 +23,7 @@ import {
   advanceToMatchday,
   createTestGame,
   playMockMatch,
+  playPreseason,
   userFixtureCount,
 } from "./helpers";
 
@@ -405,6 +406,8 @@ describe("오피스 뷰 — 재정·순위·커리어", () => {
 
   it("경기를 치르면 대회 일정에 스코어와 승패가 남는다", () => {
     const state = createTestGame(17);
+    // 친선은 대회 화면에 서지 않는다 — 대회 일정을 보려면 리그 경기여야 한다
+    playPreseason(state);
     advanceAndPlay(state);
     const list = buildOfficeViews(state).competitions.list;
     const played = list

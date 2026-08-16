@@ -7,6 +7,7 @@ import {
   applyTrainingOutcomes,
   assignmentsOf,
   buildTrainingBrief,
+  managerTrainingUptake,
   playerById,
   setTraining,
   userTactics,
@@ -318,10 +319,13 @@ describe("판정의 상한 — 한 번에 게임을 크게 흔들 수 없다", (
     const after = assignmentsOf(state, state.userTeamId).find(
       (a) => a.playerId === target.playerId,
     )!.familiarity;
-    // 판정 2가 그대로 들어오지는 않는다 — 지금 위치의 곡선과 그 선수의 흡수율만큼 깎인다
+    // 판정 2가 그대로 들어오지는 않는다 — 지금 위치의 곡선과 그 선수의 흡수율,
+    // 그리고 **감독의 훈련 축**만큼 깎인다
     const player = playerById(state, target.playerId)!;
     expect(after - before).toBeCloseTo(
-      2 * familiarityGainScale(before, "training", tacticalUptake(player.attributes)),
+      2 *
+        managerTrainingUptake(state.manager.attributes.training) *
+        familiarityGainScale(before, "training", tacticalUptake(player.attributes)),
       6,
     );
   });

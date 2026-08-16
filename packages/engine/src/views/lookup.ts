@@ -25,9 +25,9 @@ import {
 } from "../squad/registration";
 import {
   cupCatalog,
+  competitionLabel,
   competitionName,
   competitionShortName,
-  competitionStageLabel,
   isCup,
 } from "../data/cup-catalog";
 import {
@@ -43,6 +43,7 @@ import { teamCatalog } from "../data/team-catalog";
 import { leagueOfTeamIn, teamsOfLeagueIn } from "../competition/promotion";
 import { tierOfTeamIn } from "../core/club-tier";
 import { computeStandings } from "../competition/season";
+import { USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
 import {
   attributeLine,
   knowledgeNote,
@@ -799,9 +800,9 @@ function seasonLabel(state: GameState): string {
   return `${year}-${String((year + 1) % 100).padStart(2, "0")} 시즌 (시즌 ${state.season})`;
 }
 
-/** 대회·단계 태그 — "EPL R7", "UCL 8강 1차전" */
+/** 대회·단계 태그 — "EPL R7", "UCL 8강 1차전", "친선" */
 function competitionTag(m: MatchRecord): string {
-  return `${competitionShortName(m.competitionId)} ${competitionStageLabel(m.competitionId, m.stage ?? "league", m.round)}`;
+  return competitionLabel(m.competitionId, m.stage ?? "league", m.round);
 }
 
 /** 기준 팀 시점의 승패 — 정규시간이 같으면 승부차기로 갈린다 */
@@ -1216,9 +1217,17 @@ export function careerView(state: GameState): LookupResult {
   const rank = table.findIndex((r) => r.teamId === state.userTeamId) + 1;
   const m = state.manager;
 
+  // 경고는 세이브가 끝나는 길의 카운터다 — 평판 바로 아래에 세워 압박이 읽히게 한다
+  const warnings = m.boardWarnings ?? 0;
+
   const lines = [
     `[커리어] ${m.name} — ${teamName(state.userTeamId)} 재임 · ${seasonLabel(state)}`,
     `평판: 보드${m.reputation.board} 미디어${m.reputation.media} 선수단${m.reputation.squad}`,
+    warnings > 0
+      ? `보드 경고: ${warnings}/${USER_WARNINGS_BEFORE_SACK}회` +
+        (m.lastWarnedOn ? ` (마지막 ${m.lastWarnedOn})` : "") +
+        ` — ${USER_WARNINGS_BEFORE_SACK}회째에 자리가 없어진다`
+      : `보드 경고: 없음 (${USER_WARNINGS_BEFORE_SACK}회째에 자리가 없어진다)`,
     row && row.played > 0
       ? `이번 시즌 진행: ${competitionName(league)} ${rank}위 · ${row.played}경기 ${row.wins}승 ${row.draws}무 ${row.losses}패 · 승점 ${row.points} (득실 ${row.goalDiff >= 0 ? "+" : ""}${row.goalDiff})`
       : `이번 시즌 진행: 아직 리그 경기 없음`,

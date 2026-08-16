@@ -39,14 +39,17 @@ import {
 } from "../club/finance";
 import {
   cupCatalog,
+  competitionLabel,
   competitionName,
   competitionShortName,
   competitionStageLabel,
   cupCatalogById,
+  fixtureLabel,
   isCup,
   isEuroCup,
   knockoutStages,
 } from "../data/cup-catalog";
+import { isFriendly } from "../competition/friendly";
 import { DOMESTIC_STAGES, domesticCupById } from "../data/domestic-cup-catalog";
 import { domesticCupsOf } from "../competition/domestic-cup";
 import { drawParts, drawTitle } from "../competition/draw-schedule";
@@ -72,6 +75,8 @@ import {
 } from "../squad/scouting";
 import type { ScoutGrade, ScoutReportCard } from "@story-fm/domain";
 import { listingOf } from "../market/negotiation";
+import { USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
+import { MANAGER_ATTR_CAP, MANAGER_XP_PER_LEVEL } from "../skills";
 import { marketValueOf, wageExpectationOf } from "../market/market";
 import { settlingPercent } from "../squad/settling";
 import { computeStandings, type StandingRow } from "../competition/season";
@@ -764,6 +769,20 @@ export interface OfficeViews {
       background: string;
       attributes: Record<string, number>;
       reputation: Record<string, number>;
+      /**
+       * 보드 경고 — 한도에 닿으면 자리가 없어진다(`market/manager-market.ts`).
+       * 경질은 이 세이브가 끝나는 유일한 길이라 카운터가 화면에 서 있어야 한다:
+       * 끝이 예고 없이 오면 사건이 아니라 사고다.
+       */
+      boardWarnings: number;
+      warningLimit: number;
+      /** 마지막 경고일 — 압박의 시계 (경고를 받은 적이 없으면 null) */
+      lastWarnedOn: string | null;
+      /** 축별 누적 XP — 훈련은 세션당 0.5라 소수로 쌓인다 (뷰는 반올림해 싣는다) */
+      xp: Record<string, number>;
+      /** 한 칸에 필요한 XP · 성장 상한 — 규칙 숫자의 원본은 `grantManagerXP`다 */
+      xpPerLevel: number;
+      attrCap: number;
     };
     players: SquadViewRow[];
     formation: string;
@@ -1488,9 +1507,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
        * 화면만 말하게 된다. 기억은 다시 선발이 될 때 `roleId`로 서서 온다.
        */
       const slotted = (liveSlot?.role ?? assignment?.role) === "starting";
-      const assignedRoleId = slotted
-        ? (liveSlot?.entry.roleId ?? assignment?.roleId)
-        : undefined;
+      const assignedRoleId = slotted ? (liveSlot?.entry.roleId ?? assignment?.roleId) : undefined;
       const shownOverall = observedOverall(p.attributes.overall, observation);
       const slotValue = assignedSlot ? slotFit(assignedSlot, assignedRoleId) : null;
       return {
@@ -1743,13 +1760,16 @@ export function buildOfficeViews(state: GameState): OfficeViews {
           time: e.time,
           type: e.type,
           status: e.status,
-          title: `${cup ? `${competitionShortName(m.competitionId)} ` : ""}${stage} ${m.neutral ? "중립" : home ? "홈" : "원정"} vs ${opponent}`,
+          title: `${fixtureLabel(m.competitionId, m.stage ?? "league", m.round)} ${m.neutral ? "중립" : home ? "홈" : "원정"} vs ${opponent}`,
           detail,
           result,
           win,
           isNext: next !== null && m.id === next.id,
           match: {
-            competition: cup ? competitionShortName(m.competitionId) : null,
+            // 리그 경기는 이름을 생략한다(감독은 자기 리그를 안다). 컵과 친선은
+            // 어느 경기인지가 곧 정보다
+            competition: cup || isFriendly(m) ? competitionShortName(m.competitionId) : null,
+            // 친선은 단계가 없어 빈 문자열이다 — 화면이 빈 칩을 그리지 않는다
             stage,
             opponent: teamShortName(home ? m.awayTeamId : m.homeTeamId),
             opponentName: opponent,
@@ -1951,7 +1971,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
     .slice(-5)
     .map(
       (m) =>
-        `${isCup(m.competitionId) ? `${competitionShortName(m.competitionId)} ` : ""}${competitionStageLabel(m.competitionId, m.stage ?? "league", m.round)} ${teamShortName(m.homeTeamId)} ${m.result?.homeGoals}-${m.result?.awayGoals} ${teamShortName(m.awayTeamId)}${m.result?.penalties ? ` (승부차기 ${m.result.penalties.home}-${m.result.penalties.away})` : ""}`,
+        `${fixtureLabel(m.competitionId, m.stage ?? "league", m.round)} ${teamShortName(m.homeTeamId)} ${m.result?.homeGoals}-${m.result?.awayGoals} ${teamShortName(m.awayTeamId)}${m.result?.penalties ? ` (승부차기 ${m.result.penalties.home}-${m.result.penalties.away})` : ""}`,
     );
 
   const lastRecord = state.seasonRecords[state.seasonRecords.length - 1];
@@ -1964,6 +1984,16 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         background: state.manager.background,
         attributes: { ...state.manager.attributes },
         reputation: { ...state.manager.reputation },
+        // 옛 세이브엔 경고 필드가 없다 — 없으면 아직 한 번도 안 받은 것이다
+        boardWarnings: state.manager.boardWarnings ?? 0,
+        warningLimit: USER_WARNINGS_BEFORE_SACK,
+        lastWarnedOn: state.manager.lastWarnedOn ?? null,
+        // 훈련 XP가 0.5씩 쌓여 소수가 된다 — 화면이 87.5를 보일 이유가 없다
+        xp: Object.fromEntries(
+          Object.entries(state.managerXP).map(([axis, value]) => [axis, Math.round(value)]),
+        ),
+        xpPerLevel: MANAGER_XP_PER_LEVEL,
+        attrCap: MANAGER_ATTR_CAP,
       },
       players,
       formation: tactics.spec.formation,
@@ -2004,7 +2034,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
     },
     competitions: {
       next: next
-        ? `${isCup(next.competitionId) ? `${competitionShortName(next.competitionId)} ` : ""}${competitionStageLabel(next.competitionId, next.stage ?? "league", next.round)} ${next.date} ${next.neutral ? "중립" : next.homeTeamId === userTeamId ? "홈" : "원정"} vs ${teamName(next.homeTeamId === userTeamId ? next.awayTeamId : next.homeTeamId)}`
+        ? `${fixtureLabel(next.competitionId, next.stage ?? "league", next.round)} ${next.date} ${next.neutral ? "중립" : next.homeTeamId === userTeamId ? "홈" : "원정"} vs ${teamName(next.homeTeamId === userTeamId ? next.awayTeamId : next.homeTeamId)}`
         : null,
       nextMatch: next
         ? {
@@ -2012,7 +2042,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
             time: next.time ?? "15:00",
             // 대회 이름을 **언제나** 붙인다 — 이 카드 하나가 유일한 일정 정보라
             // "R2"만 적으면 무슨 대회의 2라운드인지 화면 어디에도 없다
-            label: `${competitionShortName(next.competitionId)} ${competitionStageLabel(next.competitionId, next.stage ?? "league", next.round)}`,
+            label: competitionLabel(next.competitionId, next.stage ?? "league", next.round),
             opponent: teamName(next.homeTeamId === userTeamId ? next.awayTeamId : next.homeTeamId),
             venue: next.neutral ? "neutral" : next.homeTeamId === userTeamId ? "home" : "away",
             inDays: Math.max(0, diffDays(state.date, next.date)),

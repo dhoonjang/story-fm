@@ -75,7 +75,9 @@ describe("기본 훈련 — 시즌 달력에 미리 깔려 있다", () => {
     for (let i = 0; i <= 4; i++) {
       expect(trainingOn(state, addDays(back, i)), `복귀 ${i}일차`).toHaveLength(1);
     }
-    expect(trainingOn(state, addDays(back, 4)).join()).toContain("체력 테스트");
+    // 복귀 주 마지막 날은 **첫 친선의 전날**이다 — 경기 준비가 체력 테스트를 밀어낸다.
+    // 경기와의 거리가 요일보다 먼저다(planFor)
+    expect(trainingOn(state, addDays(back, 4)).join()).toContain("경기 준비");
   });
 
   it("복귀 주 다음 2주가 기초 체력기 — 러닝·웨이트에 이중 세션", () => {
@@ -131,12 +133,13 @@ describe("기본 훈련 — 시즌 달력에 미리 깔려 있다", () => {
   it("경기가 없는 주는 평일 5일만 훈련하고 주말은 쉰다", () => {
     const state = createTestGame();
     const dates = new Set(userMatchDates(state));
-    // 프리시즌 (경기가 아직 없다) — 평일만 훈련하고 주말은 비어 있다
-    expect(trainingOn(state, "2026-07-18")).toHaveLength(0); // 토
-    expect(trainingOn(state, "2026-07-19")).toHaveLength(0); // 일
-    for (const weekday of ["2026-07-20", "2026-07-21", "2026-07-22", "2026-07-23", "2026-07-24"]) {
+    // 프리시즌에도 경기가 있다(친선 — 7/18 토) — 그 주 평일은 훈련이 차 있다
+    expect(trainingOn(state, "2026-07-18")).toHaveLength(0); // 토 = 경기일
+    expect(trainingOn(state, "2026-07-19").join()).toContain("회복"); // 일 = MD+1
+    for (const weekday of ["2026-07-21", "2026-07-22", "2026-07-23", "2026-07-24"]) {
       expect(trainingOn(state, weekday).length, weekday).toBeGreaterThan(0);
     }
+    expect(trainingOn(state, "2026-07-20")).toHaveLength(0); // 월 = MD+2 완전 휴식
 
     // 시즌 중에도 경기가 걸리지 않는 주말은 비어 있다 (A매치 휴식기 등)
     let checked = 0;
