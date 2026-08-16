@@ -155,12 +155,16 @@
 플레이 가능한 프로토타입. 온보딩 → 일상 지시 → 경기 → 시즌 전환 → 멀티시즌이
 엔드투엔드로 돈다. 주요 미구현(상세는 각 문서의 "미해결"):
 
-- 보드/구단주 요청·목표 시스템 (경질 경고는 있음)
-- 세계가 먼저 말 걸기 — 기자회견 외 (설계는 [data/people.md](data/people.md))
-- 서사 아크·장기 기억 축적
-- 승부차기 연출 — 코어가 조용히 굴린다
-- 감독 이직 — 경질이 곧 세이브의 끝이다
-- 유스 아카데미 — 콜업은 있으나 육성 구조가 없다
+- 보드/구단주 요청·목표 시스템 — 순위 기대와 경질 경고까지다
+  ([simulation/career.md](simulation/career.md))
+- 세계가 먼저 말 걸기 — 코어가 여는 장면은 회견뿐이고, 누적되는 압력이 없다
+  (설계는 [data/people.md](data/people.md))
+- 서사 아크·장기 기억 축적 — 최근 몇 건만 스냅샷에 실린다
+  ([llm/agents.md](llm/agents.md))
+- 승부차기 연출 — 코어가 조용히 굴린다 ([simulation/match.md](simulation/match.md))
+- 감독 이직 — 경질이 곧 세이브의 끝이다 ([simulation/career.md](simulation/career.md))
+- 유스 아카데미 — 2군은 코어 곡선으로 자랄 뿐 감독의 손잡이가 콜업뿐이다
+  ([simulation/season.md](simulation/season.md))
 
 ## 문서 지도
 

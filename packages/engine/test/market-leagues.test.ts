@@ -12,6 +12,7 @@ import {
   isOutsideOurEconomy,
   leagueOfTeam,
   marketBiasOf,
+  marketValueOf,
   playersOf,
   searchPlayers,
   windowOpenForTeam,
@@ -142,9 +143,10 @@ describe("이적창 — 우리와 시기가 다르다", () => {
 
 describe("돈 성향과 복귀 저항", () => {
   it("사우디는 지르고 MLS는 아낀다 — 둘 다 노장을 반긴다", () => {
-    const saudi = marketBiasOf("alnassr");
-    const mls = marketBiasOf("intermiami");
-    const ours = marketBiasOf("arsenal");
+    const state = createTestGame();
+    const saudi = marketBiasOf(state, "alnassr");
+    const mls = marketBiasOf(state, "intermiami");
+    const ours = marketBiasOf(state, "arsenal");
 
     expect(saudi.fee).toBeGreaterThan(ours.fee);
     expect(saudi.wage).toBeGreaterThan(2);
@@ -187,5 +189,33 @@ describe("돈 성향과 복귀 저항", () => {
     // 복귀 저항 항목이 붙은 쪽에만 그 감점이 있다
     expect(legendOdds.factors.some((f) => f.label === "복귀 저항")).toBe(true);
     expect(peerOdds.factors.some((f) => f.label === "복귀 저항")).toBe(false);
+  });
+});
+
+/**
+ * 승강은 세이브(`state.leagueOf`)에만 남는다 — 카탈로그의 `leagueId`는 불변이다.
+ * 그래서 "이 팀이 지금 어느 리그에 있나"를 묻는 시장 쪽 자리는 전부
+ * `leagueOfTeamIn`을 지나야 한다 (docs/data/game-state.md §1).
+ */
+describe("시장은 세이브의 리그 소속을 본다", () => {
+  it("시장가는 지금 뛰는 리그의 계수를 쓴다", () => {
+    const state = createTestGame();
+    const player = playersOf(state, state.userTeamId)[0]!;
+    const before = marketValueOf(state, player);
+    // 계수가 더 낮은 리그로 옮기면(1 → 5) 몸값이 따라 내려간다
+    state.leagueOf = { ...(state.leagueOf ?? {}), [state.userTeamId]: "ligue1" };
+    expect(marketValueOf(state, player)).toBeLessThan(before);
+  });
+
+  it("돈 성향과 이적창도 카탈로그가 아니라 세이브를 따라간다", () => {
+    const state = createTestGame();
+    state.windows = buildTransferWindows(1);
+    state.date = "2027-03-10"; // 우리 창은 닫히고 MLS만 열린 날
+    expect(marketBiasOf(state, state.userTeamId)).toEqual({ fee: 1, wage: 1, veteranAppetite: 1 });
+    expect(windowOpenForTeam(state, state.userTeamId)).toBeNull();
+
+    state.leagueOf = { ...(state.leagueOf ?? {}), [state.userTeamId]: "mls" };
+    expect(marketBiasOf(state, state.userTeamId)).toEqual(marketBiasOf(state, "intermiami"));
+    expect(windowOpenForTeam(state, state.userTeamId)).not.toBeNull();
   });
 });

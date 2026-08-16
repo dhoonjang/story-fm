@@ -6,6 +6,7 @@ const testConfig = {
   provider: "openai" as const,
   model: "gpt-test",
   maxTokens: 1024,
+  timeoutMs: 30_000,
 };
 
 const usage = {
@@ -22,7 +23,9 @@ function completion(message: Record<string, unknown>, finish = "stop") {
 
 function makeStubClient(responses: unknown[]) {
   const sent: Array<Record<string, unknown>> = [];
-  const create = vi.fn(async (params: Record<string, unknown>) => {
+  // 요청 옵션(시한·중단 신호)까지 기록에 남도록 두 인자를 그대로 받는다
+  const create = vi.fn(async (...args: [Record<string, unknown>, unknown?]) => {
+    const params = args[0];
     // 요청은 매 반복 새로 만들어지는 게 아니라 같은 배열을 다시 보내므로 사본을 뜬다
     sent.push({ ...params, messages: [...(params.messages as unknown[])] });
     const next = responses.shift();
@@ -46,7 +49,8 @@ const usageChunk = { choices: [], usage };
 /** 요청마다 chunk 목록 하나를 async iterable로 돌려주는 stub */
 function makeStreamClient(streams: unknown[][]) {
   const sent: Array<Record<string, unknown>> = [];
-  const create = vi.fn(async (params: Record<string, unknown>) => {
+  const create = vi.fn(async (...args: [Record<string, unknown>, unknown?]) => {
+    const params = args[0];
     sent.push({ ...params, messages: [...(params.messages as unknown[])] });
     const next = streams.shift();
     if (!next) throw new Error("stub 스트림 부족");
@@ -68,6 +72,21 @@ describe("OpenAI 어댑터", () => {
      * 400을 맞는다.
      */
     expect(sent[0]?.reasoning_effort).toBe("none");
+  });
+
+  it("설정의 시한과 중단 신호를 요청 옵션으로 넘긴다 — SDK 기본값에 기대지 않는다", async () => {
+    const { client, create } = makeStubClient([completion({ role: "assistant", content: "됐다" })]);
+    const llm = new OpenAiGameLLM(testConfig, client);
+    const controller = new AbortController();
+    await llm.runTurn({ system: "시스템", history: [], user: "안녕", signal: controller.signal });
+
+    const options = create.mock.calls[0]![1] as unknown as {
+      timeout?: number;
+      signal?: AbortSignal;
+    };
+    expect(options.timeout).toBe(testConfig.timeoutMs);
+    // 신호를 안 넘기면 시한이 지나도 소켓이 살아 토큰과 연결을 문다
+    expect(options.signal).toBe(controller.signal);
   });
 
   it("도구 명세를 그대로 넘긴다 — 스키마는 제공자 중립이다", async () => {

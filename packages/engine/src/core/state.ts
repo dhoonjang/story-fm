@@ -344,7 +344,7 @@ export interface PendingMatch {
    * 적응도(`familiarity`)도 함께 담는다. 전술을 바꾸면 코어가 적응도를 깎는데,
    * 그건 **새 전술을 훈련해야 한다**는 뜻이라 그 경기 한 번의 대응에는 맞지 않는다.
    * 담지 않으면 하프타임에 라인 한 번 올린 대가로 팀 적응도가 영구히 깎인다.
-   * 적응도가 **쌓이는** 것은 경기가 아니라 날짜가 흐를 때다(`settleTactics`).
+   * 적응도가 **쌓이는** 것은 훈련·경기 결산 판정이지 경기 중의 조정이 아니다.
    */
   tacticsBefore?: {
     spec: import("@story-fm/domain").TacticsSpec;
@@ -779,15 +779,23 @@ export function activeContract(state: GameState, playerId: string): Contract | n
 }
 
 /** 팀 주급 총액 — 활성 계약의 합 (저장하지 않는 파생값) */
-export function weeklyWagesOf(state: GameState, teamId: string): number {
-  /**
-   * **임대는 주급을 나눈다.** 계약은 원소속에 남으므로 합계는 여전히 우리 것인데,
-   * 임대 팀이 `wageShare`만큼을 낸다 — 그만큼 우리 부담에서 빠지고 그쪽에 얹힌다.
-   * 저장하지 않고 계약 + `GamePlayer.loan`에서 파생한다.
-   */
-  let total = 0;
+/** 이번 주 주급 한 줄 — 선수 한 명이 이 구단에 지우는 부담 */
+export interface WeeklyWageLine {
+  gamePlayerId: string;
+  weekly: number;
+}
+
+/**
+ * 이 구단의 **선수별 주급 부담** — 합계(`weeklyWagesOf`)와 원장 명세가 같은 값을 본다.
+ *
+ * **임대는 주급을 나눈다.** 계약은 원소속에 남으므로 합계는 여전히 우리 것인데,
+ * 임대 팀이 `wageShare`만큼을 낸다 — 그만큼 우리 부담에서 빠지고 그쪽에 얹힌다.
+ * 저장하지 않고 계약 + `GamePlayer.loan`에서 파생한다.
+ */
+export function weeklyWageLinesOf(state: GameState, teamId: string): WeeklyWageLine[] {
+  const byPlayer = new Map<string, number>();
   for (const c of state.contracts) {
-    if (c.status === "active" && c.teamId === teamId) total += c.weeklyWage;
+    if (c.status === "active" && c.teamId === teamId) byPlayer.set(c.gamePlayerId, c.weeklyWage);
   }
   /**
    * 임대 보정 — **임대 중인 선수만 훑는다.** 계약마다 선수를 찾으면 O(계약×선수)라
@@ -802,10 +810,22 @@ export function weeklyWagesOf(state: GameState, teamId: string): number {
       (c) => c.status === "active" && c.gamePlayerId === player.id,
     );
     if (!contract || contract.teamId !== loan.fromTeamId) continue;
-    if (loan.fromTeamId === teamId) total -= contract.weeklyWage * loan.wageShare;
-    else if (player.teamId === teamId) total += contract.weeklyWage * loan.wageShare;
+    const share = contract.weeklyWage * loan.wageShare;
+    if (loan.fromTeamId === teamId) {
+      byPlayer.set(player.id, (byPlayer.get(player.id) ?? 0) - share);
+    } else if (player.teamId === teamId) {
+      byPlayer.set(player.id, (byPlayer.get(player.id) ?? 0) + share);
+    }
   }
-  return total;
+  const lines: WeeklyWageLine[] = [];
+  for (const [gamePlayerId, weekly] of byPlayer) {
+    if (weekly > 0) lines.push({ gamePlayerId, weekly });
+  }
+  return lines;
+}
+
+export function weeklyWagesOf(state: GameState, teamId: string): number {
+  return weeklyWageLinesOf(state, teamId).reduce((sum, l) => sum + l.weekly, 0);
 }
 
 /** 시즌 누적 경고 — BOOKING에서 파생 */

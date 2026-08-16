@@ -160,18 +160,6 @@ function resolveScouting(state: GameState, digest: string[]): void {
 }
 
 /**
- * 타 팀 선수의 하루 회복 — **리그가 같은 규칙으로 돈다.**
- *
- * ⚠️ 예전엔 이 순회가 없어서 **회복이 우리 팀에만** 있었다. 남의 팀 선수는 경기로
- * 깎이기만 하고 되찾는 일이 없어 시즌이 갈수록 단조 감소했다 — 시즌 중반에 재 보면
- * 우리 선발은 늘 100인데 상대 상위 14명은 평균 77, 그중 최저는 30이었다. 감독이
- * 보는 화면에서 "상대는 늘 지쳐 있다"가 그래서 나왔다.
- *
- * 회복량은 **감독 팀의 기본 마이크로사이클과 같은 눈금**이다 — 경기 다음 날은
- * 회복 세션(16), 그다음 날은 완전 휴식(13), 그 밖은 본훈련(8). AI 구단도 훈련을
- * 하므로 늘 쉬는 값을 주면 반대로 남의 팀이 유리해진다.
- */
-/**
  * 하루를 소화한다.
  *
  * @returns **오늘 결정하지 않으면 사라지는 일**이 있으면 true — 그때만 시계가 선다.
@@ -246,11 +234,11 @@ function dailyTick(
   }
 
   tickOtherClubs(state);
-  // 전술 적응은 감독 팀을 포함한 모든 클럽이 매일 조금씩 받는다 (other-clubs.ts)
+  // 하루치 전술 적응 — **AI 클럽만** 받는다 (other-clubs.ts의 계약)
   driftFamiliarity(state);
 
-  // 전술 적응도 — **시간이 붙인다.** 같은 전술을 유지하는 동안 매일 조금씩 손에 익고,
-  // 그 숙련도는 기억(`drilled`)에 계속 갱신돼 나중에 되돌아왔을 때 되찾을 수 있다.
+  // 감독 팀은 기억(`drilled`)만 갱신한다 — **시간은 적응도를 올리지 않는다**
+  // (skills/index.ts의 계약). 상승 경로는 훈련·경기 결산 판정뿐이다.
   settleTactics(state, state.date);
 
   // 휴식은 소화할 것이 없다 — 지나갔다는 표시만 남긴다
@@ -323,7 +311,7 @@ function dailyTick(
     }
   } else if (state.date === addDays(state.calendar.preseasonStart, 1)) ensureMonthlyPosted(state);
 
-  // 주급 (월요일) — 활성 계약 합에서 파생, 전 팀에 적용
+  // 주급 (월요일) — 활성 계약 합에서 파생, 구단 전체에 적용 (무소속 제외 — finance.ts)
   if (dow === 1) payWeeklyWages(state);
 
   // 벤치 불만 발생 — 월요일, 고평가 비선발 자원 (간이).
@@ -738,7 +726,8 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
       if (!player || isInjured(state, player.id)) continue;
       openInjuryFor(state, player, "match", injuryRng);
     }
-    // 뛴 만큼 성향이 내려간다 — 다친 선수도 그 경기의 몫은 받는다 (균형식 그대로)
+    // 뛰었는데 안 다쳤으면 성향이 내려간다 — 선발은 출전 한 번 몫씩, 다친 선수도
+    // 그 경기의 몫은 받는다 (균형식 그대로 — injury.ts)
     for (const side of ["home", "away"] as const) {
       for (const p of squads[side].starters) easeProneness(p);
     }
@@ -874,7 +863,7 @@ export function describeNextFixture(state: GameState): string {
   return `다음 경기: ${competitionShortName(next.competitionId)} ${competitionStageLabel(next.competitionId, next.stage ?? "league", next.round)} ${next.date} ${next.neutral ? "중립" : home ? "홈" : "원정"} vs ${teamName(home ? next.awayTeamId : next.homeTeamId)}`;
 }
 
-/** 정지 소화 — 유저 팀 경기가 끝날 때 호출 (경기 단위로 차감) */
+/** 정지 소화 — 경기가 끝날 때 호출 (경기 단위로 차감). 유저 경기·타 팀 간이 시뮬 둘 다 */
 export function serveSuspensions(state: GameState, playerIds: string[]): void {
   for (const id of playerIds) {
     const s = activeSuspension(state, id);
