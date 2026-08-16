@@ -3700,6 +3700,18 @@ textarea {
   font-weight: 800;
   font-variant-numeric: tabular-nums;
 }
+/**
+ * 축 라벨 아래의 XP 자국 — **다음 칸까지 얼마나 왔는가**를 숫자 대신 길이로 말한다.
+ * 숫자를 하나 더 붙이면 다섯 축이 열 개의 숫자가 되어 오각형이 표로 돌아간다.
+ * 도형(능력치)보다 한 단 흐리게 둬서 주인이 바뀌지 않게 한다.
+ */
+.mgr-radar .xp-track {
+  fill: var(--border);
+}
+.mgr-radar .xp-fill {
+  fill: var(--accent);
+  opacity: 0.7;
+}
 
 /**
  * 표의 바탕 — **오른쪽 칸에 무엇이 서든 같다.**
@@ -5894,9 +5906,20 @@ textarea {
  * ⚠️ `inline-block`이라 **내용 폭만큼만** 넓어진다. 블록으로 두면 왼쪽 열 끝까지
  * 늘어나 상자 오른쪽이 통째로 비고, 그게 이 화면에서 카드를 걷어냈던 이유였다.
  */
+/**
+ * 평판과 보드 경고가 나란히 서는 줄 — 둘 다 감독에게 **딸린 수치 묶음**이고
+ * 한 줄에 있어야 "세계가 보는 눈"과 "자리의 남은 목숨"이 같은 무게로 읽힌다.
+ * 좁아지면 아래로 접힌다.
+ */
+.mgr-meters {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
 .mgr-rep {
   display: inline-block;
-  margin-top: 14px;
   padding: 10px 14px 11px;
   background: var(--panel-2);
   border: 1px solid var(--border);
@@ -5949,6 +5972,39 @@ textarea {
   color: var(--text);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+}
+/**
+ * 보드 경고 — 평판 상자와 **같은 상자, 다른 알맹이**다. 평판은 눈금 위를 오가는
+ * 값이라 막대지만 경고는 세는 것이라 칸이다: 세 칸이 곧 자리의 남은 목숨이고
+ * 찬 칸이 받은 경고다. 마지막 칸은 붉게 차서 다음이 없다는 것을 색으로 말한다.
+ */
+.mgr-warn {
+  display: inline-block;
+  padding: 10px 14px 11px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.mgr-warn-cells {
+  display: flex;
+  gap: 5px;
+  /* 평판 항목 줄(막대 4px + 값)과 높이를 맞춰 두 상자의 밑선이 어긋나지 않게 */
+  padding: 3px 0;
+}
+.mgr-warn-cells i {
+  width: 20px;
+  height: 9px;
+  border-radius: var(--r-xs);
+  background: transparent;
+  border: 1px solid var(--border);
+}
+.mgr-warn-cells i.on {
+  background: var(--accent-2);
+  border-color: var(--accent-2);
+}
+.mgr-warn-cells i.on.last {
+  background: var(--danger);
+  border-color: var(--danger);
 }
 .mgr-head .mgr-radar {
   flex: 0 0 auto;

@@ -77,7 +77,23 @@ const radarPath = (radius: number, count: number) =>
     .map((p, i) => `${i === 0 ? "M" : "L"}${p}`)
     .join(" ") + " Z";
 
-function ManagerRadar({ attributes }: { attributes: Record<string, number | undefined> }) {
+/**
+ * 축 라벨 아래에 눕는 XP 자국의 크기 — 라벨 글자 폭(두 자 + 값)보다 짧게 잡아
+ * 꼭짓점마다 선이 아니라 **자국**으로 보이게 한다.
+ */
+const XP_BAR_W = 26;
+const XP_BAR_H = 2.4;
+
+function ManagerRadar({
+  attributes,
+  xp,
+  attrCap,
+}: {
+  attributes: Record<string, number | undefined>;
+  /** 축별 다음 칸까지의 진행 (0~100) */
+  xp: Record<string, number | undefined>;
+  attrCap: number;
+}) {
   const axes = MANAGER_ATTRIBUTES;
   const values = axes.map((a) => Math.max(0, Math.min(100, attributes[a] ?? 0)));
   const shape =
@@ -114,13 +130,47 @@ function ManagerRadar({ attributes }: { attributes: Record<string, number | unde
           const [x, y] = radarPoint(i, axes.length, RADAR_R + 17);
           const c = RADAR_R + RADAR_PAD;
           const anchor = Math.abs(x - c) < 4 ? "middle" : x > c ? "start" : "end";
+          /**
+           * 다음 칸까지의 진행 — **숫자를 하나 더 늘어놓지 않는다.** 축값 옆에
+           * 87처럼 적으면 능력치와 XP가 같은 종류로 읽혀 다섯 축이 열 개의 숫자가
+           * 된다. 라벨 아래에 눕는 자국이 얼마나 찼는지가 곧 "자라는 중"이다.
+           * 상한(`attrCap`)에 닿은 축은 더 자라지 않으므로 자국을 그리지 않는다.
+           */
+          const grows = values[i] < attrCap;
+          const progress = Math.max(0, Math.min(100, xp[a] ?? 0)) / 100;
+          const barX =
+            anchor === "middle" ? x - XP_BAR_W / 2 : anchor === "start" ? x : x - XP_BAR_W;
           return (
-            <text key={a} className="axis-label" x={x} y={y} textAnchor={anchor}>
-              <tspan>{MANAGER_ATTRIBUTE_KO[a]}</tspan>
-              <tspan className="axis-value" dx="5">
-                {values[i]}
-              </tspan>
-            </text>
+            <g key={a}>
+              <text className="axis-label" x={x} y={y} textAnchor={anchor}>
+                <tspan>{MANAGER_ATTRIBUTE_KO[a]}</tspan>
+                <tspan className="axis-value" dx="5">
+                  {values[i]}
+                </tspan>
+              </text>
+              {grows && (
+                <>
+                  <rect
+                    className="xp-track"
+                    x={barX}
+                    y={y + 8}
+                    width={XP_BAR_W}
+                    height={XP_BAR_H}
+                    rx={XP_BAR_H / 2}
+                  />
+                  {progress > 0 && (
+                    <rect
+                      className="xp-fill"
+                      x={barX}
+                      y={y + 8}
+                      width={XP_BAR_W * progress}
+                      height={XP_BAR_H}
+                      rx={XP_BAR_H / 2}
+                    />
+                  )}
+                </>
+              )}
+            </g>
           );
         })}
       </svg>
@@ -2969,32 +3019,77 @@ export function CareerView({
           <h3>{squad.manager.name} 감독</h3>
           <div className="bg">{squad.manager.background}</div>
           {/**
-           * 평판 — 감독의 능력이 아니라 **세계가 그를 보는 눈**이라 오각형과 같은
-           * 무게로 그리지 않는다. 다만 셋을 견주는 값이라 막대가 읽기 편하다:
-           * **짧은 막대 셋을 한 줄로** 눕혀 눈금은 주되 자리는 덜 차지한다.
+           * 감독에게 **딸린 수치 묶음** 둘이 한 줄에 선다 — 세계가 그를 보는 눈(평판)과
+           * 자리에 남은 목숨(보드 경고). 둘 다 이름·배경보다 아래 단이고 서로는 같은 단이다.
            */}
-          <div className="mgr-rep">
-            <div className="mgr-rep-title">평판</div>
-            <div className="mgr-rep-items">
-              {(
-                [
-                  ["보드", squad.manager.reputation.board],
-                  ["언론", squad.manager.reputation.media],
-                  ["선수단", squad.manager.reputation.squad],
-                ] as const
-              ).map(([label, value]) => (
-                <span className="rep-item" key={label}>
-                  <span className="rep-label">{label}</span>
-                  <span className="rep-bar">
-                    <i style={{ width: `${value}%` }} />
+          <div className="mgr-meters">
+            {/**
+             * 평판 — 감독의 능력이 아니라 **세계가 그를 보는 눈**이라 오각형과 같은
+             * 무게로 그리지 않는다. 다만 셋을 견주는 값이라 막대가 읽기 편하다:
+             * **짧은 막대 셋을 한 줄로** 눕혀 눈금은 주되 자리는 덜 차지한다.
+             */}
+            <div className="mgr-rep">
+              <div className="mgr-rep-title">평판</div>
+              <div className="mgr-rep-items">
+                {(
+                  [
+                    ["보드", squad.manager.reputation.board],
+                    ["언론", squad.manager.reputation.media],
+                    ["선수단", squad.manager.reputation.squad],
+                  ] as const
+                ).map(([label, value]) => (
+                  <span className="rep-item" key={label}>
+                    <span className="rep-label">{label}</span>
+                    <span className="rep-bar">
+                      <i style={{ width: `${value}%` }} />
+                    </span>
+                    <b>{value}</b>
                   </span>
-                  <b>{value}</b>
-                </span>
-              ))}
+                ))}
+              </div>
+            </div>
+            {/**
+             * 보드 경고 — 평판과 **같은 무게로, 다른 물건으로** 그린다. 경질은 이
+             * 세이브가 끝나는 유일한 길이라 카운터가 화면에 없으면 끝이 예고 없이
+             * 온다. 평판은 0~100 사이를 오가는 눈금이지만 경고는 **세는 것**이라
+             * 막대가 아니라 칸이다 — 찬 칸이 받은 경고고, 마지막 칸이 차면 붉다.
+             */}
+            <div className="mgr-warn">
+              <div className="mgr-rep-title">보드 경고</div>
+              <div
+                className="mgr-warn-cells"
+                data-testid="board-warnings"
+                role="img"
+                aria-label={`보드 경고 ${squad.manager.boardWarnings}/${squad.manager.warningLimit}${
+                  squad.manager.lastWarnedOn ? ` · 마지막 ${squad.manager.lastWarnedOn}` : ""
+                }`}
+                title={
+                  squad.manager.lastWarnedOn
+                    ? `마지막 경고 ${squad.manager.lastWarnedOn}`
+                    : undefined
+                }
+              >
+                {Array.from({ length: squad.manager.warningLimit }, (_, i) => (
+                  <i
+                    key={i}
+                    className={
+                      i < squad.manager.boardWarnings
+                        ? i === squad.manager.warningLimit - 1
+                          ? "on last"
+                          : "on"
+                        : ""
+                    }
+                  />
+                ))}
+              </div>
             </div>
           </div>
         </div>
-        <ManagerRadar attributes={squad.manager.attributes} />
+        <ManagerRadar
+          attributes={squad.manager.attributes}
+          xp={squad.manager.xp}
+          attrCap={squad.manager.attrCap}
+        />
       </div>
 
       <div className="section-title">트로피 보관함</div>
