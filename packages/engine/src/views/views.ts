@@ -26,7 +26,7 @@ import {
 } from "@story-fm/domain";
 import { diffDays, nextMatchFor, seasonEndDate } from "../competition/calendar";
 import { clubProfile } from "../data/club-profile";
-import { teamCatalogById } from "../data/team-catalog";
+import { tierOfTeamIn } from "../core/club-tier";
 import { categoryOf, currentMonthSummary, psrStatus, seasonWageRatio } from "../club/finance";
 import {
   cupCatalog,
@@ -1814,7 +1814,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         noncash: e.accounting === "noncash",
       };
     });
-  const stadium = clubProfile(userTeamId, teamCatalogById(userTeamId)?.tier ?? 3);
+  const stadium = clubProfile(userTeamId, tierOfTeamIn(state, userTeamId));
 
   const recentResults = state.matches
     .filter((m) => m.result && (m.homeTeamId === userTeamId || m.awayTeamId === userTeamId))

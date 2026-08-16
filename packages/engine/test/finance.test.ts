@@ -868,7 +868,7 @@ describe("밸런스 기준선", () => {
     const state = createTestGame(42, "arsenal");
     // tier1 · 브랜드1이 같아도 리그가 다르면 고정비·초기치·예산이 갈린다
     expect(monthlyFixedCostOf("psg")).toBeLessThan(monthlyFixedCostOf("arsenal"));
-    expect(seasonBudgetBaseOf("psg")).toBeLessThan(seasonBudgetBaseOf("arsenal"));
+    expect(seasonBudgetBaseOf(state, "psg")).toBeLessThan(seasonBudgetBaseOf(state, "arsenal"));
     expect(financeOf(state, "psg").balance).toBeLessThan(financeOf(state, "arsenal").balance);
     expect(financeOf(state, "psg").transferBudget).toBeLessThan(
       financeOf(state, "arsenal").transferBudget,
