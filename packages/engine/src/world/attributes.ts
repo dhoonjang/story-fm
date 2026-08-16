@@ -2,7 +2,7 @@ import type { AttributeAxis, AxisValues, WeightSlot } from "@story-fm/domain";
 import { normalizedLogCurve, weightSlotOf } from "@story-fm/domain";
 
 /**
- * 15축 파생 — 능력치 모델의 데이터 계층 (attribute-model.md §8).
+ * 15축 파생 — 능력치 모델의 데이터 계층 (player.md §1 · §12).
  *
  * 시드 데이터(epl-players.ts)는 EA FC 계열 **6축 + GK**만 갖는다. 15축 중 7축은
  * 1:1로 옮겨오고, 나머지 8축은 여기서 **결정적으로 파생**한다 (1단계).
@@ -229,7 +229,7 @@ export function deriveAxes(
   };
 }
 
-// ── 노화 곡선 (attribute-model.md §5) ────────────────────
+// ── 노화 곡선 (player.md §6.3) ────────────────────
 
 /**
  * 축별 노화 곡선 — 15축 분리의 최대 수확.

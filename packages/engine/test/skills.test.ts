@@ -72,7 +72,7 @@ describe("판정형 스킬 — 변화량은 공식이 정한다 (overview §7)",
     }
   });
 
-  it("리더십이 높을수록 같은 팀토크가 더 크게 울린다 (결정 #13)", () => {
+  it("리더십이 높을수록 같은 팀토크가 더 크게 울린다 (career.md §2)", () => {
     const low = createTestGame();
     low.manager.attributes.leadership = 40;
     const high = createTestGame();
@@ -347,7 +347,7 @@ describe("포지션 스킬 (멀티 포지션)", () => {
     expect(naturalPositionOf(df).position).toBe("ST");
     expect(df.positions.filter((p) => p.isNatural)).toHaveLength(1);
     expect(groupOf(df)).toBe("FW");
-    // ST 자리 가중치로 재산정 (15축 가중합 — attribute-model.md §2)
+    // ST 자리 가중치로 재산정 (15축 가중합 — player.md §2)
     expect(df.attributes.overall).toBe(roleFit(df.attributes, "ST"));
   });
 

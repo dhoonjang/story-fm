@@ -260,7 +260,7 @@ describe("합의 실행 — 장부가 움직인다", () => {
         (e) => e.category === "transfer_out" && e.label.includes(player.name),
       ),
     ).toBe(true);
-    // 에이전트 수수료도 이적료의 10%로 함께 빠진다 (club-finance §6)
+    // 에이전트 수수료도 이적료의 10%로 함께 빠진다 (finance.md §6)
     expect(
       financeOf(state, state.userTeamId).ledger.find((e) => e.category === "agent_fee")?.amount,
     ).toBe(Math.round(terms.fee * 0.1));

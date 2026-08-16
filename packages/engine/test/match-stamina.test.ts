@@ -21,7 +21,7 @@ import {
  *
  * 여기서 고정하는 것은 숫자가 아니라 게임의 계약이다: 90분을 뛰면 바닥 근처로
  * 가고, 사흘 뒤 경기에는 지구력이 좋은 선수만 그대로 나갈 수 있다. 이게 무너지면
- * "누구를 쉬게 할까"라는 결정 자체가 게임에서 사라진다 (attribute-model §4.2).
+ * "누구를 쉬게 할까"라는 결정 자체가 게임에서 사라진다 (match.md §3).
  */
 
 function startersOf(state: ReturnType<typeof createTestGame>) {

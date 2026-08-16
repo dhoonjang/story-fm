@@ -38,7 +38,7 @@ describe("순위표", () => {
   });
 });
 
-describe("간이 시뮬 분포 (결정 #5) — 전력이 결과에 반영된다", () => {
+describe("간이 시뮬 분포 (match.md §7) — 전력이 결과에 반영된다", () => {
   it("강팀이 약팀을 상대로 다수 표본에서 우세하다", () => {
     const state = createTestGame(3);
     const strong = simSquad(state, "mancity");
@@ -72,7 +72,7 @@ describe("간이 시뮬 분포 (결정 #5) — 전력이 결과에 반영된다"
   });
 });
 
-describe("시즌 전환 (결정 #15, game-loop §7)", () => {
+describe("시즌 전환 (season.md §6)", () => {
   it("다음 시즌 7월 1일 프리시즌으로 이동하고 이적창이 새로 열린다", () => {
     const state = createTestGame(5);
     const digest = transitionSeason(state);

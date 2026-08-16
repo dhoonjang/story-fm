@@ -29,7 +29,7 @@ const newGame = (seed: number, teamId = "arsenal"): GameState => {
   });
 };
 
-describe("수석코치 페르소나 — 데이터로 다루는 인물 (personas.md)", () => {
+describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md §1)", () => {
   it("새 게임에 수석코치가 함께 온다", () => {
     const state = createTestGame();
     const coach = headCoachOf(state);

@@ -20,12 +20,12 @@ import type { PositionGroup } from "@story-fm/domain";
  * 실제로 쓰는 축은 `goalkeeping`(EA OVR)과 `passing`(EA Kicking) 둘뿐이고
  * 나머지는 `deriveAxes`가 보지 않는다 (world/attributes.ts).
  *
- * ⚠️ 라이선스 부채 (data-sourcing.md §7): 능력치·실명은 EA IP·NIL 대상.
+ * ⚠️ 라이선스 부채 (sources.md §7): 능력치·실명은 EA IP·NIL 대상.
  * MVP 한정 사용 — 정식 출시 전 자체 산정 능력치·가명 전환으로 청산한다.
  *
  * 세계관 주의: 인게임 연도는 가상으로 진행되고, 유스 유입은 계속 합성
  * 가명으로 생성한다 (실존 유소년에게 가상 서사를 입히는 리스크 회피,
- * narrative.md §7). 강등 팀(레스터·입스위치·사우샘프턴)은 카탈로그 유지를
+ * people.md §2). 강등 팀(레스터·입스위치·사우샘프턴)은 카탈로그 유지를
  * 위해 실제 챔피언십 스쿼드로 채운다 — 카탈로그의 EPL 20팀은 실제 리그
  * 구성이 아니라 이 게임의 1부 명단이다.
  */
@@ -51,7 +51,7 @@ export interface RealPlayerSeed {
   potential: number;
   /**
    * 홈그로운 자격 (그 클럽 나라 협회에서 만 21세 이전 3시즌 등록).
-   * 시드에 없으면 카탈로그가 결정적 대체 규칙으로 채운다 — data-sourcing.md §7.
+   * 시드에 없으면 카탈로그가 결정적 대체 규칙으로 채운다 — sources.md §7.
    */
   homegrown?: boolean;
   /**

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { naturalPositionOf, physiqueLabel, weightSlotOf } from "@story-fm/domain";
 import { footOf, physiqueOf, playerCatalog, syntheticFoot } from "@story-fm/engine";
 
-/** 주발 분포와 신체 파생 (catalog.ts · attribute-model.md) */
+/** 주발 분포와 신체 파생 (catalog.ts · player.md §1 · §4) */
 
 describe("약발 — 실측이 원본, 모르는 실존 선수만 4", () => {
   const weakOf = (e: { foot?: { left: number; right: number } }) =>

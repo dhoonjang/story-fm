@@ -11,7 +11,7 @@ import {
 import { createTestGame } from "./helpers";
 
 /**
- * 설득 — 숫자로 못 넘는 벽을 넘는 수단 (persuasion.ts · transfers.md §1.5).
+ * 설득 — 숫자로 못 넘는 벽을 넘는 수단 (persuasion.ts · transfer.md §4).
  * 경계선은 하나다: **코어가 사실 대조한 논거만 확률을 움직인다.**
  */
 
