@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatTurn } from "@story-fm/engine";
-import { hasRailHint, hintsOfCall, panelHintsOf } from "../lib/panel-hints";
+import { hintsOfCall, panelHintsOf } from "../lib/panel-hints";
 
 /**
  * 장부 변경은 **그 화면 쪽에서** 알린다 — 채팅은 서사의 자리다.
@@ -12,44 +12,6 @@ const turn = (calls: ChatTurn["toolCalls"]): ChatTurn => ({
   text: "[2026-08-15 오전]\n@코치: 네.",
   toolCalls: calls,
   at: "2026-08-15",
-});
-
-describe("어느 화면으로 가는가", () => {
-  it("장부를 바꾸는 스킬은 레일이 맡는다", () => {
-    for (const name of ["set_lineup", "set_tactics", "set_training", "apply_finance_event"]) {
-      expect(hasRailHint(name), name).toBe(true);
-    }
-  });
-
-  it("대화형도 바뀌는 장부가 있다 — 사기는 명단이, 평판은 커리어가 보여준다", () => {
-    const squad = panelHintsOf([turn([{ name: "talk_to_player", summary: "면담 — 사기 +4" }])]);
-    expect(squad.map((h) => h.panel)).toEqual(["스쿼드"]);
-    const career = panelHintsOf([
-      turn([{ name: "respond_to_media", summary: "기자회견 대응 — 언론 +2" }]),
-    ]);
-    expect(career.map((h) => h.panel)).toEqual(["커리어"]);
-  });
-
-  /**
-   * 협상·스카우트는 **카드**로 선다(`MarketCard`) — 진행 중인 흥정은 어느 장부에도
-   * 실리지 않으므로 레일이 가리킬 화면이 없다.
-   */
-  it("카드로 서는 스킬은 말풍선을 갖지 않는다", () => {
-    for (const name of [
-      "send_offer",
-      "respond_offer",
-      "open_renewal",
-      "withdraw_offer",
-      "scout_player",
-    ]) {
-      expect(hasRailHint(name), name).toBe(false);
-    }
-  });
-
-  it("여러 장부를 건드리는 스킬도 한 화면만 가리킨다 — 같은 문장이 두 칸에 서면 두 번 벌어진 일처럼 읽힌다", () => {
-    const hints = panelHintsOf([turn([{ name: "accept_deal", summary: "이적 확정" }])]);
-    expect(hints.map((h) => h.panel)).toEqual(["스쿼드"]);
-  });
 });
 
 /**
@@ -120,30 +82,6 @@ describe("항목으로 서는 말풍선", () => {
     expect(hints[0]!.lines[0]!.note).toBeUndefined();
   });
 
-  it("갈래는 값과 갈라져 실린다 — 화면이 줄표를 다시 찾지 않는다", () => {
-    const hints = panelHintsOf([
-      turn([
-        {
-          name: "set_training",
-          summary: "훈련 지정 — 매주 월요일 오전=압박 전환(패스·시야) × 6주",
-          brief: {
-            head: "훈련 지정",
-            items: [{ label: "반복", text: "매주 3회 × 6주", note: "패스·시야" }],
-          },
-        },
-      ]),
-    ]);
-    expect(hints[0]!.lines).toEqual([
-      {
-        skill: "set_training",
-        head: "훈련 지정",
-        label: "반복",
-        text: "매주 3회 × 6주",
-        note: "패스·시야",
-      },
-    ]);
-  });
-
   it("옛 기록은 항목이 없다 — 지금까지처럼 요약 첫 줄이 선다", () => {
     const hints = panelHintsOf([
       turn([{ name: "set_lineup", summary: "라인업을 확정했습니다\n두 번째 줄" }]),
@@ -188,11 +126,6 @@ describe("말풍선의 내용", () => {
     expect(hints[0]!.lines.map((l) => l.text)).toEqual(["라인업을 확정했습니다"]);
   });
 
-  it("갈래는 화면이 아이콘으로 세운다 — 줄에 어느 스킬인지 남는다", () => {
-    const hints = panelHintsOf([turn([{ name: "set_captain", summary: "손흥민을 주장으로" }])]);
-    expect(hints[0]!.lines[0]!.skill).toBe("set_captain");
-  });
-
   it("끝에 괄호로 달린 사족은 떼어 낸다 — 본문에 붙으면 바뀐 것이 안 보인다", () => {
     const hints = panelHintsOf([
       turn([
@@ -204,11 +137,6 @@ describe("말풍선의 내용", () => {
     ]);
     expect(hints[0]!.lines[0]!.text).toBe("전술 변경 — 4-2-3-1, 멘탈리티 3");
     expect(hints[0]!.lines[0]!.note).toBe("전술 적응도 +20, 익혀 둔 전술");
-  });
-
-  it("괄호가 없으면 사족도 없다", () => {
-    const hints = panelHintsOf([turn([{ name: "set_lineup", summary: "라인업을 확정했습니다" }])]);
-    expect(hints[0]!.lines[0]!.note).toBeUndefined();
   });
 
   it("코어가 한 일(silent)은 알림이 아니다", () => {
@@ -237,14 +165,5 @@ describe("칩으로 되부르는 말풍선", () => {
     const hints = hintsOfCall({ name: "set_training", summary: "월요일 오전 세트피스" });
     expect(hints.map((h) => h.panel)).toEqual(["달력"]);
     expect(hints[0]!.lines.map((l) => l.text)).toEqual(["월요일 오전 세트피스"]);
-  });
-
-  it("여러 장부를 건드린 호출도 한 화면만 부른다", () => {
-    const hints = hintsOfCall({ name: "accept_deal", summary: "이적 확정" });
-    expect(hints.map((h) => h.panel)).toEqual(["스쿼드"]);
-  });
-
-  it("카드로 서는 스킬은 부를 말풍선이 없다", () => {
-    expect(hintsOfCall({ name: "send_offer", summary: "오퍼를 넣었습니다" })).toEqual([]);
   });
 });

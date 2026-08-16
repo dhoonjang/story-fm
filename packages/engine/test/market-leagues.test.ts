@@ -16,7 +16,6 @@ import {
   marketBiasOf,
   marketValueOf,
   playersOf,
-  searchPlayers,
   secondTierOf,
   windowOpenForTeam,
   type GameState,
@@ -31,11 +30,6 @@ import { createTestGame } from "./helpers";
 const marketTeams = () => teamCatalog().filter((t) => isMarketOnlyLeague(t.leagueId));
 
 describe("세계에서의 자리 — 경기를 하지 않는다", () => {
-  it("두 리그가 등록돼 있고 클럽이 붙어 있다", () => {
-    expect(marketLeagues().map((l) => l.id).sort()).toEqual(["mls", "saudi"]);
-    expect(marketTeams().length).toBeGreaterThanOrEqual(8);
-  });
-
   it("일정에 한 경기도 없다 — 리그전도 컵도", () => {
     const state = createTestGame();
     const ids = new Set(marketTeams().map((t) => t.id));
@@ -68,17 +62,7 @@ describe("세계에서의 자리 — 경기를 하지 않는다", () => {
   });
 });
 
-describe("선수 풀 — 레전드가 검색·협상에 잡힌다", () => {
-  it("레전드가 그 클럽에 있고 나이가 들어 있다", () => {
-    const state = createTestGame();
-    const nassr = playersOf(state, "alnassr");
-    const ronaldo = nassr.find((p) => p.name.includes("호날두"));
-    expect(ronaldo, "알 나스르에 호날두가 없다").toBeDefined();
-    // 2026년 기준 40대 — 이름값은 남았지만 전성기가 아니다
-    expect(ageOf(ronaldo!.birthdate, state.date)).toBeGreaterThan(38);
-    expect(ronaldo!.attributes.overall).toBeGreaterThan(70);
-  });
-
+describe("선수 풀", () => {
   it("스쿼드가 작다 — 경기를 안 하므로 로테이션이 필요 없다", () => {
     const state = createTestGame();
     for (const team of marketTeams()) {
@@ -88,12 +72,6 @@ describe("선수 풀 — 레전드가 검색·협상에 잡힌다", () => {
     }
   });
 
-  it("리그 이름으로 선수를 찾을 수 있다 — 못 찾으면 GM이 지어낸다", () => {
-    const state = createTestGame();
-    const res = searchPlayers(state, { competition: "사우디 프로 리그", limit: 10 });
-    expect(res.ok).toBe(true);
-    expect(res.message).toContain("사우디");
-  });
 });
 
 describe("이적창 — 우리와 시기가 다르다", () => {
@@ -169,8 +147,6 @@ describe("돈 성향과 복귀 저항", () => {
       years: 2,
     });
     expect(odds.factors.some((f) => f.label === "복귀 저항")).toBe(true);
-    const why = odds.factors.find((f) => f.label === "복귀 저항")!.why;
-    expect(why).toContain("주급");
   });
 
   it("같은 조건이면 5대 리그 선수보다 데려오기 어렵다", () => {
@@ -230,101 +206,64 @@ describe("시장은 세이브의 리그 소속을 본다", () => {
  * 계수로는 강등이 몸값에 닿지 않는다 (docs/simulation/transfer.md §3).
  */
 describe("리그 보정은 승강을 따라 움직인다", () => {
+  // 세계를 한 번만 세운다 — 리그 소속(`leagueOf`) 말고는 아무것도 건드리지 않는다
+  const state: GameState = createTestGame();
+  const home = leagueOfTeam(state.userTeamId);
+  const second = secondTierOf(home)!;
   /** 반올림(10만 단위)이 비율을 흐리지 않도록 스쿼드 최상위를 쓴다 */
-  const topPlayer = (state: GameState) =>
-    [...playersOf(state, state.userTeamId)].sort(
-      (a, b) => b.attributes.overall - a.attributes.overall,
-    )[0]!;
+  const player = [...playersOf(state, state.userTeamId)].sort(
+    (a, b) => b.attributes.overall - a.attributes.overall,
+  )[0]!;
 
-  const moveTo = (state: GameState, leagueId: string) => {
+  /** 그 리그에서 뛴다면 이 선수는 얼마인가 */
+  const valueIn = (leagueId: string) => {
     state.leagueOf = { ...(state.leagueOf ?? {}), [state.userTeamId]: leagueId };
+    return marketValueOf(state, player);
   };
 
   /** 어느 리그에서 강등해도 같은 비율이다 — 2부는 그 나라 1부의 0.15배다 */
   const RELEGATION_RATIO = Math.pow(0.15, LEAGUE_FACTOR_EXPONENT);
 
-  it("강등하면 같은 선수가 더 싸게 평가된다", () => {
-    const state = createTestGame();
-    const player = topPlayer(state);
-    const top = leagueOfTeam(state.userTeamId);
-    const second = secondTierOf(top)!;
-    expect(second).toBeTruthy();
-
-    const before = marketValueOf(state, player);
-    moveTo(state, second);
-    const after = marketValueOf(state, player);
-
-    expect(after).toBeLessThan(before);
-    expect(after / before).toBeCloseTo(RELEGATION_RATIO, 2);
+  it("강등하면 더 싸게, 승격하면 원래대로", () => {
+    const inTop = valueIn(home);
+    const inSecond = valueIn(second);
+    expect(inSecond).toBeLessThan(inTop);
+    expect(inSecond / inTop).toBeCloseTo(RELEGATION_RATIO, 2);
+    // 되돌아오는 것까지가 한 쌍이다 — 강등이 값을 영구히 깎으면 승격이 보상이 아니다
+    expect(valueIn(home)).toBe(inTop);
   });
 
   it("계수는 그대로인데도 값이 움직인다 — 나라 축이 아니라 티어 축이다", () => {
-    const state = createTestGame();
-    const top = leagueOfTeam(state.userTeamId);
-    const second = secondTierOf(top)!;
     // 같은 나라 1·2부는 계수가 같다. 이 값에 비례시키던 때는 한 푼도 안 움직였다
-    expect(leagueCatalogById(second)!.coefficient).toBe(leagueCatalogById(top)!.coefficient);
+    expect(leagueCatalogById(second)!.coefficient).toBe(leagueCatalogById(home)!.coefficient);
   });
 
-  it("승격하면 값이 되돌아온다", () => {
-    const state = createTestGame();
-    const player = topPlayer(state);
-    const top = leagueOfTeam(state.userTeamId);
-    const before = marketValueOf(state, player);
-
-    moveTo(state, secondTierOf(top)!);
-    moveTo(state, top);
-    expect(marketValueOf(state, player)).toBe(before);
-  });
-
-  it("1부 사이의 폭은 승강보다 좁다 — 리그를 옮기는 것과 부를 내려가는 것은 다르다", () => {
-    const state = createTestGame();
-    const player = topPlayer(state);
-    const top = leagueOfTeam(state.userTeamId);
-    const inTop = marketValueOf(state, player);
-
-    moveTo(state, "ligue1"); // 5대 리그 중 경제 수준이 가장 낮다
-    const inWeakestTop = marketValueOf(state, player);
-    moveTo(state, secondTierOf(top)!);
-    const inSecond = marketValueOf(state, player);
-
-    expect(inSecond).toBeLessThan(inWeakestTop);
-    expect(inWeakestTop).toBeLessThan(inTop);
-    // 가장 약한 1부로 옮기는 값이 강등보다 싸게 먹힌다
-    expect(inWeakestTop / inTop).toBeGreaterThan(RELEGATION_RATIO);
-  });
-
-  it("시장 전용 리그는 헐값이 아니다 — 계수 20·21이 식에 딸려 들어가던 자리", () => {
-    const state = createTestGame();
-    const player = topPlayer(state);
-    const inTop = marketValueOf(state, player);
-
-    for (const league of marketLeagues()) {
-      moveTo(state, league.id);
-      const there = marketValueOf(state, player);
-      // 보정 사우디 0.98 · MLS 0.92 — 5대 리그와 같은 띠다 (계수를 쓰던 때는 0.15·0.10)
-      expect(there / inTop, league.id).toBeGreaterThan(RELEGATION_RATIO);
-      expect(there / inTop, league.id).toBeLessThanOrEqual(1);
-    }
-  });
-
-  it("눈금은 경제 수준의 거듭제곱이다 — 리그마다 표와 같은 값이 나온다", () => {
-    const state = createTestGame();
-    const player = topPlayer(state);
+  it("눈금은 경제 수준의 거듭제곱이다 — 리그마다 문서의 표와 같은 값이 나온다", () => {
     // 우리 팀은 EPL(경제 수준 1.00)이라 보정이 곧 기준점이고, 비율은 상대 리그의 눈금이다
-    expect(leagueOfTeam(state.userTeamId)).toBe("epl");
-    const inEpl = marketValueOf(state, player);
+    expect(home).toBe("epl");
+    const inEpl = valueIn(home);
 
     // transfer.md §3의 표 — 경제 수준^0.15
     for (const [leagueId, economy] of [
       ["laliga", 0.62],
-      ["ligue1", 0.42],
+      ["ligue1", 0.42], // 5대 리그 중 가장 낮다 — 1부 사이의 폭은 승강보다 좁다
+      ["saudi", 0.45],
       ["mls", 0.3],
       ["championship", 0.15],
+      ["ligue2", 0.42 * 0.15],
     ] as const) {
-      moveTo(state, leagueId);
-      const ratio = marketValueOf(state, player) / inEpl;
-      expect(ratio, leagueId).toBeCloseTo(Math.pow(economy, LEAGUE_FACTOR_EXPONENT), 2);
+      expect(valueIn(leagueId) / inEpl, leagueId).toBeCloseTo(
+        Math.pow(economy, LEAGUE_FACTOR_EXPONENT),
+        2,
+      );
+    }
+  });
+
+  it("시장 전용 리그는 헐값이 아니다 — 계수 20·21이 식에 딸려 들어가던 자리", () => {
+    const inEpl = valueIn(home);
+    for (const league of marketLeagues()) {
+      // 계수를 쓰던 때는 보정이 0.15·0.10이라 레전드가 동급의 7분의 1에 팔렸다
+      expect(valueIn(league.id) / inEpl, league.id).toBeGreaterThan(RELEGATION_RATIO);
     }
   });
 });

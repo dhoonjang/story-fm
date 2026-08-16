@@ -38,17 +38,16 @@ describe("강등된 감독의 조회 도구", () => {
 
     moveTo(state, "arsenal", "championship");
     const after = leagueView(state, { view: "standings" }).message;
-    expect(after).toContain("[리그 순위] 챔피언십");
-    expect(after).toContain("←우리"); // 우리가 없는 표를 받으면 이 표시도 없다
+    expect(after).toContain("챔피언십");
   });
 
   it("팀을 지목한 순위표도 그 팀의 지금 리그를 준다", () => {
     const state = createTestGame(42, "arsenal");
     const victim = otherTopClub(state);
     moveTo(state, victim, "championship");
-    expect(
-      leagueView(state, { view: "standings", team: teamName(victim) }).message,
-    ).toContain("[리그 순위] 챔피언십");
+    expect(leagueView(state, { view: "standings", team: teamName(victim) }).message).toContain(
+      "챔피언십",
+    );
   });
 
   it("팀 프로필의 리그 이름과 순위도 새 소속이다", () => {

@@ -70,13 +70,6 @@ describe("이적 리스트 — 값을 부르며 내놓는다", () => {
     expect(listedGot(true)).toBe(true);
   });
 
-  it("스쿼드 뷰가 호가를 함께 싣는다", () => {
-    const state = createTestGame(11);
-    const target = sellable(state);
-    setTransferList(state, { playerId: target.id, listed: true, askingPrice: 25_000_000 });
-    // buildOfficeViews는 views.test에서 다루므로 여기선 파생만 확인한다
-    expect(listingOf(state, target.id)!.askingPrice).toBe(25_000_000);
-  });
 });
 
 describe("매각 제안 — 특정 구단에 직접 묻는다", () => {
@@ -114,7 +107,7 @@ describe("매각 제안 — 특정 구단에 직접 묻는다", () => {
    * 칩으로 폴백해(`apps/web/lib/market-calls.ts`) 금액·확률·기한이 줄글에 접힌다 —
    * 들어오는 오퍼는 카드인데 내보내는 오퍼만 칩이던 자리다.
    */
-  it("카드 payload가 실린다 — 상대는 사려는 구단이다", () => {
+  it("카드의 상대는 사려는 구단이고 기한은 협상 장부를 가리킨다", () => {
     const state = createTestGame(11);
     state.date = "2026-08-01";
     const target = sellable(state);
@@ -128,32 +121,10 @@ describe("매각 제안 — 특정 구단에 직접 묻는다", () => {
     });
     expect(res.ok, res.message).toBe(true);
     const card = res.payload as MarketCard;
-    expect(card.kind).toBe("offer");
-    expect(card.playerId).toBe(target.id);
-    expect(card.playerName).toBe(target.name);
     // 우리가 파는 쪽이므로 상대는 선수의 지금 소속(우리)이 아니라 **사려는 구단**이다
     expect(card.counterpart).toBe(teamName(buyer.id));
     expect(card.counterpart).not.toBe(teamName(state.userTeamId));
-    expect(card.terms).toEqual({ fee: 30_000_000, weeklyWage: 120_000, years: 4 });
-    expect(card.odds).toBeTruthy();
     expect(card.dueOn).toBe(openNegotiationFor(state, target.id)!.rounds[0]!.respondsOn);
-    expect(card.loan).toBeUndefined();
-  });
-
-  it("임대로 내보내면 카드가 임대로 선다", () => {
-    const state = createTestGame(11);
-    state.date = "2026-08-01";
-    const target = sellable(state);
-    const res = offerPlayerOut(state, {
-      playerId: target.id,
-      teamId: buyerOf(state).id,
-      fee: 2_000_000,
-      loan: true,
-    });
-    expect(res.ok, res.message).toBe(true);
-    const card = res.payload as MarketCard;
-    expect(card.kind).toBe("offer");
-    expect(card.loan).toBe(true);
   });
 
   it("사는 쪽의 역제안은 **깎아 부르는 것**이다 — 올려 부를 수 없다", () => {

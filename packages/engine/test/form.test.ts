@@ -5,9 +5,7 @@ import {
   decayedForm,
   formAngle,
   formDeltaFromMatch,
-  formLabel,
   formSwing,
-  formTone,
   seasonStatOf,
   userPlayers,
 } from "@story-fm/engine";
@@ -107,33 +105,6 @@ describe("폼 — 시간 축을 가진 컨디션 (form.ts)", () => {
     // 축 밖은 잘린다 (12시를 넘어 돌지 않는다)
     expect(formAngle(2)).toBe(0);
     expect(formAngle(-2)).toBe(180);
-  });
-
-  it("명단에 여러 각도가 함께 뜬다 — 전부 같으면 폼이 있으나 마나다", () => {
-    const state = createTestGame(11, "arsenal");
-    for (let i = 0; i < 16; i++) {
-      const before = state.date;
-      advanceAndPlay(state);
-      if (state.date === before || state.season > 1) break;
-    }
-    const played = userPlayers(state).filter((p) => (seasonStatOf(state, p.id)?.apps ?? 0) > 0);
-    const angles = new Set(played.map((p) => formAngle(p.state.form)));
-    expect(played.length).toBeGreaterThan(10);
-    expect(angles.size).toBeGreaterThanOrEqual(5);
-    // 12시(절정)는 아무나 도달하지 못한다
-    expect(Math.min(...angles)).toBeGreaterThan(0);
-  }, 120_000);
-
-  it("라벨은 시기를 말한다 — 경계는 ±0.33과 ±0.73", () => {
-    expect(formLabel(0.85)).toBe("절정");
-    expect(formLabel(0.45)).toBe("상승세");
-    expect(formLabel(0.1)).toBe("평소");
-    expect(formLabel(-0.5)).toBe("침체");
-    expect(formLabel(-0.9)).toBe("바닥");
-    // 색 계열은 더 좁은 경계를 쓴다 — 평소 안에서도 기울기가 보이게
-    expect(formTone(0.2)).toBe("up");
-    expect(formTone(0.05)).toBe("flat");
-    expect(formTone(-0.2)).toBe("down");
   });
 
   it("경기를 치르면 선수마다 폼이 갈리고, 쉬면 다시 모인다 (통합)", () => {

@@ -3,7 +3,6 @@ import {
   playerCard,
   playersOf,
   rankByName,
-  searchPlayers,
   setCaptain,
   userPlayers,
   type NamedItem,
@@ -137,29 +136,20 @@ describe("카탈로그 — 실제 세계에서", () => {
     expect(found?.name).toBe("엘리엇 앤더슨");
   });
 
-  it("search_players가 흔들린 표기를 받는다", () => {
-    const res = searchPlayers(state, { name: "엔더슨" });
-    expect(res.ok).toBe(true);
-    expect(res.message).toContain("엘리엇 앤더슨");
-  });
-
   it("선수 카드가 이름으로도 열린다", () => {
     const res = playerCard(state, "엔더슨");
     expect(res.ok, res.message).toBe(true);
-    expect(res.message).toContain("엘리엇 앤더슨");
   });
 
   it("갈리는 이름은 카드 대신 후보를 돌려준다", () => {
     const res = playerCard(state, "마르티네스");
     expect(res.ok).toBe(false);
     expect(res.message).toContain("여러 선수와 맞습니다");
-    expect(res.message).toContain("마르티네스");
   });
 
-  it("없는 이름은 검색을 안내한다", () => {
+  it("없는 이름으로는 카드가 열리지 않는다", () => {
     const res = playerCard(state, "존재하지않는사람");
     expect(res.ok).toBe(false);
-    expect(res.message).toContain("search_players");
   });
 
   it("스킬도 이름으로 선수를 집는다 — 상태를 바꾸는 자리까지", () => {

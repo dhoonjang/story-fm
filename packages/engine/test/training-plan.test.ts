@@ -230,31 +230,33 @@ describe("감독의 지시가 기본 훈련을 이긴다", () => {
  *
  * 옆에 다른 경기가 붙으면 그쪽 규칙이 이긴다(회복 → 경기 준비 → 전술 → 휴식 순).
  * 그래서 각 날짜는 **다른 경기에 물리지 않았을 때만** 확인한다.
+ *
+ * 단정이 아니라 위반 목록을 돌려준다 — 시즌을 굴리는 **도중에** 봐야 하는 것이라,
+ * 굴리는 쪽은 모아 두고 단정은 각 케이스가 한다.
  */
-function expectMicrocycle(state: GameState, matchDate: string): void {
+function microcycleViolations(state: GameState, matchDate: string): string[] {
   const others = new Set(userMatchDates(state));
   others.delete(matchDate);
   const clear = (...offsets: number[]) => offsets.every((o) => !others.has(addDays(matchDate, o)));
+  const out: string[] = [];
 
-  expect(trainingOn(state, matchDate), `${matchDate}: 경기일엔 훈련하지 않는다`).toHaveLength(0);
+  if (trainingOn(state, matchDate).length > 0) out.push(`${matchDate}: 경기일에 훈련이 있다`);
   // MD−1 = 경기 준비. 단 이틀 전에 경기가 있었으면 그날은 회복이 이긴다
-  if (clear(-1, -2)) {
-    expect(
-      trainingOn(state, addDays(matchDate, -1)).join(),
-      `${matchDate}: MD−1은 경기 준비`,
-    ).toContain("경기 준비");
+  if (clear(-1, -2) && !trainingOn(state, addDays(matchDate, -1)).join().includes("경기 준비")) {
+    out.push(`${matchDate}: MD−1이 경기 준비가 아니다`);
   }
-  if (clear(1)) {
-    expect(trainingOn(state, addDays(matchDate, 1)).join(), `${matchDate}: MD+1은 회복`).toContain(
-      "회복",
-    );
+  if (clear(1) && !trainingOn(state, addDays(matchDate, 1)).join().includes("회복")) {
+    out.push(`${matchDate}: MD+1이 회복이 아니다`);
   }
   // MD+2 = 완전 휴식. 단 사흘·나흘 뒤에 경기가 있으면 준비·전술이 이긴다
-  if (clear(2, 3, 4)) {
-    expect(trainingOn(state, addDays(matchDate, 2)), `${matchDate}: MD+2는 완전 휴식`).toHaveLength(
-      0,
-    );
+  if (clear(2, 3, 4) && trainingOn(state, addDays(matchDate, 2)).length > 0) {
+    out.push(`${matchDate}: MD+2가 완전 휴식이 아니다`);
   }
+  return out;
+}
+
+function expectMicrocycle(state: GameState, matchDate: string): void {
+  expect(microcycleViolations(state, matchDate)).toEqual([]);
 }
 
 /** 그 컵 그 단계의 우리 경기 날짜 (없으면 "") */
@@ -361,6 +363,62 @@ describe("훈련 비우기 — 쉬는 날은 상태로 남는다", () => {
   });
 });
 
+/**
+ * 시즌을 **한 번만** 굴리고 세 검증이 나눠 쓴다.
+ *
+ * 셋 다 "컵 대진이 붙은 뒤의 달력"을 봐야 해서 시즌을 겨울까지 밀어야 하는데,
+ * 예전엔 각자 제 세이브를 굴려 같은 아홉 달을 세 번 지났다. 보는 시점은 다르지만
+ * 지나는 길은 하나다 — 한 번 굴리면서 각자의 시점에 위반을 모아 둔다.
+ */
+interface SeasonSweep {
+  /** 리그컵 1라운드 — 경기 **전날**에 본 마이크로사이클 */
+  eflcup: { date: string; violations: string[] };
+  /** FA컵 1라운드 — **추첨된 그날** 본 마이크로사이클과 추첨~경기 간격(일) */
+  facup: { date: string; gap: number; violations: string[] };
+  /** 6주 간격 체크포인트마다 훑은 "아직 안 치른 경기" */
+  sweep: { checked: number; violations: string[] };
+}
+
+let sweepCache: SeasonSweep | null = null;
+
+function seasonSweep(): SeasonSweep {
+  if (sweepCache) return sweepCache;
+  const state = createTestGame(7);
+  const out: SeasonSweep = {
+    eflcup: { date: "", violations: [] },
+    facup: { date: "", gap: 0, violations: [] },
+    sweep: { checked: 0, violations: [] },
+  };
+  const checkpoints = new Set([45, 90, 135, 180, 225, 270]); // 6주 간격으로 시즌을 훑는다
+  for (let day = 1; day <= 270; day++) {
+    advanceTime(state, { days: 1 });
+    if (state.phase === "matchday") playMockMatch(state);
+
+    // 리그컵 — 경기 전날에는 재배치가 이미 끝나 있어야 한다
+    const eflcup = ourTieDate(state, "eflcup", "r32");
+    if (!out.eflcup.date && eflcup && state.date >= addDays(eflcup, -1)) {
+      out.eflcup = { date: eflcup, violations: microcycleViolations(state, eflcup) };
+    }
+    // FA컵 — 시계를 더 밀지 않고 **추첨된 그날** 본다
+    const facup = ourTieDate(state, "facup", "r32");
+    if (!out.facup.date && facup) {
+      out.facup = {
+        date: facup,
+        gap: diffDays(state.date, facup),
+        violations: microcycleViolations(state, facup),
+      };
+    }
+    if (!checkpoints.has(day)) continue;
+    // 아직 안 치른 우리 경기 — 컵 대진이 붙고 리그가 연기된 뒤의 모습이다
+    for (const date of userMatchDates(state).filter((d) => d > state.date)) {
+      out.sweep.violations.push(...microcycleViolations(state, date));
+      out.sweep.checked++;
+    }
+  }
+  sweepCache = out;
+  return out;
+}
+
 describe("일정이 바뀌면 훈련도 따라 바뀐다", () => {
   /**
    * 컵 대진은 **경기일 몇 주 전에** 편성된다. 예전엔 "경기 수가 늘어난 tick"에서만
@@ -369,60 +427,23 @@ describe("일정이 바뀌면 훈련도 따라 바뀐다", () => {
    * 아니었다.
    */
   it("리그컵 경기 앞뒤가 마이크로사이클을 따른다", () => {
-    const state = createTestGame(7);
-    let cupDate = "";
-    let guard = 400;
-    while (guard-- > 0) {
-      advanceTime(state, { days: 1 });
-      if (state.phase === "matchday") playMockMatch(state);
-      const date = ourTieDate(state, "eflcup", "r32");
-      // 경기 전날까지 시계를 민다 — 그때는 이미 재배치가 끝나 있어야 한다
-      if (date && state.date >= addDays(date, -1)) {
-        cupDate = date;
-        break;
-      }
-    }
-    expect(cupDate, "리그컵 1라운드 대진을 찾지 못했다").not.toBe("");
-    expectMicrocycle(state, cupDate);
+    const { eflcup } = seasonSweep();
+    expect(eflcup.date, "리그컵 1라운드 대진을 찾지 못했다").not.toBe("");
+    expect(eflcup.violations).toEqual([]);
   }, 120_000);
 
   it("한참 뒤에 잡힌 대진도 추첨된 그날 바로 반영된다", () => {
     // FA컵 1라운드는 12월 초에 추첨돼 1월에 열린다 — 3주 창으로는 못 잡는 간격이다
-    const state = createTestGame(7);
-    let guard = 400;
-    let drawn = "";
-    while (guard-- > 0 && !drawn) {
-      advanceTime(state, { days: 1 });
-      if (state.phase === "matchday") playMockMatch(state);
-      drawn = ourTieDate(state, "facup", "r32");
-    }
-    expect(drawn, "FA컵 1라운드 대진을 찾지 못했다").not.toBe("");
-    expect(
-      diffDays(state.date, drawn),
-      "추첨과 경기가 3주 안이면 이 테스트가 무의미하다",
-    ).toBeGreaterThan(21);
-    // 시계를 더 밀지 않고 **추첨된 그날** 확인한다
-    expectMicrocycle(state, drawn);
+    const { facup } = seasonSweep();
+    expect(facup.date, "FA컵 1라운드 대진을 찾지 못했다").not.toBe("");
+    expect(facup.gap, "추첨과 경기가 3주 안이면 이 테스트가 무의미하다").toBeGreaterThan(21);
+    expect(facup.violations).toEqual([]);
   }, 120_000);
 
   it("시즌 어느 시점에 멈춰도 남은 경기 전부가 사이클을 지킨다", () => {
-    const state = createTestGame(7);
-    const checkpoints = [45, 90, 135, 180, 225, 270]; // 6주 간격으로 시즌을 훑는다
-    let day = 0;
-    let swept = 0;
-    for (const at of checkpoints) {
-      while (day < at) {
-        advanceTime(state, { days: 1 });
-        if (state.phase === "matchday") playMockMatch(state);
-        day++;
-      }
-      // 아직 안 치른 우리 경기 — 컵 대진이 붙고 리그가 연기된 뒤의 모습이다
-      for (const date of userMatchDates(state).filter((d) => d > state.date)) {
-        expectMicrocycle(state, date);
-        swept++;
-      }
-    }
-    expect(swept, "검사한 경기가 없다").toBeGreaterThan(50);
+    const { sweep } = seasonSweep();
+    expect(sweep.violations).toEqual([]);
+    expect(sweep.checked, "검사한 경기가 없다").toBeGreaterThan(50);
   }, 120_000);
 
   it("경기가 연기되면 옮겨 간 날에 사이클이 새로 선다", () => {

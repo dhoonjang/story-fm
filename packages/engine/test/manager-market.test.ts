@@ -4,7 +4,10 @@ import {
   allMatchesDone,
   computeStandings,
   isTopFlight,
+  leagueOfTeamIn,
   reviewUserSeat,
+  runManagerMarket,
+  tierOfTeamIn,
   USER_WARNINGS_BEFORE_SACK,
   type GameState,
 } from "@story-fm/engine";
@@ -27,40 +30,59 @@ function playSeason(state: GameState): void {
   }
 }
 
+/**
+ * 순위표를 손으로 세운다 — `targetId`만 전패, 나머지는 전부 무승부.
+ *
+ * 경질 판정이 읽는 것은 순위와 소화 경기 수뿐이므로(manager-market.ts), 시즌을
+ * 굴리지 않고도 판정에 걸리는 자리를 만들 수 있다. 경기 모델이 흔들려도 이
+ * 테스트가 우연히 통과·실패하지 않는다.
+ */
+function fabricateBottom(state: GameState, targetId: string, rounds = 10): void {
+  const league = leagueOfTeamIn(state, targetId);
+  for (const match of state.matches) {
+    if (match.competitionId !== league || match.round > rounds) continue;
+    const home = match.homeTeamId === targetId;
+    const away = match.awayTeamId === targetId;
+    match.result =
+      home || away
+        ? { homeGoals: home ? 0 : 3, awayGoals: away ? 0 : 3, scorers: [] }
+        : { homeGoals: 1, awayGoals: 1, scorers: [] };
+  }
+}
+
+/** 하루 뒤 (판정은 날짜마다 다른 rng를 쓴다) */
+function nextDay(date: string): string {
+  return new Date(Date.parse(date) + 86_400_000).toISOString().slice(0, 10);
+}
+
 describe("AI 구단은 성적으로 감독을 자른다", () => {
-  const state = createTestGame(7);
-  playSeason(state);
-  const changed = state.teams.filter(
-    (t) => isTopFlight(t.id) && t.managerSince !== state.calendar.preseasonStart,
-  );
+  /**
+   * tier 4(잔류가 기대)를 꼴찌에 앉힌다 — 기대 순위와의 **차이**로만 재던 시절
+   * 강등권 구단의 감독은 영원히 안 잘렸다(꼴찌를 해도 차이가 3뿐이다).
+   */
+  it("꼴찌 구단은 감독이 바뀌고, 새 감독은 이름과 부임일을 갖는다", () => {
+    const state = createTestGame(7);
+    const target = state.teams
+      .filter((t) => isTopFlight(t.id))
+      .sort((a, b) => tierOfTeamIn(state, b.id) - tierOfTeamIn(state, a.id))[0]!;
+    expect(tierOfTeamIn(state, target.id), "잔류가 기대인 구단").toBe(4);
 
-  it("한 시즌에 여러 구단이 감독을 바꾼다 — 다만 리그가 통째로 뒤집히지는 않는다", () => {
-    const clubs = state.teams.filter((t) => isTopFlight(t.id)).length;
-    expect(changed.length).toBeGreaterThan(5);
-    expect(changed.length).toBeLessThan(clubs * 0.5);
-  }, 300_000);
+    fabricateBottom(state, target.id);
+    const table = computeStandings(state, leagueOfTeamIn(state, target.id));
+    expect(table[table.length - 1]!.teamId).toBe(target.id);
 
-  it("새 감독은 이름과 부임일을 갖는다", () => {
-    for (const team of changed) {
-      expect(team.managerName, team.id).toBeTruthy();
-      expect(team.managerSince! > state.calendar.preseasonStart, team.id).toBe(true);
+    // 부임 유예(75일)를 지난 자리에서 하루씩 판정을 돌린다
+    state.date = "2026-12-01";
+    const hired = state.calendar.preseasonStart;
+    for (let i = 0; i < 90 && target.managerSince === hired; i++) {
+      runManagerMarket(state, []);
+      state.date = nextDay(state.date);
     }
-  });
 
-  it("경질은 시즌 중에 일어난다 — 부임일이 개막 뒤다", () => {
-    for (const team of changed) {
-      expect(team.managerSince! > state.calendar.start, team.id).toBe(true);
-    }
-    // 시즌 말 순위로 잘린 이유를 되짚지는 않는다 — 새 감독 효과로 반등한 팀도 있다
-    // (리버풀이 감독을 바꾸고 3위로 끝난 시드가 있었다)
-    expect(computeStandings(state, "epl").length).toBe(20);
-  });
-
-  it("잔류가 기대인 구단도 잘릴 수 있다 — 차이로만 재면 하위 팀은 영원히 안 잘린다", () => {
-    // tier 4(잔류 기대)는 꼴찌를 해도 기대 순위와의 차이가 3뿐이라, 예전 규칙에선
-    // **강등권 구단의 감독이 절대 안 잘렸다**. 지금은 등급마다 자리를 직접 적는다
-    const lower = state.teams.filter((t) => isTopFlight(t.id) && t.managerName !== undefined);
-    expect(lower.length).toBeGreaterThan(0);
+    expect(target.managerSince, "꼴찌 구단의 감독이 자리를 지켰다").not.toBe(hired);
+    expect(target.managerName).toBeTruthy();
+    // 경질은 시즌 중에 일어난다 — 부임일이 개막 뒤다
+    expect(target.managerSince! > state.calendar.start).toBe(true);
   });
 });
 
@@ -100,16 +122,43 @@ describe("감독도 잘린다 — 다만 경고가 먼저다", () => {
 
   it("경질되면 시계가 멈춘다 — 더 이상 그 구단의 사람이 아니다", () => {
     const state = createTestGame(7);
-    playSeason(state);
-    if (!state.dismissal) return; // 이 시드에서 살아남았다면 검사할 것이 없다
+    // 경질장은 위 케이스가 만드는 것과 같은 값이다 — 여기서 보는 것은 그 뒤의 시계다
+    state.dismissal = {
+      on: state.date,
+      season: state.season,
+      teamId: state.userTeamId,
+      reason: "기대에 한참 못 미쳤다",
+    };
     const before = state.date;
+
     const advanced = advanceTime(state, { days: 7 });
+
     expect(advanced.ok).toBe(false);
     expect(state.date).toBe(before);
     expect(advanced.digest.join(" ")).toContain("경질");
-  }, 300_000);
+  });
 
   it("경고는 세 번까지다 — 그 전에 순위를 올리면 지워진다", () => {
     expect(USER_WARNINGS_BEFORE_SACK).toBe(3);
   });
+});
+
+/**
+ * 밸런스 하네스 — 한 시즌을 굴려 **리그 전체의 경질 건수**를 센다.
+ *
+ * 기대값이 고정값이 아니라 밴드다(다섯 구단 초과 · 절반 미만). 규칙이 맞는지는
+ * 위의 케이스들이 보고, 여기서는 `SACK_CHANCE`·문턱이 만든 빈도가 사람 사는
+ * 범위인지를 잰다. 시드 하나가 몇 분을 쓴다:
+ *
+ *   BALANCE=1 pnpm vitest run packages/engine/test/manager-market.test.ts
+ */
+describe.skipIf(!process.env.BALANCE)("한 시즌의 감독 경질 규모", () => {
+  it("한 시즌에 여러 구단이 감독을 바꾼다 — 다만 리그가 통째로 뒤집히지는 않는다", () => {
+    const state = createTestGame(7);
+    playSeason(state);
+    const clubs = state.teams.filter((t) => isTopFlight(t.id));
+    const changed = clubs.filter((t) => t.managerSince !== state.calendar.preseasonStart);
+    expect(changed.length).toBeGreaterThan(5);
+    expect(changed.length).toBeLessThan(clubs.length * 0.5);
+  }, 300_000);
 });
