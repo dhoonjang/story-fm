@@ -829,16 +829,21 @@ test("전술판 자유 배치 — 드래그로 한 자리만 세밀하게 조정
   // ⚠️ **라인을 넘는 곳이어야 한다** — 포메이션 숫자는 라인별 인원에서 파생되므로,
   // 같은 라인 안에서 옮기면 코드만 바뀌고(ST→LF) 숫자는 그대로다. 옮길 칩이
   // 어느 라인에 서 있는지는 배치 순서에 따라 매번 다르다.
-  // 옮길 칩은 **9번이 아닌 아무 자리** — 이 테스트는 뒤에서 다시 ST를 찾아 CF로
-  // 내리므로, 첫 재배치로 ST를 라인 밖으로 빼면 그 검증이 설 자리가 없어진다.
-  // (배치 순서는 구단·시드마다 달라 `slot-1`이 9번일 수도 있다)
+  // 옮길 칩은 **골키퍼도 9번도 아닌 아무 자리**. GK를 끌어내면 GK 자리가 0곳이 되고
+  // 앱은 그 배치를 보내지 않아(office.tsx `save`) 저장이 영영 보류된다. 9번을 빼면
+  // 이 테스트가 뒤에서 다시 ST를 찾아 CF로 내리는 검증이 설 자리가 없어진다.
+  // (배치 순서는 구단·시드마다 달라 `slot-1`이 골키퍼일 수도 9번일 수도 있다)
   const movingId = await page.evaluate(() => {
+    const codeOf = (e: Element) => e.querySelector(".slot-code")?.textContent ?? "";
     const el = [...document.querySelectorAll(".pitch-slot")].find(
-      (e) => e.querySelector(".slot-code")?.textContent !== "ST",
+      (e) => codeOf(e) !== "ST" && codeOf(e) !== "GK",
     );
     return el?.getAttribute("data-testid") ?? "";
   });
   expect(movingId).not.toBe("");
+  // 시드가 바뀌어 배치 순서가 달라져도 골키퍼를 집지 않았음을 여기서 못박는다 —
+  // 못박지 않으면 저장이 보류되는 15초 뒤 타임아웃으로만 드러난다
+  await expect(page.getByTestId(movingId).locator(".slot-code")).not.toHaveText("GK");
 
   const target = await page.evaluate((id: string) => {
     const boardEl = document.querySelector('[data-testid="pitch-board"]')!;
@@ -851,8 +856,10 @@ test("전술판 자유 배치 — 드래그로 한 자리만 세밀하게 조정
       return { cx: r.left + r.width / 2, cy: r.top + r.height / 2 };
     });
     let best = { x: 0, y: 0, dist: -1 };
+    // y 상한이 80인 이유: 골문 쪽 라인(y≥86)에 놓으면 GK가 두 명이 되어 저장이
+    // 보류된다. 격자 스냅이 2 단위라 84까지가 안전하지만 여유를 둔다 (tactics.ts)
     for (let px = 15; px <= 85; px += 5) {
-      for (let py = 15; py <= 85; py += 5) {
+      for (let py = 15; py <= 80; py += 5) {
         if (Math.abs(py - moving) < 30) continue; // 같은 라인 안의 이동은 숫자를 안 바꾼다
         const x = b.left + (b.width * px) / 100;
         const y = b.top + (b.height * py) / 100;
@@ -901,6 +908,12 @@ test("전술판 자유 배치 — 드래그로 한 자리만 세밀하게 조정
     );
   });
   expect(overlapping).toBe(false);
+
+  // 골키퍼가 여전히 한 명 — 0곳이든 2곳이든 앱은 저장을 보류하므로(office.tsx `save`),
+  // 아래 자동 저장 검증이 무엇을 재는지는 이 단언이 서 있어야 분명하다
+  await expect(
+    page.locator(".pitch-slot").filter({ has: page.locator(".slot-code", { hasText: /^GK$/ }) }),
+  ).toHaveCount(1);
 
   // 자동 저장 — 손을 뗀 뒤 잠시 지나면 서버에 반영된다 (저장 버튼이 없다)
   await expect(page.getByTestId("save-lineup")).toHaveCount(0);
