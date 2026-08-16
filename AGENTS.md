@@ -159,18 +159,23 @@ is not what is being tested, and where it genuinely is, build one fixture per
 being worked on burns runner minutes nobody reads. `/merge` marks the PR ready,
 and that is what starts the run it then watches.
 
-**The suite is sharded across runners.** `ubuntu-latest` has two cores, so the
-test gate is four jobs — `unit + api (i/4)`, each running
-`--shard=i/4 --maxWorkers=100%`. All four must be green; a shard is not a sample.
-Vitest assigns files to shards by hashing their path, so a new test file
-reshuffles the split, and **one file is never split across shards** — the slowest
-file is the floor for its shard. That floor is `euro-knockout.test.ts`, whose one
-full-season case needs the whole world because the euro draw is what it checks.
-The suite costs about 13 CPU-minutes over some 1,600 cases (measured locally, 12 cores);
-`finance.test.ts`, which used to set the floor at 17.5 runner-minutes, is now a
-fifteenth of that. More shards will not move the floor; only a cheaper test will.
-Nothing is excluded from the gate: making it faster means making a test cheaper,
-not moving it out of CI.
+**The runner shape lives in two repository variables, not in the workflow.**
+`CI_RUNNER` picks the machine and `CI_SHARDS` the shard list; with neither set,
+`ci.yml` falls back to GitHub-hosted `ubuntu-latest` × `[1, 2, 3, 4]`. The
+intended setting is one 8-core external runner and `[1]` — clearing the
+variables is the rollback, and it needs no commit. Every shard must be green; a
+shard is not a sample.
+
+**Cores beat shards.** Vitest assigns files to shards by hashing their path, so
+four shards land three-fold uneven and each one pays its own checkout and
+`pnpm install` — about 1.5 minutes that runs no test. One job with more cores
+removes both: vitest balances inside the job, and the setup is paid once. The
+suite costs about 13 CPU-minutes over some 1,600 cases locally (12 cores) and
+25.5 on a hosted runner. What it cannot go below is the slowest single file,
+because **one file is never split across shards**: `euro-knockout.test.ts` at
+126s, then `training-plan.test.ts` at 107s. More cores will not move that floor;
+only a cheaper test will. Nothing is excluded from the gate — making CI faster
+means making a test cheaper, not moving it out.
 
 - **While working** — `pnpm typecheck` and `pnpm lint`, plus `pnpm test <path>`
   for the file you just wrote. That is the whole local loop.
