@@ -23,7 +23,9 @@ function completion(message: Record<string, unknown>, finish = "stop") {
 
 function makeStubClient(responses: unknown[]) {
   const sent: Array<Record<string, unknown>> = [];
-  const create = vi.fn(async (params: Record<string, unknown>, _options?: unknown) => {
+  // 요청 옵션(시한·중단 신호)까지 기록에 남도록 두 인자를 그대로 받는다
+  const create = vi.fn(async (...args: [Record<string, unknown>, unknown?]) => {
+    const params = args[0];
     // 요청은 매 반복 새로 만들어지는 게 아니라 같은 배열을 다시 보내므로 사본을 뜬다
     sent.push({ ...params, messages: [...(params.messages as unknown[])] });
     const next = responses.shift();
@@ -47,7 +49,8 @@ const usageChunk = { choices: [], usage };
 /** 요청마다 chunk 목록 하나를 async iterable로 돌려주는 stub */
 function makeStreamClient(streams: unknown[][]) {
   const sent: Array<Record<string, unknown>> = [];
-  const create = vi.fn(async (params: Record<string, unknown>, _options?: unknown) => {
+  const create = vi.fn(async (...args: [Record<string, unknown>, unknown?]) => {
+    const params = args[0];
     sent.push({ ...params, messages: [...(params.messages as unknown[])] });
     const next = streams.shift();
     if (!next) throw new Error("stub 스트림 부족");

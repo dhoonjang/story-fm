@@ -365,7 +365,13 @@ describe("입력 조립 — 캐시 계층과 상태 채널", () => {
     ]);
 
     const llm = new AnthropicGameLLM(
-      { agent: "gm", provider: "anthropic", model: "legacy-model", maxTokens: 512, timeoutMs: 30_000 },
+      {
+        agent: "gm",
+        provider: "anthropic",
+        model: "legacy-model",
+        maxTokens: 512,
+        timeoutMs: 30_000,
+      },
       stub,
     );
     const result = await llm.runTurn({
