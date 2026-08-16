@@ -62,9 +62,14 @@ export function leagueEconomyLevel(leagueId: string): number {
  * 이 구단의 경제 수준 — 리그 배율에 브랜드 보정을 얹은 값.
  * 고정비와 초기치가 같은 값을 읽으므로 한 구단의 살림이 한 눈금 위에 선다.
  */
-export function clubEconomyLevel(teamId: string): number {
+/**
+ * @param tier 구단 프로필이 등재되지 않은 팀의 **폴백**으로만 쓰인다. 세이브가 있는
+ *   문맥은 `tierOfTeamIn(state, teamId)`을 넘긴다 — 넘기지 않으면 카탈로그 값이라
+ *   어드민 편집이 진행 중인 세이브에 샌다 (team.md §2).
+ */
+export function clubEconomyLevel(teamId: string, tier?: 1 | 2 | 3 | 4): number {
   const team = teamCatalogById(teamId) ?? teamCatalog()[0]!;
-  const brand = clubProfile(teamId, team.tier).commercialTier;
+  const brand = clubProfile(teamId, tier ?? team.tier).commercialTier;
   const level = leagueEconomyLevel(team.leagueId);
   return level + (1 - level) * BRAND_GLOBAL_LIFT[brand];
 }

@@ -1040,7 +1040,11 @@ export function addMissingClubs(state: GameState): number {
   const wages = initialWages(added, state.date);
 
   for (const team of missing) {
-    state.teams.push({ id: team.id, aiManagerTacticsRating: randInt(rng, 55, 82) });
+    state.teams.push({
+      id: team.id,
+      aiManagerTacticsRating: randInt(rng, 55, 82),
+      tier: team.tier,
+    });
     // 무소속은 스쿼드도 배치도 갖지 않는다 — 팀 엔티티만 있으면 된다
     if (!isClubTeam(team.id)) continue;
     const squad = added.filter((p) => p.teamId === team.id);
@@ -1653,6 +1657,8 @@ export function createGame(input: CreateGameInput): GameState {
   const teams: GameTeam[] = catalogTeams.map((t) => ({
     id: t.id,
     aiManagerTacticsRating: randInt(rng, 55, 82),
+    // 체급은 여기서 **복사된다** — 이후 카탈로그를 고쳐도 이 세이브는 흔들리지 않는다
+    tier: t.tier,
     // 부임일 — 감독 시장이 "얼마나 됐나"를 여기서 잰다 (`manager-market.ts`)
     managerSince: calendar.preseasonStart,
   }));

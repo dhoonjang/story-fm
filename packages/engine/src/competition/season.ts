@@ -27,6 +27,7 @@ import { payLeaguePrizes, paySeasonBonuses, topUpTransferBudget } from "../club/
 import { buildEuroEntrants, entrantsOf, type LeagueTables } from "./europe";
 import { buildSeasonFixtures, isUserFixture } from "./fixtures";
 import { applyPromotionRelegation, leagueOfTeamIn, teamsOfLeagueIn } from "./promotion";
+import { recomputeClubTiers } from "./club-tier";
 import { generateYouthPlayer } from "../world/generate";
 import { assignSquadNumber } from "../squad/numbers";
 import {
@@ -605,6 +606,12 @@ export function transitionSeason(state: GameState): string[] {
    * 순서가 뒤집히면 강등된 팀이 그 리그의 다음 시즌 일정에 그대로 남는다.
    */
   applyPromotionRelegation(state, finalTables, digest);
+  /**
+   * 체급 재산정 — 승강 **뒤**여야 한다. 승격·강등한 팀은 리그가 바뀌면서 다른 풀에
+   * 들어가고, 그게 곧 완전 재산정이다 (team.md §2.1). 아래 이적 예산 보충도 새
+   * 체급을 읽어야 하므로 순서가 여기다.
+   */
+  digest.push(...recomputeClubTiers(state));
 
   state.season = nextSeason;
   state.calendar = nextCalendar;
