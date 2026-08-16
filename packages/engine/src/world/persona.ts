@@ -13,7 +13,7 @@ import { countryOfTeam, leagueOfTeam } from "../data/team-catalog";
 import { makeRng, pick } from "../core/rng";
 
 /**
- * 페르소나 생성 — **시드로 결정적**이다 (personas.md §4).
+ * 페르소나 생성 — **시드로 결정적**이다 (people.md §2).
  *
  * 기획서는 핵심 인물을 LLM으로 한 번 생성해 고정하라고 하지만, 그 앞단인
  * **원형 분류는 규칙 기반**이다. 여기 있는 건 그 규칙 단계다. 코어에 둔 이유는
@@ -176,7 +176,7 @@ export function inventPersonName(rng: () => number, teamId: string): string {
  *
  * 이름: 실제 수석코치를 아는 구단이면 그 사람이고(`coach-seeds.ts`), 모르면 리그
  * 국적에 맞는 가상 이름을 뽑는다. 어느 쪽이든 성격·동기·말투는 게임이 지어낸다 —
- * 그래서 실명 항목은 라이선스 부채를 진다 (data-sourcing.md §7).
+ * 그래서 실명 항목은 라이선스 부채를 진다 (sources.md §7).
  *
  * 구단을 시드 채널에 섞는 이유: 같은 시드로 다른 팀을 맡으면 다른 코치를 만나야
  * 한다. 부임한 곳이 다르면 만나는 사람도 다르다.

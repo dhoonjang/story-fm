@@ -14,7 +14,7 @@ const ev = (partial: Partial<MatchEvent> & Pick<MatchEvent, "minute" | "type">):
   ...partial,
 });
 
-describe("경기 장부 검증 (match-sim.md §4)", () => {
+describe("경기 장부 검증 (match.md §5)", () => {
   it("골을 적용하면 스코어가 오른다", () => {
     const r = applyEvents(createLedger(home, away), [
       ev({ minute: 12, type: "goal", team: "home", actors: ["hm-fw1"] }),
@@ -216,7 +216,7 @@ describe("경기 장부 검증 (match-sim.md §4)", () => {
  * 연장 — 90분이 승부를 못 가린 녹아웃은 장부가 **계속 열려 있어야** 한다.
  * `full_time` 자리를 `extra_time_start`가 대신하고, 그 뒤로 두 하프가 더 있다.
  */
-describe("연장 장부 (match-sim.md §2)", () => {
+describe("연장 장부 (match.md §2)", () => {
   /** 후반까지 흘려 놓은 장부 */
   function inSecondHalf() {
     const half = applyEvents(createLedger(home, away), [ev({ minute: 45, type: "half_time" })]);

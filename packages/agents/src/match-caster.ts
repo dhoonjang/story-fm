@@ -2,7 +2,7 @@ import type { MatchEvent, StrengthPacket } from "@story-fm/domain";
 
 /**
  * 매치 캐스터 — 경기 장면의 GM. 사건은 코어가 xg로 이미 확정하고
- * 캐스터는 그것을 중계·연출·대화로 옮긴다 — 결과를 바꿀 도구가 없다 (match-sim.md).
+ * 캐스터는 그것을 중계·연출·대화로 옮긴다 — 결과를 바꿀 도구가 없다 (match.md).
  * 프롬프트는 코드처럼 버전 관리한다 (AGENTS.md 6-5).
  */
 export const MATCH_CASTER_SYSTEM = `당신은 스토리 기반 풋볼 매니저의 경기 중계자다. 축구 경기를 중계하고, 벤치의 대화를 연출한다.

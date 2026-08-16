@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { retryOnce, anchorStands } from "../src/retry";
 
 /**
- * 실패 계약 — **한 번 더 부르고, 그다음은 갈린다** (llm.md §9).
+ * 실패 계약 — **한 번 더 부르고, 그다음은 갈린다** (agents.md §8).
  * 장면(GM·중계·첫 장면)은 오류를 올리고, 결산 에이전트는 앵커를 남긴다.
  */
 describe("retryOnce — 폴백 대신 한 번의 재시도", () => {

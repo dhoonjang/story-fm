@@ -3,7 +3,7 @@ import { teamCatalogById } from "../data/team-catalog";
 
 /**
  * 온보딩 — 유저가 직접 입력한 배경(자유 텍스트)을 능력치 4축으로 배분한다
- * (결정 #11, attribute-model.md §9). 실모드에선 GM(LLM)이 판정하지만,
+ * (career.md §1). 실모드에선 GM(LLM)이 판정하지만,
  * 그 결과도 이 규칙과 같은 제약(등급별 기준선·특화 예산·범위)을 통과해야 한다.
  * mock 모드·LLM 실패 폴백은 이 휴리스틱을 그대로 쓴다.
  *

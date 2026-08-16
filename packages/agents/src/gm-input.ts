@@ -43,7 +43,7 @@ const MATCH_DIGEST_DAYS = 3;
 const EXPIRING_ALERT_DAYS = 180;
 
 /**
- * 페르소나 블록 — 인물 카드를 모델이 읽는 형태로 (personas.md §6).
+ * 페르소나 블록 — 인물 카드를 모델이 읽는 형태로 (people.md §1).
  * 예시 대사까지 실어야 모델이 톤을 흉내 내는 대신 그 사람으로 말한다.
  * 세이브당 고정이라 레퍼런스 층(캐시 프리픽스)에 들어간다.
  */
@@ -57,7 +57,7 @@ export function describePersona(persona: Persona): string {
     ...persona.speechStyle.samples.map((s) => `  예) ${s}`),
     // 직책이 아니라 이름으로 말한다 — 규칙은 시스템 프롬프트(출력 문법)에 한 번만 선다
     `화자 태그: @${persona.characterId}:`,
-    // 실명 인물 — 평판을 해칠 서사 금지 가드와 세트로만 운용한다 (data-sourcing.md §7)
+    // 실명 인물 — 평판을 해칠 서사 금지 가드와 세트로만 운용한다 (sources.md §7)
     ...(persona.real
       ? [
           `⚠️ 실존 인물이다. 직무 안에서 유능하게 그리고, 실제 인물의 평판을 해칠 서사 — 비위·불화·무능·사생활 — 는 만들지 않는다.`,

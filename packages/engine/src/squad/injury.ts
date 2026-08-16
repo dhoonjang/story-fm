@@ -49,7 +49,7 @@ export function openInjuryFor(
   });
   // 다친 사실은 그 선수에게 남는다 — 다음 부상이 조금 더 가까워진다
   raiseProneness(player, severity);
-  // 치료비 — 부상은 재정에도 흔적을 남긴다 (club-finance §6). 남의 팀 장부는 우리 것이 아니다
+  // 치료비 — 부상은 재정에도 흔적을 남긴다 (finance.md §6). 남의 팀 장부는 우리 것이 아니다
   if (player.teamId === state.userTeamId) {
     recordMedicalCost(state, player.id, player.name, severity);
   }

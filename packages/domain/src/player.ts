@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** 0~99 능력치 스케일 — 선수·감독 공통 (attribute-model.md §1) */
+/** 0~99 능력치 스케일 — 선수·감독 공통 (player.md §1) */
 export const RatingSchema = z.number().int().min(0).max(99);
 
 export const PositionGroupSchema = z.enum(["GK", "DF", "MF", "FW"]);
@@ -210,7 +210,7 @@ export function footAdjust(position: string, foot: Foot | undefined): number {
 }
 
 /**
- * 능력치 15축 (attribute-model.md §1) — 전 선수가 15축 **전부**를 갖는다.
+ * 능력치 15축 (player.md §1) — 전 선수가 15축 **전부**를 갖는다.
  * 포지션별 예외 분기는 없다: 어떤 축이 그 선수에게 의미 있는지는
  * POSITION_WEIGHTS(§2)가 정한다. goalkeeping도 필드 플레이어가 낮은 값으로 보유.
  */
@@ -285,7 +285,7 @@ export type PlayerAttributes = z.infer<typeof PlayerAttributesSchema>;
 /** 15축만 담은 값 묶음 — overall·potential 없이 계산에 쓰는 입력 타입 */
 export type AxisValues = Record<AttributeAxis, number>;
 
-// ── 포지션 가중치 (attribute-model.md §2) ───────────────
+// ── 포지션 가중치 (player.md §2) ───────────────
 
 /**
  * 가중치를 매기는 **자리** — 22개 포지션 코드를 9종으로 접는다.
@@ -363,7 +363,7 @@ export interface RoleDef {
 
 /**
  * 자리별 축 가중치 — **0.1 ~ 3.0, 0.1 해상도**. `overall`·`roleFit`·시뮬 존 점수의
- * 단일 소스다 (attribute-model.md §2). 각 자리의 값은 그 자리의 **제네릭 역할**
+ * 단일 소스다 (player.md §2). 각 자리의 값은 그 자리의 **제네릭 역할**
  * (센터백=CD, 풀백=FB, 윙어=W…)이고, 세부 역할은 여기서의 차이로 정의한다.
  *
  * ## 왜 단계가 아니라 소수인가
@@ -392,7 +392,7 @@ export interface RoleDef {
  * 66) 자리마다 다르게 섞이면 그 자리만 통째로 낮아진다. 리더십의 주 통로는 주장
  * 지명·팀토크·라커룸이지 전력이 아니다.
  *
- * (초안 값 — balance.md에서 튜닝)
+ * (초안 값)
  */
 export const POSITION_WEIGHTS: Record<WeightSlot, AxisValues> = {
   GK: {
@@ -1273,7 +1273,7 @@ const ROLE_DEFS: Record<WeightSlot, RoleDef[]> = {
  * 개인 기술로 해낸다. 수비는 라인·커버가 곧 조직이라 중원 다음으로 민감하다.
  *
  * 1.0이 기준이고, 이 배율만큼 전술 적응도의 **감점 폭**이 커지거나 줄어든다
- * (`famFactor` — sim/strength-packet.ts). 초안 값 (balance.md에서 튜닝).
+ * (`famFactor` — sim/strength-packet.ts). 초안 값이다.
  */
 export const TACTICAL_SENSITIVITY: Record<WeightSlot, number> = {
   GK: 0.8, // 라인 높이에 따라 스위퍼 역할이 갈리는 정도
@@ -1507,7 +1507,7 @@ export function bestOverall(axes: AxisValues, positions: readonly { position: st
   return best;
 }
 
-/** 빠르게 변하는 컨디션 — 부상은 별도 INJURY 테이블 (attribute-model.md §2) */
+/** 빠르게 변하는 컨디션 — 부상은 별도 INJURY 테이블 (player.md §5) */
 export const PlayerStateSchema = z.object({
   /**
    * 폼 **−1.0 ‥ +1.0** (실수) — 1이 곧 절정, −1이 곧 바닥이라 값 자체가 비율로
@@ -1717,7 +1717,7 @@ export function naturalPositionOf(player: Pick<GamePlayer, "positions">): Player
 /**
  * 이 자리가 그 선수의 **선호**인가 — 주 포지션 자체이거나 그 좌우 분화면 참이다.
  * `CB`가 주 포지션인 선수에게 `LCB`·`RCB`는 "소화 가능"이 아니라 같은 자리다
- * (요구 역량이 같고 갈리는 건 주발뿐 — attribute-model.md §좌우 분화).
+ * (요구 역량이 같고 갈리는 건 주발뿐 — player.md §4 좌우 분화).
  * 묶음(`RB↔RWB`·`ST↔CF`)까지는 넓히지 않는다 — 하는 일이 달라 감점이 남는다.
  */
 export function isNaturalAt(player: Pick<GamePlayer, "positions">, position: string): boolean {
@@ -1768,7 +1768,7 @@ export interface ScoutAttributeView {
   exact: boolean;
   /**
    * 이 값이 **얼마나 틀릴 수 있나** (±). 스카우팅을 마쳐도 0이 되지 않는다 —
-   * 관측형은 ±1, 분석형은 ±3이 남는다(attribute-model.md §3). 화면은 이 폭으로
+   * 관측형은 ±1, 분석형은 ±3이 남는다(player.md §9). 화면은 이 폭으로
    * 흐림의 **정도**를 그린다: 단정/추정의 두 갈래로만 그리면 "리포트를 받았는데
    * 왜 아직 흐린가"와 "소문으로만 아는 선수"가 같아 보인다.
    */

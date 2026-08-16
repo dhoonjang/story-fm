@@ -458,7 +458,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     });
   }
 
-  // ③ 감독 협상력 — 두 관문에 함께 (결정 #13)
+  // ③ 감독 협상력 — 두 관문에 함께 (career.md §2)
   const negotiation = state.manager.attributes.negotiation;
   if (Math.abs(negotiation - 50) >= 5) {
     const score = (negotiation - 50) / 100;

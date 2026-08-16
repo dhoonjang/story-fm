@@ -15,7 +15,7 @@ import { playerById, teamName, type GameState } from "../core/state";
 /**
  * 스카우팅 지식 — 정보 비대칭(안개)의 단일 소스.
  *
- * 규약 (선수 단위 5단계 × 축 단위 2계층 — attribute-model.md §3):
+ * 규약 (선수 단위 5단계 × 축 단위 2계층 — player.md §9):
  * | 수준       | 조건                                   | 관측형 | 분석형 | 잠재력 |
  * | own       | 우리 팀 선수                            | 정확   | 정확   | ±6→±2 |
  * | adapting  | 영입 후 아직 적응 중                     | ±1→0  | ±3→0  | ±9→±2 |
@@ -51,7 +51,7 @@ export const KNOWLEDGE_KO: Record<Knowledge, string> = {
 };
 
 /**
- * 축의 **관측 가능성** — 히든 레이어의 대체물 (attribute-model.md §3).
+ * 축의 **관측 가능성** — 히든 레이어의 대체물 (player.md §9).
  * 경계선은 *실행 vs 판단*이다: 몸과 발로 하는 건 경기에서 드러나고,
  * 머리와 마음으로 하는 건 표본이 필요하다.
  */
@@ -284,7 +284,7 @@ export function ratingTier(value: number): RatingTier {
 }
 
 /**
- * 수치 → 서술 라벨. 채팅에서 능력치 숫자를 읊지 않는다는 결정 #2와 맞물려,
+ * 수치 → 서술 라벨. 채팅에서 능력치 숫자를 읊지 않는다는 노출 규약(player.md §10)과 맞물려,
  * 안개가 있는 선수는 숫자 대신 이 라벨만 GM에게 전달한다.
  */
 export function ratingLabel(value: number): string {

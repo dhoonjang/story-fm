@@ -131,7 +131,7 @@ function isMidSystemRejection(err: unknown): boolean {
  * 앞의 세 구간은 캐시 read(0.1×), 뒤 두 구간만 정가로 읽힌다.
  *
  * 다른 제공자 어댑터도 GameLLM 계약(출력 문법·tool call·Zod 검증)은
- * 동일하게 지킨다 (economy.md §3).
+ * 동일하게 지킨다 (models.md §3).
  */
 export class AnthropicGameLLM implements GameLLM {
   private readonly client: Anthropic;

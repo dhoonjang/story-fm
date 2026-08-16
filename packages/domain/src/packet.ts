@@ -4,7 +4,7 @@
  * 이 패킷은 "LLM에게 주는 힌트"가 아니라 **결과를 정하는 수치**다. 선수×경로
  * 슈팅 프로필(`guide.shotProfiles`)이 두 시뮬레이터의 발생률 원본이고, 사건은
  * 코어가 굴린다. LLM은 그 사건을 중계·연출한다
- * (match-sim.md §1·§2). 숫자와 한국어 해석을 함께 담는 이유는 그대로다 —
+ * (match.md §1·§2). 숫자와 한국어 해석을 함께 담는 이유는 그대로다 —
  * 중계와 원인 태그가 같은 문장을 인용해야 "왜 그렇게 됐는지"가 설명된다.
  */
 
@@ -32,7 +32,7 @@ export interface Matchup {
  *
  * 이득과 대가를 함께 적는다. 지시는 공짜가 아니고(라인을 올리면 뒷공간이 열린다),
  * 소화율(`uptake`)이 낮으면 **이득만 깎이고 대가는 그대로** 남는다 — 그래서
- * 소화하지 못하는 팀의 과격한 지시는 순손실이 된다 (match-sim.md §1.1).
+ * 소화하지 못하는 팀의 과격한 지시는 순손실이 된다 (match.md §1.2).
  */
 export interface TacticalRead {
   /** 지시 적용률 0.45~1.0 — 감독 전술 능력 + 팀 전술 적응도 */
@@ -109,7 +109,7 @@ export interface SidePacket {
   zones: ZoneStrength;
   /** 결정력을 중립화한 기회 생성용 존 전력. */
   creationZones?: ZoneStrength;
-  /** 감독 전술 능력치가 만든 전술 소화율 계수 (attribute-model.md §7) */
+  /** 감독 전술 능력치가 만든 전술 소화율 계수 (career.md §2) */
   tacticalFit: number;
   /** 전술 지시의 반영 — 적용률과 이득·대가 (설명 가능성) */
   tactical: TacticalRead;

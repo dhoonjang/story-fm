@@ -5,7 +5,7 @@ import { affordableWageBill } from "../club/finance";
 import type { GameState } from "../core/state";
 
 /**
- * 주급 모델 — **구단 예산을 스쿼드에 나눈다** (club-finance.md).
+ * 주급 모델 — **구단 예산을 스쿼드에 나눈다** (transfer.md §8).
  *
  * 예전에는 `wageForOverall(overall)` 하나로 정했다. 두 가지가 잘못이었다.
  * ① **능력치가 바뀌면 주급이 따라 움직였다** — 파생 축을 실측에 맞춰 OVR 눈금이
@@ -45,7 +45,7 @@ export interface WageSubject {
 // ── 구단 예산 ───────────────────────────────────────────
 
 /**
- * **구단의 주간 임금 예산 — 급여에 쓸 수 있는 돈을 주로 나눈 값** (club-finance §6.3).
+ * **구단의 주간 임금 예산 — 급여에 쓸 수 있는 돈을 주로 나눈 값** (finance.md §6.3).
  *
  * 예전엔 `상수 × 성적 등급 × 브랜드 × 경제 수준`이었다. 네 축이 전부 카탈로그 값이라
  * 예산이 **다섯 시즌 내내 상수**였고, 자동 재계약이 매 시즌 인건비를 그 상수로 되돌렸다.

@@ -125,7 +125,7 @@ export function buildMatchPress(state: GameState, matchId: string): PressConfere
   /**
    * **사실만 넘긴다.** 기자의 질문은 GM이 이 카드들로 직접 쓴다 — 코어가 문장을
    * 박아 두면 시즌 내내 같은 말이 반복되고, 기자의 성격도 그날의 맥락도 문장에
-   * 닿지 못한다 (approaches.md §1).
+   * 닿지 못한다 (overview.md §1 철칙 4).
    */
   const facts: PressFact[] = [
     {

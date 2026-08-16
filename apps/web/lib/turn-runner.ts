@@ -85,7 +85,7 @@ export function turnErrorMessage(detail: string): string {
 }
 
 /**
- * 유저 턴 → GM 실행 → 모델 턴 (ai-manager §2), 잠금·원자성 포함.
+ * 유저 턴 → GM 실행 → 모델 턴 (agents.md §2), 잠금·원자성 포함.
  * onDelta를 주면 GM 서사 텍스트를 스트리밍으로 흘려보낸다.
  *
  * 원자성 — 성공할 때만 저장한다. GM 턴이 중간에 실패하면 부분 실행된 도구

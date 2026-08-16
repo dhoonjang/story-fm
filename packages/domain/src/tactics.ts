@@ -192,7 +192,7 @@ export function tacticsSignature(spec: TacticsSpec): string {
  * 두 전술 설정의 거리 — 얼마나 다른 전술인가.
  * 포메이션 교체가 가장 크고(구조가 바뀐다), 슬라이더는 **축별 비용 × 칸 수**.
  * 적응도가 **얼마나 깎이는지**와 **비슷한 전술에서 얼마나 전이되는지**를 모두 이 값이 정한다.
- * (초안 계수 — balance.md에서 튜닝)
+ * (초안 계수)
  */
 export function tacticsDistance(a: TacticsSpec, b: TacticsSpec): number {
   let d = a.formation !== b.formation ? 25 : 0;

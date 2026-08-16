@@ -122,7 +122,7 @@ const CLUSTER_ROLE_PENALTY = 2;
  * 약발이 **분명히 안 좋다고 확인된 선수만** 낮게 잡는다 — 모르면 4다.
  *
  * 주발의 좌우는 여전히 부채다: 실측이 없으면 주 포지션의 좌우로 추정한다
- * (왼쪽 자리면 왼발일 확률을 높게 — data-sourcing.md §7).
+ * (왼쪽 자리면 왼발일 확률을 높게 — sources.md §7).
  */
 export function footOf(nameEn: string, natural: string, seed?: FootSeed): Foot {
   const leftChance = sideOf(natural) === "L" ? 70 : 20;
@@ -155,7 +155,7 @@ const DEFAULT_WEAK_FOOT = 4;
  *
  * 분포는 5대 리그 실측 2,295명 그대로다 —
  * 1성 0.3% · 2성 16.2% · **3성 59.7%** · 4성 21.4% · 5성 2.4%,
- * 왼발 26%. (fcratings/EA FC 27 — data-sourcing.md §7)
+ * 왼발 26%. (fcratings/EA FC 27 — sources.md §4.1)
  */
 export function syntheticFoot(key: string, natural: string): Foot {
   const leftChance = sideOf(natural) === "L" ? 70 : 26;
@@ -176,7 +176,7 @@ function clampFootRating(v: number): number {
  * 하는 셈이라, 자리별 기준치에 **공중볼·몸싸움·스피드**를 얹어 앞뒤가 맞게 만든다.
  * 골키퍼·센터백은 크고, 윙어·공격형 미드필더는 작다. 스피드가 높으면 조금 가볍다.
  *
- * ⚠️ 실측이 아니다 — data-sourcing.md §7의 데이터 부채.
+ * ⚠️ 실측이 아니다 — sources.md §7의 데이터 부채.
  */
 const HEIGHT_BASE: Record<string, number> = {
   GK: 191,
@@ -291,7 +291,7 @@ export function derivePositions(nameEn: string, natural: string): PlayerPosition
  *
  * 진짜 판정 근거는 "만 21세 이전에 그 협회 클럽에서 3시즌 등록"이라는 **경력
  * 이력**인데, 시드에 그 이력이 없다. 능력치 15축을 6축에서 파생하는 것과 같은
- * 종류의 데이터 부채로 다루고(data-sourcing.md §7), 시드에 `homegrown`이
+ * 종류의 데이터 부채로 다루고(sources.md §7), 시드에 `homegrown`이
  * 명시돼 있으면 그것을 우선한다.
  *
  * 대체 규칙은 이름·생일 해시로 나라별 목표 비율을 맞춘다 — 1부는 명단의 약 40%,
@@ -348,7 +348,7 @@ function entryFromSeed(teamId: string, s: RealPlayerSeed): CatalogDraft {
  *
  * 클럽당 최소 40명을 채운다. 앞 28명이 1군(포지션별 주전+백업)이고, 뒤 14명은
  * 유망주 자리다 — 실선수 시드가 들어와도 아카데미는 계속 합성 가명으로 채운다
- * (실존 유소년에게 가상 서사를 입히지 않는다는 결정, narrative.md §7).
+ * (실존 유소년에게 가상 서사를 입히지 않는다는 결정, people.md §2).
  */
 const FALLBACK_TEMPLATE: string[] = [
   // 1군 28명 — GK 3, DF 9, MF 10, FW 6
@@ -636,7 +636,7 @@ function teamDrafts(team: TeamCatalogEntry): CatalogDraft[] {
     return [
       ...seeds.map((s) => entryFromSeed(team.id, s)),
       // 실선수 1군이 하한에 못 미치면 합성 선수로 보충한다.
-      // 유소년은 실명을 쓰지 않는 결정(narrative.md §7)과도 맞는 방향이다.
+      // 유소년은 실명을 쓰지 않는 결정(people.md §2)과도 맞는 방향이다.
       ...topUpEntries(team.id, team.tier, seeds),
     ];
   }

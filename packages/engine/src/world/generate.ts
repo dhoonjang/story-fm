@@ -8,7 +8,7 @@ import { makeRng, pick, randInt } from "../core/rng";
 
 /**
  * 게임 중 생성되는 선수 — 유스 콜업 등. 카탈로그에 없으므로 catalogId = null.
- * 실존 유소년에게 가상 서사를 입히는 리스크를 피해 합성 가명을 쓴다 (narrative.md §7).
+ * 실존 유소년에게 가상 서사를 입히는 리스크를 피해 합성 가명을 쓴다 (people.md §2).
  */
 
 const clamp99 = (x: number) => Math.max(1, Math.min(99, Math.round(x)));

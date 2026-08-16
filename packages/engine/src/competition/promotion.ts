@@ -119,7 +119,7 @@ export function applyPromotionRelegation(
     const up = promotedFrom(state, second);
     for (const teamId of down) {
       setLeague(state, teamId, second);
-      // 낙하산 — 강등의 완충이자 챔피언십 재정 기준선의 정체 (club-finance)
+      // 낙하산 — 강등의 완충이자 챔피언십 재정 기준선의 정체 (finance.md §9-1)
       startParachute(state, teamId, leagueId);
     }
     for (const teamId of up) {

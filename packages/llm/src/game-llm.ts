@@ -104,7 +104,7 @@ export interface GameToolSpec {
  * 보고 방식이 갈리기 때문에 어댑터가 여기서 모양을 맞춘다 — Gemini·OpenAI는
  * 프롬프트 합계에 캐시분을 이미 포함하지만 Anthropic은 빼고 보고한다. 그대로
  * 두면 `cacheReadTokens / inputTokens`가 제공자마다 다른 뜻이 되어, 히트율이
- * "프리픽스가 살아 있나"라는 하나의 질문에 답하지 못한다 (llm.md §8).
+ * "프리픽스가 살아 있나"라는 하나의 질문에 답하지 못한다 (models.md §4).
  */
 export interface TurnUsage {
   /** 이 호출이 읽은 입력 전부 — 캐시 읽기·쓰기 몫을 포함한다 */

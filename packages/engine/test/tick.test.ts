@@ -14,7 +14,7 @@ import {
 } from "@story-fm/engine";
 import { advanceDays, advanceToMatchday, createMiniGame, createTestGame } from "./helpers";
 
-describe("advance_time — 시간은 스킬로만 흐른다 (game-loop §3)", () => {
+describe("advance_time — 시간은 스킬로만 흐른다 (season.md §5)", () => {
   it("프리시즌에서 다음 경기일까지 전진하면 개막전에서 멈춘다", () => {
     const state = createTestGame();
     expect(state.date).toBe("2026-07-01"); // 7/1 프리시즌 시작

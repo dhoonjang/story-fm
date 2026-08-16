@@ -67,7 +67,7 @@ describe("보고서 한 장", () => {
 
     /**
      * 리포트는 **정답 공개가 아니라 오차를 좁히는 행위**다 — 관측형 ±1 ·
-     * 분석형 ±3이 끝까지 남는다 (attribute-model.md §3).
+     * 분석형 ±3이 끝까지 남는다 (player.md §9).
      */
     expect(after).toBeLessThan(before);
     expect(after).toBeGreaterThan(0);
