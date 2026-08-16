@@ -344,7 +344,7 @@ export interface PendingMatch {
    * 적응도(`familiarity`)도 함께 담는다. 전술을 바꾸면 코어가 적응도를 깎는데,
    * 그건 **새 전술을 훈련해야 한다**는 뜻이라 그 경기 한 번의 대응에는 맞지 않는다.
    * 담지 않으면 하프타임에 라인 한 번 올린 대가로 팀 적응도가 영구히 깎인다.
-   * 적응도가 **쌓이는** 것은 경기가 아니라 날짜가 흐를 때다(`settleTactics`).
+   * 적응도가 **쌓이는** 것은 훈련·경기 결산 판정이지 경기 중의 조정이 아니다.
    */
   tacticsBefore?: {
     spec: import("@story-fm/domain").TacticsSpec;

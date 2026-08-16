@@ -22,7 +22,7 @@ gh pr view --json number,title,url,isDraft,state,mergeable,mergeStateStatus,base
 
 On `main`, or with no PR for this branch → say so and stop. Base must be `main`.
 
-Note whether this is a worktree — `resolve` puts work in one, and step 5 differs.
+Note whether this is a worktree — `resolve` puts work in one, and step 7 differs.
 `git rev-parse --git-common-dir` pointing outside the current directory means yes;
 `orca worktree current --json` names it.
 
@@ -37,27 +37,64 @@ Uncommitted changes: show them and ask what belongs in this PR. Never sweep them
 in with `git add -A` — name the paths (AGENTS.md §5). Unpushed commits: push
 them.
 
-## 3. Verify — this is the gate
+## 3. Conflicts first
 
-There is no CI on this repo. These three are the only thing standing between a
-mistake and main.
+Before anything is verified, the branch has to be sitting on top of current main.
+Do this first on purpose: resolving a conflict changes the code, and code that
+changed has to be re-tested — so a CI run started before this step is worthless.
 
 ```bash
-pnpm typecheck
-pnpm test
-pnpm lint
+git fetch origin
+git merge origin/main
 ```
 
-If the change touches the web app or the game loop, run `pnpm e2e` too — this is
-the one place it runs (AGENTS.md §5). One e2e at a time **across all worktrees**:
-port 3399 and `/tmp/story-fm-e2e` are shared, so if another worktree is mid-run,
-either wait or pass `E2E_SLOT=1`–`9`.
+Merge, never rebase (AGENTS.md §5) — the branch is shared with the PR.
 
-**Any failure stops the merge.** Report the actual output and fix it, or hand it
-back. A failure that names no file you touched is pre-existing — report it and
-ask whether to land anyway; do not decide that alone.
+- **Clean** → go to §4.
+- **Conflicted** → resolve them. Read both sides and the design doc that governs
+  the behavior; a conflict is two intents meeting, not two texts. `git commit`
+  the merge with the conflicting paths named, and say in the report which files
+  conflicted and how you settled each.
+- **The two sides genuinely disagree about behavior** — main changed the rule
+  this branch is also changing, and only one can be right — **stop and ask the
+  user.** That is a design call, not a merge step.
 
-## 4. Write the squash message
+Then push, so CI runs against what will actually land:
+
+```bash
+git push origin HEAD
+```
+
+## 4. Wait for CI — this is the gate
+
+`.github/workflows/ci.yml` runs `typecheck`, `lint`, the full `pnpm test` and
+`pnpm e2e` on this branch. **That run is the gate; do not re-run the suites
+locally to duplicate it** (AGENTS.md §5).
+
+```bash
+gh pr checks --watch --fail-fast
+```
+
+The push in §3 starts a fresh run — make sure the checks you are reading belong
+to the commit you just pushed, not the one before it:
+
+```bash
+gh pr view --json headRefOid,statusCheckRollup
+```
+
+- **All green** → go to §5.
+- **A check is red** → open it, fix it here, push, and watch again.
+  `gh run view <id> --log-failed` gives the failing output; for a red e2e,
+  download the `playwright-report` artifact rather than guessing.
+- **Red in a file this branch never touched** → pre-existing. Report it with the
+  output and ask whether to land anyway; do not decide that alone.
+- **No checks at all** → the workflow did not trigger. Say so and stop; merging
+  unverified is the one thing this step exists to prevent.
+
+Reproducing a CI failure locally is fine and expected — that is the case where
+running `pnpm test` or `pnpm e2e` on this machine earns its minutes.
+
+## 5. Write the squash message
 
 The PR is squash-merged, so the PR title and body **are** the commit that lands
 on main. This is the last chance to get that commit right.
@@ -74,7 +111,7 @@ EOF
 )"
 ```
 
-## 5. Merge
+## 6. Merge
 
 ```bash
 gh pr ready
@@ -88,11 +125,11 @@ EOF
 Pass `--subject`/`--body` explicitly — left to itself GitHub builds the squash
 message from the branch's working commits, which are notes, not history.
 
-If the merge is blocked (conflict, `mergeable: CONFLICTING`), stop and report.
-Resolving a conflict against main is a decision to make with the user, not a step
-to power through.
+If the merge is blocked here, main moved while §4 was watching CI. Go back to §3,
+merge it in, and let CI run again — a conflict resolved after a green run is code
+nothing verified.
 
-## 6. Return to main and tear down
+## 7. Return to main and tear down
 
 **In a worktree** (the `resolve` path) — `git checkout main` cannot work here,
 main is checked out in the primary repo. Update that repo in place, leave the
@@ -126,7 +163,7 @@ git push origin --delete <branch>
 git branch -d <branch>
 ```
 
-## 7. Confirm
+## 8. Confirm
 
 ```bash
 git log --oneline -3

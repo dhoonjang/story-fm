@@ -4,6 +4,7 @@ import { diffDays, windowOpenOn } from "../competition/calendar";
 import { claimLabel, evaluatePitch } from "./persuasion";
 import { isMarketOnlyLeague, leagueCatalogById } from "../data/league-catalog";
 import { leagueOfTeam, teamCatalogById } from "../data/team-catalog";
+import { leagueOfTeamIn } from "../competition/promotion";
 import { euroCompetitionOf } from "../competition/europe";
 import { hashChannel } from "../core/rng";
 import { knowledgeOf, KNOWLEDGE_KO, type Knowledge } from "../squad/scouting";
@@ -82,8 +83,9 @@ function contractFactor(yearsLeft: number): number {
   return 1;
 }
 
-function leagueFactor(teamId: string): number {
-  const coefficient = leagueCatalogById(leagueOfTeam(teamId))?.coefficient ?? 5;
+/** 지금 뛰는 리그의 계수 — 강등되면 그 시즌부터 값이 따라 내려간다 */
+function leagueFactor(state: GameState, teamId: string): number {
+  const coefficient = leagueCatalogById(leagueOfTeamIn(state, teamId))?.coefficient ?? 5;
   return 1.15 - coefficient * 0.05; // 계수 1 → 1.10, 계수 5 → 0.90
 }
 
@@ -102,7 +104,7 @@ export function marketValueOf(state: GameState, player: GamePlayer): number {
     ageCurve(age, player.attributes.overall, player.attributes.potential) *
     (1 + player.state.form * 0.12) *
     contractFactor(contractYearsLeft(state, player.id)) *
-    leagueFactor(player.teamId);
+    leagueFactor(state, player.teamId);
   return Math.round(value / 100_000) * 100_000;
 }
 
@@ -1051,7 +1053,7 @@ export { teamName, teamCatalogById };
  * 영입은 못 하는 상태가 되고, 그게 이 리그들이 만드는 가장 큰 드라마다.
  */
 export function windowOpenForTeam(state: GameState, teamId: string, date = state.date) {
-  const leagueId = leagueOfTeam(teamId);
+  const leagueId = leagueOfTeamIn(state, teamId);
   return windowOpenOn(state.windows, date, isMarketOnlyLeague(leagueId) ? leagueId : undefined);
 }
 
@@ -1074,8 +1076,8 @@ const LEAGUE_BIAS: Record<string, MarketBias> = {
   mls: { fee: 0.75, wage: 1.3, veteranAppetite: 1.6 },
 };
 
-export function marketBiasOf(teamId: string): MarketBias {
-  return LEAGUE_BIAS[leagueOfTeam(teamId)] ?? DEFAULT_BIAS;
+export function marketBiasOf(state: GameState, teamId: string): MarketBias {
+  return LEAGUE_BIAS[leagueOfTeamIn(state, teamId)] ?? DEFAULT_BIAS;
 }
 
 /**
