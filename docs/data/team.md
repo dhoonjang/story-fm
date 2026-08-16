@@ -368,6 +368,9 @@ WorldScope { leagues, teamsPerLeague, cups, markets }
 - **카탈로그가 갖는 값은 세이브에서 바꿀 수 없다.** 승강이 `state.leagueOf`로
   표현되는 것이 그 결과다 — `leagueId`를 덮어쓰면 다음 게임의 리그 구성이 함께
   흔들린다.
+- **`leagueId`를 직접 읽는 코드는 "지금 어디 있나"를 묻는 게 아니어야 한다.**
+  지금 소속은 `leagueOfTeamIn(state, teamId)`, 리그의 종류(시장 전용·나라)는
+  카탈로그 — 두 갈래는 [game-state.md](./game-state.md) §1이 원본이다.
 - **리그당 팀 수는 짝수다.** 홀수면 라운드마다 한 팀이 쉬어 편성에 부전승이 생긴다
   (축소 세계도 `teamsPerLeague`를 짝수로 내린다). 리그전을 도는 리그는 2~20팀이다 —
   달력이 38라운드 골격이라 20팀을 넘으면 배치할 매치위크가 모자란다.
@@ -389,15 +392,22 @@ WorldScope { leagues, teamsPerLeague, cups, markets }
 
 ## 9. 미해결
 
-- **승강이 카탈로그를 전부 대신하지 못한다** — 재정·AI 시장·감독 시장은 여전히
-  카탈로그의 `leagueId`를 읽는다 ([../simulation/season.md](../simulation/season.md) §8).
-- **승격한 2부 클럽의 스쿼드가 얇다** — 컵 전용으로 20명만 만들어지고, 1부로
-  올라와도 보충 경로가 시즌 전환의 유스 유입뿐이다.
-- **1부 96팀 중 EPL 20팀만 지정 선발을 갖는다** — 나머지 76팀은 11명을 엔진이
-  고른다. 슬롯 배치는 선수별 적응도의 전역 최댓값을 구하므로 앞 슬롯의 선택 때문에
+- **1부/2부 판정(`isTopFlight`)만 아직 카탈로그다** — 세계 생성·축소 세계가 상태
+  없이 부르는 자리라 두 갈래 규칙 밖에 있다
+  ([game-state.md](./game-state.md) §9).
+- **승격한 2부 클럽의 스쿼드가 얇다** — `world/catalog.ts`의
+  `SECOND_DIVISION_TEMPLATE`이 20명만 만들고, `market/ai-market.ts`의
+  `planTransfer`가 카탈로그의 `isTopFlight`로 막아 승격 뒤에도 사지 못한다
+  (유스 유입·임대·자유계약만 들어온다).
+- **1부 96팀 중 EPL 20팀만 지정 선발을 갖는다** — `data/team-catalog.ts`의
+  `DEFAULT_XI`에 20팀만 있고, 나머지 76팀은 `core/state.ts`의 `fillSlots`가 11명을
+  고른다. 슬롯 배치는 적합도 합의 전역 최댓값을 구하므로 앞 슬롯의 선택 때문에
   뒤 슬롯에 부적합한 선수가 남지 않는다. 비 EPL 지정 선발 조사는 남아 있다.
-- **2군에 경기가 없다** — 승격 전까지 출전이라는 성장 경로가 닫혀 있다.
-- **구장은 수용인원 하나로만 표현된다** — 확장·이전 같은 구단 투자 결정이 없다.
+- **2군에 경기가 없다** — `competition/fixtures.ts`의 `buildSeasonFixtures`가 리그와
+  대항전만 짜므로 1군 승격 전까지 출전이라는 성장 경로가 닫혀 있다.
+- **구장은 수용인원 하나로만 표현된다** — `data/club-profile.ts`의 `ClubProfile`은
+  세이브 밖 시드 표이고 `club/finance.ts`는 `capacity`를 입장 수입에만 쓴다
+  (시설비는 체급 상수 `facilityCostOf`). 확장·이전 같은 구단 투자 결정이 없다.
 
 ## 코드 위치
 

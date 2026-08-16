@@ -2,6 +2,7 @@ import { ageOf, normalizedLogCurve, type GamePlayer } from "@story-fm/domain";
 import { addDays, diffDays, seasonYear, windowOpenOn } from "../competition/calendar";
 import { isClubTeam, isTopFlight, leagueOfTeam } from "../data/team-catalog";
 import { isMarketOnlyLeague } from "../data/league-catalog";
+import { leagueOfTeamIn } from "../competition/promotion";
 import { recordFinance } from "../club/finance";
 import { marketBiasOf, marketValueOf, windowOpenForTeam } from "./market";
 import { makeRng } from "../core/rng";
@@ -173,7 +174,7 @@ function wants(state: GameState, squads: Squads, buyerId: string, player: GamePl
   const firstTeam = squads.firstTeam(buyerId);
   if (firstTeam.length >= MAX_FIRST_TEAM) return false;
   const level = squadLevel(squad);
-  const bias = marketBiasOf(buyerId);
+  const bias = marketBiasOf(state, buyerId);
   const age = ageOf(player.birthdate, state.date);
   if (isMarketOnlyLeague(leagueOfTeam(buyerId))) {
     // 돈으로 흡수하는 곳 — 수준이 위여도 데려가고, 노장을 반긴다
@@ -194,7 +195,7 @@ function wants(state: GameState, squads: Squads, buyerId: string, player: GamePl
 
 /** 이적료 — 시장가에 구단 성향과 약간의 흔들림을 얹는다 */
 function feeFor(state: GameState, buyerId: string, player: GamePlayer, rng: () => number): number {
-  const base = marketValueOf(state, player) * marketBiasOf(buyerId).fee;
+  const base = marketValueOf(state, player) * marketBiasOf(state, buyerId).fee;
   const jitter = 0.85 + rng() * 0.4;
   return Math.max(0, Math.round((base * jitter) / 100_000) * 100_000);
 }
@@ -230,7 +231,7 @@ function moveClub(
       wageSubjectOf(player, state.date),
       [...squad, player].map((p) => wageSubjectOf(p, state.date)),
       state,
-    ) * marketBiasOf(toTeamId).wage,
+    ) * marketBiasOf(state, toTeamId).wage,
   );
   const years = 2 + Math.floor(input.rng() * 3);
   state.contracts.push({
@@ -610,13 +611,13 @@ export function runAiTransfers(state: GameState, digest: string[]): void {
   }
 
   /** 감독의 리그에서 벌어진 큰 건만 — 그것도 하루 두 줄까지 */
-  const ourLeague = leagueOfTeam(state.userTeamId);
+  const ourLeague = leagueOfTeamIn(state, state.userTeamId);
   const notable = settled
     .filter(
       ({ player, deal }) =>
         deal.kind === "transfer" &&
         (deal.fee >= NOTABLE_FEE || player.attributes.overall >= NOTABLE_OVERALL) &&
-        (leagueOfTeam(deal.toTeamId) === ourLeague || isTopFlight(deal.toTeamId)),
+        (leagueOfTeamIn(state, deal.toTeamId) === ourLeague || isTopFlight(deal.toTeamId)),
     )
     .sort((a, b) => b.deal.fee - a.deal.fee)
     .slice(0, NOTABLE_PER_DAY);

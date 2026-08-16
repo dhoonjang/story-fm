@@ -1,5 +1,5 @@
 import { topLeagues } from "../data/league-catalog";
-import { leagueOfTeam } from "../data/team-catalog";
+import { leagueOfTeamIn } from "../competition/promotion";
 import { tierOfTeamIn } from "../core/club-tier";
 import { inventPersonName } from "../world/persona";
 import { makeRng, randInt } from "../core/rng";
@@ -74,7 +74,7 @@ const USER_BOARD_FLOOR = 25;
 
 /** 그 팀이 리그에서 몇 위인가 (1부만 — 2부는 리그전이 없다) */
 function positionOf(state: GameState, teamId: string): { position: number; played: number } | null {
-  const leagueId = leagueOfTeam(teamId);
+  const leagueId = leagueOfTeamIn(state, teamId);
   if (!topLeagues().some((l) => l.id === leagueId)) return null;
   const table = computeStandings(state, leagueId);
   const index = table.findIndex((r) => r.teamId === teamId);
@@ -106,7 +106,7 @@ function daysInCharge(state: GameState, teamId: string): number {
 export function runManagerMarket(state: GameState, digest: string[]): void {
   const rng = makeRng(state.seed, `manager-market:${state.date}`);
   let sacked = 0;
-  const ourLeague = leagueOfTeam(state.userTeamId);
+  const ourLeague = leagueOfTeamIn(state, state.userTeamId);
 
   for (const team of state.teams) {
     if (sacked >= SACKINGS_PER_DAY) break;
@@ -140,7 +140,7 @@ export function runManagerMarket(state: GameState, digest: string[]): void {
     }
 
     // 우리 리그의 일만 브리핑한다 — 5대 리그 전체를 올리면 소음이다
-    if (leagueOfTeam(team.id) === ourLeague) {
+    if (leagueOfTeamIn(state, team.id) === ourLeague) {
       digest.push(
         `📰 ${teamShortName(team.id)}가 감독을 경질했다 — 후임은 ${team.managerName}`,
       );
