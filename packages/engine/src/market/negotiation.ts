@@ -39,6 +39,7 @@ import { marketBiasOf, windowOpenForTeam } from "./market";
 import { evaluatePitch, latitudeOf } from "./persuasion";
 import { makeRng } from "../core/rng";
 import type { MarketSkillResult, SkillResult } from "../skills";
+import { grantManagerXP } from "../skills";
 import { buildTransferPress, openPress } from "../club/press";
 import {
   activeContract,
@@ -1556,8 +1557,34 @@ function affordabilityGate(
   return null;
 }
 
-/** 합의된 조건을 장부로 옮긴다 — 메디컬을 통과한 뒤에만 불린다 */
+/**
+ * 타결이 감독의 협상 축에 남기는 XP — **오퍼를 넣는 것에는 붙지 않는다.**
+ * 넣기만 해도 오르면 아무 선수에게나 1파운드를 부르는 것이 훈련이 된다.
+ * 팀이 오가는 딜(영입·매각)이 재계약·임대보다 무거운 협상이다.
+ */
+const NEGOTIATION_XP: Record<Negotiation["kind"], number> = {
+  buy: 15,
+  sell: 15,
+  loan: 7,
+  loan_out: 7,
+  renew: 7,
+};
+
+/**
+ * 합의된 조건을 장부로 옮긴다 — 메디컬을 통과한 뒤에만 불린다.
+ *
+ * ⚠️ `state.negotiations`는 **감독의 딜만** 담는다. AI 구단끼리의 재계약
+ * (`runAiRenewals`)은 계약 row를 직접 갈아 끼우고 이 함수를 지나지 않는다 —
+ * 그래서 여기서 협상 XP를 주는 것이 곧 "감독이 맺은 딜에만" 이다.
+ */
 export function executeDeal(state: GameState, negotiation: Negotiation): SkillResult {
+  const result = settleDeal(state, negotiation);
+  if (!result.ok) return result;
+  const grown = grantManagerXP(state, "negotiation", NEGOTIATION_XP[negotiation.kind]);
+  return grown ? { ...result, message: `${result.message} · ${grown}` } : result;
+}
+
+function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
   const player = playerById(state, negotiation.gamePlayerId);
   if (!player) return { ok: false, message: "선수를 찾지 못했습니다" };
 

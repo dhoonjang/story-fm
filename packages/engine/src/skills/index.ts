@@ -235,8 +235,9 @@ export { positionGroupOf };
 
 // ---- 감독 성장 (attribute-model.md §7) ----
 
-const XP_PER_LEVEL = 100;
-const ATTR_CAP = 90;
+/** 한 칸에 필요한 XP · 성장 상한 — 뷰가 진행을 그리려면 같은 값을 읽어야 한다 */
+export const MANAGER_XP_PER_LEVEL = 100;
+export const MANAGER_ATTR_CAP = 90;
 
 export function grantManagerXP(
   state: GameState,
@@ -244,8 +245,11 @@ export function grantManagerXP(
   amount: number,
 ): string | null {
   state.managerXP[axis] += amount;
-  if (state.managerXP[axis] >= XP_PER_LEVEL && state.manager.attributes[axis] < ATTR_CAP) {
-    state.managerXP[axis] -= XP_PER_LEVEL;
+  if (
+    state.managerXP[axis] >= MANAGER_XP_PER_LEVEL &&
+    state.manager.attributes[axis] < MANAGER_ATTR_CAP
+  ) {
+    state.managerXP[axis] -= MANAGER_XP_PER_LEVEL;
     state.manager.attributes[axis] += 1;
     return `감독 성장 — ${MANAGER_ATTRIBUTE_KO[axis]} ${state.manager.attributes[axis]}`;
   }

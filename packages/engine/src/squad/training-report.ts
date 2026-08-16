@@ -9,7 +9,7 @@ import {
 } from "@story-fm/domain";
 import { attributeDeclineScale, attributeGainScale } from "../world/attributes";
 import { seasonRating } from "@story-fm/domain";
-import { setPlayerPosition } from "../skills";
+import { grantManagerXP, setPlayerPosition } from "../skills";
 import {
   assignmentsOf,
   playerById,
@@ -51,7 +51,7 @@ import type { GameState } from "../core/state";
  * 그래서 상한을 세 겹으로 둔다:
  *   ① 선수별 전술 적응도는 `TACTIC_GAIN_MIN`~`TACTIC_GAIN_MAX`로 잘린다
  *   ② 그 위에 코어의 흡수율(`tacticalUptake`)이 곱해져 실제로 남는 양이 정해진다
- *   ③ 능력치는 **구간당 `TRAINING_ATTR_CAP`명, 각 한 축 ±1**이 끝이다
+ *   ③ 능력치는 **구간당 `trainingAttrCap()`명, 각 한 축 ±1**이 끝이다
  *      (그것도 그 구간에 실제로 훈련한 축만, 잠재력 상한 안에서)
  *
  * 판정이 실패하면(모델 오류·검증 탈락·mock 모드) 아무것도 하지 않는다 — tick이
@@ -77,13 +77,51 @@ export const ATTR_STEP_MIN = -1;
 export const ATTR_STEP_MAX = 1;
 
 /**
- * 한 판정에서 능력치가 움직일 수 있는 **인원** 상한.
+ * 한 판정에서 능력치가 움직일 수 있는 **인원** — 감독의 훈련 축이 정한다.
  *
  * 경기가 훨씬 넉넉한 이유는 하나다 — 90분은 열한 명 모두에게 무언가를 남긴다.
  * 훈련 며칠은 그렇지 않아서, 아무에게도 남지 않는 구간이 정상이다.
+ *
+ * `TRAINING_ATTR_CAP`은 그중 **천장**이다 — 판정자에게 알리는 값이라 감독이
+ * 도달할 수 있는 최대여야 한다. 실제 상한은 `trainingAttrCap()`이 잘라 준다.
  */
-export const TRAINING_ATTR_CAP = 5;
+export const TRAINING_ATTR_CAP_MIN = 3;
+export const TRAINING_ATTR_CAP = 6;
 export const MATCH_ATTR_CAP = 11;
+
+/** 감독 축의 0~99를 0~1로 — 축값은 도메인이 이미 0~99로 가둔다 */
+function axisRatio(value: number): number {
+  return Math.max(0, Math.min(99, value)) / 99;
+}
+
+/**
+ * 훈련 축이 정하는 **흡수율** — 판정이 낸 폭 중 실제로 남는 비율 (0.75~1.00).
+ *
+ * ⚠️ **1을 넘지 않는다.** 감독이 판정 밴드(적응도 −1~3 · 능력치 ±1)를 뚫으면
+ * "한 번에 게임을 크게 흔들지 않는다"는 결산의 계약이 흐려진다 — 좋은 감독은
+ * 더 많이 얻는 쪽이 아니라 **덜 흘리는** 쪽이다.
+ */
+export const TRAINING_UPTAKE_FLOOR = 0.75;
+export const TRAINING_UPTAKE_SPAN = 0.25;
+export function managerTrainingUptake(training: number): number {
+  return TRAINING_UPTAKE_FLOOR + axisRatio(training) * TRAINING_UPTAKE_SPAN;
+}
+
+/** 이 감독의 한 결산이 능력치를 움직일 수 있는 인원 — 3~6 */
+export function trainingAttrCap(training: number): number {
+  const span = TRAINING_ATTR_CAP - TRAINING_ATTR_CAP_MIN;
+  return Math.max(
+    TRAINING_ATTR_CAP_MIN,
+    Math.min(TRAINING_ATTR_CAP, Math.round(TRAINING_ATTR_CAP_MIN + axisRatio(training) * span)),
+  );
+}
+
+/**
+ * 훈련 XP — **세션 하나당** 이만큼. 결산 횟수가 아니라 세션 수로 세는 것이
+ * 핵심이다: `advance_time`을 하루씩 쪼개도 총 세션 수는 같아 XP를 불릴 수 없다.
+ * 소수로 쌓이고 100에서 한 칸이 된다 (`grantManagerXP`).
+ */
+export const TRAINING_XP_PER_SESSION = 0.5;
 
 /** 이 구간에 소화된 훈련 세션 하나 */
 export interface TrainedSession {
@@ -260,6 +298,10 @@ export function applyTrainingOutcomes(
   const subjects = new Map(brief.subjects.map((s) => [s.playerId, s] as const));
   const lines: string[] = [];
   let attrSpent = 0;
+  // 감독의 훈련 축 — 흡수율과 인원 상한을 함께 정한다 (docs/simulation/career.md §2)
+  const training = state.manager.attributes.training;
+  const uptake = managerTrainingUptake(training);
+  const attrCap = trainingAttrCap(training);
 
   for (const outcome of outcomes) {
     const subject = subjects.get(outcome.playerId);
@@ -275,10 +317,12 @@ export function applyTrainingOutcomes(
       const gain = clampGain(outcome.tacticGain);
       if (gain !== 0) {
         const before = assignment.familiarity;
-        // 상승은 **위로 갈수록 깎이고, 잘 읽는 선수가 더 가져간다** — 소수로 쌓인다
+        // 상승은 **위로 갈수록 깎이고, 잘 읽는 선수가 더 가져간다** — 소수로 쌓인다.
+        // 감독의 흡수율은 **상승에만** 곱한다: 하락에까지 곱하면 나쁜 감독 밑에서
+        // 흐트러짐이 더뎌지는 거꾸로 된 결과가 된다
         assignment.familiarity = applyFamiliarityGain(
           before,
-          gain,
+          gain > 0 ? gain * uptake : gain,
           "training",
           tacticalUptake(player.attributes),
         );
@@ -347,7 +391,8 @@ export function applyTrainingOutcomes(
     const moved = applyAttributeStep(state, player, outcome.attribute, outcome.attributeStep, {
       allowed,
       spent: attrSpent,
-      cap: TRAINING_ATTR_CAP,
+      cap: attrCap,
+      factor: uptake,
       source: "training",
       note: "훈련 결산",
       entryId: session.entryId,
@@ -361,6 +406,13 @@ export function applyTrainingOutcomes(
       );
     }
   }
+
+  /**
+   * 훈련장이 감독을 기른다 — **소화된 세션 수**만큼 (결산 횟수가 아니다).
+   * 판정이 아무것도 남기지 않은 구간도 훈련은 있었으므로 XP는 붙는다.
+   */
+  const grown = grantManagerXP(state, "training", brief.sessions.length * TRAINING_XP_PER_SESSION);
+  if (grown) lines.push(grown);
   return lines;
 }
 
@@ -391,6 +443,11 @@ export function applyAttributeStep(
     allowed: ReadonlySet<AttributeAxis> | null;
     spent: number;
     cap: number;
+    /**
+     * 감독 계수 (기본 1) — **상승에만** 곱한다. 하락에 곱하면 나쁜 감독 밑에서
+     * 노화가 느려지는 거꾸로 된 결과가 된다. 경기 결산은 주지 않는다.
+     */
+    factor?: number;
     source: "training" | "match";
     note: string;
     /** 출처 일정·날짜 — 결산은 지나간 훈련 날짜를 가리킨다 */
@@ -419,7 +476,7 @@ export function applyAttributeStep(
   const age = player.birthdate !== undefined ? ageOf(player.birthdate, state.date) : 24;
   const scale =
     move > 0
-      ? attributeGainScale(axis, value, player.attributes.potential, age)
+      ? attributeGainScale(axis, value, player.attributes.potential, age) * (opts.factor ?? 1)
       : attributeDeclineScale(axis, age);
   if (scale <= 0) return null;
 

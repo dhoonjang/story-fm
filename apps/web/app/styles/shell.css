@@ -3736,6 +3736,18 @@ textarea {
   font-weight: 800;
   font-variant-numeric: tabular-nums;
 }
+/**
+ * 축 라벨 아래의 XP 자국 — **다음 칸까지 얼마나 왔는가**를 숫자 대신 길이로 말한다.
+ * 숫자를 하나 더 붙이면 다섯 축이 열 개의 숫자가 되어 오각형이 표로 돌아간다.
+ * 도형(능력치)보다 한 단 흐리게 둬서 주인이 바뀌지 않게 한다.
+ */
+.mgr-radar .xp-track {
+  fill: var(--border);
+}
+.mgr-radar .xp-fill {
+  fill: var(--accent);
+  opacity: 0.7;
+}
 
 /**
  * 표의 바탕 — **오른쪽 칸에 무엇이 서든 같다.**

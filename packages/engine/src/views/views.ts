@@ -75,6 +75,8 @@ import {
 } from "../squad/scouting";
 import type { ScoutGrade, ScoutReportCard } from "@story-fm/domain";
 import { listingOf } from "../market/negotiation";
+import { USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
+import { MANAGER_ATTR_CAP, MANAGER_XP_PER_LEVEL } from "../skills";
 import { marketValueOf, wageExpectationOf } from "../market/market";
 import { settlingPercent } from "../squad/settling";
 import { computeStandings, type StandingRow } from "../competition/season";
@@ -767,6 +769,20 @@ export interface OfficeViews {
       background: string;
       attributes: Record<string, number>;
       reputation: Record<string, number>;
+      /**
+       * 보드 경고 — 한도에 닿으면 자리가 없어진다(`market/manager-market.ts`).
+       * 경질은 이 세이브가 끝나는 유일한 길이라 카운터가 화면에 서 있어야 한다:
+       * 끝이 예고 없이 오면 사건이 아니라 사고다.
+       */
+      boardWarnings: number;
+      warningLimit: number;
+      /** 마지막 경고일 — 압박의 시계 (경고를 받은 적이 없으면 null) */
+      lastWarnedOn: string | null;
+      /** 축별 누적 XP — 훈련은 세션당 0.5라 소수로 쌓인다 (뷰는 반올림해 싣는다) */
+      xp: Record<string, number>;
+      /** 한 칸에 필요한 XP · 성장 상한 — 규칙 숫자의 원본은 `grantManagerXP`다 */
+      xpPerLevel: number;
+      attrCap: number;
     };
     players: SquadViewRow[];
     formation: string;
@@ -1491,9 +1507,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
        * 화면만 말하게 된다. 기억은 다시 선발이 될 때 `roleId`로 서서 온다.
        */
       const slotted = (liveSlot?.role ?? assignment?.role) === "starting";
-      const assignedRoleId = slotted
-        ? (liveSlot?.entry.roleId ?? assignment?.roleId)
-        : undefined;
+      const assignedRoleId = slotted ? (liveSlot?.entry.roleId ?? assignment?.roleId) : undefined;
       const shownOverall = observedOverall(p.attributes.overall, observation);
       const slotValue = assignedSlot ? slotFit(assignedSlot, assignedRoleId) : null;
       return {
@@ -1970,6 +1984,16 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         background: state.manager.background,
         attributes: { ...state.manager.attributes },
         reputation: { ...state.manager.reputation },
+        // 옛 세이브엔 경고 필드가 없다 — 없으면 아직 한 번도 안 받은 것이다
+        boardWarnings: state.manager.boardWarnings ?? 0,
+        warningLimit: USER_WARNINGS_BEFORE_SACK,
+        lastWarnedOn: state.manager.lastWarnedOn ?? null,
+        // 훈련 XP가 0.5씩 쌓여 소수가 된다 — 화면이 87.5를 보일 이유가 없다
+        xp: Object.fromEntries(
+          Object.entries(state.managerXP).map(([axis, value]) => [axis, Math.round(value)]),
+        ),
+        xpPerLevel: MANAGER_XP_PER_LEVEL,
+        attrCap: MANAGER_ATTR_CAP,
       },
       players,
       formation: tactics.spec.formation,

@@ -55,7 +55,7 @@ import { recordCard } from "../match/discipline";
 import { runAiTransfers } from "../market/ai-market";
 import { reviewUserSeat, runManagerMarket } from "../market/manager-market";
 import { matchRating } from "../match/ratings";
-import { settleTactics } from "../skills";
+import { grantManagerXP, settleTactics } from "../skills";
 import { allMatchesDone, endSeason } from "../competition/season";
 import { cancelTrainingOn, syncDefaultTraining } from "../squad/training-plan";
 import {
@@ -136,6 +136,9 @@ function isHardSession(session: TrainingSession): boolean {
   return !(session.focus.length > 0 && session.focus.every((f) => f === "recovery"));
 }
 
+/** 보고서 한 장이 감독의 분석 축에 남기는 XP — 파견이 아니라 **도착**에 붙는다 */
+const SCOUT_REPORT_XP = 8;
+
 /**
  * 스카우트 파견 완료 — dueOn에 도달한 리포트를 닫고 보고한다.
  * 완료 이후 그 선수의 능력치 안개가 걷힌다 (scouting.ts).
@@ -151,6 +154,9 @@ function resolveScouting(state: GameState, digest: string[]): void {
       `스카우트 보고서 도착: ${player.name} (${teamName(player.teamId)}) — 능력치를 정확히 파악했다`,
     );
     pushNarrative(state, `${player.name} 스카우트 보고서 입수`, 2);
+    // 보고서를 읽는 것이 감독의 눈을 기른다 (docs/simulation/career.md §3)
+    const grown = grantManagerXP(state, "analysis", SCOUT_REPORT_XP);
+    if (grown) digest.push(grown);
   }
 }
 
