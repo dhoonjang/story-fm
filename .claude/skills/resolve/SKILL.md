@@ -141,7 +141,7 @@ Then send the briefing **and submit it** — `--enter` is what presses Return:
 ```bash
 orca terminal send --terminal <handle> --enter --json --text 'Issue #<n> — <title>.
 Read .claude/skills/resolve/SKILL.md and run it from §3 on. You are the lead in
-this worktree; the branch is not created yet.
+this worktree; it is already on its branch — work on that one, whatever it is named.
 열린 PR이 이미 쥐고 있는 파일 — 겹치는 것을 고치기 전에 그 PR의 diff를 읽어라:
   packages/engine/src/club/finance.ts  #34 #49
   docs/simulation/finance.md  #34 #35 #45'
@@ -204,16 +204,16 @@ branch overwrite each other.
 
 *Everything below runs in the new worktree.*
 
-## 3. Branch, then docs, then the PR
+## 3. Docs, then the PR
 
 ```bash
 pwd                                    # must be the worktree, not /Users/dhoonjang/local/story-fm
-git switch -c <type>/<kebab-slug>
+git branch --show-current              # the branch §2 created — work on this one
 ```
 
-`<type>` is the Conventional-Commit type from the issue title (`feat` `fix`
-`refactor` `docs` `test` `chore`) — `fix/red-card-reaches-result`. This matches
-the branches already in the history.
+`worktree create` already cut the branch and Orca tracks the issue by it. **Its
+name is not a reason to cut another** (AGENTS.md §5) — there is no naming
+convention to match, and the second branch leaves the tracked one unused.
 
 Read the issue body and the design docs it points at (`docs/` is the single
 source — AGENTS.md §7). If the task changes behavior, **update `docs/` to
