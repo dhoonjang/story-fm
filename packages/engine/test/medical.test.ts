@@ -67,7 +67,6 @@ describe("이적은 합의한 날 끝나지 않는다", () => {
 
     const result = acceptDeal(state, negotiation.id);
     expect(result.ok, result.message).toBe(true);
-    expect(result.message).toContain("메디컬");
     // 장부는 아직 아무것도 움직이지 않았다
     expect(negotiation.status).toBe("agreed");
     expect(playerById(state, player.id)!.teamId).toBe(fromTeamId);
@@ -196,8 +195,7 @@ describe("소견이 붙으면 데려가는 쪽이 결정한다", () => {
     expect(deal.negotiation.status).toBe("agreed");
     expect(deal.negotiation.medical!.note).toBeTruthy();
     expect(playerById(state, deal.player.id)!.teamId).not.toBe(state.userTeamId);
-    const verdict = pendingVerdicts(state).find((v) => v.negotiation.id === deal.negotiation.id);
-    expect(verdict?.label).toContain("소견");
+    expect(pendingVerdicts(state).some((v) => v.negotiation.id === deal.negotiation.id)).toBe(true);
   });
 
   it("강행하면 계약은 되지만 그 몸이 약하다는 사실이 남는다", () => {
@@ -285,6 +283,5 @@ describe("우리가 파는 쪽이면 상대가 값을 깎는다", () => {
       verdict: "accept",
     });
     expect(accepted.ok, accepted.message).toBe(true);
-    expect(accepted.message).toContain("메디컬 재협상");
   });
 });

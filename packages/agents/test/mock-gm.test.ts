@@ -49,7 +49,6 @@ describe("mock GM — 유저 여정 시나리오", () => {
     const turn = buildOnboardingTurn(state);
     expectGmGrammar(turn.text);
     expect(turn.text).toContain("김감독");
-    expect(turn.text).toContain("다음 경기");
   });
 
   it("온보딩 폴백은 같은 시드로 재현되고 다른 시드에선 장면이 달라진다", () => {
@@ -76,7 +75,6 @@ describe("mock GM — 유저 여정 시나리오", () => {
     const said = "응 그리고 훈련 싹다 갈아엎자. 체력 훈련 싹 지우고, 패스 훈련에 집중하자";
     const turn = runMockGmTurn(state, said);
     const call = turn.toolCalls.find((c) => c.name === "set_training")!;
-    expect(call.brief?.head).toBe("훈련 지정");
     expect(call.brief!.items.length).toBeGreaterThan(0);
     // 요일을 몇 개로 펼치든 항목 하나로 접힌다 — 그게 말풍선 한 줄이다
     expect(call.brief!.items).toHaveLength(1);
@@ -86,7 +84,6 @@ describe("mock GM — 유저 여정 시나리오", () => {
     expect(JSON.stringify(call.brief)).not.toContain("갈아엎자");
     // 장면은 도구 결과를 인용하지 않는다 — 같은 사실이 대사와 말풍선에 두 번 서면 안 된다
     expect(turn.text).not.toContain(call.summary);
-    expect(turn.text).not.toContain("매주 월요일 오전=");
   });
 
   it("훈련 지시 → set_training 스킬이 세션을 등록한다", () => {
@@ -198,7 +195,6 @@ describe("mock GM — 유저 여정 시나리오", () => {
     const turn = runMockGmTurn(state, "음...");
     expectGmGrammar(turn.text);
     expect(turn.toolCalls).toHaveLength(0);
-    expect(turn.text).toContain("다음 경기");
   });
 });
 

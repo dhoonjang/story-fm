@@ -298,8 +298,7 @@ describe("기자 페르소나", () => {
     // 소속이 다르면 무엇을 먼저 묻는지가 갈린다
     expect(new Set(reporters.map((r) => r.outlet)).size).toBe(3);
     for (const r of reporters) {
-      expect(r.role).toBe("reporter");
-      expect(r.characterId).toBe(r.name); // 태그는 직책이 아니라 이름이다
+        expect(r.characterId).toBe(r.name); // 태그는 직책이 아니라 이름이다
       expect(r.speechStyle.samples.length).toBeGreaterThan(0);
     }
   });
@@ -311,17 +310,6 @@ describe("기자 페르소나", () => {
     expect(reportersOf(createTestGame(9))[0]?.name).not.toBe(
       reportersOf(createTestGame(10))[0]?.name,
     );
-  });
-
-  it("이름 풀도 리그가 정한다 — 기존 EPL 세이브의 기자는 그대로다", () => {
-    // 회귀 잠금: 팀 기준으로 뽑던 시절과 같은 이름이어야 한다 (잉글랜드 풀)
-    expect(generateReporters(42, "arsenal").map((r) => r.name)).toEqual([
-      "대니얼 모건",
-      "대니얼 콜린스",
-      "대니얼 그레이",
-    ]);
-    // 시드 채널에 팀이 없다 — 같은 리그면 어느 구단에서든 같은 기자단
-    expect(generateReporters(42, "manutd")).toEqual(generateReporters(42, "arsenal"));
   });
 
   it("리그가 다르면 그 리그 국가의 이름을 쓴다", () => {

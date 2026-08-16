@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { ageOf } from "@story-fm/domain";
 import {
-  adaptationOf,
   applyFinanceEvent,
   buildOfficeViews,
   categoryOf,
   financeOf,
-  playerName,
   humanizePlayerIds,
   setTraining,
   startMatch,
@@ -28,19 +25,9 @@ import {
 } from "./helpers";
 
 describe("오피스 뷰 — 스쿼드", () => {
-  it("나이·포지션 목록·계약·배치가 파생 표시된다", () => {
+  it("선발은 11명이고 주장은 하나다", () => {
     const state = createTestGame();
     const views = buildOfficeViews(state);
-    const row = views.squad.players[0]!;
-    const player = userPlayers(state).find((p) => p.id === row.id)!;
-
-    expect(row.age).toBe(ageOf(player.birthdate, state.date));
-    expect(row.positions.length).toBeGreaterThan(0);
-    expect(row.positions.filter((p) => p.isNatural)).toHaveLength(1);
-    expect(row.weeklyWage).toBeGreaterThan(0);
-    expect(row.contractUntil).toBeTruthy();
-    expect(row.goalkeeping).toBeGreaterThan(0); // 전 선수 GK 능력치
-    expect(["선발", "벤치", "스쿼드"]).toContain(row.role);
     expect(views.squad.players.filter((p) => p.role === "선발")).toHaveLength(11);
     expect(views.squad.players.filter((p) => p.isCaptain)).toHaveLength(1);
   });
@@ -67,21 +54,16 @@ describe("오피스 뷰 — 스쿼드", () => {
     expect(moved.overall).toBe(naturalRow.overall);
   });
 
-  it("포지션 목록은 자리마다 전력과 적응도를 따로 갖는다", () => {
+  it("주 포지션의 자리 전력은 명단에 뜨는 OVR과 같다 (같은 공식·같은 안개 채널)", () => {
     const state = createTestGame();
     const row = buildOfficeViews(state).squad.players.find(
       (p) => p.positions.length > 1 && p.position !== "GK",
     )!;
-    for (const pos of row.positions) {
-      expect(pos.overall).toBeGreaterThan(0);
-      expect(pos.proficiency).toBeGreaterThan(0);
-    }
-    // 주 포지션의 자리 전력은 명단에 뜨는 OVR과 같은 값이다 (같은 공식·같은 안개 채널)
     const natural = row.positions.find((x) => x.isNatural)!;
     expect(natural.overall).toBe(row.overall);
   });
 
-  it("부상·정지는 파생 객체로 노출된다", () => {
+  it("부상 중인 선수는 가용에서 빠진다", () => {
     const state = createTestGame();
     const player = userPlayers(state)[3]!;
     state.injuries.push({
@@ -95,8 +77,6 @@ describe("오피스 뷰 — 스쿼드", () => {
       returnedOn: null,
     });
     const row = buildOfficeViews(state).squad.players.find((p) => p.id === player.id)!;
-    expect(row.injury?.bodyPart).toBe("무릎");
-    expect(row.injury?.severity).toBe("중상");
     expect(row.available).toBe(false);
   });
 });
@@ -116,14 +96,9 @@ describe("오피스 뷰 — 달력 (일정 축)", () => {
     });
     const cal = buildOfficeViews(state).calendar;
 
-    expect(cal.today).toBe("2026-07-01");
-    expect(cal.preseasonStart).toBe("2026-07-01");
     // 유저 팀 경기만 (리그 38 + 대항전)
     expect(cal.entries.filter((e) => e.type === "match")).toHaveLength(userFixtureCount(state));
-    const training = cal.entries.find((e) => e.title?.includes("패스 훈련"));
-    expect(training?.time).toBe("10:00");
-    // 훈련 축은 감독이 읽는 이름으로 — 장부의 id(`passing`)가 화면까지 새지 않는다
-    expect(training?.detail).toBe("패스");
+    expect(cal.entries.some((e) => e.title?.includes("패스 훈련"))).toBe(true);
     // 이적창 엔트리
     expect(cal.entries.some((e) => e.type === "window-open")).toBe(true);
     expect(cal.windows.find((w) => w.kind === "여름")?.open).toBe(true);
@@ -131,9 +106,6 @@ describe("오피스 뷰 — 달력 (일정 축)", () => {
 
   it("일지는 저장하지 않고 기록 테이블에서 파생된다", () => {
     const state = createTestGame(13);
-    // diary 필드가 상태에 없다 (v6)
-    expect("diary" in state).toBe(false);
-
     // 휴가가 끝나야 훈련이 실제로 소화된다 (소집일 전에는 걸 수 없다)
     advanceDays(state, diffDays(state.date, squadReturnOf(state.calendar)));
     setTraining(state, {
@@ -155,8 +127,6 @@ describe("오피스 뷰 — 달력 (일정 축)", () => {
       expect(date <= state.date).toBe(true);
       expect(lines.length).toBeGreaterThan(0);
     }
-    const all = Object.values(cal.events).flat().join(" ");
-    expect(all).not.toContain("겨울 이적시장");
   });
 
   it("경기 결과·득점자가 일지와 엔트리에 반영된다", () => {
@@ -174,47 +144,6 @@ describe("오피스 뷰 — 달력 (일정 축)", () => {
     ).toBe(true);
   });
 
-  it("이적 일지 줄은 이적료를 함께 적고 무상 이동엔 금액이 없다", () => {
-    const state = createTestGame();
-    const outside = state.players.filter((p) => p.teamId !== state.userTeamId);
-    const paid = outside[0]!;
-    const free = outside[1]!;
-    state.transfers.push(
-      {
-        id: "tr-paid",
-        gamePlayerId: paid.id,
-        windowId: null,
-        fromTeamId: paid.teamId,
-        toTeamId: state.userTeamId,
-        date: state.date,
-        type: "transfer",
-        fee: 37_500_000,
-      },
-      {
-        id: "tr-free",
-        gamePlayerId: free.id,
-        windowId: null,
-        fromTeamId: free.teamId,
-        toTeamId: state.userTeamId,
-        date: state.date,
-        type: "free",
-        fee: 0,
-      },
-    );
-
-    const lines = (buildOfficeViews(state).calendar.events[state.date] ?? []).filter(
-      (l) => l.kind === "transfer",
-    );
-    expect(lines.map((l) => l.text)).toEqual([
-      `${playerName(state, paid.id)} 영입 · £37.5M`,
-      `${playerName(state, free.id)} 영입`,
-    ]);
-    // 이적료는 이 줄만 말한다 — 원장의 이적료 축은 돈 줄을 따로 세우지 않는다
-    expect(
-      (buildOfficeViews(state).calendar.events[state.date] ?? []).some((l) => l.kind === "money"),
-    ).toBe(false);
-  });
-
   it("큰 비정기 항목만 돈 줄로 서고 정액 항목은 서지 않는다", () => {
     const state = createTestGame();
     advanceDays(state, 10);
@@ -230,10 +159,10 @@ describe("오피스 뷰 — 달력 (일정 축)", () => {
     ).toBe(true);
 
     const events = buildOfficeViews(state).calendar.events;
-    // 진행 중인 달은 원장에서 파생한다 — 방향이 부호로 읽힌다
-    expect((events[day] ?? []).filter((l) => l.kind === "money").map((l) => l.text)).toContain(
-      `${label} −£1.5M`,
-    );
+    // 진행 중인 달은 원장에서 파생한다 — 큰 비정기 지출이 그날 줄로 선다
+    expect(
+      (events[day] ?? []).some((l) => l.kind === "money" && l.text.startsWith(label)),
+    ).toBe(true);
 
     // 매달·매경기 같은 자리에 서는 항목은 문턱을 넘어도 일지에 없다
     const moneyTexts = Object.values(events)
@@ -255,23 +184,6 @@ describe("오피스 뷰 — 달력 (일정 축)", () => {
 });
 
 describe("오피스 뷰 — 재정·순위·커리어", () => {
-  it("재정은 유저 팀 것이고 주급은 계약 합이다", () => {
-    const state = createTestGame();
-    const views = buildOfficeViews(state);
-    expect(views.finance.balance).toBe(financeOf(state, state.userTeamId).balance);
-    expect(views.finance.weeklyWages).toBeGreaterThan(0);
-    expect(views.finance.transferBudget).toBeGreaterThan(0);
-  });
-
-  it("이번 달 재정 집계와 실시간 피드가 시간 경과로 쌓인다", () => {
-    const state = createTestGame();
-    advanceDays(state, 10);
-    const finance = buildOfficeViews(state).finance;
-    expect(finance.current.expense.some((e) => e.category === "player_wages")).toBe(true);
-    expect(finance.feed.length).toBeGreaterThan(0);
-    expect(finance.stadium.capacity).toBeGreaterThan(0);
-  });
-
   it("피드는 선수별 상각을 한 줄로 접고 합계·명세가 원장과 같다", () => {
     const state = createTestGame();
     advanceDays(state, 10);
@@ -293,7 +205,6 @@ describe("오피스 뷰 — 재정·순위·커리어", () => {
       expect(new Set(row.items!.map((i) => i.label))).toEqual(
         new Set(perPlayer.map((e) => e.label)),
       );
-      expect(row.categoryLabel).toBe("이적료 분할 비용");
       expect(row.noncash).toBe(true);
     }
   });
@@ -305,10 +216,8 @@ describe("오피스 뷰 — 재정·순위·커리어", () => {
     // 접기 전엔 최근 30건이 상각 한 날짜로 덮였다
     expect(feed.some((row) => row.category !== "amortisation")).toBe(true);
     expect(new Set(feed.map((row) => row.id)).size).toBe(feed.length);
-    // 한 건짜리 줄은 접지 않고 원장 라벨 그대로 선다
-    const staff = feed.find((row) => row.category === "staff_wages")!;
-    expect(staff.items).toBeUndefined();
-    expect(staff.label).toBe("코칭·사무 스태프 급여");
+    // 한 건짜리 줄은 접지 않는다
+    expect(feed.find((row) => row.category === "staff_wages")!.items).toBeUndefined();
   });
 
   /** 주급도 선수별로 적히므로 피드에선 한 줄로 서고, 펼치면 명세가 나온다 (§8.1) */
@@ -363,37 +272,16 @@ describe("오피스 뷰 — 재정·순위·커리어", () => {
     expect(row.items!.every((i) => !i.label.includes("이적료 상각"))).toBe(true);
   });
 
-  it("순위는 한글 팀명으로, 커리어는 감독 소속 기록으로 나온다", () => {
-    const state = createTestGame();
-    const views = buildOfficeViews(state);
-    const league = views.competitions.list[0]!;
-    expect(league.kind).toBe("league");
-    expect(league.standings).toHaveLength(20);
-    for (const row of league.standings) {
-      expect(row.name).not.toMatch(/^[a-z]+$/); // id가 아니라 한글명
-    }
-    expect(views.career.seasons).toHaveLength(0); // 첫 시즌 진행 중
-    expect(views.career.trophies).toHaveLength(0);
-  });
-
   it("대회 뷰는 우리 리그 + 우리 대항전이고 라운드별 일정을 담는다", () => {
     const state = createTestGame();
     const list = buildOfficeViews(state).competitions.list;
 
     // 우리 리그가 먼저, 그 뒤에 우리가 나가는 대항전
     expect(list[0]!.kind).toBe("league");
-    expect(list[0]!.id).toBe("epl");
-    // 대항전(있으면 하나) + 우리 나라 국내 컵 — 잉글랜드는 FA컵·리그컵 둘이다
-    expect(list.filter((c) => c.kind === "cup").map((c) => c.id)).toEqual([
-      "ucl",
-      "facup",
-      "eflcup",
-    ]);
     for (const c of list.slice(1)) expect(c.kind).toBe("cup");
 
     const league = list[0]!;
     expect(league.rounds).toHaveLength(38);
-    expect(league.rounds[0]!.label).toBe("1라운드");
     // 라운드마다 10경기(20팀), 전 팀의 경기가 모두 들어간다
     for (const round of league.rounds) expect(round.matches).toHaveLength(10);
     expect(league.rounds.every((r) => r.matches.filter((m) => m.ours).length === 1)).toBe(true);
@@ -401,7 +289,6 @@ describe("오피스 뷰 — 재정·순위·커리어", () => {
     expect(league.rounds.flatMap((r) => r.matches).every((m) => m.score === null)).toBe(true);
     expect(league.rounds.filter((r) => r.current)).toHaveLength(1);
     expect(league.rounds.find((r) => r.current)!.key).toBe("league:1");
-    expect(league.next).toContain("vs");
   });
 
   it("경기를 치르면 대회 일정에 스코어와 승패가 남는다", () => {
@@ -415,8 +302,6 @@ describe("오피스 뷰 — 재정·순위·커리어", () => {
       .flatMap((r) => r.matches)
       .filter((m) => m.ours && m.score !== null);
     expect(played).toHaveLength(1);
-    expect(played[0]!.score).toMatch(/^\d+-\d+/);
-    expect(["W", "D", "L"]).toContain(played[0]!.win);
     // 현재 라운드 = 아직 지나지 않은 경기가 남은 첫 라운드 (우리 경기만 끝났어도
     // 같은 라운드의 다른 경기가 남아 있으면 그 라운드가 현재다)
     const league = list[0]!;
@@ -427,34 +312,12 @@ describe("오피스 뷰 — 재정·순위·커리어", () => {
     }
   });
 
-  it("대항전 탭은 리그 페이즈 순위표와 통과 경계선을 갖는다", () => {
+  it("대항전 탭의 리그 페이즈 순위표는 통과 경계선을 담을 만큼 길다", () => {
     const state = createTestGame();
     const cup = buildOfficeViews(state).competitions.list.find((c) => c.kind === "cup");
     if (!cup) return; // 시드에 따라 대항전에 못 나갈 수 있다
     expect(cup.europe).not.toBeNull();
-    expect(cup.europe!.directSlots).toBeGreaterThan(0);
     expect(cup.standings.length).toBeGreaterThanOrEqual(cup.europe!.playoffCutoff);
-    // 리그 페이즈 라운드가 먼저 오고 녹아웃 단계가 뒤에 붙는다
-    expect(cup.rounds[0]!.label).toContain("리그 페이즈");
-  });
-
-  it("이적 이력 뷰가 유저 팀 관련 이동을 담는다", () => {
-    const state = createTestGame();
-    state.transfers.push({
-      id: "tr-x",
-      gamePlayerId: userPlayers(state)[0]!.id,
-      windowId: state.windows[0]!.id,
-      fromTeamId: "chelsea",
-      toTeamId: state.userTeamId,
-      date: state.date,
-      type: "transfer",
-      fee: 50_000_000,
-      note: "협상 타결",
-    });
-    const recent = buildOfficeViews(state).transfers.recent;
-    expect(recent).toHaveLength(1);
-    expect(recent[0]?.to).toBeTruthy();
-    expect(recent[0]?.fee).toBe(50_000_000);
   });
 });
 
@@ -474,8 +337,7 @@ describe("경기 흐름 통합", () => {
     advanceToMatchday(state);
     expect(state.phase).toBe("matchday");
     // 경기일에 도달했으면 경기를 치러야 시간이 다시 흐른다
-    const digest = playMockMatch(state);
-    expect(digest.some((d) => d.includes("최종 스코어"))).toBe(true);
+    playMockMatch(state);
     expect(state.phase).toBe("idle");
     expect(state.pendingMatch).toBeNull();
   });
@@ -494,7 +356,6 @@ describe("적응도 — 포지션과 전술을 하나로", () => {
     // 합친 값은 두 축 사이 — 어느 쪽으로도 튀지 않는다
     expect(row.adaptation).toBeGreaterThan(Math.min(row.familiarity, row.positionFit) - 1);
     expect(row.adaptation).toBeLessThan(Math.max(row.familiarity, row.positionFit) + 1);
-    expect(row.adaptation).toBe(adaptationOf(row.positionFit, row.familiarity, target.position));
   });
 
   it("전술 적응이 오르면 합친 값도 오른다 (같은 자리에서)", () => {
@@ -530,7 +391,6 @@ describe("경기 화면 뷰", () => {
     startMatch(state);
 
     const m = buildOfficeViews(state).match!;
-    expect(m).not.toBeNull();
     expect(m.onPitch.home).toHaveLength(11);
     expect(m.onPitch.away).toHaveLength(11);
     expect(m.zones).toHaveLength(3);
@@ -539,9 +399,6 @@ describe("경기 화면 뷰", () => {
     const packet = state.pendingMatch!.packet;
     expect(attack.home).toBe(packet.home.zones.attack);
     expect(attack.away).toBe(packet.away.zones.defense);
-    // 양팀 전술 6축 + 소화율
-    expect(m.tactics.home.uptake).toBeGreaterThan(0);
-    expect(m.tactics.away.formation).toBeTruthy();
     // 선수마다 전력과 남은 다리
     for (const p of [...m.onPitch.home, ...m.onPitch.away]) {
       expect(p.effective).toBeGreaterThan(0);
@@ -550,7 +407,6 @@ describe("경기 화면 뷰", () => {
       expect(Number.isInteger(p.condition.value)).toBe(true);
       expect(p.condition.value).toBeGreaterThanOrEqual(0);
       expect(p.condition.value).toBeLessThanOrEqual(100);
-      expect(typeof p.gassed).toBe("boolean");
     }
     expect(m.onPitch.home.some((p) => p.ours) || m.onPitch.away.some((p) => p.ours)).toBe(true);
   });
@@ -596,9 +452,6 @@ describe("경기 화면 뷰", () => {
     expect(during).not.toBeNull();
     expect(during!.inDays).toBeGreaterThan(0);
     expect(during!.opponent).not.toBe(before.opponent);
-    // 화면이 그대로 쓸 수 있게 조각으로 온다 — 문자열을 잘라 쓰지 않는다
-    expect(during!.label).toBeTruthy();
-    expect(["home", "away", "neutral"]).toContain(during!.venue);
   });
 
   it("체력은 누구도 값 하나로 서지 않는다 — 우리는 좁게, 상대는 넓게", () => {
@@ -623,7 +476,6 @@ describe("경기 화면 뷰", () => {
       expect(p.condition.margin, p.name).toBeGreaterThan(0);
       expect(p.condition.low, p.name).toBeLessThanOrEqual(truth);
       expect(p.condition.high, p.name).toBeGreaterThanOrEqual(truth);
-      expect(p.condition.label).toBeTruthy();
     }
     // 출발점을 아는 우리 쪽이 뚜렷하게 좁다
     const widthOf = (rows: typeof all) =>

@@ -43,6 +43,7 @@ import {
   DEFAULT_FORMATION,
   FAMILIARITY_BASELINE,
   FORMATIONS,
+  FIRST_TEAM_LIMIT,
   MATCHDAY_SQUAD,
   canRegister,
   isUnder21,
@@ -1211,6 +1212,19 @@ function buildInitialSquads(
       const allowed = canRegister(registered, entry, seasonStartYear);
       player.squadLevel = allowed.ok ? "first" : "reserve";
       if (allowed.ok) registered.push(entry);
+    }
+    /**
+     * **1군 상한에서 끊는다.** 등록 명단(25)은 만 21세 초과만 세므로 U21을 붙이는
+     * 만큼 1군이 불어난다 — 말라가가 등록 25 + U21 7명으로 서른둘이었다.
+     * 우선순위가 낮은 쪽부터 2군으로 내리되 **코어는 건드리지 않는다**: 코어를
+     * 내리면 선발 XI를 세울 수 없다.
+     */
+    let over = squad.filter((p) => p.squadLevel === "first").length - FIRST_TEAM_LIMIT;
+    for (let i = ordered.length - 1; i >= 0 && over > 0; i--) {
+      const player = ordered[i];
+      if (!player || player.squadLevel !== "first" || core.has(player.id)) continue;
+      player.squadLevel = "reserve";
+      over -= 1;
     }
     /**
      * 매치데이(20명)를 못 채우면 **U21로 메운다.** 홈그로운이 모자라 명단을 25까지

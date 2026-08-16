@@ -2,9 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { MatchRecord } from "@story-fm/domain";
 import {
   applyMatchFinance,
-  competitionLabel,
   financeOf,
-  fixtureLabel,
   isFriendly,
   isTelevised,
   matchdayRevenue,
@@ -58,21 +56,6 @@ describe("친선 매치데이", () => {
     expect(isTelevised(homeMatch(null))).toBe(false);
     // 토요일 15:00 블랙아웃이 아닌 리그 경기는 그대로 대상이다
     expect(isTelevised({ ...homeMatch("epl"), date: "2026-08-02" })).toBe(true);
-  });
-});
-
-describe("친선 표기", () => {
-  it("이름만 서고 단계가 공백으로 새지 않는다", () => {
-    expect(competitionLabel(null, "league", 1)).toBe("친선");
-    expect(fixtureLabel(null, "league", 1)).toBe("친선");
-  });
-
-  it("리그·컵 표기는 그대로다", () => {
-    expect(competitionLabel("epl", "league", 3)).toBe("프리미어리그 R3");
-    // 달력은 리그 이름을 생략한다 — 감독은 자기 리그를 안다
-    expect(fixtureLabel("epl", "league", 3)).toBe("R3");
-    // 컵은 대회 이름이 붙는다 — 단계 이름은 대회마다 다르다(FA컵 r16 = 4라운드)
-    expect(fixtureLabel("facup", "r16", 1)).toBe("FA컵 4라운드");
   });
 });
 

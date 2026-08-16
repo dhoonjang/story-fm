@@ -2,18 +2,20 @@ import { describe, expect, it } from "vitest";
 import { ageOf } from "@story-fm/domain";
 import {
   activeContract,
+  advanceTime,
   assignmentsOf,
   isClubTeam,
   computeStandings,
   groupOf,
   isFriendly,
+  MINI_WORLD,
   playersOf,
   quickSimulate,
   transitionSeason,
   userPlayers,
   weeklyWagesOf,
 } from "@story-fm/engine";
-import { advanceAndPlay, createTestGame, simSquad } from "./helpers";
+import { createMiniGame, createTestGame, playFullSeason, simSquad } from "./helpers";
 
 describe("순위표", () => {
   it("승점·득실차 정렬이 정확하다", () => {
@@ -187,21 +189,30 @@ describe("시즌 전환 (결정 #15, game-loop §7)", () => {
   });
 });
 
-describe("풀 시즌 통합 — 38라운드 완주 후 커리어 기록·전환", () => {
+/**
+ * **축소 세계에서 완주한다** — 검증 대상은 완주 그 자체지 세계의 크기가 아니다.
+ *
+ * 전체 세계는 한 시즌에 2,100여 경기를 굴려 이 한 케이스가 30초를 넘게 썼다.
+ * 여덟 팀짜리 세계는 같은 규칙으로 같은 길(마지막 라운드 → 시즌 리뷰 → 전환)을
+ * 1초 안에 지난다. 달라지는 것은 **리그 라운드 수(38 → 14)와 컵이 없다는 것**뿐이라,
+ * 리그 경기 수는 세계에서 파생하고 트로피는 리그 우승만 본다.
+ */
+describe("풀 시즌 통합 — 리그 완주 후 커리어 기록·전환", () => {
   it("시즌을 끝까지 돌리면 SEASON_RECORD가 남고 시즌 2로 전환된다", () => {
-    const state = createTestGame(21);
-    // 리그 38 + 대항전 + 국내 컵 2개 — 한 시즌 최대 60여 경기
-    let guard = 100;
-    while (state.season === 1 && guard-- > 0) {
-      advanceAndPlay(state);
-    }
+    const teams = MINI_WORLD.teamsPerLeague;
+    const state = createMiniGame(21);
+    expect(playFullSeason(state), `시즌을 끝내지 못했다 (${state.date})`).toBe(true);
+    // 마지막 경기가 끝난 것과 시즌이 넘어간 것은 다른 날이다
+    advanceTime(state, { days: 1 });
+
     expect(state.season).toBe(2);
     expect(state.seasonRecords).toHaveLength(1);
     const record = state.seasonRecords[0]!;
-    expect(record.wins + record.draws + record.losses).toBe(38);
+    // 리그전은 더블 라운드로빈이다 — 한 경기도 빠뜨리지 않고 기록에 든다
+    expect(record.wins + record.draws + record.losses).toBe((teams - 1) * 2);
     expect(record.teamId).toBe("arsenal"); // 재임 팀이 기록된다
     expect(record.position).toBeGreaterThanOrEqual(1);
-    expect(record.position).toBeLessThanOrEqual(20);
+    expect(record.position).toBeLessThanOrEqual(teams);
     expect(record.boardVerdict.length).toBeGreaterThan(0);
     // 우승했다면 트로피에 당시 팀이 남는다
     if (record.position === 1) {
@@ -209,7 +220,5 @@ describe("풀 시즌 통합 — 38라운드 완주 후 커리어 기록·전환"
       expect(trophy?.competition).toBe("프리미어리그");
       expect(trophy?.teamId).toBe("arsenal");
     }
-    // 프리시즌 친선이 붙으면서 한 시즌이 10%쯤 길어졌다 — 세계 전체가 팀당 4경기를
-    // 더 치른다(약 220경기). 단독 실행 65초라 60초 한도로는 못 끝낸다.
-  }, 120_000);
+  }, 30_000);
 });

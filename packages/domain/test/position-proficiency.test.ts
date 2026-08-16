@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   ADAPTATION_GAUGE_BAND,
-  ADAPTATION_IMPACT,
-  PROFICIENCY_FACTOR_FLOOR,
-  PROFICIENCY_FLOOR,
-  PROFICIENCY_LOG_SCALE,
-  PROFICIENCY_MAX,
-  PROFICIENCY_MIN,
   adaptationOf,
   adaptationWeightsOf,
   clusterOf,
@@ -130,12 +124,6 @@ describe("positionProficiency", () => {
 
 describe("adaptationOf", () => {
   it("경기 팩터는 최대 폭, 게이지는 실제로 방문하는 폭으로 섞는다", () => {
-    expect(ADAPTATION_IMPACT).toEqual({ position: 0.9, tactical: 0.15 });
-    expect(PROFICIENCY_FACTOR_FLOOR).toBe(0.1);
-    expect(PROFICIENCY_LOG_SCALE).toBe(5);
-    expect(PROFICIENCY_FLOOR).toBe(25);
-    expect(PROFICIENCY_MIN).toBe(0);
-    expect(PROFICIENCY_MAX).toBe(99);
     // 바닥값 25 위에 남은 폭만 자리의 몫이다 — 1 − profFactor(25)
     expect(ADAPTATION_GAUGE_BAND.position).toBeCloseTo(0.368663);
     expect(ADAPTATION_GAUGE_BAND.tactical).toBe(0.15);

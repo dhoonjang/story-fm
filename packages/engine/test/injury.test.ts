@@ -118,55 +118,71 @@ describe("부상 성향 — 개인별 확률로 관리된다", () => {
 /** 한 경기의 온필드 인원 (양팀) — 경기당 기대 건수를 개인 확률로 나눌 때의 분모 */
 const ON_PITCH = 22;
 
-describe("성향은 빈도에도 닿는다 — 유리몸 팀은 더 자주 쓰러진다", () => {
-  const injuriesOver = (state: ReturnType<typeof createTestGame>, runs: number) => {
-    const home = simSquadOf(state, "chelsea");
-    const away = simSquadOf(state, "liverpool");
-    let count = 0;
-    for (let i = 0; i < runs; i++) {
-      count += quickSimulate(home, away, 2000 + i, `rate:${i}`).injuries.length;
-    }
-    return count / runs;
-  };
-
-  it("평균 성향 1.0이면 경기당 기대 건수는 INJURY_PER_MATCH 근처다", () => {
-    // 손잡이에서 유도한다 — 눈금을 조정해도 이 테스트는 따라온다
-    const expected = INJURY_CHANCE_PER_APPEARANCE * ON_PITCH;
-    const rate = injuriesOver(createTestGame(11), 5000);
-    expect(rate).toBeGreaterThan(expected * 0.8);
-    expect(rate).toBeLessThan(expected * 1.2);
-  });
-
-  it("선발 전원이 유리몸이면 건수가 는다", () => {
-    const healthy = injuriesOver(createTestGame(11), 5000);
-    const state = createTestGame(11);
-    for (const p of playersOf(state, "chelsea")) p.state.injuryProneness = 2.2;
-    const fragile = injuriesOver(state, 5000);
-    expect(fragile).toBeGreaterThan(healthy * 1.3);
-  });
-
-  it("유리몸 한 명이면 총량은 그대로고 그 사람이 더 자주 걸린다", () => {
-    const state = createTestGame(11);
-    const squad = simSquadOf(state, "chelsea");
-    const glass = squad.starters[3]!;
-    glass.state.injuryProneness = 2.2;
-    const home = simSquadOf(state, "chelsea");
-    const away = simSquadOf(state, "liverpool");
-
-    let hisShare = 0;
-    let homeInjuries = 0;
-    for (let i = 0; i < 6000; i++) {
-      const r = quickSimulate(home, away, 5000 + i, `share:${i}`);
-      for (const tag of r.injuries) {
-        if (!tag.startsWith("home:")) continue;
-        homeInjuries++;
-        if (tag === `home:${glass.id}`) hisShare++;
+/**
+ * 밸런스 하네스 — **회귀 테스트가 아니라 빈도 측정이다** (AGENTS.md §5).
+ *
+ * 세 검증 모두 경기 5,000~6,000판을 굴려 "기대 건수의 0.8~1.2배 안인가",
+ * "1.3배 넘게 느는가", "7%가 아니라 11%를 넘는가"를 본다. 고정된 기대값이 없어
+ * 무엇이 회귀인지 규정하지 못하고, 비용은 이 파일에서 가장 크다. 부상 확률
+ * 상수를 만졌으면 직접 돌려 눈금을 확인한다:
+ *
+ *   BALANCE=1 pnpm vitest run packages/engine/test/injury.test.ts
+ *
+ * 성향이 값으로 어떻게 움직이는지(오름·내림·상하한·균형식)는 위 describe가
+ * 결정적으로 못 박고 있다 — 여기서 재는 것은 그 값이 만드는 **분포**뿐이다.
+ */
+describe.skipIf(!process.env.BALANCE)(
+  "성향은 빈도에도 닿는다 — 유리몸 팀은 더 자주 쓰러진다",
+  () => {
+    const injuriesOver = (state: ReturnType<typeof createTestGame>, runs: number) => {
+      const home = simSquadOf(state, "chelsea");
+      const away = simSquadOf(state, "liverpool");
+      let count = 0;
+      for (let i = 0; i < runs; i++) {
+        count += quickSimulate(home, away, 2000 + i, `rate:${i}`).injuries.length;
       }
-    }
-    // 균등이면 뛴 선수(선발 11 + 교체 최대 4) 중 1명이라 7~9%
-    expect(hisShare / homeInjuries).toBeGreaterThan(0.11);
-  });
-});
+      return count / runs;
+    };
+
+    it("평균 성향 1.0이면 경기당 기대 건수는 INJURY_PER_MATCH 근처다", () => {
+      // 손잡이에서 유도한다 — 눈금을 조정해도 이 테스트는 따라온다
+      const expected = INJURY_CHANCE_PER_APPEARANCE * ON_PITCH;
+      const rate = injuriesOver(createTestGame(11), 5000);
+      expect(rate).toBeGreaterThan(expected * 0.8);
+      expect(rate).toBeLessThan(expected * 1.2);
+    });
+
+    it("선발 전원이 유리몸이면 건수가 는다", () => {
+      const healthy = injuriesOver(createTestGame(11), 5000);
+      const state = createTestGame(11);
+      for (const p of playersOf(state, "chelsea")) p.state.injuryProneness = 2.2;
+      const fragile = injuriesOver(state, 5000);
+      expect(fragile).toBeGreaterThan(healthy * 1.3);
+    });
+
+    it("유리몸 한 명이면 총량은 그대로고 그 사람이 더 자주 걸린다", () => {
+      const state = createTestGame(11);
+      const squad = simSquadOf(state, "chelsea");
+      const glass = squad.starters[3]!;
+      glass.state.injuryProneness = 2.2;
+      const home = simSquadOf(state, "chelsea");
+      const away = simSquadOf(state, "liverpool");
+
+      let hisShare = 0;
+      let homeInjuries = 0;
+      for (let i = 0; i < 6000; i++) {
+        const r = quickSimulate(home, away, 5000 + i, `share:${i}`);
+        for (const tag of r.injuries) {
+          if (!tag.startsWith("home:")) continue;
+          homeInjuries++;
+          if (tag === `home:${glass.id}`) hisShare++;
+        }
+      }
+      // 균등이면 뛴 선수(선발 11 + 교체 최대 4) 중 1명이라 7~9%
+      expect(hisShare / homeInjuries).toBeGreaterThan(0.11);
+    });
+  },
+);
 
 describe("부상은 팀을 가리지 않는다", () => {
   it("타 팀 경기의 부상이 INJURY 표에 남는다", () => {
@@ -280,44 +296,14 @@ describe("부임 전 부상 이력 — 조사된 선수만", () => {
 });
 
 describe("간이 시뮬 — 성향은 뛴 선수 전원에게 걸린다", () => {
-  /** 유저와 무관한 두 팀의 경기 하나 — 간이 시뮬이 소화하는 경로다 */
-  function playAiMatch(state: ReturnType<typeof createTestGame>): string[] {
-    state.matches.push({
-      id: "quick-subs",
-      season: state.season,
-      competitionId: null,
-      round: 1,
-      date: state.date,
-      time: "15:00",
-      homeTeamId: "liverpool",
-      awayTeamId: "chelsea",
-      result: null,
-    });
-    simulateOtherMatches(state, []);
-    return state.matches.find((m) => m.id === "quick-subs")!.result!.homeLineup!;
-  }
-
-  it("교체로 들어온 선수도 성향이 내려간다 — 벤치에 앉아만 있으면 그대로다", () => {
-    const state = createTestGame(11);
-    const squad = simSquadOf(state, "liverpool");
-    const starters = new Set(squad.starters.map((p) => p.id));
-    const lineup = playAiMatch(state);
-
-    const cameOn = lineup.filter((id) => !starters.has(id));
-    expect(cameOn.length).toBeGreaterThan(0);
-    for (const id of cameOn) {
-      // 그 경기에서 다친 선수는 상승이 하강을 덮는다 — 균형식대로다
-      if (isInjured(state, id)) continue;
-      expect(pronenessValue(playerById(state, id)!)).toBeLessThan(PRONENESS_BASE);
-    }
-    // 안 뛴 벤치는 손대지 않는다 — 하강이 출전이 아니라 소집에 걸리면 안 된다
-    const idle = (squad.bench ?? []).filter((p) => !lineup.includes(p.id));
-    expect(idle.length).toBeGreaterThan(0);
-    for (const p of idle) expect(p.state.injuryProneness).toBeUndefined();
-  });
+  /**
+   * 세계 하나를 둘이 나눠 쓴다 (`createTestGame`은 한 번에 1초다). **경기를
+   * 치르는 검증이 뒤에 온다** — 앞의 것은 읽기만 하므로 순서가 이 방향일 때만
+   * 공유가 성립한다.
+   */
+  const state = createTestGame(11);
 
   it("부상 추첨도 교체 투입 선수를 후보로 센다", () => {
-    const state = createTestGame(11);
     const home = simSquadOf(state, "chelsea");
     const away = simSquadOf(state, "liverpool");
     const starters = new Set([...home.starters, ...away.starters].map((p) => p.id));
@@ -333,6 +319,37 @@ describe("간이 시뮬 — 성향은 뛴 선수 전원에게 걸린다", () => 
     expect(total).toBeGreaterThan(0);
     // 선발만 뽑던 시절엔 정확히 0이었다 (뛴 열넷 중 셋 남짓이 교체 자원이다)
     expect(onSubs).toBeGreaterThan(0);
+  });
+
+  it("교체로 들어온 선수도 성향이 내려간다 — 벤치에 앉아만 있으면 그대로다", () => {
+    const squad = simSquadOf(state, "liverpool");
+    const starters = new Set(squad.starters.map((p) => p.id));
+    // 유저와 무관한 두 팀의 경기 하나 — 간이 시뮬이 소화하는 경로다
+    state.matches.push({
+      id: "quick-subs",
+      season: state.season,
+      competitionId: null,
+      round: 1,
+      date: state.date,
+      time: "15:00",
+      homeTeamId: "liverpool",
+      awayTeamId: "chelsea",
+      result: null,
+    });
+    simulateOtherMatches(state, []);
+    const lineup = state.matches.find((m) => m.id === "quick-subs")!.result!.homeLineup!;
+
+    const cameOn = lineup.filter((id) => !starters.has(id));
+    expect(cameOn.length).toBeGreaterThan(0);
+    for (const id of cameOn) {
+      // 그 경기에서 다친 선수는 상승이 하강을 덮는다 — 균형식대로다
+      if (isInjured(state, id)) continue;
+      expect(pronenessValue(playerById(state, id)!)).toBeLessThan(PRONENESS_BASE);
+    }
+    // 안 뛴 벤치는 손대지 않는다 — 하강이 출전이 아니라 소집에 걸리면 안 된다
+    const idle = (squad.bench ?? []).filter((p) => !lineup.includes(p.id));
+    expect(idle.length).toBeGreaterThan(0);
+    for (const p of idle) expect(p.state.injuryProneness).toBeUndefined();
   });
 });
 

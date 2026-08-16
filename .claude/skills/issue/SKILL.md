@@ -37,8 +37,11 @@ Add the type label too when it obviously applies: `bug`, `enhancement`,
 issue however long it is. What the plan needs is the **breakdown** — that is what
 `resolve` copies into the PR and splits into lanes.
 
-**1. Break it into tasks.** A task is one coherent edit that could be one commit:
-a file or two plus the test that proves it. Walk the path the change actually
+**1. Break it into tasks.** A task is one coherent edit that could be one commit —
+a file or two, plus a test **only where AGENTS.md §5 says one is earned**: a
+formula, an invariant, a boundary, a state transition. A task whose result is
+visible on screen the moment it breaks carries no test line, and a task that only
+measures balance names the `BALANCE` gate instead. Walk the path the change actually
 takes through the layers — `docs/` → `packages/domain` (schema) →
 `packages/sim`/`engine` → `apps/web` API → UI → tests — and keep only the layers
 it really touches. Name the files you found while reading the code.

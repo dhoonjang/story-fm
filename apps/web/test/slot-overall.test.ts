@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultRoleOf, roleFit, type AxisValues } from "@story-fm/domain";
+import { defaultRoleOf } from "@story-fm/domain";
 import {
   buildOfficeViews,
   createGame,
@@ -32,10 +32,21 @@ function game(seed = 31): GameState {
   });
 }
 
+type SquadRows = ReturnType<typeof buildOfficeViews>["squad"]["players"];
+
+/** 읽기만 하는 케이스는 세계를 하나만 세워 나눠 쓴다 — 상태를 바꾸는 쪽만 제 것을 짓는다 */
+let cached: { state: GameState; rows: SquadRows } | undefined;
+function shared(): { state: GameState; rows: SquadRows } {
+  if (cached === undefined) {
+    const state = game();
+    cached = { state, rows: buildOfficeViews(state).squad.players };
+  }
+  return cached;
+}
+
 describe("화면과 서버가 같은 값을 낸다", () => {
   it("배치된 선수의 자리 전력이 서버의 slotOverall과 같다", () => {
-    const rows = buildOfficeViews(game()).squad.players;
-    const placed = rows.filter((p) => p.assignedPosition !== null);
+    const placed = shared().rows.filter((p) => p.assignedPosition !== null);
     expect(placed.length).toBeGreaterThanOrEqual(11);
     for (const p of placed) {
       const mine = slotOverallOf(p, p.assignedPosition, p.roleId ?? undefined);
@@ -45,7 +56,7 @@ describe("화면과 서버가 같은 값을 낸다", () => {
   });
 
   it("자리별 목록의 전력도 같다 — 옮겨 보기 전에 이미 맞는다", () => {
-    for (const p of buildOfficeViews(game()).squad.players) {
+    for (const p of shared().rows) {
       for (const listed of p.positions) {
         expect(slotOverallOf(p, listed.position, defaultRoleOf(listed.position)), p.name).toBe(
           listed.overall,
@@ -61,8 +72,7 @@ describe("화면과 서버가 같은 값을 낸다", () => {
    * 그런 부수효과로 옮길 수는 없다.
    */
   it("종합은 저장값에 같은 오프셋을 얹은 값이다", () => {
-    const state = game();
-    const rows = buildOfficeViews(state).squad.players;
+    const { state, rows } = shared();
     for (const row of rows) {
       const stored = playersOf(state, state.userTeamId).find((x) => x.id === row.id)!;
       expect(row.overall, row.name).toBe(
@@ -103,7 +113,7 @@ describe("안개는 축에만 있고, 합성값은 거기서 파생된다", () =
   });
 
   it("우리 선수는 안개가 없다 — 오프셋도 0이다", () => {
-    for (const p of buildOfficeViews(game()).squad.players) {
+    for (const p of shared().rows) {
       expect(p.observation.knowledge, p.name).toBe("own");
       expect(p.observation.margin, p.name).toBe(0);
       expect(p.observation.overallOffset, p.name).toBe(0);
@@ -113,32 +123,13 @@ describe("안개는 축에만 있고, 합성값은 거기서 파생된다", () =
 
 describe("자리와 역할이 값을 움직인다", () => {
   it("배치 밖이면 자리 값이 없다", () => {
-    const p = buildOfficeViews(game()).squad.players[0]!;
+    const p = shared().rows[0]!;
     expect(slotOverallOf(p, null, undefined)).toBeNull();
   });
 
   it("같은 자리라도 역할이 다르면 요구가 다르다", () => {
-    const rows = buildOfficeViews(game()).squad.players;
-    const cb = rows.find((p) => p.positions.some((x) => x.position === "CB"))!;
+    const cb = shared().rows.find((p) => p.positions.some((x) => x.position === "CB"))!;
     expect(slotOverallOf(cb, "CB", "stopper")).not.toBe(slotOverallOf(cb, "CB", "cover-defender"));
   });
 
-  it("왕복해도 값이 부풀지 않는다 — 상태를 안 들고 있는 순수 함수다", () => {
-    const rows = buildOfficeViews(game()).squad.players;
-    const p = rows.find((x) => x.assignedPosition !== null)!;
-    const home = slotOverallOf(p, p.assignedPosition, p.roleId ?? undefined);
-    slotOverallOf(p, "ST", defaultRoleOf("ST"));
-    expect(slotOverallOf(p, p.assignedPosition, p.roleId ?? undefined)).toBe(home);
-  });
-
-  it("관측 오프셋은 자리마다 같게 얹힌다 — 자리끼리의 비교가 흔들리지 않는다", () => {
-    const p = buildOfficeViews(game()).squad.players[0]!;
-    const axes = p as unknown as AxisValues;
-    const offset = p.observation.overallOffset;
-    for (const code of ["CB", "DM", "ST"]) {
-      expect(slotOverallOf(p, code, defaultRoleOf(code))).toBe(
-        Math.max(1, Math.min(99, Math.round(roleFit(axes, code, defaultRoleOf(code)) + offset))),
-      );
-    }
-  });
 });

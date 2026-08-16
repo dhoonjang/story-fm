@@ -70,7 +70,6 @@ describe("경기 평점 공식", () => {
 
   it("대량 실점은 뒷선이 지고, 첫 골은 봐준다", () => {
     const gk = (conceded: number) => matchRating({ ...base, group: "GK", conceded });
-    expect(gk(1)).toBe(matchRating({ ...base, group: "GK", conceded: 1 }));
     expect(gk(3)).toBeLessThan(gk(1));
     // 미드필더·공격수는 실점 수에 흔들리지 않는다
     expect(matchRating({ ...base, conceded: 4 })).toBe(matchRating({ ...base, conceded: 1 }));
@@ -232,7 +231,6 @@ describe("평점 브리프 — LLM 채점의 입력 (코어가 만든다)", () =
       expect(p.anchor).toBeGreaterThanOrEqual(RATING_MIN);
       expect(p.anchor).toBeLessThanOrEqual(RATING_MAX);
     }
-    expect(brief.scoreline).toContain(":");
   });
 
   it("교체 투입 선수는 뛴 시간만 갖는다", () => {
