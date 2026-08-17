@@ -425,8 +425,8 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
           .join(", ")}`
       : `개인 지시·역할: 없음`,
   ];
-  // 사건은 싣지 않는다 — 구간은 감독 지시가 반영된 뒤 호출 안에서 advance_match가
-  // 굴린다. 이 블록은 그 직전의 장부다
+  // 사건은 싣지 않는다 — 코어가 이미 굴린 구간은 [이번 구간에 일어난 일]로 따로
+  // 실린다. 이 블록은 그 구간이 끝난 자리의 장부다 (agents.md §3)
   return [
     `[경기 장부 — 매 턴 갱신]`,
     `스코어 ${ledger.score.home}:${ledger.score.away} · ${ledger.minute}′ · ${ledger.phase}`,

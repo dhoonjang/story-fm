@@ -23,12 +23,6 @@ import { CARD_SKILLS, hasRailHint } from "../lib/panel-hints";
  */
 const MATCH_ONLY = new Set(["exploit_point", "set_match_plan"]);
 
-/**
- * 코어가 한 일 — 늘 `silent`로 실려 칩이 되지 않는다. 경기 진행은 감독이 부른
- * 스킬이 아니라 시계를 민 결과이고, 그 결과는 중계와 스코어가 이미 말한다.
- */
-const SILENT = new Set(["advance_match"]);
-
 describe("스킬이 화면에 서는 길", () => {
   it("조작형 스킬은 모두 말풍선 아니면 카드다", () => {
     const orphans = SKILL_CATALOG.filter(
@@ -36,8 +30,7 @@ describe("스킬이 화면에 서는 길", () => {
         !s.readOnly &&
         !hasRailHint(s.name) &&
         !CARD_SKILLS.has(s.name) &&
-        !MATCH_ONLY.has(s.name) &&
-        !SILENT.has(s.name),
+        !MATCH_ONLY.has(s.name),
     ).map((s) => s.name);
     expect(orphans, "말풍선(PANEL_OF)이나 카드(CARD_SKILLS) 중 하나로 보내야 한다").toEqual([]);
   });
