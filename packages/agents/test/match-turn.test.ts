@@ -88,7 +88,7 @@ describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
     // 교체만으로는 시계가 움직이지 않는다
     expect(state.pendingMatch!.ledger.minute).toBe(ledger.minute);
 
-    const played = use("advance_match");
+    const played = use("advance_match", { pace: "segment" });
     expect(played.ok).toBe(true);
 
     const after = state.pendingMatch!.ledger;
@@ -105,8 +105,8 @@ describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
   it("한 턴에 두 번은 굴리지 못한다 — 코어가 막는다", () => {
     const state = matchState();
     const { use } = turnTools(state);
-    expect(use("advance_match").ok).toBe(true);
-    const again = use("advance_match");
+    expect(use("advance_match", { pace: "segment" }).ok).toBe(true);
+    const again = use("advance_match", { pace: "segment" });
     expect(again.ok).toBe(false);
     expect(again.message).toContain("이미 진행");
   });
@@ -119,20 +119,58 @@ describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
     const side = userSide(state);
     const mover = state.pendingMatch!.ledger[side].onPitch[10]!;
     expect(use("set_player_tactic", { playerId: mover, position: "CB" }).ok).toBe(true);
-    const blocked = use("advance_match");
+    const blocked = use("advance_match", { pace: "segment" });
     expect(blocked.ok).toBe(false);
     expect(blocked.message).toContain("전술판 검토");
     expect(state.pendingMatch!.ledger.minute).toBe(minute);
 
     // 검토 뒤 다음 턴에는 바뀐 포메이션으로 정상 진행한다.
-    expect(turnTools(state).use("advance_match").ok).toBe(true);
+    expect(turnTools(state).use("advance_match", { pace: "segment" }).ok).toBe(true);
     expect(state.pendingMatch!.ledger.minute).toBeGreaterThan(minute);
+  });
+
+  /**
+   * 대화 한 마디가 구간 하나를 삼키던 자리 — `advance_match`에 진행 폭이 없어
+   * 감독이 "마페 일루와봐"라고만 해도 하프타임까지 넘어갔다 (match.md §2).
+   */
+  it("대화 턴(moment)은 1분만 흐른다", () => {
+    const state = matchState();
+    // 킥오프를 먼저 지난다 — 첫 구간은 0분 사건이 붙는 특수한 자리다
+    turnTools(state).use("advance_match", { pace: "segment" });
+    const before = state.pendingMatch!.ledger.minute;
+
+    expect(turnTools(state).use("advance_match", { pace: "moment" }).ok).toBe(true);
+
+    const elapsed = state.pendingMatch!.ledger.minute - before;
+    expect(elapsed).toBeGreaterThan(0);
+    expect(elapsed).toBeLessThanOrEqual(2);
+  });
+
+  it("moment는 아무 일도 없으면 사건을 지어내지 않는다", () => {
+    const state = matchState();
+    turnTools(state).use("advance_match", { pace: "segment" });
+    const before = state.pendingMatch!.ledger.events.length;
+
+    // 25분 침묵과 달리 1분 침묵은 흔하다 — 흔적(chance)을 남기면 대화마다 찬스가 생긴다
+    for (let turn = 0; turn < 5; turn++) {
+      turnTools(state).use("advance_match", { pace: "moment" });
+    }
+    const added = state.pendingMatch!.ledger.events.length - before;
+    expect(added).toBeLessThan(5);
+  });
+
+  it("pace 없이는 진행하지 못한다 — 얼마나 갈지 모르는 호출은 반려한다", () => {
+    const state = matchState();
+    const minute = state.pendingMatch!.ledger.minute;
+    const blocked = turnTools(state).use("advance_match");
+    expect(blocked.ok).toBe(false);
+    expect(state.pendingMatch!.ledger.minute).toBe(minute);
   });
 
   it("장부 블록은 사건을 싣지 않는다 — 사건은 진행 도구가 돌려준다", () => {
     const state = matchState();
     const { use } = turnTools(state);
-    const played = use("advance_match");
+    const played = use("advance_match", { pace: "segment" });
     expect(played.message).toContain("[이번 구간에 일어난 일");
     // 상태 스냅샷은 구간이 굴러가기 **직전**의 장부다
     expect(buildLedgerNote(state)).not.toContain("[이번 구간에 일어난 일");
@@ -147,7 +185,7 @@ describe("골 표식", () => {
     // 턴마다 새 도구 묶음 — 실모드의 한 턴 = 한 구간
     for (let turn = 0; turn < 60; turn++) {
       if (state.pendingMatch?.ledger.phase === "finished") break;
-      turnTools(state, goals).use("advance_match");
+      turnTools(state, goals).use("advance_match", { pace: "segment" });
     }
     const ledger = state.pendingMatch!.ledger;
     expect(ledger.phase).toBe("finished");
@@ -164,7 +202,7 @@ describe("골 표식", () => {
     const goals: GoalMark[] = [];
     for (let turn = 0; turn < 60; turn++) {
       if (state.pendingMatch?.ledger.phase === "finished") break;
-      turnTools(state, goals).use("advance_match");
+      turnTools(state, goals).use("advance_match", { pace: "segment" });
     }
     const ours = userSide(state);
     const score = state.pendingMatch!.ledger.score;

@@ -1,5 +1,18 @@
 import { expect, test } from "@playwright/test";
 
+/**
+ * 이 파일만 파일 단위 직렬로 되돌린다 (`fullyParallel`에서 빠진다).
+ *
+ * 어드민이 고치는 카탈로그는 **서버 프로세스 하나가 들고 있는 전역 상태**다.
+ * 소속을 옮기는 케이스와 팀·리그를 고치는 케이스를 나란히 돌리면 한쪽의
+ * `catalog-reset`이 다른 쪽이 방금 옮긴 선수를 되돌려, 명단 수가 어긋난다
+ * (`team-squad-arsenal`이 39명 그대로인 채 38명을 기다린다).
+ *
+ * 네 케이스를 합쳐 13초라 임계 경로(가장 긴 케이스 26초) 아래에 있다 — 직렬로
+ * 두어도 전체 시간이 늘지 않는다.
+ */
+test.describe.configure({ mode: "default" });
+
 /** 편집 손잡이가 되는 행 — 목록이 비었을 때의 안내 행과 구별한다 */
 const ROW = '.admin-list tbody tr[role="button"]';
 
