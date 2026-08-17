@@ -123,7 +123,15 @@
   color: var(--muted);
   font-size: var(--fs-sm);
 }
-.tt-close {
+.tt-head-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: none;
+}
+.tt-close,
+.tt-toggle,
+.tt-copy {
   background: none;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
@@ -131,8 +139,19 @@
   padding: 2px 8px;
   cursor: pointer;
 }
-.tt-close:hover {
+.tt-close:hover,
+.tt-toggle:hover,
+.tt-copy:hover {
   color: var(--text);
+}
+.tt-toggle,
+.tt-copy {
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+/* 복사는 헤더 맨 끝 — 사실들과 같은 줄에 서되 손이 닿는 자리는 따로다 */
+.tt-copy {
+  margin-left: var(--sp-2);
 }
 .tt-body {
   padding: var(--sp-3) var(--sp-4) var(--sp-4);
@@ -158,12 +177,21 @@
   padding: var(--sp-2) var(--sp-3);
   min-width: 0;
 }
+/**
+ * 호출 머리는 **따라 붙는다** — 시스템 프롬프트 하나가 수만 자라 한 호출을 지나는
+ * 데도 스크롤이 한참이다. 지금 읽는 원문이 누구의 것인지가 화면에서 사라지면
+ * gm과 rater의 프롬프트를 구별할 수 없다.
+ */
 .tt-call-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg);
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: var(--sp-2);
-  padding-bottom: var(--sp-2);
+  padding: var(--sp-2) 0;
   border-bottom: 1px solid var(--border-soft);
 }
 .tt-agent {
@@ -219,9 +247,12 @@
   font-variant-numeric: tabular-nums;
 }
 /**
- * 원문 — **줄바꿈 없이 그대로.** 긴 줄은 이 블록 안에서만 가로로 흐르고,
- * 세로도 여기서 잘린다: 한 블록이 수만 자라 창을 통째로 밀면 다음 호출까지
- * 내려가는 데만 스크롤이 한참 걸린다.
+ * 원문 — **전문이 그대로 선다.**
+ *
+ * ⚠️ 높이 상한도 가로 스크롤도 두지 않는다. 상한을 두면 프롬프트가 블록 안에서
+ * 잘려 "여기까지가 전부"로 읽히고, 줄을 접지 않으면 긴 문단이 창 밖으로 흘러
+ * 가로로 끌어야 보인다 — 둘 다 원문을 보여주겠다는 이 창의 용건을 무너뜨린다.
+ * 넘치는 몫은 창 본문(`.tt-body`)이 스크롤하고, 길이는 접힘이 감당한다.
  */
 .tt-pre {
   margin: var(--sp-1) 0 var(--sp-2);
@@ -233,8 +264,17 @@
   font-size: var(--fs-xs);
   line-height: 1.55;
   color: var(--text);
-  white-space: pre;
-  overflow: auto;
-  max-height: 44vh;
+  /* 줄바꿈은 원문 그대로 지키되, 창보다 긴 줄은 접어 다 보이게 한다 */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   tab-size: 2;
+}
+/**
+ * JSON은 들여쓰기가 구조다 — 접으면 중첩이 무너져 읽을 수 없다. 그래서 이쪽만
+ * 줄을 지키고 가로로 흐르며, 그 스크롤은 이 블록 안에서 끝난다.
+ */
+.tt-pre.json {
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow-x: auto;
 }

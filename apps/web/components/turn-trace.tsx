@@ -34,16 +34,23 @@ const FOCUSABLE = [
  *
  * 비어 있는 블록은 아예 서지 않는다 — 열어 봐야 빈 칸인 줄이 열 개면 무엇이
  * 실제로 오갔는지가 그 사이에 묻힌다.
+ *
+ * ⚠️ **블록은 안에서 스크롤하지 않는다.** 펼친 것은 전문이고, 넘치는 몫은 창
+ * 본문이 스크롤한다 — 블록마다 상한을 두면 프롬프트가 그 안에서 잘려 "여기까지가
+ * 전부"로 읽힌다. 접힘이 이미 길이를 감당하므로 상한은 필요하지 않다.
  */
 function TraceBlock({
   label,
   meta,
   open = false,
+  /** JSON 덩어리인가 — 산문은 줄을 접어 다 보이게, JSON은 들여쓰기를 지킨다 */
+  json = false,
   children,
 }: {
   label: string;
   meta?: string;
   open?: boolean;
+  json?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -52,20 +59,41 @@ function TraceBlock({
         <span className="tt-block-label">{label}</span>
         {meta !== undefined && <span className="tt-block-meta">{meta}</span>}
       </summary>
-      <pre className="tt-pre">{children}</pre>
+      <pre className={json ? "tt-pre json" : "tt-pre"}>{children}</pre>
     </details>
   );
 }
 
-const json = (value: unknown) => JSON.stringify(value, null, 2);
+const pretty = (value: unknown) => JSON.stringify(value, null, 2);
 
 /** 밀리초 — 초 단위가 눈에 들어오는 길이부터 초로 적는다 */
 function duration(ms: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
 }
 
-/** 호출 하나 — 헤더(누가·무엇으로·얼마나·얼마어치)와 접힌 블록들 */
-function TraceCallView({ call, at }: { call: TurnTraceCall; at: number }) {
+/** 이 호출이 보낸 글자 수 — "다 왔나"를 눈으로 확인하는 눈금이다 */
+function requestChars(call: TurnTraceCall): number {
+  const { system, user, stateNote, history, tools } = call.request;
+  return (
+    system.reduce((sum, block) => sum + block.length, 0) +
+    user.length +
+    (stateNote?.length ?? 0) +
+    pretty(history).length +
+    pretty(tools).length
+  );
+}
+
+/** 호출 하나 — 헤더(누가·무엇으로·얼마나·얼마어치)와 원문 블록들 */
+function TraceCallView({
+  call,
+  at,
+  /** 접힌 것까지 전부 펼친 상태인가 — 창 머리의 손잡이가 정한다 */
+  expandAll,
+}: {
+  call: TurnTraceCall;
+  at: number;
+  expandAll: boolean;
+}) {
   const usage = call.response?.usage;
   return (
     <section className="tt-call">
@@ -77,6 +105,9 @@ function TraceCallView({ call, at }: { call: TurnTraceCall; at: number }) {
         <span className="tt-model">{call.model ?? "—"}</span>
         <span className="tt-facts">
           <span>{duration(call.durationMs)}</span>
+          <span title="요청 전체(system + history + user + stateNote + tools)의 글자 수">
+            보낸 글자 {requestChars(call).toLocaleString("ko-KR")}
+          </span>
           {usage && (
             <span title="입력 / 출력 / 캐시 읽기 / 캐시 쓰기">
               in {usage.inputTokens} · out {usage.outputTokens} · cache r{usage.cacheReadTokens}/w
@@ -86,20 +117,59 @@ function TraceCallView({ call, at }: { call: TurnTraceCall; at: number }) {
           {call.response && <span>{call.response.stopReason ?? "stop 미보고"}</span>}
           {call.request.streaming && <span>streaming</span>}
         </span>
+        <CopyButton value={pretty(call)} />
       </header>
       {call.error !== null && <div className="tt-error">{call.error}</div>}
 
-      {/* 사람이 가장 먼저 보는 것부터 — 요청의 끝(user·stateNote)과 응답 텍스트가 펼쳐진 채로 선다 */}
-      <TraceBlock label="user" open>
-        {call.request.user}
-      </TraceBlock>
+      {/**
+       * 순서는 **모델이 읽는 순서**다 — 시스템 프롬프트가 맨 앞이고 발화가 끝이다.
+       * 사람이 궁금한 것만 앞으로 끌어오면 프롬프트가 응답 아래로 밀려 "원문을
+       * 보여주는 창"이 요약처럼 읽힌다.
+       *
+       * 요청 쪽은 **모두 펼친 채로 선다** — 이 창의 용건이 그 원문이다. 접힘은
+       * 훑을 때 접으라고 있는 것이고, 열자마자 접혀 있으면 무엇이 나갔는지 보려고
+       * 매번 블록마다 눌러야 한다.
+       */}
+      {call.request.system.map((block, i) => (
+        <TraceBlock
+          key={i}
+          label={`system #${i + 1}`}
+          meta={`${block.length.toLocaleString("ko-KR")}자${i === 0 ? " · 캐시 프리픽스 머리" : ""}`}
+          open
+        >
+          {block}
+        </TraceBlock>
+      ))}
+      {call.request.history.length > 0 && (
+        <TraceBlock
+          label="history"
+          meta={`${call.request.history.length}개`}
+          open={expandAll}
+          json
+        >
+          {pretty(call.request.history)}
+        </TraceBlock>
+      )}
       {call.request.stateNote !== undefined && (
-        <TraceBlock label="stateNote" open>
+        <TraceBlock label="stateNote" meta={`${call.request.stateNote.length}자`} open>
           {call.request.stateNote}
         </TraceBlock>
       )}
+      <TraceBlock label="user" meta={`${call.request.user.length}자`} open>
+        {call.request.user}
+      </TraceBlock>
+      {call.request.tools.length > 0 && (
+        <TraceBlock label="tools" meta={`${call.request.tools.length}개`} open={expandAll} json>
+          {pretty(call.request.tools)}
+        </TraceBlock>
+      )}
+
       {call.response && (
-        <TraceBlock label="응답 텍스트" meta={`${call.response.text.length}자`} open>
+        <TraceBlock
+          label="응답 텍스트"
+          meta={`${call.response.text.length.toLocaleString("ko-KR")}자`}
+          open
+        >
           {call.response.text}
         </TraceBlock>
       )}
@@ -107,32 +177,36 @@ function TraceCallView({ call, at }: { call: TurnTraceCall; at: number }) {
         <TraceBlock
           label="응답 messages"
           meta={`${call.response.messages.length}개 · tool_use ${call.response.toolCallCount}`}
+          open={expandAll}
+          json
         >
-          {json(call.response.messages)}
-        </TraceBlock>
-      )}
-
-      {/* 프롬프트 쪽은 접힌 채로 — 열자마자 수만 토큰이 쏟아지면 아무것도 못 읽는다 */}
-      {call.request.system.map((block, i) => (
-        <TraceBlock
-          key={i}
-          label={`system #${i + 1}`}
-          meta={`${block.length}자${i === 0 ? " · 캐시 프리픽스 머리" : ""}`}
-        >
-          {block}
-        </TraceBlock>
-      ))}
-      {call.request.history.length > 0 && (
-        <TraceBlock label="history" meta={`${call.request.history.length}개`}>
-          {json(call.request.history)}
-        </TraceBlock>
-      )}
-      {call.request.tools.length > 0 && (
-        <TraceBlock label="tools" meta={`${call.request.tools.length}개`}>
-          {json(call.request.tools)}
+          {pretty(call.response.messages)}
         </TraceBlock>
       )}
     </section>
+  );
+}
+
+/**
+ * 원문을 밖으로 꺼내는 길 — 수만 자짜리 프롬프트는 편집기에서 읽고 diff를 떠야
+ * 무엇이 달라졌는지 보인다. 개발 서버는 localhost라 클립보드가 열려 있다.
+ */
+function CopyButton({ value }: { value: string }) {
+  const [done, setDone] = useState(false);
+  useEffect(() => {
+    if (!done) return;
+    const timer = setTimeout(() => setDone(false), 1200);
+    return () => clearTimeout(timer);
+  }, [done]);
+  return (
+    <button
+      className="tt-copy"
+      onClick={() => {
+        void navigator.clipboard.writeText(value).then(() => setDone(true));
+      }}
+    >
+      {done ? "복사됨" : "전문 복사"}
+    </button>
   );
 }
 
@@ -160,6 +234,14 @@ export function TurnTracePopup({
   const headingId = useId();
   const [trace, setTrace] = useState<TurnTracePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * JSON 덩어리(history · tools · 응답 messages)까지 펼쳐 둘 것인가.
+   *
+   * 손으로 접었다 편 것은 `<details>`가 쥐고 있으므로, 이 손잡이는 목록을 다시
+   * 세워(`key`) 기본 상태를 바꾼다 — 블록마다 열림 상태를 리액트로 끌어오면 창
+   * 하나가 스무 개의 상태를 들고 있어야 한다.
+   */
+  const [expandAll, setExpandAll] = useState(false);
 
   useEffect(() => {
     const abort = new AbortController();
@@ -242,15 +324,27 @@ export function TurnTracePopup({
                   : "불러오는 중…"}
             </span>
           </div>
-          <button className="tt-close" onClick={onClose} aria-label="닫기">
-            ✕
-          </button>
+          <div className="tt-head-tools">
+            {trace && trace.calls.length > 0 && (
+              <button
+                className="tt-toggle"
+                onClick={() => setExpandAll((on) => !on)}
+                aria-pressed={expandAll}
+              >
+                {expandAll ? "JSON 접기" : "JSON까지 펼치기"}
+              </button>
+            )}
+            <button className="tt-close" onClick={onClose} aria-label="닫기">
+              ✕
+            </button>
+          </div>
         </header>
-        <div className="tt-body">
+        {/* 손잡이가 바뀌면 목록을 다시 세운다 — `<details>`의 기본 열림을 그렇게 바꾼다 */}
+        <div className="tt-body" key={expandAll ? "all" : "prose"}>
           {error !== null && <p className="tt-note">기록을 불러오지 못했다 — {error}</p>}
           {trace && trace.calls.length === 0 && <p className="tt-note">{emptyNote(trace.mode)}</p>}
           {trace?.calls.map((call, i) => (
-            <TraceCallView call={call} at={i} key={i} />
+            <TraceCallView call={call} at={i} expandAll={expandAll} key={i} />
           ))}
         </div>
       </div>
