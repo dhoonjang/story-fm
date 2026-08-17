@@ -10,7 +10,7 @@ import {
 } from "../src/index";
 
 /**
- * 포지션 적응도의 단일 규칙 (attribute-model.md §1) — 엔진 `proficiencyAt`과 웹
+ * 포지션 적응도의 단일 규칙 (player.md §8) — 엔진 `proficiencyAt`과 웹
  * 전술판이 **이 함수 하나**를 공유한다.
  *
  * 고쳐진 결함: 폴백이 라인 경계만 보고 거리를 무시해서, 최전방→공격형 미드필더

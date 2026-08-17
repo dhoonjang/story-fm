@@ -84,7 +84,7 @@ import {
 import { makeRng, pick } from "./rng";
 
 /**
- * advance_time — 캘린더 시계가 흐르는 유일한 경로 (game-loop.md §3).
+ * advance_time — 캘린더 시계가 흐르는 유일한 경로 (season.md §5).
  * 하루 단위 tick을 결정적으로 적용하고, 감독의 결정이 필요한 이벤트에서 멈춘다.
  *
  * v6: 훈련·경기·이적창이 모두 SCHEDULE_ENTRY로 등록돼 있으므로, 하루의 처리는
@@ -559,7 +559,7 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
 const DEFAULT_KICKOFF = "15:00";
 
 /**
- * 해당 날짜의 타 팀 경기 간이 시뮬 (결정 #5) — **킥오프 순서를 지킨다.**
+ * 해당 날짜의 타 팀 경기 간이 시뮬 (match.md §7) — **킥오프 순서를 지킨다.**
  *
  * 하루치를 통째로 굴리면 우리 경기 **전에** 그날 모든 결과가 나와 있다. 12:30에
  * 킥오프하는 감독이 17:30 경기의 결과를 이미 아는 셈이라, 순위표를 열면 오늘

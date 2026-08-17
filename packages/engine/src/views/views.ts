@@ -831,7 +831,7 @@ export interface OfficeViews {
      *
      * 한 줄 문자열(`next`)과 나란히 두는 이유: 화면이 날짜·상대·홈원정을 각자
      * 배치하려면 조각이 필요하고, 무엇보다 **며칠 남았는지**가 있어야 한다.
-     * 체력이 자리마다 다르게 깎이고 회복이 며칠에 걸리는 지금(match-sim §2.1.1),
+     * 체력이 자리마다 다르게 깎이고 회복이 며칠에 걸리는 지금(match.md §3),
      * "사흘 뒤"인지 "엿새 뒤"인지가 곧 로테이션 판단이다.
      */
     nextMatch: {
@@ -1529,7 +1529,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
          * 기본과 달라지면 그 값을 보여주는 게 맞다.
          */
         slotOverall: slotValue !== null && slotValue !== shownOverall ? slotValue : null,
-        // 오피스는 우리 선수의 숫자를 그대로 보여준다 (결정 #2). 단 **적응 중인 새
+        // 오피스는 우리 선수의 숫자를 그대로 보여준다 (player.md §10). 단 **적응 중인 새
         // 영입**은 스카우트 수준의 오차가 남는다 — 훈련장에서 본 게 전부다.
         ...observed,
         potential: potentialBand(state, p),

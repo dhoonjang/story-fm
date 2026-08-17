@@ -387,7 +387,7 @@ const AXES = [
  *
  * ⚠️ 전술은 안개를 지나지 않는다. 90분 동안 눈앞에서 라인이 올라가고 압박이
  * 들어오는 것은 감독이 그냥 보는 사실이다 — 흐릴 것은 선수의 수치이지 팀의 성향이
- * 아니다 (attribute-model §3.2와 같은 경계).
+ * 아니다 (player.md §9와 같은 경계).
  */
 function SideTactics({ tactics }: { tactics: Match["tactics"]["home"] }) {
   return (

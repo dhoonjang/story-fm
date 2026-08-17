@@ -22,8 +22,8 @@ import {
 } from "@story-fm/engine";
 
 /**
- * 능력치 15축 · 포지션 가중치 · 노화 곡선 (attribute-model.md §1·§2·§5).
- * 관측 가능성(§3)은 scouting.test.ts가 다룬다.
+ * 능력치 15축 · 포지션 가중치 · 노화 곡선 (player.md §1·§2·§6).
+ * 관측 가능성(§9)은 scouting.test.ts가 다룬다.
  */
 
 describe("15축 구성", () => {

@@ -11,7 +11,7 @@ import {
   type RegistrablePlayer,
 } from "@story-fm/domain";
 
-/** 등록 명단 규칙 (squad-rules.ts · attribute-model.md와 별개의 운영 규칙) */
+/** 등록 명단 규칙 (squad-rules.ts · player.md와 별개의 운영 규칙) */
 
 const SEASON = 2026;
 const player = (

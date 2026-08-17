@@ -3,7 +3,7 @@ import { z } from "zod";
 export const MatchSideSchema = z.enum(["home", "away"]);
 export type MatchSide = z.infer<typeof MatchSideSchema>;
 
-/** 경기 이벤트 타입 — LLM(매치 티어)이 생성하고 코어 장부가 검증한다 (결정 #14) */
+/** 경기 이벤트 타입 — LLM(매치 티어)이 생성하고 코어 장부가 검증한다 (match.md §5) */
 export const MatchEventTypeSchema = z.enum([
   "kickoff",
   "goal",
@@ -49,7 +49,7 @@ export const MatchEventSchema = z.object({
   team: MatchSideSchema.optional(),
   /** 선수 id — substitution은 [나가는 선수, 들어오는 선수] 순서 */
   actors: z.array(z.string()).default([]),
-  /** 원인 태그 — 전력 분석 패킷 항목을 인용해야 한다 (match-sim.md §3) */
+  /** 원인 태그 — 전력 분석 패킷 항목을 인용해야 한다 (match.md §4) */
   causes: z.array(z.string()).default([]),
   detail: z.string().optional(),
   /**

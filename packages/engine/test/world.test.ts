@@ -500,7 +500,7 @@ describe("시즌 일정 (일정 축)", () => {
   });
 });
 
-describe("온보딩 — 배경 직접 입력 해석 (결정 #11)", () => {
+describe("온보딩 — 배경 직접 입력 해석 (career.md §1)", () => {
   const sum = (a: ManagerAttributes) => MANAGER_ATTRIBUTES.reduce((t, axis) => t + a[axis], 0);
 
   it("모든 축이 시작 범위 안에 있다", () => {

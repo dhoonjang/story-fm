@@ -47,7 +47,7 @@ import { clubEconomyLevel } from "../data/league-economy";
 import { makeRng, randInt } from "../core/rng";
 import { installDefaultTraining } from "../squad/training-plan";
 
-/** 시즌 리뷰·전환 — 멀티시즌 코어 (결정 #15, game-loop.md §7) */
+/** 시즌 리뷰·전환 — 멀티시즌 코어 (season.md §6) */
 
 export interface StandingRow {
   teamId: string;
@@ -175,7 +175,7 @@ export function allMatchesDone(state: GameState): boolean {
  * 시즌 예산 보충 (£) — 등급별. 큰 영입은 여기에 **판매 대금**을 얹어야 가능하다.
  *
  * 표는 **EPL 기준이고 구단 경제 수준을 곱한다**(`seasonBudgetBaseOf` —
- * club-finance.md §12.1). 곱하지 않으면 리그 1 구단이 EPL과 같은 예산을 매 시즌
+ * finance.md §6.2). 곱하지 않으면 리그 1 구단이 EPL과 같은 예산을 매 시즌
  * 받아 이적 시장의 눈금이 리그를 잃는다.
  */
 export const SEASON_BUDGET_TOPUP: Record<number, number> = {
@@ -313,7 +313,7 @@ export function reviewSeason(state: GameState): string[] {
 }
 
 /**
- * 시즌 전환 — 쇠퇴·은퇴·유스 유입·계약 갱신·새 일정 (game-loop §7).
+ * 시즌 전환 — 쇠퇴·은퇴·유스 유입·계약 갱신·새 일정 (season.md §6).
  * 다음 시즌의 7월 1일(프리시즌 시작 = 여름 이적창 개장)로 이동한다.
  */
 export function transitionSeason(state: GameState): string[] {
@@ -655,7 +655,7 @@ export function transitionSeason(state: GameState): string[] {
   state.pendingMatch = null;
   // 이적 예산 보충 — 등급별 base. 일률 £15M이면 시즌 2부터 68~72 OVR밖에 못 사서
   // 이적 루프가 첫 여름 이후 죽는다. 등급별 순이익과 같은 자리에 뒀다
-  // (docs/decisions/0002-transfer-market-balance.md). 나머지는 선수 판매로 만든다.
+  // (transfer.md §3). 나머지는 선수 판매로 만든다.
   // base 위에 **재정 성과**가 얹히고, PSR 위반이면 동결된다.
   for (const finance of state.finances) {
     // 무소속은 구단이 아니다 — 영입할 주체가 없으니 예산도 없다 (team.md §7).

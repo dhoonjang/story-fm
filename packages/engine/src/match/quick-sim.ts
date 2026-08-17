@@ -39,7 +39,7 @@ export interface SimSquad {
 }
 
 /**
- * 간이 시뮬 — **타 팀 간 경기 전용** 결정적 확률 모델 (결정 #5).
+ * 간이 시뮬 — **타 팀 간 경기 전용** 결정적 확률 모델 (match.md §7).
  *
  * 유저 경기는 구간 시뮬레이터(`sim/match-engine.ts`)가 분 단위로 굴린다. 여기는
  * 나머지 2,000여 경기를 한 번에 처리한다 — 품질을 쓸 곳에 쓴다.
@@ -563,7 +563,7 @@ export function simulateExtraTime(
   };
 }
 
-/** 타 팀 간 경기 결과 (match-sim.md §7) */
+/** 타 팀 간 경기 결과 (match.md §7) */
 export function quickSimulate(
   home: SimSquad,
   away: SimSquad,
