@@ -67,10 +67,12 @@ export default defineConfig({
     baseURL: url,
   },
   webServer: {
-    command: "pnpm --filter @story-fm/web dev",
+    command: process.env.CI
+      ? "pnpm --filter @story-fm/web build && pnpm --filter @story-fm/web start"
+      : "pnpm --filter @story-fm/web dev",
     url,
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    timeout: 300_000,
     env: {
       PORT: String(port),
       LLM_MODE: "mock",
