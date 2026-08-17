@@ -55,6 +55,8 @@ import {
   proficiencyAt,
   pushNarrative,
   recordGrowth,
+  reservePlayers,
+  squadLevelOf,
   tacticsOf,
   teamName,
   userPlayers,
@@ -265,10 +267,11 @@ function assembleUserLineup(state: GameState): {
 } {
   const tactics = tacticsOf(state, state.userTeamId);
   /**
-   * **후보는 1군뿐이다** (match.md §2 · team.md §5). `set_lineup`만 2군을 반려하면
+   * **1군이 먼저다** (match.md §2 · team.md §5). `set_lineup`만 2군을 반려하면
    * 감독이 손대지 않은 자리를 코어가 대신 채우는 이 경로가 그 규칙을 우회한다.
    */
   const roster = firstTeamPlayers(state, state.userTeamId);
+  const reserves = reservePlayers(state, state.userTeamId);
   const byId = new Map(roster.map((p) => [p.id, p] as const));
   const unavailable = (id: string) => isInjured(state, id) || isSuspended(state, id);
 
@@ -288,14 +291,21 @@ function assembleUserLineup(state: GameState): {
       continue;
     }
     // 대체 — 슬롯 적응도·그룹 일치·OVR 순
-    const candidate = roster
-      .filter((p) => !taken.has(p.id) && !unavailable(p.id))
-      .filter((p) => (slotGroup === "GK" ? groupOf(p) === "GK" : groupOf(p) !== "GK"))
-      .sort(
-        (x, y) =>
-          proficiencyAt(y, a.position) - proficiencyAt(x, a.position) ||
-          y.attributes.overall - x.attributes.overall,
-      )[0];
+    const pick = (pool: GamePlayer[]) =>
+      pool
+        .filter((p) => !taken.has(p.id) && !unavailable(p.id))
+        .filter((p) => (slotGroup === "GK" ? groupOf(p) === "GK" : groupOf(p) !== "GK"))
+        .sort(
+          (x, y) =>
+            proficiencyAt(y, a.position) - proficiencyAt(x, a.position) ||
+            y.attributes.overall - x.attributes.overall,
+        )[0];
+    /**
+     * **2군은 1군이 바닥났을 때의 긴급 호출이다** (match.md §2). 아예 부르지 않으면
+     * 부상·정지가 겹친 주에 열한 명이 서지 않아 경기 자체가 열리지 않는다 — 규칙을
+     * 지키느라 게임이 멈추는 쪽이 2군 하나가 서는 쪽보다 나쁘다.
+     */
+    const candidate = pick(roster) ?? pick(reserves);
     if (!candidate) {
       return {
         onPitch,
@@ -306,7 +316,8 @@ function assembleUserLineup(state: GameState): {
     }
     onPitch.push(candidate.id);
     taken.add(candidate.id);
-    replaced.push(`${outgoing} → ${candidate.name}`);
+    const calledUp = squadLevelOf(candidate) === "reserve" ? " (2군 호출)" : "";
+    replaced.push(`${outgoing} → ${candidate.name}${calledUp}`);
   }
 
   // 벤치 — 배치된 벤치 우선, 부족하면 가용 상위로 채움 (GK 1명 확보)
