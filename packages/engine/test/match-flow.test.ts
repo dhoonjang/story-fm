@@ -5,11 +5,14 @@ import {
   assignmentsOf,
   buildOfficeViews,
   digestLines,
+  firstTeamPlayers,
   isClubTeam,
   finalizeMatch,
   groupOf,
   loadGame,
+  MATCH_PROFICIENCY_GAIN,
   playersOf,
+  proficiencyAt,
   refreshPacket,
   saveGame,
   setLineup,
@@ -595,6 +598,159 @@ describe("경고 누적 퇴장의 장부 (match.md §5)", () => {
 
     // 우리 선수의 정지는 감독이 바로 알아야 한다 — 말풍선에 서는 갈래에 선다
     expect(digest.ours.some((d) => d.includes(name) && d.includes("정지"))).toBe(true);
+  });
+});
+
+/**
+ * **한 경기는 양 팀 장부에 같은 흔적을 남긴다** (match.md §6).
+ *
+ * 마감이 우리 명단만 돌던 때는 상대가 우리를 상대로 두 골을 넣어도 시즌 득점이
+ * 그대로였고, 퇴장당한 상대는 다음 경기에 정상 출전했다. 정지를 소화하러 결장한
+ * 상대 선수는 `served`가 오르지 않아 한 경기를 더 쉬었다 — 득점왕·평점 순위가
+ * 우리 경기만큼 어긋나는 것이다.
+ */
+describe("감독 경기 마감의 대칭 (match.md §6)", () => {
+  /** 하프타임·종료를 손으로 밀어 경기를 닫는다 — 구간을 굴리면 카드·골이 난수다 */
+  function closeMatch(state: GameState) {
+    for (const stop of ["half_time", "full_time"] as const) {
+      const applied = applyMatchEvents(state, [
+        { minute: stop === "half_time" ? 45 : 90, type: stop, actors: [], causes: [] },
+      ]);
+      expect(applied.ok, applied.message).toBe(true);
+    }
+    return finalizeMatch(state);
+  }
+
+  it("상대의 출전·득점·도움·카드·정지가 우리와 같은 장부에 남는다", () => {
+    // **친선은 장부에 남지 않는다** — 리그 개막 뒤에서 봐야 시즌 기록이 움직인다
+    const state = atMatchday(42, { afterPreseason: true });
+    const fixture = state.matches.find(
+      (m) =>
+        m.date === state.date &&
+        !m.result &&
+        (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+    );
+    if (!fixture) throw new Error("오늘 경기를 찾지 못했습니다");
+    const oppTeamId =
+      fixture.homeTeamId === state.userTeamId ? fixture.awayTeamId : fixture.homeTeamId;
+
+    /** 정지 중인 상대 선수 — 이 경기에 결장하고, 그 결장이 소화로 세어져야 한다 */
+    const banned = firstTeamPlayers(state, oppTeamId)[0];
+    if (!banned) throw new Error("상대 1군 선수를 찾지 못했습니다");
+    state.suspensions.push({
+      id: `sus-test-${banned.id}`,
+      gamePlayerId: banned.id,
+      cause: "red",
+      issuedOn: state.date,
+      lengthMatches: 1,
+      served: 0,
+      status: "active",
+    });
+
+    expect(startMatch(state).ok).toBe(true);
+    const oppSide = userSide(state) === "home" ? "away" : "home";
+    const matchId = state.pendingMatch!.matchId;
+    const onPitch = state.pendingMatch!.ledger[oppSide].onPitch;
+    expect(onPitch, "정지 중인 선수는 그라운드에 없다").not.toContain(banned.id);
+    const [keeper, booked, sentOff, assister, scorer] = [
+      onPitch[0]!,
+      onPitch[1]!,
+      onPitch[2]!,
+      onPitch[9]!,
+      onPitch[10]!,
+    ];
+    const sentOffName = playersOf(state, oppTeamId).find((p) => p.id === sentOff)!.name;
+
+    /** 상대 쪽 사건을 직접 넣는다 — 구간을 굴려 우연을 기다리면 난수이고 느리다 */
+    const events = applyMatchEvents(state, [
+      { minute: 20, type: "yellow_card", team: oppSide, actors: [booked], causes: [] },
+      { minute: 30, type: "red_card", team: oppSide, actors: [sentOff], causes: [] },
+      { minute: 40, type: "goal", team: oppSide, actors: [scorer, assister], causes: [] },
+    ]);
+    expect(events.ok, events.message).toBe(true);
+
+    /** 그 시즌 그 팀의 기록 — 이 경기가 더한 몫만 보려면 앞뒤를 견줘야 한다 */
+    const statOf = (id: string) =>
+      state.seasonStats.find(
+        (s) => s.gamePlayerId === id && s.season === state.season && s.teamId === oppTeamId,
+      );
+    const appsBefore = (id: string) => statOf(id)?.apps ?? 0;
+    const before = {
+      keeper: appsBefore(keeper),
+      sentOff: appsBefore(sentOff),
+      banned: appsBefore(banned.id),
+      goals: statOf(scorer)?.goals ?? 0,
+      assists: statOf(assister)?.assists ?? 0,
+      ratingSum: statOf(scorer)?.ratingSum ?? 0,
+    };
+
+    const digest = closeMatch(state);
+
+    // 출전 — 퇴장당한 선수도 그라운드를 밟았다
+    expect(statOf(keeper)?.apps).toBe(before.keeper + 1);
+    expect(statOf(sentOff)?.apps).toBe(before.sentOff + 1);
+    expect(appsBefore(banned.id), "결장한 정지자는 출전이 늘지 않는다").toBe(before.banned);
+    // 득점·도움 — 상대의 득점왕 셈이 우리 경기에서도 이어진다
+    expect(statOf(scorer)?.goals).toBe(before.goals + 1);
+    expect(statOf(assister)?.assists).toBe(before.assists + 1);
+    // 평점은 경기별로 남지 않고 시즌 합계로만 쌓인다 (간이 시뮬과 같은 규칙, §7)
+    expect(statOf(scorer)?.ratingSum ?? 0).toBeGreaterThan(before.ratingSum);
+    expect(state.matches.find((m) => m.id === matchId)?.result?.ratings?.[scorer]).toBeUndefined();
+
+    // 카드 → BOOKING, 퇴장 → 다음 경기 정지 (간이 시뮬과 같은 문)
+    const bookings = state.bookings.filter((b) => b.matchId === matchId);
+    expect(bookings.filter((b) => b.gamePlayerId === booked && b.card === "yellow")).toHaveLength(1);
+    expect(bookings.filter((b) => b.gamePlayerId === sentOff && b.card === "red")).toHaveLength(1);
+    const red = state.suspensions.find((s) => s.gamePlayerId === sentOff);
+    expect(red?.cause).toBe("red");
+    expect(red?.status).toBe("active");
+    // 정지 소화 — 결장한 한 경기가 차감된다 (안 세면 한 경기를 더 쉰다)
+    const served = state.suspensions.find((s) => s.gamePlayerId === banned.id);
+    expect(served?.served).toBe(1);
+    expect(served?.status).toBe("done");
+
+    // 남의 팀 정지·무드는 브리핑하지 않는다 — 조회 도구가 알려 준다
+    expect(digest.ours.some((d) => d.includes(sentOffName))).toBe(false);
+  });
+
+  /**
+   * **적응도는 그 경기에 선 자리에 쌓인다.** 벤치 배치의 자리로 올리던 때는,
+   * 90분 동안 센터백으로 뛴 공격수의 최전방 적응도가 올랐다.
+   */
+  it("교체 투입자는 물려받은 자리의 적응도가 오른다", () => {
+    const state = atMatchday(42, { afterPreseason: true });
+    expect(startMatch(state).ok).toBe(true);
+    const mine =
+      userSide(state) === "home" ? state.pendingMatch!.ledger.home : state.pendingMatch!.ledger.away;
+    const roster = userPlayers(state);
+    const out = assignmentsOf(state, state.userTeamId, "starting").find(
+      (a) => weightSlotOf(a.position) === "CB" && mine.onPitch.includes(a.playerId),
+    );
+    /** 센터백이 아닌 벤치 자원 — 물려받은 자리와 자기 자리가 갈려야 시험이 성립한다 */
+    const sub = mine.bench
+      .map((id) => roster.find((p) => p.id === id))
+      .find((p) => p !== undefined && (groupOf(p) === "MF" || groupOf(p) === "FW"));
+    if (!out || !sub) throw new Error("CB 선발 또는 벤치 자원을 찾지 못했습니다");
+    const benchPosition = assignmentsOf(state, state.userTeamId).find(
+      (a) => a.playerId === sub.id,
+    )?.position;
+    expect(benchPosition).not.toBe(out.position);
+
+    expect(substitutePlayer(state, { out: out.playerId, in: sub.id }).ok).toBe(true);
+    expect(state.pendingMatch!.positionsPlayed?.[sub.id]).toBe(out.position);
+    const seatBefore = proficiencyAt(sub, out.position);
+    const benchBefore = benchPosition ? proficiencyAt(sub, benchPosition) : null;
+
+    closeMatch(state);
+
+    const player = userPlayers(state).find((p) => p.id === sub.id)!;
+    expect(player.positions.find((p) => p.position === out.position)?.proficiency).toBe(
+      seatBefore + MATCH_PROFICIENCY_GAIN,
+    );
+    // 벤치에 걸려 있던 자리는 그대로다 — 그 자리에서 뛰지 않았다
+    if (benchPosition && benchBefore !== null) {
+      expect(proficiencyAt(player, benchPosition)).toBe(benchBefore);
+    }
   });
 });
 
