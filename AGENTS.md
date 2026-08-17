@@ -157,25 +157,10 @@ is not what is being tested, and where it genuinely is, build one fixture per
 `typecheck` · `lint` · `pnpm test` · `pnpm e2e`, and its verdict is what
 `/merge` waits on. **It does not run while the PR is a draft** — a branch still
 being worked on burns runner minutes nobody reads. `/merge` marks the PR ready,
-and that is what starts the run it then watches.
-
-**The runner shape lives in two repository variables, not in the workflow.**
-`CI_RUNNER` is `ubicloud-standard-8` and `CI_SHARDS` is `[1]`, so the gate is
-three jobs on one 8-core runner each. Clear either variable and `ci.yml` falls
-back to GitHub-hosted `ubuntu-latest` × `[1, 2, 3, 4]` — that fallback is the
-rollback, and it needs no commit. Every shard must be green; a shard is not a
-sample.
-
-**Cores beat shards.** Vitest assigns files to shards by hashing their path, so
-four shards landed three-fold uneven, and each one paid its own checkout and
-`pnpm install` — about 1.5 minutes that runs no test. One job with more cores
-removes both: vitest balances inside the job, and the setup is paid once. The
-whole suite — 119 files, some 1,600 cases — now runs in **2m52s** (10.7
-CPU-minutes of tests). What it cannot go below is the slowest single file,
-because **one file is never split across shards**: `euro-knockout.test.ts` at
-53s, then `training-plan.test.ts` at 42s. More cores will not move that floor;
-only a cheaper test will. Nothing is excluded from the gate — making CI faster
-means making a test cheaper, not moving it out.
+and that is what starts the run it then watches. Every job must be green; a
+shard is not a sample. Nothing is excluded from the gate — making CI faster
+means making a test cheaper, not moving it out. How the gate is sharded and what
+it runs on is `ci.yml`'s business; read it there when you are changing it.
 
 - **While working** — `pnpm typecheck` and `pnpm lint`, plus `pnpm test <path>`
   for the file you just wrote. That is the whole local loop.
