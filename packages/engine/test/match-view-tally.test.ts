@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { clampCondition } from "@story-fm/domain";
 import {
   advanceSegment,
   advanceTime,
@@ -88,6 +89,40 @@ describe("경기 중 기록", () => {
     const total = rows.reduce((sum, p) => sum + p.tally.assists, 0);
     // 명단 밖(교체로 나간 선수)의 도움은 표에 없으므로 합이 더 클 수는 없다
     expect(total).toBeLessThanOrEqual(assisted.length);
+  });
+});
+
+describe("경기 중 체력 — 두 탭이 한 축을 본다", () => {
+  it("전술판 체력이 소모한 만큼 내려가고 판세의 추정 구간 안에 든다", () => {
+    const state = intoMatch(11);
+    const views = buildOfficeViews(state);
+    const match = views.match;
+    if (!match) return; // 경기가 이미 끝났으면 볼 것이 없다
+
+    const worn = state.pendingMatch!.matchFatigue ?? {};
+    const rows = new Map(views.squad.players.map((r) => [r.id, r] as const));
+    const ours = [
+      ...match.onPitch.home,
+      ...match.onPitch.away,
+      ...match.bench.home,
+      ...match.bench.away,
+    ].filter((p) => p.ours);
+    expect(ours.length, "우리 선수가 판세에 없다").toBeGreaterThan(0);
+    // 닳은 선수가 있어야 두 값을 견주는 일에 뜻이 있다
+    expect(ours.filter((p) => (worn[p.id] ?? 0) > 0).length, "아무도 닳지 않았다").toBeGreaterThan(
+      0,
+    );
+
+    for (const p of ours) {
+      const row = rows.get(p.id);
+      expect(row, `${p.name}이 명단에 없다`).toBeDefined();
+      const stored = playerById(state, p.id)!.state.condition;
+      // 저장값이 아니라 지금 값 — 판세와 같은 축(matchFatigue)에서 뺀다
+      expect(row!.condition, `${p.name} 체력`).toBe(clampCondition(stored - (worn[p.id] ?? 0)));
+      // 판세는 안개를 지나지만 참값을 늘 구간 안에 품는다 (readCondition)
+      expect(row!.condition, `${p.name} 하한`).toBeGreaterThanOrEqual(p.condition.low);
+      expect(row!.condition, `${p.name} 상한`).toBeLessThanOrEqual(p.condition.high);
+    }
   });
 });
 

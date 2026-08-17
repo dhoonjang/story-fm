@@ -18,6 +18,7 @@ import {
   TRAIN_ATTR_KO,
   ageOf,
   anchorOf,
+  clampCondition,
   defaultRoleOf,
   naturalPositionOf,
   rolesFor,
@@ -1444,6 +1445,13 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         ]
       : [],
   );
+  /**
+   * 경기 중이면 체력은 **지금 값**이다 — 킥오프의 저장값에서 이 경기가 가져간
+   * 만큼(`pendingMatch.matchFatigue`)을 뺀다. 판세 탭(`buildMatchView`)이 쓰는
+   * 축 그대로라 같은 선수가 두 탭에서 다른 숫자로 보이지 않는다. 우리 선수만
+   * 보는 화면이므로 안개(`readCondition`)는 지나지 않는다.
+   */
+  const worn = livePacket ? (state.pendingMatch?.matchFatigue ?? {}) : {};
   const issues = new Set(state.issues.map((i) => i.gamePlayerId));
 
   /**
@@ -1546,7 +1554,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         formAngle: formAngle(p.state.form),
         formTone: formTone(p.state.form),
         recentRatings: recentRatingsOf(state, p.id),
-        condition: p.state.condition,
+        condition: clampCondition(p.state.condition - (worn[p.id] ?? 0)),
         mood: moodOf(state, p),
         role: (livePacket
           ? liveSlot
