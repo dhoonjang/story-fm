@@ -22,6 +22,7 @@ import {
   playerName,
   reportersOf,
   scoutingSummary,
+  scoutReportLine,
   speakerCues,
   squadFamiliarity,
   squadLevelOf,
@@ -33,7 +34,13 @@ import {
   type GameState,
   type ScenePoint,
 } from "@story-fm/engine";
-import { naturalPositionOf, PERSONA_ROLE_LABEL, slotOfTime, type Persona } from "@story-fm/domain";
+import {
+  naturalPositionOf,
+  PERSONA_ROLE_LABEL,
+  slotOfTime,
+  type Persona,
+  type ScoutReportCard,
+} from "@story-fm/domain";
 
 /** 경기 브리핑에 그대로 싣는 직전 평시 감독 발화 수 */
 const MATCH_BRIEF_TURNS = 3;
@@ -207,7 +214,12 @@ export interface TimePassed {
  * 상태 스냅샷 — 매 턴 새로 주입되는 휘발성 블록 (role:"system" 오퍼레이터 채널).
  * phase 같은 내부 enum은 넣지 않는다 — 라우팅용 값이지 모델이 읽을 정보가 아니다.
  */
-export function buildGmStateNote(state: GameState, passed?: TimePassed | null): string {
+export function buildGmStateNote(
+  state: GameState,
+  passed?: TimePassed | null,
+  /** 이번 턴에 카드로 서는 보고서 — 카드가 프롬프트에 못 가므로 값은 여기로 온다 */
+  arrivedReports: readonly ScoutReportCard[] = [],
+): string {
   const standings = computeStandings(state);
   const rank = standings.findIndex((r) => r.teamId === state.userTeamId) + 1;
   // 0경기 순위는 싣지 않는다 — 정렬 순서일 뿐인데 모델이 구단의 처지로 읽는다
@@ -293,6 +305,20 @@ export function buildGmStateNote(state: GameState, passed?: TimePassed | null): 
               .join("\n")}`
           : `그 사이 특별한 일은 없었다.`,
       ].join("\n"),
+    );
+  }
+  /**
+   * 도착한 스카우트 보고서 — **이번 턴에 화면 카드로 서는 그것들이다.**
+   *
+   * 카드는 모델이 장면을 쓴 뒤에 붙어 프롬프트에 가지 않는다. 그래서 값이 여기
+   * 없으면 모델은 카드 옆에서 금액을 지어내고, 한 화면이 두 말을 한다
+   * (agents.md §6). 줄은 카드와 같은 함수에서 나온다 — `scoutReportLine`.
+   */
+  if (arrivedReports.length > 0) {
+    lines.push(
+      `도착한 스카우트 보고서 (감독 화면에 카드로 선다 — 금액은 이 값 그대로 말해라):\n${arrivedReports
+        .map((c) => `- ${scoutReportLine(state, c.playerId) ?? c.name}`)
+        .join("\n")}`,
     );
   }
   /**
