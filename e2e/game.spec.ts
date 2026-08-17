@@ -789,13 +789,18 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
    * 불릴 수 없다" — 전술 적응도는 소수까지 제자리로 온다). 여기서 같은 값을
    * 요구하지 않는 이유는 화면 값이 **자리 성분이 섞인 합친 적응도**이고, 이 시점의
    * 첫 행은 앞서 교체로 방금 선발이 된 선수라 자리 성분이 함께 움직이기 때문이다.
+   *
+   * ⚠️ **기준은 바꾸기 전 값이지 바꾼 뒤 값이 아니다.** 방금 선발이 된 선수는 저장이
+   * 한 번 돌면서 적응도가 **오르는** 쪽으로 다시 잡히기도 한다 — 그때 바꾼 뒤 값을
+   * 기준으로 삼으면 "되돌렸더니 올라간 몫이 빠졌다"가 실패로 잡힌다. 재려는 것은
+   * 왕복이 손해로 남지 않는다는 것 하나다.
    */
   await page.getByTestId("tactic-mentality-3").click();
   await expect(page.getByTestId("view-squad")).toHaveAttribute("data-save", "saved", {
     // 자동 저장 디바운스가 3초다 — 왕복까지 감안해 여유를 둔다
     timeout: 15_000,
   });
-  expect(await famOf(), "되돌렸는데 손해가 남았다").toBeGreaterThanOrEqual(famShifted);
+  expect(await famOf(), "되돌렸는데 손해가 남았다").toBeGreaterThanOrEqual(famBefore);
 
   await page.getByTestId("tactic-passStyle-5").click();
   await expect(page.getByTestId("tactics-panel")).toContainText("매우 길게");

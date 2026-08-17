@@ -311,6 +311,13 @@ export const FREE_AGENT_SIGN_CHANCE = 0.06;
 export const FREE_AGENT_SIGNINGS_PER_DAY = 2;
 /** 자리가 얇다고 보는 기준 — 그 포지션군 인원이 이 아래면 급하다 */
 const THIN_GROUP = 5;
+/**
+ * 이름값을 재는 기준 등급 — 이 등급이면 배수 1.0이다.
+ * ⚠️ 종합의 눈금을 탄다 (player.md §4 — 평균 67.5 → 65.9).
+ */
+const FREE_AGENT_PAR_RATING = 67;
+/** 구단과 선수의 수준이 맞다고 보는 폭 — 같은 이유로 눈금을 탄다 (8 → 7) */
+const SUITOR_LEVEL_BAND = 7;
 
 /**
  * 무소속 선수를 다른 구단이 데려간다 — tick이 **이적창이 열린 날** 부른다.
@@ -331,8 +338,10 @@ export function signFreeAgents(state: GameState, digest: string[]): void {
   for (const player of pool) {
     if (signed >= FREE_AGENT_SIGNINGS_PER_DAY) return;
     const age = ageOf(player.birthdate, state.date);
-    // 이름값이 클수록 빨리, 나이가 많을수록 더디게
-    const appeal = (player.attributes.overall / 70) * (age >= 34 ? 0.35 : age >= 31 ? 0.7 : 1);
+    // 이름값이 클수록 빨리, 나이가 많을수록 더디게 (기준 등급은 종합 눈금을 탄다)
+    const appeal =
+      (player.attributes.overall / FREE_AGENT_PAR_RATING) *
+      (age >= 34 ? 0.35 : age >= 31 ? 0.7 : 1);
     if (rng() > FREE_AGENT_SIGN_CHANCE * appeal) continue;
 
     const suitor = pickSuitor(state, player, rng);
@@ -367,7 +376,7 @@ function pickSuitor(state: GameState, player: GamePlayer, rng: () => number): st
         .slice(0, 15)
         .reduce((sum, v) => sum + v, 0) / Math.min(15, squad.length);
     const gap = Math.abs(level - player.attributes.overall);
-    if (gap > 8) continue;
+    if (gap > SUITOR_LEVEL_BAND) continue;
 
     // 급할수록 여러 번 이름을 넣는다 (결정적 rng 하나로 뽑기 위해)
     const weight = Math.max(1, THIN_GROUP + 3 - atGroup);

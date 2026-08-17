@@ -211,37 +211,47 @@ describe("API — 온보딩부터 경기까지", () => {
     );
     const game = (await created.json()) as GamePayload;
     const players = game.views.squad.players;
-    const gk = players.find((p) => p.positionGroup === "GK");
-    const outfield = players.filter((p) => p.positionGroup !== "GK").slice(0, 10);
-    if (!gk) throw new Error("no gk");
-    const startingIds = [gk.id, ...outfield.map((p) => p.id)];
+    /**
+     * **세울 자리를 먼저 정하고 사람을 앉힌다.** 예전에는 명단 앞에서 열 명을 끊어
+     * 각자의 주 포지션에 세웠는데, 그러면 모양이 **명단 정렬에 딸려** 움직인다 —
+     * OVR 눈금이 좁아지자 같은 방식이 4-2-3-1 대신 4-3-2-1을 냈다. 자리 목록을
+     * 이쪽이 쥐면 "보낸 자리에서 이름이 나온다"만 남는다.
+     */
+    const SLOTS = ["GK", "RB", "RCB", "LCB", "LB", "RDM", "LDM", "CAM", "RW", "LW", "ST"];
+    const used = new Set<string>();
+    const take = (group: string) => {
+      const found = players.find((p) => !used.has(p.id) && p.positionGroup === group);
+      if (!found) throw new Error(`${group} 자원이 없다`);
+      used.add(found.id);
+      return found;
+    };
+    const forSlot = ["GK", "DF", "DF", "DF", "DF", "MF", "MF", "MF", "FW", "FW", "FW"].map(take);
+    const startingIds = forSlot.map((p) => p.id);
     const bench = players
       .filter((p) => !startingIds.includes(p.id))
       .slice(0, 7)
       .map((p) => ({ playerId: p.id }));
 
     // v6: 배치 포지션을 지정해 보낸다 (주 포지션은 바뀌지 않는다)
-    const target = outfield[0]!;
-    const starting = startingIds.map((id, i) => ({
-      playerId: id,
-      position: id === gk.id ? "GK" : id === target.id ? "RCM" : `SLOT${i}`,
-    }));
-    // 슬롯 코드는 실제 포지션 코드여야 하므로 나머지는 기존 주 포지션으로
-    for (const slot of starting) {
-      if (slot.position.startsWith("SLOT")) {
-        slot.position = players.find((p) => p.id === slot.playerId)!.position;
-      }
-    }
+    const starting = forSlot.map((p, i) => ({ playerId: p.id, position: SLOTS[i]! }));
+    // 배치와 주 포지션이 실제로 갈리는 사람 하나 — 둘이 별개임을 재려면 달라야 한다
+    const movedAt = starting.findIndex(
+      (slot, i) => forSlot[i]!.position !== slot.position && slot.position !== "GK",
+    );
+    expect(movedAt, "배치가 주 포지션과 갈리는 선수가 없다").toBeGreaterThan(0);
+    const target = forSlot[movedAt]!;
+
     const slice = await savedSlice(await postLineup(json({ starting, bench }), params(game.id)));
     const updated = slice.views.squad!;
     const changed = updated.players.find((p) => p.id === target.id);
     // 배치 포지션이 반영되고, 주 포지션은 그대로다 (v6 분리)
-    expect(changed?.assignedPosition).toBe("RCM");
+    expect(changed?.assignedPosition).toBe(SLOTS[movedAt]);
+    expect(changed?.position).toBe(target.position);
     expect(changed?.role).toBe("선발");
     /**
      * 포메이션 이름은 **보낸 프리셋이 아니라 세운 자리에서** 나온다
-     * (team.md §6 · game-state.md §5). 11명을 전부 제 주 포지션에 세웠으니
-     * 그 좌표가 읽히는 이름이 곧 팀의 모양이다.
+     * (team.md §6 · game-state.md §5). 4-2-3-1의 자리 목록으로 세웠으니 그 좌표가
+     * 읽히는 이름이 곧 팀의 모양이다.
      */
     expect(updated.formation).toBe("4-2-3-1");
     // 선발이 정확히 11명

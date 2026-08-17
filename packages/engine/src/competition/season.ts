@@ -372,6 +372,14 @@ export function transitionSeason(state: GameState): string[] {
     else contractsByTeam.set(c.teamId, [c]);
   }
 
+  /**
+   * 서른셋을 넘겨 이 아래면 은퇴한다 — **종합의 눈금을 탄다.**
+   *
+   * 옛 72와 같은 인원 비율(상위 37%)에 서는 값이다 (player.md §4). 72를 그대로
+   * 두면 새 눈금에서 그 선이 전체의 63%를 덮어 서른서넛이 한 시즌에 통째로 은퇴한다.
+   */
+  const RETIRE_OVERALL = 68;
+
   for (const team of state.teams) {
     /**
      * **무소속은 클럽이 아니다** — 은퇴만 태우고 유스 유입·배치·계약 갱신은
@@ -390,7 +398,7 @@ export function transitionSeason(state: GameState): string[] {
        * 감독이 겪은 것 없이 숫자만 달라진다. 이제 **매달 조금씩** 움직인다
        * (`development.ts`). 시즌 전환이 하는 건 은퇴 판정과 명단 정리뿐이다.
        */
-      if (age >= 35 || (age >= 33 && player.attributes.overall < 72)) {
+      if (age >= 35 || (age >= 33 && player.attributes.overall < RETIRE_OVERALL)) {
         retirees.push(player.id);
       }
       // 새 시즌 리셋
