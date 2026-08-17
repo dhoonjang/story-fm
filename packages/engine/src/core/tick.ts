@@ -56,6 +56,7 @@ import { recordCard } from "../match/discipline";
 import { runAiTransfers } from "../market/ai-market";
 import { reviewUserSeat, runManagerMarket } from "../market/manager-market";
 import { matchRating } from "../match/ratings";
+import { scoutReportLine } from "../views/views";
 import { grantManagerXP, settleTactics } from "../skills";
 import { allMatchesDone, endSeason } from "../competition/season";
 import { cancelTrainingOn, syncDefaultTraining } from "../squad/training-plan";
@@ -152,8 +153,14 @@ function resolveScouting(state: GameState, digest: string[]): void {
     report.completedOn = state.date;
     const player = playerById(state, report.gamePlayerId);
     if (!player) continue;
+    /**
+     * 값을 함께 낸다 — 카드는 모델이 장면을 쓴 뒤에 붙어 프롬프트에 가지 않으므로
+     * 이 줄이 도착 사건의 사실이 모델에 닿는 유일한 통로다 (agents.md §6).
+     */
     digest.push(
-      `스카우트 보고서 도착: ${player.name} (${teamName(player.teamId)}) — 능력치를 정확히 파악했다`,
+      `스카우트 보고서 도착 — ${
+        scoutReportLine(state, player.id) ?? `${player.name} (${teamName(player.teamId)})`
+      }`,
     );
     pushNarrative(state, `${player.name} 스카우트 보고서 입수`, 2);
     // 보고서를 읽는 것이 감독의 눈을 기른다 (docs/simulation/career.md §3)

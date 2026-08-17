@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatMoney,
   playersOf,
   ratingLabel,
   ratingTier,
   scoutPlayer,
   scoutReportCard,
+  scoutReportLine,
   advanceTime,
   type GameState,
 } from "@story-fm/engine";
@@ -71,6 +73,30 @@ describe("보고서 한 장", () => {
      */
     expect(after).toBeLessThan(before);
     expect(after).toBeGreaterThan(0);
+  });
+
+  /**
+   * 카드는 모델이 장면을 **쓴 뒤에** 붙어 화면에만 가고, 모델이 읽는 것은 도착
+   * 다이제스트뿐이다. 두 값이 갈리면 카드는 £34.9M인데 대사는 4,000만이 된다
+   * (agents.md §6).
+   */
+  it("도착 다이제스트가 카드와 같은 값을 낸다", () => {
+    const state = createTestGame(11);
+    const p = target(state);
+    expect(scoutPlayer(state, p.id).ok).toBe(true);
+
+    let arrival = "";
+    for (let i = 0; i < SCOUT_DAYS * 3 && !arrival; i++) {
+      arrival =
+        advanceTime(state, { days: 1 }).digest.find((d) =>
+          d.startsWith("스카우트 보고서 도착"),
+        ) ?? "";
+    }
+    const card = scoutReportCard(state, p.id)!;
+    expect(arrival).toBe(`스카우트 보고서 도착 — ${scoutReportLine(state, p.id)}`);
+    expect(arrival).toContain(formatMoney(card.marketValue));
+    expect(arrival).toContain(formatMoney(card.wageExpectation));
+    expect(arrival).toContain(`종합 ${card.overall.value}`);
   });
 
   it("없는 선수는 null — 화면이 빈 카드를 그리지 않는다", () => {
