@@ -63,6 +63,7 @@ import {
   buildScheduleEntries,
   buildSeasonCalendar,
   buildTransferWindows,
+  FIRST_SEASON,
   seasonYear,
   type SeasonCalendar,
 } from "../competition/calendar";
@@ -1735,7 +1736,7 @@ export function createGame(input: CreateGameInput): GameState {
   if (!teamCatalog().some((t) => t.id === input.userTeamId)) {
     throw new Error(`알 수 없는 팀: ${input.userTeamId}`);
   }
-  const season = 1;
+  const season = FIRST_SEASON;
   const calendar = buildSeasonCalendar(season);
   const rng = makeRng(seed, "ai-managers");
   const world = input.world;

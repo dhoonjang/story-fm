@@ -11,7 +11,7 @@ import {
   FINANCE_EXPENSE_CATEGORIES,
   FINANCE_INCOME_CATEGORIES,
 } from "@story-fm/domain";
-import { dayOfWeek } from "../competition/calendar";
+import { addDays, buildSeasonCalendar, dayOfWeek, FIRST_SEASON } from "../competition/calendar";
 import { clubProfile } from "../data/club-profile";
 import { clubEconomyLevel, leagueEconomyLevel } from "../data/league-economy";
 import { isMarketOnlyLeague, isTopLeague, leagueCatalogById } from "../data/league-catalog";
@@ -694,20 +694,25 @@ export function isOutsideOurEconomy(teamId: string): boolean {
   return isMarketOnlyLeague(leagueOfTeam(teamId));
 }
 
+/** 주급일 — tick이 주급을 무는 요일 (`core/tick.ts`) */
+const MONDAY = 1;
+
 /**
- * 주간 주급 지급 — 전 팀 (월요일).
+ * 주간 주급 지급 — 전 팀 (월요일). `weeks`는 **건너뛴 주**를 한 번에 무는 자리다
+ * (`paySkippedWages`) — 평소엔 1주씩이다.
  *
  * **유저 팀만 선수별로 적는다.** 원장은 유저 팀만 쌓으므로(§4.5) AI 팀에 명세를
  * 만들면 잔고 한 번 더할 것을 스물몇 번 나눠 더하는 값만 치른다 — 96팀 × 매주다.
  * 유저 팀 명세는 상각과 같은 모양이라 피드가 그대로 접는다 (§8.1).
  */
-export function payWeeklyWages(state: GameState): void {
+export function payWeeklyWages(state: GameState, weeks = 1): void {
+  if (weeks <= 0) return;
   const playerNames = new Map(state.players.map((p) => [p.id, p.name]));
   for (const team of state.teams) {
     // 무소속은 구단이 아니다 — 자유계약 선수가 모인 자리라 낼 주급도 받을 수입도 없다
     if (!isClubTeam(team.id) || isOutsideOurEconomy(team.id)) continue;
     if (team.id !== state.userTeamId) {
-      const wages = weeklyWagesOf(state, team.id);
+      const wages = weeklyWagesOf(state, team.id) * weeks;
       if (wages > 0) {
         recordFinance(state, team.id, {
           kind: "expense",
@@ -723,7 +728,7 @@ export function payWeeklyWages(state: GameState): void {
         kind: "expense",
         category: "player_wages",
         label: playerNames.get(line.gamePlayerId) ?? line.gamePlayerId,
-        amount: line.weekly,
+        amount: line.weekly * weeks,
         ref: { type: "player", id: line.gamePlayerId },
       });
     }
@@ -763,12 +768,13 @@ const WEEKS_PER_MONTH = 52 / 12;
 /**
  * 게임이 시작한 날 — 시작 스쿼드의 계약이 전부 이 날에 놓인다(`createGame`).
  * 그 뒤에 맺은 계약(영입·재계약)은 전부 이보다 늦으므로 레거시와 갈린다.
+ *
+ * ⚠️ **남은 계약의 최소 `since`로 읽으면 안 된다.** 원계약이 만료되고 정리될수록
+ * 그 값이 뒤로 표류해, 그해 유스 콜업이 "시작 스쿼드"로 판정돼 레거시 상각을
+ * 받는다. 게임은 언제나 시즌 1에서 시작하므로 이 날짜는 달력만으로 정해진다 —
+ * 세이브에 새 필드를 두지 않는다 (finance.md §6.1).
  */
-function gameStartDate(state: GameState): string {
-  let earliest = state.date;
-  for (const c of state.contracts) if (c.since < earliest) earliest = c.since;
-  return earliest;
-}
+const GAME_START_DATE = buildSeasonCalendar(FIRST_SEASON).preseasonStart;
 
 /** 상각이 남아 있는가 — 계약 기간을 다 채웠으면 끝났다 */
 function amortisationMonthsLeft(state: GameState, since: string, until: string): number {
@@ -780,70 +786,90 @@ function amortisationMonthsLeft(state: GameState, since: string, until: string):
 }
 
 /**
- * 이번 달 이적료 상각 — 활성 계약 + 이적 원장에서 **파생**한다 (자산 테이블 없음).
+ * 이 팀의 선수별 **계약 사슬** — 시작일 순. 재계약은 새 행을 쌓고 이전 행을
+ * `"ended"`로 남기므로 계약 이력이 세이브에 그대로 있다. 그래서 취득 시점도
+ * 재계약마다 갈리는 상각 기울기도 새 필드 없이 되찾을 수 있다. 시즌 전환이 끝난
+ * 계약을 정리하지만 **활성 계약이 있는 선수의 이력은 남긴다** (`transitionSeason` —
+ * finance.md §6.1). 그게 이 사슬의 전제다.
  *
- * 두 갈래가 같은 축으로 들어온다:
- *   게임 중 영입 — 이적료 ÷ 계약 개월수 (원본은 이적 원장)
- *   시작 스쿼드 — 주급 × 배수 (원본은 계약 자체)
- * 계약 시작일로 갈리므로 **한 선수가 두 갈래에 동시에 들지 않는다** — 영입한
- * 선수의 계약은 언제나 게임 시작일보다 늦다.
- *
- * 계약이 끝나거나 선수를 팔면 활성 계약이 사라지므로 상각도 자동으로 멈춘다.
- * 매각은 거기서 그치지 않고 **잔존가를 털어 낸다** (`bookValueOf` — finance.md §6.1).
- *
- * 이적 갈래의 순회 기준은 **이적 원장**이다 — 이적은 몇 건뿐이고 계약은 3천 건에
- * 가까우므로(96팀 × 30명) 계약을 훑으면 월초 정산이 팀 수만큼 느려진다.
+ * 팀 단위로 한 번에 접는다 — 선수마다 3천 줄(96팀 × 30명)을 다시 훑으면 월초
+ * 정산이 팀 수 × 스쿼드 수만큼 느려진다.
  */
-/**
- * 이 선수가 이 팀에 온 **첫 계약** — 재계약은 새 행을 쌓고 이전 행을 `"ended"`로 남기므로
- * 계약 이력이 세이브에 그대로 있다. 그래서 취득 시점을 새 필드 없이 되찾을 수 있다.
- */
-function firstContractAt(state: GameState, teamId: string, playerId: string): Contract | null {
-  let first: Contract | null = null;
-  for (const c of state.contracts) {
-    if (c.gamePlayerId !== playerId || c.teamId !== teamId) continue;
-    if (first === null || c.since < first.since) first = c;
+function contractChainsOf(state: GameState, teamId: string): Map<string, Contract[]> {
+  const chains = new Map<string, Contract[]>();
+  for (const contract of state.contracts) {
+    if (contract.teamId !== teamId) continue;
+    const chain = chains.get(contract.gamePlayerId);
+    if (chain) chain.push(contract);
+    else chains.set(contract.gamePlayerId, [contract]);
   }
-  return first;
+  for (const chain of chains.values()) {
+    chain.sort((a, b) => (a.since < b.since ? -1 : a.since > b.since ? 1 : 0));
+  }
+  return chains;
 }
 
 /**
- * **취득원가와 원래 상각 기간** — 재계약이 이 둘을 바꾸지 않는다.
+ * **취득원가** — 재계약이 이것을 바꾸지 않는다.
  *
  * 예전엔 레거시 갈래가 "계약 시작일 == 게임 시작일"로 판정했다. 그래서 **재계약하는
  * 순간 그 선수의 상각이 사라졌다** — 4시즌이면 전 구단 상각이 0이 되고 유저 장부
  * 손익이 £16.7M → £202.2M으로 올라갔다(§10.3의 3번 최대 원인). 실제 회계는 재계약으로
  * 잔존가를 지우지 않는다.
  */
-function acquisitionOf(
-  state: GameState,
-  teamId: string,
-  playerId: string,
-): { cost: number; months: number; since: string } | null {
-  const first = firstContractAt(state, teamId, playerId);
-  if (!first) return null;
+function acquisitionCostOf(state: GameState, teamId: string, chain: Contract[]): number {
+  const first = chain[0];
+  if (!first) return 0;
   const months = monthsBetween(first.since, first.until) + 1;
-  if (months <= 0) return null;
+  if (months <= 0) return 0;
 
   // 유상으로 데려왔으면 이적료가 취득원가다
   const paid = state.transfers.find(
     (t) =>
-      t.toTeamId === teamId && t.gamePlayerId === playerId && t.fee > 0 && first.since >= t.date,
+      t.toTeamId === teamId &&
+      t.gamePlayerId === first.gamePlayerId &&
+      t.fee > 0 &&
+      first.since >= t.date,
   );
-  if (paid) return { cost: paid.fee, months, since: first.since };
+  if (paid) return paid.fee;
 
   // 시작 스쿼드는 주급에서 파생한다 (§6.1) — 그 외(무상 이적·유스)는 장부가 없다
-  if (first.since > gameStartDate(state)) return null;
-  return {
-    cost: first.weeklyWage * WEEKS_PER_MONTH * LEGACY_AMORTISATION_WAGE_RATE * months,
-    months,
-    since: first.since,
-  };
+  if (first.since > GAME_START_DATE) return 0;
+  return first.weeklyWage * WEEKS_PER_MONTH * LEGACY_AMORTISATION_WAGE_RATE * months;
 }
 
 /**
- * 지금 남은 **장부상 잔존가** — 취득원가를 원래 기간에 균등 상각한 나머지.
- * 매각 시 처분 이익(§6.1)과 월 상각이 같은 식을 쓴다.
+ * 그 달의 **장부상 잔존가** — 취득원가를 계약 사슬을 따라 접은 나머지.
+ *
+ * ⚠️ **첫 계약의 직선이 아니다.** 재계약은 그 시점의 잔존가를 새 기간에 다시 펴므로
+ * 잔존가는 계약마다 기울기가 갈리는 **꺾은선**이다. 첫 계약의 직선으로만 읽으면
+ * 재계약이 두 번 겹치는 순간 불변식(총 상각 ≤ 취득원가)이 양쪽으로 깨진다 —
+ * 짧게 재계약한 뒤 또 재계약하면 이미 더 빨리 턴 값이 원래 눈금으로 되살아나고,
+ * 만기를 넘겨 재계약하면 원래 눈금이 이미 0이라 남은 값이 통째로 사라진다.
+ */
+function residualOf(state: GameState, teamId: string, chain: Contract[], at: string): number {
+  let value = acquisitionCostOf(state, teamId, chain);
+  if (value <= 0) return 0;
+
+  const target = monthOf(at);
+  for (let i = 0; i < chain.length; i++) {
+    const contract = chain[i]!;
+    const next = chain[i + 1];
+    const nextMonth = next ? monthOf(next.since) : null;
+    // 이 계약이 상각을 지고 있던 구간 — 다음 계약이 시작하거나 기준 달에 닿을 때까지
+    const until = nextMonth !== null && nextMonth < target ? nextMonth : target;
+    const months = monthsBetween(contract.since, contract.until) + 1;
+    if (months > 0) {
+      const used = Math.min(months, Math.max(0, monthsBetween(monthOf(contract.since), until)));
+      value -= (value / months) * used;
+    }
+    if (until === target) break;
+  }
+  return Math.max(0, value);
+}
+
+/**
+ * 지금 남은 **장부상 잔존가**. 매각 시 처분 이익(§6.1)과 월 상각이 같은 식을 쓴다.
  */
 export function bookValueOf(
   state: GameState,
@@ -851,42 +877,34 @@ export function bookValueOf(
   playerId: string,
   at?: string,
 ): number {
-  const acq = acquisitionOf(state, teamId, playerId);
-  if (!acq) return 0;
-  const used = monthsBetween(acq.since, monthOf(at ?? state.date));
-  return Math.max(0, acq.cost * (1 - Math.min(1, Math.max(0, used) / acq.months)));
+  const chain = contractChainsOf(state, teamId).get(playerId) ?? [];
+  return residualOf(state, teamId, chain, at ?? state.date);
 }
 
 /**
  * 이번 달 이적료 상각 — 활성 계약 + 이적 원장에서 **파생**한다 (자산 테이블 없음).
  *
- * 취득원가는 두 갈래로 정해진다 (`acquisitionOf`):
+ * 취득원가는 두 갈래로 정해진다 (`acquisitionCostOf`):
  *   게임 중 영입 — 이적료
  *   시작 스쿼드 — 주급 × 배수 × 원래 계약 개월수
- * 그 뒤는 한 길이다. 원래 계약 동안은 `취득원가 ÷ 원래 개월수`를 매달 털고,
- * **재계약하면 그 시점의 잔존가를 새 기간에 다시 편다** — 총액은 그대로이고 연 상각은
- * 낮아진다. 계약이 끝나거나 선수를 팔면 멈춘다.
+ * 그 뒤는 **한 길이다** — 지금 도는 계약이 시작할 때의 잔존가를 그 계약의 개월수에
+ * 편다. 첫 계약이면 그 잔존가가 곧 취득원가라 `취득원가 ÷ 원래 개월수`이고,
+ * 재계약이면 그 시점까지 턴 나머지를 새 기간에 다시 편다 — 총액은 그대로이고 연
+ * 상각은 낮아진다. 계약이 끝나거나 선수를 팔면 멈춘다.
  */
 export function amortisationOf(state: GameState, teamId: string): AmortisationLine[] {
   const lines: AmortisationLine[] = [];
-  for (const contract of state.contracts) {
-    if (contract.status !== "active" || contract.teamId !== teamId) continue;
+  const chains = contractChainsOf(state, teamId);
+  for (const [playerId, chain] of chains) {
+    const contract = chain.find((c) => c.status === "active");
+    if (!contract) continue;
     if (amortisationMonthsLeft(state, contract.since, contract.until) <= 0) continue;
 
-    const acq = acquisitionOf(state, teamId, contract.gamePlayerId);
-    if (!acq || acq.cost <= 0) continue;
-
-    // 원래 계약이 아직 도는 중이면 원래 눈금 그대로
-    if (contract.since <= acq.since) {
-      lines.push({ playerId: contract.gamePlayerId, monthly: acq.cost / acq.months });
-      continue;
-    }
-    // 재계약 — 그 시점의 잔존가를 새 기간에 다시 편다
-    const residual = bookValueOf(state, teamId, contract.gamePlayerId, contract.since);
+    const residual = residualOf(state, teamId, chain, contract.since);
     if (residual <= 0) continue;
     const months = monthsBetween(contract.since, contract.until) + 1;
     if (months <= 0) continue;
-    lines.push({ playerId: contract.gamePlayerId, monthly: residual / months });
+    lines.push({ playerId, monthly: residual / months });
   }
   return lines;
 }
@@ -924,7 +942,7 @@ function recentWinRates(state: GameState, window: number): Map<string, number> {
  * 전에 마감한다.
  */
 export function runMonthlyFinance(state: GameState, digest: string[]): void {
-  closeMonth(state, digest);
+  closeMonths(state, digest, previousMonth(monthOf(state.date)));
   postMonthlyItems(state);
   /**
    * 동결 판정은 **시즌 전환이 아니라 매달** 다시 본다 (§9.4). 시즌 끝에만 보면
@@ -936,6 +954,38 @@ export function runMonthlyFinance(state: GameState, digest: string[]): void {
     refreshBudgetFreeze(state, team.id, digest);
   }
   pruneLedger(state);
+}
+
+/**
+ * 시즌의 **마지막 달 마감** — 시즌 리뷰와 시즌 전환 사이에서만 부른다 (§7.1).
+ *
+ * 월초 훅만으로는 시즌의 마지막 달이 시즌 안에서 마감되지 않는다. 시즌은 6월 초에
+ * 끝나고 전환이 곧바로 다음 7월 1일로 건너뛰므로 다음 월초 훅은 8월 1일이다. 그런데
+ * 6월은 리그 상금·시즌 보너스가 앉는 달이고, 이적 예산과 PSR은 **전환 안에서** 지난
+ * 시즌 손익을 읽는다 — 마지막 달이 빠진 성과로 다음 시즌이 정해졌다.
+ *
+ * ⚠️ `state.season`·`state.calendar`가 **아직 끝난 시즌일 때** 돌아야 한다. 보고서의
+ * 시즌 번호를 그 둘로 역산하기 때문이다 (`seasonOfMonth`).
+ */
+export function closeSeasonBooks(state: GameState, digest: string[]): void {
+  paySkippedWages(state);
+  closeMonths(state, digest, monthOf(state.date));
+}
+
+/**
+ * 전환이 건너뛰는 주급 — 시즌 종료 다음 날부터 **다음 시즌 시작 전날까지의 월요일**만큼.
+ *
+ * 정액 수입과 고정비는 그달 1일에 한 달치가 다 앉는데 주급만 한 주치라, 그대로
+ * 마감하면 시즌의 마지막 달이 구조적 흑자가 되고 그 흑자가 곧 다음 시즌 예산이 된다.
+ * 선수는 6월 30일까지 계약돼 있으므로 그 주급은 실제로 나가야 하는 돈이다.
+ */
+function paySkippedWages(state: GameState): void {
+  const nextSeasonStart = buildSeasonCalendar(state.season + 1).preseasonStart;
+  let weeks = 0;
+  for (let date = addDays(state.date, 1); date < nextSeasonStart; date = addDays(date, 1)) {
+    if (dayOfWeek(date) === MONDAY) weeks++;
+  }
+  payWeeklyWages(state, weeks);
 }
 
 /**
@@ -1369,11 +1419,17 @@ function cashFlowAfter(ledger: LedgerEntry[], month: string): number {
     .reduce((s, e) => s + (e.kind === "income" ? e.amount : -e.amount), 0);
 }
 
-/** 지난달 마감 — 유저 팀만. 같은 달을 두 번 마감하지 않는다 */
-function closeMonth(state: GameState, digest: string[]): void {
+/** 직전 달 — "YYYY-MM" */
+function previousMonth(month: string): string {
+  const [year, m] = month.split("-").map(Number) as [number, number];
+  return m > 1 ? `${year}-${String(m - 1).padStart(2, "0")}` : `${year - 1}-12`;
+}
+
+/** `through`까지 마감 — 유저 팀만. 같은 달을 두 번 마감하지 않는다 */
+function closeMonths(state: GameState, digest: string[], through: string): void {
   const finance = financeOf(state, state.userTeamId);
   const months = [...new Set(finance.ledger.map((e) => monthOf(e.date)))]
-    .filter((m) => m < monthOf(state.date))
+    .filter((m) => m <= through)
     .sort();
   for (const month of months) {
     if (state.financeReports.some((r) => r.month === month && r.teamId === state.userTeamId)) {
