@@ -37,11 +37,15 @@ describe("한 시즌을 돈 뒤의 체력·출전 분포", () => {
       .filter((n) => n > 0);
 
     const readings: Readings<typeof AI_FITNESS> = {
-      "상대 상위 14명 체력 (최저 팀)": Math.min(...RIVALS.map((t) => topCondition(state, t, LINEUP))),
+      "상대 상위 14명 체력 (최저 팀)": Math.min(
+        ...RIVALS.map((t) => topCondition(state, t, LINEUP)),
+      ),
       "우리와 상대의 체력 격차": Math.abs(us - them),
       "한 시즌 출전 인원 (맨시티)": apps.length,
     };
-    console.log(reportOf(AI_FITNESS, readings, `시드 7 · 우리 ${us.toFixed(1)} vs 상대 ${them.toFixed(1)}`));
+    console.log(
+      reportOf(AI_FITNESS, readings, `시드 7 · 우리 ${us.toFixed(1)} vs 상대 ${them.toFixed(1)}`),
+    );
     expect(outOfBand(AI_FITNESS, readings)).toEqual([]);
   });
 });

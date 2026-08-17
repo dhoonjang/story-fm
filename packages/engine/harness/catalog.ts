@@ -15,6 +15,7 @@ export const WORLD_SEASON = defineHarness({
   what: "전체 세계 EPL 한 시즌 — 득점·슈팅 분포 · 승점 곡선 · 카드",
   doc: MATCH,
   cost: "시드당 수십 초 × 3시드",
+  // prettier-ignore
   bands: [
     { metric: "리그 평균 슈팅/경기", role: "reference", min: 24, max: 26, why: "실제 1부의 양 팀 합" },
     { metric: "리그 평균 기회 xG/경기", role: "measure", why: "최종 득점과 같은 눈금이어야 한다" },
@@ -60,6 +61,7 @@ export const AI_ROTATION = defineHarness({
   what: "AI 스쿼드의 체력 분포와 로테이션 문턱 발동률",
   doc: MATCH,
   cost: "world-season과 같은 시즌을 나눠 쓴다",
+  // prettier-ignore
   bands: [
     { metric: "표본 (팀 × 경기일)", role: "measure", unit: "count", why: "감독 경기가 시작되는 순간의 리그를 그대로 읽은 횟수" },
     { metric: "선발 평균 체력", role: "measure", why: "그날 서는 열한 명의 체력" },
@@ -79,6 +81,7 @@ export const ASSIST_RATE = defineHarness({
   what: "골에 도움이 붙는 비율",
   doc: MATCH,
   cost: "축소 세계 6시드 · 수 초",
+  // prettier-ignore
   bands: [
     { metric: "골", role: "measure", unit: "count", why: "골이 없으면 시험이 성립하지 않는다" },
     { metric: "도움", role: "measure", unit: "count", why: "빈 칸이 아닌 도움만 센다" },
@@ -91,6 +94,7 @@ export const INJURY_RATE = defineHarness({
   what: "경기당 부상 건수 · 성향이 빈도에 닿는 폭",
   doc: MATCH,
   cost: "간이 시뮬 16,000판 · 수십 초",
+  // prettier-ignore
   bands: [
     { metric: "경기당 부상 건수", role: "measure", why: "양 팀 합" },
     { metric: "기대 대비 배율", role: "guard", min: 0.8, max: 1.2, why: "기대 = `INJURY_CHANCE_PER_APPEARANCE` × 온필드 22명. 손잡이에서 유도하므로 눈금을 옮겨도 따라온다" },
@@ -104,10 +108,11 @@ export const FINANCE_TIER1 = defineHarness({
   what: "tier1 유저 구단의 한 시즌 살림 — 장부 손익 · 현금 · 급여 비중 · 수입",
   doc: `${FINANCE}.1`,
   cost: "전체 세계 한 시즌 · 수 분",
+  // prettier-ignore
   bands: [
     { metric: "시즌 1 보고서 수", role: "guard", min: 10, unit: "count", why: "한 시즌을 다 돌지 못하면 나머지가 전부 헛값이다" },
-    { metric: "연 장부 손익", role: "guard", min: -30_000_000, max: 40_000_000, unit: "money", why: "PSR 위반선(시즌 평균 −£35M) 바로 위부터, 흑자만으로 이적 예산이 무한히 불어나지 않는 선까지" },
-    { metric: "연 현금 순증", role: "reference", min: 85_000_000, max: 200_000_000, unit: "money", why: "이적 활동이 지배하는 축이라 자릿수만 본다 — 판정은 장부 손익이 한다" },
+    { metric: "연 장부 손익", role: "reference", min: -30_000_000, max: 40_000_000, unit: "money", why: "**밴드의 기준 축.** PSR 위반선(시즌 평균 −£35M) 바로 위부터, 흑자만으로 이적 예산이 무한히 불어나지 않는 선까지 — 지금 상단 밖이다 (finance.md §10.2)" },
+    { metric: "연 현금 순증", role: "guard", min: 85_000_000, max: 200_000_000, unit: "money", why: "이적 활동이 지배하는 축이라 밸런스를 판정하지 않는다 — 시즌이 제대로 돌았는지의 난간" },
     { metric: "연 수입", role: "guard", min: 300_000_000, unit: "money", why: "실제 상위 구단 £400–700M의 6–7할" },
     { metric: "연 지출", role: "measure", unit: "money", why: "수입과 함께 읽는다 — 손익의 분해" },
     { metric: "연 상각", role: "measure", unit: "money", why: "실제 구단은 비용의 3할 안팎" },
@@ -122,6 +127,7 @@ export const FINANCE_LEAGUES = defineHarness({
   what: "한 시즌 뒤 리그별 잔고 — 어느 리그도 구조적 적자가 아니다",
   doc: `${FINANCE}.3`,
   cost: "finance-tier1과 같은 시즌을 나눠 쓴다",
+  // prettier-ignore
   bands: [
     { metric: "리그별 중간 잔고의 최소", role: "guard", min: 0, unit: "money", why: "약체 리그가 구조적 적자면 이적 시장이 왜곡된다 (불변식 1)" },
     { metric: "리그별 최저 잔고의 최소", role: "guard", min: -30_000_000, unit: "money", why: "한 구단이 파산 수준으로 가라앉지 않는 선" },
@@ -133,6 +139,7 @@ export const FINANCE_MULTI_SEASON = defineHarness({
   what: "세 시즌을 굴려도 가라앉는 리그가 없다",
   doc: `${FINANCE}.3`,
   cost: "전체 세계 세 시즌 · 십수 분",
+  // prettier-ignore
   bands: [
     { metric: "도달한 시즌", role: "guard", min: 4, unit: "count", why: "세 시즌은 리그가 가라앉는지 보이는 가장 짧은 창이다" },
     { metric: "리그별 중간 잔고의 최소", role: "guard", min: 0, unit: "money", why: "한 시즌은 발산을 감추기에 충분히 짧다 (불변식 1). 자유계약·시장 전용 리그는 클럽이 아니라 대상 밖" },
@@ -144,6 +151,7 @@ export const FINANCE_SECOND_TIER = defineHarness({
   what: "리그전을 굴리지 않는 2부의 한 시즌 수지",
   doc: "docs/simulation/finance.md §9.5",
   cost: "전체 세계 한 시즌 · 수 분",
+  // prettier-ignore
   bands: [
     { metric: "2부 구단 수", role: "guard", min: 10, unit: "count", why: "표본이 없으면 중간값이 뜻을 잃는다" },
     { metric: "2부 한 시즌 수지 중간값", role: "guard", min: -8_000_000, unit: "money", why: "균형이 아니라 **수입원의 존재**를 지킨다 — 이 선이 깨지면 매치데이 보정이 사라졌다는 뜻이다" },
@@ -155,6 +163,7 @@ export const AI_FITNESS = defineHarness({
   what: "한 시즌을 돈 뒤의 AI 스쿼드 체력·출전 분포",
   doc: MATCH,
   cost: "전체 세계 한 시즌 · 수 분",
+  // prettier-ignore
   bands: [
     { metric: "상대 상위 14명 체력 (최저 팀)", role: "guard", min: 70, why: "라인업에 설 14명이 어느 시점에도 쓸 만해야 한다" },
     { metric: "우리와 상대의 체력 격차", role: "guard", max: 10, why: "하루 회복이 우리 팀에만 있던 시절 이 차이가 20을 넘었다" },
@@ -167,6 +176,7 @@ export const AI_MARKET = defineHarness({
   what: "한 시즌의 AI↔AI 시장 규모 — 팀당 이적·임대와 여름 비중",
   doc: "docs/simulation/transfer.md §6",
   cost: "전체 세계 한 시즌 · 수 분",
+  // prettier-ignore
   bands: [
     { metric: "총 이동", role: "measure", unit: "count", why: "이적 + 임대 — 팀당 값의 분모가 아니라 규모 그 자체" },
     { metric: "1부 팀당 이적", role: "guard", min: 1, max: 6, why: "실제 시장과 같은 자릿수" },
@@ -180,12 +190,12 @@ export const MANAGER_MARKET = defineHarness({
   what: "한 시즌에 감독을 바꾸는 1부 구단 수",
   doc: "docs/simulation/transfer.md §7",
   cost: "전체 세계 한 시즌 · 수 분",
+  // prettier-ignore
   bands: [
     { metric: "경질 구단 수", role: "guard", min: 5, unit: "count", why: "`SACK_CHANCE`와 문턱이 만든 빈도가 사람 사는 범위인가" },
     { metric: "경질 구단 비중", role: "guard", max: 0.5, unit: "ratio", why: "리그가 통째로 뒤집히지는 않는다" },
   ],
 });
-
 
 /**
  * 종합 눈금 — **그 숫자가 굴리는 것들의 분포** (`docs/data/player.md` §4).
@@ -200,6 +210,7 @@ export const OVERALL_SCALE = defineHarness({
   what: "종합이 굴리는 것들의 분포 — 자리별 평균 · 축 범위 밖 · 시장가 · 주급 · 잠재력 간격",
   doc: "docs/data/player.md §4",
   cost: "세계 하나 · 시드당 몇 초 × 2시드",
+  // prettier-ignore
   bands: [
     { metric: "선수 수", role: "measure", unit: "count", why: "전 세계" },
     { metric: "EPL 인원", role: "measure", unit: "count", why: "돈은 EPL만 잰다 — 전 세계에 계약 조회를 걸면 몇 분이 된다" },

@@ -114,7 +114,8 @@ const MARK: Record<BandRole, [string, string]> = {
 };
 
 /** 한글·한자는 터미널에서 두 칸을 먹는다 — 폭을 글자 수로 세면 표가 어긋난다 */
-const WIDE = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-\u9fff\ua000-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe6f\uff00-\uff60\uffe0-\uffe6]/;
+const WIDE =
+  /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-\u9fff\ua000-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe6f\uff00-\uff60\uffe0-\uffe6]/;
 
 function widthOf(text: string): number {
   return [...text].reduce((n, ch) => n + (WIDE.test(ch) ? 2 : 1), 0);
@@ -149,7 +150,9 @@ export function listing(harnesses: readonly Harness[]): string {
     out.push(`  근거:   ${harness.doc}`);
     const width = Math.max(...harness.bands.map((b) => widthOf(b.metric)));
     for (const band of harness.bands) {
-      out.push(`    ${pad(band.metric, width)}  ${pad(rangeOf(band), 20)}${pad(band.role, 11)}${band.why}`);
+      out.push(
+        `    ${pad(band.metric, width)}  ${pad(rangeOf(band), 20)}${pad(band.role, 11)}${band.why}`,
+      );
     }
     out.push("");
   }

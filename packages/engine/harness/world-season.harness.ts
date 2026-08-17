@@ -82,7 +82,8 @@ function seasonReadings(state: GameState): Readings<typeof WORLD_SEASON> {
   const teamGoals = played.flatMap((m) => [m.result!.homeGoals, m.result!.awayGoals]);
   const shots = played.flatMap((m) => [m.result!.homeShots ?? 0, m.result!.awayShots ?? 0]);
   const shotMean = shots.reduce((a, b) => a + b, 0) / Math.max(1, shots.length);
-  const sum = (pick: (m: (typeof played)[number]) => number) => played.reduce((a, m) => a + pick(m), 0);
+  const sum = (pick: (m: (typeof played)[number]) => number) =>
+    played.reduce((a, m) => a + pick(m), 0);
   const share = (xs: number[], goals: number, top = false) =>
     ratio(xs.filter((x) => (top ? x >= goals : x === goals)).length, xs.length);
 

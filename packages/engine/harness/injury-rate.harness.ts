@@ -64,7 +64,9 @@ describe("성향은 빈도에도 닿는다 — 유리몸 팀은 더 자주 쓰�
       "유리몸 팀 배율": fragile / healthy,
       "유리몸 한 명의 부상 점유율": hisShare / Math.max(1, homeInjuries),
     };
-    console.log(reportOf(INJURY_RATE, readings, `간이 시뮬 16,000판 · 기대 ${expected.toFixed(3)}건`));
+    console.log(
+      reportOf(INJURY_RATE, readings, `간이 시뮬 16,000판 · 기대 ${expected.toFixed(3)}건`),
+    );
     expect(outOfBand(INJURY_RATE, readings)).toEqual([]);
   });
 });
