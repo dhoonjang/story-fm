@@ -5,12 +5,14 @@ import {
   applyScenePoint,
   createGame,
   clockOf,
+  formatMoney,
   headCoachOf,
   interpretBackgroundHeuristic,
   ownerOf,
   reportersOf,
   speakerRoles,
   scoutPlayer,
+  scoutReportCard,
   playersOf,
   userPlayers,
   type GameState,
@@ -27,7 +29,7 @@ import {
   runOnboardingTurn,
   type GmToolCall,
 } from "@story-fm/agents";
-import { normalizeSpeaker } from "@story-fm/domain";
+import { normalizeSpeaker, SCOUT_DAYS } from "@story-fm/domain";
 import type { GameLLM, TurnRequest } from "@story-fm/llm";
 
 /**
@@ -138,6 +140,25 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
     const target = playersOf(state, "chelsea")[0]!;
     scoutPlayer(state, target.id);
     expect(buildGmStateNote(state)).toContain("스카우트 파견 중");
+  });
+
+  /**
+   * 카드는 프롬프트에 가지 않는다. 카드가 서는 턴의 스냅샷이 같은 금액을 싣지 않으면
+   * 모델은 카드 옆에서 몸값을 지어내고 한 화면이 두 말을 한다 (agents.md §6).
+   */
+  it("카드가 서는 턴의 스냅샷이 카드와 같은 금액을 싣는다", () => {
+    const state = game();
+    const target = playersOf(state, "chelsea")[0]!;
+    scoutPlayer(state, target.id);
+    advanceTime(state, { days: SCOUT_DAYS });
+
+    const card = scoutReportCard(state, target.id)!;
+    const note = buildGmStateNote(state, null, [card]);
+    expect(note).toContain("도착한 스카우트 보고서");
+    expect(note).toContain(formatMoney(card.marketValue));
+    expect(note).toContain(formatMoney(card.wageExpectation));
+    // 실리지 않은 턴에는 한 줄도 쓰지 않는다 — 매 턴 정가로 읽히는 블록이다
+    expect(buildGmStateNote(state)).not.toContain("도착한 스카우트 보고서");
   });
 
   it("날짜가 흐르면 내용이 바뀐다 (캐시 밖에 있어야 하는 이유)", () => {

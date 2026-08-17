@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   formatMoney,
   playersOf,
+  pushReportCards,
   ratingLabel,
   ratingTier,
   scoutPlayer,
   scoutReportCard,
   scoutReportLine,
+  takeReportCards,
   advanceTime,
   type GameState,
 } from "@story-fm/engine";
@@ -76,9 +78,8 @@ describe("보고서 한 장", () => {
   });
 
   /**
-   * 카드는 모델이 장면을 **쓴 뒤에** 붙어 화면에만 가고, 모델이 읽는 것은 도착
-   * 다이제스트뿐이다. 두 값이 갈리면 카드는 £34.9M인데 대사는 4,000만이 된다
-   * (agents.md §6).
+   * 카드는 모델이 장면을 **쓴 뒤에** 붙어 화면에만 간다. 모델이 읽는 것은 도착 줄뿐이라
+   * 두 값이 갈리면 카드는 £34.9M인데 대사는 4,000만이 된다 (agents.md §6).
    */
   it("도착 다이제스트가 카드와 같은 값을 낸다", () => {
     const state = createTestGame(11);
@@ -97,6 +98,36 @@ describe("보고서 한 장", () => {
     expect(arrival).toContain(formatMoney(card.marketValue));
     expect(arrival).toContain(formatMoney(card.wageExpectation));
     expect(arrival).toContain(`종합 ${card.overall.value}`);
+  });
+
+  /**
+   * 카드는 **모델이 그 값을 읽은 턴에만** 선다 — 시계가 장면 뒤에 구른 턴(모델 헤더)의
+   * 도착은 줄에 남아 다음 턴에 실린다. 도착과 동시에 카드를 세우면 그 턴의 모델은
+   * 금액을 못 읽은 채 카드 옆에서 지어낸다 (agents.md §6).
+   */
+  it("도착한 보고서는 카드로 꺼내 갈 때까지 줄에 남는다", () => {
+    const state = createTestGame(11);
+    const p = target(state);
+    expect(scoutPlayer(state, p.id).ok).toBe(true);
+    for (let i = 0; i < SCOUT_DAYS * 3 && !state.scoutReports[0]?.completedOn; i++) {
+      advanceTime(state, { days: 1 });
+    }
+
+    expect(state.pendingReportCards).toEqual([p.id]);
+    // 며칠이 더 흘러도 사라지지 않는다 — 아직 아무도 읽지 않았다
+    advanceTime(state, { days: 3 });
+    expect(state.pendingReportCards).toEqual([p.id]);
+
+    expect(takeReportCards(state, 3)).toEqual([p.id]);
+    expect(takeReportCards(state, 3)).toEqual([]);
+  });
+
+  /** 상한을 넘긴 만큼은 **버리지 않고 남긴다** — 며칠을 기다려 산 카드다 */
+  it("한 턴 상한을 넘으면 남은 것은 다음 턴 몫으로 남는다", () => {
+    const state = createTestGame(11);
+    pushReportCards(state, ["a", "b", "c", "d"]);
+    expect(takeReportCards(state, 3)).toEqual(["a", "b", "c"]);
+    expect(takeReportCards(state, 3)).toEqual(["d"]);
   });
 
   it("없는 선수는 null — 화면이 빈 카드를 그리지 않는다", () => {
