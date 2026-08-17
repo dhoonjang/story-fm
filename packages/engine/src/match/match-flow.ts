@@ -25,6 +25,7 @@ import {
   applyEvents,
   buildStrengthPacket,
   createLedger,
+  GAP_THRESHOLD,
   planAiSubstitution,
   planAiTacticalShift,
   simulateSegment,
@@ -120,15 +121,36 @@ function slotsFor(state: GameState, teamId: string, ids: string[]): LineupSlot[]
    * 전술판과 패킷이 다른 판이 된다.
    */
   const cameFrom = new Map<string, string>();
+  /** 쓰러졌는데 아직 그라운드에 있는 선수 — 장부는 부상으로 명단을 바꾸지 않는다 */
+  const hurt = new Set<string>();
   const pending = state.pendingMatch;
   if (pending) {
     const side = currentMatch(state).homeTeamId === teamId ? "home" : "away";
     for (const event of pending.ledger.events) {
-      if (event.type !== "substitution" || event.team !== side) continue;
+      if (event.team !== side) continue;
+      if (event.type === "injury") {
+        const [victim] = event.actors;
+        if (victim) hurt.add(victim);
+        continue;
+      }
+      if (event.type !== "substitution") continue;
       const [out, into] = event.actors;
       if (out && into) cameFrom.set(into, cameFrom.get(out) ?? out);
     }
   }
+  /**
+   * **다친 채 남은 선수는 구멍이다** (match.md §2). 장부의 `injury`가 명단을 바꾸지
+   * 않으므로, 감독이 교체하지 않으면 그 선수는 온전한 전력으로 남은 시간을 뛴다 —
+   * 교체를 미루는 결정에 값이 붙지 않는다. 그래서 패킷이 보는 경기 중 피로를 구멍
+   * 문턱 아래로 두지 않는다: 개인 전력이 깎이고, 그 라인이 구멍 하나의 대가를 치르고,
+   * 키포인트에 교체를 부르는 문장이 뜬다. 이미 그보다 지쳐 있었으면 그 값 그대로다 —
+   * 부상이 다리를 되살리지는 않는다.
+   *
+   * ⚠️ 깎는 것은 **패킷뿐**이다. 경기 후 체력 정산이 읽는 `pendingMatch.matchFatigue`는
+   * 건드리지 않는다 — 부상의 대가는 결장 일수가 이미 치른다 (match.md §6).
+   */
+  const fatigueOf = (id: string) =>
+    hurt.has(id) ? Math.max(worn[id] ?? 0, GAP_THRESHOLD) : (worn[id] ?? 0);
   const seatFor = new Map<string, Seat>();
   for (const id of ids) {
     if (assignments.get(id)?.role === "starting") continue;
@@ -183,7 +205,7 @@ function slotsFor(state: GameState, teamId: string, ids: string[]): LineupSlot[]
         // 3년 뛴 선수가 같은 정도로 전술을 소화하는 셈이 된다
         familiarity: assignment?.familiarity ?? FAMILIARITY_BASELINE,
         // 경기 중 누적 피로 — 후반에 전력이 떨어져 교체 타이밍이 뜻을 갖는다
-        matchFatigue: worn[id] ?? 0,
+        matchFatigue: fatigueOf(id),
       },
     ];
   });

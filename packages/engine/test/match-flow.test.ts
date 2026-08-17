@@ -338,6 +338,43 @@ describe("회귀: 부상·정지 선수는 경기에 나설 수 없다", () => {
   });
 
   /**
+   * 부상 정지점에서 교체를 미루는 결정에 코어가 값을 매긴다 (match.md §2).
+   * 장부는 `injury`로 명단을 바꾸지 않으므로, 이 감산이 없으면 다친 선수가 온전한
+   * 전력으로 남은 시간을 뛰고 교체하지 않는 쪽이 이득이 된다.
+   */
+  it("교체하지 않은 부상 선수는 남은 시간을 구멍으로 뛴다", () => {
+    const state = atMatchday();
+    startMatch(state);
+    const side = userSide(state);
+    const pending = state.pendingMatch!;
+    const ours = () => (side === "home" ? pending.packet.home : pending.packet.away);
+    const onPitch = () => (side === "home" ? pending.ledger.home : pending.ledger.away).onPitch;
+    // 수비수를 고른다 — 구멍의 대가가 어느 줄에 실리는지 함께 보기 위해
+    const victim = onPitch().find((id) => {
+      const player = userPlayers(state).find((x) => x.id === id);
+      return player !== undefined && groupOf(player) === "DF";
+    });
+    if (!victim) throw new Error("수비수를 찾지 못했다");
+    const effectiveOfVictim = () => ours().lineup.find((row) => row.id === victim)!.effective;
+    const before = effectiveOfVictim();
+    const defenseBefore = ours().zones.defense;
+
+    const hurt = applyMatchEvents(state, [
+      { minute: 20, type: "injury", team: side, actors: [victim], causes: [] },
+    ]);
+    expect(hurt.ok).toBe(true);
+    refreshPacket(state);
+
+    // 그라운드에는 그대로 서 있다 — 빼는 것은 교체뿐이다 (match.md §5)
+    expect(onPitch()).toContain(victim);
+    expect(effectiveOfVictim()).toBeLessThan(before);
+    // 구멍 하나의 대가는 그 라인 전체가 치른다
+    expect(ours().zones.defense).toBeLessThan(defenseBefore);
+    // 경기 후 체력 정산이 읽는 누적 피로는 건드리지 않는다 — 부상은 결장 일수로 치른다
+    expect(pending.matchFatigue?.[victim] ?? 0).toBe(0);
+  });
+
+  /**
    * **거르는 자리는 명단을 짜는 한 곳뿐이다** (match.md §7). 상대 벤치를 `startMatch`가
    * 다시 짜면 그 문이 감독의 경기에서만 새서, 정지 선수와 2군이 우리와 붙는 경기에서만
    * 벤치에 선다.

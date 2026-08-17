@@ -619,6 +619,14 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
     away: { ...ledger.away.yellows },
   };
   const gone = new Set<string>(ledger.sentOff);
+  /**
+   * **이미 쓰러진 선수는 다시 뽑히지 않는다** (match.md §5). 장부는 부상으로 온필드
+   * 명단을 바꾸지 않으므로, 교체되지 않은 부상자가 그대로 후보에 남아 있다 — 한 경기에
+   * 두 번 뽑히면 경기 후 반영이 같은 선수에게 INJURY row를 두 장 연다.
+   */
+  const alreadyHurt = new Set<string>(
+    ledger.events.filter((e) => e.type === "injury").flatMap((e) => e.actors),
+  );
   const rate = totalRate(rates);
 
   // 사건 사이의 시간은 지수분포 — 발생률이 높으면 사건이 촘촘해진다
@@ -738,7 +746,7 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
     }
 
     // 부상 — 감독이 교체를 결정해야 하므로 정지점이다
-    const hurt = pickInjured(rng, squad, fatigue, gone, proneness);
+    const hurt = pickInjured(rng, squad, fatigue, new Set([...gone, ...alreadyHurt]), proneness);
     if (!hurt) continue;
     events.push({ minute, type: "injury", team: side, actors: [hurt.id], causes: [] });
     return finish("injury", minute);

@@ -187,6 +187,46 @@ describe("구간 시뮬레이터 — 결과는 코어가 정한다", () => {
     }
   });
 
+  it("이미 쓰러진 선수는 같은 경기에서 다시 부상 후보가 되지 않는다 (match.md §5)", () => {
+    /**
+     * 부상만 뽑는 난수 — 대기(짧게) → 사건 추첨(가중표의 마지막 = 원정 부상) →
+     * 대상 추첨. 부상은 경기당 0.1건이라 시드를 아무리 돌려도 한 경기에 두 번은
+     * 나오지 않는다: 뽑히는 자리를 직접 열어야 이 규칙을 볼 수 있다.
+     */
+    const injuryRng = () => {
+      const script = [0.02, 0.999999, 0.5];
+      let i = 0;
+      return () => script[i++ % script.length]!;
+    };
+    const s = setup();
+    const first = simulateSegment({
+      packet: s.packet,
+      ledger: s.ledger,
+      squads: s.squads,
+      tactics: s.tactics,
+      rng: injuryRng(),
+    });
+    const hurt = first.events.find((e) => e.type === "injury");
+    expect(hurt?.actors[0]).toBeDefined();
+
+    const applied = applyEvents(s.ledger, first.events);
+    if (!applied.ok) throw new Error(applied.errors.join(" / "));
+    // 부상은 명단을 바꾸지 않는다 — 교체하지 않았으므로 그대로 서 있다
+    expect(applied.state.away.onPitch).toContain(hurt!.actors[0]);
+
+    // 같은 난수·같은 가중이면 예전엔 같은 사람이 또 뽑혔다
+    const second = simulateSegment({
+      packet: s.packet,
+      ledger: applied.state,
+      squads: s.squads,
+      tactics: s.tactics,
+      rng: injuryRng(),
+    });
+    const again = second.events.find((e) => e.type === "injury");
+    expect(again?.actors[0]).toBeDefined();
+    expect(again!.actors[0]).not.toBe(hurt!.actors[0]);
+  });
+
   it("득점자는 공격 자원 쪽으로 기운다 — 골키퍼는 넣지 않는다", () => {
     let fw = 0;
     let total = 0;
