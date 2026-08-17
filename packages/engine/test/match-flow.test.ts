@@ -11,6 +11,7 @@ import {
   groupOf,
   loadGame,
   MATCH_PROFICIENCY_GAIN,
+  MATCHDAY_BENCH,
   playersOf,
   proficiencyAt,
   refreshPacket,
@@ -334,6 +335,106 @@ describe("회귀: 부상·정지 선수는 경기에 나설 수 없다", () => {
     const res = substitutePlayer(state, { out, in: benchId });
     expect(res.ok).toBe(false);
     expect(res.message).toContain("부상");
+  });
+
+  /**
+   * **거르는 자리는 명단을 짜는 한 곳뿐이다** (match.md §7). 상대 벤치를 `startMatch`가
+   * 다시 짜면 그 문이 감독의 경기에서만 새서, 정지 선수와 2군이 우리와 붙는 경기에서만
+   * 벤치에 선다.
+   */
+  it("상대 벤치도 간이 시뮬의 명단을 그대로 받는다 — 정지자·2군이 없다", () => {
+    const state = atMatchday();
+    const today = state.matches.find(
+      (m) =>
+        m.date === state.date &&
+        !m.result &&
+        (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+    )!;
+    const opponentId =
+      today.homeTeamId === state.userTeamId ? today.awayTeamId : today.homeTeamId;
+    const inXI = new Set(assignmentsOf(state, opponentId, "starting").map((a) => a.playerId));
+    // 배치 밖 최상위 둘 — 걸러지지 않으면 OVR 순 벤치의 맨 위에 선다
+    const spare = playersOf(state, opponentId)
+      .filter((p) => !inXI.has(p.id))
+      .sort((a, b) => b.attributes.overall - a.attributes.overall);
+    const banned = spare[0]!;
+    const reserve = spare[1]!;
+    state.suspensions.push({
+      id: "susp-bench",
+      gamePlayerId: banned.id,
+      cause: "red",
+      issuedOn: state.date,
+      lengthMatches: 1,
+      served: 0,
+      status: "active",
+    });
+    reserve.squadLevel = "reserve";
+
+    expect(startMatch(state).ok).toBe(true);
+    const theirs =
+      userSide(state) === "home" ? state.pendingMatch!.ledger.away : state.pendingMatch!.ledger.home;
+    expect(theirs.bench.length).toBeGreaterThan(0);
+    expect(theirs.bench).not.toContain(banned.id);
+    expect(theirs.bench).not.toContain(reserve.id);
+    expect(theirs.onPitch).not.toContain(banned.id);
+    expect(theirs.onPitch).not.toContain(reserve.id);
+  });
+
+  /** 2군은 승격 후에만 배치된다 (team.md §5) — 코어가 대신 채우는 자리도 같다 */
+  it("우리 자동 대체는 2군을 세우지 않는다", () => {
+    const state = atMatchday();
+    const teamId = state.userTeamId;
+    const starter = assignmentsOf(state, teamId, "starting")[3]!;
+    const assigned = new Set(assignmentsOf(state, teamId).map((a) => a.playerId));
+    /** 그 자리의 적응도를 천장에 두면 1군만 보지 않는 한 반드시 뽑힌다 */
+    const spare = playersOf(state, teamId).find((p) => !assigned.has(p.id))!;
+    spare.squadLevel = "reserve";
+    spare.positions = [{ position: starter.position, proficiency: 99, isNatural: true }];
+    state.injuries.push({
+      id: "inj-r4",
+      gamePlayerId: starter.playerId,
+      bodyPart: "종아리",
+      severity: "minor",
+      cause: "training",
+      occurredOn: state.date,
+      expectedReturn: "2026-12-31",
+      returnedOn: null,
+    });
+
+    expect(startMatch(state).ok).toBe(true);
+    const mine =
+      userSide(state) === "home" ? state.pendingMatch!.ledger.home : state.pendingMatch!.ledger.away;
+    expect(mine.onPitch).toHaveLength(11);
+    expect(mine.onPitch).not.toContain(spare.id);
+    expect(mine.bench).not.toContain(spare.id);
+  });
+
+  /** 경계 — 배치된 벤치가 상한을 채워도 골키퍼 자리는 잘리지 않는다 (match.md §2) */
+  it("벤치가 전원 필드 선수로 차 있어도 골키퍼 한 자리가 남는다", () => {
+    const state = atMatchday();
+    const teamId = state.userTeamId;
+    const starting = assignmentsOf(state, teamId, "starting").map((a) => ({
+      playerId: a.playerId,
+      position: a.position,
+    }));
+    const inXI = new Set(starting.map((s) => s.playerId));
+    const outfield = firstTeamPlayers(state, teamId)
+      .filter((p) => !inXI.has(p.id) && groupOf(p) !== "GK")
+      .slice(0, MATCHDAY_BENCH);
+    expect(outfield).toHaveLength(MATCHDAY_BENCH);
+    expect(
+      setLineup(state, { starting, bench: outfield.map((p) => ({ playerId: p.id })) }).ok,
+    ).toBe(true);
+
+    expect(startMatch(state).ok).toBe(true);
+    const mine =
+      userSide(state) === "home" ? state.pendingMatch!.ledger.home : state.pendingMatch!.ledger.away;
+    expect(mine.bench).toHaveLength(MATCHDAY_BENCH);
+    const keepers = mine.bench.filter((id) => {
+      const player = playersOf(state, teamId).find((p) => p.id === id);
+      return player !== undefined && groupOf(player) === "GK";
+    });
+    expect(keepers).toHaveLength(1);
   });
 
   it("부상 선수를 선발로 확정하려 하면 스킬이 반려한다", () => {
@@ -922,6 +1023,36 @@ describe("교체 투입의 역할 (match.md §2)", () => {
     expect(substitutePlayer(state, { out: out.playerId, in: sub }).ok).toBe(true);
 
     expect(packetSide().lineup.find((p) => p.id === sub)?.roleId).toBe("ball-playing-defender");
+  });
+
+  /**
+   * **어느 자리를 잇는지는 교체 사건이 정한다.** 두 자리가 함께 비어 있으면 적응도로
+   * 고르는 판단은 둘을 맞바꾼다 — 감독이 뺀 자리와 들어간 자리가 어긋난다.
+   */
+  it("두 자리가 비어도 각자 나간 선수의 자리를 잇는다", () => {
+    const state = atMatchday();
+    const started = startMatch(state);
+    expect(started.ok).toBe(true);
+    const side = userSide(state);
+    const mine =
+      side === "home" ? state.pendingMatch!.ledger.home : state.pendingMatch!.ledger.away;
+    const roster = userPlayers(state);
+    const groupAt = (id: string) => groupOf(roster.find((p) => p.id === id)!);
+    const xi = assignmentsOf(state, state.userTeamId, "starting").filter((a) =>
+      mine.onPitch.includes(a.playerId),
+    );
+    const outDf = xi.find((a) => groupAt(a.playerId) === "DF")!;
+    const outFw = xi.find((a) => groupAt(a.playerId) === "FW")!;
+    // 자리를 가로질러 넣는다 — 수비수 자리에 공격수를, 공격수 자리에 수비수를
+    const inFw = mine.bench.find((id) => groupAt(id) === "FW")!;
+    const inDf = mine.bench.find((id) => groupAt(id) === "DF")!;
+
+    expect(substitutePlayer(state, { out: outDf.playerId, in: inFw }).ok).toBe(true);
+    expect(substitutePlayer(state, { out: outFw.playerId, in: inDf }).ok).toBe(true);
+
+    const lineup = (side === "home" ? state.pendingMatch!.packet.home : state.pendingMatch!.packet.away).lineup;
+    expect(lineup.find((p) => p.id === inFw)?.position).toBe(outDf.position);
+    expect(lineup.find((p) => p.id === inDf)?.position).toBe(outFw.position);
   });
 
   /**

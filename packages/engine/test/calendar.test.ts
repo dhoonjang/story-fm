@@ -31,6 +31,19 @@ function fixturesOf(matches: MatchRecord[], teamId: string): MatchRecord[] {
     .sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
+/** 라운드가 시작하는 날 — 라운드 번호 순 (한 라운드는 이틀에 걸친다) */
+function roundStartDates(matches: MatchRecord[]): string[] {
+  const byRound = new Map<number, string>();
+  for (const m of matches) {
+    const first = byRound.get(m.round);
+    if (first === undefined || m.date < first) byRound.set(m.round, m.date);
+  }
+  return [...byRound.entries()].sort((a, b) => a[0] - b[0]).map(([, date]) => date);
+}
+
+/** 라운드 사이 최대 공백 — A매치 휴식기와 컵 주말이 겹쳐도 3주가 한계다 */
+const MAX_ROUND_GAP_DAYS = 21;
+
 describe("라운드 날짜 골격", () => {
   it("38라운드가 8월 중순 개막 → 5월 마지막 일요일 최종전으로 끝난다", () => {
     const weeks = buildMatchweekDates(1);
@@ -82,6 +95,27 @@ describe("라운드 날짜 골격", () => {
       const weeks = buildMatchweekDates(season);
       expect(weeks, `시즌 ${season}`).toHaveLength(38);
       expect(weeks[37]!.date.slice(0, 7)).toBe(`${2026 + season}-05`);
+    }
+  });
+
+  /**
+   * 라운드 수가 38이 아닌 리그도 시즌 전체를 쓴다 — 골격에서 뒤부터 덜어내던 때는
+   * 12팀 22라운드가 1월에 21라운드를 끝내고 최종 라운드만 5월에 남았다.
+   * 간격 상한(3주)은 38라운드 골격 자체의 상한이기도 하다.
+   */
+  it("38라운드가 아닌 리그도 라운드 사이가 3주를 넘지 않는다", () => {
+    for (const size of [12, 14, 18]) {
+      const teams = Array.from({ length: size }, (_, i) => `t${i}`);
+      for (let season = 1; season <= 5; season++) {
+        const dates = roundStartDates(buildMatches(season, teams, 7, "championship"));
+        expect(dates, `${size}팀 시즌 ${season}`).toHaveLength(2 * (size - 1));
+        for (let i = 1; i < dates.length; i++) {
+          expect(
+            diffDays(dates[i - 1]!, dates[i]!),
+            `${size}팀 시즌 ${season} ${i}R→${i + 1}R`,
+          ).toBeLessThanOrEqual(MAX_ROUND_GAP_DAYS);
+        }
+      }
     }
   });
 });
