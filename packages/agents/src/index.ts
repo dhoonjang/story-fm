@@ -1,5 +1,6 @@
 export * from "./match-caster";
 export * from "./match-intent-schema";
+export * from "./match-intent";
 export * from "./match-rater";
 export * from "./mood-rater";
 export * from "./training-rater";

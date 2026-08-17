@@ -13,6 +13,7 @@
 version: 1
 agents:
   gm:            { provider: google, model: gemini-3.6-flash,      max_tokens: 64000, timeout_ms: 180000 }
+  match-intent:  { provider: google, model: gemini-3.5-flash-lite, max_tokens: 16000, timeout_ms: 60000 }
   match-caster:  { provider: google, model: gemini-3.6-flash,      max_tokens: 64000, timeout_ms: 180000 }
   match-rater:   { provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000,  timeout_ms: 30000 }
   training-rater:{ provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000,  timeout_ms: 30000 }
@@ -22,11 +23,15 @@ agents:
 | 에이전트 | 담당 | 출력 상한 | 시한 |
 | --- | --- | --- | --- |
 | `gm` | 평시 서사 · 의도 해석 · 판정 | 64,000 | 180초 |
+| `match-intent` | 경기 중 감독의 말 → 의도 | 16,000 | 60초 |
 | `match-caster` | 경기 중계 · 벤치 대화 | 64,000 | 180초 |
 | `match-rater` | 경기 평점 재채점 | 8,000 | 30초 |
 | `training-rater` | 훈련 결산 | 8,000 | 30초 |
 | `mood-rater` | 심경 한 줄 | 8,000 | 30초 |
 
+- **해석이 싼 자리로 가는 이유는 그 일이 판단이 아니라 분류이기 때문**이다 — 무엇을
+  하라는 말인지 고르는 것이고, 그것이 사실인지와 얼마나 먹히는지는 코어가 정한다.
+  경기 한 턴이 두 호출이 됐으므로(agents.md §3) 여기서 지연을 갚아야 한다.
 - **중계가 가벼운 이유는 사건을 코어가 정하기 때문**이다 — 모델은 xg가 굴린 결과를
   문장으로 옮길 뿐인데 90분에 스무 번 도니 지연이 곧 게임 속도다
   ([../simulation/match.md](../simulation/match.md) §2).
