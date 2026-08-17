@@ -1044,10 +1044,15 @@ const MATCH_TOOL_NAMES = new Set([
   "search_players",
 ]);
 
+/** 이 턴에 흐르는 시간 — 대화 한 마디가 구간 하나를 삼키지 않게 하는 눈금 */
+const PACE_MINUTES = { moment: 1 } as const;
+
+const AdvanceMatchSchema = z.object({ pace: z.enum(["moment", "segment"]) });
+
 /**
  * 경기 진행 도구 — 구간은 LLM 호출 **안에서** 굴린다. 호출 전에 굴리면 그 턴의
- * 교체·전술 지시가 이 구간에 반영되지 않는다. 인자가 없고 사건은 전부 코어가
- * xg로 굴리므로(match.md §2) 모델이 쥐는 것은 진행 시점뿐이다.
+ * 교체·전술 지시가 이 구간에 반영되지 않는다. 사건은 전부 코어가 xg로 굴리므로
+ * (match.md §2) 모델이 쥐는 것은 **언제 부르는가와 얼마나 가는가**뿐이다.
  */
 function makeAdvanceMatchTool(
   state: GameState,
@@ -1062,8 +1067,23 @@ function makeAdvanceMatchTool(
   return {
     name: "advance_match",
     description,
-    inputSchema: { type: "object", properties: {}, required: [] },
-    handle() {
+    inputSchema: obj(
+      {
+        pace: {
+          type: "string",
+          enum: ["moment", "segment"],
+          description:
+            "이 턴에 얼마나 흐르는가. moment — 감독이 대화를 걸었거나 지시만 내린 턴, 1분만 흐른다. " +
+            "segment — 감독이 경기를 보자고 한 턴, 다음 정지점까지 간다.",
+        },
+      },
+      ["pace"],
+    ),
+    handle(input: unknown) {
+      const parsed = AdvanceMatchSchema.safeParse(input);
+      if (!parsed.success) {
+        return { ok: false, message: "pace를 moment 또는 segment로 지정하세요" };
+      }
       const pending = state.pendingMatch;
       if (!pending || state.phase !== "match") {
         return { ok: false, message: "진행 중인 경기가 없습니다" };
@@ -1081,7 +1101,9 @@ function makeAdvanceMatchTool(
         };
       }
       const before = { ...pending.ledger.score };
-      const step = advanceMatchTo(state, pending.ledger.minute + 1);
+      // moment는 구간을 1분에서 끊는다 — 목표 분만 당기면 구간 하나가 그대로 간다
+      const maxMinutes = parsed.data.pace === "moment" ? PACE_MINUTES.moment : undefined;
+      const step = advanceMatchTo(state, pending.ledger.minute + 1, { maxMinutes });
       if (!step.ok) return { ok: false, message: step.message };
       advanced = true;
       pending.lastSegment = { events: step.events, stop: step.stop ?? "flow" };

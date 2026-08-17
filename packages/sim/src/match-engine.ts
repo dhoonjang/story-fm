@@ -107,6 +107,15 @@ export interface SegmentInput {
    * 90분 종료에 닿는 구간에는 골이 없으므로 호출 시점의 스코어가 곧 종료 스코어다.
    */
   toExtraTime?: boolean;
+  /**
+   * 이 구간을 몇 분까지만 굴릴 것인가 — 없으면 정지점까지(상한 25분).
+   *
+   * 감독이 벤치에서 말만 건 턴은 구간 하나를 쓸 자리가 아니다(match.md §2). 1을
+   * 넣으면 그 1분에 실제로 일어난 것만 확정하고, **아무 일도 없었으면 사건을
+   * 지어내지 않는다** — 25분 침묵은 발생률이 비정상이라는 신호지만 1분 침묵은
+   * 흔하다. 사건 없이 흐른 시각은 호출부가 `advanceClock`으로 민다.
+   */
+  maxMinutes?: number;
   /** 결정적 난수 — 호출부가 (시드, 경기, 구간 번호)로 만든다 */
   rng: () => number;
 }
@@ -449,6 +458,8 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
   }
   const halfEnd = PHASE_END[phase];
   const limit = halfEnd + stoppageTime(rng, phase);
+  /** 이 구간이 흐를 수 있는 분 — 호출부가 더 짧게 부를 수는 있어도 길게는 못 한다 */
+  const span = Math.min(MAX_SEGMENT_MINUTES, input.maxMinutes ?? MAX_SEGMENT_MINUTES);
 
   const started = ledger.events.some((e) => e.type === "kickoff");
   let t = Math.max(ledger.minute, PHASE_START[phase]);
@@ -504,8 +515,12 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
      * 빈 배치는 장부가 반려한다 — 그러면 시각이 movement 없이 멈춰 경기가 끝나지
      * 않는다. 25분간 유효 슛 하나 없는 건 발생률이 아주 낮을 때뿐이니, 그 경우
      * 두드린 흔적 하나(chance)를 남긴다. 골 확률에는 영향이 없다.
+     *
+     * ⚠️ **짧게 부른 구간은 그냥 비워 둔다.** 1분에 아무 일도 없는 것은 정상이고,
+     * 여기서 흔적을 남기면 감독이 말을 걸 때마다 찬스가 하나씩 생긴다. 그 구간의
+     * 시계는 호출부가 `advanceClock`으로 민다 (match.md §2).
      */
-    if (events.length === 0) {
+    if (events.length === 0 && span >= MAX_SEGMENT_MINUTES) {
       const side: MatchSide =
         rng() * (rates.shot.home + rates.shot.away) < rates.shot.home ? "home" : "away";
       const profiles = packet.guide.shotProfiles?.[side] ?? [];
@@ -618,7 +633,7 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
       events.push({ minute, type: closing, actors: [], causes: [] });
       return finish(closing, minute);
     }
-    if (t - from >= MAX_SEGMENT_MINUTES || events.length >= MAX_SEGMENT_EVENTS) {
+    if (t - from >= span || events.length >= MAX_SEGMENT_EVENTS) {
       return finish("flow", Math.max(Math.floor(t), ledger.minute));
     }
 
