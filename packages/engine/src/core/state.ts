@@ -330,6 +330,16 @@ export interface PendingMatch {
    */
   matchFatigue?: Record<string, number>;
   /**
+   * **실제로 밟은 자리** (선수 id → 포지션 코드) — 양 팀 것이 함께 쌓인다.
+   *
+   * 자리를 정하는 곳은 패킷을 세우는 `slotsFor` 하나다(교체는 빈 자리를 잇고,
+   * 로테이션은 사람과 함께 자리를 옮긴다). 그래서 그때 남기고, 경기 뒤 포지션
+   * 적응도가 이 값을 읽는다 — 저장된 배치를 읽으면 교체 투입자가 그라운드에서
+   * 서 본 적 없는 벤치 배치의 자리로 오른다 (match.md §6).
+   * 옛 세이브엔 없다 — 없으면 배치·주 포지션으로 읽는다 (optional).
+   */
+  positionsPlayed?: Record<string, string>;
+  /**
    * 실모드 캐스터의 대화 이력. 새 이력은 제공자·모델 태그를 갖는다.
    * unknown[]은 태그 도입 전 Anthropic 세이브 호환용이다.
    */
