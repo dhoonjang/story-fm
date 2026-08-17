@@ -285,6 +285,9 @@ erDiagram
   내려가고, 리그 평균이 시즌마다 위로 밀린다.
 - 같은 결로 `PlayerState.moodNote`와 `SETTLING_EVENT`도 저장한다 — 원본이 그
   구간의 대화·사건인데 그건 어디에도 표로 남지 않는다.
+- `PlayerState.talkedOn`(마지막 면담 날짜)도 같다. `SETTLING_EVENT`는 **정착 중인
+  선수만** 남기므로, 나머지 선수에게 "오늘 이미 이야기했나"를 물을 표가 없다.
+  옛 세이브엔 없다 — 없으면 아직 이야기한 적 없는 것으로 읽고 버전을 올리지 않는다.
 - `FinanceReport.highlights`도 그렇다 — 원본인 원장이 3개월 뒤 **잘린다.** 파생할
   원본이 사라지므로 절단 전에 큰 건만 옮겨 적는다
   (→ [finance](../simulation/finance.md) §8.2).

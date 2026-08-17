@@ -365,6 +365,19 @@ export function applyTalkToPlayer(
   if (!pick.ok) return pick;
   const player = pick.player;
 
+  /**
+   * **하루 한 번** (career.md §2) — 사기도 정착도 XP도 서사도 그날 첫 면담만 셈한다.
+   * 경기 하나가 하루 안에서 끝나므로 이 문이 곧 "경기당 한 번"이고, 정지점마다 같은
+   * 선수를 부르는 것이 폼을 올리는 최적 전략이 되던 자리를 막는다.
+   */
+  if (player.state.talkedOn === state.date) {
+    return {
+      ok: true,
+      message: `${player.name}과는 오늘 이미 이야기했습니다 — 같은 말이 두 번 남지는 않습니다`,
+    };
+  }
+  player.state.talkedOn = state.date;
+
   const base = TALK_BASE[input.outcome];
   const delta = Math.round(base * (input.intensity / 2) * leadershipFactor(state));
   const bounded = Math.max(-8, Math.min(8, delta));
@@ -377,12 +390,22 @@ export function applyTalkToPlayer(
   /**
    * 새 영입에게 면담은 **적응의 계기**다 — 아직 못 쓰는 선수에게도 감독이 할 수
    * 있는 일이 있어야 한다. 결과가 나쁘면 오히려 더 겉돈다(음수).
+   *
+   * ⚠️ **사기가 움직이지 않은 대화(`neutral`)에는 방향이 없다** — 크레딧도 0이다.
+   * 부호로 방향을 가르면 0이 음수 쪽에 떨어져, 나쁘지도 않았던 면담이 적응을 뒤로
+   * 민다. GM이 매긴 무게(`settling`)도 이 문 앞에서 멈춘다 (player.md §9.3).
    */
-  const settlingCredit = creditSettling(state, player.id, "talk", {
-    anchor: settlingAnchor("talk", { direction: base > 0 ? 1 : -1, intensity: input.intensity }),
-    ...(input.settling === undefined ? {} : { proposed: input.settling }),
-    ...(input.settlingNote === undefined ? {} : { note: input.settlingNote }),
-  });
+  const settlingCredit =
+    base === 0
+      ? 0
+      : creditSettling(state, player.id, "talk", {
+          anchor: settlingAnchor("talk", {
+            direction: base > 0 ? 1 : -1,
+            intensity: input.intensity,
+          }),
+          ...(input.settling === undefined ? {} : { proposed: input.settling }),
+          ...(input.settlingNote === undefined ? {} : { note: input.settlingNote }),
+        });
   const settling = settlingCredit !== 0 ? settlingOf(state, player.id) : null;
 
   const xpMsg =

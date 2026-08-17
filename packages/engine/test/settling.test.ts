@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   EVENT_BAND,
   MATCH_CREDIT,
+  addDays,
   settlingAnchor,
   applyTalkToPlayer,
   applyTeamTalk,
@@ -175,6 +176,39 @@ describe("감독의 말도 정착을 움직인다 (SETTLING_EVENT)", () => {
       applyTalkToPlayer(state, { playerId: target.id, outcome: "motivated", intensity: 2 });
     }
     expect(settlingOf(state, target.id)!.eventCredit).toBe(once);
+  });
+
+  it("델타가 0인 면담은 정착을 움직이지 않는다 — 방향이 없으면 남기지 않는다", () => {
+    const state = createTestGame(11);
+    const target = opponentsOf(state)[0]!;
+    sign(state, target.id);
+    play(state, target.id, 4); // 뒤로 밀리는 것을 보려면 쌓아 둔 게 있어야 한다
+    const before = settlingOf(state, target.id)!.progress;
+    // GM이 무게를 매겨 보내도 방향이 없는 자리에는 실리지 않는다
+    applyTalkToPlayer(state, {
+      playerId: target.id,
+      outcome: "neutral",
+      intensity: 2,
+      settling: 99,
+    });
+    expect(state.settlingEvents).toEqual([]);
+    expect(settlingOf(state, target.id)!.progress).toBe(before);
+  });
+
+  it("같은 날 두 번째 면담은 사기도 움직이지 않는다 — 다음 날이면 다시 셈한다", () => {
+    const state = createTestGame(11);
+    const target = opponentsOf(state)[0]!;
+    sign(state, target.id);
+    const player = playerById(state, target.id)!;
+
+    applyTalkToPlayer(state, { playerId: target.id, outcome: "motivated", intensity: 2 });
+    const afterFirst = player.state.form;
+    applyTalkToPlayer(state, { playerId: target.id, outcome: "motivated", intensity: 2 });
+    expect(player.state.form).toBe(afterFirst);
+
+    state.date = addDays(state.date, 1);
+    applyTalkToPlayer(state, { playerId: target.id, outcome: "motivated", intensity: 2 });
+    expect(player.state.form).toBeGreaterThan(afterFirst);
   });
 
   it("몰아세우면 오히려 더 겉돈다", () => {

@@ -29,7 +29,8 @@ export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조
 - 선수나 코치를 부르기만 했거나 말만 건 턴은 "none"이다.
 
 # 대화 (talk · teamTalk)
-감독의 말이 그 사람에게 어떻게 닿았는지를 **라벨**로 고른다. 수치는 코어가 만든다.
+감독이 **그 사람에게 건넨 말**이 있을 때만 싣고, 그 말이 어떻게 닿았는지를 **라벨**로 고른다. 수치는 코어가 만든다.
+- 이름을 부르기만 한 말("브루노 일루와봐", "잠깐 와봐")은 부름이지 면담이 아니다 — talk을 비운다.
 - talk.outcome — reassured(다독임) · motivated(자극) · neutral · disappointed(실망을 드러냄) · angered(질책)
 - teamTalk.outcome — inspired · encouraged · neutral · flat · backfired · feared
 - intensity 1~3 — 말의 세기.
