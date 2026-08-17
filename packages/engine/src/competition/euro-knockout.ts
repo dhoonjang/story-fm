@@ -9,7 +9,7 @@ import {
   type CupCatalogEntry,
 } from "../data/cup-catalog";
 import { completeDraw, drawIsDue, scheduleDraw } from "./draw-schedule";
-import { knockoutDates } from "./europe";
+import { euroMatchdayDates, knockoutDates } from "./europe";
 import { payLeaguePhasePrizes, payStagePrizes } from "./euro-prize";
 import { makeRng } from "../core/rng";
 import { pairOf, resolveExtraTime, tieAggregate } from "./extra-time";
@@ -33,7 +33,6 @@ import { computeStandings } from "./season";
 function knockoutId(cupId: string, season: number, stage: MatchStage, pair: number, leg: number) {
   return `m-${cupId}-${season}-${stage}-p${pair}-l${leg}`;
 }
-
 
 /** 이 대회 이 단계의 경기 — 대진 번호, 그다음 차수 순 */
 export function euroStageMatches(
@@ -344,6 +343,53 @@ function reportOurTie(
       : `${short} ${label} 탈락 — 여정이 여기서 끝났다`,
   );
   pushNarrative(state, `${short} ${label} ${advanced ? "통과" : "탈락"}`, 4);
+}
+
+/**
+ * 이 팀에게 **아직 유효한** 대항전 예약일 — 컵 편성·리그 연기가 비워 둬야 할 자리.
+ *
+ * 예약의 근거는 하나다: **그 경기는 나중에 편성되므로 지금 장부에 없다**
+ * (`reservedEuroDates`). 녹아웃에서는 그 근거가 두 자리에서 사라진다.
+ *
+ * ① **이미 뽑힌 단계** — 그 경기는 장부에 있고 48시간 규칙이 직접 잰다.
+ * ② **이미 떨어진 팀** — 그 경기는 영영 생기지 않는다.
+ *
+ * ⚠️ **걸러내지 않으면 4~5월 주중이 통째로 잠긴다.** 준결승 예약일(4/28·5/5)이 그
+ * 대회에 나갔던 **모든** 팀을 막아, 국내 컵은 주중으로 못 가고 리그 연기도 자리를
+ * 못 찾는다. 남는 선택지가 연이틀 경기(`HARD_MIN_REST_HOURS` 아래)거나 라운드를
+ * 한 달 뒤로 가르는 것뿐이 된다 — 실제로 FA컵 준결승이 그렇게 갈라졌다.
+ *
+ * ⚠️ **리그 페이즈는 그대로 막는다.** 여덟 날이 시즌 시작에 고정이고 참가 팀이
+ * **전원** 뛴다 — 떨어질 일도, 나중에 뽑힐 일도 없어서 위 두 근거가 닿지 않는다.
+ * 여기를 함께 풀었더니 쿠프 드 프랑스 라운드가 UCL 리그 페이즈 **다음 날**로
+ * 앉았다(23시간). 국내 컵 라운드가 대항전 주간을 피하는 것은 실제 대회의 골격이다.
+ */
+export function reservedEuroDatesFor(state: GameState, teamId: string): string[] {
+  const entry = state.euroEntrants.find((e) => e.teams.includes(teamId));
+  if (!entry) return [];
+  const cup = cupCatalogById(entry.cupId);
+  if (!cup) return [];
+
+  const dates: string[] = [...euroMatchdayDates(state.season)];
+  let alive = true;
+  for (const stage of knockoutStages(cup)) {
+    const drawn = euroStageMatches(state, entry.cupId, stage);
+    if (drawn.length === 0) {
+      // 아직 안 뽑혔다 — 살아 있는 동안은 그 자리를 비워 둬야 한다
+      if (alive) dates.push(...knockoutDates(state.season, stage));
+      continue;
+    }
+    const ours = drawn.find((m) => m.homeTeamId === teamId || m.awayTeamId === teamId);
+    if (!ours) {
+      // ⚠️ **플레이오프 결장은 탈락이 아니다** — 직행 팀은 이 단계를 건너뛴다.
+      // 본선 단계는 다르다: 거기 없으면 올라오지 못한 것이다.
+      if (stage !== "playoff") alive = false;
+      continue;
+    }
+    const winner = euroTieWinner(state, entry.cupId, stage, pairOf(ours));
+    if (winner !== null && winner !== teamId) alive = false;
+  }
+  return dates;
 }
 
 /** 이 대회의 우승 팀 — 결승이 끝났을 때만 (시즌 리뷰·트로피의 원본) */
