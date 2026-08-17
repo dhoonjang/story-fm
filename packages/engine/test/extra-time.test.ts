@@ -587,15 +587,15 @@ describe("연장·승부차기의 입력 (match.md §7)", () => {
 
   it("경기가 가진 중립 표식이 간이 시뮬까지 간다", () => {
     /** 오늘 자리에 타 팀끼리의 결승 하나만 세우고 그 하루를 굴린다 */
-    const playFinal = (neutral: boolean) => {
+    const playFinal = (neutral: boolean, round: number) => {
       const state = createTestGame(11);
       state.matches = state.matches.filter((m) => m.date !== state.date);
       const match: MatchRecord = {
-        id: `m-facup-${state.season}-final-p0-l1`,
+        id: `m-facup-${state.season}-final-p0-l${round}`,
         season: state.season,
         competitionId: "facup",
         stage: "final",
-        round: 1,
+        round,
         date: state.date,
         time: "15:00",
         homeTeamId: "mancity",
@@ -607,10 +607,20 @@ describe("연장·승부차기의 입력 (match.md §7)", () => {
       simulateOtherMatches(state, []);
       return match.result!;
     };
-    // 난수 채널에 중립이 안 들어가므로, 시뮬이 표식을 안 읽으면 두 결과가 똑같다
-    const nominal = playFinal(false);
-    const neutral = playFinal(true);
-    expect([neutral.homeXg, neutral.awayXg]).not.toEqual([nominal.homeXg, nominal.awayXg]);
+    /**
+     * 난수 채널에 중립이 안 들어가므로, 시뮬이 표식을 안 읽으면 결과가 똑같다.
+     *
+     * ⚠️ **한 판으로는 못 잰다.** 노출 차이(1.06 대 1.00)는 슈팅 추첨 하나를 뒤집을
+     * 때만 결과에 드러나고, 한 편성에서 아무것도 안 뒤집히면 두 값이 같게 나온다 —
+     * 표식이 제대로 흘러도 그렇다. 채널을 바꿔 가며 여러 판을 더하면 그 우연이
+     * 사라진다 (라운드가 채널에 들어간다).
+     */
+    const total = (neutral: boolean) =>
+      Array.from({ length: 8 }, (_, i) => playFinal(neutral, i + 1)).reduce(
+        (sum, r) => sum + (r.homeXg ?? 0) + (r.awayXg ?? 0),
+        0,
+      );
+    expect(total(true)).not.toBe(total(false));
   });
 
   it("승부차기 성공률은 0.62~0.80 밖으로 나가지 않는다", () => {
