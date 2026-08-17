@@ -1,7 +1,7 @@
 import type { MatchRecord } from "@story-fm/domain";
 import { addDays, dayOfWeek, tooClose } from "./calendar";
 import { competitionShortName, isCup } from "../data/cup-catalog";
-import { isTopLeague } from "../data/league-catalog";
+import { isCupOnlyLeague, isTopLeague } from "../data/league-catalog";
 import { reservedEuroDatesFor } from "./euro-knockout";
 import { inCompetition } from "./friendly";
 import { teamName, type GameState } from "../core/state";
@@ -72,6 +72,17 @@ function seasonDeadline(state: GameState, competitionId: string): string {
 }
 
 /**
+ * 리그전을 도는 대회인가 — 1부 전부와, 감독이 강등돼 내려간 2부.
+ *
+ * 2부 일정은 감독이 거기 있을 때만 깔리므로(`LeagueMembership.extraLeagues`)
+ * 리그의 종류만 봐도 대상이 갈린다. 1부만 보면 그 시즌의 리그 경기는 컵에
+ * 걸려도 비켜주지 못하고, 대신 컵이 제 날짜를 잃는다 (season.md §3).
+ */
+function runsLeagueSchedule(competitionId: string): boolean {
+  return isTopLeague(competitionId) || isCupOnlyLeague(competitionId);
+}
+
+/**
  * 이 경기를 연기할 수 있는가 — **옮길 수 있는 경기는 반드시 대회 경기다**.
  * 그 사실을 반환 타입에 실어, 대회 id가 필요한 뒷단계가 널을 만나지 않는다.
  */
@@ -84,7 +95,7 @@ export function isPostponable(
   // 친선은 연기 대상이 아니다 — 비켜줄 컵이 없고, 프리시즌의 그 날짜가 곧 그 경기다
   if (!inCompetition(match)) return false;
   if (isCup(match.competitionId)) return false; // 컵·대항전 날짜는 계약이다
-  if (!isTopLeague(match.competitionId)) return false;
+  if (!runsLeagueSchedule(match.competitionId)) return false;
   return match.round < lastRoundOf(state, match.competitionId);
 }
 
