@@ -41,78 +41,92 @@ function medianOf(values: number[]): number {
   return sorted[Math.floor(sorted.length / 2)] ?? 0;
 }
 
-describe("한 시즌의 살림", () => {
-  let state: GameState;
-  let secondTierBefore: Map<string, number>;
+/**
+ * 시드를 둘 재는 이유: 한 시즌의 총액이 성적 하나에 몇 %씩 움직여, 한 시드만으로는
+ * 밴드 안인지 시드 운인지 가를 수 없다 (finance.md §10.2).
+ */
+for (const seed of [42, 7]) {
+  describe(`한 시즌의 살림 — 시드 ${seed}`, () => {
+    let state: GameState;
+    let secondTierBefore: Map<string, number>;
 
-  beforeAll(() => {
-    state = createTestGame(42, "arsenal");
-    secondTierBefore = new Map(
-      state.teams
-        .filter((t) => SECOND_TIERS.includes(leagueOfTeam(t.id)))
-        .map((t) => [t.id, financeOf(state, t.id).balance] as const),
-    );
-    playSeasonKeepingSeat(state);
+    beforeAll(() => {
+      state = createTestGame(seed, "arsenal");
+      secondTierBefore = new Map(
+        state.teams
+          .filter((t) => SECOND_TIERS.includes(leagueOfTeam(t.id)))
+          .map((t) => [t.id, financeOf(state, t.id).balance] as const),
+      );
+      playSeasonKeepingSeat(state);
+    });
+
+    it("tier1 유저 구단", () => {
+      const season1 = state.financeReports.filter((r) => r.season === 1);
+      const sum = (pick: (r: (typeof season1)[number]) => number) =>
+        season1.reduce((total, r) => total + pick(r), 0);
+      // 프리시즌 달은 매치데이 수입이 없어 급여 비중이 자연히 높다 — 대상에서 뺀다
+      const inSeason = season1.filter((r) => r.income.some((l) => l.category === "matchday"));
+      const ratios = inSeason.map((r) => r.wageRatio);
+
+      const readings: Readings<typeof FINANCE_TIER1> = {
+        "시즌 1 보고서 수": season1.length,
+        "연 장부 손익": sum((r) => r.pnlNet),
+        "연 현금 순증": sum((r) => r.cashNet),
+        "연 수입": sum((r) => r.incomeTotal),
+        "연 지출": sum((r) => r.expenseTotal),
+        "연 상각": sum((r) =>
+          r.expense.filter((l) => l.category === "amortisation").reduce((a, l) => a + l.amount, 0),
+        ),
+        "경기 달 수": inSeason.length,
+        "경기 달 급여 비중 (최저)": ratios.length ? Math.min(...ratios) : Number.NaN,
+        "경기 달 급여 비중 (최고)": ratios.length ? Math.max(...ratios) : Number.NaN,
+      };
+      console.log(reportOf(FINANCE_TIER1, readings, `시드 ${seed} · 아스날 · 시즌 1`));
+      expect(outOfBand(FINANCE_TIER1, readings)).toEqual([]);
+    });
+
+    it("어떤 리그의 AI 구단도 한 시즌에 파산하지 않는다", () => {
+      const byLeague = new Map<string, number[]>();
+      for (const f of state.finances) {
+        const league = leagueOfTeam(f.teamId);
+        byLeague.set(league, [...(byLeague.get(league) ?? []), f.balance]);
+      }
+      const readings: Readings<typeof FINANCE_LEAGUES> = {
+        "리그별 중간 잔고의 최소": Math.min(...[...byLeague.values()].map(medianOf)),
+        "리그별 최저 잔고의 최소": Math.min(...[...byLeague.values()].map((xs) => Math.min(...xs))),
+      };
+      const worst = [...byLeague.entries()].sort((a, b) => medianOf(a[1]) - medianOf(b[1]))[0];
+      console.log(
+        reportOf(
+          FINANCE_LEAGUES,
+          readings,
+          `시드 ${seed} · 리그 ${byLeague.size}개 · 최저 ${worst?.[0]}`,
+        ),
+      );
+      expect(outOfBand(FINANCE_LEAGUES, readings)).toEqual([]);
+    });
+
+    it("리그전을 굴리지 않는 리그도 한 시즌을 버틴다", () => {
+      const deltas = [...secondTierBefore].map(
+        ([teamId, before]) => financeOf(state, teamId).balance - before,
+      );
+      const readings: Readings<typeof FINANCE_SECOND_TIER> = {
+        "2부 구단 수": deltas.length,
+        "2부 한 시즌 수지 중간값": medianOf(deltas),
+      };
+      console.log(
+        reportOf(FINANCE_SECOND_TIER, readings, `시드 ${seed} · ${SECOND_TIERS.join(" · ")}`),
+      );
+      expect(outOfBand(FINANCE_SECOND_TIER, readings)).toEqual([]);
+
+      // 리그전을 굴리는 리그에는 이 보정이 붙지 않는다 — 매치데이는 경기가 만든다
+      expect(
+        financeOf(state, state.userTeamId).ledger.some((e) => e.label === "리그 홈경기 수입"),
+        "1부는 경기에서 매치데이를 번다",
+      ).toBe(false);
+    });
   });
-
-  it("tier1 유저 구단 (시드 42 · 아스날)", () => {
-    const season1 = state.financeReports.filter((r) => r.season === 1);
-    const sum = (pick: (r: (typeof season1)[number]) => number) =>
-      season1.reduce((total, r) => total + pick(r), 0);
-    // 프리시즌 달은 매치데이 수입이 없어 급여 비중이 자연히 높다 — 대상에서 뺀다
-    const inSeason = season1.filter((r) => r.income.some((l) => l.category === "matchday"));
-    const ratios = inSeason.map((r) => r.wageRatio);
-
-    const readings: Readings<typeof FINANCE_TIER1> = {
-      "시즌 1 보고서 수": season1.length,
-      "연 장부 손익": sum((r) => r.pnlNet),
-      "연 현금 순증": sum((r) => r.cashNet),
-      "연 수입": sum((r) => r.incomeTotal),
-      "연 지출": sum((r) => r.expenseTotal),
-      "연 상각": sum((r) =>
-        r.expense.filter((l) => l.category === "amortisation").reduce((a, l) => a + l.amount, 0),
-      ),
-      "경기 달 수": inSeason.length,
-      "경기 달 급여 비중 (최저)": ratios.length ? Math.min(...ratios) : Number.NaN,
-      "경기 달 급여 비중 (최고)": ratios.length ? Math.max(...ratios) : Number.NaN,
-    };
-    console.log(reportOf(FINANCE_TIER1, readings, "시드 42 · 아스날 · 시즌 1"));
-    expect(outOfBand(FINANCE_TIER1, readings)).toEqual([]);
-  });
-
-  it("어떤 리그의 AI 구단도 한 시즌에 파산하지 않는다", () => {
-    const byLeague = new Map<string, number[]>();
-    for (const f of state.finances) {
-      const league = leagueOfTeam(f.teamId);
-      byLeague.set(league, [...(byLeague.get(league) ?? []), f.balance]);
-    }
-    const readings: Readings<typeof FINANCE_LEAGUES> = {
-      "리그별 중간 잔고의 최소": Math.min(...[...byLeague.values()].map(medianOf)),
-      "리그별 최저 잔고의 최소": Math.min(...[...byLeague.values()].map((xs) => Math.min(...xs))),
-    };
-    const worst = [...byLeague.entries()].sort((a, b) => medianOf(a[1]) - medianOf(b[1]))[0];
-    console.log(reportOf(FINANCE_LEAGUES, readings, `리그 ${byLeague.size}개 · 최저 ${worst?.[0]}`));
-    expect(outOfBand(FINANCE_LEAGUES, readings)).toEqual([]);
-  });
-
-  it("리그전을 굴리지 않는 리그도 한 시즌을 버틴다", () => {
-    const deltas = [...secondTierBefore].map(
-      ([teamId, before]) => financeOf(state, teamId).balance - before,
-    );
-    const readings: Readings<typeof FINANCE_SECOND_TIER> = {
-      "2부 구단 수": deltas.length,
-      "2부 한 시즌 수지 중간값": medianOf(deltas),
-    };
-    console.log(reportOf(FINANCE_SECOND_TIER, readings, SECOND_TIERS.join(" · ")));
-    expect(outOfBand(FINANCE_SECOND_TIER, readings)).toEqual([]);
-
-    // 리그전을 굴리는 리그에는 이 보정이 붙지 않는다 — 매치데이는 경기가 만든다
-    expect(
-      financeOf(state, state.userTeamId).ledger.some((e) => e.label === "리그 홈경기 수입"),
-      "1부는 경기에서 매치데이를 번다",
-    ).toBe(false);
-  });
-});
+}
 
 /**
  * 다년 불변식 (finance.md §10.3) — 한 시즌은 발산을 감추기에 충분히 짧다.
