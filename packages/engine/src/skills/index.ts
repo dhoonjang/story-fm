@@ -51,7 +51,12 @@ import { recallRole, rememberRole } from "./role-memory";
 import { addDays, diffDays, sortEntries, squadReturnOf } from "../competition/calendar";
 import { clampForm, moraleToForm } from "../squad/form";
 import { canRegisterFor, registrationLine, squadRegistrationOf } from "../squad/registration";
-import { SCOUT_REPEAT_LIMIT, completedScoutReports } from "../squad/scouting";
+import {
+  SCOUT_REPEAT_LIMIT,
+  completedScoutReports,
+  deferScout,
+  dropDeferredScout,
+} from "../squad/scouting";
 import { creditSettling, settlingAnchor, settlingOf } from "../squad/settling";
 import {
   assignmentsOf,
@@ -2173,11 +2178,31 @@ export function scoutPlayer(state: GameState, ref: string): MarketSkillResult {
       message: `${player.name}은(는) ${done}번 살펴봤습니다 — 더 보내도 새로 알 게 없습니다`,
     };
   }
-  const inFlight = state.scoutReports.filter((r) => r.completedOn === null).length;
-  if (inFlight >= SCOUT_CONCURRENT_LIMIT) {
+  const inFlight = state.scoutReports.filter((r) => r.completedOn === null);
+  if (inFlight.length >= SCOUT_CONCURRENT_LIMIT) {
+    /**
+     * **무엇이 나갔고 무엇이 안 나갔는지 이름으로 말한다.** 한도만 알려 주면
+     * 감독은 지목한 넷 중 누가 빠졌는지 알 수 없다.
+     *
+     * 그리고 못 나갔다는 사실을 대기로 남긴다 — 이 문구는 이 턴에만 살아 있어,
+     * 남기지 않으면 다음 턴의 모델에는 넷째를 읽을 자리가 없다
+     * (→ [docs/data/player.md](../../../../docs/data/player.md) §9.4).
+     */
+    deferScout(state, playerId);
+    const busy = inFlight
+      .map((r) => `${playerName(state, r.gamePlayerId)} 보고 ${r.dueOn}`)
+      .join(", ");
+    const earliest = inFlight.reduce(
+      (min, r) => (r.dueOn < min ? r.dueOn : min),
+      inFlight[0]!.dueOn,
+    );
     return {
       ok: false,
-      message: `동시에 보낼 수 있는 스카우트는 ${SCOUT_CONCURRENT_LIMIT}명까지입니다 — 보고를 기다리세요`,
+      message:
+        `${player.name}(${teamName(player.teamId)})은(는) 보내지 못했습니다 — 동시 파견 한도 ` +
+        `${SCOUT_CONCURRENT_LIMIT}명이 차 있습니다 (파견 중: ${busy}). ` +
+        `${earliest} 보고가 들어오면 자리가 납니다. ` +
+        `${player.name} 요청은 대기로 남습니다 — 자리가 난 뒤 다시 불러야 나갑니다`,
     };
   }
   const dueOn = addDays(state.date, SCOUT_DAYS);
@@ -2189,6 +2214,8 @@ export function scoutPlayer(state: GameState, ref: string): MarketSkillResult {
     dueOn,
     completedOn: null,
   });
+  // 대기하던 요청이 드디어 나갔다 — 남겨 두면 나간 파견이 "안 나갔다"로 읽힌다
+  dropDeferredScout(state, playerId);
   /**
    * 파견은 아직 아무 장부도 바꾸지 않았다 — 갈 화면이 없으므로 **카드**로 선다.
    * 며칠 뒤 도착하는 보고서 카드와 같은 흐름에 놓여 "보냈다 → 왔다"가 이어진다.

@@ -17,7 +17,12 @@ import { toFreeAgency } from "../market/departures";
 import { teamCatalog, isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import { cupCatalog, competitionShortName, isCup, isEuroCup } from "../data/cup-catalog";
 import { domesticCupCatalog } from "../data/domestic-cup-catalog";
-import { domesticChampion, domesticCupWinners, reviewDomesticCups } from "./domestic-cup";
+import {
+  cupRunsThisSeason,
+  domesticChampion,
+  domesticCupWinners,
+  reviewDomesticCups,
+} from "./domestic-cup";
 import { hasPendingDraw } from "./draw-schedule";
 import { isCupOnlyLeague, isMarketOnlyLeague, leagueName } from "../data/league-catalog";
 import { hasCups, scopedLeagues } from "../world/scope";
@@ -146,6 +151,10 @@ export function computeStandings(
  * 쿠프 드 프랑스·DFB-포칼 결승이 안 치러진 채 시즌이 넘어가 우승 팀도 상금도 없이
  * 사라졌다(실측: 시즌 2에서 두 대회). 그 나라 유럽 티켓 한 장이 순위만으로 나가고,
  * 컵을 든 팀은 아무것도 받지 못한다. 대항전을 전부 기다리는 것과 같은 이유다.
+ *
+ * ⚠️ **다만 그 시즌에 열린 컵만.** 기다릴 컵은 `advanceDomesticCups`가 돌리는 컵과
+ * 같은 게이트(`cupRunsThisSeason`)로 골라야 한다 — 안 열린 컵은 결승이 없어 우승자가
+ * 영영 나오지 않고, 날짜만 흐르며 시즌이 넘어가지 않는다.
  */
 export function allMatchesDone(state: GameState): boolean {
   // 아직 안 열린 추첨이 있으면 그 라운드의 경기는 **아직 존재하지도 않는다**.
@@ -170,7 +179,10 @@ export function allMatchesDone(state: GameState): boolean {
 
   // 컵은 **우승 팀이 나와야** 끝이다 — 경기가 다 끝났어도 다음 단계가 편성 전일 수 있다
   if (!cups) return true;
-  for (const cup of domesticCups) if (!domesticChampion(state, cup.id)) return false;
+  for (const cup of domesticCups) {
+    if (!cupRunsThisSeason(state, cup)) continue;
+    if (!domesticChampion(state, cup.id)) return false;
+  }
   for (const cup of cupCatalog()) if (!euroChampion(state, cup.id)) return false;
   return true;
 }

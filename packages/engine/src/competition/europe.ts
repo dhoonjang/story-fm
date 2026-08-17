@@ -369,10 +369,11 @@ function drawCost(
  * 규모(UCL 24팀 중 5팀이 잉글랜드)에서 해가 없을 수 있어 무거운 벌점으로 둔다.
  */
 function drawOrder(teamIds: string[], seed: number, cupId: string, rounds: number): string[] {
-  const rng = makeRng(seed, `ring:${cupId}`);
-  // 포트 배정과 같은 자리다 — 편성 문맥이라 카탈로그 체급을 읽는다 (`potsOf`)
-  const byStrength = [...teamIds].sort(
-    (a, b) => catalogTierOf(a) - catalogTierOf(b) || (rng() < 0.5 ? -1 : 1),
+  // 난수는 정렬 **전에** 셔플로 한 번만 쓴다 — 비교자에 넣으면 같은 쌍에 매번 다른
+  // 답이 나와 순서가 정렬 구현에 딸린다. 안정 정렬이 셔플된 순서로 동률을 푼다.
+  // 체급은 편성 문맥이라 카탈로그를 읽는다 (`potsOf`와 같은 자리)
+  const byStrength = shuffled(teamIds, seed, `ring:${cupId}`).sort(
+    (a, b) => catalogTierOf(a) - catalogTierOf(b),
   );
   const order: string[] = [];
   for (let i = 0, j = byStrength.length - 1; i <= j; i++, j--) {
