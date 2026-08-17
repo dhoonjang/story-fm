@@ -199,6 +199,7 @@ row, 지난 일 = 그대로 이력.**
 | ↳ `GoalMark` `CardMark` | 그 턴의 골·카드 — 장부의 사건이지 중계 문장의 파싱이 아니다 | `core/state.ts` |
 | `pendingEdits` `PendingEdit` | 아직 GM이 읽지 않은 화면 조작 — 같은 키는 마지막 것만 | `core/state.ts` |
 | `pendingNews` | 아직 GM이 읽지 않은 경기 밖 소식 — 결산이 함께 굴린 재정·다른 경기 | `core/state.ts` |
+| `pendingReportCards` | 아직 카드로 세우지 않은 스카우트 보고서 — 모델이 그 줄을 읽은 턴에 비워진다 | `core/state.ts` |
 
 ⚠️ **능력치 5축은 평판의 `media`와 다른 것이다** — 능력치(`leadership` `tactics`
 `training` `negotiation` `analysis`)는 감독이 가진 역량, 평판(`board` `media`
