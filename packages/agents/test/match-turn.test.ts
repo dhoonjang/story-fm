@@ -12,6 +12,8 @@ import {
 import {
   applyMatchIntent,
   buildLedgerNote,
+  stampMatchScene,
+  stampMatchStream,
   type GmToolCall,
   type MatchIntent,
 } from "@story-fm/agents";
@@ -144,6 +146,37 @@ describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
     // 상태 스냅샷은 구간이 굴러간 **뒤**의 장부이고, 사건 목록은 따로 실린다
     expect(buildLedgerNote(state)).not.toContain("[이번 구간에 일어난 일");
     expect(buildLedgerNote(state)).toContain("[경기 장부");
+  });
+});
+
+/**
+ * 경기 장면의 시각은 **장부의 것**이다 (docs/llm/agents.md §3 ④). 대화만 한 턴에
+ * 캐스터가 `[12']`를 적고 화면이 그것을 그대로 믿어, 코어가 0′에 서 있는데 감독은
+ * 12분이 지나간 판 위에 다음 지시를 쌓았다.
+ */
+describe("경기 장면의 시각 — 장부가 붙인다", () => {
+  it("캐스터가 적은 분이 장부와 어긋나면 장부의 분으로 세운다", () => {
+    const casted = "[12']\n@중계: 브루노가 중거리 슛을 때립니다!";
+    expect(stampMatchScene(casted, 0)).toBe("[0']\n@중계: 브루노가 중거리 슛을 때립니다!");
+  });
+
+  it("헤더가 없는 응답에도 장부의 분이 선다", () => {
+    expect(stampMatchScene("@중계: 다시 이어갑니다.", 67)).toBe("[67']\n@중계: 다시 이어갑니다.");
+  });
+
+  /** 사후 교정만 하면 스트리밍 첫 줄이 화면에 먼저 닿아 라이브 화면이 잠깐 어긋난다 */
+  it("스트리밍은 코어의 분을 먼저 내보내고 모델의 시각 줄은 화면에 닿지 않는다", () => {
+    const out: string[] = [];
+    const feed = stampMatchStream(43, (delta) => out.push(delta));
+    for (const delta of ["[1", "2']\n@중계: ", "다시 이어갑니다."]) feed(delta);
+    expect(out.join("")).toBe("[43']\n@중계: 다시 이어갑니다.");
+  });
+
+  it("모델이 시각 줄을 쓰지 않아도 본문은 그대로 흐른다", () => {
+    const out: string[] = [];
+    const feed = stampMatchStream(0, (delta) => out.push(delta));
+    for (const delta of ["@중계: ", "휘슬이 울립니다."]) feed(delta);
+    expect(out.join("")).toBe("[0']\n@중계: 휘슬이 울립니다.");
   });
 });
 
