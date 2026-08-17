@@ -32,7 +32,7 @@ import { agentConfig, createGameLLM, hasKey, type GameLLM } from "@story-fm/llm"
 import { rateMatchPerformances } from "./match-rater";
 import { reportMood } from "./mood-rater";
 import { reportTraining } from "./training-rater";
-import { MATCH_CASTER_SYSTEM } from "./match-caster";
+import { buildNoSegmentMessage, MATCH_CASTER_SYSTEM } from "./match-caster";
 import { buildOnboardingTurn, runMockGmTurn } from "./mock-gm";
 import { retryOnce } from "./retry";
 import { GM_SYSTEM } from "./gm-prompt";
@@ -339,8 +339,12 @@ async function runRealGmTurn(
         user: [
           ...(operatorOrders ?? []).map((order) => buildOperatorMessage(`전술판 조작 — ${order}`)),
           operator ? buildOperatorMessage(message) : buildManagerMessage(state, message),
-          // 코어가 이미 굴린 구간 — 예전엔 도구 반환값으로 오던 것이 이제 입력이다
-          ...(applied?.segment ? [``, applied.segment] : []),
+          // 코어가 이미 굴린 구간 — 예전엔 도구 반환값으로 오던 것이 이제 입력이다.
+          // 진행이 없는 턴도 그 사실을 싣는다 — 안 실으면 킥오프 턴과 입력이 같아져
+          // 캐스터가 첫 휘슬 대신 지어낸 시각과 슛을 중계한다
+          ...(inMatch && !kickoff
+            ? [``, applied?.segment ?? buildNoSegmentMessage(matchMinute ?? 0)]
+            : []),
           // 스킬이 돌려준 말 — 걸린 지시도, 걸리지 않은 지시도 중계의 근거가 된다
           ...(applied && applied.notes.length > 0
             ? [``, `[감독의 지시에 코어가 답한 것]`, ...applied.notes.map((n) => `- ${n}`)]
