@@ -171,9 +171,13 @@ function makeReportTool(onIntent: (intent: MatchIntent) => void): GameToolSpec {
 /**
  * 감독의 말 → 의도 하나.
  *
- * **두 번 실패하면 오류다** — 결산과 달리 삼키지 않는다(agents.md §1). 해석하지
- * 못한 턴에 무언가를 짐작해 적용하면 감독이 내리지 않은 지시가 판에 오르고, 그것은
- * 아무 일도 일어나지 않는 것보다 나쁘다.
+ * **산출이 나온 뒤의 실패는 실패가 아니다** (agents.md §3 ②). `report_intent`가 의도를
+ * 낸 다음 이어지는 요청이 깨져도 이 걸음의 산출은 이미 완성돼 있다 — 받은 의도로
+ * 진행한다. 그래서 실패 판정은 오직 `intent`가 비었는가로 가른다.
+ *
+ * **의도 없이 두 번 실패하면 오류다** — 결산과 달리 삼키지 않는다(agents.md §1).
+ * 해석하지 못한 턴에 무언가를 짐작해 적용하면 감독이 내리지 않은 지시가 판에 오르고,
+ * 그것은 아무 일도 일어나지 않는 것보다 나쁘다.
  */
 export async function runMatchIntent(
   state: GameState,
@@ -198,8 +202,8 @@ export async function runMatchIntent(
       () => intent !== null,
     );
   } catch (error) {
-    console.warn("[match:intent] 해석에 실패했습니다:", error);
-    return { ok: false, message: "지시를 옮기지 못했습니다 — 다시 말씀해 주세요" };
+    // 삼키는 것이 아니라 판정을 아래로 미룬다 — 무슨 일이 있었는지는 남아야 한다
+    console.warn("[match:intent] 해석 호출이 실패했습니다:", error);
   }
   if (intent === null) {
     return { ok: false, message: "지시를 옮기지 못했습니다 — 다시 말씀해 주세요" };
