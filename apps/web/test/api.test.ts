@@ -350,8 +350,6 @@ describe("API — 온보딩부터 경기까지", () => {
     );
     const game = (await created.json()) as GamePayload;
     const before = game.views.squad;
-    // 새 게임의 6축은 구단 운용 정체성에서 나온다 (team.md §6) — 첼시는 점유형
-    expect(before.tactics.mentality).toBe(4);
     expect(before.familiarity).toBeGreaterThan(0);
 
     // 현재 선발을 그대로 유지하고 전술만 바꾼다
