@@ -129,6 +129,19 @@ const STOP_KO: Record<string, string> = {
   flow: "특별한 사건 없이 시간이 흘렀다",
 };
 
+/**
+ * 사건의 배우 표기. `actors` 순서는 사건 종류마다 다른 방향을 뜻하므로(골은
+ * [득점자, 도움], 교체는 [아웃, 인] — match.md §4) 순서에 뜻을 맡기지 않고
+ * 역할을 이름 옆에 적는다.
+ */
+function actorsNote(ev: MatchEvent, nameOf: (id: string) => string): string {
+  const [first, second] = ev.actors.map(nameOf);
+  if (!first) return "";
+  if (ev.type === "goal") return second ? `득점 ${first} · 도움 ${second}` : `득점 ${first}`;
+  if (ev.type === "substitution") return second ? `OUT ${first} · IN ${second}` : `OUT ${first}`;
+  return ev.actors.map(nameOf).join(" → ");
+}
+
 /** 구간 대본 → 캐스터 입력. 선수는 이름으로 준다 — id를 주면 중계에 id가 흘러나온다. */
 export function buildSegmentMessage(
   events: MatchEvent[],
@@ -137,7 +150,7 @@ export function buildSegmentMessage(
   sideName: (side: "home" | "away") => string,
 ): string {
   const lines = events.map((ev) => {
-    const who = ev.actors.map(nameOf).join(" → ");
+    const who = actorsNote(ev, nameOf);
     const team = ev.team ? `${sideName(ev.team)} ` : "";
     const cause = ev.causes.length > 0 ? ` · 근거: ${ev.causes.join(" / ")}` : "";
     const detail = ev.detail ? ` · ${ev.detail}` : "";
