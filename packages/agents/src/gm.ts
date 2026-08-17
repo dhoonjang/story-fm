@@ -48,11 +48,14 @@ import {
   buildManagerMessage,
   buildMatchReference,
   buildOperatorMessage,
+  filterSceneStream,
   parseSceneHeader,
+  sanitizeSceneText,
   stampMatchScene,
   stampMatchStream,
 } from "./gm-input";
 import {
+  GmTurnFailure,
   TIME_PASSED,
   parseTimeSkip,
   type GmToolCall,
@@ -221,19 +224,26 @@ async function runRealGmTurn(
   // 벌어진 일"을 상태에 실어, 모델은 도착한 자리에서 보고한다
   const pendingBeforeSkip = new Set(pendingVerdicts(state).map((v) => v.negotiation.id));
   const skip = !inMatch && operator ? parseTimeSkip(message) : null;
-  const skipFrom = state.date;
+  /**
+   * 이 턴이 시작한 날짜 — **손잡이보다도, 장면보다도 먼저** 잡는다.
+   *
+   * 결산(훈련·심경)이 보는 구간의 시작이 여기다. 시계가 도는 자리가 둘이라
+   * (손잡이는 장면 앞, 헤더는 장면 뒤 — agents.md §2) 장면 뒤에 잡으면 손잡이 턴의
+   * 구간이 길이 0이 되어 결산이 아예 돌지 않는다.
+   */
+  const turnFrom = state.date;
   const skipped = skip ? advanceForSkip(state, skip) : null;
   if (skipped) {
     calls.push({
       name: TIME_PASSED,
       summary: [
-        `${skipFrom} → ${state.date} — ${ADVANCE_STOP_KO[skipped.stopped] ?? "진행했다"}`,
+        `${turnFrom} → ${state.date} — ${ADVANCE_STOP_KO[skipped.stopped] ?? "진행했다"}`,
         ...skipped.digest,
       ].join("\n"),
       silent: true,
     });
     const brief = buildTrainingBrief(state, skipped.trained?.sessions ?? [], {
-      from: skipFrom,
+      from: turnFrom,
       to: state.date,
     });
     if (brief) pendingTraining.push(brief);
@@ -272,8 +282,10 @@ async function runRealGmTurn(
       ? ({ ok: true, intent: { advance: "segment" } } as const)
       : await runMatchIntent(state, message);
     // 두 번 실패하면 아무것도 바꾸지 않고 되돌린다 — 짐작해 적용하면 감독이 내리지
-    // 않은 지시가 판에 오르고, 그건 아무 일도 안 일어나는 것보다 나쁘다
-    if (!parsed.ok) return { text: parsed.message, toolCalls: calls, goals, cards };
+    // 않은 지시가 판에 오르고, 그건 아무 일도 안 일어나는 것보다 나쁘다.
+    // 안내 문구는 장면이 아니라 배너다 — 턴 결과로 돌려주면 화자도 헤더도 없는 줄이
+    // 채팅에 저장되고 그 턴은 되돌릴 수도 없다 (agents.md §8)
+    if (!parsed.ok) throw new GmTurnFailure(parsed.message);
     applied = applyMatchIntent(state, parsed.intent, calls, goals, cards);
   }
 
@@ -301,7 +313,7 @@ async function runRealGmTurn(
         state,
         skipped
           ? {
-              from: skipFrom,
+              from: turnFrom,
               stopped: ADVANCE_STOP_KO[skipped.stopped] ?? "진행했다",
               digest: skipped.digest,
             }
@@ -317,13 +329,12 @@ async function runRealGmTurn(
   const history =
     inMatch && !kickoff ? (state.pendingMatch?.casterHistory ?? []) : buildGmHistory(state);
 
-  // 헤더가 날짜를 옮기기 전의 시점 — 훈련 결산이 "어느 구간이었나"를 알아야 한다
-  const sceneFrom = state.date;
+  // 헤더가 옮기기 전의 시각 — "시계가 제자리인가"를 재는 자리다 (날짜는 `turnFrom`)
   const clockFrom = clockOf(state);
   /**
-   * 재시도의 조건 — **아직 아무 자국도 남지 않았을 때만.** 도구가 돌았으면 상태가
-   * 이미 바뀌었고(이중 반영), 글자가 나갔으면 화면에 장면이 두 번 그려진다.
-   * 대부분의 실패(인증·혼잡·한도·연결)는 첫 글자보다 먼저 온다.
+   * 재시도의 조건 — **이 호출이 아직 아무 자국도 남기지 않았을 때만.** 도구가
+   * 돌았으면 상태가 이미 바뀌었고(이중 반영), 글자가 나갔으면 화면에 장면이 두 번
+   * 그려진다. 대부분의 실패(인증·혼잡·한도·연결)는 첫 글자보다 먼저 온다.
    */
   let streamed = false;
   const trackText = onText
@@ -337,9 +348,18 @@ async function runRealGmTurn(
    * 뒤이자 `finalizeMatch`가 장부를 지우기 전인 지금이 읽을 수 있는 유일한 자리다.
    */
   const matchMinute = inMatch ? (state.pendingMatch?.ledger.minute ?? null) : null;
-  // 첫 줄은 코어가 쓴다 — 모델이 적은 시각은 화면에 닿기 전에 걷힌다
-  const streamText =
-    trackText && matchMinute !== null ? stampMatchStream(matchMinute, trackText) : trackText;
+  /**
+   * 경기의 첫 줄은 코어가 쓴다 — 모델이 적은 시각은 화면에 닿기 전에 걷힌다.
+   * 평시는 대신 위생이 걸린다 — 걸러질 줄이 화면에 잠깐 떴다 사라지면 그것대로
+   * 눈에 띄므로 저장과 화면에 같은 것이 선다 (agents.md §2).
+   */
+  const streamText = !trackText
+    ? undefined
+    : inMatch
+      ? matchMinute !== null
+        ? stampMatchStream(matchMinute, trackText)
+        : trackText
+      : filterSceneStream(trackText);
   const result = await retryOnce(
     inMatch ? "gm:match" : "gm:turn",
     () =>
@@ -364,29 +384,37 @@ async function runRealGmTurn(
         tools,
         onText: streamText,
       }),
-    () => streamed || calls.some((c) => c.name !== TIME_PASSED),
+    /**
+     * 자국은 **이 호출이 남긴 것만** 센다. 캐스터는 도구가 없어 판을 바꾸지 못하고,
+     * 판을 바꾼 것은 앞 걸음의 코어다 — 그 기록을 자국으로 세면 구간을 굴린 모든
+     * 경기 턴이 첫 실패에 그대로 무너진다 (agents.md §3 ④·§8).
+     */
+    inMatch ? () => streamed : () => streamed || calls.some((c) => c.name !== TIME_PASSED),
   );
 
+  // 도구 앞에 흘린 작업 서술과 두 번째 헤더를 걷어낸다 — 중계에는 걸지 않는다
+  // (구간마다 헤더를 새로 찍는 것이 정상이다 — prompts.md §1)
+  const sceneText = inMatch ? result.text : sanitizeSceneText(result.text);
   // 첫 줄 헤더가 시계를 움직인다 — 모델의 선언을 코어가 따라가되 그대로 믿지 않고,
   // 경기일·기한 앞에서 멈춘 뒤 그 사실을 기록으로 남긴다
-  const scene = parseSceneHeader(result.text);
+  const scene = parseSceneHeader(sceneText);
   // 중계가 적은 분은 쓰이지 않지만, 장부와 갈렸다는 사실은 프롬프트가 흔들린 신호다
   if (matchMinute !== null && scene.minute !== null && scene.minute !== matchMinute) {
     console.warn(`[gm] 중계의 시각 ${scene.minute}′ — 장부(${matchMinute}′)로 세웁니다`);
   }
   // 헤더를 못 읽으면 시계가 멈춘다 — 조용히 지나가지 않게 첫 줄을 로그에 남긴다
   if (!inMatch && !scene.point) {
-    const first = result.text.split("\n").find((line) => line.trim().length > 0) ?? "";
+    const first = sceneText.split("\n").find((line) => line.trim().length > 0) ?? "";
     console.warn(
       `[gm] 장면 헤더를 읽지 못해 시계가 멈춥니다: ${JSON.stringify(first.slice(0, 80))}`,
     );
   }
   // 헤더는 읽혔는데 시각이 안 움직인 턴 — 이어지는 대화면 정상이지만 몇 턴이고
   // 반복되면 세계가 정지하므로 로그로 드러낸다
-  if (!inMatch && !skipped && scene.point && scene.point.date === sceneFrom) {
+  if (!inMatch && !skipped && scene.point && scene.point.date === turnFrom) {
     if (minutesOfClock(scene.point.clock) <= minutesOfClock(clockFrom)) {
       console.warn(
-        `[gm] 시계가 제자리입니다 (${sceneFrom} ${clockFrom}) — 헤더: ${JSON.stringify(
+        `[gm] 시계가 제자리입니다 (${turnFrom} ${clockFrom}) — 헤더: ${JSON.stringify(
           (scene.header ?? "").slice(0, 60),
         )}`,
       );
@@ -413,7 +441,7 @@ async function runRealGmTurn(
       });
     }
     const brief = buildTrainingBrief(state, moved.trained?.sessions ?? [], {
-      from: sceneFrom,
+      from: turnFrom,
       to: state.date,
     });
     if (brief) pendingTraining.push(brief);
@@ -451,11 +479,11 @@ async function runRealGmTurn(
         }
       }
       // 심경 — **평점이 매겨진 뒤에** 읽어야 "잘하고도 졌다"가 문장에 담긴다
-      await rateMood(state, sceneFrom);
+      await rateMood(state, turnFrom);
     }
   }
   // 시간이 흐른 턴의 심경 — 그 구간에 실제로 무슨 일이 있었던 선수만 다시 쓴다
-  if (!inMatch && state.date !== sceneFrom) await rateMood(state, sceneFrom);
+  if (!inMatch && state.date !== turnFrom) await rateMood(state, turnFrom);
   // 출력 상한에 잘린 턴은 이미 스트리밍으로 나가 되돌릴 수 없다 — 원인만 로그에 남긴다
   if (result.stopReason === "max_tokens") {
     console.error(
