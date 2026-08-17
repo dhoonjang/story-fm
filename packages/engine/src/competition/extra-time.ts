@@ -2,6 +2,7 @@ import type { GamePlayer, MatchRecord } from "@story-fm/domain";
 import { clampCondition, naturalPositionOf } from "@story-fm/domain";
 import { conditionDrain, drainVariance } from "@story-fm/sim";
 import { EXTRA_TIME_MINUTES, simulateExtraTime } from "../match/quick-sim";
+import { simSquadFor } from "../core/tick";
 import {
   assignmentsOf,
   ensureSeasonStat,
@@ -28,12 +29,7 @@ import {
  * 우리 컵 8강도 남의 8강도 같은 규칙을 지난다.
  */
 
-/**
- * 연장을 뛰는 인원 — 출전 명단의 앞 열한 명.
- *
- * 90분에 누가 서 있었는지는 결과에 남지 않는다(교체 기록은 장부에 없다).
- * 유저 경기의 명단은 종료 시점 온필드가 앞에 오고, 간이 시뮬은 선발이 앞에 온다.
- */
+/** 한 팀이 그라운드에 세우는 인원 — 옛 세이브의 명단을 자를 때만 쓴다 */
 const EXTRA_TIME_XI = 11;
 
 /**
@@ -111,10 +107,24 @@ export function tieAggregate(
   };
 }
 
-/** 그 팀이 연장을 뛰는 열한 명 — 명단이 없는 옛 기록은 1군 상위로 채운다 */
-function extraTimeXi(state: GameState, teamId: string, lineup: string[] | undefined): GamePlayer[] {
-  const listed = (lineup ?? [])
-    .slice(0, EXTRA_TIME_XI)
+/**
+ * **경기를 끝낸 사람들** — 연장을 뛰고 페널티를 차는 열한 명(퇴장이 있었으면 그보다 적다).
+ *
+ * 명단(`homeLineup`)은 **뛴 사람 전부**라 앞 열한 명을 자르면 교체로 나간 선수와
+ * 퇴장당한 선수가 연장을 뛴다. 그래서 두 시뮬 다 종료 시점 온필드를 따로 남기고
+ * (`homeOnPitch`) 여기가 그것을 읽는다 — 그게 없는 옛 세이브에서만 명단 앞 열한
+ * 명으로, 명단조차 없으면 1군 상위로 물러선다 (match.md §7).
+ */
+export function finishingXi(
+  state: GameState,
+  match: MatchRecord,
+  side: "home" | "away",
+): GamePlayer[] {
+  const result = match.result;
+  const teamId = side === "home" ? match.homeTeamId : match.awayTeamId;
+  const onPitch = side === "home" ? result?.homeOnPitch : result?.awayOnPitch;
+  const lineup = side === "home" ? result?.homeLineup : result?.awayLineup;
+  const listed = (onPitch ?? (lineup ?? []).slice(0, EXTRA_TIME_XI))
     .map((id) => playerById(state, id))
     .filter((p): p is GamePlayer => p !== null && p.teamId === teamId);
   if (listed.length > 0) return listed;
@@ -152,12 +162,18 @@ export function resolveExtraTime(state: GameState, decider: MatchRecord, channel
   if (!needsExtraTime(state, decider)) return false;
 
   const xi = {
-    home: extraTimeXi(state, decider.homeTeamId, result.homeLineup),
-    away: extraTimeXi(state, decider.awayTeamId, result.awayLineup),
+    home: finishingXi(state, decider, "home"),
+    away: finishingXi(state, decider, "away"),
   };
+  /**
+   * **전력 모델은 90분과 같은 원본에서 선다** — 전술판의 자리·좌표·역할, 팀 전술,
+   * 개인 적응도, 감독의 전술 눈금까지 `simSquadFor`가 한 벌로 세운다. 팀 id와
+   * 선수 목록만 넘기면 패킷이 자연 포지션·기본 전술·적응도 60·감독 65로 서서
+   * 연장에서만 약팀이 살아나거나 죽는다 (match.md §7).
+   */
   const extra = simulateExtraTime(
-    { teamId: decider.homeTeamId, starters: xi.home },
-    { teamId: decider.awayTeamId, starters: xi.away },
+    simSquadFor(state, decider.homeTeamId, xi.home),
+    simSquadFor(state, decider.awayTeamId, xi.away),
     state.seed,
     channel,
     { neutral: decider.neutral === true },
