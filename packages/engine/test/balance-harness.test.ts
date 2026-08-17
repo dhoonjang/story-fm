@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  EXHAUSTED_CONDITION,
+  ROTATION_FATIGUE,
+  ROTATION_FRESHER,
+  ROTATION_OVR_DROP,
   advanceTime,
   assignmentsOf,
   computeStandings,
@@ -7,6 +11,7 @@ import {
   groupOf,
   isInjured,
   isSuspended,
+  simSquadOf,
   type GameState,
 } from "@story-fm/engine";
 import { createTestGame, drillUserTactics, playMockMatch } from "./helpers";
@@ -15,6 +20,9 @@ import { createTestGame, drillUserTactics, playMockMatch } from "./helpers";
  * 로테이션하는 감독 — AI 팀(`simSquadOf`)과 같은 문턱으로 지친 선발을 바꾼다.
  * 하네스가 이걸 안 하면 감독 팀만 시즌 내내 같은 XI로 뛰어 측정이 실제 플레이와
  * 다른 것을 잰다.
+ *
+ * ⚠️ 문턱은 `simSquadOf`가 쓰는 상수 그것이다. 여기에 숫자를 따로 적으면 로테이션을
+ * 재는 자리가 재려는 대상과 다른 눈금을 쓴다.
  */
 function rotate(state: GameState): void {
   const squad = firstTeamPlayers(state, state.userTeamId);
@@ -26,7 +34,7 @@ function rotate(state: GameState): void {
     const tired = byId.get(slot.playerId);
     const unavailable =
       !tired || isInjured(state, slot.playerId) || isSuspended(state, slot.playerId);
-    if (!unavailable && tired && 100 - tired.state.condition < 30) continue;
+    if (!unavailable && tired && 100 - tired.state.condition < ROTATION_FATIGUE) continue;
     const pick = squad
       .filter(
         (p) =>
@@ -34,8 +42,8 @@ function rotate(state: GameState): void {
           !isInjured(state, p.id) &&
           !isSuspended(state, p.id) &&
           (!tired || groupOf(p) === groupOf(tired)) &&
-          (!tired || p.attributes.overall >= tired.attributes.overall - 8) &&
-          (!tired || p.state.condition >= tired.state.condition + 15),
+          (!tired || p.attributes.overall >= tired.attributes.overall - ROTATION_OVR_DROP) &&
+          (!tired || p.state.condition >= tired.state.condition + ROTATION_FRESHER),
       )
       .sort((a, b) => b.attributes.overall - a.attributes.overall)[0];
     if (!pick) continue;
@@ -155,6 +163,101 @@ function distribution(state: GameState, label: string): string {
   ].join("\n");
 }
 
+/**
+ * **AI 로테이션 — 문턱 셋이 실제로 걸리는가** (docs/simulation/match.md §7).
+ *
+ * `ROTATION_FATIGUE`·`ROTATION_OVR_DROP`·`ROTATION_FRESHER`는 **동시에** 걸려야
+ * 하므로 깊이가 얕은 팀에서는 통째로 불발하고 `EXHAUSTED_CONDITION` 갈래만 남는다.
+ * 그게 실제로 일어나는지는 코드를 읽어서는 알 수 없다 — 시즌을 굴려 세는 자리가
+ * 여기다. 기대값을 두지 않는 이유도 같다: 재려는 값이지 지키려는 값이 아니다.
+ */
+const CONDITION_BANDS = [40, 60, 80, 100];
+const BAND_LABELS = ["~39", "40~59", "60~79", "80~99", "100"];
+
+function bandOf(condition: number): number {
+  const index = CONDITION_BANDS.findIndex((edge) => condition < edge);
+  return index === -1 ? CONDITION_BANDS.length : index;
+}
+
+interface RotationTally {
+  /** 표본 = 팀 × 경기일 */
+  samples: number;
+  /** 그날 서는 선발의 체력 (평균의 분자와 분모) */
+  starterCondition: number;
+  starterCount: number;
+  /** 1군 전체의 체력 분포 — `CONDITION_BANDS` 구간별 인원 */
+  bands: number[];
+  bandTotal: number;
+  /** 피로 문턱을 넘긴 가용 선발 */
+  tired: number;
+  /** 그중 실제로 라인업에서 빠진 사람 */
+  rotated: number;
+  /**
+   * 빠진 사람 중 체력이 탈진 문턱 **위**였던 사람 — 문턱 셋 갈래가 확실히 걸린
+   * 경우다. 탈진 문턱 아래는 두 갈래를 밖에서 가를 수 없다.
+   */
+  aboveExhausted: number;
+}
+
+function newTally(): RotationTally {
+  return {
+    samples: 0,
+    starterCondition: 0,
+    starterCount: 0,
+    bands: new Array(CONDITION_BANDS.length + 1).fill(0) as number[],
+    bandTotal: 0,
+    tired: 0,
+    rotated: 0,
+    aboveExhausted: 0,
+  };
+}
+
+/** 감독 경기가 시작되는 순간의 리그 — 그 시점의 AI 라인업을 그대로 읽는다 */
+function sampleRotation(state: GameState, tally: RotationTally): void {
+  for (const row of computeStandings(state, "epl")) {
+    if (row.teamId === state.userTeamId) continue;
+    const squad = firstTeamPlayers(state, row.teamId);
+    const byId = new Map(squad.map((p) => [p.id, p]));
+    const onPitch = new Set(simSquadOf(state, row.teamId).starters.map((p) => p.id));
+    tally.samples += 1;
+    for (const p of squad) {
+      tally.bandTotal += 1;
+      tally.bands[bandOf(p.state.condition)]! += 1;
+      if (onPitch.has(p.id)) {
+        tally.starterCondition += p.state.condition;
+        tally.starterCount += 1;
+      }
+    }
+    for (const a of assignmentsOf(state, row.teamId, "starting")) {
+      const p = byId.get(a.playerId);
+      // 부상·정지로 빠진 자리는 로테이션이 아니다 — 문턱이 판단할 기회조차 없다
+      if (!p || isInjured(state, p.id) || isSuspended(state, p.id)) continue;
+      if (100 - p.state.condition < ROTATION_FATIGUE) continue;
+      tally.tired += 1;
+      if (onPitch.has(p.id)) continue;
+      tally.rotated += 1;
+      if (p.state.condition > EXHAUSTED_CONDITION) tally.aboveExhausted += 1;
+    }
+  }
+}
+
+function rotationReport(tally: RotationTally, label: string): string {
+  const per = (n: number) => (n / Math.max(1, tally.samples)).toFixed(2);
+  const bands = tally.bands
+    .map((count, i) => `${BAND_LABELS[i]}:${pct(count, tally.bandTotal)}`)
+    .join(" ");
+  return [
+    `[${label}] AI 로테이션 (표본 ${tally.samples} = 팀 × 경기일)`,
+    `  선발 평균 체력 ${(tally.starterCondition / Math.max(1, tally.starterCount)).toFixed(1)}`,
+    `  1군 체력 분포 ${bands}`,
+    `  피로 ${ROTATION_FATIGUE}↑ 가용 선발 ${per(tally.tired)}명/팀·경기일 · ` +
+      `그중 로테이션 ${per(tally.rotated)}명 (${pct(tally.rotated, tally.tired)}) · ` +
+      `불발 ${per(tally.tired - tally.rotated)}명`,
+    `  로테이션 중 체력 ${EXHAUSTED_CONDITION} 위 ${per(tally.aboveExhausted)}명 ` +
+      `(${pct(tally.aboveExhausted, tally.rotated)}) — 문턱 셋 갈래가 확실히 걸린 몫`,
+  ].join("\n");
+}
+
 describe.skipIf(!process.env.BALANCE)("밸런스 하네스 (전체 세계)", () => {
   for (const seed of [42, 7, 99]) {
     it(`시드 ${seed} — 한 시즌`, () => {
@@ -162,6 +265,7 @@ describe.skipIf(!process.env.BALANCE)("밸런스 하네스 (전체 세계)", () 
       let last = "";
       let spread = "";
       let note = "";
+      const tally = newTally();
       for (let i = 0; i < 600; i++) {
         const advanced = advanceTime(state, "next_match");
         if (!advanced.ok) {
@@ -174,6 +278,7 @@ describe.skipIf(!process.env.BALANCE)("밸런스 하네스 (전체 세계)", () 
         }
         if (advanced.stopped === "season_end") break;
         if (advanced.stopped === "matchday") {
+          if (state.season === 1) sampleRotation(state, tally);
           drillUserTactics(state, 7);
           rotate(state);
           playMockMatch(state);
@@ -183,7 +288,9 @@ describe.skipIf(!process.env.BALANCE)("밸런스 하네스 (전체 세계)", () 
           }
         }
       }
-      console.log(last + note + "\n" + spread);
+      console.log(
+        last + note + "\n" + spread + "\n" + rotationReport(tally, `시드 ${seed}`),
+      );
       expect(state.matches.length).toBeGreaterThan(0);
     });
   }
