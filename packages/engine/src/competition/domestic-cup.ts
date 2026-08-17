@@ -746,8 +746,11 @@ const LATE_ADOPTION_GRACE_DAYS = 21;
  * ② 1라운드 추첨일이 아직 크게 지나지 않았어야 한다. 시즌 중반에 컵이 새로 붙는
  *    세이브에 다섯 라운드를 남은 몇 주에 욱여넣으면 일정이 무너진다 — 그런 시즌은
  *    조용히 건너뛰고 다음 시즌부터 정상으로 돈다.
+ *
+ * 시즌 종료 판정(`allMatchesDone`)도 **이 함수로** 기다릴 컵을 고른다 — 게이트가
+ * 둘이면 안 열린 컵의 우승자를 영원히 기다린다.
  */
-function cupRunsThisSeason(state: GameState, cup: DomesticCupEntry): boolean {
+export function cupRunsThisSeason(state: GameState, cup: DomesticCupEntry): boolean {
   const entrants = domesticCupEntrants(cup.id);
   if (entrants.length !== DOMESTIC_CUP_SIZE) return false;
   if (entrants.some((id) => !state.teams.some((t) => t.id === id))) return false;

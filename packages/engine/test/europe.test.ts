@@ -224,6 +224,27 @@ describe("대항전 리그 페이즈 편성", () => {
     expect(key(1, 42)).not.toBe(key(1, 7));
     expect(key(1, 42)).not.toBe(key(2, 42));
   });
+
+  it("정렬 구현이 달라도 같은 대진 — 난수는 비교자에 들어가지 않는다", () => {
+    // 네이티브와 다른 안정 정렬로 갈아 끼운다 — 비교자가 일관되면 구현이 무엇이든 답이 같아야 한다
+    const native = Array.prototype.sort;
+    const insertion = function <T>(this: T[], cmp: (a: T, b: T) => number): T[] {
+      for (let i = 1; i < this.length; i++) {
+        const v = this[i]!;
+        let j = i - 1;
+        for (; j >= 0 && cmp(this[j]!, v) > 0; j--) this[j + 1] = this[j]!;
+        this[j + 1] = v;
+      }
+      return this;
+    };
+    Array.prototype.sort = insertion as typeof Array.prototype.sort;
+    try {
+      const remade = buildAllEuroMatches(1, 42, buildEuroEntrants(1, 42));
+      expect(remade.map((m) => m.id)).toEqual(matches.map((m) => m.id));
+    } finally {
+      Array.prototype.sort = native;
+    }
+  });
 });
 
 describe("리그 일정과의 공존", () => {
