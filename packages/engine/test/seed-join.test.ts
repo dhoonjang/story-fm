@@ -343,3 +343,55 @@ describe("자리표시자 생년월일 — 1월 1일이 실제 날짜인지 표�
     expect(violations).toEqual([]);
   });
 });
+
+/**
+ * 소속 불변식 — **한 선수는 한 구단에만 있고, 한 구단 안에서 번호가 겹치지 않는다**
+ * (sources.md §4.1.1).
+ *
+ * 선수를 구단 사이로 옮기는 갱신이 조용히 깨는 자리다. 중복은 두 구단의 스쿼드
+ * 깊이·급여 총액·라인업 후보를 함께 어긋내고, 겹친 번호는 `ensureSquadNumbers`가
+ * 손대지 않는다 — 그 함수는 **빈 번호만** 채우므로 시드가 들여온 충돌은 그대로
+ * 게임에 실린다.
+ *
+ * ⚠️ **이름만으로 중복을 잡을 수는 없다.** 생일이 19일 떨어진 동명이인이 실재한다
+ * (알렉스 히메네스 2005-05-08 · 2005-04-19). 그래서 키는 (이름 + 생년월일)이고,
+ * 생일까지 어긋난 중복은 이 축으로 잡히지 않는다 — 그쪽은 위키 구단 문서와의
+ * 대조만이 가른다.
+ */
+describe("소속 불변식 — 한 선수 한 구단, 한 구단 안에서 번호는 하나", () => {
+  const ALL_SQUADS: Record<string, readonly RealPlayerSeed[]> = {
+    ...REAL_SQUADS,
+    ...EU_SQUADS,
+    ...MARKET_LEAGUE_SQUADS,
+  };
+
+  it("같은 (이름 + 생년월일)이 두 구단에 실려 있지 않다", () => {
+    const teamsOf = new Map<string, string[]>();
+    for (const [team, squad] of Object.entries(ALL_SQUADS)) {
+      for (const seed of squad) {
+        const key = `${seed.nameEn}|${seed.birthdate}`;
+        teamsOf.set(key, [...(teamsOf.get(key) ?? []), team]);
+      }
+    }
+    const violations = [...teamsOf]
+      .filter(([, teams]) => new Set(teams).size > 1)
+      .map(([key, teams]) => `${key} — ${teams.join(", ")}`);
+
+    expect(violations).toEqual([]);
+  });
+
+  it("한 구단이 같은 등번호를 두 명에게 주지 않는다", () => {
+    const violations = Object.entries(ALL_SQUADS).flatMap(([team, squad]) => {
+      const namesOf = new Map<number, string[]>();
+      for (const seed of squad) {
+        if (seed.squadNumber === undefined) continue;
+        namesOf.set(seed.squadNumber, [...(namesOf.get(seed.squadNumber) ?? []), seed.nameEn]);
+      }
+      return [...namesOf]
+        .filter(([, names]) => names.length > 1)
+        .map(([number, names]) => `${team} #${number} — ${names.join(", ")}`);
+    });
+
+    expect(violations).toEqual([]);
+  });
+});
