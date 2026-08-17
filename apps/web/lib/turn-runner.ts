@@ -9,6 +9,7 @@ import {
   type GameState,
 } from "@story-fm/engine";
 import { runGmTurn } from "@story-fm/agents";
+import { bindTurnTrace, traceTurn } from "@story-fm/llm";
 import { toPayload, type GamePayload } from "./store";
 import type { MatchBoardOrder } from "./match-orders";
 
@@ -115,86 +116,90 @@ export function runTurnLocked(
    */
   orders?: readonly MatchBoardOrder[],
 ): Promise<TurnOutcome> {
-  return withGameLock(id, async () => {
-    const state = loadGame(id);
-    if (!state) return { ok: false as const, status: 404, error: "게임을 찾을 수 없습니다" };
+  // 이 턴에 오간 원문은 model 턴을 채팅에 밀어 넣는 자리에서 그 인덱스에 묶인다
+  return withGameLock(id, () =>
+    traceTurn(async (): Promise<TurnOutcome> => {
+      const state = loadGame(id);
+      if (!state) return { ok: false as const, status: 404, error: "게임을 찾을 수 없습니다" };
 
-    /**
-     * 경기 중인가 — **턴을 시작할 때** 본다. 이 턴에서 경기가 끝나더라도
-     * 감독이 말을 건 상대는 중계였으므로 그 턴은 경기 이력에 속한다.
-     */
-    const inMatch = state.phase === "match";
-    const matchId = state.pendingMatch?.matchId;
-    const mark = inMatch ? { inMatch: true as const, ...(matchId ? { matchId } : {}) } : {};
-    // 판에서 쌓인 조작은 LLM이 다시 해석하지 않는다. 구조화된 ID·값을 코어 스킬로
-    // 먼저 적용하고, 모델에는 이미 반영된 사실만 넘긴다.
-    const appliedOrders: string[] = [];
-    if (orders !== undefined && orders.length > 0) {
-      for (const order of orders) {
-        const result = applyMatchBoardOrder(state, order);
-        if (!result.ok) {
-          return {
-            ok: false as const,
-            status: 400,
-            error: "전술판 지시를 반영하지 못했습니다",
-            detail: result.message,
-          };
+      /**
+       * 경기 중인가 — **턴을 시작할 때** 본다. 이 턴에서 경기가 끝나더라도
+       * 감독이 말을 건 상대는 중계였으므로 그 턴은 경기 이력에 속한다.
+       */
+      const inMatch = state.phase === "match";
+      const matchId = state.pendingMatch?.matchId;
+      const mark = inMatch ? { inMatch: true as const, ...(matchId ? { matchId } : {}) } : {};
+      // 판에서 쌓인 조작은 LLM이 다시 해석하지 않는다. 구조화된 ID·값을 코어 스킬로
+      // 먼저 적용하고, 모델에는 이미 반영된 사실만 넘긴다.
+      const appliedOrders: string[] = [];
+      if (orders !== undefined && orders.length > 0) {
+        for (const order of orders) {
+          const result = applyMatchBoardOrder(state, order);
+          if (!result.ok) {
+            return {
+              ok: false as const,
+              status: 400,
+              error: "전술판 지시를 반영하지 못했습니다",
+              detail: result.message,
+            };
+          }
+          appliedOrders.push(`전술판 적용 완료 — ${result.message} (다시 적용하지 말 것)`);
         }
-        appliedOrders.push(`전술판 적용 완료 — ${result.message} (다시 적용하지 말 것)`);
+        refreshPacket(state);
+        state.chat.push({
+          role: "operator",
+          text: appliedOrders.join("\n"),
+          toolCalls: [],
+          at: state.date,
+          ...mark,
+        });
       }
-      refreshPacket(state);
       state.chat.push({
-        role: "operator",
-        text: appliedOrders.join("\n"),
+        role: operator ? "operator" : "user",
+        text: message,
         toolCalls: [],
         at: state.date,
-        ...mark,
+        ...(inMatch ? { inMatch: true, ...(matchId ? { matchId } : {}) } : {}),
       });
-    }
-    state.chat.push({
-      role: operator ? "operator" : "user",
-      text: message,
-      toolCalls: [],
-      at: state.date,
-      ...(inMatch ? { inMatch: true, ...(matchId ? { matchId } : {}) } : {}),
-    });
-    try {
-      const turn = await runGmTurn(state, message, onDelta, operator, appliedOrders);
-      state.chat.push({
-        role: "model",
-        text: turn.text,
-        toolCalls: turn.toolCalls,
-        at: state.date,
-        ...(turn.goals && turn.goals.length > 0 ? { goals: turn.goals } : {}),
-        ...(turn.cards && turn.cards.length > 0 ? { cards: turn.cards } : {}),
-        ...(turn.reports && turn.reports.length > 0 ? { reports: turn.reports } : {}),
-        // 킥오프 턴은 시작할 땐 평시였지만 끝나면 경기 중이다 — 중계가 말한 턴이다.
-        // 종료 턴은 반대로 시작할 때만 경기 중이므로 그때의 matchId를 들고 간다
-        ...(inMatch || state.phase === "match"
-          ? {
-              inMatch: true,
-              ...((matchId ?? state.pendingMatch?.matchId)
-                ? { matchId: (matchId ?? state.pendingMatch?.matchId)! }
-                : {}),
-            }
-          : {}),
-      });
-      /**
-       * 화면 조작 기록은 **읽힌 뒤에** 비운다 — 턴이 실패하면 그대로 남아
-       * 다음 발화 때 다시 읽힌다(실패한 턴은 없었던 일이 되어야 한다).
-       */
-      takeEdits(state);
-      saveGame(state);
-      return { ok: true as const, payload: toPayload(state) };
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      console.error(`[turn] GM 턴 실패 (game=${id}):`, error);
-      return {
-        ok: false as const,
-        status: 502,
-        error: turnErrorMessage(detail),
-        detail,
-      };
-    }
-  });
+      try {
+        const turn = await runGmTurn(state, message, onDelta, operator, appliedOrders);
+        state.chat.push({
+          role: "model",
+          text: turn.text,
+          toolCalls: turn.toolCalls,
+          at: state.date,
+          ...(turn.goals && turn.goals.length > 0 ? { goals: turn.goals } : {}),
+          ...(turn.cards && turn.cards.length > 0 ? { cards: turn.cards } : {}),
+          ...(turn.reports && turn.reports.length > 0 ? { reports: turn.reports } : {}),
+          // 킥오프 턴은 시작할 땐 평시였지만 끝나면 경기 중이다 — 중계가 말한 턴이다.
+          // 종료 턴은 반대로 시작할 때만 경기 중이므로 그때의 matchId를 들고 간다
+          ...(inMatch || state.phase === "match"
+            ? {
+                inMatch: true,
+                ...((matchId ?? state.pendingMatch?.matchId)
+                  ? { matchId: (matchId ?? state.pendingMatch?.matchId)! }
+                  : {}),
+              }
+            : {}),
+        });
+        bindTurnTrace(id, state.chat.length - 1);
+        /**
+         * 화면 조작 기록은 **읽힌 뒤에** 비운다 — 턴이 실패하면 그대로 남아
+         * 다음 발화 때 다시 읽힌다(실패한 턴은 없었던 일이 되어야 한다).
+         */
+        takeEdits(state);
+        saveGame(state);
+        return { ok: true as const, payload: toPayload(state) };
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        console.error(`[turn] GM 턴 실패 (game=${id}):`, error);
+        return {
+          ok: false as const,
+          status: 502,
+          error: turnErrorMessage(detail),
+          detail,
+        };
+      }
+    }),
+  );
 }
