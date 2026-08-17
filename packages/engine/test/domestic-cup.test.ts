@@ -31,7 +31,7 @@ import {
   userStillIn,
   type GameState,
 } from "@story-fm/engine";
-import type { MatchRecord } from "@story-fm/domain";
+import type { MatchRecord, MatchStage } from "@story-fm/domain";
 import { createTestGame, keepSeat, playMockMatch } from "./helpers";
 
 /**
@@ -542,6 +542,40 @@ describe("기존 세이브 — 2부 클럽 채워 넣기", () => {
     for (const cup of domesticCupCatalog()) {
       expect(domesticStageMatches(state, cup.id, "r32"), cup.id).toHaveLength(0);
     }
+  });
+
+  /**
+   * 소프트락 회귀 — 안 열린 컵의 우승자를 기다리면 결승이 영영 없어 날짜만 흐른다.
+   *
+   * 시즌을 다시 굴리지 않고 완주한 세이브를 복제해 만든다. 어드민이 한 나라 클럽을
+   * 하나 뺀 세이브가 이 모양이다 — 참가 명단의 팀이 세이브에 없고, 그래서 그 대회는
+   * 한 판도 편성되지 않았다.
+   */
+  it("그 시즌 열리지 않은 컵은 시즌 종료를 막지 않는다", () => {
+    const state = structuredClone(seasonOf(7));
+    const ours = new Set(domesticCupsOf(state.userTeamId).map((c) => c.id));
+    const [skipped, ran] = domesticCupCatalog().filter((c) => !ours.has(c.id));
+    const dropSeasonMatches = (cupId: string, stage?: MatchStage) => {
+      state.matches = state.matches.filter(
+        (m) =>
+          !(
+            m.season === state.season &&
+            m.competitionId === cupId &&
+            (stage === undefined || m.stage === stage)
+          ),
+      );
+    };
+
+    dropSeasonMatches(skipped!.id);
+    state.teams = state.teams.filter((t) => t.id !== domesticCupEntrants(skipped!.id)[0]);
+    expect(domesticChampion(state, skipped!.id)).toBeNull();
+    expect(allMatchesDone(state)).toBe(true);
+
+    // 뒤집어 — **열린** 컵은 우승자가 없으면 여전히 기다린다. 빠진 것이 같은
+    // 우승자인데도 판정이 갈리는 자리가 게이트다
+    dropSeasonMatches(ran!.id, "final");
+    expect(domesticChampion(state, ran!.id)).toBeNull();
+    expect(allMatchesDone(state)).toBe(false);
   });
 });
 
