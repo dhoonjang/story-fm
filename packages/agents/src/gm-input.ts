@@ -77,6 +77,9 @@ export function describePersona(persona: Persona): string {
  * 레퍼런스 블록 — 캐시되는 시스템 블록. 감독 프로필 + 인물 카드 + 선수 명부.
  * 능력치·컨디션은 넣지 않는다 — 상세는 조회 도구의 몫.
  * ⚠️ 정렬은 (포지션, id) 고정 — 훈련으로 바뀌는 값(OVR)으로 정렬하면 캐시 프리픽스가 매 턴 깨진다.
+ * ⚠️ 감독의 능력·평판도 마찬가지다 — 경기마다 평판이 움직이고 능력도 자라므로
+ * 여기 있으면 경기 한 번에 이 블록과 그 뒤가 통째로 무효가 된다. 수치는 매 턴 층
+ * (`buildGmStateNote`)이 싣고 여기엔 이름과 배경만 남는다.
  */
 export function buildGmReference(state: GameState): string {
   const rows = userPlayers(state)
@@ -91,8 +94,6 @@ export function buildGmReference(state: GameState): string {
     `[감독 프로필]`,
     `이름: ${m.name}`,
     `배경: ${m.background}`,
-    `능력: 리더십${m.attributes.leadership} 전술${m.attributes.tactics} 훈련${m.attributes.training} 협상${m.attributes.negotiation} 분석${m.attributes.analysis}`,
-    `평판: 보드${m.reputation.board} 미디어${m.reputation.media} 선수단${m.reputation.squad}`,
     `감독 발화 화자 형식: @${m.name}: <발화> — 당신은 이 화자를 대신 연기하지 않는다.`,
     ``,
     describePersona(headCoachOf(state)),
@@ -275,6 +276,9 @@ export function buildGmStateNote(
     describeNextFixture(state),
     `전술: ${tac.formation} · 멘탈${tac.mentality} 라인${tac.defensiveLine} 압박${tac.pressing} 템포${tac.tempo} 폭${tac.width} 패스${tac.passStyle} · 선발 평균 적응 ${Math.round(squadFamiliarity(state, state.userTeamId))}`,
     `재정: 잔고 £${(finance.balance / 1e6).toFixed(1)}M · 주급 £${(weeklyWagesOf(state, state.userTeamId) / 1e6).toFixed(2)}M/주 · 이적예산 £${(finance.transferBudget / 1e6).toFixed(1)}M`,
+    // 감독의 수치는 캐시 밖이다 — 평판은 경기마다 움직이고 능력도 자란다.
+    // 레퍼런스(감독 프로필)엔 이름·배경만 남는다
+    `감독 ${state.manager.name}: 리더십${state.manager.attributes.leadership} 전술${state.manager.attributes.tactics} 훈련${state.manager.attributes.training} 협상${state.manager.attributes.negotiation} 분석${state.manager.attributes.analysis} · 평판 보드${state.manager.reputation.board} 미디어${state.manager.reputation.media} 선수단${state.manager.reputation.squad}`,
     // 부임 직후엔 선수단이 여름 휴가 중 — 소집일을 밝혀야 빈 훈련장을 지어내지 않는다
     state.date < squadReturnOf(state.calendar)
       ? `선수단 여름 휴가 중 — ${squadReturnOf(state.calendar)} 소집 (그 전에는 훈련을 잡을 수 없다)`
@@ -726,11 +730,28 @@ function relevantTurns(state: GameState): typeof state.chat {
   );
 }
 
+/**
+ * 이력이 끝나는 자리 — 뒤에서부터 **모델 턴이 나올 때까지가 이번 턴의 입력**이다.
+ *
+ * 한 턴은 채팅에 하나가 아니라 여럿을 남긴다(전술판 조작이 오퍼레이터 턴으로 먼저
+ * 서고 감독 발화가 그 뒤에 선다). 저장이 성공한 채팅은 언제나 모델 턴으로 끝나므로
+ * (실패한 턴은 저장되지 않는다) 꼬리의 비-모델 턴이 곧 이번 턴에 밀어 넣은 입력이고,
+ * 그것들은 이번 호출의 발화 블록이 이미 싣는다.
+ *
+ * ⚠️ 한 줄만 빼면 두 자리에서 틀린다 — 조작이 이력과 발화 블록에 두 번 실리고,
+ * 킥오프처럼 이번 턴 발화가 경기 이력으로 갈린 턴에서는 뺄 줄이 이 목록에 애초에
+ * 없어 직전 평시 발화가 대신 잘려 나간다.
+ */
+function historyEnd(chat: GameState["chat"]): number {
+  for (let i = chat.length - 1; i >= 0; i -= 1) if (chat[i]?.role === "model") return i + 1;
+  return 0;
+}
+
 export function buildGmHistory(
   state: GameState,
 ): Array<{ role: "user" | "assistant"; content: string }> {
   const chat = relevantTurns(state);
-  const upto = Math.max(0, chat.length - 1); // 방금 push된 이번 발화는 제외
+  const upto = historyEnd(chat);
   const start = Math.max(
     0,
     Math.floor(Math.max(0, upto - HISTORY_KEEP) / HISTORY_STEP) * HISTORY_STEP,

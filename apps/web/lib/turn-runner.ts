@@ -8,7 +8,7 @@ import {
   takeEdits,
   type GameState,
 } from "@story-fm/engine";
-import { runGmTurn } from "@story-fm/agents";
+import { GmTurnFailure, runGmTurn } from "@story-fm/agents";
 import { bindTurnTrace, traceTurn } from "@story-fm/llm";
 import { toPayload, type GamePayload } from "./store";
 import type { MatchBoardOrder } from "./match-orders";
@@ -123,8 +123,10 @@ export function runTurnLocked(
       if (!state) return { ok: false as const, status: 404, error: "게임을 찾을 수 없습니다" };
 
       /**
-       * 경기 중인가 — **턴을 시작할 때** 본다. 이 턴에서 경기가 끝나더라도
-       * 감독이 말을 건 상대는 중계였으므로 그 턴은 경기 이력에 속한다.
+       * 경기 턴인가 — **턴을 시작할 때** 본다. 이 턴에서 경기가 끝나더라도 감독이
+       * 말을 건 상대는 중계였으므로 그 턴은 경기 이력에 속하고, 반대로 이 턴에
+       * `start_match`로 경기가 열렸어도 화자는 아직 평시 GM이라 평시 이력에 남는다
+       * (agents.md §5) — 중계는 그다음 턴(킥오프)부터다.
        */
       const inMatch = state.phase === "match";
       const matchId = state.pendingMatch?.matchId;
@@ -159,7 +161,7 @@ export function runTurnLocked(
         text: message,
         toolCalls: [],
         at: state.date,
-        ...(inMatch ? { inMatch: true, ...(matchId ? { matchId } : {}) } : {}),
+        ...mark,
       });
       try {
         const turn = await runGmTurn(state, message, onDelta, operator, appliedOrders);
@@ -171,16 +173,8 @@ export function runTurnLocked(
           ...(turn.goals && turn.goals.length > 0 ? { goals: turn.goals } : {}),
           ...(turn.cards && turn.cards.length > 0 ? { cards: turn.cards } : {}),
           ...(turn.reports && turn.reports.length > 0 ? { reports: turn.reports } : {}),
-          // 킥오프 턴은 시작할 땐 평시였지만 끝나면 경기 중이다 — 중계가 말한 턴이다.
-          // 종료 턴은 반대로 시작할 때만 경기 중이므로 그때의 matchId를 들고 간다
-          ...(inMatch || state.phase === "match"
-            ? {
-                inMatch: true,
-                ...((matchId ?? state.pendingMatch?.matchId)
-                  ? { matchId: (matchId ?? state.pendingMatch?.matchId)! }
-                  : {}),
-              }
-            : {}),
+          // 유저 턴과 같은 표식 — 한 턴의 두 줄이 서로 다른 이력으로 갈리면 안 된다
+          ...mark,
         });
         bindTurnTrace(id, state.chat.length - 1);
         /**
@@ -196,7 +190,11 @@ export function runTurnLocked(
         return {
           ok: false as const,
           status: 502,
-          error: turnErrorMessage(detail),
+          /**
+           * `GmTurnFailure`는 감독에게 보일 문구를 이미 들고 온다 — 원인을 짐작해
+           * 바꿔 쓰면 "지시를 옮기지 못했다"가 "응답을 받지 못했다"로 둔갑한다.
+           */
+          error: error instanceof GmTurnFailure ? error.message : turnErrorMessage(detail),
           detail,
         };
       }

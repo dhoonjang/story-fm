@@ -49,6 +49,20 @@ export interface GmTurnResult {
 }
 
 /**
+ * 턴을 끝내지 못한 실패 — **장면이 아니라 배너다** (agents.md §8).
+ *
+ * 감독에게 보일 한 줄을 들고 오지만 그것은 픽션 밖의 안내라 모델 턴으로 저장되지
+ * 않는다. 채팅에 남기면 화자도 시점 헤더도 없는 줄이 장면들 사이에 서고, 그 턴은
+ * 되돌릴 수도 없다. 실패는 아무것도 저장하지 않는 것이 곧 롤백이다.
+ */
+export class GmTurnFailure extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GmTurnFailure";
+  }
+}
+
+/**
  * 시계가 움직였다는 기록의 이름 — **스킬이 아니라 코어의 처리 결과**다.
  *
  * 모델이 첫 줄에 적은 시점을 코어가 받아 시계를 옮긴다(`applyScenePoint`).

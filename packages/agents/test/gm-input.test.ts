@@ -96,6 +96,30 @@ describe("레퍼런스 블록 (캐시되는 시스템 블록)", () => {
     expect(buildGmStateNote(state)).not.toContain(coach.name);
   });
 
+  /**
+   * 감독의 수치는 경기 한 번에 움직인다(평판) — 캐시 층에 두면 그 한 번에
+   * 레퍼런스와 그 뒤가 통째로 무효가 된다 (agents.md §5).
+   */
+  it("감독의 능력·평판은 레퍼런스가 아니라 스냅샷에 있다", () => {
+    const state = game();
+    const { attributes, reputation } = state.manager;
+    const ref = buildGmReference(state);
+
+    // 이름·배경은 레퍼런스에 남는다 — 안 바뀌는 것들이다
+    expect(ref).toContain(state.manager.name);
+    expect(ref).not.toContain(`리더십${attributes.leadership}`);
+    expect(ref).not.toContain(`보드${reputation.board}`);
+
+    const note = buildGmStateNote(state);
+    expect(note).toContain(`리더십${attributes.leadership}`);
+    expect(note).toContain(`보드${reputation.board}`);
+
+    // 평판이 움직여도 캐시 프리픽스는 그대로다
+    const before = buildGmReference(state);
+    state.manager.reputation.media += 5;
+    expect(buildGmReference(state)).toBe(before);
+  });
+
   it("정렬이 결정적이다 — 같은 세이브면 항상 같은 순서", () => {
     expect(buildGmReference(game(31))).toBe(buildGmReference(game(31)));
   });
@@ -340,6 +364,59 @@ describe("이력 창 — 시작점을 STEP 단위로만 옮긴다", () => {
     const first = buildGmHistory(state)[0]?.content;
     state.chat.push({ role: "user", text: "다음 발화", toolCalls: [], at: state.date });
     expect(buildGmHistory(state)[0]?.content).toBe(first); // 프리픽스 유지 → 캐시 적중
+  });
+
+  /**
+   * 한 턴은 채팅에 여럿을 남긴다 — 전술판 조작이 오퍼레이터 턴으로 먼저 서고
+   * 감독 발화가 그 뒤에 선다. 한 줄만 빼면 조작이 이력과 발화 블록에 두 번 실려
+   * 모델이 같은 지시를 두 번 읽는다 (agents.md §5).
+   */
+  it("이번 턴에 밀어 넣은 것은 조작이든 발화든 이력이 아니다", () => {
+    const state = game();
+    state.chat.push({ role: "user", text: "지난 발화", toolCalls: [], at: state.date });
+    state.chat.push({ role: "model", text: "@코치: 알겠습니다", toolCalls: [], at: state.date });
+    // 여기부터가 이번 턴 — 이 호출의 발화 블록이 이미 싣는다
+    state.chat.push({
+      role: "operator",
+      text: "전술판 적용 완료 — 압박 상향",
+      toolCalls: [],
+      at: state.date,
+    });
+    state.chat.push({ role: "user", text: "이번 턴 발화", toolCalls: [], at: state.date });
+
+    expect(buildGmHistory(state).map((h) => h.content)).toEqual([
+      "@김감독: 지난 발화",
+      "@코치: 알겠습니다",
+    ]);
+  });
+
+  /**
+   * 킥오프 턴 — 이번 턴 발화는 경기 이력으로 갈려 평시 목록에 애초에 없다.
+   * 그때 한 줄을 빼면 직전 평시 발화가 대신 잘려 나간다.
+   */
+  it("킥오프 턴에서 직전 평시 발화가 이력에 그대로 남는다", () => {
+    const state = game();
+    state.chat.push({ role: "user", text: "선발은 그대로 간다", toolCalls: [], at: state.date });
+    state.chat.push({ role: "model", text: "@코치: 알겠습니다", toolCalls: [], at: state.date });
+    // 경기를 연 턴 — 화자는 평시 GM이라 평시 이력에 남는다
+    state.chat.push({ role: "user", text: "경기장으로 가자", toolCalls: [], at: state.date });
+    state.chat.push({ role: "model", text: "@코치: 라커룸입니다", toolCalls: [], at: state.date });
+    // 킥오프 턴의 발화 — 시작할 때 이미 경기 중이라 경기 턴으로 표시된다
+    state.chat.push({
+      role: "user",
+      text: "휘슬 불면 바로 압박",
+      toolCalls: [],
+      at: state.date,
+      inMatch: true,
+    });
+    state.phase = "match"; // 아직 pendingMatch.entered가 아니다 — 이력은 평시를 읽는다
+
+    expect(buildGmHistory(state).map((h) => h.content)).toEqual([
+      "@김감독: 선발은 그대로 간다",
+      "@코치: 알겠습니다",
+      "@김감독: 경기장으로 가자",
+      "@코치: 라커룸입니다",
+    ]);
   });
 
   it("충분히 길어지면 창이 앞으로 이동한다 (무한 성장 방지)", () => {

@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   advanceTime,
   createGame,
   interpretBackgroundHeuristic,
+  markEntered,
   startMatch,
   userSide,
   type CardMark,
@@ -12,11 +13,20 @@ import {
 import {
   applyMatchIntent,
   buildLedgerNote,
+  GmTurnFailure,
+  runGmTurn,
   stampMatchScene,
   stampMatchStream,
   type GmToolCall,
   type MatchIntent,
 } from "@story-fm/agents";
+
+/** 실모드 경기 턴이 부르는 모델 — 해석도 중계도 이 하나를 거친다 */
+const { runTurn } = vi.hoisted(() => ({ runTurn: vi.fn() }));
+vi.mock("@story-fm/llm", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@story-fm/llm")>();
+  return { ...actual, createGameLLM: () => ({ runTurn }) };
+});
 
 /**
  * 경기 턴의 **순서** — 감독의 지시가 그 구간에 닿는가.
@@ -177,6 +187,76 @@ describe("경기 장면의 시각 — 장부가 붙인다", () => {
     const feed = stampMatchStream(0, (delta) => out.push(delta));
     for (const delta of ["@중계: ", "휘슬이 울립니다."]) feed(delta);
     expect(out.join("")).toBe("[0']\n@중계: 휘슬이 울립니다.");
+  });
+});
+
+/**
+ * 경기 턴의 **실패** — 한 턴이 두 호출이라(agents.md §3) 어느 걸음이 흔들렸는지에
+ * 따라 갈린다. 해석이 못 나오면 턴 전체가 없던 일이 되고, 중계만 흔들린 것은 코어가
+ * 이미 굴린 구간을 되감을 이유가 없다.
+ */
+describe("경기 턴의 실패 — 어느 걸음이 흔들렸나", () => {
+  const previousMode = process.env.LLM_MODE;
+  beforeEach(() => {
+    process.env.LLM_MODE = "real";
+    runTurn.mockReset();
+  });
+  afterEach(() => {
+    if (previousMode === undefined) delete process.env.LLM_MODE;
+    else process.env.LLM_MODE = previousMode;
+  });
+
+  /** 캐스터의 응답 — 도구는 없고 문장만 온다 */
+  const casted = (text: string) => ({
+    text,
+    history: { version: 1 as const, provider: "anthropic" as const, model: "test", messages: [] },
+    usage: { inputTokens: 10, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    toolCallCount: 0,
+    stopReason: "end_turn",
+  });
+
+  /** 첫 휘슬은 지나간 판 — 손잡이(`계속`)로 온 진행 턴이다 */
+  function rolling(seed = 5): GameState {
+    const state = matchState(seed);
+    markEntered(state);
+    return state;
+  }
+
+  /**
+   * 캐스터는 도구가 없어 **다시 불러도 이중 반영이 없다.** 구간을 굴린 것은 앞
+   * 걸음의 코어이므로 그 기록을 자국으로 세면, 진행한 모든 경기 턴이 첫 실패에
+   * 그대로 무너지고 방금 굴린 구간까지 롤백된다 (agents.md §3 ④).
+   */
+  it("중계가 한 번 실패하면 다시 부른다 — 구간은 한 번만 굴렀다", async () => {
+    const state = rolling();
+    runTurn.mockRejectedValueOnce(new Error('529 {"type":"overloaded_error"}'));
+    runTurn.mockResolvedValueOnce(casted("[12']\n@중계: 다시 이어갑니다."));
+
+    const turn = await runGmTurn(state, "계속", undefined, true);
+
+    expect(runTurn).toHaveBeenCalledTimes(2);
+    expect(turn.text).toContain("다시 이어갑니다");
+    // 구간은 해석 뒤 코어가 굴린 것 하나뿐 — 재시도가 판을 한 번 더 밀지 않는다
+    expect(turn.toolCalls.filter((c) => c.name === "advance_match")).toHaveLength(1);
+    expect(state.pendingMatch!.ledger.minute).toBeGreaterThan(0);
+  });
+
+  /**
+   * 반대쪽 — 해석이 두 번 실패한 턴은 **장면을 내지 않는다.** "다시 말씀해 주세요"가
+   * 정상 텍스트로 돌아가면 화자도 시점 헤더도 없는 줄이 채팅에 저장되고, 그 턴은
+   * 되돌릴 수도 없다 (agents.md §8).
+   */
+  it("지시 해석이 두 번 실패하면 장면 대신 오류가 올라간다", async () => {
+    const state = rolling();
+    const minute = state.pendingMatch!.ledger.minute;
+    runTurn.mockRejectedValue(new Error("Connection error"));
+
+    await expect(runGmTurn(state, "압박 올려", undefined, false)).rejects.toBeInstanceOf(
+      GmTurnFailure,
+    );
+    // 해석에서 끊겼으므로 중계는 불리지 않았고, 판도 그대로다
+    expect(runTurn).toHaveBeenCalledTimes(2);
+    expect(state.pendingMatch!.ledger.minute).toBe(minute);
   });
 });
 

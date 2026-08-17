@@ -19,6 +19,7 @@ vi.mock("@story-fm/agents", async (importOriginal) => {
   return { ...actual, runGmTurn: (...args: unknown[]) => reject(...args) };
 });
 
+const { GmTurnFailure } = await import("@story-fm/agents");
 const { POST: createGame } = await import("../app/api/games/route");
 const { GET: getGame } = await import("../app/api/games/[id]/route");
 const { POST: postTurn } = await import("../app/api/games/[id]/turn/route");
@@ -59,6 +60,28 @@ describe("LLM 응답 실패", () => {
     expect(body.detail).toContain("529"); // 원인은 detail로만 (툴팁·로그용)
 
     // 저장된 채팅이 그대로다 — 실패한 턴은 흔적을 남기지 않는다
+    const after = await getGame(new Request("http://test.local"), params(game.id));
+    const reloaded = (await after.json()) as GamePayload;
+    expect(reloaded.chat).toHaveLength(before);
+  });
+
+  /**
+   * 턴을 끝내지 못한 실패는 **배너 한 줄**이다 (agents.md §8) — 지시 해석이 두 번
+   * 실패한 경기 턴이 그 자리다. 예전에는 그 안내가 정상 `text`로 돌아와 화자도 시점
+   * 헤더도 없는 줄이 장면들 사이에 저장됐다.
+   */
+  it("턴 실패가 들고 온 안내는 그대로 배너가 되고 채팅에는 남지 않는다", async () => {
+    const game = await newGame();
+    const before = game.chat.length;
+    const notice = "지시를 옮기지 못했습니다 — 다시 말씀해 주세요";
+    reject.mockRejectedValueOnce(new GmTurnFailure(notice));
+
+    const res = await postTurn(json({ message: "왼쪽을 두껍게" }), params(game.id));
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { error: string };
+    // 원인을 짐작한 문구로 덮이지 않는다 — GM이 들고 온 한 줄 그대로
+    expect(body.error).toBe(notice);
+
     const after = await getGame(new Request("http://test.local"), params(game.id));
     const reloaded = (await after.json()) as GamePayload;
     expect(reloaded.chat).toHaveLength(before);
