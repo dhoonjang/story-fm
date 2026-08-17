@@ -1,5 +1,7 @@
 import type { Player, PositionGroup } from "@story-fm/domain";
+import { anchorOf } from "@story-fm/domain";
 import type { LineupSlot } from "./strength-packet";
+import { laneOfX, type GridLane } from "./zone-grid";
 
 /**
  * 키포인트 — **감독이 경기 전·중에 읽어내는 것들.**
@@ -53,7 +55,19 @@ export interface KeyPoint {
   vague: string;
   /** 벌어진 정도 — 클수록 먼저 보인다 */
   weight: number;
+  /**
+   * 그 지점이 선 레인 — **약점을 가진 쪽(`side`)의 방향**으로 적는다.
+   *
+   * 겨냥한 선수가 서 있는 전술판 x가 정한다. 공략은 이 레인으로 실리므로
+   * (`applyExploits`) 방향을 반대로 적으면 지시가 반대편 칸에 걸린다. 표적이 팀
+   * 전체인 지점(백라인 조직·중원 활동량)에는 레인이 없다.
+   */
+  lane?: GridLane;
 }
+
+/** 그 선수가 선 레인 — 실제 전술판 좌표가 없으면 맡은 자리의 기본 좌표로 본다 */
+const laneOfSlot = (slot: LineupSlot): GridLane =>
+  laneOfX(slot.point?.x ?? anchorOf(slot.position).x);
 
 const groupOf = (s: LineupSlot): PositionGroup => {
   const code = s.position.replace(/^[LRC]/, "");
@@ -63,11 +77,12 @@ const groupOf = (s: LineupSlot): PositionGroup => {
   return "MF";
 };
 
+/** 슬롯을 돌려준다 — 능력치만이 아니라 **어디 서 있는지**까지 필요하다(`lane`) */
 const top = (xi: LineupSlot[], g: PositionGroup, read: (p: Player) => number) =>
-  xi.filter((s) => groupOf(s) === g).sort((a, b) => read(b.player) - read(a.player))[0]?.player;
+  xi.filter((s) => groupOf(s) === g).sort((a, b) => read(b.player) - read(a.player))[0];
 
 const bottom = (xi: LineupSlot[], g: PositionGroup, read: (p: Player) => number) =>
-  xi.filter((s) => groupOf(s) === g).sort((a, b) => read(a.player) - read(b.player))[0]?.player;
+  xi.filter((s) => groupOf(s) === g).sort((a, b) => read(a.player) - read(b.player))[0];
 
 const avg = (xi: LineupSlot[], g: PositionGroup, read: (p: Player) => number) => {
   const xs = xi.filter((s) => groupOf(s) === g).map((s) => read(s.player));
@@ -79,9 +94,14 @@ type RawPoint = Omit<KeyPoint, "side"> & { side: "us" | "them" };
 
 function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: string): RawPoint[] {
   const out: RawPoint[] = [];
+  /**
+   * `who`는 **그 지점을 가진 선수의 슬롯**이다 — `side`가 `us`면 `atk` 쪽,
+   * `them`이면 `def` 쪽. 레인은 그 슬롯의 좌표에서 읽으므로 다른 팀의 슬롯을
+   * 넘기면 공략이 반대편 레인에 걸린다.
+   */
   const push = (
     axis: string,
-    who: Player | undefined,
+    who: LineupSlot | undefined,
     side: RawPoint["side"],
     zone: KeyPoint["zone"],
     weight: number,
@@ -89,21 +109,30 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
     vague: string,
   ) => {
     if (weight > 0)
-      out.push({ id: `${axis}:${who?.id ?? "team"}`, side, zone, weight, text, vague });
+      out.push({
+        id: `${axis}:${who?.player.id ?? "team"}`,
+        side,
+        zone,
+        weight,
+        text,
+        vague,
+        // 표적이 팀 전체면 레인이 없다 — 그때 공략은 세 칸에 고르게 실린다
+        lane: who ? laneOfSlot(who) : undefined,
+      });
   };
 
   // ── 뒷공간 — 하이라인의 대가 ──
   const fast = top(atk, "FW", (p) => p.attributes.pace);
   const slowCB = bottom(def, "DF", (p) => p.attributes.pace);
   if (fast && slowCB) {
-    const gap = fast.attributes.pace - slowCB.attributes.pace;
+    const gap = fast.player.attributes.pace - slowCB.player.attributes.pace;
     push(
       "backline-pace",
       slowCB,
       "them",
       "attack",
       gap - 9,
-      `${us} 뒷공간 공략: ${fast.name}(pace ${fast.attributes.pace}) vs ${slowCB.name}(pace ${slowCB.attributes.pace})`,
+      `${us} 뒷공간 공략: ${fast.player.name}(pace ${fast.player.attributes.pace}) vs ${slowCB.player.name}(pace ${slowCB.player.attributes.pace})`,
       `${them} 최종 수비가 발이 느리다 — 뒷공간이 열린다`,
     );
   }
@@ -112,14 +141,14 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
   const dribbler = top(atk, "FW", (p) => p.attributes.dribbling);
   const weakTackler = bottom(def, "DF", (p) => p.attributes.tackling);
   if (dribbler && weakTackler) {
-    const gap = dribbler.attributes.dribbling - weakTackler.attributes.tackling;
+    const gap = dribbler.player.attributes.dribbling - weakTackler.player.attributes.tackling;
     push(
       "wing-duel",
       weakTackler,
       "them",
       "attack",
       gap - 11,
-      `${us} 1대1 우위: ${dribbler.name}(드리블 ${dribbler.attributes.dribbling}) vs ${weakTackler.name}(태클 ${weakTackler.attributes.tackling})`,
+      `${us} 1대1 우위: ${dribbler.player.name}(드리블 ${dribbler.player.attributes.dribbling}) vs ${weakTackler.player.name}(태클 ${weakTackler.player.attributes.tackling})`,
       `${us}는 측면에서 사람을 벗겨낼 수 있다`,
     );
   }
@@ -128,14 +157,14 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
   const tall = top(atk, "FW", (p) => p.attributes.aerial);
   const weakAir = bottom(def, "DF", (p) => p.attributes.aerial);
   if (tall && weakAir) {
-    const gap = tall.attributes.aerial - weakAir.attributes.aerial;
+    const gap = tall.player.attributes.aerial - weakAir.player.attributes.aerial;
     push(
       "aerial",
       weakAir,
       "them",
       "attack",
       gap - 11,
-      `${us} 제공권 우위: ${tall.name}(공중볼 ${tall.attributes.aerial}) vs ${weakAir.name}(${weakAir.attributes.aerial})`,
+      `${us} 제공권 우위: ${tall.player.name}(공중볼 ${tall.player.attributes.aerial}) vs ${weakAir.player.name}(${weakAir.player.attributes.aerial})`,
       `${us}가 공중에서 앞선다 — 크로스와 세트피스가 통한다`,
     );
   }
@@ -143,14 +172,14 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
   // ── 압박 저항 — 빌드업이 프레스를 견디나 ──
   const shaky = bottom(def, "MF", (p) => (p.attributes.composure + p.attributes.passing) / 2);
   if (shaky) {
-    const value = (shaky.attributes.composure + shaky.attributes.passing) / 2;
+    const value = (shaky.player.attributes.composure + shaky.player.attributes.passing) / 2;
     push(
       "press-resistance",
       shaky,
       "them",
       "midfield",
       72 - value,
-      `${them} 빌드업 약점: ${shaky.name}(침착 ${shaky.attributes.composure} · 패스 ${shaky.attributes.passing}) — 압박하면 흔들린다`,
+      `${them} 빌드업 약점: ${shaky.player.name}(침착 ${shaky.player.attributes.composure} · 패스 ${shaky.player.attributes.passing}) — 압박하면 흔들린다`,
       `${them} 중원은 압박에 약하다`,
     );
   }
@@ -163,8 +192,8 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       creator,
       "us",
       "midfield",
-      creator.attributes.vision - 79,
-      `${us} 창조의 축: ${creator.name}(시야 ${creator.attributes.vision}) — 이 선수를 지우면 공격이 멎는다`,
+      creator.player.attributes.vision - 79,
+      `${us} 창조의 축: ${creator.player.name}(시야 ${creator.player.attributes.vision}) — 이 선수를 지우면 공격이 멎는다`,
       `${us}의 공격은 중원 한 명에게서 시작된다`,
     );
   }
@@ -177,8 +206,8 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       finisher,
       "us",
       "attack",
-      finisher.attributes.finishing - 81,
-      `${us} 결정력: ${finisher.name}(결정력 ${finisher.attributes.finishing}) — 한 번의 기회로 끝낸다`,
+      finisher.player.attributes.finishing - 81,
+      `${us} 결정력: ${finisher.player.name}(결정력 ${finisher.player.attributes.finishing}) — 한 번의 기회로 끝낸다`,
       `${us} 최전방은 기회를 놓치지 않는다`,
     );
   }
@@ -191,8 +220,8 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       gk,
       "them",
       "attack",
-      73 - gk.attributes.goalkeeping,
-      `${them} 골문 불안: ${gk.name}(골키핑 ${gk.attributes.goalkeeping})`,
+      73 - gk.player.attributes.goalkeeping,
+      `${them} 골문 불안: ${gk.player.name}(골키핑 ${gk.player.attributes.goalkeeping})`,
       `${them} 골키퍼가 미덥지 않다`,
     );
     push(
@@ -200,8 +229,8 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       gk,
       "them",
       "defense",
-      gk.attributes.passing - 77,
-      `${them} 골키퍼 배급: ${gk.name}(패스 ${gk.attributes.passing}) — 뒤에서부터 풀어 나온다`,
+      gk.player.attributes.passing - 77,
+      `${them} 골키퍼 배급: ${gk.player.name}(패스 ${gk.player.attributes.passing}) — 뒤에서부터 풀어 나온다`,
       `${them}는 골키퍼부터 빌드업한다`,
     );
   }
@@ -219,14 +248,14 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       `${them} 수비 조직: 백라인 평균 위치선정 ${Math.round(line)} — 라인이 자주 어긋난다`,
       `${them} 수비는 짜임새가 헐겁다`,
     );
-    if (leader && leader.attributes.leadership <= 45) {
+    if (leader && leader.player.attributes.leadership <= 45) {
       push(
         "backline-leader",
         leader,
         "them",
         "attack",
-        50 - leader.attributes.leadership,
-        `${them} 백라인에 조율자가 없다 (최고 리더십 ${leader.attributes.leadership})`,
+        50 - leader.player.attributes.leadership,
+        `${them} 백라인에 조율자가 없다 (최고 리더십 ${leader.player.attributes.leadership})`,
         `${them} 수비는 서로를 부르지 않는다`,
       );
     }
@@ -236,14 +265,14 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
   const strong = top(atk, "FW", (p) => p.attributes.strength);
   const light = bottom(def, "DF", (p) => p.attributes.strength);
   if (strong && light) {
-    const gap = strong.attributes.strength - light.attributes.strength;
+    const gap = strong.player.attributes.strength - light.player.attributes.strength;
     push(
       "physical",
       light,
       "them",
       "attack",
       gap - 13,
-      `${us} 몸싸움 우위: ${strong.name}(힘 ${strong.attributes.strength}) vs ${light.name}(${light.attributes.strength})`,
+      `${us} 몸싸움 우위: ${strong.player.name}(힘 ${strong.player.attributes.strength}) vs ${light.player.name}(${light.player.attributes.strength})`,
       `${us} 최전방이 등지고 버틴다`,
     );
   }
@@ -265,15 +294,15 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
   // ── 세트피스 키커 — 죽은 공에서 나오는 득점 ──
   const kicker = [...atk].sort(
     (a, b) => b.player.attributes.kicking - a.player.attributes.kicking,
-  )[0]?.player;
+  )[0];
   if (kicker) {
     push(
       "set-piece",
       kicker,
       "us",
       "attack",
-      kicker.attributes.kicking - 82,
-      `${us} 세트피스 키커: ${kicker.name}(킥 ${kicker.attributes.kicking})`,
+      kicker.player.attributes.kicking - 82,
+      `${us} 세트피스 키커: ${kicker.player.name}(킥 ${kicker.player.attributes.kicking})`,
       `${us}는 죽은 공이 위협적이다`,
     );
   }
@@ -284,15 +313,15 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       b.player.attributes.aggression -
       b.player.attributes.composure -
       (a.player.attributes.aggression - a.player.attributes.composure),
-  )[0]?.player;
+  )[0];
   if (rough) {
     push(
       "discipline",
       rough,
       "them",
       "defense",
-      rough.attributes.aggression - rough.attributes.composure - 22,
-      `${them} 카드 위험: ${rough.name}(적극성 ${rough.attributes.aggression} · 침착 ${rough.attributes.composure})`,
+      rough.player.attributes.aggression - rough.player.attributes.composure - 22,
+      `${them} 카드 위험: ${rough.player.name}(적극성 ${rough.player.attributes.aggression} · 침착 ${rough.player.attributes.composure})`,
       `${them}에 발끈하는 선수가 있다`,
     );
   }
