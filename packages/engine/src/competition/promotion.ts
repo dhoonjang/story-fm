@@ -1,5 +1,7 @@
-import { leagueCatalog, leagueCatalogById, leagueName } from "../data/league-catalog";
+import { isTopLeague, leagueCatalog, leagueCatalogById, leagueName } from "../data/league-catalog";
 import { leagueOfTeam } from "../data/team-catalog";
+import { clubEconomyLevel } from "../data/league-economy";
+import { tierOfTeamIn } from "../core/club-tier";
 import { makeRng } from "../core/rng";
 import { computeStandings } from "./season";
 import { startParachute, stopParachute } from "../club/finance";
@@ -11,8 +13,9 @@ import { playersOf, pushNarrative, teamName, teamShortName, type GameState } fro
  * 팀의 소속 리그는 카탈로그가 갖고 **불변**이므로(2-레이어 원칙) 승강은 세이브
  * 상태(`state.leagueOf`)로만 표현된다. "이 팀이 지금 어느 리그에 있는가"를 묻는
  * 자리는 전부 `leagueOfTeamIn`을 지나야 한다 — 일정·순위표·재정·이적 시장·조회
- * 도구. 카탈로그를 직접 읽어도 되는 것은 승강이 바꾸지 않는 축, 곧 리그의
- * 종류(시장 전용)와 나라뿐이다.
+ * 도구. 소속에서 파생하는 판정도 같은 자리에 선다 — `isTopFlightIn`,
+ * `clubEconomyLevelIn`. 카탈로그를 직접 읽어도 되는 것은 승강이 바꾸지 않는 축,
+ * 곧 리그의 종류(시장 전용)와 나라, 그리고 세이브가 아직 없는 **세계 생성**뿐이다.
  *
  * 2부는 리그전을 돌지 않아 순위표가 없다(`league-catalog`의 `cup-only`). 그래서
  * 승격 팀은 **전력 + 시즌을 섞은 시드**로 뽑는다 — 다만 감독이 그 리그에 있으면
@@ -34,6 +37,29 @@ export const PROMOTION_LUCK = 4;
 /** 이 팀이 지금 속한 리그 — 승강이 있으면 세이브가, 없으면 카탈로그가 답한다 */
 export function leagueOfTeamIn(state: GameState, teamId: string): string {
   return state.leagueOf?.[teamId] ?? leagueOfTeam(teamId);
+}
+
+/**
+ * 이 팀이 지금 1부인가 — `isTopFlight`의 상태 인지 판.
+ *
+ * 카탈로그판은 **세계 생성**(새 게임의 스쿼드 분류·절차 생성·축소 세계)이 계속
+ * 쓴다. 그 자리엔 아직 세이브가 없고, 새 게임의 결과는 카탈로그만으로 정해져야
+ * 재현된다. 게임이 시작한 뒤 도는 자리(AI 시장·국내 컵 시드)는 이쪽이다.
+ */
+export function isTopFlightIn(state: GameState, teamId: string): boolean {
+  return isTopLeague(leagueOfTeamIn(state, teamId));
+}
+
+/**
+ * 이 구단의 지금 살림 수준 — `clubEconomyLevel`의 상태 인지 판. 리그도 체급도
+ * 세이브가 답한다.
+ *
+ * 승강이 이 값을 움직이는 축이다(2부는 그 나라 1부에서 파생한다). 카탈로그판을
+ * 그대로 두면 강등한 구단이 2부 수입을 받으면서 1부 고정비를 내고 1부 시즌 예산을
+ * 배정받는다 (finance.md §6.2).
+ */
+export function clubEconomyLevelIn(state: GameState, teamId: string): number {
+  return clubEconomyLevel(teamId, tierOfTeamIn(state, teamId), leagueOfTeamIn(state, teamId));
 }
 
 /** 지금 그 리그에 속한 클럽 (세이브 기준) */

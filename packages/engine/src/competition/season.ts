@@ -26,7 +26,12 @@ import { payWinnerPrize } from "./euro-prize";
 import { payLeaguePrizes, paySeasonBonuses, topUpTransferBudget } from "../club/finance";
 import { buildEuroEntrants, entrantsOf, type LeagueTables } from "./europe";
 import { buildSeasonFixtures, isUserFixture } from "./fixtures";
-import { applyPromotionRelegation, leagueOfTeamIn, teamsOfLeagueIn } from "./promotion";
+import {
+  applyPromotionRelegation,
+  clubEconomyLevelIn,
+  leagueOfTeamIn,
+  teamsOfLeagueIn,
+} from "./promotion";
 import { recomputeClubTiers } from "./club-tier";
 import { boardExpectationOfTier, tierOfTeamIn } from "../core/club-tier";
 import { generateYouthPlayer } from "../world/generate";
@@ -43,7 +48,6 @@ import {
   type GameState,
 } from "../core/state";
 import { estimateWeeklyWage, wageSubjectOf } from "../world/wages";
-import { clubEconomyLevel } from "../data/league-economy";
 import { makeRng, randInt } from "../core/rng";
 import { installDefaultTraining } from "../squad/training-plan";
 
@@ -187,7 +191,7 @@ export const SEASON_BUDGET_TOPUP: Record<number, number> = {
 
 export function seasonBudgetBaseOf(state: GameState, teamId: string): number {
   const tier = tierOfTeamIn(state, teamId);
-  return Math.round((SEASON_BUDGET_TOPUP[tier] ?? 0) * clubEconomyLevel(teamId, tier));
+  return Math.round((SEASON_BUDGET_TOPUP[tier] ?? 0) * clubEconomyLevelIn(state, teamId));
 }
 
 /** 이 세이브에서 그 구단이 지고 있는 기대 — 체급은 세이브가 갖는다 */
