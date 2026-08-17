@@ -699,16 +699,18 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
       const booked = pickBooked(rng, squad, gone, yellows[side]);
       if (!booked) continue;
       const already = (yellows[side][booked.id] ?? 0) > 0;
-      // 이미 경고가 있으면 두 번째 경고 = 퇴장 (장부가 자동 처리한다)
       const straightRed = rng() < STRAIGHT_RED_CHANCE;
-      events.push({
-        minute,
-        type: straightRed ? "red_card" : "yellow_card",
-        team: side,
-        actors: [booked.id],
-        causes: [],
-      });
+      const card = (type: "yellow_card" | "red_card") => {
+        events.push({ minute, type, team: side, actors: [booked.id], causes: [] });
+      };
+      if (!straightRed) card("yellow_card");
+      /**
+       * 두 번째 경고 = 퇴장 — **경고 한 줄 뒤에 퇴장 한 줄**을 함께 남긴다
+       * (match.md §5). 장부는 경고 2장을 알아서 내보내지만, 경기 후 반영은 사건
+       * 타입만 읽으므로 `red_card` 줄이 없으면 출장 정지가 걸리지 않는다.
+       */
       if (straightRed || already) {
+        card("red_card");
         gone.add(booked.id);
         return finish("red_card", minute);
       }

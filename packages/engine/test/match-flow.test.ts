@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   advanceSegment,
+  applyMatchEvents,
   assignmentsOf,
   buildOfficeViews,
   digestLines,
@@ -524,6 +525,76 @@ describe("결산 요약의 갈래 (match.md §6)", () => {
     // 우리 경기 사건은 손에 꼽힌다. 라운드 전체가 실리던 예전엔 이 셈이 스무 줄이었다
     expect(digest.ours.length).toBeLessThanOrEqual(12);
     expect(digest.ours.length).toBeLessThan(digestLines(digest).length);
+  });
+});
+
+/**
+ * **두 번째 경고는 다음 경기 정지로 이어진다** (match.md §5·§7).
+ *
+ * 장부는 경고 2장을 자동 퇴장으로 바꾸지만(온필드에서 빼고 `sentOff`에 넣는다) 경기 후
+ * 반영(`finalizeMatch`)은 **사건 타입만** 읽는다. `red_card` 줄이 없으면 `cause:"red"`
+ * 정지가 생기지 않아, 같은 사건이 우리 경기에선 정지가 없고 타 팀 간이 시뮬에선 있는
+ * 세계가 된다 — 리그가 우리 팀만의 규칙으로 도는 것이다.
+ */
+describe("경고 누적 퇴장의 장부 (match.md §5)", () => {
+  it("두 번째 경고는 퇴장 정지 한 건과 경고·퇴장 두 줄로 남는다", () => {
+    // **친선의 카드는 어느 대회에도 쌓이지 않는다** — 리그 개막 뒤에서 봐야 장부가 움직인다
+    const state = atMatchday(42, { afterPreseason: true });
+    expect(startMatch(state).ok).toBe(true);
+    const side = userSide(state);
+    const mine = () =>
+      side === "home" ? state.pendingMatch!.ledger.home : state.pendingMatch!.ledger.away;
+    const matchId = state.pendingMatch!.matchId;
+    const target = mine().onPitch[0]!;
+    const name = userPlayers(state).find((p) => p.id === target)!.name;
+
+    /** 카드 사건을 직접 넣는다 — 구간을 굴려 우연히 경고 2장을 기다리면 난수이고 느리다 */
+    const SECOND = 38;
+    const card = (minute: number, types: ReadonlyArray<"yellow_card" | "red_card">) =>
+      applyMatchEvents(
+        state,
+        types.map((type) => ({ minute, type, team: side, actors: [target], causes: [] })),
+      );
+
+    expect(card(20, ["yellow_card"]).ok).toBe(true);
+    // 구간 시뮬이 두 번째 경고 자리에 넣는 그 쌍 — 경고 한 줄 + 퇴장 한 줄
+    const second = card(SECOND, ["yellow_card", "red_card"]);
+    expect(second.ok, second.message).toBe(true);
+    expect(mine().onPitch).not.toContain(target);
+
+    /**
+     * 카드를 넣고 **곧바로** 끝낸다 — 구간을 더 굴리면 시뮬이 같은 선수에게 카드를 더 줘
+     * 셈이 흔들린다. 하프타임은 정지점이라 같은 배치에 뒤 사건을 붙이면 반려된다.
+     */
+    for (const stop of ["half_time", "full_time"] as const) {
+      const applied = applyMatchEvents(state, [
+        { minute: stop === "half_time" ? 45 : 90, type: stop, actors: [], causes: [] },
+      ]);
+      expect(applied.ok, applied.message).toBe(true);
+    }
+
+    const digest = finalizeMatch(state);
+
+    // 정지는 **정확히 하나** — 퇴장 한 건이다 (경고 누적 눈금은 아직 안 걸린다)
+    const suspensions = state.suspensions.filter((s) => s.gamePlayerId === target);
+    expect(suspensions).toHaveLength(1);
+    expect(suspensions[0]?.cause).toBe("red");
+    expect(suspensions[0]?.lengthMatches).toBe(1);
+    expect(suspensions[0]?.status).toBe("active");
+
+    // 퇴장이 일어난 그 분의 BOOKING은 yellow 한 줄 + red 한 줄
+    // (레드가 경고로 세어지지도, 레드 두 줄로 남지도 않는다)
+    const atSecond = state.bookings.filter(
+      (b) => b.gamePlayerId === target && b.matchId === matchId && b.minute === SECOND,
+    );
+    expect([...atSecond.map((b) => b.card)].sort()).toEqual(["red", "yellow"]);
+    // 경기 전체로는 경고 2장 + 퇴장 1장 — 간이 시뮬(§7)과 같은 모양이다
+    const ofTarget = state.bookings.filter((b) => b.gamePlayerId === target);
+    expect(ofTarget.filter((b) => b.card === "yellow")).toHaveLength(2);
+    expect(ofTarget.filter((b) => b.card === "red")).toHaveLength(1);
+
+    // 우리 선수의 정지는 감독이 바로 알아야 한다 — 말풍선에 서는 갈래에 선다
+    expect(digest.ours.some((d) => d.includes(name) && d.includes("정지"))).toBe(true);
   });
 });
 
