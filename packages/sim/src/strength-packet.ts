@@ -481,7 +481,7 @@ export const CREATION_SKILL_LOG_WEIGHT = 0.75;
  * 대등한 경로에서 슈팅 하나의 평균 기회 xG.
  * 실제 1부 리그의 슛당 xG는 0.11 언저리다(2.8골 ÷ 25슛).
  */
-export const BASE_SHOT_XG = 0.09;
+export const BASE_SHOT_XG = 0.093;
 /** 최종 공격 지역 우위가 슈팅 질에 닿는 세기. */
 export const ROUTE_XG_LOGIT_WEIGHT = 0.7;
 /** 선수의 전진 위치가 슈팅 질에 닿는 세기. */
