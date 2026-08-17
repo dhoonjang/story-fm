@@ -2,7 +2,7 @@ import type { MatchRecord } from "@story-fm/domain";
 import { addDays, dayOfWeek, tooClose } from "./calendar";
 import { competitionShortName, isCup } from "../data/cup-catalog";
 import { isTopLeague } from "../data/league-catalog";
-import { reservedEuroDates } from "./europe";
+import { reservedEuroDatesFor } from "./euro-knockout";
 import { inCompetition } from "./friendly";
 import { teamName, type GameState } from "../core/state";
 
@@ -29,8 +29,11 @@ const REARRANGE_SEARCH_DAYS = 80;
  * 이 팀이 뛸 수 없는 날 — 이미 잡힌 경기 + (대항전 참가팀이면) 예약된 대항전 날짜.
  *
  * 대항전 녹아웃은 아직 편성되지 않았어도 **날짜가 이미 정해져 있다**
- * (`reservedEuroDates`). 그 자리를 비워 두지 않으면 나중에 편성된 대항전 경기가
+ * (`reservedEuroDatesFor`). 그 자리를 비워 두지 않으면 나중에 편성된 대항전 경기가
  * 컵 경기와 같은 날 겹친다 — 한 팀이 하루에 두 경기를 뛰게 된다.
+ *
+ * ⚠️ **그 팀에게 아직 유효한 예약만** 본다. 시즌 전체의 예약일을 대항전에 나갔던
+ * 모든 팀에게 걸면 4~5월 주중이 통째로 잠겨, 연기할 자리가 없어진다.
  */
 export function teamBusyDates(state: GameState, teamId: string): Set<string> {
   const dates = new Set<string>();
@@ -38,9 +41,7 @@ export function teamBusyDates(state: GameState, teamId: string): Set<string> {
     if (m.season !== state.season) continue;
     if (m.homeTeamId === teamId || m.awayTeamId === teamId) dates.add(m.date);
   }
-  if (state.euroEntrants.some((e) => e.teams.includes(teamId))) {
-    for (const d of reservedEuroDates(state.season)) dates.add(d);
-  }
+  for (const d of reservedEuroDatesFor(state, teamId)) dates.add(d);
   return dates;
 }
 
@@ -124,8 +125,7 @@ export function postponeMatch(
   // 예약된 대항전 날짜는 시각을 모르니 하루를 통째로 막는다
   const blocked = new Set<string>();
   for (const teamId of teams) {
-    if (!state.euroEntrants.some((e) => e.teams.includes(teamId))) continue;
-    for (const d of reservedEuroDates(state.season)) blocked.add(d);
+    for (const d of reservedEuroDatesFor(state, teamId)) blocked.add(d);
   }
   const ok = (date: string) => {
     const slot = { date, time: REARRANGED_KICKOFF };

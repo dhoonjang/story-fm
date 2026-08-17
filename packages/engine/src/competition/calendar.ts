@@ -61,6 +61,7 @@ export {
   diffDays,
   seasonYear,
   MIN_REST_HOURS,
+  HARD_MIN_REST_HOURS,
   kickoffAt,
   restHours,
   tooClose,
