@@ -38,6 +38,20 @@ export interface RealPlayerSeed {
   squadNumber?: number;
   /** 출생년월일 (YYYY-MM-DD) — 나이는 플레이 날짜 기준 계산 */
   birthdate: string;
+  /**
+   * `birthdate`가 `YYYY-01-01`일 때만 쓰는 표식 — **연도만 근거가 있고 월·일은
+   * 모르는 자리표시자면 `true`, 대조해서 실제 1월 1일생임을 확인했으면 `false`.**
+   *
+   * 1월 1일은 조사가 닿지 않은 자리를 채우는 값으로 쓰여 왔고(라로 고메스가
+   * `2006-01-01`로 실려 있었는데 실제는 2006-10-16), 실제 1월 1일생과 생김새가
+   * 같아 표식 없이는 둘을 가르지 못한다. 그래서 **`-01-01`인 시드는 이 필드를
+   * 생략할 수 없다** — `test/seed-join.test.ts`가 빠진 것을 잡는다.
+   *
+   * `true`인 값은 **조인 키가 아니다.** (이름 + 생년월일) 대조에 쓰지 않고,
+   * 조인 실패의 "옛 값 유지"도 적용하지 않는다 — 확인된 날짜가 나오면 덮고
+   * 이 표식을 지운다 (data/sources.md §4.1).
+   */
+  birthdateApprox?: boolean;
   position: string;
   positionGroup: PositionGroup;
   pace: number;
