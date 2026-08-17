@@ -3,9 +3,11 @@ import {
   CHIP_SIZE,
   FORMATION_LAYOUTS,
   FORMATION_SLOTS,
+  PITCH_BANDS,
   POSITION_ANCHORS,
   anchorOf,
   clampToBoard,
+  movePoint,
   positionAtPoint,
   positionGroupOf,
   separateBoardPoints,
@@ -199,6 +201,49 @@ describe("전술판 좌표 → 포지션 코드 (자유 배치의 원본)", () =
     expect(clampToBoard({ x: -20, y: 140 })).toEqual({ x: 4, y: 94 });
     expect(clampToBoard({ x: 120, y: -5 })).toEqual({ x: 96, y: 6 });
     expect(clampToBoard({ x: 50.34, y: 50.36 })).toEqual({ x: 50.3, y: 50.4 });
+  });
+});
+
+describe("이름으로 부르는 이동 (movePoint)", () => {
+  const BANDS = ["defense", "midfield", "attack"] as const;
+  const LANES = ["left", "center", "right"] as const;
+  /** 밴드가 닿아야 하는 포지션 라인 — 수미(DM)·공미(AM)는 밴드로 닿지 않는 자리다 */
+  const LINE_OF_BAND = {
+    defense: new Set(["LB", "LCB", "CB", "RCB", "RB"]),
+    midfield: new Set(["LM", "LCM", "CM", "RCM", "RM"]),
+    attack: new Set(["LW", "LF", "CF", "RF", "RW"]),
+  } as const;
+
+  it("세 밴드는 각각 DEF · MID · CFW 라인에 닿는다 — 어느 레인에서든", () => {
+    for (const band of BANDS) {
+      for (const lane of LANES) {
+        const code = positionAtPoint(movePoint(anchorOf("CDM"), { lane, band }));
+        expect(LINE_OF_BAND[band].has(code), `${band}×${lane} → ${code}`).toBe(true);
+      }
+    }
+  });
+
+  it("수미에게 '중원으로'는 수미 라인이 아니라 중앙 미드필더 라인이다", () => {
+    const ldm = anchorOf("LDM");
+    expect(positionAtPoint(movePoint(ldm, { band: "midfield" }))).toBe("LCM");
+    expect(positionAtPoint(movePoint(ldm, { lane: "left", band: "midfield" }))).toBe("LM");
+  });
+
+  it("밴드 y는 지역 전술의 밴드 중심과 같고, 라인 경계 위에 있지 않다", () => {
+    for (const band of BANDS) {
+      const p = movePoint(anchorOf("CM"), { band });
+      expect(p.y).toBe(PITCH_BANDS.center[band]);
+      // 경계 위라면 한 칸 아래·위 중 하나는 다른 라인이 된다
+      const line = positionAtPoint(p);
+      expect(positionAtPoint({ x: p.x, y: p.y - 1 }), `${band} y-1`).toBe(line);
+      expect(positionAtPoint({ x: p.x, y: p.y + 1 }), `${band} y+1`).toBe(line);
+    }
+  });
+
+  it("지정하지 않은 축은 지금 자리를 그대로 쓴다", () => {
+    const rb = anchorOf("RB");
+    expect(movePoint(rb, { lane: "left" })).toEqual({ x: 12, y: rb.y });
+    expect(movePoint(rb, { band: "attack" })).toEqual({ x: rb.x, y: PITCH_BANDS.center.attack });
   });
 });
 

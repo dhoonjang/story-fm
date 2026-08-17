@@ -444,12 +444,12 @@ const MOVE_LANE_X: Record<"left" | "center" | "right", number> = {
   center: 50,
   right: 88,
 };
-/** 우리 진영·중원·상대 진영의 대표 y — 골키퍼 라인(y>=88)은 넘지 않는다 */
-const MOVE_BAND_Y: Record<"defense" | "midfield" | "attack", number> = {
-  defense: 76,
-  midfield: 50,
-  attack: 22,
-};
+/**
+ * 우리 진영·중원·상대 진영의 y — 지역 전술의 밴드 중심과 **같은 값**이다.
+ * 라인 경계(`BAND_FROM`)가 아니라 안쪽이라 DEF·MID·CFW 라인에 각각 닿는다.
+ * 경계 위(50)에 놓으면 "중원으로"가 MID가 아니라 DM 라인에 떨어진다.
+ */
+const MOVE_BAND_Y: Record<"defense" | "midfield" | "attack", number> = PITCH_BANDS.center;
 
 export function movePoint(
   from: BoardPoint,
