@@ -697,6 +697,11 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
   80~~84 정상급 · 75~~79 준수한 주전감 · 70~~74 스쿼드 자원 · ≤69 유망주/백업.
 - 조회 도구(`get_player`)는 15축을 쏟지 않고 가중치 상위 축 + 특징 축만 요약한다
   ([llm/agents.md](../llm/agents.md)).
+- **스카우트 보고서 도착**: 화면 카드(`scoutReportCard`)와 모델에 가는 다이제스트 한 줄
+  (`scoutReportLine`)이 **같은 값**을 낸다 — 줄이 카드에서 파생하기 때문이다. 종합은
+  관측값 ±N, 잠재력은 구간, 금액(시장가·요구액·기대 주급)은 흐리지 않는다(§9).
+  카드가 프롬프트에 가지 않으므로 이 줄이 없으면 모델은 금액을 지어낸다
+  ([llm/agents.md](../llm/agents.md) §6).
 
 ## 11. 감독 능력치
 
@@ -737,6 +742,7 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
 | 월간 성장 (`developsByCore`)                                                                                                    | `packages/engine/src/squad/development.ts`                                              |
 | 폼 (`formLabel`·`formAngle`)                                                                                                    | `packages/engine/src/squad/form.ts`                                                     |
 | 안개·잠재력·경기 중 체력 (`observationMargin`·`readCondition`·`observedFit`)                                                    | `packages/engine/src/squad/scouting.ts`                                                 |
+| 보고서 카드와 도착 줄 (`scoutReportCard`·`scoutReportLine`)                                                                     | `packages/engine/src/views/views.ts`                                                    |
 | 정착 (`settlingOf`·`SETTLING_EVENT`)                                                                                            | `packages/engine/src/squad/settling.ts`                                                 |
 | 역할 기억 (`recallRole`·`rememberRole`)                                                                                         | `packages/engine/src/skills/role-memory.ts`                                             |
 | 적응도 선반·역할 대가 정산 (`shelveFamiliarity`·`settleRoleCost`)                                                               | `packages/engine/src/skills/familiarity-memory.ts`                                      |
