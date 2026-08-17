@@ -17,6 +17,8 @@ import {
   AXIS_KO,
   clampCondition,
   tacticalUptake as uptakeOf,
+  DIRECTIVE_INTENSITY_KO,
+  type DirectiveIntensity,
   PLAYER_DIRECTIVE_KO,
   type PlayerDirectiveKind,
   MATCHDAY_SQUAD,
@@ -43,6 +45,7 @@ import {
   tacticsDistance,
   withCurrentDrilled,
 } from "@story-fm/domain";
+import { DIRECTIVE_TUNING } from "@story-fm/sim";
 import { settleRoleCost, shelveFamiliarity, unshelveFamiliarity } from "./familiarity-memory";
 import { recallRole, rememberRole } from "./role-memory";
 import { addDays, diffDays, sortEntries, squadReturnOf } from "../competition/calendar";
@@ -892,8 +895,13 @@ export function setPlayerTactic(
     point?: BoardPoint;
     move?: { lane?: "left" | "center" | "right"; band?: "defense" | "midfield" | "attack" };
     role?: string;
-    /** 개인 지시 — 자유 서술 + 선택적 종류·대상 */
-    instruction?: { note: string; kind?: PlayerDirectiveKind; targetId?: string };
+    /** 개인 지시 — 자유 서술 + 선택적 종류·대상·세기 */
+    instruction?: {
+      note: string;
+      kind?: PlayerDirectiveKind;
+      targetId?: string;
+      intensity?: DirectiveIntensity;
+    };
   },
 ): SkillResult {
   const notes: string[] = [];
@@ -1522,7 +1530,14 @@ export function setTactics(state: GameState, spec: Partial<TacticsSpec>): SkillR
  */
 export function setPlayerInstruction(
   state: GameState,
-  input: { playerId: string; note: string; kind?: PlayerDirectiveKind; targetId?: string },
+  input: {
+    playerId: string;
+    note: string;
+    kind?: PlayerDirectiveKind;
+    targetId?: string;
+    /** 얼마나 세게 — 없으면 `normal`이라 세기를 안 보내는 호출이 그대로 선다 */
+    intensity?: DirectiveIntensity;
+  },
 ): SkillResult {
   const pick = ourPlayer(state, input.playerId);
   if (!pick.ok) return pick;
@@ -1554,6 +1569,7 @@ export function setPlayerInstruction(
     assignment.directive = {
       kind: input.kind,
       ...(target ? { targetId: target.id } : {}),
+      ...(input.intensity ? { intensity: input.intensity } : {}),
     };
   }
 
@@ -1581,9 +1597,40 @@ export function setPlayerInstruction(
       },
     };
   }
+  /** 세기는 **보통이 아닐 때만** 적는다 — 기본값을 매번 적으면 그게 선택으로 읽힌다 */
+  const intensityKo =
+    input.intensity && input.intensity !== "normal"
+      ? ` ${DIRECTIVE_INTENSITY_KO[input.intensity]}`
+      : "";
+  const kindKo = `${PLAYER_DIRECTIVE_KO[input.kind]}${intensityKo}`;
+  /**
+   * **`kind`가 있어도 판에 닿지 않는 두 갈래** — 그것도 말해야 한다.
+   *
+   * 시뮬로 가는 것은 그라운드 위 선수의 지시뿐이고(`directivesOnPitch`) 그중에서도
+   * 앞선 `MAX_EFFECTIVE`개까지다(`applyDirectives`). 저장은 되니 **거절이 아니라
+   * 고지다** — 교체로 들어가거나 다른 지시를 거두면 그대로 걸린다. 조용히 버리면
+   * `kind` 없는 지시를 성공으로 답하던 것과 같은 거짓 성공이 된다.
+   */
+  const withDirective = userTactics(state).assignments.filter(
+    (a) => a.role === "starting" && a.directive,
+  );
+  const order = withDirective.findIndex((a) => a.playerId === player.id);
+  const unreached =
+    assignment.role !== "starting"
+      ? { text: "벤치", why: "벤치라 지금은 판에 닿지 않습니다 — 교체로 들어가면 걸립니다" }
+      : order >= DIRECTIVE_TUNING.MAX_EFFECTIVE
+        ? {
+            text: `지시 ${order + 1}번째`,
+            why:
+              `이미 지시 ${DIRECTIVE_TUNING.MAX_EFFECTIVE}개가 걸려 판에 닿지 않습니다 — ` +
+              `하나를 거두면 걸립니다`,
+          }
+        : null;
   return {
     ok: true,
-    message: `${player.name} 개인 지시 — "${input.note}" [${PLAYER_DIRECTIVE_KO[input.kind]}${targetNote}]`,
+    message:
+      `${player.name} 개인 지시 — "${input.note}" [${kindKo}${targetNote}]` +
+      (unreached ? ` · ${unreached.why}` : ""),
     /**
      * 항목에는 **지시의 갈래와 대상만** 싣는다. `note`는 감독의 말 그대로라
      * 길이에 상한이 없다 — 그 문장은 `message`를 타고 장면으로 간다.
@@ -1592,9 +1639,10 @@ export function setPlayerInstruction(
       head: `${player.name} 개인 지시`,
       items: [
         item({
-          text: PLAYER_DIRECTIVE_KO[input.kind],
+          text: kindKo,
           ...(target ? { note: `겨냥 ${target.name}` } : {}),
         }),
+        ...(unreached ? [item({ text: unreached.text, note: "판에 반영되지 않음" })] : []),
       ],
     },
   };

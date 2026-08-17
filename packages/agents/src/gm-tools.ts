@@ -66,6 +66,7 @@ import {
 } from "@story-fm/engine";
 import {
   ATTRIBUTE_AXES,
+  DIRECTIVE_INTENSITIES,
   MAX_PITCH_CLAIMS,
   PitchClaimKindSchema,
   PitchClaimSchema,
@@ -380,6 +381,11 @@ export function buildGmTools(
               },
               kind: { type: "string", enum: [...PLAYER_DIRECTIVE_KINDS] },
               targetId: { type: "string", description: "man_mark·press_target의 대상 선수 id" },
+              intensity: {
+                type: "string",
+                enum: [...DIRECTIVE_INTENSITIES],
+                description: "감독이 말한 세기 — 생략하면 normal",
+              },
             },
             required: ["note"],
           },
@@ -401,6 +407,7 @@ export function buildGmTools(
             note: z.string().min(1).max(160),
             kind: z.enum(PLAYER_DIRECTIVE_KINDS).optional(),
             targetId: z.string().optional(),
+            intensity: z.enum(DIRECTIVE_INTENSITIES).optional(),
           })
           .optional(),
       }),
