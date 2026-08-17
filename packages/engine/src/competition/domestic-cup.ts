@@ -19,8 +19,9 @@ import {
 } from "../data/domestic-cup-catalog";
 import { leagueCatalogById, topLeagueOfCountry } from "../data/league-catalog";
 import { completeDraw, drawEntryOf, drawIsDue, drawRefId, scheduleDraw } from "./draw-schedule";
-import { clubsOfCountry, isTopFlight, leagueOfTeam } from "../data/team-catalog";
+import { clubsOfCountry, leagueOfTeam } from "../data/team-catalog";
 import { tierOfTeamIn } from "../core/club-tier";
+import { isTopFlightIn } from "./promotion";
 import { reservedEuroDates } from "./europe";
 import { payOnce } from "../club/finance";
 import { clearForCup } from "./reschedule";
@@ -198,10 +199,11 @@ export function userStillIn(state: GameState, cupId: string): boolean {
 
 /**
  * 전력 서열 — 작을수록 강하다. 1부가 2부보다 앞서고, 같은 부에선 tier 순.
- * 홈 배정 규정(`homeRule`)의 기준이다.
+ * 홈 배정 규정(`homeRule`)의 기준이다. 둘 다 **지금** 값이라 강등한 클럽은 그
+ * 시즌 컵에서 하부 클럽으로 셈해진다.
  */
 function rankOf(state: GameState, teamId: string): number {
-  return (isTopFlight(teamId) ? 0 : 10) + tierOfTeamIn(state, teamId);
+  return (isTopFlightIn(state, teamId) ? 0 : 10) + tierOfTeamIn(state, teamId);
 }
 
 /**
