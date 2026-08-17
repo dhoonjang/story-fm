@@ -189,6 +189,11 @@ describe("포지션 가중치", () => {
      * 골키핑 79인데 종합 82가 나오면 말이 안 된다. 한동안 그랬는데, 골키핑의
      * **지분이 39%뿐**이라 나머지 61%(킥력·위치선정·침착성…)가 값을 밀어 올렸다.
      * 지금은 65%다 — 배급·커맨드가 여전히 값을 움직이되 뒤집지는 못한다.
+     *
+     * 종합이 가중 평균이 된 뒤로(player.md §4) 골키퍼의 종합은 골키핑을 **넘지
+     * 않는다** — 나머지 35%가 아래로 당겨 중앙값이 −4에 선다. 재는 것은 그래서
+     * "0에 붙어 있나"가 아니라 **띠가 좁게 유지되나**다: 넓어지면 골키핑이 아니라
+     * 다른 축이 골키퍼의 등급을 정하고 있다는 뜻이다.
      */
     const sum = ATTRIBUTE_AXES.reduce((t, a) => t + POSITION_WEIGHTS.GK[a], 0);
     expect(POSITION_WEIGHTS.GK.goalkeeping / sum).toBeGreaterThan(0.6);
@@ -198,9 +203,11 @@ describe("포지션 가중치", () => {
       .map((e) => roleFit(e, "GK") - e.goalkeeping)
       .sort((a, b) => a - b);
     expect(gaps.length).toBeGreaterThan(300);
-    expect(gaps[Math.floor(gaps.length / 2)], "중앙값이 0에서 벗어났다").toBe(0);
-    const within2 = gaps.filter((x) => Math.abs(x) <= 2).length / gaps.length;
-    expect(within2, `±2 안 ${(within2 * 100).toFixed(0)}%`).toBeGreaterThan(0.8);
+    const median = gaps[Math.floor(gaps.length / 2)]!;
+    expect(median, `중앙값 ${median}`).toBeLessThanOrEqual(0);
+    expect(median, `중앙값 ${median}`).toBeGreaterThanOrEqual(-6);
+    const near = gaps.filter((x) => Math.abs(x - median) <= 3).length / gaps.length;
+    expect(near, `중앙값 ±3 안 ${(near * 100).toFixed(0)}%`).toBeGreaterThan(0.8);
   });
 
   it("goalkeeping은 GK 자리에서만 **실질적으로** 들어간다", () => {
@@ -387,6 +394,36 @@ describe("세부 역할 (FM 역할 체계)", () => {
 });
 
 describe("종합(overall) — 가장 잘 맞는 자리 · 기본 역할", () => {
+  it("종합은 그 선수 축의 범위 안에 있다 — 어느 자리·어느 역할에서도", () => {
+    /**
+     * **이 불변식이 종합의 정의다** (player.md §4). 15축을 함께 펼쳐 놓은 화면에서
+     * 종합이 어느 축보다 높으면 감독은 계산이 틀렸다고 읽는다 — 실제로 그랬다:
+     * 축 최대 92인 선수의 종합이 93으로 나왔고, 카탈로그 5,780명 중 52명이 그랬다.
+     *
+     * 자리·역할을 전부 도는 이유는 역할 기준점(`ROLE_PIVOT`)이 평행 이동이라
+     * **범위 밖으로 밀어낼 수 있는 유일한 항**이기 때문이다.
+     */
+    const violations: string[] = [];
+    for (const entry of playerCatalog()) {
+      const values = ATTRIBUTE_AXES.map((a) => entry[a]);
+      const low = Math.min(...values);
+      const high = Math.max(...values);
+      for (const { position } of entry.positions) {
+        for (const role of rolesFor(position)) {
+          const fit = roleFit(entry, position, role.id);
+          if (fit >= low && fit <= high) continue;
+          violations.push(`${entry.nameEn} ${position}:${role.id} ${fit} ∉ [${low}, ${high}]`);
+        }
+      }
+      const shown = bestOverall(entry, entry.positions);
+      if (shown < low || shown > high) {
+        violations.push(`${entry.nameEn} 표시용 종합 ${shown} ∉ [${low}, ${high}]`);
+      }
+    }
+    expect(violations.slice(0, 10)).toEqual([]);
+  });
+
+
   it("종합은 세부 역할을 타지 않는다 — 숫자 하나가 여러 등급이 되면 안 된다", () => {
     const p = playerCatalog().find((e) => naturalPositionOf(e).position === "ST")!;
     const shown = bestOverall(p, p.positions);
@@ -402,32 +439,37 @@ describe("overall 분포 — 밴드 의미가 유지된다", () => {
   const sorted = [...overalls].sort((a, b) => a - b);
   const q = (p: number) => sorted[Math.floor(sorted.length * p)]!;
 
-  it("6축 시절 분포(평균 70 · p90 79 · 최대 94)와 정합한다", () => {
+  it("가중 평균의 눈금 — 평균 66 · p90 76 근처에 선다", () => {
+    /**
+     * 되펴기를 걷어낸 뒤의 눈금이다(player.md §4). 폭이 밴드 하나만큼이라도 벗어나면
+     * 축 파생이나 가중치가 움직였다는 뜻이고, 그때는 종합을 읽는 곡선(시장가·희망
+     * 주급·`RATING_TIERS`)을 함께 다시 재야 한다.
+     */
     const mean = overalls.reduce((s, x) => s + x, 0) / overalls.length;
-    expect(mean).toBeGreaterThan(66);
-    expect(mean).toBeLessThan(72);
-    expect(q(0.9)).toBeGreaterThanOrEqual(76);
-    expect(q(0.9)).toBeLessThanOrEqual(82);
+    expect(mean).toBeGreaterThan(64);
+    expect(mean).toBeLessThan(69);
+    expect(q(0.9)).toBeGreaterThanOrEqual(73);
+    expect(q(0.9)).toBeLessThanOrEqual(79);
   });
 
-  it("월드클래스(90+) 밴드가 비지 않고, 흔하지도 않다 — 실선수 기준", () => {
+  it("최상단 밴드가 비지 않고, 흔하지도 않다 — 실선수 기준", () => {
     /**
      * **실선수만 본다.** 밴드의 의미를 정하는 건 실제 선수의 분포이고, 절차 생성
      * 선수는 그 분포를 흉내 낼 뿐이다. 실선수 시드가 없는 리그(사우디·MLS)가
      * 늘면서 카탈로그의 절반이 합성이 됐는데, 그걸 분모에 넣으면 이 테스트가
      * "합성 생성기가 후한가"를 재게 된다 — 다른 질문이다.
      *
-     * ⚠️ 그 다른 질문의 답은 지금 **아니오**다: 90+ 59명 중 40명이 합성이고
-     * 알이티하드의 33세 골키퍼가 96으로 나온다(실선수 최고 발베르데 95보다 높다).
-     * `fallbackEntries`가 tier 기준선(2등급=80)에 `+randInt(0,8)`을 얹는 탓이다.
-     * 밸런스 사안이라 여기서 고치지 않고 남긴다.
+     * 문턱이 90이 아니라 84인 이유: 종합이 축 가중 평균이라 90+는 구조적으로 비어
+     * 있고(§4), 옛 90과 같은 인원 비율에 서는 값이 84다. `RATING_TIERS`의 라벨은
+     * 여기 따라오지 않는다 — 그 자는 15축에도 함께 걸려 있어 축의 눈금을 흔들 수
+     * 없다 (player.md §10).
      */
     const real = playerCatalog()
       .filter((e) => !e.synthetic)
       .map((e) => roleFit(e, naturalPositionOf(e).position));
-    const worldClass = real.filter((x) => x >= 90).length;
-    expect(worldClass).toBeGreaterThan(0);
-    expect(worldClass).toBeLessThan(real.length * 0.01);
+    const top = real.filter((x) => x >= 84).length;
+    expect(top).toBeGreaterThan(0);
+    expect(top).toBeLessThan(real.length * 0.01);
   });
 
   it("자리별 평균이 서로 크게 벌어지지 않는다 — 포지션 간 비교가 가능해야 한다", () => {
