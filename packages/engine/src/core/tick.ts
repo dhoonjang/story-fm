@@ -428,12 +428,16 @@ function standsToday(state: GameState, digest: string[]): boolean {
  * 않는다.** 사흘 간격에서 많이 뛰는 자리(풀백·중원·윙어)가 75~76(피로 24~25)로
  * 걸리고 덜 뛰는 자리(센터백·최전방)는 83~85(피로 15~17)로 통과한다 — 자리마다
  * 갈리는 것이 요점이다. 사흘 연전이 이어지면 피로가 37 근처에 눕는다.
+ *
+ * 공개하는 이유는 하나뿐이다 — **밸런스 하네스가 이 문턱을 재기 때문이다.**
+ * 하네스가 제 숫자를 따로 적으면 로테이션을 재는 자리가 재려는 대상과 다른 눈금을
+ * 쓴다 (실제로 그랬다: 하네스는 30, 여기는 20).
  */
-const ROTATION_FATIGUE = 20;
+export const ROTATION_FATIGUE = 20;
 /** 대체가 허용되는 기량 손실 — 이보다 떨어지면 지쳐도 그냥 뛴다 */
-const ROTATION_OVR_DROP = 8;
+export const ROTATION_OVR_DROP = 8;
 /** 대체 자원은 최소 이만큼 더 신선해야 한다 */
-const ROTATION_FRESHER = 15;
+export const ROTATION_FRESHER = 15;
 /**
  * **다리가 멎은 선수는 기량과 무관하게 뺀다.**
  *
