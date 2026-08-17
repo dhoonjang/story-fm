@@ -227,7 +227,6 @@ function dailyTick(
       : "training";
 
   resolveInjuries(state, digest);
-  resolveScouting(state, digest);
 
   for (const player of players) {
     /**
@@ -251,6 +250,16 @@ function dailyTick(
   }
 
   tickOtherClubs(state);
+  /**
+   * 스카우팅 도착은 **그날의 폼·체력이 다 움직인 뒤에** 알린다.
+   *
+   * 도착 줄은 그 자리에서 문자열로 굳고(모델이 읽는 것은 그 줄뿐이다), 카드는
+   * 나중에 살아 있는 상태에서 다시 그려진다. 폼 앞에서 줄을 만들면 그날의 폼
+   * 감쇠만큼 둘이 갈려 카드는 £29.3M인데 대사는 £29.2M이 된다 (agents.md §6).
+   * ⚠️ **남의 팀 폼은 `tickOtherClubs`가 움직인다** — 스카우팅 대상은 대개 남의
+   * 팀이므로 위 감독 팀 루프 뒤로 옮기는 것만으로는 모자라다.
+   */
+  resolveScouting(state, digest);
   // 하루치 전술 적응 — **AI 클럽만** 받는다 (other-clubs.ts의 계약)
   driftFamiliarity(state);
 
@@ -331,6 +340,11 @@ function dailyTick(
   // 주급 (월요일) — 활성 계약 합에서 파생, 구단 전체에 적용 (무소속 제외 — finance.ts)
   if (dow === 1) payWeeklyWages(state);
 
+  /**
+   * 벤치 불만을 낼 만한 자원인가 — **종합의 눈금을 탄다.**
+   * 옛 78과 같은 인원 비율(상위 17%)에 서는 값이다 (player.md §4).
+   */
+  const BENCHED_GRIPE_OVERALL = 74;
   // 벤치 불만 발생 — 월요일, 고평가 비선발 자원 (간이).
   // 리그 개막 후에만 — 프리시즌엔 아직 "출전 기회"를 논할 경기가 없다 (v6)
   if (dow === 1 && state.date >= state.calendar.start && rng() < 0.15) {
@@ -341,7 +355,7 @@ function dailyTick(
       (p) =>
         squadLevelOf(p) === "first" &&
         !starters.has(p.id) &&
-        p.attributes.overall >= 78 &&
+        p.attributes.overall >= BENCHED_GRIPE_OVERALL &&
         !issuePlayers.has(p.id),
     );
     if (benched.length > 0) {
@@ -450,8 +464,11 @@ function standsToday(state: GameState, digest: string[]): boolean {
  * 쓴다 (실제로 그랬다: 하네스는 30, 여기는 20).
  */
 export const ROTATION_FATIGUE = 20;
-/** 대체가 허용되는 기량 손실 — 이보다 떨어지면 지쳐도 그냥 뛴다 */
-export const ROTATION_OVR_DROP = 8;
+/**
+ * 대체가 허용되는 기량 손실 — 이보다 떨어지면 지쳐도 그냥 뛴다.
+ * ⚠️ 종합의 눈금을 탄다 (player.md §4 — 축 가중 평균이 되며 분포가 좁아져 8 → 7).
+ */
+export const ROTATION_OVR_DROP = 7;
 /** 대체 자원은 최소 이만큼 더 신선해야 한다 */
 export const ROTATION_FRESHER = 15;
 /**
