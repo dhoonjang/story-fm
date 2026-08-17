@@ -1,7 +1,7 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
-import type { CSSProperties } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import type { CardMark, ChatTurn, GoalMark, ToolCallRecord } from "@story-fm/engine";
 import { cutStamps } from "../lib/scene-stamp";
 import { hasRailHint } from "../lib/panel-hints";
@@ -447,6 +447,75 @@ function humanize(text: string, names?: Record<string, string>): string {
 
 export { partOfDayStamp, turnStamp } from "../lib/scene-stamp";
 
+/** 눌렀다고 치는 시간 — 짧으면 스크롤을 잡는 손에 걸리고, 길면 눌러도 안 열린 줄 안다 */
+const LONG_PRESS_MS = 500;
+/** 이만큼 움직이면 누른 게 아니라 끄는 것이다 (스크롤·드래그 선택) */
+const LONG_PRESS_SLOP = 10;
+
+/**
+ * 롱프레스 — 주어졌을 때만 핸들러가 달린다.
+ *
+ * ⚠️ 채팅에는 이미 누를 것이 있다(스킬 칩·접힌 경기 머리). 그 위에서 시작한
+ * 눌림은 그 버튼의 몫이라 아예 시계를 걸지 않고, 롱프레스가 성립한 뒤에는
+ * 뒤따르는 click과 컨텍스트 메뉴를 삼킨다 — 안 그러면 손을 떼는 순간 다른 것이
+ * 함께 열린다.
+ */
+type PressHandlers = {
+  onPointerDown?: (e: ReactPointerEvent<HTMLDivElement>) => void;
+  onPointerMove?: (e: ReactPointerEvent<HTMLDivElement>) => void;
+  onPointerUp?: () => void;
+  onPointerCancel?: () => void;
+  onPointerLeave?: () => void;
+  onClickCapture?: (e: React.MouseEvent<HTMLDivElement>) => void;
+  onContextMenu?: (e: React.MouseEvent<HTMLDivElement>) => void;
+};
+
+function useLongPress(onLongPress?: () => void): PressHandlers {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const origin = useRef<{ x: number; y: number } | null>(null);
+  const fired = useRef(false);
+
+  const cancel = () => {
+    if (timer.current !== null) clearTimeout(timer.current);
+    timer.current = null;
+    origin.current = null;
+  };
+  useEffect(() => cancel, []);
+
+  if (!onLongPress) return {};
+  return {
+    onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      if (e.target instanceof Element && e.target.closest("button, a, input, textarea, summary"))
+        return;
+      fired.current = false;
+      origin.current = { x: e.clientX, y: e.clientY };
+      timer.current = setTimeout(() => {
+        fired.current = true;
+        cancel();
+        onLongPress();
+      }, LONG_PRESS_MS);
+    },
+    onPointerMove: (e: ReactPointerEvent<HTMLDivElement>) => {
+      const from = origin.current;
+      if (!from) return;
+      if (Math.hypot(e.clientX - from.x, e.clientY - from.y) > LONG_PRESS_SLOP) cancel();
+    },
+    onPointerUp: cancel,
+    onPointerCancel: cancel,
+    onPointerLeave: cancel,
+    onClickCapture: (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!fired.current) return;
+      fired.current = false;
+      e.preventDefault();
+      e.stopPropagation();
+    },
+    onContextMenu: (e: React.MouseEvent<HTMLDivElement>) => {
+      if (fired.current) e.preventDefault();
+    },
+  };
+}
+
 export function ChatTurnView({
   turn,
   streaming = false,
@@ -455,6 +524,7 @@ export function ChatTurnView({
   prevStamp = null,
   onRevealHint,
   revealedCall = null,
+  onLongPress,
 }: {
   turn: ChatTurn;
   /** 스트리밍 중인 미완성 턴 — 마지막 미완성 줄을 보류해 파싱 깨짐 방지 */
@@ -468,12 +538,22 @@ export function ChatTurnView({
   onRevealHint?: (call: ToolCallRecord) => void;
   /** 지금 말풍선이 서 있는 호출 — 그 칩만 펼친 모양이 된다 */
   revealedCall?: ToolCallRecord | null;
+  /**
+   * 이 턴을 길게 눌렀다 — 무엇이 열리는지는 이 컴포넌트가 알지 않는다.
+   * 주어지지 않으면 제스처 자체가 없다(프로덕션 · 아직 기록이 없는 턴).
+   */
+  onLongPress?: () => void;
 }) {
   const text = useMemo(() => humanize(turn.text, playerNames), [turn.text, playerNames]);
+  const press = useLongPress(onLongPress);
 
   // 감독의 말은 오른쪽 말풍선이라 그 자체로 갈린다 — 구간 표시는 모델 턴이 맡는다
   if (turn.role === "user") {
-    return <div className="turn-user">{turn.text}</div>;
+    return (
+      <div className="turn-user" {...press}>
+        {turn.text}
+      </div>
+    );
   }
 
   let lines = text.split("\n").filter((line) => line.trim().length > 0);
@@ -535,6 +615,7 @@ export function ChatTurnView({
     <div
       className={`turn-model${streaming ? " streaming" : ""}${turn.inMatch === true ? " in-match" : ""}`}
       data-testid="model-turn"
+      {...press}
     >
       {pieces.map((piece, i) => {
         if (!piece.mark) {

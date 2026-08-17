@@ -8,6 +8,8 @@ import type { ChatTurn, ToolCallRecord } from "@story-fm/engine";
 import { ChatTurnView, turnStamp } from "./chat";
 import { hintsOfCall, panelHintsOf, type PanelHint } from "@/lib/panel-hints";
 import { chatForActiveMatch } from "@/lib/match-chat";
+import { buildTraceIndex } from "@/lib/turn-trace-index";
+import { TurnTracePopup } from "./turn-trace";
 import { mergeMatchOrders, type MatchBoardOrder } from "@/lib/match-orders";
 import { RailHints } from "./rail-hints";
 import { Loading } from "./loading";
@@ -160,6 +162,13 @@ const TURN_IDLE_TIMEOUT_MS = 60_000;
 
 /** 시한을 넘긴 턴 — 서버의 `turnErrorMessage`와 같은 문구를 쓴다 */
 const TURN_TIMEOUT_MESSAGE = "응답이 지연돼 턴을 취소했습니다 — 다시 시도해 주세요.";
+
+/**
+ * 턴 원문을 볼 수 있는가 — **개발 모드에서만.** 기록도 라우트도 같은 기준으로
+ * 닫힌다(`traceEnabled`, models.md §5). Next가 이 값을 클라이언트 번들에
+ * 인라인하므로 프로덕션 빌드에서는 상수 `false`가 되어 제스처가 통째로 사라진다.
+ */
+const TRACE_ENABLED = process.env.NODE_ENV !== "production";
 
 export function GameScreen({ gameId }: { gameId: string }) {
   const [game, setGame] = useState<GamePayload | null>(null);
@@ -364,6 +373,13 @@ export function GameScreen({ gameId }: { gameId: string }) {
   const [input, setInput] = useState("");
   /** 시간 손잡이의 선택지가 펼쳐져 있는가 — 입력이 비었을 때만 열 수 있다 */
   const [skipOpen, setSkipOpen] = useState(false);
+  /**
+   * 원문 창이 열린 턴의 자리 (`game.chat`의 절대 인덱스) — 개발 모드에서만 찬다.
+   * 게임의 일부가 아니라 개발 도구라 세이브에도 URL에도 남기지 않는다.
+   */
+  const [traceAt, setTraceAt] = useState<number | null>(null);
+  /* 창의 Esc·포커스 정리가 매 렌더마다 다시 걸리지 않게 닫는 손잡이는 고정한다 */
+  const closeTrace = useCallback(() => setTraceAt(null), []);
   /** 펼쳐 둔 경기 기록 — 접힌 게 기본이다 (끝난 경기는 결과만 남는다) */
   const [openLogs, setOpenLogs] = useState<ReadonlySet<string>>(new Set());
   const toggleLog = useCallback((id: string) => {
@@ -683,6 +699,17 @@ export function GameScreen({ gameId }: { gameId: string }) {
     }
     return null;
   }, [game]);
+  /**
+   * 턴 → 원문 기록의 자리. ⚠️ **걸러지지 않은 `game.chat`**으로 만든다 —
+   * 화면이 그리는 목록은 경기 중 턴을 걸러내므로 그 자리를 쓰면 남의 턴이 열린다.
+   * (이 훅도 `if (!game)` 앞이어야 한다 — 위 주석 참조)
+   */
+  const traceIndex = useMemo(() => buildTraceIndex(game?.chat ?? []), [game?.chat]);
+  const traceOpener = (turn: ChatTurn): (() => void) | undefined => {
+    if (!TRACE_ENABLED) return undefined;
+    const at = traceIndex.get(turn);
+    return at === undefined ? undefined : () => setTraceAt(at);
+  };
 
   if (!game)
     return (
@@ -804,7 +831,10 @@ export function GameScreen({ gameId }: { gameId: string }) {
           let prevStamp: string | null = null;
           const render = (turn: ChatTurn, i: number) => {
             if (turn.role === "operator") return null;
-            if (turn.role !== "model") return <ChatTurnView key={i} turn={turn} />;
+            // 감독의 발화를 눌러도 열리는 것은 **그 발화가 실려 나간 호출**이다 —
+            // 인덱스를 아는 이 자리가 그것을 해석한다 (`buildTraceIndex`)
+            if (turn.role !== "model")
+              return <ChatTurnView key={i} turn={turn} onLongPress={traceOpener(turn)} />;
             const node = (
               <ChatTurnView
                 key={i}
@@ -814,6 +844,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
                 prevStamp={prevStamp}
                 onRevealHint={inMatch ? undefined : revealHint}
                 revealedCall={pinnedHint?.call ?? null}
+                onLongPress={traceOpener(turn)}
               />
             );
             prevStamp = turnStamp(turn) ?? prevStamp;
@@ -1314,6 +1345,10 @@ export function GameScreen({ gameId }: { gameId: string }) {
           </section>
         </div>
       </main>
+      {/* 턴 원문 — 개발 모드에서 턴을 길게 눌렀을 때만 선다 (models.md §5) */}
+      {TRACE_ENABLED && traceAt !== null && (
+        <TurnTracePopup gameId={gameId} index={traceAt} onClose={closeTrace} />
+      )}
     </div>
   );
 }

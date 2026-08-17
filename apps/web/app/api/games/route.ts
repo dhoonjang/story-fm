@@ -11,6 +11,7 @@ import {
   topLeagues,
 } from "@story-fm/engine";
 import { runOnboardingTurn } from "@story-fm/agents";
+import { bindTurnTrace, traceTurn } from "@story-fm/llm";
 import { toPayload } from "@/lib/store";
 import { turnErrorMessage } from "@/lib/turn-runner";
 
@@ -86,15 +87,30 @@ export async function POST(request: Request) {
    * 실패하면 **게임을 만들지 않는다** — 규칙 장면으로 열어 두면 유저는 그것이
    * 이 게임의 첫 장면인 줄 알고, 다시 시작할 기회를 잃는다.
    */
-  let intro;
-  try {
-    intro = await runOnboardingTurn(state);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    console.error("[games] 첫 장면 생성 실패 — 게임을 만들지 않는다:", error);
-    return NextResponse.json({ error: turnErrorMessage(detail), detail }, { status: 502 });
+  // 첫 장면의 원문도 그 model 턴에 묶인다 — 묶는 것은 `traceTurn` 범위 안에서만 된다
+  const opened = await traceTurn(async () => {
+    try {
+      const intro = await runOnboardingTurn(state);
+      state.chat.push({
+        role: "model",
+        text: intro.text,
+        toolCalls: intro.toolCalls,
+        at: state.date,
+      });
+      bindTurnTrace(state.id, state.chat.length - 1);
+      return { ok: true as const };
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.error("[games] 첫 장면 생성 실패 — 게임을 만들지 않는다:", error);
+      return { ok: false as const, detail };
+    }
+  });
+  if (!opened.ok) {
+    return NextResponse.json(
+      { error: turnErrorMessage(opened.detail), detail: opened.detail },
+      { status: 502 },
+    );
   }
-  state.chat.push({ role: "model", text: intro.text, toolCalls: intro.toolCalls, at: state.date });
   saveGame(state);
 
   return NextResponse.json(toPayload(state));

@@ -75,3 +75,263 @@
   color: var(--silver);
   margin: 26px 0 10px;
 }
+
+/* ── 턴 원문 뷰어 — 개발 모드에서 턴을 길게 눌렀을 때 서는 창 ─────────────────────────── */
+
+/**
+ * 게임 화면 위에 겹치므로 여기서만 그림자를 쓴다(표면 밝기 규칙의 예외 — 어드민
+ * 모달과 같다). 창이 넓은 것은 **원문이 내용**이기 때문이다: 시스템 프롬프트 한
+ * 줄이 접혀 넘어가면 무엇이 나갔는지를 읽을 수가 없다.
+ */
+.tt-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(6, 8, 12, 0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-4);
+}
+.tt-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop);
+  width: 100%;
+  max-width: 980px;
+  max-height: calc(100vh - 2 * var(--sp-4));
+  display: flex;
+  flex-direction: column;
+  /* 원문은 안에서만 넘친다 — 밖으로 새면 채팅 화면이 가로로 밀린다 */
+  min-width: 0;
+}
+.tt-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+.tt-title {
+  font-size: var(--fs-lg);
+}
+.tt-sub {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.tt-head-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: none;
+}
+.tt-close,
+.tt-toggle,
+.tt-copy {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.tt-close:hover,
+.tt-toggle:hover,
+.tt-copy:hover {
+  color: var(--text);
+}
+.tt-toggle,
+.tt-copy {
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+/* 복사는 헤더 맨 끝 — 사실들과 같은 줄에 서되 손이 닿는 자리는 따로다 */
+.tt-copy {
+  margin-left: var(--sp-2);
+}
+.tt-body {
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+/* 비었을 때·실패했을 때의 한 줄 — 개발 도구의 말투다 */
+.tt-note {
+  color: var(--muted);
+  font-size: var(--fs-md);
+  line-height: 1.6;
+  padding: var(--sp-3) 0;
+}
+
+/* 호출 하나 — 한 턴에 여럿이 순서대로 선다(gm + rater, intent + caster) */
+.tt-call {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  padding: var(--sp-2) var(--sp-3);
+  min-width: 0;
+}
+/**
+ * 호출 머리는 **따라 붙는다** — 시스템 프롬프트 하나가 수만 자라 한 호출을 지나는
+ * 데도 스크롤이 한참이다. 지금 읽는 원문이 누구의 것인지가 화면에서 사라지면
+ * gm과 rater의 프롬프트를 구별할 수 없다.
+ */
+.tt-call-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+.tt-agent {
+  font-size: var(--fs-base);
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+}
+/* 호출 순서 — 무엇이 먼저 돌았는지가 곧 그 턴의 경로다 */
+.tt-agent > i {
+  font-style: normal;
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+}
+.tt-model {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.tt-facts {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.tt-error {
+  margin-top: var(--sp-2);
+  color: var(--danger);
+  font-size: var(--fs-sm);
+}
+
+/**
+ * 방향 — **보낸 것과 받은 것.**
+ *
+ * 색과 왼쪽 띠가 그 경계를 진다. 띠가 블록 전체 길이를 따라 내려가는 것이 핵심이다:
+ * 프롬프트 하나가 수만 자라 머리가 화면에서 밀려난 뒤에도 지금 읽는 원문이 어느
+ * 쪽인지 남아야 한다. 파랑은 우리가 보낸 것(`--accent-2`), 초록은 모델이 돌려준
+ * 것(`--accent`) — 화면의 다른 곳과 같은 짝이다.
+ */
+.tt-side {
+  border-left: 2px solid var(--tt-dir);
+  padding-left: var(--sp-3);
+  margin-top: var(--sp-3);
+}
+.tt-side.in {
+  --tt-dir: var(--accent-2);
+}
+.tt-side.out {
+  --tt-dir: var(--accent);
+}
+.tt-side-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+}
+.tt-side-head > b {
+  color: var(--tt-dir);
+}
+.tt-arrow {
+  color: var(--tt-dir);
+  font-size: var(--fs-base);
+  line-height: 1;
+}
+.tt-side-facts {
+  color: var(--muted);
+  font-size: var(--fs-2xs);
+  font-variant-numeric: tabular-nums;
+}
+/* 그 방향이 무엇을 담는지 한 줄 — 경계를 색으로만 두면 무엇이 다른지는 여전히 모른다 */
+.tt-side-hint {
+  margin: 2px 0 var(--sp-1);
+  color: var(--dim);
+  font-size: var(--fs-2xs);
+  line-height: 1.5;
+}
+
+/* 블록 — 접힌 채로 이름과 크기만, 펼치면 원문 그대로 */
+.tt-block > summary {
+  cursor: pointer;
+  padding: var(--sp-1) 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  list-style-position: outside;
+}
+.tt-block-label {
+  font-weight: 700;
+  color: var(--silver);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+/**
+ * 방향이 그 자리와 다른 블록 — 응답 꼬리에 섞인 우리 발화·`tool_result`가 그렇다.
+ * 이름에 방향의 색을 물려 "초록 칸 안의 파란 줄"로 보이게 한다.
+ */
+.tt-block.in > summary > .tt-block-label {
+  color: var(--accent-2);
+}
+.tt-block.out > summary > .tt-block-label {
+  color: var(--accent);
+}
+.tt-block-meta {
+  color: var(--dim);
+  font-size: var(--fs-2xs);
+  font-variant-numeric: tabular-nums;
+}
+/**
+ * 원문 — **전문이 그대로 선다.**
+ *
+ * ⚠️ 높이 상한도 가로 스크롤도 두지 않는다. 상한을 두면 프롬프트가 블록 안에서
+ * 잘려 "여기까지가 전부"로 읽히고, 줄을 접지 않으면 긴 문단이 창 밖으로 흘러
+ * 가로로 끌어야 보인다 — 둘 다 원문을 보여주겠다는 이 창의 용건을 무너뜨린다.
+ * 넘치는 몫은 창 본문(`.tt-body`)이 스크롤하고, 길이는 접힘이 감당한다.
+ */
+.tt-pre {
+  margin: var(--sp-1) 0 var(--sp-2);
+  padding: var(--sp-2);
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-xs);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+  color: var(--text);
+  /* 줄바꿈은 원문 그대로 지키되, 창보다 긴 줄은 접어 다 보이게 한다 */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 2;
+}
+/**
+ * JSON은 들여쓰기가 구조다 — 접으면 중첩이 무너져 읽을 수 없다. 그래서 이쪽만
+ * 줄을 지키고 가로로 흐르며, 그 스크롤은 이 블록 안에서 끝난다.
+ */
+.tt-pre.json {
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow-x: auto;
+}
