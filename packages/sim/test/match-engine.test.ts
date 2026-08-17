@@ -105,14 +105,50 @@ describe("구간 시뮬레이터 — 결과는 코어가 정한다", () => {
     expect(a.ledger.events).toEqual(b.ledger.events);
   });
 
-  it("경기가 항상 완결된다 — 하프타임을 거쳐 90분 이후 종료", () => {
+  /**
+   * 각 하프는 **규정 분수만큼만** 굴러간다 (match.md §2). 추가시간이 시계에 얹히면
+   * 그 하프의 끝이 다음 하프의 시작이 되어 90분 기준선이 92~96분으로 불어나고,
+   * 슈팅률·피로의 `/90` 눈금이 그만큼 어긋난다.
+   */
+  it("경기가 항상 완결된다 — 45′ 하프타임, 90′ 종료", () => {
     for (const seed of [1, 2, 3, 11, 42, 99]) {
       const { ledger } = playMatch(setup(), seed);
       expect(ledger.phase, `seed ${seed}`).toBe("finished");
       expect(ledger.events.some((e) => e.type === "kickoff")).toBe(true);
-      expect(ledger.events.some((e) => e.type === "half_time")).toBe(true);
+      const half = ledger.events.find((e) => e.type === "half_time")!;
+      expect(half?.minute, `seed ${seed}`).toBe(45);
       const end = ledger.events.find((e) => e.type === "full_time")!;
-      expect(end.minute).toBeGreaterThanOrEqual(90);
+      expect(end.minute, `seed ${seed}`).toBe(90);
+      // 사건도 그 안에 선다 — 45′를 넘긴 전반의 슛은 후반의 시각을 먹는다
+      for (const e of ledger.events) {
+        expect(e.minute, `seed ${seed} / ${e.type}`).toBeLessThanOrEqual(90);
+      }
+    }
+  });
+
+  /**
+   * 구간의 시각은 **장부가 멈추는 자리**여야 한다 (match.md §3). 마지막 사건 뒤의
+   * 대기까지 이 구간의 시각으로 돌려주면 장부는 사건에서 멈추고, 같은 분에서 다시
+   * 출발하는 다음 구간이 그 1~2분의 피로와 패스를 한 번 더 센다.
+   */
+  it("구간의 시각과 장부의 시각이 어긋나지 않는다", () => {
+    for (const seed of [5, 17, 33]) {
+      const s = setup();
+      let ledger = s.ledger;
+      for (let segment = 0; segment < 60 && ledger.phase !== "finished"; segment++) {
+        const plan = simulateSegment({
+          packet: s.packet,
+          ledger,
+          squads: s.squads,
+          tactics: s.tactics,
+          rng: rngOf(seed * 1000 + segment),
+        });
+        const applied = applyEvents(ledger, plan.events);
+        if (!applied.ok) throw new Error(`구간 ${segment} 반려: ${applied.errors.join(" / ")}`);
+        ledger = applied.state;
+        expect(ledger.minute, `seed ${seed} / 구간 ${segment} (${plan.stop})`).toBe(plan.minute);
+      }
+      expect(ledger.phase, `seed ${seed}`).toBe("finished");
     }
   });
 
@@ -245,7 +281,7 @@ describe("연장 — 구간 시뮬이 120분까지 간다", () => {
       const { ledger } = playMatch(setup(80, 80), seed);
       const shape = shapeOf(ledger);
       expect(shape.entered, `seed ${seed}`).toBe(false);
-      expect(shape.end!.minute).toBeLessThan(100); // 90 + 추가시간
+      expect(shape.end!.minute).toBe(90);
       if (shape.level) draws++;
     }
     // 무승부가 한 번도 안 나왔다면 이 테스트는 아무것도 증명하지 못한다
@@ -264,14 +300,12 @@ describe("연장 — 구간 시뮬이 120분까지 간다", () => {
         continue;
       }
       extraTimes++;
-      // 연장 두 하프를 모두 지나고 120′ 이후에 끝난다
-      expect(
-        ledger.events.some((e) => e.type === "extra_half_time"),
-        `seed ${seed}`,
-      ).toBe(true);
-      expect(shape.end!.minute, `seed ${seed}`).toBeGreaterThanOrEqual(120);
+      // 연장 두 하프가 각각 15분씩 온전히 굴러간다 — 90 → 105 → 120
       const start = ledger.events.find((e) => e.type === "extra_time_start")!;
-      expect(start.minute).toBeGreaterThanOrEqual(90);
+      expect(start.minute, `seed ${seed}`).toBe(90);
+      const extraHalf = ledger.events.find((e) => e.type === "extra_half_time")!;
+      expect(extraHalf?.minute, `seed ${seed}`).toBe(105);
+      expect(shape.end!.minute, `seed ${seed}`).toBe(120);
     }
     expect(extraTimes).toBeGreaterThan(0);
   });

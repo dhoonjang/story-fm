@@ -11,7 +11,7 @@ export interface TeamLedger {
   onPitch: string[];
   bench: string[];
   subsUsed: number;
-  /** 교체 기회(창) — 같은 분(分)의 연속 교체는 한 창, 하프타임(45′)은 창 미소모 */
+  /** 교체 기회(창) — 같은 분(分)의 연속 교체는 한 창, 휴식 정지점은 창 미소모 */
   subWindows: number;
   lastSubMinute: number | null;
   /** 선수별 경고 수 — 경고 2회는 자동 퇴장 */
@@ -152,6 +152,38 @@ const BREAK_KO: Record<string, string> = {
 const BREAK_EVENTS: ReadonlySet<string> = new Set(Object.keys(BREAK_KO));
 
 /**
+ * 이 교체가 **휴식 정지점에 붙어 있는가** — 창 미소모의 판정 (match.md §5).
+ *
+ * 분으로 재면 안 된다: 정지 사건의 시각은 국면이 끝나는 분이고, 그 값이 조금만
+ * 움직여도 "45′·46′면 면제"가 통째로 사라진다. 정지점 자체를 본다.
+ *
+ * 자리는 정지 사건의 **앞뒤 양쪽**이다 — 다음 배치에서 감독이 부르는 교체는 뒤에
+ * 오고, 구간 시뮬이 정지 사건과 함께 올리는 AI 교체는 같은 배치의 앞에 온다
+ * (`insertBeforeStop`). 경기가 재개되면 — 정지 사건 뒤에 교체가 아닌 사건이
+ * 기록되거나 시계가 그 분을 지나면 — 다시 보통의 교체다.
+ */
+function atBreakStop(state: MatchLedgerState, incoming: MatchEvent[], i: number): boolean {
+  const sub = incoming[i];
+  if (!sub) return false;
+  /** 교체를 건너뛰고 만나는 첫 사건 — 교체 여러 장은 한 정지점의 같은 자리다 */
+  const around = (events: readonly MatchEvent[], from: number, step: number): MatchEvent | null => {
+    for (let j = from; j >= 0 && j < events.length; j += step) {
+      const found = events[j];
+      if (!found || found.type === "substitution") continue;
+      return found;
+    }
+    return null;
+  };
+  /** 그 정지 사건에 붙어 있는가 — 시계가 그 뒤로 움직였으면 경기가 재개된 것이다 */
+  const attached = (event: MatchEvent | null) =>
+    event !== null && BREAK_EVENTS.has(event.type) && event.minute === sub.minute;
+  return (
+    attached(around(incoming, i + 1, 1)) ||
+    attached(around(state.events, state.events.length - 1, -1))
+  );
+}
+
+/**
  * 이벤트 배치를 검증하며 적용한다 — 원자적: 하나라도 실패하면 전체 반려.
  * 오류 메시지는 한국어로 — LLM이 읽고 수정 재기록한다 (Zod 재시도와 동일 패턴).
  */
@@ -186,7 +218,7 @@ export function applyEvents(state: MatchLedgerState, incoming: MatchEvent[]): Ap
         ],
       };
     }
-    const err = applyOne(next, ev, i);
+    const err = applyOne(next, ev, i, atBreakStop(next, incoming, i));
     if (err) return { ok: false, errors: [err] };
     next.events.push(ev);
     next.minute = Math.max(next.minute, ev.minute);
@@ -221,7 +253,13 @@ function sanitizeEvent(state: MatchLedgerState, ev: MatchEvent): MatchEvent {
   return { ...ev, actors: credible && assist !== undefined ? [scorer, assist] : [scorer] };
 }
 
-function applyOne(state: MatchLedgerState, ev: MatchEvent, i: number): string | null {
+function applyOne(
+  state: MatchLedgerState,
+  ev: MatchEvent,
+  i: number,
+  /** 이 사건이 휴식 정지점에 붙어 있는가 — 교체의 창 미소모가 여기서 갈린다 */
+  atBreak: boolean,
+): string | null {
   // 공통: 시간 순증 + 종료 이후 금지
   if (state.phase === "finished") {
     return `${label(i, ev)}: 경기 종료(full_time) 이후의 이벤트는 기록할 수 없습니다`;
@@ -330,11 +368,10 @@ function applyOne(state: MatchLedgerState, ev: MatchEvent, i: number): string | 
       if (side.subsUsed >= limits.maxSubs) {
         return `${label(i, ev)}: 교체 ${limits.maxSubs}명 소진 — 더 교체할 수 없습니다`;
       }
-      // 교체 기회(창) 검증 — 같은 분의 연속 교체는 한 창, 휴식 시간은 미소모
-      const isHalfTimeSub = ev.minute === 45 || ev.minute === 46;
-      const opensNewWindow = !isHalfTimeSub && side.lastSubMinute !== ev.minute;
+      // 교체 기회(창) 검증 — 같은 분의 연속 교체는 한 창, 휴식 정지점은 미소모
+      const opensNewWindow = !atBreak && side.lastSubMinute !== ev.minute;
       if (opensNewWindow && side.subWindows >= limits.maxSubWindows) {
-        return `${label(i, ev)}: 교체 기회 ${limits.maxSubWindows}회 소진 (하프타임 제외)`;
+        return `${label(i, ev)}: 교체 기회 ${limits.maxSubWindows}회 소진 (휴식 정지점 제외)`;
       }
       const outErr = requireOnPitch(out);
       if (outErr) return outErr;
@@ -348,7 +385,9 @@ function applyOne(state: MatchLedgerState, ev: MatchEvent, i: number): string | 
       side.bench = side.bench.filter((id) => id !== into);
       side.subsUsed += 1;
       if (opensNewWindow) side.subWindows += 1;
-      if (!isHalfTimeSub) side.lastSubMinute = ev.minute;
+      // 휴식 정지점의 교체는 창을 열지 않았으므로 그 분을 남기지도 않는다 —
+      // 남기면 경기 재개 뒤 같은 분의 첫 교체가 창 없이 지나간다
+      if (!atBreak) side.lastSubMinute = ev.minute;
       break;
     }
 

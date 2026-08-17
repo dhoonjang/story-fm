@@ -28,6 +28,7 @@ import {
   planAiSubstitution,
   planAiTacticalShift,
   simulateSegment,
+  subLimitsOf,
   type LineupSlot,
   type SegmentPlan,
   type SegmentStop,
@@ -1367,8 +1368,8 @@ export function finalizeMatch(state: GameState): MatchDigest {
 
 export { activeSuspension, type TacticAssignment };
 
-/** 동시에 노릴 수 있는 지점 수 — sim의 규칙을 그대로 다시 내보낸다 */
-export { MAX_EXPLOITS };
+/** 동시에 노릴 수 있는 지점 수 · 국면별 교체 한도 — sim의 규칙을 그대로 다시 내보낸다 */
+export { MAX_EXPLOITS, subLimitsOf };
 
 /**
  * 공략 지정 — **감독이 읽은 약점을 겨냥한다** (sim `exploits.ts`).

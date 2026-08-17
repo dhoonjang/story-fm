@@ -218,6 +218,69 @@ describe("경기 장부 검증 (match.md §5)", () => {
     if (!fourth.ok) expect(fourth.errors[0]).toContain("교체 기회");
   });
 
+  /**
+   * 창 면제는 **정지점 종류가 정한다** — 분으로 재면(45′·46′) 추가시간이 얹힌
+   * 하프타임과 연장의 두 휴식이 통째로 규칙 밖으로 나간다 (match.md §5).
+   */
+  it("휴식 정지점의 교체는 창을 쓰지 않는다 — 시각이 45′·46′가 아니어도", () => {
+    const bench = Array.from({ length: 8 }, (_, i) => `b${i}`);
+    let state = createLedger({ onPitch: home.onPitch, bench }, away);
+
+    const half = applyEvents(state, [ev({ minute: 47, type: "half_time" })]);
+    if (!half.ok) throw new Error(half.errors.join(" / "));
+    const atHalf = applyEvents(half.state, [
+      ev({ minute: 47, type: "substitution", team: "home", actors: ["hm-df1", "b0"] }),
+    ]);
+    expect(atHalf.ok).toBe(true);
+    if (!atHalf.ok) return;
+    expect(atHalf.state.home.subWindows).toBe(0);
+
+    // 경기가 재개되면 같은 자리도 보통의 교체다
+    const resumed = applyEvents(atHalf.state, [
+      ev({ minute: 50, type: "shot", team: "home", actors: ["hm-fw1"] }),
+      ev({ minute: 50, type: "substitution", team: "home", actors: ["hm-df2", "b1"] }),
+    ]);
+    expect(resumed.ok).toBe(true);
+    if (!resumed.ok) return;
+    expect(resumed.state.home.subWindows).toBe(1);
+    state = resumed.state;
+
+    // 연장의 두 휴식 — 면제 조건 자체가 없어 창을 먹던 자리다
+    for (const [minute, type] of [
+      [90, "extra_time_start"],
+      [105, "extra_half_time"],
+    ] as const) {
+      const opened = applyEvents(state, [ev({ minute, type })]);
+      if (!opened.ok) throw new Error(`${type}: ${opened.errors.join(" / ")}`);
+      const sub = applyEvents(opened.state, [
+        ev({
+          minute,
+          type: "substitution",
+          team: "home",
+          actors: [minute === 90 ? "hm-df3" : "hm-df4", minute === 90 ? "b2" : "b3"],
+        }),
+      ]);
+      expect(sub.ok, `${type} 교체가 반려됐다`).toBe(true);
+      if (!sub.ok) return;
+      expect(sub.state.home.subWindows, `${type}에서 창이 소모됐다`).toBe(1);
+      state = sub.state;
+    }
+  });
+
+  /**
+   * 구간 시뮬은 AI 교체를 정지 사건 **앞**에 끼워 한 배치로 올린다
+   * (`insertBeforeStop`) — 같은 정지점의 같은 자리다.
+   */
+  it("정지 사건 앞에 붙은 교체도 창을 쓰지 않는다", () => {
+    const bench = Array.from({ length: 8 }, (_, i) => `b${i}`);
+    const r = applyEvents(createLedger({ onPitch: home.onPitch, bench }, away), [
+      ev({ minute: 45, type: "substitution", team: "home", actors: ["hm-df1", "b0"] }),
+      ev({ minute: 45, type: "half_time" }),
+    ]);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.state.home.subWindows).toBe(0);
+  });
+
   it("킥오프는 한 경기에 한 번만 기록된다", () => {
     const first = applyEvents(createLedger(home, away), [ev({ minute: 0, type: "kickoff" })]);
     expect(first.ok).toBe(true);
