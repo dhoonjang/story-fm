@@ -63,6 +63,18 @@ export function addStats(
   return { ...state, stats };
 }
 
+/**
+ * 시계만 앞으로 민다 — **사건 없이 흐른 구간의 유일한 경로.**
+ *
+ * 사건 배치는 빈 배열을 반려한다(`applyEvents`): 기록 없이 시계를 미는 길이 열려
+ * 있으면 한 턴에 경기 전체를 밀어붙일 수 있다. 그래서 정말로 아무 일도 없는
+ * 구간 — 감독이 말만 건 1분 — 만 여기로 지난다. 스코어·명단·국면·사건은 그대로고
+ * 시각만 올라가며, 역행은 무시한다(장부의 시간은 되감기지 않는다).
+ */
+export function advanceClock(state: MatchLedgerState, minute: number): MatchLedgerState {
+  return minute <= state.minute ? state : { ...state, minute };
+}
+
 export type ApplyResult = { ok: true; state: MatchLedgerState } | { ok: false; errors: string[] };
 
 /** 하드 상한 — 비상식 방지 (match.md §5) */
