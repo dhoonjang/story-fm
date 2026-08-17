@@ -791,6 +791,22 @@ export function planAiSubstitution(
       .sort((a, b) => b.attributes.overall - a.attributes.overall)[0];
 
   /**
+   * 다친 선수를 메울 사람 — 같은 계열이 먼저고, 없으면 **골키퍼와 필드를 가른다.**
+   *
+   * 필드 선수의 자리는 필드 선수만 잇는다(기량 순으로만 고르면 예비 골키퍼가
+   * 윙으로 뛴다). 골키퍼가 쓰러졌는데 벤치에 키퍼가 없을 때만 필드 선수가 장갑을
+   * 낀다 — 여기서 아무도 넣지 않으면 다친 골키퍼가 90분까지 그대로 선다.
+   */
+  const coverFor = (hurt: Player) => {
+    const group = positionGroupOfPlayer(hurt);
+    const same = bestOf(group, gone);
+    if (same) return same;
+    return squad.bench
+      .filter((p) => !gone.has(p.id) && (group === "GK" || positionGroupOfPlayer(p) !== "GK"))
+      .sort((a, b) => b.attributes.overall - a.attributes.overall)[0];
+  };
+
+  /**
    * **부상은 무조건 뺀다.** 다친 선수를 90분까지 세워 두는 벤치는 없다.
    * 다른 판단(시각·확률·피로 문턱)을 전부 건너뛴다 — 골키퍼도 예외가 아니다.
    *
@@ -801,12 +817,7 @@ export function planAiSubstitution(
   const hurtId = injury?.actors[0];
   if (hurtId) {
     const hurt = squad.onPitch.find((p) => p.id === hurtId);
-    const cover =
-      hurt &&
-      (bestOf(positionGroupOfPlayer(hurt), gone) ??
-        squad.bench
-          .filter((p) => !gone.has(p.id))
-          .sort((a, b) => b.attributes.overall - a.attributes.overall)[0]);
+    const cover = hurt && coverFor(hurt);
     if (hurt && cover) {
       return {
         minute: plan.minute,
@@ -854,6 +865,43 @@ export function planAiSubstitution(
 }
 
 /**
+ * AI의 경기 중 전술이 **킥오프 값에서** 벌어질 수 있는 최대 눈금 — ⚠️ 밸런스 값.
+ *
+ * 상한이 지금 값이 아니라 킥오프 값에 걸린다. 판단은 정지점마다 다시 불리고 그
+ * 결과가 다음 판단의 입력이 되므로, 지금 값에 ±1을 얹으면 골·부상·카드가 잦은
+ * 경기에서 같은 판단이 쌓여 눈금 끝에 붙는다.
+ */
+export const AI_SHIFT_BOUND = 2;
+
+/** AI가 옮기는 축 — 전부 1~5 눈금이다 */
+const AI_SHIFT_AXES = ["mentality", "defensiveLine", "pressing", "tempo"] as const;
+type AiShiftAxis = (typeof AI_SHIFT_AXES)[number];
+
+const AXIS_MIN = 1;
+const AXIS_MAX = 5;
+
+/**
+ * 판단이 낸 값을 킥오프 ± `AI_SHIFT_BOUND` 안, 그리고 1~5 안으로 조인다.
+ * 조인 뒤 지금 값과 같아진 축은 떨어뜨린다 — 움직이지 않는 이동은 이동이 아니다.
+ */
+function settleShift(
+  wanted: Partial<Record<AiShiftAxis, number>>,
+  current: TacticsSpec,
+  kickoff: TacticsSpec,
+): Partial<TacticsSpec> | null {
+  const shift: Partial<Record<AiShiftAxis, number>> = {};
+  for (const axis of AI_SHIFT_AXES) {
+    const want = wanted[axis];
+    if (want === undefined) continue;
+    const low = Math.max(AXIS_MIN, kickoff[axis] - AI_SHIFT_BOUND);
+    const high = Math.min(AXIS_MAX, kickoff[axis] + AI_SHIFT_BOUND);
+    const settled = Math.min(high, Math.max(low, want));
+    if (settled !== current[axis]) shift[axis] = settled;
+  }
+  return Object.keys(shift).length > 0 ? shift : null;
+}
+
+/**
  * AI 팀의 경기 중 전술 반응 — **상대도 벤치에서 판단한다.**
  *
  * 이게 없으면 상대는 킥오프 전술로 90분을 버티는 고정 표적이고, 감독의 조정은
@@ -867,7 +915,10 @@ export function planAiSubstitution(
  */
 export function planAiTacticalShift(
   side: MatchSide,
+  /** 지금 걸려 있는 전술 — 앞선 정지점에서 옮긴 값이 실려 있다 */
   current: TacticsSpec,
+  /** 킥오프 전술 — 이동의 상한이 여기서 선다 (`AI_SHIFT_BOUND`) */
+  kickoff: TacticsSpec,
   ledger: MatchLedgerState,
   /** 라커룸에서 강도를 다시 정하는 자리 */
   halftime = false,
@@ -882,25 +933,29 @@ export function planAiTacticalShift(
 
   if (diff < 0) {
     // 지고 있다 — 무게를 앞으로. 두 골 차로 늦었으면 라인까지 올려 던진다
-    const push: Partial<TacticsSpec> = {
-      mentality: Math.min(5, current.mentality + (urgent || halftime ? 2 : 1)),
-      tempo: Math.min(5, current.tempo + 1),
+    const push: Partial<Record<AiShiftAxis, number>> = {
+      mentality: current.mentality + (urgent || halftime ? 2 : 1),
+      tempo: current.tempo + 1,
     };
     if ((urgent || halftime) && diff <= -2) {
-      push.defensiveLine = Math.min(5, current.defensiveLine + 1);
+      push.defensiveLine = current.defensiveLine + 1;
     }
     if (halftime) {
-      push.pressing = Math.min(5, current.pressing + 1);
+      push.pressing = current.pressing + 1;
     }
-    return push;
+    return settleShift(push, current, kickoff);
   }
   if (diff > 0 && urgent) {
     // 이기고 있고 시간이 얼마 없다 — 내려서서 지킨다
-    return {
-      mentality: Math.max(1, current.mentality - 1),
-      defensiveLine: Math.max(1, current.defensiveLine - 1),
-      tempo: Math.max(1, current.tempo - 1),
-    };
+    return settleShift(
+      {
+        mentality: current.mentality - 1,
+        defensiveLine: current.defensiveLine - 1,
+        tempo: current.tempo - 1,
+      },
+      current,
+      kickoff,
+    );
   }
   return null;
 }

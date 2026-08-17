@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AI_SHIFT_BOUND,
   EXTRA_TIME_SUBS,
   LEDGER_LIMITS,
   applyEvents,
@@ -326,41 +327,65 @@ describe("AI 전술 반응", () => {
   const spec = { ...DEFAULT_TACTICS };
   const ledgerAt = (minute: number, home: number, away: number) =>
     ({ minute, score: { home, away } }) as never;
+  /** 첫 정지점 — 지금 걸린 전술이 아직 킥오프 전술이다 */
+  const shiftAt = (
+    current: TacticsSpec,
+    ledger: MatchLedgerState,
+    halftime = false,
+    kickoff: TacticsSpec = current,
+  ) => planAiTacticalShift("home", current, kickoff, ledger, halftime);
 
   it("전반에는 움직이지 않는다", () => {
-    expect(planAiTacticalShift("home", spec, ledgerAt(30, 0, 1))).toBeNull();
+    expect(shiftAt(spec, ledgerAt(30, 0, 1))).toBeNull();
   });
 
   it("지고 있으면 무게를 앞으로 옮긴다", () => {
-    const shift = planAiTacticalShift("home", spec, ledgerAt(60, 0, 1));
+    const shift = shiftAt(spec, ledgerAt(60, 0, 1));
     expect(shift?.mentality).toBeGreaterThan(spec.mentality);
     expect(shift?.tempo).toBeGreaterThan(spec.tempo);
   });
 
   it("실제 선수 재배치 없이 포메이션 이름만 바꾸지 않는다", () => {
-    const shift = planAiTacticalShift(
-      "home",
-      { ...spec, formation: "5-4-1" },
-      ledgerAt(45, 0, 1),
-      true,
-    );
+    const shift = shiftAt({ ...spec, formation: "5-4-1" }, ledgerAt(45, 0, 1), true);
     expect(shift?.formation).toBeUndefined();
   });
 
   it("늦게까지 두 골 차로 지면 라인까지 올려 던진다", () => {
-    const shift = planAiTacticalShift("home", spec, ledgerAt(80, 0, 2));
+    const shift = shiftAt(spec, ledgerAt(80, 0, 2));
     expect(shift?.mentality).toBe(5);
     expect(shift?.defensiveLine).toBeGreaterThan(spec.defensiveLine);
   });
 
   it("이기고 있고 시간이 없으면 내려선다", () => {
-    const shift = planAiTacticalShift("home", spec, ledgerAt(80, 2, 1));
+    const shift = shiftAt(spec, ledgerAt(80, 2, 1));
     expect(shift?.mentality).toBeLessThan(spec.mentality);
     expect(shift?.defensiveLine).toBeLessThan(spec.defensiveLine);
   });
 
   it("이기고 있어도 시간이 남았으면 서두르지 않는다", () => {
-    expect(planAiTacticalShift("home", spec, ledgerAt(60, 2, 1))).toBeNull();
+    expect(shiftAt(spec, ledgerAt(60, 2, 1))).toBeNull();
+  });
+
+  /**
+   * 판단은 정지점마다 다시 불리고 그 결과가 다음 판단의 입력이 된다. 상한이 지금
+   * 값에 걸리면 상대의 성향이 스코어가 아니라 **정지점 횟수**의 함수가 된다.
+   */
+  it("정지점이 몇 번을 와도 킥오프 값에서 AI_SHIFT_BOUND를 넘지 않는다", () => {
+    // 수비적으로 시작한 팀 — 상한이 눈금 끝(1~5)이 아니라 킥오프 값에 걸린다
+    const kickoff: TacticsSpec = { ...DEFAULT_TACTICS, mentality: 1, tempo: 2 };
+    let current = kickoff;
+    let shift: Partial<TacticsSpec> | null = null;
+    for (let stop = 0; stop < 8; stop++) {
+      shift = shiftAt(current, ledgerAt(80, 0, 2), false, kickoff);
+      if (shift) current = { ...current, ...shift };
+    }
+    // 상한에 닿으면 더 옮길 것이 없다 — 움직이지 않는 이동은 이동이 아니다
+    expect(shift).toBeNull();
+    for (const axis of ["mentality", "defensiveLine", "pressing", "tempo"] as const) {
+      expect(Math.abs(current[axis] - kickoff[axis])).toBeLessThanOrEqual(AI_SHIFT_BOUND);
+    }
+    // 그렇다고 판단이 지워지지도 않는다 — 상한까지는 옮겼다
+    expect(current.mentality).toBe(kickoff.mentality + AI_SHIFT_BOUND);
   });
 });
 
@@ -379,6 +404,10 @@ describe("AI 교체 판단", () => {
   };
   const plan = (minute: number, extra: Partial<Record<string, unknown>> = {}) =>
     ({ minute, events: [], stop: "flow", fatigue: {}, sentOff: [], ...extra }) as never;
+  const hurtPlan = (minute: number, id: string) =>
+    plan(minute, {
+      events: [{ minute, type: "injury", team: "home", actors: [id], causes: [] }],
+    });
 
   it("경기 내내 쌓인 피로를 본다 — 저장값만 보면 아무도 교체되지 않는다", () => {
     const squad = squadOf(75);
@@ -399,13 +428,38 @@ describe("AI 교체 판단", () => {
       "home",
       squad,
       ledger(20),
-      plan(20, {
-        events: [{ minute: 20, type: "injury", team: "home", actors: [hurt.id], causes: [] }],
-      }),
+      hurtPlan(20, hurt.id),
       () => 0.99, // 확률 판정을 통과할 수 없는 값
       {},
     );
     expect(sub?.actors[0]).toBe(hurt.id);
+  });
+
+  it("다친 필드 선수를 예비 골키퍼로 메우지 않는다", () => {
+    const full = squadOf(75);
+    const hurt = full.onPitch[9]!; // ST
+    // 벤치에 골키퍼만 남았다 — 여기서 기량 순으로 고르면 예비 GK가 최전방에 선다
+    const squad = { onPitch: full.onPitch, bench: full.bench.filter((p) => p.id.endsWith("-gk")) };
+    expect(
+      planAiSubstitution("home", squad, ledger(20), hurtPlan(20, hurt.id), () => 0.99, {}),
+    ).toBeNull();
+  });
+
+  it("골키퍼가 쓰러졌는데 벤치에 키퍼가 없으면 필드 선수가 장갑을 낀다", () => {
+    const full = squadOf(75);
+    const hurt = full.onPitch[0]!; // GK
+    const bench = full.bench.filter((p) => !p.id.endsWith("-gk"));
+    const sub = planAiSubstitution(
+      "home",
+      { onPitch: full.onPitch, bench },
+      ledger(20),
+      hurtPlan(20, hurt.id),
+      () => 0.99,
+      {},
+    );
+    // null이면 다친 골키퍼가 90분까지 그대로 선다
+    expect(sub?.actors[0]).toBe(hurt.id);
+    expect(bench.map((p) => p.id)).toContain(sub?.actors[1]);
   });
 
   it("교체 한도는 장부와 같다 (5명·3회)", () => {
