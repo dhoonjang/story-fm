@@ -395,18 +395,43 @@ function shuffled<T>(items: readonly T[], seed: number, channel: string): T[] {
  * 매 시즌 똑같은 대진표를 쓰게 된다 — 실제 리그도 시즌마다 새로 추첨한다.
  */
 /**
- * 라운드 수에 맞춘 기준 날짜 — 18팀 리그는 34라운드다.
- * 모자란 만큼 **주중 라운드부터** 덜어낸다 (18팀 리그는 휴식기를 메울 필요가
- * 적다). 개막 라운드와 최종 라운드는 항상 유지한다.
+ * 라운드 수에 맞춘 기준 날짜 — 18팀 리그는 34라운드, 강등된 감독의 2부(12·14팀)는
+ * 22·26라운드다. 개막 라운드와 최종 라운드는 항상 유지한다.
+ *
+ * 38개 골격에서 모자란 만큼 덜어내되 **시즌 전체에 고르게** 남긴다. 종류별로
+ * 뒤에서부터 덜어내면 남은 라운드가 시즌 앞쪽에 몰린다 — 22라운드는 1월에
+ * 21라운드를 끝내고 최종 라운드만 5월에 서서, 2~5월 리그 경기가 0이었다.
+ *
+ * 고르게 고르는 자리는 **날짜**로 잰다. 골격의 앵커는 간격이 일정하지 않아
+ * (주중 라운드는 앞 주말 사흘 뒤, 휴식기 뒤는 2주 뒤) 인덱스를 균등 분할하면
+ * 날짜는 여전히 뭉친다. 라운드가 서야 할 날을 개막~최종의 균등 분할로 정하고,
+ * 그 날에 가장 가까운 앵커를 가져온다.
  */
 function anchorsFor(season: number, rounds: number): Matchweek[] {
-  const keep = [...buildMatchweekDates(season)];
-  for (const kind of ["midweek", "weekend"] as const) {
-    for (let i = keep.length - 2; i > 0 && keep.length > rounds; i--) {
-      if (keep[i]!.kind === kind) keep.splice(i, 1);
+  const all = buildMatchweekDates(season);
+  const numbered = (weeks: Matchweek[]) => weeks.map((w, i) => ({ ...w, round: i + 1 }));
+  if (rounds >= all.length) return numbered(all.slice(0, rounds));
+
+  const opener = all[0]!;
+  const finale = all[all.length - 1]!;
+  const span = diffDays(opener.date, finale.date);
+  const picked: Matchweek[] = [opener];
+  let prev = 0;
+  for (let r = 1; r < rounds - 1; r++) {
+    const target = addDays(opener.date, Math.round((span * r) / (rounds - 1)));
+    // 남은 라운드가 설 자리를 남겨 두는 범위 안에서 목표일에 가장 가까운 앵커
+    const limit = all.length - 1 - (rounds - 1 - r);
+    let best = prev + 1;
+    for (let i = prev + 1; i <= limit; i++) {
+      if (Math.abs(diffDays(all[i]!.date, target)) < Math.abs(diffDays(all[best]!.date, target))) {
+        best = i;
+      }
     }
+    picked.push(all[best]!);
+    prev = best;
   }
-  return keep.slice(0, rounds).map((w, i) => ({ ...w, round: i + 1 }));
+  picked.push(finale);
+  return numbered(picked);
 }
 
 export function buildMatches(
