@@ -36,7 +36,9 @@ import { MATCH_CASTER_SYSTEM } from "./match-caster";
 import { buildOnboardingTurn, runMockGmTurn } from "./mock-gm";
 import { retryOnce } from "./retry";
 import { GM_SYSTEM } from "./gm-prompt";
-import { buildGmTools, buildMatchTools } from "./gm-tools";
+import { buildGmTools } from "./gm-tools";
+import { runMatchIntent } from "./match-intent";
+import { applyMatchIntent, type AppliedIntent } from "./match-intent-apply";
 import {
   buildGmHistory,
   buildGmReference,
@@ -237,20 +239,53 @@ async function runRealGmTurn(
           .filter((id) => !pendingBeforeSkip.has(id))
       : [],
   );
-  const tools = kickoff
-    ? // 첫 호흡엔 손이 없다 — 도구를 주면 모델은 곧장 구간을 굴려 킥오프를 지나친다
-      []
-    : inMatch
-      ? buildMatchTools(state, calls, goals, cards, { progressionOnly: operator })
-      : buildGmTools(state, calls, { deferNegotiationIds });
+  /**
+   * **경기 턴의 ②·③** — 해석이 먼저, 중계가 나중이다 (docs/llm/agents.md §3).
+   *
+   * 감독의 말을 의도 하나로 옮기고 코어가 스킬로 적용한 뒤 구간까지 굴려 둔다.
+   * 그래서 아래 중계 호출은 **이번 턴에 바뀐 판**을 처음부터 쥐고 시작한다 —
+   * 예전엔 캐스터가 도구로 판을 바꾸고 같은 호출에서 중계까지 써서, 자기가 방금
+   * 바꾼 것을 못 보고 썼다.
+   *
+   * 킥오프 턴은 지나간다 — 감독이 아직 아무것도 지시하지 않았고, 첫 휘슬만 여는
+   * 자리라 구간이 굴러가면 안 된다.
+   */
+  let applied: AppliedIntent | null = null;
+  if (inMatch && !kickoff) {
+    /**
+     * 손잡이로 온 턴은 해석할 것이 없다 — 화면의 대기 중 교체·좌표·역할·전술 축은
+     * 코어가 이미 적용했고(match.md §2), `계속`이 뜻하는 것은 진행 하나뿐이다.
+     * 버튼 한 번에 모델을 부르지 않는다.
+     */
+    const parsed = operator
+      ? ({ ok: true, intent: { advance: "segment" } } as const)
+      : await runMatchIntent(state, message);
+    // 두 번 실패하면 아무것도 바꾸지 않고 되돌린다 — 짐작해 적용하면 감독이 내리지
+    // 않은 지시가 판에 오르고, 그건 아무 일도 안 일어나는 것보다 나쁘다
+    if (!parsed.ok) return { text: parsed.message, toolCalls: calls, goals, cards };
+    applied = applyMatchIntent(state, parsed.intent, calls, goals, cards);
+  }
+
+  /**
+   * 경기 중에는 도구 표면이 **0**이다 — 해석은 이미 끝났고 중계는 문장만 쓴다.
+   * 도구 정의는 고정층이라 캐시 프리픽스를 부풀리는데, 경기 중에 그 값을 치를
+   * 이유가 사라졌다 (agents.md §5).
+   */
+  const tools = inMatch ? [] : buildGmTools(state, calls, { deferNegotiationIds });
 
   // 입력은 안정성 순 3층 — ① 고정 프롬프트 ② 레퍼런스 ③ 발화+상태 스냅샷.
   // 앞 두 층만 캐시 프리픽스(0.1×)다 (docs/llm/agents.md §5)
   const system = inMatch
     ? [MATCH_CASTER_SYSTEM, buildMatchReference(state)]
     : [GM_SYSTEM, buildGmReference(state)];
+  /**
+   * **대화만 건 턴은 판을 싣지 않는다.** 선수를 부른 한 마디에 패킷 전체를 실으면
+   * 중계가 읽지도 않을 판세를 매 턴 정가로 읽는다 (agents.md §5). 킥오프 턴도 같은
+   * 이유로 판이 없다 — 아직 아무 일도 일어나지 않았는데 판세를 쥐여 주면 첫 마디부터
+   * 우열을 읊는다.
+   */
   const stateNote = inMatch
-    ? buildLedgerNote(state, { withPacket: !kickoff })
+    ? buildLedgerNote(state, { withPacket: !kickoff && applied?.touched !== false })
     : buildGmStateNote(
         state,
         skipped
@@ -294,6 +329,12 @@ async function runRealGmTurn(
         user: [
           ...(operatorOrders ?? []).map((order) => buildOperatorMessage(`전술판 조작 — ${order}`)),
           operator ? buildOperatorMessage(message) : buildManagerMessage(state, message),
+          // 코어가 이미 굴린 구간 — 예전엔 도구 반환값으로 오던 것이 이제 입력이다
+          ...(applied?.segment ? [``, applied.segment] : []),
+          // 스킬이 돌려준 말 — 걸린 지시도, 걸리지 않은 지시도 중계의 근거가 된다
+          ...(applied && applied.notes.length > 0
+            ? [``, `[감독의 지시에 코어가 답한 것]`, ...applied.notes.map((n) => `- ${n}`)]
+            : []),
         ].join("\n"),
         stateNote,
         tools,
