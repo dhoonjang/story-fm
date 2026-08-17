@@ -158,9 +158,15 @@ is not what is being tested, and where it genuinely is, build one fixture per
 `/merge` waits on. **It does not run while the PR is a draft** — a branch still
 being worked on burns runner minutes nobody reads. `/merge` marks the PR ready,
 and that is what starts the run it then watches. Every job must be green; a
-shard is not a sample. Nothing is excluded from the gate — making CI faster
-means making a test cheaper, not moving it out. How the gate is sharded and what
-it runs on is `ci.yml`'s business; read it there when you are changing it.
+shard is not a sample.
+
+**It also does not run when nothing it could catch has changed.** A change
+confined to `.md` files skips the code jobs and lands on the `changes` check
+alone. Anything else — one `.ts`, one config line, `ci.yml` itself — runs the
+whole gate. Do not widen that rule to try to catch comment-only edits in code: a
+path cannot tell a comment from a statement, and the cost of being wrong is a
+red change merged green. How the gate is sharded and what it runs on is
+`ci.yml`'s business; read it there when you are changing it.
 
 - **While working** — `pnpm typecheck` and `pnpm lint`, plus `pnpm test <path>`
   for the file you just wrote. That is the whole local loop.
