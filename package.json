@@ -9,6 +9,7 @@
   },
   "scripts": {
     "test": "vitest run",
+    "balance": "tsx packages/engine/harness/cli.ts",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",

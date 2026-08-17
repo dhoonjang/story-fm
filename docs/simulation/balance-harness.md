@@ -51,6 +51,7 @@ pnpm balance finance       # 파일 이름으로 걸러 하나만
 | `finance-tier1` | tier1 한 시즌 장부 손익 · 현금 · 급여 비중 · 수입 | [finance](finance.md) §10.1 |
 | `finance-leagues` | 리그별 잔고 — 어느 리그도 구조적 적자가 아니다 | [finance](finance.md) §10.3 |
 | `finance-second-tier` | 리그전을 굴리지 않는 2부의 한 시즌 수지 | [finance](finance.md) §9.5 |
+| `finance-multi-season` | 세 시즌을 굴려도 가라앉는 리그가 없다 | [finance](finance.md) §10.3 |
 | `ai-fitness` | 한 시즌 뒤 AI 스쿼드 체력 · 출전 분산 | [match](match.md) §7 |
 | `ai-market` | 한 시즌 팀당 이적·임대 건수 · 여름 비중 | [transfer](transfer.md) §6 |
 | `manager-market` | 한 시즌 감독 경질 구단 수 | [transfer](transfer.md) §7 |
