@@ -547,6 +547,19 @@ export interface GameState {
    * 비워진다(`takeNews`). 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   pendingNews?: string[];
+  /**
+   * **아직 카드로 세우지 않은 스카우트 보고서** — 도착한 선수의 id.
+   *
+   * 카드는 모델이 그 값을 읽은 턴에만 선다. 시계가 도는 자리가 둘이라 그렇다 —
+   * 손잡이로 넘긴 턴은 코어가 장면보다 **먼저** 굴러 같은 턴에 읽히지만, 모델이
+   * 장면 헤더로 옮긴 턴은 코어가 장면 **뒤에** 구른다. 뒤쪽에서 그냥 카드를
+   * 붙이면 모델은 못 읽은 금액을 지어내고, 카드와 대사가 갈린다
+   * (→ [docs/llm/agents.md](../../../../docs/llm/agents.md) §6).
+   *
+   * `pendingNews`와 같은 규약이다 — 모아 두었다가 스냅샷에 실린 턴에 비워진다
+   * (`takeReportCards`). 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  pendingReportCards?: string[];
   /** 스카우트 파견·완료 이력 — 타 팀 선수 안개의 근거 (scouting.ts) */
   scoutReports: ScoutReport[];
   /** 진행 중 협상 — 며칠에 걸쳐 오퍼가 오가므로 파생으로 되돌릴 수 없다 */
@@ -1962,4 +1975,33 @@ export function takeNews(state: GameState): string[] {
   const news = state.pendingNews ?? [];
   state.pendingNews = [];
   return news;
+}
+
+/**
+ * 카드를 기다리는 보고서 수 상한 — 아무도 꺼내지 않는 경로(mock)에서 줄이 무한히
+ * 자라지 않게. 실모드는 매 평시 턴 꺼내므로 파견 한도(3) 위로 잘 가지 않는다.
+ */
+export const PENDING_REPORT_CARD_LIMIT = 12;
+
+/** 아직 카드로 세우지 않은 보고서를 줄에 세운다 — 도착한 순서대로 */
+export function pushReportCards(state: GameState, playerIds: readonly string[]): void {
+  if (playerIds.length === 0) return;
+  const queue = (state.pendingReportCards ??= []);
+  for (const id of playerIds) if (!queue.includes(id)) queue.push(id);
+  if (queue.length > PENDING_REPORT_CARD_LIMIT) {
+    queue.splice(0, queue.length - PENDING_REPORT_CARD_LIMIT);
+  }
+}
+
+/**
+ * 카드로 세울 보고서를 앞에서 `limit`개만 꺼내 비운다.
+ *
+ * 남은 것은 줄에 그대로 둔다 — 잘라 버리면 며칠을 기다려 산 보고서가 화면에
+ * 한 번도 안 뜬다. 다음 턴이 이어서 세운다.
+ */
+export function takeReportCards(state: GameState, limit: number): string[] {
+  const take = Math.max(0, limit);
+  const queue = state.pendingReportCards ?? [];
+  state.pendingReportCards = queue.slice(take);
+  return queue.slice(0, take);
 }
