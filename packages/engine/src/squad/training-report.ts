@@ -12,6 +12,7 @@ import { seasonRating } from "@story-fm/domain";
 import { grantManagerXP, setPlayerPosition } from "../skills";
 import {
   assignmentsOf,
+  isAvailable,
   playerById,
   proficiencyAt,
   recomputeOverall,
@@ -52,7 +53,8 @@ import type { GameState } from "../core/state";
  *   ① 선수별 전술 적응도는 `TACTIC_GAIN_MIN`~`TACTIC_GAIN_MAX`로 잘린다
  *   ② 그 위에 코어의 흡수율(`tacticalUptake`)이 곱해져 실제로 남는 양이 정해진다
  *   ③ 능력치는 **구간당 `trainingAttrCap()`명, 각 한 축 ±1**이 끝이다
- *      (그것도 그 구간에 실제로 훈련한 축만, 잠재력 상한 안에서)
+ *      (그것도 그 구간에 실제로 훈련한 축 — 개인 훈련이 걸린 선수는 그 축까지 —
+ *      만, 잠재력 상한 안에서)
  *
  * 판정이 실패하면(모델 오류·검증 탈락·mock 모드) 아무것도 하지 않는다 — tick이
  * 이미 앵커를 반영해 뒀으므로 훈련은 언제나 완결된다.
@@ -155,7 +157,10 @@ export interface TrainingSubject {
   instruction: string | null;
   /**
    * 감독이 이 선수에게 건 **개인 훈련** (없으면 null).
-   * `position`이 있으면 그 자리를 배우는 중이라 결산이 적응도를 움직일 수 있다.
+   *
+   * `position`이 있으면 그 자리를 배우는 중이라 결산이 적응도를 움직일 수 있고,
+   * `axis`가 있으면 팀 세션이 그 축을 하지 않은 구간에도 **이 선수만** 그 축을
+   * 가져갈 수 있다 (`allowedAxesFor`).
    */
   program: { axis?: string; position?: string } | null;
 }
@@ -169,7 +174,13 @@ export interface TrainingBrief {
   subjects: TrainingSubject[];
   /** 이 기간 감독과 나눈 대화 (최근 것부터 잘라 넣는다) */
   chat: Array<{ at: string; role: "user" | "model"; text: string }>;
-  /** 이 구간에 훈련한 능력치 축 — 능력치 성장은 여기 있는 축만 허용된다 */
+  /**
+   * 이 구간에 훈련한 능력치 축 — 팀 세션의 축 + 대상들에게 걸린 개인 훈련 축.
+   *
+   * 판정자에게는 이 합집합을 후보로 보이고, **누가 어느 축을 가져갈 수 있는지는
+   * 코어가 선수마다 다시 자른다** (`allowedAxesFor`) — 개인 훈련 축은 걸어 둔
+   * 그 한 명에게만 열린다.
+   */
   trainedAxes: AttributeAxis[];
 }
 
@@ -200,17 +211,38 @@ export interface TrainingOutcome {
 }
 
 const CHAT_KEEP = 12;
-const NOTE_MAX = 60;
 
-/** 이 구간에 훈련한 능력치 축 (tactical·recovery는 능력치가 아니다) */
-function axesOf(sessions: TrainedSession[]): AttributeAxis[] {
+/** 능력치 축인가 — 개인 훈련의 `axis`는 자유 문자열로 저장된다 */
+function attributeAxis(value: string | undefined | null): AttributeAxis | null {
+  if (!value) return null;
+  return (ATTRIBUTE_AXES as readonly string[]).includes(value) ? (value as AttributeAxis) : null;
+}
+
+/** 팀 세션이 겨냥한 능력치 축 (tactical·recovery는 능력치가 아니다) */
+function teamAxesOf(sessions: readonly TrainedSession[]): Set<AttributeAxis> {
   const set = new Set<AttributeAxis>();
   for (const s of sessions) {
     for (const f of s.focus) {
-      if ((ATTRIBUTE_AXES as readonly string[]).includes(f)) set.add(f as AttributeAxis);
+      const axis = attributeAxis(f);
+      if (axis) set.add(axis);
     }
   }
-  return [...set];
+  return set;
+}
+
+/**
+ * 이 선수의 허용 축 — **팀 세션의 축 + 자기에게 걸린 개인 훈련 축.**
+ *
+ * 개인 훈련은 팀 메뉴 위에 한 명만 겨냥해 얹는 것이라(`set_player_training`),
+ * 팀이 그 축을 하지 않은 구간에도 열려야 지시가 장부에 닿는다. 대신 **그 한
+ * 명에게만** 연다 — 전원에게 열면 한 선수의 개인 훈련이 팀 전체의 성장 축을
+ * 넓힌다 (docs/data/player.md §6.1).
+ */
+function allowedAxesFor(
+  teamAxes: ReadonlySet<AttributeAxis>,
+  personal: AttributeAxis | null,
+): ReadonlySet<AttributeAxis> {
+  return personal ? new Set([...teamAxes, personal]) : teamAxes;
 }
 
 /** 결산 브리프를 짓는다 — 없으면 null (훈련이 없었던 구간) */
@@ -224,10 +256,20 @@ export function buildTrainingBrief(
     assignmentsOf(state, state.userTeamId).map((a) => [a.playerId, a] as const),
   );
   const subjects: TrainingSubject[] = [];
+  const axes = teamAxesOf(sessions);
   for (const player of state.players) {
     if (player.teamId !== state.userTeamId || squadLevelOf(player) !== "first") continue;
+    /**
+     * **못 뛰는 선수는 훈련도 함께하지 않았다** — 재활 중이거나 출장 정지인 선수를
+     * 실으면 판정이 그 구간의 전술 적응도·능력치를 그대로 얹는다. 심경 결산도
+     * 같은 선을 긋는다 (docs/data/player.md §6.1).
+     */
+    if (!isAvailable(state, player.id)) continue;
     const assignment = assignments.get(player.id);
     const program = state.playerTraining.find((t) => t.gamePlayerId === player.id);
+    // 개인 훈련 축은 팀 세션에 없어도 그 선수의 허용 축이다 — 판정자에게도 알린다
+    const personal = attributeAxis(program?.axis);
+    if (personal) axes.add(personal);
     subjects.push({
       program: program
         ? {
@@ -266,7 +308,7 @@ export function buildTrainingBrief(
       .filter((t) => t.at >= window.from && t.role !== "operator")
       .slice(-CHAT_KEEP)
       .map((t) => ({ at: t.at, role: t.role as "user" | "model", text: t.text.slice(0, 400) })),
-    trainedAxes: axesOf(sessions),
+    trainedAxes: [...axes],
   };
 }
 
@@ -294,7 +336,8 @@ export function applyTrainingOutcomes(
   const assignments = new Map(
     assignmentsOf(state, state.userTeamId).map((a) => [a.playerId, a] as const),
   );
-  const allowed = new Set(brief.trainedAxes);
+  // 팀 세션의 축 — 개인 훈련 축은 걸어 둔 선수에게만 얹는다 (`allowedAxesFor`)
+  const teamAxes = teamAxesOf(brief.sessions);
   const subjects = new Map(brief.subjects.map((s) => [s.playerId, s] as const));
   const lines: string[] = [];
   let attrSpent = 0;
@@ -307,6 +350,12 @@ export function applyTrainingOutcomes(
     const subject = subjects.get(outcome.playerId);
     const player = playerById(state, outcome.playerId);
     if (!subject || !player) continue; // 명단 밖 선수는 무시한다
+    /**
+     * 판정을 받는 사이에 **팀을 떠난 선수**는 더 이상 우리 장부의 대상이 아니다.
+     * 브리프는 구간이 끝난 자리에서 짓지만 판정은 그 뒤에 돌아오므로, 그 사이의
+     * 이적·임대가 남긴 선수를 여기서 다시 걸러 낸다.
+     */
+    if (player.teamId !== state.userTeamId) continue;
 
     // ① 전술 적응도 — **여기가 유일한 변화 경로다.** 코어는 훈련 중에 아무것도
     //    올리지 않았다. 얼마나 스몄는지는 이 판정이 정하고, 코어는 −1~3으로 가둔다.
@@ -352,26 +401,34 @@ export function applyTrainingOutcomes(
       const gain = Math.max(0, Math.min(POSITION_TRAIN_MAX, Math.round(outcome.positionGain)));
       if (gain > 0) {
         const slot = player.positions.find((x) => x.position === program.position);
-        if (!slot) {
-          player.positions.push({
-            position: program.position,
-            proficiency: Math.min(99, proficiencyAt(player, program.position) + gain),
-            isNatural: false,
-          });
-        } else if (slot.proficiency < 99) {
-          slot.proficiency = Math.min(99, slot.proficiency + gain);
+        const before = slot?.proficiency ?? proficiencyAt(player, program.position);
+        const after = Math.min(99, before + gain);
+        /**
+         * **실제로 넘어간 만큼만 장부에 적는다.** 99에 닿은 자리는 판정이 +2를
+         * 내도 아무것도 오르지 않는데, 그 구간마다 "적응 +2"가 성장 로그와
+         * 요약에 남아 감독은 오르고 있다고 읽는다.
+         */
+        const gained = after - before;
+        if (gained > 0) {
+          if (slot) slot.proficiency = after;
+          else
+            player.positions.push({
+              position: program.position,
+              proficiency: after,
+              isNatural: false,
+            });
+          recordGrowth(
+            state,
+            player.id,
+            session.entryId,
+            "training",
+            `pos:${program.position}`,
+            gained,
+            "전향 훈련",
+            session.date,
+          );
+          lines.push(`${player.name} ${program.position} 적응 +${gained}`);
         }
-        recordGrowth(
-          state,
-          player.id,
-          session.entryId,
-          "training",
-          `pos:${program.position}`,
-          gain,
-          "전향 훈련",
-          session.date,
-        );
-        lines.push(`${player.name} ${program.position} 적응 +${gain}`);
         // 새 자리가 본업을 넘어서면 전향이 끝난 것이다 (장부 정리는 코어 몫)
         const natural = naturalPositionOf(player);
         const learned = player.positions.find((x) => x.position === program.position);
@@ -387,9 +444,9 @@ export function applyTrainingOutcomes(
       }
     }
 
-    // ③ 능력치 — 그 구간에 훈련한 축만 (공용 규칙)
+    // ③ 능력치 — 그 구간에 훈련한 축 + 이 선수에게 걸린 개인 훈련 축 (공용 규칙)
     const moved = applyAttributeStep(state, player, outcome.attribute, outcome.attributeStep, {
-      allowed,
+      allowed: allowedAxesFor(teamAxes, attributeAxis(program?.axis)),
       spent: attrSpent,
       cap: attrCap,
       factor: uptake,
@@ -402,7 +459,7 @@ export function applyTrainingOutcomes(
       attrSpent += 1;
       const sign = moved.step > 0 ? "+" : "−";
       lines.push(
-        `${player.name} ${AXIS_KO[moved.axis]} ${sign}1 → ${moved.value} — ${trim(outcome.note)}`,
+        `${player.name} ${AXIS_KO[moved.axis]} ${sign}1 → ${moved.value} — ${oneLine(outcome.note)}`,
       );
     }
   }
@@ -513,7 +570,13 @@ function clampGain(value: unknown): number {
   return Math.max(TACTIC_GAIN_MIN, Math.min(TACTIC_GAIN_MAX, Math.round(value)));
 }
 
-function trim(note: string): string {
-  const clean = note.replace(/\s+/g, " ").trim();
-  return clean.length > NOTE_MAX ? `${clean.slice(0, NOTE_MAX)}…` : clean;
+/**
+ * 근거 한 줄을 한 줄로 편다 — **자르지는 않는다.**
+ *
+ * 길이는 판정자 쪽에서 이미 두 겹으로 잡혀 있다(프롬프트가 30자 안팎을 요구하고
+ * 스키마가 200자에서 튕긴다). 코어가 그 위에 또 `…`를 붙이면 감독이 읽는 건
+ * 문장이 아니라 잘린 토막이고, 왜 잘렸는지는 화면 어디에도 없다.
+ */
+function oneLine(note: string): string {
+  return note.replace(/\s+/g, " ").trim();
 }

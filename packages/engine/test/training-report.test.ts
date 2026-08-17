@@ -8,6 +8,7 @@ import {
   assignmentsOf,
   buildTrainingBrief,
   playerById,
+  setPlayerTraining,
   setTraining,
   userTactics,
   type GameState,
@@ -291,6 +292,29 @@ describe("판정의 상한 — 한 번에 게임을 크게 흔들 수 없다", (
     expect(userTactics(state).assignments.map((a) => a.familiarity)).toEqual(famBefore);
   });
 
+  it("적응도가 99에 닿은 자리는 전향 훈련이 장부에 아무것도 남기지 않는다", () => {
+    const state = afterSquadReturn(createTestGame(7));
+    const target = assignmentsOf(state, state.userTeamId, "starting")[0]!.playerId;
+    const player = playerById(state, target)!;
+    // 본업도 천장에 둬 전향 완료 판정이 끼어들지 않게 한다
+    player.positions.find((p) => p.isNatural)!.proficiency = 99;
+    const taken = new Set(player.positions.map((p) => p.position));
+    const learned = ["ST", "CB", "LB", "RB", "CM"].find((p) => !taken.has(p))!;
+    player.positions.push({ position: learned, proficiency: 99, isNatural: false });
+    setPlayerTraining(state, { playerId: target, position: learned });
+
+    const brief = trainOneDay(state, ["tactical"])!;
+    const lines = applyTrainingOutcomes(state, brief, [
+      { playerId: target, tacticGain: 0, attribute: null, positionGain: 2, note: "" },
+    ]);
+    // 아무것도 오르지 않았으면 성장 로그에도 요약에도 그렇게 적힌다
+    expect(state.growthLog.filter((g) => g.target === `pos:${learned}`)).toHaveLength(0);
+    expect(
+      lines.some((l) => l.includes("적응 +")),
+      "천장에서 적응 +N이 남았다",
+    ).toBe(false);
+  });
+
   it("판정이 없으면 그 구간의 훈련은 아무것도 남기지 않는다", () => {
     const state = createTestGame(7);
     const before = assignmentsOf(state, state.userTeamId, "starting")[0]!.familiarity;
@@ -301,5 +325,82 @@ describe("판정의 상한 — 한 번에 게임을 크게 흔들 수 없다", (
     expect(after, "코어가 몰래 올렸다").toBe(before);
     // 다만 그 구간의 훈련은 판정 대상으로 넘어간다
     expect(brief.subjects.length).toBeGreaterThan(0);
+  });
+});
+
+describe("대상은 그 구간을 팀과 함께 보낸 선수다", () => {
+  it("부상·정지 선수는 판정 대상이 아니다", () => {
+    const state = afterSquadReturn(createTestGame(7));
+    const starting = assignmentsOf(state, state.userTeamId, "starting");
+    const hurt = starting[0]!.playerId;
+    const banned = starting[1]!.playerId;
+    state.injuries.push({
+      id: "inj-training-report",
+      gamePlayerId: hurt,
+      bodyPart: "햄스트링",
+      severity: "moderate",
+      cause: "training",
+      occurredOn: state.date,
+      expectedReturn: addDays(state.date, 60),
+      returnedOn: null,
+    });
+    state.suspensions.push({
+      id: "sus-training-report",
+      gamePlayerId: banned,
+      cause: "red",
+      issuedOn: state.date,
+      lengthMatches: 2,
+      served: 0,
+      status: "active",
+    });
+
+    const brief = trainOneDay(state, ["stamina"], "러닝")!;
+    const ids = new Set(brief.subjects.map((s) => s.playerId));
+    expect(ids.has(hurt), "재활 중인 선수가 판정 대상에 있다").toBe(false);
+    expect(ids.has(banned), "출장 정지 선수가 판정 대상에 있다").toBe(false);
+    expect(ids.size, "대상이 통째로 비었다").toBeGreaterThan(0);
+  });
+});
+
+describe("개인 훈련 축은 걸어 둔 선수에게만 열린다", () => {
+  it("팀이 하지 않은 축도 개인 훈련이 걸린 선수는 오른다", () => {
+    const state = afterSquadReturn(createTestGame(7));
+    const starting = assignmentsOf(state, state.userTeamId, "starting");
+    const target = starting[0]!.playerId;
+    const other = starting[1]!.playerId;
+    setPlayerTraining(state, { playerId: target, axis: "finishing" });
+
+    // 팀은 러닝만 했다 — 결정력은 팀 세션에 없는 축이다
+    const brief = trainOneDay(state, ["stamina"], "러닝")!;
+    expect(brief.trainedAxes, "판정자에게 후보 축으로 보이지 않는다").toContain("finishing");
+
+    // 둘 다 자랄 자리를 만들어 둔다 — 여기서 가르는 건 곡선이 아니라 허용 축이다
+    for (const id of [target, other]) {
+      const p = playerById(state, id)!;
+      p.birthdate = `${Number(state.date.slice(0, 4)) - 18}-01-01`;
+      p.attributes.finishing = 60;
+      p.attributes.potential = 85;
+    }
+
+    applyTrainingOutcomes(
+      state,
+      brief,
+      [target, other].map((playerId) => ({
+        playerId,
+        tacticGain: 0,
+        attribute: "finishing" as const,
+        attributeStep: 1,
+        note: "슈팅을 따로 봤다",
+      })),
+    );
+
+    expect(
+      playerById(state, target)!.attributes.finishing,
+      "개인 훈련 축이 장부에 닿지 않는다",
+    ).toBe(61);
+    expect(
+      playerById(state, other)!.attributes.finishing,
+      "남에게 걸린 개인 훈련 축이 전원에게 열렸다",
+    ).toBe(60);
   });
 });
