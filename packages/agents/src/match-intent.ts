@@ -18,6 +18,10 @@ import { retryOnce } from "./retry";
  * 스킬이 아니다(`mood-rater`의 `report_mood`와 같은 자리). 상태를 바꾸는 것은 이
  * 객체를 받은 코어이고, 실재 확인(없는 선수·떠난 표적·우리 쪽 지점)도 거기서 한다.
  * 그래서 프롬프트는 코어가 이미 막는 것을 다시 지시하지 않는다.
+ *
+ * 반대로 **평시 도구 설명이 갖는 판정 근거는 이 프롬프트가 직접 가져야 한다** — 경기
+ * 중에는 도구 표면이 0이라 `SKILL_CATALOG`의 설명이 실리지 않는다. 없으면 같은 판정이
+ * 평시와 경기에서 다른 근거로 내려진다 (docs/llm/prompts.md §5).
  */
 export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조화된 의도로 옮기는 해석기다. 중계도 대사도 쓰지 않고 report_intent 하나로만 답한다.
 
@@ -31,6 +35,7 @@ export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조
 # 대화 (talk · teamTalk)
 감독이 **그 사람에게 건넨 말**이 있을 때만 싣고, 그 말이 어떻게 닿았는지를 **라벨**로 고른다. 수치는 코어가 만든다.
 - 이름을 부르기만 한 말("브루노 일루와봐", "잠깐 와봐")은 부름이지 면담이 아니다 — talk을 비운다.
+- outcome은 감독 발화의 (a) 맥락 적합성 (b) 설득 근거 (c) 대상 수용성으로 판정한다.
 - talk.outcome — reassured(다독임) · motivated(자극) · neutral · disappointed(실망을 드러냄) · angered(질책)
 - teamTalk.outcome — inspired · encouraged · neutral · flat · backfired · feared
 - intensity 1~3 — 말의 세기.

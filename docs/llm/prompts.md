@@ -83,6 +83,7 @@
 
 - **판정 기준 셋** — (a) 맥락 적합성 (b) 설득 근거가 실제 사실을 딛고 있는가
   (c) 대상 페르소나의 수용성. **잘한 말은 잘 먹혀야 한다 — 판정은 랜덤이 아니다.**
+  평시에는 판정형 도구의 설명이, 경기 중에는 `MATCH_INTENT_SYSTEM`이 이 셋을 갖는다(§5).
 - **반문 규칙** — 대상이 모호하거나 규칙 위반이거나 정보가 모자라면 실행하지 않고 픽션
   안에서 묻는다(`@수석코치: 성호는 아직 회복 중인데, 그래도 쓰시겠습니까?`).
   단 **이름 없이 가리키면 먼저 직전 대화에서 대상을 찾는다** — 되묻기가 기본값이 되면
@@ -125,6 +126,26 @@
   코어가 멈춰 세우므로, 같은 일을 프롬프트가 또 시키면 페이싱만 굳는다.
 - **프롬프트 변경은 별도 커밋으로 분리한다.**
 
+### 무엇이 어디에 사는가
+
+**한 규칙은 한 자리에만 산다.** 자리는 그 규칙이 **무엇에 걸려 있는가**로 정해진다.
+
+| 자리                                    | 무엇이 사는가                                                                        |
+| --------------------------------------- | ------------------------------------------------------------------------------------ |
+| 시스템 프롬프트 (`GM_SYSTEM`)           | 도구와 무관하게 매 턴 서는 것 — 화자·권한 경계·출력 문법·장면의 속도·톤              |
+| 도구 설명 (`SKILL_CATALOG`)             | 그 도구를 **언제 부르고, 인자를 어떻게 채우고, 결과를 장면에 어떻게 옮기는가**       |
+| 경기 프롬프트 (`MATCH_INTENT_SYSTEM`)   | 경기 중 필요한 판정·해석 근거 전부 — 도구 표면이 0이라(§2) 도구 설명이 실리지 않는다 |
+| 상태 스냅샷 (`describePendingPress` 등) | 그 블록의 표기를 읽는 법 — "기자가 아는 사실 (이 밖은 묻지 못한다)"                  |
+
+- **한 도구의 사용법을 시스템 프롬프트가 다시 적지 않는다.** 원본이 둘이면 갈린다 — 같은
+  도구를 한쪽은 "확률대로 판정하라"로, 다른 쪽은 "확률은 참고일 뿐"으로 말하게 되고 둘 다
+  같은 턴에 실린다.
+- **여러 도구에 걸친 규칙은 도구 이름을 열거하지 않고** 시스템 프롬프트에 한 줄로 남긴다
+  ("부르지 않은 스킬의 결과를 장면이 말하지 않는다").
+- **평시 도구 설명과 경기 프롬프트가 같은 규칙을 갖는 것은 중복이 아니다.** 경기 중에는
+  도구 설명이 실리지 않으므로, 없으면 같은 판정이 평시와 경기에서 다른 근거로 내려진다.
+- 옮길 때는 더하지 말고 지우는 방향으로. 받는 쪽에 이미 있으면 지우기만 한다.
+
 ## 6. 미해결
 
 - 프롬프트 회귀 측정 — 문구를 고쳤을 때 무엇이 좋아졌는지 재는 하네스가 없다.
@@ -135,14 +156,14 @@
 
 ## 코드 위치
 
-| 무엇                                         | 어디                                                                         |
-| -------------------------------------------- | ---------------------------------------------------------------------------- |
-| 평시 시스템 프롬프트 (`GM_SYSTEM`)           | `packages/agents/src/gm-prompt.ts`                                           |
-| 지시 해석 프롬프트·스키마 (`MATCH_INTENT_SYSTEM`) | `packages/agents/src/match-intent.ts` · `match-intent-schema.ts`        |
-| 중계 시스템 프롬프트 (`MATCH_CASTER_SYSTEM`) | `packages/agents/src/match-caster.ts`                                        |
-| 결산 프롬프트 셋                             | `packages/agents/src/training-rater.ts` · `match-rater.ts` · `mood-rater.ts` |
-| 첫 장면 지시 (`ONBOARDING_INSTRUCTION`)      | `packages/agents/src/gm.ts`                                                  |
-| 도구 설명·그룹·표시 이름 (`SKILL_CATALOG`)   | `packages/agents/src/skill-descriptions.ts`                                  |
-| 도구 바인딩·스키마·경기 화이트리스트         | `packages/agents/src/gm-tools.ts`                                            |
-| 장면 위생·헤더 파서                          | `packages/agents/src/gm-input.ts`                                            |
-| 스킬 실행부                                  | `packages/engine/src/skills/index.ts`                                        |
+| 무엇                                              | 어디                                                                         |
+| ------------------------------------------------- | ---------------------------------------------------------------------------- |
+| 평시 시스템 프롬프트 (`GM_SYSTEM`)                | `packages/agents/src/gm-prompt.ts`                                           |
+| 지시 해석 프롬프트·스키마 (`MATCH_INTENT_SYSTEM`) | `packages/agents/src/match-intent.ts` · `match-intent-schema.ts`             |
+| 중계 시스템 프롬프트 (`MATCH_CASTER_SYSTEM`)      | `packages/agents/src/match-caster.ts`                                        |
+| 결산 프롬프트 셋                                  | `packages/agents/src/training-rater.ts` · `match-rater.ts` · `mood-rater.ts` |
+| 첫 장면 지시 (`ONBOARDING_INSTRUCTION`)           | `packages/agents/src/gm.ts`                                                  |
+| 도구 설명·그룹·표시 이름 (`SKILL_CATALOG`)        | `packages/agents/src/skill-descriptions.ts`                                  |
+| 도구 바인딩·스키마·경기 화이트리스트              | `packages/agents/src/gm-tools.ts`                                            |
+| 장면 위생·헤더 파서                               | `packages/agents/src/gm-input.ts`                                            |
+| 스킬 실행부                                       | `packages/engine/src/skills/index.ts`                                        |
