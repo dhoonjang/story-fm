@@ -50,7 +50,7 @@ import {
   pendingVerdicts,
   runMedicals,
 } from "../market/negotiation";
-import { quickSimulate, type SimSquad } from "../match/quick-sim";
+import { playedIn, quickSimulate, type SimSquad } from "../match/quick-sim";
 import { recordCard } from "../match/discipline";
 import { runAiTransfers } from "../market/ai-market";
 import { reviewUserSeat, runManagerMarket } from "../market/manager-market";
@@ -594,15 +594,19 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
     const { injuries: hurt, cards, subs, possession, ...scoreline } = result;
     // 친선은 어느 대회에도 속하지 않는다 — 몸에 남는 것만 정산하고 장부는 건너뛴다
     const friendly = isFriendly(match);
-    /** 실제로 그라운드를 밟은 선수 — 교체 투입까지 (스카우팅 지식의 원본이다) */
-    const played11 = (side: "home" | "away") => [
-      ...squads[side].starters.map((p) => p.id),
-      ...subs.filter((s) => s.side === side).map((s) => s.in),
-    ];
+    /**
+     * 실제로 그라운드를 밟은 선수 — 교체 투입까지 (스카우팅 지식의 원본이다).
+     * 출전 기록·평점·폼·피로·부상·성향이 전부 이 **한 목록**에 걸린다. 하나라도
+     * 선발로 좁히면 로테이션 자원만 그 눈금 밖에 남는다.
+     */
+    const onPitch = {
+      home: playedIn(squads.home, "home", subs),
+      away: playedIn(squads.away, "away", subs),
+    };
     match.result = {
       ...scoreline,
-      homeLineup: played11("home"),
-      awayLineup: played11("away"),
+      homeLineup: onPitch.home.map((p) => p.id),
+      awayLineup: onPitch.away.map((p) => p.id),
     };
     // 출전·득점·도움·평점 — AI 팀도 시즌 스탯을 쌓아야 득점왕·평점 비교가 성립한다.
     // 경기별 평점은 남기지 않는다(장부가 없다) — 시즌 합계만 누적한다
@@ -618,13 +622,7 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
       const conceded = side === "home" ? result.awayGoals : result.homeGoals;
       const outcome = goalsFor > conceded ? "win" : goalsFor === conceded ? "draw" : "loss";
       // 교체로 들어온 선수도 뛴 선수다 — 출전·득점·평점이 함께 쌓인다
-      const onField = [
-        ...squads[side].starters,
-        ...(squads[side].bench ?? []).filter((p) =>
-          subs.some((s) => s.side === side && s.in === p.id),
-        ),
-      ];
-      for (const p of onField) {
+      for (const p of onPitch[side]) {
         const goals = scored.filter((id) => id === p.id).length;
         const assists = assisted.filter((id) => id === p.id).length;
         const rating = matchRating({
@@ -657,7 +655,7 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
         state,
         teamId,
         goalsFor - conceded,
-        onField.map((p) => p.id),
+        onPitch[side].map((p) => p.id),
       );
     }
     /**
@@ -682,13 +680,7 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
       const slotOf = new Map(
         assignmentsOf(state, teamId).map((a) => [a.playerId, a.position] as const),
       );
-      const wore = [
-        ...squads[side].starters,
-        ...(squads[side].bench ?? []).filter((p) =>
-          subs.some((s) => s.side === side && s.in === p.id),
-        ),
-      ];
-      for (const p of wore) {
+      for (const p of onPitch[side]) {
         const minutes = Math.max(0, Math.min(90, minutesOf(p.id)));
         const position = slotOf.get(p.id) ?? naturalPositionOf(p).position;
         // 그날의 몫 — 유저 경기와 같은 키 모양이라 리그 전체가 한 규칙을 쓴다
@@ -736,14 +728,17 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
     const injuryRng = makeRng(state.seed, `quick-injury:${match.id}`);
     for (const tag of hurt) {
       const [side, playerId] = tag.split(":") as ["home" | "away", string];
-      const player = squads[side].starters.find((p) => p.id === playerId);
+      const player = onPitch[side].find((p) => p.id === playerId);
       if (!player || isInjured(state, player.id)) continue;
       openInjuryFor(state, player, "match", injuryRng);
     }
-    // 뛰었는데 안 다쳤으면 성향이 내려간다 — 선발은 출전 한 번 몫씩, 다친 선수도
-    // 그 경기의 몫은 받는다 (균형식 그대로 — injury.ts)
+    /**
+     * 뛰었는데 안 다쳤으면 성향이 내려간다 — **뛴 선수 전원, 다친 선수까지.**
+     * 균형식이 "경기당 기대 상승 = 출전 한 번의 하강"이므로(injury.ts) 예외를
+     * 두면 눈금이 밀린다. 유저 경기(`finalizeMatch`)와 같은 규칙이다.
+     */
     for (const side of ["home", "away"] as const) {
-      for (const p of squads[side].starters) easeProneness(p);
+      for (const p of onPitch[side]) easeProneness(p);
     }
     // 재정 — AI 팀도 홈 수입·중계 수당·원정 비용을 갖는다 (잔고만 갱신)
     applyAiMatchFinance(state, match);

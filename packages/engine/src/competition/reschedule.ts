@@ -151,7 +151,14 @@ export function postponeMatch(
 }
 
 /**
- * 컵 경기를 이 날 치르기 위해 비켜줘야 할 리그 경기들 — 두 팀의 D−1·D·D+1.
+ * 컵 경기를 이 날 치르기 위해 비켜줘야 할 리그 경기들 — 두 팀의 D−1·D·D+1,
+ * 그리고 **48시간이 안 나오는 그 바깥의 경기**.
+ *
+ * ⚠️ 날짜로만 세면 컵을 막는 창과 비켜세우는 창이 어긋난다. 금요일 밤 리그
+ * (D−2 20:00)와 일요일 낮 컵(15:00)은 43시간이라 휴식 규칙이 막는데, D±1이
+ * 아니라 아무도 옮기지 않는다. 그러면 컵은 제 날짜를 잃고 다음 창까지 밀린다 —
+ * FA컵 결승이 5월 16일 웸블리에서 6월 12일로 밀린 적이 있다.
+ *
  * 하나라도 못 옮기면(대항전·최종 라운드·이미 치름) 빈 배열이 아니라 `null`을
  * 돌려준다 — 부분만 옮기면 달력만 흔들고 컵은 여전히 못 들어간다.
  */
@@ -159,13 +166,15 @@ export function clashesToClear(
   state: GameState,
   teams: string[],
   date: string,
+  time?: string,
 ): MatchRecord[] | null {
   const window = new Set([addDays(date, -1), date, addDays(date, 1)]);
+  const slot = { date, time };
   const teamSet = new Set(teams);
   const clashes = state.matches.filter(
     (m) =>
       m.season === state.season &&
-      window.has(m.date) &&
+      (window.has(m.date) || tooClose(m, slot)) &&
       (teamSet.has(m.homeTeamId) || teamSet.has(m.awayTeamId)),
   );
   if (clashes.some((m) => !isPostponable(state, m))) return null;
@@ -185,7 +194,7 @@ export function clearForCup(
   digest: string[],
   time?: string,
 ): boolean {
-  const clashes = clashesToClear(state, teams, date);
+  const clashes = clashesToClear(state, teams, date, time);
   if (clashes === null) return false;
   if (clashes.length === 0) return true;
 
