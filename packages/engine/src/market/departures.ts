@@ -3,6 +3,7 @@ import { ageOf } from "@story-fm/domain";
 import { diffDays, seasonYear, windowOpenOn } from "../competition/calendar";
 import { leagueOfTeam } from "../data/team-catalog";
 import { recordFinance } from "../club/finance";
+import { transferWindowLabel, windowOpenForTeam } from "./market";
 import { estimateWeeklyWage, wageSubjectOf } from "../world/wages";
 import { makeRng } from "../core/rng";
 import { assignSquadNumber } from "../squad/numbers";
@@ -170,8 +171,14 @@ export function loanPlayer(
   if (destination.id === state.userTeamId) {
     return { ok: false, message: "우리 구단에 임대할 수는 없습니다" };
   }
-  const window = windowOpenOn(state.windows, state.date);
-  if (!window) return { ok: false, message: "이적시장이 닫혀 있어 임대를 보낼 수 없습니다" };
+  // 임대 송출의 창도 **받는 쪽 협회**의 것이다 — 등록을 그쪽이 한다 (transfer.md §3)
+  const window = windowOpenForTeam(state, destination.id);
+  if (!window) {
+    return {
+      ok: false,
+      message: `${transferWindowLabel(state, destination.id)}이 닫혀 있어 임대를 보낼 수 없습니다`,
+    };
+  }
   const short = squadShortfall(state, state.userTeamId, player);
   if (short) return { ok: false, message: `우리 ${short.replace("팔 수", "보낼 수")}` };
   const contract = activeContract(state, player.id);

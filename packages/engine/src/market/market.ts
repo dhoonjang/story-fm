@@ -328,9 +328,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     const buyerWindow = buyerTeamId ? windowOpenForTeam(state, buyerTeamId) : window;
     if (!buyerWindow) {
       blockers.push(
-        buyerTeamId && isMarketOnlyLeague(leagueOfTeam(buyerTeamId))
-          ? `${leagueCatalogById(leagueOfTeam(buyerTeamId))?.name ?? "상대 리그"}의 이적시장이 닫혀 있습니다`
-          : "이적시장이 닫혀 있습니다",
+        `${buyerTeamId ? transferWindowLabel(state, buyerTeamId) : "이적시장"}이 닫혀 있습니다`,
       );
     }
   } else if (terms.kind === "renew") {
@@ -1104,6 +1102,18 @@ export { teamName, teamCatalogById };
 export function windowOpenForTeam(state: GameState, teamId: string, date = state.date) {
   const leagueId = leagueOfTeamIn(state, teamId);
   return windowOpenOn(state.windows, date, isMarketOnlyLeague(leagueId) ? leagueId : undefined);
+}
+
+/**
+ * 어느 창을 말하는가 — 등록을 받는 쪽이 시장 전용 리그면 **리그 이름을 붙인다.**
+ * 우리 창이 닫힌 9월에 그냥 "이적시장"이라고만 하면, 사우디 창은 열려 있는데도
+ * 감독은 무엇이 막혔는지 알 수 없다.
+ */
+export function transferWindowLabel(state: GameState, teamId: string): string {
+  const leagueId = leagueOfTeamIn(state, teamId);
+  return isMarketOnlyLeague(leagueId)
+    ? `${leagueCatalogById(leagueId)?.name ?? "상대 리그"}의 이적시장`
+    : "이적시장";
 }
 
 /**
