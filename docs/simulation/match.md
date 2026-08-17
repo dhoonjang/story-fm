@@ -985,9 +985,9 @@ DF +1.4 · MF +1.1 · FW +0.9 · 도움 +0.6 · 무실점 GK +0.8/DF +0.5 · 실
   타 팀 경기만 `competition/extra-time.ts`가 한 번에 굴린다. **연장이 필요한
   경기인가는 `needsExtraTime` 하나가 정한다** — 대회마다 따로 판단하면 어느
   하나만 고쳐도 규칙이 조용히 갈리고, `MatchResult.aet`가 이중 적용의 문지기다.)
-- **분포 하네스가 CI에 없다** — `engine/test/balance-harness.test.ts`가
-  `describe.skipIf(!process.env.BALANCE)`로 막혀 있다. 시드당 몇 분이라 `BALANCE=1`로
-  손으로 돌린다.
+- **분포 하네스가 CI에 없다** — 시드당 몇 분이라 `pnpm balance`로 손으로 돌린다.
+  이 문서의 밴드가 어느 하네스의 어느 지표인지는
+  [balance-harness](balance-harness.md)가 목록으로 쥐고 있다.
 
 ## 코드 위치
 

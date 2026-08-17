@@ -23,6 +23,7 @@
 | 구단·스쿼드 구성을 만진다 | [data/team.md](data/team.md) |
 | 대회 규정을 만진다 | [data/competition.md](data/competition.md) |
 | 경기 결과·밸런스를 만진다 | [simulation/match.md](simulation/match.md) |
+| 밸런스 눈금을 재고 옮긴다 | [simulation/balance-harness.md](simulation/balance-harness.md) |
 | 일정·tick·시즌 전환을 만진다 | [simulation/season.md](simulation/season.md) |
 | 이적·계약을 만진다 | [simulation/transfer.md](simulation/transfer.md) |
 | 구단 살림을 만진다 | [simulation/finance.md](simulation/finance.md) |
