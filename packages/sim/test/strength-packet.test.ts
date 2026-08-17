@@ -292,6 +292,83 @@ describe("buildStrengthPacket", () => {
     expect(high.home.zones.defense).toBeLessThan(flat.home.zones.defense);
   });
 
+  /**
+   * **세 존이 모두 이득과 대가를 함께 받아야 한다.**
+   *
+   * 예전엔 여섯 축 중 넷이 대가를 `defense`에서만 뗐고 어느 축도 수비에 이득을
+   * 주지 않았다 — 공격은 대가를 무는 축이 0개, 수비는 이득이 오는 축이 0개였다.
+   * 그래서 리그 전체가 같은 방향으로 서자 판세 3×3이 상대와 무관하게 "우리
+   * 진영이 밀린다"만 반복했다(편성 400경기에서 공격 존 매치업 342:7).
+   */
+  it("여섯 축을 통틀어 어느 존도 이득만 받거나 대가만 물지 않는다", () => {
+    const axes = ["mentality", "defensiveLine", "pressing", "tempo", "width", "passStyle"] as const;
+    const base = buildStrengthPacket(makeSide("str", 80), makeSide("wk", 78));
+    const moved = { attack: { up: 0, down: 0 }, midfield: { up: 0, down: 0 }, defense: { up: 0, down: 0 } };
+    for (const axis of axes) {
+      for (const value of [1, 5] as const) {
+        const packet = buildStrengthPacket(
+          makeSide("str", 80, { tactics: { [axis]: value } }),
+          makeSide("wk", 78),
+        );
+        for (const zone of ["attack", "midfield", "defense"] as const) {
+          const delta = packet.home.zones[zone] - base.home.zones[zone];
+          if (delta > 0) moved[zone].up += 1;
+          if (delta < 0) moved[zone].down += 1;
+        }
+      }
+    }
+    for (const zone of ["attack", "midfield", "defense"] as const) {
+      expect(moved[zone].up, `${zone} 존에 이득을 주는 축이 없다`).toBeGreaterThan(0);
+      expect(moved[zone].down, `${zone} 존에서 대가를 떼는 축이 없다`).toBeGreaterThan(0);
+    }
+  });
+
+  it("압박은 수비 존으로 이득이 들어오는 축이다 — 빌드업을 앞에서 끊는다", () => {
+    const eased = buildStrengthPacket(
+      makeSide("str", 80, { tactics: { pressing: 1 } }),
+      makeSide("wk", 78),
+    );
+    const hard = buildStrengthPacket(
+      makeSide("str", 80, { tactics: { pressing: 5 } }),
+      makeSide("wk", 78),
+    );
+    // 이득이 들어와도 뒷공간 대가가 더 크다 — 크면 압박이 공짜 축이 된다
+    expect(hard.home.zones.midfield).toBeGreaterThan(eased.home.zones.midfield);
+    expect(hard.home.zones.defense).toBeLessThan(eased.home.zones.defense);
+    expect(hard.home.tactical.notes.join(" ")).toContain("앞에서 끊되");
+  });
+
+  /**
+   * **축은 3을 기준으로 대칭이어야 한다.** 한쪽 갈래만 이득을 주면 리그 평균이
+   * 3이어도 그 존만 부푼다 — 라인은 올릴 때만 공격 이득을 줬고 짧은 패스는
+   * 여섯 축 중 유일하게 대가가 없었다.
+   */
+  it("라인을 내리면 우리 공격 시작점도 함께 멀어진다", () => {
+    const flat = buildStrengthPacket(
+      makeSide("str", 80, { tactics: { defensiveLine: 3 } }),
+      makeSide("wk", 78),
+    );
+    const deep = buildStrengthPacket(
+      makeSide("str", 80, { tactics: { defensiveLine: 1 } }),
+      makeSide("wk", 78),
+    );
+    expect(deep.home.zones.defense).toBeGreaterThan(flat.home.zones.defense);
+    expect(deep.home.zones.attack).toBeLessThan(flat.home.zones.attack);
+  });
+
+  it("짧은 패스는 중원을 얻고 전진을 내준다 — 롱볼의 거울이다", () => {
+    const flat = buildStrengthPacket(
+      makeSide("str", 80, { tactics: { passStyle: 3 } }),
+      makeSide("wk", 78),
+    );
+    const short = buildStrengthPacket(
+      makeSide("str", 80, { tactics: { passStyle: 1 } }),
+      makeSide("wk", 78),
+    );
+    expect(short.home.zones.midfield).toBeGreaterThan(flat.home.zones.midfield);
+    expect(short.home.zones.attack).toBeLessThan(flat.home.zones.attack);
+  });
+
   it("상대가 빠를수록 높은 라인의 대가가 커진다", () => {
     const slowFront = makeSide("wk", 78);
     const fastFront = makeSide("wk", 78);
@@ -529,30 +606,37 @@ describe("전력차와 총 기대 득점", () => {
     return { total: home + away, ratio: home / away };
   };
 
-  it("대등한 경기의 총 기대 득점은 3.0 언저리다", () => {
-    expect(sumOf(75, 75).total).toBeGreaterThan(2.8);
-    expect(sumOf(75, 75).total).toBeLessThan(3.3);
+  it("대등한 경기의 총 기대 득점은 3.2 언저리다", () => {
+    expect(sumOf(75, 75).total).toBeGreaterThan(3);
+    expect(sumOf(75, 75).total).toBeLessThan(3.5);
   });
 
   /**
    * ⚠️ **경계는 게임이 실제로 만나는 격차에 맞춰 둔다.**
    *
    * `makeSide(base)`는 15축을 전부 `base`로 채운 인공 스쿼드라 같은 OVR의 실제
-   * 선수보다 기회 생산이 세다(대등한 경기 실측 2.79 대 여기 2.91). 그러니 이
-   * 숫자는 리그 평균의 자가 아니라 **격차가 벌어질 때 총량이 어떻게 자라는가**의
-   * 자다 — 리그 검증은 하네스(`balance-harness.test.ts`)가 한다.
+   * 선수보다 기회 생산이 세다. 그러니 이 숫자는 리그 평균의 자가 아니라 **격차가
+   * 벌어질 때 총량이 어떻게 자라는가**의 자다 — 리그 검증은 하네스
+   * (`balance-harness.test.ts`)가 한다.
+   *
+   * ⚠️ **그 격차가 벌어졌다 — 리그 대비 +3%에서 +18%로.** `ZONE_BASELINE`(§1.1)이
+   * 흡수하는 것은 전술과 공략이 리그에 상수처럼 얹는 몫인데, 여기 인공 스쿼드는
+   * 전술이 전부 3이고 공략도 없어 그 짐을 지지 않는다. 리그 득점을 제자리에
+   * 두려고 `BASE_SHOT_XG`를 올린 만큼이 여기서는 순증으로 나타난다(모든 격차에서
+   * 균일하게 ×1.10~1.15, 홈:원정 비는 그대로). 그래서 아래 경계도 같은 비율로
+   * 올렸다 — 재는 대상인 **총량이 자라는 모양**은 그대로다.
    *
    * 실제로 만나는 격차: 한 리그 안의 최대는 12(XI 평균 OVR 86.9 대 75.1),
    * 국내 컵의 1부 대 2부가 17 언저리다. 22·30은 이 세계에 없는 조합이라
    * 그 구간에는 "지수로 터지지 않는다"만 건다.
    */
   it("전력차가 벌어져도 총 기대 득점이 폭증하지 않는다", () => {
-    // 리그 안 최대 격차 — 실제 축구의 총 득점 상한(3.4~3.8) 안에 있어야 한다
-    expect(sumOf(81, 69).total).toBeLessThan(3.8);
+    // 리그 안 최대 격차
+    expect(sumOf(81, 69).total).toBeLessThan(4.2);
     // 국내 컵의 1부 대 2부
-    expect(sumOf(84, 67).total).toBeLessThan(4.2);
+    expect(sumOf(84, 67).total).toBeLessThan(4.8);
     // 존재하지 않는 격차 — 그래도 선형 언저리를 넘지 않는다
-    expect(sumOf(90, 60).total).toBeLessThan(6);
+    expect(sumOf(90, 60).total).toBeLessThan(6.6);
   });
 
   it("총량은 눌러도 승부의 기울기는 남는다", () => {
