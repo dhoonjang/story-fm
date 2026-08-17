@@ -31,13 +31,6 @@
   "include": [
     "**/*.ts",
     "**/*.tsx",
-    "next-env.d.ts",
-    // Next는 처음 보는 distDir마다 `<distDir>/types/**/*.ts`를 이 배열에 그대로
-    // 덧붙인다 — 문자열 완전 일치로만 검사하므로 `.next-e2e-*` 같은 와일드카드로는
-    // 막히지 않는다. 추적 파일인 이 파일이 e2e 슬롯마다 더러워지지 않도록
-    // playwright.config.ts가 만들 수 있는 distDir(슬롯 0~9)을 미리 다 적어 둔다.
-    ".next/types/**/*.ts",
-    ".next-e2e/types/**/*.ts",
     ".next-e2e-1/types/**/*.ts",
     ".next-e2e-2/types/**/*.ts",
     ".next-e2e-3/types/**/*.ts",
@@ -46,7 +39,10 @@
     ".next-e2e-6/types/**/*.ts",
     ".next-e2e-7/types/**/*.ts",
     ".next-e2e-8/types/**/*.ts",
-    ".next-e2e-9/types/**/*.ts"
+    ".next-e2e-9/types/**/*.ts",
+    ".next-e2e/types/**/*.ts",
+    ".next/types/**/*.ts",
+    "next-env.d.ts"
   ],
   "exclude": [
     "node_modules",
