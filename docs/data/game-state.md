@@ -42,6 +42,19 @@
 승강으로 **바뀔 수 있는 값**만 세이브를 읽는다. 리그의 종류와 국적은 승강이
 건드리지 않으므로 카탈로그가 답한다.
 
+**소속에서 파생하는 판정도 같은 갈래를 탄다.** 둘 다 카탈로그판을 지우지 않고
+상태 인지 판을 옆에 세운다 — `leagueOfTeamIn`이 `leagueOfTeam` 옆에 선 모양이다.
+
+| 무엇 | 세이브 (`competition/promotion.ts`) | 카탈로그 |
+| --- | --- | --- |
+| 이 팀이 지금 1부인가 | `isTopFlightIn(state, teamId)` | `isTopFlight(teamId)` |
+| 이 구단의 지금 살림 수준 | `clubEconomyLevelIn(state, teamId)` | `clubEconomyLevel(teamId)` |
+
+⚠️ **세계 생성은 카탈로그판을 쓴다** — 새 게임의 스쿼드 분류·절차 생성·축소 세계
+(`core/state.ts` · `world/catalog.ts` · `world/scope.ts`)와 초기 잔고·이적 예산은
+세이브가 서기 **전에** 도는 자리라 읽을 상태가 없다. 게임이 시작한 뒤 도는
+자리 — 재정·시즌 예산·AI 시장·국내 컵 시드 — 만 세이브를 읽는다.
+
 **구단 체급(`tier`)도 같은 갈래다** — 게임 안에서 변하므로 세이브가 갖는다. 카탈로그
 값은 게임 시작의 초기치일 뿐이고, 그 뒤로는 `GAME_TEAM.tier`가 단일 소스이며 시즌마다
 다시 매겨진다([team.md](team.md) §2). 읽는 자리는 전부 `tierOfTeamIn(state, teamId)`
@@ -477,9 +490,6 @@ erDiagram
   (목록만 `writeSummary`의 사이드카 요약으로, **쓰기**만 내용 주소 조각으로
   우회하고 있다 — 직렬화 자체는 여전히 매번 돈다). 경기는 이미 이벤트
   로그이므로 나머지도 그쪽으로 옮길 여지가 있다.
-- **1부/2부 판정(`isTopFlight`)은 아직 카탈로그다.** 세계 생성과 축소 세계가 상태
-  없이 부르는 자리라 §1의 두 갈래 규칙에서 빠져 있다 — 강등된 클럽이 AI 시장에서는
-  여전히 1부 구매자로 셈해진다(`market/ai-market.ts`의 `planTransfer`).
 - **`pendingMatch.script`는 폐기된 필드**다. 구간 시뮬레이터가 사건을 그때그때
   굴리므로 `match/match-flow.ts`의 `startMatch`가 `null`을 쓸 뿐 읽는 곳이 없다
   (`scriptCursor`도 같다).

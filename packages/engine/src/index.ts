@@ -18,6 +18,7 @@ export * from "./data/league-catalog";
 export * from "./data/cup-catalog";
 export * from "./data/domestic-cup-catalog";
 export * from "./data/club-profile";
+export * from "./data/league-economy";
 export * from "./data/catalog-source";
 export * from "./data/team-override";
 export * from "./data/cup-override";

@@ -114,7 +114,9 @@ TeamCatalogEntry {
   (`competition/season.ts`)가 곱한다. 곱하지 않으면 리그 1 구단이 6분의 1 중계
   수입으로 EPL과 같은 살림을 산다.
 - **구단 경제 수준** = 리그 경제 수준 + (1 − 리그 경제 수준) × 브랜드 리프트
-  (1등급 0.55 · 2 0.30 · 3 0.12 · 4 0.05) — `data/league-economy.ts`. 리그 경제 수준은
+  (1등급 0.55 · 2 0.30 · 3 0.12 · 4 0.05) — `data/league-economy.ts`. 진행 중인
+  세이브는 `clubEconomyLevelIn(state, teamId)`으로 읽어 리그도 체급도 지금 값을
+  본다([game-state.md](./game-state.md) §1). 리그 경제 수준은
   EPL 1.00 · 라리가 0.62 · 세리에 A·분데스리가 0.58 · 리그 1 0.42 · 사우디 0.45 ·
   MLS 0.30이고, 2부는 **그 나라 1부의 0.15배**(챔피언십 0.15 ~ 리그 2 0.063)다.
   EPL은 1.00이라 브랜드와 무관하게 표가 그대로 값이 된다.
@@ -413,13 +415,10 @@ WorldScope { leagues, teamsPerLeague, cups, markets }
 
 ## 9. 미해결
 
-- **1부/2부 판정(`isTopFlight`)만 아직 카탈로그다** — 세계 생성·축소 세계가 상태
-  없이 부르는 자리라 두 갈래 규칙 밖에 있다
-  ([game-state.md](./game-state.md) §9).
 - **승격한 2부 클럽의 스쿼드가 얇다** — `world/catalog.ts`의
-  `SECOND_DIVISION_TEMPLATE`이 20명만 만들고, `market/ai-market.ts`의
-  `planTransfer`가 카탈로그의 `isTopFlight`로 막아 승격 뒤에도 사지 못한다
-  (유스 유입·임대·자유계약만 들어온다).
+  `SECOND_DIVISION_TEMPLATE`이 20명만 만들어 스무 명으로 1부 한 시즌을 시작한다.
+  승격 뒤 AI 시장에서 사는 것은 열려 있으므로(`isTopFlightIn`) 채우는 데 시즌이
+  걸린다.
 - **1부 96팀 중 EPL 20팀만 지정 선발을 갖는다** — `data/team-catalog.ts`의
   `DEFAULT_XI`에 20팀만 있고, 나머지 76팀은 `core/state.ts`의 `fillSlots`가 11명을
   고른다. 슬롯 배치는 적합도 합의 전역 최댓값을 구하므로 앞 슬롯의 선택 때문에
