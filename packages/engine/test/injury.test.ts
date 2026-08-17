@@ -18,6 +18,7 @@ import {
   quickSimulate,
   raiseProneness,
   simSquadOf,
+  simulateOtherMatches,
   startMatch,
   userSide,
 } from "@story-fm/engine";
@@ -121,7 +122,7 @@ const ON_PITCH = 22;
  * 밸런스 하네스 — **회귀 테스트가 아니라 빈도 측정이다** (AGENTS.md §5).
  *
  * 세 검증 모두 경기 5,000~6,000판을 굴려 "기대 건수의 0.8~1.2배 안인가",
- * "1.3배 넘게 느는가", "9%가 아니라 14%를 넘는가"를 본다. 고정된 기대값이 없어
+ * "1.3배 넘게 느는가", "7%가 아니라 11%를 넘는가"를 본다. 고정된 기대값이 없어
  * 무엇이 회귀인지 규정하지 못하고, 비용은 이 파일에서 가장 크다. 부상 확률
  * 상수를 만졌으면 직접 돌려 눈금을 확인한다:
  *
@@ -177,8 +178,8 @@ describe.skipIf(!process.env.BALANCE)(
           if (tag === `home:${glass.id}`) hisShare++;
         }
       }
-      // 균등이면 11명 중 1명이라 약 9%
-      expect(hisShare / homeInjuries).toBeGreaterThan(0.14);
+      // 균등이면 뛴 선수(선발 11 + 교체 최대 4) 중 1명이라 7~9%
+      expect(hisShare / homeInjuries).toBeGreaterThan(0.11);
     });
   },
 );
@@ -291,6 +292,64 @@ describe("부임 전 부상 이력 — 조사된 선수만", () => {
     for (let d = 0; d < 400; d += 20) {
       expect(pronenessFromDaysOut(d + 20)).toBeGreaterThan(pronenessFromDaysOut(d));
     }
+  });
+});
+
+describe("간이 시뮬 — 성향은 뛴 선수 전원에게 걸린다", () => {
+  /**
+   * 세계 하나를 둘이 나눠 쓴다 (`createTestGame`은 한 번에 1초다). **경기를
+   * 치르는 검증이 뒤에 온다** — 앞의 것은 읽기만 하므로 순서가 이 방향일 때만
+   * 공유가 성립한다.
+   */
+  const state = createTestGame(11);
+
+  it("부상 추첨도 교체 투입 선수를 후보로 센다", () => {
+    const home = simSquadOf(state, "chelsea");
+    const away = simSquadOf(state, "liverpool");
+    const starters = new Set([...home.starters, ...away.starters].map((p) => p.id));
+
+    let onSubs = 0;
+    let total = 0;
+    for (let i = 0; i < 200; i++) {
+      for (const tag of quickSimulate(home, away, 3000 + i, `subs:${i}`).injuries) {
+        total++;
+        if (!starters.has(tag.slice(tag.indexOf(":") + 1))) onSubs++;
+      }
+    }
+    expect(total).toBeGreaterThan(0);
+    // 선발만 뽑던 시절엔 정확히 0이었다 (뛴 열넷 중 셋 남짓이 교체 자원이다)
+    expect(onSubs).toBeGreaterThan(0);
+  });
+
+  it("교체로 들어온 선수도 성향이 내려간다 — 벤치에 앉아만 있으면 그대로다", () => {
+    const squad = simSquadOf(state, "liverpool");
+    const starters = new Set(squad.starters.map((p) => p.id));
+    // 유저와 무관한 두 팀의 경기 하나 — 간이 시뮬이 소화하는 경로다
+    state.matches.push({
+      id: "quick-subs",
+      season: state.season,
+      competitionId: null,
+      round: 1,
+      date: state.date,
+      time: "15:00",
+      homeTeamId: "liverpool",
+      awayTeamId: "chelsea",
+      result: null,
+    });
+    simulateOtherMatches(state, []);
+    const lineup = state.matches.find((m) => m.id === "quick-subs")!.result!.homeLineup!;
+
+    const cameOn = lineup.filter((id) => !starters.has(id));
+    expect(cameOn.length).toBeGreaterThan(0);
+    for (const id of cameOn) {
+      // 그 경기에서 다친 선수는 상승이 하강을 덮는다 — 균형식대로다
+      if (isInjured(state, id)) continue;
+      expect(pronenessValue(playerById(state, id)!)).toBeLessThan(PRONENESS_BASE);
+    }
+    // 안 뛴 벤치는 손대지 않는다 — 하강이 출전이 아니라 소집에 걸리면 안 된다
+    const idle = (squad.bench ?? []).filter((p) => !lineup.includes(p.id));
+    expect(idle.length).toBeGreaterThan(0);
+    for (const p of idle) expect(p.state.injuryProneness).toBeUndefined();
   });
 });
 

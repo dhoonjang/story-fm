@@ -84,6 +84,7 @@ const BLANK_WEEKENDS: Array<{ label: string; from: number; to: number }> = [
   { label: "컵 대회 주말", from: 106, to: 112 },
   { label: "리그컵 결승 주말", from: 226, to: 306 },
   { label: "3월 A매치 휴식기", from: 322, to: 331 },
+  { label: "FA컵 결승 주말", from: 510, to: 516 },
 ];
 
 /**

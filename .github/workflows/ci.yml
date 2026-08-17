@@ -57,18 +57,15 @@ jobs:
     name: unit + api (${{ matrix.shard }}/${{ strategy.job-total }})
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
-    # vitest 기본값은 `maxWorkers = max(cpus - 1, 1)` — 그대로 두면 2코어 러너에서
-    # 워커 하나가 전체를 직렬로 받는다. `--maxWorkers=100%`가 코어를 다 쓴다.
+    # vitest 기본값은 `maxWorkers = max(cpus - 1, 1)` — 그대로 두면 워커 하나가
+    # 전체를 직렬로 받는다. `--maxWorkers=100%`가 코어를 다 쓴다.
     #
-    # 실측(run 31963108859, 호스티드 2코어 × 4샤드): 테스트 파일 118개가 CPU
-    # 25.5분, 샤드 1~4의 벽시계가 2m19s · 7m13s · 3m59s · 6m29s. 해시 배분이라
-    # 샤드가 세 배까지 어긋나고, 빠른 샤드가 노는 동안 셋업 비용은 네 번 나간다.
+    # 샤드를 늘리지 마라. 배분이 파일 경로 해시라 네 샤드가 세 배까지 어긋났고
+    # (run 31963108859), 잡마다 checkout + pnpm install을 따로 낸다. 코어 하나에
+    # 몰아주면 vitest가 잡 안에서 알아서 메운다.
     #
-    # 코어를 늘리면 그 둘이 같이 사라진다 — 25.5 CPU분을 8코어에 얹으면 3분대고,
-    # 배분 편차도 잡 하나 안에서 vitest가 알아서 메운다. 더 늘려도 소용없는
-    # 지점은 가장 느린 한 파일이다: euro-knockout.test.ts가 126초, 그다음이
-    # training-plan.test.ts 107초. 파일은 쪼개지지 않으므로 그 아래로는
-    # 내려가지 않는다 — 예산을 더 깎으려면 그 파일들이 싸져야 한다 (#69).
+    # 코어를 더 얹어도 소용없는 지점은 가장 느린 한 파일이다 — 파일은 샤드로
+    # 쪼개지지 않는다. 지금 바닥은 euro-knockout.test.ts (#69).
     timeout-minutes: 25
     strategy:
       # 한 샤드가 빨갛다고 나머지를 죽이지 않는다 — 빨간 PR은 실패를 한 번에 다

@@ -228,6 +228,21 @@ function planSubs(
 }
 
 /**
+ * 실제로 그라운드를 밟은 선수 — 선발 + 투입된 교체.
+ *
+ * 부상도 성향도 이 목록에 걸린다. 유저 경기(`match-flow.ts`)가 라인업으로 쓰는
+ * 목록과 같은 모양이라야 두 시뮬이 한 규칙으로 돈다.
+ */
+export function playedIn(
+  squad: SimSquad,
+  side: "home" | "away",
+  subs: readonly QuickSub[],
+): GamePlayer[] {
+  const cameOn = new Set(subs.filter((s) => s.side === side).map((s) => s.in));
+  return [...squad.starters, ...(squad.bench ?? []).filter((p) => cameOn.has(p.id))];
+}
+
+/**
  * 부상 — **여기서는 사건만 고르고 장부는 호출부가 쓴다.**
  *
  * 심각도·결장 일수·치료비는 `openInjuryFor`가 유저 경기와 **같은 공식**으로 정한다.
@@ -235,26 +250,30 @@ function planSubs(
  *
  * **빈도도 성향을 탄다** — 유리몸을 열한 명 세운 팀은 실제로 더 자주 쓰러진다.
  * 누가 걸리는지만 성향으로 가르면 그 팀의 부상 총량은 철인 열한 명과 같아진다.
+ *
+ * 후보는 선발이 아니라 **뛴 선수 전원**이다. 선발만 뽑으면 교체 자원은 영원히
+ * 안 다치고, 호출부가 거는 성향 하강도 함께 선발에만 갇힌다.
  */
 function rollInjury(
   rng: () => number,
   squad: SimSquad,
+  played: readonly GamePlayer[],
   label: "home" | "away",
   into: string[],
 ): void {
-  if (squad.starters.length === 0) return;
+  if (played.length === 0) return;
   const proneOf = (p: GamePlayer) => squad.proneness?.[p.id] ?? 1;
-  const avgProneness = squad.starters.reduce((s, p) => s + proneOf(p), 0) / squad.starters.length;
+  const avgProneness = played.reduce((s, p) => s + proneOf(p), 0) / played.length;
   // 팀당 절반 — 경기당 기대치를 양팀이 나눈다 (구간 시뮬과 같은 눈금)
   if (rng() >= (INJURY_PER_MATCH / 2) * avgProneness) return;
-  const weights = squad.starters.map((p) => injuryWeight(p, 0, proneOf(p)));
+  const weights = played.map((p) => injuryWeight(p, 0, proneOf(p)));
   const total = weights.reduce((s, w) => s + w, 0);
   if (total <= 0) return;
   let roll = rng() * total;
-  for (let i = 0; i < squad.starters.length; i++) {
+  for (let i = 0; i < played.length; i++) {
     roll -= weights[i] ?? 0;
     if (roll <= 0) {
-      into.push(`${label}:${squad.starters[i]!.id}`);
+      into.push(`${label}:${played[i]!.id}`);
       return;
     }
   }
@@ -582,8 +601,8 @@ export function quickSimulate(
   const injuries: string[] = [];
   // 부상은 슈팅 수에 따라 난수 소비 위치가 밀리지 않는 독립 채널에서 뽑는다.
   const injuryRng = makeRng(seed, `quick:${channel}:injury`);
-  rollInjury(injuryRng, home, "home", injuries);
-  rollInjury(injuryRng, away, "away", injuries);
+  rollInjury(injuryRng, home, playedIn(home, "home", subs), "home", injuries);
+  rollInjury(injuryRng, away, playedIn(away, "away", subs), "away", injuries);
   const sum = (side: "home" | "away", read: (shot: QuickShot) => number) =>
     sampled.shots
       .filter((shot) => shot.side === side)

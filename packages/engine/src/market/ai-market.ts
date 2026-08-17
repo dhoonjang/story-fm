@@ -1,8 +1,8 @@
 import { ageOf, normalizedLogCurve, FIRST_TEAM_LIMIT, type GamePlayer } from "@story-fm/domain";
 import { addDays, diffDays, seasonYear, windowOpenOn } from "../competition/calendar";
-import { isClubTeam, isTopFlight, leagueOfTeam } from "../data/team-catalog";
+import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import { isMarketOnlyLeague } from "../data/league-catalog";
-import { leagueOfTeamIn } from "../competition/promotion";
+import { isTopFlightIn, leagueOfTeamIn } from "../competition/promotion";
 import { recordFinance } from "../club/finance";
 import { marketBiasOf, marketValueOf, windowOpenForTeam } from "./market";
 import { makeRng } from "../core/rng";
@@ -336,7 +336,7 @@ function planTransfer(
    * 한 시즌이면 세리에 B 중간 잔고가 £25M에서 마이너스로 내려갔다. 파는 것과
    * 임대로 받는 것은 그대로 두되(그쪽이 실제 2부의 시장이다) 사는 건 막는다.
    */
-  if (!isTopFlight(buyerId) && !isMarketOnlyLeague(leagueOfTeam(buyerId))) return null;
+  if (!isTopFlightIn(state, buyerId) && !isMarketOnlyLeague(leagueOfTeam(buyerId))) return null;
   const finance = state.finances.find((f) => f.teamId === buyerId);
   if (!finance || finance.budgetFrozen) return null;
   if (plannedFirstTeam(squads, buyerId, ledger) >= MAX_FIRST_TEAM) return null;
@@ -377,7 +377,7 @@ function planTransfer(
    * 막혀 있었다.** "사우디가 사간다"가 조용히 죽어 있던 자리다.
    */
   if (
-    isTopFlight(buyerId) &&
+    isTopFlightIn(state, buyerId) &&
     weeklyWagesOf(state, buyerId) + newWage > clubWageBudget(buyerId, undefined, state) * WAGE_HEADROOM
   ) {
     return null;
@@ -390,7 +390,7 @@ function planTransfer(
    * 실제로 나가는 건 현금이다. 사우디처럼 경기 수입이 없는 구단은 들어오는 돈이
    * 없어서, 예산만 보고 지르게 두면 한 시즌에 잔고가 −£180M까지 내려갔다.
    */
-  const floor = isTopFlight(buyerId) ? CASH_FLOOR_TOP : CASH_FLOOR_OTHER;
+  const floor = isTopFlightIn(state, buyerId) ? CASH_FLOOR_TOP : CASH_FLOOR_OTHER;
   if (cashLeft(state, buyerId, ledger) - fee < floor) return null;
 
   ledger.committed.add(target.id);
@@ -416,8 +416,8 @@ const LOAN_MAX_AGE = 23;
  * 구단의 중간 잔고가 마이너스로 내려갔다: 리그전이 없어 수입이 얇은 구단에
  * 상위 팀 주급의 절반은 감당이 안 되는 짐이다.
  */
-function loanWageShare(hostId: string): number {
-  return isTopFlight(hostId) ? 0.5 : 0.2;
+function loanWageShare(state: GameState, hostId: string): number {
+  return isTopFlightIn(state, hostId) ? 0.5 : 0.2;
 }
 
 function planLoan(
@@ -460,7 +460,7 @@ function planLoan(
   if (squadLevel(host) > squadLevel(squad) - 2) return null;
   if (host.filter((p) => groupOf(p) === groupOf(target)).length >= 7) return null;
   // 받는 쪽이 분담할 주급도 형편 안이어야 한다
-  const share = (activeContract(state, target.id)?.weeklyWage ?? 0) * loanWageShare(toId);
+  const share = (activeContract(state, target.id)?.weeklyWage ?? 0) * loanWageShare(state, toId);
   if (weeklyWagesOf(state, toId) + share > clubWageBudget(toId, undefined, state) * WAGE_HEADROOM)
     return null;
 
@@ -520,7 +520,7 @@ function settle(state: GameState, deal: AiDeal, rng: () => number): GamePlayer |
     player.loan = {
       fromTeamId: fromId,
       until: `${seasonYear(state.season) + 1}-06-30`,
-      wageShare: loanWageShare(deal.toTeamId),
+      wageShare: loanWageShare(state, deal.toTeamId),
     };
     return player;
   }
@@ -529,7 +529,7 @@ function settle(state: GameState, deal: AiDeal, rng: () => number): GamePlayer |
   const finance = state.finances.find((f) => f.teamId === deal.toTeamId);
   if (!finance || finance.budgetFrozen) return null;
   if (deal.fee > finance.transferBudget) return null;
-  const floor = isTopFlight(deal.toTeamId) ? CASH_FLOOR_TOP : CASH_FLOOR_OTHER;
+  const floor = isTopFlightIn(state, deal.toTeamId) ? CASH_FLOOR_TOP : CASH_FLOOR_OTHER;
   if (finance.balance - deal.fee < floor) return null;
   moveClub(state, squads, player, deal.toTeamId, {
     fee: deal.fee,
@@ -624,7 +624,7 @@ export function runAiTransfers(state: GameState, digest: string[]): void {
       ({ player, deal }) =>
         deal.kind === "transfer" &&
         (deal.fee >= NOTABLE_FEE || player.attributes.overall >= NOTABLE_OVERALL) &&
-        (leagueOfTeamIn(state, deal.toTeamId) === ourLeague || isTopFlight(deal.toTeamId)),
+        (leagueOfTeamIn(state, deal.toTeamId) === ourLeague || isTopFlightIn(state, deal.toTeamId)),
     )
     .sort((a, b) => b.deal.fee - a.deal.fee)
     .slice(0, NOTABLE_PER_DAY);

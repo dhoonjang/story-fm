@@ -151,16 +151,13 @@ export function postponeMatch(
 }
 
 /**
- * 컵 경기를 이 날 치르기 위해 비켜줘야 할 리그 경기들 — **48시간이 안 나오는 것 전부.**
+ * 컵 경기를 이 날 치르기 위해 비켜줘야 할 리그 경기들 — 두 팀의 D−1·D·D+1,
+ * 그리고 **48시간이 안 나오는 그 바깥의 경기**.
  *
- * ⚠️ 창은 날짜가 아니라 시각으로 잰다(`tooClose`) — 자리를 판정하는 쪽과 같은 자다.
- * D−1·D·D+1로 재던 때는 **이틀 전 저녁 경기가 겹침으로 잡히지 않았다**: 금 20:00
- * 다음 일 15:00은 43시간인데 "이틀 전"이라 비켜세울 대상이 아니었다. 그래서
- * `clearForCup`이 "비웠다"고 답하고도 그 자리엔 여전히 48시간이 없었고, 컵은 제
- * 날짜를 잃고 창을 넓히다 한참 뒤에 앉았다 — 결승 진출 두 팀의 5월이 모두 빡빡한
- * 시드에서 FA컵 결승이 5월 16일 웸블리에서 **6월 12일**로 밀렸다.
- *
- * 48시간은 아무리 벌어져도 앞뒤 이틀 안이라 D−2~D+2만 훑으면 빠짐이 없다.
+ * ⚠️ 날짜로만 세면 컵을 막는 창과 비켜세우는 창이 어긋난다. 금요일 밤 리그
+ * (D−2 20:00)와 일요일 낮 컵(15:00)은 43시간이라 휴식 규칙이 막는데, D±1이
+ * 아니라 아무도 옮기지 않는다. 그러면 컵은 제 날짜를 잃고 다음 창까지 밀린다 —
+ * FA컵 결승이 5월 16일 웸블리에서 6월 12일로 밀린 적이 있다.
  *
  * 하나라도 못 옮기면(대항전·최종 라운드·이미 치름) 빈 배열이 아니라 `null`을
  * 돌려준다 — 부분만 옮기면 달력만 흔들고 컵은 여전히 못 들어간다.
@@ -171,15 +168,14 @@ export function clashesToClear(
   date: string,
   time?: string,
 ): MatchRecord[] | null {
-  const slot = { date, ...(time ? { time } : {}) };
-  const span = new Set([-2, -1, 0, 1, 2].map((offset) => addDays(date, offset)));
+  const window = new Set([addDays(date, -1), date, addDays(date, 1)]);
+  const slot = { date, time };
   const teamSet = new Set(teams);
   const clashes = state.matches.filter(
     (m) =>
       m.season === state.season &&
-      span.has(m.date) &&
-      (teamSet.has(m.homeTeamId) || teamSet.has(m.awayTeamId)) &&
-      tooClose(m, slot),
+      (window.has(m.date) || tooClose(m, slot)) &&
+      (teamSet.has(m.homeTeamId) || teamSet.has(m.awayTeamId)),
   );
   if (clashes.some((m) => !isPostponable(state, m))) return null;
   return clashes;

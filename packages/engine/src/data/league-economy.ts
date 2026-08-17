@@ -66,10 +66,17 @@ export function leagueEconomyLevel(leagueId: string): number {
  * @param tier 구단 프로필이 등재되지 않은 팀의 **폴백**으로만 쓰인다. 세이브가 있는
  *   문맥은 `tierOfTeamIn(state, teamId)`을 넘긴다 — 넘기지 않으면 카탈로그 값이라
  *   어드민 편집이 진행 중인 세이브에 샌다 (team.md §2).
+ * @param leagueId 승강을 반영한 **지금**의 소속. 넘기지 않으면 카탈로그 소속이라
+ *   강등된 구단이 1부 살림을 계속 산다 — 세이브가 있는 문맥은 이 함수 대신
+ *   `clubEconomyLevelIn(state, teamId)`을 부른다 (game-state.md §1).
  */
-export function clubEconomyLevel(teamId: string, tier?: 1 | 2 | 3 | 4): number {
+export function clubEconomyLevel(
+  teamId: string,
+  tier?: 1 | 2 | 3 | 4,
+  leagueId?: string,
+): number {
   const team = teamCatalogById(teamId) ?? teamCatalog()[0]!;
   const brand = clubProfile(teamId, tier ?? team.tier).commercialTier;
-  const level = leagueEconomyLevel(team.leagueId);
+  const level = leagueEconomyLevel(leagueId ?? team.leagueId);
   return level + (1 - level) * BRAND_GLOBAL_LIFT[brand];
 }
