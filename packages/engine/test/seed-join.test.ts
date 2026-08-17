@@ -3,6 +3,7 @@ import { ageOf, weightSlotOf } from "@story-fm/domain";
 import { CATALOG_AGE_REF, deriveAxes, derivePositions, overallFor } from "@story-fm/engine";
 import { REAL_SQUADS, type RealPlayerSeed } from "../src/data/epl-players";
 import { EU_SQUADS } from "../src/data/eu-squads";
+import { MARKET_LEAGUE_SQUADS } from "../src/data/market-leagues";
 
 /**
  * 시드 갱신 오조인 가드 — **(이름 + 생년월일) 조인이 동명이인을 받았는지**를
@@ -299,6 +300,45 @@ describe("자리별 신체 하한 — 조인이 다른 체격의 사람을 받�
           `${v.height}cm (${v.group} 하한 ${MIN_HEIGHT_CM[v.group]}cm)` +
           `${v.seed.weight === undefined ? "" : ` · ${v.seed.weight}kg`} · 생 ${v.seed.birthdate}`,
       );
+
+    expect(violations).toEqual([]);
+  });
+});
+
+/**
+ * 1월 1일은 **조사가 닿지 않은 자리를 채우는 값**으로 쓰여 왔다 — 라로 고메스가
+ * `2006-01-01`로 실려 있었지만 실제는 2006-10-16이었다. 실제 1월 1일생과 값이
+ * 같아서, 표식이 없으면 "확인했더니 1월 1일"과 "확인하지 않았다"가 구분되지
+ * 않는다. 그 구분이 사라지면 조인 실패의 기본값("옛 값 유지")이 지킬 사실 없는
+ * 값을 지키게 된다 (sources.md §4.1).
+ *
+ * 그래서 `-01-01`은 `birthdateApprox`를 **생략할 수 없다**. 새 갱신이 조사되지
+ * 않은 1월 1일을 다시 들여오면 여기서 걸린다.
+ */
+describe("자리표시자 생년월일 — 1월 1일이 실제 날짜인지 표시돼 있다", () => {
+  const ALL_SQUADS: Record<string, readonly RealPlayerSeed[]> = {
+    ...REAL_SQUADS,
+    ...EU_SQUADS,
+    ...MARKET_LEAGUE_SQUADS,
+  };
+  const allRows = Object.entries(ALL_SQUADS).flatMap(([team, squad]) =>
+    squad.map((seed) => ({ seed, team })),
+  );
+  const isJan1 = (seed: RealPlayerSeed): boolean => seed.birthdate.endsWith("-01-01");
+
+  it("1월 1일생 시드는 전부 birthdateApprox를 명시한다", () => {
+    const violations = allRows
+      .filter((r) => isJan1(r.seed) && r.seed.birthdateApprox === undefined)
+      .map((r) => `${r.seed.nameKo}(${r.seed.nameEn}) ${r.team} — ${r.seed.birthdate}`);
+
+    expect(violations).toEqual([]);
+  });
+
+  // 날짜를 바로잡고 표식만 남기면 자리표시자가 아닌 값이 자리표시자로 읽힌다.
+  it("1월 1일이 아닌 시드에는 birthdateApprox가 남아 있지 않다", () => {
+    const violations = allRows
+      .filter((r) => !isJan1(r.seed) && r.seed.birthdateApprox !== undefined)
+      .map((r) => `${r.seed.nameKo}(${r.seed.nameEn}) ${r.team} — ${r.seed.birthdate}`);
 
     expect(violations).toEqual([]);
   });
