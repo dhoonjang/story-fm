@@ -55,6 +55,8 @@ import {
   proficiencyAt,
   pushNarrative,
   recordGrowth,
+  reservePlayers,
+  squadLevelOf,
   tacticsOf,
   teamName,
   userPlayers,
@@ -91,23 +93,54 @@ export function userSide(state: GameState): "home" | "away" {
   return match && match.awayTeamId === state.userTeamId ? "away" : "home";
 }
 
+/** 전술판의 한 자리 — 사람이 바뀌어도 자리는 그대로 남는다 */
+type Seat = Pick<TacticAssignment, "position"> & Partial<Pick<TacticAssignment, "point" | "roleId">>;
+
 /** 배치 + 선수 → 패킷 입력 슬롯. 온필드 id 목록으로 필터해 교체·퇴장을 반영한다 */
 function slotsFor(state: GameState, teamId: string, ids: string[]): LineupSlot[] {
   const assignments = new Map(assignmentsOf(state, teamId).map((a) => [a.playerId, a] as const));
   const squad = new Map(playersOf(state, teamId).map((p) => [p.id, p] as const));
   const worn = state.pendingMatch?.matchFatigue ?? {};
   const idSet = new Set(ids);
-  const replacementSlots = assignmentsOf(state, teamId, "starting")
-    .filter((assignment) => !idSet.has(assignment.playerId))
-    .map((assignment) => ({
+  /** 주인이 그라운드를 떠난 선발 자리 — 선발 id → 그 자리 */
+  const vacated = new Map<string, Seat>();
+  for (const assignment of assignmentsOf(state, teamId, "starting")) {
+    if (idSet.has(assignment.playerId)) continue;
+    vacated.set(assignment.playerId, {
       position: assignment.position,
       ...(assignment.point ? { point: assignment.point } : {}),
       ...(assignment.roleId ? { roleId: assignment.roleId } : {}),
-    }));
-  const replacementSetup = new Map<string, (typeof replacementSlots)[number]>();
+    });
+  }
+  /**
+   * **어느 자리를 잇는지는 교체 사건이 정한다** (match.md §2). `actors`의
+   * [나간 선수, 들어온 선수] 짝을 연쇄까지 따라간다 — 빈 자리 중 적응도가 가장 높은
+   * 곳을 고르면 킥오프 자동 대체로 이미 비어 있던 자리를 대신 집어, 감독이 본
+   * 전술판과 패킷이 다른 판이 된다.
+   */
+  const cameFrom = new Map<string, string>();
+  const pending = state.pendingMatch;
+  if (pending) {
+    const side = currentMatch(state).homeTeamId === teamId ? "home" : "away";
+    for (const event of pending.ledger.events) {
+      if (event.type !== "substitution" || event.team !== side) continue;
+      const [out, into] = event.actors;
+      if (out && into) cameFrom.set(into, cameFrom.get(out) ?? out);
+    }
+  }
+  const seatFor = new Map<string, Seat>();
   for (const id of ids) {
-    const assignment = assignments.get(id);
-    if (assignment?.role === "starting") continue;
+    if (assignments.get(id)?.role === "starting") continue;
+    const from = cameFrom.get(id);
+    const seat = from ? vacated.get(from) : undefined;
+    if (!from || !seat) continue;
+    seatFor.set(id, seat);
+    vacated.delete(from);
+  }
+  /** 짝이 닿지 않는 자리 — 사건으로 남지 않는 킥오프 자동 대체가 적응도 순으로 앉는다 */
+  const replacementSlots = [...vacated.values()];
+  for (const id of ids) {
+    if (assignments.get(id)?.role === "starting" || seatFor.has(id)) continue;
     const player = squad.get(id);
     if (!player || replacementSlots.length === 0) continue;
     const best = replacementSlots
@@ -117,14 +150,14 @@ function slotsFor(state: GameState, teamId: string, ids: string[]): LineupSlot[]
         fit: proficiencyAt(player, setup.position),
       }))
       .sort((a, b) => b.fit - a.fit || a.index - b.index)[0]!;
-    replacementSetup.set(id, best.setup);
+    seatFor.set(id, best.setup);
     replacementSlots.splice(best.index, 1);
   }
   return ids.flatMap((id) => {
     const player = squad.get(id);
     if (!player) return [];
     const assignment = assignments.get(id);
-    const inherited = replacementSetup.get(id);
+    const inherited = seatFor.get(id);
     const position =
       inherited?.position ?? assignment?.position ?? naturalPositionOf(player).position;
     /**
@@ -233,7 +266,12 @@ function assembleUserLineup(state: GameState): {
   error: string | null;
 } {
   const tactics = tacticsOf(state, state.userTeamId);
-  const roster = userPlayers(state);
+  /**
+   * **1군이 먼저다** (match.md §2 · team.md §5). `set_lineup`만 2군을 반려하면
+   * 감독이 손대지 않은 자리를 코어가 대신 채우는 이 경로가 그 규칙을 우회한다.
+   */
+  const roster = firstTeamPlayers(state, state.userTeamId);
+  const reserves = reservePlayers(state, state.userTeamId);
   const byId = new Map(roster.map((p) => [p.id, p] as const));
   const unavailable = (id: string) => isInjured(state, id) || isSuspended(state, id);
 
@@ -245,36 +283,47 @@ function assembleUserLineup(state: GameState): {
   for (const a of starters) {
     const slotGroup = positionGroupOf(a.position) ?? "MF";
     const current = byId.get(a.playerId);
+    /** 2군으로 내려간 선발은 `byId`에 없다 — 이름은 스쿼드 전체에서 찾아 밝힌다 */
+    const outgoing = playerById(state, a.playerId)?.name ?? a.playerId;
     if (current && !unavailable(a.playerId)) {
       onPitch.push(a.playerId);
       taken.add(a.playerId);
       continue;
     }
     // 대체 — 슬롯 적응도·그룹 일치·OVR 순
-    const candidate = roster
-      .filter((p) => !taken.has(p.id) && !unavailable(p.id))
-      .filter((p) => (slotGroup === "GK" ? groupOf(p) === "GK" : groupOf(p) !== "GK"))
-      .sort(
-        (x, y) =>
-          proficiencyAt(y, a.position) - proficiencyAt(x, a.position) ||
-          y.attributes.overall - x.attributes.overall,
-      )[0];
+    const pick = (pool: GamePlayer[]) =>
+      pool
+        .filter((p) => !taken.has(p.id) && !unavailable(p.id))
+        .filter((p) => (slotGroup === "GK" ? groupOf(p) === "GK" : groupOf(p) !== "GK"))
+        .sort(
+          (x, y) =>
+            proficiencyAt(y, a.position) - proficiencyAt(x, a.position) ||
+            y.attributes.overall - x.attributes.overall,
+        )[0];
+    /**
+     * **2군은 1군이 바닥났을 때의 긴급 호출이다** (match.md §2). 아예 부르지 않으면
+     * 부상·정지가 겹친 주에 열한 명이 서지 않아 경기 자체가 열리지 않는다 — 규칙을
+     * 지키느라 게임이 멈추는 쪽이 2군 하나가 서는 쪽보다 나쁘다.
+     */
+    const candidate = pick(roster) ?? pick(reserves);
     if (!candidate) {
       return {
         onPitch,
         bench: [],
         replaced,
-        error: `${current?.name ?? a.playerId}을(를) 대체할 가용 선수가 없습니다 — 스쿼드가 소진되었습니다`,
+        error: `${outgoing}을(를) 대체할 가용 선수가 없습니다 — 스쿼드가 소진되었습니다`,
       };
     }
     onPitch.push(candidate.id);
     taken.add(candidate.id);
-    replaced.push(`${current?.name ?? a.playerId} → ${candidate.name}`);
+    const calledUp = squadLevelOf(candidate) === "reserve" ? " (2군 호출)" : "";
+    replaced.push(`${outgoing} → ${candidate.name}${calledUp}`);
   }
 
   // 벤치 — 배치된 벤치 우선, 부족하면 가용 상위로 채움 (GK 1명 확보)
   const benchIds: string[] = [];
   for (const a of tactics.assignments.filter((x) => x.role === "bench")) {
+    if (benchIds.length >= MATCHDAY_BENCH) break;
     if (taken.has(a.playerId) || unavailable(a.playerId) || !byId.has(a.playerId)) continue;
     benchIds.push(a.playerId);
     taken.add(a.playerId);
@@ -282,9 +331,21 @@ function assembleUserLineup(state: GameState): {
   const rest = roster
     .filter((p) => !taken.has(p.id) && !unavailable(p.id))
     .sort((a, b) => b.attributes.overall - a.attributes.overall);
+  /**
+   * **골키퍼 한 자리는 상한에서 잘리지 않는다** (match.md §2). 뒤에 붙였다가 상한에서
+   * 잘라 내면 "GK 확보"가 배치된 벤치 인원수에 따라 있다 없다 한다 — 자리가 없으면
+   * 기량이 가장 낮은 필드 선수가 내준다.
+   */
   if (!benchIds.some((id) => groupOf(byId.get(id)!) === "GK")) {
     const gk = rest.find((p) => groupOf(p) === "GK");
     if (gk) {
+      if (benchIds.length >= MATCHDAY_BENCH) {
+        const weakest = [...benchIds].sort(
+          (x, y) => byId.get(x)!.attributes.overall - byId.get(y)!.attributes.overall,
+        )[0]!;
+        benchIds.splice(benchIds.indexOf(weakest), 1);
+        taken.delete(weakest);
+      }
       benchIds.push(gk.id);
       taken.add(gk.id);
     }
@@ -296,7 +357,7 @@ function assembleUserLineup(state: GameState): {
     taken.add(p.id);
   }
 
-  return { onPitch, bench: benchIds.slice(0, MATCHDAY_BENCH), replaced, error: null };
+  return { onPitch, bench: benchIds, replaced, error: null };
 }
 
 /**
@@ -382,13 +443,14 @@ export function startMatch(state: GameState): FlowResult {
 
   const userIsHome = match.homeTeamId === state.userTeamId;
   const opponentId = userIsHome ? match.awayTeamId : match.homeTeamId;
+  /**
+   * **상대의 명단은 간이 시뮬이 짠 그대로다** (match.md §2·§7) — 부상·정지·2군·
+   * 로테이션으로 쉬게 한 선수를 거르는 자리는 `simSquadOf` 한 곳이다. 벤치를 여기서
+   * 다시 짜면 그 필터가 감독의 경기에서만 새고, "한 곳"이 두 곳이 된다.
+   */
   const aiSquad = simSquadOf(state, opponentId);
   const aiIds = aiSquad.starters.map((p) => p.id);
-  const aiBench = playersOf(state, opponentId)
-    .filter((p) => !aiIds.includes(p.id) && !isInjured(state, p.id))
-    .sort((a, b) => b.attributes.overall - a.attributes.overall)
-    .slice(0, MATCHDAY_BENCH)
-    .map((p) => p.id);
+  const aiBench = (aiSquad.bench ?? []).map((p) => p.id);
 
   const userSideLedger = { onPitch: lineup.onPitch, bench: lineup.bench };
   const aiSideLedger = { onPitch: aiIds, bench: aiBench };
@@ -465,6 +527,18 @@ export function advanceSegment(
     home: squadFor(match.homeTeamId, pending.ledger.home),
     away: squadFor(match.awayTeamId, pending.ledger.away),
   };
+  const aiSide: "home" | "away" = match.homeTeamId === state.userTeamId ? "away" : "home";
+  const aiTeamId = aiSide === "home" ? match.homeTeamId : match.awayTeamId;
+  /** 상대의 킥오프 전술 — 경기 중 움직이는 것은 `pending.aiTactics`뿐이라 여기가 원본이다 */
+  const aiKickoff = tacticsOf(state, aiTeamId).spec;
+  /**
+   * **경기 중 옮긴 AI 전술은 판 전체에 닿는다** (match.md §2) — 패킷(`refreshPacket`)만
+   * 새 전술로 서면 상대는 "세게 미는 팀의 전력"으로 계산되면서 "원래 전술의 다리"로 뛴다.
+   */
+  const specOf = (which: "home" | "away") =>
+    which === aiSide && pending.aiTactics
+      ? pending.aiTactics
+      : tacticsOf(state, which === "home" ? match.homeTeamId : match.awayTeamId).spec;
 
   /**
    * **굴리기 직전에 판을 다시 계산한다.**
@@ -487,10 +561,7 @@ export function advanceSegment(
     packet: pending.packet,
     ledger: pending.ledger,
     squads,
-    tactics: {
-      home: tacticsOf(state, match.homeTeamId).spec,
-      away: tacticsOf(state, match.awayTeamId).spec,
-    },
+    tactics: { home: specOf("home"), away: specOf("away") },
     // 유리몸은 또 다친다 — 상대 선수도 같은 잣대로 본다 (injury.ts)
     proneness: pronenessOf(
       state,
@@ -527,7 +598,6 @@ export function advanceSegment(
    */
   const brief = options.maxMinutes !== undefined;
   // AI 팀 교체 — 상대만 90분을 그대로 뛰면 후반이 늘 우리 쪽으로 기운다
-  const aiSide: "home" | "away" = match.homeTeamId === state.userTeamId ? "away" : "home";
   const aiSub = brief
     ? null
     : planAiSubstitution(
@@ -570,12 +640,11 @@ export function advanceSegment(
    * **상대 벤치도 판단한다** — 스코어와 남은 시간을 보고 무게를 옮긴다.
    * 이 값은 pendingMatch에만 남아 그 경기에서만 쓰인다 (저장된 팀 전술은 불변).
    */
-  const aiTeamId = aiSide === "home" ? match.homeTeamId : match.awayTeamId;
-  const aiNow = pending.aiTactics ?? tacticsOf(state, aiTeamId).spec;
+  const aiNow = pending.aiTactics ?? aiKickoff;
   // 라커룸에서 판을 다시 짜는 자리 — 하프타임과 연장의 두 휴식이 같다
   const shift = brief
     ? null
-    : planAiTacticalShift(aiSide, aiNow, pending.ledger, isBreak(plan.stop));
+    : planAiTacticalShift(aiSide, aiNow, aiKickoff, pending.ledger, isBreak(plan.stop));
   if (shift) {
     // AI의 런타임 전술도 사람과 같은 스키마를 지난다. 배치 변경 없이 포메이션
     // 이름만 바꾸거나 범위를 벗어난 축을 세이브에 남기지 않는다.
@@ -810,13 +879,21 @@ export function buildRatingBrief(state: GameState): MatchRatingBrief | null {
 
   const ours = ledger.events.filter((e) => e.team === side);
   const goals = ours.filter((e) => e.type === "goal");
-  /** 교체 시각 — [나가는 선수, 들어오는 선수] 순서가 분 단위 출전 시간의 유일한 근거 */
+  /**
+   * 그라운드를 떠난 시각 — 교체의 [나가는 선수, 들어오는 선수] 짝과 **퇴장**이 같은
+   * 자격으로 출전 시간을 끊는다 (match.md §6). 퇴장을 세지 않으면 20′에 나간 선수도
+   * 90분으로 남아, LLM 채점이 "풀타임을 뛰고 퇴장까지 당한 선수"를 읽는다.
+   */
   const wentOff = new Map<string, number>();
   const cameOn = new Map<string, number>();
   for (const e of ours) {
-    if (e.type !== "substitution") continue;
-    if (e.actors[0]) wentOff.set(e.actors[0], e.minute);
-    if (e.actors[1]) cameOn.set(e.actors[1], e.minute);
+    const [first, second] = e.actors;
+    if (e.type === "substitution") {
+      if (first) wentOff.set(first, e.minute);
+      if (second) cameOn.set(second, e.minute);
+    } else if (e.type === "red_card" && first) {
+      wentOff.set(first, Math.min(wentOff.get(first) ?? e.minute, e.minute));
+    }
   }
   /** 이 경기의 길이 — 연장을 치렀으면 120분이다 (출전 시간이 평점의 기준값이다) */
   const FULL_TIME = wentToExtraTime(ledger) ? 120 : 90;
