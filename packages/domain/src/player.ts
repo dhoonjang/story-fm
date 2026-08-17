@@ -1556,6 +1556,19 @@ export const PlayerStateSchema = z.object({
   moodNote: z
     .object({ text: z.string().min(1).max(120), on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) })
     .optional(),
+  /**
+   * **마지막으로 면담한 날** — 같은 선수의 면담을 하루 한 번으로 자르는 문
+   * (career.md §2). 한 경기는 하루 안에서 끝나므로 이것이 곧 경기당 한 번이다.
+   *
+   * 파생하지 않고 저장하는 이유는 `SETTLING_EVENT`가 **정착 중인 선수만** 남기기
+   * 때문이다 — 나머지 선수에게 "오늘 이미 이야기했나"를 물을 표가 어디에도 없다.
+   *
+   * 옛 세이브엔 없다 — 없으면 아직 이야기한 적 없는 것으로 읽고 버전을 올리지 않는다.
+   */
+  talkedOn: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
 });
 export type PlayerState = z.infer<typeof PlayerStateSchema>;
 
