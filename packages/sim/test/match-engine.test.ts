@@ -199,6 +199,31 @@ describe("구간 시뮬레이터 — 결과는 코어가 정한다", () => {
     const fierce = () => setup(80, 80, { home: { pressing: 5, tempo: 5 } });
     expect(count(fierce(), "yellow_card")).toBeGreaterThan(count(calm(), "yellow_card"));
   });
+
+  /**
+   * 경기 후 반영은 **사건 타입만** 읽는다 — 두 번째 경고가 `yellow_card` 한 줄로만
+   * 남으면 그 선수는 다음 경기 정지 없이 넘어간다 (match.md §5).
+   */
+  it("두 번째 경고는 red_card 사건까지 남긴다", () => {
+    const s = setup(80, 80, { home: { pressing: 5, tempo: 5 }, away: { pressing: 5, tempo: 5 } });
+    let dismissals = 0;
+    for (let seed = 0; seed < 40; seed++) {
+      const { ledger } = playMatch(s, seed);
+      const count = (id: string, type: string) =>
+        ledger.events.filter((e) => e.type === type && e.actors[0] === id).length;
+      const booked = new Set(
+        ledger.events.filter((e) => e.type === "yellow_card").map((e) => e.actors[0]),
+      );
+      for (const id of booked) {
+        if (id === undefined || count(id, "yellow_card") < 2) continue;
+        dismissals++;
+        expect(count(id, "red_card"), `seed ${seed} / ${id}`).toBe(1);
+        expect(ledger.sentOff, `seed ${seed} / ${id}`).toContain(id);
+      }
+    }
+    // 표본에 경고 2장이 아예 없으면 위 단언은 아무것도 잡지 않는다
+    expect(dismissals).toBeGreaterThan(0);
+  });
 });
 
 /**
