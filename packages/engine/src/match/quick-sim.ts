@@ -5,6 +5,7 @@ import {
   naturalPositionOf,
   normalizedLogCurve,
   positionGroupOfPlayer,
+  positionProficiency,
 } from "@story-fm/domain";
 import {
   BOOKED_AGAIN_WEIGHT,
@@ -31,6 +32,12 @@ export interface SimSquad {
   managerTactics?: number;
   /** 벤치 — 교체 자원. 없으면 교체가 일어나지 않는다 */
   bench?: GamePlayer[];
+  /**
+   * 선수 id → 전술 적응도. **교체로 들어온 선수가 자기 값으로 서게 한다** —
+   * 벤치 선수는 `slots`에 없어서, 이 지도가 없으면 나간 선수의 값을 물려받는다.
+   * 없으면 물려받는 쪽으로 폴백한다.
+   */
+  familiarity?: Record<string, number>;
   /**
    * 선수 id → 부상 성향 배수 (`injury.ts`의 `pronenessOf`). 없으면 1.
    * 누가 다치는지만 가르고 발생 건수는 바꾸지 않는다.
@@ -362,7 +369,19 @@ function slotsAt(
   }
   return players.map((player) => {
     const setup = originals.get(player.id) ?? inherited.get(player.id);
-    return setup ? { ...setup, player } : fallbackSlot(player);
+    if (!setup) return fallbackSlot(player);
+    if (setup.player.id === player.id) return setup;
+    /**
+     * 교체로 들어온 선수는 **자리만 물려받는다** — 그 자리에서의 숙련도·적응도는
+     * 자기 것이다. 물려받으면 그라운드에 없는 사람의 숫자로 패킷이 선다
+     * (match.md §7).
+     */
+    return {
+      ...setup,
+      player,
+      proficiency: positionProficiency(player.positions, setup.position, player.foot),
+      familiarity: squad.familiarity?.[player.id] ?? setup.familiarity,
+    };
   });
 }
 

@@ -1,5 +1,6 @@
 import type { GamePlayer, ScheduleEntry, TrainingSession } from "@story-fm/domain";
 import {
+  FAMILIARITY_BASELINE,
   clampCondition,
   naturalPositionOf,
   positionGroupOfPlayer,
@@ -61,6 +62,7 @@ import { cancelTrainingOn, syncDefaultTraining } from "../squad/training-plan";
 import {
   groupOf,
   activeSuspension,
+  assignmentFor,
   assignmentsOf,
   ensureSeasonStat,
   firstTeamPlayers,
@@ -428,12 +430,16 @@ function standsToday(state: GameState, digest: string[]): boolean {
  * 않는다.** 사흘 간격에서 많이 뛰는 자리(풀백·중원·윙어)가 75~76(피로 24~25)로
  * 걸리고 덜 뛰는 자리(센터백·최전방)는 83~85(피로 15~17)로 통과한다 — 자리마다
  * 갈리는 것이 요점이다. 사흘 연전이 이어지면 피로가 37 근처에 눕는다.
+ *
+ * 공개하는 이유는 하나뿐이다 — **밸런스 하네스가 이 문턱을 재기 때문이다.**
+ * 하네스가 제 숫자를 따로 적으면 로테이션을 재는 자리가 재려는 대상과 다른 눈금을
+ * 쓴다 (실제로 그랬다: 하네스는 30, 여기는 20).
  */
-const ROTATION_FATIGUE = 20;
+export const ROTATION_FATIGUE = 20;
 /** 대체가 허용되는 기량 손실 — 이보다 떨어지면 지쳐도 그냥 뛴다 */
-const ROTATION_OVR_DROP = 8;
+export const ROTATION_OVR_DROP = 8;
 /** 대체 자원은 최소 이만큼 더 신선해야 한다 */
-const ROTATION_FRESHER = 15;
+export const ROTATION_FRESHER = 15;
 /**
  * **다리가 멎은 선수는 기량과 무관하게 뺀다.**
  *
@@ -442,7 +448,7 @@ const ROTATION_FRESHER = 15;
  * 실제 구단이라면 절대 세우지 않을 상태다. 구멍 문턱(`GAP_CONDITION` 22)보다
  * 조금 위에서, 뛸 수 있는 아무나로 바꾼다. 라인업은 약해지지만 그게 대가다.
  */
-const EXHAUSTED_CONDITION = 35;
+export const EXHAUSTED_CONDITION = 35;
 
 /**
  * 간이 시뮬 입력 조립 — 전술 배치에서 가용 선발을 뽑는다.
@@ -472,7 +478,7 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
       ...(assignment?.point ? { point: assignment.point } : {}),
       ...(assignment?.roleId ? { roleId: assignment.roleId } : {}),
       proficiency: proficiencyAt(player, position),
-      familiarity: assignment?.familiarity ?? 60,
+      familiarity: assignment?.familiarity ?? FAMILIARITY_BASELINE,
     };
   });
   // 부상·정지로 빈 자리는 OVR 상위 가용 선수로 메운다 (AI 팀의 자동 운영)
@@ -488,13 +494,21 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
       slotSetups.push({
         position: natural.position,
         proficiency: natural.proficiency,
-        familiarity: 60,
+        familiarity: FAMILIARITY_BASELINE,
       });
     }
   }
 
   // 로테이션 — 지친 선발을 같은 포지션군의 신선한 자원으로 바꾼다
   const used = new Set(starters.map((p) => p.id));
+  /**
+   * **쉬게 한 선수는 그 경기에서 아예 빠진다** — 벤치에도 없고, 뒤 슬롯의 대체
+   * 자원도 아니다. 벤치가 OVR 순이라 방금 지쳐서 뺀 에이스가 맨 위에 서면,
+   * 투입 후보를 포지션군과 OVR로만 고르는 `planSubs`가 그를 46분에 되돌린다 —
+   * 로테이션이 선발 명단에서만 일어나고 출전 시간에서는 일어나지 않는 것이다.
+   * 거르는 자리는 여기 하나다 (match.md §7).
+   */
+  const rested = new Set<string>();
   for (let i = 0; i < starters.length; i++) {
     const tired = starters[i]!;
     if (100 - tired.state.condition < ROTATION_FATIGUE) continue;
@@ -528,20 +542,45 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
         : undefined;
     const picked = replacement ?? fallback;
     if (!picked) continue;
+    /**
+     * **자리는 사람과 함께 움직인다.** 전술판의 자리(좌표·역할)는 그대로 두되
+     * 숙련도·적응도는 들어온 선수의 것으로 다시 선다. 물려받으면 강도 패킷이
+     * 그라운드에 없는 사람의 숫자로 서서, 약해진 라인업이라는 로테이션의 대가가
+     * 장부에 안 잡히거나 엉뚱하게 잡힌다.
+     */
+    const setup = slotSetups[i]!;
+    slotSetups[i] = {
+      ...setup,
+      proficiency: proficiencyAt(picked, setup.position),
+      familiarity: assignmentFor(state, picked.id)?.familiarity ?? FAMILIARITY_BASELINE,
+    };
     starters[i] = picked;
-    used.delete(tired.id);
+    rested.add(tired.id);
     used.add(picked.id);
   }
-  /** 벤치 — 교체 자원. 선발과 같은 문(부상·정지)을 지난 다음 OVR 순 아홉 명 */
+  /**
+   * 벤치 — 교체 자원. 선발과 같은 문(부상·정지)을 지난 다음 OVR 순 아홉 명이되,
+   * **로테이션으로 쉬게 한 선수는 빠진다.**
+   */
   const picked = new Set(starters.map((p) => p.id));
   const bench = squad
-    .filter((p) => !picked.has(p.id) && available(p))
+    .filter((p) => !picked.has(p.id) && !rested.has(p.id) && available(p))
     .sort((a, b) => b.attributes.overall - a.attributes.overall)
     .slice(0, MATCHDAY_BENCH);
   return {
     teamId,
     starters,
     slots: starters.map((player, index) => ({ player, ...slotSetups[index]! })),
+    /**
+     * 교체로 들어오는 선수가 **자기 전술 적응도로** 서게 하는 값 — 벤치 선수는
+     * `slots`에 없어 이 지도 없이는 나간 선수의 값을 물려받는다.
+     */
+    familiarity: Object.fromEntries(
+      [...starters, ...bench].map((p) => [
+        p.id,
+        assignmentFor(state, p.id)?.familiarity ?? FAMILIARITY_BASELINE,
+      ]),
+    ),
     tactics: tacticsOf(state, teamId).spec,
     managerTactics:
       teamId === state.userTeamId

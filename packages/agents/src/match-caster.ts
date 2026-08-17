@@ -7,9 +7,18 @@ import type { MatchEvent, StrengthPacket } from "@story-fm/domain";
  */
 export const MATCH_CASTER_SYSTEM = `당신은 스토리 기반 풋볼 매니저의 경기 중계자다. 축구 경기를 중계하고, 벤치의 대화를 연출한다.
 
-# 경기의 속도 (다른 무엇보다 먼저 지킨다)
-- **감독의 지시를 먼저 도구로 처리하고, 그 다음 advance_match로 구간을 진행한다.**
-  순서가 뒤집히면 감독의 교체·전술이 이번 구간에 반영되지 않는다.
+# 정지점의 주인 (다른 무엇보다 먼저 지킨다)
+- **정지점은 감독의 차례다.** 감독의 대사·판단·지시를 대신 쓰지 않는다. 감독을
+  화자로 세우지 않는다 — 감독 이름으로 시작하는 줄을 쓰지 마라.
+- **팀 토크와 개인 면담은 감독이 말과 강도를 고르는 자리다.** 감독이 그 말을 하지
+  않았으면 team_talk도 talk_to_player도 부르지 않는다. 감독이 선수를 부르기만 했으면
+  그 선수를 데려오는 데까지가 당신 몫이고, 선수의 대답까지만 쓴다.
+- **advance_match의 pace가 이 턴에 흐르는 시간이다.** 감독이 말을 걸었거나 지시만
+  내린 턴은 \`moment\` — 1분만 흐른다. \`segment\`(다음 정지점까지)는 감독이 경기를
+  보자고 한 턴이고, \`@: [계속]\` 같은 조작도 그 턴이다.
+- 수석코치의 짧은 관찰이나 벤치의 반응으로 장면을 닫고 감독에게 넘긴다.
+
+# 경기의 속도
 - 포메이션 지시는 get_squad로 현재 선발을 확인한 뒤 선수별 set_player_tactic으로
   구성한다. 자리를 옮길 때는 move(lane 좌·중·우 / band 우리 진영·중원·상대 진영)를
   쓰고, 지정하지 않은 축은 지금 자리를 그대로 둔다 — 좌표를 지어내지 않는다.
@@ -25,9 +34,6 @@ export const MATCH_CASTER_SYSTEM = `당신은 스토리 기반 풋볼 매니저�
 - **첫 줄은 이 장면이 닿은 시각이다** — \`[67']\` 형식. 돌려받은 사건 목록의 마지막
   시각을 적어라. 사건이 없으면 장부의 현재 분을 그대로 쓴다.
 - **한 턴은 한 호흡이다.** 받은 사건을 중계했으면 거기서 끝낸다.
-- **정지점은 감독의 차례다.** 수석코치의 짧은 관찰이나 벤치의 반응으로 닫는다. 감독의
-  대사·판단·지시를 대신 쓰지 않는다.
-- **감독이 대화만 걸었으면 사건 없이 답만 한다.**
 - **골·퇴장·부상은 그 장면에서 끝낸다.** 하프타임은 라커룸 장면 하나로 연다.
 
 # 가장 중요한 규칙
@@ -123,6 +129,19 @@ const STOP_KO: Record<string, string> = {
   flow: "특별한 사건 없이 시간이 흘렀다",
 };
 
+/**
+ * 사건의 배우 표기. `actors` 순서는 사건 종류마다 다른 방향을 뜻하므로(골은
+ * [득점자, 도움], 교체는 [아웃, 인] — match.md §4) 순서에 뜻을 맡기지 않고
+ * 역할을 이름 옆에 적는다.
+ */
+function actorsNote(ev: MatchEvent, nameOf: (id: string) => string): string {
+  const [first, second] = ev.actors.map(nameOf);
+  if (!first) return "";
+  if (ev.type === "goal") return second ? `득점 ${first} · 도움 ${second}` : `득점 ${first}`;
+  if (ev.type === "substitution") return second ? `OUT ${first} · IN ${second}` : `OUT ${first}`;
+  return ev.actors.map(nameOf).join(" → ");
+}
+
 /** 구간 대본 → 캐스터 입력. 선수는 이름으로 준다 — id를 주면 중계에 id가 흘러나온다. */
 export function buildSegmentMessage(
   events: MatchEvent[],
@@ -131,7 +150,7 @@ export function buildSegmentMessage(
   sideName: (side: "home" | "away") => string,
 ): string {
   const lines = events.map((ev) => {
-    const who = ev.actors.map(nameOf).join(" → ");
+    const who = actorsNote(ev, nameOf);
     const team = ev.team ? `${sideName(ev.team)} ` : "";
     const cause = ev.causes.length > 0 ? ` · 근거: ${ev.causes.join(" / ")}` : "";
     const detail = ev.detail ? ` · ${ev.detail}` : "";
