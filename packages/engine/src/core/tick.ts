@@ -448,7 +448,7 @@ export const ROTATION_FRESHER = 15;
  * 실제 구단이라면 절대 세우지 않을 상태다. 구멍 문턱(`GAP_CONDITION` 22)보다
  * 조금 위에서, 뛸 수 있는 아무나로 바꾼다. 라인업은 약해지지만 그게 대가다.
  */
-const EXHAUSTED_CONDITION = 35;
+export const EXHAUSTED_CONDITION = 35;
 
 /**
  * 간이 시뮬 입력 조립 — 전술 배치에서 가용 선발을 뽑는다.
