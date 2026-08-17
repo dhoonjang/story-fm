@@ -607,6 +607,72 @@ export function parseSceneHeader(text: string): ParsedScene {
   return { body: text, header: null, point: null, minute: null };
 }
 
+/** 경기 장면의 첫 줄 — 시계의 주인이 장부라 코어가 직접 쓴다 */
+function matchHeader(minute: number): string {
+  return `[${minute}']`;
+}
+
+/** 헤더 한 줄인가 — 대괄호로 열고 닫은 줄 하나 (`[43']` · `[2026-07-18 오후]`) */
+const BRACKET_LINE_RE = /^\s*\[[^\]]*\]\s*$/u;
+
+/**
+ * **경기 장면의 시각은 장부가 붙인다** (agents.md §3 ④).
+ *
+ * 평시의 첫 줄 헤더는 시계를 옮기는 입구지만 경기의 시계 주인은 장부다. 캐스터가
+ * 적은 분은 걷어내고 그 자리에 장부의 분을 세운다 — 대화만 한 턴에 `[12']`를 적어
+ * 감독이 지나가지도 않은 12분 위에 다음 지시를 쌓던 자리다.
+ */
+export function stampMatchScene(text: string, minute: number): string {
+  return `${matchHeader(minute)}\n${parseSceneHeader(text).body}`;
+}
+
+/**
+ * 스트리밍에도 같은 주인 — **코어의 시각 줄이 먼저 나가고 모델의 첫 줄은 화면에
+ * 닿기 전에 걷힌다.** 사후 교정만 하면 라이브 화면이 잠깐 다른 분을 보여 준다.
+ *
+ * 판정에 필요한 것은 첫 줄뿐이라 지연되는 것도 첫 줄뿐이다. 헤더일 수 없다고
+ * 판정되는 순간(`[`로 열지 않았다) 그 자리에서 흘려보낸다.
+ */
+export function stampMatchStream(
+  minute: number,
+  emit: (delta: string) => void,
+): (delta: string) => void {
+  let opened = false;
+  /** 아직 판정하지 못한 첫 줄. `null`이면 판정이 끝나 그대로 흘려보낸다 */
+  let head: string | null = "";
+  const flush = (rest: string): void => {
+    head = null;
+    if (rest.length > 0) emit(rest);
+  };
+  return (delta: string) => {
+    if (!opened) {
+      emit(`${matchHeader(minute)}\n`);
+      opened = true;
+    }
+    if (head === null) {
+      emit(delta);
+      return;
+    }
+    head += delta;
+    for (;;) {
+      const nl = head.indexOf("\n");
+      if (nl < 0) {
+        if (head.trim().length > 0 && !head.trimStart().startsWith("[")) flush(head);
+        return;
+      }
+      const first = head.slice(0, nl);
+      const rest = head.slice(nl + 1);
+      // 코어가 이미 첫 줄을 세웠으므로 그 앞의 빈 줄은 자리도 남기지 않는다
+      if (first.trim().length === 0) {
+        head = rest;
+        continue;
+      }
+      flush(BRACKET_LINE_RE.test(first) ? rest : `${first}\n${rest}`);
+      return;
+    }
+  };
+}
+
 /**
  * 대화 이력 창 — 시작점을 STEP 단위로만 옮긴다. 매 턴 한 칸씩 미끄러지면
  * 프리픽스가 계속 달라져 이력 캐시가 한 번도 적중하지 않는다.
