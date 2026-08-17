@@ -78,7 +78,7 @@ import type { ScoutGrade, ScoutReportCard } from "@story-fm/domain";
 import { listingOf } from "../market/negotiation";
 import { USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
 import { MANAGER_ATTR_CAP, MANAGER_XP_PER_LEVEL } from "../skills";
-import { marketValueOf, wageExpectationOf } from "../market/market";
+import { askingPriceFor, marketValueOf, wageExpectationOf } from "../market/market";
 import { settlingPercent } from "../squad/settling";
 import { computeStandings, type StandingRow } from "../competition/season";
 import { RELEGATION_SLOTS, hasRelegation, leagueOfTeamIn } from "../competition/promotion";
@@ -2169,4 +2169,36 @@ export function scoutReportCard(state: GameState, playerId: string): ScoutReport
     contractUntil: activeContract(state, p.id)?.until ?? null,
     note: knowledgeNote(state, p.id),
   };
+}
+
+/**
+ * 보고서 한 장을 **사실 한 줄로** — 도착 다이제스트가 모델에 넘기는 통로.
+ *
+ * 카드는 모델이 장면을 **쓴 뒤에** 붙어 화면에만 간다. 그래서 도착한 턴의 모델은
+ * 금액을 어디서도 읽지 못하고, 읽지 못하면 지어낸다 — 카드는 £34.9M인데 대사는
+ * 4,000만이 된다. 한 화면이 두 말을 하는 순간 둘 다 못 믿는다.
+ *
+ * ⚠️ **카드에서 파생한다.** 같은 값을 두 번 조립하면 한쪽만 고쳐질 때 다시 갈린다.
+ * 코어는 사실만 내고 문장은 GM이 쓴다 (선수 근황 cues와 같은 결).
+ */
+export function scoutReportLine(state: GameState, playerId: string): string | null {
+  const card = scoutReportCard(state, playerId);
+  const player = playerById(state, playerId);
+  if (!card || !player) return null;
+  const overall =
+    `종합 ${card.overall.value}` +
+    (card.overall.margin > 0 ? `±${card.overall.margin}` : "") +
+    ` (${card.overall.label})`;
+  return [
+    `${card.name} (${card.team}) ${card.age}세 ${card.position}`,
+    overall,
+    // 잠재력은 끝까지 폭으로만 안다 — 한 숫자로 적으면 모델이 그걸 단정한다 (player.md §9.1)
+    card.potential
+      ? `잠재력 ${card.potential.low.value}~${card.potential.high.value}`
+      : "잠재력 미지",
+    `시장가 ${formatMoney(card.marketValue)}`,
+    `요구액 ${formatMoney(askingPriceFor(state, player))}`,
+    `기대 주급 ${formatMoney(card.wageExpectation)}`,
+    ...(card.contractUntil ? [`계약 ${card.contractUntil}까지`] : []),
+  ].join(" · ");
 }

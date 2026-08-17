@@ -21,6 +21,7 @@ import {
   pushNews,
   scoutReportCard,
   takeNews,
+  takeReportCards,
   type AdvanceOutcome,
   type CardMark,
   type GameState,
@@ -88,14 +89,16 @@ function advanceForSkip(state: GameState, skip: TimeSkip): AdvanceOutcome | null
 /** 한 턴에 세우는 스카우팅 보고서 카드 상한 — 화면이 카드로 덮이면 장면이 안 읽힌다 */
 const MAX_REPORT_CARDS = 3;
 
-/** 이 턴에 도착한 스카우팅 보고서 — 시간 이동 전에 미완이던 것 중 완료된 것 */
-function arrivedReports(state: GameState, before: ReadonlySet<string>): ScoutReportCard[] {
-  const arrived = state.scoutReports.filter(
-    (r) => r.completedOn !== null && before.has(r.gamePlayerId),
-  );
-  return arrived
-    .slice(0, MAX_REPORT_CARDS)
-    .map((r) => scoutReportCard(state, r.gamePlayerId))
+/**
+ * 카드로 세울 보고서를 줄에서 꺼낸다 — **꺼낸 그 턴의 입력이 같은 값을 싣는다.**
+ *
+ * 코어가 장면보다 먼저 구른 턴(손잡이)은 그 사이 벌어진 일이, 장면 뒤에 구른
+ * 턴(모델 헤더)은 다음 턴의 도착 블록이 그 값을 싣는다. 어느 쪽이든 카드가 붙은
+ * 턴의 모델은 금액을 읽었다 (agents.md §6).
+ */
+function takeArrivedReports(state: GameState, limit: number): ScoutReportCard[] {
+  return takeReportCards(state, limit)
+    .map((playerId) => scoutReportCard(state, playerId))
     .filter((c): c is ScoutReportCard => c !== null);
 }
 
@@ -207,11 +210,13 @@ async function runRealGmTurn(
   const goals: GoalMark[] = [];
   /** 이번 턴의 경고·퇴장 — 같은 경로다. 경고는 다음 교체 판단의 입력이다 */
   const cards: CardMark[] = [];
-  // 시간이 흐르기 전에 미완이던 보고서 — 스카우트 완료는 tick의 사건이라
-  // 전후 비교로만 "이 턴에 도착했다"를 안다
-  const pendingReports = new Set(
-    state.scoutReports.filter((r) => r.completedOn === null).map((r) => r.gamePlayerId),
-  );
+  /**
+   * 지난 턴이 **장면 뒤에** 받아 둔 보고서 — 이번 턴 스냅샷이 값을 싣고 카드도 이번
+   * 턴에 선다. ⚠️ 손잡이가 시계를 옮기기 **전에** 꺼낸다: 그 뒤에 도착하는 것은
+   * 「그 사이 벌어진 일」이 따로 실으므로, 여기 섞이면 한 프롬프트에 같은 값이 두 번
+   * 실린다 (agents.md §6).
+   */
+  const carriedReports = inMatch ? [] : takeArrivedReports(state, MAX_REPORT_CARDS);
   // 손잡이로 넘긴 시간은 모델보다 먼저 흐른다 — 코어가 먼저 굴리고 "그 사이
   // 벌어진 일"을 상태에 실어, 모델은 도착한 자리에서 보고한다
   const pendingBeforeSkip = new Set(pendingVerdicts(state).map((v) => v.negotiation.id));
@@ -233,6 +238,10 @@ async function runRealGmTurn(
     });
     if (brief) pendingTraining.push(brief);
   }
+  // 손잡이가 굴려 도착한 보고서 — 그 값은 바로 위 다이제스트가 이미 싣는다
+  const skippedReports = skipped
+    ? takeArrivedReports(state, MAX_REPORT_CARDS - carriedReports.length)
+    : [];
   /** 시간 이동 중 새로 생긴 오퍼는 이번 장면에서 보고만 하고 감독의 답을 기다린다. */
   const deferNegotiationIds = new Set(
     skipped
@@ -297,6 +306,7 @@ async function runRealGmTurn(
               digest: skipped.digest,
             }
           : null,
+        carriedReports,
       );
   /**
    * 소식은 **스냅샷에 실린 그 턴에 비워진다** — `pendingEdits`와 같은 규약이다.
@@ -462,14 +472,17 @@ async function runRealGmTurn(
       : scene.header
         ? `${scene.header}\n${body}`
         : body;
+  /**
+   * 카드는 **모델이 값을 읽은 것만** 선다. 장면 헤더가 시계를 옮긴 턴은 코어가 방금
+   * 굴렀으므로 그 도착은 줄에 남아 다음 턴에 선다 (`pendingReportCards`).
+   */
+  const reports = [...carriedReports, ...skippedReports];
   return {
     text,
     toolCalls: calls,
     ...(goals.length > 0 ? { goals } : {}),
     ...(cards.length > 0 ? { cards } : {}),
-    ...(arrivedReports(state, pendingReports).length > 0
-      ? { reports: arrivedReports(state, pendingReports) }
-      : {}),
+    ...(reports.length > 0 ? { reports } : {}),
     usage: result.usage,
   };
 }

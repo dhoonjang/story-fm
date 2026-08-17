@@ -298,9 +298,22 @@ function applyOne(state: MatchLedgerState, ev: MatchEvent, i: number): string | 
     case "red_card": {
       const player = ev.actors[0];
       if (!player) return `${label(i, ev)}: 퇴장 대상(actors[0])이 필요합니다`;
+      if (!side) return `${label(i, ev)}: team이 필요합니다`;
+      /**
+       * 경고 누적 퇴장은 **경고 한 줄 + 퇴장 한 줄**로 남는다 (match.md §5).
+       * 앞줄의 두 번째 경고가 이미 그라운드에서 뺐으니 온필드를 요구하면 뒷줄이
+       * 반려되고, 그러면 사건 목록에 `red_card`가 없어 출장 정지가 걸리지 않는다.
+       * 통과는 **직전 줄이 이 선수의 경고일 때만** — 같은 퇴장에 레드가 두 줄
+       * 남거나 퇴장 뒤의 사건이 끼어드는 길은 그대로 막혀 있다.
+       */
+      const last = state.events[state.events.length - 1];
+      const afterSecondYellow =
+        last?.type === "yellow_card" &&
+        last.actors[0] === player &&
+        state.sentOff.includes(player);
+      if (afterSecondYellow) break;
       const err = requireOnPitch(player);
       if (err) return err;
-      if (!side) return `${label(i, ev)}: team이 필요합니다`;
       side.onPitch = side.onPitch.filter((id) => id !== player);
       state.sentOff.push(player);
       break;
