@@ -23,6 +23,7 @@ import {
   playersOf,
   renewalExpectation,
   respondOffer,
+  responseDelayDays,
   resolveMedical,
   sendOffer,
   suggestTerms,
@@ -62,6 +63,28 @@ function offerFor(state: GameState, playerId: string, feeRatio = 1) {
   };
 }
 
+/**
+ * 답신이 **하루 이상 걸리는** 대상 — "기다리는 동안"을 재는 케이스가 쓴다.
+ *
+ * 지연 0일은 버그가 아니라 설계다(`responseDelayDays` — 어떤 전화는 그 자리에서
+ * 끝난다). 그래서 `target`이 고른 선수의 답이 그날 오는 것도 정상인데, 그 경우
+ * "답을 기다리는 동안 막힌다"를 재는 케이스는 잴 것이 없어진다. 지연은 이적료
+ * 해시에서 나오므로 **시장가 눈금이 움직이면 누가 걸리는지도 함께 움직인다** —
+ * 한 선수를 못 박지 않고 조건에 맞는 첫 선수를 찾는 이유다.
+ */
+function targetWaiting(state: GameState) {
+  const budget = financeOf(state, state.userTeamId).transferBudget;
+  const found = state.players.find((p) => {
+    if (p.teamId === state.userTeamId) return false;
+    const terms = suggestTerms(state, p.id);
+    if (terms === null || terms.fee <= 1_000_000 || terms.fee >= budget * 0.6) return false;
+    const offer = offerFor(state, p.id);
+    return responseDelayDays(state, offer, dealOdds(state, offer).probability) > 0;
+  });
+  if (!found) throw new Error("답신을 기다리는 협상 대상을 찾지 못했습니다");
+  return found;
+}
+
 /** 오퍼가 들어올 때까지 날짜를 넘긴다 (확률적이지만 시드로 결정적) */
 function waitForIncoming(state: GameState, days = 60) {
   const digest: string[] = [];
@@ -75,7 +98,7 @@ function waitForIncoming(state: GameState, days = 60) {
 describe("오퍼", () => {
   it("협상을 개설하고 확률·응답일을 라운드에 남긴다", () => {
     const state = createTestGame(42);
-    const player = target(state);
+    const player = targetWaiting(state);
     const terms = offerFor(state, player.id);
 
     // 저장되는 확률은 **오퍼를 넣는 순간**의 값이다 (그 뒤에 다시 물으면 같은
@@ -102,7 +125,7 @@ describe("오퍼", () => {
 
   it("답이 오기 전에는 다시 오퍼할 수 없다", () => {
     const state = createTestGame(42);
-    const player = target(state);
+    const player = targetWaiting(state);
     expect(sendOffer(state, offerFor(state, player.id)).ok).toBe(true);
     const again = sendOffer(state, offerFor(state, player.id, 1.1));
     expect(again.ok).toBe(false);
@@ -124,7 +147,7 @@ describe("오퍼", () => {
 describe("상대의 판정 — 코어가 가능한 것만 받는다", () => {
   it("응답일 전에는 답할 수 없다", () => {
     const state = createTestGame(42);
-    const player = target(state);
+    const player = targetWaiting(state);
     sendOffer(state, offerFor(state, player.id));
     const negotiation = openNegotiationFor(state, player.id)!;
     const early = respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
@@ -310,7 +333,7 @@ describe("시간이 흐르면", () => {
 
   it("답이 도착하면 tick이 감독을 멈춘다", () => {
     const state = createTestGame(42);
-    const player = target(state);
+    const player = targetWaiting(state);
     sendOffer(state, offerFor(state, player.id));
     const negotiation = openNegotiationFor(state, player.id)!;
     const respondsOn = pendingOffer(negotiation)!.respondsOn!;
