@@ -21,6 +21,11 @@ describe("에이전트별 LLM 설정", () => {
     model: claude-custom
     max_tokens: 100
     timeout_ms: 1000
+  match-intent:
+    provider: google
+    model: gemini-custom
+    max_tokens: 150
+    timeout_ms: 1500
   match-caster:
     provider: openai
     model: gpt-custom
@@ -68,6 +73,7 @@ describe("에이전트별 LLM 설정", () => {
     model: gemini-test
     max_tokens: 100
     timeout_ms: 1000
+  match-intent: *google
   match-caster: *google
   match-rater: *google
   training-rater: *google

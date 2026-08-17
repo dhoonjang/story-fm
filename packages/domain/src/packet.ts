@@ -56,6 +56,20 @@ export interface RegionalInstruction {
   uptake: number;
 }
 
+/**
+ * 개인 지시·공략이 판세 격자의 한 줄 안에서 기울인 몫 — **줄 합은 0이다.**
+ *
+ * 지시의 산출은 밴드×레인 아홉 칸이고, 그 줄 평균은 존 전력에 실린다. 여기 오는
+ * 것은 평균을 뺀 나머지뿐이라 격자는 **배분만** 받는다 — 같은 전력이 존과 칸에
+ * 두 번 세어지지 않게 하는 자리다 (match.md §1.7, sim `zone-grid.ts`).
+ */
+export interface LaneBias {
+  band: RegionalBand;
+  lane: RegionalLane;
+  /** 존 전력 대비 비율 — 양수면 그 칸이 두꺼워지고 같은 줄 나머지가 얇아진다 */
+  share: number;
+}
+
 export interface PacketPlayer {
   id: string;
   name: string;
@@ -116,6 +130,11 @@ export interface SidePacket {
   /** 이 경기에만 유효한 지역별 세부 전술. */
   regional?: RegionalInstruction[];
   /**
+   * 개인 지시·공략이 격자의 배분을 기울인 몫. 지시가 없거나 레인을 겨냥하지 않은
+   * 경기에는 없고, **옛 세이브에도 없다** — 그때는 격자가 배치와 지역 플랜만 읽는다.
+   */
+  laneBias?: LaneBias[];
+  /**
    * 그라운드 위 선수 명단 — id·이름·자리에 **그 선수가 지금 내는 전력**까지.
    *
    * `effective` = roleFit(15축 × 자리 가중치) × 상태(폼·사기·피로) × 포지션 적응도
@@ -141,6 +160,18 @@ export interface ExploitTarget {
   label: string;
   /** 공략이 닿는 존 */
   zone: "attack" | "midfield" | "defense";
+  /**
+   * 그 짝이 얼마나 벌어졌나 (`KeyPoint.weight`) — **공략의 이득이 이 값을 탄다.**
+   * 크게 벌어진 약점이 문턱을 겨우 넘은 약점보다 크게 값을 해야 감독이 무엇을
+   * 읽었는지가 결과에 남는다. 진행 중인 옛 세이브에는 없고, 그때는 기준 눈금으로
+   * 본다(sim `exploits.ts`).
+   */
+  weight?: number;
+  /**
+   * 그 약점이 선 레인 — **약점을 가진 쪽의 방향**이다. 표적이 팀 전체인 지점
+   * (백라인 조직·중원 활동량)에는 없고, 그때 공략은 세 레인에 고르게 실린다.
+   */
+  lane?: RegionalLane;
 }
 
 export interface StrengthPacket {

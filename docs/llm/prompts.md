@@ -44,7 +44,9 @@
 
 ## 2. 스킬 표면 — 한 판단은 한 도구
 
-도구는 **33개**다(평시 32 + 경기 전용 `advance_match`). 같은 순간에 함께 정해지는 것들이
+도구는 **32개**이고 **전부 평시 GM의 것**이다. 경기 중에는 도구 표면이 **0**이다 —
+지시 해석이 JSON 하나를 내고 코어가 같은 스킬 함수를 부른다
+([agents.md](./agents.md) §3). 같은 순간에 함께 정해지는 것들이
 갈려 있으면 GM이 하나를 빠뜨린다 — 라인업은 1·2군 이동까지 한 요청(`set_lineup`의
 `squadLevels`), 한 선수의 자리·역할·개인 지시는 `set_player_tactic` 하나, 오퍼는 방향을
 인자로(`send_offer` kind=buy/sell/loan/loan_out), 오퍼 판정은 누가 답할 차례인지 협상이
@@ -55,7 +57,7 @@
 | 진행      | 1   | `start_match`                                                                                                                                                                   |
 | 전술·훈련 | 7   | `set_lineup` · `set_captain` · `set_tactics` · `set_player_tactic` · `exploit_point` · `set_match_plan` · `set_training`                                                        |
 | 대화·서사 | 4   | `team_talk` · `talk_to_player` · `respond_to_media` · `apply_narrative_event`                                                                                                   |
-| 경기      | 2   | `substitute` · `advance_match`                                                                                                                                                  |
+| 경기      | 1   | `substitute`                                                                                                                                                                    |
 | 이적      | 10  | `deal_odds` · `list_negotiations` · `send_offer` · `respond_offer` · `accept_deal` · `open_renewal` · `set_transfer_list` · `withdraw_offer` · `release_player` · `recall_loan` |
 | 재정      | 2   | `apply_finance_event` · `adjust_transfer_budget`                                                                                                                                |
 | 조회      | 7   | `search_players` · `get_squad` · `get_team` · `get_league` · `get_career` · `get_finance` · `scout_player`                                                                      |
@@ -64,7 +66,7 @@
 
 | 유형   | 계약                                                                                            |
 | ------ | ----------------------------------------------------------------------------------------------- |
-| 진행형 | 시계를 움직인다 — 경기는 `advance_match`, **날짜는 도구가 아니라 장면 헤더**다                  |
+| 진행형 | 시계를 움직인다 — **경기 시계는 지시 해석의 진행 의도로 코어가 밀고**, 날짜는 장면 헤더다       |
 | 설정형 | 검증 후 그대로 기록 — 라인업·전술·훈련·이적 리스트                                              |
 | 판정형 | LLM이 `{outcome, intensity}`·`stance`를 판정, **변화량은 코어 공식**                            |
 | 거래형 | 상대 판정은 LLM, 확률 앵커·한도는 코어 ([../simulation/transfer.md](../simulation/transfer.md)) |
@@ -130,6 +132,7 @@
 | 무엇                                         | 어디                                                                         |
 | -------------------------------------------- | ---------------------------------------------------------------------------- |
 | 평시 시스템 프롬프트 (`GM_SYSTEM`)           | `packages/agents/src/gm-prompt.ts`                                           |
+| 지시 해석 프롬프트·스키마 (`MATCH_INTENT_SYSTEM`) | `packages/agents/src/match-intent.ts` · `match-intent-schema.ts`        |
 | 중계 시스템 프롬프트 (`MATCH_CASTER_SYSTEM`) | `packages/agents/src/match-caster.ts`                                        |
 | 결산 프롬프트 셋                             | `packages/agents/src/training-rater.ts` · `match-rater.ts` · `mood-rater.ts` |
 | 첫 장면 지시 (`ONBOARDING_INSTRUCTION`)      | `packages/agents/src/gm.ts`                                                  |

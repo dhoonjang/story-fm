@@ -4,7 +4,6 @@ import {
   SKILL_CATALOG,
   SKILL_NAMES,
   buildGmTools,
-  buildMatchTools,
 } from "@story-fm/agents";
 import { createGame, interpretBackgroundHeuristic } from "@story-fm/engine";
 
@@ -22,9 +21,7 @@ function testGame() {
 describe("스킬 설명 — 코드가 유일한 원본이다", () => {
   it("카탈로그의 설명이 그대로 도구 description이 된다", () => {
     const state = testGame();
-    const gm = buildGmTools(state, []);
-    const match = buildMatchTools(state, []);
-    for (const tool of [...gm, ...match]) {
+    for (const tool of buildGmTools(state, [])) {
       const entry = SKILL_CATALOG.find((s) => s.name === tool.name);
       if (entry) expect(tool.description).toBe(entry.description);
     }

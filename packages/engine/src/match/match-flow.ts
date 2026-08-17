@@ -170,6 +170,8 @@ function directivesOnPitch(state: GameState, teamId: string, onPitch: readonly s
       by: a.playerId,
       kind: a.directive!.kind,
       ...(a.directive!.targetId ? { targetId: a.directive!.targetId } : {}),
+      // 세기를 여기서 빠뜨리면 감독이 고른 정도가 저장만 되고 결과에 닿지 않는다
+      ...(a.directive!.intensity ? { intensity: a.directive!.intensity } : {}),
     }));
 }
 

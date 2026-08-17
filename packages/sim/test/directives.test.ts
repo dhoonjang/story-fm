@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   DIRECTIVE_TUNING,
   TACTIC_SWING,
+  applyDirectives,
   buildStrengthPacket,
   conditionDrain,
   createLedger,
   directiveDrain,
   simulateSegment,
+  zoneMeanOf,
   type DirectiveInput,
+  type LaneCells,
   type SideInput,
 } from "@story-fm/sim";
 import { DEFAULT_TACTICS, type PlayerAttributes } from "@story-fm/domain";
@@ -67,19 +70,21 @@ describe("개인 지시 — 중립성", () => {
     expect(empty).toEqual(plain);
   });
 
-  it("그라운드에 없는 상대를 겨냥한 지시는 버려진다", () => {
+  it("그라운드에 없는 상대를 겨냥한 지시는 수치를 움직이지 않는다", () => {
     const before = buildStrengthPacket(us(), them());
     const after = buildStrengthPacket(
       us([{ by: MARKER, kind: "man_mark", targetId: "없는-선수" }]),
       them(),
     );
-    expect(after).toEqual(before);
+    expect(after.home.zones).toEqual(before.home.zones);
+    expect(after.away.zones).toEqual(before.away.zones);
   });
 
   it("벤치에 앉은 선수에게 내린 지시는 효력이 없다", () => {
     const before = buildStrengthPacket(us(), them());
     const after = buildStrengthPacket(us([{ by: "us-sub-fw", kind: "join_attack" }]), them());
-    expect(after).toEqual(before);
+    expect(after.home.zones).toEqual(before.home.zones);
+    expect(after.away.zones).toEqual(before.away.zones);
   });
 
   it("같은 선수에게 같은 지시를 여러 번 적어도 한 번만 먹는다", () => {
@@ -93,6 +98,165 @@ describe("개인 지시 — 중립성", () => {
       them(),
     );
     expect(thrice.home.zones).toEqual(once.home.zones);
+  });
+});
+
+/**
+ * 여기부터는 `applyDirectives`를 **직접** 부른다. 패킷을 거치면 존 평균만 남아
+ * 칸의 배분이 보이지 않고, 지시가 판과 같은 해상도로 실리는지는 그 배분이 전부다.
+ */
+const XI = () => makeSide("us", 78).starters;
+const THEM_XI = () => makeSide("them", 78).starters;
+const BENCH = () => makeSide("us", 78).bench;
+const THEM_BENCH = () => makeSide("them", 78).bench;
+/** 소화율 1 — 이득이 깎이지 않아야 상한과 세기 배수를 그대로 읽을 수 있다 */
+const FULL = 1;
+
+const THEIR_LEFT = "them-mf3"; // LCM · x=33 → 왼쪽
+const THEIR_RIGHT = "them-mf2"; // RCM · x=67 → 오른쪽
+const LEFT_BACK = "us-df4"; // LB · x=11
+const RIGHT_BACK = "us-df1"; // RB · x=89
+
+const run = (d: DirectiveInput[]) =>
+  applyDirectives(d, XI(), THEM_XI(), FULL, BENCH(), THEM_BENCH());
+
+describe("개인 지시 — 판과 같은 해상도", () => {
+  it("겨냥한 선수가 선 레인이 결과에 남는다 — 좌우가 같은 답을 내지 않는다", () => {
+    const left = run([{ by: MARKER, kind: "man_mark", targetId: THEIR_LEFT }]).them;
+    const right = run([{ by: MARKER, kind: "man_mark", targetId: THEIR_RIGHT }]).them;
+    // 지운 몫은 음수다 — 겨냥한 칸이 가장 크게 깎인다
+    expect(left.midfield.left).toBeLessThan(left.midfield.right);
+    expect(right.midfield.right).toBeLessThan(right.midfield.left);
+    // 공급을 끊은 몫도 같은 레인의 공격 칸으로 간다
+    expect(left.attack.left).toBeLessThan(left.attack.right);
+  });
+
+  it("우리 쪽 이득·대가는 지시받은 선수의 레인에 실린다", () => {
+    const right = run([{ by: RIGHT_BACK, kind: "join_attack" }]).us;
+    const left = run([{ by: LEFT_BACK, kind: "join_attack" }]).us;
+    // 오른쪽 풀백이 올라가면 오른쪽 앞이 두꺼워지고 오른쪽 뒤가 열린다
+    expect(right.attack.right).toBeGreaterThan(right.attack.left);
+    expect(right.defense.right).toBeLessThan(right.defense.left);
+    expect(left.attack.left).toBeGreaterThan(left.attack.right);
+    expect(left.defense.left).toBeLessThan(left.defense.right);
+  });
+
+  /**
+   * ⚠️ 이 불변식이 깨지면 밸런스가 조용히 움직인다. 격자의 계약이 "세 칸의 평균 =
+   * 존 전력"이라, 레인을 옮겨 **줄 평균까지 움직이면** 존 델타의 크기가 달라진다.
+   */
+  it("레인을 옮겨도 줄 평균은 그대로다 — 배분만 기울고 존 델타는 안 움직인다", () => {
+    const left = run([{ by: MARKER, kind: "man_mark", targetId: THEIR_LEFT }]);
+    const right = run([{ by: MARKER, kind: "man_mark", targetId: THEIR_RIGHT }]);
+    for (const band of ["attack", "midfield", "defense"] as const) {
+      expect(zoneMeanOf(left.them)[band]).toBeCloseTo(zoneMeanOf(right.them)[band], 12);
+      expect(zoneMeanOf(left.us)[band]).toBeCloseTo(zoneMeanOf(right.us)[band], 12);
+    }
+  });
+});
+
+describe("개인 지시 — 세기", () => {
+  const focus = (intensity?: DirectiveInput["intensity"]) =>
+    run([{ by: MARKER, kind: "focus_play", ...(intensity ? { intensity } : {}) }]);
+
+  /**
+   * `focus_play`의 대가는 중원에 떨어지고 그 몫의 `COST_SPILL`만큼이 공격으로
+   * 번진다. 상한에 붙은 이득만 보려면 그 번짐을 도로 빼야 한다.
+   */
+  const cappedGain = (cells: LaneCells) => {
+    const mean = zoneMeanOf(cells);
+    return mean.attack - mean.midfield * DIRECTIVE_TUNING.COST_SPILL;
+  };
+
+  it("세기를 안 보내면 보통이다 — 옛 호출이 예전 수를 그대로 낸다", () => {
+    expect(focus()).toEqual(focus("normal"));
+    expect(directiveDrain("press_target")).toBe(directiveDrain("press_target", "normal"));
+  });
+
+  /**
+   * 상한이 고정이면 소화력이 좋아 이미 잘린 지시는 세게 걸어도 같은 수를 낸다 —
+   * "잘하는 선수에게 세게 건다"가 아무 뜻이 없어진다.
+   */
+  it("이득 상한도 세기 배수를 탄다", () => {
+    const ace = { dribbling: 99, passing: 99, finishing: 99 };
+    const sharp = (intensity: NonNullable<DirectiveInput["intensity"]>) =>
+      applyDirectives(
+        [{ by: MARKER, kind: "focus_play", intensity }],
+        XI().map((s) =>
+          s.player.id === MARKER
+            ? { ...s, player: { ...s.player, attributes: { ...s.player.attributes, ...ace } } }
+            : s,
+        ),
+        THEM_XI(),
+        FULL,
+      ).us;
+
+    // 세 세기 모두 상한에 붙을 만큼 잘 소화하는 선수다 — 그래서 상한이 곧 이득이다
+    for (const intensity of ["light", "normal", "heavy"] as const) {
+      expect(cappedGain(sharp(intensity))).toBeCloseTo(
+        DIRECTIVE_TUNING.GAIN_CAP * DIRECTIVE_TUNING.INTENSITY[intensity].gain,
+        12,
+      );
+    }
+  });
+
+  it("세게 걸면 이득도 대가도 다리도 함께 커진다 — 공짜로 세지지 않는다", () => {
+    const gain = (i: NonNullable<DirectiveInput["intensity"]>) => cappedGain(focus(i).us);
+    const cost = (i: NonNullable<DirectiveInput["intensity"]>) => -zoneMeanOf(focus(i).us).midfield;
+    expect(gain("light")).toBeLessThan(gain("normal"));
+    expect(gain("normal")).toBeLessThan(gain("heavy"));
+    expect(cost("light")).toBeLessThan(cost("normal"));
+    expect(cost("normal")).toBeLessThan(cost("heavy"));
+    expect(directiveDrain("man_mark", "light")).toBeLessThan(directiveDrain("man_mark"));
+    expect(directiveDrain("man_mark")).toBeLessThan(directiveDrain("man_mark", "heavy"));
+  });
+});
+
+/**
+ * **거짓 성공을 막는 자리.** 노트가 없으면 `tactical.notes`를 인용하는 중계도
+ * 화면도 걸리지 않은 지시가 걸린 줄 안다. 문장을 박아 두지는 않는다 — 지켜야 하는
+ * 것은 "노트가 하나 남고 거기에 그 사람 이름이 있다"까지다.
+ */
+describe("개인 지시 — 판에 닿지 못한 지시는 조용하지 않다", () => {
+  const THREE: DirectiveInput[] = [
+    { by: MARKER, kind: "man_mark", targetId: THEIR_LEFT },
+    { by: RIGHT_BACK, kind: "join_attack" },
+    { by: "us-fw1", kind: "focus_play" },
+  ];
+
+  it("넷째 지시는 버려지고 그 사실이 노트에 남는다", () => {
+    const three = run(THREE);
+    const four = run([...THREE, { by: LEFT_BACK, kind: "stay_back" }]);
+    expect(four.us).toEqual(three.us);
+    expect(four.notes).toHaveLength(three.notes.length + 1);
+    const dropped = four.notes.filter((n) => n.includes(LEFT_BACK));
+    expect(dropped).toHaveLength(1);
+  });
+
+  it("그라운드에 없는 선수의 지시는 벤치에서 이름을 찾아 남긴다", () => {
+    const out = run([{ by: "us-sub-fw", kind: "join_attack" }]);
+    expect(out.us).toEqual(run([]).us);
+    expect(out.notes).toHaveLength(1);
+    expect(out.notes[0]).toContain("us-sub-fw");
+  });
+
+  it("교체로 나간 표적의 지시도 노트를 남긴다 — 이름을 못 찾아도 사실은 남는다", () => {
+    const gone = run([{ by: MARKER, kind: "man_mark", targetId: "them-sub-fw" }]);
+    expect(gone.notes).toHaveLength(1);
+    expect(gone.notes[0]).toContain("them-sub-fw");
+
+    const invented = run([{ by: MARKER, kind: "man_mark", targetId: "없는-선수" }]);
+    expect(invented.them).toEqual(run([]).them);
+    expect(invented.notes).toHaveLength(1);
+  });
+
+  it("한 선수에게 두 번 적은 지시만 조용히 넘어간다 — 감독이 내린 적 없는 지시다", () => {
+    const once = run([{ by: RIGHT_BACK, kind: "join_attack" }]);
+    const twice = run([
+      { by: RIGHT_BACK, kind: "join_attack" },
+      { by: RIGHT_BACK, kind: "join_attack" },
+    ]);
+    expect(twice).toEqual(once);
   });
 });
 

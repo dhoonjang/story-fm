@@ -8,6 +8,16 @@ agents:
     timeout_ms: 180000
     thinking_level: minimal
 
+  # 감독의 말을 구조화된 의도 하나로 옮긴다 — 판단이 아니라 분류라 가벼운 모델로 둔다.
+  # 경기 한 턴이 두 호출이 됐으므로(docs/llm/agents.md §3) 여기서 지연을 갚아야 한다.
+  # 한 턴에 교체·전술·지시가 함께 올 수 있어 결산 셋보다는 넉넉하다.
+  match-intent:
+    provider: google
+    model: gemini-3.5-flash-lite
+    max_tokens: 16000
+    timeout_ms: 60000
+    thinking_level: minimal
+
   match-caster:
     provider: google
     model: gemini-3.6-flash

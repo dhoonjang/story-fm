@@ -56,7 +56,7 @@ export const SKILL_CATALOG = [
     group: "전술·훈련",
     readOnly: false,
     description:
-      '한 선수의 자리·역할·개인 지시 중 감독이 명시한 항목만 바꾼다. 생략한 항목은 기존 값을 유지한다. 이미 그라운드에 있는 선수만 옮기며 벤치 선수를 넣으려면 substitute를 쓴다. **자리를 옮길 때는 move를 쓴다** — lane은 좌·중·우, band는 우리 진영·중원·상대 진영이고, 지정하지 않은 축은 지금 자리를 그대로 쓴다("왼쪽으로 벌려"는 lane만 보낸다). 특정 자리로 바꾸라는 지시("오른쪽 풀백으로")만 position에 코드를 적는다. **individual instruction은 kind를 함께 보내야 판이 움직인다** — man_mark·press_target(대상 targetId 필수)·focus_play·stay_back·join_attack 중 하나로 옮기고, 그 다섯에 담기지 않는 말이면 지역을 겨냥한 지시인지 보고 set_match_plan을 쓴다. kind 없이 note만 보내면 그 말은 서사에만 남고 경기에는 반영되지 않는다. 자연어 포메이션 변경은 get_squad로 현재 배치를 본 뒤 목표 모양에 꼭 필요한 최소 선수만 이동한다. 프리셋을 적용하거나 전원을 자동 재배치하지 않는다. 배치를 바꾼 턴에는 advance_match를 부르지 않고 전술판 검토를 기다린다.',
+      '한 선수의 자리·역할·개인 지시 중 감독이 명시한 항목만 바꾼다. 생략한 항목은 기존 값을 유지한다. 이미 그라운드에 있는 선수만 옮기며 벤치 선수를 넣으려면 substitute를 쓴다. **자리를 옮길 때는 move를 쓴다** — lane은 좌·중·우, band는 우리 진영·중원·상대 진영이고, 지정하지 않은 축은 지금 자리를 그대로 쓴다("왼쪽으로 벌려"는 lane만 보낸다). 특정 자리로 바꾸라는 지시("오른쪽 풀백으로")만 position에 코드를 적는다. **individual instruction은 kind를 함께 보내야 판이 움직인다** — man_mark·press_target(대상 targetId 필수)·focus_play·stay_back·join_attack 중 하나로 옮기고, 그 다섯에 담기지 않는 말이면 지역을 겨냥한 지시인지 보고 set_match_plan을 쓴다. kind 없이 note만 보내면 그 말은 서사에만 남고 경기에는 반영되지 않는다. 자연어 포메이션 변경은 get_squad로 현재 배치를 본 뒤 목표 모양에 꼭 필요한 최소 선수만 이동한다. 프리셋을 적용하거나 전원을 자동 재배치하지 않는다.',
   },
   {
     name: "exploit_point",
@@ -120,20 +120,6 @@ export const SKILL_CATALOG = [
     readOnly: false,
     description:
       "경기 정지점에서 우리 팀 선수를 교체한다. out에는 나가는 선수 id, in에는 들어오는 벤치 선수 id를 넣는다.",
-  },
-  {
-    name: "advance_match",
-    label: "경기 진행",
-    group: "경기",
-    readOnly: false,
-    description:
-      "경기 시계를 밀고 그 사이에 실제로 일어난 일을 돌려준다. " +
-      "**pace가 이 턴에 흐르는 시간이다** — 감독이 선수·코치와 대화를 걸었거나 지시만 내린 턴은 moment(1분), " +
-      "감독이 경기를 보자고 한 턴은 segment(다음 정지점까지). 대화 한 마디에 구간 하나를 태우지 않는다. " +
-      "감독의 지시(교체·전술·개인 지시)를 먼저 도구로 처리한 뒤 부른다 — 그래야 그 지시가 이 구간에 반영된다. " +
-      "단, 같은 턴에 formation을 변경했으면 부르지 않는다 — 전술판 검토 뒤 다음 턴에 진행한다. " +
-      "돌려받은 사건이 이번 턴에 중계할 전부이고, 한 턴에 한 번만 부른다. " +
-      "감독이 묻기만 했으면 부르지 않는다.",
   },
   {
     name: "apply_narrative_event",

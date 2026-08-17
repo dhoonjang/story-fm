@@ -1,12 +1,13 @@
 /**
  * GM 도구 바인딩 — 엔진 스킬을 GameToolSpec으로 감싼다.
- * 평시 전체(buildGmTools)와 경기 중 화이트리스트(buildMatchTools).
+ *
+ * **전부 평시 GM의 것이다.** 경기 중에는 도구 표면이 0이고, 감독의 말은 지시 해석이
+ * JSON 하나로 옮긴 뒤 코어가 같은 엔진 스킬을 직접 부른다 (docs/llm/agents.md §3).
  */
 import { z } from "zod";
 import {
   acceptDeal,
   adjustTransferBudget,
-  advanceMatchTo,
   answerOffer,
   applyFinanceEvent,
   applyNarrativeEvent,
@@ -32,7 +33,6 @@ import {
   playerCard,
   playerName,
   recallLoan,
-  refreshPacket,
   releasePlayer,
   respondToMedia,
   scheduleView,
@@ -56,7 +56,6 @@ import {
   TEAM_TALK_OUTCOMES,
   teamName,
   teamProfile,
-  shapeOfTactics,
   userSide,
   withdrawOffer,
   type CardMark,
@@ -66,6 +65,8 @@ import {
 } from "@story-fm/engine";
 import {
   ATTRIBUTE_AXES,
+  DIRECTIVE_INTENSITIES,
+  type MatchEvent,
   MAX_PITCH_CLAIMS,
   PitchClaimKindSchema,
   PitchClaimSchema,
@@ -73,7 +74,6 @@ import {
   PRESS_STANCES,
 } from "@story-fm/domain";
 import type { GameToolSpec, JsonObjectSchema, ToolCallContext } from "@story-fm/llm";
-import { buildSegmentMessage } from "./match-caster";
 import { skillDescriptions } from "./skill-descriptions";
 import type { GmToolCall } from "./gm-types";
 
@@ -338,11 +338,7 @@ export function buildGmTools(
           passStyle: z.number().int().min(1).max(5),
         })
         .partial(),
-      (input) => {
-        const result = setTactics(state, input);
-        if (result.ok && state.phase === "match") refreshPacket(state);
-        return result;
-      },
+      (input) => setTactics(state, input),
     ),
     wrap(
       "set_player_tactic",
@@ -380,6 +376,11 @@ export function buildGmTools(
               },
               kind: { type: "string", enum: [...PLAYER_DIRECTIVE_KINDS] },
               targetId: { type: "string", description: "man_mark·press_target의 대상 선수 id" },
+              intensity: {
+                type: "string",
+                enum: [...DIRECTIVE_INTENSITIES],
+                description: "감독이 말한 세기 — 생략하면 normal",
+              },
             },
             required: ["note"],
           },
@@ -401,6 +402,7 @@ export function buildGmTools(
             note: z.string().min(1).max(160),
             kind: z.enum(PLAYER_DIRECTIVE_KINDS).optional(),
             targetId: z.string().optional(),
+            intensity: z.enum(DIRECTIVE_INTENSITIES).optional(),
           })
           .optional(),
       }),
@@ -1029,155 +1031,57 @@ export function buildGmTools(
 }
 
 /**
- * 경기 중 화이트리스트 — 벤치에서 할 수 있는 것만. 전부 열면 국면 가드 없는
- * 스킬(훈련 편성·오퍼)이 통과되고 도구 정의가 캐시 프리픽스를 부풀린다.
+ * 구간의 사건 → 화면이 세우는 골·카드 표식.
+ *
+ * **중계 문장을 되읽지 않고 장부의 사건에서 만든다** — 모델이 쓴 글에서 스코어를
+ * 되짚으면 중계가 틀린 순간 화면도 함께 틀린다.
+ *
+ * 예전에는 `advance_match` 도구의 핸들러 안에 있었다. 도구가 사라져도(경기 중 도구
+ * 표면은 0이다 — agents.md §3) 표식은 화면의 것이라 남아야 하므로, 코어가 구간을
+ * 굴린 뒤 부르는 순수 함수로 서 있다.
  */
-const MATCH_TOOL_NAMES = new Set([
-  "substitute",
-  "set_player_tactic",
-  "set_tactics",
-  "exploit_point",
-  "set_match_plan",
-  "team_talk",
-  "talk_to_player",
-  "get_squad",
-  "search_players",
-]);
-
-/** 이 턴에 흐르는 시간 — 대화 한 마디가 구간 하나를 삼키지 않게 하는 눈금 */
-const PACE_MINUTES = { moment: 1 } as const;
-
-const AdvanceMatchSchema = z.object({ pace: z.enum(["moment", "segment"]) });
-
-/**
- * 경기 진행 도구 — 구간은 LLM 호출 **안에서** 굴린다. 호출 전에 굴리면 그 턴의
- * 교체·전술 지시가 이 구간에 반영되지 않는다. 사건은 전부 코어가 xg로 굴리므로
- * (match.md §2) 모델이 쥐는 것은 **언제 부르는가와 얼마나 가는가**뿐이다.
- */
-function makeAdvanceMatchTool(
+export function collectMatchMarks(
   state: GameState,
-  calls: GmToolCall[],
+  events: readonly MatchEvent[],
+  scoreBefore: { home: number; away: number },
   goals: GoalMark[],
   cards: CardMark[],
-  description: string,
-): GameToolSpec {
-  // 한 턴은 한 구간이다 — 두 번째 호출은 코어가 막는다 (프롬프트가 아니라 규칙)
-  let advanced = false;
-  const shapeBefore = shapeOfTactics(state);
-  return {
-    name: "advance_match",
-    description,
-    inputSchema: obj(
-      {
-        pace: {
-          type: "string",
-          enum: ["moment", "segment"],
-          description:
-            "이 턴에 얼마나 흐르는가. moment — 감독이 대화를 걸었거나 지시만 내린 턴, 1분만 흐른다. " +
-            "segment — 감독이 경기를 보자고 한 턴, 다음 정지점까지 간다.",
-        },
-      },
-      ["pace"],
-    ),
-    handle(input: unknown) {
-      const parsed = AdvanceMatchSchema.safeParse(input);
-      if (!parsed.success) {
-        return { ok: false, message: "pace를 moment 또는 segment로 지정하세요" };
-      }
-      const pending = state.pendingMatch;
-      if (!pending || state.phase !== "match") {
-        return { ok: false, message: "진행 중인 경기가 없습니다" };
-      }
-      if (advanced) {
-        return { ok: false, message: "이번 턴의 구간은 이미 진행했습니다 — 여기까지 중계하세요" };
-      }
-      const changedFormation =
-        shapeOfTactics(state) !== shapeBefore &&
-        calls.some((call) => call.name === "set_player_tactic");
-      if (changedFormation) {
-        return {
-          ok: false,
-          message: "포메이션 변경은 전술판 검토 뒤 다음 턴에 진행해야 합니다",
-        };
-      }
-      const before = { ...pending.ledger.score };
-      // moment는 구간을 1분에서 끊는다 — 목표 분만 당기면 구간 하나가 그대로 간다
-      const maxMinutes = parsed.data.pace === "moment" ? PACE_MINUTES.moment : undefined;
-      const step = advanceMatchTo(state, pending.ledger.minute + 1, { maxMinutes });
-      if (!step.ok) return { ok: false, message: step.message };
-      advanced = true;
-      pending.lastSegment = { events: step.events, stop: step.stop ?? "flow" };
-      // 감독이 부른 스킬이 아니라 **세계가 굴러간 기록**이다 — 칩으로 세우지 않는다
-      calls.push({ name: "advance_match", summary: step.message, silent: true });
-      // 표식은 **장부의 사건**에서 만든다 — 중계 문장을 되읽지 않는다
-      const running = { ...before };
-      const ourSide = userSide(state);
-      /** 이 구간에 이미 경고를 받은 선수 — 두 번째 경고는 곧 퇴장이다 */
-      const bookedHere = new Set<string>();
-      for (const ev of step.events) {
-        const who = ev.actors[0];
-        if (ev.type === "goal" && ev.team) {
-          running[ev.team] += 1;
-          goals.push({
-            minute: ev.minute,
-            scorer: playerName(state, who ?? ""),
-            assist: ev.actors[1] ? playerName(state, ev.actors[1]) : null,
-            ours: ev.team === ourSide,
-            team: sideTeamName(state, ev.team),
-            score: { ...running },
-          });
-          continue;
-        }
-        if ((ev.type === "yellow_card" || ev.type === "red_card") && ev.team && who) {
-          // 장부는 경고 2장을 자동 퇴장으로 바꾼다 — 같은 구간의 경고 여부로 second_yellow를 가른다
-          const second = ev.type === "red_card" && bookedHere.has(who);
-          if (ev.type === "yellow_card") bookedHere.add(who);
-          cards.push({
-            minute: ev.minute,
-            player: playerName(state, who),
-            kind: ev.type === "yellow_card" ? "yellow" : second ? "second_yellow" : "red",
-            ours: ev.team === ourSide,
-            team: sideTeamName(state, ev.team),
-          });
-        }
-      }
-      const ledger = pending.ledger;
-      return {
-        ok: true,
-        message: [
-          buildSegmentMessage(
-            step.events,
-            step.stop ?? "flow",
-            (id: string) => playerName(state, id),
-            (side: "home" | "away") => sideTeamName(state, side),
-          ),
-          ``,
-          `[구간 뒤 장부] 스코어 ${ledger.score.home}:${ledger.score.away} · ${ledger.minute}′ · ${ledger.phase}`,
-        ].join("\n"),
-      };
-    },
-  };
-}
-
-export function buildMatchTools(
-  state: GameState,
-  calls: GmToolCall[],
-  goals: GoalMark[] = [],
-  cards: CardMark[] = [],
-  options: { progressionOnly?: boolean } = {},
-): GameToolSpec[] {
-  const descriptions = skillDescriptions();
-  const allowed = options.progressionOnly
-    ? new Set(["get_squad", "search_players"])
-    : MATCH_TOOL_NAMES;
-  return [
-    ...buildGmTools(state, calls).filter((t) => allowed.has(t.name)),
-    makeAdvanceMatchTool(state, calls, goals, cards, descriptions.advance_match),
-  ];
+): void {
+  const running: { home: number; away: number } = { ...scoreBefore };
+  const ourSide = userSide(state);
+  /** 이 구간에 이미 경고를 받은 선수 — 두 번째 경고는 곧 퇴장이다 */
+  const bookedHere = new Set<string>();
+  for (const ev of events) {
+    const who = ev.actors[0];
+    if (ev.type === "goal" && ev.team) {
+      running[ev.team] += 1;
+      goals.push({
+        minute: ev.minute,
+        scorer: playerName(state, who ?? ""),
+        assist: ev.actors[1] ? playerName(state, ev.actors[1]) : null,
+        ours: ev.team === ourSide,
+        team: sideTeamName(state, ev.team),
+        score: { ...running },
+      });
+      continue;
+    }
+    if ((ev.type === "yellow_card" || ev.type === "red_card") && ev.team && who) {
+      // 장부는 경고 2장을 자동 퇴장으로 바꾼다 — 같은 구간의 경고 여부로 second_yellow를 가른다
+      const second = ev.type === "red_card" && bookedHere.has(who);
+      if (ev.type === "yellow_card") bookedHere.add(who);
+      cards.push({
+        minute: ev.minute,
+        player: playerName(state, who),
+        kind: ev.type === "yellow_card" ? "yellow" : second ? "second_yellow" : "red",
+        ours: ev.team === ourSide,
+        team: sideTeamName(state, ev.team),
+      });
+    }
+  }
 }
 
 /** 홈/어웨이 → 팀 이름 (중계 대본 표기용) */
-function sideTeamName(state: GameState, side: "home" | "away"): string {
+export function sideTeamName(state: GameState, side: "home" | "away"): string {
   const match = state.matches.find((m) => m.id === state.pendingMatch?.matchId);
   if (!match) return side === "home" ? "홈" : "어웨이";
   return teamName(side === "home" ? match.homeTeamId : match.awayTeamId);
