@@ -18,7 +18,7 @@ import { isMarketOnlyLeague, isTopLeague, leagueCatalogById } from "../data/leag
 import { competitionShortName, isCup, isEuroCup } from "../data/cup-catalog";
 import { isFriendly } from "../competition/friendly";
 import { isClubTeam, leagueOfTeam, teamCatalogById } from "../data/team-catalog";
-import { leagueOfTeamIn } from "../competition/promotion";
+import { clubEconomyLevelIn, leagueOfTeamIn } from "../competition/promotion";
 import { computeStandings } from "../competition/season";
 import {
   financeOf,
@@ -270,16 +270,23 @@ function brandPoolLift(state: GameState | undefined, teamId: string): number {
   return level > 0 ? clubEconomyLevel(teamId, tierOf(state, teamId)) / level : 1;
 }
 
+/**
+ * 이 파일의 경제 수준 통로 — `tierOf`와 같은 이유로 `state`가 두 문맥을 가른다.
+ * 세이브가 있으면 승강을 반영한 소속·체급을 읽는다: 강등한 구단이 2부 수입을
+ * 받으면서 1부 고정비를 내던 자리다 (finance.md §6.2).
+ */
+function economyOf(state: GameState | undefined, teamId: string): number {
+  return state ? clubEconomyLevelIn(state, teamId) : clubEconomyLevel(teamId, tierOf(state, teamId));
+}
+
 /** 시설·아카데미 월 고정비 — tier 정액에 구단 경제 수준을 곱한다 */
 function facilityCostOf(state: GameState | undefined, teamId: string): number {
-  const tier = tierOf(state, teamId);
-  return FACILITY_MONTHLY[tier] * clubEconomyLevel(teamId, tier);
+  return FACILITY_MONTHLY[tierOf(state, teamId)] * economyOf(state, teamId);
 }
 
 /** 이자·세금 월 고정비 — 같은 자 */
 function financeCostOf(state: GameState | undefined, teamId: string): number {
-  const tier = tierOf(state, teamId);
-  return FINANCE_COST_MONTHLY[tier] * clubEconomyLevel(teamId, tier);
+  return FINANCE_COST_MONTHLY[tierOf(state, teamId)] * economyOf(state, teamId);
 }
 
 /**

@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  clubEconomyLevel,
+  clubEconomyLevelIn,
   ensureMonthlyPosted,
+  isTopFlight,
+  isTopFlightIn,
   leagueOfTeamIn,
+  monthlyFixedCostOf,
   parachuteSeasonAmount,
+  seasonBudgetBaseOf,
   startParachute,
   stopParachute,
   type GameState,
@@ -86,6 +92,43 @@ describe("강등의 재정 타격", () => {
     expect(downEqual + parachute).toBeGreaterThan(topEqual * 0.4);
     // 그래도 1부에 있을 때보다는 확실히 적다
     expect(downEqual + parachute).toBeLessThan(topEqual);
+  });
+
+  it("고정비와 시즌 예산도 함께 내려간다 — 살림이 한 눈금 위에 선다", () => {
+    const state = createTestGame(42, "arsenal");
+    const fixedTop = monthlyFixedCostOf("arsenal", state);
+    const budgetTop = seasonBudgetBaseOf(state, "arsenal");
+
+    relegate(state, "arsenal");
+    const fixedDown = monthlyFixedCostOf("arsenal", state);
+    const budgetDown = seasonBudgetBaseOf(state, "arsenal");
+
+    expect(fixedDown).toBeLessThan(fixedTop);
+    expect(budgetDown).toBeLessThan(budgetTop);
+    // 체급은 그대로 두고 소속만 내렸으므로 움직인 것은 구단 경제 수준 하나다 —
+    // 두 자리가 같은 눈금을 읽는다면 낙폭의 비율도 같아야 한다
+    expect(fixedDown / fixedTop).toBeCloseTo(budgetDown / budgetTop, 6);
+  });
+
+  it("승격한 클럽은 그 자리에서 1부로 셈해진다", () => {
+    const state = createTestGame(42, "arsenal");
+    const promoted = state.teams.find((t) => leagueOfTeamIn(state, t.id) === "championship")!;
+    expect(isTopFlightIn(state, promoted.id)).toBe(false);
+    const before = monthlyFixedCostOf(promoted.id, state);
+
+    (state.leagueOf ??= {})[promoted.id] = "epl";
+
+    expect(isTopFlightIn(state, promoted.id)).toBe(true);
+    expect(monthlyFixedCostOf(promoted.id, state)).toBeGreaterThan(before);
+  });
+
+  it("카탈로그판은 승강을 보지 않는다 — 세계 생성이 읽는 자리다", () => {
+    const state = createTestGame(42, "arsenal");
+    relegate(state, "arsenal");
+
+    expect(isTopFlight("arsenal")).toBe(true);
+    expect(isTopFlightIn(state, "arsenal")).toBe(false);
+    expect(clubEconomyLevelIn(state, "arsenal")).toBeLessThan(clubEconomyLevel("arsenal"));
   });
 
   it("상업 수입은 늦게 떨어진다 — 스폰서 계약은 그날 끝나지 않는다", () => {
