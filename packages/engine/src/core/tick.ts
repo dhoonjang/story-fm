@@ -57,6 +57,7 @@ import { runAiTransfers } from "../market/ai-market";
 import { reviewUserSeat, runManagerMarket } from "../market/manager-market";
 import { matchRating } from "../match/ratings";
 import { scoutReportLine } from "../views/views";
+import { pruneDeferredScouts } from "../squad/scouting";
 import { grantManagerXP, settleTactics } from "../skills";
 import { allMatchesDone, endSeason } from "../competition/season";
 import { cancelTrainingOn, syncDefaultTraining } from "../squad/training-plan";
@@ -148,6 +149,8 @@ const SCOUT_REPORT_XP = 8;
  * 완료 이후 그 선수의 능력치 안개가 걷힌다 (scouting.ts).
  */
 function resolveScouting(state: GameState, digest: string[]): void {
+  // 한도에 막혀 못 나간 요청은 일주일이면 뜻이 지나간다 (player.md §9.4)
+  pruneDeferredScouts(state);
   for (const report of state.scoutReports) {
     if (report.completedOn !== null) continue;
     if (state.date < report.dueOn) continue;

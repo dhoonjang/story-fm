@@ -165,6 +165,7 @@ row, 지난 일 = 그대로 이력.**
 | `playerTraining` `PlayerTraining` | 개인 훈련 — 겨냥한 축·배우는 자리 | `domain/records.ts` |
 | `roleMemory` `RoleMemory` | 역할 기억 — 선수 × 자리 → 마지막에 맡긴 역할 | `domain/tactics.ts` |
 | `scoutReports` `ScoutReport` | 스카우트 파견 — `completedOn === null`이 파견 중 | `domain/records.ts` |
+| `deferredScouts` `DeferredScout` | 동시 한도에 막혀 못 나간 파견 요청 — 다음 턴 입력에 사실로 남는다 ([player.md](player.md) §9.4) | `domain/records.ts` |
 
 ### 3.5 진행 중인 흥정 · 세계의 부름
 

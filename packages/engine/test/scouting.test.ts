@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   advanceTime,
+  deferredScouts,
+  diffDays,
   knowledgeOf,
+  scoutingSummary,
   observedRating,
   playersOf,
   POTENTIAL_FLOOR,
@@ -23,7 +26,7 @@ import {
   playerById,
   buildOfficeViews,
 } from "@story-fm/engine";
-import { SCOUT_CONCURRENT_LIMIT, SCOUT_DAYS } from "@story-fm/domain";
+import { SCOUT_CONCURRENT_LIMIT, SCOUT_DAYS, SCOUT_DEFER_DAYS } from "@story-fm/domain";
 import { GAP_CONDITION } from "@story-fm/sim";
 import { advanceAndPlay, createTestGame, playMockMatch, settleFully } from "./helpers";
 
@@ -211,15 +214,62 @@ describe("스카우트 파견 규칙", () => {
     expect(again.message).toContain("이미");
   });
 
-  it("동시 파견 한도를 넘기면 반려한다", () => {
-    const state = createTestGame(11);
+  /** 셋을 채우고 넷째를 부른다 — 한도에 막힌 그 넷째를 돌려준다 */
+  function fillAndOverflow(state: GameState) {
     const pool = playersOf(state, "chelsea");
     for (let i = 0; i < SCOUT_CONCURRENT_LIMIT; i++) {
       expect(scoutPlayer(state, pool[i]!.id).ok).toBe(true);
     }
-    const over = scoutPlayer(state, pool[SCOUT_CONCURRENT_LIMIT]!.id);
-    expect(over.ok).toBe(false);
-    expect(over.message).toContain(`${SCOUT_CONCURRENT_LIMIT}명까지`);
+    const fourth = pool[SCOUT_CONCURRENT_LIMIT]!;
+    return { pool, fourth, result: scoutPlayer(state, fourth.id) };
+  }
+
+  it("동시 파견 한도를 넘기면 무엇이 나갔고 무엇이 안 나갔는지 말한다", () => {
+    const state = createTestGame(11);
+    const { pool, fourth, result } = fillAndOverflow(state);
+    expect(result.ok).toBe(false);
+    // 한도만 알려 주면 감독은 지목한 넷 중 누가 빠졌는지 알 수 없다
+    expect(result.message).toContain(fourth.name);
+    expect(result.message).toContain(pool[0]!.name);
+    expect(result.message).toContain(`${SCOUT_CONCURRENT_LIMIT}명`);
+  });
+
+  it("못 나간 요청은 대기로 남아 다음 턴 스카우팅 줄에 실린다", () => {
+    const state = createTestGame(11);
+    const { fourth } = fillAndOverflow(state);
+    expect(deferredScouts(state).map((d) => d.gamePlayerId)).toEqual([fourth.id]);
+    // 같은 이름을 다시 불러도 대기는 하나다
+    scoutPlayer(state, fourth.id);
+    expect(deferredScouts(state)).toHaveLength(1);
+    const summary = scoutingSummary(state).join("\n");
+    expect(summary).toContain(fourth.name);
+    expect(summary).toContain("빈 자리 없음");
+  });
+
+  it("자리가 나는 날에도 대기는 살아 있고, 다시 보내면 지워진다", () => {
+    const state = createTestGame(11);
+    const { fourth } = fillAndOverflow(state);
+    // 보고가 들어와 자리가 나는 그날 — 대기가 사라지면 감독은 넷째를 잊는다
+    advanceTime(state, { days: SCOUT_DAYS });
+    expect(deferredScouts(state)).toHaveLength(1);
+    expect(scoutingSummary(state).join("\n")).toContain(`지금 자리 ${SCOUT_CONCURRENT_LIMIT}`);
+    expect(scoutPlayer(state, fourth.id).ok).toBe(true);
+    // 나간 파견이 "아직 안 나갔다"로 남으면 한 화면이 두 말을 한다
+    expect(deferredScouts(state)).toHaveLength(0);
+    expect(state.deferredScouts).toHaveLength(0);
+  });
+
+  it("일주일을 넘긴 대기는 지운다 — 그 안에 자리는 반드시 난다", () => {
+    const state = createTestGame(11);
+    const requestedOn = state.date;
+    fillAndOverflow(state);
+    advanceTime(state, { days: SCOUT_DEFER_DAYS + 1 });
+    // 시계가 실제로 그만큼 넘어갔는지 — 중간에 멈췄으면 아래 단언이 뜻을 잃는다
+    expect(diffDays(requestedOn, state.date)).toBeGreaterThan(SCOUT_DEFER_DAYS);
+    expect(deferredScouts(state)).toHaveLength(0);
+    // 읽는 쪽이 걸러 준 게 아니라 tick이 지웠다
+    expect(state.deferredScouts).toHaveLength(0);
+    expect(scoutingSummary(state).join("\n")).not.toContain("미파견");
   });
 
   it("완료되면 다이제스트로 보고된다", () => {

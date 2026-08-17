@@ -270,6 +270,26 @@ export type ScoutReport = z.infer<typeof ScoutReportSchema>;
 export const SCOUT_DAYS = 7;
 export const SCOUT_CONCURRENT_LIMIT = 3;
 
+/**
+ * **한도에 막혀 못 나간 파견 요청** — 감독이 지목했으나 동시 한도가 차서 나가지
+ * 못한 이름. 반려는 스킬 결과 문구로 그 턴에 한 번 나가고 끝이라, 남겨 두지
+ * 않으면 다음 턴의 모델에는 읽을 자리가 없다 (player.md §9.4).
+ *
+ * 파견이 아니므로 `ScoutReport`가 아니다 — 여기 있는 이름은 아직 아무 데도 안
+ * 갔고, `completedOn === null`을 세는 모든 곳이 그것을 파견 중으로 읽으면 안 된다.
+ */
+export const DeferredScoutSchema = z.object({
+  gamePlayerId: z.string().min(1),
+  requestedOn: DateString,
+});
+export type DeferredScout = z.infer<typeof DeferredScoutSchema>;
+
+/**
+ * 못 나간 요청을 붙들고 있는 기간. 자리는 늦어도 `SCOUT_DAYS` 안에 나므로,
+ * 그 안에 안 나갔으면 감독의 뜻이 지나간 것이다.
+ */
+export const SCOUT_DEFER_DAYS = SCOUT_DAYS;
+
 export const PlayerIssueSchema = z.object({
   gamePlayerId: z.string().min(1),
   kind: z.enum(["unhappy"]),

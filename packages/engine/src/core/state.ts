@@ -3,6 +3,7 @@ import type {
   AxisValues,
   Booking,
   Contract,
+  DeferredScout,
   FinanceReport,
   Formation,
   GamePlayer,
@@ -562,6 +563,20 @@ export interface GameState {
   pendingReportCards?: string[];
   /** 스카우트 파견·완료 이력 — 타 팀 선수 안개의 근거 (scouting.ts) */
   scoutReports: ScoutReport[];
+  /**
+   * **못 나간 파견 요청** — 감독이 지목했으나 동시 한도가 차서 나가지 못한 이름.
+   *
+   * 반려 문구는 그 턴에만 살아 있고 다음 턴 입력에는 남지 않는다. 그 자리가
+   * 비면 모델은 "넷째는 어떻게 됐나"를 기억으로 메우고, 부르지 않은 파견을
+   * 완료형으로 말한다 — 그래서 사실로 남긴다
+   * (→ [docs/data/player.md](../../../../docs/data/player.md) §9.4).
+   *
+   * 코어는 자리가 나도 대신 보내지 않는다 — 상태 전이는 스킬 한 경로뿐이다.
+   * 지우는 것은 `scoutingSummary`를 읽는 쪽이 아니라 파견·만료다
+   * (`dropDeferredScout`·`pruneDeferredScouts`). 옛 세이브엔 없다
+   * (optional — SAVE_VERSION 유지).
+   */
+  deferredScouts?: DeferredScout[];
   /** 진행 중 협상 — 며칠에 걸쳐 오퍼가 오가므로 파생으로 되돌릴 수 없다 */
   negotiations: Negotiation[];
   /**
