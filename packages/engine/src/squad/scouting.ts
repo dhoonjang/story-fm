@@ -1,4 +1,10 @@
-import type { AttributeAxis, AxisValues, GamePlayer, ScoutReport } from "@story-fm/domain";
+import type {
+  AttributeAxis,
+  AxisValues,
+  DeferredScout,
+  GamePlayer,
+  ScoutReport,
+} from "@story-fm/domain";
 import {
   ATTRIBUTE_AXES,
   AXIS_KO,
@@ -6,9 +12,12 @@ import {
   conditionLabel,
   naturalPositionOf,
   roleFit,
+  SCOUT_CONCURRENT_LIMIT,
+  SCOUT_DEFER_DAYS,
 } from "@story-fm/domain";
 import { GAP_CONDITION } from "@story-fm/sim";
 import { isSettling, settlingNote, settlingOf } from "./settling";
+import { diffDays } from "../competition/calendar";
 import { hashChannel } from "../core/rng";
 import { playerById, teamName, type GameState } from "../core/state";
 
@@ -397,15 +406,78 @@ export function strengthsAndWeaknesses(
   };
 }
 
-/** 스카우팅 진행 현황 요약 — 상태 헤더·다이제스트용 */
+// ── 못 나간 파견 (한도에 막힌 요청) ─────────────────────
+/** 대기 줄에 이름을 몇까지 적는가 — 나머지는 수로만 (주의 줄은 매 턴 정가다) */
+const SCOUT_SUMMARY_NAMES = 3;
+
+/**
+ * 아직 살아 있는 대기 요청 — 요청 뒤 `SCOUT_DEFER_DAYS`까지, 그리고 여전히 타 팀
+ * 선수인 것만. 우리가 데려온 선수는 스카우트를 보낼 대상이 아니다.
+ */
+export function deferredScouts(state: GameState): DeferredScout[] {
+  return (state.deferredScouts ?? []).filter((d) => {
+    if (diffDays(d.requestedOn, state.date) > SCOUT_DEFER_DAYS) return false;
+    const p = playerById(state, d.gamePlayerId);
+    return !!p && p.teamId !== state.userTeamId;
+  });
+}
+
+/** 한도에 막힌 요청을 대기로 남긴다 — 같은 선수는 한 번만, 날짜는 첫 요청 그대로 */
+export function deferScout(state: GameState, playerId: string): void {
+  const queue = (state.deferredScouts ??= []);
+  if (queue.some((d) => d.gamePlayerId === playerId)) return;
+  queue.push({ gamePlayerId: playerId, requestedOn: state.date });
+}
+
+/** 나갔거나 더는 대상이 아닌 요청을 지운다 */
+export function dropDeferredScout(state: GameState, playerId: string): void {
+  if (!state.deferredScouts) return;
+  state.deferredScouts = state.deferredScouts.filter((d) => d.gamePlayerId !== playerId);
+}
+
+/** 만료·무효 요청 정리 — tick이 하루에 한 번 부른다 */
+export function pruneDeferredScouts(state: GameState): void {
+  if (!state.deferredScouts?.length) return;
+  state.deferredScouts = deferredScouts(state);
+}
+
+/** 지금 비어 있는 파견 자리 */
+export function freeScoutSlots(state: GameState): number {
+  const inFlight = state.scoutReports.filter((r) => r.completedOn === null).length;
+  return Math.max(0, SCOUT_CONCURRENT_LIMIT - inFlight);
+}
+
+/**
+ * 스카우팅 진행 현황 요약 — 상태 헤더·다이제스트용.
+ *
+ * 파견 중인 것 **다음에 못 나간 것**이 온다. 반려 문구는 그 턴에만 살아 있어서,
+ * 이 줄이 없으면 다음 턴의 모델에는 넷째를 읽을 자리가 없다 (player.md §9.4).
+ */
 export function scoutingSummary(state: GameState): string[] {
-  return state.scoutReports
+  const lines = state.scoutReports
     .filter((r) => r.completedOn === null)
     .map((r) => {
       const p = playerById(state, r.gamePlayerId);
       if (!p) return `스카우트 파견 중 (보고 ${r.dueOn})`;
       return `${p.name} (${teamName(p.teamId)}) 스카우트 파견 중 — 보고 ${r.dueOn}`;
     });
+  const waiting = deferredScouts(state);
+  if (waiting.length > 0) {
+    const names = waiting
+      .slice(0, SCOUT_SUMMARY_NAMES)
+      .map((d) => {
+        const p = playerById(state, d.gamePlayerId);
+        return p ? `${p.name} (${teamName(p.teamId)})` : d.gamePlayerId;
+      })
+      .join(", ");
+    const free = freeScoutSlots(state);
+    lines.push(
+      `스카우트 미파견 ${waiting.length}명 (${names}${waiting.length > SCOUT_SUMMARY_NAMES ? " …" : ""}) — ` +
+        `동시 한도 ${SCOUT_CONCURRENT_LIMIT}에 막혀 아직 안 나갔다 · ` +
+        (free > 0 ? `지금 자리 ${free}` : "빈 자리 없음"),
+    );
+  }
+  return lines;
 }
 
 // ── 잠재력 (폭으로만 안다) ──────────────────────────────
