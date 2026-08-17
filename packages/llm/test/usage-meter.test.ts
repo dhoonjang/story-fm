@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  MAX_TRACED_TURNS,
   TokenBudgetExceededError,
   addUsage,
   billedTokens,
@@ -16,11 +15,6 @@ import {
   recordUsage,
   resetLlmUsage,
   agentAllowed,
-  bindTurnTrace,
-  clearTurnTraces,
-  tapLlm,
-  traceTurn,
-  turnTrace,
   type GameLLM,
   type TurnResult,
   type TurnUsage,
@@ -52,7 +46,6 @@ function stubLlm(usage: TurnUsage, calls: { count: number } = { count: 0 }): Gam
 
 afterEach(() => {
   resetLlmUsage();
-  clearTurnTraces();
   vi.restoreAllMocks();
 });
 
@@ -264,96 +257,5 @@ describe("meterLlm — 계약이 같으므로 부르는 쪽은 감싼 줄 모른
     expect(calls.count).toBe(3);
     // 같은 경고를 매 턴 반복하지 않는다
     expect(warn.mock.calls.filter((c) => String(c[0]).includes("계속 실행"))).toHaveLength(1);
-  });
-});
-
-/**
- * 원문 기록 (models.md §5) — 계측과 같은 자리에 붙지만 세는 것이 아니라 **남기는**
- * 것이라 경계가 둘 더 있다: 프로세스 메모리를 무한정 물지 않고, production에서는
- * 아무것도 쌓이지 않는다.
- */
-describe("tapLlm — 개발 모드에서만 원문을 남긴다", () => {
-  const dev = { NODE_ENV: "development" };
-
-  it("한 턴에 오간 호출을 그 턴 인덱스 아래 순서대로 쌓는다", async () => {
-    const gm = tapLlm(stubLlm(usageOf({ inputTokens: 100, outputTokens: 20 })), "gm", dev);
-    const rater = tapLlm(stubLlm(usageOf({ inputTokens: 30 })), "match-rater", dev);
-
-    await traceTurn(async () => {
-      await gm.runTurn({ system: ["고정", "레퍼런스"], history: [], user: "전방 압박" });
-      await rater.runTurn({ system: "S", history: [], user: "평점" });
-      bindTurnTrace("g1", 7);
-    }, dev);
-
-    const calls = turnTrace("g1", 7);
-    expect(calls.map((c) => c.agent)).toEqual(["gm", "match-rater"]);
-    const first = calls[0]!;
-    expect(first.request.system).toEqual(["고정", "레퍼런스"]);
-    expect(first.request.user).toBe("전방 압박");
-    expect(first.response?.usage.inputTokens).toBe(100);
-    // 묶지 않은 자리는 비어 있다 — 남의 턴을 열지 않는다
-    expect(turnTrace("g1", 6)).toEqual([]);
-  });
-
-  /** 실패한 호출이야말로 원문을 보고 싶은 자리다 — 시한을 넘긴 턴이 그렇다 */
-  it("실패한 호출도 요청과 이유를 남기고 오류는 그대로 올린다", async () => {
-    const broken: GameLLM = {
-      async runTurn(): Promise<TurnResult> {
-        throw new Error("gm 에이전트가 180000ms 안에 응답하지 않았습니다 (timeout)");
-      },
-    };
-    const llm = tapLlm(broken, "gm", dev);
-
-    await traceTurn(async () => {
-      await expect(llm.runTurn({ system: "S", history: [], user: "지시" })).rejects.toThrow(
-        /timeout/,
-      );
-      bindTurnTrace("g1", 0);
-    }, dev);
-
-    const call = turnTrace("g1", 0)[0]!;
-    expect(call.response).toBeNull();
-    expect(call.error).toContain("timeout");
-    expect(call.request.user).toBe("지시");
-  });
-
-  it("링버퍼 상한을 넘기면 오래된 턴부터 버린다", async () => {
-    const llm = tapLlm(stubLlm(usageOf({ inputTokens: 10 })), "gm", dev);
-    const overflow = 3;
-    for (let index = 0; index < MAX_TRACED_TURNS + overflow; index++) {
-      await traceTurn(async () => {
-        await llm.runTurn({ system: "S", history: [], user: `턴 ${index}` });
-        bindTurnTrace("g1", index);
-      }, dev);
-    }
-
-    // 오래된 쪽은 사라졌다 — 세이브가 아니라 최근 몇 턴을 보는 창이다
-    for (let index = 0; index < overflow; index++) {
-      expect(turnTrace("g1", index)).toEqual([]);
-    }
-    expect(turnTrace("g1", overflow)).toHaveLength(1);
-    expect(turnTrace("g1", MAX_TRACED_TURNS + overflow - 1)).toHaveLength(1);
-  });
-
-  /** 켜지는 조건은 production이 아닐 때 — 라우트도 화면도 같은 기준으로 닫힌다 */
-  it("production에서는 아무것도 쌓이지 않는다 — 호출은 그대로 돈다", async () => {
-    const prod = { NODE_ENV: "production" };
-    const calls = { count: 0 };
-    const llm = tapLlm(stubLlm(usageOf({ inputTokens: 10 }), calls), "gm", prod);
-
-    await traceTurn(async () => {
-      await llm.runTurn({ system: "S", history: [], user: "지시" });
-      bindTurnTrace("g1", 0);
-    }, prod);
-
-    expect(calls.count).toBe(1);
-    expect(turnTrace("g1", 0)).toEqual([]);
-  });
-
-  /** 턴 범위 밖의 호출(CLI·테스트)은 묶을 자리가 없다 */
-  it("턴 범위 밖의 호출은 기록하지 않는다", async () => {
-    const llm = tapLlm(stubLlm(usageOf({ inputTokens: 10 })), "gm", dev);
-    await llm.runTurn({ system: "S", history: [], user: "범위 밖" });
-    expect(turnTrace("g1", 0)).toEqual([]);
   });
 });
