@@ -379,16 +379,6 @@ function causesFor(packet: StrengthPacket, side: MatchSide): string[] {
 }
 
 /**
- * 추가시간 — 전반 1~4분, 후반 2~6분, **연장 하프는 1~2분**. 결정적으로 뽑는다.
- * 연장이 짧은 건 15분짜리 하프라 멈춰 있던 시간도 그만큼 적기 때문이다.
- */
-function stoppageTime(rng: () => number, phase: PlayPhase): number {
-  if (phase === "first_half") return 1 + Math.floor(rng() * 4);
-  if (phase === "second_half") return 2 + Math.floor(rng() * 5);
-  return 1 + Math.floor(rng() * 2);
-}
-
-/**
  * 연장 30분의 기대 득점 — **정규 90분 대비 배율.** 시간 비율(1/3)보다 낮다:
  * 지친 다리로 뛰는 시간이고 승부차기가 보이는 자리라 양 팀 다 잃지 않는 쪽으로 기운다.
  *
@@ -457,12 +447,23 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
       rates.shot[side] *= EXTRA_TIME_DENSITY;
     }
   }
+  /**
+   * 이 하프가 끝나는 시각 — **규정 분수 그대로다** (match.md §2).
+   *
+   * 추가시간을 여기에 얹으면 그 하프의 끝이 다음 하프의 시작이 되어 시계가 국면마다
+   * 불어난다: 후반이 46~49′에서 시작하고 90분 기준선이 92~96분이 되며, 연장 두
+   * 하프는 밀려서 30분이 27분으로 줄어든다. 슈팅률도 피로도 `/90` 눈금이라
+   * (`ratesOf`·stamina.ts) 시계가 어긋난 만큼 경기당 슛과 소모가 함께 어긋난다.
+   */
   const halfEnd = PHASE_END[phase];
-  const limit = halfEnd + stoppageTime(rng, phase);
   /** 이 구간이 흐를 수 있는 분 — 호출부가 더 짧게 부를 수는 있어도 길게는 못 한다 */
   const span = Math.min(MAX_SEGMENT_MINUTES, input.maxMinutes ?? MAX_SEGMENT_MINUTES);
 
   const started = ledger.events.some((e) => e.type === "kickoff");
+  /**
+   * 하프의 첫 구간은 그 국면이 시작하는 분에서 출발한다 — 앞 하프가 규정 시각에
+   * 끝나므로(`halfEnd`) 45·90·105가 그대로 다음 하프의 0분이다.
+   */
   let t = Math.max(ledger.minute, PHASE_START[phase]);
   if (!started) {
     events.push({ minute: 0, type: "kickoff", actors: [], causes: [] });
@@ -615,10 +616,9 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
     const wait = -Math.log(Math.max(1e-9, 1 - rng())) / Math.max(1e-6, rate);
     t += Math.max(0.5, wait);
 
-    if (t >= limit) {
-      // 추가시간은 구간마다 새로 뽑히므로(난수 채널이 다르다) 앞 구간이 이미 지나간
-      // 시각보다 이른 종료가 나올 수 있다. 장부는 시간 역행을 반려하므로 여기서 막는다
-      const minute = Math.max(Math.ceil(limit), ledger.minute, halfEnd);
+    if (t >= halfEnd) {
+      // 장부는 시간 역행을 반려한다 — 짧게 부른 구간이 밀어 둔 시각보다 이르면 안 된다
+      const minute = Math.max(halfEnd, ledger.minute);
       /**
        * 국면이 끝나는 방식은 넷이다 — 하프타임 · **연장 개시** · 연장 하프타임 · 종료.
        * 90분 뒤에 연장이 붙는지는 코어가 이미 정해서 넘겨준다(`toExtraTime`).
@@ -635,7 +635,16 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
       return finish(closing, minute);
     }
     if (t - from >= span || events.length >= MAX_SEGMENT_EVENTS) {
-      return finish("flow", Math.max(Math.floor(t), ledger.minute));
+      /**
+       * **장부가 멈추는 자리에서 함께 멈춘다** (match.md §3).
+       *
+       * 배치가 끝나면 장부의 시각은 마지막 사건의 분이다. 그 뒤의 대기까지 이 구간의
+       * 시각으로 돌려주면, 같은 분에서 다시 출발하는 다음 구간이 그 1~2분의 피로와
+       * 패스를 한 번 더 센다. 사건이 하나도 없는 구간만 흐른 시각 그대로다 —
+       * 그때는 흔적 하나(`finish`의 chance)나 호출부의 `advanceClock`이 시계를 민다.
+       */
+      const last = events[events.length - 1]?.minute ?? Math.floor(t);
+      return finish("flow", Math.max(last, ledger.minute));
     }
 
     const minute = Math.max(1, Math.floor(t));
@@ -726,8 +735,8 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
   }
 
   // 발생률이 0에 가까운 극단 — 조용히 흐름만 흘렀다
-  const minute = Math.min(limit - 1, Math.floor(t));
-  return finish("flow", Math.max(from, minute));
+  const quiet = events[events.length - 1]?.minute ?? Math.min(halfEnd - 1, Math.floor(t));
+  return finish("flow", Math.max(from, quiet, ledger.minute));
 }
 
 /**
