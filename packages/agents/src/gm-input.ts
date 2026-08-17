@@ -27,6 +27,7 @@ import {
   squadFamiliarity,
   squadLevelOf,
   squadReturnOf,
+  subLimitsOf,
   tacticsOf,
   teamName,
   userPlayers,
@@ -457,13 +458,19 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
   ];
   // 사건은 싣지 않는다 — 코어가 이미 굴린 구간은 [이번 구간에 일어난 일]로 따로
   // 실린다. 이 블록은 그 구간이 끝난 자리의 장부다 (agents.md §3)
+  /**
+   * 교체 한도는 **국면이 정한다** — 연장은 6인/4회다 (match.md §5). 5/3으로 박아
+   * 두면 연장에 들어간 모델이 아직 남은 카드를 없는 것으로 읽는다. 장부 검증과
+   * AI 판단이 보는 것과 같은 함수다.
+   */
+  const subLimits = subLimitsOf(ledger.phase);
   return [
     `[경기 장부 — 매 턴 갱신]`,
     `스코어 ${ledger.score.home}:${ledger.score.away} · ${ledger.minute}′ · ${ledger.phase}`,
     `홈 온필드: ${withNames(ledger.home.onPitch)}`,
-    `홈 벤치: ${withNames(ledger.home.bench)} (교체 ${ledger.home.subsUsed}/5, 기회 ${ledger.home.subWindows}/3)`,
+    `홈 벤치: ${withNames(ledger.home.bench)} (교체 ${ledger.home.subsUsed}/${subLimits.maxSubs}, 기회 ${ledger.home.subWindows}/${subLimits.maxSubWindows})`,
     `어웨이 온필드: ${withNames(ledger.away.onPitch)}`,
-    `어웨이 벤치: ${withNames(ledger.away.bench)} (교체 ${ledger.away.subsUsed}/5)`,
+    `어웨이 벤치: ${withNames(ledger.away.bench)} (교체 ${ledger.away.subsUsed}/${subLimits.maxSubs}, 기회 ${ledger.away.subWindows}/${subLimits.maxSubWindows})`,
     ledger.sentOff.length > 0 ? `퇴장: ${withNames(ledger.sentOff)}` : "",
     ...standingLines,
     ...packetLines,
