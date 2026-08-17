@@ -13,6 +13,7 @@ import {
   naturalPositionOf,
   positionGroupOf,
   positionGroupOfPlayer,
+  PROFICIENCY_MAX,
   TacticsSpecSchema,
   tacticsSignature,
 } from "@story-fm/domain";
@@ -45,6 +46,7 @@ import {
   activeSuspension,
   assignmentsOf,
   ensureSeasonStat,
+  firstTeamPlayers,
   isInjured,
   isSuspended,
   groupOf,
@@ -179,31 +181,40 @@ export function refreshPacket(state: GameState): void {
   const pending = state.pendingMatch;
   if (!pending) return;
   const match = currentMatch(state);
-  const build = (teamId: string, ledgerSide: { onPitch: string[]; bench: string[] }) => ({
-    teamId,
-    teamName: teamName(teamId),
-    starters: slotsFor(state, teamId, ledgerSide.onPitch),
-    bench: slotsFor(state, teamId, ledgerSide.bench),
-    // 상대가 경기 중 바꾼 전술이 있으면 그것으로 — 저장된 팀 전술은 그대로 둔다
-    tactics:
-      teamId !== state.userTeamId && pending.aiTactics
-        ? pending.aiTactics
-        : tacticsOf(state, teamId).spec,
-    managerTactics: managerTacticsOf(state, teamId),
+  const build = (teamId: string, ledgerSide: { onPitch: string[]; bench: string[] }) => {
+    const starters = slotsFor(state, teamId, ledgerSide.onPitch);
     /**
-     * 감독의 **분석 능력** — 키포인트를 몇 개나 발견하는가 (key-points.ts).
-     * 우리 팀에만 준다: 이 패킷은 감독이 보는 화면이고, 상대 벤치의 눈은 여기 없다.
+     * **그라운드에 선 순간의 자리를 남긴다** — 경기 뒤 포지션 적응도가 읽는 값이다
+     * (match.md §6). 자리를 정하는 곳이 여기 하나이므로 여기서 적는다.
      */
-    ...(teamId === state.userTeamId
-      ? {
-          managerAnalysis: state.manager.attributes.analysis,
-          // 감독이 겨냥한 지점 — 없는 id는 패킷이 조용히 버린다 (exploits.ts)
-          ...(pending.exploits ? { exploits: pending.exploits } : {}),
-          ...(pending.regionalPlans ? { regional: pending.regionalPlans } : {}),
-        }
-      : {}),
-    directives: directivesOnPitch(state, teamId, ledgerSide.onPitch),
-  });
+    const seats = (pending.positionsPlayed ??= {});
+    for (const slot of starters) seats[slot.player.id] = slot.position;
+    return {
+      teamId,
+      teamName: teamName(teamId),
+      starters,
+      bench: slotsFor(state, teamId, ledgerSide.bench),
+      // 상대가 경기 중 바꾼 전술이 있으면 그것으로 — 저장된 팀 전술은 그대로 둔다
+      tactics:
+        teamId !== state.userTeamId && pending.aiTactics
+          ? pending.aiTactics
+          : tacticsOf(state, teamId).spec,
+      managerTactics: managerTacticsOf(state, teamId),
+      /**
+       * 감독의 **분석 능력** — 키포인트를 몇 개나 발견하는가 (key-points.ts).
+       * 우리 팀에만 준다: 이 패킷은 감독이 보는 화면이고, 상대 벤치의 눈은 여기 없다.
+       */
+      ...(teamId === state.userTeamId
+        ? {
+            managerAnalysis: state.manager.attributes.analysis,
+            // 감독이 겨냥한 지점 — 없는 id는 패킷이 조용히 버린다 (exploits.ts)
+            ...(pending.exploits ? { exploits: pending.exploits } : {}),
+            ...(pending.regionalPlans ? { regional: pending.regionalPlans } : {}),
+          }
+        : {}),
+      directives: directivesOnPitch(state, teamId, ledgerSide.onPitch),
+    };
+  };
   pending.packet = buildStrengthPacket(
     build(match.homeTeamId, pending.ledger.home),
     build(match.awayTeamId, pending.ledger.away),
@@ -882,6 +893,64 @@ export function buildRatingBrief(state: GameState): MatchRatingBrief | null {
 }
 
 /**
+ * **그 자리에서 뛴 한 경기의 값** — 포지션 적응도의 경기 경로 (match.md §6).
+ *
+ * 양 팀 공통이다: 우리 명단만 올리면 우리를 상대한 클럽만 자리를 못 익힌다.
+ * 훈련의 전향(`POSITION_TRAIN_MAX` 0~2)이 이 값을 기준으로 서 있다.
+ */
+export const MATCH_PROFICIENCY_GAIN = 1;
+
+/**
+ * 그 경기에 **실제로 밟은 자리** — 패킷을 세울 때 남겨 둔 값이 원본이다.
+ * 저장된 배치를 읽으면 교체 투입자가 벤치 배치의 자리로, 로테이션으로 다른 자리에
+ * 선 선수가 원래 자리로 오른다. 옛 세이브(자리 기록 없음)만 배치로 되짚는다.
+ */
+function seatOf(state: GameState, player: GamePlayer): string {
+  const recorded = state.pendingMatch?.positionsPlayed?.[player.id];
+  if (recorded) return recorded;
+  const assignment = assignmentsOf(state, player.teamId).find((a) => a.playerId === player.id);
+  return assignment?.position ?? naturalPositionOf(player).position;
+}
+
+/**
+ * 실전 경험 — 그 자리의 적응도가 `MATCH_PROFICIENCY_GAIN`만큼 오른다.
+ *
+ * 목록에 없던 자리는 폴백값(`proficiencyAt` — player.md §8)이 시작점이 되어 함께
+ * 오른다. 값을 그대로 두고 성장 로그만 남기면 장부가 일어나지 않은 상승을 적는다.
+ */
+function gainMatchProficiency(
+  state: GameState,
+  player: GamePlayer,
+  position: string,
+  entryId: string | null,
+): void {
+  const slot = player.positions.find((p) => p.position === position);
+  if (slot) {
+    if (slot.proficiency >= PROFICIENCY_MAX) return; // 천장 — 장부에 적을 것이 없다
+    slot.proficiency = Math.min(PROFICIENCY_MAX, slot.proficiency + MATCH_PROFICIENCY_GAIN);
+  } else {
+    // 처음 맡은 자리 — 경험이 쌓이기 시작한다
+    player.positions.push({
+      position,
+      proficiency: Math.min(
+        PROFICIENCY_MAX,
+        proficiencyAt(player, position) + MATCH_PROFICIENCY_GAIN,
+      ),
+      isNatural: false,
+    });
+  }
+  recordGrowth(
+    state,
+    player.id,
+    entryId,
+    "match",
+    `pos:${position}`,
+    MATCH_PROFICIENCY_GAIN,
+    slot ? "실전 경험" : "새 포지션 경험",
+  );
+}
+
+/**
  * 경기 후 결산이 낸 줄 — **갈래로 나뉘어 있다** (docs/simulation/match.md §6).
  *
  * 한 덩어리 `string[]`이던 때는 우리 경기 스코어와 같은 라운드 다른 경기 전부와
@@ -977,23 +1046,20 @@ export function finalizeMatch(state: GameState): MatchDigest {
   const entry = state.schedule.find((e) => e.type === "match" && e.refId === match.id);
   if (entry) entry.status = "done";
 
-  const roster = userPlayers(state);
-  const assignments = new Map(
-    assignmentsOf(state, state.userTeamId).map((a) => [a.playerId, a] as const),
-  );
-  const played = new Set(side === "home" ? homeLineup : awayLineup);
-
   /**
-   * 폼은 **개인 평점**이 만든다 (form.ts). 앵커는 아래에서 박지만 브리프에 이미
-   * 들어 있으므로 여기서 읽는다 — 팀 결과만 보던 예전 모델은 이긴 경기에 부진한
-   * 선수도 똑같이 올려서 열한 명이 한 몸처럼 움직였다.
+   * 폼은 **개인 평점**이 만든다 (form.ts). 우리 팀의 앵커는 브리프가 원본이므로
+   * 여기서 읽는다 — 팀 결과만 보던 예전 모델은 이긴 경기에 부진한 선수도 똑같이
+   * 올려서 열한 명이 한 몸처럼 움직였다. 상대 팀의 평점은 같은 공식(`matchRating`)을
+   * 장부에서 다시 부른다: 브리프는 감독이 읽는 화면이라 우리 명단만 담는다.
    */
   const anchorOfPlayer = new Map((brief?.players ?? []).map((p) => [p.playerId, p.anchor]));
-  const userGoalEvents = ledger.events.filter((e) => e.type === "goal" && e.team === side);
-  /** 골 이벤트의 actors는 [득점자, (도움)] — 두 번째를 득점으로 세면 안 된다 */
-  const userScorers = userGoalEvents.map((e) => e.actors[0]).filter((id): id is string => !!id);
-  const userAssisters = userGoalEvents.map((e) => e.actors[1]).filter((id): id is string => !!id);
 
+  /**
+   * **친선은 장부에 남지 않는다** (season.md §2의 닿는다/닿지 않는다 표).
+   * 몸에 남는 것(체력·폼·부상·적응도)은 그대로 정산하고, 시즌 기록·징계처럼
+   * 대회에 매달린 것만 건너뛴다.
+   */
+  const friendly = isFriendly(match);
   /**
    * **경기가 실제로 가져간 만큼 깎는다** (`pendingMatch.matchFatigue`).
    *
@@ -1003,108 +1069,114 @@ export function finalizeMatch(state: GameState): MatchDigest {
    * 축구의 대가도, 지구력이라는 능력치도 장부에 남지 않았다. 이제 화면에서 보던
    * 그 소모가 그대로 정산된다.
    */
-  /**
-   * **친선은 장부에 남지 않는다** (season.md §2의 닿는다/닿지 않는다 표).
-   * 몸에 남는 것(체력·폼·부상·적응도)은 그대로 정산하고, 시즌 기록·징계처럼
-   * 대회에 매달린 것만 건너뛴다.
-   */
-  const friendly = isFriendly(match);
   const drained = pending.matchFatigue ?? {};
-  for (const player of roster) {
-    if (!played.has(player.id)) continue;
-    if (!friendly) ensureSeasonStat(state, player.id, player.teamId).apps += 1;
-    // 체력은 몸의 소모만 정산한다. 승패의 심리 효과는 formDeltaFromMatch가 맡는다.
-    player.state.condition = clampCondition(player.state.condition - (drained[player.id] ?? 0));
-    player.state.form = clampForm(
-      player.state.form + formDeltaFromMatch(player, anchorOfPlayer.get(player.id), outcome),
-    );
+  const lineupOf = { home: homeLineup, away: awayLineup } as const;
+  const teamIdOf = { home: match.homeTeamId, away: match.awayTeamId } as const;
+
+  /**
+   * **한 팀의 마감** — 양 팀이 이 함수를 지난다 (match.md §6).
+   *
+   * 우리 명단만 돌던 때는 우리와 붙은 클럽만 출전·득점·평점·폼·징계 없이 시즌을
+   * 보냈다. 살라가 우리를 상대로 두 골을 넣어도 시즌 득점은 그대로였고, 퇴장당한
+   * 상대는 다음 경기에 정상 출전했다 — 득점왕과 평점 순위가 우리 경기만큼 어긋난
+   * 것이다. 간이 시뮬(`tick.ts`)이 자기 경기의 양 팀에 적는 것과 **같은 함수**를
+   * 쓴다: 리그가 우리 팀만의 규칙으로 돌면 안 된다.
+   */
+  const settleSide = (which: "home" | "away"): void => {
+    const teamId = teamIdOf[which];
+    const ours = which === side;
+    const events = ledger.events.filter((e) => e.team === which);
+    /** 골 이벤트의 actors는 [득점자, (도움)] — 두 번째를 득점으로 세면 안 된다 */
+    const goals = events.filter((e) => e.type === "goal");
+    const scored = which === "home" ? ledger.score.home : ledger.score.away;
+    const conceded = which === "home" ? ledger.score.away : ledger.score.home;
+    const result = scored > conceded ? "win" : scored === conceded ? "draw" : "loss";
+    const cardsOf = (id: string, type: MatchEvent["type"]) =>
+      events.filter((e) => e.type === type && e.actors[0] === id).length;
+
+    for (const id of lineupOf[which]) {
+      const player = playerById(state, id);
+      if (!player) continue;
+      const scoredBy = goals.filter((e) => e.actors[0] === id).length;
+      const assists = goals.filter((e) => e.actors[1] === id).length;
+      const rating =
+        anchorOfPlayer.get(id) ??
+        matchRating({
+          group: positionGroupOfPlayer(player),
+          goals: scoredBy,
+          assists,
+          yellows: cardsOf(id, "yellow_card"),
+          reds: cardsOf(id, "red_card"),
+          conceded,
+          outcome: result,
+        });
+      if (!friendly) {
+        const stat = ensureSeasonStat(state, id, player.teamId);
+        stat.apps += 1;
+        stat.goals += scoredBy;
+        if (assists > 0) stat.assists = (stat.assists ?? 0) + assists;
+        stat.ratingSum = (stat.ratingSum ?? 0) + rating;
+      }
+      // 체력은 몸의 소모만 정산한다. 승패의 심리 효과는 formDeltaFromMatch가 맡는다.
+      // 폼에 골을 따로 더하지 않는 이유도 같다 — 골은 이미 평점에 크게 들어가 있고,
+      // 또 올리면 이중 계산이라 "골 넣은 선수만 즉시 최고 폼"이 된다.
+      player.state.condition = clampCondition(player.state.condition - (drained[id] ?? 0));
+      player.state.form = clampForm(player.state.form + formDeltaFromMatch(player, rating, result));
+      /**
+       * ⚠️ **전술 적응도는 여기서 올리지 않는다.** 경기가 그 선수에게 무엇을 남겼는지는
+       * 사건 목록을 읽는 평점 판정이 함께 정한다(`match-rater` → `applyMatchFamiliarity`).
+       * 출전 시간은 그 판정의 기준값으로만 넘어간다.
+       */
+      gainMatchProficiency(state, player, seatOf(state, player), entry?.id ?? null);
+    }
 
     /**
-     * ⚠️ **전술 적응도는 여기서 올리지 않는다.** 경기가 그 선수에게 무엇을 남겼는지는
-     * 사건 목록을 읽는 평점 판정이 함께 정한다(`match-rater` → `applyMatchFamiliarity`).
-     * 출전 시간은 그 판정의 기준값으로만 넘어간다.
+     * 정지 소화 — 이 경기에 결장한 정지자는 1경기 차감. **새 카드보다 먼저** 처리한다:
+     * 순서가 뒤집히면 방금 퇴장당한 선수가 그 경기로 정지를 소화해 버린다.
+     * 우리 정지자는 킥오프 시점의 명단(`servingSuspension`)이 원본이고, 상대는
+     * 간이 시뮬과 같은 방식으로 지금 센다 — 카드가 아직 안 쌓여 같은 집합이다.
+     * 친선은 대회 경기가 아니라 소화되지 않는다.
      */
-    const assignment = assignments.get(player.id);
-    const pos = assignment?.position ?? naturalPositionOf(player).position;
-    const slot = player.positions.find((p) => p.position === pos);
-    if (slot) {
-      if (slot.proficiency < 99) {
-        slot.proficiency = Math.min(99, slot.proficiency + 1);
-        recordGrowth(state, player.id, entry?.id ?? null, "match", `pos:${pos}`, 1, "실전 경험");
-      }
-    } else {
-      // 처음 맡은 자리 — 경험이 쌓이기 시작한다
-      player.positions.push({
-        position: pos,
-        proficiency: proficiencyAt(player, pos),
-        isNatural: false,
-      });
-      recordGrowth(state, player.id, entry?.id ?? null, "match", `pos:${pos}`, 1, "새 포지션 경험");
+    if (!friendly) {
+      serveSuspensions(
+        state,
+        ours
+          ? (pending.servingSuspension ?? [])
+          : firstTeamPlayers(state, teamId)
+              .filter((p) => isSuspended(state, p.id))
+              .map((p) => p.id),
+      );
     }
-  }
-  /**
-   * **상대도 뛰었다.** 우리와 붙은 팀은 이 경기의 대가를 치르지 않고 있었다 —
-   * 간이 시뮬(`quick-sim`)은 자기 경기만 정산하고 여기는 우리 명단만 돌았기
-   * 때문이다. 그래서 우리를 상대한 클럽만 주중 연전을 공짜로 소화했다.
-   * 구간 시뮬이 양 팀 소모를 함께 쌓아 두므로 같은 장부에서 함께 정산한다.
-   */
-  const oppIds = new Set(side === "home" ? awayLineup : homeLineup);
-  for (const id of oppIds) {
-    const player = playerById(state, id);
-    if (!player || player.teamId === state.userTeamId) continue;
-    player.state.condition = clampCondition(player.state.condition - (drained[id] ?? 0));
-  }
 
-  // 골은 이미 평점(앵커)에 크게 반영돼 있다 — 폼을 또 올리면 이중 계산이고,
-  // 그게 "골 넣은 선수만 즉시 최고 폼"의 원인이었다
-  if (!friendly) {
-    for (const scorerId of userScorers) {
-      const player = roster.find((p) => p.id === scorerId);
-      if (!player) continue;
-      ensureSeasonStat(state, scorerId, player.teamId).goals += 1;
+    // 카드 → BOOKING, 누적/퇴장 → SUSPENSION. 친선의 카드는 어느 대회에도 쌓이지 않는다
+    for (const e of friendly ? [] : events) {
+      if (e.type !== "yellow_card" && e.type !== "red_card") continue;
+      const target = e.actors[0];
+      if (!target || !playerById(state, target)) continue;
+      // 카드 → BOOKING·SUSPENSION은 **간이 시뮬과 같은 문**을 지난다 (discipline.ts)
+      const note = recordCard(state, {
+        playerId: target,
+        matchId: match.id,
+        card: e.type === "yellow_card" ? "yellow" : "red",
+        minute: e.minute,
+      });
+      // 우리 선수의 정지는 감독이 바로 알아야 한다 (남의 팀 것은 조회로 안다)
+      if (note && ours) digest.push(note);
     }
-    for (const assisterId of userAssisters) {
-      const player = roster.find((p) => p.id === assisterId);
-      if (!player) continue;
-      const stat = ensureSeasonStat(state, assisterId, player.teamId);
-      stat.assists = (stat.assists ?? 0) + 1;
-    }
-  }
+  };
+  settleSide("home");
+  settleSide("away");
 
   // 경기 평점 — 기준선은 여기서 결정적으로 박고, 경기 후 LLM이 이 위에서 다듬는다.
   // **brief를 반드시 같은 함수로 만든다** — 앵커가 두 곳에서 따로 계산되면
   // LLM 보정의 증감 정산(applyMatchRatings)이 어긋난다
   // 친선의 평점은 **경기에는 남고 시즌 합계에는 안 들어간다** — 감독은 프리시즌
   // 경기의 평점을 읽어야 하지만 그것이 시즌 평균을 만들지는 않는다
+  // 경기별 평점은 **우리 팀만** 남는다 — 상대의 평점은 간이 시뮬과 같이 시즌
+  // 합계(`ratingSum`)에만 들어간다 (match.md §6·§7)
   const ratings: Record<string, number> = {};
-  for (const p of brief?.players ?? []) {
-    ratings[p.playerId] = p.anchor;
-    const player = roster.find((x) => x.id === p.playerId);
-    if (!player || friendly) continue;
-    const stat = ensureSeasonStat(state, p.playerId, player.teamId);
-    stat.ratingSum = (stat.ratingSum ?? 0) + p.anchor;
-  }
+  for (const p of brief?.players ?? []) ratings[p.playerId] = p.anchor;
   match.result = { ...match.result, ratings };
-
-  // 정지 소화 — 이번 경기 결장자는 1경기 차감. 친선은 대회 경기가 아니라 소화되지 않는다
-  if (!friendly) serveSuspensions(state, pending.servingSuspension ?? []);
-
-  // 카드 → BOOKING, 누적/퇴장 → SUSPENSION. 친선의 카드는 어느 대회에도 쌓이지 않는다
-  for (const e of friendly ? [] : ledger.events) {
-    if (e.team !== side || !e.actors[0]) continue;
-    const player = roster.find((p) => p.id === e.actors[0]);
-    if (!player) continue;
-    if (e.type !== "yellow_card" && e.type !== "red_card") continue;
-    // 카드 → BOOKING·SUSPENSION은 **간이 시뮬과 같은 문**을 지난다 (discipline.ts)
-    const note = recordCard(state, {
-      playerId: player.id,
-      matchId: match.id,
-      card: e.type === "yellow_card" ? "yellow" : "red",
-      minute: e.minute,
-    });
-    // 우리 선수의 정지는 감독이 바로 알아야 한다 (남의 팀 것은 조회로 안다)
-    if (note) digest.push(note);
-  }
 
   /**
    * 경기 중 부상 확정 → INJURY row — **양 팀 모두.**
@@ -1176,11 +1248,18 @@ export function finalizeMatch(state: GameState): MatchDigest {
   );
   digest.push(`최종 스코어 ${scoreline} — ${outcomeKo}`, ...messages);
   /**
-   * 연패·대패·연승이 라커룸에 남기는 것 (slump.ts) — 리그 전체와 같은 규칙이다.
-   * 경기 결과가 장부에 쓰인 **뒤**라야 이번 경기가 연속 기록에 들어간다.
+   * 연패·대패·연승이 라커룸에 남기는 것 (slump.ts) — **양 팀 모두.** 리그 전체와
+   * 같은 규칙이다. 경기 결과가 장부에 쓰인 **뒤**라야 이번 경기가 연속 기록에
+   * 들어간다. 남의 라커룸 소식은 브리핑하지 않는다 — 감독은 조회로 안다.
    */
-  const runNote = applyResultMood(state, state.userTeamId, userGoals - oppGoals, [...played]);
-  if (runNote) digest.push(runNote);
+  for (const which of ["home", "away"] as const) {
+    const diff =
+      which === "home"
+        ? ledger.score.home - ledger.score.away
+        : ledger.score.away - ledger.score.home;
+    const runNote = applyResultMood(state, teamIdOf[which], diff, lineupOf[which]);
+    if (runNote && which === side) digest.push(runNote);
+  }
 
   // 경기 중 조정을 킥오프 상태로 — pendingMatch가 지워지기 전에 (스냅샷이 거기 있다)
   const restored = restoreTactics(state);
