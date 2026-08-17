@@ -83,6 +83,36 @@ describe("경기 장부 검증 (match.md §5)", () => {
       expect(first.state.sentOff).toContain("aw-df1");
       expect(first.state.away.onPitch).not.toContain("aw-df1");
     }
+
+    // 경고 한 줄 + 퇴장 한 줄 — 두 번째 경고 뒤의 red_card는 온필드를 요구하지 않는다.
+    // 사건 목록에 red_card가 남아야 다음 경기 출장 정지가 걸린다 (match.md §7).
+    const withRed = applyEvents(createLedger(home, away), [
+      ev({ minute: 20, type: "yellow_card", team: "away", actors: ["aw-df1"] }),
+      ev({ minute: 55, type: "yellow_card", team: "away", actors: ["aw-df1"] }),
+      ev({ minute: 55, type: "red_card", team: "away", actors: ["aw-df1"] }),
+    ]);
+    expect(withRed.ok).toBe(true);
+    if (withRed.ok) {
+      expect(withRed.state.events.map((e) => e.type)).toEqual([
+        "yellow_card",
+        "yellow_card",
+        "red_card",
+      ]);
+      // 퇴장은 한 번뿐이다 — 경고와 레드가 각각 밀어 넣으면 정지가 두 번 걸린다
+      expect(withRed.state.sentOff.filter((id) => id === "aw-df1")).toHaveLength(1);
+      expect(withRed.state.away.onPitch).not.toContain("aw-df1");
+    }
+  });
+
+  it("같은 퇴장에 red_card가 두 줄이면 뒷줄은 반려된다", () => {
+    const r = applyEvents(createLedger(home, away), [
+      ev({ minute: 20, type: "yellow_card", team: "away", actors: ["aw-df1"] }),
+      ev({ minute: 55, type: "yellow_card", team: "away", actors: ["aw-df1"] }),
+      ev({ minute: 55, type: "red_card", team: "away", actors: ["aw-df1"] }),
+      ev({ minute: 56, type: "red_card", team: "away", actors: ["aw-df1"] }),
+    ]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors[0]).toContain("퇴장");
   });
 
   it("시간 역행은 반려된다", () => {
