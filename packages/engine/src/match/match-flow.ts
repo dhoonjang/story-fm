@@ -28,6 +28,7 @@ import {
   planAiSubstitution,
   planAiTacticalShift,
   simulateSegment,
+  subLimitsOf,
   type LineupSlot,
   type SegmentPlan,
   type SegmentStop,
@@ -1114,6 +1115,13 @@ export function finalizeMatch(state: GameState): MatchDigest {
     homeLineup,
     awayLineup,
     /**
+     * 종료 휘슬에 서 있던 사람 — 명단은 뛴 사람 전부라 교체 아웃·퇴장이 섞여 있다.
+     * 감독의 경기는 구간 시뮬이 연장까지 직접 가므로 여기서 쓰이지는 않지만,
+     * 두 시뮬이 같은 모양의 장부를 남겨야 읽는 쪽이 갈리지 않는다 (match.md §7).
+     */
+    homeOnPitch: [...ledger.home.onPitch],
+    awayOnPitch: [...ledger.away.onPitch],
+    /**
      * **연장을 치렀다는 표식** — 무득점 연장은 스코어에 흔적을 안 남기므로 이 값이
      * 유일한 증거다. 그리고 이게 이중 적용의 문지기다: 대진 승자를 묻는 자리에서
      * `resolveExtraTime`이 이 경기를 다시 굴리지 않는다 (extra-time.ts).
@@ -1367,8 +1375,8 @@ export function finalizeMatch(state: GameState): MatchDigest {
 
 export { activeSuspension, type TacticAssignment };
 
-/** 동시에 노릴 수 있는 지점 수 — sim의 규칙을 그대로 다시 내보낸다 */
-export { MAX_EXPLOITS };
+/** 동시에 노릴 수 있는 지점 수 · 국면별 교체 한도 — sim의 규칙을 그대로 다시 내보낸다 */
+export { MAX_EXPLOITS, subLimitsOf };
 
 /**
  * 공략 지정 — **감독이 읽은 약점을 겨냥한다** (sim `exploits.ts`).

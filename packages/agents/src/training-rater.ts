@@ -1,5 +1,7 @@
 import { z } from "zod";
 import {
+  ATTR_STEP_MAX,
+  ATTR_STEP_MIN,
   TACTIC_GAIN_MAX,
   TACTIC_GAIN_MIN,
   TRAINING_ATTR_CAP,
@@ -17,6 +19,10 @@ import { retryOnce, anchorStands } from "./retry";
  * 코어는 적응도를 건드리지 않는다 — 실제로 얼마나 스몄는지는 여기서만 정한다.
  * 세션마다 부르지 않는다 — 훈련엔 사건 목록이 없어 하루치로는 판단 거리가 없다.
  * 값의 폭은 코어가 좁게 물려 둬 모델이 무뎌도 게임이 흔들리지 않는다.
+ *
+ * ⚠️ **폭과 인원의 숫자는 전부 코어 상수에서 읽는다** — 프롬프트에도 스키마에도
+ * 손으로 적지 않는다. 적으면 코어만 조여지고 판정자는 옛 밴드를 계속 믿는다
+ * (docs/llm/agents.md §4).
  */
 export const TRAINING_RATER_SYSTEM = `당신은 축구 구단의 훈련장을 지켜본 코치다.
 
@@ -29,7 +35,7 @@ export const TRAINING_RATER_SYSTEM = `당신은 축구 구단의 훈련장을 �
 ## 규칙 (어기면 코어가 잘라 낸다)
 - 전술 적응도는 **${TACTIC_GAIN_MIN} ~ ${TACTIC_GAIN_MAX} 중 하나**다. 대부분은 0~1이고, ${TACTIC_GAIN_MIN}은
   지친 선수를 굴려 오히려 흐트러졌을 때다.
-- 능력치는 **0~${TRAINING_ATTR_CAP}명**, 각 한 축 **+1 또는 −1**, **그 기간에 실제로 훈련한 축만**.
+- 능력치는 **0~${TRAINING_ATTR_CAP}명**, 각 한 축 **+${ATTR_STEP_MAX} 또는 −${-ATTR_STEP_MIN}**, **그 기간에 실제로 훈련한 축만**.
   아무에게도 변화가 없는 구간이 정상이다. 서른을 넘긴 선수의 스피드·체력·드리블은
   훈련해도 내려간다.
 - **개인 훈련으로 자리를 배우는 선수**(대상 표에 "전향 …"으로 표시)에게는
@@ -47,7 +53,7 @@ const OutcomeSchema = z.object({
   tacticGain: z.number().min(-9).max(9).optional(),
   positionGain: z.number().min(0).max(9).optional(),
   attribute: z.enum(ATTRIBUTE_AXES).nullish(),
-  attributeStep: z.number().min(-1).max(1).nullish(),
+  attributeStep: z.number().min(ATTR_STEP_MIN).max(ATTR_STEP_MAX).nullish(),
   date: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -127,7 +133,10 @@ function makeReportTool(
                 enum: [...ATTRIBUTE_AXES],
                 description: `움직일 능력치 축 (그 기간에 훈련한 축만, ${TRAINING_ATTR_CAP}명까지)`,
               },
-              attributeStep: { type: "number", description: "그 축의 방향 — 1 또는 -1" },
+              attributeStep: {
+                type: "number",
+                description: `그 축의 방향 — ${ATTR_STEP_MAX} 또는 ${ATTR_STEP_MIN}`,
+              },
               date: {
                 type: "string",
                 description: "이 변화가 나온 훈련 날짜 (YYYY-MM-DD, 위 훈련 목록 중 하나)",

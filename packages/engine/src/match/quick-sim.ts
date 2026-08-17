@@ -8,11 +8,12 @@ import {
   positionProficiency,
 } from "@story-fm/domain";
 import {
-  BOOKED_AGAIN_WEIGHT,
+  ASSIST_RATE,
   CARDS_PER_MATCH,
   EXTRA_TIME_SHOT_SHARE,
   INJURY_PER_MATCH,
   STRAIGHT_RED_CHANCE,
+  bookingWeight,
   buildStrengthPacket,
   injuryWeight,
   samplePoisson,
@@ -107,10 +108,8 @@ function weightedPick(
 
 /**
  * 도움 — 시야·패스가 높은 동료 쪽으로 기운다. 모든 골에 도움이 붙지는 않는다
- * (단독 돌파·페널티 등 — ASSIST_RATE만큼만 붙는다).
+ * (단독 돌파·페널티 등 — `ASSIST_RATE`만큼만 붙는다. 구간 시뮬과 한 벌이다).
  */
-const ASSIST_RATE = 0.7;
-
 function pickAssister(
   rng: () => number,
   pool: readonly GamePlayer[],
@@ -123,9 +122,9 @@ function pickAssister(
 
 /**
  * 카드 — **구간 시뮬과 같은 눈금**에서 나온다: 빈도는 `CARDS_PER_MATCH`,
- * 다이렉트 레드는 `STRAIGHT_RED_CHANCE`, 이미 경고를 받은 선수의 관대함은
- * `BOOKED_AGAIN_WEIGHT`. 누가 받는지도 `match-engine.ts`의 `pickBooked`와 같은
- * 가중(거칠기 + 태클 미숙)이다 — 눈금이 갈리면 "우리 팀만 카드를 받는다"가 된다.
+ * 다이렉트 레드는 `STRAIGHT_RED_CHANCE`, 누가 받는지는 `bookingWeight`(거칠기 +
+ * 태클 미숙, 이미 경고를 받았으면 관대해진다) — 셋 다 `packages/sim`이 한 벌만
+ * 갖는다. 눈금이 갈리면 "우리 팀만 카드를 받는다"가 된다.
  */
 function rollCards(
   rng: () => number,
@@ -158,13 +157,7 @@ function rollCards(
     const pool = outfield(playersAt(squad, side, minute, validSubs)).filter(
       (p) => !sentOff.has(p.id),
     );
-    const booked = weightedPick(
-      rng,
-      pool,
-      (p) =>
-        (p.attributes.aggression * 1.5 + (99 - p.attributes.tackling) * 0.5) *
-        (yellows.has(p.id) ? BOOKED_AGAIN_WEIGHT : 1),
-    );
+    const booked = weightedPick(rng, pool, (p) => bookingWeight(p, yellows.has(p.id)));
     if (!booked) return;
     const second = yellows.has(booked.id);
     const straight = rng() < STRAIGHT_RED_CHANCE;
@@ -582,12 +575,19 @@ export function simulateExtraTime(
   };
 }
 
-/** 타 팀 간 경기 결과 (match.md §7) */
+/**
+ * 타 팀 간 경기 결과 (match.md §7)
+ *
+ * @param options.neutral 중립 경기장(결승) — 홈 어드밴티지를 주지 않는다. 경기가
+ *   갖고 있는 사실(`MatchRecord.neutral`)이라 호출부가 그대로 넘긴다: 여기서
+ *   `false`로 굳으면 명목상의 홈이 결승에서 공짜 우위를 얻는다.
+ */
 export function quickSimulate(
   home: SimSquad,
   away: SimSquad,
   seed: number,
   channel: string,
+  options: { neutral?: boolean } = {},
 ): QuickResult {
   const rng = makeRng(seed, `quick:${channel}`);
   const squads = { home, away };
@@ -602,7 +602,7 @@ export function quickSimulate(
   rollCards(rng, home, "home", plannedSubs, subs, cards);
   rollCards(rng, away, "away", plannedSubs, subs, cards);
 
-  const sampled = shotTimeline(rng, squads, cards, subs, 0, 94, 1, false);
+  const sampled = shotTimeline(rng, squads, cards, subs, 0, 94, 1, options.neutral === true);
   const possession = sampled.possession;
   const scorers: string[] = [];
   const assists: string[] = [];
