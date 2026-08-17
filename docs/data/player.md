@@ -689,6 +689,25 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
 - 전술·포지션 적응도(`adaptationOf`)와 다른 축이다 — 그건 "자리와 전술을
   아는가", 이건 "이 클럽 사람이 됐는가".
 
+### 9.4 파견 — 동시 셋, 넘친 요청은 사실로 남는다
+
+스카우트는 한 번에 **셋까지**(`SCOUT_CONCURRENT_LIMIT`) 나가고 한 명당
+`SCOUT_DAYS`(7일) 걸린다. 감독이 네 명을 지목하면 셋이 나가고 넷째는 **나가지
+않는다** — 그 요청은 대기로 남는다(`deferredScouts`).
+
+- 반려 문구는 **무엇이 나갔고 무엇이 안 나갔는지** 이름으로 말한다 — 지금 나가
+  있는 셋과 가장 이른 보고 날짜까지. "한도 셋까지입니다"만으로는 감독이 넷째가
+  어떻게 됐는지 알 수 없다.
+- 못 나간 요청은 **다음 턴 입력에도 남는다** — 상태 스냅샷의 스카우팅 줄
+  (`scoutingSummary`)이 파견 중인 것과 나란히 싣고, 자리가 비어 있으면 몇 자리인지도
+  함께 낸다. 사실이 남지 않으면 모델은 기억으로 메우고 부르지 않은 파견을
+  완료형으로 말한다 ([../llm/agents.md](../llm/agents.md) §6).
+- 자리가 나도 **코어가 대신 보내지 않는다** — 상태 전이는 스킬 한 경로뿐이다.
+  줄을 읽은 GM이 스킬을 다시 부르고, 그때 대기는 지워진다.
+- 대기는 요청 뒤 `SCOUT_DEFER_DAYS`(=`SCOUT_DAYS`)가 지나면 지운다 — 그 안에 자리는
+  반드시 나므로, 일주일을 넘긴 요청은 감독의 뜻이 지나간 것이다. 그 선수를 우리가
+  영입해도 지워진다.
+
 ## 10. 노출 규약
 
 - **오피스 뷰**: 우리 선수는 숫자 그대로(15축·폼 화살표·체력·심경), 타 팀은 §9
@@ -742,6 +761,7 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
 | 월간 성장 (`developsByCore`)                                                                                                    | `packages/engine/src/squad/development.ts`                                              |
 | 폼 (`formLabel`·`formAngle`)                                                                                                    | `packages/engine/src/squad/form.ts`                                                     |
 | 안개·잠재력·경기 중 체력 (`observationMargin`·`readCondition`·`observedFit`)                                                    | `packages/engine/src/squad/scouting.ts`                                                 |
+| 파견 한도·대기 (`scoutPlayer`·`deferScout`·`scoutingSummary`)                                                                   | `packages/engine/src/skills/index.ts` · `packages/engine/src/squad/scouting.ts`         |
 | 보고서 카드와 도착 줄 (`scoutReportCard`·`scoutReportLine`)                                                                     | `packages/engine/src/views/views.ts`                                                    |
 | 정착 (`settlingOf`·`SETTLING_EVENT`)                                                                                            | `packages/engine/src/squad/settling.ts`                                                 |
 | 역할 기억 (`recallRole`·`rememberRole`)                                                                                         | `packages/engine/src/skills/role-memory.ts`                                             |
