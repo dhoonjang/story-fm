@@ -45,16 +45,19 @@ function TraceBlock({
   open = false,
   /** JSON 덩어리인가 — 산문은 줄을 접어 다 보이게, JSON은 들여쓰기를 지킨다 */
   json = false,
+  /** 이 블록만 방향이 다를 때 — 응답 꼬리에 섞여 있는 우리 발화가 그렇다 */
+  tone,
   children,
 }: {
   label: string;
   meta?: string;
   open?: boolean;
   json?: boolean;
+  tone?: "in" | "out";
   children: ReactNode;
 }) {
   return (
-    <details className="tt-block" open={open}>
+    <details className={tone === undefined ? "tt-block" : `tt-block ${tone}`} open={open}>
       <summary>
         <span className="tt-block-label">{label}</span>
         {meta !== undefined && <span className="tt-block-meta">{meta}</span>}
@@ -71,6 +74,39 @@ function duration(ms: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
 }
 
+const num = (value: number) => value.toLocaleString("ko-KR");
+
+/**
+ * 이력 메시지의 `role` — 제공자 원형 기록이라 모양을 단정할 수 없다.
+ *
+ * 이 한 낱말이 **응답 꼬리 안에서 input과 output을 가르는 경계**다: 어댑터는
+ * 이번 턴의 우리 발화도 같은 이력에 적기 때문에(Anthropic은 `role:"user"`,
+ * Gemini는 `role:"user"` content) 꼬리의 첫 조각은 모델이 쓴 것이 아니다.
+ */
+function roleOf(message: unknown): string {
+  if (message === null || typeof message !== "object") return "?";
+  const role = (message as { role?: unknown }).role;
+  return typeof role === "string" ? role : "?";
+}
+
+/**
+ * 그 조각을 누가 썼는가 — **모델이 쓴 것만 output이다.**
+ *
+ * `assistant`(Anthropic·OpenAI)와 `model`(Gemini)만 모델의 몫이고, 나머지는 전부
+ * 모델에 **들어간** 것이다: 우리 발화도, 스킬이 돌려준 `tool_result`도 이력에서는
+ * user·tool 역할로 적힌다(Anthropic은 tool_result까지 `role:"user"`다).
+ */
+function wroteIt(role: string): "in" | "out" | "unknown" {
+  if (role === "assistant" || role === "model") return "out";
+  return role === "?" ? "unknown" : "in";
+}
+
+const WROTE_IT_KO: Record<"in" | "out" | "unknown", string> = {
+  in: "모델에 들어간 것 — 발화 또는 tool_result",
+  out: "모델이 쓴 것",
+  unknown: "역할을 읽을 수 없다",
+};
+
 /** 이 호출이 보낸 글자 수 — "다 왔나"를 눈으로 확인하는 눈금이다 */
 function requestChars(call: TurnTraceCall): number {
   const { system, user, stateNote, history, tools } = call.request;
@@ -83,7 +119,41 @@ function requestChars(call: TurnTraceCall): number {
   );
 }
 
-/** 호출 하나 — 헤더(누가·무엇으로·얼마나·얼마어치)와 원문 블록들 */
+/**
+ * 어디까지가 보낸 것이고 어디부터가 받은 것인가.
+ *
+ * 블록을 한 줄로 죽 세우면 `tools` 다음의 `응답 텍스트`가 같은 모양으로 이어져,
+ * **모델이 쓴 것과 우리가 보낸 것이 한 덩어리로 읽힌다.** 그 경계를 잘못 읽으면
+ * 이 창의 용건("프롬프트가 잘못 나갔나, 모델이 이상하게 답했나")이 무너진다 —
+ * 그래서 방향을 색과 표식으로 갈라 세우고, 그쪽의 크기도 그쪽 머리에 적는다.
+ */
+function TraceSide({
+  dir,
+  facts,
+  hint,
+  children,
+}: {
+  dir: "in" | "out";
+  facts: string;
+  hint: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className={`tt-side ${dir}`}>
+      <div className="tt-side-head">
+        <span className="tt-arrow" aria-hidden>
+          {dir === "in" ? "→" : "←"}
+        </span>
+        <b>{dir === "in" ? "보낸 것 (input)" : "받은 것 (output)"}</b>
+        <span className="tt-side-facts">{facts}</span>
+      </div>
+      <p className="tt-side-hint">{hint}</p>
+      {children}
+    </section>
+  );
+}
+
+/** 호출 하나 — 머리(누가·무엇으로·얼마나)와 방향으로 갈린 원문 */
 function TraceCallView({
   call,
   at,
@@ -94,7 +164,27 @@ function TraceCallView({
   at: number;
   expandAll: boolean;
 }) {
-  const usage = call.response?.usage;
+  const { request, response } = call;
+  const usage = response?.usage;
+  const inFacts = [
+    `${num(requestChars(call))}자`,
+    `system ${request.system.length}블록`,
+    `history ${request.history.length}개`,
+    `tools ${request.tools.length}개`,
+    ...(usage
+      ? [`in ${num(usage.inputTokens)}토큰 (캐시 읽기 ${num(usage.cacheReadTokens)})`]
+      : []),
+  ].join(" · ");
+  const outFacts = response
+    ? [
+        `${num(response.text.length)}자`,
+        `메시지 ${response.messages.length}개`,
+        `tool_use ${response.toolCallCount}`,
+        ...(usage ? [`out ${num(usage.outputTokens)}토큰`] : []),
+        response.stopReason ?? "stop 미보고",
+      ].join(" · ")
+    : "응답 없음";
+
   return (
     <section className="tt-call">
       <header className="tt-call-head">
@@ -105,84 +195,86 @@ function TraceCallView({
         <span className="tt-model">{call.model ?? "—"}</span>
         <span className="tt-facts">
           <span>{duration(call.durationMs)}</span>
-          <span title="요청 전체(system + history + user + stateNote + tools)의 글자 수">
-            보낸 글자 {requestChars(call).toLocaleString("ko-KR")}
-          </span>
-          {usage && (
-            <span title="입력 / 출력 / 캐시 읽기 / 캐시 쓰기">
-              in {usage.inputTokens} · out {usage.outputTokens} · cache r{usage.cacheReadTokens}/w
-              {usage.cacheWriteTokens}
-            </span>
-          )}
-          {call.response && <span>{call.response.stopReason ?? "stop 미보고"}</span>}
-          {call.request.streaming && <span>streaming</span>}
+          {request.streaming && <span>streaming</span>}
         </span>
         <CopyButton value={pretty(call)} />
       </header>
-      {call.error !== null && <div className="tt-error">{call.error}</div>}
 
       {/**
-       * 순서는 **모델이 읽는 순서**다 — 시스템 프롬프트가 맨 앞이고 발화가 끝이다.
-       * 사람이 궁금한 것만 앞으로 끌어오면 프롬프트가 응답 아래로 밀려 "원문을
-       * 보여주는 창"이 요약처럼 읽힌다.
+       * 요청 안의 순서는 **모델이 읽는 순서**다 — 시스템 프롬프트가 맨 앞이고 발화가
+       * 끝이다. 사람이 궁금한 것만 앞으로 끌어오면 무엇이 어느 자리에 실려 나갔는지가
+       * 사라진다.
        *
-       * 요청 쪽은 **모두 펼친 채로 선다** — 이 창의 용건이 그 원문이다. 접힘은
-       * 훑을 때 접으라고 있는 것이고, 열자마자 접혀 있으면 무엇이 나갔는지 보려고
-       * 매번 블록마다 눌러야 한다.
+       * 요청 쪽 산문은 **모두 펼친 채로 선다** — 이 창의 용건이 그 원문이다.
        */}
-      {call.request.system.map((block, i) => (
-        <TraceBlock
-          key={i}
-          label={`system #${i + 1}`}
-          meta={`${block.length.toLocaleString("ko-KR")}자${i === 0 ? " · 캐시 프리픽스 머리" : ""}`}
-          open
-        >
-          {block}
+      <TraceSide
+        dir="in"
+        facts={inFacts}
+        hint="모델이 이 순서로 읽는다 — 앞이 캐시 프리픽스(system·history), 끝이 이번 턴의 발화다."
+      >
+        {request.system.map((block, i) => (
+          <TraceBlock
+            key={i}
+            label={`system #${i + 1}`}
+            meta={`${num(block.length)}자${i === 0 ? " · 캐시 프리픽스 머리" : ""}`}
+            open
+          >
+            {block}
+          </TraceBlock>
+        ))}
+        {request.history.length > 0 && (
+          <TraceBlock label="history" meta={`${request.history.length}개`} open={expandAll} json>
+            {pretty(request.history)}
+          </TraceBlock>
+        )}
+        {request.stateNote !== undefined && (
+          <TraceBlock label="stateNote" meta={`${num(request.stateNote.length)}자`} open>
+            {request.stateNote}
+          </TraceBlock>
+        )}
+        <TraceBlock label="user" meta={`${num(request.user.length)}자`} open>
+          {request.user}
         </TraceBlock>
-      ))}
-      {call.request.history.length > 0 && (
-        <TraceBlock
-          label="history"
-          meta={`${call.request.history.length}개`}
-          open={expandAll}
-          json
-        >
-          {pretty(call.request.history)}
-        </TraceBlock>
-      )}
-      {call.request.stateNote !== undefined && (
-        <TraceBlock label="stateNote" meta={`${call.request.stateNote.length}자`} open>
-          {call.request.stateNote}
-        </TraceBlock>
-      )}
-      <TraceBlock label="user" meta={`${call.request.user.length}자`} open>
-        {call.request.user}
-      </TraceBlock>
-      {call.request.tools.length > 0 && (
-        <TraceBlock label="tools" meta={`${call.request.tools.length}개`} open={expandAll} json>
-          {pretty(call.request.tools)}
-        </TraceBlock>
-      )}
+        {request.tools.length > 0 && (
+          <TraceBlock label="tools" meta={`${request.tools.length}개`} open={expandAll} json>
+            {pretty(request.tools)}
+          </TraceBlock>
+        )}
+      </TraceSide>
 
-      {call.response && (
-        <TraceBlock
-          label="응답 텍스트"
-          meta={`${call.response.text.length.toLocaleString("ko-KR")}자`}
-          open
-        >
-          {call.response.text}
-        </TraceBlock>
-      )}
-      {call.response && call.response.messages.length > 0 && (
-        <TraceBlock
-          label="응답 messages"
-          meta={`${call.response.messages.length}개 · tool_use ${call.response.toolCallCount}`}
-          open={expandAll}
-          json
-        >
-          {pretty(call.response.messages)}
-        </TraceBlock>
-      )}
+      <TraceSide
+        dir="out"
+        facts={outFacts}
+        hint="이 호출이 이력에 새로 붙인 것만 — 앞의 이력은 위 history에 있다. 어댑터는 이번 턴의 우리 발화도 같은 이력에 적으므로, 꼬리 안에서는 `role`이 경계다(파란 것은 우리가 보낸 것)."
+      >
+        {call.error !== null && <div className="tt-error">{call.error}</div>}
+        {response && (
+          <TraceBlock label="응답 텍스트" meta={`${num(response.text.length)}자`} open>
+            {response.text}
+          </TraceBlock>
+        )}
+        {/**
+         * 꼬리를 **메시지마다 따로** 세운다. 한 덩어리 JSON으로 두면 우리 발화와
+         * 모델의 tool_use·thinking이 같은 들여쓰기 안에서 뒤섞여, 무엇이 모델이 쓴
+         * 것인지 눈으로 가릴 수 없다.
+         */}
+        {response?.messages.map((message, i) => {
+          const role = roleOf(message);
+          const wrote = wroteIt(role);
+          return (
+            <TraceBlock
+              key={i}
+              label={`messages[${i}] · ${role}`}
+              meta={WROTE_IT_KO[wrote]}
+              tone={wrote === "unknown" ? undefined : wrote}
+              open={expandAll}
+              json
+            >
+              {pretty(message)}
+            </TraceBlock>
+          );
+        })}
+      </TraceSide>
     </section>
   );
 }

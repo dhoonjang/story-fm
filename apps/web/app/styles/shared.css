@@ -226,6 +226,53 @@
   font-size: var(--fs-sm);
 }
 
+/**
+ * 방향 — **보낸 것과 받은 것.**
+ *
+ * 색과 왼쪽 띠가 그 경계를 진다. 띠가 블록 전체 길이를 따라 내려가는 것이 핵심이다:
+ * 프롬프트 하나가 수만 자라 머리가 화면에서 밀려난 뒤에도 지금 읽는 원문이 어느
+ * 쪽인지 남아야 한다. 파랑은 우리가 보낸 것(`--accent-2`), 초록은 모델이 돌려준
+ * 것(`--accent`) — 화면의 다른 곳과 같은 짝이다.
+ */
+.tt-side {
+  border-left: 2px solid var(--tt-dir);
+  padding-left: var(--sp-3);
+  margin-top: var(--sp-3);
+}
+.tt-side.in {
+  --tt-dir: var(--accent-2);
+}
+.tt-side.out {
+  --tt-dir: var(--accent);
+}
+.tt-side-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+}
+.tt-side-head > b {
+  color: var(--tt-dir);
+}
+.tt-arrow {
+  color: var(--tt-dir);
+  font-size: var(--fs-base);
+  line-height: 1;
+}
+.tt-side-facts {
+  color: var(--muted);
+  font-size: var(--fs-2xs);
+  font-variant-numeric: tabular-nums;
+}
+/* 그 방향이 무엇을 담는지 한 줄 — 경계를 색으로만 두면 무엇이 다른지는 여전히 모른다 */
+.tt-side-hint {
+  margin: 2px 0 var(--sp-1);
+  color: var(--dim);
+  font-size: var(--fs-2xs);
+  line-height: 1.5;
+}
+
 /* 블록 — 접힌 채로 이름과 크기만, 펼치면 원문 그대로 */
 .tt-block > summary {
   cursor: pointer;
@@ -240,6 +287,16 @@
   font-weight: 700;
   color: var(--silver);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+/**
+ * 방향이 그 자리와 다른 블록 — 응답 꼬리에 섞인 우리 발화·`tool_result`가 그렇다.
+ * 이름에 방향의 색을 물려 "초록 칸 안의 파란 줄"로 보이게 한다.
+ */
+.tt-block.in > summary > .tt-block-label {
+  color: var(--accent-2);
+}
+.tt-block.out > summary > .tt-block-label {
+  color: var(--accent);
 }
 .tt-block-meta {
   color: var(--dim);
