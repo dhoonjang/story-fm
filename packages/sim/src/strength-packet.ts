@@ -36,7 +36,7 @@ import { stateModifier } from "./state-modifier";
 import { buildCounterContext, evaluateCounters, type CounterResult } from "./tactical-counters";
 import { GAP_PENALTY, GAP_THRESHOLD } from "./stamina";
 import { finishingGoalProbability, FINISHING_PIVOT, FINISHING_SCALE } from "./shot-model";
-import { GRID_LANES, zoneGrid } from "./zone-grid";
+import { addCells, GRID_LANES, laneBiasOf, zoneGrid, zoneMeanOf, zeroCells } from "./zone-grid";
 
 /** 배치된 선수 — 전술 배치(TACTIC_ASSIGNMENT)에서 조립해 넘긴다 */
 export interface LineupSlot {
@@ -975,15 +975,37 @@ export function buildStrengthPacket(
   const awayDelta = tacticalDeltas(awayXI, awayIn.tactics, awayUptake, frontlinePace(homeXI));
 
   /**
-   * 개인 지시 — **양쪽 존을 함께 건드린다.** 마크는 내 본업을 덜게 하는 동시에
+   * 개인 지시·공략이 쌓이는 **아홉 칸** — 두 갈래로 접혀 존과 격자에 나뉘어 실린다
+   * (match.md §1.7). 둘을 한 통에 모으는 것은 상한(`LANE_BIAS_CAP`)이 합계에 한 번만
+   * 걸려야 하기 때문이다.
+   */
+  const homeCells = zeroCells();
+  const awayCells = zeroCells();
+
+  /**
+   * 개인 지시 — **양쪽 판을 함께 건드린다.** 마크는 내 본업을 덜게 하는 동시에
    * 상대의 그 자리를 지우므로, 한쪽 델타만으로는 표현할 수 없다.
    */
-  const homeDirect = applyDirectives(homeIn.directives, homeXI, awayXI, homeUptake);
-  const awayDirect = applyDirectives(awayIn.directives, awayXI, homeXI, awayUptake);
-  for (const zone of ["attack", "midfield", "defense"] as const) {
-    homeDelta[zone] += homeDirect.us[zone] + awayDirect.them[zone];
-    awayDelta[zone] += awayDirect.us[zone] + homeDirect.them[zone];
-  }
+  const homeDirect = applyDirectives(
+    homeIn.directives,
+    homeXI,
+    awayXI,
+    homeUptake,
+    homeIn.bench,
+    awayIn.bench,
+  );
+  const awayDirect = applyDirectives(
+    awayIn.directives,
+    awayXI,
+    homeXI,
+    awayUptake,
+    awayIn.bench,
+    homeIn.bench,
+  );
+  addCells(homeCells, homeDirect.us);
+  addCells(homeCells, awayDirect.them);
+  addCells(awayCells, awayDirect.us);
+  addCells(awayCells, homeDirect.them);
   homeDelta.notes.push(...homeDirect.notes);
   awayDelta.notes.push(...awayDirect.notes);
 
@@ -1022,12 +1044,25 @@ export function buildStrengthPacket(
     awayUptake,
     "away",
   );
-  for (const zone of ["attack", "midfield", "defense"] as const) {
-    homeDelta[zone] += homeExploit.us[zone] + awayExploit.them[zone];
-    awayDelta[zone] += awayExploit.us[zone] + homeExploit.them[zone];
-  }
+  addCells(homeCells, homeExploit.us);
+  addCells(homeCells, awayExploit.them);
+  addCells(awayCells, awayExploit.us);
+  addCells(awayCells, homeExploit.them);
   homeDelta.notes.push(...homeExploit.notes);
   awayDelta.notes.push(...awayExploit.notes);
+
+  /**
+   * 칸을 접는다 — **줄 평균은 존으로, 줄 안의 편차는 격자로.** 평균을 양쪽에 다
+   * 실으면 그 전력이 두 번 세어진다.
+   */
+  const homeZoneDelta = zoneMeanOf(homeCells);
+  const awayZoneDelta = zoneMeanOf(awayCells);
+  for (const zone of ["attack", "midfield", "defense"] as const) {
+    homeDelta[zone] += homeZoneDelta[zone];
+    awayDelta[zone] += awayZoneDelta[zone];
+  }
+  const homeLaneBias = laneBiasOf(homeCells);
+  const awayLaneBias = laneBiasOf(awayCells);
 
   /**
    * **전술 상성** — 두 전술을 맞붙인다 (tactical-counters.ts).
@@ -1059,6 +1094,7 @@ export function buildStrengthPacket(
           })),
         }
       : {}),
+    ...(homeLaneBias.length > 0 ? { laneBias: homeLaneBias } : {}),
     lineup: roster(homeIn.starters),
     bench: roster(homeIn.bench),
   };
@@ -1078,6 +1114,7 @@ export function buildStrengthPacket(
           })),
         }
       : {}),
+    ...(awayLaneBias.length > 0 ? { laneBias: awayLaneBias } : {}),
     lineup: roster(awayIn.starters),
     bench: roster(awayIn.bench),
   };

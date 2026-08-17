@@ -1,4 +1,4 @@
-import type { PacketPlayer, RegionalIntent, StrengthPacket } from "@story-fm/domain";
+import type { LaneBias, PacketPlayer, RegionalIntent, StrengthPacket } from "@story-fm/domain";
 import { anchorOf, PITCH_BANDS } from "@story-fm/domain";
 
 /**
@@ -28,6 +28,13 @@ import { anchorOf, PITCH_BANDS } from "@story-fm/domain";
  * 상대가 얇은 칸을 골랐으면 이득이고, 이미 두꺼운 칸을 골랐으면 옆 칸을 헐어
  * 손해를 본다. 그래서 지역 플랜에는 **별도의 득점 계수가 없다** — 격자 하나가
  * 슈팅 생성의 유일한 수치 원본이라는 §1.4의 규칙을 그대로 지킨다.
+ *
+ * ## 개인 지시와 공략도 같은 눈금으로 실린다
+ *
+ * 지시의 산출은 존 셋이 아니라 **아홉 칸**(`LaneCells`)이고, 그 칸이 두 갈래로
+ * 접힌다: 줄 평균은 존 델타가 되고(`zoneMeanOf`), 줄 안의 편차만 여기 얹힌다
+ * (`laneBiasOf` → `SidePacket.laneBias`). 평균을 양쪽에 다 실으면 그 전력이 두 번
+ * 세어지므로, 격자가 받는 것은 **배분의 기울기뿐**이다.
  */
 
 export type GridLane = "left" | "center" | "right";
@@ -73,6 +80,104 @@ export const REGIONAL_INTENT_WEIGHT: Record<RegionalIntent, number> = {
  * 되는 화면은 실제 판세보다 훨씬 과장된 그림을 그린다.
  */
 const THIN_PENALTY = 0.18;
+
+/**
+ * 전술판 좌표가 선 레인 — **가장 가까운 칸 중심**이 그 레인이다.
+ *
+ * 지시가 어느 칸에 실릴지는 겨냥한 사람이 서 있는 자리가 정한다. 칸 중심으로 가르는
+ * 것이라 x=30인 선수는 왼쪽, x=40인 선수는 가운데다.
+ */
+export function laneOfX(x: number): GridLane {
+  return GRID_LANES.reduce((best, lane) =>
+    Math.abs(x - LANE_X[lane]) < Math.abs(x - LANE_X[best]) ? lane : best,
+  );
+}
+
+/**
+ * 지시가 겨냥한 칸으로 몰리는 폭 — ⚠️ 밸런스 값.
+ *
+ * 겨냥한 칸이 존 델타의 `1 + 2k`배, 나머지 두 칸이 `1 - k`배씩이라 **세 칸의 평균은
+ * 여전히 존 델타다.** 그래서 이 값을 아무리 키워도 존 전력의 크기는 움직이지 않고
+ * 줄 안의 배분만 기운다.
+ *
+ * 이웃 칸이 0이 되지 않는 것은 선수가 점이 아니라 영역을 맡기 때문이다(`REACH`와
+ * 같은 이유) — 왼쪽 윙어를 지운다고 그 팀의 왼쪽 공격만 사라지는 것은 아니다.
+ */
+const LANE_FOCUS = 0.75;
+
+/**
+ * 한 칸이 줄 안에서 기울 수 있는 최대 몫 — 존 전력 대비.
+ *
+ * 지시 셋과 공략 둘이 한 칸에 겹칠 수 있어 상한이 없으면 정규화 전 값이 음수로
+ * 내려가고, 그러면 격자가 뒤집힌다. `TACTIC_SWING`이 존에 하는 일을 칸에 한다.
+ */
+const LANE_BIAS_CAP = 0.3;
+
+/**
+ * 밴드×레인 아홉 칸의 조정값 — **개인 지시·공략의 산출 단위** (match.md §1.7).
+ *
+ * 값은 존 전력 대비 비율이다(0.06이면 6%). 존 셋이 아니라 이 꼴로 내는 이유는
+ * 겨냥한 선수가 선 레인이 결과에 남아야 하기 때문이고, 두 갈래로 접혀 존과 격자에
+ * 나뉘어 실린다.
+ */
+export type LaneCells = Record<GridBand, Record<GridLane, number>>;
+
+export const zeroCells = (): LaneCells => ({
+  attack: { left: 0, center: 0, right: 0 },
+  midfield: { left: 0, center: 0, right: 0 },
+  defense: { left: 0, center: 0, right: 0 },
+});
+
+/**
+ * 한 칸을 겨냥해 조정을 얹는다 — **세 칸의 평균은 `amount`로 남는다.**
+ *
+ * `lane`이 없으면(표적이 팀 전체이거나 자리를 겨냥하지 않는 지시) 세 칸에 고르게
+ * 실린다. 그때 편차가 0이라 격자는 움직이지 않고 존 델타만 남는다 — 레인이 없던
+ * 시절과 정확히 같은 수다.
+ */
+export function addFocused(
+  cells: LaneCells,
+  band: GridBand,
+  lane: GridLane | undefined,
+  amount: number,
+): void {
+  for (const l of GRID_LANES) {
+    const share = lane === undefined ? 1 : l === lane ? 1 + 2 * LANE_FOCUS : 1 - LANE_FOCUS;
+    cells[band][l] += amount * share;
+  }
+}
+
+/** 두 산출을 합친다 — 지시와 공략이 같은 칸에 겹칠 수 있다 */
+export function addCells(into: LaneCells, from: LaneCells): void {
+  for (const band of GRID_BANDS)
+    for (const lane of GRID_LANES) into[band][lane] += from[band][lane];
+}
+
+/** 존 델타로 접히는 몫 — **줄 평균**이다. 격자의 계약이 "세 칸의 평균 = 존 전력"이다 */
+export function zoneMeanOf(cells: LaneCells): Record<GridBand, number> {
+  const out = {} as Record<GridBand, number>;
+  for (const band of GRID_BANDS)
+    out[band] = GRID_LANES.reduce((sum, lane) => sum + cells[band][lane], 0) / GRID_LANES.length;
+  return out;
+}
+
+/**
+ * 격자에 실리는 몫 — **줄 평균을 뺀 나머지.** 줄 합이 0이라 존 전력을 옮기지 않는다.
+ * 움직이지 않는 칸은 싣지 않는다(패킷이 늘 아홉 줄을 달고 다니지 않게).
+ */
+export function laneBiasOf(cells: LaneCells): LaneBias[] {
+  const mean = zoneMeanOf(cells);
+  const out: LaneBias[] = [];
+  for (const band of GRID_BANDS)
+    for (const lane of GRID_LANES) {
+      const share = Math.max(
+        -LANE_BIAS_CAP,
+        Math.min(LANE_BIAS_CAP, cells[band][lane] - mean[band]),
+      );
+      if (share !== 0) out.push({ band, lane, share });
+    }
+  return out;
+}
 
 /** 그 칸에서 실제로 뛰는 전력 — 가까운 선수일수록 크게 친다 */
 function presence(
@@ -120,6 +225,14 @@ const MIRROR_LANE: Record<GridLane, GridLane> = {
   center: "center",
   right: "left",
 };
+
+/**
+ * 상대 쪽 레인을 우리 쪽 레인으로 — **공략이 쓰는 거울.**
+ *
+ * 공략의 이득은 우리 격자에 실리는데 약점이 선 레인은 상대의 방향으로 적혀 있다.
+ * 상대의 왼쪽 뒷공간을 노리면 값을 하는 것은 **우리 오른쪽**이다.
+ */
+export const mirrorLane = (lane: GridLane): GridLane => MIRROR_LANE[lane];
 const FACING_BAND: Record<GridBand, GridBand> = {
   attack: "defense",
   midfield: "midfield",
@@ -150,10 +263,19 @@ export function zoneGrid(
         const plan = packet[side].regional?.find(
           (entry) => entry.band === band && entry.lane === lane,
         );
-        if (!plan) return base;
+        /**
+         * 개인 지시·공략이 이 칸으로 기울인 몫 — **줄 합이 0이라 존 전력은 그대로다.**
+         * 존에 실리는 것은 같은 산출의 줄 평균이고(`zoneMeanOf`), 여기 오는 것은
+         * 평균을 뺀 나머지뿐이라 그 전력이 두 번 세어지지 않는다.
+         */
+        const bias =
+          packet[side].laneBias?.find((entry) => entry.band === band && entry.lane === lane)
+            ?.share ?? 0;
         // 기존 배치가 이미 한 칸에만 잡혀도 지시가 사라지지 않게, 줄 전력의 한
         // 몫을 목표 칸에 더한 뒤 같은 줄 안에서 다시 정규화한다.
-        return base + zones[band] * REGIONAL_INTENT_WEIGHT[plan.intent] * plan.uptake;
+        const planShare = plan ? REGIONAL_INTENT_WEIGHT[plan.intent] * plan.uptake : 0;
+        // 밀린 칸이 음수로 뒤집히면 정규화가 격자를 뒤집는다 — 얇아지되 사라지지 않는다
+        return Math.max(base * (1 - LANE_BIAS_CAP), base + zones[band] * (planShare + bias));
       });
       const fixed = normalize(raw, zones[band]);
       GRID_LANES.forEach((lane, i) => out.set(`${band}:${lane}`, fixed[i]!));

@@ -796,6 +796,25 @@ export const PLAYER_DIRECTIVE_KO: Record<PlayerDirectiveKind, string> = {
   join_attack: "공격 가담",
 };
 
+/**
+ * 지시의 **세기** — 종류가 접는 것은 *무엇을*이고, 이 축이 남기는 것은 *얼마나*다.
+ *
+ * "붙어서 아예 지워버려"와 "따라가진 말고 견제만"은 같은 `man_mark`지만 같은 지시가
+ * 아니다. 종류가 다섯으로 접히는 것은 설계지만(자연어의 다양함은 `instruction`이
+ * 받는다) 정도까지 접히면 언어가 인터페이스인 게임에서 **감독이 고른 세기가 결과에
+ * 남지 않는다.** 이득·대가·체력 소모가 함께 이 배수를 탄다 — 세게 걸수록 얻는 것만
+ * 크는 것이 아니다 (`packages/sim/src/directives.ts`의 `DIRECTIVE_TUNING`).
+ */
+export const DIRECTIVE_INTENSITIES = ["light", "normal", "heavy"] as const;
+export const DirectiveIntensitySchema = z.enum(DIRECTIVE_INTENSITIES);
+export type DirectiveIntensity = z.infer<typeof DirectiveIntensitySchema>;
+
+export const DIRECTIVE_INTENSITY_KO: Record<DirectiveIntensity, string> = {
+  light: "가볍게",
+  normal: "보통",
+  heavy: "강하게",
+};
+
 export const PlayerDirectiveSchema = z.object({
   kind: PlayerDirectiveKindSchema,
   /**
@@ -803,6 +822,8 @@ export const PlayerDirectiveSchema = z.object({
    * 코어가 "그 선수가 오늘 그라운드에 있는가"를 검증한다.
    */
   targetId: z.string().min(1).optional(),
+  /** 얼마나 세게 — 없으면 `normal`이라 옛 세이브와 세기를 안 보낸 호출이 그대로 선다 */
+  intensity: DirectiveIntensitySchema.optional(),
 });
 export type PlayerDirective = z.infer<typeof PlayerDirectiveSchema>;
 
