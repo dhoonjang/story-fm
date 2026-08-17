@@ -293,7 +293,7 @@ export function monthlyFixedCostOf(teamId: string, state?: GameState): number {
 }
 
 /**
- * 균등 배분에도 **리그 배율을 적용한다** (club-finance §5.1) — 실제로 각국 중계권
+ * 균등 배분에도 **리그 배율을 적용한다** (finance.md §5.1) — 실제로 각국 중계권
  * 규모는 리그마다 크게 다르다 (리그1은 EPL의 0.16).
  *
  * 예전엔 껐다. 주급 곡선이 리그를 몰라(능력치로만 정해져) 약체 리그 구단이 EPL 수준
@@ -782,7 +782,7 @@ function amortisationMonthsLeft(state: GameState, since: string, until: string):
  * 선수의 계약은 언제나 게임 시작일보다 늦다.
  *
  * 계약이 끝나거나 선수를 팔면 활성 계약이 사라지므로 상각도 자동으로 멈춘다.
- * 매각 시 장부상 잔존가 처리는 v1에서 생략한다 (club-finance §13).
+ * 매각은 거기서 그치지 않고 **잔존가를 털어 낸다** (`bookValueOf` — finance.md §6.1).
  *
  * 이적 갈래의 순회 기준은 **이적 원장**이다 — 이적은 몇 건뿐이고 계약은 3천 건에
  * 가까우므로(96팀 × 30명) 계약을 훑으면 월초 정산이 팀 수만큼 느려진다.
@@ -1923,7 +1923,7 @@ export function currentMonthSummary(state: GameState) {
 
 /**
  * 재정 조회 (GM `get_finance`) — 월간 보고서 또는 이번 달 잠정 집계.
- * 컨텍스트에 상시 넣지 않고 물어볼 때만 읽는다 (llm-io 3층 규약).
+ * 컨텍스트에 상시 넣지 않고 물어볼 때만 읽는다 (agents.md §7).
  */
 export function financeLookup(state: GameState, month?: string): { ok: boolean; message: string } {
   const finance = financeOf(state, state.userTeamId);

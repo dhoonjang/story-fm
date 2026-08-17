@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MatchEvent } from "@story-fm/domain";
-import { applyEvents, createLedger, describeLedger } from "@story-fm/sim";
+import { applyEvents, createLedger } from "@story-fm/sim";
 import { makeLedgerSide, makeSquad } from "./helpers";
 
 const homeSquad = makeSquad("hm", 80);
@@ -14,7 +14,7 @@ const ev = (partial: Partial<MatchEvent> & Pick<MatchEvent, "minute" | "type">):
   ...partial,
 });
 
-describe("경기 장부 검증 (match-sim.md §4)", () => {
+describe("경기 장부 검증 (match.md §5)", () => {
   it("골을 적용하면 스코어가 오른다", () => {
     const r = applyEvents(createLedger(home, away), [
       ev({ minute: 12, type: "goal", team: "home", actors: ["hm-fw1"] }),
@@ -210,25 +210,13 @@ describe("경기 장부 검증 (match-sim.md §4)", () => {
     expect(end.ok).toBe(true);
     if (end.ok) expect(end.state.phase).toBe("finished");
   });
-
-  it("장부 요약은 스코어·페이즈를 담는다", () => {
-    const r = applyEvents(createLedger(home, away), [
-      ev({ minute: 12, type: "goal", team: "home", actors: ["hm-fw1"], causes: ["wing_overload"] }),
-    ]);
-    expect(r.ok).toBe(true);
-    if (r.ok) {
-      const text = describeLedger(r.state, { home: "홈FC", away: "어웨이FC" });
-      expect(text).toContain("홈FC 1 : 0 어웨이FC");
-      expect(text).toContain("전반");
-    }
-  });
 });
 
 /**
  * 연장 — 90분이 승부를 못 가린 녹아웃은 장부가 **계속 열려 있어야** 한다.
  * `full_time` 자리를 `extra_time_start`가 대신하고, 그 뒤로 두 하프가 더 있다.
  */
-describe("연장 장부 (match-sim.md §2)", () => {
+describe("연장 장부 (match.md §2)", () => {
   /** 후반까지 흘려 놓은 장부 */
   function inSecondHalf() {
     const half = applyEvents(createLedger(home, away), [ev({ minute: 45, type: "half_time" })]);
@@ -352,15 +340,5 @@ describe("연장 장부 (match-sim.md §2)", () => {
     ]);
     expect(seventh.ok).toBe(false);
     if (!seventh.ok) expect(seventh.errors[0]).toContain("6명 소진");
-  });
-
-  it("장부 요약이 연장을 말한다 — 교체 한도도 함께 바뀐다", () => {
-    const half = applyEvents(createLedger(home, away), [ev({ minute: 45, type: "half_time" })]);
-    if (!half.ok) throw new Error("half fail");
-    const start = applyEvents(half.state, [ev({ minute: 91, type: "extra_time_start" })]);
-    if (!start.ok) throw new Error("extra fail");
-    const text = describeLedger(start.state, { home: "홈FC", away: "어웨이FC" });
-    expect(text).toContain("연장 전반");
-    expect(text).toContain("/6");
   });
 });

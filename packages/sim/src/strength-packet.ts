@@ -69,7 +69,7 @@ export interface SideInput {
   starters: LineupSlot[];
   bench: LineupSlot[];
   tactics: TacticsSpec;
-  /** 감독 전술 능력치 (0~99) → 전술 소화율 (attribute-model.md §7) */
+  /** 감독 전술 능력치 (0~99) → 전술 소화율 (career.md §2) */
   managerTactics: number;
   /**
    * 감독 분석 능력치 (0~99) — **키포인트를 몇 개나 발견하는가.**
@@ -97,7 +97,7 @@ export interface SideInput {
 /**
  * 존 기여 점수 — **맡은 자리의 가중치**로 계산한 15축 가중합 × 상태 보정.
  * 포지션군별 하드코딩 공식이 아니라 POSITION_WEIGHTS(도메인) 하나에서 나온다
- * (attribute-model.md §2 — overall·roleFit·존 점수의 단일 소스).
+ * (player.md §2 — overall·roleFit·존 점수의 단일 소스).
  */
 function zoneScore(slot: LineupSlot): number {
   const state = slot.matchFatigue
@@ -239,7 +239,7 @@ export function instructionUptake(
 function squadTrait(slots: LineupSlot[], read: (p: Player) => number): number {
   const all = mean(slots.map((s) => read(s.player)));
   if (all === 0) return 1;
-  return all / 70; // 70을 리그 평균 어림으로 둔다 (balance.md에서 튜닝)
+  return all / 70; // 70을 리그 평균 어림으로 둔다 (match.md §1.2)
 }
 
 interface ZoneDelta {

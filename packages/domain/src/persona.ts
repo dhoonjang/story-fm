@@ -1,13 +1,13 @@
 import { z } from "zod";
 
 /**
- * 페르소나 — **코드가 아니라 데이터**로 다루는 인물 (AGENTS.md 4장 · personas.md).
+ * 페르소나 — **코드가 아니라 데이터**로 다루는 인물 (AGENTS.md 4장 · people.md §1).
  *
  * 페르소나는 시뮬 숫자에 직접 손대지 않는다. 사기·관계 같은 **상태를 거쳐서만**
  * 세계에 영향을 준다. 여기 있는 것은 전부 "어떻게 말하고 무엇을 원하는가" —
  * LLM이 그 인물을 일관되게 연기하기 위한 재료다.
  *
- * 지금 채워지는 건 **수석코치와 구단주**(personas.md §2의 핵심 계층)다.
+ * 지금 채워지는 건 **수석코치와 구단주**(people.md §2의 핵심 계층)다.
  * 기자·핵심 선수는 같은 스키마로 뒤에 붙는다.
  */
 
@@ -17,7 +17,7 @@ export type PersonaRole = z.infer<typeof PersonaRoleSchema>;
 
 /**
  * 말투 — 지문 하나로는 모델이 흉내만 내고 만다. **예시 대사**를 함께 줘야
- * 톤이 실제로 붙는다 (personas.md §6).
+ * 톤이 실제로 붙는다 (people.md §1).
  */
 export const SpeechStyleSchema = z.object({
   /** 말투 지문 — 한 문장 */
@@ -29,7 +29,7 @@ export type SpeechStyle = z.infer<typeof SpeechStyleSchema>;
 
 export const PersonaSchema = z.object({
   /**
-   * 채팅 @태그와 1:1 (personas.md §1) — **그 사람의 이름**이다.
+   * 채팅 @태그와 1:1 (people.md §3) — **그 사람의 이름**이다.
    *
    * 선수가 `@손흥민:`으로 말하는데 코치만 `@수석코치:`로 말하면, 이름을 지어 준
    * 의미가 없고 화면에서도 그 사람이 아니라 직책이 말하는 것처럼 읽힌다.
@@ -38,7 +38,7 @@ export const PersonaSchema = z.object({
   characterId: z.string().min(1),
   name: z.string().min(1),
   role: PersonaRoleSchema,
-  /** 원형 — 같은 자리라도 어떤 유형의 사람인가 (personas.md §2) */
+  /** 원형 — 같은 자리라도 어떤 유형의 사람인가 (people.md §2) */
   archetype: z.string().min(1),
   /** 성격 3~5개 — "데이터 신봉자", "직설적" */
   traits: z.array(z.string().min(1)).min(1),
@@ -53,7 +53,7 @@ export const PersonaSchema = z.object({
   outlet: z.string().min(1).optional(),
   /**
    * 실존 인물인가 — 이름만 실제이고 성격·대사는 게임이 지어낸 것이다.
-   * 서사 가드가 이 표식을 보고 **부정적 실명 서사를 막는다** (data-sourcing.md §7).
+   * 서사 가드가 이 표식을 보고 **부정적 실명 서사를 막는다** (sources.md §7).
    * 가상 인물엔 없다(옵셔널).
    */
   real: z.boolean().optional(),

@@ -3,6 +3,8 @@ import { YELLOWS_PER_SUSPENSION, positionGroupOfPlayer } from "@story-fm/domain"
 import {
   advanceTime,
   allMatchesDone,
+  createGame,
+  interpretBackgroundHeuristic,
   isSuspended,
   playersOf,
   quickMinuteOf,
@@ -11,8 +13,9 @@ import {
   seasonYellowsOf,
   simSquadOf,
   type GameState,
+  type WorldScope,
 } from "@story-fm/engine";
-import { createTestGame, playMockMatch } from "./helpers";
+import { createTestGame, keepSeat, playMockMatch } from "./helpers";
 
 /**
  * 간이 시뮬의 장부 — **리그가 우리 팀에만 있는 규칙으로 돌지 않는다.**
@@ -23,6 +26,21 @@ import { createTestGame, playMockMatch } from "./helpers";
  */
 
 /**
+ * 리그 하나만 도는 세계 — 20팀 38라운드, 컵·대항전·시장 리그 없음.
+ *
+ * 여기 검증은 **한 시즌치 카드가 쌓여야** 성립한다: 경고 다섯 장마다 정지 하나,
+ * 시즌에 퇴장 몇십 건, 스쿼드 열대여섯 명 출전. 여덟 팀짜리 축소 세계는 14라운드에
+ * 그쳐 그 눈금에 닿지 못하고, 전체 세계는 같은 38라운드를 위해 리그 다섯 개와 2부
+ * 예순네 클럽까지 함께 굴린다. 라운드 수는 그대로 두고 굴리는 것만 5분의 1로 줄인다.
+ */
+const ONE_LEAGUE: WorldScope = {
+  leagues: ["epl"],
+  teamsPerLeague: 20,
+  cups: false,
+  markets: false,
+};
+
+/**
  * 한 시즌을 끝까지 돌린 세이브 — 시드마다 **한 번만** 굴리고 나눠 쓴다.
  * 여기 테스트들은 장부를 읽기만 하고, 시즌 한 바퀴는 이 파일에서 가장 비싼 일이다.
  */
@@ -31,10 +49,20 @@ const seasons = new Map<number, GameState>();
 function seasonOf(seed: number): GameState {
   const cached = seasons.get(seed);
   if (cached) return cached;
-  const state = createTestGame(seed);
+  const background = "K리그에서 뛰다 은퇴한 수비수 출신 분석가";
+  const state = createGame({
+    seed,
+    userTeamId: "arsenal",
+    managerName: "김감독",
+    background,
+    attributes: interpretBackgroundHeuristic(background, "arsenal"),
+    world: ONE_LEAGUE,
+  });
   let guard = 420;
   while (guard-- > 0 && !allMatchesDone(state)) {
     const before = state.date;
+    // 장부가 한 시즌치 쌓이는 것을 재는 동안 자리는 지킨다 — 경질은 시계를 멈춘다
+    keepSeat(state);
     const advanced = advanceTime(state, { days: 1 });
     if (state.phase === "matchday") playMockMatch(state);
     if (state.date === before && advanced.stopped !== "matchday") break;

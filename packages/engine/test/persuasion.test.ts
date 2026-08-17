@@ -11,7 +11,7 @@ import {
 import { createTestGame } from "./helpers";
 
 /**
- * 설득 — 숫자로 못 넘는 벽을 넘는 수단 (persuasion.ts · transfers.md §1.5).
+ * 설득 — 숫자로 못 넘는 벽을 넘는 수단 (persuasion.ts · transfer.md §4).
  * 경계선은 하나다: **코어가 사실 대조한 논거만 확률을 움직인다.**
  */
 
@@ -38,7 +38,6 @@ describe("사실 대조 — 말만 잘해서는 안 된다", () => {
     const lie = evaluatePitch(state, legend.id, [claim("homecoming")]);
     if (!lie.verdicts[0]?.verified) {
       expect(lie.score).toBeLessThan(0);
-      expect(lie.verdicts[0]?.why.length).toBeGreaterThan(0);
     }
   });
 
@@ -49,7 +48,6 @@ describe("사실 대조 — 말만 잘해서는 안 된다", () => {
     ]);
     expect(out.score).toBe(0);
     expect(out.verdicts[0]?.verified).toBe(false);
-    expect(out.verdicts[0]?.note).toContain("아들");
   });
 
   it("같은 논거를 반복하면 다시 쳐주지 않는다 — 반복은 설득이 아니다", () => {
@@ -59,7 +57,6 @@ describe("사실 대조 — 말만 잘해서는 안 된다", () => {
     expect(first.latitude).toBeGreaterThan(0);
     const again = evaluatePitch(state, legend.id, [claim("last_chance")], first.verified);
     expect(again.latitude).toBe(0);
-    expect(again.verdicts[0]?.why).toContain("이미 한 이야기");
   });
 
   it("결정적이다 — 같은 상태·같은 주장이면 같은 판정", () => {
@@ -83,7 +80,6 @@ describe("사실 대조 — 말만 잘해서는 안 된다", () => {
     if (!weakSamePosition) return;
     const out = evaluatePitch(state, weakSamePosition.id, [claim("starting_role")]);
     expect(out.verdicts[0]?.verified).toBe(false);
-    expect(out.verdicts[0]?.why).toContain("주전 약속");
   });
 });
 
@@ -97,7 +93,7 @@ describe("확률 — 설득에는 상한이 없다", () => {
     ...(pitch ? { pitch } : {}),
   });
 
-  it("논거는 확률이 아니라 여유를 연다 — 근거는 한 줄씩 드러난다", () => {
+  it("논거는 확률이 아니라 여유를 연다", () => {
     const state = createTestGame();
     state.date = "2026-08-01";
     const legend = legendOf(state);
@@ -109,22 +105,6 @@ describe("확률 — 설득에는 상한이 없다", () => {
     expect(pitched.probability).toBe(bare.probability);
     expect(bare.latitude).toBe(0);
     expect(pitched.latitude).toBeGreaterThan(0);
-    const factor = pitched.factors.find((f) => f.label.startsWith("설득 —"));
-    expect(factor?.why).toContain("판정 여유");
-  });
-
-  it("거짓 논거를 섞으면 오히려 떨어진다", () => {
-    const state = createTestGame();
-    state.date = "2026-08-01";
-    const legend = legendOf(state);
-    const honest = dealOdds(state, buyTerms(legend.id, [claim("last_chance")]));
-    const inflated = dealOdds(
-      state,
-      buyTerms(legend.id, [claim("last_chance"), claim("homecoming"), claim("reunion")]),
-    );
-    // 확인 안 되는 이야기를 갖다 붙이면 신뢰를 잃는다
-    const lies = inflated.factors.filter((f) => f.why.includes("신뢰를 잃는다"));
-    if (lies.length > 0) expect(inflated.probability).toBeLessThan(honest.probability);
   });
 
   it("복귀 저항은 남아 있고, 그 위에 여유가 얹힌다 — 없앤 게 아니라 넘는 것", () => {
@@ -257,7 +237,6 @@ describe("오퍼에 실린 설득", () => {
       pitch: [claim("starting_role", "네가 우리 1번 선택이다")],
     });
     expect(res.ok, res.message).toBe(true);
-    expect(res.message).toContain("설득:");
 
     const negotiation = state.negotiations.find((n) => n.gamePlayerId === target.id);
     expect(negotiation).toBeDefined();

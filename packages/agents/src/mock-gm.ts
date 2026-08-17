@@ -83,7 +83,7 @@ const carry = (result: { payload?: unknown; brief?: SkillBrief }) => ({
   ...(result.brief === undefined ? {} : { brief: result.brief }),
 });
 
-/** 수석코치 화자 태그 — 직책이 아니라 그 사람의 이름이다 (personas.md) */
+/** 수석코치 화자 태그 — 직책이 아니라 그 사람의 이름이다 (people.md §3) */
 function coach(state: GameState): string {
   return `@${headCoachOf(state).characterId}:`;
 }
@@ -754,7 +754,7 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
   }
 
   if (/명단|스쿼드|상태 보여|선수단/u.test(msg)) {
-    // 채팅에서는 숫자를 읊지 않는다 — 서술로 (결정 #2)
+    // 채팅에서는 숫자를 읊지 않는다 — 서술로 (prompts.md §1)
     const views = buildOfficeViews(state);
     const top = views.squad.players.slice(0, 4).map((p) => p.name);
     return {

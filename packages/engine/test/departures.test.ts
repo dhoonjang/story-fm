@@ -131,7 +131,9 @@ describe("임대 — 전력을 내주고 성장을 산다", () => {
     const state = createTestGame(11);
     const target = spare(state);
     loanPlayer(state, { playerId: target.id, teamId: "chelsea" });
-    expect(releasePlayer(state, { playerId: target.id }).message).toContain("임대 중");
+    const res = releasePlayer(state, { playerId: target.id });
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain("임대 중");
   });
 });
 

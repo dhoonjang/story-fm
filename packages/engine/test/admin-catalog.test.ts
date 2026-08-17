@@ -5,8 +5,6 @@ import path from "node:path";
 import {
   adminAddLeague,
   adminAddTeam,
-  adminCupCatalog,
-  adminLeagueCatalog,
   adminRemoveLeague,
   adminRemoveTeam,
   adminResetCupCatalog,
@@ -41,7 +39,10 @@ import {
   tierOfTeamIn,
   type LeagueCatalogEntry,
 } from "@story-fm/engine";
-import { createTestGame } from "./helpers";
+import { createTestGame, rebuildEveryFixture } from "./helpers";
+
+// 카탈로그를 고치는 파일 — 편집 뒤에 시작한 게임은 편집을 반영해야 하므로 보관본을 안 쓴다
+rebuildEveryFixture();
 
 /**
  * 팀·리그·컵 카탈로그 어드민 — **게임과 무관한 초기치 DB**를 편집한다 (v6).
@@ -64,32 +65,6 @@ afterEach(() => {
 });
 
 describe("카탈로그 조회", () => {
-  it("팀 행은 정체성 + 전술 성향 + 구단 프로필 + 파생값을 함께 준다", () => {
-    const rows = adminTeamCatalog();
-    expect(rows).toHaveLength(teamCatalog().length);
-    const arsenal = rows.find((r) => r.id === "arsenal")!;
-    expect(arsenal.leagueId).toBe("epl");
-    expect(arsenal.leagueName).toBe("프리미어리그");
-    expect(arsenal.tacticalStyle).toBe("possession");
-    expect(arsenal.stadium).toBe("에미레이츠 스타디움");
-    expect(arsenal.capacity).toBeGreaterThan(10_000);
-    expect(arsenal.commercialTier).toBe(1);
-    expect(arsenal.squadSize).toBeGreaterThan(14);
-  });
-
-  it("리그 행은 소속 팀 수를 파생으로 담는다", () => {
-    const rows = adminLeagueCatalog();
-    expect(rows).toHaveLength(leagueCatalog().length);
-    expect(rows.find((r) => r.id === "epl")!.teamCount).toBe(20);
-    expect(rows.find((r) => r.id === "free")!.teamCount).toBe(1);
-  });
-
-  it("컵 조회는 유럽 대항전과 국내 컵을 나눠 준다", () => {
-    const { europe, domestic } = adminCupCatalog();
-    expect(europe.map((c) => c.id)).toEqual(["ucl", "uel", "uecl"]);
-    expect(domestic).toHaveLength(6);
-  });
-
   it("편집 전에는 세 '편집됨' 플래그가 전부 꺼져 있다", () => {
     expect(isTeamCatalogEdited()).toBe(false);
     expect(isLeagueCatalogEdited()).toBe(false);
@@ -170,7 +145,6 @@ describe("체급 편집과 진행 중인 세이브", () => {
     const state = createTestGame(7, "arsenal");
     const before = tierOfTeamIn(state, state.userTeamId);
     const expected = boardExpectation(state, state.userTeamId);
-    expect(before).toBe(1);
 
     const res = adminUpdateTeam("arsenal", { tier: 4 });
     expect(res.ok).toBe(true);
@@ -217,7 +191,6 @@ describe("팀 추가·삭제", () => {
     });
     expect(res.ok).toBe(true);
     const row = adminTeamCatalog().find((t) => t.id === "wrexham")!;
-    expect(row.leagueName).toBe("챔피언십");
     expect(row.squadSize).toBeGreaterThan(14);
     expect(playerCatalog().some((p) => p.teamId === "wrexham")).toBe(true);
   });

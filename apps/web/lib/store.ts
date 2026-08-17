@@ -50,7 +50,7 @@ export interface GamePayload {
   playerNames: Record<string, string>;
   /**
    * 화자 이름→직책 — 채팅이 `스티브 홀랜드 (수석코치)`로 보여 준다.
-   * 모델은 이름만 뱉으므로 직책은 세이브가 알려 준다 (personas.md).
+   * 모델은 이름만 뱉으므로 직책은 세이브가 알려 준다 (people.md §3).
    */
   speakerRoles: Record<string, SpeakerRole>;
   /**

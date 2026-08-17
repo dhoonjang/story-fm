@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ATTRIBUTE_AXES } from "@story-fm/domain";
 import {
-  FAMILIARITY_SPREAD,
-  PROFICIENCY_SPREAD,
   buildStrengthPacket,
   famFactor,
   profFactor,
@@ -13,7 +11,6 @@ import { makeSide } from "./helpers";
 
 describe("적응도 전력 팩터", () => {
   it("포지션 0은 0.1이고 로그 곡선이 1≈0.2, 25≈0.6을 근사한다", () => {
-    expect(PROFICIENCY_SPREAD).toBe(0.9);
     expect(profFactor(0)).toBe(0.1);
     expect(profFactor(1)).toBeCloseTo(0.154067);
     expect(profFactor(25)).toBeCloseTo(0.631337);
@@ -27,7 +24,6 @@ describe("적응도 전력 팩터", () => {
   });
 
   it("전술은 기본 15%p에 자리 민감도를 곱한다", () => {
-    expect(FAMILIARITY_SPREAD).toBe(0.15);
     expect(famFactor(0, "CM")).toBeCloseTo(0.79);
     expect(famFactor(0, "ST")).toBeCloseTo(0.91);
     expect(famFactor(100, "CM")).toBe(1);
@@ -165,7 +161,7 @@ describe("buildStrengthPacket", () => {
     expect(tired.home.zones.defense).toBeLessThan(fresh.home.zones.defense);
   });
 
-  it("감독 전술 능력치가 높으면 전술 소화율이 오른다 (결정 #13)", () => {
+  it("감독 전술 능력치가 높으면 전술 소화율이 오른다 (career.md §2)", () => {
     expect(tacticalFit(90)).toBeGreaterThan(tacticalFit(50));
     const sharp = buildStrengthPacket(
       makeSide("str", 80, { managerTactics: 90 }),
@@ -198,9 +194,8 @@ describe("buildStrengthPacket", () => {
     }
   });
 
-  it("패킷에 한국어 요약과 라인업이 포함된다 (LLM 인용용)", () => {
+  it("패킷에 라인업 열한 명과 존 매치업 셋이 실린다", () => {
     const packet = buildStrengthPacket(makeSide("str", 80), makeSide("wk", 70));
-    expect(packet.summary).toContain("기대 득점");
     expect(packet.home.lineup).toHaveLength(11);
     expect(packet.matchups).toHaveLength(3);
   });

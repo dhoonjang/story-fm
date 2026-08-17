@@ -121,9 +121,37 @@ packages/
 
 ### Tests
 
+**A test earns its place by catching what nobody would notice.** Deterministic
+formulas and curves, invariants, boundary conditions, state transitions — the
+things that go wrong quietly and stay wrong. Everything else costs more than it
+returns:
+
+| Write a test for | Do not |
+| --- | --- |
+| a formula, a curve, a rounding rule | a string the screen shows the moment it breaks |
+| an invariant (books balance, no duplicate ids) | what `strict` already rejects |
+| a boundary (0, cap, last day of the season) | the implementation restated line by line |
+| a state transition (offer → contract → squad) | a value the seed owns and a seed change will move |
+
+"It is a new feature" is not a reason on its own. A change whose whole behavior
+is visible on screen ships without a test; a change to a number nobody can see
+does not.
+
+**Measuring balance is not testing.** A case that plays seasons to see whether
+the numbers land in a sensible band has no fixed expectation to regress against,
+and it costs minutes. That is a harness: put it behind
+`describe.skipIf(!process.env.BALANCE)` the way
+`packages/engine/test/balance-harness.test.ts` does, and run it with `BALANCE=1`
+when you are tuning.
+
+**Fixtures cost more than the logic they carry.** `createTestGame()` builds a
+whole world — a second per call. Call the pure function directly when the world
+is not what is being tested, and where it genuinely is, build one fixture per
+`describe` and share it.
+
 - Test the sim core **without an LLM** — fixed seed, deterministic.
 - Test LLM-dependent logic with mocks, or at the schema-validation level.
-- New features ship with tests. Never hide a failing test; report it as it is.
+- Never hide a failing test; report it as it is.
 
 **The gate is CI, not your machine.** `.github/workflows/ci.yml` runs
 `typecheck` · `lint` · `pnpm test` · `pnpm e2e`, and its verdict is what
@@ -131,15 +159,23 @@ packages/
 being worked on burns runner minutes nobody reads. `/merge` marks the PR ready,
 and that is what starts the run it then watches.
 
-**The suite does not fit one runner.** `pnpm test` is ~84 runner-minutes of CPU
-and `ubuntu-latest` has two cores, so the test gate is four jobs —
-`unit + api (i/4)`, each running `--shard=i/4 --maxWorkers=100%`. All four must
-be green; a shard is not a sample. Vitest assigns files to shards by hashing
-their path, so a new test file reshuffles the split, and **one file is never
-split across shards** — the slowest file is the floor for its shard, and today
-that is `finance.test.ts` at 17.5 minutes on the runner. More shards will not
-move that floor; only a cheaper test will. Nothing is excluded from the gate:
-making it faster means making a test cheaper, not moving it out of CI.
+**The runner shape lives in two repository variables, not in the workflow.**
+`CI_RUNNER` picks the machine and `CI_SHARDS` the shard list; with neither set,
+`ci.yml` falls back to GitHub-hosted `ubuntu-latest` × `[1, 2, 3, 4]`. The
+intended setting is one 8-core external runner and `[1]` — clearing the
+variables is the rollback, and it needs no commit. Every shard must be green; a
+shard is not a sample.
+
+**Cores beat shards.** Vitest assigns files to shards by hashing their path, so
+four shards land three-fold uneven and each one pays its own checkout and
+`pnpm install` — about 1.5 minutes that runs no test. One job with more cores
+removes both: vitest balances inside the job, and the setup is paid once. The
+suite costs about 13 CPU-minutes over some 1,600 cases locally (12 cores) and
+25.5 on a hosted runner. What it cannot go below is the slowest single file,
+because **one file is never split across shards**: `euro-knockout.test.ts` at
+126s, then `training-plan.test.ts` at 107s. More cores will not move that floor;
+only a cheaper test will. Nothing is excluded from the gate — making CI faster
+means making a test cheaper, not moving it out.
 
 - **While working** — `pnpm typecheck` and `pnpm lint`, plus `pnpm test <path>`
   for the file you just wrote. That is the whole local loop.

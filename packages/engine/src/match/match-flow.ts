@@ -68,7 +68,7 @@ import { needsExtraTime } from "../competition/extra-time";
 import { recordCard } from "./discipline";
 import { makeRng } from "../core/rng";
 
-/** 경기 흐름 — 시작 · 이벤트 반영 · 마무리 (overview §4, match-sim.md) */
+/** 경기 흐름 — 시작 · 이벤트 반영 · 마무리 (overview.md §4 · match.md) */
 
 export interface FlowResult {
   ok: boolean;
@@ -158,7 +158,7 @@ function managerTacticsOf(state: GameState, teamId: string): number {
 }
 
 /**
- * 전력 분석 패킷 (재)계산 — 전술 변경·교체 시에도 호출 (match-sim.md §2).
+ * 전력 분석 패킷 (재)계산 — 전술 변경·교체 시에도 호출 (match.md §1).
  * 경기 중에는 장부의 현재 온필드 명단으로 계산한다 (교체·퇴장 반영).
  */
 /** 그라운드에 선 선수의 개인 지시 — 교체로 나간 선수의 지시는 따라 나간다 */
@@ -862,7 +862,7 @@ export function digestLines(digest: MatchDigest): string[] {
   return [...digest.ours, ...digest.finance, ...digest.others];
 }
 
-/** 경기 후 반영 — 사건은 창발, 반영은 공식 (match-sim.md §6) */
+/** 경기 후 반영 — 사건은 창발, 반영은 공식 (match.md §6) */
 export function finalizeMatch(state: GameState): MatchDigest {
   const pending = state.pendingMatch;
   if (!pending) return { ours: [], finance: [], others: [] };

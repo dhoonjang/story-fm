@@ -3,7 +3,6 @@ import {
   FREE_AGENT_TEAM,
   activeContract,
   answerOffer,
-  dealOdds,
   freeAgents,
   isClubTeam,
   loanPlayer,
@@ -78,23 +77,6 @@ describe("임대 영입 — 사는 게 아니라 빌리는 것", () => {
       .filter((p) => p.teamId !== state.userTeamId)
       .sort((a, b) => a.attributes.overall - b.attributes.overall)[2]!;
 
-  it("확률의 관문이 다르다 — 주전은 안 빌려준다", () => {
-    const state = createTestGame(11);
-    state.date = "2026-08-01";
-    const squad = playersOf(state, "chelsea").sort(
-      (a, b) => b.attributes.overall - a.attributes.overall,
-    );
-    const star = squad[0]!;
-    const odds = dealOdds(state, {
-      playerId: star.id,
-      fee: 5_000_000,
-      weeklyWage: 100_000,
-      years: 1,
-      kind: "loan",
-    });
-    expect(odds.factors.some((f) => f.label === "그 팀에서의 자리")).toBe(true);
-  });
-
   it("임대 오퍼 → 수락 → 확정이면 계약은 그대로 두고 선수만 온다", () => {
     const state = createTestGame(11);
     state.date = "2026-08-01";
@@ -153,7 +135,6 @@ describe("다른 구단도 계약을 관리한다", () => {
       runAiRenewals(state, digest);
     }
     if (openNegotiationFor(state, target.id)) return; // 재계약을 안 할 수도 있다
-    expect(digest.join(" ")).toContain("재계약");
     expect(activeContract(state, target.id)!.until > "2026-12-31").toBe(true);
   });
 
@@ -182,7 +163,6 @@ describe("임대 내보내기도 흥정이다 — 상대가 받아 줘야 한다
       loan: true,
     });
     expect(res.ok, res.message).toBe(true);
-    expect(res.message).toContain("임대");
     const negotiation = openNegotiationFor(state, target.id)!;
     expect(negotiation.kind).toBe("loan_out");
 
@@ -214,7 +194,6 @@ describe("판정을 기다리는 협상은 눈에 띈다", () => {
     const waiting = pendingVerdicts(state);
     expect(waiting).toHaveLength(1);
     expect(waiting[0]!.action).toBe("respond_offer");
-    expect(waiting[0]!.label).toContain("판정");
   });
 
   it("합의된 협상은 확정을 기다린다", () => {

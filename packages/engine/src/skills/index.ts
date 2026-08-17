@@ -77,7 +77,7 @@ import {
 /**
  * 스킬 = 상태 변경의 유일한 통로 (overview §2.2·§5).
  * 판정형: LLM은 {outcome, intensity}만 정하고 변화량은 여기 공식이 정한다
- * (overview §7). 감독 능력치가 계수로 들어간다 (결정 #13).
+ * (overview §7). 감독 능력치가 계수로 들어간다 (career.md §2).
  */
 
 export interface SkillResult {
@@ -233,7 +233,7 @@ export function setSquadLevel(
 export const POSITION_CODES = Object.keys(POSITION_GROUPS);
 export { positionGroupOf };
 
-// ---- 감독 성장 (attribute-model.md §7) ----
+// ---- 감독 성장 (career.md §3) ----
 
 /** 한 칸에 필요한 XP · 성장 상한 — 뷰가 진행을 그리려면 같은 값을 읽어야 한다 */
 export const MANAGER_XP_PER_LEVEL = 100;
@@ -367,7 +367,7 @@ export function applyTalkToPlayer(
   const bounded = Math.max(-8, Math.min(8, delta));
   player.state.form = clampForm(player.state.form + moraleToForm(bounded));
 
-  // 면담은 방치 이슈를 해소한다 (game-loop §4-5)
+  // 면담은 방치 이슈를 해소한다 (season.md §5)
   const hadIssue = state.issues.some((i) => i.gamePlayerId === player.id);
   state.issues = state.issues.filter((i) => i.gamePlayerId !== player.id);
 
@@ -1276,7 +1276,7 @@ export function rememberTactics(tactics: TeamTactics, on: string): void {
  *
  * 세 축을 고른 이유: 시야는 그림을 그리는 힘, 위치선정은 그 그림에서 제 자리를 찾는
  * 힘, 침착성은 익숙지 않은 상황에서도 판단이 무너지지 않는 힘이다. 셋 다
- * **판단 계열**이라 스카우팅으로도 오차가 남는 축이고(attribute-model.md),
+ * **판단 계열**이라 스카우팅으로도 오차가 남는 축이고(player.md §9),
  * 그래서 "왜 쟤만 못 따라오지"가 감독에게 흥미로운 질문이 된다.
  */
 export function tacticalUptake(player: Player): number {
@@ -1297,7 +1297,7 @@ function shiftFactor(player: Player | null): number {
 
 /**
  * 경기 중 전술 변경이 치르는 적응도 대가의 비율 — 훈련장에서 바꿀 때의 몇 배인가.
- * ⚠️ 밸런스 값 (아래 시뮬레이션으로 잡았다 — balance.md).
+ * ⚠️ 밸런스 값 — 아래 시뮬레이션으로 잡았다.
  */
 const IN_MATCH_FAMILIARITY_LOSS = 0.25;
 

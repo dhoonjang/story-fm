@@ -172,25 +172,6 @@ describe("승격·강등은 등록 규칙을 따른다", () => {
 });
 
 describe("2군 — 합성 유스는 채움용이다", () => {
-  it("실명 유망주가 2군 상위를 차지한다 (맨유 헤븐·레이시)", () => {
-    const state = createTestGame();
-    const reserves = playersOf(state, "manutd")
-      .filter((p) => squadLevelOf(p) === "reserve")
-      .sort((a, b) => b.attributes.overall - a.attributes.overall);
-    expect(reserves.length).toBeGreaterThan(10);
-
-    // 상위 3명은 전부 카탈로그 실선수여야 한다 — 이름 없는 합성이 위를 덮으면
-    // 유스 발굴이 "누군지 모를 선수를 올리는 일"이 된다
-    for (const p of reserves.slice(0, 3)) {
-      expect(p.catalogId, `${p.name}이 2군 상위인데 합성이다`).not.toBeNull();
-    }
-    const top = reserves[0]!.attributes.overall;
-    const bestSynthetic = Math.max(
-      ...reserves.filter((p) => p.catalogId === null).map((p) => p.attributes.overall),
-    );
-    expect(bestSynthetic).toBeLessThan(top);
-  });
-
   it("어느 구단에서도 합성이 실명 유망주 위에 서지 않는다", () => {
     const state = createTestGame();
     for (const teamId of ["manutd", "arsenal", "liverpool", "chelsea", "tottenham"]) {

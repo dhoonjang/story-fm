@@ -303,7 +303,7 @@ describe("연장이 필요한 경기인가 — 단일 판정", () => {
  * 있고, 그 경기의 장부에 연장이 남고, 그래서 `resolveExtraTime`이 같은 경기를
  * 다시 굴리지 않는다.
  */
-describe("유저 경기의 연장 (match-sim.md §2)", () => {
+describe("유저 경기의 연장 (competition.md §6)", () => {
   /** 감독의 컵 경기 하나를 오늘 자리에 세운다 — 킥오프 직전 상태 */
   function stageUserCupMatch(state: GameState, pair: number, opponent = "chelsea"): MatchRecord {
     const match: MatchRecord = {

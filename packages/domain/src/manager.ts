@@ -2,7 +2,7 @@ import { z } from "zod";
 import { RatingSchema } from "./player";
 
 /**
- * 감독 능력치 **5축** — 유저 플레이 × 능력치 계수 구조 (결정 #13, attribute-model.md §9).
+ * 감독 능력치 **5축** — 유저 플레이 × 능력치 계수 구조 (career.md §2).
  *
  * | 축 | 계수가 들어가는 자리 |
  * | --- | --- |
@@ -38,7 +38,7 @@ export const MANAGER_ATTRIBUTES = Object.keys(MANAGER_ATTRIBUTE_KO) as Array<
   keyof ManagerAttributes
 >;
 
-/** 평판 — 세계가 감독을 어떻게 보는가 (능력치와 구분, personas.md §3) */
+/** 평판 — 세계가 감독을 어떻게 보는가 (능력치와 구분, career.md §4) */
 export const ManagerReputationSchema = z.object({
   board: z.number().int().min(0).max(100),
   media: z.number().int().min(0).max(100),
@@ -47,7 +47,7 @@ export const ManagerReputationSchema = z.object({
 
 export const ManagerSchema = z.object({
   name: z.string().min(1),
-  /** 온보딩에서 유저가 직접 입력한 배경 서술 (결정 #11) */
+  /** 온보딩에서 유저가 직접 입력한 배경 서술 (career.md §1) */
   background: z.string(),
   attributes: ManagerAttributesSchema,
   reputation: ManagerReputationSchema,

@@ -5,13 +5,11 @@ import {
   observedRating,
   playersOf,
   POTENTIAL_FLOOR,
-  knowledgeNote,
   settlingOf,
   POTENTIAL_MARGIN,
   POTENTIAL_SCOUT_FLOOR,
   SCOUT_REPEAT_LIMIT,
   potentialBand,
-  potentialView,
   scoutPlayer,
   scoutedAttributes,
   userPlayers,
@@ -58,9 +56,8 @@ describe("지식 수준 파생", () => {
     expect(knowledgeOf(state, other.id)).toBe("rumoured");
     for (const attr of scoutedAttributes(state, other)) {
       expect(attr.exact).toBeNull();
-      expect(attr.label.length).toBeGreaterThan(0);
     }
-    expect(potentialView(state, other)).toContain("미지");
+    expect(potentialBand(state, other)).toBeNull();
   });
 
   it("맞대결에서 실제로 뛴 선수만 seen이 된다 (벤치에만 앉은 선수는 아니다)", () => {
@@ -274,7 +271,6 @@ describe("영입 직후 — 안개는 날짜가 아니라 정착으로 걷힌다
     }
     // 잠재력은 우리 선수보다도 넓게 본다 — 계약서에 사인해도 아직 모르는 몸이다
     expect(potentialBand(state, target)!.margin).toBeGreaterThan(POTENTIAL_FLOOR);
-    expect(knowledgeNote(state, target.id)).toContain("적응");
   });
 
   it("정착이 끝나면 own — 수치가 정확해진다", () => {
@@ -355,7 +351,6 @@ describe("잠재력 — 누구도 단정하지 못한다 (구간으로만 안다
   it("만난 적 없는 선수는 짐작조차 못 한다", () => {
     const state = createTestGame(11);
     expect(potentialBand(state, opponentOf(state))).toBeNull();
-    expect(potentialView(state, opponentOf(state))).toContain("미지");
   });
 
   it("우리 선수는 **데리고 뛸수록** 좁아지고, 끝까지 ±2는 남는다", () => {

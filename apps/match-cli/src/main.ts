@@ -1,6 +1,6 @@
 /**
  * 경기 세로 관통 프로토타입 — 전력 분석 패킷(코어) → 매치 캐스터 LLM 진행 →
- * 장부 검증(코어)의 한 사이클을 실제로 돌려본다 (match-sim.md).
+ * 장부 검증(코어)의 한 사이클을 실제로 돌려본다 (match.md).
  *
  *   pnpm match --dry          패킷·장부만 출력 (LLM 호출 없음)
  *   pnpm match --turns 3      진행 턴 수 제한 (기본 8)
@@ -103,7 +103,7 @@ if (dry) {
 }
 
 // ---- ② 경기 장부 + 구간 시뮬레이터 ----
-// 결과는 코어가 xg로 굴린다. LLM은 그 사건을 중계할 뿐이다 (match-sim.md §2).
+// 결과는 코어가 xg로 굴린다. LLM은 그 사건을 중계할 뿐이다 (match.md §2).
 const ledgerSide = (side: z.infer<typeof SideSchema>) => ({
   onPitch: [...side.startingIds],
   bench: side.players.filter((p) => !side.startingIds.includes(p.id)).map((p) => p.id),

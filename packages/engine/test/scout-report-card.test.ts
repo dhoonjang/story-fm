@@ -25,19 +25,6 @@ const target = (state: GameState) =>
 const keeper = (state: GameState) => playersOf(state, "chelsea").find(isKeeper)!;
 
 describe("보고서 한 장", () => {
-  it("판단에 필요한 것이 한자리에 있다", () => {
-    const state = createTestGame(11);
-    const p = target(state);
-    const card = scoutReportCard(state, p.id)!;
-
-    expect(card.name).toBe(p.name);
-    expect(card.marketValue).toBeGreaterThan(0);
-    expect(card.wageExpectation).toBeGreaterThan(0);
-    expect(card.foot.left).toBeGreaterThanOrEqual(1);
-    expect(card.positions.some((x) => x.natural)).toBe(true);
-    expect(card.note.length).toBeGreaterThan(0);
-  });
-
   /** 필드 플레이어의 골키핑은 어디에도 쓰이지 않는다 — 보고서에 두면 줄만 잡아먹는다 */
   it("골키핑은 골키퍼의 보고서에만 실린다", () => {
     const state = createTestGame(11);
@@ -56,7 +43,6 @@ describe("보고서 한 장", () => {
     const state = createTestGame(11);
     const card = scoutReportCard(state, target(state).id)!;
 
-    expect(card.overall.label.length).toBeGreaterThan(0);
     expect(card.overall.margin).toBeGreaterThan(0);
     // 등급은 관측값에서 나온다 — 화면이 따로 계산하면 같은 값이 두 말을 한다
     expect(card.overall.label).toBe(ratingLabel(card.overall.value));
@@ -81,7 +67,7 @@ describe("보고서 한 장", () => {
 
     /**
      * 리포트는 **정답 공개가 아니라 오차를 좁히는 행위**다 — 관측형 ±1 ·
-     * 분석형 ±3이 끝까지 남는다 (attribute-model.md §3).
+     * 분석형 ±3이 끝까지 남는다 (player.md §9).
      */
     expect(after).toBeLessThan(before);
     expect(after).toBeGreaterThan(0);

@@ -157,7 +157,7 @@ function RoundFixtures({ competition }: { competition: Competition }) {
  * 언제 누구인가. 달력을 통째로 세우면 그 한 줄을 찾으러 스크롤해야 한다.
  *
  * **며칠 남았는지를 크게 적는다** — 체력이 자리마다 다르게 깎이고 회복이 며칠에
- * 걸리므로(match-sim §2.1.1) "사흘 뒤"는 곧 로테이션 판단이다. 날짜만 적으면
+ * 걸리므로(match.md §3) "사흘 뒤"는 곧 로테이션 판단이다. 날짜만 적으면
  * 감독이 오늘 날짜와 빼서 세야 한다.
  */
 function NextFixture({ next }: { next: OfficeViews["competitions"]["nextMatch"] }) {

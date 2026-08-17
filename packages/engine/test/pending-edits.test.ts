@@ -59,7 +59,6 @@ describe("전술판이 바꾼 것", () => {
     expect(res.ok, res.message).toBe(true);
 
     const note = lineupChangeNote(state, before)!;
-    expect(note).toContain("선발 교체");
     expect(note).toContain(bench.name);
   });
 

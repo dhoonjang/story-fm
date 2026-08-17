@@ -6,7 +6,6 @@ import {
   budgetVerdict,
   cacheAlerts,
   cacheHitRate,
-  describeUsage,
   emptyLedger,
   emptyUsage,
   llmUsage,
@@ -171,7 +170,7 @@ describe("상한 정책 — 게임 진행을 막지 않는다", () => {
 
   /**
    * 상한을 넘겨도 **서사와 중계는 계속 돈다** — 그 자리에는 대신 세울 값이 없다.
-   * 끊기는 것은 앵커라는 폴백이 이미 있는 결산뿐이다 (llm.md §5).
+   * 끊기는 것은 앵커라는 폴백이 이미 있는 결산뿐이다 (agents.md §4).
    */
   it("상한을 넘기면 결산만 끊고 GM·중계는 돌린다", () => {
     const ledger = recordUsage(
@@ -258,22 +257,5 @@ describe("meterLlm — 계약이 같으므로 부르는 쪽은 감싼 줄 모른
     expect(calls.count).toBe(3);
     // 같은 경고를 매 턴 반복하지 않는다
     expect(warn.mock.calls.filter((c) => String(c[0]).includes("계속 실행"))).toHaveLength(1);
-  });
-});
-
-describe("describeUsage", () => {
-  it("합계와 실제로 돈 에이전트만 한 줄로 적는다", () => {
-    let ledger = emptyLedger();
-    ledger = recordUsage(
-      ledger,
-      "gm",
-      usageOf({ inputTokens: 1000, outputTokens: 100, cacheReadTokens: 900 }),
-    );
-    const line = describeUsage(ledger);
-    expect(line).toContain("합계 1회");
-    expect(line).toContain("gm 1회");
-    expect(line).toContain("캐시 90%");
-    // 안 돈 에이전트는 줄을 차지하지 않는다
-    expect(line).not.toContain("match");
   });
 });

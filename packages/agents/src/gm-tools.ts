@@ -1047,7 +1047,7 @@ const MATCH_TOOL_NAMES = new Set([
 /**
  * 경기 진행 도구 — 구간은 LLM 호출 **안에서** 굴린다. 호출 전에 굴리면 그 턴의
  * 교체·전술 지시가 이 구간에 반영되지 않는다. 인자가 없고 사건은 전부 코어가
- * xg로 굴리므로(match-sim.md) 모델이 쥐는 것은 진행 시점뿐이다.
+ * xg로 굴리므로(match.md §2) 모델이 쥐는 것은 진행 시점뿐이다.
  */
 function makeAdvanceMatchTool(
   state: GameState,

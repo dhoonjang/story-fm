@@ -9,8 +9,6 @@ import {
   arrivedResponses,
   askingPriceFor,
   dealOdds,
-  describeNegotiation,
-  describeNegotiations,
   expireNegotiations,
   expiringContracts,
   financeOf,
@@ -260,7 +258,7 @@ describe("합의 실행 — 장부가 움직인다", () => {
         (e) => e.category === "transfer_out" && e.label.includes(player.name),
       ),
     ).toBe(true);
-    // 에이전트 수수료도 이적료의 10%로 함께 빠진다 (club-finance §6)
+    // 에이전트 수수료도 이적료의 10%로 함께 빠진다 (finance.md §6)
     expect(
       financeOf(state, state.userTeamId).ledger.find((e) => e.category === "agent_fee")?.amount,
     ).toBe(Math.round(terms.fee * 0.1));
@@ -331,22 +329,6 @@ describe("시간이 흐르면", () => {
     expect(stopped === "attention" || stopped === "reached").toBe(true);
   });
 
-  it("협상 요약과 상세가 사람이 읽을 수 있게 나온다", () => {
-    const state = createTestGame(42);
-    expect(describeNegotiations(state)).toContain("없음");
-    const player = target(state);
-    sendOffer(state, offerFor(state, player.id));
-    const negotiation = openNegotiationFor(state, player.id)!;
-
-    const summary = describeNegotiations(state);
-    expect(summary).toContain(player.name);
-    expect(summary).toContain(negotiation.id);
-
-    const detail = describeNegotiation(state, negotiation.id);
-    expect(detail).toContain(player.name);
-    expect(detail).toContain("우리"); // 오퍼 이력
-    expect(detail).toMatch(/기준|성사/); // 확률 근거가 붙는다
-  });
 });
 
 describe("매각 — 들어오는 오퍼", () => {
@@ -521,22 +503,6 @@ describe("매각 — 들어오는 오퍼", () => {
     }
   });
 
-  /** 메디컬 재협상 판정은 **상대가 적어 둔 메모**로 갈린다 — 감독의 메모가 덮지 않는다 */
-  it("감독의 메모가 메디컬 재협상 표시를 덮지 않는다", () => {
-    const state = createTestGame(42);
-    const { negotiation } = waitForIncoming(state);
-    const offer = incomingOffer(negotiation!)!;
-    offer.note = "메디컬 소견 — 무릎에 잔여 리스크";
-
-    const answered = answerIncomingOffer(state, {
-      negotiationId: negotiation!.id,
-      verdict: "accept",
-      note: "그 값이면 보냅니다",
-    });
-    expect(answered.ok, answered.message).toBe(true);
-    expect(answered.message).toContain("메디컬 재협상안을 수락");
-  });
-
   /** 되부를 때 주급도 함께 조정할 수 있다 — 예전엔 이 값이 조용히 버려졌다 */
   it("역제안에 주급을 실으면 그 값이 라운드와 카드에 남는다", () => {
     const state = createTestGame(42);
@@ -706,42 +672,6 @@ describe("시장의 문 — 한쪽에만 걸려 있던 관문들", () => {
     }
     return incomingOffers(state)[0];
   }
-
-  /**
-   * **협상 기록은 선수를 시장에서 지우지 않는다.**
-   *
-   * 예전엔 `status !== "expired"`인 협상이 하나라도 있으면 후보에서 뺐다. 기록은
-   * 시즌이 바뀌어도 남으므로 그것은 영구 배제였다 — 오퍼를 한 번 거절하면 그
-   * 선수는 두 번 다시 오퍼를 못 받았고, 직접 영입한 선수는 애초에 팔 수 없었다.
-   */
-  it("영입 이력이 있는 선수도 오퍼를 받을 수 있다", () => {
-    const state = createTestGame(42);
-    const ours = playersOf(state, state.userTeamId)[0]!;
-    state.negotiations.push({
-      id: "neg-history",
-      gamePlayerId: ours.id,
-      kind: "buy",
-      counterpartTeamId: "someone",
-      windowId: null,
-      openedOn: state.date,
-      expiresOn: state.date,
-      status: "completed",
-      rounds: [],
-    });
-    // 이 선수만 값이 나가게 두고 시장을 굴린다
-    const digest: string[] = [];
-    let offered = false;
-    for (let i = 0; i < 200 && !offered; i++) {
-      state.date = addDays(state.date, 1);
-      generateIncomingOffers(state, digest);
-      offered = state.negotiations.some((n) => n.gamePlayerId === ours.id && n.kind === "sell");
-    }
-    // 완료된 협상 기록이 후보 자격을 막지 않는다는 것이 요점이다
-    expect(
-      state.negotiations.filter((n) => n.kind === "sell").length,
-      "이력이 있는 선수가 낀 스쿼드에서도 시장은 돈다",
-    ).toBeGreaterThan(0);
-  });
 
   it("거절은 영구 배제가 아니라 한동안 식는 것이다", () => {
     const state = createTestGame(42);

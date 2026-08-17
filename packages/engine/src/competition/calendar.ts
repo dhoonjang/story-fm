@@ -11,7 +11,7 @@ import { isEuroWeek } from "./europe";
 /**
  * 시즌 캘린더 (v6) — 게임은 7월 1일(여름 이적창 개장)에 시작해 프리시즌을 보내고
  * 8월 중순 개막전으로 들어간다. 경기·훈련·이적창이 모두 SCHEDULE_ENTRY 단일 축에
- * 등록되고, 경기 실체는 MATCH가 갖는다 (game-loop.md §2).
+ * 등록되고, 경기 실체는 MATCH가 갖는다 (season.md §2).
  *
  * 날짜는 ISO 문자열(YYYY-MM-DD), 시간대 이슈를 피해 UTC로만 계산한다.
  */
