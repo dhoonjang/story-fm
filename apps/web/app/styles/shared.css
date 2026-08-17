@@ -75,3 +75,166 @@
   color: var(--silver);
   margin: 26px 0 10px;
 }
+
+/* ── 턴 원문 뷰어 — 개발 모드에서 턴을 길게 눌렀을 때 서는 창 ─────────────────────────── */
+
+/**
+ * 게임 화면 위에 겹치므로 여기서만 그림자를 쓴다(표면 밝기 규칙의 예외 — 어드민
+ * 모달과 같다). 창이 넓은 것은 **원문이 내용**이기 때문이다: 시스템 프롬프트 한
+ * 줄이 접혀 넘어가면 무엇이 나갔는지를 읽을 수가 없다.
+ */
+.tt-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(6, 8, 12, 0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-4);
+}
+.tt-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop);
+  width: 100%;
+  max-width: 980px;
+  max-height: calc(100vh - 2 * var(--sp-4));
+  display: flex;
+  flex-direction: column;
+  /* 원문은 안에서만 넘친다 — 밖으로 새면 채팅 화면이 가로로 밀린다 */
+  min-width: 0;
+}
+.tt-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+.tt-title {
+  font-size: var(--fs-lg);
+}
+.tt-sub {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.tt-close {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.tt-close:hover {
+  color: var(--text);
+}
+.tt-body {
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+/* 비었을 때·실패했을 때의 한 줄 — 개발 도구의 말투다 */
+.tt-note {
+  color: var(--muted);
+  font-size: var(--fs-md);
+  line-height: 1.6;
+  padding: var(--sp-3) 0;
+}
+
+/* 호출 하나 — 한 턴에 여럿이 순서대로 선다(gm + rater, intent + caster) */
+.tt-call {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  padding: var(--sp-2) var(--sp-3);
+  min-width: 0;
+}
+.tt-call-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--border-soft);
+}
+.tt-agent {
+  font-size: var(--fs-base);
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+}
+/* 호출 순서 — 무엇이 먼저 돌았는지가 곧 그 턴의 경로다 */
+.tt-agent > i {
+  font-style: normal;
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+}
+.tt-model {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.tt-facts {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.tt-error {
+  margin-top: var(--sp-2);
+  color: var(--danger);
+  font-size: var(--fs-sm);
+}
+
+/* 블록 — 접힌 채로 이름과 크기만, 펼치면 원문 그대로 */
+.tt-block > summary {
+  cursor: pointer;
+  padding: var(--sp-1) 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  list-style-position: outside;
+}
+.tt-block-label {
+  font-weight: 700;
+  color: var(--silver);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.tt-block-meta {
+  color: var(--dim);
+  font-size: var(--fs-2xs);
+  font-variant-numeric: tabular-nums;
+}
+/**
+ * 원문 — **줄바꿈 없이 그대로.** 긴 줄은 이 블록 안에서만 가로로 흐르고,
+ * 세로도 여기서 잘린다: 한 블록이 수만 자라 창을 통째로 밀면 다음 호출까지
+ * 내려가는 데만 스크롤이 한참 걸린다.
+ */
+.tt-pre {
+  margin: var(--sp-1) 0 var(--sp-2);
+  padding: var(--sp-2);
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-xs);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+  color: var(--text);
+  white-space: pre;
+  overflow: auto;
+  max-height: 44vh;
+  tab-size: 2;
+}
