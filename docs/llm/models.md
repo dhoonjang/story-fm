@@ -158,7 +158,41 @@ chunk에만 실린다 — 그 옵션이 없으면 계측이 이 에이전트를 
   남는 계약이라 건너뛴 자리에 이미 코어의 값이 서 있다. 건너뛴 횟수도 장부에 적는다 —
   안 적으면 결산이 왜 비었는지 알 수 없다.
 
-## 5. ⚠️ 불변식
+## 5. 개발 모드 원문 열람 (`turn-trace.ts`)
+
+**한 턴이 모델에 보낸 것과 받은 것을 그 자리에서 읽는다.** 채팅에서 턴을 **길게
+누르면**(500ms) 그 턴의 호출들이 요청(system 블록 · 이력 · 발화 · 상태 스냅샷 ·
+도구 스펙)과 응답(본문 · 이력에 새로 붙은 메시지 · 사용량)까지 원문으로 열린다.
+계측이 세는 것은 토큰 수뿐이라(§4), 프롬프트가 잘못 나갔는지 모델이 이상하게
+답했는지 코어가 그걸 잘못 옮겼는지를 가를 눈이 없었다.
+
+| 무엇 | 값 |
+| --- | --- |
+| 기록을 따는 자리 | **팩토리 하나** — `createGameLLM`의 `tapLlm` (계측·시한과 같은 문) |
+| 켜지는 조건 | `NODE_ENV !== "production"` — 라우트도 제스처도 같은 기준으로 닫힌다 |
+| 사는 곳 | **프로세스 메모리의 링버퍼** — 최근 20 채팅 턴, 넘치면 오래된 턴부터 버린다 |
+| 키 | **채팅 턴 인덱스** (`state.chat`의 자리) — 그 아래 호출 여럿이 순서대로 붙는다 |
+| 묶는 자리 | `runTurnLocked`(평시·경기)와 `runOnboardingTurn`(첫 장면) — model 턴을 밀어 넣는 그 자리 |
+| 라우트 | `GET /api/games/[id]/trace/[index]` — production이면 404 |
+
+- **세이브에는 넣지 않는다.** 시스템 프롬프트와 이력 원문은 턴마다 수만 토큰이고
+  세이브는 이미 수 MB다. 서버가 재시작하면 기록이 사라지는 것을 받아들인다 — 지금
+  보고 있는 턴을 읽는 도구이지 이력을 남기는 도구가 아니다.
+- **한 채팅 턴은 호출 하나가 아니다.** 평시 턴은 `gm` + 결산 raters, 경기 턴은
+  `match-intent` + `match-caster` + `match-rater`가 함께 돈다. 그래서 키가 호출이
+  아니라 턴이고, 한 턴을 열면 그 턴에 오간 왕복이 **순서대로 전부** 보인다.
+- **어느 호출이 이 턴의 것인가는 실행 문맥이 정한다**(`AsyncLocalStorage`). 시각이나
+  전역 큐로 가르면 두 게임이 같은 프로세스에서 동시에 턴을 돌릴 때 남의 호출이
+  섞인다.
+- **감독 발화 턴을 누르면 바로 뒤 model 턴의 기록이 열린다** — 그 발화가 실려 나간
+  호출이 거기 있다.
+- **응답은 이력에 새로 붙은 메시지만 적는다** — `tool_use`·thinking 블록이 거기
+  있고, 프롬프트로 이미 적은 이력을 두 번 적지 않는다.
+- ⚠️ **`LLM_MODE=mock`은 기록이 비어 있다.** 모의 GM은 `createGameLLM`을 지나지
+  않는다(agents.md §8) — 팝업이 모드를 함께 받아 "모의 GM은 모델을 부르지 않는다"고
+  말한다. 빈 기록을 고장으로 읽지 않게 하는 것이 이 한 줄의 일이다.
+
+## 6. ⚠️ 불변식
 
 - **모델 ID는 `config/llm.yml` 밖에 쓰지 않는다.** 코드는 에이전트 이름으로만 부른다.
 - **설정 파싱은 순수 함수로 남긴다**(`parseLlmConfig`) — 환경을 읽는 자리가 늘면 설정 검증 테스트가 깨진다.
@@ -172,10 +206,10 @@ chunk에만 실린다 — 그 옵션이 없으면 계측이 이 에이전트를 
 - **잠금에 시한을 걸지 않는다.** 끝나지 않는 호출은 호출 쪽에서 끝낸다 — 잠금을 시간으로
   풀면 두 요청이 같은 세이브를 동시에 쓴다.
 
-## 6. 미해결
+## 7. 미해결
 
 - 계측을 화면에 세울지 — 지금은 `usage-meter.ts`의 `llmUsage()`·`describeUsage()`로 코드에서만
-  읽고 `apps/web`에 부르는 자리가 없다.
+  읽고 `apps/web`에 부르는 자리가 없다. 원문 팝업(§5)은 그 턴의 사용량만 보여 준다.
 - OpenAI Responses API 이전 — 서사를 그쪽으로 옮겨 추론이 필요해지는 날.
   `openai-adapter.ts`는 `chat.completions`만 부른다.
 - 제공자별 캐시 적중 조건과 최소 프리픽스가 달라 히트율을 에이전트끼리 직접 비교할 수 없다 —
@@ -194,4 +228,8 @@ chunk에만 실린다 — 그 옵션이 없으면 계측이 이 에이전트를 
 | 턴 라우트 마감(`maxDuration`·ping) | `apps/web/app/api/games/[id]/turn/route.ts` · `turn/stream/route.ts` |
 | 설정 검증 테스트 | `packages/llm/test/agent-config.test.ts` |
 | 토큰 계측·예산 상한 | `packages/llm/src/usage-meter.ts` |
+| 원문 기록(링버퍼·`tapLlm`) | `packages/llm/src/turn-trace.ts` |
+| 턴 인덱스에 묶는 자리 | `apps/web/lib/turn-runner.ts` · `apps/web/app/api/games/route.ts` |
+| 원문 라우트(dev 전용) | `apps/web/app/api/games/[id]/trace/[index]/route.ts` |
+| 원문 팝업·롱프레스 | `apps/web/components/turn-trace.tsx` · `components/chat.tsx` |
 | 모드 해석 (`LLM_MODE`) | `packages/agents/src/gm.ts` (`resolveLlmMode`) |
