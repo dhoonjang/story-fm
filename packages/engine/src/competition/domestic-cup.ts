@@ -1,6 +1,7 @@
 import type { MatchRecord, MatchStage } from "@story-fm/domain";
 import {
   MIN_REST_HOURS,
+  HARD_MIN_REST_HOURS,
   addDays,
   dayOfWeek,
   restHours,
@@ -22,7 +23,7 @@ import { completeDraw, drawEntryOf, drawIsDue, drawRefId, scheduleDraw } from ".
 import { clubsOfCountry, leagueOfTeam } from "../data/team-catalog";
 import { tierOfTeamIn } from "../core/club-tier";
 import { isTopFlightIn } from "./promotion";
-import { reservedEuroDates } from "./europe";
+import { reservedEuroDatesFor } from "./euro-knockout";
 import { payOnce } from "../club/finance";
 import { clearForCup } from "./reschedule";
 import { makeRng } from "../core/rng";
@@ -238,8 +239,7 @@ function pickTieDate(
     }
     const blocked = new Set<string>();
     for (const teamId of teams) {
-      if (!state.euroEntrants.some((e) => e.teams.includes(teamId))) continue;
-      for (const d of reservedEuroDates(state.season)) blocked.add(d);
+      for (const d of reservedEuroDatesFor(state, teamId)) blocked.add(d);
     }
     return { played, blocked };
   };
@@ -251,6 +251,13 @@ function pickTieDate(
   const rested = (date: string, time: string) =>
     !busy.played.some((m) => tooClose(m, { date, time })) &&
     ![-1, 0, 1].some((o) => busy.blocked.has(addDays(date, o)));
+  /**
+   * 40시간 바닥(`HARD_MIN_REST_HOURS`)은 지켜지나 — 아래 사다리가 조건을 풀며
+   * 내려갈 때 **`free`로 곧장 떨어지지 않게 붙잡는 단**이다. `free`는 "그날만
+   * 겹치지 않으면 된다"라서, 토요일 저녁 리그 **다음 날** 낮에 컵을 앉힌다.
+   */
+  const restedHard = (date: string, time: string) =>
+    !busy.played.some((m) => restHours(m, { date, time }) < HARD_MIN_REST_HOURS);
 
   // ① 목표 자리를 지키기 위해 리그를 비켜세운다 (컵이 밀리기 전에 먼저 시도)
   const target = from > state.date ? from : addDays(state.date, 1);
@@ -313,15 +320,39 @@ function pickTieDate(
     // ② 가까이서 **가장 긴 휴식**. 첫 빈 날을 덥석 잡으면 UCL 전날에 컵이 앉는다 —
     //    같은 창 안에 이틀 뒤 자리가 있는데도. 예약된 대항전 날짜 옆도 피한다:
     //    그 녹아웃은 **나중에** 편성되므로 지금 장부에는 없다.
-    { days: restWindow, weekdays, ok: (d) => free(d) && !nearReserved(d), best: true },
+    {
+      days: restWindow,
+      weekdays,
+      ok: (d) => free(d) && restedHard(d, kickoffFor(d)) && !nearReserved(d),
+      best: true,
+    },
     // ③ 그래도 없으면 창을 넓힌다 (예전엔 여기서 "직전 하루만 쉬면 된다"로 조건을
     //    풀어 버려서 컵 다음날 리그가 섰다 — 창을 넓힐지언정 조건은 안 푼다)
     { days: window, weekdays, ok: (d) => rested(d, kickoffFor(d)) },
-    { days: window, weekdays, ok: (d) => free(d) && !nearReserved(d), best: true },
-    { days: window, weekdays, ok: free, best: true },
-    // ④ 최후 방어 — **요일 제약까지 풀어서라도** 겹치지 않는 날을 찾는다.
+    {
+      days: window,
+      weekdays,
+      ok: (d) => free(d) && restedHard(d, kickoffFor(d)) && !nearReserved(d),
+      best: true,
+    },
+    { days: window, weekdays, ok: (d) => free(d) && restedHard(d, kickoffFor(d)), best: true },
+    // ④ **40시간 바닥은 창보다 앞선다.** 여기까지 왔다는 건 28일 안에 바닥을 지키는
+    //    자리가 없다는 뜻이다. 그때는 라운드가 늘어지는 것보다 연이틀 경기가 나쁘므로
+    //    창을 끝까지, 요일까지 풀어서 바닥을 지키는 자리를 먼저 찾는다.
+    //    ⚠️ 여기서는 `best`를 쓰지 않는다 — 최대 휴식을 고르면 창 끝의 한산한 날이
+    //    이겨 라운드가 몇 주씩 갈라진다. 바닥만 지키면 되므로 **가장 이른 자리**다.
+    { days: LAST_RESORT_DAYS, weekdays, ok: (d) => free(d) && restedHard(d, kickoffFor(d)) },
+    {
+      days: LAST_RESORT_DAYS,
+      weekdays: null,
+      ok: (d) => free(d) && restedHard(d, kickoffFor(d)),
+    },
+    // ⑤ 최후 방어 — 바닥까지 내준다. **같은 날만 아니면 된다.**
     //    같은 날 두 경기는 tick이 그중 하나를 영원히 남겨 시즌을 멈춘다
     //    (FA컵 결승이 UCL 결승과 같은 날 잡혀 실제로 그렇게 멈춘 적이 있다).
+    //    24시간은 빡빡한 것이고 0시간은 멈추는 것이라, 여기서만 바닥을 포기한다.
+    { days: window, weekdays, ok: (d) => free(d) && !nearReserved(d), best: true },
+    { days: window, weekdays, ok: free, best: true },
     { days: LAST_RESORT_DAYS, weekdays: null, ok: free },
   ];
 

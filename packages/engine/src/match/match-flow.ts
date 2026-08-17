@@ -20,6 +20,7 @@ import type { SkillResult } from "../skills";
 import {
   MAX_EXPLOITS,
   addStats,
+  advanceClock,
   applyEvents,
   buildStrengthPacket,
   createLedger,
@@ -423,7 +424,14 @@ export function markEntered(state: GameState): void {
  * 구간 번호를 난수 채널에 넣으므로 같은 세이브·같은 개입이면 같은 경기가 나오고,
  * 감독이 개입하면 패킷이 달라져 그다음 구간부터 확률이 바뀐다.
  */
-export function advanceSegment(state: GameState): {
+export function advanceSegment(
+  state: GameState,
+  /**
+   * 이 구간의 길이 상한 — 없으면 정지점까지. 감독이 대화·지시만 한 턴은 1분이다
+   * (`advance_match`의 `pace`, match.md §2).
+   */
+  options: { maxMinutes?: number } = {},
+): {
   ok: boolean;
   plan: SegmentPlan | null;
   message: string;
@@ -495,19 +503,30 @@ export function advanceSegment(state: GameState): {
      * 구간 시뮬은 대회도 대진도 모르고 이 답만 받는다 (extra-time.ts).
      */
     toExtraTime: needsExtraTime(state, match, pending.ledger.score),
+    maxMinutes: options.maxMinutes,
     rng,
   });
 
+  /**
+   * **짧게 부른 구간은 구간이 아니다** — 상대 벤치는 그 자리에서 움직이지 않는다.
+   *
+   * AI 교체도 AI 전술 이동도 구간이 끝날 때마다 한 번씩 굴러간다. 1분짜리를 같은
+   * 자리로 세면 감독이 벤치에서 대화를 몇 번 거는 사이에 AI가 교체 카드를 다 쓰고
+   * 강도를 한계까지 올린다 — 감독이 말을 아낄수록 상대가 약해지는 판이 된다.
+   */
+  const brief = options.maxMinutes !== undefined;
   // AI 팀 교체 — 상대만 90분을 그대로 뛰면 후반이 늘 우리 쪽으로 기운다
   const aiSide: "home" | "away" = match.homeTeamId === state.userTeamId ? "away" : "home";
-  const aiSub = planAiSubstitution(
-    aiSide,
-    squads[aiSide],
-    pending.ledger,
-    plan,
-    rng,
-    pending.matchFatigue ?? {},
-  );
+  const aiSub = brief
+    ? null
+    : planAiSubstitution(
+        aiSide,
+        squads[aiSide],
+        pending.ledger,
+        plan,
+        rng,
+        pending.matchFatigue ?? {},
+      );
   /**
    * 부상 교체만은 **사건 뒤**에 붙인다 — 다치기 전에 빼는 장면이 되면 안 된다.
    * 나머지 교체는 정지 사건 앞에 끼워야 장부가 받는다 (`insertBeforeStop`).
@@ -518,8 +537,20 @@ export function advanceSegment(state: GameState): {
       : insertBeforeStop(plan.events, aiSub)
     : plan.events;
 
-  const applied = applyMatchEvents(state, events);
-  if (!applied.ok) return { ok: false, plan: null, message: applied.message };
+  let message = `사건 없이 ${plan.minute}′까지 흘렀습니다`;
+  if (events.length > 0) {
+    const applied = applyMatchEvents(state, events);
+    if (!applied.ok) return { ok: false, plan: null, message: applied.message };
+    message = applied.message;
+  }
+  /**
+   * 짧게 부른 구간만 시계를 따로 민다 — **장부의 시각은 마지막 사건의 시각**이라,
+   * 사건이 없거나(빈 배치는 장부가 반려한다) 사건이 구간 앞머리에만 있으면 1분을
+   * 불러도 시각이 그대로다. 그러면 호출부가 목표 분에 닿을 때까지 구간을 더 굴려
+   * "1분만"이 무너진다. 긴 구간은 건드리지 않는다: 마지막 사건까지가 장부의
+   * 시각이라는 규칙은 그쪽에선 이미 맞다.
+   */
+  if (brief) pending.ledger = advanceClock(pending.ledger, plan.minute);
 
   // 흐름의 양(패스·슛·xg·선방)은 사건이 아니라 숫자로 쌓인다
   pending.ledger = addStats(pending.ledger, plan.stats);
@@ -531,7 +562,9 @@ export function advanceSegment(state: GameState): {
   const aiTeamId = aiSide === "home" ? match.homeTeamId : match.awayTeamId;
   const aiNow = pending.aiTactics ?? tacticsOf(state, aiTeamId).spec;
   // 라커룸에서 판을 다시 짜는 자리 — 하프타임과 연장의 두 휴식이 같다
-  const shift = planAiTacticalShift(aiSide, aiNow, pending.ledger, isBreak(plan.stop));
+  const shift = brief
+    ? null
+    : planAiTacticalShift(aiSide, aiNow, pending.ledger, isBreak(plan.stop));
   if (shift) {
     // AI의 런타임 전술도 사람과 같은 스키마를 지난다. 배치 변경 없이 포메이션
     // 이름만 바꾸거나 범위를 벗어난 축을 세이브에 남기지 않는다.
@@ -544,7 +577,7 @@ export function advanceSegment(state: GameState): {
   }
   // 피로가 쌓였으니 다음 구간의 전력이 달라진다 (교체·전술 변경과 같은 경로)
   refreshPacket(state);
-  return { ok: true, plan: { ...plan, events }, message: applied.message };
+  return { ok: true, plan: { ...plan, events }, message };
 }
 
 /**
@@ -554,10 +587,15 @@ export function advanceSegment(state: GameState): {
  * 부른다. 다만 **사건이 나면 거기서 멈춘다** — 골·퇴장·부상·하프타임은 감독이
  * 반응할 자리이고, 그것을 지나쳐 목표 분까지 밀어붙이면 개입할 순간이 사라진다.
  * 그래서 선언한 분은 "여기까지 가 보자"이지 "무조건 여기까지"가 아니다.
+ *
+ * `maxMinutes`는 그 위에 얹는 **구간 자체의 상한**이다. 목표 분만으로는 짧게 갈 수
+ * 없다 — 구간 하나가 이미 정지점까지 가기 때문에, 감독이 말만 건 1분을 만들려면
+ * 구간을 그만큼에서 끊어야 한다 (match.md §2).
  */
 export function advanceMatchTo(
   state: GameState,
   targetMinute: number,
+  options: { maxMinutes?: number } = {},
 ): {
   ok: boolean;
   events: MatchEvent[];
@@ -578,7 +616,7 @@ export function advanceMatchTo(
     if (ledger.phase === "finished") break;
     if (ledger.minute >= targetMinute && events.length > 0) break;
 
-    const step = advanceSegment(state);
+    const step = advanceSegment(state, options);
     if (!step.ok || !step.plan) {
       return {
         ok: events.length > 0,

@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
+import type { GamePlayer } from "@story-fm/domain";
 import {
   advanceTime,
   allMatchesDone,
+  assignmentFor,
   firstTeamPlayers,
   playersOf,
+  proficiencyAt,
   simSquadOf,
   tickOtherClubs,
   type GameState,
@@ -108,6 +111,72 @@ describe("타 팀은 로테이션으로 다리를 안배한다", () => {
     const before = simSquadOf(state, "mancity").starters.map((p) => p.id);
     const after = simSquadOf(state, "mancity").starters.map((p) => p.id);
     expect(after).toEqual(before);
+  });
+});
+
+/**
+ * 로테이션의 대가는 **출전 시간까지** 이어져야 대가다 (match.md §7).
+ *
+ * 벤치가 OVR 순이라 방금 지쳐서 뺀 에이스가 맨 위에 서면, 투입 후보를 포지션군과
+ * OVR로만 고르는 `planSubs`가 그를 46분에 되돌린다.
+ */
+describe("로테이션으로 뺀 선수는 그 경기에서 빠진다", () => {
+  // 로테이션이 한 번 일어난 상태를 세 케이스가 나눠 쓴다 (`createTestGame`이 비싸다)
+  let fixture: {
+    state: GameState;
+    before: ReturnType<typeof simSquadOf>;
+    after: ReturnType<typeof simSquadOf>;
+    victim: GamePlayer;
+    index: number;
+  } | null = null;
+
+  const rotated = () => {
+    if (!fixture) {
+      const state = createTestGame(7);
+      const before = simSquadOf(state, "mancity");
+      const victim = before.starters.find((p) => p.attributes.overall < 88) ?? before.starters[5]!;
+      victim.state.condition = 40;
+      fixture = {
+        state,
+        before,
+        after: simSquadOf(state, "mancity"),
+        victim,
+        index: before.starters.findIndex((p) => p.id === victim.id),
+      };
+    }
+    return fixture;
+  };
+
+  it("벤치에도 없다 — OVR 순 벤치의 맨 위로 돌아오지 않는다", () => {
+    const { after, victim } = rotated();
+    expect(after.starters.map((p) => p.id), `${victim.name}이 지쳤는데도 선발`).not.toContain(
+      victim.id,
+    );
+    expect(
+      (after.bench ?? []).map((p) => p.id),
+      `${victim.name}이 벤치 1순위로 돌아왔다 — 46분에 다시 들어온다`,
+    ).not.toContain(victim.id);
+  });
+
+  it("자리는 그대로 두고 들어온 선수의 숙련도로 그 슬롯이 선다", () => {
+    const { before, after, victim, index } = rotated();
+    const was = before.slots![index]!;
+    const now = after.slots![index]!;
+    expect(now.player.id, "그 자리의 주인이 바뀌지 않았다").not.toBe(victim.id);
+    expect(now.position, "전술판의 자리는 사람이 바뀌어도 그대로다").toBe(was.position);
+    // 물려받으면 그라운드에 없는 사람의 숫자로 패킷이 선다
+    expect(now.proficiency).toBe(proficiencyAt(now.player, now.position));
+  });
+
+  it("적응도도 들어온 선수 자신의 것이다", () => {
+    const { state, after, index } = rotated();
+    const incoming = after.slots![index]!.player;
+    const assignment = assignmentFor(state, incoming.id);
+    expect(assignment, `${incoming.name}에게 전술 배치가 없다`).not.toBeNull();
+    assignment!.familiarity = 42;
+    const again = simSquadOf(state, "mancity");
+    expect(again.slots![index]!.player.id).toBe(incoming.id);
+    expect(again.slots![index]!.familiarity).toBe(42);
   });
 });
 

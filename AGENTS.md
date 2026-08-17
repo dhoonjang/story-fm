@@ -149,6 +149,15 @@ whole world — a second per call. Call the pure function directly when the worl
 is not what is being tested, and where it genuinely is, build one fixture per
 `describe` and share it.
 
+**Suite weight is paid per file, and you do not get it back.** Every test file
+imports the engine module graph before it asserts anything, so a file costs CI
+whether it holds one case or thirty — the suite is bound by total CPU, not by its
+slowest case. Trimming later barely helps: dropping the ten heaviest files, near
+half the suite's test time, moved the job by a sixth. So the moment to be sparing
+is when a file is **created** — put a new case in the file that already owns that
+domain, and open a new one only when none does. The measurements are in
+`vitest.config.ts`; that question is settled, do not re-measure it to decide.
+
 - Test the sim core **without an LLM** — fixed seed, deterministic.
 - Test LLM-dependent logic with mocks, or at the schema-validation level.
 - Never hide a failing test; report it as it is.

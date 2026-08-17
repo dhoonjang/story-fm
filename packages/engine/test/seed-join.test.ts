@@ -3,6 +3,7 @@ import { ageOf, weightSlotOf } from "@story-fm/domain";
 import { CATALOG_AGE_REF, deriveAxes, derivePositions, overallFor } from "@story-fm/engine";
 import { REAL_SQUADS, type RealPlayerSeed } from "../src/data/epl-players";
 import { EU_SQUADS } from "../src/data/eu-squads";
+import { MARKET_LEAGUE_SQUADS } from "../src/data/market-leagues";
 
 /**
  * 시드 갱신 오조인 가드 — **(이름 + 생년월일) 조인이 동명이인을 받았는지**를
@@ -20,9 +21,10 @@ import { EU_SQUADS } from "../src/data/eu-squads";
  *    오조인이 OVR만 끌어내리면 `potential − OVR` 간격이 나이에 안 맞게 벌어진다.
  *
  * 세 축의 신뢰도는 같지 않다. 1·2는 별개 출처의 **실측**이라 걸리면 거의 조인
- * 실패다. 3의 `potential`은 **판단값**이라, EA가 등급을 정당하게 내렸는데 잠재력을
- * 함께 손보지 않은 선수도 걸린다 — 3의 위반은 조인 실패의 증거가 아니라 **확인할
- * 후보 목록**이다.
+ * 실패다. 3의 `potential`은 **판단값**이라, 걸린 선수가 오조인인지 "6축만 갈고
+ * 잠재력을 다시 재지 않았는지"를 이 축이 가르지 못한다 — 3의 위반은 조인 실패의
+ * 증거가 아니라 **확인할 후보 목록**이다. 가를 필요도 없다: 둘 다 갱신이 남긴
+ * 오류이고, 어느 쪽이든 고쳐야 한다.
  *
  * 세계를 세우지 않는다 — 순수 데이터 불변식이라 시드 배열과 파생 함수만 쓴다.
  */
@@ -66,8 +68,8 @@ const axisLine = (s: RealPlayerSeed): string =>
   (s.goalkeeping === undefined ? "" : `/gk${s.goalkeeping}`);
 
 /**
- * 주급이 있는 EPL 선수 + 주급·OVR 백분위 괴리. 탐지기 1과 3이 **같은 모집단**을
- * 쓴다 — 주급은 `epl-players.ts`에만 있어서 5대 리그 나머지는 이 축이 없다.
+ * 주급이 있는 EPL 선수 + 주급·OVR 백분위 괴리. **이 축만 모집단이 좁다** — 주급은
+ * `epl-players.ts`에만 있어서 5대 리그 나머지는 이 축이 없다. 나머지 셋은 전원을 본다.
  */
 function eplWageGapRows() {
   const rows = rowsOf(REAL_SQUADS).flatMap((r) =>
@@ -169,79 +171,77 @@ describe("자리-프로필 모순 — 조인이 다른 자리의 선수를 받�
 });
 
 /**
- * 나이 밴드별 `potential − OVR` 상한 — 어린 선수는 간격이 큰 게 정상이고 전성기
- * 선수는 아니다. 경계는 `026710e` 이전 시드의 **나이별 최대 간격 곡선**에서 왔다:
+ * 나이별 `potential − OVR` 상한 — **`docs/data/player.md` §6.5 대역 표의 상한 행
+ * 그대로다.** 어린 선수는 간격이 큰 게 정상이고 전성기 선수는 아니다. 곡선의 출처는
+ * `026710e` 실측 이전 시드의 나이별 최대 간격이다: 그 시절 `potential`과 종합은 같은
+ * 판단값에서 나왔으므로, 그 곡선이 시드를 쓴 사람이 쥐고 있던 밴드다.
  *
- * ```
- * 16세 28 · 17세 23 · 18세 25 · 19세 26 | 20세 22 · 21세 19 | 22세 14 · 23세 13 ·
- * 24세 13 | 25세 10 · 26세 11 · 27세 9 · 28세 7 · 29~30세 8 · 31세+ ≤6
- * ```
- *
- * 곡선이 꺾이는 자리(19→20, 21→22, 24→25)에서 끊고, 밴드 안의 최대값을 `oldMax`로
- * 적었다. 20~22를 한 밴드로 묶으면 20세의 22가 22세의 14를 가려 오조인이 숨는다.
+ * ⚠️ **나이를 뭉치지 않는다.** 20~22를 한 밴드로 묶으면 20세의 22가 22세의 14를 가려
+ * 과대평가가 숨는다. 문서의 표와 한 칸씩 대조할 수 있어야 하므로 나이별로 적는다.
  */
-const POTENTIAL_GAP_BANDS: readonly { maxAge: number; oldMax: number }[] = [
-  { maxAge: 19, oldMax: 28 },
-  { maxAge: 21, oldMax: 22 },
-  { maxAge: 24, oldMax: 14 },
-  { maxAge: 99, oldMax: 11 },
-];
+const POTENTIAL_GAP_MAX: Readonly<Record<number, number>> = {
+  16: 28,
+  17: 23,
+  18: 25,
+  19: 26,
+  20: 22,
+  21: 19,
+  22: 14,
+  23: 13,
+  24: 13,
+  25: 10,
+  26: 11,
+  27: 9,
+  28: 7,
+  29: 8,
+  30: 8,
+};
+/** 표 밖의 양 끝 — 시드에 만 15세 이하는 없고, 31세부터는 곡선이 평평하다 */
+const GAP_MAX_UNDER_16 = 28;
+const GAP_MAX_OVER_30 = 6;
 
 /**
- * 밴드 상한에 얹는 여유. 임계 = `oldMax + 3`이고, 이 값에서 `026710e` 이전 시드
- * 2,957명의 위반이 **0명**이다 — 탐지기 1과 같은 방식(정상 띠의 천장 + 여유)이다.
+ * 대역 상한에 얹는 여유. 임계 = `상한 + 3`.
+ *
+ * **여유가 없으면 이 탐지기는 서지 못한다.** 다른 셋과 달리 상한이 관측된 정상 띠의
+ * 천장이 아니라 시드를 접어 둔 경계라, **255명이 상한에 정확히 붙어 있다.** 여유 0에
+ * 걸면 탐지기가 자기가 만든 경계에 서서 어떤 변화에도 발화한다.
+ *
+ * 3인 근거: 판정된 오조인은 6축 평균이 8 이상 떨어진 선수들이었다. 파생 OVR을 4 이상
+ * 끌어내리는 갱신이면 걸리고, 그보다 작은 흔들림은 지나간다.
  */
 const POTENTIAL_GAP_MARGIN = 3;
 
 const potentialGapLimit = (age: number): number =>
-  (POTENTIAL_GAP_BANDS.find((b) => age <= b.maxAge)?.oldMax ?? 0) + POTENTIAL_GAP_MARGIN;
+  (age <= 15 ? GAP_MAX_UNDER_16 : (POTENTIAL_GAP_MAX[age] ?? GAP_MAX_OVER_30)) +
+  POTENTIAL_GAP_MARGIN;
 
 /**
- * 주급 괴리와 함께 볼 때 쓰는 **교차검증용** 주급 임계. 단독 임계(60)보다 낮다 —
- * 다른 독립 축이 같은 방향으로 어긋난 게 이미 증거이기 때문이다.
+ * **잠재력 축은 단독으로 선다** — 5대 리그 전원을 본다.
  *
- * ⚠️ 이 값만은 **"옛 데이터 위반 0명"으로 보정할 수 없었다.** 두 조건의 AND인데
- * 잠재력 조건 하나만으로 이미 옛 시드 위반이 0명이라, 주급 임계를 35까지 낮춰도
- * AND는 0명이다. 그래서 두 가지로 값을 잡았다.
+ * 이 축을 주급 괴리와의 AND로 좁혀 둘 수밖에 없던 시기가 있었다. `potential`이 옛
+ * 6축에 맞춰 매긴 값이라 EA 실측이 들어와 OVR이 정당하게 내려간 선수가 수백 명
+ * 걸렸고, 그 대가로 주급이 없는 EU 2,192명이 통째로 사각지대였다. 시드를 나이 대역
+ * 안으로 접고 나서 그 오탐의 원인이 없어졌다 — **AND 없이도 위반은 0명이다.**
  *
- * - **위**: 안드레이 산투스의 주급 괴리가 53.5%p다. 이 사례를 잡는 게 목적이므로
- *   임계는 그 아래여야 한다 (55로 올리면 산투스가 빠진다).
- * - **아래**: 주급 조건이 실질적인 관문으로 남아야 한다. 옛 시드 EPL 776명 중
- *   주급 조건을 통과하는 사람이 임계 50에서 **2명**, 45에서 6명, 35에서 18명이다.
- *   50이면 교차검증이 여전히 무언가를 걸러낸다.
+ * ⚠️ **다시 좁히기 전에 시드가 대역 밖으로 나갔는지부터 본다.** 이 축이 시끄러워지는
+ * 정상적인 이유는 하나뿐이다: 6축을 갈고 `potential`을 다시 재지 않은 갱신
+ * (`docs/data/sources.md` §4.1의 마지막 단계). 그건 탐지기가 잡아야 할 것이지
+ * 임계를 풀 이유가 아니다.
  */
-const WAGE_OVR_GAP_CORROBORATION = 50;
-
-/**
- * **두 독립 축이 동시에 어긋날 때만** 위반으로 삼는다.
- *
- * 주급(salarysport)과 잠재력(시드의 수기 판단값)은 **둘 다 EA 6축 조인과 독립**이다.
- * 독립 출처 둘이 동시에 파생 OVR과 어긋나면 조인을 의심할 근거가 되지만, **하나만**
- * 어긋나는 건 그 출처가 낡았다는 뜻일 수 있다.
- *
- * 잠재력 하나만 보면 실제로 그렇게 된다. `eu-squads.ts`에는 **정상 조인인데 잠재력만
- * 낡은 선수가 수백 명** 있다 — 옛 값이 실측이 아니라 밴드 판단값이었고 `potential`은
- * 그 밴드에 맞춰 손으로 매긴 값이라, EA 실측이 들어오면서 통째로 낡았다. 평균6 컷을
- * -4까지 내려 뽑은 후보 306명 중 294명이 조인 실패의 지문(생년월일·키·주발 변화)이
- * 없었다. 낡은 잠재력을 고치는 건 성장 상한을 움직이는 밸런스 변경이라 별개 일이다.
- *
- * 그래서 이 탐지기는 **주급이 있는 EPL 선수만** 본다. EU가 이 축의 사각지대가 되는
- * 것은 받아들인다 — 주급이 독립 출처라는 성질에 딸린 한계이고, EU는 탐지기 2·4가 덮는다.
- */
-describe("주급 괴리 + 잠재력 간격 교차검증 — 독립 출처 둘이 함께 어긋났다", () => {
-  it("주급과 잠재력이 동시에 파생 OVR과 어긋난 선수는 없다", () => {
-    const violations = eplWageGapRows()
+describe("잠재력 − OVR 간격 — 갱신이 6축만 갈고 잠재력을 그대로 두었다", () => {
+  it("나이 대역 상한을 넘는 잠재력 간격을 가진 선수는 없다", () => {
+    const violations = [...rowsOf(REAL_SQUADS), ...rowsOf(EU_SQUADS)]
       .map((r) => {
         const age = ageOf(r.seed.birthdate, CATALOG_AGE_REF);
         return { ...r, age, potGap: r.seed.potential - r.ovr, potLimit: potentialGapLimit(age) };
       })
-      .filter((v) => v.wageGap > WAGE_OVR_GAP_CORROBORATION && v.potGap > v.potLimit)
-      .sort((a, b) => b.potGap - a.potGap)
+      .filter((v) => v.potGap > v.potLimit)
+      .sort((a, b) => b.potGap - b.potLimit - (a.potGap - a.potLimit))
       .map(
         (v) =>
           `${v.seed.nameKo}(${v.seed.nameEn}) ${v.team} ${v.seed.position} 만 ${v.age}세 — ` +
-          `주급 괴리 ${wageGapLine(v)} (교차검증 임계 ${WAGE_OVR_GAP_CORROBORATION}%p) · ` +
-          `잠재력 간격 ${v.potGap} (잠재력 ${v.seed.potential} - OVR ${v.ovr}, 이 나이 상한 ${v.potLimit}) ` +
+          `잠재력 간격 ${v.potGap} (잠재력 ${v.seed.potential} - OVR ${v.ovr}, 이 나이 임계 ${v.potLimit}) ` +
           `· 6축 ${axisLine(v.seed)} · 생 ${v.seed.birthdate}`,
       );
 
@@ -300,6 +300,45 @@ describe("자리별 신체 하한 — 조인이 다른 체격의 사람을 받�
           `${v.height}cm (${v.group} 하한 ${MIN_HEIGHT_CM[v.group]}cm)` +
           `${v.seed.weight === undefined ? "" : ` · ${v.seed.weight}kg`} · 생 ${v.seed.birthdate}`,
       );
+
+    expect(violations).toEqual([]);
+  });
+});
+
+/**
+ * 1월 1일은 **조사가 닿지 않은 자리를 채우는 값**으로 쓰여 왔다 — 라로 고메스가
+ * `2006-01-01`로 실려 있었지만 실제는 2006-10-16이었다. 실제 1월 1일생과 값이
+ * 같아서, 표식이 없으면 "확인했더니 1월 1일"과 "확인하지 않았다"가 구분되지
+ * 않는다. 그 구분이 사라지면 조인 실패의 기본값("옛 값 유지")이 지킬 사실 없는
+ * 값을 지키게 된다 (sources.md §4.1).
+ *
+ * 그래서 `-01-01`은 `birthdateApprox`를 **생략할 수 없다**. 새 갱신이 조사되지
+ * 않은 1월 1일을 다시 들여오면 여기서 걸린다.
+ */
+describe("자리표시자 생년월일 — 1월 1일이 실제 날짜인지 표시돼 있다", () => {
+  const ALL_SQUADS: Record<string, readonly RealPlayerSeed[]> = {
+    ...REAL_SQUADS,
+    ...EU_SQUADS,
+    ...MARKET_LEAGUE_SQUADS,
+  };
+  const allRows = Object.entries(ALL_SQUADS).flatMap(([team, squad]) =>
+    squad.map((seed) => ({ seed, team })),
+  );
+  const isJan1 = (seed: RealPlayerSeed): boolean => seed.birthdate.endsWith("-01-01");
+
+  it("1월 1일생 시드는 전부 birthdateApprox를 명시한다", () => {
+    const violations = allRows
+      .filter((r) => isJan1(r.seed) && r.seed.birthdateApprox === undefined)
+      .map((r) => `${r.seed.nameKo}(${r.seed.nameEn}) ${r.team} — ${r.seed.birthdate}`);
+
+    expect(violations).toEqual([]);
+  });
+
+  // 날짜를 바로잡고 표식만 남기면 자리표시자가 아닌 값이 자리표시자로 읽힌다.
+  it("1월 1일이 아닌 시드에는 birthdateApprox가 남아 있지 않다", () => {
+    const violations = allRows
+      .filter((r) => !isJan1(r.seed) && r.seed.birthdateApprox !== undefined)
+      .map((r) => `${r.seed.nameKo}(${r.seed.nameEn}) ${r.team} — ${r.seed.birthdate}`);
 
     expect(violations).toEqual([]);
   });
