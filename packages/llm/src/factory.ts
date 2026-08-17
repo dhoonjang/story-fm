@@ -4,6 +4,7 @@ import { withDeadline } from "./deadline";
 import type { GameLLM } from "./game-llm";
 import { GeminiGameLLM } from "./gemini-adapter";
 import { OpenAiGameLLM } from "./openai-adapter";
+import { tapLlm } from "./turn-trace";
 import { meterLlm } from "./usage-meter";
 
 function adapterFor(config: AgentConfig): GameLLM {
@@ -25,7 +26,8 @@ function adapterFor(config: AgentConfig): GameLLM {
  * 시한(`deadline`)이 빠짐없이 걸린다. 설정의 에이전트 이름이 그대로 계측 키가 된다.
  *
  * 순서 — 예산 판정이 바깥이다. 부르지도 않고 건너뛰는 호출에 시한을 재 봐야
- * 소용이 없다.
+ * 소용이 없다. 원문 기록(`tapLlm`, models.md §5)은 그 안쪽이다: 건너뛴 호출은
+ * 요청이 없어 적을 것도 없고, 시한을 넘긴 호출은 **실패까지 적혀야** 한다.
  */
 export function createGameLLM(config: AgentConfig): GameLLM {
   if (!hasKey(config.provider)) {
@@ -34,5 +36,8 @@ export function createGameLLM(config: AgentConfig): GameLLM {
     );
   }
   const adapter = adapterFor(config);
-  return meterLlm(withDeadline(adapter, config.agent, config.timeoutMs), config.agent);
+  return meterLlm(
+    tapLlm(withDeadline(adapter, config.agent, config.timeoutMs), config.agent),
+    config.agent,
+  );
 }
