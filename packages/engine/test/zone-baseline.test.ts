@@ -64,9 +64,11 @@ function tallyFixtures(state: GameState, count: number) {
 }
 
 describe("존 눈금의 리그 기준선", () => {
+  // 세계는 한 번만 짓는다 — `createTestGame`은 호출당 1초다 (AGENTS.md §5 테스트)
+  const state = createTestGame(42);
+  const { tally, played } = tallyFixtures(state, 200);
+
   it("편성의 매치업 비율이 세 존 모두 1 언저리다", () => {
-    const state = createTestGame(42);
-    const { tally, played } = tallyFixtures(state, 200);
     expect(played).toBe(200);
     for (const zone of ["attack", "midfield", "defense"] as const) {
       expect(tally[zone].ratio, `${zone} 존의 기준선이 1에서 벗어났다`).toBeGreaterThan(0.97);
@@ -75,8 +77,6 @@ describe("존 눈금의 리그 기준선", () => {
   });
 
   it("판정이 한쪽으로 쏠리지 않는다 — 공격 존이 늘 이기던 자리다", () => {
-    const state = createTestGame(42);
-    const { tally } = tallyFixtures(state, 200);
     for (const zone of ["attack", "midfield", "defense"] as const) {
       const { home, away } = tally[zone];
       const lean = Math.max(home, away) / Math.max(1, Math.min(home, away));
@@ -84,19 +84,16 @@ describe("존 눈금의 리그 기준선", () => {
       expect(lean, `${zone} 존 판정이 ${home}:${away}로 쏠렸다`).toBeLessThan(2);
     }
   });
-});
 
-/**
- * **프리셋 여섯 축의 리그 평균은 3에 서야 한다.**
- *
- * 3이 중립이고 전술 델타는 3에서의 편차로 계산되므로, 프리셋이 한쪽으로 쏠리면
- * 리그 전체가 같은 방향의 이득과 대가를 달고 선다. 예전 프리셋은 여섯 축이 전부
- * 3 이상이라(멘탈리티 3.30 · 압박 3.47 · 라인 3.30 · 템포 3.34 · 폭 3.78 ·
- * 패스 3.12) 리그 평균이 공격 +2.4 / 수비 −2.3으로 섰다.
- */
-describe("전술 프리셋의 리그 분포", () => {
-  it("여섯 축 모두 리그 평균이 3 근처다", () => {
-    const state = createTestGame(42);
+  /**
+   * **프리셋 여섯 축의 리그 평균은 3에 서야 한다.**
+   *
+   * 3이 중립이고 전술 델타는 3에서의 편차로 계산되므로, 프리셋이 한쪽으로 쏠리면
+   * 리그 전체가 같은 방향의 이득과 대가를 달고 선다. 예전 프리셋은 여섯 축이 전부
+   * 3 이상이라(멘탈리티 3.30 · 압박 3.47 · 라인 3.30 · 템포 3.34 · 폭 3.78 ·
+   * 패스 3.12) 리그 평균이 공격 +2.4 / 수비 −2.3으로 섰다.
+   */
+  it("전술 프리셋 여섯 축의 리그 평균이 3 근처다", () => {
     const axes = ["mentality", "defensiveLine", "pressing", "tempo", "width", "passStyle"] as const;
     const specs = state.teams.map((team) => tacticsOf(state, team.id).spec);
     expect(specs.length).toBeGreaterThan(100);
