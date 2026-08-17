@@ -1296,51 +1296,20 @@ export function weightsFor(position: string): AxisValues {
 }
 
 /**
- * 자리별 스케일 보정 — **축이 15개면 가중 평균은 중앙으로 수렴한다.**
- * 어떤 월드클래스도 15축 전부가 최상급이지는 않으므로(그게 현실적이다) 원값의
- * 상단이 눌린다. 그대로 두면 "90+ 월드클래스" 밴드(§7)가 영구히 비어버리고,
- * 자리마다 눌리는 정도도 달라(GK가 가장 심하다) 포지션 간 비교가 깨진다.
- *
- * 그래서 **자리별 기준점에서 스케일을 되편다**: 목표는 공통 평균 69이고, 순서를
- * 바꾸지 않는 단조 변환이라 선수 간 서열은 그대로다.
- *
- * ⚠️ 기준점은 **카탈로그 실측 평균이 아니라 EA 공개 등급으로 맞춘 값**이다. 한동안
- * 주석은 실측 평균이라고 적혀 있었는데 실제 값은 그렇지 않았고, 정직하게 실측
- * 평균을 넣어 보니 자리별 편차가 −3.9~+2.3으로 벌어졌다(σ 3.67). 가중치는 우리
- * 것이고 기준점만 실측에 맞추는 것이라 "남의 공식을 베끼는" 것과는 다르다 —
- * 기준점은 자리의 **수준**을 정하는 손잡이일 뿐 무엇이 중요한지는 안 건드린다.
- *
- * **CF만 다른 방식으로 잡는다.** EA 표본에 CF로 잡히는 선수가 1명뿐이라 편차를
- * 잴 수가 없어서, ST와 **같은 모집단**(최전방 자원 568명)의 평균이 두 자리에서
- * 같아지도록 맞췄다. 그래야 CF·ST 비교가 임의의 수준 차가 아니라 순수하게
- * 가중치 모양의 문제가 된다.
- *
- * 파생 공식이나 가중치가 바뀌면 함께 갱신한다 — world.test.ts가 분포를 고정한다.
- * **입력이 바뀌어도 마찬가지다.** 골키퍼의 `passing`이 자리 채우기용 판단값에서
- * EA 실측 킥력으로 바뀌자(52~62 → 70~87) 원값 평균이 1.3 올라 종합이 골키핑을
- * 넘어섰다 — GK 기준점은 그 몫을 되돌린 값이다(64.6 → 65.4).
- */
-const RAW_PIVOT: Record<WeightSlot, number> = {
-  GK: 65.4,
-  CB: 67.4,
-  FB: 66.4,
-  DM: 65.8,
-  CM: 66.5,
-  AM: 67.4,
-  W: 69.2,
-  CF: 66.2,
-  ST: 67.6,
-};
-
-/**
- * **역할별 기준점 보정** — `"슬롯:역할"` → 그 역할의 원값 평균이 자리 기본에서
+ * **역할별 기준점 보정** — `"슬롯:역할"` → 그 역할의 가중 평균이 자리 기본 역할에서
  * 얼마나 벗어나는가 (카탈로그 실측, `scripts` 없이 테스트로 재생성한다).
  *
  * 없으면 **역할 선택이 곧 공짜 능력치**가 된다. 예컨대 컴플리트 포워드는 높은 축만
  * 골라 얹으므로 보정 없이는 누구를 넣어도 값이 오르고, 반대로 프레싱 포워드는
  * 적극성(평균이 낮은 축)을 크게 잡아 누구를 넣어도 내려간다 — 선수가 아니라
  * **역할이 등급을 정하는** 셈이다. 역할마다 기준점을 따로 두면 **평균적인 선수는
- * 어느 역할에서도 69**이고, 갈리는 건 "이 선수가 그 역할에 맞느냐"뿐이다.
+ * 그 자리의 어느 역할에서도 같은 값**이고, 갈리는 건 "이 선수가 그 역할에
+ * 맞느냐"뿐이다.
+ *
+ * ⚠️ **자리 사이에는 같은 보정을 두지 않는다.** 한때 `RAW_PIVOT`이 자리마다 수준을
+ * 맞췄는데, 그 보정은 되펴기(×1.237)와 한 몸이라 종합을 축 범위 밖으로 밀어냈다.
+ * 자리 간 수준 차는 이제 가중치가 정한 그대로 남는다 — 실측 자리별 평균 폭은
+ * 5.5로 되펴던 시절(6.5)보다 오히려 좁다 (`attributes.test.ts`).
  */
 const ROLE_PIVOT: Record<string, number> = {
   "AM:advanced-playmaker": 0.1,
@@ -1456,18 +1425,19 @@ export function roleWeights(position: string, role?: string): AxisValues {
   return w;
 }
 
-const CALIBRATION_MEAN = 69;
-/** 되펴는 정도 — 6축 시절 분포(평균 70 · p90 79 · 최대 94)에 맞춘 값 */
-const CALIBRATION_GAIN = 1.237;
-
 /**
- * 이 자리·이 역할에서의 전력 — 15축의 가중 평균에 기준점 보정을 적용한 0~99 값.
+ * 이 자리·이 역할에서의 전력 — **15축의 가중 평균이고, 축 범위를 벗어나지 않는다.**
  *
  * 같은 선수라도 **자리에 따라** 다르고(라이스를 DM에 두면 tackling·positioning이
  * 지배하고 AM에 올리면 vision·dribbling이 지배한다), 같은 자리에서도 **역할에 따라**
  * 다르다(같은 풀백이라도 정통 풀백과 인버티드 풀백은 요구가 다르다).
  *
  * `role`을 주지 않으면 그 자리의 **기본 역할**이다 — 표시용 `overall`이 이 값을 쓴다.
+ *
+ * ⚠️ **평균을 되펴지 않는다.** 한동안 자리 기준점에서 ×1.237로 되펴 6축 시절
+ * 분포(평균 70 · 최대 94)에 맞췄는데, 그러면 종합이 **그 선수 어느 축보다도 높게**
+ * 나온다 — 15축을 함께 펼쳐 놓은 화면에서 그건 계산이 틀린 것으로 읽힌다
+ * (`docs/data/player.md` §4).
  */
 export function roleFit(axes: AxisValues, position: string, role?: string): number {
   const slot = weightSlotOf(position);
@@ -1476,17 +1446,22 @@ export function roleFit(axes: AxisValues, position: string, role?: string): numb
   const w = roleWeights(position, def.id);
   let sum = 0;
   let total = 0;
+  let lowest = Infinity;
+  let highest = -Infinity;
   for (const axis of ATTRIBUTE_AXES) {
     // 0인 축은 없다 (`FLOOR_WEIGHT`) — 15축 전부가 조금씩이라도 전력에 닿는다
     const weight = w[axis];
-    sum += axes[axis] * weight;
+    const value = axes[axis];
+    sum += value * weight;
     total += weight;
+    if (value < lowest) lowest = value;
+    if (value > highest) highest = value;
   }
   if (total === 0) return 0;
-  const raw = sum / total;
-  const pivot = RAW_PIVOT[slot] + (ROLE_PIVOT[`${slot}:${def.id}`] ?? 0);
-  const calibrated = CALIBRATION_MEAN + (raw - pivot) * CALIBRATION_GAIN;
-  return Math.max(1, Math.min(99, Math.round(calibrated)));
+  // 역할 기준점은 **평행 이동**이다 — 역할을 고르는 것만으로 값이 오르내리지
+  // 않게 하되(§3), 축 범위 밖으로는 나가지 못한다.
+  const leveled = sum / total - (ROLE_PIVOT[`${slot}:${def.id}`] ?? 0);
+  return Math.max(lowest, Math.min(highest, Math.round(leveled)));
 }
 
 /**

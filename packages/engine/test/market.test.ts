@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GamePlayer } from "@story-fm/domain";
 import {
-  MARKET_VALUE_AT_84,
+  MARKET_VALUE_AT_PEAK,
   PATIENCE_DECAY,
   activeContract,
   askingPriceFor,
@@ -29,15 +29,15 @@ function pick(state: ReturnType<typeof createTestGame>, overall: number): GamePl
 }
 
 describe("시장가", () => {
-  it("등급 곡선은 단조 증가하고 84 OVR이 기준값이다", () => {
-    expect(baseValueOf(84)).toBe(MARKET_VALUE_AT_84);
+  it("등급 곡선은 단조 증가하고 80 OVR이 기준값이다", () => {
+    expect(baseValueOf(80)).toBe(MARKET_VALUE_AT_PEAK);
     for (let ovr = 56; ovr < 95; ovr++) {
       expect(baseValueOf(ovr), `${ovr}`).toBeLessThan(baseValueOf(ovr + 1));
     }
     // 하한 아래는 이적료가 붙지 않는다
     expect(baseValueOf(50)).toBe(0);
-    // 최상급과 스쿼드 자원의 격차가 실제처럼 크게 벌어진다
-    expect(baseValueOf(84) / Math.max(1, baseValueOf(64))).toBeGreaterThan(8);
+    // 최상급과 스쿼드 자원의 격차가 실제처럼 크게 벌어진다 (눈금이 좁아진 만큼 폭도 좁다)
+    expect(baseValueOf(80) / Math.max(1, baseValueOf(62))).toBeGreaterThan(8);
   });
 
   it("나이·계약 잔여·리그가 값을 움직인다", () => {

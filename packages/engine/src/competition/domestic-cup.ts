@@ -662,8 +662,7 @@ export function domesticTieWinner(
   const afterExtra = level();
   if (afterExtra) return afterExtra;
 
-  const pens =
-    decider.result!.penalties ?? shootout(state, decider.homeTeamId, decider.awayTeamId, channel);
+  const pens = decider.result!.penalties ?? shootout(state, decider, channel);
   decider.result!.penalties = pens;
   return pens.home > pens.away ? decider.homeTeamId : decider.awayTeamId;
 }

@@ -22,7 +22,7 @@ import {
   wageExpectationOf,
   type DealTerms,
 } from "./market";
-import { loanPlayer } from "./departures";
+import { isFreeAgent, loanPlayer } from "./departures";
 import {
   describeMedical,
   isIncomingDeal,
@@ -112,16 +112,26 @@ function liveNegotiationFor(state: GameState, playerId: string): Negotiation | n
  */
 const REJECT_COOLDOWN_DAYS = 30;
 
-/** 최근에 거절로 끝난 협상이 있는가 — 시장이 잠시 물러나 있을 이유다 */
-function recentlyRejected(state: GameState, playerId: string): boolean {
-  return state.negotiations.some((n) => {
-    if (n.gamePlayerId !== playerId || n.status !== "rejected") return false;
-    const on = n.rounds[n.rounds.length - 1]?.date ?? n.openedOn;
-    return diffDays(on, state.date) < REJECT_COOLDOWN_DAYS;
-  });
+/** 이 결렬이 아직 식지 않았는가 */
+function stillCooling(state: GameState, negotiation: Negotiation): boolean {
+  const on = negotiation.rounds[negotiation.rounds.length - 1]?.date ?? negotiation.openedOn;
+  return diffDays(on, state.date) < REJECT_COOLDOWN_DAYS;
 }
 
-/** 이번 창에서 이미 결렬된 협상 — 같은 선수에게 다시 오퍼할 수 없다 */
+/** 최근에 거절로 끝난 협상이 있는가 — 시장이 잠시 물러나 있을 이유다 */
+function recentlyRejected(state: GameState, playerId: string): boolean {
+  return state.negotiations.some(
+    (n) => n.gamePlayerId === playerId && n.status === "rejected" && stillCooling(state, n),
+  );
+}
+
+/**
+ * 이번 창에서 이미 결렬된 협상 — 같은 선수에게 다시 오퍼할 수 없다.
+ *
+ * **창이 닫힌 날에는 창으로 잴 수 없다.** 그 날에도 갈 수 있는 길(무소속 영입·
+ * 시장 전용 리그 매각)이 있는데 창 없이 "전부 이번 창"으로 세면 지난 시즌의
+ * 결렬 하나가 영구 배제가 된다 — 그 날의 잣대는 식는 30일이다.
+ */
 function rejectedThisWindow(state: GameState, playerId: string): Negotiation | null {
   const window = windowOpenOn(state.windows, state.date);
   return (
@@ -129,7 +139,7 @@ function rejectedThisWindow(state: GameState, playerId: string): Negotiation | n
       (n) =>
         n.gamePlayerId === playerId &&
         n.status === "rejected" &&
-        (window === null || n.windowId === window.id),
+        (window === null ? stillCooling(state, n) : n.windowId === window.id),
     ) ?? null
   );
 }
@@ -1620,8 +1630,11 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
     skipWindow: true,
   });
   if (gate) return gate;
-  const sellerShort = squadShortfall(state, player.teamId, player);
-  if (sellerShort) return { ok: false, message: `${teamName(player.teamId)}가 ${sellerShort}` };
+  // 무소속은 클럽이 아니라 클럽이 없는 상태다 — 지킬 스쿼드가 없다
+  const sellerShort = isFreeAgent(player) ? null : squadShortfall(state, player.teamId, player);
+  if (sellerShort) {
+    return { ok: false, message: `${teamName(player.teamId)}이(가) ${sellerShort}` };
+  }
 
   const fromTeamId = player.teamId;
   // 원장 — TRANSFER row가 이력의 원본 (GamePlayer.teamId는 현재값일 뿐)

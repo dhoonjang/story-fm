@@ -9,6 +9,7 @@ import {
   offerPlayerOut,
   openNegotiationFor,
   pendingVerdicts,
+  playerById,
   playersOf,
   releasePlayer,
   runAiRenewals,
@@ -16,6 +17,8 @@ import {
   signFreeAgents,
   userPlayers,
   weeklyWagesOf,
+  windowOpenOn,
+  withdrawOffer,
   type GameState,
 } from "@story-fm/engine";
 import { completeDeal, createTestGame } from "./helpers";
@@ -58,6 +61,47 @@ describe("무소속 — 클럽이 아니라 클럽이 없는 상태", () => {
     expect(isClubTeam(after.teamId)).toBe(true);
     expect(activeContract(state, target.id)?.teamId).toBe(after.teamId);
     expect(digest.join("")).toContain(after.name ?? "");
+  });
+
+  it("감독이 직접 데려온다 — 무소속엔 파는 쪽 스쿼드 하한이 없다", () => {
+    const state = createTestGame(11);
+    state.date = "2026-08-01";
+    const target = spare(state);
+    const wage = activeContract(state, target.id)!.weeklyWage;
+    releasePlayer(state, { playerId: target.id });
+    expect(target.teamId).toBe(FREE_AGENT_TEAM);
+
+    const offered = sendOffer(state, { playerId: target.id, fee: 0, weeklyWage: wage, years: 2 });
+    expect(offered.ok, offered.message).toBe(true);
+    const negotiation = openNegotiationFor(state, target.id)!;
+    state.date = negotiation.rounds[0]!.respondsOn!;
+    const verdict = answerOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
+    expect(verdict.ok, verdict.message).toBe(true);
+
+    const done = completeDeal(state, negotiation.id);
+    expect(done.ok, done.message).toBe(true);
+    expect(negotiation.status).toBe("completed");
+    expect(playerById(state, target.id)!.teamId).toBe(state.userTeamId);
+    expect(activeContract(state, target.id)!.teamId).toBe(state.userTeamId);
+  });
+
+  it("창이 닫힌 날의 결렬은 30일이면 식는다 — 창으로 재면 영구 배제가 된다", () => {
+    const state = createTestGame(11);
+    state.date = "2026-11-15";
+    expect(windowOpenOn(state.windows, state.date)).toBeNull();
+    const target = spare(state);
+    const wage = activeContract(state, target.id)!.weeklyWage;
+    releasePlayer(state, { playerId: target.id });
+    const offer = { playerId: target.id, fee: 0, weeklyWage: wage, years: 2 };
+
+    expect(sendOffer(state, offer).ok).toBe(true);
+    withdrawOffer(state, openNegotiationFor(state, target.id)!.id);
+    expect(sendOffer(state, offer).ok, "아직 식지 않았다").toBe(false);
+
+    state.date = "2026-12-20";
+    expect(windowOpenOn(state.windows, state.date)).toBeNull();
+    const again = sendOffer(state, offer);
+    expect(again.ok, again.message).toBe(true);
   });
 
   it("우리 팀은 이 경로로 선수를 받지 않는다 — 감독이 직접 데려와야 한다", () => {

@@ -227,7 +227,6 @@ function dailyTick(
       : "training";
 
   resolveInjuries(state, digest);
-  resolveScouting(state, digest);
 
   for (const player of players) {
     /**
@@ -251,6 +250,16 @@ function dailyTick(
   }
 
   tickOtherClubs(state);
+  /**
+   * 스카우팅 도착은 **그날의 폼·체력이 다 움직인 뒤에** 알린다.
+   *
+   * 도착 줄은 그 자리에서 문자열로 굳고(모델이 읽는 것은 그 줄뿐이다), 카드는
+   * 나중에 살아 있는 상태에서 다시 그려진다. 폼 앞에서 줄을 만들면 그날의 폼
+   * 감쇠만큼 둘이 갈려 카드는 £29.3M인데 대사는 £29.2M이 된다 (agents.md §6).
+   * ⚠️ **남의 팀 폼은 `tickOtherClubs`가 움직인다** — 스카우팅 대상은 대개 남의
+   * 팀이므로 위 감독 팀 루프 뒤로 옮기는 것만으로는 모자라다.
+   */
+  resolveScouting(state, digest);
   // 하루치 전술 적응 — **AI 클럽만** 받는다 (other-clubs.ts의 계약)
   driftFamiliarity(state);
 
@@ -331,6 +340,11 @@ function dailyTick(
   // 주급 (월요일) — 활성 계약 합에서 파생, 구단 전체에 적용 (무소속 제외 — finance.ts)
   if (dow === 1) payWeeklyWages(state);
 
+  /**
+   * 벤치 불만을 낼 만한 자원인가 — **종합의 눈금을 탄다.**
+   * 옛 78과 같은 인원 비율(상위 17%)에 서는 값이다 (player.md §4).
+   */
+  const BENCHED_GRIPE_OVERALL = 74;
   // 벤치 불만 발생 — 월요일, 고평가 비선발 자원 (간이).
   // 리그 개막 후에만 — 프리시즌엔 아직 "출전 기회"를 논할 경기가 없다 (v6)
   if (dow === 1 && state.date >= state.calendar.start && rng() < 0.15) {
@@ -341,7 +355,7 @@ function dailyTick(
       (p) =>
         squadLevelOf(p) === "first" &&
         !starters.has(p.id) &&
-        p.attributes.overall >= 78 &&
+        p.attributes.overall >= BENCHED_GRIPE_OVERALL &&
         !issuePlayers.has(p.id),
     );
     if (benched.length > 0) {
@@ -450,8 +464,11 @@ function standsToday(state: GameState, digest: string[]): boolean {
  * 쓴다 (실제로 그랬다: 하네스는 30, 여기는 20).
  */
 export const ROTATION_FATIGUE = 20;
-/** 대체가 허용되는 기량 손실 — 이보다 떨어지면 지쳐도 그냥 뛴다 */
-export const ROTATION_OVR_DROP = 8;
+/**
+ * 대체가 허용되는 기량 손실 — 이보다 떨어지면 지쳐도 그냥 뛴다.
+ * ⚠️ 종합의 눈금을 탄다 (player.md §4 — 축 가중 평균이 되며 분포가 좁아져 8 → 7).
+ */
+export const ROTATION_OVR_DROP = 7;
 /** 대체 자원은 최소 이만큼 더 신선해야 한다 */
 export const ROTATION_FRESHER = 15;
 /**
@@ -463,6 +480,53 @@ export const ROTATION_FRESHER = 15;
  * 조금 위에서, 뛸 수 있는 아무나로 바꾼다. 라인업은 약해지지만 그게 대가다.
  */
 export const EXHAUSTED_CONDITION = 35;
+
+/**
+ * 전술판이 이 선수에게 준 자리 — 좌표·역할은 판의 것, 숙련도는 사람의 것.
+ * 배치가 없으면 자연 포지션에 기준선 적응도로 선다.
+ */
+function boardSlotOf(state: GameState, player: GamePlayer) {
+  const assignment = assignmentFor(state, player.id);
+  const position = assignment?.position ?? naturalPositionOf(player).position;
+  return {
+    position,
+    ...(assignment?.point ? { point: assignment.point } : {}),
+    ...(assignment?.roleId ? { roleId: assignment.roleId } : {}),
+    proficiency: proficiencyAt(player, position),
+    familiarity: assignment?.familiarity ?? FAMILIARITY_BASELINE,
+  };
+}
+
+/** 이 팀을 이끄는 사람의 전술 눈금 — 감독 팀이면 감독 본인, 아니면 AI 감독 */
+function managerTacticsOf(state: GameState, teamId: string): number {
+  return teamId === state.userTeamId
+    ? state.manager.attributes.tactics
+    : state.teams.find((team) => team.id === teamId)?.aiManagerTacticsRating ?? 65;
+}
+
+/**
+ * **이 선수들로 세우는 간이 시뮬 입력** — 명단이 이미 정해진 자리(연장)가 쓴다.
+ *
+ * 팀 id와 선수 목록만 넘기면 패킷이 자연 포지션 · `DEFAULT_TACTICS` · 적응도 60 ·
+ * 감독 65로 서서, 90분과 연장이 서로 다른 팀의 경기가 된다 (match.md §7).
+ * 벤치는 두지 않는다 — 30분을 한 번에 굴리는 자리라 교체가 일어나지 않는다.
+ */
+export function simSquadFor(
+  state: GameState,
+  teamId: string,
+  players: readonly GamePlayer[],
+): SimSquad {
+  return {
+    teamId,
+    starters: [...players],
+    slots: players.map((player) => ({ player, ...boardSlotOf(state, player) })),
+    familiarity: Object.fromEntries(
+      players.map((p) => [p.id, assignmentFor(state, p.id)?.familiarity ?? FAMILIARITY_BASELINE]),
+    ),
+    tactics: tacticsOf(state, teamId).spec,
+    managerTactics: managerTacticsOf(state, teamId),
+  };
+}
 
 /**
  * 간이 시뮬 입력 조립 — 전술 배치에서 가용 선발을 뽑는다.
@@ -484,17 +548,7 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
   const starters = startingAssignments
     .map((a) => byId.get(a.playerId))
     .filter((p): p is GamePlayer => p !== undefined && available(p));
-  const slotSetups = starters.map((player) => {
-    const assignment = startingAssignments.find((item) => item.playerId === player.id);
-    const position = assignment?.position ?? naturalPositionOf(player).position;
-    return {
-      position,
-      ...(assignment?.point ? { point: assignment.point } : {}),
-      ...(assignment?.roleId ? { roleId: assignment.roleId } : {}),
-      proficiency: proficiencyAt(player, position),
-      familiarity: assignment?.familiarity ?? FAMILIARITY_BASELINE,
-    };
-  });
+  const slotSetups = starters.map((player) => boardSlotOf(state, player));
   // 부상·정지로 빈 자리는 OVR 상위 가용 선수로 메운다 (AI 팀의 자동 운영)
   if (starters.length < 11) {
     const used = new Set(starters.map((p) => p.id));
@@ -596,10 +650,7 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
       ]),
     ),
     tactics: tacticsOf(state, teamId).spec,
-    managerTactics:
-      teamId === state.userTeamId
-        ? state.manager.attributes.tactics
-        : state.teams.find((team) => team.id === teamId)?.aiManagerTacticsRating ?? 65,
+    managerTactics: managerTacticsOf(state, teamId),
     bench,
     proneness: pronenessOf(
       state,
@@ -642,6 +693,9 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
       squads.away,
       state.seed,
       `${state.season}:${match.competitionId ?? "friendly"}:${match.stage ?? "league"}:${match.round}:${match.homeTeamId}-${match.awayTeamId}`,
+      // 중립 경기장은 **경기가 갖고 있는 사실**이다 — 안 넘기면 결승의 명목상
+      // 홈이 홈 어드밴티지를 그대로 받는다 (match.md §7)
+      { neutral: match.neutral === true },
     );
     // 부상·카드·교체는 각자의 표가 갖는다 — 경기 결과에 섞어 넣지 않는다
     const { injuries: hurt, cards, subs, possession, ...scoreline } = result;
@@ -656,10 +710,23 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
       home: playedIn(squads.home, "home", subs),
       away: playedIn(squads.away, "away", subs),
     };
+    /**
+     * 종료 휘슬에 서 있던 사람 — 연장과 승부차기가 쓰는 목록이다 (match.md §7).
+     * 뛴 사람 전부에서 교체로 나간 선수와 퇴장당한 선수를 뺀다.
+     */
+    const finished = (side: "home" | "away"): string[] => {
+      const gone = new Set([
+        ...subs.filter((s) => s.side === side).map((s) => s.out),
+        ...cards.filter((c) => c.side === side && c.card === "red").map((c) => c.playerId),
+      ]);
+      return onPitch[side].filter((p) => !gone.has(p.id)).map((p) => p.id);
+    };
     match.result = {
       ...scoreline,
       homeLineup: onPitch.home.map((p) => p.id),
       awayLineup: onPitch.away.map((p) => p.id),
+      homeOnPitch: finished("home"),
+      awayOnPitch: finished("away"),
     };
     // 출전·득점·도움·평점 — AI 팀도 시즌 스탯을 쌓아야 득점왕·평점 비교가 성립한다.
     // 경기별 평점은 남기지 않는다(장부가 없다) — 시즌 합계만 누적한다

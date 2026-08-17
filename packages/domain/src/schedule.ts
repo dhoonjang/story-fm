@@ -87,6 +87,16 @@ export const MatchResultSchema = z.object({
   homeLineup: z.array(z.string()).optional(),
   awayLineup: z.array(z.string()).optional(),
   /**
+   * **종료 시각에 그라운드에 서 있던 선수** — 연장과 승부차기를 뛰는 사람들이다.
+   *
+   * 위 명단은 "뛴 사람 전부"라 교체로 나간 선수도 퇴장당한 선수도 들어 있다.
+   * 앞 열한 명을 잘라 쓰면 그들이 연장을 뛰고 페널티를 찬다 — 그래서 그 시점의
+   * 온필드만 따로 남긴다. 퇴장이 있었으면 열한 명보다 적다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  homeOnPitch: z.array(z.string()).optional(),
+  awayOnPitch: z.array(z.string()).optional(),
+  /**
    * **연장을 치렀다** — 90분(2차전제는 합계)이 같아 30분을 더 뛴 경기.
    *
    * 연장 골은 위 goals·scorers에 그대로 합쳐지고 분은 91~120이다. 무득점으로

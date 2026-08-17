@@ -74,11 +74,17 @@ const MAX_SQUAD = 52;
  */
 const CASH_FLOOR_TOP = -10_000_000;
 const CASH_FLOOR_OTHER = 0;
-/** 수준 차 — 이보다 크게 벌어지면 애초에 거래가 성립하지 않는다 */
-const LEVEL_BAND = 7;
+/**
+ * 수준 차 — 이보다 크게 벌어지면 애초에 거래가 성립하지 않는다.
+ *
+ * ⚠️ **종합의 눈금을 탄다.** 축 가중 평균으로 바뀌며 분포가 좁아졌으므로
+ * (player.md §4) 7을 그대로 두면 같은 밴드가 더 넓은 인원을 덮어 AI가 덜 까다로워진다.
+ */
+const LEVEL_BAND = 6;
 /** 감독의 달력·브리핑에 올릴 만한 이적 — 이 아래는 조용히 지나간다 */
 const NOTABLE_FEE = 25_000_000;
-const NOTABLE_OVERALL = 82;
+/** 옛 82와 같은 인원 비율(상위 8%)에 서는 값 — 눈금이 좁아진 몫이다 */
+const NOTABLE_OVERALL = 78;
 /** 하루에 브리핑할 이적 수 — 창이 열린 날 열 줄씩 올라오면 소음이다 */
 const NOTABLE_PER_DAY = 2;
 

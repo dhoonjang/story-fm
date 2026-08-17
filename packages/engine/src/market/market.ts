@@ -31,14 +31,20 @@ import {
  */
 
 /**
- * **84 OVR 정점기(24~27세) 선수의 시장가.** ⚠️ 밸런스 임시값 (사용자 확인 대기).
+ * **80 OVR 정점기(24~27세) 선수의 시장가.** ⚠️ 밸런스 임시값 (사용자 확인 대기).
  * 곡선 전체가 이 한 값에 비례하므로 조정은 여기서 끝난다.
  *
  * 이적료를 주급에 비례시키지 않는 이유: 실제 축구에서 주급은 완만하고 이적료는
- * 급하다 (84 OVR과 62 OVR의 주급 차이는 3.5배지만 이적료 차이는 수십 배다).
+ * 급하다 (80 OVR과 60 OVR의 주급 차이는 3.5배지만 이적료 차이는 수십 배다).
  * 그래서 등급에서 55를 뺀 값의 거듭제곱으로 따로 휘게 만든다.
+ *
+ * ⚠️ **기준 등급은 84가 아니라 80이다.** 종합이 되편 값에서 축 가중 평균이 되며
+ * 눈금이 좁아졌고(player.md §4), 옛 84와 같은 인원 비율에 서는 값이 80이다.
+ * 84로 두면 세계 시장가 총액이 £74.0B에서 £49.4B로 3분의 1 빠진다.
  */
-export const MARKET_VALUE_AT_84 = 65_000_000;
+export const MARKET_VALUE_AT_PEAK = 65_000_000;
+/** 그 금액이 붙는 등급 — 이 값과 `VALUE_FLOOR_RATING` 사이가 곡선의 허리다 */
+const VALUE_PEAK_RATING = 80;
 /** 곡선의 급함 — 클수록 최상급과 스쿼드 자원의 격차가 벌어진다 */
 const VALUE_EXPONENT = 2.6;
 /** 이 등급 아래는 이적료가 거의 붙지 않는다 */
@@ -114,10 +120,12 @@ function leagueFactor(state: GameState, teamId: string): number {
   );
 }
 
-/** 등급 → 기본 시장가. 84 OVR이 기준점이고 아래로 급하게 떨어진다 */
+/** 등급 → 기본 시장가. 80 OVR이 기준점이고 아래로 급하게 떨어진다 */
 export function baseValueOf(overall: number): number {
   const over = Math.max(0, overall - VALUE_FLOOR_RATING);
-  return MARKET_VALUE_AT_84 * Math.pow(over / (84 - VALUE_FLOOR_RATING), VALUE_EXPONENT);
+  return (
+    MARKET_VALUE_AT_PEAK * Math.pow(over / (VALUE_PEAK_RATING - VALUE_FLOOR_RATING), VALUE_EXPONENT)
+  );
 }
 
 /** 이 선수의 시장가 (£) — 안개 없는 진짜 값 */
@@ -133,10 +141,25 @@ export function marketValueOf(state: GameState, player: GamePlayer): number {
   return Math.round(value / 100_000) * 100_000;
 }
 
+/**
+ * **등급 기대 주급의 기준 등급** — 이 등급이 곧 1주 £6,000이고 위로 급하게 휜다.
+ *
+ * ⚠️ 40이 아니라 38.5인 이유는 시장가 기준 등급과 같다 — 종합이 축 가중 평균이
+ * 되며 눈금이 좁아졌다(player.md §4). 40으로 두면 희망 주급 p90이 £116k에서
+ * £99k로 빠진다. 되맞춘 뒤 EPL 실측은 p50 £74k · p90 £136k로 옛 값(£71k·£138k)
+ * 대역에 남는다.
+ */
+const WAGE_BASE_RATING = 38.5;
+
+/** 등급 → 기대 주급 (£/주) — 이적·재계약이 같은 곡선을 읽는다 */
+function wageByRating(overall: number): number {
+  return Math.pow(Math.max(WAGE_BASE_RATING, overall) / WAGE_BASE_RATING, 4.2) * 6_000;
+}
+
 /** 이 선수가 원하는 주급 (£/주) — 현 주급과 시장가에서 파생 */
 export function wageExpectationOf(state: GameState, player: GamePlayer): number {
   const current = activeContract(state, player.id)?.weeklyWage ?? 0;
-  const byRating = Math.pow(Math.max(40, player.attributes.overall) / 40, 4.2) * 6_000;
+  const byRating = wageByRating(player.attributes.overall);
   // 이적은 인상을 전제한다 — 현 주급의 115% 또는 등급 기대치 중 높은 쪽
   return Math.round(Math.max(current * 1.15, byRating) / 1_000) * 1_000;
 }
@@ -821,7 +844,7 @@ function sellOdds(
  */
 export function renewalExpectation(state: GameState, player: GamePlayer): number {
   const current = activeContract(state, player.id)?.weeklyWage ?? 0;
-  const byRating = Math.pow(Math.max(40, player.attributes.overall) / 40, 4.2) * 6_000;
+  const byRating = wageByRating(player.attributes.overall);
   const yearsLeft = contractYearsLeft(state, player.id);
   // 만료가 가까우면 몸값을 더 부른다 (1년 미만 ×1.25 · 2년 미만 ×1.15)
   const leverage = yearsLeft < 1 ? 1.25 : yearsLeft < 2 ? 1.15 : 1.05;

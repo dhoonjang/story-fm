@@ -1568,15 +1568,19 @@ function initialTactics(
         width: 3,
         passStyle: 2,
       };
+    // 두 줄 넷이 **모양으로** 폭을 만들고 길게 갈 자리를 낸다 — 지시로 더 얹지
+    // 않는다(3-5-2와 같은 규칙). 얹어 두면(템포·폭·패스 전부 4) 이 프리셋을 쓰는
+    // 구단이 늘어날 때 리그 평균이 통째로 그쪽으로 밀린다. 남기는 것은 두 줄이
+    // 내려서 기다린다는 것 하나다.
     case "4-4-2":
       return {
         formation,
         mentality: 3,
-        defensiveLine: 3,
+        defensiveLine: 2,
         pressing: 3,
-        tempo: 4,
-        width: 4,
-        passStyle: 4,
+        tempo: 3,
+        width: 3,
+        passStyle: 3,
       };
     // 윙백이 폭을 만드는 모양이라 지시로 더 벌리지 않는다 — 여섯 축 전부 중립
     case "3-5-2":

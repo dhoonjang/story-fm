@@ -17,7 +17,7 @@ import type { GamePhase, GameState } from "./state";
 import { ensurePersonas } from "../world/persona";
 import { ensureSquadNumbers } from "../squad/numbers";
 import { playerCatalog } from "../world/catalog";
-import { addMissingClubs, teamName } from "./state";
+import { addMissingClubs, recomputeOverall, teamName } from "./state";
 
 export { dataDir };
 
@@ -339,6 +339,18 @@ function validate(raw: unknown): LoadResult {
     delete legacy.morale;
     delete legacy.fatigue;
   }
+  /**
+   * **종합은 저장된 값이 아니라 15축의 파생 캐시다** — 로드할 때 다시 계산한다.
+   *
+   * 되펴기를 걷어내며 눈금이 통째로 움직였는데(player.md §4), 세이브에 든
+   * `overall`은 저장된 그 순간의 공식으로 찍힌 값이라 옛 눈금을 그대로 들고
+   * 들어온다. 그러면 한 세이브 안에서 옛 선수는 93, 새로 들어온 선수는 86이 되어
+   * 같은 표에 두 눈금이 선다.
+   *
+   * 축에서 파생하는 값이므로 멱등이고, 없던 필드를 채우는 것도 아니라 세이브
+   * 버전을 올리지 않는다 (원칙 4). 이후 공식이 또 움직여도 여기가 따라온다.
+   */
+  for (const player of state.players) recomputeOverall(player);
   // 2부 리그 도입 — 세이브에 없는 카탈로그 클럽을 채워 넣는다. 이걸 하지 않으면
   // 국내 컵이 존재하지 않는 팀으로 대진을 짜거나 아예 돌지 않는다 (state.ts).
   // 진행 중인 게임에 영향은 없다 — 이 클럽들은 리그전을 돌지 않는다.

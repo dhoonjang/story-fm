@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { ATTRIBUTE_AXES, ageOf, naturalPositionOf, weightSlotOf } from "@story-fm/domain";
 import {
   EXHAUSTED_CONDITION,
   ROTATION_FATIGUE,
   ROTATION_FRESHER,
   ROTATION_OVR_DROP,
+  activeContract,
   advanceTime,
   assignmentsOf,
   computeStandings,
@@ -11,7 +13,9 @@ import {
   groupOf,
   isInjured,
   isSuspended,
+  marketValueOf,
   simSquadOf,
+  wageExpectationOf,
   type GameState,
 } from "@story-fm/engine";
 import { createTestGame, drillUserTactics, playMockMatch } from "./helpers";
@@ -257,6 +261,115 @@ function rotationReport(tally: RotationTally, label: string): string {
       `(${pct(tally.aboveExhausted, tally.rotated)}) — 문턱 셋 갈래가 확실히 걸린 몫`,
   ].join("\n");
 }
+
+/**
+ * **종합 눈금 — 그 숫자가 굴리는 것들의 분포** (player.md §4).
+ *
+ * 종합은 화면의 숫자 하나가 아니라 시장가·주급 서열·잠재력 간격·등급 색이 함께 읽는
+ * 눈금이다. 눈금을 옮기면 그 넷이 전부 따라 움직이는데, 얼마나 움직이는지는 코드를
+ * 읽어서는 알 수 없다 — 세계를 하나 세워 재는 자리가 여기다.
+ *
+ * 기대값을 두지 않는 이유는 위 하네스와 같다: 재려는 값이지 지키려는 값이 아니다.
+ */
+function quantile(sorted: number[], q: number): number {
+  if (sorted.length === 0) return 0;
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))]!;
+}
+
+/** `docs/data/player.md` §6.5 대역 상한 — seed-join.test.ts와 같은 표 */
+const GAP_MAX: Readonly<Record<number, number>> = {
+  16: 31,
+  17: 26,
+  18: 28,
+  19: 29,
+  20: 25,
+  21: 22,
+  22: 17,
+  23: 16,
+  24: 16,
+  25: 13,
+  26: 14,
+  27: 12,
+  28: 10,
+  29: 11,
+  30: 11,
+};
+const gapLimit = (age: number): number => (age <= 15 ? 31 : (GAP_MAX[age] ?? 9));
+
+function scaleReport(state: GameState, label: string): string {
+  const all = state.players;
+  const overalls = all.map((p) => p.attributes.overall).sort((a, b) => a - b);
+  const q = (x: number) => quantile(overalls, x);
+
+  // 축 범위 밖 — 종합이 어느 축보다 높거나(위) 어느 축보다 낮은(아래) 선수
+  const above = all.filter(
+    (p) => p.attributes.overall > Math.max(...ATTRIBUTE_AXES.map((a) => p.attributes[a])),
+  );
+  const below = all.filter(
+    (p) => p.attributes.overall < Math.min(...ATTRIBUTE_AXES.map((a) => p.attributes[a])),
+  );
+
+  const tone = (v: number) => (v >= 85 ? "top" : v >= 75 ? "strong" : v >= 65 ? "solid" : "low");
+  const tones = { top: 0, strong: 0, solid: 0, low: 0 };
+  for (const v of overalls) tones[tone(v) as keyof typeof tones] += 1;
+
+  const bySlot = new Map<string, number[]>();
+  for (const p of all) {
+    const slot = weightSlotOf(naturalPositionOf(p).position);
+    (bySlot.get(slot) ?? bySlot.set(slot, []).get(slot)!).push(p.attributes.overall);
+  }
+  const slotLine = [...bySlot.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([slot, xs]) => `${slot}:${(xs.reduce((s, x) => s + x, 0) / xs.length).toFixed(1)}`)
+    .join(" ");
+
+  // 돈은 EPL만 — 전 세계 5,700명에 계약 조회를 걸면 몇 분이 된다
+  const eplTeams = new Set(computeStandings(state, "epl").map((r) => r.teamId));
+  const epl = all.filter((p) => eplTeams.has(p.teamId));
+  const values = epl.map((p) => marketValueOf(state, p)).sort((a, b) => a - b);
+  const wants = epl.map((p) => wageExpectationOf(state, p)).sort((a, b) => a - b);
+  const wages = epl
+    .map((p) => activeContract(state, p.id)?.weeklyWage ?? 0)
+    .sort((a, b) => a - b);
+  const m = (x: number) => `£${(x / 1_000_000).toFixed(1)}M`;
+  const k = (x: number) => `£${Math.round(x / 1_000)}k`;
+
+  const gaps = all.map((p) => ({
+    gap: p.attributes.potential - p.attributes.overall,
+    limit: gapLimit(ageOf(p.birthdate, state.date)),
+  }));
+  const sortedGaps = gaps.map((g) => g.gap).sort((a, b) => a - b);
+  const overBand = gaps.filter((g) => g.gap > g.limit).length;
+
+  return [
+    `[${label}] 종합 눈금 (선수 ${all.length}명 · EPL ${epl.length}명)`,
+    `  종합 평균 ${(overalls.reduce((s, x) => s + x, 0) / overalls.length).toFixed(1)} · ` +
+      `p10 ${q(0.1)} p50 ${q(0.5)} p90 ${q(0.9)} p99 ${q(0.99)} 최대 ${overalls[overalls.length - 1]}`,
+    `  자리별 평균 ${slotLine}`,
+    `  축 범위 밖 위로 ${above.length}명 (${pct(above.length, all.length)}) · ` +
+      `아래로 ${below.length}명 (${pct(below.length, all.length)})`,
+    `  등급 색 top(85+) ${pct(tones.top, all.length)} · strong(75+) ${pct(tones.strong, all.length)} · ` +
+      `solid(65+) ${pct(tones.solid, all.length)} · low ${pct(tones.low, all.length)}`,
+    `  시장가 p50 ${m(quantile(values, 0.5))} p90 ${m(quantile(values, 0.9))} ` +
+      `최대 ${m(values[values.length - 1] ?? 0)} · 총액 ${m(values.reduce((s, x) => s + x, 0))}`,
+    `  희망 주급 p50 ${k(quantile(wants, 0.5))} p90 ${k(quantile(wants, 0.9))} ` +
+      `최대 ${k(wants[wants.length - 1] ?? 0)}`,
+    `  실제 주급 p50 ${k(quantile(wages, 0.5))} p90 ${k(quantile(wages, 0.9))} ` +
+      `최대 ${k(wages[wages.length - 1] ?? 0)} · 총액 ${m(wages.reduce((s, x) => s + x, 0))}`,
+    `  잠재력 간격 p50 ${quantile(sortedGaps, 0.5)} p90 ${quantile(sortedGaps, 0.9)} ` +
+      `최대 ${sortedGaps[sortedGaps.length - 1]} · 대역 상한 초과 ${overBand}명 (${pct(overBand, all.length)})`,
+  ].join("\n");
+}
+
+describe.skipIf(!process.env.BALANCE)("종합 눈금 (세계 하나)", () => {
+  for (const seed of [42, 7]) {
+    it(`시드 ${seed} — 분포`, () => {
+      const state = createTestGame(seed);
+      console.log(scaleReport(state, `시드 ${seed}`));
+      expect(state.players.length).toBeGreaterThan(0);
+    });
+  }
+});
 
 describe.skipIf(!process.env.BALANCE)("밸런스 하네스 (전체 세계)", () => {
   for (const seed of [42, 7, 99]) {

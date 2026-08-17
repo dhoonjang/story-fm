@@ -2,15 +2,21 @@ import { describe, expect, it } from "vitest";
 import {
   EXTRA_TIME_MINUTES,
   advanceSegment,
+  assignmentsOf,
   domesticTieWinner,
   euroTieWinner,
   finalizeMatch,
+  finishingXi,
   needsExtraTime,
+  penaltyRate,
   playersOf,
+  quickSimulate,
   resolveExtraTime,
   simulateExtraTime,
+  simulateOtherMatches,
   startMatch,
   substitutePlayer,
+  tacticsOf,
   tieAggregate,
   userPlayers,
   userSide,
@@ -490,6 +496,141 @@ describe("유저 경기의 연장 (competition.md §6)", () => {
     }
     // 무승부가 한 번도 안 나왔다면 이 테스트는 아무것도 증명하지 못한다
     expect(draws).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * **연장과 승부차기의 입력은 90분과 같은 원본에서 나온다** (match.md §7).
+ *
+ * 여기서 재는 것은 결과가 아니라 **입력**이다: 중립 경기장이 시뮬까지 가는가,
+ * 연장 패킷이 전술판에서 서는가, 그 30분을 뛰는 사람이 종료 시점 온필드인가,
+ * 승부차기 성공률이 문서가 적어 둔 대역 안에 있는가. 전부 화면에 안 보이는
+ * 자리라 갈려도 아무도 모른다 — 상위 시드가 결승에서 공짜 우위를 얻을 뿐이다.
+ */
+describe("연장·승부차기의 입력 (match.md §7)", () => {
+  it("연장을 뛰는 사람은 종료 시점 온필드다 — 교체로 나간 선수는 아니다", () => {
+    const state = createTestGame(11);
+    const decider = stageTie(state, "facup", "r16", 700, [
+      { home: "arsenal", away: "chelsea", homeGoals: 1, awayGoals: 1 },
+    ])[0]!;
+    const squad = playersOf(state, "arsenal");
+    const lineup = decider.result!.homeLineup!;
+    // 70분에 한 명을 빼고 벤치 자원을 넣은 경기 — 명단에는 둘 다 남는다
+    const wentOff = lineup[0]!;
+    const cameOn = squad[15]!.id;
+    decider.result!.homeLineup = [...lineup, cameOn];
+    decider.result!.homeOnPitch = [...lineup.slice(1), cameOn];
+
+    expect(finishingXi(state, decider, "home").map((p) => p.id)).toEqual(
+      decider.result!.homeOnPitch,
+    );
+
+    for (const p of playersOf(state, "arsenal")) p.state.condition = 100;
+    expect(resolveExtraTime(state, decider, "facup:r16:700")).toBe(true);
+    const conditionOf = (id: string) =>
+      playersOf(state, "arsenal").find((p) => p.id === id)!.state.condition;
+    // 나간 선수는 연장을 뛰지 않는다 — 명단 앞 열한 명에 서 있어도
+    expect(conditionOf(wentOff)).toBe(100);
+    // 들어온 선수는 뛴다 — 명단 열두 번째라도
+    expect(conditionOf(cameOn)).toBeLessThan(100);
+  });
+
+  it("연장 패킷은 전술판·전술·적응도에서 선다 — 이름만 넘긴 기본값이 아니다", () => {
+    const state = createTestGame(11);
+    const board = tacticsOf(state, "arsenal");
+    // 기본값에서 확실히 떼어 놓는다 — 이름만 넘기면 패킷이 여기로 돌아온다
+    board.spec = { ...board.spec, mentality: 5, tempo: 5, pressing: 5, defensiveLine: 5 };
+    for (const a of assignmentsOf(state, "arsenal")) a.familiarity = 95;
+
+    let bareXg = 0;
+    let boardXg = 0;
+    for (let pair = 710; pair < 718; pair++) {
+      const decider = stageTie(state, "facup", "r16", pair, [
+        { home: "arsenal", away: "chelsea", homeGoals: 0, awayGoals: 0 },
+      ])[0]!;
+      for (const teamId of ["arsenal", "chelsea"]) {
+        for (const p of playersOf(state, teamId)) p.state.condition = 100;
+      }
+      const channel = `facup:r16:${pair}`;
+      // 옛 입력 — 팀 id와 선수 목록만. 패킷은 자연 포지션·기본 전술·적응도 60·감독 65로 선다
+      const bare = simulateExtraTime(
+        { teamId: decider.homeTeamId, starters: finishingXi(state, decider, "home") },
+        { teamId: decider.awayTeamId, starters: finishingXi(state, decider, "away") },
+        state.seed,
+        channel,
+      );
+      expect(resolveExtraTime(state, decider, channel)).toBe(true);
+      bareXg += bare.homeXg + bare.awayXg;
+      boardXg += decider.result!.homeXg! + decider.result!.awayXg!;
+    }
+    expect(boardXg).toBeGreaterThan(0);
+    expect(boardXg).not.toBe(bareXg);
+  });
+
+  it("중립 경기장은 홈 노출을 지운다 — 결승의 명목상 홈에 공짜 우위가 없다", () => {
+    const state = createTestGame(11);
+    const home = simSquad(state, "mancity");
+    const away = simSquad(state, "arsenal");
+    const shots = { nominal: { home: 0, away: 0 }, neutral: { home: 0, away: 0 } };
+    for (let i = 0; i < 30; i++) {
+      const nominal = quickSimulate(home, away, 900 + i, `venue:${i}`);
+      const neutral = quickSimulate(home, away, 900 + i, `venue:${i}`, { neutral: true });
+      shots.nominal.home += nominal.homeShots;
+      shots.nominal.away += nominal.awayShots;
+      shots.neutral.home += neutral.homeShots;
+      shots.neutral.away += neutral.awayShots;
+    }
+    const share = (s: { home: number; away: number }) => s.home / (s.home + s.away);
+    // 홈 노출(1.06)과 원정 노출(0.96)이 사라지면 홈 몫이 내려간다
+    expect(share(shots.neutral)).toBeLessThan(share(shots.nominal));
+  });
+
+  it("경기가 가진 중립 표식이 간이 시뮬까지 간다", () => {
+    /** 오늘 자리에 타 팀끼리의 결승 하나만 세우고 그 하루를 굴린다 */
+    const playFinal = (neutral: boolean, round: number) => {
+      const state = createTestGame(11);
+      state.matches = state.matches.filter((m) => m.date !== state.date);
+      const match: MatchRecord = {
+        id: `m-facup-${state.season}-final-p0-l${round}`,
+        season: state.season,
+        competitionId: "facup",
+        stage: "final",
+        round,
+        date: state.date,
+        time: "15:00",
+        homeTeamId: "mancity",
+        awayTeamId: "chelsea",
+        result: null,
+        ...(neutral ? { neutral: true } : {}),
+      };
+      state.matches.push(match);
+      simulateOtherMatches(state, []);
+      return match.result!;
+    };
+    /**
+     * 난수 채널에 중립이 안 들어가므로, 시뮬이 표식을 안 읽으면 결과가 똑같다.
+     *
+     * ⚠️ **한 판으로는 못 잰다.** 노출 차이(1.06 대 1.00)는 슈팅 추첨 하나를 뒤집을
+     * 때만 결과에 드러나고, 한 편성에서 아무것도 안 뒤집히면 두 값이 같게 나온다 —
+     * 표식이 제대로 흘러도 그렇다. 채널을 바꿔 가며 여러 판을 더하면 그 우연이
+     * 사라진다 (라운드가 채널에 들어간다).
+     */
+    const total = (neutral: boolean) =>
+      Array.from({ length: 8 }, (_, i) => playFinal(neutral, i + 1)).reduce(
+        (sum, r) => sum + (r.homeXg ?? 0) + (r.awayXg ?? 0),
+        0,
+      );
+    expect(total(true)).not.toBe(total(false));
+  });
+
+  it("승부차기 성공률은 0.62~0.80 밖으로 나가지 않는다", () => {
+    // 대역은 competition.md §6이 쥔다 — 여기서는 그 밖으로 새지 않는 것만 본다
+    expect(penaltyRate(60)).toBeCloseTo(0.62, 10);
+    expect(penaltyRate(70)).toBeCloseTo(0.67, 10);
+    expect(penaltyRate(96)).toBeCloseTo(0.8, 10);
+    // 양 끝 — 하한이 없던 때는 평균 50인 팀이 0.57까지 내려갔다
+    expect(penaltyRate(20)).toBeCloseTo(0.62, 10);
+    expect(penaltyRate(200)).toBeCloseTo(0.8, 10);
   });
 });
 

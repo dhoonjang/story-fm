@@ -127,6 +127,12 @@ export function applyResultMood(
 }
 
 /**
+ * 목소리를 낼 만한 주력 자원인가 — **종합의 눈금을 탄다.**
+ * 옛 75와 같은 인원 비율(상위 25%)에 서는 값이다 (player.md §4).
+ */
+const SLUMP_VOICE_OVERALL = 72;
+
+/**
  * 길어진 침체는 한 사람에게 이름을 붙인다 — 폼이 가장 낮은 주력 자원.
  * 무작위가 아닌 이유: 감독이 "왜 하필 이 선수인가"를 납득할 수 있어야 한다.
  */
@@ -139,7 +145,7 @@ function markSlumpIssue(
   if (teamId !== state.userTeamId) return; // 남의 라커룸 불만은 장부에 남기지 않는다
   const already = new Set(state.issues.map((i) => i.gamePlayerId));
   const candidate = [...squad]
-    .filter((p) => !already.has(p.id) && p.attributes.overall >= 75)
+    .filter((p) => !already.has(p.id) && p.attributes.overall >= SLUMP_VOICE_OVERALL)
     .sort((a, b) => a.state.form - b.state.form)[0];
   if (!candidate) return;
   state.issues.push({
