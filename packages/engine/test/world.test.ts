@@ -332,9 +332,12 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
   });
 
   it("초기 운용은 포메이션의 성격과 일치한다", () => {
+    // 점유는 라인과 폭을 올리는 대신 템포와 패스 길이를 내린다 — 올린 축만큼 내린 축이 있다
     const possession = tacticsOf(state, "psg").spec;
     expect(possession.formation).toBe("4-3-3");
-    expect(possession.pressing).toBeGreaterThan(3);
+    expect(possession.defensiveLine).toBeGreaterThan(3);
+    expect(possession.width).toBeGreaterThan(3);
+    expect(possession.tempo).toBeLessThan(3);
     expect(possession.passStyle).toBeLessThan(3);
 
     const lowBlock = tacticsOf(state, "getafe").spec;
