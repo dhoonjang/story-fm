@@ -245,8 +245,11 @@ function weightedRoute(
 const outfield = (squad: SegmentSquad, gone: ReadonlySet<string> = new Set()) =>
   squad.onPitch.filter((p) => positionGroupOfPlayer(p) !== "GK" && !gone.has(p.id));
 
-/** 도움 — 시야·패스. 모든 골에 붙지는 않는다 (단독 돌파·PK) */
-const ASSIST_RATE = 0.68;
+/**
+ * 도움 — 시야·패스. 모든 골에 붙지는 않는다 (단독 돌파·PK).
+ * 간이 시뮬도 이 값을 함께 쓴다 (`engine/quick-sim.ts`).
+ */
+export const ASSIST_RATE = 0.68;
 
 /** 한 팀이 1분에 주고받는 패스 — 실제 1부 리그가 90분에 400~600회다 */
 const PASSES_PER_MINUTE = 5.6;
@@ -312,19 +315,26 @@ export const STRAIGHT_RED_CHANCE = 0.03;
  */
 export const BOOKED_AGAIN_WEIGHT = 0.35;
 
-/** 카드 — 적극성이 높고 태클이 약한 선수가 자주 받는다 */
+/**
+ * 카드를 받을 상대 가중 — 적극성이 높고 태클이 약한 선수가 자주 받는다.
+ * 간이 시뮬도 이 식을 함께 쓴다 (`engine/quick-sim.ts`).
+ */
+export function bookingWeight(player: Player, alreadyBooked: boolean): number {
+  const a = player.attributes;
+  return (
+    (a.aggression * 1.5 + (99 - a.tackling) * 0.5) * (alreadyBooked ? BOOKED_AGAIN_WEIGHT : 1)
+  );
+}
+
+/** 이번 카드를 받는 사람 — 온필드에서 `bookingWeight`로 뽑는다 */
 function pickBooked(
   rng: () => number,
   squad: SegmentSquad,
   gone?: ReadonlySet<string>,
   booked?: Readonly<Record<string, number>>,
 ): Player | null {
-  return weightedPick(
-    rng,
-    outfield(squad, gone),
-    (p) =>
-      (p.attributes.aggression * 1.5 + (99 - p.attributes.tackling) * 0.5) *
-      ((booked?.[p.id] ?? 0) > 0 ? BOOKED_AGAIN_WEIGHT : 1),
+  return weightedPick(rng, outfield(squad, gone), (p) =>
+    bookingWeight(p, (booked?.[p.id] ?? 0) > 0),
   );
 }
 
