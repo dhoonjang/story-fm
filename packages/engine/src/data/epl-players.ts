@@ -11,8 +11,12 @@ import type { PositionGroup } from "@story-fm/domain";
  * **생년월일은 위키가 정한다** — EA도 여기서 틀리고, 그 오류가 조인을 깬다
  * (data/sources.md §4.1). 포지션 코드는 기존 시드(있으면)를 우선한다.
  *
+ * **소속 축만 2026-08-17에 다시 대조했다** — 임대 선수는 임대처 스쿼드에 있고,
+ * 이적으로 옛 구단에 남은 선수는 없다 (data/sources.md §4.1.1). 명단의 증감은
+ * 2026-08-15 그대로다.
+ *
  * ⚠️ **EA에 없는 선수는 옛 값 그대로다.** EA는 구단당 25명 안팎만 싣기 때문에
- * 5대 리그 시드 2,822명 중 2,412명(85%)만 실측 키를 갖고, 나머지 410명은
+ * 5대 리그 시드 2,817명 중 2,411명(85%)만 실측 키를 갖고, 나머지 406명은
  * 대부분 아카데미 자원이다(21세 이하가 282명). 이들의 6축은 여전히 판단값이다.
  *
  * ⚠️ **골키퍼의 6축은 EA의 골키퍼 세부 능력치**다. 그래서 `dribbling`(볼컨트롤)·
@@ -83,7 +87,7 @@ export interface RealPlayerSeed {
    * **약발 등급 1~5** (EA FC 27 공개 `Weak Foot` 별점 그대로).
    * 생략하면 **4** — 조사가 닿지 않은 선수의 기본값이다.
    *
-   * 5대 리그 시드 2,822명 중 2,437명(86%)이 실측이고, 나머지는 EA에 없는
+   * 5대 리그 시드 2,817명 중 2,433명(86%)이 실측이고, 나머지는 EA에 없는
    * 아카데미 자원이라 4로 남는다. **실측이 있으면 3도 그대로 적는다** — 3성은
    * EA 분포의 최빈값(61%)이고, 이걸 4로 접으면 카탈로그가 통째로 "약발 좋은
    * 선수들"이 되어 좌우 배치 판단이 밋밋해진다.
@@ -169,7 +173,6 @@ export const REAL_SQUADS: Record<string, readonly RealPlayerSeed[]> = {
     { nameEn: "Abdukodir Khusanov", squadNumber: 45, nameKo: "압두코디르 후사노프", birthdate: "2004-02-29", position: "CB", positionGroup: "DF", pace: 90, shooting: 39, passing: 61, dribbling: 65, defending: 80, physical: 79, height: 186, weight: 84, foot: "R", weakFoot: 3, potential: 87, weeklyWage: 83000 },
     { nameEn: "Phil Foden", squadNumber: 47, nameKo: "필 포든", birthdate: "2000-05-28", position: "AM", positionGroup: "MF", pace: 81, shooting: 81, passing: 82, dribbling: 89, defending: 57, physical: 57, height: 171, weight: 70, foot: "L", weakFoot: 3, potential: 89, weeklyWage: 130000 },
     { nameEn: "Divine Mukasa", squadNumber: 63, nameKo: "디바인 무카사", birthdate: "2008-04-27", position: "AM", positionGroup: "MF", pace: 74, shooting: 68, passing: 74, dribbling: 80, defending: 40, physical: 56, potential: 86, weeklyWage: 3400 },
-    { nameEn: "Divin Mubama", squadNumber: 67, nameKo: "디빈 무바마", birthdate: "2004-10-25", position: "ST", positionGroup: "FW", pace: 73, shooting: 65, passing: 47, dribbling: 65, defending: 28, physical: 71, height: 183, weight: 70, foot: "L", weakFoot: 3, potential: 82, weeklyWage: 11000 },
     { nameEn: "Max Alleyne", squadNumber: 68, nameKo: "맥스 알레인", birthdate: "2005-07-21", position: "CB", positionGroup: "DF", pace: 74, shooting: 34, passing: 53, dribbling: 64, defending: 67, physical: 70, height: 185, weight: 80, foot: "R", weakFoot: 3, potential: 82, weeklyWage: 13000 },
     { nameEn: "Rico Lewis", squadNumber: 82, nameKo: "리코 루이스", birthdate: "2004-11-21", position: "RB", positionGroup: "DF", pace: 76, shooting: 54, passing: 74, dribbling: 79, defending: 73, physical: 58, height: 170, weight: 64, foot: "R", weakFoot: 3, potential: 88, weeklyWage: 88000 },
     { nameEn: "Stephen Mfuni", squadNumber: 91, nameKo: "스티븐 음푸니", birthdate: "2008-01-23", position: "CB", positionGroup: "DF", pace: 72, shooting: 30, passing: 55, dribbling: 58, defending: 63, physical: 66, potential: 80, weeklyWage: 420 },
@@ -209,7 +212,6 @@ export const REAL_SQUADS: Record<string, readonly RealPlayerSeed[]> = {
     { nameEn: "Toby Collyer", squadNumber: 43, nameKo: "토비 콜리어", birthdate: "2004-01-03", position: "CM", positionGroup: "MF", pace: 67, shooting: 49, passing: 67, dribbling: 68, defending: 67, physical: 69, height: 183, weight: 65, foot: "R", weakFoot: 5, potential: 79, weeklyWage: 7000 },
     { nameEn: "Dermot Mee", squadNumber: 45, nameKo: "더모트 미", birthdate: "2002-11-20", position: "GK", positionGroup: "GK", pace: 42, shooting: 22, passing: 64, dribbling: 38, defending: 22, physical: 72, goalkeeping: 74, potential: 79, weeklyWage: 1400 },
     { nameEn: "Shea Lacey", squadNumber: 46, nameKo: "셰이 레이시", birthdate: "2007-04-14", position: "RW", positionGroup: "FW", pace: 79, shooting: 66, passing: 68, dribbling: 80, defending: 34, physical: 58, potential: 85, weeklyWage: 1600 },
-    { nameEn: "Altay Bayındır", nameKo: "알타이 바이은드르", birthdate: "1998-04-14", position: "GK", positionGroup: "GK", pace: 30, shooting: 53, passing: 70, dribbling: 16, defending: 14, physical: 68, goalkeeping: 75, height: 198, weight: 88, foot: "R", weakFoot: 2, potential: 79, weeklyWage: 43000 },
   ],
   liverpool: [
     { nameEn: "Alisson Becker", squadNumber: 1, nameKo: "알리송 베케르", birthdate: "1993-06-09", position: "GK", positionGroup: "GK", pace: 52, shooting: 35, passing: 66, dribbling: 45, defending: 38, physical: 66, goalkeeping: 88, height: 191, weight: 91, foot: "R", weakFoot: 3, potential: 89, weeklyWage: 235000 },
@@ -265,7 +267,6 @@ export const REAL_SQUADS: Record<string, readonly RealPlayerSeed[]> = {
     { nameEn: "Amadou Onana", squadNumber: 24, nameKo: "아마두 오나나", birthdate: "2001-08-16", position: "CM", positionGroup: "MF", pace: 74, shooting: 64, passing: 72, dribbling: 74, defending: 81, physical: 82, height: 192, weight: 76, foot: "R", weakFoot: 4, potential: 90, weeklyWage: 110000 },
     { nameEn: "Lamare Bogarde", squadNumber: 26, nameKo: "라마레 보가르드", birthdate: "2004-01-05", position: "CB", positionGroup: "DF", pace: 67, shooting: 53, passing: 67, dribbling: 70, defending: 72, physical: 69, height: 183, weight: 70, foot: "R", weakFoot: 4, potential: 81, weeklyWage: 8000 },
     { nameEn: "Zépiqueno Redmond", squadNumber: 28, nameKo: "제피케노 레드먼드", birthdate: "2006-03-24", position: "LW", positionGroup: "FW", pace: 86, shooting: 66, passing: 62, dribbling: 76, defending: 35, physical: 66, potential: 80, weeklyWage: 1600 },
-    { nameEn: "Evann Guessand", squadNumber: 29, nameKo: "에방 게상", birthdate: "2001-02-16", position: "RW", positionGroup: "FW", pace: 83, shooting: 76, passing: 72, dribbling: 78, defending: 36, physical: 78, foot: "R", weakFoot: 3, potential: 82, weeklyWage: 103000 },
     { nameEn: "Leon Bailey", squadNumber: 31, nameKo: "레온 베일리", birthdate: "1997-08-09", position: "RW", positionGroup: "FW", pace: 86, shooting: 74, passing: 73, dribbling: 82, defending: 38, physical: 61, height: 178, weight: 77, foot: "L", weakFoot: 2, potential: 80, weeklyWage: 64000 },
     { nameEn: "Kosta Nedeljković", squadNumber: 32, nameKo: "코스타 네델코비치", birthdate: "2005-12-16", position: "RB", positionGroup: "DF", pace: 81, shooting: 44, passing: 65, dribbling: 69, defending: 68, physical: 67, height: 184, weight: 72, foot: "R", weakFoot: 2, potential: 84, weeklyWage: 9300 },
     { nameEn: "Samuel Iling-Junior", squadNumber: 33, nameKo: "새뮤얼 일링-주니어", birthdate: "2003-10-04", position: "LM", positionGroup: "MF", pace: 81, shooting: 64, passing: 68, dribbling: 75, defending: 56, physical: 62, height: 182, weight: 75, foot: "L", weakFoot: 4, potential: 81, weeklyWage: 19000 },
@@ -355,7 +356,6 @@ export const REAL_SQUADS: Record<string, readonly RealPlayerSeed[]> = {
     { nameEn: "Geovany Quenda", squadNumber: 47, nameKo: "제오바니 켄다", birthdate: "2007-04-30", position: "RM", positionGroup: "MF", pace: 85, shooting: 64, passing: 73, dribbling: 79, defending: 41, physical: 67, height: 172, weight: 71, foot: "L", weakFoot: 4, potential: 89, weeklyWage: 19000 },
     { nameEn: "Landon Emenalo", squadNumber: 56, nameKo: "랜던 에메날로", birthdate: "2008-01-18", position: "CM", positionGroup: "MF", pace: 68, shooting: 56, passing: 67, dribbling: 64, defending: 60, physical: 60, potential: 82, weeklyWage: 4000 },
     { nameEn: "Emmanuel Emegha", nameKo: "에마뉘엘 에메하", birthdate: "2003-02-03", position: "ST", positionGroup: "FW", pace: 89, shooting: 76, passing: 60, dribbling: 69, defending: 31, physical: 79, height: 195, weight: 82, foot: "L", weakFoot: 5, potential: 85, weeklyWage: 64000 },
-    { nameEn: "Filip Jörgensen", nameKo: "필립 요르겐센", birthdate: "2002-03-18", position: "GK", positionGroup: "GK", pace: 47, shooting: 35, passing: 64, dribbling: 44, defending: 38, physical: 62, goalkeeping: 77, foot: "R", weakFoot: 3, potential: 83, weeklyWage: 72000 },
     { nameEn: "Ishe Samuels-Smith", nameKo: "이셰 새뮤얼스-스미스", birthdate: "2006-06-05", position: "LB", positionGroup: "DF", pace: 75, shooting: 43, passing: 60, dribbling: 62, defending: 63, physical: 66, height: 186, weight: 76, foot: "L", weakFoot: 3, potential: 78, weeklyWage: 1600 },
     { nameEn: "Jordan Henderson", nameKo: "조던 헨더슨", birthdate: "1990-06-17", position: "CM", positionGroup: "MF", pace: 65, shooting: 71, passing: 80, dribbling: 74, defending: 75, physical: 76, height: 182, weight: 80, foot: "R", weakFoot: 3, potential: 82, weeklyWage: 65000 },
     { nameEn: "Kendry Páez", nameKo: "켄드리 파에스", birthdate: "2007-05-04", position: "AM", positionGroup: "MF", pace: 78, shooting: 69, passing: 71, dribbling: 77, defending: 47, physical: 54, height: 178, weight: 71, foot: "L", weakFoot: 3, potential: 89, weeklyWage: 1600 },
@@ -451,7 +451,6 @@ export const REAL_SQUADS: Record<string, readonly RealPlayerSeed[]> = {
     { nameEn: "Malick Yalcouyé", squadNumber: 35, nameKo: "말리크 얄쿠예", birthdate: "2005-11-18", position: "DM", positionGroup: "MF", pace: 81, shooting: 61, passing: 67, dribbling: 72, defending: 65, physical: 67, height: 169, weight: 69, foot: "R", weakFoot: 2, potential: 86, weeklyWage: 7800 },
     { nameEn: "Zadok Yohanna", squadNumber: 36, nameKo: "자독 요한나", birthdate: "2007-04-12", position: "RW", positionGroup: "FW", pace: 89, shooting: 66, passing: 60, dribbling: 81, defending: 32, physical: 62, potential: 85, weeklyWage: 1600 },
     { nameEn: "Tom McGill", squadNumber: 38, nameKo: "톰 맥길", birthdate: "2000-03-25", position: "GK", positionGroup: "GK", pace: 30, shooting: 47, passing: 63, dribbling: 28, defending: 13, physical: 50, goalkeeping: 62, height: 185, weight: 80, foot: "R", weakFoot: 2, potential: 64, weeklyWage: 4600 },
-    { nameEn: "Facundo Buonanotte", squadNumber: 40, nameKo: "파쿤도 부오나노테", birthdate: "2005-01-26", position: "AM", positionGroup: "MF", pace: 75, shooting: 70, passing: 73, dribbling: 75, defending: 30, physical: 52, foot: "L", weakFoot: 3, potential: 84, weeklyWage: 37000 },
     { nameEn: "Luka Vušković", squadNumber: 44, nameKo: "루카 부슈코비치", birthdate: "2007-02-24", position: "CB", positionGroup: "DF", pace: 59, shooting: 62, passing: 62, dribbling: 63, defending: 78, physical: 80, height: 193, weight: 86, foot: "R", weakFoot: 3, potential: 89, weeklyWage: 23000 },
     { nameEn: "Pascal Struijk", nameKo: "파스칼 스트라윅", birthdate: "1999-08-11", position: "CB", positionGroup: "DF", pace: 59, shooting: 46, passing: 61, dribbling: 65, defending: 76, physical: 80, height: 190, weight: 79, foot: "L", weakFoot: 4, potential: 80, weeklyWage: 39000 },
     { nameEn: "Tom Watson", nameKo: "톰 왓슨", birthdate: "2006-04-08", position: "RW", positionGroup: "FW", pace: 79, shooting: 65, passing: 62, dribbling: 69, defending: 29, physical: 57, height: 190, weight: 77, foot: "R", weakFoot: 3, potential: 83, weeklyWage: 27000 },
@@ -666,7 +665,6 @@ export const REAL_SQUADS: Record<string, readonly RealPlayerSeed[]> = {
     { nameEn: "Mohammed Kudus", squadNumber: 20, nameKo: "모하메드 쿠두스", birthdate: "2000-08-02", position: "RW", positionGroup: "FW", pace: 89, shooting: 76, passing: 74, dribbling: 86, defending: 60, physical: 75, height: 177, weight: 70, foot: "L", weakFoot: 3, potential: 86, weeklyWage: 100000 },
     { nameEn: "Dejan Kulusevski", squadNumber: 21, nameKo: "데얀 쿨루셉스키", birthdate: "2000-04-25", position: "AM", positionGroup: "MF", pace: 74, shooting: 79, passing: 84, dribbling: 85, defending: 62, physical: 80, height: 186, weight: 80, foot: "L", weakFoot: 3, potential: 89, weeklyWage: 128000 },
     { nameEn: "Pedro Porro", squadNumber: 23, nameKo: "페드로 포로", birthdate: "1999-09-13", position: "RB", positionGroup: "DF", pace: 78, shooting: 73, passing: 81, dribbling: 80, defending: 77, physical: 76, height: 173, weight: 69, foot: "R", weakFoot: 3, potential: 86, weeklyWage: 112000 },
-    { nameEn: "Djed Spence", squadNumber: 24, nameKo: "제드 스펜스", birthdate: "2000-08-09", position: "RB", positionGroup: "DF", pace: 88, shooting: 52, passing: 72, dribbling: 79, defending: 76, physical: 75, height: 184, weight: 71, foot: "R", weakFoot: 3, potential: 84, weeklyWage: 87000 },
     { nameEn: "Kōta Takai", squadNumber: 25, nameKo: "타카이 코타", birthdate: "2004-09-04", position: "CB", positionGroup: "DF", pace: 62, shooting: 32, passing: 55, dribbling: 62, defending: 72, physical: 69, height: 192, weight: 90, foot: "R", weakFoot: 3, potential: 85, weeklyWage: 25000 },
     { nameEn: "Wilson Odobert", squadNumber: 28, nameKo: "윌슨 오도베르", birthdate: "2004-11-28", position: "LW", positionGroup: "FW", pace: 86, shooting: 71, passing: 70, dribbling: 79, defending: 30, physical: 49, height: 182, weight: 75, foot: "R", weakFoot: 4, potential: 92, weeklyWage: 71000 },
     { nameEn: "Pape Matar Sarr", squadNumber: 29, nameKo: "파페 마타르 사르", birthdate: "2002-09-14", position: "CM", positionGroup: "MF", pace: 68, shooting: 66, passing: 77, dribbling: 80, defending: 78, physical: 76, height: 184, weight: 70, foot: "R", weakFoot: 3, potential: 88, weeklyWage: 65000 },
@@ -901,20 +899,19 @@ export const REAL_SQUADS: Record<string, readonly RealPlayerSeed[]> = {
     { nameEn: "Cameron Archer", squadNumber: 19, nameKo: "캐머런 아처", birthdate: "2001-05-01", position: "ST", positionGroup: "FW", pace: 82, shooting: 71, passing: 59, dribbling: 72, defending: 25, physical: 65, foot: "R", potential: 77, weeklyWage: 26000 },
     { nameEn: "Ben Brereton Díaz", squadNumber: 22, nameKo: "벤 브레러턴 디아스", birthdate: "1999-01-18", position: "ST", positionGroup: "FW", pace: 78, shooting: 71, passing: 65, dribbling: 70, defending: 41, physical: 72, foot: "R", weakFoot: 3, potential: 74, weeklyWage: 24000 },
     { nameEn: "Samuel Edozie", squadNumber: 23, nameKo: "새뮤얼 에도지", birthdate: "2003-01-26", position: "LW", positionGroup: "FW", pace: 84, shooting: 62, passing: 65, dribbling: 75, defending: 28, physical: 57, foot: "R", weakFoot: 2, potential: 78, weeklyWage: 19000 },
-    { nameEn: "Shea Charles", squadNumber: 24, nameKo: "셰이 찰스", birthdate: "2004-04-19", position: "DM", positionGroup: "MF", pace: 64, shooting: 63, passing: 72, dribbling: 70, defending: 69, physical: 75, foot: "R", weakFoot: 3, potential: 83, weeklyWage: 19000 },
     { nameEn: "George Long", squadNumber: 25, nameKo: "조지 롱", birthdate: "1993-11-05", position: "GK", positionGroup: "GK", pace: 43, shooting: 33, passing: 61, dribbling: 44, defending: 33, physical: 63, goalkeeping: 66, foot: "L", weakFoot: 3, potential: 67, weeklyWage: 8200 },
     { nameEn: "Cam Bragg", squadNumber: 26, nameKo: "캠 브래그", birthdate: "2005-02-26", position: "CM", positionGroup: "MF", pace: 68, shooting: 52, passing: 66, dribbling: 66, defending: 60, physical: 62, potential: 74, weeklyWage: 3400 },
     { nameEn: "Kuryu Matsuki", squadNumber: 27, nameKo: "마쓰키 쿠류", birthdate: "2003-04-19", position: "AM", positionGroup: "MF", pace: 73, shooting: 65, passing: 66, dribbling: 72, defending: 62, physical: 71, foot: "L", weakFoot: 3, potential: 75, weeklyWage: 18000 },
     { nameEn: "Gavin Bazunu", squadNumber: 31, nameKo: "개빈 바주누", birthdate: "2002-04-11", position: "GK", positionGroup: "GK", pace: 52, shooting: 32, passing: 60, dribbling: 48, defending: 34, physical: 66, goalkeeping: 70, foot: "R", weakFoot: 2, potential: 82, weeklyWage: 25000 },
     { nameEn: "Welington", squadNumber: 34, nameKo: "웰링턴", birthdate: "2000-06-26", position: "LB", positionGroup: "DF", pace: 77, shooting: 52, passing: 67, dribbling: 70, defending: 68, physical: 64, foot: "L", weakFoot: 2, potential: 71, weeklyWage: 17000 },
     { nameEn: "Damion Downs", squadNumber: 42, nameKo: "데이미언 다운스", birthdate: "2004-01-06", position: "ST", positionGroup: "FW", pace: 71, shooting: 68, passing: 53, dribbling: 64, defending: 24, physical: 68, foot: "R", weakFoot: 3, potential: 78, weeklyWage: 32000 },
-    { nameEn: "Jay Robinson", squadNumber: 46, nameKo: "제이 로빈슨", birthdate: "2007-03-06", position: "AM", positionGroup: "MF", pace: 75, shooting: 65, passing: 59, dribbling: 68, defending: 28, physical: 54, foot: "R", potential: 80, weeklyWage: 8100 },
     { nameEn: "Moses Sesay", squadNumber: 47, nameKo: "모지스 세세이", birthdate: "2007-01-16", position: "CM", positionGroup: "MF", pace: 68, shooting: 48, passing: 62, dribbling: 64, defending: 58, physical: 60, potential: 76, weeklyWage: 480 },
     { nameEn: "Nicholas Oyekunle", squadNumber: 49, nameKo: "니컬러스 오예쿤레", birthdate: "2007-05-15", position: "ST", positionGroup: "FW", pace: 76, shooting: 60, passing: 50, dribbling: 62, defending: 30, physical: 66, potential: 76, weeklyWage: 1600 },
+    { nameEn: "Divin Mubama", squadNumber: 28, nameKo: "디빈 무바마", birthdate: "2004-10-25", position: "ST", positionGroup: "FW", pace: 73, shooting: 65, passing: 47, dribbling: 65, defending: 28, physical: 71, height: 183, weight: 70, foot: "L", weakFoot: 3, potential: 82, weeklyWage: 11000 },
     { nameEn: "Barnaby Williams", squadNumber: 53, nameKo: "바너비 윌리엄스", birthdate: "2006-11-12", position: "CM", positionGroup: "MF", pace: 59, shooting: 47, passing: 58, dribbling: 55, defending: 51, physical: 51, potential: 71, weeklyWage: 1500 },
     { nameEn: "Dylan Moody", nameKo: "딜런 무디", birthdate: "2008-03-11", position: "GK", positionGroup: "GK", pace: 42, shooting: 22, passing: 45, dribbling: 38, defending: 22, physical: 53, goalkeeping: 55, potential: 71, weeklyWage: 3400 },
     { nameEn: "Aaron Ramsdale", squadNumber: 30, nameKo: "아론 램스데일", birthdate: "1998-05-08", position: "GK", positionGroup: "GK", pace: 50, shooting: 34, passing: 62, dribbling: 50, defending: 35, physical: 66, goalkeeping: 77, foot: "R", weakFoot: 3, potential: 80, weeklyWage: 75000 },
-    { nameEn: "Juan Larios", squadNumber: 28, nameKo: "후안 라리오스", birthdate: "2004-06-03", position: "LB", positionGroup: "DF", pace: 84, shooting: 36, passing: 60, dribbling: 71, defending: 66, physical: 53, foot: "L", weakFoot: 3, potential: 74, weeklyWage: 18000 },
+    { nameEn: "Juan Larios", nameKo: "후안 라리오스", birthdate: "2004-06-03", position: "LB", positionGroup: "DF", pace: 84, shooting: 36, passing: 60, dribbling: 71, defending: 66, physical: 53, foot: "L", weakFoot: 3, potential: 74, weeklyWage: 18000 },
     { nameEn: "Rory Whittaker", nameKo: "로리 휘태커", birthdate: "2008-01-03", position: "RB", positionGroup: "DF", pace: 82, shooting: 32, passing: 56, dribbling: 64, defending: 54, physical: 56, potential: 76, weeklyWage: 430 },
   ],
 };

@@ -1339,7 +1339,7 @@ export const DEFAULT_XI: Record<string, readonly string[]> = {
     "pedro-porro",
     "micky-van-de-ven",
     "jan-paul-van-hecke",
-    "djed-spence",
+    "destiny-udogie",
     "sandro-tonali",
     "mateus-fernandes",
     "james-maddison",
