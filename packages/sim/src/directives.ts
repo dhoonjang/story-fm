@@ -1,6 +1,25 @@
-import type { AttributeAxis, Player, PlayerDirectiveKind } from "@story-fm/domain";
-import { PLAYER_DIRECTIVE_KO, positionGroupOf, positionGroupOfPlayer } from "@story-fm/domain";
+import type {
+  AttributeAxis,
+  DirectiveIntensity,
+  Player,
+  PlayerDirectiveKind,
+} from "@story-fm/domain";
+import {
+  anchorOf,
+  DIRECTIVE_INTENSITY_KO,
+  PLAYER_DIRECTIVE_KO,
+  positionGroupOf,
+  positionGroupOfPlayer,
+} from "@story-fm/domain";
 import type { LineupSlot } from "./strength-packet";
+import {
+  addFocused,
+  laneOfX,
+  zeroCells,
+  type GridBand,
+  type GridLane,
+  type LaneCells,
+} from "./zone-grid";
 
 /**
  * 개인 지시 — **감독의 말이 특정 선수·특정 상대에 닿는 자리.**
@@ -21,7 +40,16 @@ import type { LineupSlot } from "./strength-packet";
  * 4. **선수의 역량을 탄다** — 그 지시를 소화할 능력이 없으면 **이득이 줄고 대가가
  *    커진다.** 지구력 없는 풀백에게 "계속 올라가"는 앞도 못 만들고 뒤만 연다.
  * 5. **발동하면 문장으로 드러난다** — 노트가 `tactical.notes`로 올라가 중계·감독
- *    화면이 그대로 인용한다.
+ *    화면이 그대로 인용한다. **걸리지 않은 지시도 마찬가지다**: 조용히 버리면
+ *    그 노트를 인용하는 중계도 화면도 걸리지 않은 지시가 걸린 줄 안다.
+ *
+ * ## 판과 같은 해상도로 실린다
+ *
+ * 산출은 존 셋이 아니라 **밴드×레인 아홉 칸**(`LaneCells`)이다 (match.md §1.7).
+ * 존 셋으로만 실으면 오른쪽 풀백을 마크하든 왼쪽 윙어를 마크하든 상대 수비 줄
+ * 전체가 같은 비율로 깎여, 키포인트가 "사카(88) vs 무뇨스(61)"까지 짚어 준
+ * 정밀함이 결과에서 사라진다. 칸은 `strength-packet.ts`에서 두 갈래로 접힌다 —
+ * **줄 평균은 존 델타로, 줄 안의 편차는 격자로.**
  */
 
 /** 지시를 받은 선수와 겨냥한 상대 — 배치(`TacticAssignment.directive`)에서 조립된다 */
@@ -31,9 +59,12 @@ export interface DirectiveInput {
   kind: PlayerDirectiveKind;
   /** 겨냥한 상대 선수 (man_mark·press_target) */
   targetId?: string;
+  /** 얼마나 세게 — 없으면 `normal`이라 세기를 보내지 않는 호출이 예전 수를 그대로 낸다 */
+  intensity?: DirectiveIntensity;
 }
 
-type Zone = "attack" | "midfield" | "defense";
+/** 지시가 이득·대가를 얹는 줄 — 격자의 밴드와 같은 낱말이다 */
+type Zone = GridBand;
 
 /**
  * ⚙️ **개인 지시의 계수는 전부 여기 있다** — 밸런스 조정은 이 표만 보면 된다.
@@ -43,8 +74,29 @@ type Zone = "attack" | "midfield" | "defense";
  * 순손실로 뒤집힌다 — 그게 "지시가 공짜가 아니다"의 실제 모양이다.
  */
 export const DIRECTIVE_TUNING = {
-  /** 지시 하나가 존에 얹는 **이득의 상한** — 전술 상성(3~8%)과 같은 자리 */
+  /**
+   * 지시 하나가 존에 얹는 **이득의 상한** — 전술 상성(3~8%)과 같은 자리.
+   * 세기 배수를 함께 탄다(`INTENSITY`) — 상한이 고정이면 잘하는 선수에게 세게 거는
+   * 것이 아무 뜻이 없다.
+   */
   GAIN_CAP: 0.08,
+  /**
+   * **지시의 세기** — 종류가 접는 것은 *무엇을*이고 이 축이 남기는 것은 *얼마나*다.
+   *
+   * "붙어서 아예 지워버려"와 "따라가진 말고 견제만"은 같은 `man_mark`지만 같은
+   * 지시가 아니다. 정도까지 다섯 종에 접히면 **자연어 인터페이스의 폭이 결과에서
+   * 사라진다.**
+   *
+   * 셋이 함께 걸리는 것이 규칙이다: 세게 걸면 이득만 크는 것이 아니라 대가도
+   * 다리도 함께 커진다. 대가가 이득보다 덜 기우는 것은(1.35 < 1.4) 세게 거는 쪽에
+   * 아주 약간의 순이득을 남겨 두기 위한 것이고, 그 몫은 `drain`이 회수한다 —
+   * 세게 건 선수는 먼저 멈춘다.
+   */
+  INTENSITY: {
+    light: { gain: 0.6, cost: 0.75, drain: 0.9 },
+    normal: { gain: 1, cost: 1, drain: 1 },
+    heavy: { gain: 1.4, cost: 1.35, drain: 1.2 },
+  } satisfies Record<DirectiveIntensity, { gain: number; cost: number; drain: number }>,
   /** 한 경기에 유효한 지시 수 — 넘으면 선수단이 다 소화하지 못한다 */
   MAX_EFFECTIVE: 3,
   /** 능력을 소화력으로 옮길 때의 기준점 — 이 값이 1.0(평균적인 소화) */
@@ -190,12 +242,16 @@ const DIRECTIVE_EFFECTS: Record<PlayerDirectiveKind, DirectiveSpec> = {
   },
 };
 
+/** 세기 배수 — 세기를 안 보낸 지시는 `normal`이라 예전과 같은 수를 낸다 */
+const intensityOf = (intensity?: DirectiveIntensity) =>
+  DIRECTIVE_TUNING.INTENSITY[intensity ?? "normal"];
+
 /**
  * 이 지시가 얹는 **체력 소모 배율** — 지시가 없으면 1(중립)이다.
  * `conditionDrain`의 마지막 인자로 들어간다 (`match-engine.ts`의 구간 정산).
  */
-export function directiveDrain(kind?: PlayerDirectiveKind): number {
-  return kind ? DIRECTIVE_EFFECTS[kind].drain : 1;
+export function directiveDrain(kind?: PlayerDirectiveKind, intensity?: DirectiveIntensity): number {
+  return kind ? DIRECTIVE_EFFECTS[kind].drain * intensityOf(intensity).drain : 1;
 }
 
 const clamp = (lo: number, hi: number, v: number) => Math.max(lo, Math.min(hi, v));
@@ -225,6 +281,21 @@ function duelAptitude(rate: number): number {
   return clamp(APTITUDE_MIN, APTITUDE_MAX, rate / DUEL_EVEN);
 }
 
+/**
+ * 지시 하나가 얹는 이득 — **상한도 세기 배수를 탄다.**
+ *
+ * 상한을 고정해 두면 잘하는 선수에게 세게 거는 것이 아무 뜻이 없다: 소화력이 좋아
+ * 이미 상한에 붙은 지시는 세기를 올려도 같은 수를 낸다. 상한이 함께 움직여야
+ * `heavy`가 실제로 더 큰 이득을 낼 수 있고(0.112), `light`는 더 못 낸다(0.048).
+ */
+function gainOf(
+  spec: DirectiveSpec,
+  apt: number,
+  mul: (typeof DIRECTIVE_TUNING.INTENSITY)[DirectiveIntensity],
+): number {
+  return Math.min(DIRECTIVE_TUNING.GAIN_CAP * mul.gain, spec.gain * mul.gain * apt);
+}
+
 /** 소화력이 대가에 걸리는 배율 */
 function costScale(spec: DirectiveSpec, gainApt: number, attrs: Player["attributes"]): number {
   const apt = spec.costBy ? aptitude(attrs, spec.costBy) : gainApt;
@@ -241,101 +312,185 @@ function duelReadOf(rate: number): string {
 }
 
 export interface DirectiveOutcome {
-  /** 지시를 내린 쪽의 존 조정 — 대가가 주로 여기 남는다 */
-  us: Record<Zone, number>;
-  /** 겨냥당한 쪽의 존 조정 */
-  them: Record<Zone, number>;
+  /**
+   * 지시를 내린 쪽의 **칸 조정** — 대가가 주로 여기 남는다.
+   * 우리 팀 전술판의 방향으로 적힌다.
+   */
+  us: LaneCells;
+  /**
+   * 겨냥당한 쪽의 **칸 조정** — 그 팀 자신의 방향으로 적힌다.
+   * 홈의 왼쪽이 원정의 오른쪽과 만나는 뒤집기는 `zoneGrid`가 이미 한다.
+   */
+  them: LaneCells;
   notes: string[];
 }
 
-const zeroZones = (): Record<Zone, number> => ({ attack: 0, midfield: 0, defense: 0 });
+/** 지시가 실릴 칸 — 밴드는 맡은 자리가, 레인은 전술판 좌표가 정한다 */
+interface Cell {
+  band: Zone;
+  lane: GridLane;
+}
 
 /**
- * 대가를 우리 존에 적는다 — **중원에 떨어진 몫은 공격에도 번진다**(`COST_SPILL`).
+ * 대가를 우리 칸에 적는다 — **중원에 떨어진 몫은 공격에도 번진다**(`COST_SPILL`).
  * 중원만 깎으면 xg가 그걸 읽지 않아 그 지시가 결과적으로 공짜가 된다.
+ * 번짐도 **같은 레인**으로 간다 — 그 측면의 연결이 끊기면 그 측면의 마무리가 준다.
  */
-function payCost(out: DirectiveOutcome, zone: Zone, cost: number): void {
-  out.us[zone] -= cost;
-  if (zone === "midfield") out.us.attack -= cost * DIRECTIVE_TUNING.COST_SPILL;
-}
-
-/** 배치 포지션 → 존. 선수의 주 포지션이 아니라 "맡은 자리"가 기준이다 */
-function zoneOfSlot(slot: LineupSlot): Zone {
-  const group = positionGroupOf(slot.position) ?? positionGroupOfPlayer(slot.player);
-  return group === "FW" ? "attack" : group === "DF" || group === "GK" ? "defense" : "midfield";
+function payCost(out: DirectiveOutcome, at: Cell, cost: number): void {
+  addFocused(out.us, at.band, at.lane, -cost);
+  if (at.band === "midfield")
+    addFocused(out.us, "attack", at.lane, -cost * DIRECTIVE_TUNING.COST_SPILL);
 }
 
 /**
- * 개인 지시 → 존 조정.
+ * 배치 → 칸. 선수의 주 포지션이 아니라 **"맡은 자리"**가 기준이다.
  *
- * 대상이 그라운드에 없으면(교체·미출전·지어낸 id) 그 지시는 조용히 버려진다 —
- * 코어가 사실을 확인하는 자리이고, 없는 사람을 마크할 수는 없다.
+ * 레인은 실제 전술판 x가 정한다 — 좌표가 없는 배치(채팅으로 세운 라인업, 옛
+ * 세이브)는 그 포지션의 기본 좌표로 읽는다. 어느 슬롯이든 좌표가 하나는 있으므로
+ * 지시는 **언제나 레인을 가진다**: 레인 없이 세 칸에 고르게 실리는 갈래
+ * (`addFocused`의 `lane === undefined`)는 표적이 팀 전체인 공략의 것이다.
+ */
+function cellOfSlot(slot: LineupSlot): Cell {
+  const group = positionGroupOf(slot.position) ?? positionGroupOfPlayer(slot.player);
+  const band: Zone =
+    group === "FW" ? "attack" : group === "DF" || group === "GK" ? "defense" : "midfield";
+  return { band, lane: laneOfX(slot.point?.x ?? anchorOf(slot.position).x) };
+}
+
+/**
+ * 개인 지시 → **아홉 칸의 조정.**
+ *
+ * 판에 닿지 못한 지시(넷째부터, 그라운드에 없는 선수, 사라진 표적)는 **버리되
+ * 그 사실을 노트로 남긴다.** 코어가 사실을 확인하는 자리이고 — 없는 사람을 마크할
+ * 수는 없다 — 조용히 버리면 노트를 인용하는 중계도 화면도 걸린 줄 안다.
  *
  * @param uptake 지시 적용률 — **이득에만** 곱한다 (대가는 온전히 남는다)
+ * @param usBench 우리 벤치 — 걸리지 않은 지시의 **이름을 찾는 데만** 쓴다
+ * @param themBench 상대 벤치 — 교체로 나간 표적의 이름을 찾는 데만 쓴다
  */
 export function applyDirectives(
   directives: readonly DirectiveInput[] | undefined,
   usXI: readonly LineupSlot[],
   themXI: readonly LineupSlot[],
   uptake: number,
+  usBench?: readonly LineupSlot[],
+  themBench?: readonly LineupSlot[],
 ): DirectiveOutcome {
-  const out: DirectiveOutcome = { us: zeroZones(), them: zeroZones(), notes: [] };
+  const out: DirectiveOutcome = { us: zeroCells(), them: zeroCells(), notes: [] };
   if (!directives || directives.length === 0) return out;
 
   const byId = (slots: readonly LineupSlot[], id: string) => slots.find((s) => s.player.id === id);
+  /** 걸리지 않은 지시도 사람 이름으로 말한다 — id를 인용하는 노트는 감독이 못 읽는다 */
+  const nameIn = (slots: readonly LineupSlot[] | undefined, id: string) =>
+    slots?.find((s) => s.player.id === id)?.player.name;
+
   /**
    * **한 선수에게 하나까지, 팀 전체로 셋까지.** 배치(`TacticAssignment.directive`)가
    * 단수라 엔진은 한 선수에게 둘을 만들 수 없지만, 같은 지시를 세 번 적어 세 배로
    * 먹이는 길을 열어 두지 않는다.
+   *
+   * 넘친 지시는 노트를 남기고, **중복만 조용히 넘긴다** — 감독이 한 번만 내린 지시를
+   * 두고 "둘째는 안 걸렸다"고 설명하면 있지도 않은 지시를 있었던 것으로 만든다.
    */
   const seen = new Set<string>();
   const live: DirectiveInput[] = [];
+  /** 넘쳐서 못 걸린 지시의 노트 — 뒤에 붙여 노트가 감독이 내린 순서대로 읽히게 한다 */
+  const overflow: string[] = [];
   for (const d of directives) {
     if (seen.has(d.by)) continue;
     seen.add(d.by);
+    if (live.length >= DIRECTIVE_TUNING.MAX_EFFECTIVE) {
+      overflow.push(DROPPED_KO.overflow(nameIn(usXI, d.by) ?? nameIn(usBench, d.by)));
+      continue;
+    }
     live.push(d);
-    if (live.length === DIRECTIVE_TUNING.MAX_EFFECTIVE) break;
   }
 
   for (const d of live) {
     const me = byId(usXI, d.by);
-    if (!me) continue; // 벤치에 앉은 선수에게 내린 지시는 효력이 없다
+    if (!me) {
+      // 벤치에 앉은 선수에게 내린 지시는 효력이 없다
+      out.notes.push(DROPPED_KO.offPitch(nameIn(usBench, d.by)));
+      continue;
+    }
     const spec = DIRECTIVE_EFFECTS[d.kind];
+    const mul = intensityOf(d.intensity);
     const attrs = me.player.attributes;
     const name = me.player.name;
+    const mine = cellOfSlot(me);
+    /** 세기가 보통이 아니면 그 사실이 노트에 남는다 — 감독이 고른 정도가 결과에 있다 */
+    const tag =
+      d.intensity && d.intensity !== "normal" ? ` (${DIRECTIVE_INTENSITY_KO[d.intensity]})` : "";
 
     if (spec.duel) {
       const target = d.targetId ? byId(themXI, d.targetId) : undefined;
-      if (!target) continue; // 대상이 그라운드에 없다 — 지시가 성립하지 않는다
+      if (!target) {
+        // 대상이 그라운드에 없다 — 지시가 성립하지 않는다 (교체로 나갔거나 없는 id)
+        out.notes.push(
+          DROPPED_KO.goneTarget(name, d.targetId ? nameIn(themBench, d.targetId) : undefined),
+        );
+        continue;
+      }
       const rate = duel(
         meanOf(attrs, spec.duel.mine),
         meanOf(target.player.attributes, spec.duel.theirs),
       );
       const apt = duelAptitude(rate);
-      const bite = Math.min(DIRECTIVE_TUNING.GAIN_CAP, spec.gain * apt) * uptake;
-      const themZone = zoneOfSlot(target);
-      // 상대를 지운다 — 잘 붙을수록 크게, 그래도 상한을 넘지 않는다
-      out.them[themZone] -= bite;
-      // 공급을 끊으면 마무리도 준다 (xg는 공격·수비 존만 본다)
-      if (themZone !== "attack") out.them.attack -= bite * DIRECTIVE_TUNING.MARK_SPILL;
+      const bite = gainOf(spec, apt, mul) * uptake;
+      /**
+       * 상대를 지운다 — 잘 붙을수록 크게, 그래도 상한을 넘지 않는다.
+       * **겨냥한 선수가 선 칸**이 깎인다: 오른쪽 풀백을 마크하면 그 팀의 그 자리가
+       * 얇아지고, 왼쪽 윙어를 마크하면 반대쪽이 얇아진다.
+       */
+      const theirs = cellOfSlot(target);
+      addFocused(out.them, theirs.band, theirs.lane, -bite);
+      // 공급을 끊으면 마무리도 준다 (xg는 공격·수비 존만 본다). 끊긴 것이 그 측면의
+      // 공급이므로 마무리가 주는 것도 **그 측면**이다
+      if (theirs.band !== "attack")
+        addFocused(out.them, "attack", theirs.lane, -bite * DIRECTIVE_TUNING.MARK_SPILL);
       /**
        * 본업을 덜 한다 — **대가는 소화율과 무관하다.** 버거운 상대를 붙잡느라
-       * 자리를 비우면 지우지도 못하고 자기 자리만 빈다.
+       * 자리를 비우면 지우지도 못하고 자기 자리만 빈다. 비는 것은 **내가 선 칸**이라
+       * 상대를 따라간 레인이 아니라 내가 떠난 레인이 열린다.
        */
-      payCost(out, zoneOfSlot(me), spec.cost * costScale(spec, apt, attrs));
-      out.notes.push(`${NOTE_KO[d.kind](name, target.player.name)} — ${duelReadOf(rate)}`);
+      payCost(out, mine, spec.cost * mul.cost * costScale(spec, apt, attrs));
+      out.notes.push(`${NOTE_KO[d.kind](name, target.player.name)} — ${duelReadOf(rate)}${tag}`);
       continue;
     }
 
     const apt = aptitude(attrs, spec.gainBy ?? []);
-    const gain = Math.min(DIRECTIVE_TUNING.GAIN_CAP, spec.gain * apt) * uptake;
-    const cost = spec.cost * costScale(spec, apt, attrs);
-    if (spec.gainZone !== "target") out.us[spec.gainZone] += gain;
-    payCost(out, spec.costZone === "own" ? zoneOfSlot(me) : spec.costZone, cost);
-    out.notes.push(`${NOTE_KO[d.kind](name)} — ${readOf(apt)}`);
+    const gain = gainOf(spec, apt, mul) * uptake;
+    const cost = spec.cost * mul.cost * costScale(spec, apt, attrs);
+    // 표적이 없는 지시는 이득도 대가도 **지시받은 선수의 레인**에 실린다 —
+    // 오른쪽 풀백이 올라가면 열리는 것은 오른쪽 뒷공간이다
+    if (spec.gainZone !== "target") addFocused(out.us, spec.gainZone, mine.lane, gain);
+    payCost(out, spec.costZone === "own" ? mine : { band: spec.costZone, lane: mine.lane }, cost);
+    out.notes.push(`${NOTE_KO[d.kind](name)} — ${readOf(apt)}${tag}`);
   }
+  out.notes.push(...overflow);
   return out;
 }
+
+/**
+ * **판에 닿지 못한 지시** — 조용히 버리면 거짓 성공이 된다.
+ *
+ * 이 노트가 없으면 `tactical.notes`를 인용하는 중계도 감독 화면도 걸리지 않은 지시를
+ * 걸린 것으로 읽고, GM은 그것을 전제로 다음 장면을 쓴다. 그래서 꼴이 하나다:
+ * **`무엇이 안 걸렸는가 — 왜`.** 한 줄만 읽어도 다시 내릴지 말지가 정해져야 한다.
+ *
+ * 이름을 못 찾는 갈래가 있는 것은 지어낸 id도 여기로 오기 때문이다 — 그때는 이름
+ * 없이 사실만 남긴다.
+ */
+const DROPPED_KO = {
+  overflow: (name?: string): string =>
+    `${name ? `${name}에게 내린 지시가` : "지시 하나가"} 판에 닿지 않았다 — 한 경기에 ${DIRECTIVE_TUNING.MAX_EFFECTIVE}개까지다`,
+  offPitch: (name?: string): string =>
+    name
+      ? `${name}은(는) 그라운드에 없어 지시가 걸리지 않았다`
+      : `그라운드에 없는 선수에게 내린 지시라 걸리지 않았다`,
+  goneTarget: (by: string, target?: string): string =>
+    `${by}의 지시가 걸리지 않았다 — ${target ? `${target}은(는) 이미 그라운드를 떠났다` : "겨냥한 상대가 그라운드에 없다"}`,
+} as const;
 
 /**
  * 지시가 그라운드에서 무엇으로 보이는가 — 감독 화면·중계가 그대로 인용한다.

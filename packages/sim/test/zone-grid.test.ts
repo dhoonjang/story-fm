@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildStrengthPacket, zoneGrid, GRID_BANDS, GRID_LANES } from "@story-fm/sim";
-import { DEFAULT_TACTICS, type TacticsSpec } from "@story-fm/domain";
+import { DEFAULT_TACTICS, type DirectiveIntensity, type TacticsSpec } from "@story-fm/domain";
 import { makeSide } from "./helpers";
 import type { SideInput } from "@story-fm/sim";
 
@@ -110,5 +110,69 @@ describe("판세 격자 — 존을 좌·중·우로 쪼갠다", () => {
     const mean = (g: typeof grid) =>
       GRID_LANES.reduce((s, lane) => s + cellOf(g, "attack", lane).home, 0) / GRID_LANES.length;
     expect(mean(grid)).toBeCloseTo(mean(flat), 6);
+  });
+});
+
+/**
+ * 개인 지시·공략이 칸으로 오는 길 (match.md §1.7). 지키는 것은 둘이다 —
+ * **줄 합이 보존된다**(지시의 존 델타가 격자에서 두 번 세어지지 않는다)와
+ * **겨냥한 레인이 결과에 남는다**(오른쪽을 마크하면 오른쪽이 깎인다).
+ */
+describe("지시가 칸으로 실린다", () => {
+  /** 상대의 한 선수를 전담 마크한 판 — 겨냥한 자리는 인자로 고른다 */
+  const markingPacket = (targetId: string, intensity?: DirectiveIntensity) => {
+    const us = makeSide("us", 78);
+    us.directives = [
+      { by: "us-mf2", kind: "man_mark", targetId, ...(intensity ? { intensity } : {}) },
+    ];
+    return buildStrengthPacket(us, makeSide("them", 78));
+  };
+
+  /**
+   * 이것이 이슈 #87이 지키라고 한 불변식이다 — 칸을 존과 함께 밀면 그 전력이 두 번
+   * 세어지고, 격자가 화면과 다른 말을 하게 된다.
+   */
+  it("지시가 걸려도 각 줄 세 칸의 평균은 그 줄의 존 전력과 같다", () => {
+    // them-df4 = LB(x 11), them-df1 = RB(x 89) — 왼쪽 풀백을 지운다
+    const packet = markingPacket("them-df4", "heavy");
+    const grid = zoneGrid(packet);
+    for (const band of GRID_BANDS) {
+      const meanOf = (side: "home" | "away") =>
+        GRID_LANES.reduce((s, lane) => s + cellOf(grid, band, lane)[side], 0) / GRID_LANES.length;
+      expect(meanOf("home")).toBeCloseTo(packet.home.zones[band], 6);
+    }
+    // 겨냥당한 쪽도 마찬가지다 — 거울로 뒤집힌 줄에서 확인한다
+    for (const band of GRID_BANDS) {
+      const facing = band === "attack" ? "defense" : band === "defense" ? "attack" : "midfield";
+      const mean =
+        GRID_LANES.reduce((s, lane) => s + cellOf(grid, facing, lane).away, 0) / GRID_LANES.length;
+      expect(mean).toBeCloseTo(packet.away.zones[band], 6);
+    }
+  });
+
+  /**
+   * 완료 조건 1 — 같은 지시라도 겨냥한 선수가 선 레인에 따라 다른 칸이 움직인다.
+   * 예전에는 존 델타 하나였으므로 두 판이 완전히 같은 격자를 냈다.
+   */
+  it("같은 마크라도 겨냥한 풀백이 선 레인이 깎인다", () => {
+    const left = zoneGrid(markingPacket("them-df4"));
+    const right = zoneGrid(markingPacket("them-df1"));
+    /**
+     * 상대 수비의 **왼쪽** 칸은 홈 기준 `attack:right`의 `away` 값이다 —
+     * 홈의 오른쪽 공격이 원정의 왼쪽 수비와 만난다.
+     */
+    const theirDefense = (grid: ReturnType<typeof zoneGrid>, lane: "left" | "right") =>
+      cellOf(grid, "attack", lane === "left" ? "right" : "left").away;
+
+    expect(theirDefense(left, "left")).toBeLessThan(theirDefense(right, "left"));
+    expect(theirDefense(right, "right")).toBeLessThan(theirDefense(left, "right"));
+  });
+
+  it("세기가 세면 그 칸이 더 깎인다", () => {
+    const theirLeft = (packet: ReturnType<typeof buildStrengthPacket>) =>
+      cellOf(zoneGrid(packet), "attack", "right").away;
+    expect(theirLeft(markingPacket("them-df4", "heavy"))).toBeLessThan(
+      theirLeft(markingPacket("them-df4", "light")),
+    );
   });
 });

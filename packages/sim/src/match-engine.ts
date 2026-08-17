@@ -421,7 +421,8 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
    */
   const drainOf = new Map<string, number>(
     [...(directives?.home ?? []), ...(directives?.away ?? [])].map(
-      (d) => [d.by, directiveDrain(d.kind)] as const,
+      // 세기도 다리에 걸린다 — 세게 걸수록 얻는 것만 크는 것이 아니다
+      (d) => [d.by, directiveDrain(d.kind, d.intensity)] as const,
     ),
   );
   const events: MatchEvent[] = [];
