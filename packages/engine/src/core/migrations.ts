@@ -1,0 +1,214 @@
+import { clampCondition, migratePassStyle, migrateSignature } from "@story-fm/domain";
+
+/**
+ * 옛 세이브를 지금 모양으로 옮기는 함수들 — **로드의 두 번째 걸음**
+ * (→ [docs/data/game-state.md](../../../../docs/data/game-state.md) §6).
+ *
+ * 전부 순수하고 **멱등**하다. 같은 세이브를 두 번 열어도 값이 두 번 움직이지
+ * 않도록 저마다 "이미 옮겼는가"를 값이나 마커로 먼저 묻는다 — 로드는 한 세이브에
+ * 몇 번이고 다시 일어나는 일이라, 한 번만 도는 것을 보장할 자리가 여기밖에 없다.
+ *
+ * 매개변수는 `GameState`가 아니라 **그 마이그레이션이 실제로 읽는 축**이다.
+ * 세계를 세우지 않고 손으로 쓴 몇 줄짜리 세이브로 전/후를 고정할 수 있어야 한다
+ * (`createTestGame()`은 호출당 1초다 — AGENTS.md §5).
+ */
+
+/**
+ * 없으면 빈 배열로 채우는 필드 — 순수한 목록·이력이라 "비어 있음"이 곧 유효한
+ * 초기 상태다. 반대로 `players`·`teams`처럼 없으면 세이브가 깨진 것은 필수 테이블
+ * 검사가 막는다 (`persistence.ts`).
+ *
+ * ⚠️ `GameState`에 새 배열을 추가하면 **여기에도 넣어야 한다** — 안 그러면 옛
+ * 세이브에서 `undefined`로 남아 첫 접근에서 터진다.
+ */
+const ARRAY_FIELDS = [
+  "trainingSessions",
+  "negotiations",
+  "injuries",
+  "bookings",
+  "suspensions",
+  "transfers",
+  "growthLog",
+  "seasonStats",
+  "issues",
+  "euroEntrants",
+  "seasonRecords",
+  "trophies",
+  "achievements",
+  "narrative",
+  "chat",
+  "scoutReports",
+  "settlingEvents",
+  "transferList",
+  "playerTraining",
+  "roleMemory",
+  "pressConferences",
+  "aiDeals",
+  "leagueHistory",
+  // 재정 보고서는 다음 달 1일부터 쌓인다. 옛 원장 엔트리는 category가 없어
+  // 집계에서 "기타"로 읽힌다 (finance.ts categoryOf)
+  "financeReports",
+] as const;
+
+/** 스키마 진화 — 나중에 붙은 테이블은 없으면 빈 배열이다 (세이브 호환 원칙) */
+export function fillEmptyTables(save: Record<string, unknown>): void {
+  for (const key of ARRAY_FIELDS) save[key] ??= [];
+}
+
+interface ManagerAxesSave {
+  manager?: { attributes?: Record<string, unknown> };
+  managerXP?: Record<string, unknown>;
+}
+
+/**
+ * 감독 능력치 4축 → 5축 (`media` → `analysis`, `training` 추가).
+ *
+ * 새 필드를 채우는 것뿐이라 세이브 버전을 올리지 않는다. 미디어는 **평판**에
+ * 그대로 남아 있으므로 그쪽은 건드리지 않는다.
+ */
+export function migrateManagerAxes(save: ManagerAxesSave): void {
+  const move = (rec: Record<string, unknown> | undefined, fill: number) => {
+    if (!rec) return;
+    if (rec.analysis === undefined) rec.analysis = rec.media ?? fill;
+    if (rec.training === undefined) rec.training = fill;
+    delete rec.media;
+  };
+  move(save.manager?.attributes, 50);
+  move(save.managerXP, 0);
+}
+
+interface SquadLevelSave {
+  players: Array<{
+    id: string;
+    teamId: string;
+    squadLevel?: "first" | "reserve";
+    attributes: { overall: number };
+  }>;
+  teams: ReadonlyArray<{ id: string }>;
+  tactics: ReadonlyArray<{ teamId: string; assignments: ReadonlyArray<{ playerId: string }> }>;
+}
+
+/** `squadLevel` 도입 전 세이브가 1군으로 세우는 인원 — 전술 배치 선수를 포함한다 */
+const LEGACY_FIRST_TEAM = 25;
+
+/**
+ * `squadLevel` 도입 전 v6 세이브 호환 — 전술 배치 선수와 OVR 상위 25명을 1군으로,
+ * 나머지를 2군으로 분류한다.
+ *
+ * 한 명이라도 미분류가 있을 때만 돈다. 아래 루프는 팀마다 전 선수를 훑으므로
+ * (169팀 × 5,700명) 이미 옮긴 세이브에서도 매 로드 60만 번을 비교하고 있었다.
+ */
+export function migrateSquadLevels(save: SquadLevelSave): void {
+  if (save.players.every((player) => player.squadLevel !== undefined)) return;
+  for (const team of save.teams) {
+    const roster = save.players.filter((player) => player.teamId === team.id);
+    if (roster.every((player) => player.squadLevel !== undefined)) continue;
+    const assigned = save.tactics
+      .find((tactics) => tactics.teamId === team.id)
+      ?.assignments.map((assignment) => assignment.playerId);
+    const first = new Set(assigned ?? []);
+    for (const player of [...roster].sort((a, b) => b.attributes.overall - a.attributes.overall)) {
+      if (first.size >= LEGACY_FIRST_TEAM) break;
+      first.add(player.id);
+    }
+    for (const player of roster) player.squadLevel = first.has(player.id) ? "first" : "reserve";
+  }
+}
+
+interface PassStyleSave {
+  /** `passStyle`이 `unknown`인 것이 이 마이그레이션의 전제다 — 옛 값은 문자열이다 */
+  tactics: ReadonlyArray<{
+    spec: { passStyle: unknown };
+    drilled?: Array<{ signature: string }>;
+  }>;
+}
+
+/**
+ * 패스 스타일이 세 갈래 문자열에서 1~5 눈금으로 폈다 — 옛 세이브의 값을 옮긴다.
+ *
+ * 지문(`drilled.signature`)에도 들어 있으므로 적응도 기억까지 함께 옮겨야
+ * "익힌 전술로 돌아왔는데 처음 보는 전술" 취급을 받지 않는다.
+ */
+export function migratePassStyles(save: PassStyleSave): void {
+  for (const tactics of save.tactics) {
+    tactics.spec.passStyle = migratePassStyle(tactics.spec.passStyle);
+    for (const memory of tactics.drilled ?? []) {
+      memory.signature = migrateSignature(memory.signature);
+    }
+  }
+}
+
+interface FormScaleSave {
+  players: ReadonlyArray<{ state: { form: number } }>;
+  formUnitScale?: boolean;
+}
+
+/** 옛 폼 눈금의 폭 — −3~3 정수 7단계를 −1~1로 나누는 값 */
+const LEGACY_FORM_SPAN = 3;
+
+/**
+ * 폼 축이 −3~3 정수에서 **−1~1 실수**로 바뀌었다 (form.ts).
+ *
+ * 값만 보고는 옛 세이브인지 알 수 없다 — 옛 "1"과 새 "1"이 같은 숫자인데 뜻이
+ * 정반대(약한 상승 vs 절정)다. 그래서 마커를 둔다. optional 필드라 세이브 버전을
+ * 올리지 않는다. 폼은 빠르게 변하는 값이라 한 번만 옮기면 된다.
+ */
+export function migrateFormScale(save: FormScaleSave): void {
+  if (save.formUnitScale) return;
+  for (const player of save.players) {
+    const scaled = Math.round((player.state.form / LEGACY_FORM_SPAN) * 1000) / 1000;
+    player.state.form = Math.max(-1, Math.min(1, scaled));
+  }
+  save.formUnitScale = true;
+}
+
+interface ConditionSave {
+  players: ReadonlyArray<{ state: { morale?: number; fatigue?: number; condition?: number } }>;
+}
+
+/** 옛 세이브에 값이 없을 때의 사기·피로 — 그 시절의 기본값 */
+const LEGACY_MORALE = 60;
+const LEGACY_FATIGUE = 20;
+/** 화면이 두 축을 하나로 보여 주던 가중치 — 저장값이 그 숫자를 이어받는다 */
+const FRESHNESS_WEIGHT = 0.6;
+const MORALE_WEIGHT = 0.4;
+
+/**
+ * 사기·피로 두 축이 **체력 하나**로 합쳐졌다 (player.ts).
+ *
+ * 옛 세이브의 두 값을 화면이 쓰던 그 공식으로 합친다 — 감독이 보던 숫자가 그대로
+ * 저장값이 되므로 로드 전후로 체감이 달라지지 않는다. 값이 이미 옮겨졌는지는
+ * `condition`의 유무로 안다(옛 세이브엔 없다).
+ */
+export function migrateConditions(save: ConditionSave): void {
+  for (const player of save.players) {
+    const legacy = player.state;
+    if (legacy.condition !== undefined) continue;
+    const freshness = 100 - (legacy.fatigue ?? LEGACY_FATIGUE);
+    legacy.condition = clampCondition(
+      freshness * FRESHNESS_WEIGHT + (legacy.morale ?? LEGACY_MORALE) * MORALE_WEIGHT,
+    );
+    delete legacy.morale;
+    delete legacy.fatigue;
+  }
+}
+
+interface MatchStatsSave {
+  pendingMatch?: {
+    ledger?: { stats?: Record<string, { scoringExpectation?: number }> };
+  } | null;
+}
+
+/**
+ * 중단된 경기의 선수별 기록에 **결정력 반영 기대 득점** 축이 붙었다.
+ *
+ * 경기 도중에 저장된 옛 세이브에는 그 칸이 없는데, 종료 정산은 라인업 전원의
+ * 값을 그냥 더한다 — 한 명만 비어도 팀 합계가 `NaN`이 되어 그대로 장부에 앉는다
+ * (`match/match-flow.ts`). 스키마의 기본값은 그 칸을 읽는 자리가 아니라 여기서
+ * 채워야 한다: 진행 중인 경기 장부는 스키마가 검사하는 테이블 밖이다.
+ */
+export function migrateMatchStats(save: MatchStatsSave): void {
+  const stats = save.pendingMatch?.ledger?.stats;
+  if (!stats) return;
+  for (const line of Object.values(stats)) line.scoringExpectation ??= 0;
+}

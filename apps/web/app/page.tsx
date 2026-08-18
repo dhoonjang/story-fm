@@ -18,7 +18,7 @@ interface GameSummary {
 interface UnreadableGame {
   readable: false;
   id: string;
-  reason: "version" | "corrupt";
+  reason: "version" | "corrupt" | "migration" | "schema";
   saveVersion: number | null;
   expected: number;
   createdAt: string;
@@ -29,9 +29,14 @@ type GameListEntry = ({ readable?: true } & GameSummary) | UnreadableGame;
 /**
  * 못 여는 이유 — 버전이면 **어느 버전이 어느 버전과 어긋났는지**까지 읽혀야 한다.
  * 파일이 자기 버전조차 말하지 못하는 경우가 있어 `saveVersion`은 비어 있을 수 있다.
+ *
+ * 넷은 로드가 어느 걸음에서 멈췄는가다. 앞의 둘은 파일이, 뒤의 둘은 **이 게임을
+ * 여는 코드**가 어긋난 것이라 감독이 손쓸 여지가 없다 — 그래서 문장이 다르다.
  */
 function unreadableReason(g: UnreadableGame): string {
   if (g.reason === "corrupt") return "파일이 손상돼 열 수 없습니다";
+  if (g.reason === "migration") return "이 세이브를 지금 버전으로 옮기다 멈췄습니다";
+  if (g.reason === "schema") return "저장된 내용이 지금 규격과 어긋납니다";
   const had = g.saveVersion === null ? "버전을 알 수 없는 세이브" : `세이브 버전 ${g.saveVersion}`;
   return `${had} · 지금 여는 버전 ${g.expected}`;
 }
