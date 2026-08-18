@@ -196,10 +196,10 @@ export function reviewUserSeat(state: GameState, digest: string[]): boolean {
   manager.lastWarnedOn = state.date;
 
   const sackable = standing.position >= userSackBottom(leagueSizeIn(state, state.userTeamId));
+  const expectation = boardExpectation(state, state.userTeamId);
   if (next < USER_WARNINGS_BEFORE_SACK || !sackable || board > USER_BOARD_FLOOR) {
     manager.boardWarnings = next;
     manager.reputation.board = Math.max(0, board - 6);
-    const expectation = boardExpectation(state, state.userTeamId);
     digest.push(
       `⚠️ 보드가 성적을 문제 삼았다 — 기대는 ${expectation.label}인데 현재 ${standing.position}위다` +
         ` (경고 ${next}/${USER_WARNINGS_BEFORE_SACK})`,
@@ -212,7 +212,7 @@ export function reviewUserSeat(state: GameState, digest: string[]): boolean {
     on: state.date,
     season: state.season,
     teamId: state.userTeamId,
-    reason: `기대(${boardExpectation(state, state.userTeamId).label})에 한참 못 미쳤다`,
+    reason: `기대 ${expectation.label} · 현재 ${standing.position}위`,
   };
   digest.push(`💼 경질 — ${teamName(state.userTeamId)}가 감독 계약을 해지했다`);
   pushNarrative(state, `${teamName(state.userTeamId)} 경질`, 5);
