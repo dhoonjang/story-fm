@@ -4,9 +4,8 @@ import {
   RATING_MAX,
   RATING_MIN,
   MATCH_ATTR_CAP,
-  applyMatchAttributes,
-  applyMatchFamiliarity,
-  applyMatchRatings,
+  matchRated,
+  settleMatchRating,
   MATCH_FAMILIARITY_MAX,
   MATCH_FAMILIARITY_MIN,
   type GameState,
@@ -100,7 +99,7 @@ function makeRateTool(
   return {
     name: "rate_players",
     description:
-      "출전한 선수 전원의 경기 평점과 한 줄 근거를 제출한다. 기준 평점에서 크게 벗어난 값은 코어가 잘라 낸다.",
+      "출전한 선수 전원의 경기 평점과 한 줄 근거를 **한 번에** 제출한다. 기준 평점에서 크게 벗어난 값은 코어가 잘라 낸다. 두 번째 제출은 반영되지 않는다.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -141,23 +140,15 @@ function makeRateTool(
           .join(" / ");
         return { ok: false, message: `평점 형식 오류 — ${issues}` };
       }
-      const { applied, skipped } = applyMatchRatings(state, matchId, parsed.data.ratings);
-      // 전술 체득 — 코어는 아무것도 올리지 않았다. 여기가 유일한 상승 경로다
-      applyMatchFamiliarity(
-        state,
-        parsed.data.ratings
-          .filter((r) => r.drill !== undefined)
-          .map((r) => ({ playerId: r.playerId, gain: r.drill! })),
-      );
-      // 능력치 — 훈련 결산과 같은 규칙(`awardAttribute`)을 탄다
-      applyMatchAttributes(
-        state,
-        parsed.data.ratings.map((r) => ({
-          playerId: r.playerId,
-          attribute: r.attribute ?? null,
-          attributeStep: r.attributeStep ?? 1,
-        })),
-      );
+      // 평점·전술 적응도·능력치는 한 표식 아래 한 번만 — 코어가 두 번째 호출을 막는다
+      const { applied, skipped, already } = settleMatchRating(state, matchId, parsed.data.ratings);
+      if (already) {
+        // ok: false로 답하면 모델이 도구 루프를 한 바퀴 더 돈다
+        return {
+          ok: true,
+          message: "이 경기의 평점은 이미 반영됐습니다 — 다시 제출하지 마세요",
+        };
+      }
       if (applied === 0) {
         return {
           ok: false,
@@ -198,7 +189,7 @@ export async function rateMatchPerformances(
         tools: [makeRateTool(state, brief.matchId, (n) => (applied = n))],
       });
     },
-    () => applied > 0, // 이미 평점이 박혔으면 다시 부르지 않는다
+    () => matchRated(state, brief.matchId), // 장부에 표식이 섰으면 다시 부르지 않는다
   ).catch(anchorStands("rater:match"));
   return { applied };
 }
