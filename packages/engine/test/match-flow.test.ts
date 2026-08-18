@@ -891,9 +891,10 @@ describe("감독 경기 마감의 대칭 (match.md §6)", () => {
     closeMatch(state);
 
     const player = userPlayers(state).find((p) => p.id === sub.id)!;
-    expect(player.positions.find((p) => p.position === out.position)?.proficiency).toBe(
-      seatBefore + MATCH_PROFICIENCY_GAIN,
-    );
+    // 저장된 값이 아니라 **조회한 값**으로 잰다 — 주발 보정은 저장에 들어가지 않고
+    // `positionProficiency`가 읽을 때 얹는다 (player.md §8). 저장값으로 재면 좌우
+    // 자리(RCB·LCB)에서 그 보정만큼 어긋난다
+    expect(proficiencyAt(player, out.position)).toBe(seatBefore + MATCH_PROFICIENCY_GAIN);
     // 벤치에 걸려 있던 자리는 그대로다 — 그 자리에서 뛰지 않았다
     if (benchPosition && benchBefore !== null) {
       expect(proficiencyAt(player, benchPosition)).toBe(benchBefore);
