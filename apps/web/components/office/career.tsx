@@ -2,6 +2,7 @@
 
 import type { OfficeViews } from "@story-fm/engine";
 import { MANAGER_ATTRIBUTES, MANAGER_ATTRIBUTE_KO } from "@story-fm/domain";
+import { IconTrophy } from "@/components/icons";
 
 /**
  * 감독 능력치 5축 — **오각형**.
@@ -240,7 +241,10 @@ export function CareerView({
         {career.trophies.length === 0 && <div className="empty">아직 트로피가 없습니다</div>}
         {career.trophies.map((t, i) => (
           <div className="trophy" key={i}>
-            🏆 {t.competition} — 시즌 {t.season} ({t.teamName})
+            <IconTrophy size={16} />
+            <span>
+              {t.competition} — 시즌 {t.season} ({t.teamName})
+            </span>
           </div>
         ))}
       </div>

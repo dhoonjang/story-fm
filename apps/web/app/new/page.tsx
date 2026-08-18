@@ -64,7 +64,7 @@ export default function NewGamePage() {
       } catch {
         if (cancelled) return;
         if (attempt < 4) setTimeout(() => load(attempt + 1), 1500);
-        else setError("팀 목록을 불러오지 못했습니다 — 새로고침해 주세요");
+        else setError("팀 목록을 불러오지 못했습니다");
       }
     }
     load(0);
@@ -255,7 +255,6 @@ export default function NewGamePage() {
             {/* 능력치의 출처는 규칙이지 조작법이 아니다 — 적기 전에 알아야 한다 */}
             <span className="field-note">여기 적은 이력이 감독의 초기 능력치가 된다</span>
             <textarea
-              placeholder="예: K리그에서 뛰다 은퇴한 수비수. 데이터 분석 회사를 거쳐 지도자의 길로"
               value={background}
               onChange={(e) => setBackground(e.target.value)}
               data-testid="manager-background"

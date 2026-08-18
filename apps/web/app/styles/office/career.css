@@ -170,10 +170,18 @@
   gap: 8px;
 }
 .trophy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   background: var(--panel-2);
   border: 1px solid var(--gold);
   border-radius: var(--r-md);
   padding: 10px 14px;
+}
+/* 트로피 아이콘 — 테두리와 같은 금색이라 카드 하나가 한 색으로 읽힌다 */
+.trophy > svg {
+  flex-shrink: 0;
+  color: var(--gold);
 }
 .achv {
   background: var(--panel-2);

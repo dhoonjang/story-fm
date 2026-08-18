@@ -51,11 +51,11 @@ async function expectOvrConsistent(page: Page) {
     let compared = 0;
     for (const chip of chips) {
       if (!chip.name || !chip.ovr) continue;
-      // 칩은 **성만** 보여준다(`chipName`) — 명단의 전체 이름에서 마지막 낱말로 잇는다.
-      // 성이 겹치면 어느 행인지 알 수 없으므로 건너뛴다 (틀린 비교보다 안 하는 게 낫다)
+      // 칩과 명단은 **같은 이름**을 적는다 — 화면이 이름을 줄이지 않으므로 그대로 잇는다.
+      // 동명이인이면 어느 행인지 알 수 없으므로 건너뛴다 (틀린 비교보다 안 하는 게 낫다)
       const matches = rows.filter((r) => {
         const full = (r.querySelector(".row-name")?.textContent ?? "").replace("Ⓒ", "").trim();
-        return full.split(/\s+/).at(-1) === chip.name;
+        return full === chip.name;
       });
       if (matches.length !== 1) continue;
       const row = matches[0]!;
@@ -510,7 +510,7 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
 
   // 전술판 — 편집 모드 없이 스쿼드 화면에서 바로 조작한다 (전술판 | 명단 2단)
   await openBoard(page);
-  // 조작법 안내 문구는 없다 (잠긴 경기 중에만 이유를 밝힌다)
+  // 조작법 안내 문구는 어디에도 없다 — 잠긴 판은 잔디 색이 빠지는 것으로 알린다
   await expect(page.getByTestId("board-hint")).toHaveCount(0);
   await expect(page.getByTestId("squad-table")).toBeVisible();
   await expect(page.locator(".pitch-slot")).toHaveCount(11);
@@ -669,9 +669,7 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
     .filter({ has: page.locator(".row-name", { hasText: inName }) })
     .getByTestId(/^swapin-/)
     .click();
-  await expect(
-    page.locator(".pitch-slot").filter({ hasText: inName.split(" ").pop() ?? "" }),
-  ).toHaveCount(1);
+  await expect(page.locator(".pitch-slot").filter({ hasText: inName })).toHaveCount(1);
   // 밀려난 선수는 전술판에서 빠진다 (중복 배치 없음)
   await expect(page.locator(".pitch-slot", { hasText: outName })).toHaveCount(0);
   // 방금 올라온 선수의 OVR이 칩과 명단에서 같은 숫자인가 — 여기가 가장 크게 갈렸다
@@ -757,7 +755,7 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
    * 명단 정렬이 지금 칸을 따라 실시간으로 바뀌기 때문이다 — 앞선 교체로 첫 행이
    * 방금 올라온 선수가 되면 자리 성분까지 함께 움직여 무엇을 재는지 흐려진다.
    */
-  const tracked = ((await page.getByTestId("slot-0").locator(".slot-name").innerText()) ?? "")
+  const tracked = ((await page.getByTestId("slot-0").locator(".slot-name").textContent()) ?? "")
     .replace("Ⓒ", "")
     .trim();
   const famOf = async () => {

@@ -25,7 +25,7 @@ test("LLM 실패 배너", async ({ page }) => {
       status: 502,
       contentType: "application/json",
       body: JSON.stringify({
-        error: "모델 서버가 혼잡합니다 — 잠시 후 다시 시도해 주세요.",
+        error: "모델 서버가 혼잡합니다",
         detail: '529 {"type":"overloaded_error"}',
       }),
     }),

@@ -52,7 +52,7 @@ export default function HomePage() {
       } catch {
         if (cancelled) return;
         if (attempt < 4) setTimeout(() => run(attempt + 1), 1200);
-        else setError("게임 목록을 불러오지 못했습니다 — 새로고침해 주세요");
+        else setError("게임 목록을 불러오지 못했습니다");
       }
     }
     run(0);

@@ -84,11 +84,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   return withGameLock(id, async () => {
     const state = loadGame(id);
     if (!state) return NextResponse.json({ error: "게임을 찾을 수 없습니다" }, { status: 404 });
+    // 서버는 **사실만** 낸다 — 그 다음에 무엇을 하라는 말은 GM이 쓴다
     if (state.phase === "match") {
-      return NextResponse.json(
-        { error: "경기 중에는 채팅으로 교체를 지시하세요" },
-        { status: 409 },
-      );
+      return NextResponse.json({ error: "경기 중 — 전술판 잠금" }, { status: 409 });
     }
 
     // 저장 전 모습 — 무엇이 달라졌는지는 결과로만 말한다 (`lineupChangeNote`)

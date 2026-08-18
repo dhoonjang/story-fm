@@ -10,12 +10,9 @@ import type { CSSProperties, PointerEvent, ReactNode, Ref } from "react";
  * 파일이 각자 세 줄을 그렸고, 이름 옆에 등번호를 붙이는 손질이 우리 판에만
  * 들어가 상대 판에서는 이름이 잘린 채로 남았다.
  *
- * 여기가 **구조**를 갖는다 — 그라운드의 선, 칩의 세 줄, 성만 남기는 규칙.
- * 상태(고른 칩·못 뛰는 선수·지친 상대)는 부르는 쪽이 클래스로 얹는다.
+ * 여기가 **구조**를 갖는다 — 그라운드의 선, 칩의 세 줄. 상태(고른 칩·못 뛰는
+ * 선수·지친 상대)는 부르는 쪽이 클래스로 얹는다.
  */
-
-/** 칩에는 성만 — 전체 이름은 두 줄로 접혀 판이 어수선해진다 */
-export const chipName = (name: string) => name.trim().split(/\s+/).at(-1) ?? name;
 
 /**
  * 눈금은 **기본 배치의 칩 자리에 맞춰** 잡았다 — 보통(3)일 때 수비 라인은 센터백
@@ -112,7 +109,7 @@ type PitchChipProps = {
   squadNumber?: number | null;
   roleTag?: PitchRoleTag | null;
   captain?: boolean;
-  /** 전체 이름 — 칩에는 성만 남는다. 빈 자리는 `null` */
+  /** 이름 — 칩에 그대로 선다(안 들어가면 접힌다). 빈 자리는 `null` */
   name: string | null;
   /** 이 자리에서 내는 전력 */
   ovr: ReactNode;
@@ -167,7 +164,7 @@ export function PitchChip({
       </span>
       <span className="slot-name">
         {captain && <b className="slot-cap">Ⓒ</b>}
-        {name ? chipName(name) : "—"}
+        {name || "—"}
       </span>
       <span className="slot-meta">
         <b>{ovr}</b>
