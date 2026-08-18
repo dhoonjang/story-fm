@@ -101,9 +101,6 @@ export interface PanelHint {
   more: number;
 }
 
-/** 문장 끝에 괄호로 달린 사족 — "…적응도 60 (+20, 익혀 둔 전술)" */
-const TRAILING_NOTE = /\s*\(([^()]+)\)\s*$/;
-
 /** 말풍선 한 장에 세울 줄 수 — 넘치면 접는다 */
 const HINT_LINES = 3;
 
@@ -148,8 +145,8 @@ export function hintsOfCall(call: ToolCallRecord): PanelHint[] {
 /**
  * 기록 하나가 세우는 줄들 — **코어가 항목으로 냈으면 항목마다 한 줄.**
  *
- * `brief`가 없는 것은 옛 세이브의 기록이다. 그때는 지금까지처럼 요약 문자열의
- * 첫 줄을 세우고 끝 괄호만 사족으로 뗀다 — 화면이 문장을 더 쪼개지는 않는다.
+ * `brief`가 없는 것은 옛 세이브의 기록이다. 그때는 요약 문자열의 첫 줄을 통째로
+ * 세운다 — 코어가 쓴 문장을 화면이 정규식으로 되쪼개 갈래를 만들지 않는다.
  */
 function linesOfCall(call: ToolCallRecord): HintLine[] {
   const brief = call.brief;
@@ -171,14 +168,7 @@ function linesOfCall(call: ToolCallRecord): HintLine[] {
   // 요약 첫 줄만 — 여러 줄짜리는 말풍선에 담기지 않는다
   const summary = (call.summary.split("\n")[0] ?? call.summary).trim();
   if (summary.length === 0) return [];
-  const note = TRAILING_NOTE.exec(summary)?.[1];
-  return [
-    {
-      skill: call.name,
-      text: summary.replace(TRAILING_NOTE, ""),
-      ...(note === undefined ? {} : { note }),
-    },
-  ];
+  return [{ skill: call.name, text: summary }];
 }
 
 /** 기록 하나의 지문 — 스킬 이름과 세운 줄들. 같은 지문은 두 번 세지 않는다 */

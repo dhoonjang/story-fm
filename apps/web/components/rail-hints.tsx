@@ -2,7 +2,6 @@
 
 import { Fragment } from "react";
 import type { HintLine, PanelHint, PanelKey } from "@/lib/panel-hints";
-import { abbreviateRoles, splitNote } from "@/lib/hint-text";
 import {
   IconBoard,
   IconCalendar,
@@ -92,12 +91,12 @@ function withDelta(text: string) {
  * 두 번 나오고 무엇이 값인지 안 읽힌다. 코어가 자리를 나눠 주므로(`SkillBriefItem`)
  * 화면은 자리마다 톤만 정하면 된다.
  *
- * 옛 기록의 사족(`brief` 없는 폴백)만 `splitNote`를 탄다 — 그건 문장 끝에서 떼어 낸
- * 것이라 수치와 설명이 한 덩어리다.
+ * 코어가 쓴 문자열은 다시 가르지 않는다 — 역할도 코어가 판과 같은 약칭(`CF`)으로 내고,
+ * `note`도 원자 하나다. `withDelta`만 남는데 그건 뜻을 만드는 것이 아니라 ±수치에
+ * 색을 주는 강조 표시다.
  */
 function HintRow({ line }: { line: HintLine }) {
   const Icon = SKILL_ICON[line.skill];
-  const note = line.note === undefined ? undefined : splitNote(abbreviateRoles(line.note));
   return (
     <span className="rail-hint-line">
       {/* 이어지는 항목은 같은 스킬의 계속이다 — 아이콘을 다시 세우면 건수가 부풀어 보인다 */}
@@ -105,13 +104,8 @@ function HintRow({ line }: { line: HintLine }) {
       <span className="rail-hint-what">
         {line.head !== undefined && <b className="rail-hint-lead">{line.head}</b>}
         {line.label !== undefined && <em className="rail-hint-label">{line.label}</em>}
-        <span className="rail-hint-value">{withDelta(abbreviateRoles(line.text))}</span>
-        {note && (
-          <em className="rail-hint-aside">
-            {note.fact !== "" && <span>{withDelta(note.fact)}</span>}
-            {note.aside}
-          </em>
-        )}
+        <span className="rail-hint-value">{withDelta(line.text)}</span>
+        {line.note !== undefined && <em className="rail-hint-aside">{withDelta(line.note)}</em>}
       </span>
     </span>
   );
