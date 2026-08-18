@@ -166,8 +166,8 @@ domain, and open a new one only when none does. The measurements are in
 - Never hide a failing test; report it as it is.
 
 **The gate is CI, not your machine.** `.github/workflows/ci.yml` runs
-`typecheck` · `lint` · `pnpm test` · `pnpm e2e`, and its verdict is what
-`/merge` waits on. **It does not run while the PR is a draft** — a branch still
+`typecheck` · `lint` · `format:check` · `pnpm test` · `pnpm e2e`, and its verdict
+is what `/merge` waits on. **It does not run while the PR is a draft** — a branch still
 being worked on burns runner minutes nobody reads. `/merge` marks the PR ready,
 and that is what starts the run it then watches. Every job must be green; a
 shard is not a sample.
@@ -180,8 +180,14 @@ path cannot tell a comment from a statement, and the cost of being wrong is a
 red change merged green. How the gate is sharded and what it runs on is
 `ci.yml`'s business; read it there when you are changing it.
 
-- **While working** — `pnpm typecheck` and `pnpm lint`, plus `pnpm test <path>`
-  for the file you just wrote. That is the whole local loop.
+- **While working** — `pnpm typecheck`, `pnpm lint` and `pnpm format`, plus
+  `pnpm test <path>` for the file you just wrote. That is the whole local loop.
+- **`pnpm typecheck` is three projects, not one** — `tsconfig.json` (packages ·
+  match-cli · vitest configs), `apps/web/tsconfig.json` (the Next app, its tests
+  and `next.config.ts`) and `tsconfig.e2e.json` (`e2e/` · `playwright.config.ts`).
+  They stay apart because the app and the specs need the DOM lib and the
+  deterministic core must not see it. A new top-level folder of `.ts` belongs to
+  one of the three — a folder no config includes is a folder nothing checks.
 - **Do not run the full `pnpm test` or `pnpm e2e` locally.** Both cost minutes
   the CI runner is already paying, and the suite you would run is the one CI
   runs. Run them locally only when the user asks, or when CI has failed and you
