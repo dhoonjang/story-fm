@@ -3,6 +3,7 @@ import {
   FREE_AGENT_TEAM,
   activeContract,
   answerOffer,
+  dealOdds,
   freeAgents,
   isClubTeam,
   loanPlayer,
@@ -84,10 +85,21 @@ describe("무소속 — 클럽이 아니라 클럽이 없는 상태", () => {
     const state = createTestGame(11);
     state.date = "2026-08-01";
     const target = spare(state);
-    const wage = activeContract(state, target.id)!.weeklyWage;
     releasePlayer(state, { playerId: target.id });
     expect(target.teamId).toBe(FREE_AGENT_TEAM);
 
+    /**
+     * **옛 계약 주급이 아니라 기대 주급을 부른다.** 방출 전 주급은 그 구단이
+     * 매기던 값이라 선수의 기대치와 무관하다 — 어린 유망주는 둘이 크게 벌어져,
+     * 옛 주급으로 부르면 성사 확률 0%가 나오고 시드가 바뀔 때마다 흔들린다.
+     */
+    const wage = dealOdds(state, {
+      playerId: target.id,
+      fee: 0,
+      weeklyWage: 0,
+      years: 2,
+      kind: "buy",
+    }).wageExpectation;
     const offered = sendOffer(state, { playerId: target.id, fee: 0, weeklyWage: wage, years: 2 });
     expect(offered.ok, offered.message).toBe(true);
     const negotiation = openNegotiationFor(state, target.id)!;
