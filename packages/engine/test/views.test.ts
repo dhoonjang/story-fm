@@ -3,6 +3,8 @@ import {
   applyFinanceEvent,
   buildOfficeViews,
   categoryOf,
+  cupProgressOf,
+  type BracketStageView,
   financeOf,
   humanizePlayerIds,
   setTraining,
@@ -13,6 +15,7 @@ import {
   addDays,
   diffDays,
   playerById,
+  type GameState,
 } from "@story-fm/engine";
 import { edgeOf } from "@story-fm/sim";
 import {
@@ -43,8 +46,14 @@ describe("오피스 뷰 — 스쿼드", () => {
         a.role === "starting" && !["GK", "ST", "CF", "LST", "RST", "LF", "RF"].includes(a.position),
     )!;
     const naturalRow = buildOfficeViews(state).squad.players.find((p) => p.id === target.playerId)!;
-    // 배치가 주 포지션과 같은 계열이면 같은 숫자를 두 번 보여주지 않는다
-    expect(naturalRow.slotOverall).toBeNull();
+    /**
+     * **같은 숫자를 두 번 보여주지 않는다** — 자리 값이 카드의 종합과 같으면 비운다.
+     * 종합은 그 선수가 **가장 잘 맞는 자리**의 값이라(player.md §4) 주 포지션에 선
+     * 선수라도 둘이 갈릴 수 있고, 갈릴 때는 보여 주는 것이 맞다.
+     */
+    for (const p of buildOfficeViews(state).squad.players) {
+      expect(p.slotOverall, p.name).not.toBe(p.overall);
+    }
 
     target.position = "ST";
     const moved = buildOfficeViews(state).squad.players.find((p) => p.id === target.playerId)!;
@@ -55,13 +64,17 @@ describe("오피스 뷰 — 스쿼드", () => {
     expect(moved.overall).toBe(naturalRow.overall);
   });
 
-  it("주 포지션의 자리 전력은 명단에 뜨는 OVR과 같다 (같은 공식·같은 안개 채널)", () => {
+  it("명단 OVR은 자리 목록의 최댓값이다 (같은 공식·같은 안개 채널)", () => {
+    /**
+     * 카드의 종합은 **가장 잘 맞는 자리에서 기본 역할로** 낸 값이다 (player.md §4).
+     * 자리 목록과 카드가 다른 공식이나 다른 안개 채널을 쓰면 어느 자리도 카드의
+     * 숫자에 닿지 못하거나 넘어선다 — 그 자리에서 어드민 표와 게임이 갈렸다.
+     */
     const state = createTestGame();
     const row = buildOfficeViews(state).squad.players.find(
       (p) => p.positions.length > 1 && p.position !== "GK",
     )!;
-    const natural = row.positions.find((x) => x.isNatural)!;
-    expect(natural.overall).toBe(row.overall);
+    expect(Math.max(...row.positions.map((x) => x.overall))).toBe(row.overall);
   });
 
   it("부상 중인 선수는 가용에서 빠진다", () => {
@@ -233,7 +246,7 @@ describe("오피스 뷰 — 재정·순위·커리어", () => {
       const raw = ledger.filter((e) => e.category === "player_wages" && e.date === row.date);
       expect(row.items).toHaveLength(raw.length);
       expect(row.amount).toBe(raw.reduce((sum, e) => sum + e.amount, 0));
-      expect(row.itemsRef).toBe("player");
+      expect(row.unit).toBe("명");
       // 명세는 큰 금액부터 — 화면이 첫 이름을 대표로 세운다
       const amounts = row.items!.map((i) => i.amount);
       expect([...amounts].sort((a, b) => b - a)).toEqual(amounts);
@@ -322,13 +335,90 @@ describe("오피스 뷰 — 재정·순위·커리어", () => {
   });
 });
 
+/**
+ * 컵 진행 — 순위표가 없는 대회의 "현재 위치". 브래킷을 뒤져 우리 자리를 찾는 일은
+ * 화면이 아니라 코어가 한다(§5). 다섯 갈래가 전부 같은 대진에서 갈리므로, 하나만
+ * 어긋나도 머리줄이 그럴듯하게 틀린다 — "8강 탈락"과 "탈락"은 화면에서 구분되지 않는다.
+ */
+describe("컵 진행", () => {
+  const tie = (ours: boolean, won: boolean | null) => ({
+    date: "2027-01-10",
+    home: "A",
+    away: "B",
+    score: null,
+    ours,
+    won,
+  });
+  const stage = (id: string, label: string, ties: ReturnType<typeof tie>[]): BracketStageView => ({
+    stage: id,
+    label,
+    ties,
+  });
+
+  it("추첨 전과 대진 밖은 다른 자리다", () => {
+    expect(cupProgressOf([])).toEqual({ stage: null, outcome: "undrawn" });
+    expect(cupProgressOf([stage("r32", "32강", [tie(false, null)])])).toEqual({
+      stage: null,
+      outcome: "out",
+    });
+  });
+
+  it("우리 대진이 마지막으로 선 단계를 읽는다", () => {
+    const bracket = [
+      stage("r16", "16강", [tie(true, true)]),
+      stage("qf", "8강", [tie(true, null)]),
+    ];
+    expect(cupProgressOf(bracket)).toEqual({ stage: "8강", outcome: "through" });
+  });
+
+  it("진 단계는 그 단계 이름과 함께 남는다", () => {
+    const bracket = [
+      stage("r16", "16강", [tie(true, true)]),
+      stage("qf", "8강", [tie(true, false)]),
+    ];
+    expect(cupProgressOf(bracket)).toEqual({ stage: "8강", outcome: "eliminated" });
+  });
+
+  it("결승을 이겨야만 우승이다 — 준결승 승리는 진출이다", () => {
+    const sf = stage("sf", "준결승", [tie(true, true)]);
+    expect(cupProgressOf([sf])).toEqual({ stage: "준결승", outcome: "through" });
+    expect(cupProgressOf([sf, stage("final", "결승", [tie(true, true)])])).toEqual({
+      stage: "결승",
+      outcome: "champion",
+    });
+  });
+});
+
 describe("id → 이름 치환", () => {
+  const state = createTestGame();
+
   it("humanizePlayerIds가 서사 속 선수 id를 이름으로 바꾼다", () => {
-    const state = createTestGame();
     const p = userPlayers(state)[0]!;
     const out = humanizePlayerIds(state, `@${p.id}: 준비됐습니다. ${p.id} 침투 시작.`);
     expect(out).toContain(p.name);
     expect(out).not.toContain(p.id);
+  });
+
+  /**
+   * 부분 문자열까지 치우면 짧은 id가 긴 id를 반쪽만 먹는다 — 이슈의 `rodri` ⊂
+   * `rodrigo-muniz`가 그 자리고, 동명이인을 가르는 `-<생년>` 꼬리도 같은 모양이다.
+   * 세계는 필요 없다 — 이 함수가 읽는 것은 `players`의 id와 이름뿐이다.
+   */
+  it("id는 낱말 경계에서만 바뀐다 — 짧은 id가 긴 id를 반쪽 먹지 않는다", () => {
+    const named = {
+      players: [
+        { id: "rodri", name: "로드리" },
+        { id: "rodrigo-muniz", name: "호드리구 무니스" },
+        { id: "rodri-2005", name: "로드리 주니어" },
+      ],
+    } as unknown as GameState;
+
+    expect(humanizePlayerIds(named, "rodrigo-muniz에게 rodri가 붙는다")).toBe(
+      "호드리구 무니스에게 로드리가 붙는다",
+    );
+    expect(humanizePlayerIds(named, "rodri-2005와 rodri는 다른 사람이다")).toBe(
+      "로드리 주니어와 로드리는 다른 사람이다",
+    );
   });
 });
 
@@ -472,6 +562,38 @@ describe("경기 화면 뷰", () => {
     expect(during).not.toBeNull();
     expect(during!.inDays).toBeGreaterThan(0);
     expect(during!.opponent).not.toBe(before.opponent);
+  });
+
+  /**
+   * 대회 탭의 "다음 경기"는 **그 대회의** 경기다. 팀 단위 값을 그대로 쓰면 챔스 탭
+   * 아래에 친선이 서고, 결과 없는 첫 경기를 그냥 집으면 경기 중에 "오늘 · 지금
+   * 상대"가 선다 — 결과는 종료 시점에 쓰이기 때문이다.
+   */
+  it("대회별 다음 경기는 그 대회의 것이고 진행 중인 경기를 건너뛴다", () => {
+    const state = createTestGame(9, "manutd");
+    // 친선은 대회 화면에 서지 않는다 — 대회의 경기를 치러야 그 탭이 센다
+    playPreseason(state);
+    advanceToMatchday(state);
+
+    const before = buildOfficeViews(state).competitions;
+    const league = before.list[0]!;
+    // 킥오프 전 — 오늘 그 경기가 리그의 다음 경기이자 팀의 다음 경기다
+    expect(league.nextMatch).not.toBeNull();
+    expect(league.nextMatch!.inDays).toBe(0);
+    expect(league.nextMatch!.opponent).toBe(before.nextMatch!.opponent);
+
+    startMatch(state);
+    const during = buildOfficeViews(state).competitions.list[0]!;
+    expect(during.nextMatch).not.toBeNull();
+    expect(during.nextMatch!.inDays).toBeGreaterThan(0);
+    expect(during.nextMatch!.opponent).not.toBe(league.nextMatch!.opponent);
+
+    // 그 대회의 일정에서 온 경기다 — 다른 대회(하물며 친선)의 경기를 세우지 않는다
+    const fixture = during.rounds
+      .flatMap((r) => r.matches)
+      .find((m) => m.ours && m.date === during.nextMatch!.date);
+    expect(fixture).toBeDefined();
+    expect([fixture!.homeName, fixture!.awayName]).toContain(during.nextMatch!.opponent);
   });
 
   it("체력은 누구도 값 하나로 서지 않는다 — 우리는 좁게, 상대는 넓게", () => {

@@ -587,6 +587,26 @@ describe("여름 휴가", () => {
     expect(strong.issues.length).toBeLessThanOrEqual(weak.issues.length);
   });
 
+  /**
+   * 지난 날짜는 휴가와 다른 이유로 막힌다 — tick이 이미 지나가 엔트리가 영영
+   * "예정"으로 남고, 같은 날짜가 조기 소집으로 흘러가면 대가가 부풀려 매겨진다.
+   */
+  it("지난 날짜에는 훈련을 잡지 못하고, 반려된 호출은 소집일을 옮기지 않는다", () => {
+    const state = createTestGame();
+    const before = squadReturnOf(state.calendar);
+    const past = addDays(state.date, -1);
+    const res = setTraining(state, {
+      sessions: [{ date: past, slot: "am", label: "복귀 훈련", focus: ["stamina"] }],
+      recallSquad: true,
+    });
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain(past);
+    expect(res.message).toContain(state.date);
+    // 검증이 승격보다 먼저다 — 반려하고 나서 소집일이 앞당겨져 있으면 대가만 남는다
+    expect(squadReturnOf(state.calendar)).toBe(before);
+    expect(state.issues.some((i) => i.note?.includes("휴가"))).toBe(false);
+  });
+
   it("소집일 이후는 그대로 잡힌다", () => {
     const state = createTestGame();
     const date = addDays(squadReturnOf(state.calendar), 2);

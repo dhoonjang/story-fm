@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ageOf, weightSlotOf } from "@story-fm/domain";
-import { CATALOG_AGE_REF, deriveAxes, derivePositions, overallFor } from "@story-fm/engine";
+import { ageOf, bestOverall, weightSlotOf } from "@story-fm/domain";
+import { CATALOG_AGE_REF, deriveAxes, derivePositions } from "@story-fm/engine";
 import { REAL_SQUADS, type RealPlayerSeed } from "../src/data/epl-players";
 import { INJURY_HISTORY } from "../src/data/injury-history";
 import { EU_SQUADS } from "../src/data/eu-squads";
@@ -33,7 +33,7 @@ import { MARKET_LEAGUE_SQUADS } from "../src/data/market-leagues";
 /** 파생 OVR — 카탈로그가 쓰는 경로 그대로 (catalog.ts `entryFromSeed`) */
 function overallOf(s: RealPlayerSeed): number {
   const axes = deriveAxes(s.nameEn, s.position, s, ageOf(s.birthdate, CATALOG_AGE_REF));
-  return overallFor(s.position, axes, derivePositions(s.nameEn, s.position));
+  return bestOverall(axes, derivePositions(s.nameEn, s.position));
 }
 
 interface SeedRow {
@@ -91,11 +91,16 @@ const wageGapLine = (v: ReturnType<typeof eplWageGapRows>[number]): string =>
 /**
  * 주급 백분위가 OVR 백분위보다 이만큼(%p) 높으면 **그 하나만으로** 조인 실패로 본다.
  *
- * 60인 근거: `026710e` 이전 시드에서 가장 큰 괴리가 **51.7%p**(칼빈 필립스 —
- * 실제로 과지급 계약이라 오조인이 아니다)였다. 과지급·부상 이탈·구계약 같은
- * 정상적인 괴리가 사는 띠가 거기까지이므로, 그 위에 여유 8을 얹었다.
+ * 정상적인 괴리(과지급·부상 이탈·구계약)의 최대치에 여유 8을 얹은 값이다. 그
+ * 최대치는 언제나 칼빈 필립스이고, 그는 실제로 과지급 계약이라 오조인이 아니다.
+ *
+ * ⚠️ **임계는 절대값이 아니라 모집단에 걸린다.** 이 축은 주급이 있는 EPL 선수만
+ * 보는데, 그 인원이 바뀌면 아무 데이터도 변하지 않아도 백분위가 통째로 움직인다 —
+ * 시드를 위키 1군 명단에 맞추며 735명이 667명이 되자 상위 여덟 명이 같은 순서로
+ * 나란히 5%p씩 올라갔고, 필립스가 56.5 → 61.3이 됐다. 그래서 시드 인원이 바뀌면
+ * **이 값도 함께 다시 잰다**: 최대 괴리 + 8.
  */
-const WAGE_OVR_GAP_LIMIT = 60;
+const WAGE_OVR_GAP_LIMIT = 70;
 
 /**
  * 한쪽 방향만 본다 — 주급이 높은데 OVR이 낮은 경우.
@@ -258,13 +263,13 @@ describe("잠재력 − OVR 간격 — 갱신이 6축만 갈고 잠재력을 그
  * 다른 셋과 달리 이 임계는 `026710e` **이전 데이터로 보정할 수 없었다**. 옛 시드에는
  * 키 실측이 2,957명 중 **118명**뿐이라(나머지는 `physiqueOf`가 능력치에서 파생했다)
  * 자리별 표본이 GK 10 · CB 20 · 필드 88명에 그친다. 그래서 임계는 **현재 시드의
- * 실측 2,414명 분포**와 실제 축구의 하한에서 왔다 — 그만큼 근거가 얇다.
+ * 실측 2,357명 분포**와 실제 축구의 하한에서 왔다 — 그만큼 근거가 얇다.
  *
  * 분포(현재 시드, 실측만):
  * ```
- * GK    n=264  최소 172 · p1 181 · p5 183 · 중앙 190
- * CB    n=466  최소 168 · p1 174 · p5 181 · 중앙 188
- * 필드  n=1684 최소 162 · p1 168 · p5 171 · 중앙 181
+ * GK    n=254  최소 179 · p1 181 · p5 183 · 중앙 190
+ * CB    n=454  최소 170 · p1 174 · p5 181 · 중앙 188
+ * 필드  n=1649 최소 162 · p1 168 · p5 170 · 중앙 181
  * ```
  * 필드 하한을 165로 두면 **실존하는 단신 선수가 걸린다** — 라메크 반다 162,
  * 마리오 소리아노 163, 브라이언 사라고사 164는 모두 맞는 값이다. 그래서 필드는

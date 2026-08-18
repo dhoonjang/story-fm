@@ -220,4 +220,37 @@ describe("흐름의 양 — 사건이 아닌 기록", () => {
       if (p.tally.saves > 0) expect(p.position, `${p.name}`).toBe("GK");
     }
   });
+
+  /**
+   * 팀 합계와 선발 평균은 **뷰가 낸다** (overview §5). 화면이 같은 행들을 다시 접으면
+   * 상대 쪽 안개를 두 번 지나거나 반올림이 갈려, 같은 경기가 두 숫자로 읽힌다.
+   */
+  it("팀 합계와 선발 평균이 그라운드 위 행들의 합·평균이다", () => {
+    const state = intoMatch(11);
+    const view = buildOfficeViews(state).match;
+    if (!view) return;
+    for (const side of ["home", "away"] as const) {
+      const rows = view.onPitch[side];
+      expect(rows.length, `${side} 선발`).toBeGreaterThan(0);
+      const sum = (pick: (t: (typeof rows)[number]["tally"]) => number) =>
+        rows.reduce((acc, p) => acc + pick(p.tally), 0);
+      const totals = view.totals[side];
+      expect(totals.passes, `${side} 패스`).toBe(sum((t) => t.passes));
+      expect(totals.progressive, `${side} 전진`).toBe(sum((t) => t.progressive));
+      expect(totals.shots, `${side} 슛`).toBe(sum((t) => t.shots));
+      expect(totals.saves, `${side} 선방`).toBe(sum((t) => t.saves));
+      expect(totals.goals, `${side} 골`).toBe(sum((t) => t.goals));
+      expect(totals.xg, `${side} xG`).toBeCloseTo(
+        sum((t) => t.xg),
+        6,
+      );
+      expect(totals.scoringExpectation, `${side} 결정력 반영`).toBeCloseTo(
+        sum((t) => t.scoringExpectation),
+        6,
+      );
+      expect(view.xiRating[side], `${side} 선발 평균`).toBe(
+        Math.round(rows.reduce((acc, p) => acc + p.effective, 0) / rows.length),
+      );
+    }
+  });
 });

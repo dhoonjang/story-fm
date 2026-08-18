@@ -493,3 +493,73 @@ describe("개인 훈련 축은 걸어 둔 선수에게만 열린다", () => {
     ).toBe(60);
   });
 });
+
+/**
+ * 전향 훈련 — **자리는 판정으로만 오르고, 새 자리가 본업을 넘으면 거기서 끝난다.**
+ * 코어가 날짜를 세어 올리던 자리를 결산에 넘긴 뒤, 상한과 완료 전이가 이 경로의
+ * 유일한 문이다 (player.md §8).
+ */
+describe("전향 훈련 — 상한과 완료 전이", () => {
+  /** 픽스처는 describe당 하나 — 두 케이스가 각자 다른 선수를 골라 쓴다 */
+  const state = afterSquadReturn(createTestGame(7));
+
+  /** 이 선수가 아직 안 가진 자리 하나 */
+  const freshPosition = (positions: ReadonlyArray<{ position: string }>) => {
+    const taken = new Set(positions.map((p) => p.position));
+    return ["ST", "CB", "LB", "RB", "CM"].find((p) => !taken.has(p))!;
+  };
+
+  it("판정이 폭주해도 한 결산에 두 칸까지고, 음수는 자리를 깎지 않는다", () => {
+    const target = assignmentsOf(state, state.userTeamId, "starting")[0]!.playerId;
+    const player = playerById(state, target)!;
+    // 본업을 위에 둬 완료 전이가 끼어들지 않게 한다
+    player.positions.find((p) => p.isNatural)!.proficiency = 90;
+    const learned = freshPosition(player.positions);
+    player.positions.push({ position: learned, proficiency: 40, isNatural: false });
+    setPlayerTraining(state, { playerId: target, position: learned });
+    const posOf = () => player.positions.find((p) => p.position === learned)!.proficiency;
+
+    const brief = trainOneDay(state, ["tactical"])!;
+    applyTrainingOutcomes(state, brief, [
+      { playerId: target, tacticGain: 0, attribute: null, positionGain: 99, note: "" },
+    ]);
+    expect(posOf(), "상한을 넘었다").toBe(40 + POSITION_TRAIN_MAX);
+
+    // 아래로는 문이 없다 — 훈련이 자리를 되돌리지는 않는다
+    applyTrainingOutcomes(state, nextSettlement(state, brief), [
+      { playerId: target, tacticGain: 0, attribute: null, positionGain: -5, note: "" },
+    ]);
+    expect(posOf(), "음수 판정이 자리를 깎았다").toBe(40 + POSITION_TRAIN_MAX);
+    expect(
+      state.growthLog.filter((g) => g.gamePlayerId === target && g.target === `pos:${learned}`),
+    ).toHaveLength(1);
+  });
+
+  it("새 자리가 본업을 넘어서면 본업이 바뀌고 개인 훈련이 걷힌다", () => {
+    const target = assignmentsOf(state, state.userTeamId, "starting")[1]!.playerId;
+    const player = playerById(state, target)!;
+    player.positions.find((p) => p.isNatural)!.proficiency = 90;
+    const learned = freshPosition(player.positions);
+    // 본업 바로 아래 — 이번 결산의 두 칸이 경계를 넘긴다
+    player.positions.push({ position: learned, proficiency: 89, isNatural: false });
+    setPlayerTraining(state, { playerId: target, position: learned });
+
+    const brief = trainOneDay(state, ["tactical"])!;
+    applyTrainingOutcomes(state, brief, [
+      {
+        playerId: target,
+        tacticGain: 0,
+        attribute: null,
+        positionGain: POSITION_TRAIN_MAX,
+        note: "",
+      },
+    ]);
+
+    expect(player.positions.find((p) => p.position === learned)!.proficiency).toBe(91);
+    expect(player.positions.find((p) => p.isNatural)!.position, "본업이 안 넘어갔다").toBe(learned);
+    expect(
+      state.playerTraining.some((t) => t.gamePlayerId === target),
+      "전향이 끝났는데 개인 훈련이 남았다",
+    ).toBe(false);
+  });
+});

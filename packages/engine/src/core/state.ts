@@ -48,6 +48,7 @@ import {
   FIRST_TEAM_LIMIT,
   MATCHDAY_BENCH,
   MATCHDAY_SQUAD,
+  bestOverall,
   canRegister,
   isUnder21,
   FORMATION_LAYOUTS,
@@ -70,7 +71,7 @@ import {
   type SeasonCalendar,
 } from "../competition/calendar";
 import { rankByName } from "./name-match";
-import { defaultXiIds, overallFor, playerCatalog } from "../world/catalog";
+import { defaultXiIds, playerCatalog } from "../world/catalog";
 import { estimateSquadWages, wageSubjectOf } from "../world/wages";
 import { clubEconomyLevel } from "../data/league-economy";
 import { generateYouthPlayer } from "../world/generate";
@@ -822,9 +823,14 @@ export function groupOf(player: GamePlayer): PositionGroup {
   return positionGroupOfPlayer(player);
 }
 
-/** 능력치 변경 후 overall 재계산 — 주 포지션 **가중치** 공식 */
+/**
+ * 능력치 변경 후 overall 재계산 — **표시용 종합의 단일 공식** `bestOverall`.
+ *
+ * ⚠️ 보유 자리 목록을 반드시 넘긴다. 주 포지션 하나로 내던 때는 어드민 표와
+ * 게임의 OVR이 5,320명 중 1,160명에서 갈렸다 (player.md §4).
+ */
 export function recomputeOverall(player: GamePlayer): void {
-  player.attributes.overall = overallFor(naturalPositionOf(player).position, player.attributes);
+  player.attributes.overall = bestOverall(player.attributes, player.positions);
   if (player.attributes.potential < player.attributes.overall) {
     player.attributes.potential = player.attributes.overall;
   }
@@ -1058,13 +1064,26 @@ export function pushNarrative(state: GameState, text: string, salience = 2): voi
   if (state.narrative.length > 200) state.narrative.splice(0, state.narrative.length - 200);
 }
 
-/** 서사 텍스트의 선수 id를 이름으로 치환 — LLM 출력이 id를 흘릴 때 대비 */
+/** id를 이룰 수 있는 문자 — 앞뒤에 이것이 붙어 있으면 그 id가 아니라 더 긴 id의 일부다 */
+const ID_EDGE = "[\\w-]";
+
+/**
+ * 서사 텍스트의 선수 id를 이름으로 치환 — LLM 출력이 id를 흘릴 때 대비.
+ *
+ * ⚠️ **낱말 경계에서만 바꾼다.** 부분 문자열까지 치우면 `rodri`가 `rodrigo-muniz`를
+ * 반쪽만 먹어 "로드리go-muniz"가 되고, 동명이인을 가르는 `-<생년>` 꼬리가 붙은 id는
+ * 전부 다른 사람 이름으로 바뀐다. 한 번에 지나가며 긴 id를 먼저 보는 것도 같은 이유다 —
+ * 이미 바꾼 자리를 다음 id가 다시 훑지 않는다.
+ */
 export function humanizePlayerIds(state: GameState, text: string): string {
-  let out = text;
-  for (const p of state.players) {
-    if (out.includes(p.id)) out = out.split(p.id).join(p.name);
-  }
-  return out;
+  const hits = state.players
+    .filter((p) => text.includes(p.id))
+    .sort((a, b) => b.id.length - a.id.length);
+  if (hits.length === 0) return text;
+  const names = new Map(hits.map((p) => [p.id, p.name]));
+  const ids = hits.map((p) => p.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  const pattern = new RegExp(`(?<!${ID_EDGE})(?:${ids})(?!${ID_EDGE})`, "g");
+  return text.replace(pattern, (id) => names.get(id) ?? id);
 }
 
 // ── 게임 생성 ───────────────────────────────────────────

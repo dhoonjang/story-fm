@@ -1,5 +1,5 @@
-import type { Player, PositionGroup } from "@story-fm/domain";
-import { anchorOf } from "@story-fm/domain";
+import type { MatchSide, MatchupZone, Player, PositionGroup } from "@story-fm/domain";
+import { anchorOf, positionGroupOf, positionGroupOfPlayer } from "@story-fm/domain";
 import type { LineupSlot } from "./strength-packet";
 import { laneOfX, type GridLane } from "./zone-grid";
 
@@ -50,9 +50,9 @@ export interface KeyPoint {
    */
   id: string;
   /** 이 지점을 **가진 쪽** — 공략하는 쪽이 아니다 */
-  side: "home" | "away";
+  side: MatchSide;
   /** 공략이 닿는 존 */
-  zone: "attack" | "midfield" | "defense";
+  zone: MatchupZone;
   /** 정밀한 문장 — 이름과 수치까지 */
   text: string;
   /** 흐린 문장 — 방향만. 전술 능력이 낮으면 이쪽이 보인다 */
@@ -73,13 +73,13 @@ export interface KeyPoint {
 const laneOfSlot = (slot: LineupSlot): GridLane =>
   laneOfX(slot.point?.x ?? anchorOf(slot.position).x);
 
-const groupOf = (s: LineupSlot): PositionGroup => {
-  const code = s.position.replace(/^[LRC]/, "");
-  if (code === "GK") return "GK";
-  if (["CB", "B", "WB", "DF"].some((x) => code.endsWith(x))) return "DF";
-  if (["ST", "CF", "F", "W"].some((x) => code.endsWith(x))) return "FW";
-  return "MF";
-};
+/**
+ * 배치 포지션 → 존 그룹. **맡은 자리**가 기준이고, 자리를 못 읽으면 그 선수의 주
+ * 포지션으로 본다 — `strength-packet.ts`의 `slotGroup`과 같은 규칙이다. 여기서
+ * 코드를 다시 뜯으면 키포인트가 세는 그룹과 존 전력이 세는 그룹이 갈린다.
+ */
+const groupOf = (s: LineupSlot): PositionGroup =>
+  positionGroupOf(s.position) ?? positionGroupOfPlayer(s.player);
 
 /** 슬롯을 돌려준다 — 능력치만이 아니라 **어디 서 있는지**까지 필요하다(`lane`) */
 const top = (xi: LineupSlot[], g: PositionGroup, read: (p: Player) => number) =>
@@ -349,7 +349,7 @@ export function buildKeyPoints(
    * 절대 좌표(home/away)로 옮긴다. 이걸 빠뜨리면 공략이 반대편에 걸린다
    * (실제로 우리가 노렸는데 상대 xG가 올랐다).
    */
-  const absolute = (points: RawPoint[], usSide: "home" | "away"): KeyPoint[] =>
+  const absolute = (points: RawPoint[], usSide: MatchSide): KeyPoint[] =>
     points.map((p) => ({
       ...p,
       side: p.side === "us" ? usSide : usSide === "home" ? "away" : "home",
@@ -360,7 +360,7 @@ export function buildKeyPoints(
   ].sort((a, b) => b.weight - a.weight);
 }
 
-/** 감독이 몇 개를 발견하는가 — 분석 30이면 3개, 85면 9개 */
+/** 감독이 몇 개를 발견하는가 — 분석 30이면 4개, 85면 9개 */
 function keyPointCount(analysis: number): number {
   return Math.max(2, Math.min(10, Math.round(2 + (analysis / 99) * 8)));
 }
@@ -369,7 +369,7 @@ function keyPointCount(analysis: number): number {
 export interface ShownPoint {
   text: string;
   /** 이 약점을 가진 쪽 — 이로운 쪽은 그 반대다 */
-  side: "home" | "away";
+  side: MatchSide;
 }
 
 /**

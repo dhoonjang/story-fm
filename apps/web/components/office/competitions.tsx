@@ -5,9 +5,14 @@ import type { OfficeViews } from "@story-fm/engine";
 
 // ── 대회 — 대회별 탭 · 순위표 · 라운드별 일정 ──────────────
 type Competition = OfficeViews["competitions"]["list"][number];
+/** 다음 경기 조각 — 팀 단위와 대회 단위가 같은 모양이라 카드도 하나다 */
+type NextMatch = NonNullable<OfficeViews["competitions"]["nextMatch"]>;
+
+const venueLabel = (venue: NextMatch["venue"]) =>
+  venue === "home" ? "홈" : venue === "away" ? "원정" : "중립";
 
 /** 순위표 — 리그는 그대로, 대항전은 통과 경계선을 긋는다 */
-function StandingsTable({ competition, teamName }: { competition: Competition; teamName: string }) {
+function StandingsTable({ competition }: { competition: Competition }) {
   // 순위표를 갖는 대회는 리그와 대항전 리그 페이즈뿐이다 (국내 컵은 브래킷을 본다)
   const europe = competition.europe;
   const zones = competition.zones;
@@ -34,7 +39,7 @@ function StandingsTable({ competition, teamName }: { competition: Competition; t
             <tr
               key={row.teamId}
               className={[
-                row.name === teamName ? "me" : "",
+                row.ours ? "me" : "",
                 zone ? `zone zone-${zone.kind}` : "",
                 // 구역의 마지막 행 아래에 선을 긋는다 — 4위와 5위의 차이가 한 계단이 아니다
                 zone && zone.through === i + 1 ? "cut" : "",
@@ -151,18 +156,18 @@ function RoundFixtures({ competition }: { competition: Competition }) {
 }
 
 /**
- * 다음 경기 한 칸 — **경기 중에는 달력 대신 이것만 본다.**
+ * 다음 경기 한 칸 — **무엇의 다음인지는 부르는 자리가 정한다**(위 `nextMatch`).
  *
- * 90분 안에 감독이 일정에서 궁금한 것은 하나뿐이다: 이 경기가 끝나면 다음은
- * 언제 누구인가. 달력을 통째로 세우면 그 한 줄을 찾으러 스크롤해야 한다.
+ * 경기 중에는 달력 대신 이것만 본다: 90분 안에 감독이 일정에서 궁금한 것은
+ * 하나뿐이라(이 경기가 끝나면 언제 누구인가) 달력을 통째로 세우면 그 한 줄을
+ * 찾으러 스크롤해야 한다.
  *
  * **며칠 남았는지를 크게 적는다** — 체력이 자리마다 다르게 깎이고 회복이 며칠에
  * 걸리므로(match.md §3) "사흘 뒤"는 곧 로테이션 판단이다. 날짜만 적으면
  * 감독이 오늘 날짜와 빼서 세야 한다.
  */
-function NextFixture({ next }: { next: OfficeViews["competitions"]["nextMatch"] }) {
-  if (!next) return null;
-  const venue = next.venue === "home" ? "홈" : next.venue === "away" ? "원정" : "중립";
+function NextFixture({ next }: { next: NextMatch }) {
+  const venue = venueLabel(next.venue);
   return (
     <div className="next-fixture" data-testid="next-fixture">
       <span className="nf-when">
@@ -183,14 +188,23 @@ function NextFixture({ next }: { next: OfficeViews["competitions"]["nextMatch"] 
 
 export function CompetitionsView({
   competitions,
-  teamName,
+  inMatch = false,
 }: {
   competitions: OfficeViews["competitions"];
-  teamName: string;
+  /** 경기 중인가 — 카드가 무엇을 세우는지가 여기서 갈린다 (아래 `nextMatch`) */
+  inMatch?: boolean;
 }) {
   const list = competitions.list;
   const [activeId, setActiveId] = useState(list[0]?.id ?? "");
   const active = list.find((c) => c.id === activeId) ?? list[0];
+  /**
+   * 맨 아래 카드 — **평시엔 보고 있는 대회의 경기, 경기 중엔 팀의 다음 경기**다.
+   *
+   * 대회 탭은 그 대회를 읽으러 온 자리라 순위표·일정 아래에 다른 대회의 경기가
+   * 서면 안 되고(overview §5), 90분 안에 궁금한 것은 반대로 이 경기가 끝난 뒤
+   * 언제 누구인가다(match.md §8).
+   */
+  const nextMatch = inMatch ? competitions.nextMatch : (active?.nextMatch ?? null);
 
   return (
     <div data-testid="view-competitions">
@@ -217,13 +231,13 @@ export function CompetitionsView({
             <span>
               {/* 국내 컵은 순위표가 없다 — 순위 대신 어디까지 갔는지를 말한다 */}
               {active.standings.length === 0
-                ? cupProgress(active)
+                ? cupProgressLabel(active.cupProgress)
                 : active.userPosition > 0
                   ? `${active.europe ? "리그 페이즈 " : ""}${active.userPosition}위`
                   : "순위 없음"}
               {/* 추첨 전이면 "남은 경기 없음"이 아니라 아직 시작을 안 한 것이다 */}
-              {active.next
-                ? ` · 다음 ${active.next}`
+              {active.nextMatch
+                ? ` · 다음 ${active.nextMatch.date} ${venueLabel(active.nextMatch.venue)} vs ${active.nextMatch.opponent}`
                 : active.bracket.length === 0 && active.standings.length === 0
                   ? ""
                   : " · 남은 경기 없음"}
@@ -234,7 +248,7 @@ export function CompetitionsView({
           {active.standings.length > 0 && (
             <>
               <div className="section-title">순위</div>
-              <StandingsTable competition={active} teamName={teamName} />
+              <StandingsTable competition={active} />
               <ZoneLegend zones={active.zones} />
             </>
           )}
@@ -268,10 +282,10 @@ export function CompetitionsView({
 
       {/* 다음 경기는 **맨 아래**다 — 이 화면에 온 이유는 순위표이고, 다음 상대는
           다 읽고 나서 "그래서 언제 누구지"로 이어지는 자리다 */}
-      {competitions.nextMatch && (
+      {nextMatch && (
         <>
           <div className="section-title">다음 경기</div>
-          <NextFixture next={competitions.nextMatch} />
+          <NextFixture next={nextMatch} />
         </>
       )}
     </div>
@@ -280,16 +294,21 @@ export function CompetitionsView({
 
 /**
  * 컵에서 우리가 어디까지 갔는가 — 순위표가 없는 대회의 "현재 위치".
- * 브래킷에서 우리 대진이 마지막으로 나온 단계를 읽는다.
+ * 단계와 결말은 뷰가 내고(브래킷 해석은 코어의 몫), 화면은 문장만 잇는다.
  */
-function cupProgress(competition: Competition): string {
-  const ours = competition.bracket.filter((stage) => stage.ties.some((t) => t.ours));
-  const last = ours[ours.length - 1];
-  if (!last) return competition.bracket.length === 0 ? "추첨 전" : "탈락";
-  const tie = last.ties.find((t) => t.ours)!;
-  if (tie.won === false) return `${last.label} 탈락`;
-  if (tie.won === true && last.stage === "final") return "우승";
-  return `${last.label} 진출`;
+function cupProgressLabel({ stage, outcome }: Competition["cupProgress"]): string {
+  switch (outcome) {
+    case "undrawn":
+      return "추첨 전";
+    case "out":
+      return "탈락";
+    case "champion":
+      return "우승";
+    case "eliminated":
+      return stage ? `${stage} 탈락` : "탈락";
+    case "through":
+      return stage ? `${stage} 진출` : "진출";
+  }
 }
 
 /** 녹아웃 브래킷 — 단계별 대진 (2차전 합계는 엔진이 계산해 넘긴다) */

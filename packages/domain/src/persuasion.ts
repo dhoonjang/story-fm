@@ -48,7 +48,7 @@ export type PitchClaimKind = z.infer<typeof PitchClaimKindSchema>;
 export const PitchClaimSchema = z.object({
   kind: PitchClaimKindSchema,
   /** 감독이 실제로 한 말 — 사실 대조에는 쓰지 않고 서사와 로그에 쓴다 */
-  note: z.string().max(160).optional(),
+  note: z.string().min(1).max(160).optional().describe("감독이 한 말 한 줄 (서사용)"),
 });
 export type PitchClaim = z.infer<typeof PitchClaimSchema>;
 

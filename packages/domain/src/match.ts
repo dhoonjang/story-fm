@@ -3,7 +3,7 @@ import { z } from "zod";
 export const MatchSideSchema = z.enum(["home", "away"]);
 export type MatchSide = z.infer<typeof MatchSideSchema>;
 
-/** 경기 이벤트 타입 — LLM(매치 티어)이 생성하고 코어 장부가 검증한다 (match.md §5) */
+/** 경기 이벤트 타입 — 코어(구간·간이 시뮬)가 만들고 코어 장부가 검증한다 (match.md §5) */
 export const MatchEventTypeSchema = z.enum([
   "kickoff",
   "goal",

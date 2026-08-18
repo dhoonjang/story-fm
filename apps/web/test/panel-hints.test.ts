@@ -77,7 +77,7 @@ describe("항목으로 서는 말풍선", () => {
         },
       ]),
     ]);
-    // 끝 괄호를 사족으로 떼는 것은 옛 기록의 폴백 경로뿐이다 — 항목은 코어가 이미 갈라 냈다
+    // 갈래(`note`)는 코어가 항목에 담아 낼 때만 선다 — 화면이 문자열에서 떼어 내지 않는다
     expect(hints[0]!.lines[0]!.text).toBe("4-2-3-1 (전술 적응도 +20)");
     expect(hints[0]!.lines[0]!.note).toBeUndefined();
   });
@@ -124,19 +124,6 @@ describe("말풍선의 내용", () => {
       ]),
     ]);
     expect(hints[0]!.lines.map((l) => l.text)).toEqual(["라인업을 확정했습니다"]);
-  });
-
-  it("끝에 괄호로 달린 사족은 떼어 낸다 — 본문에 붙으면 바뀐 것이 안 보인다", () => {
-    const hints = panelHintsOf([
-      turn([
-        {
-          name: "set_tactics",
-          summary: "전술 변경 — 4-2-3-1, 멘탈리티 3 (전술 적응도 +20, 익혀 둔 전술)",
-        },
-      ]),
-    ]);
-    expect(hints[0]!.lines[0]!.text).toBe("전술 변경 — 4-2-3-1, 멘탈리티 3");
-    expect(hints[0]!.lines[0]!.note).toBe("전술 적응도 +20, 익혀 둔 전술");
   });
 
   it("코어가 한 일(silent)은 알림이 아니다", () => {

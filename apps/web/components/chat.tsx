@@ -236,27 +236,12 @@ function ToolDetail({ call }: { call: ToolCallRecord }) {
             // 알약 하나가 항목 하나 — 이름은 흐리게 앞, 값은 또렷하게, 갈래는 뒤에
             <span className="tool-item" key={i}>
               {item.label !== undefined && <em>{item.label}</em>}
-              {splitValue(item.text)}
+              <b>{item.text}</b>
               {item.note !== undefined && <i>{item.note}</i>}
             </span>
           ))}
         </div>
       )}
-    </>
-  );
-}
-
-/**
- * `사기 +4` 처럼 **이름과 값**으로 갈리면 나눠 그린다.
- * 값이 앞에 오는 문장(`불만 해소`)은 그대로 둔다 — 억지로 쪼개면 뜻이 깨진다.
- */
-function splitValue(part: string) {
-  const m = /^(.*?)\s+([+-]?[\d.]+%?|[+-]\d+)$/u.exec(part);
-  if (!m) return part;
-  return (
-    <>
-      <em>{m[1]}</em>
-      <b>{m[2]}</b>
     </>
   );
 }

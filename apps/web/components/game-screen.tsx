@@ -4,14 +4,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { GamePayload, GameSlice } from "@/lib/store";
 import { mergeSlice } from "@/lib/game-slice";
-import type { ChatTurn, ToolCallRecord } from "@story-fm/engine";
+import type { ChatTurn } from "@story-fm/engine";
 import { ChatTurnView, turnStamp } from "./chat";
-import { hintsOfCall, panelHintsOf, type PanelHint } from "@/lib/panel-hints";
 import { chatForActiveMatch } from "@/lib/match-chat";
 import { buildTraceIndex } from "@/lib/turn-trace-index";
 import { TurnTracePopup } from "./turn-trace";
 import { mergeMatchOrders, type MatchBoardOrder } from "@/lib/match-orders";
-import { RailHints } from "./rail-hints";
+import { streamTurn } from "@/lib/turn-stream";
+import { Composer } from "./composer";
+import { RailHints, useRailHints } from "./rail-hints";
 import { Loading } from "./loading";
 import { SquadView, CalendarView, FinanceView, CompetitionsView, CareerView } from "./office";
 import { createLineupSaver, type LineupSaver } from "./lineup-saver";
@@ -24,14 +25,9 @@ import {
   IconChat,
   IconChevron,
   IconFinance,
-  IconDay,
   IconMark,
   IconMatch,
-  IconPlay,
-  IconSend,
-  IconSkip,
   IconSquad,
-  IconWeek,
   IconTrophy,
 } from "./icons";
 
@@ -86,27 +82,6 @@ const MATCH_PANELS = [
 type MatchTab = (typeof MATCH_PANELS)[number]["key"];
 
 /**
- * 시간을 넘기는 손잡이 — **버튼이 곧 감독의 말**이다.
- *
- * 엔진을 직접 부르지 않고 채팅으로 도는 이유는 `send`에 적어 두었다. 문장은
- * **감독의 말투가 아니라 조작의 이름**이다 — 이건 `operator` 채널로 가고
- * 모델에는 `[조작: 시간 진행 — 하루]`로 들어간다. "하루만 넘기자" 같은 구어체로
- * 두면 이력에 감독이 한 말처럼 남는다.
- *
- * 눈금을 셋으로 끊은 건 프리시즌 때문이다 — 7월엔 다음 경기가 몇 주 뒤라
- * "다음 경기로"만 있으면 이적·훈련을 들여다볼 틈 없이 개막까지 날아간다.
- */
-/** 시간 손잡이의 얼굴 — 해(하루) · 달력 한 줄(일주일) · 공(다음 경기) */
-const SKIP_ICONS = { day: IconDay, week: IconWeek, match: IconMatch } as const;
-
-/**
- * ⚠️ 아래 `say` 문장은 **서버가 되읽는다** (`parseTimeSkip` — gm-types.ts).
- * 손잡이로 넘긴 시간만은 모델을 거치지 않고 코어가 먼저 굴리기 때문이다.
- * 문구를 바꾸면 그 파서도 함께 고쳐야 한다 — 안 그러면 조작이 감독의 발화로
- * 읽혀 시계가 모델의 헤더에 다시 매달린다 (agents 테스트가 문장을 고정한다).
- */
-
-/**
  * 경기 구간을 한 덩어리로 묶는다 — **끝난 경기는 메인 채팅에서 접힌다.**
  *
  * 경기 하나가 중계 수십 턴을 남기는데 그게 평시 대화 사이에 그대로 흐르면,
@@ -134,34 +109,6 @@ function groupMatchTurns(chat: readonly ChatTurn[]): ChatBlock[] {
   }
   return blocks;
 }
-
-const TIME_SKIPS = [
-  { key: "day", label: "하루", say: () => "시간 진행 — 하루" },
-  { key: "week", label: "일주일", say: () => "시간 진행 — 일주일" },
-  {
-    key: "match",
-    label: "다음 경기",
-    /**
-     * **날짜를 붙여 보낸다.** 시간은 GM이 첫 줄 헤더에 적은 시점으로 흐르므로
-     * (`applyScenePoint`), 목표가 "다음 경기"라는 말뿐이면 모델이 일정을 조회해
-     * 날짜를 옮겨 적어야 한다 — 한 번 더 왕복하고 틀릴 여지도 생긴다.
-     * 클라이언트는 그 날짜를 이미 알고 있다(달력 뷰의 `isNext`).
-     */
-    say: (date: string) => `시간 진행 — 다음 경기 (${date})`,
-  },
-] as const;
-
-/**
- * 아무것도 오지 않은 채로 이만큼 지나면 턴을 끊는다.
- *
- * 서버는 도구만 도는 조용한 구간에도 하트비트를 흘리므로(turn/stream 라우트,
- * 10초 간격) 이 시계가 끝까지 도는 것은 **연결이 죽었을 때뿐**이다. 값이 하트비트
- * 간격보다 넉넉해야 느린 네트워크가 멀쩡한 턴을 끊지 않는다.
- */
-const TURN_IDLE_TIMEOUT_MS = 60_000;
-
-/** 시한을 넘긴 턴 — 서버의 `turnErrorMessage`와 같은 문구를 쓴다 */
-const TURN_TIMEOUT_MESSAGE = "응답이 지연돼 턴을 취소했습니다";
 
 /**
  * 턴 원문을 볼 수 있는가 — **개발 모드에서만.** 기록도 라우트도 같은 기준으로
@@ -238,25 +185,11 @@ export function GameScreen({ gameId }: { gameId: string }) {
     () => () => void (boardCloseTimer.current && clearTimeout(boardCloseTimer.current)),
     [],
   );
-  /** 읽은 장부 알림 — 그 화면을 연 순간부터 다시 세우지 않는다 (다음 턴에 풀린다) */
-  const [seenHints, setSeenHints] = useState<string[]>([]);
   /**
-   * 알림을 닫았나 — **다음 클릭 한 번**이면 닫힌다.
-   *
-   * 알림은 지나가는 것이지 화면에 상주하는 것이 아니다. 놓쳐도 그 지시는 채팅에
-   * 칩으로 남아 있어서 눌러 다시 부를 수 있다(`pinnedHint`).
+   * 바뀐 장부를 알리는 말풍선 — **선다 · 읽힌다 · 닫힌다 · 다시 불린다**가
+   * 한 자리에 있다 (`rail-hints.tsx`). 무대는 무엇을 눌렀는지만 넘긴다.
    */
-  const [hintsClosed, setHintsClosed] = useState(false);
-  /** 채팅 칩이 다시 불러낸 말풍선 — 자동 알림과 같은 자리에 선다 */
-  const [pinnedHint, setPinnedHint] = useState<{
-    call: ToolCallRecord;
-    hints: PanelHint[];
-  } | null>(null);
-  /** 칩을 눌렀다 — 같은 칩을 다시 누르면 닫는다 (칩이 곧 손잡이다) */
-  const revealHint = useCallback((call: ToolCallRecord) => {
-    setHintsClosed(true);
-    setPinnedHint((prev) => (prev?.call === call ? null : { call, hints: hintsOfCall(call) }));
-  }, []);
+  const rail = useRailHints({ chat: game?.chat, panel });
   /**
    * 전술판에서 쌓인 조작 — 다음 턴에 함께 나간다 (대기 목록을 화면에 그리지는
    * 않는다: 판 자체가 바뀐 모습이 곧 표시다).
@@ -317,62 +250,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
     setBoardClosing(false);
     setBoardOpen(true);
   }, [game?.chat]);
-  /**
-   * 마지막 턴이 바꾼 장부 — 아이콘 줄에 말풍선으로 선다.
-   * 이미 연 화면은 빼고(`seenHints`), 지금 보고 있는 화면도 뺀다.
-   */
-  const hints = useMemo(
-    () =>
-      game
-        ? panelHintsOf(game.chat).filter((h) => h.panel !== panel && !seenHints.includes(h.panel))
-        : [],
-    [game, panel, seenHints],
-  );
-  /**
-   * **GM이 말한 횟수** — 알림이 새로 서는 기준이다.
-   *
-   * 채팅 길이로 재면 안 된다: 감독이 보내는 순간 낙관적 유저 턴이 먼저 들어가고
-   * (`send`), 턴이 실패하면 도로 빠진다. 그때마다 리셋이 돌면 **닫아 둔 직전
-   * 알림이 되살아났다가** 답이 오면 다시 바뀐다 — 그게 말풍선이 깜빡이는 이유다.
-   * 알림은 세계가 무언가 한 뒤에만 새로 선다.
-   */
-  const modelTurns = useMemo(
-    () => game?.chat.reduce((n, t) => n + (t.role === "model" ? 1 : 0), 0) ?? 0,
-    [game],
-  );
-  /**
-   * 새 턴이 오면 알림은 처음부터 — 방금 벌어진 일은 다시 알려야 한다.
-   * 이전 턴에 읽은 표식(`seenHints`)도 여기서 풀린다: 그건 그 알림을 읽었다는
-   * 뜻이었고, 새 지시는 새 알림이다.
-   *
-   * 이걸 `useEffect`로 미루면 리셋 전 한 프레임이 그려진다 — 지난 턴에 읽은
-   * 알림이 잠깐 사라졌다 다시 뜬다. 렌더 중에 맞추면 그 프레임이 없다.
-   */
-  const [hintTurn, setHintTurn] = useState(0);
-  if (hintTurn !== modelTurns) {
-    setHintTurn(modelTurns);
-    setHintsClosed(false);
-    setPinnedHint(null);
-    setSeenHints([]);
-  }
-  /**
-   * **다른 쪽을 누르면 닫힌다.** 말풍선은 조작 대상이 아니라 지나가는 알림이라
-   * 닫는 ✕를 달지 않는다 — 감독이 다음 무엇을 누르든 그게 곧 "읽었다"다.
-   * 칩(`data-hint-keep`)만 예외다: 그 클릭은 말풍선을 부르는 손잡이다.
-   */
-  useEffect(() => {
-    const onDown = (e: PointerEvent) => {
-      const el = e.target instanceof Element ? e.target : null;
-      if (el?.closest("[data-hint-keep]")) return;
-      setPinnedHint((p) => (p === null ? p : null));
-      setHintsClosed((c) => (c ? c : true));
-    };
-    document.addEventListener("pointerdown", onDown);
-    return () => document.removeEventListener("pointerdown", onDown);
-  }, []);
   const [input, setInput] = useState("");
-  /** 시간 손잡이의 선택지가 펼쳐져 있는가 — 입력이 비었을 때만 열 수 있다 */
-  const [skipOpen, setSkipOpen] = useState(false);
   /**
    * 원문 창이 열린 턴의 자리 (`game.chat`의 절대 인덱스) — 개발 모드에서만 찬다.
    * 게임의 일부가 아니라 개발 도구라 세이브에도 URL에도 남기지 않는다.
@@ -397,14 +275,6 @@ export function GameScreen({ gameId }: { gameId: string }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // 입력 textarea 높이 자동 조절 — 내용이 늘면 최대 높이까지 커지고 이후 스크롤
-  useEffect(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
-  }, [input]);
-
   // 타이핑 리빌 — 수신 버퍼(acc)를 시간 기반으로 글자 단위 공개한다.
   // rAF(부드러움) + 인터벌(백그라운드 탭 보험) 이중 틱, 진행량은 경과 시간 기준.
   const streamAccRef = useRef("");
@@ -412,8 +282,6 @@ export function GameScreen({ gameId }: { gameId: string }) {
   const pendingPayloadRef = useRef<GamePayload | null>(null);
   const rafRef = useRef(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  /** 무응답 감시 시계 — 델타든 하트비트든 무엇이든 오면 되감긴다 */
-  const idleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     fetch(`/api/games/${gameId}`)
@@ -426,7 +294,6 @@ export function GameScreen({ gameId }: { gameId: string }) {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       if (intervalRef.current) clearInterval(intervalRef.current);
-      if (idleRef.current) clearTimeout(idleRef.current);
     };
   }, [gameId]);
 
@@ -530,27 +397,11 @@ export function GameScreen({ gameId }: { gameId: string }) {
       };
 
       let finished = false;
-      /**
-       * 무응답 감시 — 델타든 하트비트든 **무엇이든 도착하면 되감긴다.** 아무것도
-       * 오지 않은 채로 시한이 지나면 요청을 끊어, 기다림이 끝나지 않는 자리를
-       * 없앤다. 서버 쪽 턴과 잠금은 모델 호출마다 걸린 시한이 푼다
-       * (docs/llm/models.md §1-1) — 여기서 끊는 것은 화면의 기다림뿐이다.
-       */
-      const abort = new AbortController();
-      const stopWatch = () => {
-        if (idleRef.current) clearTimeout(idleRef.current);
-        idleRef.current = null;
-      };
-      const armWatch = () => {
-        stopWatch();
-        idleRef.current = setTimeout(() => abort.abort(), TURN_IDLE_TIMEOUT_MS);
-      };
       const stopPump = () => {
         if (rafRef.current) cancelAnimationFrame(rafRef.current);
         rafRef.current = 0;
         if (intervalRef.current) clearInterval(intervalRef.current);
         intervalRef.current = null;
-        stopWatch();
       };
       const commit = (payload: GamePayload | null) => {
         if (finished) return;
@@ -605,74 +456,24 @@ export function GameScreen({ gameId }: { gameId: string }) {
       // 백그라운드 탭에서는 rAF가 멈추므로 인터벌이 진행·커밋을 보장한다
       intervalRef.current = setInterval(step, 300);
 
-      try {
-        armWatch();
-        const res = await fetch(`/api/games/${gameId}/turn/stream`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message, operator, ...(orders.length > 0 ? { orders } : {}) }),
-          signal: abort.signal,
-        });
-        if (!res.ok || !res.body) {
-          const data = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
-          fail(data.error ?? "턴을 처리하지 못했습니다", data.detail);
-          commit(null);
-          return;
-        }
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let closed = false;
-        for (;;) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          // 하트비트도 여기로 온다 — 무엇이 왔는지 가리지 않고 시계를 되감는다
-          armWatch();
-          buffer += decoder.decode(value, { stream: true });
-          let nl: number;
-          while ((nl = buffer.indexOf("\n")) >= 0) {
-            const line = buffer.slice(0, nl);
-            buffer = buffer.slice(nl + 1);
-            if (!line.trim()) continue;
-            let evt: {
-              type: string;
-              text?: string;
-              payload?: GamePayload;
-              error?: string;
-              detail?: string;
-            };
-            try {
-              evt = JSON.parse(line);
-            } catch {
-              continue; // 불완전한 조각은 건너뛴다 — 다음 줄에서 회복
-            }
-            if (evt.type === "delta" && evt.text) {
-              streamAccRef.current += evt.text;
-            } else if (evt.type === "done" && evt.payload) {
-              pendingPayloadRef.current = evt.payload; // 공개가 끝나면 pump가 커밋
-              closed = true;
-            } else if (evt.type === "error") {
-              fail(evt.error ?? "턴을 처리하지 못했습니다", evt.detail);
-              closed = true;
-            }
-          }
-        }
-        /**
-         * 스트림이 `done`도 `error`도 없이 끊겼다 — 서버가 중간에 죽었거나
-         * 응답이 잘렸다. 그냥 마감하면 낙관적 유저 발화가 화면에만 남고(서버는
-         * 아무것도 저장하지 않았다) 감독은 무엇이 반영됐는지 알 수 없다.
-         */
-        stopWatch();
-        if (!closed) fail(TURN_TIMEOUT_MESSAGE, "스트림이 done 없이 끊겼습니다");
-        if (!pendingPayloadRef.current) commit(null);
-      } catch (e) {
-        // 시한을 넘겨 우리가 끊은 것과 연결이 안 된 것은 감독에게 다른 사건이다
-        fail(
-          abort.signal.aborted ? TURN_TIMEOUT_MESSAGE : "서버에 연결하지 못했습니다",
-          e instanceof Error ? e.message : String(e),
-        );
-        commit(null);
-      }
+      /**
+       * 줄 하나가 이벤트 하나 — 프로토콜은 `lib/turn-stream.ts`가 안다. 여기서는
+       * **글자를 버퍼에 붓고, 끝난 턴을 공개가 끝난 뒤에 앉힐 자리에 둘 뿐**이다.
+       */
+      const failure = await streamTurn(
+        gameId,
+        { message, operator, orders },
+        {
+          onDelta: (text) => {
+            streamAccRef.current += text;
+          },
+          onDone: (payload) => {
+            pendingPayloadRef.current = payload; // 공개가 끝나면 pump가 커밋
+          },
+        },
+      );
+      if (failure) fail(failure.reason, failure.detail);
+      if (!pendingPayloadRef.current) commit(null);
     },
     [input, busy, game, liveMatch?.matchId, gameId, saver],
   );
@@ -724,15 +525,9 @@ export function GameScreen({ gameId }: { gameId: string }) {
    * 달력 뷰가 이미 표시해 둔 값이라(`isNext`) 따로 계산하지 않는다.
    */
   const nextMatchDate = game?.views.calendar.entries.find((e) => e.isNext)?.date ?? null;
-  /** 쓸 말이 있으면 보내기, 없으면 시간 손잡이 — 버튼 하나가 두 뜻을 갖는다 */
-  const hasInput = input.trim().length > 0;
   /** 경기 중에는 시간을 경기가 민다 — 손잡이를 쥐어 주지 않는다 */
   const canSkip = game?.phase !== "match";
 
-  /**
-   * 채팅 — 무대의 주인. 경기 중에는 오른쪽 절반으로 좁아질 뿐 사라지지 않는다.
-   * (컴포넌트로 쪼개면 매 렌더마다 새 타입이 되어 입력창이 포커스를 잃는다)
-   */
   /**
    * 경기 중인가 — **채팅의 주인이 바뀐다.**
    *
@@ -762,16 +557,6 @@ export function GameScreen({ gameId }: { gameId: string }) {
   const boardOnStage = showBoard ? matchTab === "팀" : shownPanel === "스쿼드";
   /** 나가는 중에도 서랍은 그려져 있어야 한다 — 그동안 오른쪽으로 미끄러진다 */
   const boardTakesStage = (boardOpen || boardClosing) && boardOnStage;
-  /**
-   * 레일에 세울 말풍선 — **처음엔 그 턴에 바뀐 장부 전부, 칩을 누르면 그 하나만.**
-   *
-   * 자동 알림은 "방금 무엇이 달라졌나"를 한 번에 알리는 것이라 탭별로 묶어 한 장에
-   * 쌓는다(시간이 흘러 다음 장으로 넘어가지 않는다 — 감독이 눈을 뗀 사이에 지나간다).
-   * 칩은 그 지시 하나를 가리키므로 그 장부만 선다(`hintsOfCall`).
-   * 경기 중에는 장부 레일이 서지 않으므로 칩도 제자리에서 펼친다(`onRevealHint` 없음).
-   */
-  const shownHints = pinnedHint ? pinnedHint.hints : hintsClosed ? [] : hints;
-
   /**
    * ── 같은 화면은 **한 번만 적는다** ─────────────────────────
    *
@@ -803,10 +588,21 @@ export function GameScreen({ gameId }: { gameId: string }) {
       }
     />
   );
+  /**
+   * 대회 뷰 — **경기 중인지가 맨 아래 카드를 가른다.** 평시엔 보고 있는 대회의
+   * 다음 경기, 90분 안에는 팀의 다음 경기다 (overview §5 · match.md §8).
+   */
   const competitionsView = (
-    <CompetitionsView competitions={game.views.competitions} teamName={game.teamName} />
+    <CompetitionsView competitions={game.views.competitions} inMatch={inMatch} />
   );
 
+  /**
+   * 채팅 — 무대의 주인. 경기 중에는 오른쪽 절반으로 좁아질 뿐 사라지지 않는다.
+   * ⚠️ **여기 안에서 컴포넌트를 정의하지 않는다.** 렌더마다 새 타입이 되어 React가
+   * 그 아래를 통째로 다시 세우고, 입력창이 포커스를 잃는다. 파일 밖으로 뺀 것
+   * (`Composer`)은 타입이 고정이라 그 함정이 없다 — 갈라지는 것은 **자리**지
+   * 파일이 아니다.
+   */
   const chatPane = (
     <section className={`chat-pane${inMatch ? " broadcasting" : ""}`}>
       <div className="chat-scroll" ref={scrollRef} data-testid="chat-scroll">
@@ -833,8 +629,13 @@ export function GameScreen({ gameId }: { gameId: string }) {
                 playerNames={game.playerNames}
                 speakerRoles={game.speakerRoles}
                 prevStamp={prevStamp}
-                onRevealHint={inMatch ? undefined : revealHint}
-                revealedCall={pinnedHint?.call ?? null}
+                /**
+                 * 레일에 세울 말풍선 — **자동 알림은 그 턴에 바뀐 장부 전부,
+                 * 칩을 누르면 그 지시 하나만.** 경기 중에는 장부 레일이 서지
+                 * 않으므로 칩도 제자리에서 펼친다(손잡이를 주지 않는다).
+                 */
+                onRevealHint={inMatch ? undefined : rail.reveal}
+                revealedCall={rail.revealedCall}
                 onLongPress={traceOpener(turn)}
               />
             );
@@ -914,102 +715,16 @@ export function GameScreen({ gameId }: { gameId: string }) {
           </div>
         </div>
       )}
-      {/**
-       * 시간 이동 — **자주 하는 지시라 손이 아니라 눈에 둔다.**
-       *
-       * 매번 "다음 경기로 가자"를 타이핑하게 두면 GM이 대신 "시간을 보내시겠습니까?"
-       * 하고 되묻는 장면으로 턴을 닫는다. 그건 감독이 결정할 일을 세계가 대신
-       * 물어보는 것이라, 넘기는 손잡이를 감독 쪽에 두고 GM에겐 되묻지 못하게 했다.
-       *
-       * 다만 **늘 펼쳐 두지는 않는다.** 칩 세 개가 입력창 위에 상주하면 감독이
-       * 할 일이 "말하기"인지 "넘기기"인지 화면이 두 갈래로 말한다. 입력이 비어
-       * 있을 때만 같은 버튼이 시간 손잡이가 되고, 한 글자라도 쓰면 보내기가 된다 —
-       * **손잡이는 하나고 뜻은 상황이 정한다.**
-       *
-       * 경기 중에는 숨긴다 — 그때 시간은 경기가 밀고, 진행은 채팅이 맡는다.
-       */}
-      <div className="composer">
-        {skipOpen && canSkip && (
-          <>
-            {/* 바깥을 눌러 닫는다 — 메뉴 밖 어디든 */}
-            <button
-              className="skip-scrim"
-              type="button"
-              aria-label="닫기"
-              onClick={() => setSkipOpen(false)}
-            />
-            <div className="skip-menu" data-testid="time-skip" role="menu">
-              {TIME_SKIPS.map((t) => {
-                // 남은 경기가 없으면(시즌 끝) 갈 곳이 없다 — 그리지 않는다
-                if (t.key === "match" && !nextMatchDate) return null;
-                const say = t.say(nextMatchDate ?? "");
-                const Icon = SKIP_ICONS[t.key];
-                return (
-                  <button
-                    key={t.key}
-                    role="menuitem"
-                    onClick={() => {
-                      setSkipOpen(false);
-                      send(say, true);
-                    }}
-                    disabled={busy}
-                    data-testid={`skip-${t.key}`}
-                  >
-                    <Icon />
-                    {t.label}
-                  </button>
-                );
-              })}
-            </div>
-          </>
-        )}
-        <div className="chat-input">
-          <textarea
-            ref={inputRef}
-            value={input}
-            rows={1}
-            onChange={(e) => {
-              setInput(e.target.value);
-              // 쓰기 시작하면 버튼이 보내기로 바뀐다 — 열려 있던 선택지는 닫는다
-              if (e.target.value.trim()) setSkipOpen(false);
-            }}
-            onKeyDown={(e) => {
-              // Enter = 전송, Shift+Enter = 줄바꿈 (IME 조합 중에는 무시)
-              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                send();
-              }
-            }}
-            disabled={busy}
-            data-testid="chat-input"
-          />
-          {/**
-           * **손잡이는 하나다.** 쓸 말이 없으면 시간 손잡이, 한 글자라도 쓰면 보내기.
-           *
-           * 경기 중에는 시간 손잡이 자리가 **진행**이 된다 — 그때 시간을 미는 건
-           * 달력이 아니라 경기이고, 감독이 할 일도 "계속"이라고 타이핑하는 게
-           * 아니라 한 구간 더 굴리는 것이다.
-           *
-           * 아이콘만 두는 건 입력칸 **안에** 앉기 때문이다 — 글자를 얹으면 쓸 폭을
-           * 뺏는다. 무엇을 하는 손잡이인지는 **아이콘이 바뀌는 것**이 말하고, 화면
-           * 밖의 이름은 `aria-label`이 갖는다 — 단축키를 글로 알리지 않는다.
-           */}
-          <button
-            className={hasInput ? "send" : inMatch ? "send" : "skip"}
-            onClick={() => {
-              if (hasInput) return void send();
-              if (inMatch) return void send("계속", true);
-              setSkipOpen((v) => !v);
-            }}
-            disabled={busy || (!hasInput && !inMatch && !canSkip)}
-            data-testid={hasInput ? "chat-send" : inMatch ? "match-advance" : "time-skip-toggle"}
-            aria-label={hasInput ? "전송" : inMatch ? "경기 진행" : "시간 보내기"}
-            aria-expanded={hasInput || inMatch ? undefined : skipOpen}
-          >
-            {hasInput ? <IconSend /> : inMatch ? <IconPlay /> : <IconSkip />}
-          </button>
-        </div>
-      </div>
+      <Composer
+        input={input}
+        onInput={setInput}
+        onSend={send}
+        busy={busy}
+        inMatch={inMatch}
+        canSkip={canSkip}
+        nextMatchDate={nextMatchDate}
+        inputRef={inputRef}
+      />
     </section>
   );
 
@@ -1092,9 +807,9 @@ export function GameScreen({ gameId }: { gameId: string }) {
             {PANELS.map(({ key, Icon }) => (
               <button
                 key={key}
-                className={`${panel === key ? "active" : ""}${hints.some((h) => h.panel === key) ? " hinted" : ""}`}
+                className={`${panel === key ? "active" : ""}${rail.hints.some((h) => h.panel === key) ? " hinted" : ""}`}
                 onClick={() => {
-                  setSeenHints((seen) => (seen.includes(key) ? seen : [...seen, key]));
+                  rail.markSeen(key);
                   setPanel(panel === key ? null : key);
                 }}
                 data-testid={`tab-${key}`}
@@ -1114,7 +829,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
              * 아이콘 위의 점이 "여기가 바뀌었다"를 남긴다 — 말풍선을 닫아도 남는다.
              * 카드 자체의 생김새는 `RailHints`가 갖는다.
              */}
-            <RailHints hints={shownHints} pinned={pinnedHint !== null} />
+            <RailHints hints={rail.shown} pinned={rail.pinned} />
           </nav>
         )}
       </header>

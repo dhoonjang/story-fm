@@ -8,11 +8,13 @@ import {
   GamePlayerSchema,
   TeamTacticsSchema,
   clusterOf,
+  isMirrorPair,
   naturalPositionOf,
   positionGroupOfPlayer,
   sameCluster,
 } from "@story-fm/domain";
 import {
+  adminCatalog,
   DEFAULT_XI,
   tacticalStyles,
   teamCatalog,
@@ -195,15 +197,15 @@ describe("선수 카탈로그 (불변 초기치 DB)", () => {
         const own = e.positions.find((p) => p.position === code);
         expect(own, `${e.nameEn} (${nat.position}) 에 ${code} 없음`).toBeDefined();
         /**
-         * 위아래 모두 6 이내 — **주 포지션이 상한은 아니다**. 오른발 센터백은
-         * 뭉뚱그린 CB보다 RCB를 잘 본다(`footAdjust`). 한쪽만 막으면 주발 모델을
-         * 도로 금지하게 된다.
-         *
-         * 폭이 6인 이유: 보정은 두 발 차이에 비례하고(±3이 최대), 주 포지션이
-         * 이미 한쪽 끝이면(왼발 5/1 선수의 LCB) 반대편까지 3+3이 벌어진다.
-         * 약발이 좋은 선수(5/4)는 좌우 차이가 2뿐이다 — 그게 이 모델의 요점이다.
+         * **좌우 분화는 저장값이 정확히 같다** — 주발은 저장하지 않고 조회할 때
+         * `positionProficiency`가 붙인다 (player.md §4·§8). 여기 얹어 두면 조회가
+         * 다시 얹어 폭이 두 배가 됐다. 역할이 다른 묶음(RB↔RWB · ST↔CF)만 −2가
+         * 남는다 — 같은 묶음이어도 하는 일이 다르기 때문이다.
          */
-        expect(Math.abs(nat.proficiency - own!.proficiency)).toBeLessThanOrEqual(6);
+        const expected = code === nat.position || isMirrorPair(nat.position, code) ? 0 : 2;
+        expect(nat.proficiency - own!.proficiency, `${e.nameEn} ${nat.position}→${code}`).toBe(
+          expected,
+        );
         compared++;
       }
     }
@@ -346,6 +348,28 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
       ).toBe(true);
       expect(new Set(squad.map((player) => player.squadNumber)).size, team.id).toBe(squad.length);
     }
+  });
+
+  it("어드민 표의 OVR과 게임 선수의 OVR이 같은 숫자다", () => {
+    /**
+     * **파생의 원본은 하나다** (player.md §4). 어드민은 `bestOverall`, 게임은 주
+     * 포지션 `roleFit`이던 때 카탈로그 5,320명 중 1,160명이 갈렸고(사카 89/86),
+     * 같은 선수의 시장가·희망 주급·노출 밴드가 보는 화면마다 달랐다.
+     */
+    const shown = new Map<string, number>();
+    for (const team of adminCatalog()) {
+      for (const row of team.players) shown.set(row.id, row.overall);
+    }
+    const mismatched = state.players
+      .filter((p) => p.catalogId !== null && shown.has(p.catalogId))
+      .map((p) => ({ p, admin: shown.get(p.catalogId!)! }))
+      .filter(({ p, admin }) => admin !== p.attributes.overall)
+      .map(({ p, admin }) => `${p.name} 게임 ${p.attributes.overall} ≠ 어드민 ${admin}`);
+    expect(mismatched.slice(0, 5)).toEqual([]);
+    // 비교 대상이 실제로 있었는지 — 조인이 통째로 빗나가면 위가 조용히 통과한다
+    expect(
+      state.players.filter((p) => p.catalogId !== null && shown.has(p.catalogId)).length,
+    ).toBeGreaterThan(100);
   });
 
   it("리그 개막은 8월 중순 금요일 밤 (실제 EPL처럼 개막전 1경기가 금요일)", () => {

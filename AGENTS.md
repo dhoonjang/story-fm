@@ -98,6 +98,11 @@ e2e/               # Playwright specs — onboarding · game · admin · turn er
 - Functional and immutable by default; isolate side effects at the boundary
   (API/IO).
 - Domain types live in `packages/domain`; other packages import from there.
+- **The screen imports `@story-fm/engine` for types only.** A value import pulls
+  `node:fs` into the browser bundle and `next build` dies — `typecheck` passes, so
+  only the CI e2e job catches it. A pure rule the screen and the core both need
+  (`observedFit`, `roleAtSlot`, `ratingTier`) belongs in `packages/domain`; the
+  engine re-exports it so core-side callers do not move.
 - kebab-case files and directories, PascalCase types and components, camelCase
   values and functions.
 - Give numbers and formulas names — balance tuning should only need to read that

@@ -19,11 +19,12 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# 잡은 두 러너로 갈린다 — 코어가 아쉬운 잡 하나와, 아쉽지 않은 나머지.
+# 잡은 두 러너로 갈린다 — 코어가 아쉬운 잡 하나와, 아쉽지 않은 나머지. 어느 러너로
+# 가는지는 저장소 변수가 쥐고, **지금 값은 `gh variable list`가 답한다**:
 #
-#   CI_RUNNER       = ubicloud-standard-8   ← test (코어에 비례해 빨라진다)
-#   CI_SHARDS       = [1]
-#   CI_RUNNER_LIGHT = (미설정 → ubuntu-latest)  ← static · e2e
+#   CI_RUNNER       ← test (코어에 비례해 빨라진다) · 미설정이면 ubuntu-latest
+#   CI_SHARDS       ← test 매트릭스 · 미설정이면 [1] (= `--shard=1/1`, 즉 전부)
+#   CI_RUNNER_LIGHT ← changes · static · e2e · 미설정이면 ubuntu-latest
 #
 # 둘로 가르는 이유는 무료 한도가 두 군데에 따로 있기 때문이다. GitHub은 프라이빗
 # 저장소에 월 2,000분을 주는데 외부 러너로 다 옮기면 그게 통째로 놀고, Ubicloud는
@@ -31,7 +32,7 @@ concurrency:
 # 안 빨라지는 잡을 GitHub 쪽에 두면 양쪽 무료분을 같이 태운다.
 #
 # ⚠️ GitHub 2,000분이 소진되면 Free 플랜은 프라이빗 저장소의 Actions를 **멈춘다**.
-# 그때는 CI_RUNNER_LIGHT를 ubicloud-standard-2로 걸면 그 잡들이 그쪽으로 넘어간다.
+# CI_RUNNER_LIGHT에 ubicloud-standard-2를 걸면 그 잡들이 그쪽으로 넘어간다.
 #
 # 러너를 변수가 쥐는 이유 — 외부 러너는 붙지 못하면 잡이 큐에 걸린 채 타임아웃까지
 # 가고 그동안 PR은 하나도 초록이 되지 않는다. 변수를 지우는 것이 곧 롤백이고, 그
@@ -41,7 +42,8 @@ concurrency:
 # 잡마다 checkout + pnpm install에 1.5분씩 드는데 그 셋업은 테스트를 하나도
 # 돌리지 않는다 — 잡이 여섯이면 9분이 거기로 간다.
 #
-# 지금 PR 한 번이 무엇을 쓰는가 (run 31999772973, 위 변수 그대로):
+# PR 한 번이 무엇을 쓰는가 — run 31999772973을 잰 값이다. **그때의 구성**은
+# CI_RUNNER=ubicloud-standard-8 · CI_SHARDS=[1] · CI_RUNNER_LIGHT 미설정이었다:
 #
 #   잡                러너                 잡 전체   그중 실작업   과금
 #   changes           ubuntu-latest            3초         1초     1분
@@ -99,13 +101,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
+          truncated=0
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            files=$(gh api "repos/$REPO/pulls/${{ github.event.number }}/files" --paginate --jq '.[].filename')
+            # 리네임은 새 이름만 오면 반쪽이다 — `.ts`를 `.md`로 옮긴 변경이 목록에
+            # `.md` 하나로만 서서 코드 잡을 통째로 건너뛴다. 사라진 쪽 이름도 함께 센다.
+            files=$(gh api "repos/$REPO/pulls/${{ github.event.number }}/files" --paginate \
+              --jq '.[] | .filename, (.previous_filename // empty)')
           else
-            files=$(gh api "repos/$REPO/commits/${{ github.sha }}" --jq '.files[].filename')
+            # 커밋 API는 파일 300개에서 잘리고 페이지를 더 주지 않는다 — 잘린 목록으로
+            # 판정하는 것은 「빨간 걸 초록으로 넘긴다」다. 상한에 닿으면 목록을 안 믿는다.
+            files=$(gh api "repos/$REPO/commits/${{ github.sha }}" \
+              --jq '.files[]? | .filename, (.previous_filename // empty)')
+            listed=$(gh api "repos/$REPO/commits/${{ github.sha }}" --jq '.files | length')
+            if [ "${listed:-0}" -ge 300 ]; then truncated=1; fi
           fi
           echo "$files"
-          if printf '%s\n' "$files" | grep -qvE '\.md$'; then
+          if [ "$truncated" = 1 ] || printf '%s\n' "$files" | grep -qvE '\.md$'; then
             echo "code=true" >> "$GITHUB_OUTPUT"
           else
             echo "code=false" >> "$GITHUB_OUTPUT"
@@ -167,7 +178,7 @@ jobs:
       # 보여야 고치는 왕복이 한 번으로 끝난다
       fail-fast: false
       matrix:
-        shard: ${{ fromJSON(vars.CI_SHARDS || '[1, 2, 3, 4]') }}
+        shard: ${{ fromJSON(vars.CI_SHARDS || '[1]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -219,9 +230,12 @@ jobs:
         if: steps.pw-cache.outputs.cache-hit == 'true'
 
       # playwright.config.ts가 LLM_MODE=mock·포트·데이터 디렉터리를 모두 쥔다.
-      # CI에서는 reuseExistingServer가 꺼져 매번 제 dev 서버를 띄운다.
+      # CI에서는 reuseExistingServer가 꺼져 매번 **빌드한 앱**을 띄운다(`next start`).
       - run: pnpm e2e
 
+      # 빨간 e2e를 읽는 유일한 창 — 러너 로그에는 실패한 단언 한 줄뿐이고 그 순간
+      # 화면이 무엇이었는지가 없다. playwright.config.ts가 CI에서만 html 리포트와
+      # 트레이스·스크린샷을 남기고, 그 둘을 여기서 올린다 (`merge` §4가 받아 본다).
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -229,4 +243,6 @@ jobs:
           path: |
             playwright-report/
             test-results/
+          # 비어 있으면 스텝이 조용히 지나간다 — 리포터 설정이 빠진 것을 여기서 만난다
+          if-no-files-found: error
           retention-days: 7

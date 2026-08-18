@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  bestOverall,
   DEFAULT_TACTICS,
   defaultRoleOf,
   naturalPositionOf,
@@ -23,6 +24,7 @@ import {
   isAvailable,
   isInjured,
   lineupSignature,
+  moraleToForm,
   playerById,
   reservePlayers,
   squadLevelOf,
@@ -47,6 +49,24 @@ import {
   addDays,
 } from "@story-fm/engine";
 import { createTestGame } from "./helpers";
+
+/**
+ * **역할이 값을 실제로 움직이는** 선발 센터백. `roleFit`은 정수로 접히므로 두 역할이
+ * 같은 숫자에 앉는 선수가 있고(힌카피는 어느 역할로도 79다), 그 선수로는 "역할을
+ * 바꾸면 그 자리 전력이 달라진다"를 잴 수 없다 — 라인업이 흔들릴 때마다 그런 선수가
+ * 첫 센터백이 되면 케이스가 이유 없이 붉어진다.
+ */
+function pickCentreBack(state: ReturnType<typeof createTestGame>) {
+  return assignmentsOf(state, state.userTeamId, "starting").find((a) => {
+    if (weightSlotOf(a.position) !== "CB") return false;
+    const attrs = playerById(state, a.playerId)!.attributes;
+    const fit = (role: string) => roleFit(attrs, a.position, role);
+    return (
+      fit("ball-playing-defender") !== fit("no-nonsense-cb") &&
+      fit("ball-playing-defender") !== bestOverall(attrs, playerById(state, a.playerId)!.positions)
+    );
+  })!;
+}
 
 /** 현재 배치를 setLineup 입력 형태로 (검증 테스트의 기준 라인업) */
 function currentLineup(state: ReturnType<typeof createTestGame>) {
@@ -89,6 +109,50 @@ describe("판정형 스킬 — 변화량은 공식이 정한다 (overview §7)",
     expect(targetHigh.state.form - highBefore).toBeGreaterThanOrEqual(
       target.state.form - lowBefore,
     );
+  });
+
+  it("한 번의 말이 움직이는 폭엔 한도가 있다 — 면담 ±8 (overview §7)", () => {
+    const state = createTestGame();
+    state.manager.attributes.leadership = 99; // 계수가 가장 큰 자리 — 한도를 미는 쪽
+    const players = userPlayers(state);
+    /** 한 선수에게 한 번, 0에서 출발해 남은 폼을 읽는다 (면담은 하루 한 번이다) */
+    const formAfter = (
+      index: number,
+      outcome: "motivated" | "reassured" | "angered",
+      intensity: 1 | 2 | 3,
+    ) => {
+      const player = players[index]!;
+      player.state.form = 0;
+      expect(applyTalkToPlayer(state, { playerId: player.id, outcome, intensity }).ok).toBe(true);
+      return player.state.form;
+    };
+
+    // 한도 아래에서는 더 센 말이 더 크게 남는다
+    expect(formAfter(0, "motivated", 2)).toBeGreaterThan(formAfter(1, "reassured", 2));
+    // 한도 위에서는 둘 다 같은 자리에 선다 — 8에서 잘린다
+    expect(formAfter(2, "motivated", 3)).toBeCloseTo(moraleToForm(8), 10);
+    expect(formAfter(3, "reassured", 3)).toBeCloseTo(moraleToForm(8), 10);
+    // 아래쪽 한도도 같은 폭이다
+    expect(formAfter(4, "angered", 3)).toBeCloseTo(moraleToForm(-8), 10);
+  });
+
+  it("팀토크는 한도에 딱 닿는다 — 여기서 더 세지면 조용히 잘린다 (overview §7)", () => {
+    const state = createTestGame();
+    state.manager.attributes.leadership = 99;
+    const player = userPlayers(state)[0]!;
+
+    player.state.form = 0;
+    expect(applyTeamTalk(state, { occasion: "pre", outcome: "inspired", intensity: 3 }).ok).toBe(
+      true,
+    );
+    expect(player.state.form).toBeCloseTo(moraleToForm(6), 10);
+
+    // 같은 폭이 아래로도 열려 있다 (자리가 다르면 하루에 또 한 번이다)
+    player.state.form = 0;
+    expect(applyTeamTalk(state, { occasion: "half", outcome: "backfired", intensity: 3 }).ok).toBe(
+      true,
+    );
+    expect(player.state.form).toBeCloseTo(moraleToForm(-6), 10);
   });
 
   it("면담이 불만 이슈를 푸는 것은 잘 풀렸을 때뿐이다 (career.md §2)", () => {
@@ -458,8 +522,13 @@ describe("포지션 스킬 (멀티 포지션)", () => {
     expect(naturalPositionOf(df).position).toBe("ST");
     expect(df.positions.filter((p) => p.isNatural)).toHaveLength(1);
     expect(groupOf(df)).toBe("FW");
-    // ST 자리 가중치로 재산정 (15축 가중합 — player.md §2)
-    expect(df.attributes.overall).toBe(roleFit(df.attributes, "ST"));
+    /**
+     * 종합은 **가장 잘 맞는 자리**의 값이라 주 포지션 표기를 옮겨도 그 자리의
+     * 값으로 갈아치워지지 않는다 (player.md §4) — 어드민 표와 같은 함수다.
+     * 실제로 최전방에 세웠을 때의 전력은 `roleFit`이 따로 낸다.
+     */
+    expect(df.attributes.overall).toBe(bestOverall(df.attributes, df.positions));
+    expect(roleFit(df.attributes, "ST")).toBeLessThanOrEqual(df.attributes.overall);
   });
 
   it("처음 맡는 포지션은 낮은 적응도로 추가된다", () => {
@@ -767,9 +836,7 @@ describe("주장·전술·개인 지시", () => {
 
   it("자리를 옮겨도 호환 역할은 유지하고 비호환 역할만 초기화한다", () => {
     const state = createTestGame(7);
-    const cb = assignmentsOf(state, state.userTeamId, "starting").find(
-      (a) => weightSlotOf(a.position) === "CB",
-    )!;
+    const cb = pickCentreBack(state);
     expect(cb, "센터백 배치를 찾지 못했다").toBeTruthy();
 
     // 그 자리에 없는 역할은 거부하고 고를 수 있는 목록을 알려 준다
@@ -834,9 +901,7 @@ describe("주장·전술·개인 지시", () => {
 
   it("역할을 바꾸면 화면의 전력과 적응도가 실제로 움직인다", () => {
     const state = createTestGame(7);
-    const cb = assignmentsOf(state, state.userTeamId, "starting").find(
-      (a) => weightSlotOf(a.position) === "CB",
-    )!;
+    const cb = pickCentreBack(state);
     const row = () => buildOfficeViews(state).squad.players.find((x) => x.id === cb.playerId)!;
     const before = row();
     const famBefore = cb.familiarity;
@@ -1061,6 +1126,39 @@ describe("훈련 스킬 = 일정 생성 (규칙 테이블 없음)", () => {
 });
 
 describe("서사 이벤트 — 체력·폼만, 한도 내 (overview §7)", () => {
+  it("하루 세 번까지다 — 네 번째는 반려되고 장부를 건드리지 않는다", () => {
+    const state = createTestGame();
+    const player = userPlayers(state)[0]!;
+    player.state.form = 0;
+    const fire = () =>
+      applyNarrativeEvent(state, { playerIds: [player.id], formDelta: 1, note: "장면" });
+    for (let n = 1; n <= 3; n++) expect(fire().ok, `${n}번째가 막혔다`).toBe(true);
+
+    const before = player.state.form;
+    expect(fire().ok, "네 번째가 통과했다").toBe(false);
+    expect(player.state.form, "반려된 이벤트가 폼을 움직였다").toBe(before);
+
+    // 날이 바뀌면 다시 세 번이 열린다 — 한도의 단위는 하루다
+    state.date = addDays(state.date, 1);
+    expect(fire().ok).toBe(true);
+  });
+
+  it("폼은 −1/0/+1 단계로만 말하고 코어가 0.12씩 옮긴다", () => {
+    const state = createTestGame();
+    const player = userPlayers(state)[0]!;
+    const step = (formDelta: number) => {
+      player.state.form = 0;
+      expect(
+        applyNarrativeEvent(state, { playerIds: [player.id], formDelta, note: "장면" }).ok,
+      ).toBe(true);
+      return player.state.form;
+    };
+    expect(step(1)).toBeCloseTo(0.12, 10);
+    expect(step(-1)).toBeCloseTo(-0.12, 10);
+    // 모델이 큰 수를 불러도 단계는 하나다 — 한 장면이 선수를 절정에 꽂지 못한다
+    expect(step(9)).toBeCloseTo(0.12, 10);
+  });
+
   it("한도를 넘는 값은 잘린다", () => {
     const state = createTestGame();
     const player = userPlayers(state)[0]!;
