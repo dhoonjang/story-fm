@@ -9,7 +9,6 @@ import {
   AXIS_KO,
   CHIP_SIZE,
   anchorOf,
-  conditionLabel,
   clampToBoard,
   isNaturalAt,
   positionAtPoint,
@@ -28,6 +27,7 @@ import {
 import type { GamePayload, GameSlice } from "@/lib/store";
 import type { MatchBoardOrder } from "@/lib/match-orders";
 import { slotOverallOf } from "@/lib/slot-overall";
+import { ConditionBar } from "@/components/condition-bar";
 import {
   familiarityForRole,
   lineupBody,
@@ -290,26 +290,6 @@ function RatingTrend({ ratings }: { ratings: number[] }) {
           {r.toFixed(1)}
         </span>
       ))}
-    </span>
-  );
-}
-
-/** 상태 막대 — 사기·피로를 눈으로 표현한다 (피로는 높을수록 나쁘다) */
-function StatBar({
-  value,
-  max = 100,
-  kind,
-}: {
-  value: number;
-  max?: number;
-  kind: "form" | "condition";
-}) {
-  const pct = Math.max(0, Math.min(100, (value / max) * 100));
-  // 체력은 낮을수록 나쁘다 — 색으로도 알린다
-  const level = kind === "condition" ? (value < 35 ? " bad" : value < 50 ? " low" : "") : "";
-  return (
-    <span className={`stat-bar ${kind}${level}`} title={`${value}`}>
-      <span style={{ width: `${pct}%` }} />
     </span>
   );
 }
@@ -1829,7 +1809,7 @@ function SquadTable({
         case "form":
           return p.form;
         case "condition":
-          return p.condition;
+          return p.condition.value;
         case "rating":
           // 기록 없는 선수는 정렬 맨 아래로 — 0.00과 "아직 없음"은 다르다
           return p.seasonRating ?? -1;
@@ -1990,9 +1970,10 @@ function SquadTable({
               <td>
                 <FormArrow p={p} />
               </td>
-              {/* 사기·피로를 하나로 합친 값 — 왜 이 값인지는 행을 펼치면 한 문장으로 나온다 */}
-              <td title={`${conditionLabel(p.condition)} · ${p.mood}`}>
-                <StatBar value={p.condition} kind="condition" />
+              {/* 사기·피로를 하나로 합친 값 — 왜 이 값인지는 행을 펼치면 한 문장으로 나온다.
+                  경기 중에는 판세 탭과 같은 읽은 값이라 막대에 모르는 폭이 붙는다 */}
+              <td title={p.mood}>
+                <ConditionBar c={p.condition} />
               </td>
               {/* 골 대신 평점 — 골 수는 행을 펼치면 시즌 기록에 그대로 있다 */}
               <td

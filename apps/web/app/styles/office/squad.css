@@ -1473,27 +1473,3 @@
 .squad-table td:first-child {
   width: 34%;
 }
-.stat-bar {
-  display: inline-block;
-  width: 46px;
-  height: 6px;
-  border-radius: var(--r-xs);
-  background: var(--panel-2);
-  overflow: hidden;
-  vertical-align: middle;
-}
-.stat-bar span {
-  display: block;
-  height: 100%;
-  background: var(--accent-2);
-}
-/* 체력 — 높을수록 좋다. 낮아지면 색으로도 경고한다 */
-.stat-bar.condition span {
-  background: var(--accent);
-}
-.stat-bar.condition.low span {
-  background: var(--gold);
-}
-.stat-bar.condition.bad span {
-  background: var(--danger);
-}

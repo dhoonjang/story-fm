@@ -5,6 +5,7 @@ import type { OfficeViews } from "@story-fm/engine";
 import { anchorOf, positionGroupOf, separateBoardPoints } from "@story-fm/domain";
 import { pitchPointOf, spreadMarkers, type PitchPoint } from "@/lib/pitch-layout";
 import { IconBoard } from "@/components/icons";
+import { ConditionBar } from "@/components/condition-bar";
 import { PitchChip, PitchGround } from "./pitch";
 
 type Match = NonNullable<OfficeViews["match"]>;
@@ -18,20 +19,23 @@ type MatchPlayer = Match["onPitch"]["home"][number];
  * 화면은 그 순서로 읽힌다. 전부 코어가 이미 계산한 값이라 여기서 셈하지 않는다.
  */
 /**
- * 판세 — **어디가 밀리나, 그리고 무엇이 통하나.**
+ * 판세 — **어디가 밀리나 · 왜 · 내 지시가 먹혔나.**
  *
- * 존 막대와 키포인트는 한 질문의 두 면이다: 막대가 "중원이 밀린다"를 말하고
- * 키포인트가 "왜"를 말한다. 탭을 갈라 뒀을 때는 감독이 밀리는 걸 보고 이유를
- * 찾으러 옆 탭으로 건너가 다시 읽어야 했다 — 정지점마다 그러기엔 길이 멀다.
+ * 셋은 한 질문의 세 면이다: 격자가 "왼쪽 중원이 밀린다"를 말하고, 키포인트가 "왜"를
+ * 말하고, 공략·노트가 "그래서 내가 시킨 것이 지금 걸려 있나"를 말한다. 탭을 갈라
+ * 뒀을 때는 감독이 밀리는 걸 보고 이유를 찾으러 옆 탭으로 건너가 다시 읽어야 했다 —
+ * 정지점마다 그러기엔 길이 멀다.
  *
  * **전술 6축은 여기 두지 않는다** — 판을 만지는 자리(전술판)에 이미 있고, 거기서는
  * 읽는 김에 고칠 수도 있다. 두 곳에 같은 값을 세우면 어느 쪽이 진짜인지 흐려진다.
  */
 export function MatchOverview({ match }: { match: Match }) {
+  const ours = match.home.ours ? "home" : "away";
   return (
     <div className="match-view" data-testid="view-match">
       <ZoneBars match={match} />
       <KeyPoints points={match.keyPoints} />
+      <Orders exploiting={match.exploiting} notes={match.tactics[ours].notes} />
     </div>
   );
 }
@@ -193,12 +197,11 @@ function Scoreboard({ match }: { match: Match }) {
   );
 }
 
-/** 화면에 그리는 순서 — 왼쪽이 우리 골문, 오른쪽이 상대 골문 */
-const BANDS = [
-  { key: "defense", label: "우리 진영" },
-  { key: "midfield", label: "중원" },
-  { key: "attack", label: "상대 진영" },
-] as const;
+/**
+ * 왼쪽에서 오른쪽으로 그리는 순서 — **자리는 홈 기준**이라 왼쪽이 홈 골문이다.
+ * 그 줄이 누구의 진영인지는 뷰의 `zones[].label`이 이미 말한다.
+ */
+const BANDS = ["defense", "midfield", "attack"] as const;
 /** 위에서 아래로 — 우리가 공격 방향을 바라볼 때의 왼쪽·가운데·오른쪽 */
 const LANES = [
   { key: "left", label: "좌" },
@@ -206,13 +209,31 @@ const LANES = [
   { key: "right", label: "우" },
 ] as const;
 
-/** 우열의 크기 — 존 라벨(`edgeOf`)과 같은 밴드를 쓴다 */
-function edgeClass(ours: number, theirs: number): string {
-  const ratio = theirs > 0 ? ours / theirs : 1;
-  const abs = ratio >= 1 ? ratio : 1 / ratio;
-  if (abs < 1.04) return "even";
-  const size = abs >= 1.18 ? "big" : abs >= 1.08 ? "clear" : "slight";
-  return `${ratio > 1 ? "up" : "down"} ${size}`;
+/**
+ * 우열을 색으로 — **문턱은 화면에 없다.**
+ *
+ * 어느 쪽이 이기고 있는지(`edge`)와 얼마나 벌어졌는지(`size`)는 코어가 매치업
+ * 문장과 같은 자리에서 정해 실어 보낸 값이다(`sim`의 `edgeOf`). 화면이 비율을
+ * 다시 재면 한쪽만 손봤을 때 같은 판이 GM의 말과 다른 색으로 보인다.
+ */
+function edgeClass(v: { edge: "ours" | "theirs" | "even"; size: "slight" | "clear" | "big" }) {
+  if (v.edge === "even") return "even";
+  return `${v.edge === "ours" ? "up" : "down"} ${v.size}`;
+}
+
+/** 벌어진 폭을 부르는 말 — 코어의 `size`에 화면이 주는 이름 */
+const SIZE_KO = { slight: "근소한", clear: "뚜렷한", big: "압도적인" } as const;
+
+/** 그 줄·그 칸을 한 줄로 읽어 주는 말 — 마우스를 얹으면 나온다 */
+function edgeTitle(v: {
+  ours: number;
+  theirs: number;
+  edge: "ours" | "theirs" | "even";
+  size: "slight" | "clear" | "big";
+}) {
+  const gap =
+    v.edge === "even" ? "팽팽하다" : `${SIZE_KO[v.size]} ${v.edge === "ours" ? "우위" : "열세"}`;
+  return `우리 ${Math.round(v.ours)} vs 상대 ${Math.round(v.theirs)} — ${gap}`;
 }
 
 /**
@@ -263,19 +284,8 @@ function placeBothSides(match: Match): {
 function ZoneBars({ match }: { match: Match }) {
   const cellOf = (band: string, lane: string) =>
     match.grid.find((c) => c.band === band && c.lane === lane);
-  /** 그 전선 전체의 우열 — 세 칸을 합쳐 머리에 적는다 */
-  const bandEdge = (band: string) => {
-    const cells = match.grid.filter((c) => c.band === band);
-    const ours = cells.reduce((s, c) => s + c.ours, 0);
-    const theirs = cells.reduce((s, c) => s + c.theirs, 0);
-    return edgeClass(ours, theirs);
-  };
-  /** 왼쪽이 홈이므로 진영 이름도 홈 기준으로 붙는다 */
-  const bandLabel = (band: string) => {
-    if (band === "midfield") return "중원";
-    const isHomeHalf = band === "defense";
-    return isHomeHalf === match.home.ours ? "우리 진영" : "상대 진영";
-  };
+  /** 그 전선 전체의 판정 — 코어가 매치업으로 이미 매겨 보낸 줄이다 */
+  const zoneOf = (band: string) => match.zones.find((z) => z.zone === band);
   return (
     <div className="mv-zones" data-testid="match-zones">
       {/* 기대 득점 — 판세의 결론이라 판 위에 크게 선다. 순서는 스코어와 같은 홈 : 원정 */}
@@ -292,24 +302,29 @@ function ZoneBars({ match }: { match: Match }) {
         </span>
       </div>
       <div className="mv-pitch">
+        {/* 줄 이름과 그 줄의 우열 — 격자를 읽는 눈금이라 그림 쪽이다 */}
         <div className="mv-pitch-head" aria-hidden>
-          {BANDS.map((b) => (
-            <span className={`mv-band ${bandEdge(b.key)}`} key={b.key}>
-              {bandLabel(b.key)}
-            </span>
-          ))}
+          {BANDS.map((band) => {
+            const z = zoneOf(band);
+            if (!z) return <span key={band} />;
+            return (
+              <span className={`mv-band ${edgeClass(z)}`} key={band} title={edgeTitle(z)}>
+                {z.label}
+              </span>
+            );
+          })}
         </div>
         <div className="mv-pitch-field">
           {LANES.map((lane) =>
             BANDS.map((band) => {
-              const c = cellOf(band.key, lane.key);
+              const c = cellOf(band, lane.key);
               if (!c) return null;
               const diff = Math.round(c.ours - c.theirs);
               return (
                 <span
-                  className={`mv-cell ${edgeClass(c.ours, c.theirs)}`}
-                  key={`${band.key}:${lane.key}`}
-                  title={`${bandLabel(band.key)} ${lane.label} — 우리 ${Math.round(c.ours)} vs 상대 ${Math.round(c.theirs)}`}
+                  className={`mv-cell ${edgeClass(c)}`}
+                  key={`${band}:${lane.key}`}
+                  title={`${zoneOf(band)?.label ?? ""} ${lane.label} — ${edgeTitle(c)}`}
                 >
                   {diff > 0 ? `+${diff}` : diff}
                 </span>
@@ -367,6 +382,38 @@ function KeyPoints({ points }: { points: Match["keyPoints"] }) {
   );
 }
 
+/**
+ * 지시가 판에 닿았나 — **공략 중과 전술 노트.**
+ *
+ * 공략(match.md §1.6)과 지역 플랜(§1.7)은 경기 중에만 부를 수 있고 장부에 흔적을
+ * 남기지 않아 레일 말풍선이 없다(overview §5). 그래서 이 자리가 유일한 증거다:
+ * 걸린 공략은 감독이 읽은 그 표적 이름 그대로 서고, 걸리지 않았거나 버려진 것과
+ * 개인 지시의 결과는 노트 한 줄로 선다 — 노트가 없으면 감독은 걸리지 않은 공략을
+ * 걸린 줄 안다.
+ */
+function Orders({ exploiting, notes }: { exploiting: string[]; notes: string[] }) {
+  if (exploiting.length === 0 && notes.length === 0) return null;
+  return (
+    <div className="mv-orders" data-testid="match-orders">
+      {exploiting.length > 0 && (
+        <div className="mv-exploits" data-testid="match-exploiting">
+          <b>공략 중</b>
+          {exploiting.map((target, i) => (
+            <span className="mv-exploit" key={i}>
+              {target}
+            </span>
+          ))}
+        </div>
+      )}
+      {notes.map((note, i) => (
+        <div className="mv-note" key={i}>
+          {note}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 const AXES = [
   { key: "mentality", label: "멘탈리티", low: "수비적", high: "공격적" },
   { key: "defensiveLine", label: "수비 라인", low: "낮게", high: "높게" },
@@ -406,6 +453,18 @@ function SideTactics({ tactics }: { tactics: Match["tactics"]["home"] }) {
           </div>
         );
       })}
+      {/* 상대 벤치가 지금 하고 있는 일 — 6축이 말하지 않는 것(공략·개인 지시)이 여기
+          남는다. 문장이 흐린 것은 그가 못 본 수치가 노트로 새지 않게 코어가 그렇게
+          쓴 것이다 (match.md §1.6) */}
+      {tactics.notes.length > 0 && (
+        <div className="mv-tac-notes" data-testid="opp-tactic-notes">
+          {tactics.notes.map((note, i) => (
+            <span className="mv-note" key={i}>
+              {note}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -654,7 +713,7 @@ function OpponentTable({ players, bench }: { players: MatchPlayer[]; bench: Matc
                   {p.margin > 0 && <i className="mv-eff-margin">±{p.margin}</i>}
                 </td>
                 <td>
-                  <ConditionBar c={p.condition} gassed={p.gassed} />
+                  <ConditionBar c={p.condition} />
                 </td>
                 {/* 시즌 평점 — 공개 기록이라 우리 명단과 같은 숫자·같은 소수 자리다 */}
                 <td className="hide-sm">
@@ -666,30 +725,5 @@ function OpponentTable({ players, bench }: { players: MatchPlayer[]; bench: Matc
         ))}
       </tbody>
     </table>
-  );
-}
-
-/**
- * 체력 막대 — **값이 아니라 구간이다.**
- *
- * 경기 중 남은 다리는 아무도 실시간으로 재지 못한다(scouting.ts §체력). 흐린
- * 숫자를 또렷한 막대로 그리면 감독은 그걸 사실로 읽으므로, 확실한 만큼만 채우고
- * 그 위로 **모르는 폭**을 흐리게 얹는다 — 막대의 끝이 어디인지 모른다는 사실이
- * 모양으로 드러난다. 안내 문구는 두지 않는다.
- *
- * 우리 선수의 꼬리는 짧고 상대는 길며, 둘 다 후반으로 갈수록 길어진다.
- * 폭 자체가 "지금 이걸 얼마나 믿을 수 있나"를 말한다.
- */
-function ConditionBar({ c, gassed }: { c: MatchPlayer["condition"]; gassed: boolean }) {
-  // 명단(office)의 체력 막대와 같은 문턱 — 화면마다 색이 다르면 눈금이 흔들린다
-  const tone = gassed ? "spent" : c.value < 50 ? "tired" : "";
-  return (
-    <span className="mv-cond-bar" title={`${c.label} — 체력 ${c.low}~${c.high}`}>
-      <span className={`mv-cond-sure ${tone}`} style={{ width: `${c.low}%` }} />
-      <span
-        className={`mv-cond-fog ${tone}`}
-        style={{ left: `${c.low}%`, width: `${c.high - c.low}%` }}
-      />
-    </span>
   );
 }

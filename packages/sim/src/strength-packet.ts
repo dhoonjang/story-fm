@@ -677,13 +677,17 @@ const other = (side: MatchSide): MatchSide => (side === "home" ? "away" : "home"
  * 우열 라벨 — 문턱이 좁으면 지시 한 칸이 "팽팽하다"를 "뚜렷한 우위"로 뒤집는다.
  * LLM은 숫자보다 이 라벨을 읽으므로 밴드를 넉넉히 둔다 (예전엔 even이 1.5%까지였다).
  *
+ * **문턱은 여기 하나뿐이다.** 판세 화면의 격자 색도 이 함수를 지난 값을 받는다
+ * (`views.ts` → `match-view.tsx`) — 화면이 같은 밴드를 다시 적어 두면 한쪽만
+ * 손봤을 때 같은 판이 GM의 문장과 다른 색으로 보인다.
+ *
  * ⚠️ **문턱은 존 값의 눈금을 탄다.** 종합이 되편 값에서 축 가중 평균이 되며
  * (`player.md` §4) EPL 20팀 선발 XI 평균의 폭이 13.3 → 10.8로 좁아졌고, 팀 간
  * 비율의 1에서의 편차도 그만큼(×0.84) 줄었다 — 옛 문턱 그대로면 "압도적인"이
  * 0.5%에서 **0%**가 되어 영영 나오지 않는다. 아래 값은 옛 눈금에서의 발화 빈도
  * (0.5% · 28% · 41%)를 되찾은 것이다.
  */
-function edgeOf(ratio: number): { edge: EdgeSide; size: EdgeSize } {
+export function edgeOf(ratio: number): { edge: EdgeSide; size: EdgeSize } {
   const abs = ratio >= 1 ? ratio : 1 / ratio;
   const size: EdgeSize = abs >= 1.15 ? "big" : abs >= 1.07 ? "clear" : "slight";
   const edge: EdgeSide = abs < 1.035 ? "even" : ratio > 1 ? "home" : "away";

@@ -396,6 +396,51 @@
   background: linear-gradient(90deg, rgb(248 113 113 / 0.1), transparent 60%), var(--panel);
 }
 
+/**
+ * 지시의 증거 — **공략 중과 전술 노트.**
+ *
+ * 키포인트가 "판에서 벌어지는 일"이면 이쪽은 "내가 시킨 일"이라, 키포인트 아래에
+ * 붙되 색을 쓰지 않는다. 유불리를 말하는 자리가 아니기 때문이다.
+ */
+.mv-orders {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mv-exploits {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+}
+.mv-exploits b {
+  color: var(--muted);
+  font-weight: 600;
+}
+/* 걸려 있는 표적 — 지금 실제로 판에 얹혀 있는 것이라 칩으로 또렷하게 선다 */
+.mv-exploit {
+  padding: 3px 9px;
+  border-radius: var(--r-sm);
+  background: rgb(74 222 128 / 0.12);
+  border: 1px solid rgb(74 222 128 / 0.35);
+  color: var(--accent);
+}
+/* 노트 — 걸리지 않은 것과 개인 지시의 결과. 읽는 줄글이라 칩이 아니다 */
+.mv-note {
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--muted);
+}
+.mv-tac-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
 /* 양팀 전술 — 축마다 양쪽 눈금을 마주 보게 */
 .mv-tactics {
   background: var(--panel);
@@ -581,40 +626,4 @@
 .nf-venue.home {
   background: rgba(74, 222, 128, 0.16);
   color: var(--accent);
-}
-
-/**
- * 체력 — 명단과 같은 축(높을수록 좋다). 바닥나면 색으로 먼저 알린다.
- *
- * 폭도 우리 명단의 막대(`.stat-bar`)와 같다 — 두 탭을 오갈 때 같은 길이가 같은
- * 뜻이어야 한다. 다른 것은 **끝이 어디인지 모른다는 사실**을 얹는 안개뿐이다.
- */
-.mv-cond-bar {
-  position: relative;
-  display: inline-block;
-  width: 46px;
-  height: 6px;
-  border-radius: var(--r-xs);
-  background: var(--panel-2);
-  overflow: hidden;
-  vertical-align: middle;
-}
-.mv-cond-bar span {
-  position: absolute;
-  top: 0;
-  height: 100%;
-  background: var(--accent);
-}
-.mv-cond-sure {
-  left: 0;
-}
-/* 모르는 폭 — 참값이 이 어딘가에 있다. 반투명이라 "끝이 어디인지 모른다"가 보인다 */
-.mv-cond-fog {
-  opacity: 0.28;
-}
-.mv-cond-bar span.tired {
-  background: var(--gold);
-}
-.mv-cond-bar span.spent {
-  background: var(--danger);
 }
