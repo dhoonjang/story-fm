@@ -8,6 +8,7 @@ import {
   listGameSummaries,
   saveGame,
   teamCatalog,
+  teamsOfLeague,
   topLeagues,
 } from "@story-fm/engine";
 import { runOnboardingTurn } from "@story-fm/agents";
@@ -50,11 +51,16 @@ export function GET(request: Request) {
   }
   const leagues = topLeagues();
   const ids = new Set(leagues.map((l) => l.id));
+  // 기대 순위는 리그 인원에서 나온다 (career.md §5) — 세이브가 없으니 카탈로그가 센다
+  const sizeOf = new Map(leagues.map((l) => [l.id, teamsOfLeague(l.id).length]));
   return NextResponse.json({
     leagues,
     teams: teamCatalog()
       .filter((t) => ids.has(t.leagueId))
-      .map((t) => ({ ...t, expectation: boardExpectationOfTier(catalogTierOf(t.id)).label })),
+      .map((t) => ({
+        ...t,
+        expectation: boardExpectationOfTier(catalogTierOf(t.id), sizeOf.get(t.leagueId) ?? 0).label,
+      })),
   });
 }
 

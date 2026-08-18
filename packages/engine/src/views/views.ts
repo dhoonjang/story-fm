@@ -79,7 +79,8 @@ import { MANAGER_ATTR_CAP, MANAGER_XP_PER_LEVEL } from "../skills";
 import { askingPriceFor, marketValueOf, wageExpectationOf } from "../market/market";
 import { settlingPercent } from "../squad/settling";
 import { computeStandings, type StandingRow } from "../competition/season";
-import { RELEGATION_SLOTS, hasRelegation, leagueOfTeamIn } from "../competition/promotion";
+import { hasRelegation, leagueOfTeamIn } from "../competition/promotion";
+import { RELEGATION_SLOTS } from "../core/league-shape";
 import { isCupOnlyLeague } from "../data/league-catalog";
 import {
   activeContract,

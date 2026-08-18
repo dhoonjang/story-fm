@@ -1,6 +1,7 @@
 import { topLeagues } from "../data/league-catalog";
-import { leagueOfTeamIn } from "../competition/promotion";
+import { leagueOfTeamIn, leagueSizeIn } from "../competition/promotion";
 import { tierOfTeamIn } from "../core/club-tier";
+import { positionAt, relegationLine } from "../core/league-shape";
 import { inventPersonName } from "../world/persona";
 import { makeRng, randInt } from "../core/rng";
 import { boardExpectation, computeStandings } from "../competition/season";
@@ -30,22 +31,33 @@ const MIN_MATCHES = 8;
 /** 부임 직후의 유예 (일) — 새 감독에게 시간을 준다 */
 const GRACE_DAYS = 75;
 /**
- * 등급별 문턱 — **위험한 순위와 잘리는 순위.**
+ * 등급별 문턱 — **위험한 순위와 잘리는 순위**를 리그 크기의 비율로 적는다.
  *
  * ⚠️ 기대 순위와의 **차이**로만 재면 하위 구단은 영원히 안 잘린다: 잔류가 기대인
- * 팀(tier 4, 목표 17위)은 꼴찌를 해도 차이가 3이다. 실제로도 강등권 팀 감독이
- * 가장 자주 잘리는데 그 반대가 됐다. 그래서 등급마다 자리를 직접 적는다.
+ * 팀은 꼴찌를 해도 차이가 강등 칸 수뿐이다. 실제로도 강등권 팀 감독이 가장 자주
+ * 잘리는데 그 반대가 됐다. 그래서 등급마다 자리를 직접 적는다.
+ *
+ * ⚠️ **자리를 순위로 적으면 18팀 리그가 어긋난다** — tier 4의 20위는 분데스리가에
+ * 없는 자리라 그 리그의 잔류권 구단은 아무리 처져도 감독이 안 잘렸다. 20팀을 넣으면
+ * 예전 값 6·10 / 10·14 / 15·18 / 18·20이 그대로 나온다 (career.md §5).
  */
-const SEAT: Record<number, { danger: number; sack: number }> = {
-  1: { danger: 6, sack: 10 },
-  2: { danger: 10, sack: 14 },
-  3: { danger: 15, sack: 18 },
-  4: { danger: 18, sack: 20 },
+const SEAT_BAND: Record<number, { danger: number; sack: number }> = {
+  1: { danger: 0.3, sack: 0.5 },
+  2: { danger: 0.5, sack: 0.7 },
+  3: { danger: 0.75, sack: 0.9 },
 };
 
-/** 이 구단의 자리 — 체급은 **세이브가 갖는다**(team.md §2), 카탈로그가 아니다 */
+/**
+ * 이 구단의 자리 — 체급은 **세이브가 갖는다**(team.md §2), 카탈로그가 아니다.
+ * 잔류가 기대인 tier 4는 비율이 아니라 리그의 모양이 자리를 정한다: 강등권에
+ * 들어가면 위험하고 꼴찌면 자리가 없다.
+ */
 function seatOf(state: GameState, teamId: string): { danger: number; sack: number } {
-  return SEAT[tierOfTeamIn(state, teamId)]!;
+  const size = leagueSizeIn(state, teamId);
+  const tier = tierOfTeamIn(state, teamId);
+  if (tier === 4) return { danger: relegationLine(size), sack: size };
+  const band = SEAT_BAND[tier]!;
+  return { danger: positionAt(size, band.danger), sack: positionAt(size, band.sack) };
 }
 /** 하루에 잘리는 감독 수 상한 — 리그가 하루아침에 뒤집히지 않게 */
 const SACKINGS_PER_DAY = 2;
@@ -57,16 +69,19 @@ const NEW_MANAGER_BOUNCE = 6;
 /** 감독 팀의 경고 단계 — 이 횟수를 넘기면 경질된다 */
 export const USER_WARNINGS_BEFORE_SACK = 3;
 /**
- * 감독이 잘리는 순위 — **AI보다 훨씬 아래**다.
+ * 감독이 잘리는 순위 — **AI보다 훨씬 아래**다. 강등권에서도 아래 두 자리,
+ * 곧 20팀 리그면 19·20위이고 18팀 리그면 17·18위다.
  *
  * 같은 문턱을 쓰면 우승 경쟁이 기대인 구단에서 10위만 해도 시즌 중에 자리가
  * 없어진다. 그건 규칙이라기보다 사고다 — 아직 **새 구단에 부임하는 길이 없어서**
  * 경질은 곧 세이브의 끝이다. 그래서 감독은 경고를 세 번 받고, 보드 신뢰가 바닥이고,
- * 그러고도 **리그 최하위권(19·20위)**일 때만 잘린다. 라이벌 구단이 12위에서 감독을
- * 바꾸는 것과는 다른 잣대인데, 그 비대칭은 의도한 것이다: 세계는 감독의 이야기를
- * 위해 돈다. (새 구단 부임이 생기면 이 문턱은 AI와 같아져야 한다.)
+ * 그러고도 그 두 자리에 있을 때만 잘린다. 라이벌 구단이 12위에서 감독을 바꾸는
+ * 것과는 다른 잣대인데, 그 비대칭은 의도한 것이다: 세계는 감독의 이야기를 위해
+ * 돈다. (새 구단 부임이 생기면 이 문턱은 AI와 같아져야 한다.)
  */
-const USER_SACK_BOTTOM = 19;
+function userSackBottom(leagueSize: number): number {
+  return Math.min(leagueSize, relegationLine(leagueSize) + 1);
+}
 /** 감독 팀은 이만큼 치른 뒤에야 판단한다 — AI보다 늦게 본다 (경고를 먼저 주기 때문) */
 const USER_MIN_MATCHES = 12;
 /** 보드 평판이 이 아래로 내려가야 마지막 단계로 간다 */
@@ -162,7 +177,9 @@ export function reviewUserSeat(state: GameState, digest: string[]): boolean {
   if (standing.position <= boardExpectation(state, state.userTeamId).target) {
     if (warnings > 0) {
       manager.boardWarnings = warnings - 1;
-      digest.push(`보드가 한숨 돌렸다 — 경고 하나가 지워졌다 (${manager.boardWarnings}/3)`);
+      digest.push(
+        `보드가 한숨 돌렸다 — 경고 하나가 지워졌다 (${manager.boardWarnings}/${USER_WARNINGS_BEFORE_SACK})`,
+      );
     }
     return false;
   }
@@ -171,10 +188,12 @@ export function reviewUserSeat(state: GameState, digest: string[]): boolean {
   if (manager.lastWarnedOn && daysBetween(manager.lastWarnedOn, state.date) < 30) return false;
 
   const board = manager.reputation.board;
-  const next = warnings + 1;
+  // 경고 수는 마지막 단계에서 멈춘다 — 4/3은 화면이 그릴 수 없는 숫자다.
+  // 평판 압박은 계속 걸린다(그게 마지막 경고를 마지막이게 하는 힘이다) (career.md §5)
+  const next = Math.min(warnings + 1, USER_WARNINGS_BEFORE_SACK);
   manager.lastWarnedOn = state.date;
 
-  const sackable = standing.position >= USER_SACK_BOTTOM;
+  const sackable = standing.position >= userSackBottom(leagueSizeIn(state, state.userTeamId));
   if (next < USER_WARNINGS_BEFORE_SACK || !sackable || board > USER_BOARD_FLOOR) {
     manager.boardWarnings = next;
     manager.reputation.board = Math.max(0, board - 6);

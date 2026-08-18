@@ -10,6 +10,7 @@
  * 감독 시장에 흩어져 있어, 어느 쪽으로도 순환이 생기지 않는 자리에 둔다.
  */
 import type { GameState } from "./state";
+import { positionAt, safetyLine } from "./league-shape";
 import { teamCatalogById } from "../data/team-catalog";
 
 /** 카탈로그에 없는 팀(어드민 추가 직후 등)의 체급 */
@@ -31,20 +32,32 @@ export function tierOfTeamIn(state: GameState, teamId: string): 1 | 2 | 3 | 4 {
   return state.teams.find((t) => t.id === teamId)?.tier ?? catalogTierOf(teamId);
 }
 
+/** 체급별 기대 순위가 앉는 리그 크기 비율 — tier 4만 비율이 아니라 잔류선이다 */
+const EXPECTATION_BAND = { 1: 0.1, 2: 0.3, 3: 0.6 } as const;
+
 /**
  * 체급 하나가 뜻하는 **보드 기대치** — 난이도는 별도 옵션이 아니라 이 표다
  * (career.md §5). 세이브가 있으면 `boardExpectation(state, teamId)`(`competition/season.ts`),
- * 부임 **전** 팀 목록처럼 세이브가 아직 없는 자리는 카탈로그 체급을 직접 넘긴다.
+ * 부임 **전** 팀 목록처럼 세이브가 아직 없는 자리는 카탈로그 체급과 카탈로그 리그
+ * 인원을 직접 넘긴다.
+ *
+ * 목표 순위는 **리그 크기에서 나온다** — 상위 10%·30%·60%, tier 4는 잔류선이다.
+ * 20팀이면 2·6·12·17위이고 18팀이면 2·5·11·15위다. 상수로 적어 두면 18팀 리그에서
+ * 17위가 "잔류 충족"이 된다 — 그 리그의 17위는 강등이다.
  *
  * 체급을 읽는 자리 옆에 둔다 — 시즌 롤오버의 재산정도 이 문구로 감독에게 알리므로,
  * 시즌 모듈에 두면 `season.ts` ↔ `competition/club-tier.ts` 순환이 된다.
  */
-export function boardExpectationOfTier(tier: 1 | 2 | 3 | 4): { target: number; label: string } {
-  return tier === 1
-    ? { target: 2, label: "우승 경쟁" }
-    : tier === 2
-      ? { target: 6, label: "유럽 대항전권(6위 이내)" }
-      : tier === 3
-        ? { target: 12, label: "중위권 안착(12위 이내)" }
-        : { target: 17, label: "잔류(17위 이내)" };
+export function boardExpectationOfTier(
+  tier: 1 | 2 | 3 | 4,
+  leagueSize: number,
+): { target: number; label: string } {
+  if (tier === 4) {
+    const target = safetyLine(leagueSize);
+    return { target, label: `잔류(${target}위 이내)` };
+  }
+  const target = positionAt(leagueSize, EXPECTATION_BAND[tier]);
+  if (tier === 1) return { target, label: "우승 경쟁" };
+  if (tier === 2) return { target, label: `유럽 대항전권(${target}위 이내)` };
+  return { target, label: `중위권 안착(${target}위 이내)` };
 }
