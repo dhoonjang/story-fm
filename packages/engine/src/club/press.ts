@@ -8,7 +8,7 @@ import type {
 } from "@story-fm/domain";
 import { isNaturalAt, naturalPositionOf } from "@story-fm/domain";
 import type { GameState } from "../core/state";
-import { playersOf, pushNarrative, teamName, userPlayers } from "../core/state";
+import { playersOf, pushNarrative, teamNameIn, userPlayers } from "../core/state";
 import { makeRng, pick } from "../core/rng";
 import { clampForm, formLabel, moraleToForm } from "../squad/form";
 import type { SkillResult } from "../skills";
@@ -116,7 +116,7 @@ export function buildMatchPress(state: GameState, matchId: string): PressConfere
   const outcome = outcomeOf(state, match);
   if (!outcome) return null;
   const home = match.homeTeamId === state.userTeamId;
-  const opponent = teamName(home ? match.awayTeamId : match.homeTeamId);
+  const opponent = teamNameIn(state, home ? match.awayTeamId : match.homeTeamId);
   const score = `${result.homeGoals}-${result.awayGoals}`;
 
   const recent = recentOutcomes(state, 4);

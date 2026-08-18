@@ -2,7 +2,7 @@ import type { GamePlayer, SettlingEvent } from "@story-fm/domain";
 import { ageOf } from "@story-fm/domain";
 import { diffDays } from "../competition/calendar";
 import { countryOfTeam } from "../data/team-catalog";
-import { playerById, playersOf, teamName, type GameState } from "../core/state";
+import { playerById, playersOf, teamNameIn, type GameState } from "../core/state";
 
 /**
  * 정착 — 새 팀에 녹아드는 일. **날짜가 아니라 겪은 양이다.**
@@ -320,7 +320,7 @@ export function settlingNote(state: GameState, playerId: string): string | null 
   const from = state.transfers.find(
     (t) => t.gamePlayerId === playerId && t.date === a.joinedOn && t.fromTeamId !== null,
   );
-  const origin = from?.fromTeamId ? `${teamName(from.fromTeamId)}에서 온 뒤 ` : "";
+  const origin = from?.fromTeamId ? `${teamNameIn(state, from.fromTeamId)}에서 온 뒤 ` : "";
   const load = a.factors.map((f) => f.label).join(" · ");
   return (
     `적응 ${Math.round(a.progress * 100)}% — ${origin}${done.length > 0 ? done.join(" · ") : "아직 경기도 훈련도 없다"}` +

@@ -45,6 +45,7 @@ import { makeRng } from "../core/rng";
 import type { MarketSkillResult, SkillResult } from "../skills";
 import { grantManagerXP } from "../skills";
 import { buildTransferPress, openPress } from "../club/press";
+import { pickAnyPlayer } from "../core/player-ref";
 import {
   activeContract,
   releaseFromTactics,
@@ -227,9 +228,13 @@ export function arrivedResponses(state: GameState): Negotiation[] {
  * 확률은 여기서 계산해 라운드에 **함께 저장한다.** 나중에 "확률 34%였는데 LLM이
  * 수락했다"를 집계할 수 있어야 판정의 분포를 검증할 수 있다 (설계 §6).
  */
-export function sendOffer(state: GameState, terms: DealTerms): MarketSkillResult {
-  const player = playerById(state, terms.playerId);
-  if (!player) return { ok: false, message: `"${terms.playerId}"라는 선수를 찾지 못했습니다` };
+export function sendOffer(state: GameState, input: DealTerms): MarketSkillResult {
+  const pick = pickAnyPlayer(state, input.playerId);
+  if (!pick.ok) return { ok: false, message: pick.message };
+  const player = pick.player;
+  // 감독이 부른 이름이 실려 오므로 여기서 id로 굳힌다 — 아래는 협상 id와
+  // `gamePlayerId`를 이 값으로 짓는다
+  const terms: DealTerms = { ...input, playerId: player.id };
 
   // 임대 영입도 같은 테이블을 쓴다 — 방향만 다르다
   const kind: Negotiation["kind"] = terms.kind === "loan" ? "loan" : "buy";
@@ -748,8 +753,9 @@ export function setTransferList(
   state: GameState,
   input: { playerId: string; listed: boolean; askingPrice?: number; note?: string },
 ): SkillResult {
-  const player = playerById(state, input.playerId);
-  if (!player) return { ok: false, message: `"${input.playerId}"라는 선수를 찾지 못했습니다` };
+  const pick = pickAnyPlayer(state, input.playerId);
+  if (!pick.ok) return { ok: false, message: pick.message };
+  const player = pick.player;
   // 임대는 양방향 다 막힌다 — 나간 선수는 `teamId`가 남의 팀이고, 온 선수는 남의 계약이다
   const locked = loanLockOf(player);
   if (locked) return { ok: false, message: locked };
@@ -806,8 +812,9 @@ export function offerPlayerOut(
     loan?: boolean;
   },
 ): MarketSkillResult {
-  const player = playerById(state, input.playerId);
-  if (!player) return { ok: false, message: `"${input.playerId}"라는 선수를 찾지 못했습니다` };
+  const pick = pickAnyPlayer(state, input.playerId);
+  if (!pick.ok) return { ok: false, message: pick.message };
+  const player = pick.player;
   const locked = loanLockOf(player);
   if (locked) return { ok: false, message: locked };
   if (player.teamId !== state.userTeamId) {
@@ -1303,13 +1310,14 @@ export function openRenewal(
   state: GameState,
   input: { playerId: string; weeklyWage: number; years: number },
 ): MarketSkillResult {
-  const player = playerById(state, input.playerId);
-  if (!player) return { ok: false, message: `"${input.playerId}"라는 선수를 찾지 못했습니다` };
+  const pick = pickAnyPlayer(state, input.playerId);
+  if (!pick.ok) return { ok: false, message: pick.message };
+  const player = pick.player;
   if (player.teamId !== state.userTeamId) {
     return { ok: false, message: `${player.name}은(는) 우리 선수가 아닙니다` };
   }
   const terms: DealTerms = {
-    playerId: input.playerId,
+    playerId: player.id,
     fee: 0,
     weeklyWage: input.weeklyWage,
     years: input.years,
@@ -1319,9 +1327,9 @@ export function openRenewal(
   if (odds.blockers.length > 0) {
     return { ok: false, message: `재계약 협상을 열 수 없습니다 — ${odds.blockers.join(" / ")}` };
   }
-  const conflict = conflictingNegotiation(state, input.playerId, "renew");
+  const conflict = conflictingNegotiation(state, player.id, "renew");
   if (conflict) return { ok: false, message: kindConflictMessage(conflict, player.name) };
-  const existing = openNegotiationOfKind(state, input.playerId, "renew");
+  const existing = openNegotiationOfKind(state, player.id, "renew");
   if (existing) {
     const waiting = pendingOffer(existing);
     if (waiting && waiting.respondsOn !== null && waiting.respondsOn > state.date) {
@@ -1338,8 +1346,8 @@ export function openRenewal(
     existing ??
     (() => {
       const created: Negotiation = {
-        id: `neg-renew-${input.playerId}-${state.date}`,
-        gamePlayerId: input.playerId,
+        id: `neg-renew-${player.id}-${state.date}`,
+        gamePlayerId: player.id,
         kind: "renew",
         counterpartTeamId: null, // 상대는 선수 본인이다
         windowId: null, // 이적창과 무관

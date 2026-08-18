@@ -7,6 +7,7 @@ import {
   TRAINING_ATTR_CAP,
   POSITION_TRAIN_MAX,
   applyTrainingOutcomes,
+  trainingSettled,
   type GameState,
   type TrainingBrief,
 } from "@story-fm/engine";
@@ -150,6 +151,17 @@ function makeReportTool(
       required: ["results"],
     },
     handle(input: unknown) {
+      /**
+       * **한 구간은 한 번만 결산된다** — 도구 루프는 같은 도구를 여러 번 부를 수
+       * 있다 (docs/llm/agents.md §4). `ok: false`로 답하면 모델이 명단을 고쳐 또
+       * 부르므로, 성공으로 답하고 장부는 건드리지 않는다.
+       */
+      if (trainingSettled(state, brief)) {
+        return {
+          ok: true,
+          message: "이 구간의 훈련 결산은 이미 반영됐습니다 — 다시 제출하지 마세요",
+        };
+      }
       const parsed = ReportInputSchema.safeParse(input);
       if (!parsed.success) {
         const issues = parsed.error.issues
@@ -200,7 +212,9 @@ export async function reportTraining(
         tools: [makeReportTool(state, brief, (l) => (lines = l))],
       });
     },
-    () => lines.length > 0, // 이미 성과가 반영됐으면 다시 부르지 않는다
+    // 이미 반영됐으면 다시 부르지 않는다 — 요약 줄이 비어도(소수로만 움직인 구간)
+    // 장부는 이미 움직였으므로 반환값이 아니라 상태의 표식을 본다
+    () => trainingSettled(state, brief),
   ).catch(anchorStands("rater:training"));
   return { lines };
 }

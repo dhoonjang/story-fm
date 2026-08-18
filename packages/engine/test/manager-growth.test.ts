@@ -8,6 +8,7 @@ import {
   applyTrainingOutcomes,
   assignmentsOf,
   buildTrainingBrief,
+  cancelTrainingOn,
   financeOf,
   managerTrainingUptake,
   openNegotiationFor,
@@ -33,8 +34,9 @@ import { afterSquadReturn, completeDeal, createTestGame } from "./helpers";
  *
  * 여기서 고정하는 것은 셋이다:
  *   ① 훈련 축이 훈련 결산에 **실제로 걸린다** — 같은 판정이 감독에 따라 다른 결과를 남긴다
- *   ② 협상 타결·스카우트 보고서·훈련 결산이 각각 제 축의 XP를 올린다
- *   ③ 훈련 XP는 **세션 수**의 함수다 — 시간을 쪼개도 총합이 같다
+ *   ② 협상 타결·스카우트 보고서·훈련 세션이 각각 제 축의 XP를 올린다
+ *   ③ 훈련 XP는 **세션 수**의 함수이고 그것을 주는 것은 결산이 아니라 코어다 —
+ *      결산이 없어도 붙고, 결산이 두 번 와도 늘지 않고, 시간을 쪼개도 총합이 같다
  */
 
 const addDays = (date: string, n: number) => {
@@ -158,37 +160,42 @@ describe("훈련 축이 훈련 결산에 걸린다", () => {
 });
 
 describe("쓰는 만큼 오른다 — 세 축이 각자 자란다", () => {
-  it("훈련 결산이 훈련 축의 XP를 올린다 — 세션 수 × 0.5", () => {
+  it("훈련 XP는 결산이 아니라 코어가 준다 — 세션 수 × 0.5", () => {
     const state = createTestGame(7);
-    const before = state.managerXP.training;
     const brief = trainOneDay(state, ["stamina"], "러닝");
-    applyTrainingOutcomes(state, brief, []);
-    expect(state.managerXP.training - before).toBeCloseTo(
-      brief.sessions.length * TRAINING_XP_PER_SESSION,
+    const earned = brief.sessions.length * TRAINING_XP_PER_SESSION;
+    /**
+     * 결산은 아직 오지 않았다 — mock 모드나 예산 상한이면 영영 오지 않는다.
+     * 그래도 훈련장은 감독을 길렀어야 한다 (docs/simulation/career.md §3).
+     */
+    expect(state.managerXP.training, "결산 없는 구간의 훈련이 감독을 안 길렀다").toBeCloseTo(
+      earned,
       9,
     );
     // 다른 축은 훈련장에서 자라지 않는다
     for (const axis of MANAGER_ATTRIBUTES) {
       if (axis !== "training") expect(state.managerXP[axis]).toBe(0);
     }
-  });
 
-  it("XP는 소수로 쌓인다 — 반올림하면 세션 하나가 통째로 사라진다", () => {
-    const state = createTestGame(7);
-    const full = trainOneDay(state, ["stamina"], "러닝");
-    // 세션 **하나**만 실린 브리프 — 0.5가 그대로 남아야 한다
-    const one = buildTrainingBrief(state, [full.sessions[0]!], {
-      from: full.from,
-      to: full.to,
-    })!;
-    applyTrainingOutcomes(state, one, []);
-    expect(state.managerXP.training).toBe(TRAINING_XP_PER_SESSION);
-    applyTrainingOutcomes(state, one, []);
-    expect(state.managerXP.training).toBe(1);
+    // 도구 루프가 같은 결산을 두 번 제출해도 XP는 그대로다 (docs/llm/agents.md §4)
+    applyTrainingOutcomes(state, brief, []);
+    applyTrainingOutcomes(state, brief, []);
+    expect(state.managerXP.training, "결산이 XP를 또 줬다").toBeCloseTo(earned, 9);
+
+    // 소수로 쌓인다 — 반올림하면 세션 하나가 통째로 사라지거나 두 배가 된다
+    const before = state.managerXP.training;
+    const date = addDays(state.date, 1);
+    cancelTrainingOn(state, date); // 그날 훈련을 정확히 하나로 만든다
+    setTraining(state, {
+      sessions: [{ date, slot: "am", label: "러닝", focus: ["stamina"] as never }],
+    });
+    const solo = advanceTime(state, { days: 1 });
+    expect(solo.trained?.sessions, "그날 훈련이 하나가 아니다").toHaveLength(1);
+    expect(state.managerXP.training - before).toBe(TRAINING_XP_PER_SESSION);
   });
 
   it("시간을 쪼개도 훈련 XP 총합은 같다 — 결산 횟수가 아니라 세션 수다", () => {
-    /** 하루씩 N번 진행하며 매번 결산을 반영한다 */
+    /** 하루씩 N번 진행하며 매번 결산까지 반영한다 — 결산 횟수가 갈리는 자리다 */
     const run = (step: number, days: number) => {
       const state = createTestGame(11);
       afterSquadReturn(state);

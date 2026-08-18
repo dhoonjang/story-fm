@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   adminAddLeague,
   adminAddTeam,
+  adminRemoveCatalogPlayer,
   adminRemoveLeague,
   adminRemoveTeam,
   adminResetCupCatalog,
@@ -17,6 +18,7 @@ import {
   adminUpdateTeam,
   boardExpectation,
   boardExpectationOfTier,
+  catalogPath,
   catalogTierOf,
   checkEuroCupInvariants,
   checkLeagueInvariants,
@@ -37,6 +39,9 @@ import {
   teamCatalogPath,
   teamsOfLeague,
   tierOfTeamIn,
+  type AdminCupPatch,
+  type AdminDomesticCupPatch,
+  type AdminLeaguePatch,
   type LeagueCatalogEntry,
 } from "@story-fm/engine";
 import { createTestGame, rebuildEveryFixture } from "./helpers";
@@ -286,6 +291,25 @@ describe("리그 편집", () => {
     expect(leagueCatalog().some((l) => l.id === "kleague")).toBe(false);
   });
 
+  /**
+   * 패치는 어드민이 보낸 **런타임 JSON**이다 — 타입이 `Omit<…, "id">`라고 해서
+   * 그 모양으로 온다는 보장이 없다. 그대로 얹으면 id가 옮겨가거나 숫자 자리에
+   * 문자열이 앉은 파일이 저장되고, 그 파일은 다음 로드에서 통째로 시드로 폴백해
+   * 편집이 조용히 사라진다.
+   */
+  it("패치가 id를 옮기거나 숫자 자리에 문자열을 앉히면 거절한다", () => {
+    const moved = { id: "epl2", name: "다른 리그" } as unknown as AdminLeaguePatch;
+    expect(adminUpdateLeague("epl", moved).ok).toBe(false);
+    const notNumber = { coefficient: "1" } as unknown as AdminLeaguePatch;
+    expect(adminUpdateLeague("epl", notNumber).message).toContain("계수");
+    expect(existsSync(leagueCatalogPath())).toBe(false);
+
+    // 모르는 키는 저장 파일에 들어가지 않는다
+    const extra = { name: "잉글랜드 1부", nope: 1 } as unknown as AdminLeaguePatch;
+    expect(adminUpdateLeague("epl", extra).ok).toBe(true);
+    expect(leagueCatalog().find((l) => l.id === "epl")).not.toHaveProperty("nope");
+  });
+
   it("리셋이 시드로 되돌린다", () => {
     adminUpdateLeague("epl", { name: "바뀐 이름" });
     expect(adminResetLeagueCatalog().ok).toBe(true);
@@ -321,6 +345,39 @@ describe("컵 편집", () => {
     });
     expect(res.ok).toBe(true);
     expect(cupCatalog().find((c) => c.id === "uecl")!.size).toBe(12);
+  });
+
+  /**
+   * `windows`가 라운드 하나를 빠뜨리면 저장은 통과하고 **시즌 중에** 터진다 —
+   * `stageTarget`이 그 라운드를 편성할 때 목표일을 찾지 못한다 (competition.md §7).
+   */
+  it("국내 컵 목표일은 치르는 다섯 라운드를 다 가져야 한다", () => {
+    const half = { windows: { r32: [1, 10], r16: [2, 7] } } as unknown as AdminDomesticCupPatch;
+    const res = adminUpdateDomesticCup("facup", half);
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain("qf");
+
+    // 시드가 함께 갖는 league·playoff 키는 남아 있어도 거절하지 않는다
+    const full = {
+      windows: {
+        league: [1, 10],
+        playoff: [1, 10],
+        r32: [1, 10],
+        r16: [2, 7],
+        qf: [3, 21],
+        sf: [4, 25],
+        final: [5, 16],
+      },
+    } as unknown as AdminDomesticCupPatch;
+    expect(adminUpdateDomesticCup("facup", full).ok).toBe(true);
+  });
+
+  it("컵 패치도 id를 옮기지 못한다", () => {
+    const moved = { id: "ucl2" } as unknown as AdminCupPatch;
+    expect(adminUpdateCup("ucl", moved).ok).toBe(false);
+    const domestic = { id: "facup2" } as unknown as AdminDomesticCupPatch;
+    expect(adminUpdateDomesticCup("facup", domestic).ok).toBe(false);
+    expect(existsSync(cupCatalogPath())).toBe(false);
   });
 
   it("국내 컵도 같은 파일에서 편집·리셋된다", () => {
@@ -373,6 +430,17 @@ describe("불변식 (순수 함수)", () => {
     expect(checkLeagueInvariants(l, [team("t1", "a")])).toEqual([]);
   });
 
+  /**
+   * 팀 id 중복은 크래시가 아니라 **소실**이라 조용하다 — `teamCatalogById`가 하나만
+   * 답해 나머지 동명 클럽이 스쿼드·일정·순위표에서 통째로 사라진다 (team.md §8).
+   */
+  it("팀 id는 카탈로그 안에서 유일하다", () => {
+    const l = [league({ id: "a", kind: "cup-only" })];
+    expect(checkLeagueInvariants(l, [team("t1", "a"), team("t1", "a")]).join()).toContain(
+      "팀 id가 중복",
+    );
+  });
+
   it("대항전은 브래킷·티켓 합·리그 참조를 함께 본다", () => {
     const leagues = [league({ id: "epl" })];
     const base = {
@@ -396,5 +464,91 @@ describe("불변식 (순수 함수)", () => {
     expect(
       checkEuroCupInvariants([{ ...base, directSlots: 6, playoffSlots: 6 }], leagues).join(),
     ).toContain("참가 팀");
+  });
+
+  /**
+   * 본선 첫 단계는 직행 팀 하나에 플레이오프 승자 하나를 붙인다(`mainDrawPairs`).
+   * 합만 보면 통과하는 조합이 있다 — 직행 6 + 플레이오프 4는 브래킷 8로 2의
+   * 거듭제곱이지만, 승자는 둘뿐이라 직행 넷이 상대 없이 남는다. 그러면 결승이
+   * 만들어지지 않아 **시즌이 끝나지 않는다.**
+   */
+  it("플레이오프가 있으면 직행 팀이 승자와 일대일로 맞아야 한다", () => {
+    const leagues = [league({ id: "epl" })];
+    const lopsided = {
+      id: "c",
+      name: "컵",
+      short: "C",
+      size: 12,
+      matchesPerTeam: 4,
+      slots: { epl: 12 },
+      directSlots: 6,
+      playoffSlots: 4,
+      prize: { participation: 0, win: 0, draw: 0, stage: {}, winner: 0 },
+    };
+    // 브래킷(6 + 2 = 8)은 2의 거듭제곱이라 합 검사에는 걸리지 않는다
+    const problems = checkEuroCupInvariants([lopsided], leagues);
+    expect(problems.join()).not.toContain("2의 거듭제곱");
+    expect(problems.join()).toContain("일대일");
+    // 플레이오프가 없으면 직행만으로 브래킷이 서므로 이 식을 묻지 않는다
+    expect(
+      checkEuroCupInvariants([{ ...lopsided, directSlots: 8, playoffSlots: 0 }], leagues),
+    ).toEqual([]);
+  });
+
+  it("시드 대항전은 이 식을 만족한다 (UCL 8/16 · UEL 4/8 · UECL 2/4)", () => {
+    expect(checkEuroCupInvariants(cupCatalog(), leagueCatalog())).toEqual([]);
+  });
+});
+
+/**
+ * 오버라이드 파일은 **모양을 검사해 통과한 것만** 카탈로그가 된다. 어긋난 파일이
+ * 그대로 읽히면 실패가 저장한 순간이 아니라 한참 뒤 새 게임을 세울 때 터지고,
+ * 반대로 멀쩡한 파일을 거절하면 편집이 조용히 사라진다 — 양쪽을 함께 본다.
+ */
+describe("오버라이드 파일 로드", () => {
+  it("모양이 어긋난 선수 카탈로그는 시드로 돌아간다", () => {
+    // 15축이 통째로 빠진 줄 — 그대로 카탈로그가 되면 전력을 재는 자리에서 터진다
+    writeFileSync(
+      catalogPath(),
+      JSON.stringify([
+        {
+          id: "ghost",
+          teamId: "arsenal",
+          nameKo: "유령",
+          nameEn: "Ghost",
+          birthdate: "2000-01-01",
+          positions: [{ position: "ST", proficiency: 80, isNatural: true }],
+          potential: 80,
+        },
+      ]),
+      "utf8",
+    );
+    expect(playerCatalog().some((p) => p.id === "ghost")).toBe(false);
+    expect(playerCatalog().some((p) => p.teamId === "arsenal")).toBe(true);
+  });
+
+  it("어드민이 저장한 선수 카탈로그는 파일에서 그대로 다시 읽힌다", () => {
+    const victim = playerCatalog()[0]!.id;
+    expect(adminRemoveCatalogPlayer(victim).ok).toBe(true);
+    expect(existsSync(catalogPath())).toBe(true);
+    // 편집 세대가 오르면 카탈로그 캐시가 비고, 다음 조회는 파일을 다시 읽는다
+    adminResetLeagueCatalog();
+    // 스키마가 엔진이 쓴 모양을 거절하면 시드로 폴백해 지운 선수가 되살아난다
+    expect(playerCatalog().some((p) => p.id === victim)).toBe(false);
+  });
+
+  it("팀 id가 중복된 팀 카탈로그는 시드로 돌아간다", () => {
+    const seed = teamCatalog().map((t) => ({ ...t }));
+    writeFileSync(
+      teamCatalogPath(),
+      JSON.stringify({
+        teams: [...seed, { ...seed[0]! }],
+        tacticalStyle: {},
+        clubProfiles: {},
+      }),
+      "utf8",
+    );
+    adminResetLeagueCatalog(); // 편집 세대를 올려 캐시를 비운다
+    expect(teamCatalog()).toHaveLength(seed.length);
   });
 });

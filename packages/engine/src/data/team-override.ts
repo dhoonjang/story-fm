@@ -81,10 +81,20 @@ function isProfileMap(value: unknown): value is Record<string, ClubProfile> {
   });
 }
 
+/**
+ * 팀 id는 카탈로그 안에서 유일하다 (team.md §8) — 중복이면 `teamCatalogById`가
+ * 하나만 답해 나머지 동명 클럽이 스쿼드·일정·순위표에서 통째로 사라진다.
+ * 그 손실은 조용하므로 파일을 통째로 거절하고 시드로 돌아간다.
+ */
+function hasDuplicateIds(teams: readonly TeamCatalogEntry[]): boolean {
+  return new Set(teams.map((t) => t.id)).size !== teams.length;
+}
+
 const load = catalogSource<TeamOverride | null>(() => {
   const o = asRecord(readOverride(teamCatalogPath()));
   if (o === null) return null;
   if (!Array.isArray(o.teams) || o.teams.length === 0 || !o.teams.every(isTeamEntry)) return null;
+  if (hasDuplicateIds(o.teams as TeamCatalogEntry[])) return null;
   if (!isStyleMap(o.tacticalStyle) || !isProfileMap(o.clubProfiles)) return null;
   return {
     teams: o.teams as TeamCatalogEntry[],

@@ -9,7 +9,7 @@ import {
 } from "@story-fm/domain";
 import { attributeDeclineScale, attributeGainScale } from "../world/attributes";
 import { seasonRating } from "@story-fm/domain";
-import { grantManagerXP, setPlayerPosition } from "../skills";
+import { setPlayerPosition } from "../skills";
 import {
   assignmentsOf,
   isAvailable,
@@ -19,7 +19,7 @@ import {
   recordGrowth,
   seasonStatOf,
   squadLevelOf,
-  teamName,
+  teamNameIn,
 } from "../core/state";
 
 /**
@@ -119,9 +119,10 @@ export function trainingAttrCap(training: number): number {
 }
 
 /**
- * 훈련 XP — **세션 하나당** 이만큼. 결산 횟수가 아니라 세션 수로 세는 것이
- * 핵심이다: `advance_time`을 하루씩 쪼개도 총 세션 수는 같아 XP를 불릴 수 없다.
- * 소수로 쌓이고 100에서 한 칸이 된다 (`grantManagerXP`).
+ * 훈련 XP — **세션 하나당** 이만큼. 세션을 소화하는 자리(`dailyTick`)에서 코어가
+ * 준다: 결산당 고정값이면 `advance_time`을 하루씩 쪼개는 것만으로 불어나고,
+ * 결산에 매달면 판정이 실패한 구간의 훈련은 감독을 기르지 않는다. 세션 수는
+ * 어떻게 쪼개도 같다. 소수로 쌓이고 100에서 한 칸이 된다 (`grantManagerXP`).
  */
 export const TRAINING_XP_PER_SESSION = 0.5;
 
@@ -294,7 +295,7 @@ export function buildTrainingBrief(
   if (subjects.length === 0) return null;
 
   return {
-    teamName: teamName(state.userTeamId),
+    teamName: teamNameIn(state, state.userTeamId),
     from: window.from,
     to: window.to,
     sessions,
@@ -313,6 +314,29 @@ export function buildTrainingBrief(
 }
 
 /**
+ * 아직 결산이 얹히지 않은 훈련 세션 — 표식은 일정 엔트리의 `settled`다.
+ *
+ * 엔트리를 찾지 못한 세션(합성 브리프)은 표식을 남길 자리가 없어 언제나
+ * 미반영으로 센다 — 자리 없는 브리프까지 막으면 결산이 아예 돌지 않는다.
+ */
+function unsettledSessions(state: GameState, brief: TrainingBrief): TrainedSession[] {
+  return brief.sessions.filter((s) => {
+    const entry = state.schedule.find((e) => e.id === s.entryId);
+    return entry === undefined || entry.settled !== true;
+  });
+}
+
+/**
+ * 이 구간의 훈련이 **전부** 이미 반영됐나 — 도구 핸들러와 재시도 가드가 보는 값.
+ *
+ * 요약 줄의 유무로는 가를 수 없다: 적응도가 소수로만 움직인 구간은 줄이 하나도
+ * 없지만 장부는 이미 움직였다.
+ */
+export function trainingSettled(state: GameState, brief: TrainingBrief): boolean {
+  return unsettledSessions(state, brief).length === 0;
+}
+
+/**
  * 판정을 장부에 반영한다 — **검증은 여기서만** 한다.
  *
  * 모델이 무엇을 돌려주든 이 함수를 통과한 것만 게임 상태가 된다 (AGENTS.md 6-7).
@@ -325,6 +349,12 @@ export function applyTrainingOutcomes(
   brief: TrainingBrief,
   outcomes: readonly TrainingOutcome[],
 ): string[] {
+  /**
+   * **한 결산은 장부를 한 번만 움직인다** — 도구 루프는 같은 결산을 여러 번
+   * 제출할 수 있고, 그때마다 반영하면 적응도·능력치가 호출 횟수만큼 쌓여
+   * "코어 앵커 ± 한도"가 뚫린다 (docs/llm/agents.md §4).
+   */
+  if (trainingSettled(state, brief)) return [];
   /**
    * 판정이 가리킨 훈련 날짜 → 그 세션 (없으면 마지막 세션).
    * 하루에 두 세션이면 **먼저 있던 쪽**(오전)에 붙인다 — 판정은 날짜까지만 답한다.
@@ -346,7 +376,12 @@ export function applyTrainingOutcomes(
   const uptake = managerTrainingUptake(training);
   const attrCap = trainingAttrCap(training);
 
+  // 같은 판정에 같은 선수가 두 줄로 오면 **첫 줄만** 받는다 — 두 줄째까지 받으면
+  // 한 결산이 그 선수에게 밴드의 두 배를 남긴다 (docs/llm/agents.md §4)
+  const taken = new Set<string>();
   for (const outcome of outcomes) {
+    if (taken.has(outcome.playerId)) continue;
+    taken.add(outcome.playerId);
     const subject = subjects.get(outcome.playerId);
     const player = playerById(state, outcome.playerId);
     if (!subject || !player) continue; // 명단 밖 선수는 무시한다
@@ -464,12 +499,12 @@ export function applyTrainingOutcomes(
     }
   }
 
-  /**
-   * 훈련장이 감독을 기른다 — **소화된 세션 수**만큼 (결산 횟수가 아니다).
-   * 판정이 아무것도 남기지 않은 구간도 훈련은 있었으므로 XP는 붙는다.
-   */
-  const grown = grantManagerXP(state, "training", brief.sessions.length * TRAINING_XP_PER_SESSION);
-  if (grown) lines.push(grown);
+  // 이 구간은 반영이 끝났다 — 두 번째 제출은 맨 위에서 걸린다.
+  // 엔트리를 찾지 못한 세션은 표식을 남길 자리가 없다 (합성 브리프)
+  for (const session of brief.sessions) {
+    const entry = state.schedule.find((e) => e.id === session.entryId);
+    if (entry) entry.settled = true;
+  }
   return lines;
 }
 

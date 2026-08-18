@@ -17,7 +17,7 @@ import type { GamePhase, GameState } from "./state";
 import { ensurePersonas } from "../world/persona";
 import { ensureSquadNumbers } from "../squad/numbers";
 import { playerCatalog } from "../world/catalog";
-import { addMissingClubs, recomputeOverall, teamName } from "./state";
+import { addMissingClubs, recomputeOverall, teamNameIn } from "./state";
 
 export { dataDir };
 
@@ -469,7 +469,7 @@ export type GameListEntry = ({ readable: true } & GameSummary) | UnreadableGame;
 function summaryOf(state: GameState): GameSummary {
   return {
     id: state.id,
-    teamName: teamName(state.userTeamId),
+    teamName: teamNameIn(state, state.userTeamId),
     managerName: state.manager.name,
     season: state.season,
     date: state.date,

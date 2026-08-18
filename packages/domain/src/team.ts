@@ -1,9 +1,14 @@
 import { z } from "zod";
 
 /**
- * 게임 팀 (GAME_TEAM) — 정규화 v6. 이름·리그 등 정체성은 TEAM_CATALOG에,
- * 라인업은 TACTIC_ASSIGNMENT에, 재정은 FINANCE에 있으므로 팀 엔티티는 얇다.
- * id는 카탈로그 팀 id를 재사용한다.
+ * 게임 팀 (GAME_TEAM) — 정규화 v6. 라인업은 TACTIC_ASSIGNMENT에, 재정은 FINANCE에
+ * 있고, id는 카탈로그 팀 id를 재사용한다.
+ *
+ * **카탈로그가 초기치를 주는 값은 게임 시작에 여기로 복사된다** — 이름·약칭·소속
+ * 리그·체급·구장·브랜드(team.md §1). 카탈로그는 어드민이 편집할 수 있으므로,
+ * 매 요청 카탈로그를 읽는 자리는 그대로 어드민 편집이 진행 중인 세이브로 새는
+ * 구멍이다. 복사한 필드는 전부 optional이다 — 옛 세이브엔 없고, 없으면 카탈로그가
+ * 답한다 (SAVE_VERSION 유지).
  */
 export const GameTeamSchema = z.object({
   id: z.string().min(1),
@@ -17,6 +22,32 @@ export const GameTeamSchema = z.object({
    * 옛 세이브엔 없다 — 없으면 카탈로그가 답한다 (세이브 버전 유지).
    */
   tier: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).optional(),
+  /**
+   * **표시명 — 세이브가 갖는다.** 카탈로그 값은 게임 시작의 초기치일 뿐이다.
+   * 읽는 자리는 `teamNameIn` · `teamShortNameIn`뿐이다 (game-state.md §1).
+   *
+   * 옛 세이브엔 없다 — 없으면 카탈로그가 답한다 (세이브 버전 유지).
+   */
+  name: z.string().min(1).optional(),
+  shortName: z.string().min(1).optional(),
+  /**
+   * **소속 리그 — 세이브가 갖는다.** 승강은 이 값이 아니라 `state.leagueOf`가
+   * 덮으므로, 여기 있는 것은 언제나 **게임이 시작할 때의** 소속이다. 읽는 자리는
+   * `leagueOfTeamIn` 하나뿐이다 — 카탈로그를 직접 읽으면 어드민의 리그 이동 편집이
+   * 진행 중인 세이브의 순위표와 일정을 흔든다.
+   */
+  leagueId: z.string().min(1).optional(),
+  /**
+   * **구장·브랜드 — 세이브가 갖는다** (`CLUB_PROFILES`의 사본). 매치데이 수입과
+   * 상업 수입의 기준이라, 카탈로그를 직접 읽으면 어드민의 수용인원 편집이 진행 중인
+   * 세이브의 장부를 그 자리에서 바꾼다. 읽는 자리는 `clubProfileIn`뿐이다.
+   *
+   * **프로필이 등재된 클럽만 갖는다.** 미등재 클럽(2부·시장 전용·어드민 추가)은
+   * 값이 없는 것이 사실이고, 폴백은 읽는 자리가 정한다 (team.md §3).
+   */
+  stadium: z.string().optional(),
+  capacity: z.number().int().min(0).optional(),
+  commercialTier: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).optional(),
   /**
    * AI 감독의 전술 역량치 0~99 — 전술 설정(TACTICS)이 아니라 전술 소화율 배율의
    * 입력. 유저 팀은 MANAGER.attributes.tactics를 대신 사용한다.

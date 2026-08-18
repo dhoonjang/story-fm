@@ -14,7 +14,7 @@ import { payLeaguePhasePrizes, payStagePrizes } from "./euro-prize";
 import { makeRng } from "../core/rng";
 import { pairOf, resolveExtraTime, tieAggregate } from "./extra-time";
 import { shootout } from "./shootout";
-import { pushNarrative, teamName, teamShortName, type GameState } from "../core/state";
+import { pushNarrative, teamNameIn, teamShortNameIn, type GameState } from "../core/state";
 import { computeStandings } from "./season";
 
 /**
@@ -187,13 +187,15 @@ function createStage(
   );
   if (ours) {
     const opponent = ours.homeTeamId === state.userTeamId ? ours.awayTeamId : ours.homeTeamId;
-    digest.push(`🎫 ${short} ${label} 대진 확정 — 상대는 ${teamName(opponent)} (${ours.date})`);
-    pushNarrative(state, `${short} ${label} 진출 — vs ${teamName(opponent)}`, 4);
+    digest.push(
+      `🎫 ${short} ${label} 대진 확정 — 상대는 ${teamNameIn(state, opponent)} (${ours.date})`,
+    );
+    pushNarrative(state, `${short} ${label} 진출 — vs ${teamNameIn(state, opponent)}`, 4);
   } else {
     digest.push(
       `${short} ${label} 대진: ${pairs
         .slice(0, 4)
-        .map(([a, b]) => `${teamShortName(a)}–${teamShortName(b)}`)
+        .map(([a, b]) => `${teamShortNameIn(state, a)}–${teamShortNameIn(state, b)}`)
         .join(", ")}${pairs.length > 4 ? " 등" : ""}`,
     );
   }

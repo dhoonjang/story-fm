@@ -17,13 +17,15 @@ import { clubEconomyLevel, leagueEconomyLevel } from "../data/league-economy";
 import { isMarketOnlyLeague, isTopLeague, leagueCatalogById } from "../data/league-catalog";
 import { competitionShortName, isCup, isEuroCup } from "../data/cup-catalog";
 import { isFriendly } from "../competition/friendly";
-import { isClubTeam, leagueOfTeam, teamCatalogById } from "../data/team-catalog";
+import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import { clubEconomyLevelIn, leagueOfTeamIn } from "../competition/promotion";
 import { computeStandings } from "../competition/season";
 import {
+  catalogLeagueIn,
+  clubProfileIn,
   financeOf,
   pushNarrative,
-  teamShortName,
+  teamShortNameIn,
   weeklyWageLinesOf,
   weeklyWagesOf,
   type GameState,
@@ -255,8 +257,13 @@ function tierOf(state: GameState | undefined, teamId: string): 1 | 2 | 3 | 4 {
   return state ? tierOfTeamIn(state, teamId) : catalogTierOf(teamId);
 }
 
+/**
+ * 이 파일의 구장·브랜드 통로 — `tierOf`와 같은 이유로 `state`가 두 문맥을 가른다.
+ * 세이브가 있으면 세이브가 든 프로필을 읽는다 — 카탈로그를 읽으면 어드민의 수용인원·
+ * 브랜드 편집이 진행 중인 세이브의 매치데이·상업 수입을 그 자리에서 바꾼다 (team.md §3).
+ */
 function profileOf(state: GameState | undefined, teamId: string) {
-  return clubProfile(teamId, tierOf(state, teamId));
+  return state ? clubProfileIn(state, teamId) : clubProfile(teamId, tierOf(state, teamId));
 }
 
 function poolOf(state: GameState, teamId: string): number {
@@ -265,9 +272,13 @@ function poolOf(state: GameState, teamId: string): number {
 
 /** 브랜드가 중계 몫을 끌어올리는 배수 — 경제 수준 ÷ 리그 수준 (브랜드 보정만 남긴다) */
 function brandPoolLift(state: GameState | undefined, teamId: string): number {
-  const league = teamCatalogById(teamId)?.leagueId ?? leagueOfTeam(teamId);
+  // 승강이 아니라 **원 소속**이다 — 분자와 분모가 같은 리그여야 브랜드 보정만 남는다
+  const league = catalogLeagueIn(state, teamId);
   const level = leagueEconomyLevel(league);
-  return level > 0 ? clubEconomyLevel(teamId, tierOf(state, teamId)) / level : 1;
+  const { commercialTier } = profileOf(state, teamId);
+  return level > 0
+    ? clubEconomyLevel(teamId, tierOf(state, teamId), league, commercialTier) / level
+    : 1;
 }
 
 /**
@@ -535,7 +546,7 @@ export function applyMatchFinance(
   const teamId = state.userTeamId;
   const home = match.homeTeamId === teamId;
   const opponentId = home ? match.awayTeamId : match.homeTeamId;
-  const label = `${competitionShortName(match.competitionId)} vs ${teamShortName(opponentId)}`;
+  const label = `${competitionShortName(match.competitionId)} vs ${teamShortNameIn(state, opponentId)}`;
   const ref = { type: "match" as const, id: match.id };
 
   // 홈 입장 수입 — 중립 경기(결승)는 우리 수입이 아니다

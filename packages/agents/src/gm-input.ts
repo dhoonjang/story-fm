@@ -36,7 +36,6 @@ import {
   type ScenePoint,
 } from "@story-fm/engine";
 import {
-  naturalPositionOf,
   PERSONA_ROLE_LABEL,
   slotOfTime,
   type Persona,
@@ -75,21 +74,15 @@ export function describePersona(persona: Persona): string {
 }
 
 /**
- * 레퍼런스 블록 — 캐시되는 시스템 블록. 감독 프로필 + 인물 카드 + 선수 명부.
- * 능력치·컨디션은 넣지 않는다 — 상세는 조회 도구의 몫.
- * ⚠️ 정렬은 (포지션, id) 고정 — 훈련으로 바뀌는 값(OVR)으로 정렬하면 캐시 프리픽스가 매 턴 깨진다.
+ * 레퍼런스 블록 — 캐시되는 시스템 블록. 감독 프로필 + 인물 카드 + 선수단 규칙.
+ * ⚠️ 선수의 이름도 id도 여기 두지 않는다 — 명단은 영입·매각·2군 승격·주장 변경마다
+ * 바뀌고, 한 줄이 달라지면 이 블록과 그 뒤의 이력이 통째로 무효가 된다. 이름은 매 턴
+ * 층(`buildGmStateNote`)의 「선수단」 줄이 싣는다.
  * ⚠️ 감독의 능력·평판도 마찬가지다 — 경기마다 평판이 움직이고 능력도 자라므로
  * 여기 있으면 경기 한 번에 이 블록과 그 뒤가 통째로 무효가 된다. 수치는 매 턴 층
  * (`buildGmStateNote`)이 싣고 여기엔 이름과 배경만 남는다.
  */
 export function buildGmReference(state: GameState): string {
-  const rows = userPlayers(state)
-    .map((p) => ({ p, pos: naturalPositionOf(p).position }))
-    .sort((a, b) => (a.pos === b.pos ? (a.p.id < b.p.id ? -1 : 1) : a.pos < b.pos ? -1 : 1))
-    .map(
-      ({ p, pos }) =>
-        `${p.id}|${p.name}|${pos}|${squadLevelOf(p) === "first" ? "1군" : "2군"}${p.isCaptain ? "|주장" : ""}`,
-    );
   const m = state.manager;
   return [
     `[감독 프로필]`,
@@ -103,10 +96,12 @@ export function buildGmReference(state: GameState): string {
     ``,
     // 기자단 카드 — 회견은 세계가 먼저 부르는 자리라, 부를 사람이 카드로 서 있어야 한다
     ...reportersOf(state).flatMap((r) => [describePersona(r), ``]),
-    // ⚠️ 명부 헤더는 "모두 화자다"로 유지 — 조회 안내를 덧붙이면 명부가 id 표로
-    // 읽혀 한 번 이름이 불린 선수만 계속 말한다
-    `[${teamName(state.userTeamId)} 선수단] id|이름|주포지션|스쿼드 — 이 이름들이 모두 화자다`,
-    ...rows,
+    // ⚠️ 이름이 아니라 규칙이다 — 목록을 되살리면 캐시가 명단과 함께 깨지고,
+    // 그 목록은 다시 id 표로 읽혀 한 번 불린 선수만 계속 말한다
+    `[${teamName(state.userTeamId)} 선수단]`,
+    `선수는 인물 카드가 없어도 전원 화자다. 이름은 상태 스냅샷의 「선수단」 줄에 있고, 그 이름이 곧 화자 명단이다.`,
+    `스킬의 선수 인자도 그 이름으로 받는다 — 조회가 돌려준 id를 적어도 된다.`,
+    `능력치·배치·컨디션·계약은 get_squad·search_players가 준다.`,
   ].join("\n");
 }
 
@@ -287,7 +282,29 @@ export function buildGmStateNote(
         ? `예정 훈련 ${trainingCount}건: ${training.join(" / ")}${trainingCount > training.length ? " …" : ""}`
         : `예정 훈련 없음 — 기본 훈련까지 비워진 상태다`,
     alerts.length > 0 ? `주의: ${alerts.join(" · ")}` : `주의: 없음`,
-    // 선수 근황 — 부상·정지·불만 밖의 이름이 실리는 유일한 자리.
+    /**
+     * 선수단 — **화자 명단이다.** 이 줄이 없으면 카드가 있는 코치·구단주·기자만
+     * 말하고 서른 명은 조회 대상이 된다 (agents.md §6).
+     *
+     * 이름만 싣는다 — 배치·능력치·컨디션은 조회의 몫이고, 캐시 층이 아니라 여기인
+     * 이유는 명단이 영입·승격·주장 변경마다 바뀌기 때문이다 (agents.md §5).
+     */
+    (() => {
+      const named = (level: "first" | "reserve") =>
+        players
+          .filter((p) => squadLevelOf(p) === level)
+          .map((p) => `${p.name}${p.isCaptain ? "(주장)" : ""}`);
+      const first = named("first");
+      const reserve = named("reserve");
+      // 구분자는 쉼표가 아니라 가운뎃점이다 — 한국어 성명에 공백이 들어가서
+      // 쉼표로 이으면 어디서 한 사람이 끝나는지가 흐려진다
+      return [
+        `선수단(${players.length}명) — 모두 화자다`,
+        `  1군 ${first.length}: ${first.join(" · ")}`,
+        ...(reserve.length > 0 ? [`  2군 ${reserve.length}: ${reserve.join(" · ")}`] : []),
+      ].join("\n");
+    })(),
+    // 선수 근황 — 위 이름들 중 **사실이 붙는** 셋이다.
     // 코어는 사실만 낸다(speakerCues) — 누가 말할지, 무슨 말을 할지는 GM의 몫
     (() => {
       const cues = speakerCues(state);

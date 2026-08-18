@@ -27,17 +27,38 @@ export interface CupOverride {
 
 const STAGES = ["league", "playoff", "r32", "r16", "qf", "sf", "final"] as const;
 
+/**
+ * 국내 컵이 **실제로 치르는** 다섯 라운드 — `windows`가 이 키를 다 가져야 한다.
+ * `domestic-cup-catalog.ts`의 `DOMESTIC_STAGES`와 같은 목록이지만 값으로 가져올 수
+ * 없다 — 그 모듈이 이 파일을 읽으므로 순환 참조가 된다.
+ */
+const PLAYED_STAGES = ["r32", "r16", "qf", "sf", "final"] as const;
+
 function isStageMap(value: unknown): boolean {
   const o = asRecord(value);
   return o !== null && Object.keys(o).every((k) => (STAGES as readonly string[]).includes(k));
 }
 
 /** `[월, 일]` 쌍 */
-function isDatePair(value: unknown): boolean {
+export function isMonthDay(value: unknown): boolean {
   if (!Array.isArray(value) || value.length !== 2) return false;
   const [month, day] = value as unknown[];
   if (typeof month !== "number" || typeof day !== "number") return false;
   return month >= 1 && month <= 12 && day >= 1 && day <= 31;
+}
+
+/**
+ * `windows`에 목표일이 없는 라운드 — 비어 있으면 통과다.
+ *
+ * 키가 알려진 단계인지만 보면 **키가 하나도 없는 표도 통과한다.** 그러면
+ * `domestic-cup.ts`의 `stageTarget`이 `cup.windows[stage]`를 구조 분해하다 터진다 —
+ * 저장한 순간이 아니라 그 라운드를 편성하는 시즌 중에.
+ * 시드는 `league`·`playoff` 키도 함께 갖는다: 남아 있어도 거절하지 않는다.
+ */
+export function missingCupWindows(value: unknown): string[] {
+  const windows = asRecord(value);
+  if (windows === null) return [...PLAYED_STAGES];
+  return PLAYED_STAGES.filter((stage) => !isMonthDay(windows[stage]));
 }
 
 function isStageList(value: unknown): boolean {
@@ -86,11 +107,12 @@ function isDomesticEntry(value: unknown): value is DomesticCupEntry {
     (o.prestige === 1 || o.prestige === 2) &&
     isStageList(o.twoLegged) &&
     (o.drawStyle === "per-round" || o.drawStyle === "fixed-bracket") &&
-    isDatePair(o.firstDraw) &&
+    isMonthDay(o.firstDraw) &&
     typeof o.drawDelayDays === "number" &&
     (o.homeRule === "underdog" || o.homeRule === "seeded" || o.homeRule === "draw") &&
     isStageMap(windows) &&
-    Object.values(windows).every(isDatePair) &&
+    Object.values(windows).every(isMonthDay) &&
+    missingCupWindows(windows).length === 0 &&
     (o.stageNames === undefined || isStageMap(o.stageNames)) &&
     (o.finalMidweek === undefined || typeof o.finalMidweek === "boolean") &&
     (o.europeanTicket === "uel" || o.europeanTicket === "uecl") &&

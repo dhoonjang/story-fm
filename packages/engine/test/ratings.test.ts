@@ -321,14 +321,43 @@ describe("LLM 평점 반영 — 코어는 가능한 판정만 받는다", () => 
     expect(value).toBeGreaterThan(anchor);
   });
 
-  it("두 번 적용해도 값이 튀지 않는다 — 증감 정산이라 멱등이다", () => {
+  it("두 번 불러도 앵커 ±RATING_BAND 안이다 — 둘째 호출은 장부를 더 움직이지 않는다", () => {
     const { state, matchId, playerId, anchor } = played();
-    const target = Math.min(RATING_MAX, anchor + 0.4);
-    applyMatchRatings(state, matchId, [{ playerId, rating: target }]);
-    const once = state.seasonStats.find((s) => s.gamePlayerId === playerId)?.ratingSum;
-    applyMatchRatings(state, matchId, [{ playerId, rating: target }]);
-    const twice = state.seasonStats.find((s) => s.gamePlayerId === playerId)?.ratingSum;
-    expect(twice).toBeCloseTo(once ?? 0, 5);
+    const ceiling = Math.min(RATING_MAX, anchor + RATING_BAND);
+    const valueOf = () =>
+      state.matches.find((m) => m.id === matchId)?.result?.ratings?.[playerId] ?? 0;
+    const sumOf = () => state.seasonStats.find((s) => s.gamePlayerId === playerId)?.ratingSum ?? 0;
+
+    const first = applyMatchRatings(state, matchId, [{ playerId, rating: 10 }]);
+    expect(first.applied).toBe(1);
+    expect(first.already).toBe(false);
+    expect(valueOf()).toBeCloseTo(ceiling, 5);
+    const once = sumOf();
+
+    // 도구 루프가 같은 판정을 다시 제출한 자리 — 보정된 값에서 밴드를 다시 재면 앵커에서 2배 벗어난다
+    const again = applyMatchRatings(state, matchId, [{ playerId, rating: 10 }]);
+    expect(again.already, "표식이 안 섰다").toBe(true);
+    expect(again.applied).toBe(0);
+    expect(valueOf(), "앵커에서 밴드보다 멀어졌다").toBeCloseTo(ceiling, 5);
+    expect(sumOf(), "시즌 합계가 두 번 움직였다").toBeCloseTo(once, 5);
+  });
+
+  it("같은 호출 안에 같은 선수가 두 줄로 오면 첫 줄만 받는다", () => {
+    const { state, matchId, playerId, anchor } = played();
+    const target = anchor <= RATING_MAX - 0.4 ? anchor + 0.4 : anchor - 0.4;
+    const before = state.seasonStats.find((s) => s.gamePlayerId === playerId)?.ratingSum ?? 0;
+
+    const { applied, skipped } = applyMatchRatings(state, matchId, [
+      { playerId, rating: target, note: "첫 줄" },
+      { playerId, rating: 10, note: "둘째 줄" },
+    ]);
+    expect(applied).toBe(1);
+    expect(skipped).toBe(1);
+    const match = state.matches.find((m) => m.id === matchId);
+    expect(match?.result?.ratings?.[playerId]).toBeCloseTo(target, 5);
+    expect(match?.result?.ratingNotes?.[playerId]).toBe("첫 줄");
+    const after = state.seasonStats.find((s) => s.gamePlayerId === playerId)?.ratingSum ?? 0;
+    expect(after - before).toBeCloseTo(target - anchor, 5);
   });
 
   it("출전하지 않은 선수·모르는 id는 버린다", () => {

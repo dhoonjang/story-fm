@@ -60,13 +60,14 @@ import {
   reservePlayers,
   squadLevelOf,
   tacticsOf,
-  teamName,
+  teamNameIn,
   userPlayers,
   FAMILIARITY_BASELINE,
   MATCHDAY_BENCH,
   type GameState,
   type PendingMatch,
 } from "../core/state";
+import { pickOurPlayer } from "../core/player-ref";
 import { competitionLabel } from "../data/cup-catalog";
 import { isFriendly } from "../competition/friendly";
 import { advanceDomesticCups } from "../competition/domestic-cup";
@@ -247,7 +248,7 @@ export function refreshPacket(state: GameState): void {
     for (const slot of starters) seats[slot.player.id] = slot.position;
     return {
       teamId,
-      teamName: teamName(teamId),
+      teamName: teamNameIn(state, teamId),
       starters,
       bench: slotsFor(state, teamId, ledgerSide.bench),
       // 상대가 경기 중 바꾼 전술이 있으면 그것으로 — 저장된 팀 전술은 그대로 둔다
@@ -794,27 +795,32 @@ export function substitutePlayer(state: GameState, input: { out: string; in: str
   if (!match || state.phase !== "match") {
     return { ok: false, message: "교체는 경기 중에만 가능합니다" };
   }
-  const roster = userPlayers(state);
-  const incoming = roster.find((p) => p.id === input.in);
-  if (incoming && isInjured(state, incoming.id)) {
+  // 감독이 부른 이름이 실려 오므로 장부에 넘기기 전에 우리 선수 id로 굳힌다
+  const going = pickOurPlayer(state, input.out);
+  if (!going.ok) return { ok: false, message: going.message };
+  const coming = pickOurPlayer(state, input.in);
+  if (!coming.ok) return { ok: false, message: coming.message };
+  const outgoing = going.player;
+  const incoming = coming.player;
+  if (isInjured(state, incoming.id)) {
     return { ok: false, message: `${incoming.name}은(는) 부상 중이라 투입할 수 없습니다` };
   }
-  if (isSuspended(state, input.in)) {
-    return { ok: false, message: `${incoming?.name ?? input.in}은(는) 출장 정지 중입니다` };
+  if (isSuspended(state, incoming.id)) {
+    return { ok: false, message: `${incoming.name}은(는) 출장 정지 중입니다` };
   }
   const result = applyMatchEvents(state, [
     {
       minute: match.ledger.minute,
       type: "substitution",
       team: userSide(state),
-      actors: [input.out, input.in],
+      actors: [outgoing.id, incoming.id],
       causes: [],
     },
   ]);
   if (result.ok) refreshPacket(state); // 교체가 존 전력에 반영되도록
-  const outName = roster.find((p) => p.id === input.out)?.name ?? input.out;
-  const inName = incoming?.name ?? input.in;
-  return result.ok ? { ok: true, message: `교체 완료 — ${outName} OUT, ${inName} IN` } : result;
+  return result.ok
+    ? { ok: true, message: `교체 완료 — ${outgoing.name} OUT, ${incoming.name} IN` }
+    : result;
 }
 
 /** 동시에 걸 수 있는 지역 플랜 수 — 공략(`MAX_EXPLOITS`)과 같은 이유의 상한이다 */
@@ -981,8 +987,8 @@ export function buildRatingBrief(state: GameState): MatchRatingBrief | null {
       return `${e.minute}′ ${mine} ${e.type}${who ? ` [${who}]` : ""}${e.detail ? ` — ${e.detail}` : ""}`.trim();
     });
 
-  const homeName = teamName(match.homeTeamId);
-  const awayName = teamName(match.awayTeamId);
+  const homeName = teamNameIn(state, match.homeTeamId);
+  const awayName = teamNameIn(state, match.awayTeamId);
   return {
     matchId: match.id,
     scoreline: `${homeName} ${ledger.score.home} : ${ledger.score.away} ${awayName}`,
@@ -1350,7 +1356,7 @@ export function finalizeMatch(state: GameState): MatchDigest {
   const outcomeKo = outcome === "win" ? "승리" : outcome === "draw" ? "무승부" : "패배";
   pushNarrative(
     state,
-    `${competitionLabel(match.competitionId, match.stage ?? "league", match.round)} vs ${teamName(opponentId)} ${scoreline} ${outcomeKo}`,
+    `${competitionLabel(match.competitionId, match.stage ?? "league", match.round)} vs ${teamNameIn(state, opponentId)} ${scoreline} ${outcomeKo}`,
     outcome === "win" ? 4 : 3,
   );
   digest.push(`최종 스코어 ${scoreline} — ${outcomeKo}`, ...messages);

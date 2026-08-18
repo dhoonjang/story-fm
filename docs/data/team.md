@@ -1,9 +1,10 @@
 # 구단
 
-**구단의 정체성은 카탈로그가 갖고, 세이브는 변하는 것만 갖는다.** 이름·리그·
-기본 포메이션·기본 선발 XI는 코드의 불변 표에 있고, 게임 안에서 바뀌는 것(감독
-이름·AI 전술 역량치·**구단 체급**)만 `GAME_TEAM`에 남는다. 스쿼드·전술·재정은 팀
-엔티티가 아니라 각자의 테이블이 갖는다.
+**구단의 정체성은 카탈로그가 정하고, 게임이 시작하면 세이브가 그 사본을 갖는다.**
+이름·소속 리그·체급·구장·브랜드는 코드의 불변 표에서 오지만, 새 게임은 그 값을
+`GAME_TEAM`으로 **복사**하고 그 뒤로는 세이브가 단일 소스다(§1의 복사 목록).
+카탈로그에 남는 것은 게임을 **시작할 때만** 읽는 것 — 기본 포메이션·기본 선발 XI·
+스쿼드 시드 — 뿐이다. 스쿼드·전술·재정은 팀 엔티티가 아니라 각자의 테이블이 갖는다.
 
 등번호도 팀 자체 필드가 아니라 현재 소속 선수의 `squadNumber`가 갖는다. 같은 팀의
 배정 번호는 중복될 수 없다. 공식 번호 시드가 없는 선수도 포지션 관례와 남은 번호로
@@ -16,8 +17,8 @@
 
 ```ts
 TeamCatalogEntry {
-  id, name, shortName,   // 표시명은 전부 여기서 온다 (GAME_TEAM은 이름을 안 갖는다)
-  leagueId,              // 소속 리그 — 불변. 승강은 state.leagueOf가 덮는다
+  id, name, shortName,   // 표시명의 **초기치** — 그 뒤는 GAME_TEAM.name (§1 복사 목록)
+  leagueId,              // 소속 리그의 **초기치**. 승강은 state.leagueOf가 그 위를 덮는다
   tier: 1 | 2 | 3 | 4,   // 구단 체급의 **초기치** — 그 뒤는 GAME_TEAM.tier (§2)
   formation?,            // 기본 포메이션 — 없으면 DEFAULT_TACTICS의 4-3-3
 }
@@ -64,16 +65,41 @@ TeamCatalogEntry {
 있으면 그 파일이 진실이라 추가한 팀의 스쿼드를 절차 생성해 붙이고 지운 팀의 선수를
 빼낸다.
 
-저장은 §8의 불변식을 먼저 확인하고, 어기면 한국어 메시지로 거절한다. 다만 국내 컵
+저장은 §8의 불변식을 먼저 확인하고, 어기면 한국어 메시지로 거절한다 — **팀 id는
+중복될 수 없다**(뒤 항목이 앞을 가려 그 클럽이 카탈로그에서 사라진다). 다만 국내 컵
 32클럽만은 **경고**다 — 어기면 컵이 열리지 않을 뿐 크래시가 아니고, 막으면 클럽을
 한 팀도 더하거나 뺄 수 없다.
 
-### `GAME_TEAM`이 얇은 이유
+선수 카탈로그 파일은 읽을 때 **Zod 스키마로 검증**하고, 어긋나면 시드에서 파생한
+기본 카탈로그로 돌아간다 — 손으로 고쳤거나 옛 모양인 파일이 그대로 카탈로그가 되면
+새 게임이 세워질 때 터진다.
 
-세이브의 팀 엔티티에는 **세 필드뿐**이다: `aiManagerTacticsRating`(AI 감독의 전술
-역량치) · `managerName?` · `managerSince?`. 나머지는 전부 다른 곳이 원본이다 —
-정체성은 카탈로그, 라인업은 `TACTIC_ASSIGNMENT`, 살림은 `FINANCE`, 소속 선수는
-`GAME_PLAYER.teamId`. 팀 id도 카탈로그 id를 그대로 재사용한다.
+### `GAME_TEAM`이 카탈로그에서 복사하는 것
+
+새 게임을 시작할 때(`createGame`) 세이브가 **한 번 복사하고 그 뒤로는 세이브가
+답한다.** 진행 중인 세이브를 어드민 편집에서 떼어 놓는 것이 이 복사의 전부다 —
+카탈로그를 매 요청 읽는 자리가 하나라도 남으면 어드민이 저장하는 순간 그 값이
+진행 중인 게임의 화면과 장부에 들어간다.
+
+| `GAME_TEAM` | 카탈로그 원본 | 이 값을 읽는 통로 |
+| --- | --- | --- |
+| `name?` `shortName?` | `TeamCatalogEntry` | `teamNameIn(state, id)` · `teamShortNameIn(state, id)` |
+| `leagueId?` | `TeamCatalogEntry.leagueId` | `leagueOfTeamIn(state, id)` — 승강(`state.leagueOf`)이 그 위를 덮는다 |
+| `tier?` | `TeamCatalogEntry.tier` | `tierOfTeamIn(state, id)` (§2) |
+| `stadium?` `capacity?` `commercialTier?` | `CLUB_PROFILES` | `clubProfileIn(state, id)` (§3) |
+
+- 전부 **optional**이다. 옛 세이브엔 없으므로 없으면 카탈로그가 답한다 —
+  세이브 버전은 오르지 않는다.
+- 구단 프로필은 **등재된 클럽만** 복사한다. 미등재 클럽(2부·시장 전용·어드민 추가)은
+  값이 없는 것이 사실이고, 폴백은 읽는 자리가 정한다 (§3 · §2.1).
+- 나머지는 여전히 다른 곳이 원본이다 — 라인업은 `TACTIC_ASSIGNMENT`, 살림은
+  `FINANCE`, 소속 선수는 `GAME_PLAYER.teamId`, 기본 포메이션·기본 선발 XI·스쿼드
+  시드는 카탈로그(새 게임을 세울 때만 읽는다). 팀 id도 카탈로그 id를 재사용한다.
+
+세이브에 **없는 클럽을 로드가 채워 넣는 자리**(`addMissingClubs`)도 같은 규칙을
+따르되, 채워 넣는 대상은 **코드의 시드 카탈로그에 있는 클럽뿐**이고 값도 시드에서
+복사한다. 어드민이 추가한 팀은 오버라이드에만 있으므로 이미 진행 중인 세이브에
+들어가지 않는다 ([game-state.md](game-state.md) §6).
 
 ## 2. 구단 체급 (tier)
 
@@ -207,7 +233,14 @@ ClubProfile { stadium, capacity, commercialTier: 1|2|3|4 }
   샬케는 성적보다 브랜드가 크고, 본머스·코모는 반대다. 실제 상업 수입 격차의
   원인이므로 `tier`로 뭉개면 클럽이 구분되지 않는다.
 - 등재되지 않은 팀(2부·시장 전용·어드민 추가)은 `tier` 폴백을 쓴다 —
-  55k / 42k / 30k / 22k에 같은 등급의 브랜드.
+  55k / 42k / 30k / 22k에 같은 등급의 브랜드. 다만 시즌 롤오버의 체급 재산정만은
+  폴백을 쓰지 않는다 (§2.1의 `UNLISTED_CLUB_SIZE`).
+- **게임이 시작하면 세이브가 사본을 갖는다** — 등재된 클럽의 `stadium`·`capacity`·
+  `commercialTier`가 `GAME_TEAM`으로 복사되고, 읽는 자리는 전부
+  `clubProfileIn(state, teamId)` 하나를 지난다. 카탈로그를 직접 읽으면 어드민의
+  구장·브랜드 편집이 진행 중인 세이브의 매치데이·상업 수입을 그 자리에서 바꾼다.
+  세이브가 없는 문맥(새 게임의 초기 잔고, 주급 기준선)만 `clubProfile(teamId, tier)`
+  를 쓴다.
 
 수입 공식은 [../simulation/finance.md](../simulation/finance.md).
 
@@ -408,8 +441,12 @@ WorldScope { leagues, teamsPerLeague, cups, markets }
 ## 8. ⚠️ 불변식
 
 - **카탈로그가 갖는 값은 세이브에서 바꿀 수 없다.** 승강이 `state.leagueOf`로
-  표현되는 것이 그 결과다 — `leagueId`를 덮어쓰면 다음 게임의 리그 구성이 함께
-  흔들린다.
+  표현되는 것이 그 결과다 — 카탈로그의 `leagueId`를 덮어쓰면 다음 게임의 리그
+  구성이 함께 흔들린다.
+- **어드민 편집은 진행 중인 세이브의 어떤 값도 움직이지 않는다.** 이름·소속·체급·
+  구장·브랜드는 게임 시작에 `GAME_TEAM`으로 복사되고(§1), 읽는 자리는 전부
+  `teamNameIn` · `leagueOfTeamIn` · `tierOfTeamIn` · `clubProfileIn`을 지난다.
+  카탈로그를 직접 읽어도 되는 것은 세이브가 아직 없는 문맥뿐이다.
 - **`leagueId`를 직접 읽는 코드는 "지금 어디 있나"를 묻는 게 아니어야 한다.**
   지금 소속은 `leagueOfTeamIn(state, teamId)`, 리그의 종류(시장 전용·나라)는
   카탈로그 — 두 갈래는 [game-state.md](./game-state.md) §1이 원본이다.
@@ -419,6 +456,8 @@ WorldScope { leagues, teamsPerLeague, cups, markets }
 - **어드민 편집도 이 불변식을 지킨다.** 팀의 `leagueId` 변경·추가·삭제는 저장
   시점에 막힌다(`world/catalog-invariants.ts`) — 어기면 실패가 편집한 순간이 아니라
   한참 뒤 새 게임을 시작할 때 터진다.
+- **팀 id는 카탈로그 안에서 유일하다.** 중복되면 `teamCatalogById`가 하나만 답해
+  나머지 동명 클럽이 스쿼드·일정·순위표에서 통째로 사라진다.
 - **나라별 1부 + 2부는 정확히 32클럽이다.** 국내 컵 브래킷이 2의 거듭제곱이어야
   부전승이 없고, 32가 아니면 그 시즌 컵이 통째로 열리지 않는다.
 - **무소속은 클럽이 아니다.** 스쿼드·전력·순위표·재정을 도는 순회는 `isClubTeam`

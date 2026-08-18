@@ -75,15 +75,18 @@ import { generateYouthPlayer } from "../world/generate";
 import { ensureSquadNumbers } from "../squad/numbers";
 import { hasCups, scopedTeams, type WorldScope } from "../world/scope";
 import {
+  TEAM_CATALOG_SEED,
   teamCatalog,
   type TeamCatalogEntry,
   countryOfTeam,
   formationOf,
   isTopFlight,
+  leagueOfTeam,
   tacticalStyleOf,
   teamCatalogById,
   isClubTeam,
 } from "../data/team-catalog";
+import { CLUB_PROFILES_SEED, clubProfile, clubProfiles, type ClubProfile } from "../data/club-profile";
 // 순환 참조로 보이지만 안전하다 — domestic-cup은 state의 함수를 **런타임에만** 부르고,
 // 여기서도 모듈 로드가 끝난 뒤(createGame 호출 시점)에만 부른다.
 import { advanceDomesticCups } from "../competition/domestic-cup";
@@ -637,12 +640,100 @@ export function userTeam(state: GameState): GameTeam {
   return teamById(state, state.userTeamId);
 }
 
-/** 팀 표시 이름 — 카탈로그에서 (게임 팀 엔티티는 이름을 갖지 않는다) */
+/**
+ * 팀 표시 이름 — **세이브가 없는 문맥**에서만 (새 게임 생성·어드민 미리보기·부임 전
+ * 팀 목록). 게임이 진행 중이면 `teamNameIn`을 써야 한다.
+ */
 export function teamName(teamId: string): string {
   return teamCatalogById(teamId)?.name ?? teamId;
 }
 export function teamShortName(teamId: string): string {
   return teamCatalogById(teamId)?.shortName ?? teamId;
+}
+
+/**
+ * 이 팀의 **지금** 이름 — 세이브가 갖고, 없으면(옛 세이브) 카탈로그가 답한다.
+ * `tierOfTeamIn`·`leagueOfTeamIn`과 같은 모양이다 (game-state.md §1).
+ *
+ * 카탈로그를 직접 읽으면 어드민의 이름 편집이 **진행 중인 세이브**의 화면·피드·
+ * 서사에 그대로 들어간다 — 감독이 지난주에 상대한 클럽의 이름이 바뀐다.
+ */
+export function teamNameIn(state: GameState, teamId: string): string {
+  return state.teams.find((t) => t.id === teamId)?.name ?? teamName(teamId);
+}
+export function teamShortNameIn(state: GameState, teamId: string): string {
+  return state.teams.find((t) => t.id === teamId)?.shortName ?? teamShortName(teamId);
+}
+
+/**
+ * 이 구단의 **지금** 구장·브랜드 — 세이브가 갖고, 없으면(옛 세이브·미등재 클럽)
+ * 카탈로그가 체급 폴백으로 답한다 (team.md §3).
+ *
+ * 매치데이 수입과 상업 수입의 기준이라, 카탈로그를 직접 읽으면 어드민의 수용인원
+ * 편집이 진행 중인 세이브의 장부를 그 자리에서 바꾼다.
+ */
+export function clubProfileIn(state: GameState, teamId: string): ClubProfile {
+  const team = state.teams.find((t) => t.id === teamId);
+  if (team?.capacity !== undefined && team.commercialTier !== undefined) {
+    return {
+      stadium: team.stadium ?? "",
+      capacity: team.capacity,
+      commercialTier: team.commercialTier,
+    };
+  }
+  return clubProfile(teamId, team?.tier ?? teamCatalogById(teamId)?.tier ?? 3);
+}
+
+/**
+ * 이 팀이 **게임이 시작할 때** 속해 있던 리그 — 세이브가 갖고, 없으면(옛 세이브)
+ * 카탈로그가 답한다.
+ *
+ * `leagueOfTeamIn`과 갈리는 것은 승강이다 — 이쪽은 승강 **전**의 원 소속이라,
+ * "이 구단이 원래 어느 리그의 클럽인가"를 묻는 자리(브랜드 보정)가 쓴다. 지금
+ * 어디 있는가는 언제나 `leagueOfTeamIn`이다 (game-state.md §1).
+ */
+export function catalogLeagueIn(state: GameState | undefined, teamId: string): string {
+  return state?.teams.find((t) => t.id === teamId)?.leagueId ?? leagueOfTeam(teamId);
+}
+
+/**
+ * 이 클럽의 **세이브에 실린 프로필** — 없으면 null.
+ *
+ * `clubProfileIn`과 갈리는 것은 폴백이다. 시즌 롤오버의 체급 재산정은 미등재 클럽에
+ * 체급 폴백을 쓰면 안 되므로(작년 체급이 올해 규모가 되어 스스로를 재생산한다 —
+ * `competition/club-tier.ts`) "값이 없다"를 그대로 받아야 한다.
+ */
+export function savedClubProfile(state: GameState, teamId: string): ClubProfile | null {
+  const team = state.teams.find((t) => t.id === teamId);
+  if (team?.capacity === undefined || team.commercialTier === undefined) return null;
+  return {
+    stadium: team.stadium ?? "",
+    capacity: team.capacity,
+    commercialTier: team.commercialTier,
+  };
+}
+
+/**
+ * 카탈로그 팀 하나를 `GAME_TEAM`의 사본 필드로 — 새 게임과 로드 시 보충이 같은
+ * 목록을 쓴다. 프로필은 **등재된 클럽만** 싣는다 (team.md §1).
+ */
+function copiedTeamFields(
+  team: TeamCatalogEntry,
+  profile: ClubProfile | undefined,
+): Pick<GameTeam, "name" | "shortName" | "leagueId" | "tier" | "stadium" | "capacity" | "commercialTier"> {
+  return {
+    name: team.name,
+    shortName: team.shortName,
+    leagueId: team.leagueId,
+    tier: team.tier,
+    ...(profile === undefined
+      ? {}
+      : {
+          stadium: profile.stadium,
+          capacity: profile.capacity,
+          commercialTier: profile.commercialTier,
+        }),
+  };
 }
 
 export function playersOf(state: GameState, teamId: string): GamePlayer[] {
@@ -1091,12 +1182,21 @@ const CORE_GK = 2;
  * 클럽만 새로 인스턴스화해 붙인다 — 기존 진행에는 아무 영향이 없다
  * (이 클럽들은 리그전을 돌지 않고 컵에만 나온다).
  *
+ * ⚠️ **채워 넣는 것은 코드의 시드 카탈로그에 있는 클럽뿐이고, 값도 시드에서
+ * 복사한다.** 지금 유효한 카탈로그는 어드민 오버라이드일 수 있으므로, 그것을 읽으면
+ * 어드민이 팀 하나를 추가할 때마다 **열려 있는 모든 옛 세이브**에 그 클럽과 스쿼드가
+ * 주입된다 — 편집이 새 게임에만 반영된다는 약속이 로드 경로로 뚫린다
+ * (game-state.md §6).
+ *
  * @returns 추가된 클럽 수 (0이면 최신 세이브)
  */
 export function addMissingClubs(state: GameState): number {
   const present = new Set(state.teams.map((t) => t.id));
+  const seed = new Map(TEAM_CATALOG_SEED.map((t) => [t.id, t]));
   // 축소 세계는 빠진 게 아니라 원래 없는 것이다 — 채워 넣으면 세계가 커진다
-  const missing = scopedTeams(state.world).filter((t) => !present.has(t.id));
+  const missing = scopedTeams(state.world)
+    .map((t) => seed.get(t.id))
+    .filter((t): t is TeamCatalogEntry => t !== undefined && !present.has(t.id));
   if (missing.length === 0) return 0;
 
   const rng = makeRng(state.seed, "backfill:ai-managers");
@@ -1109,7 +1209,7 @@ export function addMissingClubs(state: GameState): number {
     state.teams.push({
       id: team.id,
       aiManagerTacticsRating: randInt(rng, 55, 82),
-      tier: team.tier,
+      ...copiedTeamFields(team, CLUB_PROFILES_SEED[team.id]),
     });
     // 무소속은 스쿼드도 배치도 갖지 않는다 — 팀 엔티티만 있으면 된다
     if (!isClubTeam(team.id)) continue;
@@ -1756,11 +1856,13 @@ export function createGame(input: CreateGameInput): GameState {
     throw new Error(`이 세계에 없는 팀: ${input.userTeamId}`);
   }
 
+  // 카탈로그의 정체성은 여기서 **복사된다** — 이후 어드민이 카탈로그를 고쳐도
+  // 이 세이브의 이름·소속·체급·살림은 흔들리지 않는다 (team.md §1)
+  const profiles = clubProfiles();
   const teams: GameTeam[] = catalogTeams.map((t) => ({
     id: t.id,
     aiManagerTacticsRating: randInt(rng, 55, 82),
-    // 체급은 여기서 **복사된다** — 이후 카탈로그를 고쳐도 이 세이브는 흔들리지 않는다
-    tier: t.tier,
+    ...copiedTeamFields(t, profiles[t.id]),
     // 부임일 — 감독 시장이 "얼마나 됐나"를 여기서 잰다 (`manager-market.ts`)
     managerSince: calendar.preseasonStart,
   }));

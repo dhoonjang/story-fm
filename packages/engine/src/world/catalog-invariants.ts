@@ -35,6 +35,13 @@ export function checkLeagueInvariants(
   const duplicated = leagues.filter((l, i) => leagues.findIndex((x) => x.id === l.id) !== i);
   for (const league of duplicated) problems.push(`리그 id가 중복됩니다: ${league.id}`);
 
+  /**
+   * 팀 id 중복은 크래시가 아니라 **소실**이다 — `teamCatalogById`가 하나만 답해
+   * 나머지 동명 클럽이 스쿼드·일정·순위표에서 통째로 사라진다 (team.md §8).
+   */
+  const duplicatedTeams = teams.filter((t, i) => teams.findIndex((x) => x.id === t.id) !== i);
+  for (const team of duplicatedTeams) problems.push(`팀 id가 중복됩니다: ${team.id}`);
+
   for (const team of teams) {
     if (!ids.has(team.leagueId)) {
       problems.push(`${team.name}: 카탈로그에 없는 리그를 가리킵니다 (${team.leagueId})`);
@@ -45,7 +52,9 @@ export function checkLeagueInvariants(
     if (league.kind !== "playable") continue;
     const count = teams.filter((t) => t.leagueId === league.id).length;
     if (count < MIN_LEAGUE_TEAMS) {
-      problems.push(`${league.name}: 리그전을 돌려면 ${MIN_LEAGUE_TEAMS}팀 이상이어야 합니다 (지금 ${count}팀)`);
+      problems.push(
+        `${league.name}: 리그전을 돌려면 ${MIN_LEAGUE_TEAMS}팀 이상이어야 합니다 (지금 ${count}팀)`,
+      );
     } else if (count % 2 !== 0) {
       problems.push(`${league.name}: 팀 수가 홀수(${count})라 리그전을 편성할 수 없습니다`);
     } else if (count > MAX_LEAGUE_TEAMS) {
@@ -56,6 +65,9 @@ export function checkLeagueInvariants(
   }
   return problems;
 }
+
+/** 플레이오프 한 대진에 서는 팀 수 — 승자가 본선 한 자리를 가져간다 */
+const PLAYOFF_TEAMS_PER_TIE = 2;
 
 /** 2의 거듭제곱인가 — 녹아웃 브래킷은 부전승 없이 반씩 줄어야 한다 */
 function isPowerOfTwo(n: number): boolean {
@@ -88,6 +100,19 @@ export function checkEuroCupInvariants(
     }
     if (cup.playoffSlots % 2 !== 0) {
       problems.push(`${cup.name}: 플레이오프 팀 수는 짝수여야 합니다 (지금 ${cup.playoffSlots})`);
+    } else if (
+      cup.playoffSlots > 0 &&
+      cup.directSlots !== cup.playoffSlots / PLAYOFF_TEAMS_PER_TIE
+    ) {
+      /**
+       * 본선 첫 단계는 **직행 팀 하나에 플레이오프 승자 하나**를 붙인다
+       * (`euro-knockout.ts`의 `mainDrawPairs`). 어긋나면 승자 한 팀이 두 대진에
+       * 서거나 직행 팀이 상대 없이 남아 결승이 만들어지지 않고 — 시즌이 끝나지
+       * 않는다. 합만 보는 브래킷 검사로는 잡히지 않는 자리다.
+       */
+      problems.push(
+        `${cup.name}: 직행 ${cup.directSlots}팀이 플레이오프 승자 ${cup.playoffSlots / PLAYOFF_TEAMS_PER_TIE}팀과 일대일로 맞지 않습니다`,
+      );
     }
     const bracket = knockoutBracketSize(cup);
     if (!isPowerOfTwo(bracket)) {
