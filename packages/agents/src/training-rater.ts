@@ -11,7 +11,7 @@ import {
   type GameState,
   type TrainingBrief,
 } from "@story-fm/engine";
-import { ATTRIBUTE_AXES, AXIS_KO } from "@story-fm/domain";
+import { ATTRIBUTE_AXES, AXIS_KO, DateString } from "@story-fm/domain";
 import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
 import { retryOnce, anchorStands } from "./retry";
 
@@ -46,19 +46,29 @@ export const TRAINING_RATER_SYSTEM = `당신은 축구 구단의 훈련장을 �
 - 선수 id는 목록의 것을 그대로 쓴다. 이름으로 쓰지 않는다.
 - 반드시 report_training 도구로만 답한다. 그 밖의 텍스트는 쓰지 않는다.`;
 
+/**
+ * 스키마가 받아들이는 폭 — 코어 밴드(`TACTIC_GAIN_MIN`~`TACTIC_GAIN_MAX`,
+ * `POSITION_TRAIN_MAX`)보다 넓게 열어 둔다. 벗어난 값은 파싱을 깨뜨리는 대신
+ * 코어가 자르므로(`applyTrainingOutcomes`), 한 줄 때문에 결산 전체가 버려지지 않는다.
+ */
+const ACCEPTED_GAIN_BOUND = 9;
+
+/** 한 번에 결산하는 인원 상한 — 한 구간의 훈련 대상은 1군·2군을 합쳐도 이 아래다 */
+const MAX_TRAINED_PLAYERS = 60;
+
+/** 근거 한 줄의 길이 상한 — 프롬프트는 30자 안팎을 요구하고, 여기는 그 여유다 */
+const NOTE_MAX = 200;
+
 const OutcomeSchema = z.object({
   playerId: z.string().min(1),
-  tacticGain: z.number().min(-9).max(9).optional(),
-  positionGain: z.number().min(0).max(9).optional(),
+  tacticGain: z.number().min(-ACCEPTED_GAIN_BOUND).max(ACCEPTED_GAIN_BOUND).optional(),
+  positionGain: z.number().min(0).max(ACCEPTED_GAIN_BOUND).optional(),
   attribute: z.enum(ATTRIBUTE_AXES).nullish(),
   attributeStep: z.number().min(ATTR_STEP_MIN).max(ATTR_STEP_MAX).nullish(),
-  date: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .optional(),
-  note: z.string().max(200).optional(),
+  date: DateString.optional(),
+  note: z.string().max(NOTE_MAX).optional(),
 });
-const ReportInputSchema = z.object({ results: z.array(OutcomeSchema).max(60) });
+const ReportInputSchema = z.object({ results: z.array(OutcomeSchema).max(MAX_TRAINED_PLAYERS) });
 
 /** 브리프를 프롬프트 본문으로 — 훈련 일지 + 대화 + 대상 표 */
 export function buildTrainingPrompt(brief: TrainingBrief): string {

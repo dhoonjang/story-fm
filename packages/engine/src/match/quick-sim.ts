@@ -1,7 +1,10 @@
 import type { GamePlayer, TacticsSpec } from "@story-fm/domain";
 import {
+  CONDITION_MAX,
   DEFAULT_TACTICS,
+  FAMILIARITY_BASELINE,
   logRatioFactor,
+  PHASE_END,
   naturalPositionOf,
   normalizedLogCurve,
   positionGroupOfPlayer,
@@ -72,17 +75,28 @@ function sampleMinute(rng: () => number): number {
 /** 골 시각 분포의 로그 눈금 — 전반 약 46%, 후반 약 54%. */
 export const QUICK_MINUTE_LOG_SCALE = 0.2;
 
+/** 사건이 실릴 수 있는 마지막 분 — 정규 90분 + 추가시간 */
+const LAST_MINUTE = 94;
+
 /** 0~1 균등 난수를 후반이 조금 더 붐비는 1~94분으로 옮긴다. */
 export function quickMinuteOf(unit: number): number {
   return Math.max(
     1,
-    Math.min(94, Math.ceil(normalizedLogCurve(unit, QUICK_MINUTE_LOG_SCALE) * 94)),
+    Math.min(
+      LAST_MINUTE,
+      Math.ceil(normalizedLogCurve(unit, QUICK_MINUTE_LOG_SCALE) * LAST_MINUTE),
+    ),
   );
 }
 
+/** 상대 전력이 0에 가까울 때 비를 폭발시키지 않는 바닥 */
+const MIN_STRENGTH = 0.01;
+/** 전력비를 배율로 옮기는 로그 눈금 */
+const STRENGTH_LOG_SCALE = 6;
+
 /** 호환용 전력비 판독 — 결과 시뮬은 선수×지역 패킷을 직접 쓴다. */
 export function quickStrengthFactor(ours: number, theirs: number): number {
-  return logRatioFactor(ours / Math.max(0.01, theirs), 6);
+  return logRatioFactor(ours / Math.max(MIN_STRENGTH, theirs), STRENGTH_LOG_SCALE);
 }
 
 function outfield(players: readonly GamePlayer[]): GamePlayer[] {
@@ -134,7 +148,7 @@ function rollCards(
   validSubs: QuickSub[],
   into: QuickCard[],
 ): void {
-  const count = samplePoisson(rng, CARDS_PER_MATCH / 2);
+  const count = samplePoisson(rng, CARDS_PER_MATCH / TEAMS_PER_MATCH);
   /**
    * 분을 **먼저 뽑아 시간 순으로** 돌린다. 뽑는 순서와 분이 따로 놀면 30분에
    * 퇴장한 선수가 80분에 경고를 받은 장부가 나온다 — 그라운드에 없는 선수다.
@@ -180,6 +194,9 @@ function rollCards(
  * AI 팀도 로테이션을 하면 주중 대항전을 뛴 팀의 주말 라인업이 실제로 흔들린다.
  * 예전엔 선발 11명이 90분을 다 뛰어서, 컵과 유럽을 병행하는 팀에 아무 대가가 없었다.
  */
+/** 경기당 값(카드·부상)을 한 팀 몫으로 나눌 때 쓴다 */
+const TEAMS_PER_MATCH = 2;
+
 const SUB_MINUTES = [46, 60, 68, 76, 82];
 /** 이만큼 지쳤으면 무조건 뺀다 — 그 아래면 감독 재량(`SUB_ANYWAY`) */
 const SUB_TIREDNESS = 34;
@@ -205,7 +222,7 @@ function planSubs(
     const tired = outfield(squad.starters)
       .filter((p) => !off.has(p.id))
       .sort((a, b) => a.state.condition - b.state.condition)[0];
-    if (!tired || 100 - tired.state.condition < SUB_TIREDNESS) {
+    if (!tired || CONDITION_MAX - tired.state.condition < SUB_TIREDNESS) {
       // 다들 멀쩡해도 대개는 쓴다 (교체 없는 경기는 실제로 거의 없다)
       if (rng() > SUB_ANYWAY) continue;
     }
@@ -265,7 +282,7 @@ function rollInjury(
   const proneOf = (p: GamePlayer) => squad.proneness?.[p.id] ?? 1;
   const avgProneness = played.reduce((s, p) => s + proneOf(p), 0) / played.length;
   // 팀당 절반 — 경기당 기대치를 양팀이 나눈다 (구간 시뮬과 같은 눈금)
-  if (rng() >= (INJURY_PER_MATCH / 2) * avgProneness) return;
+  if (rng() >= (INJURY_PER_MATCH / TEAMS_PER_MATCH) * avgProneness) return;
   const weights = played.map((p) => injuryWeight(p, 0, proneOf(p)));
   const total = weights.reduce((s, w) => s + w, 0);
   if (total <= 0) return;
@@ -327,7 +344,7 @@ export interface QuickResult {
 export const EXTRA_TIME_MINUTES = 30;
 /** 연장의 첫 분 — 골의 분은 91~120이다 */
 const EXTRA_TIME_FIRST_MINUTE = 91;
-const EXTRA_TIME_DENSITY = (EXTRA_TIME_SHOT_SHARE * 90) / EXTRA_TIME_MINUTES;
+const EXTRA_TIME_DENSITY = (EXTRA_TIME_SHOT_SHARE * PHASE_END.second_half) / EXTRA_TIME_MINUTES;
 
 interface QuickShot {
   side: "home" | "away";
@@ -345,7 +362,7 @@ const fallbackSlot = (player: GamePlayer): LineupSlot => {
     player,
     position: natural.position,
     proficiency: natural.proficiency,
-    familiarity: 60,
+    familiarity: FAMILIARITY_BASELINE,
   };
 };
 
@@ -399,6 +416,22 @@ function playersAt(
   ];
 }
 
+/** 하프타임이 오는 분 */
+const HALF_TIME = PHASE_END.first_half;
+
+/**
+ * 90분 치 슈팅이 두 하프에 실리는 밀도 — 전반 46%가 45분에, 후반 54%가 추가시간까지
+ * 49분에 실린다 (`QUICK_MINUTE_LOG_SCALE`의 골 시각 분포와 같은 비율).
+ */
+const FIRST_HALF_DENSITY = 0.92;
+const SECOND_HALF_DENSITY = 48.6 / 49;
+
+/** 감독 정보가 없는 팀(AI 벤치)의 전술 능력 — 리그 평균 언저리 */
+const AI_MANAGER_TACTICS = 65;
+
+/** 아무 구간도 재지 못했을 때의 점유 — 어느 쪽으로도 기울지 않는다 */
+const EVEN_POSSESSION = 0.5;
+
 function shotTimeline(
   rng: () => number,
   squads: { home: SimSquad; away: SimSquad },
@@ -413,7 +446,7 @@ function shotTimeline(
   for (const card of cards) if (card.card === "red") sentOff.set(card.playerId, card.minute);
 
   const boundaries = new Set<number>([from, to]);
-  if (from < 45 && to > 45) boundaries.add(45);
+  if (from < HALF_TIME && to > HALF_TIME) boundaries.add(HALF_TIME);
   for (const card of cards)
     if (card.card === "red" && card.minute > from && card.minute < to) boundaries.add(card.minute);
   for (const sub of subs) if (sub.minute > from && sub.minute < to) boundaries.add(sub.minute);
@@ -427,7 +460,12 @@ function shotTimeline(
     const end = times[index + 1]!;
     const minutes = end - start;
     if (minutes <= 0) continue;
-    const intervalDensity = from === 0 && to === 94 ? (end <= 45 ? 0.92 : 48.6 / 49) : density;
+    const intervalDensity =
+      from === 0 && to === LAST_MINUTE
+        ? end <= HALF_TIME
+          ? FIRST_HALF_DENSITY
+          : SECOND_HALF_DENSITY
+        : density;
     const active = {
       home: playersAt(squads.home, "home", start, subs, sentOff),
       away: playersAt(squads.away, "away", start, subs, sentOff),
@@ -443,7 +481,7 @@ function shotTimeline(
         ),
         bench: [],
         tactics: squads.home.tactics ?? DEFAULT_TACTICS,
-        managerTactics: squads.home.managerTactics ?? 65,
+        managerTactics: squads.home.managerTactics ?? AI_MANAGER_TACTICS,
       },
       {
         teamId: squads.away.teamId,
@@ -455,7 +493,7 @@ function shotTimeline(
         ),
         bench: [],
         tactics: squads.away.tactics ?? DEFAULT_TACTICS,
-        managerTactics: squads.away.managerTactics ?? 65,
+        managerTactics: squads.away.managerTactics ?? AI_MANAGER_TACTICS,
       },
       { neutral },
     );
@@ -494,7 +532,7 @@ function shotTimeline(
             home: weightedPossession.home / totalMinutes,
             away: weightedPossession.away / totalMinutes,
           }
-        : { home: 0.5, away: 0.5 },
+        : { home: EVEN_POSSESSION, away: EVEN_POSSESSION },
   };
 }
 
@@ -602,7 +640,16 @@ export function quickSimulate(
   rollCards(rng, home, "home", plannedSubs, subs, cards);
   rollCards(rng, away, "away", plannedSubs, subs, cards);
 
-  const sampled = shotTimeline(rng, squads, cards, subs, 0, 94, 1, options.neutral === true);
+  const sampled = shotTimeline(
+    rng,
+    squads,
+    cards,
+    subs,
+    0,
+    LAST_MINUTE,
+    1,
+    options.neutral === true,
+  );
   const possession = sampled.possession;
   const scorers: string[] = [];
   const assists: string[] = [];

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DateString } from "./date-string";
 import {
   type AttributeAxis,
   type AxisValues,
@@ -42,7 +43,16 @@ export function presetOf(shape: string): Formation | null {
   return parsed.success ? parsed.data : null;
 }
 
-const Scale5 = z.number().int().min(1).max(5);
+/**
+ * 전술 슬라이더의 눈금 — 여섯 축이 모두 이 1~5 위에 선다.
+ * 가운데가 아무 쪽으로도 기울지 않은 값이라, 축의 세기는 언제나
+ * `값 - TACTIC_SCALE_NEUTRAL` 로 읽는다.
+ */
+export const TACTIC_SCALE_MIN = 1;
+export const TACTIC_SCALE_MAX = 5;
+export const TACTIC_SCALE_NEUTRAL = 3;
+
+const Scale5 = z.number().int().min(TACTIC_SCALE_MIN).max(TACTIC_SCALE_MAX);
 
 /** 전술 본체 (TACTICS) — 개인 지시는 배치(TacticAssignment)로 이동 */
 export const TacticsSpecSchema = z.object({
@@ -65,25 +75,31 @@ export const DEFAULT_FORMATION: Formation = "4-3-3";
 
 export const DEFAULT_TACTICS: TacticsSpec = {
   formation: DEFAULT_FORMATION,
-  mentality: 3,
-  defensiveLine: 3,
-  pressing: 3,
-  tempo: 3,
-  width: 3,
-  passStyle: 3,
+  mentality: TACTIC_SCALE_NEUTRAL,
+  defensiveLine: TACTIC_SCALE_NEUTRAL,
+  pressing: TACTIC_SCALE_NEUTRAL,
+  tempo: TACTIC_SCALE_NEUTRAL,
+  width: TACTIC_SCALE_NEUTRAL,
+  passStyle: TACTIC_SCALE_NEUTRAL,
 };
 
 /**
  * 옛 세이브의 패스 스타일(`"short" | "mixed" | "direct"`)을 1~5로 옮긴다.
  *
  * 세 갈래로는 "지금보다 조금만 짧게"를 말할 수 없어 다른 축과 같은 눈금으로 폈다.
- * 세 값은 눈금의 양 끝과 가운데에 놓인다. 이미 숫자면 그대로 통과시킨다.
+ * 옮긴 값은 가운데(`mixed`)와 그 양옆 한 칸이다. 이미 숫자면 그대로 통과시킨다.
  */
+const LEGACY_PASS_STYLE = {
+  short: TACTIC_SCALE_NEUTRAL - 1,
+  mixed: TACTIC_SCALE_NEUTRAL,
+  direct: TACTIC_SCALE_NEUTRAL + 1,
+} as const;
+
 export function migratePassStyle(value: unknown): number {
   if (typeof value === "number") return value;
-  if (value === "short") return 2;
-  if (value === "direct") return 4;
-  return 3;
+  if (value === "short") return LEGACY_PASS_STYLE.short;
+  if (value === "direct") return LEGACY_PASS_STYLE.direct;
+  return LEGACY_PASS_STYLE.mixed;
 }
 
 /**
@@ -194,8 +210,11 @@ export function tacticsSignature(spec: TacticsSpec): string {
  * 적응도가 **얼마나 깎이는지**와 **비슷한 전술에서 얼마나 전이되는지**를 모두 이 값이 정한다.
  * (초안 계수)
  */
+/** 포메이션을 갈아엎는 값 — 슬라이더 한 축을 끝까지 미는 것보다 크다 */
+const FORMATION_CHANGE_COST = 25;
+
 export function tacticsDistance(a: TacticsSpec, b: TacticsSpec): number {
-  let d = a.formation !== b.formation ? 25 : 0;
+  let d = a.formation !== b.formation ? FORMATION_CHANGE_COST : 0;
   for (const axis of TACTIC_AXES) d += Math.abs(a[axis] - b[axis]) * AXIS_COST[axis];
   return d;
 }
@@ -216,9 +235,12 @@ export interface BoardPoint {
   y: number;
 }
 
+/** 전술판 좌표의 위끝 — x·y 모두 0~100 위에 선다 */
+export const BOARD_MAX = 100;
+
 export const BoardPointSchema = z.object({
-  x: z.number().min(0).max(100),
-  y: z.number().min(0).max(100),
+  x: z.number().min(0).max(BOARD_MAX),
+  y: z.number().min(0).max(BOARD_MAX),
 });
 
 /**
@@ -253,14 +275,22 @@ function bandOf(y: number): Band {
 function bandRange(y: number): readonly [number, number] {
   const found = BAND_FROM.findIndex(([, from]) => y >= from);
   const i = found < 0 ? BAND_FROM.length - 1 : found;
-  return [BAND_FROM[i]![1], i === 0 ? 100 : BAND_FROM[i - 1]![1]];
+  return [BAND_FROM[i]![1], i === 0 ? BOARD_MAX : BAND_FROM[i - 1]![1]];
 }
 
+/** 레인이 끝나는 x — 이 값까지가 그 레인이고, 넘으면 다음 레인이다 */
+const LANE_UPTO: Record<Exclude<Lane, "wideR">, number> = {
+  wideL: 22,
+  halfL: 44,
+  center: 56,
+  halfR: 78,
+};
+
 function laneOf(x: number): Lane {
-  if (x < 22) return "wideL";
-  if (x < 44) return "halfL";
-  if (x <= 56) return "center";
-  if (x < 78) return "halfR";
+  if (x < LANE_UPTO.wideL) return "wideL";
+  if (x < LANE_UPTO.halfL) return "halfL";
+  if (x <= LANE_UPTO.center) return "center";
+  if (x < LANE_UPTO.halfR) return "halfR";
   return "wideR";
 }
 
@@ -284,13 +314,17 @@ export function positionAtPoint(p: BoardPoint): string {
   return BAND_LANE_CODES[bandOf(p.y)][laneOf(p.x)];
 }
 
+/** 판 가장자리에 남기는 여백 — 칩이 터치라인·골라인에 걸치지 않게 한다 */
+const BOARD_MARGIN = { x: 4, y: 6 } as const;
+
+/** 좌표는 소수 첫째 자리까지 — 세이브에 실리는 값이라 자리수를 고정한다 */
+const roundCoord = (v: number) => Math.round(v * 10) / 10;
+
 /** 전술판 안으로 좌표를 접어 넣는다 — 칩이 라인 밖으로 나가지 않게 */
 export function clampToBoard(p: BoardPoint): BoardPoint {
-  const round = (v: number) => Math.round(v * 10) / 10;
-  return {
-    x: round(Math.min(96, Math.max(4, p.x))),
-    y: round(Math.min(94, Math.max(6, p.y))),
-  };
+  const fold = (v: number, margin: number) =>
+    roundCoord(Math.min(BOARD_MAX - margin, Math.max(margin, v)));
+  return { x: fold(p.x, BOARD_MARGIN.x), y: fold(p.y, BOARD_MARGIN.y) };
 }
 
 /** 배치 격자 — 드래그를 이 간격으로 맞춰야 손으로 놓은 자리도 줄이 맞는다 */
@@ -330,13 +364,22 @@ const SEPARATE_PASSES = 30;
  * 좌우로 갈려 코드 표기가 바뀌는 경우(`CB` 둘 → `LCB`/`RCB`)는 POSITION_WEIGHTS·
  * 클러스터가 같은 자리라 전력에 영향이 없다 — 오히려 정직한 표기다.
  */
+/** 라인 경계에서 안쪽으로 물리는 폭 — 경계에 정확히 놓이면 다음 라인으로 읽힌다 */
+const BAND_INSET = 0.1;
+
+/** 겹침을 푼 뒤 두 칩 사이에 남기는 틈 — 딱 붙여 놓으면 다음 패스에서 또 겹친다 */
+const SEPARATION_GAP = 0.1;
+
 export function separateBoardPoints(points: readonly BoardPoint[], pinned = -1): BoardPoint[] {
   const out = points.map(clampToBoard);
   // 시작 시점의 라인을 기억해 두고, 밀어낸 뒤에도 그 라인 안에 머물게 한다
   const fences = out.map((p) => bandRange(p.y));
   const place = (i: number, next: BoardPoint): BoardPoint => {
     const [lo, hi] = fences[i]!;
-    return clampToBoard({ x: next.x, y: Math.min(hi - 0.1, Math.max(lo + 0.1, next.y)) });
+    return clampToBoard({
+      x: next.x,
+      y: Math.min(hi - BAND_INSET, Math.max(lo + BAND_INSET, next.y)),
+    });
   };
 
   for (let pass = 0; pass < SEPARATE_PASSES; pass++) {
@@ -359,7 +402,7 @@ export function separateBoardPoints(points: readonly BoardPoint[], pinned = -1):
         // pinned 칩은 제자리에 두고 상대만 비킨다
         const moveA = pinned !== i;
         const moveB = pinned !== j;
-        const share = moveA && moveB ? gap / 2 + 0.05 : gap + 0.1;
+        const share = moveA && moveB ? (gap + SEPARATION_GAP) / 2 : gap + SEPARATION_GAP;
         if (moveA) out[i] = place(i, { ...a, [axis]: a[axis] - dir * share });
         if (moveB) out[j] = place(j, { ...b, [axis]: b[axis] + dir * share });
       }
@@ -866,7 +909,7 @@ export const DrilledTacticsSchema = z.object({
   /** 이 설정으로 마지막에 훈련했을 때의 선발 평균 적응도 */
   familiarity: FamiliaritySchema,
   /** 마지막으로 이 설정을 썼던 날 — 오래 방치하면 기억이 옅어진다 */
-  lastUsedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  lastUsedOn: DateString,
 });
 export type DrilledTactics = z.infer<typeof DrilledTacticsSchema>;
 
@@ -889,7 +932,7 @@ export type DrilledTactics = z.infer<typeof DrilledTacticsSchema>;
  * 읽어 엉뚱한 값이 나온다.
  */
 export const RoleMemoSchema = z.object({
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  date: DateString,
   /** 그날 아침에 서 있던 자리 — 옛 세이브엔 없다 (없으면 지금 자리로 읽는다) */
   position: z.string().min(1).optional(),
   /** 그날 아침에 맡고 있던 역할 */

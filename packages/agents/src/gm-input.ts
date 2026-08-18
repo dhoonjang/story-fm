@@ -183,7 +183,7 @@ function matchDigest(state: GameState): string | null {
   const best = Object.entries(played.result.ratings ?? {})
     .filter(([pid]) => state.players.find((p) => p.id === pid)?.teamId === state.userTeamId)
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 2)
+    .slice(0, TOP_RATED_SHOWN)
     .map(([pid, r]) => `${nameOf(pid)} ${r.toFixed(1)}`)
     .join(", ");
   return [
@@ -213,6 +213,17 @@ export interface TimePassed {
  * 상태 스냅샷 — 매 턴 새로 주입되는 휘발성 블록 (role:"system" 오퍼레이터 채널).
  * phase 같은 내부 enum은 넣지 않는다 — 라우팅용 값이지 모델이 읽을 정보가 아니다.
  */
+/**
+ * 상태 노트가 프롬프트에 싣는 꼬리 길이.
+ *
+ * 전부 실으면 매 턴 같은 목록이 길게 반복돼 캐시 뒤가 무거워지고, 정작 이번 턴에
+ * 달라진 것이 묻힌다 — 모델이 읽을 만큼만 남기고 나머지는 화면이 보여 준다.
+ */
+const TOP_RATED_SHOWN = 2;
+const TRAINING_SHOWN = 3;
+const EXPIRING_SHOWN = 3;
+const RECENT_NARRATIVE = 4;
+
 export function buildGmStateNote(
   state: GameState,
   passed?: TimePassed | null,
@@ -238,7 +249,7 @@ export function buildGmStateNote(
 
   const training = state.schedule
     .filter((e) => e.type === "training" && e.status === "scheduled" && e.date >= state.date)
-    .slice(0, 3)
+    .slice(0, TRAINING_SHOWN)
     .map((e) => {
       const s = state.trainingSessions.find((x) => x.id === e.refId);
       return `${e.date.slice(5)} ${slotOfTime(e.time) === "am" ? "오전" : "오후"} ${s?.label ?? "훈련"}`;
@@ -259,9 +270,9 @@ export function buildGmStateNote(
       const expiring = expiringContracts(state, EXPIRING_ALERT_DAYS);
       return expiring.length > 0
         ? `계약 만료 임박 ${expiring.length} (${expiring
-            .slice(0, 3)
+            .slice(0, EXPIRING_SHOWN)
             .map((row) => `${row.player.name}~${row.contract.until}`)
-            .join(", ")}${expiring.length > 3 ? " …" : ""})`
+            .join(", ")}${expiring.length > EXPIRING_SHOWN ? " …" : ""})`
         : null;
     })(),
   ].filter((x): x is string => x !== null);
@@ -367,7 +378,7 @@ export function buildGmStateNote(
   if (!negotiations.startsWith("진행 중인 협상 없음")) {
     lines.push(`협상:\n${negotiations}`);
   }
-  const recent = state.narrative.slice(-4).map((n) => `${n.date} ${n.text}`);
+  const recent = state.narrative.slice(-RECENT_NARRATIVE).map((n) => `${n.date} ${n.text}`);
   if (recent.length > 0) lines.push(`최근 사건: ${recent.join(" / ")}`);
   return lines.join("\n");
 }

@@ -5,6 +5,7 @@ import {
   ageOf,
   applyFamiliarityGain,
   naturalPositionOf,
+  RATING_MAX,
   storedProficiencyFor,
   tacticalUptake,
 } from "@story-fm/domain";
@@ -93,7 +94,7 @@ export const MATCH_ATTR_CAP = 11;
 
 /** 감독 축의 0~99를 0~1로 — 축값은 도메인이 이미 0~99로 가둔다 */
 function axisRatio(value: number): number {
-  return Math.max(0, Math.min(99, value)) / 99;
+  return Math.max(0, Math.min(RATING_MAX, value)) / RATING_MAX;
 }
 
 /**
@@ -213,6 +214,9 @@ export interface TrainingOutcome {
 
 const CHAT_KEEP = 12;
 
+/** 그중 한 줄이 브리프에 실리는 길이 — 긴 지시는 앞머리만 있어도 무엇인지 읽힌다 */
+const CHAT_LINE_MAX = 400;
+
 /** 능력치 축인가 — 개인 훈련의 `axis`는 자유 문자열로 저장된다 */
 function attributeAxis(value: string | undefined | null): AttributeAxis | null {
   if (!value) return null;
@@ -308,7 +312,11 @@ export function buildTrainingBrief(
     chat: state.chat
       .filter((t) => t.at >= window.from && t.role !== "operator")
       .slice(-CHAT_KEEP)
-      .map((t) => ({ at: t.at, role: t.role as "user" | "model", text: t.text.slice(0, 400) })),
+      .map((t) => ({
+        at: t.at,
+        role: t.role as "user" | "model",
+        text: t.text.slice(0, CHAT_LINE_MAX),
+      })),
     trainedAxes: [...axes],
   };
 }

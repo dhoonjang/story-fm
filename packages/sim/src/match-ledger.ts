@@ -56,9 +56,8 @@ export function addStats(
       passes: before.passes + line.passes,
       progressive: before.progressive + line.progressive,
       shots: before.shots + line.shots,
-      xg: Math.round((before.xg + line.xg) * 100) / 100,
-      scoringExpectation:
-        Math.round(((before.scoringExpectation ?? 0) + line.scoringExpectation) * 100) / 100,
+      xg: round2(before.xg + line.xg),
+      scoringExpectation: round2((before.scoringExpectation ?? 0) + line.scoringExpectation),
       saves: before.saves + line.saves,
     };
   }
@@ -93,6 +92,15 @@ export const LEDGER_LIMITS = {
  * 그 한 장을 쓸 자리가 없다.
  */
 export const EXTRA_TIME_SUBS = 1;
+
+/** 한 선수가 이만큼 경고를 받으면 퇴장이다 */
+const YELLOWS_TO_SEND_OFF = 2;
+
+/** 장부 요약이 붙이는 최근 이벤트 수 — 프롬프트에 실리는 꼬리다 */
+const LEDGER_RECENT_EVENTS = 8;
+
+/** xG 는 소수 둘째 자리까지 — 장부에 쌓이는 값이라 자리수가 흔들리면 안 된다 */
+const round2 = (v: number) => Math.round(v * 100) / 100;
 
 /**
  * 이 국면의 교체 한도 — 90분은 5인/3회, 연장은 6인/4회.
@@ -327,7 +335,7 @@ function applyOne(
       if (err) return err;
       if (!side) return `${label(i, ev)}: team이 필요합니다`;
       side.yellows[player] = (side.yellows[player] ?? 0) + 1;
-      if ((side.yellows[player] ?? 0) >= 2) {
+      if ((side.yellows[player] ?? 0) >= YELLOWS_TO_SEND_OFF) {
         // 경고 누적 퇴장
         side.onPitch = side.onPitch.filter((id) => id !== player);
         state.sentOff.push(player);
@@ -465,7 +473,7 @@ export function describeLedger(
     `교체: 홈 ${state.home.subsUsed}/${limits.maxSubs}, 어웨이 ${state.away.subsUsed}/${limits.maxSubs}` +
       (state.sentOff.length > 0 ? ` · 퇴장: ${state.sentOff.join(", ")}` : ""),
   ];
-  const recent = state.events.slice(-8);
+  const recent = state.events.slice(-LEDGER_RECENT_EVENTS);
   if (recent.length > 0) {
     lines.push(
       "최근 이벤트: " +

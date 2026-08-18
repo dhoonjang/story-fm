@@ -1,4 +1,5 @@
 import type { GamePlayer } from "@story-fm/domain";
+import { RATING_MAX } from "@story-fm/domain";
 
 /**
  * 폼 — **시간 축을 가진 컨디션.** 규칙을 한곳에 모은다 (player.md §5.1).
@@ -28,8 +29,14 @@ import type { GamePlayer } from "@story-fm/domain";
 export const FORM_MIN = -1;
 export const FORM_MAX = 1;
 
+/** 폼 값의 해상도 — 하루치 회귀가 0.0167이라 소수 셋째 자리가 필요하다 */
+const round3 = (x: number) => Math.round(x * 1000) / 1000;
+
+/** 폼 1을 만드는 사기 점수 — 사기 1점이 옛 condition 1점과 같은 폭을 내는 눈금이다 */
+const MORALE_PER_FORM = 36;
+
 /** 사기 1점이 기존 condition 1점과 같은 즉시 전력 폭(0.25%)을 내도록 폼으로 옮긴다. */
-export const moraleToForm = (morale: number): number => Math.round((morale / 36) * 1000) / 1000;
+export const moraleToForm = (morale: number): number => round3(morale / MORALE_PER_FORM);
 
 /**
  * 폼의 중립점 — **평점 분포의 중앙**이지 평점 공식의 기준선(6.0)이 아니다.
@@ -50,15 +57,21 @@ const DAILY_DECAY = 0.0167;
 const EDGE_DAMPING = 0.75;
 
 /** 폼 값은 소수 셋째 자리까지 — 매일 회귀가 0.0167씩이라 자리가 필요하다 */
-export const clampForm = (x: number) =>
-  Math.max(FORM_MIN, Math.min(FORM_MAX, Math.round(x * 1000) / 1000));
+export const clampForm = (x: number) => Math.max(FORM_MIN, Math.min(FORM_MAX, round3(x)));
 
 /**
  * 기복의 폭 — 침착성이 낮은 선수는 같은 경기에도 폼이 크게 흔들린다.
  * 0.7(침착 99) ~ 1.3(침착 0).
  */
+/** 침착 0이 갖는 기복 */
+const SWING_AT_ZERO_COMPOSURE = 1.3;
+/** 침착이 최고까지 잡아 주는 몫 — 0.7~1.3 */
+const SWING_COMPOSURE_RELIEF = 0.6;
+
 export function formSwing(player: GamePlayer): number {
-  return 1.3 - (player.attributes.composure / 99) * 0.6;
+  return (
+    SWING_AT_ZERO_COMPOSURE - (player.attributes.composure / RATING_MAX) * SWING_COMPOSURE_RELIEF
+  );
 }
 
 /**
@@ -106,18 +119,24 @@ export type FormLabel = "절정" | "상승세" | "평소" | "침체" | "바닥";
  * **폼의 눈금은 여기 한 곳이다.** 문턱을 숫자로 옮겨 적는 자리가 생기면 한쪽만
  * 옮겨졌을 때 아무 소리 없이 갈린다 — 대역으로 갈리는 곳은 이 라벨로 갈라라.
  */
+/** 라벨이 갈리는 폼 — 위아래 대칭이다 */
+const FORM_LABEL_FROM = { 절정: 0.73, 상승세: 0.33 } as const;
+
 export function formLabel(form: number): FormLabel {
-  if (form >= 0.73) return "절정";
-  if (form >= 0.33) return "상승세";
-  if (form > -0.33) return "평소";
-  if (form > -0.73) return "침체";
+  if (form >= FORM_LABEL_FROM.절정) return "절정";
+  if (form >= FORM_LABEL_FROM.상승세) return "상승세";
+  if (form > -FORM_LABEL_FROM.상승세) return "평소";
+  if (form > -FORM_LABEL_FROM.절정) return "침체";
   return "바닥";
 }
 
 /** 화살표의 색 계열 — 좋음(위)·보통(가로)·나쁨(아래) */
+/** 화살표가 기우는 폼 — 이 안쪽은 가로다 */
+const FORM_TONE_FROM = 0.12;
+
 export function formTone(form: number): "up" | "flat" | "down" {
-  if (form >= 0.12) return "up";
-  if (form > -0.12) return "flat";
+  if (form >= FORM_TONE_FROM) return "up";
+  if (form > -FORM_TONE_FROM) return "flat";
   return "down";
 }
 
@@ -135,7 +154,10 @@ export function formTone(form: number): "up" | "flat" | "down" {
  * 폴백 폰트로 빠져 **가장 강조돼야 할 절정·바닥이 가장 가늘게** 보였다.
  * 그래서 글자 대신 도형 하나를 돌린다.
  */
+/** 폼 0(평소)이 가리키는 각 — 3시. 절정이 0°, 바닥이 180°다 */
+const FLAT_ANGLE = 90;
+
 export function formAngle(form: number): number {
   const clamped = Math.max(FORM_MIN, Math.min(FORM_MAX, form));
-  return Math.round((90 - clamped * 90) * 10) / 10;
+  return Math.round((FLAT_ANGLE - clamped * FLAT_ANGLE) * 10) / 10;
 }

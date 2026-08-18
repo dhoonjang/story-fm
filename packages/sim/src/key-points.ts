@@ -1,5 +1,5 @@
 import type { MatchSide, MatchupZone, Player, PositionGroup } from "@story-fm/domain";
-import { anchorOf, positionGroupOf, positionGroupOfPlayer } from "@story-fm/domain";
+import { RATING_MAX, anchorOf, positionGroupOf, positionGroupOfPlayer } from "@story-fm/domain";
 import type { LineupSlot } from "./strength-packet";
 import { laneOfX, type GridLane } from "./zone-grid";
 
@@ -93,6 +93,54 @@ const avg = (xi: LineupSlot[], g: PositionGroup, read: (p: Player) => number) =>
   return xs.length > 0 ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
 };
 
+/**
+ * 축마다 **여기서부터가 특징이다** 하는 문턱. `weight` 는 문턱을 넘은 만큼이고,
+ * 넘지 못하면(`weight <= 0`) 그 지점은 아예 생기지 않는다 — 올리면 그 축이 덜
+ * 잡히고, 내리면 흔한 짝까지 키포인트가 된다.
+ *
+ * 세 종류다. **격차**는 두 능력치 차이에서 문턱을 빼고, **약점**은 문턱에서
+ * 능력치를 빼며, **강점**은 능력치에서 문턱을 뺀다.
+ *
+ * 키는 `RawPoint.id` 의 앞머리이자 `exploits.ts` 의 `AXIS_EFFECT` 키다.
+ */
+const AXIS_THRESHOLD = {
+  /** 격차 — 최전방 pace vs 최종 수비 pace */
+  "backline-pace": 9,
+  /** 격차 — 최전방 dribbling vs 수비 tackling */
+  "wing-duel": 11,
+  /** 격차 — 최전방 aerial vs 수비 aerial */
+  aerial: 11,
+  /** 약점 — 중원 (composure + passing) / 2 */
+  "press-resistance": 72,
+  /** 강점 — 중원 vision */
+  creator: 79,
+  /** 강점 — 최전방 finishing */
+  finisher: 81,
+  /** 약점 — 골키퍼 goalkeeping */
+  keeper: 73,
+  /** 강점 — 골키퍼 passing */
+  "keeper-distribution": 77,
+  /** 약점 — 백라인 평균 positioning */
+  "backline-shape": 70,
+  /** 약점 — 백라인 최고 leadership */
+  "backline-leader": 50,
+  /** 격차 — 최전방 strength vs 수비 strength */
+  physical: 13,
+  /** 약점 — 중원 평균 stamina */
+  stamina: 68,
+  /** 강점 — 최고 kicking */
+  "set-piece": 82,
+  /** 강점 — aggression - composure, 거칠수록 크다 */
+  discipline: 22,
+} as const;
+
+/**
+ * 백라인에 조율자가 없다고 부를 리더십 상한 — 최고 리더십이 이보다 높으면 부를
+ * 사람이 있다고 본다. `AXIS_THRESHOLD["backline-leader"]` 보다 낮아, 지점이
+ * 생기는 짝은 언제나 이 문(門)을 먼저 통과한다.
+ */
+const BACKLINE_LEADER_GATE = 45;
+
 /** 한쪽 팀이 상대에게 갖는 우위·약점 — 두 방향으로 각각 부른다 */
 type RawPoint = Omit<KeyPoint, "side"> & { side: "us" | "them" };
 
@@ -135,7 +183,7 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       slowCB,
       "them",
       "attack",
-      gap - 9,
+      gap - AXIS_THRESHOLD["backline-pace"],
       `${us} 뒷공간 공략: ${fast.player.name}(pace ${fast.player.attributes.pace}) vs ${slowCB.player.name}(pace ${slowCB.player.attributes.pace})`,
       `${them} 최종 수비가 발이 느리다 — 뒷공간이 열린다`,
     );
@@ -151,7 +199,7 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       weakTackler,
       "them",
       "attack",
-      gap - 11,
+      gap - AXIS_THRESHOLD["wing-duel"],
       `${us} 1대1 우위: ${dribbler.player.name}(드리블 ${dribbler.player.attributes.dribbling}) vs ${weakTackler.player.name}(태클 ${weakTackler.player.attributes.tackling})`,
       `${us}는 측면에서 사람을 벗겨낼 수 있다`,
     );
@@ -167,7 +215,7 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       weakAir,
       "them",
       "attack",
-      gap - 11,
+      gap - AXIS_THRESHOLD.aerial,
       `${us} 제공권 우위: ${tall.player.name}(공중볼 ${tall.player.attributes.aerial}) vs ${weakAir.player.name}(${weakAir.player.attributes.aerial})`,
       `${us}가 공중에서 앞선다 — 크로스와 세트피스가 통한다`,
     );
@@ -182,7 +230,7 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       shaky,
       "them",
       "midfield",
-      72 - value,
+      AXIS_THRESHOLD["press-resistance"] - value,
       `${them} 빌드업 약점: ${shaky.player.name}(침착 ${shaky.player.attributes.composure} · 패스 ${shaky.player.attributes.passing}) — 압박하면 흔들린다`,
       `${them} 중원은 압박에 약하다`,
     );
@@ -196,7 +244,7 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       creator,
       "us",
       "midfield",
-      creator.player.attributes.vision - 79,
+      creator.player.attributes.vision - AXIS_THRESHOLD.creator,
       `${us} 창조의 축: ${creator.player.name}(시야 ${creator.player.attributes.vision}) — 이 선수를 지우면 공격이 멎는다`,
       `${us}의 공격은 중원 한 명에게서 시작된다`,
     );
@@ -210,7 +258,7 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       finisher,
       "us",
       "attack",
-      finisher.player.attributes.finishing - 81,
+      finisher.player.attributes.finishing - AXIS_THRESHOLD.finisher,
       `${us} 결정력: ${finisher.player.name}(결정력 ${finisher.player.attributes.finishing}) — 한 번의 기회로 끝낸다`,
       `${us} 최전방은 기회를 놓치지 않는다`,
     );
@@ -224,7 +272,7 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       gk,
       "them",
       "attack",
-      73 - gk.player.attributes.goalkeeping,
+      AXIS_THRESHOLD.keeper - gk.player.attributes.goalkeeping,
       `${them} 골문 불안: ${gk.player.name}(골키핑 ${gk.player.attributes.goalkeeping})`,
       `${them} 골키퍼가 미덥지 않다`,
     );
@@ -233,7 +281,7 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       gk,
       "them",
       "defense",
-      gk.player.attributes.passing - 77,
+      gk.player.attributes.passing - AXIS_THRESHOLD["keeper-distribution"],
       `${them} 골키퍼 배급: ${gk.player.name}(패스 ${gk.player.attributes.passing}) — 뒤에서부터 풀어 나온다`,
       `${them}는 골키퍼부터 빌드업한다`,
     );
@@ -248,17 +296,17 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       undefined,
       "them",
       "attack",
-      70 - line,
+      AXIS_THRESHOLD["backline-shape"] - line,
       `${them} 수비 조직: 백라인 평균 위치선정 ${Math.round(line)} — 라인이 자주 어긋난다`,
       `${them} 수비는 짜임새가 헐겁다`,
     );
-    if (leader && leader.player.attributes.leadership <= 45) {
+    if (leader && leader.player.attributes.leadership <= BACKLINE_LEADER_GATE) {
       push(
         "backline-leader",
         leader,
         "them",
         "attack",
-        50 - leader.player.attributes.leadership,
+        AXIS_THRESHOLD["backline-leader"] - leader.player.attributes.leadership,
         `${them} 백라인에 조율자가 없다 (최고 리더십 ${leader.player.attributes.leadership})`,
         `${them} 수비는 서로를 부르지 않는다`,
       );
@@ -275,7 +323,7 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       light,
       "them",
       "attack",
-      gap - 13,
+      gap - AXIS_THRESHOLD.physical,
       `${us} 몸싸움 우위: ${strong.player.name}(힘 ${strong.player.attributes.strength}) vs ${light.player.name}(${light.player.attributes.strength})`,
       `${us} 최전방이 등지고 버틴다`,
     );
@@ -289,7 +337,7 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       undefined,
       "us",
       "midfield",
-      68 - engine,
+      AXIS_THRESHOLD.stamina - engine,
       `${us} 중원 활동량 부족: 평균 체력 ${Math.round(engine)} — 후반에 밀린다`,
       `${us} 중원은 후반에 다리가 무거워진다`,
     );
@@ -305,7 +353,7 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       kicker,
       "us",
       "attack",
-      kicker.player.attributes.kicking - 82,
+      kicker.player.attributes.kicking - AXIS_THRESHOLD["set-piece"],
       `${us} 세트피스 키커: ${kicker.player.name}(킥 ${kicker.player.attributes.kicking})`,
       `${us}는 죽은 공이 위협적이다`,
     );
@@ -324,7 +372,9 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       rough,
       "them",
       "defense",
-      rough.player.attributes.aggression - rough.player.attributes.composure - 22,
+      rough.player.attributes.aggression -
+        rough.player.attributes.composure -
+        AXIS_THRESHOLD.discipline,
       `${them} 카드 위험: ${rough.player.name}(적극성 ${rough.player.attributes.aggression} · 침착 ${rough.player.attributes.composure})`,
       `${them}에 발끈하는 선수가 있다`,
     );
@@ -360,9 +410,18 @@ export function buildKeyPoints(
   ].sort((a, b) => b.weight - a.weight);
 }
 
+/** 분석이 0이어도 이만큼은 보인다 */
+const KEY_POINT_COUNT_MIN = 2;
+/** 분석이 최고여도 이 이상은 보이지 않는다 */
+const KEY_POINT_COUNT_MAX = 10;
+
 /** 감독이 몇 개를 발견하는가 — 분석 30이면 4개, 85면 9개 */
 function keyPointCount(analysis: number): number {
-  return Math.max(2, Math.min(10, Math.round(2 + (analysis / 99) * 8)));
+  const span = KEY_POINT_COUNT_MAX - KEY_POINT_COUNT_MIN;
+  return Math.max(
+    KEY_POINT_COUNT_MIN,
+    Math.min(KEY_POINT_COUNT_MAX, Math.round(KEY_POINT_COUNT_MIN + (analysis / RATING_MAX) * span)),
+  );
 }
 
 /** 감독의 눈에 실제로 잡힌 지점 — 문장과 **누가 이 약점을 가졌나** */
@@ -379,11 +438,20 @@ export interface ShownPoint {
  * 어떤 건 정밀하고 어떤 건 흐린 게 자연스럽다 — 크게 벌어진 짝일수록 눈이
  * 어두워도 또렷하다.
  */
+/** 전술이 최고일 때 능력만으로 얻는 또렷함 */
+const TACTICS_CLARITY_MAX = 0.75;
+/** 벌어진 폭이 더해 줄 수 있는 또렷함의 상한 */
+const GAP_CLARITY_MAX = 0.25;
+/** 그 상한에 닿는 `weight` — 이보다 벌어져도 더 또렷해지지 않는다 */
+const GAP_CLARITY_FULL = 60;
+/** 이 위면 이름과 수치가, 아래면 방향만 보인다 */
+const SHARP_CLARITY = 0.55;
+
 export function readKeyPoints(points: KeyPoint[], analysis: number, tactics: number): ShownPoint[] {
-  const sharp = (tactics / 99) * 0.75;
+  const sharp = (tactics / RATING_MAX) * TACTICS_CLARITY_MAX;
   return points.slice(0, keyPointCount(analysis)).map((p) => {
     // 벌어진 폭이 큰 짝은 낮은 전술 능력으로도 또렷이 보인다
-    const clarity = sharp + Math.min(0.25, p.weight / 60);
-    return { text: clarity >= 0.55 ? p.text : p.vague, side: p.side };
+    const clarity = sharp + Math.min(GAP_CLARITY_MAX, p.weight / GAP_CLARITY_FULL);
+    return { text: clarity >= SHARP_CLARITY ? p.text : p.vague, side: p.side };
   });
 }

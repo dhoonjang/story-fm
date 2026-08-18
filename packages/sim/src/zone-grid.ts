@@ -93,6 +93,9 @@ export const REGIONAL_INTENT_WEIGHT: Record<RegionalIntent, number> = {
  */
 const THIN_PENALTY = 0.18;
 
+/** 온전한 칸으로 볼 만큼 사람이 붙은 무게 합 — 이보다 얇으면 `THIN_PENALTY`가 깎는다 */
+const FULL_DENSITY = 1.2;
+
 /**
  * 전술판 좌표가 선 레인 — **가장 가까운 칸 중심**이 그 레인이다.
  *
@@ -210,7 +213,7 @@ function presence(
   }
   if (weight === 0) return 0;
   // 그 자리에 사람이 얼마나 붙어 있나 — 얇으면 조금 깎인다
-  const density = Math.min(1, weight / 1.2);
+  const density = Math.min(1, weight / FULL_DENSITY);
   return (sum / weight) * (1 - THIN_PENALTY * (1 - density));
 }
 

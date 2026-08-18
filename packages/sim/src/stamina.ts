@@ -1,5 +1,11 @@
 import type { Player, TacticsSpec } from "@story-fm/domain";
-import { weightSlotOf } from "@story-fm/domain";
+import {
+  CONDITION_MAX,
+  PHASE_END,
+  RATING_MAX,
+  TACTIC_SCALE_NEUTRAL,
+  weightSlotOf,
+} from "@story-fm/domain";
 
 /**
  * 체력 소모 — **자리와 전술이 함께 정한다.**
@@ -49,12 +55,22 @@ export function positionalDrain(position: string): number {
  * 라인을 올리면 뒤로 돌아가는 회복 주행이 늘고, 폭을 넓게 쓰면 측면 자원이
  * 좌우로 더 많이 커버한다.
  */
+const TACTICAL_DRAIN_MIN = 0.72;
+const TACTICAL_DRAIN_MAX = 1.55;
+
+/** 축을 한 칸 올릴 때 팀 전체 소모에 얹히는 몫 — 압박이 가장 비싸다 */
+const DRAIN_PER_STEP = {
+  pressing: 0.09,
+  tempo: 0.055,
+  defensiveLine: 0.03,
+  width: 0.025,
+} as const;
+
 export function tacticalDrain(spec: TacticsSpec): number {
-  const press = (spec.pressing - 3) * 0.09;
-  const tempo = (spec.tempo - 3) * 0.055;
-  const line = (spec.defensiveLine - 3) * 0.03;
-  const width = (spec.width - 3) * 0.025;
-  return Math.max(0.72, Math.min(1.55, 1 + press + tempo + line + width));
+  const step = (axis: keyof typeof DRAIN_PER_STEP) =>
+    (spec[axis] - TACTIC_SCALE_NEUTRAL) * DRAIN_PER_STEP[axis];
+  const total = step("pressing") + step("tempo") + step("defensiveLine") + step("width");
+  return Math.max(TACTICAL_DRAIN_MIN, Math.min(TACTICAL_DRAIN_MAX, 1 + total));
 }
 
 /**
@@ -64,21 +80,36 @@ export function tacticalDrain(spec: TacticsSpec): number {
  * **전방과 중원**이 먼저 지친다(센터백은 라인만 맞춘다). 이 결이 없으면 "압박을
  * 올렸더니 센터백이 먼저 쓰러진다" 같은 일이 생긴다.
  */
+/** 폭 한 칸이 측면 자원에 더 얹는 몫 */
+const WIDE_WIDTH_STEP = 0.05;
+/** 압박 한 칸이 전방·중원에 더 얹는 몫 */
+const PRESS_STEP_FRONT = 0.05;
+/** 같은 한 칸이 센터백·골키퍼에게서 덜어 가는 몫 — 라인만 맞추면 되기 때문이다 */
+const PRESS_RELIEF_BACK = 0.03;
+/** 전술이 아무리 덜어 줘도 이 아래로는 내려가지 않는다 */
+const POSITIONAL_TACTIC_WEIGHT_MIN = 0.7;
+
 function positionalTacticWeight(position: string, spec: TacticsSpec): number {
   const slot = weightSlotOf(position);
   const wide = slot === "FB" || slot === "W";
   const front = slot === "ST" || slot === "CF" || slot === "AM" || slot === "W";
   const middle = slot === "CM" || slot === "DM";
   let w = 1;
-  if (wide) w += (spec.width - 3) * 0.05;
-  if (front || middle) w += (spec.pressing - 3) * 0.05;
-  if (slot === "CB" || slot === "GK") w -= (spec.pressing - 3) * 0.03;
-  return Math.max(0.7, w);
+  if (wide) w += (spec.width - TACTIC_SCALE_NEUTRAL) * WIDE_WIDTH_STEP;
+  if (front || middle) w += (spec.pressing - TACTIC_SCALE_NEUTRAL) * PRESS_STEP_FRONT;
+  if (slot === "CB" || slot === "GK")
+    w -= (spec.pressing - TACTIC_SCALE_NEUTRAL) * PRESS_RELIEF_BACK;
+  return Math.max(POSITIONAL_TACTIC_WEIGHT_MIN, w);
 }
+
+/** 지구력 0이 무는 소모 배율 */
+const DRAIN_AT_ZERO_STAMINA = 1.39;
+/** 지구력이 최고까지 덜어 주는 몫 — 양 끝의 차가 ±25%다 */
+const DRAIN_STAMINA_RELIEF = 0.75;
 
 /** 지구력 배율 — 90이면 풀타임을 버티고, 60이면 60분부터 기량이 떨어진다. */
 function staminaFactor(player: Player): number {
-  return 1.39 - (player.attributes.stamina / 99) * 0.75;
+  return DRAIN_AT_ZERO_STAMINA - (player.attributes.stamina / RATING_MAX) * DRAIN_STAMINA_RELIEF;
 }
 
 /**
@@ -96,6 +127,9 @@ function staminaFactor(player: Player): number {
  * 사흘 뒤는 완전 회복이 아니고(지구력 70 중앙 미드필더 ≈73) 만 7일이면 100이다.
  */
 const FULL_MATCH_DRAIN = 42;
+
+/** `FULL_MATCH_DRAIN`이 재는 길이 — 정규 시간이 끝나는 분 */
+const FULL_MATCH_MINUTES = PHASE_END.second_half;
 
 /**
  * 활동량을 남은 체력으로 바꾸는 감쇠 눈금.
@@ -145,9 +179,16 @@ export const RECOVERY_BASE = {
 } as const;
 export type RecoveryKind = keyof typeof RECOVERY_BASE;
 
+/** 지구력 0이 받는 회복 배율 */
+const RECOVERY_AT_ZERO_STAMINA = 0.84;
+/** 지구력이 최고까지 더해 주는 몫 — 소모 쪽(±25%)보다 좁다 */
+const RECOVERY_STAMINA_BONUS = 0.33;
+
 /** 회복 배율 — 지구력 90이면 3일 연전을 버틸 만큼 빠르되 소모 차이보다 작다. */
 export function recoveryFactor(player: Player): number {
-  return 0.84 + (player.attributes.stamina / 99) * 0.33;
+  return (
+    RECOVERY_AT_ZERO_STAMINA + (player.attributes.stamina / RATING_MAX) * RECOVERY_STAMINA_BONUS
+  );
 }
 
 /** 오늘 이 선수가 되찾는 체력 */
@@ -185,6 +226,10 @@ export const DRAIN_VARIANCE = 0.12;
  * 고정된 편향이 되는 셈이라, "오늘따라 무거웠다"가 "얘는 원래 잘 지친다"로 바뀐다.
  * murmur3의 마무리 믹스로 상위 비트를 아래로 섞어 내린다.
  */
+/** 해시를 0~2 배수로 나누는 칸 수 — 홀수라 가운데 칸이 정확히 1.0(변동 없음)이다 */
+const VARIANCE_BUCKETS = 2001;
+const VARIANCE_MIDPOINT = (VARIANCE_BUCKETS - 1) / 2;
+
 export function drainVariance(key: string): number {
   if (!key) return 1;
   let h = 2166136261;
@@ -197,7 +242,7 @@ export function drainVariance(key: string): number {
   h ^= h >>> 13;
   h = Math.imul(h, 3266489909);
   h ^= h >>> 16;
-  return 1 - DRAIN_VARIANCE + (((h >>> 0) % 2001) / 1000) * DRAIN_VARIANCE;
+  return 1 - DRAIN_VARIANCE + (((h >>> 0) % VARIANCE_BUCKETS) / VARIANCE_MIDPOINT) * DRAIN_VARIANCE;
 }
 
 /**
@@ -220,9 +265,12 @@ export function drainVariance(key: string): number {
  */
 export const CHASE_DRAIN = 0.8;
 
+/** 아무도 공을 더 갖지 않은 점유 — 여기서 `chaseFactor`가 1이다 */
+const EVEN_POSSESSION = 0.5;
+
 /** 점유(0~1)가 이 팀의 소모에 곱하는 배율 */
 export function chaseFactor(possession: number): number {
-  return 1 + (0.5 - possession) * CHASE_DRAIN;
+  return 1 + (EVEN_POSSESSION - possession) * CHASE_DRAIN;
 }
 
 export function conditionDrain(
@@ -232,11 +280,11 @@ export function conditionDrain(
   minutes: number,
   variance = 1,
   directive = 1,
-  possession = 0.5,
+  possession = EVEN_POSSESSION,
   availableCondition = player.state.condition,
 ): number {
   const load =
-    ((FULL_MATCH_DRAIN * minutes) / 90) *
+    ((FULL_MATCH_DRAIN * minutes) / FULL_MATCH_MINUTES) *
     positionalDrain(position) *
     tacticalDrain(spec) *
     positionalTacticWeight(position, spec) *
@@ -244,7 +292,7 @@ export function conditionDrain(
     variance *
     directive *
     chaseFactor(possession);
-  const available = Math.max(0, Math.min(100, availableCondition));
+  const available = Math.max(0, Math.min(CONDITION_MAX, availableCondition));
   return available * (1 - Math.exp(-load / CONDITION_DECAY_SCALE));
 }
 
@@ -265,7 +313,7 @@ export function conditionDrain(
 export const GAP_THRESHOLD = 78;
 
 /** 같은 문턱을 체력(높을수록 좋다) 축으로 본 값 — 화면은 이 축을 쓴다 */
-export const GAP_CONDITION = 100 - GAP_THRESHOLD;
+export const GAP_CONDITION = CONDITION_MAX - GAP_THRESHOLD;
 
 /** 구멍 하나가 그 라인에 내는 손해 */
 export const GAP_PENALTY = 0.07;
