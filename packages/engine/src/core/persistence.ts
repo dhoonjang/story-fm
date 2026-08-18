@@ -10,10 +10,19 @@ import {
 } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { clampCondition, migratePassStyle, migrateSignature } from "@story-fm/domain";
 import { advanceDomesticCups } from "../competition/domestic-cup";
 import { migrateEuroPrizeKeys } from "../competition/euro-prize";
-import { dataDir } from "./paths";
+import { catalogPath, cupCatalogPath, dataDir, leagueCatalogPath, teamCatalogPath } from "./paths";
+import {
+  fillEmptyTables,
+  migrateConditions,
+  migrateFormScale,
+  migrateManagerAxes,
+  migrateMatchStats,
+  migratePassStyles,
+  migrateSquadLevels,
+} from "./migrations";
+import { SaveSchema } from "./save-schema";
 import type { GamePhase, GameState } from "./state";
 import { ensurePersonas } from "../world/persona";
 import { ensureSquadNumbers } from "../squad/numbers";
@@ -63,29 +72,6 @@ function writeAtomic(file: string, contents: string): void {
   writeFileSync(tmp, contents, "utf8");
   renameSync(tmp, file);
 }
-
-/**
- * 없으면 빈 배열로 채우는 필드 — 순수한 목록·이력이라 "비어 있음"이 곧 유효한
- * 초기 상태다. 반대로 `players`·`teams`처럼 없으면 세이브가 깨진 것은 위의
- * 필수 목록이 막는다.
- */
-const ARRAY_FIELDS = [
-  "trainingSessions",
-  "negotiations",
-  "injuries",
-  "bookings",
-  "suspensions",
-  "transfers",
-  "growthLog",
-  "seasonStats",
-  "issues",
-  "euroEntrants",
-  "seasonRecords",
-  "trophies",
-  "achievements",
-  "narrative",
-  "chat",
-] as const;
 
 function paths(id: string) {
   const dir = dataDir();
@@ -207,8 +193,14 @@ function attachShards(raw: unknown, id: string): unknown {
  */
 export const SAVE_VERSION = 6;
 
-/** 세이브를 열지 못한 이유 — 문장은 화면이 쓴다, 코어는 사실만 싣는다 */
-export type UnreadableReason = "version" | "corrupt";
+/**
+ * 세이브를 열지 못한 이유 — 문장은 화면이 쓴다, 코어는 사실만 싣는다.
+ *
+ * 넷은 **로드의 어느 걸음에서 멈췄는가**이고, 그래서 고칠 자리가 저마다 다르다
+ * (→ [docs/data/game-state.md](../../../../docs/data/game-state.md) §6):
+ * 앞의 둘은 파일이 문제고, 뒤의 둘은 **코드가 그 파일을 다루지 못하는 것**이다.
+ */
+export type UnreadableReason = "version" | "corrupt" | "migration" | "schema";
 
 interface LoadFailure {
   ok: false;
@@ -221,128 +213,35 @@ interface LoadFailure {
 
 type LoadResult = { ok: true; state: GameState } | LoadFailure;
 
-/** 로드 시 버전·필수 필드 검사. 통과하지 못하면 사유를 그대로 돌려준다 */
-function validate(raw: unknown): LoadResult {
-  if (!raw || typeof raw !== "object") {
-    return { ok: false, reason: "corrupt", saveVersion: null, createdAt: null };
-  }
-  const s = raw as Record<string, unknown>;
-  const saveVersion = typeof s.saveVersion === "number" ? s.saveVersion : null;
-  const createdAt = typeof s.createdAt === "string" ? s.createdAt : null;
-  if (s.saveVersion !== SAVE_VERSION) {
-    return { ok: false, reason: "version", saveVersion, createdAt };
-  }
-  // v6 필수 테이블 — 하나라도 없으면 손상으로 본다
-  const required = [
-    "players",
-    "teams",
-    "tactics",
-    "finances",
-    "contracts",
-    "schedule",
-    "matches",
-    "windows",
-    "calendar",
-    "manager",
-  ];
-  for (const key of required) {
-    if (s[key] === undefined || s[key] === null) {
-      return { ok: false, reason: "corrupt", saveVersion, createdAt };
-    }
-  }
-  /**
-   * 스키마 진화 — 배열 필드는 없으면 빈 배열로 채운다 (세이브 호환 원칙).
-   * ⚠️ `GameState`에 새 배열을 추가하면 **여기에도 넣어야 한다** — 안 그러면
-   * 옛 세이브에서 `undefined`로 남아 첫 접근에서 터진다.
-   */
-  for (const key of ARRAY_FIELDS) s[key] ??= [];
-  s.scoutReports ??= [];
-  s.settlingEvents ??= [];
-  s.transferList ??= [];
-  s.playerTraining ??= [];
-  s.roleMemory ??= [];
-  s.pressConferences ??= [];
-  s.aiDeals ??= [];
-  s.leagueHistory ??= [];
-  // 재정 보고서는 다음 달 1일부터 쌓인다. 옛 원장 엔트리는 category가 없어
-  // 집계에서 "기타"로 읽힌다 (finance.ts categoryOf).
-  s.financeReports ??= [];
-  /**
-   * 감독 능력치 4축 → 5축 (`media` → `analysis`, `training` 추가).
-   * 새 필드를 채우는 것뿐이라 세이브 버전을 올리지 않는다 (원칙 4).
-   * 미디어는 **평판**에 그대로 남아 있으므로 그쪽은 건드리지 않는다.
-   */
-  const migrateAxes = (rec: Record<string, unknown> | undefined, fill: number) => {
-    if (!rec) return;
-    if (rec.analysis === undefined) rec.analysis = rec.media ?? fill;
-    if (rec.training === undefined) rec.training = fill;
-    delete rec.media;
-  };
-  migrateAxes((s.manager as { attributes?: Record<string, unknown> } | undefined)?.attributes, 50);
-  migrateAxes(s.managerXP as Record<string, unknown> | undefined, 0);
-  const state = raw as GameState;
-  // squadLevel 도입 전 v6 세이브 호환: 기존 전술 배치 선수와 OVR 상위 25명을
-  // 1군으로, 나머지를 2군으로 분류한다.
-  // 한 명이라도 미분류가 있을 때만 돈다 — 아래 루프는 팀마다 전 선수를 훑으므로
-  // (169팀 × 5,700명) 이미 옮긴 세이브에서도 매 로드 60만 번을 비교하고 있었다
-  if (state.players.some((p) => p.squadLevel === undefined)) {
-    for (const team of state.teams) {
-      const roster = state.players.filter((p) => p.teamId === team.id);
-      if (roster.every((p) => p.squadLevel !== undefined)) continue;
-      const assigned = new Set(
-        state.tactics.find((t) => t.teamId === team.id)?.assignments.map((a) => a.playerId) ?? [],
-      );
-      const first = new Set(assigned);
-      for (const player of [...roster].sort(
-        (a, b) => b.attributes.overall - a.attributes.overall,
-      )) {
-        if (first.size >= 25) break;
-        first.add(player.id);
-      }
-      for (const player of roster) player.squadLevel = first.has(player.id) ? "first" : "reserve";
-    }
-  }
-  // 패스 스타일이 세 갈래에서 1~5 눈금으로 폈다 — 옛 세이브의 문자열을 옮긴다.
-  // 지문(`tacticsSignature`)에도 들어 있으므로 적응도 기억까지 함께 옮겨야
-  // "익힌 전술로 돌아왔는데 처음 보는 전술" 취급을 받지 않는다.
-  for (const tactics of state.tactics) {
-    tactics.spec.passStyle = migratePassStyle(tactics.spec.passStyle);
-    for (const memory of tactics.drilled ?? []) {
-      memory.signature = migrateSignature(memory.signature);
-    }
-  }
-  /**
-   * 폼 축이 −3~3 정수에서 **−1~1 실수**로 바뀌었다 (form.ts).
-   *
-   * 값만 보고는 옛 세이브인지 알 수 없다 — 옛 "1"과 새 "1"이 같은 숫자인데 뜻이
-   * 정반대(약한 상승 vs 절정)다. 그래서 마커를 둔다. optional 필드라 세이브
-   * 버전을 올리지 않는다(원칙 4). 폼은 빠르게 변하는 값이라 한 번만 옮기면 된다.
-   */
-  if (!state.formUnitScale) {
-    for (const player of state.players) {
-      player.state.form = Math.max(
-        -1,
-        Math.min(1, Math.round((player.state.form / 3) * 1000) / 1000),
-      );
-    }
-    state.formUnitScale = true;
-  }
+/** v6 필수 테이블 — 하나라도 없으면 세이브가 깨진 것이다 */
+const REQUIRED_TABLES = [
+  "players",
+  "teams",
+  "tactics",
+  "finances",
+  "contracts",
+  "schedule",
+  "matches",
+  "windows",
+  "calendar",
+  "manager",
+] as const;
 
-  /**
-   * 사기·피로 두 축이 **체력 하나**로 합쳐졌다 (player.ts).
-   *
-   * 옛 세이브의 두 값을 화면이 쓰던 그 공식으로 합친다 — 감독이 보던 숫자가
-   * 그대로 저장값이 되므로 로드 전후로 체감이 달라지지 않는다. 값이 이미
-   * 옮겨졌는지는 `condition`의 유무로 안다(옛 세이브엔 없다).
-   */
-  for (const player of state.players) {
-    const legacy = player.state as { morale?: number; fatigue?: number; condition?: number };
-    if (legacy.condition !== undefined) continue;
-    const freshness = 100 - (legacy.fatigue ?? 20);
-    player.state.condition = clampCondition(freshness * 0.6 + (legacy.morale ?? 60) * 0.4);
-    delete legacy.morale;
-    delete legacy.fatigue;
-  }
+/**
+ * 옛 세이브를 지금 모양으로 — **로드의 두 번째 걸음.**
+ *
+ * 앞쪽은 형태를 옮기는 순수 함수들(`core/migrations.ts`)이고, 뒤쪽은 세계를
+ * 따라잡게 하는 엔진 함수들이다. 순서가 뜻을 갖는 자리가 있다: 분류가 끝난 뒤라야
+ * 등번호를 채울 수 있고, 빠진 클럽을 채운 뒤라야 컵이 대진을 짤 수 있다.
+ */
+function migrate(save: Record<string, unknown>, state: GameState): void {
+  fillEmptyTables(save);
+  migrateManagerAxes(save);
+  migrateSquadLevels(state);
+  migratePassStyles(state);
+  migrateFormScale(state);
+  migrateConditions(state);
+  migrateMatchStats(state);
   /**
    * **종합은 저장된 값이 아니라 15축의 파생 캐시다** — 로드할 때 다시 계산한다.
    *
@@ -352,23 +251,38 @@ function validate(raw: unknown): LoadResult {
    * 같은 표에 두 눈금이 선다.
    *
    * 축에서 파생하는 값이므로 멱등이고, 없던 필드를 채우는 것도 아니라 세이브
-   * 버전을 올리지 않는다 (원칙 4). 이후 공식이 또 움직여도 여기가 따라온다.
+   * 버전을 올리지 않는다. 이후 공식이 또 움직여도 여기가 따라온다.
    */
   for (const player of state.players) recomputeOverall(player);
   // 2부 리그 도입 — 세이브에 없는 카탈로그 클럽을 채워 넣는다. 이걸 하지 않으면
   // 국내 컵이 존재하지 않는 팀으로 대진을 짜거나 아예 돌지 않는다 (state.ts).
   // 진행 중인 게임에 영향은 없다 — 이 클럽들은 리그전을 돌지 않는다.
   addMissingClubs(state);
-  /**
-   * 등번호 도입 전 세이브는 번호가 전부 비어 있다. 그 상태에서 포지션 관례부터
-   * 적용하면 브루누 페르난데스처럼 카탈로그에 공식 8번이 있어도 임의 번호를 받는다.
-   * 현재 소속이 시드 소속과 같은 선수는 실측값을 먼저 복원하고, 이적한 선수와
-   * 미확인·생성 선수만 아래의 결정적 배정에 맡긴다.
-   *
-   * **번호가 있는 선수는 건드리지 않는다.** 세이브가 든 번호를 매번 지우고 다시
-   * 배정하면 이적하며 받은 번호가 세이브를 열 때마다 뒤집히고, 배정 대상이
-   * 명단 전체가 되어 로드마다 그 비용을 다시 문다.
-   */
+  restoreSquadNumbers(state);
+  // 대항전 상금 멱등 키가 표시 라벨에서 안정 키로 바뀌었다. 리그 페이즈 정산은
+  // 리그 페이즈가 끝난 뒤 **매일** 다시 불리므로, 옛 키를 옮기지 않으면 진행 중인
+  // 세이브가 이미 받은 상금을 새 키로 한 번 더 받는다.
+  migrateEuroPrizeKeys(state);
+  // 국내 컵 따라잡기 — 컵 편성은 tick에서 도는데, 컵이 없던 세이브를 **열기만**
+  // 해서는 tick이 돌지 않아 달력이 계속 비어 보인다. 새 게임이 생성 시점에
+  // 부르는 것과 같은 함수를 로드에서도 한 번 부른다 (결정적·멱등이라 안전하다).
+  advanceDomesticCups(state, []);
+  // 페르소나 도입 — 수석코치가 없던 세이브를 채운다. 생성이 시드로 결정적이라
+  // 그 세이브의 코치는 늘 같은 사람이고, 그래서 버전을 올리지 않아도 된다.
+  ensurePersonas(state);
+}
+
+/**
+ * 등번호 도입 전 세이브는 번호가 전부 비어 있다. 그 상태에서 포지션 관례부터
+ * 적용하면 브루누 페르난데스처럼 카탈로그에 공식 8번이 있어도 임의 번호를 받는다.
+ * 현재 소속이 시드 소속과 같은 선수는 실측값을 먼저 복원하고, 이적한 선수와
+ * 미확인·생성 선수만 결정적 배정(`ensureSquadNumbers`)에 맡긴다.
+ *
+ * **번호가 있는 선수는 건드리지 않는다.** 세이브가 든 번호를 매번 지우고 다시
+ * 배정하면 이적하며 받은 번호가 세이브를 열 때마다 뒤집히고, 배정 대상이 명단
+ * 전체가 되어 로드마다 그 비용을 다시 문다.
+ */
+function restoreSquadNumbers(state: GameState): void {
   const unnumbered = state.players.filter(
     (player) => player.squadNumber === undefined && player.teamId !== "freeagents",
   );
@@ -386,17 +300,50 @@ function validate(raw: unknown): LoadResult {
   }
   // 공식 번호를 먼저 보존하고, 남은 빈칸과 혹시 생긴 중복만 채운다.
   ensureSquadNumbers(state.players);
-  // 대항전 상금 멱등 키가 표시 라벨에서 안정 키로 바뀌었다. 리그 페이즈 정산은
-  // 리그 페이즈가 끝난 뒤 **매일** 다시 불리므로, 옛 키를 옮기지 않으면 진행 중인
-  // 세이브가 이미 받은 상금을 새 키로 한 번 더 받는다.
-  migrateEuroPrizeKeys(state);
-  // 국내 컵 따라잡기 — 컵 편성은 tick에서 도는데, 컵이 없던 세이브를 **열기만**
-  // 해서는 tick이 돌지 않아 달력이 계속 비어 보인다. 새 게임이 생성 시점에
-  // 부르는 것과 같은 함수를 로드에서도 한 번 부른다 (결정적·멱등이라 안전하다).
-  advanceDomesticCups(state, []);
-  // 페르소나 도입 — 수석코치가 없던 세이브를 채운다. 생성이 시드로 결정적이라
-  // 그 세이브의 코치는 늘 같은 사람이고, 그래서 버전을 올리지 않아도 된다.
-  ensurePersonas(state);
+}
+
+/**
+ * 로드 — **세 걸음이고, 걸음마다 실패의 뜻이 다르다**
+ * (→ [docs/data/game-state.md](../../../../docs/data/game-state.md) §6).
+ *
+ * 1. 형태 — 버전과 필수 테이블. 걸리면 **파일**이 문제다.
+ * 2. 마이그레이션 — 옛 세이브를 지금 모양으로. 넘어지면 **코드**가 문제다.
+ * 3. 스키마 parse — 도메인 스키마가 곧 세이브 계약이다.
+ *
+ * 파일을 못 읽는 것과 코어가 그 파일을 다루다 넘어지는 것을 한 사유로 뭉치면
+ * 멀쩡한 세이브가 "손상"으로 서고, 고칠 것이 파일인지 코드인지 아무도 모른다.
+ */
+function validate(raw: unknown): LoadResult {
+  if (!raw || typeof raw !== "object") {
+    return { ok: false, reason: "corrupt", saveVersion: null, createdAt: null };
+  }
+  const save = raw as Record<string, unknown>;
+  const saveVersion = typeof save.saveVersion === "number" ? save.saveVersion : null;
+  const createdAt = typeof save.createdAt === "string" ? save.createdAt : null;
+  if (save.saveVersion !== SAVE_VERSION) {
+    return { ok: false, reason: "version", saveVersion, createdAt };
+  }
+  for (const key of REQUIRED_TABLES) {
+    if (save[key] === undefined || save[key] === null) {
+      return { ok: false, reason: "corrupt", saveVersion, createdAt };
+    }
+  }
+  const state = raw as GameState;
+  try {
+    migrate(save, state);
+  } catch {
+    return { ok: false, reason: "migration", saveVersion, createdAt };
+  }
+  /**
+   * 검사를 통과한 결과를 **그대로 상태로 쓴다** — `.default()`가 붙은 축은 여기서
+   * 채워지고, 스키마에 없는 찌꺼기 키는 여기서 떨어진다. 스키마가 없는 축은
+   * `passthrough`가 손대지 않고 넘긴다 (`core/save-schema.ts`).
+   */
+  const parsed = SaveSchema.safeParse(state);
+  if (!parsed.success) {
+    return { ok: false, reason: "schema", saveVersion, createdAt };
+  }
+  Object.assign(state, parsed.data);
   return { ok: true, state };
 }
 
@@ -434,16 +381,40 @@ export function loadGame(id: string): GameState | null {
   return result.ok ? result.state : null;
 }
 
+/**
+ * 데이터 디렉터리에 있지만 게임이 아닌 파일 — 어드민이 편집한 카탈로그 오버라이드.
+ * 세이브와 같은 자리에 살고 이름도 `.json`이라, 걸러 내지 않으면 목록에 열리지
+ * 않는 게임 카드로 선다.
+ */
+function catalogFiles(): Set<string> {
+  return new Set(
+    [catalogPath(), teamCatalogPath(), leagueCatalogPath(), cupCatalogPath()].map((file) =>
+      path.basename(file),
+    ),
+  );
+}
+
+/**
+ * 이 디렉터리에 있는 게임의 id.
+ *
+ * **`.bak`만 남은 세이브도 센다.** 저장은 본 파일을 `.bak`으로 밀어낸 뒤 새 본
+ * 파일을 걸어 넣으므로(`saveGame` 3·4단계), 그 사이에 죽으면 디스크에는 `.bak`뿐인
+ * 순간이 있다. 읽기는 그 파일로 폴백해 멀쩡히 열리는데 목록이 `.json`만 훑으면
+ * 그 게임은 화면에서 사라진다 — 감독에게는 없어진 것과 같다.
+ */
 export function listGames(): string[] {
   const dir = dataDir();
   if (!existsSync(dir)) return [];
-  return (
-    readdirSync(dir)
-      // `.meta.json`은 목록용 요약 사이드카, `.shard-….json`은 세이브의 조각 —
-      // 둘 다 게임이 아니다
-      .filter((f) => f.endsWith(".json") && !f.endsWith(".meta.json") && !SHARD_FILE.test(f))
-      .map((f) => f.replace(/\.json$/, ""))
-  );
+  const skip = catalogFiles();
+  const ids = new Set<string>();
+  for (const name of readdirSync(dir)) {
+    // `.meta.json`은 목록용 요약 사이드카, `.shard-….json`은 세이브의 조각 —
+    // 둘 다 게임이 아니다
+    if (name.endsWith(".meta.json") || SHARD_FILE.test(name) || skip.has(name)) continue;
+    if (name.endsWith(".json")) ids.add(name.slice(0, -".json".length));
+    else if (name.endsWith(".json.bak")) ids.add(name.slice(0, -".json.bak".length));
+  }
+  return [...ids];
 }
 
 /** 게임 목록 화면용 요약 — 저장된 게임을 최근 생성 순으로 */

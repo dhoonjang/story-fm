@@ -29,10 +29,27 @@ const spare = (state: GameState) => {
 };
 
 describe("무소속 — 클럽이 아니라 클럽이 없는 상태", () => {
+  // 새 게임을 읽기만 하는 케이스가 함께 쓴다 — 세계를 다시 세우지 않는다
+  const fresh = createTestGame(11);
+
   it("게임 시작 시 비어 있다", () => {
-    const state = createTestGame(11);
-    expect(freeAgents(state)).toHaveLength(0);
+    expect(freeAgents(fresh)).toHaveLength(0);
     expect(isClubTeam(FREE_AGENT_TEAM)).toBe(false);
+  });
+
+  /**
+   * 무소속은 **클럽이 아니다** — 팀 엔티티 한 줄만 있고 재정도 전술도 AI 감독도
+   * 없다 (team.md §4). 만들어 두면 £4.8M을 쥔 "무소속 구단"이 이적료를 지불하고
+   * 순위표 밖에서 감독을 경질당한다.
+   */
+  it("재정도 전술도 AI 감독도 갖지 않는다 — 팀 엔티티 한 줄뿐이다", () => {
+    const team = fresh.teams.find((t) => t.id === FREE_AGENT_TEAM);
+    // 방출된 선수의 `teamId`가 가리킬 자리라 팀 자체는 서 있어야 한다
+    expect(team, "무소속 팀 엔티티가 없다").toBeDefined();
+    expect(team!.aiManagerTacticsRating).toBeUndefined();
+    expect(team!.managerSince).toBeUndefined();
+    expect(fresh.finances.some((f) => f.teamId === FREE_AGENT_TEAM)).toBe(false);
+    expect(fresh.tactics.some((t) => t.teamId === FREE_AGENT_TEAM)).toBe(false);
   });
 
   it("방출하면 무소속이 된다 — 계약이 끊긴다", () => {
@@ -83,6 +100,24 @@ describe("무소속 — 클럽이 아니라 클럽이 없는 상태", () => {
     expect(negotiation.status).toBe("completed");
     expect(playerById(state, target.id)!.teamId).toBe(state.userTeamId);
     expect(activeContract(state, target.id)!.teamId).toBe(state.userTeamId);
+  });
+
+  /**
+   * **무소속엔 이적료를 받을 구단이 없다.** 막지 않으면 그 돈이 세계 밖으로 나간다 —
+   * 예전엔 무소속이 £4.8M 장부를 갖고 있어서 £5M이 아무도 쓰지 않는 잔고로 사라졌다.
+   */
+  it("이적료를 붙인 오퍼는 무소속에게 넣을 수 없다 — 공짜면 통한다", () => {
+    const state = createTestGame(11);
+    state.date = "2026-08-01";
+    const target = spare(state);
+    const wage = activeContract(state, target.id)!.weeklyWage;
+    releasePlayer(state, { playerId: target.id });
+    const offer = { playerId: target.id, weeklyWage: wage, years: 2 };
+
+    const paid = sendOffer(state, { ...offer, fee: 5_000_000 });
+    expect(paid.ok, "무소속에 이적료가 붙었다").toBe(false);
+    // 막는 것은 이적료지 영입이 아니다
+    expect(sendOffer(state, { ...offer, fee: 0 }).ok).toBe(true);
   });
 
   it("창이 닫힌 날의 결렬은 30일이면 식는다 — 창으로 재면 영구 배제가 된다", () => {

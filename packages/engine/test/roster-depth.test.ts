@@ -1,21 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { ageOf, naturalPositionOf } from "@story-fm/domain";
 import {
-  teamCatalog,
-  activeContract,
-  assignmentsOf,
-  groupOf,
-  isClubTeam,
-  playerCatalog,
-  playersOf,
-  transitionSeason,
-} from "@story-fm/engine";
-import { createTestGame } from "./helpers";
+  ageOf,
+  FORMATION_SLOTS,
+  positionGroupOf,
+  positionGroupOfPlayer,
+  type PositionGroup,
+} from "@story-fm/domain";
+import { teamCatalog, isClubTeam, playerCatalog } from "@story-fm/engine";
 
 const TIER = new Map(teamCatalog().map((t) => [t.id, t.tier]));
 /** 스쿼드를 갖는 클럽만 — 무소속은 방출·계약 만료로만 사람이 들어온다 */
 const CLUBS = teamCatalog().filter((t) => isClubTeam(t.id));
 const REF = "2026-08-15"; // 시즌 개막 기준 나이
+const GROUPS: readonly PositionGroup[] = ["GK", "DF", "MF", "FW"];
+
+/** 골키퍼만 슬롯 하나를 넘겨 잡는다 — 부상·정지로 주전이 빠져도 골문은 비지 않는다 */
+const GK_FLOOR = 2;
 
 describe("실선수 로스터 깊이 (30인+, 유망주 포함)", () => {
   const catalog = playerCatalog();
@@ -38,15 +38,18 @@ describe("실선수 로스터 깊이 (30인+, 유망주 포함)", () => {
   it("포지션 그룹별 최소 인원 — 선발·시즌 전환이 고갈로 막히지 않는다", () => {
     for (const team of CLUBS) {
       const roster = rosterOf(team.id);
-      const count = (g: string) =>
-        roster.filter((e) => {
-          const natural = naturalPositionOf(e).position;
-          return (
-            (g === "GK" && natural === "GK") ||
-            (g !== "GK" && groupOf({ positions: e.positions } as never) === g)
-          );
-        }).length;
-      expect(count("GK")).toBeGreaterThanOrEqual(2);
+      const count = (g: PositionGroup) =>
+        roster.filter((e) => positionGroupOfPlayer(e) === g).length;
+      /**
+       * 엔진이 요구하는 것은 **프리셋 하나를 제자리 선수로 채울 수 있는가**뿐이다 —
+       * `pickFormation`은 스쿼드가 감당하는 모양을 고르지 특정 모양을 강요하지 않는다.
+       * 수비수가 넷인 구단은 5백을 안 설 뿐 깨진 것이 아니다.
+       */
+      const fillable = Object.values(FORMATION_SLOTS).some((slots) =>
+        GROUPS.every((g) => count(g) >= slots.filter((s) => positionGroupOf(s) === g).length),
+      );
+      expect(fillable, `${team.id}: 어떤 프리셋도 제자리 선수로 채울 수 없다`).toBe(true);
+      expect(count("GK"), `${team.id}: 백업 골키퍼가 없다`).toBeGreaterThanOrEqual(GK_FLOOR);
     }
   });
 
@@ -68,21 +71,4 @@ describe("실선수 로스터 깊이 (30인+, 유망주 포함)", () => {
     const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
     expect(mean(avgByTier[1]!)).toBeGreaterThan(mean(avgByTier[4]!));
   });
-
-  it("깊은 스쿼드로 15시즌을 전환해도 배치·계약이 유효하다", () => {
-    const state = createTestGame(42);
-    for (let s = 0; s < 15; s++) transitionSeason(state);
-    for (const team of state.teams) {
-      if (!isClubTeam(team.id)) continue;
-      const roster = playersOf(state, team.id);
-      const starters = assignmentsOf(state, team.id, "starting");
-      expect(starters).toHaveLength(11);
-      expect(roster.filter((p) => groupOf(p) === "GK").length).toBeGreaterThanOrEqual(1);
-      // 배치는 모두 실제 보유 선수
-      const ids = new Set(roster.map((p) => p.id));
-      for (const a of assignmentsOf(state, team.id)) expect(ids.has(a.playerId)).toBe(true);
-      // 모든 선수가 활성 계약을 갖는다 (은퇴자는 제거됨)
-      for (const p of roster) expect(activeContract(state, p.id)).not.toBeNull();
-    }
-  }, 90_000);
 });

@@ -85,22 +85,81 @@ describe("판정형 스킬 — 변화량은 공식이 정한다 (overview §7)",
     );
   });
 
-  it("면담은 불만 이슈를 해소한다", () => {
+  it("면담이 불만 이슈를 푸는 것은 잘 풀렸을 때뿐이다 (career.md §2)", () => {
     const state = createTestGame();
-    const player = userPlayers(state)[5]!;
-    state.issues.push({
-      gamePlayerId: player.id,
-      kind: "unhappy",
-      note: "출전 불만",
-      since: state.date,
-    });
-    const result = applyTalkToPlayer(state, {
-      playerId: player.id,
-      outcome: "reassured",
-      intensity: 2,
-    });
-    expect(result.ok).toBe(true);
-    expect(state.issues).toHaveLength(0);
+    const calmed = userPlayers(state)[5]!;
+    const shouted = userPlayers(state)[6]!;
+    for (const p of [calmed, shouted]) {
+      state.issues.push({
+        gamePlayerId: p.id,
+        kind: "unhappy",
+        note: "출전 불만",
+        since: state.date,
+      });
+    }
+    expect(
+      applyTalkToPlayer(state, { playerId: calmed.id, outcome: "reassured", intensity: 2 }).ok,
+    ).toBe(true);
+    expect(
+      applyTalkToPlayer(state, { playerId: shouted.id, outcome: "angered", intensity: 2 }).ok,
+    ).toBe(true);
+    // 화를 내고 나오는 것이 불만 해소책이 되면 안 된다
+    expect(state.issues.map((i) => i.gamePlayerId)).toEqual([shouted.id]);
+  });
+
+  it("같은 선수의 면담은 하루에 한 번만 셈한다 (`talkedOn` — career.md §2)", () => {
+    const state = createTestGame();
+    const player = userPlayers(state)[4]!;
+    player.state.form = 0;
+    const talk = { playerId: player.id, outcome: "motivated", intensity: 3 } as const;
+
+    expect(applyTalkToPlayer(state, talk).ok).toBe(true);
+    expect(player.state.talkedOn).toBe(state.date);
+    const form = player.state.form;
+    const xp = state.managerXP.leadership;
+    const narrated = state.narrative.length;
+    expect(form).toBeGreaterThan(0);
+
+    // 두 번째부터는 사기도 XP도 서사도 움직이지 않는다 — 반려가 아니라 무효다
+    expect(applyTalkToPlayer(state, talk).ok).toBe(true);
+    expect(player.state.form).toBe(form);
+    expect(state.managerXP.leadership).toBe(xp);
+    expect(state.narrative.length).toBe(narrated);
+
+    // 날이 바뀌면 다시 열린다
+    state.date = addDays(state.date, 1);
+    expect(applyTalkToPlayer(state, talk).ok).toBe(true);
+    expect(player.state.form).toBeGreaterThan(form);
+    expect(player.state.talkedOn).toBe(state.date);
+  });
+
+  it("팀토크는 occasion마다 하루에 한 번만 셈한다 (career.md §2)", () => {
+    const state = createTestGame();
+    const player = userPlayers(state)[0]!;
+    player.state.form = 0;
+    const pre = { occasion: "pre", outcome: "inspired", intensity: 3 } as const;
+
+    expect(applyTeamTalk(state, pre).ok).toBe(true);
+    expect(state.manager.teamTalkedOn?.pre).toBe(state.date);
+    const form = player.state.form;
+    const xp = state.managerXP.leadership;
+    const narrated = state.narrative.length;
+    expect(form).toBeGreaterThan(0);
+
+    expect(applyTeamTalk(state, pre).ok).toBe(true);
+    expect(player.state.form).toBe(form);
+    expect(state.managerXP.leadership).toBe(xp);
+    expect(state.narrative.length).toBe(narrated);
+
+    // 하프타임의 한마디는 경기 전의 한마디와 다른 순간이다 — 자리마다 따로 센다
+    expect(applyTeamTalk(state, { ...pre, occasion: "half" }).ok).toBe(true);
+    const afterHalf = player.state.form;
+    expect(afterHalf).toBeGreaterThan(form);
+
+    // 날이 바뀌면 같은 자리도 다시 열린다
+    state.date = addDays(state.date, 1);
+    expect(applyTeamTalk(state, pre).ok).toBe(true);
+    expect(player.state.form).toBeGreaterThan(afterHalf);
   });
 
   it("잘못된 선수 면담은 반려된다", () => {
@@ -312,6 +371,26 @@ describe("주장·전술·개인 지시", () => {
     expect(next.isCaptain).toBe(true);
     expect(before.isCaptain).toBe(false);
     expect(userPlayers(state).filter((p) => p.isCaptain)).toHaveLength(1);
+  });
+
+  it("완장의 체력 보너스는 선수마다 첫 지명에만 붙는다 (career.md §2)", () => {
+    const state = createTestGame();
+    const [first, second] = userPlayers(state).filter((p) => !p.isCaptain);
+    first!.state.condition = 70;
+    second!.state.condition = 70;
+
+    expect(setCaptain(state, first!.id).ok).toBe(true);
+    expect(first!.state.condition).toBe(74);
+    expect(first!.state.captainedOn).toBe(state.date);
+    expect(setCaptain(state, second!.id).ok).toBe(true);
+    expect(second!.state.condition).toBe(74);
+
+    // 둘을 번갈아 지명하는 것만으로 둘 다 체력이 차던 자리
+    expect(setCaptain(state, first!.id).ok).toBe(true);
+    expect(setCaptain(state, second!.id).ok).toBe(true);
+    expect(first!.state.condition).toBe(74);
+    expect(second!.state.condition).toBe(74);
+    expect(second!.isCaptain).toBe(true);
   });
 
   it("전술: Zod 검증을 통과해야 반영된다", () => {

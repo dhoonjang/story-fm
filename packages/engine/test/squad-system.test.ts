@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  FIRST_TEAM_LIMIT,
   MATCHDAY_SQUAD,
   NON_HOMEGROWN_MAX,
   SQUAD_LIST_LIMIT,
@@ -53,6 +54,21 @@ describe("1·2군 스쿼드", () => {
       );
       expect(keepers.length, `${team.id} 1군 골키퍼`).toBeGreaterThanOrEqual(2);
     }
+  });
+
+  /**
+   * 1군 상한(`FIRST_TEAM_LIMIT`)은 등록 명단 25인과 다른 눈금이다 — U21은 명단
+   * 밖이라 1군 인원이 25를 넘을 수 있고, 그 위 천장이 이 값이다. 새 게임이 이걸
+   * 넘겨 시작하면 감독은 첫날부터 줄일 수 없는 명단을 쥔다.
+   */
+  it("어느 구단도 1군이 상한을 넘지 않는다", () => {
+    const state = createTestGame();
+    const over = state.teams
+      .map((team) => ({ id: team.id, first: firstTeamPlayers(state, team.id).length }))
+      .filter((t) => t.first > FIRST_TEAM_LIMIT)
+      .map((t) => `${t.id} ${t.first}명`);
+
+    expect(over).toEqual([]);
   });
 
   it("2군 선수는 승격 전 라인업에 들어갈 수 없고, 강등하면 배치에서 빠진다", () => {

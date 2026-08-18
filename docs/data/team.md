@@ -276,6 +276,9 @@ ClubProfile { stadium, capacity, commercialTier: 1|2|3|4 }
 - **무소속(`free`)은 리그가 아니라 리그 밖**이다. `GAME_PLAYER.teamId`가 필수라
   자리를 하나 두되 클럽이 아닌 것으로 다룬다 — 초기 스쿼드도, 일정도, 순위표도,
   재정도 없다. 스쿼드·배치·전력을 논하는 순회는 전부 `isClubTeam`으로 거른다.
+  **세이브에 서는 것은 `GAME_TEAM` 한 줄뿐**이고 `FINANCE`도 `TACTICS`도 AI 감독
+  (`aiManagerTacticsRating`·`managerSince`)도 붙지 않는다 — 새 게임을 세울 때나
+  로드가 빠진 클럽을 채울 때나 같다.
 
 ### 보충 선수의 능력치 기준선
 

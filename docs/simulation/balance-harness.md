@@ -42,19 +42,20 @@ pnpm balance finance       # 파일 이름으로 걸러 하나만
 목록의 원본은 `pnpm balance --list`다. 여기 적는 것은 어느 문서가 그 밴드의 근거를
 쥐고 있는지뿐이다.
 
-| 하네스                 | 무엇을 재는가                                     | 근거                        |
-| ---------------------- | ------------------------------------------------- | --------------------------- |
-| `world-season`         | 한 시즌 득점·슈팅 분포 · 승점 곡선 · 카드         | [match](match.md) §7        |
-| `ai-rotation`          | AI 스쿼드 체력 분포 · 로테이션 문턱 발동률        | [match](match.md) §7        |
-| `assist-rate`          | 골에 도움이 붙는 비율                             | [match](match.md) §7        |
-| `injury-rate`          | 경기당 부상 건수 · 성향이 빈도에 닿는 폭          | [match](match.md) §7        |
-| `finance-tier1`        | tier1 한 시즌 장부 손익 · 현금 · 급여 비중 · 수입 | [finance](finance.md) §10.1 |
-| `finance-leagues`      | 리그별 잔고 — 어느 리그도 구조적 적자가 아니다    | [finance](finance.md) §10.3 |
-| `finance-second-tier`  | 리그전을 굴리지 않는 2부의 한 시즌 수지           | [finance](finance.md) §9.5  |
-| `finance-multi-season` | 세 시즌을 굴려도 가라앉는 리그가 없다             | [finance](finance.md) §10.3 |
-| `ai-fitness`           | 한 시즌 뒤 AI 스쿼드 체력 · 출전 분산             | [match](match.md) §7        |
-| `ai-market`            | 한 시즌 팀당 이적·임대 건수 · 여름 비중           | [transfer](transfer.md) §6  |
-| `manager-market`       | 한 시즌 감독 경질 구단 수                         | [transfer](transfer.md) §7  |
+| 하네스                 | 무엇을 재는가                                       | 근거                        |
+| ---------------------- | --------------------------------------------------- | --------------------------- |
+| `world-season`         | 한 시즌 득점·슈팅 분포 · 승점 곡선 · 카드           | [match](match.md) §7        |
+| `ai-rotation`          | AI 스쿼드 체력 분포 · 로테이션 문턱 발동률          | [match](match.md) §7        |
+| `assist-rate`          | 골에 도움이 붙는 비율                               | [match](match.md) §7        |
+| `injury-rate`          | 경기당 부상 건수 · 성향이 빈도에 닿는 폭            | [match](match.md) §7        |
+| `finance-tier1`        | tier1 한 시즌 장부 손익 · 현금 · 급여 비중 · 수입   | [finance](finance.md) §10.1 |
+| `finance-leagues`      | 리그별 잔고 — 어느 리그도 구조적 적자가 아니다      | [finance](finance.md) §10.3 |
+| `finance-second-tier`  | 리그전을 굴리지 않는 2부의 한 시즌 수지             | [finance](finance.md) §9.5  |
+| `finance-multi-season` | 세 시즌을 굴려도 가라앉는 리그가 없다               | [finance](finance.md) §10.3 |
+| `ai-fitness`           | 한 시즌 뒤 AI 스쿼드 체력 · 출전 분산               | [match](match.md) §7        |
+| `ai-market`            | 한 시즌 팀당 이적·임대 건수 · 여름 비중             | [transfer](transfer.md) §6  |
+| `manager-market`       | 한 시즌 감독 경질 구단 수                           | [transfer](transfer.md) §7  |
+| `squad-longevity`      | 15시즌을 넘긴 뒤에도 구단이 선발 XI·계약을 세우는가 | [season](season.md) §6      |
 
 ## 4. ⚠️ 불변식
 
