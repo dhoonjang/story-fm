@@ -550,6 +550,21 @@ export const FinanceReportSchema = z.object({
 });
 export type FinanceReport = z.infer<typeof FinanceReportSchema>;
 
+/**
+ * 한 시즌 한 리그의 **최종 순위** — 구단 체급 재산정의 성적 축이 읽는다
+ * (team.md §2.1). 시즌 롤오버가 승강을 적용하기 **전에** 남기고 최근 세 시즌만 든다.
+ *
+ * 감독의 `SEASON_RECORD`로는 이 축을 잴 수 없다 — 그 표는 감독 팀만 쌓이므로
+ * 나머지 클럽은 영원히 중립이 된다.
+ */
+export const LeagueFinalTableSchema = z.object({
+  season: z.number().int(),
+  leagueId: z.string().min(1),
+  /** 1위부터 차례로 */
+  order: z.array(z.string().min(1)),
+});
+export type LeagueFinalTable = z.infer<typeof LeagueFinalTableSchema>;
+
 // ── 감독 커리어 (정규화) ──────────────────────────────
 export const SeasonRecordSchema = z.object({
   season: z.number().int(),

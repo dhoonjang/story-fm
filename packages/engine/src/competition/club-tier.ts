@@ -9,7 +9,7 @@ import { playersOf, savedClubProfile, teamNameIn, type GameState } from "../core
 import { boardExpectationOfTier, tierOfTeamIn } from "../core/club-tier";
 import { isCupOnlyLeague, isTopLeague } from "../data/league-catalog";
 import { clubProfiles, type ClubProfile } from "../data/club-profile";
-import { leagueOfTeamIn } from "./promotion";
+import { leagueOfTeamIn, leagueSizeIn } from "./promotion";
 
 // ── 눈금 ──────────────────────────────────────────────
 // 밸런스를 만지려면 이 블록만 읽으면 된다.
@@ -23,8 +23,8 @@ const AXIS_WEIGHTS = { size: 0.5, squad: 0.3, recent: 0.2 } as const;
 /** 규모 축 안에서 구장과 브랜드를 반씩 — 둘 다 클럽의 크기를 재는 자다 */
 const SIZE_MIX = { capacity: 0.5, brand: 0.5 } as const;
 
-/** 최근 성적으로 세는 시즌 수 */
-const RECENT_SEASONS = 3;
+/** 최근 성적으로 세는 시즌 수 — 순위표를 남기는 쪽(`recordLeagueHistory`)도 이 값을 쓴다 */
+export const RECENT_SEASONS = 3;
 
 /** 기록도 자료도 없을 때의 값 — 위로도 아래로도 밀지 않는다 */
 const NEUTRAL = 0.5;
@@ -89,25 +89,25 @@ function squadRating(state: GameState, teamId: string): number {
 }
 
 /**
- * 최근 성적 — 최근 세 시즌 리그 순위의 **리그 크기 대비 백분위** 평균 (1위가 1.0,
+ * 최근 성적 — 최근 세 시즌 리그 최종 순위의 **리그 크기 대비 백분위** 평균 (1위가 1.0,
  * 꼴찌가 0.0). 기록이 없는 클럽(첫 시즌, 리그전을 돌지 않는 2부)은 중립이다.
+ *
+ * 원본은 시즌 롤오버가 남긴 리그별 순위표(`state.leagueHistory`)다 — **전 클럽이 같은
+ * 표를 읽는다.** 감독의 `SEASON_RECORD`를 읽던 시절엔 그 표가 감독 팀만 쌓여서 나머지
+ * 96클럽이 언제나 중립이었고, 세 축 중 하나가 AI 구단에게는 없는 축이었다.
  *
  * 이 축만은 따로 정규화하지 않는다 — 순위를 리그 크기로 나눈 값이 이미 백분위다.
  */
-function recentForm(state: GameState, teamId: string, leagueSizes: Map<string, number>): number {
-  const records = state.seasonRecords
-    .filter((r) => r.teamId === teamId)
-    .sort((a, b) => b.season - a.season)
-    .slice(0, RECENT_SEASONS);
-  if (records.length === 0) return NEUTRAL;
-
-  const scores = records.map((r) => {
-    const leagueId = r.leagueId ?? leagueOfTeamIn(state, teamId);
-    const size = leagueSizes.get(leagueId) ?? 0;
-    if (size <= 1) return NEUTRAL;
-    const fromBottom = (size - r.position) / (size - 1);
-    return Math.max(0, Math.min(1, fromBottom));
-  });
+function recentForm(state: GameState, teamId: string): number {
+  const scores: number[] = [];
+  for (const table of state.leagueHistory ?? []) {
+    const index = table.order.indexOf(teamId);
+    if (index < 0) continue;
+    const size = table.order.length;
+    if (size <= 1) continue;
+    scores.push((size - (index + 1)) / (size - 1));
+  }
+  if (scores.length === 0) return NEUTRAL;
   return scores.reduce((sum, s) => sum + s, 0) / scores.length;
 }
 
@@ -125,11 +125,7 @@ function tierAt(fraction: number, cuts: readonly { upTo: number; tier: 1 | 2 | 3
 }
 
 /** 이 리그의 클럽들을 점수순으로 — 동점은 teamId 오름차순으로 깬다(결정성) */
-function rankLeague(
-  state: GameState,
-  teamIds: readonly string[],
-  leagueSizes: Map<string, number>,
-) {
+function rankLeague(state: GameState, teamIds: readonly string[]) {
   const profiles = clubProfiles();
   // 세이브가 든 프로필이 먼저다 — 어드민의 수용인원 편집이 진행 중인 세이브의 체급을
   // 다시 매기면 안 된다 (game-state.md §1)
@@ -146,7 +142,7 @@ function rankLeague(
         SIZE_MIX.capacity * percentileIn(capacities, capacities[i]!) +
         SIZE_MIX.brand * percentileIn(brands, brands[i]!);
       const squad = percentileIn(squads, squads[i]!);
-      const recent = recentForm(state, teamId, leagueSizes);
+      const recent = recentForm(state, teamId);
       return {
         teamId,
         score: AXIS_WEIGHTS.size * size + AXIS_WEIGHTS.squad * squad + AXIS_WEIGHTS.recent * recent,
@@ -169,14 +165,13 @@ export function recomputeClubTiers(state: GameState): string[] {
     if (bucket) bucket.push(team.id);
     else byLeague.set(leagueId, [team.id]);
   }
-  const leagueSizes = new Map([...byLeague].map(([id, ids]) => [id, ids.length]));
 
   const before = tierOfTeamIn(state, state.userTeamId);
 
   for (const [leagueId, teamIds] of byLeague) {
     const cuts = cutsFor(leagueId);
     if (!cuts) continue; // 시장 전용·무소속은 기존 체급을 그대로 둔다
-    const ranked = rankLeague(state, teamIds, leagueSizes);
+    const ranked = rankLeague(state, teamIds);
     ranked.forEach((row, index) => {
       const team = state.teams.find((t) => t.id === row.teamId);
       if (team) team.tier = tierAt(index / ranked.length, cuts);
@@ -187,7 +182,7 @@ export function recomputeClubTiers(state: GameState): string[] {
   if (after === before) return [];
   return [
     `${teamNameIn(state, state.userTeamId)} 구단 체급 ${before} → ${after} — 보드 기대는 "${
-      boardExpectationOfTier(after).label
+      boardExpectationOfTier(after, leagueSizeIn(state, state.userTeamId)).label
     }"가 됐다`,
   ];
 }

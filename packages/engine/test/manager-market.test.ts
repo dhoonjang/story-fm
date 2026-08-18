@@ -75,25 +75,31 @@ describe("AI 구단은 성적으로 감독을 자른다", () => {
   });
 });
 
+/**
+ * 경기 모델의 밸런스에 기대지 않고, 우승 경쟁 팀이 12연패한 장부를 만든다.
+ * 경고 시스템의 테스트가 슈팅 모델 보정에 따라 우연히 통과·실패하면 안 된다.
+ */
+function fabricateUserSlump(state: GameState): void {
+  const ours = state.matches
+    .filter(
+      (m) =>
+        m.competitionId === "epl" &&
+        (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+    )
+    .slice(0, 12);
+  for (const match of ours) {
+    match.result = {
+      homeGoals: match.homeTeamId === state.userTeamId ? 0 : 1,
+      awayGoals: match.awayTeamId === state.userTeamId ? 0 : 1,
+      scorers: [],
+    };
+  }
+}
+
 describe("감독도 잘린다 — 다만 경고가 먼저다", () => {
   it("성적이 기대에 못 미치면 보드가 경고하고, 끝내 경질된다", () => {
     const state = createTestGame(7);
-    // 경기 모델의 밸런스에 기대지 않고, 우승 경쟁 팀이 12연패한 장부를 만든다.
-    // 경고 시스템의 테스트가 슈팅 모델 보정에 따라 우연히 통과·실패하면 안 된다.
-    const ours = state.matches
-      .filter(
-        (m) =>
-          m.competitionId === "epl" &&
-          (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
-      )
-      .slice(0, 12);
-    for (const match of ours) {
-      match.result = {
-        homeGoals: match.homeTeamId === state.userTeamId ? 0 : 1,
-        awayGoals: match.awayTeamId === state.userTeamId ? 0 : 1,
-        scorers: [],
-      };
-    }
+    fabricateUserSlump(state);
 
     state.date = "2027-01-01";
     expect(reviewUserSeat(state, [])).toBe(false);
@@ -127,7 +133,53 @@ describe("감독도 잘린다 — 다만 경고가 먼저다", () => {
     expect(advanced.digest.join(" ")).toContain("경질");
   });
 
-  it("경고는 세 번까지다 — 그 전에 순위를 올리면 지워진다", () => {
-    expect(USER_WARNINGS_BEFORE_SACK).toBe(3);
+  /**
+   * 경고 수는 마지막 단계에서 멈춘다 (career.md §5) — 화면은 세 칸을 그리고 GM도
+   * 같은 숫자를 말하므로 4/3은 그릴 수 없는 값이다. 압박은 멈추지 않는다: 마지막
+   * 경고를 마지막이게 하는 것은 카운터가 아니라 계속 깎이는 보드 평판이다.
+   */
+  it("경고는 세 번에서 멈추고, 평판은 계속 깎인다", () => {
+    const state = createTestGame(7);
+    fabricateUserSlump(state);
+    const board = state.manager.reputation.board;
+    const digest: string[] = [];
+    const months = ["2027-01-01", "2027-02-01", "2027-03-04", "2027-04-05", "2027-05-07"];
+
+    const warnings = months.map((date) => {
+      state.date = date;
+      expect(reviewUserSeat(state, digest), date).toBe(false);
+      return state.manager.boardWarnings ?? 0;
+    });
+
+    expect(warnings).toEqual([1, 2, 3, 3, 3]);
+    expect(digest.some((d) => d.includes(`4/${USER_WARNINGS_BEFORE_SACK}`))).toBe(false);
+    expect(state.manager.reputation.board).toBe(board - 6 * months.length);
+  });
+});
+
+/**
+ * 18팀 리그 — 경질선이 20위로 박혀 있어 분데스리가·리그 1에는 **없는 자리**였다.
+ * 그 리그의 잔류권 구단은 아무리 처져도 감독이 자리를 지켰다 (career.md §5).
+ */
+describe("18팀 리그에서도 문턱이 닿는다", () => {
+  it("18팀 리그 꼴찌 구단의 감독도 잘린다", () => {
+    const state = createTestGame(7);
+    const target = state.teams.find((t) => t.id === "paderborn")!;
+    expect(tierOfTeamIn(state, target.id), "잔류가 기대인 구단").toBe(4);
+    expect(leagueOfTeamIn(state, target.id)).toBe("bundesliga");
+
+    fabricateBottom(state, target.id);
+    const table = computeStandings(state, "bundesliga");
+    expect(table).toHaveLength(18);
+    expect(table[table.length - 1]!.teamId).toBe(target.id);
+
+    state.date = "2026-12-01";
+    const hired = state.calendar.preseasonStart;
+    for (let i = 0; i < 90 && target.managerSince === hired; i++) {
+      runManagerMarket(state, []);
+      state.date = nextDay(state.date);
+    }
+
+    expect(target.managerSince, "18팀 리그 꼴찌 구단의 감독이 자리를 지켰다").not.toBe(hired);
   });
 });

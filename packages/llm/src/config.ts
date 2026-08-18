@@ -47,6 +47,22 @@ export interface OpenAiAgentConfig extends BaseAgentConfig {
 
 export type AgentConfig = AnthropicAgentConfig | GoogleAgentConfig | OpenAiAgentConfig;
 
+/**
+ * 제공자가 흡수할 수 있는 설정 — **제공자 이름으로 분기하는 유일한 표**다.
+ *
+ * 설정이 적어 둔 것은 반드시 요청에 실려야 한다 (models.md §1-2). 어댑터가 실을
+ * 자리가 없는 옵션은 조용히 무시하는 대신 여기서 걸려 시작할 때 실패한다 — 설정과
+ * 실제로 도는 것이 갈리면 "GM만 사고가 얕은" 이유를 알 수 없다. 어댑터가 그 옵션을
+ * 다루기 시작하면 바뀌는 것은 이 표의 한 칸뿐이다.
+ */
+const PROVIDER_CAPABILITIES: Record<LlmProvider, { thinkingLevel: boolean }> = {
+  // 사고를 끄고 부른다 — 출력 상한을 본문이 온전히 쓴다
+  anthropic: { thinkingLevel: false },
+  google: { thinkingLevel: true },
+  // 함수 도구를 쓰려면 Chat Completions에서 추론을 꺼야 한다
+  openai: { thinkingLevel: false },
+};
+
 const RawAgentConfigSchema = z
   .object({
     provider: z.enum(["anthropic", "google", "openai"]),
@@ -55,7 +71,14 @@ const RawAgentConfigSchema = z
     timeout_ms: z.number().int().positive(),
     thinking_level: z.enum(["minimal", "low", "medium", "high"]).optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (raw) => raw.thinking_level === undefined || PROVIDER_CAPABILITIES[raw.provider].thinkingLevel,
+    (raw) => ({
+      message: `${raw.provider} 어댑터는 thinking_level을 요청에 싣지 않습니다 — 지우거나 제공자를 바꾸세요`,
+      path: ["thinking_level"],
+    }),
+  );
 
 const LlmConfigFileSchema = z
   .object({

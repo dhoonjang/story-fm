@@ -10,6 +10,7 @@ import type {
   GameTeam,
   GrowthEntry,
   Injury,
+  LeagueFinalTable,
   Manager,
   ManagerAttributes,
   MatchRecord,
@@ -501,6 +502,14 @@ export interface GameState {
    * (`buildEuroEntrants`). 파생으로 되돌릴 수 없는 값이므로 저장한다.
    */
   euroEntrants: EuroEntry[];
+  /**
+   * 지난 시즌들의 리그 최종 순위 — 구단 체급 재산정의 성적 축이 읽는다
+   * (team.md §2.1). 시즌 전환에서 승강을 적용하기 **전에** 그해 리그전을 돈 리그마다
+   * 한 줄씩 남기고 최근 세 시즌만 든다. 새 시즌의 일정이 옛 경기를 밀어내므로
+   * (`state.matches` 교체) 순위표로 되돌릴 수 없는 값이다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  leagueHistory?: LeagueFinalTable[];
 
   // ── 기록 ──
   injuries: Injury[];
@@ -2023,6 +2032,7 @@ export function createGame(input: CreateGameInput): GameState {
       ...generateReporters(seed, input.userTeamId),
     ],
     formUnitScale: true,
+    leagueHistory: [],
     seasonRecords: [],
     trophies: [],
     achievements: [],

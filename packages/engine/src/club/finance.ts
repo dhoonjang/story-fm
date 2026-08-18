@@ -18,7 +18,7 @@ import { isMarketOnlyLeague, isTopLeague, leagueCatalogById } from "../data/leag
 import { competitionShortName, isCup, isEuroCup } from "../data/cup-catalog";
 import { isFriendly } from "../competition/friendly";
 import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
-import { clubEconomyLevelIn, leagueOfTeamIn } from "../competition/promotion";
+import { clubEconomyLevelIn, leagueOfTeamIn, leagueSizeIn } from "../competition/promotion";
 import { computeStandings } from "../competition/season";
 import {
   catalogLeagueIn,
@@ -432,8 +432,7 @@ function previousRankOf(state: GameState, teamId: string): number {
 
 /** 리그 팀 수 — 성적 수당의 계단 수 (18팀 리그는 계단이 짧다) */
 function leagueSizeOf(state: GameState, teamId: string): number {
-  const league = leagueOfTeamIn(state, teamId);
-  return Math.max(2, state.teams.filter((t) => leagueOfTeamIn(state, t.id) === league).length);
+  return Math.max(2, leagueSizeIn(state, teamId));
 }
 
 /**

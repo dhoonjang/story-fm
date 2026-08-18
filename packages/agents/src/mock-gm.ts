@@ -40,6 +40,7 @@ import {
   startMatch,
   isInjured,
   headCoachOf,
+  reportersOf,
   makeRng,
   pick,
   substitutePlayer,
@@ -86,6 +87,11 @@ const carry = (result: { payload?: unknown; brief?: SkillBrief }) => ({
 /** 수석코치 화자 태그 — 직책이 아니라 그 사람의 이름이다 (people.md §3) */
 function coach(state: GameState): string {
   return `@${headCoachOf(state).characterId}:`;
+}
+
+/** 회견장에 앉은 기자 — 회견마다 결정적으로 같은 사람이 묻는다 */
+function reporter(state: GameState, press: PressConference): string {
+  return `@${pick(makeRng(state.seed, `press-${press.id}`), reportersOf(state)).characterId}:`;
 }
 
 function playerName(state: GameState, id: string): string {
@@ -381,7 +387,7 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
         });
         return {
           text: result.ok
-            ? `@: *교체 준비 — ${out.name} OUT, ${playerName(state, subId)} IN*\n${coach(state)} 반영했습니다. "계속"이라고 하시면 경기를 진행합니다.`
+            ? `@: *교체 준비 — ${out.name} OUT, ${playerName(state, subId)} IN*\n${coach(state)} 반영했습니다.`
             : `${coach(state)} ${result.message}`,
           toolCalls: calls,
         };
@@ -402,7 +408,7 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
         line: 1,
       });
       return {
-        text: `@: *감독의 목소리가 라커룸을 울린다*\n${coach(state)} ${result.message}. "계속"으로 후반을 시작하시죠.`,
+        text: `@: *감독의 목소리가 라커룸을 울린다*\n${coach(state)} ${result.message}`,
         toolCalls: calls,
       };
     }
@@ -688,13 +694,13 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
       line: 2,
     });
     return {
-      text: `@: *플래시가 터지는 회견장*\n@기자: ${mockQuestion(press)}\n${coach(state)} ${result.message}`,
+      text: `@: *플래시가 터지는 회견장*\n${reporter(state, press)} ${mockQuestion(press)}\n${coach(state)} ${result.message}`,
       toolCalls: calls,
     };
   }
   if (press) {
     return {
-      text: `@: *회견장 문 앞*\n${coach(state)} 기자단이 기다리고 있습니다 — ${press.context}.\n@기자: ${mockQuestion(press)}`,
+      text: `@: *회견장 문 앞*\n${coach(state)} 기자단이 기다리고 있습니다 — ${press.context}.\n${reporter(state, press)} ${mockQuestion(press)}`,
       toolCalls: calls,
     };
   }
@@ -795,7 +801,7 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
       result.stopped === "matchday"
         ? `\n${coach(state)} 오늘이 경기일입니다. 라인업과 전술을 점검하시죠.`
         : result.stopped === "attention"
-          ? `\n${coach(state)} 오늘이 기한인 협상이 있어 여기서 멈췄습니다. 정리하고 나서 "계속 가자"고 하시면 더 진행합니다.`
+          ? `\n${coach(state)} 오늘이 기한인 협상이 있어 여기서 멈췄습니다.`
           : result.stopped === "season_end"
             ? `\n@: *한 시즌이 막을 내렸다*`
             : "";
@@ -812,8 +818,7 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
       `${coach(state)} ${describeNextFixture(state)}` +
       (issues.length > 0
         ? `\n${coach(state)} ${issues.join(", ")}의 불만이 쌓이고 있습니다 — 면담을 권합니다.`
-        : "") +
-      `\n${coach(state)} 훈련 지시, 전술 변경, 면담, 아니면 "다음 경기로 가자"라고 말씀해 주세요.`,
+        : ""),
     toolCalls: calls,
   };
 }

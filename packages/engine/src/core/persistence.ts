@@ -12,6 +12,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { clampCondition, migratePassStyle, migrateSignature } from "@story-fm/domain";
 import { advanceDomesticCups } from "../competition/domestic-cup";
+import { migrateEuroPrizeKeys } from "../competition/euro-prize";
 import { dataDir } from "./paths";
 import type { GamePhase, GameState } from "./state";
 import { ensurePersonas } from "../world/persona";
@@ -262,6 +263,7 @@ function validate(raw: unknown): LoadResult {
   s.roleMemory ??= [];
   s.pressConferences ??= [];
   s.aiDeals ??= [];
+  s.leagueHistory ??= [];
   // 재정 보고서는 다음 달 1일부터 쌓인다. 옛 원장 엔트리는 category가 없어
   // 집계에서 "기타"로 읽힌다 (finance.ts categoryOf).
   s.financeReports ??= [];
@@ -384,6 +386,10 @@ function validate(raw: unknown): LoadResult {
   }
   // 공식 번호를 먼저 보존하고, 남은 빈칸과 혹시 생긴 중복만 채운다.
   ensureSquadNumbers(state.players);
+  // 대항전 상금 멱등 키가 표시 라벨에서 안정 키로 바뀌었다. 리그 페이즈 정산은
+  // 리그 페이즈가 끝난 뒤 **매일** 다시 불리므로, 옛 키를 옮기지 않으면 진행 중인
+  // 세이브가 이미 받은 상금을 새 키로 한 번 더 받는다.
+  migrateEuroPrizeKeys(state);
   // 국내 컵 따라잡기 — 컵 편성은 tick에서 도는데, 컵이 없던 세이브를 **열기만**
   // 해서는 tick이 돌지 않아 달력이 계속 비어 보인다. 새 게임이 생성 시점에
   // 부르는 것과 같은 함수를 로드에서도 한 번 부른다 (결정적·멱등이라 안전하다).

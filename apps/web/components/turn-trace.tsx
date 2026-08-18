@@ -181,7 +181,7 @@ function TraceCallView({
         `메시지 ${response.messages.length}개`,
         `tool_use ${response.toolCallCount}`,
         ...(usage ? [`out ${num(usage.outputTokens)}토큰`] : []),
-        response.stopReason ?? "stop 미보고",
+        response.stopReason ?? "종료 사유 미보고",
       ].join(" · ")
     : "응답 없음";
 

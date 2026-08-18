@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import AnthropicSdk from "@anthropic-ai/sdk";
 import type Anthropic from "@anthropic-ai/sdk";
 import { AnthropicGameLLM } from "@story-fm/llm";
-import type { GameToolSpec } from "@story-fm/llm";
+import type { GameToolSpec, StopReason } from "@story-fm/llm";
 
 /** 모킹된 API 응답 시퀀스로 어댑터의 tool 재시도 루프를 검증한다 (LLM 호출 없음) */
 
@@ -223,7 +223,7 @@ describe("AnthropicGameLLM tool 루프", () => {
     expect(result.toolCallCount).toBe(2);
     expect(result.text).toContain("골입니다");
     expect(result.text).toContain("수석코치");
-    expect(result.stopReason).toBe("end_turn");
+    expect(result.stopReason).toBe("completed");
 
     // 이력: user, assistant(tool_use), user(tool_result is_error), assistant, user(tool_result), assistant
     const history = storedMessages(result.history);
@@ -392,6 +392,31 @@ describe("입력 조립 — 캐시 계층과 상태 채널", () => {
       role: "user",
       content: "[감독]\n발화",
     });
-    expect(result.stopReason).toBe("end_turn");
+    expect(result.stopReason).toBe("completed");
+  });
+});
+
+/**
+ * 종료 사유는 **중립 값으로만** 나간다 (models.md §3-1). 원문을 그대로 흘리면 잘림
+ * 검사가 이 제공자에만 맞고, 제공자를 바꾸는 순간 조용히 꺼진다.
+ */
+describe("AnthropicGameLLM 종료 사유", () => {
+  const cases: Array<[Anthropic.StopReason | null, StopReason | null]> = [
+    ["end_turn", "completed"],
+    ["stop_sequence", "completed"],
+    ["max_tokens", "truncated"],
+    ["refusal", "filtered"],
+    ["pause_turn", "other"],
+    [null, null],
+  ];
+
+  it.each(cases)("%s는 %s로 옮긴다", async (raw, neutral) => {
+    const stub = makeStubClient([{ ...endTurn, stop_reason: raw }]);
+    const result = await new AnthropicGameLLM(testConfig, stub).runTurn({
+      system: "sys",
+      history: [],
+      user: "안녕",
+    });
+    expect(result.stopReason).toBe(neutral);
   });
 });

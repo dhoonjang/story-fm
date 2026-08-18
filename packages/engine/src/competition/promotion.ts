@@ -1,6 +1,7 @@
 import { isTopLeague, leagueCatalog, leagueCatalogById, leagueName } from "../data/league-catalog";
 import { clubEconomyLevel } from "../data/league-economy";
 import { tierOfTeamIn } from "../core/club-tier";
+import { RELEGATION_SLOTS } from "../core/league-shape";
 import { makeRng } from "../core/rng";
 import { computeStandings } from "./season";
 import { startParachute, stopParachute } from "../club/finance";
@@ -28,9 +29,6 @@ import {
  * 승격 팀은 **전력 + 시즌을 섞은 시드**로 뽑는다 — 다만 감독이 그 리그에 있으면
  * 그 시즌엔 진짜 순위표가 있으므로(`buildAllLeagueMatches`의 추가 리그) 표를 쓴다.
  */
-
-/** 강등·승격 인원 — 실제 5대 리그와 같다 */
-export const RELEGATION_SLOTS = 3;
 
 /**
  * 승격 추첨의 폭 — 전력 **서열** 위에 얹히는 난수(자리 수).
@@ -83,6 +81,14 @@ export function clubEconomyLevelIn(state: GameState, teamId: string): number {
 /** 지금 그 리그에 속한 클럽 (세이브 기준) */
 export function teamsOfLeagueIn(state: GameState, leagueId: string): string[] {
   return state.teams.filter((t) => leagueOfTeamIn(state, t.id) === leagueId).map((t) => t.id);
+}
+
+/**
+ * 이 팀이 속한 리그의 클럽 수 — 순위 문턱이 파생하는 두 재료 중 하나
+ * (`core/league-shape.ts` · career.md §5). 승강이 옮긴 소속을 본다.
+ */
+export function leagueSizeIn(state: GameState, teamId: string): number {
+  return teamsOfLeagueIn(state, leagueOfTeamIn(state, teamId)).length;
 }
 
 /** 국내 컵을 채우는 2부들 — 승강의 상대 리그 */

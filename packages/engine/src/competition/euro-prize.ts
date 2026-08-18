@@ -1,12 +1,14 @@
 import type { MatchStage } from "@story-fm/domain";
 import {
   competitionShortName,
+  cupCatalog,
   cupCatalogById,
+  knockoutStages,
   stageLabel,
   type CupCatalogEntry,
 } from "../data/cup-catalog";
-import { financeOf, type GameState } from "../core/state";
-import { categoryOf, payOnce } from "../club/finance";
+import type { GameState } from "../core/state";
+import { payOnce } from "../club/finance";
 
 /**
  * 대항전 상금 — 참가비·리그 페이즈 성적·단계 진출·우승.
@@ -15,29 +17,75 @@ import { categoryOf, payOnce } from "../club/finance";
  * 정한다. 실제 대회처럼 참가만 해도 큰돈이 들어오고, 한 단계 올라갈 때마다
  * 더해진다. 리그와 마찬가지로 96팀 모두에게 적용한다 (재정은 팀에 소속).
  *
- * 중복 지급은 `FINANCE.prizesPaid`의 키로 막는다. 예전엔 원장의 항목명을 봤지만,
- * 원장은 최근 3개월만 남기고 AI 팀은 아예 쌓지 않으므로(finance.md §4.4·§4.5)
- * "원장이 곧 사실"이 성립하지 않는다 — 지급 사실은 따로 들고 있어야 한다.
+ * 중복 지급은 `FINANCE.prizesPaid`의 키가 막는다 — 원장이 아니다. 원장은 최근
+ * 3개월만 남기고 AI 팀은 아예 쌓지 않으므로(finance.md §4.4·§4.5) "원장이 곧 사실"이
+ * 성립하지 않는다.
  */
 
 function prizeLabel(cup: CupCatalogEntry, season: number, what: string): string {
   return `${competitionShortName(cup.id)} ${what} 상금 (S${season})`;
 }
 
+/** 한 대회 한 시즌 안에서 상금을 가르는 축 — 라벨과 달리 표시에 쓰이지 않는다 */
+type PrizeKind = "league-phase" | `stage:${MatchStage}` | "winner";
+
+/**
+ * 멱등 키 — `category + ref + 무엇 + season` (finance.md §4.1).
+ *
+ * 라벨은 언제든 고쳐 쓰는 문장이라 키로 쓸 수 없다. 항목명 한 글자를 고치는 순간
+ * 이미 지급한 상금이 새 키를 얻어 한 번 더 나간다.
+ */
+function prizeKey(cupId: string, kind: PrizeKind, season: number): string {
+  return `prize:competition:${cupId}:${kind}:S${season}`;
+}
+
 function payPrize(
   state: GameState,
   teamId: string,
   cupId: string,
+  kind: PrizeKind,
   label: string,
   amount: number,
 ): boolean {
-  return payOnce(state, teamId, label, {
+  return payOnce(state, teamId, prizeKey(cupId, kind, state.season), {
     kind: "income",
     category: "prize",
     label,
     amount,
     ref: { type: "competition", id: cupId },
   });
+}
+
+/**
+ * 옛 세이브 호환 — 표시 라벨을 그대로 멱등 키로 쓰던 시절의 `prizesPaid`를 안정
+ * 키로 옮긴다. 옮기지 않으면 `advanceEuroKnockouts`가 매일 부르는 리그 페이즈
+ * 정산이 옛 키를 못 알아보고 같은 상금을 한 번 더 지급한다.
+ *
+ * 라벨이 시즌을 달고 있어 지난 시즌 기록까지 그대로 옮겨온다. 새 키는 이 표에
+ * 없으므로 두 번 돌려도 결과가 같다.
+ */
+export function migrateEuroPrizeKeys(state: GameState): void {
+  const moved = new Map<string, string>();
+  for (const cup of cupCatalog()) {
+    for (let season = 1; season <= state.season; season++) {
+      moved.set(prizeLabel(cup, season, "리그 페이즈"), prizeKey(cup.id, "league-phase", season));
+      moved.set(prizeLabel(cup, season, "우승"), prizeKey(cup.id, "winner", season));
+      for (const stage of knockoutStages(cup)) {
+        moved.set(
+          prizeLabel(cup, season, `${stageLabel(stage, 1, false)} 진출`),
+          prizeKey(cup.id, `stage:${stage}`, season),
+        );
+      }
+    }
+  }
+  for (const finance of state.finances) {
+    const keys = finance.prizesPaid;
+    if (!keys) continue;
+    for (let i = 0; i < keys.length; i++) {
+      const next = moved.get(keys[i]!);
+      if (next) keys[i] = next;
+    }
+  }
 }
 
 /**
@@ -52,12 +100,19 @@ export function payLeaguePhasePrizes(state: GameState, cupId: string, digest: st
     (m) =>
       m.season === state.season && m.competitionId === cupId && (m.stage ?? "league") === "league",
   );
+  /**
+   * 참가비의 조건은 성적이 아니라 출전이다 — 그래서 **경기에 나선 팀 전원**이
+   * 0원 수당으로 먼저 오르고, 승/무만 그 위에 쌓인다. 성적으로 맵을 채우면
+   * 전패한 팀이 맵에 없어 참가비까지 함께 사라진다.
+   */
   const earned = new Map<string, number>();
+  const add = (teamId: string, amount: number) =>
+    earned.set(teamId, (earned.get(teamId) ?? 0) + amount);
   for (const m of phase) {
+    add(m.homeTeamId, 0);
+    add(m.awayTeamId, 0);
     if (!m.result) continue;
     const { homeGoals, awayGoals } = m.result;
-    const add = (teamId: string, amount: number) =>
-      earned.set(teamId, (earned.get(teamId) ?? 0) + amount);
     if (homeGoals === awayGoals) {
       add(m.homeTeamId, cup.prize.draw);
       add(m.awayTeamId, cup.prize.draw);
@@ -67,7 +122,10 @@ export function payLeaguePhasePrizes(state: GameState, cupId: string, digest: st
   }
   for (const [teamId, bonus] of earned) {
     const total = cup.prize.participation + bonus;
-    if (payPrize(state, teamId, cupId, label, total) && teamId === state.userTeamId) {
+    if (
+      payPrize(state, teamId, cupId, "league-phase", label, total) &&
+      teamId === state.userTeamId
+    ) {
       digest.push(`💰 ${label} ${formatMoney(total)} 입금`);
     }
   }
@@ -86,7 +144,10 @@ export function payStagePrizes(
   if (!cup || amount <= 0) return;
   const label = prizeLabel(cup, state.season, `${stageLabel(stage, 1, false)} 진출`);
   for (const teamId of new Set(teams)) {
-    if (payPrize(state, teamId, cupId, label, amount) && teamId === state.userTeamId) {
+    if (
+      payPrize(state, teamId, cupId, `stage:${stage}`, label, amount) &&
+      teamId === state.userTeamId
+    ) {
       digest.push(`💰 ${label} ${formatMoney(amount)} 입금`);
     }
   }
@@ -102,22 +163,12 @@ export function payWinnerPrize(
   const cup = cupCatalogById(cupId);
   if (!cup) return;
   const label = prizeLabel(cup, state.season, "우승");
-  if (payPrize(state, champion, cupId, label, cup.prize.winner) && champion === state.userTeamId) {
+  if (
+    payPrize(state, champion, cupId, "winner", label, cup.prize.winner) &&
+    champion === state.userTeamId
+  ) {
     digest.push(`💰 ${label} ${formatMoney(cup.prize.winner)} 입금`);
   }
-}
-
-/**
- * 이 팀이 이번 시즌 대항전에서 번 총액 — 브리핑·검증용.
- * 상세 원장을 갖는 유저 팀만 정확하다 (AI 팀은 잔고만 갱신된다).
- */
-export function euroPrizeTotal(state: GameState, teamId: string): number {
-  const suffix = `(S${state.season})`;
-  return financeOf(state, teamId)
-    .ledger.filter(
-      (e) => categoryOf(e) === "prize" && e.label.endsWith(suffix) && e.label.includes("상금"),
-    )
-    .reduce((sum, e) => sum + e.amount, 0);
 }
 
 function formatMoney(amount: number): string {

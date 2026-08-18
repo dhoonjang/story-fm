@@ -33,7 +33,7 @@ export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조
 - 선수나 코치를 부르기만 했거나 말만 건 턴은 "none"이다.
 
 # 대화 (talk · teamTalk)
-감독이 **그 사람에게 건넨 말**이 있을 때만 싣고, 그 말이 어떻게 닿았는지를 **라벨**로 고른다. 수치는 코어가 만든다.
+감독이 **그 사람에게 건넨 말**이 있을 때만 싣고, 그 말이 어떻게 닿았는지를 **라벨**로 고른다.
 - 이름을 부르기만 한 말("브루노 일루와봐", "잠깐 와봐")은 부름이지 면담이 아니다 — talk을 비운다.
 - outcome은 감독 발화의 (a) 맥락 적합성 (b) 설득 근거 (c) 대상 수용성으로 판정한다.
 - talk.outcome — reassured(다독임) · motivated(자극) · neutral · disappointed(실망을 드러냄) · angered(질책)
@@ -54,7 +54,7 @@ export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조
 - exploits — 공략 목록에 있는 id만.
 
 # unresolved
-어느 갈래에도 담기지 않은 말은 감독의 표현 그대로 unresolved에 남긴다. 비워 두면 감독은 그 지시가 걸린 줄 안다.`;
+어느 갈래에도 담기지 않은 말은 감독의 표현 그대로 unresolved에 남긴다.`;
 
 /** 산출 도구의 JSON 스키마 — Zod와 짝이다 (`MatchIntentSchema`) */
 const REPORT_INPUT_SCHEMA = {
