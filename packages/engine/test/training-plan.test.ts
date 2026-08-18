@@ -70,7 +70,9 @@ describe("기본 훈련 — 시즌 달력에 미리 깔려 있다", () => {
   it("복귀 첫 주는 메디컬로 열고 강도를 올리지 않는다", () => {
     const state = createTestGame();
     const back = preseasonReturnDate(state.calendar.preseasonStart);
-    expect(trainingOn(state, back)).toEqual(["복귀 메디컬 — 신체 검사·체력 측정"]);
+    // 문구가 아니라 규칙을 잰다 — 복귀 첫날은 검사 한 세션뿐이다
+    expect(trainingOn(state, back)).toHaveLength(1);
+    expect(trainingOn(state, back)[0]).toContain("메디컬");
     // 복귀 주 내내 단일 세션 (이중 세션은 그다음 주부터)
     for (let i = 0; i <= 4; i++) {
       expect(trainingOn(state, addDays(back, i)), `복귀 ${i}일차`).toHaveLength(1);
@@ -449,28 +451,31 @@ describe("일정이 바뀌면 훈련도 따라 바뀐다", () => {
   it("경기가 연기되면 옮겨 간 날에 사이클이 새로 선다", () => {
     const state = createTestGame(7);
     advanceTime(state, { days: 40 }); // 개막 뒤로 시계를 민다
-    const match = state.matches.find(
-      (m) =>
-        (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId) &&
-        m.date > addDays(state.date, 14) &&
-        isPostponable(state, m),
-    )!;
-    expect(match, "옮길 수 있는 경기를 찾지 못했다").toBeDefined();
-    const emptied = match.date;
+    /**
+     * **비워진 날이 평일이고 옆에 경기가 없는** 경기를 고른다 — 그래야 "경기가
+     * 빠지면 훈련이 돌아온다"를 아래에서 조건 없이 잴 수 있다. 조건을 `if`로
+     * 감싸 두면 조건이 안 맞는 날이 뽑혔을 때 케이스가 조용히 사라진다.
+     */
+    const dates = userMatchDates(state);
+    const match = state.matches.find((m) => {
+      if (m.homeTeamId !== state.userTeamId && m.awayTeamId !== state.userTeamId) return false;
+      if (m.date <= addDays(state.date, 14) || !isPostponable(state, m)) return false;
+      const dow = new Date(`${m.date}T00:00:00Z`).getUTCDay();
+      if (dow === 0 || dow === 6) return false;
+      return !dates.some((d) => d !== m.date && Math.abs(diffDays(m.date, d)) <= 2);
+    });
+    expect(match, "옮길 수 있는 평일 단독 경기를 찾지 못했다").toBeDefined();
+    const emptied = match!.date;
 
-    expect(postponeMatch(state, match)).toBe(true);
-    expect(match.date, "경기가 다른 날로 옮겨졌어야 한다").not.toBe(emptied);
+    expect(postponeMatch(state, match!)).toBe(true);
+    expect(match!.date, "경기가 다른 날로 옮겨졌어야 한다").not.toBe(emptied);
 
     syncDefaultTraining(state);
-    expectMicrocycle(state, match.date); // 새 날짜에 사이클이 선다
-    // 비워진 날은 평범한 하루로 돌아간다 — 주말도 아니고 옆 경기에 물리지도 않았다면
-    const dow = new Date(`${emptied}T00:00:00Z`).getUTCDay();
-    const busyNearby = userMatchDates(state).some((d) => Math.abs(diffDays(emptied, d)) <= 2);
-    if (dow !== 0 && dow !== 6 && !busyNearby) {
-      expect(trainingOn(state, emptied), `${emptied}: 경기가 빠졌으면 훈련이 돌아온다`).not.toEqual(
-        [],
-      );
-    }
+    expectMicrocycle(state, match!.date); // 새 날짜에 사이클이 선다
+    // 비워진 날은 평범한 하루로 돌아간다
+    expect(trainingOn(state, emptied), `${emptied}: 경기가 빠졌으면 훈련이 돌아온다`).not.toEqual(
+      [],
+    );
   }, 60_000);
 });
 

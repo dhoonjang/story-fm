@@ -7,6 +7,8 @@ import {
   playerById,
   startMatch,
   type GameState,
+  type MatchView,
+  type OfficeViews,
 } from "@story-fm/engine";
 import { createTestGame } from "./helpers";
 
@@ -15,8 +17,20 @@ import { createTestGame } from "./helpers";
  * 둘 다 `ledger.events`의 파생이다: 저장하지 않으므로 장부와 갈릴 수 없다.
  */
 
-/** 경기일까지 진행한 뒤 킥오프하고 몇 구간 굴린다 (끝내지는 않는다) */
-function intoMatch(seed: number): GameState {
+/**
+ * 경기일까지 진행한 뒤 킥오프하고 몇 구간 굴린다 (끝내지는 않는다).
+ *
+ * 시드마다 **한 번만** 굴리고 나눠 쓴다 — 아래 검증들은 장부를 읽기만 한다.
+ * `finalizeMatch`를 부르지 않으므로 `state.phase`는 `match`에 머물고,
+ * 판세 뷰(`views.match`)는 **언제나 서 있다**. 예전엔 그 자리에 `if (!view) return`이
+ * 있어, 뷰가 서지 않으면 케이스가 통째로 사라졌다.
+ */
+const midMatch = new Map<number, OfficeViews & { state: GameState; match: MatchView }>();
+
+function intoMatch(seed: number) {
+  const cached = midMatch.get(seed);
+  if (cached) return cached;
+
   const state = createTestGame(seed);
   let guard = 12;
   while (state.phase !== "matchday" && guard-- > 0) {
@@ -31,15 +45,24 @@ function intoMatch(seed: number): GameState {
     if (!step.ok) throw new Error(step.message);
     if (step.plan?.stop === "full_time") break;
   }
-  return state;
+  const views = buildOfficeViews(state);
+  expect(views.match, `시드 ${seed}: 경기 중인데 판세가 서지 않았다`).not.toBeNull();
+  const built = { ...views, state, match: views.match! };
+  midMatch.set(seed, built);
+  return built;
 }
+
+/** 판세에 실린 모든 선수 행 — 그라운드 위와 벤치 양쪽 */
+const allRows = (view: MatchView) => [
+  ...view.onPitch.home,
+  ...view.onPitch.away,
+  ...view.bench.home,
+  ...view.bench.away,
+];
 
 describe("경기 중 기록", () => {
   it("골 목록이 장부의 득점과 정확히 맞는다", () => {
-    const state = intoMatch(11);
-    const view = buildOfficeViews(state).match;
-    if (!view) return; // 경기가 이미 끝났으면 볼 것이 없다
-
+    const { state, match: view } = intoMatch(11);
     const scored = state.pendingMatch!.ledger.events.filter((e) => e.type === "goal");
     expect(view.goals).toHaveLength(scored.length);
     expect(view.goals.length).toBe(view.score.home + view.score.away);
@@ -50,21 +73,12 @@ describe("경기 중 기록", () => {
   });
 
   it("선수별 집계가 사건 목록과 어긋나지 않는다", () => {
-    const state = intoMatch(7);
-    const view = buildOfficeViews(state).match;
-    if (!view) return;
-
-    const rows = [
-      ...view.onPitch.home,
-      ...view.onPitch.away,
-      ...view.bench.home,
-      ...view.bench.away,
-    ];
+    const { state, match: view } = intoMatch(7);
     const events = state.pendingMatch!.ledger.events;
     const countOf = (type: string, id: string) =>
       events.filter((e) => e.type === type && e.actors[0] === id).length;
 
-    for (const p of rows) {
+    for (const p of allRows(view)) {
       expect(p.tally.goals, `${p.name} 골`).toBe(countOf("goal", p.id));
       expect(p.tally.saves, `${p.name} 선방`).toBe(countOf("save", p.id));
       expect(p.tally.yellows, `${p.name} 경고`).toBe(countOf("yellow_card", p.id));
@@ -75,18 +89,10 @@ describe("경기 중 기록", () => {
   });
 
   it("도움은 두 번째 행위자에게 붙는다", () => {
-    const state = intoMatch(3);
-    const view = buildOfficeViews(state).match;
-    if (!view) return;
+    const { state, match: view } = intoMatch(7);
     const events = state.pendingMatch!.ledger.events;
     const assisted = events.filter((e) => e.type === "goal" && e.actors[1]);
-    const rows = [
-      ...view.onPitch.home,
-      ...view.onPitch.away,
-      ...view.bench.home,
-      ...view.bench.away,
-    ];
-    const total = rows.reduce((sum, p) => sum + p.tally.assists, 0);
+    const total = allRows(view).reduce((sum, p) => sum + p.tally.assists, 0);
     // 명단 밖(교체로 나간 선수)의 도움은 표에 없으므로 합이 더 클 수는 없다
     expect(total).toBeLessThanOrEqual(assisted.length);
   });
@@ -99,19 +105,12 @@ describe("경기 중 기록", () => {
  */
 describe("경기 중 체력 — 두 탭이 한 값을 본다", () => {
   it("판세와 명단이 같은 읽은 값이고, 참값은 그 구간 안에 있다", () => {
-    const state = intoMatch(11);
-    const views = buildOfficeViews(state);
-    const match = views.match;
-    if (!match) return; // 경기가 이미 끝났으면 볼 것이 없다
+    const views = intoMatch(11);
+    const { state, match } = views;
 
     const worn = state.pendingMatch!.matchFatigue ?? {};
     const rows = new Map(views.squad.players.map((r) => [r.id, r] as const));
-    const ours = [
-      ...match.onPitch.home,
-      ...match.onPitch.away,
-      ...match.bench.home,
-      ...match.bench.away,
-    ].filter((p) => p.ours);
+    const ours = allRows(match).filter((p) => p.ours);
     expect(ours.length, "우리 선수가 판세에 없다").toBeGreaterThan(0);
     // 닳은 선수가 있어야 두 값을 견주는 일에 뜻이 있다
     expect(ours.filter((p) => (worn[p.id] ?? 0) > 0).length, "아무도 닳지 않았다").toBeGreaterThan(
@@ -148,10 +147,7 @@ describe("경기 중 체력 — 두 탭이 한 값을 본다", () => {
 
 describe("흐름의 양 — 사건이 아닌 기록", () => {
   it("패스가 쌓이고 전진 패스는 그 일부다", () => {
-    const state = intoMatch(5);
-    const view = buildOfficeViews(state).match;
-    if (!view) return;
-
+    const { match: view } = intoMatch(11);
     const rows = [...view.onPitch.home, ...view.onPitch.away];
     const passes = rows.reduce((s, p) => s + p.tally.passes, 0);
     expect(passes, "패스가 하나도 안 쌓였다").toBeGreaterThan(0);
@@ -163,10 +159,7 @@ describe("흐름의 양 — 사건이 아닌 기록", () => {
   });
 
   it("전진 패스 비율은 선수마다 다르다 — 앞을 보는 선수가 더 찌른다", () => {
-    const state = intoMatch(7);
-    const view = buildOfficeViews(state).match;
-    if (!view) return;
-
+    const { state, match: view } = intoMatch(7);
     const rows = [...view.onPitch.home, ...view.onPitch.away]
       .filter((p) => p.tally.passes >= 20 && p.position !== "GK")
       .map((p) => ({
@@ -177,7 +170,10 @@ describe("흐름의 양 — 사건이 아닌 기록", () => {
           return a.vision * 0.5 + a.kicking * 0.3 + a.composure * 0.2;
         })(),
       }));
-    if (rows.length < 6) return;
+    // 표본이 모자라면 아래 비교가 뜻을 잃는다 — 조용히 빠져나가지 않는다
+    expect(rows.length, "패스 20회 이상인 필드 플레이어가 여섯도 안 된다").toBeGreaterThanOrEqual(
+      6,
+    );
 
     // 비율이 하나로 뭉쳐 있으면 성향이 안 걸린 것이다
     const shares = new Set(rows.map((r) => Math.round(r.share * 100)));
@@ -191,12 +187,10 @@ describe("흐름의 양 — 사건이 아닌 기록", () => {
   });
 
   it("슛에는 xG가 붙고, 합이 선수 기록과 맞는다", () => {
-    const state = intoMatch(7);
-    const view = buildOfficeViews(state).match;
-    if (!view) return;
+    const { state } = intoMatch(7);
     const events = state.pendingMatch!.ledger.events;
     const shots = events.filter((e) => e.type === "shot" || e.type === "goal");
-    if (shots.length === 0) return;
+    expect(shots.length, "슛이 한 번도 없었다").toBeGreaterThan(0);
     for (const e of shots) {
       expect(e.xg, `${e.minute}' ${e.type} xg 없음`).toBeDefined();
       expect(e.xg!).toBeGreaterThan(0);
@@ -213,12 +207,10 @@ describe("흐름의 양 — 사건이 아닌 기록", () => {
   });
 
   it("골키퍼만 선방을 갖는다", () => {
-    const state = intoMatch(11);
-    const view = buildOfficeViews(state).match;
-    if (!view) return;
-    for (const p of [...view.onPitch.home, ...view.onPitch.away]) {
-      if (p.tally.saves > 0) expect(p.position, `${p.name}`).toBe("GK");
-    }
+    const { match: view } = intoMatch(11);
+    const keepers = [...view.onPitch.home, ...view.onPitch.away].filter((p) => p.tally.saves > 0);
+    expect(keepers.length, "선방이 한 번도 없었다").toBeGreaterThan(0);
+    for (const p of keepers) expect(p.position, `${p.name}`).toBe("GK");
   });
 
   /**
@@ -226,9 +218,7 @@ describe("흐름의 양 — 사건이 아닌 기록", () => {
    * 상대 쪽 안개를 두 번 지나거나 반올림이 갈려, 같은 경기가 두 숫자로 읽힌다.
    */
   it("팀 합계와 선발 평균이 그라운드 위 행들의 합·평균이다", () => {
-    const state = intoMatch(11);
-    const view = buildOfficeViews(state).match;
-    if (!view) return;
+    const { match: view } = intoMatch(11);
     for (const side of ["home", "away"] as const) {
       const rows = view.onPitch[side];
       expect(rows.length, `${side} 선발`).toBeGreaterThan(0);

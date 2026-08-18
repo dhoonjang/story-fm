@@ -80,8 +80,9 @@ describe("골의 분", () => {
 
   it("득점자와 같은 길이로, 시간 순으로 남는다", () => {
     const state = createTestGame(3);
+    // 스쿼드는 한 번만 세운다 — 루프 안에서 다시 세우면 그게 이 케이스의 값이 된다
+    const squads = { home: simSquadOf(state, "mancity"), away: simSquadOf(state, "hull") };
     for (let i = 0; i < 60; i++) {
-      const squads = { home: simSquadOf(state, "mancity"), away: simSquadOf(state, "hull") };
       const r = quickSimulate(squads.home, squads.away, 900 + i, `min:${i}`);
       expect(r.goalMinutes).toHaveLength(r.scorers.length);
       expect(r.assists).toHaveLength(r.scorers.length);
@@ -148,14 +149,11 @@ describe("간이 시뮬 전력 로그", () => {
 describe("카드·퇴장", () => {
   it("두 번째 경고는 경고 한 장 + 퇴장으로 남는다 (실제 기록과 같다)", () => {
     const state = createTestGame(3);
+    const home = simSquadOf(state, "mancity");
+    const away = simSquadOf(state, "hull");
     let secondYellows = 0;
     for (let i = 0; i < 400; i++) {
-      const r = quickSimulate(
-        simSquadOf(state, "mancity"),
-        simSquadOf(state, "hull"),
-        4000 + i,
-        `card:${i}`,
-      );
+      const r = quickSimulate(home, away, 4000 + i, `card:${i}`);
       for (const red of r.cards.filter((c) => c.card === "red")) {
         const yellows = r.cards.filter(
           (c) => c.playerId === red.playerId && c.card === "yellow",
@@ -239,7 +237,12 @@ describe("카드·퇴장", () => {
    */
   it("퇴장이 스코어에 닿는다 — 한 명이 빠진 팀은 더 많이 내주고 덜 넣는다", () => {
     const state = createTestGame(3);
-    const MATCHES = 400;
+    /**
+     * 판 수 — **방향이 결정적으로 잡히는 선**이다. 400판일 때 60초를 썼고, 150판으로
+     * 줄여도 세 짝 모두 같은 방향이고 크기 문턱(±10%)도 그대로 넘는다. 시드가 같으니
+     * 이 수는 흔들리는 표본이 아니라 고정된 판이다 — 늘려도 답이 달라지지 않는다.
+     */
+    const MATCHES = 150;
     const pairs: Array<[string, string]> = [
       ["mancity", "hull"],
       ["arsenal", "everton"],
@@ -329,15 +332,12 @@ describe("같은 날 경기는 킥오프 순서대로 굴러간다", () => {
 describe("교체", () => {
   it("양 팀이 모두 교체한다 — 한도는 팀마다 따로다", () => {
     const state = createTestGame(3);
+    const home = simSquadOf(state, "mancity");
+    const away = simSquadOf(state, "hull");
     let homeSubs = 0;
     let awaySubs = 0;
     for (let i = 0; i < 60; i++) {
-      const r = quickSimulate(
-        simSquadOf(state, "mancity"),
-        simSquadOf(state, "hull"),
-        6000 + i,
-        `sub:${i}`,
-      );
+      const r = quickSimulate(home, away, 6000 + i, `sub:${i}`);
       homeSubs += r.subs.filter((s) => s.side === "home").length;
       awaySubs += r.subs.filter((s) => s.side === "away").length;
       expect(r.subs.filter((s) => s.side === "home").length).toBeLessThanOrEqual(4);

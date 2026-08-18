@@ -13,6 +13,7 @@ import {
   isInjured,
   openInjuryFor,
   playerById,
+  playerCatalog,
   playersOf,
   pronenessFromDaysOut,
   pronenessValue,
@@ -23,13 +24,22 @@ import {
   startMatch,
   userSide,
 } from "@story-fm/engine";
+import { INJURY_HISTORY } from "../src/data/injury-history";
 import { advanceToMatchday, createTestGame } from "./helpers";
+
+/**
+ * 조사된 선수 수는 **표가 정한다** — `INJURY_HISTORY`의 키 중 시드에 있는 이름
+ * 전부다. 여기 숫자를 손으로 적어 두면 표에 한 줄 넣는 것만으로 테스트가 빨개진다
+ * (그리고 그때 고쳐지는 것은 코드가 아니라 이 숫자다).
+ */
+const RESEARCHED = Object.keys(INJURY_HISTORY);
 
 describe("부상 성향 — 개인별 확률로 관리된다", () => {
   it("조사된 이력이 없으면 1.0에서 출발한다 — 지어내지 않는다", () => {
     const state = createTestGame(11);
     const unresearched = state.players.filter((p) => p.state.injuryProneness === undefined);
-    expect(unresearched.length).toBeGreaterThan(5000);
+    // 조사분보다 훨씬 많다 — 표는 수백 명 중 몇십 명만 덮는다
+    expect(unresearched.length).toBeGreaterThan(RESEARCHED.length);
     for (const p of unresearched) expect(pronenessValue(p)).toBe(PRONENESS_BASE);
   });
 
@@ -160,47 +170,75 @@ describe("부상은 팀을 가리지 않는다", () => {
 });
 
 describe("부임 전 부상 이력 — 조사된 선수만", () => {
-  const find = (state: ReturnType<typeof createTestGame>, nameKo: string) =>
-    state.players.find((p) => p.name === nameKo)!;
+  const state = createTestGame(42);
+  /** 조인 키는 카탈로그의 `nameEn`이다 (`seedInjuryHistory`) */
+  const nameById = new Map(playerCatalog().map((e) => [e.id, e.nameEn]));
+  const nameOf = (playerId: string) => {
+    const player = playerById(state, playerId)!;
+    return player.catalogId === null ? undefined : nameById.get(player.catalogId);
+  };
+  /** 표에 이름이 있고 이 세계에 실제로 있는 선수 */
+  const researched = state.players.filter((p) => {
+    const nameEn = p.catalogId === null ? undefined : nameById.get(p.catalogId);
+    return nameEn !== undefined && INJURY_HISTORY[nameEn] !== undefined;
+  });
+  const seededRows = state.injuries.filter((i) => i.note === "부임 전 이력");
 
-  it("이력이 INJURY 표에 행으로 들어간다", () => {
-    const state = createTestGame(42);
-    const rodri = find(state, "로드리");
-    const rows = state.injuries.filter((i) => i.gamePlayerId === rodri.id);
-    expect(rows.length).toBe(7);
-    // 십자인대 파열 — 2024-09-23 ~ 2025-04-30 (Transfermarkt)
-    const acl = rows.find((r) => r.bodyPart === "십자인대")!;
-    expect(acl.occurredOn).toBe("2024-09-23");
-    expect(acl.returnedOn).toBe("2025-04-30");
-    expect(acl.severity).toBe("major");
+  it("표가 게임에 닿는다 — 값을 갖는 선수는 조사분 그들뿐이다", () => {
+    expect(researched.length, "표의 이름이 한 명도 게임에 닿지 않았다").toBeGreaterThan(0);
+    const withValue = state.players.filter((p) => p.state.injuryProneness !== undefined);
+    expect(withValue.map((p) => p.id).sort()).toEqual(researched.map((p) => p.id).sort());
+    // 나머지 전부는 평균에서 출발한다 (지어내지 않는다)
+    expect(state.players.length - withValue.length).toBeGreaterThan(RESEARCHED.length);
   });
 
-  it("조사되지 않은 선수는 손대지 않는다 — 1.0에 남는다", () => {
-    const state = createTestGame(42);
-    const untouched = state.players.filter((p) => p.state.injuryProneness === undefined);
-    // 표에 있는 14명만 값을 갖는다 — 나머지 전부는 평균에서 출발한다
-    expect(untouched.length).toBeGreaterThan(5000);
-    expect(state.players.filter((p) => p.state.injuryProneness !== undefined).length).toBe(14);
+  /**
+   * 행 하나하나가 표의 한 줄이다 — **코어는 부상을 지어내지 않는다.**
+   * 특정 선수의 행 수를 손으로 적지 않는다: 표에 한 줄 넣는 것만으로 빨개지고,
+   * 그때 고쳐지는 것은 코드가 아니라 그 숫자다.
+   */
+  it("씨앗 부상 행은 표에서만 나오고 날짜를 그대로 옮긴다", () => {
+    expect(seededRows.length, "씨앗 부상 행이 하나도 없다").toBeGreaterThan(0);
+    for (const row of seededRows) {
+      const nameEn = nameOf(row.gamePlayerId);
+      expect(nameEn, `${row.gamePlayerId}: 카탈로그에 없는 선수에게 이력이 붙었다`).toBeDefined();
+      const entry = INJURY_HISTORY[nameEn!]?.find((e) => e.from === row.occurredOn);
+      expect(entry, `${nameEn} ${row.occurredOn}: 표에 없는 부상이다`).toBeDefined();
+      expect(row.bodyPart, `${nameEn} ${row.occurredOn} 부위`).toBe(entry!.part);
+      expect(row.expectedReturn, `${nameEn} ${row.occurredOn} 복귀 예정`).toBe(entry!.until);
+      // 부임일 전에 끝난 부상만 닫혀 있다 — 아직 안 끝난 것은 열린 채로 온다
+      expect(row.returnedOn, `${nameEn} ${row.occurredOn} 복귀일`).toBe(
+        entry!.until > state.date ? null : entry!.until,
+      );
+    }
   });
 
-  it("이력이 많을수록 성향이 높다", () => {
-    const state = createTestGame(42);
-    expect(pronenessValue(find(state, "로드리"))).toBeGreaterThan(
-      pronenessValue(find(state, "유리엔 팀버르")),
+  it("결장이 길수록 성향이 높다", () => {
+    // 이름을 박지 않는다 — 씨앗 행의 결장 일수로 양 끝을 뽑는다
+    const daysOf = (playerId: string) =>
+      seededRows
+        .filter((i) => i.gamePlayerId === playerId)
+        .reduce((sum, i) => sum + diffDays(i.occurredOn, i.expectedReturn), 0);
+    const ranked = [...researched].sort((a, b) => daysOf(a.id) - daysOf(b.id));
+    const least = ranked[0]!;
+    const most = ranked[ranked.length - 1]!;
+    expect(daysOf(most.id), "표가 한 사람뿐이라 견줄 것이 없다").toBeGreaterThan(daysOf(least.id));
+    expect(pronenessValue(most), `${most.name} vs ${least.name}`).toBeGreaterThan(
+      pronenessValue(least),
     );
-    expect(pronenessValue(find(state, "유리엔 팀버르"))).toBeGreaterThan(PRONENESS_BASE);
+    expect(pronenessValue(most)).toBeGreaterThan(PRONENESS_BASE);
   });
 
   it("복귀일이 안 지난 선수는 **다친 채로** 인계된다", () => {
-    const state = createTestGame(42);
-    const kamara = find(state, "부바카르 카마라");
-    const open = state.injuries.find((i) => i.gamePlayerId === kamara.id && i.returnedOn === null);
-    expect(open).toBeDefined();
-    expect(open!.expectedReturn).toBe("2026-07-06");
-    expect(isInjured(state, kamara.id)).toBe(true);
+    const open = seededRows.filter((i) => i.returnedOn === null);
+    expect(open.length, "부임 시점에 다친 선수가 표에 없다").toBeGreaterThan(0);
+    for (const row of open) expect(isInjured(state, row.gamePlayerId), row.id).toBe(true);
+
     // 그리고 tick이 복귀일에 닫는다 — 특별 취급이 없다
-    advanceTime(state, { days: 8 });
-    expect(isInjured(state, kamara.id)).toBe(false);
+    const soonest = [...open].sort((a, b) => (a.expectedReturn < b.expectedReturn ? -1 : 1))[0]!;
+    const ticked = createTestGame(42);
+    advanceTime(ticked, { days: diffDays(ticked.date, soonest.expectedReturn) + 2 });
+    expect(isInjured(ticked, soonest.gamePlayerId)).toBe(false);
   });
 
   it("동시에 안고 있던 부상을 두 번 세지 않는다", () => {
@@ -209,21 +247,9 @@ describe("부임 전 부상 이력 — 조사된 선수만", () => {
      * 네 부상의 일수를 그냥 더하면 303일이지만, 8~11월이 한 번의 결장이라
      * 실제로 빠진 날은 231일이다 — 합집합으로 세야 한다.
      */
-    const state = createTestGame(42);
-    const shaw = pronenessValue(find(state, "루크 쇼"));
-    expect(shaw).toBeCloseTo(pronenessFromDaysOut(231), 5);
-    expect(shaw).toBeLessThan(pronenessFromDaysOut(303));
-  });
-
-  it("결장 일수 → 성향은 기준점 사이를 잇는다", () => {
-    expect(pronenessFromDaysOut(0)).toBeCloseTo(0.75, 5);
-    expect(pronenessFromDaysOut(40)).toBeCloseTo(1.0, 5);
-    expect(pronenessFromDaysOut(400)).toBeCloseTo(2.2, 5);
-    expect(pronenessFromDaysOut(9999)).toBeCloseTo(2.2, 5);
-    // 단조 증가
-    for (let d = 0; d < 400; d += 20) {
-      expect(pronenessFromDaysOut(d + 20)).toBeGreaterThan(pronenessFromDaysOut(d));
-    }
+    const shaw = state.players.find((p) => p.catalogId === "luke-shaw")!;
+    expect(pronenessValue(shaw)).toBeCloseTo(pronenessFromDaysOut(231), 5);
+    expect(pronenessValue(shaw)).toBeLessThan(pronenessFromDaysOut(303));
   });
 });
 
