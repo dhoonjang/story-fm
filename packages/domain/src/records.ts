@@ -240,7 +240,7 @@ export type SeasonStat = z.infer<typeof SeasonStatSchema>;
 
 /**
  * 시즌 평균 평점 — 출전이 없으면 null(0.0과 "기록 없음"은 다르다).
- * 경기당 평점은 engine/ratings.ts가 장부 사실로 결정적으로 매긴다.
+ * 경기당 평점은 engine/match/ratings.ts가 장부 사실로 결정적으로 매긴다.
  */
 export function seasonRating(
   stat: Pick<SeasonStat, "apps" | "ratingSum"> | null | undefined,
@@ -253,7 +253,7 @@ export function seasonRating(
 /**
  * 스카우트 파견 (SCOUT_REPORT) — **선수 단위**. 완료되면 그 선수의 능력치 안개가
  * 걷힌다(정확 공개). 단 잠재력은 끝까지 알 수 없다 — 성장 여력은 스카우트도
- * 단정하지 못한다는 규약. 지식 수준 파생은 engine/scouting.ts 참고.
+ * 단정하지 못한다는 규약. 지식 수준 파생은 engine/squad/scouting.ts 참고.
  */
 export const ScoutReportSchema = z.object({
   id: z.string().min(1),

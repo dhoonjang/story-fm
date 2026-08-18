@@ -1,5 +1,10 @@
 import type { MatchSide, Player, PositionGroup, TacticsSpec } from "@story-fm/domain";
-import { FAMILIARITY_MAX, positionGroupOf, positionGroupOfPlayer } from "@story-fm/domain";
+import {
+  FAMILIARITY_BASELINE,
+  FAMILIARITY_MAX,
+  positionGroupOf,
+  positionGroupOfPlayer,
+} from "@story-fm/domain";
 import type { LineupSlot } from "./strength-packet";
 
 /**
@@ -20,11 +25,13 @@ import type { LineupSlot } from "./strength-packet";
  *    인용하고 골의 원인 태그가 된다. 수치만 움직이면 감독은 왜 이겼는지 모른다.
  *
  * ③ **효과는 작다(3~8%).** 세게 잡으면 "정답 전술"을 찾는 게임이 되고 상대
- *    정체성만 알면 승부가 끝난다. xg 로그 민감도(1.3)가 이 폭을 승률 차로 옮긴다 —
- *    실력 차를 뒤집지는 못하고 접전을 가른다.
+ *    정체성만 알면 승부가 끝난다. 존에 실린 폭은 경로 우위를 지나 슈팅 양과 질
+ *    양쪽으로 번역되므로(match.md §1.4) 실력 차를 뒤집지는 못하고 접전을 가른다.
  *
  * 이득에는 지시 적용률(`uptake`)을 곱한다. 좋은 수를 봐도 소화하지 못하는 팀은
- * 절반만 가져간다. **대가(음수)는 온전히 치른다.**
+ * 절반만 가져간다. **대가(음수)는 온전히 치른다** — 세워 둔 전술이 상대와 맞물린
+ * 결과라 소화하지 못한다고 덜 열리지 않는다. 대가를 절반만 태우는 6축·공략과
+ * 갈리는 자리다 (match.md §1.2의 표).
  */
 
 /** 한 상성이 만드는 효과 — 어느 팀의 어느 존을 얼마나 움직이나 */
@@ -161,7 +168,8 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
       if (severity <= 0) return null;
       const sweeper = ramp(us.gkSweep, 55, 88); // 스위퍼가 최대 40%까지 막아 준다
       const line = us.spec.defensiveLine - 3;
-      const drilled = mean(us.slots.map((s) => s.familiarity ?? 60)) / FAMILIARITY_MAX;
+      const drilled =
+        mean(us.slots.map((s) => s.familiarity ?? FAMILIARITY_BASELINE)) / FAMILIARITY_MAX;
       const trap = 1 + (1 - drilled) * 0.5; // 손발이 안 맞으면 트랩이 무너진다
       const size = -0.05 * severity * line * (1 - sweeper * 0.4) * trap;
       return [
