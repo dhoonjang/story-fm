@@ -1,7 +1,7 @@
 import {
   FAMILIARITY_MAX,
-  defaultRoleOf,
   positionAtPoint,
+  roleAtSlot as inheritedRoleAt,
   roleChangeCost,
   rolesFor,
   type BoardPoint,
@@ -51,15 +51,14 @@ export interface BoardState {
 }
 
 /**
- * 그 자리에서 지금 걸리는 역할 — 코어 `inherit`와 **같은 3단** (player.md §3.2).
+ * 그 자리에서 지금 걸리는 역할 — **도메인의 3단을 그대로 부른다** (player.md §3.2).
  *
- * ⚠️ 코어는 자리가 바뀌었는지가 아니라 **그 역할이 새 자리 목록에 있는지**만 본다.
- * 옛 자리와 견주면 CB → LCB처럼 코드만 바뀌는 이동에서 화면이 기억을 꺼내고 코어는
- * 걸린 역할을 그대로 두어 두 값이 갈린다.
+ * 순서를 여기 옮겨 적으면 코어의 승계(`inheritedRole`)와 갈리고, 그러면 감독이 누른
+ * 적 없는 역할 변경이 자동 저장 응답과 함께 혼자 일어난다. 이 함수는 뷰의 행에서
+ * 인자만 꺼내 넘긴다.
  */
 export function roleAtSlot(p: Pick<SquadRow, "roleId" | "roleMemory">, position: string): string {
-  if (p.roleId !== null && rolesFor(position).some((r) => r.id === p.roleId)) return p.roleId;
-  return p.roleMemory[position] ?? defaultRoleOf(position);
+  return inheritedRoleAt(position, p.roleId, p.roleMemory[position]);
 }
 
 export function lineupBody(

@@ -39,6 +39,7 @@ import {
   positionGroupOf,
   clampFamiliarity,
   defaultRoleOf,
+  inheritedRole,
   storedProficiencyFor,
   rolesFor,
   separateBoardPoints,
@@ -847,14 +848,14 @@ export function setLineup(
     /** 배치가 들고 있던 것과 선반이 들고 있던 것의 공통분모 — 선반엔 자리가 없다 */
     const old: Partial<TacticAssignment> | undefined =
       prev.get(playerId) ?? unshelveFamiliarity(tactics, playerId);
-    const oldRole = old?.roleId;
-    const keepRole =
-      oldRole !== undefined && rolesFor(position).some((role) => role.id === oldRole);
+    /**
+     * 되찾기 3단은 **도메인이 하나로 갖는다**(`inheritedRole`) — 전술판이 저장을
+     * 기다리는 동안 부르는 그 함수다. 여기서 순서를 따로 밟으면 감독이 누른 적 없는
+     * 역할 변경이 자동 저장 응답과 함께 혼자 일어난다.
+     */
     const roleId = !slotted
       ? undefined
-      : keepRole
-        ? oldRole
-        : recallRole(state, playerId, position);
+      : inheritedRole(position, old?.roleId, recallRole(state, playerId, position));
     /**
      * **오늘 역할을 손댄 흔적은 살려 둔다.** 전술판은 조작마다 배치를 다시
      * 쓰는데, 여기서 memo가 사라지면 저장할 때마다 "오늘 아침"이 새로 잡혀
@@ -1320,7 +1321,9 @@ export function setPlayerRole(
     message: `${player.name} ${assignment.position} 역할 → ${def.ko}`,
     brief: {
       head: player.name,
-      items: [item({ label: `${assignment.position} 역할`, text: def.ko })],
+      // 역할 이름은 **전술판 칩과 같은 표기로** 낸다 — 화면이 긴 이름을 줄이면
+      // 그 치환이 코어 문구를 되쪼개는 일이 되고, 표가 바뀌면 조용히 어긋난다
+      items: [item({ label: `${assignment.position} 역할`, text: def.abbr })],
     },
   };
 }

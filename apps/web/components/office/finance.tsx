@@ -11,8 +11,12 @@ type FinanceMonth = OfficeViews["finance"]["current"];
 const signed = (v: number) => `${v >= 0 ? "+" : "−"}${money(Math.abs(v))}`;
 const percent = (ratio: number) => `${Math.round(ratio * 100)}%`;
 
-/** 급여 비중의 경고 색 — 시즌 누계와 월별이 같은 임계를 쓴다 */
-const wageTone = (ratio: number) => (ratio >= 0.75 ? "danger" : ratio >= 0.65 ? "warn" : "");
+/** 급여 비중 구간의 색 — 구간 경계는 코어(`finance.ts`)가 갖고 화면은 색만 고른다 */
+const WAGE_TONE_CLASS: Record<OfficeViews["finance"]["wageTone"], string> = {
+  ok: "",
+  caution: "warn",
+  danger: "danger",
+};
 
 type FinanceFeedRow = OfficeViews["finance"]["feed"][number];
 
@@ -26,7 +30,8 @@ type FinanceFeedRow = OfficeViews["finance"]["feed"][number];
 function feedLabel(entry: FinanceFeedRow): string {
   const items = entry.items ?? [];
   if (items.length < 2) return entry.label;
-  const unit = entry.itemsRef === "player" ? "명" : "건";
+  // 무엇을 세는지는 무엇이 묶였는지가 정한다 — 뷰가 낱말을 주고 화면은 잇는다
+  const unit = entry.unit ?? "건";
   if (entry.label) return `${entry.label} ${items.length}${unit}`;
   return `${items[0]!.label} 외 ${items.length - 1}${unit}`;
 }
@@ -107,7 +112,7 @@ function FinanceMonthCard({ month }: { month: FinanceMonth }) {
       <div className="fin-meta">
         {/* 장부 손익은 현금 흐름과 갈릴 때만 적는다 — 같으면 머리의 수를 두 번 말한다 */}
         {month.pnlNet !== month.cashNet && <>장부 손익 {signed(month.pnlNet)} · </>}
-        급여 비중 <b className={wageTone(month.wageRatio)}>{percent(month.wageRatio)}</b>
+        급여 비중 <b className={WAGE_TONE_CLASS[month.wageTone]}>{percent(month.wageRatio)}</b>
       </div>
       <div className="fin-cols">
         <div className="fin-col">
@@ -167,7 +172,9 @@ export function FinanceView({ finance }: { finance: OfficeViews["finance"] }) {
         </div>
         <div className="fin-stat">
           <div className="label">시즌 급여 비중</div>
-          <div className={`value ${wageTone(finance.wageRatio)}`}>{percent(finance.wageRatio)}</div>
+          <div className={`value ${WAGE_TONE_CLASS[finance.wageTone]}`}>
+            {percent(finance.wageRatio)}
+          </div>
         </div>
         {finance.psr && (
           <div className="fin-stat" data-testid="fin-psr">

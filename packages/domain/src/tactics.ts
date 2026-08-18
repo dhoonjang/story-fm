@@ -499,6 +499,21 @@ export const PROFICIENCY_FACTOR_FLOOR = 0.1;
 /** 로그 곡선의 휨을 정하는 눈금. 작을수록 초반이 더 가파르다. */
 export const PROFICIENCY_LOG_SCALE = 5;
 
+/**
+ * **낯선 자리 경계** — 이 아래로 세우면 라인업이 경고를 세운다.
+ *
+ * 바닥값(`PROFICIENCY_FLOOR` 25)과 웬만큼 아는 자리 사이의 중간이다. 감독이 판을
+ * 짜다 실수로 센터백을 윙에 세운 것과, 알고 시키는 변칙을 가르는 선이라 정확한
+ * 자리보다 **하나의 자리**라는 게 중요하다 — 화면에 숫자를 복사해 두면 여기를
+ * 옮길 때 경고만 옛 선에 남는다.
+ */
+export const UNFAMILIAR_PROFICIENCY = 50;
+
+/** 그 자리를 낯설어하는가 — 경고를 세울지의 단일 판정 */
+export function isUnfamiliarPosition(proficiency: number): boolean {
+  return proficiency < UNFAMILIAR_PROFICIENCY;
+}
+
 /** 경기에서 두 적응도가 만들 수 있는 기본 최대 감점 폭 — 화면과 sim의 공통 원본. */
 export const ADAPTATION_IMPACT = {
   position: 1 - PROFICIENCY_FACTOR_FLOOR,

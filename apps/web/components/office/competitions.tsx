@@ -7,7 +7,7 @@ import type { OfficeViews } from "@story-fm/engine";
 type Competition = OfficeViews["competitions"]["list"][number];
 
 /** 순위표 — 리그는 그대로, 대항전은 통과 경계선을 긋는다 */
-function StandingsTable({ competition, teamName }: { competition: Competition; teamName: string }) {
+function StandingsTable({ competition }: { competition: Competition }) {
   // 순위표를 갖는 대회는 리그와 대항전 리그 페이즈뿐이다 (국내 컵은 브래킷을 본다)
   const europe = competition.europe;
   const zones = competition.zones;
@@ -34,7 +34,7 @@ function StandingsTable({ competition, teamName }: { competition: Competition; t
             <tr
               key={row.teamId}
               className={[
-                row.name === teamName ? "me" : "",
+                row.ours ? "me" : "",
                 zone ? `zone zone-${zone.kind}` : "",
                 // 구역의 마지막 행 아래에 선을 긋는다 — 4위와 5위의 차이가 한 계단이 아니다
                 zone && zone.through === i + 1 ? "cut" : "",
@@ -181,13 +181,7 @@ function NextFixture({ next }: { next: OfficeViews["competitions"]["nextMatch"] 
   );
 }
 
-export function CompetitionsView({
-  competitions,
-  teamName,
-}: {
-  competitions: OfficeViews["competitions"];
-  teamName: string;
-}) {
+export function CompetitionsView({ competitions }: { competitions: OfficeViews["competitions"] }) {
   const list = competitions.list;
   const [activeId, setActiveId] = useState(list[0]?.id ?? "");
   const active = list.find((c) => c.id === activeId) ?? list[0];
@@ -217,7 +211,7 @@ export function CompetitionsView({
             <span>
               {/* 국내 컵은 순위표가 없다 — 순위 대신 어디까지 갔는지를 말한다 */}
               {active.standings.length === 0
-                ? cupProgress(active)
+                ? cupProgressLabel(active.cupProgress)
                 : active.userPosition > 0
                   ? `${active.europe ? "리그 페이즈 " : ""}${active.userPosition}위`
                   : "순위 없음"}
@@ -234,7 +228,7 @@ export function CompetitionsView({
           {active.standings.length > 0 && (
             <>
               <div className="section-title">순위</div>
-              <StandingsTable competition={active} teamName={teamName} />
+              <StandingsTable competition={active} />
               <ZoneLegend zones={active.zones} />
             </>
           )}
@@ -280,16 +274,21 @@ export function CompetitionsView({
 
 /**
  * 컵에서 우리가 어디까지 갔는가 — 순위표가 없는 대회의 "현재 위치".
- * 브래킷에서 우리 대진이 마지막으로 나온 단계를 읽는다.
+ * 단계와 결말은 뷰가 내고(브래킷 해석은 코어의 몫), 화면은 문장만 잇는다.
  */
-function cupProgress(competition: Competition): string {
-  const ours = competition.bracket.filter((stage) => stage.ties.some((t) => t.ours));
-  const last = ours[ours.length - 1];
-  if (!last) return competition.bracket.length === 0 ? "추첨 전" : "탈락";
-  const tie = last.ties.find((t) => t.ours)!;
-  if (tie.won === false) return `${last.label} 탈락`;
-  if (tie.won === true && last.stage === "final") return "우승";
-  return `${last.label} 진출`;
+function cupProgressLabel({ stage, outcome }: Competition["cupProgress"]): string {
+  switch (outcome) {
+    case "undrawn":
+      return "추첨 전";
+    case "out":
+      return "탈락";
+    case "champion":
+      return "우승";
+    case "eliminated":
+      return stage ? `${stage} 탈락` : "탈락";
+    case "through":
+      return stage ? `${stage} 진출` : "진출";
+  }
 }
 
 /** 녹아웃 브래킷 — 단계별 대진 (2차전 합계는 엔진이 계산해 넘긴다) */

@@ -42,6 +42,26 @@ export interface MatchRatingFacts {
   outcome: "win" | "draw" | "loss";
 }
 
+/**
+ * 평점이 선 자리 — 명단의 평점 추이가 점 색을 고르는 **하나의 자.**
+ *
+ * 경계는 `RATING_BASE`(6.0) 언저리에서 갈린다: 기준선 위로 한 단 오르면 좋은 경기,
+ * 기준선을 밑돌면 아쉬운 경기다. 화면에 숫자를 복사해 두면 기준선을 옮길 때 색만
+ * 옛 자리에 남는다.
+ */
+export const RATING_HOT = 7.5;
+export const RATING_GOOD = 6.5;
+export const RATING_FLAT = 5.5;
+
+export type RatingTone = "hot" | "good" | "flat" | "cold";
+
+export function ratingTone(rating: number): RatingTone {
+  if (rating >= RATING_HOT) return "hot";
+  if (rating >= RATING_GOOD) return "good";
+  if (rating >= RATING_FLAT) return "flat";
+  return "cold";
+}
+
 /** 경기 평점 — 소수 첫째 자리까지 (3.0~10.0) */
 export function matchRating(f: MatchRatingFacts): number {
   let r = RATING_BASE + OUTCOME_DELTA[f.outcome];

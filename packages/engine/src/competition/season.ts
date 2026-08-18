@@ -68,6 +68,8 @@ import { installDefaultTraining } from "../squad/training-plan";
 
 export interface StandingRow {
   teamId: string;
+  /** 우리 팀인가 — 이름을 견주면 같은 이름의 다른 팀에서 갈린다 (화면이 행을 짚는 근거) */
+  ours: boolean;
   name: string;
   shortName: string;
   played: number;
@@ -99,6 +101,7 @@ export function computeStandings(
   for (const teamId of members) {
     rows.set(teamId, {
       teamId,
+      ours: teamId === state.userTeamId,
       name: teamName(teamId),
       shortName: teamShortName(teamId),
       played: 0,

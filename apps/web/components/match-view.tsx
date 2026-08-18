@@ -10,6 +10,7 @@ import { PitchChip, PitchGround } from "./pitch";
 
 type Match = NonNullable<OfficeViews["match"]>;
 type MatchPlayer = Match["onPitch"]["home"][number];
+type MatchTotals = Match["totals"]["home"];
 
 /**
  * 경기 화면 — **중계 채팅 밖에서도 판세가 보여야 한다.**
@@ -69,10 +70,6 @@ export function MatchOpponent({
   const bench = match.bench[them];
   const subs = match.subs[them];
   const tactics = match.tactics[them];
-  /** 선발 평균 — 우리 쪽 요약과 같은 숫자다. 다만 이 값들은 안개를 지난 추정이다 */
-  const xiRating = players.length
-    ? Math.round(players.reduce((s, p) => s + p.effective, 0) / players.length)
-    : 0;
   return (
     <div
       className={`squad-view opponent${boardOpen ? "" : " folded"}`}
@@ -81,7 +78,10 @@ export function MatchOpponent({
       <div className="squad-head">
         <div className="squad-summary">
           <span>
-            <b data-testid="opp-shape">{tactics.formation}</b> · 선발 평균 <b>{xiRating}</b>
+            {/* 선발 평균은 뷰가 낸다 — 상대 쪽은 안개를 지난 값이라 화면이 다시 평균
+                내면 우리 쪽 요약과 다른 자로 잰 값이 된다 */}
+            <b data-testid="opp-shape">{tactics.formation}</b> · 선발 평균{" "}
+            <b>{match.xiRating[them]}</b>
           </span>
           <span className="muted">
             교체 {subs.used}/5 · 기회 {subs.windows}/3
@@ -108,7 +108,7 @@ export function MatchOpponent({
               <span className="roster-tab-n">{players.length + bench.length}</span>
             </span>
           </div>
-          <TeamTotals players={players} />
+          <TeamTotals totals={match.totals[them]} />
         </div>
       </div>
       <div className="squad-layout">
@@ -599,38 +599,28 @@ function statLine(t: MatchPlayer["tally"]): string {
  * 그런데 팀 단위로는 그 숫자들이 곧 판세다("우리가 더 만졌는데 슛이 없다").
  * 그래서 **선수별은 툴팁, 팀별은 한 줄**로 가른다.
  */
-function TeamTotals({ players }: { players: MatchPlayer[] }) {
-  const sum = players.reduce(
-    (acc, p) => ({
-      passes: acc.passes + p.tally.passes,
-      progressive: acc.progressive + p.tally.progressive,
-      shots: acc.shots + p.tally.shots,
-      xg: acc.xg + p.tally.xg,
-      scoringExpectation: acc.scoringExpectation + p.tally.scoringExpectation,
-      saves: acc.saves + p.tally.saves,
-    }),
-    { passes: 0, progressive: 0, shots: 0, xg: 0, scoringExpectation: 0, saves: 0 },
-  );
-  if (sum.passes === 0 && sum.shots === 0) return null;
+function TeamTotals({ totals }: { totals: MatchTotals }) {
+  // 접는 것은 뷰가 한다 — 화면이 같은 행들을 다시 더하면 선수별과 팀 합계가 갈린다
+  if (totals.passes === 0 && totals.shots === 0) return null;
   return (
     <div className="mv-totals" data-testid="match-totals">
       <span>
-        패스 <b>{sum.passes}</b>
+        패스 <b>{totals.passes}</b>
       </span>
       <span>
-        전진 <b>{sum.progressive}</b>
+        전진 <b>{totals.progressive}</b>
       </span>
       <span>
-        슛 <b>{sum.shots}</b>
+        슛 <b>{totals.shots}</b>
       </span>
       <span title="이 경기에서 만든 기회의 질 — 팀 합계">
-        xG <b>{sum.xg.toFixed(2)}</b>
+        xG <b>{totals.xg.toFixed(2)}</b>
       </span>
       <span>
-        결정력 반영 <b>{sum.scoringExpectation.toFixed(2)}</b>
+        결정력 반영 <b>{totals.scoringExpectation.toFixed(2)}</b>
       </span>
       <span>
-        선방 <b>{sum.saves}</b>
+        선방 <b>{totals.saves}</b>
       </span>
     </div>
   );

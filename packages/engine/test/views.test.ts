@@ -3,6 +3,8 @@ import {
   applyFinanceEvent,
   buildOfficeViews,
   categoryOf,
+  cupProgressOf,
+  type BracketStageView,
   financeOf,
   humanizePlayerIds,
   setTraining,
@@ -244,7 +246,7 @@ describe("오피스 뷰 — 재정·순위·커리어", () => {
       const raw = ledger.filter((e) => e.category === "player_wages" && e.date === row.date);
       expect(row.items).toHaveLength(raw.length);
       expect(row.amount).toBe(raw.reduce((sum, e) => sum + e.amount, 0));
-      expect(row.itemsRef).toBe("player");
+      expect(row.unit).toBe("명");
       // 명세는 큰 금액부터 — 화면이 첫 이름을 대표로 세운다
       const amounts = row.items!.map((i) => i.amount);
       expect([...amounts].sort((a, b) => b - a)).toEqual(amounts);
@@ -330,6 +332,60 @@ describe("오피스 뷰 — 재정·순위·커리어", () => {
     if (!cup) return; // 시드에 따라 대항전에 못 나갈 수 있다
     expect(cup.europe).not.toBeNull();
     expect(cup.standings.length).toBeGreaterThanOrEqual(cup.europe!.playoffCutoff);
+  });
+});
+
+/**
+ * 컵 진행 — 순위표가 없는 대회의 "현재 위치". 브래킷을 뒤져 우리 자리를 찾는 일은
+ * 화면이 아니라 코어가 한다(§5). 다섯 갈래가 전부 같은 대진에서 갈리므로, 하나만
+ * 어긋나도 머리줄이 그럴듯하게 틀린다 — "8강 탈락"과 "탈락"은 화면에서 구분되지 않는다.
+ */
+describe("컵 진행", () => {
+  const tie = (ours: boolean, won: boolean | null) => ({
+    date: "2027-01-10",
+    home: "A",
+    away: "B",
+    score: null,
+    ours,
+    won,
+  });
+  const stage = (id: string, label: string, ties: ReturnType<typeof tie>[]): BracketStageView => ({
+    stage: id,
+    label,
+    ties,
+  });
+
+  it("추첨 전과 대진 밖은 다른 자리다", () => {
+    expect(cupProgressOf([])).toEqual({ stage: null, outcome: "undrawn" });
+    expect(cupProgressOf([stage("r32", "32강", [tie(false, null)])])).toEqual({
+      stage: null,
+      outcome: "out",
+    });
+  });
+
+  it("우리 대진이 마지막으로 선 단계를 읽는다", () => {
+    const bracket = [
+      stage("r16", "16강", [tie(true, true)]),
+      stage("qf", "8강", [tie(true, null)]),
+    ];
+    expect(cupProgressOf(bracket)).toEqual({ stage: "8강", outcome: "through" });
+  });
+
+  it("진 단계는 그 단계 이름과 함께 남는다", () => {
+    const bracket = [
+      stage("r16", "16강", [tie(true, true)]),
+      stage("qf", "8강", [tie(true, false)]),
+    ];
+    expect(cupProgressOf(bracket)).toEqual({ stage: "8강", outcome: "eliminated" });
+  });
+
+  it("결승을 이겨야만 우승이다 — 준결승 승리는 진출이다", () => {
+    const sf = stage("sf", "준결승", [tie(true, true)]);
+    expect(cupProgressOf([sf])).toEqual({ stage: "준결승", outcome: "through" });
+    expect(cupProgressOf([sf, stage("final", "결승", [tie(true, true)])])).toEqual({
+      stage: "결승",
+      outcome: "champion",
+    });
   });
 });
 
