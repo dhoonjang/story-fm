@@ -66,7 +66,13 @@ export function GET(request: Request) {
 
 /** 새 게임 생성 — 배경 직접 입력 → 능력치 배분 (career.md §1) */
 export async function POST(request: Request) {
-  const body = CreateSchema.safeParse(await request.json());
+  let raw: unknown;
+  try {
+    raw = await request.json();
+  } catch {
+    return NextResponse.json({ error: "잘못된 요청 본문입니다" }, { status: 400 });
+  }
+  const body = CreateSchema.safeParse(raw);
   if (!body.success) {
     return NextResponse.json(
       { error: body.error.issues[0]?.message ?? "입력 오류" },
