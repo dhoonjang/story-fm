@@ -250,6 +250,26 @@ describe("개인 지시 — 판에 닿지 못한 지시는 조용하지 않다",
     expect(invented.notes).toHaveLength(1);
   });
 
+  /**
+   * **셋을 세는 것은 실재를 확인한 뒤다** (match.md §2). 걸릴 수 없는 지시가 자리를
+   * 먹으면 감독이 내린 셋 중 하나가 이유 없이 사라지고, 노트는 그것을 "넷째라
+   * 안 걸렸다"고 엉뚱한 이유로 설명한다.
+   */
+  it("걸리지 못한 지시는 셋 중 한 자리를 먹지 않는다 — 벤치 선수도, 사라진 표적도", () => {
+    const three = run(THREE);
+    for (const dead of [
+      { by: "us-sub-fw", kind: "join_attack" } as const,
+      { by: LEFT_BACK, kind: "man_mark", targetId: "them-sub-fw" } as const,
+    ]) {
+      const withDead = run([dead, ...THREE]);
+      expect(withDead.us, `${dead.by}의 지시가 자리를 먹었다`).toEqual(three.us);
+      expect(withDead.them).toEqual(three.them);
+      // 걸린 셋 + 걸리지 못한 하나 — 노트는 감독이 내린 순서대로 선다
+      expect(withDead.notes).toHaveLength(three.notes.length + 1);
+      expect(withDead.notes[0]).toBe(run([dead]).notes[0]);
+    }
+  });
+
   it("한 선수에게 두 번 적은 지시만 조용히 넘어간다 — 감독이 내린 적 없는 지시다", () => {
     const once = run([{ by: RIGHT_BACK, kind: "join_attack" }]);
     const twice = run([
