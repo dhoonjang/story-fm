@@ -296,10 +296,13 @@ export function buildGmStateNote(
           .map((p) => `${p.name}${p.isCaptain ? "(주장)" : ""}`);
       const first = named("first");
       const reserve = named("reserve");
-      return (
-        `선수단(${players.length}명) — 1군 ${first.length}: ${first.join(", ")}` +
-        (reserve.length > 0 ? ` / 2군 ${reserve.length}: ${reserve.join(", ")}` : "")
-      );
+      // 구분자는 쉼표가 아니라 가운뎃점이다 — 한국어 성명에 공백이 들어가서
+      // 쉼표로 이으면 어디서 한 사람이 끝나는지가 흐려진다
+      return [
+        `선수단(${players.length}명) — 모두 화자다`,
+        `  1군 ${first.length}: ${first.join(" · ")}`,
+        ...(reserve.length > 0 ? [`  2군 ${reserve.length}: ${reserve.join(" · ")}`] : []),
+      ].join("\n");
     })(),
     // 선수 근황 — 위 이름들 중 **사실이 붙는** 셋이다.
     // 코어는 사실만 낸다(speakerCues) — 누가 말할지, 무슨 말을 할지는 GM의 몫
