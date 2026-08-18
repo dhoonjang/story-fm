@@ -1,4 +1,11 @@
-import type { LaneBias, PacketPlayer, RegionalIntent, StrengthPacket } from "@story-fm/domain";
+import type {
+  LaneBias,
+  PacketPlayer,
+  RegionalBand,
+  RegionalIntent,
+  RegionalLane,
+  StrengthPacket,
+} from "@story-fm/domain";
 import { anchorOf, PITCH_BANDS } from "@story-fm/domain";
 
 /**
@@ -37,14 +44,19 @@ import { anchorOf, PITCH_BANDS } from "@story-fm/domain";
  * 세어지므로, 격자가 받는 것은 **배분의 기울기뿐**이다.
  */
 
-export type GridLane = "left" | "center" | "right";
-export type GridBand = "defense" | "midfield" | "attack";
+export type GridLane = RegionalLane;
+export type GridBand = RegionalBand;
 
 export const GRID_LANES: readonly GridLane[] = ["left", "center", "right"];
 export const GRID_BANDS: readonly GridBand[] = ["defense", "midfield", "attack"];
 
-/** 칸의 중심 — 전술판 좌표계(0~100). y는 **자기 골문이 100**이다 */
-const LANE_X: Record<GridLane, number> = { left: 17, center: 50, right: 83 };
+/**
+ * 칸의 중심 x — 전술판 좌표계(0~100). y는 **자기 골문이 100**이다.
+ *
+ * 공격 경로도 이 자리를 쓴다(`strength-packet.ts`의 슈팅 경로 가중치) — 레인이
+ * 두 값을 가지면 격자가 두껍다고 말하는 칸과 슛이 몰리는 칸이 어긋난다.
+ */
+export const LANE_X: Record<GridLane, number> = { left: 17, center: 50, right: 83 };
 /** 세로 자리는 화면과 나눠 쓴다 — 경기 화면이 선수를 같은 칸에 앉힌다 */
 const BAND_Y: Record<GridBand, number> = PITCH_BANDS.center;
 
