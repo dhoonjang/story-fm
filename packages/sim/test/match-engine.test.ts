@@ -3,6 +3,7 @@ import {
   AI_SHIFT_BOUND,
   EXTRA_TIME_SUBS,
   LEDGER_LIMITS,
+  advanceClock,
   applyEvents,
   buildStrengthPacket,
   createLedger,
@@ -76,10 +77,17 @@ function playMatch(
   s: Setup,
   seed: number,
   extraTime = false,
+  /**
+   * 구간을 이 분에서 끊는다 — 없으면 정지점까지(상한 25분). 넣으면 같은 경기가
+   * 서너 배 많은 구간으로 쪼개지므로, **끊는 횟수가 총량을 바꾸는지** 볼 수 있다.
+   */
+  maxMinutes?: number,
 ): { ledger: MatchLedgerState; plans: SegmentPlan[] } {
   let ledger = s.ledger;
   const plans: SegmentPlan[] = [];
-  for (let segment = 0; segment < 60 && ledger.phase !== "finished"; segment++) {
+  /** 앞 구간이 멈춘 연속 시계 — 호출부가 이어 주는 것이 이 값이다 (match.md §1.4) */
+  let clock: number | undefined;
+  for (let segment = 0; segment < 200 && ledger.phase !== "finished"; segment++) {
     const plan = simulateSegment({
       packet: s.packet,
       ledger,
@@ -87,9 +95,17 @@ function playMatch(
       tactics: s.tactics,
       // 지금 스코어가 같아야 연장이다 — 코어의 `needsExtraTime`이 하는 판단
       toExtraTime: extraTime && ledger.score.home === ledger.score.away,
+      ...(maxMinutes !== undefined ? { maxMinutes } : {}),
+      ...(clock !== undefined ? { clock } : {}),
       rng: rngOf(seed * 1000 + segment),
     });
     plans.push(plan);
+    clock = plan.clock;
+    // 짧게 부른 구간은 아무 일도 없이 끝날 수 있다 — 빈 배치는 장부가 반려하므로 시계만 민다
+    if (plan.events.length === 0) {
+      ledger = advanceClock(ledger, plan.minute);
+      continue;
+    }
     const applied = applyEvents(ledger, plan.events);
     if (!applied.ok) throw new Error(`구간 ${segment} 반려: ${applied.errors.join(" / ")}`);
     ledger = applied.state;
@@ -150,6 +166,58 @@ describe("구간 시뮬레이터 — 결과는 코어가 정한다", () => {
       }
       expect(ledger.phase, `seed ${seed}`).toBe("finished");
     }
+  });
+
+  /**
+   * **구간이 몇 번으로 끊기든 굴리는 시계는 90분 그대로다** (match.md §1.4).
+   *
+   * 사건의 분은 `Math.floor`라 장부에 실릴 때 소수가 잘린다. 이어받을 연속 시계가
+   * 없으면 정지점마다 그 잘린 몫이 되감겨 같은 시간이 두 번 굴려지고, 끊기는 횟수가
+   * 곧 경기의 총량이 된다 — 감독이 말을 걸수록 더 쏘는 판이다.
+   */
+  it("연속 시계가 정지점에서 되감기지 않는다 — 장부의 분보다 앞서 있고 90′에 닿는다", () => {
+    for (const seed of [1, 7, 42]) {
+      for (const chop of [undefined, 10, 3]) {
+        const { ledger, plans } = playMatch(setup(), seed, false, chop);
+        const at = `seed ${seed} / ${chop ?? "정지점"}분`;
+        expect(ledger.phase, at).toBe("finished");
+        let previous = 0;
+        for (const plan of plans) {
+          // 잘린 소수가 남아 있다 — 장부의 정수 분이 연속 시계를 되감지 않는다
+          expect(plan.clock, `${at} / ${plan.stop}`).toBeGreaterThanOrEqual(plan.minute);
+          expect(plan.clock, `${at} / ${plan.stop}`).toBeGreaterThanOrEqual(previous);
+          previous = plan.clock;
+        }
+        // 굴린 시계의 끝은 규정 90분 — 되감기면 이 자리에 닿기까지 90분을 넘겨 굴린다
+        expect(previous, at).toBe(90);
+      }
+    }
+  });
+
+  /**
+   * **슈팅 총량의 원본은 패킷이다** (match.md §1.4) — 발생률이 패킷의 선수×경로 기대
+   * 슈팅 `/90`이므로 90분을 정확히 한 번 굴리면 실측이 그 기대치로 모인다.
+   * 되감김이 있으면 감독이 멈춰 선 횟수만큼 총량이 부풀어(정지점 7~8개면 +4%)
+   * 밸런스 손잡이가 서 있는 눈금이 개입 횟수를 탄다.
+   *
+   * ⚠️ **여기는 회귀만 잡는다.** 밴드가 넓은 것은 100경기의 표본오차가 1.8%이기
+   * 때문이고, 완료 조건의 ±1.5%는 경기 수를 늘려야 재진다 — 그건 하네스의 자리다
+   * (`pnpm balance segment-shots`).
+   */
+  it("경기의 실측 슈팅 총량이 패킷 기대 슈팅과 같은 눈금이다", () => {
+    const s = setup();
+    const expected =
+      (s.packet.guide.expectedShots?.home ?? 0) + (s.packet.guide.expectedShots?.away ?? 0);
+    const MATCHES = 100;
+    let shots = 0;
+    // 장부는 불변이라(`applyEvents`가 복제한다) 패킷 하나를 100경기가 나눠 쓴다
+    for (let m = 0; m < MATCHES; m++) {
+      const { ledger } = playMatch(s, m + 1);
+      shots += ledger.events.filter((e) => e.type === "shot" || e.type === "goal").length;
+    }
+    const measured = shots / MATCHES;
+    const at = `기대 ${expected.toFixed(2)} · 실측 ${measured.toFixed(2)}`;
+    expect(Math.abs((measured - expected) / expected), at).toBeLessThan(0.04);
   });
 
   it("한 구간의 사건 수가 장부의 배치 상한을 넘지 않는다", () => {
