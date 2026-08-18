@@ -2,13 +2,13 @@
 
 import { useState } from "react";
 import type { OfficeViews } from "@story-fm/engine";
-import { money, moneyFine } from "@/lib/money";
+import { formatMoney } from "@story-fm/domain";
 import { IconChevron } from "@/components/icons";
 
 // ── 재정 (요약 카드 + 실시간 활동 + 월간 보고서) ─────────────
 type FinanceMonth = OfficeViews["finance"]["current"];
 
-const signed = (v: number) => `${v >= 0 ? "+" : "−"}${money(Math.abs(v))}`;
+const signed = (v: number) => `${v >= 0 ? "+" : "−"}${formatMoney(Math.abs(v))}`;
 const percent = (ratio: number) => `${Math.round(ratio * 100)}%`;
 
 /** 급여 비중 구간의 색 — 구간 경계는 코어(`finance.ts`)가 갖고 화면은 색만 고른다 */
@@ -40,8 +40,7 @@ function feedLabel(entry: FinanceFeedRow): string {
  * 재정 활동 한 줄 — 뷰가 접어 보낸 줄이면 눌러서 명세를 편다.
  *
  * 펼침은 달력 `기록`의 `EventLine`과 같은 규칙(건수 알약 → 왼쪽 선 아래 명세)이라
- * 감독이 새로 배울 상호작용이 없다. 명세 금액만 `moneyFine`으로 읽는다 — 선수 한 명
- * 몫의 월 상각은 백만 눈금에서 전부 `£0.0M`이 된다.
+ * 감독이 새로 배울 상호작용이 없다.
  */
 function FinanceFeedLine({ entry }: { entry: FinanceFeedRow }) {
   const [open, setOpen] = useState(false);
@@ -54,7 +53,7 @@ function FinanceFeedLine({ entry }: { entry: FinanceFeedRow }) {
       <span className="label">{feedLabel(entry)}</span>
       <span className={entry.kind === "income" ? "amt plus" : "amt minus"}>
         {sign}
-        {money(entry.amount)}
+        {formatMoney(entry.amount)}
         {entry.noncash && <span className="fin-tag">장부</span>}
       </span>
       {items.length > 0 && <IconChevron size={12} />}
@@ -80,7 +79,7 @@ function FinanceFeedLine({ entry }: { entry: FinanceFeedRow }) {
               <span className="label">{item.label}</span>
               <span className={entry.kind === "income" ? "amt plus" : "amt minus"}>
                 {sign}
-                {moneyFine(item.amount)}
+                {formatMoney(item.amount)}
               </span>
             </div>
           ))}
@@ -116,23 +115,23 @@ function FinanceMonthCard({ month }: { month: FinanceMonth }) {
       </div>
       <div className="fin-cols">
         <div className="fin-col">
-          <div className="fin-col-title income">수입 {money(month.incomeTotal)}</div>
+          <div className="fin-col-title income">수입 {formatMoney(month.incomeTotal)}</div>
           {month.income.map((item) => (
             <div className="fin-line" key={item.category}>
               <span>{item.label}</span>
-              <span>{money(item.amount)}</span>
+              <span>{formatMoney(item.amount)}</span>
             </div>
           ))}
         </div>
         <div className="fin-col">
-          <div className="fin-col-title expense">지출 {money(month.expenseTotal)}</div>
+          <div className="fin-col-title expense">지출 {formatMoney(month.expenseTotal)}</div>
           {month.expense.map((item) => (
             <div className="fin-line" key={item.category}>
               <span>
                 {item.label}
                 {item.category === "amortisation" && <span className="fin-tag">장부</span>}
               </span>
-              <span>{money(item.amount)}</span>
+              <span>{formatMoney(item.amount)}</span>
             </div>
           ))}
         </div>
@@ -153,12 +152,12 @@ export function FinanceView({ finance }: { finance: OfficeViews["finance"] }) {
       <div className="finance-cards">
         <div className="finance-card">
           <div className="label">구단 잔고</div>
-          <div className="value">{money(finance.balance)}</div>
+          <div className="value">{formatMoney(finance.balance)}</div>
         </div>
         <div className="finance-card">
           <div className="label">이적 예산</div>
           <div className="value">
-            {money(finance.transferBudget)}
+            {formatMoney(finance.transferBudget)}
             {finance.budgetFrozen && <span className="fin-tag danger">동결</span>}
           </div>
         </div>
@@ -168,7 +167,7 @@ export function FinanceView({ finance }: { finance: OfficeViews["finance"] }) {
       <div className="fin-stats">
         <div className="fin-stat">
           <div className="label">주간 주급</div>
-          <div className="value">{money(finance.weeklyWages)}</div>
+          <div className="value">{formatMoney(finance.weeklyWages)}</div>
         </div>
         <div className="fin-stat">
           <div className="label">시즌 급여 비중</div>
@@ -183,7 +182,7 @@ export function FinanceView({ finance }: { finance: OfficeViews["finance"] }) {
               {/* 여유가 마이너스면 부호를 £ 앞으로 — 화면의 다른 음수와 같은 모양 */}
               {finance.psr.headroom < 0
                 ? signed(finance.psr.headroom)
-                : money(finance.psr.headroom)}
+                : formatMoney(finance.psr.headroom)}
             </div>
             <div className="sub">3시즌 누적 {signed(finance.psr.rolling3Season)}</div>
           </div>

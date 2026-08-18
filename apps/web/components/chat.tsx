@@ -6,11 +6,10 @@ import type { CardMark, ChatTurn, GoalMark, ToolCallRecord } from "@story-fm/eng
 import { cutStamps } from "../lib/scene-stamp";
 import { hasRailHint } from "../lib/panel-hints";
 import { weaveTurn } from "../lib/turn-pieces";
-import { BROADCAST_SPEAKER, normalizeSpeaker } from "@story-fm/domain";
+import { BROADCAST_SPEAKER, formatMoney, normalizeSpeaker } from "@story-fm/domain";
 import type { ScoutReportCard } from "@story-fm/domain";
 import { MarketCardView } from "@/components/market-card";
 import { splitMarketCalls } from "@/lib/market-calls";
-import { money, wage } from "@/lib/money";
 import { ratingTone, scoutMargin, scoutValue } from "@/lib/scout-report-display";
 import { SKILL_LABEL } from "@/lib/skill-label";
 import type { SpeakerKind, SpeakerRole } from "@story-fm/engine";
@@ -351,11 +350,11 @@ function ScoutReport({ report: r }: { report: ScoutReportCard }) {
         )}
         <span>
           <em>시장가</em>
-          <b>{money(r.marketValue)}</b>
+          <b>{formatMoney(r.marketValue)}</b>
         </span>
         <span>
           <em>기대 주급</em>
-          <b>{wage(r.wageExpectation)}</b>
+          <b>{formatMoney(r.wageExpectation)}</b>
         </span>
         {r.contractUntil && (
           <span>

@@ -1,5 +1,6 @@
 import type { AttributeAxis, AxisValues, WeightSlot } from "@story-fm/domain";
 import { normalizedLogCurve, weightSlotOf } from "@story-fm/domain";
+import { hashOf } from "./name-hash";
 
 /**
  * 15축 파생 — 능력치 모델의 데이터 계층 (player.md §1 · §12).
@@ -49,16 +50,6 @@ export interface SeedAxes {
 }
 
 const clamp99 = (x: number) => Math.max(1, Math.min(99, Math.round(x)));
-
-/** 이름 해시 — 시드 없이도 같은 선수는 항상 같은 파생값 */
-function hashOf(text: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return Math.abs(h);
-}
 
 /** [-spread, +spread] 결정적 편차 — 축마다 다른 해시 채널 */
 function jitter(nameEn: string, axis: string, spread: number): number {

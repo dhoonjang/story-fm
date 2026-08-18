@@ -37,6 +37,7 @@ import { TRAINING_XP_PER_SESSION, type TrainedSession } from "../squad/training-
 import {
   applyAiMatchFinance,
   ensureMonthlyPosted,
+  formatMoney,
   payWeeklyWages,
   runMonthlyFinance,
 } from "../club/finance";
@@ -418,7 +419,7 @@ function dailyTick(
     const offer = pendingOffer(negotiation);
     if (!player || !offer) continue;
     digest.push(
-      `📨 ${teamNameIn(state, negotiation.counterpartTeamId ?? "")}에서 ${player.name} 오퍼(£${(offer.fee / 1_000_000).toFixed(1)}M)에 대한 답이 도착했습니다`,
+      `📨 ${teamNameIn(state, negotiation.counterpartTeamId ?? "")}에서 ${player.name} 오퍼(${formatMoney(offer.fee)})에 대한 답이 도착했습니다`,
     );
   }
 

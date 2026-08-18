@@ -1,7 +1,6 @@
 "use client";
 
-import type { MarketCard, MarketTerms } from "@story-fm/domain";
-import { money, wage } from "@/lib/money";
+import { formatMoney, type MarketCard, type MarketTerms } from "@story-fm/domain";
 import { IconFinance, IconInsight, IconPerson, IconTrash } from "@/components/icons";
 
 /**
@@ -48,13 +47,13 @@ function Terms({ terms, loan = false }: { terms: MarketTerms; loan?: boolean }) 
       {terms.fee !== undefined && (
         <span>
           <em>{loan ? "임대료" : "이적료"}</em>
-          <b>{money(terms.fee)}</b>
+          <b>{formatMoney(terms.fee)}</b>
         </span>
       )}
       {terms.weeklyWage !== undefined && (
         <span>
           <em>주급</em>
-          <b>{wage(terms.weeklyWage)}</b>
+          <b>{formatMoney(terms.weeklyWage)}</b>
         </span>
       )}
       {terms.years !== undefined && (

@@ -167,7 +167,7 @@ TeamCatalogEntry {
   잔류선(팀 수 − 강등 칸 수)이다. 경질 위험선·업적도 같은 식을 쓴다
   ([../simulation/career.md](../simulation/career.md) §5).
 
-### 2.1 시즌마다 다시 매긴다 (`competition/club-tier.ts`)
+### 2.1 시즌마다 다시 매긴다 (`competition/club-tier-recompute.ts`)
 
 시즌 롤오버에서 **승강을 적용한 뒤** 리그마다 전 클럽을 다시 줄 세운다. 승격·강등한
 팀은 리그가 바뀌면서 다른 풀에 들어가므로 자동으로 완전히 재산정된다 — 승격팀이

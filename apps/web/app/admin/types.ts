@@ -1,6 +1,5 @@
 import {
   ATTRIBUTE_AXES,
-  POSITION_GROUPS,
   mirrorBaseOf,
   type AttributeAxis,
   type MatchStage,
@@ -97,9 +96,6 @@ export interface CatalogResponse {
 }
 
 export const ATTRS = ATTRIBUTE_AXES;
-
-/** 선택 가능한 포지션 코드 — 도메인 매핑이 원본이라 축이 늘면 같이 늘어난다 */
-export const POSITION_CODES = Object.keys(POSITION_GROUPS);
 
 export function clampAttr(v: number): number {
   return Math.min(99, Math.max(1, Math.round(Number.isFinite(v) ? v : 1)));

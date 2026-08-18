@@ -26,7 +26,7 @@ import { clubsOfCountry, leagueOfTeam } from "../data/team-catalog";
 import { tierOfTeamIn } from "../core/club-tier";
 import { isTopFlightIn } from "./promotion";
 import { reservedEuroDatesFor } from "./euro-knockout";
-import { payOnce } from "../club/finance";
+import { formatMoney, payOnce } from "../club/finance";
 import { clearForCup } from "./reschedule";
 import { makeRng } from "../core/rng";
 import { pairOf, resolveExtraTime, tieAggregate } from "./extra-time";
@@ -517,7 +517,7 @@ function payRoundPrize(
       ref: { type: "competition", id: cup.id },
     });
     if (paid && teamId === state.userTeamId) {
-      digest.push(`💰 ${label} £${(amount / 1_000_000).toFixed(1)}M 입금`);
+      digest.push(`💰 ${label} ${formatMoney(amount)} 입금`);
     }
   }
 }
@@ -893,7 +893,7 @@ export function reviewDomesticCups(state: GameState): string[] {
         ref: { type: "competition", id: cup.id },
       });
       if (paid && teamId === state.userTeamId) {
-        digest.push(`💰 ${label} £${(amount / 1_000_000).toFixed(1)}M 입금`);
+        digest.push(`💰 ${label} ${formatMoney(amount)} 입금`);
       }
     };
     payTo(champion, "우승", cup.prize.winner);

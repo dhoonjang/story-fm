@@ -10,6 +10,7 @@ import { isNaturalAt, naturalPositionOf, RATING_MAX } from "@story-fm/domain";
 import type { GameState } from "../core/state";
 import { playerById, playersOf, pushNarrative, teamNameIn, userPlayers } from "../core/state";
 import { pickPlayerAmong } from "../core/player-ref";
+import { formatMoney } from "./finance";
 import { makeRng, pick } from "../core/rng";
 import { clampForm, formLabel, moraleToForm } from "../squad/form";
 import { recentOutcomes } from "../squad/slump";
@@ -252,7 +253,7 @@ export function buildTransferPress(
   if (better >= SQUAD_CORE_SIZE && input.fee < BIG_FEE) return null;
 
   const pos = naturalPositionOf(player).position;
-  const fee = input.fee > 0 ? ` · 이적료 £${(input.fee / 1e6).toFixed(1)}M` : " · 이적료 없음";
+  const fee = input.fee > 0 ? ` · 이적료 ${formatMoney(input.fee)}` : " · 이적료 없음";
   const facts: PressFact[] =
     input.kind === "in"
       ? [
@@ -288,7 +289,7 @@ export function buildTransferPress(
     trigger: "transfer",
     context:
       `${player.name} ${input.kind === "in" ? "영입" : "매각"}` +
-      (input.fee > 0 ? ` · £${(input.fee / 1e6).toFixed(1)}M` : ""),
+      (input.fee > 0 ? ` · ${formatMoney(input.fee)}` : ""),
     facts,
     status: "pending",
     weight: 2,

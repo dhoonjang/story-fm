@@ -10,7 +10,7 @@ import { euroCompetitionOf } from "../competition/europe";
 import { hashChannel } from "../core/rng";
 import { knowledgeOf, KNOWLEDGE_KO, type Knowledge } from "../squad/scouting";
 import { USER_WAGE_HEADROOM, wageRoomOf } from "../world/wages";
-import { budgetFreezeLabel } from "../club/finance";
+import { budgetFreezeLabel, formatMoney } from "../club/finance";
 import {
   activeContract,
   financeOf,
@@ -431,9 +431,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
       );
     }
     if (terms.fee > ourFinance.transferBudget) {
-      blockers.push(
-        `이적 예산을 넘습니다 — 가용 £${(ourFinance.transferBudget / 1_000_000).toFixed(1)}M`,
-      );
+      blockers.push(`이적 예산을 넘습니다 — 가용 ${formatMoney(ourFinance.transferBudget)}`);
     }
     /**
      * **주급 여력** — 이적료를 낼 수 있어도 매주 나갈 돈이 없으면 못 데려온다.
@@ -450,7 +448,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
       blockers.push(
         room <= 0
           ? "주급 여력이 없습니다 — 임금 총액이 이미 구단 한도를 넘었습니다"
-          : `주급 여력을 넘습니다 — 주당 £${Math.round(room / 1_000)}k까지 가능합니다`,
+          : `주급 여력을 넘습니다 — 주당 ${formatMoney(room)}까지 가능합니다`,
       );
     }
   }
@@ -488,7 +486,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     label: "제시 이적료",
     why:
       askingPrice > 0
-        ? `상대는 £${(askingPrice / 1_000_000).toFixed(1)}M을 기대한다 (제시액은 그 ${Math.round(feeRatio * 100)}%)`
+        ? `상대는 ${formatMoney(askingPrice)}을 기대한다 (제시액은 그 ${Math.round(feeRatio * 100)}%)`
         : "계약이 만료돼 이적료가 필요 없다",
   });
   for (const why of stance.why) {
@@ -518,7 +516,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     gate: "player",
     score: (wageRatio - 1) * 6,
     label: "제시 주급",
-    why: `선수 기대는 £${Math.round(wageExpectation / 1_000)}k/주 (제시액은 그 ${Math.round(wageRatio * 100)}%)`,
+    why: `선수 기대는 ${formatMoney(wageExpectation)}/주 (제시액은 그 ${Math.round(wageRatio * 100)}%)`,
   });
 
   // 이적 시장 전용 리그에서 데려오기 — 돈을 포기하고 돌아오는 결정이라 무겁다
@@ -714,7 +712,7 @@ function loanOdds(
     gate: "club",
     score: (feeRatio - 1) * 3,
     label: "임대료",
-    why: `£${(expectedFee / 1_000_000).toFixed(1)}M 정도를 기대한다 (부른 값은 그 ${Math.round(feeRatio * 100)}%)`,
+    why: `${formatMoney(expectedFee)} 정도를 기대한다 (부른 값은 그 ${Math.round(feeRatio * 100)}%)`,
   });
 
   // 주급을 우리가 얼마나 떠안는가 — 임대의 진짜 값은 여기 있다
@@ -723,7 +721,7 @@ function loanOdds(
     gate: "club",
     score: (wageShare - 0.5) * 2.2,
     label: "주급 분담",
-    why: `주급 £${Math.round(wageExpectation / 1_000)}k 중 ${Math.round(wageShare * 100)}%를 우리가 낸다`,
+    why: `주급 ${formatMoney(wageExpectation)} 중 ${Math.round(wageShare * 100)}%를 우리가 낸다`,
   });
 
   // 그 팀에서 자리가 있는가 — 주전은 빌려주지 않는다
@@ -834,7 +832,7 @@ function sellOdds(
     gate: "club",
     score: (feeRatio - 1) * 8,
     label: "우리가 부른 값",
-    why: `사는 쪽이 낼 수 있는 상한은 £${(buyerCeiling / 1_000_000).toFixed(1)}M 정도다 (부른 값은 그 ${Math.round((terms.fee / Math.max(1, buyerCeiling)) * 100)}%)`,
+    why: `사는 쪽이 낼 수 있는 상한은 ${formatMoney(buyerCeiling)} 정도다 (부른 값은 그 ${Math.round((terms.fee / Math.max(1, buyerCeiling)) * 100)}%)`,
   });
 
   const blockedBy = betterAtPosition(state, state.userTeamId, player);
@@ -953,7 +951,7 @@ function renewOdds(
   contributions.push({
     score: (wageRatio - 1) * 6,
     label: "제시 주급",
-    why: `재계약 기대는 £${Math.round(expectation / 1_000)}k/주 (제시액은 그 ${Math.round(wageRatio * 100)}%)`,
+    why: `재계약 기대는 ${formatMoney(expectation)}/주 (제시액은 그 ${Math.round(wageRatio * 100)}%)`,
   });
 
   const age = ageOf(player.birthdate, state.date);
@@ -1127,13 +1125,12 @@ export function describeWait(days: number): string {
 /** 협상 상황 한 줄 요약 — 조회 도구·상태 스냅샷용 */
 export function describeOdds(odds: DealOdds): string {
   if (odds.blockers.length > 0) return `불가 — ${odds.blockers.join(" / ")}`;
-  const money = (n: number) => `£${(n / 1_000_000).toFixed(1)}M`;
   const head = odds.fuzzy
     ? `성사 가능성 ${oddsLabel(odds.probability)} (${KNOWLEDGE_KO[odds.knowledge]} — 숫자는 어림)`
     : `성사 확률 ${odds.probability}%`;
   return [
     head,
-    `시장가 ${money(odds.marketValue)} · 요구액 ${money(odds.askingPrice)} · 주급 기대 £${Math.round(odds.wageExpectation / 1_000)}k`,
+    `시장가 ${formatMoney(odds.marketValue)} · 요구액 ${formatMoney(odds.askingPrice)} · 주급 기대 ${formatMoney(odds.wageExpectation)}`,
     ...odds.factors.map(
       (f) => `  ${f.delta >= 0 ? "+" : "−"}${Math.abs(f.delta)} ${f.label} — ${f.why}`,
     ),

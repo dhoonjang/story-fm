@@ -1,11 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { AXIS_GROUPS, AXIS_GROUP_KO, AXIS_KO, type AttributeAxis } from "@story-fm/domain";
+import {
+  AXIS_GROUPS,
+  AXIS_GROUP_KO,
+  AXIS_KO,
+  POSITION_CODES,
+  type AttributeAxis,
+} from "@story-fm/domain";
 import { Modal } from "./modal";
 import {
   ATTRS,
-  POSITION_CODES,
   clampAttr,
   type CatalogPosition,
   type CatalogResponse,

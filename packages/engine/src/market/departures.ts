@@ -2,7 +2,7 @@ import type { GamePlayer } from "@story-fm/domain";
 import { ageOf } from "@story-fm/domain";
 import { contractUntil, diffDays, seasonYear, windowOpenOn } from "../competition/calendar";
 import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
-import { recordFinance } from "../club/finance";
+import { formatMoney, recordFinance } from "../club/finance";
 import { loanLockOf, transferWindowLabel, windowOpenForTeam } from "./market";
 import { estimateWeeklyWage, wageSubjectOf } from "../world/wages";
 import { makeRng } from "../core/rng";
@@ -133,7 +133,7 @@ export function releasePlayer(state: GameState, input: { playerId: string }): Sk
   if (finance && severance > finance.balance) {
     return {
       ok: false,
-      message: `위약금 £${(severance / 1_000_000).toFixed(1)}M을 감당할 잔고가 없습니다`,
+      message: `위약금 ${formatMoney(severance)}을 감당할 잔고가 없습니다`,
     };
   }
 
@@ -153,7 +153,7 @@ export function releasePlayer(state: GameState, input: { playerId: string }): Sk
   return {
     ok: true,
     message:
-      `${player.name}과(와) 계약을 해지했습니다 — 위약금 £${(severance / 1_000_000).toFixed(1)}M.` +
+      `${player.name}과(와) 계약을 해지했습니다 — 위약금 ${formatMoney(severance)}.` +
       " 무소속이 됐습니다 — 다른 구단이 데려갈 수 있습니다." +
       (wasCaptain ? " 주장이 떠났습니다 — 새 주장을 지명하세요." : ""),
   };

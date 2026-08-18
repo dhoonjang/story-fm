@@ -12,6 +12,7 @@ import {
   type Foot,
 } from "@story-fm/domain";
 import { deriveAxes } from "./attributes";
+import { hashOf } from "./name-hash";
 import { catalogPath, dataDir } from "../core/paths";
 import { stripStoredFootAdjust } from "../core/migrations";
 import { catalogCacheKey } from "../data/catalog-source";
@@ -42,16 +43,6 @@ import { claimPlayerId, slugifyName } from "./player-id";
  */
 
 const clamp99 = (x: number) => Math.max(1, Math.min(99, Math.round(x)));
-
-/** 이름에서 결정적 해시 — 시드 없이도 같은 선수는 항상 같은 파생값 */
-function hashOf(text: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return Math.abs(h);
-}
 
 /**
  * 카탈로그 나이 기준일 — 능력치·나이 파생의 고정점.

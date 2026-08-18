@@ -721,7 +721,7 @@ export function catalogLeagueIn(state: GameState | undefined, teamId: string): s
  *
  * `clubProfileIn`과 갈리는 것은 폴백이다. 시즌 롤오버의 체급 재산정은 미등재 클럽에
  * 체급 폴백을 쓰면 안 되므로(작년 체급이 올해 규모가 되어 스스로를 재생산한다 —
- * `competition/club-tier.ts`) "값이 없다"를 그대로 받아야 한다.
+ * `competition/club-tier-recompute.ts`) "값이 없다"를 그대로 받아야 한다.
  */
 export function savedClubProfile(state: GameState, teamId: string): ClubProfile | null {
   const team = state.teams.find((t) => t.id === teamId);

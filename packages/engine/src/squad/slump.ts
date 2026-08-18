@@ -50,6 +50,9 @@ export type MatchOutcome = "win" | "draw" | "loss";
  * 몸을 만드는 중에 하위 팀에 진 것이 연패로 쌓이면 개막 첫 주에 이미 침체인
  * 선수단이 되고, 점층 편성이 감독을 벌주는 장치가 된다. 그 경기가 폼에 남기는
  * 것은 `formDeltaFromMatch`와 대패 페널티가 이미 정산한다.
+ *
+ * **승부차기를 보지 않는다** — 90분을 비긴 경기는 폼에도 무승부다. 승패 표기의
+ * 자(`outcomeFor`)와 결과가 갈리는 것은 그 때문이고, 합치면 폼이 움직인다.
  */
 export function recentOutcomes(state: GameState, teamId: string, limit: number): MatchOutcome[] {
   return state.matches
