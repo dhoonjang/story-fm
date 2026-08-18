@@ -28,6 +28,7 @@ import {
   entrantsOf,
   simSquadOf,
   playerById,
+  playersOf,
   tieAggregate,
 } from "@story-fm/engine";
 import { createTestGame, keepSeat, playMockMatch, playPreseason } from "./helpers";
@@ -584,25 +585,46 @@ describe("주중 경기 부담 (로테이션)", () => {
     for (const p of changed) expect(p.state.condition).toBeGreaterThan(20);
   });
 
-  it("간이 시뮬을 치른 AI 팀 선발은 피로가 오른다", () => {
+  /**
+   * 체력은 **높을수록 싱싱한** 축이다 (`conditionDrain`이 깎는다). 하루의 회복과
+   * 한 경기의 소모를 같은 하루 안에서 견주지 않으면, 며칠 쉰 선수의 회복분이
+   * 소모를 덮어 "피로가 올랐다"가 소모 없이도 통과한다.
+   */
+  it("간이 시뮬을 치른 AI 팀은 뛴 선수만 체력이 깎인다", () => {
     const state = createTestGame(42);
-    const digest: string[] = [];
-    const fatigueBefore = new Map(state.players.map((p) => [p.id, p.state.condition]));
-    // 첫 리그 라운드까지 전진 — 우리 경기가 아닌 경기들이 간이 시뮬로 소화된다.
     // 프리시즌 친선이 먼저 걸리므로 치르고 간다 (경기일엔 시계가 선다)
     playPreseason(state);
+
+    // 하루씩 전진하며 **우리 경기가 아닌** 경기 하나가 굴러간 그날을 잡는다.
+    // 하루만 재야 회복(하루치)과 소모(한 경기)가 같은 저울에 오른다.
+    let before = new Map<string, number>();
+    let simulated: (typeof state.matches)[number] | undefined;
     let guard = 20;
-    while (guard-- > 0) {
-      const advanced = advanceTime(state, { days: 7 });
-      digest.push(...advanced.digest);
-      if (state.matches.some((m) => m.result)) break;
-      if (advanced.stopped === "matchday") break;
+    while (guard-- > 0 && !simulated) {
+      before = new Map(state.players.map((p) => [p.id, p.state.condition]));
+      const done = new Set(state.matches.filter((m) => m.result).map((m) => m.id));
+      const advanced = advanceTime(state, { days: 1 });
+      if (!advanced.ok) break;
+      simulated = state.matches.find(
+        (m) =>
+          m.result !== null &&
+          !done.has(m.id) &&
+          m.homeTeamId !== state.userTeamId &&
+          m.awayTeamId !== state.userTeamId,
+      );
     }
-    const played = state.matches.filter((m) => m.result);
-    expect(played.length, "간이 시뮬이 돌았다").toBeGreaterThan(0);
-    const tired = state.players.filter(
-      (p) => p.state.condition > (fatigueBefore.get(p.id) ?? 0) + 20,
-    );
-    expect(tired.length, "경기를 뛴 선수들의 피로가 올랐다").toBeGreaterThan(0);
+    expect(simulated, "AI 경기가 간이 시뮬로 굴러야 한다").toBeTruthy();
+
+    const lineup = simulated!.result!.homeLineup ?? [];
+    expect(lineup.length, "간이 시뮬이 출전 명단을 남긴다").toBeGreaterThanOrEqual(11);
+    const shift = (id: string) =>
+      (playerById(state, id)?.state.condition ?? 0) - (before.get(id) ?? 0);
+
+    // 뛴 선수는 그날 회복분을 덮고도 내려간다 — 소모가 빠지면 여기가 빨개진다
+    for (const id of lineup) expect(shift(id), id).toBeLessThan(0);
+    // 같은 하루를 보낸 미출전 동료는 반대로 회복만 받는다
+    const rested = playersOf(state, simulated!.homeTeamId).filter((p) => !lineup.includes(p.id));
+    expect(rested.length).toBeGreaterThan(0);
+    for (const p of rested) expect(shift(p.id), p.id).toBeGreaterThanOrEqual(0);
   });
 });
