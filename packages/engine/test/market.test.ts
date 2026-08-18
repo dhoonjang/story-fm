@@ -6,11 +6,13 @@ import {
   activeContract,
   askingPriceFor,
   baseValueOf,
+  betterAtPosition,
   dealOdds,
   knowledgeOf,
   marketValueOf,
   playersOf,
   responseDelayDays,
+  squadDepthOf,
   wageExpectationOf,
 } from "@story-fm/engine";
 import { createTestGame } from "./helpers";
@@ -241,6 +243,30 @@ describe("딜 확률", () => {
       dealOdds(state, { playerId: target.id, fee: 1, weeklyWage: 1, years: 4 }).blockers.join(),
     ).toContain("이적시장");
     window.opensOn = opensOn;
+  });
+});
+
+describe("팀×자리 색인 — 세는 규칙이 하나여야 한다", () => {
+  /**
+   * `squadDepthOf`는 `betterAtPosition`을 원장 한 번 훑기로 바꿔 놓은 것이다.
+   * 두 벌이 되는 순간 재계약·오퍼 판단이 조용히 갈리므로 답이 같은지 못 박는다.
+   */
+  it("색인이 세는 수는 `betterAtPosition`과 같다", () => {
+    const state = createTestGame(31);
+    const depth = squadDepthOf(state);
+    // 팀을 갈라 본다 — 우리 팀·라이벌·2부, 그리고 그 자리가 빈 조합까지
+    for (const teamId of [state.userTeamId, "chelsea", "leeds"]) {
+      for (const player of playersOf(state, teamId)) {
+        expect(depth.betterThan(teamId, player)).toBe(betterAtPosition(state, teamId, player));
+      }
+      // 남의 팀 선수를 그 팀에 대 보는 것도 같은 답이어야 한다 (영입 검토가 그 모양이다)
+      for (const player of playersOf(state, "arsenal").slice(0, 5)) {
+        expect(depth.betterThan(teamId, player)).toBe(betterAtPosition(state, teamId, player));
+      }
+    }
+    // 선수가 없는 팀은 0 — 색인에 칸 자체가 없다
+    const anyone = playersOf(state, "chelsea")[0]!;
+    expect(depth.betterThan("존재하지않는팀", anyone)).toBe(0);
   });
 });
 
