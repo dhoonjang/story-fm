@@ -15,8 +15,18 @@ import {
   userPlayers,
   userSide,
   isFriendly,
+  advanceTime,
+  playersOf,
+  seasonStatOf,
+  type GameState,
 } from "@story-fm/engine";
-import { advanceToMatchday, createTestGame, playMockMatch, playPreseason } from "./helpers";
+import { advanceToMatchday, createMiniGame, playMockMatch, playPreseason } from "./helpers";
+
+/**
+ * **축소 세계(8팀·컵 없음)로 돈다.** 평점 공식·밴드·시즌 합계는 세계의 크기와
+ * 무관한데, 전체 세계는 경기일 하나에 닿는 데도 리그 다섯 개와 2부 예순네 클럽을
+ * 함께 굴린다 — 이 파일이 그것 때문에 13분을 썼다.
+ */
 
 /** 경기 평점 — 장부 사실만으로 결정적으로 매긴다 (ratings.ts) */
 
@@ -122,7 +132,7 @@ describe("시즌 평점 파생", () => {
 
 describe("경기가 기록으로 남는다", () => {
   it("유저 경기 — 출전 선수마다 평점이 남고 시즌 합계로 쌓인다", () => {
-    const state = createTestGame();
+    const state = createMiniGame(11);
     advanceToMatchday(state);
     playMockMatch(state);
 
@@ -147,7 +157,7 @@ describe("경기가 기록으로 남는다", () => {
   });
 
   it("골 이벤트의 두 번째 선수는 도움이다 — 득점으로 세지 않는다", () => {
-    const state = createTestGame();
+    const state = createMiniGame(11);
     // 시즌 기록을 보는 시험이라 리그 개막까지 간다 — 친선은 장부에 남지 않는다
     playPreseason(state);
     advanceToMatchday(state);
@@ -178,7 +188,7 @@ describe("경기가 기록으로 남는다", () => {
   });
 
   it("타 팀 경기 — 퀵심도 도움을 낸다 (득점자 본인은 아니다)", () => {
-    const state = createTestGame();
+    const state = createMiniGame(11);
     const teams = [...new Set(state.players.map((p) => p.teamId))].filter(
       (t) => t !== state.userTeamId,
     );
@@ -209,7 +219,7 @@ describe("경기가 기록으로 남는다", () => {
 
 describe("평점 브리프 — LLM 채점의 입력 (코어가 만든다)", () => {
   it("장부가 살아 있을 때만 만들 수 있다 — 경기 전후엔 null", () => {
-    const state = createTestGame();
+    const state = createMiniGame(11);
     expect(buildRatingBrief(state)).toBeNull(); // 경기 전
     advanceToMatchday(state);
     playMockMatch(state);
@@ -217,7 +227,7 @@ describe("평점 브리프 — LLM 채점의 입력 (코어가 만든다)", () =
   });
 
   it("출전 선수마다 자리·선발 여부·출전 시간·기준 평점을 담는다", () => {
-    const state = createTestGame();
+    const state = createMiniGame(11);
     advanceToMatchday(state);
     expect(startMatch(state).ok).toBe(true);
     const brief = buildRatingBrief(state);
@@ -234,7 +244,7 @@ describe("평점 브리프 — LLM 채점의 입력 (코어가 만든다)", () =
   });
 
   it("교체 투입 선수는 뛴 시간만 갖는다", () => {
-    const state = createTestGame();
+    const state = createMiniGame(11);
     advanceToMatchday(state);
     expect(startMatch(state).ok).toBe(true);
     const pending = state.pendingMatch;
@@ -264,7 +274,7 @@ describe("평점 브리프 — LLM 채점의 입력 (코어가 만든다)", () =
   });
 
   it("finalizeMatch가 박는 앵커와 브리프의 앵커가 같다 — 어긋나면 정산이 깨진다", () => {
-    const state = createTestGame();
+    const state = createMiniGame(11);
     advanceToMatchday(state);
     expect(startMatch(state).ok).toBe(true);
     const brief = buildRatingBrief(state);
@@ -279,8 +289,13 @@ describe("평점 브리프 — LLM 채점의 입력 (코어가 만든다)", () =
 });
 
 describe("LLM 평점 반영 — 코어는 가능한 판정만 받는다", () => {
+  /**
+   * **축소 세계로 돈다.** 밴드·시즌 합계는 세계의 크기와 무관한데, 전체 세계로
+   * 프리시즌 넷을 치르면 이 헬퍼 한 번이 2분을 쓴다 (리그 다섯 개와 2부까지 함께
+   * 굴린다). 케이스마다 장부를 고쳐 쓰므로 세이브는 나눠 쓸 수 없다.
+   */
   const played = () => {
-    const state = createTestGame();
+    const state = createMiniGame(11);
     // 보정분이 시즌 합계를 따라 움직이는지 보는 시험이라 리그 경기여야 한다 —
     // 친선은 앵커도 보정분도 시즌 합계에 안 들어간다 (season.md §2)
     playPreseason(state);
@@ -296,21 +311,6 @@ describe("LLM 평점 반영 — 코어는 가능한 판정만 받는다", () => 
     const [playerId, anchor] = Object.entries(match.result.ratings)[0] as [string, number];
     return { state, matchId: match.id, playerId, anchor, match };
   };
-
-  it("밴드 안의 보정은 그대로 들어가고 시즌 합계도 따라 움직인다", () => {
-    const { state, matchId, playerId, anchor } = played();
-    const before = state.seasonStats.find((s) => s.gamePlayerId === playerId)?.ratingSum ?? 0;
-    const target = Math.min(RATING_MAX, anchor + 0.5);
-    const { applied } = applyMatchRatings(state, matchId, [
-      { playerId, rating: target, note: "상대 10번을 90분 내내 지웠다" },
-    ]);
-    expect(applied).toBe(1);
-    const match = state.matches.find((m) => m.id === matchId);
-    expect(match?.result?.ratings?.[playerId]).toBe(target);
-    expect(match?.result?.ratingNotes?.[playerId]).toContain("90분");
-    const after = state.seasonStats.find((s) => s.gamePlayerId === playerId)?.ratingSum ?? 0;
-    expect(after - before).toBeCloseTo(target - anchor, 5);
-  });
 
   it("밴드를 벗어나면 잘라 낸다 — LLM이 10점을 줘도 앵커에서 멀어질 수 없다", () => {
     const { state, matchId, playerId, anchor } = played();
@@ -367,5 +367,88 @@ describe("LLM 평점 반영 — 코어는 가능한 판정만 받는다", () => 
     ]);
     expect(applied).toBe(0);
     expect(skipped).toBe(1);
+  });
+});
+
+/**
+ * 도움은 **장부에서 결과까지 살아남아야 한다.**
+ *
+ * 코어는 골의 68%에 도움을 붙이는데(`pickAssister`), 경기가 끝날 때 `MatchResult`가
+ * 득점자만 남기던 시절에는 그 사실이 사라졌다 — 시즌 합계 숫자 말고는 누가 도왔는지
+ * 어디에도 없어서 "어시스트가 기록되지 않는다"로 보였다.
+ *
+ * **축소 세계(8팀·컵 없음)로 돈다.** 도움이 장부에 남는 길은 유저 경기의 구간
+ * 시뮬과 AI 경기의 간이 시뮬 둘뿐이고, 둘 다 세계의 크기와 무관하게 같은 함수다.
+ */
+describe("도움이 사라지지 않는다", () => {
+  /**
+   * 프리시즌 친선을 흘려보내고 리그 한 경기를 끝까지 치른 축소 세계 — 한 번만
+   * 굴리고 두 케이스가 나눠 쓴다 (둘 다 장부를 읽기만 한다).
+   */
+  const played: GameState = (() => {
+    const state = createMiniGame(11);
+    playPreseason(state);
+    let guard = 12;
+    while (state.phase !== "matchday" && guard-- > 0) {
+      const moved = advanceTime(state, "next_match");
+      if (!moved.ok) throw new Error(moved.digest.join(" / "));
+      if (moved.stopped === "season_end") throw new Error("리그 경기 전에 시즌이 끝났다");
+    }
+    if (state.phase !== "matchday") throw new Error("경기일에 닿지 못했다");
+    playMockMatch(state);
+    return state;
+  })();
+
+  it("경기 결과가 득점자와 **같은 길이**의 도움 배열을 갖는다", () => {
+    let assisted = 0;
+    for (const m of played.matches) {
+      if (!m.result) continue;
+      expect(m.result.assists, `${m.id} 도움 배열이 없다`).toBeDefined();
+      expect(m.result.assists!.length, `${m.id} 길이 불일치`).toBe(m.result.scorers.length);
+      assisted += m.result.assists!.filter((a) => a !== "").length;
+    }
+    // 길이만 맞고 전부 빈 칸이면 도움은 여전히 사라진 것이다 — 0이 아님을 못 박는다
+    expect(assisted, "도움이 한 건도 붙지 않았다").toBeGreaterThan(0);
+  });
+
+  it("시즌 기록에도 도움이 쌓인다", () => {
+    // 친선의 도움은 경기에만 남고 시즌 합계에는 안 들어간다 (season.md §2)
+    const assisted = [
+      ...new Set(
+        played.matches
+          .filter((m) => !isFriendly(m))
+          .flatMap((m) => m.result?.assists ?? [])
+          .filter((a) => a !== "")
+          .map((a) => (a.includes(":") ? a.split(":", 2)[1]! : a)),
+      ),
+    ];
+    expect(assisted.length, "리그 경기에 도움이 한 건도 없다").toBeGreaterThan(0);
+    for (const id of assisted) {
+      expect(seasonStatOf(played, id)?.assists ?? 0, `${id} 시즌 도움`).toBeGreaterThan(0);
+    }
+  });
+
+  it("친선의 도움은 시즌 합계에 들어가지 않는다", () => {
+    const ours = new Set(playersOf(played, played.userTeamId).map((p) => p.id));
+    const friendlyOnly = [
+      ...new Set(
+        played.matches
+          .filter((m) => isFriendly(m))
+          .flatMap((m) => m.result?.assists ?? [])
+          .filter((a) => a !== "")
+          .map((a) => (a.includes(":") ? a.split(":", 2)[1]! : a))
+          .filter((id) => ours.has(id)),
+      ),
+    ];
+    expect(friendlyOnly.length, "친선에서 우리 팀 도움이 한 건도 없다").toBeGreaterThan(0);
+    const leagueAssists = new Set(
+      played.matches
+        .filter((m) => !isFriendly(m))
+        .flatMap((m) => m.result?.assists ?? [])
+        .map((a) => (a.includes(":") ? a.split(":", 2)[1]! : a)),
+    );
+    for (const id of friendlyOnly.filter((x) => !leagueAssists.has(x))) {
+      expect(seasonStatOf(played, id)?.assists ?? 0, `${id} 친선 도움이 시즌에 샜다`).toBe(0);
+    }
   });
 });

@@ -18,7 +18,7 @@ import {
 } from "@story-fm/engine";
 import { TIME_PASSED, buildOnboardingTurn, runMockGmTurn } from "@story-fm/agents";
 
-function newGame(seed = 42): GameState {
+function build(seed: number): GameState {
   const background = "프리미어리그에서 뛰었던 주장 출신 수비수";
   return createGame({
     seed,
@@ -28,6 +28,13 @@ function newGame(seed = 42): GameState {
     attributes: interpretBackgroundHeuristic(background),
   });
 }
+
+/**
+ * 시드 42의 세계를 **한 번만** 세우고 케이스마다 복제한다 — `createGame`은 판당
+ * 수 초, 복제는 그 수십 분의 일이다. 다른 시드가 필요한 케이스만 따로 짓는다.
+ */
+const BASE = build(42);
+const newGame = (): GameState => structuredClone(BASE);
 
 /**
  * 모델 턴 문법 검증 — **첫 줄은 장면의 시점**이고, 나머지 텍스트 줄은 @로 시작한다
@@ -51,18 +58,18 @@ describe("mock GM — 유저 여정 시나리오", () => {
     expect(turn.text).toContain("김감독");
   });
 
-  it("온보딩 폴백은 같은 시드로 재현되고 다른 시드에선 장면이 달라진다", () => {
-    expect(buildOnboardingTurn(newGame(42)).text).toBe(buildOnboardingTurn(newGame(42)).text);
+  /**
+   * 폴백 장면은 **상태만 읽는다** — 같은 세이브를 두 번 열면 같은 장면이고, 세계가
+   * 다르면 장면도 갈린다. 방향이 결정적이라 시드 둘이면 잡힌다(열 판을 세울 이유가
+   * 없다 — 판당 수 초다).
+   */
+  it("온보딩 폴백은 같은 세이브에서 재현되고 다른 세계에선 장면이 달라진다", () => {
+    const state = newGame();
+    expect(buildOnboardingTurn(state).text).toBe(buildOnboardingTurn(state).text);
     // 첫 줄은 시점(모든 세이브가 7월 1일)이므로 장면이 갈리는 건 그다음 줄이다
-    const openings = new Set(
-      [1, 2, 3, 4, 5, 6, 7, 8].map(
-        (seed) => buildOnboardingTurn(newGame(seed)).text.split("\n")[1],
-      ),
-    );
-    expect(openings.size).toBeGreaterThan(1);
-    // 새 게임 10판 — 세계가 커지면서 `createGame`이 판당 1초를 넘는다.
-    // 시드마다 실제로 다른 세계를 만드는 게 이 테스트의 요점이라 판수를 줄이지 않는다.
-  }, 60_000);
+    const opening = (seed: number) => buildOnboardingTurn(build(seed)).text.split("\n")[1];
+    expect(opening(1)).not.toBe(opening(2));
+  });
 
   /**
    * 모의 GM도 **실모드와 같은 것을 기록해야** 화면이 같다.
@@ -129,7 +136,7 @@ describe("mock GM — 유저 여정 시나리오", () => {
   });
 
   it("진행 → 경기일 → 경기 시작 → 계속으로 경기 종료까지 완주한다", () => {
-    const state = newGame(7);
+    const state = build(7);
 
     // 이적 오퍼·부상 같은 attention 정지는 감독의 결정을 기다리며 멈춘다 —
     // 경기일에 닿을 때까지 다시 진행시킨다 (감독이 실제로 하는 일과 같다)
@@ -178,7 +185,7 @@ describe("mock GM — 유저 여정 시나리오", () => {
   });
 
   it("경기 중 하프타임 팀토크가 판정형으로 반영된다", () => {
-    const state = newGame(13);
+    const state = build(13);
     runMockGmTurn(state, "경기일로 가자");
     runMockGmTurn(state, "경기 시작");
     expect(state.phase).toBe("match");
@@ -200,7 +207,7 @@ describe("mock GM — 유저 여정 시나리오", () => {
 
 describe("mock GM — 이적 협상", () => {
   it("선수를 지목하면 오퍼를 넣고, 답이 오면 확률대로 판정한다", () => {
-    const state = newGame(42);
+    const state = newGame();
     // 살 수 있는 상대 팀 선수를 하나 고른다
     const budget = financeOf(state, state.userTeamId).transferBudget;
     const wanted = state.players.find((p) => {
@@ -208,6 +215,8 @@ describe("mock GM — 이적 협상", () => {
       const terms = suggestTerms(state, p.id);
       return terms !== null && terms.fee > 1_000_000 && terms.fee < budget * 0.5;
     })!;
+    // 원 소속은 지금 읽어 둔다 — `wanted`는 상태 안의 살아 있는 객체다
+    const fromTeamId = wanted.teamId;
 
     const sent = runMockGmTurn(state, `${wanted.name} 데려오자`);
     expect(sent.toolCalls.map((c) => c.name)).toContain("send_offer");
@@ -218,15 +227,20 @@ describe("mock GM — 이적 협상", () => {
     state.date = pendingOffer(negotiation)!.respondsOn!;
     const answered = runMockGmTurn(state, "협상 어떻게 됐나");
     expect(answered.toolCalls.map((c) => c.name)).toContain("respond_offer");
-    expect(["agreed", "rejected", "open", "completed"]).toContain(negotiation.status);
-    // 수락됐다면 계약까지 확정한다 (mock은 확률 50% 이상에서 수락)
-    if (pendingOffer(negotiation) === null && negotiation.status === "completed") {
-      expect(playerById(state, wanted.id)!.teamId).toBe(state.userTeamId);
-    }
+    // 답이 온 오퍼는 판정을 받는다 — 대기 중인 채로 남지 않는다
+    expect(pendingOffer(negotiation)).toBeNull();
+    expect(negotiation.status).not.toBe("open");
+    /**
+     * 선수가 옮겨 앉는 것은 **계약 확정(completed)** 뿐이다. 구단 합의(agreed)에서
+     * 이미 소속을 바꾸면 개인 조건이 깨졌을 때 되돌릴 자리가 없다.
+     */
+    expect(playerById(state, wanted.id)!.teamId).toBe(
+      negotiation.status === "completed" ? state.userTeamId : fromTeamId,
+    );
   });
 
   it("받은 오퍼는 감독의 말에 따라 거절·역제안·수락된다", () => {
-    const state = newGame(42);
+    const state = newGame();
     const digest: string[] = [];
     for (let i = 0; i < 60 && incomingOffers(state).length === 0; i++) {
       state.date = addDays(state.date, 1);
@@ -243,7 +257,7 @@ describe("mock GM — 이적 협상", () => {
 
 describe("mock GM — 재계약", () => {
   it("재계약을 제안하고, 답이 오면 선수 본인이 되어 판정한다", () => {
-    const state = newGame(42);
+    const state = newGame();
     const player = playersOf(state, state.userTeamId)[0]!;
     activeContract(state, player.id)!.until = addDays(state.date, 120);
 
@@ -256,9 +270,8 @@ describe("mock GM — 재계약", () => {
     state.date = pendingOffer(renewal)!.respondsOn!;
     const answered = runMockGmTurn(state, `${player.name} 재계약 어떻게 됐나`);
     expect(answered.toolCalls.map((c) => c.name)).toContain("respond_offer");
-    // 기대 주급대로 제안했으므로 대체로 수락된다
-    if (renewal.status === "completed") {
-      expect(activeContract(state, player.id)!.until > addDays(state.date, 120)).toBe(true);
-    }
+    // 기대 주급대로 제안했으므로 수락된다 — 확정이면 계약 기간이 실제로 늘어난다
+    expect(renewal.status).toBe("completed");
+    expect(activeContract(state, player.id)!.until > addDays(state.date, 120)).toBe(true);
   });
 });

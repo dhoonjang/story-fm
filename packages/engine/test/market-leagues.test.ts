@@ -96,7 +96,7 @@ describe("이적창 — 우리와 시기가 다르다", () => {
     state.windows = seasonWindows();
     state.date = "2026-09-20";
     const ours = playersOf(state, state.userTeamId)[0]!;
-    const theirs = playersOf(state, "alnassr").find((p) => p.name.includes("호날두"))!;
+    const theirs = playersOf(state, "alnassr")[0]!;
 
     // 사우디로 매각 — 사는 쪽 협회 창이 열려 있으므로 막히지 않는다
     const sell = dealOdds(state, {
@@ -189,7 +189,7 @@ describe("돈 성향과 복귀 저항", () => {
   it("복귀 저항이 확률 근거에 드러난다 — 블랙박스로 깎지 않는다", () => {
     const state = createTestGame();
     state.date = "2026-08-01"; // 우리 창이 열려 있는 날
-    const legend = playersOf(state, "alnassr").find((p) => p.name.includes("호날두"))!;
+    const legend = playersOf(state, "alnassr")[0]!;
     const odds = dealOdds(state, {
       playerId: legend.id,
       fee: 20_000_000,
@@ -202,20 +202,27 @@ describe("돈 성향과 복귀 저항", () => {
   it("같은 조건이면 5대 리그 선수보다 데려오기 어렵다", () => {
     const state = createTestGame();
     state.date = "2026-08-01";
-    const legend = playersOf(state, "alnassr").find((p) => p.name.includes("호날두"))!;
-    // 비슷한 나이·전력의 5대 리그 선수를 찾는다
-    const peer = state.players.find(
-      (p) =>
-        !isMarketOnlyLeague(leagueOfTeam(p.teamId)) &&
-        p.teamId !== state.userTeamId &&
-        Math.abs(p.attributes.overall - legend.attributes.overall) <= 2 &&
-        ageOf(p.birthdate, state.date) >= 30,
-    );
-    expect(peer, "비교할 5대 리그 선수가 없다").toBeDefined();
+    /**
+     * **짝을 이름으로 집지 않는다.** 비교가 성립하려면 나이·전력이 붙어 있어야
+     * 하므로, 사우디 선수 중 그런 5대 리그 짝이 있는 첫 쌍을 찾는다.
+     */
+    const pair = playersOf(state, "alnassr")
+      .map((legend) => ({
+        legend,
+        peer: state.players.find(
+          (p) =>
+            !isMarketOnlyLeague(leagueOfTeam(p.teamId)) &&
+            p.teamId !== state.userTeamId &&
+            Math.abs(p.attributes.overall - legend.attributes.overall) <= 2 &&
+            ageOf(p.birthdate, state.date) >= 30,
+        ),
+      }))
+      .find((x) => x.peer !== undefined);
+    expect(pair, "나이·전력이 붙는 5대 리그 짝이 없다").toBeDefined();
 
     const terms = { fee: 20_000_000, weeklyWage: 500_000, years: 2 };
-    const legendOdds = dealOdds(state, { ...terms, playerId: legend.id });
-    const peerOdds = dealOdds(state, { ...terms, playerId: peer!.id });
+    const legendOdds = dealOdds(state, { ...terms, playerId: pair!.legend.id });
+    const peerOdds = dealOdds(state, { ...terms, playerId: pair!.peer!.id });
     // 복귀 저항 항목이 붙은 쪽에만 그 감점이 있다
     expect(legendOdds.factors.some((f) => f.label === "복귀 저항")).toBe(true);
     expect(peerOdds.factors.some((f) => f.label === "복귀 저항")).toBe(false);

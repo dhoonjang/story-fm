@@ -21,6 +21,13 @@ import { SCOUT_DAYS } from "@story-fm/domain";
 import { createTestGame } from "./helpers";
 
 /**
+ * 세계는 **하나만** 세운다 — 조회가 무엇을 보여 주고 무엇을 감추는지는 시드와
+ * 무관하고, 케이스마다 시드를 나누면 그만큼 세계를 더 세울 뿐이다 (`helpers.ts`의
+ * 픽스처 보관은 같은 인자일 때만 복제를 준다). 케이스가 손대는 값은 각자
+ * 넣는다 — 넘어가는 것은 언제나 복제본이라 다음 케이스로 새지 않는다.
+ */
+
+/**
  * 읽기 전용 조회 — GM이 컨텍스트 대신 온디맨드로 부르는 도구의 엔진 구현.
  * 가장 중요한 검증: **타 팀 선수의 참값 수치가 새어나가지 않는다.**
  */
@@ -169,7 +176,7 @@ describe("search_players", () => {
 
 describe("playerCard — 선수 상세", () => {
   it("우리 선수는 능력치·컨디션·계약·전술까지 전부 준다", () => {
-    const state = createTestGame(22);
+    const state = createTestGame(21);
     const mine = userPlayers(state)[0]!;
     const res = playerCard(state, mine.id);
     expect(res.ok).toBe(true);
@@ -179,7 +186,7 @@ describe("playerCard — 선수 상세", () => {
   });
 
   it("타 팀 선수는 라벨·인상만 주고 참값·잠재력을 감춘다", () => {
-    const state = createTestGame(22);
+    const state = createTestGame(21);
     const other = playersOf(state, "chelsea")[0]!;
     const res = playerCard(state, other.id);
     expect(res.ok).toBe(true);
@@ -188,7 +195,7 @@ describe("playerCard — 선수 상세", () => {
   });
 
   it("스카우팅을 마치면 오차가 좁혀지지만 여전히 라벨로 말한다", () => {
-    const state = createTestGame(22);
+    const state = createTestGame(21);
     const other = playersOf(state, "chelsea")[0]!;
     scoutPlayer(state, other.id);
     advanceTime(state, { days: SCOUT_DAYS });
@@ -201,21 +208,21 @@ describe("playerCard — 선수 상세", () => {
   });
 
   it("없는 id는 반려한다", () => {
-    const state = createTestGame(22);
+    const state = createTestGame(21);
     expect(playerCard(state, "nope").ok).toBe(false);
   });
 });
 
 describe("get_team · get_league", () => {
   it("팀 프로필은 순위·전술·주력 선수를 주고, 타 팀엔 안개를 적용한다", () => {
-    const state = createTestGame(23);
+    const state = createTestGame(21);
     const res = teamProfile(state, "chelsea");
     expect(res.ok).toBe(true);
     expect(res.message).not.toMatch(/OVR\d+/);
   });
 
   it("타 팀 주력 선수는 참값 상위 6이 아니다 — 고르는 것도 노출이다", () => {
-    const state = createTestGame(23);
+    const state = createTestGame(21);
     const starting = assignmentsOf(state, "chelsea", "starting")
       .map((a) => playerById(state, a.playerId))
       .filter((p) => p !== null);
@@ -227,13 +234,13 @@ describe("get_team · get_league", () => {
   });
 
   it("우리 팀 프로필은 정확한 수치를 준다", () => {
-    const state = createTestGame(23);
+    const state = createTestGame(21);
     const res = teamProfile(state, "mine");
     expect(res.message).toMatch(/OVR\d+/);
   });
 
   it("순위표는 20팀 전부와 우리 팀 표시를 준다", () => {
-    const state = createTestGame(23);
+    const state = createTestGame(21);
     const res = leagueView(state, { view: "standings" });
     expect(res.ok).toBe(true);
     expect(res.message).toContain("←우리");
@@ -241,7 +248,7 @@ describe("get_team · get_league", () => {
   });
 
   it("일정은 지난 결과와 예정 경기를 함께 준다", () => {
-    const state = createTestGame(23);
+    const state = createTestGame(21);
     const res = leagueView(state, { view: "fixtures", count: 3 });
     expect(res.ok).toBe(true);
     // 날짜·요일·킥오프·대회·홈원정이 한 줄에 — "R1"만으로는 언제인지 답할 수 없다.
@@ -252,7 +259,7 @@ describe("get_team · get_league", () => {
   });
 
   it("순위표는 다른 리그·대항전도 볼 수 있고, 없는 대회는 반려한다", () => {
-    const state = createTestGame(23);
+    const state = createTestGame(21);
     const laliga = leagueView(state, { view: "standings", competition: "laliga" });
     expect(laliga.ok).toBe(true);
     expect(laliga.message).toContain("라리가");
@@ -280,7 +287,7 @@ describe("get_league — 일정 검색", () => {
     message.split("\n").filter((l) => l.startsWith("  지난") || l.startsWith("  예정"));
 
   it("상대를 지정하면 맞대결만 주고 전적을 요약한다", () => {
-    const state = createTestGame(23);
+    const state = createTestGame(21);
     const derbies = meetings(state, "arsenal", "tottenham");
     expect(derbies.length).toBeGreaterThanOrEqual(2);
     const first = derbies.sort((a, b) => (a.date < b.date ? -1 : 1))[0]!;
@@ -301,7 +308,7 @@ describe("get_league — 일정 검색", () => {
   });
 
   it("when=upcoming은 예정만, past는 지난 경기만 준다", () => {
-    const state = createTestGame(24);
+    const state = createTestGame(21);
     const round1 = state.matches.filter((m) => m.competitionId === "epl" && m.round === 1);
     for (const m of round1) m.result = { homeGoals: 1, awayGoals: 0, scorers: [] };
 
@@ -316,14 +323,14 @@ describe("get_league — 일정 검색", () => {
   });
 
   it("team=all + round는 그 라운드 전체 경기를 준다", () => {
-    const state = createTestGame(24);
+    const state = createTestGame(21);
     const res = leagueView(state, { view: "fixtures", team: "all", round: 3, count: 20 });
     expect(res.ok).toBe(true);
     expect(fixtureLines(res.message)).toHaveLength(10); // EPL 20팀 → 라운드당 10경기
   });
 
   it("날짜 범위와 대회로 좁힌다", () => {
-    const state = createTestGame(24);
+    const state = createTestGame(21);
     const res = leagueView(state, {
       view: "fixtures",
       competition: "epl",
@@ -336,7 +343,7 @@ describe("get_league — 일정 검색", () => {
   });
 
   it("약칭을 해석하고, 모호하거나 없는 이름은 반려한다", () => {
-    const state = createTestGame(24);
+    const state = createTestGame(21);
     const next = leagueView(state, {
       view: "fixtures",
       opponent: "맨유",
@@ -354,7 +361,7 @@ describe("get_league — 일정 검색", () => {
   });
 
   it("절단된 경기 수를 조용히 숨기지 않는다", () => {
-    const state = createTestGame(24);
+    const state = createTestGame(21);
     const res = leagueView(state, { view: "fixtures", when: "upcoming", count: 2 });
     expect(res.message).toMatch(/더 뒤의 예정 경기 \d+건/);
   });
@@ -366,7 +373,7 @@ describe("get_league — 일정 검색", () => {
  */
 describe("get_squad", () => {
   it("선발·벤치·예비를 나누고 자리 적합도까지 준다", () => {
-    const state = createTestGame(31);
+    const state = createTestGame(21);
     const res = squadView(state);
     expect(res.ok).toBe(true);
     // 배치 인원이 요약과 목록 양쪽에서 일치한다
@@ -378,7 +385,7 @@ describe("get_squad", () => {
   });
 
   it("level=reserve는 2군만, role=starting은 선발만 준다", () => {
-    const state = createTestGame(31);
+    const state = createTestGame(21);
     const reserve = squadView(state, { level: "reserve" });
     const reserveCount = userPlayers(state).filter((p) => p.squadLevel === "reserve").length;
     expect(reserve.message.split("\n").filter((l) => l.startsWith("  "))).toHaveLength(
@@ -391,7 +398,7 @@ describe("get_squad", () => {
   });
 
   it("부상·정지·경고 임박·불만을 배치 줄에 표시한다", () => {
-    const state = createTestGame(31);
+    const state = createTestGame(21);
     const starter = userPlayers(state).find((p) => p.squadLevel !== "reserve")!;
     for (let i = 0; i < 4; i++) {
       state.bookings.push({
@@ -421,7 +428,7 @@ describe("get_squad", () => {
 
 describe("search_players — 대상 범위", () => {
   it("competition으로 한 리그만 뒤진다", () => {
-    const state = createTestGame(32);
+    const state = createTestGame(21);
     const epl = searchPlayers(state, { competition: "epl", position: "ST", limit: 5 });
     expect(epl.ok).toBe(true);
     // 다른 리그 선수가 섞이지 않는다 (id 접두사가 팀이다)
@@ -432,14 +439,14 @@ describe("search_players — 대상 범위", () => {
   });
 
   it("없는 대회는 반려한다", () => {
-    const state = createTestGame(32);
+    const state = createTestGame(21);
     expect(searchPlayers(state, { competition: "K리그" }).ok).toBe(false);
   });
 });
 
 describe("scheduleView — 감독의 달력", () => {
   it("경기·훈련·이적창을 한 축에 날짜순으로 놓는다", () => {
-    const state = createTestGame(33);
+    const state = createTestGame(21);
     const applied = setTraining(state, {
       repeatWeekly: [{ dow: 2, slot: "am", label: "고강도 압박", focus: ["stamina", "tactical"] }],
       weeks: 2,
@@ -459,7 +466,7 @@ describe("scheduleView — 감독의 달력", () => {
   });
 
   it("type으로 좁히고, 빈 기간은 그렇다고 말한다", () => {
-    const state = createTestGame(33);
+    const state = createTestGame(21);
     setTraining(state, {
       repeatWeekly: [{ dow: 2, slot: "am", label: "회복", focus: ["recovery"] }],
       weeks: 1,
@@ -469,7 +476,7 @@ describe("scheduleView — 감독의 달력", () => {
   });
 
   it("우리 팀 경기만 달력에 올린다 (리그 타 팀 경기는 get_league의 몫)", () => {
-    const state = createTestGame(33);
+    const state = createTestGame(21);
     const res = scheduleView(state, {
       type: "match",
       from: "2026-08-01",
@@ -484,7 +491,7 @@ describe("scheduleView — 감독의 달력", () => {
 
 describe("이력·폼", () => {
   it("선수 카드는 부상 이력과 경고 누적을 준다", () => {
-    const state = createTestGame(35);
+    const state = createTestGame(21);
     const p = userPlayers(state)[0]!;
     state.injuries.push({
       id: "inj-1",
@@ -513,7 +520,7 @@ describe("이력·폼", () => {
   });
 
   it("순위표에 최근 5경기 폼이 붙는다", () => {
-    const state = createTestGame(35);
+    const state = createTestGame(21);
     const ours = state.matches
       .filter((m) => m.competitionId === "epl" && [m.homeTeamId, m.awayTeamId].includes("arsenal"))
       .sort((a, b) => (a.date < b.date ? -1 : 1))

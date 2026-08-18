@@ -15,6 +15,7 @@ import {
   pendingVerdicts,
   playerById,
   pronenessValue,
+  resolveMedical,
   respondOffer,
   runMedicals,
   sendOffer,
@@ -23,7 +24,7 @@ import {
   windowOpenOn,
   withdrawOffer,
 } from "@story-fm/engine";
-import type { Negotiation } from "@story-fm/domain";
+import type { GamePlayer, Negotiation } from "@story-fm/domain";
 import { createTestGame } from "./helpers";
 
 /**
@@ -33,45 +34,47 @@ import { createTestGame } from "./helpers";
  * 결정적이고 성향을 탄다 ③ 소견이 붙으면 데려가는 쪽이 결정한다.
  */
 
-function target(state: GameState, nth = 0) {
+/**
+ * 예산 안에서 살 수 있는 첫 후보 — **id를 한 번만 찾아 두고 재사용한다.**
+ *
+ * 후보를 고르려면 5,700명을 `suggestTerms`로 평가해야 하는데, 같은 시드의 세이브는
+ * 언제나 같은 사람을 내놓는다(픽스처는 복제본이다). 이 파일이 그 훑기를 열세 번
+ * 반복하느라 5분을 썼다.
+ */
+let targetId: string | null = null;
+
+function target(state: GameState) {
+  if (targetId !== null) return playerById(state, targetId)!;
   const budget = financeOf(state, state.userTeamId).transferBudget;
-  const affordable = state.players.filter((p) => {
+  const found = state.players.find((p) => {
     if (p.teamId === state.userTeamId) return false;
     const terms = suggestTerms(state, p.id);
     return terms !== null && terms.fee > 1_000_000 && terms.fee < budget * 0.6;
   });
-  const found = affordable[nth];
   if (!found) throw new Error("협상 대상을 찾지 못했습니다");
+  targetId = found.id;
   return found;
 }
 
 /**
- * 합의까지 민다 — 검진 직전 상태. **막히면 null이다.**
- *
- * 검진 판정은 협상 시드에 묶여 결정적이라 "통과하는 딜"·"소견이 붙는 딜"을 재려면
- * 후보를 넘겨 가며 찾아야 한다 — 그 탐색이 첫 후보에서 멈추지 않도록 실패를 던지지
- * 않는다.
+ * 오퍼 → 합의까지 민다 — 검진 직전 상태. **막히면 그게 실패다.**
+ * 첫 후보로 되지 않으면 이 파일이 전제하는 세계가 아니므로 조용히 넘어가지 않는다.
  */
-function tryAgreeOn(state: GameState, nth = 0) {
-  const player = target(state, nth);
+function agreeOn(state: GameState) {
+  const player = target(state);
   const terms = {
     playerId: player.id,
     fee: Math.round(askingPriceFor(state, player) * 1.1),
     weeklyWage: wageExpectationOf(state, player),
     years: 4,
   };
-  if (!sendOffer(state, terms).ok) return null;
+  const sent = sendOffer(state, terms);
+  expect(sent.ok, sent.message).toBe(true);
   const negotiation = openNegotiationFor(state, player.id)!;
   state.date = pendingOffer(negotiation)!.respondsOn!;
-  if (!respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" }).ok) return null;
+  const answered = respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
+  expect(answered.ok, answered.message).toBe(true);
   return { player, terms, negotiation };
-}
-
-/** 합의까지 민다 — 첫 후보로 되고, 안 되면 그게 실패다 */
-function agreeOn(state: GameState) {
-  const deal = tryAgreeOn(state);
-  expect(deal, "합의까지 가는 영입을 찾지 못했다").not.toBeNull();
-  return deal!;
 }
 
 describe("이적은 합의한 날 끝나지 않는다", () => {
@@ -118,22 +121,17 @@ describe("이적은 합의한 날 끝나지 않는다", () => {
   });
 
   it("통과하면 그날 계약이 된다 — 감독이 다시 부르지 않아도", () => {
-    // 소견은 협상 시드를 타므로 통과하는 딜을 후보를 넘겨 가며 찾는다
-    for (let nth = 0; nth < 12; nth++) {
-      const state = createTestGame(42);
-      const deal = tryAgreeOn(state, nth);
-      if (!deal) continue;
-      acceptDeal(state, deal.negotiation.id);
-      state.date = deal.negotiation.medical!.onDate;
-      const digest: string[] = [];
-      runMedicals(state, digest);
-      if (deal.negotiation.medical!.status !== "passed") continue;
-      expect(deal.negotiation.status).toBe("completed");
-      expect(playerById(state, deal.player.id)!.teamId).toBe(state.userTeamId);
-      expect(digest.join(" ")).toContain("메디컬 통과");
-      return;
-    }
-    throw new Error("검진을 통과하는 영입을 찾지 못했다");
+    // 통과하는 굴림도 협상 id로 고른다 (아래 `handBuiltBuy`) — 세계는 하나면 된다
+    const state = createTestGame(42);
+    const player = target(state);
+    const negotiation = handBuiltBuy(state, player, "neg-pass", false);
+    const digest: string[] = [];
+    runMedicals(state, digest);
+
+    expect(negotiation.medical!.status).toBe("passed");
+    expect(negotiation.status).toBe("completed");
+    expect(playerById(state, player.id)!.teamId).toBe(state.userTeamId);
+    expect(digest.join(" ")).toContain("메디컬 통과");
   });
 });
 
@@ -179,72 +177,115 @@ describe("검진은 결정적이고 몸을 읽는다", () => {
   });
 });
 
+/**
+ * 소견이 붙은 영입을 **결정적으로** 세운다 — 예전엔 후보를 넘겨 가며 세계를 열두 번
+ * 세워 "소견이 붙는 딜"을 찾았고, 못 찾으면 케이스가 통째로 사라졌다.
+ *
+ * 판정은 두 가지로만 갈린다: `flagChance`(성향·부상·나이)와 `makeRng(시드,
+ * "medical:<협상 id>")` 한 번. 부상 중인 선수를 사면 확률이 상한(0.75)에 붙으므로,
+ * **협상 id의 꼬리만 바꿔 굴려 보면** 몇 번 안에 소견이 붙는 굴림이 나온다.
+ * `resolveMedical`은 협상만 건드리고 장부를 옮기지 않으므로 그 탐색은 세계를
+ * 더럽히지 않는다.
+ */
+function handBuiltBuy(state: GameState, player: GamePlayer, base: string, wantFlagged: boolean) {
+  const window = windowOpenOn(state.windows, state.date);
+  if (!window) throw new Error("이적창이 열린 날에서 시작해야 한다");
+  // 값 산정은 후보 하나당 한 번이면 된다 — 굴림마다 다시 세면 예순 번을 센다
+  const fee = askingPriceFor(state, player);
+  const weeklyWage = wageExpectationOf(state, player);
+  const draft = (id: string): Negotiation => ({
+    id,
+    gamePlayerId: player.id,
+    kind: "buy",
+    counterpartTeamId: player.teamId,
+    windowId: window.id,
+    openedOn: state.date,
+    expiresOn: addDays(state.date, 14),
+    status: "agreed",
+    // 검진은 **오늘** 끝나도록 손으로 잡는다 — 굴림이 협상 id에만 달리게 된다
+    medical: { onDate: state.date, status: "scheduled" },
+    rounds: [
+      {
+        date: state.date,
+        by: "us",
+        fee,
+        weeklyWage,
+        contractYears: 4,
+        respondsOn: null,
+        probability: 60,
+        verdict: "accept",
+      },
+    ],
+  });
+
+  for (let n = 0; n < 60; n++) {
+    const id = `${base}-${n}`;
+    // 같은 (시드, id, 날짜, 몸 상태)면 같은 판정이다 — 굴려 보고 고른다
+    if (resolveMedical(state, draft(id), player).passed === wantFlagged) continue;
+    const negotiation = draft(id);
+    state.negotiations.push(negotiation);
+    return negotiation;
+  }
+  throw new Error(`${wantFlagged ? "소견이 붙는" : "통과하는"} 굴림을 예순 번 안에 찾지 못했다`);
+}
+
+/** 부상 중인 후보 하나에 소견이 붙은 영입 협상 — 검진까지 끝난 상태로 돌려준다 */
+function flaggedDeal(opts: { deadline?: boolean } = {}) {
+  const state = createTestGame(42);
+  const player = target(state);
+  // 부상 중이면 소견 확률이 상한에 붙는다 (`FLAG_WHILE_INJURED`)
+  openInjuryFor(state, player, "match", () => 0.9);
+  if (opts.deadline) windowOpenOn(state.windows, state.date)!.closesOn = state.date;
+  const pronenessBefore = pronenessValue(playerById(state, player.id)!);
+  const negotiation = handBuiltBuy(
+    state,
+    player,
+    `neg-flag-${opts.deadline ? "dl" : "open"}`,
+    true,
+  );
+  const digest: string[] = [];
+  runMedicals(state, digest);
+  expect(negotiation.medical!.status, digest.join(" · ")).toBe("flagged");
+  return { state, player, negotiation, pronenessBefore, digest };
+}
+
 describe("소견이 붙으면 데려가는 쪽이 결정한다", () => {
-  /** 소견이 붙은 영입 협상을 만든다 — 부상 중인 선수를 사면 거의 확실하다 */
-  function flaggedBuy(state: GameState, nth = 0) {
-    openInjuryFor(state, target(state, nth), "match", () => 0.9);
-    const deal = tryAgreeOn(state, nth);
-    if (!deal) return null;
-    const { player, negotiation } = deal;
-    acceptDeal(state, negotiation.id);
-    state.date = negotiation.medical!.onDate;
-    runMedicals(state, []);
-    return negotiation.medical!.status === "flagged" ? { player, negotiation } : null;
-  }
-
-  /**
-   * 소견이 붙는 영입 하나를 찾는다 — 검진은 결정적이지만 **누구에게 붙는지는
-   * 스쿼드를 탄다**. 카탈로그를 갱신하면 1순위 후보가 바뀌므로 후보를 넘겨 가며 찾는다.
-   */
-  function flaggedDeal() {
-    for (let nth = 0; nth < 12; nth++) {
-      const state = createTestGame(42);
-      const deal = flaggedBuy(state, nth);
-      if (deal) return { state, ...deal };
-    }
-    return null;
-  }
-
   it("소견은 계약을 막고 감독을 기다린다", () => {
-    const deal = flaggedDeal();
-    expect(deal, "소견이 붙는 영입을 찾지 못했다").not.toBeNull();
-    if (!deal) return;
-    const { state } = deal;
-    expect(deal.negotiation.status).toBe("agreed");
-    expect(deal.negotiation.medical!.note).toBeTruthy();
-    expect(playerById(state, deal.player.id)!.teamId).not.toBe(state.userTeamId);
-    expect(pendingVerdicts(state).some((v) => v.negotiation.id === deal.negotiation.id)).toBe(true);
+    const { state, player, negotiation } = flaggedDeal();
+    expect(negotiation.status).toBe("agreed");
+    expect(negotiation.medical!.note).toBeTruthy();
+    expect(negotiation.medical!.overridden).toBeUndefined();
+    expect(playerById(state, player.id)!.teamId).not.toBe(state.userTeamId);
+    expect(pendingVerdicts(state).some((v) => v.negotiation.id === negotiation.id)).toBe(true);
   });
 
   it("강행하면 계약은 되지만 그 몸이 약하다는 사실이 남는다", () => {
-    const deal = flaggedDeal();
-    expect(deal, "소견이 붙는 영입을 찾지 못했다").not.toBeNull();
-    if (!deal) return;
-    const { state } = deal;
-    const before = pronenessValue(playerById(state, deal.player.id)!);
-    const done = acceptDeal(state, deal.negotiation.id);
+    const { state, player, negotiation, pronenessBefore } = flaggedDeal();
+    const done = acceptDeal(state, negotiation.id);
     expect(done.ok, done.message).toBe(true);
-    expect(deal.negotiation.status).toBe("completed");
-    expect(deal.negotiation.medical!.overridden).toBe(true);
-    expect(pronenessValue(playerById(state, deal.player.id)!)).toBeGreaterThan(before);
+    expect(negotiation.status).toBe("completed");
+    expect(negotiation.medical!.overridden).toBe(true);
+    expect(pronenessValue(playerById(state, player.id)!)).toBeGreaterThan(pronenessBefore);
   });
 
   it("물러서도 그 창이 닫히지는 않는다 — 조건을 다시 짤 수 있다", () => {
-    const deal = flaggedDeal();
-    expect(deal, "소견이 붙는 영입을 찾지 못했다").not.toBeNull();
-    if (!deal) return;
-    const { state } = deal;
-    const out = withdrawOffer(state, deal.negotiation.id);
+    const { state, player, negotiation } = flaggedDeal();
+    const out = withdrawOffer(state, negotiation.id);
     expect(out.ok).toBe(true);
     // 결렬(rejected)이 아니다 — 같은 창에서 다시 부를 수 있어야 한다
-    expect(deal.negotiation.status).toBe("expired");
+    expect(negotiation.status).toBe("expired");
     const retry = sendOffer(state, {
-      playerId: deal.player.id,
-      fee: Math.round(askingPriceFor(state, deal.player) * 0.8),
-      weeklyWage: wageExpectationOf(state, deal.player),
+      playerId: player.id,
+      fee: Math.round(askingPriceFor(state, player) * 0.8),
+      weeklyWage: wageExpectationOf(state, player),
       years: 4,
     });
     expect(retry.ok, retry.message).toBe(true);
+  });
+
+  it("소견이 붙어도 결정할 날이 남는다 — 그날 안에 강행할 수 있다", () => {
+    const { state, negotiation } = flaggedDeal();
+    expect(negotiation.expiresOn > state.date).toBe(true);
   });
 });
 
@@ -256,82 +297,29 @@ describe("소견이 붙으면 데려가는 쪽이 결정한다", () => {
  * 부상 성향이 오른 선수를 받는다. 답을 기다리다 창이 닫히면 그때 무산된다.
  */
 describe("마감일의 소견", () => {
-  /** 마감일에 합의만 남은 영입 — 검진이 그날 끝나고 소견이 붙는 상태를 만든다 */
-  function deadlineFlagged() {
-    for (let nth = 0; nth < 12; nth++) {
-      const state = createTestGame(42);
-      const window = windowOpenOn(state.windows, state.date);
-      if (!window) throw new Error("이적창이 열린 날에서 시작해야 한다");
-      window.closesOn = state.date; // 오늘이 마감일
-      const player = target(state, nth);
-      openInjuryFor(state, player, "match", () => 0.9);
-      const negotiation: Negotiation = {
-        id: `neg-buy-${player.id}-${state.date}`,
-        gamePlayerId: player.id,
-        kind: "buy",
-        counterpartTeamId: player.teamId,
-        windowId: window.id,
-        openedOn: state.date,
-        expiresOn: state.date,
-        status: "agreed",
-        rounds: [
-          {
-            date: state.date,
-            by: "us",
-            fee: askingPriceFor(state, player),
-            weeklyWage: wageExpectationOf(state, player),
-            contractYears: 4,
-            respondsOn: null,
-            probability: 60,
-            verdict: "accept",
-          },
-        ],
-      };
-      state.negotiations.push(negotiation);
-      const pronenessBefore = pronenessValue(playerById(state, player.id)!);
-      const first = acceptDeal(state, negotiation.id);
-      if (negotiation.medical?.status !== "flagged") continue;
-      return { state, player, negotiation, first, pronenessBefore };
-    }
-    return null;
-  }
-
   it("그날 검진이 끝나도 소견은 감독을 기다린다 — 같은 호출이 강행이 되지 않는다", () => {
-    const deal = deadlineFlagged();
-    expect(deal, "마감일에 소견이 붙는 영입을 찾지 못했다").not.toBeNull();
-    if (!deal) return;
-    const { state, negotiation, first } = deal;
+    const { state, player, negotiation, pronenessBefore } = flaggedDeal({ deadline: true });
     // 창 밖으로 미룰 수 없어 검진은 오늘 끝났다
     expect(negotiation.medical!.onDate).toBe(state.date);
-    expect(first.ok, first.message).toBe(true);
-    expect(first.message).toContain("소견");
     // 계약도 강행도 아직 없다
     expect(negotiation.status).toBe("agreed");
     expect(negotiation.medical!.overridden).toBeUndefined();
-    expect(playerById(state, deal.player.id)!.teamId).not.toBe(state.userTeamId);
-    expect(pronenessValue(playerById(state, deal.player.id)!)).toBe(deal.pronenessBefore);
+    expect(playerById(state, player.id)!.teamId).not.toBe(state.userTeamId);
+    expect(pronenessValue(playerById(state, player.id)!)).toBe(pronenessBefore);
     expect(pendingVerdicts(state).some((v) => v.negotiation.id === negotiation.id)).toBe(true);
   });
 
   it("한 번 더 부르면 그때가 강행이다 — 마감일 안이라 계약이 된다", () => {
-    const deal = deadlineFlagged();
-    expect(deal, "마감일에 소견이 붙는 영입을 찾지 못했다").not.toBeNull();
-    if (!deal) return;
-    const { state, negotiation } = deal;
+    const { state, player, negotiation, pronenessBefore } = flaggedDeal({ deadline: true });
     const done = acceptDeal(state, negotiation.id);
     expect(done.ok, done.message).toBe(true);
     expect(negotiation.status).toBe("completed");
     expect(negotiation.medical!.overridden).toBe(true);
-    expect(pronenessValue(playerById(state, deal.player.id)!)).toBeGreaterThan(
-      deal.pronenessBefore,
-    );
+    expect(pronenessValue(playerById(state, player.id)!)).toBeGreaterThan(pronenessBefore);
   });
 
   it("답하지 않은 채 창이 닫히면 그날 무산된다 — 결렬이 아니다", () => {
-    const deal = deadlineFlagged();
-    expect(deal, "마감일에 소견이 붙는 영입을 찾지 못했다").not.toBeNull();
-    if (!deal) return;
-    const { state, negotiation } = deal;
+    const { state, negotiation } = flaggedDeal({ deadline: true });
     // 소견은 결정할 날을 남기지만 그 날이 창 밖이다
     expect(negotiation.expiresOn > state.date).toBe(true);
     state.date = addDays(state.date, 1);

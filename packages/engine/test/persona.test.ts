@@ -10,25 +10,18 @@ import {
   ownerOf,
   generateOwner,
   OWNER_ARCHETYPE_LABELS,
-  interpretBackgroundHeuristic,
-  createGame,
-  type GameState,
   reportersOf,
   generateReporters,
   teamCatalog,
 } from "@story-fm/engine";
 import { createTestGame } from "./helpers";
 
-const newGame = (seed: number, teamId = "arsenal"): GameState => {
-  const background = "K리그에서 뛰다 은퇴한 수비수 출신 분석가";
-  return createGame({
-    seed,
-    userTeamId: teamId,
-    managerName: "김감독",
-    background,
-    attributes: interpretBackgroundHeuristic(background),
-  });
-};
+/**
+ * 인물은 **순수 함수가 시드에서 만든다** (`generateHeadCoach` 등). 세계를 세워야
+ * 하는 것은 `state.personas`를 읽는 자리(`headCoachOf`·`speakerRoles`·`ensurePersonas`)
+ * 뿐이고, 그것도 픽스처 보관을 타는 `createTestGame`으로 충분하다 — 예전엔 이 파일이
+ * `createGame`을 열다섯 번 직접 불러 매번 세계를 새로 세웠다.
+ */
 
 describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md §1)", () => {
   it("새 게임에 수석코치가 함께 온다", () => {
@@ -44,13 +37,14 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
     expect(coach.speechStyle.samples.length).toBeGreaterThan(0);
   });
 
-  it("같은 세이브는 언제 열어도 같은 사람이다 (시드 결정적)", () => {
-    expect(headCoachOf(newGame(42))).toEqual(headCoachOf(newGame(42)));
+  it("세이브가 담은 사람은 시드가 만든 그 사람이다 (결정적)", () => {
+    // 세계가 담아 둔 인물과 순수 함수가 만드는 인물이 같아야 로드가 시드로 복원된다
+    expect(headCoachOf(createTestGame(42))).toEqual(generateHeadCoach(42, "arsenal"));
     expect(generateHeadCoach(42, "arsenal")).toEqual(generateHeadCoach(42, "arsenal"));
   });
 
   it("화자 태그는 직책이 아니라 이름이다 — 옛 세이브도 로드 때 고쳐진다", () => {
-    const state = newGame(42, "manutd");
+    const state = createTestGame(42, "manutd");
     expect(headCoachOf(state).characterId).toBe("스티브 홀랜드");
 
     // 태그를 직책으로 쓰던 시절의 세이브를 흉내 낸다
@@ -117,7 +111,7 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
   });
 
   it("화면이 붙일 직책 맵을 준다 — 모델 출력에 기대지 않는다", () => {
-    const state = newGame(42, "manutd");
+    const state = createTestGame(42, "manutd");
     const roles = speakerRoles(state);
     // 키는 정규화된 이름 — 사전을 만들 때와 찾을 때가 같은 함수를 쓴다
     expect(roles[normalizeSpeaker("스티브 홀랜드")]).toEqual({
@@ -129,7 +123,7 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
   });
 
   it("자리를 아는 화자는 다 알려 준다 — 주장도", () => {
-    const state = newGame(42, "manutd");
+    const state = createTestGame(42, "manutd");
     const captain = state.players.find((p) => p.teamId === "manutd" && p.isCaptain)!;
     expect(speakerRoles(state)[normalizeSpeaker(captain.name)]).toEqual({
       kind: "captain",
@@ -138,7 +132,7 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
   });
 
   it("우리 선수는 직책 없이 자리만 갖는다 — 대화마다 (선수)는 시끄럽다", () => {
-    const state = newGame(42, "manutd");
+    const state = createTestGame(42, "manutd");
     const roles = speakerRoles(state);
     const squad = state.players.filter((p) => p.teamId === "manutd" && p.isCaptain !== true);
     const known = squad.filter((p) => roles[normalizeSpeaker(p.name)] !== undefined);
@@ -150,7 +144,7 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
   });
 
   it("남의 팀 선수는 협상 테이블에 앉았을 때만 사전에 든다", () => {
-    const state = newGame(42, "manutd");
+    const state = createTestGame(42, "manutd");
     const outsider = state.players.find((p) => p.teamId !== "manutd")!;
     expect(speakerRoles(state)[normalizeSpeaker(outsider.name)]).toBeUndefined();
 
@@ -169,7 +163,7 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
   });
 
   it("합의 뒤 메디컬을 기다리는 선수도 사전에 남는다 — open만 보면 자리가 사라진다", () => {
-    const state = newGame(42, "manutd");
+    const state = createTestGame(42, "manutd");
     const outsider = state.players.find((p) => p.teamId !== "manutd")!;
     state.negotiations.push({
       id: "neg-2",
@@ -188,7 +182,7 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
 
   it("끝난 협상은 화자를 남기지 않는다", () => {
     for (const status of ["completed", "rejected", "expired"] as const) {
-      const state = newGame(42, "manutd");
+      const state = createTestGame(42, "manutd");
       const outsider = state.players.find((p) => p.teamId !== "manutd")!;
       state.negotiations.push({
         id: `neg-${status}`,
@@ -206,7 +200,7 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
   });
 
   it("이름이 겹치면 아무것도 붙이지 않는다 — 틀린 직책보다 없는 게 낫다", () => {
-    const state = newGame(42, "manutd");
+    const state = createTestGame(42, "manutd");
     const coach = headCoachOf(state);
     // 코치와 같은 이름의 주장이 있는 상황을 만든다
     const captain = state.players.find((p) => p.teamId === "manutd" && p.isCaptain)!;
@@ -215,7 +209,7 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
   });
 
   it("personas가 빈 배열이어도 직책이 사라지지 않는다", () => {
-    const state = newGame(42, "manutd");
+    const state = createTestGame(42, "manutd");
     // `?? `만 쓰면 빈 배열을 "있음"으로 봐서 사전이 통째로 비었다 (회귀 방지)
     state.personas = [];
     expect(speakerRoles(state)[normalizeSpeaker("스티브 홀랜드")]?.label).toBe(
@@ -224,7 +218,7 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
   });
 
   it("구단주도 데이터다 — 만날 때마다 같은 사람, 코치와 다른 사람", () => {
-    const state = newGame(7, "manutd");
+    const state = createTestGame(7, "manutd");
     const owner = ownerOf(state);
     expect(owner.role).toBe("owner");
     // 실명을 아는 구단이면 그 사람이 나온다 (owner-seeds)
@@ -245,7 +239,7 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
   });
 
   it("화자 사전이 구단주의 자리를 안다 — 화면이 아이콘·직책을 붙일 재료", () => {
-    const state = newGame(7, "manutd");
+    const state = createTestGame(7, "manutd");
     const roles = speakerRoles(state);
     expect(roles[normalizeSpeaker("짐 랫클리프")]).toEqual({
       kind: "owner",
@@ -254,7 +248,7 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
   });
 
   it("구단주가 없던 세이브는 로드 때 채워진다 (버전을 올리지 않는다)", () => {
-    const state = newGame(7, "manutd");
+    const state = createTestGame(7, "manutd");
     const expected = ownerOf(state);
     // 수석코치만 있던 시절의 세이브
     state.personas = state.personas!.filter((p) => p.role === "head_coach");
@@ -265,7 +259,7 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
   });
 
   it("페르소나가 없는 옛 세이브는 로드 때 채워진다 (버전을 올리지 않는다)", () => {
-    const state = newGame(7);
+    const state = createTestGame(7);
     const expected = headCoachOf(state);
     // 페르소나 도입 전 세이브를 흉내 낸다
     delete state.personas;
@@ -277,7 +271,7 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
   });
 
   it("이미 있으면 덮어쓰지 않는다 (감독이 만난 사람이 바뀌지 않는다)", () => {
-    const state = newGame(7);
+    const state = createTestGame(7);
     const coach = headCoachOf(state);
     ensurePersonas(state);
     ensurePersonas(state);

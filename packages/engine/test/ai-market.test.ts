@@ -11,6 +11,7 @@ import {
   isTopFlight,
   playersOf,
   runAiTransfers,
+  windowOpenForTeam,
   windowOpenOn,
   type GameState,
 } from "@story-fm/engine";
@@ -178,11 +179,22 @@ describe("이적창이 열리면 남의 팀끼리도 움직인다", () => {
     expect(fees[0]).toBeLessThan(200_000_000); // 우리 경제 규모를 벗어나지 않는다
   });
 
-  it("같은 시드면 같은 시장이다 — 결정적", () => {
-    const other = playSummer();
-    expect(aiMoves(other).map((t) => `${t.gamePlayerId}:${t.toTeamId}:${t.date}`)).toEqual(
-      moves.map((t) => `${t.gamePlayerId}:${t.toTeamId}:${t.date}`),
-    );
+  /**
+   * 결정성은 **시장 함수 자체**에 있다 — 여름을 두 번 굴려 견주면 같은 것을 재면서
+   * 몇 분을 더 쓴다. 같은 세이브에 같은 날짜를 먹이면 같은 거래가 나와야 한다.
+   */
+  it("같은 시드·같은 날짜면 같은 시장이다 — 결정적", () => {
+    const run = () => {
+      const fresh = createTestGame(9);
+      for (let i = 0; i < 10; i++) {
+        runAiTransfers(fresh, []);
+        fresh.date = addDays(fresh.date, 1);
+      }
+      return aiMoves(fresh).map((t) => `${t.gamePlayerId}:${t.toTeamId}:${t.date}`);
+    };
+    const first = run();
+    expect(first.length, "열흘 동안 거래가 한 건도 없었다").toBeGreaterThan(0);
+    expect(run()).toEqual(first);
   });
 });
 
@@ -221,21 +233,24 @@ describe("시장이 스쿼드를 무너뜨리지 않는다", () => {
     expect(state.aiDeals?.length ?? 0).toBeLessThanOrEqual(queued);
   });
 
+  /**
+   * 창이 닫혀 있으면 **한 건도** 없다. 여름을 굴려 마감일까지 밀어 보는 대신
+   * 어느 협회 창도 열려 있지 않은 날을 골라 시장 함수만 부른다 — 기대값이 밴드가
+   * 아니라 0이라 무엇이 깨졌는지가 분명하다.
+   */
   it("창이 닫혀 있으면 아무 일도 없다", () => {
-    const state = playSummer();
-    // 창이 닫힌 뒤 2주 — 그동안의 이적은 시장 전용 리그(사우디·MLS) 것뿐이다
-    const before = aiMoves(state).length;
-    let guard = 20;
-    while (guard-- > 0 && windowOpenOn(state.windows, state.date)) {
-      advanceTime(state, { days: 1 });
-      if (state.phase === "matchday") playMockMatch(state);
+    const state = createTestGame();
+    state.windows = buildTransferWindows(1);
+    state.date = "2026-11-15"; // 여름(9/1)·사우디(10/6)가 다 닫혔고 겨울은 아직이다
+    expect(windowOpenOn(state.windows, state.date)).toBeNull();
+    for (const team of state.teams) {
+      expect(windowOpenForTeam(state, team.id), team.id).toBeNull();
     }
-    const closed = state.date;
+
     for (let i = 0; i < 14; i++) {
-      advanceTime(state, { days: 1 });
-      if (state.phase === "matchday") playMockMatch(state);
+      runAiTransfers(state, []);
+      state.date = addDays(state.date, 1);
     }
-    const after = aiMoves(state).filter((t) => t.date >= closed);
-    expect(after.length, "창이 닫혔는데 유럽 클럽이 거래했다").toBeLessThan(before * 0.1);
-  }, 60_000);
+    expect(aiMoves(state), "창이 닫혔는데 거래가 일어났다").toEqual([]);
+  });
 });

@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
-import type { PitchClaim } from "@story-fm/domain";
+import type { GamePlayer, PitchClaim } from "@story-fm/domain";
+import { ageOf, naturalPositionOf } from "@story-fm/domain";
 import {
+  countryOfTeam,
   dealOdds,
   evaluatePitch,
   playersOf,
   respondOffer,
   sendOffer,
   userPlayers,
+  type GameState,
 } from "@story-fm/engine";
 import { createTestGame } from "./helpers";
 
@@ -18,27 +21,38 @@ import { createTestGame } from "./helpers";
 const claim = (kind: PitchClaim["kind"], note?: string): PitchClaim =>
   note === undefined ? { kind } : { kind, note };
 
-/** 사우디 레전드 — 돈으로는 못 데려오는 대표 사례 */
-const legendOf = (state: ReturnType<typeof createTestGame>) =>
-  playersOf(state, "alnassr").find((p) => p.name.includes("호날두"))!;
+/**
+ * 시장 전용 리그의 노장 — 돈으로는 못 데려오는 대표 사례.
+ *
+ * 이름으로 집으면 시드가 한 줄만 바뀌어도 무너지고 지키는 것은 없다. 이 파일이
+ * 필요로 하는 것은 **두 성질**이라 그것으로 고른다: 서른셋 이상(`last_chance`가
+ * 사실)이고 우리 나라에서 자라지 않았다(`homecoming`이 거짓).
+ */
+function legendOf(state: GameState): GamePlayer {
+  const ours = countryOfTeam(state.userTeamId);
+  const found = [...playersOf(state, "alnassr")]
+    .sort((a, b) => b.attributes.overall - a.attributes.overall)
+    .find((p) => ageOf(p.birthdate, state.date) >= 33 && p.homegrownCountry !== ours);
+  expect(found, "사우디에 33세 이상 외국 출신 선수가 없다").toBeDefined();
+  return found!;
+}
 
 describe("사실 대조 — 말만 잘해서는 안 된다", () => {
   it("확인된 논거는 확률을 올리지 않고 **판정 여유**를 연다 — 무게는 LLM 몫", () => {
     const state = createTestGame();
     const legend = legendOf(state);
 
-    // 41세 — "마지막 기회"는 사실이다
+    // 서른셋을 넘겼다 — "마지막 기회"는 사실이다
     const truth = evaluatePitch(state, legend.id, [claim("last_chance")]);
     expect(truth.verdicts[0]?.verified).toBe(true);
     // 코어는 무게를 매기지 않는다 (표가 없다)
     expect(truth.score).toBe(0);
     expect(truth.latitude).toBeGreaterThan(0);
 
-    // 잉글랜드에서 자라지 않았다면 "고향 복귀"는 거짓이다
+    // 우리 나라에서 자라지 않았으므로 "고향 복귀"는 거짓이고, 거짓에는 대가가 있다
     const lie = evaluatePitch(state, legend.id, [claim("homecoming")]);
-    if (!lie.verdicts[0]?.verified) {
-      expect(lie.score).toBeLessThan(0);
-    }
+    expect(lie.verdicts[0]?.verified).toBe(false);
+    expect(lie.score).toBeLessThan(0);
   });
 
   it("코어가 확인할 수 없는 이야기(other)는 0점 — 서사로만 남는다", () => {
@@ -67,24 +81,33 @@ describe("사실 대조 — 말만 잘해서는 안 된다", () => {
     );
   });
 
+  /**
+   * 자리를 세계에서 찾지 않고 **손으로 세운다** — 우리 최고 선수와 같은 자리에
+   * 앉히면 주전 약속은 거짓이고, 그 위로 올려 세우면 사실이 된다. 시드가 어떤
+   * 선수를 어디에 두든 두 방향이 다 돈다.
+   */
   it("주전 보장은 **그 자리가 실제로 비어 있어야** 통한다", () => {
     const state = createTestGame();
-    // 우리 최고 선수와 같은 자리의 약한 선수 — 주전 약속이 거짓이 되는 경우
     const ours = userPlayers(state).sort((a, b) => b.attributes.overall - a.attributes.overall)[0]!;
-    const weakSamePosition = state.players.find(
-      (p) =>
-        p.teamId !== state.userTeamId &&
-        p.positions[0]?.position === ours.positions[0]?.position &&
-        p.attributes.overall < ours.attributes.overall - 10,
+    const rival = state.players.find((p) => p.teamId !== state.userTeamId)!;
+    rival.positions = ours.positions.map((slot) => ({ ...slot }));
+    expect(naturalPositionOf(rival).position).toBe(naturalPositionOf(ours).position);
+
+    rival.attributes = { ...rival.attributes, overall: ours.attributes.overall - 10 };
+    expect(evaluatePitch(state, rival.id, [claim("starting_role")]).verdicts[0]?.verified).toBe(
+      false,
     );
-    if (!weakSamePosition) return;
-    const out = evaluatePitch(state, weakSamePosition.id, [claim("starting_role")]);
-    expect(out.verdicts[0]?.verified).toBe(false);
+
+    // 그 자리의 누구보다 나으면 같은 약속이 사실이 된다
+    rival.attributes = { ...rival.attributes, overall: 99 };
+    expect(evaluatePitch(state, rival.id, [claim("starting_role")]).verdicts[0]?.verified).toBe(
+      true,
+    );
   });
 });
 
 describe("확률 — 설득에는 상한이 없다", () => {
-  /** 레전드 주급은 £3.9M대다 — 설득이 통해도 헐값에는 안 온다 */
+  /** 노장의 기대 주급은 수백만 파운드대다 — 설득이 통해도 헐값에는 안 온다 */
   const buyTerms = (playerId: string, pitch?: PitchClaim[]) => ({
     playerId,
     fee: 20_000_000,
@@ -111,39 +134,16 @@ describe("확률 — 설득에는 상한이 없다", () => {
     const state = createTestGame();
     state.date = "2026-08-01";
     const legend = legendOf(state);
-    const truthful = truthfulClaimsFor(state, legend.id);
-    expect(truthful.length, "사실인 논거가 하나도 없다").toBeGreaterThan(0);
 
-    const persuaded = dealOdds(state, buyTerms(legend.id, truthful));
+    const persuaded = dealOdds(state, buyTerms(legend.id, [claim("last_chance")]));
     expect(persuaded.latitude).toBeGreaterThan(0);
     expect(persuaded.factors.some((f) => f.label === "복귀 저항")).toBe(true);
   });
 });
 
-/** 그 선수에게 실제로 사실인 논거만 고른다 */
-function truthfulClaimsFor(
-  state: ReturnType<typeof createTestGame>,
-  playerId: string,
-): PitchClaim[] {
-  const candidates: PitchClaim["kind"][] = [
-    "last_chance",
-    "trophy_push",
-    "european_football",
-    "project_lead",
-    "starting_role",
-    "compatriot",
-    "manager_reputation",
-    "homecoming",
-    "reunion",
-  ];
-  return candidates
-    .filter((kind) => evaluatePitch(state, playerId, [claim(kind)]).verdicts[0]?.verified)
-    .map((kind) => claim(kind));
-}
-
 describe("**판정은 LLM이 한다** — 코어는 가능한 판정만 받는다", () => {
   /**
-   * 확률이 바닥인 오퍼 — 주급 £3.9M을 기대하는 레전드에게 £20k를 부른다.
+   * 확률이 바닥인 오퍼 — 수백만 파운드를 기대하는 노장에게 £20k를 부른다.
    * 답이 오는 날까지 시계를 돌려 판정 가능한 상태로 만든다.
    */
   const lowballOffer = (pitch?: PitchClaim[]) => {
@@ -157,17 +157,19 @@ describe("**판정은 LLM이 한다** — 코어는 가능한 판정만 받는�
       years: 2,
       ...(pitch ? { pitch } : {}),
     });
-    const negotiation = state.negotiations.find((n) => n.gamePlayerId === target.id);
-    const respondsOn = negotiation?.rounds[0]?.respondsOn;
+    expect(res.ok, res.message).toBe(true);
+    const negotiation = state.negotiations.find((n) => n.gamePlayerId === target.id)!;
+    expect(negotiation, "오퍼가 협상을 열지 않았다").toBeDefined();
+    const respondsOn = negotiation.rounds[0]?.respondsOn;
     if (respondsOn) state.date = respondsOn;
-    return { state, target, res, negotiation };
+    return { state, target, negotiation };
   };
 
   it("논거가 없으면 바닥 확률의 수락을 코어가 막는다", () => {
-    const { state, negotiation, res } = lowballOffer();
-    expect(res.ok, res.message).toBe(true);
+    const { state, negotiation } = lowballOffer();
+    expect(negotiation.rounds[0]!.probability).toBeLessThan(5);
     const verdict = respondOffer(state, {
-      negotiationId: negotiation!.id,
+      negotiationId: negotiation.id,
       verdict: "accept",
     });
     expect(verdict.ok).toBe(false);
@@ -175,43 +177,29 @@ describe("**판정은 LLM이 한다** — 코어는 가능한 판정만 받는�
   });
 
   it("**확인된 논거가 하나라도 있으면 코어는 더 막지 않는다** — 선수가 판단한다", () => {
-    const seed = lowballOffer();
-    const truthful = truthfulClaimsFor(seed.state, seed.target.id);
-    if (truthful.length === 0) return;
-
-    const { state, negotiation, res } = lowballOffer([truthful[0]!]);
-    expect(res.ok, res.message).toBe(true);
-    expect((negotiation?.pitched ?? []).length).toBeGreaterThan(0);
+    const { state, target, negotiation } = lowballOffer([claim("last_chance")]);
+    // 서른셋을 넘긴 선수라 이 논거는 언제나 사실이다
+    expect(evaluatePitch(state, target.id, [claim("last_chance")]).verdicts[0]?.verified).toBe(
+      true,
+    );
+    expect(negotiation.pitched ?? []).toEqual(["last_chance"]);
 
     const verdict = respondOffer(state, {
-      negotiationId: negotiation!.id,
+      negotiationId: negotiation.id,
       verdict: "accept",
-      note: "고향으로 돌아가고 싶다고 했다",
+      note: "마지막 기회라고 했다",
     });
     // 확률은 여전히 바닥이지만 판정은 선수의 몫이 된다
-    expect(negotiation!.rounds[0]!.probability).toBeLessThan(5);
+    expect(negotiation.rounds[0]!.probability).toBeLessThan(5);
     expect(verdict.ok, verdict.message).toBe(true);
   });
 
   it("거짓 논거로는 그 문이 열리지 않는다", () => {
-    const state = createTestGame();
-    state.date = "2026-08-01";
-    // 확인되지 않는 주장만 골라 던진다
-    const target = legendOf(state);
-    const bogus = (["homecoming", "reunion", "other"] as const)
-      .map((kind) => claim(kind))
-      .filter((c) => !evaluatePitch(state, target.id, [c]).verdicts[0]?.verified);
-    if (bogus.length === 0) return;
-
-    sendOffer(state, {
-      playerId: target.id,
-      fee: 1_000_000,
-      weeklyWage: 20_000,
-      years: 2,
-      pitch: bogus,
-    });
-    const negotiation = state.negotiations.find((n) => n.gamePlayerId === target.id)!;
-    if (negotiation.rounds[0]?.respondsOn) state.date = negotiation.rounds[0].respondsOn;
+    // `homecoming`은 legendOf가 거짓임을 보장하고, `other`는 코어가 절대 확인하지 못한다
+    const { state, negotiation } = lowballOffer([
+      claim("homecoming"),
+      claim("other", "아들이 이 도시에서 학교를 다니고 싶어 한다"),
+    ]);
     expect(negotiation.pitched ?? []).toEqual([]);
     const verdict = respondOffer(state, {
       negotiationId: negotiation.id,

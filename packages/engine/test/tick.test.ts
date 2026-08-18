@@ -57,53 +57,66 @@ describe("advance_time — 시간은 스킬로만 흐른다 (season.md §5)", ()
     expect(blocked.stopped).toBe("blocked");
   });
 
-  it("타 팀 경기는 각자 날짜에 간이 시뮬되고 시즌 스탯이 쌓인다", () => {
+  /**
+   * **tick은 우리 킥오프 앞까지만 굴린다** — 예전엔 하루치를 통째로 굴려서,
+   * 순위표를 열면 "이기면 몇 위"가 이미 확정돼 있었다.
+   *
+   * 예전 이 케이스는 **리그 1라운드**를 훑었다. 그런데 시즌 첫 경기일은 프리시즌
+   * 친선(7/18)이고 1라운드는 한 달 뒤라, `if (m.date > state.date) continue` 가
+   * 그 전부를 걸러 **단언이 한 줄도 돌지 않았다.** 그날 실제로 잡혀 있는 경기로 본다.
+   */
+  it("우리 킥오프와 같은 시각의 남의 경기는 미리 굴러 있지 않다", () => {
     const state = createTestGame();
     advanceToMatchday(state);
-    const round1 = state.matches.filter((m) => m.round === 1);
-    const others = round1.filter(
-      (m) => m.homeTeamId !== state.userTeamId && m.awayTeamId !== state.userTeamId,
-    );
-    // 유저 리그(EPL)의 나머지 9경기 — 다른 리그 경기도 같은 날 함께 시뮬된다
-    expect(others.filter((m) => m.competitionId === "epl").length).toBe(9);
-    const mineToday = state.matches.find(
+    const kickoff = (m: { time?: string }) => m.time ?? "15:00";
+    const ours = state.matches.find(
       (m) =>
         m.date === state.date &&
-        !m.result &&
         (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+    )!;
+    expect(ours, "경기일인데 우리 경기가 없다").toBeDefined();
+    expect(ours.result, "유저 경기를 tick이 굴렸다").toBeNull();
+
+    // 프리시즌 친선은 온 세계가 같은 날 같은 시각에 치른다 — 전부 우리 뒤에 선다
+    const notEarlier = state.matches.filter(
+      (m) => m.id !== ours.id && m.date === state.date && kickoff(m) >= kickoff(ours),
     );
-    for (const m of others) {
-      if (m.date > state.date) continue;
-      // 오늘 경기는 **킥오프 순서**를 탄다 — 우리보다 늦게 시작하는 경기는 아직 안 굴렀다
-      if (
-        m.date === state.date &&
-        mineToday &&
-        (m.time ?? "15:00") >= (mineToday.time ?? "15:00")
-      ) {
-        expect(m.result, `${m.id} 우리 킥오프 뒤 경기가 미리 굴렀다`).toBeNull();
-        continue;
-      }
-      expect(m.result).not.toBeNull();
-    }
-    // 유저 경기는 시뮬되지 않는다
-    const mine = round1.find(
-      (m) => m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId,
+    expect(notEarlier.length, "같은 날 남의 경기가 없다").toBeGreaterThan(10);
+    for (const m of notEarlier) expect(m.result, `${m.id} 우리보다 먼저 굴렀다`).toBeNull();
+    // 지난 날짜에 미소화가 남지도 않았다
+    expect(state.matches.filter((m) => m.date < state.date && !m.result)).toEqual([]);
+
+    /**
+     * 리그 1라운드 편성은 손대지 않은 채 남아 있다 — 우리 리그의 나머지 아홉 경기.
+     * (우리 킥오프 뒤에 남의 경기가 굴러가는지는 `quick-sim-events.test.ts`가
+     * 실제 리그 경기일을 찾아 잰다 — 프리시즌에는 앞선 킥오프가 존재하지 않는다.)
+     */
+    const round1 = state.matches.filter(
+      (m) =>
+        m.competitionId === "epl" &&
+        m.round === 1 &&
+        m.homeTeamId !== state.userTeamId &&
+        m.awayTeamId !== state.userTeamId,
     );
-    expect(mine?.result).toBeNull();
-    // 시뮬된 경기의 출전 기록이 남는다
-    if (others.some((m) => m.result)) {
-      expect(state.seasonStats.length).toBeGreaterThan(0);
-    }
+    expect(round1).toHaveLength(9);
   });
 
-  it("훈련이 쌓이면 능력치가 오르고 성장 로그가 남는다 (trainXP 없이)", () => {
+  /**
+   * 훈련 일정은 코어가 깔지만 **능력치는 코어가 올리지 않는다** — 상승은 결산(LLM)이
+   * 낸다(`settleTraining`). 예전 이 자리는 `>= before`만 재고 진짜 단언을
+   * `if (오른 경우)` 안에 두어, 코어가 몰래 올려도 초록이었다.
+   *
+   * 우리 팀 1군은 월간 성장(`developsByCore`)에서도 빠지므로, 훈련만 소화한
+   * 두 달은 이 선수의 축을 한 칸도 움직이지 못한다.
+   */
+  it("훈련 일정은 깔리지만 코어가 능력치를 올리지는 않는다", () => {
     const state = createTestGame(11);
-    const roster = userPlayers(state);
     // 1군만 팀 훈련 일정을 소화한다 — 2군을 고르면 성장 출처가 개발 프로그램(reserve)이 된다
-    const young =
-      roster.find((p) => p.squadLevel !== "reserve" && ageOf(p.birthdate, state.date) <= 21) ??
-      roster[0]!;
-    const before = young.attributes.finishing;
+    const young = userPlayers(state).find(
+      (p) => p.squadLevel !== "reserve" && ageOf(p.birthdate, state.date) <= 21,
+    )!;
+    expect(young, "1군 유망주가 없다").toBeDefined();
+    const before = { ...young.attributes };
     // 평일 오전·오후 슈팅 훈련 등록 (기본 훈련 없음 → 스킬이 일정을 만든다)
     setTraining(state, {
       repeatWeekly: [1, 2, 3, 4, 5].flatMap((dow) => [
@@ -114,20 +127,17 @@ describe("advance_time — 시간은 스킬로만 흐른다 (season.md §5)", ()
     });
     expect(state.schedule.filter((e) => e.type === "training").length).toBeGreaterThan(10);
 
-    let guard = 20;
-    while (guard-- > 0 && young.attributes.finishing === before) {
+    for (let i = 0; i < 20; i++) {
       const r = advanceTime(state, { days: 3 });
       if (!r.ok || r.stopped === "matchday") break;
     }
-    expect(young.attributes.finishing).toBeGreaterThanOrEqual(before);
-    if (young.attributes.finishing > before) {
-      const log = state.growthLog.filter(
-        (g) => g.gamePlayerId === young.id && g.target === "finishing",
-      );
-      expect(log.length).toBeGreaterThan(0);
-      expect(log[0]?.source).toBe("training");
-      expect(log[0]?.entryId).toBeTruthy(); // 출처 일정이 기록된다
-    }
+    // 일정은 실제로 소화됐다 — 날짜가 훈련 구간을 지났다
+    expect(state.date > "2026-07-13").toBe(true);
+    expect(young.attributes, "코어가 훈련만으로 능력치를 올렸다").toEqual(before);
+    expect(
+      state.growthLog.filter((g) => g.gamePlayerId === young.id && g.source === "training"),
+      "결산 없이 훈련 성장 로그가 생겼다",
+    ).toEqual([]);
   });
 
   it("전술 훈련은 결산에 넘길 기준값만 낸다 — 코어가 직접 올리지 않는다", () => {

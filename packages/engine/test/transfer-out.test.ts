@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  addDays,
   answerIncomingOffer,
   adjustTransferBudget,
   askingPriceFor,
+  generateIncomingOffers,
   incomingOffers,
   listingOf,
   offerPlayerOut,
@@ -12,11 +14,11 @@ import {
   setTransferList,
   teamName,
   userPlayers,
+  wageExpectationOf,
   type GameState,
 } from "@story-fm/engine";
-import type { MarketCard } from "@story-fm/domain";
+import type { GamePlayer, MarketCard, Negotiation } from "@story-fm/domain";
 import { completeDeal, createTestGame } from "./helpers";
-import { advanceDays } from "./helpers";
 
 /**
  * 매각 — **감독이 시작할 수 있어야 한다.**
@@ -58,16 +60,19 @@ describe("이적 리스트 — 값을 부르며 내놓는다", () => {
     expect(listingOf(state, target.id)).toBeNull();
   });
 
-  it("등재하면 오퍼가 붙는다 — 안 올리면 그 자리에 그대로 있다", () => {
-    const listedGot = (list: boolean) => {
-      const state = createTestGame(11);
-      const target = sellable(state);
-      if (list)
-        setTransferList(state, { playerId: target.id, listed: true, askingPrice: 1_000_000 });
-      for (let i = 0; i < 20 && incomingOffers(state).length === 0; i++) advanceDays(state, 1);
-      return incomingOffers(state).some((n) => n.gamePlayerId === target.id);
-    };
-    expect(listedGot(true)).toBe(true);
+  it("등재하면 값을 보고 오퍼가 붙는다", () => {
+    const state = createTestGame(11);
+    const target = sellable(state);
+    setTransferList(state, { playerId: target.id, listed: true, askingPrice: 1_000_000 });
+    const digest: string[] = [];
+    for (let i = 0; i < 40 && incomingOffers(state).length === 0; i++) {
+      state.date = addDays(state.date, 1);
+      generateIncomingOffers(state, digest);
+    }
+    expect(
+      incomingOffers(state).some((n) => n.gamePlayerId === target.id),
+      "등재한 선수에게 40일 동안 오퍼가 한 건도 안 붙었다",
+    ).toBe(true);
   });
 });
 
@@ -163,8 +168,9 @@ describe("매각 제안 — 특정 구단에 직접 묻는다", () => {
     offerPlayerOut(state, { playerId: target.id, teamId: buyer.id, fee: 1_000_000 });
     const negotiation = openNegotiationFor(state, target.id)!;
     state.date = negotiation.rounds[0]!.respondsOn!;
+    // 시장가 한참 아래로 불렀으므로 확률이 하한(5%)에 걸릴 일이 없다
     const verdict = respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
-    if (!verdict.ok) return; // 확률이 바닥이면 코어가 막는다 — 그건 그것대로 옳다
+    expect(verdict.ok, verdict.message).toBe(true);
 
     const budgetBefore = state.finances.find((f) => f.teamId === state.userTeamId)!.transferBudget;
     // 사는 쪽 메디컬을 지나야 선수가 옮겨 간다 (medical.ts)
@@ -208,16 +214,61 @@ describe("예산 우회 — 이적료를 흉내 낼 수 없다", () => {
   });
 });
 
-/** 들어온 오퍼 경로는 그대로 살아 있다 */
+/**
+ * 들어온 오퍼 경로는 그대로 살아 있다 — **오퍼를 손으로 세운다.**
+ * 시장이 언제 우리 선수를 노리는지는 시드가 정하지만, 감독이 답하는 문은
+ * 그 주사위와 무관하게 언제나 같은 자리에 있어야 한다.
+ */
 describe("AI가 먼저 노리는 길도 남아 있다", () => {
-  it("받은 오퍼에 답하는 경로가 여전히 동작한다 (answerIncomingOffer)", () => {
+  /** 상대가 넣은 매각 오퍼 하나 — 감독의 답을 기다린다 */
+  function offerFromChelsea(state: GameState, player: GamePlayer, fee: number): Negotiation {
+    const negotiation: Negotiation = {
+      id: `neg-in-${player.id}`,
+      gamePlayerId: player.id,
+      kind: "sell",
+      counterpartTeamId: "chelsea",
+      windowId: null,
+      openedOn: state.date,
+      expiresOn: addDays(state.date, 10),
+      status: "open",
+      rounds: [
+        {
+          date: state.date,
+          by: "them",
+          fee,
+          weeklyWage: wageExpectationOf(state, player),
+          contractYears: 4,
+          respondsOn: null,
+          probability: 60,
+          verdict: null,
+        },
+      ],
+    };
+    state.negotiations.push(negotiation);
+    return negotiation;
+  }
+
+  it("받은 오퍼를 거절하면 그 자리에서 협상이 닫힌다 (answerIncomingOffer)", () => {
     const state = createTestGame(11);
+    state.date = "2026-08-01";
     const target = sellable(state);
-    setTransferList(state, { playerId: target.id, listed: true, askingPrice: 1_000_000 });
-    for (let i = 0; i < 20 && incomingOffers(state).length === 0; i++) advanceDays(state, 1);
-    const negotiation = incomingOffers(state)[0];
-    if (!negotiation) return;
+    const negotiation = offerFromChelsea(state, target, 30_000_000);
+    expect(incomingOffers(state).map((n) => n.id)).toEqual([negotiation.id]);
+
     const res = answerIncomingOffer(state, { negotiationId: negotiation.id, verdict: "reject" });
     expect(res.ok, res.message).toBe(true);
+    expect(negotiation.status).toBe("rejected");
+    expect(incomingOffers(state)).toEqual([]);
+  });
+
+  it("수락하면 합의로 넘어가고 확정을 기다린다", () => {
+    const state = createTestGame(11);
+    state.date = "2026-08-01";
+    const target = sellable(state);
+    const negotiation = offerFromChelsea(state, target, 30_000_000);
+
+    const res = answerIncomingOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
+    expect(res.ok, res.message).toBe(true);
+    expect(negotiation.status).toBe("agreed");
   });
 });

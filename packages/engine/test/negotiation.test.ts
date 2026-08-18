@@ -105,6 +105,65 @@ function waitForIncoming(state: GameState, days = 60) {
   return { negotiation: incomingOffers(state)[0], digest };
 }
 
+/**
+ * **협상을 손으로 세운다** — 합의 뒤를 보는 케이스가 파일 전체에서 공유하는 픽스처.
+ *
+ * 오퍼 → 답신 → 합의를 세계에 굴려 기다리면 확률·답신 지연·검진이 전부 시드에
+ * 걸려, 주사위가 안 나온 날 케이스가 통째로 빠진다. 여기서 재는 것은 그 앞이
+ * 아니라 **관문과 장부**라 상태를 직접 세워 넣는 것이 옳다 (코어는 순수 함수다).
+ *
+ * 기본값은 "창이 열려 있고, 검진은 이미 통과한, 우리가 부른 합의"다.
+ */
+function stagedNegotiation(
+  state: GameState,
+  input: {
+    id: string;
+    kind: Negotiation["kind"];
+    playerId: string;
+    counterpartTeamId: string;
+    fee: number;
+    weeklyWage?: number;
+    years?: number;
+    status?: Negotiation["status"];
+    /** 검진 — 기본은 "이미 통과", `null`이면 아직 잡히지 않은 것으로 둔다 */
+    medical?: "passed" | "scheduled" | null;
+    expiresOn?: string;
+    /** 이적창을 30일 열어 둔다 (기본) — 창 자체를 보는 케이스는 끈다 */
+    openWindow?: boolean;
+  },
+): Negotiation {
+  if (input.openWindow !== false) {
+    for (const w of state.windows) w.closesOn = addDays(state.date, 30);
+  }
+  const negotiation: Negotiation = {
+    id: input.id,
+    gamePlayerId: input.playerId,
+    kind: input.kind,
+    counterpartTeamId: input.counterpartTeamId,
+    windowId: null,
+    openedOn: state.date,
+    expiresOn: input.expiresOn ?? addDays(state.date, 10),
+    status: input.status ?? "agreed",
+    ...(input.medical === null
+      ? {}
+      : { medical: { onDate: state.date, status: input.medical ?? "passed" } }),
+    rounds: [
+      {
+        date: state.date,
+        by: "us",
+        fee: input.fee,
+        weeklyWage: input.weeklyWage ?? 40_000,
+        contractYears: input.years ?? 1,
+        respondsOn: null,
+        probability: 60,
+        verdict: "accept",
+      },
+    ],
+  };
+  state.negotiations.push(negotiation);
+  return negotiation;
+}
+
 describe("오퍼", () => {
   it("협상을 개설하고 확률·응답일을 라운드에 남긴다", () => {
     const state = createTestGame(42);
@@ -174,12 +233,12 @@ describe("상대의 판정 — 코어가 가능한 것만 받는다", () => {
     const negotiation = openNegotiationFor(state, player.id)!;
     state.date = pendingOffer(negotiation)!.respondsOn!;
 
+    // 헐값이 실제로 하한 아래인지 먼저 못 박는다 — 아니면 이 케이스는 잴 것이 없다
     const odds = dealOdds(state, terms);
-    if (odds.probability < 5) {
-      const result = respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
-      expect(result.ok).toBe(false);
-      expect(result.message).toContain("응할 구단은 없습니다");
-    }
+    expect(odds.probability, "요구액의 20%인데도 확률이 하한 위다").toBeLessThan(5);
+    const result = respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("응할 구단은 없습니다");
     // 거절은 언제나 가능하다
     expect(respondOffer(state, { negotiationId: negotiation.id, verdict: "reject" }).ok).toBe(true);
     expect(openNegotiationFor(state, player.id)).toBeNull();
@@ -831,31 +890,15 @@ describe("시장의 문 — 한쪽에만 걸려 있던 관문들", () => {
     const state = createTestGame(42);
     const player = target(state);
     // 합의까지 간 임대 협상을 직접 세운다 — 관문만 보는 테스트다
-    const negotiation = {
+    const negotiation = stagedNegotiation(state, {
       id: "neg-loan",
-      gamePlayerId: player.id,
-      kind: "loan" as const,
+      kind: "loan",
+      playerId: player.id,
       counterpartTeamId: player.teamId,
-      windowId: null,
-      openedOn: state.date,
-      expiresOn: addDays(state.date, 10),
-      status: "agreed" as const,
+      fee: 2_000_000,
       // 검진은 이미 통과한 것으로 — 여기서 보려는 것은 창이다
-      medical: { onDate: state.date, status: "passed" as const },
-      rounds: [
-        {
-          date: state.date,
-          by: "us" as const,
-          fee: 2_000_000,
-          weeklyWage: 40_000,
-          contractYears: 1,
-          respondsOn: null,
-          probability: 60,
-          verdict: "accept" as const,
-        },
-      ],
-    };
-    state.negotiations.push(negotiation);
+      openWindow: false,
+    });
 
     for (const w of state.windows) w.closesOn = addDays(state.date, -1);
     const done = acceptDeal(state, negotiation.id);
@@ -866,24 +909,45 @@ describe("시장의 문 — 한쪽에만 걸려 있던 관문들", () => {
     expect(acceptDeal(state, negotiation.id).ok, "창이 열리면 확정된다").toBe(true);
   });
 
-  /** 소견이 붙으면 결정할 시간이 생긴다 — 그날이 마지막 날이면 고를 수가 없다 */
+  /**
+   * 소견이 붙으면 결정할 시간이 생긴다 — 그날이 마지막 날이면 고를 수가 없다.
+   *
+   * 소견 판정은 **협상 id에 묶여 결정적**이라(`medical:<id>`), 세계를 굴려 붙기를
+   * 기다리지 않고 합의된 딜을 손으로 세워 붙는 것을 하나 찾는다. 부상 중인 선수는
+   * 소견 확률이 천장(0.75)이라 몇 번이면 걸린다.
+   */
   it("메디컬 소견은 결정할 날을 남긴다", () => {
     const state = createTestGame(42);
     const player = target(state);
-    sendOffer(state, offerFor(state, player.id, 1.3));
-    const negotiation = openNegotiationFor(state, player.id)!;
-    state.date = pendingOffer(negotiation)!.respondsOn!;
-    if (!respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" }).ok) return;
-    acceptDeal(state, negotiation.id);
-    // 기한을 검진일에 딱 붙여 놓고 소견을 강제한다
-    negotiation.expiresOn = state.date;
-    negotiation.medical = { onDate: state.date, status: "scheduled" };
-    const outcome = resolveMedical(state, negotiation, playerById(state, player.id)!);
-    if (outcome.passed) return; // 통과한 딜은 이 케이스가 아니다
-    expect(
-      negotiation.expiresOn > state.date,
-      "소견을 읽고 강행·철회를 고를 날이 남아야 한다",
-    ).toBe(true);
+    openInjuryFor(state, playerById(state, player.id)!, "match", () => 0.9);
+
+    let flagged = false;
+    for (let attempt = 0; attempt < 20 && !flagged; attempt++) {
+      const negotiation = stagedNegotiation(state, {
+        id: `neg-medical-${attempt}`,
+        kind: "buy",
+        playerId: player.id,
+        counterpartTeamId: player.teamId,
+        fee: 10_000_000,
+        weeklyWage: 80_000,
+        years: 4,
+        medical: "scheduled",
+        // 기한을 검진일에 딱 붙여 놓는다 — 소견이 붙으면 여기가 밀려나야 한다
+        expiresOn: state.date,
+        openWindow: false,
+      });
+      const outcome = resolveMedical(state, negotiation, playerById(state, player.id)!);
+      if (outcome.passed) continue;
+
+      expect(negotiation.medical!.status).toBe("flagged");
+      expect(negotiation.medical!.note, "소견에는 읽을 문장이 있어야 한다").toBeTruthy();
+      expect(
+        negotiation.expiresOn > state.date,
+        "소견을 읽고 강행·철회를 고를 날이 남아야 한다",
+      ).toBe(true);
+      flagged = true;
+    }
+    expect(flagged, "스무 번을 세워도 소견이 붙는 검진이 없었다").toBe(true);
   });
 });
 
@@ -897,38 +961,11 @@ describe("시장의 문 — 한쪽에만 걸려 있던 관문들", () => {
 describe("임대료 — 검사한 값이 빠진다", () => {
   const LOAN_FEE = 2_000_000;
 
-  /** 합의까지 간 임대 협상을 세운다 — 관문 뒤의 장부만 보는 테스트다 */
-  function agreedLoan(
+  /** 합의까지 간 임대 협상 — 관문 뒤의 장부만 보는 테스트다 */
+  const agreedLoan = (
     state: GameState,
     input: { id: string; kind: "loan" | "loan_out"; playerId: string; counterpartTeamId: string },
-  ) {
-    const negotiation = {
-      id: input.id,
-      gamePlayerId: input.playerId,
-      kind: input.kind,
-      counterpartTeamId: input.counterpartTeamId,
-      windowId: null,
-      openedOn: state.date,
-      expiresOn: addDays(state.date, 10),
-      status: "agreed" as const,
-      medical: { onDate: state.date, status: "passed" as const },
-      rounds: [
-        {
-          date: state.date,
-          by: "us" as const,
-          fee: LOAN_FEE,
-          weeklyWage: 40_000,
-          contractYears: 1,
-          respondsOn: null,
-          probability: 60,
-          verdict: "accept" as const,
-        },
-      ],
-    };
-    state.negotiations.push(negotiation);
-    for (const w of state.windows) w.closesOn = addDays(state.date, 30);
-    return negotiation;
-  }
+  ) => stagedNegotiation(state, { ...input, fee: LOAN_FEE });
 
   it("빌려오면 현금과 예산이 같은 크기로 빠진다", () => {
     const state = createTestGame(42);
@@ -1084,37 +1121,23 @@ describe("임대 송출의 메디컬 소견", () => {
 
   it("임대료 눈금으로 깎아 다시 부르고, 감독이 수락할 수 있다", () => {
     // 소견 판정은 협상 시드에 묶여 결정적이라 붙는 건 하나를 찾아 쓴다
-    for (let attempt = 0; attempt < 8; attempt++) {
+    let resolved = false;
+    for (let attempt = 0; attempt < 8 && !resolved; attempt++) {
       const state = createTestGame(42);
       const ours = [...playersOf(state, state.userTeamId)].sort(
         (a, b) => a.attributes.overall - b.attributes.overall,
       )[0]!;
       const borrowerId = state.players.find((p) => p.teamId !== state.userTeamId)!.teamId;
-      for (const w of state.windows) w.closesOn = addDays(state.date, 30);
       openInjuryFor(state, ours, "match", () => 0.9);
-      const negotiation: Negotiation = {
+      const negotiation = stagedNegotiation(state, {
         id: `neg-loanout-${ours.id}-${state.date}-${attempt}`,
-        gamePlayerId: ours.id,
         kind: "loan_out",
+        playerId: ours.id,
         counterpartTeamId: borrowerId,
-        windowId: null,
-        openedOn: state.date,
-        expiresOn: addDays(state.date, 10),
-        status: "agreed",
-        rounds: [
-          {
-            date: state.date,
-            by: "us",
-            fee: LOAN_FEE,
-            weeklyWage: 40_000,
-            contractYears: 1,
-            respondsOn: null,
-            probability: 60,
-            verdict: "accept",
-          },
-        ],
-      };
-      state.negotiations.push(negotiation);
+        fee: LOAN_FEE,
+        // 검진은 아직 잡히지 않았다 — `acceptDeal`이 날을 잡고 소견이 거기서 붙는다
+        medical: null,
+      });
       const pronenessBefore = pronenessValue(playerById(state, ours.id)!);
 
       expect(acceptDeal(state, negotiation.id).ok).toBe(true);
@@ -1141,9 +1164,9 @@ describe("임대 송출의 메디컬 소견", () => {
       expect(playerById(state, ours.id)!.loan?.fromTeamId).toBe(state.userTeamId);
       // 상대 구단의 소견이라 우리가 강행한 것이 아니다 — 성향은 그대로다
       expect(pronenessValue(playerById(state, ours.id)!)).toBe(pronenessBefore);
-      return;
+      resolved = true;
     }
-    throw new Error("소견이 붙는 임대 송출을 찾지 못했다");
+    expect(resolved, "여덟 번을 세워도 소견이 붙는 임대 송출이 없었다").toBe(true);
   });
 });
 
@@ -1283,7 +1306,7 @@ describe("임대 중인 선수는 소유 구단만 움직인다", () => {
   const FEE = 2_000_000;
 
   /** 합의까지 간 협상 하나 — 관문 뒤의 장부를 보려면 확정 직전까지 세워야 한다 */
-  function agreedDeal(
+  const agreedDeal = (
     state: GameState,
     input: {
       id: string;
@@ -1292,33 +1315,7 @@ describe("임대 중인 선수는 소유 구단만 움직인다", () => {
       counterpartTeamId: string;
       fee: number;
     },
-  ) {
-    for (const w of state.windows) w.closesOn = addDays(state.date, 30);
-    state.negotiations.push({
-      id: input.id,
-      gamePlayerId: input.playerId,
-      kind: input.kind,
-      counterpartTeamId: input.counterpartTeamId,
-      windowId: null,
-      openedOn: state.date,
-      expiresOn: addDays(state.date, 10),
-      status: "agreed",
-      medical: { onDate: state.date, status: "passed" },
-      rounds: [
-        {
-          date: state.date,
-          by: "us",
-          fee: input.fee,
-          weeklyWage: 40_000,
-          contractYears: 3,
-          respondsOn: null,
-          probability: 60,
-          verdict: "accept",
-        },
-      ],
-    });
-    return input.id;
-  }
+  ) => stagedNegotiation(state, { ...input, years: 3 }).id;
 
   /** 첼시 선수를 우리가 빌려 온다 — `teamId`는 우리, 계약은 첼시에 남는다 */
   function borrowed(state: GameState) {

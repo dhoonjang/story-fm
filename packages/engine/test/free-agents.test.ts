@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   FREE_AGENT_TEAM,
+  LOAN_FEE_RATE,
   activeContract,
+  addDays,
   answerOffer,
   dealOdds,
   freeAgents,
@@ -10,6 +12,7 @@ import {
   offerPlayerOut,
   openNegotiationFor,
   pendingVerdicts,
+  marketValueOf,
   playerById,
   playersOf,
   releasePlayer,
@@ -17,6 +20,7 @@ import {
   sendOffer,
   signFreeAgents,
   userPlayers,
+  wageExpectationOf,
   weeklyWagesOf,
   windowOpenOn,
   withdrawOffer,
@@ -27,6 +31,31 @@ import { completeDeal, createTestGame } from "./helpers";
 const spare = (state: GameState) => {
   const squad = userPlayers(state).sort((a, b) => a.attributes.overall - b.attributes.overall);
   return squad.find((p) => p.positions[0]?.position !== "GK") ?? squad[0]!;
+};
+
+/**
+ * 내보내는 딜의 **결정적 픽스처** — 이 파일의 매각·임대 송출 케이스가 공유한다.
+ *
+ * 두 가지가 케이스를 조용히 죽인다. ① 스쿼드 맨 밑은 유스라 몸값이 0이고
+ * (`baseValueOf` 하한) 그러면 "사는 쪽 상한의 몇 %를 불렀나"가 언제나 0%라
+ * 확률이 0으로 떨어진다. ② 시장가 위로 부르면 같은 자리에서 하한(5%)에 걸린다.
+ * 둘 다 코어가 옳게 막는 것이라, 예전엔 `if (!verdict.ok) return`으로 빠져 나가
+ * 케이스가 한 줄도 안 돌았다.
+ *
+ * **오퍼를 손으로 세우지는 않는다** — 이 케이스들이 재는 것이 바로
+ * `offer_player_out → 판정 → 확정` 경로 자체다. 경로는 그대로 두고 값만 눈금
+ * 위로 올려, 주사위가 빗나갈 수 없게 만든다.
+ */
+const outgoing = (state: GameState, kind: "sell" | "loan_out") => {
+  const player = userPlayers(state)
+    .sort((a, b) => a.attributes.overall - b.attributes.overall)
+    .find((p) => p.positions[0]?.position !== "GK" && marketValueOf(state, p) > 0);
+  expect(player, "값이 붙는 매물이 스쿼드에 없다").toBeDefined();
+  const value = marketValueOf(state, player!);
+  return {
+    player: player!,
+    fee: Math.round(value * (kind === "loan_out" ? LOAN_FEE_RATE : 0.5)),
+  };
 };
 
 describe("무소속 — 클럽이 아니라 클럽이 없는 상태", () => {
@@ -66,19 +95,32 @@ describe("무소속 — 클럽이 아니라 클럽이 없는 상태", () => {
 
   it("다른 구단이 데려간다 — 자리가 얇고 수준이 맞는 곳으로", () => {
     const state = createTestGame(11);
-    const target = spare(state);
+    /**
+     * **스쿼드 중간을 내놓는다.** 영입은 수준이 맞는 구단만 하므로
+     * (`SUITOR_LEVEL_BAND` — 팀 상위 15명 평균과 ±7), 맨 밑의 유스는 어느 리그와도
+     * 눈금이 안 맞아 영원히 무소속으로 남는다. 그건 이 케이스가 재려는 것이 아니다.
+     */
+    const squad = userPlayers(state).sort((a, b) => a.attributes.overall - b.attributes.overall);
+    const target = squad[Math.floor(squad.length / 2)]!;
     releasePlayer(state, { playerId: target.id });
 
+    /**
+     * **날짜를 앞으로만 민다.** `signFreeAgents`의 rng는 (시드, 날짜) 하나로
+     * 정해지므로 같은 날을 다시 부르면 같은 눈이 나온다 — 스물여덟 날을 돌려
+     * 쓰면 400번을 불러도 실제 시도는 스물여덟 번이다.
+     */
     const digest: string[] = [];
-    for (let i = 0; i < 400 && freeAgents(state).length > 0; i++) {
-      state.date = `2026-07-${String((i % 28) + 1).padStart(2, "0")}`;
+    for (let i = 0; i < 200 && freeAgents(state).length > 0; i++) {
+      state.date = addDays(state.date, 1);
       signFreeAgents(state, digest);
     }
     const after = state.players.find((p) => p.id === target.id)!;
-    if (after.teamId === FREE_AGENT_TEAM) return; // 아무도 안 데려갈 수도 있다
+    expect(after.teamId, "200일 동안 아무도 데려가지 않았다").not.toBe(FREE_AGENT_TEAM);
     expect(isClubTeam(after.teamId)).toBe(true);
     expect(activeContract(state, target.id)?.teamId).toBe(after.teamId);
     expect(digest.join("")).toContain(after.name ?? "");
+    // **우리 팀은 이 경로로 받지 않는다** — 감독이 직접 데려와야 한다
+    expect(after.teamId, "가만히 있었는데 스쿼드가 채워졌다").not.toBe(state.userTeamId);
   });
 
   it("감독이 직접 데려온다 — 무소속엔 파는 쪽 스쿼드 하한이 없다", () => {
@@ -150,16 +192,6 @@ describe("무소속 — 클럽이 아니라 클럽이 없는 상태", () => {
     const again = sendOffer(state, offer);
     expect(again.ok, again.message).toBe(true);
   });
-
-  it("우리 팀은 이 경로로 선수를 받지 않는다 — 감독이 직접 데려와야 한다", () => {
-    const state = createTestGame(11);
-    const before = playersOf(state, state.userTeamId).length;
-    const target = spare(state);
-    releasePlayer(state, { playerId: target.id });
-    const digest: string[] = [];
-    for (let i = 0; i < 200; i++) signFreeAgents(state, digest);
-    expect(playersOf(state, state.userTeamId).length).toBeLessThan(before);
-  });
 });
 
 describe("임대 영입 — 사는 게 아니라 빌리는 것", () => {
@@ -172,11 +204,11 @@ describe("임대 영입 — 사는 게 아니라 빌리는 것", () => {
     const state = createTestGame(11);
     state.date = "2026-08-01";
     const target = targetOf(state);
-    const contractBefore = activeContract(state, target.id)!;
+    // 임대료·주급을 상대가 부르는 값 위로 얹는다 — 확률이 하한(5%)에 걸리지 않게
     const res = sendOffer(state, {
       playerId: target.id,
-      fee: 3_000_000,
-      weeklyWage: Math.round(contractBefore.weeklyWage * 0.5),
+      fee: Math.round(marketValueOf(state, target) * LOAN_FEE_RATE * 1.5),
+      weeklyWage: Math.round(wageExpectationOf(state, target) * 1.2),
       years: 1,
       kind: "loan",
     });
@@ -186,7 +218,7 @@ describe("임대 영입 — 사는 게 아니라 빌리는 것", () => {
 
     state.date = negotiation.rounds[0]!.respondsOn!;
     const verdict = answerOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
-    if (!verdict.ok) return; // 확률이 바닥이면 코어가 막는다
+    expect(verdict.ok, verdict.message).toBe(true);
 
     const done = completeDeal(state, negotiation.id);
     expect(done.ok, done.message).toBe(true);
@@ -216,17 +248,28 @@ describe("다른 구단도 계약을 관리한다", () => {
     // 계약이 곧 끝나는 타 팀 선수를 만든다
     const target = playersOf(state, "chelsea").find((p) => p.teamId !== state.userTeamId)!;
     const contract = activeContract(state, target.id)!;
-    contract.until = "2026-12-31";
+    const until = "2027-06-30";
+    contract.until = until;
 
     sendOffer(state, { playerId: target.id, fee: 20_000_000, weeklyWage: 90_000, years: 4 });
     expect(openNegotiationFor(state, target.id)).not.toBeNull();
 
+    /**
+     * **이 선수의 계약 하나만 남긴다.** 판정은 하루에 한 번이고 매번 세계의 모든
+     * 계약을 훑으므로, 그대로 두면 케이스 하나가 몇 분을 쓴다. 오퍼는 이미
+     * 온전한 세계에서 넣었고, 여기서 보는 것은 그 뒤의 한 갈래다.
+     */
+    state.contracts = state.contracts.filter((c) => c.gamePlayerId === target.id);
+
+    // 검토 창(만료 240일 전)이 열리는 날부터 하루씩 — 날짜를 안 밀면 같은 눈만 나온다
+    state.date = "2026-11-02";
     const digest: string[] = [];
-    for (let i = 0; i < 500 && openNegotiationFor(state, target.id); i++) {
+    for (let i = 0; i < 240 && openNegotiationFor(state, target.id); i++) {
       runAiRenewals(state, digest);
+      state.date = addDays(state.date, 1);
     }
-    if (openNegotiationFor(state, target.id)) return; // 재계약을 안 할 수도 있다
-    expect(activeContract(state, target.id)!.until > "2026-12-31").toBe(true);
+    expect(openNegotiationFor(state, target.id), "검토 창 내내 재계약이 없었다").toBeNull();
+    expect(activeContract(state, target.id)!.until > until).toBe(true);
   });
 
   it("우리 선수는 건드리지 않는다 — 재계약은 감독의 일이다", () => {
@@ -234,7 +277,10 @@ describe("다른 구단도 계약을 관리한다", () => {
     const ours = userPlayers(state)[0]!;
     const until = activeContract(state, ours.id)!.until;
     const digest: string[] = [];
-    for (let i = 0; i < 300; i++) runAiRenewals(state, digest);
+    for (let i = 0; i < 120; i++) {
+      runAiRenewals(state, digest);
+      state.date = addDays(state.date, 1);
+    }
     expect(activeContract(state, ours.id)!.until).toBe(until);
   });
 });
@@ -243,13 +289,13 @@ describe("임대 내보내기도 흥정이다 — 상대가 받아 줘야 한다
   it("send_offer(kind=loan_out) → 판정 → 확정이면 그쪽으로 간다", () => {
     const state = createTestGame(11);
     state.date = "2026-08-01";
-    const target = spare(state);
+    const { player: target, fee } = outgoing(state, "loan_out");
     const wage = activeContract(state, target.id)!.weeklyWage;
 
     const res = offerPlayerOut(state, {
       playerId: target.id,
       teamId: "chelsea",
-      fee: 500_000,
+      fee,
       weeklyWage: Math.round(wage * 0.6),
       loan: true,
     });
@@ -259,7 +305,7 @@ describe("임대 내보내기도 흥정이다 — 상대가 받아 줘야 한다
 
     state.date = negotiation.rounds[0]!.respondsOn!;
     const verdict = answerOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
-    if (!verdict.ok) return;
+    expect(verdict.ok, verdict.message).toBe(true);
     const done = completeDeal(state, negotiation.id);
     expect(done.ok, done.message).toBe(true);
     const after = state.players.find((p) => p.id === target.id)!;
@@ -277,10 +323,13 @@ describe("판정을 기다리는 협상은 눈에 띈다", () => {
     const target = playersOf(state, "chelsea").find((p) => p.teamId !== state.userTeamId)!;
     sendOffer(state, { playerId: target.id, fee: 15_000_000, weeklyWage: 80_000, years: 4 });
     const negotiation = openNegotiationFor(state, target.id)!;
-    const respondsOn = negotiation.rounds[0]!.respondsOn!;
-    if (respondsOn > state.date) {
-      expect(pendingVerdicts(state), "답이 오기 전엔 서지 않는다").toHaveLength(0);
-    }
+    /**
+     * 답신 지연 0일은 설계다(`responseDelayDays`) — 그 선수가 걸리면 "기다리는
+     * 동안"을 잴 수 없으므로 답신일을 이틀 뒤로 못 박고 두 상태를 다 본다.
+     */
+    const respondsOn = addDays(state.date, 2);
+    negotiation.rounds[0]!.respondsOn = respondsOn;
+    expect(pendingVerdicts(state), "답이 오기 전엔 서지 않는다").toHaveLength(0);
     state.date = respondsOn;
     const waiting = pendingVerdicts(state);
     expect(waiting).toHaveLength(1);
@@ -290,11 +339,12 @@ describe("판정을 기다리는 협상은 눈에 띈다", () => {
   it("합의된 협상은 확정을 기다린다", () => {
     const state = createTestGame(11);
     state.date = "2026-08-01";
-    const target = spare(state);
-    offerPlayerOut(state, { playerId: target.id, teamId: "chelsea", fee: 500_000 });
+    const { player: target, fee } = outgoing(state, "sell");
+    offerPlayerOut(state, { playerId: target.id, teamId: "chelsea", fee });
     const negotiation = openNegotiationFor(state, target.id)!;
     state.date = negotiation.rounds[0]!.respondsOn!;
-    if (!answerOffer(state, { negotiationId: negotiation.id, verdict: "accept" }).ok) return;
+    const answered = answerOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
+    expect(answered.ok, answered.message).toBe(true);
     const waiting = pendingVerdicts(state);
     expect(waiting[0]!.action).toBe("accept_deal");
   });
