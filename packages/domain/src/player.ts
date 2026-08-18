@@ -1395,6 +1395,46 @@ export function defaultRoleOf(position: string): string {
 }
 
 /**
+ * **자리를 옮겼을 때 되찾는 역할** — ① 지금 걸린 역할이 새 자리 목록에 있으면 그대로
+ * → ② 그 자리의 기억 (§3.2). 둘 다 없으면 `undefined`, 곧 **그 자리의 기본 역할**이다.
+ *
+ * ⚠️ **자리가 바뀌었는지는 보지 않는다** — 그 역할이 새 자리 목록에 있는지만 본다.
+ * 옛 자리와 견주면 CB → LCB처럼 코드만 바뀌는 이동에서 한쪽만 기억을 꺼내 값이 갈린다.
+ *
+ * 코어(`setLineup`의 승계)와 전술판이 **같은 이 함수를 부른다.** 저장을 기다리는
+ * 3초 동안 화면이 규칙을 따로 밟으면, 감독이 누른 적 없는 역할 변경이 자동 저장
+ * 응답과 함께 혼자 일어난다.
+ *
+ * `undefined`를 기본 역할로 접지 않는 이유: 코어는 **스스로 닿는 값을 배치에 적지
+ * 않는다**. 적어 두면 그 기본 역할이 감독의 결정으로 기억에 남는다(`rememberRole`).
+ *
+ * @param current 지금 걸린 역할 (없으면 null·undefined)
+ * @param remembered 그 자리에서 마지막에 맡던 역할 (없으면 null·undefined)
+ */
+export function inheritedRole(
+  position: string,
+  current: string | null | undefined,
+  remembered: string | null | undefined,
+): string | undefined {
+  const options = rolesFor(position);
+  if (current != null && options.some((r) => r.id === current)) return current;
+  if (remembered != null && options.some((r) => r.id === remembered)) return remembered;
+  return undefined;
+}
+
+/**
+ * **그 자리에 서면 실제로 걸리는 역할** — 되찾기(`inheritedRole`)에 기본 역할까지
+ * 얹은 3단. 화면은 값이 있어야 알약을 그리므로 이쪽을 부른다.
+ */
+export function roleAtSlot(
+  position: string,
+  current: string | null | undefined,
+  remembered: string | null | undefined,
+): string {
+  return inheritedRole(position, current, remembered) ?? defaultRoleOf(position);
+}
+
+/**
  * 역할 한글 이름 → 약칭 (`컴플리트 포워드` → `CF`).
  *
  * 좁은 자리에서 역할을 부르는 이름은 **전술판과 같아야 한다** — 같은 역할이

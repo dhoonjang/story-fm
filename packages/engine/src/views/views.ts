@@ -37,6 +37,8 @@ import {
   monthOf,
   psrStatus,
   seasonWageRatio,
+  wageRatioTone,
+  type WageRatioTone,
 } from "../club/finance";
 import {
   cupCatalog,
@@ -56,6 +58,7 @@ import { domesticCupsOf } from "../competition/domestic-cup";
 import { drawParts, drawTitle } from "../competition/draw-schedule";
 import { euroCompetitionOf } from "../competition/europe";
 import { formAngle, formLabel, formTone } from "../squad/form";
+import { ratingTone, type RatingTone } from "../match/ratings";
 import { GAP_CONDITION, edgeOf, zoneGrid } from "@story-fm/sim";
 import { moodOf } from "../squad/mood";
 import { isHomegrownFor, occupiesSquadList, squadRegistrationOf } from "../squad/registration";
@@ -155,6 +158,8 @@ export interface FinanceMonthView {
   /** 장부의 변화 (이적료 지출 제외, 상각 포함) */
   pnlNet: number;
   wageRatio: number;
+  /** 그 비중이 선 구간 — 색의 경계는 `finance.ts`가 갖는다 */
+  wageTone: WageRatioTone;
   notes: string[];
 }
 
@@ -180,10 +185,11 @@ export interface FinanceFeedRow {
   /** 2건 이상 접혔을 때만 — 펼치면 나오는 대상별 명세. 금액이 큰 것부터 */
   items?: Array<{ label: string; amount: number }>;
   /**
-   * 명세가 무엇을 하나씩 세는지 — 묶인 엔트리가 모두 같은 `ref.type`일 때만.
-   * 화면이 `45명`과 `2건`을 가르는 데 쓴다.
+   * 명세를 **무엇으로 세는가** — 묶인 엔트리가 모두 선수를 가리키면 `명`, 아니면 `건`.
+   * 세는 단위는 무엇이 묶였는지가 정하므로 코어가 안다. 화면은 이 낱말과 `items.length`로
+   * "손흥민 외 44명"을 조립한다 (문장은 코어가 만들지 않는다).
    */
-  itemsRef?: "match" | "player" | "transfer" | "competition";
+  unit?: "명" | "건";
 }
 
 /** 피드가 세우는 줄 수 — 원장 건수가 아니라 **접은 뒤의** 줄 수다 */
@@ -216,7 +222,7 @@ function foldFinanceFeed(ledger: readonly LedgerEntry[]): FinanceFeedRow[] {
     head: string;
     items: Array<{ label: string; amount: number }>;
     /** 묶인 엔트리의 `ref.type` — 하나로 모이지 않으면 null */
-    refType: FinanceFeedRow["itemsRef"] | null;
+    refType: NonNullable<LedgerEntry["ref"]>["type"] | null;
   };
   const groups = new Map<string, Group>();
   const order: Group[] = [];
@@ -268,7 +274,7 @@ function foldFinanceFeed(ledger: readonly LedgerEntry[]): FinanceFeedRow[] {
       id: `fold-${key}`,
       label: head,
       items: [...items].sort((a, b) => b.amount - a.amount),
-      ...(refType ? { itemsRef: refType } : {}),
+      ...(refType ? { unit: refType === "player" ? ("명" as const) : ("건" as const) } : {}),
     };
   });
 }
@@ -298,6 +304,12 @@ export interface SquadPositionView {
    * 그 자리 전력은 낮을 수 있다.
    */
   overall: number;
+}
+
+/** 최근 경기 평점 한 점 — 색의 경계는 `ratings.ts`가 갖는다 (화면이 다시 자르지 않는다) */
+export interface RecentRatingView {
+  value: number;
+  tone: RatingTone;
 }
 
 /** 스쿼드 행 = 메타 + 15축 (오피스 뷰는 우리 선수라 숫자를 그대로 준다) */
@@ -373,7 +385,7 @@ interface SquadViewRowMeta {
    * 시간 축이다 (숫자 하나로는 "오르는 중인지 식는 중인지"를 알 수 없다).
    * 유저 팀 경기에만 평점이 남으므로 그 범위다.
    */
-  recentRatings: number[];
+  recentRatings: RecentRatingView[];
   /**
    * **체력** — 지금 이 선수의 상태 0~100 (몸과 마음이 한 축이다).
    * 왜 이 값인지는 `mood` 한 문장이 설명한다.
@@ -582,8 +594,39 @@ export interface CompetitionView {
   rounds: CompetitionRoundView[];
   /** 녹아웃 단계별 대진 — 리그는 빈 배열 */
   bracket: BracketStageView[];
+  /** 컵에서 우리가 어디까지 갔나 — 순위표가 없는 대회의 "현재 위치" */
+  cupProgress: CupProgressView;
   /** 대항전 전용 — 리그 페이즈 통과 경계선 */
   europe: EuropeView | null;
+}
+
+/**
+ * 컵 진행 — **브래킷 해석은 코어가 한다.**
+ *
+ * 화면이 대진을 뒤져 "우리가 마지막으로 선 단계"를 찾으면 같은 장부를 두 곳에서
+ * 읽게 되고, 그 규칙이 갈리면 순위표 없는 대회의 머리줄만 조용히 틀린다.
+ * 코어는 단계와 결말만 내고 "8강 탈락"이라는 문장은 화면이 잇는다.
+ */
+export interface CupProgressView {
+  /** 우리 대진이 마지막으로 선 단계 이름 — 아직 서 본 적이 없으면 null */
+  stage: string | null;
+  /**
+   * 그 단계에서 무슨 일이 있었나.
+   * `undrawn` 추첨 전 · `out` 대진에 우리가 없다 · `eliminated` 그 단계에서 졌다 ·
+   * `champion` 결승에서 이겼다 · `through` 통과해 다음을 기다린다
+   */
+  outcome: "undrawn" | "out" | "eliminated" | "champion" | "through";
+}
+
+/** 브래킷에서 우리 자리를 읽는다 — `cupProgress`의 단일 규칙 */
+export function cupProgressOf(bracket: readonly BracketStageView[]): CupProgressView {
+  const ours = bracket.filter((stage) => stage.ties.some((t) => t.ours));
+  const last = ours[ours.length - 1];
+  if (!last) return { stage: null, outcome: bracket.length === 0 ? "undrawn" : "out" };
+  const tie = last.ties.find((t) => t.ours)!;
+  if (tie.won === false) return { stage: last.label, outcome: "eliminated" };
+  if (tie.won === true && last.stage === "final") return { stage: last.label, outcome: "champion" };
+  return { stage: last.label, outcome: "through" };
 }
 
 export interface BracketStageView {
@@ -684,6 +727,42 @@ export interface MatchPlayerView {
   ours: boolean;
   /** 이 경기에서 한 일 — 사건 목록의 파생 */
   tally: MatchTally;
+}
+
+/** 선발 평균 전력 — 그라운드 위 열한 명의 평균(정수). 빈 명단이면 0 */
+function xiRatingOf(players: readonly MatchPlayerView[]): number {
+  if (players.length === 0) return 0;
+  return Math.round(players.reduce((sum, p) => sum + p.effective, 0) / players.length);
+}
+
+/** 팀 합계 — 선수별 `tally`를 더한다. 경고·퇴장은 사람 단위라 세지 않는다 */
+function tallyTotal(players: readonly MatchPlayerView[]): MatchTally {
+  return players.reduce<MatchTally>(
+    (acc, p) => ({
+      goals: acc.goals + p.tally.goals,
+      assists: acc.assists + p.tally.assists,
+      shots: acc.shots + p.tally.shots,
+      saves: acc.saves + p.tally.saves,
+      yellows: acc.yellows + p.tally.yellows,
+      red: acc.red || p.tally.red,
+      passes: acc.passes + p.tally.passes,
+      progressive: acc.progressive + p.tally.progressive,
+      xg: acc.xg + p.tally.xg,
+      scoringExpectation: acc.scoringExpectation + p.tally.scoringExpectation,
+    }),
+    {
+      goals: 0,
+      assists: 0,
+      shots: 0,
+      saves: 0,
+      yellows: 0,
+      red: false,
+      passes: 0,
+      progressive: 0,
+      xg: 0,
+      scoringExpectation: 0,
+    },
+  );
 }
 
 /**
@@ -795,6 +874,13 @@ export interface MatchView {
   };
   onPitch: { home: MatchPlayerView[]; away: MatchPlayerView[] };
   bench: { home: MatchPlayerView[]; away: MatchPlayerView[] };
+  /**
+   * 선발 평균 전력 — 그라운드 위 열한 명의 `effective` 평균(정수).
+   * 상대 쪽은 안개를 지난 값이라 **화면이 다시 평균 내면** 우리 쪽과 다른 자로 잰 값이 된다.
+   */
+  xiRating: { home: number; away: number };
+  /** 팀 합계 — 선수별 `tally`의 합. 표에 열을 더 세우지 않고 한 줄로 세운다 */
+  totals: { home: MatchTally; away: MatchTally };
   subs: { home: { used: number; windows: number }; away: { used: number; windows: number } };
   sentOff: string[];
 }
@@ -853,6 +939,8 @@ export interface OfficeViews {
     stadium: { name: string; capacity: number };
     /** 급여 비중 — **시즌 누계** (급여 ÷ 매출). 한 달만 보면 프리시즌에 튄다 */
     wageRatio: number;
+    /** 시즌 누계 비중이 선 구간 — 경계는 `finance.ts` */
+    wageTone: WageRatioTone;
     psr: { rolling3Season: number; headroom: number } | null;
     /** 진행 중인 이번 달 잠정 집계 */
     current: FinanceMonthView;
@@ -1095,11 +1183,14 @@ function outcomeFor(state: GameState, match: MatchRecord): "W" | "D" | "L" | nul
  * 경기별로 남아 있으므로(`MATCH.result.ratings`, 유저 팀 경기만) 날짜순으로
  * 훑어 마지막 다섯 개를 준다 — 화면이 추이를 그릴 수 있다.
  */
-function recentRatingsOf(state: GameState, playerId: string, limit = 5): number[] {
+function recentRatingsOf(state: GameState, playerId: string, limit = 5): RecentRatingView[] {
   const rated = state.matches
     .filter((m) => m.result?.ratings?.[playerId] !== undefined)
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-  return rated.slice(-limit).map((m) => m.result!.ratings![playerId]!);
+  return rated.slice(-limit).map((m) => {
+    const value = m.result!.ratings![playerId]!;
+    return { value, tone: ratingTone(value) };
+  });
 }
 
 /**
@@ -1280,6 +1371,11 @@ function buildMatchView(state: GameState): MatchView | null {
     teamId: string,
   ) => entries.filter((e) => ids.includes(e.id)).map((e) => player(e, teamId));
 
+  const onPitch = {
+    home: rowsOf(packet.home.lineup, ledger.home.onPitch, match.homeTeamId),
+    away: rowsOf(packet.away.lineup, ledger.away.onPitch, match.awayTeamId),
+  };
+
   const tacticsOfSide = (teamId: string, tactical: { uptake: number; notes: string[] }) => ({
     ...(teamId !== state.userTeamId && pending.aiTactics
       ? pending.aiTactics
@@ -1385,10 +1481,9 @@ function buildMatchView(state: GameState): MatchView | null {
       home: tacticsOfSide(match.homeTeamId, packet.home.tactical),
       away: tacticsOfSide(match.awayTeamId, packet.away.tactical),
     },
-    onPitch: {
-      home: rowsOf(packet.home.lineup, ledger.home.onPitch, match.homeTeamId),
-      away: rowsOf(packet.away.lineup, ledger.away.onPitch, match.awayTeamId),
-    },
+    onPitch: onPitch,
+    xiRating: { home: xiRatingOf(onPitch.home), away: xiRatingOf(onPitch.away) },
+    totals: { home: tallyTotal(onPitch.home), away: tallyTotal(onPitch.away) },
     bench: {
       home: rowsOf(packet.home.bench, ledger.home.bench, match.homeTeamId),
       away: rowsOf(packet.away.bench, ledger.away.bench, match.awayTeamId),
@@ -1461,6 +1556,7 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
   const nextOurs = matches.find(
     (m) => !m.result && (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
   );
+  const bracket = cup ? buildBracket(state, competitionId) : [];
   return {
     id: competitionId,
     name: competitionName(competitionId),
@@ -1473,7 +1569,8 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
       ? `${nextOurs.date} ${nextOurs.neutral ? "중립" : nextOurs.homeTeamId === state.userTeamId ? "홈" : "원정"} vs ${teamNameIn(state, nextOurs.homeTeamId === state.userTeamId ? nextOurs.awayTeamId : nextOurs.homeTeamId)}`
       : null,
     rounds,
-    bracket: cup ? buildBracket(state, competitionId) : [],
+    bracket,
+    cupProgress: cupProgressOf(bracket),
     // 통과 경계선은 리그 페이즈가 있는 대항전에만 있다 (국내 컵은 순위표가 없다)
     europe: isEuroCup(competitionId) ? buildEuropeView(state, competitionId) : null,
   };
@@ -2026,6 +2123,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       cashNet: r.cashNet,
       pnlNet: r.pnlNet,
       wageRatio: r.wageRatio,
+      wageTone: wageRatioTone(r.wageRatio),
       notes: r.notes,
     }));
   const now = currentMonthSummary(state);
@@ -2039,6 +2137,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
     cashNet: now.cashNet,
     pnlNet: now.pnlNet,
     wageRatio: now.wageRatio,
+    wageTone: wageRatioTone(now.wageRatio),
     notes: [],
   };
   // 실시간 활동 피드 — 접은 뒤 최근 30줄 (§8.1). 자르고 접으면 접기 전과 같아진다
@@ -2107,6 +2206,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       stadium: { name: stadium.stadium, capacity: stadium.capacity },
       // 시즌 누계 기준 — 한 달만 보면 프리시즌에 100%를 넘어 무의미하다
       wageRatio: seasonWageRatio(state),
+      wageTone: wageRatioTone(seasonWageRatio(state)),
       psr: state.financeReports.length > 0 ? psrStatus(state) : null,
       current,
       reports,
