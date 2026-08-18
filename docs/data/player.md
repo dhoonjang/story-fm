@@ -348,16 +348,18 @@ LAM/RAM · LF/RF · LST/RST.
 
 ### 6.2 판정 한 칸이 그대로 오르지 않는다 (`attributeGainScale`)
 
-열여덟의 한 칸과 서른의 한 칸은 같은 사건이 아니다. 셋을 곱한다:
+열여덟의 한 칸과 서른의 한 칸은 같은 사건이 아니다. 넷을 곱한다:
 
 ```
 실제 상승 = 판정(±1) × 잠재력 여유(천장에 닿으면 0)
-                    × 나이(≤18 ×1.15 … 25~27 ×0.6 … 34+ ×0.15, 축마다 시계가 다르다)
                     × 현재 수준(85→86은 60→61보다 무겁다 — 잠재력 여유와 다른 항이다)
+                    × 나이 배율(§6.3 나이 표의 **결산** 열)
+                    × 축 시계(꺾이는 축 ×0.6 · 멈춘 축 ×1 · 늦게 크는 축 ×1.15)
 
 N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
 잠재력 여유 = N((potential−value)/10, 2)
 현재 수준   = N((100−value)/40, 1)
+축 시계     = agingDelta(축, 나이) < 0 → ×0.6 · = 0 → ×1 · > 0 → ×1.15
 ```
 
 18세 60(잠재 85)은 판정 한 번에 한 칸, 30세 85(88)는 열두 번을 받아야 한 칸이다.
@@ -370,17 +372,60 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
   서른셋의 스피드가 나빠졌다는 판정은 그대로가 맞다.
 - 잠재력 상한은 **오를 때만** 막는다 — 이미 넘은 선수도 늙는다. 아래 바닥은 1.
 
-### 6.3 월간 성장 (코어 — `engine/squad/development.ts`)
+### 6.3 나이 곡선 — 월간 성장과 결산이 같은 표를 읽는다
 
-매월 1일, 선수당 **최대 2축 ±1**: 축별 노화 곡선(`agingDelta`) × 잠재력 여유 ×
+매월 1일, 결산을 받지 않는 선수(`developsByCore`)는 **최대 2축 ±1**씩 움직인다
+(`engine/squad/development.ts`): 축별 노화 곡선 × 잠재력 여유 × 나이 배율 ×
 시드 난수(결정적).
 
-| 곡선                    | 축                                                                |
-| ----------------------- | ----------------------------------------------------------------- |
-| 이르게 정점, 28+ 급락   | pace · stamina · dribbling                                        |
-| 30~32 유지 후 완만 하락 | strength · aerial · finishing · tackling · goalkeeping            |
-| 34+까지 성장 (24~33 +1) | passing · kicking · vision · positioning · composure · leadership |
-| 거의 불변 (성향)        | aggression                                                        |
+**축별 노화 곡선** (`agingDelta`) — 음수는 **시즌 기대 하락량**, 양수는 **방향
+가중**이다(아래 ⚠️):
+
+| 곡선          | 축                                                                | ≤23 | 24~27 | 28~29 |  30 | 31~32 |  33 | 34~36 | 37+ |
+| ------------- | ----------------------------------------------------------------- | --: | ----: | ----: | --: | ----: | --: | ----: | --: |
+| 이르게 정점   | pace · stamina · dribbling                                        |   0 |     0 |    −1 |  −2 |    −2 |  −3 |    −3 |  −3 |
+| 유지 후 하락  | strength · aerial · finishing · tackling · goalkeeping            |   0 |     0 |     0 |   0 |    −1 |  −1 |    −2 |  −2 |
+| 늦게까지 성장 | passing · kicking · vision · positioning · composure · leadership |   0 |    +1 |    +1 |  +1 |    +1 |  +1 |     0 |  −1 |
+| 성향 — 불변   | aggression                                                        |   0 |     0 |     0 |   0 |     0 |   0 |     0 |   0 |
+
+**나이 배율** — 경계는 한 곳(`AGE_GROWTH_BANDS`, `engine/world/attributes.ts`)이
+갖고 두 경로가 같이 읽는다:
+
+| 나이  | 월간 성장(`growChance`) | 결산 판정(`attributeGainScale`) |
+| ----- | ----------------------: | ------------------------------: |
+| ≤18   |                       1 |                            1.15 |
+| 19~20 |                       1 |                               1 |
+| 21    |                    0.85 |                               1 |
+| 22~23 |                    0.85 |                            0.85 |
+| 24    |                     0.6 |                            0.85 |
+| 25~27 |                     0.6 |                             0.6 |
+| 28~30 |                    0.35 |                             0.4 |
+| 31~33 |                    0.15 |                            0.25 |
+| 34+   |                    0.15 |                            0.15 |
+
+⚠️ **두 열은 아직 갈라져 있다** — 스물하나·스물넷·서른하나부터가 경로마다 다른
+배율을 받는다. 경계는 한 표가 갖지만, 값을 한 열로 합치는 것은 4,000명의 성장
+속도를 한꺼번에 옮기는 일이라 밸런스 결정이 먼저다.
+
+월간 판정은 축마다 이렇게 굴린다:
+
+```
+꺾이는 축 (노화 < 0)  월 하락 확률 = |노화| / 12                (값 1 아래로는 안 내려간다)
+그 밖의 축            월 상승 확률 = 성장 확률 / 12
+                      성장 확률   = clamp(min(1, 여유/12) × 나이 배율(월간), 0.02, 0.35)
+                                    × (노화 > 0 ? 1 : 0.6)
+                      여유 = potential − value, 0 이하면 오르지 않는다
+```
+
+- ⚠️ **하락과 상승은 대칭이 아니다.** 하락은 곡선의 기대치를 열두 달에 그대로
+  나눠 담지만, 상승의 `+1`은 방향 가중일 뿐이다 — 실제 상승 폭은 잠재력 여유와
+  나이가 정하고 시즌 0.35칸이 천장이다.
+- **움직일 축은 목록 순서가 아니라 시드가 고른다** — 15축이 저마다 제 난수를
+  받고, 움직인 축 중 시드가 정한 순서로 둘까지 반영한다. 앞에서부터 둘을 자르면
+  `ATTRIBUTE_AXES` 앞쪽(pace·stamina)만 자라고 뒤쪽(leadership·goalkeeping)은
+  구조적으로 굳는다.
+- 같은 세이브·같은 달이면 같은 결과다 — 난수 채널이 (시드, 날짜, 선수, 축)이라
+  선수 목록 순서에도 의존하지 않는다.
 
 "다리는 죽고 머리로 뛰는 베테랑"이 데이터에서 나온다. ⚠️ **노화를 시즌 경계에
 몰지 않는다** — 매달 조금씩 움직여야 "요즘 발이 예전 같지 않다"가 시즌 중에
@@ -806,8 +851,8 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
 | ------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | 15축·가중치·역할 50종·기준점·주발·`roleFit`·`bestOverall`·`isNaturalAt`                                                         | `packages/domain/src/player.ts`                                                         |
 | 전술 적응도(`applyFamiliarityGain`·`tacticalUptake`·`tacticsDistance`·기억)·포지션 적응도(`positionProficiency`·`adaptationOf`) | `packages/domain/src/tactics.ts`                                                        |
-| 시드 파생·노화·성장 배율 (`deriveAxes`·`agingDelta`·`attributeGainScale/DeclineScale`)                                          | `packages/engine/src/world/attributes.ts`                                               |
-| 월간 성장 (`developsByCore`)                                                                                                    | `packages/engine/src/squad/development.ts`                                              |
+| 시드 파생·노화·나이 배율 한 표 (`deriveAxes`·`agingDelta`·`AGE_GROWTH_BANDS`·`attributeGainScale/DeclineScale`)                 | `packages/engine/src/world/attributes.ts`                                               |
+| 월간 성장 (`developsByCore`·`rollMonthlyAxes`·`growChance`)                                                                     | `packages/engine/src/squad/development.ts`                                              |
 | 폼 (`formLabel`·`formAngle`)                                                                                                    | `packages/engine/src/squad/form.ts`                                                     |
 | 안개·잠재력·경기 중 체력 (`observationMargin`·`readCondition`·`observedFit`)                                                    | `packages/engine/src/squad/scouting.ts`                                                 |
 | 파견 한도·대기 (`scoutPlayer`·`deferScout`·`scoutingSummary`)                                                                   | `packages/engine/src/skills/index.ts` · `packages/engine/src/squad/scouting.ts`         |
