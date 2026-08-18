@@ -576,6 +576,26 @@ export interface CompetitionRoundView {
 }
 
 /**
+ * 다음 경기 한 칸 — **팀 단위와 대회 단위가 같은 조각을 쓴다.**
+ *
+ * 조각으로 싣는 이유: 화면이 날짜·상대·홈원정을 각자 배치하려면 조각이 필요하고,
+ * 무엇보다 **며칠 남았는지**가 있어야 한다. 체력이 자리마다 다르게 깎이고 회복이
+ * 며칠에 걸리는 지금(match.md §3), "사흘 뒤"인지 "엿새 뒤"인지가 곧 로테이션 판단이다.
+ */
+export interface NextMatchView {
+  date: string;
+  /** 킥오프 시각 `20:00` */
+  time: string;
+  /** 어느 경기인가 — 팀 단위는 대회까지(`프리미어리그 R2`), 대회 단위는 그 대회의 라운드 */
+  label: string;
+  /** 상대 팀 이름 (풀네임) */
+  opponent: string;
+  venue: "home" | "away" | "neutral";
+  /** 오늘로부터 며칠 뒤인가 — 0이면 오늘이다 */
+  inDays: number;
+}
+
+/**
  * 대회 하나 — 순위표 + 라운드별 일정 (+ 대항전이면 브래킷).
  * 우리가 나가는 대회만 만든다 (감독의 관심 범위 = 우리 리그 + 우리 대항전).
  */
@@ -590,8 +610,12 @@ export interface CompetitionView {
   zones: StandingZone[];
   /** 우리 순위 (0 = 순위표에 없음) */
   userPosition: number;
-  /** 이 대회의 다음 우리 경기 요약 */
-  next: string | null;
+  /**
+   * **이 대회의** 다음 우리 경기 — 남은 경기가 없으면 null(탈락·일정 종료·추첨 전).
+   * 팀 단위 `competitions.nextMatch`와 같은 조각이고, 무엇을 세울지는 화면이 고른다
+   * (메인 UI는 보고 있는 대회, 경기 중 탭은 팀 — overview §5 · match.md §8).
+   */
+  nextMatch: NextMatchView | null;
   rounds: CompetitionRoundView[];
   /** 녹아웃 단계별 대진 — 리그는 빈 배열 */
   bracket: BracketStageView[];
@@ -953,25 +977,11 @@ export interface OfficeViews {
   /** 대회 — 우리 리그 + 우리 대항전. 대회별 순위표와 일정이 한 자리에 (§2.4) */
   competitions: {
     /**
-     * **우리 팀의 당장 다음 경기** — 경기 중에는 달력 대신 이것만 본다.
-     *
-     * 조각으로 싣는 이유: 화면이 날짜·상대·홈원정을 각자 배치하려면 조각이
-     * 필요하고, 무엇보다 **며칠 남았는지**가 있어야 한다. 체력이 자리마다 다르게
-     * 깎이고 회복이 며칠에 걸리는 지금(match.md §3), "사흘 뒤"인지 "엿새 뒤"인지가
-     * 곧 로테이션 판단이다.
+     * **우리 팀의 당장 다음 경기** — 대회를 가리지 않는다. 경기 중 대회 탭이
+     * 세우는 것이 이것이다(match.md §8): 90분 안에 묻는 것은 이 경기가 끝난 뒤
+     * 언제 누구인가지 그 대회의 다음 라운드가 아니다.
      */
-    nextMatch: {
-      date: string;
-      /** 킥오프 시각 `20:00` */
-      time: string;
-      /** 대회 + 단계 (`프리미어리그 R2`) */
-      label: string;
-      /** 상대 팀 이름 (풀네임) */
-      opponent: string;
-      venue: "home" | "away" | "neutral";
-      /** 오늘로부터 며칠 뒤인가 — 0이면 오늘이다 */
-      inDays: number;
-    } | null;
+    nextMatch: NextMatchView | null;
     recentResults: string[];
     /** 탭 순서: 우리 리그 → 우리 대항전 */
     list: CompetitionView[];
@@ -1497,6 +1507,23 @@ function buildMatchView(state: GameState): MatchView | null {
 }
 
 /**
+ * 경기 하나를 "다음 경기" 조각으로 — 팀 단위와 대회 단위가 같은 함수를 쓴다.
+ * 갈리는 것은 **무엇을 골랐는가**와 표기(`label`)뿐이라, 같은 경기를 두 자리에서
+ * 다르게 적을 길이 없다.
+ */
+function nextMatchView(state: GameState, m: MatchRecord, label: string): NextMatchView {
+  const userTeamId = state.userTeamId;
+  return {
+    date: m.date,
+    time: m.time ?? "15:00",
+    label,
+    opponent: teamNameIn(state, m.homeTeamId === userTeamId ? m.awayTeamId : m.homeTeamId),
+    venue: m.neutral ? "neutral" : m.homeTeamId === userTeamId ? "home" : "away",
+    inDays: Math.max(0, diffDays(state.date, m.date)),
+  };
+}
+
+/**
  * 대회 하나의 뷰 — 순위표 + 라운드별 일정.
  *
  * 라운드 묶음은 `(stage, round)`로 만든다. 리그는 stage가 없어 `R3`이 곧 라운드고,
@@ -1515,15 +1542,20 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
   for (const stage of ["league", "playoff", "r32", "r16", "qf", "sf", "final"]) {
     order.set(stage, order.size);
   }
-  const grouped = new Map<string, CompetitionRoundView>();
-  for (const m of matches) {
+  // 라운드 표기는 한 번만 적는다 — 묶음 머리와 "다음 경기" 카드가 같은 문장을 쓴다
+  const roundLabelOf = (m: MatchRecord): string => {
     const stage = m.stage ?? "league";
-    const key = `${stage}:${m.round}`;
-    const label = cup
+    return cup
       ? stage === "league"
         ? `리그 페이즈 ${m.round}R`
         : competitionStageLabel(competitionId, stage, m.round)
       : `${m.round}라운드`;
+  };
+  const grouped = new Map<string, CompetitionRoundView>();
+  for (const m of matches) {
+    const stage = m.stage ?? "league";
+    const key = `${stage}:${m.round}`;
+    const label = roundLabelOf(m);
     const round = grouped.get(key) ?? { key, label, date: m.date, matches: [], current: false };
     round.matches.push({
       id: m.id,
@@ -1553,8 +1585,17 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
   if (current) current.current = true;
 
   const standings = computeStandings(state, competitionId);
-  const nextOurs = matches.find(
-    (m) => !m.result && (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+  /**
+   * 이 대회의 다음 우리 경기 — **팀 단위와 같은 함수로 고른다.**
+   *
+   * 결과가 없는 첫 경기를 그냥 집으면 경기 중에는 그게 **지금 이 경기**다(결과는
+   * 종료 시점에 쓰인다). 그러면 대회 머리줄이 "다음 · 오늘 · 지금 상대"가 된다.
+   */
+  const nextOurs = nextMatchFor(
+    matches,
+    state.userTeamId,
+    state.date,
+    state.pendingMatch?.matchId ?? null,
   );
   const bracket = cup ? buildBracket(state, competitionId) : [];
   return {
@@ -1565,9 +1606,7 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
     standings,
     zones: buildStandingZones(state, competitionId, standings.length),
     userPosition: standings.findIndex((r) => r.teamId === state.userTeamId) + 1,
-    next: nextOurs
-      ? `${nextOurs.date} ${nextOurs.neutral ? "중립" : nextOurs.homeTeamId === state.userTeamId ? "홈" : "원정"} vs ${teamNameIn(state, nextOurs.homeTeamId === state.userTeamId ? nextOurs.awayTeamId : nextOurs.homeTeamId)}`
-      : null,
+    nextMatch: nextOurs ? nextMatchView(state, nextOurs, roundLabelOf(nextOurs)) : null,
     rounds,
     bracket,
     cupProgress: cupProgressOf(bracket),
@@ -2213,20 +2252,14 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       feed,
     },
     competitions: {
+      // 대회 이름을 **언제나** 붙인다 — 이 카드 하나가 유일한 일정 정보라
+      // "R2"만 적으면 무슨 대회의 2라운드인지 화면 어디에도 없다
       nextMatch: next
-        ? {
-            date: next.date,
-            time: next.time ?? "15:00",
-            // 대회 이름을 **언제나** 붙인다 — 이 카드 하나가 유일한 일정 정보라
-            // "R2"만 적으면 무슨 대회의 2라운드인지 화면 어디에도 없다
-            label: competitionLabel(next.competitionId, next.stage ?? "league", next.round),
-            opponent: teamNameIn(
-              state,
-              next.homeTeamId === userTeamId ? next.awayTeamId : next.homeTeamId,
-            ),
-            venue: next.neutral ? "neutral" : next.homeTeamId === userTeamId ? "home" : "away",
-            inDays: Math.max(0, diffDays(state.date, next.date)),
-          }
+        ? nextMatchView(
+            state,
+            next,
+            competitionLabel(next.competitionId, next.stage ?? "league", next.round),
+          )
         : null,
       recentResults,
       list: competitionList,

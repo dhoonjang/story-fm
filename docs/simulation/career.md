@@ -268,25 +268,25 @@
   자리를 주는 코드가 없어, 경질이 곧 세이브의 끝이다. 스키마(`teamId`)는 준비돼 있다.
 - **업적이 다섯뿐**(`competition/season.ts`의 `checkAchievements`)이고 `champion`의
   설명이 리그 이름으로 하드코딩돼 있다.
-- 경질된 뒤의 화면이 없다 — `views/views.ts`도 `office.tsx`도 `dismissal`을 읽지 않아
-  시계가 멈춘 세이브는 digest 한 줄로만 그 사실을 말한다.
+- 경질된 뒤의 화면이 없다 — `views/views.ts`도 오피스 뷰 어느 것도 `dismissal`을 읽지
+  않아, 시계가 멈춘 세이브는 digest 한 줄로만 그 사실을 말한다.
 - 전 축이 상한(`skills/index.ts`의 `MANAGER_ATTR_CAP` 90)에 닿은 시나리오의 게임감이
   검증되지 않았다.
 
 ## 코드 위치
 
-| 무엇                         | 어디                                                                                        |
-| ---------------------------- | ------------------------------------------------------------------------------------------- |
-| 배경 해석·기준선·전문 분야   | `packages/engine/src/world/onboarding.ts`                                                   |
-| 능력치·평판 타입             | `packages/domain/src/manager.ts`                                                            |
-| XP·팀토크·면담 계수          | `packages/engine/src/skills/index.ts`                                                       |
-| 소화율·`tacticalFit`         | `packages/sim/src/strength-packet.ts`                                                       |
-| 훈련 결산 흡수율·인원 상한   | `packages/engine/src/squad/training-report.ts`                                              |
-| 키포인트 개수·정밀도         | `packages/sim/src/key-points.ts`                                                            |
-| 체력 안개 (`ANALYSIS_FLOOR`) | `packages/engine/src/squad/scouting.ts`                                                     |
-| 딜 확률 기여                 | `packages/engine/src/market/market.ts`                                                      |
-| 기자회견 스탠스·평판 폭      | `packages/engine/src/club/press.ts`                                                         |
-| 보드 기대·시즌 리뷰·업적     | `packages/engine/src/competition/season.ts`                                                 |
-| 경고·경질·AI 감독 시장       | `packages/engine/src/market/manager-market.ts`                                              |
-| 커리어 기록 타입             | `packages/domain/src/records.ts`                                                            |
-| 커리어 뷰·조회 도구          | `packages/engine/src/views/views.ts` · `views/lookup.ts` · `apps/web/components/office.tsx` |
+| 무엇                         | 어디                                                                                               |
+| ---------------------------- | -------------------------------------------------------------------------------------------------- |
+| 배경 해석·기준선·전문 분야   | `packages/engine/src/world/onboarding.ts`                                                          |
+| 능력치·평판 타입             | `packages/domain/src/manager.ts`                                                                   |
+| XP·팀토크·면담 계수          | `packages/engine/src/skills/index.ts`                                                              |
+| 소화율·`tacticalFit`         | `packages/sim/src/strength-packet.ts`                                                              |
+| 훈련 결산 흡수율·인원 상한   | `packages/engine/src/squad/training-report.ts`                                                     |
+| 키포인트 개수·정밀도         | `packages/sim/src/key-points.ts`                                                                   |
+| 체력 안개 (`ANALYSIS_FLOOR`) | `packages/engine/src/squad/scouting.ts`                                                            |
+| 딜 확률 기여                 | `packages/engine/src/market/market.ts`                                                             |
+| 기자회견 스탠스·평판 폭      | `packages/engine/src/club/press.ts`                                                                |
+| 보드 기대·시즌 리뷰·업적     | `packages/engine/src/competition/season.ts`                                                        |
+| 경고·경질·AI 감독 시장       | `packages/engine/src/market/manager-market.ts`                                                     |
+| 커리어 기록 타입             | `packages/domain/src/records.ts`                                                                   |
+| 커리어 뷰·조회 도구          | `packages/engine/src/views/views.ts` · `views/lookup.ts` · `apps/web/components/office/career.tsx` |
