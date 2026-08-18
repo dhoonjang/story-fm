@@ -19,8 +19,10 @@ import {
   dealOdds,
   describeMood,
   generateIncomingOffers,
+  lastMatchIndexOf,
   marketValueOf,
   moodOf,
+  playersOf,
   runBonus,
   slumpPenalty,
   streakOf,
@@ -275,6 +277,44 @@ describe("심경 결산 — 코어가 사실을 잡고 결만 맡긴다", () => 
  * 명이 등을 돌릴 뿐이라, 공식이 어긋나도 아무도 눈치채지 못한다. 문턱·계단·상한과
  * "누가 지목되는가"를 여기서 고정한다.
  */
+describe("마지막 경기 색인 — 원장을 한 번만 훑는다", () => {
+  /**
+   * 명단 전체의 심경을 지을 때 색인 하나를 돌려 쓴다. 색인이 고르는 경기가 선수마다
+   * 훑을 때와 갈리면 여운 문장이 조용히 어긋나므로, **같은 문장이 나오는지**를 본다.
+   */
+  it("색인으로 지은 앵커가 선수마다 훑은 앵커와 같다", () => {
+    const state = createTestGame(31);
+    const squad = playersOf(state, state.userTeamId);
+    // 같은 날 두 경기·다른 날 여러 경기 — 고르는 규칙이 갈릴 만한 자리를 만든다
+    const [a, b, c] = [squad[0]!, squad[1]!, squad[2]!];
+    const record = (id: string, date: string, ratings: Record<string, number>) =>
+      state.matches.push({
+        id,
+        season: state.season,
+        competitionId: "epl",
+        round: 1,
+        date,
+        homeTeamId: state.userTeamId,
+        awayTeamId: "chelsea",
+        result: { homeGoals: 2, awayGoals: 1, scorers: [], homeLineup: [], ratings },
+      });
+    record("m-idx-1", addDays(state.date, -6), { [a.id]: 7.5, [b.id]: 5.1 });
+    record("m-idx-2", addDays(state.date, -2), { [a.id]: 4.9, [c.id]: 8.2 });
+    // 같은 날 두 줄 — 뒤쪽 줄이 이긴다
+    record("m-idx-3", addDays(state.date, -1), { [b.id]: 6.0 });
+    record("m-idx-4", addDays(state.date, -1), { [b.id]: 9.0 });
+    // 아직 오지 않은 경기는 여운이 아니다
+    record("m-idx-5", addDays(state.date, 3), { [a.id]: 9.9, [b.id]: 9.9, [c.id]: 9.9 });
+
+    const index = lastMatchIndexOf(state);
+    for (const player of squad) {
+      expect(describeMood(state, player, index)).toBe(describeMood(state, player));
+    }
+    expect(index.get(b.id)?.id).toBe("m-idx-4");
+    expect(index.get(a.id)?.id).toBe("m-idx-2");
+  });
+});
+
 describe("연패·연승이 라커룸에 남는다", () => {
   /** 치른 리그 경기 하나 — 연속 기록에 필요한 것은 결과뿐이다 */
   function played(

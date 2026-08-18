@@ -120,17 +120,17 @@
 
 ### 3.1 메타
 
-| 필드                     | 무엇                                                                    | 정의                       |
-| ------------------------ | ----------------------------------------------------------------------- | -------------------------- |
-| `id` `seed` `createdAt`  | 세이브 식별 · 모든 난수의 뿌리                                          | `core/state.ts`            |
-| `season` `date` `clock?` | 시즌 번호 · 날짜 · 하루 안의 시각(`HH:MM`)                              | `core/state.ts`            |
-| `calendar`               | `SeasonCalendar` — 프리시즌 시작·소집일·개막일                          | `competition/calendar.ts`  |
-| `userTeamId` `phase`     | 감독의 팀 · `idle`/`matchday`/`match` (라우팅 전용)                     | `core/state.ts`            |
-| `pendingMatch`           | 진행 중인 경기 — 패킷·장부·캐스터 이력·킥오프 전술·입장 여부(`entered`) | `core/state.ts`            |
-| `world?`                 | 이 세계의 범위 (테스트용 축소 세계)                                     | `world/scope.ts`           |
-| `leagueOf?`              | 승강 결과 — 팀 → 지금 속한 리그                                         | `competition/promotion.ts` |
-| `dismissal?`             | 경질됨 — 있으면 시계가 멈춘다                                           | `core/state.ts`            |
-| `formUnitScale?`         | 폼 눈금 마이그레이션 마커 (§6)                                          | `core/state.ts`            |
+| 필드                     | 무엇                                                                                                          | 정의                       |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| `id` `seed` `createdAt`  | 세이브 식별 · 모든 난수의 뿌리                                                                                | `core/state.ts`            |
+| `season` `date` `clock?` | 시즌 번호 · 날짜 · 하루 안의 시각(`HH:MM`)                                                                    | `core/state.ts`            |
+| `calendar`               | `SeasonCalendar` — 프리시즌 시작·소집일·개막일                                                                | `competition/calendar.ts`  |
+| `userTeamId` `phase`     | 감독의 팀 · `idle`/`matchday`/`match` (라우팅 전용)                                                           | `core/state.ts`            |
+| `pendingMatch`           | 진행 중인 경기 — 패킷·장부·캐스터 이력·킥오프 전술·입장 여부(`entered`)·구간 시뮬의 연속 시계(`segmentClock`) | `core/state.ts`            |
+| `world?`                 | 이 세계의 범위 (테스트용 축소 세계)                                                                           | `world/scope.ts`           |
+| `leagueOf?`              | 승강 결과 — 팀 → 지금 속한 리그                                                                               | `competition/promotion.ts` |
+| `dismissal?`             | 경질됨 — 있으면 시계가 멈춘다                                                                                 | `core/state.ts`            |
+| `formUnitScale?`         | 폼 눈금 마이그레이션 마커 (§6)                                                                                | `core/state.ts`            |
 
 ### 3.2 팀 · 선수
 

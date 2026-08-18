@@ -118,25 +118,33 @@ export function visibleChat(chat: readonly ChatTurn[]): ChatTurn[] {
   });
 }
 
-/** 채팅에 접혀 있는 경기들의 머리글 — 이력에 등장한 `matchId`만 만든다 */
+/**
+ * 채팅에 접혀 있는 경기들의 머리글 — 이력에 등장한 `matchId`만 만든다.
+ *
+ * 선수와 경기는 **먼저 색인으로 세운다.** 이 함수는 매 턴 응답에 실리는데, 득점자
+ * 한 명·평점 한 줄마다 5,700명 배열을 훑으면 접힌 경기가 쌓일수록 턴이 무거워진다.
+ */
 function matchLogsOf(state: GameState): GamePayload["matchLogs"] {
   const ids = new Set(
     state.chat.map((t) => t.matchId).filter((id): id is string => typeof id === "string"),
   );
   const logs: GamePayload["matchLogs"] = {};
+  if (ids.size === 0) return logs;
+  const matchById = new Map(state.matches.map((m) => [m.id, m] as const));
+  const playerById = new Map(state.players.map((p) => [p.id, p] as const));
   for (const id of ids) {
-    const m = state.matches.find((x) => x.id === id);
+    const m = matchById.get(id);
     if (!m) continue;
     const ours = m.homeTeamId === state.userTeamId;
     const opponent = teamName(ours ? m.awayTeamId : m.homeTeamId);
-    const nameOf = (pid: string) => state.players.find((p) => p.id === pid)?.name ?? pid;
+    const nameOf = (pid: string) => playerById.get(pid)?.name ?? pid;
     const goals = (m.result?.scorers ?? []).map((tag, i) => {
       const minute = m.result?.goalMinutes?.[i];
       return `${minute !== undefined ? `${minute}′ ` : ""}${nameOf(tag.split(":")[1] ?? tag)}`;
     });
     /** 평점은 **우리 팀 선수만** 남는다 — 장부가 온전한 경기의 파생값이다 */
     const best = Object.entries(m.result?.ratings ?? {})
-      .filter(([pid]) => state.players.find((p) => p.id === pid)?.teamId === state.userTeamId)
+      .filter(([pid]) => playerById.get(pid)?.teamId === state.userTeamId)
       .map(([pid, rating]) => ({ name: nameOf(pid), rating }))
       .sort((a, b) => b.rating - a.rating)
       .slice(0, 3);

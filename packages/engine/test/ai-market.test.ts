@@ -67,7 +67,15 @@ describe("이적창이 열리면 남의 팀끼리도 움직인다", () => {
   });
 
   it("장부가 온전하다 — 원장·계약·재정·배치가 함께 움직인다", () => {
-    const deal = moves.find((t) => t.type === "transfer" && t.fee > 0)!;
+    /**
+     * **한 창에서 두 번 팔리는 선수가 있다** — 닐 모페가 7월에 레버쿠젠으로 갔다가
+     * 9월 1일에 라요로 다시 팔렸다. 그래서 아무 거래나 집어 지금 소속과 맞대면
+     * 장부가 멀쩡한데도 어긋난다. 대조할 것은 **그 선수의 마지막 거래**다.
+     */
+    const lastOf = new Map(moves.map((t) => [t.gamePlayerId, t] as const));
+    const deal = moves.find(
+      (t) => t.type === "transfer" && t.fee > 0 && lastOf.get(t.gamePlayerId) === t,
+    )!;
     expect(deal).toBeTruthy();
     const player = state.players.find((p) => p.id === deal.gamePlayerId)!;
     // 소속이 옮겨졌고

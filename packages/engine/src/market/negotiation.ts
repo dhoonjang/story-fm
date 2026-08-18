@@ -17,7 +17,6 @@ import { AGENT_FEE_RATE, budgetFreezeLabel, recordFinance } from "../club/financ
 import {
   LOAN_FEE_RATE,
   askingPriceFor,
-  betterAtPosition,
   contractOwnerOf,
   dealOdds,
   describeOdds,
@@ -27,6 +26,7 @@ import {
   oddsText,
   renewalExpectation,
   responseDelayDays,
+  squadDepthOf,
   wageExpectationOf,
   type DealTerms,
 } from "./market";
@@ -1172,19 +1172,25 @@ function pickBuyer(state: GameState, player: GamePlayer, rng: () => number): str
   const value = marketValueOf(state, player);
   const age = ageOf(player.birthdate, state.date);
   const options: string[] = [];
+  /**
+   * 그 자리를 이미 메운 구단 — **선수 배열을 팀마다가 아니라 한 번만 훑는다.**
+   * 96구단에 5,777명을 곱하던 자리라, 세는 규칙은 그대로 두고 방향만 뒤집었다.
+   */
+  const covered = new Set<string>();
+  for (const p of state.players) {
+    if (p.attributes.overall < player.attributes.overall) continue;
+    if (naturalPositionOf(p).position !== position) continue;
+    covered.add(p.teamId);
+  }
+  const financeOfTeam = new Map(state.finances.map((f) => [f.teamId, f] as const));
   for (const team of state.teams) {
     if (team.id === state.userTeamId) continue;
     // 사는 쪽 협회의 창이 열려 있어야 한다 — 우리 창과 다를 수 있다
     if (windowOpenForTeam(state, team.id) === null) continue;
-    const finance = state.finances.find((f) => f.teamId === team.id);
+    const finance = financeOfTeam.get(team.id);
     if (!finance || finance.transferBudget < value) continue;
     // 그 자리에 우리 선수보다 나은 자원이 없는 팀이 노린다
-    const covered = playersOf(state, team.id).some(
-      (p) =>
-        naturalPositionOf(p).position === position &&
-        p.attributes.overall >= player.attributes.overall,
-    );
-    if (covered) continue;
+    if (covered.has(team.id)) continue;
     // 노장 선호 — 사우디·MLS는 30세 이상에게 훨씬 적극적이다. 가중치는
     // 후보를 여러 번 넣어 표현한다 (결정적 rng 하나로 뽑기 위해)
     const weight = age >= 30 ? Math.round(marketBiasOf(state, team.id).veteranAppetite * 2) : 2;
@@ -2422,17 +2428,24 @@ const AI_RENEWAL_CHANCE = 0.02;
 export function runAiRenewals(state: GameState, digest: string[]): void {
   const limit = addDays(state.date, AI_RENEWAL_WINDOW_DAYS);
   const rng = makeRng(state.seed, `ai-renewal:${state.date}`);
+  /**
+   * 색인을 먼저 세운다 — 5,777건의 계약이 저마다 5,777명을 훑던 자리다.
+   * 이 순회는 **계약과 협상만** 갈아 끼우므로(선수의 소속·전력은 그대로) 색인이
+   * 도는 동안 어긋나지 않는다.
+   */
+  const byId = new Map(state.players.map((p) => [p.id, p] as const));
+  const depth = squadDepthOf(state);
 
   for (const contract of state.contracts) {
     if (contract.status !== "active") continue;
     if (contract.teamId === state.userTeamId) continue;
     if (contract.until > limit || contract.until <= state.date) continue;
-    const player = playerById(state, contract.gamePlayerId);
+    const player = byId.get(contract.gamePlayerId);
     if (!player || player.teamId !== contract.teamId) continue;
     if (player.loan) continue; // 임대 중엔 원소속이 따로 판단한다
 
     // 팀에서의 자리와 나이 — 주전이고 어릴수록 서둘러 잡는다
-    const blocked = betterAtPosition(state, contract.teamId, player);
+    const blocked = depth.betterThan(contract.teamId, player);
     const age = ageOf(player.birthdate, state.date);
     const urgency =
       (blocked === 0 ? 2.2 : blocked === 1 ? 1.2 : 0.5) * (age >= 33 ? 0.3 : age <= 24 ? 1.4 : 1);
