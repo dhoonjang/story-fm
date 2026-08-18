@@ -309,15 +309,40 @@ const ROOM_LOG_SCALE = 2;
 const LEVEL_FLOOR = 60;
 const LEVEL_LOG_SCALE = 1;
 
-/** 나이대별 성장 배율 — 스물셋까지가 가장 빠르다 */
-function ageGrowthFactor(age: number): number {
-  if (age <= 18) return 1.15;
-  if (age <= 21) return 1;
-  if (age <= 24) return 0.85;
-  if (age <= 27) return 0.6;
-  if (age <= 30) return 0.4;
-  if (age <= 33) return 0.25;
-  return 0.15;
+/**
+ * 나이대별 성장 배율 — **두 경로가 같은 경계를 읽는다** (player.md §6.3).
+ * `judgment`는 결산 판정 한 칸이 실제로 남기는 몫(`attributeGainScale`),
+ * `monthly`는 월간 성장 확률의 나이 가중(`squad/development.ts`)이다.
+ *
+ * ⚠️ 두 열의 **값**은 아직 다르다(스물하나·스물넷·서른하나부터). 한 열로 합치는
+ * 것은 4,000명의 성장 속도를 한꺼번에 옮기는 일이라 밸런스 결정이 먼저다.
+ */
+const AGE_GROWTH_BANDS = [
+  { untilAge: 18, judgment: 1.15, monthly: 1 },
+  { untilAge: 20, judgment: 1, monthly: 1 },
+  { untilAge: 21, judgment: 1, monthly: 0.85 },
+  { untilAge: 23, judgment: 0.85, monthly: 0.85 },
+  { untilAge: 24, judgment: 0.85, monthly: 0.6 },
+  { untilAge: 27, judgment: 0.6, monthly: 0.6 },
+  { untilAge: 30, judgment: 0.4, monthly: 0.35 },
+  { untilAge: 33, judgment: 0.25, monthly: 0.15 },
+] as const;
+
+/** 표의 마지막 줄 — 어느 경계에도 걸리지 않는 나이(34+) */
+const AGE_GROWTH_OLDEST = { judgment: 0.15, monthly: 0.15 } as const;
+
+function ageGrowthBand(age: number): { judgment: number; monthly: number } {
+  return AGE_GROWTH_BANDS.find((band) => age <= band.untilAge) ?? AGE_GROWTH_OLDEST;
+}
+
+/** 결산 판정 쪽 나이 배율 — 스물셋까지가 가장 빠르다 */
+export function ageGrowthFactor(age: number): number {
+  return ageGrowthBand(age).judgment;
+}
+
+/** 월간 성장 쪽 나이 배율 — 경계는 결산과 같은 표에서 온다 */
+export function monthlyGrowthFactor(age: number): number {
+  return ageGrowthBand(age).monthly;
 }
 
 /**
