@@ -42,7 +42,16 @@ export function presetOf(shape: string): Formation | null {
   return parsed.success ? parsed.data : null;
 }
 
-const Scale5 = z.number().int().min(1).max(5);
+/**
+ * 전술 슬라이더의 눈금 — 여섯 축이 모두 이 1~5 위에 선다.
+ * 가운데가 아무 쪽으로도 기울지 않은 값이라, 축의 세기는 언제나
+ * `값 - TACTIC_SCALE_NEUTRAL` 로 읽는다.
+ */
+export const TACTIC_SCALE_MIN = 1;
+export const TACTIC_SCALE_MAX = 5;
+export const TACTIC_SCALE_NEUTRAL = 3;
+
+const Scale5 = z.number().int().min(TACTIC_SCALE_MIN).max(TACTIC_SCALE_MAX);
 
 /** 전술 본체 (TACTICS) — 개인 지시는 배치(TacticAssignment)로 이동 */
 export const TacticsSpecSchema = z.object({
@@ -65,12 +74,12 @@ export const DEFAULT_FORMATION: Formation = "4-3-3";
 
 export const DEFAULT_TACTICS: TacticsSpec = {
   formation: DEFAULT_FORMATION,
-  mentality: 3,
-  defensiveLine: 3,
-  pressing: 3,
-  tempo: 3,
-  width: 3,
-  passStyle: 3,
+  mentality: TACTIC_SCALE_NEUTRAL,
+  defensiveLine: TACTIC_SCALE_NEUTRAL,
+  pressing: TACTIC_SCALE_NEUTRAL,
+  tempo: TACTIC_SCALE_NEUTRAL,
+  width: TACTIC_SCALE_NEUTRAL,
+  passStyle: TACTIC_SCALE_NEUTRAL,
 };
 
 /**

@@ -1,7 +1,13 @@
 import { z } from "zod";
 
+/** 능력치 눈금의 위끝 — 0~99 스케일, 선수·감독 공통 (player.md §1) */
+export const RATING_MAX = 99;
+
+/** 체력 눈금의 위끝 — 0~100, 높을수록 좋다 */
+export const CONDITION_MAX = 100;
+
 /** 0~99 능력치 스케일 — 선수·감독 공통 (player.md §1) */
-export const RatingSchema = z.number().int().min(0).max(99);
+export const RatingSchema = z.number().int().min(0).max(RATING_MAX);
 
 export const PositionGroupSchema = z.enum(["GK", "DF", "MF", "FW"]);
 export type PositionGroup = z.infer<typeof PositionGroupSchema>;
@@ -1624,7 +1630,7 @@ export const PlayerStateSchema = z.object({
    * 경기·훈련이 깎고 휴식·회복이 채운다. 왜 낮은지는 `describeMood`가 말한다.
    * 옛 세이브는 로드할 때 두 값을 합쳐 옮긴다 (`persistence.ts`).
    */
-  condition: z.number().int().min(0).max(100),
+  condition: z.number().int().min(0).max(CONDITION_MAX),
   /**
    * **부상 성향** — 이 선수가 지금 갖는 부상 확률 배수. 1.0이 평균.
    *
@@ -1701,11 +1707,19 @@ export const CONDITION_BASE = 75;
  */
 export type ConditionBand = "fresh" | "good" | "fair" | "low" | "spent";
 
+/** 각 구간이 시작되는 체력 — 이 아래는 다음(더 나쁜) 구간이다 */
+export const CONDITION_BAND_FLOOR = {
+  fresh: 80,
+  good: 65,
+  fair: 50,
+  low: 35,
+} as const;
+
 export function conditionBand(condition: number): ConditionBand {
-  if (condition >= 80) return "fresh";
-  if (condition >= 65) return "good";
-  if (condition >= 50) return "fair";
-  if (condition >= 35) return "low";
+  if (condition >= CONDITION_BAND_FLOOR.fresh) return "fresh";
+  if (condition >= CONDITION_BAND_FLOOR.good) return "good";
+  if (condition >= CONDITION_BAND_FLOOR.fair) return "fair";
+  if (condition >= CONDITION_BAND_FLOOR.low) return "low";
   return "spent";
 }
 
