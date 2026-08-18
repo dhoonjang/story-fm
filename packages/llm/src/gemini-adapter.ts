@@ -1,4 +1,5 @@
 import {
+  FinishReason,
   FunctionCallingConfigMode,
   GoogleGenAI,
   ThinkingLevel,
@@ -14,6 +15,7 @@ import {
   isTextHistoryMessage,
   type GameLLM,
   type GameToolSpec,
+  type StopReason,
   type TurnHistory,
   type TurnRequest,
   type TurnResult,
@@ -24,6 +26,38 @@ import {
 const MAX_TOOL_ITERATIONS = 8;
 
 type GeminiClient = Pick<GoogleGenAI, "chats">;
+
+/**
+ * SDK 클라이언트는 프로세스에 하나다 — 에이전트마다 새로 만들면 연결 풀이 호출 수만큼
+ * 따로 서고, 그 이득은 아무 데도 없다. 모델·설정은 클라이언트가 아니라 chat이 든다.
+ */
+let sharedClient: GoogleGenAI | undefined;
+
+function newSharedClient(): GoogleGenAI {
+  const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
+  return new GoogleGenAI(apiKey ? { apiKey } : {});
+}
+
+/** 제공자가 내용을 막은 사유 — 텍스트 생성에서 올 수 있는 것만 센다 */
+const BLOCKED: ReadonlySet<FinishReason> = new Set([
+  FinishReason.SAFETY,
+  FinishReason.RECITATION,
+  FinishReason.BLOCKLIST,
+  FinishReason.PROHIBITED_CONTENT,
+  FinishReason.SPII,
+  FinishReason.LANGUAGE,
+]);
+
+/**
+ * Gemini의 종료 사유를 중립 계약으로 옮긴다 (models.md §3-1).
+ * `FINISH_REASON_UNSPECIFIED`는 "보고하지 않았다"이므로 null이다.
+ */
+function toStopReason(reason: FinishReason | undefined): StopReason | null {
+  if (reason === undefined || reason === FinishReason.FINISH_REASON_UNSPECIFIED) return null;
+  if (reason === FinishReason.STOP) return "completed";
+  if (reason === FinishReason.MAX_TOKENS) return "truncated";
+  return BLOCKED.has(reason) ? "filtered" : "other";
+}
 
 function isGeminiContent(value: unknown): value is Content {
   if (!value || typeof value !== "object") return false;
@@ -107,12 +141,12 @@ function thinkingLevel(level: GoogleAgentConfig["thinkingLevel"]): ThinkingLevel
 export class GeminiGameLLM implements GameLLM {
   private readonly client: GeminiClient;
 
+  /** client 주입은 테스트용 — 기본은 프로세스가 공유하는 클라이언트다 */
   constructor(
     private readonly config: GoogleAgentConfig,
     client?: GeminiClient,
   ) {
-    const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
-    this.client = client ?? new GoogleGenAI(apiKey ? { apiKey } : {});
+    this.client = client ?? (sharedClient ??= newSharedClient());
   }
 
   async runTurn(req: TurnRequest): Promise<TurnResult> {
@@ -170,7 +204,7 @@ export class GeminiGameLLM implements GameLLM {
     };
     let text = "";
     let toolCallCount = 0;
-    let stopReason: string | null = null;
+    let stopReason: StopReason | null = null;
     let message: string | Part[] = req.stateNote ? `${req.stateNote}\n\n${req.user}` : req.user;
     let danglingResults: Part[] | null = null;
 
@@ -208,10 +242,9 @@ export class GeminiGameLLM implements GameLLM {
         .slice(historyLengthBeforeSend + 1)
         .filter((content) => content.role === "model")
         .flatMap(functionCalls);
+      // 함수 호출이 실린 턴은 Gemini가 STOP을 보고해도 도구 왕복이다
       stopReason =
-        calls.length > 0
-          ? "tool_use"
-          : (response.candidates?.[0]?.finishReason?.toLowerCase() ?? null);
+        calls.length > 0 ? "tool_use" : toStopReason(response.candidates?.[0]?.finishReason);
       if (calls.length === 0) break;
 
       const results: Part[] = calls.map((call) => {
@@ -265,6 +298,7 @@ export class GeminiGameLLM implements GameLLM {
         model: this.config.model,
         messages: savedHistory,
       },
+      historyBase: baseHistory.length,
       usage,
       toolCallCount,
       stopReason,

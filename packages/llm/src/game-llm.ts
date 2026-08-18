@@ -151,14 +151,37 @@ export interface TurnRequest {
   signal?: AbortSignal;
 }
 
+/**
+ * 턴이 왜 멈췄는가 — **제공자 중립 계약**이다 (models.md §3-1).
+ *
+ * ⚠️ 값에 제공자의 낱말을 쓰지 않는다. 원문을 그대로 흘리면 잘림 검사가 제공자
+ * 하나에만 맞는다: Anthropic의 `max_tokens`를 신호로 삼으면 Gemini는 `MAX_TOKENS`를
+ * 소문자로 바꾼 값이 우연히 같아 돌고 OpenAI(`length`)에서는 아무 말 없이 꺼진다.
+ * 이름이 우연히 겹치는 것은 계약이 아니다.
+ */
+export const STOP_REASONS = ["completed", "truncated", "tool_use", "filtered", "other"] as const;
+
+export type StopReason = (typeof STOP_REASONS)[number];
+
 export interface TurnResult {
   /** 모델 턴의 서사 텍스트 (tool call 제외, 텍스트 블록 연결) */
   text: string;
   /** 갱신된 대화 이력 — 다음 턴에 그대로 넘긴다 */
   history: StoredLlmHistory;
+  /**
+   * `history.messages` 앞에서 **이번 턴 전까지의** 메시지 수 — 그 뒤가 이 호출이
+   * 새로 붙인 것이다.
+   *
+   * 보낸 이력의 길이로는 셀 수 없다: 어댑터가 자기 제공자에 맞춰 이력을 정규화하며
+   * 메시지를 더하거나 덜기 때문이다 (Gemini는 model로 시작하는 이력 앞에 연결 user
+   * 턴 하나, Anthropic은 빈 텍스트 메시지 제거, 제공자·모델 태그가 다르면 통째로
+   * 버림). 어긋난 만큼 이번 턴의 왕복이 잘리거나 지난 턴이 딸려 들어온다.
+   */
+  historyBase: number;
   usage: TurnUsage;
   toolCallCount: number;
-  stopReason: string | null;
+  /** 제공자가 사유를 보고하지 않았으면 `null`이다 */
+  stopReason: StopReason | null;
 }
 
 export interface GameLLM {

@@ -36,9 +36,10 @@ function stubLlm(usage: TurnUsage, calls: { count: number } = { count: 0 }): Gam
       return {
         text: "@수석코치: 됐습니다.",
         history: { version: 1, provider: "openai", model: "m", messages: [] },
+        historyBase: 0,
         usage,
         toolCallCount: 0,
-        stopReason: "stop",
+        stopReason: "completed",
       };
     },
   };
@@ -216,7 +217,7 @@ describe("meterLlm — 계약이 같으므로 부르는 쪽은 감싼 줄 모른
     const llm = meterLlm(stubLlm(usageOf({ inputTokens: 1 })), "gm");
     const result = await llm.runTurn({ system: "S", history: [], user: "안녕" });
     expect(result.text).toBe("@수석코치: 됐습니다.");
-    expect(result.stopReason).toBe("stop");
+    expect(result.stopReason).toBe("completed");
   });
 
   /**

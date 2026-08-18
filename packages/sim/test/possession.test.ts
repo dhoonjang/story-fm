@@ -1,15 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   CHASE_DRAIN,
-  POSSESSION_LOG_SENSITIVITY,
   POSSESSION_MAX,
   POSSESSION_MIN,
+  POSSESSION_SHOT_LOG_WEIGHT,
   buildStrengthPacket,
   chaseFactor,
   conditionDrain,
   possessionShare,
+  possessionShotShift,
 } from "@story-fm/sim";
-import { DEFAULT_TACTICS, logRatioFactor } from "@story-fm/domain";
+import type { SideInput } from "@story-fm/sim";
+import { DEFAULT_TACTICS } from "@story-fm/domain";
 import { makeSide, makeSquad } from "./helpers";
 
 describe("점유 — 중원 우위가 공을 쥔다", () => {
@@ -36,19 +38,74 @@ describe("점유 — 중원 우위가 공을 쥔다", () => {
     expect(strong.guide.possession.away).toBeLessThan(0.48);
   });
 
-  it("점유가 기대 득점에 실린다 — 쥔 쪽은 오르고 쫓는 쪽은 내린다", () => {
-    // 존은 XI 가중 평균이라 중원만 따로 만들 수 없어 로그 계약을 직접 검증한다
-    expect(
-      logRatioFactor(possessionShare(78, 62) / 0.5, POSSESSION_LOG_SENSITIVITY),
-    ).toBeGreaterThan(1);
-    expect(logRatioFactor(possessionShare(62, 78) / 0.5, POSSESSION_LOG_SENSITIVITY)).toBeLessThan(
-      1,
-    );
-  });
-
   it("패킷의 점유 두 몫은 서로의 거울이다", () => {
     const packet = buildStrengthPacket(makeSide("us", 80), makeSide("them", 68));
     expect(packet.guide.possession.home + packet.guide.possession.away).toBeCloseTo(1, 5);
+  });
+});
+
+/** 자동 공략은 능력치 변화에 반응해 존을 흔든다 — 점유만 보려면 꺼 둔다 */
+const noExploits = (side: SideInput): SideInput => ({ ...side, exploits: [] });
+
+/** 중원의 창조력만 낮춘 상대 — 존 전력이 아니라 점유가 갈리는 자리다 */
+function weakMidfield(base: number): SideInput {
+  const side = noExploits(makeSide("them", base));
+  for (const slot of side.starters) {
+    if (["RM", "LM", "RCM", "LCM"].includes(slot.position)) {
+      slot.player.attributes = {
+        ...slot.player.attributes,
+        passing: 40,
+        vision: 40,
+        composure: 40,
+      };
+    }
+  }
+  return side;
+}
+
+describe("점유가 슈팅에 실리는 몫 — possessionShotShift", () => {
+  it("반반이면 아무것도 더하지 않는다", () => {
+    expect(possessionShotShift(0.5)).toBe(0);
+  });
+
+  it("쥔 쪽이 얻는 만큼 쫓는 쪽이 잃는다 — 점유는 슈팅을 만들지 않고 옮긴다", () => {
+    const share = possessionShare(78, 62);
+    expect(possessionShotShift(share)).toBeGreaterThan(0);
+    expect(possessionShotShift(1 - share)).toBeCloseTo(-possessionShotShift(share), 12);
+  });
+
+  it("편차는 중원 우위의 로그비 그대로다 — 그래서 가중치가 작다", () => {
+    // 미드필더의 질은 존 가중 평균에도 이미 들어 있어, 이 항은 두 번 세어질 몫이다
+    expect(possessionShotShift(possessionShare(80, 64))).toBeCloseTo(
+      POSSESSION_SHOT_LOG_WEIGHT * Math.log(80 / 64),
+      12,
+    );
+  });
+
+  it("한계 점유에 닿으면 더 지배해도 노출이 그만 오른다 — 슈팅량 ±22% 안", () => {
+    expect(Math.exp(possessionShotShift(POSSESSION_MAX))).toBeLessThan(1.22);
+    expect(Math.exp(possessionShotShift(POSSESSION_MIN))).toBeGreaterThan(0.82);
+    expect(possessionShotShift(possessionShare(95, 10))).toBe(
+      possessionShotShift(possessionShare(90, 20)),
+    );
+  });
+
+  it("패킷의 슈팅 프로필이 이 몫을 태운다 — 점유가 갈리면 슈팅이 옮겨 간다", () => {
+    const level = buildStrengthPacket(
+      noExploits(makeSide("us", 75)),
+      noExploits(makeSide("them", 75)),
+      { neutral: true },
+    );
+    // 같은 팀·중립 구장이면 어느 쪽도 공짜 슈팅을 갖지 않는다
+    expect(level.guide.possession).toEqual({ home: 0.5, away: 0.5 });
+    expect(level.guide.expectedShots?.home).toBe(level.guide.expectedShots?.away);
+
+    const tilted = buildStrengthPacket(noExploits(makeSide("us", 75)), weakMidfield(75), {
+      neutral: true,
+    });
+    expect(tilted.guide.possession.home).toBeGreaterThan(0.5);
+    expect(tilted.guide.expectedShots!.home).toBeGreaterThan(level.guide.expectedShots!.home);
+    expect(tilted.guide.expectedShots!.away).toBeLessThan(level.guide.expectedShots!.away);
   });
 });
 

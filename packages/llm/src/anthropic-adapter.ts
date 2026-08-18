@@ -5,6 +5,7 @@ import {
   isTextHistoryMessage,
   type GameLLM,
   type GameToolSpec,
+  type StopReason,
   type TurnHistory,
   type TurnRequest,
   type TurnResult,
@@ -19,15 +20,38 @@ const MAX_BREAKPOINTS = 4;
 
 /**
  * role:"system" 중간 메시지를 거부한 모델 — 한 번 400을 맞으면 이후 폴백으로 고정한다.
- * (Opus 4.8은 지원, 프로바이더/모델을 갈아탈 때를 대비한 안전장치)
+ * 지원 여부가 모델마다 달라서, 설정이 모델을 갈아탈 때를 대비한 안전장치다.
  */
 const midSystemUnsupported = new Set<string>();
 
-/** SDK 타입에 아직 없는 오퍼레이터 채널 — 런타임은 지원한다 (Opus 4.8) */
-type SystemTurn = { role: "system"; content: string };
-type TurnMessage = Anthropic.MessageParam | SystemTurn;
-
 const CACHE: Anthropic.CacheControlEphemeral = { type: "ephemeral" };
+
+/**
+ * SDK 클라이언트는 프로세스에 하나다 — 에이전트마다 새로 만들면 연결 풀과 재시도
+ * 설정이 호출 수만큼 따로 서고, 그 이득은 아무 데도 없다. 인증은 어느 쪽이든
+ * 환경(API 키/프로필)에서 해석한다.
+ */
+let sharedClient: Anthropic | undefined;
+
+/** Anthropic의 종료 사유를 중립 계약으로 옮긴다 (models.md §3-1) */
+function toStopReason(reason: Anthropic.StopReason | null): StopReason | null {
+  switch (reason) {
+    case null:
+      return null;
+    case "end_turn":
+    case "stop_sequence":
+      return "completed";
+    case "max_tokens":
+      return "truncated";
+    case "tool_use":
+      return "tool_use";
+    case "refusal":
+      return "filtered";
+    // pause_turn — 서버 도구 턴의 중간 정지. 서버 도구를 주지 않으므로 여기 오지 않는다
+    default:
+      return "other";
+  }
+}
 
 /**
  * 이력 정규화 — 문자열 content를 텍스트 블록으로 바꾼다.
@@ -90,7 +114,10 @@ function anthropicHistory(
  * 원본 이력은 절대 건드리지 않는다 — 마커가 세이브에 누적되면 다음 턴 요청이
  * 브레이크포인트 상한(4개)을 넘겨 400이 된다.
  */
-function withBreakpoint(messages: TurnMessage[], upto: number): TurnMessage[] {
+function withBreakpoint(
+  messages: Anthropic.MessageParam[],
+  upto: number,
+): Anthropic.MessageParam[] {
   // 항상 복사한다 — 요청 파라미터가 이후에도 변이되는 배열을 참조하면 안 된다
   const copy = [...messages];
   for (let i = Math.min(upto, copy.length - 1); i >= 0; i--) {
@@ -122,7 +149,7 @@ function isMidSystemRejection(err: unknown): boolean {
 }
 
 /**
- * Anthropic 어댑터 — 캐시 계층(도구+시스템 / 명부·패킷 / 이력), adaptive thinking,
+ * Anthropic 어댑터 — 캐시 계층(도구+시스템 / 명부·패킷 / 이력), 사고 설정,
  * tool call 루프(검증 실패 시 is_error로 재시도 유도)를 처리한다.
  *
  * 캐시 배치 (실측 기준: 도구+시스템 프리픽스만 5천 토큰 규모):
@@ -136,12 +163,12 @@ function isMidSystemRejection(err: unknown): boolean {
 export class AnthropicGameLLM implements GameLLM {
   private readonly client: Anthropic;
 
-  /** client 주입은 테스트용 — 기본은 환경(API 키/프로필)에서 인증을 해석한다 */
+  /** client 주입은 테스트용 — 기본은 프로세스가 공유하는 클라이언트다 */
   constructor(
     private readonly config: AnthropicAgentConfig,
     client?: Anthropic,
   ) {
-    this.client = client ?? new Anthropic();
+    this.client = client ?? (sharedClient ??= new Anthropic());
   }
 
   async runTurn(req: TurnRequest): Promise<TurnResult> {
@@ -165,9 +192,9 @@ export class AnthropicGameLLM implements GameLLM {
     const baseHistory = normalizeHistory(anthropicHistory(req.history, this.config));
     /** 상태 스냅샷을 오퍼레이터 채널로 넣을지 (미지원 모델은 유저 메시지에 접어 넣는다) */
     let useSystemNote = req.stateNote !== undefined && !midSystemUnsupported.has(this.config.model);
-    const buildMessages = (withNote: boolean): TurnMessage[] => {
+    const buildMessages = (withNote: boolean): Anthropic.MessageParam[] => {
       const user = withNote || !req.stateNote ? req.user : `${req.stateNote}\n\n${req.user}`;
-      const msgs: TurnMessage[] = [...baseHistory, { role: "user", content: user }];
+      const msgs: Anthropic.MessageParam[] = [...baseHistory, { role: "user", content: user }];
       if (withNote && req.stateNote) msgs.push({ role: "system", content: req.stateNote });
       return msgs;
     };
@@ -182,7 +209,7 @@ export class AnthropicGameLLM implements GameLLM {
 
     let text = "";
     let toolCallCount = 0;
-    let stopReason: string | null = null;
+    let stopReason: StopReason | null = null;
 
     for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
       // 증분 캐시 — 첫 요청은 이력 끝까지, 이후 반복은 직전 메시지까지 캐시한다
@@ -191,12 +218,12 @@ export class AnthropicGameLLM implements GameLLM {
         model: this.config.model,
         max_tokens: req.maxTokens ?? this.config.maxTokens,
         // 사고(thinking)는 끈다 — 출력 상한을 본문이 온전히 쓰고 지연도 줄어든다.
-        // 대신 모델이 추론을 **보이는 응답에 흘릴 수** 있어(Opus 4.8의 알려진 성향)
+        // 대신 모델이 추론을 **보이는 응답에 흘릴 수** 있어
         // 시스템 프롬프트가 "최종 답만" 규약을 함께 건다 (GM_SYSTEM).
         thinking: { type: "disabled" },
         system,
         ...(toolDefs.length > 0 ? { tools: toolDefs } : {}),
-        messages: withBreakpoint(messages, markUpto) as Anthropic.MessageParam[],
+        messages: withBreakpoint(messages, markUpto),
       };
 
       /**
@@ -238,7 +265,7 @@ export class AnthropicGameLLM implements GameLLM {
       usage.outputTokens += response.usage.output_tokens;
       usage.cacheReadTokens += cacheRead;
       usage.cacheWriteTokens += cacheWrite;
-      stopReason = response.stop_reason;
+      stopReason = toStopReason(response.stop_reason);
 
       for (const block of response.content) {
         if (block.type === "text" && block.text.trim().length > 0) {
@@ -293,7 +320,7 @@ export class AnthropicGameLLM implements GameLLM {
 
     // 상태 스냅샷은 이력에 남기지 않는다 — 매 턴 새로 주입되므로 누적되면
     // 지난 날짜·지난 스코어가 이력에 쌓여 모델을 혼란시킨다.
-    const history = messages.filter((m): m is Anthropic.MessageParam => m.role !== "system");
+    const history = messages.filter((m) => m.role !== "system");
     // role:system 미지원 폴백에서도 휘발 상태를 세이브에 남기지 않는다.
     const currentUser = history[baseHistory.length];
     if (!useSystemNote && currentUser?.role === "user" && typeof currentUser.content === "string") {
@@ -307,6 +334,7 @@ export class AnthropicGameLLM implements GameLLM {
         model: this.config.model,
         messages: history,
       },
+      historyBase: baseHistory.length,
       usage,
       toolCallCount,
       stopReason,

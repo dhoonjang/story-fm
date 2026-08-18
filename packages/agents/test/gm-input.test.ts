@@ -30,7 +30,7 @@ import {
   type GmToolCall,
 } from "@story-fm/agents";
 import { normalizeSpeaker, SCOUT_DAYS } from "@story-fm/domain";
-import type { GameLLM, TurnRequest } from "@story-fm/llm";
+import type { GameLLM, StopReason, TurnRequest } from "@story-fm/llm";
 
 /**
  * GM 입력 조립 — 캐시 계층의 경계가 지켜지는지 검증한다 (docs/llm/agents.md).
@@ -255,6 +255,7 @@ describe("새 게임 첫 장면", () => {
             model: "test-model",
             messages: [],
           },
+          historyBase: 0,
           usage: {
             inputTokens: 100,
             outputTokens: 80,
@@ -262,7 +263,7 @@ describe("새 게임 첫 장면", () => {
             cacheWriteTokens: 0,
           },
           toolCallCount: 0,
-          stopReason: "end_turn",
+          stopReason: "completed" as const,
         };
       },
     };
@@ -304,7 +305,7 @@ describe("새 게임 첫 장면", () => {
       `@${headCoachOf(state).characterId}: ${tail}`,
     ].join("\n");
 
-  const reply = (text: string, stopReason = "end_turn") => ({
+  const reply = (text: string, stopReason: StopReason = "completed") => ({
     text,
     history: {
       version: 1 as const,
@@ -312,6 +313,7 @@ describe("새 게임 첫 장면", () => {
       model: "test-model",
       messages: [],
     },
+    historyBase: 0,
     usage: { inputTokens: 100, outputTokens: 80, cacheReadTokens: 0, cacheWriteTokens: 0 },
     toolCallCount: 0,
     stopReason,
@@ -328,7 +330,7 @@ describe("새 게임 첫 장면", () => {
     const llm: GameLLM = {
       runTurn: async () =>
         ++call === 1
-          ? reply(scene(state, "이적시장 목표 파"), "max_tokens")
+          ? reply(scene(state, "이적시장 목표 파"), "truncated")
           : reply(scene(state, "선수단부터 보시겠습니까.")),
     };
 

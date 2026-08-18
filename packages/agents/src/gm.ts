@@ -163,7 +163,7 @@ export async function runOnboardingTurn(state: GameState, llm?: GameLLM): Promis
       // 장면 길이만 보고 잡으면 본문이 문장 한복판에서 잘린다
     });
     // 상한에 걸린 응답은 문장이 끊겨 있다 — 문법 검사를 통과해도 걸러낸다
-    if (result.stopReason === "max_tokens") {
+    if (result.stopReason === "truncated") {
       throw new Error("첫 장면이 출력 상한에 걸려 문장이 잘렸습니다");
     }
     const text = humanizePlayerIds(state, result.text.trim());
@@ -485,7 +485,7 @@ async function runRealGmTurn(
   // 시간이 흐른 턴의 심경 — 그 구간에 실제로 무슨 일이 있었던 선수만 다시 쓴다
   if (!inMatch && state.date !== turnFrom) await rateMood(state, turnFrom);
   // 출력 상한에 잘린 턴은 이미 스트리밍으로 나가 되돌릴 수 없다 — 원인만 로그에 남긴다
-  if (result.stopReason === "max_tokens") {
+  if (result.stopReason === "truncated") {
     console.error(
       `[gm] 응답이 출력 상한(${config.maxTokens})에 걸려 잘렸습니다 — config/llm.yml의 max_tokens를 올려야 합니다`,
     );

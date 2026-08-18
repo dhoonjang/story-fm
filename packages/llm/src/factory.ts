@@ -19,6 +19,15 @@ function adapterFor(config: AgentConfig): GameLLM {
 }
 
 /**
+ * 설정 하나에 어댑터 하나 — 턴마다 다시 세우지 않는다.
+ *
+ * `LLM_CONFIG`의 설정 객체가 키다(`agentConfig()`가 늘 같은 객체를 돌려준다).
+ * 테스트가 만든 임시 설정은 자기 어댑터를 받고, 그 설정이 사라지면 항목도 함께
+ * 사라진다.
+ */
+const adapters = new WeakMap<AgentConfig, GameLLM>();
+
+/**
  * 제공자 선택의 단일 분기. agents 패키지는 구체 SDK/어댑터를 알지 않는다.
  *
  * **계측과 시한도 여기서 붙는다** — 모든 실호출이 이 문 하나를 지나므로, 어댑터 세
@@ -28,16 +37,24 @@ function adapterFor(config: AgentConfig): GameLLM {
  * 순서 — 예산 판정이 바깥이다. 부르지도 않고 건너뛰는 호출에 시한을 재 봐야
  * 소용이 없다. 원문 기록(`tapLlm`, models.md §5)은 그 안쪽이다: 건너뛴 호출은
  * 요청이 없어 적을 것도 없고, 시한을 넘긴 호출은 **실패까지 적혀야** 한다.
+ *
+ * **부르는 쪽은 매 턴 불러도 된다** — 같은 설정이면 같은 어댑터가 돌아오고, SDK
+ * 클라이언트는 어댑터보다도 오래 살아 제공자마다 하나다. 키 검사는 어댑터를 처음
+ * 세울 때만 도므로, 키가 없으면 그 자리에서 실패하고 아무것도 캐시되지 않는다.
  */
 export function createGameLLM(config: AgentConfig): GameLLM {
+  const cached = adapters.get(config);
+  if (cached) return cached;
   if (!hasKey(config.provider)) {
     throw new Error(
       `${config.agent} 에이전트의 ${config.provider} 키가 없습니다: ${keyNamesFor(config.provider)}`,
     );
   }
   const adapter = adapterFor(config);
-  return meterLlm(
+  const llm = meterLlm(
     tapLlm(withDeadline(adapter, config.agent, config.timeoutMs), config.agent),
     config.agent,
   );
+  adapters.set(config, llm);
+  return llm;
 }

@@ -83,6 +83,34 @@ describe("에이전트별 LLM 설정", () => {
     expect(config.agents.gm).toMatchObject({ thinkingLevel: "minimal" });
   });
 
+  /**
+   * 설정이 적어 둔 것은 반드시 요청에 실려야 한다 (models.md §1-2). 못 싣는 제공자에
+   * 적어 둔 값을 조용히 무시하면, 설정과 실제로 도는 것이 갈려도 화면에 아무 증상이
+   * 없다 — 키가 없을 때 폴백하지 않는 것과 같은 규칙이다.
+   */
+  it("thinking_level을 못 싣는 제공자에 적으면 시작 전에 거부한다", () => {
+    const withProvider = (provider: string): string =>
+      yamlWith(`  gm: &agent
+    provider: ${provider}
+    model: test-model
+    max_tokens: 100
+    timeout_ms: 1000
+    thinking_level: high
+  match-intent: *agent
+  match-caster: *agent
+  match-rater: *agent
+  training-rater: *agent
+  mood-rater: *agent
+`);
+
+    expect(() => parseLlmConfig(withProvider("anthropic"))).toThrow("LLM 설정이 올바르지 않습니다");
+    expect(() => parseLlmConfig(withProvider("openai"))).toThrow("LLM 설정이 올바르지 않습니다");
+    // 실을 수 있는 제공자는 그대로 통과한다
+    expect(parseLlmConfig(withProvider("google")).agents.gm).toMatchObject({
+      thinkingLevel: "high",
+    });
+  });
+
   it("에이전트가 빠지거나 설정이 잘못되면 시작 전에 거부한다", () => {
     expect(() =>
       parseLlmConfig(

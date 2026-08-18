@@ -5,6 +5,7 @@ import {
   isTextHistoryMessage,
   type GameLLM,
   type GameToolSpec,
+  type StopReason,
   type TurnHistory,
   type TurnRequest,
   type TurnResult,
@@ -17,6 +18,36 @@ const MAX_TOOL_ITERATIONS = 8;
 type ChatMessage = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 type ChatChunk = OpenAI.Chat.Completions.ChatCompletionChunk;
 type OpenAiClient = Pick<OpenAI, "chat">;
+
+/**
+ * SDK 클라이언트는 프로세스에 하나다 — 에이전트마다 새로 만들면 연결 풀과 재시도
+ * 설정이 호출 수만큼 따로 서고, 그 이득은 아무 데도 없다.
+ */
+let sharedClient: OpenAI | undefined;
+
+function newSharedClient(): OpenAI {
+  const apiKey = process.env.OPENAI_API_KEY;
+  return new OpenAI(apiKey ? { apiKey } : {});
+}
+
+/** OpenAI의 종료 사유를 중립 계약으로 옮긴다 (models.md §3-1) */
+function toStopReason(reason: string | null): StopReason | null {
+  switch (reason) {
+    case null:
+      return null;
+    case "stop":
+      return "completed";
+    case "length":
+      return "truncated";
+    case "tool_calls":
+    case "function_call":
+      return "tool_use";
+    case "content_filter":
+      return "filtered";
+    default:
+      return "other";
+  }
+}
 
 /**
  * 두 경로(완성 응답 · 스트림 조립)가 함께 쓰는 도구 호출 모양.
@@ -146,9 +177,10 @@ async function collectStream(
  * OpenAI 어댑터 — 어떤 에이전트든 YAML 설정으로 선택할 수 있다.
  *
  * ⚠️ **Chat Completions + 함수 도구는 `reasoning_effort: "none"`이어야 한다.**
- * GPT-5.6 계열은 추론을 켠 채로 함수 도구를 쓰려면 `/v1/responses`를 써야 하는데,
- * 현재는 사고를 최소로 두므로 이 제약이 설계와 어긋나지 않는다. 서사 에이전트에서
- * 추론이 필요해지면 Responses API로 갈아타야 한다.
+ * 추론을 켠 채로 함수 도구를 쓰려면 `/v1/responses`를 써야 하는 모델이 있는데,
+ * 현재는 사고를 최소로 두므로 이 제약이 설계와 어긋나지 않는다. 그래서 이 어댑터는
+ * `thinking_level`을 싣지 않는다 (config.ts의 능력 표). 서사 에이전트에서 추론이
+ * 필요해지면 Responses API로 갈아타야 한다.
  *
  * **스트리밍은 Chat Completions 위에 붙였다** — Responses API로 갈아타지 않았다.
  * 막고 있던 것은 스트리밍이 아니라 **추론 + 함수 도구**의 조합이라, 사고를 최소로
@@ -160,12 +192,12 @@ async function collectStream(
 export class OpenAiGameLLM implements GameLLM {
   private readonly client: OpenAiClient;
 
+  /** client 주입은 테스트용 — 기본은 프로세스가 공유하는 클라이언트다 */
   constructor(
     private readonly config: OpenAiAgentConfig,
     client?: OpenAiClient,
   ) {
-    const apiKey = process.env.OPENAI_API_KEY;
-    this.client = client ?? new OpenAI(apiKey ? { apiKey } : {});
+    this.client = client ?? (sharedClient ??= newSharedClient());
   }
 
   async runTurn(req: TurnRequest): Promise<TurnResult> {
@@ -207,7 +239,7 @@ export class OpenAiGameLLM implements GameLLM {
     };
     let text = "";
     let toolCallCount = 0;
-    let stopReason: string | null = null;
+    let stopReason: StopReason | null = null;
 
     // 시한은 요청 옵션으로 간다 — 값은 요청 하나의 상한이고, 한 턴 전체는
     // `withDeadline`이 마감한다. 신호를 안 넘기면 시한이 지나도 소켓이 산다.
@@ -264,7 +296,8 @@ export class OpenAiGameLLM implements GameLLM {
       if (turn.text.trim().length > 0) text += (text ? "\n" : "") + turn.text;
       messages.push(turn.message);
 
-      stopReason = turn.calls.length > 0 ? "tool_use" : turn.finishReason;
+      // 도구를 부른 턴은 OpenAI가 "stop"을 보고해도 도구 왕복이다
+      stopReason = turn.calls.length > 0 ? "tool_use" : toStopReason(turn.finishReason);
       if (turn.calls.length === 0) break;
 
       for (const call of turn.calls) {
@@ -310,6 +343,7 @@ export class OpenAiGameLLM implements GameLLM {
         model: this.config.model,
         messages: saved,
       },
+      historyBase: baseHistory.length,
       usage,
       toolCallCount,
       stopReason,
