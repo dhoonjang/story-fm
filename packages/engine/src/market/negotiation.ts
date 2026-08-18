@@ -7,7 +7,7 @@ import type {
 } from "@story-fm/domain";
 import { PITCH_CLAIM_KO, ageOf, naturalPositionOf } from "@story-fm/domain";
 import { addDays, diffDays, seasonYear, windowOpenOn } from "../competition/calendar";
-import { AGENT_FEE_RATE, recordFinance } from "../club/finance";
+import { AGENT_FEE_RATE, budgetFreezeLabel, recordFinance } from "../club/finance";
 import {
   LOAN_FEE_RATE,
   askingPriceFor,
@@ -1752,9 +1752,10 @@ function affordabilityGate(
   const finance = state.finances.find((f) => f.teamId === state.userTeamId);
   if (!finance) return { ok: false, message: "재정 정보를 찾지 못했습니다" };
   if (finance.budgetFrozen && deal.fee > 0) {
+    // 동결에는 두 출구가 있다 — PSR과 부채 (finance.md §9.2·§9.4)
     return {
       ok: false,
-      message: "보드가 이적 예산을 동결했습니다 (PSR 위반) — 매각으로 예산을 만들어야 합니다",
+      message: `보드가 이적 예산을 동결했습니다${budgetFreezeLabel(state, state.userTeamId)} — 매각으로 예산을 만들어야 합니다`,
     };
   }
   if (deal.fee > finance.transferBudget) {

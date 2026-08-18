@@ -3,7 +3,7 @@ import { addDays, diffDays, seasonYear, windowOpenOn } from "../competition/cale
 import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import { isMarketOnlyLeague } from "../data/league-catalog";
 import { isTopFlightIn, leagueOfTeamIn } from "../competition/promotion";
-import { recordFinance } from "../club/finance";
+import { AGENT_FEE_RATE, recordFinance } from "../club/finance";
 import { marketBiasOf, marketValueOf, windowOpenForTeam } from "./market";
 import { makeRng } from "../core/rng";
 import {
@@ -258,6 +258,18 @@ function moveClub(
       category: "transfer_out",
       label: `이적료 — ${player.name} 영입`,
       amount: input.fee,
+      ref,
+    });
+    /**
+     * 에이전트 수수료는 **사는 쪽이 누구든** 붙는다 (finance.md §6). 유저에게만 물리면
+     * AI 구단이 같은 영입을 10% 싸게 하고, 이적료와 달리 이 돈은 구단 사이를 도는 것이
+     * 아니라 세계 밖으로 나가므로 그 차이가 시즌마다 잔고에 쌓인다.
+     */
+    recordFinance(state, toTeamId, {
+      kind: "expense",
+      category: "agent_fee",
+      label: `에이전트 수수료 — ${player.name}`,
+      amount: input.fee * AGENT_FEE_RATE,
       ref,
     });
     recordFinance(state, fromTeamId, {
@@ -536,7 +548,8 @@ function settle(state: GameState, deal: AiDeal, rng: () => number): GamePlayer |
   if (!finance || finance.budgetFrozen) return null;
   if (deal.fee > finance.transferBudget) return null;
   const floor = isTopFlightIn(state, deal.toTeamId) ? CASH_FLOOR_TOP : CASH_FLOOR_OTHER;
-  if (finance.balance - deal.fee < floor) return null;
+  // 나가는 돈은 이적료만이 아니다 — 에이전트 수수료가 같은 날 함께 빠진다
+  if (finance.balance - deal.fee * (1 + AGENT_FEE_RATE) < floor) return null;
   moveClub(state, squads, player, deal.toTeamId, {
     fee: deal.fee,
     type: deal.fee > 0 ? "transfer" : "free",
