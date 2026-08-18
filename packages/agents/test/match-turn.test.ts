@@ -210,9 +210,10 @@ describe("경기 턴의 실패 — 어느 걸음이 흔들렸나", () => {
   const casted = (text: string) => ({
     text,
     history: { version: 1 as const, provider: "anthropic" as const, model: "test", messages: [] },
+    historyBase: 0,
     usage: { inputTokens: 10, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
     toolCallCount: 0,
-    stopReason: "end_turn",
+    stopReason: "completed" as const,
   });
 
   /** 첫 휘슬은 지나간 판 — 손잡이(`계속`)로 온 진행 턴이다 */

@@ -12,12 +12,12 @@
 ```yaml
 version: 1
 agents:
-  gm:            { provider: google, model: gemini-3.6-flash,      max_tokens: 64000, timeout_ms: 180000 }
-  match-intent:  { provider: google, model: gemini-3.5-flash-lite, max_tokens: 16000, timeout_ms: 60000 }
-  match-caster:  { provider: google, model: gemini-3.6-flash,      max_tokens: 64000, timeout_ms: 180000 }
-  match-rater:   { provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000,  timeout_ms: 30000 }
-  training-rater:{ provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000,  timeout_ms: 30000 }
-  mood-rater:    { provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000,  timeout_ms: 30000 }
+  gm:            { provider: google, model: gemini-3.6-flash,      max_tokens: 64000, timeout_ms: 180000, thinking_level: minimal }
+  match-intent:  { provider: google, model: gemini-3.5-flash-lite, max_tokens: 16000, timeout_ms: 60000,  thinking_level: minimal }
+  match-caster:  { provider: google, model: gemini-3.6-flash,      max_tokens: 64000, timeout_ms: 180000, thinking_level: minimal }
+  match-rater:   { provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000,  timeout_ms: 30000,  thinking_level: minimal }
+  training-rater:{ provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000,  timeout_ms: 30000,  thinking_level: minimal }
+  mood-rater:    { provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000,  timeout_ms: 30000,  thinking_level: minimal }
 ```
 
 | 에이전트         | 담당                         | 출력 상한 | 시한  |
@@ -39,7 +39,7 @@ agents:
   안에서만 움직여서 모델이 무뎌도 장부가 흔들리지 않는다 (agents.md §4).
 - **결산 셋을 따로 적는다** — 셋을 하나로 묶으면 그중 하나만 다른 모델로 보낼 수
   없다. 지금은 심경만 더 싼 곳으로 옮기는 것이 YAML 한 줄이다.
-- 제공자별 옵션(thinking level 등)은 그 에이전트 항목이 함께 갖는다.
+- 제공자별 옵션(`thinking_level`)은 그 에이전트 항목이 함께 갖는다 (§1-2).
 
 ## 1-1. 시한 (`timeout_ms`)
 
@@ -69,6 +69,20 @@ LLM 호출 **하나**가 그 세이브의 모든 후속 요청을 영영 붙든�
 턴은 조용한 동안 `{"type":"ping"}`을 흘려 연결이 살아 있음을 알린다. 화면은 그 신호가
 끊기면 요청을 끊고 같은 실패 배너를 세운다 — 기다림이 끝나지 않는 자리는 없다.
 
+## 1-2. 사고 수준 (`thinking_level`)
+
+**`thinking_level`은 그 값을 요청에 실을 수 있는 제공자에만 쓴다.** 지금은 Google
+하나다 — `minimal`·`low`·`medium`·`high`가 그대로 Gemini의 사고 수준이 된다. Anthropic과
+OpenAI 어댑터는 사고를 끄고 부르므로(§3) 실을 자리가 없다.
+
+- ⚠️ **못 싣는 제공자에 적으면 시작할 때 실패한다** — 조용히 무시하지 않는다. 설정이
+  적어 둔 것과 실제로 도는 것이 갈리면 "GM만 사고가 얕은" 이유를 알 수 없다. 키가 없을
+  때 폴백하지 않는 것과 같은 규칙이다 (§2).
+- **누가 실을 수 있는지는 코드 한 곳이 정한다** — `config.ts`의 `PROVIDER_CAPABILITIES`.
+  어댑터가 사고를 다루기 시작하면 그 표의 한 칸이 바뀌고, 제공자 이름을 보고 분기하는
+  자리는 그 밖 어디에도 없다.
+- Google에서 생략하면 `minimal`이다.
+
 ## 2. 설정을 읽는 규칙
 
 - **시작할 때 Zod로 검증한다**(`parseLlmConfig`) — 빠졌거나 잘못된 설정은 첫 호출
@@ -92,7 +106,7 @@ mock은 폴백이 아니라 **모드**이고 규칙 기반 오케스트레이터
 
 ```
 runTurn({ system, history, user, stateNote?, tools?, maxTokens?, onText?, signal? })
-  → { text, history: StoredLlmHistory, usage, toolCallCount, stopReason }
+  → { text, history: StoredLlmHistory, historyBase, usage, toolCallCount, stopReason }
 ```
 
 - `system`은 **블록 배열**이다 — 앞이 더 안정적인 순서로 배치해 캐시 프리픽스를 만든다.
@@ -104,11 +118,15 @@ runTurn({ system, history, user, stateNote?, tools?, maxTokens?, onText?, signal
 - 이력은 **제공자·모델로 태깅해 저장**한다(`StoredLlmHistory`). 태그가 다르면 그 이력은
   버리고 새로 시작한다 — 장부와 패킷이 남아 있어 경기는 이어진다.
 - `stateNote`(휘발 상태 스냅샷)는 어느 어댑터에서든 **저장 이력에 남기지 않는다**.
+- `historyBase`는 돌려준 이력에서 **이번 턴 전까지의 메시지 수**다. 어댑터마다 이력을
+  정규화하며 메시지를 더하거나 덜기 때문에(Gemini는 model로 시작하는 이력 앞에 연결
+  user 턴 하나, Anthropic은 빈 텍스트 메시지 제거, 태그가 다르면 통째로 버림) 보낸
+  이력의 길이로는 경계를 셀 수 없다. 이 턴이 새로 붙인 것만 읽는 자리가 이 값을 쓴다(§5).
 
 | 어댑터    | 캐싱                                       | 상태 스냅샷 자리                | 사고                       | 시한을 거는 자리                                            |
 | --------- | ------------------------------------------ | ------------------------------- | -------------------------- | ----------------------------------------------------------- |
 | Anthropic | `cache_control` 브레이크포인트(요청당 4개) | `role:"system"` 오퍼레이터 채널 | `thinking: disabled`       | `messages.stream(body, { signal, timeout })`                |
-| Gemini    | implicit (동일 프리픽스)                   | 유저 발화 앞에 접어 넣음        | `ThinkingLevel.MINIMAL`    | `chats.create`의 `config.abortSignal`·`httpOptions.timeout` |
+| Gemini    | implicit (동일 프리픽스)                   | 유저 발화 앞에 접어 넣음        | 설정의 `thinking_level`    | `chats.create`의 `config.abortSignal`·`httpOptions.timeout` |
 | OpenAI    | 자동 프롬프트 캐시                         | `role:"developer"`              | `reasoning_effort: "none"` | `chat.completions.create(body, { signal, timeout })`        |
 
 **Anthropic** — ⚠️ **화면에 흘릴 곳이 없어도 스트리밍으로 부른다.** SDK가
@@ -130,6 +148,29 @@ Chat 이력을 원형으로 저장한다. 스트리밍은 chunk마다 model cont
 스트리밍의 도구 호출은 **`index`가 자리를 정하고**(id·이름은 첫 조각에만, 인자는 문자
 단위로 쪼개져 온다), 사용량은 `stream_options.include_usage`가 붙여 주는 마지막
 chunk에만 실린다 — 그 옵션이 없으면 계측이 이 에이전트를 못 본다.
+
+## 3-1. `stopReason` — 턴이 왜 멈췄는가
+
+**세 제공자의 종료 사유는 이름이 다르고 뜻도 딱 겹치지 않는다.** 어댑터가 자기 SDK의
+값을 아래 다섯 중 하나로 옮기고, 게임 코드는 이 다섯만 읽는다. 제공자가 사유를 보고하지
+않으면 `null`이다.
+
+| 중립 값     | 뜻                      | Anthropic                    | Google                                                                             | OpenAI                         |
+| ----------- | ----------------------- | ---------------------------- | ---------------------------------------------------------------------------------- | ------------------------------ |
+| `completed` | 모델이 턴을 마쳤다      | `end_turn` · `stop_sequence` | `STOP`                                                                             | `stop`                         |
+| `truncated` | 출력 상한에 걸려 잘렸다 | `max_tokens`                 | `MAX_TOKENS`                                                                       | `length`                       |
+| `tool_use`  | 도구를 부르고 멈췄다    | `tool_use`                   | 함수 호출이 실린 턴                                                                | `tool_calls` · `function_call` |
+| `filtered`  | 제공자가 내용을 막았다  | `refusal`                    | `SAFETY` · `RECITATION` · `BLOCKLIST` · `PROHIBITED_CONTENT` · `SPII` · `LANGUAGE` | `content_filter`               |
+| `other`     | 위 어디에도 들지 않는다 | `pause_turn`                 | `OTHER` · `MALFORMED_FUNCTION_CALL` · `UNEXPECTED_TOOL_CALL` 등                    | 그 밖                          |
+
+- ⚠️ **중립 값에 제공자의 낱말을 쓰지 않는다.** 원문을 그대로 흘리면 잘림 검사가 제공자
+  하나에만 맞는다 — Anthropic의 `max_tokens`를 신호로 삼으면 Gemini는 `MAX_TOKENS`를
+  소문자로 바꾼 값이 우연히 같아 돌고 OpenAI(`length`)에서는 아무 말 없이 꺼진다. 이름이
+  우연히 겹치는 것은 계약이 아니다.
+- **함수 호출이 있는 턴은 제공자가 뭐라 하든 `tool_use`다.** Gemini·OpenAI는 도구를
+  부르고도 `STOP`/`stop`을 보고할 수 있어, 도구 왕복을 계속할지 여기서 갈린다.
+- **`truncated`가 잘린 턴의 유일한 신호다** — 첫 장면은 그 자리에서 실패하고
+  (agents.md §1), 이미 스트리밍으로 나간 진행 턴은 원인만 로그에 남는다.
 
 ## 4. 계측과 예산 (`usage-meter.ts`)
 
@@ -192,7 +233,9 @@ chunk에만 실린다 — 그 옵션이 없으면 계측이 이 에이전트를 
 - **감독 발화 턴을 누르면 바로 뒤 model 턴의 기록이 열린다** — 그 발화가 실려 나간
   호출이 거기 있다.
 - **응답은 이력에 새로 붙은 메시지만 적는다** — `tool_use`·thinking 블록이 거기
-  있고, 프롬프트로 이미 적은 이력을 두 번 적지 않는다.
+  있고, 프롬프트로 이미 적은 이력을 두 번 적지 않는다. 경계는 어댑터가 돌려준
+  `historyBase`다(§3) — 보낸 이력의 길이로 세면 정규화가 더하거나 던 만큼 어긋나
+  이번 턴의 왕복이 잘리거나 지난 턴이 딸려 들어온다.
 - ⚠️ **그 꼬리는 모델의 몫만이 아니다.** 어댑터는 이번 턴의 우리 발화와 스킬이
   돌려준 `tool_result`도 같은 이력에 적는다(Anthropic은 `tool_result`까지
   `role:"user"`다). 그래서 팝업은 보낸 것(파랑)과 받은 것(초록)을 갈라 세우고,
@@ -204,6 +247,10 @@ chunk에만 실린다 — 그 옵션이 없으면 계측이 이 에이전트를 
 ## 6. ⚠️ 불변식
 
 - **모델 ID는 `config/llm.yml` 밖에 쓰지 않는다.** 코드는 에이전트 이름으로만 부른다.
+- **제공자 이름으로 분기하는 자리는 어댑터를 고르는 문과 능력 표뿐이다.** 게임 코드가
+  읽는 값은 전부 중립이다 — 종료 사유(§3-1), 사용량(§4), 이력 태그.
+- **설정이 적어 둔 것은 반드시 요청에 실린다.** 실을 수 없으면 무시하는 대신 시작할
+  때 실패한다 (§1-2).
 - **설정 파싱은 순수 함수로 남긴다**(`parseLlmConfig`) — 환경을 읽는 자리가 늘면 설정 검증 테스트가 깨진다.
 - **출력 상한은 사고와 본문을 함께 덮는다.** "장면이 몇 줄이니 이만큼"으로 좁히면 본문이
   문장 한복판에서 잘린다. 상한은 상한일 뿐 — 과금은 실제 생성분이다.
@@ -232,7 +279,9 @@ chunk에만 실린다 — 그 옵션이 없으면 계측이 이 에이전트를 
 | 설정 로드·검증                     | `packages/llm/src/config.ts`                                                        |
 | 제공자 중립 계약                   | `packages/llm/src/game-llm.ts`                                                      |
 | 어댑터 3종                         | `packages/llm/src/anthropic-adapter.ts` · `gemini-adapter.ts` · `openai-adapter.ts` |
-| 제공자 선택 + 계측·시한 부착       | `packages/llm/src/factory.ts`                                                       |
+| 제공자 선택 + 계측·시한 부착       | `packages/llm/src/factory.ts` (에이전트별 어댑터 캐시)                              |
+| 종료 사유 중립 enum                | `packages/llm/src/game-llm.ts` (`StopReason`) · 매핑은 어댑터 셋                    |
+| 제공자 능력 표                     | `packages/llm/src/config.ts` (`PROVIDER_CAPABILITIES`)                              |
 | 시한 래퍼                          | `packages/llm/src/deadline.ts`                                                      |
 | 턴 라우트 마감(`maxDuration`·ping) | `apps/web/app/api/games/[id]/turn/route.ts` · `turn/stream/route.ts`                |
 | 설정 검증 테스트                   | `packages/llm/test/agent-config.test.ts`                                            |
