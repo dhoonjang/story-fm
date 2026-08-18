@@ -134,6 +134,11 @@ jobs:
       # Prettier — 어긋난 파일 이름만 뱉는다. 고치는 명령은 `pnpm format`.
       - if: ${{ !cancelled() }}
         run: pnpm format:check
+      # match-cli 픽스처는 도메인 스키마로 **런타임에** 파싱된다 — tsc도 eslint도
+      # JSON 안을 보지 않으므로 스키마가 움직이면 아무 잡도 빨개지지 않은 채 썩는다.
+      # `--dry`는 LLM을 부르지 않고 전력 패킷까지만 굴린다(키 불필요, 1초).
+      - if: ${{ !cancelled() }}
+        run: pnpm match --dry
 
   test:
     name: unit + api (${{ matrix.shard }}/${{ strategy.job-total }})

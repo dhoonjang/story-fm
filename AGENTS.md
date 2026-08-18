@@ -57,10 +57,12 @@ docs/              # design spec — how the game works today (README.md is the 
   data/            #   what exists — players, teams, competitions, people, saves
   simulation/      #   what happens — match, season, transfer, finance, career
   llm/             #   how it speaks — models, agents, prompts
+config/            # llm.yml — provider and model per agent
 apps/
   web/             # Next.js — chat UI · office views · API · /admin
+  match-cli/       # match prototype — strength packet → caster → ledger, one cycle
 packages/
-  domain/          # domain models + Zod schemas (player, tactics, records, fixtures, personas)
+  domain/          # domain models + Zod schemas (player, tactics, records, schedule, persona)
   sim/             # match sim core — strength packet · xG-interval sim · matchups · stamina
   engine/          # game engine — each folder is a domain:
                    #   core/(state, save, tick, dates) world/(catalog, generation, wages)
@@ -70,6 +72,7 @@ packages/
                    #   data/(catalog, seed)
   agents/          # GM orchestrator · commentary · summary writers · mock GM
   llm/             # provider-neutral GameLLM + Anthropic/Gemini/OpenAI adapters
+e2e/               # Playwright specs — onboarding · game · admin · turn errors
 ```
 
 ## 4. Architecture
