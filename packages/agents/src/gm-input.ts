@@ -320,11 +320,9 @@ export function buildGmStateNote(
     lines.push(
       [
         `시간이 흘렀다: ${passed.from} → ${state.date} (${passed.stopped})`,
-        `이미 그날이다 — 첫 줄 헤더에 ${state.date}을(를) 적어라. 도구로 시간을 다시 옮기지 마라.`,
+        `이미 그날이다 — 첫 줄 헤더에 ${state.date}을(를) 적어라.`,
         passed.digest.length > 0
-          ? `그 사이 벌어진 일 (하나를 골라 장면으로 열어라 — 목록으로 늘어놓지 마라):\n${passed.digest
-              .map((d) => `- ${d}`)
-              .join("\n")}`
+          ? `그 사이 벌어진 일:\n${passed.digest.map((d) => `- ${d}`).join("\n")}`
           : `그 사이 특별한 일은 없었다.`,
       ].join("\n"),
     );
@@ -352,18 +350,12 @@ export function buildGmStateNote(
    */
   const news = state.pendingNews ?? [];
   if (news.length > 0) {
-    lines.push(
-      `경기 뒤 들어온 소식 (하나를 골라 장면으로 열어라 — 목록으로 늘어놓지 마라):\n${news
-        .map((n) => `- ${n}`)
-        .join("\n")}`,
-    );
+    lines.push(`경기 뒤 들어온 소식:\n${news.map((n) => `- ${n}`).join("\n")}`);
   }
   // 채팅 턴 없는 화면 조작(전술판·명단·역할) — 이미 반영된 사실이라 모델은 반응만 한다
   const edits = state.pendingEdits ?? [];
   if (edits.length > 0) {
-    lines.push(
-      `감독이 화면에서 바꾼 것 (이미 반영됨 — 도구로 다시 하지 마라):\n${edits.map((e) => `- ${e.text}`).join("\n")}`,
-    );
+    lines.push(`감독이 화면에서 바꾼 것:\n${edits.map((e) => `- ${e.text}`).join("\n")}`);
   }
   // 답을 기다리는 기자회견 — 이 줄이 없으면 모델은 회견이 열린 사실 자체를 모른다
   const press = describePendingPress(state);
