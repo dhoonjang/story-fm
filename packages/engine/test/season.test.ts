@@ -9,6 +9,7 @@ import {
   computeStandings,
   groupOf,
   isFriendly,
+  leagueOfTeamIn,
   MINI_WORLD,
   playersOf,
   quickSimulate,
@@ -32,6 +33,23 @@ describe("순위표", () => {
     expect(standings[standings.length - 1]?.points).toBe(0);
     expect(standings[0]?.goalDiff).toBe(2);
     expect(standings[0]?.name).toBeTruthy(); // 카탈로그에서 한글 팀명
+  });
+
+  it("승점·득실이 같으면 다득점이 가른다 — 정렬의 세 번째 열쇠", () => {
+    const state = createTestGame();
+    const league = leagueOfTeamIn(state, state.userTeamId);
+    const round1 = state.matches.filter((m) => m.competitionId === league && m.round === 1);
+    expect(round1.length, "1라운드 리그 경기가 둘도 없다").toBeGreaterThan(1);
+    // 두 홈팀이 같은 승점(3)·같은 득실(+2)로 끝나고 득점만 다르다
+    round1[0]!.result = { homeGoals: 3, awayGoals: 1, scorers: [] };
+    round1[1]!.result = { homeGoals: 2, awayGoals: 0, scorers: [] };
+
+    const [first, second] = computeStandings(state);
+    expect(first!.points).toBe(second!.points);
+    expect(first!.goalDiff).toBe(second!.goalDiff);
+    expect(first!.goalsFor, "다득점이 아래에 섰다").toBeGreaterThan(second!.goalsFor);
+    expect(first!.teamId).toBe(round1[0]!.homeTeamId);
+    expect(second!.teamId).toBe(round1[1]!.homeTeamId);
   });
 
   it("프리시즌 친선은 아무리 크게 이겨도 순위표에 잡히지 않는다", () => {
