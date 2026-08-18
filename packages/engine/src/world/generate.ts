@@ -1,8 +1,9 @@
 import type { GamePlayer, PositionGroup } from "@story-fm/domain";
+import { bestOverall } from "@story-fm/domain";
 import { claimSyntheticName, syntheticNamePoolOf } from "../data/names";
 import { countryOfTeam, TIER_BASE } from "../data/team-catalog";
 import { deriveAxes } from "./attributes";
-import { derivePositions, overallFor, physiqueOf, syntheticFoot } from "./catalog";
+import { derivePositions, physiqueOf, syntheticFoot } from "./catalog";
 import { claimPlayerId, slugifyName } from "./player-id";
 import { makeRng, pick, randInt } from "../core/rng";
 
@@ -116,7 +117,12 @@ export function generateYouthPlayer(
     attrs,
     age,
   );
-  const overall = overallFor(position, axes);
+  // 카탈로그·어드민과 **같은 함수**로 종합을 낸다 — 보유 자리 목록이 인자다 (player.md §4)
+  const positions = derivePositions(
+    `${nameEn}-${slugifyName(teamId)}-${season}-${index}`,
+    position,
+  );
+  const overall = bestOverall(axes, positions);
 
   return {
     id: claimPlayerId(nameEn, birthdate, taken),
@@ -125,8 +131,8 @@ export function generateYouthPlayer(
     squadLevel: "reserve",
     name: nameKo,
     birthdate,
-    positions: derivePositions(`${nameEn}-${slugifyName(teamId)}-${season}-${index}`, position),
-    // 적응도 파생과 **같은 키**로 주발을 뽑는다 — 어긋나면 목록 값과 폴백이 갈린다
+    positions,
+    // 적응도 파생과 **같은 키**로 주발을 뽑는다 — 같은 선수는 언제나 같은 발이다
     foot: syntheticFoot(`${nameEn}-${slugifyName(teamId)}-${season}-${index}`, position),
     ...physiqueOf(`${nameEn}-${slugifyName(teamId)}-${season}-${index}`, position, axes),
     attributes: {

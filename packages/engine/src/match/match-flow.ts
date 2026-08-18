@@ -15,6 +15,7 @@ import {
   positionGroupOf,
   positionGroupOfPlayer,
   PROFICIENCY_MAX,
+  storedProficiencyFor,
   TacticsSpecSchema,
   tacticsSignature,
 } from "@story-fm/domain";
@@ -1039,12 +1040,13 @@ function gainMatchProficiency(
     if (slot.proficiency >= PROFICIENCY_MAX) return; // 천장 — 장부에 적을 것이 없다
     slot.proficiency = Math.min(PROFICIENCY_MAX, slot.proficiency + MATCH_PROFICIENCY_GAIN);
   } else {
-    // 처음 맡은 자리 — 경험이 쌓이기 시작한다
+    // 처음 맡은 자리 — 경험이 쌓이기 시작한다. **주발을 벗긴 원값**에서
+    // 출발한다: 저장에 보정을 남기면 조회가 다시 얹는다 (player.md §8)
     player.positions.push({
       position,
       proficiency: Math.min(
         PROFICIENCY_MAX,
-        proficiencyAt(player, position) + MATCH_PROFICIENCY_GAIN,
+        storedProficiencyFor(player.positions, position, player.foot) + MATCH_PROFICIENCY_GAIN,
       ),
       isNatural: false,
     });
