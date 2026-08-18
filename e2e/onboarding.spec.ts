@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { token } from "./palette";
+
 test("새 게임 첫 메시지가 부임 장면과 수석코치 브리핑으로 표시된다", async ({ page }) => {
   await page.goto("/new");
   await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: 20_000 });
@@ -16,7 +18,7 @@ test("새 게임 첫 메시지가 부임 장면과 수석코치 브리핑으로 
   const firstTurn = page.getByTestId("model-turn").first();
   await expect(firstTurn).toBeVisible({ timeout: 30_000 });
   await expect(firstTurn).toContainText("온보딩테스트");
-  // 화자 태그는 사람 이름이고 직책은 화면이 괄호로 붙인다 (personas.md)
+  // 화자 태그는 사람 이름이고 직책은 세이브가 안다 (docs/data/people.md §3)
   await expect(firstTurn.locator(".speaker-role").first()).toHaveText("수석코치");
   // 다만 **소개할 때 한 번만** — 같은 사람이 이어 말하는 줄엔 이름만 남는다.
   // 온보딩은 수석코치가 연속으로 말하므로 직책은 정확히 한 번 보인다
@@ -88,14 +90,18 @@ test("같은 시각은 다시 적지 않는다 — 화자 이름은 턴마다 �
   await page.getByTestId("start-game").click();
   await expect(page.getByTestId("chat-scroll")).toContainText("접기테스트", { timeout: 30_000 });
 
-  for (const msg of ["팀 분위기는 좀 어때", "알겠어", "그대로 가자"]) {
+  // 한 턴이 끝난 것은 **모델 턴이 하나 늘었다**로 안다 — 고정 대기는 빠른 날엔
+  // 낭비고 느린 날엔 다음 발화를 아직 잠긴 입력칸에 밀어 넣는다
+  const modelTurns = page.getByTestId("model-turn");
+  const messages = ["팀 분위기는 좀 어때", "알겠어", "그대로 가자"];
+  for (const [i, msg] of messages.entries()) {
+    await expect(page.getByTestId("chat-input")).toBeEnabled({ timeout: 30_000 });
     await page.getByTestId("chat-input").fill(msg);
     await page.getByTestId("chat-send").click();
-    await page.waitForTimeout(1200);
+    await expect(modelTurns).toHaveCount(i + 2, { timeout: 30_000 });
   }
-  await expect(page.getByTestId("model-turn")).toHaveCount(4, { timeout: 20_000 });
 
-  const turns = await page.getByTestId("model-turn").evaluateAll((nodes) =>
+  const turns = await modelTurns.evaluateAll((nodes) =>
     nodes.map((n) => ({
       stamp: n.querySelector('[data-testid="scene-stamp"]')?.textContent?.trim() ?? null,
       speakers: [...n.querySelectorAll(".say-who .speaker")].length,
@@ -112,11 +118,12 @@ test("같은 시각은 다시 적지 않는다 — 화자 이름은 턴마다 �
     if (t.says > 0) expect(t.speakers, "이름 없는 턴이 있다").toBeGreaterThan(0);
   }
 
-  // 이름 색은 강조색이 아니다 — 턴마다 서므로 원색이면 눈이 아프다
-  expect(
-    await page
-      .locator(".say-who .speaker")
-      .first()
-      .evaluate((n) => getComputedStyle(n).color),
-  ).toBe("rgb(204, 214, 228)"); // --silver
+  // 이름 색은 **강조색이 아니다** — 턴마다 서므로 원색이면 화면이 계속 깜빡인다.
+  // 값이 아니라 토큰으로 비교한다: 팔레트를 손봐도 이 규칙은 그대로여야 한다
+  const speakerColor = await page
+    .locator(".say-who .speaker")
+    .first()
+    .evaluate((n) => getComputedStyle(n).color);
+  expect(speakerColor).toBe(await token(page, "--silver"));
+  expect(speakerColor).not.toBe(await token(page, "--accent"));
 });

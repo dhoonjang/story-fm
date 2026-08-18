@@ -16,9 +16,11 @@ coverage/
 # 바뀌므로 커밋하면 계속 흔들린다. next dev/build가 다시 만든다.
 apps/web/next-env.d.ts
 
-# 테스트 산출물 — Playwright 실행 결과·리포트·트레이스
+# 테스트 산출물 — Playwright 실행 결과·리포트·트레이스 (E2E_SLOT이 붙인 접미사 포함)
 test-results/
+test-results-*/
 playwright-report/
+playwright-report-*/
 blob-report/
 .playwright-mcp/
 
