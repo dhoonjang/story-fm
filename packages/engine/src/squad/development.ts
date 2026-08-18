@@ -1,6 +1,6 @@
-import type { AttributeAxis, GamePlayer } from "@story-fm/domain";
+import type { AttributeAxis, AxisValues, GamePlayer } from "@story-fm/domain";
 import { ATTRIBUTE_AXES, ageOf } from "@story-fm/domain";
-import { agingDelta } from "../world/attributes";
+import { agingDelta, monthlyGrowthFactor } from "../world/attributes";
 import { makeRng } from "../core/rng";
 import { recomputeOverall, recordGrowth, squadLevelOf, type GameState } from "../core/state";
 
@@ -40,44 +40,79 @@ export function developsByCore(state: GameState, player: GamePlayer): boolean {
 }
 
 /**
- * 성장 쪽 확률 — 잠재력 여유가 클수록, 어릴수록 높다.
- * 노화 곡선이 이미 꺾인 축(음수)은 여기 들어오지 않는다.
+ * 성장 쪽 확률 (시즌 기대치 — 월 확률은 이 값을 열두 달로 나눈다).
+ * 잠재력 여유가 클수록, 어릴수록 높다. 나이 배율은 결산 경로와 같은 표에서 온다
+ * (`monthlyGrowthFactor` — player.md §6.3). 노화 곡선이 이미 꺾인 축(음수)은
+ * 여기 들어오지 않는다.
  */
-function growChance(room: number, age: number): number {
+export function growChance(room: number, age: number): number {
   if (room <= 0) return 0;
   const byRoom = Math.min(1, room / ROOM_FULL);
-  // 스물셋까지가 가장 빠르고, 스물여덟을 넘으면 눈에 띄게 준다
-  const byAge = age <= 20 ? 1 : age <= 23 ? 0.85 : age <= 27 ? 0.6 : age <= 30 ? 0.35 : 0.15;
-  return Math.max(GROW_MIN, Math.min(GROW_MAX, byRoom * byAge));
+  return Math.max(GROW_MIN, Math.min(GROW_MAX, byRoom * monthlyGrowthFactor(age)));
+}
+
+/**
+ * 이번 달 이 선수가 실제로 움직이는 축 — 최대 `MAX_AXES_PER_MONTH`개.
+ *
+ * **축은 목록 순서가 아니라 시드가 고른다.** 15축이 저마다 제 난수 채널을 받고,
+ * 움직인 축 중 시드가 정한 순서로 둘까지 반영한다. 앞에서부터 굴리다 둘이 차면
+ * 멈추는 방식은 `ATTRIBUTE_AXES` 앞쪽(pace·stamina)만 키우고 뒤쪽(leadership·
+ * goalkeeping)을 구조적으로 굳힌다 — `axes`를 어떤 순서로 넘겨도 결과가 같아야 한다.
+ */
+export function rollMonthlyAxes(
+  input: {
+    seed: number;
+    date: string;
+    playerId: string;
+    age: number;
+    values: AxisValues;
+    potential: number;
+  },
+  axes: readonly AttributeAxis[] = ATTRIBUTE_AXES,
+): { axis: AttributeAxis; step: number }[] {
+  return axes
+    .map((axis) => {
+      const rng = makeRng(input.seed, `development:${input.date}:${input.playerId}:${axis}`);
+      // 뽑히는 순서도 난수다 — 축 이름으로 세우면 편향이 자리만 옮긴다
+      const priority = rng();
+      const step = rollAxis(axis, input.age, input.values[axis], input.potential, rng);
+      return { axis, step, priority };
+    })
+    .filter((rolled) => rolled.step !== 0)
+    .sort((a, b) => a.priority - b.priority || a.axis.localeCompare(b.axis))
+    .slice(0, MAX_AXES_PER_MONTH)
+    .map(({ axis, step }) => ({ axis, step }));
 }
 
 /**
  * 한 달치 성장·쇠퇴를 적용한다 — 매월 1일 tick에서 부른다.
  *
- * 난수 채널에 날짜를 넣으므로 **같은 세이브는 같은 달에 같은 결과**다. 선수 목록을
- * id 순으로 돌아 순서에 의존하지 않는다.
+ * 난수 채널이 (시드, 날짜, 선수, 축)이라 **같은 세이브는 같은 달에 같은 결과**이고,
+ * 선수 목록 순서에도 의존하지 않는다.
  *
  * @returns 감독에게 알릴 우리 팀(2군) 변화 요약
  */
 export function applyMonthlyDevelopment(state: GameState): string[] {
-  const rng = makeRng(state.seed, `development:${state.date}`);
   const lines: string[] = [];
   const targets = state.players
     .filter((p) => developsByCore(state, p))
     .sort((a, b) => a.id.localeCompare(b.id));
 
   for (const player of targets) {
-    const age = ageOf(player.birthdate, state.date);
-    let moved = 0;
-    for (const axis of ATTRIBUTE_AXES) {
-      if (moved >= MAX_AXES_PER_MONTH) break;
-      const step = rollAxis(player, axis, age, rng);
-      if (step === 0) continue;
+    const steps = rollMonthlyAxes({
+      seed: state.seed,
+      date: state.date,
+      playerId: player.id,
+      age: ageOf(player.birthdate, state.date),
+      values: player.attributes,
+      potential: player.attributes.potential,
+    });
+    if (steps.length === 0) continue;
+
+    for (const { axis, step } of steps) {
       player.attributes[axis] = Math.max(1, Math.min(99, player.attributes[axis] + step));
-      moved += 1;
       recordGrowth(state, player.id, null, "development", axis, step, "월간 성장");
     }
-    if (moved === 0) continue;
     recomputeOverall(player);
     if (player.teamId === state.userTeamId) {
       lines.push(`${player.name} (2군) ${player.attributes.overall}`);
@@ -87,8 +122,13 @@ export function applyMonthlyDevelopment(state: GameState): string[] {
 }
 
 /** 이 축이 이번 달에 움직이는가 — +1 / −1 / 0 */
-function rollAxis(player: GamePlayer, axis: AttributeAxis, age: number, rng: () => number): number {
-  const value = player.attributes[axis];
+export function rollAxis(
+  axis: AttributeAxis,
+  age: number,
+  value: number,
+  potential: number,
+  rng: () => number,
+): number {
   const bias = agingDelta(axis, age);
 
   // 꺾이는 축 — 시즌 기대치를 열두 달에 나눠 담는다
@@ -98,7 +138,7 @@ function rollAxis(player: GamePlayer, axis: AttributeAxis, age: number, rng: () 
   }
 
   // 자라는 축 — 잠재력이 천장이다. 노화 곡선이 미는 축은 조금 더 잘 자란다
-  const room = player.attributes.potential - value;
+  const room = potential - value;
   if (room <= 0) return 0;
   const chance = growChance(room, age) * (bias > 0 ? 1 : 0.6);
   return rng() < chance / MONTHS_PER_SEASON ? 1 : 0;
