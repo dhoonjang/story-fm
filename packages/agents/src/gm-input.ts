@@ -100,7 +100,7 @@ export function buildGmReference(state: GameState): string {
     // 그 목록은 다시 id 표로 읽혀 한 번 불린 선수만 계속 말한다
     `[${teamName(state.userTeamId)} 선수단]`,
     `선수는 인물 카드가 없어도 전원 화자다. 이름은 상태 스냅샷의 「선수단」 줄에 있고, 그 이름이 곧 화자 명단이다.`,
-    `스킬의 선수 인자도 그 이름으로 받는다.`,
+    `스킬의 선수 인자도 그 이름으로 받는다 — 조회가 돌려준 id를 적어도 된다.`,
     `능력치·배치·컨디션·계약은 get_squad·search_players가 준다.`,
   ].join("\n");
 }
