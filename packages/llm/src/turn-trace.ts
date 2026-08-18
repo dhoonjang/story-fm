@@ -36,6 +36,7 @@ import {
   isStoredLlmHistory,
   type GameLLM,
   type JsonObjectSchema,
+  type StopReason,
   type TurnHistory,
   type TurnRequest,
   type TurnResult,
@@ -81,7 +82,7 @@ export interface TurnTraceResponse {
   messages: unknown[];
   usage: TurnUsage;
   toolCallCount: number;
-  stopReason: string | null;
+  stopReason: StopReason | null;
 }
 
 /** 호출 하나의 왕복 */
@@ -134,14 +135,14 @@ function traceRequest(req: TurnRequest): TurnTraceRequest {
 /**
  * 응답이 이력에 새로 붙인 메시지.
  *
- * 앞의 이력은 요청에 이미 적혀 있으므로 그만큼 잘라 낸다. 잘라 낼 수 없으면
- * (제공자·모델 태그가 달라 어댑터가 이력을 버리고 새로 시작한 턴) 전부 적는다 —
- * 자를 자리를 짐작해 앞을 날리면 그 턴의 왕복이 통째로 사라진다.
+ * 앞의 이력은 요청에 이미 적혀 있으므로 그만큼 잘라 낸다. **자를 자리는 어댑터가
+ * 돌려준 `historyBase`다** — 어댑터는 자기 제공자에 맞춰 이력을 정규화하며 메시지를
+ * 더하거나 덜기 때문에(Gemini는 연결 user 턴 하나를 앞에 두고, Anthropic은 빈 텍스트
+ * 메시지를 버리고, 태그가 다르면 통째로 새로 시작한다), 보낸 이력의 길이로 세면
+ * 어긋난 만큼 이번 턴의 왕복이 잘리거나 지난 턴이 딸려 들어온다.
  */
-function appendedMessages(result: TurnResult, sentCount: number): unknown[] {
-  const messages = result.history.messages;
-  if (messages.length < sentCount) return [...messages];
-  return messages.slice(sentCount);
+function appendedMessages(result: TurnResult): unknown[] {
+  return result.history.messages.slice(result.historyBase);
 }
 
 /* ------------------------------------------------------------------ *
@@ -292,7 +293,7 @@ export function tapLlm(llm: GameLLM, agent: AgentName, env: LlmEnv = process.env
         call.model = result.history.model;
         call.response = {
           text: result.text,
-          messages: appendedMessages(result, request.history.length),
+          messages: appendedMessages(result),
           usage: result.usage,
           toolCallCount: result.toolCallCount,
           stopReason: result.stopReason,

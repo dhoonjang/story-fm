@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { OpenAiGameLLM, isStoredLlmHistory, type GameToolSpec } from "@story-fm/llm";
+import {
+  OpenAiGameLLM,
+  isStoredLlmHistory,
+  type GameToolSpec,
+  type StopReason,
+} from "@story-fm/llm";
 
 const testConfig = {
   agent: "mood-rater" as const,
@@ -17,7 +22,7 @@ const usage = {
 };
 
 /** Chat Completions 응답 한 건 */
-function completion(message: Record<string, unknown>, finish = "stop") {
+function completion(message: Record<string, unknown>, finish: string | null = "stop") {
   return { choices: [{ message, finish_reason: finish }], usage };
 }
 
@@ -270,7 +275,7 @@ describe("OpenAI 어댑터 — 스트리밍", () => {
 
     expect(deltas).toEqual(["@수석코치: ", "훈련을 ", "마쳤습니다."]);
     expect(result.text).toBe("@수석코치: 훈련을 마쳤습니다.");
-    expect(result.stopReason).toBe("stop");
+    expect(result.stopReason).toBe("completed");
   });
 
   /**
@@ -435,5 +440,61 @@ describe("OpenAI 어댑터 — 스트리밍", () => {
       onText: () => {},
     });
     expect(handle).toHaveBeenCalledWith({}, { text: "@수석코치: 조정하겠습니다." });
+  });
+});
+
+/**
+ * 종료 사유는 **중립 값으로만** 나간다 (models.md §3-1). OpenAI의 `length`는 다른
+ * 제공자의 잘림 값과 낱말이 겹치지 않아, 원문을 흘리면 잘림 검사가 여기서만 꺼진다.
+ */
+describe("OpenAiGameLLM 종료 사유", () => {
+  const cases: Array<[string | null, StopReason | null]> = [
+    ["stop", "completed"],
+    ["length", "truncated"],
+    ["content_filter", "filtered"],
+    ["function_call", "tool_use"],
+    ["알 수 없는 값", "other"],
+    [null, null],
+  ];
+
+  it.each(cases)("%s는 %s로 옮긴다", async (raw, neutral) => {
+    const { client } = makeStubClient([
+      completion({ role: "assistant", content: "@수석코치: 됐습니다." }, raw),
+    ]);
+    const result = await new OpenAiGameLLM(testConfig, client).runTurn({
+      system: "S",
+      history: [],
+      user: "결산",
+    });
+    expect(result.stopReason).toBe(neutral);
+  });
+
+  it("도구를 부른 턴은 제공자가 stop이라 해도 도구 왕복이다", async () => {
+    const tool: GameToolSpec = {
+      name: "noop",
+      description: "테스트",
+      inputSchema: { type: "object", properties: {} },
+      handle: () => ({ ok: true, message: "완료" }),
+    };
+    const { client } = makeStubClient([
+      completion(
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [{ id: "c1", type: "function", function: { name: "noop", arguments: "{}" } }],
+        },
+        // 도구를 부르고도 stop을 보고하는 응답 — 여기서 왕복이 끊기면 안 된다
+        "stop",
+      ),
+      completion({ role: "assistant", content: "@수석코치: 됐습니다." }, "stop"),
+    ]);
+    const result = await new OpenAiGameLLM(testConfig, client).runTurn({
+      system: "S",
+      history: [],
+      user: "결산",
+      tools: [tool],
+    });
+    expect(result.toolCallCount).toBe(1);
+    expect(result.stopReason).toBe("completed");
   });
 });

@@ -4,6 +4,7 @@ import { LlmTimeoutError, withDeadline, type GameLLM, type TurnRequest } from "@
 const emptyResult = {
   text: "장면",
   history: { version: 1 as const, provider: "google" as const, model: "m", messages: [] },
+  historyBase: 0,
   usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
   toolCallCount: 0,
   stopReason: null,

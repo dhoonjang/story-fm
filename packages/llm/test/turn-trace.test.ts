@@ -33,9 +33,10 @@ function stubLlm(usage: TurnUsage, calls: { count: number } = { count: 0 }): Gam
       return {
         text: "@수석코치: 됐습니다.",
         history: { version: 1, provider: "openai", model: "m", messages: [] },
+        historyBase: 0,
         usage,
         toolCallCount: 0,
-        stopReason: "stop",
+        stopReason: "completed",
       };
     },
   };
@@ -74,6 +75,46 @@ describe("tapLlm — 개발 모드에서만 원문을 남긴다", () => {
     expect(first.response?.usage.inputTokens).toBe(100);
     // 묶지 않은 자리는 비어 있다 — 남의 턴을 열지 않는다
     expect(turnTrace("g1", 6)).toEqual([]);
+  });
+
+  /**
+   * 어댑터는 자기 제공자에 맞춰 이력을 정규화하며 메시지를 더하거나 던다 — Gemini는
+   * model로 시작하는 이력 앞에 연결 user 턴을 하나 두고, Anthropic은 빈 텍스트
+   * 메시지를 버린다. 보낸 이력의 길이로 경계를 세면 그만큼 어긋나, 지난 턴이 이번 턴의
+   * 꼬리에 딸려 들어오거나 이번 턴의 왕복이 잘려 나간다.
+   */
+  it("새로 붙은 메시지의 경계는 어댑터가 돌려준 historyBase다", async () => {
+    /** 이력 하나를 받아 앞에 연결 턴을 하나 세운 어댑터 — 돌려준 이력이 요청보다 길다 */
+    const normalizing: GameLLM = {
+      async runTurn(): Promise<TurnResult> {
+        return {
+          text: "@수석코치: 됐습니다.",
+          history: {
+            version: 1,
+            provider: "google",
+            model: "m",
+            messages: ["[이전 장면 시작]", "지난 턴", "이번 발화", "이번 응답"],
+          },
+          historyBase: 2,
+          usage: usageOf({ inputTokens: 10 }),
+          toolCallCount: 0,
+          stopReason: "completed",
+        };
+      },
+    };
+    const llm = tapLlm(normalizing, "gm", dev);
+
+    await traceTurn(async () => {
+      await llm.runTurn({
+        system: "S",
+        history: [{ role: "assistant", content: "지난 턴" }],
+        user: "이번 발화",
+      });
+      bindTurnTrace("g1", 3);
+    }, dev);
+
+    // 보낸 이력의 길이(1)로 셌다면 "지난 턴"이 이번 턴의 꼬리에 딸려 들어온다
+    expect(turnTrace("g1", 3)[0]!.response?.messages).toEqual(["이번 발화", "이번 응답"]);
   });
 
   /** 실패한 호출이야말로 원문을 보고 싶은 자리다 — 시한을 넘긴 턴이 그렇다 */

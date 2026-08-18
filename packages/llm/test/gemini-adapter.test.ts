@@ -1,6 +1,6 @@
 import { FinishReason, type Content, type GenerateContentResponse, type Part } from "@google/genai";
 import { describe, expect, it, vi } from "vitest";
-import { GeminiGameLLM, type GameToolSpec } from "@story-fm/llm";
+import { GeminiGameLLM, type GameToolSpec, type StopReason } from "@story-fm/llm";
 
 const testConfig = {
   agent: "match-caster" as const,
@@ -134,7 +134,7 @@ describe("GeminiGameLLM", () => {
     expect(result.toolCallCount).toBe(1);
     expect(result.text).toContain("기회가 왔습니다");
     expect(result.text).toContain("장부 오류");
-    expect(result.stopReason).toBe("stop");
+    expect(result.stopReason).toBe("completed");
     expect(result.usage).toEqual({
       inputTokens: 200,
       outputTokens: 80,
@@ -320,5 +320,32 @@ describe("GeminiGameLLM", () => {
         content.parts?.some((part) => part.thoughtSignature === "stream-signature"),
       ),
     ).toBe(true);
+  });
+});
+
+/**
+ * 종료 사유는 **중립 값으로만** 나간다 (models.md §3-1). Gemini의 `MAX_TOKENS`는
+ * 소문자로 바꾸면 Anthropic의 값과 우연히 같아진다 — 그 우연을 계약으로 쓰지 않는다.
+ */
+describe("GeminiGameLLM 종료 사유", () => {
+  const cases: Array<[FinishReason, StopReason | null]> = [
+    [FinishReason.STOP, "completed"],
+    [FinishReason.MAX_TOKENS, "truncated"],
+    [FinishReason.SAFETY, "filtered"],
+    [FinishReason.PROHIBITED_CONTENT, "filtered"],
+    [FinishReason.MALFORMED_FUNCTION_CALL, "other"],
+    [FinishReason.FINISH_REASON_UNSPECIFIED, null],
+  ];
+
+  it.each(cases)("%s는 %s로 옮긴다", async (raw, neutral) => {
+    const stub = makeStubClient([
+      response({ role: "model", parts: [{ text: "@수석코치: 네." }] }, raw),
+    ]);
+    const result = await new GeminiGameLLM(testConfig, stub.client as never).runTurn({
+      system: "sys",
+      history: [],
+      user: "@김감독: 계속.",
+    });
+    expect(result.stopReason).toBe(neutral);
   });
 });
