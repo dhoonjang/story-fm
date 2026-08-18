@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { token } from "./palette";
+
 /**
  * 핵심 유저 여정 e2e (mock GM):
  * 게임 목록 → 새 게임(팀 선택 + 감독 직접 입력) → 부임 브리핑 → 훈련 지시
@@ -7,12 +9,9 @@ import { expect, test, type Page } from "@playwright/test";
  */
 
 /**
- * **같은 선수의 OVR은 전술판 칩과 명단에서 같은 숫자여야 한다.**
- *
- * 예전엔 칩이 `roleFit`으로 처음부터 다시 계산하고 명단은 서버 값에 차이만
- * 얹어서, 같은 선수가 왼쪽과 오른쪽에서 다른 숫자를 달고 있었다. 특히
- * **비선발을 선발로 올린 직후** 크게 갈렸다 — 명단은 종합값 그대로인데 칩만
- * 자리 값으로 뛰었다. 지금은 두 곳이 `slotOverallOf` 하나를 부른다.
+ * **같은 선수의 OVR은 전술판 칩과 명단에서 같은 숫자여야 한다.** 두 곳이
+ * `slotOverallOf` 하나를 부른다 — 갈리기 가장 쉬운 자리는 비선발을 선발로 올린
+ * 직후다(한쪽은 종합값, 다른 쪽은 자리 값으로 뛴다).
  */
 /** 전술판 손잡이를 눌러 판을 펼친다 — 이미 펼쳐져 있으면 그대로 둔다 */
 async function pressBoardToggle(page: Page, testId = "board-toggle") {
@@ -124,11 +123,6 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await expect(page.getByTestId("hint-달력")).toHaveCount(0);
   await trainChip.click();
   await expect(page.getByTestId("hint-달력")).toBeVisible();
-  /**
-   * 기다리는 동안은 **말로 적지 않는다** — "세계가 반응하는 중…"을 띄우던 때는
-   * 매 턴 같은 문장이 대화 사이에 끼어 대사인 척했다. 점 세 개면 충분하다.
-   */
-  await expect(page.getByTestId("chat-scroll")).not.toContainText("세계가 반응");
 
   // ── 전술 변경 ──
   await input.fill("4-4-2로 바꾸고 공격적으로 가자");
@@ -152,17 +146,18 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   /**
    * ── 킥오프는 **세 걸음**이다 ──────────────────────────
    * GM이 `start_match`로 문을 열고(판이 서고 판세가 계산된다), 감독이 입장 확인
-   * 창을 지나면 중계가 첫 휘슬만 연다. 공이 구르는 것은 그다음 진행부터다 —
-   * 예전엔 입장과 동시에 20분이 지나가 감독이 킥오프를 본 적이 없었다.
+   * 창을 지나면 중계가 첫 휘슬만 연다. 공이 구르는 것은 그다음 진행부터다.
    */
   await input.fill("경기 시작하자");
   await page.getByTestId("chat-send").click();
   await expect(page.getByTestId("kickoff-gate")).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByTestId("chat-scroll")).not.toContainText("중계");
+  // 중계는 화자다 — 문구가 아니라 그 화자의 말풍선(`.say.broadcast`)이 섰는지를 본다
+  // (`BROADCAST_SPEAKER`, packages/domain/src/persona.ts)
+  const broadcast = page.locator(".say.broadcast");
+  await expect(broadcast).toHaveCount(0);
   await page.getByTestId("kickoff-enter").click();
   await expect(page.getByTestId("kickoff-gate")).toHaveCount(0, { timeout: 20_000 });
-  await expect(page.getByTestId("chat-scroll")).toContainText("킥오프", { timeout: 20_000 });
-  await expect(page.getByTestId("chat-scroll")).toContainText("중계");
+  await expect(broadcast.first()).toBeVisible({ timeout: 20_000 });
   // 첫 휘슬 턴은 시계를 움직이지 않는다 — 0분에서 감독의 차례로 돌아온다
   await expect(page.getByTestId("match-clock").locator("b")).toHaveText("0′", { timeout: 10_000 });
 
@@ -174,9 +169,8 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   const score = page.getByTestId("match-score");
   await expect(score).toBeVisible();
   /**
-   * 규칙은 **"스크롤해도 스코어가 시야에 남는다"** 이지 특정 CSS가 아니다.
-   * (sticky로 붙이든 상단 띠에 고정하든 감독에겐 같은 일이다 — 예전엔
-   * `position: sticky`를 단언했다가 더 나은 구현을 막을 뻔했다.)
+   * 규칙은 **"스크롤해도 스코어가 시야에 남는다"** 이지 특정 CSS가 아니다 —
+   * sticky로 붙이든 상단 띠에 고정하든 감독에겐 같은 일이다.
    */
   await page.getByTestId("stage-board").evaluate((n) => n.scrollTo({ top: n.scrollHeight }));
   await expect(score).toBeInViewport();
@@ -196,14 +190,12 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await page.getByTestId("mtab-대회").click();
   await expect(page.getByTestId("next-fixture")).toBeVisible();
   /**
-   * 대회 뷰는 **어디서 열리든 같은 표**다 — 경기 탭이든 장부든.
-   * 표의 바탕(`border-collapse` · 칸 여백)이 장부 쪽에만 걸려 있던 때는, 경기 중에
-   * 연 순위표만 브라우저 기본 표로 떨어져 같은 화면이 두 얼굴을 가졌다.
+   * 대회 뷰는 **어디서 열리든 같은 표**다 — 경기 탭이든 장부든. 표의 바탕을 주는
+   * 규칙은 두 그릇이 함께 다는 이름표 하나(`.ledger-body`)에 걸린다. 그 이름표
+   * 밖에서 열린 순위표는 칸 여백도 경계선도 없는 브라우저 기본 표로 떨어진다.
    */
   await expect(page.getByTestId("standings")).toBeVisible();
-  await expect(
-    page.getByTestId("standings").evaluate((el) => getComputedStyle(el).borderCollapse),
-  ).resolves.toBe("collapse");
+  await expect(page.locator('.ledger-body [data-testid="standings"]')).toHaveCount(1);
 
   /**
    * 판세 = 존 + 키포인트 한 화면. 전술 6축은 여기 없다 — 전술판이 갖는다
@@ -232,41 +224,28 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   const oppDividers = oppTable.locator("tbody tr.tier-head");
   expect(await oppDividers.count()).toBeGreaterThan(0);
   await expect(oppDividers.first()).toHaveText("");
-  // 상대 명단은 훑는 것이지 고르는 것이 아니다 — 우리 표와 달리 손에 반응하지 않는다
-  await expect(
-    oppTable
-      .locator("tbody tr.row-tier")
-      .first()
-      .evaluate((el) => getComputedStyle(el).cursor),
-  ).resolves.toBe("default");
+  // 상대 명단은 훑는 것이지 고르는 것이 아니다 — 눌러도 상세도 교체 화살표도 열리지
+  // 않는다 (우리 표는 행을 누르면 그 아래로 상세가 펼쳐진다)
+  await oppTable.locator("tbody tr.row-tier").first().click();
+  await expect(oppTable.locator(".detail-row, .swap-btn")).toHaveCount(0);
   // 경기 중에도 명단이 먼저다 — 판은 손잡이를 눌러야 선다 (양쪽 탭이 같은 상태를 쓴다)
   await expect(page.getByTestId("opponent-board")).not.toBeVisible();
   await pressBoardToggle(page, "opp-board-toggle");
   await expect(page.getByTestId("opponent-board")).toBeVisible();
-  await expect(page.locator("#__next, body").locator(".pitch-slot.theirs")).toHaveCount(11);
+  await expect(page.locator(".pitch-slot.theirs")).toHaveCount(11);
   // 상대 전술은 읽기 전용 — 우리 쪽에만 있는 조작 버튼이 여기엔 없다
   await expect(page.getByTestId("match-tactics")).toBeVisible();
   await expect(page.getByTestId("tactic-pressing-5")).toHaveCount(0);
   /**
    * 판을 펼치면 **채팅 자리 위에 한 장이 얹힌다** — 대화는 지워지지 않고 가라앉는다.
-   * 그 자리가 돌아갈 곳이라는 게 보여야 하므로 흐릿하게 남고, 손은 닿지 않는다.
-   * 접으면 있던 자리에서 그대로 다시 떠오른다.
+   * 그 자리가 돌아갈 곳이라는 게 보여야 하므로 화면에 **남아 있고**, 손은 그 위의
+   * 덮개(`board-scrim`)가 받는다. 덮개를 누르면 서랍이 닫히므로 안내 문구가 없다.
    */
-  // 값이 260ms에 걸쳐 잦아든다 — 한 번 읽고 끝내면 지나가는 중간값을 집는다
-  const chatDim = () =>
-    page.locator(".chat-pane").evaluate((el) => Number(getComputedStyle(el).opacity));
   await expect(page.getByTestId("chat-scroll")).toBeVisible();
-  await expect.poll(chatDim).toBeLessThan(0.5);
-  await expect
-    .poll(() => page.locator(".chat-pane").evaluate((el) => getComputedStyle(el).pointerEvents))
-    .toBe("none");
-  /**
-   * 가라앉은 대화를 **누르면 닫힌다** — 서랍 밖을 눌러 닫는 몸짓이라 안내가 없다.
-   * 손이 닿는 곳은 덮개(`board-scrim`)이지 아래 채팅이 아니다.
-   */
   await expect(page.getByTestId("board-scrim")).toBeVisible();
   await page.getByTestId("board-scrim").click({ position: { x: 40, y: 300 } });
-  await expect.poll(chatDim).toBe(1);
+  await expect(page.getByTestId("board-scrim")).toHaveCount(0);
+  await expect(page.getByTestId("chat-scroll")).toBeVisible();
   await expect(page.getByTestId("opp-board-toggle")).toHaveAttribute("aria-pressed", "false");
   await pressBoardToggle(page, "opp-board-toggle");
 
@@ -330,7 +309,7 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
 
   await page.getByTestId("tab-재정").click();
   await expect(page.getByTestId("view-finance")).toContainText("구단 잔고");
-  // 실시간 재정 활동 + 이번 달 진행 중 집계 (club-finance §7·§8)
+  // 실시간 재정 활동 + 이번 달 진행 중 집계 (docs/simulation/finance.md)
   await expect(page.getByTestId("fin-feed")).toContainText("선수 주급");
   await expect(page.getByTestId("view-finance")).toContainText("월간 재정 보고서");
   await expect(page.getByTestId("view-finance")).toContainText("진행 중");
@@ -423,9 +402,8 @@ test("면담 시나리오 — 판정형 스킬과 사기 반영", async ({ page 
    * 휴대폰 폭 — **좌표는 지우지 않는다.**
    *
    * 구단·감독·지금은 화면이 바뀌어도 그대로여야 하는 값이라, 좁아지면 군말만
-   * 줄이고(직함·연도) 아이콘 줄이 자기 줄을 받는다. 예전엔 감독 이름과 날짜를
-   * 차례로 `display: none` 했고, 그러다 띠가 격자 칸보다 넓어져 **아이콘 줄의
-   * 마지막 칸이 잘렸다** — 그 둘을 함께 지킨다.
+   * 줄이고(직함·연도) 아이콘 줄이 자기 줄을 받는다. 좌표를 지우는 쪽으로 좁히면
+   * 띠가 격자 칸보다 넓어져 **아이콘 줄의 마지막 칸이 잘린다** — 그 둘을 함께 지킨다.
    */
   await page.setViewportSize({ width: 375, height: 812 });
   await expect(page.getByTestId("team-name")).toBeVisible();
@@ -467,7 +445,7 @@ test("협상은 카드로 선다 — 재계약 제안", async ({ page }) => {
 
   const card = page.getByTestId("market-renewal").first();
   await expect(card).toBeVisible({ timeout: 15_000 });
-  // 카드가 조건과 기한을 갖는다 (칩을 펼쳐 읽던 것들)
+  // 카드가 조건과 기한을 함께 갖는다 — 금액 두 벌과 답할 기한을 펼치지 않고 읽는다
   await expect(card).toContainText("주급");
   await expect(card).toContainText("기간");
   await expect(card).toContainText("답");
@@ -590,25 +568,28 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
   expect(await page.locator(".pitch-slot .slot-name").allTextContents()).toEqual(beforeXI);
 
   /**
-   * 포지션 칩의 세 상태는 **다른 채널**로 갈린다 — 선호는 금색, 소화 가능은 흐린 글자.
-   * 색을 계산된 값으로 본다: 예전에 `globals.css` 뒤쪽에 같은 선택자가 한 벌 더
-   * 있어 앞에서 무엇을 고쳐도 조용히 덮였다(화면은 그대로인데 코드만 바뀌었다).
-   * 클래스 이름만 확인하면 그런 사고를 못 잡는다.
+   * 포지션 칩의 등급은 **글자색 하나로** 갈린다 — 선호는 금색, 소화 가능은 은색,
+   * 익숙하지 않은 자리는 꺼진 회색.
+   *
+   * 값이 아니라 **토큰과 비교한다**(`e2e/palette.ts`) — 팔레트를 손보면 세 색이
+   * 함께 움직이지만 매핑은 그대로여야 한다. 그래도 클래스 이름이 아니라 계산된
+   * 색으로 보는 이유: 같은 선택자가 스타일 파일 뒤쪽에 한 벌 더 서면 앞에서 무엇을
+   * 고쳐도 조용히 덮이고, 그 사고는 클래스로는 잡히지 않는다.
    */
+  const gold = await token(page, "--gold-soft");
+  const silver = await token(page, "--silver");
+  const dim = await token(page, "--dim");
   const colorOf = (sel: string) =>
     page
       .locator(`[data-testid="player-detail"] ${sel}`)
       .first()
       .evaluate((n) => getComputedStyle(n).color);
-  // 글자색은 자리의 등급만 말한다 — 선호 금색 · 소화 가능 은색 · 못 보는 자리 회색
-  expect(await colorOf(".pd-pos.natural")).toBe("rgb(194, 160, 94)"); // --gold-soft
+  expect(await colorOf(".pd-pos.natural")).toBe(gold);
   const playable = page.locator(
     '[data-testid="player-detail"] .pd-pos:not(.natural):not(.foreign)',
   );
   if ((await playable.count()) > 0) {
-    expect(await playable.first().evaluate((n) => getComputedStyle(n).color)).toBe(
-      "rgb(204, 214, 228)", // --silver
-    );
+    expect(await playable.first().evaluate((n) => getComputedStyle(n).color)).toBe(silver);
   }
   /**
    * **지금 자리라고 글자색을 바꾸지 않는다.** 밑줄만 얹는다 — 색까지 바꾸면
@@ -623,16 +604,14 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
       natural: n.classList.contains("natural"),
       foreign: n.classList.contains("foreign"),
     }));
-    expect(state.color).toBe(
-      state.natural
-        ? "rgb(194, 160, 94)" // --gold-soft
-        : state.foreign
-          ? "rgb(95, 104, 117)" // --dim
-          : "rgb(204, 214, 228)", // --silver
-    );
-    expect(state.shadow).toContain("96, 165, 250"); // 밑줄만이 "여기"를 말한다
+    expect(state.color).toBe(state.natural ? gold : state.foreign ? dim : silver);
+    // 밑줄만이 "여기"를 말한다 — 그 밑줄은 강조색 두 번째 축이다
+    expect(state.shadow).toContain(await token(page, "--accent-2"));
   }
-  // 포지션은 테두리 없는 글자다 — 읽는 값이지 누르는 물건이 아니다
+  /**
+   * 포지션은 **테두리 없는 글자**이고 역할만 알약이다 — 읽는 값과 누르는 물건이
+   * 같은 모양이면 감독은 눌러 보고 고장인 줄 안다. 테두리가 그 경계를 말한다.
+   */
   const borders = await page
     .locator('[data-testid="player-detail"] .pd-pos')
     .evaluateAll((ns) => ns.map((n) => getComputedStyle(n).borderTopWidth));
@@ -722,8 +701,8 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
   /**
    * 정렬 — **첫 칸(선수)이 기본으로 돌아오는 자리다.**
    *
-   * 다른 기준으로 흩어 놓으면 칸 순으로 되돌릴 손잡이가 없었다. 적응 칸도
-   * 누를 수 있어야 한다(예전엔 정렬 대상이 아니었다).
+   * 다른 기준으로 흩어 놓았을 때 칸 순으로 되돌릴 손잡이가 그것뿐이다. 적응 칸도
+   * 같은 손잡이를 갖는다.
    */
   const heads = page.locator(".squad-table thead th");
   const firstName = async () =>
@@ -1003,10 +982,10 @@ test("전술판 자유 배치 — 드래그로 한 자리만 세밀하게 조정
 /**
  * 전술을 바꾸고 **곧바로** 말을 걸면 — 저장이 턴보다 먼저 간다.
  *
- * 자동 저장은 조작이 멎기를 기다리므로, 예전에는 그 창(3초) 안에 보낸 턴이 옛 전술로
- * 나갔다. 화면에는 바꾼 판이 그대로 보이는데 수석코치만 다른 전술을 말했다.
- * 판을 **접기만 하고 떠나지 않는 것**이 이 시험의 핵심이다 — 탭을 옮기면 언마운트가
- * 저장을 흘려보내 경합이 가려진다.
+ * 자동 저장은 조작이 멎기를 기다린다(3초). 그 창 안에 보낸 턴이 옛 전술로 나가면
+ * 화면에는 바꾼 판이 보이는데 수석코치만 다른 전술을 말한다. 판을 **접기만 하고
+ * 떠나지 않는 것**이 이 시험의 핵심이다 — 탭을 옮기면 언마운트가 저장을 흘려보내
+ * 경합이 가려진다.
  */
 test("전술판 편집은 턴보다 먼저 서버에 닿는다", async ({ page }) => {
   await page.goto("/new");

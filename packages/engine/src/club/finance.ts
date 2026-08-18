@@ -242,6 +242,19 @@ const DEBT_FREEZE_WAGE_WEEKS = 20;
 const WAGE_RATIO_CAUTION = 0.65;
 const WAGE_RATIO_DANGER = 0.75;
 
+/** 급여 비중이 선 자리 — 월간 보고서의 경고 문구와 화면의 색이 **같은 경계**를 쓴다 */
+export type WageRatioTone = "ok" | "caution" | "danger";
+
+/**
+ * 그 비중이 어느 구간인가. 화면이 색을 고르는 근거이자 보고서가 문구를 고르는 근거다 —
+ * 경계를 화면에 복사해 두면 여기를 손볼 때 색만 옛 자리에 남는다.
+ */
+export function wageRatioTone(ratio: number): WageRatioTone {
+  if (ratio >= WAGE_RATIO_DANGER) return "danger";
+  if (ratio >= WAGE_RATIO_CAUTION) return "caution";
+  return "ok";
+}
+
 // ── 기본 유틸 ───────────────────────────────────────────
 
 /**
@@ -1523,9 +1536,10 @@ function buildReport(state: GameState, month: string, ledger: LedgerEntry[]): Fi
   const psr = { rolling3Season: rolling, headroom: PSR_LOSS_LIMIT + rolling };
 
   const notes: string[] = [];
-  if (s.wageRatio >= WAGE_RATIO_DANGER) {
+  const tone = wageRatioTone(s.wageRatio);
+  if (tone === "danger") {
     notes.push(`급여 비중 ${Math.round(s.wageRatio * 100)}% — 위험 구간, 주급 구조를 손볼 때다`);
-  } else if (s.wageRatio >= WAGE_RATIO_CAUTION) {
+  } else if (tone === "caution") {
     notes.push(`급여 비중 ${Math.round(s.wageRatio * 100)}% — 주의 구간`);
   }
   const transferOut = s.expense.find((l) => l.category === "transfer_out")?.amount ?? 0;

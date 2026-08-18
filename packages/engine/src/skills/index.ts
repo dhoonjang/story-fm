@@ -39,6 +39,8 @@ import {
   positionGroupOf,
   clampFamiliarity,
   defaultRoleOf,
+  inheritedRole,
+  storedProficiencyFor,
   rolesFor,
   separateBoardPoints,
   familiarityForSetup,
@@ -72,7 +74,6 @@ import {
   isSuspended,
   playerById,
   playerName,
-  proficiencyAt,
   pushNarrative,
   recomputeOverall,
   squadLevelOf,
@@ -847,14 +848,14 @@ export function setLineup(
     /** 배치가 들고 있던 것과 선반이 들고 있던 것의 공통분모 — 선반엔 자리가 없다 */
     const old: Partial<TacticAssignment> | undefined =
       prev.get(playerId) ?? unshelveFamiliarity(tactics, playerId);
-    const oldRole = old?.roleId;
-    const keepRole =
-      oldRole !== undefined && rolesFor(position).some((role) => role.id === oldRole);
+    /**
+     * 되찾기 3단은 **도메인이 하나로 갖는다**(`inheritedRole`) — 전술판이 저장을
+     * 기다리는 동안 부르는 그 함수다. 여기서 순서를 따로 밟으면 감독이 누른 적 없는
+     * 역할 변경이 자동 저장 응답과 함께 혼자 일어난다.
+     */
     const roleId = !slotted
       ? undefined
-      : keepRole
-        ? oldRole
-        : recallRole(state, playerId, position);
+      : inheritedRole(position, old?.roleId, recallRole(state, playerId, position));
     /**
      * **오늘 역할을 손댄 흔적은 살려 둔다.** 전술판은 조작마다 배치를 다시
      * 쓰는데, 여기서 memo가 사라지면 저장할 때마다 "오늘 아침"이 새로 잡혀
@@ -1320,7 +1321,9 @@ export function setPlayerRole(
     message: `${player.name} ${assignment.position} 역할 → ${def.ko}`,
     brief: {
       head: player.name,
-      items: [item({ label: `${assignment.position} 역할`, text: def.ko })],
+      // 역할 이름은 **전술판 칩과 같은 표기로** 낸다 — 화면이 긴 이름을 줄이면
+      // 그 치환이 코어 문구를 되쪼개는 일이 되고, 표가 바뀌면 조용히 어긋난다
+      items: [item({ label: `${assignment.position} 역할`, text: def.abbr })],
     },
   };
 }
@@ -1344,10 +1347,11 @@ export function setPlayerPosition(
   if (existing) {
     existing.isNatural = true;
   } else {
-    // 처음 맡는 자리 — 인접도 기반 초기 적응도로 시작한다
+    // 처음 맡는 자리 — 인접도 기반 초기 적응도로 시작한다. 저장은 **주발을 벗긴
+    // 원값**이다: 보정을 적어 두면 조회가 다시 얹는다 (player.md §8)
     player.positions.push({
       position: code,
-      proficiency: proficiencyAt(player, code),
+      proficiency: storedProficiencyFor(player.positions, code, player.foot),
       isNatural: true,
     });
   }
@@ -2007,6 +2011,24 @@ export function setTraining(state: GameState, input: TrainingPlanInput): SkillRe
   }
 
   /**
+   * **지난 날짜에는 훈련을 잡지 못한다 — 소집을 건드리기 전에 거른다.**
+   *
+   * 그 자리의 tick은 이미 지나갔으므로 엔트리가 영영 `scheduled`로 남아 달력에
+   * "예정"으로 서고, 같은 날짜가 조기 소집으로 흘러가면 대가(`recallSquadEarly`)가
+   * 오늘까지의 날수만큼 부풀려 매겨진다. 그래서 검증이 승격보다 먼저다 — 뒤에서
+   * 걸러도 소집일은 이미 옮겨져 있다.
+   */
+  for (const s of input.sessions ?? []) {
+    if (!DATE_RE.test(s.date)) return { ok: false, message: `날짜 형식이 잘못됨: ${s.date}` };
+    if (s.date < state.date) {
+      return {
+        ok: false,
+        message: `${s.date}은 이미 지난 날입니다 — 훈련은 오늘(${state.date})부터 잡을 수 있습니다`,
+      };
+    }
+  }
+
+  /**
    * **여름 휴가엔 훈련이 없다 — 감독이 소집을 앞당기지 않는 한.**
    *
    * 소집일 전까지 선수단은 구단에 없다. 실수로 그 자리에 세션이 깔리는 것은
@@ -2021,7 +2043,7 @@ export function setTraining(state: GameState, input: TrainingPlanInput): SkillRe
   const wanted = [
     ...(input.sessions ?? []).map((x) => x.date),
     ...((input.repeatWeekly ?? []).length > 0 ? [state.date] : []),
-  ].filter((d) => DATE_RE.test(d));
+  ];
   const earliest = wanted.sort()[0];
 
   if (input.recallSquad && earliest !== undefined && earliest < squadReturn) {
@@ -2034,7 +2056,6 @@ export function setTraining(state: GameState, input: TrainingPlanInput): SkillRe
   const dated: Array<{ date: string; slot: Slot }> = [];
   const datedFocus = new Set<TrainAttr>();
   for (const s of input.sessions ?? []) {
-    if (!DATE_RE.test(s.date)) return { ok: false, message: `날짜 형식이 잘못됨: ${s.date}` };
     if (!s.label?.trim()) return { ok: false, message: "훈련 설명(label)이 필요합니다" };
     const err = validFocus(s.focus);
     if (err) return { ok: false, message: err };

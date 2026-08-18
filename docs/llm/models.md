@@ -65,9 +65,12 @@ LLM 호출 **하나**가 그 세이브의 모든 후속 요청을 영영 붙든�
 답이 아니다 — 두 요청이 같은 세이브를 동시에 쓰는 길이 열린다. 호출이 반드시 끝나면
 사슬은 저절로 풀린다.
 
-**라우트는 응답을 반드시 마감한다** — 턴 라우트 둘 다 `maxDuration`을 갖고, 스트리밍
-턴은 조용한 동안 `{"type":"ping"}`을 흘려 연결이 살아 있음을 알린다. 화면은 그 신호가
-끊기면 요청을 끊고 같은 실패 배너를 세운다 — 기다림이 끝나지 않는 자리는 없다.
+**마감을 만드는 것은 호출의 시한 하나뿐이다** — 턴 라우트의 `maxDuration`은 서버리스
+배포에서만 읽히는 값이라 `next start`로 띄운 프로세스에는 아무 마감도 걸지 않는다.
+응답이 반드시 끝나는 근거는 `withDeadline`이 모델 호출마다 거는 시한이고
+(`packages/llm/src/deadline.ts`), 스트리밍 턴은 조용한 동안 `{"type":"ping"}`을 흘려
+연결이 살아 있음을 알린다. 화면은 그 신호가 끊기면 요청을 끊고 같은 실패 배너를
+세운다 — 기다림이 끝나지 않는 자리는 없다.
 
 ## 1-2. 사고 수준 (`thinking_level`)
 
@@ -273,21 +276,21 @@ chunk에만 실린다 — 그 옵션이 없으면 계측이 이 에이전트를 
 
 ## 코드 위치
 
-| 무엇                               | 어디                                                                                |
-| ---------------------------------- | ----------------------------------------------------------------------------------- |
-| 에이전트별 배치                    | `config/llm.yml`                                                                    |
-| 설정 로드·검증                     | `packages/llm/src/config.ts`                                                        |
-| 제공자 중립 계약                   | `packages/llm/src/game-llm.ts`                                                      |
-| 어댑터 3종                         | `packages/llm/src/anthropic-adapter.ts` · `gemini-adapter.ts` · `openai-adapter.ts` |
-| 제공자 선택 + 계측·시한 부착       | `packages/llm/src/factory.ts` (에이전트별 어댑터 캐시)                              |
-| 종료 사유 중립 enum                | `packages/llm/src/game-llm.ts` (`StopReason`) · 매핑은 어댑터 셋                    |
-| 제공자 능력 표                     | `packages/llm/src/config.ts` (`PROVIDER_CAPABILITIES`)                              |
-| 시한 래퍼                          | `packages/llm/src/deadline.ts`                                                      |
-| 턴 라우트 마감(`maxDuration`·ping) | `apps/web/app/api/games/[id]/turn/route.ts` · `turn/stream/route.ts`                |
-| 설정 검증 테스트                   | `packages/llm/test/agent-config.test.ts`                                            |
-| 토큰 계측·예산 상한                | `packages/llm/src/usage-meter.ts`                                                   |
-| 원문 기록(링버퍼·`tapLlm`)         | `packages/llm/src/turn-trace.ts`                                                    |
-| 턴 인덱스에 묶는 자리              | `apps/web/lib/turn-runner.ts` · `apps/web/app/api/games/route.ts`                   |
-| 원문 라우트(dev 전용)              | `apps/web/app/api/games/[id]/trace/[index]/route.ts`                                |
-| 원문 팝업·롱프레스                 | `apps/web/components/turn-trace.tsx` · `components/chat.tsx`                        |
-| 모드 해석 (`LLM_MODE`)             | `packages/agents/src/gm.ts` (`resolveLlmMode`)                                      |
+| 무엇                         | 어디                                                                                |
+| ---------------------------- | ----------------------------------------------------------------------------------- |
+| 에이전트별 배치              | `config/llm.yml`                                                                    |
+| 설정 로드·검증               | `packages/llm/src/config.ts`                                                        |
+| 제공자 중립 계약             | `packages/llm/src/game-llm.ts`                                                      |
+| 어댑터 3종                   | `packages/llm/src/anthropic-adapter.ts` · `gemini-adapter.ts` · `openai-adapter.ts` |
+| 제공자 선택 + 계측·시한 부착 | `packages/llm/src/factory.ts` (에이전트별 어댑터 캐시)                              |
+| 종료 사유 중립 enum          | `packages/llm/src/game-llm.ts` (`StopReason`) · 매핑은 어댑터 셋                    |
+| 제공자 능력 표               | `packages/llm/src/config.ts` (`PROVIDER_CAPABILITIES`)                              |
+| 시한 래퍼                    | `packages/llm/src/deadline.ts`                                                      |
+| 스트리밍 턴의 하트비트       | `apps/web/app/api/games/[id]/turn/stream/route.ts`                                  |
+| 설정 검증 테스트             | `packages/llm/test/agent-config.test.ts`                                            |
+| 토큰 계측·예산 상한          | `packages/llm/src/usage-meter.ts`                                                   |
+| 원문 기록(링버퍼·`tapLlm`)   | `packages/llm/src/turn-trace.ts`                                                    |
+| 턴 인덱스에 묶는 자리        | `apps/web/lib/turn-runner.ts` · `apps/web/app/api/games/route.ts`                   |
+| 원문 라우트(dev 전용)        | `apps/web/app/api/games/[id]/trace/[index]/route.ts`                                |
+| 원문 팝업·롱프레스           | `apps/web/components/turn-trace.tsx` · `components/chat.tsx`                        |
+| 모드 해석 (`LLM_MODE`)       | `packages/agents/src/gm.ts` (`resolveLlmMode`)                                      |

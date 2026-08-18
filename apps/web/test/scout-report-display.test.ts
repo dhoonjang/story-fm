@@ -14,7 +14,15 @@ describe("스카우트 보고서 표시 호환성", () => {
     expect(scoutMargin(observed)).toBe(3);
   });
 
-  it("능력치 숫자를 네 가지 색 구간으로 접는다", () => {
-    expect([64, 65, 75, 85].map(ratingTone)).toEqual(["low", "solid", "strong", "top"]);
+  /** 색 넷은 코어 등급 일곱을 묶은 것이다 — 경계가 코어와 어긋나면 여기서 잡힌다 */
+  it("능력치 숫자를 코어 등급 경계에 맞춰 네 가지 색 구간으로 접는다", () => {
+    expect([59, 60, 70, 78, 85, 90].map(ratingTone)).toEqual([
+      "low",
+      "solid",
+      "solid",
+      "strong",
+      "top",
+      "top",
+    ]);
   });
 });

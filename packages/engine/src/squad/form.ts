@@ -96,11 +96,17 @@ export function decayedForm(form: number): number {
   return clampForm(form - Math.sign(form) * step);
 }
 
+/** 폼의 시기 — 대역으로 갈리는 자리는 전부 이 다섯 중 하나로 갈린다 */
+export type FormLabel = "절정" | "상승세" | "평소" | "침체" | "바닥";
+
 /**
  * 폼의 말 — 숫자를 그대로 읊지 않고 시기로 부른다.
  * 채팅·심경 한 줄·명단이 같은 라벨을 쓴다 (표현이 갈리면 같은 값이 달라 보인다).
+ *
+ * **폼의 눈금은 여기 한 곳이다.** 문턱을 숫자로 옮겨 적는 자리가 생기면 한쪽만
+ * 옮겨졌을 때 아무 소리 없이 갈린다 — 대역으로 갈리는 곳은 이 라벨로 갈라라.
  */
-export function formLabel(form: number): string {
+export function formLabel(form: number): FormLabel {
   if (form >= 0.73) return "절정";
   if (form >= 0.33) return "상승세";
   if (form > -0.33) return "평소";

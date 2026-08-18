@@ -4,6 +4,7 @@ import { DIRECTIVE_INTENSITIES, PLAYER_DIRECTIVE_KINDS } from "@story-fm/domain"
 import { buildLedgerNote } from "./gm-input";
 import { MatchIntentSchema, type MatchIntent } from "./match-intent-schema";
 import { retryOnce } from "./retry";
+import { toToolSchema } from "./tool-schema";
 
 /**
  * 지시 해석 — **경기 중 감독의 말을 구조화된 의도 하나로 옮긴다** (agents.md §3).
@@ -56,111 +57,11 @@ export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조
 # unresolved
 어느 갈래에도 담기지 않은 말은 감독의 표현 그대로 unresolved에 남긴다.`;
 
-/** 산출 도구의 JSON 스키마 — Zod와 짝이다 (`MatchIntentSchema`) */
-const REPORT_INPUT_SCHEMA = {
-  type: "object" as const,
-  properties: {
-    talk: {
-      type: "array",
-      description: "선수·코치와의 대화",
-      items: {
-        type: "object",
-        properties: {
-          playerId: { type: "string" },
-          outcome: {
-            type: "string",
-            enum: ["reassured", "motivated", "neutral", "disappointed", "angered"],
-          },
-          intensity: { type: "integer", enum: [1, 2, 3] },
-        },
-        required: ["playerId", "outcome", "intensity"],
-      },
-    },
-    teamTalk: {
-      type: "object",
-      description: "팀 전체를 향한 말",
-      properties: {
-        occasion: { type: "string", enum: ["pre", "half", "post", "daily"] },
-        outcome: {
-          type: "string",
-          enum: ["inspired", "encouraged", "neutral", "flat", "backfired", "feared"],
-        },
-        intensity: { type: "integer", enum: [1, 2, 3] },
-      },
-      required: ["occasion", "outcome", "intensity"],
-    },
-    substitutions: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: { out: { type: "string" }, in: { type: "string" } },
-        required: ["out", "in"],
-      },
-    },
-    tactics: {
-      type: "object",
-      description: "감독이 말한 축만",
-      properties: Object.fromEntries(
-        ["mentality", "defensiveLine", "pressing", "tempo", "width", "passStyle"].map((axis) => [
-          axis,
-          { type: "integer", minimum: 1, maximum: 5 },
-        ]),
-      ),
-    },
-    playerTactics: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          playerId: { type: "string" },
-          move: {
-            type: "object",
-            properties: {
-              lane: { type: "string", enum: ["left", "center", "right"] },
-              band: { type: "string", enum: ["defense", "midfield", "attack"] },
-            },
-          },
-          position: { type: "string" },
-          role: { type: "string" },
-          instruction: {
-            type: "object",
-            properties: {
-              note: { type: "string", maxLength: 160 },
-              kind: { type: "string", enum: [...PLAYER_DIRECTIVE_KINDS] },
-              targetId: { type: "string" },
-              intensity: { type: "string", enum: [...DIRECTIVE_INTENSITIES] },
-            },
-            required: ["note"],
-          },
-        },
-        required: ["playerId"],
-      },
-    },
-    plans: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          band: { type: "string", enum: ["defense", "midfield", "attack"] },
-          lane: { type: "string", enum: ["left", "center", "right"] },
-          intent: { type: "string", enum: ["overload", "press", "protect", "transition"] },
-          note: { type: "string", maxLength: 120 },
-        },
-        required: ["band", "lane", "intent", "note"],
-      },
-    },
-    exploits: { type: "array", items: { type: "string" } },
-    advance: { type: "string", enum: ["none", "segment"] },
-    unresolved: { type: "string", description: "어느 갈래에도 담기지 않은 말", maxLength: 200 },
-  },
-  required: ["advance"],
-};
-
 function makeReportTool(onIntent: (intent: MatchIntent) => void): GameToolSpec {
   return {
     name: "report_intent",
     description: "감독의 말을 구조화된 의도로 제출한다. 이 도구로만 답한다.",
-    inputSchema: REPORT_INPUT_SCHEMA,
+    inputSchema: toToolSchema(MatchIntentSchema),
     handle: (input: unknown) => {
       const parsed = MatchIntentSchema.safeParse(input);
       if (!parsed.success) {

@@ -9,3 +9,4 @@ export * from "./gm-types";
 export * from "./mock-gm";
 export * from "./gm";
 export * from "./skill-descriptions";
+export * from "./tool-schema";

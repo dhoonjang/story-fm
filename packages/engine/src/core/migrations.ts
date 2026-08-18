@@ -1,4 +1,4 @@
-import { clampCondition, migratePassStyle, migrateSignature } from "@story-fm/domain";
+import { clampCondition, migratePassStyle, migrateSignature, mirrorBaseOf } from "@story-fm/domain";
 
 /**
  * 옛 세이브를 지금 모양으로 옮기는 함수들 — **로드의 두 번째 걸음**
@@ -211,4 +211,59 @@ export function migrateMatchStats(save: MatchStatsSave): void {
   const stats = save.pendingMatch?.ledger?.stats;
   if (!stats) return;
   for (const line of Object.values(stats)) line.scoringExpectation ??= 0;
+}
+
+/** 한 선수의 자리 하나 — 이 마이그레이션이 읽는 축만 (`PlayerPosition`의 부분집합) */
+interface MirrorPosition {
+  position: string;
+  proficiency: number;
+  isNatural: boolean;
+}
+
+/**
+ * 옛 공식이 한 묶음 안에 낼 수 있었던 **최대 폭** — `footAdjust`의 ±3 두 배다.
+ * 주 포지션이 이미 한쪽 끝이면(왼발 5/1 선수의 LCB) 반대편까지 3+3이 벌어진다.
+ * 이보다 넓은 묶음은 사람이 벌린 값이라 손대지 않는다.
+ */
+const MIRROR_SPAN_MAX = 6;
+
+/**
+ * 좌우 미러 자리에 **적혀 있는 주발 보정을 벗긴다** — 저장은 원값이고 주발은
+ * 조회할 때 붙는다 (player.md §4·§8).
+ *
+ * 옛 카탈로그·옛 세이브는 생성 시점에 좌우 보정을 얹어 두었고
+ * (`derivePositions`), `positionProficiency`가 읽을 때 한 번 더 얹어 폭이 두 배로
+ * 걸렸다 — 힌카피의 LCB 96 · RCB 90이 그것이다.
+ *
+ * 기준은 그 묶음의 **주 포지션**이다. 옛 공식이 거기에는 보정 없는 값을 그대로
+ * 적었고, 좌·우 변형만 ±보정을 받았다. 주 포지션이 없는 묶음(확장으로 한쪽만
+ * 가진 선수)은 애초에 보정을 받지 않았으므로 손대지 않는다.
+ *
+ * 멱등하다 — 벗기고 나면 묶음의 값이 전부 같아져 옮길 것이 남지 않는다.
+ */
+export function stripStoredFootAdjust(positions: readonly MirrorPosition[]): boolean {
+  let moved = false;
+  for (const anchor of positions) {
+    if (!anchor.isNatural) continue;
+    const base = mirrorBaseOf(anchor.position);
+    const group = positions.filter(
+      (p) =>
+        p !== anchor && p.proficiency !== anchor.proficiency && mirrorBaseOf(p.position) === base,
+    );
+    if (group.length === 0) continue;
+    // 주발이 낼 수 없는 폭이면 사람이 정한 값이다 — 평평하게 밀지 않는다
+    if (group.some((p) => Math.abs(p.proficiency - anchor.proficiency) > MIRROR_SPAN_MAX)) continue;
+    for (const p of group) p.proficiency = anchor.proficiency;
+    moved = true;
+  }
+  return moved;
+}
+
+interface MirrorProficiencySave {
+  players: ReadonlyArray<{ positions: readonly MirrorPosition[] }>;
+}
+
+/** 세이브 전체에 `stripStoredFootAdjust`를 적용한다 (SAVE_VERSION 유지 — 값만 옮긴다) */
+export function migrateMirrorProficiency(save: MirrorProficiencySave): void {
+  for (const player of save.players) stripStoredFootAdjust(player.positions);
 }

@@ -1,11 +1,14 @@
 import { expect, test } from "@playwright/test";
 
+/** 서버가 돌려주는 실패 문장 — 이 스펙이 만들어 넣고 배너에서 그대로 되찾는다 */
+const SERVER_ERROR = "모델 서버가 혼잡합니다";
+
 /**
- * LLM 실패 시 UI — 채팅은 그대로 두고 배너로만 알린다.
+ * LLM 실패 시 UI — **채팅은 그대로 두고 배너로만 알린다.** 실패한 턴은 채팅에
+ * 아무것도 남기지 않는다: 유저 발화도, 사과 대사를 읊는 모델 턴도.
  *
  * 턴 응답을 502로 가로채 재현한다 (서버가 세이브를 건드리지 않는 것은
- * apps/web/test/turn-error.test.ts가 검증한다). 예전에는 수석코치가
- * 사과 대사와 오류 문자열을 읊는 모델 턴이 채팅에 저장됐다.
+ * apps/web/test/turn-error.test.ts가 검증한다).
  */
 test("LLM 실패 배너", async ({ page }) => {
   await page.goto("/new");
@@ -25,7 +28,7 @@ test("LLM 실패 배너", async ({ page }) => {
       status: 502,
       contentType: "application/json",
       body: JSON.stringify({
-        error: "모델 서버가 혼잡합니다",
+        error: SERVER_ERROR,
         detail: '529 {"type":"overloaded_error"}',
       }),
     }),
@@ -35,7 +38,8 @@ test("LLM 실패 배너", async ({ page }) => {
   await page.getByTestId("chat-send").click();
 
   await expect(page.getByTestId("turn-error")).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByTestId("turn-error")).toContainText("혼잡");
+  // 배너는 **서버가 준 문장 그대로**를 세운다 — 이 문구의 주인은 위 라우트다
+  await expect(page.getByTestId("turn-error")).toContainText(SERVER_ERROR);
   // 채팅에는 유저 발화도, 사과 대사도 남지 않는다
   await expect(page.getByTestId("chat-scroll")).not.toContainText("훈련 잡아줘");
   await expect(page.getByTestId("chat-scroll")).not.toContainText("죄송");
@@ -48,8 +52,8 @@ test("LLM 실패 배너", async ({ page }) => {
  * 무응답 — 실패와 다른 사건이다. 에러는 돌아오지만 멎은 호출은 돌아오지 않는다.
  *
  * 스트림이 `done` 없이 끊긴 것으로 재현한다(응답이 잘렸거나 서버가 중간에 죽은
- * 자리). 예전에는 이 길에서 배너 없이 조용히 마감돼, 낙관적 유저 발화가 화면에만
- * 남고 감독은 무엇이 반영됐는지 알 수 없었다.
+ * 자리). 이 길도 **배너로 끝나야 한다** — 조용히 마감되면 낙관적 유저 발화가
+ * 화면에만 남고 감독은 무엇이 반영됐는지 알 수 없다.
  */
 test("멎은 턴도 실패로 끝나고 다음 턴을 막지 않는다", async ({ page }) => {
   await page.goto("/new");
@@ -76,6 +80,8 @@ test("멎은 턴도 실패로 끝나고 다음 턴을 막지 않는다", async (
   await page.getByTestId("chat-send").click();
 
   await expect(page.getByTestId("turn-error")).toBeVisible({ timeout: 20_000 });
+  // 서버가 준 문장이 없는 길이다 — 배너가 세우는 것은 **클라이언트가 지어낸** 문장
+  // (`TURN_TIMEOUT_MESSAGE`, game-screen.tsx). 두 실패를 가르는 것이 이 한 조각뿐이다
   await expect(page.getByTestId("turn-error")).toContainText("지연");
   // 반쯤 흘러온 장면은 채팅에 남지 않는다 — 서버도 저장하지 않았다
   await expect(page.getByTestId("model-turn")).toHaveCount(turnsBefore);

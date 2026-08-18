@@ -30,6 +30,7 @@ import {
   migrateMatchStats,
   migratePassStyles,
   migrateSquadLevels,
+  stripStoredFootAdjust,
 } from "../src/core/migrations";
 import { createTestGame } from "./helpers";
 
@@ -549,6 +550,44 @@ describe("옛 세이브를 지금 모양으로", () => {
     // 합쳐진 뒤의 두 축은 남지 않는다 — 두 벌로 두면 갈린다
     expect(save.players[0]!.state).toEqual({ condition: 72 });
     expect(save.players[3]!.state.morale).toBe(90);
+  });
+
+  it("미러 자리에 얹혀 있던 주발 보정을 벗긴다 — 두 번 돌려도 한 번만 움직인다", () => {
+    /**
+     * 옛 카탈로그는 좌·우 변형에 ±보정을 얹어 저장했고 `positionProficiency`가
+     * 읽을 때 한 번 더 얹었다 — 힌카피(5/2)의 LCB 96 · RCB 90이 그것이다.
+     * 기준은 그 묶음의 **주 포지션**이다: 옛 공식이 거기엔 원값을 그대로 적었다.
+     */
+    const positions = [
+      { position: "CB", proficiency: 93, isNatural: true },
+      { position: "LCB", proficiency: 95, isNatural: false },
+      { position: "RCB", proficiency: 91, isNatural: false },
+      // 역할이 다른 묶음(−2)은 보정을 받은 적이 없다 — 그대로 둔다
+      { position: "DM", proficiency: 71, isNatural: false },
+    ];
+    expect(stripStoredFootAdjust(positions)).toBe(true);
+    expect(positions.map((p) => p.proficiency)).toEqual([93, 93, 93, 71]);
+    // 멱등 — 벗기고 나면 옮길 것이 남지 않는다
+    expect(stripStoredFootAdjust(positions)).toBe(false);
+    expect(positions.map((p) => p.proficiency)).toEqual([93, 93, 93, 71]);
+  });
+
+  it("주발이 낼 수 없는 폭은 사람이 벌린 값이라 그대로 둔다", () => {
+    // 옛 공식이 낼 수 있는 최대 폭은 3+3이다 — 그보다 벌어진 묶음은 어드민이 정한 값이다
+    const edited = [
+      { position: "CB", proficiency: 90, isNatural: true },
+      { position: "LCB", proficiency: 80, isNatural: false },
+    ];
+    expect(stripStoredFootAdjust(edited)).toBe(false);
+    expect(edited[1]!.proficiency).toBe(80);
+
+    // 주 포지션이 없는 묶음도 보정을 받은 적이 없다 (확장으로 한쪽만 가진 선수)
+    const expansion = [
+      { position: "LB", proficiency: 93, isNatural: true },
+      { position: "LCB", proficiency: 74, isNatural: false },
+    ];
+    expect(stripStoredFootAdjust(expansion)).toBe(false);
+    expect(expansion[1]!.proficiency).toBe(74);
   });
 
   it("`squadLevel`이 없던 세이브는 전술 배치 + OVR 상위로 25명을 1군에 세운다", () => {

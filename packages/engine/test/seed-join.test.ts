@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ageOf, weightSlotOf } from "@story-fm/domain";
-import { CATALOG_AGE_REF, deriveAxes, derivePositions, overallFor } from "@story-fm/engine";
+import { ageOf, bestOverall, weightSlotOf } from "@story-fm/domain";
+import { CATALOG_AGE_REF, deriveAxes, derivePositions } from "@story-fm/engine";
 import { REAL_SQUADS, type RealPlayerSeed } from "../src/data/epl-players";
 import { INJURY_HISTORY } from "../src/data/injury-history";
 import { EU_SQUADS } from "../src/data/eu-squads";
@@ -33,7 +33,7 @@ import { MARKET_LEAGUE_SQUADS } from "../src/data/market-leagues";
 /** 파생 OVR — 카탈로그가 쓰는 경로 그대로 (catalog.ts `entryFromSeed`) */
 function overallOf(s: RealPlayerSeed): number {
   const axes = deriveAxes(s.nameEn, s.position, s, ageOf(s.birthdate, CATALOG_AGE_REF));
-  return overallFor(s.position, axes, derivePositions(s.nameEn, s.position));
+  return bestOverall(axes, derivePositions(s.nameEn, s.position));
 }
 
 interface SeedRow {
