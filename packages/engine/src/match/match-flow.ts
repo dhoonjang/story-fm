@@ -8,6 +8,7 @@ import type {
   TacticAssignment,
 } from "@story-fm/domain";
 import {
+  AI_MANAGER_RATING_FALLBACK,
   ageOf,
   clampCondition,
   naturalPositionOf,
@@ -215,7 +216,9 @@ function slotsFor(state: GameState, teamId: string, ids: string[]): LineupSlot[]
 
 function managerTacticsOf(state: GameState, teamId: string): number {
   if (teamId === state.userTeamId) return state.manager.attributes.tactics;
-  return state.teams.find((t) => t.id === teamId)?.aiManagerTacticsRating ?? 65;
+  return (
+    state.teams.find((t) => t.id === teamId)?.aiManagerTacticsRating ?? AI_MANAGER_RATING_FALLBACK
+  );
 }
 
 /**

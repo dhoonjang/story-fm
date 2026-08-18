@@ -197,6 +197,25 @@ export const MANAGER_MARKET = defineHarness({
   ],
 });
 
+export const SQUAD_LONGEVITY = defineHarness({
+  id: "squad-longevity",
+  what: "15시즌을 넘긴 뒤에도 구단이 선발 XI·계약을 세우는가",
+  doc: "docs/simulation/season.md §6",
+  cost: "세계 하나 · 전환 15번 · 약 1분 40초",
+  // prettier-ignore
+  bands: [
+    { metric: "클럽 수", role: "guard", min: 100, unit: "count", why: "표본이 없으면 아래 네 줄이 공허하게 통과한다 — 시드 세계의 클럽 수보다 넉넉히 아래" },
+    { metric: "선발 XI가 11이 아닌 구단", role: "guard", max: 0, unit: "count", why: "열한 명을 못 세우는 구단이 하나라도 생기면 그 리그는 경기를 치를 수 없다" },
+    { metric: "GK 없는 구단", role: "guard", max: 0, unit: "count", why: "골문은 대체할 자리가 없다 — 은퇴가 유스 콜업보다 빠를 때 가장 먼저 마르는 자리" },
+    { metric: "보유하지 않은 선수를 가리키는 배치", role: "guard", max: 0, unit: "count", why: "은퇴·이적으로 떠난 선수가 배치에 남아 있으면 라인업이 유령을 세운다" },
+    { metric: "활성 계약 없는 선수", role: "guard", max: 0, unit: "count", why: "소속과 계약은 한 쌍이다 — 갈라지면 주급도 이적료도 계산되지 않는다" },
+    { metric: "구단당 평균 스쿼드 인원", role: "measure", why: "스쿼드가 말라가는지 — 지키려는 값이 아니라 재려는 값" },
+    { metric: "가장 얕은 스쿼드 인원", role: "measure", unit: "count", why: "평균은 한 구단의 고갈을 감춘다" },
+    { metric: "가장 얕은 GK 보유", role: "measure", unit: "count", why: "1이면 버틴 것이고 2면 숫자가 살아 있다" },
+    { metric: "스쿼드 평균 나이", role: "measure", why: "은퇴와 콜업의 균형 — 해마다 오르면 언젠가 선발 XI가 깨진다" },
+  ],
+});
+
 /**
  * 종합 눈금 — **그 숫자가 굴리는 것들의 분포** (`docs/data/player.md` §4).
  *
@@ -266,5 +285,6 @@ export const HARNESSES: readonly Harness[] = [
   AI_FITNESS,
   AI_MARKET,
   MANAGER_MARKET,
+  SQUAD_LONGEVITY,
   OVERALL_SCALE,
 ];
