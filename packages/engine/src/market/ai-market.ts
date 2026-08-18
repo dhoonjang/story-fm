@@ -12,8 +12,8 @@ import {
   isInjured,
   pushNarrative,
   squadLevelOf,
-  teamName,
-  teamShortName,
+  teamNameIn,
+  teamShortNameIn,
   weeklyWagesOf,
   type GameState,
 } from "../core/state";
@@ -226,7 +226,7 @@ function moveClub(
     date: state.date,
     type: input.type,
     fee: input.fee,
-    note: `${teamName(fromTeamId)} → ${teamName(toTeamId)}`,
+    note: `${teamNameIn(state, fromTeamId)} → ${teamNameIn(state, toTeamId)}`,
   });
 
   const previous = activeContract(state, player.id);
@@ -514,7 +514,7 @@ function settle(state: GameState, deal: AiDeal, rng: () => number): GamePlayer |
       date: state.date,
       type: "loan",
       fee: 0,
-      note: `${teamName(fromId)} → ${teamName(deal.toTeamId)} 임대`,
+      note: `${teamNameIn(state, fromId)} → ${teamNameIn(state, deal.toTeamId)} 임대`,
     });
     clearDepartedState(state, player, fromId);
     player.teamId = deal.toTeamId;
@@ -657,7 +657,7 @@ export function runAiTransfers(state: GameState, digest: string[]): void {
     .slice(0, NOTABLE_PER_DAY);
   for (const { player, deal } of notable) {
     const fee = deal.fee > 0 ? ` (£${(deal.fee / 1_000_000).toFixed(1)}M)` : " (자유계약)";
-    digest.push(`📰 ${player.name} → ${teamShortName(deal.toTeamId)}${fee}`);
-    pushNarrative(state, `${player.name} ${teamShortName(deal.toTeamId)} 이적`, 2);
+    digest.push(`📰 ${player.name} → ${teamShortNameIn(state, deal.toTeamId)}${fee}`);
+    pushNarrative(state, `${player.name} ${teamShortNameIn(state, deal.toTeamId)} 이적`, 2);
   }
 }

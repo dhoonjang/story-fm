@@ -50,7 +50,24 @@ interface CatalogPlayerInputMeta {
 /** 15축을 평면 필드로 받는다 (어드민 폼과 1:1) */
 export type CatalogPlayerInput = CatalogPlayerInputMeta & AxisValues;
 
-export type CatalogPlayerPatch = Partial<CatalogPlayerInput>;
+/**
+ * 편집 패치 — 실리지 않은 필드는 손대지 않는다.
+ *
+ * `weeklyWage`만 뜻이 셋이다 (game-state.md §2): 없으면 손대지 않음, `null`이면
+ * 실측을 지워 모델 추정으로 되돌림, 숫자면 그 값. 카탈로그의 주급은 실측이고
+ * 없는 것이 기본이라, 0과 "값 없음"이 갈리지 않으면 새 게임 계약이 £0/주가 된다.
+ */
+export type CatalogPlayerPatch = Partial<Omit<CatalogPlayerInput, "weeklyWage">> & {
+  weeklyWage?: number | null;
+};
+
+/** 선수 한 명의 편집 한 번 — 소속·포지션·수치가 같은 요청에 담긴다 */
+export interface CatalogPlayerEdit extends CatalogPlayerPatch {
+  /** 옮겨 갈 팀. 지금 소속과 같으면 이동은 없던 일이 된다 */
+  teamId?: string;
+  /** 가능 포지션 전체 교체 (멀티 포지션) */
+  positions?: PlayerPosition[];
+}
 
 /** 어드민 목록 행 — 파생값(나이·OVR·주 포지션)을 표시용으로 함께 담는다 */
 export interface CatalogPlayerRow extends PlayerCatalogEntry {
@@ -118,7 +135,9 @@ function applyPatch(
     const v = patch[key];
     if (v !== undefined) target[key] = clamp99(v);
   }
-  if (patch.weeklyWage !== undefined) {
+  if (patch.weeklyWage === null) {
+    delete entry.weeklyWage;
+  } else if (patch.weeklyWage !== undefined) {
     if (!Number.isFinite(patch.weeklyWage) || patch.weeklyWage < 0) {
       return { ok: false, message: "주급은 0 이상이어야 합니다" };
     }
@@ -156,25 +175,19 @@ function applyPatch(
   return { ok: true };
 }
 
-export function adminUpdateCatalogPlayer(playerId: string, patch: CatalogPlayerPatch): AdminResult {
-  const entries = playerCatalog().map((e) => ({
+/** 편집용 사본 — 검증이 다 끝난 뒤에야 저장하므로 반려된 편집은 원본에 닿지 않는다 */
+function cloneCatalog(): PlayerCatalogEntry[] {
+  return playerCatalog().map((e) => ({
     ...e,
     positions: e.positions.map((p) => ({ ...p })),
   }));
-  const entry = entries.find((e) => e.id === playerId);
-  if (!entry) return { ok: false, message: `카탈로그에 없는 선수입니다: ${playerId}` };
-  const res = applyPatch(entry, patch);
-  if (!res.ok) return res;
-  saveCatalog(entries);
-  const row = toRow(entry);
-  return { ok: true, message: `${entry.nameKo} 갱신 (OVR ${row.overall})`, playerId };
 }
 
-/** 가능 포지션·적응도 편집 (멀티 포지션) */
-export function adminSetCatalogPositions(
-  playerId: string,
+/** 가능 포지션·적응도 전체 교체 (멀티 포지션) */
+function applyPositions(
+  entry: PlayerCatalogEntry,
   positions: PlayerPosition[],
-): AdminResult {
+): { ok: true } | { ok: false; message: string } {
   if (positions.length === 0) return { ok: false, message: "포지션이 최소 1개 필요합니다" };
   const bad = positions.filter((p) => !positionGroupOf(p.position));
   if (bad.length > 0) {
@@ -185,19 +198,58 @@ export function adminSetCatalogPositions(
   if (positions.filter((p) => p.isNatural).length < 1) {
     return { ok: false, message: "주 포지션(isNatural)은 하나 이상이어야 합니다" };
   }
-  const entries = playerCatalog().map((e) => ({
-    ...e,
-    positions: e.positions.map((p) => ({ ...p })),
-  }));
-  const entry = entries.find((e) => e.id === playerId);
-  if (!entry) return { ok: false, message: `카탈로그에 없는 선수입니다: ${playerId}` };
   entry.positions = positions.map((p) => ({
     position: p.position.toUpperCase(),
     proficiency: clamp99(p.proficiency),
     isNatural: p.isNatural,
   }));
+  return { ok: true };
+}
+
+/**
+ * 선수 한 명의 편집 — **검증이 다 끝난 뒤 한 번 쓴다** (game-state.md §2).
+ *
+ * 이동·포지션·수치를 각각 저장하면 뒤가 거절될 때 앞의 절반만 파일에 남아 화면과
+ * 갈린다. 그래서 셋 다 사본 위에서 검증하고, 하나라도 반려되면 아무것도 쓰지 않는다.
+ */
+export function adminEditCatalogPlayer(playerId: string, edit: CatalogPlayerEdit): AdminResult {
+  const { teamId, positions, ...patch } = edit;
+  const entries = cloneCatalog();
+  const entry = entries.find((e) => e.id === playerId);
+  if (!entry) return { ok: false, message: `카탈로그에 없는 선수입니다: ${playerId}` };
+
+  const done: string[] = [];
+  // 이미 그 팀이면 이동은 없던 일이다 — 다른 편집까지 반려로 떨구지 않는다
+  if (teamId !== undefined && teamId !== entry.teamId) {
+    const moved = moveEntry(entries, entry, teamId);
+    if (!moved.ok) return moved;
+    done.push(moved.message);
+  }
+  if (positions !== undefined) {
+    const res = applyPositions(entry, positions);
+    if (!res.ok) return res;
+    done.push("포지션 갱신");
+  }
+  if (Object.keys(patch).length > 0) {
+    const res = applyPatch(entry, patch);
+    if (!res.ok) return res;
+    done.push(`능력치 갱신 (OVR ${toRow(entry).overall})`);
+  }
+  if (done.length === 0) return { ok: true, message: "변경 사항이 없습니다", playerId };
   saveCatalog(entries);
-  return { ok: true, message: `${entry.nameKo} 포지션 갱신`, playerId };
+  return { ok: true, message: `${entry.nameKo} ${done.join(" · ")}`, playerId };
+}
+
+export function adminUpdateCatalogPlayer(playerId: string, patch: CatalogPlayerPatch): AdminResult {
+  return adminEditCatalogPlayer(playerId, patch);
+}
+
+/** 가능 포지션·적응도 편집 (멀티 포지션) */
+export function adminSetCatalogPositions(
+  playerId: string,
+  positions: PlayerPosition[],
+): AdminResult {
+  return adminEditCatalogPlayer(playerId, { positions });
 }
 
 export function adminAddCatalogPlayer(teamId: string, input: CatalogPlayerInput): AdminResult {
@@ -212,10 +264,7 @@ export function adminAddCatalogPlayer(teamId: string, input: CatalogPlayerInput)
     return { ok: false, message: "출생년월일 형식(YYYY-MM-DD)이 올바르지 않습니다" };
   }
 
-  const entries = playerCatalog().map((e) => ({
-    ...e,
-    positions: e.positions.map((p) => ({ ...p })),
-  }));
+  const entries = cloneCatalog();
   const nameEn = (input.nameEn || input.nameKo).trim();
   const id = claimPlayerId(nameEn, input.birthdate, new Set(entries.map((e) => e.id)));
   const attrs = Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, clamp99(input[a])])) as AxisValues;
@@ -275,25 +324,31 @@ function departureBlock(
  * 소속 팀 이동 — 방출은 무소속(`freeagents`)으로 옮기는 것이다.
  * 옮겨 가는 쪽엔 상한이 없고, 떠나는 쪽만 라인업 하한을 지킨다.
  */
-export function adminMoveCatalogPlayer(playerId: string, teamId: string): AdminResult {
+function moveEntry(
+  entries: readonly PlayerCatalogEntry[],
+  entry: PlayerCatalogEntry,
+  teamId: string,
+): { ok: true; message: string } | { ok: false; message: string } {
   const target = teamCatalogById(teamId);
   if (!target) return { ok: false, message: `알 수 없는 팀: ${teamId}` };
-  const entries = playerCatalog().map((e) => ({
-    ...e,
-    positions: e.positions.map((p) => ({ ...p })),
-  }));
-  const entry = entries.find((e) => e.id === playerId);
-  if (!entry) return { ok: false, message: `카탈로그에 없는 선수입니다: ${playerId}` };
   if (entry.teamId === teamId) {
     return { ok: false, message: `${entry.nameKo}는 이미 ${target.name} 소속입니다` };
   }
   const blocked = departureBlock(entries, entry, "이동");
   if (blocked) return { ok: false, message: blocked };
-
   const from = teamCatalogById(entry.teamId)?.name ?? entry.teamId;
   entry.teamId = teamId;
+  return { ok: true, message: `이동 (${from} → ${target.name})` };
+}
+
+export function adminMoveCatalogPlayer(playerId: string, teamId: string): AdminResult {
+  const entries = cloneCatalog();
+  const entry = entries.find((e) => e.id === playerId);
+  if (!entry) return { ok: false, message: `카탈로그에 없는 선수입니다: ${playerId}` };
+  const moved = moveEntry(entries, entry, teamId);
+  if (!moved.ok) return moved;
   saveCatalog(entries);
-  return { ok: true, message: `${entry.nameKo} 이동 (${from} → ${target.name})`, playerId };
+  return { ok: true, message: `${entry.nameKo} ${moved.message}`, playerId };
 }
 
 export function adminRemoveCatalogPlayer(playerId: string): AdminResult {

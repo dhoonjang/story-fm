@@ -1682,6 +1682,35 @@ export interface PlayerCatalogMeta {
 export type PlayerCatalogEntry = PlayerCatalogMeta & AxisValues;
 
 /**
+ * 카탈로그 한 줄의 **파일 모양** — 어드민이 저장한 `player-catalog.json`은 이
+ * 스키마를 지나야 카탈로그가 된다. 어긋난 파일을 그대로 읽으면 실패가 저장한
+ * 순간이 아니라 한참 뒤 새 게임을 세울 때 터진다 (data/team.md §1).
+ *
+ * 15축은 `ATTRIBUTE_AXES`에서 펼친다 — 축이 늘어도 스키마가 따라온다.
+ * `overall`은 파생이라 담기지 않는다 (`PlayerCatalogMeta`와 같은 목록).
+ */
+export const PlayerCatalogEntrySchema = z.object({
+  id: z.string().min(1),
+  teamId: z.string().min(1),
+  nameKo: z.string().min(1),
+  nameEn: z.string().min(1),
+  synthetic: z.boolean().optional(),
+  squadNumber: z.number().int().min(0).max(99).optional(),
+  birthdate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  positions: z.array(PlayerPositionSchema).min(1),
+  potential: RatingSchema,
+  homegrownCountry: z.string().min(1).optional(),
+  foot: FootSchema.optional(),
+  height: HeightSchema.optional(),
+  weight: WeightSchema.optional(),
+  weeklyWage: z.number().min(0).optional(),
+  ...(Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, RatingSchema])) as Record<
+    AttributeAxis,
+    typeof RatingSchema
+  >),
+});
+
+/**
  * **주 포지션은 여럿일 수 있다** — 한 자리만 진짜인 선수가 있고, 두 자리를 다
  * 자기 자리로 삼는 선수가 있다(칸셀루의 풀백·윙, 카마빙가의 중원·측면).
  * 검증 레이어는 **하나 이상**을 보장한다.

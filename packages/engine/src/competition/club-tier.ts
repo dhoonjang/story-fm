@@ -5,7 +5,7 @@
  * 1부에서 영원히 tier 4로 남아 보드가 잔류만 요구하고, 강등된 빅클럽이 2부에서
  * tier 1로 남아 우승 경쟁을 요구받는다.
  */
-import { playersOf, teamName, type GameState } from "../core/state";
+import { playersOf, savedClubProfile, teamNameIn, type GameState } from "../core/state";
 import { boardExpectationOfTier, tierOfTeamIn } from "../core/club-tier";
 import { isCupOnlyLeague, isTopLeague } from "../data/league-catalog";
 import { clubProfiles, type ClubProfile } from "../data/club-profile";
@@ -131,7 +131,9 @@ function rankLeague(
   leagueSizes: Map<string, number>,
 ) {
   const profiles = clubProfiles();
-  const sizeOf = (id: string) => profiles[id] ?? UNLISTED_CLUB_SIZE;
+  // 세이브가 든 프로필이 먼저다 — 어드민의 수용인원 편집이 진행 중인 세이브의 체급을
+  // 다시 매기면 안 된다 (game-state.md §1)
+  const sizeOf = (id: string) => savedClubProfile(state, id) ?? profiles[id] ?? UNLISTED_CLUB_SIZE;
 
   const capacities = teamIds.map((id) => sizeOf(id).capacity);
   // 브랜드는 1등급이 가장 크다 — 부호를 뒤집어 "클수록 크다"로 맞춘다
@@ -184,7 +186,7 @@ export function recomputeClubTiers(state: GameState): string[] {
   const after = tierOfTeamIn(state, state.userTeamId);
   if (after === before) return [];
   return [
-    `${teamName(state.userTeamId)} 구단 체급 ${before} → ${after} — 보드 기대는 "${
+    `${teamNameIn(state, state.userTeamId)} 구단 체급 ${before} → ${after} — 보드 기대는 "${
       boardExpectationOfTier(after).label
     }"가 됐다`,
   ];

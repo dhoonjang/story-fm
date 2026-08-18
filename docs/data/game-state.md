@@ -25,8 +25,9 @@
 출처는 `GAME_PLAYER.catalogId`로만 링크한다(유스·절차 생성 선수는 `null`).
 어드민의 카탈로그 편집이 **새 게임에만** 반영되는 것도 이 구조의 결과다.
 
-팀은 카탈로그 id를 그대로 재사용한다 — 이름·리그는 카탈로그가 갖고 있어
-`GAME_TEAM`은 얇다(AI 감독 전술 역량치, 감독 이름·부임일, 그리고 체급).
+팀은 카탈로그 id를 그대로 재사용하고, **카탈로그가 초기치를 주는 값은 게임 시작에
+`GAME_TEAM`으로 복사된다** — 이름·약칭·소속 리그·체급·구장·브랜드. 전부 optional
+이라 옛 세이브엔 없고, 없으면 카탈로그가 답한다([team.md](team.md) §1).
 
 ⚠️ **카탈로그가 갖는 값은 세이브에서 바꿀 수 없다.** 승강이 `state.leagueOf`
 (팀 → 지금 속한 리그)로 표현되는 것이 그 예다 — 카탈로그의 `leagueId`는 불변이므로
@@ -39,16 +40,21 @@
 | **이 팀이 지금 어느 리그에 있나** — 순위표·일정·중계권·리그 계수·시장 편향·우리 리그 판정 | `leagueOfTeamIn(state, teamId)` (`competition/promotion.ts`) |
 | **그 리그가 어떤 리그인가** — 시장 전용(사우디·MLS)인가, 어느 나라인가, 이름·계수 표 | 카탈로그 (`league-catalog.ts` · `team-catalog.ts`) |
 
-승강으로 **바뀔 수 있는 값**만 세이브를 읽는다. 리그의 종류와 국적은 승강이
-건드리지 않으므로 카탈로그가 답한다.
+`leagueOfTeamIn`은 세 층을 순서대로 본다 — 승강 결과(`state.leagueOf`) → 게임
+시작에 복사한 소속(`GAME_TEAM.leagueId`) → 카탈로그. 가운데 층이 있어야 어드민이
+팀의 소속 리그를 옮겨도 진행 중인 세이브의 순위표가 흔들리지 않는다. 리그의 종류와
+국적은 승강도 세이브도 건드리지 않으므로 카탈로그가 답한다.
 
 **소속에서 파생하는 판정도 같은 갈래를 탄다.** 둘 다 카탈로그판을 지우지 않고
 상태 인지 판을 옆에 세운다 — `leagueOfTeamIn`이 `leagueOfTeam` 옆에 선 모양이다.
 
-| 무엇 | 세이브 (`competition/promotion.ts`) | 카탈로그 |
+| 무엇 | 세이브 | 카탈로그 |
 | --- | --- | --- |
 | 이 팀이 지금 1부인가 | `isTopFlightIn(state, teamId)` | `isTopFlight(teamId)` |
 | 이 구단의 지금 살림 수준 | `clubEconomyLevelIn(state, teamId)` | `clubEconomyLevel(teamId)` |
+| 이 팀의 이름·약칭 | `teamNameIn(state, id)` · `teamShortNameIn(state, id)` | `teamName(id)` · `teamShortName(id)` |
+| 이 구단의 구장·브랜드 | `clubProfileIn(state, id)` | `clubProfile(id, tier)` |
+| 이 구단의 체급 | `tierOfTeamIn(state, id)` | `catalogTierOf(id)` |
 
 ⚠️ **세계 생성은 카탈로그판을 쓴다** — 새 게임의 스쿼드 분류·절차 생성·축소 세계
 (`core/state.ts` · `world/catalog.ts` · `world/scope.ts`)와 초기 잔고·이적 예산은
@@ -60,6 +66,11 @@
 다시 매겨진다([team.md](team.md) §2). 읽는 자리는 전부 `tierOfTeamIn(state, teamId)`
 하나를 지난다 — 카탈로그를 직접 읽으면 어드민이 편집한 순간 진행 중인 세이브의 보드
 기대치와 경질 위험선이 그 자리에서 달라진다.
+
+⚠️ **어드민 편집은 진행 중인 세이브의 어떤 값도 움직이지 않는다.** 이름·소속·체급·
+구장·브랜드가 전부 위의 통로를 지나는 것이 그 약속의 전부다. 오버라이드 파일이 곧
+카탈로그가 되므로(§2), 카탈로그를 매 요청 읽는 자리는 그대로 어드민 편집이 새는
+구멍이다.
 
 ## 2. 카탈로그
 
@@ -78,6 +89,13 @@
 
 - `PLAYER_CATALOG`은 시드에서 **결정적으로 파생**된다(`deriveAxes`) — 저장된 표가
   아니라 함수의 결과이고, `overall`은 아예 갖지 않는다(파생).
+- **`weeklyWage`는 실측이고, 없는 것이 기본이다.** 공개 주급이 있는 선수만 값을
+  갖고 나머지는 모델이 어림한다(`initialWages`). 그래서 어드민 편집 창의 빈 주급
+  칸은 **0이 아니라 "값 없음"**이다 — 0을 실으면 새 게임의 계약이 £0/주가 된다.
+  이미 있는 실측을 지우려면 `null`을 보낸다.
+- **선수 한 명의 편집은 한 번에 저장된다.** 소속 이동·포지션·능력치를 같은 요청에
+  담아도 검증이 다 끝난 뒤 한 번 쓴다 — 나눠 쓰면 뒤가 거절될 때 앞의 절반만 남아
+  화면과 파일이 갈린다.
 - 어드민 편집은 **오버라이드 파일**로 저장되고, 있으면 그것이 코드의 시드를
   대신한다 — 선수는 `.data/player-catalog.json`, 팀·전술 성향·구단 프로필은
   `.data/team-catalog.json`, 리그는 `.data/league-catalog.json`, 컵(유럽 + 국내)은
@@ -86,6 +104,10 @@
   `cupCatalog()` · `domesticCupCatalog()`) — 모듈 로드 시점에 굳으면 편집이
   새 게임에 닿지 않는다. 편집 범위와 검증 불변식은 [team.md](team.md) §1 ·
   [competition.md](competition.md) §1.
+- **오버라이드는 검사를 통과한 것만 카탈로그가 된다.** 넷 다 로드할 때 모양을
+  보고(선수 카탈로그는 Zod 스키마) 어긋나면 통째로 시드로 돌아간다 — 반쪽만 읽은
+  카탈로그로 새 게임을 세우면 실패가 저장한 순간이 아니라 한참 뒤에 터진다.
+  손으로 고친 파일도 같은 문을 지난다.
 - `LeagueCatalogEntry.kind`가 그 리그가 게임에서 하는 일을 정한다 —
   `playable`(5대 리그) · `cup-only`(2부, 컵만) · `market-only`(사우디·MLS, 경기 없음) ·
   `free`(무소속 — 리그가 아니라 리그 밖).
@@ -114,7 +136,7 @@
 
 | 엔티티 | 무엇 | 정의 |
 | --- | --- | --- |
-| `teams` `GameTeam` | 얇다 — AI 전술 역량치 · 현 감독 이름/부임일 | `domain/team.ts` |
+| `teams` `GameTeam` | AI 전술 역량치 · 현 감독 이름/부임일 + 카탈로그에서 복사한 정체성(이름·약칭·소속·체급·구장·브랜드) | `domain/team.ts` |
 | `players` `GamePlayer` | 15축·상태·포지션 목록·주장·임대·성장 캐리 | `domain/player.ts` |
 | ↳ `PlayerAttributes` | 15축 + `overall`(파생 캐시) + `potential` | `domain/player.ts` |
 | ↳ `PlayerState` | 폼(−1~1) · 체력(0~100) · 부상 성향 · 심경 한 줄 | `domain/player.ts` |
@@ -321,7 +343,7 @@ erDiagram
 | 사기·피로 → 체력 | `condition`이 없을 때만 — 화면이 쓰던 공식 그대로 합친다 |
 | 종합 재계산 | 전 선수 `overall`을 15축에서 다시 굴린다. 파생 캐시라 멱등이고, 저장된 옛 눈금이 새 눈금과 한 표에 서지 않게 한다 (→ [player](player.md) §4) |
 | 등번호 | **비어 있는 번호만** — 시드 소속 그대로면 공식 번호를 복원하고, 나머지 빈칸과 팀 안에서 겹친 번호를 결정적으로 채운다. 세이브가 이미 가진 번호는 건드리지 않는다 |
-| `addMissingClubs` | 세이브에 없는 카탈로그 클럽(2부 등)을 인스턴스화해 채운다 |
+| `addMissingClubs` | 세이브에 없는 **시드 카탈로그** 클럽(2부 등)을 인스턴스화해 채우고, 그 클럽의 이름·소속·체급·프로필도 시드에서 복사한다. 어드민이 추가한 팀은 시드에 없으므로 진행 중인 세이브에 들어가지 않는다 |
 | `advanceDomesticCups` | 국내 컵 따라잡기 — 결정적·멱등이라 열기만 해도 달력이 채워진다 |
 | `ensurePersonas` | 수석코치·구단주·기자를 시드로 채우고 옛 화자 태그를 이름으로 고친다 |
 

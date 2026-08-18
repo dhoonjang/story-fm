@@ -49,13 +49,32 @@ function moneyStateOf(stages: readonly MatchStage[], table: StageMoney): Record<
 type MonthDay = [number, number];
 type WindowTable = Record<string, MonthDay>;
 
-/** 편집이 여는 라운드만 뽑는다 — 표를 그대로 견주면 손대지 않아도 늘 달라진다 */
-function windowTable(windows: Partial<Record<MatchStage, MonthDay>>): WindowTable {
-  const table: WindowTable = {};
+/** 편집 칸이 여는 다섯 라운드 — 원래 표에 없던 단계는 빈 칸을 못 쓰므로 1월 1일에서 출발한다 */
+function windowStateOf(windows: Partial<Record<MatchStage, MonthDay>>): WindowTable {
+  const state: WindowTable = {};
   for (const stage of DOMESTIC_STAGES) {
     const [month, day] = windows[stage] ?? [1, 1];
-    table[stage] = [month, day];
+    state[stage] = [month, day];
   }
+  return state;
+}
+
+/**
+ * 보낼 표 — **원래 표에서 출발해** 편집한 다섯 라운드만 덮어쓴다.
+ *
+ * `windows`는 표 전체가 교체되는 필드라, 편집이 여는 다섯 라운드만 실으면
+ * `league`·`playoff`처럼 화면에 없는 키가 그대로 사라진다. 다섯 라운드는 언제나
+ * 값이 있어야 저장이 받아진다 (competition.md §1).
+ */
+function windowTable(
+  base: Partial<Record<MatchStage, MonthDay>>,
+  edited: WindowTable,
+): WindowTable {
+  const table: WindowTable = {};
+  for (const [stage, value] of Object.entries(base)) {
+    if (value) table[stage] = [value[0], value[1]];
+  }
+  for (const stage of DOMESTIC_STAGES) table[stage] = [edited[stage][0], edited[stage][1]];
   return table;
 }
 
@@ -431,7 +450,7 @@ export function DomesticCupModal({
   const [firstDraw, setFirstDraw] = useState<MonthDay>([cup.firstDraw[0], cup.firstDraw[1]]);
   const [drawDelayDays, setDrawDelayDays] = useState(cup.drawDelayDays);
   const [homeRule, setHomeRule] = useState(cup.homeRule);
-  const [windows, setWindows] = useState<WindowTable>(windowTable(cup.windows));
+  const [windows, setWindows] = useState<WindowTable>(windowStateOf(cup.windows));
   const [stageNames, setStageNames] = useState<Record<string, string>>(
     nameStateOf(cup.stageNames ?? {}),
   );
@@ -453,7 +472,7 @@ export function DomesticCupModal({
     firstDraw,
     drawDelayDays,
     homeRule,
-    windows: windowTable(windows),
+    windows: windowTable(cup.windows, windows),
     stageNames: nameTable(stageNames),
     // 시드에 없던 필드를 false로 심으면 손대지 않아도 "편집됨"이 된다
     finalMidweek: finalMidweek === (cup.finalMidweek ?? false) ? cup.finalMidweek : finalMidweek,
@@ -499,7 +518,7 @@ export function DomesticCupModal({
         firstDraw: cup.firstDraw,
         drawDelayDays: cup.drawDelayDays,
         homeRule: cup.homeRule,
-        windows: windowTable(cup.windows),
+        windows: windowTable(cup.windows, windowStateOf(cup.windows)),
         stageNames: nameTable(nameStateOf(cup.stageNames ?? {})),
         finalMidweek: cup.finalMidweek,
         europeanTicket: cup.europeanTicket,
