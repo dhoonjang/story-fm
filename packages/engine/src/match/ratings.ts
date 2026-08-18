@@ -62,16 +62,25 @@ export function ratingTone(rating: number): RatingTone {
   return "cold";
 }
 
+/** 평점은 소수 첫째 자리까지 — 장부와 화면이 같은 자리수를 본다 */
+const roundRating = (v: number) => Math.round(v * 10) / 10;
+
+/** 첫 실점은 세지 않는다 — 무실점 보너스로 이미 갈렸다 */
+const FREE_CONCEDE = 1;
+
+/** 평점 한 줄 근거의 길이 상한 — 장부에 남는 문장이다 */
+const NOTE_MAX = 120;
+
 /** 경기 평점 — 소수 첫째 자리까지 (3.0~10.0) */
 export function matchRating(f: MatchRatingFacts): number {
   let r = RATING_BASE + OUTCOME_DELTA[f.outcome];
   r += f.goals * (GOAL_CREDIT[f.group] ?? 1);
   r += f.assists * ASSIST_CREDIT;
   if (f.conceded === 0) r += CLEAN_SHEET[f.group] ?? 0;
-  else r -= Math.max(0, f.conceded - 1) * (CONCEDE_PENALTY[f.group] ?? 0);
+  else r -= Math.max(0, f.conceded - FREE_CONCEDE) * (CONCEDE_PENALTY[f.group] ?? 0);
   r -= f.yellows * YELLOW_PENALTY;
   r -= f.reds * RED_PENALTY;
-  return Math.round(Math.min(RATING_MAX, Math.max(RATING_MIN, r)) * 10) / 10;
+  return roundRating(Math.min(RATING_MAX, Math.max(RATING_MIN, r)));
 }
 
 // ── LLM 평점 (기준선은 코어, 입체는 LLM) ─────────────────────────────
@@ -268,19 +277,18 @@ export function applyMatchRatings(
       continue;
     }
     seen.add(entry.playerId);
-    const bounded =
-      Math.round(
-        Math.min(
-          RATING_MAX,
-          Math.max(
-            RATING_MIN,
-            Math.min(anchor + RATING_BAND, Math.max(anchor - RATING_BAND, entry.rating)),
-          ),
-        ) * 10,
-      ) / 10;
+    const bounded = roundRating(
+      Math.min(
+        RATING_MAX,
+        Math.max(
+          RATING_MIN,
+          Math.min(anchor + RATING_BAND, Math.max(anchor - RATING_BAND, entry.rating)),
+        ),
+      ),
+    );
     const delta = bounded - anchor;
     ratings[entry.playerId] = bounded;
-    if (entry.note) notes[entry.playerId] = entry.note.slice(0, 120);
+    if (entry.note) notes[entry.playerId] = entry.note.slice(0, NOTE_MAX);
     if (delta !== 0 && !friendly) {
       const stat = ensureSeasonStat(state, entry.playerId, player.teamId);
       stat.ratingSum = Math.max(0, (stat.ratingSum ?? 0) + delta);

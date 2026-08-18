@@ -54,12 +54,8 @@ export function openInjuryFor(
   }
   const severity: InjurySeverity =
     rng() < P_MINOR ? "minor" : rng() < P_MODERATE_GIVEN_WORSE ? "moderate" : "major";
-  const days =
-    severity === "minor"
-      ? randInt(rng, 4, 12)
-      : severity === "moderate"
-        ? randInt(rng, 15, 40)
-        : randInt(rng, 60, 140);
+  const [minDays, maxDays] = DAYS_OUT[severity];
+  const days = randInt(rng, minDays, maxDays);
   const part = pick(rng, INJURY_PARTS);
   state.injuries.push({
     id: `inj-${player.id}-${state.date}`,
@@ -116,6 +112,16 @@ export const PRONENESS_BASE = 1;
 const PRONENESS_MIN = 0.55;
 /** 상한 — 유리몸이라도 동료의 2.2배까지 */
 const PRONENESS_MAX = 2.2;
+
+/**
+ * 심각도별 결장 일수 [최소, 최대] — 굴림과 **되읽는 쪽(`severityOfDays`)이 같은 표를
+ * 본다. 두 곳에 흩어 두면 이력에서 읽은 심각도와 코어가 굴린 심각도가 갈린다.
+ */
+const DAYS_OUT: Record<InjurySeverity, readonly [number, number]> = {
+  minor: [4, 12],
+  moderate: [15, 40],
+  major: [60, 140],
+};
 
 /** 부상 한 번이 남기는 몫 — 큰 부상일수록 깊게 남는다 (십자인대 뒤의 재발 위험) */
 const RISE: Record<InjurySeverity, number> = { minor: 0.25, moderate: 0.49, major: 0.99 };
@@ -249,9 +255,11 @@ export function pronenessFromDaysOut(days: number): number {
   return PRONENESS_BASE;
 }
 
-/** 심각도 — 코어의 굴림과 같은 구간으로 읽는다 (`openInjuryFor`의 days 범위) */
+/** 심각도 — 코어의 굴림과 같은 구간으로 읽는다 (`DAYS_OUT`) */
 function severityOfDays(days: number): InjurySeverity {
-  return days < 15 ? "minor" : days < 60 ? "moderate" : "major";
+  if (days < DAYS_OUT.moderate[0]) return "minor";
+  if (days < DAYS_OUT.major[0]) return "moderate";
+  return "major";
 }
 
 /**

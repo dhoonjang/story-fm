@@ -6,7 +6,7 @@ import type {
   PressStance,
   PressTrigger,
 } from "@story-fm/domain";
-import { isNaturalAt, naturalPositionOf } from "@story-fm/domain";
+import { isNaturalAt, naturalPositionOf, RATING_MAX } from "@story-fm/domain";
 import type { GameState } from "../core/state";
 import { playerById, playersOf, pushNarrative, teamNameIn, userPlayers } from "../core/state";
 import { pickPlayerAmong } from "../core/player-ref";
@@ -28,6 +28,13 @@ import type { SkillResult } from "../skills";
  * 말이기 때문이다. 감독은 하고 싶은 말을 하고, 그것이 감싼 것인지 자른 것인지는
  * 세계(LLM)가 읽는다.
  */
+
+/** 무승 계단을 재는 창과, 그 안에서 회견이 열리는 무승 경기 수 */
+const WINLESS_WINDOW = 4;
+const WINLESS_STREAK = 3;
+
+/** 상태에 남기는 지난 회견 수 — 그 뒤는 서사에만 남는다 */
+const KEPT_CONFERENCES = 20;
 
 /** 회견 하나가 옮길 수 있는 기본 폭 — `weight`(1~3)에 비례한다 (overview §7) */
 export const PRESS_BAND = 4;
@@ -56,11 +63,22 @@ const STANCE_TABLE: Record<
  */
 const DECLINE = { board: -0.3, media: -1, squad: 0.2, target: 0, team: 0 };
 
-const clampRep = (v: number) => Math.max(0, Math.min(100, Math.round(v)));
+/** 평판 눈금의 위끝 — 0~100 */
+const REPUTATION_MAX = 100;
+
+const clampRep = (v: number) => Math.max(0, Math.min(REPUTATION_MAX, Math.round(v)));
+
+/** 리더십 0이 갖는 울림 */
+const LEADERSHIP_FACTOR_MIN = 0.7;
+/** 리더십이 최고까지 더해 주는 몫 — 0.7~1.3 */
+const LEADERSHIP_FACTOR_SPAN = 0.6;
 
 /** 리더십 계수 — 같은 말도 리더십이 자라면 라커룸에 더 크게 울린다 (skills.ts와 같은 자) */
 function leadershipFactor(state: GameState): number {
-  return 0.7 + (state.manager.attributes.leadership / 99) * 0.6;
+  return (
+    LEADERSHIP_FACTOR_MIN +
+    (state.manager.attributes.leadership / RATING_MAX) * LEADERSHIP_FACTOR_SPAN
+  );
 }
 
 /** 이 자리가 얼마나 큰가 — 한도가 여기에 비례한다 */
@@ -84,12 +102,18 @@ function outcomeOf(state: GameState, m: MatchRecord): "win" | "draw" | "loss" | 
  * 폼이 바닥인 선수, 없으면 불만이 쌓인 선수. 모델에게 "적당한 선수를 골라라"
  * 하면 없는 사연이 생긴다.
  */
+/** 기자가 "폼이 떨어졌다"고 물을 만한 폼 — 이 아래면 화젯거리다 */
+const SLUMPING_FORM = -0.35;
+
+/** 그중 몇 명까지를 후보로 두는가 — 매번 최악의 한 명만 물으면 같은 이름이 반복된다 */
+const SLUMP_CANDIDATES = 3;
+
 function questionablePlayer(state: GameState, seed: number): GamePlayer | null {
   const squad = userPlayers(state);
   const slumping = squad
-    .filter((p) => p.state.form < -0.35)
+    .filter((p) => p.state.form < SLUMPING_FORM)
     .sort((a, b) => a.state.form - b.state.form)
-    .slice(0, 3);
+    .slice(0, SLUMP_CANDIDATES);
   if (slumping.length > 0) return pick(makeRng(seed, "press"), slumping);
   const issue = state.issues[0];
   if (issue) return squad.find((p) => p.id === issue.gamePlayerId) ?? null;
@@ -122,8 +146,8 @@ export function buildMatchPress(state: GameState, matchId: string): PressConfere
    * slump.ts와 같은 자). 라커룸의 연패 판정과 기자의 무승 판정이 다른 경기를 세면
    * 같은 국면을 두 눈금으로 말하게 된다.
    */
-  const recent = recentOutcomes(state, state.userTeamId, 4);
-  const winless = recent.length >= 3 && recent.every((r) => r !== "win");
+  const recent = recentOutcomes(state, state.userTeamId, WINLESS_WINDOW);
+  const winless = recent.length >= WINLESS_STREAK && recent.every((r) => r !== "win");
 
   /**
    * **사실만 넘긴다.** 기자의 질문은 GM이 이 카드들로 직접 쓴다 — 코어가 문장을
@@ -148,7 +172,7 @@ export function buildMatchPress(state: GameState, matchId: string): PressConfere
   }
   const target = questionablePlayer(state, state.seed + state.matches.length);
   if (target) {
-    const slumping = target.state.form < -0.35;
+    const slumping = target.state.form < SLUMPING_FORM;
     facts.push({
       kind: slumping ? "slump" : "unhappy",
       text: slumping
@@ -185,11 +209,20 @@ function squeezedBy(state: GameState, arrival: GamePlayer): GamePlayer[] {
   return playersOf(state, state.userTeamId)
     .filter((p) => p.id !== arrival.id && p.squadLevel === "first" && isNaturalAt(p, pos))
     .sort((a, b) => b.attributes.overall - a.attributes.overall)
-    .slice(0, 2);
+    .slice(0, RIVAL_NAMES_SHOWN);
 }
+
+/** 같은 자리를 두고 다투는 선수를 이름으로 몇까지 넘기는가 */
+const RIVAL_NAMES_SHOWN = 2;
 
 /** 회견이 열릴 만한 이적료 — 이 아래는 1군 상위 자원일 때만 */
 const BIG_FEE = 25_000_000;
+
+/**
+ * 핵심 자원의 경계 — 스쿼드에서 그보다 나은 선수가 이만큼 있으면 핵심이 아니다.
+ * 선발 열하나에 로테이션 몇을 더한 수다.
+ */
+const SQUAD_CORE_SIZE = 14;
 
 /**
  * 이적 회견 — **큰 이동에만** 붙는다.
@@ -209,7 +242,7 @@ export function buildTransferPress(
   const better = playersOf(state, state.userTeamId).filter(
     (p) => p.id !== player.id && p.attributes.overall > player.attributes.overall,
   ).length;
-  if (better >= 14 && input.fee < BIG_FEE) return null;
+  if (better >= SQUAD_CORE_SIZE && input.fee < BIG_FEE) return null;
 
   const pos = naturalPositionOf(player).position;
   const fee = input.fee > 0 ? ` · 이적료 £${(input.fee / 1e6).toFixed(1)}M` : " · 이적료 없음";
@@ -278,8 +311,8 @@ export function openPress(state: GameState, conference: PressConference, digest?
   }
   state.pressConferences.push(conference);
   // 지나간 회견은 서사에 남지 상태로 쌓일 이유가 없다
-  if (state.pressConferences.length > 20) {
-    state.pressConferences = state.pressConferences.slice(-20);
+  if (state.pressConferences.length > KEPT_CONFERENCES) {
+    state.pressConferences = state.pressConferences.slice(-KEPT_CONFERENCES);
   }
   digest?.push(`기자회견 — ${conference.context}`);
 }
