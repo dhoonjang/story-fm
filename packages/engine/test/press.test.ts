@@ -10,7 +10,7 @@ import {
   userPlayers,
   type GameState,
 } from "@story-fm/engine";
-import type { MatchRecord, PressConference } from "@story-fm/domain";
+import type { GamePlayer, MatchRecord, PressConference } from "@story-fm/domain";
 import { createTestGame } from "./helpers";
 
 /**
@@ -196,6 +196,84 @@ describe("기자회견 — 답과 거절", () => {
     const state = createTestGame(47);
     expect(respondToMedia(state, { stance: "defend" }).ok).toBe(false);
     expect(declinePress(state).ok).toBe(false);
+  });
+});
+
+describe("기자회견 — 지목은 사실 카드 안에서만", () => {
+  /** 카드에 이름 하나가 오른 회견 — 그 하나 말고는 겨눌 수 있는 선수가 없다 */
+  function openWithNamedFact(state: GameState, about: GamePlayer): void {
+    for (const p of userPlayers(state)) p.state.form = 0;
+    openPress(
+      state,
+      fakeConference({
+        facts: [{ kind: "slump", text: `${about.name} 폼 바닥`, about: about.id, sharp: true }],
+        weight: 3,
+      }),
+    );
+  }
+
+  it("카드 밖 선수를 겨누면 반려된다 — 회견도 사기도 그대로다", () => {
+    const state = createTestGame(61);
+    const [onCard, offCard] = [userPlayers(state)[0]!, userPlayers(state)[1]!];
+    openWithNamedFact(state, onCard);
+
+    const result = respondToMedia(state, { stance: "criticise", targetPlayerId: offCard.id });
+
+    expect(result.ok).toBe(false);
+    // 반려는 되돌리는 것이지 절반만 반영하는 것이 아니다 — 답할 자리가 남아 있어야 한다
+    expect(pendingPress(state)).not.toBeNull();
+    expect(offCard.state.form).toBe(0);
+    expect(onCard.state.form).toBe(0);
+  });
+
+  it("카드 안 선수는 이름으로 불러도 닿는다", () => {
+    const state = createTestGame(67);
+    const onCard = userPlayers(state)[0]!;
+    openWithNamedFact(state, onCard);
+
+    const result = respondToMedia(state, { stance: "defend", targetPlayerId: onCard.name });
+
+    expect(result.ok, result.message).toBe(true);
+    expect(result.message).toContain(onCard.name);
+    expect(onCard.state.form).toBeGreaterThan(0);
+  });
+
+  it("이름이 갈리면 고르지 않고 반려한다", () => {
+    const state = createTestGame(71);
+    const [a, b] = [userPlayers(state)[0]!, userPlayers(state)[1]!];
+    a.name = "마르틴 산체스";
+    b.name = "마르틴 로페스";
+    for (const p of userPlayers(state)) p.state.form = 0;
+    openPress(
+      state,
+      fakeConference({
+        facts: [
+          { kind: "slump", text: `${a.name} 폼 바닥`, about: a.id, sharp: true },
+          { kind: "unhappy", text: `${b.name} 라커룸 불만`, about: b.id, sharp: true },
+        ],
+      }),
+    );
+
+    const result = respondToMedia(state, { stance: "criticise", targetPlayerId: "마르틴" });
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain(a.name);
+    expect(result.message).toContain(b.name);
+    expect(pendingPress(state)).not.toBeNull();
+  });
+
+  it("이름 걸린 사실이 없는 회견에서는 아무도 겨눌 수 없다", () => {
+    const state = createTestGame(73);
+    const someone = userPlayers(state)[0]!;
+    openPress(state, fakeConference());
+    expect(respondToMedia(state, { stance: "own", targetPlayerId: someone.id }).ok).toBe(false);
+  });
+
+  it("겨눈 선수가 없으면 카드의 첫 이름이 그대로 대상이다", () => {
+    const state = createTestGame(79);
+    const onCard = userPlayers(state)[0]!;
+    openWithNamedFact(state, onCard);
+    expect(respondToMedia(state, { stance: "defend" }).message).toContain(onCard.name);
   });
 });
 

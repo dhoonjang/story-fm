@@ -8,7 +8,9 @@ import {
   formatMoney,
   headCoachOf,
   interpretBackgroundHeuristic,
+  openPress,
   ownerOf,
+  pendingPress,
   reportersOf,
   speakerRoles,
   scoutPlayer,
@@ -554,6 +556,32 @@ describe("도구 구성", () => {
     const res = captain.handle({ playerId: target.id }, { text: written });
     expect(res.ok, res.message).toBe(true);
     expect(calls[0]!.line).toBe(3);
+  });
+
+  it("stance도 decline도 없으면 회견이 닫히지 않는다 — 감독이 하지 않은 거절이다", () => {
+    const state = game();
+    const calls: GmToolCall[] = [];
+    const respond = buildGmTools(state, calls).find((t) => t.name === "respond_to_media")!;
+    openPress(state, {
+      id: "press-guard",
+      date: state.date,
+      trigger: "match",
+      context: "테스트전 0-1 패배",
+      facts: [{ kind: "result", text: "테스트전 0-1 패배 (홈)", about: null, sharp: true }],
+      status: "pending",
+      weight: 1,
+    });
+    const beforeMedia = state.manager.reputation.media;
+
+    const res = respond.handle({});
+
+    expect(res.ok).toBe(false);
+    expect(pendingPress(state)).not.toBeNull();
+    expect(state.manager.reputation.media).toBe(beforeMedia);
+    expect(calls).toHaveLength(0);
+    // 거절은 감독이 거절했을 때만 — 명시하면 그때는 닫힌다
+    expect(respond.handle({ decline: true }).ok).toBe(true);
+    expect(pendingPress(state)).toBeNull();
   });
 
   it("자리를 안 넘기면 남기지 않는다 — 옛 기록처럼 맨 앞에 선다", () => {
