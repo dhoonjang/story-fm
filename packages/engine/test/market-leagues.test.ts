@@ -4,6 +4,8 @@ import {
   marketLeagues,
   MARKET_LEAGUE_BUDGET,
   teamCatalog,
+  acceptDeal,
+  answerIncomingOffer,
   buildTransferWindows,
   computeStandings,
   dealOdds,
@@ -15,7 +17,11 @@ import {
   leagueOfTeam,
   marketBiasOf,
   marketValueOf,
+  offerPlayerOut,
+  playerById,
   playersOf,
+  respondOffer,
+  runMedicals,
   secondTierOf,
   windowOpenForTeam,
   type GameState,
@@ -112,6 +118,50 @@ describe("이적창 — 우리와 시기가 다르다", () => {
       years: 2,
     });
     expect(buy.blockers.join()).toContain("이적시장이 닫혀");
+  });
+
+  /**
+   * 오퍼가 열어 준 창을 **확정도 같은 창으로 재야 한다.** 확정만 우리 창으로 재면
+   * 감독이 수락한 딜이 메디컬 다음 날 반드시 무산되고 `agreed`에 고착된다.
+   */
+  it("9월에 사우디로 파는 딜이 확정(`completed`)까지 간다", () => {
+    const state = createTestGame();
+    state.windows = seasonWindows();
+    state.date = "2026-09-20";
+
+    // 자리가 막힌 선수를 싸게 내민다 — 사는 쪽도 선수도 응할 조건
+    const spare = [...playersOf(state, state.userTeamId)].sort(
+      (a, b) => a.attributes.overall - b.attributes.overall,
+    )[0]!;
+    const offered = offerPlayerOut(state, {
+      playerId: spare.id,
+      teamId: "alnassr",
+      fee: Math.round(marketValueOf(state, spare) / 2),
+    });
+    expect(offered.ok, offered.message).toBe(true);
+
+    const negotiation = state.negotiations.find((n) => n.gamePlayerId === spare.id)!;
+    state.date = negotiation.rounds[0]!.respondsOn ?? state.date;
+    const answer = respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
+    expect(answer.ok, answer.message).toBe(true);
+    expect(negotiation.status).toBe("agreed");
+
+    // 합의는 검진 일정만 잡는다 — 우리 창이 닫혔어도 사우디 창 안이라 날이 잡힌다
+    const accepted = acceptDeal(state, negotiation.id);
+    expect(accepted.ok, accepted.message).toBe(true);
+    expect(negotiation.medical?.onDate).toBeDefined();
+
+    state.date = negotiation.medical!.onDate;
+    runMedicals(state, []);
+    // 소견이 붙으면 사는 쪽이 깎아 다시 부른다 — 그 값을 받으면 그 자리에서 확정된다
+    if (negotiation.status === "open") {
+      expect(answerIncomingOffer(state, { negotiationId: negotiation.id, verdict: "accept" }).ok)
+        .toBe(true);
+      const forced = acceptDeal(state, negotiation.id);
+      expect(forced.ok, forced.message).toBe(true);
+    }
+    expect(negotiation.status).toBe("completed");
+    expect(playerById(state, spare.id)?.teamId).toBe("alnassr");
   });
 
   it("MLS는 아예 다른 계절에 연다 — 우리 시즌 한복판", () => {
