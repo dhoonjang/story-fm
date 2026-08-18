@@ -10,6 +10,7 @@ import type {
   TacticAssignment,
   TacticsSpec,
   TeamTactics,
+  TeamTalkOccasion,
   TrainAttr,
 } from "@story-fm/domain";
 import {
@@ -262,16 +263,43 @@ function leadershipFactor(state: GameState): number {
   return 0.7 + (state.manager.attributes.leadership / 99) * 0.6;
 }
 
+/** 팀토크를 꺼낸 자리 — 이미 했다는 말이 어느 자리를 가리키는지 밝힌다 */
+const OCCASION_KO: Record<TeamTalkOccasion, string> = {
+  pre: "경기 전",
+  half: "하프타임",
+  post: "경기 후",
+  daily: "평시",
+};
+
 export function applyTeamTalk(
   state: GameState,
   input: {
-    occasion: "pre" | "half" | "post" | "daily";
+    /** 그 말을 꺼낸 자리 — **하루 한 번을 세는 단위다** (career.md §2) */
+    occasion: TeamTalkOccasion;
     outcome: TeamTalkOutcome;
     intensity: 1 | 2 | 3;
     /** 이 말이 새 영입들의 적응에 남긴 무게 — 코어 앵커에서 EVENT_BAND만큼만 */
     settling?: number;
   },
 ): SkillResult {
+  /**
+   * **자리마다 하루 한 번** (career.md §2) — 사기도 정착도 XP도 서사도 그 자리의 첫
+   * 팀토크만 셈한다. 경기 중에는 정지점마다 `team_talk`이 의도로 옮겨질 수 있어
+   * (`match-intent-apply.ts`), 문이 없으면 같은 말을 반복하는 것이 폼을 올리는 최적
+   * 전략이 된다.
+   *
+   * 하루 한 번으로 묶지 않고 자리로 가른 것은 경기 전의 한마디와 하프타임의 한마디가
+   * 서로 다른 순간이기 때문이다 — 묶으면 연타를 막는 대신 장면 하나가 사라진다.
+   */
+  const talkedOn = state.manager.teamTalkedOn ?? {};
+  if (talkedOn[input.occasion] === state.date) {
+    return {
+      ok: true,
+      message: `${OCCASION_KO[input.occasion]} 팀토크는 오늘 이미 했습니다 — 같은 말이 두 번 남지는 않습니다`,
+    };
+  }
+  state.manager.teamTalkedOn = { ...talkedOn, [input.occasion]: state.date };
+
   const base = TEAM_TALK_BASE[input.outcome];
   const delta = Math.round(base * (input.intensity / 2) * leadershipFactor(state));
   const bounded = Math.max(-6, Math.min(6, delta)); // 이벤트당 한도 (overview §7)
@@ -343,9 +371,14 @@ export function applyTalkToPlayer(
   const bounded = Math.max(-8, Math.min(8, delta));
   player.state.form = clampForm(player.state.form + moraleToForm(bounded));
 
-  // 면담은 방치 이슈를 해소한다 (season.md §5)
-  const hadIssue = state.issues.some((i) => i.gamePlayerId === player.id);
-  state.issues = state.issues.filter((i) => i.gamePlayerId !== player.id);
+  /**
+   * 면담은 방치 이슈를 해소한다 — **잘 풀렸을 때만** (career.md §2). 결과와 무관하게
+   * 지우면 화를 내고 나오는 것도 불만 해소책이 되고, 판정이 무엇이 됐든 부르기만 하면
+   * 되는 일이 된다.
+   */
+  const resolvesIssue = base > 0;
+  const hadIssue = resolvesIssue && state.issues.some((i) => i.gamePlayerId === player.id);
+  if (resolvesIssue) state.issues = state.issues.filter((i) => i.gamePlayerId !== player.id);
 
   /**
    * 새 영입에게 면담은 **적응의 계기**다 — 아직 못 쓰는 선수에게도 감독이 할 수
@@ -1193,6 +1226,9 @@ export function setPlayerPosition(
   };
 }
 
+/** 완장을 **처음** 채운 날의 체력 — 라커룸 한가운데 서는 일이다 (career.md §2) */
+const CAPTAIN_FIRST_LIFT = 4;
+
 export function setCaptain(state: GameState, playerId: string): SkillResult {
   const pick = pickOurPlayer(state, playerId);
   if (!pick.ok) return pick;
@@ -1200,7 +1236,15 @@ export function setCaptain(state: GameState, playerId: string): SkillResult {
   // 팀당 1명 — 기존 주장 해제
   for (const p of userPlayers(state)) p.isCaptain = false;
   player.isCaptain = true;
-  player.state.condition = clampCondition(player.state.condition + 4);
+  /**
+   * **체력 보너스는 선수당 첫 지명에만** (career.md §2). 완장은 몇 번이고 오가지만
+   * 처음 채워지는 순간의 무게는 한 번뿐이다 — 문이 없으면 두 선수를 번갈아 지명하는
+   * 것만으로 둘 다 체력이 100이 된다.
+   */
+  if (player.state.captainedOn === undefined) {
+    player.state.captainedOn = state.date;
+    player.state.condition = clampCondition(player.state.condition + CAPTAIN_FIRST_LIFT);
+  }
   // 새 영입에게 완장을 채우는 건 라커룸 한가운데 세우는 일이다 (settling.ts)
   const settled = creditSettling(state, player.id, "captain") > 0;
   return {

@@ -1544,6 +1544,20 @@ export const PlayerStateSchema = z.object({
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional(),
+  /**
+   * **처음 완장을 찬 날** — 주장 지명의 체력 보너스를 선수당 한 번으로 자르는 문
+   * (career.md §2). 완장은 몇 번이고 오가지만 처음 채워지는 순간의 무게는 한 번뿐이라,
+   * 두 선수를 번갈아 지명하는 것만으로 둘 다 체력이 차던 자리다.
+   *
+   * 지금 누가 주장인지는 `isCaptain`이 답한다 — 이 값은 지난 사실이라 완장을 넘겨도
+   * 지워지지 않는다.
+   *
+   * 옛 세이브엔 없다 — 없으면 아직 완장을 찬 적 없는 것으로 읽고 버전을 올리지 않는다.
+   */
+  captainedOn: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
 });
 export type PlayerState = z.infer<typeof PlayerStateSchema>;
 
