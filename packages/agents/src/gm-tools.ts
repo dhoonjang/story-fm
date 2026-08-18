@@ -599,13 +599,21 @@ export function buildGmTools(
         targetPlayerId: z.string().optional(),
         decline: z.boolean().optional(),
       }),
-      (input) =>
-        input.decline || !input.stance
-          ? declinePress(state)
-          : respondToMedia(state, {
-              stance: input.stance,
-              targetPlayerId: input.targetPlayerId ?? null,
-            }),
+      (input) => {
+        /**
+         * **거절은 감독이 거절했을 때만이다.** 둘 다 비운 호출을 거절로 읽으면
+         * 감독이 하지 않은 결정(언론 −1×무게)이 장부에 남는다 — 모델이 다시
+         * 부르게 하는 편이 낫다 (people.md §4).
+         */
+        if (input.decline === true) return declinePress(state);
+        if (!input.stance) {
+          return { ok: false, message: "답이면 stance가, 거절이면 decline: true가 필요합니다" };
+        }
+        return respondToMedia(state, {
+          stance: input.stance,
+          targetPlayerId: input.targetPlayerId ?? null,
+        });
+      },
     ),
     wrap(
       "substitute",

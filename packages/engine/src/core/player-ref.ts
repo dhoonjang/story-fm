@@ -51,3 +51,32 @@ export function pickOurPlayer(state: GameState, ref: string): PlayerPickResult {
         : `"${ref}"는 우리 팀 선수가 아닙니다`,
   };
 }
+
+/**
+ * **이미 좁혀진 후보** 안에서 하나 — 회견의 사실 카드처럼 고를 수 있는 이름이
+ * 정해져 있는 자리.
+ *
+ * 밖을 겨눈 지목은 되돌린다. 목록에 없는 이름을 코어가 근처의 누군가로 바꿔 주면
+ * 그것은 감독이 하지 않은 지목이 된다. 후보가 몇 안 되므로 반려에 목록을 그대로
+ * 실어 GM이 다시 고를 수 있게 한다.
+ */
+export function pickPlayerAmong(
+  state: GameState,
+  pool: readonly GamePlayer[],
+  ref: string,
+  poolLabel: string,
+): PlayerPickResult {
+  if (pool.length === 0) return { ok: false, message: `${poolLabel}에 오른 선수가 없습니다` };
+  const absent = {
+    ok: false as const,
+    message: `"${ref}"는 ${poolLabel}에 없습니다 — ${candidateLine(pool)}`,
+  };
+  // 세계의 정확한 id인데 후보 밖이면 거기서 끝이다 — 정확한 지목을 이름으로 다시 짐작하지 않는다
+  const exact = playerById(state, ref.trim());
+  if (exact) return pool.some((p) => p.id === exact.id) ? { ok: true, player: exact } : absent;
+  const { player, candidates } = resolvePlayerRef(pool, ref);
+  if (player) return { ok: true, player };
+  return candidates.length > 0
+    ? { ok: false, message: `"${ref}"는 여러 선수와 맞습니다 — ${candidateLine(candidates)}` }
+    : absent;
+}
