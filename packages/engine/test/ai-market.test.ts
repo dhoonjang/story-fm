@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   activeContract,
+  addDays,
   advanceTime,
+  AGENT_FEE_RATE,
+  financeOf,
   assignmentsOf,
   buildTransferWindows,
   firstTeamPlayers,
@@ -112,6 +115,41 @@ describe("이적창이 열리면 남의 팀끼리도 움직인다", () => {
     }
     expect(moved, "여름 창에 유료 이적이 한 건도 없었다").toBeTruthy();
   }, 60_000);
+
+  /**
+   * **에이전트 수수료는 사는 쪽이 누구든 붙는다** (finance.md §6). 유저에게만 물리던
+   * 시절 AI 구단은 같은 영입을 10% 싸게 했고, 이적료와 달리 이 돈은 구단 사이를 도는
+   * 것이 아니라 세계 밖으로 나가므로 그 차이가 시즌마다 쌓였다.
+   *
+   * 시계를 tick으로 밀지 않고 날짜만 밀어 부른다 — 경기·주급·월초 정산이 섞이면
+   * 잔고의 변화가 이적의 값이 아니게 된다.
+   */
+  it("에이전트 수수료는 AI 영입에도 붙는다 — 이적료의 10%가 세계 밖으로 나간다", () => {
+    const state = createTestGame(9);
+    const before = new Map(state.finances.map((f) => [f.teamId, f.balance] as const));
+    for (let i = 0; i < 10; i++) {
+      runAiTransfers(state, []);
+      state.date = addDays(state.date, 1);
+    }
+    const paid = state.transfers.filter((t) => t.type === "transfer" && t.fee > 0);
+    expect(paid.length).toBeGreaterThan(0);
+
+    for (const [teamId, cash] of before) {
+      const out = paid
+        .filter((t) => t.toTeamId === teamId)
+        .reduce((sum, t) => sum + Math.round(t.fee) + Math.round(t.fee * AGENT_FEE_RATE), 0);
+      const income = paid
+        .filter((t) => t.fromTeamId === teamId)
+        .reduce((sum, t) => sum + Math.round(t.fee), 0);
+      expect(financeOf(state, teamId).balance, teamId).toBe(cash - out + income);
+    }
+
+    // 이적료는 구단 사이를 돌 뿐이고, 줄어든 총액은 정확히 수수료다
+    const drained =
+      [...before.values()].reduce((sum, v) => sum + v, 0) -
+      state.finances.reduce((sum, f) => sum + f.balance, 0);
+    expect(drained).toBe(paid.reduce((sum, t) => sum + Math.round(t.fee * AGENT_FEE_RATE), 0));
+  });
 
   it("임대는 계약을 원소속에 남긴다 — 복귀가 파생된다", () => {
     const loan = moves.find((t) => t.type === "loan")!;

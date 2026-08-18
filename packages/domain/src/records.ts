@@ -458,7 +458,7 @@ export const TeamFinanceSchema = z.object({
    * 원장은 절단되므로 "원장이 곧 사실"에 기댈 수 없다.
    */
   prizesPaid: z.array(z.string()).optional(),
-  /** 보드가 이적 예산을 동결했는가 (PSR 위반) */
+  /** 보드가 이적 예산을 동결했는가 — PSR 한도 초과 **또는** 부채 한도 초과 (finance.md §9.2·§9.4) */
   budgetFrozen: z.boolean().optional(),
   /**
    * `adjust_transfer_budget`이 **오늘** 움직인 금액의 합 (날짜 + 절대값).

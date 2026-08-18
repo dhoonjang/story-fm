@@ -65,13 +65,20 @@ describe("강등의 재정 타격", () => {
     expect(parachuteSeasonAmount(state, "arsenal")).toBe(0);
   });
 
-  it("승격 한 시즌 만에 다시 내려가면 낙하산이 짧다", () => {
+  /**
+   * 실제 EPL엔 "승격 한 시즌 만에 다시 내려가면 2년" 조항이 있다. 우리 세계엔 그
+   * 상태가 남지 않는다 — 승격이 낙하산 기록을 지우므로(`stopParachute`) 재강등은
+   * 언제나 처음부터 세 해다 (finance.md §9-1).
+   */
+  it("낙하산은 언제나 세 해다 — 승격이 '아직 받는 중'을 지운다", () => {
     const state = createTestGame(42, "arsenal");
     relegate(state, "arsenal");
-    // 아직 받는 중에 또 강등 — 2년만 받는다
+    expect(state.finances.find((f) => f.teamId === "arsenal")!.parachute!.years).toBe(3);
+
+    // 승격 → 재강등: 실제 규칙이 2년으로 줄일 유일한 경로다
+    stopParachute(state, "arsenal");
     startParachute(state, "arsenal", "epl");
-    const drop = state.finances.find((f) => f.teamId === "arsenal")!.parachute!;
-    expect(drop.years).toBe(2);
+    expect(state.finances.find((f) => f.teamId === "arsenal")!.parachute!.years).toBe(3);
   });
 
   it("강등되면 월 수입이 크게 줄지만 낙하산이 절벽을 막는다", () => {
@@ -143,5 +150,28 @@ describe("강등의 재정 타격", () => {
     expect(year1).toBeLessThan(before);
     // 첫해 낙폭은 중계권만큼 크지 않다
     expect(year1).toBeGreaterThan(before * 0.8);
+  });
+
+  /**
+   * **감소는 세 해짜리 지연이지 2부의 상업 수준이 아니다.** 상업 정액은 리그를 모르는
+   * 브랜드 등급에서 나오므로(finance.md §5.3), 표의 마지막 해를 넘기면 그 등급의 값으로
+   * 돌아온다. 여기를 늘리려면 상업 정액 자체가 리그를 알아야 한다 (§9-1).
+   */
+  it("감소는 세 해에서 끝난다 — 4년차 상업은 브랜드 정액으로 돌아온다", () => {
+    const top = createTestGame(42, "arsenal");
+    ensureMonthlyPosted(top);
+    const full = monthIncome(top, "arsenal", "스폰서십");
+
+    const worst = createTestGame(42, "arsenal");
+    relegate(worst, "arsenal");
+    worst.season += 2; // 3년차 — 감소가 가장 깊은 해
+    ensureMonthlyPosted(worst);
+    expect(monthIncome(worst, "arsenal", "스폰서십")).toBeLessThan(full * 0.7);
+
+    const later = createTestGame(42, "arsenal");
+    relegate(later, "arsenal");
+    later.season += 3; // 4년차
+    ensureMonthlyPosted(later);
+    expect(monthIncome(later, "arsenal", "스폰서십")).toBe(full);
   });
 });
