@@ -12,6 +12,7 @@ import {
   anchorOf,
   clampToBoard,
   isNaturalAt,
+  isUnfamiliarPosition,
   positionAtPoint,
   footLabel,
   physiqueLabel,
@@ -278,17 +279,19 @@ function FormArrow({ p }: { p: Pick<SquadRow, "form" | "formLabel" | "formAngle"
  * 폼 숫자 하나로는 "오르는 중"과 "식는 중"을 구분할 수 없다. 왼쪽이 오래된
  * 경기고 오른쪽이 최근이라, 눈으로 훑으면 방향이 읽힌다.
  */
-function RatingTrend({ ratings }: { ratings: number[] }) {
+function RatingTrend({ ratings }: { ratings: SquadRow["recentRatings"] }) {
   if (ratings.length === 0) return <span className="rt-empty">기록 없음</span>;
   return (
     <span className="rating-trend" data-testid="rating-trend">
+      {/* 점 색의 경계는 코어가 갖는다(`ratingTone`) — 화면이 다시 자르면 기준선을
+          옮길 때 색만 옛 자리에 남는다 */}
       {ratings.map((r, i) => (
         <span
-          className={`rt-dot ${r >= 7.5 ? "hot" : r >= 6.5 ? "good" : r >= 5.5 ? "flat" : "cold"}`}
+          className={`rt-dot ${r.tone}`}
           key={i}
-          title={`${i + 1}번째 전 경기 평점 ${r.toFixed(1)}`}
+          title={`${i + 1}번째 전 경기 평점 ${r.value.toFixed(1)}`}
         >
-          {r.toFixed(1)}
+          {r.value.toFixed(1)}
         </span>
       ))}
     </span>
@@ -1278,6 +1281,11 @@ export function SquadView({
    * 선발 평균 — **각자 그 자리에서 내는 값**의 평균이다 (칩에 쓰인 숫자 그대로).
    * `overall`로 재면 센터백을 윙에 세워도 평균이 꿈쩍하지 않아, 판을 잘못 짠 것이
    * 머리 요약에서만 멀쩡해 보인다.
+   *
+   * ⚠️ **화면이 값을 직접 내는 그 자리다** (overview §5). 전술판은 칩을 옮기는 3초
+   * 동안 저장 전 배치를 그리므로 물어볼 뷰가 없다 — 대신 값을 내는 것은 서버와 같은
+   * 함수(`slotOverallOf` → `observedFit`) 하나다. 경기 화면의 선발 평균은 저장된
+   * 배치라 뷰가 낸다(`match.xiRating`).
    */
   const xiRating =
     xi.length > 0
@@ -1291,7 +1299,8 @@ export function SquadView({
       : 0;
   const misfits = board.points
     .map((point, i) => ({ p: byId.get(board.occupants[i] ?? ""), code: positionAtPoint(point) }))
-    .filter((x) => x.p && fitAt(x.p, x.code).value < 50);
+    // 낯선 자리의 경계는 도메인이 갖는다 — 여기 숫자를 두면 판정이 두 곳이 된다
+    .filter((x) => x.p && isUnfamiliarPosition(fitAt(x.p, x.code).value));
 
   const selectedPlayer =
     selection?.kind === "slot"

@@ -181,13 +181,7 @@ function NextFixture({ next }: { next: OfficeViews["competitions"]["nextMatch"] 
   );
 }
 
-export function CompetitionsView({
-  competitions,
-}: {
-  competitions: OfficeViews["competitions"];
-  /** 화면이 더 쓰지 않는다 — 우리 팀 행은 뷰의 `ours`가 짚는다 (호출부와 함께 지울 자리) */
-  teamName: string;
-}) {
+export function CompetitionsView({ competitions }: { competitions: OfficeViews["competitions"] }) {
   const list = competitions.list;
   const [activeId, setActiveId] = useState(list[0]?.id ?? "");
   const active = list.find((c) => c.id === activeId) ?? list[0];

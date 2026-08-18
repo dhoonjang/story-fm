@@ -803,9 +803,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
       }
     />
   );
-  const competitionsView = (
-    <CompetitionsView competitions={game.views.competitions} teamName={game.teamName} />
-  );
+  const competitionsView = <CompetitionsView competitions={game.views.competitions} />;
 
   const chatPane = (
     <section className={`chat-pane${inMatch ? " broadcasting" : ""}`}>

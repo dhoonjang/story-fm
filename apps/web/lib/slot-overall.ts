@@ -1,13 +1,14 @@
-import { roleFit, type AxisValues } from "@story-fm/domain";
-import type { OfficeViews } from "@story-fm/engine";
+import { observedFit, type OfficeViews } from "@story-fm/engine";
 
 type SquadRow = OfficeViews["squad"]["players"][number];
 
 /**
  * **이 자리·역할에서 내는 전력 — 명단·전술판·선발 평균이 같은 함수를 쓴다.**
  *
- * 규칙은 하나다: **관측된 축에서 `roleFit`을 내고 관측 오프셋을 얹는다.**
- * 서버도 같은 함수 꼴(`observedFit`)로 계산하므로 어디서 재도 같은 값이 나온다.
+ * 규칙은 **코어의 `observedFit` 하나**다(관측된 축에서 `roleFit`을 내고 관측 오프셋을
+ * 얹는다). 여기서 그 식을 다시 쓰면 코어가 눈금을 옮길 때 화면만 옛 자로 재게 된다 —
+ * 화면이 값을 직접 내는 자리는 **아직 저장되지 않은 배치**뿐이고, 그때도 부르는 것은
+ * 같은 함수여야 한다 (overview §5).
  *
  * ⚠️ 예전엔 서버가 **값마다 따로** 안개를 씌워 내려보냈다(`overall`에 한 번,
  * 자리별 전력에 또 한 번). 그러면 화면은 참값이 없어 같은 규칙을 재현할 수 없고,
@@ -27,8 +28,6 @@ export function slotOverallOf(
   role: string | undefined,
 ): number | null {
   if (!code) return null;
-  const axes = p as unknown as AxisValues;
-  return clampRating(roleFit(axes, code, role) + p.observation.overallOffset);
+  // 스쿼드 행은 15축을 그대로 들고 있다 (`SquadViewRow = SquadViewRowMeta & AxisValues`)
+  return observedFit(p, p.observation, code, role);
 }
-
-const clampRating = (value: number) => Math.max(1, Math.min(99, Math.round(value)));
