@@ -185,11 +185,9 @@ function attachShards(raw: unknown, id: string): unknown {
 }
 
 /**
- * 세이브 스키마 버전.
- * 2 = v6 정규화(카탈로그/게임 분리, 일정 축, 기록 테이블)
- * 3 = 다중 리그 (MATCH.competitionId, 리그별 순위표)
- * 6 = 능력치 15축 + 포지션 가중치 (player.md §1 — 6축 세이브와 비호환)
- * 구버전 세이브는 로드를 거부한다 — 부분 마이그레이션이 조용히 깨진 상태를
+ * 세이브 스키마 버전 (→ [docs/data/game-state.md](../../../../docs/data/game-state.md) §6).
+ *
+ * 버전이 다른 세이브는 로드를 거부한다 — 부분 마이그레이션이 조용히 깨진 상태를
  * 만드는 것보다 낫다. 다만 감추지는 않는다: 목록에는 실패 사유와 함께 선다.
  */
 export const SAVE_VERSION = 6;
@@ -244,15 +242,14 @@ function migrate(save: Record<string, unknown>, state: GameState): void {
   migrateConditions(state);
   migrateMatchStats(state);
   // 좌우 미러 자리에 얹혀 있던 주발 보정을 벗긴다 — 저장은 원값, 주발은 조회 때
-  // (player.md §8). 조회가 한 번 더 얹고 있어 폭이 두 배로 걸려 있었다.
+  // (player.md §8).
   migrateMirrorProficiency(state);
   /**
    * **종합은 저장된 값이 아니라 15축의 파생 캐시다** — 로드할 때 다시 계산한다.
    *
-   * 되펴기를 걷어내며 눈금이 통째로 움직였는데(player.md §4), 세이브에 든
-   * `overall`은 저장된 그 순간의 공식으로 찍힌 값이라 옛 눈금을 그대로 들고
-   * 들어온다. 그러면 한 세이브 안에서 옛 선수는 93, 새로 들어온 선수는 86이 되어
-   * 같은 표에 두 눈금이 선다.
+   * 세이브에 든 `overall`은 저장된 그 순간의 공식으로 찍힌 값이라, 공식이
+   * 움직이면 옛 눈금을 그대로 들고 들어온다 (player.md §4). 그러면 한 세이브
+   * 안에서 옛 선수와 새 선수가 서로 다른 눈금으로 같은 표에 선다.
    *
    * 축에서 파생하는 값이므로 멱등이고, 없던 필드를 채우는 것도 아니라 세이브
    * 버전을 올리지 않는다. 이후 공식이 또 움직여도 여기가 따라온다.

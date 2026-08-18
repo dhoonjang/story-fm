@@ -20,14 +20,6 @@ import {
   type IconComponent,
 } from "@/components/icons";
 
-/**
- * **바뀐 장부를 알리는 말풍선** — 아이콘 줄 아래 한 장.
- *
- * 아이콘마다 따로 띄우지 않는다. 한 스킬이 두 장부를 건드리는 일이 흔해서
- * (계약 확정 = 선수 + 돈) 아이콘별로 세우면 말풍선끼리 겹친다. 대신 꼬리가
- * **첫 장부의 아이콘**을 가리켜 어디서 나온 말인지 잇는다.
- */
-
 const PANEL_ICON: Record<PanelKey, IconComponent> = {
   스쿼드: IconSquad,
   달력: IconCalendar,
@@ -213,6 +205,13 @@ export function useRailHints({
   };
 }
 
+/**
+ * **바뀐 장부를 알리는 말풍선** — 아이콘 줄 아래 한 장.
+ *
+ * ⚠️ 아이콘마다 따로 띄우지 않는다. 한 스킬이 두 장부를 건드리는 일이 흔해서
+ * (계약 확정 = 선수 + 돈) 아이콘별로 세우면 말풍선끼리 겹친다. 대신 꼬리가
+ * **첫 장부의 아이콘**을 가리켜 어디서 나온 말인지 잇는다.
+ */
 export function RailHints({
   hints,
   pinned = false,

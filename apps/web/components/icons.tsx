@@ -139,11 +139,6 @@ export function IconCareer({ size = 18 }: IconProps) {
   );
 }
 
-/** 닫기 */
-/**
- * 보내기 — **위로 향한 화살표.** 종이비행기는 24 그리드에서 획이 서로 만나
- * 작은 크기(16~18px)에서 뭉개진다. 화살표는 어느 크기에서도 방향이 남는다.
- */
 /**
  * 보내기 — **선 아이콘.** 채운 화살표는 같은 초록 버튼 위에서 덩어리가 너무 커
  * 버튼이 아니라 화살표가 먼저 보였다. 획으로 그리면 색면과 기호가 층을 나눈다.
@@ -224,14 +219,6 @@ export function IconMatch({ size = 16 }: IconProps) {
         clipRule="evenodd"
         d="M12 2.8a9.2 9.2 0 1 1 0 18.4 9.2 9.2 0 0 1 0-18.4Zm0 4.9-4.05 2.94 1.55 4.76h5l1.55-4.76L12 7.7Z"
       />
-    </svg>
-  );
-}
-
-export function IconClose({ size = 16 }: IconProps) {
-  return (
-    <svg {...base(size)}>
-      <path d="M6 6l12 12M18 6L6 18" />
     </svg>
   );
 }
