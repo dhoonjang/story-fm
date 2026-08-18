@@ -89,6 +89,24 @@ export const ASSIST_RATE = defineHarness({
   ],
 });
 
+export const SEGMENT_SHOTS = defineHarness({
+  id: "segment-shots",
+  what: "구간 시뮬의 경기당 슈팅이 패킷 기대 슈팅과 같은 눈금인가 — 끊는 횟수와 무관하게",
+  doc: "docs/simulation/match.md §1.4",
+  cost: "구간 시뮬 1,600경기 · 40초쯤",
+  // prettier-ignore
+  bands: [
+    { metric: "패킷 기대 슈팅", role: "measure", why: "양 팀 합 — 실측이 모여야 할 자리" },
+    { metric: "경기당 슈팅", role: "measure", why: "정지점까지 굴린 보통의 진행" },
+    { metric: "패킷 대비 배율", role: "guard", min: 0.985, max: 1.015, unit: "ratio", why: "발생률이 패킷의 선수×경로 기대 슈팅 `/90`이라 90분을 한 번 굴리면 기대치로 모인다 — 벗어나면 밸런스 손잡이가 서 있는 눈금이 감독의 개입 횟수를 탄다" },
+    { metric: "5분씩 끊었을 때 배율", role: "guard", min: 0.985, max: 1.015, unit: "ratio", why: "구간이 서너 배로 쪼개져도 총량은 같아야 한다 — 정지점마다 시계가 되감기면 여기가 먼저 부푼다" },
+    { metric: "경기당 구간 수", role: "measure", unit: "count", why: "되감김의 크기는 이 횟수에 비례한다" },
+    { metric: "경기당 득점", role: "measure", why: "슈팅 총량이 내려가면 함께 내려간다" },
+    { metric: "경기당 기회 xG", role: "measure", why: "득점과 같은 눈금이어야 한다" },
+    { metric: "경기당 카드", role: "measure", why: "카드도 같은 시계를 탄다 — 슈팅만 맞고 카드가 어긋나면 고친 곳이 시계가 아니다" },
+  ],
+});
+
 export const INJURY_RATE = defineHarness({
   id: "injury-rate",
   what: "경기당 부상 건수 · 성향이 빈도에 닿는 폭",
@@ -277,6 +295,7 @@ export const HARNESSES: readonly Harness[] = [
   WORLD_SEASON,
   AI_ROTATION,
   ASSIST_RATE,
+  SEGMENT_SHOTS,
   INJURY_RATE,
   FINANCE_TIER1,
   FINANCE_LEAGUES,
