@@ -58,14 +58,16 @@ interface LastMatch {
   days: number;
 }
 
-/**
- * 선수별 마지막 평점 경기 — **원장을 선수마다가 아니라 한 번만 훑는다.**
- *
- * 명단 전체의 심경을 한 번에 지을 때(`buildMoodBrief`) 45명이 각자 2,000경기를
- * 훑던 자리다. 고르는 규칙은 `lastRatedMatch`와 같아야 한다.
- */
+/** 선수 → 그가 마지막으로 평점을 받은 경기 */
 export type LastMatchIndex = ReadonlyMap<string, MatchRecord>;
 
+/**
+ * 그 색인을 짓는다 — **원장을 선수마다가 아니라 한 번만 훑는다.**
+ *
+ * 명단 전체의 심경을 한 번에 지을 때(`buildMoodBrief`) 45명이 각자 2,000경기를
+ * 훑던 자리다. 고르는 규칙은 `lastRatedMatch`와 같아야 한다 — 갈리면 여운
+ * 문장이 조용히 어긋난다.
+ */
 export function lastMatchIndexOf(state: GameState): LastMatchIndex {
   const best = new Map<string, MatchRecord>();
   for (const match of state.matches) {
