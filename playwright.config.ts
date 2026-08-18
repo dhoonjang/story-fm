@@ -9,8 +9,8 @@ import { defineConfig } from "@playwright/test";
  * mock 기대가 깨지는 사고를 막는다.
  *
  * `E2E_SLOT=1`~`9`는 한 워크트리에서 e2e를 동시에 돌리기 위한 슬롯이다. 포트·빌드
- * 산출물·세이브 디렉터리가 슬롯 하나에서 함께 갈라진다 — 셋 중 하나만 나누면
- * 동시 실행이 서로를 밟으므로 개별 변수로는 열지 않는다.
+ * 산출물·세이브 디렉터리·실패 아티팩트가 슬롯 하나에서 함께 갈라진다 — 하나만
+ * 나누면 동시 실행이 서로를 밟으므로 개별 변수로는 열지 않는다.
  */
 const BASE_PORT = 3399;
 // 슬롯을 늘리면 apps/web/tsconfig.json의 include에도 그 distDir을 함께 적는다 —
@@ -31,6 +31,9 @@ const slot = readSlot();
 const suffix = slot === 0 ? "" : `-${slot}`;
 const port = BASE_PORT + slot;
 const url = `http://localhost:${port}`;
+// 리포트·트레이스도 슬롯을 따라 갈린다 — 두 슬롯이 한 디렉터리에 쓰면 나중 실행이
+// 앞 실행의 실패 증거를 지운다. ci.yml이 올리는 것은 슬롯 0의 이름이다.
+const reportDir = `playwright-report${suffix}`;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -66,8 +69,23 @@ export default defineConfig({
   // 관측). Playwright 기본값 5초는 이 환경을 잰 값이 아니다 — 기다림만 늘리고
   // 무엇을 확인하는지는 그대로 둔다.
   expect: { timeout: 15_000 },
+  /**
+   * **빨간 e2e는 아티팩트로 읽는다.** 러너 로그에 남는 것은 실패한 단언 한 줄뿐이라
+   * 그 순간 화면이 무엇이었는지가 없다 — html 리포트·트레이스·스크린샷이 그 자리를
+   * 메운다 (`.github/workflows/ci.yml`의 e2e 잡이 실패할 때 업로드한다).
+   *
+   * CI에서만 켠다. 로컬은 실패한 자리에서 곧바로 다시 돌리면 되고, 기본 리포터가
+   * 리포트 서버를 띄워 터미널을 붙잡는 쪽이 성가시다 — `open: "never"`가 그것도 막는다.
+   */
+  reporter: process.env.CI
+    ? [["html", { open: "never", outputFolder: reportDir }], ["dot"]]
+    : "list",
+  outputDir: `test-results${suffix}`,
   use: {
     baseURL: url,
+    // 실패한 시도만 남긴다 — 초록 실행에서는 지워지므로 러너 디스크를 먹지 않는다
+    trace: process.env.CI ? "retain-on-failure" : "off",
+    screenshot: process.env.CI ? "only-on-failure" : "off",
   },
   /**
    * CI는 **빌드된 앱**을 본다. 로컬은 dev 서버 그대로다.
