@@ -193,13 +193,14 @@ FM의 **듀티**(수비/지원/공격)는 두지 않는다: 역할과 곱하면 
   (→ [match.md](../simulation/match.md) §2).
 - **되찾기 순서는 하나다** — ① 지금 걸린 역할이 새 자리 목록에 있으면 그대로 → ②
   그 자리의 기억 → ③ 그 자리의 기본 역할. 코어가 배치를 다시 쓸 때(`set_lineup`의
-  승계 · `movePlayerSlot`) 이 순서로 `roleId`를 적는다.
-- **화면도 같은 순서로 읽는다.** 전술판은 감독이 만진 자리를 서버보다 먼저 아는
-  화면이라, 기억을 읽지 않으면 벤치에서 올린 선수에게 기본 역할을 걸어 두었다가
-  자동 저장 응답이 와서야 기억한 역할로 튄다 — 감독이 누른 적 없는 변경이 눈앞에서
-  일어난다. 그래서 **뷰가 그 선수의 (자리 → 역할) 기억을 행에 함께 싣고**, 화면은
-  위 세 단을 **그 순서 그대로만** 밟는다. 순서를 달리 쓰면 장부에 없는 역할을
-  화면만 말하게 된다(§3.1의 그 지점이다).
+  승계 · `movePlayerSlot`) 이 순서로 `roleId`를 적는다. 코어는 ①②까지만 적는다 —
+  ③은 스스로 닿는 값이라 배치에 쓰면 기본 역할이 감독의 결정으로 기억에 남는다.
+- **화면도 같은 순서로 읽는다 — 같은 함수로.** 전술판은 감독이 만진 자리를 서버보다
+  먼저 아는 화면이라, 기억을 읽지 않으면 벤치에서 올린 선수에게 기본 역할을 걸어
+  두었다가 자동 저장 응답이 와서야 기억한 역할로 튄다 — 감독이 누른 적 없는 변경이
+  눈앞에서 일어난다. 그래서 **뷰가 그 선수의 (자리 → 역할) 기억을 행에 함께 싣고**,
+  화면은 도메인의 `roleAtSlot`을 부른다. 코어의 승계가 부르는 `inheritedRole`이 그
+  안에 있다 — 순서가 한 자리에만 있으므로 두 쪽이 갈릴 자리가 없다(§3.1의 그 지점이다).
 - **화면이 되찾은 역할은 저장에 싣지 않는다.** 코어가 같은 순서로 스스로 닿는
   값이라 보낼 이유가 없다 — 저장에 실리는 역할은 **감독이 고른 것**뿐이다.
 - **기억은 기본값을 갈아끼우는 것이지 잠그는 게 아니다.** 감독이 새로 고르면 그게
@@ -875,6 +876,7 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
 | 보고서 카드와 도착 줄 (`scoutReportCard`·`scoutReportLine`)                                                                     | `packages/engine/src/views/views.ts`                                                    |
 | 정착 (`settlingOf`·`SETTLING_EVENT`)                                                                                            | `packages/engine/src/squad/settling.ts`                                                 |
 | 역할 기억 (`recallRole`·`rememberRole`)                                                                                         | `packages/engine/src/skills/role-memory.ts`                                             |
+| 되찾기 3단 (`inheritedRole`·`roleAtSlot`) — 코어와 전술판이 같이 부른다                                                         | `packages/domain/src/player.ts`                                                         |
 | 적응도 선반·역할 대가 정산 (`shelveFamiliarity`·`settleRoleCost`)                                                               | `packages/engine/src/skills/familiarity-memory.ts`                                      |
 | 결산 반영 (`applyAttributeStep`·`positionGain`)                                                                                 | `packages/engine/src/squad/training-report.ts` · `packages/engine/src/match/ratings.ts` |
 | 심경 (`describeMood`·`MOOD_BATCH`)                                                                                              | `packages/engine/src/squad/mood.ts` ([people.md](people.md))                            |
