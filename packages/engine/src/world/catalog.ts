@@ -26,7 +26,6 @@ import { MARKET_LEAGUE_SQUADS } from "../data/market-leagues";
 import {
   teamCatalog,
   type TeamCatalogEntry,
-  TIER_BASE,
   countryOfTeam,
   defaultXiSlugs,
   isTopFlight,
@@ -441,6 +440,44 @@ const GROUP_TARGET: Record<PositionGroup, number> = { GK: 3, DF: 9, MF: 9, FW: 5
 const TEMPLATE_GROUPS: PositionGroup[] = FALLBACK_TEMPLATE.map((p) => positionGroupOf(p) ?? "MF");
 
 /**
+ * 합성 선수가 기준선 위로 올라갈 수 있는 최대폭 — `strong()`이 주는 상한이다.
+ * 보충 선수의 기준선을 정하는 자리(`topUpBase`)가 같은 값을 읽는다: 그만큼 뺀
+ * 자리에서 출발해야 어떤 굴림도 그 팀 최고 선수를 넘지 못한다.
+ */
+const SYNTHETIC_UPSIDE = 8;
+
+/**
+ * 보충 선수가 서는 분위 — 스쿼드 **하위 4분의 1**.
+ *
+ * 보충은 주전이 아니라 로테이션 자원이다. 중앙값에 세우면 실선수 절반보다 나은
+ * 선수가 공짜로 생기고, 최고에 맞추면 이 이슈가 났던 자리로 돌아간다.
+ */
+const TOP_UP_QUANTILE = 0.25;
+
+/**
+ * 보충 선수의 능력치 기준선 — **그 클럽 실선수의 분포**에서 파생한다.
+ *
+ * tier 상수(`TIER_BASE`)를 쓰면 그 값이 리그 상위권의 눈금이라, 실선수 시드가
+ * 얇은 클럽일수록 보충 선수가 스쿼드 최고 선수를 넘어섰다 — 세계 상위 명단에
+ * 가명이 서고, 그 가명을 축으로 선발·전력 패킷·이적 시세가 돌았다.
+ *
+ * 두 항의 작은 쪽을 쓴다.
+ * - **하위 분위**(`TOP_UP_QUANTILE`) — 보충이 서는 자리.
+ * - **최고 − `SYNTHETIC_UPSIDE`** — 상한. 실선수가 몇 명뿐이라 분위가 최고 옆에
+ *   붙는 클럽(시장 전용 리그의 레전드 스쿼드)에서 이 항이 걸린다.
+ *
+ * 실선수가 하나도 없는 클럽(2부·시드 없는 1부)은 비교 대상이 없으므로 `fallback`
+ * — 그때만 tier에서 온 `strengthBase`가 기준선이다.
+ */
+function topUpBase(real: readonly CatalogDraft[], fallback: number): number {
+  if (real.length === 0) return fallback;
+  const sorted = real.map((e) => bestOverall(e, e.positions)).sort((a, b) => a - b);
+  const quantile = sorted[Math.floor((sorted.length - 1) * TOP_UP_QUANTILE)]!;
+  const ceiling = sorted[sorted.length - 1]! - SYNTHETIC_UPSIDE;
+  return Math.min(quantile, ceiling);
+}
+
+/**
  * 하한 보충 — 실선수 시드가 MIN_SQUAD에 못 미칠 때 합성 선수를 붙인다.
  *
  * 순서가 중요하다. 실제 1군이 얇은 클럽(예: 브레스트 21명)에 아카데미만 붙이면
@@ -449,12 +486,12 @@ const TEMPLATE_GROUPS: PositionGroup[] = FALLBACK_TEMPLATE.map((p) => positionGr
  */
 function topUpEntries(
   teamId: string,
-  tier: 1 | 2 | 3 | 4,
   seeds: readonly RealPlayerSeed[],
+  base: number,
 ): CatalogDraft[] {
   const short = MIN_SQUAD - seeds.length;
   if (short <= 0) return [];
-  const all = fallbackEntries(teamId, tier);
+  const all = fallbackEntries(teamId, base);
   const have: Record<string, number> = { GK: 0, DF: 0, MF: 0, FW: 0 };
   for (const s of seeds) have[s.positionGroup] = (have[s.positionGroup] ?? 0) + 1;
 
@@ -477,12 +514,15 @@ function topUpEntries(
   return out;
 }
 
+/**
+ * 절차 생성 스쿼드 — `base`가 그 스쿼드의 능력치 기준선이다. 어디서 온 값인지는
+ * 부르는 쪽이 정한다 (실선수가 있으면 `topUpBase`, 없으면 `strengthBase`).
+ */
 function fallbackEntries(
   teamId: string,
-  tier: 1 | 2 | 3 | 4,
-  options: { template?: string[]; base?: number; academyFrom?: number } = {},
+  squadBase: number,
+  options: { template?: string[]; academyFrom?: number } = {},
 ): CatalogDraft[] {
-  const tierBase = options.base ?? TIER_BASE[tier];
   const template = options.template ?? FALLBACK_TEMPLATE;
   const academyFrom = options.academyFrom ?? ACADEMY_FROM;
   return template.map((position, i) => {
@@ -493,9 +533,9 @@ function fallbackEntries(
     const nameEn = `${first.en} ${last.en}`;
     const nameKo = `${first.ko} ${last.ko}`;
     // 아카데미는 1군보다 한참 낮게 출발한다 (잠재력은 아래에서 크게 잡는다)
-    const base = i >= academyFrom ? tierBase - randInt(rng, 12, 20) : tierBase;
+    const base = i >= academyFrom ? squadBase - randInt(rng, 12, 20) : squadBase;
     const v = (d = 6) => clamp99(base + randInt(rng, -d, d));
-    const strong = () => clamp99(base + randInt(rng, 0, 8));
+    const strong = () => clamp99(base + randInt(rng, 0, SYNTHETIC_UPSIDE));
     const weak = () => clamp99(base + randInt(rng, -18, -8));
     // 아카데미 자원은 어리고, 능력치는 낮지만 잠재력 폭이 크다
     const academy = i >= academyFrom;
@@ -614,33 +654,34 @@ function teamDrafts(team: TeamCatalogEntry): CatalogDraft[] {
   // 2부와 달리 전력 감점이 없다 (약한 리그가 아니라 경기를 안 하는 리그다)
   if (isMarketOnlyLeague(team.leagueId)) {
     const seeds = ALL_SQUADS[team.id] ?? [];
+    const real = seeds.map((seed) => entryFromSeed(team.id, seed));
     return [
-      ...seeds.map((seed) => entryFromSeed(team.id, seed)),
-      ...fallbackEntries(team.id, team.tier, {
+      ...real,
+      // 레전드 몇 명이 스쿼드의 전부다 — 나머지는 그 레전드들 아래에 붙인다
+      ...fallbackEntries(team.id, topUpBase(real, strengthBase(team)), {
         template: MARKET_LEAGUE_TEMPLATE,
         academyFrom: MARKET_LEAGUE_TEMPLATE.length,
-        base: strengthBase(team),
       }),
     ];
   }
   // 2부 클럽 — 컵 전용이라 작은 스쿼드에 낮은 기준선 (`strengthBase`)
   if (!isTopFlight(team.id)) {
-    return fallbackEntries(team.id, team.tier, {
+    return fallbackEntries(team.id, strengthBase(team), {
       template: SECOND_DIVISION_TEMPLATE,
       academyFrom: SECOND_DIVISION_ACADEMY_FROM,
-      base: strengthBase(team),
     });
   }
   const seeds = ALL_SQUADS[team.id];
   if (seeds && seeds.length > 0) {
+    const real = seeds.map((s) => entryFromSeed(team.id, s));
     return [
-      ...seeds.map((s) => entryFromSeed(team.id, s)),
+      ...real,
       // 실선수 1군이 하한에 못 미치면 합성 선수로 보충한다.
       // 유소년은 실명을 쓰지 않는 결정(people.md §2)과도 맞는 방향이다.
-      ...topUpEntries(team.id, team.tier, seeds),
+      ...topUpEntries(team.id, seeds, topUpBase(real, strengthBase(team))),
     ];
   }
-  return fallbackEntries(team.id, team.tier);
+  return fallbackEntries(team.id, strengthBase(team));
 }
 
 /**
