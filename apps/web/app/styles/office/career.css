@@ -193,3 +193,8 @@
   color: var(--muted);
   font-size: var(--fs-sm);
 }
+/* 보드 평가 — 시즌 기록 표에서 유일하게 문장인 칸이라 가라앉혀 둔다 */
+.career-verdict {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}

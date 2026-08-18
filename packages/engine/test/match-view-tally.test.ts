@@ -92,8 +92,13 @@ describe("경기 중 기록", () => {
   });
 });
 
-describe("경기 중 체력 — 두 탭이 한 축을 본다", () => {
-  it("전술판 체력이 소모한 만큼 내려가고 판세의 추정 구간 안에 든다", () => {
+/**
+ * 팀 탭이 참값을 쓰던 시절엔 감독이 두 탭을 나란히 놓는 것만으로 안개가 걷혔다 —
+ * 판세의 구간과 명단의 정확한 숫자를 견주면 오차 폭까지 역산된다. 두 화면은 같은
+ * 문(`conditionShown`)을 지나야 한다 (match.md §8).
+ */
+describe("경기 중 체력 — 두 탭이 한 값을 본다", () => {
+  it("판세와 명단이 같은 읽은 값이고, 참값은 그 구간 안에 있다", () => {
     const state = intoMatch(11);
     const views = buildOfficeViews(state);
     const match = views.match;
@@ -116,12 +121,27 @@ describe("경기 중 체력 — 두 탭이 한 축을 본다", () => {
     for (const p of ours) {
       const row = rows.get(p.id);
       expect(row, `${p.name}이 명단에 없다`).toBeDefined();
-      const stored = playerById(state, p.id)!.state.condition;
-      // 저장값이 아니라 지금 값 — 판세와 같은 축(matchFatigue)에서 뺀다
-      expect(row!.condition, `${p.name} 체력`).toBe(clampCondition(stored - (worn[p.id] ?? 0)));
-      // 판세는 안개를 지나지만 참값을 늘 구간 안에 품는다 (readCondition)
-      expect(row!.condition, `${p.name} 하한`).toBeGreaterThanOrEqual(p.condition.low);
-      expect(row!.condition, `${p.name} 상한`).toBeLessThanOrEqual(p.condition.high);
+      // 두 탭이 한 값이다 — 명단이 참값을 쓰면 판세의 구간과 견줘 안개가 걷힌다
+      expect(row!.condition, `${p.name} 체력`).toEqual(p.condition);
+      // 우리 선수여도 뛰는 동안은 흐리다. 다만 안개는 흐릴 뿐 거짓말하지 않는다 —
+      // 저장값에서 이 경기가 가져간 만큼을 뺀 참값은 늘 구간 안이다 (readCondition)
+      const truth = clampCondition(playerById(state, p.id)!.state.condition - (worn[p.id] ?? 0));
+      expect(row!.condition.margin, `${p.name} 폭`).toBeGreaterThan(0);
+      expect(row!.condition.low, `${p.name} 하한`).toBeLessThanOrEqual(truth);
+      expect(row!.condition.high, `${p.name} 상한`).toBeGreaterThanOrEqual(truth);
+    }
+
+    // 출전 명단 밖은 아침에 잰 값 그대로다 — 읽을 것이 없으므로 폭도 없다
+    const side =
+      state.pendingMatch!.packet.home.teamId === state.userTeamId
+        ? state.pendingMatch!.packet.home
+        : state.pendingMatch!.packet.away;
+    const named = new Set([...side.lineup, ...side.bench].map((e) => e.id));
+    const outside = views.squad.players.filter((r) => !named.has(r.id));
+    expect(outside.length, "명단 밖 선수가 없다").toBeGreaterThan(0);
+    for (const r of outside) {
+      expect(r.condition.margin, `${r.name} 폭`).toBe(0);
+      expect(r.condition.low, `${r.name} 구간`).toBe(r.condition.high);
     }
   });
 });
