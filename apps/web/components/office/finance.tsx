@@ -188,9 +188,10 @@ export function FinanceView({ finance }: { finance: OfficeViews["finance"] }) {
             <div className="sub">3시즌 누적 {signed(finance.psr.rolling3Season)}</div>
           </div>
         )}
+        {/* 보드가 지금 지고 있는 기대 — 지난 시즌의 평가는 커리어 화면이 갖는다 */}
         <div className="fin-stat">
-          <div className="label">보드 평가</div>
-          <div className="value words">{finance.boardExpectation}</div>
+          <div className="label">보드 기대</div>
+          <div className="value words">{finance.boardExpectation.label}</div>
         </div>
         <div className="fin-stat">
           <div className="label">홈 구장</div>

@@ -226,6 +226,4 @@ export interface StrengthPacket {
     /** 경기 강도 0.8~1.3 — 압박·템포에서 나온다. 피로·파울·부상률을 함께 움직인다 */
     intensity: { home: number; away: number };
   };
-  /** 한국어 총평 한 단락 */
-  summary: string;
 }

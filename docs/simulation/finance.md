@@ -196,7 +196,7 @@ FinanceReport = {
   wageRatio: number,    // (player_wages + staff_wages) / 매출
   seasonToDate: { income, expense, cashNet, pnlNet },
   psr: { rolling3Season: number, headroom: number } | null,
-  notes: string[],      // 코어가 결정적으로 붙이는 판단 재료
+  notes: string[],      // 코어가 결정적으로 붙이는 **사실 줄** — 조언은 없다 (§7.1)
   highlights: Array<{   // 그달의 큰 비정기 항목 — 날짜와 금액을 남긴다 (§8.2)
     date, kind, category, label, amount
   }>,
@@ -582,15 +582,16 @@ clubWageBudget(주) = 그 값 ÷ 52
    반쪽 달이 된다.)
 1. **지난달 마감** — 원장을 카테고리로 접어 `FinanceReport` 생성. 이때 큰 비정기
    항목은 **날짜째로 `highlights`에 옮겨 적는다** (§8.2 — 3번의 절단보다 먼저다)
-2. **notes 생성** — 코어가 결정적으로 붙인다 (급여 비중 경고, 적자 원인,
-   PSR 여유). GM은 이걸 재료로 **서술만** 한다 — 판단은 코어 몫
+2. **notes 생성** — 코어가 결정적으로 붙인다 (급여 비중 구간, 적자 원인,
+   PSR 여유, 부채·이자). **사실만 적는다** — "주급 구조를 손볼 때다" 같은 조언은
+   코어의 말이 아니다 (overview.md §1 철칙 4). GM이 그것을 읽고 서술한다
 3. **원장 절단** — 3개월 초과분 제거
 4. **다이제스트 + 서사 메모** — 채팅에 요약 한 줄
 
 ```
 📊 2026년 8월 재정 보고서 — 수입 £32.9M / 지출 £24.4M / 순 +£8.5M
-   급여 비중 78% — 위험 구간, 주급 구조를 손볼 때다
-   PSR 여유 £21.4M — 대형 영입 전에 매각이 필요하다
+   급여 비중 78% — 위험 구간
+   PSR 여유 £21.4M (한도의 25% 미만)
 ```
 
 **첫 줄이 전부인 달이 보통이다.** 둘째 줄부터는 `notes`이고 조건이 붙은 달에만 선다

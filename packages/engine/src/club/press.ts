@@ -13,6 +13,7 @@ import { pickPlayerAmong } from "../core/player-ref";
 import { makeRng, pick } from "../core/rng";
 import { clampForm, formLabel, moraleToForm } from "../squad/form";
 import { recentOutcomes } from "../squad/slump";
+import { issueReasonText } from "../squad/mood";
 import { isFriendly } from "../competition/friendly";
 import type { SkillResult } from "../skills";
 
@@ -77,6 +78,12 @@ function outcomeOf(state: GameState, m: MatchRecord): "win" | "draw" | "loss" | 
   const us = home ? m.result.homeGoals : m.result.awayGoals;
   const them = home ? m.result.awayGoals : m.result.homeGoals;
   return us === them ? "draw" : us > them ? "win" : "loss";
+}
+
+/** 불만 사유를 사실어로 — 옛 세이브가 사유 문장을 들고 있어 그것이 폴백이다 */
+function issueTextOf(state: GameState, playerId: string): string {
+  const issue = state.issues.find((i) => i.gamePlayerId === playerId);
+  return (issue ? issueReasonText(issue) : null) ?? "사유 불명";
 }
 
 /**
@@ -153,7 +160,7 @@ export function buildMatchPress(state: GameState, matchId: string): PressConfere
       kind: slumping ? "slump" : "unhappy",
       text: slumping
         ? `${target.name} 폼 ${formLabel(target.state.form)}`
-        : `${target.name} 라커룸 불만 (${state.issues.find((i) => i.gamePlayerId === target.id)?.note ?? "사유 불명"})`,
+        : `${target.name} 라커룸 불만 (${issueTextOf(state, target.id)})`,
       about: target.id,
       sharp: true,
     });

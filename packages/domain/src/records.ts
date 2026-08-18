@@ -290,10 +290,23 @@ export type DeferredScout = z.infer<typeof DeferredScoutSchema>;
  */
 export const SCOUT_DEFER_DAYS = SCOUT_DAYS;
 
+/**
+ * 라커룸 불만의 **사유 코드** — 문장이 아니다 (people.md §5).
+ *
+ * 문장으로 적으면 그것을 읽는 자리마다 `"${note}에 불만이 쌓여 있다"` 같은 짜깁기가
+ * 생긴다. 코드로 두면 화면 문구를 고치는 것만으로 옛 세이브까지 함께 고쳐진다.
+ */
+export const PLAYER_ISSUE_REASONS = ["minutes", "losing-run", "early-return"] as const;
+export type PlayerIssueReason = (typeof PLAYER_ISSUE_REASONS)[number];
+
 export const PlayerIssueSchema = z.object({
   gamePlayerId: z.string().min(1),
   kind: z.enum(["unhappy"]),
-  note: z.string(),
+  reason: z.enum(PLAYER_ISSUE_REASONS).optional(),
+  /** 사유에 딸린 수치 — `losing-run`이면 연패 수. 그 밖엔 없다 */
+  count: z.number().int().min(1).optional(),
+  /** 옛 세이브가 들고 있는 사유 문장 — 더는 쓰지 않는다 (`reason`의 폴백) */
+  note: z.string().optional(),
   since: DateString,
 });
 export type PlayerIssue = z.infer<typeof PlayerIssueSchema>;
@@ -576,7 +589,23 @@ export const SeasonRecordSchema = z.object({
   losses: z.number().int().min(0),
   goalsFor: z.number().int().min(0),
   goalsAgainst: z.number().int().min(0),
-  boardVerdict: z.string(),
+  /**
+   * 그 시즌에 대한 **보드 평가 카드** — 등급과 근거 수치 (career.md §6).
+   * 문장은 화면이 쓴다: 같은 4위가 어느 구단에서는 성공이고 어느 구단에서는
+   * 실패인 이유가 `target`에 그대로 남는다.
+   */
+  board: z
+    .object({
+      /** 최종 순위가 기대 순위 안에 들었는가 */
+      grade: z.enum(["met", "missed"]),
+      position: z.number().int().min(1),
+      target: z.number().int().min(1),
+      /** 그 시즌 기대의 이름 — `boardExpectationOfTier`의 label */
+      expectation: z.string().min(1),
+    })
+    .optional(),
+  /** 옛 세이브가 들고 있는 평가 문장 — 더는 쓰지 않는다 (`board`의 폴백) */
+  boardVerdict: z.string().optional(),
   /**
    * 그 시즌에 뛴 리그 — 승강이 생기면서 필요해졌다. 순위만으로는 챔피언십 1위와
    * 프리미어리그 1위를 가를 수 없어 성적 수당이 잘못 붙는다.

@@ -435,7 +435,8 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
       // 킥오프는 여기서 굴리지 않는다 — 공은 감독이 입장 확인 창을 누를 때 구른다
       const briefing = packet
         ? [
-            `${coach(state)} 전력 분석입니다 — ${packet.summary}`,
+            `${coach(state)} 전력 분석입니다 — ${packet.home.teamName}(홈) vs ${packet.away.teamName}, 기대 득점 ${packet.guide.expectedGoals.home} : ${packet.guide.expectedGoals.away}`,
+            ...packet.matchups.map((m) => `${coach(state)} · ${m.why}`),
             ...packet.keyPoints.map((k) => `${coach(state)} ★ ${k}`),
           ].join("\n")
         : "";

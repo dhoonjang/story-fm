@@ -10,6 +10,7 @@ import {
   physiqueLabel,
   rolesFor,
 } from "@story-fm/domain";
+import { moodSentence } from "@/lib/mood";
 import { FitGauge, FormArrow, RatingTrend, StatusBadges } from "./marks";
 import type { SquadRow } from "./types";
 
@@ -143,7 +144,7 @@ export function PlayerDetail({
     <div className="player-detail" data-testid="player-detail">
       {/* 지금 심경 한 줄 — 아래 숫자들이 왜 그런지 */}
       <p className="pd-mood" data-testid="player-mood">
-        {p.mood}
+        {moodSentence(p.mood)}
       </p>
 
       {/* 상태 요약 — 이름·나이·OVR은 바로 위 행과 겹치므로 표에 없는 것만, 박스로

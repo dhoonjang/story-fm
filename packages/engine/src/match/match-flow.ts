@@ -1324,7 +1324,7 @@ export function finalizeMatch(state: GameState): MatchDigest {
     digest.push(
       e.team === side
         ? `부상: ${player.name} — ${part}, 약 ${days}일 결장 예상`
-        : `상대 ${player.name}이(가) ${part} 부상으로 쓰러졌다`,
+        : `상대 ${player.name} ${part} 부상`,
     );
   }
   /**

@@ -1383,11 +1383,12 @@ export function setCaptain(state: GameState, playerId: string): SkillResult {
   }
   // 새 영입에게 완장을 채우는 건 라커룸 한가운데 세우는 일이다 (settling.ts)
   const settled = creditSettling(state, player.id, "captain") > 0;
+  const settling = settled ? settlingOf(state, player.id) : null;
   return {
     ok: true,
     message:
       `${player.name}을(를) 주장으로 지명했습니다` +
-      (settled ? " — 새 영입에게는 라커룸의 자리를 준 셈입니다" : ""),
+      (settling ? ` · 적응 ${Math.round(settling.progress * 100)}%` : ""),
   };
 }
 
@@ -1969,12 +1970,12 @@ function recallSquadEarly(state: GameState, date: string): string {
     state.issues.push({
       gamePlayerId: p.id,
       kind: "unhappy",
-      note: "휴가를 반납하고 소집됐다",
+      reason: "early-return",
       since: state.date,
     });
   }
 
-  pushNarrative(state, `휴가를 접고 ${date}로 소집을 앞당겼다 — 선수단이 술렁인다`, 4);
+  pushNarrative(state, `휴가 반납 소집 ${was}→${date} · 불만 ${angry.length}명`, 4);
   return (
     `소집을 ${early}일 앞당겼습니다 (${was} → ${date}) — 선수단 체력 −${drain}` +
     (angry.length > 0 ? `, ${angry.length}명이 불만을 품었습니다` : ", 큰 반발은 없었습니다")
@@ -2378,14 +2379,14 @@ export function scoutPlayer(state: GameState, ref: string): MarketSkillResult {
     playerName: player.name,
     counterpart: teamName(player.teamId),
     dueOn,
-    ...(done > 0 ? { note: `${done + 1}번째 — 잠재력 추정을 좁힌다` } : {}),
+    ...(done > 0 ? { note: `${done + 1}번째 파견` } : {}),
   };
   return {
     ok: true,
     payload: card,
     message:
       `${player.name}(${teamName(player.teamId)}) 스카우트 파견 — 보고 예정 ${dueOn}` +
-      (done > 0 ? ` (${done + 1}번째 · 잠재력 추정을 좁힌다)` : ""),
+      (done > 0 ? ` (${done + 1}번째 파견)` : ""),
   };
 }
 
