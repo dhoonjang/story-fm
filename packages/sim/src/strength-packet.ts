@@ -420,15 +420,6 @@ export const TACTIC_SWING = 0.18;
  */
 export const POSSESSION_MIN = 0.35;
 export const POSSESSION_MAX = 0.65;
-/**
- * 점유가 기대 득점에 실리는 세기.
- *
- * 중원 우위는 **공을 쥐는 것**으로 나타나고, 공을 쥔 팀이 더 자주 상대 문 앞에
- * 선다. 로그 민감도를 작게 두는 이유는 이 축이 이미 두 번 세어질 여지가 있어서다 —
- * 미드필더의 질은 XI 평균(질 축)에도, 존 가중 평균(판 축)에도 들어 있다.
- * 여기서 더하는 것은 **점유라는 별개의 사실**이 만드는 몫이다.
- */
-export const POSSESSION_LOG_SENSITIVITY = 0.5;
 
 /**
  * 이 팀이 공을 쥐는 비율 — 중원 우위가 정한다.
@@ -450,7 +441,7 @@ export const PLAYER_SHOT_BASE = 0.99;
 export const SHOT_DEPTH_LOG_WEIGHT = 2.3;
 /** 역할의 결정력 요구가 슈팅 책임으로 번역되는 세기. */
 export const ROLE_SHOT_LOG_WEIGHT = 0.45;
-/** 점유가 공격 노출에 닿는 세기. */
+/** 점유가 공격 노출에 닿는 세기 — `possessionShotShift`. */
 export const POSSESSION_SHOT_LOG_WEIGHT = 0.32;
 /** 후방→중원→공격 경로 우위의 슈팅량 영향. */
 export const ROUTE_SHOT_LOG_WEIGHT = 0.75;
@@ -827,6 +818,21 @@ function saturateEdge(edge: number, width: number, deficit = 1): number {
 }
 
 /**
+ * 점유가 슈팅 로그오즈에 얹는 몫 — **그 쪽 전원·전 경로에 똑같이 실린다.**
+ *
+ * 중원 우위는 **공을 쥐는 것**으로 나타나고, 공을 쥔 팀이 더 자주 상대 문 앞에
+ * 선다. 가중치를 작게 두는 이유는 이 축이 두 번 세어질 여지가 있어서다 —
+ * 미드필더의 질은 XI 평균(질 축)에도, 존 가중 평균(판 축)에도 들어 있다.
+ * 여기서 더하는 것은 **점유라는 별개의 사실**이 만드는 몫이다.
+ *
+ * 두 몫의 합이 1이라(`possessionShare`) 두 쪽의 편차는 정확히 서로의 반대다 —
+ * 점유는 슈팅을 만들어내는 것이 아니라 **옮긴다.**
+ */
+export function possessionShotShift(possession: number): number {
+  return POSSESSION_SHOT_LOG_WEIGHT * (logit(possession) - logit(0.5));
+}
+
+/**
  * 선수×좌/중/우 경로의 슈팅 강도를 직접 만든다.
  * 팀 총량은 입력이 아니며 이 배열을 마지막에 합한 파생값이다.
  */
@@ -851,7 +857,7 @@ function buildPlayerShotProfiles(
     const theirs = side === "home" ? cell.away : cell.home;
     return Math.log(Math.max(Number.EPSILON, ours) / Math.max(Number.EPSILON, theirs));
   };
-  const possessionLogit = logit(possession) - logit(0.5);
+  const possessionShift = possessionShotShift(possession);
   /**
    * **지역 플랜은 공격이 어디로 흐르는지를 바꾼다.**
    *
@@ -898,7 +904,7 @@ function buildPlayerShotProfiles(
           Math.log(routeShare) +
           SHOT_DEPTH_LOG_WEIGHT * (depth - SHOT_DEPTH_PIVOT) +
           ROLE_SHOT_LOG_WEIGHT * Math.log(roleShotWeight / ROLE_SHOT_WEIGHT_PIVOT) +
-          POSSESSION_SHOT_LOG_WEIGHT * possessionLogit +
+          possessionShift +
           ROUTE_SHOT_LOG_WEIGHT *
             saturateEdge(pathEdge, ROUTE_SHOT_SATURATION, ROUTE_SHOT_DEFICIT) +
           CREATION_SKILL_LOG_WEIGHT * Math.log(creation / CREATION_EFFECTIVE_PIVOT) +
