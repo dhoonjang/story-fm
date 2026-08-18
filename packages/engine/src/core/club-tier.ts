@@ -46,7 +46,7 @@ const EXPECTATION_BAND = { 1: 0.1, 2: 0.3, 3: 0.6 } as const;
  * 17위가 "잔류 충족"이 된다 — 그 리그의 17위는 강등이다.
  *
  * 체급을 읽는 자리 옆에 둔다 — 시즌 롤오버의 재산정도 이 문구로 감독에게 알리므로,
- * 시즌 모듈에 두면 `season.ts` ↔ `competition/club-tier.ts` 순환이 된다.
+ * 시즌 모듈에 두면 `season.ts` ↔ `competition/club-tier-recompute.ts` 순환이 된다.
  */
 export function boardExpectationOfTier(
   tier: 1 | 2 | 3 | 4,

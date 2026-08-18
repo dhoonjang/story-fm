@@ -54,6 +54,12 @@ export function positionGroupOf(position: string): PositionGroup | null {
   return POSITION_GROUPS[position.toUpperCase()] ?? null;
 }
 
+/**
+ * 고를 수 있는 포지션 코드 — 매핑이 원본이라 축이 늘면 같이 늘어난다.
+ * 스킬 입구의 거절 메시지와 어드민의 선택지가 같은 목록을 읽어야 한다.
+ */
+export const POSITION_CODES = Object.keys(POSITION_GROUPS);
+
 /** 라인의 앞뒤 순서 — 자리를 옮길 때 **몇 개의 라인을 넘는지** 세는 데 쓴다 */
 export const POSITION_LINE_ORDER: Record<PositionGroup, number> = { GK: 0, DF: 1, MF: 2, FW: 3 };
 

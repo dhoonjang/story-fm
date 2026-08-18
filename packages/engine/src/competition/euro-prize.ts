@@ -8,7 +8,7 @@ import {
   type CupCatalogEntry,
 } from "../data/cup-catalog";
 import type { GameState } from "../core/state";
-import { payOnce } from "../club/finance";
+import { formatMoney, payOnce } from "../club/finance";
 
 /**
  * 대항전 상금 — 참가비·리그 페이즈 성적·단계 진출·우승.
@@ -169,8 +169,4 @@ export function payWinnerPrize(
   ) {
     digest.push(`💰 ${label} ${formatMoney(cup.prize.winner)} 입금`);
   }
-}
-
-function formatMoney(amount: number): string {
-  return `£${(amount / 1_000_000).toFixed(1)}M`;
 }

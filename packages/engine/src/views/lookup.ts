@@ -19,6 +19,8 @@ import {
   slotOfTime,
 } from "@story-fm/domain";
 import { rankByName } from "../core/name-match";
+import { formatMoney } from "../club/finance";
+import { outcomeFor, outcomeLabel } from "./views";
 import { addDays, dayOfWeek, diffDays, seasonYear, squadReturnOf } from "../competition/calendar";
 import { entrantsOf } from "../competition/europe";
 import { formLabel } from "../squad/form";
@@ -104,8 +106,6 @@ export interface LookupResult {
 /** 결과 행 수 상한 — 컨텍스트 폭주 방지 */
 const DEFAULT_LIMIT = 8;
 const MAX_LIMIT = 15;
-
-const money = (v: number) => `£${Math.round(v / 1000)}k`;
 
 // ── 이름 해석 (팀·대회) ─────────────────────────────────
 //
@@ -244,7 +244,7 @@ function ourRow(state: GameState, p: GamePlayer): string {
     `${p.id} ${p.name} ${ageOf(p.birthdate, state.date)}세 ${naturalPositionOf(p).position} ` +
     `${physiqueLabel(p.height, p.weight)}(${footLabel(p.foot)}) ` +
     `OVR${p.attributes.overall} 폼 ${formLabel(p.state.form)} ` +
-    `체력${p.state.condition} 적응${familiarityOf(state, p.id)} ${money(contract?.weeklyWage ?? 0)} ` +
+    `체력${p.state.condition} 적응${familiarityOf(state, p.id)} ${formatMoney(contract?.weeklyWage ?? 0)} ` +
     `${role} ${statLine(stat)}${status}${issue}${p.isCaptain ? " (주장)" : ""}` +
     `${isHomegrownFor(p, p.teamId) ? " [홈그로운]" : ""}${occupiesSquadList(state, p) ? "" : " [U21·명단 밖]"}`
   );
@@ -501,7 +501,7 @@ function historyLines(state: GameState, p: GamePlayer): string[] {
       (t) =>
         `${t.date} ${TRANSFER_KO[t.type] ?? t.type} ` +
         `${t.fromTeamId ? teamShortNameIn(state, t.fromTeamId) : "—"}→${t.toTeamId ? teamShortNameIn(state, t.toTeamId) : "—"}` +
-        (t.fee > 0 ? ` £${(t.fee / 1e6).toFixed(1)}M` : ""),
+        (t.fee > 0 ? ` ${formatMoney(t.fee)}` : ""),
     );
   if (moves.length > 0) lines.push(`이동 이력: ${moves.join(" / ")}`);
 
@@ -600,7 +600,7 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
     `시즌 기록: ${stat?.apps ?? 0}경기 ${stat?.goals ?? 0}골 ${stat?.assists ?? 0}도움` +
       (seasonRating(stat) === null ? "" : ` · 평점 ${seasonRating(stat)!.toFixed(2)}`),
     contract
-      ? `계약: 주급 ${money(contract.weeklyWage)} · 만료 ${contract.until}`
+      ? `계약: 주급 ${formatMoney(contract.weeklyWage)} · 만료 ${contract.until}`
       : "계약: 정보 없음",
   );
   if (injury) {
@@ -795,7 +795,7 @@ export function teamProfile(state: GameState, team: string): LookupResult {
       const their = home ? m.result!.awayGoals : m.result!.homeGoals;
       return (
         `${competitionTag(m)} ${my}-${their} vs ${teamShortNameIn(state, home ? m.awayTeamId : m.homeTeamId)} ` +
-        markOf(m, teamId)
+        outcomeLabel(outcomeFor(m, teamId))
       );
     });
 
@@ -817,9 +817,9 @@ export function teamProfile(state: GameState, team: string): LookupResult {
   let d = 0;
   let l = 0;
   for (const m of h2h) {
-    const mark = markOf(m, state.userTeamId);
-    if (mark === "승") w++;
-    else if (mark === "패") l++;
+    const outcome = outcomeFor(m, state.userTeamId);
+    if (outcome === "W") w++;
+    else if (outcome === "L") l++;
     else d++;
   }
 
@@ -907,18 +907,6 @@ function competitionTag(m: MatchRecord): string {
 }
 
 /** 기준 팀 시점의 승패 — 정규시간이 같으면 승부차기로 갈린다 */
-function markOf(m: MatchRecord, teamId: string): "승" | "무" | "패" {
-  const result = m.result!;
-  const home = m.homeTeamId === teamId;
-  const mine = home ? result.homeGoals : result.awayGoals;
-  const theirs = home ? result.awayGoals : result.homeGoals;
-  if (mine !== theirs) return mine > theirs ? "승" : "패";
-  if (!result.penalties) return "무";
-  const minePen = home ? result.penalties.home : result.penalties.away;
-  const theirPen = home ? result.penalties.away : result.penalties.home;
-  return minePen === theirPen ? "무" : minePen > theirPen ? "승" : "패";
-}
-
 function scorerNote(state: GameState, m: MatchRecord): string {
   const scorers = m.result?.scorers ?? [];
   if (scorers.length === 0) return "";
@@ -962,7 +950,7 @@ function matchLine(
     `${teamShortNameIn(state, m.homeTeamId)} ${m.result.homeGoals}-${m.result.awayGoals} ` +
     `${teamShortNameIn(state, m.awayTeamId)}${pens}`;
   const side = teamId === null ? "" : ` ${m.homeTeamId === teamId ? "홈" : "원정"}`;
-  const mark = teamId === null ? "" : ` ${markOf(m, teamId)}`;
+  const mark = teamId === null ? "" : ` ${outcomeLabel(outcomeFor(m, teamId))}`;
   return `  지난 ${when} ${tag}${side} ${score}${mark}${detail ? scorerNote(state, m) : ""}`;
 }
 
@@ -980,7 +968,7 @@ function recentForm(state: GameState, teamId: string, competitionId: string): st
     )
     .sort((a, b) => (a.date < b.date ? -1 : 1))
     .slice(-5)
-    .map((m) => markOf(m, teamId))
+    .map((m) => outcomeLabel(outcomeFor(m, teamId)))
     .join("");
 }
 
@@ -1154,9 +1142,9 @@ function fixturesView(state: GameState, input: LeagueViewInput): LookupResult {
       let scored = 0;
       let conceded = 0;
       for (const m of played) {
-        const mark = markOf(m, teamId);
-        if (mark === "승") w++;
-        else if (mark === "패") l++;
+        const outcome = outcomeFor(m, teamId);
+        if (outcome === "W") w++;
+        else if (outcome === "L") l++;
         else d++;
         const home = m.homeTeamId === teamId;
         scored += home ? m.result!.homeGoals : m.result!.awayGoals;
@@ -1268,7 +1256,7 @@ export function scheduleView(state: GameState, input: ScheduleViewInput = {}): L
       const versus = teamNameIn(state, home ? m.awayTeamId : m.homeTeamId);
       const side = m.neutral ? "중립" : home ? "홈" : "원정";
       const score = m.result
-        ? ` — ${m.result.homeGoals}-${m.result.awayGoals} ${markOf(m, state.userTeamId)}`
+        ? ` — ${m.result.homeGoals}-${m.result.awayGoals} ${outcomeLabel(outcomeFor(m, state.userTeamId))}`
         : "";
       lines.push(`${when} 경기 ${competitionTag(m)} ${side} vs ${versus}${score}`);
       continue;

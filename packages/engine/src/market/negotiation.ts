@@ -13,7 +13,7 @@ import {
   seasonYear,
   windowOpenOn,
 } from "../competition/calendar";
-import { AGENT_FEE_RATE, budgetFreezeLabel, recordFinance } from "../club/finance";
+import { AGENT_FEE_RATE, budgetFreezeLabel, formatMoney, recordFinance } from "../club/finance";
 import {
   LOAN_FEE_RATE,
   askingPriceFor,
@@ -96,9 +96,6 @@ const COUNTER_CEILING = 1.15;
 const COUNTER_WAGE_CEILING = 1.4;
 /** 협상 유효기간 — 창 마감이 더 이르면 그쪽이 먼저 온다 */
 const NEGOTIATION_DAYS = 14;
-
-const money = (amount: number) => `£${(amount / 1_000_000).toFixed(1)}M`;
-const wageOf = (amount: number) => `£${Math.round(amount / 1_000)}k`;
 
 /** 이 선수와 진행 중인 협상 */
 export function openNegotiationFor(state: GameState, playerId: string): Negotiation | null {
@@ -326,10 +323,10 @@ export function sendOffer(state: GameState, input: DealTerms): MarketSkillResult
       : "";
   const head =
     terms.kind === "loan"
-      ? `${teamName(player.teamId)}에 ${player.name} 임대를 요청 — 임대료 ${money(terms.fee)} · ` +
-        `우리가 낼 주급 ${wageOf(terms.weeklyWage)}.`
-      : `${teamName(player.teamId)}의 ${player.name}에게 오퍼 — 이적료 ${money(terms.fee)} · ` +
-        `주급 ${wageOf(terms.weeklyWage)} · ${terms.years}년.`;
+      ? `${teamName(player.teamId)}에 ${player.name} 임대를 요청 — 임대료 ${formatMoney(terms.fee)} · ` +
+        `우리가 낼 주급 ${formatMoney(terms.weeklyWage)}.`
+      : `${teamName(player.teamId)}의 ${player.name}에게 오퍼 — 이적료 ${formatMoney(terms.fee)} · ` +
+        `주급 ${formatMoney(terms.weeklyWage)} · ${terms.years}년.`;
   const card: MarketCard = {
     kind: "offer",
     playerId: player.id,
@@ -585,7 +582,7 @@ export function respondOffer(
     if (bid >= offer.fee || bid < floor) {
       return {
         ok: false,
-        message: `사는 쪽의 역제안은 ${money(floor)} 이상 ${money(offer.fee)} 미만이어야 합니다`,
+        message: `사는 쪽의 역제안은 ${formatMoney(floor)} 이상 ${formatMoney(offer.fee)} 미만이어야 합니다`,
       };
     }
   }
@@ -605,7 +602,7 @@ export function respondOffer(
   ) {
     return {
       ok: false,
-      message: `역제안은 ${money(offer.fee)} 이상 ${money(ceiling)} 이하여야 합니다`,
+      message: `역제안은 ${formatMoney(offer.fee)} 이상 ${formatMoney(ceiling)} 이하여야 합니다`,
     };
   }
   // 재계약의 역제안은 **주급**을 부른다 — 우리 제시액 이상, 기대치의 1.4배 이하
@@ -620,7 +617,7 @@ export function respondOffer(
   ) {
     return {
       ok: false,
-      message: `요구 주급은 ${wageOf(offer.weeklyWage)} 초과 ${wageOf(wageCeiling)} 이하여야 합니다`,
+      message: `요구 주급은 ${formatMoney(offer.weeklyWage)} 초과 ${formatMoney(wageCeiling)} 이하여야 합니다`,
     };
   }
   /**
@@ -643,7 +640,7 @@ export function respondOffer(
   ) {
     return {
       ok: false,
-      message: `역제안 주급은 ${wageOf(offer.weeklyWage)} 이상 ${wageOf(counterWageCeiling)} 이하여야 합니다`,
+      message: `역제안 주급은 ${formatMoney(offer.weeklyWage)} 이상 ${formatMoney(counterWageCeiling)} 이하여야 합니다`,
     };
   }
 
@@ -667,11 +664,11 @@ export function respondOffer(
 
   if (input.verdict === "accept") {
     negotiation.status = "agreed";
-    pushNarrative(state, `${player.name} 이적 합의 (${money(offer.fee)})`, 4);
+    pushNarrative(state, `${player.name} 이적 합의 (${formatMoney(offer.fee)})`, 4);
     return {
       ok: true,
       payload: verdictCard({}),
-      message: `${counterpart}가 오퍼를 받아들였습니다 — ${player.name}, ${money(offer.fee)}. 계약을 확정하세요`,
+      message: `${counterpart}가 오퍼를 받아들였습니다 — ${player.name}, ${formatMoney(offer.fee)}. 계약을 확정하세요`,
     };
   }
 
@@ -701,7 +698,7 @@ export function respondOffer(
       ok: true,
       payload: verdictCard({ counterTerms: dealTerms({ weeklyWage: counterWageDemand }) }),
       message:
-        `${player.name}은(는) 주급 ${wageOf(counterWageDemand)}을 원합니다. ` +
+        `${player.name}은(는) 주급 ${formatMoney(counterWageDemand)}을 원합니다. ` +
         `그 조건으로 다시 제안하면 받아들일 것입니다`,
     };
   }
@@ -722,7 +719,7 @@ export function respondOffer(
       counterTerms: dealTerms({ fee: counterFee, weeklyWage: counterWage }),
     }),
     message:
-      `${counterpart}의 역제안 — 이적료 ${money(counterFee)} · 주급 ${wageOf(counterWage)}. ` +
+      `${counterpart}의 역제안 — 이적료 ${formatMoney(counterFee)} · 주급 ${formatMoney(counterWage)}. ` +
       `받아들이려면 그 조건으로 오퍼를 다시 넣으세요`,
   };
 }
@@ -813,10 +810,10 @@ export function setTransferList(
       : askingPrice < market * 0.85
         ? "시장가보다 싸게 내놨습니다 — 금방 붙을 것입니다"
         : "시장가 언저리입니다";
-  pushNarrative(state, `${player.name} 이적 리스트 등재 (${money(askingPrice)})`, 3);
+  pushNarrative(state, `${player.name} 이적 리스트 등재 (${formatMoney(askingPrice)})`, 3);
   return {
     ok: true,
-    message: `${player.name}을(를) 이적 리스트에 올렸습니다 — 호가 ${money(askingPrice)}. ${stance}`,
+    message: `${player.name}을(를) 이적 리스트에 올렸습니다 — 호가 ${formatMoney(askingPrice)}. ${stance}`,
   };
 }
 
@@ -930,10 +927,10 @@ export function offerPlayerOut(
   });
   const chance = oddsText(odds);
   const head = input.loan
-    ? `${teamName(buyer.id)}에 ${player.name} 임대를 제안했습니다 — 임대료 ${money(fee)} · ` +
-      `그쪽이 낼 주급 ${wageOf(weeklyWage)}.`
-    : `${teamName(buyer.id)}에 ${player.name} 매각을 제안했습니다 — 이적료 ${money(fee)} · ` +
-      `주급 ${wageOf(weeklyWage)} · ${years}년.`;
+    ? `${teamName(buyer.id)}에 ${player.name} 임대를 제안했습니다 — 임대료 ${formatMoney(fee)} · ` +
+      `그쪽이 낼 주급 ${formatMoney(weeklyWage)}.`
+    : `${teamName(buyer.id)}에 ${player.name} 매각을 제안했습니다 — 이적료 ${formatMoney(fee)} · ` +
+      `주급 ${formatMoney(weeklyWage)} · ${years}년.`;
   const card: MarketCard = {
     kind: "offer",
     playerId: player.id,
@@ -1092,9 +1089,9 @@ export function generateIncomingOffers(state: GameState, digest: string[]): void
   };
   state.negotiations.push(negotiation);
   digest.push(
-    `📩 ${teamName(buyer)}가 ${chosen.name} 영입 오퍼를 넣었습니다 — ${money(fee)} (기한 ${negotiation.expiresOn})`,
+    `📩 ${teamName(buyer)}가 ${chosen.name} 영입 오퍼를 넣었습니다 — ${formatMoney(fee)} (기한 ${negotiation.expiresOn})`,
   );
-  pushNarrative(state, `${teamName(buyer)}의 ${chosen.name} 오퍼 (${money(fee)})`, 3);
+  pushNarrative(state, `${teamName(buyer)}의 ${chosen.name} 오퍼 (${formatMoney(fee)})`, 3);
 }
 
 /**
@@ -1148,9 +1145,9 @@ function openListedOffer(
   };
   state.negotiations.push(negotiation);
   digest.push(
-    `📩 ${teamName(buyer)}가 이적 리스트의 ${player.name}에게 오퍼를 넣었습니다 — ${money(fee)} (호가 ${money(askingPrice)} · 기한 ${negotiation.expiresOn})`,
+    `📩 ${teamName(buyer)}가 이적 리스트의 ${player.name}에게 오퍼를 넣었습니다 — ${formatMoney(fee)} (호가 ${formatMoney(askingPrice)} · 기한 ${negotiation.expiresOn})`,
   );
-  pushNarrative(state, `${teamName(buyer)}의 ${player.name} 오퍼 (${money(fee)})`, 3);
+  pushNarrative(state, `${teamName(buyer)}의 ${player.name} 오퍼 (${formatMoney(fee)})`, 3);
 }
 
 /** 우리 스쿼드에서 그 자리를 더 잘 보는 선수 수 — 오퍼가 올 만한 선수 판별 */
@@ -1278,8 +1275,8 @@ export function answerIncomingOffer(
       ok: true,
       payload: card,
       message: renegotiated
-        ? `${player.name} 메디컬 재협상안을 수락했습니다 — ${money(offer.fee)}. 계약을 확정하세요`
-        : `${player.name} 매각에 합의했습니다 — ${money(offer.fee)}. 계약을 확정하세요`,
+        ? `${player.name} 메디컬 재협상안을 수락했습니다 — ${formatMoney(offer.fee)}. 계약을 확정하세요`
+        : `${player.name} 매각에 합의했습니다 — ${formatMoney(offer.fee)}. 계약을 확정하세요`,
     };
   }
 
@@ -1291,7 +1288,10 @@ export function answerIncomingOffer(
       : marketValueOf(state, player);
   const demanded = Math.round(input.fee ?? Math.round(expectation * 1.1));
   if (demanded <= offer.fee) {
-    return { ok: false, message: `역제안은 받은 오퍼(${money(offer.fee)})보다 높아야 합니다` };
+    return {
+      ok: false,
+      message: `역제안은 받은 오퍼(${formatMoney(offer.fee)})보다 높아야 합니다`,
+    };
   }
   const wage = Math.round(input.weeklyWage ?? offer.weeklyWage);
   offer.verdict = "counter";
@@ -1313,7 +1313,7 @@ export function answerIncomingOffer(
       ...(input.note ? { note: input.note } : {}),
     }),
     message:
-      `${player.name} 값으로 ${money(demanded)}을 불렀습니다 (성사 가능성 ${oddsText(odds)}) — ` +
+      `${player.name} 값으로 ${formatMoney(demanded)}을 불렀습니다 (성사 가능성 ${oddsText(odds)}) — ` +
       describeWait(waitDays),
   };
 }
@@ -1411,7 +1411,7 @@ export function openRenewal(
     ok: true,
     payload: card,
     message:
-      `${player.name}에게 재계약 제안 — 주급 ${wageOf(input.weeklyWage)} · ${input.years}년` +
+      `${player.name}에게 재계약 제안 — 주급 ${formatMoney(input.weeklyWage)} · ${input.years}년` +
       `${until ? ` (현 계약 ${until} 만료)` : ""}. 성사 가능성 ${oddsText(odds)}. ${describeWait(waitDays)}`,
   };
 }
@@ -1456,7 +1456,7 @@ function executeLoanOut(
       amount: agreed.fee,
     });
   }
-  return { ok: true, message: `${res.message} · 임대료 ${money(agreed.fee)}` };
+  return { ok: true, message: `${res.message} · 임대료 ${formatMoney(agreed.fee)}` };
 }
 
 /**
@@ -1546,7 +1546,7 @@ function executeLoanIn(
     ok: true,
     message:
       `${player.name}을(를) ${teamName(from)}에서 임대로 데려왔습니다 — ${until}까지 · ` +
-      `임대료 ${money(agreed.fee)} · 주급 ${Math.round(wageShare * 100)}% 부담` +
+      `임대료 ${formatMoney(agreed.fee)} · 주급 ${Math.round(wageShare * 100)}% 부담` +
       (slot.ok ? "" : ` ⚠ ${slot.reason} — 2군으로 들어왔습니다`),
   };
 }
@@ -1582,13 +1582,13 @@ function executeRenewal(
   negotiation.status = "completed";
   pushNarrative(
     state,
-    `${player.name} 재계약 — 주급 ${wageOf(agreed.weeklyWage)} ${agreed.contractYears}년`,
+    `${player.name} 재계약 — 주급 ${formatMoney(agreed.weeklyWage)} ${agreed.contractYears}년`,
     4,
   );
   return {
     ok: true,
     message:
-      `${player.name} 재계약 완료 — 주급 ${wageOf(agreed.weeklyWage)}, ` +
+      `${player.name} 재계약 완료 — 주급 ${formatMoney(agreed.weeklyWage)}, ` +
       `${contractUntil(state.date, agreed.contractYears)}까지. 주급 총액이 늘어납니다`,
   };
 }
@@ -1702,7 +1702,7 @@ function medicalFlagResult(
     ok: true,
     message:
       `${teamName(receivingTeamOf(state, negotiation))}의 메디컬에서 ${player.name}에게 소견이 ` +
-      `나왔습니다 — ${note}. ${money(counter.agreedFee)}에서 ${money(counter.cut)}로 깎아 다시 ` +
+      `나왔습니다 — ${note}. ${formatMoney(counter.agreedFee)}에서 ${formatMoney(counter.cut)}로 깎아 다시 ` +
       `불렀습니다 — 답해야 합니다`,
   };
 }
@@ -1793,7 +1793,7 @@ function affordabilityGate(
   if (deal.fee > finance.transferBudget) {
     return {
       ok: false,
-      message: `이적 예산이 부족합니다 — 필요 ${money(deal.fee)} / 가용 ${money(finance.transferBudget)}`,
+      message: `이적 예산이 부족합니다 — 필요 ${formatMoney(deal.fee)} / 가용 ${formatMoney(finance.transferBudget)}`,
     };
   }
   const room = wageRoomOf(
@@ -1808,7 +1808,7 @@ function affordabilityGate(
       message:
         room <= 0
           ? "주급 여력이 없습니다 — 임금 총액이 이미 구단 한도를 넘었습니다"
-          : `주급 여력이 부족합니다 — 주당 ${wageOf(room)}까지 가능합니다`,
+          : `주급 여력이 부족합니다 — 주당 ${formatMoney(room)}까지 가능합니다`,
     };
   }
   return null;
@@ -1973,7 +1973,7 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
 
   pushNarrative(
     state,
-    `${player.name} 영입 완료 — ${teamName(fromTeamId)}에서 ${money(agreed.fee)}`,
+    `${player.name} 영입 완료 — ${teamName(fromTeamId)}에서 ${formatMoney(agreed.fee)}`,
     4,
   );
   // 큰 영입에는 회견이 붙는다 — 세계가 감독에게 설명을 요구하는 자리 (press.ts)
@@ -1986,8 +1986,8 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
   return {
     ok: true,
     message:
-      `${player.name} 영입 완료 — ${teamName(fromTeamId)}에서 ${money(agreed.fee)}, ` +
-      `주급 ${wageOf(agreed.weeklyWage)} ${agreed.contractYears}년. 남은 이적 예산 ${money(ourFinance.transferBudget)}` +
+      `${player.name} 영입 완료 — ${teamName(fromTeamId)}에서 ${formatMoney(agreed.fee)}, ` +
+      `주급 ${formatMoney(agreed.weeklyWage)} ${agreed.contractYears}년. 남은 이적 예산 ${formatMoney(ourFinance.transferBudget)}` +
       (slot.ok ? "" : ` ⚠ ${slot.reason} — 2군으로 들어왔습니다`),
   };
 }
@@ -2045,8 +2045,8 @@ function executeSale(
     return {
       ok: false,
       message:
-        `${teamName(buyerTeamId)}가 ${money(agreed.fee)}를 마련하지 못했습니다 — ` +
-        `가용 ${money(buyerFinance.transferBudget)}. 이 건은 무산됐습니다`,
+        `${teamName(buyerTeamId)}가 ${formatMoney(agreed.fee)}를 마련하지 못했습니다 — ` +
+        `가용 ${formatMoney(buyerFinance.transferBudget)}. 이 건은 무산됐습니다`,
     };
   }
 
@@ -2106,7 +2106,7 @@ function executeSale(
 
   pushNarrative(
     state,
-    `${player.name} 매각 — ${teamName(buyerTeamId)}로 ${money(agreed.fee)}`,
+    `${player.name} 매각 — ${teamName(buyerTeamId)}로 ${formatMoney(agreed.fee)}`,
     wasCaptain ? 5 : 4,
   );
   const salePress = buildTransferPress(state, {
@@ -2119,8 +2119,8 @@ function executeSale(
   return {
     ok: true,
     message:
-      `${player.name}을(를) ${teamName(buyerTeamId)}로 보냈습니다 — ${money(agreed.fee)}.` +
-      `${captainNote} 이적 예산 ${money(ourFinance?.transferBudget ?? 0)}`,
+      `${player.name}을(를) ${teamName(buyerTeamId)}로 보냈습니다 — ${formatMoney(agreed.fee)}.` +
+      `${captainNote} 이적 예산 ${formatMoney(ourFinance?.transferBudget ?? 0)}`,
   };
 }
 
@@ -2325,14 +2325,14 @@ export function describeNegotiations(state: GameState): string {
       if (last.by === "them") {
         // 내보내는 갈래는 상대가 **오퍼**를 낸 것이고, 데려오는 갈래는 **역제안**이다
         return n.kind === "sell" || n.kind === "loan_out"
-          ? `${n.id} ${who} ${direction} — 상대 오퍼 ${money(last.fee)} 도착, 답이 필요합니다`
-          : `${n.id} ${who} ${direction} — 역제안 ${money(last.fee)} 도착`;
+          ? `${n.id} ${who} ${direction} — 상대 오퍼 ${formatMoney(last.fee)} 도착, 답이 필요합니다`
+          : `${n.id} ${who} ${direction} — 역제안 ${formatMoney(last.fee)} 도착`;
       }
       const waiting =
         last.respondsOn !== null && last.respondsOn > state.date
           ? describeWait(diffDays(state.date, last.respondsOn))
           : "답 도착 — 판정 필요";
-      return `${n.id} ${who} — 우리 오퍼 ${money(last.fee)} (${waiting})`;
+      return `${n.id} ${who} — 우리 오퍼 ${formatMoney(last.fee)} (${waiting})`;
     })
     .join("\n");
 }
@@ -2348,7 +2348,7 @@ export function describeNegotiation(state: GameState, negotiationId: string): st
     `기한 ${negotiation.expiresOn}`,
     ...negotiation.rounds.map(
       (r) =>
-        `  ${r.date} ${r.by === "us" ? "우리" : "상대"} ${money(r.fee)} / ${wageOf(r.weeklyWage)} ${r.contractYears}년` +
+        `  ${r.date} ${r.by === "us" ? "우리" : "상대"} ${formatMoney(r.fee)} / ${formatMoney(r.weeklyWage)} ${r.contractYears}년` +
         `${r.verdict ? ` → ${r.verdict}` : r.respondsOn ? ` (답 ${r.respondsOn})` : ""}` +
         `${r.note ? ` — ${r.note}` : ""}` +
         (r.pitch && r.pitch.length > 0

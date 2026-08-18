@@ -1179,10 +1179,18 @@ function scoreOf(match: MatchRecord): string | null {
   return `${homeGoals}-${awayGoals}${pens}`;
 }
 
-/** 우리 경기의 승패 — 승부차기가 있으면 그것이 결론이다 */
-function outcomeFor(state: GameState, match: MatchRecord): "W" | "D" | "L" | null {
-  const home = match.homeTeamId === state.userTeamId;
-  if (!match.result || (!home && match.awayTeamId !== state.userTeamId)) return null;
+/**
+ * 이 팀의 승패 — **승패를 판정하는 유일한 자리다.**
+ *
+ * 승부차기가 있으면 그것이 결론이다: 승부차기로 갈린 컵 경기를 "무"로 칠하면 안
+ * 된다 — 그 날 이 팀은 이겼거나 떨어졌다. 결과가 없거나 이 팀의 경기가 아니면
+ * `null`이고, 한글 라벨은 `outcomeLabel`이 붙인다(조회 응답·달력 일지).
+ *
+ * (폼의 연속 기록은 승부차기를 보지 않는다 — `recentOutcomes`, slump.ts.)
+ */
+export function outcomeFor(match: MatchRecord, teamId: string): "W" | "D" | "L" | null {
+  const home = match.homeTeamId === teamId;
+  if (!match.result || (!home && match.awayTeamId !== teamId)) return null;
   const { homeGoals, awayGoals, penalties } = match.result;
   const mine = home ? homeGoals : awayGoals;
   const theirs = home ? awayGoals : homeGoals;
@@ -1193,6 +1201,13 @@ function outcomeFor(state: GameState, match: MatchRecord): "W" | "D" | "L" | nul
     if (myPens !== theirPens) return myPens > theirPens ? "W" : "L";
   }
   return "D";
+}
+
+const OUTCOME_KO = { W: "승", D: "무", L: "패" } as const;
+
+/** 승패의 한글 표기 — 판정은 `outcomeFor`가 하고 여기서는 라벨만 붙인다 */
+export function outcomeLabel(outcome: "W" | "D" | "L" | null): "승" | "무" | "패" {
+  return OUTCOME_KO[outcome ?? "D"];
 }
 
 /**
@@ -1576,7 +1591,7 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
       awayShort: teamShortNameIn(state, m.awayTeamId),
       score: scoreOf(m),
       ours: m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId,
-      win: outcomeFor(state, m),
+      win: outcomeFor(m, state.userTeamId),
       neutral: m.neutral === true,
     });
     if (m.date < round.date) round.date = m.date;
@@ -1948,14 +1963,12 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         if (m.result) {
           const my = home ? m.result.homeGoals : m.result.awayGoals;
           const their = home ? m.result.awayGoals : m.result.homeGoals;
-          // 승부차기로 갈린 컵 경기를 "무"로 칠하면 안 된다 — 그 날 우리는
-          // 이겼거나 떨어졌다 (`outcomeFor`와 같은 규칙)
-          win = outcomeFor(state, m);
+          win = outcomeFor(m, userTeamId);
           const pens = m.result.penalties;
           const pensLabel = pens
             ? ` (승부차기 ${home ? pens.home : pens.away}-${home ? pens.away : pens.home})`
             : "";
-          result = `${my}-${their}${pensLabel} ${win === "W" ? "승" : win === "L" ? "패" : "무"}`;
+          result = `${my}-${their}${pensLabel} ${outcomeLabel(win)}`;
           const mySide = home ? "home" : "away";
           /**
            * 득점자 — **도움까지 함께 읽는다.** 장부는 골 대부분에 도움을 붙이므로

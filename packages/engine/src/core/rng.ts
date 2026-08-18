@@ -3,7 +3,12 @@
  * 전부 (worldSeed, channel) 파생으로 재현 가능해야 한다 (AGENTS.md 6-4).
  */
 
-/** 문자열 → 32bit 해시 (채널 파생용) */
+/**
+ * 문자열 → 32bit 해시 (채널 파생용).
+ *
+ * ⚠️ `world/name-hash.ts`의 `hashOf`와 같은 FNV-1a지만 마무리가 `>>> 0`이라
+ * **같은 입력에 다른 값을 낸다.** 합치면 세계 생성의 파생값이 통째로 움직인다.
+ */
 export function hashChannel(channel: string): number {
   let h = 2166136261;
   for (let i = 0; i < channel.length; i++) {
