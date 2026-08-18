@@ -2,9 +2,11 @@ import type { MatchEvent, MatchPhase, MatchSide, MatchStatLine } from "@story-fm
 import { PHASE_END, TEAM_EVENT_TYPES, isExtraTime } from "@story-fm/domain";
 
 /**
- * 경기 장부 — LLM(매치 티어)이 창발적으로 생성한 사건을 검증해 기록하는
- * 결정적 코어 (match.md §5). 창발 출력이 검증 없이 게임
- * 상태가 되는 일은 없다 (AGENTS.md 6-4).
+ * 경기 장부 — 사건을 검증해 기록하는 결정적 코어 (match.md §5).
+ *
+ * **사건을 만드는 쪽도 코어다**(`match-engine.ts` 구간 시뮬 · 엔진의 간이 시뮬).
+ * 그래서 여기 검증은 LLM 방어가 아니라 **시뮬레이터의 계약 검사**이고, 반려는
+ * 시뮬레이터의 버그를 뜻한다. LLM은 이 장부가 기록한 것을 중계·연출할 뿐이다.
  */
 
 export interface TeamLedger {
@@ -185,7 +187,7 @@ function atBreakStop(state: MatchLedgerState, incoming: MatchEvent[], i: number)
 
 /**
  * 이벤트 배치를 검증하며 적용한다 — 원자적: 하나라도 실패하면 전체 반려.
- * 오류 메시지는 한국어로 — LLM이 읽고 수정 재기록한다 (Zod 재시도와 동일 패턴).
+ * 오류 메시지는 한국어로 — 반려는 시뮬레이터의 계약 위반이라 사람이 읽는다.
  */
 export function applyEvents(state: MatchLedgerState, incoming: MatchEvent[]): ApplyResult {
   if (incoming.length === 0) {
@@ -231,7 +233,7 @@ function teamOf(state: MatchLedgerState, side: MatchSide): TeamLedger {
 }
 
 /**
- * 창발 출력 다듬기 — **골을 도움 때문에 무효로 만들지 않는다.**
+ * 시뮬레이터 출력 다듬기 — **골을 도움 때문에 무효로 만들지 않는다.**
  *
  * goal의 actors는 [득점자, (도움)]이다. 득점자는 장부의 뼈대라 그라운드 위에
  * 없으면 반려하지만, 도움은 연출의 부산물이다. 중계가 벤치 선수나 상대 선수를
