@@ -294,7 +294,8 @@ describe("새 게임 첫 장면", () => {
 
     // 첫 장면의 지시는 **캐시 밖**(상태 스냅샷)에 실린다 — 문구가 아니라 그 자리를 잰다
     expect(request?.stateNote).toContain(state.date);
-    expect(request?.system?.join("\n")).not.toContain(state.date);
+    const system = request?.system;
+    expect(Array.isArray(system) ? system.join("\n") : (system ?? "")).not.toContain(state.date);
     // 시스템은 고정 계층 + 레퍼런스 계층 두 블록이다 (캐시 프리픽스의 모양)
     expect(request?.system).toHaveLength(2);
     // 출력 상한을 따로 좁히지 않는다 — 상한은 사고와 본문을 함께 덮으므로

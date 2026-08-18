@@ -139,9 +139,9 @@ describe("카탈로그 편집", () => {
     expect(adminEditCatalogPlayer(target.id, { weeklyWage: null }).ok).toBe(true);
     expect(wageOf()).toBeUndefined();
     const modelled = createTestGame(9);
-    expect(modelled.contracts.find((c) => c.gamePlayerId === target.id)!.weeklyWage).toBeGreaterThan(
-      0,
-    );
+    expect(
+      modelled.contracts.find((c) => c.gamePlayerId === target.id)!.weeklyWage,
+    ).toBeGreaterThan(0);
   });
 
   /**

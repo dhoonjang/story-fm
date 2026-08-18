@@ -32,7 +32,7 @@ describe("스킬 설명 — 코드가 유일한 원본이다", () => {
   it("모델이 받는 도구 집합이 카탈로그와 같고, 설명도 그대로다", () => {
     const toolNames = TOOLS.map((t) => t.name).sort();
     expect(toolNames).toEqual([...SKILL_NAMES].sort());
-    const described = new Map(SKILL_CATALOG.map((s) => [s.name, s.description]));
+    const described = new Map<string, string>(SKILL_CATALOG.map((s) => [s.name, s.description]));
     for (const tool of TOOLS) {
       expect(tool.description, tool.name).toBe(described.get(tool.name));
     }

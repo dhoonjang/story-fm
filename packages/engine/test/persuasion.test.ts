@@ -179,7 +179,9 @@ describe("**판정은 LLM이 한다** — 코어는 가능한 판정만 받는�
   it("**확인된 논거가 하나라도 있으면 코어는 더 막지 않는다** — 선수가 판단한다", () => {
     const { state, target, negotiation } = lowballOffer([claim("last_chance")]);
     // 서른셋을 넘긴 선수라 이 논거는 언제나 사실이다
-    expect(evaluatePitch(state, target.id, [claim("last_chance")]).verdicts[0]?.verified).toBe(true);
+    expect(evaluatePitch(state, target.id, [claim("last_chance")]).verdicts[0]?.verified).toBe(
+      true,
+    );
     expect(negotiation.pitched ?? []).toEqual(["last_chance"]);
 
     const verdict = respondOffer(state, {
