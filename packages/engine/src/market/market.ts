@@ -268,6 +268,32 @@ export interface SellContext {
   buyerTeamId: string;
 }
 
+/**
+ * **임대 중인 선수는 계약이 소유 구단의 것이다** — 그 계약을 움직이려는 모든 문이
+ * 여기를 지난다 (transfer.md §2).
+ *
+ * 관문마다 따로 적으면 `loan.fromTeamId === userTeamId`(우리가 **내보낸** 임대)만
+ * 보는 판정이 또 생긴다 — 우리에게 **온** 임대는 `teamId`가 우리라 매각·방출·재계약이
+ * 통째로 뚫린다. 두 방향은 같은 사실의 두 얼굴이므로 한 문장이 함께 막는다.
+ *
+ * @returns 잠겨 있으면 감독에게 돌려줄 이유, 아니면 null
+ */
+export function loanLockOf(player: GamePlayer): string | null {
+  if (!player.loan) return null;
+  return (
+    `${player.name}은(는) 임대 중입니다 — 계약은 ${teamName(player.loan.fromTeamId)}에 있어 ` +
+    "그쪽이 먼저 불러들여야 움직입니다"
+  );
+}
+
+/**
+ * 이 선수의 계약을 가진 구단 — **이적료의 수취인이자 원장의 `fromTeamId`.**
+ * 평소엔 `player.teamId`와 같은 값이고, 갈라지는 자리가 임대다 (transfer.md §2).
+ */
+export function contractOwnerOf(state: GameState, player: GamePlayer): string {
+  return activeContract(state, player.id)?.teamId ?? player.loan?.fromTeamId ?? player.teamId;
+}
+
 /** 안개 밴드 — 지식 수준이 낮으면 확률·금액이 흐려진다 (결정적) */
 // 적응 중인 새 영입도 이미 우리 것이라 협상 흐림이 없다 — 능력치 관측과 달리
 // 몸값·계약 조건은 계약서에 적혀 있다
@@ -315,6 +341,10 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
   const wageExpectation = wageExpectationOf(state, player);
   const window = windowOpenOn(state.windows, state.date);
   const freeAgent = contractYearsLeft(state, player.id) <= 0;
+
+  // 임대는 갈래를 가리지 않고 막힌다 — 영입·매각·임대·재계약이 모두 남의 계약을 건드린다
+  const loanLock = loanLockOf(player);
+  if (loanLock) blockers.push(loanLock);
 
   if (terms.kind === "sell" || terms.kind === "loan_out") {
     if (player.teamId !== state.userTeamId) {

@@ -12,9 +12,11 @@ import {
   LOAN_FEE_RATE,
   askingPriceFor,
   betterAtPosition,
+  contractOwnerOf,
   dealOdds,
   describeOdds,
   describeWait,
+  loanLockOf,
   marketValueOf,
   oddsText,
   renewalExpectation,
@@ -32,6 +34,7 @@ import {
   resolveMedicals,
   scheduleMedical,
 } from "./medical";
+import { isClubTeam } from "../data/team-catalog";
 import { canRegisterFor } from "../squad/registration";
 import { assignSquadNumber } from "../squad/numbers";
 import { USER_WAGE_HEADROOM, wageRoomOf } from "../world/wages";
@@ -660,9 +663,9 @@ export function setTransferList(
 ): SkillResult {
   const player = playerById(state, input.playerId);
   if (!player) return { ok: false, message: `"${input.playerId}"라는 선수를 찾지 못했습니다` };
-  if (player.loan?.fromTeamId === state.userTeamId) {
-    return { ok: false, message: `${player.name}은(는) 임대 중입니다 — 먼저 불러들여야 합니다` };
-  }
+  // 임대는 양방향 다 막힌다 — 나간 선수는 `teamId`가 남의 팀이고, 온 선수는 남의 계약이다
+  const locked = loanLockOf(player);
+  if (locked) return { ok: false, message: locked };
   if (player.teamId !== state.userTeamId) {
     return { ok: false, message: `${player.name}은(는) 우리 선수가 아닙니다` };
   }
@@ -718,9 +721,8 @@ export function offerPlayerOut(
 ): MarketSkillResult {
   const player = playerById(state, input.playerId);
   if (!player) return { ok: false, message: `"${input.playerId}"라는 선수를 찾지 못했습니다` };
-  if (player.loan?.fromTeamId === state.userTeamId) {
-    return { ok: false, message: `${player.name}은(는) 임대 중입니다 — 먼저 불러들여야 합니다` };
-  }
+  const locked = loanLockOf(player);
+  if (locked) return { ok: false, message: locked };
   if (player.teamId !== state.userTeamId) {
     return { ok: false, message: `${player.name}은(는) 우리 선수가 아닙니다` };
   }
@@ -728,6 +730,10 @@ export function offerPlayerOut(
   if (!buyer) return { ok: false, message: `"${input.teamId}"라는 구단을 찾지 못했습니다` };
   if (buyer.id === state.userTeamId) {
     return { ok: false, message: "우리 구단에 팔 수는 없습니다" };
+  }
+  // 무소속은 구단이 아니라 구단이 없는 상태다 — 받을 장부가 없다 (transfer.md §2)
+  if (!isClubTeam(buyer.id)) {
+    return { ok: false, message: `${teamName(buyer.id)}은(는) 구단이 아닙니다 — 넘길 수 없습니다` };
   }
 
   const existing = openNegotiationFor(state, player.id);
@@ -863,7 +869,10 @@ export function generateIncomingOffers(state: GameState, digest: string[]): void
    * 이적 리스트에 올려도 같은 필터를 지나므로 등재가 아무 일도 하지 않았다.
    */
   const free = (p: GamePlayer) =>
-    liveNegotiationFor(state, p.id) === null && !recentlyRejected(state, p.id);
+    // 빌려 온 선수는 우리 `teamId`를 달고 있어도 남의 계약이라 오퍼가 붙지 않는다
+    loanLockOf(p) === null &&
+    liveNegotiationFor(state, p.id) === null &&
+    !recentlyRejected(state, p.id);
 
   /**
    * **등재된 선수가 먼저다.** 감독이 값을 부르며 내놓은 선수에게는 확률이 다르게
@@ -1322,6 +1331,12 @@ function executeLoanIn(
     negotiation.status = "expired";
     return { ok: false, message: `${player.name}은(는) 이미 우리 선수입니다` };
   }
+  // 빌린 구단은 그 선수를 다시 빌려줄 수 없다 — 계약이 그쪽에 없다
+  const locked = loanLockOf(player);
+  if (locked) {
+    negotiation.status = "expired";
+    return { ok: false, message: locked };
+  }
   const contract = activeContract(state, player.id);
   if (!contract) return { ok: false, message: `${player.name}은(는) 계약이 없습니다` };
   const until = minDate(`${seasonYear(state.season) + 1}-06-30`, contract.until);
@@ -1402,6 +1417,12 @@ function executeRenewal(
   if (player.teamId !== state.userTeamId) {
     negotiation.status = "expired";
     return { ok: false, message: `${player.name}은(는) 이미 우리 선수가 아닙니다` };
+  }
+  // 빌려 온 선수의 재계약은 남의 계약을 우리 것으로 바꿔치기하는 일이다
+  const locked = loanLockOf(player);
+  if (locked) {
+    negotiation.status = "expired";
+    return { ok: false, message: locked };
   }
   const previous = activeContract(state, player.id);
   if (previous) previous.status = "ended";
@@ -1606,6 +1627,16 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
   if (negotiation.kind === "loan_out") return executeLoanOut(state, negotiation, agreed);
   if (negotiation.kind === "renew") return executeRenewal(state, negotiation, agreed);
 
+  /**
+   * **빌린 구단과의 합의로는 오지 않는다.** 계약이 소유 구단에 있어 여기서 계약을
+   * 갈아 끼우면 그 구단은 선수도 이적료도 잃는다 (transfer.md §2). 오퍼 단계가 이미
+   * 막지만, 합의와 확정 사이에 AI 시장이 그 선수를 임대 보낼 수 있어 다시 본다.
+   */
+  const loanLocked = loanLockOf(player);
+  if (loanLocked) {
+    negotiation.status = "expired";
+    return { ok: false, message: loanLocked };
+  }
   // 그 사이 다른 팀이 데려갔으면 무효다
   if (player.teamId !== negotiation.counterpartTeamId) {
     negotiation.status = "expired";
@@ -1636,7 +1667,10 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
     return { ok: false, message: `${teamName(player.teamId)}이(가) ${sellerShort}` };
   }
 
-  const fromTeamId = player.teamId;
+  // 돈과 원장의 상대는 **계약을 가진 구단**이다 — 지금 뛰는 팀과 갈라지는 자리가 임대다
+  const fromTeamId = contractOwnerOf(state, player);
+  // 전술에서 빼는 것은 그 선수가 실제로 뛰던 팀 쪽이다
+  const hostTeamId = player.teamId;
   // 원장 — TRANSFER row가 이력의 원본 (GamePlayer.teamId는 현재값일 뿐)
   state.transfers.push({
     id: `tr-${player.id}-${state.date}`,
@@ -1693,8 +1727,11 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
   }
 
   // 소속 이동 — 새 팀에서는 예비 스쿼드다 (감독이 라인업에 넣는다)
-  releaseFromTactics(state, fromTeamId, player.id);
+  releaseFromTactics(state, hostTeamId, player.id);
   player.teamId = state.userTeamId;
+  // 계약을 옮기는 자리에 임대는 남지 않는다 — 남으면 복귀일에 선수만 원소속으로
+  // 돌아가고 계약은 우리 것으로 남는다 (위 관문이 이미 걸렀어도 값은 여기서 끝난다)
+  player.loan = undefined;
   player.squadNumber = undefined;
   assignSquadNumber(state.players, player);
   player.isCaptain = false;
@@ -1744,6 +1781,12 @@ function executeSale(
   if (player.teamId !== state.userTeamId) {
     negotiation.status = "expired";
     return { ok: false, message: `${player.name}은(는) 이미 우리 선수가 아닙니다` };
+  }
+  // 우리 스쿼드에 있어도 계약이 남의 것이면 팔 수 없다 — 돈이 소유 구단을 지나쳐 온다
+  const loanLocked = loanLockOf(player);
+  if (loanLocked) {
+    negotiation.status = "expired";
+    return { ok: false, message: loanLocked };
   }
   const buyerTeamId = negotiation.counterpartTeamId;
   if (!buyerTeamId) return { ok: false, message: "사는 구단을 알 수 없습니다" };
