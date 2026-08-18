@@ -1,7 +1,7 @@
 import { ageOf } from "@story-fm/domain";
 import type { GamePlayer } from "@story-fm/domain";
 import { diffDays } from "../competition/calendar";
-import { RATING_BASELINE } from "./form";
+import { formLabel, RATING_BASELINE, type FormLabel } from "./form";
 import { settlingOf } from "./settling";
 import {
   activeContract,
@@ -38,6 +38,18 @@ import {
 
 /** 경기의 여운이 남아 있는 기간 — 이 안이면 심경이 그 경기에 매여 있다 */
 const AFTERGLOW_DAYS = 3;
+
+/**
+ * 폼이 말하는 것 — **대역은 `formLabel`이 갖는다.** 문턱을 숫자로 옮겨 적으면
+ * 한쪽만 옮겨졌을 때 이 가지가 소리 없이 죽는다. "평소"는 말할 거리가 아니라 null이다.
+ */
+const FORM_MOOD: Record<FormLabel, string | null> = {
+  절정: "경기력이 절정이라 무엇을 해도 되는 시기다",
+  상승세: "최근 경기력이 물올라 자신감이 붙었다",
+  평소: null,
+  침체: "최근 경기력이 가라앉아 스스로도 답답해한다",
+  바닥: "경기력이 바닥이라 스스로도 어쩔 줄 모른다",
+};
 
 interface LastMatch {
   outcome: "win" | "draw" | "loss";
@@ -186,18 +198,10 @@ export function describeMood(state: GameState, player: GamePlayer): string {
       else if (!role) parts.push("명단 밖이라 존재감을 보여줄 자리가 없다");
     }
 
-    /**
-     * ── 폼 ── 시기를 말한다.
-     * ⚠️ 경계는 `formLabel`(절정 0.73 · 상승세 0.33 · 침체 −0.33 · 바닥 −0.73)과
-     * 같아야 한다. 폼이 −3~3 정수이던 시절의 문턱(±1·±2.2)이 그대로 남아 있어서
-     * 이 가지가 **통째로 죽어 있었다** — 지금 정의역은 −1~+1이라 ±2.2는 영영 오지
-     * 않고 ±1은 정확히 양 끝에서만 걸렸다. 잘나가는 선수의 심경 줄이 비던 이유다.
-     */
+    // ── 폼 ── 시기를 말한다 (대역은 `formLabel`이 갖는다)
     if (parts.length === 0) {
-      if (form >= 0.73) parts.push("경기력이 절정이라 무엇을 해도 되는 시기다");
-      else if (form >= 0.33) parts.push("최근 경기력이 물올라 자신감이 붙었다");
-      else if (form <= -0.73) parts.push("경기력이 바닥이라 스스로도 어쩔 줄 모른다");
-      else if (form <= -0.33) parts.push("최근 경기력이 가라앉아 스스로도 답답해한다");
+      const said = FORM_MOOD[formLabel(form)];
+      if (said !== null) parts.push(said);
     }
 
     /**
@@ -285,8 +289,9 @@ export function buildMoodBrief(state: GameState, from: string, to: string): Mood
       weight += 2;
     }
     const { form, condition } = player.state;
-    if (form >= 0.73 || form <= -0.73) {
-      facts.push(`폼 ${form >= 0 ? "절정" : "바닥"}`);
+    const label = formLabel(form);
+    if (label === "절정" || label === "바닥") {
+      facts.push(`폼 ${label}`);
       weight += 2;
     }
     if (facts.length === 0) continue;
