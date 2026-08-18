@@ -215,6 +215,8 @@ export function isJournalMoney(entry: LedgerEntry, balance: number): boolean {
 
 /** PSR — 3시즌 누적 손실 한도 (실제 EPL 규정과 같은 £105M) */
 export const PSR_LOSS_LIMIT = 105_000_000;
+/** 보고서가 여유를 사실 줄로 적기 시작하는 지점 — 한도 대비 비율 (§7 · §9.2) */
+const PSR_HEADROOM_WARN = 0.25;
 const PSR_SEASONS = 3;
 
 /**
@@ -1538,7 +1540,7 @@ function buildReport(state: GameState, month: string, ledger: LedgerEntry[]): Fi
   const notes: string[] = [];
   const tone = wageRatioTone(s.wageRatio);
   if (tone === "danger") {
-    notes.push(`급여 비중 ${Math.round(s.wageRatio * 100)}% — 위험 구간, 주급 구조를 손볼 때다`);
+    notes.push(`급여 비중 ${Math.round(s.wageRatio * 100)}% — 위험 구간`);
   } else if (tone === "caution") {
     notes.push(`급여 비중 ${Math.round(s.wageRatio * 100)}% — 주의 구간`);
   }
@@ -1546,12 +1548,14 @@ function buildReport(state: GameState, month: string, ledger: LedgerEntry[]): Fi
   if (s.cashNet < 0 && transferOut > 0) {
     notes.push(`이적 지출 ${money(transferOut)}으로 현금이 ${money(Math.abs(s.cashNet))} 줄었다`);
   } else if (s.cashNet < 0) {
-    notes.push(`운영만으로 ${money(Math.abs(s.cashNet))} 적자 — 수입 구조를 점검해야 한다`);
+    notes.push(`운영만으로 ${money(Math.abs(s.cashNet))} 적자`);
   }
   if (psr.headroom < 0) {
     notes.push(`PSR 위반 — 3시즌 누적 ${money(rolling)}, 한도를 ${money(-psr.headroom)} 넘었다`);
-  } else if (psr.headroom < PSR_LOSS_LIMIT * 0.25) {
-    notes.push(`PSR 여유 ${money(psr.headroom)} — 대형 영입 전에 매각이 필요하다`);
+  } else if (psr.headroom < PSR_LOSS_LIMIT * PSR_HEADROOM_WARN) {
+    notes.push(
+      `PSR 여유 ${money(psr.headroom)} (한도의 ${Math.round(PSR_HEADROOM_WARN * 100)}% 미만)`,
+    );
   }
   // 부채는 잔고의 부호로 읽는다 — 감독이 이자를 물고 있다는 사실을 여기서 본다
   const debt = debtOf(state, state.userTeamId);
