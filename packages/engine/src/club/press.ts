@@ -8,7 +8,8 @@ import type {
 } from "@story-fm/domain";
 import { isNaturalAt, naturalPositionOf } from "@story-fm/domain";
 import type { GameState } from "../core/state";
-import { playersOf, pushNarrative, teamNameIn, userPlayers } from "../core/state";
+import { playerById, playersOf, pushNarrative, teamNameIn, userPlayers } from "../core/state";
+import { pickPlayerAmong } from "../core/player-ref";
 import { makeRng, pick } from "../core/rng";
 import { clampForm, formLabel, moraleToForm } from "../squad/form";
 import { recentOutcomes } from "../squad/slump";
@@ -341,6 +342,15 @@ export function applyPressOutcome(
   return { board, media, squad, target, targetName: targetPlayer?.name ?? null, team };
 }
 
+/** 반려에서 후보 목록을 가리키는 이름 — 감독에게 할 말이 아니라 어디를 봤는지의 사실이다 */
+const PRESS_CARD = "이 회견의 사실 카드";
+
+/** 이 회견에서 이름을 부를 수 있는 선수 — **카드에 오른 이름이 전부다** */
+function cardPlayers(state: GameState, conference: PressConference): GamePlayer[] {
+  const named = new Set(conference.facts.map((f) => f.about).filter((id) => id !== null));
+  return [...named].map((id) => playerById(state, id)).filter((p) => p !== null);
+}
+
 /** 부호를 붙인 한 줄 — 0은 쓰지 않는다 */
 const signed = (label: string, v: number) => (v === 0 ? null : `${label} ${v > 0 ? "+" : ""}${v}`);
 
@@ -355,7 +365,20 @@ export function respondToMedia(
   const conference = pendingPress(state);
   if (!conference) return { ok: false, message: "지금 답할 기자회견이 없습니다" };
 
-  const effect = applyPressOutcome(state, conference, input.stance, input.targetPlayerId ?? null);
+  /**
+   * 지목은 **사실 카드 안에서만** 선다 — 기자가 묻지 못한 사실(people.md §4)에
+   * 감독의 답이 닿을 수는 없다. 밖을 겨누면 되돌린다: 감독이 부르지 않은 선수의
+   * 사기가 회견 한 번에 움직이는 것이 반려보다 나쁘다.
+   */
+  const ref = input.targetPlayerId?.trim() ?? "";
+  let target: string | null = null;
+  if (ref !== "") {
+    const picked = pickPlayerAmong(state, cardPlayers(state, conference), ref, PRESS_CARD);
+    if (!picked.ok) return picked;
+    target = picked.player.id;
+  }
+
+  const effect = applyPressOutcome(state, conference, input.stance, target);
   conference.status = "answered";
 
   const parts = [

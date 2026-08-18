@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { RatingSchema } from "./player";
 
+const DateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
 /**
  * 감독 능력치 **5축** — 유저 플레이 × 능력치 계수 구조 (career.md §2).
  *
@@ -45,6 +47,26 @@ export const ManagerReputationSchema = z.object({
   squad: z.number().int().min(0).max(100),
 });
 
+/**
+ * **자리별 마지막 팀토크 날짜** — 같은 자리의 팀토크를 하루 한 번으로 자르는 문
+ * (career.md §2). 경기 전 `pre` · 하프타임 `half` · 경기 후 `post` · 평시 `daily`.
+ *
+ * 팀토크는 선수 하나가 아니라 라커룸 전체에 걸리므로, 면담의 `PlayerState.talkedOn`과
+ * 달리 감독이 들고 있어야 한다.
+ */
+export const TeamTalkLogSchema = z
+  .object({
+    pre: DateString,
+    half: DateString,
+    post: DateString,
+    daily: DateString,
+  })
+  .partial();
+export type TeamTalkLog = z.infer<typeof TeamTalkLogSchema>;
+
+/** 팀토크를 꺼낸 **자리** — 하루 한 번을 세는 단위이기도 하다 (career.md §2) */
+export type TeamTalkOccasion = keyof TeamTalkLog;
+
 export const ManagerSchema = z.object({
   name: z.string().min(1),
   /** 온보딩에서 유저가 직접 입력한 배경 서술 (career.md §1) */
@@ -59,5 +81,13 @@ export const ManagerSchema = z.object({
   boardWarnings: z.number().int().min(0).optional(),
   /** 마지막 경고일 — 같은 말을 매일 반복하지 않기 위한 자리 */
   lastWarnedOn: z.string().optional(),
+  /**
+   * 자리별 마지막 팀토크 날짜 — 같은 말을 하루에 몇 번이고 반복해 사기를 쌓지 못하게
+   * 막는 문 (`TeamTalkLogSchema`).
+   *
+   * 옛 세이브엔 없다 — 없으면 아직 아무 자리에서도 말한 적 없는 것으로 읽고
+   * 세이브 버전을 올리지 않는다.
+   */
+  teamTalkedOn: TeamTalkLogSchema.optional(),
 });
 export type Manager = z.infer<typeof ManagerSchema>;
