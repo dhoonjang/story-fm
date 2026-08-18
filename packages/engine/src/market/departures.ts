@@ -240,24 +240,9 @@ export function loanPlayer(
 }
 
 /**
- * 임대 조기 종료 — 감독이 불러들인다.
+ * 임대 조기 종료 — 감독이 불러들인다(`recall_loan`).
  * 실제 임대에도 리콜 조항이 흔하다(부상 공백·성장 정체).
  */
-export function manageLoan(
-  state: GameState,
-  input: {
-    playerId: string;
-    teamId?: string;
-    until?: string;
-    wageShare?: number;
-    recall?: boolean;
-  },
-): SkillResult {
-  if (input.recall) return recallLoan(state, { playerId: input.playerId });
-  if (!input.teamId) return { ok: false, message: "임대 보낼 구단(teamId)이 필요합니다" };
-  return loanPlayer(state, { ...input, teamId: input.teamId });
-}
-
 export function recallLoan(state: GameState, input: { playerId: string }): SkillResult {
   const pick = pickAnyPlayer(state, input.playerId);
   if (!pick.ok) return { ok: false, message: pick.message };
