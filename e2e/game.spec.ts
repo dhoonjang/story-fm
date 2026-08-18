@@ -445,7 +445,7 @@ test("협상은 카드로 선다 — 재계약 제안", async ({ page }) => {
 
   const card = page.getByTestId("market-renewal").first();
   await expect(card).toBeVisible({ timeout: 15_000 });
-  // 카드가 조건과 기한을 갖는다 (칩을 펼쳐 읽던 것들)
+  // 카드가 조건과 기한을 함께 갖는다 — 금액 두 벌과 답할 기한을 펼치지 않고 읽는다
   await expect(card).toContainText("주급");
   await expect(card).toContainText("기간");
   await expect(card).toContainText("답");

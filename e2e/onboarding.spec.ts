@@ -91,14 +91,16 @@ test("같은 시각은 다시 적지 않는다 — 화자 이름은 턴마다 �
   await expect(page.getByTestId("chat-scroll")).toContainText("접기테스트", { timeout: 30_000 });
 
   // 한 턴이 끝난 것은 **모델 턴이 하나 늘었다**로 안다 — 고정 대기는 빠른 날엔
-  // 낭비고 느린 날엔 다음 발화를 아직 잠긴 입력칸에 밀어 넣는다
+  // 낭비고 느린 날엔 다음 발화를 아직 잠긴 입력칸에 밀어 넣는다.
+  // 기다림은 기본값(15초)에 맡긴다 — 턴 하나가 그보다 오래 걸리면 케이스 전체가
+  // 90초에 걸려 죽으므로, 여기서 늘려 잡으면 무엇이 멎었는지만 흐려진다
   const modelTurns = page.getByTestId("model-turn");
   const messages = ["팀 분위기는 좀 어때", "알겠어", "그대로 가자"];
   for (const [i, msg] of messages.entries()) {
-    await expect(page.getByTestId("chat-input")).toBeEnabled({ timeout: 30_000 });
+    await expect(page.getByTestId("chat-input")).toBeEnabled();
     await page.getByTestId("chat-input").fill(msg);
     await page.getByTestId("chat-send").click();
-    await expect(modelTurns).toHaveCount(i + 2, { timeout: 30_000 });
+    await expect(modelTurns).toHaveCount(i + 2);
   }
 
   const turns = await modelTurns.evaluateAll((nodes) =>
