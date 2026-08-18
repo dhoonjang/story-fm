@@ -352,6 +352,15 @@ export interface PendingMatch {
    */
   positionsPlayed?: Record<string, string>;
   /**
+   * **구간 시뮬의 연속 시계** — 앞 구간이 사건을 굴리다 멈춘 소수 시각.
+   *
+   * 장부의 분은 정수라 사건이 실릴 때 소수가 잘린다. 그 잘린 분에서 다음 구간이
+   * 출발하면 정지점마다 최대 1분이 두 번 굴려져 한 경기의 슈팅이 패킷 기대치를
+   * 넘는다(match.md §1.4). 여기 이어 두면 구간이 몇 번으로 끊기든 총량이 같다.
+   * 옛 세이브엔 없다 — 없으면 장부의 분에서 잇는다 (optional).
+   */
+  segmentClock?: number;
+  /**
    * 실모드 캐스터의 대화 이력. 새 이력은 제공자·모델 태그를 갖는다.
    * unknown[]은 태그 도입 전 Anthropic 세이브 호환용이다.
    */
