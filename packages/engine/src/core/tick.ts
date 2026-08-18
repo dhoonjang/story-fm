@@ -13,7 +13,14 @@ import {
   injuryWeight,
   type RecoveryKind,
 } from "@story-fm/sim";
-import { addDays, dayOfWeek, diffDays, matchesOn, nextMatchFor, windowOpenOn } from "../competition/calendar";
+import {
+  addDays,
+  dayOfWeek,
+  diffDays,
+  matchesOn,
+  nextMatchFor,
+  windowOpenOn,
+} from "../competition/calendar";
 import { teamCatalog } from "../data/team-catalog";
 import { competitionLabel } from "../data/cup-catalog";
 import { isFriendly } from "../competition/friendly";
@@ -516,7 +523,7 @@ function boardSlotOf(state: GameState, player: GamePlayer) {
 function managerTacticsOf(state: GameState, teamId: string): number {
   return teamId === state.userTeamId
     ? state.manager.attributes.tactics
-    : state.teams.find((team) => team.id === teamId)?.aiManagerTacticsRating ?? 65;
+    : (state.teams.find((team) => team.id === teamId)?.aiManagerTacticsRating ?? 65);
 }
 
 /**
@@ -1055,7 +1062,10 @@ export function applyScenePoint(state: GameState, target: ScenePoint): SceneAdva
      * 어긋난다.** 막아야 할 것은 날짜가 넘어가는 것뿐이다 — 경기 중에 하루가
      * 지나면 훈련·성장·협상이 통째로 굴러 버린다.
      */
-    if (target.date === state.date && minutesOfClock(target.clock) > minutesOfClock(clockOf(state))) {
+    if (
+      target.date === state.date &&
+      minutesOfClock(target.clock) > minutesOfClock(clockOf(state))
+    ) {
       state.clock = target.clock;
       return { ok: true, digest: [], stopped: "reached", reached: here(), short: false };
     }

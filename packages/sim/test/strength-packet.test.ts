@@ -303,7 +303,11 @@ describe("buildStrengthPacket", () => {
   it("여섯 축을 통틀어 어느 존도 이득만 받거나 대가만 물지 않는다", () => {
     const axes = ["mentality", "defensiveLine", "pressing", "tempo", "width", "passStyle"] as const;
     const base = buildStrengthPacket(makeSide("str", 80), makeSide("wk", 78));
-    const moved = { attack: { up: 0, down: 0 }, midfield: { up: 0, down: 0 }, defense: { up: 0, down: 0 } };
+    const moved = {
+      attack: { up: 0, down: 0 },
+      midfield: { up: 0, down: 0 },
+      defense: { up: 0, down: 0 },
+    };
     for (const axis of axes) {
       for (const value of [1, 5] as const) {
         const packet = buildStrengthPacket(

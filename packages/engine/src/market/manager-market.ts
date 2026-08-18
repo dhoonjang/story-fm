@@ -83,10 +83,7 @@ function positionOf(state: GameState, teamId: string): { position: number; playe
 }
 
 /** 지금 자리 — 순위와 소화 경기 수 */
-function seatStatus(
-  state: GameState,
-  teamId: string,
-): { position: number; played: number } | null {
+function seatStatus(state: GameState, teamId: string): { position: number; played: number } | null {
   return positionOf(state, teamId);
 }
 
@@ -122,10 +119,7 @@ export function runManagerMarket(state: GameState, digest: string[]): void {
     if (rng() > SACK_CHANCE) continue;
 
     const before = team.aiManagerTacticsRating;
-    team.aiManagerTacticsRating = Math.min(
-      92,
-      Math.max(50, before + randInt(rng, -4, 10)),
-    );
+    team.aiManagerTacticsRating = Math.min(92, Math.max(50, before + randInt(rng, -4, 10)));
     team.managerName = inventPersonName(rng, team.id);
     team.managerSince = state.date;
     sacked += 1;
@@ -141,9 +135,7 @@ export function runManagerMarket(state: GameState, digest: string[]): void {
 
     // 우리 리그의 일만 브리핑한다 — 5대 리그 전체를 올리면 소음이다
     if (leagueOfTeamIn(state, team.id) === ourLeague) {
-      digest.push(
-        `📰 ${teamShortName(team.id)}가 감독을 경질했다 — 후임은 ${team.managerName}`,
-      );
+      digest.push(`📰 ${teamShortName(team.id)}가 감독을 경질했다 — 후임은 ${team.managerName}`);
       pushNarrative(state, `${teamName(team.id)} 감독 경질`, 3);
     }
   }

@@ -298,7 +298,7 @@ describe("기자 페르소나", () => {
     // 소속이 다르면 무엇을 먼저 묻는지가 갈린다
     expect(new Set(reporters.map((r) => r.outlet)).size).toBe(3);
     for (const r of reporters) {
-        expect(r.characterId).toBe(r.name); // 태그는 직책이 아니라 이름이다
+      expect(r.characterId).toBe(r.name); // 태그는 직책이 아니라 이름이다
       expect(r.speechStyle.samples.length).toBeGreaterThan(0);
     }
   });

@@ -387,8 +387,7 @@ describe("회귀: 부상·정지 선수는 경기에 나설 수 없다", () => {
         !m.result &&
         (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
     )!;
-    const opponentId =
-      today.homeTeamId === state.userTeamId ? today.awayTeamId : today.homeTeamId;
+    const opponentId = today.homeTeamId === state.userTeamId ? today.awayTeamId : today.homeTeamId;
     const inXI = new Set(assignmentsOf(state, opponentId, "starting").map((a) => a.playerId));
     // 배치 밖 최상위 둘 — 걸러지지 않으면 OVR 순 벤치의 맨 위에 선다
     const spare = playersOf(state, opponentId)
@@ -409,7 +408,9 @@ describe("회귀: 부상·정지 선수는 경기에 나설 수 없다", () => {
 
     expect(startMatch(state).ok).toBe(true);
     const theirs =
-      userSide(state) === "home" ? state.pendingMatch!.ledger.away : state.pendingMatch!.ledger.home;
+      userSide(state) === "home"
+        ? state.pendingMatch!.ledger.away
+        : state.pendingMatch!.ledger.home;
     expect(theirs.bench.length).toBeGreaterThan(0);
     expect(theirs.bench).not.toContain(banned.id);
     expect(theirs.bench).not.toContain(reserve.id);
@@ -440,7 +441,9 @@ describe("회귀: 부상·정지 선수는 경기에 나설 수 없다", () => {
 
     expect(startMatch(state).ok).toBe(true);
     const mine =
-      userSide(state) === "home" ? state.pendingMatch!.ledger.home : state.pendingMatch!.ledger.away;
+      userSide(state) === "home"
+        ? state.pendingMatch!.ledger.home
+        : state.pendingMatch!.ledger.away;
     expect(mine.onPitch).toHaveLength(11);
     expect(mine.onPitch).not.toContain(spare.id);
     expect(mine.bench).not.toContain(spare.id);
@@ -465,7 +468,9 @@ describe("회귀: 부상·정지 선수는 경기에 나설 수 없다", () => {
 
     expect(startMatch(state).ok).toBe(true);
     const mine =
-      userSide(state) === "home" ? state.pendingMatch!.ledger.home : state.pendingMatch!.ledger.away;
+      userSide(state) === "home"
+        ? state.pendingMatch!.ledger.home
+        : state.pendingMatch!.ledger.away;
     expect(mine.bench).toHaveLength(MATCHDAY_BENCH);
     const keepers = mine.bench.filter((id) => {
       const player = playersOf(state, teamId).find((p) => p.id === id);
@@ -837,7 +842,9 @@ describe("감독 경기 마감의 대칭 (match.md §6)", () => {
 
     // 카드 → BOOKING, 퇴장 → 다음 경기 정지 (간이 시뮬과 같은 문)
     const bookings = state.bookings.filter((b) => b.matchId === matchId);
-    expect(bookings.filter((b) => b.gamePlayerId === booked && b.card === "yellow")).toHaveLength(1);
+    expect(bookings.filter((b) => b.gamePlayerId === booked && b.card === "yellow")).toHaveLength(
+      1,
+    );
     expect(bookings.filter((b) => b.gamePlayerId === sentOff && b.card === "red")).toHaveLength(1);
     const red = state.suspensions.find((s) => s.gamePlayerId === sentOff);
     expect(red?.cause).toBe("red");
@@ -859,7 +866,9 @@ describe("감독 경기 마감의 대칭 (match.md §6)", () => {
     const state = atMatchday(42, { afterPreseason: true });
     expect(startMatch(state).ok).toBe(true);
     const mine =
-      userSide(state) === "home" ? state.pendingMatch!.ledger.home : state.pendingMatch!.ledger.away;
+      userSide(state) === "home"
+        ? state.pendingMatch!.ledger.home
+        : state.pendingMatch!.ledger.away;
     const roster = userPlayers(state);
     const out = assignmentsOf(state, state.userTeamId, "starting").find(
       (a) => weightSlotOf(a.position) === "CB" && mine.onPitch.includes(a.playerId),
@@ -1087,7 +1096,9 @@ describe("교체 투입의 역할 (match.md §2)", () => {
     expect(substitutePlayer(state, { out: outDf.playerId, in: inFw }).ok).toBe(true);
     expect(substitutePlayer(state, { out: outFw.playerId, in: inDf }).ok).toBe(true);
 
-    const lineup = (side === "home" ? state.pendingMatch!.packet.home : state.pendingMatch!.packet.away).lineup;
+    const lineup = (
+      side === "home" ? state.pendingMatch!.packet.home : state.pendingMatch!.packet.away
+    ).lineup;
     expect(lineup.find((p) => p.id === inFw)?.position).toBe(outDf.position);
     expect(lineup.find((p) => p.id === inDf)?.position).toBe(outFw.position);
   });

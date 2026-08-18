@@ -97,7 +97,8 @@ export function userSide(state: GameState): "home" | "away" {
 }
 
 /** 전술판의 한 자리 — 사람이 바뀌어도 자리는 그대로 남는다 */
-type Seat = Pick<TacticAssignment, "position"> & Partial<Pick<TacticAssignment, "point" | "roleId">>;
+type Seat = Pick<TacticAssignment, "position"> &
+  Partial<Pick<TacticAssignment, "point" | "roleId">>;
 
 /** 배치 + 선수 → 패킷 입력 슬롯. 온필드 id 목록으로 필터해 교체·퇴장을 반영한다 */
 function slotsFor(state: GameState, teamId: string, ids: string[]): LineupSlot[] {

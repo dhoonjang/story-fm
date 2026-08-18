@@ -16,11 +16,7 @@ const PatchSchema = z.object({
   coefficient: z.number().min(1, "계수는 1 이상이어야 합니다").max(99).optional(),
   realSquads: z.boolean().optional(),
   broadcastPool: z.number().min(0, "중계권 배율은 0 이상이어야 합니다").max(10).optional(),
-  avgTicketPrice: z
-    .number()
-    .min(0, "평균 티켓 단가는 0 이상이어야 합니다")
-    .max(10_000)
-    .optional(),
+  avgTicketPrice: z.number().min(0, "평균 티켓 단가는 0 이상이어야 합니다").max(10_000).optional(),
 });
 
 function payload(message: string) {

@@ -160,9 +160,9 @@ describe("오피스 뷰 — 달력 (일정 축)", () => {
 
     const events = buildOfficeViews(state).calendar.events;
     // 진행 중인 달은 원장에서 파생한다 — 큰 비정기 지출이 그날 줄로 선다
-    expect(
-      (events[day] ?? []).some((l) => l.kind === "money" && l.text.startsWith(label)),
-    ).toBe(true);
+    expect((events[day] ?? []).some((l) => l.kind === "money" && l.text.startsWith(label))).toBe(
+      true,
+    );
 
     // 매달·매경기 같은 자리에 서는 항목은 문턱을 넘어도 일지에 없다
     const moneyTexts = Object.values(events)

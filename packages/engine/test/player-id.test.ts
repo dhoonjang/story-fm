@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  claimPlayerId,
-  playerCatalog,
-  slugifyName,
-  transitionSeason,
-} from "@story-fm/engine";
+import { claimPlayerId, playerCatalog, slugifyName, transitionSeason } from "@story-fm/engine";
 import { createTestGame } from "./helpers";
 
 /**

@@ -383,7 +383,10 @@ describe("연장 장부 (match.md §2)", () => {
 
   it("연장에는 교체 한 장·한 번이 더 있다 — 6인/4회", () => {
     // 벤치를 넉넉히 둔다 — 여기서 재는 것은 한도이지 벤치 깊이가 아니다
-    const deepBench = { onPitch: home.onPitch, bench: Array.from({ length: 8 }, (_, i) => `b${i}`) };
+    const deepBench = {
+      onPitch: home.onPitch,
+      bench: Array.from({ length: 8 }, (_, i) => `b${i}`),
+    };
     let state = createLedger(deepBench, away);
     const half = applyEvents(state, [ev({ minute: 45, type: "half_time" })]);
     if (!half.ok) throw new Error("half fail");

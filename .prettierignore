@@ -13,3 +13,10 @@ apps/web/next-env.d.ts
 
 # 게임 세이브 — 로컬 플레이 데이터
 .data/
+
+# 실선수 시드 표 — **한 줄에 한 명**으로 적는다. 축이 열다섯이라 한 줄이 100자를
+# 훌쩍 넘고, 포매터에 맡기면 2,370줄이 40,687줄이 된다(eu-squads). 그러면 한 명을
+# 고친 diff가 20줄이 되어 무엇이 달라졌는지 읽히지 않는다 — 표는 표로 둔다.
+packages/engine/src/data/epl-players.ts
+packages/engine/src/data/eu-squads.ts
+packages/engine/src/data/market-leagues.ts

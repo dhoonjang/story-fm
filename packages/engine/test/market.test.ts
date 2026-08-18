@@ -283,7 +283,6 @@ describe("정보 비대칭", () => {
     });
     expect(clear.fuzzy).toBe(false);
   });
-
 });
 
 describe("응답 지연 — 상황에서 나온다", () => {

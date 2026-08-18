@@ -89,7 +89,8 @@ export function clubEconomyLevel(
   commercialTier?: 1 | 2 | 3 | 4,
 ): number {
   const team = teamCatalogById(teamId);
-  const brand = commercialTier ?? clubProfile(teamId, tier ?? team?.tier ?? UNKNOWN_TIER).commercialTier;
+  const brand =
+    commercialTier ?? clubProfile(teamId, tier ?? team?.tier ?? UNKNOWN_TIER).commercialTier;
   const league = leagueId ?? team?.leagueId;
   const level = league === undefined ? UNKNOWN_LEAGUE_LEVEL : leagueEconomyLevel(league);
   return level + (1 - level) * BRAND_GLOBAL_LIFT[brand];

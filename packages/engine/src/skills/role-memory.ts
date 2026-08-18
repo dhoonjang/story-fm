@@ -24,9 +24,7 @@ export function recallRole(
   position: string,
 ): string | undefined {
   const code = position.toUpperCase();
-  const memory = state.roleMemory?.find(
-    (m) => m.gamePlayerId === playerId && m.position === code,
-  );
+  const memory = state.roleMemory?.find((m) => m.gamePlayerId === playerId && m.position === code);
   if (!memory) return undefined;
   return rolesFor(code).some((r) => r.id === memory.roleId) ? memory.roleId : undefined;
 }
@@ -48,9 +46,7 @@ export function rememberRole(
   if (state.phase === "match") return;
   const code = position.toUpperCase();
   if (!rolesFor(code).some((r) => r.id === roleId)) return;
-  const memory = state.roleMemory.find(
-    (m) => m.gamePlayerId === playerId && m.position === code,
-  );
+  const memory = state.roleMemory.find((m) => m.gamePlayerId === playerId && m.position === code);
   if (memory) memory.roleId = roleId;
   else state.roleMemory.push({ gamePlayerId: playerId, position: code, roleId });
 }

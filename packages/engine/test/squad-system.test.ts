@@ -60,8 +60,9 @@ describe("1·2군 스쿼드", () => {
     // 등록 규칙(25인·홈그로운)에 막히지 않는 2군을 고른다 — 이 테스트가 보려는 건
     // 승격 여부가 아니라 "2군은 라인업에 못 들어간다"는 규칙이다
     const reserve = reservePlayers(state, state.userTeamId).find(
-      (p) => setSquadLevel(state, { playerId: p.id, level: "first" }).ok
-        && setSquadLevel(state, { playerId: p.id, level: "reserve" }).ok,
+      (p) =>
+        setSquadLevel(state, { playerId: p.id, level: "first" }).ok &&
+        setSquadLevel(state, { playerId: p.id, level: "reserve" }).ok,
     )!;
     expect(reserve, "승격 가능한 2군이 없다").toBeDefined();
     const starters = userTactics(state)
@@ -83,8 +84,9 @@ describe("1·2군 스쿼드", () => {
     // 등록 규칙(25인·홈그로운)에 막히지 않는 2군을 고른다 — 이 테스트가 보려는 건
     // 승격 여부가 아니라 "2군은 라인업에 못 들어간다"는 규칙이다
     const reserve = reservePlayers(state, state.userTeamId).find(
-      (p) => setSquadLevel(state, { playerId: p.id, level: "first" }).ok
-        && setSquadLevel(state, { playerId: p.id, level: "reserve" }).ok,
+      (p) =>
+        setSquadLevel(state, { playerId: p.id, level: "first" }).ok &&
+        setSquadLevel(state, { playerId: p.id, level: "reserve" }).ok,
     )!;
     expect(reserve, "승격 가능한 2군이 없다").toBeDefined();
     expect(developsByCore(state, first), "1군이 코어 성장 대상이 됐다").toBe(false);

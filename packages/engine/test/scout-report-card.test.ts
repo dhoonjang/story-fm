@@ -89,9 +89,8 @@ describe("보고서 한 장", () => {
     let arrival = "";
     for (let i = 0; i < SCOUT_DAYS * 3 && !arrival; i++) {
       arrival =
-        advanceTime(state, { days: 1 }).digest.find((d) =>
-          d.startsWith("스카우트 보고서 도착"),
-        ) ?? "";
+        advanceTime(state, { days: 1 }).digest.find((d) => d.startsWith("스카우트 보고서 도착")) ??
+        "";
     }
     const card = scoutReportCard(state, p.id)!;
     expect(arrival).toBe(`스카우트 보고서 도착 — ${scoutReportLine(state, p.id)}`);

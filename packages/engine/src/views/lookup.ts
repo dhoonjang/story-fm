@@ -201,7 +201,15 @@ function resolveCompetitionId(competition: string): string | null {
 
 /** 대회 id 힌트 — 카탈로그가 편집될 수 있으므로 부를 때 만든다 */
 const competitionHint = () =>
-  `리그(${topLeagues().map((l) => l.id).join("·")}) · 이적 시장 전용(${marketLeagues().map((l) => l.id).join("·")}) · 대항전(${cupCatalog().map((c) => c.id).join("·")}) · 국내 컵(${domesticCupCatalog().map((c) => c.id).join("·")})`;
+  `리그(${topLeagues()
+    .map((l) => l.id)
+    .join("·")}) · 이적 시장 전용(${marketLeagues()
+    .map((l) => l.id)
+    .join("·")}) · 대항전(${cupCatalog()
+    .map((c) => c.id)
+    .join("·")}) · 국내 컵(${domesticCupCatalog()
+    .map((c) => c.id)
+    .join("·")})`;
 
 /** 우리 팀 선수 한 줄 — 정확 수치 (오피스 뷰가 이미 보여주는 정보) */
 function ourRow(state: GameState, p: GamePlayer): string {

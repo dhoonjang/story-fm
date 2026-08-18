@@ -128,9 +128,10 @@ describe("로테이션으로 뺀 선수는 그 경기에서 빠진다", () => {
 
   it("벤치에도 없다 — OVR 순 벤치의 맨 위로 돌아오지 않는다", () => {
     const { after, victim } = rotated();
-    expect(after.starters.map((p) => p.id), `${victim.name}이 지쳤는데도 선발`).not.toContain(
-      victim.id,
-    );
+    expect(
+      after.starters.map((p) => p.id),
+      `${victim.name}이 지쳤는데도 선발`,
+    ).not.toContain(victim.id);
     expect(
       (after.bench ?? []).map((p) => p.id),
       `${victim.name}이 벤치 1순위로 돌아왔다 — 46분에 다시 들어온다`,

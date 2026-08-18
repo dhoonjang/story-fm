@@ -77,7 +77,6 @@ describe("선수 풀", () => {
       expect(squad.length, team.id).toBeLessThan(30);
     }
   });
-
 });
 
 describe("이적창 — 우리와 시기가 다르다", () => {
@@ -155,8 +154,9 @@ describe("이적창 — 우리와 시기가 다르다", () => {
     runMedicals(state, []);
     // 소견이 붙으면 사는 쪽이 깎아 다시 부른다 — 그 값을 받으면 그 자리에서 확정된다
     if (negotiation.status === "open") {
-      expect(answerIncomingOffer(state, { negotiationId: negotiation.id, verdict: "accept" }).ok)
-        .toBe(true);
+      expect(
+        answerIncomingOffer(state, { negotiationId: negotiation.id, verdict: "accept" }).ok,
+      ).toBe(true);
       const forced = acceptDeal(state, negotiation.id);
       expect(forced.ok, forced.message).toBe(true);
     }

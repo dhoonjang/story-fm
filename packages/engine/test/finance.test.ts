@@ -853,7 +853,6 @@ describe("PSR", () => {
     expect(digest.some((line) => line.includes("재정 성과를 반영해"))).toBe(true);
     expect(finance.transferBudget).toBeGreaterThan(seasonBudgetBaseOf(state, state.userTeamId));
   });
-
 });
 
 /**

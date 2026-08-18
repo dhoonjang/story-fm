@@ -85,7 +85,7 @@ expect(updated.views.squad.formation).toBe("3-5-2")   // 받는 값: "4-2-3-1"
 ### (c) `api.test.ts:326` — 첼시의 기본 멘탈리티
 
 ```ts
-expect(before.tactics.mentality).toBe(3)   // 받는 값: 4
+expect(before.tactics.mentality).toBe(3); // 받는 값: 4
 ```
 
 새 게임의 초기 6축은 이제 **구단 운용 정체성**(`TACTICAL_STYLE`)에서 나온다
@@ -121,12 +121,12 @@ e2e는 이렇게 적는다:
 
 그런데 **유닛 테스트 4건이 정반대를 못 박고 있다**:
 
-| 파일 | 테스트 |
-| --- | --- |
+| 파일                                      | 테스트                                                                                                           |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | `packages/engine/test/skills.test.ts:324` | 포메이션 이름을 보내도 프리셋으로 좌표를 덮지 않는다 (`setTactics({formation:"3-5-2"})` 후 **좌표 전부 그대로**) |
-| `packages/engine/test/skills.test.ts:377` | 전술: Zod 검증 — `spec.formation`이 `"4-4-2"`가 **아님**을 단언 |
-| `packages/engine/test/skills.test.ts:788` | 포메이션 이름은 배열 순서와 선수 좌표를 바꾸지 않는다 |
-| `packages/agents/test/mock-gm.test.ts:88` | 포메이션 이름은 프리셋을 적용하지 않고 전술 축만 반영한다 |
+| `packages/engine/test/skills.test.ts:377` | 전술: Zod 검증 — `spec.formation`이 `"4-4-2"`가 **아님**을 단언                                                  |
+| `packages/engine/test/skills.test.ts:788` | 포메이션 이름은 배열 순서와 선수 좌표를 바꾸지 않는다                                                            |
+| `packages/agents/test/mock-gm.test.ts:88` | 포메이션 이름은 프리셋을 적용하지 않고 전술 축만 반영한다                                                        |
 
 지금 `set_tactics` 도구 스키마에는 `formation` 자체가 없다(2729a04에서 빠졌다).
 즉 **감독이 모양을 바꿀 길은 칩을 직접 끄는 것뿐**이고, mock GM은 아직
@@ -150,12 +150,12 @@ e2e는 이렇게 적는다:
 
 ## 3. 지금 상태
 
-| 검증 | 결과 |
-| --- | --- |
-| `pnpm typecheck` | 통과 |
-| `pnpm lint` | 기존 1건만 (`match-flow.test.ts:187`) |
-| `pnpm test` | 7 실패 = 기존 4(skill-label 2 · skill-surface 1 · match-stamina 1) + api.test 3(위 a·b·c) |
-| `E2E_SLOT=1 pnpm e2e game.spec` | 3 통과 / 2 실패(`:73`은 f, `:467`은 d·e) — `:795`는 **이번에 고쳐서 통과** |
+| 검증                            | 결과                                                                                      |
+| ------------------------------- | ----------------------------------------------------------------------------------------- |
+| `pnpm typecheck`                | 통과                                                                                      |
+| `pnpm lint`                     | 기존 1건만 (`match-flow.test.ts:187`)                                                     |
+| `pnpm test`                     | 7 실패 = 기존 4(skill-label 2 · skill-surface 1 · match-stamina 1) + api.test 3(위 a·b·c) |
+| `E2E_SLOT=1 pnpm e2e game.spec` | 3 통과 / 2 실패(`:73`은 f, `:467`은 d·e) — `:795`는 **이번에 고쳐서 통과**                |
 
 ## 4. 사용자에게 물을 것
 

@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { MEMORY_FADE_DAYS, familiarityForSetup, tacticsSignature } from "@story-fm/domain";
-import { assignmentsOf, memoryRetention, playerById, setTactics, userTactics, type GameState } from "@story-fm/engine";
+import {
+  assignmentsOf,
+  memoryRetention,
+  playerById,
+  setTactics,
+  userTactics,
+  type GameState,
+} from "@story-fm/engine";
 import { createTestGame } from "./helpers";
 
 /**
@@ -28,8 +35,18 @@ describe("기억을 붙잡는 힘", () => {
   });
 
   it("주기가 곧 망각 속도다 — 같은 기간에 덜 잊는다", () => {
-    const spec = { formation: "4-4-2", mentality: 3, defensiveLine: 3, pressing: 3, tempo: 3, width: 3, passStyle: 3 } as const;
-    const drilled = [{ signature: tacticsSignature(spec), familiarity: 80, lastUsedOn: "2026-07-01" }];
+    const spec = {
+      formation: "4-4-2",
+      mentality: 3,
+      defensiveLine: 3,
+      pressing: 3,
+      tempo: 3,
+      width: 3,
+      passStyle: 3,
+    } as const;
+    const drilled = [
+      { signature: tacticsSignature(spec), familiarity: 80, lastUsedOn: "2026-07-01" },
+    ];
     const after90 = (retention: number) =>
       familiarityForSetup(drilled, spec, "2026-09-29", { retention });
 

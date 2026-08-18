@@ -64,9 +64,9 @@ export function Modal({
 
   function trapTab(e: KeyboardEvent<HTMLDivElement>) {
     if (e.key !== "Tab") return;
-    const nodes = Array.from(cardRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []).filter(
-      (n) => n.offsetParent !== null,
-    );
+    const nodes = Array.from(
+      cardRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [],
+    ).filter((n) => n.offsetParent !== null);
     const first = nodes[0];
     const last = nodes[nodes.length - 1];
     // 잡을 것이 없으면 브라우저 기본 이동에 맡긴다

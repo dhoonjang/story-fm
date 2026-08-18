@@ -3,11 +3,38 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { OfficeViews } from "@story-fm/engine";
-import { AXIS_GROUPS, AXIS_GROUP_KO, AXIS_KO, CHIP_SIZE, anchorOf, conditionLabel, clampToBoard, isNaturalAt, positionAtPoint, footLabel, physiqueLabel, positionGroupOf, positionProficiency, adaptationOf, defaultRoleOf, rolesFor, separateBoardPoints, shapeOf, snapToBoard, type BoardPoint } from "@story-fm/domain";
+import {
+  AXIS_GROUPS,
+  AXIS_GROUP_KO,
+  AXIS_KO,
+  CHIP_SIZE,
+  anchorOf,
+  conditionLabel,
+  clampToBoard,
+  isNaturalAt,
+  positionAtPoint,
+  footLabel,
+  physiqueLabel,
+  positionGroupOf,
+  positionProficiency,
+  adaptationOf,
+  defaultRoleOf,
+  rolesFor,
+  separateBoardPoints,
+  shapeOf,
+  snapToBoard,
+  type BoardPoint,
+} from "@story-fm/domain";
 import type { GamePayload, GameSlice } from "@/lib/store";
 import type { MatchBoardOrder } from "@/lib/match-orders";
 import { slotOverallOf } from "@/lib/slot-overall";
-import { familiarityForRole, lineupBody, resetRolesForMovedPlayers, roleAtSlot, type BoardState } from "@/lib/board-roles";
+import {
+  familiarityForRole,
+  lineupBody,
+  resetRolesForMovedPlayers,
+  roleAtSlot,
+  type BoardState,
+} from "@/lib/board-roles";
 import { money } from "@/lib/money";
 import { IconBoard, IconChevron } from "@/components/icons";
 import { PitchChip, PitchGround } from "../pitch";

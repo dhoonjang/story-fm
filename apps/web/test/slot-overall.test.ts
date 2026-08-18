@@ -131,5 +131,4 @@ describe("자리와 역할이 값을 움직인다", () => {
     const cb = shared().rows.find((p) => p.positions.some((x) => x.position === "CB"))!;
     expect(slotOverallOf(cb, "CB", "stopper")).not.toBe(slotOverallOf(cb, "CB", "cover-defender"));
   });
-
 });

@@ -227,7 +227,9 @@ export function TeamsPanel({
             ))}
             {visible.length === 0 && (
               <tr className="admin-list-empty">
-                <td colSpan={8}>{loaded ? "조건에 맞는 팀이 없습니다" : "팀 카탈로그를 불러오는 중…"}</td>
+                <td colSpan={8}>
+                  {loaded ? "조건에 맞는 팀이 없습니다" : "팀 카탈로그를 불러오는 중…"}
+                </td>
               </tr>
             )}
           </tbody>

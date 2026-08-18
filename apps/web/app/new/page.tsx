@@ -154,7 +154,11 @@ export default function NewGamePage() {
               aria-current={i === stepIndex ? "step" : undefined}
             >
               {i < stepIndex ? (
-                <button type="button" onClick={() => setStep(s.key)} data-testid={`step-to-${s.key}`}>
+                <button
+                  type="button"
+                  onClick={() => setStep(s.key)}
+                  data-testid={`step-to-${s.key}`}
+                >
                   {s.label}
                 </button>
               ) : (

@@ -383,7 +383,8 @@ function planTransfer(
    */
   if (
     isTopFlightIn(state, buyerId) &&
-    weeklyWagesOf(state, buyerId) + newWage > clubWageBudget(buyerId, undefined, state) * WAGE_HEADROOM
+    weeklyWagesOf(state, buyerId) + newWage >
+      clubWageBudget(buyerId, undefined, state) * WAGE_HEADROOM
   ) {
     return null;
   }

@@ -689,10 +689,7 @@ function teamDrafts(team: TeamCatalogEntry): CatalogDraft[] {
  * 어드민이 새로 만든 클럽의 스쿼드 — 편집된 선수 카탈로그에 붙일 때 쓴다.
  * 이름 충돌을 피하려고 이미 쓰인 id를 받는다.
  */
-export function buildTeamSquad(
-  team: TeamCatalogEntry,
-  taken: Set<string>,
-): PlayerCatalogEntry[] {
+export function buildTeamSquad(team: TeamCatalogEntry, taken: Set<string>): PlayerCatalogEntry[] {
   return teamDrafts(team).map((e) => ({ id: claimPlayerId(e.nameEn, e.birthdate, taken), ...e }));
 }
 

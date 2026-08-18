@@ -20,7 +20,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const state = loadGame(id);
     if (!state) return NextResponse.json({ error: "게임을 찾을 수 없습니다" }, { status: 404 });
     if (state.phase === "match") {
-      return NextResponse.json({ error: "경기 중에는 스쿼드를 이동할 수 없습니다" }, { status: 409 });
+      return NextResponse.json(
+        { error: "경기 중에는 스쿼드를 이동할 수 없습니다" },
+        { status: 409 },
+      );
     }
     const result = setSquadLevel(state, body.data);
     if (!result.ok) return NextResponse.json({ error: result.message }, { status: 400 });

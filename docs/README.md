@@ -8,31 +8,31 @@
 
 ## 폴더가 곧 층이다
 
-| 폴더 | 무엇 | 성격 |
-| --- | --- | --- |
-| [data/](data/) | 무엇이 존재하는가 — 선수·팀·대회·인물·세이브 | 카탈로그와 상태 |
-| [simulation/](simulation/) | 무엇이 일어나는가 — 경기·시즌·이적·재정·커리어 | 결정적 순수 함수 |
-| [llm/](llm/) | 그것을 어떻게 말하는가 — 모델·에이전트·프롬프트 | 상태를 못 바꾼다 |
+| 폴더                       | 무엇                                            | 성격             |
+| -------------------------- | ----------------------------------------------- | ---------------- |
+| [data/](data/)             | 무엇이 존재하는가 — 선수·팀·대회·인물·세이브    | 카탈로그와 상태  |
+| [simulation/](simulation/) | 무엇이 일어나는가 — 경기·시즌·이적·재정·커리어  | 결정적 순수 함수 |
+| [llm/](llm/)               | 그것을 어떻게 말하는가 — 모델·에이전트·프롬프트 | 상태를 못 바꾼다 |
 
 ## 무엇을 하려는가
 
-| 하려는 일 | 읽을 것 |
-| --- | --- |
-| 게임이 뭔지 알고 싶다 | [overview.md](overview.md) |
-| 선수 능력치·성장·자리를 만진다 | [data/player.md](data/player.md) |
-| 구단·스쿼드 구성을 만진다 | [data/team.md](data/team.md) |
-| 대회 규정을 만진다 | [data/competition.md](data/competition.md) |
-| 경기 결과·밸런스를 만진다 | [simulation/match.md](simulation/match.md) |
-| 밸런스 눈금을 재고 옮긴다 | [simulation/balance-harness.md](simulation/balance-harness.md) |
-| 일정·tick·시즌 전환을 만진다 | [simulation/season.md](simulation/season.md) |
-| 이적·계약을 만진다 | [simulation/transfer.md](simulation/transfer.md) |
-| 구단 살림을 만진다 | [simulation/finance.md](simulation/finance.md) |
-| 감독 성장·보드를 만진다 | [simulation/career.md](simulation/career.md) |
-| 대사·화자·인물을 만진다 | [data/people.md](data/people.md) |
-| LLM 호출을 추가·변경한다 | [llm/models.md](llm/models.md) · [llm/agents.md](llm/agents.md) |
-| 프롬프트·스킬 표면을 만진다 | [llm/prompts.md](llm/prompts.md) |
-| 엔티티·세이브 구조를 만진다 | [data/game-state.md](data/game-state.md) |
-| 선수/팀 데이터를 갈아 끼운다 | [data/sources.md](data/sources.md) |
+| 하려는 일                      | 읽을 것                                                         |
+| ------------------------------ | --------------------------------------------------------------- |
+| 게임이 뭔지 알고 싶다          | [overview.md](overview.md)                                      |
+| 선수 능력치·성장·자리를 만진다 | [data/player.md](data/player.md)                                |
+| 구단·스쿼드 구성을 만진다      | [data/team.md](data/team.md)                                    |
+| 대회 규정을 만진다             | [data/competition.md](data/competition.md)                      |
+| 경기 결과·밸런스를 만진다      | [simulation/match.md](simulation/match.md)                      |
+| 밸런스 눈금을 재고 옮긴다      | [simulation/balance-harness.md](simulation/balance-harness.md)  |
+| 일정·tick·시즌 전환을 만진다   | [simulation/season.md](simulation/season.md)                    |
+| 이적·계약을 만진다             | [simulation/transfer.md](simulation/transfer.md)                |
+| 구단 살림을 만진다             | [simulation/finance.md](simulation/finance.md)                  |
+| 감독 성장·보드를 만진다        | [simulation/career.md](simulation/career.md)                    |
+| 대사·화자·인물을 만진다        | [data/people.md](data/people.md)                                |
+| LLM 호출을 추가·변경한다       | [llm/models.md](llm/models.md) · [llm/agents.md](llm/agents.md) |
+| 프롬프트·스킬 표면을 만진다    | [llm/prompts.md](llm/prompts.md)                                |
+| 엔티티·세이브 구조를 만진다    | [data/game-state.md](data/game-state.md)                        |
+| 선수/팀 데이터를 갈아 끼운다   | [data/sources.md](data/sources.md)                              |
 
 ## 문서 쓰는 규칙
 

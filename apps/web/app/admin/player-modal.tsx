@@ -91,7 +91,10 @@ export function PlayerModal({
     const next = POSITION_CODES.find((c) => !used.has(c));
     // 남은 코드가 없으면 더하지 않는다 — 중복 포지션은 저장에서 거절당한다
     if (next === undefined) return;
-    setPositions((cur) => [...cur, { position: next, proficiency: 70, isNatural: cur.length === 0 }]);
+    setPositions((cur) => [
+      ...cur,
+      { position: next, proficiency: 70, isNatural: cur.length === 0 },
+    ]);
   }
 
   /** 저장 전 검증 — 서버가 거절할 조합을 여기서 먼저 잡는다 */
@@ -104,7 +107,8 @@ export function PlayerModal({
       const codes = positions.map((p) => p.position);
       if (new Set(codes).size !== codes.length) return "같은 포지션이 두 번 들어 있습니다";
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(birthdate)) return "생년월일 형식(YYYY-MM-DD)이 올바르지 않습니다";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(birthdate))
+      return "생년월일 형식(YYYY-MM-DD)이 올바르지 않습니다";
     return null;
   }
 

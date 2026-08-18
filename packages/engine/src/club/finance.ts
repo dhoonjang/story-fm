@@ -287,7 +287,9 @@ function brandPoolLift(state: GameState | undefined, teamId: string): number {
  * 받으면서 1부 고정비를 내던 자리다 (finance.md §6.2).
  */
 function economyOf(state: GameState | undefined, teamId: string): number {
-  return state ? clubEconomyLevelIn(state, teamId) : clubEconomyLevel(teamId, tierOf(state, teamId));
+  return state
+    ? clubEconomyLevelIn(state, teamId)
+    : clubEconomyLevel(teamId, tierOf(state, teamId));
 }
 
 /** 시설·아카데미 월 고정비 — tier 정액에 구단 경제 수준을 곱한다 */

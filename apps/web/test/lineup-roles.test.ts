@@ -45,7 +45,8 @@ const otherRoleFor = (player: SquadRow): string => {
   if (!found) throw new Error("no alternative role");
   return found.id;
 };
-const slotsOf = (rows: SquadRow[]) => rows.map((p) => ({ playerId: p.id, point: p.assignedPoint! }));
+const slotsOf = (rows: SquadRow[]) =>
+  rows.map((p) => ({ playerId: p.id, point: p.assignedPoint! }));
 const editsOf = (id: string) => loadGame(id)?.pendingEdits ?? [];
 
 beforeAll(() => {

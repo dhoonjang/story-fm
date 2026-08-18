@@ -69,7 +69,6 @@ describe("이적 리스트 — 값을 부르며 내놓는다", () => {
     };
     expect(listedGot(true)).toBe(true);
   });
-
 });
 
 describe("매각 제안 — 특정 구단에 직접 묻는다", () => {

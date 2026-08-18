@@ -346,9 +346,7 @@ function applyOne(
        */
       const last = state.events[state.events.length - 1];
       const afterSecondYellow =
-        last?.type === "yellow_card" &&
-        last.actors[0] === player &&
-        state.sentOff.includes(player);
+        last?.type === "yellow_card" && last.actors[0] === player && state.sentOff.includes(player);
       if (afterSecondYellow) break;
       const err = requireOnPitch(player);
       if (err) return err;

@@ -899,7 +899,8 @@ function buildPlayerShotProfiles(
           SHOT_DEPTH_LOG_WEIGHT * (depth - SHOT_DEPTH_PIVOT) +
           ROLE_SHOT_LOG_WEIGHT * Math.log(roleShotWeight / ROLE_SHOT_WEIGHT_PIVOT) +
           POSSESSION_SHOT_LOG_WEIGHT * possessionLogit +
-          ROUTE_SHOT_LOG_WEIGHT * saturateEdge(pathEdge, ROUTE_SHOT_SATURATION, ROUTE_SHOT_DEFICIT) +
+          ROUTE_SHOT_LOG_WEIGHT *
+            saturateEdge(pathEdge, ROUTE_SHOT_SATURATION, ROUTE_SHOT_DEFICIT) +
           CREATION_SKILL_LOG_WEIGHT * Math.log(creation / CREATION_EFFECTIVE_PIVOT) +
           FINISHING_ACCESS_LOG_WEIGHT * ((attrs.finishing - FINISHING_PIVOT) / FINISHING_SCALE) +
           Math.log(venue);
