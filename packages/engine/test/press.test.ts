@@ -10,31 +10,46 @@ import {
   userPlayers,
   type GameState,
 } from "@story-fm/engine";
-import type { PressConference } from "@story-fm/domain";
+import type { MatchRecord, PressConference } from "@story-fm/domain";
 import { createTestGame } from "./helpers";
 
 /**
- * 우리 경기 하나를 **장부에만** 끝내고 그 뒤 회견을 연다.
- *
- * tick을 거치지 않는 이유는 이 파일이 검증하는 게 "회견이 어떻게 만들어지고
- * 무엇을 옮기는가"이지 시간 진행이 아니기 때문이다 — 경기 결과라는 사실 하나만
- * 있으면 회견은 성립한다.
+ * 아직 안 치른 우리 경기 중 가장 이른 것 — 친선이냐 대회 경기냐로 갈린다.
+ * 프리시즌 친선이 달력 맨 앞이라 그냥 첫 경기를 집으면 친선이 잡힌다.
  */
-function playAndOpen(
-  state: GameState,
-  score: { us: number; them: number } = { us: 2, them: 1 },
-): PressConference {
+function nextUserMatch(state: GameState, kind: "competitive" | "friendly"): MatchRecord {
   const match = state.matches.find(
     (m) =>
-      m.result === null && (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+      m.result === null &&
+      (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId) &&
+      (kind === "friendly" ? m.competitionId === null : m.competitionId !== null),
   );
-  if (!match) throw new Error("우리 경기를 찾지 못했습니다");
+  if (!match) throw new Error(`${kind} 경기를 찾지 못했습니다`);
+  return match;
+}
+
+/** 경기를 **장부에만** 끝낸다 — 스코어라는 사실 하나면 회견은 성립한다 */
+function settle(state: GameState, match: MatchRecord, score: { us: number; them: number }): void {
   const home = match.homeTeamId === state.userTeamId;
   match.result = {
     homeGoals: home ? score.us : score.them,
     awayGoals: home ? score.them : score.us,
     scorers: [],
   };
+}
+
+/**
+ * 우리 대회 경기 하나를 끝내고 그 뒤 회견을 연다.
+ *
+ * tick을 거치지 않는 이유는 이 파일이 검증하는 게 "회견이 어떻게 만들어지고
+ * 무엇을 옮기는가"이지 시간 진행이 아니기 때문이다.
+ */
+function playAndOpen(
+  state: GameState,
+  score: { us: number; them: number } = { us: 2, them: 1 },
+): PressConference {
+  const match = nextUserMatch(state, "competitive");
+  settle(state, match, score);
   const press = buildMatchPress(state, match.id);
   expect(press).not.toBeNull();
   openPress(state, press!);
@@ -190,6 +205,31 @@ describe("기자회견 — 질문은 장부에서 나온다", () => {
     const upcoming = state.matches.find((m) => m.result === null);
     expect(upcoming).toBeDefined();
     expect(buildMatchPress(state, upcoming!.id)).toBeNull();
+  });
+
+  it("친선을 치러도 회견은 열리지 않는다 — 프리시즌은 시즌 장부 밖이다", () => {
+    const state = createTestGame(53);
+    const friendly = nextUserMatch(state, "friendly");
+    settle(state, friendly, { us: 0, them: 3 });
+    expect(buildMatchPress(state, friendly.id)).toBeNull();
+  });
+
+  it("친선의 무승은 무승 계단을 올리지 않는다", () => {
+    const state = createTestGame(53);
+    for (let i = 0; i < 3; i++) settle(state, nextUserMatch(state, "friendly"), { us: 0, them: 1 });
+    const press = playAndOpen(state, { us: 1, them: 1 });
+    expect(press.trigger).toBe("match");
+    expect(press.facts.some((f) => f.kind === "winless")).toBe(false);
+  });
+
+  it("막는 자리는 친선 하나다 — 대회 3경기 무승은 압박 회견을 연다", () => {
+    const state = createTestGame(53);
+    for (let i = 0; i < 2; i++) {
+      settle(state, nextUserMatch(state, "competitive"), { us: 0, them: 1 });
+    }
+    const press = playAndOpen(state, { us: 1, them: 1 });
+    expect(press.trigger).toBe("pressure");
+    expect(press.facts.some((f) => f.kind === "winless")).toBe(true);
   });
 
   it("폼이 바닥인 선수가 있으면 기자가 이름을 부른다", () => {
