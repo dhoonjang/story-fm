@@ -19,7 +19,7 @@ import { GAP_CONDITION } from "@story-fm/sim";
 import { isSettling, settlingNote, settlingOf } from "./settling";
 import { diffDays } from "../competition/calendar";
 import { hashChannel } from "../core/rng";
-import { playerById, teamName, type GameState } from "../core/state";
+import { playerById, teamNameIn, type GameState } from "../core/state";
 
 /**
  * 스카우팅 지식 — 정보 비대칭(안개)의 단일 소스.
@@ -459,7 +459,7 @@ export function scoutingSummary(state: GameState): string[] {
     .map((r) => {
       const p = playerById(state, r.gamePlayerId);
       if (!p) return `스카우트 파견 중 (보고 ${r.dueOn})`;
-      return `${p.name} (${teamName(p.teamId)}) 스카우트 파견 중 — 보고 ${r.dueOn}`;
+      return `${p.name} (${teamNameIn(state, p.teamId)}) 스카우트 파견 중 — 보고 ${r.dueOn}`;
     });
   const waiting = deferredScouts(state);
   if (waiting.length > 0) {
@@ -467,7 +467,7 @@ export function scoutingSummary(state: GameState): string[] {
       .slice(0, SCOUT_SUMMARY_NAMES)
       .map((d) => {
         const p = playerById(state, d.gamePlayerId);
-        return p ? `${p.name} (${teamName(p.teamId)})` : d.gamePlayerId;
+        return p ? `${p.name} (${teamNameIn(state, p.teamId)})` : d.gamePlayerId;
       })
       .join(", ");
     const free = freeScoutSlots(state);

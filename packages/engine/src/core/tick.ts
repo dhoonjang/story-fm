@@ -77,8 +77,8 @@ import {
   pushReportCards,
   squadLevelOf,
   tacticsOf,
-  teamName,
-  teamShortName,
+  teamNameIn,
+  teamShortNameIn,
   clockOf,
   formatClock,
   minutesOfClock,
@@ -163,7 +163,7 @@ function resolveScouting(state: GameState, digest: string[]): void {
      */
     digest.push(
       `스카우트 보고서 도착 — ${
-        scoutReportLine(state, player.id) ?? `${player.name} (${teamName(player.teamId)})`
+        scoutReportLine(state, player.id) ?? `${player.name} (${teamNameIn(state, player.teamId)})`
       }`,
     );
     // 카드는 모델이 그 줄을 읽은 턴에 선다 — 이 다이제스트가 장면 뒤에 굴러온
@@ -393,7 +393,7 @@ function dailyTick(
     const offer = pendingOffer(negotiation);
     if (!player || !offer) continue;
     digest.push(
-      `📨 ${teamName(negotiation.counterpartTeamId ?? "")}에서 ${player.name} 오퍼(£${(offer.fee / 1_000_000).toFixed(1)}M)에 대한 답이 도착했습니다`,
+      `📨 ${teamNameIn(state, negotiation.counterpartTeamId ?? "")}에서 ${player.name} 오퍼(£${(offer.fee / 1_000_000).toFixed(1)}M)에 대한 답이 도착했습니다`,
     );
   }
 
@@ -865,7 +865,7 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
     const entry = state.schedule.find((e) => e.type === "match" && e.refId === match.id);
     if (entry) entry.status = "done";
     played.push(
-      `${teamShortName(match.homeTeamId)} ${result.homeGoals}-${result.awayGoals} ${teamShortName(match.awayTeamId)}`,
+      `${teamShortNameIn(state, match.homeTeamId)} ${result.homeGoals}-${result.awayGoals} ${teamShortNameIn(state, match.awayTeamId)}`,
     );
   }
   if (played.length > 0) digest.push(`라운드 결과: ${played.join(", ")}`);
@@ -954,7 +954,7 @@ export function advanceTime(
       state.phase = "matchday";
       const home = userMatch.homeTeamId === state.userTeamId;
       digest.push(
-        `경기일 — ${competitionLabel(userMatch.competitionId, userMatch.stage ?? "league", userMatch.round)} ${userMatch.neutral ? "중립" : home ? "홈" : "원정"} vs ${teamName(home ? userMatch.awayTeamId : userMatch.homeTeamId)}`,
+        `경기일 — ${competitionLabel(userMatch.competitionId, userMatch.stage ?? "league", userMatch.round)} ${userMatch.neutral ? "중립" : home ? "홈" : "원정"} vs ${teamNameIn(state, home ? userMatch.awayTeamId : userMatch.homeTeamId)}`,
       );
       return { ok: true, digest, stopped: "matchday", trained };
     }
@@ -989,7 +989,7 @@ export function describeNextFixture(state: GameState): string {
   const next = nextMatchFor(state.matches, state.userTeamId, state.date);
   if (!next) return "남은 일정이 없습니다 — 시즌 마무리 국면입니다.";
   const home = next.homeTeamId === state.userTeamId;
-  return `다음 경기: ${competitionLabel(next.competitionId, next.stage ?? "league", next.round)} ${next.date} ${next.neutral ? "중립" : home ? "홈" : "원정"} vs ${teamName(home ? next.awayTeamId : next.homeTeamId)}`;
+  return `다음 경기: ${competitionLabel(next.competitionId, next.stage ?? "league", next.round)} ${next.date} ${next.neutral ? "중립" : home ? "홈" : "원정"} vs ${teamNameIn(state, home ? next.awayTeamId : next.homeTeamId)}`;
 }
 
 /** 정지 소화 — 경기가 끝날 때 호출 (경기 단위로 차감). 유저 경기·타 팀 간이 시뮬 둘 다 */

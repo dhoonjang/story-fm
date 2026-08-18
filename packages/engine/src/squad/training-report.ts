@@ -19,7 +19,7 @@ import {
   recordGrowth,
   seasonStatOf,
   squadLevelOf,
-  teamName,
+  teamNameIn,
 } from "../core/state";
 
 /**
@@ -294,7 +294,7 @@ export function buildTrainingBrief(
   if (subjects.length === 0) return null;
 
   return {
-    teamName: teamName(state.userTeamId),
+    teamName: teamNameIn(state, state.userTeamId),
     from: window.from,
     to: window.to,
     sessions,

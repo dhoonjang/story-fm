@@ -60,7 +60,7 @@ import {
   reservePlayers,
   squadLevelOf,
   tacticsOf,
-  teamName,
+  teamNameIn,
   userPlayers,
   FAMILIARITY_BASELINE,
   MATCHDAY_BENCH,
@@ -247,7 +247,7 @@ export function refreshPacket(state: GameState): void {
     for (const slot of starters) seats[slot.player.id] = slot.position;
     return {
       teamId,
-      teamName: teamName(teamId),
+      teamName: teamNameIn(state, teamId),
       starters,
       bench: slotsFor(state, teamId, ledgerSide.bench),
       // 상대가 경기 중 바꾼 전술이 있으면 그것으로 — 저장된 팀 전술은 그대로 둔다
@@ -981,8 +981,8 @@ export function buildRatingBrief(state: GameState): MatchRatingBrief | null {
       return `${e.minute}′ ${mine} ${e.type}${who ? ` [${who}]` : ""}${e.detail ? ` — ${e.detail}` : ""}`.trim();
     });
 
-  const homeName = teamName(match.homeTeamId);
-  const awayName = teamName(match.awayTeamId);
+  const homeName = teamNameIn(state, match.homeTeamId);
+  const awayName = teamNameIn(state, match.awayTeamId);
   return {
     matchId: match.id,
     scoreline: `${homeName} ${ledger.score.home} : ${ledger.score.away} ${awayName}`,
@@ -1350,7 +1350,7 @@ export function finalizeMatch(state: GameState): MatchDigest {
   const outcomeKo = outcome === "win" ? "승리" : outcome === "draw" ? "무승부" : "패배";
   pushNarrative(
     state,
-    `${competitionLabel(match.competitionId, match.stage ?? "league", match.round)} vs ${teamName(opponentId)} ${scoreline} ${outcomeKo}`,
+    `${competitionLabel(match.competitionId, match.stage ?? "league", match.round)} vs ${teamNameIn(state, opponentId)} ${scoreline} ${outcomeKo}`,
     outcome === "win" ? 4 : 3,
   );
   digest.push(`최종 스코어 ${scoreline} — ${outcomeKo}`, ...messages);
