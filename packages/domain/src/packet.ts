@@ -8,14 +8,21 @@
  * 중계와 원인 태그가 같은 문장을 인용해야 "왜 그렇게 됐는지"가 설명된다.
  */
 
+import type { MatchSide } from "./match";
+import type { BoardPoint } from "./tactics";
+
 export interface ZoneStrength {
   attack: number;
   midfield: number;
   defense: number;
 }
 
+/**
+ * 세 전선 — **패킷 전체가 쓰는 한 낱말.** 존 전력·매치업·지역 전술의 밴드·공략이
+ * 닿는 존이 모두 이 셋이고, 한 곳만 다른 이름으로 두면 같은 자리가 두 값이 된다.
+ */
 export type MatchupZone = "attack" | "midfield" | "defense";
-export type EdgeSide = "home" | "away" | "even";
+export type EdgeSide = MatchSide | "even";
 export type EdgeSize = "slight" | "clear" | "big";
 
 export interface Matchup {
@@ -31,8 +38,9 @@ export interface Matchup {
  * 전술 지시가 존 전력에 남긴 흔적 — **감독의 결정이 어떻게 수치가 됐는가**.
  *
  * 이득과 대가를 함께 적는다. 지시는 공짜가 아니고(라인을 올리면 뒷공간이 열린다),
- * 소화율(`uptake`)이 낮으면 **이득만 깎이고 대가는 그대로** 남는다 — 그래서
- * 소화하지 못하는 팀의 과격한 지시는 순손실이 된다 (match.md §1.2).
+ * 소화율(`uptake`)은 **이득에 온전히, 대가에는 층마다 다르게** 걸린다 — 전술 6축과
+ * 공략은 대가도 절반을 태우고 개인 지시·전술 상성은 대가를 온전히 문다
+ * (match.md §1.2의 표).
  */
 export interface TacticalRead {
   /** 지시 적용률 0.45~1.0 — 감독 전술 능력 + 팀 전술 적응도 */
@@ -41,7 +49,8 @@ export interface TacticalRead {
   notes: string[];
 }
 
-export type RegionalBand = "defense" | "midfield" | "attack";
+export type RegionalBand = MatchupZone;
+/** 좌·중·우 — 지역 전술·판세 격자·공격 경로가 나눠 쓰는 눈금 */
 export type RegionalLane = "left" | "center" | "right";
 export type RegionalIntent = "overload" | "press" | "protect" | "transition";
 
@@ -75,7 +84,7 @@ export interface PacketPlayer {
   name: string;
   position: string;
   /** 실제 전술판 좌표 — 없으면 position의 기본 좌표를 사용한다. */
-  point?: import("./tactics").BoardPoint;
+  point?: BoardPoint;
   /** 이 경기에서 수행하는 세부 역할. */
   roleId?: string;
   /** 이 자리에서 지금 내는 전력 (상태·적응도 반영) */
@@ -95,7 +104,7 @@ export interface PacketPlayer {
   };
 }
 
-export type ShotRoute = "left" | "center" | "right";
+export type ShotRoute = RegionalLane;
 
 /** 한 선수가 한 공격 경로에서 갖는 90분 슈팅 분포. */
 export interface PlayerShotRoute {
@@ -155,11 +164,11 @@ export interface SidePacket {
 export interface ExploitTarget {
   id: string;
   /** 어느 팀의 약점인가 — 우리가 노리는 쪽 */
-  side: "home" | "away";
+  side: MatchSide;
   /** 한 줄 설명 — 감독이 본 그 문장 (안개를 지난 뒤의 표현) */
   label: string;
   /** 공략이 닿는 존 */
-  zone: "attack" | "midfield" | "defense";
+  zone: MatchupZone;
   /**
    * 그 짝이 얼마나 벌어졌나 (`KeyPoint.weight`) — **공략의 이득이 이 값을 탄다.**
    * 크게 벌어진 약점이 문턱을 겨우 넘은 약점보다 크게 값을 해야 감독이 무엇을
@@ -188,7 +197,7 @@ export interface StrengthPacket {
    * 추측하면 틀리므로 코어가 함께 싣는다. 진행 중인 경기를 담은 **옛 세이브에는
    * 없다** — 그때는 화면이 색 없이 세운다.
    */
-  keyPointSides?: ("home" | "away")[];
+  keyPointSides?: MatchSide[];
   /**
    * **공략할 수 있는 지점** — 감독이 겨냥해 지시할 수 있는 키포인트.
    *

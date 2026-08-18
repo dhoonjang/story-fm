@@ -21,6 +21,7 @@ import type {
 import {
   ADAPTATION_IMPACT,
   anchorOf,
+  FAMILIARITY_BASELINE,
   FAMILIARITY_MAX,
   positionGroupOf,
   positionGroupOfPlayer,
@@ -36,7 +37,16 @@ import { stateModifier } from "./state-modifier";
 import { buildCounterContext, evaluateCounters, type CounterResult } from "./tactical-counters";
 import { GAP_PENALTY, GAP_THRESHOLD } from "./stamina";
 import { finishingGoalProbability, FINISHING_PIVOT, FINISHING_SCALE } from "./shot-model";
-import { addCells, GRID_LANES, laneBiasOf, zoneGrid, zoneMeanOf, zeroCells } from "./zone-grid";
+import {
+  addCells,
+  GRID_LANES,
+  LANE_X,
+  laneBiasOf,
+  mirrorLane,
+  zoneGrid,
+  zoneMeanOf,
+  zeroCells,
+} from "./zone-grid";
 
 /** 배치된 선수 — 전술 배치(TACTIC_ASSIGNMENT)에서 조립해 넘긴다 */
 export interface LineupSlot {
@@ -78,7 +88,7 @@ export interface SideInput {
   managerAnalysis?: number;
   /**
    * 지금 노리고 있는 지점 (`ExploitTarget.id`) — 감독이 지시로 겨냥한 것.
-   * 없는 id는 코어가 조용히 버린다 (`exploits.ts`).
+   * 없는 id는 코어가 버리되 그 사실을 노트로 남긴다 (`exploits.ts`).
    */
   exploits?: readonly string[];
   /**
@@ -119,30 +129,19 @@ function slotGroup(slot: LineupSlot): PositionGroup {
 }
 
 /**
- * 포지션 적응도의 전력 곡선 — 0은 0.1, 1은 약 0.15, 25는 약 0.63, 99면 온전하다.
+ * 포지션 적응도 팩터 — **전력에 곱해지는 단일 규칙** (0은 0.1, 25는 약 0.63,
+ * 99면 온전하다). 엔진의 배치 채점(`slotStrength`)도 이 함수를 부른다. 복제하면
+ * "화면·배치가 고른 자리"와 "경기가 실제로 계산하는 자리"가 조용히 갈린다.
  *
- * **12%p였을 때는 자리를 몰라도 거의 손해가 없었다.** 그 폭으로는 `roleFit`
- * 차이 몇 점을 못 이겨서, 배치 최적화가 브루누 페르난데스(주 AM)를 수비형
- * 미드필더에 세우고도 팀 합이 더 높다고 계산했다 — 실제 축구에서 10번을 6번에
- * 두는 대가는 그보다 훨씬 크다. 지금은 정규화 로그 곡선으로 낮은 값은 크게
- * 벌리고 85→95 같은 높은 구간의 차이는 4%p 안에 묶는다.
- *
- * 전술 적응도(`FAMILIARITY_SPREAD` 15%p)보다 큰 것이 맞다 — 전술은 훈련으로
- * 몇 주면 익히지만 자리는 커리어가 만든다.
- */
-export const PROFICIENCY_SPREAD = ADAPTATION_IMPACT.position;
-
-/**
- * 포지션 적응도 팩터 — **전력에 곱해지는 단일 규칙**.
- * 엔진의 배치 채점(`slotStrength`)도 이 함수를 부른다. 복제하면 "화면·배치가
- * 고른 자리"와 "경기가 실제로 계산하는 자리"가 조용히 갈린다.
+ * 폭(`ADAPTATION_IMPACT.position` 90%p)이 전술 적응도(15%p)보다 큰 것이 맞다 —
+ * 전술은 훈련으로 몇 주면 익히지만 자리는 커리어가 만든다.
  */
 export function profFactor(proficiency: number): number {
   return proficiencyReadiness(proficiency);
 }
 
 /** 전술 적응도의 기본 감점 폭 — 자리 민감도가 이 폭을 키우거나 줄인다 */
-export const FAMILIARITY_SPREAD = ADAPTATION_IMPACT.tactical;
+const FAMILIARITY_SPREAD = ADAPTATION_IMPACT.tactical;
 
 /**
  * 전술 적응도 팩터 — **개인 값**에 **자리 민감도**를 곱해 적용한다.
@@ -198,9 +197,6 @@ export function creationEffectiveOf(slot: LineupSlot): number {
   );
 }
 
-/** 배치가 없는 선수의 전술 적응도 — 도메인 기준선과 같은 값 */
-const FAMILIARITY_BASELINE = 60;
-
 /** 지금 이 선수의 총 피로 (저장값 + 경기 중 누적) */
 export function totalFatigue(slot: LineupSlot): number {
   return Math.min(100, 100 - slot.player.state.condition + (slot.matchFatigue ?? 0));
@@ -219,10 +215,11 @@ export function tacticalFit(managerTactics: number): number {
 /**
  * 지시 적용률 — **감독의 말이 그라운드에 스미는 정도** (0.45~1.0).
  *
- * 여기가 "유저의 지시가 100% 통하지 않는다"의 유일한 관문이다. 전술 지시의
- * **이득에만** 곱하고 대가는 온전히 남기므로, 소화하지 못하는 팀이 과격한 지시를
- * 받으면 순손실이 난다. 감독 전술 능력이 자라거나 팀이 전술에 익숙해지면 같은
- * 지시가 점점 더 통한다 — 그게 감독 성장의 체감이다.
+ * 여기가 "유저의 지시가 100% 통하지 않는다"의 유일한 관문이다. **이득에는 언제나
+ * 온전히 곱하고, 대가에 얼마나 걸리는지는 층마다 다르다** — 전술 6축과 공략은
+ * 대가도 절반을 태우고(`0.5 + 0.5 × uptake`), 개인 지시와 전술 상성은 대가를
+ * 온전히 문다 (match.md §1.2의 표). 감독 전술 능력이 자라거나 팀이 전술에
+ * 익숙해지면 같은 지시가 점점 더 통한다 — 그게 감독 성장의 체감이다.
  *
  * @param squadFamiliarity 선발 평균 전술 적응도 0~100. **지시는 팀 전체가 함께
  *   소화하는 것**이라 여기만은 평균이 맞다 — 개인 전력은 각자 자기 값으로 깎인다.
@@ -257,7 +254,7 @@ interface ZoneDelta {
  * 지시가 **수치엔 0, 대화엔 100%**로 들어가 LLM이 감독의 의도대로 경기를
  * 흘려보냈다. 이제 여섯 축 전부가 이득과 대가를 함께 낸다.
  *
- * @param uptake 지시 적용률 — **이득에만** 곱한다 (대가는 온전히 남는다)
+ * @param uptake 지시 적용률 — 이득에는 온전히, 대가에는 절반만 곱한다 (`cost`)
  * @param opponentPace 상대 최전방 스피드 평균 — 라인을 올릴 때 치르는 대가의 크기
  */
 function tacticalDeltas(
@@ -654,7 +651,7 @@ function buildZones(
  *
  * **숫자는 적지 않는다.** 다리가 멈춘 건 스탠드에서도 보이지만 상대가 정확히
  * 얼마나 남았는지는 아무도 모른다 — 그 값은 안개를 지나 막대로만 간다
- * (engine/scouting.ts §체력). 여기 소진 수치를 적어 두면 화면 한쪽에서 흐린
+ * (engine/squad/scouting.ts §체력). 여기 소진 수치를 적어 두면 화면 한쪽에서 흐린
  * 값이 다른 쪽에서 또렷하게 새어 나온다.
  */
 function gapNotes(slots: LineupSlot[], teamName: string, side: MatchSide): KeyNote[] {
@@ -766,12 +763,6 @@ function inMatchUptake(uptake: number, inMatch: boolean): number {
   return inMatch ? uptake + (1 - uptake) * 0.5 : uptake;
 }
 
-const SHOT_LANE_X: Record<ShotRoute, number> = { left: 17, center: 50, right: 83 };
-const MIRROR_SHOT_ROUTE: Record<ShotRoute, ShotRoute> = {
-  left: "right",
-  center: "center",
-  right: "left",
-};
 const ROUTE_PATH_WEIGHTS = { defense: 0.15, midfield: 0.3, attack: 0.55 } as const;
 const ROUTE_REACH = 30;
 const ROLE_SHOT_WEIGHT_PIVOT = 1;
@@ -849,7 +840,7 @@ function buildPlayerShotProfiles(
 ): PlayerShotProfile[] {
   const grid = zoneGrid(packet as StrengthPacket, "creation");
   const relativeCell = (route: ShotRoute, band: "defense" | "midfield" | "attack") => {
-    const globalRoute = side === "home" ? route : MIRROR_SHOT_ROUTE[route];
+    const globalRoute = side === "home" ? route : mirrorLane(route);
     const globalBand =
       side === "home" ? band : band === "attack" ? "defense" : band === "defense" ? "attack" : band;
     return grid.find((cell) => cell.lane === globalRoute && cell.band === globalBand);
@@ -892,8 +883,7 @@ function buildPlayerShotProfiles(
         attrs.positioning * 0.4 + attrs.dribbling * 0.25 + attrs.pace * 0.2 + attrs.aerial * 0.15;
       const rawRouteWeights = GRID_LANES.map((route) => ({
         route,
-        weight:
-          (1 / (1 + Math.abs(point.x - SHOT_LANE_X[route]) / ROUTE_REACH)) * (1 + focus(route)),
+        weight: (1 / (1 + Math.abs(point.x - LANE_X[route]) / ROUTE_REACH)) * (1 + focus(route)),
       }));
       const routeWeightSum = rawRouteWeights.reduce((sum, item) => sum + item.weight, 0);
 
