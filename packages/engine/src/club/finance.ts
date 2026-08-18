@@ -11,7 +11,7 @@ import {
   FINANCE_EXPENSE_CATEGORIES,
   FINANCE_INCOME_CATEGORIES,
 } from "@story-fm/domain";
-import { buildSeasonCalendar, dayOfWeek, FIRST_SEASON } from "../competition/calendar";
+import { addDays, buildSeasonCalendar, dayOfWeek, FIRST_SEASON } from "../competition/calendar";
 import { clubProfile } from "../data/club-profile";
 import { clubEconomyLevel, leagueEconomyLevel } from "../data/league-economy";
 import { isMarketOnlyLeague, isTopLeague, leagueCatalogById } from "../data/league-catalog";
@@ -724,8 +724,14 @@ export function isOutsideOurEconomy(teamId: string): boolean {
  * **유저 팀만 선수별로 적는다.** 원장은 유저 팀만 쌓으므로(§4.5) AI 팀에 명세를
  * 만들면 잔고 한 번 더할 것을 스물몇 번 나눠 더하는 값만 치른다 — 96팀 × 매주다.
  * 유저 팀 명세는 상각과 같은 모양이라 피드가 그대로 접는다 (§8.1).
+ *
+ * `weeks`는 **하루에 무는 주 수**다 — 시즌 마감이 건너뛴 월요일을 한 번에 물 때만
+ * 1이 아니다 (§7.1). 그날의 주급 명세로 계산하므로, 이미 팀을 떠난 선수의 지난
+ * 주급을 소급하지는 않는다.
  */
-export function payWeeklyWages(state: GameState): void {
+export function payWeeklyWages(state: GameState, weeks = 1): void {
+  if (weeks <= 0) return;
+  const suffix = weeks > 1 ? ` (${weeks}주)` : "";
   const playerNames = new Map(state.players.map((p) => [p.id, p.name]));
   for (const team of state.teams) {
     // 무소속은 구단이 아니다 — 자유계약 선수가 모인 자리라 낼 주급도 받을 수입도 없다
@@ -736,8 +742,8 @@ export function payWeeklyWages(state: GameState): void {
         recordFinance(state, team.id, {
           kind: "expense",
           category: "player_wages",
-          label: "선수단 주급",
-          amount: wages,
+          label: `선수단 주급${suffix}`,
+          amount: wages * weeks,
         });
       }
       continue;
@@ -746,12 +752,27 @@ export function payWeeklyWages(state: GameState): void {
       recordFinance(state, team.id, {
         kind: "expense",
         category: "player_wages",
-        label: playerNames.get(line.gamePlayerId) ?? line.gamePlayerId,
-        amount: line.weekly,
+        label: `${playerNames.get(line.gamePlayerId) ?? line.gamePlayerId}${suffix}`,
+        amount: line.weekly * weeks,
         ref: { type: "player", id: line.gamePlayerId },
       });
     }
   }
+}
+
+/**
+ * 시즌 전환이 건너뛰는 주급의 주 수 — `from` **다음 날부터 `until` 전날까지**의
+ * 월요일 수 (§7.1).
+ *
+ * `from`(시즌 종료일)의 주급은 그날의 tick이 이미 물었고, `until`(다음 시즌
+ * 시작일 = 7월 1일)은 새 시즌·새 스쿼드의 몫이라 양 끝을 다 뺀다.
+ */
+export function skippedWageWeeks(from: string, until: string): number {
+  let weeks = 0;
+  for (let date = addDays(from, 1); date < until; date = addDays(date, 1)) {
+    if (dayOfWeek(date) === 1) weeks += 1;
+  }
+  return weeks;
 }
 
 // ── 상각 ────────────────────────────────────────────────
@@ -984,14 +1005,16 @@ export function runMonthlyFinance(state: GameState, digest: string[]): void {
  * 6월은 리그 상금·시즌 보너스가 앉는 달이고, 이적 예산과 PSR은 **전환 안에서** 지난
  * 시즌 손익을 읽는다 — 마지막 달이 빠진 성과로 다음 시즌이 정해졌다.
  *
- * ⚠️ `state.season`·`state.calendar`가 **아직 끝난 시즌일 때** 돌아야 한다. 보고서의
- * 시즌 번호를 그 둘로 역산하기 때문이다 (`seasonOfMonth`).
+ * **마감보다 먼저 남은 주급을 문다.** 전환이 건너뛰는 월요일만큼 주급이 빠지면 그
+ * 달만 수입은 만근이고 지출은 한 주치라, 그 후한 손익이 다음 시즌 예산과 PSR에
+ * 그대로 닿는다. 선수는 6월 30일까지 계약돼 있으므로 회계로도 나가야 하는 돈이다.
  *
- * ⚠️ 이 달은 **주급이 한 주치뿐이다** — 전환이 남은 월요일을 건너뛰기 때문이다.
- * 정액 수입·고정비는 1일에 한 달치가 다 앉으므로 마지막 달이 그만큼 후하게 잡힌다
- * (§12).
+ * ⚠️ `state.season`·`state.calendar`가 **아직 끝난 시즌일 때** 돌아야 한다. 보고서의
+ * 시즌 번호를 그 둘로 역산하고, 남은 월요일도 다음 시즌 달력으로 세기 때문이다.
  */
 export function closeSeasonBooks(state: GameState, digest: string[]): void {
+  const nextSeasonStart = buildSeasonCalendar(state.season + 1).preseasonStart;
+  payWeeklyWages(state, skippedWageWeeks(state.date, nextSeasonStart));
   closeMonths(state, digest, monthOf(state.date));
 }
 
