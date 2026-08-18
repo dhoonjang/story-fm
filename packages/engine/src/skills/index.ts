@@ -24,7 +24,7 @@ import {
   PLAYER_DIRECTIVE_KO,
   type PlayerDirectiveKind,
   MATCHDAY_SQUAD,
-  POSITION_GROUPS,
+  POSITION_CODES,
   SCOUT_CONCURRENT_LIMIT,
   SCOUT_DAYS,
   SLOT_TIME,
@@ -224,8 +224,7 @@ function matchdaySquadFloor(): string {
 // 적응도 클램프도 도메인이 단일 소스 (clampFamiliarity) — 기억을 적는 자리와
 // 되찾는 자리가 같은 천장을 써야 왕복이 닫힌다
 
-export const POSITION_CODES = Object.keys(POSITION_GROUPS);
-export { positionGroupOf };
+export { POSITION_CODES, positionGroupOf };
 
 // ---- 감독 성장 (career.md §3) ----
 
