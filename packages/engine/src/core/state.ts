@@ -849,7 +849,9 @@ export function assignmentsOf(state: GameState, teamId: string, role?: TacticAss
 export function assignmentFor(state: GameState, playerId: string): TacticAssignment | null {
   const p = playerById(state, playerId);
   if (!p) return null;
-  return tacticsOf(state, p.teamId).assignments.find((a) => a.playerId === playerId) ?? null;
+  // 무소속엔 전술이 없다 — 배치가 없는 것이지 오류가 아니다 (team.md §4)
+  const tactics = state.tactics.find((t) => t.teamId === p.teamId);
+  return tactics?.assignments.find((a) => a.playerId === playerId) ?? null;
 }
 
 /** 이 선수의 전술 적응도 — 배치가 없으면 기준선(`FAMILIARITY_BASELINE`, domain) */
@@ -1225,8 +1227,9 @@ export function addMissingClubs(state: GameState): number {
   for (const team of missing) {
     state.teams.push({
       id: team.id,
-      aiManagerTacticsRating: randInt(rng, 55, 82),
       ...copiedTeamFields(team, CLUB_PROFILES_SEED[team.id]),
+      // 감독은 클럽에만 있다 — 무소속은 클럽이 아니다 (team.md §4)
+      ...(isClubTeam(team.id) ? { aiManagerTacticsRating: randInt(rng, 55, 82) } : {}),
     });
     // 무소속은 스쿼드도 배치도 갖지 않는다 — 팀 엔티티만 있으면 된다
     if (!isClubTeam(team.id)) continue;
@@ -1876,12 +1879,20 @@ export function createGame(input: CreateGameInput): GameState {
   // 카탈로그의 정체성은 여기서 **복사된다** — 이후 어드민이 카탈로그를 고쳐도
   // 이 세이브의 이름·소속·체급·살림은 흔들리지 않는다 (team.md §1)
   const profiles = clubProfiles();
+  /**
+   * **무소속은 클럽이 아니다** — 팀 엔티티 한 줄만 서고 AI 감독도 부임일도 갖지
+   * 않는다 (team.md §4). 로드의 `addMissingClubs`가 만드는 모양과 같다.
+   */
   const teams: GameTeam[] = catalogTeams.map((t) => ({
     id: t.id,
-    aiManagerTacticsRating: randInt(rng, 55, 82),
     ...copiedTeamFields(t, profiles[t.id]),
-    // 부임일 — 감독 시장이 "얼마나 됐나"를 여기서 잰다 (`manager-market.ts`)
-    managerSince: calendar.preseasonStart,
+    ...(isClubTeam(t.id)
+      ? {
+          aiManagerTacticsRating: randInt(rng, 55, 82),
+          // 부임일 — 감독 시장이 "얼마나 됐나"를 여기서 잰다 (`manager-market.ts`)
+          managerSince: calendar.preseasonStart,
+        }
+      : {}),
   }));
   const players = instantiatePlayers(seed, (teamId) => inThisWorld.has(teamId));
   // 구단마다 **자기 스쿼드에 맞는 모양**을 먼저 고른다 — 1·2군 분할도 이 모양의
@@ -1899,21 +1910,24 @@ export function createGame(input: CreateGameInput): GameState {
   buildInitialSquads(players, seed, formations, catalogTeams);
   ensureSquadNumbers(players);
 
-  // 전술·배치 — 구단의 기본 포메이션과 기본 선발로 시작한다 (팀 카탈로그)
-  const tactics: TeamTactics[] = teams.map((t) => {
-    const formation = formations.get(t.id) ?? formationOf(t.id);
-    return {
-      teamId: t.id,
-      spec: initialTactics(t.id, formation),
-      assignments: buildAssignments(
-        players.filter((p) => p.teamId === t.id && squadLevelOf(p) === "first"),
-        formation,
-        FAMILIARITY_BASELINE,
-        undefined,
-        defaultXiIds(t.id),
-      ),
-    };
-  });
+  // 전술·배치 — 구단의 기본 포메이션과 기본 선발로 시작한다 (팀 카탈로그).
+  // 무소속은 스쿼드도 배치도 없으므로 전술을 만들지 않는다.
+  const tactics: TeamTactics[] = teams
+    .filter((t) => isClubTeam(t.id))
+    .map((t) => {
+      const formation = formations.get(t.id) ?? formationOf(t.id);
+      return {
+        teamId: t.id,
+        spec: initialTactics(t.id, formation),
+        assignments: buildAssignments(
+          players.filter((p) => p.teamId === t.id && squadLevelOf(p) === "first"),
+          formation,
+          FAMILIARITY_BASELINE,
+          undefined,
+          defaultXiIds(t.id),
+        ),
+      };
+    });
 
   // 주장 — 유저 팀은 선발 중 최고 OVR 필드 플레이어
   const userSquad = players.filter((p) => p.teamId === input.userTeamId);
@@ -1922,17 +1936,19 @@ export function createGame(input: CreateGameInput): GameState {
     .sort((a, b) => b.attributes.overall - a.attributes.overall)[0];
   if (captain) captain.isCaptain = true;
 
-  // 재정 + 계약(주급의 원본)
-  const finances: TeamFinance[] = catalogTeams.map((t) => {
-    const f = initialFinanceOf(t.id, t.tier);
-    return {
-      teamId: t.id,
-      balance: f.balance,
-      transferBudget: f.budget,
-      ledger: [],
-      prizesPaid: [],
-    };
-  });
+  // 재정 + 계약(주급의 원본) — 무소속은 장부를 갖지 않는다 (team.md §4)
+  const finances: TeamFinance[] = catalogTeams
+    .filter((t) => isClubTeam(t.id))
+    .map((t) => {
+      const f = initialFinanceOf(t.id, t.tier);
+      return {
+        teamId: t.id,
+        balance: f.balance,
+        transferBudget: f.budget,
+        ledger: [],
+        prizesPaid: [],
+      };
+    });
   const wages = initialWages(players, calendar.preseasonStart);
   const contracts: Contract[] = players.map((p, i) => ({
     id: `c-${p.id}`,
@@ -2083,7 +2099,9 @@ export function squadShortfall(
  * 적응도는 이 팀의 전술에 대한 값이라 다른 팀에서 뜻이 없다 (player.md §7.3).
  */
 export function releaseFromTactics(state: GameState, teamId: string, playerId: string): void {
-  const tactics = tacticsOf(state, teamId);
+  // 무소속처럼 전술이 없는 자리에서 오는 선수는 뺄 배치도 없다 (team.md §4)
+  const tactics = state.tactics.find((t) => t.teamId === teamId);
+  if (!tactics) return;
   tactics.assignments = tactics.assignments.filter((a) => a.playerId !== playerId);
   if (tactics.shelved) tactics.shelved = tactics.shelved.filter((s) => s.playerId !== playerId);
 }

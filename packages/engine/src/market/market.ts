@@ -4,7 +4,7 @@ import { diffDays, windowOpenOn } from "../competition/calendar";
 import { claimLabel, evaluatePitch } from "./persuasion";
 import { isMarketOnlyLeague, leagueCatalogById } from "../data/league-catalog";
 import { leagueEconomyLevel } from "../data/league-economy";
-import { leagueOfTeam, teamCatalogById } from "../data/team-catalog";
+import { isClubTeam, leagueOfTeam, teamCatalogById } from "../data/team-catalog";
 import { leagueOfTeamIn } from "../competition/promotion";
 import { euroCompetitionOf } from "../competition/europe";
 import { hashChannel } from "../core/rng";
@@ -196,8 +196,9 @@ function sellerStance(state: GameState, player: GamePlayer): { multiple: number;
     multiple -= 0.2;
     why.push("계약이 1년도 남지 않았다");
   }
-  const finance = financeOf(state, player.teamId);
-  if (finance.balance < weeklyWagesOf(state, player.teamId) * 20) {
+  // 무소속엔 파는 구단이 없다 — 장부도 없다 (team.md §4)
+  const finance = isClubTeam(player.teamId) ? financeOf(state, player.teamId) : null;
+  if (finance && finance.balance < weeklyWagesOf(state, player.teamId) * 20) {
     multiple -= 0.15;
     why.push("상대 구단의 재정이 빠듯하다");
   }
@@ -373,6 +374,14 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     }
     if (!window && !freeAgent) {
       blockers.push("이적시장이 닫혀 있습니다");
+    }
+    /**
+     * **무소속엔 이적료를 받을 구단이 없다** (team.md §4). 막지 않으면 그 돈이
+     * 세계 밖으로 나간다 — 예전엔 무소속이 장부를 갖고 있어서 £5M이 아무도
+     * 쓰지 않는 잔고로 사라졌다.
+     */
+    if (!isClubTeam(player.teamId) && terms.fee > 0) {
+      blockers.push(`${player.name}은(는) 무소속이라 이적료가 붙지 않습니다`);
     }
     const ourFinance = financeOf(state, state.userTeamId);
     if (ourFinance.budgetFrozen && terms.fee > 0) {

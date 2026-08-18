@@ -1,5 +1,6 @@
 import type { GamePlayer, ScheduleEntry, TrainingSession } from "@story-fm/domain";
 import {
+  AI_MANAGER_RATING_FALLBACK,
   FAMILIARITY_BASELINE,
   clampCondition,
   naturalPositionOf,
@@ -523,7 +524,8 @@ function boardSlotOf(state: GameState, player: GamePlayer) {
 function managerTacticsOf(state: GameState, teamId: string): number {
   return teamId === state.userTeamId
     ? state.manager.attributes.tactics
-    : (state.teams.find((team) => team.id === teamId)?.aiManagerTacticsRating ?? 65);
+    : (state.teams.find((team) => team.id === teamId)?.aiManagerTacticsRating ??
+        AI_MANAGER_RATING_FALLBACK);
 }
 
 /**

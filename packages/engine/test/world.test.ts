@@ -22,6 +22,7 @@ import {
   slugifyName,
   pickFormation,
   squadLevelOf,
+  isClubTeam,
   isTopFlight,
   tacticsOf,
   teamsOfLeague,
@@ -271,10 +272,11 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
     // 1부 96 + 2부 64 — 2부는 리그전을 돌지 않지만 컵 참가자라 엔티티는 갖는다
     expect(state.teams).toHaveLength(teamCatalog().length);
     expect(state.players.length).toBeGreaterThanOrEqual(3800);
-    // 무소속 클럽은 비어 있게 시작한다
+    // 무소속은 **클럽이 아니다** — 팀 엔티티 한 줄만 서고 스쿼드도 전술도 장부도 없다
     expect(playersOf(state, "freeagents")).toHaveLength(0);
-    expect(state.tactics).toHaveLength(teamCatalog().length);
-    expect(state.finances).toHaveLength(teamCatalog().length);
+    const clubs = teamCatalog().filter((t) => isClubTeam(t.id)).length;
+    expect(state.tactics).toHaveLength(clubs);
+    expect(state.finances).toHaveLength(clubs);
     expect(state.contracts).toHaveLength(state.players.length);
     for (const p of state.players) {
       expect(() => GamePlayerSchema.parse(p)).not.toThrow();
@@ -301,7 +303,7 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
   it("기본 배치는 자리에 맞는 선수를 세운다 — 적응도 70 미만이 없다", () => {
     // 시작 배치에서 "생소한 자리"가 나오면 감독이 손대기 전부터 손해를 안고 시작한다.
     const placed = state.teams.flatMap((team) =>
-      assignmentsOf(state, team.id).map((a) => {
+      (isClubTeam(team.id) ? assignmentsOf(state, team.id) : []).map((a) => {
         const player = playersOf(state, team.id).find((p) => p.id === a.playerId)!;
         return { name: player.name, position: a.position, fit: proficiencyAt(player, a.position) };
       }),
