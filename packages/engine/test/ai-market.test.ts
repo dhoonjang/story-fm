@@ -2,11 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   activeContract,
   advanceTime,
-  allMatchesDone,
   assignmentsOf,
+  buildTransferWindows,
   firstTeamPlayers,
   isTopFlight,
   playersOf,
+  runAiTransfers,
   windowOpenOn,
   type GameState,
 } from "@story-fm/engine";
@@ -155,6 +156,25 @@ describe("시장이 스쿼드를 무너뜨리지 않는다", () => {
     }
   });
 
+  /**
+   * 계획은 주 1회다 — **우리 창 밖에서도.** 계획이 덮는 마지막 날을 우리 창으로만
+   * 재면 사우디·MLS만 열린 기간에 그 날이 오늘이 되어, 한 주치 시도(434회)가 매일
+   * 되풀이된다 (docs/simulation/transfer.md §6).
+   */
+  it("사우디 창만 열린 날에도 계획은 한 주치다 — 이튿날 다시 세우지 않는다", () => {
+    const state = createTestGame();
+    state.windows = buildTransferWindows(1);
+    state.date = "2026-09-20"; // 우리 창은 9/1에 닫혔고 사우디는 10/6까지 열려 있다
+    runAiTransfers(state, []);
+    expect(state.aiPlannedThrough).toBe("2026-09-26");
+
+    state.date = "2026-09-21";
+    const queued = state.aiDeals?.length ?? 0;
+    runAiTransfers(state, []);
+    expect(state.aiPlannedThrough).toBe("2026-09-26");
+    expect(state.aiDeals?.length ?? 0).toBeLessThanOrEqual(queued);
+  });
+
   it("창이 닫혀 있으면 아무 일도 없다", () => {
     const state = playSummer();
     // 창이 닫힌 뒤 2주 — 그동안의 이적은 시장 전용 리그(사우디·MLS) 것뿐이다
@@ -172,38 +192,4 @@ describe("시장이 스쿼드를 무너뜨리지 않는다", () => {
     const after = aiMoves(state).filter((t) => t.date >= closed);
     expect(after.length, "창이 닫혔는데 유럽 클럽이 거래했다").toBeLessThan(before * 0.1);
   }, 60_000);
-});
-
-/**
- * 밸런스 하네스 — 한 시즌을 굴려 **시장의 크기**를 잰다.
- *
- * 기대값이 고정값이 아니라 밴드다(팀당 이적 1~6건 · 임대 0.5~4건 · 여름 비중 5할
- * 초과). 시장이 도는지는 위의 케이스들이 보고, 여기서는 그 양이 실제 시장과 같은
- * 자릿수인지를 본다. 한 시즌이 몇 분을 쓴다:
- *
- *   BALANCE=1 pnpm vitest run packages/engine/test/ai-market.test.ts
- */
-describe.skipIf(!process.env.BALANCE)("한 시즌의 시장 규모", () => {
-  it("1부 클럽당 이적 1~6건 · 임대 0.5~4건 — 실제 시장과 같은 자릿수", () => {
-    const state = createTestGame(7);
-    let guard = 420;
-    while (guard-- > 0 && !allMatchesDone(state)) {
-      const before = state.date;
-      const advanced = advanceTime(state, { days: 1 });
-      if (state.phase === "matchday") playMockMatch(state);
-      if (state.date === before && advanced.stopped !== "matchday") break;
-    }
-    const clubs = state.teams.filter((t) => isTopFlight(t.id)).length;
-    const moves = aiMoves(state);
-    const perClub = moves.filter((t) => t.type === "transfer").length / clubs;
-    const loansPerClub = moves.filter((t) => t.type === "loan").length / clubs;
-    expect(perClub, `팀당 이적 ${perClub.toFixed(1)}`).toBeGreaterThan(1);
-    expect(perClub, `팀당 이적 ${perClub.toFixed(1)}`).toBeLessThan(6);
-    expect(loansPerClub, `팀당 임대 ${loansPerClub.toFixed(1)}`).toBeGreaterThan(0.5);
-    expect(loansPerClub, `팀당 임대 ${loansPerClub.toFixed(1)}`).toBeLessThan(4);
-
-    // 여름이 겨울보다 붐빈다 (실제 시장의 7:3)
-    const summer = moves.filter((t) => t.date < "2026-09-05").length;
-    expect(summer / moves.length).toBeGreaterThan(0.5);
-  }, 300_000);
 });

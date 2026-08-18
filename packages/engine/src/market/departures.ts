@@ -1,8 +1,9 @@
 import type { GamePlayer } from "@story-fm/domain";
 import { ageOf } from "@story-fm/domain";
 import { diffDays, seasonYear, windowOpenOn } from "../competition/calendar";
-import { leagueOfTeam } from "../data/team-catalog";
+import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import { recordFinance } from "../club/finance";
+import { loanLockOf, transferWindowLabel, windowOpenForTeam } from "./market";
 import { estimateWeeklyWage, wageSubjectOf } from "../world/wages";
 import { makeRng } from "../core/rng";
 import { assignSquadNumber } from "../squad/numbers";
@@ -104,10 +105,10 @@ export function toFreeAgency(
 export function releasePlayer(state: GameState, input: { playerId: string }): SkillResult {
   const player = playerById(state, input.playerId);
   if (!player) return { ok: false, message: `"${input.playerId}"라는 선수를 찾지 못했습니다` };
-  // 임대 나간 선수는 `teamId`가 상대 팀이다 — 소속 판정보다 이 안내가 먼저다
-  if (player.loan?.fromTeamId === state.userTeamId) {
-    return { ok: false, message: `${player.name}은(는) 임대 중입니다 — 먼저 불러들여야 합니다` };
-  }
+  // 임대 나간 선수는 `teamId`가 상대 팀이고 빌려 온 선수는 계약이 남의 것이다 —
+  // 어느 쪽이든 소속 판정보다 이 안내가 먼저다 (transfer.md §2)
+  const locked = loanLockOf(player);
+  if (locked) return { ok: false, message: locked };
   if (player.teamId !== state.userTeamId) {
     return { ok: false, message: `${player.name}은(는) 우리 선수가 아닙니다` };
   }
@@ -170,8 +171,18 @@ export function loanPlayer(
   if (destination.id === state.userTeamId) {
     return { ok: false, message: "우리 구단에 임대할 수는 없습니다" };
   }
-  const window = windowOpenOn(state.windows, state.date);
-  if (!window) return { ok: false, message: "이적시장이 닫혀 있어 임대를 보낼 수 없습니다" };
+  // 무소속은 구단이 아니라 구단이 없는 상태다 — 빌려 갈 스쿼드가 없다 (transfer.md §2)
+  if (!isClubTeam(destination.id)) {
+    return { ok: false, message: `${teamName(destination.id)}은(는) 구단이 아닙니다` };
+  }
+  // 임대 송출의 창도 **받는 쪽 협회**의 것이다 — 등록을 그쪽이 한다 (transfer.md §3)
+  const window = windowOpenForTeam(state, destination.id);
+  if (!window) {
+    return {
+      ok: false,
+      message: `${transferWindowLabel(state, destination.id)}이 닫혀 있어 임대를 보낼 수 없습니다`,
+    };
+  }
   const short = squadShortfall(state, state.userTeamId, player);
   if (short) return { ok: false, message: `우리 ${short.replace("팔 수", "보낼 수")}` };
   const contract = activeContract(state, player.id);
@@ -412,6 +423,9 @@ function signWithClub(
     fee: 0,
     note: "자유계약",
   });
+  // 남은 활성 계약을 끝내고 쓴다 — 안 끝내면 한 선수의 주급이 두 구단에서 세어진다
+  const previous = activeContract(state, player.id);
+  if (previous) previous.status = "ended";
   state.contracts.push({
     id: `c-fa-${player.id}-${state.date}`,
     gamePlayerId: player.id,

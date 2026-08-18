@@ -964,7 +964,7 @@ export function runMonthlyFinance(state: GameState, digest: string[]): void {
  *
  * ⚠️ 이 달은 **주급이 한 주치뿐이다** — 전환이 남은 월요일을 건너뛰기 때문이다.
  * 정액 수입·고정비는 1일에 한 달치가 다 앉으므로 마지막 달이 그만큼 후하게 잡힌다
- * (§12.4).
+ * (§12).
  */
 export function closeSeasonBooks(state: GameState, digest: string[]): void {
   closeMonths(state, digest, monthOf(state.date));

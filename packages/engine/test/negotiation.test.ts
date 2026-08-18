@@ -16,16 +16,21 @@ import {
   incomingOffer,
   incomingOffers,
   marketValueOf,
+  loanPlayer,
+  offerPlayerOut,
   openNegotiationFor,
   openRenewal,
   pendingOffer,
   playerById,
   playersOf,
+  recallLoan,
+  releasePlayer,
   renewalExpectation,
   respondOffer,
   responseDelayDays,
   resolveMedical,
   sendOffer,
+  setTransferList,
   suggestTerms,
   teamName,
   wageExpectationOf,
@@ -1044,5 +1049,192 @@ describe("카드의 성사 가능성", () => {
     });
     expect(renewal.ok, renewal.message).toBe(true);
     expect((renewal.payload as MarketCard).odds).toContain("%");
+  });
+});
+
+
+/**
+ * **임대 중인 선수의 계약은 소유 구단의 것이다** (transfer.md §2).
+ *
+ * 코어가 `loan.fromTeamId === userTeamId`(우리가 **내보낸** 임대)만 보던 시절엔
+ * 우리에게 **온** 임대가 우리 선수로 취급됐다: 빌려 온 선수를 팔면 남의 계약이
+ * 끝나고 이적료가 우리에게 들어왔고, 남의 임대 선수를 영입하면 돈이 계약 소유
+ * 구단이 아니라 **빌린 구단**에 입금되면서 `loan`이 남아 복귀일에 선수만 원소속으로
+ * 돌아갔다. 화면에 드러나지 않는 장부라 문마다 못 박는다.
+ */
+describe("임대 중인 선수는 소유 구단만 움직인다", () => {
+  const OWNER = "chelsea";
+  const HOST = "liverpool";
+  const BUYER = "mancity";
+  const FEE = 2_000_000;
+
+  /** 합의까지 간 협상 하나 — 관문 뒤의 장부를 보려면 확정 직전까지 세워야 한다 */
+  function agreedDeal(
+    state: GameState,
+    input: {
+      id: string;
+      kind: "buy" | "sell" | "loan";
+      playerId: string;
+      counterpartTeamId: string;
+      fee: number;
+    },
+  ) {
+    for (const w of state.windows) w.closesOn = addDays(state.date, 30);
+    state.negotiations.push({
+      id: input.id,
+      gamePlayerId: input.playerId,
+      kind: input.kind,
+      counterpartTeamId: input.counterpartTeamId,
+      windowId: null,
+      openedOn: state.date,
+      expiresOn: addDays(state.date, 10),
+      status: "agreed",
+      medical: { onDate: state.date, status: "passed" },
+      rounds: [
+        {
+          date: state.date,
+          by: "us",
+          fee: input.fee,
+          weeklyWage: 40_000,
+          contractYears: 3,
+          respondsOn: null,
+          probability: 60,
+          verdict: "accept",
+        },
+      ],
+    });
+    return input.id;
+  }
+
+  /** 첼시 선수를 우리가 빌려 온다 — `teamId`는 우리, 계약은 첼시에 남는다 */
+  function borrowed(state: GameState) {
+    const player = playersOf(state, OWNER).sort(
+      (a, b) => a.attributes.overall - b.attributes.overall,
+    )[2]!;
+    const id = agreedDeal(state, {
+      id: "neg-loan-in",
+      kind: "loan",
+      playerId: player.id,
+      counterpartTeamId: OWNER,
+      fee: FEE,
+    });
+    const done = acceptDeal(state, id);
+    expect(done.ok, done.message).toBe(true);
+    const after = playerById(state, player.id)!;
+    expect(after.teamId).toBe(state.userTeamId);
+    expect(activeContract(state, after.id)!.teamId).toBe(OWNER);
+    return after;
+  }
+
+  /** 첼시 선수가 리버풀에서 뛰는 상태 — AI 시장의 임대가 남기는 모양 그대로 */
+  function thirdPartyLoan(state: GameState) {
+    const player = playersOf(state, OWNER).sort(
+      (a, b) => a.attributes.overall - b.attributes.overall,
+    )[3]!;
+    player.teamId = HOST;
+    player.loan = { fromTeamId: OWNER, until: addDays(state.date, 200), wageShare: 0.5 };
+    return player;
+  }
+
+  it("빌려 온 선수는 어느 문으로도 나가지 않는다 — 등재·매각·재계약·방출", () => {
+    const state = createTestGame(42);
+    const player = borrowed(state);
+
+    for (const res of [
+      setTransferList(state, { playerId: player.id, listed: true }),
+      offerPlayerOut(state, { playerId: player.id, teamId: BUYER, fee: FEE }),
+      openRenewal(state, { playerId: player.id, weeklyWage: 50_000, years: 3 }),
+      releasePlayer(state, { playerId: player.id }),
+    ]) {
+      expect(res.ok, res.message).toBe(false);
+      expect(res.message).toContain("임대 중");
+    }
+    expect(state.transferList.some((l) => l.gamePlayerId === player.id)).toBe(false);
+    expect(activeContract(state, player.id)!.teamId).toBe(OWNER);
+  });
+
+  it("빌려 온 선수를 팔면 이적료가 소유 구단을 지나쳐 온다 — 확정이 막는다", () => {
+    const state = createTestGame(42);
+    const player = borrowed(state);
+    const ourBalance = financeOf(state, state.userTeamId).balance;
+    const ownerBalance = financeOf(state, OWNER).balance;
+    const buyerBalance = financeOf(state, BUYER).balance;
+
+    const id = agreedDeal(state, {
+      id: "neg-sell-loaned",
+      kind: "sell",
+      playerId: player.id,
+      counterpartTeamId: BUYER,
+      fee: 20_000_000,
+    });
+    const done = acceptDeal(state, id);
+    expect(done.ok, "빌린 구단이 남의 계약을 팔 수는 없다").toBe(false);
+
+    // 장부는 한 푼도 움직이지 않았고 계약은 여전히 첼시의 것이다
+    expect(financeOf(state, state.userTeamId).balance).toBe(ourBalance);
+    expect(financeOf(state, OWNER).balance).toBe(ownerBalance);
+    expect(financeOf(state, BUYER).balance).toBe(buyerBalance);
+    const after = playerById(state, player.id)!;
+    expect(after.teamId).toBe(state.userTeamId);
+    expect(after.loan!.fromTeamId).toBe(OWNER);
+    expect(activeContract(state, player.id)!.teamId).toBe(OWNER);
+    expect(state.contracts.filter((c) => c.gamePlayerId === player.id && c.status === "active"))
+      .toHaveLength(1);
+  });
+
+  it("임대 중인 남의 선수는 영입되지 않는다 — 돈이 빌린 구단에 입금된다", () => {
+    const state = createTestGame(42);
+    const player = thirdPartyLoan(state);
+    const ownerBalance = financeOf(state, OWNER).balance;
+    const hostBalance = financeOf(state, HOST).balance;
+    const ourBudget = financeOf(state, state.userTeamId).transferBudget;
+
+    const offer = sendOffer(state, {
+      playerId: player.id,
+      fee: FEE,
+      weeklyWage: 40_000,
+      years: 3,
+    });
+    expect(offer.ok, "오퍼 단계에서 이미 막힌다").toBe(false);
+    expect(offer.message).toContain("임대 중");
+
+    // 합의까지 갔더라도 장부를 옮기는 자리가 다시 막는다
+    const id = agreedDeal(state, {
+      id: "neg-buy-loaned",
+      kind: "buy",
+      playerId: player.id,
+      counterpartTeamId: HOST,
+      fee: FEE,
+    });
+    const done = acceptDeal(state, id);
+    expect(done.ok).toBe(false);
+    expect(financeOf(state, HOST).balance, "빌린 구단은 이적료를 받지 않는다").toBe(hostBalance);
+    expect(financeOf(state, OWNER).balance).toBe(ownerBalance);
+    expect(financeOf(state, state.userTeamId).transferBudget).toBe(ourBudget);
+    const after = playerById(state, player.id)!;
+    expect(after.teamId).toBe(HOST);
+    expect(after.loan!.fromTeamId).toBe(OWNER);
+    expect(activeContract(state, player.id)!.teamId).toBe(OWNER);
+  });
+
+  it("내보낸 임대도 같은 문을 지난다 — 불러들이면 다시 열린다", () => {
+    const state = createTestGame(42);
+    const ours = [...playersOf(state, state.userTeamId)].sort(
+      (a, b) => a.attributes.overall - b.attributes.overall,
+    )[0]!;
+    expect(loanPlayer(state, { playerId: ours.id, teamId: OWNER }).ok).toBe(true);
+
+    for (const res of [
+      setTransferList(state, { playerId: ours.id, listed: true }),
+      releasePlayer(state, { playerId: ours.id }),
+      sendOffer(state, { playerId: ours.id, fee: FEE, weeklyWage: 40_000, years: 3 }),
+    ]) {
+      expect(res.ok, res.message).toBe(false);
+      expect(res.message).toContain("임대 중");
+    }
+
+    expect(recallLoan(state, { playerId: ours.id }).ok).toBe(true);
+    const listed = setTransferList(state, { playerId: ours.id, listed: true });
+    expect(listed.ok, "불러들인 뒤에는 소유 구단이 다시 움직일 수 있다").toBe(true);
   });
 });

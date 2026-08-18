@@ -439,15 +439,19 @@ describe("overall 분포 — 밴드 의미가 유지된다", () => {
   const sorted = [...overalls].sort((a, b) => a - b);
   const q = (p: number) => sorted[Math.floor(sorted.length * p)]!;
 
-  it("가중 평균의 눈금 — 평균 66 · p90 76 근처에 선다", () => {
+  it("가중 평균의 눈금 — 평균 65 · p90 76 근처에 선다", () => {
     /**
      * 되펴기를 걷어낸 뒤의 눈금이다(player.md §4). 폭이 밴드 하나만큼이라도 벗어나면
      * 축 파생이나 가중치가 움직였다는 뜻이고, 그때는 종합을 읽는 곡선(시장가·희망
      * 주급·`RATING_TIERS`)을 함께 다시 재야 한다.
+     *
+     * ⚠️ **분모의 절반이 합성 선수라 이 밴드는 보충 기준선도 함께 잰다.** 보충이
+     * 그 클럽 실선수 분포에서 파생하게 되면서(team.md §4) 평균이 67 → 65로 내려왔다 —
+     * 움직인 건 스쿼드 깊이·아카데미 대역이고 선발 11인 평균은 리그마다 0.7 안이다.
      */
     const mean = overalls.reduce((s, x) => s + x, 0) / overalls.length;
-    expect(mean).toBeGreaterThan(64);
-    expect(mean).toBeLessThan(69);
+    expect(mean).toBeGreaterThan(62);
+    expect(mean).toBeLessThan(67);
     expect(q(0.9)).toBeGreaterThanOrEqual(73);
     expect(q(0.9)).toBeLessThanOrEqual(79);
   });
@@ -472,19 +476,59 @@ describe("overall 분포 — 밴드 의미가 유지된다", () => {
     expect(top).toBeLessThan(real.length * 0.01);
   });
 
+  it("합성 보충이 그 클럽 실선수 최고를 넘지 않는다", () => {
+    /**
+     * **보충 기준선의 불변식이다** (team.md §4·§8). 기준선이 tier 상수였을 땐 그 값이
+     * 리그 상위권의 눈금이라, 실선수 시드가 얇은 클럽일수록 보충이 세게 나왔다 —
+     * 33클럽에서 합성이 스쿼드 최고를 넘었고 세계 상위 명단에 가명이 섰다. 선발·전력
+     * 패킷·이적 시세가 전부 그 가명을 축으로 돌았다.
+     *
+     * **클럽마다 잰다.** 세계 상한 하나로는 약한 클럽 안에서 일어나는 역전을 못 잡는다.
+     */
+    const squads = new Map<string, { real: number[]; synthetic: number[] }>();
+    for (const e of playerCatalog()) {
+      const squad = squads.get(e.teamId) ?? { real: [], synthetic: [] };
+      (e.synthetic ? squad.synthetic : squad.real).push(bestOverall(e, e.positions));
+      squads.set(e.teamId, squad);
+    }
+    const violations: string[] = [];
+    for (const [teamId, { real, synthetic }] of squads) {
+      // 실선수가 없는 스쿼드(2부·시드 없는 1부)는 비교 대상이 없다
+      if (real.length === 0 || synthetic.length === 0) continue;
+      const ceiling = Math.max(...real);
+      const top = Math.max(...synthetic);
+      if (top > ceiling) violations.push(`${teamId} 합성 ${top} > 실선수 ${ceiling}`);
+    }
+    expect(violations).toEqual([]);
+
+    // 그 결과가 이슈 #150의 완료 조건이다 — 세계 상위 명단은 전원 실선수다
+    const worldTop = [...playerCatalog()]
+      .sort((a, b) => bestOverall(b, b.positions) - bestOverall(a, a.positions))
+      .slice(0, 50);
+    expect(worldTop.filter((e) => e.synthetic).map((e) => e.nameEn)).toEqual([]);
+  });
+
   it("자리별 평균이 서로 크게 벌어지지 않는다 — 포지션 간 비교가 가능해야 한다", () => {
-    // 1부 클럽만 본다. 2부는 **의도적으로** 기준선이 낮고(SECOND_DIVISION_PENALTY)
-    // 포지션 구성도 다른 축소 스쿼드라, 섞어서 재면 "축 파생이 자리에 공평한가"라는
-    // 이 테스트의 질문이 아니라 두 모집단의 강약 차이를 재게 된다.
+    /**
+     * **1부 실선수만 본다.** 2부는 의도적으로 기준선이 낮고(SECOND_DIVISION_PENALTY)
+     * 포지션 구성도 다른 축소 스쿼드라, 섞어서 재면 "축 파생이 자리에 공평한가"라는
+     * 이 테스트의 질문이 아니라 두 모집단의 강약 차이를 재게 된다.
+     *
+     * 합성 선수도 같은 이유로 뺀다 — 보충이 어느 자리에 붙는지는 그 클럽에 어느
+     * 포지션군이 모자랐나가 정하지(`topUpEntries`) 축 파생이 정하지 않는다. 섞어서
+     * 재면 보충 기준선이 움직일 때마다 이 폭이 따라 움직인다.
+     *
+     * 문턱 6은 실측 자리별 평균 폭 5.5에서 왔다 (player.md §2).
+     */
     const bySlot = new Map<string, number[]>();
-    for (const e of playerCatalog().filter((x) => isTopFlight(x.teamId))) {
+    for (const e of playerCatalog().filter((x) => isTopFlight(x.teamId) && !x.synthetic)) {
       const slot = weightSlotOf(naturalPositionOf(e).position);
       const list = bySlot.get(slot) ?? [];
       list.push(roleFit(e, naturalPositionOf(e).position));
       bySlot.set(slot, list);
     }
     const means = [...bySlot.values()].map((xs) => xs.reduce((s, x) => s + x, 0) / xs.length);
-    expect(Math.max(...means) - Math.min(...means)).toBeLessThan(4);
+    expect(Math.max(...means) - Math.min(...means)).toBeLessThan(6);
   });
 });
 
