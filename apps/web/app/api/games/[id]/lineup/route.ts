@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { MATCHDAY_BENCH } from "@story-fm/domain";
 import {
   lineupChangeNote,
   lineupSignature,
@@ -8,7 +9,6 @@ import {
   saveGame,
   setLineup,
   setPlayerRole,
-  setSquadLevel,
   setTactics,
   shapeOfTactics,
   startingIdsOf,
@@ -42,7 +42,8 @@ const TacticsSchema = z
  */
 const LineupSchema = z.object({
   starting: z.array(SlotSchema).length(11),
-  bench: z.array(SlotSchema).max(12).default([]),
+  /** 정원의 원본은 도메인 하나다 (→ docs/data/team.md §6) — 화면도 같은 값을 읽는다 */
+  bench: z.array(SlotSchema).max(MATCHDAY_BENCH).default([]),
   tactics: TacticsSchema.optional(),
   /**
    * 1·2군 이동 — 전술판에서 2군 선수를 끌어올리거나 1군을 내릴 때 함께 온다.
@@ -103,23 +104,19 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const res = setTactics(state, axes);
       if (!res.ok) return NextResponse.json({ error: res.message }, { status: 400 });
     }
-    // 1·2군 이동은 **승격 먼저, 강등 나중**이다. 승격이 앞서야 그 선수를 라인업에
-    // 넣을 수 있고(2군은 setLineup이 반려한다), 강등은 뒤에 해야 방금 짠 배치에서
-    // 다시 빠지지 않는다.
-    const levels = body.data.squadLevels ?? [];
-    for (const move of levels.filter((m) => m.level === "first")) {
-      const res = setSquadLevel(state, move);
-      if (!res.ok) return NextResponse.json({ error: res.message }, { status: 400 });
-    }
-
-    // v6: 전술판 배치는 TACTIC_ASSIGNMENT를 갱신한다 (주 포지션은 바꾸지 않는다)
-    const res = setLineup(state, { starting: body.data.starting, bench: body.data.bench });
+    /**
+     * v6: 전술판 배치는 TACTIC_ASSIGNMENT를 갱신한다 (주 포지션은 바꾸지 않는다).
+     *
+     * 1·2군 이동도 **같은 호출로** 넘긴다 — 순서(승격 → 배치 → 강등)와 검증은 코어가
+     * 한 벌만 갖는다(`setLineup` · team.md §6). 라우트가 승격을 따로 부르던 때는
+     * 배치가 반려돼도 승격만 남았고, 같은 규칙이 두 곳에 적혀 한쪽만 고쳐졌다.
+     */
+    const res = setLineup(state, {
+      starting: body.data.starting,
+      bench: body.data.bench,
+      ...(body.data.squadLevels ? { squadLevels: body.data.squadLevels } : {}),
+    });
     if (!res.ok) return NextResponse.json({ error: res.message }, { status: 400 });
-
-    for (const move of levels.filter((m) => m.level === "reserve")) {
-      const demoted = setSquadLevel(state, move);
-      if (!demoted.ok) return NextResponse.json({ error: demoted.message }, { status: 400 });
-    }
 
     /**
      * 역할은 **배치 뒤에** — 방금 선발이 된 선수에게도 걸 수 있어야 한다.

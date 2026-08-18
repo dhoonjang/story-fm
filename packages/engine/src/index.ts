@@ -13,6 +13,7 @@ export * from "./core/persistence";
 export * from "./core/tick";
 
 // data — 카탈로그·시드 (불변 초기치)
+export * from "./data/names";
 export * from "./data/team-catalog";
 export * from "./data/coach-seeds";
 export * from "./data/owner-seeds";

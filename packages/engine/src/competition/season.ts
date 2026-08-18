@@ -544,6 +544,8 @@ export function transitionSeason(state: GameState): string[] {
       for (let k = have; k < MIN_GROUP[group]; k++) forced.push(group);
     }
     const totalIntake = Math.max(Math.max(1, retirees.length + leavers.length), forced.length);
+    // 이름도 팀 안에서 유일해야 한다 — 남은 명단을 쥐고 뽑는다 (people.md §2)
+    const takenNames = new Set(squad.map((p) => p.name));
     for (let i = 0; i < totalIntake; i++) {
       const youth = generateYouthPlayer(
         state.seed + 101,
@@ -554,6 +556,7 @@ export function transitionSeason(state: GameState): string[] {
         takenIds,
         forced[i],
         seasonYear(nextSeason),
+        takenNames,
       );
       state.players.push(youth);
       assignSquadNumber(state.players, youth);

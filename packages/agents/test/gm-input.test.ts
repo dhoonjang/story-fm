@@ -617,10 +617,12 @@ describe("오퍼레이터 채널 — 감독의 말과 화면 조작은 갈린다
     /**
      * 조작은 감독 화자가 아니다. 갈리지 않으면 GM이 그 문장을 감독의 대사로 읽고
      * 인용하거나 거기서 말투·의도를 추론한다 — 감독은 말한 적이 없고 손잡이를
-     * 눌렀을 뿐이다. 표기는 새로 만들지 않고 화자 없음(`@:`)을 그대로 쓴다.
+     * 눌렀을 뿐이다. 봉투는 모델의 출력 문법 **밖**이다 — `@:`는 GM이 내레이션을
+     * 쓰는 채널이라, 거기 담으면 손잡이가 모델 자신의 문법으로 이력에 선다.
      */
     expect(operator.content).not.toContain(`@${state.manager.name}:`);
-    expect(operator.content).toBe("@: [시간 진행 — 하루]");
+    expect(operator.content).not.toMatch(/^@/u);
+    expect(operator.content).toBe("[조작: 시간 진행 — 하루]");
   });
 });
 
