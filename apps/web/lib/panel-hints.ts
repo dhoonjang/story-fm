@@ -35,13 +35,11 @@ export const PANEL_OF: Record<string, PanelKey> = {
   recall_loan: "스쿼드",
   accept_deal: "스쿼드",
   apply_narrative_event: "스쿼드",
-  rate_players: "스쿼드",
   // 대화형 — 바뀌는 것은 사기·심경이고 그건 명단이 보여준다
   team_talk: "스쿼드",
   talk_to_player: "스쿼드",
   // ── 달력 — 일정과 훈련 ──
   set_training: "달력",
-  clear_training: "달력",
   start_match: "달력",
   // ── 대회 — 끝난 경기가 순위와 기록으로 가는 곳 ──
   finalize_match: "대회",

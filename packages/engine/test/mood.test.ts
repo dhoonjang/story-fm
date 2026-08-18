@@ -1,17 +1,31 @@
 import { describe, expect, it } from "vitest";
 import { clampCondition } from "@story-fm/domain";
 import {
+  HEAVY_DEFEAT_MARGIN,
+  HEAVY_DEFEAT_PENALTY,
   MOOD_BATCH,
   MOOD_NOTE_DAYS,
+  RUN_MAX,
+  RUN_PER_WIN,
+  RUN_WINS,
+  SLUMP_ISSUE_LOSSES,
+  SLUMP_LOSSES,
+  SLUMP_MAX,
+  SLUMP_PER_LOSS,
   addDays,
   applyMoodNotes,
+  applyResultMood,
   buildMoodBrief,
   dealOdds,
   describeMood,
   generateIncomingOffers,
   marketValueOf,
   moodOf,
+  runBonus,
+  slumpPenalty,
+  streakOf,
   userPlayers,
+  type GameState,
 } from "@story-fm/engine";
 import { createTestGame } from "./helpers";
 
@@ -251,5 +265,135 @@ describe("심경 결산 — 코어가 사실을 잡고 결만 맡긴다", () => 
     const brief = buildMoodBrief(state, state.date, state.date)!;
     expect(brief.targets.length).toBeLessThanOrEqual(MOOD_BATCH);
     expect(brief.targets.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * **연패·연승이 라커룸에 남는다** (`slump.ts` · match.md §7 ④).
+ *
+ * 이 계단은 화면에 숫자로 서지 않는다 — 팀 전체의 폼이 조금 내려가고 어느 날 한
+ * 명이 등을 돌릴 뿐이라, 공식이 어긋나도 아무도 눈치채지 못한다. 문턱·계단·상한과
+ * "누가 지목되는가"를 여기서 고정한다.
+ */
+describe("연패·연승이 라커룸에 남는다", () => {
+  /** 치른 리그 경기 하나 — 연속 기록에 필요한 것은 결과뿐이다 */
+  function played(
+    state: GameState,
+    id: string,
+    day: number,
+    ours: number,
+    theirs: number,
+    teamId = state.userTeamId,
+  ) {
+    state.matches.push({
+      id,
+      season: state.season,
+      competitionId: "epl",
+      round: 1,
+      date: addDays(state.date, -day),
+      homeTeamId: teamId,
+      awayTeamId: "everton",
+      result: { homeGoals: ours, awayGoals: theirs, scorers: [] },
+    });
+  }
+
+  /** 오늘까지 이어진 n연패 — 마지막 경기가 오늘이다 */
+  function losingRun(state: GameState, n: number, teamId = state.userTeamId) {
+    for (let i = 0; i < n; i++) played(state, `m-loss-${teamId}-${i}`, n - 1 - i, 0, 1, teamId);
+  }
+
+  /** 목소리를 낼 만한 주력 자원 하나를 팀에서 가장 낮은 폼으로 세운다 */
+  function lowestVoice(state: GameState) {
+    const squad = userPlayers(state);
+    for (const p of squad) p.state.form = 0.5;
+    const voice = [...squad].sort((a, b) => b.attributes.overall - a.attributes.overall)[0]!;
+    voice.state.form = -0.5;
+    return voice;
+  }
+
+  it("연패는 문턱부터 계단으로 깎이고 상한에서 멈춘다", () => {
+    expect(slumpPenalty(SLUMP_LOSSES - 1)).toBe(0);
+    expect(slumpPenalty(SLUMP_LOSSES)).toBeCloseTo(SLUMP_PER_LOSS, 10);
+    expect(slumpPenalty(SLUMP_LOSSES + 1)).toBeCloseTo(SLUMP_PER_LOSS * 2, 10);
+    expect(slumpPenalty(SLUMP_LOSSES + 99)).toBeCloseTo(SLUMP_MAX, 10);
+  });
+
+  it("연승은 그 거울이되 이득이 손해보다 작다", () => {
+    expect(runBonus(RUN_WINS - 1)).toBe(0);
+    expect(runBonus(RUN_WINS)).toBeCloseTo(RUN_PER_WIN, 10);
+    expect(runBonus(RUN_WINS + 99)).toBeCloseTo(RUN_MAX, 10);
+    expect(RUN_MAX).toBeLessThan(SLUMP_MAX);
+  });
+
+  it("연속은 맨 앞부터만 센다 — 사이에 다른 결과가 끼면 끊긴다", () => {
+    expect(streakOf(["loss", "loss", "loss"], "loss")).toBe(3);
+    expect(streakOf(["loss", "draw", "loss", "loss"], "loss")).toBe(1);
+    expect(streakOf(["win", "loss", "loss"], "loss")).toBe(0);
+  });
+
+  it("문턱 아래는 그냥 진 경기다 — 폼도 알림도 움직이지 않는다", () => {
+    const state = createTestGame();
+    const squad = userPlayers(state);
+    for (const p of squad) p.state.form = 0.5;
+    losingRun(state, SLUMP_LOSSES - 1);
+    expect(applyResultMood(state, state.userTeamId, -1, [])).toBeNull();
+    expect(squad[0]!.state.form).toBeCloseTo(0.5, 10);
+  });
+
+  it("문턱을 넘으면 팀 전체의 폼이 그만큼 내려간다", () => {
+    const state = createTestGame();
+    const squad = userPlayers(state);
+    for (const p of squad) p.state.form = 0.5;
+    losingRun(state, SLUMP_LOSSES);
+    expect(applyResultMood(state, state.userTeamId, -1, [])).toContain(`${SLUMP_LOSSES}연패`);
+    for (const p of squad) {
+      expect(p.state.form).toBeCloseTo(0.5 - slumpPenalty(SLUMP_LOSSES), 10);
+    }
+  });
+
+  it("대패는 그날 뛴 선수가 더 치른다 — 벤치에서 본 것과 당한 것은 다르다", () => {
+    const state = createTestGame();
+    const squad = userPlayers(state);
+    for (const p of squad) p.state.form = 0.5;
+    const [onPitch, onBench] = squad;
+    played(state, "m-thrashing", 0, 0, HEAVY_DEFEAT_MARGIN);
+    applyResultMood(state, state.userTeamId, -HEAVY_DEFEAT_MARGIN, [onPitch!.id]);
+    expect(onPitch!.state.form).toBeCloseTo(0.5 - HEAVY_DEFEAT_PENALTY, 10);
+    expect(onBench!.state.form).toBeCloseTo(0.5, 10);
+  });
+
+  it("침체가 길어지면 한 명이 등을 돌린다 — 폼이 가장 낮은 주력 자원", () => {
+    const state = createTestGame();
+    const voice = lowestVoice(state);
+    const before = state.issues.length;
+
+    losingRun(state, SLUMP_ISSUE_LOSSES - 1);
+    applyResultMood(state, state.userTeamId, -1, []);
+    expect(state.issues).toHaveLength(before); // 아직은 라커룸 안에서 끝난다
+
+    played(state, "m-loss-more", 0, 0, 1);
+    applyResultMood(state, state.userTeamId, -1, []);
+    const issue = state.issues[before];
+    expect(issue?.gamePlayerId).toBe(voice.id);
+    expect(issue?.kind).toBe("unhappy");
+    expect(issue?.note).toContain(`${SLUMP_ISSUE_LOSSES}연패`);
+  });
+
+  it("한 사람이 두 번 지목되지 않는다 — 연패가 이어져도", () => {
+    const state = createTestGame();
+    const voice = lowestVoice(state);
+    losingRun(state, SLUMP_ISSUE_LOSSES);
+    applyResultMood(state, state.userTeamId, -1, []);
+    played(state, "m-loss-again", 0, 0, 1);
+    applyResultMood(state, state.userTeamId, -1, []);
+    expect(state.issues.filter((i) => i.gamePlayerId === voice.id)).toHaveLength(1);
+  });
+
+  it("남의 라커룸 불만은 장부에 남기지 않는다", () => {
+    const state = createTestGame();
+    const before = state.issues.length;
+    losingRun(state, SLUMP_ISSUE_LOSSES, "chelsea");
+    expect(applyResultMood(state, "chelsea", -1, [])).toContain("연패");
+    expect(state.issues).toHaveLength(before);
   });
 });

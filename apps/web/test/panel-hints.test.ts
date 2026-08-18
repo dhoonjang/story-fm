@@ -61,10 +61,10 @@ describe("항목으로 서는 말풍선", () => {
   it("바뀐 것을 못 적었으면 머리줄이 그 줄이다", () => {
     const hints = panelHintsOf([
       turn([
-        { name: "clear_training", summary: "훈련 해제", brief: { head: "훈련 해제", items: [] } },
+        { name: "set_training", summary: "훈련 해제", brief: { head: "훈련 해제", items: [] } },
       ]),
     ]);
-    expect(hints[0]!.lines).toEqual([{ skill: "clear_training", text: "훈련 해제" }]);
+    expect(hints[0]!.lines).toEqual([{ skill: "set_training", text: "훈련 해제" }]);
   });
 
   it("항목이 있으면 요약 문자열은 보지 않는다 — 사족 괄호도 떼지 않는다", () => {

@@ -44,6 +44,8 @@ import {
   teamsOfLeague,
 } from "@story-fm/engine";
 import { FORMATION_LAYOUTS } from "@story-fm/domain";
+import type { ChatTurn } from "@story-fm/engine";
+import { visibleChat } from "../lib/store";
 import type { GamePayload, GameSlice } from "../lib/store";
 
 /** API 통합 테스트 — 라우트 핸들러를 직접 호출 (mock GM 모드) */
@@ -784,5 +786,40 @@ describe("API — 팀·리그·컵 카탈로그 어드민", () => {
     const reset = (await resetRes.json()) as CupPayload;
     expect(reset.edited).toBe(false);
     expect(reset.europe.find((c) => c.id === "ucl")!.short).toBe("UCL");
+  });
+});
+
+/**
+ * 페이로드에 실리는 기록 — **감출 것은 코어가 표식으로 적어 둔다**(`silent`).
+ *
+ * 스킬 카탈로그의 이름으로 거르면 코어가 남기는 기록이 함께 사라진다 — 경기 마감의
+ * "경기 종료"가 응답에 없으면 90분이 무엇으로 끝났는지가 어느 화면에도 서지 않는다.
+ */
+describe("채팅 기록 필터", () => {
+  const turn = (calls: ChatTurn["toolCalls"]): ChatTurn => ({
+    role: "model",
+    text: "[2026-08-15 오후]\n@코치: 끝났습니다.",
+    toolCalls: calls,
+    at: "2026-08-15",
+  });
+
+  it("코어가 남긴 기록도 페이로드에 남는다 — 걸리는 것은 `silent`뿐이다", () => {
+    const [filtered] = visibleChat([
+      turn([
+        { name: "set_lineup", summary: "라인업 확정" },
+        {
+          name: "finalize_match",
+          summary: "아스널 2 : 1 첼시",
+          brief: { head: "경기 종료", items: [{ text: "아스널 2 : 1 첼시" }] },
+        },
+        { name: "시간 경과", summary: "2026-08-16까지 진행", silent: true },
+      ]),
+    ]);
+    expect(filtered!.toolCalls.map((c) => c.name)).toEqual(["set_lineup", "finalize_match"]);
+  });
+
+  it("거를 것이 없으면 턴을 그대로 둔다 — 화면이 쥔 것과 같은 객체다", () => {
+    const kept = turn([{ name: "set_lineup", summary: "라인업 확정" }]);
+    expect(visibleChat([kept])[0]).toBe(kept);
   });
 });

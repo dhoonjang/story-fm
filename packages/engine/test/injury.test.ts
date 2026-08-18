@@ -6,6 +6,7 @@ import {
   PRONENESS_BASE,
   advanceSegment,
   advanceTime,
+  diffDays,
   easeProneness,
   finalizeMatch,
   injuryProneness,
@@ -297,5 +298,37 @@ describe("장부는 한 공식만 쓴다", () => {
     const mine = playersOf(state, state.userTeamId)[0]!;
     openInjuryFor(state, mine, "match", () => 0.5);
     expect(ours()).toBeGreaterThan(before);
+  });
+
+  /**
+   * **미복귀는 선수당 하나다** (`domain/records.ts` · player.md §5.3). 두 번째 행이
+   * 열리면 복귀일이 둘이 되고 — 화면·조회·간이 시뮬이 각자 다른 하나를 집는다 —
+   * 성향과 치료비가 한 부상에 두 번 걸린다. 호출부의 `isInjured` 필터는 여기서 다시
+   * 확인하지 않으면 없어져도 아무 테스트도 울지 않는 종류의 가드다.
+   */
+  it("열린 부상이 있는 선수에게 두 번째가 열리지 않는다", () => {
+    const state = createTestGame(5);
+    const ledger = () => state.finances.find((f) => f.teamId === state.userTeamId)!.ledger.length;
+    const mine = playersOf(state, state.userTeamId).find((p) => !isInjured(state, p.id))!;
+    const openOf = () =>
+      state.injuries.filter((i) => i.gamePlayerId === mine.id && i.returnedOn === null);
+
+    openInjuryFor(state, mine, "match", () => 0.5);
+    const first = openOf()[0]!;
+    const proneness = pronenessValue(mine);
+    const spent = ledger();
+
+    // 두 번째 굴림은 심각도까지 다르다 — 새 행이 열렸다면 값으로 드러난다
+    const again = openInjuryFor(state, mine, "training", () => 0.99);
+
+    expect(openOf()).toEqual([first]);
+    // 돌려주는 것은 안고 있는 그 부상이다 — 일어나지 않은 결장을 호출부가 말하지 않는다
+    expect(again).toEqual({
+      part: first.bodyPart,
+      days: diffDays(state.date, first.expectedReturn),
+    });
+    // 성향도 치료비도 한 부상에 한 번뿐
+    expect(pronenessValue(mine)).toBe(proneness);
+    expect(ledger()).toBe(spent);
   });
 });

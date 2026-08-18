@@ -475,7 +475,13 @@ async function runRealGmTurn(
       if (brief) {
         const rated = await rateMatchPerformances(state, brief);
         if (rated.applied > 0) {
-          calls.push({ name: "rate_players", summary: `경기 평점 ${rated.applied}명` });
+          // 결산은 감독이 부른 적 없는 내부 판정이라 칩으로 세우지 않는다 (agents.md §4).
+          // 평점은 명단과 종료 화면이 이미 갖고 있다
+          calls.push({
+            name: "rate_players",
+            summary: `경기 평점 ${rated.applied}명`,
+            silent: true,
+          });
         }
       }
       // 심경 — **평점이 매겨진 뒤에** 읽어야 "잘하고도 졌다"가 문장에 담긴다
