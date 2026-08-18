@@ -34,13 +34,20 @@ const RETURN_SOON = 14;
 /** 회전의 기준점 — 날짜를 수로 바꾸기만 하는 자리라 값 자체에 뜻은 없다 */
 const EPOCH = "2000-01-01";
 
-/** 최근 우리 경기의 출전 명단 — 새 경기가 앞에 온다 */
+/**
+ * 최근 우리 경기의 출전 명단 — 새 경기가 앞에 온다.
+ *
+ * ⚠️ **최근은 날짜로 정한다.** `state.matches`는 날짜순이 아니다 — 컵·대항전 대진은
+ * 그 라운드가 확정될 때 배열 **뒤에** 붙으므로, 배열 끝 세 원소는 시즌 후반이면
+ * 방금 편성된 컵 경기다. 그것으로 세면 리그 3연속 명단 제외가 조용히 새어 나간다
+ * (`mood.ts`·`slump.ts`도 같은 이유로 날짜순이다).
+ */
 function recentLineups(state: GameState, limit: number): Array<ReadonlySet<string>> {
   return state.matches
     .filter((m) => m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId)
     .filter((m) => m.result !== null)
-    .slice(-limit)
-    .reverse()
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+    .slice(0, limit)
     .map((m) => {
       const home = m.homeTeamId === state.userTeamId;
       return new Set(m.result?.[home ? "homeLineup" : "awayLineup"] ?? []);
