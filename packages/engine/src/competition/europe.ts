@@ -16,6 +16,31 @@ import { seasonYear } from "./calendar";
  * 이미 competitionId로 갈라져 있으므로 컵도 그대로 얹힌다.
  */
 
+/** 요일 코드 — `dayOfWeek`가 돌려주는 값 (일요일 0) */
+const DOW = { sun: 0, wed: 3, sat: 6 } as const;
+
+/** 대항전 일정이 시작되는 달 — 이 달 이후는 시즌 표기와 같은 해다 */
+const EURO_START_MONTH = 8;
+
+/** 리그가 끝나는 마지막 날 — 결승은 이 날 이전 마지막 일요일 다음 토요일이다 */
+const LEAGUE_LAST_DAY = "05-31";
+
+/** 이 날짜 안에 대항전이 있으면 그 주중은 리그가 비켜준다 */
+const EURO_WEEK_MARGIN_DAYS = 2;
+
+const MS_PER_DAY = 86_400_000;
+
+/**
+ * 지난 시즌 표가 없을 때 세우는 임시 순위 — 체급이 자리를 정하고, 그 안에서만
+ * 시드가 섞는다. 흔들림(`TIER_JITTER`)이 한 계단(`TIER_ORDER_STEP`)보다 작아야
+ * 체급이 뒤집히지 않는다.
+ */
+const TIER_ORDER_STEP = 100;
+const TIER_JITTER = 90;
+
+/** 포트를 가르는 잣대 — 체급이 먼저고 리그 계수가 그 안을 가른다 */
+const CATALOG_TIER_STEP = 10;
+
 /** 유럽 대항전 주중 — 리그가 비켜주는 자리 (실제 UCL 리그 페이즈 일정 골격) */
 export const EURO_MATCHDAYS: Array<[number, number]> = [
   [9, 16],
@@ -37,9 +62,9 @@ export function euroMatchdayDates(season: number): string[] {
   const year = seasonYear(season);
   const pad = (n: number) => String(n).padStart(2, "0");
   return EURO_MATCHDAYS.map(([m, d]) => {
-    const y = m >= 8 ? year : year + 1;
+    const y = m >= EURO_START_MONTH ? year : year + 1;
     let date = `${y}-${pad(m)}-${pad(d)}`;
-    while (dayOfWeek(date) !== 3) date = addDays(date, 1); // 수요일로 스냅
+    while (dayOfWeek(date) !== DOW.wed) date = addDays(date, 1); // 수요일로 스냅
     return date;
   });
 }
@@ -96,10 +121,10 @@ const KNOCKOUT_MATCHDAYS: Record<string, Array<[number, number]>> = {
 };
 
 function wednesdayOn(season: number, [month, day]: [number, number]): string {
-  const year = seasonYear(season) + (month >= 8 ? 0 : 1);
+  const year = seasonYear(season) + (month >= EURO_START_MONTH ? 0 : 1);
   const pad = (n: number) => String(n).padStart(2, "0");
   let date = `${year}-${pad(month)}-${pad(day)}`;
-  while (dayOfWeek(date) !== 3) date = addDays(date, 1);
+  while (dayOfWeek(date) !== DOW.wed) date = addDays(date, 1);
   return date;
 }
 
@@ -111,9 +136,9 @@ function wednesdayOn(season: number, [month, day]: [number, number]): string {
  */
 export function knockoutDates(season: number, stage: string): string[] {
   if (stage === "final") {
-    let last = `${seasonYear(season) + 1}-05-31`;
-    while (dayOfWeek(last) !== 0) last = addDays(last, -1);
-    return [addDays(last, 6)];
+    let last = `${seasonYear(season) + 1}-${LEAGUE_LAST_DAY}`;
+    while (dayOfWeek(last) !== DOW.sun) last = addDays(last, -1);
+    return [addDays(last, DOW.sat - DOW.sun)];
   }
   return (KNOCKOUT_MATCHDAYS[stage] ?? []).map((anchor) => wednesdayOn(season, anchor));
 }
@@ -135,12 +160,14 @@ export function reservedEuroDates(season: number): string[] {
 
 /** 이 날짜가 대항전 주중인가 — 리그 주중 라운드가 피해야 하는 자리 */
 export function isEuroWeek(season: number, date: string): boolean {
-  return reservedEuroDates(season).some((d) => Math.abs(daysBetween(d, date)) <= 2);
+  return reservedEuroDates(season).some(
+    (d) => Math.abs(daysBetween(d, date)) <= EURO_WEEK_MARGIN_DAYS,
+  );
 }
 
 function daysBetween(a: string, b: string): number {
   return Math.round(
-    (new Date(`${b}T00:00:00Z`).getTime() - new Date(`${a}T00:00:00Z`).getTime()) / 86_400_000,
+    (new Date(`${b}T00:00:00Z`).getTime() - new Date(`${a}T00:00:00Z`).getTime()) / MS_PER_DAY,
   );
 }
 
@@ -179,7 +206,10 @@ function rankedTeams(
   if (previous && previous.length > 0) return previous;
   const rng = makeRng(seed, `euro:${leagueId}:${season}`);
   return teamsOfLeague(leagueId)
-    .map((t) => ({ id: t.id, key: tierOf(t.id) * 100 + Math.floor(rng() * 90) }))
+    .map((t) => ({
+      id: t.id,
+      key: tierOf(t.id) * TIER_ORDER_STEP + Math.floor(rng() * TIER_JITTER),
+    }))
     .sort((a, b) => a.key - b.key)
     .map((x) => x.id);
 }
@@ -307,7 +337,7 @@ function potsOf(
    */
   const strength = (id: string) => {
     const league = leagueCatalogById(teamCatalogById(id)?.leagueId ?? "")?.coefficient ?? 5;
-    return catalogTierOf(id) * 10 + league;
+    return catalogTierOf(id) * CATALOG_TIER_STEP + league;
   };
   const sorted = [...teamIds].sort(
     (a, b) => strength(a) - strength(b) || jitter.get(a)! - jitter.get(b)!,

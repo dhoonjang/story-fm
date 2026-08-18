@@ -35,6 +35,12 @@ export const RUN_MAX = 0.12;
 /** 침체가 불만으로 번지는 연패 — 이 지점부터 한 명이 등을 돌린다 */
 export const SLUMP_ISSUE_LOSSES = 4;
 
+/**
+ * 계단이 문턱을 넘어 얼마나 더 길어졌는지까지 보려고 창에 얹는 여유 —
+ * 문턱만큼만 읽으면 4연패도 3연패와 같은 폭이 된다.
+ */
+const STREAK_ROOM = 3;
+
 export type MatchOutcome = "win" | "draw" | "loss";
 
 /**
@@ -99,7 +105,7 @@ export function applyResultMood(
   margin: number,
   played: readonly string[],
 ): string | null {
-  const outcomes = recentOutcomes(state, teamId, Math.max(SLUMP_LOSSES, RUN_WINS) + 3);
+  const outcomes = recentOutcomes(state, teamId, Math.max(SLUMP_LOSSES, RUN_WINS) + STREAK_ROOM);
   const losses = streakOf(outcomes, "loss");
   const wins = streakOf(outcomes, "win");
   const squad = playersOf(state, teamId);

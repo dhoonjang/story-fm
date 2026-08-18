@@ -1,5 +1,5 @@
 import type { AttributeAxis, AxisValues, GamePlayer } from "@story-fm/domain";
-import { ATTRIBUTE_AXES, ageOf } from "@story-fm/domain";
+import { ATTRIBUTE_AXES, ageOf, RATING_MAX } from "@story-fm/domain";
 import { agingDelta, monthlyGrowthFactor } from "../world/attributes";
 import { makeRng } from "../core/rng";
 import { recomputeOverall, recordGrowth, squadLevelOf, type GameState } from "../core/state";
@@ -30,6 +30,12 @@ const MAX_AXES_PER_MONTH = 2;
 /** 잠재력 여유가 이만큼이면 성장 확률이 최대가 된다 */
 const ROOM_FULL = 12;
 /** 성장 확률의 상한·하한 — 여유가 없어도 아주 가끔은 는다 */
+/** 능력치가 내려갈 수 있는 바닥 — 0은 "값이 없다"로 읽히므로 쓰지 않는다 */
+const ATTRIBUTE_FLOOR = 1;
+
+/** 이미 노화 곡선이 꺾인 축이 그래도 오를 확률의 배율 */
+const DECLINING_AXIS_GROWTH = 0.6;
+
 const GROW_MIN = 0.02;
 const GROW_MAX = 0.35;
 
@@ -110,7 +116,10 @@ export function applyMonthlyDevelopment(state: GameState): string[] {
     if (steps.length === 0) continue;
 
     for (const { axis, step } of steps) {
-      player.attributes[axis] = Math.max(1, Math.min(99, player.attributes[axis] + step));
+      player.attributes[axis] = Math.max(
+        ATTRIBUTE_FLOOR,
+        Math.min(RATING_MAX, player.attributes[axis] + step),
+      );
       recordGrowth(state, player.id, null, "development", axis, step, "월간 성장");
     }
     recomputeOverall(player);
@@ -133,13 +142,13 @@ export function rollAxis(
 
   // 꺾이는 축 — 시즌 기대치를 열두 달에 나눠 담는다
   if (bias < 0) {
-    if (value <= 1) return 0;
+    if (value <= ATTRIBUTE_FLOOR) return 0;
     return rng() < Math.abs(bias) / MONTHS_PER_SEASON ? -1 : 0;
   }
 
   // 자라는 축 — 잠재력이 천장이다. 노화 곡선이 미는 축은 조금 더 잘 자란다
   const room = potential - value;
   if (room <= 0) return 0;
-  const chance = growChance(room, age) * (bias > 0 ? 1 : 0.6);
+  const chance = growChance(room, age) * (bias > 0 ? 1 : DECLINING_AXIS_GROWTH);
   return rng() < chance / MONTHS_PER_SEASON ? 1 : 0;
 }
