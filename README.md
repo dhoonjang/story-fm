@@ -16,7 +16,7 @@
 
 ## 시작하기
 
-Node.js 20 이상과 pnpm 9가 필요합니다.
+[`.nvmrc`](.nvmrc)가 정하는 Node 26과 pnpm 9가 필요합니다.
 
 ```bash
 pnpm install
