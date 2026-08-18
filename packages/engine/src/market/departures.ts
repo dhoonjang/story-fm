@@ -7,6 +7,7 @@ import { loanLockOf, transferWindowLabel, windowOpenForTeam } from "./market";
 import { estimateWeeklyWage, wageSubjectOf } from "../world/wages";
 import { makeRng } from "../core/rng";
 import { assignSquadNumber } from "../squad/numbers";
+import { arrivingSquadLevel } from "../squad/registration";
 import type { SkillResult } from "../skills";
 import { forgetRoles } from "../skills/role-memory";
 import {
@@ -62,6 +63,21 @@ export function freeAgents(state: GameState): GamePlayer[] {
 }
 
 /**
+ * 떠나는 선수가 **남기고 가는 것들** — 어느 문으로 나가든 같다.
+ *
+ * 전술 배치 · 이적 리스트 · 개인 훈련 · 역할 기억 · 주장 완장은 그 선수가 이 팀에
+ * 있을 때만 뜻이 있는 값이다. 문 하나에만 적어 두면 판 선수의 훈련 계획이 장부에
+ * 남아 다음 시즌 보고서까지 따라온다 (transfer.md §2).
+ */
+export function clearDepartedState(state: GameState, player: GamePlayer, from: string): void {
+  releaseFromTactics(state, from, player.id);
+  state.transferList = state.transferList.filter((l) => l.gamePlayerId !== player.id);
+  state.playerTraining = state.playerTraining.filter((t) => t.gamePlayerId !== player.id);
+  forgetRoles(state, player.id);
+  player.isCaptain = false;
+}
+
+/**
  * 팀을 잃은 선수를 무소속으로 보낸다 — 방출·계약 만료의 공통 종착지.
  * 계약은 여기서 끊기고, 새 팀은 시장이 찾아 준다(`signFreeAgents`).
  */
@@ -74,11 +90,7 @@ export function toFreeAgency(
   const contract = activeContract(state, player.id);
   if (contract) contract.status = "ended";
   const from = player.teamId;
-  releaseFromTactics(state, from, player.id);
-  state.transferList = state.transferList.filter((l) => l.gamePlayerId !== player.id);
-  state.playerTraining = state.playerTraining.filter((t) => t.gamePlayerId !== player.id);
-  forgetRoles(state, player.id);
-  player.isCaptain = false;
+  clearDepartedState(state, player, from);
   player.teamId = FREE_AGENT_TEAM;
   player.squadNumber = undefined;
   player.squadLevel = "first";
@@ -198,13 +210,11 @@ export function loanPlayer(
   }
   const wageShare = Math.max(0, Math.min(1, input.wageShare ?? DEFAULT_LOAN_WAGE_SHARE));
 
-  releaseFromTactics(state, state.userTeamId, player.id);
-  state.transferList = state.transferList.filter((l) => l.gamePlayerId !== player.id);
-  player.isCaptain = false;
+  clearDepartedState(state, player, state.userTeamId);
   player.teamId = destination.id;
   player.squadNumber = undefined;
   assignSquadNumber(state.players, player);
-  player.squadLevel = "first";
+  player.squadLevel = arrivingSquadLevel(state, player, destination.id);
   player.loan = { fromTeamId: state.userTeamId, until, wageShare };
   state.transfers.push({
     id: `tr-loan-${player.id}-${state.date}`,
@@ -438,5 +448,5 @@ function signWithClub(
   player.teamId = teamId;
   player.squadNumber = undefined;
   assignSquadNumber(state.players, player);
-  player.squadLevel = "first";
+  player.squadLevel = arrivingSquadLevel(state, player, teamId);
 }
