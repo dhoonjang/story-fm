@@ -240,7 +240,10 @@ describe("흐름의 양 — 사건이 아닌 기록", () => {
       expect(totals.shots, `${side} 슛`).toBe(sum((t) => t.shots));
       expect(totals.saves, `${side} 선방`).toBe(sum((t) => t.saves));
       expect(totals.goals, `${side} 골`).toBe(sum((t) => t.goals));
-      expect(totals.xg, `${side} xG`).toBeCloseTo(sum((t) => t.xg), 6);
+      expect(totals.xg, `${side} xG`).toBeCloseTo(
+        sum((t) => t.xg),
+        6,
+      );
       expect(totals.scoringExpectation, `${side} 결정력 반영`).toBeCloseTo(
         sum((t) => t.scoringExpectation),
         6,

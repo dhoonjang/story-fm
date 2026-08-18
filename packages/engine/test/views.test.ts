@@ -338,11 +338,11 @@ describe("컵 진행", () => {
     ours,
     won,
   });
-  const stage = (
-    id: string,
-    label: string,
-    ties: ReturnType<typeof tie>[],
-  ): BracketStageView => ({ stage: id, label, ties });
+  const stage = (id: string, label: string, ties: ReturnType<typeof tie>[]): BracketStageView => ({
+    stage: id,
+    label,
+    ties,
+  });
 
   it("추첨 전과 대진 밖은 다른 자리다", () => {
     expect(cupProgressOf([])).toEqual({ stage: null, outcome: "undrawn" });
