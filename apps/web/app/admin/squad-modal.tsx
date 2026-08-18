@@ -106,7 +106,9 @@ export function SquadModal({
         ))}
         {players.length === 0 && (
           // 아직 못 불러온 것과 없는 것은 다르다 — 5천 명을 받는 동안 "비었다"고 하지 않는다
-          <p className="admin-squad-empty">{loaded ? "명단이 비어 있습니다" : "명단을 불러오는 중…"}</p>
+          <p className="admin-squad-empty">
+            {loaded ? "명단이 비어 있습니다" : "명단을 불러오는 중…"}
+          </p>
         )}
       </div>
     </Modal>

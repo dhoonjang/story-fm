@@ -20,12 +20,12 @@ tier it belongs to and wait for the answer. Urgency is the user's call, not
 something readable from the code. No `priority/` label means the issue is
 invisible to `resolve`.
 
-| `priority/` | Meaning |
-| --- | --- |
-| `xhigh` | Drop everything |
-| `high` | Do this next |
-| `mid` | Should be done; nothing is stuck without it |
-| `low` | Someday |
+| `priority/` | Meaning                                     |
+| ----------- | ------------------------------------------- |
+| `xhigh`     | Drop everything                             |
+| `high`      | Do this next                                |
+| `mid`       | Should be done; nothing is stuck without it |
+| `low`       | Someday                                     |
 
 Add the type label too when it obviously applies: `bug`, `enhancement`,
 `documentation`.
@@ -48,17 +48,17 @@ it really touches. Name the files you found while reading the code.
 
 **2. Weigh each task** — the number in parentheses at the end of its line.
 
-| Weight | A task that… |
-| --- | --- |
-| 1 | changes code that already exists, inside one package |
-| 2 | adds something new (a schema field, a query, a screen, a view), or spans two packages |
-| 3 | crosses the core/LLM boundary, changes a prompt, migrates save data, or needs a balance call from the user |
+| Weight | A task that…                                                                                               |
+| ------ | ---------------------------------------------------------------------------------------------------------- |
+| 1      | changes code that already exists, inside one package                                                       |
+| 2      | adds something new (a schema field, a query, a screen, a view), or spans two packages                      |
+| 3      | crosses the core/LLM boundary, changes a prompt, migrates save data, or needs a balance call from the user |
 
 A weight is a per-task reading — it says how far that one edit reaches. Do not
 add them up and do not label the issue with the sum.
 
 A single-line task list means you did not read the code — go back and read it.
-Splitting the *work* is not splitting the *issue*: big work gets a long `## 작업`
+Splitting the _work_ is not splitting the _issue_: big work gets a long `## 작업`
 list, never three issues.
 
 ## Writing the issue

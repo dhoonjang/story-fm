@@ -20,14 +20,14 @@ agents:
   mood-rater:    { provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000,  timeout_ms: 30000 }
 ```
 
-| 에이전트 | 담당 | 출력 상한 | 시한 |
-| --- | --- | --- | --- |
-| `gm` | 평시 서사 · 의도 해석 · 판정 | 64,000 | 180초 |
-| `match-intent` | 경기 중 감독의 말 → 의도 | 16,000 | 60초 |
-| `match-caster` | 경기 중계 · 벤치 대화 | 64,000 | 180초 |
-| `match-rater` | 경기 평점 재채점 | 8,000 | 30초 |
-| `training-rater` | 훈련 결산 | 8,000 | 30초 |
-| `mood-rater` | 심경 한 줄 | 8,000 | 30초 |
+| 에이전트         | 담당                         | 출력 상한 | 시한  |
+| ---------------- | ---------------------------- | --------- | ----- |
+| `gm`             | 평시 서사 · 의도 해석 · 판정 | 64,000    | 180초 |
+| `match-intent`   | 경기 중 감독의 말 → 의도     | 16,000    | 60초  |
+| `match-caster`   | 경기 중계 · 벤치 대화        | 64,000    | 180초 |
+| `match-rater`    | 경기 평점 재채점             | 8,000     | 30초  |
+| `training-rater` | 훈련 결산                    | 8,000     | 30초  |
+| `mood-rater`     | 심경 한 줄                   | 8,000     | 30초  |
 
 - **해석이 싼 자리로 가는 이유는 그 일이 판단이 아니라 분류이기 때문**이다 — 무엇을
   하라는 말인지 고르는 것이고, 그것이 사실인지와 얼마나 먹히는지는 코어가 정한다.
@@ -79,11 +79,11 @@ LLM 호출 **하나**가 그 세이브의 모든 후속 요청을 영영 붙든�
 - ⚠️ **제공자 선택 환경변수는 없다.** 환경변수로 남는 것은 **키**와 `LLM_MODE`,
   토큰 예산뿐이다 — 배치는 전부 YAML이 갖는다.
 
-| 제공자 | 키 |
-| --- | --- |
-| anthropic | `ANTHROPIC_API_KEY` |
-| google | `GOOGLE_API_KEY` \| `GEMINI_API_KEY` |
-| openai | `OPENAI_API_KEY` |
+| 제공자    | 키                                   |
+| --------- | ------------------------------------ |
+| anthropic | `ANTHROPIC_API_KEY`                  |
+| google    | `GOOGLE_API_KEY` \| `GEMINI_API_KEY` |
+| openai    | `OPENAI_API_KEY`                     |
 
 **`LLM_MODE=mock|real`** — 미지정이면 GM 에이전트의 제공자 키가 있는지로 정한다.
 mock은 폴백이 아니라 **모드**이고 규칙 기반 오케스트레이터가 대신 돈다 (agents.md §8).
@@ -105,11 +105,11 @@ runTurn({ system, history, user, stateNote?, tools?, maxTokens?, onText?, signal
   버리고 새로 시작한다 — 장부와 패킷이 남아 있어 경기는 이어진다.
 - `stateNote`(휘발 상태 스냅샷)는 어느 어댑터에서든 **저장 이력에 남기지 않는다**.
 
-| 어댑터 | 캐싱 | 상태 스냅샷 자리 | 사고 | 시한을 거는 자리 |
-| --- | --- | --- | --- | --- |
-| Anthropic | `cache_control` 브레이크포인트(요청당 4개) | `role:"system"` 오퍼레이터 채널 | `thinking: disabled` | `messages.stream(body, { signal, timeout })` |
-| Gemini | implicit (동일 프리픽스) | 유저 발화 앞에 접어 넣음 | `ThinkingLevel.MINIMAL` | `chats.create`의 `config.abortSignal`·`httpOptions.timeout` |
-| OpenAI | 자동 프롬프트 캐시 | `role:"developer"` | `reasoning_effort: "none"` | `chat.completions.create(body, { signal, timeout })` |
+| 어댑터    | 캐싱                                       | 상태 스냅샷 자리                | 사고                       | 시한을 거는 자리                                            |
+| --------- | ------------------------------------------ | ------------------------------- | -------------------------- | ----------------------------------------------------------- |
+| Anthropic | `cache_control` 브레이크포인트(요청당 4개) | `role:"system"` 오퍼레이터 채널 | `thinking: disabled`       | `messages.stream(body, { signal, timeout })`                |
+| Gemini    | implicit (동일 프리픽스)                   | 유저 발화 앞에 접어 넣음        | `ThinkingLevel.MINIMAL`    | `chats.create`의 `config.abortSignal`·`httpOptions.timeout` |
+| OpenAI    | 자동 프롬프트 캐시                         | `role:"developer"`              | `reasoning_effort: "none"` | `chat.completions.create(body, { signal, timeout })`        |
 
 **Anthropic** — ⚠️ **화면에 흘릴 곳이 없어도 스트리밍으로 부른다.** SDK가
 `max_tokens > 21,333`인 비스트리밍 요청을 보내기도 전에 거부한다
@@ -137,15 +137,15 @@ chunk에만 실린다 — 그 옵션이 없으면 계측이 이 에이전트를 
 같은 코드를 복제하지 않고도 세션 누적과 상한이 빠짐없이 걸린다. 누적 자체는 순수 함수라
 장부를 손으로 굴려 검증한다.
 
-| 무엇 | 값 |
-| --- | --- |
-| 예산이 세는 것 | `inputTokens + outputTokens` (세션 누적) |
-| 상한 | `LLM_TOKEN_BUDGET` — 없거나 0 이하면 무제한 |
-| 상한 초과 시 끊기는 에이전트 | 결산 셋뿐 — GM·중계는 계속 돈다 |
-| 캐시 히트율 | `cacheReadTokens ÷ inputTokens` |
-| 히트율 경고 문턱 | 평균 입력 1,024 토큰 이상 × 3회 이상 호출 × 히트율 0 |
-| 장부의 키 | **에이전트 이름** — 설정의 이름이 그대로 계측 키가 된다 |
-| 세션 = 프로세스 | `resetLlmUsage()` · 읽기는 `llmUsage()` · 한 줄 요약은 `describeUsage()` |
+| 무엇                         | 값                                                                       |
+| ---------------------------- | ------------------------------------------------------------------------ |
+| 예산이 세는 것               | `inputTokens + outputTokens` (세션 누적)                                 |
+| 상한                         | `LLM_TOKEN_BUDGET` — 없거나 0 이하면 무제한                              |
+| 상한 초과 시 끊기는 에이전트 | 결산 셋뿐 — GM·중계는 계속 돈다                                          |
+| 캐시 히트율                  | `cacheReadTokens ÷ inputTokens`                                          |
+| 히트율 경고 문턱             | 평균 입력 1,024 토큰 이상 × 3회 이상 호출 × 히트율 0                     |
+| 장부의 키                    | **에이전트 이름** — 설정의 이름이 그대로 계측 키가 된다                  |
+| 세션 = 프로세스              | `resetLlmUsage()` · 읽기는 `llmUsage()` · 한 줄 요약은 `describeUsage()` |
 
 - ⚠️ **`inputTokens`는 캐시분을 포함한 입력 전부**다. Gemini·OpenAI는 프롬프트 합계에
   이미 포함하지만 Anthropic은 빼고 보고하므로 어댑터가 되돌려 놓는다 — 안 그러면 캐시가
@@ -166,14 +166,14 @@ chunk에만 실린다 — 그 옵션이 없으면 계측이 이 에이전트를 
 계측이 세는 것은 토큰 수뿐이라(§4), 프롬프트가 잘못 나갔는지 모델이 이상하게
 답했는지 코어가 그걸 잘못 옮겼는지를 가를 눈이 없었다.
 
-| 무엇 | 값 |
-| --- | --- |
-| 기록을 따는 자리 | **팩토리 하나** — `createGameLLM`의 `tapLlm` (계측·시한과 같은 문) |
-| 켜지는 조건 | `NODE_ENV !== "production"` — 라우트도 제스처도 같은 기준으로 닫힌다 |
-| 사는 곳 | **디스크의 게임별 트레이스 디렉터리** — `<데이터 디렉터리>/<gameId>.trace/<index>.json`, 게임당 최근 20 채팅 턴, 넘치면 오래된 턴부터 지운다 |
-| 키 | **채팅 턴 인덱스** (`state.chat`의 자리) — 그 아래 호출 여럿이 순서대로 붙는다 |
-| 묶는 자리 | `runTurnLocked`(평시·경기)와 `runOnboardingTurn`(첫 장면) — model 턴을 밀어 넣는 그 자리 |
-| 라우트 | `GET /api/games/[id]/trace/[index]` — production이면 404 |
+| 무엇             | 값                                                                                                                                           |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| 기록을 따는 자리 | **팩토리 하나** — `createGameLLM`의 `tapLlm` (계측·시한과 같은 문)                                                                           |
+| 켜지는 조건      | `NODE_ENV !== "production"` — 라우트도 제스처도 같은 기준으로 닫힌다                                                                         |
+| 사는 곳          | **디스크의 게임별 트레이스 디렉터리** — `<데이터 디렉터리>/<gameId>.trace/<index>.json`, 게임당 최근 20 채팅 턴, 넘치면 오래된 턴부터 지운다 |
+| 키               | **채팅 턴 인덱스** (`state.chat`의 자리) — 그 아래 호출 여럿이 순서대로 붙는다                                                               |
+| 묶는 자리        | `runTurnLocked`(평시·경기)와 `runOnboardingTurn`(첫 장면) — model 턴을 밀어 넣는 그 자리                                                     |
+| 라우트           | `GET /api/games/[id]/trace/[index]` — production이면 404                                                                                     |
 
 - **세이브에는 넣지 않는다.** 시스템 프롬프트와 이력 원문은 턴마다 수만 토큰이고
   세이브는 이미 수 MB다. 대신 세이브 옆의 **사이드카 디렉터리**에 턴 하나를 파일
@@ -226,19 +226,19 @@ chunk에만 실린다 — 그 옵션이 없으면 계측이 이 에이전트를 
 
 ## 코드 위치
 
-| 무엇 | 어디 |
-| --- | --- |
-| 에이전트별 배치 | `config/llm.yml` |
-| 설정 로드·검증 | `packages/llm/src/config.ts` |
-| 제공자 중립 계약 | `packages/llm/src/game-llm.ts` |
-| 어댑터 3종 | `packages/llm/src/anthropic-adapter.ts` · `gemini-adapter.ts` · `openai-adapter.ts` |
-| 제공자 선택 + 계측·시한 부착 | `packages/llm/src/factory.ts` |
-| 시한 래퍼 | `packages/llm/src/deadline.ts` |
-| 턴 라우트 마감(`maxDuration`·ping) | `apps/web/app/api/games/[id]/turn/route.ts` · `turn/stream/route.ts` |
-| 설정 검증 테스트 | `packages/llm/test/agent-config.test.ts` |
-| 토큰 계측·예산 상한 | `packages/llm/src/usage-meter.ts` |
-| 원문 기록(링버퍼·`tapLlm`) | `packages/llm/src/turn-trace.ts` |
-| 턴 인덱스에 묶는 자리 | `apps/web/lib/turn-runner.ts` · `apps/web/app/api/games/route.ts` |
-| 원문 라우트(dev 전용) | `apps/web/app/api/games/[id]/trace/[index]/route.ts` |
-| 원문 팝업·롱프레스 | `apps/web/components/turn-trace.tsx` · `components/chat.tsx` |
-| 모드 해석 (`LLM_MODE`) | `packages/agents/src/gm.ts` (`resolveLlmMode`) |
+| 무엇                               | 어디                                                                                |
+| ---------------------------------- | ----------------------------------------------------------------------------------- |
+| 에이전트별 배치                    | `config/llm.yml`                                                                    |
+| 설정 로드·검증                     | `packages/llm/src/config.ts`                                                        |
+| 제공자 중립 계약                   | `packages/llm/src/game-llm.ts`                                                      |
+| 어댑터 3종                         | `packages/llm/src/anthropic-adapter.ts` · `gemini-adapter.ts` · `openai-adapter.ts` |
+| 제공자 선택 + 계측·시한 부착       | `packages/llm/src/factory.ts`                                                       |
+| 시한 래퍼                          | `packages/llm/src/deadline.ts`                                                      |
+| 턴 라우트 마감(`maxDuration`·ping) | `apps/web/app/api/games/[id]/turn/route.ts` · `turn/stream/route.ts`                |
+| 설정 검증 테스트                   | `packages/llm/test/agent-config.test.ts`                                            |
+| 토큰 계측·예산 상한                | `packages/llm/src/usage-meter.ts`                                                   |
+| 원문 기록(링버퍼·`tapLlm`)         | `packages/llm/src/turn-trace.ts`                                                    |
+| 턴 인덱스에 묶는 자리              | `apps/web/lib/turn-runner.ts` · `apps/web/app/api/games/route.ts`                   |
+| 원문 라우트(dev 전용)              | `apps/web/app/api/games/[id]/trace/[index]/route.ts`                                |
+| 원문 팝업·롱프레스                 | `apps/web/components/turn-trace.tsx` · `components/chat.tsx`                        |
+| 모드 해석 (`LLM_MODE`)             | `packages/agents/src/gm.ts` (`resolveLlmMode`)                                      |

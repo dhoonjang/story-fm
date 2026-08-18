@@ -62,8 +62,12 @@ export function PlayerModal({
   const [positions, setPositions] = useState<CatalogPosition[]>(
     player ? player.positions.map((p) => ({ ...p })) : [],
   );
-  const [axes, setAxes] = useState<Record<string, number>>(
-    Object.fromEntries(ATTRS.map((a) => [a, player ? player[a] : 60])),
+  // 축은 전수다 — `ATTRS`로 지은 표라 빠진 축이 없고, 그렇게 적어야 칸마다 되묻지 않는다
+  const [axes, setAxes] = useState<Record<AttributeAxis, number>>(
+    Object.fromEntries(ATTRS.map((a) => [a, player ? player[a] : 60])) as Record<
+      AttributeAxis,
+      number
+    >,
   );
   const [potential, setPotential] = useState(player?.potential ?? 70);
   // 빈 칸이 곧 "실측 없음"이다 — 0으로 출발하면 두 뜻이 한 값에 겹친다
@@ -84,8 +88,13 @@ export function PlayerModal({
   }
   function addPos() {
     const used = new Set(positions.map((p) => p.position));
-    const next = POSITION_CODES.find((c) => !used.has(c)) ?? POSITION_CODES[0];
-    setPositions((cur) => [...cur, { position: next, proficiency: 70, isNatural: cur.length === 0 }]);
+    const next = POSITION_CODES.find((c) => !used.has(c));
+    // 남은 코드가 없으면 더하지 않는다 — 중복 포지션은 저장에서 거절당한다
+    if (next === undefined) return;
+    setPositions((cur) => [
+      ...cur,
+      { position: next, proficiency: 70, isNatural: cur.length === 0 },
+    ]);
   }
 
   /** 저장 전 검증 — 서버가 거절할 조합을 여기서 먼저 잡는다 */
@@ -98,7 +107,8 @@ export function PlayerModal({
       const codes = positions.map((p) => p.position);
       if (new Set(codes).size !== codes.length) return "같은 포지션이 두 번 들어 있습니다";
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(birthdate)) return "생년월일 형식(YYYY-MM-DD)이 올바르지 않습니다";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(birthdate))
+      return "생년월일 형식(YYYY-MM-DD)이 올바르지 않습니다";
     return null;
   }
 

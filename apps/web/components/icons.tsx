@@ -8,7 +8,15 @@
  * 24 그리드에 stroke 1.7 — 12~20px 어디에 놓아도 획 굵기가 같아 보인다.
  */
 
-type IconProps = { size?: number };
+export type IconProps = { size?: number };
+
+/**
+ * 아이콘 하나 — 표에 담아 자리별로 고르는 자리에서 쓴다.
+ *
+ * 크기 인자를 지운 `() => ReactElement`로 적으면 **실제 아이콘이 하나도 들어가지
+ * 않는다** — 인자를 받는 함수는 인자 없는 함수 자리에 서지 못한다.
+ */
+export type IconComponent = (props: IconProps) => React.ReactElement;
 
 /**
  * **면 아이콘** — 채워진 실루엣. 입력창의 초록 버튼처럼 색면 위에 앉거나 작게

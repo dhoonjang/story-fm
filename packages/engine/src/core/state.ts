@@ -86,7 +86,12 @@ import {
   teamCatalogById,
   isClubTeam,
 } from "../data/team-catalog";
-import { CLUB_PROFILES_SEED, clubProfile, clubProfiles, type ClubProfile } from "../data/club-profile";
+import {
+  CLUB_PROFILES_SEED,
+  clubProfile,
+  clubProfiles,
+  type ClubProfile,
+} from "../data/club-profile";
 // 순환 참조로 보이지만 안전하다 — domestic-cup은 state의 함수를 **런타임에만** 부르고,
 // 여기서도 모듈 로드가 끝난 뒤(createGame 호출 시점)에만 부른다.
 import { advanceDomesticCups } from "../competition/domestic-cup";
@@ -720,7 +725,10 @@ export function savedClubProfile(state: GameState, teamId: string): ClubProfile 
 function copiedTeamFields(
   team: TeamCatalogEntry,
   profile: ClubProfile | undefined,
-): Pick<GameTeam, "name" | "shortName" | "leagueId" | "tier" | "stadium" | "capacity" | "commercialTier"> {
+): Pick<
+  GameTeam,
+  "name" | "shortName" | "leagueId" | "tier" | "stadium" | "capacity" | "commercialTier"
+> {
   return {
     name: team.name,
     shortName: team.shortName,

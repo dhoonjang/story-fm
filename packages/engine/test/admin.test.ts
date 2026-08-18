@@ -364,9 +364,9 @@ describe("카탈로그 편집", () => {
     }
     outfield = adminCatalog().find((t) => t.teamId === "arsenal")!.players;
     expect(outfield).toHaveLength(14);
-    expect(adminMoveCatalogPlayer(outfield.find((p) => p.position !== "GK")!.id, "freeagents").ok).toBe(
-      false,
-    );
+    expect(
+      adminMoveCatalogPlayer(outfield.find((p) => p.position !== "GK")!.id, "freeagents").ok,
+    ).toBe(false);
   });
 
   it("시드 기본값으로 되돌릴 수 있다", () => {

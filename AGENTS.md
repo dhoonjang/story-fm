@@ -126,12 +126,12 @@ formulas and curves, invariants, boundary conditions, state transitions — the
 things that go wrong quietly and stay wrong. Everything else costs more than it
 returns:
 
-| Write a test for | Do not |
-| --- | --- |
-| a formula, a curve, a rounding rule | a string the screen shows the moment it breaks |
-| an invariant (books balance, no duplicate ids) | what `strict` already rejects |
-| a boundary (0, cap, last day of the season) | the implementation restated line by line |
-| a state transition (offer → contract → squad) | a value the seed owns and a seed change will move |
+| Write a test for                               | Do not                                            |
+| ---------------------------------------------- | ------------------------------------------------- |
+| a formula, a curve, a rounding rule            | a string the screen shows the moment it breaks    |
+| an invariant (books balance, no duplicate ids) | what `strict` already rejects                     |
+| a boundary (0, cap, last day of the season)    | the implementation restated line by line          |
+| a state transition (offer → contract → squad)  | a value the seed owns and a seed change will move |
 
 "It is a new feature" is not a reason on its own. A change whose whole behavior
 is visible on screen ships without a test; a change to a number nobody can see
@@ -166,8 +166,8 @@ domain, and open a new one only when none does. The measurements are in
 - Never hide a failing test; report it as it is.
 
 **The gate is CI, not your machine.** `.github/workflows/ci.yml` runs
-`typecheck` · `lint` · `pnpm test` · `pnpm e2e`, and its verdict is what
-`/merge` waits on. **It does not run while the PR is a draft** — a branch still
+`typecheck` · `lint` · `format:check` · `pnpm test` · `pnpm e2e`, and its verdict
+is what `/merge` waits on. **It does not run while the PR is a draft** — a branch still
 being worked on burns runner minutes nobody reads. `/merge` marks the PR ready,
 and that is what starts the run it then watches. Every job must be green; a
 shard is not a sample.
@@ -180,8 +180,14 @@ path cannot tell a comment from a statement, and the cost of being wrong is a
 red change merged green. How the gate is sharded and what it runs on is
 `ci.yml`'s business; read it there when you are changing it.
 
-- **While working** — `pnpm typecheck` and `pnpm lint`, plus `pnpm test <path>`
-  for the file you just wrote. That is the whole local loop.
+- **While working** — `pnpm typecheck`, `pnpm lint` and `pnpm format`, plus
+  `pnpm test <path>` for the file you just wrote. That is the whole local loop.
+- **`pnpm typecheck` is three projects, not one** — `tsconfig.json` (packages ·
+  match-cli · vitest configs), `apps/web/tsconfig.json` (the Next app, its tests
+  and `next.config.ts`) and `tsconfig.e2e.json` (`e2e/` · `playwright.config.ts`).
+  They stay apart because the app and the specs need the DOM lib and the
+  deterministic core must not see it. A new top-level folder of `.ts` belongs to
+  one of the three — a folder no config includes is a folder nothing checks.
 - **Do not run the full `pnpm test` or `pnpm e2e` locally.** Both cost minutes
   the CI runner is already paying, and the suite you would run is the one CI
   runs. Run them locally only when the user asks, or when CI has failed and you
@@ -238,12 +244,12 @@ folder is a layer. Read the design doc for the domain you are touching before yo
 start, and do not blur the boundary between the deterministic core and the
 non-deterministic LLM.
 
-| Folder | What | Docs |
-| --- | --- | --- |
-| — | Overall structure · the path of one turn · the game loop | [overview.md](./docs/overview.md) |
-| `data/` | What exists | [game-state](./docs/data/game-state.md) · [player](./docs/data/player.md) · [team](./docs/data/team.md) · [competition](./docs/data/competition.md) · [people](./docs/data/people.md) · [sources](./docs/data/sources.md) |
-| `simulation/` | What happens | [match](./docs/simulation/match.md) · [season](./docs/simulation/season.md) · [transfer](./docs/simulation/transfer.md) · [finance](./docs/simulation/finance.md) · [career](./docs/simulation/career.md) |
-| `llm/` | How it speaks | [models](./docs/llm/models.md) · [agents](./docs/llm/agents.md) · [prompts](./docs/llm/prompts.md) |
+| Folder        | What                                                     | Docs                                                                                                                                                                                                                      |
+| ------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| —             | Overall structure · the path of one turn · the game loop | [overview.md](./docs/overview.md)                                                                                                                                                                                         |
+| `data/`       | What exists                                              | [game-state](./docs/data/game-state.md) · [player](./docs/data/player.md) · [team](./docs/data/team.md) · [competition](./docs/data/competition.md) · [people](./docs/data/people.md) · [sources](./docs/data/sources.md) |
+| `simulation/` | What happens                                             | [match](./docs/simulation/match.md) · [season](./docs/simulation/season.md) · [transfer](./docs/simulation/transfer.md) · [finance](./docs/simulation/finance.md) · [career](./docs/simulation/career.md)                 |
+| `llm/`        | How it speaks                                            | [models](./docs/llm/models.md) · [agents](./docs/llm/agents.md) · [prompts](./docs/llm/prompts.md)                                                                                                                        |
 
 ## Status
 

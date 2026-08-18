@@ -159,8 +159,14 @@ describe("검진은 결정적이고 몸을 읽는다", () => {
   it("유리몸일수록 소견이 잘 붙는다", () => {
     const state = createTestGame(42);
     const player = target(state);
-    const sturdy = flagChance(state, { ...player, state: { ...player.state, injuryProneness: 0.55 } });
-    const fragile = flagChance(state, { ...player, state: { ...player.state, injuryProneness: 2.2 } });
+    const sturdy = flagChance(state, {
+      ...player,
+      state: { ...player.state, injuryProneness: 0.55 },
+    });
+    const fragile = flagChance(state, {
+      ...player,
+      state: { ...player.state, injuryProneness: 2.2 },
+    });
     expect(fragile).toBeGreaterThan(sturdy);
   });
 
@@ -368,9 +374,9 @@ describe("우리가 파는 쪽이면 상대가 값을 깎는다", () => {
     });
     const negotiation = state.negotiations[state.negotiations.length - 1]!;
     openInjuryFor(state, player, "match", () => 0.9);
-    expect(answerIncomingOffer(state, { negotiationId: negotiation.id, verdict: "accept" }).ok).toBe(
-      true,
-    );
+    expect(
+      answerIncomingOffer(state, { negotiationId: negotiation.id, verdict: "accept" }).ok,
+    ).toBe(true);
     acceptDeal(state, negotiation.id);
     state.date = negotiation.medical!.onDate;
     const digest: string[] = [];

@@ -207,9 +207,21 @@ export const STAGE_KO: Record<MatchStage, string> = {
 };
 
 /** 국내 컵 라운드 — 엔진 `DOMESTIC_STAGES`와 같은 순서 (일정·상금 표의 행) */
-export const DOMESTIC_STAGES = ["r32", "r16", "qf", "sf", "final"] as const satisfies readonly MatchStage[];
+export const DOMESTIC_STAGES = [
+  "r32",
+  "r16",
+  "qf",
+  "sf",
+  "final",
+] as const satisfies readonly MatchStage[];
 /** 유럽 대항전 단계 상금 표의 행 — 리그 페이즈 뒤의 경로 */
-export const EURO_PRIZE_STAGES = ["playoff", "r16", "qf", "sf", "final"] as const satisfies readonly MatchStage[];
+export const EURO_PRIZE_STAGES = [
+  "playoff",
+  "r16",
+  "qf",
+  "sf",
+  "final",
+] as const satisfies readonly MatchStage[];
 
 export const DRAW_STYLE_KO: Record<DomesticCupEntry["drawStyle"], string> = {
   "per-round": "라운드별 추첨",

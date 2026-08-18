@@ -27,7 +27,8 @@ const CLOCK_RE = /^(.*?)(AM|PM)\s*(\d{1,2}):(\d{2})$/u;
 export function partOfDayStamp(stamp: string): string {
   const m = CLOCK_RE.exec(stamp);
   if (!m) return stamp;
-  const [, head, suffix, hour, minute] = m;
+  // 네 그룹은 모두 필수다 — 기본값은 색인 검사를 달래는 자리고 실제로 쓰이지 않는다
+  const [, head = "", suffix = "", hour = "0", minute = "0"] = m;
   const h = Number(hour) % 12;
   const pm = suffix.toUpperCase() === "PM";
   const minutes = (pm ? h + 12 : h) * 60 + Number(minute);

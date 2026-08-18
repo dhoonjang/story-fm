@@ -161,7 +161,7 @@ it here.** Twice it left the briefing sitting unsent at the prompt while the
 launching session waited minutes on `terminal read`. `wait` + `send --enter` is
 the documented recipe for a launch you need to be sure of (`orca skills get
 orca-cli` → Full Handoffs), and it never needs a retry. Never pass both — a
-`--prompt` that *does* land plus a `send` is the same briefing twice.
+`--prompt` that _does_ land plus a `send` is the same briefing twice.
 
 ⚠️ **Do not reach for `orca orchestration` here.** Its own guide names this case:
 task dispatch, `worker_done` waits and decision gates are for **supervising** a
@@ -202,7 +202,7 @@ branch overwrite each other.
 
 ---
 
-*Everything below runs in the new worktree.*
+_Everything below runs in the new worktree._
 
 ## 3. Docs, then the PR
 
@@ -264,10 +264,10 @@ per teammate and a review of what comes back; below three tasks that is pure los
 paths **no other lane touches**. Write the partition down before spawning
 anything:
 
-| Lane | Tasks | Paths it owns |
-| --- | --- | --- |
-| `sim` | 2, 3 | `packages/sim/src/xg.ts`, its test |
-| `web` | 4, 5 | `apps/web/app/match/**` |
+| Lane  | Tasks | Paths it owns                      |
+| ----- | ----- | ---------------------------------- |
+| `sim` | 2, 3  | `packages/sim/src/xg.ts`, its test |
+| `web` | 4, 5  | `apps/web/app/match/**`            |
 
 Rules that make the partition real:
 

@@ -43,10 +43,7 @@ const PatchSchema = z.object({
 });
 
 /** 카탈로그 선수 편집 */
-export async function PATCH(
-  request: Request,
-  context: { params: Promise<{ playerId: string }> },
-) {
+export async function PATCH(request: Request, context: { params: Promise<{ playerId: string }> }) {
   const { playerId } = await context.params;
   let raw: unknown;
   try {
@@ -56,7 +53,10 @@ export async function PATCH(
   }
   const body = PatchSchema.safeParse(raw);
   if (!body.success) {
-    return NextResponse.json({ error: body.error.issues[0]?.message ?? "입력 오류" }, { status: 400 });
+    return NextResponse.json(
+      { error: body.error.issues[0]?.message ?? "입력 오류" },
+      { status: 400 },
+    );
   }
   // 이동·포지션·수치를 한 번에 넘긴다 — 엔진이 셋을 다 검증한 뒤 한 번 쓴다.
   // 나눠 부르면 뒤가 거절될 때 앞의 절반만 파일에 남고 화면은 갱신되지 않는다.

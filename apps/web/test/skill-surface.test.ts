@@ -27,10 +27,7 @@ describe("스킬이 화면에 서는 길", () => {
   it("조작형 스킬은 모두 말풍선 아니면 카드다", () => {
     const orphans = SKILL_CATALOG.filter(
       (s) =>
-        !s.readOnly &&
-        !hasRailHint(s.name) &&
-        !CARD_SKILLS.has(s.name) &&
-        !MATCH_ONLY.has(s.name),
+        !s.readOnly && !hasRailHint(s.name) && !CARD_SKILLS.has(s.name) && !MATCH_ONLY.has(s.name),
     ).map((s) => s.name);
     expect(orphans, "말풍선(PANEL_OF)이나 카드(CARD_SKILLS) 중 하나로 보내야 한다").toEqual([]);
   });

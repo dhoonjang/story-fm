@@ -301,7 +301,6 @@ describe("포지션 스킬 (멀티 포지션)", () => {
     expect(gk.isNatural).toBe(true);
     expect(gk.proficiency).toBeLessThan(60); // 생소한 자리
   });
-
 });
 
 describe("주장·전술·개인 지시", () => {

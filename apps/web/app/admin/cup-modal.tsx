@@ -47,16 +47,22 @@ function moneyStateOf(stages: readonly MatchStage[], table: StageMoney): Record<
 }
 
 type MonthDay = [number, number];
-type WindowTable = Record<string, MonthDay>;
+type DomesticStage = (typeof DOMESTIC_STAGES)[number];
+/** 보내는 표 — 화면에 없는 단계(`league`·`playoff`)도 실려 나간다 */
+type StageWindows = Partial<Record<MatchStage, MonthDay>>;
+/**
+ * 편집 상태의 표 — 다섯 라운드가 **빠짐없이** 있다. 칸이 늘 열려 있으므로 빈 값이
+ * 나올 자리가 없고, 전수 `Record`로 적어야 `windows[stage]`가 매번 되묻지 않는다.
+ */
+type WindowTable = Record<DomesticStage, MonthDay>;
 
 /** 편집 칸이 여는 다섯 라운드 — 원래 표에 없던 단계는 빈 칸을 못 쓰므로 1월 1일에서 출발한다 */
-function windowStateOf(windows: Partial<Record<MatchStage, MonthDay>>): WindowTable {
-  const state: WindowTable = {};
-  for (const stage of DOMESTIC_STAGES) {
+function windowStateOf(windows: StageWindows): WindowTable {
+  const at = (stage: DomesticStage): MonthDay => {
     const [month, day] = windows[stage] ?? [1, 1];
-    state[stage] = [month, day];
-  }
-  return state;
+    return [month, day];
+  };
+  return { r32: at("r32"), r16: at("r16"), qf: at("qf"), sf: at("sf"), final: at("final") };
 }
 
 /**
@@ -66,13 +72,10 @@ function windowStateOf(windows: Partial<Record<MatchStage, MonthDay>>): WindowTa
  * `league`·`playoff`처럼 화면에 없는 키가 그대로 사라진다. 다섯 라운드는 언제나
  * 값이 있어야 저장이 받아진다 (competition.md §1).
  */
-function windowTable(
-  base: Partial<Record<MatchStage, MonthDay>>,
-  edited: WindowTable,
-): WindowTable {
-  const table: WindowTable = {};
+function windowTable(base: StageWindows, edited: WindowTable): StageWindows {
+  const table: StageWindows = {};
   for (const [stage, value] of Object.entries(base)) {
-    if (value) table[stage] = [value[0], value[1]];
+    if (value) table[stage as MatchStage] = [value[0], value[1]];
   }
   for (const stage of DOMESTIC_STAGES) table[stage] = [edited[stage][0], edited[stage][1]];
   return table;
@@ -182,7 +185,9 @@ export function EuroCupModal({
     short: short.trim(),
     size,
     matchesPerTeam,
-    slots: Object.fromEntries(slotLeagues.filter((id) => (slots[id] ?? 0) > 0).map((id) => [id, slots[id]])),
+    slots: Object.fromEntries(
+      slotLeagues.filter((id) => (slots[id] ?? 0) > 0).map((id) => [id, slots[id] ?? 0]),
+    ),
     directSlots,
     playoffSlots,
     prize: {
@@ -286,11 +291,19 @@ export function EuroCupModal({
       <div className="admin-fields">
         <label className="admin-field grow">
           이름
-          <input value={name} onChange={(e) => setName(e.target.value)} data-testid="cup-modal-name" />
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            data-testid="cup-modal-name"
+          />
         </label>
         <label className="admin-field">
           짧은 표기
-          <input value={short} onChange={(e) => setShort(e.target.value)} data-testid="cup-modal-short" />
+          <input
+            value={short}
+            onChange={(e) => setShort(e.target.value)}
+            data-testid="cup-modal-short"
+          />
         </label>
       </div>
 
@@ -388,10 +401,25 @@ export function EuroCupModal({
           <span className="admin-section-note">0이면 그 항목은 지급하지 않습니다</span>
         </div>
         <div className="admin-fields">
-          <MoneyRow label="참가비" value={participation} onChange={setParticipation} testId="cup-modal-prize-participation" />
+          <MoneyRow
+            label="참가비"
+            value={participation}
+            onChange={setParticipation}
+            testId="cup-modal-prize-participation"
+          />
           <MoneyRow label="승리 수당" value={win} onChange={setWin} testId="cup-modal-prize-win" />
-          <MoneyRow label="무승부 수당" value={draw} onChange={setDraw} testId="cup-modal-prize-draw" />
-          <MoneyRow label="우승" value={winner} onChange={setWinner} testId="cup-modal-prize-winner" />
+          <MoneyRow
+            label="무승부 수당"
+            value={draw}
+            onChange={setDraw}
+            testId="cup-modal-prize-draw"
+          />
+          <MoneyRow
+            label="우승"
+            value={winner}
+            onChange={setWinner}
+            testId="cup-modal-prize-winner"
+          />
         </div>
         <div className="admin-fields admin-fields-gap">
           {EURO_PRIZE_STAGES.map((stage) => (
@@ -421,7 +449,7 @@ interface DomesticFields {
   firstDraw: MonthDay;
   drawDelayDays: number;
   homeRule: DomesticCupEntry["homeRule"];
-  windows: WindowTable;
+  windows: StageWindows;
   stageNames: StageNames;
   finalMidweek: boolean | undefined;
   europeanTicket: DomesticCupEntry["europeanTicket"];
@@ -495,7 +523,8 @@ export function DomesticCupModal({
       ]),
     ];
     for (const [label, [month, day]] of dates) {
-      if (!Number.isInteger(month) || month < 1 || month > 12) return `${label}의 월은 1~12여야 합니다`;
+      if (!Number.isInteger(month) || month < 1 || month > 12)
+        return `${label}의 월은 1~12여야 합니다`;
       if (!Number.isInteger(day) || day < 1 || day > 31) return `${label}의 일은 1~31이어야 합니다`;
     }
     return null;
@@ -548,7 +577,7 @@ export function DomesticCupModal({
     }
   }
 
-  function setWindow(stage: string, index: 0 | 1, value: number) {
+  function setWindow(stage: DomesticStage, index: 0 | 1, value: number) {
     setWindows((w) => {
       const next: MonthDay = [w[stage][0], w[stage][1]];
       next[index] = value;
@@ -588,11 +617,19 @@ export function DomesticCupModal({
       <div className="admin-fields">
         <label className="admin-field grow">
           이름
-          <input value={name} onChange={(e) => setName(e.target.value)} data-testid="cup-modal-name" />
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            data-testid="cup-modal-name"
+          />
         </label>
         <label className="admin-field">
           짧은 표기
-          <input value={short} onChange={(e) => setShort(e.target.value)} data-testid="cup-modal-short" />
+          <input
+            value={short}
+            onChange={(e) => setShort(e.target.value)}
+            data-testid="cup-modal-short"
+          />
         </label>
         <label className="admin-field">
           나라
@@ -617,7 +654,9 @@ export function DomesticCupModal({
           유럽 진출권
           <select
             value={europeanTicket}
-            onChange={(e) => setEuropeanTicket(e.target.value as DomesticCupEntry["europeanTicket"])}
+            onChange={(e) =>
+              setEuropeanTicket(e.target.value as DomesticCupEntry["europeanTicket"])
+            }
             data-testid="cup-modal-ticket"
           >
             {TICKETS.map((t) => (
@@ -699,7 +738,9 @@ export function DomesticCupModal({
                 min={1}
                 max={31}
                 value={firstDraw[1]}
-                onChange={(e) => setFirstDraw(([month]): MonthDay => [month, numOf(e.target.value)])}
+                onChange={(e) =>
+                  setFirstDraw(([month]): MonthDay => [month, numOf(e.target.value)])
+                }
                 aria-label="추첨 일"
                 data-testid="cup-modal-firstdraw-day"
               />
@@ -779,8 +820,18 @@ export function DomesticCupModal({
           <span className="admin-section-note">0이면 그 항목은 지급하지 않습니다</span>
         </div>
         <div className="admin-fields">
-          <MoneyRow label="우승" value={winner} onChange={setWinner} testId="cup-modal-prize-winner" />
-          <MoneyRow label="준우승" value={runnerUp} onChange={setRunnerUp} testId="cup-modal-prize-runnerup" />
+          <MoneyRow
+            label="우승"
+            value={winner}
+            onChange={setWinner}
+            testId="cup-modal-prize-winner"
+          />
+          <MoneyRow
+            label="준우승"
+            value={runnerUp}
+            onChange={setRunnerUp}
+            testId="cup-modal-prize-runnerup"
+          />
         </div>
         <div className="admin-fields admin-fields-gap">
           {DOMESTIC_STAGES.map((stage) => (

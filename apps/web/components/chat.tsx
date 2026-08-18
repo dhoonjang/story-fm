@@ -23,6 +23,7 @@ import {
   IconMatch,
   IconPerson,
   IconReporter,
+  type IconComponent,
 } from "@/components/icons";
 
 /**
@@ -33,7 +34,7 @@ import {
  * 남의 팀 사람)에는 **사람 아이콘**이 선다 — 틀린 직책을 다느니 "누군가 말한다"까지만
  * 말한다. 자리는 화면이 추측하지 않는다: `speakerRoles`가 코어에서 정해 실어 보낸다.
  */
-const KIND_ICON: Record<SpeakerKind, () => React.ReactElement> = {
+const KIND_ICON: Record<SpeakerKind, IconComponent> = {
   head_coach: IconCoach,
   owner: IconOwner,
   reporter: IconReporter,

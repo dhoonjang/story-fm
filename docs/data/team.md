@@ -50,12 +50,12 @@ TeamCatalogEntry {
 
 편집 가능 범위는 **구조 필드까지 전부**다.
 
-| 표 | 편집 가능 | 편집 불가 |
-| --- | --- | --- |
-| `TeamCatalogEntry` | `name` `shortName` `leagueId` `tier` `formation` | `id` |
-| `TACTICAL_STYLE` | 구단별 운용 정체성 6종 | — |
-| `CLUB_PROFILES` | `stadium` `capacity` `commercialTier` | — |
-| `DEFAULT_XI` | — (선수 카탈로그와 얽혀 있다) | 전부 |
+| 표                 | 편집 가능                                        | 편집 불가 |
+| ------------------ | ------------------------------------------------ | --------- |
+| `TeamCatalogEntry` | `name` `shortName` `leagueId` `tier` `formation` | `id`      |
+| `TACTICAL_STYLE`   | 구단별 운용 정체성 6종                           | —         |
+| `CLUB_PROFILES`    | `stadium` `capacity` `commercialTier`            | —         |
+| `DEFAULT_XI`       | — (선수 카탈로그와 얽혀 있다)                    | 전부      |
 
 세 표는 **한 파일에 함께** 저장된다. 갈라 두면 팀을 추가할 때 이름은 있는데 구장이
 없는 중간 상태가 생긴다.
@@ -81,12 +81,12 @@ TeamCatalogEntry {
 카탈로그를 매 요청 읽는 자리가 하나라도 남으면 어드민이 저장하는 순간 그 값이
 진행 중인 게임의 화면과 장부에 들어간다.
 
-| `GAME_TEAM` | 카탈로그 원본 | 이 값을 읽는 통로 |
-| --- | --- | --- |
-| `name?` `shortName?` | `TeamCatalogEntry` | `teamNameIn(state, id)` · `teamShortNameIn(state, id)` |
-| `leagueId?` | `TeamCatalogEntry.leagueId` | `leagueOfTeamIn(state, id)` — 승강(`state.leagueOf`)이 그 위를 덮는다 |
-| `tier?` | `TeamCatalogEntry.tier` | `tierOfTeamIn(state, id)` (§2) |
-| `stadium?` `capacity?` `commercialTier?` | `CLUB_PROFILES` | `clubProfileIn(state, id)` (§3) |
+| `GAME_TEAM`                              | 카탈로그 원본               | 이 값을 읽는 통로                                                     |
+| ---------------------------------------- | --------------------------- | --------------------------------------------------------------------- |
+| `name?` `shortName?`                     | `TeamCatalogEntry`          | `teamNameIn(state, id)` · `teamShortNameIn(state, id)`                |
+| `leagueId?`                              | `TeamCatalogEntry.leagueId` | `leagueOfTeamIn(state, id)` — 승강(`state.leagueOf`)이 그 위를 덮는다 |
+| `tier?`                                  | `TeamCatalogEntry.tier`     | `tierOfTeamIn(state, id)` (§2)                                        |
+| `stadium?` `capacity?` `commercialTier?` | `CLUB_PROFILES`             | `clubProfileIn(state, id)` (§3)                                       |
 
 - 전부 **optional**이다. 옛 세이브엔 없으므로 없으면 카탈로그가 답한다 —
   세이브 버전은 오르지 않는다.
@@ -126,14 +126,14 @@ TeamCatalogEntry {
 
 체급 하나가 여섯 곳을 정한다.
 
-| 어디                                        | tier 1 / 2 / 3 / 4                                     |
-| ------------------------------------------- | ------------------------------------------------------ |
-| 절차 생성 능력치 기준선 (`TIER_BASE`)       | 84 / 80 / 76 / 72 — **실선수가 없는 스쿼드만** (§4)     |
-| 시작 잔고 · 이적 예산 (`TIER_FINANCE`)      | £120M·90M / 70M·45M / 40M·22M / 25M·12M — **EPL 기준** |
-| 시즌 예산 보충 (`SEASON_BUDGET_TOPUP`)      | £45M / 30M / 18M / 12M — **EPL 기준**                  |
-| 주급 예산 (`clubWageBudget`)                | **체급을 보지 않는다** — (매출 − 고정비)에서 파생       |
-| 보드 기대 순위 (`boardExpectation`)         | 2위 / 6위 / 12위 / 17위                                |
-| 첫 시즌 대항전 티켓 순서 · 컵 시드·홈 배정  | 체급 순 (`rankedTeams` · `rankOf`)                     |
+| 어디                                       | tier 1 / 2 / 3 / 4                                     |
+| ------------------------------------------ | ------------------------------------------------------ |
+| 절차 생성 능력치 기준선 (`TIER_BASE`)      | 84 / 80 / 76 / 72 — **실선수가 없는 스쿼드만** (§4)    |
+| 시작 잔고 · 이적 예산 (`TIER_FINANCE`)     | £120M·90M / 70M·45M / 40M·22M / 25M·12M — **EPL 기준** |
+| 시즌 예산 보충 (`SEASON_BUDGET_TOPUP`)     | £45M / 30M / 18M / 12M — **EPL 기준**                  |
+| 주급 예산 (`clubWageBudget`)               | **체급을 보지 않는다** — (매출 − 고정비)에서 파생      |
+| 보드 기대 순위 (`boardExpectation`)        | 2위 / 6위 / 12위 / 17위                                |
+| 첫 시즌 대항전 티켓 순서 · 컵 시드·홈 배정 | 체급 순 (`rankedTeams` · `rankOf`)                     |
 
 - ⚠️ **실선수 시드가 있는 클럽의 합성 보충은 이 기준선을 쓰지 않는다.** tier 기준선은
   그 리그 **상위권**의 눈금이라, 시드가 얇은 클럽일수록 보충이 스쿼드 최고 선수를
@@ -176,11 +176,11 @@ TeamCatalogEntry {
 리그 **안에서** 세 축을 각각 백분위로 정규화해 가중합한다. 단위가 다른 값을 더하지
 않으려고 백분위를 쓴다.
 
-| 축 | 무엇 | 가중치 |
-| --- | --- | --- |
-| 구단 규모 | 구장 수용인원 · 상업 브랜드 등급 (`CLUB_PROFILES`) | 0.50 |
-| 스쿼드 전력 | 상위 11명 평균 OVR | 0.30 |
-| 최근 성적 | 최근 3시즌 리그 순위(`SEASON_RECORD`)의 리그 크기 대비 백분위 | 0.20 |
+| 축          | 무엇                                                          | 가중치 |
+| ----------- | ------------------------------------------------------------- | ------ |
+| 구단 규모   | 구장 수용인원 · 상업 브랜드 등급 (`CLUB_PROFILES`)            | 0.50   |
+| 스쿼드 전력 | 상위 11명 평균 OVR                                            | 0.30   |
+| 최근 성적   | 최근 3시즌 리그 순위(`SEASON_RECORD`)의 리그 크기 대비 백분위 | 0.20   |
 
 - ⚠️ **세 축 어느 것도 `tier`를 읽지 않는다.** 매출 어림(`catalogRevenueEstimate`)은
   체급을 입력으로 쓰므로 규모 축의 자가 될 수 없다 — 작년 체급이 올해 체급을 만드는
@@ -191,10 +191,10 @@ TeamCatalogEntry {
 
 정렬한 뒤 백분위로 자른다 — `TIER_CUTS`.
 
-| 리그 | 1 | 2 | 3 | 4 |
-| --- | --- | --- | --- | --- |
-| 1부 | 상위 20% | ~40% | ~75% | 나머지 |
-| 2부 | — | — | 상위 30% | 나머지 |
+| 리그 | 1        | 2    | 3        | 4      |
+| ---- | -------- | ---- | -------- | ------ |
+| 1부  | 상위 20% | ~40% | ~75%     | 나머지 |
+| 2부  | —        | —    | 상위 30% | 나머지 |
 
 2부에 tier 1·2가 없는 것은 카탈로그의 분포가 그렇기 때문이다 — 컵 인원인 2부 클럽이
 1부 빅클럽과 같은 이적 예산·보드 기대를 받을 자리가 없다.
@@ -275,10 +275,10 @@ ClubProfile { stadium, capacity, commercialTier: 1|2|3|4 }
 (`world/catalog.ts` `topUpBase`). **그 기준선은 tier가 아니라 그 클럽 실선수 종합의
 분포에서 나온다** — 두 항의 작은 쪽이다.
 
-| 항 | 무엇을 정하는가 |
-| --- | --- |
-| 실선수 종합의 **하위 4분위** | 보충이 서는 자리 — 주전이 아니라 로테이션 자원이다 |
-| 실선수 **최고 − 8** | 상한. 8은 `strong()`이 기준선 위로 올리는 최대폭(`SYNTHETIC_UPSIDE`) |
+| 항                           | 무엇을 정하는가                                                      |
+| ---------------------------- | -------------------------------------------------------------------- |
+| 실선수 종합의 **하위 4분위** | 보충이 서는 자리 — 주전이 아니라 로테이션 자원이다                   |
+| 실선수 **최고 − 8**          | 상한. 8은 `strong()`이 기준선 위로 올리는 최대폭(`SYNTHETIC_UPSIDE`) |
 
 두 번째 항이 상한이라 **어떤 굴림도 그 클럽 실선수 최고를 넘지 못한다.** 아카데미
 자리는 이 기준선에서 다시 12~20 아래에서 출발하므로 1군 보충 아래에 깔린다.
@@ -491,21 +491,21 @@ WorldScope { leagues, teamsPerLeague, cups, markets }
 
 ## 코드 위치
 
-| 무엇                                       | 어디                                                   |
-| ------------------------------------------ | ------------------------------------------------------ |
-| 팀 카탈로그 · 체급 · 지정 선발             | `packages/engine/src/data/team-catalog.ts`             |
-| 리그 카탈로그 (`kind` · 계수 · 중계권)     | `packages/engine/src/data/league-catalog.ts`           |
-| 구단 프로필 (구장 · 브랜드)                | `packages/engine/src/data/club-profile.ts`             |
+| 무엇                                       | 어디                                                              |
+| ------------------------------------------ | ----------------------------------------------------------------- |
+| 팀 카탈로그 · 체급 · 지정 선발             | `packages/engine/src/data/team-catalog.ts`                        |
+| 리그 카탈로그 (`kind` · 계수 · 중계권)     | `packages/engine/src/data/league-catalog.ts`                      |
+| 구단 프로필 (구장 · 브랜드)                | `packages/engine/src/data/club-profile.ts`                        |
 | 카탈로그 오버라이드 (읽기·쓰기·캐시)       | `packages/engine/src/data/catalog-source.ts` · `team-override.ts` |
-| 팀 어드민 (조회 · 편집 · 추가 · 삭제)      | `packages/engine/src/world/admin-team.ts`              |
-| 카탈로그 불변식 (순수)                     | `packages/engine/src/world/catalog-invariants.ts`      |
-| 등록 명단 규칙 (순수)                      | `packages/domain/src/squad-rules.ts`                   |
-| 등록 명단 — 상태에 붙이는 층               | `packages/engine/src/squad/registration.ts`            |
-| 팀 엔티티 (Zod)                            | `packages/domain/src/team.ts`                          |
-| 초기 스쿼드 분류 · 모양 고르기 · 슬롯 배치 | `packages/engine/src/core/state.ts`                    |
-| 스쿼드 생성 (실선수 시드 · 절차 생성)      | `packages/engine/src/world/catalog.ts` · `generate.ts` |
-| 축소 세계                                  | `packages/engine/src/world/scope.ts`                   |
-| 구단 주급 예산                             | `packages/engine/src/world/wages.ts`                   |
+| 팀 어드민 (조회 · 편집 · 추가 · 삭제)      | `packages/engine/src/world/admin-team.ts`                         |
+| 카탈로그 불변식 (순수)                     | `packages/engine/src/world/catalog-invariants.ts`                 |
+| 등록 명단 규칙 (순수)                      | `packages/domain/src/squad-rules.ts`                              |
+| 등록 명단 — 상태에 붙이는 층               | `packages/engine/src/squad/registration.ts`                       |
+| 팀 엔티티 (Zod)                            | `packages/domain/src/team.ts`                                     |
+| 초기 스쿼드 분류 · 모양 고르기 · 슬롯 배치 | `packages/engine/src/core/state.ts`                               |
+| 스쿼드 생성 (실선수 시드 · 절차 생성)      | `packages/engine/src/world/catalog.ts` · `generate.ts`            |
+| 축소 세계                                  | `packages/engine/src/world/scope.ts`                              |
+| 구단 주급 예산                             | `packages/engine/src/world/wages.ts`                              |
 
 </content>
 </invoke>

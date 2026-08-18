@@ -162,7 +162,9 @@ describe("심경 결산 — 코어가 사실을 잡고 결만 맡긴다", () => 
     const state = createTestGame();
     const player = withEvent(state);
     const brief = buildMoodBrief(state, state.date, state.date)!;
-    expect(applyMoodNotes(state, brief, [{ playerId: player.id, text: "동점골에 어깨가 올라갔다" }])).toBe(1);
+    expect(
+      applyMoodNotes(state, brief, [{ playerId: player.id, text: "동점골에 어깨가 올라갔다" }]),
+    ).toBe(1);
     expect(moodOf(state, player)).toBe("동점골에 어깨가 올라갔다.");
   });
 
@@ -176,7 +178,9 @@ describe("심경 결산 — 코어가 사실을 잡고 결만 맡긴다", () => 
       since: state.date,
     });
     const brief = buildMoodBrief(state, state.date, state.date)!;
-    expect(applyMoodNotes(state, brief, [{ playerId: player.id, text: "기분이 아주 좋다" }])).toBe(0);
+    expect(applyMoodNotes(state, brief, [{ playerId: player.id, text: "기분이 아주 좋다" }])).toBe(
+      0,
+    );
     expect(moodOf(state, player)).toContain("불만");
     // 그 사실을 담으면 통과한다
     expect(
@@ -190,7 +194,9 @@ describe("심경 결산 — 코어가 사실을 잡고 결만 맡긴다", () => 
     const brief = buildMoodBrief(state, state.date, state.date)!;
     const other = userPlayers(state).find((p) => p.id !== player.id)!;
     expect(applyMoodNotes(state, brief, [{ playerId: other.id, text: "좋다" }])).toBe(0);
-    expect(applyMoodNotes(state, brief, [{ playerId: player.id, text: "좋다. 아주 좋다." }])).toBe(0);
+    expect(applyMoodNotes(state, brief, [{ playerId: player.id, text: "좋다. 아주 좋다." }])).toBe(
+      0,
+    );
     expect(applyMoodNotes(state, brief, [{ playerId: player.id, text: "가".repeat(130) }])).toBe(0);
   });
 

@@ -248,7 +248,10 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
   it("모든 클럽 소속 선수는 팀 안에서 고유한 등번호를 갖는다", () => {
     for (const team of state.teams.filter((entry) => entry.id !== "freeagents")) {
       const squad = playersOf(state, team.id);
-      expect(squad.every((player) => player.squadNumber !== undefined), team.id).toBe(true);
+      expect(
+        squad.every((player) => player.squadNumber !== undefined),
+        team.id,
+      ).toBe(true);
       expect(new Set(squad.map((player) => player.squadNumber)).size, team.id).toBe(squad.length);
     }
   });

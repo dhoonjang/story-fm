@@ -321,9 +321,7 @@ export const BOOKED_AGAIN_WEIGHT = 0.35;
  */
 export function bookingWeight(player: Player, alreadyBooked: boolean): number {
   const a = player.attributes;
-  return (
-    (a.aggression * 1.5 + (99 - a.tackling) * 0.5) * (alreadyBooked ? BOOKED_AGAIN_WEIGHT : 1)
-  );
+  return (a.aggression * 1.5 + (99 - a.tackling) * 0.5) * (alreadyBooked ? BOOKED_AGAIN_WEIGHT : 1);
 }
 
 /** 이번 카드를 받는 사람 — 온필드에서 `bookingWeight`로 뽑는다 */

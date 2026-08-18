@@ -76,7 +76,13 @@ export const CUP_CATALOG_SEED: readonly CupCatalogEntry[] = [
       participation: 12_000_000,
       win: 1_500_000,
       draw: 500_000,
-      stage: { playoff: 2_000_000, r16: 6_000_000, qf: 8_000_000, sf: 10_000_000, final: 12_000_000 },
+      stage: {
+        playoff: 2_000_000,
+        r16: 6_000_000,
+        qf: 8_000_000,
+        sf: 10_000_000,
+        final: 12_000_000,
+      },
       winner: 8_000_000,
     },
   },
@@ -247,11 +253,7 @@ export function competitionLabel(
  * 있으므로 일정의 매 줄에 리그 이름을 붙이지 않는다. 컵과 친선은 어느 경기인지가
  * 곧 정보라 이름이 선다.
  */
-export function fixtureLabel(
-  competitionId: string | null,
-  stage: MatchStage,
-  round = 1,
-): string {
+export function fixtureLabel(competitionId: string | null, stage: MatchStage, round = 1): string {
   if (competitionId === null) return FRIENDLY_LABEL;
   return isCup(competitionId)
     ? competitionLabel(competitionId, stage, round)

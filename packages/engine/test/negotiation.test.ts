@@ -360,7 +360,6 @@ describe("시간이 흐르면", () => {
     expect(arrivedResponses(state)).toHaveLength(1);
     expect(stopped === "attention" || stopped === "reached").toBe(true);
   });
-
 });
 
 describe("매각 — 들어오는 오퍼", () => {
@@ -1192,7 +1191,6 @@ describe("카드의 성사 가능성", () => {
   });
 });
 
-
 /**
  * **임대 중인 선수의 계약은 소유 구단의 것이다** (transfer.md §2).
  *
@@ -1318,8 +1316,9 @@ describe("임대 중인 선수는 소유 구단만 움직인다", () => {
     expect(after.teamId).toBe(state.userTeamId);
     expect(after.loan!.fromTeamId).toBe(OWNER);
     expect(activeContract(state, player.id)!.teamId).toBe(OWNER);
-    expect(state.contracts.filter((c) => c.gamePlayerId === player.id && c.status === "active"))
-      .toHaveLength(1);
+    expect(
+      state.contracts.filter((c) => c.gamePlayerId === player.id && c.status === "active"),
+    ).toHaveLength(1);
   });
 
   it("임대 중인 남의 선수는 영입되지 않는다 — 돈이 빌린 구단에 입금된다", () => {

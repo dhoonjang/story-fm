@@ -62,10 +62,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ teamI
 }
 
 /** 카탈로그에서 팀 삭제 — 그 팀의 선수도 함께 사라진다 */
-export async function DELETE(
-  _request: Request,
-  context: { params: Promise<{ teamId: string }> },
-) {
+export async function DELETE(_request: Request, context: { params: Promise<{ teamId: string }> }) {
   const { teamId } = await context.params;
   const res = adminRemoveTeam(teamId);
   if (!res.ok) return NextResponse.json({ error: res.message }, { status: 400 });

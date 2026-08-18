@@ -142,10 +142,13 @@ export function LeagueModal({
     if (!league) return;
     // 소속 팀이 남아 있으면 엔진도 막는다 — 먼저 말해 주면 삭제를 눌러 보지 않는다
     if (league.teamCount > 0) {
-      setFormError(`${league.name}에 아직 ${league.teamCount}팀이 있습니다 — 팀을 먼저 옮기거나 지우세요`);
+      setFormError(
+        `${league.name}에 아직 ${league.teamCount}팀이 있습니다 — 팀을 먼저 옮기거나 지우세요`,
+      );
       return;
     }
-    if (!window.confirm(`카탈로그에서 ${league.name}을(를) 삭제할까요?\n(새 게임부터 반영됩니다)`)) return;
+    if (!window.confirm(`카탈로그에서 ${league.name}을(를) 삭제할까요?\n(새 게임부터 반영됩니다)`))
+      return;
     setSaving(true);
     try {
       const res = await fetch(`/api/admin/catalog/league/${league.id}`, { method: "DELETE" });

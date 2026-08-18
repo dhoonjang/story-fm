@@ -114,6 +114,9 @@ test("같은 시각은 다시 적지 않는다 — 화자 이름은 턴마다 �
 
   // 이름 색은 강조색이 아니다 — 턴마다 서므로 원색이면 눈이 아프다
   expect(
-    await page.locator(".say-who .speaker").first().evaluate((n) => getComputedStyle(n).color),
+    await page
+      .locator(".say-who .speaker")
+      .first()
+      .evaluate((n) => getComputedStyle(n).color),
   ).toBe("rgb(204, 214, 228)"); // --silver
 });

@@ -45,7 +45,7 @@ concurrency:
 #
 #   잡                러너                 잡 전체   그중 실작업   과금
 #   changes           ubuntu-latest            3초         1초     1분
-#   lint + typecheck  ubuntu-latest           47초        21초     1분
+#   lint + typecheck  ubuntu-latest           47초        21초     1분   ← format:check 합류 전
 #   e2e               ubuntu-latest          132초        91초     3분
 #   unit + api        ubicloud-standard-8    243초       226초     5분
 #
@@ -112,7 +112,7 @@ jobs:
           fi
 
   static:
-    name: lint + typecheck
+    name: lint + typecheck + format
     needs: changes
     if: ${{ needs.changes.outputs.code == 'true' }}
     # tsc도 eslint도 1분 안에 끝난다 — 코어를 얹을 자리가 아니다
@@ -127,9 +127,13 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
-      # lint는 typecheck가 깨져도 볼 값이 있다 — 한 잡에서 둘 다 끝까지 돌린다
+      # lint도 format도 typecheck가 깨져도 볼 값이 있다 — 한 잡에서 셋 다 끝까지
+      # 돌린다. 세 판정을 한 번의 왕복으로 다 보여 주는 편이 고치는 횟수를 줄인다.
       - if: ${{ !cancelled() }}
         run: pnpm lint
+      # Prettier — 어긋난 파일 이름만 뱉는다. 고치는 명령은 `pnpm format`.
+      - if: ${{ !cancelled() }}
+        run: pnpm format:check
 
   test:
     name: unit + api (${{ matrix.shard }}/${{ strategy.job-total }})

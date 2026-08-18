@@ -423,7 +423,6 @@ describe("종합(overall) — 가장 잘 맞는 자리 · 기본 역할", () => 
     expect(violations.slice(0, 10)).toEqual([]);
   });
 
-
   it("종합은 세부 역할을 타지 않는다 — 숫자 하나가 여러 등급이 되면 안 된다", () => {
     const p = playerCatalog().find((e) => naturalPositionOf(e).position === "ST")!;
     const shown = bestOverall(p, p.positions);

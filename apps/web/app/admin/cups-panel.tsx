@@ -23,8 +23,7 @@ import {
  */
 
 type ModalTarget =
-  | { kind: "euro"; cup: CupCatalogEntry }
-  | { kind: "domestic"; cup: DomesticCupEntry };
+  { kind: "euro"; cup: CupCatalogEntry } | { kind: "domestic"; cup: DomesticCupEntry };
 
 /** 리그별 티켓 합 — 참가 팀 수와 어긋나면 그 대회는 편성되지 않는다 */
 function slotSum(cup: CupCatalogEntry): number {
@@ -59,7 +58,9 @@ export function CupsPanel({
   );
 
   async function resetCups() {
-    if (!window.confirm("컵 편집을 모두 취소하고 시드 기본값으로 되돌릴까요? (대항전·국내 컵 함께)")) {
+    if (
+      !window.confirm("컵 편집을 모두 취소하고 시드 기본값으로 되돌릴까요? (대항전·국내 컵 함께)")
+    ) {
       return;
     }
     setBusy(true);
@@ -214,7 +215,9 @@ export function CupsPanel({
               ))}
               {domestic.length === 0 && (
                 <tr className="admin-list-empty">
-                  <td colSpan={7}>{loaded ? "국내 컵이 없습니다" : "컵 카탈로그를 불러오는 중…"}</td>
+                  <td colSpan={7}>
+                    {loaded ? "국내 컵이 없습니다" : "컵 카탈로그를 불러오는 중…"}
+                  </td>
                 </tr>
               )}
             </tbody>

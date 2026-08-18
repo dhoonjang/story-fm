@@ -20,9 +20,18 @@ import {
   type TacticalStyle,
   type TeamCatalogEntry,
 } from "../data/team-catalog";
-import { TACTICAL_STYLES, clearTeamOverride, readTeamOverride, writeTeamOverride } from "../data/team-override";
+import {
+  TACTICAL_STYLES,
+  clearTeamOverride,
+  readTeamOverride,
+  writeTeamOverride,
+} from "../data/team-override";
 import { buildTeamSquad, playerCatalog, saveCatalog } from "./catalog";
-import { catalogWarnings, checkCatalogInvariants, type CatalogCandidate } from "./catalog-invariants";
+import {
+  catalogWarnings,
+  checkCatalogInvariants,
+  type CatalogCandidate,
+} from "./catalog-invariants";
 import type { AdminResult } from "./admin";
 
 /**
@@ -159,7 +168,8 @@ export function adminUpdateTeam(teamId: string, patch: AdminTeamPatch): AdminRes
     team.name = patch.name.trim();
   }
   if (patch.shortName !== undefined) {
-    if (patch.shortName.trim().length === 0) return { ok: false, message: "짧은 이름이 필요합니다" };
+    if (patch.shortName.trim().length === 0)
+      return { ok: false, message: "짧은 이름이 필요합니다" };
     team.shortName = patch.shortName.trim();
   }
   if (patch.tier !== undefined) {
@@ -209,7 +219,10 @@ export function adminAddTeam(input: AdminTeamInput): AdminResult {
   if (input.name.trim().length === 0) return { ok: false, message: "팀 이름이 필요합니다" };
   if (input.shortName.trim().length === 0) return { ok: false, message: "짧은 이름이 필요합니다" };
   if (![1, 2, 3, 4].includes(input.tier)) return { ok: false, message: "체급은 1~4여야 합니다" };
-  if (input.formation !== undefined && !(FORMATIONS as readonly string[]).includes(input.formation)) {
+  if (
+    input.formation !== undefined &&
+    !(FORMATIONS as readonly string[]).includes(input.formation)
+  ) {
     return { ok: false, message: `알 수 없는 포메이션: ${input.formation}` };
   }
   if (

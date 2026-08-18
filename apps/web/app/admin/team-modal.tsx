@@ -63,7 +63,9 @@ export function TeamModal({
   const [leagueId, setLeagueId] = useState(team?.leagueId ?? defaultLeagueId);
   const [tier, setTier] = useState<Grade>(team?.tier ?? 3);
   const [formation, setFormation] = useState<string>(team?.formation ?? "");
-  const [tacticalStyle, setTacticalStyle] = useState<TacticalStyle>(team?.tacticalStyle ?? "balanced");
+  const [tacticalStyle, setTacticalStyle] = useState<TacticalStyle>(
+    team?.tacticalStyle ?? "balanced",
+  );
   const [stadium, setStadium] = useState(team?.stadium ?? "");
   const [capacity, setCapacity] = useState(team?.capacity ?? 20_000);
   const [commercialTier, setCommercialTier] = useState<Grade>(team?.commercialTier ?? 3);

@@ -57,10 +57,7 @@ export interface BoardState {
  * 옛 자리와 견주면 CB → LCB처럼 코드만 바뀌는 이동에서 화면이 기억을 꺼내고 코어는
  * 걸린 역할을 그대로 두어 두 값이 갈린다.
  */
-export function roleAtSlot(
-  p: Pick<SquadRow, "roleId" | "roleMemory">,
-  position: string,
-): string {
+export function roleAtSlot(p: Pick<SquadRow, "roleId" | "roleMemory">, position: string): string {
   if (p.roleId !== null && rolesFor(position).some((r) => r.id === p.roleId)) return p.roleId;
   return p.roleMemory[position] ?? defaultRoleOf(position);
 }

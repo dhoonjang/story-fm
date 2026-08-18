@@ -1406,6 +1406,10 @@ export function formationOf(teamId: string): Formation {
 
 /** 같은 나라의 전 클럽 (1부 + 2부) — 국내 컵 참가 명단의 원본 */
 export function clubsOfCountry(country: string): TeamCatalogEntry[] {
-  const leagues = new Set(leagueCatalog().filter((l) => l.country === country).map((l) => l.id));
+  const leagues = new Set(
+    leagueCatalog()
+      .filter((l) => l.country === country)
+      .map((l) => l.id),
+  );
   return teamCatalog().filter((t) => leagues.has(t.leagueId));
 }

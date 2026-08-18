@@ -185,7 +185,9 @@ export function applyPromotionRelegation(
       );
       pushNarrative(state, `${leagueName(leagueId)} 강등 — ${leagueName(second)}로`, 5);
     } else if (up.includes(state.userTeamId)) {
-      digest.push(`${teamNameIn(state, state.userTeamId)} 승격! 다음 시즌은 ${leagueName(leagueId)}다`);
+      digest.push(
+        `${teamNameIn(state, state.userTeamId)} 승격! 다음 시즌은 ${leagueName(leagueId)}다`,
+      );
       pushNarrative(state, `${leagueName(leagueId)} 승격`, 5);
     }
   }

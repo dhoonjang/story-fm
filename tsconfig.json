@@ -13,13 +13,18 @@
     "noEmit": true,
     "types": ["node"]
   },
+  // 결정론적 코어와 그 도구들 — DOM이 없는 쪽이다. 화면(`apps/web/tsconfig.json`)과
+  // 스펙(`tsconfig.e2e.json`)은 DOM lib이 필요해 따로 서고, `pnpm typecheck`가 셋을
+  // 차례로 돈다. 여기에 dom을 얹으면 sim·engine이 `document`를 써도 초록이 된다.
+  //
+  // 앱은 이름으로 적는다 — 예전의 `apps/*/src/**`는 `src`가 없는 apps/web을 한 파일도
+  // 덮지 못한 채 덮는 것처럼 보였다. 새 앱은 여기 아니면 제 tsconfig에 적힌다.
   "include": [
     "packages/*/src/**/*.ts",
     "packages/*/test/**/*.ts",
     "packages/*/harness/**/*.ts",
-    "apps/*/src/**/*.ts",
+    "apps/match-cli/src/**/*.ts",
     "vitest.config.ts",
-    "vitest.balance.config.ts",
-    "eslint.config.js"
+    "vitest.balance.config.ts"
   ]
 }

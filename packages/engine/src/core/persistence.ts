@@ -142,7 +142,9 @@ function referencedShards(file: string): Set<string> | null {
     const raw: unknown = JSON.parse(readFileSync(file, "utf8"));
     const map = (raw as { shards?: unknown }).shards;
     if (!map || typeof map !== "object") return new Set();
-    return new Set(Object.values(map as Record<string, unknown>).filter((h) => typeof h === "string"));
+    return new Set(
+      Object.values(map as Record<string, unknown>).filter((h) => typeof h === "string"),
+    );
   } catch {
     return null;
   }
@@ -619,7 +621,8 @@ export function deleteGame(id: string): boolean {
   const prefix = `${id}.shard-`;
   try {
     for (const name of readdirSync(dir)) {
-      if (name.startsWith(prefix) && SHARD_FILE.test(name)) rmSync(path.join(dir, name), { force: true });
+      if (name.startsWith(prefix) && SHARD_FILE.test(name))
+        rmSync(path.join(dir, name), { force: true });
     }
   } catch {
     /* 디렉터리를 읽지 못하면 남길 뿐 — 삭제 자체는 끝났다 */

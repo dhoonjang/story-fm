@@ -1,10 +1,5 @@
 import type { MatchRecord, ScheduleEntry, TransferWindow } from "@story-fm/domain";
-import {
-  scopedLeagues,
-  scopedTeams,
-  scopedTeamsOfLeague,
-  type WorldScope,
-} from "../world/scope";
+import { scopedLeagues, scopedTeams, scopedTeamsOfLeague, type WorldScope } from "../world/scope";
 import { makeRng } from "../core/rng";
 import { isEuroWeek } from "./europe";
 
@@ -532,10 +527,7 @@ export function buildAllLeagueMatches(
   membership?: LeagueMembership,
 ): MatchRecord[] {
   const out: MatchRecord[] = [];
-  const leagueIds = [
-    ...scopedLeagues(world).map((l) => l.id),
-    ...(membership?.extraLeagues ?? []),
-  ];
+  const leagueIds = [...scopedLeagues(world).map((l) => l.id), ...(membership?.extraLeagues ?? [])];
   // 2부는 리그전을 돌지 않는다 — 국내 컵 참가 인원일 뿐이다 (league-catalog §division)
   for (const leagueId of new Set(leagueIds)) {
     const teamIds = membersOfLeague(leagueId, world, membership?.leagueOf);

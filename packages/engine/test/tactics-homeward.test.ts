@@ -202,18 +202,25 @@ describe("면제는 방향 대칭이다", () => {
     target.teamId = state.userTeamId;
     target.squadLevel = "first";
     state.transfers.push({
-      id: "t1", gamePlayerId: target.id, windowId: null, fromTeamId: "chelsea",
-      toTeamId: state.userTeamId, date: state.date, type: "transfer", fee: 0,
+      id: "t1",
+      gamePlayerId: target.id,
+      windowId: null,
+      fromTeamId: "chelsea",
+      toTeamId: state.userTeamId,
+      date: state.date,
+      type: "transfer",
+      fee: 0,
     });
     setLineup(state, {
-      starting: userTactics(state).assignments
-        .filter((a) => a.role === "starting")
+      starting: userTactics(state)
+        .assignments.filter((a) => a.role === "starting")
         .map((a) => ({ playerId: a.playerId === out.playerId ? target.id : a.playerId })),
     });
     const t = userTactics(state);
     for (const a of t.assignments) a.familiarity = 70;
     const origin = { ...t.spec };
-    const famOf = (id: string) => userTactics(state).assignments.find((a) => a.playerId === id)!.familiarity;
+    const famOf = (id: string) =>
+      userTactics(state).assignments.find((a) => a.playerId === id)!.familiarity;
     const before = famOf(target.id);
 
     for (let i = 0; i < 5; i++) {

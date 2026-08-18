@@ -61,8 +61,7 @@ function boardOf(views: OfficeViews): BoardState {
 }
 
 /** 화면이 되찾기에 쓰는 근거 — 서버가 준 행 그대로 (자리 없는 행도 함께 온다) */
-const rowsOf = (views: OfficeViews) =>
-  new Map(views.squad.players.map((p) => [p.id, p] as const));
+const rowsOf = (views: OfficeViews) => new Map(views.squad.players.map((p) => [p.id, p] as const));
 
 const bodyOf = (b: BoardState, views: OfficeViews) =>
   lineupBody(b, new Set(boardOf(views).reserve), rowsOf(views));
@@ -218,7 +217,9 @@ function benchedWithMemory(seed: number) {
       .filter((p) => p.role === "선발")
       .map((p) => ({ playerId: p.id === starter.id ? sub.id : p.id, point: p.assignedPoint! })),
     bench: [
-      ...before.filter((p) => p.role === "벤치" && p.id !== sub.id).map((p) => ({ playerId: p.id })),
+      ...before
+        .filter((p) => p.role === "벤치" && p.id !== sub.id)
+        .map((p) => ({ playerId: p.id })),
       // 벤치도 자리를 일러 준다 — 로테이션 화면이 보내는 값이고, 코어는 이때만 흔적을 잇는다
       { playerId: starter.id, position },
     ],
