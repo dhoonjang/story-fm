@@ -7,9 +7,10 @@ import {
   applyMatchFamiliarity,
   assignmentsOf,
   playerById,
+  settleMatchRating,
   userPlayers,
 } from "@story-fm/engine";
-import { createTestGame } from "./helpers";
+import { advanceToMatchday, createTestGame, playMockMatch } from "./helpers";
 
 /**
  * 경기가 주는 전술 적응도 — **판정만이 올린다.**
@@ -103,5 +104,72 @@ describe("경기 출전의 전술 적응도", () => {
     const before = assignmentsOf(state, state.userTeamId).map((a) => a.familiarity);
     applyMatchFamiliarity(state, [{ playerId: "없는-선수", gain: 8 }]);
     expect(assignmentsOf(state, state.userTeamId).map((a) => a.familiarity)).toEqual(before);
+  });
+});
+
+/**
+ * 결산의 입구 — 출전 확인과 한 번 확인은 여기서만 걸린다 (agents.md §4).
+ * 위의 두 적용기는 순수 적용기라 이 확인을 갖지 않는다.
+ */
+describe("경기 결산은 한 번만, 출전 선수만", () => {
+  /** 유저 팀 경기를 하나 치른 상태 — 출전자는 `result.ratings`에 자리가 있다 */
+  const settled = () => {
+    const state = createTestGame();
+    advanceToMatchday(state);
+    playMockMatch(state);
+    const match = state.matches.find(
+      (m) =>
+        m.result?.ratings &&
+        (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+    );
+    const ratings = match?.result?.ratings;
+    if (!match || !ratings) throw new Error("평점 없음");
+    const starter = assignmentsOf(state, state.userTeamId).find(
+      (a) => ratings[a.playerId] !== undefined,
+    );
+    const absent = assignmentsOf(state, state.userTeamId).find(
+      (a) => ratings[a.playerId] === undefined,
+    );
+    if (!starter || !absent) throw new Error("출전·비출전 선수를 못 골랐다");
+    return { state, matchId: match.id, starter, absent, anchor: ratings[starter.playerId]! };
+  };
+
+  const famOf = (state: ReturnType<typeof settled>["state"], playerId: string) =>
+    assignmentsOf(state, state.userTeamId).find((a) => a.playerId === playerId)!.familiarity;
+
+  it("비출전 선수는 적응도도 능력치도 못 가져간다 — 평점과 같은 확인을 받는다", () => {
+    const { state, matchId, starter, absent, anchor } = settled();
+    const beforeStarter = famOf(state, starter.playerId);
+    const beforeAbsent = famOf(state, absent.playerId);
+    const absentBefore = structuredClone(playerById(state, absent.playerId));
+
+    const { applied, skipped } = settleMatchRating(state, matchId, [
+      { playerId: starter.playerId, rating: anchor, drill: 8, attribute: "stamina" },
+      { playerId: absent.playerId, rating: 9, drill: 8, attribute: "stamina", attributeStep: -1 },
+    ]);
+
+    expect(applied).toBe(1);
+    expect(skipped).toBe(1);
+    expect(famOf(state, starter.playerId), "출전 선수가 아무것도 못 받았다").toBeGreaterThan(
+      beforeStarter,
+    );
+    expect(famOf(state, absent.playerId), "벤치가 적응도를 가져갔다").toBe(beforeAbsent);
+    // 능력치는 성장 곡선이 캐리로 삼킬 수 있어 값만 봐서는 부족하다 — 선수 전체가 그대로여야 한다
+    expect(playerById(state, absent.playerId), "벤치가 능력치를 가져갔다").toEqual(absentBefore);
+  });
+
+  it("같은 결산을 두 번 불러도 적응도는 한 번만 오른다", () => {
+    const { state, matchId, starter, anchor } = settled();
+    const entries = [{ playerId: starter.playerId, rating: anchor, drill: 8 }];
+
+    const first = settleMatchRating(state, matchId, entries);
+    expect(first.already).toBe(false);
+    expect(first.applied).toBe(1);
+    const once = famOf(state, starter.playerId);
+
+    const again = settleMatchRating(state, matchId, entries);
+    expect(again.already, "표식이 안 섰다").toBe(true);
+    expect(again.applied).toBe(0);
+    expect(famOf(state, starter.playerId), "적응도가 두 번 올랐다").toBe(once);
   });
 });

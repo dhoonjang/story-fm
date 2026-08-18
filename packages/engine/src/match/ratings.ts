@@ -105,6 +105,14 @@ export interface RatingEntry {
   note?: string;
 }
 
+/** 한 선수에 대한 경기 결산 한 줄 — 평점·적응도·능력치가 같은 판정에서 나온다 */
+export interface MatchSettlementEntry extends RatingEntry {
+  /** 이 경기가 남긴 전술 적응도 (`MATCH_FAMILIARITY_MIN`~`MATCH_FAMILIARITY_MAX`) */
+  drill?: number;
+  attribute?: AttributeAxis | null;
+  attributeStep?: number | null;
+}
+
 /**
  * LLM 평점 반영 — **코어는 가능한 판정만 받는다.**
  *
@@ -131,6 +139,9 @@ export const MATCH_FAMILIARITY_MAX = 8;
  * 시계가 정하는 셈이 된다.
  *
  * 판정이 없으면(mock·실패) 그 경기는 적응도를 남기지 않는다.
+ *
+ * ⚠️ **순수 적용기다.** 출전 확인도 한 번 확인(`rated` 표식)도 걸지 않는다 —
+ * 그 둘은 `settleMatchRating`이 건다. 경기 결산에서는 그 입구로만 부른다.
  *
  * @param entries 선수 id → 그 경기에서 얻은 적응도
  * @returns 실제로 반영된 인원
@@ -170,6 +181,9 @@ export function applyMatchFamiliarity(
  * 축 제한은 없고(경기는 무엇이든 겪는다) 인원 상한만 다르다 — 90분은 열한 명 모두에게
  * 무언가를 남기므로 `MATCH_ATTR_CAP`까지.
  *
+ * ⚠️ **순수 적용기다.** 출전 확인도 한 번 확인(`rated` 표식)도 걸지 않는다 —
+ * 그 둘은 `settleMatchRating`이 건다. 경기 결산에서는 그 입구로만 부른다.
+ *
  * @returns 감독에게 보여줄 요약 줄
  */
 export function applyMatchAttributes(
@@ -205,19 +219,26 @@ export function applyMatchRatings(
   state: GameState,
   matchId: string,
   entries: readonly RatingEntry[],
-): { applied: number; skipped: number } {
+): { applied: number; skipped: number; already: boolean } {
   const match = state.matches.find((m) => m.id === matchId);
-  if (!match?.result?.ratings) return { applied: 0, skipped: entries.length };
+  if (!match?.result?.ratings) return { applied: 0, skipped: entries.length, already: false };
+  if (match.result.rated === true) {
+    return { applied: 0, skipped: entries.length, already: true };
+  }
+  // 자르는 기준은 **호출 진입 시점의 앵커**다 — 루프가 갱신하는 `ratings`를 보면
+  // 같은 호출 안의 두 번째 줄이 앞줄 위에서 다시 ±RATING_BAND를 얻는다
+  const anchors = { ...match.result.ratings };
   const ratings = { ...match.result.ratings };
   const notes = { ...(match.result.ratingNotes ?? {}) };
   // 친선 평점은 경기에만 남는다 — 앵커가 시즌 합계에 안 들어갔으니 보정분도 안 들어간다
   const friendly = isFriendly(match);
+  const seen = new Set<string>();
   let applied = 0;
   let skipped = 0;
 
   for (const entry of entries) {
-    const current = ratings[entry.playerId];
-    if (current === undefined || !Number.isFinite(entry.rating)) {
+    const anchor = anchors[entry.playerId];
+    if (anchor === undefined || !Number.isFinite(entry.rating) || seen.has(entry.playerId)) {
       skipped += 1;
       continue;
     }
@@ -226,19 +247,18 @@ export function applyMatchRatings(
       skipped += 1;
       continue;
     }
-    // 앵커는 이미 밴드를 반영해 저장돼 있을 수 있으므로 원본이 아니라 현재값 기준이
-    // 아니라 **저장된 앵커**에서 재도 무방하다 — 증감 정산이 멱등이라 값이 안 튄다
+    seen.add(entry.playerId);
     const bounded =
       Math.round(
         Math.min(
           RATING_MAX,
           Math.max(
             RATING_MIN,
-            Math.min(current + RATING_BAND, Math.max(current - RATING_BAND, entry.rating)),
+            Math.min(anchor + RATING_BAND, Math.max(anchor - RATING_BAND, entry.rating)),
           ),
         ) * 10,
       ) / 10;
-    const delta = bounded - current;
+    const delta = bounded - anchor;
     ratings[entry.playerId] = bounded;
     if (entry.note) notes[entry.playerId] = entry.note.slice(0, 120);
     if (delta !== 0 && !friendly) {
@@ -252,6 +272,65 @@ export function applyMatchRatings(
     ...match.result,
     ratings,
     ...(Object.keys(notes).length > 0 ? { ratingNotes: notes } : {}),
+    // 한 명도 못 받은 호출은 표식을 세우지 않는다 — 모델이 id를 고쳐 다시 부를 자리다
+    ...(applied > 0 ? { rated: true } : {}),
   };
-  return { applied, skipped };
+  return { applied, skipped, already: false };
+}
+
+/** 이 경기의 결산이 이미 장부를 움직였나 — 재시도 가드와 도구 핸들러가 보는 표식 */
+export function matchRated(state: GameState, matchId: string): boolean {
+  return state.matches.find((m) => m.id === matchId)?.result?.rated === true;
+}
+
+/**
+ * 경기 결산의 **유일한 입구** — 평점·전술 적응도·능력치를 한 표식(`MATCH.result.rated`)
+ * 아래 한 번만 반영한다.
+ *
+ * 도구 루프는 한 턴에 같은 도구를 여러 번 부를 수 있으므로(agents.md §4), 두 번째
+ * 호출은 `already`로 답하고 아무것도 하지 않는다. 출전 확인(`MATCH.result.ratings`에
+ * 자리가 있는 id)은 평점만이 아니라 적응도·능력치도 함께 받는다 — 벤치에 앉아 있던
+ * 선수가 90분을 뛴 것과 같은 것을 가져가면 안 된다.
+ */
+export function settleMatchRating(
+  state: GameState,
+  matchId: string,
+  entries: readonly MatchSettlementEntry[],
+): { applied: number; skipped: number; already: boolean; lines: string[] } {
+  if (matchRated(state, matchId)) {
+    return { applied: 0, skipped: entries.length, already: true, lines: [] };
+  }
+  const played = state.matches.find((m) => m.id === matchId)?.result?.ratings ?? {};
+  const seen = new Set<string>();
+  const accepted: MatchSettlementEntry[] = [];
+  let dropped = 0;
+  for (const entry of entries) {
+    if (played[entry.playerId] === undefined || seen.has(entry.playerId)) {
+      dropped += 1;
+      continue;
+    }
+    seen.add(entry.playerId);
+    accepted.push(entry);
+  }
+
+  const rated = applyMatchRatings(state, matchId, accepted);
+  // 표식이 서지 않은 호출에 적응도·능력치를 흘리면 다시 부를 때 그 둘만 두 번 쌓인다
+  if (rated.applied === 0) {
+    return { applied: 0, skipped: dropped + rated.skipped, already: rated.already, lines: [] };
+  }
+
+  const drills: { playerId: string; gain: number }[] = [];
+  for (const entry of accepted) {
+    if (entry.drill !== undefined) drills.push({ playerId: entry.playerId, gain: entry.drill });
+  }
+  applyMatchFamiliarity(state, drills);
+  const lines = applyMatchAttributes(
+    state,
+    accepted.map((e) => ({
+      playerId: e.playerId,
+      attribute: e.attribute ?? null,
+      attributeStep: e.attributeStep ?? 1,
+    })),
+  );
+  return { applied: rated.applied, skipped: dropped + rated.skipped, already: false, lines };
 }
