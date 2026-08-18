@@ -1,13 +1,21 @@
 import { describe, expect, it } from "vitest";
 import {
+  groupOf,
+  openRenewal,
   playerCard,
   playersOf,
   rankByName,
   setCaptain,
+  setTransferList,
+  startMatch,
+  substitutePlayer,
   userPlayers,
+  userSide,
+  type GameState,
   type NamedItem,
 } from "@story-fm/engine";
-import { createTestGame } from "./helpers";
+import type { GamePlayer } from "@story-fm/domain";
+import { advanceToMatchday, createTestGame } from "./helpers";
 
 /**
  * 이름 지목 — 감독은 카탈로그 표기를 모른다. "엔더슨"이라 불러도 "앤더슨"에
@@ -164,5 +172,68 @@ describe("카탈로그 — 실제 세계에서", () => {
     const res = setCaptain(state, stranger.name);
     expect(res.ok).toBe(false);
     expect(res.message).toContain("우리 팀 선수가 아닙니다");
+  });
+
+  /**
+   * 시장·경기 스킬도 이름을 받는다. 다만 **상태에 남는 것은 언제나 id다** —
+   * 협상 id·`gamePlayerId`·장부의 actors에 감독이 부른 이름이 박히면 세이브가
+   * 그 선수를 다시 찾지 못한다.
+   */
+  const calledBy = (p: GamePlayer): string => p.name.replace(/\s/g, "");
+  /** 붙여 쓴 채로도 그 풀에서 이 선수 하나에만 닿는가 */
+  const reaches = (p: GamePlayer, pool: readonly GamePlayer[]): boolean =>
+    p.name.includes(" ") && rankByName(calledBy(p), pool).best?.id === p.id;
+  const namedInWorld = (game: GameState): GamePlayer =>
+    userPlayers(game).find((p) => reaches(p, game.players))!;
+
+  it("이적 리스트도 이름으로 올린다 — 등재되는 것은 id다", () => {
+    const game = createTestGame(7);
+    const mine = namedInWorld(game);
+    const res = setTransferList(game, { playerId: calledBy(mine), listed: true });
+    expect(res.ok, res.message).toBe(true);
+    expect(game.transferList.map((l) => l.gamePlayerId)).toContain(mine.id);
+  });
+
+  it("재계약을 이름으로 열어도 협상에 남는 것은 id다", () => {
+    const game = createTestGame(7);
+    const mine = namedInWorld(game);
+    const said = calledBy(mine);
+    const res = openRenewal(game, { playerId: said, weeklyWage: 100_000, years: 3 });
+    expect(res.ok, res.message).toBe(true);
+    const negotiation = game.negotiations.at(-1)!;
+    expect(negotiation.gamePlayerId).toBe(mine.id);
+    expect(negotiation.id).toContain(mine.id);
+    expect(negotiation.id).not.toContain(said);
+  });
+
+  it("교체도 이름으로 하고, 장부에 남는 actors는 id다", () => {
+    const game = createTestGame(7);
+    advanceToMatchday(game);
+    const started = startMatch(game);
+    expect(started.ok, started.message).toBe(true);
+    const match = game.pendingMatch!;
+    const ours = userSide(game) === "home" ? match.ledger.home : match.ledger.away;
+    const roster = userPlayers(game);
+    const byId = (id: string): GamePlayer | undefined => roster.find((p) => p.id === id);
+    const pickable = (ids: readonly string[]): GamePlayer[] =>
+      ids.flatMap((id) => {
+        const p = byId(id);
+        return p && reaches(p, roster) ? [p] : [];
+      });
+    const out = pickable(ours.onPitch).find((p) => groupOf(p) !== "GK")!;
+    const incoming = pickable(ours.bench)[0]!;
+
+    const res = substitutePlayer(game, { out: calledBy(out), in: calledBy(incoming) });
+    expect(res.ok, res.message).toBe(true);
+    const logged = match.ledger.events.filter((e) => e.type === "substitution").at(-1)!;
+    expect(logged.actors).toEqual([out.id, incoming.id]);
+  });
+
+  it("갈리는 이름은 상태를 바꾸지 않고 후보를 돌려준다", () => {
+    const game = createTestGame(7);
+    const res = setTransferList(game, { playerId: "마르티네스", listed: true });
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain("여러 선수와 맞습니다");
+    expect(game.transferList).toHaveLength(0);
   });
 });
