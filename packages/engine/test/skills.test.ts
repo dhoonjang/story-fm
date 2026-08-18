@@ -12,15 +12,21 @@ import {
   weightSlotOf,
 } from "@story-fm/domain";
 import {
+  MATCHDAY_BENCH,
   applyNarrativeEvent,
   applyTalkToPlayer,
   applyTeamTalk,
   assignmentsOf,
   buildOfficeViews,
   grantManagerXP,
+  canRegisterFor,
   isAvailable,
   isInjured,
+  lineupSignature,
   playerById,
+  reservePlayers,
+  squadLevelOf,
+  startingIdsOf,
   setCaptain,
   setLineup,
   setPlayerInstruction,
@@ -332,6 +338,112 @@ describe("set_lineup은 조정해 둔 좌표를 건드리지 않는다", () => {
     expect(setTactics(state, { formation: "3-5-2" }).ok).toBe(true);
     const after = snapshot(state);
     expect(after).toEqual(before);
+  });
+});
+
+describe("라인업 스킬은 검증 뒤에 적용한다 (team.md §6)", () => {
+  /**
+   * 세계 하나를 이 describe가 함께 쓴다 (AGENTS.md §5 — `createTestGame`은 한 번에
+   * 1초다). 반려 케이스는 **상태를 바꾸지 않는 것이 곧 검증 대상**이라 앞뒤 순서에
+   * 기대지 않고, 기준점은 케이스마다 그 자리에서 다시 읽는다.
+   */
+  const state = createTestGame();
+  const promotable = () =>
+    reservePlayers(state, state.userTeamId).find(
+      (p) => canRegisterFor(state, p, state.userTeamId).ok && isAvailable(state, p.id),
+    );
+  const benchIds = () => assignmentsOf(state, state.userTeamId, "bench").map((a) => a.playerId);
+
+  it("배치가 반려되면 승격도 남지 않는다", () => {
+    const target = promotable();
+    expect(target, "승격 가능한 2군이 없다").toBeDefined();
+    const before = lineupSignature(state);
+
+    // 승격 자체는 옳고 배치가 열 명이라 걸린다 — 예전엔 승격만 적용된 채 반려됐다
+    const res = setLineup(state, {
+      starting: currentLineup(state).slice(0, 10),
+      squadLevels: [{ playerId: target!.id, level: "first" }],
+    });
+    expect(res.ok).toBe(false);
+    expect(squadLevelOf(target!)).toBe("reserve");
+    expect(lineupSignature(state)).toBe(before);
+  });
+
+  it("같은 요청이 배치에 앉힌 선수는 2군으로 내리지 못한다", () => {
+    const lineup = currentLineup(state);
+    const starter = userPlayers(state).find((p) => p.id === lineup[3]!.playerId)!;
+    const res = setLineup(state, {
+      starting: lineup,
+      squadLevels: [{ playerId: starter.id, level: "reserve" }],
+    });
+    expect(res.ok).toBe(false);
+    // 강등이 배치보다 뒤라, 통과시켰다면 선발이 열 명으로 남았다
+    expect(squadLevelOf(starter)).toBe("first");
+    expect(startingIdsOf(state)).toContain(starter.id);
+    expect(startingIdsOf(state)).toHaveLength(11);
+  });
+
+  it("벤치는 정원까지만 — 넘으면 반려하고 지금 벤치는 그대로다", () => {
+    const lineup = currentLineup(state);
+    const spare = userPlayers(state)
+      .filter((p) => squadLevelOf(p) === "first" && !lineup.some((s) => s.playerId === p.id))
+      .slice(0, MATCHDAY_BENCH + 1)
+      .map((p) => ({ playerId: p.id }));
+    expect(spare.length, "정원을 넘길 만큼의 비선발이 없다").toBe(MATCHDAY_BENCH + 1);
+    const before = benchIds();
+
+    expect(setLineup(state, { starting: lineup, bench: spare }).ok).toBe(false);
+    expect(benchIds()).toEqual(before);
+    expect(setLineup(state, { starting: lineup, bench: spare.slice(0, MATCHDAY_BENCH) }).ok).toBe(
+      true,
+    );
+    expect(benchIds()).toHaveLength(MATCHDAY_BENCH);
+  });
+
+  it("벤치를 생략하면 지금 벤치가 남고, 빈 배열은 비운다", () => {
+    const lineup = currentLineup(state);
+    const kept = benchIds();
+    expect(kept.length).toBeGreaterThan(0);
+
+    expect(setLineup(state, { starting: lineup }).ok).toBe(true);
+    expect(benchIds()).toEqual(kept);
+
+    expect(setLineup(state, { starting: lineup, bench: [] }).ok).toBe(true);
+    expect(benchIds()).toEqual([]);
+  });
+
+  it("승격과 배치가 한 요청으로 간다 — 2군 선수가 그대로 선발에 선다", () => {
+    const target = promotable();
+    expect(target, "승격 가능한 2군이 없다").toBeDefined();
+    const lineup = currentLineup(state);
+    const out = lineup.findIndex((s) => positionGroupOf(s.position) !== "GK");
+    const next = lineup.map((s, i) => (i === out ? { playerId: target!.id } : s));
+
+    const res = setLineup(state, {
+      starting: next,
+      squadLevels: [{ playerId: target!.id, level: "first" }],
+    });
+    expect(res.ok, res.message).toBe(true);
+    expect(squadLevelOf(target!)).toBe("first");
+    expect(startingIdsOf(state)).toContain(target!.id);
+  });
+
+  it("자리를 옮기고 역할이 반려되면 결과로 알린다 — 옮긴 자리를 되돌리지 않는다", () => {
+    const mover = assignmentsOf(state, state.userTeamId, "starting").find(
+      (a) => positionGroupOf(a.position) === "DF",
+    )!;
+    // 리베로는 센터백의 역할이라 CAM에는 없다 — 자리는 옮기고 역할만 걸린다
+    const res = setPlayerTactic(state, {
+      playerId: mover.playerId,
+      position: "CAM",
+      role: "libero",
+    });
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain("반려");
+    const after = assignmentsOf(state, state.userTeamId).find(
+      (a) => a.playerId === mover.playerId,
+    )!;
+    expect(after.position).toBe("CAM");
   });
 });
 
@@ -1016,8 +1128,8 @@ describe("역할 기억 — 벤치를 다녀와도 감독의 결정이 남는다
     expect(assignmentOf(state, cb.playerId)!.role).toBe("bench");
     expect(assignmentOf(state, cb.playerId)!.roleId).toBeUndefined();
 
-    // 예비 — 배치째 사라진다
-    expect(setLineup(state, { starting: without(state, cb.playerId) }).ok).toBe(true);
+    // 예비 — 벤치 지정을 거두면 배치째 사라진다 (생략은 "지금 벤치 그대로"다 · team.md §6)
+    expect(setLineup(state, { starting: without(state, cb.playerId), bench: [] }).ok).toBe(true);
     expect(assignmentOf(state, cb.playerId)).toBeUndefined();
 
     // 다시 선발 — 그 자리의 기본 역할이 아니라 마지막에 맡긴 역할로 선다

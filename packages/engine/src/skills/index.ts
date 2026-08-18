@@ -1,6 +1,7 @@
 import { MANAGER_ATTRIBUTE_KO } from "@story-fm/domain";
 import type {
   BoardPoint,
+  GamePlayer,
   ManagerAttributes,
   DrilledTactics,
   MarketCard,
@@ -51,7 +52,12 @@ import { settleRoleCost, shelveFamiliarity, unshelveFamiliarity } from "./famili
 import { recallRole, rememberRole } from "./role-memory";
 import { addDays, diffDays, sortEntries, squadReturnOf } from "../competition/calendar";
 import { clampForm, moraleToForm } from "../squad/form";
-import { canRegisterFor, registrationLine, squadRegistrationOf } from "../squad/registration";
+import {
+  canRegisterAllFor,
+  canRegisterFor,
+  registrationLine,
+  squadRegistrationOf,
+} from "../squad/registration";
 import {
   SCOUT_REPEAT_LIMIT,
   completedScoutReports,
@@ -108,6 +114,14 @@ export interface SkillResult {
   payload?: unknown;
   /** 결이 좋은가 — 대화형 스킬의 칩 색 (펼치지 않아도 알게) */
   tone?: "good" | "bad";
+  /**
+   * **아무것도 달라지지 않은 성공** — 이미 그 자리, 이미 그 층.
+   *
+   * 부르는 쪽은 "바꾼 것"과 "이미 그랬던 것"을 갈라야 하는데, 반려 문구를
+   * `includes("이미")`로 뒤지면 문장을 다듬는 것만으로 판정이 뒤집힌다
+   * (→ docs/data/player.md §3.1).
+   */
+  unchanged?: boolean;
 }
 
 /**
@@ -152,6 +166,8 @@ export function setSquadLevel(
   if (squadLevelOf(player) === input.level) {
     return {
       ok: true,
+      // 바뀐 것이 없다는 사실은 **반환값이** 말한다 — 부르는 쪽이 문구를 뒤지지 않게
+      unchanged: true,
       message: `${player.name}은(는) 이미 ${input.level === "first" ? "1군" : "2군"}입니다`,
     };
   }
@@ -168,12 +184,7 @@ export function setSquadLevel(
   }
 
   const first = userPlayers(state).filter((p) => squadLevelOf(p) === "first");
-  if (first.length <= MATCHDAY_SQUAD) {
-    return {
-      ok: false,
-      message: `1군은 매치데이 명단(선발 11 + 벤치 9)을 채울 ${MATCHDAY_SQUAD}명 이상이어야 합니다`,
-    };
-  }
+  if (first.length <= MATCHDAY_SQUAD) return { ok: false, message: matchdaySquadFloor() };
   player.squadLevel = "reserve";
   const tactics = userTactics(state);
   /**
@@ -186,7 +197,25 @@ export function setSquadLevel(
   tactics.assignments = tactics.assignments.filter((a) => a.playerId !== player.id);
   if (player.isCaptain) player.isCaptain = false;
   pushNarrative(state, `${player.name} 2군 이동`, 2);
-  return { ok: true, message: `${player.name}을(를) 2군으로 이동했습니다` };
+  /**
+   * **배치에서 빠지는 것까지 결과로 말한다** (→ docs/data/team.md §6). 2군은 배치를
+   * 갖지 않으므로 내리면 판에서도 빠지는데, 조용히 빼면 주전을 내린 감독이 열 명짜리
+   * 선발을 모른 채 경기를 맞는다.
+   */
+  const startingLeft = tactics.assignments.filter((a) => a.role === "starting").length;
+  const note =
+    dropped?.role === "starting"
+      ? ` — 선발에서 빠져 선발이 ${startingLeft}명입니다`
+      : dropped?.role === "bench"
+        ? " — 매치데이 벤치에서 함께 빠집니다"
+        : "";
+  return { ok: true, message: `${player.name}을(를) 2군으로 이동했습니다${note}` };
+}
+
+/** 1군 인원 하한을 말하는 한 문장 — 두 스킬이 같은 말을 해야 감독이 같은 규칙으로 읽는다 */
+function matchdaySquadFloor(): string {
+  const starters = MATCHDAY_SQUAD - MATCHDAY_BENCH;
+  return `1군은 매치데이 명단(선발 ${starters} + 벤치 ${MATCHDAY_BENCH})을 채울 ${MATCHDAY_SQUAD}명 이상이어야 합니다`;
 }
 
 // 체력 클램프는 도메인이 단일 소스 (clampCondition)
@@ -588,11 +617,16 @@ function lineupChanges(
 /**
  * 라인업 확정 — v6에서는 TACTIC_ASSIGNMENT를 갱신한다 (팀 엔티티에 배열이 없다).
  * 선발 11명·GK 1명·부상/정지 제외를 강제하고, 기존 적응도는 이어받는다.
+ *
+ * ⚠️ **검증이 전부 끝난 뒤에 적용한다** (→ docs/data/team.md §6). 승격을 먼저
+ * 적용하고 배치를 나중에 검증하던 때는 반려된 요청이 승격만 남겼다 — GM 경로는 턴이
+ * 끝날 때 저장하므로, "반려했습니다"를 읽은 감독의 스쿼드가 이미 달라져 있었다.
  */
 export function setLineup(
   state: GameState,
   input: {
     starting: Array<string | LineupSlotInput>;
+    /** 생략하면 **지금 벤치를 지킨다** — 빈 배열이 "비운다"이고 없는 것은 "그대로"다 */
     bench?: Array<string | LineupSlotInput>;
     /**
      * 1·2군 이동을 **같은 요청으로** 처리한다 (승격 → 배치 → 강등 순).
@@ -602,41 +636,59 @@ export function setLineup(
     squadLevels?: Array<{ playerId: string; level: "first" | "reserve" }>;
   },
 ): SkillResult {
-  // 승격 먼저 — 2군 선수를 선발에 넣으려면 올라와 있어야 한다
-  const levelNotes: string[] = [];
-  /** 실제로 층을 옮긴 선수만 — 이미 그 층이면 `setSquadLevel`이 성공으로 답하고 아무것도 안 한다 */
-  const levelMoved: Record<"first" | "reserve", string[]> = { first: [], reserve: [] };
-  const applyLevel = (move: { playerId: string; level: "first" | "reserve" }): SkillResult => {
-    const before = pickOurPlayer(state, move.playerId);
-    const changes = before.ok && squadLevelOf(before.player) !== move.level;
-    const res = setSquadLevel(state, move);
-    if (!res.ok) return res;
-    levelNotes.push(res.message);
-    if (changes && before.ok) levelMoved[move.level].push(before.player.name);
-    return res;
-  };
-  for (const move of input.squadLevels ?? []) {
-    if (move.level !== "first") continue;
-    const res = applyLevel(move);
-    if (!res.ok) return res;
-  }
-
   const tactics = userTactics(state);
   const norm = (x: string | LineupSlotInput): LineupSlotInput =>
     typeof x === "string" ? { playerId: x } : x;
+
+  // ── 검증 ───────────────────────────────────────────────
+  // 여기서는 아무것도 바꾸지 않는다. 하나라도 걸리면 상태는 부른 그대로다.
+
+  /** 1·2군 이동 대상 — **실제로 층을 옮기는 선수만** (이미 그 층이면 아무 일도 없다) */
+  const promoting: GamePlayer[] = [];
+  const demoting: GamePlayer[] = [];
+  for (const move of input.squadLevels ?? []) {
+    const pick = pickOurPlayer(state, move.playerId);
+    if (!pick.ok) return pick;
+    if (squadLevelOf(pick.player) === move.level) continue;
+    (move.level === "first" ? promoting : demoting).push(pick.player);
+  }
+  const promotingIds = new Set(promoting.map((p) => p.id));
+  const demotingIds = new Set(demoting.map((p) => p.id));
+
   // 이름으로 부른 자리를 먼저 id로 바꾼다 — 아래 검증(중복·2군·부상)이 전부 id로 돈다
-  const picked = [...input.starting, ...(input.bench ?? [])].map((x) => ourSlot(state, norm(x)));
-  const failures = picked.filter((p) => typeof p === "string");
-  if (failures.length > 0) return { ok: false, message: failures.join(" · ") };
-  const slots = picked.filter((p): p is LineupSlotInput => typeof p !== "string");
-  const starting = slots.slice(0, input.starting.length);
-  const bench = slots.slice(input.starting.length);
+  const resolve = (slots: Array<string | LineupSlotInput>) =>
+    slots.map((x) => ourSlot(state, norm(x)));
+  const startingPicked = resolve(input.starting);
+  const startingFailed = startingPicked.filter((p) => typeof p === "string");
+  if (startingFailed.length > 0) return { ok: false, message: startingFailed.join(" · ") };
+  const starting = startingPicked.filter((p): p is LineupSlotInput => typeof p !== "string");
+  const startingIds = new Set(starting.map((s) => s.playerId));
+
+  /**
+   * **벤치를 생략하면 지금 벤치를 지킨다.** 자리 하나만 바꾸는 지시가 벤치를 통째로
+   * 지우면 다음 경기의 교체 카드가 통째로 사라진다. 이어받을 때는 이번에 선발이 된
+   * 선수와 이번에 내리는 선수를 뺀다 — 그 둘은 감독이 방금 벤치에서 뺀 것이다.
+   */
+  const inheritedBench = tactics.assignments
+    .filter(
+      (a) =>
+        a.role === "bench" &&
+        !startingIds.has(a.playerId) &&
+        !demotingIds.has(a.playerId) &&
+        // 팀을 떠난 선수의 배치가 남아 있어도 그것 때문에 저장이 막히지는 않는다
+        userPlayerById(state, a.playerId) !== undefined,
+    )
+    .map((a) => ({ playerId: a.playerId, position: a.position }));
+  const benchPicked = resolve(input.bench ?? inheritedBench);
+  const benchFailed = benchPicked.filter((p) => typeof p === "string");
+  if (benchFailed.length > 0) return { ok: false, message: benchFailed.join(" · ") };
+  const bench = benchPicked.filter((p): p is LineupSlotInput => typeof p !== "string");
 
   if (starting.length !== 11) return { ok: false, message: "선발은 정확히 11명이어야 합니다" };
-  if (new Set(starting.map((s) => s.playerId)).size !== 11) {
+  if (startingIds.size !== 11) {
     return { ok: false, message: "선발에 중복 선수가 있습니다" };
   }
-  const overlap = bench.filter((b) => starting.some((s) => s.playerId === b.playerId));
+  const overlap = bench.filter((b) => startingIds.has(b.playerId));
   if (overlap.length > 0) {
     return {
       ok: false,
@@ -646,11 +698,16 @@ export function setLineup(
   if (new Set(bench.map((b) => b.playerId)).size !== bench.length) {
     return { ok: false, message: "벤치에 중복 선수가 있습니다" };
   }
+  // 벤치 정원 — 화면·라우트와 같은 값 하나를 읽는다 (→ docs/data/team.md §6)
+  if (bench.length > MATCHDAY_BENCH) {
+    return { ok: false, message: `벤치는 ${MATCHDAY_BENCH}명까지입니다 (${bench.length}명)` };
+  }
 
   const all = [...starting, ...bench];
+  // 이 요청이 함께 올리는 선수는 이미 1군인 셈으로 본다 — 승격은 배치보다 앞에 적용된다
   const reserves = all.filter((s) => {
     const player = userPlayerById(state, s.playerId);
-    return player && squadLevelOf(player) === "reserve";
+    return player && squadLevelOf(player) === "reserve" && !promotingIds.has(s.playerId);
   });
   if (reserves.length > 0) {
     return {
@@ -663,8 +720,9 @@ export function setLineup(
   // 기존 적응도·지시는 이어받는다 (배치가 바뀌어도 학습이 사라지지 않게)
   const prev = new Map(tactics.assignments.map((a) => [a.playerId, a]));
 
-  // 명시된 포지션 코드는 먼저 검증한다 (좌표는 아래에서 정해진다)
-  const unknownPos = starting
+  // 명시된 포지션 코드는 먼저 검증한다 — **벤치도 함께**. 벤치 코드는 좌표를 갖지
+  // 않을 뿐 배치에 그대로 적히므로, 안 보면 알 수 없는 코드가 명단에 남는다
+  const unknownPos = all
     .map((s) => s.position?.toUpperCase())
     .filter((code): code is string => code !== undefined && !positionGroupOf(code));
   if (unknownPos.length > 0) {
@@ -714,6 +772,51 @@ export function setLineup(
       ok: false,
       message: `출장 정지 선수는 선발 불가: ${suspended.map((s) => playerName(state, s.playerId)).join(", ")}`,
     };
+  }
+
+  /**
+   * 승격 가능 여부는 **누적으로** 잰다 — 한 명씩 따로 재면 남은 한 자리에 둘이 함께
+   * 들어간다고 답한다. 실제로 올리는 것은 검증이 다 끝난 뒤다.
+   */
+  if (promoting.length > 0) {
+    const allowed = canRegisterAllFor(state, promoting, state.userTeamId);
+    if (!allowed.ok) {
+      return { ok: false, message: `${playerName(state, allowed.playerId)}: ${allowed.reason}` };
+    }
+  }
+  /**
+   * **이번 배치에 앉힌 선수는 이번에 내리지 못한다.** 강등은 배치보다 뒤에 적용되므로
+   * 그냥 통과시키면 방금 세운 선발에서 다시 빠져 열 명짜리 라인업이 남는다.
+   */
+  const seated = demoting.filter(
+    (p) => startingIds.has(p.id) || bench.some((b) => b.playerId === p.id),
+  );
+  if (seated.length > 0) {
+    return {
+      ok: false,
+      message: `이번 배치에 든 선수는 2군으로 내릴 수 없습니다: ${seated.map((p) => p.name).join(", ")}`,
+    };
+  }
+  if (demoting.length > 0) {
+    const firstAfter =
+      userPlayers(state).filter((p) => squadLevelOf(p) === "first").length +
+      promoting.length -
+      demoting.length;
+    if (firstAfter < MATCHDAY_SQUAD) {
+      return { ok: false, message: matchdaySquadFloor() };
+    }
+  }
+
+  // ── 적용 ───────────────────────────────────────────────
+  // 여기서부터는 실패하지 않는다 — 실패할 수 있는 것은 위에서 전부 걸렀다.
+  const levelNotes: string[] = [];
+  const levelMoved: Record<"first" | "reserve", string[]> = { first: [], reserve: [] };
+  // 승격 먼저 — 2군 선수를 선발에 넣으려면 올라와 있어야 한다
+  for (const player of promoting) {
+    const res = setSquadLevel(state, { playerId: player.id, level: "first" });
+    if (!res.ok) return res; // 검증이 놓친 것 — 배치는 아직 손대지 않았다
+    levelNotes.push(res.message);
+    levelMoved.first.push(player.name);
   }
 
   // 처음 배치되는 선수(2군에서 올라왔거나 갓 영입된)는 이 전술을 훈련한 적이 없다.
@@ -814,10 +917,11 @@ export function setLineup(
   tactics.spec.formation = shapeOf(startPoints);
 
   // 강등은 배치 뒤에 — 배치에서 빠진 뒤라야 2군으로 내려도 라인업이 안 깨진다
-  for (const move of input.squadLevels ?? []) {
-    if (move.level !== "reserve") continue;
-    const res = applyLevel(move);
-    if (!res.ok) return res;
+  for (const player of demoting) {
+    const res = setSquadLevel(state, { playerId: player.id, level: "reserve" });
+    if (!res.ok) return res; // 검증이 놓친 것 — 위에서 인원과 배치를 이미 쟀다
+    levelNotes.push(res.message);
+    levelMoved.reserve.push(player.name);
   }
   const items = [...changes.items];
   if (levelMoved.first.length > 0) {
@@ -923,10 +1027,27 @@ export function setPlayerTactic(
   const notes: string[] = [];
   /** 항목은 하위 스킬이 각자 낸 것을 잇는다 — 세 조각이 한 줄로 엉키지 않게 */
   const items: SkillBriefItem[] = [];
+  /** 이미 바꾼 것이 있는가 — 있으면 뒤따르는 반려는 되돌리지 않고 결과로 적는다 */
+  let changed = false;
   const take = (res: SkillResult) => {
     notes.push(res.message);
     items.push(...(res.brief?.items ?? []));
+    if (res.unchanged !== true) changed = true;
   };
+  /**
+   * **부분 성공은 반려가 아니라 결과다** (→ docs/data/player.md §3.1).
+   * 아직 아무것도 안 바꿨으면 통째로 반려하고, 이미 바꿨으면 반려 사유를 결과에 싣는다
+   * — `ok: false`로 답하면 화면이 칩도 말풍선도 세우지 않아, 자리는 옮겨졌는데
+   * 감독은 아무 일도 없었다고 읽는다.
+   */
+  const rejected: string[] = [];
+  /** 반려를 어디로 보낼지 — 통째로 반려면 그 결과를, 결과에 실을 것이면 null을 낸다 */
+  const reject = (res: SkillResult): SkillResult | null => {
+    if (!changed) return res;
+    rejected.push(res.message);
+    return null;
+  };
+
   if (input.position !== undefined || input.point !== undefined || input.move !== undefined) {
     const res = movePlayerSlot(state, {
       playerId: input.playerId,
@@ -934,26 +1055,36 @@ export function setPlayerTactic(
       ...(input.point ? { point: input.point } : {}),
       ...(input.move ? { move: input.move } : {}),
     });
-    // 이미 그 자리면 넘어간다 — 역할·지시만 바꾸는 호출을 막지 않는다
-    if (!res.ok && !res.message.includes("이미")) return res;
-    if (res.ok) take(res);
+    if (!res.ok) {
+      const stop = reject(res);
+      if (stop) return stop;
+    } else take(res);
   }
   if (input.role !== undefined) {
     const res = setPlayerRole(state, { playerId: input.playerId, role: input.role });
-    if (!res.ok) return res;
-    take(res);
+    if (!res.ok) {
+      const stop = reject(res);
+      if (stop) return stop;
+    } else take(res);
   }
   if (input.instruction !== undefined) {
     const res = setPlayerInstruction(state, { playerId: input.playerId, ...input.instruction });
-    if (!res.ok) return res;
-    take(res);
+    if (!res.ok) {
+      const stop = reject(res);
+      if (stop) return stop;
+    } else take(res);
   }
   if (notes.length === 0) return { ok: false, message: "바꿀 것을 하나는 지정해야 합니다" };
+  if (rejected.length > 0) {
+    notes.push(`반려 ${rejected.join(" · ")}`);
+    items.push(item({ label: "반려", text: rejected.join(" · ") }));
+  }
   // 머리줄은 선수 하나 — 세 항목이 누구 이야기인지는 한 번만 적으면 된다
   const named = pickOurPlayer(state, input.playerId);
   return {
     ok: true,
     message: notes.join(" · "),
+    ...(changed ? {} : { unchanged: true }),
     ...(items.length > 0
       ? { brief: { head: named.ok ? named.player.name : input.playerId, items } }
       : {}),
@@ -1007,7 +1138,8 @@ export function movePlayerSlot(
   }
   const currentPoint = from;
   if (assignment.position === code && currentPoint.x === point.x && currentPoint.y === point.y) {
-    return { ok: false, message: `${player.name}은(는) 이미 ${code}입니다` };
+    // 옮길 것이 없었던 것은 실패가 아니다 — 역할·지시만 바꾸는 호출을 막지 않는다
+    return { ok: true, unchanged: true, message: `${player.name}은(는) 이미 ${code}입니다` };
   }
   const before = assignment.position;
   if (

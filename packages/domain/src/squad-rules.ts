@@ -18,8 +18,16 @@ export const SQUAD_LIST_LIMIT = 25;
 export const HOMEGROWN_MIN = 8;
 /** 파생 — 홈그로운이 모자라면 그만큼 명단 자리가 비어도 못 채운다 */
 export const NON_HOMEGROWN_MAX = SQUAD_LIST_LIMIT - HOMEGROWN_MIN;
+/** 선발 인원 — 축구의 규칙이라 조정 대상이 아니다 */
+const STARTING_XI = 11;
+/**
+ * 매치데이 벤치 정원 — **이 숫자의 원본은 여기 하나뿐이다.**
+ * 라인업 스킬(`setLineup`)·라인업 라우트·전술판이 전부 이것을 읽는다. 같은 값을 여러
+ * 곳에 적어 두면 한 곳만 늘렸을 때 화면이 담을 수 있다고 말한 벤치를 서버가 반려한다.
+ */
+export const MATCHDAY_BENCH = 9;
 /** 매치데이 명단 = 선발 11 + 벤치 9. 1군 최소 인원의 근거다 */
-export const MATCHDAY_SQUAD = 20;
+export const MATCHDAY_SQUAD = STARTING_XI + MATCHDAY_BENCH;
 
 /**
  * 1군 인원 상한 — **리그 규정이 아니라 구단 운영의 상한이다.**

@@ -58,6 +58,32 @@ export function canRegisterFor(
 }
 
 /**
+ * 한 요청이 올리려는 **여럿을 한꺼번에** 잴 수 있는가 — 누적으로 본다.
+ *
+ * 한 명씩 따로 재면 남은 한 자리에 둘이 함께 들어간다고 답한다. 라인업 저장은
+ * 승격을 적용하기 **전에** 전부 검증해야 하므로(→ docs/data/team.md §6), 앞사람이
+ * 이미 올라간 명단 위에서 다음 사람을 잰다.
+ */
+export function canRegisterAllFor(
+  state: GameState,
+  players: readonly Pick<GamePlayer, "id" | "birthdate" | "homegrownCountry">[],
+  teamId: string,
+): { ok: true } | { ok: false; playerId: string; reason: string } {
+  const joining = new Set(players.map((p) => p.id));
+  const squad = firstTeamPlayers(state, teamId)
+    .filter((p) => !joining.has(p.id))
+    .map((p) => registrableOf(state, p, teamId));
+  const year = seasonYear(state.season);
+  for (const player of players) {
+    const entry = registrableOf(state, player, teamId);
+    const allowed = canRegister(squad, entry, year);
+    if (!allowed.ok) return { ok: false, playerId: player.id, reason: allowed.reason };
+    squad.push(entry);
+  }
+  return { ok: true };
+}
+
+/**
  * 도착한 선수가 설 자리 — **1군에 자리가 있으면 1군, 없으면 2군.**
  *
  * 등록 명단(25명)과는 다른 상한이다(`FIRST_TEAM_LIMIT` 30명). 받는 쪽을 안 보면

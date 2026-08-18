@@ -8,6 +8,7 @@ import {
   AXIS_GROUP_KO,
   AXIS_KO,
   CHIP_SIZE,
+  MATCHDAY_BENCH,
   anchorOf,
   clampToBoard,
   isNaturalAt,
@@ -745,8 +746,6 @@ function PlayerDetail({
 /** 선수가 지금 속한 칸 — 화살표 교체는 이 둘을 맞바꾸는 일이다 */
 type Tier = "선발" | "벤치" | "예비" | "2군";
 
-const MAX_BENCH = 9;
-
 /** 골키퍼 자리 수 — 정확히 1이 아니면 서버가 반려하므로 저장을 보류한다 */
 const gkCountOf = (b: BoardState) => b.points.filter((p) => positionAtPoint(p) === "GK").length;
 
@@ -1002,7 +1001,7 @@ export function SquadView({
     if (!live) return;
     const next = benchSet.has(id)
       ? board.bench.filter((x) => x !== id)
-      : benchSet.size >= MAX_BENCH
+      : benchSet.size >= MATCHDAY_BENCH
         ? board.bench
         : [...board.bench, id];
     commit({ ...board, bench: next });
@@ -1055,7 +1054,7 @@ export function SquadView({
       occupants[slot.index] = incoming.id;
       // 올라간 선수는 벤치 지정에서 빼고, 내려온 선수를 벤치에 넣는다
       bench = bench.filter((x) => x !== incoming.id);
-      if (bench.length < MAX_BENCH) bench.push(outgoing);
+      if (bench.length < MATCHDAY_BENCH) bench.push(outgoing);
     }
     commit(resetRolesForMovedPlayers({ ...board, occupants, bench }, byId));
   }
@@ -1140,7 +1139,7 @@ export function SquadView({
       if (slot < 0) return;
       occupants[slot] = inId;
       const bench = board.bench.filter((id) => id !== inId);
-      if (bench.length < MAX_BENCH) bench.push(outId);
+      if (bench.length < MATCHDAY_BENCH) bench.push(outId);
       // 장부를 직접 저장하지 않는다. 다음 진행 턴의 substitute 검증 전까지는 작업 사본이다.
       setBoard(resetRolesForMovedPlayers({ ...board, occupants, bench }, byId));
       setAdvisoryPending(true);
@@ -1175,7 +1174,7 @@ export function SquadView({
     // 이 경로가 이슈의 재현 경로다 — 명단 화살표로 선발을 내리면 그 선수의 역할도 함께 내려간다
     commit(
       resetRolesForMovedPlayers(
-        { ...board, occupants, bench: bench.slice(0, MAX_BENCH), reserve },
+        { ...board, occupants, bench: bench.slice(0, MATCHDAY_BENCH), reserve },
         byId,
       ),
     );
@@ -1582,7 +1581,7 @@ export function SquadView({
           </div>
           {/* 조작법 대신 숫자만 — 벤치 정원이 몇 자리 남았는지가 유일하게 필요한 정보다 */}
           <span className="roster-counts" data-testid="bench-count">
-            벤치 {benchDesignated.length}/{MAX_BENCH} · 예비{" "}
+            벤치 {benchDesignated.length}/{MATCHDAY_BENCH} · 예비{" "}
             {benchPlayers.length - benchDesignated.length}
           </span>
         </div>
