@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultRoleOf } from "@story-fm/domain";
+import { defaultRoleOf, formatMoney } from "@story-fm/domain";
 import {
   buildOfficeViews,
   createGame,
@@ -9,7 +9,6 @@ import {
   type GameState,
 } from "@story-fm/engine";
 import { slotOverallOf } from "../lib/slot-overall";
-import { money, moneyFine, wage } from "../lib/money";
 import { ratingTone, scoutMargin, scoutValue } from "../lib/scout-report-display";
 
 /**
@@ -146,21 +145,27 @@ describe("자리와 역할이 값을 움직인다", () => {
  * 전부 `£0.0M`이 되어 서른 줄이 아무 말도 하지 않는다
  * (docs/simulation/finance.md §8.1).
  */
+/**
+ * 금액 표기는 자가 하나고 **금액이 눈금을 고른다** (`formatMoney` — overview §5).
+ * 백만으로 고정하면 원장 명세가 전부 `£0.0M`이 되고, 천으로 고정하면 이적료가
+ * `£12000k`가 되어 그대로 모델의 컨텍스트에 들어간다. 그 경계가 여기서 지켜진다.
+ */
 describe("돈의 눈금", () => {
-  it("작은 금액은 천 단위로 읽어야 값이 보인다", () => {
-    expect(money(40_000)).toBe("£0.0M"); // 이래서 따로 읽는다
-    expect(moneyFine(40_000)).toBe("£40k");
-    expect(moneyFine(725_000)).toBe("£725k");
+  it("백만 아래는 천 단위로 읽는다 — 백만 눈금이었다면 £0.0M이 될 값들이다", () => {
+    expect(formatMoney(40_000)).toBe("£40k");
+    expect(formatMoney(120_000)).toBe("£120k");
+    expect(formatMoney(725_000)).toBe("£725k");
   });
 
-  it("백만이 넘으면 이적료와 같은 눈금으로 돌아온다", () => {
-    expect(moneyFine(1_250_000)).toBe(money(1_250_000));
-    expect(moneyFine(48_000_000)).toBe("£48.0M");
+  it("백만부터는 백만 단위다 — 이적료가 £12000k로 서지 않는다", () => {
+    expect(formatMoney(1_000_000)).toBe("£1.0M");
+    expect(formatMoney(1_250_000)).toBe("£1.3M");
+    expect(formatMoney(48_000_000)).toBe("£48.0M");
   });
 
-  it("`money`와 `wage`는 그대로다 — 눈금을 전역으로 바꾸지 않는다", () => {
-    expect(money(120_000)).toBe("£0.1M");
-    expect(wage(120_000)).toBe("£120k");
+  it("눈금은 부호가 아니라 크기가 고른다", () => {
+    expect(formatMoney(-40_000)).toBe("£-40k");
+    expect(formatMoney(-2_000_000)).toBe("£-2.0M");
   });
 });
 
