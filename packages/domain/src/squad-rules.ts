@@ -1,5 +1,3 @@
-import { ageOf } from "./player";
-
 /**
  * 스쿼드 등록 규칙 — 실제 리그의 **등록 명단(registration list)** 을 그대로 옮긴다.
  *
@@ -148,9 +146,4 @@ export function canRegister(
     };
   }
   return { ok: true };
-}
-
-/** 나이로 U21을 판정할 때 쓰는 보조 — 표시용 (규칙 판정은 birthdate 기준) */
-export function isYouthAge(birthdate: string, onDate: string): boolean {
-  return ageOf(birthdate, onDate) <= 21;
 }

@@ -42,8 +42,6 @@ export const PressFactKindSchema = z.enum([
   /** 그 영입으로 자리가 겹치는 선수들 */
   "squeezed",
 ]);
-export type PressFactKind = z.infer<typeof PressFactKindSchema>;
-
 /**
  * 회견의 재료 — **사실 한 줄.** 질문이 아니다.
  *
@@ -68,7 +66,6 @@ export const PressFactSchema = z.object({
 export type PressFact = z.infer<typeof PressFactSchema>;
 
 export const PressStatusSchema = z.enum(["pending", "answered", "declined"]);
-export type PressStatus = z.infer<typeof PressStatusSchema>;
 
 export const PressConferenceSchema = z.object({
   id: z.string().min(1),
@@ -107,5 +104,4 @@ export const PRESS_STANCES = [
   /** 말을 아낀다 — 아무것도 크게 움직이지 않는다 */
   "deflect",
 ] as const;
-export const PressStanceSchema = z.enum(PRESS_STANCES);
 export type PressStance = (typeof PRESS_STANCES)[number];
