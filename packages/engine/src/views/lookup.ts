@@ -39,7 +39,7 @@ import {
 import { marketLeagues, topLeagues } from "../data/league-catalog";
 import { domesticCupEntrants, domesticStageMatches } from "../competition/domestic-cup";
 import { drawParts, drawTitle } from "../competition/draw-schedule";
-import { teamCatalog } from "../data/team-catalog";
+import { isClubTeam, teamCatalog } from "../data/team-catalog";
 import { leagueOfTeamIn, teamsOfLeagueIn } from "../competition/promotion";
 import { tierOfTeamIn } from "../core/club-tier";
 import { computeStandings } from "../competition/season";
@@ -708,6 +708,13 @@ export function teamProfile(state: GameState, team: string): LookupResult {
   const resolved = resolveTeam(state, team);
   if (!resolved.ok) return resolved;
   const teamId = resolved.teamId;
+  // 무소속은 클럽이 아니다 — 순위도 배치도 없어 프로필이 성립하지 않는다 (team.md §4)
+  if (!isClubTeam(teamId)) {
+    return {
+      ok: false,
+      message: "무소속은 구단이 아닙니다 — 자유계약 선수는 선수 검색으로 봅니다",
+    };
+  }
 
   // 순위는 **그 팀의 리그** 기준 — 타 리그 팀에 우리 리그 표를 대면 순위가 없다
   const standings = computeStandings(state, leagueOfTeamIn(state, teamId));

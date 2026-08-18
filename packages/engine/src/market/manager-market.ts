@@ -5,7 +5,7 @@ import { positionAt, relegationLine } from "../core/league-shape";
 import { inventPersonName } from "../world/persona";
 import { makeRng, randInt } from "../core/rng";
 import { boardExpectation, computeStandings } from "../competition/season";
-import { clampCondition } from "@story-fm/domain";
+import { AI_MANAGER_RATING_FALLBACK, clampCondition } from "@story-fm/domain";
 import { playersOf, pushNarrative, teamName, teamShortName, type GameState } from "../core/state";
 
 /**
@@ -133,7 +133,9 @@ export function runManagerMarket(state: GameState, digest: string[]): void {
      */
     if (rng() > SACK_CHANCE) continue;
 
-    const before = team.aiManagerTacticsRating;
+    // 순위표가 없는 팀은 위에서 걸러지므로 무소속은 여기 닿지 않는다 —
+    // 폴백은 값 없는 팀(무소속·옛 세이브)을 위한 것이다 (평균 AI 감독)
+    const before = team.aiManagerTacticsRating ?? AI_MANAGER_RATING_FALLBACK;
     team.aiManagerTacticsRating = Math.min(92, Math.max(50, before + randInt(rng, -4, 10)));
     team.managerName = inventPersonName(rng, team.id);
     team.managerSince = state.date;

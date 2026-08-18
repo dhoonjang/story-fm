@@ -24,6 +24,13 @@ import {
   type GameSummary,
   type UnreadableGame,
 } from "@story-fm/engine";
+import {
+  migrateConditions,
+  migrateFormScale,
+  migrateMatchStats,
+  migratePassStyles,
+  migrateSquadLevels,
+} from "../src/core/migrations";
 import { createTestGame } from "./helpers";
 
 /** 목록에서 한 줄을 집어 갈래까지 좁힌다 — 유니온이므로 테스트가 먼저 밝힌다 */
@@ -507,5 +514,181 @@ describe("조각 저장 — 바뀐 것만 쓴다", () => {
 
     deleteGame(state.id);
     expect(shardFiles(state.id)).toHaveLength(0);
+  });
+});
+
+/**
+ * 마이그레이션 — **로드의 두 번째 걸음** (`core/migrations.ts`).
+ *
+ * 세계를 세우지 않는다. 마이그레이션이 읽는 축만 손으로 적은 세이브를 함수에 바로
+ * 넘겨 전/후를 고정한다 — 옛 세이브 형태 하나에 케이스 하나다.
+ */
+describe("옛 세이브를 지금 모양으로", () => {
+  it("폼이 −3~3 정수에서 −1~1 실수로 옮겨지고, 마커가 두 번 옮기는 것을 막는다", () => {
+    const save = { players: [3, -3, 1, 0].map((form) => ({ state: { form } })) };
+    migrateFormScale(save);
+    expect(save.players.map((player) => player.state.form)).toEqual([1, -1, 0.333, 0]);
+    // 값만 보고는 옛 세이브인지 알 수 없다 — 마커가 그것을 말한다
+    expect((save as { formUnitScale?: boolean }).formUnitScale).toBe(true);
+
+    migrateFormScale(save);
+    expect(save.players.map((player) => player.state.form)).toEqual([1, -1, 0.333, 0]);
+  });
+
+  it("사기·피로가 화면이 쓰던 공식 그대로 체력 하나로 합쳐진다", () => {
+    const save = {
+      players: [
+        { state: { morale: 60, fatigue: 20 } }, // 신선도 80 × 0.6 + 사기 60 × 0.4
+        { state: { morale: 100, fatigue: 0 } },
+        { state: {} }, // 두 값이 아예 없던 세이브 — 그 시절 기본값으로 읽는다
+        { state: { condition: 41, morale: 90 } }, // 이미 옮긴 세이브는 건드리지 않는다
+      ],
+    };
+    migrateConditions(save);
+    expect(save.players.map((player) => player.state.condition)).toEqual([72, 100, 72, 41]);
+    // 합쳐진 뒤의 두 축은 남지 않는다 — 두 벌로 두면 갈린다
+    expect(save.players[0]!.state).toEqual({ condition: 72 });
+    expect(save.players[3]!.state.morale).toBe(90);
+  });
+
+  it("`squadLevel`이 없던 세이브는 전술 배치 + OVR 상위로 25명을 1군에 세운다", () => {
+    const save = {
+      players: Array.from({ length: 27 }, (_, i) => ({
+        id: `p${i}`,
+        teamId: "t",
+        squadLevel: undefined as "first" | "reserve" | undefined,
+        attributes: { overall: 50 + i },
+      })),
+      teams: [{ id: "t" }],
+      // 가장 약한 선수가 전술판에 서 있다 — 감독의 결정이 OVR보다 앞선다
+      tactics: [{ teamId: "t", assignments: [{ playerId: "p0" }] }],
+    };
+    migrateSquadLevels(save);
+    const levelOf = (id: string) => save.players.find((player) => player.id === id)?.squadLevel;
+    expect(save.players.filter((player) => player.squadLevel === "first")).toHaveLength(25);
+    expect(levelOf("p0")).toBe("first");
+    expect(levelOf("p26")).toBe("first");
+    // 배치 하나가 자리를 차지했으므로 상위 24명에서 잘린다
+    expect(levelOf("p2")).toBe("reserve");
+    expect(levelOf("p1")).toBe("reserve");
+
+    // 이미 분류된 세이브는 다시 줄 세우지 않는다 (169팀 × 5,700명을 매 로드 훑던 자리다)
+    for (const player of save.players) player.squadLevel = "reserve";
+    migrateSquadLevels(save);
+    expect(save.players.every((player) => player.squadLevel === "reserve")).toBe(true);
+  });
+
+  it("패스 스타일 세 갈래가 1~5 눈금으로 옮겨지고 전술 지문까지 따라온다", () => {
+    const save = {
+      tactics: [
+        { spec: { passStyle: "short" }, drilled: [{ signature: "4-3-3|3|2|4|3|3|short" }] },
+        { spec: { passStyle: "direct" }, drilled: [{ signature: "4-4-2|2|2|3|3|3|direct" }] },
+        { spec: { passStyle: "mixed" } },
+        // 이미 숫자인 세이브는 그대로 통과한다
+        { spec: { passStyle: 5 }, drilled: [{ signature: "4-3-3|3|2|4|3|3|5" }] },
+      ],
+    };
+    migratePassStyles(save);
+    expect(save.tactics.map((tactics) => tactics.spec.passStyle)).toEqual([2, 4, 3, 5]);
+    // 지문은 적응도 기억의 키다 — 함께 옮기지 않으면 익힌 전술이 처음 보는 전술이 된다
+    expect(save.tactics.map((tactics) => tactics.drilled?.[0]?.signature)).toEqual([
+      "4-3-3|3|2|4|3|3|2",
+      "4-4-2|2|2|3|3|3|4",
+      undefined,
+      "4-3-3|3|2|4|3|3|5",
+    ]);
+  });
+
+  it("경기 도중 저장된 옛 세이브의 빈 기대 득점 칸이 0으로 선다", () => {
+    // 한 명만 비어도 팀 합계가 NaN이 되어 그대로 장부에 앉는다 (match-flow.ts)
+    const stats: Record<string, { scoringExpectation?: number }> = {
+      p1: {},
+      p2: { scoringExpectation: 0.4 },
+    };
+    migrateMatchStats({ pendingMatch: { ledger: { stats } } });
+    expect(stats.p1!.scoringExpectation).toBe(0);
+    expect(stats.p2!.scoringExpectation).toBe(0.4);
+    // 경기가 없는 세이브에서도 그냥 지나간다
+    expect(() => migrateMatchStats({ pendingMatch: null })).not.toThrow();
+  });
+});
+
+/**
+ * 목록과 로드의 실패 — **어느 걸음에서 멈췄는지**가 사유다 (`core/persistence.ts`).
+ *
+ * 세이브 본문 하나를 만들어 두고 사본을 각자의 id로 눕힌다. 조각 없는 단일 파일
+ * 세이브라 `.bak`이 없고, 그래서 폴백이 실패를 가리지 않는다.
+ */
+describe("목록과 로드 — 어디서 멈췄는지 가른다", () => {
+  const firstDate = "2026-08-01";
+  const secondDate = "2026-10-01";
+  let id: string;
+  let base: Record<string, unknown>;
+
+  beforeAll(() => {
+    const state = createTestGame(59);
+    state.date = firstDate;
+    saveGame(state); // 1회차 — 두 번째 저장이 이걸 `.bak`으로 밀어낸다
+    base = readSave(state.id);
+    state.date = secondDate;
+    saveGame(state);
+    id = state.id;
+  });
+
+  /** 본문 사본을 새 id로 눕힌다 — 원본 세이브를 건드리지 않고 형태만 바꿔 본다 */
+  function lay(newId: string, edit: (raw: Record<string, unknown>) => void): string {
+    const raw = structuredClone(base);
+    edit(raw);
+    writeMonolith(newId, raw);
+    return newId;
+  }
+
+  it("본 파일이 사라지고 `.bak`만 남아도 목록에 서고 열린다", () => {
+    rmSync(path.join(dataDir(), `${id}.json`));
+    rmSync(path.join(dataDir(), `${id}.meta.json`)); // 요약 캐시도 지운다 — 본문에서 판정하게
+    expect(listGames()).toContain(id);
+    // 폴백이 읽어 내는 것은 직전 저장분이다
+    expect(readableOf(id).date).toBe(firstDate);
+    expect(loadGame(id)?.date).toBe(firstDate);
+  });
+
+  it("카탈로그 오버라이드는 게임이 아니다", () => {
+    const override = path.join(dataDir(), "player-catalog.json");
+    writeFileSync(override, "not json", "utf8");
+    try {
+      expect(listGames()).not.toContain("player-catalog");
+    } finally {
+      rmSync(override);
+    }
+  });
+
+  it("마이그레이션이 넘어진 세이브는 손상이 아니라 마이그레이션 실패로 선다", () => {
+    // 전술에 설정이 없다 — 패스 스타일을 옮기는 자리에서 넘어진다
+    const broken = lay("game-migration-xxxx", (raw) => {
+      raw.tactics = [{ teamId: "manutd" }];
+    });
+    expect(loadGame(broken)).toBeNull();
+    // 파일은 멀쩡히 읽혔다. 고칠 것은 파일이 아니라 코드다
+    expect(unreadableOf(broken).reason).toBe("migration");
+    expect(unreadableOf(broken).saveVersion).toBe(SAVE_VERSION);
+  });
+
+  it("스키마와 어긋난 세이브는 로드를 거부한다", () => {
+    const broken = lay("game-schema-xxxx", (raw) => {
+      (raw.players as Array<{ birthdate: string }>)[0]!.birthdate = "어제";
+    });
+    expect(loadGame(broken)).toBeNull();
+    expect(unreadableOf(broken).reason).toBe("schema");
+  });
+
+  /**
+   * parse 결과를 그대로 상태로 쓰므로, 스키마에 없는 축은 **떨어질 수 있는 자리**에
+   * 선다. `passthrough`가 그것을 막는다 — 여기가 깨지면 로드가 세이브를 조용히 깎는다.
+   */
+  it("스키마가 모르는 축은 로드가 깎지 않는다", () => {
+    const kept = lay("game-passthrough-xxxx", (raw) => {
+      raw.clock = "18:30"; // 스키마에 없는 축 (하루 안의 시각)
+    });
+    expect(loadGame(kept)?.clock).toBe("18:30");
   });
 });

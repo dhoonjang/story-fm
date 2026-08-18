@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ageOf, weightSlotOf } from "@story-fm/domain";
 import { CATALOG_AGE_REF, deriveAxes, derivePositions, overallFor } from "@story-fm/engine";
 import { REAL_SQUADS, type RealPlayerSeed } from "../src/data/epl-players";
+import { INJURY_HISTORY } from "../src/data/injury-history";
 import { EU_SQUADS } from "../src/data/eu-squads";
 import { MARKET_LEAGUE_SQUADS } from "../src/data/market-leagues";
 
@@ -395,5 +396,33 @@ describe("소속 불변식 — 한 선수 한 구단, 한 구단 안에서 번�
     });
 
     expect(violations).toEqual([]);
+  });
+});
+
+/**
+ * 부상 이력 조인 — **표의 키가 전부 시드에 닿는가.**
+ *
+ * `INJURY_HISTORY`는 `RealPlayerSeed.nameEn`으로 잇는다(`injury.ts`
+ * `seedInjuryHistory`). 이름 표기가 바뀌거나 그 선수가 시드에서 빠지면 그 이력은
+ * **조용히 죽는다** — 부상 행도 초기 성향도 생기지 않고, 화면엔 아무 일도 안 난
+ * 것처럼 보인다. 오타 하나로 리스 제임스가 철인이 되는 자리다.
+ *
+ * 반대 방향(시드에 있는데 이력이 없다)은 위반이 아니다 — 조사가 닿은 선수만
+ * 적는 표다 (injury-history.ts 상단).
+ */
+describe("부상 이력 조인 — 이력의 이름이 시드에 없다", () => {
+  const ALL_SQUADS: Record<string, readonly RealPlayerSeed[]> = {
+    ...REAL_SQUADS,
+    ...EU_SQUADS,
+    ...MARKET_LEAGUE_SQUADS,
+  };
+
+  it("INJURY_HISTORY의 모든 키가 실선수 시드의 nameEn에 있다", () => {
+    const seeded = new Set(
+      Object.values(ALL_SQUADS).flatMap((squad) => squad.map((s) => s.nameEn)),
+    );
+    const orphans = Object.keys(INJURY_HISTORY).filter((name) => !seeded.has(name));
+
+    expect(orphans).toEqual([]);
   });
 });
