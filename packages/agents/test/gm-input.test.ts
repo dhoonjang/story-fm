@@ -50,12 +50,44 @@ function game(seed = 31): GameState {
 }
 
 describe("레퍼런스 블록 (캐시되는 시스템 블록)", () => {
-  it("스쿼드 전원을 id|이름|주포지션으로 담는다", () => {
+  it("선수의 id도 이름도 담지 않는다 — 명단 한 줄이 바뀌면 뒤의 이력까지 무효가 된다", () => {
     const state = game();
     const ref = buildGmReference(state);
     const squad = userPlayers(state);
     expect(squad.length).toBeGreaterThanOrEqual(30);
-    for (const p of squad) expect(ref).toContain(`${p.id}|${p.name}|`);
+    for (const p of squad) {
+      expect(ref).not.toContain(p.id);
+      expect(ref).not.toContain(p.name);
+    }
+  });
+
+  /**
+   * 이슈 #184의 완료 조건 — 명단이 움직이는 세 갈래(영입·2군 승격·주장 변경)를
+   * 각각 확인한다. 하나라도 새면 이적창과 프리시즌 내내 캐시 프리픽스가 깨진다.
+   */
+  it("영입·2군 승격·주장 변경이 레퍼런스를 한 글자도 바꾸지 않는다", () => {
+    const state = game();
+    const before = buildGmReference(state);
+
+    const signing = playersOf(state, "chelsea")[0]!;
+    signing.teamId = state.userTeamId;
+    expect(buildGmReference(state)).toBe(before);
+
+    const promoted = userPlayers(state).find((p) => p.squadLevel === "reserve")!;
+    promoted.squadLevel = "first";
+    expect(buildGmReference(state)).toBe(before);
+
+    const squad = userPlayers(state);
+    for (const p of squad) p.isCaptain = false;
+    const captain = squad[0]!;
+    captain.isCaptain = true;
+    expect(buildGmReference(state)).toBe(before);
+
+    // 셋 다 매 턴 층에는 그대로 보인다 — 레퍼런스에서 뺀 것이지 지운 것이 아니다
+    const note = buildGmStateNote(state);
+    expect(note).toContain(signing.name);
+    expect(note).toContain(promoted.name);
+    expect(note).toContain(`${captain.name}(주장)`);
   });
 
   it("능력치·컨디션을 담지 않는다 — 상세는 조회 도구의 몫", () => {
@@ -120,7 +152,7 @@ describe("레퍼런스 블록 (캐시되는 시스템 블록)", () => {
     expect(buildGmReference(state)).toBe(before);
   });
 
-  it("정렬이 결정적이다 — 같은 세이브면 항상 같은 순서", () => {
+  it("같은 세이브면 언제나 같은 블록이다", () => {
     expect(buildGmReference(game(31))).toBe(buildGmReference(game(31)));
   });
 });
@@ -139,12 +171,20 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
     expect(buildGmStateNote(state)).not.toContain("idle");
   });
 
-  it("스쿼드 표를 넣지 않는다 — 명부는 캐시 블록에 있다", () => {
+  /**
+   * 화자 명단이 사는 자리 — 카드가 없는 선수가 장면에 서는 근거는 이 줄뿐이다.
+   * 이름만이다: id·능력치·배치는 조회의 몫이라 여기 실리면 안 된다.
+   */
+  it("선수단 전원의 이름을 싣되 id는 싣지 않는다", () => {
     const state = game();
     const note = buildGmStateNote(state);
     const squad = userPlayers(state);
-    const mentioned = squad.filter((p) => note.includes(p.id));
-    expect(mentioned).toHaveLength(0);
+    expect(squad.length).toBeGreaterThanOrEqual(30);
+    for (const p of squad) expect(note).toContain(p.name);
+    expect(squad.filter((p) => note.includes(p.id))).toHaveLength(0);
+    // 순서가 결정적이다 — 흔들리면 같은 세이브의 같은 턴이 매번 다른 줄을 낸다
+    const squadLine = (text: string) => text.split("\n").find((l) => l.startsWith("선수단("));
+    expect(squadLine(buildGmStateNote(game(31)))).toBe(squadLine(buildGmStateNote(game(31))));
   });
 
   it("선수 근황을 한 줄로 싣는다 — 이름을 내보내는 자리가 부상·불만뿐이면 같은 선수만 말한다", () => {

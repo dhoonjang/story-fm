@@ -32,7 +32,7 @@ import {
   offerPlayerOut,
   openNegotiationFor,
   openRenewal,
-  playerById,
+  pickAnyPlayer,
   playerCard,
   playerName,
   recallLoan,
@@ -855,10 +855,13 @@ export function buildGmTools(
         pitch: z.array(PitchClaimSchema).max(MAX_PITCH_CLAIMS).optional(),
       }),
       (input) => {
+        // 감독이 부른 이름이 그대로 실려 온다 — 정확한 id를 요구하면 부를 수 없는 도구가 된다
+        const picked = pickAnyPlayer(state, input.playerId);
+        if (!picked.ok) return { ok: false, message: picked.message };
+        const player = picked.player;
         // 금액을 말하지 않았으면 기본값(요구액·주급 기대치)으로 본다
-        const suggested = suggestTerms(state, input.playerId);
-        const player = playerById(state, input.playerId);
-        if (!suggested || !player) {
+        const suggested = suggestTerms(state, player.id);
+        if (!suggested) {
           return { ok: false, message: `"${input.playerId}" 선수를 찾지 못했습니다` };
         }
         /**
@@ -881,7 +884,7 @@ export function buildGmTools(
           ...(input.kind ? { kind: input.kind } : {}),
           ...(input.teamId ? { counterpartTeamId: input.teamId } : {}),
           ...(input.pitch ? { pitch: input.pitch } : {}),
-          pitched: openNegotiationFor(state, input.playerId)?.pitched ?? [],
+          pitched: openNegotiationFor(state, player.id)?.pitched ?? [],
         });
         return { ok: true, message: describeOdds(odds) };
       },
