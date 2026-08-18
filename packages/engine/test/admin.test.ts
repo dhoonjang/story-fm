@@ -109,42 +109,39 @@ describe("카탈로그 편집", () => {
     expect(playerCatalog().find((e) => e.id === target.id)?.pace).toBe(99);
   });
 
-  it("주급을 편집하면 새 게임의 계약에 그 값이 실린다", () => {
-    const target = adminCatalog().find((t) => t.teamId === "arsenal")!.players[0]!;
-    expect(adminUpdateCatalogPlayer(target.id, { weeklyWage: 123_000 }).ok).toBe(true);
-    expect(playerCatalog().find((e) => e.id === target.id)?.weeklyWage).toBe(123_000);
-
-    const game = createTestGame(7);
-    const contract = game.contracts.find((c) => c.gamePlayerId === target.id);
-    expect(contract?.weeklyWage).toBe(123_000);
-    // 음수는 반려된다
-    expect(adminUpdateCatalogPlayer(target.id, { weeklyWage: -1 }).ok).toBe(false);
-  });
-
   /**
    * 카탈로그의 주급은 **실측이고 없는 것이 기본**이다 (game-state.md §2). 세 뜻이
    * 갈리지 않으면 능력치 하나만 고쳐 저장해도 주급이 0으로 굳고, 그 선수의 새 게임
    * 계약이 £0/주가 된다 — 화면에는 아무 흔적도 남지 않는다.
    */
-  it("주급은 미입력·지움·값이 갈린다", () => {
+  it("주급은 미입력·지움·값이 갈리고, 값은 새 게임의 계약에 그대로 실린다", () => {
     const target = adminCatalog().find((t) => t.teamId === "arsenal")!.players[0]!;
     const wageOf = () => playerCatalog().find((e) => e.id === target.id)?.weeklyWage;
-    expect(adminEditCatalogPlayer(target.id, { weeklyWage: 90_000 }).ok).toBe(true);
+
+    expect(adminUpdateCatalogPlayer(target.id, { weeklyWage: 123_000 }).ok).toBe(true);
+    expect(wageOf()).toBe(123_000);
+    // 음수는 반려된다
+    expect(adminUpdateCatalogPlayer(target.id, { weeklyWage: -1 }).ok).toBe(false);
 
     // 미입력 — 능력치만 고쳐도 주급은 그대로다
     expect(adminEditCatalogPlayer(target.id, { pace: 71 }).ok).toBe(true);
-    expect(wageOf()).toBe(90_000);
+    expect(wageOf()).toBe(123_000);
 
     // 0은 "값 없음"이 아니라 진짜 0이다
     expect(adminEditCatalogPlayer(target.id, { weeklyWage: 0 }).ok).toBe(true);
     expect(wageOf()).toBe(0);
 
-    // null은 실측을 지운다 — 새 게임의 계약은 다시 모델이 어림한다
+    // 값이 있으면 새 게임의 계약이 그 값이고, null로 지우면 다시 모델이 어림한다
+    expect(adminEditCatalogPlayer(target.id, { weeklyWage: 90_000 }).ok).toBe(true);
+    const seeded = createTestGame(7);
+    expect(seeded.contracts.find((c) => c.gamePlayerId === target.id)?.weeklyWage).toBe(90_000);
+
     expect(adminEditCatalogPlayer(target.id, { weeklyWage: null }).ok).toBe(true);
     expect(wageOf()).toBeUndefined();
-    const game = createTestGame(9);
-    const contract = game.contracts.find((c) => c.gamePlayerId === target.id);
-    expect(contract!.weeklyWage).toBeGreaterThan(0);
+    const modelled = createTestGame(9);
+    expect(modelled.contracts.find((c) => c.gamePlayerId === target.id)!.weeklyWage).toBeGreaterThan(
+      0,
+    );
   });
 
   /**
@@ -315,8 +312,6 @@ describe("카탈로그 편집", () => {
     expect(teams.find((t) => t.teamId === "chelsea")!.players.some((p) => p.id === target.id)).toBe(
       true,
     );
-    // 새 게임은 옮긴 팀에서 출발한다
-    expect(playersOf(createTestGame(5), "chelsea").some((p) => p.id === target.id)).toBe(true);
   });
 
   it("없는 팀·없는 선수·같은 팀으로의 이동은 반려된다 (카탈로그는 그대로)", () => {
@@ -401,7 +396,12 @@ describe("게임 격리 — 카탈로그 편집은 새 게임에만 반영된다
     expect(same.attributes.pace).toBe(11);
   });
 
-  it("카탈로그에 추가한 선수는 새 게임의 스쿼드에 들어온다", () => {
+  it("추가·이동한 선수가 새 게임의 스쿼드에 그 팀 소속으로 들어온다", () => {
+    const moved = adminCatalog()
+      .find((t) => t.teamId === "arsenal")!
+      .players.find((p) => p.position !== "GK")!;
+    expect(adminMoveCatalogPlayer(moved.id, "chelsea").ok).toBe(true);
+
     const res = adminAddCatalogPlayer(
       "arsenal",
       addInput({
@@ -427,6 +427,9 @@ describe("게임 격리 — 카탈로그 편집은 새 게임에만 반영된다
     expect(
       game.contracts.some((c) => c.gamePlayerId === res.playerId && c.status === "active"),
     ).toBe(true);
+    // 옮긴 선수는 새 소속에서 출발한다
+    expect(playersOf(game, "chelsea").some((p) => p.id === moved.id)).toBe(true);
+    expect(playersOf(game, "arsenal").some((p) => p.id === moved.id)).toBe(false);
   });
 });
 
@@ -440,7 +443,7 @@ describe("게임 격리 — 카탈로그 편집은 새 게임에만 반영된다
  * 자기가 한 일이 아닌 이유로 매출이 달라진다.
  */
 describe("팀 정체성 편집과 진행 중인 세이브", () => {
-  it("이름·구장·브랜드를 고쳐도 세이브의 이름과 수입이 그대로다", () => {
+  it("이름·구장·브랜드·소속 리그를 고쳐도 세이브의 값이 그대로다", () => {
     const state = createTestGame(51, "arsenal");
     const name = teamNameIn(state, "arsenal");
     const profile = clubProfileIn(state, "arsenal");
@@ -461,23 +464,19 @@ describe("팀 정체성 편집과 진행 중인 세이브", () => {
     expect(clubProfileIn(state, "arsenal")).toEqual(profile);
     expect(annualRevenueEstimate(state, "arsenal")).toBe(revenue);
     expect(monthlyFixedCostOf("arsenal", state)).toBe(fixedCost);
-  });
 
-  /**
-   * 1부는 팀 수가 짝수여야 해서 한 팀만 옮길 수 없다 — 리그 이동이 실제로 열리는
-   * 자리는 리그전을 돌지 않는 2부끼리다 (`admin-team.ts`).
-   */
-  it("2부 사이의 리그 이동도 진행 중인 세이브의 소속을 바꾸지 않는다", () => {
-    const state = createTestGame(54, "arsenal");
+    /**
+     * 소속 리그도 같은 약속이다. 1부는 팀 수가 짝수여야 해서 한 팀만 옮길 수 없으니
+     * 리그 이동이 실제로 열리는 자리는 리그전을 돌지 않는 2부끼리다 (`admin-team.ts`).
+     * 소속이 바뀌면 그 나라 1부에서 파생하는 살림도 함께 움직이므로 둘 다 본다.
+     */
     const league = leagueOfTeamIn(state, "wolves");
     const economy = clubEconomyLevelIn(state, "wolves");
     expect(league).toBe("championship");
 
-    const res = adminUpdateTeam("wolves", { leagueId: "segunda" });
-    expect(res.ok).toBe(true);
+    expect(adminUpdateTeam("wolves", { leagueId: "segunda" }).ok).toBe(true);
     expect(teamCatalogById("wolves")!.leagueId).toBe("segunda");
 
-    // 소속이 바뀌면 그 나라 1부에서 파생하는 살림도 함께 움직인다 — 둘 다 그대로여야 한다
     expect(leagueOfTeamIn(state, "wolves")).toBe(league);
     expect(clubEconomyLevelIn(state, "wolves")).toBe(economy);
   });

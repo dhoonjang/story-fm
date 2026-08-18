@@ -4,11 +4,9 @@ import {
   activeContract,
   loanPlayer,
   loanedOut,
-  movePlayerSlot,
   playersOf,
   recallLoan,
   releasePlayer,
-  setPlayerTraining,
   severanceOf,
   userPlayers,
   userTactics,
@@ -134,50 +132,5 @@ describe("임대 — 전력을 내주고 성장을 산다", () => {
     const res = releasePlayer(state, { playerId: target.id });
     expect(res.ok).toBe(false);
     expect(res.message).toContain("임대 중");
-  });
-});
-
-describe("자리 이동 — 교체 없이 선발 안에서만", () => {
-  it("뛰고 있는 선수의 자리를 바꾼다", () => {
-    const state = createTestGame(11);
-    const starter = userTactics(state).assignments.find((a) => a.role === "starting")!;
-    const res = movePlayerSlot(state, { playerId: starter.playerId, position: "CM" });
-    if (starter.position === "CM") return;
-    expect(res.ok, res.message).toBe(true);
-    expect(
-      userTactics(state).assignments.find((a) => a.playerId === starter.playerId)!.position,
-    ).toBe("CM");
-  });
-
-  it("벤치 선수는 교체로만 넣는다 — 자리 이동으로는 못 들어온다", () => {
-    const state = createTestGame(11);
-    const bench = userTactics(state).assignments.find((a) => a.role === "bench")!;
-    const res = movePlayerSlot(state, { playerId: bench.playerId, position: "CM" });
-    expect(res.ok).toBe(false);
-    expect(res.message).toContain("그라운드에 없습니다");
-  });
-});
-
-describe("개인 훈련 — 팀 훈련 위에 한 선수만", () => {
-  it("축과 자리를 걸고 거둘 수 있다", () => {
-    const state = createTestGame(11);
-    const target = spare(state);
-    expect(setPlayerTraining(state, { playerId: target.id, axis: "finishing" }).ok).toBe(true);
-    expect(state.playerTraining).toHaveLength(1);
-
-    expect(setPlayerTraining(state, { playerId: target.id, position: "CB" }).ok).toBe(true);
-    expect(state.playerTraining[0]!.position).toBe("CB");
-    // 프로그램은 선수당 하나 — 덮어쓴다
-    expect(state.playerTraining).toHaveLength(1);
-
-    expect(setPlayerTraining(state, { playerId: target.id, clear: true }).ok).toBe(true);
-    expect(state.playerTraining).toHaveLength(0);
-  });
-
-  it("없는 축·자리는 반려한다", () => {
-    const state = createTestGame(11);
-    const target = spare(state);
-    expect(setPlayerTraining(state, { playerId: target.id, axis: "wizardry" }).ok).toBe(false);
-    expect(setPlayerTraining(state, { playerId: target.id, position: "XX" }).ok).toBe(false);
   });
 });

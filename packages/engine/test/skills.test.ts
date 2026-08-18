@@ -14,6 +14,7 @@ import {
 } from "@story-fm/domain";
 import {
   MATCHDAY_BENCH,
+  PENDING_EDIT_LIMIT,
   applyNarrativeEvent,
   applyTalkToPlayer,
   applyTeamTalk,
@@ -23,20 +24,26 @@ import {
   canRegisterFor,
   isAvailable,
   isInjured,
+  lineupChangeNote,
   lineupSignature,
+  movePlayerSlot,
   playerById,
+  recordEdit,
   reservePlayers,
   squadLevelOf,
   startingIdsOf,
+  takeEdits,
   setCaptain,
   setLineup,
   setPlayerInstruction,
   setPlayerPosition,
   setPlayerRole,
   setPlayerTactic,
+  setPlayerTraining,
   setSquadLevel,
   setTactics,
   settleTactics,
+  shapeOfTactics,
   squadFamiliarity,
   rememberTactics,
   setTraining,
@@ -1408,5 +1415,127 @@ describe("적응도 왕복 — 2군 · 자리 · 천장 100", () => {
     for (const a of tactics.assignments) {
       expect(a.familiarity, "천장 100은 기억에도 그대로 적힌다").toBe(100);
     }
+  });
+});
+
+/**
+ * 자리 이동·개인 훈련 — 감독이 도구 하나로 바로 거는 스킬이다 (`skills/index.ts`).
+ * 이적·방출과 한 파일에 있었지만 여기가 그 코드가 사는 자리다.
+ */
+describe("자리 이동 — 교체 없이 선발 안에서만", () => {
+  /** 목표 자리를 지금 쓰고 있지 않은 선발 — 옮겨야 옮긴 것이 보인다 */
+  function starterAwayFrom(state: GameState, position: string) {
+    const found = userTactics(state).assignments.find(
+      (a) => a.role === "starting" && a.position !== position,
+    );
+    expect(found, `모든 선발이 ${position}에 서 있다`).toBeDefined();
+    return found!;
+  }
+
+  it("뛰고 있는 선수의 자리를 바꾼다", () => {
+    const state = createTestGame();
+    const starter = starterAwayFrom(state, "CM");
+    const res = movePlayerSlot(state, { playerId: starter.playerId, position: "CM" });
+    expect(res.ok, res.message).toBe(true);
+    expect(
+      userTactics(state).assignments.find((a) => a.playerId === starter.playerId)!.position,
+    ).toBe("CM");
+  });
+
+  it("벤치 선수는 교체로만 넣는다 — 자리 이동으로는 못 들어온다", () => {
+    const state = createTestGame();
+    const bench = userTactics(state).assignments.find((a) => a.role === "bench")!;
+    const res = movePlayerSlot(state, { playerId: bench.playerId, position: "CM" });
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain("그라운드에 없습니다");
+  });
+});
+
+describe("개인 훈련 — 팀 훈련 위에 한 선수만", () => {
+  /** 주전이 아닌 선수 — 개인 프로그램을 걸 대상 */
+  const spare = (state: GameState) =>
+    userPlayers(state).sort((a, b) => a.attributes.overall - b.attributes.overall)[0]!;
+
+  it("축과 자리를 걸고 거둘 수 있다", () => {
+    const state = createTestGame();
+    const target = spare(state);
+    expect(setPlayerTraining(state, { playerId: target.id, axis: "finishing" }).ok).toBe(true);
+    expect(state.playerTraining).toHaveLength(1);
+
+    expect(setPlayerTraining(state, { playerId: target.id, position: "CB" }).ok).toBe(true);
+    expect(state.playerTraining[0]!.position).toBe("CB");
+    // 프로그램은 선수당 하나 — 덮어쓴다
+    expect(state.playerTraining).toHaveLength(1);
+
+    expect(setPlayerTraining(state, { playerId: target.id, clear: true }).ok).toBe(true);
+    expect(state.playerTraining).toHaveLength(0);
+  });
+
+  it("없는 축·자리는 반려한다", () => {
+    const state = createTestGame();
+    const target = spare(state);
+    expect(setPlayerTraining(state, { playerId: target.id, axis: "wizardry" }).ok).toBe(false);
+    expect(setPlayerTraining(state, { playerId: target.id, position: "XX" }).ok).toBe(false);
+  });
+});
+
+/**
+ * 화면 조작은 **모아 두었다가 한 번에** 읽힌다 (state.ts).
+ * 판을 짜며 열 번을 만지는데 그때마다 턴을 만들면 채팅이 조작 로그가 된다.
+ */
+
+describe("조작 모으기", () => {
+  it("같은 대상은 접힌다 — 과정이 아니라 결과가 남는다", () => {
+    const state = createTestGame();
+    recordEdit(state, "role:p1", "역할 → 볼 플레잉 디펜더");
+    recordEdit(state, "role:p1", "역할 → 리베로");
+    recordEdit(state, "role:p1", "역할 → 노넌센스");
+    recordEdit(state, "role:p2", "역할 → 레지스타");
+
+    expect(state.pendingEdits).toHaveLength(2);
+    expect(state.pendingEdits![0]!.text).toContain("노넌센스");
+  });
+
+  it("상한을 넘으면 오래된 것부터 밀린다", () => {
+    const state = createTestGame();
+    for (let i = 0; i < PENDING_EDIT_LIMIT + 5; i++) recordEdit(state, `k${i}`, `조작 ${i}`);
+    expect(state.pendingEdits).toHaveLength(PENDING_EDIT_LIMIT);
+    expect(state.pendingEdits![0]!.text).toBe("조작 5");
+  });
+
+  it("꺼내면 비워진다 — 다음 턴에 다시 읽히지 않는다", () => {
+    const state = createTestGame();
+    recordEdit(state, "lineup", "전술판: 자리를 조정했다");
+    expect(takeEdits(state)).toHaveLength(1);
+    expect(takeEdits(state)).toHaveLength(0);
+  });
+});
+
+describe("전술판이 바꾼 것", () => {
+  it("선발이 바뀌면 들어온 사람과 빠진 사람을 적는다", () => {
+    const state = createTestGame();
+    const before = {
+      starting: startingIdsOf(state),
+      shape: shapeOfTactics(state),
+      signature: lineupSignature(state),
+    };
+    const bench = userPlayers(state).find((p) => !before.starting.includes(p.id))!;
+    const starting = [...before.starting.slice(0, 10), bench.id];
+
+    const res = setLineup(state, { starting: starting.map((playerId) => ({ playerId })) });
+    expect(res.ok, res.message).toBe(true);
+
+    const note = lineupChangeNote(state, before)!;
+    expect(note).toContain(bench.name);
+  });
+
+  it("아무것도 안 바뀌면 남기지 않는다", () => {
+    const state = createTestGame();
+    const before = {
+      starting: startingIdsOf(state),
+      shape: shapeOfTactics(state),
+      signature: lineupSignature(state),
+    };
+    expect(lineupChangeNote(state, before)).toBeNull();
   });
 });
