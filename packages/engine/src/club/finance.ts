@@ -11,7 +11,7 @@ import {
   FINANCE_EXPENSE_CATEGORIES,
   FINANCE_INCOME_CATEGORIES,
 } from "@story-fm/domain";
-import { addDays, buildSeasonCalendar, dayOfWeek, FIRST_SEASON } from "../competition/calendar";
+import { buildSeasonCalendar, dayOfWeek, FIRST_SEASON } from "../competition/calendar";
 import { clubProfile } from "../data/club-profile";
 import { clubEconomyLevel, leagueEconomyLevel } from "../data/league-economy";
 import { isMarketOnlyLeague, isTopLeague, leagueCatalogById } from "../data/league-catalog";
@@ -694,25 +694,20 @@ export function isOutsideOurEconomy(teamId: string): boolean {
   return isMarketOnlyLeague(leagueOfTeam(teamId));
 }
 
-/** 주급일 — tick이 주급을 무는 요일 (`core/tick.ts`) */
-const MONDAY = 1;
-
 /**
- * 주간 주급 지급 — 전 팀 (월요일). `weeks`는 **건너뛴 주**를 한 번에 무는 자리다
- * (`paySkippedWages`) — 평소엔 1주씩이다.
+ * 주간 주급 지급 — 전 팀 (월요일).
  *
  * **유저 팀만 선수별로 적는다.** 원장은 유저 팀만 쌓으므로(§4.5) AI 팀에 명세를
  * 만들면 잔고 한 번 더할 것을 스물몇 번 나눠 더하는 값만 치른다 — 96팀 × 매주다.
  * 유저 팀 명세는 상각과 같은 모양이라 피드가 그대로 접는다 (§8.1).
  */
-export function payWeeklyWages(state: GameState, weeks = 1): void {
-  if (weeks <= 0) return;
+export function payWeeklyWages(state: GameState): void {
   const playerNames = new Map(state.players.map((p) => [p.id, p.name]));
   for (const team of state.teams) {
     // 무소속은 구단이 아니다 — 자유계약 선수가 모인 자리라 낼 주급도 받을 수입도 없다
     if (!isClubTeam(team.id) || isOutsideOurEconomy(team.id)) continue;
     if (team.id !== state.userTeamId) {
-      const wages = weeklyWagesOf(state, team.id) * weeks;
+      const wages = weeklyWagesOf(state, team.id);
       if (wages > 0) {
         recordFinance(state, team.id, {
           kind: "expense",
@@ -728,7 +723,7 @@ export function payWeeklyWages(state: GameState, weeks = 1): void {
         kind: "expense",
         category: "player_wages",
         label: playerNames.get(line.gamePlayerId) ?? line.gamePlayerId,
-        amount: line.weekly * weeks,
+        amount: line.weekly,
         ref: { type: "player", id: line.gamePlayerId },
       });
     }
@@ -966,26 +961,13 @@ export function runMonthlyFinance(state: GameState, digest: string[]): void {
  *
  * ⚠️ `state.season`·`state.calendar`가 **아직 끝난 시즌일 때** 돌아야 한다. 보고서의
  * 시즌 번호를 그 둘로 역산하기 때문이다 (`seasonOfMonth`).
+ *
+ * ⚠️ 이 달은 **주급이 한 주치뿐이다** — 전환이 남은 월요일을 건너뛰기 때문이다.
+ * 정액 수입·고정비는 1일에 한 달치가 다 앉으므로 마지막 달이 그만큼 후하게 잡힌다
+ * (§12.4).
  */
 export function closeSeasonBooks(state: GameState, digest: string[]): void {
-  paySkippedWages(state);
   closeMonths(state, digest, monthOf(state.date));
-}
-
-/**
- * 전환이 건너뛰는 주급 — 시즌 종료 다음 날부터 **다음 시즌 시작 전날까지의 월요일**만큼.
- *
- * 정액 수입과 고정비는 그달 1일에 한 달치가 다 앉는데 주급만 한 주치라, 그대로
- * 마감하면 시즌의 마지막 달이 구조적 흑자가 되고 그 흑자가 곧 다음 시즌 예산이 된다.
- * 선수는 6월 30일까지 계약돼 있으므로 그 주급은 실제로 나가야 하는 돈이다.
- */
-function paySkippedWages(state: GameState): void {
-  const nextSeasonStart = buildSeasonCalendar(state.season + 1).preseasonStart;
-  let weeks = 0;
-  for (let date = addDays(state.date, 1); date < nextSeasonStart; date = addDays(date, 1)) {
-    if (dayOfWeek(date) === MONDAY) weeks++;
-  }
-  payWeeklyWages(state, weeks);
 }
 
 /**

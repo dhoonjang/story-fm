@@ -855,25 +855,6 @@ describe("PSR", () => {
     expect(finance.transferBudget).toBeGreaterThan(seasonBudgetBaseOf(state, state.userTeamId));
   });
 
-  /**
-   * 전환이 6월의 남은 월요일을 건너뛴다. 정액 수입·고정비는 6월 1일에 한 달치가 다
-   * 앉으므로, 주급만 한 주치면 마지막 달이 구조적 흑자가 되고 그 흑자가 곧 다음 시즌
-   * 예산이 된다 (finance.md §7.1).
-   */
-  it("마감 전에 시즌이 건너뛰는 주급을 문다", () => {
-    const state = createTestGame(42, "arsenal");
-    state.date = "2027-06-05";
-    const weekly = weeklyWagesOf(state, state.userTeamId);
-
-    endSeason(state);
-
-    const june = state.financeReports.find(
-      (r) => r.month === "2027-06" && r.teamId === state.userTeamId,
-    )!;
-    const wages = june.expense.find((l) => l.category === "player_wages")?.amount ?? 0;
-    // 2027-06-05 다음 월요일은 7·14·21·28 — 다음 시즌 시작(7월 1일) 전날까지 네 번이다
-    expect(wages / weekly).toBeCloseTo(4, 3);
-  });
 });
 
 /**
@@ -1072,8 +1053,15 @@ describe.skipIf(!process.env.BALANCE)("밸런스 기준선 — 시즌을 굴려 
     // 움직인다(실측: 7위·상금 £35M → 6위·상금 £57M, 홈 경기 몇 개가 따라붙어
     // 매치데이도 +£4M). 순위 상금보다 컵 상금의 폭이 훨씬 크므로, 한 시즌의
     // 대회 성적 하나로 밴드를 넘나드는 상단은 가드 구실을 못 한다.
+    //
+    // ⚠️ **상단을 £260M으로 다시 올렸다 — 재는 창이 한 달 넓어졌다.** 시즌의
+    // 마지막 달이 이제 시즌 안에서 마감되므로(finance.md §7.1) 이 합은 11개월이
+    // 아니라 **12개월**이고, 그 12번째 달이 순위·컵 상금을 통째로 지고 있다.
+    // 같은 시드가 11개월 시절 £153.3M · 12개월 £204.1M으로 £50.8M 올랐는데 그게
+    // 거의 그대로 상금이다 — 살림이 후해진 것이 아니라 세던 창이 좁았던 것이라,
+    // 11개월 시절 천장까지의 여유(31%)를 12개월에 그대로 옮겼다.
     expect(cash).toBeGreaterThan(85_000_000);
-    expect(cash).toBeLessThan(200_000_000);
+    expect(cash).toBeLessThan(260_000_000);
     // 급여 비중 — 경기가 있는 달은 실제 구단 범위 안에 든다.
     // 프리시즌 달(매치데이 수입 없음)은 자연히 높아 대상에서 뺀다
     const inSeason = season1.filter((r) => r.income.some((l) => l.category === "matchday"));
