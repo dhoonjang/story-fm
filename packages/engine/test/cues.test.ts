@@ -77,6 +77,68 @@ describe("근황은 사실에서 온다", () => {
   });
 });
 
+/**
+ * **"최근 세 경기"는 날짜의 것이다.**
+ *
+ * `state.matches`는 날짜순이 아니다 — 컵·대항전 대진은 그 라운드가 확정될 때 배열
+ * 뒤에 붙는다. 배열 끝에서 세면 시즌 후반의 "최근"이 방금 편성된 컵 경기가 되고,
+ * 리그 3연속 명단 제외가 조용히 새어 나간다. 화면에 아무 소리도 나지 않는 종류라
+ * 여기가 아니면 드러날 자리가 없다.
+ */
+describe("연속 명단 제외는 날짜순 직전 세 경기로 센다", () => {
+  /** 치른 경기 하나 — `lineup`에 있는 선수만 뛴 것으로 남는다 */
+  function played(state: GameState, id: string, date: string, lineup: readonly string[]) {
+    state.matches.push({
+      id,
+      season: state.season,
+      competitionId: "epl",
+      round: 1,
+      date,
+      homeTeamId: state.userTeamId,
+      awayTeamId: "chelsea",
+      result: {
+        homeGoals: 1,
+        awayGoals: 0,
+        scorers: [],
+        homeLineup: [...lineup],
+      },
+    });
+  }
+
+  /** 세 경기를 벤치에서 본 선수 하나를 만들고, 그 선수를 돌려준다 */
+  function benchedForThree(state: GameState) {
+    const target = firsts(state, 1)[0]!;
+    const others = userPlayers(state)
+      .filter((p) => p.id !== target.id)
+      .map((p) => p.id);
+    for (const [i, day] of [4, 3, 2].entries()) {
+      played(state, `m-league-${i}`, addDays(state.date, -day), others);
+    }
+    return target;
+  }
+
+  it("배열 뒤에 붙은 옛 경기가 최근 세 경기를 밀어내지 않는다", () => {
+    const state = quiet(createTestGame(11));
+    const target = benchedForThree(state);
+    // 3주 전 컵 경기가 이제야 배열 끝에 붙는다 — 그날은 이 선수가 뛰었다
+    played(state, "m-cup-old", addDays(state.date, -21), [target.id]);
+
+    const cue = speakerCues(state, 40).find((c) => c.playerId === target.id);
+    expect(cue?.fact).toBe("3경기 연속 명단 제외");
+  });
+
+  it("직전 경기에 나섰으면 근황이 아니다 — 배열 끝이 옛 대진이어도", () => {
+    const state = quiet(createTestGame(11));
+    const target = firsts(state, 1)[0]!;
+    played(state, "m-yesterday", addDays(state.date, -1), [target.id]);
+    // 배열 끝의 셋은 3주 전 컵 대진이다 — 편성 순서지 날짜 순서가 아니다
+    for (const [i, day] of [21, 22, 23].entries()) {
+      played(state, `m-cup-${i}`, addDays(state.date, -day), []);
+    }
+    expect(speakerCues(state, 40).some((c) => c.playerId === target.id)).toBe(false);
+  });
+});
+
 describe("한 사람이 계속 말하지 않는다", () => {
   it("최근에 말한 선수는 뒤로 밀린다", () => {
     const state = quiet(createTestGame(11));
