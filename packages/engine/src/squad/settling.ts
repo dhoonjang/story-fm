@@ -1,4 +1,10 @@
-import type { GamePlayer, SettlingEvent } from "@story-fm/domain";
+import type {
+  GamePlayer,
+  Injury,
+  SettlingEvent,
+  TrainingSession,
+  Transfer,
+} from "@story-fm/domain";
 import { ageOf } from "@story-fm/domain";
 import { diffDays } from "../competition/calendar";
 import { countryOfTeam } from "../data/team-catalog";
@@ -123,9 +129,11 @@ type Tie =
  * 줄은 온 날이다.
  */
 export function joinedUserTeamOn(state: GameState, playerId: string): string | null {
-  const ledger = state.transfers
-    .filter((t) => t.gamePlayerId === playerId)
-    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  // 원장에 줄이 없는 선수가 대부분이다 — 정렬은 걸을 줄이 있을 때만 한다
+  const ledger: Transfer[] = [];
+  for (const t of state.transfers) if (t.gamePlayerId === playerId) ledger.push(t);
+  if (ledger.length === 0) return null;
+  ledger.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 
   let tie: Tie = "none";
   let joined: string | null = null;
@@ -159,13 +167,8 @@ export function joinedUserTeamOn(state: GameState, playerId: string): string | n
 }
 
 /** 그 날 부상 중이었나 — 부상 기간의 훈련은 적응에 쌓이지 않는다 */
-function injuredOn(state: GameState, playerId: string, date: string): boolean {
-  return state.injuries.some(
-    (i) =>
-      i.gamePlayerId === playerId &&
-      i.occurredOn <= date &&
-      date < (i.returnedOn ?? i.expectedReturn),
-  );
+function injuredOn(injuries: readonly Injury[], date: string): boolean {
+  return injuries.some((i) => i.occurredOn <= date && date < (i.returnedOn ?? i.expectedReturn));
 }
 
 /** 영입 이후 우리 팀에서 그라운드를 밟은 횟수 */
@@ -184,15 +187,24 @@ function matchesSince(state: GameState, playerId: string, since: string): number
   return count;
 }
 
-/** 영입 이후 실제로 치른 팀 훈련 일수 (휴식 세션·부상 기간 제외) */
+/**
+ * 영입 이후 실제로 치른 팀 훈련 일수 (휴식 세션·부상 기간 제외).
+ *
+ * 세션과 부상은 **하루마다가 아니라 한 번** 추린다 — 일정 × 세션 × 부상이던
+ * 자리다. `find`가 첫 줄을 고르므로 색인도 먼저 만난 줄을 남긴다.
+ */
 function trainingsSince(state: GameState, playerId: string, since: string): number {
+  const sessions = new Map<string, TrainingSession>();
+  for (const session of state.trainingSessions) {
+    if (!sessions.has(session.id)) sessions.set(session.id, session);
+  }
+  const injuries = state.injuries.filter((i) => i.gamePlayerId === playerId);
   let count = 0;
   for (const entry of state.schedule) {
     if (entry.type !== "training" || entry.status !== "done") continue;
     if (entry.date < since || entry.date > state.date) continue;
-    const session = state.trainingSessions.find((s) => s.id === entry.refId);
-    if (session?.rest) continue; // 쉬는 날은 함께한 훈련이 아니다
-    if (injuredOn(state, playerId, entry.date)) continue;
+    if (sessions.get(entry.refId)?.rest) continue; // 쉬는 날은 함께한 훈련이 아니다
+    if (injuredOn(injuries, entry.date)) continue;
     count += 1;
   }
   return count;

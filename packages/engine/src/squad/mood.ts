@@ -1,5 +1,5 @@
 import { ageOf } from "@story-fm/domain";
-import type { GamePlayer, PlayerIssueReason } from "@story-fm/domain";
+import type { GamePlayer, MatchRecord, PlayerIssueReason } from "@story-fm/domain";
 import { diffDays } from "../competition/calendar";
 import { formLabel, RATING_BASELINE, type FormLabel } from "./form";
 import { settlingOf } from "./settling";
@@ -101,17 +101,50 @@ interface LastMatch {
   days: number;
 }
 
+/** 선수 → 그가 마지막으로 평점을 받은 경기 */
+export type LastMatchIndex = ReadonlyMap<string, MatchRecord>;
+
+/**
+ * 그 색인을 짓는다 — **원장을 선수마다가 아니라 한 번만 훑는다.**
+ *
+ * 명단 전체의 심경을 한 번에 지을 때(`buildMoodBrief`) 45명이 각자 2,000경기를
+ * 훑던 자리다. 고르는 규칙은 `lastRatedMatch`와 같아야 한다 — 갈리면 여운
+ * 문장이 조용히 어긋난다.
+ */
+export function lastMatchIndexOf(state: GameState): LastMatchIndex {
+  const best = new Map<string, MatchRecord>();
+  for (const match of state.matches) {
+    if (match.date > state.date) continue;
+    const ratings = match.result?.ratings;
+    if (!ratings) continue;
+    for (const [playerId, rating] of Object.entries(ratings)) {
+      if (rating === undefined) continue;
+      const seen = best.get(playerId);
+      if (seen === undefined || match.date >= seen.date) best.set(playerId, match);
+    }
+  }
+  return best;
+}
+
+/** 이 선수의 마지막 평점 경기 — 같은 날이 둘이면 원장 뒤쪽 줄이 이긴다 */
+function lastRatedMatch(state: GameState, playerId: string): MatchRecord | undefined {
+  let best: MatchRecord | undefined;
+  for (const match of state.matches) {
+    if (match.result?.ratings?.[playerId] === undefined) continue;
+    if (match.date > state.date) continue;
+    if (best === undefined || match.date >= best.date) best = match;
+  }
+  return best;
+}
+
 /**
  * 그 선수가 마지막으로 뛴 우리 경기 — **평점이 남은 경기만** 본다.
  *
  * 평점은 유저 팀 경기에만 기록되므로(`MATCH.result.ratings`) 이 함수는 곧
  * "감독이 지켜본 경기"를 고르는 셈이다. 타 팀 경기의 여운까지 흉내 내지 않는다.
  */
-function lastMatchOf(state: GameState, playerId: string): LastMatch | null {
-  const rated = state.matches
-    .filter((m) => m.result?.ratings?.[playerId] !== undefined && m.date <= state.date)
-    .sort((a, b) => (a.date < b.date ? 1 : -1));
-  const match = rated[0];
+function lastMatchOf(state: GameState, playerId: string, index?: LastMatchIndex): LastMatch | null {
+  const match = index ? index.get(playerId) : lastRatedMatch(state, playerId);
   if (!match?.result) return null;
   const home = match.homeTeamId === state.userTeamId;
   const ours = home ? match.result.homeGoals : match.result.awayGoals;
@@ -159,7 +192,11 @@ function grievanceOf(state: GameState, playerId: string): MoodFact | null {
  * 화면·조회 도구는 `moodOf`를 부른다. 이 함수를 직접 부르는 곳은 앵커를 세우는
  * 브리프뿐이다.
  */
-export function moodFactsOf(state: GameState, player: GamePlayer): MoodFact[] {
+export function moodFactsOf(
+  state: GameState,
+  player: GamePlayer,
+  index?: LastMatchIndex,
+): MoodFact[] {
   const facts: MoodFact[] = [];
 
   const injury = openInjury(state, player.id);
@@ -186,7 +223,7 @@ export function moodFactsOf(state: GameState, player: GamePlayer): MoodFact[] {
      * 방금 뛴 경기가 있으면 그것이 지금 마음을 가장 크게 차지한다. 불만보다
      * 앞에 두지는 않는다 — 불만은 감독이 손을 써야 하는 일이고 여운은 지나간다.
      */
-    const last = lastMatchOf(state, player.id);
+    const last = lastMatchOf(state, player.id, index);
     const fresh = last !== null && last.days <= AFTERGLOW_DAYS;
 
     // ── 마음 ──
@@ -391,12 +428,14 @@ export interface MoodBrief {
  */
 export function buildMoodBrief(state: GameState, from: string, to: string): MoodBrief | null {
   const targets: Array<MoodTarget & { weight: number }> = [];
+  // 명단 전원이 같은 원장을 본다 — 한 번 세워서 앵커까지 함께 쓴다
+  const lastMatches = lastMatchIndexOf(state);
   for (const player of playersOf(state, state.userTeamId)) {
     if (openInjury(state, player.id) || activeSuspension(state, player.id)) continue;
     const facts: string[] = [];
     let weight = 0;
 
-    const last = lastMatchOf(state, player.id);
+    const last = lastMatchOf(state, player.id, lastMatches);
     if (last && last.days <= AFTERGLOW_DAYS) {
       facts.push(
         `${last.days === 0 ? "오늘" : `${last.days}일 전`} 경기 ${OUTCOME_WORD[last.outcome]}` +
@@ -427,7 +466,7 @@ export function buildMoodBrief(state: GameState, from: string, to: string): Mood
     targets.push({
       playerId: player.id,
       name: player.name,
-      anchor: moodAnchor(moodFactsOf(state, player)),
+      anchor: moodAnchor(moodFactsOf(state, player, lastMatches)),
       facts,
       hasIssue: issue !== undefined,
       weight,
