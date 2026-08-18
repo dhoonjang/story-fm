@@ -10,6 +10,7 @@ import { euroCompetitionOf } from "../competition/europe";
 import { hashChannel } from "../core/rng";
 import { knowledgeOf, KNOWLEDGE_KO, type Knowledge } from "../squad/scouting";
 import { USER_WAGE_HEADROOM, wageRoomOf } from "../world/wages";
+import { budgetFreezeLabel } from "../club/finance";
 import {
   activeContract,
   financeOf,
@@ -375,7 +376,10 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     }
     const ourFinance = financeOf(state, state.userTeamId);
     if (ourFinance.budgetFrozen && terms.fee > 0) {
-      blockers.push("보드가 이적 예산을 동결했습니다 (PSR) — 먼저 매각해야 합니다");
+      // 동결에는 두 출구가 있다 — PSR과 부채 (finance.md §9.2·§9.4)
+      blockers.push(
+        `보드가 이적 예산을 동결했습니다${budgetFreezeLabel(state, state.userTeamId)} — 먼저 매각해야 합니다`,
+      );
     }
     if (terms.fee > ourFinance.transferBudget) {
       blockers.push(

@@ -68,16 +68,16 @@ const TELEVISED_TYPICAL = 32;
 /**
  * **파라슈트 페이먼트** — 강등 클럽이 떠나온 리그에서 받는 낙하산.
  *
- * 실제 EPL은 강등 뒤 3년간 순수 중계 몫의 55/45/20%를 준다(승격 1시즌 만에
- * 다시 내려간 팀은 2년). 우리 균등 배분(£110M)은 중앙 상업 몫까지 흡수한
- * 값이라 같은 금액이 되도록 비율을 조금 낮춰 잡는다.
+ * 실제 EPL은 강등 뒤 3년간 순수 중계 몫의 55/45/20%를 준다. 우리 균등 배분
+ * (£110M)은 중앙 상업 몫까지 흡수한 값이라 같은 금액이 되도록 비율을 조금 낮춰
+ * 잡는다. **연차는 언제나 이 배열의 길이다** — 실제 EPL의 "승격 1시즌 만에 다시
+ * 내려가면 2년" 조항은 승격이 낙하산 기록을 지우는 우리 세계에서 성립하지 않는다
+ * (`stopParachute` — 그 상태가 남지 않는다).
  *
  * 이게 없으면 강등이 곧 파산이다 — 실제로 챔피언십의 재정 기준선을 올려
  * 놓는 것이 이 돈이고, 강등 팀의 40%가 한 시즌 만에 돌아오는 이유이기도 하다.
  */
 const PARACHUTE_RATE: readonly number[] = [0.45, 0.36, 0.16];
-/** 승격 1시즌 만에 다시 강등되면 2년만 받는다 */
-const PARACHUTE_YEARS_SHORT = 2;
 
 /**
  * 강등이 상업 수입에 오는 데는 시간이 걸린다 — 스폰서 계약은 그날 끝나지 않는다.
@@ -553,7 +553,13 @@ export function applyMatchFinance(
   const label = `${competitionShortName(match.competitionId)} vs ${teamShortNameIn(state, opponentId)}`;
   const ref = { type: "match" as const, id: match.id };
 
-  // 홈 입장 수입 — 중립 경기(결승)는 우리 수입이 아니다
+  /**
+   * **중립 경기(결승)에선 홈 표기가 자리 이름일 뿐이다** — 게이트는 개최지의 몫이라
+   * 우리 수입이 아니고, 두 팀 다 남의 구장으로 이동한다. 표기로 원정비를 가르면 같은
+   * 결승에서 낸 돈이 갈린다 (finance.md §5.2).
+   */
+  const travels = !home || match.neutral === true;
+
   if (home && !match.neutral) {
     const gate = matchdayRevenue(state, match);
     recordFinance(state, teamId, {
@@ -573,7 +579,8 @@ export function applyMatchFinance(
     digest.push(
       `💰 관중 ${gate.attendance.toLocaleString("en-US")}명 (${Math.round(gate.occupancy * 100)}%) — 입장 수입 ${money(gate.income)}`,
     );
-  } else if (!home && !isFriendly(match)) {
+  }
+  if (travels && !isFriendly(match)) {
     /**
      * **친선 원정에는 비용을 매기지 않는다** — 주최 측이 부담하는 자리다.
      *
@@ -652,8 +659,10 @@ export function applyAiMatchFinance(state: GameState, match: MatchRecord): void 
         label: "경기 운영비",
         amount: gate * MATCHDAY_OPEX_RATE,
       });
-    } else if (side === "away" && !friendly) {
-      // 친선 원정은 주최 측이 부담한다 — 유저 경기와 같은 규칙(`applyMatchFinance`)
+    }
+    // 중립 경기는 양쪽 다 원정이다 — 유저 경기와 같은 규칙(`applyMatchFinance`)
+    if ((side === "away" || match.neutral === true) && !friendly) {
+      // 친선 원정은 주최 측이 부담한다 — 같은 자리
       recordFinance(state, teamId, {
         kind: "expense",
         category: "travel_medical",
@@ -1015,18 +1024,14 @@ export function parachuteSeasonAmount(state: GameState, teamId: string): number 
   return BROADCAST_EQUAL_SEASON * pool * rate;
 }
 
-/**
- * 강등 클럽에 파라슈트를 세운다 — 시즌 전환에서 부른다.
- * 직전 강등에서 아직 받는 중이었으면(승격 1시즌 만의 재강등) 햇수가 짧아진다.
- */
+/** 강등 클럽에 파라슈트를 세운다 — 시즌 전환에서 부른다 */
 export function startParachute(state: GameState, teamId: string, fromLeagueId: string): void {
   const finance = state.finances.find((f) => f.teamId === teamId);
   if (!finance) return;
-  const stillFalling = parachuteSeasonAmount(state, teamId) > 0;
   finance.parachute = {
     fromLeagueId,
     startSeason: state.season + 1,
-    years: stillFalling ? PARACHUTE_YEARS_SHORT : PARACHUTE_RATE.length,
+    years: PARACHUTE_RATE.length,
   };
 }
 
@@ -1036,7 +1041,13 @@ export function stopParachute(state: GameState, teamId: string): void {
   if (finance) delete finance.parachute;
 }
 
-/** 강등 뒤 몇 해가 지났나 — 상업 수입 감소가 이 값을 본다 (없으면 null) */
+/**
+ * 강등 뒤 몇 해가 지났나 — 상업 수입 감소가 이 값을 본다 (없으면 null).
+ *
+ * **`RELEGATED_COMMERCIAL`의 마지막 해를 넘기면 null이다** — 감소는 스폰서 계약이
+ * 다시 쓰이기까지의 지연이지 2부의 상업 수준이 아니고, 상업 정액은 리그를 모르는
+ * 브랜드 등급에서 나온다(finance.md §9-1).
+ */
 function relegatedYear(state: GameState, teamId: string): number | null {
   const drop = state.finances.find((f) => f.teamId === teamId)?.parachute;
   if (!drop) return null;
@@ -1356,8 +1367,19 @@ function pruneLedger(state: GameState): void {
   finance.ledger = finance.ledger.filter((e) => monthOf(e.date) >= cutoff);
 }
 
-function lineOf(entries: LedgerEntry[], category: FinanceCategory): FinanceReportLine | null {
-  const mine = entries.filter((e) => categoryOf(e) === category);
+/**
+ * 한 카테고리의 한 줄 — **방향은 `kind`가 정한다.**
+ *
+ * 카테고리만으로 접으면 수입·지출 양쪽에 설 수 있는 `other`(카테고리 도입 전 세이브)가
+ * 한쪽 줄에서 상계된다 — 옛 수입 엔트리가 지출 합에 음의 몫으로 섞이고 수입 합에서는
+ * 통째로 빠져, 잔고는 그대로인데 보고서 합이 원장 합과 갈린다 (finance.md §4.2·§4.4).
+ */
+function lineOf(
+  entries: LedgerEntry[],
+  kind: "income" | "expense",
+  category: FinanceCategory,
+): FinanceReportLine | null {
+  const mine = entries.filter((e) => e.kind === kind && categoryOf(e) === category);
   if (mine.length === 0) return null;
   const byLabel = new Map<string, number>();
   for (const e of mine) byLabel.set(e.label, (byLabel.get(e.label) ?? 0) + e.amount);
@@ -1381,11 +1403,11 @@ export function summarise(entries: LedgerEntry[]): {
   pnlNet: number;
   wageRatio: number;
 } {
-  const income = FINANCE_INCOME_CATEGORIES.map((c) => lineOf(entries, c)).filter(
-    (x): x is FinanceReportLine => x !== null,
-  );
+  const income = [...FINANCE_INCOME_CATEGORIES, "other" as const]
+    .map((c) => lineOf(entries, "income", c))
+    .filter((x): x is FinanceReportLine => x !== null);
   const expense = [...FINANCE_EXPENSE_CATEGORIES, "other" as const]
-    .map((c) => lineOf(entries, c))
+    .map((c) => lineOf(entries, "expense", c))
     .filter((x): x is FinanceReportLine => x !== null);
 
   const incomeTotal = income.reduce((s, l) => s + l.amount, 0);
@@ -1569,23 +1591,42 @@ function monthlyInterestOf(state: GameState, teamId: string): number {
 }
 
 /**
- * 예산 동결 판정 — **PSR과 부채가 같은 출구를 쓴다.**
+ * 지갑을 닫은 이유 — **PSR과 부채가 같은 출구를 쓴다.**
  *
  * PSR은 유저에게만 걸린다(AI는 보고서를 남기지 않는다). 부채는 잔고의 부호로만
  * 읽으므로 AI에게도 그대로 걸리고, `ai-market`이 이미 `budgetFrozen`을 보고 있어
  * 빚더미 구단이 영입을 멈춘다.
  */
+function budgetFreezeReason(state: GameState, teamId: string): "psr" | "debt" | null {
+  if (teamId === state.userTeamId && psrStatus(state).headroom < 0) return "psr";
+  if (debtOf(state, teamId) > debtLimitOf(state, teamId)) return "debt";
+  return null;
+}
+
+/**
+ * 동결을 알리는 자리에 붙는 사유 — **동결에는 두 출구가 있다**(§9.2·§9.4). 사유를
+ * 말하지 않으면 빚으로 닫힌 지갑을 감독이 PSR로 읽는다.
+ *
+ * 플래그는 월초에 세워지므로 그 뒤로 사정이 달라졌을 수 있다 — 지금 짚이는 사유가
+ * 없으면 아무 말도 붙이지 않는다.
+ */
+export function budgetFreezeLabel(state: GameState, teamId: string): string {
+  const reason = budgetFreezeReason(state, teamId);
+  return reason === "psr" ? " (PSR 한도 초과)" : reason === "debt" ? " (부채 한도 초과)" : "";
+}
+
+/** 예산 동결 판정 — 매달 다시 본다. 갚으면 그 자리에서 풀린다 (§9.4) */
 function refreshBudgetFreeze(state: GameState, teamId: string, digest: string[]): void {
   const finance = financeOf(state, teamId);
   const isUser = teamId === state.userTeamId;
-  const byDebt = debtOf(state, teamId) > debtLimitOf(state, teamId);
-  const byPsr = isUser && psrStatus(state).headroom < 0;
+  const cause = budgetFreezeReason(state, teamId);
   const before = finance.budgetFrozen === true;
-  finance.budgetFrozen = byDebt || byPsr;
+  finance.budgetFrozen = cause !== null;
 
   if (!isUser || finance.budgetFrozen === before) return;
   if (finance.budgetFrozen) {
-    const reason = byPsr ? "PSR 한도를 넘겨" : `부채가 ${money(debtOf(state, teamId))}에 이르러`;
+    const reason =
+      cause === "psr" ? "PSR 한도를 넘겨" : `부채가 ${money(debtOf(state, teamId))}에 이르러`;
     digest.push(`⚠️ 보드가 ${reason} 이적 예산을 동결했다 — 매각 없이는 영입할 수 없다`);
     pushNarrative(state, `이적 예산 동결 — ${reason}`, 4);
   } else {
@@ -1601,12 +1642,32 @@ export function psrStatus(state: GameState): { rolling3Season: number; headroom:
 
 // ── 시즌 단위 ───────────────────────────────────────────
 
+/**
+ * 시즌 성과 보너스 — 순위 계단과 그 자리의 주급 총액 배수 (finance.md §6).
+ *
+ * **고정된 계단이다.** 리그 팀 수에서도, 대항전 티켓 수(`cup-catalog`의 `slots` — EPL은
+ * UCL 5 · UEL 4 · UECL 2)에서도 파생하지 않는다: 선수단에 무엇을 약속했는가의 자이지
+ * 진출 자체의 판정이 아니다.
+ */
+const SEASON_BONUS = {
+  champion: { position: 1, wageMultiple: 4 },
+  ucl: { position: 4, wageMultiple: 2 },
+  europe: { position: 6, wageMultiple: 1 },
+} as const;
+
 /** 우승·유럽 진출 보너스 — 시즌 리뷰에서 (주급 총액 배수) */
 export function paySeasonBonuses(state: GameState, position: number, digest: string[]): void {
   const wages = weeklyWagesOf(state, state.userTeamId);
-  const bonus = position === 1 ? wages * 4 : position <= 4 ? wages * 2 : position <= 6 ? wages : 0;
+  const bonus =
+    position === SEASON_BONUS.champion.position
+      ? wages * SEASON_BONUS.champion.wageMultiple
+      : position <= SEASON_BONUS.ucl.position
+        ? wages * SEASON_BONUS.ucl.wageMultiple
+        : position <= SEASON_BONUS.europe.position
+          ? wages * SEASON_BONUS.europe.wageMultiple
+          : 0;
   if (bonus <= 0) return;
-  const label = position === 1 ? "우승 보너스" : "유럽 진출 보너스";
+  const label = position === SEASON_BONUS.champion.position ? "우승 보너스" : "유럽 진출 보너스";
   if (
     payOnce(state, state.userTeamId, `${label}:S${state.season}`, {
       kind: "expense",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FINANCE_CATEGORY_KO, type FinanceCategory } from "@story-fm/domain";
+import { FINANCE_CATEGORY_KO, type FinanceCategory, type LedgerEntry } from "@story-fm/domain";
 import type { GameState } from "@story-fm/engine";
 import {
   annualRevenueEstimate,
@@ -28,6 +28,8 @@ import {
   currentMonthSummary,
   financeLookup,
   financeOf,
+  ensureMonthlyPosted,
+  paySeasonBonuses,
   isTelevised,
   leagueOfTeam,
   matchdayRevenue,
@@ -176,6 +178,53 @@ describe("매치데이", () => {
     ).toBe(false);
   });
 
+  /**
+   * 중립 결승은 **홈 표기가 자리 이름일 뿐**이다. 게이트는 개최지의 몫이라 어느 쪽도
+   * 받지 않는데, 원정비를 홈 표기로 가르면 같은 결승에서 한 팀만 £400k를 낸다
+   * (finance.md §5.2). 컵 경기라 생중계 수당도 없어 움직이는 돈이 원정비뿐이다.
+   */
+  it("중립 결승은 홈 수입이 없고 양 팀 다 원정비를 낸다", () => {
+    const league = leagueOfTeam(createTestGame().userTeamId);
+
+    const travel = (userIsHome: boolean): { user: number; rival: number } => {
+      const state = createTestGame();
+      const rival = state.teams.find(
+        (t) => t.id !== state.userTeamId && leagueOfTeam(t.id) === league,
+      )!.id;
+      const final = {
+        ...state.matches.find((m) => m.competitionId === league)!,
+        id: `neutral-final-${userIsHome ? "home" : "away"}`,
+        competitionId: "ucl",
+        stage: "final" as const,
+        homeTeamId: userIsHome ? state.userTeamId : rival,
+        awayTeamId: userIsHome ? rival : state.userTeamId,
+        neutral: true,
+        result: null,
+      };
+      const before = financeOf(state, rival).balance;
+      applyMatchFinance(state, final, "win", []);
+
+      const ledger = financeOf(state, state.userTeamId).ledger;
+      // 개최지의 게이트는 어느 쪽의 수입도 아니다
+      expect(ledger.some((e) => categoryOf(e) === "matchday")).toBe(false);
+      return {
+        user: ledger
+          .filter((e) => categoryOf(e) === "travel_medical")
+          .reduce((sum, e) => sum + e.amount, 0),
+        // AI 팀은 원장을 남기지 않으므로(§4.5) 잔고로 읽는다
+        rival: before - financeOf(state, rival).balance,
+      };
+    };
+
+    const asHome = travel(true);
+    const asAway = travel(false);
+    // 표기가 어느 쪽이든 우리가 내는 돈이 같고, 상대도 같은 돈을 낸다
+    expect(asHome.user).toBeGreaterThan(0);
+    expect(asAway.user).toBe(asHome.user);
+    expect(asHome.rival).toBe(asHome.user);
+    expect(asAway.rival).toBe(asHome.user);
+  });
+
   it("경기 후 홈 입장 수입·운영비가 원장에 남는다", () => {
     const state = createMiniGame();
     let guard = 12;
@@ -270,6 +319,26 @@ describe("월간 보고서", () => {
     // 그래도 달력은 날짜와 금액을 안다 — 보고서의 highlights에서 파생하기 때문
     const day = buildOfficeViews(state).calendar.events[bigDate] ?? [];
     expect(day.filter((e) => e.kind === "money").map((e) => e.text)).toEqual([`${label} +£2.0M`]);
+  });
+
+  /**
+   * 카테고리 도입 전 세이브의 엔트리는 `other`로 읽힌다 — 그 카테고리는 **수입·지출
+   * 양쪽에 설 수 있는 유일한 자리**다. 카테고리만으로 접으면 옛 수입이 지출 줄에
+   * 상계돼, 잔고는 그대로인데 보고서 합이 원장 합과 갈린다 (finance.md §4.2).
+   */
+  it("카테고리 없는 옛 엔트리도 방향대로 선다", () => {
+    const legacy: LedgerEntry[] = [
+      { id: "led-old-1", date: "2026-08-02", kind: "income", label: "옛 수입", amount: 3_000_000 },
+      { id: "led-old-2", date: "2026-08-03", kind: "expense", label: "옛 지출", amount: 1_000_000 },
+    ];
+    const s = summarise(legacy);
+
+    expect(s.incomeTotal).toBe(3_000_000);
+    expect(s.expenseTotal).toBe(1_000_000);
+    expect(s.cashNet).toBe(2_000_000);
+    // 양쪽에 한 줄씩 선다 — 한쪽으로 몰면 3M과 1M이 한 숫자가 된다
+    expect(s.income.find((l) => l.category === "other")?.amount).toBe(3_000_000);
+    expect(s.expense.find((l) => l.category === "other")?.amount).toBe(1_000_000);
   });
 
   it("급여 비중과 판단 재료(notes)가 붙는다", () => {
@@ -679,6 +748,88 @@ describe("이적료 — 현금과 장부 두 축", () => {
         amortisationOf(state, state.userTeamId).find((l) => l.playerId === target.id)?.monthly ?? 0;
     }
     expect(Math.round(total)).toBe(fee);
+  });
+});
+
+/**
+ * 성적이 살림으로 오는 두 자리 — 스폰서 조항(수입)과 선수단 보너스(지출).
+ * 화면에 서지 않는 계수라 어긋나도 조용하다 (finance.md §5.3·§6).
+ */
+describe("성적이 돈이 되는 자리", () => {
+  /** 그달 스폰서십 수입 — 조항이 곱해진 값 */
+  function sponsorship(state: GameState, month: string): number {
+    return financeOf(state, state.userTeamId)
+      .ledger.filter((e) => monthOf(e.date) === month && e.label === "스폰서십")
+      .reduce((sum, e) => sum + e.amount, 0);
+  }
+
+  it("대항전 진출은 대회마다 붙고, 트로피는 종류를 가리지 않고 한 번 붙는다", () => {
+    const state = createTestGame(42, "arsenal");
+    const us = state.userTeamId;
+    /**
+     * 달만 넘겨 같은 세이브에서 조항을 갈아 끼운다 — 세계를 여섯 번 세우지 않는다.
+     * 월초 정액 항목은 그달에 한 번만 붙으므로(`ensureMonthlyPosted`) 달이 곧 표본이다.
+     */
+    const clause = (month: string, set: () => void): number => {
+      set();
+      state.date = `${month}-01`;
+      ensureMonthlyPosted(state);
+      return sponsorship(state, month);
+    };
+
+    const bare = clause("2026-07", () => {
+      state.euroEntrants = [];
+      state.trophies = [];
+    });
+    const ucl = clause("2026-08", () => {
+      state.euroEntrants = [{ cupId: "ucl", teams: [us] }];
+    });
+    const uel = clause("2026-09", () => {
+      state.euroEntrants = [{ cupId: "uel", teams: [us] }];
+    });
+    const uecl = clause("2026-10", () => {
+      state.euroEntrants = [{ cupId: "uecl", teams: [us] }];
+    });
+    const cup = clause("2026-11", () => {
+      state.euroEntrants = [];
+      state.trophies = [{ season: state.season - 1, competition: "FA컵", teamId: us }];
+    });
+    const two = clause("2026-12", () => {
+      state.trophies = [
+        { season: state.season - 1, competition: "FA컵", teamId: us },
+        { season: state.season - 1, competition: "프리미어리그", teamId: us },
+      ];
+    });
+
+    expect(bare).toBeGreaterThan(0);
+    expect(ucl / bare).toBeCloseTo(1.15, 3);
+    expect(uel / bare).toBeCloseTo(1.06, 3);
+    expect(uecl / bare).toBeCloseTo(1.03, 3);
+    // 리그든 컵이든 트로피 하나 — 두 개를 들어도 값이 같다
+    expect(cup / bare).toBeCloseTo(1.2, 3);
+    expect(two).toBe(cup);
+  });
+
+  it("시즌 성과 보너스는 순위 계단마다 주급 총액의 배수다", () => {
+    const state = createTestGame(42, "arsenal");
+    const wages = weeklyWagesOf(state, state.userTeamId);
+    expect(wages).toBeGreaterThan(0);
+
+    /** 멱등 키가 시즌을 달고 있으므로 시즌을 넘겨 계단마다 새로 받는다 */
+    const bonusAt = (position: number): number => {
+      const before = financeOf(state, state.userTeamId).balance;
+      paySeasonBonuses(state, position, []);
+      state.season += 1;
+      return before - financeOf(state, state.userTeamId).balance;
+    };
+
+    expect(bonusAt(1)).toBe(Math.round(wages * 4));
+    expect(bonusAt(2)).toBe(Math.round(wages * 2));
+    expect(bonusAt(4)).toBe(Math.round(wages * 2));
+    expect(bonusAt(5)).toBe(Math.round(wages));
+    expect(bonusAt(6)).toBe(Math.round(wages));
+    // 계단은 고정이다 — 리그 팀 수도, 대항전 티켓 수(EPL은 UCL 5)도 보지 않는다
+    expect(bonusAt(7)).toBe(0);
   });
 });
 
