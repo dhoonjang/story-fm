@@ -812,7 +812,7 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
 
 - **오피스 뷰**: 우리 선수는 숫자 그대로(15축·폼 화살표·체력·심경), 타 팀은 §9
   오차를 반영한 관측값 + OVR 옆 `±N`(오차 0이면 안 그린다).
-- **채팅(GM)**: 숫자를 읊지 않고 밴드로. 자는 `RATING_TIERS`(`engine/squad/scouting.ts`)
+- **채팅(GM)**: 숫자를 읊지 않고 밴드로. 자는 `RATING_TIERS`(`domain/player.ts`)
   **하나뿐이다** — 화면이 고르는 색과 GM이 읊는 말이 같은 표에서 나와야 같은 선수를
   두고 둘이 다른 말을 하지 않는다. 문서는 값을 복제하지 않는다.
   - ⚠️ **이 자는 종합과 15축에 함께 걸린다.** 축의 눈금은 이 이슈로 움직이지
@@ -871,7 +871,8 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
 | 시드 파생·노화·나이 배율 한 표 (`deriveAxes`·`agingDelta`·`AGE_GROWTH_BANDS`·`attributeGainScale/DeclineScale`)                 | `packages/engine/src/world/attributes.ts`                                               |
 | 월간 성장 (`developsByCore`·`rollMonthlyAxes`·`growChance`)                                                                     | `packages/engine/src/squad/development.ts`                                              |
 | 폼 (`formLabel`·`formAngle`)                                                                                                    | `packages/engine/src/squad/form.ts`                                                     |
-| 안개·잠재력·경기 중 체력 (`observationMargin`·`readCondition`·`observedFit`)                                                    | `packages/engine/src/squad/scouting.ts`                                                 |
+| 안개의 크기·잠재력·경기 중 체력 (`observationMargin`·`readCondition`)                                                           | `packages/engine/src/squad/scouting.ts`                                                 |
+| 안개를 얹는 규칙·등급표 (`observedFit`·`observedOverall`·`RATING_TIERS`) — 화면도 같이 부른다                                   | `packages/domain/src/player.ts` (엔진이 재수출)                                         |
 | 파견 한도·대기 (`scoutPlayer`·`deferScout`·`scoutingSummary`)                                                                   | `packages/engine/src/skills/index.ts` · `packages/engine/src/squad/scouting.ts`         |
 | 보고서 카드와 도착 줄 (`scoutReportCard`·`scoutReportLine`)                                                                     | `packages/engine/src/views/views.ts`                                                    |
 | 정착 (`settlingOf`·`SETTLING_EVENT`)                                                                                            | `packages/engine/src/squad/settling.ts`                                                 |
