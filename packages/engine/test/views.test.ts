@@ -13,6 +13,7 @@ import {
   addDays,
   diffDays,
   playerById,
+  type GameState,
 } from "@story-fm/engine";
 import { edgeOf } from "@story-fm/sim";
 import {
@@ -323,12 +324,35 @@ describe("오피스 뷰 — 재정·순위·커리어", () => {
 });
 
 describe("id → 이름 치환", () => {
+  const state = createTestGame();
+
   it("humanizePlayerIds가 서사 속 선수 id를 이름으로 바꾼다", () => {
-    const state = createTestGame();
     const p = userPlayers(state)[0]!;
     const out = humanizePlayerIds(state, `@${p.id}: 준비됐습니다. ${p.id} 침투 시작.`);
     expect(out).toContain(p.name);
     expect(out).not.toContain(p.id);
+  });
+
+  /**
+   * 부분 문자열까지 치우면 짧은 id가 긴 id를 반쪽만 먹는다 — 이슈의 `rodri` ⊂
+   * `rodrigo-muniz`가 그 자리고, 동명이인을 가르는 `-<생년>` 꼬리도 같은 모양이다.
+   * 세계는 필요 없다 — 이 함수가 읽는 것은 `players`의 id와 이름뿐이다.
+   */
+  it("id는 낱말 경계에서만 바뀐다 — 짧은 id가 긴 id를 반쪽 먹지 않는다", () => {
+    const named = {
+      players: [
+        { id: "rodri", name: "로드리" },
+        { id: "rodrigo-muniz", name: "호드리구 무니스" },
+        { id: "rodri-2005", name: "로드리 주니어" },
+      ],
+    } as unknown as GameState;
+
+    expect(humanizePlayerIds(named, "rodrigo-muniz에게 rodri가 붙는다")).toBe(
+      "호드리구 무니스에게 로드리가 붙는다",
+    );
+    expect(humanizePlayerIds(named, "rodri-2005와 rodri는 다른 사람이다")).toBe(
+      "로드리 주니어와 로드리는 다른 사람이다",
+    );
   });
 });
 
