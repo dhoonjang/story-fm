@@ -6,7 +6,13 @@ import type {
   NegotiationVerdict,
 } from "@story-fm/domain";
 import { PITCH_CLAIM_KO, ageOf, naturalPositionOf } from "@story-fm/domain";
-import { addDays, diffDays, seasonYear, windowOpenOn } from "../competition/calendar";
+import {
+  addDays,
+  contractUntil,
+  diffDays,
+  seasonYear,
+  windowOpenOn,
+} from "../competition/calendar";
 import { AGENT_FEE_RATE, budgetFreezeLabel, recordFinance } from "../club/finance";
 import {
   LOAN_FEE_RATE,
@@ -86,8 +92,8 @@ const MAX_ROUNDS = 8;
 const MIN_ACCEPT_PROBABILITY = 5;
 /** 역제안 상한 — 요구액의 이 배수를 넘게 부를 수 없다 */
 const COUNTER_CEILING = 1.15;
-/** 재계약 요구 주급 상한 — 기대치의 이 배수 (선수도 무리한 요구는 하지 않는다) */
-const RENEW_WAGE_CEILING = 1.4;
+/** 역제안 요구 주급 상한 — 기대치의 이 배수 (상대도 무리한 요구는 하지 않는다) */
+const COUNTER_WAGE_CEILING = 1.4;
 /** 협상 유효기간 — 창 마감이 더 이르면 그쪽이 먼저 온다 */
 const NEGOTIATION_DAYS = 14;
 
@@ -603,7 +609,7 @@ export function respondOffer(
     };
   }
   // 재계약의 역제안은 **주급**을 부른다 — 우리 제시액 이상, 기대치의 1.4배 이하
-  const wageCeiling = Math.round(renewalExpectation(state, player) * RENEW_WAGE_CEILING);
+  const wageCeiling = Math.round(renewalExpectation(state, player) * COUNTER_WAGE_CEILING);
   const counterWageDemand = renewing
     ? Math.round(input.weeklyWage ?? renewalExpectation(state, player))
     : 0;
@@ -615,6 +621,29 @@ export function respondOffer(
     return {
       ok: false,
       message: `요구 주급은 ${wageOf(offer.weeklyWage)} 초과 ${wageOf(wageCeiling)} 이하여야 합니다`,
+    };
+  }
+  /**
+   * **데려오는 딜의 역제안 주급에도 범위가 있다.** 이적료에만 걸어 두면 상대가
+   * 이적료는 규칙대로 부르면서 주급을 열 배로 되불러, 코어가 막지 않는 값이 그대로
+   * 협상에 남는다 — 재계약이 이미 막고 있던 자리다(위).
+   *
+   * 자는 같은 배수(`COUNTER_WAGE_CEILING`)이고 기대치만 갈래를 따른다: 희망 주급과
+   * **우리 제시액 중 큰 쪽**이라, 우리가 이미 기대 위를 부른 오퍼에도 상대가 부를 수
+   * 있는 값이 남는다. 매각·임대 송출은 주급을 사는 쪽이 정하므로 대상이 아니다.
+   */
+  const wageAnchor = renewing ? 0 : Math.max(offer.weeklyWage, wageExpectationOf(state, player));
+  const counterWageCeiling = Math.round(wageAnchor * COUNTER_WAGE_CEILING);
+  const counterWage = renewing ? 0 : Math.round(input.weeklyWage ?? wageAnchor);
+  if (
+    !renewing &&
+    !selling &&
+    input.verdict === "counter" &&
+    (counterWage < offer.weeklyWage || counterWage > counterWageCeiling)
+  ) {
+    return {
+      ok: false,
+      message: `역제안 주급은 ${wageOf(offer.weeklyWage)} 이상 ${wageOf(counterWageCeiling)} 이하여야 합니다`,
     };
   }
 
@@ -676,9 +705,6 @@ export function respondOffer(
         `그 조건으로 다시 제안하면 받아들일 것입니다`,
     };
   }
-  const counterWage = Math.round(
-    input.weeklyWage ?? Math.max(offer.weeklyWage, wageExpectationOf(state, player)),
-  );
   negotiation.rounds.push({
     date: state.date,
     by: "them",
@@ -1544,7 +1570,7 @@ function executeRenewal(
     teamId: state.userTeamId,
     weeklyWage: agreed.weeklyWage,
     since: state.date,
-    until: `${seasonYear(state.season) + agreed.contractYears}-06-30`,
+    until: contractUntil(state.date, agreed.contractYears),
     status: "active",
   });
   negotiation.status = "completed";
@@ -1557,7 +1583,7 @@ function executeRenewal(
     ok: true,
     message:
       `${player.name} 재계약 완료 — 주급 ${wageOf(agreed.weeklyWage)}, ` +
-      `${seasonYear(state.season) + agreed.contractYears}-06-30까지. 주급 총액이 늘어납니다`,
+      `${contractUntil(state.date, agreed.contractYears)}까지. 주급 총액이 늘어납니다`,
   };
 }
 
@@ -1888,7 +1914,7 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
     teamId: state.userTeamId,
     weeklyWage: agreed.weeklyWage,
     since: state.date,
-    until: `${seasonYear(state.season) + agreed.contractYears}-06-30`,
+    until: contractUntil(state.date, agreed.contractYears),
     status: "active",
   });
 
@@ -2038,7 +2064,7 @@ function executeSale(
     teamId: buyerTeamId,
     weeklyWage: agreed.weeklyWage,
     since: state.date,
-    until: `${seasonYear(state.season) + agreed.contractYears}-06-30`,
+    until: contractUntil(state.date, agreed.contractYears),
     status: "active",
   });
 
@@ -2420,7 +2446,7 @@ export function runAiRenewals(state: GameState, digest: string[]): void {
       teamId: contract.teamId,
       weeklyWage: Math.round(contract.weeklyWage * (1.05 + rng() * 0.25)),
       since: state.date,
-      until: `${seasonYear(state.season) + years}-06-30`,
+      until: contractUntil(state.date, years),
       status: "active",
     });
 

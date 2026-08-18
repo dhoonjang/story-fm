@@ -1,5 +1,11 @@
 import { ageOf, normalizedLogCurve, FIRST_TEAM_LIMIT, type GamePlayer } from "@story-fm/domain";
-import { addDays, diffDays, seasonYear, windowOpenOn } from "../competition/calendar";
+import {
+  addDays,
+  contractUntil,
+  diffDays,
+  seasonYear,
+  windowOpenOn,
+} from "../competition/calendar";
 import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import { isMarketOnlyLeague } from "../data/league-catalog";
 import { isTopFlightIn, leagueOfTeamIn } from "../competition/promotion";
@@ -247,7 +253,7 @@ function moveClub(
     teamId: toTeamId,
     weeklyWage: wage,
     since: state.date,
-    until: `${seasonYear(state.season) + years}-06-30`,
+    until: contractUntil(state.date, years),
     status: "active",
   });
 

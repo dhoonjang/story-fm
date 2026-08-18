@@ -8,6 +8,7 @@ import {
   answerIncomingOffer,
   arrivedResponses,
   askingPriceFor,
+  contractUntil,
   dealOdds,
   expireNegotiations,
   expiringContracts,
@@ -220,6 +221,47 @@ describe("상대의 판정 — 코어가 가능한 것만 받는다", () => {
     expect(last.verdict).toBe("counter");
     expect(last.note).toBe("이 값이면 놓아준다");
     expect(negotiation.status).toBe("open"); // 역제안은 협상을 계속 열어 둔다
+  });
+
+  /**
+   * 이적료에만 범위가 걸려 있던 자리 — 상대가 이적료는 규칙대로 부르면서 주급을
+   * 열 배로 되불러도 코어가 통과시켰다. 재계약이 이미 막고 있던 것과 같은 자다.
+   */
+  it("역제안 주급은 우리 제시액 이상, 기대치의 1.4배 이하여야 한다", () => {
+    const state = createTestGame(42);
+    const player = target(state);
+    const terms = offerFor(state, player.id, 0.8);
+    sendOffer(state, terms);
+    const negotiation = openNegotiationFor(state, player.id)!;
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+    const fee = Math.max(askingPriceFor(state, player), terms.fee);
+
+    const absurd = respondOffer(state, {
+      negotiationId: negotiation.id,
+      verdict: "counter",
+      fee,
+      weeklyWage: wageExpectationOf(state, player) * 10,
+    });
+    expect(absurd.ok).toBe(false);
+
+    // 우리가 부른 값보다 낮게 되부르는 것도 역제안이 아니다
+    const lower = respondOffer(state, {
+      negotiationId: negotiation.id,
+      verdict: "counter",
+      fee,
+      weeklyWage: Math.round(terms.weeklyWage * 0.5),
+    });
+    expect(lower.ok).toBe(false);
+
+    const demanded = Math.round(Math.max(terms.weeklyWage, wageExpectationOf(state, player)) * 1.2);
+    const fine = respondOffer(state, {
+      negotiationId: negotiation.id,
+      verdict: "counter",
+      fee,
+      weeklyWage: demanded,
+    });
+    expect(fine.ok, fine.message).toBe(true);
+    expect(negotiation.rounds[negotiation.rounds.length - 1]!.weeklyWage).toBe(demanded);
   });
 
   it("결렬되면 그 창에서 다시 오퍼할 수 없다", () => {
@@ -693,6 +735,40 @@ describe("재계약 — 상대가 선수 본인이다", () => {
     expect(fresh.weeklyWage).toBe(Math.round(expectation * 1.2));
     expect(fresh.until > oldContract.until).toBe(true);
     expect(playerById(state, player.id)!.teamId).toBe(state.userTeamId);
+  });
+});
+
+describe("계약의 만료일 — 계약일이 정한다", () => {
+  /**
+   * 경계는 6월 30일과 7월 1일이다. 시즌 기준 연도로 세면 1월의 1년 계약이 그해
+   * 6월 30일, 곧 다섯 달짜리가 된다 (transfer.md §5-1).
+   */
+  it("겨울 1년 계약은 다음 해 6월 30일까지다", () => {
+    expect(contractUntil("2027-01-20", 1)).toBe("2028-06-30");
+    // 여름 계약은 달라지지 않는다 — 역년이 시즌 기준 연도와 같은 구간이다
+    expect(contractUntil("2026-08-15", 1)).toBe("2027-06-30");
+    expect(contractUntil("2026-07-01", 3)).toBe("2029-06-30");
+    // 시즌이 갈리는 자리 — 6/30과 7/1은 역년이 같아 만료도 같다
+    expect(contractUntil("2027-06-30", 1)).toBe("2028-06-30");
+    expect(contractUntil("2027-07-01", 1)).toBe("2028-06-30");
+  });
+
+  it("겨울에 확정한 1년 재계약이 그 시즌 안에서 끝나지 않는다", () => {
+    const state = createTestGame(42);
+    state.date = "2027-01-20"; // 시즌 1(2026-07 ~ 2027-06)의 겨울 창
+    const player = playersOf(state, state.userTeamId)[0]!;
+    activeContract(state, player.id)!.until = addDays(state.date, 120);
+
+    const wage = Math.round(renewalExpectation(state, player) * 1.3);
+    expect(openRenewal(state, { playerId: player.id, weeklyWage: wage, years: 1 }).ok).toBe(true);
+    const negotiation = state.negotiations.find((n) => n.kind === "renew")!;
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+    const accepted = respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
+    expect(accepted.ok, accepted.message).toBe(true);
+    const done = acceptDeal(state, negotiation.id);
+    expect(done.ok, done.message).toBe(true);
+
+    expect(activeContract(state, player.id)!.until).toBe("2028-06-30");
   });
 });
 
