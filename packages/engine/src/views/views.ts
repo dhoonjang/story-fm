@@ -80,6 +80,7 @@ import { USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
 import { MANAGER_ATTR_CAP, MANAGER_XP_PER_LEVEL } from "../skills";
 import { askingPriceFor, marketValueOf, wageExpectationOf } from "../market/market";
 import { settlingPercent } from "../squad/settling";
+import { INJURY_SEVERITY_KO } from "../squad/injury";
 import { computeStandings, type StandingRow } from "../competition/season";
 import { hasRelegation, leagueOfTeamIn } from "../competition/promotion";
 import { RELEGATION_SLOTS } from "../core/league-shape";
@@ -905,7 +906,6 @@ export interface OfficeViews {
 }
 
 const ROLE_KO: Record<AssignmentRole, "선발" | "벤치"> = { starting: "선발", bench: "벤치" };
-const SEVERITY_KO: Record<string, string> = { minor: "경상", moderate: "중상", major: "장기" };
 
 function isUserMatch(state: GameState, matchId: string): boolean {
   const m = state.matches.find((x) => x.id === matchId);
@@ -1684,7 +1684,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         injury: injury
           ? {
               bodyPart: injury.bodyPart,
-              severity: SEVERITY_KO[injury.severity] ?? injury.severity,
+              severity: INJURY_SEVERITY_KO[injury.severity],
               expectedReturn: injury.expectedReturn,
             }
           : null,
