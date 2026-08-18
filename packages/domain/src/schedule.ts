@@ -41,6 +41,16 @@ export const ScheduleEntrySchema = z.object({
   /** 유저 팀 일정인가 — 훈련은 항상 유저 팀, 경기·추첨은 유저 팀 관련 여부 */
   teamId: z.string().min(1).nullable(),
   status: z.enum(["scheduled", "done"]),
+  /**
+   * **훈련 결산이 이 세션을 이미 반영했다** — `status: "done"`은 코어가 하루를 소화한
+   * 표식이고, 이것은 그 위에 LLM 판정이 얹혔다는 표식이다. 둘은 다른 시점에 선다:
+   * 결산은 tick보다 뒤에 오고 실패하면 아예 오지 않는다.
+   *
+   * 결산 도구는 한 턴에 여러 번 불릴 수 있어(agents.md §4) 이 표식이 없으면
+   * 적응도·능력치가 호출 횟수만큼 쌓인다. 훈련 엔트리에만 선다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  settled: z.boolean().optional(),
 });
 export type ScheduleEntry = z.infer<typeof ScheduleEntrySchema>;
 
@@ -119,6 +129,13 @@ export const MatchResultSchema = z.object({
   ratings: z.record(z.string(), z.number()).optional(),
   /** 평점 한 줄 근거 (선수 id → 문장). LLM이 매긴 경우에만 — 숫자만 남기지 않는다 */
   ratingNotes: z.record(z.string(), z.string()).optional(),
+  /**
+   * **이 경기의 결산 판정이 이미 반영됐다** — 평점·전술 적응도·능력치 셋 다.
+   * 표식이 서 있으면 `ratings`는 더 이상 코어 앵커가 아니므로, 두 번째 호출은
+   * 반영하지 않는다(agents.md §4). 앵커는 이 표식이 서기 전의 `ratings`다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  rated: z.boolean().optional(),
 });
 export type MatchResult = z.infer<typeof MatchResultSchema>;
 
