@@ -144,8 +144,7 @@ function isValidOnboardingText(state: GameState, text: string): boolean {
  *
  * **폴백은 없다.** 호출 실패·잘린 응답·문법 위반은 한 번 다시 시도하고, 그래도
  * 안 되면 오류를 올린다 — 규칙 장면으로 대신 채우면 실모드가 도는 줄 알고
- * 넘어간다(실제로 SDK가 비스트리밍 요청을 거부하는 동안 모든 첫 장면이 규칙
- * 장면이었다). `buildOnboardingTurn`은 이제 mock 모드 전용이다.
+ * 넘어간다. `buildOnboardingTurn`은 mock 모드 전용이다.
  */
 export async function runOnboardingTurn(state: GameState, llm?: GameLLM): Promise<GmTurnResult> {
   const config = agentConfig("gm");
@@ -202,7 +201,6 @@ async function runRealGmTurn(
    *
    * 도구를 주지 않아 구간이 굴러갈 수 없고, 패킷도 싣지 않는다. 대신 평시 이력을
    * 그대로 넘겨(`relevantTurns`) 라커룸에서 이어지는 목소리로 첫 휘슬만 연다.
-   * 예전엔 입장과 동시에 20분이 지나가 감독이 킥오프를 본 적이 없었다.
    */
   const kickoff = inMatch && state.pendingMatch?.entered !== true;
   const config = agentConfig(inMatch ? "match-caster" : "gm");
@@ -264,9 +262,7 @@ async function runRealGmTurn(
    * **경기 턴의 ②·③** — 해석이 먼저, 중계가 나중이다 (docs/llm/agents.md §3).
    *
    * 감독의 말을 의도 하나로 옮기고 코어가 스킬로 적용한 뒤 구간까지 굴려 둔다.
-   * 그래서 아래 중계 호출은 **이번 턴에 바뀐 판**을 처음부터 쥐고 시작한다 —
-   * 예전엔 캐스터가 도구로 판을 바꾸고 같은 호출에서 중계까지 써서, 자기가 방금
-   * 바꾼 것을 못 보고 썼다.
+   * 그래서 아래 중계 호출은 **이번 턴에 바뀐 판**을 처음부터 쥐고 시작한다.
    *
    * 킥오프 턴은 지나간다 — 감독이 아직 아무것도 지시하지 않았고, 첫 휘슬만 여는
    * 자리라 구간이 굴러가면 안 된다.
@@ -369,7 +365,7 @@ async function runRealGmTurn(
         user: [
           ...(operatorOrders ?? []).map((order) => buildOperatorMessage(`전술판 조작 — ${order}`)),
           operator ? buildOperatorMessage(message) : buildManagerMessage(state, message),
-          // 코어가 이미 굴린 구간 — 예전엔 도구 반환값으로 오던 것이 이제 입력이다.
+          // 코어가 이미 굴린 구간.
           // 진행이 없는 턴도 그 사실을 싣는다 — 안 실으면 킥오프 턴과 입력이 같아져
           // 캐스터가 첫 휘슬 대신 지어낸 시각과 슛을 중계한다
           ...(inMatch && !kickoff

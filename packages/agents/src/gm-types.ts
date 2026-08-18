@@ -26,7 +26,7 @@ export interface GmToolCall {
 }
 
 export interface GmTurnResult {
-  /** 모델 턴 텍스트 — @문법 (overview §2.1) */
+  /** 모델 턴 텍스트 — @문법 (overview.md §3) */
   text: string;
   toolCalls: GmToolCall[];
   /** 이번 턴에 들어간 골 (경기 턴에만) */
