@@ -9,6 +9,14 @@ import {
   type GameState,
 } from "@story-fm/engine";
 import { slotOverallOf } from "../lib/slot-overall";
+import { money, moneyFine, wage } from "../lib/money";
+import { ratingTone, scoutMargin, scoutValue } from "../lib/scout-report-display";
+
+/**
+ * 화면이 만드는 **순수 파생값** — `apps/web/lib`의 표시 규칙들이다. 문자열이 아니라
+ * 공식이라 여기서 잰다: 코어 등급을 색 구간으로 접는 경계, 금액의 눈금, 그리고
+ * 자리·역할에서 나오는 OVR. 어느 것도 화면을 열면 바로 드러나지 않는다.
+ */
 
 /**
  * **명단 OVR·전술판 칩·선발 평균은 같은 규칙에서 나온다.**
@@ -130,5 +138,54 @@ describe("자리와 역할이 값을 움직인다", () => {
   it("같은 자리라도 역할이 다르면 요구가 다르다", () => {
     const cb = shared().rows.find((p) => p.positions.some((x) => x.position === "CB"))!;
     expect(slotOverallOf(cb, "CB", "stopper")).not.toBe(slotOverallOf(cb, "CB", "cover-defender"));
+  });
+});
+
+/**
+ * 재정 활동 피드를 펼치면 선수 한 명 몫의 월 상각이 선다 — 백만 눈금으로는
+ * 전부 `£0.0M`이 되어 서른 줄이 아무 말도 하지 않는다
+ * (docs/simulation/finance.md §8.1).
+ */
+describe("돈의 눈금", () => {
+  it("작은 금액은 천 단위로 읽어야 값이 보인다", () => {
+    expect(money(40_000)).toBe("£0.0M"); // 이래서 따로 읽는다
+    expect(moneyFine(40_000)).toBe("£40k");
+    expect(moneyFine(725_000)).toBe("£725k");
+  });
+
+  it("백만이 넘으면 이적료와 같은 눈금으로 돌아온다", () => {
+    expect(moneyFine(1_250_000)).toBe(money(1_250_000));
+    expect(moneyFine(48_000_000)).toBe("£48.0M");
+  });
+
+  it("`money`와 `wage`는 그대로다 — 눈금을 전역으로 바꾸지 않는다", () => {
+    expect(money(120_000)).toBe("£0.1M");
+    expect(wage(120_000)).toBe("£120k");
+  });
+});
+
+describe("스카우트 보고서 표시 호환성", () => {
+  it("옛 세이브의 숫자 종합과 잠재력을 그대로 읽는다", () => {
+    expect(scoutValue(81)).toBe(81);
+    expect(scoutValue(94)).toBe(94);
+    expect(scoutMargin(81)).toBe(0);
+  });
+
+  it("새 보고서의 등급 객체에서는 숫자와 오차만 꺼낸다", () => {
+    const observed = { value: 82, label: "주전급", tier: "first", margin: 3 };
+    expect(scoutValue(observed)).toBe(82);
+    expect(scoutMargin(observed)).toBe(3);
+  });
+
+  /** 색 넷은 코어 등급 일곱을 묶은 것이다 — 경계가 코어와 어긋나면 여기서 잡힌다 */
+  it("능력치 숫자를 코어 등급 경계에 맞춰 네 가지 색 구간으로 접는다", () => {
+    expect([59, 60, 70, 78, 85, 90].map(ratingTone)).toEqual([
+      "low",
+      "solid",
+      "solid",
+      "strong",
+      "top",
+      "top",
+    ]);
   });
 });

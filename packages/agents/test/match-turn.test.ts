@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { MatchEvent } from "@story-fm/domain";
 import {
   advanceTime,
   createGame,
@@ -13,6 +14,7 @@ import {
 import {
   applyMatchIntent,
   buildLedgerNote,
+  buildSegmentMessage,
   GmTurnFailure,
   runGmTurn,
   stampMatchScene,
@@ -36,7 +38,7 @@ vi.mock("@story-fm/llm", async (importOriginal) => {
  * 뒤 구간을 굴리므로 **순서가 구조다** (docs/llm/agents.md §3). 여기서 지키는 것은
  * 그 구조가 실제로 그 순서를 내는가다.
  */
-function matchState(seed = 5): GameState {
+function buildMatchState(seed: number): GameState {
   const background = "K리그에서 뛰다 은퇴한 수비수 출신 분석가";
   const state = createGame({
     seed,
@@ -53,6 +55,13 @@ function matchState(seed = 5): GameState {
   expect(started.ok).toBe(true);
   return state;
 }
+
+/**
+ * 킥오프 직전까지 굴려 둔 판을 **한 번만** 세우고 케이스마다 복제한다 — 세계를
+ * 짓고 경기일까지 미는 데 판당 수 초가 들고, 복제는 그 수십 분의 일이다.
+ */
+const KICKOFF = buildMatchState(5);
+const matchState = (): GameState => structuredClone(KICKOFF);
 
 /** 한 턴 — 해석이 냈을 의도를 그대로 코어에 넣는다 (LLM은 이 경로에 없다) */
 function turn(
@@ -217,8 +226,8 @@ describe("경기 턴의 실패 — 어느 걸음이 흔들렸나", () => {
   });
 
   /** 첫 휘슬은 지나간 판 — 손잡이(`계속`)로 온 진행 턴이다 */
-  function rolling(seed = 5): GameState {
-    const state = matchState(seed);
+  function rolling(): GameState {
+    const state = matchState();
     markEntered(state);
     return state;
   }
@@ -261,9 +270,13 @@ describe("경기 턴의 실패 — 어느 걸음이 흔들렸나", () => {
   });
 });
 
+/**
+ * 골 표식 — 화면이 골을 세우는 근거다. 한 경기를 완주시키는 값비싼 셋업이라
+ * **한 판으로 표식의 모든 성질을 잰다**(수·스코어·득점자·우리 편 여부).
+ */
 describe("골 표식", () => {
-  it("경기가 끝나면 표식 수가 스코어와 정확히 같다 — 지어낸 골도, 빠진 골도 없다", () => {
-    const state = matchState(11);
+  it("경기가 끝나면 표식이 스코어와 정확히 맞물린다 — 지어낸 골도, 빠진 골도 없다", () => {
+    const state = buildMatchState(11);
     const goals: GoalMark[] = [];
     // 턴마다 한 구간 — 실모드의 한 턴과 같다
     for (let t = 0; t < 60; t++) {
@@ -271,26 +284,82 @@ describe("골 표식", () => {
       turn(state, GO, goals);
     }
     const ledger = state.pendingMatch!.ledger;
+    const ours = userSide(state);
+    const total = ledger.score.home + ledger.score.away;
+
     expect(ledger.phase).toBe("finished");
-    expect(goals).toHaveLength(ledger.score.home + ledger.score.away);
+    // 0-0으로 끝난 판이면 아래가 전부 공회전한다 — 시드 11은 골이 나는 판이다
+    expect(total).toBeGreaterThan(0);
+    expect(goals).toHaveLength(total);
     // 마지막 표식의 스코어가 곧 최종 스코어다 (골마다 그 직후의 스코어를 싣는다)
-    if (goals.length > 0) {
-      expect(goals[goals.length - 1]!.score).toEqual(ledger.score);
-      for (const goal of goals) expect(goal.scorer).not.toBe("");
-    }
+    expect(goals[goals.length - 1]!.score).toEqual(ledger.score);
+    for (const goal of goals) expect(goal.scorer).not.toBe("");
+    // 우리 골 표식의 수 = 우리 쪽 스코어 (색을 가르는 근거가 장부와 같다)
+    expect(goals.filter((g) => g.ours)).toHaveLength(ledger.score[ours]);
+    expect(goals.filter((g) => !g.ours)).toHaveLength(
+      ledger.score[ours === "home" ? "away" : "home"],
+    );
+  });
+});
+
+const NAMES: Record<string, string> = {
+  p1: "손흥민",
+  p2: "페드로 포로",
+};
+const nameOf = (id: string) => NAMES[id] ?? id;
+const sideName = (side: "home" | "away") => (side === "home" ? "토트넘" : "아스널");
+
+function script(ev: MatchEvent): string {
+  return buildSegmentMessage([ev], "flow", nameOf, sideName);
+}
+
+describe("구간 대본 — 배우 표기", () => {
+  it("골은 득점자와 도움을 역할로 갈라 적는다", () => {
+    const line = script({
+      minute: 44,
+      type: "goal",
+      team: "home",
+      actors: ["p1", "p2"],
+      causes: [],
+    });
+    expect(line).toContain("득점 손흥민 · 도움 페드로 포로");
+    expect(line).not.toContain("→");
   });
 
-  it("우리 골과 상대 골이 갈린다", () => {
-    const state = matchState(11);
-    const goals: GoalMark[] = [];
-    for (let t = 0; t < 60; t++) {
-      if (state.pendingMatch?.ledger.phase === "finished") break;
-      turn(state, GO, goals);
-    }
-    const ours = userSide(state);
-    const score = state.pendingMatch!.ledger.score;
-    // 우리 골 표식의 수 = 우리 쪽 스코어 (색을 가르는 근거가 장부와 같다)
-    expect(goals.filter((g) => g.ours)).toHaveLength(score[ours]);
-    expect(goals.filter((g) => !g.ours)).toHaveLength(score[ours === "home" ? "away" : "home"]);
+  it("도움 없는 골은 득점자만 적는다", () => {
+    expect(
+      script({ minute: 12, type: "goal", team: "home", actors: ["p1"], causes: [] }),
+    ).toContain("득점 손흥민");
+  });
+
+  it("교체는 나가는 선수와 들어오는 선수를 갈라 적는다", () => {
+    const line = script({
+      minute: 60,
+      type: "substitution",
+      team: "away",
+      actors: ["p1", "p2"],
+      causes: [],
+    });
+    expect(line).toContain("OUT 손흥민 · IN 페드로 포로");
+    expect(line).not.toContain("→");
+  });
+
+  it("사건 종류가 달라도 같은 순서가 같은 뜻으로 읽히지 않는다", () => {
+    const actors = ["p1", "p2"];
+    const goal = script({ minute: 44, type: "goal", team: "home", actors, causes: [] });
+    const sub = script({ minute: 44, type: "substitution", team: "home", actors, causes: [] });
+    expect(goal).not.toEqual(sub);
+  });
+
+  it("배우가 하나뿐인 사건은 이름만 적는다", () => {
+    expect(
+      script({ minute: 33, type: "yellow_card", team: "home", actors: ["p1"], causes: [] }),
+    ).toContain("경고: 손흥민");
+  });
+
+  it("배우가 없는 사건은 이름 자리를 비운다", () => {
+    expect(script({ minute: 45, type: "half_time", actors: [], causes: [] })).toContain(
+      "- 45′ 하프타임",
+    );
   });
 });

@@ -392,7 +392,7 @@ describe("buildStrengthPacket", () => {
     expect(vsFast.home.zones.defense).toBeLessThan(vsSlow.home.zones.defense);
   });
 
-  it("소화율이 낮으면 이득만 깎이고 대가는 남는다 — 과격한 지시가 순손실이 된다", () => {
+  it("소화율이 낮으면 이득이 대가보다 더 깎인다 — 과격한 지시가 순손실 쪽으로 간다", () => {
     // 같은 지시(전면 공격), 다른 감독. 소화율은 감독 전술 능력 + 팀 적응도에서 나온다
     const sharp = buildStrengthPacket(
       makeSide("str", 80, { tactics: { mentality: 5 }, managerTactics: 95, familiarity: 1 }),
@@ -404,8 +404,11 @@ describe("buildStrengthPacket", () => {
     );
     expect(dull.home.tactical.uptake).toBeLessThan(sharp.home.tactical.uptake);
 
-    // 대가(수비 하락)는 두 감독이 똑같이 치른다 — 소화율과 무관하다.
-    // 그래서 못 소화하는 팀은 "공격은 덜 오르고 수비는 그대로 내려간" 상태가 된다
+    /**
+     * 전술 축의 **이득은 소화율을 온전히**, **대가는 절반만** 탄다
+     * (`strength-packet.ts`의 `gain`·`cost`). 그래서 못 소화하는 팀은 "공격은 많이
+     * 덜 오르고 수비는 조금 덜 내려간" 상태가 되어 이득/대가의 비가 나빠진다.
+     */
     const gainSharp = sharp.home.zones.attack / sharp.home.tacticalFit;
     const gainDull = dull.home.zones.attack / dull.home.tacticalFit;
     const lossSharp = sharp.home.zones.defense / sharp.home.tacticalFit;

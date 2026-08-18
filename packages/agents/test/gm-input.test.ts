@@ -21,6 +21,8 @@ import {
 } from "@story-fm/engine";
 import {
   TIME_PASSED,
+  filterSceneStream,
+  sanitizeSceneText,
   parseTimeSkip,
   buildGmHistory,
   buildManagerMessage,
@@ -40,16 +42,23 @@ import type { GameLLM, StopReason, TurnRequest } from "@story-fm/llm";
  * 이 경계가 무너지면(레퍼런스에 날짜가 새거나, 순서가 흔들리면) 캐시가 조용히 죽는다.
  */
 
-function game(seed = 31): GameState {
+/**
+ * 세계는 **한 번만** 세우고 케이스마다 복제해 쓴다 — `createGame`은 판당 수 초,
+ * 복제는 그 수십 분의 일이다. 케이스가 상태를 고쳐도 서로 새지 않는다.
+ */
+function build(): GameState {
   const background = "K리그에서 뛰다 은퇴한 수비수 출신 분석가";
   return createGame({
-    seed,
+    seed: 31,
     userTeamId: "arsenal",
     managerName: "김감독",
     background,
     attributes: interpretBackgroundHeuristic(background),
   });
 }
+
+const BASE = build();
+const game = (): GameState => structuredClone(BASE);
 
 describe("레퍼런스 블록 (캐시되는 시스템 블록)", () => {
   it("선수의 id도 이름도 담지 않는다 — 명단 한 줄이 바뀌면 뒤의 이력까지 무효가 된다", () => {
@@ -154,8 +163,16 @@ describe("레퍼런스 블록 (캐시되는 시스템 블록)", () => {
     expect(buildGmReference(state)).toBe(before);
   });
 
-  it("같은 세이브면 언제나 같은 블록이다", () => {
-    expect(buildGmReference(game(31))).toBe(buildGmReference(game(31)));
+  /**
+   * 조립은 상태만 읽는다 — 시계나 난수가 섞이면 같은 상태의 두 턴이 다른 블록을
+   * 내고 캐시가 조용히 죽는다. (같은 시드가 같은 세계를 만드는지는 세계 쪽의
+   * 몫이다 — `packages/engine/test/world.test.ts`.)
+   */
+  it("같은 상태를 두 번 읽으면 레퍼런스도 명단 줄도 한 글자까지 같다", () => {
+    const state = game();
+    expect(buildGmReference(state)).toBe(buildGmReference(state));
+    const squadLine = (note: string) => note.split("\n").find((l) => l.startsWith("선수단("));
+    expect(squadLine(buildGmStateNote(state))).toBe(squadLine(buildGmStateNote(state)));
   });
 });
 
@@ -184,9 +201,6 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
     expect(squad.length).toBeGreaterThanOrEqual(30);
     for (const p of squad) expect(note).toContain(p.name);
     expect(squad.filter((p) => note.includes(p.id))).toHaveLength(0);
-    // 순서가 결정적이다 — 흔들리면 같은 세이브의 같은 턴이 매번 다른 줄을 낸다
-    const squadLine = (text: string) => text.split("\n").find((l) => l.startsWith("선수단("));
-    expect(squadLine(buildGmStateNote(game(31)))).toBe(squadLine(buildGmStateNote(game(31))));
   });
 
   it("선수 근황을 한 줄로 싣는다 — 이름을 내보내는 자리가 부상·불만뿐이면 같은 선수만 말한다", () => {
@@ -278,9 +292,9 @@ describe("새 게임 첫 장면", () => {
       else process.env.LLM_MODE = previousMode;
     }
 
-    expect(request?.user).toBe("@김감독: *새 감독으로서 구단에 첫 출근한다*");
-    expect(request?.stateNote).toContain("[오퍼레이터 지시 — 새 게임 첫 장면]");
+    // 첫 장면의 지시는 **캐시 밖**(상태 스냅샷)에 실린다 — 문구가 아니라 그 자리를 잰다
     expect(request?.stateNote).toContain(state.date);
+    expect(request?.system?.join("\n")).not.toContain(state.date);
     // 시스템은 고정 계층 + 레퍼런스 계층 두 블록이다 (캐시 프리픽스의 모양)
     expect(request?.system).toHaveLength(2);
     // 출력 상한을 따로 좁히지 않는다 — 상한은 사고와 본문을 함께 덮으므로
@@ -711,11 +725,10 @@ describe("장면 헤더", () => {
     const start = state.date;
     const moved = applyScenePoint(state, { date: addDays(start, 2), clock: "19:00" });
     expect(moved.ok).toBe(true);
-    // 중간에 경기일·판단이 필요한 일이 없으면 선언한 곳에 닿는다
-    if (!moved.short) {
-      expect(state.date).toBe(addDays(start, 2));
-      expect(clockOf(state)).toBe("19:00");
-    }
+    // 프리시즌 첫 이틀에는 세워 세울 일이 없다 — 선언한 곳에 그대로 닿는다
+    expect(moved.short).toBeFalsy();
+    expect(state.date).toBe(addDays(start, 2));
+    expect(clockOf(state)).toBe("19:00");
     const back = applyScenePoint(state, { date: start, clock: "09:00" });
     expect(state.date).not.toBe(start);
     expect(back.short).toBe(true);
@@ -810,5 +823,73 @@ describe("장면을 여는 사람은 그 일에 가장 가까운 사람이다", 
     // 선수도 마찬가지 — 유니폼 아이콘이 서려면 사전에 있어야 한다
     const player = userPlayers(state)[0]!;
     expect(roleOf(player.name)).toBeDefined();
+  });
+});
+
+/**
+ * 장면 위생 — **도구를 부르는 턴의 작업 로그가 대화에 섞이지 않는다.**
+ *
+ * 도구 반복마다 모델은 시점 헤더와 "…확인하겠습니다" 한 줄을 새로 찍는다.
+ * 프롬프트로 눌러도 남는 습성이라 코어가 걷어낸다 — 출력 문법이 허락하는 줄은
+ * 맨 앞 헤더 하나, `@`로 시작하는 줄, 빈 줄뿐이다.
+ */
+describe("sanitizeSceneText", () => {
+  it("도구 앞 서술과 두 번째 헤더를 걷어낸다", () => {
+    const raw = [
+      "[2026-07-01 AM 9:45]",
+      "소집 첫 주는 체력 위주로 잡겠습니다.",
+      "[2026-07-01 AM 9:45]",
+      "[2026-07-01 AM 9:45]",
+      "소집 첫 주(7/13~7/18)를 새로 짜겠습니다.",
+      "[2026-07-01 AM 9:45]",
+      "@스티브 홀랜드: 첫 주는 다리부터 다시 만드는 걸로 채웠습니다.",
+    ].join("\n");
+
+    expect(sanitizeSceneText(raw)).toBe(
+      [
+        "[2026-07-01 AM 9:45]",
+        "@스티브 홀랜드: 첫 주는 다리부터 다시 만드는 걸로 채웠습니다.",
+      ].join("\n"),
+    );
+  });
+
+  it("멀쩡한 장면은 그대로 둔다 (빈 줄은 문단 간격이다)", () => {
+    const scene = ["[2026-07-01 AM 9:30]", "@: *문이 열린다*", "", "@손흥민: 감독님."].join("\n");
+    expect(sanitizeSceneText(scene)).toBe(scene);
+  });
+
+  it("@ 줄이 하나도 없으면 손대지 않는다 — 빈 턴보다 어긴 장면이 낫다", () => {
+    const broken = "오늘은 조용한 하루였습니다.";
+    expect(sanitizeSceneText(broken)).toBe(broken);
+  });
+});
+
+describe("filterSceneStream — 화면에도 같은 위생", () => {
+  const run = (deltas: string[]) => {
+    const out: string[] = [];
+    const feed = filterSceneStream((d) => out.push(d));
+    for (const d of deltas) feed(d);
+    return out.join("");
+  };
+
+  it("걸러진 줄은 화면에 잠깐도 뜨지 않는다", () => {
+    const text = run([
+      "[2026-07-01 ",
+      "AM 9:45]\n브루누의 ",
+      "카드를 확인하겠습니다.\n",
+      "[2026-07-01 AM 9:45]\n",
+      "@스티브 홀랜드: 걱정할 게 ",
+      "없습니다.",
+    ]);
+    expect(text).toBe("[2026-07-01 AM 9:45]\n@스티브 홀랜드: 걱정할 게 없습니다.");
+  });
+
+  it("살아남는 줄은 델타 그대로 흘러간다", () => {
+    const out: string[] = [];
+    const feed = filterSceneStream((d) => out.push(d));
+    for (const d of ["@손", "흥민: 감독", "님."]) feed(d);
+    // 첫 조각만 줄 앞머리 판정에 쓰이고, 그 뒤는 조각 단위로 그대로 나간다
+    expect(out.join("")).toBe("@손흥민: 감독님.");
+    expect(out.length).toBe(3);
   });
 });

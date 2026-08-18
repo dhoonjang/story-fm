@@ -3,6 +3,26 @@ import { AGENT_NAMES, LLM_CONFIG, findLlmConfigPath, hasKey, parseLlmConfig } fr
 
 const yamlWith = (agents: string): string => `version: 1\nagents:\n${agents}`;
 
+/** 온전한 한 벌 — 갈래마다 이 표에서 한 자리만 무너뜨려 무엇이 거부를 부르는지 가른다 */
+const AGENT_BLOCK: Record<string, unknown> = {
+  provider: "google",
+  model: "gemini-test",
+  max_tokens: 100,
+  timeout_ms: 1000,
+};
+type Agents = Record<string, Record<string, unknown>>;
+const fullAgents = (): Agents =>
+  Object.fromEntries(AGENT_NAMES.map((name) => [name, { ...AGENT_BLOCK }]));
+const yamlOf = (agents: Agents): string =>
+  yamlWith(
+    Object.entries(agents)
+      .flatMap(([name, config]) => [
+        `  ${name}:`,
+        ...Object.entries(config).map(([key, value]) => `    ${key}: ${JSON.stringify(value)}`),
+      ])
+      .join("\n") + "\n",
+  );
+
 describe("에이전트별 LLM 설정", () => {
   it("에이전트마다 시한이 있고 제공자 기본값에 기대지 않는다", () => {
     for (const agent of AGENT_NAMES) {
@@ -111,48 +131,51 @@ describe("에이전트별 LLM 설정", () => {
     });
   });
 
-  it("에이전트가 빠지거나 설정이 잘못되면 시작 전에 거부한다", () => {
-    expect(() =>
-      parseLlmConfig(
-        yamlWith(`  gm:
-    provider: google
-    model: gemini-test
-    max_tokens: 100
-    timeout_ms: 1000
-`),
-      ),
-    ).toThrow("LLM 설정이 올바르지 않습니다");
-
-    expect(() =>
-      parseLlmConfig(
-        yamlWith(`  gm: &bad
-    provider: google
-    model: ""
-    max_tokens: 0
-    timeout_ms: 0
-  match-caster: *bad
-  match-rater: *bad
-  training-rater: *bad
-  mood-rater: *bad
-`),
-      ),
-    ).toThrow("LLM 설정이 올바르지 않습니다");
+  /** 무너뜨리지 않은 표는 통과한다 — 아래 갈래들이 "무엇이든 던진다"가 아님을 세운다 */
+  it("여섯 자리가 다 선 설정은 그대로 통과한다", () => {
+    const config = parseLlmConfig(yamlOf(fullAgents()));
+    for (const agent of AGENT_NAMES) expect(config.agents[agent].model).toBe("gemini-test");
   });
 
-  it("시한이 빠진 에이전트는 시작 전에 거부한다 — 제공자 기본값으로 새지 않는다", () => {
-    expect(() =>
-      parseLlmConfig(
-        yamlWith(`  gm: &noTimeout
-    provider: google
-    model: gemini-test
-    max_tokens: 100
-  match-caster: *noTimeout
-  match-rater: *noTimeout
-  training-rater: *noTimeout
-  mood-rater: *noTimeout
-`),
-      ),
-    ).toThrow("LLM 설정이 올바르지 않습니다");
+  it("에이전트는 한 자리만 빠져도 거부된다 — 여섯 자리를 각각 확인한다", () => {
+    for (const missing of AGENT_NAMES) {
+      const agents = fullAgents();
+      delete agents[missing];
+      expect(() => parseLlmConfig(yamlOf(agents)), missing).toThrow("LLM 설정이 올바르지 않습니다");
+    }
+  });
+
+  /**
+   * 항목이 빠진 자리는 **제공자 기본값으로 새지 않는다** (models.md §1-1) — 셋이
+   * 서로 다른 기본값을 갖고 있어, 조용히 통과시키면 같은 설정이 어댑터마다 다른
+   * 계약을 지킨다.
+   */
+  it("필수 항목이 빠지면 거부된다 — 항목마다 각각", () => {
+    for (const key of Object.keys(AGENT_BLOCK)) {
+      const agents = fullAgents();
+      const partial = { ...agents.gm };
+      delete partial[key];
+      agents.gm = partial;
+      expect(() => parseLlmConfig(yamlOf(agents)), key).toThrow("LLM 설정이 올바르지 않습니다");
+    }
+  });
+
+  it("값이 규칙을 벗어나면 거부된다 — 갈래마다 각각", () => {
+    const broken: Array<[string, Record<string, unknown>]> = [
+      ["빈 모델 이름", { model: "" }],
+      ["공백뿐인 모델 이름", { model: "   " }],
+      ["0 토큰", { max_tokens: 0 }],
+      ["정수가 아닌 토큰", { max_tokens: 10.5 }],
+      ["0 시한", { timeout_ms: 0 }],
+      ["음수 시한", { timeout_ms: -1 }],
+      ["모르는 제공자", { provider: "mistral" }],
+      ["모르는 항목", { region: "eu" }],
+    ];
+    for (const [label, patch] of broken) {
+      const agents = fullAgents();
+      agents.gm = { ...agents.gm, ...patch };
+      expect(() => parseLlmConfig(yamlOf(agents)), label).toThrow("LLM 설정이 올바르지 않습니다");
+    }
   });
 
   it("앱 하위 디렉터리에서도 저장소 설정을 찾는다", () => {

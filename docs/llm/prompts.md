@@ -178,7 +178,7 @@ Zod에만 있는 상한은 모델이 모르는 채로 그 도구를 계속 실�
 ## 6. 미해결
 
 - 프롬프트 회귀 측정 — 문구를 고쳤을 때 무엇이 좋아졌는지 재는 하네스가 없다.
-  `packages/agents/test`에는 문법(`scene-hygiene.test.ts`)·카탈로그 일치
+  `packages/agents/test`에는 문법(`gm-input.test.ts`)·카탈로그 일치
   (`skill-descriptions.test.ts`) 검사뿐이다.
 - 도구 설명의 길이 예산 — `set_training`·`get_league`처럼 긴 설명이 고정층을 차지한다.
   `skill-descriptions.ts`의 `SKILL_CATALOG`에 길이를 재는 자리가 없다.
