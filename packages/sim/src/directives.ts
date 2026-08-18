@@ -391,28 +391,56 @@ export function applyDirectives(
    *
    * 넘친 지시는 노트를 남기고, **중복만 조용히 넘긴다** — 감독이 한 번만 내린 지시를
    * 두고 "둘째는 안 걸렸다"고 설명하면 있지도 않은 지시를 있었던 것으로 만든다.
+   *
+   * **셋을 세는 것은 실재를 확인한 뒤다.** 벤치에 앉은 선수의 지시, 교체로 사라진
+   * 표적을 향한 지시는 애초에 걸릴 수 없으므로 자리를 먹지 않는다 — 먹으면 감독이
+   * 내린 셋 중 하나가 이유 없이 사라지고, 노트는 그것을 "넷째라 안 걸렸다"고 엉뚱한
+   * 이유로 설명한다. 그래서 걸리는 지시와 그 자리에서 버려진 지시의 노트를 **감독이
+   * 내린 순서 그대로** 한 줄에 세워 두고 아래에서 편다.
    */
   const seen = new Set<string>();
-  const live: DirectiveInput[] = [];
+  /** 걸리는 지시와 그 자리에서 버려진 노트가 감독이 내린 순서대로 섞여 선다 */
+  const steps: Array<
+    { note: string } | { d: DirectiveInput; me: LineupSlot; target?: LineupSlot }
+  > = [];
+  let effective = 0;
   /** 넘쳐서 못 걸린 지시의 노트 — 뒤에 붙여 노트가 감독이 내린 순서대로 읽히게 한다 */
   const overflow: string[] = [];
   for (const d of directives) {
     if (seen.has(d.by)) continue;
     seen.add(d.by);
-    if (live.length >= DIRECTIVE_TUNING.MAX_EFFECTIVE) {
-      overflow.push(DROPPED_KO.overflow(nameIn(usXI, d.by) ?? nameIn(usBench, d.by)));
-      continue;
-    }
-    live.push(d);
-  }
-
-  for (const d of live) {
     const me = byId(usXI, d.by);
     if (!me) {
       // 벤치에 앉은 선수에게 내린 지시는 효력이 없다
-      out.notes.push(DROPPED_KO.offPitch(nameIn(usBench, d.by)));
+      steps.push({ note: DROPPED_KO.offPitch(nameIn(usBench, d.by)) });
       continue;
     }
+    const target =
+      DIRECTIVE_EFFECTS[d.kind].duel && d.targetId ? byId(themXI, d.targetId) : undefined;
+    if (DIRECTIVE_EFFECTS[d.kind].duel && !target) {
+      // 대상이 그라운드에 없다 — 지시가 성립하지 않는다 (교체로 나갔거나 없는 id)
+      steps.push({
+        note: DROPPED_KO.goneTarget(
+          me.player.name,
+          d.targetId ? nameIn(themBench, d.targetId) : undefined,
+        ),
+      });
+      continue;
+    }
+    if (effective >= DIRECTIVE_TUNING.MAX_EFFECTIVE) {
+      overflow.push(DROPPED_KO.overflow(me.player.name));
+      continue;
+    }
+    effective += 1;
+    steps.push({ d, me, ...(target ? { target } : {}) });
+  }
+
+  for (const entry of steps) {
+    if ("note" in entry) {
+      out.notes.push(entry.note);
+      continue;
+    }
+    const { d, me } = entry;
     const spec = DIRECTIVE_EFFECTS[d.kind];
     const mul = intensityOf(d.intensity);
     const attrs = me.player.attributes;
@@ -422,15 +450,8 @@ export function applyDirectives(
     const tag =
       d.intensity && d.intensity !== "normal" ? ` (${DIRECTIVE_INTENSITY_KO[d.intensity]})` : "";
 
-    if (spec.duel) {
-      const target = d.targetId ? byId(themXI, d.targetId) : undefined;
-      if (!target) {
-        // 대상이 그라운드에 없다 — 지시가 성립하지 않는다 (교체로 나갔거나 없는 id)
-        out.notes.push(
-          DROPPED_KO.goneTarget(name, d.targetId ? nameIn(themBench, d.targetId) : undefined),
-        );
-        continue;
-      }
+    if (spec.duel && entry.target) {
+      const target = entry.target;
       const rate = duel(
         meanOf(attrs, spec.duel.mine),
         meanOf(target.player.attributes, spec.duel.theirs),

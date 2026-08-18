@@ -1023,33 +1023,37 @@ export function buildStrengthPacket(
   const shownPoints = readKeyPoints(rawPoints, ourAnalysis, ourTactics);
 
   /**
-   * **공략** — 감독이 읽은 약점을 겨냥한 지시 (exploits.ts).
+   * **공략** — 감독이 읽은 약점을 겨냥한 지시 (exploits.ts, match.md §1.6).
    *
-   * 표적 목록은 키포인트에서 나오고, 감독이 실제로 본 문장을 label로 갖는다 —
-   * 흐리게 본 감독은 흐린 표적을 노린다. AI 팀은 자기 등급만큼 스스로 고른다.
+   * 목록이 두 벌인 것은 **안개와 실재가 다른 문이기 때문**이다. 패킷에 실리는
+   * `targets`는 감독이 실제로 본 것뿐이라 그가 고를 수 있는 전부이고(`exploit_point`가
+   * 이 목록으로 반려한다), 여기서 대조하는 `liveTargets`는 그라운드에 실재하는
+   * 전부다. 걸어 둔 공략은 **그 지점이 사라졌을 때만** 끊긴다 — 교체로 키포인트가
+   * 다시 정렬돼 목록에서 밀려났다는 이유로 끊기면, 감독이 내린 적 없는 취소가 된다.
+   *
+   * AI 벤치도 `liveTargets`에서 고른다. 우리 감독이 어둡다고 상대까지 눈이 멀면
+   * 우리 약점이 드러나는 유일한 경로가 닫힌다.
    */
-  const targets = exploitTargets(
+  const { live: liveTargets, seen: targets } = exploitTargets(
     rawPoints,
     shownPoints.map((p) => p.text),
   );
-  const homeExploit = applyExploits(
-    homeIn.exploits ??
-      (homeIn.managerAnalysis === undefined
-        ? autoExploits(targets, homeIn.managerTactics, "home")
-        : undefined),
-    targets,
-    homeUptake,
-    "home",
-  );
-  const awayExploit = applyExploits(
-    awayIn.exploits ??
-      (awayIn.managerAnalysis === undefined
-        ? autoExploits(targets, awayIn.managerTactics, "away")
-        : undefined),
-    targets,
-    awayUptake,
-    "away",
-  );
+  /**
+   * 한쪽 벤치의 공략. AI 벤치의 눈은 **분석 축**이지만(match.md §1.6) AI 감독은
+   * 등급이 하나뿐이라(`Team.aiManagerTacticsRating`) 그 하나가 두 축을 겸한다.
+   */
+  const exploitsOf = (side: SideInput, ourSide: "home" | "away", uptake: number) =>
+    applyExploits(
+      side.exploits ??
+        (side.managerAnalysis === undefined
+          ? autoExploits(liveTargets, side.managerTactics, ourSide)
+          : undefined),
+      liveTargets,
+      uptake,
+      ourSide,
+    );
+  const homeExploit = exploitsOf(homeIn, "home", homeUptake);
+  const awayExploit = exploitsOf(awayIn, "away", awayUptake);
   addCells(homeCells, homeExploit.us);
   addCells(homeCells, awayExploit.them);
   addCells(awayCells, awayExploit.us);
