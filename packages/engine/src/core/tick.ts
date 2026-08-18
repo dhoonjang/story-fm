@@ -25,7 +25,7 @@ import { advanceEuroKnockouts } from "../competition/euro-knockout";
 import { applyMonthlyDevelopment } from "../squad/development";
 import { returnDueLoans, signFreeAgents } from "../market/departures";
 import { clampForm, decayedForm, formDeltaFromMatch } from "../squad/form";
-import type { TrainedSession } from "../squad/training-report";
+import { TRAINING_XP_PER_SESSION, type TrainedSession } from "../squad/training-report";
 import {
   applyAiMatchFinance,
   ensureMonthlyPosted,
@@ -274,11 +274,14 @@ function dailyTick(
 
   // 훈련 세션 적용 — 등록된 엔트리만 (기본 훈련 없음)
   let hardSessions = 0;
+  // 결산이 보는 세션 수와 갈리면 안 된다 — `trained.sessions`에 실리는 것과 같게 센다
+  let doneSessions = 0;
   for (const entry of workEntries) {
     const session = sessionById(state, entry.refId);
     entry.status = "done";
     if (!session) continue;
     if (isHardSession(session)) hardSessions++;
+    doneSessions++;
     trained?.sessions.push({
       entryId: entry.id,
       date: entry.date,
@@ -287,6 +290,18 @@ function dailyTick(
       focus: [...session.focus],
       ordered: session.auto !== true,
     });
+  }
+
+  /**
+   * 훈련장이 감독을 기른다 — **소화된 세션 수**만큼 (docs/simulation/career.md §3).
+   *
+   * 결산이 아니라 여기서 주는 이유는 둘이다: 판정이 실패하거나 mock이면 감독이
+   * 훈련장에서 아무것도 배우지 못하고, 결산 도구가 한 턴에 두 번 불리면 두 배로
+   * 배운다. 하루 단위로 붙으므로 `advance_time`을 쪼개도 총합은 같다.
+   */
+  if (doneSessions > 0) {
+    const grown = grantManagerXP(state, "training", doneSessions * TRAINING_XP_PER_SESSION);
+    if (grown) digest.push(grown);
   }
 
   /**
