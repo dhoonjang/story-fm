@@ -41,7 +41,7 @@ issue however long it is. What the plan needs is the **breakdown** — that is w
 a file or two, plus a test **only where AGENTS.md §5 says one is earned**: a
 formula, an invariant, a boundary, a state transition. A task whose result is
 visible on screen the moment it breaks carries no test line, and a task that only
-measures balance names the `BALANCE` gate instead. Walk the path the change actually
+measures balance names the harness (`packages/*/harness/` · `pnpm balance`) instead. Walk the path the change actually
 takes through the layers — `docs/` → `packages/domain` (schema) →
 `packages/sim`/`engine` → `apps/web` API → UI → tests — and keep only the layers
 it really touches. Name the files you found while reading the code.

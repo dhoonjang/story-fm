@@ -139,10 +139,13 @@ does not.
 
 **Measuring balance is not testing.** A case that plays seasons to see whether
 the numbers land in a sensible band has no fixed expectation to regress against,
-and it costs minutes. That is a harness: put it behind
-`describe.skipIf(!process.env.BALANCE)` the way
-`packages/engine/test/balance-harness.test.ts` does, and run it with `BALANCE=1`
-when you are tuning.
+and it costs minutes. That is a harness, and it lives in `packages/*/harness/` —
+outside the suite's `include`, so `pnpm test` never collects the file. Each one
+carries a descriptor (`packages/engine/harness/harness.ts`) that owns its band
+numbers; assertions, output and the listing all read from it, so a band is written
+in exactly one place. `pnpm balance --list` shows every harness and what it
+measures, `pnpm balance` runs them
+(→ [docs/simulation/balance-harness.md](./docs/simulation/balance-harness.md)).
 
 **Fixtures cost more than the logic they carry.** `createTestGame()` builds a
 whole world — a second per call. Call the pure function directly when the world

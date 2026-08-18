@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   activeContract,
   advanceTime,
-  allMatchesDone,
   assignmentsOf,
   buildTransferWindows,
   firstTeamPlayers,
@@ -193,38 +192,4 @@ describe("시장이 스쿼드를 무너뜨리지 않는다", () => {
     const after = aiMoves(state).filter((t) => t.date >= closed);
     expect(after.length, "창이 닫혔는데 유럽 클럽이 거래했다").toBeLessThan(before * 0.1);
   }, 60_000);
-});
-
-/**
- * 밸런스 하네스 — 한 시즌을 굴려 **시장의 크기**를 잰다.
- *
- * 기대값이 고정값이 아니라 밴드다(팀당 이적 1~6건 · 임대 0.5~4건 · 여름 비중 5할
- * 초과). 시장이 도는지는 위의 케이스들이 보고, 여기서는 그 양이 실제 시장과 같은
- * 자릿수인지를 본다. 한 시즌이 몇 분을 쓴다:
- *
- *   BALANCE=1 pnpm vitest run packages/engine/test/ai-market.test.ts
- */
-describe.skipIf(!process.env.BALANCE)("한 시즌의 시장 규모", () => {
-  it("1부 클럽당 이적 1~6건 · 임대 0.5~4건 — 실제 시장과 같은 자릿수", () => {
-    const state = createTestGame(7);
-    let guard = 420;
-    while (guard-- > 0 && !allMatchesDone(state)) {
-      const before = state.date;
-      const advanced = advanceTime(state, { days: 1 });
-      if (state.phase === "matchday") playMockMatch(state);
-      if (state.date === before && advanced.stopped !== "matchday") break;
-    }
-    const clubs = state.teams.filter((t) => isTopFlight(t.id)).length;
-    const moves = aiMoves(state);
-    const perClub = moves.filter((t) => t.type === "transfer").length / clubs;
-    const loansPerClub = moves.filter((t) => t.type === "loan").length / clubs;
-    expect(perClub, `팀당 이적 ${perClub.toFixed(1)}`).toBeGreaterThan(1);
-    expect(perClub, `팀당 이적 ${perClub.toFixed(1)}`).toBeLessThan(6);
-    expect(loansPerClub, `팀당 임대 ${loansPerClub.toFixed(1)}`).toBeGreaterThan(0.5);
-    expect(loansPerClub, `팀당 임대 ${loansPerClub.toFixed(1)}`).toBeLessThan(4);
-
-    // 여름이 겨울보다 붐빈다 (실제 시장의 7:3)
-    const summer = moves.filter((t) => t.date < "2026-09-05").length;
-    expect(summer / moves.length).toBeGreaterThan(0.5);
-  }, 300_000);
 });

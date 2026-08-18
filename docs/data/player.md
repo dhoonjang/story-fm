@@ -783,7 +783,7 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
   `RealPlayerSeed`에서 `world/catalog.ts`의 `entryFromSeed`가 파생한다. 라이선스
   부채 청산 장치 ([sources.md](sources.md) §7).
 - 가중치 지문·오차 폭·상태 계수 튜닝 — 분포 모니터링 하네스가 없다
-  (`engine/test/balance-harness.test.ts`는 경기 결과만 본다).
+  (`engine/harness/world-season.harness.ts`는 경기 결과만 본다).
 
 ## 코드 위치
 
