@@ -553,7 +553,7 @@ function settle(state: GameState, deal: AiDeal, rng: () => number): GamePlayer |
  * 실행은 그 주의 각 날짜로 흩는다. **마감이 가까우면 뒤쪽 날짜에 몰린다** —
  * 실제 시장의 데드라인 데이가 그렇다.
  */
-function planWeek(state: GameState, rng: () => number): AiDeal[] {
+function planWeek(state: GameState, rng: () => number): { deals: AiDeal[]; through: string } {
   const squads = indexSquads(state);
   const clubs = marketClubs(state);
   const ledger: Ledger = {
@@ -562,10 +562,10 @@ function planWeek(state: GameState, rng: () => number): AiDeal[] {
     arrivals: new Map(),
     departures: new Map(),
   };
-  const window = windowOpenOn(state.windows, state.date);
-  const lastDay = window ? minDate(window.closesOn, addDays(state.date, WEEK - 1)) : state.date;
+  const closesOn = planHorizon(state);
+  const lastDay = closesOn ? minDate(closesOn, addDays(state.date, WEEK - 1)) : state.date;
   const span = Math.max(0, diffDays(state.date, lastDay));
-  const deadlineWeek = window ? window.closesOn <= addDays(state.date, WEEK - 1) : false;
+  const deadlineWeek = closesOn ? closesOn <= addDays(state.date, WEEK - 1) : false;
 
   const attempts = Math.round(ATTEMPTS_PER_DAY * WEEK * (deadlineWeek ? DEADLINE_RUSH : 1));
   const deals: AiDeal[] = [];
@@ -583,7 +583,26 @@ function planWeek(state: GameState, rng: () => number): AiDeal[] {
     );
     deals.push({ ...deal, date: addDays(state.date, offset) });
   }
-  return deals;
+  return { deals, through: lastDay };
+}
+
+/**
+ * 이번 계획이 덮을 마지막 날 — **우리 창이 열려 있으면 그 마감일**, 닫혀 있으면
+ * 그때 열려 있는 시장 전용 리그 창 중 가장 늦게 닫히는 것.
+ *
+ * 우리 창으로만 재면 사우디·MLS만 열린 기간에 마지막 날이 오늘이 되고, 그러면
+ * 한 주치 시도(`ATTEMPTS_PER_DAY × WEEK`)가 **매일** 되풀이된다. 창이 하나도 없으면
+ * 계획할 것이 없다 (transfer.md §6).
+ */
+function planHorizon(state: GameState): string | null {
+  const ours = windowOpenOn(state.windows, state.date);
+  if (ours) return ours.closesOn;
+  let latest: string | null = null;
+  for (const w of state.windows) {
+    if (state.date < w.opensOn || state.date > w.closesOn) continue;
+    if (latest === null || w.closesOn > latest) latest = w.closesOn;
+  }
+  return latest;
 }
 
 const WEEK = 7;
@@ -614,13 +633,16 @@ export function runAiTransfers(state: GameState, digest: string[]): void {
   }
   state.aiDeals = queue.filter((d) => d.date > state.date);
 
-  // ② 계획은 주 1회 — 창이 열린 동안, 큐가 비었을 때만
-  const anyWindow = windowOpenOn(state.windows, state.date);
-  const marketWindow = state.teams.some(
-    (t) => isMarketOnlyLeague(leagueOfTeam(t.id)) && windowOpenForTeam(state, t.id),
-  );
-  if ((anyWindow || marketWindow) && state.aiDeals.length === 0) {
-    state.aiDeals = planWeek(state, rng);
+  /**
+   * ② 계획은 주 1회 — **계획이 덮은 마지막 날에 이르러야** 다음 주치를 세운다.
+   *
+   * 큐가 비었는지로 재면 안 된다: 그 주에 성사된 딜이 없거나 앞쪽 날짜에 몰리면
+   * 큐가 곧바로 비어 다음 날 또 한 주치를 시도한다.
+   */
+  if (planHorizon(state) !== null && state.date >= (state.aiPlannedThrough ?? state.date)) {
+    const planned = planWeek(state, rng);
+    state.aiDeals = [...state.aiDeals, ...planned.deals];
+    state.aiPlannedThrough = planned.through;
   }
 
   /** 감독의 리그에서 벌어진 큰 건만 — 그것도 하루 두 줄까지 */

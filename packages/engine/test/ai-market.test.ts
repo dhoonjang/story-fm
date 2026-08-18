@@ -4,9 +4,11 @@ import {
   advanceTime,
   allMatchesDone,
   assignmentsOf,
+  buildTransferWindows,
   firstTeamPlayers,
   isTopFlight,
   playersOf,
+  runAiTransfers,
   windowOpenOn,
   type GameState,
 } from "@story-fm/engine";
@@ -153,6 +155,25 @@ describe("시장이 스쿼드를 무너뜨리지 않는다", () => {
       expect(firstTeamPlayers(state, team.id).length, team.id).toBeLessThanOrEqual(31);
       expect(playersOf(state, team.id).length, team.id).toBeLessThanOrEqual(52);
     }
+  });
+
+  /**
+   * 계획은 주 1회다 — **우리 창 밖에서도.** 계획이 덮는 마지막 날을 우리 창으로만
+   * 재면 사우디·MLS만 열린 기간에 그 날이 오늘이 되어, 한 주치 시도(434회)가 매일
+   * 되풀이된다 (docs/simulation/transfer.md §6).
+   */
+  it("사우디 창만 열린 날에도 계획은 한 주치다 — 이튿날 다시 세우지 않는다", () => {
+    const state = createTestGame();
+    state.windows = buildTransferWindows(1);
+    state.date = "2026-09-20"; // 우리 창은 9/1에 닫혔고 사우디는 10/6까지 열려 있다
+    runAiTransfers(state, []);
+    expect(state.aiPlannedThrough).toBe("2026-09-26");
+
+    state.date = "2026-09-21";
+    const queued = state.aiDeals?.length ?? 0;
+    runAiTransfers(state, []);
+    expect(state.aiPlannedThrough).toBe("2026-09-26");
+    expect(state.aiDeals?.length ?? 0).toBeLessThanOrEqual(queued);
   });
 
   it("창이 닫혀 있으면 아무 일도 없다", () => {

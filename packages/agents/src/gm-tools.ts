@@ -23,6 +23,8 @@ import {
   EVENT_CREDIT,
   financeLookup,
   leagueView,
+  LOAN_FEE_RATE,
+  marketValueOf,
   NARRATIVE_EXPENSE_CATEGORIES,
   NARRATIVE_FINANCE_MAX_AMOUNT,
   NARRATIVE_FINANCE_MIN_AMOUNT,
@@ -30,6 +32,7 @@ import {
   offerPlayerOut,
   openNegotiationFor,
   openRenewal,
+  playerById,
   playerCard,
   playerName,
   recallLoan,
@@ -814,7 +817,17 @@ export function buildGmTools(
           fee: int(0, 500_000_000),
           weeklyWage: int(0, 2_000_000),
           years: int(1, 6),
-          kind: { type: "string", enum: ["buy", "sell"] },
+          kind: {
+            type: "string",
+            enum: ["buy", "sell", "renew", "loan", "loan_out"],
+            description:
+              "buy=영입(기본) · sell=매각 · renew=재계약 · loan=임대 영입 · loan_out=임대 송출",
+          },
+          teamId: {
+            type: "string",
+            description:
+              "sell·loan_out의 상대 구단 id — **그 협회의 이적창으로 판정한다.** 사우디·MLS는 우리보다 늦게 닫히므로 빠뜨리면 확률이 틀린다",
+          },
           pitch: {
             type: "array",
             maxItems: MAX_PITCH_CLAIMS,
@@ -837,19 +850,36 @@ export function buildGmTools(
         fee: z.number().min(0).optional(),
         weeklyWage: z.number().min(0).optional(),
         years: z.number().int().min(1).max(6).optional(),
-        kind: z.enum(["buy", "sell"]).optional(),
+        kind: z.enum(["buy", "sell", "renew", "loan", "loan_out"]).optional(),
+        teamId: z.string().optional(),
         pitch: z.array(PitchClaimSchema).max(MAX_PITCH_CLAIMS).optional(),
       }),
       (input) => {
         // 금액을 말하지 않았으면 기본값(요구액·주급 기대치)으로 본다
         const suggested = suggestTerms(state, input.playerId);
-        if (!suggested) return { ok: false, message: `"${input.playerId}" 선수를 찾지 못했습니다` };
+        const player = playerById(state, input.playerId);
+        if (!suggested || !player) {
+          return { ok: false, message: `"${input.playerId}" 선수를 찾지 못했습니다` };
+        }
+        /**
+         * 갈래마다 기본 이적료가 다르다 — 재계약은 이적료가 없고, 임대의 기준은
+         * 임대료(시장가의 `LOAN_FEE_RATE`)다. 요구액을 그대로 두면 임대 확률이
+         * 열 배 부풀려 나온다.
+         */
+        const fee =
+          input.kind === "renew"
+            ? 0
+            : input.kind === "loan" || input.kind === "loan_out"
+              ? Math.round(marketValueOf(state, player) * LOAN_FEE_RATE)
+              : suggested.fee;
         const odds = dealOdds(state, {
           ...suggested,
+          fee,
           ...(input.fee !== undefined ? { fee: input.fee } : {}),
           ...(input.weeklyWage !== undefined ? { weeklyWage: input.weeklyWage } : {}),
           ...(input.years !== undefined ? { years: input.years } : {}),
           ...(input.kind ? { kind: input.kind } : {}),
+          ...(input.teamId ? { counterpartTeamId: input.teamId } : {}),
           ...(input.pitch ? { pitch: input.pitch } : {}),
           pitched: openNegotiationFor(state, input.playerId)?.pitched ?? [],
         });
