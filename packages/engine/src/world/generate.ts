@@ -1,6 +1,6 @@
 import type { GamePlayer, PositionGroup } from "@story-fm/domain";
-import { FIRST_NAMES, LAST_NAMES } from "../data/names";
-import { TIER_BASE } from "../data/team-catalog";
+import { claimSyntheticName, syntheticNamePoolOf } from "../data/names";
+import { countryOfTeam, TIER_BASE } from "../data/team-catalog";
 import { deriveAxes } from "./attributes";
 import { derivePositions, overallFor, physiqueOf, syntheticFoot } from "./catalog";
 import { claimPlayerId, slugifyName } from "./player-id";
@@ -33,6 +33,11 @@ export function generateYouthPlayer(
   forceGroup?: PositionGroup,
   /** 합류 연도 (유스는 시즌 개막 연도 기준 17~19세) */
   refYear = 2026 + season,
+  /**
+   * 이 팀에 이미 있는 이름 — 새 이름을 여기에 등록하며 고른다. 안 넘기면
+   * 콜업된 유스가 1군 선수와 동명이인으로 설 수 있다 (people.md §2).
+   */
+  takenNames: Set<string> = new Set(),
 ): GamePlayer {
   const rng = makeRng(seed, `youth:${teamId}:${season}:${index}`);
   const groups: PositionGroup[] = ["GK", "DF", "DF", "MF", "MF", "FW", "FW"];
@@ -50,10 +55,11 @@ export function generateYouthPlayer(
    */
   const base = TIER_BASE[tier] - 24;
 
-  const first = pick(rng, FIRST_NAMES);
-  const last = pick(rng, LAST_NAMES);
-  const nameEn = `${first.en} ${last.en}`;
-  const nameKo = `${first.ko} ${last.ko}`;
+  const { ko: nameKo, en: nameEn } = claimSyntheticName(
+    rng,
+    syntheticNamePoolOf(countryOfTeam(teamId)),
+    takenNames,
+  );
   const v = (d = 6) => clamp99(base + randInt(rng, -d, d));
   const strong = () => clamp99(base + randInt(rng, 0, 8));
   const weak = () => clamp99(base + randInt(rng, -18, -8));

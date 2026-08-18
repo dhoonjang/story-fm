@@ -15,6 +15,7 @@ import {
   type GameState,
   reportersOf,
   generateReporters,
+  teamCatalog,
 } from "@story-fm/engine";
 import { createTestGame } from "./helpers";
 
@@ -341,5 +342,36 @@ describe("기자 페르소나", () => {
     state.personas = state.personas?.filter((p) => p.role !== "reporter");
     ensurePersonas(state);
     expect(reportersOf(state)).toHaveLength(3);
+  });
+});
+
+/**
+ * 다섯이 같은 풀에서 독립 추첨하던 자리다 — 겹치면 `speakerRoles`가 둘 다
+ * 포기해 **직책과 아이콘이 함께 사라진다** (people.md §1 · §2).
+ */
+describe("인물 이름의 유일성", () => {
+  it("한 세이브의 다섯(수석코치·구단주·기자 3인)은 이름이 서로 겹치지 않는다", () => {
+    const clashing: string[] = [];
+    for (const seed of [1, 7, 42, 99, 2026]) {
+      for (const team of teamCatalog()) {
+        const names = [
+          generateHeadCoach(seed, team.id).characterId,
+          generateOwner(seed, team.id).characterId,
+          ...generateReporters(seed, team.id).map((r) => r.characterId),
+        ].map(normalizeSpeaker);
+        if (new Set(names).size !== names.length) clashing.push(`${seed}:${team.id}`);
+      }
+    }
+    expect(clashing).toEqual([]);
+  });
+
+  it("화자 사전이 인물 전원의 자리를 안다 — 이름이 겹쳐 생략되는 자리가 없다", () => {
+    for (const seed of [3, 11]) {
+      const state = createTestGame(seed);
+      const roles = speakerRoles(state);
+      for (const persona of state.personas ?? []) {
+        expect(roles[normalizeSpeaker(persona.characterId)]?.kind, persona.name).toBe(persona.role);
+      }
+    }
   });
 });

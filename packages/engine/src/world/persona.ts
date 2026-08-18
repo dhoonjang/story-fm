@@ -8,8 +8,8 @@ import {
 } from "@story-fm/domain";
 import { realCoachNameOf } from "../data/coach-seeds";
 import { realOwnerNameOf } from "../data/owner-seeds";
-import { leagueCatalogById } from "../data/league-catalog";
-import { countryOfTeam, leagueOfTeam } from "../data/team-catalog";
+import { claimPersonaName, personaNamePoolOf } from "../data/names";
+import { countryOfTeam } from "../data/team-catalog";
 import { makeRng, pick } from "../core/rng";
 
 /**
@@ -121,45 +121,44 @@ const COACH_ARCHETYPES: readonly CoachArchetype[] = [
 ];
 
 /**
- * 이름 풀 — **실명을 모르는 팀**의 대체 이름이다 (`coach-seeds.ts`에 없는 팀).
+ * 한 세이브의 가상 이름 — 다섯 자리(기자 3 · 수석코치 · 구단주)를 **한 번에** 뽑는다.
  *
- * 나라별로 나눈 이유는 아스날 수석코치가 "안드레 페레스"이면 그 자체로 어색하기
- * 때문이다. 리그 국적을 따라가면 실명이 아니어도 그 구단의 사람처럼 읽힌다.
- * 한국어 중계 문맥의 표기를 따른다.
+ * 자리마다 독립 추첨하면 같은 풀에서 같은 이름이 나오고, 겹친 이름은
+ * `speakerRoles`가 둘 다 포기해 **직책과 아이콘이 함께 사라진다**
+ * (people.md §1 — 태그는 전역 유일). 그래서 앞사람이 쥔 이름을 넘겨가며 뽑는다.
+ *
+ * **순서가 규칙이다.** 실명이 먼저 자리를 잡고(그 사람의 이름은 흔들 수 없다),
+ * 그다음이 기자다 — 기자는 구단이 아니라 리그를 따라다니므로 뒤로 밀면 감독이
+ * 팀을 옮길 때마다 담당 기자의 이름이 갈린다.
  */
-interface NamePool {
-  given: readonly string[];
-  family: readonly string[];
-}
-
-const NAME_POOLS: Record<string, NamePool> = {
-  잉글랜드: {
-    given: ["제임스", "토마스", "대니얼", "마이클", "올리버", "해리", "에런", "루크"],
-    family: ["베넷", "콜린스", "하퍼", "그레이", "모건", "라이언", "웰스", "다우니"],
-  },
-  스페인: {
-    given: ["파블로", "하비에르", "세르히오", "알바로", "이반", "미겔"],
-    family: ["페레스", "리코", "가르시아", "몰리나", "세라노", "나바로"],
-  },
-  이탈리아: {
-    given: ["루카", "마르코", "안드레아", "다비데", "스테파노", "마테오"],
-    family: ["마르케티", "리치", "베르가모", "콘티", "파리네티", "갈리"],
-  },
-  독일: {
-    given: ["슈테판", "토비아스", "마티아스", "얀", "플로리안", "닐스"],
-    family: ["브란트", "뮐러", "케슬러", "바그너", "호프만", "슈나이더"],
-  },
-  프랑스: {
-    given: ["니콜라", "티에리", "쥘리앵", "마티외", "로랑", "뱅상"],
-    family: ["뒤퐁", "모로", "르콩트", "지라르", "베르나르", "포르티에"],
-  },
-};
-
-const FALLBACK_POOL = NAME_POOLS["잉글랜드"]!;
-
-/** 나라 → 이름 풀. 풀이 없는 나라는 잉글랜드로 떨어진다 */
-function namePoolOf(country: string | undefined): NamePool {
-  return (country !== undefined ? NAME_POOLS[country] : undefined) ?? FALLBACK_POOL;
+function personaNames(
+  seed: number,
+  teamId: string,
+): {
+  reporters: Record<string, string>;
+  headCoach: string;
+  owner: string;
+} {
+  const pool = personaNamePoolOf(countryOfTeam(teamId));
+  const realCoach = realCoachNameOf(teamId);
+  const realOwner = realOwnerNameOf(teamId);
+  const taken = new Set([realCoach, realOwner].filter((n) => n !== null));
+  const reporters: Record<string, string> = {};
+  for (const archetype of REPORTER_ARCHETYPES) {
+    reporters[archetype.key] = claimPersonaName(
+      makeRng(seed, `persona:name:reporter:${archetype.key}`),
+      pool,
+      taken,
+    );
+  }
+  return {
+    reporters,
+    headCoach:
+      realCoach ??
+      claimPersonaName(makeRng(seed, `persona:name:head_coach:${teamId}`), pool, taken),
+    owner:
+      realOwner ?? claimPersonaName(makeRng(seed, `persona:name:owner:${teamId}`), pool, taken),
+  };
 }
 
 /**
@@ -167,7 +166,7 @@ function namePoolOf(country: string | undefined): NamePool {
  * 감독 시장(`manager-market.ts`)이 후임 감독의 이름을 여기서 얻는다.
  */
 export function inventPersonName(rng: () => number, teamId: string): string {
-  const pool = namePoolOf(countryOfTeam(teamId));
+  const pool = personaNamePoolOf(countryOfTeam(teamId));
   return `${pick(rng, pool.given)} ${pick(rng, pool.family)}`;
 }
 
@@ -185,8 +184,7 @@ export function generateHeadCoach(seed: number, teamId: string): Persona {
   const rng = makeRng(seed, `persona:head_coach:${teamId}`);
   const archetype = pick(rng, COACH_ARCHETYPES);
   const real = realCoachNameOf(teamId);
-  const pool = namePoolOf(countryOfTeam(teamId));
-  const name = real ?? `${pick(rng, pool.given)} ${pick(rng, pool.family)}`;
+  const name = personaNames(seed, teamId).headCoach;
   return {
     // 화자 태그는 직책이 아니라 **이름**이다 — 선수가 @손흥민:으로 말하듯
     characterId: name,
@@ -300,8 +298,7 @@ export function generateOwner(seed: number, teamId: string): Persona {
   const rng = makeRng(seed, `persona:owner:${teamId}`);
   const archetype = pick(rng, OWNER_ARCHETYPES);
   const real = realOwnerNameOf(teamId);
-  const pool = namePoolOf(countryOfTeam(teamId));
-  const name = real ?? `${pick(rng, pool.given)} ${pick(rng, pool.family)}`;
+  const name = personaNames(seed, teamId).owner;
   return {
     characterId: name,
     name,
@@ -530,11 +527,10 @@ const OUTLET_NAMES: Record<string, string[]> = {
  * 팀을 넣지 않는다. 감독이 다른 팀으로 옮겨도 같은 기자를 만난다.
  */
 export function generateReporters(seed: number, teamId: string): Persona[] {
-  // 이름 풀의 기준도 리그다 — 시드 채널과 어긋나면 같은 담당 기자의 이름이 갈린다
-  const pool = namePoolOf(leagueCatalogById(leagueOfTeam(teamId))?.country);
+  const names = personaNames(seed, teamId);
   return REPORTER_ARCHETYPES.map((archetype) => {
     const rng = makeRng(seed, `persona:reporter:${archetype.key}`);
-    const name = `${pick(rng, pool.given)} ${pick(rng, pool.family)}`;
+    const name = names.reporters[archetype.key]!;
     const outlet = pick(rng, OUTLET_NAMES[archetype.key] ?? ["프레스"]);
     return {
       characterId: name,

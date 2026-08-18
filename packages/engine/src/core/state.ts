@@ -46,6 +46,7 @@ import {
   FAMILIARITY_BASELINE,
   FORMATIONS,
   FIRST_TEAM_LIMIT,
+  MATCHDAY_BENCH,
   MATCHDAY_SQUAD,
   canRegister,
   isUnder21,
@@ -1407,6 +1408,8 @@ function buildInitialSquads(
       }
     }
     const reserveCount = squad.filter((p) => p.squadLevel === "reserve").length;
+    // 이름도 팀 안에서 유일해야 한다 — 1군 명단을 쥐고 시작한다 (people.md §2)
+    const takenNames = new Set(squad.map((p) => p.name));
     for (let i = reserveCount; i < RESERVE_TEAM_SIZE; i++) {
       const youth = generateYouthPlayer(
         seed + 17,
@@ -1417,6 +1420,7 @@ function buildInitialSquads(
         takenIds,
         undefined,
         2026,
+        takenNames,
       );
       youth.squadLevel = "reserve";
       players.push(youth);
@@ -1858,8 +1862,8 @@ export function buildAssignments(
   return assignments;
 }
 
-/** 매치데이 벤치 규모 */
-export const MATCHDAY_BENCH = 9;
+/** 매치데이 벤치 규모 — 값은 도메인이 하나만 갖는다 (`squad-rules.ts`) */
+export { MATCHDAY_BENCH };
 
 export function createGame(input: CreateGameInput): GameState {
   const seed = input.seed ?? randInt(makeRng(Date.now() % 2 ** 31, "seed"), 1, 2 ** 30);

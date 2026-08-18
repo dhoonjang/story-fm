@@ -37,6 +37,12 @@ import {
   START_MIN_AXIS,
   START_MAX_AXIS,
   playerCatalog,
+  buildTeamSquad,
+  generateYouthPlayer,
+  syntheticNamePoolOf,
+  personaNamePoolOf,
+  SYNTHETIC_NAME_COUNTRIES,
+  PERSONA_NAME_COUNTRIES,
   playersOf,
   assignmentsOf,
   activeContract,
@@ -232,6 +238,84 @@ describe("선수 카탈로그 (불변 초기치 DB)", () => {
   it("결정적이다 — 같은 카탈로그가 반복 호출에도 동일", () => {
     expect(playerCatalog()).toEqual(catalog);
   });
+
+  /**
+   * 한 팀 안의 동명이인은 화면만의 문제가 아니다 — `rankByName`이 매번 되묻고,
+   * GM 명부에 같은 이름 두 줄이 서며, 로마자까지 같으면 id가 연도로 갈린다.
+   */
+  it("한 팀 안에서 이름만으로 사람이 갈린다 — 한글도 로마자도", () => {
+    const byTeam = new Map<string, typeof catalog>();
+    for (const entry of catalog)
+      byTeam.set(entry.teamId, [...(byTeam.get(entry.teamId) ?? []), entry]);
+    const clashing: string[] = [];
+    for (const [teamId, squad] of byTeam) {
+      const ko = new Set(squad.map((e) => e.nameKo));
+      const en = new Set(squad.map((e) => e.nameEn));
+      if (ko.size !== squad.length) clashing.push(`${teamId}: 한글 ${squad.length - ko.size}`);
+      if (en.size !== squad.length) clashing.push(`${teamId}: 로마자 ${squad.length - en.size}`);
+    }
+    expect(clashing).toEqual([]);
+  });
+
+  /**
+   * 합성 선수가 실선수와 같은 이름이면 유일성을 지켜도 사람이 안 갈린다.
+   * 뽑힌 조합이 아니라 **뽑힐 수 있는 조합 전부**를 보는 이유다 — 풀을 고칠 때
+   * 걸려야 하지, 시드가 그 조합을 뽑는 날 걸려서는 늦다.
+   */
+  it("합성 이름 조합이 실선수 이름과 겹치지 않는다", () => {
+    const real = catalog.filter((e) => e.synthetic !== true);
+    const realKo = new Set(real.map((e) => e.nameKo));
+    const realEn = new Set(real.map((e) => e.nameEn));
+    const clashing: string[] = [];
+    for (const country of SYNTHETIC_NAME_COUNTRIES) {
+      const pool = syntheticNamePoolOf(country);
+      for (const first of pool.first) {
+        for (const last of pool.last) {
+          if (realKo.has(`${first.ko} ${last.ko}`)) clashing.push(`${first.ko} ${last.ko}`);
+          if (realEn.has(`${first.en} ${last.en}`)) clashing.push(`${first.en} ${last.en}`);
+        }
+      }
+    }
+    expect(clashing).toEqual([]);
+  });
+
+  /**
+   * 인물(수석코치·구단주·기자)과 선수가 동명이인이면 `speakerRoles`가 둘 다
+   * 포기해 직책·아이콘이 함께 사라진다. 성을 나눠 두면 조합이 겹칠 수 없다.
+   */
+  it("인물 이름 풀과 선수 이름 풀은 성을 나눠 갖는다", () => {
+    const playerFamily = new Set(
+      SYNTHETIC_NAME_COUNTRIES.flatMap((c) => syntheticNamePoolOf(c).last.map((n) => n.ko)),
+    );
+    const shared = PERSONA_NAME_COUNTRIES.flatMap((c) => personaNamePoolOf(c).family).filter((f) =>
+      playerFamily.has(f),
+    );
+    expect(shared).toEqual([]);
+  });
+
+  /**
+   * 이름 재추첨은 시드 rng를 쓴다 — 같은 시드가 두 번 돌면 같은 명단이 나와야
+   * 세계 생성이 결정적이다 (AGENTS.md §4).
+   */
+  it("같은 시드로 두 번 만들면 같은 명단이 나온다 — 재추첨도 결정적", () => {
+    const team = teamCatalog().find((t) => t.leagueId !== "free")!;
+    const once = buildTeamSquad(team, new Set());
+    const twice = buildTeamSquad(team, new Set());
+    expect(twice).toEqual(once);
+
+    const takenA = new Set<string>();
+    const takenB = new Set<string>();
+    const youthOf = (taken: Set<string>, names: Set<string>) =>
+      Array.from(
+        { length: 6 },
+        (_, i) =>
+          generateYouthPlayer(7, team.id, 0, i, team.tier, taken, undefined, 2026, names).name,
+      );
+    const namesA = new Set<string>();
+    const namesB = new Set<string>();
+    expect(youthOf(takenB, namesB)).toEqual(youthOf(takenA, namesA));
+    expect(namesA.size).toBe(6); // 같은 팀에 콜업된 유스끼리도 겹치지 않는다
+  });
 });
 
 describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
@@ -244,6 +328,13 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
     const summer = state.windows.find((w) => w.kind === "summer");
     expect(summer?.opensOn).toBe("2026-07-01");
     expect(state.date >= (summer?.opensOn ?? "")).toBe(true);
+  });
+
+  it("2군을 메운 유스까지 팀 안에서 이름이 겹치지 않는다", () => {
+    for (const team of state.teams.filter((entry) => entry.id !== "freeagents")) {
+      const squad = playersOf(state, team.id);
+      expect(new Set(squad.map((p) => p.name)).size).toBe(squad.length);
+    }
   });
 
   it("모든 클럽 소속 선수는 팀 안에서 고유한 등번호를 갖는다", () => {

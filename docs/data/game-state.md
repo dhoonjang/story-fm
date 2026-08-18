@@ -85,7 +85,7 @@
 | 인물 시드              | 실제 수석코치·구단주 이름                              | `data/coach-seeds.ts` · `owner-seeds.ts`                     |
 | 선수 시드              | EPL 실선수 · 유럽 4대 리그 · 시장 전용 리그            | `data/epl-players.ts` · `eu-squads.ts` · `market-leagues.ts` |
 | 부상 이력 시드         | 유리몸 성향의 출발점                                   | `data/injury-history.ts`                                     |
-| 이름 풀                | 절차 생성 선수의 이름                                  | `data/names.ts`                                              |
+| 이름 풀                | 절차 생성 선수·가상 인물의 이름 — 나라별               | `data/names.ts`                                              |
 
 - `PLAYER_CATALOG`은 시드에서 **결정적으로 파생**된다(`deriveAxes`) — 저장된 표가
   아니라 함수의 결과이고, `overall`은 아예 갖지 않는다(파생).

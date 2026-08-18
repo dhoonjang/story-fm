@@ -33,8 +33,8 @@ import {
   strengthBase,
 } from "../data/team-catalog";
 import { isMarketOnlyLeague } from "../data/league-catalog";
-import { FIRST_NAMES, LAST_NAMES } from "../data/names";
-import { makeRng, pick, randInt } from "../core/rng";
+import { claimSyntheticName, syntheticNamePoolOf } from "../data/names";
+import { makeRng, randInt } from "../core/rng";
 import { claimPlayerId, slugifyName } from "./player-id";
 
 /**
@@ -492,7 +492,9 @@ function topUpEntries(
 ): CatalogDraft[] {
   const short = MIN_SQUAD - seeds.length;
   if (short <= 0) return [];
-  const all = fallbackEntries(teamId, base);
+  const all = fallbackEntries(teamId, base, {
+    takenNames: new Set(seeds.map((s) => s.nameKo)),
+  });
   const have: Record<string, number> = { GK: 0, DF: 0, MF: 0, FW: 0 };
   for (const s of seeds) have[s.positionGroup] = (have[s.positionGroup] ?? 0) + 1;
 
@@ -522,17 +524,23 @@ function topUpEntries(
 function fallbackEntries(
   teamId: string,
   squadBase: number,
-  options: { template?: string[]; academyFrom?: number } = {},
+  options: { template?: string[]; academyFrom?: number; takenNames?: Set<string> } = {},
 ): CatalogDraft[] {
   const template = options.template ?? FALLBACK_TEMPLATE;
   const academyFrom = options.academyFrom ?? ACADEMY_FROM;
+  // 이름 풀은 리그 국적을 따른다 — 세군다 명단이 통째로 잉글랜드 사람이 되지 않게
+  const pool = syntheticNamePoolOf(countryOfTeam(teamId));
+  /**
+   * **한 팀 안에서는 이름만으로 사람이 갈려야 한다** (people.md §2). 자리마다
+   * 독립 추첨하면 조합이 아무리 많아도 40명 스쿼드에서 같은 이름이 서고,
+   * 로마자까지 같아 `rankByName`이 매번 되묻는다. 실선수 시드가 있는 클럽은
+   * 그 이름들도 미리 쥐고 시작한다 (`topUpEntries`).
+   */
+  const takenNames = options.takenNames ?? new Set<string>();
   return template.map((position, i) => {
     const rng = makeRng(hashOf(`${teamId}:${i}`), `catalog:${teamId}:${i}`);
     const group = positionGroupOf(position) ?? "MF";
-    const first = pick(rng, FIRST_NAMES);
-    const last = pick(rng, LAST_NAMES);
-    const nameEn = `${first.en} ${last.en}`;
-    const nameKo = `${first.ko} ${last.ko}`;
+    const { ko: nameKo, en: nameEn } = claimSyntheticName(rng, pool, takenNames);
     // 아카데미는 1군보다 한참 낮게 출발한다 (잠재력은 아래에서 크게 잡는다)
     const base = i >= academyFrom ? squadBase - randInt(rng, 12, 20) : squadBase;
     const v = (d = 6) => clamp99(base + randInt(rng, -d, d));
@@ -662,6 +670,7 @@ function teamDrafts(team: TeamCatalogEntry): CatalogDraft[] {
       ...fallbackEntries(team.id, topUpBase(real, strengthBase(team)), {
         template: MARKET_LEAGUE_TEMPLATE,
         academyFrom: MARKET_LEAGUE_TEMPLATE.length,
+        takenNames: new Set(seeds.map((s) => s.nameKo)),
       }),
     ];
   }
