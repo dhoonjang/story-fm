@@ -319,7 +319,7 @@ LAM/RAM · LF/RF · LST/RST.
   전원이 침울해지고 이적 판정·재계약·오퍼까지 오염된다. 마음의 근거는
   `hasIssue`(라커룸 불만)·폼·정착·출전 기회이고, 체력은 감정어 없이 사실로만
   쓴다. 심경 한 줄의 계약은 [people.md](people.md).
-- 왜 낮은지는 심경 한 줄(`describeMood` 앵커 + mood-rater 재작성)이 말한다.
+- 왜 낮은지는 심경 한 줄(코어 사실 카드 `moodFactsOf` + mood-rater 재작성)이 말한다.
 
 ### 5.3 부상 — 심각도·기간·성향 (`engine/squad/injury.ts`)
 
@@ -994,7 +994,7 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
 | 되찾기 3단 (`inheritedRole`·`roleAtSlot`) — 코어와 전술판이 같이 부른다                                                         | `packages/domain/src/player.ts`                                                         |
 | 적응도 선반·역할 대가 정산 (`shelveFamiliarity`·`settleRoleCost`)                                                               | `packages/engine/src/skills/familiarity-memory.ts`                                      |
 | 결산 반영 (`applyAttributeStep`·`positionGain`)                                                                                 | `packages/engine/src/squad/training-report.ts` · `packages/engine/src/match/ratings.ts` |
-| 심경 (`describeMood`·`MOOD_BATCH`)                                                                                              | `packages/engine/src/squad/mood.ts` ([people.md](people.md))                            |
+| 심경 (`moodFactsOf`·`MOOD_BATCH`)                                                                                               | `packages/engine/src/squad/mood.ts` ([people.md](people.md))                            |
 | 적응도 영향 폭(`ADAPTATION_IMPACT`)·화면 합산(`adaptationOf`)                                                                   | `packages/domain/src/tactics.ts`                                                        |
 | 전력 팩터 (`profFactor`·`famFactor`)·상태 보정                                                                                  | `packages/sim/src/strength-packet.ts` · `state-modifier.ts`                             |
 | 합성 주발 표집 (`syntheticFoot`)                                                                                                | `packages/engine/src/world/catalog.ts`                                                  |
