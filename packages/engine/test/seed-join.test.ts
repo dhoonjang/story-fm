@@ -361,10 +361,11 @@ describe("자리표시자 생년월일 — 1월 1일이 실제 날짜인지 표�
  * 손대지 않는다 — 그 함수는 **빈 번호만** 채우므로 시드가 들여온 충돌은 그대로
  * 게임에 실린다.
  *
- * ⚠️ **이름만으로 중복을 잡을 수는 없다.** 생일이 19일 떨어진 동명이인이 실재한다
- * (알렉스 히메네스 2005-05-08 · 2005-04-19). 그래서 키는 (이름 + 생년월일)이고,
- * 생일까지 어긋난 중복은 이 축으로 잡히지 않는다 — 그쪽은 위키 구단 문서와의
- * 대조만이 가른다.
+ * ⚠️ **이름은 중복을 다 잡지 못한다.** 생일이 19일 떨어진 동명이인이 실재하고
+ * (알렉스 히메네스 2005-05-08 · 2005-04-19), 생일까지 어긋난 중복은 (이름 +
+ * 생년월일) 축을 그대로 통과한다. 그 자리를 `wikidataId`가 메운다 — 위키 문서
+ * 제목이 동명이인을 이미 갈라 두므로 QID는 사람마다 하나다. QID가 없는 선수는
+ * 위키 문서가 없는 아카데미 자원이고, 그들에게는 (이름 + 생년월일)이 남는다.
  */
 describe("소속 불변식 — 한 선수 한 구단, 한 구단 안에서 번호는 하나", () => {
   const ALL_SQUADS: Record<string, readonly RealPlayerSeed[]> = {
@@ -372,6 +373,41 @@ describe("소속 불변식 — 한 선수 한 구단, 한 구단 안에서 번�
     ...EU_SQUADS,
     ...MARKET_LEAGUE_SQUADS,
   };
+
+  /**
+   * 오타 난 키는 다른 사람의 키가 아니라 **아무의 키도 아니다** — 아래 중복 검사를
+   * 조용히 빠져나가므로, 모양부터 잠근다.
+   */
+  it("wikidataId는 Q + 숫자다", () => {
+    const violations = Object.entries(ALL_SQUADS).flatMap(([team, squad]) =>
+      squad
+        .filter((s) => s.wikidataId !== undefined && !/^Q[1-9]\d*$/.test(s.wikidataId))
+        .map((s) => `${s.nameKo}(${s.nameEn}) ${team} — ${s.wikidataId}`),
+    );
+
+    expect(violations).toEqual([]);
+  });
+
+  /**
+   * **이 검사가 이슈의 목적이다** — 위키 구단 문서를 다시 받지 않고 시드만 읽어서
+   * 중복을 가른다. 두 구단에 걸친 중복도, 한 구단 안에 두 번 실린 것도 같은 축이
+   * 잡는다: 한 사람은 QID 하나이고, 그 QID는 시드에 한 번만 나온다.
+   */
+  it("같은 wikidataId가 두 행에 실려 있지 않다", () => {
+    const rowsOfQid = new Map<string, string[]>();
+    for (const [team, squad] of Object.entries(ALL_SQUADS)) {
+      for (const seed of squad) {
+        if (seed.wikidataId === undefined) continue;
+        const at = `${team}:${seed.nameEn}(${seed.birthdate})`;
+        rowsOfQid.set(seed.wikidataId, [...(rowsOfQid.get(seed.wikidataId) ?? []), at]);
+      }
+    }
+    const violations = [...rowsOfQid]
+      .filter(([, rows]) => rows.length > 1)
+      .map(([qid, rows]) => `${qid} — ${rows.join(", ")}`);
+
+    expect(violations).toEqual([]);
+  });
 
   it("같은 (이름 + 생년월일)이 두 구단에 실려 있지 않다", () => {
     const teamsOf = new Map<string, string[]>();
