@@ -1,4 +1,4 @@
-import type { GamePlayer, MatchRecord, ScheduleEntry } from "@story-fm/domain";
+import type { GamePlayer, MatchRecord, ScheduleEntry, SeasonRecord } from "@story-fm/domain";
 import {
   YELLOWS_PER_SUSPENSION,
   ageOf,
@@ -17,7 +17,7 @@ import { addDays, dayOfWeek, diffDays, seasonYear, squadReturnOf } from "../comp
 import { entrantsOf } from "../competition/europe";
 import { formLabel } from "../squad/form";
 import { INJURY_SEVERITY_KO } from "../squad/injury";
-import { moodOf } from "../squad/mood";
+import { moodAnchor, moodOf } from "../squad/mood";
 import {
   isHomegrownFor,
   occupiesSquadList,
@@ -472,6 +472,26 @@ function historyLines(state: GameState, p: GamePlayer): string[] {
   return lines;
 }
 
+/**
+ * GM이 읽는 심경 한 줄 — 결산이 다시 쓴 문장이 있으면 그것, 없으면 **사실 줄**.
+ * 코어가 GM에게 넘기는 것은 사실뿐이다 (overview.md §1 철칙 4).
+ */
+function moodLine(state: GameState, player: GamePlayer): string {
+  return moodOf(state, player).note ?? moodAnchor(state, player);
+}
+
+/**
+ * 그 시즌의 보드 평가 — 등급과 근거 수치. 옛 세이브는 평가 문장을 들고 있어
+ * 그것이 폴백이다 (career.md §6).
+ */
+function boardLine(record: SeasonRecord): string {
+  if (record.board) {
+    const met = record.board.grade === "met";
+    return ` — 보드 기대 ${record.board.target}위(${record.board.expectation}) · ${met ? "달성" : "미달"}`;
+  }
+  return record.boardVerdict ? ` — 보드: "${record.boardVerdict}"` : "";
+}
+
 /** 그 자리에서 맡고 있는 세부 역할의 한글 이름 (미지정이면 기본 역할) */
 function roleLabel(position: string, roleId?: string): string {
   const defs = rolesFor(position);
@@ -515,7 +535,7 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
   if (knowledge === "own") {
     lines.push(
       `컨디션: 폼 ${formLabel(p.state.form)} · 체력 ${p.state.condition} (${conditionLabel(p.state.condition)})`,
-      `심경: ${moodOf(state, p)}`,
+      `심경: ${moodLine(state, p)}`,
       `소화 포지션: ${p.positions
         .map((x) => `${x.position}${x.isNatural ? "*" : ""}${x.proficiency}`)
         .join(" / ")}`,
@@ -1289,7 +1309,7 @@ export function careerView(state: GameState): LookupResult {
       lines.push(
         `  시즌 ${r.season} (${year}-${String((year + 1) % 100).padStart(2, "0")}) ${teamNameIn(state, r.teamId)} ` +
           `${r.position}위 · ${r.wins}승 ${r.draws}무 ${r.losses}패 · 득 ${r.goalsFor} 실 ${r.goalsAgainst}` +
-          (r.boardVerdict ? ` — 보드: "${r.boardVerdict}"` : ""),
+          boardLine(r),
       );
     }
     if (records.length > 10) lines.push(`  …그 외 ${records.length - 10}시즌`);

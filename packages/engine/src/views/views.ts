@@ -60,7 +60,7 @@ import { euroCompetitionOf } from "../competition/europe";
 import { formAngle, formLabel, formTone } from "../squad/form";
 import { ratingTone, type RatingTone } from "../match/ratings";
 import { GAP_CONDITION, edgeOf, zoneGrid } from "@story-fm/sim";
-import { moodOf } from "../squad/mood";
+import { moodOf, type MoodRead } from "../squad/mood";
 import { isHomegrownFor, occupiesSquadList, squadRegistrationOf } from "../squad/registration";
 import {
   observationOf,
@@ -84,7 +84,7 @@ import { MANAGER_ATTR_CAP, MANAGER_XP_PER_LEVEL } from "../skills";
 import { askingPriceFor, marketValueOf, wageExpectationOf } from "../market/market";
 import { settlingPercent } from "../squad/settling";
 import { INJURY_SEVERITY_KO } from "../squad/injury";
-import { computeStandings, type StandingRow } from "../competition/season";
+import { boardExpectation, computeStandings, type StandingRow } from "../competition/season";
 import { hasRelegation, leagueOfTeamIn } from "../competition/promotion";
 import { RELEGATION_SLOTS } from "../core/league-shape";
 import { isCupOnlyLeague } from "../data/league-catalog";
@@ -396,8 +396,11 @@ interface SquadViewRowMeta {
    * 쓰면 감독이 두 탭을 견주는 것만으로 안개가 걷힌다.
    */
   condition: ConditionRead;
-  /** 지금 심경 한 줄 — 코어 앵커(`describeMood`) 위에 결산이 다시 쓴 문장 (`moodOf`) */
-  mood: string;
+  /**
+   * 지금 심경 — **코어가 고른 사실 카드**와, 결산(LLM)이 다시 쓴 한 줄(`moodOf`).
+   * 문장은 화면이 쓴다 (`apps/web/lib/mood.ts` · overview.md §1 철칙 4).
+   */
+  mood: MoodRead;
   /** 배치 역할 — 없으면 예비(스쿼드) */
   role: "선발" | "벤치" | "스쿼드";
   /** 이 전술에서 맡는 포지션 (배치가 있을 때) */
@@ -960,7 +963,12 @@ export interface OfficeViews {
     weeklyWages: number;
     transferBudget: number;
     budgetFrozen: boolean;
-    boardExpectation: string;
+    /**
+     * **보드가 지금 이 구단에 지고 있는 기대** — 체급이 정한다 (`boardExpectation`).
+     * 지난 시즌의 **평가**가 아니다: 그 둘을 한 칸에 겹쳐 두면 첫 시즌의 감독이
+     * 아무도 매기지 않은 평가를 읽는다.
+     */
+    boardExpectation: { target: number; label: string };
     stadium: { name: string; capacity: number };
     /** 급여 비중 — **시즌 누계** (급여 ÷ 매출). 한 달만 보면 프리시즌에 튄다 */
     wageRatio: number;
@@ -995,10 +1003,13 @@ export interface OfficeViews {
       position: number;
       record: string;
       /**
-       * 그 시즌에 대한 보드의 평가 한 줄 — **순위와 전적이 말하지 않는 것**.
-       * 같은 4위가 어느 구단에서는 성공이고 어느 구단에서는 실패다(career.md §5).
+       * 그 시즌에 대한 **보드 평가 카드** — 등급과 근거 수치 (career.md §6).
+       * 순위와 전적이 말하지 않는 것이 여기 있다: 같은 4위가 어느 구단에서는
+       * 성공이고 어느 구단에서는 실패인 이유가 `target`에 남는다. 문장은 화면이 쓴다.
        */
-      boardVerdict: string;
+      board: { grade: "met" | "missed"; target: number; expectation: string } | null;
+      /** 옛 세이브가 들고 있는 평가 문장 — `board`가 없을 때만 선다 */
+      boardVerdict: string | null;
     }>;
   };
 }
@@ -2192,8 +2203,6 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         `${fixtureLabel(m.competitionId, m.stage ?? "league", m.round)} ${teamShortNameIn(state, m.homeTeamId)} ${m.result?.homeGoals}-${m.result?.awayGoals} ${teamShortNameIn(state, m.awayTeamId)}${m.result?.penalties ? ` (승부차기 ${m.result.penalties.home}-${m.result.penalties.away})` : ""}`,
     );
 
-  const lastRecord = state.seasonRecords[state.seasonRecords.length - 1];
-
   return {
     match: buildMatchView(state),
     squad: {
@@ -2241,7 +2250,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       weeklyWages: weeklyWagesOf(state, userTeamId),
       transferBudget: finance.transferBudget,
       budgetFrozen: finance.budgetFrozen === true,
-      boardExpectation: lastRecord?.boardVerdict ?? "시즌 목표 달성",
+      boardExpectation: boardExpectation(state, userTeamId),
       stadium: { name: stadium.stadium, capacity: stadium.capacity },
       // 시즌 누계 기준 — 한 달만 보면 프리시즌에 100%를 넘어 무의미하다
       wageRatio: seasonWageRatio(state),
@@ -2280,7 +2289,10 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         teamName: teamNameIn(state, s.teamId),
         position: s.position,
         record: `${s.wins}승 ${s.draws}무 ${s.losses}패`,
-        boardVerdict: s.boardVerdict,
+        board: s.board
+          ? { grade: s.board.grade, target: s.board.target, expectation: s.board.expectation }
+          : null,
+        boardVerdict: s.boardVerdict ?? null,
       })),
     },
   };

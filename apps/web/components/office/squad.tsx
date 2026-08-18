@@ -38,6 +38,7 @@ import {
   type BoardState,
 } from "@/lib/board-roles";
 import { money } from "@/lib/money";
+import { moodSentence } from "@/lib/mood";
 import { IconBoard, IconChevron } from "@/components/icons";
 import { PitchChip, PitchGround } from "../pitch";
 import { createLineupSaver, type LineupSaveOutcome, type LineupSaver } from "../lineup-saver";
@@ -566,9 +567,10 @@ function PlayerDetail({
   const preferred = (code: string) => isNaturalAt(p, code);
   return (
     <div className="player-detail" data-testid="player-detail">
-      {/* 지금 심경 한 줄 — 아래 숫자들이 왜 그런지 */}
+      {/* 지금 심경 한 줄 — 아래 숫자들이 왜 그런지. 코어는 사실 카드만 넘기고
+          문장은 화면이 쓴다 (docs/overview.md §1 철칙 4) */}
       <p className="pd-mood" data-testid="player-mood">
-        {p.mood}
+        {moodSentence(p.mood)}
       </p>
 
       {/* 상태 요약 — 이름·나이·OVR은 바로 위 행과 겹치므로 표에 없는 것만 앞에 둔다 */}
@@ -1971,7 +1973,7 @@ function SquadTable({
               </td>
               {/* 사기·피로를 하나로 합친 값 — 왜 이 값인지는 행을 펼치면 한 문장으로 나온다.
                   경기 중에는 판세 탭과 같은 읽은 값이라 막대에 모르는 폭이 붙는다 */}
-              <td title={p.mood}>
+              <td title={moodSentence(p.mood)}>
                 <ConditionBar c={p.condition} />
               </td>
               {/* 골 대신 평점 — 골 수는 행을 펼치면 시즌 기록에 그대로 있다 */}
