@@ -163,9 +163,9 @@ describe("전술 변화의 방향 (tacticsAffinityShift)", () => {
   it("왕복은 정확히 제자리다 — 오간 것만으로는 한 톨도 안 남는다", () => {
     const far: TacticsSpec = { ...A, mentality: 5, tempo: 1, width: 4, passStyle: 5 };
     expect(tacticsAffinityShift(longBaller, A, far)).not.toBe(0);
-    expect(tacticsAffinityShift(longBaller, A, far) + tacticsAffinityShift(longBaller, far, A)).toBe(
-      0,
-    );
+    expect(
+      tacticsAffinityShift(longBaller, A, far) + tacticsAffinityShift(longBaller, far, A),
+    ).toBe(0);
     expect(tacticsAffinityShift(longBaller, A, A)).toBe(0);
   });
 
@@ -175,7 +175,14 @@ describe("전술 변화의 방향 (tacticsAffinityShift)", () => {
 
   it("쏠림 없는 선수에게는 어느 변화도 0이다 — 축의 양 끝이 똑같이 익숙하다", () => {
     const flat = attrsOf();
-    for (const axis of ["mentality", "defensiveLine", "pressing", "tempo", "width", "passStyle"] as const) {
+    for (const axis of [
+      "mentality",
+      "defensiveLine",
+      "pressing",
+      "tempo",
+      "width",
+      "passStyle",
+    ] as const) {
       expect(tacticsAffinityShift(flat, A, { ...A, [axis]: 5 }), axis).toBe(0);
     }
   });

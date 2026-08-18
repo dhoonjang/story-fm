@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_LOAN_WAGE_SHARE,
+  SEVERANCE_RATE,
+  SEVERANCE_WEEKS_CAP,
   activeContract,
+  addDays,
   loanPlayer,
   loanedOut,
   movePlayerSlot,
@@ -179,5 +182,40 @@ describe("개인 훈련 — 팀 훈련 위에 한 선수만", () => {
     const target = spare(state);
     expect(setPlayerTraining(state, { playerId: target.id, axis: "wizardry" }).ok).toBe(false);
     expect(setPlayerTraining(state, { playerId: target.id, position: "XX" }).ok).toBe(false);
+  });
+});
+
+/**
+ * 위약금의 눈금 — **잔여 계약 주급의 절반**, 다만 세는 데 양 끝이 있다.
+ * 상한이 없으면 5년 계약 하나가 구단을 파산시키고, 하한이 없으면 이미 끝난 계약이
+ * 음수 주 수로 돈을 만든다.
+ */
+describe("위약금의 양 끝", () => {
+  /** 픽스처는 describe당 하나 — 세 케이스가 같은 선수의 계약 만료일만 옮겨 쓴다 */
+  const state = createTestGame(11);
+  const target = spare(state);
+  const contract = activeContract(state, target.id)!;
+
+  const severanceWith = (until: string) => {
+    contract.until = until;
+    return severanceOf(state, target.id);
+  };
+
+  it("잔여 주 수 × 주급 × 절반이다", () => {
+    expect(severanceWith(addDays(state.date, 70))).toBe(
+      Math.round(contract.weeklyWage * 10 * SEVERANCE_RATE),
+    );
+  });
+
+  it("아무리 긴 계약도 104주까지만 센다", () => {
+    const capped = Math.round(contract.weeklyWage * SEVERANCE_WEEKS_CAP * SEVERANCE_RATE);
+    expect(severanceWith(addDays(state.date, 7 * SEVERANCE_WEEKS_CAP))).toBe(capped);
+    // 그 너머는 한 푼도 더 붙지 않는다
+    expect(severanceWith(addDays(state.date, 7 * SEVERANCE_WEEKS_CAP * 3))).toBe(capped);
+  });
+
+  it("이미 끝난 계약은 0이다 — 음수 주 수가 돈을 만들지 않는다", () => {
+    expect(severanceWith(state.date)).toBe(0);
+    expect(severanceWith(addDays(state.date, -700))).toBe(0);
   });
 });

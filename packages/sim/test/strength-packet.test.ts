@@ -672,7 +672,8 @@ describe("경기 강도 (matchIntensity)", () => {
     // 1~5 스물다섯 조합 전부가 밴드 안이고, 그중 최소는 하한에 **잘려서** 0.8이다
     const all: number[] = [];
     for (let pressing = 1; pressing <= 5; pressing++) {
-      for (let tempo = 1; tempo <= 5; tempo++) all.push(matchIntensity(tactics({ pressing, tempo })));
+      for (let tempo = 1; tempo <= 5; tempo++)
+        all.push(matchIntensity(tactics({ pressing, tempo })));
     }
     expect(Math.min(...all)).toBe(0.8);
     expect(matchIntensity(tactics({ pressing: 1, tempo: 1 })), "하한이 안 물렸다").toBe(0.8);
