@@ -353,17 +353,28 @@ export function attributeLine(state: GameState, player: GamePlayer): string {
     .join(" · ");
 }
 
+/**
+ * 안내문이 잠재력에 대해 할 수 있는 말 — **실제로 주는 구간과 어긋나면 안 된다.**
+ * 구간을 주면서 "알 수 없다"고 하면 모델이 손에 든 정보를 버린다 (player.md §10).
+ */
+function potentialNote(state: GameState, playerId: string, knowledge: Knowledge): string {
+  const margin = potentialMargin(state, playerId, knowledge);
+  return margin === null ? "잠재력은 짐작할 근거가 없다" : `잠재력은 구간으로만 안다(±${margin})`;
+}
+
 /** 안개 상태 안내문 — GM이 확신의 정도를 말로 표현할 근거 */
 export function knowledgeNote(state: GameState, playerId: string): string {
   const knowledge = knowledgeOf(state, playerId);
   const margin = KNOWLEDGE_MARGIN[knowledge];
-  if (knowledge === "own") return "우리 선수 — 모든 수치가 정확하다";
+  const potential = potentialNote(state, playerId, knowledge);
+  if (knowledge === "own") return `우리 선수 — 능력치는 정확하다 · ${potential}`;
   if (knowledge === "adapting") {
     const observable = observationMargin(state, playerId, "pace", knowledge);
     const analytical = observationMargin(state, playerId, "vision", knowledge);
     return (
       `${settlingNote(state, playerId)} · 훈련장에서 본 게 전부다` +
-      `(실행 ±${observable} · 판단 ±${analytical}) — 경기와 훈련이 쌓일수록 정확해진다`
+      `(실행 ±${observable} · 판단 ±${analytical}) — 경기와 훈련이 쌓일수록 정확해진다 · ` +
+      potential
     );
   }
   const open = openScoutReport(state, playerId);
@@ -373,13 +384,13 @@ export function knowledgeNote(state: GameState, playerId: string): string {
     return (
       `스카우팅 완료 — 실행 계열(스피드·패스·태클 등)은 거의 정확하나(±${margin}), ` +
       `판단 계열(결정력·시야·위치선정·침착성·리더십)은 ±${analytical} 오차가 남는다. ` +
-      `잠재력은 알 수 없다${pending}`
+      `${potential}${pending}`
     );
   }
   const source = knowledge === "seen" ? "직접 상대해 봤다" : "리그 평판·소문 수준";
   return (
     `${source} — 평가에 오차가 있다(실행 ±${margin} · 판단 ±${analytical}). ` +
-    `단정하지 말고 인상으로 말하라${pending}`
+    `${potential} · 단정하지 말고 인상으로 말하라${pending}`
   );
 }
 
@@ -545,12 +556,17 @@ export interface PotentialBand {
 }
 
 /**
- * 잠재력 추정 구간 — **참값은 항상 이 안에 있다.**
+ * 잠재력 추정 구간 — 불변식 둘 (player.md §9.1).
  *
- * 중심을 참값에서 ±margin/2만큼 결정적으로 흔들고 거기서 ±margin을 펼친다.
- * 그래서 같은 선수를 몇 번을 물어도 같은 구간이 나오고(신뢰할 수 있는 정보),
- * 감독의 추정이 낙관적일 수도 비관적일 수도 있으면서, 진실을 벗어나지는 않는다.
- * 하한은 지금 실력 아래로 내려가지 않는다 — 이미 가진 것을 못 가질 수는 없다.
+ * 1. **참값은 항상 이 안에 있다.** 중심을 참값에서 ±margin/2만큼 결정적으로 흔들고
+ *    거기서 ±margin을 펼친다 — 같은 선수를 몇 번을 물어도 같은 구간이 나오고,
+ *    감독의 추정이 낙관적일 수도 비관적일 수도 있으면서, 진실을 벗어나지 않는다.
+ * 2. **하한은 현재 실력 아래로 안 내려간다** — 이미 가진 것을 못 가질 수는 없다.
+ *    기준은 **관측** 종합이다. 참 종합을 기준에 쓰면 하한이 그 숫자를 그대로 불러
+ *    안개가 뚫린다.
+ *
+ * 둘이 부딪히면 1이 이긴다 — 그래서 `floor`가 참값에서 잘린다. 안개가 종합을 참
+ * 잠재력 위로 부풀린 선수(잠재력 = 종합인데 관측이 후한 경우)가 여기에 걸린다.
  */
 export function potentialBand(state: GameState, player: GamePlayer): PotentialBand | null {
   const knowledge = knowledgeOf(state, player.id);
@@ -563,7 +579,7 @@ export function potentialBand(state: GameState, player: GamePlayer): PotentialBa
     observedOverall(player.attributes.overall, observationOf(state, player.id)),
   );
   return {
-    low: Math.max(1, Math.min(floor, center - margin)),
+    low: Math.max(floor, center - margin),
     high: Math.min(99, Math.max(truth, center + margin)),
     margin,
   };

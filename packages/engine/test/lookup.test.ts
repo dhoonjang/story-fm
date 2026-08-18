@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   advanceTime,
+  assignmentsOf,
   leagueView,
+  playerById,
   playerCard,
   playersOf,
   scheduleView,
@@ -41,6 +43,18 @@ function leaksTrueRatings(
   return keys.some((k) => new RegExp(`\\b${attrs[k]}\\b`).test(scrubbed));
 }
 
+/**
+ * 결과에 실린 선수 id를 **순서대로**. 행이 라벨만 보여도 순서는 정렬 키를 말하므로,
+ * 안개가 새는지는 값이 아니라 이 순서를 봐야 보인다 (player.md §10).
+ */
+function rowIds(message: string, pool: ReadonlyArray<{ id: string }>): string[] {
+  const known = new Set(pool.map((p) => p.id));
+  return message
+    .split("\n")
+    .map((l) => l.trim().split(" ")[0] ?? "")
+    .filter((id) => known.has(id));
+}
+
 describe("search_players", () => {
   it("우리 팀은 정확한 수치를 준다", () => {
     const state = createTestGame(21);
@@ -70,6 +84,42 @@ describe("search_players", () => {
 
     const none = searchPlayers(state, { team: "mine", name: "존재하지않는이름" });
     expect(none.message).toContain("조건에 맞는 선수가 없습니다");
+  });
+
+  it("타 팀은 참값 순서로 줄을 세우지 않는다 — 같은 질문엔 같은 답", () => {
+    const state = createTestGame(21);
+    const pool = playersOf(state, "chelsea");
+    const res = searchPlayers(state, { team: "chelsea", limit: 15 });
+    const shown = rowIds(res.message, pool);
+    expect(shown).toHaveLength(15);
+    const byTruth = [...pool]
+      .sort((a, b) => b.attributes.overall - a.attributes.overall)
+      .slice(0, 15)
+      .map((p) => p.id);
+    expect(shown).not.toEqual(byTruth);
+    // 오차는 (seed, playerId, 축) 해시라 순서가 호출마다 흔들리지 않는다
+    expect(rowIds(searchPlayers(state, { team: "chelsea", limit: 15 }).message, pool)).toEqual(
+      shown,
+    );
+  });
+
+  it("체력 정렬은 우리 선수만 참값 순이다 — 타 팀은 읽은 값으로 세운다", () => {
+    const state = createTestGame(21);
+    const ours = playersOf(state, state.userTeamId);
+    const theirs = playersOf(state, "chelsea");
+    // 전원이 같은 값이면 무엇으로 세우든 순서가 같아 보인다 — 값을 갈라 둔다
+    ours.forEach((p, i) => (p.state.condition = 100 - i * 2));
+    theirs.forEach((p, i) => (p.state.condition = 100 - i * 2));
+    const byCondition = (pool: ReadonlyArray<(typeof ours)[number]>) =>
+      [...pool]
+        .sort((a, b) => a.state.condition - b.state.condition)
+        .slice(0, 15)
+        .map((p) => p.id);
+
+    const mine = searchPlayers(state, { team: "mine", sortBy: "fatigue", limit: 15 });
+    expect(rowIds(mine.message, ours)).toEqual(byCondition(ours));
+    const other = searchPlayers(state, { team: "chelsea", sortBy: "fatigue", limit: 15 });
+    expect(rowIds(other.message, theirs)).not.toEqual(byCondition(theirs));
   });
 
   it("팀 이름 표기가 흔들려도 해석하고, 없는 팀만 반려한다", () => {
@@ -131,6 +181,18 @@ describe("get_team · get_league", () => {
     const res = teamProfile(state, "chelsea");
     expect(res.ok).toBe(true);
     expect(res.message).not.toMatch(/OVR\d+/);
+  });
+
+  it("타 팀 주력 선수는 참값 상위 6이 아니다 — 고르는 것도 노출이다", () => {
+    const state = createTestGame(23);
+    const starting = assignmentsOf(state, "chelsea", "starting")
+      .map((a) => playerById(state, a.playerId))
+      .filter((p) => p !== null);
+    const byTruth = [...starting]
+      .sort((a, b) => b.attributes.overall - a.attributes.overall)
+      .slice(0, 6)
+      .map((p) => p.id);
+    expect(rowIds(teamProfile(state, "chelsea").message, starting)).not.toEqual(byTruth);
   });
 
   it("우리 팀 프로필은 정확한 수치를 준다", () => {
