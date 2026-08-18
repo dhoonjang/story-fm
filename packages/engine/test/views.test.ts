@@ -564,6 +564,38 @@ describe("경기 화면 뷰", () => {
     expect(during!.opponent).not.toBe(before.opponent);
   });
 
+  /**
+   * 대회 탭의 "다음 경기"는 **그 대회의** 경기다. 팀 단위 값을 그대로 쓰면 챔스 탭
+   * 아래에 친선이 서고, 결과 없는 첫 경기를 그냥 집으면 경기 중에 "오늘 · 지금
+   * 상대"가 선다 — 결과는 종료 시점에 쓰이기 때문이다.
+   */
+  it("대회별 다음 경기는 그 대회의 것이고 진행 중인 경기를 건너뛴다", () => {
+    const state = createTestGame(9, "manutd");
+    // 친선은 대회 화면에 서지 않는다 — 대회의 경기를 치러야 그 탭이 센다
+    playPreseason(state);
+    advanceToMatchday(state);
+
+    const before = buildOfficeViews(state).competitions;
+    const league = before.list[0]!;
+    // 킥오프 전 — 오늘 그 경기가 리그의 다음 경기이자 팀의 다음 경기다
+    expect(league.nextMatch).not.toBeNull();
+    expect(league.nextMatch!.inDays).toBe(0);
+    expect(league.nextMatch!.opponent).toBe(before.nextMatch!.opponent);
+
+    startMatch(state);
+    const during = buildOfficeViews(state).competitions.list[0]!;
+    expect(during.nextMatch).not.toBeNull();
+    expect(during.nextMatch!.inDays).toBeGreaterThan(0);
+    expect(during.nextMatch!.opponent).not.toBe(league.nextMatch!.opponent);
+
+    // 그 대회의 일정에서 온 경기다 — 다른 대회(하물며 친선)의 경기를 세우지 않는다
+    const fixture = during.rounds
+      .flatMap((r) => r.matches)
+      .find((m) => m.ours && m.date === during.nextMatch!.date);
+    expect(fixture).toBeDefined();
+    expect([fixture!.homeName, fixture!.awayName]).toContain(during.nextMatch!.opponent);
+  });
+
   it("체력은 누구도 값 하나로 서지 않는다 — 우리는 좁게, 상대는 넓게", () => {
     const state = createTestGame(9, "manutd");
     advanceToMatchday(state);
