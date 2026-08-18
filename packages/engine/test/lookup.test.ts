@@ -268,7 +268,7 @@ describe("get_league — 일정 검색", () => {
 });
 
 /**
- * get_squad — **현재 배치**를 읽는 자리. 선수 명부엔 배치가 없고 search_players는
+ * get_squad — **현재 배치**를 읽는 자리. 컨텍스트엔 선수단 이름뿐이고 search_players는
  * 상한이 15명이라, 이 도구가 없으면 "지금 누가 선발인지"를 알 방법이 없다.
  */
 describe("get_squad", () => {

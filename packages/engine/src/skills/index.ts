@@ -68,7 +68,6 @@ import {
   proficiencyAt,
   pushNarrative,
   recomputeOverall,
-  resolvePlayerRef,
   squadLevelOf,
   tacticsOf,
   teamName,
@@ -81,6 +80,7 @@ import {
   type SkillBrief,
   type SkillBriefItem,
 } from "../core/state";
+import { pickAnyPlayer, pickOurPlayer } from "../core/player-ref";
 
 /**
  * 스킬 = 상태 변경의 유일한 통로 (overview §2.2·§5).
@@ -126,58 +126,13 @@ export type MarketSkillResult =
 
 // ── 선수 지목 ───────────────────────────────────────────
 //
-// 도구 인자에는 id가 오게 되어 있지만, 감독이 부른 이름("엔더슨")이 그대로
-// 실려 오는 일이 잦다. 표기가 한 글자 흔들려도 닿아야 하되, **엉뚱한 사람을
-// 조용히 골라서는 안 된다** — 스킬은 상태를 바꾸는 자리다. 갈리면 후보를 돌려
-// GM이 되묻게 한다.
-
-const CANDIDATES_SHOWN = 6;
-
-const candidateLine = (players: readonly Player[]): string =>
-  players
-    .slice(0, CANDIDATES_SHOWN)
-    .map((p) => `${p.name}(${p.id})`)
-    .join(" / ");
-
-type PlayerPickResult = { ok: true; player: Player } | { ok: false; message: string };
-
-/** 우리 팀 선수 하나 */
-function ourPlayer(state: GameState, ref: string): PlayerPickResult {
-  // 세계의 정확한 id인데 우리 선수가 아니면 거기서 끝이다 — 정확한 지목을 이름으로 다시 짐작하지 않는다
-  const exact = playerById(state, ref.trim());
-  if (exact) {
-    return exact.teamId === state.userTeamId
-      ? { ok: true, player: exact }
-      : { ok: false, message: `"${ref}"는 우리 팀 선수가 아닙니다` };
-  }
-  const { player, candidates } = resolvePlayerRef(userPlayers(state), ref);
-  if (player) return { ok: true, player };
-  return {
-    ok: false,
-    message:
-      candidates.length > 0
-        ? `"${ref}"는 여러 선수와 맞습니다 — ${candidateLine(candidates)}`
-        : `"${ref}"는 우리 팀 선수가 아닙니다`,
-  };
-}
+// 이름 해석은 코어가 한 벌만 갖는다 (`pickOurPlayer`·`pickAnyPlayer`, core/state.ts) —
+// 이적·교체 스킬도 같은 것을 쓴다.
 
 /** 라인업 한 자리 — 풀리면 id로 바뀐 자리, 아니면 그 이유 */
 function ourSlot(state: GameState, slot: LineupSlotInput): LineupSlotInput | string {
-  const pick = ourPlayer(state, slot.playerId);
+  const pick = pickOurPlayer(state, slot.playerId);
   return pick.ok ? { ...slot, playerId: pick.player.id } : pick.message;
-}
-
-/** 세계 어디의 선수든 하나 — 타 팀 선수를 겨냥할 때 */
-function anyPlayer(state: GameState, ref: string): PlayerPickResult {
-  const { player, candidates } = resolvePlayerRef(state.players, ref);
-  if (player) return { ok: true, player };
-  return {
-    ok: false,
-    message:
-      candidates.length > 0
-        ? `"${ref}"는 여러 선수와 맞습니다 — ${candidateLine(candidates)}`
-        : `"${ref}"라는 선수를 찾지 못했습니다`,
-  };
 }
 
 /**
@@ -190,7 +145,7 @@ export function setSquadLevel(
   state: GameState,
   input: { playerId: string; level: "first" | "reserve" },
 ): SkillResult {
-  const pick = ourPlayer(state, input.playerId);
+  const pick = pickOurPlayer(state, input.playerId);
   if (!pick.ok) return pick;
   const player = pick.player;
   if (squadLevelOf(player) === input.level) {
@@ -366,7 +321,7 @@ export function applyTalkToPlayer(
     settlingNote?: string;
   },
 ): SkillResult {
-  const pick = ourPlayer(state, input.playerId);
+  const pick = pickOurPlayer(state, input.playerId);
   if (!pick.ok) return pick;
   const player = pick.player;
 
@@ -619,7 +574,7 @@ export function setLineup(
   /** 실제로 층을 옮긴 선수만 — 이미 그 층이면 `setSquadLevel`이 성공으로 답하고 아무것도 안 한다 */
   const levelMoved: Record<"first" | "reserve", string[]> = { first: [], reserve: [] };
   const applyLevel = (move: { playerId: string; level: "first" | "reserve" }): SkillResult => {
-    const before = ourPlayer(state, move.playerId);
+    const before = pickOurPlayer(state, move.playerId);
     const changes = before.ok && squadLevelOf(before.player) !== move.level;
     const res = setSquadLevel(state, move);
     if (!res.ok) return res;
@@ -962,7 +917,7 @@ export function setPlayerTactic(
   }
   if (notes.length === 0) return { ok: false, message: "바꿀 것을 하나는 지정해야 합니다" };
   // 머리줄은 선수 하나 — 세 항목이 누구 이야기인지는 한 번만 적으면 된다
-  const named = ourPlayer(state, input.playerId);
+  const named = pickOurPlayer(state, input.playerId);
   return {
     ok: true,
     message: notes.join(" · "),
@@ -991,7 +946,7 @@ export function movePlayerSlot(
     move?: { lane?: "left" | "center" | "right"; band?: "defense" | "midfield" | "attack" };
   },
 ): SkillResult {
-  const pick = ourPlayer(state, input.playerId);
+  const pick = pickOurPlayer(state, input.playerId);
   if (!pick.ok) return pick;
   const player = pick.player;
   const named = input.move && (input.move.lane || input.move.band) ? input.move : undefined;
@@ -1082,7 +1037,7 @@ export function setPlayerTraining(
   state: GameState,
   input: { playerId: string; axis?: string; position?: string; clear?: boolean },
 ): SkillResult {
-  const pick = ourPlayer(state, input.playerId);
+  const pick = pickOurPlayer(state, input.playerId);
   if (!pick.ok) return pick;
   const player = pick.player;
   const index = state.playerTraining.findIndex((t) => t.gamePlayerId === player.id);
@@ -1139,7 +1094,7 @@ export function setPlayerRole(
   state: GameState,
   input: { playerId: string; role: string },
 ): SkillResult {
-  const pick = ourPlayer(state, input.playerId);
+  const pick = pickOurPlayer(state, input.playerId);
   if (!pick.ok) return pick;
   const player = pick.player;
   const tactics = userTactics(state);
@@ -1209,7 +1164,7 @@ export function setPlayerPosition(
   state: GameState,
   input: { playerId: string; position: string },
 ): SkillResult {
-  const pick = ourPlayer(state, input.playerId);
+  const pick = pickOurPlayer(state, input.playerId);
   if (!pick.ok) return pick;
   const player = pick.player;
   const code = input.position.toUpperCase();
@@ -1239,7 +1194,7 @@ export function setPlayerPosition(
 }
 
 export function setCaptain(state: GameState, playerId: string): SkillResult {
-  const pick = ourPlayer(state, playerId);
+  const pick = pickOurPlayer(state, playerId);
   if (!pick.ok) return pick;
   const player = pick.player;
   // 팀당 1명 — 기존 주장 해제
@@ -1567,7 +1522,7 @@ export function setPlayerInstruction(
     intensity?: DirectiveIntensity;
   },
 ): SkillResult {
-  const pick = ourPlayer(state, input.playerId);
+  const pick = pickOurPlayer(state, input.playerId);
   if (!pick.ok) return pick;
   const player = pick.player;
   const assignment = userTactics(state).assignments.find((a) => a.playerId === player.id);
@@ -1580,7 +1535,7 @@ export function setPlayerInstruction(
   if (input.kind) {
     const needsTarget = input.kind === "man_mark" || input.kind === "press_target";
     if (needsTarget) {
-      const found = input.targetId ? anyPlayer(state, input.targetId) : null;
+      const found = input.targetId ? pickAnyPlayer(state, input.targetId) : null;
       if (!found) {
         return {
           ok: false,
@@ -2112,7 +2067,7 @@ export function applyNarrativeEvent(
   const formStep = Math.max(-1, Math.min(1, Math.round(input.formDelta ?? 0)));
   const form = formStep * NARRATIVE_FORM_STEP;
   // 검증 먼저, 적용은 전원 유효할 때만 — 원자성 (장부 applyEvents와 동일 패턴)
-  const resolved = input.playerIds.map((ref) => ourPlayer(state, ref));
+  const resolved = input.playerIds.map((ref) => pickOurPlayer(state, ref));
   const missing = resolved.filter((r) => !r.ok);
   if (missing.length > 0) {
     return { ok: false, message: missing.map((r) => (r.ok ? "" : r.message)).join(" · ") };
@@ -2155,7 +2110,7 @@ export function applyNarrativeEvent(
  * (SCOUT_REPEAT_LIMIT까지 · scouting.ts 규약).
  */
 export function scoutPlayer(state: GameState, ref: string): MarketSkillResult {
-  const pick = anyPlayer(state, ref);
+  const pick = pickAnyPlayer(state, ref);
   if (!pick.ok) return pick;
   const player = pick.player;
   const playerId = player.id;

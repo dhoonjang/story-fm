@@ -10,10 +10,10 @@ import { assignSquadNumber } from "../squad/numbers";
 import { arrivingSquadLevel } from "../squad/registration";
 import type { SkillResult } from "../skills";
 import { forgetRoles } from "../skills/role-memory";
+import { pickAnyPlayer } from "../core/player-ref";
 import {
   activeContract,
   groupOf,
-  playerById,
   playersOf,
   pushNarrative,
   releaseFromTactics,
@@ -115,8 +115,9 @@ export function toFreeAgency(
  * 물고(원장에 남아 PSR까지 간다) 주급 총액에서 사라진다.
  */
 export function releasePlayer(state: GameState, input: { playerId: string }): SkillResult {
-  const player = playerById(state, input.playerId);
-  if (!player) return { ok: false, message: `"${input.playerId}"라는 선수를 찾지 못했습니다` };
+  const pick = pickAnyPlayer(state, input.playerId);
+  if (!pick.ok) return { ok: false, message: pick.message };
+  const player = pick.player;
   // 임대 나간 선수는 `teamId`가 상대 팀이고 빌려 온 선수는 계약이 남의 것이다 —
   // 어느 쪽이든 소속 판정보다 이 안내가 먼저다 (transfer.md §2)
   const locked = loanLockOf(player);
@@ -172,8 +173,9 @@ export function loanPlayer(
   state: GameState,
   input: { playerId: string; teamId: string; until?: string; wageShare?: number },
 ): SkillResult {
-  const player = playerById(state, input.playerId);
-  if (!player) return { ok: false, message: `"${input.playerId}"라는 선수를 찾지 못했습니다` };
+  const pick = pickAnyPlayer(state, input.playerId);
+  if (!pick.ok) return { ok: false, message: pick.message };
+  const player = pick.player;
   if (player.teamId !== state.userTeamId) {
     return { ok: false, message: `${player.name}은(는) 우리 선수가 아닙니다` };
   }
@@ -257,8 +259,9 @@ export function manageLoan(
 }
 
 export function recallLoan(state: GameState, input: { playerId: string }): SkillResult {
-  const player = playerById(state, input.playerId);
-  if (!player) return { ok: false, message: `"${input.playerId}"라는 선수를 찾지 못했습니다` };
+  const pick = pickAnyPlayer(state, input.playerId);
+  if (!pick.ok) return { ok: false, message: pick.message };
+  const player = pick.player;
   if (!player.loan || player.loan.fromTeamId !== state.userTeamId) {
     return { ok: false, message: `${player.name}은(는) 우리가 임대 보낸 선수가 아닙니다` };
   }

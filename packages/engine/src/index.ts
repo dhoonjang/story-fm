@@ -6,6 +6,7 @@ export * from "./core/paths";
 export * from "./core/dates";
 export * from "./core/name-match";
 export * from "./core/state";
+export * from "./core/player-ref";
 export * from "./core/club-tier";
 export * from "./core/persistence";
 export * from "./core/tick";
