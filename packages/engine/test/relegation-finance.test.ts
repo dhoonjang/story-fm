@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   clubEconomyLevel,
   clubEconomyLevelIn,
+  clubWageBudget,
   ensureMonthlyPosted,
   isTopFlight,
   isTopFlightIn,
@@ -115,6 +116,27 @@ describe("강등의 재정 타격", () => {
     // 체급은 그대로 두고 소속만 내렸으므로 움직인 것은 구단 경제 수준 하나다 —
     // 두 자리가 같은 눈금을 읽는다면 낙폭의 비율도 같아야 한다
     expect(fixedDown / fixedTop).toBeCloseTo(budgetDown / budgetTop, 6);
+  });
+
+  /**
+   * 고정비만 승강을 알던 시절, 강등 구단은 2부 수입 위에 1부 급여 천장을 그대로
+   * 갖고 승격 구단은 1부 수입에 2부 천장으로 묶여 있었다 (finance.md §6.3).
+   */
+  it("주급 천장도 지금 소속을 읽는다 — 두 방향 다", () => {
+    const state = createTestGame(42, "arsenal");
+    const catalogBudget = clubWageBudget("arsenal");
+    const topBudget = clubWageBudget("arsenal", undefined, state);
+
+    const promoted = state.teams.find((t) => leagueOfTeamIn(state, t.id) === "championship")!;
+    const secondBudget = clubWageBudget(promoted.id, undefined, state);
+
+    relegate(state, "arsenal");
+    (state.leagueOf ??= {})[promoted.id] = "epl";
+
+    expect(clubWageBudget("arsenal", undefined, state)).toBeLessThan(topBudget);
+    expect(clubWageBudget(promoted.id, undefined, state)).toBeGreaterThan(secondBudget);
+    // 세이브를 넘기지 않는 자리는 세계 생성뿐이라 카탈로그 소속 그대로다
+    expect(clubWageBudget("arsenal")).toBe(catalogBudget);
   });
 
   it("승격한 클럽은 그 자리에서 1부로 셈해진다", () => {

@@ -1305,10 +1305,18 @@ export function annualRevenueEstimate(state: GameState, teamId: string): number 
  */
 const WAGE_AFFORDABLE_SHARE = 0.85;
 
-/** `state`는 세이브 문맥에서만 넘어온다 (`tierOf` 주석) */
+/**
+ * `state`는 세이브 문맥에서만 넘어온다 (`tierOf` 주석).
+ *
+ * ⚠️ **리그는 세이브가 있으면 세이브가 답한다**(`leagueOfTeamIn`) — 고정비는 이미
+ * 승강을 알므로(§6.2) 매출만 카탈로그 소속을 읽으면 강등 구단이 2부 수입에 1부 급여
+ * 천장을 그대로 갖고, 승격 구단은 1부 수입에 2부 천장으로 묶인다 (finance.md §6.3).
+ * 세이브가 아직 없는 세계 생성 시점만 카탈로그 소속이 답한다.
+ */
 export function affordableWageBill(teamId: string, leagueId?: string, state?: GameState): number {
+  const league = leagueId ?? (state ? leagueOfTeamIn(state, teamId) : leagueOfTeam(teamId));
   const net =
-    catalogRevenueEstimate(teamId, leagueId, state) - monthlyFixedCostOf(teamId, state) * 12;
+    catalogRevenueEstimate(teamId, league, state) - monthlyFixedCostOf(teamId, state) * 12;
   return Math.max(0, net * WAGE_AFFORDABLE_SHARE) / (1 + STAFF_WAGE_RATE[tierOf(state, teamId)]);
 }
 
