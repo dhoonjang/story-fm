@@ -477,7 +477,8 @@ function historyLines(state: GameState, p: GamePlayer): string[] {
  * 코어가 GM에게 넘기는 것은 사실뿐이다 (overview.md §1 철칙 4).
  */
 function moodLine(state: GameState, player: GamePlayer): string {
-  return moodOf(state, player).note ?? moodAnchor(state, player);
+  const mood = moodOf(state, player);
+  return mood.note ?? moodAnchor(mood.facts);
 }
 
 /**
