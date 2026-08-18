@@ -1479,6 +1479,82 @@ export function roleWeights(position: string, role?: string): AxisValues {
  * 나온다 — 15축을 함께 펼쳐 놓은 화면에서 그건 계산이 틀린 것으로 읽힌다
  * (`docs/data/player.md` §4).
  */
+/**
+ * **감독이 그 선수를 얼마나 정확히 아는가** — 표시값에 얹히는 결정적 오프셋 하나.
+ *
+ * 오프셋을 **무엇으로 정하는지**는 세이브를 읽어야 알므로 엔진의 몫이다
+ * (`observationOf`). 그것을 **어떻게 얹는지**는 순수 규칙이라 여기 있다 —
+ * 전술판이 저장 전 배치의 전력을 낼 때 부르는 함수이기 때문이다.
+ *
+ * ⚠️ 엔진에 두면 화면이 값을 가져오려고 코어를 import하게 되고, 그 순간 `node:fs`가
+ * 브라우저 번들에 딸려 온다. 순수한 규칙은 양쪽이 닿는 자리에 있어야 한다.
+ */
+export interface ObservationOffset {
+  /** 종합·자리 전력에 얹는 결정적 오프셋 */
+  overallOffset: number;
+}
+
+/** 표시용 눈금 — 1~99에서 자른다 (0은 "값이 없다"로 읽히므로 쓰지 않는다) */
+const clampShown = (value: number) => Math.max(1, Math.min(99, Math.round(value)));
+
+/**
+ * 관측된 축에서 그 자리·역할의 전력을 낸다 — **화면과 서버의 단일 규칙.**
+ *
+ * 안개는 **축에만** 있다(`axes`가 이미 관측값이다). 합성값은 전부 여기서 파생되므로
+ * 자리를 어떻게 옮겨도 명단과 전술판이 어긋날 수 없다.
+ */
+export function observedFit(
+  axes: AxisValues,
+  observation: ObservationOffset,
+  position: string,
+  role?: string,
+): number {
+  return clampShown(roleFit(axes, position, role) + observation.overallOffset);
+}
+
+/**
+ * 표시용 종합의 관측값 — **저장된 `attributes.overall`에 같은 오프셋만 얹는다.**
+ *
+ * 관측된 축에서 `bestOverall`을 다시 굴리지 않는 이유: 저장값은 카탈로그 생성
+ * 시점의 포지션 목록으로 계산돼 있어(`overallFor`) 지금 목록으로 재계산하면
+ * 값이 달라지는 선수가 있다 — 화면과 시뮬의 눈금을 그런 부수효과로 옮길 수는 없다.
+ * 어차피 **자리 전력과 같은 오프셋**을 쓰므로 둘 사이의 비교는 흔들리지 않는다.
+ */
+export function observedOverall(storedOverall: number, observation: ObservationOffset): number {
+  return clampShown(storedOverall + observation.overallOffset);
+}
+
+/**
+ * 등급 — 수치를 말로 자르는 **단일 자.** GM이 읊는 말과 화면이 그리는 등급이
+ * 같은 표를 읽어야, 같은 선수를 두고 둘이 다른 말을 하지 않는다.
+ */
+export const RATING_TIERS = [
+  { key: "world", min: 90, ko: "월드클래스" },
+  { key: "elite", min: 85, ko: "리그 최정상" },
+  { key: "first", min: 78, ko: "정상급" },
+  { key: "squad", min: 70, ko: "준주전급" },
+  { key: "par", min: 60, ko: "리그 평균" },
+  { key: "below", min: 50, ko: "평균 이하" },
+  { key: "weak", min: 0, ko: "약점" },
+] as const;
+
+export type RatingTier = (typeof RATING_TIERS)[number]["key"];
+
+const tierOfRating = (value: number) => RATING_TIERS.find((t) => value >= t.min) ?? RATING_TIERS[6];
+
+/** 등급 키 — 화면이 색을 고르는 자리 */
+export function ratingTier(value: number): RatingTier {
+  return tierOfRating(value).key;
+}
+
+/**
+ * 수치 → 서술 라벨. 채팅에서 능력치 숫자를 읊지 않는다는 노출 규약(player.md §10)과 맞물려,
+ * 안개가 있는 선수는 숫자 대신 이 라벨만 GM에게 전달한다.
+ */
+export function ratingLabel(value: number): string {
+  return tierOfRating(value).ko;
+}
+
 export function roleFit(axes: AxisValues, position: string, role?: string): number {
   const slot = weightSlotOf(position);
   const defs = ROLE_DEFS[slot];

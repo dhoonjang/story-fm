@@ -1,4 +1,5 @@
-import { ratingTier, type RatingTier } from "@story-fm/engine";
+// 도메인에서 가져온다 — 엔진을 값으로 import하면 `node:fs`가 브라우저 번들에 딸려 온다
+import { ratingTier, type RatingTier } from "@story-fm/domain";
 
 /** 새 보고서 객체와 숫자만 저장된 옛 보고서를 같은 숫자 표기로 읽는다. */
 export function scoutValue(value: unknown): number | null {

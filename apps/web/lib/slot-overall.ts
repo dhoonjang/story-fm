@@ -1,4 +1,5 @@
-import { observedFit, type OfficeViews } from "@story-fm/engine";
+import { observedFit } from "@story-fm/domain";
+import type { OfficeViews } from "@story-fm/engine";
 
 type SquadRow = OfficeViews["squad"]["players"][number];
 
@@ -9,6 +10,9 @@ type SquadRow = OfficeViews["squad"]["players"][number];
  * 얹는다). 여기서 그 식을 다시 쓰면 코어가 눈금을 옮길 때 화면만 옛 자로 재게 된다 —
  * 화면이 값을 직접 내는 자리는 **아직 저장되지 않은 배치**뿐이고, 그때도 부르는 것은
  * 같은 함수여야 한다 (overview §5).
+ *
+ * ⚠️ **도메인에서 가져온다** — 엔진은 값으로 import할 수 없다. 화면 번들이 코어를
+ * 끌어오면 `node:fs`가 브라우저로 딸려 와 빌드가 죽는다 (엔진은 같은 함수를 재수출한다).
  *
  * ⚠️ 예전엔 서버가 **값마다 따로** 안개를 씌워 내려보냈다(`overall`에 한 번,
  * 자리별 전력에 또 한 번). 그러면 화면은 참값이 없어 같은 규칙을 재현할 수 없고,
