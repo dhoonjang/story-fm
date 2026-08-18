@@ -43,8 +43,14 @@ export const TEAM_EVENT_TYPES: ReadonlySet<MatchEventType> = new Set([
   "injury",
 ]);
 
+/**
+ * 이벤트 분의 상한 — 연장 끝(`PHASE_END.extra_second` 120′)에 추가시간 여유를 더한 값.
+ * 장부가 받아들이는 마지막 분이지, 경기가 끝나는 분이 아니다.
+ */
+export const MATCH_MINUTE_MAX = 130;
+
 export const MatchEventSchema = z.object({
-  minute: z.number().int().min(0).max(130),
+  minute: z.number().int().min(0).max(MATCH_MINUTE_MAX),
   type: MatchEventTypeSchema,
   team: MatchSideSchema.optional(),
   /** 선수 id — substitution은 [나가는 선수, 들어오는 선수] 순서 */
