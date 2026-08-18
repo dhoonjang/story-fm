@@ -16,6 +16,7 @@ import { rankByName } from "../core/name-match";
 import { addDays, dayOfWeek, diffDays, seasonYear, squadReturnOf } from "../competition/calendar";
 import { entrantsOf } from "../competition/europe";
 import { formLabel } from "../squad/form";
+import { INJURY_SEVERITY_KO } from "../squad/injury";
 import { moodOf } from "../squad/mood";
 import {
   isHomegrownFor,
@@ -409,7 +410,6 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
 
 // ── 선수 상세 ───────────────────────────────────────────
 
-const SEVERITY_KO: Record<string, string> = { minor: "경미", moderate: "중간", major: "중상" };
 const CAUSE_KO: Record<string, string> = { match: "경기", training: "훈련", other: "기타" };
 const TRANSFER_KO: Record<string, string> = {
   transfer: "이적",
@@ -437,7 +437,7 @@ function historyLines(state: GameState, p: GamePlayer): string[] {
       .slice(-3)
       .map(
         (i) =>
-          `${i.occurredOn} ${i.bodyPart}(${SEVERITY_KO[i.severity] ?? i.severity}·${CAUSE_KO[i.cause] ?? i.cause})` +
+          `${i.occurredOn} ${i.bodyPart}(${INJURY_SEVERITY_KO[i.severity]}·${CAUSE_KO[i.cause] ?? i.cause})` +
           (i.returnedOn ? ` ~${i.returnedOn}` : " 복귀 전"),
       );
     lines.push(
@@ -548,7 +548,7 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
   );
   if (injury) {
     lines.push(
-      `부상: ${injury.bodyPart} (${SEVERITY_KO[injury.severity] ?? injury.severity}) — 복귀 예상 ${injury.expectedReturn}`,
+      `부상: ${injury.bodyPart} (${INJURY_SEVERITY_KO[injury.severity]}) — 복귀 예상 ${injury.expectedReturn}`,
     );
   }
   if (suspension) {
