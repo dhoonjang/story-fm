@@ -583,6 +583,11 @@ export function positionProficiency(
   foot?: Foot,
 ): number {
   const code = target.toUpperCase();
+  /**
+   * ⚠️ **주발은 여기서만 붙는다.** 저장된 `proficiency`는 주발이 빠진 원값이라
+   * (player.md §8) 어느 가지를 타든 목표 자리의 보정을 **한 번만** 얹는다.
+   * 생성·훈련이 미리 얹어 두면 조회가 다시 얹어 폭이 두 배가 된다.
+   */
   const adjust = footAdjust(code, foot);
   const exact = positions.find((p) => p.position.toUpperCase() === code);
   if (exact) return clampRating(exact.proficiency + adjust);
@@ -595,12 +600,7 @@ export function positionProficiency(
    */
   const mirrored = positions.filter((p) => isMirrorPair(p.position, code));
   if (mirrored.length > 0) {
-    const base = Math.max(...mirrored.map((p) => p.proficiency + footAdjust(p.position, foot)));
-    // 이미 가진 자리의 주발 이점을 빼고 목표 자리의 것을 얹는다 (이중 계산 방지)
-    const source = mirrored.reduce((top, p) =>
-      p.proficiency + footAdjust(p.position, foot) >= base ? p : top,
-    );
-    return clampRating(source.proficiency + adjust);
+    return clampRating(Math.max(...mirrored.map((p) => p.proficiency)) + adjust);
   }
 
   const cluster = clusterOf(code);
@@ -623,6 +623,20 @@ export function positionProficiency(
     best = Math.max(best, held.proficiency - penalty);
   }
   return clampRating(best + adjust);
+}
+
+/**
+ * 처음 맡는 자리를 목록에 **적을 때의 값** — 주발을 벗긴 원값이다 (player.md §8).
+ *
+ * 훈련·경기가 새 자리를 적립할 때 `positionProficiency`가 낸 값을 그대로 적으면
+ * 그 안에 든 주발 보정이 저장에 남고, 다음 조회가 또 얹어 폭이 두 배가 된다.
+ */
+export function storedProficiencyFor(
+  positions: ReadonlyArray<{ position: string; proficiency: number }>,
+  target: string,
+  foot?: Foot,
+): number {
+  return clampRating(positionProficiency(positions, target, foot) - footAdjust(target, foot));
 }
 
 const clampRating = (v: number) => Math.max(PROFICIENCY_MIN, Math.min(99, Math.round(v)));
@@ -1164,8 +1178,9 @@ export function withCurrentDrilled(
     {
       signature,
       // 천장은 `FAMILIARITY_MAX`다 — 99로 자르면 100에 닿은 선수가 전술을 한 번
-      // 스치는 것만으로 99가 되고, 되돌아와도 100을 되찾지 못한다 (§7.1)
-      familiarity: clampFamiliarity(Math.round(familiarity)),
+      // 스치는 것만으로 99가 되고, 되돌아와도 100을 되찾지 못한다 (§7.1).
+      // 소수도 자르지 않는다 — 정수로 접으면 왕복이 소수점에서 샌다 (§7.3)
+      familiarity: clampFamiliarity(familiarity),
       lastUsedOn: on,
     },
     ...rest,
@@ -1211,7 +1226,7 @@ export function familiarityForSetup(
    */
   const exact = (drilled ?? []).find((d) => d.signature === signature);
   if (exact) {
-    return clampFamiliarity(Math.round(exact.familiarity - fadeOf(exact.lastUsedOn)));
+    return clampFamiliarity(exact.familiarity - fadeOf(exact.lastUsedOn));
   }
 
   let best = FAMILIARITY_MIN;
@@ -1224,7 +1239,7 @@ export function familiarityForSetup(
       d.familiarity - fade - Math.round(distanceOf(spec, next) * TRANSFER_LOSS),
     );
   }
-  return clampFamiliarity(Math.round(best));
+  return clampFamiliarity(best);
 }
 
 /** 팀의 현재 전술 + 배치 — GAME_TEAM당 1개 (프리셋 확장 여지) */

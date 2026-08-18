@@ -191,7 +191,7 @@ export function footLabel(foot: Foot | undefined): string {
 
 /**
  * 두 발 차이 1당 보정 폭. 차이가 클수록 좌우가 갈린다 —
- * 5/4는 ±1, 5/2는 ±2, 5/1은 ±3. 양발(5/5)은 0이다.
+ * 5/4는 ±1, 5/3·5/2는 ±2, 5/1은 ±3. 양발(5/5)은 0이다.
  */
 export const FOOT_STEP = 0.75;
 
@@ -199,6 +199,13 @@ export const FOOT_STEP = 0.75;
  * 주발 보정 — **그 쪽 발이 반대쪽보다 얼마나 나은가**로 정한다.
  * 왼발잡이가 LCB를 CB·RCB보다 편해하는 것이 이 함수의 전부이고,
  * 약발이 좋을수록(5/4) 그 차이가 작아진다.
+ *
+ * ⚠️ **반올림은 0에서 멀어지는 쪽으로** — 좌우가 정확히 대칭이어야 한다
+ * (`footAdjust(L) === -footAdjust(R)`). `Math.round`는 1.5를 2로, −1.5를 −1로
+ * 접어 발 차이 2(5/3 — 카탈로그의 57%)에서 한쪽만 넓게 벌어졌다.
+ *
+ * ⚠️ **이 값은 저장하지 않는다** — 조회할 때 `positionProficiency`가 한 번만
+ * 얹는다 (player.md §4). 저장된 적응도에 미리 얹어 두면 이중으로 걸린다.
  */
 export function footAdjust(position: string, foot: Foot | undefined): number {
   if (!foot) return 0;
@@ -206,7 +213,8 @@ export function footAdjust(position: string, foot: Foot | undefined): number {
   if (side === null) return 0;
   const mine = side === "L" ? foot.left : foot.right;
   const other = side === "L" ? foot.right : foot.left;
-  return Math.round((mine - other) * FOOT_STEP);
+  const gap = mine - other;
+  return Math.sign(gap) * Math.round(Math.abs(gap) * FOOT_STEP);
 }
 
 /**

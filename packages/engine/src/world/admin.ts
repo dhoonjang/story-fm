@@ -1,9 +1,14 @@
 import type { AxisValues, PlayerCatalogEntry, PlayerPosition } from "@story-fm/domain";
-import { ATTRIBUTE_AXES, ageOf, naturalPositionOf, positionGroupOf } from "@story-fm/domain";
+import {
+  ATTRIBUTE_AXES,
+  ageOf,
+  bestOverall,
+  naturalPositionOf,
+  positionGroupOf,
+} from "@story-fm/domain";
 import {
   CATALOG_AGE_REF,
   derivePositions,
-  overallFor,
   playerCatalog,
   resetCatalog,
   saveCatalog,
@@ -95,7 +100,7 @@ function toRow(entry: PlayerCatalogEntry): CatalogPlayerRow {
   return {
     ...entry,
     age: ageOf(entry.birthdate, CATALOG_AGE_REF),
-    overall: overallFor(natural.position, entry, entry.positions),
+    overall: bestOverall(entry, entry.positions),
     position: natural.position,
   };
 }
@@ -169,8 +174,7 @@ function applyPatch(
     else entry.positions.push({ position: code, proficiency: 88, isNatural: true });
   }
   // 잠재치는 파생 OVR보다 낮을 수 없다 (성장 여지 하한)
-  const group = positionGroupOf(naturalPositionOf(entry).position) ?? "MF";
-  const overall = overallFor(group, entry, entry.positions);
+  const overall = bestOverall(entry, entry.positions);
   if (entry.potential < overall) entry.potential = overall;
   return { ok: true };
 }
@@ -270,7 +274,7 @@ export function adminAddCatalogPlayer(teamId: string, input: CatalogPlayerInput)
   const attrs = Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, clamp99(input[a])])) as AxisValues;
   // 시드 선수와 같은 공식으로 파생한다 — 같은 자리 묶음(CB↔RCB/LCB)까지 채워진다
   const positions = derivePositions(nameEn, code);
-  const overall = overallFor(code, attrs, positions);
+  const overall = bestOverall(attrs, positions);
   const entry: PlayerCatalogEntry = {
     id,
     teamId,

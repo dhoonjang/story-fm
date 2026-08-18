@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { ageOf, naturalPositionOf } from "@story-fm/domain";
+import { ageOf, bestOverall, naturalPositionOf } from "@story-fm/domain";
 import {
   CATALOG_AGE_REF,
   activeContract,
   clubWageBudget,
   estimateSquadWages,
   isTopFlight,
-  overallFor,
   playerCatalog,
   playersOf,
   type WageSubject,
@@ -24,7 +23,7 @@ function subjectsOf(teamId: string): WageSubject[] {
     .filter((e) => e.teamId === teamId)
     .map((e) => ({
       id: e.id,
-      overall: overallFor(naturalPositionOf(e).position, e),
+      overall: bestOverall(e, e.positions),
       age: ageOf(e.birthdate, CATALOG_AGE_REF),
       position: naturalPositionOf(e).position,
     }));

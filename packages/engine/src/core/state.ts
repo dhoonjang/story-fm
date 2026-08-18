@@ -48,6 +48,7 @@ import {
   FIRST_TEAM_LIMIT,
   MATCHDAY_BENCH,
   MATCHDAY_SQUAD,
+  bestOverall,
   canRegister,
   isUnder21,
   FORMATION_LAYOUTS,
@@ -70,7 +71,7 @@ import {
   type SeasonCalendar,
 } from "../competition/calendar";
 import { rankByName } from "./name-match";
-import { defaultXiIds, overallFor, playerCatalog } from "../world/catalog";
+import { defaultXiIds, playerCatalog } from "../world/catalog";
 import { estimateSquadWages, wageSubjectOf } from "../world/wages";
 import { clubEconomyLevel } from "../data/league-economy";
 import { generateYouthPlayer } from "../world/generate";
@@ -822,9 +823,14 @@ export function groupOf(player: GamePlayer): PositionGroup {
   return positionGroupOfPlayer(player);
 }
 
-/** 능력치 변경 후 overall 재계산 — 주 포지션 **가중치** 공식 */
+/**
+ * 능력치 변경 후 overall 재계산 — **표시용 종합의 단일 공식** `bestOverall`.
+ *
+ * ⚠️ 보유 자리 목록을 반드시 넘긴다. 주 포지션 하나로 내던 때는 어드민 표와
+ * 게임의 OVR이 5,320명 중 1,160명에서 갈렸다 (player.md §4).
+ */
 export function recomputeOverall(player: GamePlayer): void {
-  player.attributes.overall = overallFor(naturalPositionOf(player).position, player.attributes);
+  player.attributes.overall = bestOverall(player.attributes, player.positions);
   if (player.attributes.potential < player.attributes.overall) {
     player.attributes.potential = player.attributes.overall;
   }
