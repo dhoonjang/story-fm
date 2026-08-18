@@ -1,8 +1,8 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { positionProficiency } from "@story-fm/domain";
-import { money } from "@/lib/money";
+import { formatMoney, positionProficiency } from "@story-fm/domain";
+
 import type { SquadRow } from "./types";
 
 /**
@@ -218,7 +218,7 @@ export function StatusBadges({ p }: { p: SquadRow }) {
       {p.suspended > 0 && <span className="tag st alert">정지 {p.suspended}</span>}
       {p.hasIssue && <span className="tag st alert">불만</span>}
       {p.transferListed !== null && (
-        <span className="tag st note" title={`호가 ${money(p.transferListed)}`}>
+        <span className="tag st note" title={`호가 ${formatMoney(p.transferListed)}`}>
           이적 리스트
         </span>
       )}

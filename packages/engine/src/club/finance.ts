@@ -10,6 +10,7 @@ import {
   FINANCE_CATEGORY_KO,
   FINANCE_EXPENSE_CATEGORIES,
   FINANCE_INCOME_CATEGORIES,
+  formatMoney,
 } from "@story-fm/domain";
 import { addDays, buildSeasonCalendar, dayOfWeek, FIRST_SEASON } from "../competition/calendar";
 import { clubProfile } from "../data/club-profile";
@@ -341,11 +342,11 @@ function equalShareFactor(state: GameState, teamId: string): number {
   return EQUAL_SHARE_LEAGUE_SCALED ? poolOf(state, teamId) : 1;
 }
 
-/** 금액 표기 — 원장·다이제스트·달력 일지가 같은 자를 쓴다 */
-export const formatMoney = (amount: number) =>
-  Math.abs(amount) >= 1_000_000
-    ? `£${(amount / 1_000_000).toFixed(1)}M`
-    : `£${Math.round(amount / 1000)}k`;
+/**
+ * 금액 표기 — 규칙은 도메인이 갖는다(화면도 같은 자를 부른다). 재정만이 아니라
+ * 상금·협상·조회 응답이 전부 여기를 거친다.
+ */
+export { formatMoney };
 const money = formatMoney;
 
 export function monthOf(date: string): string {

@@ -9,7 +9,7 @@ import {
 import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import { isMarketOnlyLeague } from "../data/league-catalog";
 import { isTopFlightIn, leagueOfTeamIn } from "../competition/promotion";
-import { AGENT_FEE_RATE, recordFinance } from "../club/finance";
+import { AGENT_FEE_RATE, formatMoney, recordFinance } from "../club/finance";
 import { marketBiasOf, marketValueOf, windowOpenForTeam } from "./market";
 import { makeRng } from "../core/rng";
 import {
@@ -676,7 +676,7 @@ export function runAiTransfers(state: GameState, digest: string[]): void {
     .sort((a, b) => b.deal.fee - a.deal.fee)
     .slice(0, NOTABLE_PER_DAY);
   for (const { player, deal } of notable) {
-    const fee = deal.fee > 0 ? ` (£${(deal.fee / 1_000_000).toFixed(1)}M)` : " (자유계약)";
+    const fee = deal.fee > 0 ? ` (${formatMoney(deal.fee)})` : " (자유계약)";
     digest.push(`📰 ${player.name} → ${teamShortNameIn(state, deal.toTeamId)}${fee}`);
     pushNarrative(state, `${player.name} ${teamShortNameIn(state, deal.toTeamId)} 이적`, 2);
   }
