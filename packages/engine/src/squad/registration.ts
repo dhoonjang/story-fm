@@ -1,5 +1,5 @@
 import type { GamePlayer, RegistrablePlayer, SquadRegistration } from "@story-fm/domain";
-import { canRegister, isUnder21, squadRegistration } from "@story-fm/domain";
+import { FIRST_TEAM_LIMIT, canRegister, isUnder21, squadRegistration } from "@story-fm/domain";
 import { seasonYear } from "../competition/calendar";
 import { countryOfTeam } from "../data/team-catalog";
 import { firstTeamPlayers, type GameState } from "../core/state";
@@ -55,6 +55,22 @@ export function canRegisterFor(
     .filter((p) => p.id !== player.id)
     .map((p) => registrableOf(state, p, teamId));
   return canRegister(squad, registrableOf(state, player, teamId), seasonYear(state.season));
+}
+
+/**
+ * 도착한 선수가 설 자리 — **1군에 자리가 있으면 1군, 없으면 2군.**
+ *
+ * 등록 명단(25명)과는 다른 상한이다(`FIRST_TEAM_LIMIT` 30명). 받는 쪽을 안 보면
+ * 매각과 자유계약이 상대 1군을 서른 넘게 불린다 — AI 시장은 계획과 실행 양쪽에서
+ * 이 상한을 지키는데 감독이 만든 딜만 그냥 지나갔다 (transfer.md §2).
+ */
+export function arrivingSquadLevel(
+  state: GameState,
+  player: Pick<GamePlayer, "id">,
+  teamId: string,
+): "first" | "reserve" {
+  const taken = firstTeamPlayers(state, teamId).filter((p) => p.id !== player.id).length;
+  return taken < FIRST_TEAM_LIMIT ? "first" : "reserve";
 }
 
 /** 등록 현황 한 줄 — GM 컨텍스트·조회 도구에 쓴다 */
