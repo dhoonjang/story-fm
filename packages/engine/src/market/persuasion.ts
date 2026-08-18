@@ -1,7 +1,7 @@
 import type { GamePlayer, PitchClaim, PitchClaimKind } from "@story-fm/domain";
 import { PITCH_CLAIM_KO, ageOf, naturalPositionOf } from "@story-fm/domain";
 import { euroCompetitionOf } from "../competition/europe";
-import { countryOfTeam } from "../data/team-catalog";
+import { countryOfTeam, isClubTeam } from "../data/team-catalog";
 import { computeStandings } from "../competition/season";
 import { diffDays } from "../competition/calendar";
 import { activeContract, playerById, playersOf, teamName, type GameState } from "../core/state";
@@ -44,9 +44,11 @@ export interface ClaimVerdict {
 const LIE_PENALTY = 1.4;
 
 /**
- * 확인된 논거 하나가 여는 판정 여유(%p) — **LLM에게 주는 신호의 크기**다.
- * 논거가 하나라도 확인되면 코어는 수락을 막지 않고(`respondOffer`), 이 값은
- * "얼마나 흔들릴 만한가"를 판정자에게 전하는 눈금으로 쓰인다.
+ * 확인된 논거 하나가 여는 판정 여유(%p) — **수락 하한이 이만큼 내려간다.**
+ *
+ * `respondOffer`의 하한(`MIN_ACCEPT_PROBABILITY` 5%)에서 빠지는 값이라 여기가
+ * 12인 동안은 논거 하나로 하한이 0이 된다. 그래도 눈금이어야 하는 이유는 감독이
+ * 보는 숫자이기 때문이다 — 걸리는 데가 없는 `+12%p`는 대조할 수 없는 장식이다.
  */
 export const LATITUDE_PER_CLAIM = 12;
 
@@ -71,20 +73,58 @@ function betterAtSamePosition(state: GameState, player: GamePlayer): number {
   ).length;
 }
 
-/** 같은 팀에서 함께 뛴 적이 있는가 — TRANSFER 원장의 소속 구간이 겹치는지 */
-function sharedClubWith(state: GameState, player: GamePlayer): string | null {
-  const ourSquad = new Set(playersOf(state, state.userTeamId).map((p) => p.id));
-  const theirClubs = new Set<string>();
-  for (const t of state.transfers) {
-    if (t.gamePlayerId !== player.id) continue;
-    if (t.fromTeamId !== null) theirClubs.add(t.fromTeamId);
-    if (t.toTeamId !== null) theirClubs.add(t.toTeamId);
+/** 한 구단에 있었던 구간 — `[from, to)` (원장이 모르는 시작은 `EPOCH`) */
+interface Spell {
+  teamId: string;
+  from: string;
+  to: string;
+}
+
+/** 원장 이전은 알 수 없다 — 첫 이적 전의 소속은 여기서부터 센다 */
+const EPOCH = "0000-01-01";
+
+/**
+ * 이 선수의 소속 구간 — **TRANSFER 원장에서 파생한다.**
+ *
+ * 이적 하나가 앞 구간을 닫고 다음 구간을 연다. 원장에 없는 선수(시드 그대로인
+ * 선수)는 지금 소속 하나가 전부다. 클럽이 아닌 자리(무소속)는 빼고 돌려준다 —
+ * 무소속을 한 구단으로 세면 방출을 거친 둘이 "함께 뛴 사이"가 된다.
+ */
+function spellsOf(state: GameState, player: GamePlayer): Spell[] {
+  const moves = state.transfers
+    .filter((t) => t.gamePlayerId === player.id)
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const spells: Spell[] = [];
+  let since = EPOCH;
+  // 원장의 양끝은 비어 있을 수 있다 (유스 등록·은퇴) — 모르는 구간은 접는다
+  let at: string | null = moves.length > 0 ? moves[0]!.fromTeamId : player.teamId;
+  for (const move of moves) {
+    if (at !== null) spells.push({ teamId: at, from: since, to: move.date });
+    since = move.date;
+    at = move.toTeamId;
   }
-  if (theirClubs.size === 0) return null;
-  for (const t of state.transfers) {
-    if (!ourSquad.has(t.gamePlayerId)) continue;
-    if (t.fromTeamId !== null && theirClubs.has(t.fromTeamId)) return t.fromTeamId;
-    if (t.toTeamId !== null && theirClubs.has(t.toTeamId)) return t.toTeamId;
+  if (at !== null) spells.push({ teamId: at, from: since, to: state.date });
+  return spells.filter((spell) => isClubTeam(spell.teamId) && spell.from < spell.to);
+}
+
+/**
+ * 같은 팀에서 **함께 뛴 적이 있는가** — 소속 구간이 겹쳐야 사실이다.
+ *
+ * 클럽 이름만 대조하면 십 년 차이로 같은 구단을 거친 둘이 동료가 된다. 겹침은
+ * 엄격하게 본다 — 한쪽이 떠난 날 다른 쪽이 온 것은 함께 뛴 것이 아니다
+ * (transfer.md §4).
+ */
+function sharedClubWith(state: GameState, player: GamePlayer): string | null {
+  const theirs = spellsOf(state, player);
+  if (theirs.length === 0) return null;
+  for (const mate of playersOf(state, state.userTeamId)) {
+    if (mate.id === player.id) continue;
+    for (const ours of spellsOf(state, mate)) {
+      const overlap = theirs.find(
+        (spell) => spell.teamId === ours.teamId && spell.from < ours.to && ours.from < spell.to,
+      );
+      if (overlap) return overlap.teamId;
+    }
   }
   return null;
 }

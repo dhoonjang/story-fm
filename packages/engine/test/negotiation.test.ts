@@ -17,6 +17,10 @@ import {
   incomingOffers,
   marketValueOf,
   loanPlayer,
+  LOAN_FEE_RATE,
+  openInjuryFor,
+  pronenessValue,
+  runMedicals,
   offerPlayerOut,
   openNegotiationFor,
   openRenewal,
@@ -36,7 +40,7 @@ import {
   wageExpectationOf,
   withdrawOffer,
 } from "@story-fm/engine";
-import type { MarketCard } from "@story-fm/domain";
+import type { MarketCard, Negotiation } from "@story-fm/domain";
 import { completeDeal, createTestGame } from "./helpers";
 
 /**
@@ -439,6 +443,9 @@ describe("매각 — 들어오는 오퍼", () => {
     const buyerTeamId = negotiation!.counterpartTeamId!;
     const budgetBefore = financeOf(state, state.userTeamId).transferBudget;
     const squadBefore = playersOf(state, state.userTeamId).length;
+    // 떠나는 선수가 남기고 가는 것들 — 어느 문으로 나가든 함께 지워진다 (transfer.md §2)
+    state.playerTraining.push({ gamePlayerId: player.id, axis: "pace", since: state.date });
+    state.roleMemory.push({ gamePlayerId: player.id, position: "ST", roleId: "poacher" });
 
     const answered = answerIncomingOffer(state, {
       negotiationId: negotiation!.id,
@@ -474,6 +481,9 @@ describe("매각 — 들어오는 오퍼", () => {
     expect(transfer.toTeamId).toBe(buyerTeamId);
     // 계약도 새 팀으로 넘어간다
     expect(activeContract(state, player.id)!.teamId).toBe(buyerTeamId);
+    // 개인 훈련·역할 기억은 방출만이 아니라 매각에서도 정리된다
+    expect(state.playerTraining.some((t) => t.gamePlayerId === player.id)).toBe(false);
+    expect(state.roleMemory.some((m) => m.gamePlayerId === player.id)).toBe(false);
   });
 
   it("우리가 넣은 오퍼는 answerIncomingOffer로 답할 수 없다", () => {
@@ -929,6 +939,136 @@ describe("임대료 — 검사한 값이 빠진다", () => {
     expect(financeOf(state, state.userTeamId).transferBudget).toBe(ourBudget + LOAN_FEE);
     expect(financeOf(state, borrowerId).balance).toBe(theirBalance - LOAN_FEE);
     expect(financeOf(state, borrowerId).transferBudget).toBe(theirBudget - LOAN_FEE);
+  });
+});
+
+/**
+ * **협상은 갈래별로 따로 선다** (transfer.md §1).
+ *
+ * 열린 협상을 갈래를 안 보고 재사용하면 라운드는 이번 오퍼의 조건으로 쌓이는데
+ * 실행은 협상이 쥔 `kind`가 고른다 — 임대 협상에 영입 오퍼가 얹히면 합의가
+ * 임대료 자리에 이적료를 문다.
+ */
+describe("갈래가 다른 협상은 섞이지 않는다", () => {
+  it("영입이 열려 있으면 같은 선수의 임대 오퍼가 반려된다 — 양방향", () => {
+    const state = createTestGame(42);
+    const player = target(state);
+    expect(sendOffer(state, offerFor(state, player.id)).ok).toBe(true);
+    const buy = openNegotiationFor(state, player.id)!;
+    expect(buy.kind).toBe("buy");
+    // id에도 갈래가 든다 — 같은 선수에게 같은 날 두 갈래를 열면 겹친다
+    expect(buy.id).toContain(`neg-buy-${player.id}-`);
+
+    const loan = sendOffer(state, {
+      playerId: player.id,
+      fee: Math.round(marketValueOf(state, player) * LOAN_FEE_RATE),
+      weeklyWage: wageExpectationOf(state, player),
+      years: 1,
+      kind: "loan",
+    });
+    expect(loan.ok, "영입 협상 위에 임대 라운드가 쌓여서는 안 된다").toBe(false);
+    expect(loan.message).toContain("영입 협상");
+    expect(buy.rounds).toHaveLength(1);
+    expect(state.negotiations.filter((n) => n.gamePlayerId === player.id)).toHaveLength(1);
+
+    // 우리 선수 쪽도 같다 — 매각이 열려 있으면 임대 송출이 반려된다
+    const ours = [...playersOf(state, state.userTeamId)].sort(
+      (a, b) => a.attributes.overall - b.attributes.overall,
+    )[0]!;
+    const buyerId = state.players.find((p) => p.teamId !== state.userTeamId)!.teamId;
+    const sale = offerPlayerOut(state, {
+      playerId: ours.id,
+      teamId: buyerId,
+      fee: Math.round(marketValueOf(state, ours)),
+    });
+    expect(sale.ok, sale.message).toBe(true);
+    const out = openNegotiationFor(state, ours.id)!;
+    expect(out.kind).toBe("sell");
+    const loanOut = offerPlayerOut(state, {
+      playerId: ours.id,
+      teamId: buyerId,
+      fee: Math.round(marketValueOf(state, ours) * LOAN_FEE_RATE),
+      loan: true,
+    });
+    expect(loanOut.ok).toBe(false);
+    expect(loanOut.message).toContain("매각 협상");
+    expect(out.rounds).toHaveLength(1);
+  });
+});
+
+/**
+ * **임대 송출의 소견에도 감독이 답한다** (transfer.md §5).
+ *
+ * 사는 구단이 깎아 다시 부르는 값은 **임대료 눈금**을 타고(시장가로 재면 하한이
+ * 임대료의 일곱 배라 부를 수 있는 값이 없다), 그 재제안은 매각과 같은 문으로
+ * 감독에게 온다 — 예전엔 `answerIncomingOffer`가 매각만 통과시켜 철회밖에
+ * 남지 않았다.
+ */
+describe("임대 송출의 메디컬 소견", () => {
+  const LOAN_FEE = 2_000_000;
+
+  it("임대료 눈금으로 깎아 다시 부르고, 감독이 수락할 수 있다", () => {
+    // 소견 판정은 협상 시드에 묶여 결정적이라 붙는 건 하나를 찾아 쓴다
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const state = createTestGame(42);
+      const ours = [...playersOf(state, state.userTeamId)].sort(
+        (a, b) => a.attributes.overall - b.attributes.overall,
+      )[0]!;
+      const borrowerId = state.players.find((p) => p.teamId !== state.userTeamId)!.teamId;
+      for (const w of state.windows) w.closesOn = addDays(state.date, 30);
+      openInjuryFor(state, ours, "match", () => 0.9);
+      const negotiation: Negotiation = {
+        id: `neg-loanout-${ours.id}-${state.date}-${attempt}`,
+        gamePlayerId: ours.id,
+        kind: "loan_out",
+        counterpartTeamId: borrowerId,
+        windowId: null,
+        openedOn: state.date,
+        expiresOn: addDays(state.date, 10),
+        status: "agreed",
+        rounds: [
+          {
+            date: state.date,
+            by: "us",
+            fee: LOAN_FEE,
+            weeklyWage: 40_000,
+            contractYears: 1,
+            respondsOn: null,
+            probability: 60,
+            verdict: "accept",
+          },
+        ],
+      };
+      state.negotiations.push(negotiation);
+      const pronenessBefore = pronenessValue(playerById(state, ours.id)!);
+
+      expect(acceptDeal(state, negotiation.id).ok).toBe(true);
+      state.date = negotiation.medical!.onDate;
+      runMedicals(state, []);
+      if (negotiation.medical!.status !== "flagged") continue;
+
+      // 깎아 부른 값은 임대료 아래에 선다 — 시장가로 재면 임대료의 몇 배가 됐다
+      expect(negotiation.status).toBe("open");
+      const cut = incomingOffer(negotiation)!;
+      expect(cut, "소견이 나오면 사는 구단이 다시 부른다").not.toBeNull();
+      expect(cut.fee).toBeLessThanOrEqual(LOAN_FEE);
+      expect(cut.fee).toBeGreaterThan(0);
+
+      // 매각과 같은 문으로 답한다
+      const answered = answerIncomingOffer(state, {
+        negotiationId: negotiation.id,
+        verdict: "accept",
+      });
+      expect(answered.ok, answered.message).toBe(true);
+      const done = acceptDeal(state, negotiation.id);
+      expect(done.ok, done.message).toBe(true);
+      expect(negotiation.status).toBe("completed");
+      expect(playerById(state, ours.id)!.loan?.fromTeamId).toBe(state.userTeamId);
+      // 상대 구단의 소견이라 우리가 강행한 것이 아니다 — 성향은 그대로다
+      expect(pronenessValue(playerById(state, ours.id)!)).toBe(pronenessBefore);
+      return;
+    }
+    throw new Error("소견이 붙는 임대 송출을 찾지 못했다");
   });
 });
 

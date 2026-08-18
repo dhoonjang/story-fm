@@ -11,7 +11,6 @@ import {
   groupOf,
   isInjured,
   pushNarrative,
-  releaseFromTactics,
   squadLevelOf,
   teamName,
   teamShortName,
@@ -20,6 +19,7 @@ import {
 } from "../core/state";
 import { WAGE_HEADROOM, clubWageBudget, estimateWeeklyWage, wageSubjectOf } from "../world/wages";
 import { assignSquadNumber } from "../squad/numbers";
+import { clearDepartedState } from "./departures";
 
 /**
  * 남의 팀끼리의 이적 시장 — **세계가 감독 없이도 돈다.**
@@ -273,12 +273,11 @@ function moveClub(
     if (seller) seller.transferBudget += input.fee;
   }
 
-  releaseFromTactics(state, fromTeamId, player.id);
+  clearDepartedState(state, player, fromTeamId);
   squads.move(player, toTeamId);
   player.teamId = toTeamId;
   player.squadNumber = undefined;
   assignSquadNumber(state.players, player);
-  player.isCaptain = false;
   player.squadLevel = "first";
 }
 
@@ -506,7 +505,8 @@ function settle(state: GameState, deal: AiDeal, rng: () => number): GamePlayer |
     if (squads.firstTeam(player.teamId).length <= MIN_FIRST_TEAM) return null;
     const fromId = player.teamId;
     state.transfers.push({
-      id: `tr-loan-${player.id}-${state.date}`,
+      // AI끼리의 임대 — 감독의 임대 송출(`tr-loan-…`)과 id가 겹치지 않는다
+      id: `tr-ai-loan-${player.id}-${state.date}`,
       gamePlayerId: player.id,
       windowId: windowOpenForTeam(state, deal.toTeamId)?.id ?? null,
       fromTeamId: fromId,
@@ -516,12 +516,11 @@ function settle(state: GameState, deal: AiDeal, rng: () => number): GamePlayer |
       fee: 0,
       note: `${teamName(fromId)} → ${teamName(deal.toTeamId)} 임대`,
     });
-    releaseFromTactics(state, fromId, player.id);
+    clearDepartedState(state, player, fromId);
     player.teamId = deal.toTeamId;
     player.squadNumber = undefined;
     assignSquadNumber(state.players, player);
     player.squadLevel = "first";
-    player.isCaptain = false;
     // 계약은 원소속에 남는다 — 복귀는 이 값이 파생시킨다 (`returnDueLoans`)
     player.loan = {
       fromTeamId: fromId,
