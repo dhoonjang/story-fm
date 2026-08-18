@@ -1436,6 +1436,13 @@ export function SquadView({
         )}
       />
     ),
+    /**
+     * ⚠️ 집합·표는 **문자열 열쇠로** 싣는다 (`localReserveKey`·`benchKey`·
+     * `onPitchKey`·`rolesKey`). `Set`과 객체는 내용이 같아도 렌더마다 새 객체라,
+     * 그것을 그대로 실으면 메모가 매번 깨져 아무것도 아끼지 못한다. 규칙은 열쇠가
+     * 무엇을 대신하는지 볼 수 없어 원본이 빠졌다고 읽는다.
+     */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       localRows,
       squadFilter,
@@ -1814,6 +1821,9 @@ function SquadTable({
         return String(x).localeCompare(String(y)) * dir;
       return (x - y) * dir;
     });
+    // `tierKey`는 `tierOf`가 **무엇을 답하는지**를 대신하는 문자열이다 — 함수는
+    // 같은 것이 계속 오므로 이게 없으면 자리 이동이 정렬에 반영되지 않는다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [players, sort, tierOf, tierKey]);
 
   const th = (key: SortKey, label: string, className?: string, title?: string) => (

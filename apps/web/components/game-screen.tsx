@@ -676,20 +676,14 @@ export function GameScreen({ gameId }: { gameId: string }) {
         commit(null);
       }
     },
-    [input, busy, game, gameId, saver],
+    [input, busy, game, liveMatch?.matchId, gameId, saver],
   );
 
-  if (error && !game)
-    return (
-      <main className="onboarding">
-        <p className="error-text">{error}</p>
-      </main>
-    );
   /**
    * 마지막으로 화면에 선 시각 — 흘러오는 턴이 같은 시각을 다시 적지 않게 한다.
-   * ⚠️ 훅이라 **`if (!game)` 앞**에 있어야 한다 — 뒤에 두면 게임이 로드되기 전과
-   * 후의 훅 개수가 달라져 "Rendered more hooks than during the previous render"로
-   * 화면이 통째로 죽는다 (실제로 그랬다).
+   * ⚠️ 훅이라 **이른 반환 전부보다 앞**에 서야 한다 — 하나라도 뒤에 두면 그 갈래를
+   * 지난 렌더와 그러지 않은 렌더의 훅 개수가 달라져 "Rendered more hooks than
+   * during the previous render"로 화면이 통째로 죽는다 (실제로 그랬다).
    */
   const lastStamp = useMemo(() => {
     const visible = chatForActiveMatch(game?.chat ?? [], liveMatch?.matchId ?? null);
@@ -698,11 +692,11 @@ export function GameScreen({ gameId }: { gameId: string }) {
       if (stamp) return stamp;
     }
     return null;
-  }, [game]);
+  }, [game, liveMatch?.matchId]);
   /**
    * 턴 → 원문 기록의 자리. ⚠️ **걸러지지 않은 `game.chat`**으로 만든다 —
    * 화면이 그리는 목록은 경기 중 턴을 걸러내므로 그 자리를 쓰면 남의 턴이 열린다.
-   * (이 훅도 `if (!game)` 앞이어야 한다 — 위 주석 참조)
+   * (이 훅도 이른 반환보다 앞이어야 한다 — 위 주석 참조)
    */
   const traceIndex = useMemo(() => buildTraceIndex(game?.chat ?? []), [game?.chat]);
   const traceOpener = (turn: ChatTurn): (() => void) | undefined => {
@@ -711,6 +705,12 @@ export function GameScreen({ gameId }: { gameId: string }) {
     return at === undefined ? undefined : () => setTraceAt(at);
   };
 
+  if (error && !game)
+    return (
+      <main className="onboarding">
+        <p className="error-text">{error}</p>
+      </main>
+    );
   if (!game)
     return (
       <main className="loading-page">
