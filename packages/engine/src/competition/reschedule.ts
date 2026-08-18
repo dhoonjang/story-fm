@@ -16,7 +16,8 @@ import { teamName, type GameState } from "../core/state";
  *
  * 그래서 순서를 뒤집었다. 컵은 실제 대회 날짜를 우선 차지하고, 그 자리에 걸린
  * **리그 경기가 비켜준다**. 대항전·다른 컵 경기는 못 옮긴다 — 그쪽 날짜는 UEFA·협회가
- * 정한 계약이다. 리그 최종 라운드도 못 옮긴다 (전 경기 동시 킥오프가 규칙이다).
+ * 정한 계약이다. 리그의 **개막 라운드와 최종 라운드**도 못 옮긴다 (개막전은 시즌이
+ * 서는 자리고, 최종 라운드는 전 경기 동시 킥오프가 규칙이다).
  */
 
 /** 연기된 경기가 앉는 자리 — 실제 재편성도 주중(화·수)이 기본이다 */
@@ -85,6 +86,10 @@ function runsLeagueSchedule(competitionId: string): boolean {
 /**
  * 이 경기를 연기할 수 있는가 — **옮길 수 있는 경기는 반드시 대회 경기다**.
  * 그 사실을 반환 타입에 실어, 대회 id가 필요한 뒷단계가 널을 만나지 않는다.
+ *
+ * ⚠️ **개막 라운드는 최종 라운드와 같이 계약이다.** 어느 리그도 컵 때문에 개막전을
+ * 미루지 않는다. 이 문이 없던 동안 코파 이탈리아·포칼의 1라운드가 개막 주말을
+ * 차지하고 세리에 A 개막 라운드 10경기를 통째로 주중으로 밀어냈다 (season.md §3).
  */
 export function isPostponable(
   state: GameState,
@@ -96,7 +101,7 @@ export function isPostponable(
   if (!inCompetition(match)) return false;
   if (isCup(match.competitionId)) return false; // 컵·대항전 날짜는 계약이다
   if (!runsLeagueSchedule(match.competitionId)) return false;
-  return match.round < lastRoundOf(state, match.competitionId);
+  return match.round > 1 && match.round < lastRoundOf(state, match.competitionId);
 }
 
 /** 일정 축의 엔트리도 따라 옮긴다 (감독 달력에 오른 우리 경기) */

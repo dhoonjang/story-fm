@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  addDays,
   buildMatches,
   buildMatchweekDates,
   buildScheduleEntries,
@@ -8,9 +9,13 @@ import {
   buildTransferWindows,
   dayOfWeek,
   diffDays,
+  domesticCupCatalog,
+  restHours,
   squadReturnOf,
+  stageTarget,
   teamsOfLeague,
   FRIENDLY_ROUNDS,
+  MIN_REST_HOURS,
 } from "@story-fm/engine";
 import type { MatchRecord } from "@story-fm/domain";
 import { createTestGame, userFixtureCount } from "./helpers";
@@ -44,6 +49,39 @@ function roundStartDates(matches: MatchRecord[]): string[] {
 /** 라운드 사이 최대 공백 — A매치 휴식기와 컵 주말이 겹쳐도 3주가 한계다 */
 const MAX_ROUND_GAP_DAYS = 21;
 
+/** 5대 리그 — 하나의 골격을 나눠 쓴다 */
+const TOP_LEAGUES = ["epl", "laliga", "seriea", "bundesliga", "ligue1"];
+
+/** A매치 휴식기 — 대회와 무관하게 고정인 네 주말 (`INTERNATIONAL_BREAKS`) */
+const BREAKS: Array<[number, number]> = [
+  [901, 910],
+  [1008, 1014],
+  [1112, 1118],
+  [322, 331],
+];
+
+/**
+ * 이 골격이 비켜주는 컵 라운드의 목표일 — 잉글랜드 컵의 결승과 메이저 컵 첫 라운드.
+ * 달력이 카탈로그에서 파생되는지 보는 자리라, 날짜를 다시 적지 않고 카탈로그를 읽는다.
+ */
+function cupTargets(season: number): string[] {
+  const cups = domesticCupCatalog().filter((c) => c.country === "잉글랜드");
+  const finals = cups.filter((c) => !c.finalMidweek).map((c) => stageTarget(season, c, "final"));
+  return cups[0] ? [...finals, stageTarget(season, cups[0], "r32")] : finals;
+}
+
+/** 팀별 경기를 날짜순으로 묶는다 */
+function byTeam(matches: MatchRecord[]): Map<string, MatchRecord[]> {
+  const out = new Map<string, MatchRecord[]>();
+  for (const m of matches) {
+    for (const id of [m.homeTeamId, m.awayTeamId]) {
+      out.set(id, [...(out.get(id) ?? []), m]);
+    }
+  }
+  for (const list of out.values()) list.sort((a, b) => (a.date < b.date ? -1 : 1));
+  return out;
+}
+
 describe("라운드 날짜 골격", () => {
   it("38라운드가 8월 중순 개막 → 5월 마지막 일요일 최종전으로 끝난다", () => {
     const weeks = buildMatchweekDates(1);
@@ -59,22 +97,43 @@ describe("라운드 날짜 골격", () => {
     }
   });
 
-  it("A매치 휴식기·컵 주말에는 라운드가 없다", () => {
-    const weeks = buildMatchweekDates(1);
+  it("A매치 휴식기와 컵 주말에는 라운드가 없다 — 컵 주말은 카탈로그에서 나온다", () => {
     const md = (d: string) => Number(d.slice(5, 7)) * 100 + Number(d.slice(8, 10));
-    // 9·10·11·3월 A매치 주말, 1월 컵 주말, 리그컵 결승 주말
-    const blanks: Array<[number, number]> = [
-      [901, 910],
-      [1008, 1014],
-      [1112, 1118],
-      [106, 112],
-      [226, 306],
-      [322, 331],
-    ];
-    for (const w of weeks) {
-      if (w.kind !== "weekend") continue;
-      for (const [from, to] of blanks) {
-        expect(md(w.date) >= from && md(w.date) <= to).toBe(false);
+    for (let season = 1; season <= 8; season++) {
+      const targets = cupTargets(season);
+      for (const w of buildMatchweekDates(season)) {
+        if (w.kind !== "weekend") continue;
+        for (const [from, to] of BREAKS) {
+          expect(md(w.date) >= from && md(w.date) <= to, `시즌 ${season} ${w.date}`).toBe(false);
+        }
+        // 결승 진출 두 팀이 하루 뒤 웸블리에 서지 않게 그 주말은 통째로 빈다
+        for (const target of targets) {
+          expect(
+            Math.abs(diffDays(w.date, target)) > 2,
+            `시즌 ${season} ${w.date} vs ${target}`,
+          ).toBe(true);
+        }
+      }
+    }
+  });
+
+  /**
+   * 빈 주말은 값이 있을 때만 빈다 — "리그컵 결승 주말"이 카탈로그 결승(3/22)과
+   * 4주 어긋난 2/26~3/6에 박혀 있어, 아무 대회도 없는 두 주말이 함께 비었다.
+   */
+  it("이유 없이 비는 주말이 없다", () => {
+    const md = (d: string) => Number(d.slice(5, 7)) * 100 + Number(d.slice(8, 10));
+    for (let season = 1; season <= 8; season++) {
+      const weeks = buildMatchweekDates(season);
+      const standing = new Set(weeks.map((w) => w.date));
+      const targets = cupTargets(season);
+      for (let sat = weeks[0]!.date; sat < weeks[37]!.date; sat = addDays(sat, 7)) {
+        if (standing.has(sat)) continue;
+        if (BREAKS.some(([from, to]) => md(sat) >= from && md(sat) <= to)) continue;
+        if (targets.some((t) => Math.abs(diffDays(sat, t)) <= 3)) continue;
+        // 박싱데이·성탄 연전·주중 라운드가 그 주를 대신 쓴 경우
+        const covered = weeks.some((w) => Math.abs(diffDays(w.date, sat)) <= 4);
+        expect(covered, `시즌 ${season}: 설명되지 않은 빈 주말 ${sat}`).toBe(true);
       }
     }
   });
@@ -145,14 +204,45 @@ describe("대진 편성", () => {
     }
   });
 
-  it("경기 사이에 최소 하루는 쉰다 (이틀 연속 경기 없음)", () => {
-    for (const id of ids) {
-      const dates = fixturesOf(matches, id).map((m) => m.date);
-      for (let i = 1; i < dates.length; i++) {
-        expect(
-          diffDays(dates[i - 1]!, dates[i]!),
-          `${id} ${dates[i - 1]}→${dates[i]}`,
-        ).toBeGreaterThanOrEqual(2);
+  /**
+   * **휴식은 날짜가 아니라 킥오프 시각으로 잰다** (season.md §2).
+   *
+   * "이틀 차"로 재던 동안 월 20:00 → 수 19:30(47시간 30분)과 월 20:00 → 박싱데이
+   * 15:00(43시간)이 골격 안에 그대로 있었다. 리그 크기·시즌마다 골격이 다시
+   * 짜이므로 한 시즌 한 리그로는 못 본다 — 개막일이 8월 15~21일을 오가고,
+   * 라운드 수가 다르면 앵커를 골라 앉는 자리도 달라진다.
+   */
+  it("연속 두 경기의 킥오프 간격이 48시간을 밑돌지 않는다", () => {
+    for (let season = 1; season <= 8; season++) {
+      for (const size of [12, 18, 20]) {
+        const teams = size === 20 ? ids : Array.from({ length: size }, (_, i) => `t${i}`);
+        const league = size === 20 ? "epl" : "championship";
+        for (const [id, list] of byTeam(buildMatches(season, teams, 7, league))) {
+          for (let i = 1; i < list.length; i++) {
+            const rest = restHours(list[i - 1]!, list[i]!);
+            const label = `시즌 ${season} ${size}팀 ${id} ${list[i - 1]!.date} ${list[i - 1]!.time} → ${list[i]!.date} ${list[i]!.time}`;
+            expect(rest, label).toBeGreaterThanOrEqual(MIN_REST_HOURS);
+          }
+        }
+      }
+    }
+  });
+
+  /**
+   * 다섯 리그가 한 골격을 나눠 쓰므로 개막 라운드도 같은 주말에 선다 — 코파
+   * 이탈리아·포칼의 1라운드가 그 주말을 차지하는 동안 세리에 A 개막 라운드가
+   * 통째로 주중으로 밀려났다 (컵과의 관계는 domestic-cup.test.ts가 본다).
+   */
+  it("다섯 리그의 개막 라운드가 모두 개막 주말에 선다", () => {
+    for (let season = 1; season <= 8; season++) {
+      const opener = buildMatchweekDates(season)[0]!.date;
+      for (const leagueId of TOP_LEAGUES) {
+        const teams = teamsOfLeague(leagueId).map((t) => t.id);
+        for (const m of buildMatches(season, teams, 7, leagueId)) {
+          if (m.round !== 1) continue;
+          const offset = diffDays(opener, m.date);
+          expect(offset >= -1 && offset <= 2, `시즌 ${season} ${leagueId} ${m.date}`).toBe(true);
+        }
       }
     }
   });

@@ -14,6 +14,7 @@ import {
   clubsOfCountry,
   competitionStageLabel,
   computeStandings,
+  diffDays,
   domesticChampion,
   domesticCupEntrants,
   domesticCupWinners,
@@ -602,6 +603,28 @@ describe("컵이 리그를 비켜세운다 — 겹치면 리그가 연기된다"
     expect(datesOf("qf").length, "8강이 한 주에 흩어져야 한다").toBeLessThanOrEqual(3);
     expect(datesOf("sf")).toEqual(["2027-04-25"]); // 실제 4강 날짜
     expect(datesOf("final")).toEqual(["2027-05-16"]); // 실제 웸블리 결승일
+  });
+
+  /**
+   * **개막 라운드는 최종 라운드와 같이 계약이다** (`isPostponable`).
+   *
+   * 이 문이 없던 동안 코파 이탈리아 1라운드(8/16)·포칼 1라운드(8/18)가 개막 주말을
+   * 차지하고 리그를 비켜세워, 세리에 A 개막 라운드 10경기가 통째로 주중으로,
+   * 분데스리가는 아홉 중 일곱이 8~9월에 흩어졌다. 컵을 스치지 않는 EPL만 보면
+   * 초록이라, 검사는 **다섯 리그 전부**를 본다.
+   */
+  it("어느 리그든 개막 라운드가 개막 주말에 그대로 있다", () => {
+    const opener = state.calendar.start; // 금요일 밤 개막전 — 주말은 여기서 사흘
+    for (const leagueId of ["epl", "laliga", "seriea", "bundesliga", "ligue1"]) {
+      const first = state.matches.filter(
+        (m) => m.season === state.season && m.competitionId === leagueId && m.round === 1,
+      );
+      expect(first.length, `${leagueId} 개막 라운드가 없다`).toBeGreaterThan(0);
+      for (const m of first) {
+        const offset = diffDays(opener, m.date);
+        expect(offset >= 0 && offset <= 3, `${leagueId} ${m.date} (개막 ${opener})`).toBe(true);
+      }
+    }
   });
 
   it("연기해도 리그 경기 수는 그대로다 — 옮길 뿐 없애지 않는다", () => {

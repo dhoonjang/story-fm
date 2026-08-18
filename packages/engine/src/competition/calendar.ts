@@ -61,7 +61,8 @@ export {
   restHours,
   tooClose,
 } from "../core/dates";
-import { addDays, dayOfWeek, diffDays, seasonYear } from "../core/dates";
+import { addDays, dayOfWeek, diffDays, kickoffAt, MIN_REST_HOURS, seasonYear } from "../core/dates";
+import { domesticCupsOfCountry } from "../data/domestic-cup-catalog";
 
 // ── 실제 EPL 캘린더 골격 ────────────────────────────────
 //
@@ -72,16 +73,74 @@ import { addDays, dayOfWeek, diffDays, seasonYear } from "../core/dates";
 
 const MD = (iso: string): number => Number(iso.slice(5, 7)) * 100 + Number(iso.slice(8, 10));
 
-/** 리그 경기가 없는 주말 — A매치 휴식기 4회 + 컵 대회 주말 2회 */
-const BLANK_WEEKENDS: Array<{ label: string; from: number; to: number }> = [
+/** A매치 휴식기 — 리그가 쉬는 네 주말. FIFA 캘린더의 자리라 대회와 무관하게 고정이다 */
+const INTERNATIONAL_BREAKS: Array<{ label: string; from: number; to: number }> = [
   { label: "9월 A매치 휴식기", from: 901, to: 910 },
   { label: "10월 A매치 휴식기", from: 1008, to: 1014 },
   { label: "11월 A매치 휴식기", from: 1112, to: 1118 },
-  { label: "컵 대회 주말", from: 106, to: 112 },
-  { label: "리그컵 결승 주말", from: 226, to: 306 },
   { label: "3월 A매치 휴식기", from: 322, to: 331 },
-  { label: "FA컵 결승 주말", from: 510, to: 516 },
 ];
+
+/**
+ * 이 골격이 따르는 나라 — 캘린더는 실제 EPL 일정을 재현한 것이고, 컵이 비우는
+ * 주말도 그 나라 대회에서 나온다. 다섯 리그가 이 골격 하나를 공유한다.
+ */
+const SKELETON_COUNTRY = "잉글랜드";
+
+/** 주말 라운드가 설 수 있는 요일 — 컵 결승·1라운드를 이쪽으로 당길 때 쓴다 */
+const WEEKEND_DAYS = new Set([6, 0]);
+
+/**
+ * 컵이 차지하는 주말 — **카탈로그의 목표일에서 파생한다**.
+ *
+ * 월·일을 따로 적어 두면 대회가 날짜를 옮길 때 달력만 옛 자리에 남는다. 실제로
+ * "리그컵 결승 주말"이 2/26~3/6에 박혀 있어 카탈로그 결승(3/22)과 4주 어긋났고,
+ * 범위가 9일이라 아무 대회도 없는 두 주말이 함께 비었다.
+ *
+ * 비우는 자리는 둘이다.
+ * - **결승 주말** — 리그가 그 토요일에 서면 결승 진출 두 팀이 하루 뒤 웸블리에
+ *   선다. 주중 결승(`finalMidweek`)은 주말을 건드리지 않으므로 비우지 않는다.
+ * - **메이저 컵의 첫 라운드** — 그 나라 32클럽이 전부 나오는 라운드라 리그가
+ *   통째로 비켜준다 (FA컵 3라운드의 1월 주말).
+ */
+function cupBlankSaturdays(season: number): Set<string> {
+  const out = new Set<string>();
+  const cups = domesticCupsOfCountry(SKELETON_COUNTRY);
+  for (const cup of cups) {
+    if (!cup.finalMidweek) out.add(weekendSaturdayOf(seasonDate(season, cup.windows.final)));
+  }
+  const major = cups[0];
+  if (major) out.add(weekendSaturdayOf(seasonDate(season, major.windows.r32)));
+  return out;
+}
+
+/** 시즌 안의 `[월, 일]` → 날짜 — 7월 이후는 그 해, 그 전은 이듬해 */
+export function seasonDate(season: number, [month, day]: [number, number]): string {
+  const year = seasonYear(season) + (month >= 7 ? 0 : 1);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${year}-${pad(month)}-${pad(day)}`;
+}
+
+/**
+ * 가장 가까운 허용 요일로 옮긴다 — 같은 거리면 뒤쪽.
+ * 사흘 안에서만 움직이므로 대회 골격은 그대로다.
+ */
+export function snapToWeekday(date: string, weekdays: Set<number>): string {
+  if (weekdays.has(dayOfWeek(date))) return date;
+  for (let i = 1; i <= 3; i++) {
+    for (const offset of [i, -i]) {
+      const moved = addDays(date, offset);
+      if (weekdays.has(dayOfWeek(moved))) return moved;
+    }
+  }
+  return date;
+}
+
+/** 이 컵 라운드가 걸리는 주말의 토요일 — 주말 라운드는 그 토요일로 대표된다 */
+function weekendSaturdayOf(date: string): string {
+  const weekend = snapToWeekday(date, WEEKEND_DAYS);
+  return dayOfWeek(weekend) === 6 ? weekend : addDays(weekend, -1);
+}
 
 /**
  * 주중 라운드 후보 — 실제 EPL이 주중 경기를 넣는 시기 순.
@@ -108,9 +167,12 @@ const MIDWEEK_WINDOWS: Array<{ from: [number, number]; to: [number, number] }> =
 /**
  * 주말 라운드 10경기의 TV 슬롯 — 금 야간 1, 토 5(이른·정규 3·늦은), 일 3, 월 야간 1.
  * [기준 토요일로부터의 일수, 킥오프]
+ *
+ * 금·월 야간은 **주말의 양 끝**이라 이웃 라운드와 48시간을 못 만들 때가 있다
+ * (월 20:00 → 수 19:30은 47시간 30분이다). 그래서 그 둘은 조건부고, 나머지 여덟
+ * 자리가 이 라운드가 반드시 쓰는 슬롯이다 (`withSlots`).
  */
-const WEEKEND_SLOTS: Array<readonly [number, string]> = [
-  [-1, "20:00"],
+const WEEKEND_CORE_SLOTS: Array<readonly [number, string]> = [
   [0, "12:30"],
   [0, "15:00"],
   [0, "15:00"],
@@ -119,7 +181,18 @@ const WEEKEND_SLOTS: Array<readonly [number, string]> = [
   [1, "14:00"],
   [1, "14:00"],
   [1, "16:30"],
-  [2, "20:00"],
+];
+
+/** 조건부 양 끝 — 열리면 야간 경기, 닫히면 토·일 낮으로 한 칸씩 더 간다 */
+const FRIDAY_NIGHT = [-1, "20:00"] as const;
+const MONDAY_NIGHT = [2, "20:00"] as const;
+const FRIDAY_CLOSED = [0, "15:00"] as const;
+const MONDAY_CLOSED = [1, "16:30"] as const;
+
+const WEEKEND_SLOTS: Array<readonly [number, string]> = [
+  FRIDAY_NIGHT,
+  ...WEEKEND_CORE_SLOTS,
+  MONDAY_NIGHT,
 ];
 
 /** 박싱데이 — 12/26에 7경기를 몰고 다음 날 3경기 */
@@ -163,6 +236,17 @@ export interface Matchweek {
   /** 기준 날짜 — 주말은 토요일, 주중은 수요일, 최종은 마지막 일요일 */
   date: string;
   kind: MatchweekKind;
+  /**
+   * 이 라운드 10경기가 쓰는 슬롯 — 주말의 금·월 야간은 앞뒤 라운드와 48시간이
+   * 나올 때만 열린다. 자리를 고른 **뒤에야** 정해지므로 앵커에는 없다 (`withSlots`).
+   */
+  slots: Array<readonly [number, string]>;
+}
+
+/** 자리만 정해진 라운드 — 슬롯은 이웃이 확정된 뒤에 붙는다 */
+interface Anchor {
+  date: string;
+  kind: MatchweekKind;
 }
 
 const SLOTS_BY_KIND: Record<MatchweekKind, Array<readonly [number, string]>> = {
@@ -172,22 +256,96 @@ const SLOTS_BY_KIND: Record<MatchweekKind, Array<readonly [number, string]>> = {
   final: FINAL_SLOTS,
 };
 
-/** 이 라운드의 경기가 실제로 걸쳐 있는 날짜 범위 (간격 검사용) */
-function spanOf(week: Matchweek): [string, string] {
-  const offsets = SLOTS_BY_KIND[week.kind].map(([d]) => d);
-  return [addDays(week.date, Math.min(...offsets)), addDays(week.date, Math.max(...offsets))];
+/**
+ * 이 라운드가 **반드시** 쓰는 슬롯 — 조건부인 금·월 야간을 뺀 자리.
+ * 자리를 고르는 계산은 이쪽으로 잰다. 열릴지 모르는 슬롯을 넣고 재면 어떤 주중
+ * 라운드도 주말 옆에 설 수 없어 골격이 38라운드를 채우지 못한다.
+ */
+function coreSlots(kind: MatchweekKind): Array<readonly [number, string]> {
+  return kind === "weekend" ? WEEKEND_CORE_SLOTS : SLOTS_BY_KIND[kind];
 }
 
-/** 두 라운드 사이에 최소 2일(하루 이상 휴식)이 있는가 — 이틀 연속 경기 방지 */
-function wellSpaced(a: Matchweek, b: Matchweek): boolean {
-  const [aFrom, aTo] = spanOf(a);
-  const [bFrom, bTo] = spanOf(b);
-  return aTo < bFrom ? diffDays(aTo, bFrom) >= 2 : diffDays(bTo, aFrom) >= 2;
+/** 이 라운드의 킥오프가 걸쳐 있는 구간 (ms) */
+function kickoffWindow(anchor: Anchor): [number, number] {
+  const times = coreSlots(anchor.kind).map(([offset, time]) =>
+    kickoffAt(addDays(anchor.date, offset), time),
+  );
+  return [Math.min(...times), Math.max(...times)];
 }
 
-function isBlankWeekend(saturday: string): boolean {
+const restBetween = (from: number, to: number): number => (to - from) / 3_600_000;
+
+/**
+ * 두 라운드 사이에 48시간이 있는가 — **날짜가 아니라 킥오프 시각으로 잰다**.
+ * 날짜로 재던 동안 월 20:00 → 수 19:30(47.5시간)과 월 20:00 → 박싱데이
+ * 15:00(43시간)이 "이틀 차"로 통과했다 (`MIN_REST_HOURS`, season.md §2).
+ */
+function wellSpaced(a: Anchor, b: Anchor): boolean {
+  const [aFrom, aTo] = kickoffWindow(a);
+  const [bFrom, bTo] = kickoffWindow(b);
+  const gap = aTo <= bFrom ? restBetween(aTo, bFrom) : restBetween(bTo, aFrom);
+  return gap >= MIN_REST_HOURS;
+}
+
+/**
+ * 앵커에 슬롯을 붙인다 — 주말의 금·월 야간은 **이웃 라운드가 48시간 밖일 때만**
+ * 연다. 실제 리그도 주중 라운드가 붙은 주에는 월요일 밤 경기를 넣지 않는다.
+ *
+ * 이웃의 자리는 `coreSlots`로 재도 안전하다: 주말끼리는 최소 이레 떨어져 있어
+ * 금·월이 열려도 나흘이 남고, 주중·박싱데이·최종 라운드는 조건부 슬롯이 없다.
+ */
+function withSlots(anchors: Anchor[]): Matchweek[] {
+  return anchors.map((anchor, i) => {
+    if (anchor.kind !== "weekend") {
+      return {
+        round: i + 1,
+        date: anchor.date,
+        kind: anchor.kind,
+        slots: SLOTS_BY_KIND[anchor.kind],
+      };
+    }
+    const prev = anchors[i - 1];
+    const next = anchors[i + 1];
+    const fridayNight = kickoffAt(addDays(anchor.date, FRIDAY_NIGHT[0]), FRIDAY_NIGHT[1]);
+    const mondayNight = kickoffAt(addDays(anchor.date, MONDAY_NIGHT[0]), MONDAY_NIGHT[1]);
+    const friday =
+      prev === undefined || restBetween(kickoffWindow(prev)[1], fridayNight) >= MIN_REST_HOURS;
+    const monday =
+      next === undefined || restBetween(mondayNight, kickoffWindow(next)[0]) >= MIN_REST_HOURS;
+    return {
+      round: i + 1,
+      date: anchor.date,
+      kind: anchor.kind,
+      slots: [
+        friday ? FRIDAY_NIGHT : FRIDAY_CLOSED,
+        ...WEEKEND_CORE_SLOTS,
+        monday ? MONDAY_NIGHT : MONDAY_CLOSED,
+      ],
+    };
+  });
+}
+
+function isBlankWeekend(saturday: string, cupBlanks: Set<string>): boolean {
   const v = MD(saturday);
-  return BLANK_WEEKENDS.some((w) => v >= w.from && v <= w.to);
+  return INTERNATIONAL_BREAKS.some((w) => v >= w.from && v <= w.to) || cupBlanks.has(saturday);
+}
+
+/**
+ * 라운드가 없는 구간이 이만큼 넘게 벌어지면 주중 라운드를 먼저 넣는다 —
+ * 두 주말을 연달아 비우는 3월(컵 결승 주말 + A매치 휴식기)이 그 자리다.
+ */
+const LONG_GAP_DAYS = 14;
+
+/** 이 날이 크게 벌어진 구멍 안인가 */
+function inLongGap(anchors: Anchor[], date: string): boolean {
+  let before = "";
+  let after = "";
+  for (const a of anchors) {
+    if (a.date < date) {
+      if (a.date > before) before = a.date;
+    } else if (after === "" || a.date < after) after = a.date;
+  }
+  return before !== "" && after !== "" && diffDays(before, after) > LONG_GAP_DAYS;
 }
 
 /** 범위 안에서 지정 요일이 처음 오는 날 */
@@ -205,6 +363,22 @@ function openerSaturday(year: number): string {
   return d;
 }
 
+/**
+ * 국내 컵 1라운드가 설 수 있는 가장 이른 날 — **개막 주말 다음다음 주중(수)**.
+ *
+ * 카탈로그의 목표일은 고정 월·일이라 개막 토요일이 8월 15~21일 사이를 오가는 것을
+ * 모른다. 코파 이탈리아 1라운드(8/16)와 포칼 1라운드(8/18)가 개막 주말에 그대로
+ * 걸려, 컵이 자리를 지키느라 세리에 A 개막 라운드 10경기를 통째로 주중으로
+ * 밀어냈다 (`clearForCup`).
+ *
+ * ⚠️ 개막 **다음** 주중이 아닌 이유는 월요일 밤 슬롯이다 — 개막 라운드의 월 20:00과
+ * 그 주 수요일 컵(19:45)은 47시간 45분이라, 컵이 또 그 경기를 비켜세우려 든다.
+ * 한 주를 더 밀면 개막 라운드는 아흐레 밖이고, 그때 걸리는 것은 2라운드다.
+ */
+export function firstCupRoundFloor(season: number): string {
+  return addDays(openerSaturday(seasonYear(season)), 11);
+}
+
 /** 최종 라운드 — 5월 마지막 일요일 */
 function finalSunday(year: number): string {
   let d = `${year}-05-31`;
@@ -215,52 +389,72 @@ function finalSunday(year: number): string {
 /**
  * 38라운드의 기준 날짜 — 실제 EPL 캘린더 골격을 재현한다.
  * 주말 라운드(휴식기 제외) + 박싱데이 + 성탄 연전 + 부족분 주중 라운드 + 최종 라운드.
+ *
+ * ⚠️ **날짜가 규칙인 라운드를 먼저 세운다.** 박싱데이와 성탄 연전은 12/26이라서
+ * 박싱데이고 연말이라서 연전이다 — 옮길 수 없다. 주말을 먼저 채우면 크리스마스가
+ * 주중에 걸리는 해에는 앞 주말이 자리를 차지하고 **박싱데이 라운드가 통째로
+ * 사라진다**(월 20:00 → 수 12:30은 40시간 30분이라 48시간 규칙이 막는다).
+ * 순서를 뒤집으면 대신 그 주말 하나가 빠지고, 빠진 몫은 주중 라운드가 메운다.
  */
-export function buildMatchweekDates(season: number): Matchweek[] {
+function buildAnchors(season: number): Anchor[] {
   const year = seasonYear(season);
   const opener = openerSaturday(year);
   const last = finalSunday(year + 1);
   const boxingDay = `${year}-12-26`;
+  const cupBlanks = cupBlankSaturdays(season);
 
-  const anchors: Matchweek[] = [];
+  const anchors: Anchor[] = [];
   const push = (date: string, kind: MatchweekKind): boolean => {
-    const candidate: Matchweek = { round: 0, date, kind };
+    const candidate: Anchor = { date, kind };
     if (anchors.some((a) => a.date === date || !wellSpaced(a, candidate))) return false;
     anchors.push(candidate);
     return true;
   };
 
-  // 주말 라운드 — 박싱데이가 있는 주는 박싱데이가 대신한다
-  for (let sat = opener; diffDays(sat, last) >= 7; sat = addDays(sat, 7)) {
-    if (isBlankWeekend(sat)) continue;
-    if (Math.abs(diffDays(sat, boxingDay)) <= 3) continue;
-    push(sat, "weekend");
-  }
   push(boxingDay, "boxing");
   // 성탄 연전 — 박싱데이 이틀 뒤부터 신년까지의 첫 수요일
   const festive = firstDowInRange(`${year}-12-29`, `${year + 1}-01-02`, 3);
   if (festive) push(festive, "midweek");
 
-  // 휴식기로 잃은 라운드를 주중 경기로 메운다
-  for (const w of MIDWEEK_WINDOWS) {
-    if (anchors.length >= 37) break;
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const at = (md: [number, number]) =>
-      `${md[0] >= 8 ? year : year + 1}-${pad(md[0])}-${pad(md[1])}`;
-    // 창 안의 수요일을 차례로 본다 — 대항전 주중은 리그가 비켜준다
-    // (실제 리그도 UCL 주에 주중 경기를 넣지 않는다)
-    for (let d = at(w.from); d <= at(w.to); d = addDays(d, 1)) {
-      if (dayOfWeek(d) !== 3 || isEuroWeek(season, d)) continue;
-      if (push(d, "midweek")) break;
+  // 주말 라운드 — 휴식기·컵 주말과 성탄 연전 옆자리는 비운다
+  for (let sat = opener; diffDays(sat, last) >= 7; sat = addDays(sat, 7)) {
+    if (isBlankWeekend(sat, cupBlanks)) continue;
+    push(sat, "weekend");
+  }
+
+  /**
+   * 휴식기로 잃은 라운드를 주중 경기로 메운다 — **크게 벌어진 구멍부터**.
+   *
+   * 창 순서(실제 EPL이 주중을 넣는 시기 순)만 따르면 앞쪽 창이 예산을 다 쓰고
+   * 3주짜리 공백이 그대로 남는다. 컵 결승 주말과 A매치 휴식기가 연달아 오는 3월이
+   * 그 자리다 — 실제 리그도 그 사이에 주중 라운드를 하나 넣는다.
+   */
+  for (const gapFirst of [true, false]) {
+    for (const w of MIDWEEK_WINDOWS) {
+      if (anchors.length >= 37) break;
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const at = (md: [number, number]) =>
+        `${md[0] >= 8 ? year : year + 1}-${pad(md[0])}-${pad(md[1])}`;
+      // 창 안의 수요일을 차례로 본다 — 대항전 주중은 리그가 비켜준다
+      // (실제 리그도 UCL 주에 주중 경기를 넣지 않는다)
+      for (let d = at(w.from); d <= at(w.to); d = addDays(d, 1)) {
+        if (dayOfWeek(d) !== 3 || isEuroWeek(season, d)) continue;
+        if (gapFirst && !inLongGap(anchors, d)) continue;
+        if (push(d, "midweek")) break;
+      }
     }
   }
 
   anchors.sort((a, b) => (a.date < b.date ? -1 : 1));
-  const weeks = [...anchors.slice(0, 37), { round: 0, date: last, kind: "final" as const }];
+  const weeks: Anchor[] = [...anchors.slice(0, 37), { date: last, kind: "final" }];
   if (weeks.length !== 38) {
     throw new Error(`시즌 ${season}: 라운드 날짜가 ${weeks.length}개 (38 필요)`);
   }
-  return weeks.map((w, i) => ({ ...w, round: i + 1 }));
+  return weeks;
+}
+
+export function buildMatchweekDates(season: number): Matchweek[] {
+  return withSlots(buildAnchors(season));
 }
 
 /**
@@ -409,14 +603,13 @@ function shuffled<T>(items: readonly T[], seed: number, channel: string): T[] {
  * 그 날에 가장 가까운 앵커를 가져온다.
  */
 function anchorsFor(season: number, rounds: number): Matchweek[] {
-  const all = buildMatchweekDates(season);
-  const numbered = (weeks: Matchweek[]) => weeks.map((w, i) => ({ ...w, round: i + 1 }));
-  if (rounds >= all.length) return numbered(all.slice(0, rounds));
+  const all = buildAnchors(season);
+  if (rounds >= all.length) return withSlots(all.slice(0, rounds));
 
   const opener = all[0]!;
   const finale = all[all.length - 1]!;
   const span = diffDays(opener.date, finale.date);
-  const picked: Matchweek[] = [opener];
+  const picked: Anchor[] = [opener];
   let prev = 0;
   for (let r = 1; r < rounds - 1; r++) {
     const target = addDays(opener.date, Math.round((span * r) / (rounds - 1)));
@@ -432,7 +625,9 @@ function anchorsFor(season: number, rounds: number): Matchweek[] {
     prev = best;
   }
   picked.push(finale);
-  return numbered(picked);
+  // 앵커가 듬성해졌으니 금·월 야간을 **다시** 판정한다 — 38라운드 골격에서
+  // 닫혀 있던 슬롯이 22라운드에서는 열린다
+  return withSlots(picked);
 }
 
 export function buildMatches(
@@ -491,7 +686,7 @@ export function buildMatches(
  * 킥오프를 받는다.
  */
 export function slotFor(week: Matchweek, indexInRound: number): { date: string; time: string } {
-  const slots = SLOTS_BY_KIND[week.kind];
+  const slots = week.slots;
   const order = shuffled(
     Array.from({ length: slots.length }, (_, i) => i),
     week.round,

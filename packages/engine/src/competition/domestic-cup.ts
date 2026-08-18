@@ -4,8 +4,10 @@ import {
   HARD_MIN_REST_HOURS,
   addDays,
   dayOfWeek,
+  firstCupRoundFloor,
   restHours,
-  seasonYear,
+  seasonDate,
+  snapToWeekday,
   sortEntries,
   tooClose,
 } from "./calendar";
@@ -138,13 +140,6 @@ export function domesticCupsOf(teamId: string): DomesticCupEntry[] {
   return country ? domesticCupsOfCountry(country) : [];
 }
 
-/** 시즌 안의 `[월, 일]` → 날짜 — 7월 이후는 그 해, 그 전은 이듬해 */
-function dateIn(season: number, [month, day]: [number, number]): string {
-  const year = seasonYear(season) + (month >= 7 ? 0 : 1);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${year}-${pad(month)}-${pad(day)}`;
-}
-
 /**
  * 이 단계의 목표 날짜 — 시즌 해를 붙인 실제 대회 일정 골격.
  *
@@ -156,30 +151,23 @@ function dateIn(season: number, [month, day]: [number, number]): string {
  *
  * 다른 라운드는 설 수 있는 요일이 넷이라(화·수·토·일) 앞으로 하루이틀만 훑으면
  * 자리가 나온다 — 굳이 당기지 않는다.
+ *
+ * ⚠️ **1라운드만 바닥이 있다** (`firstCupRoundFloor`) — 개막 주말보다 이른 목표일은
+ * 개막 라운드 뒤로 밀린다. 코파 이탈리아 1라운드(8/16)·포칼 1라운드(8/18)가 개막
+ * 주말에 걸려 세리에 A·분데스리가의 개막 라운드를 통째로 밀어낸 자리다 (season.md §3).
  */
 export function stageTarget(season: number, cup: DomesticCupEntry, stage: MatchStage): string {
-  const target = dateIn(season, cup.windows[stage]);
-  return stage === "final" ? snapToWeekday(target, finalWeekdaysOf(cup)) : target;
+  const target = seasonDate(season, cup.windows[stage]);
+  if (stage === "final") return snapToWeekday(target, finalWeekdaysOf(cup));
+  if (stage !== DOMESTIC_STAGES[0]) return target;
+  // 1라운드는 개막 라운드 뒤다 — 고정 월·일은 개막 토요일의 흔들림을 모른다
+  const floor = firstCupRoundFloor(season);
+  return target < floor ? floor : target;
 }
 
 /** 이 대회의 결승이 설 수 있는 요일 (0=일) — 규정이자 편성의 제약 */
 export function finalWeekdays(cup: DomesticCupEntry): number[] {
   return [...finalWeekdaysOf(cup)];
-}
-
-/**
- * 가장 가까운 허용 요일로 옮긴다 — 같은 거리면 뒤쪽.
- * 사흘 안에서만 움직이므로 대회 골격은 그대로다.
- */
-function snapToWeekday(date: string, weekdays: Set<number>): string {
-  if (weekdays.has(dayOfWeek(date))) return date;
-  for (let i = 1; i <= 3; i++) {
-    for (const offset of [i, -i]) {
-      const moved = addDays(date, offset);
-      if (weekdays.has(dayOfWeek(moved))) return moved;
-    }
-  }
-  return date;
 }
 
 /** 이 팀이 이 컵에서 아직 살아 있는가 — 추첨을 감독의 달력에 올릴지 정한다 */
@@ -251,13 +239,22 @@ function pickTieDate(
   const rested = (date: string, time: string) =>
     !busy.played.some((m) => tooClose(m, { date, time })) &&
     ![-1, 0, 1].some((o) => busy.blocked.has(addDays(date, o)));
+  /** 아직 대진이 없는 예약 대항전 날짜 **바로 옆**인가 */
+  const nearReserved = (date: string) => [-1, 1].some((o) => busy.blocked.has(addDays(date, o)));
   /**
    * 40시간 바닥(`HARD_MIN_REST_HOURS`)은 지켜지나 — 아래 사다리가 조건을 풀며
    * 내려갈 때 **`free`로 곧장 떨어지지 않게 붙잡는 단**이다. `free`는 "그날만
    * 겹치지 않으면 된다"라서, 토요일 저녁 리그 **다음 날** 낮에 컵을 앉힌다.
+   *
+   * ⚠️ **예약된 대항전 날짜도 바닥을 만든다.** 그 녹아웃은 아직 뽑히지 않아 장부에
+   * 없지만 날짜는 이미 UEFA의 것이고, 그 밤 경기(18:45·21:00) 앞뒤 하루는 어떤
+   * 킥오프를 잡아도 25시간 안쪽이다. 장부만 보고 "40시간을 지켰다"고 앉힌 자리가
+   * 나중에 25시간이 됐다 — 코파 이탈리아 8강 화요일 19:45, 다음 날 UCL 플레이오프
+   * 21:00 (시드 23·42).
    */
   const restedHard = (date: string, time: string) =>
-    !busy.played.some((m) => restHours(m, { date, time }) < HARD_MIN_REST_HOURS);
+    !busy.played.some((m) => restHours(m, { date, time }) < HARD_MIN_REST_HOURS) &&
+    !nearReserved(date);
 
   // ① 목표 자리를 지키기 위해 리그를 비켜세운다 (컵이 밀리기 전에 먼저 시도)
   const target = from > state.date ? from : addDays(state.date, 1);
@@ -286,7 +283,6 @@ function pickTieDate(
    * "24시간짜리 경기"로 세면 1·2월엔 거의 모든 후보가 24로 눌려 동점이 되고,
    * 그러면 가장 이른 날이 뽑혀 **하필 UCL 전날**에 컵이 앉는다 (실제로 그랬다).
    */
-  const nearReserved = (date: string) => [-1, 1].some((o) => busy.blocked.has(addDays(date, o)));
   const scoreAt = (date: string) => {
     const slot = { date, time: kickoffFor(date) };
     let rest = Number.POSITIVE_INFINITY;
@@ -318,23 +314,17 @@ function pickTieDate(
     // ① 가까이서 48시간이 나오는 자리
     { days: restWindow, weekdays, ok: (d) => rested(d, kickoffFor(d)) },
     // ② 가까이서 **가장 긴 휴식**. 첫 빈 날을 덥석 잡으면 UCL 전날에 컵이 앉는다 —
-    //    같은 창 안에 이틀 뒤 자리가 있는데도. 예약된 대항전 날짜 옆도 피한다:
-    //    그 녹아웃은 **나중에** 편성되므로 지금 장부에는 없다.
+    //    같은 창 안에 이틀 뒤 자리가 있는데도. 예약된 대항전 날짜 옆은 `restedHard`가
+    //    막는다: 그 녹아웃은 **나중에** 편성되므로 지금 장부에는 없다.
     {
       days: restWindow,
       weekdays,
-      ok: (d) => free(d) && restedHard(d, kickoffFor(d)) && !nearReserved(d),
+      ok: (d) => free(d) && restedHard(d, kickoffFor(d)),
       best: true,
     },
     // ③ 그래도 없으면 창을 넓힌다 (예전엔 여기서 "직전 하루만 쉬면 된다"로 조건을
     //    풀어 버려서 컵 다음날 리그가 섰다 — 창을 넓힐지언정 조건은 안 푼다)
     { days: window, weekdays, ok: (d) => rested(d, kickoffFor(d)) },
-    {
-      days: window,
-      weekdays,
-      ok: (d) => free(d) && restedHard(d, kickoffFor(d)) && !nearReserved(d),
-      best: true,
-    },
     { days: window, weekdays, ok: (d) => free(d) && restedHard(d, kickoffFor(d)), best: true },
     // ④ **40시간 바닥은 창보다 앞선다.** 여기까지 왔다는 건 28일 안에 바닥을 지키는
     //    자리가 없다는 뜻이다. 그때는 라운드가 늘어지는 것보다 연이틀 경기가 나쁘므로
@@ -755,7 +745,7 @@ export function cupRunsThisSeason(state: GameState, cup: DomesticCupEntry): bool
   if (entrants.some((id) => !state.teams.some((t) => t.id === id))) return false;
   // 이미 1라운드가 편성됐으면 시작한 대회다 — 문턱은 더 볼 필요가 없다
   if (domesticStageMatches(state, cup.id, DOMESTIC_STAGES[0]!).length > 0) return true;
-  return state.date <= addDays(dateIn(state.season, cup.firstDraw), LATE_ADOPTION_GRACE_DAYS);
+  return state.date <= addDays(seasonDate(state.season, cup.firstDraw), LATE_ADOPTION_GRACE_DAYS);
 }
 
 /**
@@ -782,7 +772,7 @@ export function advanceDomesticCups(state: GameState, digest: string[]): void {
             state,
             cup.id,
             stage,
-            dateIn(state.season, cup.firstDraw),
+            seasonDate(state.season, cup.firstDraw),
             entrants.includes(state.userTeamId),
           );
           if (!drawIsDue(state, cup.id, stage)) break;
