@@ -953,13 +953,14 @@ describe("지시가 판에 닿는 길", () => {
     const mid = assignmentsOf(state, state.userTeamId, "starting").find((a) =>
       ["CM", "CDM", "CAM", "LCM", "RCM"].includes(a.position),
     );
-    if (!mid) return;
-    const before = mid.point ?? { x: 50, y: 50 };
+    // 어떤 프리셋에도 중원은 있다 — 없으면 셋업이 깨진 것이지 넘어갈 일이 아니다
+    expect(mid, "선발에 중앙 미드필더가 없다").toBeDefined();
+    const before = mid!.point ?? { x: 50, y: 50 };
 
-    const moved = setPlayerTactic(state, { playerId: mid.playerId, move: { lane: "left" } });
+    const moved = setPlayerTactic(state, { playerId: mid!.playerId, move: { lane: "left" } });
     expect(moved.ok, moved.message).toBe(true);
     const after = assignmentsOf(state, state.userTeamId).find(
-      (a) => a.playerId === mid.playerId,
+      (a) => a.playerId === mid!.playerId,
     )!.point!;
     expect(after.x).toBeLessThan(before.x);
     expect(after.y, "앞뒤는 건드리지 않는다").toBe(before.y);
