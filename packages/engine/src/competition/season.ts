@@ -44,7 +44,7 @@ import {
   leagueSizeIn,
   teamsOfLeagueIn,
 } from "./promotion";
-import { RECENT_SEASONS, recomputeClubTiers } from "./club-tier";
+import { RECENT_SEASONS, recomputeClubTiers } from "./club-tier-recompute";
 import { boardExpectationOfTier, tierOfTeamIn } from "../core/club-tier";
 import { leagueRounds, safetyLine } from "../core/league-shape";
 import { generateYouthPlayer } from "../world/generate";
