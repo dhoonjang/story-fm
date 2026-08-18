@@ -68,8 +68,6 @@ import {
   proficiencyAt,
   pushNarrative,
   recomputeOverall,
-  pickAnyPlayer,
-  pickOurPlayer,
   squadLevelOf,
   tacticsOf,
   teamName,
@@ -82,6 +80,7 @@ import {
   type SkillBrief,
   type SkillBriefItem,
 } from "../core/state";
+import { pickAnyPlayer, pickOurPlayer } from "../core/player-ref";
 
 /**
  * 스킬 = 상태 변경의 유일한 통로 (overview §2.2·§5).
