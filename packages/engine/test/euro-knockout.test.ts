@@ -22,6 +22,8 @@ import {
   financeOf,
   payWinnerPrize,
   payStagePrizes,
+  payLeaguePhasePrizes,
+  migrateEuroPrizeKeys,
   euroCompetitionOf,
   entrantsOf,
   simSquadOf,
@@ -453,15 +455,71 @@ describe("상금", () => {
     expect(balance).toBeGreaterThan(before);
   });
 
+  it("리그 페이즈를 전패한 팀도 참가비를 받는다 — 조건은 성적이 아니라 출전이다", () => {
+    const state = createTestGame(42);
+    const cup = cupCatalogById("ucl")!;
+    const phase = leaguePhaseOf(state, "ucl");
+    // 한 팀을 골라 그 팀 경기를 전부 패배로 채운다 (나머지는 홈 승)
+    const winless = phase[0]!.homeTeamId;
+    for (const m of phase) {
+      const home = m.homeTeamId === winless;
+      if (!home && m.awayTeamId !== winless) continue;
+      m.result = home
+        ? { homeGoals: 0, awayGoals: 2, scorers: [] }
+        : { homeGoals: 2, awayGoals: 0, scorers: [] };
+    }
+    fillResults(phase);
+
+    const before = financeOf(state, winless).balance;
+    payLeaguePhasePrizes(state, "ucl", []);
+    payLeaguePhasePrizes(state, "ucl", []); // 두 번 불러도 한 번만
+
+    expect(financeOf(state, winless).balance - before).toBe(cup.prize.participation);
+    // 한 팀도 빠지지 않는다
+    const entrants = new Set(phase.flatMap((m) => [m.homeTeamId, m.awayTeamId]));
+    expect(entrants.size).toBe(cup.size);
+    const key = `prize:competition:ucl:league-phase:S${state.season}`;
+    expect(state.finances.filter((f) => (f.prizesPaid ?? []).includes(key))).toHaveLength(
+      entrants.size,
+    );
+  });
+
+  it("옛 세이브의 라벨 키를 안정 키로 옮긴다 — 같은 상금이 다시 나가지 않는다", () => {
+    const state = createTestGame(42);
+    fillResults(leaguePhaseOf(state, "ucl"));
+    payLeaguePhasePrizes(state, "ucl", []);
+
+    // 라벨을 그대로 키로 쓰던 시절의 세이브로 되돌린다
+    const key = `prize:competition:ucl:league-phase:S${state.season}`;
+    const legacy = `UCL 리그 페이즈 상금 (S${state.season})`;
+    let downgraded = 0;
+    for (const f of state.finances) {
+      const keys = f.prizesPaid;
+      if (!keys) continue;
+      const i = keys.indexOf(key);
+      if (i < 0) continue;
+      keys[i] = legacy;
+      downgraded++;
+    }
+    expect(downgraded).toBeGreaterThan(0);
+
+    const balances = state.finances.map((f) => f.balance);
+    migrateEuroPrizeKeys(state);
+    migrateEuroPrizeKeys(state); // 멱등
+    payLeaguePhasePrizes(state, "ucl", []);
+
+    expect(state.finances.map((f) => f.balance)).toEqual(balances);
+    expect(state.finances.some((f) => (f.prizesPaid ?? []).includes(legacy))).toBe(false);
+  });
+
   it("단계마다 진출 상금이 그 단계의 팀 전원에게 들어간다", () => {
     const state = createTestGame(42);
     const cup = cupCatalogById("ucl")!;
     runKnockouts(state, "ucl");
-    // 지급 사실은 prizesPaid 키가 갖는다 — AI 팀은 상세 원장을 쌓지 않는다.
-    // 항목명은 정확히 비교한다 — "준결승 진출 상금"은 "결승 진출 상금"을 포함한다
+    // 지급 사실은 prizesPaid 키가 갖는다 — AI 팀은 상세 원장을 쌓지 않는다
     const paidFor = (stage: "r16" | "qf" | "sf" | "final") => {
-      const label = `UCL ${stageLabel(stage, 1, false)} 진출 상금 (S1)`;
-      return state.finances.filter((f) => (f.prizesPaid ?? []).includes(label)).length;
+      const key = `prize:competition:ucl:stage:${stage}:S1`;
+      return state.finances.filter((f) => (f.prizesPaid ?? []).includes(key)).length;
     };
     expect(paidFor("r16")).toBe(16);
     expect(paidFor("qf")).toBe(8);
@@ -486,7 +544,9 @@ describe("상금", () => {
     payWinnerPrize(state, "ucl", champion, []);
     payWinnerPrize(state, "ucl", champion, []); // 두 번 불러도 한 번만
     // 지급 사실은 prizesPaid가 갖는다 (AI 팀은 원장을 쌓지 않는다)
-    const paid = state.finances.filter((f) => (f.prizesPaid ?? []).includes("UCL 우승 상금 (S1)"));
+    const paid = state.finances.filter((f) =>
+      (f.prizesPaid ?? []).includes("prize:competition:ucl:winner:S1"),
+    );
     expect(paid).toHaveLength(1);
     expect(paid[0]!.teamId).toBe(champion);
     expect(financeOf(state, champion).balance - before).toBe(cup.prize.winner);
