@@ -4,452 +4,1123 @@
     "teamName": "아스날",
     "players": [
       {
-        "id": "raya",
-        "name": "다비드 라야",
-        "attributes": {
-          "pace": 55,
-          "shooting": 30,
-          "passing": 70,
-          "dribbling": 50,
-          "defending": 40,
-          "physical": 72,
-          "goalkeeping": 85,
-          "overall": 85,
-          "potential": 86
-        },
-        "state": {
-          "form": 1,
-          "morale": 68,
-          "fatigue": 15
-        },
+        "id": "david-raya",
+        "catalogId": "david-raya",
         "teamId": "arsenal",
-        "birthdate": "1997-01-01",
+        "name": "다비드 라야",
+        "squadNumber": 1,
+        "birthdate": "1995-09-15",
         "positions": [
           {
             "position": "GK",
-            "proficiency": 90,
+            "proficiency": 94,
             "isNatural": true
           }
         ],
-        "catalogId": null,
+        "foot": {
+          "left": 3,
+          "right": 5
+        },
+        "height": 183,
+        "weight": 75,
+        "attributes": {
+          "pace": 62,
+          "stamina": 35,
+          "strength": 68,
+          "aerial": 70,
+          "finishing": 65,
+          "dribbling": 43,
+          "passing": 87,
+          "kicking": 99,
+          "tackling": 28,
+          "vision": 72,
+          "positioning": 90,
+          "composure": 57,
+          "aggression": 44,
+          "leadership": 62,
+          "goalkeeping": 87,
+          "overall": 83,
+          "potential": 92
+        },
+        "state": {
+          "form": 0.3,
+          "condition": 82
+        },
         "isCaptain": false
       },
       {
-        "id": "white",
-        "name": "벤 화이트",
-        "attributes": {
-          "pace": 78,
-          "shooting": 55,
-          "passing": 76,
-          "dribbling": 74,
-          "defending": 81,
-          "physical": 76,
-          "overall": 82,
-          "potential": 83,
-          "goalkeeping": 22
-        },
-        "state": {
-          "form": 0,
-          "morale": 65,
-          "fatigue": 20
-        },
+        "id": "jurrien-timber",
+        "catalogId": "jurrien-timber",
         "teamId": "arsenal",
-        "birthdate": "1999-01-01",
+        "name": "유리엔 팀버르",
+        "squadNumber": 12,
+        "birthdate": "2001-06-17",
         "positions": [
           {
             "position": "RB",
-            "proficiency": 90,
+            "proficiency": 91,
             "isNatural": true
-          }
-        ],
-        "catalogId": null,
-        "isCaptain": false
-      },
-      {
-        "id": "saliba",
-        "name": "윌리암 살리바",
-        "attributes": {
-          "pace": 84,
-          "shooting": 40,
-          "passing": 78,
-          "dribbling": 72,
-          "defending": 89,
-          "physical": 86,
-          "overall": 89,
-          "potential": 92,
-          "goalkeeping": 22
-        },
-        "state": {
-          "form": 1,
-          "morale": 70,
-          "fatigue": 12
-        },
-        "teamId": "arsenal",
-        "birthdate": "2002-01-01",
-        "positions": [
+          },
           {
-            "position": "CB",
-            "proficiency": 90,
-            "isNatural": true
-          }
-        ],
-        "catalogId": null,
-        "isCaptain": false
-      },
-      {
-        "id": "gabriel",
-        "name": "가브리엘 마갈량이스",
-        "attributes": {
-          "pace": 80,
-          "shooting": 45,
-          "passing": 74,
-          "dribbling": 65,
-          "defending": 87,
-          "physical": 88,
-          "overall": 87,
-          "potential": 88,
-          "goalkeeping": 22
-        },
-        "state": {
-          "form": 1,
-          "morale": 70,
-          "fatigue": 15
-        },
-        "teamId": "arsenal",
-        "birthdate": "1999-01-01",
-        "positions": [
+            "position": "RWB",
+            "proficiency": 89,
+            "isNatural": false
+          },
           {
-            "position": "CB",
-            "proficiency": 90,
-            "isNatural": true
+            "position": "RM",
+            "proficiency": 71,
+            "isNatural": false
+          },
+          {
+            "position": "RCB",
+            "proficiency": 77,
+            "isNatural": false
           }
         ],
-        "catalogId": null,
-        "isCaptain": false
-      },
-      {
-        "id": "calafiori",
-        "name": "리카르도 칼라피오리",
+        "foot": {
+          "left": 3,
+          "right": 5
+        },
+        "height": 179,
+        "weight": 78,
         "attributes": {
-          "pace": 79,
-          "shooting": 60,
-          "passing": 78,
-          "dribbling": 76,
-          "defending": 80,
-          "physical": 79,
-          "overall": 81,
-          "potential": 87,
-          "goalkeeping": 22
+          "pace": 76,
+          "stamina": 79,
+          "strength": 81,
+          "aerial": 76,
+          "finishing": 48,
+          "dribbling": 78,
+          "passing": 76,
+          "kicking": 64,
+          "tackling": 83,
+          "vision": 75,
+          "positioning": 75,
+          "composure": 79,
+          "aggression": 77,
+          "leadership": 45,
+          "goalkeeping": 21,
+          "overall": 78,
+          "potential": 87
         },
         "state": {
           "form": 0,
-          "morale": 66,
-          "fatigue": 18
+          "condition": 78
         },
+        "isCaptain": false
+      },
+      {
+        "id": "gabriel-magalhaes",
+        "catalogId": "gabriel-magalhaes",
         "teamId": "arsenal",
-        "birthdate": "2003-01-01",
+        "name": "가브리엘 마갈량이스",
+        "squadNumber": 6,
+        "birthdate": "1997-12-19",
+        "positions": [
+          {
+            "position": "CB",
+            "proficiency": 88,
+            "isNatural": true
+          },
+          {
+            "position": "RCB",
+            "proficiency": 89,
+            "isNatural": false
+          },
+          {
+            "position": "LCB",
+            "proficiency": 87,
+            "isNatural": false
+          },
+          {
+            "position": "DM",
+            "proficiency": 74,
+            "isNatural": false
+          }
+        ],
+        "foot": {
+          "left": 5,
+          "right": 2
+        },
+        "height": 190,
+        "weight": 87,
+        "attributes": {
+          "pace": 64,
+          "stamina": 75,
+          "strength": 84,
+          "aerial": 89,
+          "finishing": 44,
+          "dribbling": 65,
+          "passing": 64,
+          "kicking": 62,
+          "tackling": 89,
+          "vision": 58,
+          "positioning": 75,
+          "composure": 81,
+          "aggression": 88,
+          "leadership": 57,
+          "goalkeeping": 30,
+          "overall": 83,
+          "potential": 89
+        },
+        "state": {
+          "form": 0.6,
+          "condition": 88
+        },
+        "isCaptain": false
+      },
+      {
+        "id": "piero-hincapie",
+        "catalogId": "piero-hincapie",
+        "teamId": "arsenal",
+        "name": "피에로 인카피에",
+        "squadNumber": 5,
+        "birthdate": "2002-01-09",
+        "positions": [
+          {
+            "position": "CB",
+            "proficiency": 93,
+            "isNatural": true
+          },
+          {
+            "position": "RCB",
+            "proficiency": 92,
+            "isNatural": false
+          },
+          {
+            "position": "LCB",
+            "proficiency": 94,
+            "isNatural": false
+          },
+          {
+            "position": "DM",
+            "proficiency": 71,
+            "isNatural": false
+          }
+        ],
+        "foot": {
+          "left": 5,
+          "right": 2
+        },
+        "height": 184,
+        "weight": 77,
+        "attributes": {
+          "pace": 84,
+          "stamina": 74,
+          "strength": 82,
+          "aerial": 81,
+          "finishing": 41,
+          "dribbling": 72,
+          "passing": 68,
+          "kicking": 56,
+          "tackling": 84,
+          "vision": 72,
+          "positioning": 75,
+          "composure": 77,
+          "aggression": 75,
+          "leadership": 42,
+          "goalkeeping": 29,
+          "overall": 79,
+          "potential": 92
+        },
+        "state": {
+          "form": -0.3,
+          "condition": 74
+        },
+        "isCaptain": false
+      },
+      {
+        "id": "riccardo-calafiori",
+        "catalogId": "riccardo-calafiori",
+        "teamId": "arsenal",
+        "name": "리카르도 칼라피오리",
+        "squadNumber": 33,
+        "birthdate": "2002-05-19",
         "positions": [
           {
             "position": "LB",
-            "proficiency": 90,
+            "proficiency": 93,
             "isNatural": true
+          },
+          {
+            "position": "LWB",
+            "proficiency": 91,
+            "isNatural": false
+          },
+          {
+            "position": "LCB",
+            "proficiency": 82,
+            "isNatural": false
           }
         ],
-        "catalogId": null,
+        "foot": {
+          "left": 5,
+          "right": 4
+        },
+        "height": 188,
+        "weight": 86,
+        "attributes": {
+          "pace": 73,
+          "stamina": 82,
+          "strength": 80,
+          "aerial": 81,
+          "finishing": 68,
+          "dribbling": 76,
+          "passing": 75,
+          "kicking": 70,
+          "tackling": 80,
+          "vision": 70,
+          "positioning": 81,
+          "composure": 77,
+          "aggression": 89,
+          "leadership": 38,
+          "goalkeeping": 30,
+          "overall": 80,
+          "potential": 88
+        },
+        "state": {
+          "form": 0.3,
+          "condition": 80
+        },
         "isCaptain": false
       },
       {
-        "id": "rice",
-        "name": "데클란 라이스",
-        "attributes": {
-          "pace": 77,
-          "shooting": 72,
-          "passing": 83,
-          "dribbling": 79,
-          "defending": 84,
-          "physical": 86,
-          "overall": 89,
-          "potential": 91,
-          "goalkeeping": 22
-        },
-        "state": {
-          "form": 2,
-          "morale": 74,
-          "fatigue": 18
-        },
+        "id": "martin-zubimendi",
+        "catalogId": "martin-zubimendi",
         "teamId": "arsenal",
-        "birthdate": "2000-01-01",
+        "name": "마르틴 수비멘디",
+        "squadNumber": 36,
+        "birthdate": "1999-04-20",
         "positions": [
           {
             "position": "DM",
-            "proficiency": 90,
+            "proficiency": 95,
             "isNatural": true
-          }
-        ],
-        "catalogId": null,
-        "isCaptain": false
-      },
-      {
-        "id": "odegaard",
-        "name": "마르틴 외데고르",
-        "attributes": {
-          "pace": 74,
-          "shooting": 80,
-          "passing": 90,
-          "dribbling": 87,
-          "defending": 58,
-          "physical": 66,
-          "overall": 88,
-          "potential": 89,
-          "goalkeeping": 22
-        },
-        "state": {
-          "form": 1,
-          "morale": 72,
-          "fatigue": 20
-        },
-        "teamId": "arsenal",
-        "birthdate": "2000-01-01",
-        "positions": [
+          },
           {
-            "position": "AM",
-            "proficiency": 90,
-            "isNatural": true
+            "position": "RDM",
+            "proficiency": 96,
+            "isNatural": false
+          },
+          {
+            "position": "CDM",
+            "proficiency": 95,
+            "isNatural": false
+          },
+          {
+            "position": "LDM",
+            "proficiency": 94,
+            "isNatural": false
+          },
+          {
+            "position": "CB",
+            "proficiency": 76,
+            "isNatural": false
+          },
+          {
+            "position": "CM",
+            "proficiency": 79,
+            "isNatural": false
           }
         ],
-        "catalogId": null,
-        "isCaptain": false
-      },
-      {
-        "id": "merino",
-        "name": "미켈 메리노",
+        "foot": {
+          "left": 4,
+          "right": 5
+        },
+        "height": 181,
+        "weight": 70,
         "attributes": {
-          "pace": 68,
-          "shooting": 74,
-          "passing": 80,
-          "dribbling": 75,
-          "defending": 78,
-          "physical": 84,
-          "overall": 83,
-          "potential": 83,
-          "goalkeeping": 22
+          "pace": 66,
+          "stamina": 79,
+          "strength": 75,
+          "aerial": 73,
+          "finishing": 71,
+          "dribbling": 81,
+          "passing": 81,
+          "kicking": 72,
+          "tackling": 81,
+          "vision": 84,
+          "positioning": 73,
+          "composure": 77,
+          "aggression": 65,
+          "leadership": 50,
+          "goalkeeping": 30,
+          "overall": 78,
+          "potential": 88
         },
         "state": {
           "form": 0,
-          "morale": 64,
-          "fatigue": 22
+          "condition": 86
         },
+        "isCaptain": false
+      },
+      {
+        "id": "declan-rice",
+        "catalogId": "declan-rice",
         "teamId": "arsenal",
-        "birthdate": "1997-01-01",
+        "name": "데클란 라이스",
+        "squadNumber": 41,
+        "birthdate": "1999-01-14",
         "positions": [
           {
             "position": "CM",
             "proficiency": 90,
             "isNatural": true
+          },
+          {
+            "position": "RCM",
+            "proficiency": 91,
+            "isNatural": false
+          },
+          {
+            "position": "LCM",
+            "proficiency": 89,
+            "isNatural": false
+          },
+          {
+            "position": "AM",
+            "proficiency": 81,
+            "isNatural": false
+          },
+          {
+            "position": "CDM",
+            "proficiency": 75,
+            "isNatural": false
           }
         ],
-        "catalogId": null,
+        "foot": {
+          "left": 3,
+          "right": 5
+        },
+        "height": 185,
+        "weight": 80,
+        "attributes": {
+          "pace": 72,
+          "stamina": 89,
+          "strength": 84,
+          "aerial": 73,
+          "finishing": 73,
+          "dribbling": 81,
+          "passing": 86,
+          "kicking": 80,
+          "tackling": 84,
+          "vision": 81,
+          "positioning": 83,
+          "composure": 84,
+          "aggression": 91,
+          "leadership": 57,
+          "goalkeeping": 31,
+          "overall": 83,
+          "potential": 92
+        },
+        "state": {
+          "form": -0.6,
+          "condition": 70
+        },
         "isCaptain": false
       },
       {
-        "id": "saka",
-        "name": "부카요 사카",
+        "id": "martin-odegaard",
+        "catalogId": "martin-odegaard",
+        "teamId": "arsenal",
+        "name": "마르틴 외데고르",
+        "squadNumber": 8,
+        "birthdate": "1998-12-17",
+        "positions": [
+          {
+            "position": "AM",
+            "proficiency": 94,
+            "isNatural": true
+          },
+          {
+            "position": "RAM",
+            "proficiency": 93,
+            "isNatural": false
+          },
+          {
+            "position": "CAM",
+            "proficiency": 94,
+            "isNatural": false
+          },
+          {
+            "position": "LAM",
+            "proficiency": 95,
+            "isNatural": false
+          },
+          {
+            "position": "CF",
+            "proficiency": 73,
+            "isNatural": false
+          },
+          {
+            "position": "CM",
+            "proficiency": 73,
+            "isNatural": false
+          }
+        ],
+        "foot": {
+          "left": 5,
+          "right": 2
+        },
+        "height": 178,
+        "weight": 68,
         "attributes": {
-          "pace": 88,
-          "shooting": 84,
-          "passing": 84,
-          "dribbling": 89,
-          "defending": 55,
-          "physical": 72,
-          "overall": 89,
-          "potential": 93,
-          "goalkeeping": 22
+          "pace": 68,
+          "stamina": 80,
+          "strength": 64,
+          "aerial": 62,
+          "finishing": 78,
+          "dribbling": 87,
+          "passing": 88,
+          "kicking": 78,
+          "tackling": 67,
+          "vision": 91,
+          "positioning": 72,
+          "composure": 83,
+          "aggression": 63,
+          "leadership": 54,
+          "goalkeeping": 28,
+          "overall": 84,
+          "potential": 90
         },
         "state": {
-          "form": 2,
-          "morale": 76,
-          "fatigue": 16
+          "form": 0.3,
+          "condition": 84
         },
+        "isCaptain": false
+      },
+      {
+        "id": "eberechi-eze",
+        "catalogId": "eberechi-eze",
         "teamId": "arsenal",
-        "birthdate": "2003-01-01",
+        "name": "에베레치 에제",
+        "squadNumber": 10,
+        "birthdate": "1998-06-29",
+        "positions": [
+          {
+            "position": "AM",
+            "proficiency": 95,
+            "isNatural": true
+          },
+          {
+            "position": "RAM",
+            "proficiency": 96,
+            "isNatural": false
+          },
+          {
+            "position": "CAM",
+            "proficiency": 95,
+            "isNatural": false
+          },
+          {
+            "position": "LAM",
+            "proficiency": 94,
+            "isNatural": false
+          },
+          {
+            "position": "CF",
+            "proficiency": 73,
+            "isNatural": false
+          },
+          {
+            "position": "CM",
+            "proficiency": 72,
+            "isNatural": false
+          }
+        ],
+        "foot": {
+          "left": 4,
+          "right": 5
+        },
+        "height": 178,
+        "weight": 67,
+        "attributes": {
+          "pace": 74,
+          "stamina": 75,
+          "strength": 68,
+          "aerial": 58,
+          "finishing": 80,
+          "dribbling": 87,
+          "passing": 82,
+          "kicking": 76,
+          "tackling": 57,
+          "vision": 90,
+          "positioning": 71,
+          "composure": 84,
+          "aggression": 69,
+          "leadership": 40,
+          "goalkeeping": 30,
+          "overall": 82,
+          "potential": 88
+        },
+        "state": {
+          "form": 0.6,
+          "condition": 76
+        },
+        "isCaptain": false
+      },
+      {
+        "id": "viktor-gyokeres",
+        "catalogId": "viktor-gyokeres",
+        "teamId": "arsenal",
+        "name": "빅토르 요케레스",
+        "squadNumber": 14,
+        "birthdate": "1998-06-04",
+        "positions": [
+          {
+            "position": "ST",
+            "proficiency": 93,
+            "isNatural": true
+          },
+          {
+            "position": "RST",
+            "proficiency": 92,
+            "isNatural": false
+          },
+          {
+            "position": "LST",
+            "proficiency": 94,
+            "isNatural": false
+          },
+          {
+            "position": "RF",
+            "proficiency": 91,
+            "isNatural": false
+          },
+          {
+            "position": "CF",
+            "proficiency": 91,
+            "isNatural": false
+          },
+          {
+            "position": "LF",
+            "proficiency": 91,
+            "isNatural": false
+          },
+          {
+            "position": "SS",
+            "proficiency": 91,
+            "isNatural": false
+          }
+        ],
+        "foot": {
+          "left": 4,
+          "right": 5
+        },
+        "height": 189,
+        "weight": 94,
+        "attributes": {
+          "pace": 86,
+          "stamina": 82,
+          "strength": 90,
+          "aerial": 88,
+          "finishing": 86,
+          "dribbling": 78,
+          "passing": 72,
+          "kicking": 68,
+          "tackling": 44,
+          "vision": 80,
+          "positioning": 74,
+          "composure": 87,
+          "aggression": 60,
+          "leadership": 49,
+          "goalkeeping": 19,
+          "overall": 83,
+          "potential": 90
+        },
+        "state": {
+          "form": 0,
+          "condition": 90
+        },
+        "isCaptain": false
+      },
+      {
+        "id": "bukayo-saka",
+        "catalogId": "bukayo-saka",
+        "teamId": "arsenal",
+        "name": "부카요 사카",
+        "squadNumber": 7,
+        "birthdate": "2001-09-05",
+        "positions": [
+          {
+            "position": "RW",
+            "proficiency": 91,
+            "isNatural": true
+          },
+          {
+            "position": "RM",
+            "proficiency": 89,
+            "isNatural": false
+          },
+          {
+            "position": "CF",
+            "proficiency": 75,
+            "isNatural": false
+          },
+          {
+            "position": "LW",
+            "proficiency": 82,
+            "isNatural": false
+          }
+        ],
+        "foot": {
+          "left": 5,
+          "right": 4
+        },
+        "height": 178,
+        "weight": 65,
+        "attributes": {
+          "pace": 83,
+          "stamina": 86,
+          "strength": 76,
+          "aerial": 74,
+          "finishing": 82,
+          "dribbling": 87,
+          "passing": 85,
+          "kicking": 78,
+          "tackling": 60,
+          "vision": 87,
+          "positioning": 79,
+          "composure": 89,
+          "aggression": 67,
+          "leadership": 33,
+          "goalkeeping": 27,
+          "overall": 83,
+          "potential": 95
+        },
+        "state": {
+          "form": 0.3,
+          "condition": 72
+        },
+        "isCaptain": false
+      },
+      {
+        "id": "kepa-arrizabalaga",
+        "catalogId": "kepa-arrizabalaga",
+        "teamId": "arsenal",
+        "name": "케파 아리사발라가",
+        "squadNumber": 13,
+        "birthdate": "1995-03-13",
+        "positions": [
+          {
+            "position": "GK",
+            "proficiency": 89,
+            "isNatural": true
+          }
+        ],
+        "foot": {
+          "left": 4,
+          "right": 5
+        },
+        "height": 186,
+        "weight": 85,
+        "attributes": {
+          "pace": 44,
+          "stamina": 36,
+          "strength": 65,
+          "aerial": 70,
+          "finishing": 30,
+          "dribbling": 45,
+          "passing": 55,
+          "kicking": 59,
+          "tackling": 32,
+          "vision": 36,
+          "positioning": 71,
+          "composure": 52,
+          "aggression": 44,
+          "leadership": 46,
+          "goalkeeping": 79,
+          "overall": 71,
+          "potential": 80
+        },
+        "state": {
+          "form": 0,
+          "condition": 88
+        },
+        "isCaptain": false
+      },
+      {
+        "id": "william-saliba",
+        "catalogId": "william-saliba",
+        "teamId": "arsenal",
+        "name": "윌리앙 살리바",
+        "squadNumber": 2,
+        "birthdate": "2001-03-24",
+        "positions": [
+          {
+            "position": "CB",
+            "proficiency": 89,
+            "isNatural": true
+          },
+          {
+            "position": "RCB",
+            "proficiency": 90,
+            "isNatural": false
+          },
+          {
+            "position": "LCB",
+            "proficiency": 88,
+            "isNatural": false
+          },
+          {
+            "position": "DM",
+            "proficiency": 71,
+            "isNatural": false
+          }
+        ],
+        "foot": {
+          "left": 3,
+          "right": 5
+        },
+        "height": 193,
+        "weight": 85,
+        "attributes": {
+          "pace": 77,
+          "stamina": 76,
+          "strength": 83,
+          "aerial": 82,
+          "finishing": 39,
+          "dribbling": 73,
+          "passing": 68,
+          "kicking": 56,
+          "tackling": 88,
+          "vision": 62,
+          "positioning": 76,
+          "composure": 73,
+          "aggression": 86,
+          "leadership": 46,
+          "goalkeeping": 28,
+          "overall": 81,
+          "potential": 90
+        },
+        "state": {
+          "form": 0.3,
+          "condition": 92
+        },
+        "isCaptain": false
+      },
+      {
+        "id": "gabriel-martinelli",
+        "catalogId": "gabriel-martinelli",
+        "teamId": "arsenal",
+        "name": "가브리엘 마르티넬리",
+        "squadNumber": 11,
+        "birthdate": "2001-06-18",
+        "positions": [
+          {
+            "position": "LW",
+            "proficiency": 96,
+            "isNatural": true
+          },
+          {
+            "position": "LM",
+            "proficiency": 94,
+            "isNatural": false
+          },
+          {
+            "position": "CF",
+            "proficiency": 82,
+            "isNatural": false
+          },
+          {
+            "position": "RW",
+            "proficiency": 73,
+            "isNatural": false
+          }
+        ],
+        "foot": {
+          "left": 3,
+          "right": 5
+        },
+        "height": 178,
+        "weight": 75,
+        "attributes": {
+          "pace": 90,
+          "stamina": 83,
+          "strength": 72,
+          "aerial": 70,
+          "finishing": 77,
+          "dribbling": 83,
+          "passing": 75,
+          "kicking": 64,
+          "tackling": 46,
+          "vision": 72,
+          "positioning": 66,
+          "composure": 82,
+          "aggression": 50,
+          "leadership": 30,
+          "goalkeeping": 17,
+          "overall": 80,
+          "potential": 85
+        },
+        "state": {
+          "form": -0.3,
+          "condition": 86
+        },
+        "isCaptain": false
+      },
+      {
+        "id": "bruno-guimaraes",
+        "catalogId": "bruno-guimaraes",
+        "teamId": "arsenal",
+        "name": "브루누 기마랑이스",
+        "squadNumber": 39,
+        "birthdate": "1997-11-16",
+        "positions": [
+          {
+            "position": "CM",
+            "proficiency": 91,
+            "isNatural": true
+          },
+          {
+            "position": "RCM",
+            "proficiency": 92,
+            "isNatural": false
+          },
+          {
+            "position": "LCM",
+            "proficiency": 90,
+            "isNatural": false
+          },
+          {
+            "position": "AM",
+            "proficiency": 81,
+            "isNatural": false
+          },
+          {
+            "position": "CDM",
+            "proficiency": 82,
+            "isNatural": false
+          }
+        ],
+        "foot": {
+          "left": 2,
+          "right": 5
+        },
+        "height": 182,
+        "weight": 74,
+        "attributes": {
+          "pace": 66,
+          "stamina": 83,
+          "strength": 81,
+          "aerial": 68,
+          "finishing": 75,
+          "dribbling": 84,
+          "passing": 84,
+          "kicking": 78,
+          "tackling": 79,
+          "vision": 83,
+          "positioning": 76,
+          "composure": 78,
+          "aggression": 73,
+          "leadership": 49,
+          "goalkeeping": 29,
+          "overall": 80,
+          "potential": 87
+        },
+        "state": {
+          "form": 0,
+          "condition": 90
+        },
+        "isCaptain": false
+      },
+      {
+        "id": "noni-madueke",
+        "catalogId": "noni-madueke",
+        "teamId": "arsenal",
+        "name": "노니 마두에케",
+        "squadNumber": 20,
+        "birthdate": "2002-03-10",
         "positions": [
           {
             "position": "RW",
             "proficiency": 90,
             "isNatural": true
-          }
-        ],
-        "catalogId": null,
-        "isCaptain": false
-      },
-      {
-        "id": "havertz",
-        "name": "카이 하베르츠",
-        "attributes": {
-          "pace": 78,
-          "shooting": 81,
-          "passing": 79,
-          "dribbling": 80,
-          "defending": 60,
-          "physical": 82,
-          "overall": 84,
-          "potential": 85,
-          "goalkeeping": 22
-        },
-        "state": {
-          "form": 0,
-          "morale": 66,
-          "fatigue": 20
-        },
-        "teamId": "arsenal",
-        "birthdate": "2000-01-01",
-        "positions": [
+          },
           {
-            "position": "ST",
-            "proficiency": 90,
-            "isNatural": true
-          }
-        ],
-        "catalogId": null,
-        "isCaptain": false
-      },
-      {
-        "id": "martinelli",
-        "name": "가브리엘 마르티넬리",
-        "attributes": {
-          "pace": 90,
-          "shooting": 79,
-          "passing": 76,
-          "dribbling": 85,
-          "defending": 50,
-          "physical": 74,
-          "overall": 84,
-          "potential": 88,
-          "goalkeeping": 22
-        },
-        "state": {
-          "form": -1,
-          "morale": 60,
-          "fatigue": 18
-        },
-        "teamId": "arsenal",
-        "birthdate": "2002-01-01",
-        "positions": [
+            "position": "RM",
+            "proficiency": 88,
+            "isNatural": false
+          },
+          {
+            "position": "CF",
+            "proficiency": 72,
+            "isNatural": false
+          },
           {
             "position": "LW",
-            "proficiency": 90,
-            "isNatural": true
+            "proficiency": 78,
+            "isNatural": false
           }
         ],
-        "catalogId": null,
+        "foot": {
+          "left": 5,
+          "right": 3
+        },
+        "height": 182,
+        "weight": 75,
+        "attributes": {
+          "pace": 88,
+          "stamina": 81,
+          "strength": 69,
+          "aerial": 68,
+          "finishing": 75,
+          "dribbling": 83,
+          "passing": 74,
+          "kicking": 65,
+          "tackling": 45,
+          "vision": 76,
+          "positioning": 70,
+          "composure": 72,
+          "aggression": 60,
+          "leadership": 29,
+          "goalkeeping": 27,
+          "overall": 79,
+          "potential": 89
+        },
+        "state": {
+          "form": 0.6,
+          "condition": 84
+        },
         "isCaptain": false
       },
       {
-        "id": "trossard",
-        "name": "레안드로 트로사르",
-        "attributes": {
-          "pace": 80,
-          "shooting": 80,
-          "passing": 79,
-          "dribbling": 84,
-          "defending": 45,
-          "physical": 68,
-          "overall": 82,
-          "potential": 82,
-          "goalkeeping": 22
-        },
-        "state": {
-          "form": 1,
-          "morale": 65,
-          "fatigue": 10
-        },
+        "id": "mikel-merino",
+        "catalogId": "mikel-merino",
         "teamId": "arsenal",
-        "birthdate": "1996-01-01",
+        "name": "미켈 메리노",
+        "squadNumber": 23,
+        "birthdate": "1996-06-22",
         "positions": [
           {
-            "position": "LW",
-            "proficiency": 90,
+            "position": "CM",
+            "proficiency": 91,
             "isNatural": true
-          }
-        ],
-        "catalogId": null,
-        "isCaptain": false
-      },
-      {
-        "id": "timber",
-        "name": "유리엔 팀버",
-        "attributes": {
-          "pace": 81,
-          "shooting": 45,
-          "passing": 77,
-          "dribbling": 76,
-          "defending": 84,
-          "physical": 78,
-          "overall": 83,
-          "potential": 87,
-          "goalkeeping": 22
-        },
-        "state": {
-          "form": 0,
-          "morale": 63,
-          "fatigue": 8
-        },
-        "teamId": "arsenal",
-        "birthdate": "2002-01-01",
-        "positions": [
+          },
           {
-            "position": "CB",
+            "position": "RCM",
             "proficiency": 90,
-            "isNatural": true
-          }
-        ],
-        "catalogId": null,
-        "isCaptain": false
-      },
-      {
-        "id": "nwaneri",
-        "name": "이선 은와네리",
-        "attributes": {
-          "pace": 79,
-          "shooting": 78,
-          "passing": 77,
-          "dribbling": 84,
-          "defending": 42,
-          "physical": 60,
-          "overall": 78,
-          "potential": 90,
-          "goalkeeping": 22
-        },
-        "state": {
-          "form": 1,
-          "morale": 70,
-          "fatigue": 5
-        },
-        "teamId": "arsenal",
-        "birthdate": "2008-01-01",
-        "positions": [
+            "isNatural": false
+          },
+          {
+            "position": "LCM",
+            "proficiency": 92,
+            "isNatural": false
+          },
           {
             "position": "AM",
-            "proficiency": 90,
-            "isNatural": true
+            "proficiency": 73,
+            "isNatural": false
+          },
+          {
+            "position": "CDM",
+            "proficiency": 78,
+            "isNatural": false
           }
         ],
-        "catalogId": null,
+        "foot": {
+          "left": 5,
+          "right": 3
+        },
+        "height": 189,
+        "weight": 83,
+        "attributes": {
+          "pace": 53,
+          "stamina": 79,
+          "strength": 80,
+          "aerial": 69,
+          "finishing": 79,
+          "dribbling": 80,
+          "passing": 80,
+          "kicking": 70,
+          "tackling": 81,
+          "vision": 85,
+          "positioning": 84,
+          "composure": 85,
+          "aggression": 73,
+          "leadership": 48,
+          "goalkeeping": 29,
+          "overall": 79,
+          "potential": 86
+        },
+        "state": {
+          "form": 0,
+          "condition": 92
+        },
+        "isCaptain": false
+      },
+      {
+        "id": "christos-tzolis",
+        "catalogId": "christos-tzolis",
+        "teamId": "arsenal",
+        "name": "크리스토스 촐리스",
+        "squadNumber": 17,
+        "birthdate": "2002-01-30",
+        "positions": [
+          {
+            "position": "LW",
+            "proficiency": 96,
+            "isNatural": true
+          },
+          {
+            "position": "LM",
+            "proficiency": 94,
+            "isNatural": false
+          },
+          {
+            "position": "CF",
+            "proficiency": 75,
+            "isNatural": false
+          },
+          {
+            "position": "RW",
+            "proficiency": 70,
+            "isNatural": false
+          }
+        ],
+        "foot": {
+          "left": 4,
+          "right": 5
+        },
+        "height": 179,
+        "weight": 73,
+        "attributes": {
+          "pace": 82,
+          "stamina": 81,
+          "strength": 71,
+          "aerial": 73,
+          "finishing": 78,
+          "dribbling": 83,
+          "passing": 77,
+          "kicking": 68,
+          "tackling": 38,
+          "vision": 83,
+          "positioning": 65,
+          "composure": 77,
+          "aggression": 54,
+          "leadership": 41,
+          "goalkeeping": 31,
+          "overall": 78,
+          "potential": 86
+        },
+        "state": {
+          "form": 0.3,
+          "condition": 88
+        },
         "isCaptain": false
       }
     ],
     "startingIds": [
-      "raya",
-      "white",
-      "saliba",
-      "gabriel",
-      "calafiori",
-      "rice",
-      "odegaard",
-      "merino",
-      "saka",
-      "havertz",
-      "martinelli"
+      "david-raya",
+      "jurrien-timber",
+      "gabriel-magalhaes",
+      "piero-hincapie",
+      "riccardo-calafiori",
+      "martin-zubimendi",
+      "declan-rice",
+      "martin-odegaard",
+      "eberechi-eze",
+      "viktor-gyokeres",
+      "bukayo-saka"
     ],
     "tactics": {
       "formation": "4-3-3",
@@ -458,8 +1129,7 @@
       "pressing": 4,
       "tempo": 4,
       "width": 4,
-      "passStyle": "short",
-      "playerInstructions": []
+      "passStyle": 2
     },
     "managerTactics": 58
   },
@@ -468,452 +1138,1155 @@
     "teamName": "첼시",
     "players": [
       {
-        "id": "sanchez",
-        "name": "로베르트 산체스",
-        "attributes": {
-          "pace": 52,
-          "shooting": 25,
-          "passing": 68,
-          "dribbling": 45,
-          "defending": 38,
-          "physical": 80,
-          "goalkeeping": 80,
-          "overall": 80,
-          "potential": 81
-        },
-        "state": {
-          "form": 0,
-          "morale": 62,
-          "fatigue": 14
-        },
+        "id": "robert-sanchez",
+        "catalogId": "robert-sanchez",
         "teamId": "chelsea",
-        "birthdate": "1999-01-01",
+        "name": "로베르트 산체스",
+        "squadNumber": 1,
+        "birthdate": "1997-11-18",
         "positions": [
           {
             "position": "GK",
-            "proficiency": 90,
+            "proficiency": 95,
             "isNatural": true
           }
         ],
-        "catalogId": null,
+        "foot": {
+          "left": 4,
+          "right": 5
+        },
+        "height": 197,
+        "weight": 90,
+        "attributes": {
+          "pace": 60,
+          "stamina": 33,
+          "strength": 66,
+          "aerial": 70,
+          "finishing": 56,
+          "dribbling": 45,
+          "passing": 78,
+          "kicking": 95,
+          "tackling": 20,
+          "vision": 56,
+          "positioning": 78,
+          "composure": 50,
+          "aggression": 41,
+          "leadership": 52,
+          "goalkeeping": 81,
+          "overall": 77,
+          "potential": 84
+        },
+        "state": {
+          "form": 0.3,
+          "condition": 82
+        },
         "isCaptain": false
       },
       {
-        "id": "james",
-        "name": "리스 제임스",
-        "attributes": {
-          "pace": 82,
-          "shooting": 70,
-          "passing": 84,
-          "dribbling": 80,
-          "defending": 83,
-          "physical": 84,
-          "overall": 84,
-          "potential": 87,
-          "goalkeeping": 22
-        },
-        "state": {
-          "form": 0,
-          "morale": 66,
-          "fatigue": 24
-        },
+        "id": "reece-james",
+        "catalogId": "reece-james",
         "teamId": "chelsea",
-        "birthdate": "2001-01-01",
+        "name": "리스 제임스",
+        "squadNumber": 24,
+        "birthdate": "1999-12-08",
         "positions": [
           {
             "position": "RB",
-            "proficiency": 90,
+            "proficiency": 95,
             "isNatural": true
+          },
+          {
+            "position": "RWB",
+            "proficiency": 93,
+            "isNatural": false
+          },
+          {
+            "position": "RM",
+            "proficiency": 71,
+            "isNatural": false
+          },
+          {
+            "position": "RCB",
+            "proficiency": 70,
+            "isNatural": false
           }
         ],
-        "catalogId": null,
-        "isCaptain": false
-      },
-      {
-        "id": "fofana",
-        "name": "웨슬리 포파나",
+        "foot": {
+          "left": 4,
+          "right": 5
+        },
+        "height": 180,
+        "weight": 91,
         "attributes": {
-          "pace": 83,
-          "shooting": 35,
-          "passing": 70,
-          "dribbling": 68,
-          "defending": 84,
-          "physical": 82,
-          "overall": 83,
-          "potential": 87,
-          "goalkeeping": 22
+          "pace": 76,
+          "stamina": 90,
+          "strength": 82,
+          "aerial": 79,
+          "finishing": 71,
+          "dribbling": 78,
+          "passing": 83,
+          "kicking": 73,
+          "tackling": 83,
+          "vision": 83,
+          "positioning": 77,
+          "composure": 79,
+          "aggression": 90,
+          "leadership": 49,
+          "goalkeeping": 21,
+          "overall": 81,
+          "potential": 88
         },
         "state": {
           "form": 0,
-          "morale": 64,
-          "fatigue": 16
+          "condition": 78
         },
-        "teamId": "chelsea",
-        "birthdate": "2002-01-01",
-        "positions": [
-          {
-            "position": "CB",
-            "proficiency": 90,
-            "isNatural": true
-          }
-        ],
-        "catalogId": null,
         "isCaptain": false
       },
       {
-        "id": "colwill",
+        "id": "levi-colwill",
+        "catalogId": "levi-colwill",
+        "teamId": "chelsea",
         "name": "레비 콜윌",
-        "attributes": {
-          "pace": 76,
-          "shooting": 40,
-          "passing": 78,
-          "dribbling": 72,
-          "defending": 83,
-          "physical": 81,
-          "overall": 82,
-          "potential": 88,
-          "goalkeeping": 22
-        },
-        "state": {
-          "form": 1,
-          "morale": 67,
-          "fatigue": 14
-        },
-        "teamId": "chelsea",
-        "birthdate": "2004-01-01",
+        "squadNumber": 6,
+        "birthdate": "2003-02-26",
         "positions": [
           {
             "position": "CB",
-            "proficiency": 90,
+            "proficiency": 95,
             "isNatural": true
+          },
+          {
+            "position": "RCB",
+            "proficiency": 96,
+            "isNatural": false
+          },
+          {
+            "position": "LCB",
+            "proficiency": 94,
+            "isNatural": false
+          },
+          {
+            "position": "DM",
+            "proficiency": 70,
+            "isNatural": false
           }
         ],
-        "catalogId": null,
+        "foot": {
+          "left": 5,
+          "right": 3
+        },
+        "height": 187,
+        "weight": 83,
+        "attributes": {
+          "pace": 70,
+          "stamina": 74,
+          "strength": 80,
+          "aerial": 79,
+          "finishing": 43,
+          "dribbling": 72,
+          "passing": 71,
+          "kicking": 57,
+          "tackling": 81,
+          "vision": 64,
+          "positioning": 67,
+          "composure": 71,
+          "aggression": 80,
+          "leadership": 47,
+          "goalkeeping": 23,
+          "overall": 76,
+          "potential": 89
+        },
+        "state": {
+          "form": 0.6,
+          "condition": 88
+        },
         "isCaptain": false
       },
       {
-        "id": "cucurella",
-        "name": "마르크 쿠쿠레야",
+        "id": "tosin-adarabioyo",
+        "catalogId": "tosin-adarabioyo",
+        "teamId": "chelsea",
+        "name": "토신 아다라비오요",
+        "squadNumber": 4,
+        "birthdate": "1997-09-24",
+        "positions": [
+          {
+            "position": "CB",
+            "proficiency": 89,
+            "isNatural": true
+          },
+          {
+            "position": "RCB",
+            "proficiency": 90,
+            "isNatural": false
+          },
+          {
+            "position": "LCB",
+            "proficiency": 88,
+            "isNatural": false
+          },
+          {
+            "position": "DM",
+            "proficiency": 73,
+            "isNatural": false
+          }
+        ],
+        "foot": {
+          "left": 3,
+          "right": 5
+        },
+        "height": 197,
+        "weight": 80,
         "attributes": {
-          "pace": 61,
-          "shooting": 50,
-          "passing": 76,
-          "dribbling": 76,
-          "defending": 82,
-          "physical": 77,
-          "overall": 82,
-          "potential": 83,
-          "goalkeeping": 22
+          "pace": 69,
+          "stamina": 69,
+          "strength": 79,
+          "aerial": 80,
+          "finishing": 46,
+          "dribbling": 64,
+          "passing": 63,
+          "kicking": 56,
+          "tackling": 78,
+          "vision": 63,
+          "positioning": 73,
+          "composure": 78,
+          "aggression": 80,
+          "leadership": 48,
+          "goalkeeping": 24,
+          "overall": 76,
+          "potential": 81
         },
         "state": {
-          "form": 1,
-          "morale": 68,
-          "fatigue": 18
+          "form": -0.3,
+          "condition": 74
         },
+        "isCaptain": false
+      },
+      {
+        "id": "jorrel-hato",
+        "catalogId": "jorrel-hato",
         "teamId": "chelsea",
-        "birthdate": "2000-01-01",
+        "name": "요럴 하토",
+        "squadNumber": 21,
+        "birthdate": "2006-03-07",
         "positions": [
           {
             "position": "LB",
-            "proficiency": 90,
+            "proficiency": 92,
             "isNatural": true
+          },
+          {
+            "position": "LWB",
+            "proficiency": 90,
+            "isNatural": false
+          },
+          {
+            "position": "LM",
+            "proficiency": 70,
+            "isNatural": false
+          },
+          {
+            "position": "LCB",
+            "proficiency": 70,
+            "isNatural": false
           }
         ],
-        "catalogId": null,
+        "foot": {
+          "left": 5,
+          "right": 3
+        },
+        "height": 182,
+        "weight": 76,
+        "attributes": {
+          "pace": 85,
+          "stamina": 78,
+          "strength": 73,
+          "aerial": 74,
+          "finishing": 41,
+          "dribbling": 74,
+          "passing": 70,
+          "kicking": 59,
+          "tackling": 75,
+          "vision": 68,
+          "positioning": 66,
+          "composure": 64,
+          "aggression": 86,
+          "leadership": 36,
+          "goalkeeping": 20,
+          "overall": 75,
+          "potential": 90
+        },
+        "state": {
+          "form": 0.3,
+          "condition": 80
+        },
         "isCaptain": false
       },
       {
-        "id": "caicedo",
-        "name": "모이세스 카이세도",
-        "attributes": {
-          "pace": 76,
-          "shooting": 68,
-          "passing": 81,
-          "dribbling": 80,
-          "defending": 86,
-          "physical": 86,
-          "overall": 87,
-          "potential": 90,
-          "goalkeeping": 22
-        },
-        "state": {
-          "form": 2,
-          "morale": 72,
-          "fatigue": 18
-        },
+        "id": "moises-caicedo",
+        "catalogId": "moises-caicedo",
         "teamId": "chelsea",
-        "birthdate": "2003-01-01",
+        "name": "모이세스 카이세도",
+        "squadNumber": 25,
+        "birthdate": "2001-11-02",
         "positions": [
           {
             "position": "DM",
-            "proficiency": 90,
+            "proficiency": 95,
             "isNatural": true
+          },
+          {
+            "position": "RDM",
+            "proficiency": 96,
+            "isNatural": false
+          },
+          {
+            "position": "CDM",
+            "proficiency": 95,
+            "isNatural": false
+          },
+          {
+            "position": "LDM",
+            "proficiency": 94,
+            "isNatural": false
+          },
+          {
+            "position": "CB",
+            "proficiency": 81,
+            "isNatural": false
+          },
+          {
+            "position": "CM",
+            "proficiency": 82,
+            "isNatural": false
           }
         ],
-        "catalogId": null,
+        "foot": {
+          "left": 3,
+          "right": 5
+        },
+        "height": 178,
+        "weight": 73,
+        "attributes": {
+          "pace": 71,
+          "stamina": 80,
+          "strength": 82,
+          "aerial": 79,
+          "finishing": 67,
+          "dribbling": 81,
+          "passing": 78,
+          "kicking": 72,
+          "tackling": 85,
+          "vision": 80,
+          "positioning": 79,
+          "composure": 76,
+          "aggression": 79,
+          "leadership": 43,
+          "goalkeeping": 27,
+          "overall": 80,
+          "potential": 95
+        },
+        "state": {
+          "form": 0,
+          "condition": 86
+        },
         "isCaptain": false
       },
       {
-        "id": "enzo",
-        "name": "엔소 페르난데스",
-        "attributes": {
-          "pace": 72,
-          "shooting": 74,
-          "passing": 86,
-          "dribbling": 80,
-          "defending": 74,
-          "physical": 78,
-          "overall": 85,
-          "potential": 89,
-          "goalkeeping": 22
-        },
-        "state": {
-          "form": 1,
-          "morale": 69,
-          "fatigue": 20
-        },
+        "id": "enzo-fernandez",
+        "catalogId": "enzo-fernandez",
         "teamId": "chelsea",
-        "birthdate": "2002-01-01",
+        "name": "엔소 페르난데스",
+        "squadNumber": 8,
+        "birthdate": "2001-04-10",
         "positions": [
           {
             "position": "CM",
-            "proficiency": 90,
+            "proficiency": 93,
             "isNatural": true
+          },
+          {
+            "position": "RCM",
+            "proficiency": 94,
+            "isNatural": false
+          },
+          {
+            "position": "LCM",
+            "proficiency": 92,
+            "isNatural": false
+          },
+          {
+            "position": "CDM",
+            "proficiency": 73,
+            "isNatural": false
           }
         ],
-        "catalogId": null,
+        "foot": {
+          "left": 2,
+          "right": 5
+        },
+        "height": 173,
+        "weight": 63,
+        "attributes": {
+          "pace": 74,
+          "stamina": 73,
+          "strength": 77,
+          "aerial": 65,
+          "finishing": 53,
+          "dribbling": 66,
+          "passing": 69,
+          "kicking": 61,
+          "tackling": 82,
+          "vision": 65,
+          "positioning": 63,
+          "composure": 68,
+          "aggression": 88,
+          "leadership": 50,
+          "goalkeeping": 19,
+          "overall": 71,
+          "potential": 85
+        },
+        "state": {
+          "form": -0.6,
+          "condition": 70
+        },
         "isCaptain": false
       },
       {
-        "id": "palmer",
-        "name": "콜 파머",
-        "attributes": {
-          "pace": 76,
-          "shooting": 87,
-          "passing": 86,
-          "dribbling": 87,
-          "defending": 48,
-          "physical": 70,
-          "overall": 88,
-          "potential": 92,
-          "goalkeeping": 22
-        },
-        "state": {
-          "form": 2,
-          "morale": 74,
-          "fatigue": 16
-        },
+        "id": "cole-palmer",
+        "catalogId": "cole-palmer",
         "teamId": "chelsea",
-        "birthdate": "2003-01-01",
+        "name": "콜 파머",
+        "squadNumber": 10,
+        "birthdate": "2002-05-06",
         "positions": [
           {
             "position": "AM",
-            "proficiency": 90,
+            "proficiency": 91,
             "isNatural": true
+          },
+          {
+            "position": "RAM",
+            "proficiency": 92,
+            "isNatural": false
+          },
+          {
+            "position": "CAM",
+            "proficiency": 91,
+            "isNatural": false
+          },
+          {
+            "position": "LAM",
+            "proficiency": 90,
+            "isNatural": false
+          },
+          {
+            "position": "CF",
+            "proficiency": 76,
+            "isNatural": false
+          },
+          {
+            "position": "SS",
+            "proficiency": 70,
+            "isNatural": false
+          },
+          {
+            "position": "CM",
+            "proficiency": 76,
+            "isNatural": false
           }
         ],
-        "catalogId": null,
+        "foot": {
+          "left": 5,
+          "right": 3
+        },
+        "height": 185,
+        "weight": 76,
+        "attributes": {
+          "pace": 75,
+          "stamina": 75,
+          "strength": 64,
+          "aerial": 55,
+          "finishing": 83,
+          "dribbling": 86,
+          "passing": 86,
+          "kicking": 79,
+          "tackling": 50,
+          "vision": 83,
+          "positioning": 65,
+          "composure": 77,
+          "aggression": 73,
+          "leadership": 43,
+          "goalkeeping": 19,
+          "overall": 81,
+          "potential": 91
+        },
+        "state": {
+          "form": 0.3,
+          "condition": 84
+        },
         "isCaptain": false
       },
       {
-        "id": "madueke",
-        "name": "노니 마두에케",
-        "attributes": {
-          "pace": 87,
-          "shooting": 78,
-          "passing": 72,
-          "dribbling": 85,
-          "defending": 40,
-          "physical": 74,
-          "overall": 81,
-          "potential": 86,
-          "goalkeeping": 22
-        },
-        "state": {
-          "form": 1,
-          "morale": 66,
-          "fatigue": 15
-        },
+        "id": "estevao",
+        "catalogId": "estevao",
         "teamId": "chelsea",
-        "birthdate": "2003-01-01",
+        "name": "에스테방",
+        "squadNumber": 41,
+        "birthdate": "2007-02-17",
         "positions": [
           {
             "position": "RW",
-            "proficiency": 90,
+            "proficiency": 94,
             "isNatural": true
+          },
+          {
+            "position": "RM",
+            "proficiency": 92,
+            "isNatural": false
+          },
+          {
+            "position": "CF",
+            "proficiency": 72,
+            "isNatural": false
+          },
+          {
+            "position": "LW",
+            "proficiency": 74,
+            "isNatural": false
           }
         ],
-        "catalogId": null,
+        "foot": {
+          "left": 5,
+          "right": 2
+        },
+        "height": 179,
+        "weight": 70,
+        "attributes": {
+          "pace": 90,
+          "stamina": 73,
+          "strength": 57,
+          "aerial": 57,
+          "finishing": 75,
+          "dribbling": 84,
+          "passing": 74,
+          "kicking": 73,
+          "tackling": 33,
+          "vision": 80,
+          "positioning": 61,
+          "composure": 72,
+          "aggression": 61,
+          "leadership": 42,
+          "goalkeeping": 22,
+          "overall": 79,
+          "potential": 92
+        },
+        "state": {
+          "form": 0.6,
+          "condition": 76
+        },
         "isCaptain": false
       },
       {
-        "id": "neto",
-        "name": "페드로 네투",
+        "id": "pedro-neto",
+        "catalogId": "pedro-neto",
+        "teamId": "chelsea",
+        "name": "페드루 네투",
+        "squadNumber": 7,
+        "birthdate": "2000-03-09",
+        "positions": [
+          {
+            "position": "RM",
+            "proficiency": 91,
+            "isNatural": true
+          },
+          {
+            "position": "RW",
+            "proficiency": 89,
+            "isNatural": false
+          },
+          {
+            "position": "RB",
+            "proficiency": 73,
+            "isNatural": false
+          },
+          {
+            "position": "RCM",
+            "proficiency": 78,
+            "isNatural": false
+          }
+        ],
+        "foot": {
+          "left": 5,
+          "right": 4
+        },
+        "height": 174,
+        "weight": 62,
         "attributes": {
-          "pace": 88,
-          "shooting": 76,
-          "passing": 78,
-          "dribbling": 86,
-          "defending": 42,
-          "physical": 68,
-          "overall": 82,
-          "potential": 85,
-          "goalkeeping": 22
+          "pace": 91,
+          "stamina": 80,
+          "strength": 70,
+          "aerial": 73,
+          "finishing": 77,
+          "dribbling": 83,
+          "passing": 77,
+          "kicking": 71,
+          "tackling": 40,
+          "vision": 71,
+          "positioning": 62,
+          "composure": 78,
+          "aggression": 52,
+          "leadership": 42,
+          "goalkeeping": 29,
+          "overall": 80,
+          "potential": 86
         },
         "state": {
           "form": 0,
-          "morale": 64,
-          "fatigue": 17
+          "condition": 90
         },
+        "isCaptain": false
+      },
+      {
+        "id": "joao-pedro",
+        "catalogId": "joao-pedro",
         "teamId": "chelsea",
-        "birthdate": "2001-01-01",
+        "name": "주앙 페드루",
+        "squadNumber": 20,
+        "birthdate": "2002-01-26",
+        "positions": [
+          {
+            "position": "ST",
+            "proficiency": 88,
+            "isNatural": true
+          },
+          {
+            "position": "RST",
+            "proficiency": 87,
+            "isNatural": false
+          },
+          {
+            "position": "LST",
+            "proficiency": 89,
+            "isNatural": false
+          },
+          {
+            "position": "RF",
+            "proficiency": 86,
+            "isNatural": false
+          },
+          {
+            "position": "CF",
+            "proficiency": 86,
+            "isNatural": false
+          },
+          {
+            "position": "LF",
+            "proficiency": 86,
+            "isNatural": false
+          },
+          {
+            "position": "SS",
+            "proficiency": 86,
+            "isNatural": false
+          }
+        ],
+        "foot": {
+          "left": 4,
+          "right": 5
+        },
+        "height": 182,
+        "weight": 78,
+        "attributes": {
+          "pace": 79,
+          "stamina": 78,
+          "strength": 74,
+          "aerial": 76,
+          "finishing": 82,
+          "dribbling": 83,
+          "passing": 73,
+          "kicking": 66,
+          "tackling": 38,
+          "vision": 82,
+          "positioning": 71,
+          "composure": 77,
+          "aggression": 57,
+          "leadership": 49,
+          "goalkeeping": 21,
+          "overall": 77,
+          "potential": 85
+        },
+        "state": {
+          "form": 0.3,
+          "condition": 72
+        },
+        "isCaptain": false
+      },
+      {
+        "id": "mike-penders",
+        "catalogId": "mike-penders",
+        "teamId": "chelsea",
+        "name": "마이크 펜더르스",
+        "squadNumber": 13,
+        "birthdate": "2005-07-31",
+        "positions": [
+          {
+            "position": "GK",
+            "proficiency": 89,
+            "isNatural": true
+          }
+        ],
+        "foot": {
+          "left": 5,
+          "right": 2
+        },
+        "height": 200,
+        "weight": 95,
+        "attributes": {
+          "pace": 23,
+          "stamina": 30,
+          "strength": 64,
+          "aerial": 65,
+          "finishing": 57,
+          "dribbling": 42,
+          "passing": 79,
+          "kicking": 99,
+          "tackling": 9,
+          "vision": 59,
+          "positioning": 69,
+          "composure": 42,
+          "aggression": 56,
+          "leadership": 53,
+          "goalkeeping": 77,
+          "overall": 73,
+          "potential": 86
+        },
+        "state": {
+          "form": 0,
+          "condition": 88
+        },
+        "isCaptain": false
+      },
+      {
+        "id": "morgan-rogers",
+        "catalogId": "morgan-rogers",
+        "teamId": "chelsea",
+        "name": "모건 로저스",
+        "squadNumber": 17,
+        "birthdate": "2002-07-26",
+        "positions": [
+          {
+            "position": "AM",
+            "proficiency": 91,
+            "isNatural": true
+          },
+          {
+            "position": "RAM",
+            "proficiency": 90,
+            "isNatural": false
+          },
+          {
+            "position": "CAM",
+            "proficiency": 91,
+            "isNatural": false
+          },
+          {
+            "position": "LAM",
+            "proficiency": 92,
+            "isNatural": false
+          },
+          {
+            "position": "CF",
+            "proficiency": 77,
+            "isNatural": false
+          },
+          {
+            "position": "SS",
+            "proficiency": 78,
+            "isNatural": false
+          },
+          {
+            "position": "CM",
+            "proficiency": 80,
+            "isNatural": false
+          }
+        ],
+        "foot": {
+          "left": 4,
+          "right": 5
+        },
+        "height": 188,
+        "weight": 80,
+        "attributes": {
+          "pace": 77,
+          "stamina": 81,
+          "strength": 78,
+          "aerial": 70,
+          "finishing": 81,
+          "dribbling": 85,
+          "passing": 81,
+          "kicking": 72,
+          "tackling": 67,
+          "vision": 76,
+          "positioning": 70,
+          "composure": 81,
+          "aggression": 79,
+          "leadership": 47,
+          "goalkeeping": 28,
+          "overall": 79,
+          "potential": 89
+        },
+        "state": {
+          "form": 0.3,
+          "condition": 92
+        },
+        "isCaptain": false
+      },
+      {
+        "id": "maxence-lacroix",
+        "catalogId": "maxence-lacroix",
+        "teamId": "chelsea",
+        "name": "막상스 라크루아",
+        "birthdate": "2000-02-09",
+        "positions": [
+          {
+            "position": "CB",
+            "proficiency": 92,
+            "isNatural": true
+          },
+          {
+            "position": "RCB",
+            "proficiency": 91,
+            "isNatural": false
+          },
+          {
+            "position": "LCB",
+            "proficiency": 93,
+            "isNatural": false
+          },
+          {
+            "position": "DM",
+            "proficiency": 78,
+            "isNatural": false
+          }
+        ],
+        "foot": {
+          "left": 2,
+          "right": 5
+        },
+        "height": 190,
+        "weight": 84,
+        "attributes": {
+          "pace": 88,
+          "stamina": 71,
+          "strength": 82,
+          "aerial": 80,
+          "finishing": 41,
+          "dribbling": 67,
+          "passing": 57,
+          "kicking": 56,
+          "tackling": 81,
+          "vision": 61,
+          "positioning": 68,
+          "composure": 73,
+          "aggression": 85,
+          "leadership": 41,
+          "goalkeeping": 28,
+          "overall": 78,
+          "potential": 83
+        },
+        "state": {
+          "form": -0.3,
+          "condition": 86
+        },
+        "isCaptain": false
+      },
+      {
+        "id": "jamie-gittens",
+        "catalogId": "jamie-gittens",
+        "teamId": "chelsea",
+        "name": "제이미 기튼스",
+        "squadNumber": 11,
+        "birthdate": "2004-08-08",
         "positions": [
           {
             "position": "LW",
-            "proficiency": 90,
+            "proficiency": 94,
             "isNatural": true
-          }
-        ],
-        "catalogId": null,
-        "isCaptain": false
-      },
-      {
-        "id": "jackson",
-        "name": "니콜라스 잭슨",
-        "attributes": {
-          "pace": 87,
-          "shooting": 79,
-          "passing": 70,
-          "dribbling": 80,
-          "defending": 40,
-          "physical": 80,
-          "overall": 82,
-          "potential": 86,
-          "goalkeeping": 22
-        },
-        "state": {
-          "form": 0,
-          "morale": 63,
-          "fatigue": 16
-        },
-        "teamId": "chelsea",
-        "birthdate": "2002-01-01",
-        "positions": [
+          },
           {
-            "position": "ST",
-            "proficiency": 90,
-            "isNatural": true
-          }
-        ],
-        "catalogId": null,
-        "isCaptain": false
-      },
-      {
-        "id": "gusto",
-        "name": "말로 귀스토",
-        "attributes": {
-          "pace": 84,
-          "shooting": 55,
-          "passing": 76,
-          "dribbling": 78,
-          "defending": 79,
-          "physical": 76,
-          "overall": 80,
-          "potential": 86,
-          "goalkeeping": 22
-        },
-        "state": {
-          "form": 0,
-          "morale": 62,
-          "fatigue": 8
-        },
-        "teamId": "chelsea",
-        "birthdate": "2004-01-01",
-        "positions": [
+            "position": "LM",
+            "proficiency": 92,
+            "isNatural": false
+          },
           {
-            "position": "RB",
-            "proficiency": 90,
-            "isNatural": true
-          }
-        ],
-        "catalogId": null,
-        "isCaptain": false
-      },
-      {
-        "id": "lavia",
-        "name": "로메오 라비아",
-        "attributes": {
-          "pace": 74,
-          "shooting": 65,
-          "passing": 80,
-          "dribbling": 79,
-          "defending": 79,
-          "physical": 77,
-          "overall": 80,
-          "potential": 88,
-          "goalkeeping": 22
-        },
-        "state": {
-          "form": 0,
-          "morale": 61,
-          "fatigue": 6
-        },
-        "teamId": "chelsea",
-        "birthdate": "2005-01-01",
-        "positions": [
+            "position": "CF",
+            "proficiency": 75,
+            "isNatural": false
+          },
           {
-            "position": "DM",
-            "proficiency": 90,
-            "isNatural": true
+            "position": "RW",
+            "proficiency": 80,
+            "isNatural": false
           }
         ],
-        "catalogId": null,
-        "isCaptain": false
-      },
-      {
-        "id": "nkunku",
-        "name": "크리스토퍼 은쿤쿠",
+        "foot": {
+          "left": 4,
+          "right": 5
+        },
+        "height": 179,
+        "weight": 77,
         "attributes": {
-          "pace": 81,
-          "shooting": 83,
-          "passing": 78,
+          "pace": 92,
+          "stamina": 71,
+          "strength": 59,
+          "aerial": 63,
+          "finishing": 73,
           "dribbling": 84,
-          "defending": 45,
-          "physical": 72,
-          "overall": 83,
-          "potential": 84,
-          "goalkeeping": 22
+          "passing": 66,
+          "kicking": 57,
+          "tackling": 27,
+          "vision": 67,
+          "positioning": 54,
+          "composure": 67,
+          "aggression": 65,
+          "leadership": 24,
+          "goalkeeping": 30,
+          "overall": 77,
+          "potential": 88
         },
         "state": {
           "form": 0,
-          "morale": 60,
-          "fatigue": 6
+          "condition": 90
         },
+        "isCaptain": false
+      },
+      {
+        "id": "emmanuel-emegha",
+        "catalogId": "emmanuel-emegha",
         "teamId": "chelsea",
-        "birthdate": "1999-01-01",
+        "name": "에마뉘엘 에메하",
+        "birthdate": "2003-02-03",
         "positions": [
           {
             "position": "ST",
-            "proficiency": 90,
+            "proficiency": 88,
             "isNatural": true
+          },
+          {
+            "position": "RST",
+            "proficiency": 89,
+            "isNatural": false
+          },
+          {
+            "position": "LST",
+            "proficiency": 87,
+            "isNatural": false
+          },
+          {
+            "position": "RF",
+            "proficiency": 86,
+            "isNatural": false
+          },
+          {
+            "position": "CF",
+            "proficiency": 86,
+            "isNatural": false
+          },
+          {
+            "position": "LF",
+            "proficiency": 86,
+            "isNatural": false
+          },
+          {
+            "position": "SS",
+            "proficiency": 86,
+            "isNatural": false
           }
         ],
-        "catalogId": null,
+        "foot": {
+          "left": 5,
+          "right": 5
+        },
+        "height": 195,
+        "weight": 82,
+        "attributes": {
+          "pace": 89,
+          "stamina": 69,
+          "strength": 79,
+          "aerial": 87,
+          "finishing": 76,
+          "dribbling": 69,
+          "passing": 60,
+          "kicking": 56,
+          "tackling": 31,
+          "vision": 66,
+          "positioning": 67,
+          "composure": 76,
+          "aggression": 51,
+          "leadership": 37,
+          "goalkeeping": 29,
+          "overall": 77,
+          "potential": 85
+        },
+        "state": {
+          "form": 0.6,
+          "condition": 84
+        },
+        "isCaptain": false
+      },
+      {
+        "id": "jordan-henderson",
+        "catalogId": "jordan-henderson",
+        "teamId": "chelsea",
+        "name": "조던 헨더슨",
+        "birthdate": "1990-06-17",
+        "positions": [
+          {
+            "position": "CM",
+            "proficiency": 91,
+            "isNatural": true
+          },
+          {
+            "position": "RCM",
+            "proficiency": 92,
+            "isNatural": false
+          },
+          {
+            "position": "LCM",
+            "proficiency": 90,
+            "isNatural": false
+          },
+          {
+            "position": "AM",
+            "proficiency": 75,
+            "isNatural": false
+          },
+          {
+            "position": "CDM",
+            "proficiency": 72,
+            "isNatural": false
+          }
+        ],
+        "foot": {
+          "left": 3,
+          "right": 5
+        },
+        "height": 182,
+        "weight": 80,
+        "attributes": {
+          "pace": 65,
+          "stamina": 82,
+          "strength": 76,
+          "aerial": 63,
+          "finishing": 71,
+          "dribbling": 74,
+          "passing": 80,
+          "kicking": 73,
+          "tackling": 75,
+          "vision": 76,
+          "positioning": 70,
+          "composure": 86,
+          "aggression": 75,
+          "leadership": 54,
+          "goalkeeping": 24,
+          "overall": 77,
+          "potential": 82
+        },
+        "state": {
+          "form": 0,
+          "condition": 92
+        },
+        "isCaptain": false
+      },
+      {
+        "id": "nicolas-jackson",
+        "catalogId": "nicolas-jackson",
+        "teamId": "chelsea",
+        "name": "니콜라스 잭슨",
+        "squadNumber": 15,
+        "birthdate": "2001-06-20",
+        "positions": [
+          {
+            "position": "ST",
+            "proficiency": 92,
+            "isNatural": true
+          },
+          {
+            "position": "RST",
+            "proficiency": 91,
+            "isNatural": false
+          },
+          {
+            "position": "LST",
+            "proficiency": 93,
+            "isNatural": false
+          },
+          {
+            "position": "RF",
+            "proficiency": 90,
+            "isNatural": false
+          },
+          {
+            "position": "CF",
+            "proficiency": 90,
+            "isNatural": false
+          },
+          {
+            "position": "LF",
+            "proficiency": 90,
+            "isNatural": false
+          },
+          {
+            "position": "SS",
+            "proficiency": 90,
+            "isNatural": false
+          }
+        ],
+        "foot": {
+          "left": 3,
+          "right": 5
+        },
+        "height": 187,
+        "weight": 78,
+        "attributes": {
+          "pace": 82,
+          "stamina": 76,
+          "strength": 78,
+          "aerial": 85,
+          "finishing": 77,
+          "dribbling": 79,
+          "passing": 69,
+          "kicking": 67,
+          "tackling": 40,
+          "vision": 72,
+          "positioning": 68,
+          "composure": 73,
+          "aggression": 68,
+          "leadership": 33,
+          "goalkeeping": 20,
+          "overall": 76,
+          "potential": 84
+        },
+        "state": {
+          "form": 0.3,
+          "condition": 88
+        },
         "isCaptain": false
       }
     ],
     "startingIds": [
-      "sanchez",
-      "james",
-      "fofana",
-      "colwill",
-      "cucurella",
-      "caicedo",
-      "enzo",
-      "palmer",
-      "madueke",
-      "neto",
-      "jackson"
+      "robert-sanchez",
+      "reece-james",
+      "levi-colwill",
+      "tosin-adarabioyo",
+      "jorrel-hato",
+      "moises-caicedo",
+      "enzo-fernandez",
+      "cole-palmer",
+      "estevao",
+      "pedro-neto",
+      "joao-pedro"
     ],
     "tactics": {
       "formation": "4-2-3-1",
@@ -922,8 +2295,7 @@
       "pressing": 3,
       "tempo": 3,
       "width": 3,
-      "passStyle": "mixed",
-      "playerInstructions": []
+      "passStyle": 3
     },
     "managerTactics": 72
   }
