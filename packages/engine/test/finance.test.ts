@@ -33,8 +33,11 @@ import {
   matchdayRevenue,
   monthOf,
   psrStatus,
+  recordFinance,
   summarise,
   topUpTransferBudget,
+  transitionSeason,
+  endSeason,
   userPlayers,
 } from "@story-fm/engine";
 import { advanceAndPlay, advanceDays, createMiniGame, createTestGame } from "./helpers";
@@ -443,6 +446,23 @@ describe("이적료 — 현금과 장부 두 축", () => {
     expect(after!.monthly).toBeGreaterThan(0);
   });
 
+  /**
+   * 레거시 갈래를 여는 자는 **고정된 게임 시작일**이다. 남은 계약의 최소 `since`로
+   * 읽으면 원계약이 정리될수록 그 날짜가 뒤로 표류해, 그해 유스 콜업이 시작 스쿼드로
+   * 판정돼 레거시 상각을 받는다 (finance.md §6.1).
+   */
+  it("뒤늦게 맺은 계약은 시작 스쿼드가 아니다 — 게임 시작일은 움직이지 않는다", () => {
+    const state = createTestGame(42, "arsenal");
+    const target = state.contracts.find((c) => c.teamId === state.userTeamId)!;
+    // 시작 스쿼드 계약이 전부 사라진 세이브 — 남은 것은 3시즌 뒤에 맺은 계약뿐이다
+    target.since = "2029-07-01";
+    target.until = "2033-06-30";
+    state.contracts = [target];
+    state.date = "2029-08-01";
+
+    expect(bookValueOf(state, state.userTeamId, target.gamePlayerId)).toBe(0);
+  });
+
   it("원래 계약 기간이 다 지나면 잔존가가 0이다", () => {
     const state = createTestGame(42, "arsenal");
     const target = state.contracts.find(
@@ -524,6 +544,141 @@ describe("이적료 — 현금과 장부 두 축", () => {
     const mine = amortisationOf(state, state.userTeamId).filter((l) => l.playerId === target.id);
     expect(mine).toHaveLength(1);
     expect(Math.round(mine[0]!.monthly)).toBe(1_000_000); // 48M / 48개월 — 이적료가 이긴다
+  });
+
+  /**
+   * 시즌 전환은 끝난 계약을 정리한다. 그런데 취득원가가 그 이력에서 파생하므로
+   * 통째로 지우면 **재계약 행이 첫 계약 자리에 올라앉는다** — 취득원가가 재계약
+   * 시점으로 옮겨 처음부터 다시 펴진다 (finance.md §6.1).
+   */
+  it("시즌 전환을 넘겨도 재계약 선수의 취득원가가 옮겨 앉지 않는다", () => {
+    const state = createTestGame(42, "arsenal");
+    const target = state.players.find(
+      (p) => p.teamId !== state.userTeamId && p.birthdate > "2000-01-01",
+    )!;
+    state.transfers.push({
+      id: "tr-renew-carry",
+      gamePlayerId: target.id,
+      windowId: null,
+      fromTeamId: target.teamId,
+      toTeamId: state.userTeamId,
+      date: state.date,
+      type: "transfer",
+      fee: 48_000_000,
+    });
+    target.teamId = state.userTeamId;
+
+    // £48M · 48개월(2026-07 ~ 2030-06) → 6개월 뒤 54개월짜리로 재계약
+    const first = state.contracts.find((c) => c.gamePlayerId === target.id)!;
+    first.teamId = state.userTeamId;
+    first.since = state.date;
+    first.until = "2030-06-30";
+    first.status = "ended";
+    state.contracts.push({
+      id: `${first.id}-renew`,
+      gamePlayerId: target.id,
+      teamId: state.userTeamId,
+      weeklyWage: first.weeklyWage,
+      since: "2027-01-01",
+      until: "2031-06-30",
+      status: "active",
+    });
+
+    transitionSeason(state);
+
+    // 첫 계약은 남아 있다 — 취득원가가 여기서 나온다
+    expect(state.contracts.some((c) => c.id === first.id)).toBe(true);
+    const line = amortisationOf(state, state.userTeamId).find((l) => l.playerId === target.id);
+    // 2027-01 잔존가 = 48M − (48M/48)×6 = 42M, 남은 54개월에 편다.
+    // 취득원가가 옮겨 앉으면 48M/54 = 888,889가 된다.
+    expect(Math.round(line!.monthly)).toBe(Math.round(42_000_000 / 54));
+  });
+
+  /** 시작 스쿼드는 이적 기록이 없다 — 첫 계약이 사라지면 상각 갈래 자체가 사라진다 */
+  it("시작 스쿼드도 전환을 넘긴 재계약에서 상각이 이어진다", () => {
+    const state = createTestGame(42, "arsenal");
+    const first = state.contracts.find(
+      (c) =>
+        c.teamId === state.userTeamId &&
+        c.status === "active" &&
+        c.until >= "2030-06-30" &&
+        (state.players.find((p) => p.id === c.gamePlayerId)?.birthdate ?? "") > "2000-01-01",
+    )!;
+    first.status = "ended";
+    state.contracts.push({
+      id: `${first.id}-renew`,
+      gamePlayerId: first.gamePlayerId,
+      teamId: state.userTeamId,
+      weeklyWage: first.weeklyWage,
+      since: "2027-01-01",
+      until: "2031-06-30",
+      status: "active",
+    });
+
+    transitionSeason(state);
+
+    const line = amortisationOf(state, state.userTeamId).find(
+      (l) => l.playerId === first.gamePlayerId,
+    );
+    expect(line?.monthly).toBeGreaterThan(0);
+  });
+
+  /**
+   * **불변식: 한 취득에서 털어 내는 상각의 총합은 취득원가와 같다** (§6.1).
+   *
+   * 잔존가를 첫 계약의 직선으로만 읽으면 재계약이 두 번 겹치는 순간 양쪽으로 깨진다 —
+   * 짧게 재계약한 뒤 또 재계약하면 이미 더 빨리 턴 값이 원래 눈금으로 되살아나 총액이
+   * 취득원가를 넘고, 원래 만기를 지나 재계약하면 남은 값이 통째로 사라진다.
+   */
+  it("재계약이 두 번 겹쳐도 총 상각이 취득원가와 같다", () => {
+    const state = createTestGame(42, "arsenal");
+    const target = state.players.find((p) => p.teamId !== state.userTeamId)!;
+    const fee = 48_000_000;
+    state.transfers.push({
+      id: "tr-chain",
+      gamePlayerId: target.id,
+      windowId: null,
+      fromTeamId: target.teamId,
+      toTeamId: state.userTeamId,
+      date: "2026-07-01",
+      type: "transfer",
+      fee,
+    });
+    target.teamId = state.userTeamId;
+
+    // 48개월 → 12개월 뒤 60개월로(원래 남은 기간보다 길게) → 그 48개월 뒤 다시 48개월로
+    const chain = [
+      { since: "2026-07-01", until: "2030-06-30" },
+      { since: "2027-07-01", until: "2032-06-30" },
+      { since: "2031-07-01", until: "2035-06-30" },
+    ];
+    state.contracts = state.contracts.filter((c) => c.gamePlayerId !== target.id);
+    for (const [i, c] of chain.entries()) {
+      state.contracts.push({
+        id: `c-chain-${i}`,
+        gamePlayerId: target.id,
+        teamId: state.userTeamId,
+        weeklyWage: 100_000,
+        since: c.since,
+        until: c.until,
+        status: "ended",
+      });
+    }
+    const rows = state.contracts.filter((c) => c.gamePlayerId === target.id);
+
+    // 사슬의 마지막 계약이 끝날 때까지 달마다 털어 낸 값을 더한다
+    let total = 0;
+    for (let m = 0; m < 12 * 12; m++) {
+      const year = 2026 + Math.floor((m + 6) / 12);
+      const month = String(((m + 6) % 12) + 1).padStart(2, "0");
+      state.date = `${year}-${month}-01`;
+      // 그 달에 도는 계약 하나만 활성이다 (active = 선수당 정확히 1건)
+      const running = [...chain].reverse().find((c) => c.since <= state.date);
+      for (const row of rows) row.status = row.since === running?.since ? "active" : "ended";
+      total +=
+        amortisationOf(state, state.userTeamId).find((l) => l.playerId === target.id)?.monthly ?? 0;
+    }
+    expect(Math.round(total)).toBe(fee);
   });
 });
 
@@ -662,6 +817,43 @@ describe("PSR", () => {
     // 같은 £40M이 선수를 판 돈이면 성과가 없다 — 그 돈은 이미 예산에 들어갔다
     expect(budgetAfter([{ category: "transfer_in", amount: 40_000_000 }])).toBe(45_000_000);
   });
+
+  /**
+   * 시즌은 6월 초에 끝나고 전환이 곧바로 7월 1일로 건너뛰므로, 월초 훅에 맡기면
+   * 상금·보너스가 앉은 마지막 달이 8월에야 마감된다. 그런데 예산·PSR은 전환 **안에서**
+   * 지난 시즌 손익을 읽는다 — 마지막 달이 빠진 성과로 다음 시즌이 정해졌다
+   * (finance.md §7.1).
+   */
+  it("시즌 종료는 마지막 달을 마감한 뒤 예산·PSR을 정한다", () => {
+    const state = createTestGame(42, "arsenal");
+    state.date = "2027-06-01";
+    runMonthlyFinance(state, []); // 6월 정액 항목
+    state.date = "2027-06-05";
+    recordFinance(state, state.userTeamId, {
+      kind: "income",
+      category: "commercial",
+      label: "시즌 마지막 달의 큰 수입",
+      amount: 300_000_000,
+    });
+    const finance = financeOf(state, state.userTeamId);
+    finance.transferBudget = 0; // 이월을 빼고 이번 보충만 본다
+
+    const digest = endSeason(state);
+
+    const june = state.financeReports.find(
+      (r) => r.month === "2027-06" && r.teamId === state.userTeamId,
+    );
+    expect(june).toBeTruthy();
+    // 끝난 시즌의 보고서다 — 시즌 번호는 전환 전의 달력으로 역산된다
+    expect(june!.season).toBe(1);
+    expect(state.season).toBe(2);
+    // 손익 창(PSR)도 이 달을 본다
+    expect(psrStatus(state).rolling3Season).toBe(june!.pnlNet);
+    // 예산의 성과 조각도 — 마지막 달이 빠지면 지난 시즌 보고서가 하나도 없어 0이 된다
+    expect(digest.some((line) => line.includes("재정 성과를 반영해"))).toBe(true);
+    expect(finance.transferBudget).toBeGreaterThan(seasonBudgetBaseOf(state, state.userTeamId));
+  });
+
 });
 
 /**
@@ -1108,5 +1300,4 @@ describe("재정이 도는 범위", () => {
      */
     expect(financeOf(state, free!.id).balance, "무소속 잔고는 움직이지 않는다").toBe(before);
   });
-
 });
