@@ -10,6 +10,14 @@ import { z } from "zod";
  * 구멍이다. 복사한 필드는 전부 optional이다 — 옛 세이브엔 없고, 없으면 카탈로그가
  * 답한다 (SAVE_VERSION 유지).
  */
+/**
+ * AI 감독 역량치가 없는 자리의 값 — 평균 AI 감독.
+ *
+ * 무소속(클럽이 아니라 감독도 없다)과 이 필드가 없던 옛 세이브가 여기로 온다.
+ * 읽는 자리가 셋이라 숫자를 각자 적으면 조용히 갈린다.
+ */
+export const AI_MANAGER_RATING_FALLBACK = 65;
+
 export const GameTeamSchema = z.object({
   id: z.string().min(1),
   /**
@@ -51,8 +59,11 @@ export const GameTeamSchema = z.object({
   /**
    * AI 감독의 전술 역량치 0~99 — 전술 설정(TACTICS)이 아니라 전술 소화율 배율의
    * 입력. 유저 팀은 MANAGER.attributes.tactics를 대신 사용한다.
+   *
+   * **클럽만 갖는다.** 무소속은 클럽이 아니라 감독도 없다 (team.md §4). 값이 없는
+   * 자리는 `AI_MANAGER_RATING_FALLBACK`으로 읽는다.
    */
-  aiManagerTacticsRating: z.number().int().min(0).max(99),
+  aiManagerTacticsRating: z.number().int().min(0).max(99).optional(),
   /**
    * 현재 감독의 이름·부임일 — **경질과 선임이 있는 세계**의 최소 기록
    * (`manager-market.ts`). 옛 세이브엔 없다: 이름이 없으면 화면이 이름을 말하지

@@ -1436,18 +1436,20 @@ describe("재정이 도는 범위", () => {
     advanceDays(state, 40);
   }
 
-  it("무소속은 구단이 아니므로 재정이 돌지 않는다", () => {
+  it("무소속은 구단이 아니므로 장부가 서지 않는다", () => {
     const state = createTestGame(42, "arsenal");
     const free = state.teams.find((t) => leagueOfTeam(t.id) === "free");
     expect(free, "무소속 자리가 있다").toBeDefined();
-    const before = financeOf(state, free!.id).balance;
+    const hasLedger = () => state.finances.some((f) => f.teamId === free!.id);
+    expect(hasLedger(), "새 게임의 무소속엔 장부가 없다").toBe(false);
 
     postAMonth(state);
 
     /**
-     * 예전엔 `postMonthlyItems`가 전 팀을 돌며 시설비·이자를 물려, 자유계약 선수단이
-     * 매달 적자를 쌓았다(세 시즌에 −£6M). 클럽이 아닌 자리는 낼 것도 받을 것도 없다.
+     * 예전엔 무소속이 £4.8M 장부를 갖고 시작했고 `postMonthlyItems`가 전 팀을 돌며
+     * 시설비·이자를 물려 자유계약 선수단이 매달 적자를 쌓았다(세 시즌에 −£6M).
+     * 이제 장부 자체가 없다 — 월초 정산이 그 자리를 만들어 내지도 않는다.
      */
-    expect(financeOf(state, free!.id).balance, "무소속 잔고는 움직이지 않는다").toBe(before);
+    expect(hasLedger(), "월초 정산이 무소속 장부를 만들었다").toBe(false);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { simSquadOf, tacticsOf, type GameState } from "@story-fm/engine";
+import { isClubTeam, simSquadOf, tacticsOf, type GameState } from "@story-fm/engine";
 import { buildStrengthPacket } from "@story-fm/sim";
 import { createTestGame } from "./helpers";
 
@@ -95,7 +95,10 @@ describe("존 눈금의 리그 기준선", () => {
    */
   it("전술 프리셋 여섯 축의 리그 평균이 3 근처다", () => {
     const axes = ["mentality", "defensiveLine", "pressing", "tempo", "width", "passStyle"] as const;
-    const specs = state.teams.map((team) => tacticsOf(state, team.id).spec);
+    // 무소속은 클럽이 아니라 전술을 갖지 않는다 (team.md §4)
+    const specs = state.teams
+      .filter((team) => isClubTeam(team.id))
+      .map((team) => tacticsOf(state, team.id).spec);
     expect(specs.length).toBeGreaterThan(100);
     for (const axis of axes) {
       const mean = specs.reduce((sum, spec) => sum + spec[axis], 0) / specs.length;

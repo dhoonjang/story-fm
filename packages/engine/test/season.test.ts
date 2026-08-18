@@ -159,23 +159,19 @@ describe("시즌 전환 (season.md §6)", () => {
   });
 
   /**
-   * 무소속은 구단이 아니다 (team.md §7) — 영입할 주체가 없으니 예산도 없다.
-   * 월초 정산은 `isClubTeam`으로 거르는데 예산 보충만 빠져 있어서, 쓰이지 않는
-   * 예산이 자유계약 선수단에 매 시즌 쌓였다.
+   * 무소속은 구단이 아니다 (team.md §4) — 영입할 주체가 없으니 장부도 예산도 없다.
+   * 예전엔 £4.8M 장부를 갖고 시작해 쓰이지 않는 예산이 매 시즌 쌓였다. 이제 새
+   * 게임이 그 자리를 만들지 않으므로, **시즌 전환도 그 자리를 만들어 내면 안 된다.**
    */
-  it("무소속에는 시즌 이적 예산이 붙지 않는다", () => {
+  it("무소속에는 장부도 시즌 이적 예산도 붙지 않는다", () => {
     const state = createTestGame(5);
-    const nonClubs = state.finances.filter((f) => !isClubTeam(f.teamId));
-    expect(nonClubs.length, "무소속 자리가 재정 표에 있다").toBeGreaterThan(0);
-    const before = nonClubs.map((f) => [f.teamId, f.transferBudget] as const);
+    const nonClubs = () => state.finances.filter((f) => !isClubTeam(f.teamId));
+    expect(nonClubs(), "새 게임의 무소속엔 장부가 없다").toHaveLength(0);
 
     transitionSeason(state);
     transitionSeason(state);
 
-    for (const [teamId, budget] of before) {
-      const after = state.finances.find((f) => f.teamId === teamId)!;
-      expect(after.transferBudget, `${teamId} 이적 예산`).toBe(budget);
-    }
+    expect(nonClubs(), "시즌 전환이 무소속 장부를 만들었다").toHaveLength(0);
     // 클럽은 그대로 보충된다 — 필터가 예산 보충 자체를 죽이면 안 된다
     const club = state.finances.find((f) => isClubTeam(f.teamId))!;
     expect(club.transferBudget).toBeGreaterThan(0);
