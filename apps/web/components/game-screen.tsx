@@ -803,7 +803,13 @@ export function GameScreen({ gameId }: { gameId: string }) {
       }
     />
   );
-  const competitionsView = <CompetitionsView competitions={game.views.competitions} />;
+  /**
+   * 대회 뷰 — **경기 중인지가 맨 아래 카드를 가른다.** 평시엔 보고 있는 대회의
+   * 다음 경기, 90분 안에는 팀의 다음 경기다 (overview §5 · match.md §8).
+   */
+  const competitionsView = (
+    <CompetitionsView competitions={game.views.competitions} inMatch={inMatch} />
+  );
 
   const chatPane = (
     <section className={`chat-pane${inMatch ? " broadcasting" : ""}`}>
