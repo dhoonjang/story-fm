@@ -20,6 +20,19 @@ import { openInjury, playerById, userPlayers, type GameState } from "../core/sta
 
 const INJURY_PARTS = ["햄스트링", "발목", "무릎", "종아리", "허벅지", "어깨", "허리"];
 
+/**
+ * 심각도의 한글 라벨 — **원본은 이 표 하나다.**
+ *
+ * 화면(`views.ts`)과 GM 조회 도구(`lookup.ts`)가 같은 표를 읽는다. 두 벌을 두면 같은
+ * 부상이 스쿼드 화면에서는 "경상", GM 대사에서는 "경미"가 되고, 감독은 그게 같은
+ * 부상인지 알 수 없다 (player.md §5.3).
+ */
+export const INJURY_SEVERITY_KO: Record<InjurySeverity, string> = {
+  minor: "경상",
+  moderate: "중상",
+  major: "장기",
+};
+
 /** 부상 발생 — INJURY row 생성 (현재 부상 = returnedOn null) */
 export function openInjuryFor(
   state: GameState,
@@ -27,6 +40,18 @@ export function openInjuryFor(
   cause: "match" | "training",
   rng: () => number,
 ): { days: number; part: string } {
+  /**
+   * **선수당 미복귀는 최대 1건**(`domain/records.ts`)이고, 그 계약은 행을 쓰는 여기가
+   * 지킨다. 이미 열린 부상이 있으면 새 행도 성향 상승도 치료비도 없고 — 안고 있는 그
+   * 부상을 그대로 돌려준다. 지금 호출부는 모두 `isInjured`로 먼저 거르지만, 거르지
+   * 않는 호출부가 하나 생기면 미복귀 두 건이 남아 복귀일도 부위도 둘이 되고,
+   * 화면·조회·간이 시뮬이 각자 다른 하나를 집는다.
+   */
+  const current = openInjury(state, player.id);
+  if (current) {
+    const left = Math.max(0, diffDays(state.date, current.expectedReturn));
+    return { days: left, part: current.bodyPart };
+  }
   const severity: InjurySeverity =
     rng() < P_MINOR ? "minor" : rng() < P_MODERATE_GIVEN_WORSE ? "moderate" : "major";
   const days =
