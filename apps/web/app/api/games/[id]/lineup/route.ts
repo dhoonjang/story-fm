@@ -15,6 +15,7 @@ import {
 } from "@story-fm/engine";
 import { toPayload } from "@/lib/store";
 import { withGameLock } from "@/lib/turn-runner";
+import { invalidGameId } from "@/app/api/games/game-id";
 
 const SlotSchema = z.object({
   playerId: z.string().min(1),
@@ -70,6 +71,8 @@ const LineupSchema = z.object({
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
+  const bad = invalidGameId(id);
+  if (bad) return bad;
 
   let raw: unknown;
   try {
