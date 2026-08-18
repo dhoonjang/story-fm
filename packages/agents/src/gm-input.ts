@@ -111,11 +111,13 @@ export function buildManagerMessage(state: GameState, message: string): string {
 }
 
 /**
- * 화면 조작 — 감독의 발화가 아니다. `@:`(화자 없음) 문법에 조작 그대로를 담아
- * (`@: [시간 진행 — 하루]`) GM이 대사로 읽고 인용·말투 추론하는 것을 막는다.
+ * 화면 조작 — 감독의 발화가 아니다. **모델의 출력 문법 밖 봉투로 싣는다**
+ * (`[조작: 시간 진행 — 하루]`). `@:`는 GM이 내레이션을 쓰는 채널이라 거기 담으면
+ * 감독의 화면 조작이 모델 자신의 문법으로 이력에 서고, 인물이 그 손잡이를 아는
+ * 것으로 읽힌다 (docs/llm/prompts.md §1).
  */
 export function buildOperatorMessage(message: string): string {
-  return `@: [${message}]`;
+  return `[조작: ${message}]`;
 }
 
 /**
