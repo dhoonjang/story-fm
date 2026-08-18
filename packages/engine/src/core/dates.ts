@@ -21,6 +21,21 @@ export function seasonYear(season: number): number {
   return 2026 + (season - 1);
 }
 
+/**
+ * N년 계약이 끝나는 날 — **계약일이 정한다** (transfer.md §5-1).
+ *
+ * 계약은 언제 맺어도 6월 30일에 끝나므로 연수를 세는 기준이 곧 계약의 길이다.
+ * ⚠️ 시즌 기준 연도(`seasonYear`)로 세면 겨울 창이 무너진다 — 1월에 맺은 1년
+ * 계약이 그해 6월 30일, 곧 다섯 달짜리가 된다. 계약일의 **역년**으로 세면
+ * 7–12월은 시즌 기준 연도와 같은 값이고 1–6월만 한 해 뒤로 가, 여름 계약은
+ * 그대로면서 겨울 계약이 제 길이를 찾는다.
+ *
+ * 임대의 복귀일은 이 자가 아니다 — 연수가 아니라 "이번 시즌까지"라 시즌 마감을 쓴다.
+ */
+export function contractUntil(onDate: string, years: number): string {
+  return `${Number(onDate.slice(0, 4)) + years}-06-30`;
+}
+
 // ── 경기 간 최소 휴식 ────────────────────────────────────
 
 /**

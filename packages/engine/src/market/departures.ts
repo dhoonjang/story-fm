@@ -1,6 +1,6 @@
 import type { GamePlayer } from "@story-fm/domain";
 import { ageOf } from "@story-fm/domain";
-import { diffDays, seasonYear, windowOpenOn } from "../competition/calendar";
+import { contractUntil, diffDays, seasonYear, windowOpenOn } from "../competition/calendar";
 import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import { recordFinance } from "../club/finance";
 import { loanLockOf, transferWindowLabel, windowOpenForTeam } from "./market";
@@ -430,7 +430,7 @@ function signWithClub(
     teamId,
     weeklyWage: wage,
     since: state.date,
-    until: `${seasonYear(state.season) + years}-06-30`,
+    until: contractUntil(state.date, years),
     status: "active",
   });
   player.teamId = teamId;

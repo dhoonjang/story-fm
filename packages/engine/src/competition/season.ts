@@ -11,6 +11,7 @@ import {
   buildScheduleEntries,
   buildSeasonCalendar,
   buildTransferWindows,
+  contractUntil,
   seasonYear,
 } from "./calendar";
 import { toFreeAgency } from "../market/departures";
@@ -581,7 +582,7 @@ export function transitionSeason(state: GameState): string[] {
           state,
         ),
         since: nextCalendar.preseasonStart,
-        until: `${seasonYear(nextSeason) + 3}-06-30`,
+        until: contractUntil(nextCalendar.preseasonStart, 3),
         status: "active",
       });
     }
@@ -620,7 +621,7 @@ export function transitionSeason(state: GameState): string[] {
           state,
         ),
         since: nextCalendar.preseasonStart,
-        until: `${seasonYear(nextSeason) + randInt(rng, 2, 4)}-06-30`,
+        until: contractUntil(nextCalendar.preseasonStart, randInt(rng, 2, 4)),
         status: "active",
       });
     }

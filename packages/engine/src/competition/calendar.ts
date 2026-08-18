@@ -52,6 +52,7 @@ export function onSummerBreak(calendar: SeasonCalendar, date: string): boolean {
 
 export {
   addDays,
+  contractUntil,
   dayOfWeek,
   diffDays,
   seasonYear,

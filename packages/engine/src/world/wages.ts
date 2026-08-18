@@ -61,6 +61,10 @@ export interface WageSubject {
  * 파생 경로(고정비·스태프 급여 비중)가 체급을 읽으므로, 넘기지 않으면 어드민의
  * 체급 편집이 진행 중인 세이브의 주급 천장에 샌다 (team.md §2).
  * 세계 생성 시점(`initialWages`)에는 세이브가 아직 없어 카탈로그가 답한다.
+ *
+ * ⚠️ **소속 리그도 같은 통로로 온다** — `state`를 넘기지 않으면 매출이 카탈로그
+ * 리그에서 나와, 강등한 구단이 2부 수입 위에 1부 천장을 그대로 갖는다
+ * (finance.md §6.3). 게임이 시작한 뒤 도는 자리는 전부 `state`를 넘긴다.
  */
 export function clubWageBudget(teamId: string, leagueId?: string, state?: GameState): number {
   return affordableWageBill(teamId, leagueId, state) / 52;
