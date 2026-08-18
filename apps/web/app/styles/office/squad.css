@@ -1416,9 +1416,30 @@
 .squad-table th.sorted {
   color: var(--accent);
 }
+/**
+ * 정렬 손잡이 — **머리 칸 전체가 버튼이다.** `<th>`는 열 머리로 남아야
+ * `aria-sort`가 성립하므로(그래야 지금 어느 열로 정렬됐는지가 읽힌다) 누르는 일은
+ * 안쪽 버튼이 맡는다. 생김새는 머리글 그대로라, 버튼이 하나 더 생긴 것처럼 보이지
+ * 않는다 — 포커스 링만 그것이 눌리는 자리임을 알린다.
+ */
 .squad-table th.sortable {
-  cursor: pointer;
   user-select: none;
+}
+.squad-table th.sortable .sort-btn {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+.squad-table th.sortable .sort-btn:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+  border-radius: var(--r-xs);
 }
 .squad-table .sort-mark {
   font-size: var(--fs-3xs);
@@ -1429,6 +1450,14 @@
 }
 .squad-table tbody tr:hover td {
   background: rgba(96, 165, 250, 0.06);
+}
+/* 키보드로 닿은 행 — 어드민 표와 같은 규칙이다(호버와 같은 자리를 밝힌다) */
+.squad-table tbody tr:focus-visible {
+  outline: none;
+}
+.squad-table tbody tr:focus-visible td {
+  background: rgba(96, 165, 250, 0.06);
+  box-shadow: inset 0 -1px 0 var(--accent);
 }
 .squad-table tbody tr.picked td {
   background: rgba(96, 165, 250, 0.1);
