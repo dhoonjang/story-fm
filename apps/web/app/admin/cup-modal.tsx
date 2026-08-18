@@ -47,16 +47,22 @@ function moneyStateOf(stages: readonly MatchStage[], table: StageMoney): Record<
 }
 
 type MonthDay = [number, number];
-type WindowTable = Record<string, MonthDay>;
+type DomesticStage = (typeof DOMESTIC_STAGES)[number];
+/** 보내는 표 — 화면에 없는 단계(`league`·`playoff`)도 실려 나간다 */
+type StageWindows = Partial<Record<MatchStage, MonthDay>>;
+/**
+ * 편집 상태의 표 — 다섯 라운드가 **빠짐없이** 있다. 칸이 늘 열려 있으므로 빈 값이
+ * 나올 자리가 없고, 전수 `Record`로 적어야 `windows[stage]`가 매번 되묻지 않는다.
+ */
+type WindowTable = Record<DomesticStage, MonthDay>;
 
 /** 편집 칸이 여는 다섯 라운드 — 원래 표에 없던 단계는 빈 칸을 못 쓰므로 1월 1일에서 출발한다 */
-function windowStateOf(windows: Partial<Record<MatchStage, MonthDay>>): WindowTable {
-  const state: WindowTable = {};
-  for (const stage of DOMESTIC_STAGES) {
+function windowStateOf(windows: StageWindows): WindowTable {
+  const at = (stage: DomesticStage): MonthDay => {
     const [month, day] = windows[stage] ?? [1, 1];
-    state[stage] = [month, day];
-  }
-  return state;
+    return [month, day];
+  };
+  return { r32: at("r32"), r16: at("r16"), qf: at("qf"), sf: at("sf"), final: at("final") };
 }
 
 /**
@@ -66,13 +72,10 @@ function windowStateOf(windows: Partial<Record<MatchStage, MonthDay>>): WindowTa
  * `league`·`playoff`처럼 화면에 없는 키가 그대로 사라진다. 다섯 라운드는 언제나
  * 값이 있어야 저장이 받아진다 (competition.md §1).
  */
-function windowTable(
-  base: Partial<Record<MatchStage, MonthDay>>,
-  edited: WindowTable,
-): WindowTable {
-  const table: WindowTable = {};
+function windowTable(base: StageWindows, edited: WindowTable): StageWindows {
+  const table: StageWindows = {};
   for (const [stage, value] of Object.entries(base)) {
-    if (value) table[stage] = [value[0], value[1]];
+    if (value) table[stage as MatchStage] = [value[0], value[1]];
   }
   for (const stage of DOMESTIC_STAGES) table[stage] = [edited[stage][0], edited[stage][1]];
   return table;
@@ -182,7 +185,9 @@ export function EuroCupModal({
     short: short.trim(),
     size,
     matchesPerTeam,
-    slots: Object.fromEntries(slotLeagues.filter((id) => (slots[id] ?? 0) > 0).map((id) => [id, slots[id]])),
+    slots: Object.fromEntries(
+      slotLeagues.filter((id) => (slots[id] ?? 0) > 0).map((id) => [id, slots[id] ?? 0]),
+    ),
     directSlots,
     playoffSlots,
     prize: {
@@ -421,7 +426,7 @@ interface DomesticFields {
   firstDraw: MonthDay;
   drawDelayDays: number;
   homeRule: DomesticCupEntry["homeRule"];
-  windows: WindowTable;
+  windows: StageWindows;
   stageNames: StageNames;
   finalMidweek: boolean | undefined;
   europeanTicket: DomesticCupEntry["europeanTicket"];
@@ -548,7 +553,7 @@ export function DomesticCupModal({
     }
   }
 
-  function setWindow(stage: string, index: 0 | 1, value: number) {
+  function setWindow(stage: DomesticStage, index: 0 | 1, value: number) {
     setWindows((w) => {
       const next: MonthDay = [w[stage][0], w[stage][1]];
       next[index] = value;

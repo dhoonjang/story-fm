@@ -11,7 +11,7 @@
     "test": "vitest run",
     "balance": "tsx packages/engine/harness/cli.ts",
     "test:watch": "vitest",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p apps/web/tsconfig.json --noEmit && tsc -p tsconfig.e2e.json --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
     "match": "tsx apps/match-cli/src/main.ts",

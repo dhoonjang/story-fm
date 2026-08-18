@@ -94,7 +94,8 @@ function ManagerRadar({
            * 된다. 라벨 아래에 눕는 자국이 얼마나 찼는지가 곧 "자라는 중"이다.
            * 상한(`attrCap`)에 닿은 축은 더 자라지 않으므로 자국을 그리지 않는다.
            */
-          const grows = values[i] < attrCap;
+          const value = values[i] ?? 0;
+          const grows = value < attrCap;
           const progress = Math.max(0, Math.min(1, (xp[a] ?? 0) / xpPerLevel));
           const barX =
             anchor === "middle" ? x - XP_BAR_W / 2 : anchor === "start" ? x : x - XP_BAR_W;
@@ -103,7 +104,7 @@ function ManagerRadar({
               <text className="axis-label" x={x} y={y} textAnchor={anchor}>
                 <tspan>{MANAGER_ATTRIBUTE_KO[a]}</tspan>
                 <tspan className="axis-value" dx="5">
-                  {values[i]}
+                  {value}
                 </tspan>
               </text>
               {grows && (

@@ -67,9 +67,10 @@ export function Modal({
     const nodes = Array.from(cardRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []).filter(
       (n) => n.offsetParent !== null,
     );
-    if (nodes.length === 0) return;
     const first = nodes[0];
     const last = nodes[nodes.length - 1];
+    // 잡을 것이 없으면 브라우저 기본 이동에 맡긴다
+    if (first === undefined || last === undefined) return;
     const active = document.activeElement;
     if (e.shiftKey && active === first) {
       e.preventDefault();

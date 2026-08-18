@@ -91,6 +91,7 @@ export default function NewGamePage() {
   const step: Step =
     wanted === "manager" && !team ? "team" : wanted === "team" && !league ? "league" : wanted;
   const stepIndex = STEPS.findIndex((s) => s.key === step);
+  const prevStep = STEPS[stepIndex - 1];
   const leagueTeams = teams.filter((t) => t.leagueId === leagueId).sort(byTier);
   const ring = ringPoints(leagues.length || 1);
 
@@ -130,7 +131,7 @@ export default function NewGamePage() {
   return (
     <main className="onboarding">
       <div className="onboarding-top">
-        {step === "league" ? (
+        {step === "league" || prevStep === undefined ? (
           <Link href="/" className="back-link" data-testid="back-to-list">
             ← 게임 목록
           </Link>
@@ -138,10 +139,10 @@ export default function NewGamePage() {
           <button
             type="button"
             className="back-link"
-            onClick={() => setStep(STEPS[stepIndex - 1].key)}
+            onClick={() => prevStep !== undefined && setStep(prevStep.key)}
             data-testid="step-back"
           >
-            ← {STEPS[stepIndex - 1].label}
+            ← {prevStep?.label}
           </button>
         )}
         {/* 지나온 단계는 되돌아가는 길이다 — 눌리는 칸만 글자가 살아 있다 */}
@@ -179,18 +180,23 @@ export default function NewGamePage() {
               <svg viewBox="0 0 100 100" aria-hidden>
                 <polygon points={ringPolygon(ring)} />
               </svg>
-              {leagues.map((l, i) => (
-                <button
-                  key={l.id}
-                  className={`league-node${leagueId === l.id ? " selected" : ""}`}
-                  style={{ left: `${ring[i].x}%`, top: `${ring[i].y}%` }}
-                  onClick={() => selectLeague(l.id)}
-                  data-testid={`league-${l.id}`}
-                >
-                  <span className="node-name">{l.name}</span>
-                  <span className="node-country">{l.country}</span>
-                </button>
-              ))}
+              {leagues.map((l, i) => {
+                // 고리는 리그 수만큼 찍는다 — 자리가 없으면 세울 곳도 없다
+                const at = ring[i];
+                if (at === undefined) return null;
+                return (
+                  <button
+                    key={l.id}
+                    className={`league-node${leagueId === l.id ? " selected" : ""}`}
+                    style={{ left: `${at.x}%`, top: `${at.y}%` }}
+                    onClick={() => selectLeague(l.id)}
+                    data-testid={`league-${l.id}`}
+                  >
+                    <span className="node-name">{l.name}</span>
+                    <span className="node-country">{l.country}</span>
+                  </button>
+                );
+              })}
             </div>
           )}
         </section>

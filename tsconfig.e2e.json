@@ -1,0 +1,9 @@
+{
+  // Playwright 스펙과 그 설정 — 브라우저 안에서 도는 `page.evaluate` 콜백이 DOM을
+  // 만지므로 dom lib이 필요하다. 그래서 루트 tsconfig에 얹지 않고 따로 선다.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "dom", "dom.iterable"]
+  },
+  "include": ["e2e/**/*.ts", "playwright.config.ts"]
+}

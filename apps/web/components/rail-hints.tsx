@@ -16,6 +16,7 @@ import {
   IconPerson,
   IconSquad,
   IconTrophy,
+  type IconComponent,
 } from "@/components/icons";
 
 /**
@@ -25,9 +26,6 @@ import {
  * (계약 확정 = 선수 + 돈) 아이콘별로 세우면 말풍선끼리 겹친다. 대신 꼬리가
  * **첫 장부의 아이콘**을 가리켜 어디서 나온 말인지 잇는다.
  */
-
-/** 아이콘 하나 — 크기는 CSS가 정하므로 인자 없이 세운다 */
-type IconComponent = (props: { size?: number }) => React.ReactElement;
 
 const PANEL_ICON: Record<PanelKey, IconComponent> = {
   스쿼드: IconSquad,

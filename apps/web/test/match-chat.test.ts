@@ -7,6 +7,8 @@ const turn = (text: string, matchId?: string): ChatTurn => ({
   role: "model",
   text,
   toolCalls: [],
+  // 걸러내는 규칙은 `matchId`만 본다 — 시각은 자리를 채우는 값이다
+  at: "2026-07-01T09:00:00.000Z",
   ...(matchId ? { inMatch: true, matchId } : {}),
 });
 

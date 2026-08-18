@@ -28,20 +28,6 @@ const nextConfig: NextConfig = {
    * 프로덕션 빌드에는 애초에 없는 요소다.
    */
   devIndicators: false,
-  /**
-   * 빌드는 검사하지 않는다 — 검사의 자리는 `pnpm typecheck`와 `pnpm lint`다.
-   *
-   * e2e가 CI에서 이 빌드를 물고 서므로(playwright.config.ts) 여기서 tsc와 eslint를
-   * 한 번 더 돌리면 게이트가 이미 낸 값을 e2e 잡이 다시 낸다.
-   *
-   * ⚠️ 다만 루트 `tsconfig.json`의 include는 앱의 src 아래만 훑어, `app/`과
-   * `components/`로 나뉜 이 앱을 하나도 덮지 않는다. 즉 지금 apps/web은 **어느
-   * 쪽에서도** 타입 검사를 받지 않고, `tsc -p apps/web/tsconfig.json`을 직접
-   * 돌리면 오류가 여덟 개 남아 있다. 그 구멍은 이 파일이 아니라 루트 include가
-   * 메워야 한다.
-   */
-  typescript: { ignoreBuildErrors: true },
-  eslint: { ignoreDuringBuilds: true },
 };
 
 export default nextConfig;
