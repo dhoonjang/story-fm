@@ -103,10 +103,10 @@ export const ADVANCE_INTENTS = ["none", "segment"] as const;
 
 export const MatchIntentSchema = z.object({
   /** 선수·코치와의 대화 — 여럿을 한 턴에 부를 수 있다 */
-  talk: z.array(PlayerTalkSchema).max(4).optional(),
-  teamTalk: TeamTalkSchema.optional(),
+  talk: z.array(PlayerTalkSchema).max(4).optional().describe("선수·코치와의 대화"),
+  teamTalk: TeamTalkSchema.optional().describe("팀 전체를 향한 말"),
   substitutions: z.array(SubstitutionSchema).max(5).optional(),
-  tactics: TacticsSchema.optional(),
+  tactics: TacticsSchema.optional().describe("감독이 말한 축만"),
   playerTactics: z.array(PlayerTacticSchema).max(11).optional(),
   plans: z.array(MatchPlanSchema).max(2).optional(),
   /** 노릴 표적의 id — 코어가 실재를 대조한다 (`exploits.ts`) */
@@ -119,7 +119,7 @@ export const MatchIntentSchema = z.object({
    * 판단을 그 위에 쌓는다. 이 저장소가 이미 여러 번 고친 거짓 성공이라, 못 옮긴 말은
    * 그대로 여기 실려 감독에게 되돌아간다.
    */
-  unresolved: z.string().max(200).optional(),
+  unresolved: z.string().min(1).max(200).optional().describe("어느 갈래에도 담기지 않은 말"),
 });
 
 export type MatchIntent = z.infer<typeof MatchIntentSchema>;

@@ -2008,6 +2008,24 @@ export function setTraining(state: GameState, input: TrainingPlanInput): SkillRe
   }
 
   /**
+   * **지난 날짜에는 훈련을 잡지 못한다 — 소집을 건드리기 전에 거른다.**
+   *
+   * 그 자리의 tick은 이미 지나갔으므로 엔트리가 영영 `scheduled`로 남아 달력에
+   * "예정"으로 서고, 같은 날짜가 조기 소집으로 흘러가면 대가(`recallSquadEarly`)가
+   * 오늘까지의 날수만큼 부풀려 매겨진다. 그래서 검증이 승격보다 먼저다 — 뒤에서
+   * 걸러도 소집일은 이미 옮겨져 있다.
+   */
+  for (const s of input.sessions ?? []) {
+    if (!DATE_RE.test(s.date)) return { ok: false, message: `날짜 형식이 잘못됨: ${s.date}` };
+    if (s.date < state.date) {
+      return {
+        ok: false,
+        message: `${s.date}은 이미 지난 날입니다 — 훈련은 오늘(${state.date})부터 잡을 수 있습니다`,
+      };
+    }
+  }
+
+  /**
    * **여름 휴가엔 훈련이 없다 — 감독이 소집을 앞당기지 않는 한.**
    *
    * 소집일 전까지 선수단은 구단에 없다. 실수로 그 자리에 세션이 깔리는 것은
@@ -2022,7 +2040,7 @@ export function setTraining(state: GameState, input: TrainingPlanInput): SkillRe
   const wanted = [
     ...(input.sessions ?? []).map((x) => x.date),
     ...((input.repeatWeekly ?? []).length > 0 ? [state.date] : []),
-  ].filter((d) => DATE_RE.test(d));
+  ];
   const earliest = wanted.sort()[0];
 
   if (input.recallSquad && earliest !== undefined && earliest < squadReturn) {
@@ -2035,7 +2053,6 @@ export function setTraining(state: GameState, input: TrainingPlanInput): SkillRe
   const dated: Array<{ date: string; slot: Slot }> = [];
   const datedFocus = new Set<TrainAttr>();
   for (const s of input.sessions ?? []) {
-    if (!DATE_RE.test(s.date)) return { ok: false, message: `날짜 형식이 잘못됨: ${s.date}` };
     if (!s.label?.trim()) return { ok: false, message: "훈련 설명(label)이 필요합니다" };
     const err = validFocus(s.focus);
     if (err) return { ok: false, message: err };

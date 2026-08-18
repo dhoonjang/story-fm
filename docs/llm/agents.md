@@ -268,6 +268,11 @@ GM 한 걸음이다. `phase`는 **라우팅 전용**이라 모델 입력에는 �
 받으면, 컨텍스트에 id가 없는 그 스킬은 부를 수 없다.
 ⚠️ **확신이 하나일 때만 고른다.** 갈리면 후보를 돌려주고 GM이 되묻는다
 ([prompts.md](./prompts.md) §3) — 잘못 집은 선수는 그대로 잘못된 상태 전이가 된다.
+입구는 셋뿐이다 (`core/player-ref.ts`) — 우리 선수는 `pickOurPlayer`, 세계 전체는
+`pickAnyPlayer`, 회견 사실 카드처럼 이미 좁혀진 목록은 `pickPlayerAmong`. **정확한 id를
+지목했는데 자격 밖이면 거기서 끝난다** — 근처의 누군가로 바꿔 주면 그것은 감독이 하지
+않은 지목이 된다. 반대로 서사가 흘린 id를 이름으로 되돌릴 때는(`humanizePlayerIds`) 낱말
+경계에서만 바꾼다 — 부분 문자열까지 치우면 `rodri`가 `rodrigo-muniz`를 반쪽만 바꾼다.
 **답할 도구가 없으면 모델은 지어내므로** 컨텍스트 밖 사실에는 각각 읽을 자리를 준다 —
 배치는 `get_squad`, 훈련 일정은 `get_league(view="calendar")`, 지난 시즌은 `get_career`,
 한 선수의 상세는 `search_players(playerId)`.
