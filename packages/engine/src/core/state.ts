@@ -46,6 +46,7 @@ import {
   FAMILIARITY_BASELINE,
   FORMATIONS,
   FIRST_TEAM_LIMIT,
+  MATCHDAY_BENCH,
   MATCHDAY_SQUAD,
   canRegister,
   isUnder21,
@@ -1861,8 +1862,8 @@ export function buildAssignments(
   return assignments;
 }
 
-/** 매치데이 벤치 규모 */
-export const MATCHDAY_BENCH = 9;
+/** 매치데이 벤치 규모 — 값은 도메인이 하나만 갖는다 (`squad-rules.ts`) */
+export { MATCHDAY_BENCH };
 
 export function createGame(input: CreateGameInput): GameState {
   const seed = input.seed ?? randInt(makeRng(Date.now() % 2 ** 31, "seed"), 1, 2 ** 30);
