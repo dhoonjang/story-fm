@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  bestOverall,
   DEFAULT_TACTICS,
   defaultRoleOf,
   naturalPositionOf,
@@ -47,6 +48,24 @@ import {
   addDays,
 } from "@story-fm/engine";
 import { createTestGame } from "./helpers";
+
+/**
+ * **역할이 값을 실제로 움직이는** 선발 센터백. `roleFit`은 정수로 접히므로 두 역할이
+ * 같은 숫자에 앉는 선수가 있고(힌카피는 어느 역할로도 79다), 그 선수로는 "역할을
+ * 바꾸면 그 자리 전력이 달라진다"를 잴 수 없다 — 라인업이 흔들릴 때마다 그런 선수가
+ * 첫 센터백이 되면 케이스가 이유 없이 붉어진다.
+ */
+function pickCentreBack(state: ReturnType<typeof createTestGame>) {
+  return assignmentsOf(state, state.userTeamId, "starting").find((a) => {
+    if (weightSlotOf(a.position) !== "CB") return false;
+    const attrs = playerById(state, a.playerId)!.attributes;
+    const fit = (role: string) => roleFit(attrs, a.position, role);
+    return (
+      fit("ball-playing-defender") !== fit("no-nonsense-cb") &&
+      fit("ball-playing-defender") !== bestOverall(attrs, playerById(state, a.playerId)!.positions)
+    );
+  })!;
+}
 
 /** 현재 배치를 setLineup 입력 형태로 (검증 테스트의 기준 라인업) */
 function currentLineup(state: ReturnType<typeof createTestGame>) {
@@ -458,8 +477,13 @@ describe("포지션 스킬 (멀티 포지션)", () => {
     expect(naturalPositionOf(df).position).toBe("ST");
     expect(df.positions.filter((p) => p.isNatural)).toHaveLength(1);
     expect(groupOf(df)).toBe("FW");
-    // ST 자리 가중치로 재산정 (15축 가중합 — player.md §2)
-    expect(df.attributes.overall).toBe(roleFit(df.attributes, "ST"));
+    /**
+     * 종합은 **가장 잘 맞는 자리**의 값이라 주 포지션 표기를 옮겨도 그 자리의
+     * 값으로 갈아치워지지 않는다 (player.md §4) — 어드민 표와 같은 함수다.
+     * 실제로 최전방에 세웠을 때의 전력은 `roleFit`이 따로 낸다.
+     */
+    expect(df.attributes.overall).toBe(bestOverall(df.attributes, df.positions));
+    expect(roleFit(df.attributes, "ST")).toBeLessThanOrEqual(df.attributes.overall);
   });
 
   it("처음 맡는 포지션은 낮은 적응도로 추가된다", () => {
@@ -767,9 +791,7 @@ describe("주장·전술·개인 지시", () => {
 
   it("자리를 옮겨도 호환 역할은 유지하고 비호환 역할만 초기화한다", () => {
     const state = createTestGame(7);
-    const cb = assignmentsOf(state, state.userTeamId, "starting").find(
-      (a) => weightSlotOf(a.position) === "CB",
-    )!;
+    const cb = pickCentreBack(state);
     expect(cb, "센터백 배치를 찾지 못했다").toBeTruthy();
 
     // 그 자리에 없는 역할은 거부하고 고를 수 있는 목록을 알려 준다
@@ -834,9 +856,7 @@ describe("주장·전술·개인 지시", () => {
 
   it("역할을 바꾸면 화면의 전력과 적응도가 실제로 움직인다", () => {
     const state = createTestGame(7);
-    const cb = assignmentsOf(state, state.userTeamId, "starting").find(
-      (a) => weightSlotOf(a.position) === "CB",
-    )!;
+    const cb = pickCentreBack(state);
     const row = () => buildOfficeViews(state).squad.players.find((x) => x.id === cb.playerId)!;
     const before = row();
     const famBefore = cb.familiarity;
