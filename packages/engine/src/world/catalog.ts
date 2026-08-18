@@ -59,6 +59,9 @@ function hashOf(text: string): number {
  */
 export const CATALOG_AGE_REF = "2026-08-15";
 
+/** 그 기준일의 연도 — 합성 선수의 생년은 나이에서 거꾸로 센다 */
+const CATALOG_AGE_REF_YEAR = Number(CATALOG_AGE_REF.slice(0, 4));
+
 /**
  * 포지션 인접 관계 — 멀티 포지션 파생의 근거 (**다른 라인·다른 역할**로의 확장).
  * 좌우·중앙 분화만 다른 자리(CB↔RCB/LCB, CM↔RCM/LCM 등)는 여기가 아니라
@@ -437,6 +440,19 @@ const TEMPLATE_GROUPS: PositionGroup[] = FALLBACK_TEMPLATE.map((p) => positionGr
  */
 const SYNTHETIC_UPSIDE = 8;
 
+/** 아카데미 자원이 1군 기준선에서 내려앉는 폭 */
+const ACADEMY_DROP = { min: 12, max: 20 } as const;
+
+/**
+ * 기준선에서 축이 흩어지는 폭 — 자리에 맞는 축은 위로(`strong`), 무관한 축은
+ * 아래로(`weak`) 치우친다. 폭이 좁으면 합성 선수가 전부 같은 모양이 된다.
+ */
+const SPREAD = { ordinary: 6, weakMin: -18, weakMax: -8 } as const;
+
+/** 합성 선수의 나이 — 아카데미와 1군이 다른 구간에 선다 */
+const ACADEMY_AGE = { min: 16, max: 20 } as const;
+const SENIOR_AGE = { min: 19, max: 33 } as const;
+
 /**
  * 보충 선수가 서는 분위 — 스쿼드 **하위 4분의 1**.
  *
@@ -532,13 +548,16 @@ function fallbackEntries(
     const group = positionGroupOf(position) ?? "MF";
     const { ko: nameKo, en: nameEn } = claimSyntheticName(rng, pool, takenNames);
     // 아카데미는 1군보다 한참 낮게 출발한다 (잠재력은 아래에서 크게 잡는다)
-    const base = i >= academyFrom ? squadBase - randInt(rng, 12, 20) : squadBase;
-    const v = (d = 6) => clamp99(base + randInt(rng, -d, d));
+    const base =
+      i >= academyFrom ? squadBase - randInt(rng, ACADEMY_DROP.min, ACADEMY_DROP.max) : squadBase;
+    const v = (d = SPREAD.ordinary) => clamp99(base + randInt(rng, -d, d));
     const strong = () => clamp99(base + randInt(rng, 0, SYNTHETIC_UPSIDE));
-    const weak = () => clamp99(base + randInt(rng, -18, -8));
+    const weak = () => clamp99(base + randInt(rng, SPREAD.weakMin, SPREAD.weakMax));
     // 아카데미 자원은 어리고, 능력치는 낮지만 잠재력 폭이 크다
     const academy = i >= academyFrom;
-    const age = academy ? randInt(rng, 16, 20) : randInt(rng, 19, 33);
+    const age = academy
+      ? randInt(rng, ACADEMY_AGE.min, ACADEMY_AGE.max)
+      : randInt(rng, SENIOR_AGE.min, SENIOR_AGE.max);
     const attrs =
       group === "GK"
         ? {
@@ -580,7 +599,7 @@ function fallbackEntries(
                 goalkeeping: 0,
               };
     const foot = syntheticFoot(nameEn, position);
-    const birthdate = `${2026 - age}-${String(randInt(rng, 1, 12)).padStart(2, "0")}-${String(randInt(rng, 1, 28)).padStart(2, "0")}`;
+    const birthdate = `${CATALOG_AGE_REF_YEAR - age}-${String(randInt(rng, 1, 12)).padStart(2, "0")}-${String(randInt(rng, 1, 28)).padStart(2, "0")}`;
     // 아카데미 자원은 그 클럽이 키운 선수다 — 정의상 홈그로운
     const homegrownCountry = deriveHomegrownCountry(
       { nameEn, birthdate },

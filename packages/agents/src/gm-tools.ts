@@ -68,6 +68,7 @@ import {
 } from "@story-fm/engine";
 import {
   ATTRIBUTE_AXES,
+  DateString,
   DIRECTIVE_INTENSITIES,
   type MatchEvent,
   MAX_PITCH_CLAIMS,
@@ -88,7 +89,7 @@ import type { GmToolCall } from "./gm-types";
  * 감독 발화가 통째로 실려 원장 라벨 한 줄이 단락이 됐다.
  */
 const playerRef = z.string().min(1);
-const dateArg = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const dateArg = DateString;
 /** 이적료·호가의 상한 — 한 건이 이보다 크면 협상이 아니라 오타다 */
 const MONEY_MAX = 500_000_000;
 /** 주급의 상한 */

@@ -222,13 +222,30 @@
 
 | 기록            | 무엇이 남나                                                | 언제                                       |
 | --------------- | ---------------------------------------------------------- | ------------------------------------------ |
-| `SEASON_RECORD` | 시즌 · 팀 · 최종 순위 · 승무패 · 득실 · **보드 평가 문장** | 시즌 리뷰                                  |
+| `SEASON_RECORD` | 시즌 · 팀 · 최종 순위 · 승무패 · 득실 · **보드 평가 카드** | 시즌 리뷰                                  |
 | `TROPHY`        | 시즌 · 대회 표시 이름 · 팀                                 | 리그 1위 · 유럽 대항전 우승 · 국내 컵 우승 |
 | `ACHIEVEMENT`   | code · 이름 · 설명 · 시즌                                  | 시즌 리뷰의 조건 검사                      |
 
-**시즌 리뷰(`reviewSeason`)가 한 자리에서 확정한다** — 최종 순위 → 보드 평가 문장과 평판
+**시즌 리뷰(`reviewSeason`)가 한 자리에서 확정한다** — 최종 순위 → 보드 평가 카드와 평판
 ±8 → 리그 트로피 → 유럽·국내 컵 결산(트로피·평판·상금) → 리그 상금·성과 보너스 → 업적 →
 `SEASON_RECORD` 적재. 그다음이 시즌 전환이다 ([season.md](./season.md) §7).
+
+**보드 평가는 등급과 근거 수치로 남는다** (`SEASON_RECORD.board`) — 문장이 아니다
+(overview.md §1 철칙 4).
+
+```ts
+board: {
+  grade: "met" | "missed",   // 최종 순위 ≤ 기대 순위
+  position: number,          // 최종 순위
+  target: number,            // 그 시즌의 기대 순위
+  expectation: string,       // 기대의 이름 — `boardExpectationOfTier`의 label
+}
+```
+
+같은 4위가 어느 구단에서는 성공이고 어느 구단에서는 실패인 이유가 `target`에 그대로
+남으므로, 커리어 표는 **그 시즌의 기대까지 함께** 보여 준다. 문장은 화면이 쓴다.
+⚠️ 옛 세이브는 `board` 대신 평가 문장(`boardVerdict`)을 들고 있다 — 화면이 그것을
+폴백으로 읽는다 (둘 다 optional, 세이브 버전 유지).
 
 업적은 다섯이다: `champion`(그 리그 1위 — 설명이 리그 이름을 쓴다) ·
 `invincible`(리그 전 경기 무패 — 20팀 38경기, 18팀 34경기) · `top4`(4위 이내) ·
@@ -268,25 +285,25 @@
   자리를 주는 코드가 없어, 경질이 곧 세이브의 끝이다. 스키마(`teamId`)는 준비돼 있다.
 - **업적이 다섯뿐**(`competition/season.ts`의 `checkAchievements`)이고 `champion`의
   설명이 리그 이름으로 하드코딩돼 있다.
-- 경질된 뒤의 화면이 없다 — `views/views.ts`도 `office.tsx`도 `dismissal`을 읽지 않아
-  시계가 멈춘 세이브는 digest 한 줄로만 그 사실을 말한다.
+- 경질된 뒤의 화면이 없다 — `views/views.ts`도 오피스 뷰 어느 것도 `dismissal`을 읽지
+  않아, 시계가 멈춘 세이브는 digest 한 줄로만 그 사실을 말한다.
 - 전 축이 상한(`skills/index.ts`의 `MANAGER_ATTR_CAP` 90)에 닿은 시나리오의 게임감이
   검증되지 않았다.
 
 ## 코드 위치
 
-| 무엇                         | 어디                                                                                        |
-| ---------------------------- | ------------------------------------------------------------------------------------------- |
-| 배경 해석·기준선·전문 분야   | `packages/engine/src/world/onboarding.ts`                                                   |
-| 능력치·평판 타입             | `packages/domain/src/manager.ts`                                                            |
-| XP·팀토크·면담 계수          | `packages/engine/src/skills/index.ts`                                                       |
-| 소화율·`tacticalFit`         | `packages/sim/src/strength-packet.ts`                                                       |
-| 훈련 결산 흡수율·인원 상한   | `packages/engine/src/squad/training-report.ts`                                              |
-| 키포인트 개수·정밀도         | `packages/sim/src/key-points.ts`                                                            |
-| 체력 안개 (`ANALYSIS_FLOOR`) | `packages/engine/src/squad/scouting.ts`                                                     |
-| 딜 확률 기여                 | `packages/engine/src/market/market.ts`                                                      |
-| 기자회견 스탠스·평판 폭      | `packages/engine/src/club/press.ts`                                                         |
-| 보드 기대·시즌 리뷰·업적     | `packages/engine/src/competition/season.ts`                                                 |
-| 경고·경질·AI 감독 시장       | `packages/engine/src/market/manager-market.ts`                                              |
-| 커리어 기록 타입             | `packages/domain/src/records.ts`                                                            |
-| 커리어 뷰·조회 도구          | `packages/engine/src/views/views.ts` · `views/lookup.ts` · `apps/web/components/office.tsx` |
+| 무엇                         | 어디                                                                                               |
+| ---------------------------- | -------------------------------------------------------------------------------------------------- |
+| 배경 해석·기준선·전문 분야   | `packages/engine/src/world/onboarding.ts`                                                          |
+| 능력치·평판 타입             | `packages/domain/src/manager.ts`                                                                   |
+| XP·팀토크·면담 계수          | `packages/engine/src/skills/index.ts`                                                              |
+| 소화율·`tacticalFit`         | `packages/sim/src/strength-packet.ts`                                                              |
+| 훈련 결산 흡수율·인원 상한   | `packages/engine/src/squad/training-report.ts`                                                     |
+| 키포인트 개수·정밀도         | `packages/sim/src/key-points.ts`                                                                   |
+| 체력 안개 (`ANALYSIS_FLOOR`) | `packages/engine/src/squad/scouting.ts`                                                            |
+| 딜 확률 기여                 | `packages/engine/src/market/market.ts`                                                             |
+| 기자회견 스탠스·평판 폭      | `packages/engine/src/club/press.ts`                                                                |
+| 보드 기대·시즌 리뷰·업적     | `packages/engine/src/competition/season.ts`                                                        |
+| 경고·경질·AI 감독 시장       | `packages/engine/src/market/manager-market.ts`                                                     |
+| 커리어 기록 타입             | `packages/domain/src/records.ts`                                                                   |
+| 커리어 뷰·조회 도구          | `packages/engine/src/views/views.ts` · `views/lookup.ts` · `apps/web/components/office/career.tsx` |

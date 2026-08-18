@@ -27,6 +27,7 @@ import {
   lineupChangeNote,
   lineupSignature,
   movePlayerSlot,
+  moraleToForm,
   playerById,
   recordEdit,
   reservePlayers,
@@ -115,6 +116,50 @@ describe("판정형 스킬 — 변화량은 공식이 정한다 (overview §7)",
     expect(targetHigh.state.form - highBefore).toBeGreaterThanOrEqual(
       target.state.form - lowBefore,
     );
+  });
+
+  it("한 번의 말이 움직이는 폭엔 한도가 있다 — 면담 ±8 (overview §7)", () => {
+    const state = createTestGame();
+    state.manager.attributes.leadership = 99; // 계수가 가장 큰 자리 — 한도를 미는 쪽
+    const players = userPlayers(state);
+    /** 한 선수에게 한 번, 0에서 출발해 남은 폼을 읽는다 (면담은 하루 한 번이다) */
+    const formAfter = (
+      index: number,
+      outcome: "motivated" | "reassured" | "angered",
+      intensity: 1 | 2 | 3,
+    ) => {
+      const player = players[index]!;
+      player.state.form = 0;
+      expect(applyTalkToPlayer(state, { playerId: player.id, outcome, intensity }).ok).toBe(true);
+      return player.state.form;
+    };
+
+    // 한도 아래에서는 더 센 말이 더 크게 남는다
+    expect(formAfter(0, "motivated", 2)).toBeGreaterThan(formAfter(1, "reassured", 2));
+    // 한도 위에서는 둘 다 같은 자리에 선다 — 8에서 잘린다
+    expect(formAfter(2, "motivated", 3)).toBeCloseTo(moraleToForm(8), 10);
+    expect(formAfter(3, "reassured", 3)).toBeCloseTo(moraleToForm(8), 10);
+    // 아래쪽 한도도 같은 폭이다
+    expect(formAfter(4, "angered", 3)).toBeCloseTo(moraleToForm(-8), 10);
+  });
+
+  it("팀토크는 한도에 딱 닿는다 — 여기서 더 세지면 조용히 잘린다 (overview §7)", () => {
+    const state = createTestGame();
+    state.manager.attributes.leadership = 99;
+    const player = userPlayers(state)[0]!;
+
+    player.state.form = 0;
+    expect(applyTeamTalk(state, { occasion: "pre", outcome: "inspired", intensity: 3 }).ok).toBe(
+      true,
+    );
+    expect(player.state.form).toBeCloseTo(moraleToForm(6), 10);
+
+    // 같은 폭이 아래로도 열려 있다 (자리가 다르면 하루에 또 한 번이다)
+    player.state.form = 0;
+    expect(applyTeamTalk(state, { occasion: "half", outcome: "backfired", intensity: 3 }).ok).toBe(
+      true,
+    );
+    expect(player.state.form).toBeCloseTo(moraleToForm(-6), 10);
   });
 
   it("면담이 불만 이슈를 푸는 것은 잘 풀렸을 때뿐이다 (career.md §2)", () => {
@@ -1088,6 +1133,39 @@ describe("훈련 스킬 = 일정 생성 (규칙 테이블 없음)", () => {
 });
 
 describe("서사 이벤트 — 체력·폼만, 한도 내 (overview §7)", () => {
+  it("하루 세 번까지다 — 네 번째는 반려되고 장부를 건드리지 않는다", () => {
+    const state = createTestGame();
+    const player = userPlayers(state)[0]!;
+    player.state.form = 0;
+    const fire = () =>
+      applyNarrativeEvent(state, { playerIds: [player.id], formDelta: 1, note: "장면" });
+    for (let n = 1; n <= 3; n++) expect(fire().ok, `${n}번째가 막혔다`).toBe(true);
+
+    const before = player.state.form;
+    expect(fire().ok, "네 번째가 통과했다").toBe(false);
+    expect(player.state.form, "반려된 이벤트가 폼을 움직였다").toBe(before);
+
+    // 날이 바뀌면 다시 세 번이 열린다 — 한도의 단위는 하루다
+    state.date = addDays(state.date, 1);
+    expect(fire().ok).toBe(true);
+  });
+
+  it("폼은 −1/0/+1 단계로만 말하고 코어가 0.12씩 옮긴다", () => {
+    const state = createTestGame();
+    const player = userPlayers(state)[0]!;
+    const step = (formDelta: number) => {
+      player.state.form = 0;
+      expect(
+        applyNarrativeEvent(state, { playerIds: [player.id], formDelta, note: "장면" }).ok,
+      ).toBe(true);
+      return player.state.form;
+    };
+    expect(step(1)).toBeCloseTo(0.12, 10);
+    expect(step(-1)).toBeCloseTo(-0.12, 10);
+    // 모델이 큰 수를 불러도 단계는 하나다 — 한 장면이 선수를 절정에 꽂지 못한다
+    expect(step(9)).toBeCloseTo(0.12, 10);
+  });
+
   it("한도를 넘는 값은 잘린다", () => {
     const state = createTestGame();
     const player = userPlayers(state)[0]!;

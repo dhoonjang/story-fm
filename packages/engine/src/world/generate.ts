@@ -6,6 +6,7 @@ import { deriveAxes } from "./attributes";
 import { derivePositions, physiqueOf, syntheticFoot } from "./catalog";
 import { claimPlayerId, slugifyName } from "./player-id";
 import { makeRng, pick, randInt } from "../core/rng";
+import { seasonYear } from "../core/dates";
 
 /**
  * 게임 중 생성되는 선수 — 유스 콜업 등. 카탈로그에 없으므로 catalogId = null.
@@ -13,6 +14,24 @@ import { makeRng, pick, randInt } from "../core/rng";
  */
 
 const clamp99 = (x: number) => Math.max(1, Math.min(99, Math.round(x)));
+
+/**
+ * 기준선에서 축이 흩어지는 폭 — 자리에 맞는 축은 위로(`strong`), 무관한 축은
+ * 아래로(`weak`) 치우친다. 폭이 좁으면 합성 선수가 전부 같은 모양이 된다.
+ */
+const SPREAD = { ordinary: 6, strong: 8, weakMin: -18, weakMax: -8 } as const;
+
+/** 필드 플레이어의 골키핑 — 있으나 마나 한 값이지만 0은 아니다 */
+const OUTFIELD_GK = { from: 15, span: 20 } as const;
+
+/** 유스가 합류하는 나이 */
+const YOUTH_AGE = { min: 17, max: 19 } as const;
+
+/** 지금 실력 위에 얹는 성장 여지 — 드물게 진짜 물건이 섞이는 폭이다 */
+const YOUTH_UPSIDE = { min: 10, max: 26 } as const;
+
+/** 합류 시점의 체력 */
+const JOINING_CONDITION = { min: 70, max: 84 } as const;
 
 /** 그룹별 대표 포지션 — 유스의 주 포지션 */
 const GROUP_POSITION: Record<PositionGroup, string[]> = {
@@ -33,7 +52,7 @@ export function generateYouthPlayer(
   /** 지정 시 그 그룹으로 — GK 고갈 방지 등 (리뷰 발견) */
   forceGroup?: PositionGroup,
   /** 합류 연도 (유스는 시즌 개막 연도 기준 17~19세) */
-  refYear = 2026 + season,
+  refYear = seasonYear(season) + 1,
   /**
    * 이 팀에 이미 있는 이름 — 새 이름을 여기에 등록하며 고른다. 안 넘기면
    * 콜업된 유스가 1군 선수와 동명이인으로 설 수 있다 (people.md §2).
@@ -61,9 +80,9 @@ export function generateYouthPlayer(
     syntheticNamePoolOf(countryOfTeam(teamId)),
     takenNames,
   );
-  const v = (d = 6) => clamp99(base + randInt(rng, -d, d));
-  const strong = () => clamp99(base + randInt(rng, 0, 8));
-  const weak = () => clamp99(base + randInt(rng, -18, -8));
+  const v = (d = SPREAD.ordinary) => clamp99(base + randInt(rng, -d, d));
+  const strong = () => clamp99(base + randInt(rng, 0, SPREAD.strong));
+  const weak = () => clamp99(base + randInt(rng, SPREAD.weakMin, SPREAD.weakMax));
 
   const attrs =
     group === "GK"
@@ -84,7 +103,7 @@ export function generateYouthPlayer(
             dribbling: v(),
             defending: strong(),
             physical: strong(),
-            goalkeeping: clamp99(15 + randInt(rng, 0, 20)),
+            goalkeeping: clamp99(OUTFIELD_GK.from + randInt(rng, 0, OUTFIELD_GK.span)),
           }
         : group === "MF"
           ? {
@@ -94,7 +113,7 @@ export function generateYouthPlayer(
               dribbling: v(),
               defending: v(),
               physical: v(),
-              goalkeeping: clamp99(15 + randInt(rng, 0, 20)),
+              goalkeeping: clamp99(OUTFIELD_GK.from + randInt(rng, 0, OUTFIELD_GK.span)),
             }
           : {
               pace: strong(),
@@ -103,10 +122,10 @@ export function generateYouthPlayer(
               dribbling: strong(),
               defending: weak(),
               physical: v(),
-              goalkeeping: clamp99(15 + randInt(rng, 0, 20)),
+              goalkeeping: clamp99(OUTFIELD_GK.from + randInt(rng, 0, OUTFIELD_GK.span)),
             };
 
-  const age = randInt(rng, 17, 19);
+  const age = randInt(rng, YOUTH_AGE.min, YOUTH_AGE.max);
   const month = randInt(rng, 1, 12);
   const day = randInt(rng, 1, 28);
   const birthdate = `${refYear - age}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
@@ -140,9 +159,9 @@ export function generateYouthPlayer(
       overall,
       // 유스의 매력은 지금 실력이 아니라 **성장 여지**다 — 기준선을 낮춘 만큼
       // 잠재력 폭을 넓혀, 드물게 진짜 물건이 섞이게 둔다
-      potential: clamp99(overall + randInt(rng, 10, 26)),
+      potential: clamp99(overall + randInt(rng, YOUTH_UPSIDE.min, YOUTH_UPSIDE.max)),
     },
-    state: { form: 0, condition: randInt(rng, 70, 84) },
+    state: { form: 0, condition: randInt(rng, JOINING_CONDITION.min, JOINING_CONDITION.max) },
     isCaptain: false,
   };
 }

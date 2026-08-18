@@ -1369,7 +1369,7 @@ export const DEFAULT_XI: Record<string, readonly string[]> = {
     "azor-matusiwa",
     "jack-taylor",
     "jaden-philogene",
-    "sammie-szmodics",
+    "daizen-maeda",
     "marcelino-nunez",
     "chuba-akpom",
   ],

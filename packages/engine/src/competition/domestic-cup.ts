@@ -684,11 +684,7 @@ function reportOurTie(
   if (!played) return;
   const label = domesticStageLabel(cup, stage);
   const advanced = winners.includes(state.userTeamId);
-  digest.push(
-    advanced
-      ? `${cup.short} ${label} 통과 — 다음 라운드로 간다`
-      : `${cup.short} ${label} 탈락 — 컵 여정이 여기서 끝났다`,
-  );
+  digest.push(advanced ? `${cup.short} ${label} 통과` : `${cup.short} ${label} 탈락`);
   pushNarrative(state, `${cup.short} ${label} ${advanced ? "통과" : "탈락"}`, 4);
 }
 
@@ -907,11 +903,11 @@ export function reviewDomesticCups(state: GameState): string[] {
       state.trophies.push({ season: state.season, competition: cup.name, teamId: champion });
       state.manager.reputation.media = Math.min(100, state.manager.reputation.media + 8);
       state.manager.reputation.board = Math.min(100, state.manager.reputation.board + 6);
-      digest.push(`🏆 ${cup.name} 우승! 트로피 보관함에 추가되었다`);
+      digest.push(`🏆 ${cup.name} 우승`);
       pushNarrative(state, `${cup.name} 우승`, 5);
     } else if (ours) {
       state.manager.reputation.media = Math.min(100, state.manager.reputation.media + 3);
-      digest.push(`${cup.short} 준우승 — 결승에서 ${teamName(champion)}에 무너졌다`);
+      digest.push(`${cup.short} 준우승 — 결승 상대 ${teamName(champion)}`);
       pushNarrative(state, `${cup.short} 준우승`, 4);
     } else if (cup.country === countryOf(state.userTeamId)) {
       digest.push(`${cup.short} 우승: ${teamShortName(champion)}`);

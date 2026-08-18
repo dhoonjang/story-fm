@@ -4,6 +4,23 @@ import type { OfficeViews } from "@story-fm/engine";
 import { MANAGER_ATTRIBUTES, MANAGER_ATTRIBUTE_KO } from "@story-fm/domain";
 import { IconTrophy } from "@/components/icons";
 
+type SeasonRow = OfficeViews["career"]["seasons"][number];
+
+/**
+ * **보드 평가 한 줄을 쓰는 자리** — 코어는 등급과 근거 수치만 넘긴다
+ * (docs/overview.md §1 철칙 4 · career.md §6).
+ *
+ * 옛 세이브는 카드 대신 평가 문장을 들고 있어 그것이 폴백이다. 둘 다 없으면
+ * 지어내지 않고 빈 칸으로 둔다.
+ */
+function boardVerdictOf(s: SeasonRow): string {
+  if (s.board) {
+    const met = s.board.grade === "met";
+    return `${s.board.expectation} — ${met ? "달성" : `미달 (기대 ${s.board.target}위)`}`;
+  }
+  return s.boardVerdict ?? "—";
+}
+
 /**
  * 감독 능력치 5축 — **오각형**.
  *
@@ -284,8 +301,9 @@ export function CareerView({
                 <td>{s.position}위</td>
                 <td>{s.record}</td>
                 {/* 순위와 전적이 말하지 않는 것 — 같은 4위가 어느 구단에서는 성공이고
-                    어느 구단에서는 실패다 */}
-                <td className="career-verdict">{s.boardVerdict}</td>
+                    어느 구단에서는 실패다. 코어는 등급과 기대 순위만 넘기고 문장은
+                    여기서 쓴다 (docs/overview.md §1 철칙 4) */}
+                <td className="career-verdict">{boardVerdictOf(s)}</td>
               </tr>
             ))}
           </tbody>

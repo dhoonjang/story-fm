@@ -4,7 +4,7 @@ import { CARD_SKILLS, hasRailHint } from "../lib/panel-hints";
 import { SKILL_LABEL } from "../lib/skill-label";
 
 /**
- * **스킬 결과가 화면에 서는 길은 둘뿐이다** (game-overview §3).
+ * **스킬 결과가 화면에 서는 길은 둘뿐이다** (overview.md §3).
  *
  * 1. **칩 + 말풍선** — 갈 장부가 있는 스킬. 그 턴에 바뀐 장부들이 탭 순서대로
  *    한 장씩 알림으로 서고, 채팅에 남은 칩을 누르면 그 말풍선이 다시 선다.

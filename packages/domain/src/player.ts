@@ -1,7 +1,17 @@
 import { z } from "zod";
+import { DateString } from "./date-string";
+
+/** 등번호의 위끝 — 능력치 눈금과 같은 99지만 다른 축이다 */
+export const SQUAD_NUMBER_MAX = 99;
+
+/** 능력치 눈금의 위끝 — 0~99 스케일, 선수·감독 공통 (player.md §1) */
+export const RATING_MAX = 99;
+
+/** 체력 눈금의 위끝 — 0~100, 높을수록 좋다 */
+export const CONDITION_MAX = 100;
 
 /** 0~99 능력치 스케일 — 선수·감독 공통 (player.md §1) */
-export const RatingSchema = z.number().int().min(0).max(99);
+export const RatingSchema = z.number().int().min(0).max(RATING_MAX);
 
 export const PositionGroupSchema = z.enum(["GK", "DF", "MF", "FW"]);
 export type PositionGroup = z.infer<typeof PositionGroupSchema>;
@@ -156,6 +166,11 @@ export const FootRatingSchema = z.number().int().min(1).max(5);
  */
 export const HeightSchema = z.number().int().min(150).max(215);
 export const WeightSchema = z.number().int().min(50).max(120);
+
+/**
+ * 부상 성향 배수의 천장 — 1.0이 평균이고, 여기 닿으면 유리몸 중의 유리몸이다.
+ */
+export const INJURY_PRONENESS_MAX = 5;
 
 /** 체격 한 줄 — "188cm · 82kg" */
 export function physiqueLabel(height?: number, weight?: number): string {
@@ -356,6 +371,12 @@ export function weightSlotOf(position: string): WeightSlot {
  */
 export const FLOOR_WEIGHT = 0.05;
 
+/** 가중치의 천장 — 역할 차이를 얹어도 한 축이 이보다 무거워지지는 않는다 */
+export const CEIL_WEIGHT = 3;
+
+/** 가중치의 해상도 — 0.1 단위로 떨어뜨려야 표와 계산이 같은 값을 본다 */
+const roundWeight = (v: number) => Math.round(v * 10) / 10;
+
 /** 세부 역할 한 종 — 자리의 기본 가중치에 얹는 **차이**로 정의한다 */
 export interface RoleDef {
   id: string;
@@ -365,7 +386,7 @@ export interface RoleDef {
   abbr: string;
   /** 한 줄 설명 — UI·LLM 도구 설명에 그대로 쓴다 */
   desc: string;
-  /** 기본 가중치에서의 차이. 결과는 [FLOOR_WEIGHT, 3] 로 잘린다 */
+  /** 기본 가중치에서의 차이. 결과는 [FLOOR_WEIGHT, CEIL_WEIGHT] 로 잘린다 */
   delta: Partial<AxisValues>;
 }
 
@@ -1467,7 +1488,7 @@ export function roleWeights(position: string, role?: string): AxisValues {
   for (const axis of ATTRIBUTE_AXES) {
     const d = def.delta[axis];
     if (d === undefined) continue;
-    w[axis] = Math.max(FLOOR_WEIGHT, Math.min(3, Math.round((base[axis] + d) * 10) / 10));
+    w[axis] = Math.max(FLOOR_WEIGHT, Math.min(CEIL_WEIGHT, roundWeight(base[axis] + d)));
   }
   roleWeightCache.set(key, w);
   return w;
@@ -1502,8 +1523,12 @@ export interface ObservationOffset {
   overallOffset: number;
 }
 
-/** 표시용 눈금 — 1~99에서 자른다 (0은 "값이 없다"로 읽히므로 쓰지 않는다) */
-const clampShown = (value: number) => Math.max(1, Math.min(99, Math.round(value)));
+/** 화면에 적는 능력치의 아래끝 — 0은 "값이 없다"로 읽히므로 쓰지 않는다 */
+const SHOWN_RATING_MIN = 1;
+
+/** 표시용 눈금 — 1~99에서 자른다 */
+const clampShown = (value: number) =>
+  Math.max(SHOWN_RATING_MIN, Math.min(RATING_MAX, Math.round(value)));
 
 /**
  * 관측된 축에서 그 자리·역할의 전력을 낸다 — **화면과 서버의 단일 규칙.**
@@ -1624,7 +1649,7 @@ export const PlayerStateSchema = z.object({
    * 경기·훈련이 깎고 휴식·회복이 채운다. 왜 낮은지는 `describeMood`가 말한다.
    * 옛 세이브는 로드할 때 두 값을 합쳐 옮긴다 (`persistence.ts`).
    */
-  condition: z.number().int().min(0).max(100),
+  condition: z.number().int().min(0).max(CONDITION_MAX),
   /**
    * **부상 성향** — 이 선수가 지금 갖는 부상 확률 배수. 1.0이 평균.
    *
@@ -1638,7 +1663,7 @@ export const PlayerStateSchema = z.object({
    *
    * 옛 세이브엔 없다 — 없으면 1.0(`PRONENESS_BASE`)으로 읽고 버전을 올리지 않는다.
    */
-  injuryProneness: z.number().min(0).max(5).optional(),
+  injuryProneness: z.number().min(0).max(INJURY_PRONENESS_MAX).optional(),
   /**
    * **맥락을 읽고 다시 쓴 심경 한 줄** — 코어 앵커(`describeMood`) 위에 얹힌다.
    *
@@ -1652,9 +1677,7 @@ export const PlayerStateSchema = z.object({
    *
    * 옛 세이브엔 없다 — 없으면 앵커를 쓰고 버전을 올리지 않는다.
    */
-  moodNote: z
-    .object({ text: z.string().min(1).max(120), on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) })
-    .optional(),
+  moodNote: z.object({ text: z.string().min(1).max(120), on: DateString }).optional(),
   /**
    * **마지막으로 면담한 날** — 같은 선수의 면담을 하루 한 번으로 자르는 문
    * (career.md §2). 한 경기는 하루 안에서 끝나므로 이것이 곧 경기당 한 번이다.
@@ -1664,10 +1687,7 @@ export const PlayerStateSchema = z.object({
    *
    * 옛 세이브엔 없다 — 없으면 아직 이야기한 적 없는 것으로 읽고 버전을 올리지 않는다.
    */
-  talkedOn: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .optional(),
+  talkedOn: DateString.optional(),
   /**
    * **처음 완장을 찬 날** — 주장 지명의 체력 보너스를 선수당 한 번으로 자르는 문
    * (career.md §2). 완장은 몇 번이고 오가지만 처음 채워지는 순간의 무게는 한 번뿐이라,
@@ -1678,16 +1698,13 @@ export const PlayerStateSchema = z.object({
    *
    * 옛 세이브엔 없다 — 없으면 아직 완장을 찬 적 없는 것으로 읽고 버전을 올리지 않는다.
    */
-  captainedOn: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .optional(),
+  captainedOn: DateString.optional(),
 });
 export type PlayerState = z.infer<typeof PlayerStateSchema>;
 
 /** 체력을 0~100 안으로 — 모든 변화가 이 문을 지난다 */
 export function clampCondition(value: number): number {
-  return Math.max(0, Math.min(100, Math.round(value)));
+  return Math.max(0, Math.min(CONDITION_MAX, Math.round(value)));
 }
 
 /** 하루가 시작될 때의 기본 체력 — 새 선수·새 시즌이 여기서 출발한다 */
@@ -1701,11 +1718,19 @@ export const CONDITION_BASE = 75;
  */
 export type ConditionBand = "fresh" | "good" | "fair" | "low" | "spent";
 
+/** 각 구간이 시작되는 체력 — 이 아래는 다음(더 나쁜) 구간이다 */
+export const CONDITION_BAND_FLOOR = {
+  fresh: 80,
+  good: 65,
+  fair: 50,
+  low: 35,
+} as const;
+
 export function conditionBand(condition: number): ConditionBand {
-  if (condition >= 80) return "fresh";
-  if (condition >= 65) return "good";
-  if (condition >= 50) return "fair";
-  if (condition >= 35) return "low";
+  if (condition >= CONDITION_BAND_FLOOR.fresh) return "fresh";
+  if (condition >= CONDITION_BAND_FLOOR.good) return "good";
+  if (condition >= CONDITION_BAND_FLOOR.fair) return "fair";
+  if (condition >= CONDITION_BAND_FLOOR.low) return "low";
   return "spent";
 }
 
@@ -1750,9 +1775,9 @@ export const GamePlayerSchema = z.object({
   squadLevel: z.enum(["first", "reserve"]).optional(),
   name: z.string().min(1),
   /** 현재 소속팀의 등번호. 미배정·구 세이브·자유계약 선수는 없음 */
-  squadNumber: z.number().int().min(1).max(99).optional(),
+  squadNumber: z.number().int().min(1).max(SQUAD_NUMBER_MAX).optional(),
   /** 출생년월일 (YYYY-MM-DD). 나이는 플레이 날짜 기준으로 계산 (ageOf) */
-  birthdate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  birthdate: DateString,
   positions: z.array(PlayerPositionSchema).min(1),
   /**
    * 홈그로운 자격을 가진 **협회(나라)**. 등록 명단의 홈그로운 판정은 이 값과
@@ -1779,7 +1804,7 @@ export const GamePlayerSchema = z.object({
   loan: z
     .object({
       fromTeamId: z.string().min(1),
-      until: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      until: DateString,
       wageShare: z.number().min(0).max(1),
     })
     .optional(),
@@ -1853,8 +1878,8 @@ export const PlayerCatalogEntrySchema = z.object({
   nameKo: z.string().min(1),
   nameEn: z.string().min(1),
   synthetic: z.boolean().optional(),
-  squadNumber: z.number().int().min(0).max(99).optional(),
-  birthdate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  squadNumber: z.number().int().min(0).max(SQUAD_NUMBER_MAX).optional(),
+  birthdate: DateString,
   positions: z.array(PlayerPositionSchema).min(1),
   potential: RatingSchema,
   homegrownCountry: z.string().min(1).optional(),

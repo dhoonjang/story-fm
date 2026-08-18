@@ -91,6 +91,22 @@ const avg = (slots: LineupSlot[], read: (p: Player) => number) =>
 /** 측면 자원 — 풀백·윙백·윙어 (좌우 코드로 가른다) */
 const isWide = (s: LineupSlot) => /^(L|R)(B|WB|M|W)$/.test(s.position.toUpperCase());
 
+/**
+ * 그 자리에 아무도 없을 때 대신 읽는 값 — 정상 XI 는 네 그룹을 모두 채우므로
+ * 라인업이 어긋났을 때만 닿는다. 리그 평균 언저리라 상성이 한쪽으로 터지지 않는다.
+ */
+const ABSENT_GROUP = {
+  fwPace: 70,
+  cbPace: 70,
+  gkSweep: 60,
+  aerialAtk: 65,
+  aerialDef: 65,
+  pressResist: 65,
+  wideQuality: 65,
+  creativity: 65,
+  finishing: 65,
+} as const;
+
 export function buildCounterContext(
   side: MatchSide,
   name: string,
@@ -110,12 +126,14 @@ export function buildCounterContext(
     uptake,
     slots,
     count: { GK: gk.length, DF: df.length, MF: mf.length, FW: fw.length },
-    fwPace: fw.length > 0 ? avg(fw, (p) => p.attributes.pace) : 70,
-    cbPace: df.length > 0 ? avg(df, (p) => p.attributes.pace) : 70,
+    fwPace: fw.length > 0 ? avg(fw, (p) => p.attributes.pace) : ABSENT_GROUP.fwPace,
+    cbPace: df.length > 0 ? avg(df, (p) => p.attributes.pace) : ABSENT_GROUP.cbPace,
     gkSweep:
-      gk.length > 0 ? avg(gk, (p) => (p.attributes.positioning + p.attributes.pace) / 2) : 60,
-    aerialAtk: fw.length > 0 ? avg(fw, (p) => p.attributes.aerial) : 65,
-    aerialDef: df.length > 0 ? avg(df, (p) => p.attributes.aerial) : 65,
+      gk.length > 0
+        ? avg(gk, (p) => (p.attributes.positioning + p.attributes.pace) / 2)
+        : ABSENT_GROUP.gkSweep,
+    aerialAtk: fw.length > 0 ? avg(fw, (p) => p.attributes.aerial) : ABSENT_GROUP.aerialAtk,
+    aerialDef: df.length > 0 ? avg(df, (p) => p.attributes.aerial) : ABSENT_GROUP.aerialDef,
     buildUp: avg([...gk, ...df], (p) => (p.attributes.passing + p.attributes.composure) / 2),
     pressResist:
       mf.length > 0
@@ -123,13 +141,16 @@ export function buildCounterContext(
             mf,
             (p) => (p.attributes.composure + p.attributes.dribbling + p.attributes.passing) / 3,
           )
-        : 65,
+        : ABSENT_GROUP.pressResist,
     wideQuality:
       wide.length > 0
         ? avg(wide, (p) => (p.attributes.pace + p.attributes.dribbling + p.attributes.kicking) / 3)
-        : 65,
-    creativity: mf.length + fw.length > 0 ? avg([...mf, ...fw], (p) => p.attributes.vision) : 65,
-    finishing: fw.length > 0 ? avg(fw, (p) => p.attributes.finishing) : 65,
+        : ABSENT_GROUP.wideQuality,
+    creativity:
+      mf.length + fw.length > 0
+        ? avg([...mf, ...fw], (p) => p.attributes.vision)
+        : ABSENT_GROUP.creativity,
+    finishing: fw.length > 0 ? avg(fw, (p) => p.attributes.finishing) : ABSENT_GROUP.finishing,
   };
 }
 

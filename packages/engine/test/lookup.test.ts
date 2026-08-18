@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  activeContract,
   advanceTime,
   assignmentsOf,
+  ensureSeasonStat,
   leagueView,
   playerById,
   playerCard,
@@ -9,6 +11,7 @@ import {
   scheduleView,
   scoutPlayer,
   searchPlayers,
+  seasonStatOf,
   setTraining,
   squadView,
   teamProfile,
@@ -127,6 +130,34 @@ describe("search_players", () => {
     expect(rowIds(mine.message, ours)).toEqual(byCondition(ours));
     const other = searchPlayers(state, { team: "chelsea", sortBy: "fatigue", limit: 15 });
     expect(rowIds(other.message, theirs)).not.toEqual(byCondition(theirs));
+  });
+
+  /**
+   * 정렬 키를 비교자 안에서 뽑던 것을 풀당 한 번으로 옮겼다. 원장을 읽는 규칙이
+   * 갈리면 순서가 조용히 달라지므로, **원장이 말하는 순서**와 맞춰 둔다.
+   */
+  it("득점·출전·주급 정렬은 원장이 말하는 값 순이다", () => {
+    const state = createTestGame(31);
+    const ours = playersOf(state, state.userTeamId);
+    // 전원이 같은 값이면 무엇으로 세우든 같아 보인다 — 원장을 갈라 둔다
+    ours.forEach((p, i) => {
+      const contract = activeContract(state, p.id);
+      if (contract) contract.weeklyWage = 10_000 + i * 137;
+      const stat = ensureSeasonStat(state, p.id, p.teamId);
+      stat.goals = (i * 5) % 23;
+      stat.apps = 40 - i;
+    });
+    const byLedger = (key: (p: (typeof ours)[number]) => number): string[] =>
+      [...ours]
+        .sort((a, b) => key(b) - key(a))
+        .slice(0, 15)
+        .map((p) => p.id);
+    const shown = (sortBy: "wage" | "goals" | "apps"): string[] =>
+      rowIds(searchPlayers(state, { team: "mine", sortBy, limit: 15 }).message, ours);
+
+    expect(shown("wage")).toEqual(byLedger((p) => activeContract(state, p.id)?.weeklyWage ?? 0));
+    expect(shown("goals")).toEqual(byLedger((p) => seasonStatOf(state, p.id)?.goals ?? 0));
+    expect(shown("apps")).toEqual(byLedger((p) => seasonStatOf(state, p.id)?.apps ?? 0));
   });
 
   it("팀 이름 표기가 흔들려도 해석하고, 없는 팀만 반려한다", () => {

@@ -9,6 +9,7 @@ import {
   observedOverall,
   ratingLabel,
   ratingTier,
+  RATING_MAX,
   RATING_TIERS,
   SCOUT_CONCURRENT_LIMIT,
   SCOUT_DEFER_DAYS,
@@ -192,6 +193,9 @@ export function offsetFor(seed: number, playerId: string, attr: string, margin: 
   return (h % (margin * 2 + 1)) - margin;
 }
 
+/** 안개가 낀 값의 아래끝 — 0은 "값이 없다"로 읽히므로 쓰지 않는다 */
+const OBSERVED_RATING_MIN = 1;
+
 /** 지식 수준을 반영한 관측 능력치 — 참값이 아니라 "감독이 그렇게 알고 있는 값" */
 export function observedRating(
   state: GameState,
@@ -203,7 +207,7 @@ export function observedRating(
   const margin = observationMargin(state, playerId, attr, knowledge);
   if (margin === 0) return trueValue;
   const offset = offsetFor(state.seed, playerId, attr, margin);
-  return Math.max(1, Math.min(99, trueValue + offset));
+  return Math.max(OBSERVED_RATING_MIN, Math.min(RATING_MAX, trueValue + offset));
 }
 
 /**
@@ -294,13 +298,23 @@ export function overallView(state: GameState, player: GamePlayer): string {
  * 잠재력 — **아무도 단정하지 못한다.** 구간 + 확신의 정도로 말한다.
  * 우리 선수는 데리고 뛸수록, 타 팀 선수는 스카우트를 거듭 보낼수록 좁아진다.
  */
+/** 추정 폭이 이 안이면 그 말로 부른다 — 넘으면 "대강 짐작"이다 */
+const CONFIDENCE_MARGIN = { 거의확실: 3, 대체로신뢰: 6 } as const;
+
 export function potentialView(state: GameState, player: GamePlayer): string {
   const band = potentialBand(state, player);
   if (!band) return "미지 (성장 여력을 짐작할 근거가 없다)";
   const confidence =
-    band.margin <= 3 ? "거의 확실" : band.margin <= 6 ? "대체로 신뢰" : "대강 짐작";
+    band.margin <= CONFIDENCE_MARGIN.거의확실
+      ? "거의 확실"
+      : band.margin <= CONFIDENCE_MARGIN.대체로신뢰
+        ? "대체로 신뢰"
+        : "대강 짐작";
   return `${band.low}~${band.high} (${confidence} · ±${band.margin})`;
 }
+
+/** 한 줄 요약이 꼽는 강점·약점 축의 수 */
+const HIGHLIGHT_AXES = 2;
 
 /** 능력치 한 줄 요약 — 조회 도구 결과에 쓴다 */
 export function attributeLine(state: GameState, player: GamePlayer): string {
@@ -365,9 +379,9 @@ export function strengthsAndWeaknesses(
     }))
     .sort((a, b) => b.value - a.value);
   return {
-    strengths: ranked.slice(0, 2).map((r) => ATTR_KO[r.key]),
+    strengths: ranked.slice(0, HIGHLIGHT_AXES).map((r) => ATTR_KO[r.key]),
     weaknesses: ranked
-      .slice(-2)
+      .slice(-HIGHLIGHT_AXES)
       .reverse()
       .map((r) => ATTR_KO[r.key]),
   };

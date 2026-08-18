@@ -1,5 +1,7 @@
 import { z } from "zod";
 import {
+  ATTR_STEP_MAX,
+  ATTR_STEP_MIN,
   RATING_BAND,
   RATING_MAX,
   RATING_MIN,
@@ -38,7 +40,7 @@ export const MATCH_RATER_SYSTEM = `당신은 방금 끝난 축구 경기를 채�
 출전 시간과 경기 사건을 참고해라. 빠뜨린 선수는 변화가 없는 것으로 본다.
 
 ## 능력치 (attribute / attributeStep)
-이 경기로 한 축이 움직인 선수를 적는다. **0~${MATCH_ATTR_CAP}명**, 각 한 축 **+1 또는 −1**.
+이 경기로 한 축이 움직인 선수를 적는다. **0~${MATCH_ATTR_CAP}명**, 각 한 축 **+${ATTR_STEP_MAX} 또는 −${-ATTR_STEP_MIN}**.
 서른을 넘긴 선수는 내려가는 쪽이 자연스럽다 — 특히 스피드·체력·드리블.
 
 ## 규칙
@@ -48,15 +50,32 @@ export const MATCH_RATER_SYSTEM = `당신은 방금 끝난 축구 경기를 채�
 - 선수 id는 그대로 돌려준다. 이름으로 쓰지 않는다.
 - 반드시 rate_players 도구로만 답한다. 그 밖의 텍스트는 쓰지 않는다.`;
 
+/**
+ * 스키마가 받아들이는 폭 — 코어 밴드(`RATING_MIN`~`RATING_MAX`,
+ * `MATCH_FAMILIARITY_MIN`~`MATCH_FAMILIARITY_MAX`)보다 넓게 열어 둔다.
+ * 벗어난 값은 파싱을 깨뜨리는 대신 코어가 자르므로(`settleMatchRating`),
+ * 한 선수의 과한 숫자 하나로 경기 판정 전체가 버려지지 않는다.
+ */
+const ACCEPTED_RATING_MAX = 20;
+const ACCEPTED_DRILL_BOUND = 20;
+
+/** 한 번에 매기는 인원 상한 — 한 경기 명단(선발 + 벤치)보다 넉넉하다 */
+const MAX_RATED_PLAYERS = 30;
+
+/** 근거 한 줄의 길이 상한 — 프롬프트는 40자 안팎을 요구하고, 여기는 그 여유다 */
+const NOTE_MAX = 200;
+
 const RatingEntrySchema = z.object({
   playerId: z.string().min(1),
-  rating: z.number().min(0).max(20),
-  drill: z.number().min(-20).max(20).optional(),
+  rating: z.number().min(0).max(ACCEPTED_RATING_MAX),
+  drill: z.number().min(-ACCEPTED_DRILL_BOUND).max(ACCEPTED_DRILL_BOUND).optional(),
   attribute: z.enum(ATTRIBUTE_AXES).nullish(),
-  attributeStep: z.number().min(-1).max(1).nullish(),
-  note: z.string().max(200).optional(),
+  attributeStep: z.number().min(ATTR_STEP_MIN).max(ATTR_STEP_MAX).nullish(),
+  note: z.string().max(NOTE_MAX).optional(),
 });
-const RateInputSchema = z.object({ ratings: z.array(RatingEntrySchema).min(1).max(30) });
+const RateInputSchema = z.object({
+  ratings: z.array(RatingEntrySchema).min(1).max(MAX_RATED_PLAYERS),
+});
 
 /** 브리프를 프롬프트 본문으로 — 표 한 장 + 사건 목록 */
 export function buildRatingPrompt(brief: MatchRatingBrief): string {

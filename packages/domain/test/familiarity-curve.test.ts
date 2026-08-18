@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ATTRIBUTE_AXES,
   FAMILIARITY_MAX,
   logRatioFactor,
   normalizedLogCurve,
@@ -7,7 +8,11 @@ import {
   applyFamiliarityGain,
   familiarityForSetup,
   familiarityGainScale,
+  tacticsAffinityShift,
+  tacticsDistance,
+  tacticsSignature,
   withCurrentDrilled,
+  type AxisValues,
   type FamiliaritySource,
   type TacticsSpec,
 } from "@story-fm/domain";
@@ -162,5 +167,90 @@ describe("공통 자연로그 곡선", () => {
     expect(stronger).toBeGreaterThan(1);
     expect(weaker).toBeLessThan(1);
     expect(stronger * weaker).toBeCloseTo(1, 10);
+  });
+});
+
+/**
+ * 전술 변화의 **방향** — 같은 지시도 선수마다 다르게 다가온다.
+ *
+ * 여기서 지키는 건 부호의 대칭이다. 축마다 `칸 수(부호 포함) × 축의 무게 × 쏠림`을
+ * 더하므로 **왕복은 정확히 제자리**여야 한다 — 한 톨이라도 남으면 A↔B를 오가는
+ * 것만으로 적응도를 불릴 수 있다.
+ */
+const attrsOf = (over: Partial<AxisValues> = {}): AxisValues => ({
+  ...(Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, 50])) as AxisValues),
+  ...over,
+});
+
+/** 롱볼이 자기 축구인 선수 — 킥·제공권은 최고, 연결·침착은 바닥 */
+const longBaller = attrsOf({ kicking: 99, aerial: 99, passing: 1, composure: 1 });
+
+describe("전술 변화의 방향 (tacticsAffinityShift)", () => {
+  it("왕복은 정확히 제자리다 — 오간 것만으로는 한 톨도 안 남는다", () => {
+    const far: TacticsSpec = { ...A, mentality: 5, tempo: 1, width: 4, passStyle: 5 };
+    expect(tacticsAffinityShift(longBaller, A, far)).not.toBe(0);
+    expect(
+      tacticsAffinityShift(longBaller, A, far) + tacticsAffinityShift(longBaller, far, A),
+    ).toBe(0);
+    expect(tacticsAffinityShift(longBaller, A, A)).toBe(0);
+  });
+
+  it("포메이션 교체는 이 축에 들어가지 않는다 — 구조의 문제라 방향이 없다", () => {
+    expect(tacticsAffinityShift(longBaller, A, { ...A, formation: "4-3-3" })).toBe(0);
+  });
+
+  it("쏠림 없는 선수에게는 어느 변화도 0이다 — 축의 양 끝이 똑같이 익숙하다", () => {
+    const flat = attrsOf();
+    for (const axis of [
+      "mentality",
+      "defensiveLine",
+      "pressing",
+      "tempo",
+      "width",
+      "passStyle",
+    ] as const) {
+      expect(tacticsAffinityShift(flat, A, { ...A, [axis]: 5 }), axis).toBe(0);
+    }
+  });
+
+  it("한 칸의 크기는 축의 무게를 넘지 않는다 — 쏠림은 ±1에서 잘린다", () => {
+    const step = { ...A, passStyle: 4 };
+    // 쏠림이 최대인 선수에게 한 칸은 딱 그 축의 무게(= 전술 거리)만큼이다
+    expect(tacticsAffinityShift(longBaller, A, step)).toBeCloseTo(tacticsDistance(A, step), 10);
+    // 능력 차를 더 벌려도 같은 값이다 — 클램프가 물린다
+    const extreme = attrsOf({ kicking: 99, aerial: 99, passing: 0, composure: 0 });
+    expect(tacticsAffinityShift(extreme, A, step)).toBeCloseTo(tacticsDistance(A, step), 10);
+    // 반대쪽으로 가면 부호만 뒤집힌다
+    expect(tacticsAffinityShift(longBaller, A, { ...A, passStyle: 2 })).toBeCloseTo(
+      -tacticsDistance(A, step),
+      10,
+    );
+  });
+});
+
+describe("기억에 적기 (withCurrentDrilled)", () => {
+  it("같은 전술은 기록이 하나뿐이다 — 다시 적어도 겹쳐 쌓이지 않는다", () => {
+    const once = withCurrentDrilled(undefined, A, 40, "2026-07-01");
+    const twice = withCurrentDrilled(once, A, 62.5, "2026-07-08");
+    expect(twice).toHaveLength(1);
+    expect(twice[0]).toMatchObject({
+      signature: tacticsSignature(A),
+      familiarity: 62.5,
+      lastUsedOn: "2026-07-08",
+    });
+  });
+
+  it("다른 전술의 기억은 뒤에 그대로 남는다 — 방금 쓴 것이 맨 앞이다", () => {
+    const onA = withCurrentDrilled(undefined, A, 70, "2026-07-01");
+    const onB = withCurrentDrilled(onA, B, 55, "2026-07-10");
+    expect(onB.map((d) => d.signature)).toEqual([tacticsSignature(B), tacticsSignature(A)]);
+    expect(onB[1]!.familiarity).toBe(70);
+  });
+
+  it("천장과 바닥에서 잘린다 — 기억이 눈금 밖에 적히지 않는다", () => {
+    expect(withCurrentDrilled(undefined, A, 120, "2026-07-01")[0]!.familiarity).toBe(
+      FAMILIARITY_MAX,
+    );
+    expect(withCurrentDrilled(undefined, A, -5, "2026-07-01")[0]!.familiarity).toBe(0);
   });
 });

@@ -1,4 +1,10 @@
-import type { GamePlayer, MatchRecord, ScheduleEntry } from "@story-fm/domain";
+import type {
+  GamePlayer,
+  MatchRecord,
+  ScheduleEntry,
+  SeasonRecord,
+  SeasonStat,
+} from "@story-fm/domain";
 import {
   YELLOWS_PER_SUSPENSION,
   ageOf,
@@ -17,7 +23,7 @@ import { addDays, dayOfWeek, diffDays, seasonYear, squadReturnOf } from "../comp
 import { entrantsOf } from "../competition/europe";
 import { formLabel } from "../squad/form";
 import { INJURY_SEVERITY_KO } from "../squad/injury";
-import { moodOf } from "../squad/mood";
+import { moodAnchor, moodOf } from "../squad/mood";
 import {
   isHomegrownFor,
   occupiesSquadList,
@@ -287,6 +293,48 @@ function sortCondition(state: GameState, p: GamePlayer): number {
     : readCondition(state, p.id, p.state.condition).value;
 }
 
+/**
+ * 풀 하나의 정렬 키 — **선수당 한 번만** 뽑는다.
+ *
+ * 원장에서 읽는 키(득점·출전·주급)는 원장을 한 번 훑어 색인으로 세운다. `find`가
+ * 첫 줄을 고르므로 색인도 **먼저 만난 줄을 남긴다** — 같은 선수에 줄이 둘이어도
+ * 고르는 값이 달라지지 않는다.
+ */
+function sortKeyOf(
+  state: GameState,
+  pool: readonly GamePlayer[],
+  sortBy: NonNullable<SearchPlayersInput["sortBy"]>,
+): (p: GamePlayer) => number {
+  if (sortBy === "age") return () => 0;
+  if (sortBy === "rating" || sortBy === "fatigue") {
+    // 안개 키는 지식 수준 파생이라 비싸다 — 풀당 한 번만 뽑고 비교는 그 값으로 한다
+    const fogged = new Map(
+      pool.map(
+        (p) =>
+          [p.id, sortBy === "rating" ? sortRating(state, p) : sortCondition(state, p)] as const,
+      ),
+    );
+    return (p) => fogged.get(p.id) ?? 0;
+  }
+  if (sortBy === "wage") {
+    const wage = new Map<string, number>();
+    for (const c of state.contracts) {
+      if (c.status !== "active") continue;
+      if (!wage.has(c.gamePlayerId)) wage.set(c.gamePlayerId, c.weeklyWage);
+    }
+    return (p) => wage.get(p.id) ?? 0;
+  }
+  // 스탯은 시즌·팀까지 같아야 그 선수의 줄이다 — 시즌 중 이적하면 팀별로 갈린다
+  const stat = new Map<string, SeasonStat>();
+  for (const s of state.seasonStats) {
+    if (s.season !== state.season) continue;
+    const k = `${s.gamePlayerId}\u0000${s.teamId}`;
+    if (!stat.has(k)) stat.set(k, s);
+  }
+  const of = (p: GamePlayer) => stat.get(`${p.id}\u0000${p.teamId}`);
+  return sortBy === "goals" ? (p) => of(p)?.goals ?? 0 : (p) => of(p)?.apps ?? 0;
+}
+
 // ── 검색 ────────────────────────────────────────────────
 
 export interface SearchPlayersInput {
@@ -353,35 +401,23 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
   const pool = input.name ? rankByName(input.name, narrowed).matches : narrowed;
 
   const sortBy = input.sortBy ?? "rating";
-  // 안개 키는 지식 수준 파생이라 비싸다 — 풀당 한 번만 뽑고 비교는 그 값으로 한다
-  const fogged =
-    sortBy === "rating" || sortBy === "fatigue"
-      ? new Map(
-          pool.map(
-            (p) =>
-              [p.id, sortBy === "rating" ? sortRating(state, p) : sortCondition(state, p)] as const,
-          ),
-        )
-      : null;
-  const fog = (p: GamePlayer) => fogged?.get(p.id) ?? 0;
+  /**
+   * **정렬 키는 비교자가 아니라 풀에서 뽑는다.**
+   *
+   * 비교자 안의 `seasonStatOf`·`activeContract`는 한 번이 원장 전체 훑기라,
+   * 5,700명을 세우면 그 선형 탐색이 n·log n번 돈다(주급 정렬 실측 2.7초).
+   * 키를 선수당 한 번만 뽑아 두면 비교는 숫자 대 숫자가 된다 — 순서는 그대로다.
+   */
+  const key = sortKeyOf(state, pool, sortBy);
   const sorted = [...pool].sort((a, b) => {
     switch (sortBy) {
       case "age":
         return ageOf(a.birthdate, state.date) - ageOf(b.birthdate, state.date);
       case "fatigue":
         // 지친 순 — 체력이 낮은 쪽이 앞
-        return fog(a) - fog(b);
-      case "goals":
-        return (seasonStatOf(state, b.id)?.goals ?? 0) - (seasonStatOf(state, a.id)?.goals ?? 0);
-      case "apps":
-        return (seasonStatOf(state, b.id)?.apps ?? 0) - (seasonStatOf(state, a.id)?.apps ?? 0);
-      case "wage":
-        return (
-          (activeContract(state, b.id)?.weeklyWage ?? 0) -
-          (activeContract(state, a.id)?.weeklyWage ?? 0)
-        );
+        return key(a) - key(b);
       default:
-        return fog(b) - fog(a);
+        return key(b) - key(a);
     }
   });
 
@@ -472,6 +508,27 @@ function historyLines(state: GameState, p: GamePlayer): string[] {
   return lines;
 }
 
+/**
+ * GM이 읽는 심경 한 줄 — 결산이 다시 쓴 문장이 있으면 그것, 없으면 **사실 줄**.
+ * 코어가 GM에게 넘기는 것은 사실뿐이다 (overview.md §1 철칙 4).
+ */
+function moodLine(state: GameState, player: GamePlayer): string {
+  const mood = moodOf(state, player);
+  return mood.note ?? moodAnchor(mood.facts);
+}
+
+/**
+ * 그 시즌의 보드 평가 — 등급과 근거 수치. 옛 세이브는 평가 문장을 들고 있어
+ * 그것이 폴백이다 (career.md §6).
+ */
+function boardLine(record: SeasonRecord): string {
+  if (record.board) {
+    const met = record.board.grade === "met";
+    return ` — 보드 기대 ${record.board.target}위(${record.board.expectation}) · ${met ? "달성" : "미달"}`;
+  }
+  return record.boardVerdict ? ` — 보드: "${record.boardVerdict}"` : "";
+}
+
 /** 그 자리에서 맡고 있는 세부 역할의 한글 이름 (미지정이면 기본 역할) */
 function roleLabel(position: string, roleId?: string): string {
   const defs = rolesFor(position);
@@ -515,7 +572,7 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
   if (knowledge === "own") {
     lines.push(
       `컨디션: 폼 ${formLabel(p.state.form)} · 체력 ${p.state.condition} (${conditionLabel(p.state.condition)})`,
-      `심경: ${moodOf(state, p)}`,
+      `심경: ${moodLine(state, p)}`,
       `소화 포지션: ${p.positions
         .map((x) => `${x.position}${x.isNatural ? "*" : ""}${x.proficiency}`)
         .join(" / ")}`,
@@ -1289,7 +1346,7 @@ export function careerView(state: GameState): LookupResult {
       lines.push(
         `  시즌 ${r.season} (${year}-${String((year + 1) % 100).padStart(2, "0")}) ${teamNameIn(state, r.teamId)} ` +
           `${r.position}위 · ${r.wins}승 ${r.draws}무 ${r.losses}패 · 득 ${r.goalsFor} 실 ${r.goalsAgainst}` +
-          (r.boardVerdict ? ` — 보드: "${r.boardVerdict}"` : ""),
+          boardLine(r),
       );
     }
     if (records.length > 10) lines.push(`  …그 외 ${records.length - 10}시즌`);

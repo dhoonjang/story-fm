@@ -615,6 +615,12 @@ export function advanceSegment(
      */
     toExtraTime: needsExtraTime(state, match, pending.ledger.score),
     maxMinutes: options.maxMinutes,
+    /**
+     * **앞 구간이 멈춘 소수 시각에서 잇는다** — 장부의 분에서 다시 출발하면 정지점마다
+     * 최대 1분이 되감겨 그 시간이 두 번 굴려진다 (match.md §1.4). 옛 세이브에는 이
+     * 값이 없다 — 그때는 예전처럼 장부의 분이 출발점이다.
+     */
+    clock: pending.segmentClock,
     rng,
   });
 
@@ -665,6 +671,8 @@ export function advanceSegment(
   // 흐름의 양(패스·슛·xg·선방)은 사건이 아니라 숫자로 쌓인다
   pending.ledger = addStats(pending.ledger, plan.stats);
   pending.segment = segment + 1;
+  // 다음 구간이 이어받을 연속 시계 — 장부의 정수 분이 잘라 버린 소수 자리를 여기 남긴다
+  pending.segmentClock = plan.clock;
   /**
    * **상대 벤치도 판단한다** — 스코어와 남은 시간을 보고 무게를 옮긴다.
    * 이 값은 pendingMatch에만 남아 그 경기에서만 쓰인다 (저장된 팀 전술은 불변).
@@ -1316,7 +1324,7 @@ export function finalizeMatch(state: GameState): MatchDigest {
     digest.push(
       e.team === side
         ? `부상: ${player.name} — ${part}, 약 ${days}일 결장 예상`
-        : `상대 ${player.name}이(가) ${part} 부상으로 쓰러졌다`,
+        : `상대 ${player.name} ${part} 부상`,
     );
   }
   /**

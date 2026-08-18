@@ -2,12 +2,16 @@ import { describe, expect, it } from "vitest";
 import { ATTRIBUTE_AXES } from "@story-fm/domain";
 import {
   buildStrengthPacket,
+  edgeOf,
   famFactor,
+  instructionUptake,
+  matchIntensity,
   profFactor,
+  stateModifier,
   tacticalFit,
   type SideInput,
 } from "@story-fm/sim";
-import { makeSide } from "./helpers";
+import { makeSide, tactics } from "./helpers";
 
 describe("적응도 전력 팩터", () => {
   it("포지션 0은 0.1이고 로그 곡선이 1≈0.2, 25≈0.6을 근사한다", () => {
@@ -650,5 +654,143 @@ describe("전력차와 총 기대 득점", () => {
     expect(sumOf(78, 72).ratio).toBeGreaterThan(1.5);
     expect(sumOf(82, 68).ratio).toBeGreaterThan(sumOf(78, 72).ratio);
     expect(sumOf(86, 64).ratio).toBeGreaterThan(sumOf(82, 68).ratio);
+  });
+});
+
+/**
+ * 눈금과 클램프 — **지시가 그라운드에 닿기 전에 지나는 문들**.
+ *
+ * 값 하나하나가 아니라 문의 위치를 고정한다. 계수는 밸런스라 움직이겠지만, 문이
+ * 열려 있어야 할 곳에서 닫히거나 (하한이 실제로 물린다) 닫혀 있어야 할 곳에서
+ * 열리면 (상한이 눈금 안에서 닿는다) 설계가 바뀐 것이다.
+ */
+describe("경기 강도 (matchIntensity)", () => {
+  it("기본 전술은 1이고, 압박이 템포보다 무겁다", () => {
+    expect(matchIntensity(tactics())).toBe(1);
+    expect(matchIntensity(tactics({ pressing: 5 }))).toBe(1.14);
+    expect(matchIntensity(tactics({ tempo: 5 }))).toBe(1.08);
+  });
+
+  it("하한 0.8은 물리고 상한 1.3은 눈금 안에서 닿지 않는다", () => {
+    // 1~5 스물다섯 조합 전부가 밴드 안이고, 그중 최소는 하한에 **잘려서** 0.8이다
+    const all: number[] = [];
+    for (let pressing = 1; pressing <= 5; pressing++) {
+      for (let tempo = 1; tempo <= 5; tempo++)
+        all.push(matchIntensity(tactics({ pressing, tempo })));
+    }
+    expect(Math.min(...all)).toBe(0.8);
+    expect(matchIntensity(tactics({ pressing: 1, tempo: 1 })), "하한이 안 물렸다").toBe(0.8);
+    // 상한은 방어선일 뿐 — 가장 격렬한 전술도 1.22에서 멈춘다
+    expect(Math.max(...all)).toBe(1.22);
+  });
+});
+
+describe("지시 적용률 (instructionUptake)", () => {
+  it("0.45~1.0의 양 끝에 정확히 닿는다 — 감독의 말이 아주 안 통하지도, 다 통하지도 않는다", () => {
+    expect(instructionUptake(0, 0)).toBe(0.45);
+    expect(instructionUptake(99, 100)).toBe(1);
+    // 두 축은 각자 제 몫을 낸다 — 감독 0.35, 팀 적응도 0.2
+    expect(instructionUptake(99, 0)).toBe(0.8);
+    expect(instructionUptake(0, 100)).toBe(0.65);
+  });
+
+  it("적응도는 0~100으로 접힌다 — 눈금 밖 값이 문을 밀지 못한다", () => {
+    expect(instructionUptake(60, -50)).toBe(instructionUptake(60, 0));
+    expect(instructionUptake(60, 500)).toBe(instructionUptake(60, 100));
+  });
+
+  it("두 축 모두 단조 증가한다 — 자라는데 되레 안 통하는 구간이 없다", () => {
+    for (const fam of [0, 50, 100]) {
+      let previous = 0;
+      for (let tactic = 0; tactic <= 99; tactic++) {
+        const now = instructionUptake(tactic, fam);
+        expect(now, `적응도 ${fam} · 전술 ${tactic}에서 되레 내려갔다`).toBeGreaterThanOrEqual(
+          previous,
+        );
+        previous = now;
+      }
+    }
+  });
+});
+
+describe("경기 중 지시 (inMatch)", () => {
+  const opponent = () => makeSide("b", 75);
+
+  it("남은 거리의 절반을 메운다 — 벤치의 한마디가 라커룸의 한마디보다 잘 먹힌다", () => {
+    const side = () => makeSide("a", 75, { managerTactics: 99, familiarity: 0 });
+    const still = buildStrengthPacket(side(), opponent(), { neutral: true });
+    const live = buildStrengthPacket(side(), opponent(), { neutral: true, inMatch: true });
+    expect(still.home.tactical.uptake).toBe(0.8);
+    expect(live.home.tactical.uptake).toBeCloseTo(0.9, 10);
+  });
+
+  it("이미 다 통하는 팀에는 아무것도 더하지 않는다 — 1을 넘길 문이 없다", () => {
+    const full = (id: string) => makeSide(id, 75, { managerTactics: 99, familiarity: 100 });
+    const still = buildStrengthPacket(full("a"), full("b"), { neutral: true });
+    const live = buildStrengthPacket(full("a"), full("b"), { neutral: true, inMatch: true });
+    expect(live.home.tactical.uptake).toBe(1);
+    // 양쪽이 모두 천장이면 경기 중 패킷은 라커룸 패킷과 한 글자도 다르지 않다
+    expect(live).toEqual(still);
+  });
+});
+
+describe("판세 밴드 (edgeOf) — 문턱은 이 함수 하나뿐이다", () => {
+  it("even → slight → clear → big의 문턱이 정확하다", () => {
+    expect(edgeOf(1)).toEqual({ edge: "even", size: "slight" });
+    expect(edgeOf(1.034)).toEqual({ edge: "even", size: "slight" });
+    expect(edgeOf(1.035)).toEqual({ edge: "home", size: "slight" });
+    expect(edgeOf(1.069)).toEqual({ edge: "home", size: "slight" });
+    expect(edgeOf(1.07)).toEqual({ edge: "home", size: "clear" });
+    expect(edgeOf(1.149)).toEqual({ edge: "home", size: "clear" });
+    expect(edgeOf(1.15)).toEqual({ edge: "home", size: "big" });
+  });
+
+  it("좌우가 대칭이다 — 뒤집으면 편만 바뀌고 크기는 그대로다", () => {
+    for (const ratio of [1.01, 1.05, 1.1, 1.2, 1.6, 3]) {
+      const home = edgeOf(ratio);
+      const away = edgeOf(1 / ratio);
+      expect(away.size, `비율 ${ratio}`).toBe(home.size);
+      expect(away.edge, `비율 ${ratio}`).toBe(home.edge === "home" ? "away" : "even");
+    }
+  });
+});
+
+describe("상태 계수 (stateModifier)", () => {
+  it("기준(폼 0 · 컨디션 75)이 1이고, 폼 ±1이 ±9%, 컨디션 25칸이 ±6.25%다", () => {
+    expect(stateModifier({ form: 0, condition: 75 })).toBe(1);
+    expect(stateModifier({ form: 1, condition: 75 })).toBeCloseTo(1.09, 10);
+    expect(stateModifier({ form: -1, condition: 75 })).toBeCloseTo(0.91, 10);
+    expect(stateModifier({ form: 0, condition: 100 })).toBeCloseTo(1.0625, 10);
+    expect(stateModifier({ form: 0, condition: 50 })).toBeCloseTo(0.9375, 10);
+  });
+
+  it("하한 0.4는 방어선일 뿐 — 눈금 안에서는 0.72 아래로 안 내려간다", () => {
+    let low = Number.POSITIVE_INFINITY;
+    let high = Number.NEGATIVE_INFINITY;
+    for (const form of [-1, -0.5, 0, 0.5, 1]) {
+      for (let condition = 0; condition <= 100; condition++) {
+        const mod = stateModifier({ form, condition });
+        low = Math.min(low, mod);
+        high = Math.max(high, mod);
+      }
+    }
+    expect(low, "하한이 물렸다 — 계수가 0.4까지 떨어졌다").toBeCloseTo(0.7225, 10);
+    expect(high).toBeCloseTo(1.1525, 10);
+  });
+});
+
+describe("업셋 확률 (upsetChance)", () => {
+  it("대등하면 0.35고, 전력이 벌어질수록 내려가되 0.05~0.45를 벗어나지 않는다", () => {
+    const even = buildStrengthPacket(makeSide("a", 75), makeSide("b", 75), { neutral: true });
+    expect(even.guide.upsetChance).toBe(0.35);
+
+    let previous = even.guide.upsetChance;
+    for (const away of [70, 60, 50, 40, 30]) {
+      const packet = buildStrengthPacket(makeSide("a", 90), makeSide("b", away), { neutral: true });
+      expect(packet.guide.upsetChance, `상대 ${away}`).toBeLessThanOrEqual(previous);
+      expect(packet.guide.upsetChance).toBeGreaterThanOrEqual(0.05);
+      expect(packet.guide.upsetChance).toBeLessThanOrEqual(0.45);
+      previous = packet.guide.upsetChance;
+    }
   });
 });

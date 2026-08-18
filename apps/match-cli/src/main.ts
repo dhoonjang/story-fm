@@ -90,7 +90,7 @@ const names = { home: fixture.home.teamName, away: fixture.away.teamName };
 const packet = buildStrengthPacket(toSideInput(fixture.home), toSideInput(fixture.away));
 
 console.log("═══ 전력 분석 패킷 ═══");
-console.log(packet.summary);
+console.log(`${packet.home.teamName}(홈) vs ${packet.away.teamName}`);
 for (const m of packet.matchups) console.log(`  · ${m.why}`);
 for (const k of packet.keyPoints) console.log(`  ★ ${k}`);
 console.log(
@@ -134,6 +134,8 @@ function makeRng(base: number, channel: string): () => number {
 }
 let segmentIndex = 0;
 const matchFatigue: Record<string, number> = {};
+/** 구간 시뮬의 연속 시계 — 장부의 정수 분이 잘라 버린 소수 자리를 다음 구간에 잇는다 */
+let matchClock: number | undefined;
 
 /** 다음 정지점까지 굴려 장부에 반영하고, 캐스터에게 줄 대본을 돌려준다 */
 function runSegment(): { note: string; stop: string } {
@@ -147,8 +149,10 @@ function runSegment(): { note: string; stop: string } {
     ledger,
     squads,
     tactics: { home: fixture.home.tactics, away: fixture.away.tactics },
+    clock: matchClock,
     rng,
   });
+  matchClock = plan.clock;
   const aiSub = planAiSubstitution("away", squads.away, ledger, plan, rng);
   const events: MatchEvent[] = aiSub ? [aiSub, ...plan.events] : plan.events;
   const result = applyEvents(ledger, events);

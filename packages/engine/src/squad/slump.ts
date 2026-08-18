@@ -35,6 +35,12 @@ export const RUN_MAX = 0.12;
 /** 침체가 불만으로 번지는 연패 — 이 지점부터 한 명이 등을 돌린다 */
 export const SLUMP_ISSUE_LOSSES = 4;
 
+/**
+ * 계단이 문턱을 넘어 얼마나 더 길어졌는지까지 보려고 창에 얹는 여유 —
+ * 문턱만큼만 읽으면 4연패도 3연패와 같은 폭이 된다.
+ */
+const STREAK_ROOM = 3;
+
 export type MatchOutcome = "win" | "draw" | "loss";
 
 /**
@@ -91,7 +97,7 @@ export function runBonus(wins: number): number {
  *
  * @param margin 우리 득점 − 실점
  * @param played 그 경기에 뛴 선수 id — 대패의 대가는 그라운드에 있던 사람이 치른다
- * @returns 감독에게 알릴 만한 일이 있으면 한 줄 (없으면 null)
+ * @returns 감독에게 알릴 만한 연속 기록이 있으면 그 사실 (없으면 null)
  */
 export function applyResultMood(
   state: GameState,
@@ -99,7 +105,7 @@ export function applyResultMood(
   margin: number,
   played: readonly string[],
 ): string | null {
-  const outcomes = recentOutcomes(state, teamId, Math.max(SLUMP_LOSSES, RUN_WINS) + 3);
+  const outcomes = recentOutcomes(state, teamId, Math.max(SLUMP_LOSSES, RUN_WINS) + STREAK_ROOM);
   const losses = streakOf(outcomes, "loss");
   const wins = streakOf(outcomes, "win");
   const squad = playersOf(state, teamId);
@@ -121,8 +127,8 @@ export function applyResultMood(
 
   if (losses >= SLUMP_ISSUE_LOSSES) markSlumpIssue(state, teamId, squad, losses);
 
-  if (losses >= SLUMP_LOSSES) return `${losses}연패 — 라커룸이 가라앉았다`;
-  if (wins >= RUN_WINS) return `${wins}연승 — 선수단 분위기가 올라 있다`;
+  if (losses >= SLUMP_LOSSES) return `${losses}연패`;
+  if (wins >= RUN_WINS) return `${wins}연승`;
   return null;
 }
 
@@ -151,7 +157,8 @@ function markSlumpIssue(
   state.issues.push({
     gamePlayerId: candidate.id,
     kind: "unhappy",
-    note: `${losses}연패 — 팀 상황에 불만`,
+    reason: "losing-run",
+    count: losses,
     since: state.date,
   });
 }

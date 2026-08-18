@@ -272,13 +272,11 @@ function reviewEuropeanCampaign(state: GameState): string[] {
       state.trophies.push({ season: state.season, competition: cup.name, teamId: champion });
       state.manager.reputation.media = Math.min(100, state.manager.reputation.media + 10);
       state.manager.reputation.board = Math.min(100, state.manager.reputation.board + 10);
-      digest.push(`🏆 ${cup.name} 우승! 유럽 정상에 올랐다`);
+      digest.push(`🏆 ${cup.name} 우승`);
       pushNarrative(state, `${cup.name} 우승`, 5);
     } else if (ours) {
       state.manager.reputation.media = Math.min(100, state.manager.reputation.media + 4);
-      digest.push(
-        `${competitionShortName(cup.id)} 준우승 — 결승에서 ${teamName(champion)}에 무너졌다`,
-      );
+      digest.push(`${competitionShortName(cup.id)} 준우승 — 결승 상대 ${teamName(champion)}`);
       pushNarrative(state, `${competitionShortName(cup.id)} 준우승`, 4);
     } else {
       digest.push(`${competitionShortName(cup.id)} 우승: ${teamName(champion)}`);
@@ -297,9 +295,6 @@ export function reviewSeason(state: GameState): string[] {
 
   const expectation = boardExpectation(state, state.userTeamId);
   const met = position <= expectation.target;
-  const verdict = met
-    ? `기대(${expectation.label})를 충족했다 — 보드가 만족한다`
-    : `기대(${expectation.label})에 미치지 못했다 — 보드의 신뢰가 흔들린다`;
   state.manager.reputation.board = Math.max(
     0,
     Math.min(100, state.manager.reputation.board + (met ? 8 : -8)),
@@ -311,9 +306,7 @@ export function reviewSeason(state: GameState): string[] {
       competition: leagueName(leagueOfTeamIn(state, state.userTeamId)),
       teamId: state.userTeamId,
     });
-    digest.push(
-      `🏆 ${leagueName(leagueOfTeamIn(state, state.userTeamId))} 우승! 트로피 보관함에 추가되었다`,
-    );
+    digest.push(`🏆 ${leagueName(leagueOfTeamIn(state, state.userTeamId))} 우승`);
   }
   digest.push(...reviewEuropeanCampaign(state));
   digest.push(...reviewDomesticCups(state));
@@ -331,13 +324,18 @@ export function reviewSeason(state: GameState): string[] {
     losses: row.losses,
     goalsFor: row.goalsFor,
     goalsAgainst: row.goalsAgainst,
-    boardVerdict: verdict,
+    board: {
+      grade: met ? "met" : "missed",
+      position,
+      target: expectation.target,
+      expectation: expectation.label,
+    },
     leagueId: leagueOfTeamIn(state, state.userTeamId),
   });
 
   digest.push(
     `시즌 ${state.season} 종료 — 최종 ${position}위 (${row.wins}승 ${row.draws}무 ${row.losses}패, 득실 ${row.goalDiff > 0 ? "+" : ""}${row.goalDiff})`,
-    verdict,
+    `보드 평가: 기대 ${expectation.label} · 최종 ${position}위 — ${met ? "달성" : "미달"}`,
   );
   for (const a of state.achievements.filter((x) => x.season === state.season)) {
     digest.push(`업적 달성: ${a.name} — ${a.description}`);

@@ -179,6 +179,46 @@ export function betterAtPosition(state: GameState, teamId: string, player: GameP
   ).length;
 }
 
+/**
+ * `betterAtPosition`을 여러 번 물어야 할 때 쓰는 **팀×자리 색인** — 세는 규칙은
+ * 위와 같고, 선수 배열을 한 번만 훑는다.
+ *
+ * AI 재계약 검토(`runAiRenewals`)는 하루에 수백 건의 계약을 보는데, 건마다 전
+ * 선수를 훑으면 그 하루가 5,777 × 수백이 된다. 색인은 **읽기 전용 파생**이라
+ * 선수의 소속·전력이 그대로인 동안만 유효하다 — 한 번의 순회 안에서 세우고 버린다.
+ */
+export interface SquadDepth {
+  /** 그 팀 그 자리에서 이 선수보다 나은 선수 수 */
+  betterThan(teamId: string, player: GamePlayer): number;
+}
+
+export function squadDepthOf(state: GameState): SquadDepth {
+  // 자리별 전력을 내림차순으로 — "나보다 큰" 구간이 앞쪽 연속이 되어 경계만 찾으면 된다
+  const bySlot = new Map<string, number[]>();
+  for (const p of state.players) {
+    const slot = `${p.teamId}\u0000${naturalPositionOf(p).position}`;
+    const list = bySlot.get(slot);
+    if (list) list.push(p.attributes.overall);
+    else bySlot.set(slot, [p.attributes.overall]);
+  }
+  for (const list of bySlot.values()) list.sort((a, b) => b - a);
+  return {
+    betterThan(teamId, player) {
+      const list = bySlot.get(`${teamId}\u0000${naturalPositionOf(player).position}`);
+      if (!list) return 0;
+      const mine = player.attributes.overall;
+      let lo = 0;
+      let hi = list.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (list[mid]! > mine) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
+    },
+  };
+}
+
 /** 파는 쪽의 태도 — 요구액이 시장가에서 얼마나 벌어지는가 */
 function sellerStance(state: GameState, player: GamePlayer): { multiple: number; why: string[] } {
   const why: string[] = [];

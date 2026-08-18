@@ -47,6 +47,7 @@ pnpm balance finance       # 파일 이름으로 걸러 하나만
 | `world-season`         | 한 시즌 득점·슈팅 분포 · 승점 곡선 · 카드           | [match](match.md) §7        |
 | `ai-rotation`          | AI 스쿼드 체력 분포 · 로테이션 문턱 발동률          | [match](match.md) §7        |
 | `assist-rate`          | 골에 도움이 붙는 비율                               | [match](match.md) §7        |
+| `segment-shots`        | 구간 시뮬의 경기당 슈팅이 패킷 기대 슈팅과 같은가   | [match](match.md) §1.4      |
 | `injury-rate`          | 경기당 부상 건수 · 성향이 빈도에 닿는 폭            | [match](match.md) §7        |
 | `finance-tier1`        | tier1 한 시즌 장부 손익 · 현금 · 급여 비중 · 수입   | [finance](finance.md) §10.1 |
 | `finance-leagues`      | 리그별 잔고 — 어느 리그도 구조적 적자가 아니다      | [finance](finance.md) §10.3 |

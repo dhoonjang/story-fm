@@ -67,7 +67,7 @@ export interface WageSubject {
  * (finance.md §6.3). 게임이 시작한 뒤 도는 자리는 전부 `state`를 넘긴다.
  */
 export function clubWageBudget(teamId: string, leagueId?: string, state?: GameState): number {
-  return affordableWageBill(teamId, leagueId, state) / 52;
+  return affordableWageBill(teamId, leagueId, state) / WEEKS_PER_YEAR;
 }
 
 /**
@@ -76,6 +76,9 @@ export function clubWageBudget(teamId: string, leagueId?: string, state?: GameSt
  * 현금만 보면 이적료는 못 내도 주급은 낼 수 있는 것처럼 보인다. 이적료는 한 번
  * 나가지만 주급은 매주 나가므로 파산의 실제 경로는 대개 이쪽이다.
  */
+/** 주급을 연봉으로 펴는 눈금 — 계약은 주 단위로 적히고 장부는 해로 센다 */
+const WEEKS_PER_YEAR = 52;
+
 export const WAGE_HEADROOM = 1.1;
 
 /**

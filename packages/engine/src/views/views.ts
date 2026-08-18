@@ -60,7 +60,7 @@ import { euroCompetitionOf } from "../competition/europe";
 import { formAngle, formLabel, formTone } from "../squad/form";
 import { ratingTone, type RatingTone } from "../match/ratings";
 import { GAP_CONDITION, edgeOf, zoneGrid } from "@story-fm/sim";
-import { moodOf } from "../squad/mood";
+import { moodOf, type MoodRead } from "../squad/mood";
 import { isHomegrownFor, occupiesSquadList, squadRegistrationOf } from "../squad/registration";
 import {
   observationOf,
@@ -84,7 +84,7 @@ import { MANAGER_ATTR_CAP, MANAGER_XP_PER_LEVEL } from "../skills";
 import { askingPriceFor, marketValueOf, wageExpectationOf } from "../market/market";
 import { settlingPercent } from "../squad/settling";
 import { INJURY_SEVERITY_KO } from "../squad/injury";
-import { computeStandings, type StandingRow } from "../competition/season";
+import { boardExpectation, computeStandings, type StandingRow } from "../competition/season";
 import { hasRelegation, leagueOfTeamIn } from "../competition/promotion";
 import { RELEGATION_SLOTS } from "../core/league-shape";
 import { isCupOnlyLeague } from "../data/league-catalog";
@@ -111,8 +111,6 @@ import {
   weeklyWagesOf,
   type GameState,
 } from "../core/state";
-
-/** 오피스 뷰 — 상태의 읽기 전용 프로젝션 (overview §2.4) */
 
 /**
  * 그날 훈련이 남긴 것 — **집계 한 줄**.
@@ -396,8 +394,11 @@ interface SquadViewRowMeta {
    * 쓰면 감독이 두 탭을 견주는 것만으로 안개가 걷힌다.
    */
   condition: ConditionRead;
-  /** 지금 심경 한 줄 — 코어 앵커(`describeMood`) 위에 결산이 다시 쓴 문장 (`moodOf`) */
-  mood: string;
+  /**
+   * 지금 심경 — **코어가 고른 사실 카드**와, 결산(LLM)이 다시 쓴 한 줄(`moodOf`).
+   * 문장은 화면이 쓴다 (`apps/web/lib/mood.ts` · overview.md §1 철칙 4).
+   */
+  mood: MoodRead;
   /** 배치 역할 — 없으면 예비(스쿼드) */
   role: "선발" | "벤치" | "스쿼드";
   /** 이 전술에서 맡는 포지션 (배치가 있을 때) */
@@ -477,9 +478,9 @@ interface SquadViewRowMeta {
 /**
  * 달력 일지의 한 줄.
  *
- * 아이콘을 **문자열에 박지 않는다.** 예전엔 `"🏋️ 오전 훈련"`처럼 이모지를 앞에
- * 붙였는데, 그러면 ① 플랫폼마다 모양·너비가 달라 줄이 흔들리고 ② UI가 종류를 알 수
- * 없어 색·정렬로 구분할 방법이 없다. 종류는 데이터로 주고 그림은 화면이 그린다.
+ * ⚠️ 아이콘을 **문자열에 박지 않는다.** 이모지를 앞에 붙이면 ① 플랫폼마다 모양·
+ * 너비가 달라 줄이 흔들리고 ② UI가 종류를 알 수 없어 색·정렬로 구분할 방법이 없다.
+ * 종류는 데이터로 주고 그림은 화면이 그린다.
  */
 export interface CalendarEventView {
   kind:
@@ -517,8 +518,7 @@ export interface CalendarEntryView {
   isNext: boolean;
   /**
    * 경기 전용 조각 — 달력 칸은 좁아서 제목을 통째로 쓸 수 없다.
-   * 여기서 조각을 주면 UI가 문자열을 잘라 쓰지 않아도 된다
-   * (예전엔 `title.replace(/^R\d+\s/, "")` 같은 정규식으로 도려냈다).
+   * 여기서 조각을 주면 UI가 `title`을 정규식으로 도려내지 않아도 된다.
    */
   match: {
     /** 대회 약칭 — 리그는 null (기본값이라 칸에 적지 않는다) */
@@ -576,6 +576,26 @@ export interface CompetitionRoundView {
 }
 
 /**
+ * 다음 경기 한 칸 — **팀 단위와 대회 단위가 같은 조각을 쓴다.**
+ *
+ * 조각으로 싣는 이유: 화면이 날짜·상대·홈원정을 각자 배치하려면 조각이 필요하고,
+ * 무엇보다 **며칠 남았는지**가 있어야 한다. 체력이 자리마다 다르게 깎이고 회복이
+ * 며칠에 걸리는 지금(match.md §3), "사흘 뒤"인지 "엿새 뒤"인지가 곧 로테이션 판단이다.
+ */
+export interface NextMatchView {
+  date: string;
+  /** 킥오프 시각 `20:00` */
+  time: string;
+  /** 어느 경기인가 — 팀 단위는 대회까지(`프리미어리그 R2`), 대회 단위는 그 대회의 라운드 */
+  label: string;
+  /** 상대 팀 이름 (풀네임) */
+  opponent: string;
+  venue: "home" | "away" | "neutral";
+  /** 오늘로부터 며칠 뒤인가 — 0이면 오늘이다 */
+  inDays: number;
+}
+
+/**
  * 대회 하나 — 순위표 + 라운드별 일정 (+ 대항전이면 브래킷).
  * 우리가 나가는 대회만 만든다 (감독의 관심 범위 = 우리 리그 + 우리 대항전).
  */
@@ -590,8 +610,12 @@ export interface CompetitionView {
   zones: StandingZone[];
   /** 우리 순위 (0 = 순위표에 없음) */
   userPosition: number;
-  /** 이 대회의 다음 우리 경기 요약 */
-  next: string | null;
+  /**
+   * **이 대회의** 다음 우리 경기 — 남은 경기가 없으면 null(탈락·일정 종료·추첨 전).
+   * 팀 단위 `competitions.nextMatch`와 같은 조각이고, 무엇을 세울지는 화면이 고른다
+   * (메인 UI는 보고 있는 대회, 경기 중 탭은 팀 — overview §5 · match.md §8).
+   */
+  nextMatch: NextMatchView | null;
   rounds: CompetitionRoundView[];
   /** 녹아웃 단계별 대진 — 리그는 빈 배열 */
   bracket: BracketStageView[];
@@ -668,7 +692,6 @@ export interface EuropeView {
   playoffCutoff: number;
 }
 
-/** 경기 중 한 선수 — 지금 내는 전력과 남은 다리 */
 /**
  * 그 선수가 **이 경기에서 한 일** — 장부 사건(`ledger.events`)에서 파생한다.
  *
@@ -692,6 +715,7 @@ export interface MatchTally {
   scoringExpectation: number;
 }
 
+/** 경기 중 한 선수 — 지금 내는 전력과 남은 다리 */
 export interface MatchPlayerView {
   id: string;
   name: string;
@@ -886,6 +910,7 @@ export interface MatchView {
   sentOff: string[];
 }
 
+/** 오피스 뷰 — 상태의 읽기 전용 프로젝션 (overview §5) */
 export interface OfficeViews {
   /** 경기 중에만 채워진다 — 그 밖에는 null */
   match: MatchView | null;
@@ -936,7 +961,12 @@ export interface OfficeViews {
     weeklyWages: number;
     transferBudget: number;
     budgetFrozen: boolean;
-    boardExpectation: string;
+    /**
+     * **보드가 지금 이 구단에 지고 있는 기대** — 체급이 정한다 (`boardExpectation`).
+     * 지난 시즌의 **평가**가 아니다: 그 둘을 한 칸에 겹쳐 두면 첫 시즌의 감독이
+     * 아무도 매기지 않은 평가를 읽는다.
+     */
+    boardExpectation: { target: number; label: string };
     stadium: { name: string; capacity: number };
     /** 급여 비중 — **시즌 누계** (급여 ÷ 매출). 한 달만 보면 프리시즌에 튄다 */
     wageRatio: number;
@@ -950,28 +980,14 @@ export interface OfficeViews {
     /** 실시간 재정 활동 — 최근 원장을 접은 줄 (최신 순, docs/simulation/finance.md §8.1) */
     feed: FinanceFeedRow[];
   };
-  /** 대회 — 우리 리그 + 우리 대항전. 대회별 순위표와 일정이 한 자리에 (§2.4) */
+  /** 대회 — 우리 리그 + 우리 대항전. 대회별 순위표와 일정이 한 자리에 (overview §5) */
   competitions: {
     /**
-     * **우리 팀의 당장 다음 경기** — 경기 중에는 달력 대신 이것만 본다.
-     *
-     * 조각으로 싣는 이유: 화면이 날짜·상대·홈원정을 각자 배치하려면 조각이
-     * 필요하고, 무엇보다 **며칠 남았는지**가 있어야 한다. 체력이 자리마다 다르게
-     * 깎이고 회복이 며칠에 걸리는 지금(match.md §3), "사흘 뒤"인지 "엿새 뒤"인지가
-     * 곧 로테이션 판단이다.
+     * **우리 팀의 당장 다음 경기** — 대회를 가리지 않는다. 경기 중 대회 탭이
+     * 세우는 것이 이것이다(match.md §8): 90분 안에 묻는 것은 이 경기가 끝난 뒤
+     * 언제 누구인가지 그 대회의 다음 라운드가 아니다.
      */
-    nextMatch: {
-      date: string;
-      /** 킥오프 시각 `20:00` */
-      time: string;
-      /** 대회 + 단계 (`프리미어리그 R2`) */
-      label: string;
-      /** 상대 팀 이름 (풀네임) */
-      opponent: string;
-      venue: "home" | "away" | "neutral";
-      /** 오늘로부터 며칠 뒤인가 — 0이면 오늘이다 */
-      inDays: number;
-    } | null;
+    nextMatch: NextMatchView | null;
     recentResults: string[];
     /** 탭 순서: 우리 리그 → 우리 대항전 */
     list: CompetitionView[];
@@ -985,10 +1001,13 @@ export interface OfficeViews {
       position: number;
       record: string;
       /**
-       * 그 시즌에 대한 보드의 평가 한 줄 — **순위와 전적이 말하지 않는 것**.
-       * 같은 4위가 어느 구단에서는 성공이고 어느 구단에서는 실패다(career.md §5).
+       * 그 시즌에 대한 **보드 평가 카드** — 등급과 근거 수치 (career.md §6).
+       * 순위와 전적이 말하지 않는 것이 여기 있다: 같은 4위가 어느 구단에서는
+       * 성공이고 어느 구단에서는 실패인 이유가 `target`에 남는다. 문장은 화면이 쓴다.
        */
-      boardVerdict: string;
+      board: { grade: "met" | "missed"; target: number; expectation: string } | null;
+      /** 옛 세이브가 들고 있는 평가 문장 — `board`가 없을 때만 선다 */
+      boardVerdict: string | null;
     }>;
   };
 }
@@ -1497,6 +1516,23 @@ function buildMatchView(state: GameState): MatchView | null {
 }
 
 /**
+ * 경기 하나를 "다음 경기" 조각으로 — 팀 단위와 대회 단위가 같은 함수를 쓴다.
+ * 갈리는 것은 **무엇을 골랐는가**와 표기(`label`)뿐이라, 같은 경기를 두 자리에서
+ * 다르게 적을 길이 없다.
+ */
+function nextMatchView(state: GameState, m: MatchRecord, label: string): NextMatchView {
+  const userTeamId = state.userTeamId;
+  return {
+    date: m.date,
+    time: m.time ?? "15:00",
+    label,
+    opponent: teamNameIn(state, m.homeTeamId === userTeamId ? m.awayTeamId : m.homeTeamId),
+    venue: m.neutral ? "neutral" : m.homeTeamId === userTeamId ? "home" : "away",
+    inDays: Math.max(0, diffDays(state.date, m.date)),
+  };
+}
+
+/**
  * 대회 하나의 뷰 — 순위표 + 라운드별 일정.
  *
  * 라운드 묶음은 `(stage, round)`로 만든다. 리그는 stage가 없어 `R3`이 곧 라운드고,
@@ -1515,15 +1551,20 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
   for (const stage of ["league", "playoff", "r32", "r16", "qf", "sf", "final"]) {
     order.set(stage, order.size);
   }
-  const grouped = new Map<string, CompetitionRoundView>();
-  for (const m of matches) {
+  // 라운드 표기는 한 번만 적는다 — 묶음 머리와 "다음 경기" 카드가 같은 문장을 쓴다
+  const roundLabelOf = (m: MatchRecord): string => {
     const stage = m.stage ?? "league";
-    const key = `${stage}:${m.round}`;
-    const label = cup
+    return cup
       ? stage === "league"
         ? `리그 페이즈 ${m.round}R`
         : competitionStageLabel(competitionId, stage, m.round)
       : `${m.round}라운드`;
+  };
+  const grouped = new Map<string, CompetitionRoundView>();
+  for (const m of matches) {
+    const stage = m.stage ?? "league";
+    const key = `${stage}:${m.round}`;
+    const label = roundLabelOf(m);
     const round = grouped.get(key) ?? { key, label, date: m.date, matches: [], current: false };
     round.matches.push({
       id: m.id,
@@ -1553,8 +1594,17 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
   if (current) current.current = true;
 
   const standings = computeStandings(state, competitionId);
-  const nextOurs = matches.find(
-    (m) => !m.result && (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+  /**
+   * 이 대회의 다음 우리 경기 — **팀 단위와 같은 함수로 고른다.**
+   *
+   * 결과가 없는 첫 경기를 그냥 집으면 경기 중에는 그게 **지금 이 경기**다(결과는
+   * 종료 시점에 쓰인다). 그러면 대회 머리줄이 "다음 · 오늘 · 지금 상대"가 된다.
+   */
+  const nextOurs = nextMatchFor(
+    matches,
+    state.userTeamId,
+    state.date,
+    state.pendingMatch?.matchId ?? null,
   );
   const bracket = cup ? buildBracket(state, competitionId) : [];
   return {
@@ -1565,9 +1615,7 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
     standings,
     zones: buildStandingZones(state, competitionId, standings.length),
     userPosition: standings.findIndex((r) => r.teamId === state.userTeamId) + 1,
-    next: nextOurs
-      ? `${nextOurs.date} ${nextOurs.neutral ? "중립" : nextOurs.homeTeamId === state.userTeamId ? "홈" : "원정"} vs ${teamNameIn(state, nextOurs.homeTeamId === state.userTeamId ? nextOurs.awayTeamId : nextOurs.homeTeamId)}`
-      : null,
+    nextMatch: nextOurs ? nextMatchView(state, nextOurs, roundLabelOf(nextOurs)) : null,
     rounds,
     bracket,
     cupProgress: cupProgressOf(bracket),
@@ -1695,10 +1743,9 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         /**
          * 이 자리·이 **역할**에서 내는 전력 — 기본값과 다를 때만 채운다.
          *
-         * 예전엔 "자리 묶음이 주 포지션과 다를 때"만 냈다. 그러면 센터백이 센터백
-         * 자리에 선 채로 **역할만 바꿨을 때** 화면의 숫자가 꿈쩍도 하지 않는다 —
-         * 볼 플레잉 디펜더와 노넌센스는 요구 역량이 다른데도. 자리든 역할이든
-         * 기본과 달라지면 그 값을 보여주는 게 맞다.
+         * ⚠️ 자리 묶음만 보지 않는다. 센터백이 센터백 자리에 선 채로 **역할만**
+         * 바꿔도(볼 플레잉 디펜더 ↔ 노넌센스) 요구 역량이 달라지므로, 자리든
+         * 역할이든 기본과 달라지면 그 값을 낸다.
          */
         slotOverall: slotValue !== null && slotValue !== shownOverall ? slotValue : null,
         // 오피스는 우리 선수의 숫자를 그대로 보여준다 (player.md §10). 단 **적응 중인 새
@@ -1911,8 +1958,8 @@ export function buildOfficeViews(state: GameState): OfficeViews {
           result = `${my}-${their}${pensLabel} ${win === "W" ? "승" : win === "L" ? "패" : "무"}`;
           const mySide = home ? "home" : "away";
           /**
-           * 득점자 — **도움까지 함께 읽는다.** 장부는 골의 68%에 도움을 붙이는데
-           * 결과에 안 남기던 때는 "어시스트가 기록되지 않는다"로 보였다
+           * 득점자 — **도움까지 함께 읽는다.** 장부는 골 대부분에 도움을 붙이므로
+           * 여기서 빠뜨리면 화면에는 "어시스트가 기록되지 않는다"로 보인다
            * (`MatchResult.assists` — 득점자와 같은 순서, 없는 골은 빈 칸).
            */
           const assistIds = m.result.assists ?? [];
@@ -2153,8 +2200,6 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         `${fixtureLabel(m.competitionId, m.stage ?? "league", m.round)} ${teamShortNameIn(state, m.homeTeamId)} ${m.result?.homeGoals}-${m.result?.awayGoals} ${teamShortNameIn(state, m.awayTeamId)}${m.result?.penalties ? ` (승부차기 ${m.result.penalties.home}-${m.result.penalties.away})` : ""}`,
     );
 
-  const lastRecord = state.seasonRecords[state.seasonRecords.length - 1];
-
   return {
     match: buildMatchView(state),
     squad: {
@@ -2202,7 +2247,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       weeklyWages: weeklyWagesOf(state, userTeamId),
       transferBudget: finance.transferBudget,
       budgetFrozen: finance.budgetFrozen === true,
-      boardExpectation: lastRecord?.boardVerdict ?? "시즌 목표 달성",
+      boardExpectation: boardExpectation(state, userTeamId),
       stadium: { name: stadium.stadium, capacity: stadium.capacity },
       // 시즌 누계 기준 — 한 달만 보면 프리시즌에 100%를 넘어 무의미하다
       wageRatio: seasonWageRatio(state),
@@ -2213,20 +2258,14 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       feed,
     },
     competitions: {
+      // 대회 이름을 **언제나** 붙인다 — 이 카드 하나가 유일한 일정 정보라
+      // "R2"만 적으면 무슨 대회의 2라운드인지 화면 어디에도 없다
       nextMatch: next
-        ? {
-            date: next.date,
-            time: next.time ?? "15:00",
-            // 대회 이름을 **언제나** 붙인다 — 이 카드 하나가 유일한 일정 정보라
-            // "R2"만 적으면 무슨 대회의 2라운드인지 화면 어디에도 없다
-            label: competitionLabel(next.competitionId, next.stage ?? "league", next.round),
-            opponent: teamNameIn(
-              state,
-              next.homeTeamId === userTeamId ? next.awayTeamId : next.homeTeamId,
-            ),
-            venue: next.neutral ? "neutral" : next.homeTeamId === userTeamId ? "home" : "away",
-            inDays: Math.max(0, diffDays(state.date, next.date)),
-          }
+        ? nextMatchView(
+            state,
+            next,
+            competitionLabel(next.competitionId, next.stage ?? "league", next.round),
+          )
         : null,
       recentResults,
       list: competitionList,
@@ -2247,7 +2286,10 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         teamName: teamNameIn(state, s.teamId),
         position: s.position,
         record: `${s.wins}승 ${s.draws}무 ${s.losses}패`,
-        boardVerdict: s.boardVerdict,
+        board: s.board
+          ? { grade: s.board.grade, target: s.board.target, expectation: s.board.expectation }
+          : null,
+        boardVerdict: s.boardVerdict ?? null,
       })),
     },
   };
@@ -2258,17 +2300,11 @@ export { assignmentsOf };
 // ── 스카우팅 보고서 — 채팅이 카드로 그린다 ──────────────
 
 /**
- * 스카우트가 가져온 **보고서 한 장**.
- *
- * 예전엔 "스카우트 보고서 도착: 홀란 — 능력치를 정확히 파악했다" 한 줄이
- * 다이제스트에 묻혀 화면에 아예 뜨지 않았다. 며칠을 기다려 얻은 정보인데
- * 감독은 그걸 보러 선수 검색을 다시 해야 했다.
+ * 스카우트가 가져온 **보고서 한 장**을 조립한다 — 안개는 `observedRating`이 이미 씌운다.
  *
  * **한 번 읽고 넘어갈 정보가 아니다** — 능력치 15축·주발·잠재력 구간·몸값이
  * 한자리에 있어야 "지금 지를까, 더 볼까"가 판단된다. 그래서 카드다.
  */
-
-/** 보고서 한 장을 조립한다 — 안개는 `observedRating`이 이미 씌운다 */
 export function scoutReportCard(state: GameState, playerId: string): ScoutReportCard | null {
   const p = playerById(state, playerId);
   if (!p) return null;

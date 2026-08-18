@@ -4,7 +4,7 @@ import { tierOfTeamIn } from "../core/club-tier";
 import { positionAt, relegationLine } from "../core/league-shape";
 import { inventPersonName } from "../world/persona";
 import { makeRng, randInt } from "../core/rng";
-import { boardExpectation, computeStandings } from "../competition/season";
+import { boardExpectation, computeStandings, type StandingRow } from "../competition/season";
 import { AI_MANAGER_RATING_FALLBACK, clampCondition } from "@story-fm/domain";
 import { playersOf, pushNarrative, teamName, teamShortName, type GameState } from "../core/state";
 
@@ -87,24 +87,50 @@ const USER_MIN_MATCHES = 12;
 /** 보드 평판이 이 아래로 내려가야 마지막 단계로 간다 */
 const USER_BOARD_FLOOR = 25;
 
+/**
+ * 순위표를 리그당 한 번만 짓는 자 — **같은 표를 96번 세우지 않는다.**
+ *
+ * `runManagerMarket`은 96구단을 돌며 각자의 순위를 묻는데, 순위표는 경기 원장에서
+ * 파생하고 이 루프는 원장을 건드리지 않는다(감독 이름·선수 상태만 바뀐다). 한 번
+ * 세운 표를 그대로 돌려줘도 같은 답이다.
+ */
+function standingsCache(state: GameState): (leagueId: string) => StandingRow[] {
+  const built = new Map<string, StandingRow[]>();
+  return (leagueId) => {
+    let table = built.get(leagueId);
+    if (!table) {
+      table = computeStandings(state, leagueId);
+      built.set(leagueId, table);
+    }
+    return table;
+  };
+}
+
 /** 그 팀이 리그에서 몇 위인가 (1부만 — 2부는 리그전이 없다) */
-function positionOf(state: GameState, teamId: string): { position: number; played: number } | null {
+function positionOf(
+  state: GameState,
+  teamId: string,
+  tableOf: (leagueId: string) => StandingRow[],
+): { position: number; played: number } | null {
   const leagueId = leagueOfTeamIn(state, teamId);
   if (!topLeagues().some((l) => l.id === leagueId)) return null;
-  const table = computeStandings(state, leagueId);
+  const table = tableOf(leagueId);
   const index = table.findIndex((r) => r.teamId === teamId);
   if (index < 0) return null;
   return { position: index + 1, played: table[index]!.played };
 }
 
 /** 지금 자리 — 순위와 소화 경기 수 */
-function seatStatus(state: GameState, teamId: string): { position: number; played: number } | null {
-  return positionOf(state, teamId);
+function seatStatus(
+  state: GameState,
+  teamId: string,
+  tableOf: (leagueId: string) => StandingRow[] = standingsCache(state),
+): { position: number; played: number } | null {
+  return positionOf(state, teamId, tableOf);
 }
 
 /** 부임한 지 얼마나 됐나 — 옛 세이브엔 없어 시즌 시작으로 본다 */
-function daysInCharge(state: GameState, teamId: string): number {
-  const team = state.teams.find((t) => t.id === teamId);
+function daysInCharge(state: GameState, team: { managerSince?: string } | undefined): number {
   const since = team?.managerSince ?? state.calendar.preseasonStart;
   return Math.max(0, Math.round((Date.parse(state.date) - Date.parse(since)) / 86_400_000));
 }
@@ -119,12 +145,13 @@ export function runManagerMarket(state: GameState, digest: string[]): void {
   const rng = makeRng(state.seed, `manager-market:${state.date}`);
   let sacked = 0;
   const ourLeague = leagueOfTeamIn(state, state.userTeamId);
+  const tableOf = standingsCache(state);
 
   for (const team of state.teams) {
     if (sacked >= SACKINGS_PER_DAY) break;
     if (team.id === state.userTeamId) continue;
-    if (daysInCharge(state, team.id) < GRACE_DAYS) continue;
-    const standing = seatStatus(state, team.id);
+    if (daysInCharge(state, team) < GRACE_DAYS) continue;
+    const standing = seatStatus(state, team.id, tableOf);
     if (!standing || standing.played < MIN_MATCHES) continue;
     if (standing.position < seatOf(state, team.id).sack) continue;
     /**
@@ -196,10 +223,10 @@ export function reviewUserSeat(state: GameState, digest: string[]): boolean {
   manager.lastWarnedOn = state.date;
 
   const sackable = standing.position >= userSackBottom(leagueSizeIn(state, state.userTeamId));
+  const expectation = boardExpectation(state, state.userTeamId);
   if (next < USER_WARNINGS_BEFORE_SACK || !sackable || board > USER_BOARD_FLOOR) {
     manager.boardWarnings = next;
     manager.reputation.board = Math.max(0, board - 6);
-    const expectation = boardExpectation(state, state.userTeamId);
     digest.push(
       `⚠️ 보드가 성적을 문제 삼았다 — 기대는 ${expectation.label}인데 현재 ${standing.position}위다` +
         ` (경고 ${next}/${USER_WARNINGS_BEFORE_SACK})`,
@@ -212,7 +239,7 @@ export function reviewUserSeat(state: GameState, digest: string[]): boolean {
     on: state.date,
     season: state.season,
     teamId: state.userTeamId,
-    reason: `기대(${boardExpectation(state, state.userTeamId).label})에 한참 못 미쳤다`,
+    reason: `기대 ${expectation.label} · 현재 ${standing.position}위`,
   };
   digest.push(`💼 경질 — ${teamName(state.userTeamId)}가 감독 계약을 해지했다`);
   pushNarrative(state, `${teamName(state.userTeamId)} 경질`, 5);
