@@ -106,7 +106,6 @@ import { makeRng, randInt } from "./rng";
 // domestic-cup과 같은 이유로 안전하다 — training-plan은 state를 **타입으로만** 읽는다
 import { installDefaultTraining } from "../squad/training-plan";
 
-/** 채팅 턴 — 도구 호출 기록 포함 (UI가 스킬 칩으로 렌더) */
 /** 감독이 화면에서 직접 바꾼 것 한 줄 — GM이 읽고 나면 사라진다 */
 export interface PendingEdit {
   /** 접기 키 — 같은 키의 조작은 마지막 것만 남는다 (`role:p-123`, `lineup`) */
@@ -115,20 +114,6 @@ export interface PendingEdit {
   at: string;
 }
 
-/**
- * **스킬 결과의 구조화 요약** — 머리줄 하나와 항목 몇 개.
- *
- * 예전엔 결과가 `summary` 문자열 하나였고, 화면이 그걸 ` · `로 되쪼개 항목을
- * 만들었다. 그러면 두 가지가 깨진다: 문구가 바뀌면 화면이 조용히 어긋나고,
- * 길이를 아무도 모르므로 말풍선 한 줄이 대여섯 줄로 접힌다.
- *
- * 그래서 **코어가 항목을 낸다.** 화면은 항목을 그대로 세우고 넘치면 접는다
- * (`PanelHint.more`). `summary`는 LLM에게 돌려주는 줄로 남는다 — 모델은 길어도
- * 읽지만 말풍선은 그렇지 않다.
- *
- * ⚠️ **항목 하나는 한 줄에 든다.** 건수와 갈래까지만 적고, LLM이 쓴 자유 문장은
- * 싣지 않는다 (그 문장은 장면과 서사 로그에 이미 있다).
- */
 /**
  * 항목 하나 — **값과 갈래를 갈라 낸다.**
  *
@@ -145,6 +130,15 @@ export interface SkillBriefItem {
   note?: string;
 }
 
+/**
+ * **스킬 결과의 구조화 요약** — 머리줄 하나와 항목 몇 개.
+ *
+ * 화면은 항목을 그대로 세우고 넘치면 접는다 (`PanelHint.more`) — 요약 문자열을
+ * 되쪼개지 않는다. `summary`는 LLM에게 돌려주는 줄로 남는다.
+ *
+ * ⚠️ **항목 하나는 한 줄에 든다.** 건수와 갈래까지만 적고, LLM이 쓴 자유 문장은
+ * 싣지 않는다 (그 문장은 장면과 서사 로그에 이미 있다).
+ */
 export interface SkillBrief {
   /** 무엇을 했나 — 스킬 이름값의 짧은 머리줄 (`라인업 확정`) */
   head: string;
@@ -201,6 +195,7 @@ export interface ToolCallRecord {
    */
   line?: number;
 }
+/** 채팅 턴 — 도구 호출 기록 포함 (UI가 스킬 칩으로 렌더) */
 export interface ChatTurn {
   /**
    * 누가 한 말인가.
@@ -639,8 +634,8 @@ export interface GameState {
 
   // ── 서사 ──
   /**
-   * 인물 — 데이터로 다루는 페르소나 (people.md §1). 지금은 수석코치 하나이고,
-   * 구단주·기자·핵심 선수가 같은 배열에 붙는다. 옛 세이브엔 없어 optional —
+   * 인물 — 데이터로 다루는 페르소나 (people.md §1). 수석코치·구단주·기자가 한
+   * 배열에 붙는다. 옛 세이브엔 없어 optional —
    * 로드 시 시드로 채운다(`ensurePersonas`)므로 세이브 버전을 올리지 않는다.
    */
   personas?: Persona[];
@@ -819,11 +814,6 @@ export function resolvePlayerRef(pool: readonly GamePlayer[], ref: string): Play
   return { player: best, candidates: matches };
 }
 
-/** 이름으로 선수 하나 — 확신이 갈리면 null (후보까지 필요하면 resolvePlayerRef) */
-export function findPlayerByName(state: GameState, name: string): GamePlayer | null {
-  return resolvePlayerRef(state.players, name).player;
-}
-
 export function playerName(state: GameState, id: string): string {
   return playerById(state, id)?.name ?? id;
 }
@@ -835,8 +825,8 @@ export function groupOf(player: GamePlayer): PositionGroup {
 /**
  * 능력치 변경 후 overall 재계산 — **표시용 종합의 단일 공식** `bestOverall`.
  *
- * ⚠️ 보유 자리 목록을 반드시 넘긴다. 주 포지션 하나로 내던 때는 어드민 표와
- * 게임의 OVR이 5,320명 중 1,160명에서 갈렸다 (player.md §4).
+ * ⚠️ 보유 자리 목록을 반드시 넘긴다 — 주 포지션 하나로 내면 어드민 표와 게임의
+ * OVR이 갈린다 (player.md §4).
  */
 export function recomputeOverall(player: GamePlayer): void {
   player.attributes.overall = bestOverall(player.attributes, player.positions);
@@ -1011,10 +1001,6 @@ export function financeOf(state: GameState, teamId: string): TeamFinance {
   const f = state.finances.find((x) => x.teamId === teamId);
   if (!f) throw new Error(`재정 없음: ${teamId}`);
   return f;
-}
-
-export function userFinance(state: GameState): TeamFinance {
-  return financeOf(state, state.userTeamId);
 }
 
 export function seasonStatOf(
@@ -1575,8 +1561,8 @@ function lineupFit(p: GamePlayer, slot: string, prof = proficiencyAt(p, slot)): 
 
 /**
  * 맡은 자리에서의 실제 기여 — 시뮬의 존 기여 점수와 **같은 잣대**.
- * 적응도 팩터는 sim에서 가져온다 (예전엔 같은 식이 양쪽에 복제돼 있었다 —
- * 한쪽만 고치면 배치가 고른 자리와 경기가 계산하는 자리가 조용히 갈린다).
+ * ⚠️ 적응도 팩터는 sim에서 가져온다. 여기에 같은 식을 다시 쓰면 배치가 고른
+ * 자리와 경기가 계산하는 자리가 조용히 갈린다.
  */
 function slotStrength(p: GamePlayer, slot: string): number {
   return roleFit(p.attributes, slot) * profFactor(proficiencyAt(p, slot));
@@ -1586,10 +1572,9 @@ function slotStrength(p: GamePlayer, slot: string): number {
  * 이 스쿼드로 그 모양을 세우면 나오는 **전력**.
  *
  * ⚠️ 채점 전에 **자리를 제대로 배치해야** 한다. `roleFit`만 보고 그리디로 채우면
- * 라이스가 라이트백에, 요케레스가 윙에 서는 라인업이 나오고 — 그 엉터리 배치의
- * 합으로 모양을 고르니 96팀 중 40팀이 5-4-1이 됐다. 배치는 실제 라인업과 같은
- * 기준(`lineupFit`: 포지션 적응도 + OVR + 포지션군)으로 뽑고, **전력 합은**
- * 그렇게 뽑힌 11명의 존 기여로 낸다.
+ * 라이스가 라이트백에, 요케레스가 윙에 서는 라인업이 나오고, 그 배치의 합으로
+ * 모양이 정해진다. 배치는 실제 라인업과 같은 기준(`lineupFit`: 포지션 적응도 +
+ * OVR + 포지션군)으로 뽑고, **전력 합은** 그렇게 뽑힌 11명의 존 기여로 낸다.
  *
  * 모든 모양이 11자리라 자리별 기준선은 합에서 상쇄된다 — 따로 정규화하지 않는다.
  */
@@ -1605,8 +1590,8 @@ function shapeStrength(
 
 /**
  * (선수 × 슬롯) 점수 캐시 — 프리셋 5개를 훑으면 같은 조합을 몇 번씩 다시 잰다.
- * `proficiencyAt`이 포지션 배열을 훑으므로 그대로 두면 새 게임 하나에 100만 번
- * 가까이 불린다 (게임 생성이 0.4초 → mock GM 테스트가 타임아웃까지 갔다).
+ * `proficiencyAt`이 포지션 배열을 훑으므로 캐시가 없으면 새 게임 하나에 100만 번
+ * 가까이 불린다.
  *
  * `preferred`를 주면 지정 선발 가산까지 얹은 **실제 라인업과 같은 잣대**가 된다 —
  * 모양을 고르는 쪽과 자리를 앉히는 쪽이 다른 점수를 쓰면, 세울 수 있는 모양인데도
@@ -1618,7 +1603,7 @@ function memoFit(preferred?: ReadonlySet<string>): (p: GamePlayer, slot: string)
     const key = `${p.id}|${slot}`;
     let v = cache.get(key);
     if (v === undefined) {
-      // 적응도는 한 번만 — `fillSlots`가 쌍 교환을 세 번 돌며 이 함수를 수만 번 부른다
+      // 적응도는 한 번만 — `fillSlots`의 헝가리안이 이 함수를 수만 번 부른다
       const prof = proficiencyAt(p, slot);
       v =
         lineupFit(p, slot, prof) + (preferred?.has(p.id) && prof >= XI_BONUS_FLOOR ? XI_BONUS : 0);
@@ -1633,10 +1618,8 @@ function memoFit(preferred?: ReadonlySet<string>): (p: GamePlayer, slot: string)
  *
  * ⚠️ **여섯 축의 리그 평균이 3에 서야 한다.** 3이 중립이고 전술 델타는 3에서의
  * 편차로 계산되므로(`tacticalDeltas`), 프리셋이 한쪽으로 쏠리면 **리그 전체가
- * 같은 방향의 이득과 대가를 달고 선다**. 예전 프리셋은 여섯 축이 전부 3 이상이라
- * (멘탈리티 3.30 · 압박 3.47 · 라인 3.30 · 템포 3.34 · 폭 3.78 · 패스 3.12) 리그
- * 평균이 공격 +2.4 / 수비 −2.3을 달고 서서, 판세 3×3이 상대와 무관하게 "우리
- * 진영이 밀린다"만 반복했다.
+ * 같은 방향의 이득과 대가를 달고 선다** — 판세 3×3이 상대와 무관하게 한 방향만
+ * 되풀이한다.
  *
  * 그래서 각 스타일은 **올린 축만큼 내린 축을 갖는다** — 점유는 라인과 폭을 올리는
  * 대신 템포와 패스 길이를 내리고, 역습·롱볼은 라인과 압박을 내린다. 프리셋을

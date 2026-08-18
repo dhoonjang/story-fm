@@ -5,11 +5,9 @@
  * 무엇을 세는지가 코드 밖에서도 분명해진다. 런타임 장부는 그 함수들을 모듈 하나에
  * 모아 둔 것뿐이고, 실제 호출은 `meterLlm`이 감싼 `GameLLM`을 지난다.
  *
- * ⚠️ **상한은 게임을 멈추지 않는다.** AGENTS.md 4장의 "비용 상한이 게임 진행이나
- * 연출을 깎지 않는다"가 여기 그대로 걸린다 — 상한을 넘겨도 GM·중계는 계속 돌고,
- * 끊기는 것은 **세 결산 에이전트뿐**이다. 결산은 원래 "실패하면 앵커가 남는" 계약이라
- * (agents.md §4) 건너뛴 자리에 이미 코어의 값이 서 있다. 상한이 서사를 끊으면
- * 감독은 세계가 왜 침묵하는지 알 수 없다.
+ * ⚠️ **상한은 게임을 멈추지 않는다.** 상한을 넘겨도 GM·중계는 계속 돌고, 끊기는
+ * 것은 **세 결산 에이전트뿐**이다. 결산은 "실패하면 앵커가 남는" 계약이라
+ * (agents.md §4) 건너뛴 자리에 이미 코어의 값이 서 있다.
  */
 
 import { AGENT_NAMES, type AgentName, type LlmEnv } from "./config";
@@ -232,11 +230,6 @@ export function llmUsage(): UsageLedger {
 export function resetLlmUsage(): void {
   sessionLedger = emptyLedger();
   warned.clear();
-}
-
-/** 어댑터 밖에서 잰 호출도 같은 장부에 넣는다 */
-export function noteLlmUsage(agent: AgentName, usage: TurnUsage): void {
-  sessionLedger = recordUsage(sessionLedger, agent, usage);
 }
 
 function warnOnce(key: string, message: string): void {

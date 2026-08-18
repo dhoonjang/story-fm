@@ -63,12 +63,6 @@ export function isTextHistoryMessage(value: unknown): value is TextHistoryMessag
 }
 
 /**
- * 게임 도구 — LLM의 tool call을 받아 검증(Zod)·실행하는 계약.
- * handle()은 파싱 실패·규칙 위반을 한국어 메시지로 돌려주고,
- * 어댑터가 이를 tool_result(is_error)로 되돌려 LLM이 수정 재시도하게
- * 한다 (AGENTS.md 6-2 재시도 규약).
- */
-/**
  * 도구가 불린 **자리** — 그때까지 모델이 쓴 본문.
  *
  * 스킬은 장면 한복판에서 불린다: 코치가 "라인업 조정하겠습니다"라고 답한 **뒤**에
@@ -84,6 +78,12 @@ export interface ToolCallContext {
   text: string;
 }
 
+/**
+ * 게임 도구 — LLM의 tool call을 받아 검증(Zod)·실행하는 계약.
+ * handle()은 파싱 실패·규칙 위반을 한국어 메시지로 돌려주고,
+ * 어댑터가 이를 tool_result(is_error)로 되돌려 LLM이 수정 재시도하게
+ * 한다 (AGENTS.md 6-2 재시도 규약).
+ */
 export interface GameToolSpec {
   name: string;
   description: string;

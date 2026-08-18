@@ -112,8 +112,6 @@ import {
   type GameState,
 } from "../core/state";
 
-/** 오피스 뷰 — 상태의 읽기 전용 프로젝션 (overview §2.4) */
-
 /**
  * 그날 훈련이 남긴 것 — **집계 한 줄**.
  *
@@ -480,9 +478,9 @@ interface SquadViewRowMeta {
 /**
  * 달력 일지의 한 줄.
  *
- * 아이콘을 **문자열에 박지 않는다.** 예전엔 `"🏋️ 오전 훈련"`처럼 이모지를 앞에
- * 붙였는데, 그러면 ① 플랫폼마다 모양·너비가 달라 줄이 흔들리고 ② UI가 종류를 알 수
- * 없어 색·정렬로 구분할 방법이 없다. 종류는 데이터로 주고 그림은 화면이 그린다.
+ * ⚠️ 아이콘을 **문자열에 박지 않는다.** 이모지를 앞에 붙이면 ① 플랫폼마다 모양·
+ * 너비가 달라 줄이 흔들리고 ② UI가 종류를 알 수 없어 색·정렬로 구분할 방법이 없다.
+ * 종류는 데이터로 주고 그림은 화면이 그린다.
  */
 export interface CalendarEventView {
   kind:
@@ -520,8 +518,7 @@ export interface CalendarEntryView {
   isNext: boolean;
   /**
    * 경기 전용 조각 — 달력 칸은 좁아서 제목을 통째로 쓸 수 없다.
-   * 여기서 조각을 주면 UI가 문자열을 잘라 쓰지 않아도 된다
-   * (예전엔 `title.replace(/^R\d+\s/, "")` 같은 정규식으로 도려냈다).
+   * 여기서 조각을 주면 UI가 `title`을 정규식으로 도려내지 않아도 된다.
    */
   match: {
     /** 대회 약칭 — 리그는 null (기본값이라 칸에 적지 않는다) */
@@ -695,7 +692,6 @@ export interface EuropeView {
   playoffCutoff: number;
 }
 
-/** 경기 중 한 선수 — 지금 내는 전력과 남은 다리 */
 /**
  * 그 선수가 **이 경기에서 한 일** — 장부 사건(`ledger.events`)에서 파생한다.
  *
@@ -719,6 +715,7 @@ export interface MatchTally {
   scoringExpectation: number;
 }
 
+/** 경기 중 한 선수 — 지금 내는 전력과 남은 다리 */
 export interface MatchPlayerView {
   id: string;
   name: string;
@@ -913,6 +910,7 @@ export interface MatchView {
   sentOff: string[];
 }
 
+/** 오피스 뷰 — 상태의 읽기 전용 프로젝션 (overview §5) */
 export interface OfficeViews {
   /** 경기 중에만 채워진다 — 그 밖에는 null */
   match: MatchView | null;
@@ -982,7 +980,7 @@ export interface OfficeViews {
     /** 실시간 재정 활동 — 최근 원장을 접은 줄 (최신 순, docs/simulation/finance.md §8.1) */
     feed: FinanceFeedRow[];
   };
-  /** 대회 — 우리 리그 + 우리 대항전. 대회별 순위표와 일정이 한 자리에 (§2.4) */
+  /** 대회 — 우리 리그 + 우리 대항전. 대회별 순위표와 일정이 한 자리에 (overview §5) */
   competitions: {
     /**
      * **우리 팀의 당장 다음 경기** — 대회를 가리지 않는다. 경기 중 대회 탭이
@@ -1745,10 +1743,9 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         /**
          * 이 자리·이 **역할**에서 내는 전력 — 기본값과 다를 때만 채운다.
          *
-         * 예전엔 "자리 묶음이 주 포지션과 다를 때"만 냈다. 그러면 센터백이 센터백
-         * 자리에 선 채로 **역할만 바꿨을 때** 화면의 숫자가 꿈쩍도 하지 않는다 —
-         * 볼 플레잉 디펜더와 노넌센스는 요구 역량이 다른데도. 자리든 역할이든
-         * 기본과 달라지면 그 값을 보여주는 게 맞다.
+         * ⚠️ 자리 묶음만 보지 않는다. 센터백이 센터백 자리에 선 채로 **역할만**
+         * 바꿔도(볼 플레잉 디펜더 ↔ 노넌센스) 요구 역량이 달라지므로, 자리든
+         * 역할이든 기본과 달라지면 그 값을 낸다.
          */
         slotOverall: slotValue !== null && slotValue !== shownOverall ? slotValue : null,
         // 오피스는 우리 선수의 숫자를 그대로 보여준다 (player.md §10). 단 **적응 중인 새
@@ -1961,8 +1958,8 @@ export function buildOfficeViews(state: GameState): OfficeViews {
           result = `${my}-${their}${pensLabel} ${win === "W" ? "승" : win === "L" ? "패" : "무"}`;
           const mySide = home ? "home" : "away";
           /**
-           * 득점자 — **도움까지 함께 읽는다.** 장부는 골의 68%에 도움을 붙이는데
-           * 결과에 안 남기던 때는 "어시스트가 기록되지 않는다"로 보였다
+           * 득점자 — **도움까지 함께 읽는다.** 장부는 골 대부분에 도움을 붙이므로
+           * 여기서 빠뜨리면 화면에는 "어시스트가 기록되지 않는다"로 보인다
            * (`MatchResult.assists` — 득점자와 같은 순서, 없는 골은 빈 칸).
            */
           const assistIds = m.result.assists ?? [];
@@ -2303,17 +2300,11 @@ export { assignmentsOf };
 // ── 스카우팅 보고서 — 채팅이 카드로 그린다 ──────────────
 
 /**
- * 스카우트가 가져온 **보고서 한 장**.
- *
- * 예전엔 "스카우트 보고서 도착: 홀란 — 능력치를 정확히 파악했다" 한 줄이
- * 다이제스트에 묻혀 화면에 아예 뜨지 않았다. 며칠을 기다려 얻은 정보인데
- * 감독은 그걸 보러 선수 검색을 다시 해야 했다.
+ * 스카우트가 가져온 **보고서 한 장**을 조립한다 — 안개는 `observedRating`이 이미 씌운다.
  *
  * **한 번 읽고 넘어갈 정보가 아니다** — 능력치 15축·주발·잠재력 구간·몸값이
  * 한자리에 있어야 "지금 지를까, 더 볼까"가 판단된다. 그래서 카드다.
  */
-
-/** 보고서 한 장을 조립한다 — 안개는 `observedRating`이 이미 씌운다 */
 export function scoutReportCard(state: GameState, playerId: string): ScoutReportCard | null {
   const p = playerById(state, playerId);
   if (!p) return null;
