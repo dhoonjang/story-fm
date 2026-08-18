@@ -1,4 +1,3 @@
-import { DEFAULT_SKILL_DESCRIPTIONS } from "@story-fm/agents";
 import {
   buildOfficeViews,
   speakerRoles,
@@ -100,18 +99,21 @@ function namesForChat(state: GameState): Record<string, string> {
 }
 
 /**
- * 화면에 세울 스킬 칩만 남긴다 — **지금 존재하는 스킬**의 호출만.
+ * 화면에 세울 기록만 남긴다 — **감출 것은 코어가 표식으로 적어 둔다**(`silent`).
  *
- * 채팅은 지우지 않는 기록이라 이력에는 `advance_time`처럼 그 뒤에 사라진 도구의
- * 호출이 그대로 남아 있다. 칩은 "감독이 부른 스킬"의 표시인데, 목록에도 없고
- * 어드민에서 열 수도 없는 이름이 대화에 서 있으면 없는 기능을 광고하는 셈이다.
- * 저장된 데이터는 건드리지 않고 **보여줄 때만** 거른다.
+ * 스킬 카탈로그의 이름만 남기면 코어가 남기는 기록이 함께 사라진다 — 경기 마감
+ * (`finalize_match`)의 "경기 종료"가 그것이라, 90분이 무엇으로 끝났는지가 어느
+ * 화면에도 서지 않았다. 무엇이 칩으로 설 만한 일인지는 그것을 남긴 코어가 알므로
+ * 화면은 표식만 본다 (agents.md §2).
+ *
+ * 표식이 없던 시절의 기록은 이름밖에 없어 여기서 걸리지 않는다 — 그 유령 칩은
+ * 화면이 이름으로 막는다(`chat.tsx`). 저장된 데이터는 건드리지 않고 **보여줄 때만**
+ * 거른다.
  */
-function visibleChat(chat: readonly ChatTurn[]): ChatTurn[] {
-  const known = new Set(Object.keys(DEFAULT_SKILL_DESCRIPTIONS));
+export function visibleChat(chat: readonly ChatTurn[]): ChatTurn[] {
   return chat.map((turn) => {
     if (turn.toolCalls === undefined || turn.toolCalls.length === 0) return turn;
-    const kept = turn.toolCalls.filter((c) => known.has(c.name));
+    const kept = turn.toolCalls.filter((c) => c.silent !== true);
     return kept.length === turn.toolCalls.length ? turn : { ...turn, toolCalls: kept };
   });
 }
