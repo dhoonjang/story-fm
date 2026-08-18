@@ -98,19 +98,64 @@ export interface Settling {
 }
 
 /**
+ * 원장이 말하는, 그 줄 시점의 우리와 이 선수의 사이.
+ * `type:"loan"`이 네 가지 이동을 다 적기 때문에 필요하다 (`joinedUserTeamOn`).
+ */
+type Tie =
+  /** 우리 팀 사람이 아니다 */
+  | "none"
+  /** 우리 소속으로 여기 있다 */
+  | "signed"
+  /** 임대로 와 있다 — 계약은 저쪽에 있다 */
+  | "borrowed"
+  /** 우리 선수인데 임대로 나가 있다 */
+  | "lent";
+
+/**
  * 이 선수가 우리 팀에 들어온 날 — TRANSFER 원장의 마지막 영입 기록.
  * 원소속(게임 시작 스쿼드)은 기록이 없으므로 null.
- * **유스 콜업은 적응이 없다** — 이미 이 클럽 사람이고 훈련장도 같다.
+ * **유스 콜업과 임대 복귀는 적응이 없다** — 이미 이 클럽 사람이고 훈련장도 같다.
+ *
+ * ⚠️ **`type:"loan"` 한 종류가 네 가지 이동을 적는다** — 임대 영입 · 그 선수의
+ * 반납 · 우리 선수 임대 송출 · 그 선수의 복귀. 방향만 봐서는 복귀와 영입이 같은
+ * 모양(`toTeamId` = 우리)이라, 원장을 날짜 순으로 걸으며 **직전까지의 사이**로
+ * 가른다: 나가 있던 우리 선수가 돌아온 줄은 온 날이 아니고, 임대로 데려온 선수의
+ * 줄은 온 날이다.
  */
 export function joinedUserTeamOn(state: GameState, playerId: string): string | null {
-  let latest: string | null = null;
-  for (const t of state.transfers) {
-    if (t.gamePlayerId !== playerId) continue;
-    if (t.toTeamId !== state.userTeamId) continue;
-    if (t.type === "youth") continue;
-    if (latest === null || t.date > latest) latest = t.date;
+  const ledger = state.transfers
+    .filter((t) => t.gamePlayerId === playerId)
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+  let tie: Tie = "none";
+  let joined: string | null = null;
+  for (const t of ledger) {
+    if (t.toTeamId === state.userTeamId) {
+      if (t.type === "youth") {
+        tie = "signed"; // 콜업 — 이미 이 클럽 사람이라 온 날이 없다
+        joined = null;
+      } else if (t.type !== "loan") {
+        tie = "signed";
+        joined = t.date;
+      } else if (tie === "lent") {
+        tie = "signed"; // 우리가 내보낸 임대의 복귀 — 처음 온 날이 그대로 남는다
+      } else {
+        tie = "borrowed";
+        joined = t.date;
+      }
+    } else if (t.fromTeamId === state.userTeamId) {
+      if (t.type !== "loan") {
+        tie = "none"; // 이적·방출·은퇴로 떠났다
+        joined = null;
+      } else if (tie === "borrowed") {
+        tie = "none"; // 임대로 와 있던 선수를 원소속에 돌려보냈다
+        joined = null;
+      } else {
+        tie = "lent"; // 우리 선수를 임대로 내보냈다 — 계약은 우리에게 남는다
+      }
+    }
   }
-  return latest;
+  return joined;
 }
 
 /** 그 날 부상 중이었나 — 부상 기간의 훈련은 적응에 쌓이지 않는다 */
