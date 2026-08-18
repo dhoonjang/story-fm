@@ -68,7 +68,6 @@ import {
 } from "../squad/scouting";
 import { creditSettling, settlingAnchor, settlingOf } from "../squad/settling";
 import {
-  assignmentsOf,
   groupOf,
   isInjured,
   isSuspended,
@@ -2387,20 +2386,6 @@ export function scoutPlayer(state: GameState, ref: string): MarketSkillResult {
       `${player.name}(${teamName(player.teamId)}) 스카우트 파견 — 보고 예정 ${dueOn}` +
       (done > 0 ? ` (${done + 1}번째 파견)` : ""),
   };
-}
-
-export function describeTactics(state: GameState): string {
-  const t = userTactics(state);
-  const starters = assignmentsOf(state, state.userTeamId, "starting");
-  const avgFam =
-    starters.length > 0
-      ? Math.round(starters.reduce((s, a) => s + a.familiarity, 0) / starters.length)
-      : 60;
-  const lineup = starters.map((a) => `${a.position} ${playerName(state, a.playerId)}`).join(", ");
-  return (
-    `${t.spec.formation} · 멘탈리티 ${t.spec.mentality} · 압박 ${t.spec.pressing} · 템포 ${t.spec.tempo} · ` +
-    `패스 ${t.spec.passStyle} · 평균 전술 적응도 ${avgFam}\n선발: ${lineup}`
-  );
 }
 
 export { MATCHDAY_BENCH, groupOf, tacticsOf };

@@ -185,20 +185,6 @@ export function cacheAlerts(ledger: UsageLedger): AgentName[] {
   });
 }
 
-/** 사람이 읽는 한 줄 — 로그·디버깅용 */
-export function describeUsage(ledger: UsageLedger): string {
-  const line = (label: string, entry: AgentLedger) =>
-    `${label} ${entry.calls}회 in ${entry.usage.inputTokens} out ${entry.usage.outputTokens}` +
-    ` 캐시 ${Math.round(cacheHitRate(entry.usage) * 100)}%` +
-    (entry.skipped > 0 ? ` 건너뜀 ${entry.skipped}` : "");
-  return [
-    line("합계", { calls: ledger.calls, skipped: ledger.skipped, usage: ledger.usage }),
-    ...AGENT_NAMES.filter(
-      (agent) => ledger.byAgent[agent].calls + ledger.byAgent[agent].skipped > 0,
-    ).map((agent) => line(agent, ledger.byAgent[agent])),
-  ].join(" | ");
-}
-
 /** 상한에 걸려 부르지 않았다 — 결산의 "실패하면 앵커" 경로로 떨어진다 */
 export class TokenBudgetExceededError extends Error {
   constructor(

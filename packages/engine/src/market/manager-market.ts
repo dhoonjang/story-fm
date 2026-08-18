@@ -249,9 +249,3 @@ export function reviewUserSeat(state: GameState, digest: string[]): boolean {
 function daysBetween(from: string, to: string): number {
   return Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000);
 }
-
-/** 그 팀의 현재 감독 이름 — 우리 팀은 감독 본인, AI는 선임된 사람(없으면 null) */
-export function managerNameOf(state: GameState, teamId: string): string | null {
-  if (teamId === state.userTeamId) return state.manager.name;
-  return state.teams.find((t) => t.id === teamId)?.managerName ?? null;
-}

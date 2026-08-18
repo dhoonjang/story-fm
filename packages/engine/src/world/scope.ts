@@ -75,12 +75,6 @@ export function scopedTeams(scope?: WorldScope): TeamCatalogEntry[] {
   return out;
 }
 
-/** 이 클럽이 이 세계에 있는가 */
-export function inWorld(teamId: string, scope?: WorldScope): boolean {
-  if (!scope) return true;
-  return scopedTeams(scope).some((t) => t.id === teamId);
-}
-
 /** 컵·대항전이 열리는 세계인가 */
 export function hasCups(scope?: WorldScope): boolean {
   return scope ? scope.cups : true;

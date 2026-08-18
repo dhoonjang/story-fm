@@ -555,13 +555,6 @@ export function potentialBand(state: GameState, player: GamePlayer): PotentialBa
   };
 }
 
-/** 잠재력 한 줄 — 숫자 하나가 아니라 구간이다 */
-export function potentialText(state: GameState, player: GamePlayer): string {
-  const band = potentialBand(state, player);
-  if (!band) return "미지 (성장 여력을 짐작할 근거가 없다)";
-  return `${band.low}~${band.high}`;
-}
-
 // ── 체력 (리포트가 아니라 눈으로 읽는다) ─────────────────
 
 /**
