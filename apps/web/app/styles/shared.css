@@ -335,3 +335,39 @@
   overflow-wrap: normal;
   overflow-x: auto;
 }
+
+/**
+ * 체력 막대 — **명단·판세·상대 표가 같은 하나를 쓴다**(`condition-bar.tsx`).
+ *
+ * 높을수록 좋고, 바닥나면 색으로 먼저 알린다. 채워진 만큼이 **확실한 폭**이고 그
+ * 위에 얹히는 반투명한 꼬리가 **모르는 폭**이다 — 참값이 그 어딘가에 있다는 사실이
+ * 모양으로 드러난다. 경기 밖에서는 꼬리가 없다.
+ */
+.cond-bar {
+  position: relative;
+  display: inline-block;
+  width: 46px;
+  height: 6px;
+  border-radius: var(--r-xs);
+  background: var(--panel-2);
+  overflow: hidden;
+  vertical-align: middle;
+}
+.cond-bar span {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: var(--accent);
+}
+.cond-sure {
+  left: 0;
+}
+.cond-fog {
+  opacity: 0.28;
+}
+.cond-bar.low span {
+  background: var(--gold);
+}
+.cond-bar.spent span {
+  background: var(--danger);
+}

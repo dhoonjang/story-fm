@@ -14,6 +14,7 @@ import {
   diffDays,
   playerById,
 } from "@story-fm/engine";
+import { edgeOf } from "@story-fm/sim";
 import {
   advanceAndPlay,
   advanceDays,
@@ -394,11 +395,13 @@ describe("경기 화면 뷰", () => {
     expect(m.onPitch.home).toHaveLength(11);
     expect(m.onPitch.away).toHaveLength(11);
     expect(m.zones).toHaveLength(3);
-    // 매치업은 맞붙는 두 값을 견준다 — 공격 존의 상대 값은 상대 **수비**다
+    // 매치업은 맞붙는 두 값을 견준다 — 공격 존의 상대 값은 상대 **수비**다.
+    // 값은 우리 편 기준으로 접혀 온다 (자리만 홈 기준)
     const attack = m.zones.find((z) => z.zone === "attack")!;
     const packet = state.pendingMatch!.packet;
-    expect(attack.home).toBe(packet.home.zones.attack);
-    expect(attack.away).toBe(packet.away.zones.defense);
+    const weAreHome = m.home.ours;
+    expect(attack.ours).toBe(weAreHome ? packet.home.zones.attack : packet.away.zones.defense);
+    expect(attack.theirs).toBe(weAreHome ? packet.away.zones.defense : packet.home.zones.attack);
     // 선수마다 전력과 남은 다리
     for (const p of [...m.onPitch.home, ...m.onPitch.away]) {
       expect(p.effective).toBeGreaterThan(0);
@@ -409,6 +412,23 @@ describe("경기 화면 뷰", () => {
       expect(p.condition.value).toBeLessThanOrEqual(100);
     }
     expect(m.onPitch.home.some((p) => p.ours) || m.onPitch.away.some((p) => p.ours)).toBe(true);
+
+    /**
+     * 줄 머리(존 매치업)와 그 줄 아홉 칸은 **같은 판정에서 나와야 한다.**
+     * 화면은 색만 칠하므로, 둘이 갈리면 같은 판이 두 색으로 보이고 그때 감독이
+     * 믿는 것은 화면이지 코어의 매치업 문장이 아니다.
+     */
+    for (const zone of m.zones) {
+      const row = m.grid.filter((c) => c.band === zone.zone);
+      expect(row).toHaveLength(3);
+      const ours = row.reduce((sum, c) => sum + c.ours, 0);
+      const theirs = row.reduce((sum, c) => sum + c.theirs, 0);
+      const { edge, size } = edgeOf(ours / theirs);
+      expect(zone.edge, zone.label).toBe(
+        edge === "even" ? "even" : edge === "home" ? "ours" : "theirs",
+      );
+      if (zone.edge !== "even") expect(zone.size, zone.label).toBe(size);
+    }
   });
 
   /**

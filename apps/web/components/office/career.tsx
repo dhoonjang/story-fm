@@ -273,6 +273,7 @@ export function CareerView({
               <th>팀</th>
               <th>순위</th>
               <th>전적</th>
+              <th>보드</th>
             </tr>
           </thead>
           <tbody>
@@ -282,6 +283,9 @@ export function CareerView({
                 <td>{s.teamName}</td>
                 <td>{s.position}위</td>
                 <td>{s.record}</td>
+                {/* 순위와 전적이 말하지 않는 것 — 같은 4위가 어느 구단에서는 성공이고
+                    어느 구단에서는 실패다 */}
+                <td className="career-verdict">{s.boardVerdict}</td>
               </tr>
             ))}
           </tbody>

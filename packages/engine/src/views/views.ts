@@ -2,6 +2,7 @@ import type {
   AssignmentRole,
   AxisValues,
   BoardPoint,
+  EdgeSize,
   LedgerEntry,
   MatchRecord,
   PacketPlayer,
@@ -19,6 +20,7 @@ import {
   ageOf,
   anchorOf,
   clampCondition,
+  conditionLabel,
   defaultRoleOf,
   naturalPositionOf,
   rolesFor,
@@ -54,7 +56,7 @@ import { domesticCupsOf } from "../competition/domestic-cup";
 import { drawParts, drawTitle } from "../competition/draw-schedule";
 import { euroCompetitionOf } from "../competition/europe";
 import { formAngle, formLabel, formTone } from "../squad/form";
-import { GAP_CONDITION, zoneGrid } from "@story-fm/sim";
+import { GAP_CONDITION, edgeOf, zoneGrid } from "@story-fm/sim";
 import { moodOf } from "../squad/mood";
 import { isHomegrownFor, occupiesSquadList, squadRegistrationOf } from "../squad/registration";
 import {
@@ -375,8 +377,12 @@ interface SquadViewRowMeta {
   /**
    * **체력** — 지금 이 선수의 상태 0~100 (몸과 마음이 한 축이다).
    * 왜 이 값인지는 `mood` 한 문장이 설명한다.
+   *
+   * 경기 밖에서는 아침에 잰 값 그대로라 폭이 0이고, **경기 중 출전 명단의 선수는
+   * 판세 탭과 같은 읽은 값**이다(`readCondition` · player.md §9.2). 한쪽만 참값을
+   * 쓰면 감독이 두 탭을 견주는 것만으로 안개가 걷힌다.
    */
-  condition: number;
+  condition: ConditionRead;
   /** 지금 심경 한 줄 — 코어 앵커(`describeMood`) 위에 결산이 다시 쓴 문장 (`moodOf`) */
   mood: string;
   /** 배치 역할 — 없으면 예비(스쿼드) */
@@ -681,6 +687,25 @@ export interface MatchPlayerView {
 }
 
 /**
+ * 우열 — **우리 편 기준으로 접은 `EdgeSide`.**
+ *
+ * 코어의 판정은 홈/원정 축이지만 판세 화면이 묻는 것은 "우리가 이기고 있나"뿐이고,
+ * 화면이 그 접기를 스스로 하면 홈일 때와 원정일 때 색이 뒤집힌다.
+ */
+export type MatchEdge = "ours" | "theirs" | "even";
+
+/**
+ * 두 전력의 우열 — **문턱은 코어(`edgeOf`)가 갖는다.**
+ *
+ * 여기서 하는 일은 홈 기준 판정을 우리 기준으로 옮기는 것뿐이다. 비율의 분모가
+ * 0인 칸은 견줄 것이 없으므로 팽팽한 것으로 둔다.
+ */
+function edgeFor(ours: number, theirs: number): { edge: MatchEdge; size: EdgeSize } {
+  const { edge, size } = edgeOf(theirs > 0 ? ours / theirs : 1);
+  return { edge: edge === "even" ? "even" : edge === "home" ? "ours" : "theirs", size };
+}
+
+/**
  * 경기 화면 — **중계 채팅 밖에서도 판세가 보여야 한다.**
  *
  * 채팅은 흘러가고, 감독은 "지금 어디가 밀리는지 · 무엇이 통하고 있는지 · 누구를
@@ -703,14 +728,21 @@ export interface MatchView {
    * 화면이 경기로 넘어간다. 화면은 이 값으로 입장 확인 창을 세운다.
    */
   beforeKickoff: boolean;
-  /** 존별 전력 — 막대로 견준다 */
+  /**
+   * 세 전선의 매치업 — **격자 줄 머리**가 읽는 값.
+   *
+   * 맞붙는 두 값을 견준다: 공격 존의 상대 값은 상대 **수비**다. 값도 우열도
+   * 격자와 같은 축(`ours`/`theirs`)으로 접혀 있고, `label`은 홈이 왼쪽인 판에서
+   * 그 줄이 누구의 진영인지를 이미 말한다 — 화면이 홈/우리를 다시 따지지 않는다.
+   */
   zones: {
     zone: "attack" | "midfield" | "defense";
+    /** "우리 진영" · "중원" · "상대 진영" */
     label: string;
-    home: number;
-    away: number;
-    edge: "home" | "away" | "even";
-    size: string;
+    ours: number;
+    theirs: number;
+    edge: MatchEdge;
+    size: EdgeSize;
   }[];
   /**
    * 득점 기록 — **스코어 옆에 이름이 서야 한다.**
@@ -739,6 +771,12 @@ export interface MatchView {
     lane: "left" | "center" | "right";
     ours: number;
     theirs: number;
+    /**
+     * 그 칸의 우열 — **문턱은 코어가 갖는다**(`sim`의 `edgeOf`, 매치업 문장과 같은
+     * 밴드). 화면이 비율을 다시 재면 한쪽만 고쳐질 때 같은 판이 두 색으로 보인다.
+     */
+    edge: MatchEdge;
+    size: EdgeSize;
   }[];
   /**
    * 발동한 상성·구멍·미스매치 — 감독이 지금 손볼 자리.
@@ -825,15 +863,13 @@ export interface OfficeViews {
   };
   /** 대회 — 우리 리그 + 우리 대항전. 대회별 순위표와 일정이 한 자리에 (§2.4) */
   competitions: {
-    /** 대회 무관 — 다음 경기 한 줄 요약 */
-    next: string | null;
     /**
      * **우리 팀의 당장 다음 경기** — 경기 중에는 달력 대신 이것만 본다.
      *
-     * 한 줄 문자열(`next`)과 나란히 두는 이유: 화면이 날짜·상대·홈원정을 각자
-     * 배치하려면 조각이 필요하고, 무엇보다 **며칠 남았는지**가 있어야 한다.
-     * 체력이 자리마다 다르게 깎이고 회복이 며칠에 걸리는 지금(match.md §3),
-     * "사흘 뒤"인지 "엿새 뒤"인지가 곧 로테이션 판단이다.
+     * 조각으로 싣는 이유: 화면이 날짜·상대·홈원정을 각자 배치하려면 조각이
+     * 필요하고, 무엇보다 **며칠 남았는지**가 있어야 한다. 체력이 자리마다 다르게
+     * 깎이고 회복이 며칠에 걸리는 지금(match.md §3), "사흘 뒤"인지 "엿새 뒤"인지가
+     * 곧 로테이션 판단이다.
      */
     nextMatch: {
       date: string;
@@ -859,18 +895,11 @@ export interface OfficeViews {
       teamName: string;
       position: number;
       record: string;
+      /**
+       * 그 시즌에 대한 보드의 평가 한 줄 — **순위와 전적이 말하지 않는 것**.
+       * 같은 4위가 어느 구단에서는 성공이고 어느 구단에서는 실패다(career.md §5).
+       */
       boardVerdict: string;
-    }>;
-  };
-  transfers: {
-    recent: Array<{
-      date: string;
-      type: string;
-      playerName: string;
-      from: string | null;
-      to: string | null;
-      fee: number;
-      note: string | null;
     }>;
   };
 }
@@ -1074,20 +1103,16 @@ function recentRatingsOf(state: GameState, playerId: string, limit = 5): number[
 }
 
 /**
- * 존 라벨 — **왼쪽이 언제나 홈**이다. 막대도 왼쪽이 홈이라 라벨과 그림이 어긋나면
- * 어느 쪽이 이기는지 거꾸로 읽힌다.
+ * 줄 이름 — **홈이 왼쪽인 판**에서 그 줄이 누구의 진영인가.
+ *
+ * 격자의 자리는 홈 기준이라(스코어보드와 좌우가 같아야 한다) 홈 수비 줄이 곧
+ * 왼쪽이다. 우리가 원정이면 그 왼쪽이 상대의 진영이 된다.
  */
-const ZONE_KO: Record<"attack" | "midfield" | "defense", string> = {
-  attack: "홈 공격 → 어웨이 수비",
-  midfield: "중원",
-  defense: "홈 수비 ← 어웨이 공격",
-};
+function zoneLabel(zone: "attack" | "midfield" | "defense", weAreHome: boolean): string {
+  if (zone === "midfield") return "중원";
+  return (zone === "defense") === weAreHome ? "우리 진영" : "상대 진영";
+}
 
-const EDGE_SIZE_KO: Record<string, string> = {
-  slight: "근소",
-  clear: "뚜렷",
-  big: "압도적",
-};
 const MATCH_PHASE_KO: Record<string, string> = {
   first_half: "전반",
   second_half: "후반",
@@ -1095,6 +1120,30 @@ const MATCH_PHASE_KO: Record<string, string> = {
   extra_second: "연장 후반",
   finished: "종료",
 };
+
+/**
+ * 화면에 서는 체력 — **판세 탭과 팀 탭이 이 함수 하나를 지난다.**
+ *
+ * 경기 중이면 저장값에서 이 경기가 가져간 만큼을 뺀 지금 값에 안개를 씌운다
+ * (`readCondition` · player.md §9.2) — 뛰는 동안 남은 다리는 아무도 못 재기
+ * 때문이다. 두 탭이 같은 인자로 이 문을 지나므로 같은 선수가 두 숫자로 보이지
+ * 않고, 팀 탭이 참값을 쓰던 시절처럼 **두 탭을 견줘 안개를 걷을 수도 없다.**
+ *
+ * `live`가 없으면(경기 밖 · 출전 명단 밖) 아침에 잰 값 그대로라 폭이 0이다 —
+ * 그때는 읽은 값이 아니라 잰 값이다.
+ */
+function conditionShown(
+  state: GameState,
+  playerId: string,
+  saved: number,
+  live: { drain: number; matchId: string } | null,
+): ConditionRead {
+  if (!live) {
+    const value = clampCondition(saved);
+    return { value, low: value, high: value, margin: 0, label: conditionLabel(value) };
+  }
+  return readCondition(state, playerId, Math.max(0, saved - live.drain), live.drain, live.matchId);
+}
 
 /**
  * 경기 화면 — 코어가 이미 계산한 값을 화면이 읽을 모양으로 옮긴다.
@@ -1179,12 +1228,12 @@ function buildMatchView(state: GameState): MatchView | null {
     teamId: string,
   ): MatchPlayerView => {
     const p = playerById(state, entry.id);
-    // 경기 중 소모(worn)를 저장된 체력에서 뺀 지금 값 — 화면과 시뮬이 같은 축을 본다
-    const drain = worn[entry.id] ?? 0;
-    const truth = Math.max(0, (p?.state.condition ?? 0) - drain);
-    // 다리는 눈으로 읽는다 — 코어는 참값으로 계산하고 여기서만 흐려진다.
-    // 뛴 만큼 폭이 벌어지므로 소모량을 함께 넘긴다
-    const condition = readCondition(state, entry.id, truth, drain, match.id);
+    // 경기 중 소모(worn)를 저장된 체력에서 뺀 지금 값 — 화면과 시뮬이 같은 축을 본다.
+    // 다리는 눈으로 읽는다 — 코어는 참값으로 계산하고 여기서만 흐려진다
+    const condition = conditionShown(state, entry.id, p?.state.condition ?? 0, {
+      drain: worn[entry.id] ?? 0,
+      matchId: match.id,
+    });
     /**
      * 전력도 안개를 지난다 — **명단 화면과 같은 채널**(`observationOf`)이라
      * 같은 상대 선수가 두 화면에서 다른 숫자로 보이지 않는다. 우리 선수는
@@ -1260,25 +1309,38 @@ function buildMatchView(state: GameState): MatchView | null {
     /**
      * 매치업은 **맞붙는 두 값**을 견준다 — 공격 존은 우리 공격 대 상대 **수비**다.
      * 같은 존끼리 비교하면(공격 vs 공격) 아무 뜻이 없다.
+     *
+     * 우열은 코어가 이미 매긴 것(`Matchup.edge`)을 우리 편으로 접기만 한다 —
+     * GM이 읽는 매치업 문장과 화면의 줄 머리가 같은 판정에서 나와야 한다.
      */
-    zones: packet.matchups.map((m) => ({
-      zone: m.zone,
-      label: ZONE_KO[m.zone],
-      home:
+    zones: packet.matchups.map((m) => {
+      const weAreHome = match.homeTeamId === state.userTeamId;
+      const homeValue =
         m.zone === "attack"
           ? packet.home.zones.attack
           : m.zone === "midfield"
             ? packet.home.zones.midfield
-            : packet.home.zones.defense,
-      away:
+            : packet.home.zones.defense;
+      const awayValue =
         m.zone === "attack"
           ? packet.away.zones.defense
           : m.zone === "midfield"
             ? packet.away.zones.midfield
-            : packet.away.zones.attack,
-      edge: m.edge,
-      size: EDGE_SIZE_KO[m.size] ?? m.size,
-    })),
+            : packet.away.zones.attack;
+      return {
+        zone: m.zone,
+        label: zoneLabel(m.zone, weAreHome),
+        ours: weAreHome ? homeValue : awayValue,
+        theirs: weAreHome ? awayValue : homeValue,
+        edge:
+          m.edge === "even"
+            ? ("even" as const)
+            : (m.edge === "home") === weAreHome
+              ? ("ours" as const)
+              : ("theirs" as const),
+        size: m.size,
+      };
+    }),
     goals: ledger.events
       .filter((e) => e.type === "goal")
       .map((e) => {
@@ -1303,12 +1365,9 @@ function buildMatchView(state: GameState): MatchView | null {
      */
     grid: zoneGrid(packet).map((c) => {
       const weAreHome = match.homeTeamId === state.userTeamId;
-      return {
-        band: c.band,
-        lane: c.lane,
-        ours: weAreHome ? c.home : c.away,
-        theirs: weAreHome ? c.away : c.home,
-      };
+      const ours = weAreHome ? c.home : c.away;
+      const theirs = weAreHome ? c.away : c.home;
+      return { band: c.band, lane: c.lane, ours, theirs, ...edgeFor(ours, theirs) };
     }),
     /**
      * 유불리는 **우리 편 기준**으로 접어서 넘긴다 — 화면이 홈/원정 중 어느 쪽이
@@ -1454,11 +1513,12 @@ export function buildOfficeViews(state: GameState): OfficeViews {
   );
   /**
    * 경기 중이면 체력은 **지금 값**이다 — 킥오프의 저장값에서 이 경기가 가져간
-   * 만큼(`pendingMatch.matchFatigue`)을 뺀다. 판세 탭(`buildMatchView`)이 쓰는
-   * 축 그대로라 같은 선수가 두 탭에서 다른 숫자로 보이지 않는다. 우리 선수만
-   * 보는 화면이므로 안개(`readCondition`)는 지나지 않는다.
+   * 만큼(`pendingMatch.matchFatigue`)을 뺀다. 그 값이 판세 탭과 **같은 문**
+   * (`conditionShown`)을 지나므로 같은 선수가 두 탭에서 다른 숫자로 보이지 않는다 —
+   * 출전 명단에 든 선수는 양쪽 모두 읽은 값이다.
    */
   const worn = livePacket ? (state.pendingMatch?.matchFatigue ?? {}) : {};
+  const liveMatchId = livePacket ? (state.pendingMatch?.matchId ?? null) : null;
   const issues = new Set(state.issues.map((i) => i.gamePlayerId));
 
   /**
@@ -1561,7 +1621,12 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         formAngle: formAngle(p.state.form),
         formTone: formTone(p.state.form),
         recentRatings: recentRatingsOf(state, p.id),
-        condition: clampCondition(p.state.condition - (worn[p.id] ?? 0)),
+        condition: conditionShown(
+          state,
+          p.id,
+          p.state.condition,
+          liveSlot && liveMatchId ? { drain: worn[p.id] ?? 0, matchId: liveMatchId } : null,
+        ),
         mood: moodOf(state, p),
         role: (livePacket
           ? liveSlot
@@ -2048,9 +2113,6 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       feed,
     },
     competitions: {
-      next: next
-        ? `${fixtureLabel(next.competitionId, next.stage ?? "league", next.round)} ${next.date} ${next.neutral ? "중립" : next.homeTeamId === userTeamId ? "홈" : "원정"} vs ${teamNameIn(state, next.homeTeamId === userTeamId ? next.awayTeamId : next.homeTeamId)}`
-        : null,
       nextMatch: next
         ? {
             date: next.date,
@@ -2087,21 +2149,6 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         record: `${s.wins}승 ${s.draws}무 ${s.losses}패`,
         boardVerdict: s.boardVerdict,
       })),
-    },
-    transfers: {
-      recent: state.transfers
-        .filter((t) => t.fromTeamId === userTeamId || t.toTeamId === userTeamId)
-        .slice(-20)
-        .reverse()
-        .map((t) => ({
-          date: t.date,
-          type: t.type,
-          playerName: playerName(state, t.gamePlayerId),
-          from: t.fromTeamId ? teamNameIn(state, t.fromTeamId) : null,
-          to: t.toTeamId ? teamNameIn(state, t.toTeamId) : null,
-          fee: t.fee,
-          note: t.note ?? null,
-        })),
     },
   };
 }

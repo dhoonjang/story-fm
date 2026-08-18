@@ -1569,13 +1569,33 @@ export function clampCondition(value: number): number {
 /** 하루가 시작될 때의 기본 체력 — 새 선수·새 시즌이 여기서 출발한다 */
 export const CONDITION_BASE = 75;
 
+/**
+ * 체력 구간 — **라벨과 화면의 색이 같은 경계를 쓴다.**
+ *
+ * 경계가 두 곳에 적히면 명단의 막대와 경기 화면의 막대가 같은 선수를 다른 색으로
+ * 칠한다 — 실제로 한동안 그랬다(명단 35/50, 경기 화면은 구멍 문턱과 50).
+ */
+export type ConditionBand = "fresh" | "good" | "fair" | "low" | "spent";
+
+export function conditionBand(condition: number): ConditionBand {
+  if (condition >= 80) return "fresh";
+  if (condition >= 65) return "good";
+  if (condition >= 50) return "fair";
+  if (condition >= 35) return "low";
+  return "spent";
+}
+
+const CONDITION_BAND_KO: Record<ConditionBand, string> = {
+  fresh: "최상",
+  good: "좋음",
+  fair: "보통",
+  low: "처짐",
+  spent: "바닥",
+};
+
 /** 체력 구간 라벨 — 숫자만 보면 "70이 좋은 건가?"가 된다 */
 export function conditionLabel(condition: number): string {
-  if (condition >= 80) return "최상";
-  if (condition >= 65) return "좋음";
-  if (condition >= 50) return "보통";
-  if (condition >= 35) return "처짐";
-  return "바닥";
+  return CONDITION_BAND_KO[conditionBand(condition)];
 }
 
 /** 가능 포지션 + 포지션 적응도 — 선수당 여러 개, isNatural은 **하나 이상** */
