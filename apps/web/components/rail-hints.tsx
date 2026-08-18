@@ -1,6 +1,8 @@
 "use client";
 
-import { Fragment } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import type { ChatTurn, ToolCallRecord } from "@story-fm/engine";
+import { hintsOfCall, panelHintsOf } from "@/lib/panel-hints";
 import type { HintLine, PanelHint, PanelKey } from "@/lib/panel-hints";
 import {
   IconBoard,
@@ -107,6 +109,108 @@ function HintRow({ line }: { line: HintLine }) {
       </span>
     </span>
   );
+}
+
+/**
+ * ── 알림의 일생 — **선다 · 읽힌다 · 닫힌다 · 다시 불린다** ──────────────────
+ *
+ * 무대(`game-screen.tsx`)는 이 상태를 셋으로 나눠 들고 있었다(읽은 장부 · 닫았나 ·
+ * 되부른 말풍선). 넷 다 같은 질문 하나에 답하는 값이라 한 자리에 모은다 —
+ * 그리는 것은 아래 `RailHints`고, 여기는 **무엇을 그릴지**를 정한다.
+ */
+export function useRailHints({
+  chat,
+  panel,
+}: {
+  chat?: readonly ChatTurn[];
+  panel: string | null;
+}) {
+  /** 읽은 장부 알림 — 그 화면을 연 순간부터 다시 세우지 않는다 (다음 턴에 풀린다) */
+  const [seen, setSeen] = useState<string[]>([]);
+  /**
+   * 알림을 닫았나 — **다음 클릭 한 번**이면 닫힌다.
+   *
+   * 알림은 지나가는 것이지 화면에 상주하는 것이 아니다. 놓쳐도 그 지시는 채팅에
+   * 칩으로 남아 있어서 눌러 다시 부를 수 있다(`pinned`).
+   */
+  const [closed, setClosed] = useState(false);
+  /** 채팅 칩이 다시 불러낸 말풍선 — 자동 알림과 같은 자리에 선다 */
+  const [pinned, setPinned] = useState<{ call: ToolCallRecord; hints: PanelHint[] } | null>(null);
+
+  /**
+   * 마지막 턴이 바꾼 장부 — 아이콘 줄에 말풍선으로 선다.
+   * 이미 연 화면은 빼고(`seen`), 지금 보고 있는 화면도 뺀다.
+   */
+  const hints = useMemo(
+    () =>
+      chat ? panelHintsOf(chat).filter((h) => h.panel !== panel && !seen.includes(h.panel)) : [],
+    [chat, panel, seen],
+  );
+  /**
+   * **GM이 말한 횟수** — 알림이 새로 서는 기준이다.
+   *
+   * 채팅 길이로 재면 안 된다: 감독이 보내는 순간 낙관적 유저 턴이 먼저 들어가고
+   * (`send`), 턴이 실패하면 도로 빠진다. 그때마다 리셋이 돌면 **닫아 둔 직전
+   * 알림이 되살아났다가** 답이 오면 다시 바뀐다 — 그게 말풍선이 깜빡이는 이유다.
+   * 알림은 세계가 무언가 한 뒤에만 새로 선다.
+   */
+  const modelTurns = useMemo(
+    () => chat?.reduce((n, t) => n + (t.role === "model" ? 1 : 0), 0) ?? 0,
+    [chat],
+  );
+  /**
+   * 새 턴이 오면 알림은 처음부터 — 방금 벌어진 일은 다시 알려야 한다.
+   * 이전 턴에 읽은 표식(`seen`)도 여기서 풀린다: 그건 그 알림을 읽었다는
+   * 뜻이었고, 새 지시는 새 알림이다.
+   *
+   * 이걸 `useEffect`로 미루면 리셋 전 한 프레임이 그려진다 — 지난 턴에 읽은
+   * 알림이 잠깐 사라졌다 다시 뜬다. 렌더 중에 맞추면 그 프레임이 없다.
+   */
+  const [hintTurn, setHintTurn] = useState(0);
+  if (hintTurn !== modelTurns) {
+    setHintTurn(modelTurns);
+    setClosed(false);
+    setPinned(null);
+    setSeen([]);
+  }
+  /**
+   * **다른 쪽을 누르면 닫힌다.** 말풍선은 조작 대상이 아니라 지나가는 알림이라
+   * 닫는 ✕를 달지 않는다 — 감독이 다음 무엇을 누르든 그게 곧 "읽었다"다.
+   * 칩(`data-hint-keep`)만 예외다: 그 클릭은 말풍선을 부르는 손잡이다.
+   */
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      const el = e.target instanceof Element ? e.target : null;
+      if (el?.closest("[data-hint-keep]")) return;
+      setPinned((p) => (p === null ? p : null));
+      setClosed((c) => (c ? c : true));
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, []);
+
+  /** 칩을 눌렀다 — 같은 칩을 다시 누르면 닫는다 (칩이 곧 손잡이다) */
+  const reveal = useCallback((call: ToolCallRecord) => {
+    setClosed(true);
+    setPinned((prev) => (prev?.call === call ? null : { call, hints: hintsOfCall(call) }));
+  }, []);
+  /** 그 장부를 열었다 — 이번 턴 동안은 그 알림을 다시 세우지 않는다 */
+  const markSeen = useCallback((key: string) => {
+    setSeen((cur) => (cur.includes(key) ? cur : [...cur, key]));
+  }, []);
+
+  return {
+    /** 이번 턴에 바뀐 장부 — 아이콘 위의 점이 이걸 읽는다 (닫아도 남는다) */
+    hints,
+    /** 지금 말풍선으로 세울 것 — 되부른 게 있으면 그것만, 닫았으면 없다 */
+    shown: pinned ? pinned.hints : closed ? [] : hints,
+    /** 되부른 말풍선인가 — 좁은 화면에서도 선다 */
+    pinned: pinned !== null,
+    /** 지금 펼쳐 둔 칩 — 그 칩이 눌린 채로 남는다 */
+    revealedCall: pinned?.call ?? null,
+    reveal,
+    markSeen,
+  };
 }
 
 export function RailHints({
