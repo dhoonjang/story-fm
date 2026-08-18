@@ -16,19 +16,23 @@ import { laneOfX, type GridLane } from "./zone-grid";
  * 실제 전술 분석이 다루는 국면을 축으로 삼되, **코어가 이미 시뮬레이션에 쓰는
  * 능력치로만** 만든다. 화면에만 있고 결과에 닿지 않는 정보는 감독을 속인다.
  *
- *   - **뒷공간** — 하이라인의 대가. 최전방 pace vs 최종 수비 pace
- *   - **측면 1대1** — 윙어 dribbling vs 풀백 tackling (드리블 돌파)
- *   - **공중볼** — 크로스·세트피스의 근거. aerial
- *   - **압박 저항** — 빌드업이 상대 프레스를 견디는가. composure·passing
- *   - **창조** — 킬패스가 어디서 나오나. vision
- *   - **마무리** — 같은 기회에서 더 넣는가. finishing
- *   - **골문** — 선방과 배급. goalkeeping·passing
- *   - **수비 조직** — 라인을 지키는 눈. positioning·leadership
- *   - **경합** — 몸싸움으로 밀어내는가. strength
- *   - **활동량** — 90분을 버티는가. stamina
- *   - **세트피스 키커** — 죽은 공에서 나오는 득점. kicking
- *   - **경험** — 어린 선수가 압박에 흔들린다. composure + 나이
- *   - **거친 선수** — 카드와 페널티의 씨앗. aggression
+ * 백틱 안의 id는 `RawPoint.id`의 앞머리이자 `exploits.ts`의 `AXIS_EFFECT`
+ * 키다 — **여기에 축을 더하면 그쪽에도 항목이 있어야** 공략이 걸린다.
+ *
+ *   - **뒷공간** `backline-pace` — 하이라인의 대가. 최전방 pace vs 최종 수비 pace
+ *   - **측면 1대1** `wing-duel` — 드리블 돌파. 최전방 dribbling vs 수비 tackling
+ *   - **공중볼** `aerial` — 크로스·세트피스의 근거. aerial
+ *   - **압박 저항** `press-resistance` — 빌드업이 프레스를 견디는가. 중원 composure·passing
+ *   - **창조** `creator` — 킬패스가 어디서 나오나. 중원 vision
+ *   - **마무리** `finisher` — 같은 기회에서 더 넣는가. 최전방 finishing
+ *   - **골문** `keeper` — 선방. goalkeeping
+ *   - **골키퍼 배급** `keeper-distribution` — 뒤에서부터 풀어 나오는가. 골키퍼 passing
+ *   - **수비 조직** `backline-shape` — 라인이 어긋나는가. 백라인 평균 positioning
+ *   - **백라인 조율자** `backline-leader` — 서로를 부르는 사람이 있는가. 백라인 최고 leadership
+ *   - **경합** `physical` — 몸싸움으로 밀어내는가. strength
+ *   - **활동량** `stamina` — 90분을 버티는가. 중원 평균 stamina
+ *   - **세트피스 키커** `set-piece` — 죽은 공에서 나오는 득점. kicking
+ *   - **거친 선수** `discipline` — 카드와 페널티의 씨앗. aggression - composure
  *
  * ## 감독의 눈만큼만 보인다
  *
