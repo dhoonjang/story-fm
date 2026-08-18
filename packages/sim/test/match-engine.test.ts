@@ -175,12 +175,25 @@ describe("구간 시뮬레이터 — 결과는 코어가 정한다", () => {
     }
   });
 
-  it("골에는 패킷에서 뽑은 원인 태그가 붙는다 (코어가 인용한다)", () => {
-    const { ledger } = playMatch(setup(88, 62), 5);
+  it("골의 원인 태그는 패킷에서 인용한 문장뿐이다 — 지어낸 문장은 붙지 않는다", () => {
+    const s = setup(88, 62);
+    const { ledger } = playMatch(s, 5);
+    /**
+     * 코어가 인용할 수 있는 문장의 전부 — 여기 없는 문자열이 붙으면 그게 곧
+     * 검증되지 않은 태그다. **비어 있는 것은 정상이다**: 패킷이 그 편에 줄 근거를
+     * 하나도 갖지 않은 경기가 있고, 폴백 문장을 세우면 모든 골이 "전술이 근거로
+     * 붙은 골"이 되어 감독의 전술 XP 조건이 조건이 아니게 된다 (career.md §3).
+     */
+    const quotable = new Set([
+      ...s.packet.matchups.map((m) => m.why),
+      ...s.packet.keyPoints,
+      ...s.packet.home.tactical.notes,
+      ...s.packet.away.tactical.notes,
+    ]);
     const goals = ledger.events.filter((e) => e.type === "goal");
     expect(goals.length).toBeGreaterThan(0);
     for (const goal of goals) {
-      expect(goal.causes.length).toBeGreaterThan(0);
+      for (const cause of goal.causes) expect(quotable).toContain(cause);
       expect(goal.shotOutcome).toBe("goal");
       expect(goal.xg).toBeGreaterThan(0);
       expect(goal.goalProbability).toBeGreaterThan(0);

@@ -376,16 +376,25 @@ function pickInjured(
  * 예전엔 LLM이 자유 문자열로 붙였고 아무도 검증하지 않았는데, 이 태그가 감독의
  * 전술 XP를 준다(`finalizeMatch`). 검증 없는 필드가 상태를 바꾸던 자리라
  * 이제 코어가 패킷에서 직접 뽑는다.
+ *
+ * ⚠️ **없으면 비운다.** 폴백 문장을 세우면 모든 골에 태그가 붙어 "전술이 근거로 붙은
+ * 골"이라는 전술 XP의 조건이 조건이 아니게 된다 (career.md §3). 패킷이 그 편에 줄
+ * 근거를 하나도 갖지 않은 경기는 실제로 있다.
  */
 function causesFor(packet: StrengthPacket, side: MatchSide): string[] {
   const zone = side === "home" ? "attack" : "defense";
   const hit = packet.matchups.find((m) => m.zone === zone && m.edge === side);
   if (hit) return [hit.why];
-  const label = side === "home" ? "홈" : "어웨이";
-  const key = packet.keyPoints.find((k) => k.startsWith(label));
+  /**
+   * 키포인트 문장은 팀 이름·상성 이름으로 시작해 **편이 문장에 없다.** 어느 편에
+   * 이로운지는 패킷이 같은 순서로 실어 보낸 `keyPointSides`가 원본이다
+   * (`strength-packet.ts`).
+   */
+  const at = packet.keyPointSides?.indexOf(side) ?? -1;
+  const key = at >= 0 ? packet.keyPoints[at] : undefined;
   if (key) return [key];
   const note = (side === "home" ? packet.home : packet.away).tactical.notes[0];
-  return note ? [note] : ["중원 주도권 싸움"];
+  return note ? [note] : [];
 }
 
 /**
