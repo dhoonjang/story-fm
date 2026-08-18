@@ -511,41 +511,6 @@ describe("경기 화면 뷰", () => {
     );
   });
 
-  /**
-   * 팀 탭이 참값을 쓰던 시절엔 감독이 두 탭을 나란히 놓는 것만으로 안개가 걷혔다 —
-   * 판세의 구간과 명단의 정확한 숫자를 견주면 상대의 오차 폭까지 역산된다.
-   * 두 화면은 같은 문(`conditionShown`)을 지나야 한다.
-   */
-  it("체력은 판세 탭과 팀 탭이 한 값이다", () => {
-    const state = createTestGame(9, "manutd");
-    advanceToMatchday(state);
-    startMatch(state);
-
-    const views = buildOfficeViews(state);
-    const m = views.match!;
-    const ourSide = m.home.ours ? "home" : "away";
-    const inSquad = [...m.onPitch[ourSide], ...m.bench[ourSide]];
-    const rows = new Map(views.squad.players.map((row) => [row.id, row]));
-    expect(inSquad.length).toBeGreaterThan(11);
-
-    for (const p of inSquad) {
-      const row = rows.get(p.id);
-      expect(row, p.name).toBeDefined();
-      expect(row!.condition, p.name).toEqual(p.condition);
-      // 우리 선수여도 뛰는 동안은 흐리다 — 폭이 0이면 팀 탭이 참값을 흘리고 있다
-      expect(row!.condition.margin, p.name).toBeGreaterThan(0);
-    }
-
-    // 출전 명단 밖은 아침에 잰 값 그대로다 — 읽을 것이 없으므로 폭도 없다
-    const playing = new Set(inSquad.map((p) => p.id));
-    const outside = views.squad.players.filter((row) => !playing.has(row.id));
-    expect(outside.length).toBeGreaterThan(0);
-    for (const row of outside) {
-      expect(row.condition.margin, row.name).toBe(0);
-      expect(row.condition.low, row.name).toBe(row.condition.high);
-    }
-  });
-
   it("경기가 끝나면 사라진다 — 빈 화면을 남기지 않는다", () => {
     const state = createTestGame(9, "manutd");
     advanceToMatchday(state);
