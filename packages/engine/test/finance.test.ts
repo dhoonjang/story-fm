@@ -11,6 +11,7 @@ import {
   isCup,
   payLeaguePrizes,
   isMarketOnlyLeague,
+  isClubTeam,
   monthlyFixedCostOf,
   seasonBudgetBaseOf,
   NARRATIVE_EXPENSE_CATEGORIES,
@@ -40,6 +41,8 @@ import {
   topUpTransferBudget,
   transitionSeason,
   endSeason,
+  closeSeasonBooks,
+  skippedWageWeeks,
   userPlayers,
 } from "@story-fm/engine";
 import { advanceAndPlay, advanceDays, createMiniGame, createTestGame } from "./helpers";
@@ -1003,6 +1006,36 @@ describe("PSR", () => {
     // 예산의 성과 조각도 — 마지막 달이 빠지면 지난 시즌 보고서가 하나도 없어 0이 된다
     expect(digest.some((line) => line.includes("재정 성과를 반영해"))).toBe(true);
     expect(finance.transferBudget).toBeGreaterThan(seasonBudgetBaseOf(state, state.userTeamId));
+  });
+
+  /**
+   * 마지막 달의 주급 — 전환이 건너뛰는 월요일만큼 마감이 함께 문다 (finance.md §7.1).
+   * 경계는 양 끝이다: 종료일의 주급은 그날의 tick이 이미 물었고, 7월 1일은 새 시즌의
+   * 몫이다. 세는 자리가 하루 어긋나면 전 구단의 한 시즌 지출이 한 주씩 틀린다.
+   */
+  it("마지막 달은 전환이 건너뛰는 월요일 수만큼 주급을 문다", () => {
+    // 종료일이 월요일이어도 그날은 이미 물었다 — 6/14·21·28 세 번
+    expect(skippedWageWeeks("2027-06-07", "2027-07-01")).toBe(3);
+    // 시작 **전날**까지다 — 7월 1일이 월요일이어도 그 주급은 새 시즌의 몫이다
+    expect(skippedWageWeeks("2024-06-04", "2024-07-01")).toBe(3);
+    expect(skippedWageWeeks("2024-06-24", "2024-07-01")).toBe(0);
+    // 마지막 월요일을 지나 끝난 시즌은 물 것이 없다
+    expect(skippedWageWeeks("2027-06-29", "2027-07-01")).toBe(0);
+
+    const state = createTestGame(42, "arsenal");
+    state.date = "2027-06-05"; // 6/7·14·21·28 — 네 번
+    // AI 팀은 주급을 한 줄로 문다 — 반올림이 한 번뿐이라 눈금이 그대로 보인다
+    const ai = state.teams.find(
+      (t) =>
+        t.id !== state.userTeamId && isClubTeam(t.id) && !isMarketOnlyLeague(leagueOfTeam(t.id)),
+    )!;
+    const weekly = weeklyWagesOf(state, ai.id);
+    const before = financeOf(state, ai.id).balance;
+
+    closeSeasonBooks(state, []);
+
+    expect(weekly).toBeGreaterThan(0);
+    expect(financeOf(state, ai.id).balance).toBe(before - Math.round(weekly * 4));
   });
 });
 
