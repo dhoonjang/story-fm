@@ -134,9 +134,8 @@
 }
 .cal-fx-opp {
   font-weight: 700;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 .cal-fx-venue {
   font-size: var(--fs-3xs);

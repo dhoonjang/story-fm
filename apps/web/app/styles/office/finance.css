@@ -174,9 +174,9 @@
   font-variant-numeric: tabular-nums;
 }
 .fin-feed-row .label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 .fin-feed-row .amt {
   font-weight: 700;
@@ -204,9 +204,9 @@
   line-height: 1.7;
 }
 .fin-feed-item .label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 .fin-feed-item .amt {
   white-space: nowrap;

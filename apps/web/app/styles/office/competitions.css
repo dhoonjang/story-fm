@@ -158,9 +158,9 @@
   white-space: nowrap;
 }
 .fixture .side {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 .fixture .side.away {
   text-align: right;

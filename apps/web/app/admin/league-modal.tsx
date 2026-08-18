@@ -74,8 +74,8 @@ export function LeagueModal({
     if (mode === "create" && !ID_RE.test(id.trim())) {
       return "리그 id는 영소문자·숫자·하이픈만 쓸 수 있습니다";
     }
-    if (!fields.name) return "리그 이름을 입력하세요";
-    if (!fields.country) return "나라를 입력하세요";
+    if (!fields.name) return "리그 이름 없음";
+    if (!fields.country) return "나라 없음";
     if (fields.coefficient < 1 || fields.coefficient > MAX_COEFFICIENT) {
       return `계수는 1~${MAX_COEFFICIENT} 사이여야 합니다`;
     }

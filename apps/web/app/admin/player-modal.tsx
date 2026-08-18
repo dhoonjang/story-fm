@@ -99,11 +99,11 @@ export function PlayerModal({
 
   /** 저장 전 검증 — 서버가 거절할 조합을 여기서 먼저 잡는다 */
   function validate(): string | null {
-    if (!nameKo.trim()) return "이름을 입력하세요";
+    if (!nameKo.trim()) return "이름 없음";
     if (!teamId) return "팀을 고르세요";
     if (mode === "edit") {
       if (positions.length === 0) return "포지션이 최소 하나 필요합니다";
-      if (!positions.some((p) => p.isNatural)) return "선호 포지션을 하나 이상 지정하세요";
+      if (!positions.some((p) => p.isNatural)) return "선호 포지션 0개 — 최소 1개";
       const codes = positions.map((p) => p.position);
       if (new Set(codes).size !== codes.length) return "같은 포지션이 두 번 들어 있습니다";
     }
@@ -371,9 +371,13 @@ export function PlayerModal({
           </div>
         </section>
       ) : (
-        <p className="hint">
-          포지션 목록은 주 포지션에서 파생됩니다 — 추가한 뒤 이 창에서 편집하세요.
-        </p>
+        /* 새 선수는 아직 고칠 목록이 없다 — 무엇이 그 자리를 채우는지만 적는다 */
+        <section>
+          <div className="admin-section-head">
+            <b className="admin-section-title">포지션</b>
+            <span className="admin-section-note">주 포지션에서 파생</span>
+          </div>
+        </section>
       )}
 
       <section>

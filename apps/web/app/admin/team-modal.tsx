@@ -89,11 +89,11 @@ export function TeamModal({
     if (mode === "create") {
       if (!ID_RE.test(id.trim())) return "팀 id는 영소문자·숫자·하이픈만 쓸 수 있습니다";
     }
-    if (!fields.name) return "팀 이름을 입력하세요";
-    if (!fields.shortName) return "짧은 이름을 입력하세요";
+    if (!fields.name) return "팀 이름 없음";
+    if (!fields.shortName) return "짧은 이름 없음";
     if (!fields.leagueId) return "소속 리그를 고르세요";
     // 추가할 때 구장 이름은 비워 둘 수 있다 — 엔진이 체급에 맞는 기본 프로필로 채운다
-    if (mode === "edit" && !fields.stadium) return "구장 이름을 입력하세요";
+    if (mode === "edit" && !fields.stadium) return "구장 이름 없음";
     if (fields.capacity < 1 || fields.capacity > MAX_CAPACITY) {
       return `수용인원은 1~${MAX_CAPACITY.toLocaleString()} 사이여야 합니다`;
     }

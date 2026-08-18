@@ -40,8 +40,15 @@ async function openBoard(page: Page) {
 
 async function expectOvrConsistent(page: Page) {
   const check = await page.evaluate(() => {
+    /** 이름 칸에서 이름만 — 등번호(`shirt-no`)와 주장 표식은 이름이 아니다 */
+    const nameIn = (el: Element | null) => {
+      if (!el) return "";
+      const clone = el.cloneNode(true) as Element;
+      clone.querySelector(".shirt-no")?.remove();
+      return (clone.textContent ?? "").replace("Ⓒ", "").trim();
+    };
     const chips = [...document.querySelectorAll(".pitch-slot")].map((el) => ({
-      name: (el.querySelector(".slot-name")?.textContent ?? "").replace("Ⓒ", "").trim(),
+      name: nameIn(el.querySelector(".slot-name")),
       ovr: (el.querySelector(".slot-meta b")?.textContent ?? "").trim(),
     }));
     const heads = [...document.querySelectorAll(".squad-table thead th")];
@@ -51,12 +58,10 @@ async function expectOvrConsistent(page: Page) {
     let compared = 0;
     for (const chip of chips) {
       if (!chip.name || !chip.ovr) continue;
-      // 칩은 **성만** 보여준다(`chipName`) — 명단의 전체 이름에서 마지막 낱말로 잇는다.
-      // 성이 겹치면 어느 행인지 알 수 없으므로 건너뛴다 (틀린 비교보다 안 하는 게 낫다)
-      const matches = rows.filter((r) => {
-        const full = (r.querySelector(".row-name")?.textContent ?? "").replace("Ⓒ", "").trim();
-        return full.split(/\s+/).at(-1) === chip.name;
-      });
+      // 칩과 명단은 **같은 이름**을 적는다 — 화면이 이름을 줄이지 않으므로 그대로 잇는다.
+      // 두 자리 다 이름 칸에 등번호가 함께 서므로 그것만 걷어 낸다.
+      // 동명이인이면 어느 행인지 알 수 없으므로 건너뛴다 (틀린 비교보다 안 하는 게 낫다)
+      const matches = rows.filter((r) => nameIn(r.querySelector(".row-name")) === chip.name);
       if (matches.length !== 1) continue;
       const row = matches[0]!;
       const cell = (row.querySelectorAll("td")[col]?.textContent ?? "").replace("?", "").trim();
@@ -510,7 +515,7 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
 
   // 전술판 — 편집 모드 없이 스쿼드 화면에서 바로 조작한다 (전술판 | 명단 2단)
   await openBoard(page);
-  // 조작법 안내 문구는 없다 (잠긴 경기 중에만 이유를 밝힌다)
+  // 조작법 안내 문구는 어디에도 없다 — 잠긴 판은 잔디 색이 빠지는 것으로 알린다
   await expect(page.getByTestId("board-hint")).toHaveCount(0);
   await expect(page.getByTestId("squad-table")).toBeVisible();
   await expect(page.locator(".pitch-slot")).toHaveCount(11);
@@ -572,10 +577,13 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
     .locator(".squad-table tbody tr.row-tier.t-bench, .squad-table tbody tr.row-tier.t-squad")
     .filter({ hasNot: page.locator("td:nth-child(2):text-is('GK')") })
     .first();
-  // 이름 칸엔 교체 화살표·표식·상태 배지가 함께 선다 — 이름은 자체 요소에서 읽는다
-  const inName = ((await benchRow.locator(".row-name").textContent()) ?? "")
-    .replace("Ⓒ", "")
-    .trim();
+  // 이름 칸엔 교체 화살표·표식·상태 배지가 함께 선다 — 이름은 자체 요소에서, 그
+  // 안에서도 등번호를 뺀 몫만 읽는다 (전술판 칩도 같은 이름을 그대로 세운다)
+  const inName = await benchRow.locator(".row-name").evaluate((el) => {
+    const clone = el.cloneNode(true) as Element;
+    clone.querySelector(".shirt-no")?.remove();
+    return (clone.textContent ?? "").replace("Ⓒ", "").trim();
+  });
   const beforeXI = await page.locator(".pitch-slot .slot-name").allTextContents();
   await benchRow.click();
   await expect(page.getByTestId("player-detail")).toBeVisible();
@@ -663,14 +671,16 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
   await page.getByTestId("slot-10").click();
   await expect(page.locator('.swap-btn:text("←")').first()).toBeVisible();
   await expect(page.locator('.swap-btn:text("→")')).toHaveCount(0);
-  const outName = (await page.getByTestId("slot-10").locator(".slot-name").textContent()) ?? "";
+  const outName = ((await page.getByTestId("slot-10").locator(".slot-name").textContent()) ?? "")
+    .replace("Ⓒ", "")
+    .trim();
   await page
     .locator(".squad-table tbody tr.row-tier")
     .filter({ has: page.locator(".row-name", { hasText: inName }) })
     .getByTestId(/^swapin-/)
     .click();
   await expect(
-    page.locator(".pitch-slot").filter({ hasText: inName.split(" ").pop() ?? "" }),
+    page.locator(".pitch-slot").filter({ has: page.locator(".slot-name", { hasText: inName }) }),
   ).toHaveCount(1);
   // 밀려난 선수는 전술판에서 빠진다 (중복 배치 없음)
   await expect(page.locator(".pitch-slot", { hasText: outName })).toHaveCount(0);
@@ -757,7 +767,7 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
    * 명단 정렬이 지금 칸을 따라 실시간으로 바뀌기 때문이다 — 앞선 교체로 첫 행이
    * 방금 올라온 선수가 되면 자리 성분까지 함께 움직여 무엇을 재는지 흐려진다.
    */
-  const tracked = ((await page.getByTestId("slot-0").locator(".slot-name").innerText()) ?? "")
+  const tracked = ((await page.getByTestId("slot-0").locator(".slot-name").textContent()) ?? "")
     .replace("Ⓒ", "")
     .trim();
   const famOf = async () => {

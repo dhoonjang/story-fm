@@ -1446,11 +1446,12 @@ export function SquadView({
                 <button
                   className="ghost-btn"
                   disabled={!live || onPitch.has(p.id)}
+                  /* 잠긴 이유는 **사실로만** — 다음에 무엇을 하라는 말은 붙이지 않는다 */
                   title={
                     !live
-                      ? "경기 중에는 1·2군을 옮길 수 없습니다"
+                      ? "경기 중 — 1·2군 이동 잠금"
                       : onPitch.has(p.id)
-                        ? "선발에서 내린 뒤에 옮길 수 있습니다"
+                        ? "선발 배치 중 — 1·2군 이동 잠금"
                         : undefined
                   }
                   onClick={() => onMoveSquadRow(p.id, localReserve.has(p.id) ? "first" : "reserve")}
@@ -1560,7 +1561,6 @@ export function SquadView({
               onClick={onToggleBoard}
               aria-pressed={boardOpen}
               data-testid="board-toggle"
-              title="전술판"
             >
               <IconBoard />
               전술판
@@ -1643,15 +1643,6 @@ export function SquadView({
         {/* 접힘은 **CSS가 정한다** — 채팅이 옆에 설 만큼 넓을 때만 뜻이 있고,
             좁은 화면에서는 접어도 남는 자리를 명단이 늘어나 채울 뿐이다 */}
         <div className="squad-board-col">
-          {/* 포메이션 프리셋 선택도, 조작법 안내도 두지 않는다 — 자리는 칩을 끌어
-              만들고(보면 안다), "4-4-2로 가자" 같은 프리셋 교체는 채팅(set_tactics)이
-              맡는다. 잠긴 상태만 이유를 밝힌다 */}
-          {!live && !advisory && (
-            <p className="hint" data-testid="board-hint">
-              경기 중에는 전술판이 잠깁니다 — 교체는 채팅으로 지시하세요.
-            </p>
-          )}
-
           {/**
            * 판과 전술 줄은 **한 덩어리다** — 채팅 위에 얹힐 때 둘이 한 장으로 붙는다.
            * 평소 레이아웃에서는 `display: contents`라 이 래퍼가 없는 것과 같다.
@@ -1660,7 +1651,7 @@ export function SquadView({
             {/* 그라운드와 칩은 상대 판과 **같은 컴포넌트**다 (pitch.tsx) — 상태만 얹는다 */}
             <PitchGround
               boardRef={boardRef}
-              variant={usable ? "editing" : undefined}
+              variant={usable ? "editing" : "locked"}
               testId="pitch-board"
               tactics={board.tactics}
             >

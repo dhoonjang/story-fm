@@ -201,8 +201,8 @@ export function EuroCupModal({
 
   /** 명백한 것만 막는다 — 브래킷 셈(2의 거듭제곱 등)은 엔진이 판정하고 메시지를 준다 */
   function validate(): string | null {
-    if (!fields.name) return "대회 이름을 입력하세요";
-    if (!fields.short) return "짧은 표기를 입력하세요";
+    if (!fields.name) return "대회 이름 없음";
+    if (!fields.short) return "짧은 표기 없음";
     const numbers: Array<[string, number]> = [
       ["참가 팀 수", size],
       ["팀당 경기 수", matchesPerTeam],
@@ -509,9 +509,9 @@ export function DomesticCupModal({
   };
 
   function validate(): string | null {
-    if (!fields.name) return "대회 이름을 입력하세요";
-    if (!fields.short) return "짧은 표기를 입력하세요";
-    if (!fields.country) return "나라를 입력하세요";
+    if (!fields.name) return "대회 이름 없음";
+    if (!fields.short) return "짧은 표기 없음";
+    if (!fields.country) return "나라 없음";
     if (!Number.isInteger(drawDelayDays) || drawDelayDays < 0) {
       return "추첨 지연 일수는 0 이상의 정수여야 합니다";
     }

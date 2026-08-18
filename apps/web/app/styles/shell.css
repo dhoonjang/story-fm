@@ -611,9 +611,7 @@ textarea {
 .admin-team {
   color: var(--muted);
   max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: keep-all;
 }
 .admin-ovr {
   font-weight: 700;
@@ -921,9 +919,8 @@ textarea {
 .admin-squad-name {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
   font-size: var(--fs-md);
 }
 .admin-squad-name .muted {
@@ -1018,9 +1015,8 @@ textarea {
   flex: 0 0 132px;
   color: var(--muted);
   font-size: var(--fs-sm);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 .admin-kv-text {
   flex: 1;
@@ -1207,16 +1203,14 @@ textarea {
 .game-card-team {
   font-size: var(--fs-lg);
   font-weight: 700;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 .game-card-sub {
   color: var(--muted);
   font-size: var(--fs-sm);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 /* 어디까지 왔는가 — 팀·감독(왼쪽)과 축을 나눠 오른쪽에 세운다. 한 줄에 점으로
    이어 붙이면 네 값이 한 덩이로 읽혀 무엇도 눈에 걸리지 않는다 */
@@ -1317,7 +1311,7 @@ textarea {
   align-items: center;
   gap: var(--sp-3);
   padding: 0 var(--sp-4);
-  height: 52px;
+  min-height: 52px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   /* 줄이 넘칠 땐 **왼쪽 정보가 줄어든다** — 이동 수단(아이콘 줄)은 화면이 좁아도
@@ -1398,9 +1392,8 @@ textarea {
 .topbar .meta {
   color: var(--muted);
   font-size: var(--fs-md);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
   min-width: 0;
 }
 .topbar-sub .meta,
@@ -2479,9 +2472,8 @@ textarea {
 .match-log-title {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 .match-log-date {
   font-size: var(--fs-xs);

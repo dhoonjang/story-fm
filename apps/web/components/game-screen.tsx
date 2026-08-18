@@ -161,7 +161,7 @@ const TIME_SKIPS = [
 const TURN_IDLE_TIMEOUT_MS = 60_000;
 
 /** 시한을 넘긴 턴 — 서버의 `turnErrorMessage`와 같은 문구를 쓴다 */
-const TURN_TIMEOUT_MESSAGE = "응답이 지연돼 턴을 취소했습니다 — 다시 시도해 주세요.";
+const TURN_TIMEOUT_MESSAGE = "응답이 지연돼 턴을 취소했습니다";
 
 /**
  * 턴 원문을 볼 수 있는가 — **개발 모드에서만.** 기록도 라우트도 같은 기준으로
@@ -668,9 +668,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
       } catch (e) {
         // 시한을 넘겨 우리가 끊은 것과 연결이 안 된 것은 감독에게 다른 사건이다
         fail(
-          abort.signal.aborted
-            ? TURN_TIMEOUT_MESSAGE
-            : "서버에 연결하지 못했습니다 — 다시 시도해 주세요.",
+          abort.signal.aborted ? TURN_TIMEOUT_MESSAGE : "서버에 연결하지 못했습니다",
           e instanceof Error ? e.message : String(e),
         );
         commit(null);
@@ -717,13 +715,6 @@ export function GameScreen({ gameId }: { gameId: string }) {
         <Loading size={34} />
       </main>
     );
-
-  const placeholder =
-    game.phase === "match"
-      ? '"계속" 으로 경기를 진행하거나, 교체·팀토크를 지시하세요'
-      : game.phase === "matchday"
-        ? '"경기 시작"으로 킥오프하거나, 라인업·전술을 손보세요'
-        : "훈련 지시, 전술 변경, 면담… 감독으로서 말하세요";
 
   /** 폭이 곧 가독성인 뷰 — 전술판+명단·열두 달 격자는 900px 안에 넣을 수 없다 */
   const wide = shownPanel === "스쿼드" || shownPanel === "달력";
@@ -989,7 +980,6 @@ export function GameScreen({ gameId }: { gameId: string }) {
                 send();
               }
             }}
-            placeholder={placeholder}
             disabled={busy}
             data-testid="chat-input"
           />
@@ -1001,7 +991,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
            * 아니라 한 구간 더 굴리는 것이다.
            *
            * 아이콘만 두는 건 입력칸 **안에** 앉기 때문이다 — 글자를 얹으면 쓸 폭을
-           * 뺏는다. 뜻은 `aria-label`과 툴팁이 갖는다.
+           * 뺏는다. 무엇을 하는 손잡이인지는 **아이콘이 바뀌는 것**이 말하고, 화면
+           * 밖의 이름은 `aria-label`이 갖는다 — 단축키를 글로 알리지 않는다.
            */}
           <button
             className={hasInput ? "send" : inMatch ? "send" : "skip"}
@@ -1014,7 +1005,6 @@ export function GameScreen({ gameId }: { gameId: string }) {
             data-testid={hasInput ? "chat-send" : inMatch ? "match-advance" : "time-skip-toggle"}
             aria-label={hasInput ? "전송" : inMatch ? "경기 진행" : "시간 보내기"}
             aria-expanded={hasInput || inMatch ? undefined : skipOpen}
-            title={hasInput ? "전송 (Enter)" : inMatch ? "경기 진행" : "시간 보내기"}
           >
             {hasInput ? <IconSend /> : inMatch ? <IconPlay /> : <IconSkip />}
           </button>

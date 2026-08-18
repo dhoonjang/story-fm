@@ -65,24 +65,25 @@ export type TurnOutcome =
 
 /**
  * LLM 실패를 감독에게 보일 한 줄로 — **게임 밖의 사건**이므로 픽션 밖 말투로.
- * 원인 문자열은 서버 로그에만 남기고, 화면에는 대처 가능한 안내만 준다.
+ * 원인 문자열은 서버 로그에만 남기고, 화면에는 **무슨 일이 났는지만** 적는다 —
+ * 다시 걸어 보라는 말은 배너의 `다시 시도` 버튼이 이미 하고 있다.
  * 새 게임 첫 장면(`/api/games`)도 같은 문구를 쓴다 — 폴백 장면은 없다.
  */
 export function turnErrorMessage(detail: string): string {
   const d = detail.toLowerCase();
   if (d.includes("overloaded") || d.includes("529")) {
-    return "모델 서버가 혼잡합니다 — 잠시 후 다시 시도해 주세요.";
+    return "모델 서버가 혼잡합니다";
   }
   if (d.includes("rate limit") || d.includes("429")) {
-    return "요청 한도를 넘었습니다 — 잠시 후 다시 시도해 주세요.";
+    return "요청 한도를 넘었습니다";
   }
   if (d.includes("timeout") || d.includes("etimedout") || d.includes("abort")) {
-    return "응답이 지연돼 턴을 취소했습니다 — 다시 시도해 주세요.";
+    return "응답이 지연돼 턴을 취소했습니다";
   }
   if (d.includes("api key") || d.includes("authentication") || d.includes("401")) {
-    return "LLM 인증 정보가 올바르지 않습니다 — 서버 설정을 확인해 주세요.";
+    return "LLM 인증 정보가 올바르지 않습니다";
   }
-  return "응답을 받지 못해 지시를 반영하지 못했습니다 — 다시 시도해 주세요.";
+  return "응답을 받지 못해 지시를 반영하지 못했습니다";
 }
 
 /**
