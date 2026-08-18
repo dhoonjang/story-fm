@@ -1326,27 +1326,35 @@ export function finalizeMatch(state: GameState): MatchDigest {
   // 재정 — 매치데이(관중)·생중계 수당·승리 수당·원정 비용 (finance.ts)
   applyMatchFinance(state, match, outcome, financeLines);
 
-  const repDelta = outcome === "win" ? 2 : outcome === "loss" ? -2 : 0;
-  state.manager.reputation.board = Math.max(
-    0,
-    Math.min(100, state.manager.reputation.board + repDelta),
-  );
-  state.manager.reputation.squad = Math.max(
-    0,
-    Math.min(100, state.manager.reputation.squad + repDelta),
-  );
-
+  /**
+   * **평판과 감독 XP도 시즌의 것이다** (season.md §2). 프리시즌은 감독이 판을
+   * 시험하는 자리라 시험에 값이 붙지 않는다 — 걸러지 않으면 친선 넷을 다 이긴 것만으로
+   * 보드·선수단 평판 +8, 리더십 XP 40이 승점 하나 없이 들어온다.
+   */
   const messages: string[] = [];
-  if (outcome === "win") {
-    const msg = grantManagerXP(state, "leadership", 10);
-    if (msg) messages.push(msg);
-  }
-  const tacticalGoals = ledger.events.filter(
-    (e) => e.type === "goal" && e.team === side && e.causes.length > 0,
-  ).length;
-  if (tacticalGoals > 0) {
-    const msg = grantManagerXP(state, "tactics", Math.min(30, tacticalGoals * 12));
-    if (msg) messages.push(msg);
+  if (!friendly) {
+    const repDelta = outcome === "win" ? 2 : outcome === "loss" ? -2 : 0;
+    state.manager.reputation.board = Math.max(
+      0,
+      Math.min(100, state.manager.reputation.board + repDelta),
+    );
+    state.manager.reputation.squad = Math.max(
+      0,
+      Math.min(100, state.manager.reputation.squad + repDelta),
+    );
+
+    if (outcome === "win") {
+      const msg = grantManagerXP(state, "leadership", 10);
+      if (msg) messages.push(msg);
+    }
+    /** 원인 태그가 빈 골은 세지 않는다 — 패킷이 우리 편에 줄 근거를 갖지 않은 경기다 */
+    const tacticalGoals = ledger.events.filter(
+      (e) => e.type === "goal" && e.team === side && e.causes.length > 0,
+    ).length;
+    if (tacticalGoals > 0) {
+      const msg = grantManagerXP(state, "tactics", Math.min(30, tacticalGoals * 12));
+      if (msg) messages.push(msg);
+    }
   }
 
   const opponentId = side === "home" ? match.awayTeamId : match.homeTeamId;
@@ -1394,8 +1402,9 @@ export function finalizeMatch(state: GameState): MatchDigest {
   advanceEuroKnockouts(state, otherLines);
   advanceDomesticCups(state, otherLines);
   /**
-   * 회견은 **매 경기 뒤** 열린다 (press.ts). 이긴 경기에만 열면 회견이 상이 되고,
-   * 감독이 세계에 대답할 자리가 결과에 따라 사라진다.
+   * 회견은 **대회 경기마다** 열린다 (press.ts). 이긴 경기에만 열면 회견이 상이 되고,
+   * 감독이 세계에 대답할 자리가 결과에 따라 사라진다. 친선은 자리 자체가 없다 —
+   * `buildMatchPress`가 거기서 널을 돌려준다 (season.md §2).
    */
   const press = buildMatchPress(state, match.id);
   if (press) openPress(state, press, otherLines);

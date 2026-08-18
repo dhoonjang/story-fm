@@ -480,9 +480,12 @@ export function matchdayRevenue(state: GameState, match: MatchRecord): MatchdayR
   const rank = standings.findIndex((r) => r.teamId === teamId) + 1;
   if (rank > 0) occupancy += ((11 - rank) / 10) * 0.04;
 
-  // 최근 5경기 폼
+  // 최근 5경기 폼 — **대회 경기만.** 친선의 승패가 표를 팔면 프리시즌 성적이 살림에
+  // 남는다 (season.md §2)
   const recent = state.matches
-    .filter((m) => m.result && (m.homeTeamId === teamId || m.awayTeamId === teamId))
+    .filter(
+      (m) => m.result && !isFriendly(m) && (m.homeTeamId === teamId || m.awayTeamId === teamId),
+    )
     .slice(-5);
   if (recent.length > 0) {
     const wins = recent.filter((m) => {
@@ -924,7 +927,8 @@ export function amortisationOf(state: GameState, teamId: string): AmortisationLi
 function recentWinRates(state: GameState, window: number): Map<string, number> {
   const results = new Map<string, boolean[]>();
   for (const m of state.matches) {
-    if (!m.result) continue;
+    // 친선은 세지 않는다 — 머천다이징이 프리시즌 성적을 읽을 자리가 아니다 (season.md §2)
+    if (!m.result || isFriendly(m)) continue;
     const push = (teamId: string, won: boolean) => {
       const list = results.get(teamId) ?? [];
       list.push(won);

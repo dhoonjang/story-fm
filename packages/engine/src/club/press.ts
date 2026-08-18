@@ -11,6 +11,8 @@ import type { GameState } from "../core/state";
 import { playersOf, pushNarrative, teamNameIn, userPlayers } from "../core/state";
 import { makeRng, pick } from "../core/rng";
 import { clampForm, formLabel, moraleToForm } from "../squad/form";
+import { recentOutcomes } from "../squad/slump";
+import { isFriendly } from "../competition/friendly";
 import type { SkillResult } from "../skills";
 
 /**
@@ -76,17 +78,6 @@ function outcomeOf(state: GameState, m: MatchRecord): "win" | "draw" | "loss" | 
   return us === them ? "draw" : us > them ? "win" : "loss";
 }
 
-/** 최근 치른 우리 경기 — 새 것부터 */
-function recentOutcomes(state: GameState, limit: number): Array<"win" | "draw" | "loss"> {
-  return state.matches
-    .filter((m) => m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId)
-    .filter((m) => m.result !== null)
-    .slice(-limit)
-    .reverse()
-    .map((m) => outcomeOf(state, m))
-    .filter((o): o is "win" | "draw" | "loss" => o !== null);
-}
-
 /**
  * 지금 기자가 이름을 부를 만한 선수 — **장부가 고른다.**
  * 폼이 바닥인 선수, 없으면 불만이 쌓인 선수. 모델에게 "적당한 선수를 골라라"
@@ -113,13 +104,24 @@ export function buildMatchPress(state: GameState, matchId: string): PressConfere
   const match = state.matches.find((m) => m.id === matchId);
   const result = match?.result;
   if (!match || !result) return null;
+  /**
+   * **친선 뒤에는 회견이 없다** (season.md §2). 프리시즌은 감독이 판을 시험하는
+   * 자리이고, 회견은 시험을 값으로 만든다 — 친선 3경기 무승이 `pressure` 회견(무게 3,
+   * 폭 ±12)을 열어, 답하지 않고 다음 친선으로 가는 것만으로 언론 평판이 무너졌다.
+   */
+  if (isFriendly(match)) return null;
   const outcome = outcomeOf(state, match);
   if (!outcome) return null;
   const home = match.homeTeamId === state.userTeamId;
   const opponent = teamNameIn(state, home ? match.awayTeamId : match.homeTeamId);
   const score = `${result.homeGoals}-${result.awayGoals}`;
 
-  const recent = recentOutcomes(state, 4);
+  /**
+   * 무승 계단은 **시즌의 것이다** — 친선도 지난 시즌도 세지 않는다(`recentOutcomes`,
+   * slump.ts와 같은 자). 라커룸의 연패 판정과 기자의 무승 판정이 다른 경기를 세면
+   * 같은 국면을 두 눈금으로 말하게 된다.
+   */
+  const recent = recentOutcomes(state, state.userTeamId, 4);
   const winless = recent.length >= 3 && recent.every((r) => r !== "win");
 
   /**
