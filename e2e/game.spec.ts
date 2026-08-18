@@ -40,8 +40,15 @@ async function openBoard(page: Page) {
 
 async function expectOvrConsistent(page: Page) {
   const check = await page.evaluate(() => {
+    /** 이름 칸에서 이름만 — 등번호(`shirt-no`)와 주장 표식은 이름이 아니다 */
+    const nameIn = (el: Element | null) => {
+      if (!el) return "";
+      const clone = el.cloneNode(true) as Element;
+      clone.querySelector(".shirt-no")?.remove();
+      return (clone.textContent ?? "").replace("Ⓒ", "").trim();
+    };
     const chips = [...document.querySelectorAll(".pitch-slot")].map((el) => ({
-      name: (el.querySelector(".slot-name")?.textContent ?? "").replace("Ⓒ", "").trim(),
+      name: nameIn(el.querySelector(".slot-name")),
       ovr: (el.querySelector(".slot-meta b")?.textContent ?? "").trim(),
     }));
     const heads = [...document.querySelectorAll(".squad-table thead th")];
@@ -52,11 +59,9 @@ async function expectOvrConsistent(page: Page) {
     for (const chip of chips) {
       if (!chip.name || !chip.ovr) continue;
       // 칩과 명단은 **같은 이름**을 적는다 — 화면이 이름을 줄이지 않으므로 그대로 잇는다.
+      // 두 자리 다 이름 칸에 등번호가 함께 서므로 그것만 걷어 낸다.
       // 동명이인이면 어느 행인지 알 수 없으므로 건너뛴다 (틀린 비교보다 안 하는 게 낫다)
-      const matches = rows.filter((r) => {
-        const full = (r.querySelector(".row-name")?.textContent ?? "").replace("Ⓒ", "").trim();
-        return full === chip.name;
-      });
+      const matches = rows.filter((r) => nameIn(r.querySelector(".row-name")) === chip.name);
       if (matches.length !== 1) continue;
       const row = matches[0]!;
       const cell = (row.querySelectorAll("td")[col]?.textContent ?? "").replace("?", "").trim();
@@ -572,10 +577,13 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
     .locator(".squad-table tbody tr.row-tier.t-bench, .squad-table tbody tr.row-tier.t-squad")
     .filter({ hasNot: page.locator("td:nth-child(2):text-is('GK')") })
     .first();
-  // 이름 칸엔 교체 화살표·표식·상태 배지가 함께 선다 — 이름은 자체 요소에서 읽는다
-  const inName = ((await benchRow.locator(".row-name").textContent()) ?? "")
-    .replace("Ⓒ", "")
-    .trim();
+  // 이름 칸엔 교체 화살표·표식·상태 배지가 함께 선다 — 이름은 자체 요소에서, 그
+  // 안에서도 등번호를 뺀 몫만 읽는다 (전술판 칩도 같은 이름을 그대로 세운다)
+  const inName = await benchRow.locator(".row-name").evaluate((el) => {
+    const clone = el.cloneNode(true) as Element;
+    clone.querySelector(".shirt-no")?.remove();
+    return (clone.textContent ?? "").replace("Ⓒ", "").trim();
+  });
   const beforeXI = await page.locator(".pitch-slot .slot-name").allTextContents();
   await benchRow.click();
   await expect(page.getByTestId("player-detail")).toBeVisible();
@@ -663,13 +671,17 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
   await page.getByTestId("slot-10").click();
   await expect(page.locator('.swap-btn:text("←")').first()).toBeVisible();
   await expect(page.locator('.swap-btn:text("→")')).toHaveCount(0);
-  const outName = (await page.getByTestId("slot-10").locator(".slot-name").textContent()) ?? "";
+  const outName = ((await page.getByTestId("slot-10").locator(".slot-name").textContent()) ?? "")
+    .replace("Ⓒ", "")
+    .trim();
   await page
     .locator(".squad-table tbody tr.row-tier")
     .filter({ has: page.locator(".row-name", { hasText: inName }) })
     .getByTestId(/^swapin-/)
     .click();
-  await expect(page.locator(".pitch-slot").filter({ hasText: inName })).toHaveCount(1);
+  await expect(
+    page.locator(".pitch-slot").filter({ has: page.locator(".slot-name", { hasText: inName }) }),
+  ).toHaveCount(1);
   // 밀려난 선수는 전술판에서 빠진다 (중복 배치 없음)
   await expect(page.locator(".pitch-slot", { hasText: outName })).toHaveCount(0);
   // 방금 올라온 선수의 OVR이 칩과 명단에서 같은 숫자인가 — 여기가 가장 크게 갈렸다
