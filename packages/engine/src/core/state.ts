@@ -81,6 +81,7 @@ import {
   countryOfTeam,
   formationOf,
   isTopFlight,
+  leagueOfTeam,
   tacticalStyleOf,
   teamCatalogById,
   isClubTeam,
@@ -681,6 +682,18 @@ export function clubProfileIn(state: GameState, teamId: string): ClubProfile {
     };
   }
   return clubProfile(teamId, team?.tier ?? teamCatalogById(teamId)?.tier ?? 3);
+}
+
+/**
+ * 이 팀이 **게임이 시작할 때** 속해 있던 리그 — 세이브가 갖고, 없으면(옛 세이브)
+ * 카탈로그가 답한다.
+ *
+ * `leagueOfTeamIn`과 갈리는 것은 승강이다 — 이쪽은 승강 **전**의 원 소속이라,
+ * "이 구단이 원래 어느 리그의 클럽인가"를 묻는 자리(브랜드 보정)가 쓴다. 지금
+ * 어디 있는가는 언제나 `leagueOfTeamIn`이다 (game-state.md §1).
+ */
+export function catalogLeagueIn(state: GameState | undefined, teamId: string): string {
+  return state?.teams.find((t) => t.id === teamId)?.leagueId ?? leagueOfTeam(teamId);
 }
 
 /**
