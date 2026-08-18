@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { GET as getCatalog, POST as createGame } from "../app/api/games/route";
 import { GET as getGame, DELETE as deleteGameRoute } from "../app/api/games/[id]/route";
-import { POST as postTurn } from "../app/api/games/[id]/turn/route";
+import { POST as postTurn } from "../app/api/games/[id]/turn/stream/route";
 import { POST as postLineup } from "../app/api/games/[id]/lineup/route";
 import {
   GET as catalogGet,
@@ -78,10 +78,22 @@ const gameList = () =>
     games: Array<{ id: string; teamName: string }>;
   }>;
 
+/**
+ * 한 턴 — 화면이 부르는 그 라우트다. 스트림이 흘린 NDJSON에서 최종 페이로드를
+ * 걷는다(`{"type":"done"}`); 실패는 이벤트로 오므로 여기서 사유째 터뜨린다.
+ */
 async function turn(id: string, message: string): Promise<GamePayload> {
   const res = await postTurn(json({ message }), params(id));
   expect(res.status).toBe(200);
-  return (await res.json()) as GamePayload;
+  const events = (await res.text())
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { type: string; payload?: GamePayload; error?: string });
+  const failure = events.find((e) => e.type === "error");
+  if (failure) throw new Error(`턴 실패: ${failure.error}`);
+  const payload = events.find((e) => e.type === "done")?.payload;
+  if (!payload) throw new Error("턴이 done 이벤트 없이 끝났다");
+  return payload;
 }
 
 beforeAll(() => {
@@ -134,9 +146,48 @@ describe("API — 온보딩부터 경기까지", () => {
     expect(bad.status).toBe(400);
   });
 
+  /**
+   * 파싱 실패는 **입력 오류**다 — `request.json()`이 검증보다 먼저 던지는 자리라
+   * 감싸지 않으면 잘못된 한 글자가 500이 되어 나간다.
+   */
+  it("파싱되지 않는 본문은 400", async () => {
+    const res = await createGame(
+      new Request("http://test.local", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{teamId:",
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("없는 게임 조회는 404", async () => {
     const res = await getGame(new Request("http://test.local"), params("ghost"));
     expect(res.status).toBe(404);
+  });
+
+  /**
+   * 게임 id는 **세이브 파일의 이름이 된다** — `path.join(dir, `${id}.json`)`.
+   * 경로 조각이 섞인 id가 `loadGame`·`deleteGame`까지 가면 데이터 디렉터리 밖의
+   * 파일을 읽거나 지운다. 없는 게임(404)이 아니라 잘못된 요청(400)으로 끊는다.
+   */
+  it("경로가 섞인 게임 id는 디스크에 닿기 전에 400", async () => {
+    const bad = "../../etc/passwd";
+    const idError = "게임 id가 올바르지 않습니다";
+    const failed = async (res: Response) => {
+      expect(res.status).toBe(400);
+      return ((await res.json()) as { error: string }).error;
+    };
+
+    expect(await failed(await getGame(new Request("http://test.local"), params(bad)))).toBe(
+      idError,
+    );
+    expect(await failed(await deleteGameRoute(new Request("http://test.local"), params(bad)))).toBe(
+      idError,
+    );
+    // 본문이 옳아도 id에서 먼저 걸린다 — 사유가 그것을 말한다
+    expect(await failed(await postTurn(json({ message: "안녕" }), params(bad)))).toBe(idError);
+    expect(await failed(await postLineup(json({ starting: [] }), params(bad)))).toBe(idError);
   });
 
   it("생성 → 조회 → 지시 → 경기 완주의 전체 여정이 동작한다", async () => {

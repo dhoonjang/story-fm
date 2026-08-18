@@ -19,6 +19,7 @@ import {
   migrateFormScale,
   migrateManagerAxes,
   migrateMatchStats,
+  migrateMirrorProficiency,
   migratePassStyles,
   migrateSquadLevels,
 } from "./migrations";
@@ -242,6 +243,9 @@ function migrate(save: Record<string, unknown>, state: GameState): void {
   migrateFormScale(state);
   migrateConditions(state);
   migrateMatchStats(state);
+  // 좌우 미러 자리에 얹혀 있던 주발 보정을 벗긴다 — 저장은 원값, 주발은 조회 때
+  // (player.md §8). 조회가 한 번 더 얹고 있어 폭이 두 배로 걸려 있었다.
+  migrateMirrorProficiency(state);
   /**
    * **종합은 저장된 값이 아니라 15축의 파생 캐시다** — 로드할 때 다시 계산한다.
    *

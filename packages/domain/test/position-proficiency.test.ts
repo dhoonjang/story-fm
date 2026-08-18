@@ -4,6 +4,7 @@ import {
   adaptationOf,
   adaptationWeightsOf,
   clusterOf,
+  footAdjust,
   positionDistance,
   positionProficiency,
   proficiencyReadiness,
@@ -59,6 +60,46 @@ describe("positionProficiency", () => {
     // 오른발잡이는 정확히 거울상
     expect(positionProficiency(cb, "RCB", { left: 1, right: 5 })).toBe(93);
     expect(positionProficiency(cb, "LCB", { left: 1, right: 5 })).toBe(87);
+  });
+
+  it("주발 보정은 좌우가 정확히 대칭이다 — 5/3에서 한쪽만 벌어지지 않는다", () => {
+    /**
+     * `Math.round`는 1.5를 2로, −1.5를 −1로 접는다. 발 차이 2(5/3)는 카탈로그의
+     * 57%라, 그 절반이 왼쪽 +2 · 오른쪽 −1로 갈려 있었다 (player.md §4).
+     */
+    for (const weak of [1, 2, 3, 4, 5]) {
+      const foot = { left: 5, right: weak };
+      expect(footAdjust("LCB", foot) + footAdjust("RCB", foot), `5/${weak}`).toBe(0);
+      // 거울상 선수도 같은 폭이어야 한다
+      expect(
+        footAdjust("LCB", foot) + footAdjust("LCB", { left: weak, right: 5 }),
+        `5/${weak}`,
+      ).toBe(0);
+    }
+    expect(footAdjust("LCB", { left: 5, right: 4 })).toBe(1);
+    expect(footAdjust("LCB", { left: 5, right: 3 })).toBe(2);
+    expect(footAdjust("LCB", { left: 5, right: 1 })).toBe(3);
+    expect(footAdjust("CB", { left: 5, right: 1 })).toBe(0); // 중앙은 어느 발도 아니다
+  });
+
+  it("저장된 미러 자리도 보정을 한 번만 받는다 — 저장은 원값이다", () => {
+    /**
+     * 카탈로그는 좌·중·우를 **같은 값**으로 적고, 좌우는 조회할 때 갈린다
+     * (player.md §8). 생성이 미리 얹어 두던 때는 조회가 한 번 더 얹어 힌카피
+     * (5/2)의 LCB가 96 · RCB가 90 — 의도한 ±2가 ±3으로 벌어졌다.
+     */
+    const stored = [
+      { position: "CB", proficiency: 93 },
+      { position: "LCB", proficiency: 93 },
+      { position: "RCB", proficiency: 93 },
+    ];
+    const leftFooted = { left: 5, right: 2 };
+    expect(positionProficiency(stored, "LCB", leftFooted)).toBe(95);
+    expect(positionProficiency(stored, "CB", leftFooted)).toBe(93);
+    expect(positionProficiency(stored, "RCB", leftFooted)).toBe(91);
+    // 목록에 있든 없든 같은 값이어야 한다 — 카탈로그와 폴백이 어긋나면 안 된다
+    expect(positionProficiency(held("CB", 93), "LCB", leftFooted)).toBe(95);
+    expect(positionProficiency(held("CB", 93), "RCB", leftFooted)).toBe(91);
   });
 
   it("역할이 다른 묶음은 여전히 2점 깎는다 — 라인 높이·역할은 좌우와 다르다", () => {

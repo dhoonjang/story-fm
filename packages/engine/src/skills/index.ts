@@ -40,6 +40,7 @@ import {
   clampFamiliarity,
   defaultRoleOf,
   inheritedRole,
+  storedProficiencyFor,
   rolesFor,
   separateBoardPoints,
   familiarityForSetup,
@@ -73,7 +74,6 @@ import {
   isSuspended,
   playerById,
   playerName,
-  proficiencyAt,
   pushNarrative,
   recomputeOverall,
   squadLevelOf,
@@ -1347,10 +1347,11 @@ export function setPlayerPosition(
   if (existing) {
     existing.isNatural = true;
   } else {
-    // 처음 맡는 자리 — 인접도 기반 초기 적응도로 시작한다
+    // 처음 맡는 자리 — 인접도 기반 초기 적응도로 시작한다. 저장은 **주발을 벗긴
+    // 원값**이다: 보정을 적어 두면 조회가 다시 얹는다 (player.md §8)
     player.positions.push({
       position: code,
-      proficiency: proficiencyAt(player, code),
+      proficiency: storedProficiencyFor(player.positions, code, player.foot),
       isNatural: true,
     });
   }

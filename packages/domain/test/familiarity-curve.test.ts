@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   FAMILIARITY_MAX,
   applyFamiliarityGain,
+  familiarityForSetup,
   familiarityGainScale,
+  withCurrentDrilled,
   type FamiliaritySource,
+  type TacticsSpec,
 } from "@story-fm/domain";
 
 /**
@@ -99,5 +102,39 @@ describe("적응도 상승 곡선", () => {
   it("천장과 바닥을 넘지 않는다", () => {
     expect(applyFamiliarityGain(98, 99, "match")).toBeLessThanOrEqual(FAMILIARITY_MAX);
     expect(applyFamiliarityGain(2, -99, "training")).toBe(0);
+  });
+});
+
+/**
+ * 기억은 **소수로 적히고 소수로 되찾힌다** (player.md §7.1·§7.3).
+ * 적는 자리·되찾는 자리 어느 한쪽이라도 정수로 접으면 왕복이 소수점에서 새어,
+ * 실험 삼아 A→B→A를 오간 감독이 출발한 값보다 낮은 곳에 선다.
+ */
+const A: TacticsSpec = {
+  formation: "4-4-2",
+  mentality: 3,
+  defensiveLine: 3,
+  pressing: 3,
+  tempo: 3,
+  width: 3,
+  passStyle: 3,
+};
+const B: TacticsSpec = { ...A, formation: "4-3-3", pressing: 5 };
+
+describe("적응도 기억 — 왕복", () => {
+  it("적을 때도 되찾을 때도 소수를 자르지 않는다", () => {
+    const drilled = withCurrentDrilled(undefined, A, 78.4, "2026-07-01");
+    expect(drilled[0]!.familiarity).toBe(78.4);
+    expect(familiarityForSetup(drilled, A, "2026-07-01")).toBe(78.4);
+  });
+
+  it("A→B→A는 정확히 제자리다 — 같은 날 되돌아오면 한 톨도 안 샌다", () => {
+    const onA = 78.4;
+    // 떠나기 전에 지금 값을 적어 두고 B로 간다
+    const afterLeaving = withCurrentDrilled(undefined, A, onA, "2026-07-01");
+    const onB = familiarityForSetup(afterLeaving, B, "2026-07-01");
+    // B에서 다시 적고 A로 돌아온다
+    const afterB = withCurrentDrilled(afterLeaving, B, onB, "2026-07-01");
+    expect(familiarityForSetup(afterB, A, "2026-07-01")).toBe(onA);
   });
 });

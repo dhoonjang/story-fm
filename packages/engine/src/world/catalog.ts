@@ -1,25 +1,19 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import type {
-  AxisValues,
-  PlayerCatalogEntry,
-  PlayerPosition,
-  PositionGroup,
-} from "@story-fm/domain";
+import type { PlayerCatalogEntry, PlayerPosition, PositionGroup } from "@story-fm/domain";
 import {
   PlayerCatalogEntrySchema,
   ageOf,
   bestOverall,
   clusterOf,
-  footAdjust,
   isMirrorPair,
   positionGroupOf,
-  roleFit,
   sideOf,
   weightSlotOf,
   type Foot,
 } from "@story-fm/domain";
 import { deriveAxes } from "./attributes";
 import { catalogPath, dataDir } from "../core/paths";
+import { stripStoredFootAdjust } from "../core/migrations";
 import { catalogCacheKey } from "../data/catalog-source";
 import { REAL_SQUADS, type RealPlayerSeed } from "../data/epl-players";
 import { EU_SQUADS } from "../data/eu-squads";
@@ -238,19 +232,15 @@ export function derivePositions(nameEn: string, natural: string): PlayerPosition
    * ① 사실상 같은 자리는 모두 갖는다.
    *
    * **좌우 분화(CB↔LCB↔RCB)는 같은 값**이다 — 부르는 이름만 다른 같은 자리다.
-   * 갈리는 건 주발뿐이고(`footAdjust` ±3), 그 규칙은 폴백(`positionProficiency`)과
-   * 정확히 같다 — 카탈로그에 있는 값과 없는 자리의 값이 어긋나지 않게.
+   * 갈리는 건 주발뿐이지만(`footAdjust` ±3) **여기서 얹지 않는다** — 저장은
+   * 원값이고 좌우는 조회할 때 `positionProficiency`가 한 번 가른다
+   * (player.md §4·§8). ⚠️ 여기서 얹으면 조회가 다시 얹어 폭이 두 배가 된다.
    */
-  const foot = footOf(nameEn, code);
-  const naturalAdjust = footAdjust(code, foot);
   for (const pos of clusterOf(code) ?? []) {
     if (pos === code) continue;
-    const mirrored = isMirrorPair(code, pos);
     positions.push({
       position: pos,
-      proficiency: clamp99(
-        mirrored ? base - naturalAdjust + footAdjust(pos, foot) : base - CLUSTER_ROLE_PENALTY,
-      ),
+      proficiency: clamp99(isMirrorPair(code, pos) ? base : base - CLUSTER_ROLE_PENALTY),
       isNatural: false,
     });
   }
@@ -337,7 +327,7 @@ function entryFromSeed(teamId: string, s: RealPlayerSeed): CatalogDraft {
     // 판단값이라 파생 공식이 바뀌면 어긋날 수 있는데(축 보정으로 OVR이 오르자
     // 757명이 역전됐다), 그걸 그대로 두면 어드민 표에 pot < ovr가 뜬다.
     // 여기서 접어 두면 게임·어드민·조회가 같은 값을 본다.
-    potential: Math.max(clamp99(s.potential), overallFor(s.position, axes, positions)),
+    potential: Math.max(clamp99(s.potential), bestOverall(axes, positions)),
     ...(homegrownCountry === undefined ? {} : { homegrownCountry }),
     ...(s.weeklyWage === undefined ? {} : { weeklyWage: s.weeklyWage }),
   };
@@ -739,7 +729,13 @@ export function playerCatalog(): PlayerCatalogEntry[] {
        * 능력치가 없는 선수의 전력을 재는 자리에서 — 터진다.
        */
       const parsed = PlayerCatalogEntrySchema.array().min(1).safeParse(raw);
-      if (parsed.success) entries = parsed.data;
+      if (parsed.success) {
+        // 어드민이 저장한 옛 카탈로그는 미러 자리에 주발 보정을 얹은 채로 들고
+        // 있다 — 조회가 다시 얹기 전에 벗긴다 (player.md §8). 파일은 건드리지
+        // 않는다: 어드민이 저장할 때 비로소 원값으로 기록된다.
+        for (const entry of parsed.data) stripStoredFootAdjust(entry.positions);
+        entries = parsed.data;
+      }
     } catch {
       /* 손상 파일은 무시하고 시드로 폴백 */
     }
@@ -803,23 +799,4 @@ export function defaultXiIds(teamId: string): string[] {
   return defaultXiSlugs(teamId)
     .map((slug) => byName.get(slug))
     .filter((id): id is string => id !== undefined);
-}
-
-/**
- * overall 파생 — **가장 잘 맞는 자리에서, 기본 역할로** 낸 15축 가중 평균 (FM의 CA).
- *
- * 선수 카드의 숫자 하나는 "이 선수는 어느 정도인가"에 답해야 하므로 세부 역할을
- * 타면 안 된다 — 역할을 타면 같은 선수가 역할 목록만큼 여러 등급을 갖는다.
- * 실제로 맡은 자리·역할의 값은 `roleFit(axes, position, role)`이 따로 낸다.
- *
- * 주 포지션 하나만 보지 않는 이유: 시드의 주 포지션 표기는 출처마다 갈리고
- * (EA는 윙어를 LM/RM으로 적는다), 그 표기 하나 때문에 종합이 낮게 나오면 이적·
- * 라인업 판단이 통째로 어긋난다. 능력치가 바뀔 때마다 재계산한다.
- */
-export function overallFor(
-  position: string,
-  axes: AxisValues,
-  positions?: readonly { position: string }[],
-): number {
-  return positions && positions.length > 0 ? bestOverall(axes, positions) : roleFit(axes, position);
 }

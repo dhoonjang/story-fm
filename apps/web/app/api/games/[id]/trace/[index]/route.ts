@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { resolveLlmMode } from "@story-fm/agents";
 import { traceEnabled, turnTrace } from "@story-fm/llm";
+import { invalidGameId } from "@/app/api/games/game-id";
 
 /**
  * 그 채팅 턴이 모델과 주고받은 원문 (models.md §5).
@@ -22,6 +23,8 @@ export async function GET(
   if (!traceEnabled()) return new NextResponse(null, { status: 404 });
 
   const { id, index: raw } = await context.params;
+  const bad = invalidGameId(id);
+  if (bad) return bad;
   const index = Number(raw);
   if (!Number.isInteger(index) || index < 0) {
     return NextResponse.json({ error: `턴 인덱스가 올바르지 않습니다: ${raw}` }, { status: 400 });
