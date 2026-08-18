@@ -582,7 +582,9 @@ erDiagram
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | 엔티티 정의 (Zod)                  | `packages/domain/src/` — `player` `team` `tactics` `records` `schedule` `manager` `persona` `press` `persuasion` `match` |
 | `GameState` · 새 게임 생성         | `packages/engine/src/core/state.ts`                                                                                      |
-| 저장·로드·마이그레이션             | `packages/engine/src/core/persistence.ts`                                                                                |
+| 저장·로드 · 실패 사유              | `packages/engine/src/core/persistence.ts`                                                                                |
+| 마이그레이션 (이름 붙은 순수 함수) | `packages/engine/src/core/migrations.ts`                                                                                 |
+| 세이브 스키마 (로드의 검사)        | `packages/engine/src/core/save-schema.ts`                                                                                |
 | 데이터 디렉터리 · 카탈로그 경로    | `packages/engine/src/core/paths.ts`                                                                                      |
 | 카탈로그 빌드·오버라이드           | `packages/engine/src/world/catalog.ts` · `attributes.ts`                                                                 |
 | 카탈로그 원본                      | `packages/engine/src/data/`                                                                                              |
