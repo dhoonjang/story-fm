@@ -3,8 +3,11 @@ import {
   advanceTime,
   deferredScouts,
   diffDays,
+  knowledgeNote,
   knowledgeOf,
   scoutingSummary,
+  observationOf,
+  observedOverall,
   observedRating,
   playersOf,
   POTENTIAL_FLOOR,
@@ -392,6 +395,26 @@ describe("잠재력 — 누구도 단정하지 못한다 (구간으로만 안다
     }
   });
 
+  it("하한은 감독이 아는 현재 실력 아래로 내려가지 않는다 — 이미 가진 것을 못 가질 수는 없다", () => {
+    const state = createTestGame(11);
+    const scouted = opponentOf(state);
+    scoutPlayer(state, scouted.id);
+    awaitReport(state, scouted.id);
+    expect(knowledgeOf(state, scouted.id)).toBe("scouted");
+
+    for (const p of [...userPlayers(state), scouted]) {
+      const band = potentialBand(state, p)!;
+      // 기준은 **관측** 종합이다 — 참 종합을 쓰면 하한이 그 숫자를 그대로 부른다
+      const known = observedOverall(p.attributes.overall, observationOf(state, p.id));
+      // 안개가 종합을 참 잠재력 위로 부풀렸으면 참값이 이긴다 (구간 안 불변식이 먼저)
+      expect(band.low, `${p.name} 하한`).toBeGreaterThanOrEqual(
+        Math.min(known, p.attributes.potential),
+      );
+      expect(band.low, `${p.name} 하한은 참값 아래`).toBeLessThanOrEqual(p.attributes.potential);
+      expect(band.high, `${p.name} 상한은 참값 위`).toBeGreaterThanOrEqual(p.attributes.potential);
+    }
+  });
+
   it("같은 선수를 몇 번을 물어도 같은 구간이 나온다 — 결정적", () => {
     const state = createTestGame(11);
     const p = userPlayers(state)[0]!;
@@ -400,7 +423,10 @@ describe("잠재력 — 누구도 단정하지 못한다 (구간으로만 안다
 
   it("만난 적 없는 선수는 짐작조차 못 한다", () => {
     const state = createTestGame(11);
-    expect(potentialBand(state, opponentOf(state))).toBeNull();
+    const unknown = opponentOf(state);
+    expect(potentialBand(state, unknown)).toBeNull();
+    // 안내문도 같은 말을 한다 — 구간이 없으면 구간을 약속하지 않는다
+    expect(knowledgeNote(state, unknown.id)).toContain("짐작할 근거가 없다");
   });
 
   it("우리 선수는 **데리고 뛸수록** 좁아지고, 끝까지 ±2는 남는다", () => {
@@ -430,6 +456,8 @@ describe("잠재력 — 누구도 단정하지 못한다 (구간으로만 안다
       awaitReport(state, target.id);
       margins.push(potentialBand(state, target)!.margin);
     }
+    // 안내문이 "알 수 없다"고 하면 모델이 손에 든 구간을 버린다
+    expect(knowledgeNote(state, target.id)).toContain("구간으로만");
     expect(margins[0]).toBe(POTENTIAL_MARGIN.scouted);
     expect(margins[margins.length - 1]).toBe(POTENTIAL_SCOUT_FLOOR);
     for (let i = 1; i < margins.length; i++) expect(margins[i]!).toBeLessThan(margins[i - 1]!);

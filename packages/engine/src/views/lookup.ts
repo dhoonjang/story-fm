@@ -48,8 +48,11 @@ import {
   attributeLine,
   knowledgeNote,
   knowledgeOf,
+  observationOf,
+  observedOverall,
   overallView,
   potentialView,
+  readCondition,
   strengthsAndWeaknesses,
   type Knowledge,
 } from "../squad/scouting";
@@ -268,6 +271,21 @@ export function playerRow(state: GameState, p: GamePlayer): string {
   return p.teamId === state.userTeamId ? ourRow(state, p) : theirRow(state, p);
 }
 
+/**
+ * **줄 세우는 값도 노출이다** (player.md §10) — 행이 라벨만 보여도 참값으로 세운
+ * 순서는 그 값을 그대로 말한다. 정렬 키는 그 행이 찍는 관측값과 같아야 한다.
+ */
+function sortRating(state: GameState, p: GamePlayer): number {
+  return observedOverall(p.attributes.overall, observationOf(state, p.id));
+}
+
+/** 체력은 지식 5단계가 아니라 §9.2의 채널 — 우리 선수는 아침에 쟀고, 타 팀은 읽는다 */
+function sortCondition(state: GameState, p: GamePlayer): number {
+  return p.teamId === state.userTeamId
+    ? p.state.condition
+    : readCondition(state, p.id, p.state.condition).value;
+}
+
 // ── 검색 ────────────────────────────────────────────────
 
 export interface SearchPlayersInput {
@@ -334,13 +352,24 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
   const pool = input.name ? rankByName(input.name, narrowed).matches : narrowed;
 
   const sortBy = input.sortBy ?? "rating";
+  // 안개 키는 지식 수준 파생이라 비싸다 — 풀당 한 번만 뽑고 비교는 그 값으로 한다
+  const fogged =
+    sortBy === "rating" || sortBy === "fatigue"
+      ? new Map(
+          pool.map(
+            (p) =>
+              [p.id, sortBy === "rating" ? sortRating(state, p) : sortCondition(state, p)] as const,
+          ),
+        )
+      : null;
+  const fog = (p: GamePlayer) => fogged?.get(p.id) ?? 0;
   const sorted = [...pool].sort((a, b) => {
     switch (sortBy) {
       case "age":
         return ageOf(a.birthdate, state.date) - ageOf(b.birthdate, state.date);
       case "fatigue":
         // 지친 순 — 체력이 낮은 쪽이 앞
-        return a.state.condition - b.state.condition;
+        return fog(a) - fog(b);
       case "goals":
         return (seasonStatOf(state, b.id)?.goals ?? 0) - (seasonStatOf(state, a.id)?.goals ?? 0);
       case "apps":
@@ -351,7 +380,7 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
           (activeContract(state, a.id)?.weeklyWage ?? 0)
         );
       default:
-        return b.attributes.overall - a.attributes.overall;
+        return fog(b) - fog(a);
     }
   });
 
@@ -734,7 +763,7 @@ export function teamProfile(state: GameState, team: string): LookupResult {
     .filter((a) => a.role === "starting")
     .map((a) => playerById(state, a.playerId))
     .filter((p): p is GamePlayer => p !== null)
-    .sort((a, b) => b.attributes.overall - a.attributes.overall)
+    .sort((a, b) => sortRating(state, b) - sortRating(state, a))
     .slice(0, 6);
 
   const lines = [
