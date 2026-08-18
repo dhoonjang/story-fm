@@ -4,6 +4,7 @@ import {
   activeContract,
   advanceTime,
   assignmentsOf,
+  boardExpectation,
   isClubTeam,
   computeStandings,
   groupOf,
@@ -11,9 +12,12 @@ import {
   MINI_WORLD,
   playersOf,
   quickSimulate,
+  recordLeagueHistory,
+  reviewSeason,
   transitionSeason,
   userPlayers,
   weeklyWagesOf,
+  type GameState,
 } from "@story-fm/engine";
 import { createMiniGame, createTestGame, playFullSeason, simSquad } from "./helpers";
 
@@ -186,6 +190,81 @@ describe("시즌 전환 (season.md §6)", () => {
     expect(captains).toHaveLength(1);
     expect(captains[0]?.id).not.toBe(captain.id);
     expect(groupOf(captains[0]!)).not.toBe("GK");
+  });
+});
+
+/**
+ * 18팀 리그 — 문턱이 20팀 순위로 박혀 있던 자리들 (career.md §5).
+ *
+ * 분데스리가 17위는 **강등**인데 보드는 "잔류 충족"으로 읽어 평판 +8과 `survivor`를
+ * 줬고, 34라운드 리그에 `invincible`(38경기)은 있을 수 없었다.
+ */
+describe("18팀 리그의 시즌 리뷰", () => {
+  /** 그 리그의 리그전 결과를 손으로 채운다 — 경기 모델에 기대지 않는다 */
+  function fabricateLeague(
+    state: GameState,
+    leagueId: string,
+    score: (homeTeamId: string, awayTeamId: string) => [number, number],
+  ): void {
+    for (const match of state.matches) {
+      if (match.competitionId !== leagueId || (match.stage ?? "league") !== "league") continue;
+      const [homeGoals, awayGoals] = score(match.homeTeamId, match.awayTeamId);
+      match.result = { homeGoals, awayGoals, scorers: [] };
+    }
+  }
+
+  it("17위는 잔류가 아니다 — 보드 기대는 15위이고 생존왕도 없다", () => {
+    const state = createTestGame(7, "paderborn");
+    const us = state.userTeamId;
+    const last = "elversberg"; // 우리 밑에 한 팀은 있어야 17위가 된다
+    // 우리는 최하위 팀만 두 번 잡고 나머지는 전패, 그 팀은 전패 — 나머지는 서로 비긴다
+    fabricateLeague(state, "bundesliga", (home, away) => {
+      if (home === us) return away === last ? [1, 0] : [0, 1];
+      if (away === us) return home === last ? [0, 1] : [1, 0];
+      if (home === last) return [0, 1];
+      if (away === last) return [1, 0];
+      return [1, 1];
+    });
+    const table = computeStandings(state);
+    expect(table).toHaveLength(18);
+    expect(table.findIndex((r) => r.teamId === us) + 1).toBe(17);
+
+    expect(boardExpectation(state, us).target).toBe(15);
+    const before = state.manager.reputation.board;
+    const digest = reviewSeason(state);
+
+    expect(state.manager.reputation.board).toBe(before - 8);
+    expect(digest.some((d) => d.includes("미치지 못했다"))).toBe(true);
+    expect(state.achievements.some((a) => a.code === "survivor")).toBe(false);
+    expect(state.seasonRecords[0]?.position).toBe(17);
+  });
+
+  it("34경기 무패가 무패 시즌이고, 챔피언은 그 리그 이름으로 남는다", () => {
+    const state = createTestGame(7, "paderborn");
+    const us = state.userTeamId;
+    fabricateLeague(state, "bundesliga", (home, away) =>
+      home === us ? [1, 0] : away === us ? [0, 1] : [1, 1],
+    );
+
+    reviewSeason(state);
+
+    const champion = state.achievements.find((a) => a.code === "champion");
+    expect(champion?.description).toBe("분데스리가 우승");
+    const invincible = state.achievements.find((a) => a.code === "invincible");
+    expect(invincible?.description).toBe("34경기 무패의 완성");
+  });
+
+  it("시즌 순위표가 통째로 남는다 — 체급 재산정의 성적 축이 읽는 표다", () => {
+    const state = createTestGame(7, "paderborn");
+    fabricateLeague(state, "bundesliga", (home) => (home === state.userTeamId ? [1, 0] : [1, 1]));
+
+    recordLeagueHistory(state);
+
+    const table = state.leagueHistory?.find((t) => t.leagueId === "bundesliga");
+    expect(table?.season).toBe(state.season);
+    expect(table?.order).toEqual(computeStandings(state, "bundesliga").map((r) => r.teamId));
+    // 경기를 하지 않은 리그는 줄을 세우지 않는다 — 0경기짜리 표는 순위가 아니다
+    expect(state.leagueHistory?.some((t) => t.leagueId === "laliga")).toBe(false);
   });
 });
 
