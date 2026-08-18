@@ -553,7 +553,7 @@ describe("여름 휴가", () => {
     expect(avg()).toBeLessThan(conditionBefore);
     // 대가 ② 라커룸의 반발
     expect(state.issues.length).toBeGreaterThan(0);
-    expect(state.issues[0]?.note).toContain("휴가");
+    expect(state.issues[0]?.reason).toBe("early-return");
   });
 
   it("조기 소집 뒤에는 그 날짜부터 훈련이 자유롭다", () => {
@@ -604,7 +604,7 @@ describe("여름 휴가", () => {
     expect(res.message).toContain(state.date);
     // 검증이 승격보다 먼저다 — 반려하고 나서 소집일이 앞당겨져 있으면 대가만 남는다
     expect(squadReturnOf(state.calendar)).toBe(before);
-    expect(state.issues.some((i) => i.note?.includes("휴가"))).toBe(false);
+    expect(state.issues.some((i) => i.reason === "early-return")).toBe(false);
   });
 
   it("소집일 이후는 그대로 잡힌다", () => {

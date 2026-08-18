@@ -1204,14 +1204,6 @@ export function buildStrengthPacket(
   const UPSET_PER_GAP = 0.0123;
   const upsetChance = round2(Math.min(0.45, Math.max(0.05, 0.35 - overallGap * UPSET_PER_GAP)));
 
-  const xgGap = expectedGoals.home - expectedGoals.away;
-  const verdict =
-    Math.abs(xgGap) < 0.15 ? "박빙 판세" : `${xgGap > 0 ? home.teamName : away.teamName} 우세 판세`;
-  const summary =
-    `${home.teamName}(홈) vs ${away.teamName}. ` +
-    matchups.map((m) => m.why).join(" / ") +
-    ` — 기대 득점 ${expectedGoals.home} : ${expectedGoals.away}, ${verdict}.`;
-
   /**
    * 키포인트 = **발동한 상성**(전술이 만난 결과) + 구멍(교체 신호) + 전술 미스매치.
    * 상성이 앞에 온다 — 감독이 지금 무엇을 바꿔야 하는지가 먼저다. 상성과 구멍은
@@ -1259,6 +1251,5 @@ export function buildStrengthPacket(
         away: matchIntensity(awayIn.tactics),
       },
     },
-    summary,
   };
 }

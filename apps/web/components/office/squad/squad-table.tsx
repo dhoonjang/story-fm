@@ -2,6 +2,7 @@
 
 import { Fragment, useMemo } from "react";
 import { ConditionBar } from "@/components/condition-bar";
+import { moodSentence } from "@/lib/mood";
 import { FitGauge, FormArrow, Margin, StatusBadges, ovrTitle } from "./marks";
 import { TIER_SLUG, type SquadRow, type Tier } from "./types";
 
@@ -265,7 +266,7 @@ export function SquadTable({
               </td>
               {/* 사기·피로를 하나로 합친 값 — 왜 이 값인지는 행을 펼치면 한 문장으로 나온다.
                   경기 중에는 판세 탭과 같은 읽은 값이라 막대에 모르는 폭이 붙는다 */}
-              <td title={p.mood}>
+              <td title={moodSentence(p.mood)}>
                 <ConditionBar c={p.condition} />
               </td>
               {/* 골 대신 평점 — 골 수는 행을 펼치면 시즌 기록에 그대로 있다 */}

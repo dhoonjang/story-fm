@@ -90,7 +90,7 @@ const names = { home: fixture.home.teamName, away: fixture.away.teamName };
 const packet = buildStrengthPacket(toSideInput(fixture.home), toSideInput(fixture.away));
 
 console.log("═══ 전력 분석 패킷 ═══");
-console.log(packet.summary);
+console.log(`${packet.home.teamName}(홈) vs ${packet.away.teamName}`);
 for (const m of packet.matchups) console.log(`  · ${m.why}`);
 for (const k of packet.keyPoints) console.log(`  ★ ${k}`);
 console.log(

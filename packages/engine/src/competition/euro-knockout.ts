@@ -338,11 +338,7 @@ function reportOurTie(
   const short = competitionShortName(cup.id);
   const label = stageLabel(stage, 1, false);
   const advanced = winners.includes(state.userTeamId);
-  digest.push(
-    advanced
-      ? `${short} ${label} 통과 — 다음 라운드로 간다`
-      : `${short} ${label} 탈락 — 여정이 여기서 끝났다`,
-  );
+  digest.push(advanced ? `${short} ${label} 통과` : `${short} ${label} 탈락`);
   pushNarrative(state, `${short} ${label} ${advanced ? "통과" : "탈락"}`, 4);
 }
 

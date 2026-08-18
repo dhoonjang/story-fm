@@ -97,7 +97,7 @@ export function runBonus(wins: number): number {
  *
  * @param margin 우리 득점 − 실점
  * @param played 그 경기에 뛴 선수 id — 대패의 대가는 그라운드에 있던 사람이 치른다
- * @returns 감독에게 알릴 만한 일이 있으면 한 줄 (없으면 null)
+ * @returns 감독에게 알릴 만한 연속 기록이 있으면 그 사실 (없으면 null)
  */
 export function applyResultMood(
   state: GameState,
@@ -127,8 +127,8 @@ export function applyResultMood(
 
   if (losses >= SLUMP_ISSUE_LOSSES) markSlumpIssue(state, teamId, squad, losses);
 
-  if (losses >= SLUMP_LOSSES) return `${losses}연패 — 라커룸이 가라앉았다`;
-  if (wins >= RUN_WINS) return `${wins}연승 — 선수단 분위기가 올라 있다`;
+  if (losses >= SLUMP_LOSSES) return `${losses}연패`;
+  if (wins >= RUN_WINS) return `${wins}연승`;
   return null;
 }
 
@@ -157,7 +157,8 @@ function markSlumpIssue(
   state.issues.push({
     gamePlayerId: candidate.id,
     kind: "unhappy",
-    note: `${losses}연패 — 팀 상황에 불만`,
+    reason: "losing-run",
+    count: losses,
     since: state.date,
   });
 }

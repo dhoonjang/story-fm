@@ -13,6 +13,7 @@ import { pickPlayerAmong } from "../core/player-ref";
 import { makeRng, pick } from "../core/rng";
 import { clampForm, formLabel, moraleToForm } from "../squad/form";
 import { recentOutcomes } from "../squad/slump";
+import { issueReasonText } from "../squad/mood";
 import { isFriendly } from "../competition/friendly";
 import type { SkillResult } from "../skills";
 
@@ -97,6 +98,12 @@ function outcomeOf(state: GameState, m: MatchRecord): "win" | "draw" | "loss" | 
   return us === them ? "draw" : us > them ? "win" : "loss";
 }
 
+/** 불만 사유를 사실어로 — 옛 세이브가 사유 문장을 들고 있어 그것이 폴백이다 */
+function issueTextOf(state: GameState, playerId: string): string {
+  const issue = state.issues.find((i) => i.gamePlayerId === playerId);
+  return (issue ? issueReasonText(issue) : null) ?? "사유 불명";
+}
+
 /**
  * 지금 기자가 이름을 부를 만한 선수 — **장부가 고른다.**
  * 폼이 바닥인 선수, 없으면 불만이 쌓인 선수. 모델에게 "적당한 선수를 골라라"
@@ -177,7 +184,7 @@ export function buildMatchPress(state: GameState, matchId: string): PressConfere
       kind: slumping ? "slump" : "unhappy",
       text: slumping
         ? `${target.name} 폼 ${formLabel(target.state.form)}`
-        : `${target.name} 라커룸 불만 (${state.issues.find((i) => i.gamePlayerId === target.id)?.note ?? "사유 불명"})`,
+        : `${target.name} 라커룸 불만 (${issueTextOf(state, target.id)})`,
       about: target.id,
       sharp: true,
     });

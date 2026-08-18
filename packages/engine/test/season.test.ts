@@ -245,12 +245,17 @@ describe("18팀 리그의 시즌 리뷰", () => {
 
     expect(boardExpectation(state, us).target).toBe(15);
     const before = state.manager.reputation.board;
-    const digest = reviewSeason(state);
+    reviewSeason(state);
 
     expect(state.manager.reputation.board).toBe(before - 8);
-    expect(digest.some((d) => d.includes("미치지 못했다"))).toBe(true);
     expect(state.achievements.some((a) => a.code === "survivor")).toBe(false);
     expect(state.seasonRecords[0]?.position).toBe(17);
+    // 보드 평가는 문장이 아니라 등급과 근거 수치다 (overview.md §1 철칙 4)
+    expect(state.seasonRecords[0]?.board).toMatchObject({
+      grade: "missed",
+      position: 17,
+      target: 15,
+    });
   });
 
   it("34경기 무패가 무패 시즌이고, 챔피언은 그 리그 이름으로 남는다", () => {
@@ -306,7 +311,10 @@ describe("풀 시즌 통합 — 리그 완주 후 커리어 기록·전환", () 
     expect(record.teamId).toBe("arsenal"); // 재임 팀이 기록된다
     expect(record.position).toBeGreaterThanOrEqual(1);
     expect(record.position).toBeLessThanOrEqual(teams);
-    expect(record.boardVerdict.length).toBeGreaterThan(0);
+    // 보드 평가는 문장이 아니라 등급과 근거 수치다 (overview.md §1 철칙 4)
+    const board = record.board!;
+    expect(board.position).toBe(record.position);
+    expect(board.grade).toBe(record.position <= board.target ? "met" : "missed");
     // 우승했다면 트로피에 당시 팀이 남는다
     if (record.position === 1) {
       const trophy = state.trophies.find((t) => t.season === 1);

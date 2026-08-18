@@ -418,7 +418,9 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
     ? [
         ``,
         `[현재 판세 — 구간마다 갱신]`,
-        packet.summary,
+        // 판세를 읽는 것은 모델의 일이다 — 코어는 이름·수치·상성 근거만 싣는다
+        `${packet.home.teamName}(홈) vs ${packet.away.teamName} — 기대 득점 ${packet.guide.expectedGoals.home} : ${packet.guide.expectedGoals.away}`,
+        packet.matchups.map((m) => m.why).join(" / "),
         ...packet.keyPoints.map((k) => `· ${k}`),
         `홈 전술 소화: ${Math.round(packet.home.tactical.uptake * 100)}%${
           packet.home.tactical.notes.length > 0

@@ -83,6 +83,7 @@ import {
   proficiencyAt,
   pushNarrative,
   pushReportCards,
+  seasonStatOf,
   squadLevelOf,
   tacticsOf,
   teamNameIn,
@@ -386,10 +387,11 @@ function dailyTick(
       state.issues.push({
         gamePlayerId: gripe.id,
         kind: "unhappy",
-        note: "출전 기회 불만",
+        reason: "minutes",
         since: state.date,
       });
-      digest.push(`${gripe.name}이(가) 출전 기회에 불만을 품기 시작했다 — 면담이 필요해 보인다`);
+      const apps = seasonStatOf(state, gripe.id)?.apps ?? 0;
+      digest.push(`${gripe.name} 출전 기회 불만 — 시즌 출전 ${apps}경기, 비선발`);
       pushNarrative(state, `${gripe.name} 출전 불만`, 3);
     }
   }
