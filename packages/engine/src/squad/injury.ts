@@ -323,4 +323,3 @@ export function seedInjuryHistory(state: GameState): void {
     player.state.injuryProneness = pronenessFromDaysOut(unionDays(spans));
   }
 }
-
