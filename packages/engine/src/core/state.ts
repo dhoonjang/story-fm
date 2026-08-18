@@ -1407,6 +1407,8 @@ function buildInitialSquads(
       }
     }
     const reserveCount = squad.filter((p) => p.squadLevel === "reserve").length;
+    // 이름도 팀 안에서 유일해야 한다 — 1군 명단을 쥐고 시작한다 (people.md §2)
+    const takenNames = new Set(squad.map((p) => p.name));
     for (let i = reserveCount; i < RESERVE_TEAM_SIZE; i++) {
       const youth = generateYouthPlayer(
         seed + 17,
@@ -1417,6 +1419,7 @@ function buildInitialSquads(
         takenIds,
         undefined,
         2026,
+        takenNames,
       );
       youth.squadLevel = "reserve";
       players.push(youth);
