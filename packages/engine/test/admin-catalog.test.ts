@@ -28,6 +28,7 @@ import {
   domesticCupCatalog,
   isCupCatalogEdited,
   isLeagueCatalogEdited,
+  leagueSizeIn,
   isTeamCatalogEdited,
   leagueCatalog,
   leagueCatalogPath,
@@ -176,7 +177,7 @@ describe("체급 편집과 진행 중인 세이브", () => {
     expect(loaded!.teams.every((t) => t.tier === undefined)).toBe(true);
     expect(tierOfTeamIn(loaded!, "arsenal")).toBe(catalogTierOf("arsenal"));
     expect(boardExpectation(loaded!, "arsenal")).toEqual(
-      boardExpectationOfTier(catalogTierOf("arsenal")),
+      boardExpectationOfTier(catalogTierOf("arsenal"), leagueSizeIn(loaded!, "arsenal")),
     );
   });
 });

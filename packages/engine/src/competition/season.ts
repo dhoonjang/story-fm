@@ -40,10 +40,12 @@ import {
   applyPromotionRelegation,
   clubEconomyLevelIn,
   leagueOfTeamIn,
+  leagueSizeIn,
   teamsOfLeagueIn,
 } from "./promotion";
-import { recomputeClubTiers } from "./club-tier";
+import { RECENT_SEASONS, recomputeClubTiers } from "./club-tier";
 import { boardExpectationOfTier, tierOfTeamIn } from "../core/club-tier";
+import { leagueRounds, safetyLine } from "../core/league-shape";
 import { generateYouthPlayer } from "../world/generate";
 import { assignSquadNumber } from "../squad/numbers";
 import {
@@ -216,7 +218,7 @@ export function boardExpectation(
   state: GameState,
   teamId: string,
 ): { target: number; label: string } {
-  return boardExpectationOfTier(tierOfTeamIn(state, teamId));
+  return boardExpectationOfTier(tierOfTeamIn(state, teamId), leagueSizeIn(state, teamId));
 }
 
 function checkAchievements(state: GameState, position: number, row: StandingRow): void {
@@ -224,8 +226,13 @@ function checkAchievements(state: GameState, position: number, row: StandingRow)
     if (state.achievements.some((a) => a.code === code && a.season === state.season)) return;
     state.achievements.push({ code, season: state.season, name, description });
   };
-  if (position === 1) add("champion", "챔피언", "프리미어리그 우승");
-  if (row.losses === 0 && row.played >= 38) add("invincible", "무패 시즌", "38경기 무패의 완성");
+  const league = leagueOfTeamIn(state, state.userTeamId);
+  const size = leagueSizeIn(state, state.userTeamId);
+  const rounds = leagueRounds(size);
+  if (position === 1) add("champion", "챔피언", `${leagueName(league)} 우승`);
+  if (row.losses === 0 && row.played >= rounds) {
+    add("invincible", "무패 시즌", `${rounds}경기 무패의 완성`);
+  }
   if (position <= 4) add("top4", "탑4", "유럽 최상위 대항전 진출권 확보");
 
   const topScorer = state.seasonStats
@@ -236,7 +243,9 @@ function checkAchievements(state: GameState, position: number, row: StandingRow)
     if (player) add("sharpshooter", "골잡이 조련사", `${player.name} 시즌 ${topScorer.goals}골`);
   }
   const tier = tierOfTeamIn(state, state.userTeamId);
-  if (tier === 4 && position <= 17) add("survivor", "생존왕", "잔류권 팀을 안전하게 지켜냈다");
+  if (tier === 4 && position <= safetyLine(size)) {
+    add("survivor", "생존왕", "잔류권 팀을 안전하게 지켜냈다");
+  }
 }
 
 /**
@@ -331,6 +340,40 @@ export function reviewSeason(state: GameState): string[] {
   }
   pushNarrative(state, `시즌 ${state.season} 최종 ${position}위`, 5);
   return digest;
+}
+
+/**
+ * 그해 리그전을 돈 리그의 **최종 순위표를 통째로 남긴다** — 구단 체급 재산정의 성적
+ * 축이 읽는 유일한 원본이다 (team.md §2.1).
+ *
+ * ⚠️ **승강을 적용하기 전에, 새 일정을 짜기 전에** 불러야 한다. `computeStandings`는
+ * 지금 소속(`leagueOfTeamIn`)과 `state.season`의 경기로 표를 세우므로, 승강 뒤에
+ * 부르면 방금 올라온 팀이 0경기로 표에 서고 강등된 팀은 사라진다.
+ *
+ * 감독의 `SEASON_RECORD`로는 이 축을 잴 수 없다 — 그 표는 감독 팀만 쌓여서 나머지
+ * 96클럽이 영원히 중립(0.5)이 된다. 최근 세 시즌만 든다(그 밖은 아무도 안 읽는다).
+ */
+export function recordLeagueHistory(state: GameState): void {
+  const leagueIds = new Set<string>();
+  for (const match of state.matches) {
+    if (match.season !== state.season || !match.result) continue;
+    if ((match.stage ?? "league") !== "league") continue;
+    const id = match.competitionId;
+    // 친선(대회 없음)도 컵도 줄을 세우지 않는다 — 리그전만 순위표를 갖는다
+    if (id === null || isCup(id)) continue;
+    leagueIds.add(id);
+  }
+  const kept = (state.leagueHistory ?? []).filter(
+    (table) => table.season !== state.season && table.season > state.season - RECENT_SEASONS,
+  );
+  for (const leagueId of [...leagueIds].sort()) {
+    kept.push({
+      season: state.season,
+      leagueId,
+      order: computeStandings(state, leagueId).map((r) => r.teamId),
+    });
+  }
+  state.leagueHistory = kept;
 }
 
 /**
@@ -643,6 +686,8 @@ export function transitionSeason(state: GameState): string[] {
     finalTables[league.id] = computeStandings(state, league.id).map((r) => r.teamId);
   }
   const cupWinners = domesticCupWinners(state);
+  // 성적 축의 원본 — 승강이 소속을 옮기기 **전에** 그해 순위표를 남긴다 (team.md §2.1)
+  recordLeagueHistory(state);
   /**
    * 승강 — 티켓과 **같은 최종 순위표**를 쓰고, 새 일정을 짜기 **전에** 자리를 바꾼다.
    * 순서가 뒤집히면 강등된 팀이 그 리그의 다음 시즌 일정에 그대로 남는다.
