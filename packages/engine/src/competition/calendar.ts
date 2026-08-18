@@ -268,6 +268,12 @@ export function buildMatchweekDates(season: number): Matchweek[] {
   return weeks.map((w, i) => ({ ...w, round: i + 1 }));
 }
 
+/**
+ * 새 게임이 서는 시즌 — **언제나 1이다** (`createGame`). 세이브의 `season`은
+ * 여기서부터 세므로, 게임이 시작한 날짜도 이 번호 하나로 정해진다.
+ */
+export const FIRST_SEASON = 1;
+
 export function buildSeasonCalendar(season: number): SeasonCalendar {
   const year = seasonYear(season);
   // 개막전은 금요일 밤 — 주말 라운드의 첫 슬롯이다

@@ -111,8 +111,8 @@ export const FINANCE_TIER1 = defineHarness({
   // prettier-ignore
   bands: [
     { metric: "시즌 1 보고서 수", role: "guard", min: 10, unit: "count", why: "한 시즌을 다 돌지 못하면 나머지가 전부 헛값이다" },
-    { metric: "연 장부 손익", role: "reference", min: -30_000_000, max: 40_000_000, unit: "money", why: "**밴드의 기준 축.** PSR 위반선(시즌 평균 −£35M) 바로 위부터, 흑자만으로 이적 예산이 무한히 불어나지 않는 선까지 — 지금 상단 밖이다 (finance.md §10.2)" },
-    { metric: "연 현금 순증", role: "guard", min: 85_000_000, max: 200_000_000, unit: "money", why: "이적 활동이 지배하는 축이라 밸런스를 판정하지 않는다 — 시즌이 제대로 돌았는지의 난간" },
+    { metric: "연 장부 손익", role: "reference", min: -30_000_000, max: 70_000_000, unit: "money", why: "**밴드의 기준 축.** PSR 위반선(시즌 평균 −£35M) 바로 위부터, 흑자만으로 이적 예산이 무한히 불어나지 않는 선까지. 상단은 한 시즌이 12개월이 되며 +£40M에서 옮겼다 — 마지막 달이 시즌 안에서 마감되고(finance.md §7.1) 그 달이 순위·컵 상금을 진다" },
+    { metric: "연 현금 순증", role: "guard", min: 85_000_000, max: 260_000_000, unit: "money", why: "이적 활동이 지배하는 축이라 밸런스를 판정하지 않는다 — 시즌이 제대로 돌았는지의 난간. 상단은 11개월 시절 천장까지의 여유(31%)를 12개월에 그대로 옮긴 값이다" },
     { metric: "연 수입", role: "guard", min: 300_000_000, unit: "money", why: "실제 상위 구단 £400–700M의 6–7할" },
     { metric: "연 지출", role: "measure", unit: "money", why: "수입과 함께 읽는다 — 손익의 분해" },
     { metric: "연 상각", role: "measure", unit: "money", why: "실제 구단은 비용의 3할 안팎" },

@@ -28,7 +28,12 @@ import { isCupOnlyLeague, isMarketOnlyLeague, leagueName } from "../data/league-
 import { hasCups, scopedLeagues } from "../world/scope";
 import { euroChampion, euroStageMatches } from "./euro-knockout";
 import { payWinnerPrize } from "./euro-prize";
-import { payLeaguePrizes, paySeasonBonuses, topUpTransferBudget } from "../club/finance";
+import {
+  closeSeasonBooks,
+  payLeaguePrizes,
+  paySeasonBonuses,
+  topUpTransferBudget,
+} from "../club/finance";
 import { buildEuroEntrants, entrantsOf, type LeagueTables } from "./europe";
 import { buildSeasonFixtures, isUserFixture } from "./fixtures";
 import {
@@ -341,11 +346,25 @@ export function transitionSeason(state: GameState): string[] {
   const judgeDate = nextCalendar.start;
 
   /**
-   * **끝난 계약은 지운다.** 아무도 읽지 않는데(활성 계약만 조회된다) 시즌마다
-   * 2,000줄씩 쌓여 세이브와 모든 순회를 무겁게 한다. 이력이 필요한 것은
-   * `TRANSFER` 원장이고 그건 그대로 남는다.
+   * **끝난 계약은 지우되 장부가 읽는 사슬은 남긴다.**
+   *
+   * 계약은 시즌마다 2,000줄씩 쌓여 세이브와 모든 순회를 무겁게 하므로 정리해야
+   * 한다. 그런데 상각의 취득원가와 잔존가는 **그 팀에서의 계약 이력**에서 파생하므로
+   * (finance.md §6.1) 통째로 지우면 재계약 행이 첫 계약 자리에 올라앉는다 —
+   * 취득원가가 재계약 시점으로 옮겨 다시 펴지고(총 상각 > 취득원가), 시작 스쿼드는
+   * 취득 갈래를 잃어 상각이 £0이 된다.
+   *
+   * 그래서 **그 팀에 아직 활성 계약이 있는 선수의 이력만** 남긴다. 떠난 선수·은퇴
+   * 선수의 끝난 계약은 아무도 읽지 않으므로 그대로 지운다 — 남는 줄은 시즌 수가
+   * 아니라 스쿼드 크기 × 재계약 횟수로 묶인다.
    */
-  state.contracts = state.contracts.filter((c) => c.status === "active");
+  const bookedPlayers = new Set<string>();
+  for (const c of state.contracts) {
+    if (c.status === "active") bookedPlayers.add(`${c.teamId}:${c.gamePlayerId}`);
+  }
+  state.contracts = state.contracts.filter(
+    (c) => c.status === "active" || bookedPlayers.has(`${c.teamId}:${c.gamePlayerId}`),
+  );
 
   /**
    * 선수 색인 — **팀 루프 안에서 선형 탐색을 하지 않기 위해서다.**
@@ -696,8 +715,19 @@ export function transitionSeason(state: GameState): string[] {
   return digest;
 }
 
+/**
+ * 시즌 종료 — 리뷰 → **마지막 달 마감** → 전환 (season.md §6).
+ *
+ * 마감이 가운데 서는 이유는 하나다: 리뷰가 상금·보너스를 그달 원장에 앉히고, 전환이
+ * 그 시즌의 손익으로 이적 예산과 PSR을 정한다. 마감이 전환 뒤로 밀리면 상금이 앉은
+ * 달은 두 달 뒤(다음 시즌 8월 1일)에야 보고서가 되고, 그 사이에 예산과 동결이
+ * 마지막 달을 뺀 성과로 결정된다 (finance.md §7.1).
+ */
 export function endSeason(state: GameState): string[] {
-  return [...reviewSeason(state), ...transitionSeason(state)];
+  const digest = reviewSeason(state);
+  closeSeasonBooks(state, digest);
+  digest.push(...transitionSeason(state));
+  return digest;
 }
 
 export { teamCatalog };
