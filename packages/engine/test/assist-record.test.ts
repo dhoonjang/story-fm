@@ -79,33 +79,3 @@ describe("도움이 사라지지 않는다", () => {
     }
   });
 });
-
-/**
- * 밸런스 하네스 — **비율은 회귀 대상이 아니다** (AGENTS.md §5).
- *
- * 골의 몇 할에 도움이 붙는가는 `pickAssister`의 설계값(68%)이 정하는 분포다.
- * 여기 문턱(0.35)은 표본이 작아 넉넉히 잡은 값이라, 68%가 45%로 내려가도
- * 조용히 지나간다 — 지킬 기대값이 없다. 도움이 아예 사라지는 회귀는 위
- * describe가 0이 아님으로 못 박는다.
- *
- *   BALANCE=1 pnpm vitest run packages/engine/test/assist-record.test.ts
- */
-describe.skipIf(!process.env.BALANCE)("도움이 붙는 비율", () => {
-  it("여러 경기를 치르면 도움이 실제로 붙는다 — 전부 빈 칸일 수 없다", () => {
-    let goals = 0;
-    let assisted = 0;
-    for (const seed of [1, 2, 3, 5, 7, 11]) {
-      const state = playOne(seed);
-      if (!state) continue;
-      for (const m of state.matches) {
-        if (!m.result) continue;
-        goals += m.result.scorers.length;
-        assisted += (m.result.assists ?? []).filter((a) => a !== "").length;
-        expect(m.result.assists!.length, `${m.id} 길이`).toBe(m.result.scorers.length);
-      }
-    }
-    expect(goals, "골이 하나도 없으면 시험이 성립하지 않는다").toBeGreaterThan(5);
-    // 설계값 68% — 표본이 작으니 넉넉히 잡되 0은 아니어야 한다
-    expect(assisted / goals).toBeGreaterThan(0.35);
-  });
-});

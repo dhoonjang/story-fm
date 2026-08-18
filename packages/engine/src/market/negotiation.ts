@@ -35,7 +35,7 @@ import {
 import { canRegisterFor } from "../squad/registration";
 import { assignSquadNumber } from "../squad/numbers";
 import { USER_WAGE_HEADROOM, wageRoomOf } from "../world/wages";
-import { marketBiasOf, windowOpenForTeam } from "./market";
+import { marketBiasOf, transferWindowLabel, windowOpenForTeam } from "./market";
 import { evaluatePitch, latitudeOf } from "./persuasion";
 import { makeRng } from "../core/rng";
 import type { MarketSkillResult, SkillResult } from "../skills";
@@ -1747,8 +1747,18 @@ function executeSale(
   }
   const buyerTeamId = negotiation.counterpartTeamId;
   if (!buyerTeamId) return { ok: false, message: "사는 구단을 알 수 없습니다" };
-  const window = windowOpenOn(state.windows, state.date);
-  if (!window) return { ok: false, message: "이적시장이 닫혀 있어 매각을 확정할 수 없습니다" };
+  /**
+   * **창은 사는 쪽 협회의 것이다** — 등록을 하는 쪽이 그쪽이기 때문이고, 오퍼가
+   * 그 창으로 열렸으므로 확정도 같은 창으로 재야 한다 (transfer.md §3).
+   * 우리 창으로 재면 9월의 사우디행은 합의까지 가 놓고 반드시 여기서 막힌다.
+   */
+  const window = windowOpenForTeam(state, buyerTeamId);
+  if (!window) {
+    return {
+      ok: false,
+      message: `${transferWindowLabel(state, buyerTeamId)}이 닫혀 있어 매각을 확정할 수 없습니다`,
+    };
+  }
   const shortfall = squadShortfall(state, state.userTeamId, player);
   if (shortfall) return { ok: false, message: `우리 ${shortfall}` };
   /**
@@ -2091,6 +2101,8 @@ export function describeNegotiation(state: GameState, negotiationId: string): st
     );
   }
   if (last && player) {
+    // 갈래와 상대를 함께 넘긴다 — 안 넘기면 매각·임대·재계약이 영입 기준으로 계산돼
+    // 우리 선수에게 "이미 우리 선수입니다"가 뜬다 (transfer.md §3)
     lines.push(
       describeOdds(
         dealOdds(state, {
@@ -2098,6 +2110,10 @@ export function describeNegotiation(state: GameState, negotiationId: string): st
           fee: last.fee,
           weeklyWage: last.weeklyWage,
           years: last.contractYears,
+          kind: negotiation.kind,
+          ...(negotiation.counterpartTeamId
+            ? { counterpartTeamId: negotiation.counterpartTeamId }
+            : {}),
         }),
       ),
     );

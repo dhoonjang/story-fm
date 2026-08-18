@@ -1,6 +1,7 @@
 import type { GamePlayer, Medical, Negotiation } from "@story-fm/domain";
 import { ageOf } from "@story-fm/domain";
-import { addDays, diffDays, windowOpenOn } from "../competition/calendar";
+import { addDays, diffDays } from "../competition/calendar";
+import { windowOpenForTeam } from "./market";
 import { pronenessValue, raiseProneness } from "../squad/injury";
 import { makeRng } from "../core/rng";
 import { openInjury, playerById, teamName, pushNarrative, type GameState } from "../core/state";
@@ -78,7 +79,9 @@ export function scheduleMedical(state: GameState, negotiation: Negotiation): Med
    * 아무것도 못 하는 채로 딜이 사라진다 — 실제 마감일에도 검진은 밤을 새워서라도
    * 그날 끝난다. 날짜를 여기서 잘라야 `expiresOn`이 창 밖으로 늘어나지 않는다.
    */
-  const window = windowOpenOn(state.windows, state.date);
+  // **창은 등록을 받는 쪽의 것이다** — 매각·임대 송출이면 사는 구단의 협회 창이라
+  // 우리 창이 닫힌 뒤에도 그쪽 마감일까지는 검진을 잡을 수 있다 (transfer.md §3)
+  const window = windowOpenForTeam(state, receivingTeamOf(state, negotiation));
   let onDate = addDays(state.date, days);
   if (window && onDate > window.closesOn) onDate = state.date;
   const medical: Medical = { onDate, status: "scheduled" };

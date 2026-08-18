@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   advanceTime,
-  allMatchesDone,
   computeStandings,
   isTopFlight,
   leagueOfTeamIn,
@@ -11,7 +10,7 @@ import {
   USER_WARNINGS_BEFORE_SACK,
   type GameState,
 } from "@story-fm/engine";
-import { createTestGame, playMockMatch } from "./helpers";
+import { createTestGame } from "./helpers";
 
 /**
  * 감독 시장 — **벤치의 사람도 바뀐다.**
@@ -19,16 +18,6 @@ import { createTestGame, playMockMatch } from "./helpers";
  * 이게 없으면 12월에 6연패를 한 구단이 이듬해 5월까지 같은 벤치로 앉아 있다.
  * 감독이 겪는 세계에서 "라이벌이 감독을 갈아치웠다"는 사건이 아예 없었다.
  */
-
-function playSeason(state: GameState): void {
-  let guard = 420;
-  while (guard-- > 0 && !allMatchesDone(state)) {
-    const before = state.date;
-    const advanced = advanceTime(state, { days: 1 });
-    if (state.phase === "matchday") playMockMatch(state);
-    if (state.date === before && advanced.stopped !== "matchday") break;
-  }
-}
 
 /**
  * 순위표를 손으로 세운다 — `targetId`만 전패, 나머지는 전부 무승부.
@@ -141,24 +130,4 @@ describe("감독도 잘린다 — 다만 경고가 먼저다", () => {
   it("경고는 세 번까지다 — 그 전에 순위를 올리면 지워진다", () => {
     expect(USER_WARNINGS_BEFORE_SACK).toBe(3);
   });
-});
-
-/**
- * 밸런스 하네스 — 한 시즌을 굴려 **리그 전체의 경질 건수**를 센다.
- *
- * 기대값이 고정값이 아니라 밴드다(다섯 구단 초과 · 절반 미만). 규칙이 맞는지는
- * 위의 케이스들이 보고, 여기서는 `SACK_CHANCE`·문턱이 만든 빈도가 사람 사는
- * 범위인지를 잰다. 시드 하나가 몇 분을 쓴다:
- *
- *   BALANCE=1 pnpm vitest run packages/engine/test/manager-market.test.ts
- */
-describe.skipIf(!process.env.BALANCE)("한 시즌의 감독 경질 규모", () => {
-  it("한 시즌에 여러 구단이 감독을 바꾼다 — 다만 리그가 통째로 뒤집히지는 않는다", () => {
-    const state = createTestGame(7);
-    playSeason(state);
-    const clubs = state.teams.filter((t) => isTopFlight(t.id));
-    const changed = clubs.filter((t) => t.managerSince !== state.calendar.preseasonStart);
-    expect(changed.length).toBeGreaterThan(5);
-    expect(changed.length).toBeLessThan(clubs.length * 0.5);
-  }, 300_000);
 });
