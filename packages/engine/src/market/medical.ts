@@ -4,7 +4,7 @@ import { addDays, diffDays } from "../competition/calendar";
 import { windowOpenForTeam } from "./market";
 import { pronenessValue, raiseProneness } from "../squad/injury";
 import { makeRng } from "../core/rng";
-import { openInjury, playerById, teamName, pushNarrative, type GameState } from "../core/state";
+import { openInjury, playerById, teamNameIn, pushNarrative, type GameState } from "../core/state";
 
 /**
  * 메디컬 — **합의와 계약 사이의 하루.**
@@ -223,7 +223,7 @@ export function describeMedical(state: GameState, negotiation: Negotiation): str
   const who = player?.name ?? negotiation.gamePlayerId;
   const where = isIncomingDeal(negotiation)
     ? "우리 메디컬"
-    : `${teamName(receivingTeamOf(state, negotiation))} 메디컬`;
+    : `${teamNameIn(state, receivingTeamOf(state, negotiation))} 메디컬`;
   if (medical.status === "scheduled") return `${who} ${where} ${medical.onDate} 예정`;
   if (medical.status === "passed") return `${who} ${where} 통과`;
   return `${who} ${where} 소견 — ${medical.note ?? "이상 소견"}`;

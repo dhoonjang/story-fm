@@ -1,11 +1,18 @@
 import { isTopLeague, leagueCatalog, leagueCatalogById, leagueName } from "../data/league-catalog";
-import { leagueOfTeam } from "../data/team-catalog";
 import { clubEconomyLevel } from "../data/league-economy";
 import { tierOfTeamIn } from "../core/club-tier";
 import { makeRng } from "../core/rng";
 import { computeStandings } from "./season";
 import { startParachute, stopParachute } from "../club/finance";
-import { playersOf, pushNarrative, teamName, teamShortName, type GameState } from "../core/state";
+import {
+  catalogLeagueIn,
+  clubProfileIn,
+  playersOf,
+  pushNarrative,
+  teamNameIn,
+  teamShortNameIn,
+  type GameState,
+} from "../core/state";
 
 /**
  * 승강 — 1부 하위 세 팀과 그 나라 2부 상위 세 팀이 자리를 바꾼다.
@@ -34,9 +41,15 @@ export const RELEGATION_SLOTS = 3;
  */
 export const PROMOTION_LUCK = 4;
 
-/** 이 팀이 지금 속한 리그 — 승강이 있으면 세이브가, 없으면 카탈로그가 답한다 */
+/**
+ * 이 팀이 지금 속한 리그 — 세 층을 순서대로 본다.
+ *
+ * 승강 결과(`state.leagueOf`) → 게임 시작에 복사한 소속(`GAME_TEAM.leagueId`) →
+ * 카탈로그. 가운데 층이 있어야 어드민이 팀의 리그를 옮겨도 진행 중인 세이브의
+ * 순위표·일정이 흔들리지 않는다 (game-state.md §1).
+ */
 export function leagueOfTeamIn(state: GameState, teamId: string): string {
-  return state.leagueOf?.[teamId] ?? leagueOfTeam(teamId);
+  return state.leagueOf?.[teamId] ?? catalogLeagueIn(state, teamId);
 }
 
 /**
@@ -59,7 +72,12 @@ export function isTopFlightIn(state: GameState, teamId: string): boolean {
  * 배정받는다 (finance.md §6.2).
  */
 export function clubEconomyLevelIn(state: GameState, teamId: string): number {
-  return clubEconomyLevel(teamId, tierOfTeamIn(state, teamId), leagueOfTeamIn(state, teamId));
+  return clubEconomyLevel(
+    teamId,
+    tierOfTeamIn(state, teamId),
+    leagueOfTeamIn(state, teamId),
+    clubProfileIn(state, teamId).commercialTier,
+  );
 }
 
 /** 지금 그 리그에 속한 클럽 (세이브 기준) */
@@ -119,7 +137,9 @@ function promotedFrom(state: GameState, secondTier: string): string[] {
 
 function setLeague(state: GameState, teamId: string, leagueId: string): void {
   const map = (state.leagueOf ??= {});
-  if (leagueOfTeam(teamId) === leagueId) delete map[teamId];
+  // 세이브가 복사한 원 소속과 같으면 항목을 두지 않는다 — 지금 카탈로그와 견주면
+  // 어드민의 리그 이동 편집이 진행 중인 세이브의 승강 기록을 지운다
+  if (catalogLeagueIn(state, teamId) === leagueId) delete map[teamId];
   else map[teamId] = leagueId;
 }
 
@@ -156,16 +176,16 @@ export function applyPromotionRelegation(
 
     if (leagueId !== ourLeague && second !== ourLeague) continue;
     digest.push(
-      `⬇️ ${leagueName(leagueId)} 강등: ${down.map((id) => teamShortName(id)).join(" · ")}`,
-      `⬆️ ${leagueName(leagueId)} 승격: ${up.map((id) => teamShortName(id)).join(" · ")}`,
+      `⬇️ ${leagueName(leagueId)} 강등: ${down.map((id) => teamShortNameIn(state, id)).join(" · ")}`,
+      `⬆️ ${leagueName(leagueId)} 승격: ${up.map((id) => teamShortNameIn(state, id)).join(" · ")}`,
     );
     if (down.includes(state.userTeamId)) {
       digest.push(
-        `${teamName(state.userTeamId)}이(가) 강등됐다 — 다음 시즌은 ${leagueName(second)}다`,
+        `${teamNameIn(state, state.userTeamId)}이(가) 강등됐다 — 다음 시즌은 ${leagueName(second)}다`,
       );
       pushNarrative(state, `${leagueName(leagueId)} 강등 — ${leagueName(second)}로`, 5);
     } else if (up.includes(state.userTeamId)) {
-      digest.push(`${teamName(state.userTeamId)} 승격! 다음 시즌은 ${leagueName(leagueId)}다`);
+      digest.push(`${teamNameIn(state, state.userTeamId)} 승격! 다음 시즌은 ${leagueName(leagueId)}다`);
       pushNarrative(state, `${leagueName(leagueId)} 승격`, 5);
     }
   }

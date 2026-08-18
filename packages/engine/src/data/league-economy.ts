@@ -1,6 +1,6 @@
 import { clubProfile } from "./club-profile";
 import { isTopLeague, leagueCatalog, leagueCatalogById } from "./league-catalog";
-import { teamCatalog, teamCatalogById } from "./team-catalog";
+import { teamCatalogById } from "./team-catalog";
 
 /**
  * **리그 경제 수준 (EPL = 1) — 이 세계의 돈 단위.**
@@ -40,6 +40,16 @@ const SECOND_DIVISION_OF_TOP = 0.15;
  */
 const BRAND_GLOBAL_LIFT: Record<1 | 2 | 3 | 4, number> = { 1: 0.55, 2: 0.3, 3: 0.12, 4: 0.05 };
 
+/**
+ * 카탈로그에 없는 클럽의 폴백 — 어드민이 지운 팀이 세이브에 남아 있을 때뿐이다.
+ *
+ * ⚠️ **다른 클럽을 대신 세우지 않는다.** 카탈로그 첫 팀을 폴백으로 쓰면 이름도 모르는
+ * 클럽이 아스날의 리그와 브랜드로 살림을 산다 — 잔고·고정비·시즌 예산이 전부 그 값에서
+ * 나온다. 모르면 모르는 대로, 표에 있는 가장 작은 리그 수준과 중간 체급으로 둔다.
+ */
+const UNKNOWN_TIER = 3;
+const UNKNOWN_LEAGUE_LEVEL = Math.min(...Object.values(LEAGUE_ECONOMY_LEVEL));
+
 /** 그 나라 1부 — 2부의 경제 수준이 여기서 파생한다 */
 function topLeagueOfCountry(leagueId: string): string | null {
   const country = leagueCatalogById(leagueId)?.country;
@@ -69,14 +79,18 @@ export function leagueEconomyLevel(leagueId: string): number {
  * @param leagueId 승강을 반영한 **지금**의 소속. 넘기지 않으면 카탈로그 소속이라
  *   강등된 구단이 1부 살림을 계속 산다 — 세이브가 있는 문맥은 이 함수 대신
  *   `clubEconomyLevelIn(state, teamId)`을 부른다 (game-state.md §1).
+ * @param commercialTier 세이브가 든 브랜드 등급. 넘기지 않으면 카탈로그 프로필이라
+ *   어드민의 브랜드 편집이 진행 중인 세이브의 수입에 샌다 (team.md §3).
  */
 export function clubEconomyLevel(
   teamId: string,
   tier?: 1 | 2 | 3 | 4,
   leagueId?: string,
+  commercialTier?: 1 | 2 | 3 | 4,
 ): number {
-  const team = teamCatalogById(teamId) ?? teamCatalog()[0]!;
-  const brand = clubProfile(teamId, tier ?? team.tier).commercialTier;
-  const level = leagueEconomyLevel(leagueId ?? team.leagueId);
+  const team = teamCatalogById(teamId);
+  const brand = commercialTier ?? clubProfile(teamId, tier ?? team?.tier ?? UNKNOWN_TIER).commercialTier;
+  const league = leagueId ?? team?.leagueId;
+  const level = league === undefined ? UNKNOWN_LEAGUE_LEVEL : leagueEconomyLevel(league);
   return level + (1 - level) * BRAND_GLOBAL_LIFT[brand];
 }

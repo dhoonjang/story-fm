@@ -27,8 +27,6 @@ import {
   slotOfTime,
 } from "@story-fm/domain";
 import { diffDays, nextMatchFor, seasonEndDate } from "../competition/calendar";
-import { clubProfile } from "../data/club-profile";
-import { tierOfTeamIn } from "../core/club-tier";
 import {
   categoryOf,
   currentMonthSummary,
@@ -100,8 +98,9 @@ import {
   adaptationOf,
   FAMILIARITY_BASELINE,
   tacticsOf,
-  teamName,
-  teamShortName,
+  clubProfileIn,
+  teamNameIn,
+  teamShortNameIn,
   weeklyWagesOf,
   type GameState,
 } from "../core/state";
@@ -943,7 +942,14 @@ function buildBracket(state: GameState, competitionId: string): BracketStageView
         const leg = played[0]!;
         score = `1차전 ${leg.result!.homeGoals}-${leg.result!.awayGoals}`;
       }
-      return { date: decider.date, home: teamName(home), away: teamName(away), score, ours, won };
+      return {
+        date: decider.date,
+        home: teamNameIn(state, home),
+        away: teamNameIn(state, away),
+        score,
+        ours,
+        won,
+      };
     });
     bracket.push({ stage, label: competitionStageLabel(competitionId, stage), ties });
   }
@@ -1237,13 +1243,13 @@ function buildMatchView(state: GameState): MatchView | null {
     competition: competitionShortName(match.competitionId),
     stage: competitionStageLabel(match.competitionId, match.stage ?? "league", match.round),
     home: {
-      name: teamName(match.homeTeamId),
-      short: teamShortName(match.homeTeamId),
+      name: teamNameIn(state, match.homeTeamId),
+      short: teamShortNameIn(state, match.homeTeamId),
       ours: match.homeTeamId === state.userTeamId,
     },
     away: {
-      name: teamName(match.awayTeamId),
-      short: teamShortName(match.awayTeamId),
+      name: teamNameIn(state, match.awayTeamId),
+      short: teamShortNameIn(state, match.awayTeamId),
       ours: match.awayTeamId === state.userTeamId,
     },
     score: { ...ledger.score },
@@ -1368,10 +1374,10 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
       id: m.id,
       date: m.date,
       time: m.time ?? "15:00",
-      homeName: teamName(m.homeTeamId),
-      awayName: teamName(m.awayTeamId),
-      homeShort: teamShortName(m.homeTeamId),
-      awayShort: teamShortName(m.awayTeamId),
+      homeName: teamNameIn(state, m.homeTeamId),
+      awayName: teamNameIn(state, m.awayTeamId),
+      homeShort: teamShortNameIn(state, m.homeTeamId),
+      awayShort: teamShortNameIn(state, m.awayTeamId),
       score: scoreOf(m),
       ours: m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId,
       win: outcomeFor(state, m),
@@ -1404,7 +1410,7 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
     zones: buildStandingZones(state, competitionId, standings.length),
     userPosition: standings.findIndex((r) => r.teamId === state.userTeamId) + 1,
     next: nextOurs
-      ? `${nextOurs.date} ${nextOurs.neutral ? "중립" : nextOurs.homeTeamId === state.userTeamId ? "홈" : "원정"} vs ${teamName(nextOurs.homeTeamId === state.userTeamId ? nextOurs.awayTeamId : nextOurs.homeTeamId)}`
+      ? `${nextOurs.date} ${nextOurs.neutral ? "중립" : nextOurs.homeTeamId === state.userTeamId ? "홈" : "원정"} vs ${teamNameIn(state, nextOurs.homeTeamId === state.userTeamId ? nextOurs.awayTeamId : nextOurs.homeTeamId)}`
       : null,
     rounds,
     bracket: cup ? buildBracket(state, competitionId) : [],
@@ -1725,7 +1731,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         const m = matchById.get(e.refId);
         if (!m) return null;
         const home = m.homeTeamId === userTeamId;
-        const opponent = teamName(home ? m.awayTeamId : m.homeTeamId);
+        const opponent = teamNameIn(state, home ? m.awayTeamId : m.homeTeamId);
         let result: string | null = null;
         let win: CalendarEntryView["win"] = null;
         let detail: string | null = null;
@@ -1779,7 +1785,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
             competition: cup || isFriendly(m) ? competitionShortName(m.competitionId) : null,
             // 친선은 단계가 없어 빈 문자열이다 — 화면이 빈 칩을 그리지 않는다
             stage,
-            opponent: teamShortName(home ? m.awayTeamId : m.homeTeamId),
+            opponent: teamShortNameIn(state, home ? m.awayTeamId : m.homeTeamId),
             opponentName: opponent,
             venue: m.neutral ? "neutral" : home ? "home" : "away",
             // 칸이 좁아 정규시간 스코어만 — 승부차기 여부는 색(승/패)과 툴팁에 있다
@@ -1971,7 +1977,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
   };
   // 실시간 활동 피드 — 접은 뒤 최근 30줄 (§8.1). 자르고 접으면 접기 전과 같아진다
   const feed = foldFinanceFeed(finance.ledger);
-  const stadium = clubProfile(userTeamId, tierOfTeamIn(state, userTeamId));
+  const stadium = clubProfileIn(state, userTeamId);
 
   const recentResults = state.matches
     .filter((m) => m.result && (m.homeTeamId === userTeamId || m.awayTeamId === userTeamId))
@@ -1979,7 +1985,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
     .slice(-5)
     .map(
       (m) =>
-        `${fixtureLabel(m.competitionId, m.stage ?? "league", m.round)} ${teamShortName(m.homeTeamId)} ${m.result?.homeGoals}-${m.result?.awayGoals} ${teamShortName(m.awayTeamId)}${m.result?.penalties ? ` (승부차기 ${m.result.penalties.home}-${m.result.penalties.away})` : ""}`,
+        `${fixtureLabel(m.competitionId, m.stage ?? "league", m.round)} ${teamShortNameIn(state, m.homeTeamId)} ${m.result?.homeGoals}-${m.result?.awayGoals} ${teamShortNameIn(state, m.awayTeamId)}${m.result?.penalties ? ` (승부차기 ${m.result.penalties.home}-${m.result.penalties.away})` : ""}`,
     );
 
   const lastRecord = state.seasonRecords[state.seasonRecords.length - 1];
@@ -2042,7 +2048,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
     },
     competitions: {
       next: next
-        ? `${fixtureLabel(next.competitionId, next.stage ?? "league", next.round)} ${next.date} ${next.neutral ? "중립" : next.homeTeamId === userTeamId ? "홈" : "원정"} vs ${teamName(next.homeTeamId === userTeamId ? next.awayTeamId : next.homeTeamId)}`
+        ? `${fixtureLabel(next.competitionId, next.stage ?? "league", next.round)} ${next.date} ${next.neutral ? "중립" : next.homeTeamId === userTeamId ? "홈" : "원정"} vs ${teamNameIn(state, next.homeTeamId === userTeamId ? next.awayTeamId : next.homeTeamId)}`
         : null,
       nextMatch: next
         ? {
@@ -2051,7 +2057,10 @@ export function buildOfficeViews(state: GameState): OfficeViews {
             // 대회 이름을 **언제나** 붙인다 — 이 카드 하나가 유일한 일정 정보라
             // "R2"만 적으면 무슨 대회의 2라운드인지 화면 어디에도 없다
             label: competitionLabel(next.competitionId, next.stage ?? "league", next.round),
-            opponent: teamName(next.homeTeamId === userTeamId ? next.awayTeamId : next.homeTeamId),
+            opponent: teamNameIn(
+              state,
+              next.homeTeamId === userTeamId ? next.awayTeamId : next.homeTeamId,
+            ),
             venue: next.neutral ? "neutral" : next.homeTeamId === userTeamId ? "home" : "away",
             inDays: Math.max(0, diffDays(state.date, next.date)),
           }
@@ -2063,7 +2072,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       trophies: state.trophies.map((t) => ({
         competition: t.competition,
         season: t.season,
-        teamName: teamName(t.teamId),
+        teamName: teamNameIn(state, t.teamId),
       })),
       achievements: state.achievements.map(({ name, description, season }) => ({
         name,
@@ -2072,7 +2081,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       })),
       seasons: state.seasonRecords.map((s) => ({
         season: s.season,
-        teamName: teamName(s.teamId),
+        teamName: teamNameIn(state, s.teamId),
         position: s.position,
         record: `${s.wins}승 ${s.draws}무 ${s.losses}패`,
         boardVerdict: s.boardVerdict,
@@ -2087,8 +2096,8 @@ export function buildOfficeViews(state: GameState): OfficeViews {
           date: t.date,
           type: t.type,
           playerName: playerName(state, t.gamePlayerId),
-          from: t.fromTeamId ? teamName(t.fromTeamId) : null,
-          to: t.toTeamId ? teamName(t.toTeamId) : null,
+          from: t.fromTeamId ? teamNameIn(state, t.fromTeamId) : null,
+          to: t.toTeamId ? teamNameIn(state, t.toTeamId) : null,
           fee: t.fee,
           note: t.note ?? null,
         })),
@@ -2134,7 +2143,7 @@ export function scoutReportCard(state: GameState, playerId: string): ScoutReport
   return {
     playerId: p.id,
     name: p.name,
-    team: teamName(p.teamId),
+    team: teamNameIn(state, p.teamId),
     age: ageOf(p.birthdate, state.date),
     position: naturalPositionOf(p).position,
     positions: p.positions.map((x) => ({

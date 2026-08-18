@@ -6,16 +6,29 @@ import { ATTRIBUTE_AXES, ageOf, naturalPositionOf, roleFit } from "@story-fm/dom
 import {
   leagueCatalog,
   teamCatalog,
+  teamCatalogById,
   adminAddCatalogPlayer,
+  adminAddTeam,
   adminCatalog,
+  adminEditCatalogPlayer,
   adminMoveCatalogPlayer,
   adminRemoveCatalogPlayer,
   adminResetCatalog,
+  adminResetTeamCatalog,
   adminSetCatalogPositions,
   adminUpdateCatalogPlayer,
+  adminUpdateTeam,
+  annualRevenueEstimate,
+  clubEconomyLevelIn,
+  clubProfileIn,
   isCatalogEdited,
+  leagueOfTeamIn,
+  loadGame,
+  monthlyFixedCostOf,
   playerCatalog,
   playersOf,
+  saveGame,
+  teamNameIn,
   CATALOG_AGE_REF,
   type CatalogPlayerInput,
 } from "@story-fm/engine";
@@ -38,6 +51,7 @@ beforeEach(() => {
 afterEach(() => {
   // 편집 파일을 지우고 시드 상태로 복귀 (다른 테스트에 새지 않게)
   adminResetCatalog();
+  adminResetTeamCatalog();
   delete process.env.STORY_FM_DATA_DIR;
   rmSync(dir, { recursive: true, force: true });
 });
@@ -105,6 +119,52 @@ describe("카탈로그 편집", () => {
     expect(contract?.weeklyWage).toBe(123_000);
     // 음수는 반려된다
     expect(adminUpdateCatalogPlayer(target.id, { weeklyWage: -1 }).ok).toBe(false);
+  });
+
+  /**
+   * 카탈로그의 주급은 **실측이고 없는 것이 기본**이다 (game-state.md §2). 세 뜻이
+   * 갈리지 않으면 능력치 하나만 고쳐 저장해도 주급이 0으로 굳고, 그 선수의 새 게임
+   * 계약이 £0/주가 된다 — 화면에는 아무 흔적도 남지 않는다.
+   */
+  it("주급은 미입력·지움·값이 갈린다", () => {
+    const target = adminCatalog().find((t) => t.teamId === "arsenal")!.players[0]!;
+    const wageOf = () => playerCatalog().find((e) => e.id === target.id)?.weeklyWage;
+    expect(adminEditCatalogPlayer(target.id, { weeklyWage: 90_000 }).ok).toBe(true);
+
+    // 미입력 — 능력치만 고쳐도 주급은 그대로다
+    expect(adminEditCatalogPlayer(target.id, { pace: 71 }).ok).toBe(true);
+    expect(wageOf()).toBe(90_000);
+
+    // 0은 "값 없음"이 아니라 진짜 0이다
+    expect(adminEditCatalogPlayer(target.id, { weeklyWage: 0 }).ok).toBe(true);
+    expect(wageOf()).toBe(0);
+
+    // null은 실측을 지운다 — 새 게임의 계약은 다시 모델이 어림한다
+    expect(adminEditCatalogPlayer(target.id, { weeklyWage: null }).ok).toBe(true);
+    expect(wageOf()).toBeUndefined();
+    const game = createTestGame(9);
+    const contract = game.contracts.find((c) => c.gamePlayerId === target.id);
+    expect(contract!.weeklyWage).toBeGreaterThan(0);
+  });
+
+  /**
+   * 이동 → 포지션 → 수치를 나눠 저장하면 뒤가 거절될 때 앞의 절반만 파일에 남고
+   * 화면은 갱신되지 않는다. 한 요청은 전부 반영되거나 아무것도 반영되지 않는다.
+   */
+  it("한 요청 안에서 하나가 반려되면 아무것도 저장되지 않는다", () => {
+    const target = adminCatalog().find((t) => t.teamId === "arsenal")!.players[0]!;
+    const before = playerCatalog().find((e) => e.id === target.id)!;
+    const res = adminEditCatalogPlayer(target.id, {
+      teamId: "freeagents",
+      pace: 55,
+      // 주 포지션이 없는 목록은 반려된다 — 앞의 이동·능력치까지 되돌아가야 한다
+      positions: [{ position: "ST", proficiency: 80, isNatural: false }],
+    });
+    expect(res.ok).toBe(false);
+
+    const after = playerCatalog().find((e) => e.id === target.id)!;
+    expect(after.teamId).toBe(before.teamId);
+    expect(after.pace).toBe(before.pace);
   });
 
   it("주 포지션을 바꿔도 종합은 안 떨어진다 — 가장 잘 맞는 자리 기준이라", () => {
@@ -367,5 +427,105 @@ describe("게임 격리 — 카탈로그 편집은 새 게임에만 반영된다
     expect(
       game.contracts.some((c) => c.gamePlayerId === res.playerId && c.status === "active"),
     ).toBe(true);
+  });
+});
+
+/**
+ * 어드민 편집은 **새 게임에만** 반영된다 — 그것이 2-레이어의 약속이다
+ * (game-state.md §1). 체급은 이미 세이브가 갖고 있었고(admin-catalog.test.ts),
+ * 여기서는 나머지 축을 본다: 이름·소속 리그·구장·브랜드.
+ *
+ * 화면 문구가 아니라 **장부의 숫자**까지 따라오는지가 요점이다. 수용인원과 브랜드는
+ * 매치데이·상업 수입의 입력이라, 카탈로그를 읽는 자리가 하나만 남아도 감독은
+ * 자기가 한 일이 아닌 이유로 매출이 달라진다.
+ */
+describe("팀 정체성 편집과 진행 중인 세이브", () => {
+  it("이름·구장·브랜드를 고쳐도 세이브의 이름과 수입이 그대로다", () => {
+    const state = createTestGame(51, "arsenal");
+    const name = teamNameIn(state, "arsenal");
+    const profile = clubProfileIn(state, "arsenal");
+    const revenue = annualRevenueEstimate(state, "arsenal");
+    const fixedCost = monthlyFixedCostOf("arsenal", state);
+
+    const res = adminUpdateTeam("arsenal", {
+      name: "북런던 FC",
+      shortName: "NLD",
+      capacity: 1_000,
+      commercialTier: 4,
+    });
+    expect(res.ok).toBe(true);
+    // 편집은 카탈로그에 확실히 닿았다 — 그런데도 세이브는 흔들리지 않는다
+    expect(teamCatalogById("arsenal")!.name).toBe("북런던 FC");
+
+    expect(teamNameIn(state, "arsenal")).toBe(name);
+    expect(clubProfileIn(state, "arsenal")).toEqual(profile);
+    expect(annualRevenueEstimate(state, "arsenal")).toBe(revenue);
+    expect(monthlyFixedCostOf("arsenal", state)).toBe(fixedCost);
+  });
+
+  /**
+   * 1부는 팀 수가 짝수여야 해서 한 팀만 옮길 수 없다 — 리그 이동이 실제로 열리는
+   * 자리는 리그전을 돌지 않는 2부끼리다 (`admin-team.ts`).
+   */
+  it("2부 사이의 리그 이동도 진행 중인 세이브의 소속을 바꾸지 않는다", () => {
+    const state = createTestGame(54, "arsenal");
+    const league = leagueOfTeamIn(state, "wolves");
+    const economy = clubEconomyLevelIn(state, "wolves");
+    expect(league).toBe("championship");
+
+    const res = adminUpdateTeam("wolves", { leagueId: "segunda" });
+    expect(res.ok).toBe(true);
+    expect(teamCatalogById("wolves")!.leagueId).toBe("segunda");
+
+    // 소속이 바뀌면 그 나라 1부에서 파생하는 살림도 함께 움직인다 — 둘 다 그대로여야 한다
+    expect(leagueOfTeamIn(state, "wolves")).toBe(league);
+    expect(clubEconomyLevelIn(state, "wolves")).toBe(economy);
+  });
+
+  it("정체성이 없는 옛 세이브는 그대로 로드되고 카탈로그로 폴백한다", () => {
+    const state = createTestGame(52, "arsenal");
+    // 옛 세이브 — GAME_TEAM에 복사본이 없다 (SAVE_VERSION은 그대로)
+    for (const team of state.teams) {
+      delete team.name;
+      delete team.shortName;
+      delete team.leagueId;
+      delete team.stadium;
+      delete team.capacity;
+      delete team.commercialTier;
+    }
+    saveGame(state);
+
+    const loaded = loadGame(state.id);
+    expect(loaded).not.toBeNull();
+    expect(loaded!.teams.every((t) => t.name === undefined)).toBe(true);
+    expect(teamNameIn(loaded!, "arsenal")).toBe(teamCatalogById("arsenal")!.name);
+    expect(leagueOfTeamIn(loaded!, "arsenal")).toBe(teamCatalogById("arsenal")!.leagueId);
+  });
+
+  /**
+   * 로드가 세이브에 없는 클럽을 채워 넣는 자리(`addMissingClubs`)는 **시드 카탈로그**만
+   * 본다. 지금 유효한 카탈로그(=오버라이드)를 읽으면 어드민이 팀 하나를 추가할 때마다
+   * 열려 있는 **모든 옛 세이브**에 그 클럽과 스쿼드가 주입된다.
+   */
+  it("어드민이 더한 팀은 이미 열려 있는 세이브에 들어가지 않는다", () => {
+    const state = createTestGame(53, "arsenal");
+    const before = state.teams.length;
+    saveGame(state);
+
+    // 2부는 리그전을 돌지 않아 팀 수 짝수 제약이 없다 (컵 32팀은 경고일 뿐)
+    const res = adminAddTeam({
+      id: "wrexham",
+      name: "렉섬",
+      shortName: "WRX",
+      leagueId: "championship",
+      tier: 4,
+    });
+    expect(res.ok).toBe(true);
+    expect(teamCatalogById("wrexham")).not.toBeNull();
+
+    const loaded = loadGame(state.id)!;
+    expect(loaded.teams).toHaveLength(before);
+    expect(loaded.teams.some((t) => t.id === "wrexham")).toBe(false);
+    expect(loaded.players.some((p) => p.teamId === "wrexham")).toBe(false);
   });
 });

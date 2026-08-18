@@ -66,7 +66,8 @@ export function PlayerModal({
     Object.fromEntries(ATTRS.map((a) => [a, player ? player[a] : 60])),
   );
   const [potential, setPotential] = useState(player?.potential ?? 70);
-  const [wage, setWage] = useState(player?.weeklyWage ?? 0);
+  // 빈 칸이 곧 "실측 없음"이다 — 0으로 출발하면 두 뜻이 한 값에 겹친다
+  const [wage, setWage] = useState<number | "">(player?.weeklyWage ?? "");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -113,7 +114,13 @@ export function PlayerModal({
       ...Object.fromEntries(ATTRS.map((a) => [a, clampAttr(axes[a])])),
       potential: clampAttr(potential),
     };
-    const weeklyWage = Math.min(MAX_WAGE, Math.max(0, Math.round(wage) || 0));
+    /**
+     * 주급은 실측이고 **없는 것이 기본**이다 (game-state.md §2). 빈 칸을 0으로
+     * 실으면 새 게임 계약이 £0/주로 굳으므로, 비어 있으면 값을 아예 싣지 않는다.
+     * 원래 실측이 있던 선수를 비운 것만 `null` — 실측을 지워 모델 추정으로 돌린다.
+     */
+    const weeklyWage = wage === "" ? null : Math.min(MAX_WAGE, Math.max(0, Math.round(wage) || 0));
+    const wagePatch = weeklyWage === null && player?.weeklyWage === undefined ? {} : { weeklyWage };
     try {
       const res =
         mode === "create"
@@ -127,7 +134,7 @@ export function PlayerModal({
                 birthdate,
                 position: mainPosition,
                 ...numbers,
-                weeklyWage: weeklyWage || undefined,
+                ...(weeklyWage === null ? {} : { weeklyWage }),
               }),
             })
           : await fetch(`/api/admin/catalog/player/${player!.id}`, {
@@ -145,7 +152,7 @@ export function PlayerModal({
                   isNatural: p.isNatural,
                 })),
                 ...numbers,
-                weeklyWage,
+                ...wagePatch,
               }),
             });
       const data: CatalogResponse = await res.json();
@@ -411,7 +418,8 @@ export function PlayerModal({
             max={MAX_WAGE}
             step={1000}
             value={wage}
-            onChange={(e) => setWage(Number(e.target.value))}
+            placeholder="모델 추정"
+            onChange={(e) => setWage(e.target.value === "" ? "" : Number(e.target.value))}
             data-testid="player-modal-wage"
           />
         </label>

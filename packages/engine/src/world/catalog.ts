@@ -6,6 +6,7 @@ import type {
   PositionGroup,
 } from "@story-fm/domain";
 import {
+  PlayerCatalogEntrySchema,
   ageOf,
   bestOverall,
   clusterOf,
@@ -726,7 +727,13 @@ export function playerCatalog(): PlayerCatalogEntry[] {
   if (existsSync(file)) {
     try {
       const raw = JSON.parse(readFileSync(file, "utf8")) as unknown;
-      if (Array.isArray(raw) && raw.length > 0) entries = raw as PlayerCatalogEntry[];
+      /**
+       * **모양을 검사해 통과한 것만** 카탈로그가 된다 (team.md §1). 손으로 고쳤거나
+       * 옛 모양인 파일을 그대로 읽으면 실패가 여기가 아니라 새 게임을 세울 때 —
+       * 능력치가 없는 선수의 전력을 재는 자리에서 — 터진다.
+       */
+      const parsed = PlayerCatalogEntrySchema.array().min(1).safeParse(raw);
+      if (parsed.success) entries = parsed.data;
     } catch {
       /* 손상 파일은 무시하고 시드로 폴백 */
     }
