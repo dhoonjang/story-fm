@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { runTurnLocked } from "@/lib/turn-runner";
+import { invalidGameId } from "@/app/api/games/game-id";
 
 const TurnSchema = z.object({
   message: z.string().min(1).max(1000),
@@ -37,11 +38,10 @@ const TurnSchema = z.object({
 });
 
 /**
- * 이 라우트가 응답을 붙들 수 있는 최대 시간 — **백스톱**이다.
- *
- * 실제 시한은 모델 호출마다 걸려 있고(`config/llm.yml`의 `timeout_ms`) 그것이
- * 게임 잠금을 푸는 쪽이다. 여기 값은 그 시한들이 겹쳐 쌓였을 때 응답이 영영
- * 열려 있지 않게 하는 마지막 마감선이다 (llm/models.md §1-1).
+ * ⚠️ **서버리스 배포에서만 읽힌다** — `next start`로 띄운 프로세스는 이 값을 보지
+ * 않으므로 여기에 마감을 기대면 안 된다. 응답이 반드시 끝나는 근거는 모델 호출마다
+ * 걸리는 시한 하나뿐이고(`config/llm.yml`의 `timeout_ms` · `withDeadline`), 게임
+ * 잠금을 푸는 것도 그쪽이다 (llm/models.md §1-1).
  */
 export const maxDuration = 300;
 
@@ -54,10 +54,12 @@ const HEARTBEAT_MS = 10_000;
  *   {"type":"ping"}                아직 살아 있다 — 도구만 도는 구간의 침묵을 메운다
  *   {"type":"done","payload":{...}} 최종 게임 페이로드
  *   {"type":"error","error":"...","detail":"..."} 실패 — 채팅에 아무것도 남지 않는다
- * 잠금·원자성은 runTurnLocked가 담당 (JSON 라우트와 동일 뮤텍스 공유).
+ * 잠금·원자성은 runTurnLocked가 담당.
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
+  const bad = invalidGameId(id);
+  if (bad) return bad;
 
   let raw: unknown;
   try {
