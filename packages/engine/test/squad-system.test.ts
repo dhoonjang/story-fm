@@ -12,6 +12,7 @@ import {
   squadLevelOf,
   firstTeamPlayers,
   isTopFlight,
+  playerCatalog,
   squadRegistrationOf,
   reservePlayers,
   developsByCore,
@@ -173,15 +174,36 @@ describe("승격·강등은 등록 규칙을 따른다", () => {
 
 describe("2군 — 합성 유스는 채움용이다", () => {
   it("어느 구단에서도 합성이 실명 유망주 위에 서지 않는다", () => {
+    /**
+     * `generateYouthPlayer`가 `TIER_BASE - 24`에서 출발하는 이유다 — 예전 기준선에선
+     * 열여섯 살 합성 선수가 1군 최저보다 높게 나와 2군 상위를 이름 없는 선수들이
+     * 독점했다.
+     *
+     * ⚠️ **재는 상대는 "2군에 있는 카탈로그 선수"가 아니라 그 구단의 실명 U21**이다.
+     * 2군 배정은 별개 로직이고(`fillSlots`), 카탈로그의 아카데미 자리도 합성 가명이라
+     * (people.md §2) 섞어 재면 이 테스트가 카탈로그 보충 기준선(`topUpBase`)을 따라
+     * 흔들린다 — 그쪽은 attributes.test.ts가 따로 잰다.
+     */
     const state = createTestGame();
+    const seasonStartYear = Number(state.date.slice(0, 4));
+    const realIds = new Set(
+      playerCatalog()
+        .filter((e) => !e.synthetic)
+        .map((e) => e.id),
+    );
     for (const teamId of ["manutd", "arsenal", "liverpool", "chelsea", "tottenham"]) {
-      const reserves = playersOf(state, teamId).filter((p) => squadLevelOf(p) === "reserve");
-      const seeded = reserves.filter((p) => p.catalogId !== null);
-      const synthetic = reserves.filter((p) => p.catalogId === null);
-      if (seeded.length === 0 || synthetic.length === 0) continue;
-      const bestSeeded = Math.max(...seeded.map((p) => p.attributes.overall));
+      const squad = playersOf(state, teamId);
+      const prospects = squad.filter(
+        (p) =>
+          p.catalogId !== null &&
+          realIds.has(p.catalogId) &&
+          isUnder21(p.birthdate, seasonStartYear),
+      );
+      const synthetic = squad.filter((p) => p.catalogId === null);
+      if (prospects.length === 0 || synthetic.length === 0) continue;
+      const bestProspect = Math.max(...prospects.map((p) => p.attributes.overall));
       const bestSynthetic = Math.max(...synthetic.map((p) => p.attributes.overall));
-      expect(bestSynthetic, `${teamId}`).toBeLessThan(bestSeeded);
+      expect(bestSynthetic, `${teamId}`).toBeLessThan(bestProspect);
     }
   });
 
