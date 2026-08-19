@@ -827,6 +827,47 @@ describe("목록과 로드 — 어디서 멈췄는지 가른다", () => {
   });
 
   /**
+   * `schema`·`migration`은 **코드가 내린 판정**이다. 캐시하지 않으면 목록 요청마다
+   * 수 MB를 다시 파싱하고, 파일 지문만으로 캐시하면 코드를 고쳐도 그 판정이 영영
+   * 남는다 — 두 방향을 한 자리에서 세운다.
+   */
+  it("스키마 실패도 사이드카에 남고, 코드 지문이 달라지면 다시 판정한다", () => {
+    const broken = lay("game-schema-cache-xxxx", (raw) => {
+      (raw.players as Array<{ birthdate: string }>)[0]!.birthdate = "어제";
+    });
+    const file = path.join(dataDir(), `${broken}.json`);
+    const meta = path.join(dataDir(), `${broken}.meta.json`);
+    const body = readFileSync(file, "utf8");
+
+    expect(unreadableOf(broken).reason).toBe("schema"); // 1회차 — 본문에서 판정
+    expect(existsSync(meta), "실패가 사이드카에 남지 않았다").toBe(true);
+
+    // 2회차는 본문을 열지 않는다 — 세이브 하나가 한 몸에 수 MB다
+    const cachedRun = vi.spyOn(JSON, "parse");
+    expect(unreadableOf(broken).reason).toBe("schema");
+    expect(
+      cachedRun.mock.calls.filter((call) => call[0] === body),
+      "두 번째 목록이 세이브 본문을 다시 파싱했다",
+    ).toHaveLength(0);
+    vi.restoreAllMocks();
+
+    // 마이그레이션·스키마가 고쳐지면 코드 지문이 달라지고, 그 판정은 다시 내려진다
+    const cached = JSON.parse(readFileSync(meta, "utf8")) as {
+      unreadable: { loader?: string };
+    };
+    expect(typeof cached.unreadable.loader, "실패 캐시에 코드 지문이 없다").toBe("string");
+    cached.unreadable.loader = "고쳐진-코드";
+    writeFileSync(meta, JSON.stringify(cached), "utf8");
+
+    const fixedRun = vi.spyOn(JSON, "parse");
+    expect(unreadableOf(broken).reason).toBe("schema");
+    expect(
+      fixedRun.mock.calls.filter((call) => call[0] === body).length,
+      "코드 지문이 달라졌는데 옛 실패 캐시를 그대로 믿었다",
+    ).toBeGreaterThan(0);
+  });
+
+  /**
    * parse 결과를 그대로 상태로 쓰므로, 스키마에 없는 축은 **떨어질 수 있는 자리**에
    * 선다. `passthrough`가 그것을 막는다 — 여기가 깨지면 로드가 세이브를 조용히 깎는다.
    */
