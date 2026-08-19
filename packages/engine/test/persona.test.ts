@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { PersonaSchema, HEAD_COACH_ROLE_LABEL, normalizeSpeaker } from "@story-fm/domain";
+import { describe, expect, it, vi } from "vitest";
+import {
+  PersonaSchema,
+  HEAD_COACH_ROLE_LABEL,
+  normalizeSpeaker,
+  type GamePlayer,
+} from "@story-fm/domain";
 import {
   HEAD_COACH_ARCHETYPES,
   HEAD_COACH_NAMES,
@@ -14,6 +19,8 @@ import {
   generateReporters,
   teamCatalog,
 } from "@story-fm/engine";
+import { personaKeywords } from "../src/world/persona";
+import { generatePlayerPersona, PLAYER_ARCHETYPE_LABELS } from "../src/world/player-persona";
 import { createTestGame } from "./helpers";
 
 /**
@@ -367,5 +374,143 @@ describe("인물 이름의 유일성", () => {
         expect(roles[normalizeSpeaker(persona.characterId)]?.kind, persona.name).toBe(persona.role);
       }
     }
+  });
+});
+
+/**
+ * 선수 페르소나 — **저장하지 않고 (시드, 선수 id)에서 파생한다** (people.md §6).
+ *
+ * 값어치가 있는 것은 **결정성**이다: 같은 세이브는 언제 열어도 같은 사람을 만나고,
+ * 시즌이 흘러 나이가 바뀌어도 사람됨은 그대로다. 원형 라벨의 문구는 테스트하지 않는다.
+ */
+describe("선수 페르소나 — 파생되는 카드", () => {
+  // 세계는 세우지 않는다 — 원본 하나를 복제해 나이·포지션만 바꾼 순수 입력을 만든다
+  const basePlayer = createTestGame().players[0]!;
+  const playerLike = (id: string, position: string, birthdate: string): GamePlayer => ({
+    ...basePlayer,
+    id,
+    name: `가상 ${id}`,
+    birthdate,
+    positions: [{ position, proficiency: 85, isNatural: true }],
+  });
+  const youngStriker = playerLike("p-young-st", "ST", "2007-04-11");
+  const veteranCentreBack = playerLike("p-vet-cb", "CB", "1993-02-20");
+  const samples = [
+    youngStriker,
+    veteranCentreBack,
+    playerLike("p-prime-st", "ST", "1999-09-01"),
+    playerLike("p-prime-gk", "GK", "1997-05-30"),
+    playerLike("p-young-cm", "CM", "2006-01-15"),
+    playerLike("p-vet-cf", "CF", "1992-11-03"),
+  ];
+
+  it("같은 (시드, 선수)는 언제나 같은 사람이다 — 세이브가 담지 않아도 복원된다", () => {
+    expect(generatePlayerPersona(7, youngStriker)).toEqual(generatePlayerPersona(7, youngStriker));
+    // 화자 태그는 직책이 아니라 이름이다 (코치와 같은 규약)
+    expect(generatePlayerPersona(7, youngStriker).characterId).toBe(youngStriker.name);
+    // 세이브가 다르면 다른 사람을 만난다
+    const archetypes = new Set(
+      [1, 2, 3, 4, 5, 6, 7, 8].map((seed) => generatePlayerPersona(seed, youngStriker).archetype),
+    );
+    expect(archetypes.size).toBeGreaterThan(1);
+    // 시드 채널은 이름이 아니라 **id**다 — 동명이인도, 이적한 선수도 같은 사람이다
+    expect(
+      generatePlayerPersona(7, { ...youngStriker, name: "다른 이름", teamId: "chelsea" }).archetype,
+    ).toBe(generatePlayerPersona(7, youngStriker).archetype);
+    // 선수가 다르면 각자의 추첨을 탄다
+    const byPlayer = new Set(
+      Array.from(
+        { length: 12 },
+        (_, i) => generatePlayerPersona(7, { ...youngStriker, id: `p-${i}` }).archetype,
+      ),
+    );
+    expect(byPlayer.size).toBeGreaterThan(1);
+  });
+
+  it("나이가 흘러도 같은 사람이다 — 기준일이 고정이라 시즌이 바뀌어도 흔들리지 않는다", () => {
+    const before = samples.map((p) => generatePlayerPersona(7, p).archetype);
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2032-03-01T00:00:00Z"));
+      expect(samples.map((p) => generatePlayerPersona(7, p).archetype)).toEqual(before);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("원형 전수가 스키마를 통과한다 — 성격·동기·말투가 한 묶음으로 온다", () => {
+    const seen = new Map<string, string>();
+    for (const player of samples) {
+      for (let seed = 1; seed <= 120; seed++) {
+        const persona = generatePlayerPersona(seed, player);
+        expect(() => PersonaSchema.parse(persona)).not.toThrow();
+        expect(persona.role).toBe("player");
+        // 말투는 지문만으로 붙지 않는다 — 예시 대사가 함께 있어야 한다
+        expect(persona.speechStyle.samples.length).toBeGreaterThan(0);
+        const bundle = persona.traits.join("/") + persona.motivation;
+        const previous = seen.get(persona.archetype);
+        if (previous) expect(previous).toBe(bundle);
+        else seen.set(persona.archetype, bundle);
+      }
+    }
+    expect([...seen.keys()].sort()).toEqual([...PLAYER_ARCHETYPE_LABELS].sort());
+  });
+
+  it("나이와 포지션이 확률을 기울인다 — 국적은 걸지 않는다", () => {
+    const countOf = (player: GamePlayer, label: string) =>
+      Array.from({ length: 300 }, (_, i) => generatePlayerPersona(i + 1, player).archetype).filter(
+        (a) => a === label,
+      ).length;
+    // 어린 공격수 쪽에 야심가가, 노장 수비수 쪽에 라커룸 리더가 더 자주 선다
+    expect(countOf(youngStriker, "야심가형")).toBeGreaterThan(
+      countOf(veteranCentreBack, "야심가형"),
+    );
+    expect(countOf(veteranCentreBack, "라커룸 리더")).toBeGreaterThan(
+      countOf(youngStriker, "라커룸 리더"),
+    );
+    // 나이가 라벨과 어긋나는 자리는 아예 서지 않는다
+    expect(countOf(veteranCentreBack, "불안한 유망주")).toBe(0);
+    expect(countOf(youngStriker, "불안한 유망주")).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * 캐릭터북 키워드 — **나열한 것만 본다** (people.md §6). 만드는 자리가 한 곳이라
+ * 자리마다 다른 규칙이 생기지 않는다.
+ */
+describe("페르소나 키워드", () => {
+  it("이름과 이름 조각이 키워드가 된다 — 두 글자 미만은 되지 못한다", () => {
+    const keywords = personaKeywords({ name: "스티브 홀랜드", role: "player" });
+    expect(keywords).toContain("스티브 홀랜드");
+    expect(keywords).toContain("홀랜드");
+    // 중복도 한 글자도 남지 않는다
+    expect(new Set(keywords).size).toBe(keywords.length);
+    expect(personaKeywords({ name: "박 지", role: "player" })).toEqual(["박 지"]);
+  });
+
+  it("자리를 부르는 말이 함께 걸린다 — 매 턴 나오는 말은 넣지 않는다", () => {
+    const coach = generateHeadCoach(42, "manutd");
+    expect(coach.keywords).toEqual(expect.arrayContaining(["수석코치", "코치", coach.name]));
+    const owner = generateOwner(42, "manutd");
+    expect(owner.keywords).toEqual(expect.arrayContaining(["구단주", "회장", "보드"]));
+    const reporter = generateReporters(42, "arsenal")[0]!;
+    expect(reporter.keywords).toEqual(
+      expect.arrayContaining(["기자", "회견", "인터뷰", reporter.outlet!]),
+    );
+    // "이적"처럼 매 턴 나오는 말이 한 턴 상한 3장을 다 채우면 불린 사람이 밀린다
+    for (const persona of [coach, owner, reporter]) expect(persona.keywords).not.toContain("이적");
+  });
+
+  it("키워드가 없던 옛 세이브는 로드가 채운다 — 선수는 만들지 않는다", () => {
+    const state = createTestGame(7);
+    for (const persona of state.personas ?? []) delete persona.keywords;
+    ensurePersonas(state);
+    for (const persona of state.personas ?? []) {
+      expect(persona.keywords?.length, persona.name).toBeGreaterThan(0);
+      expect(persona.keywords).toContain(persona.name);
+    }
+    // 선수 페르소나는 파생이라 세이브에 들어가지 않는다
+    expect(state.personas?.some((p) => p.role === "player")).toBe(false);
+    expect(state.personas).toHaveLength(5);
   });
 });
