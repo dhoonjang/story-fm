@@ -488,6 +488,15 @@ export function buildMoodBrief(state: GameState, from: string, to: string): Mood
 }
 
 /**
+ * 저장할 문장의 상한 — `GamePlayerSchema`의 `moodNote.text`가 `max(120)`이라,
+ * 이 문을 넘긴 문장은 다음 로드에서 세이브 전체를 스키마 실패로 만든다.
+ */
+const MOOD_NOTE_MAX = 120;
+
+/** 이미 끝난 문장 — `?`·`!`도 종결이라 마침표를 덧붙이지 않는다 */
+const SENTENCE_END = /[.!?]$/u;
+
+/**
  * 결산 결과를 장부에 적는다 — **사실은 코어가 잡고 결만 받는다.**
  *
  * 버려지는 문장은 사실 카드를 남긴다(빈 자리가 되지 않는다). 거르는 조건은 셋이다:
@@ -507,13 +516,16 @@ export function applyMoodNotes(
     const target = byId.get(note.playerId);
     if (!target) continue;
     const text = note.text.trim();
-    if (text.length === 0 || text.length > 120) continue;
+    if (text.length === 0) continue;
     // 한 문장 — 마침표가 문장 중간에 여러 번 나오면 여러 문장이다
     if ((text.match(/[.!?]/gu) ?? []).length > 1) continue;
+    // 재는 것은 **저장할 문장**이다 — 마침표를 붙인 뒤 재지 않으면 121자가 세이브로 나간다
+    const sentence = SENTENCE_END.test(text) ? text : `${text}.`;
+    if (sentence.length > MOOD_NOTE_MAX) continue;
     if (target.hasIssue && !text.includes("불만")) continue;
     const player = playerById(state, note.playerId);
     if (!player) continue;
-    player.state.moodNote = { text: text.endsWith(".") ? text : `${text}.`, on: state.date };
+    player.state.moodNote = { text: sentence, on: state.date };
     applied += 1;
   }
   return applied;

@@ -304,6 +304,24 @@ describe("심경 결산 — 코어가 사실을 잡고 결만 맡긴다", () => 
     expect(applyMoodNotes(state, brief, [{ playerId: player.id, text: "가".repeat(130) }])).toBe(0);
   });
 
+  it("길이는 저장할 문장으로 잰다 — 마침표가 붙어 넘치면 버리고 `!`는 그대로 종결이다", () => {
+    const state = createTestGame();
+    const player = withEvent(state);
+    const brief = buildMoodBrief(state, state.date, state.date)!;
+    // 마침표를 붙이면 121자 — 세이브 스키마 상한을 넘으므로 버린다
+    expect(applyMoodNotes(state, brief, [{ playerId: player.id, text: "가".repeat(120) }])).toBe(0);
+    expect(player.state.moodNote).toBeUndefined();
+    // 119자는 마침표까지 정확히 120자 — 저장되고 스키마를 통과한다
+    expect(applyMoodNotes(state, brief, [{ playerId: player.id, text: "가".repeat(119) }])).toBe(1);
+    expect(player.state.moodNote?.text).toHaveLength(120);
+    expect(PlayerStateSchema.safeParse(player.state).success).toBe(true);
+    // `!`로 끝나면 덧붙이지 않는다 — 120자가 그대로 남는다
+    const shout = `${"가".repeat(119)}!`;
+    expect(applyMoodNotes(state, brief, [{ playerId: player.id, text: shout }])).toBe(1);
+    expect(player.state.moodNote?.text).toBe(shout);
+    expect(PlayerStateSchema.safeParse(player.state).success).toBe(true);
+  });
+
   it("사실이 바뀌면 코어가 이긴다 — 다친 선수에게 지난 결이 붙어 있지 않다", () => {
     const state = createTestGame();
     const player = withEvent(state);
