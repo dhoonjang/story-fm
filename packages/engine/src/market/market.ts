@@ -1159,13 +1159,6 @@ export function oddsText(odds: Pick<DealOdds, "probability" | "fuzzy">): string 
   return odds.fuzzy ? oddsLabel(odds.probability) : `${odds.probability}%`;
 }
 
-/** 협상 상대 — buy는 선수의 현 소속, sell은 오퍼를 넣은 구단 */
-export function counterpartOf(state: GameState, playerId: string): string | null {
-  const player = playerById(state, playerId);
-  if (!player || player.teamId === state.userTeamId) return null;
-  return player.teamId;
-}
-
 export { teamName, teamCatalogById };
 
 // ── 이적 시장 전용 리그 (사우디·MLS) ─────────────────────
