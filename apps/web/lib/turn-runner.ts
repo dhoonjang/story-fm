@@ -9,7 +9,7 @@ import {
   type GameState,
 } from "@story-fm/engine";
 import { GmTurnFailure, runGmTurn } from "@story-fm/agents";
-import { bindTurnTrace, traceTurn } from "@story-fm/llm";
+import { beginGameUsage, bindTurnTrace, traceTurn } from "@story-fm/llm";
 import { toPayload, type GamePayload } from "./store";
 import type { MatchBoardOrder } from "./match-orders";
 
@@ -120,6 +120,9 @@ export function runTurnLocked(
   // 이 턴에 오간 원문은 model 턴을 채팅에 밀어 넣는 자리에서 그 인덱스에 묶인다
   return withGameLock(id, () =>
     traceTurn(async (): Promise<TurnOutcome> => {
+      // 토큰 예산의 단위는 게임이다 — 다른 게임의 턴이면 여기서 장부를 비운다
+      // (models.md §4). 잠금 안이라 한 프로세스에서 두 게임이 겹치지 않는다.
+      beginGameUsage(id);
       const state = loadGame(id);
       if (!state) return { ok: false as const, status: 404, error: "게임을 찾을 수 없습니다" };
 

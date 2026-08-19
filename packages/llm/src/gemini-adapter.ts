@@ -108,14 +108,26 @@ function functionCalls(content: Content | undefined): FunctionCall[] {
     .filter((call): call is FunctionCall => call !== undefined);
 }
 
-function addUsage(total: TurnUsage, response: GenerateContentResponse): void {
+/**
+ * 왕복 하나의 몫을 누적기에 더하고 **그 delta를 돌려준다** — 부르는 쪽이 그대로
+ * `req.onUsage`에 실어 보내므로, 턴이 실패로 끝나도 여기까지 쓴 토큰이 남는다
+ * (models.md §4).
+ */
+function addUsage(total: TurnUsage, response: GenerateContentResponse): TurnUsage {
   const usage = response.usageMetadata;
-  // promptTokenCount는 캐시분(cachedContentTokenCount)을 이미 품고 있다 —
-  // 계약이 요구하는 "입력 전부"와 같은 값이라 그대로 더한다.
-  total.inputTokens += usage?.promptTokenCount ?? 0;
-  total.outputTokens += usage?.candidatesTokenCount ?? 0;
-  total.cacheReadTokens += usage?.cachedContentTokenCount ?? 0;
-  // Gemini의 implicit cache는 별도 cache creation 토큰을 보고하지 않는다.
+  const delta: TurnUsage = {
+    // promptTokenCount는 캐시분(cachedContentTokenCount)을 이미 품고 있다 —
+    // 계약이 요구하는 "입력 전부"와 같은 값이라 그대로 더한다.
+    inputTokens: usage?.promptTokenCount ?? 0,
+    outputTokens: usage?.candidatesTokenCount ?? 0,
+    cacheReadTokens: usage?.cachedContentTokenCount ?? 0,
+    // Gemini의 implicit cache는 별도 cache creation 토큰을 보고하지 않는다.
+    cacheWriteTokens: 0,
+  };
+  total.inputTokens += delta.inputTokens;
+  total.outputTokens += delta.outputTokens;
+  total.cacheReadTokens += delta.cacheReadTokens;
+  return delta;
 }
 
 function thinkingLevel(level: GoogleAgentConfig["thinkingLevel"]): ThinkingLevel {
@@ -252,7 +264,9 @@ export class GeminiGameLLM implements GameLLM {
       }
 
       if (!response) throw new Error("Gemini가 빈 스트림을 반환했습니다.");
-      addUsage(usage, response);
+      // 왕복 하나가 끝나는 자리에서 그 몫을 보고한다 (models.md §4)
+      const delta = addUsage(usage, response);
+      req.onUsage?.(delta);
       if (responseText.trim().length > 0) {
         text += (text ? "\n" : "") + responseText;
       }

@@ -22,6 +22,7 @@ import {
   type GmToolCall,
   type MatchIntent,
 } from "@story-fm/agents";
+import { ModelOutputError } from "../src/retry";
 
 /** 실모드 경기 턴이 부르는 모델 — 해석도 중계도 이 하나를 거친다 */
 const { runTurn } = vi.hoisted(() => ({ runTurn: vi.fn() }));
@@ -237,9 +238,9 @@ describe("경기 턴의 실패 — 어느 걸음이 흔들렸나", () => {
    * 걸음의 코어이므로 그 기록을 자국으로 세면, 진행한 모든 경기 턴이 첫 실패에
    * 그대로 무너지고 방금 굴린 구간까지 롤백된다 (agents.md §3 ④).
    */
-  it("중계가 한 번 실패하면 다시 부른다 — 구간은 한 번만 굴렀다", async () => {
+  it("중계의 산출을 쓸 수 없으면 다시 부른다 — 구간은 한 번만 굴렀다", async () => {
     const state = rolling();
-    runTurn.mockRejectedValueOnce(new Error('529 {"type":"overloaded_error"}'));
+    runTurn.mockRejectedValueOnce(new ModelOutputError("중계가 출력 문법을 어겼습니다"));
     runTurn.mockResolvedValueOnce(casted("[12']\n@중계: 다시 이어갑니다."));
 
     const turn = await runGmTurn(state, "계속", undefined, true);
@@ -252,11 +253,11 @@ describe("경기 턴의 실패 — 어느 걸음이 흔들렸나", () => {
   });
 
   /**
-   * 반대쪽 — 해석이 두 번 실패한 턴은 **장면을 내지 않는다.** "다시 말씀해 주세요"가
+   * 반대쪽 — 해석이 실패한 턴은 **장면을 내지 않는다.** "다시 말씀해 주세요"가
    * 정상 텍스트로 돌아가면 화자도 시점 헤더도 없는 줄이 채팅에 저장되고, 그 턴은
    * 되돌릴 수도 없다 (agents.md §8).
    */
-  it("지시 해석이 두 번 실패하면 장면 대신 오류가 올라간다", async () => {
+  it("지시 해석이 실패하면 장면 대신 오류가 올라간다", async () => {
     const state = rolling();
     const minute = state.pendingMatch!.ledger.minute;
     runTurn.mockRejectedValue(new Error("Connection error"));
@@ -264,8 +265,8 @@ describe("경기 턴의 실패 — 어느 걸음이 흔들렸나", () => {
     await expect(runGmTurn(state, "압박 올려", undefined, false)).rejects.toBeInstanceOf(
       GmTurnFailure,
     );
-    // 해석에서 끊겼으므로 중계는 불리지 않았고, 판도 그대로다
-    expect(runTurn).toHaveBeenCalledTimes(2);
+    // 해석에서 끊겼으므로 중계는 불리지 않았고, 판도 그대로다 — 연결 오류는 다시 부르지 않는다
+    expect(runTurn).toHaveBeenCalledTimes(1);
     expect(state.pendingMatch!.ledger.minute).toBe(minute);
   });
 });
