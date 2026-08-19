@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CardMark, ChatTurn, GoalMark, ToolCallRecord } from "@story-fm/engine";
-import { minuteOf, weaveTurn } from "../lib/turn-pieces";
+import { minuteOf, splitStaging, weaveTurn } from "../lib/turn-pieces";
 import { mergeSlice } from "../lib/game-slice";
 import { chatForActiveMatch } from "../lib/match-chat";
 import { buildTraceIndex } from "../lib/turn-trace-index";
@@ -41,6 +41,62 @@ const shape = (lines: string[], parts: Parameters<typeof weaveTurn>[1]) =>
     if (piece.mark.kind === "calls") return piece.mark.calls.map((c) => c.name).join("+");
     return piece.mark.key;
   });
+
+/**
+ * 연출 구간 나누기 — 화면이 문법 밖의 출력을 흡수하는 자리다(docs/llm/prompts.md §1).
+ * 별표를 하나씩 세면 `**`에서 경계가 밀려 **말이 통째로 연출로 뒤집힌다.**
+ */
+describe("splitStaging", () => {
+  /** 읽기 쉬운 꼴로 — 연출은 별표로 다시 감싸 경계가 어디였는지 보이게 */
+  const shown = (line: string) =>
+    splitStaging(line).map((p) => (p.staging ? `*${p.text}*` : p.text));
+
+  it("연출은 기울고 말은 그대로 — 별표는 남지 않는다", () => {
+    expect(shown("@손흥민: *고개를 숙인다* 죄송합니다.")).toEqual([
+      "@손흥민: ",
+      "*고개를 숙인다*",
+      " 죄송합니다.",
+    ]);
+  });
+
+  it("마크다운 볼드가 말을 연출로 뒤집지 않는다 — 연속 별표는 구분자 하나다", () => {
+    expect(
+      shown("스트라이커 **티에르노 배리**입니다. 로마의 **산티아고 카스트로**입니다."),
+    ).toEqual([
+      "스트라이커 ",
+      "*티에르노 배리*",
+      "입니다. 로마의 ",
+      "*산티아고 카스트로*",
+      "입니다.",
+    ]);
+  });
+
+  it("짝이 안 맞는 홀수 별표도 구분자로 먹는다 — 날것으로 남기지 않는다", () => {
+    expect(shown("*라커룸이 얼어붙는다* 그리고 남은 별표*")).toEqual([
+      "*라커룸이 얼어붙는다*",
+      " 그리고 남은 별표",
+    ]);
+    expect(shown("여는 별표만 *있다").join("")).not.toContain("**");
+    expect(
+      splitStaging("별표만 *있다")
+        .map((p) => p.text)
+        .join(""),
+    ).not.toContain("*");
+  });
+
+  it("스트리밍 중 열린 채 끝난 `*…`는 연출이다 — 닫힐 때까지 깜빡이지 않는다", () => {
+    expect(shown("@: *교체 보드가")).toEqual(["@: ", "*교체 보드가*"]);
+    // 별표만 도착한 프레임에서는 빈 <em>이 서지 않는다
+    expect(splitStaging("@: *")).toEqual([{ text: "@: ", staging: false }]);
+  });
+
+  it("별표가 없으면 조각은 하나 — 평범한 대사는 그대로다", () => {
+    expect(splitStaging("@감독: 라인을 올려")).toEqual([
+      { text: "@감독: 라인을 올려", staging: false },
+    ]);
+    expect(splitStaging("")).toEqual([]);
+  });
+});
 
 describe("분 읽기", () => {
   it("프라임·아포스트로피·추가 시간을 모두 읽는다", () => {

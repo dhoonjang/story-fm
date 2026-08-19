@@ -156,3 +156,34 @@ export function weaveTurn(
   while (nextMinute < byMinute.length) pieces.push({ mark: byMinute[nextMinute++]!.mark });
   return pieces;
 }
+
+/** 한 줄을 이룬 조각 — 연출(`*…*`)이거나 그냥 말이다 */
+export interface StagingPart {
+  text: string;
+  staging: boolean;
+}
+
+/**
+ * 한 줄을 연출 구간과 말 구간으로 나눈다 (docs/llm/prompts.md §1 `연출 := "*" 텍스트 "*"`).
+ *
+ * **연속된 별표는 별표 하나와 같다.** 모델이 마크다운 볼드(`**이름**`)를 쓰면 별표를
+ * 하나씩 세는 파서는 경계가 한 칸 밀려 **말이 통째로 연출로 뒤집힌다**. 별표가 몇
+ * 개인가가 아니라 **별표가 나왔다는 사실**만 구분자로 읽으면 그 어긋남 자체가 없다.
+ *
+ * **별표는 어느 경우에도 남기지 않는다** — 짝이 안 맞는 홀수 별표도 구분자로 먹는다.
+ * 문법 밖의 출력을 화면이 흡수하는 자리라(AGENTS.md §6.7), 남겨 둔 별표는 곧 날것이다.
+ *
+ * 스트리밍 중 아직 닫히지 않은 트레일링 `*…`는 연출로 본다 — 안 그러면 닫는 별표가
+ * 도착할 때까지 한 프레임 동안 말 모양으로 섰다가 기울어진다.
+ */
+export function splitStaging(line: string): StagingPart[] {
+  const parts: StagingPart[] = [];
+  let staging = false;
+  for (const text of line.split(/\*+/u)) {
+    // 빈 조각은 버린다 — 별표로 시작·끝나는 줄이 빈 <em>을 세우지 않도록.
+    // 자리는 세되 버리는 것이라, 뒤따르는 구분자의 뒤집기는 그대로 일어난다
+    if (text.length > 0) parts.push({ text, staging });
+    staging = !staging;
+  }
+  return parts;
+}
