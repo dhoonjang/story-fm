@@ -1,4 +1,4 @@
-import type { MatchRecord, ScheduleEntry, TransferWindow } from "@story-fm/domain";
+import type { MatchRecord, MatchStage, ScheduleEntry, TransferWindow } from "@story-fm/domain";
 import { scopedLeagues, scopedTeams, scopedTeamsOfLeague, type WorldScope } from "../world/scope";
 import { makeRng } from "../core/rng";
 import { isEuroWeek } from "./europe";
@@ -63,7 +63,11 @@ export {
   tooClose,
 } from "../core/dates";
 import { addDays, dayOfWeek, diffDays, kickoffAt, MIN_REST_HOURS, seasonYear } from "../core/dates";
-import { domesticCupsOfCountry } from "../data/domestic-cup-catalog";
+import {
+  domesticCupsOfCountry,
+  DOMESTIC_STAGES,
+  type DomesticCupEntry,
+} from "../data/domestic-cup-catalog";
 
 // ── 실제 EPL 캘린더 골격 ────────────────────────────────
 //
@@ -106,13 +110,46 @@ const WEEKEND_DAYS = new Set([6, 0]);
  */
 function cupBlankSaturdays(season: number): Set<string> {
   const out = new Set<string>();
-  const cups = domesticCupsOfCountry(SKELETON_COUNTRY);
-  for (const cup of cups) {
-    if (!cup.finalMidweek) out.add(weekendSaturdayOf(seasonDate(season, cup.windows.final)));
+  for (const cup of domesticCupsOfCountry(SKELETON_COUNTRY)) {
+    for (const stage of BLANKABLE_STAGES) {
+      const saturday = cupBlankWeekend(season, cup, stage);
+      if (saturday) out.add(saturday);
+    }
   }
-  const major = cups[0];
-  if (major) out.add(weekendSaturdayOf(seasonDate(season, major.windows.r32)));
   return out;
+}
+
+/** 주말을 비워 줄 수 있는 단계 — 진입 라운드와 결승뿐이다 */
+const BLANKABLE_STAGES: MatchStage[] = [DOMESTIC_STAGES[0]!, "final"];
+
+/**
+ * 달력이 이 컵 이 단계를 위해 비운 주말의 토요일 — 비우지 않았으면 `null`.
+ *
+ * **비우는 쪽과 앉는 쪽이 함께 읽는 단일 판정이다.** 달력은 목표일을 주말로 스냅해
+ * 비우는데, 컵 편성(`stageTarget`)이 카탈로그의 원 날짜에서 앞으로만 훑으면 비운
+ * 주말은 아무 경기 없이 지나가고 그 라운드는 주중으로 간다 — 목표일의 요일이 해마다
+ * 밀리므로 시즌마다 다른 방식으로 어긋난다 (FA컵 3라운드 1/10: 수요일인 시즌엔 화·수,
+ * 토요일인 시즌엔 뒤 절반이 그 앞 수요일).
+ *
+ * 골격을 따르는 나라가 하나뿐이라(`SKELETON_COUNTRY`) 다른 나라 컵에는 비운 주말이
+ * 없다 — 없는 주말을 목표로 삼으면 리그가 선 주말로 컵을 밀어 넣는 셈이다.
+ */
+export function cupBlankWeekend(
+  season: number,
+  cup: DomesticCupEntry,
+  stage: MatchStage,
+): string | null {
+  if (cup.country !== SKELETON_COUNTRY) return null;
+  // 주중 결승(`finalMidweek`)은 주말을 건드리지 않으므로 비우지 않는다
+  if (stage === "final") {
+    return cup.finalMidweek ? null : weekendSaturdayOf(seasonDate(season, cup.windows.final));
+  }
+  // 진입 라운드는 **메이저 컵의 것만** — 그 나라 32클럽이 전부 나와 리그가 통째로
+  // 비켜준다 (FA컵 3라운드의 1월 주말). 두 번째 컵까지 비우면 주말이 모자란다.
+  if (stage !== DOMESTIC_STAGES[0]) return null;
+  return domesticCupsOfCountry(SKELETON_COUNTRY)[0]?.id === cup.id
+    ? weekendSaturdayOf(seasonDate(season, cup.windows[stage]))
+    : null;
 }
 
 /** 시즌 안의 `[월, 일]` → 날짜 — 7월 이후는 그 해, 그 전은 이듬해 */
