@@ -93,6 +93,28 @@ describe("대항전 참가 배정", () => {
     expect(entrantsOf(withoutTables, "ucl")).not.toEqual(entrantsOf(withTables, "ucl"));
   });
 
+  it("컵 우승팀 둘이 모두 순위 밖이면 밀려나는 것은 순위가 가장 낮은 팀이다", () => {
+    // EPL 티켓은 UCL 5 · UEL 4 · UECL 2 — 순위 그대로면 11위까지 유럽에 간다.
+    const table = teamsOfLeague("epl").map((t) => t.id);
+    const rank = (n: number) => table[n - 1]!;
+    const entrants = buildEuroEntrants(
+      2,
+      42,
+      { epl: table },
+      {
+        epl: { uel: rank(12), uecl: rank(15) },
+      },
+    );
+    const of = (cupId: string) =>
+      entrantsOf(entrants, cupId).filter((id) => leagueOfTeam(id) === "epl");
+
+    expect(of("ucl")).toEqual([rank(1), rank(2), rank(3), rank(4), rank(5)]);
+    // FA컵 우승 12위가 UEL 막차(9위)를 밀어내고, 9위는 UECL로 내려간다.
+    expect(of("uel")).toEqual([rank(6), rank(7), rank(8), rank(12)]);
+    // 리그컵 우승 15위 차례에 밀리는 것은 목록의 마지막(9위)이 아니라 10위다.
+    expect(of("uecl")).toEqual([rank(9), rank(15)]);
+  });
+
   it("배정은 시드에 따라 갈리고 같은 시드면 같다", () => {
     expect(europeanEntrants("ucl", 1, 42)).toEqual(europeanEntrants("ucl", 1, 42));
     expect(europeanEntrants("ucl", 1, 42)).not.toEqual(europeanEntrants("ucl", 1, 7));
