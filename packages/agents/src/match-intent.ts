@@ -104,7 +104,7 @@ export async function runMatchIntent(
           return client.runTurn({
             system: MATCH_INTENT_SYSTEM,
             history: [],
-            // 명단·현재 6축·걸린 지시·공략 표적이 여기 다 있다 — 중계가 읽는 것과 같은 블록
+            // 명단·현재 6축·걸린 지시·공략 표적만 — 분류에 쓰이지 않는 판세는 빠진다
             user: [buildLedgerNote(state), ``, `[감독]`, message].join("\n"),
             tools: [makeReportTool((value) => (intent = value))],
             toolChoice: { name: REPORT_INTENT_TOOL },
