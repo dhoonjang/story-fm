@@ -33,16 +33,21 @@ function messageParts(message: unknown): Part[] {
 function makeStubClient(responses: GenerateContentResponse[]) {
   let history: Content[] = [];
   const sent: Content[] = [];
-  const sendMessage = vi.fn(async ({ message }: { message: unknown }) => {
-    const user = { role: "user", parts: messageParts(message) } satisfies Content;
-    sent.push(user);
-    history.push(user);
-    const next = responses.shift();
-    if (!next) throw new Error("stub 응답 부족");
-    const model = next.candidates?.[0]?.content;
-    if (model) history.push(model);
-    return next;
-  });
+  /** 요청별 per-request config — 미지정이면 undefined다 (chat 설정을 그대로 쓴다) */
+  const sentConfigs: Array<Record<string, unknown> | undefined> = [];
+  const sendMessage = vi.fn(
+    async ({ message, config }: { message: unknown; config?: Record<string, unknown> }) => {
+      sentConfigs.push(config);
+      const user = { role: "user", parts: messageParts(message) } satisfies Content;
+      sent.push(user);
+      history.push(user);
+      const next = responses.shift();
+      if (!next) throw new Error("stub 응답 부족");
+      const model = next.candidates?.[0]?.content;
+      if (model) history.push(model);
+      return next;
+    },
+  );
   const chat = {
     sendMessage,
     sendMessageStream: vi.fn(),
@@ -56,10 +61,74 @@ function makeStubClient(responses: GenerateContentResponse[]) {
     client: { chats: { create } },
     create,
     sent,
+    sentConfigs,
   };
 }
 
 describe("GeminiGameLLM", () => {
+  it("강제 도구는 첫 요청에만, chat 설정을 통째로 실은 per-request config로 간다", async () => {
+    const stub = makeStubClient([
+      response({
+        role: "model",
+        parts: [{ functionCall: { id: "call-1", name: "report_mood", args: {} } }],
+      }),
+      response({ role: "model", parts: [{ text: "끝." }] }),
+    ]);
+    const tool: GameToolSpec = {
+      name: "report_mood",
+      description: "테스트 도구",
+      inputSchema: { type: "object", properties: {} },
+      handle: () => ({ ok: true, message: "반영" }),
+    };
+
+    const llm = new GeminiGameLLM(testConfig, stub.client as never);
+    await llm.runTurn({
+      system: "고정 프롬프트",
+      history: [],
+      user: "결산",
+      tools: [tool],
+      toolChoice: { name: "report_mood" },
+    });
+
+    const first = stub.sentConfigs[0] as {
+      toolConfig?: { functionCallingConfig?: { mode?: string; allowedFunctionNames?: string[] } };
+      systemInstruction?: string;
+      maxOutputTokens?: number;
+      tools?: unknown[];
+    };
+    expect(first.toolConfig?.functionCallingConfig?.mode).toBe("ANY");
+    expect(first.toolConfig?.functionCallingConfig?.allowedFunctionNames).toEqual(["report_mood"]);
+    /**
+     * per-request config는 chat 설정을 상속하지 않고 대체한다(SDK 계약) — 모드만
+     * 얹으면 systemInstruction·도구·출력 상한이 첫 요청에서 통째로 사라진다.
+     */
+    expect(first.systemInstruction).toBe("고정 프롬프트");
+    expect(first.maxOutputTokens).toBe(testConfig.maxTokens);
+    expect(first.tools).toHaveLength(1);
+    /**
+     * 도구 결과를 돌려준 뒤에도 강제가 남아 있으면 모델이 턴을 끝낼 길이 없어
+     * 왕복 상한까지 같은 도구를 다시 부른다 — 그래서 두 번째 요청은 chat 설정(AUTO)이다.
+     */
+    expect(stub.sentConfigs[1]).toBeUndefined();
+  });
+
+  it("toolChoice가 없으면 per-request config 없이 chat 설정의 AUTO로 간다", async () => {
+    const stub = makeStubClient([response({ role: "model", parts: [{ text: "네." }] })]);
+    const tool: GameToolSpec = {
+      name: "noop",
+      description: "테스트 도구",
+      inputSchema: { type: "object", properties: {} },
+      handle: () => ({ ok: true, message: "ok" }),
+    };
+    const llm = new GeminiGameLLM(testConfig, stub.client as never);
+    await llm.runTurn({ system: "고정 프롬프트", history: [], user: "안녕", tools: [tool] });
+
+    expect(stub.sentConfigs[0]).toBeUndefined();
+    const created = stub.create.mock.calls[0]![0] as {
+      config: { toolConfig?: { functionCallingConfig?: { mode?: string } } };
+    };
+    expect(created.config.toolConfig?.functionCallingConfig?.mode).toBe("AUTO");
+  });
   it("설정의 시한과 중단 신호를 chat 설정에 실어 보낸다 — SDK 기본값에 기대지 않는다", async () => {
     const stub = makeStubClient([response({ role: "model", parts: [{ text: "@수석코치: 네." }] })]);
     const controller = new AbortController();
