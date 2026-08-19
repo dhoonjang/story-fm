@@ -1,11 +1,12 @@
 import type {
   GamePlayer,
   MarketCard,
+  MarketDirection,
   MarketTerms,
   Negotiation,
   NegotiationVerdict,
 } from "@story-fm/domain";
-import { PITCH_CLAIM_KO, ageOf, naturalPositionOf } from "@story-fm/domain";
+import { PITCH_CLAIM_KO, ageOf, marketDirectionKo, naturalPositionOf } from "@story-fm/domain";
 import {
   addDays,
   contractUntil,
@@ -114,12 +115,26 @@ function liveNegotiationFor(state: GameState, playerId: string): Negotiation | n
 /** id에 박히는 갈래 표기 — 밑줄 없는 한 낱말이라 `neg-renew-…`와 같은 꼴로 선다 */
 const kindSlug = (kind: Negotiation["kind"]) => kind.replace("_", "");
 
-/** 갈래의 이름 — 안내 문장과 요약이 같은 말을 쓴다 */
+/**
+ * **갈래가 정하는 방향** — 재계약에는 방향이 없다(상대가 구단이 아니라 선수 본인이다).
+ */
+function directionOfKind(kind: Negotiation["kind"]): MarketDirection | null {
+  if (kind === "renew") return null;
+  return kind === "buy" || kind === "loan" ? "in" : "out";
+}
+
+/** 카드에 실을 방향 — 방향이 없는 갈래에는 필드 자체가 서지 않는다 */
+function directionField(kind: Negotiation["kind"]): { direction?: MarketDirection } {
+  const direction = directionOfKind(kind);
+  return direction ? { direction } : {};
+}
+
+/** 갈래의 이름 — 안내 문장과 요약이 같은 말을 쓴다 (낱말은 도메인이 쥔다) */
 const KIND_KO: Record<Negotiation["kind"], string> = {
-  buy: "영입",
-  sell: "매각",
-  loan: "임대 영입",
-  loan_out: "임대 송출",
+  buy: marketDirectionKo("in"),
+  sell: marketDirectionKo("out"),
+  loan: marketDirectionKo("in", true),
+  loan_out: marketDirectionKo("out", true),
   renew: "재계약",
 };
 
@@ -335,6 +350,7 @@ export function sendOffer(state: GameState, input: DealTerms): MarketSkillResult
     terms: dealTerms({ fee: terms.fee, weeklyWage: terms.weeklyWage, years: terms.years }),
     odds: chance,
     dueOn: respondsOn,
+    ...directionField(kind),
     ...(terms.kind === "loan" ? { loan: true } : {}),
     ...(verdicts.length > 0
       ? {
@@ -418,6 +434,8 @@ function counterpartOf(negotiation: Negotiation, player: GamePlayer): string {
 function verdictCardOf(input: {
   player: GamePlayer;
   counterpart: string;
+  /** 협상의 갈래 — 카드의 방향이 여기서 나온다 */
+  kind: Negotiation["kind"];
   verdict: NegotiationVerdict;
   offer: Negotiation["rounds"][number];
   /** 되부른 조건이 성사될 가능성 — 역제안일 때만 (`oddsText` 표기) */
@@ -438,6 +456,7 @@ function verdictCardOf(input: {
       weeklyWage: input.offer.weeklyWage,
       years: input.offer.contractYears,
     }),
+    ...directionField(input.kind),
     ...(input.verdict === "counter" && input.odds ? { odds: input.odds } : {}),
     ...(input.loan === true ? { loan: true } : {}),
     ...(input.note ? { note: input.note } : {}),
@@ -652,6 +671,7 @@ export function respondOffer(
     ...verdictCardOf({
       player,
       counterpart,
+      kind: negotiation.kind,
       verdict: input.verdict,
       offer,
       // 역제안만 답이 남는다 — 카드는 그때만 확률을 세운다 (`verdictCardOf`)
@@ -940,6 +960,7 @@ export function offerPlayerOut(
     terms: dealTerms({ fee, weeklyWage, years }),
     odds: chance,
     dueOn: respondsOn,
+    ...directionField(kind),
     ...(input.loan ? { loan: true } : {}),
   };
   return {
@@ -1245,6 +1266,7 @@ export function answerIncomingOffer(
     const card = verdictCardOf({
       player,
       counterpart,
+      kind: negotiation.kind,
       verdict: "reject",
       offer,
       ...(input.note ? { note: input.note } : {}),
@@ -1265,6 +1287,7 @@ export function answerIncomingOffer(
     const card = verdictCardOf({
       player,
       counterpart,
+      kind: negotiation.kind,
       verdict: "accept",
       offer,
       ...(input.note ? { note: input.note } : {}),
@@ -1305,6 +1328,7 @@ export function answerIncomingOffer(
     payload: verdictCardOf({
       player,
       counterpart,
+      kind: negotiation.kind,
       verdict: "counter",
       offer,
       odds: oddsText(odds),
@@ -2143,6 +2167,7 @@ export function withdrawOffer(state: GameState, negotiationId: string): MarketSk
     playerId: negotiation.gamePlayerId,
     playerName: who,
     counterpart: teamName(negotiation.counterpartTeamId ?? player?.teamId ?? ""),
+    ...directionField(negotiation.kind),
     ...(note ? { note } : {}),
   });
   if (negotiation.medical?.status === "flagged") {
@@ -2258,7 +2283,8 @@ export function pendingVerdicts(state: GameState): Array<{
   }> = [];
   for (const negotiation of state.negotiations) {
     const player = playerById(state, negotiation.gamePlayerId);
-    const who = player?.name ?? negotiation.gamePlayerId;
+    // 라벨은 방향을 함께 싣는다 — 이름만 서면 GM이 사는 건지 파는 건지 뒤집는다
+    const who = `${player?.name ?? negotiation.gamePlayerId} ${KIND_KO[negotiation.kind]}`;
     if (negotiation.status === "agreed") {
       const medical = negotiation.medical;
       /**
@@ -2312,10 +2338,19 @@ export function describeNegotiations(state: GameState): string {
     .map((n) => {
       const player = playerById(state, n.gamePlayerId);
       const last = n.rounds[n.rounds.length - 1];
+      const name = player?.name ?? n.gamePlayerId;
+      const counterpart = teamName(n.counterpartTeamId ?? "");
+      /**
+       * **내보내는 갈래의 상대는 선수의 소속이 아니라 거래 상대다.** `선수(상대팀)`은
+       * 영입 기준의 표기라 매각에 쓰면 우리 선수가 사려는 구단 소속처럼 읽힌다
+       * (transfer.md §1).
+       */
       const who =
         n.kind === "renew"
-          ? `${player?.name ?? n.gamePlayerId}`
-          : `${player?.name ?? n.gamePlayerId}(${teamName(n.counterpartTeamId ?? "")})`;
+          ? name
+          : directionOfKind(n.kind) === "out"
+            ? `${name} → ${counterpart}`
+            : `${name}(${counterpart})`;
       const direction = KIND_KO[n.kind];
       if (n.status === "agreed") {
         const medical = describeMedical(state, n);
@@ -2332,7 +2367,7 @@ export function describeNegotiations(state: GameState): string {
         last.respondsOn !== null && last.respondsOn > state.date
           ? describeWait(diffDays(state.date, last.respondsOn))
           : "답 도착 — 판정 필요";
-      return `${n.id} ${who} — 우리 오퍼 ${formatMoney(last.fee)} (${waiting})`;
+      return `${n.id} ${who} ${direction} — 우리 오퍼 ${formatMoney(last.fee)} (${waiting})`;
     })
     .join("\n");
 }

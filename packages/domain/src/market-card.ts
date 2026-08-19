@@ -9,6 +9,20 @@
  * 값은 **숫자 그대로** 싣는다(원 단위). `£42M` 같은 표기는 화면의 것이다.
  */
 
+/**
+ * **거래의 방향** — 선수가 우리 쪽으로 오는가(`in`), 우리에게서 나가는가(`out`).
+ *
+ * `loan`만으로는 갈리지 않는다: 빌려오는 것도 빌려주는 것도 임대다. 방향과 임대
+ * 여부가 함께 갈래 하나를 정한다.
+ */
+export type MarketDirection = "in" | "out";
+
+/** 갈래의 이름 — 요약 줄·주의 줄·카드 배지가 한 낱말을 함께 쓴다 */
+export function marketDirectionKo(direction: MarketDirection, loan = false): string {
+  if (direction === "in") return loan ? "임대 영입" : "영입";
+  return loan ? "임대 송출" : "매각";
+}
+
 /** 카드가 말하는 국면 */
 export type MarketCardKind =
   /** 우리가 넣은 오퍼 — 답을 기다린다 */
@@ -33,7 +47,7 @@ export interface MarketCard {
   kind: MarketCardKind;
   playerId: string;
   playerName: string;
-  /** 선수의 지금 소속 — 매각이면 사려는 구단 */
+  /** 거래 상대 구단 — 데려오는 거래면 선수의 지금 소속, 내보내는 거래면 사려는 구단 */
   counterpart: string;
   /** 우리가 낸 조건 */
   terms?: MarketTerms;
@@ -56,4 +70,11 @@ export interface MarketCard {
   note?: string;
   /** 임대인가 — 같은 금액이 이적료가 아니라 임대료다 */
   loan?: boolean;
+  /**
+   * **방향** — 데려오는 거래인가(`in`) 내보내는 거래인가(`out`).
+   *
+   * 카드만 봐서는 사는 건지 파는 건지 알 수 없어서 생긴 축이다. 재계약처럼 방향이
+   * 없는 카드에는 서지 않고, 이 축이 생기기 전에 남은 카드에도 없다 — 그래서 optional.
+   */
+  direction?: MarketDirection;
 }
