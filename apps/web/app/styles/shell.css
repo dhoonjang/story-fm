@@ -2953,10 +2953,12 @@ textarea {
   color: var(--deal);
   line-height: 0;
 }
+/* 배지는 방향까지 실어 두 낱말이 된다(`임대 송출 역제안`) — 중간에서 접히면 두 표식으로 읽힌다 */
 .mc-badge {
   font-size: var(--fs-3xs);
   font-weight: 700;
   letter-spacing: 0.04em;
+  white-space: nowrap;
   padding: 2px 7px;
   border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--deal) 16%, transparent);
