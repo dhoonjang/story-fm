@@ -644,6 +644,13 @@ export interface GameState {
    * (`persistence.ts`). 없으면 옛 −3~3 세이브로 보고 3으로 나눈다.
    */
   formUnitScale?: boolean;
+  /**
+   * 미러 자리에 적혀 있던 주발 보정을 이미 벗긴 세이브인가 — 로드 시 한 번만
+   * 벗기기 위한 마커 (`core/migrations.ts`). 벗기기는 묶음을 주 포지션 값으로
+   * 평평하게 미는 일이라, 마커 없이 매번 돌면 경기·훈련이 LCB·RCB에 쌓은
+   * 적응도까지 같이 지운다 (player.md §8).
+   */
+  mirrorProficiencyStripped?: boolean;
   narrative: NarrativeNote[];
   chat: ChatTurn[];
 }
@@ -2063,6 +2070,9 @@ export function createGame(input: CreateGameInput): GameState {
       ...generateReporters(seed, input.userTeamId),
     ],
     formUnitScale: true,
+    // 카탈로그는 읽을 때 이미 벗겨져 들어온다(`world/catalog.ts`) — 새 세이브에
+    // 벗길 것은 없고, 여기서 서는 자리부터 적립이 쌓인다
+    mirrorProficiencyStripped: true,
     leagueHistory: [],
     seasonRecords: [],
     trophies: [],

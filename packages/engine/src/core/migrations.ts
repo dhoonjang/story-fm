@@ -261,9 +261,21 @@ export function stripStoredFootAdjust(positions: readonly MirrorPosition[]): boo
 
 interface MirrorProficiencySave {
   players: ReadonlyArray<{ positions: readonly MirrorPosition[] }>;
+  mirrorProficiencyStripped?: boolean;
 }
 
-/** 세이브 전체에 `stripStoredFootAdjust`를 적용한다 (SAVE_VERSION 유지 — 값만 옮긴다) */
+/**
+ * 세이브 전체에 `stripStoredFootAdjust`를 **한 번만** 적용한다 (SAVE_VERSION 유지 —
+ * optional 마커라 옛 세이브도 그대로 열린다).
+ *
+ * 벗기기는 묶음을 주 포지션 값으로 평평하게 미는 일이고, 게임은 그 자리를 정당하게
+ * 가른다 — 경기(`gainMatchProficiency`)와 포지션 훈련이 LCB·RCB에 그대로 적립한다.
+ * 그 적립 폭은 옛 주발 보정 폭과 구분되지 않으므로, 매 로드마다 돌면 한 시즌 쌓은
+ * 좌우 적응도가 조용히 되감기고 성장 로그에는 오른 기록만 남는다. 그래서 값이 아니라
+ * 마커로 가른다 (`formUnitScale`과 같은 방식 — game-state.md §6).
+ */
 export function migrateMirrorProficiency(save: MirrorProficiencySave): void {
+  if (save.mirrorProficiencyStripped) return;
   for (const player of save.players) stripStoredFootAdjust(player.positions);
+  save.mirrorProficiencyStripped = true;
 }
