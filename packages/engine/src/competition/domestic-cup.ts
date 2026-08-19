@@ -497,6 +497,55 @@ function createTie(
   return legs;
 }
 
+/** 한 컵 한 시즌 안에서 상금을 가르는 축 — 라벨과 달리 표시에 쓰이지 않는다 */
+type PrizeKind = `stage:${MatchStage}` | "winner" | "runner-up";
+
+/**
+ * 멱등 키 — `category + ref + 무엇 + season` (finance.md §4.1).
+ *
+ * 라벨은 언제든 고쳐 쓰는 문장이라 키로 쓸 수 없다. 컵 약칭이나 단계 이름 한
+ * 글자를 고치는 순간 이미 지급한 상금이 새 키를 얻어 한 번 더 나간다.
+ */
+function prizeKey(cupId: string, kind: PrizeKind, season: number): string {
+  return `prize:competition:${cupId}:${kind}:S${season}`;
+}
+
+function prizeLabel(cup: DomesticCupEntry, season: number, what: string): string {
+  return `${cup.short} ${what} 상금 (S${season})`;
+}
+
+/**
+ * 옛 세이브 호환 — 표시 라벨을 그대로 멱등 키로 쓰던 시절의 `prizesPaid`를 안정
+ * 키로 옮긴다. 옮기지 않으면 로드가 곧바로 부르는 `advanceDomesticCups`의 라운드
+ * 정산이 옛 키를 못 알아보고 같은 상금을 한 번 더 지급한다.
+ *
+ * 라벨이 시즌을 달고 있어 지난 시즌 기록까지 그대로 옮겨온다. 새 키는 이 표에
+ * 없으므로 두 번 돌려도 결과가 같다.
+ */
+export function migrateDomesticPrizeKeys(state: GameState): void {
+  const moved = new Map<string, string>();
+  for (const cup of domesticCupCatalog()) {
+    for (let season = 1; season <= state.season; season++) {
+      moved.set(prizeLabel(cup, season, "우승"), prizeKey(cup.id, "winner", season));
+      moved.set(prizeLabel(cup, season, "준우승"), prizeKey(cup.id, "runner-up", season));
+      for (const stage of DOMESTIC_STAGES) {
+        moved.set(
+          prizeLabel(cup, season, `${domesticStageLabel(cup, stage)} 진출`),
+          prizeKey(cup.id, `stage:${stage}`, season),
+        );
+      }
+    }
+  }
+  for (const finance of state.finances) {
+    const keys = finance.prizesPaid;
+    if (!keys) continue;
+    for (let i = 0; i < keys.length; i++) {
+      const next = moved.get(keys[i]!);
+      if (next) keys[i] = next;
+    }
+  }
+}
+
 /** 라운드 진출 상금 — 그 단계에 오른 모든 팀에게 (중복 지급은 원장 키가 막는다) */
 function payRoundPrize(
   state: GameState,
@@ -507,9 +556,9 @@ function payRoundPrize(
 ): void {
   const amount = cup.prize.round[stage] ?? 0;
   if (amount <= 0) return;
-  const label = `${cup.short} ${domesticStageLabel(cup, stage)} 진출 상금 (S${state.season})`;
+  const label = prizeLabel(cup, state.season, `${domesticStageLabel(cup, stage)} 진출`);
   for (const teamId of new Set(teams)) {
-    const paid = payOnce(state, teamId, label, {
+    const paid = payOnce(state, teamId, prizeKey(cup.id, `stage:${stage}`, state.season), {
       kind: "income",
       category: "prize",
       label,
@@ -897,9 +946,9 @@ export function reviewDomesticCups(state: GameState): string[] {
     const runnerUp = domesticRunnerUp(state, cup.id);
     const ours = champion === state.userTeamId || runnerUp === state.userTeamId;
 
-    const payTo = (teamId: string, what: string, amount: number) => {
-      const label = `${cup.short} ${what} 상금 (S${state.season})`;
-      const paid = payOnce(state, teamId, label, {
+    const payTo = (teamId: string, kind: PrizeKind, what: string, amount: number) => {
+      const label = prizeLabel(cup, state.season, what);
+      const paid = payOnce(state, teamId, prizeKey(cup.id, kind, state.season), {
         kind: "income",
         category: "prize",
         label,
@@ -910,8 +959,8 @@ export function reviewDomesticCups(state: GameState): string[] {
         digest.push(`💰 ${label} ${formatMoney(amount)} 입금`);
       }
     };
-    payTo(champion, "우승", cup.prize.winner);
-    if (runnerUp) payTo(runnerUp, "준우승", cup.prize.runnerUp);
+    payTo(champion, "winner", "우승", cup.prize.winner);
+    if (runnerUp) payTo(runnerUp, "runner-up", "준우승", cup.prize.runnerUp);
 
     if (champion === state.userTeamId) {
       state.trophies.push({ season: state.season, competition: cup.name, teamId: champion });
