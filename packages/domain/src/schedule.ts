@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ATTRIBUTE_AXES, AXIS_KO } from "./player";
+import { ShootoutKickSchema } from "./match";
 
 /**
  * 일정 축 (v6) — 경기·훈련·이적창·컵 추첨이 날짜+시간의 단일 축에 등록된다.
@@ -120,7 +121,18 @@ export const MatchResultSchema = z.object({
    * 스코어는 위 goals에 남고 승자는 이 값으로 갈린다 (2021년부터 원정 다득점
    * 규칙은 없다).
    */
-  penalties: z.object({ home: z.number().int().min(0), away: z.number().int().min(0) }).optional(),
+  penalties: z
+    .object({
+      home: z.number().int().min(0),
+      away: z.number().int().min(0),
+      /**
+       * 찬 순서 그대로의 킥 목록 — 중계·화면이 인용하는 원본이다. 합계는 여기서
+       * 세지만(`shootoutTally`) 두 숫자를 함께 두는 이유는 옛 세이브다: 킥 없이
+       * 결과만 적힌 승부차기가 이미 장부에 있다 (optional — SAVE_VERSION 유지).
+       */
+      kicks: z.array(ShootoutKickSchema).optional(),
+    })
+    .optional(),
   /**
    * 경기 평점 (선수 id → 0.0~10.0). 장부가 온전한 **유저 팀 경기**에만 남는다 —
    * 타 팀 경기는 시즌 합계(SEASON_STAT.ratingSum)에만 반영하고 경기별로는 갖지 않는다

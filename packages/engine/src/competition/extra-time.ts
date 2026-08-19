@@ -89,6 +89,42 @@ export function needsExtraTime(
   return carry.home + now.home === carry.away + now.away;
 }
 
+/**
+ * **이 경기 뒤에 승부차기가 붙는가** — 연장의 문 다음에 서는 문.
+ *
+ * 연장을 치르고도 합계가 같으면 승부차기다. 그래서 판정은 `needsExtraTime`과 같은
+ * 잣대에 **연장을 이미 치렀는가**를 더한 것이다. 진행 중인 경기는 그 시계가 아직
+ * 장부에 없으므로(`result`가 비어 있다) 넘겨받은 스코어를 믿는다 — 감독의 경기는
+ * 120분이 끝난 자리에서 이 함수를 스코어와 함께 묻는다.
+ */
+export function needsShootout(
+  state: GameState,
+  match: MatchRecord,
+  score?: { home: number; away: number },
+): boolean {
+  if (!score && match.result?.aet !== true) return false;
+  return needsExtraTime(state, match, score);
+}
+
+/**
+ * **이미 적힌 결과로 갈리는 승자** — 갈리지 않으면 null. 아무것도 굴리지 않는다.
+ *
+ * 국내 컵과 대항전이 같은 한 벌을 쓴다. 합계가 먼저고, 같으면 승부차기 합계다 —
+ * 연장·승부차기를 굴리는 것은 `resolveDomesticTie` · `resolveEuroTie`이고 승자를
+ * **묻는** 자리는 여기를 지난다 (competition.md §6).
+ */
+export function settledTieWinner(legs: readonly MatchRecord[]): string | null {
+  if (legs.length === 0 || legs.some((m) => !m.result)) return null;
+  const decider = legs[legs.length - 1]!;
+  const agg = tieAggregate(legs, decider);
+  if (agg.home !== agg.away) {
+    return agg.home > agg.away ? decider.homeTeamId : decider.awayTeamId;
+  }
+  const pens = decider.result!.penalties;
+  if (!pens || pens.home === pens.away) return null;
+  return pens.home > pens.away ? decider.homeTeamId : decider.awayTeamId;
+}
+
 /** 대진 합계 — 마지막 경기(단판·2차전)의 홈·원정 기준 */
 export function tieAggregate(
   legs: readonly MatchRecord[],
@@ -122,9 +158,21 @@ export function finishingXi(
 ): GamePlayer[] {
   const result = match.result;
   const teamId = side === "home" ? match.homeTeamId : match.awayTeamId;
-  const onPitch = side === "home" ? result?.homeOnPitch : result?.awayOnPitch;
+  /**
+   * **진행 중인 장부가 결과보다 앞선다.**
+   *
+   * 감독의 경기는 마감(`finalizeMatch`)이 승부차기 **뒤**에 온다 — 승부차기를 굴리는
+   * 동안 `match.result`는 아직 `null`이라 결과만 읽으면 1군 상위 열한 명까지 밀려나
+   * 벤치에 앉아 있던 에이스와 **퇴장당한 선수가 페널티를 찬다.** 살아 있는 장부의
+   * 온필드가 곧 경기를 끝낸 열한 명이고, 마감이 `homeOnPitch`로 적는 것도 이 목록이다.
+   */
+  const live =
+    state.pendingMatch?.matchId === match.id ? state.pendingMatch.ledger[side].onPitch : null;
+  const onPitch = live ?? (side === "home" ? result?.homeOnPitch : result?.awayOnPitch);
   const lineup = side === "home" ? result?.homeLineup : result?.awayLineup;
-  const listed = (onPitch ?? (lineup ?? []).slice(0, EXTRA_TIME_XI))
+  /** 같은 id가 두 번 실린 장부가 있다 — 한 사람이 연달아 차지 않도록 접는다 */
+  const unique = [...new Set(onPitch ?? (lineup ?? []).slice(0, EXTRA_TIME_XI))];
+  const listed = unique
     .map((id) => playerById(state, id))
     .filter((p): p is GamePlayer => p !== null && p.teamId === teamId);
   if (listed.length > 0) return listed;

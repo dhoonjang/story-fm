@@ -14,6 +14,7 @@ import type {
   Manager,
   ManagerAttributes,
   MatchRecord,
+  MatchSide,
   NarrativeNote,
   Persona,
   PlayerIssue,
@@ -29,6 +30,7 @@ import type {
   ScoutReportCard,
   SeasonRecord,
   SeasonStat,
+  ShootoutKick,
   StrengthPacket,
   Suspension,
   TacticAssignment,
@@ -400,6 +402,20 @@ export interface PendingMatch {
    * 구 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   lastSegment?: { events: import("@story-fm/domain").MatchEvent[]; stop: string };
+  /**
+   * **승부차기가 남았을 때만** — 장부는 `finished`지만 경기는 끝나지 않았다.
+   *
+   * 120분이 끝났는데 승부가 남은 감독의 경기에서만 선다(`advanceMatchTo`가 세운다).
+   * 킥 목록이 원본이고 합계는 세지 않는다(`shootoutTally`). 옛 세이브엔 없다
+   * (optional — SAVE_VERSION 유지).
+   */
+  shootout?: {
+    /** 먼저 차는 쪽 — 동전이 정한다 (`shootoutFirst`) */
+    first: MatchSide;
+    kicks: ShootoutKick[];
+    /** 감독이 지시한 키커 순서 (선수 id) — 없으면 기본 순서 */
+    order?: { home?: string[]; away?: string[] };
+  };
   /**
    * **상대가 경기 중 바꾼 전술** — 이 경기에만 유효하다.
    *

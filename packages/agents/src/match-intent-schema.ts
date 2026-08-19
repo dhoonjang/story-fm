@@ -111,6 +111,13 @@ export const MatchIntentSchema = z.object({
   plans: z.array(MatchPlanSchema).max(2).optional(),
   /** 노릴 표적의 id — 코어가 실재를 대조한다 (`exploits.ts`) */
   exploits: z.array(z.string().min(1)).max(2).optional(),
+  /**
+   * 승부차기 키커 순서 — 감독이 이름을 든 사람만. 나머지는 코어의 기본 순서가 잇는다.
+   *
+   * 여기 오는 것은 **누구를 세웠나**까지다 — 들어갔는지 막혔는지는 코어가 굴린다
+   * (match.md §2).
+   */
+  shootoutOrder: z.array(playerId).max(11).optional().describe("승부차기 키커 순서"),
   advance: z.enum(ADVANCE_INTENTS),
   /**
    * 옮기지 못한 말 — **비워 두지 않는다.**
@@ -138,6 +145,7 @@ export function touchesPitch(intent: MatchIntent): boolean {
     (intent.playerTactics?.length ?? 0) > 0 ||
     (intent.plans?.length ?? 0) > 0 ||
     (intent.exploits?.length ?? 0) > 0 ||
+    (intent.shootoutOrder?.length ?? 0) > 0 ||
     intent.tactics !== undefined ||
     intent.advance !== "none"
   );

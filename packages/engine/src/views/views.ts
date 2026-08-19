@@ -8,6 +8,7 @@ import type {
   PacketPlayer,
   Foot,
   ScheduleType,
+  ShootoutOutcome,
   SquadRegistration,
 } from "@story-fm/domain";
 import {
@@ -26,6 +27,7 @@ import {
   rolesFor,
   seasonRating,
   separateBoardPoints,
+  shootoutTally,
   slotOfTime,
 } from "@story-fm/domain";
 import { diffDays, nextMatchFor, seasonEndDate } from "../competition/calendar";
@@ -908,6 +910,30 @@ export interface MatchView {
   totals: { home: MatchTally; away: MatchTally };
   subs: { home: { used: number; windows: number }; away: { used: number; windows: number } };
   sentOff: string[];
+  /**
+   * 승부차기 — 120분이 승부를 못 가른 경기에만 선다.
+   *
+   * 합계는 킥 목록에서 다시 센다(`shootoutTally`) — 두 벌로 두면 조용히 갈린다.
+   */
+  shootout: { tally: { home: number; away: number }; kicks: MatchShootoutKickView[] } | null;
+}
+
+/**
+ * 승부차기 한 발 — **찬 순서 그대로** 화면에 남는다 (match.md §8).
+ *
+ * 감독이 다음 키커를 정하려면 누가 찼고 들어갔는지 막혔는지가 보여야 한다.
+ * 성공 확률은 넘기지 않는다 — 화면이 입에 담지 않는 게임 내부 수치다.
+ */
+export interface MatchShootoutKickView {
+  round: number;
+  side: "home" | "away";
+  /** 팀 약칭 — 우리 편 색만으로는 두 줄이 갈리지 않는다 */
+  team: string;
+  taker: string;
+  /** 막아선 골키퍼 — 명단에 골키퍼가 없는 옛 세이브에서만 빈다 */
+  keeper: string | null;
+  outcome: ShootoutOutcome;
+  ours: boolean;
 }
 
 /** 오피스 뷰 — 상태의 읽기 전용 프로젝션 (overview §5) */
@@ -1285,6 +1311,7 @@ function buildMatchView(state: GameState): MatchView | null {
 
   const ledger = pending.ledger;
   const worn = pending.matchFatigue ?? {};
+  const shootout = pending.shootout;
 
   /**
    * 선수별 기록 — 사건 목록을 한 번 훑어 접는다. 저장하지 않는 이유는 원본이
@@ -1434,7 +1461,9 @@ function buildMatchView(state: GameState): MatchView | null {
     },
     score: { ...ledger.score },
     minute: ledger.minute,
-    phase: MATCH_PHASE_KO[ledger.phase] ?? ledger.phase,
+    // 승부차기는 장부가 `finished`인 채로 진행된다 — "종료"로 적으면 화면이 끝난
+    // 경기를 말하고, 감독은 아직 키커를 세우는 중이다 (match.md §2)
+    phase: shootout ? "승부차기" : (MATCH_PHASE_KO[ledger.phase] ?? ledger.phase),
     beforeKickoff: pending.entered !== true,
     /**
      * 매치업은 **맞붙는 두 값**을 견준다 — 공격 존은 우리 공격 대 상대 **수비**다.
@@ -1527,6 +1556,23 @@ function buildMatchView(state: GameState): MatchView | null {
       away: { used: ledger.away.subsUsed, windows: ledger.away.subWindows },
     },
     sentOff: ledger.sentOff.map((id) => playerName(state, id)),
+    shootout: shootout
+      ? {
+          tally: shootoutTally(shootout.kicks),
+          kicks: shootout.kicks.map((kick) => {
+            const teamId = kick.team === "home" ? match.homeTeamId : match.awayTeamId;
+            return {
+              round: kick.round,
+              side: kick.team,
+              team: teamShortNameIn(state, teamId),
+              taker: playerName(state, kick.taker),
+              keeper: kick.keeper ? playerName(state, kick.keeper) : null,
+              outcome: kick.outcome,
+              ours: teamId === state.userTeamId,
+            };
+          }),
+        }
+      : null,
   };
 }
 

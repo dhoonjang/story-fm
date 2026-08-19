@@ -13,6 +13,7 @@ import {
   knockoutDates,
   knockoutStages,
   reservedEuroDates,
+  resolveEuroTie,
   buildMatchweekDates,
   diffDays,
   isCup,
@@ -247,7 +248,8 @@ describe("승자 판정", () => {
       legs[0]!.result = { homeGoals: 1, awayGoals: 1, scorers: [] };
       legs[1]!.result = { homeGoals: 2, awayGoals: 2, scorers: [] };
 
-      const winner = euroTieWinner(state, "ucl", "playoff", pair);
+      // 굴리는 것은 `resolveEuroTie` 하나다 — 조회 함수는 이미 적힌 결과를 읽을 뿐이다
+      const winner = resolveEuroTie(state, "ucl", "playoff", pair);
       const result = legs[1]!.result;
       expect(result.aet, "연장 표식").toBe(true); // 승부차기 앞에 연장이 있다
       const agg = tieAggregate(legs, legs[1]!);

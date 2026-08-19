@@ -6,6 +6,7 @@
 import {
   advanceTime,
   applyScenePoint,
+  awaitingShootout,
   buildMoodBrief,
   buildRatingBrief,
   buildTrainingBrief,
@@ -456,7 +457,12 @@ async function runRealGmTurn(
     state.pendingMatch.casterHistory = result.history;
     // 첫 휘슬을 불었다 — 이 뒤로는 패킷과 도구를 쥔 보통의 진행 턴이다
     if (kickoff) markEntered(state);
-    if (state.pendingMatch.ledger.phase === "finished") {
+    /**
+     * 승부차기가 남았으면 마감하지 않는다 — 장부는 `finished`지만 승부는 아직
+     * 갈리지 않았다 (match.md §2). 여기서 마감하면 킥을 한 발도 차지 않은 경기가
+     * 결과로 굳는다.
+     */
+    if (state.pendingMatch.ledger.phase === "finished" && !awaitingShootout(state)) {
       // 브리프는 장부가 살아 있을 때만 만들 수 있다 — finalizeMatch가 지우기 전에
       const brief = buildRatingBrief(state);
       const digest = finalizeMatch(state);

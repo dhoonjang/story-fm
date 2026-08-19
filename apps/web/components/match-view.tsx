@@ -11,6 +11,7 @@ import { PitchChip, PitchGround } from "./pitch";
 type Match = NonNullable<OfficeViews["match"]>;
 type MatchPlayer = Match["onPitch"]["home"][number];
 type MatchTotals = Match["totals"]["home"];
+type Shootout = NonNullable<Match["shootout"]>;
 
 /**
  * 경기 화면 — **중계 채팅 밖에서도 판세가 보여야 한다.**
@@ -158,6 +159,7 @@ export function MatchHeadline({ match }: { match: Match }) {
     <div className="match-headline">
       <Scoreboard match={match} />
       <GoalLog goals={match.goals} />
+      <ShootoutLog shootout={match.shootout} />
     </div>
   );
 }
@@ -547,6 +549,41 @@ function GoalLog({ goals }: { goals: Match["goals"] }) {
         <span key={i} className={`mv-goal${g.ours ? " ours" : ""}`}>
           <i>{g.minute}′</i> {g.scorer}
           {g.assist && <em> ({g.assist})</em>}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** 킥 하나의 결말 — 골키퍼가 막았으면 누가 막았는지까지 (막은 사람도 사건이다) */
+function kickOutcome(kick: Shootout["kicks"][number]): string {
+  if (kick.outcome === "scored") return "성공";
+  if (kick.outcome === "saved") return kick.keeper ? `${kick.keeper} 선방` : "선방";
+  return "실축";
+}
+
+/**
+ * 승부차기 — **합계와 킥 하나하나가 찬 순서대로 선다** (match.md §8).
+ *
+ * 득점 기록과 같은 자리·같은 모양이다: 스코어 아래 한 줄로 흐르고 우리 킥은 색으로
+ * 갈린다. 감독이 다음 키커를 정하려면 누가 찼고 들어갔는지 막혔는지가 보여야 한다.
+ * 성공 확률은 그리지 않는다 — 화면이 게임 내부 수치를 입에 담지 않는다.
+ */
+function ShootoutLog({ shootout }: { shootout: Match["shootout"] }) {
+  if (!shootout) return null;
+  return (
+    <div className="mv-goals-log" data-testid="match-shootout">
+      <span className="mv-goal">
+        <i>승부차기</i>
+        {shootout.tally.home} : {shootout.tally.away}
+      </span>
+      {shootout.kicks.map((kick, i) => (
+        <span key={i} className={`mv-goal${kick.ours ? " ours" : ""}`}>
+          <i>
+            {kick.round}R {kick.team}
+          </i>
+          {kick.taker}
+          <em> {kickOutcome(kick)}</em>
         </span>
       ))}
     </div>

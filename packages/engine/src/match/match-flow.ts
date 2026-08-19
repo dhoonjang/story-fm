@@ -2,9 +2,11 @@ import type {
   GamePlayer,
   MatchEvent,
   MatchRecord,
+  MatchSide,
   RegionalBand,
   RegionalIntent,
   RegionalLane,
+  ShootoutKick,
   TacticAssignment,
 } from "@story-fm/domain";
 import {
@@ -15,6 +17,8 @@ import {
   positionGroupOf,
   positionGroupOfPlayer,
   PROFICIENCY_MAX,
+  shootoutSettled,
+  shootoutTally,
   storedProficiencyFor,
   TacticsSpecSchema,
   tacticsSignature,
@@ -74,7 +78,8 @@ import { competitionLabel } from "../data/cup-catalog";
 import { isFriendly } from "../competition/friendly";
 import { advanceDomesticCups } from "../competition/domestic-cup";
 import { advanceEuroKnockouts } from "../competition/euro-knockout";
-import { needsExtraTime } from "../competition/extra-time";
+import { needsExtraTime, needsShootout } from "../competition/extra-time";
+import { rollShootoutKick, shootoutFirst } from "../competition/shootout";
 import { recordCard } from "./discipline";
 import { makeRng } from "../core/rng";
 
@@ -694,6 +699,17 @@ export function advanceSegment(
   }
   // 피로가 쌓였으니 다음 구간의 전력이 달라진다 (교체·전술 변경과 같은 경로)
   refreshPacket(state);
+  /**
+   * **승부차기의 문은 구간이 끝나는 이 자리에 선다** — 드라이버가 아니라.
+   *
+   * `advanceSegment`는 그 자체가 공개 진입점이고 `advanceMatchTo`를 거치지 않는
+   * 호출부가 실재한다(mock GM·테스트). 문을 드라이버에 두면 "누가 승부차기를
+   * 여는가"가 어느 함수로 굴렸는지에 따라 갈려, mock 모드의 컵 경기만 조용히
+   * 오프스크린으로 밀려난다. 여는 것은 상태(`pending.shootout`) 하나뿐이고
+   * 정지점을 돌려주는 것은 드라이버의 몫이다 — `plan.stop`은 sim의 어휘라
+   * 120분 뒤의 자리를 담지 않는다.
+   */
+  openShootout(state, pending);
   return { ok: true, plan: { ...plan, events }, message };
 }
 
@@ -716,7 +732,7 @@ export function advanceMatchTo(
 ): {
   ok: boolean;
   events: MatchEvent[];
-  stop: SegmentStop | null;
+  stop: MatchStop | null;
   minute: number;
   message: string;
 } {
@@ -726,7 +742,7 @@ export function advanceMatchTo(
   }
 
   const events: MatchEvent[] = [];
-  let stop: SegmentStop | null = null;
+  let stop: MatchStop | null = null;
   let guard = 8;
   while (guard-- > 0) {
     const ledger = pending.ledger;
@@ -750,6 +766,24 @@ export function advanceMatchTo(
     if (pending.ledger.minute >= targetMinute) break;
   }
 
+  /**
+   * 120분이 끝났는데 승부가 남았으면 **정지점이 하나 더 있다** — 장부는 `finished`지만
+   * 경기는 끝나지 않았다. 마감(`finalizeMatch`)은 승부차기가 갈린 뒤에 온다.
+   *
+   * 문을 여는 것은 구간(`advanceSegment`)이고 `openShootout`은 멱등이라, 여기서는
+   * 이미 열린 문을 **읽어** 정지점으로 옮기는 셈이다 — 장부가 이미 끝난 자리에서
+   * 불려 구간을 한 번도 굴리지 않은 턴만 이 호출이 문을 연다.
+   */
+  if (openShootout(state, pending)) {
+    return {
+      ok: true,
+      events,
+      stop: "shootout_start",
+      minute: pending.ledger.minute,
+      message: "120분 종료 — 승부차기",
+    };
+  }
+
   return {
     ok: true,
     events,
@@ -758,6 +792,32 @@ export function advanceMatchTo(
     message: `${pending.ledger.minute}′까지 진행`,
   };
 }
+
+/**
+ * **승부차기의 문** — 120분이 끝났는데 승부가 남았으면 연다. **구간이 끝나는
+ * 자리에서 불린다**(`advanceSegment`) — 어느 드라이버로 굴리든 같은 문을 지나야 한다.
+ *
+ * 이미 열려 있으면 그대로 둔다: 먼저 차는 쪽을 정하는 동전(`shootoutFirst`)은 한
+ * 경기에 한 번이고, 다시 던지면 진행 턴마다 순서가 뒤바뀐다.
+ *
+ * @returns 이 경기가 승부차기를 남겨 두고 있는가
+ */
+function openShootout(state: GameState, pending: PendingMatch): boolean {
+  if (pending.ledger.phase !== "finished") return false;
+  if (pending.shootout) return true;
+  const match = currentMatch(state);
+  if (!needsShootout(state, match, pending.ledger.score)) return false;
+  pending.shootout = { first: shootoutFirst(state, match), kicks: [] };
+  return true;
+}
+
+/**
+ * 진행 턴이 멈춰 선 자리 — 구간 시뮬의 정지점에 **승부차기의 둘**이 얹힌다.
+ *
+ * `SegmentStop`은 sim 패키지가 쥔 "공이 굴러가는 동안"의 어휘라 120분 뒤의 자리를
+ * 담지 않는다. 그래서 넓히는 것은 경기 흐름을 쥔 이쪽이다.
+ */
+export type MatchStop = SegmentStop | "shootout_start" | "shootout_kick";
 
 /** 벤치가 판을 다시 짜는 정지점 — 하프타임 · 연장 개시 · 연장 하프타임 */
 function isBreak(stop: SegmentStop): boolean {
@@ -834,6 +894,139 @@ export function substitutePlayer(state: GameState, input: { out: string; in: str
   return result.ok
     ? { ok: true, message: `교체 완료 — ${outgoing.name} OUT, ${incoming.name} IN` }
     : result;
+}
+
+/**
+ * **이 경기가 승부차기를 남겨 두고 있는가** — 장부는 끝났지만 승부는 안 끝났다.
+ *
+ * 마감(`finalizeMatch`)의 문지기다: 이게 참인 동안 경기를 닫으면 승부차기가
+ * 오프스크린으로 밀려나고 감독은 자기 경기의 결말을 못 본다.
+ */
+export function awaitingShootout(state: GameState): boolean {
+  const shootout = state.pendingMatch?.shootout;
+  return shootout ? !shootoutSettled(shootout.kicks) : false;
+}
+
+/**
+ * 페널티를 찰 수 있는 사람 — **그 경기를 끝낸 열한 명**이다(퇴장이 있었으면 그보다 적다).
+ *
+ * `finishingXi`를 쓰지 않는다: 그쪽은 `match.result`를 읽는데 감독의 경기는 마감이
+ * 승부차기 **뒤**에 오므로 아직 결과가 없고, 그러면 1군 상위 열한 명으로 물러서서
+ * 벤치에 앉아 있던 에이스가 키커 목록에 오른다. 장부의 온필드가 곧 그 열한 명이고,
+ * 마감이 `homeOnPitch`로 적는 것도 이 목록이다.
+ */
+function shootoutTakers(pending: PendingMatch, side: MatchSide): ReadonlySet<string> {
+  return new Set(pending.ledger[side].onPitch);
+}
+
+/**
+ * **키커 순서 지시** — 승부차기 정지점에서만, 감독의 팀 것만 받는다.
+ *
+ * 지목한 사람이 앞에 서고 나머지는 기본 순서로 뒤를 잇는다(순서를 세우는 것은
+ * `shootoutOrder`다). 그라운드에 없는 이름은 **조용히 버리지 않는다** — 버리면
+ * 감독은 자기가 정한 순서로 차는 줄 알고 다음 판단을 그 위에 쌓는다.
+ */
+export function setShootoutOrder(state: GameState, input: { playerIds: string[] }): FlowResult {
+  const pending = state.pendingMatch;
+  if (!pending || state.phase !== "match" || !pending.shootout) {
+    return { ok: false, message: "키커 순서는 승부차기에서만 정할 수 있습니다" };
+  }
+  if (shootoutSettled(pending.shootout.kicks)) {
+    return { ok: false, message: "승부차기가 이미 끝났습니다" };
+  }
+  const side = userSide(state);
+  const takers = shootoutTakers(pending, side);
+  const order: string[] = [];
+  const names: string[] = [];
+  for (const ref of input.playerIds) {
+    // 감독이 부른 이름이 실려 오므로 우리 선수 id로 굳힌다 (`substitutePlayer`와 같은 문)
+    const picked = pickOurPlayer(state, ref);
+    if (!picked.ok) return { ok: false, message: picked.message };
+    const player = picked.player;
+    if (!takers.has(player.id)) {
+      return {
+        ok: false,
+        message: `${player.name}은(는) 그라운드에 없어 페널티를 찰 수 없습니다 — 경기를 끝낸 열한 명 중에서 고르세요`,
+      };
+    }
+    if (order.includes(player.id)) continue; // 같은 사람을 두 번 부르면 앞자리가 그의 자리다
+    order.push(player.id);
+    names.push(player.name);
+  }
+  if (order.length === 0) {
+    return { ok: false, message: "키커를 한 명 이상 지목해야 합니다" };
+  }
+  pending.shootout.order = { ...pending.shootout.order, [side]: order };
+  return { ok: true, message: `키커 순서 — ${names.join(" → ")} (나머지는 기본 순서)` };
+}
+
+/** 킥 하나를 감독이 읽는 한 줄로 — 사실만 적는다. 문장은 캐스터가 쓴다 */
+function shootoutKickLine(
+  state: GameState,
+  kick: ShootoutKick,
+  tally: { home: number; away: number },
+): string {
+  const takerName = playerById(state, kick.taker)?.name ?? kick.taker;
+  const outcome = kick.outcome === "scored" ? "성공" : kick.outcome === "saved" ? "선방" : "실축";
+  const keeper = kick.keeper ? playerById(state, kick.keeper)?.name : null;
+  const against = kick.outcome === "saved" && keeper ? ` (${keeper})` : "";
+  return `${kick.round}라운드 ${takerName} ${outcome}${against} · 승부차기 ${tally.home}:${tally.away}`;
+}
+
+/**
+ * **다음 한 발** — 코어가 결과를 굴리고 캐스터는 그것을 문장으로 옮긴다.
+ *
+ * 진행 한 번에 한 발이다: 다른 정지점과 같은 분업이라 결과를 정하는 것은 언제나
+ * 코어이고, 감독은 발과 발 사이에 남아 있다.
+ */
+export function advanceShootout(state: GameState): {
+  ok: boolean;
+  kick: ShootoutKick | null;
+  done: boolean;
+  message: string;
+} {
+  const pending = state.pendingMatch;
+  if (!pending || state.phase !== "match" || !pending.shootout) {
+    return { ok: false, kick: null, done: false, message: "승부차기가 진행 중이 아닙니다" };
+  }
+  const shootout = pending.shootout;
+  const tallyOf = () => shootoutTally(shootout.kicks);
+  if (shootoutSettled(shootout.kicks)) {
+    const tally = tallyOf();
+    return {
+      ok: true,
+      kick: null,
+      done: true,
+      message: `승부차기 종료 — ${tally.home}:${tally.away}`,
+    };
+  }
+  const kick = rollShootoutKick(
+    state,
+    currentMatch(state),
+    shootout.kicks,
+    shootout.first,
+    shootout.order,
+  );
+  if (!kick) {
+    const tally = tallyOf();
+    return {
+      ok: true,
+      kick: null,
+      done: true,
+      message: `승부차기 종료 — ${tally.home}:${tally.away}`,
+    };
+  }
+  shootout.kicks = [...shootout.kicks, kick];
+  const tally = tallyOf();
+  const done = shootoutSettled(shootout.kicks);
+  return {
+    ok: true,
+    kick,
+    done,
+    message: done
+      ? `${shootoutKickLine(state, kick, tally)} — 승부차기 종료`
+      : shootoutKickLine(state, kick, tally),
+  };
 }
 
 /** 동시에 걸 수 있는 지역 플랜 수 — 공략(`MAX_EXPLOITS`)과 같은 이유의 상한이다 */
@@ -1169,6 +1362,22 @@ export function finalizeMatch(state: GameState): MatchDigest {
      * `resolveExtraTime`이 이 경기를 다시 굴리지 않는다 (extra-time.ts).
      */
     ...(wentToExtraTime(ledger) ? { aet: true } : {}),
+    /**
+     * **승부차기 합계와 킥 목록** — 킥이 원본이라 합계도 거기서 센다(`shootoutTally`).
+     *
+     * 그리고 이게 이중 적용의 문지기다: 이 값이 있으면 `advanceDomesticCups` ·
+     * `advanceEuroKnockouts`가 감독이 이미 한 발씩 찬 승부차기를 다시 굴리지 않는다.
+     * **갈린 뒤에만 적는다** — 아직 안 갈린 합계를 적으면 그 문지기가 무승부를
+     * 승자로 읽는다.
+     */
+    ...(pending.shootout && shootoutSettled(pending.shootout.kicks)
+      ? {
+          penalties: {
+            ...shootoutTally(pending.shootout.kicks),
+            kicks: [...pending.shootout.kicks],
+          },
+        }
+      : {}),
   };
   const entry = state.schedule.find((e) => e.type === "match" && e.refId === match.id);
   if (entry) entry.status = "done";
@@ -1381,9 +1590,15 @@ export function finalizeMatch(state: GameState): MatchDigest {
 
   const opponentId = side === "home" ? match.awayTeamId : match.homeTeamId;
   // 120분을 뛴 경기는 그 사실이 스코어 옆에 남아야 한다 — 무득점 연장은 흔적이 없다
-  const scoreline = `${ledger.score.home}:${ledger.score.away}${
-    wentToExtraTime(ledger) ? " (연장)" : ""
-  }`;
+  /**
+   * 승부차기는 **스코어를 바꾸지 않는다** — 승부차기 골은 골이 아니라 스코어라인은
+   * 120분 그대로다. 그래서 합계는 괄호로 옆에 선다.
+   */
+  const pens = match.result?.penalties;
+  const scoreline =
+    `${ledger.score.home}:${ledger.score.away}` +
+    (wentToExtraTime(ledger) ? " (연장)" : "") +
+    (pens ? ` (승부차기 ${pens.home}:${pens.away})` : "");
   const outcomeKo = outcome === "win" ? "승리" : outcome === "draw" ? "무승부" : "패배";
   pushNarrative(
     state,

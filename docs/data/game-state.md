@@ -156,15 +156,15 @@
 
 ### 3.3 일정 · 대회
 
-| 엔티티                               | 무엇                                                              | 정의                    |
-| ------------------------------------ | ----------------------------------------------------------------- | ----------------------- |
-| `schedule` `ScheduleEntry`           | **일정 축 단일화** — 경기·훈련·이적창 개폐·추첨·컵 라운드         | `domain/schedule.ts`    |
-| `matches` `MatchRecord`              | 경기 — 대회·단계·라운드·킥오프·중립 여부                          | `domain/schedule.ts`    |
-| ↳ `MatchResult`                      | `null`=미진행. 스코어·득점자·도움·분·출전 명단·연장·승부차기·평점 | `domain/schedule.ts`    |
-| `trainingSessions` `TrainingSession` | 라벨 + `focus` + `auto`(기본 배치) + `rest`(비워 둔 자리)         | `domain/schedule.ts`    |
-| `windows` `TransferWindow`           | 이적창 — 리그별(`leagueId`)이면 그 협회만                         | `domain/records.ts`     |
-| `euroEntrants` `EuroEntry`           | 이번 시즌 대항전 참가 팀 — **추첨은 이미 일어난 사실**            | `competition/europe.ts` |
-| `leagueHistory` `LeagueFinalTable`   | 최근 세 시즌 리그별 최종 순위 — 체급 재산정의 성적 축이 읽는다    | `domain/records.ts`     |
+| 엔티티                               | 무엇                                                                                  | 정의                    |
+| ------------------------------------ | ------------------------------------------------------------------------------------- | ----------------------- |
+| `schedule` `ScheduleEntry`           | **일정 축 단일화** — 경기·훈련·이적창 개폐·추첨·컵 라운드                             | `domain/schedule.ts`    |
+| `matches` `MatchRecord`              | 경기 — 대회·단계·라운드·킥오프·중립 여부                                              | `domain/schedule.ts`    |
+| ↳ `MatchResult`                      | `null`=미진행. 스코어·득점자·도움·분·출전 명단·연장·승부차기(합계 + 킥 하나하나)·평점 | `domain/schedule.ts`    |
+| `trainingSessions` `TrainingSession` | 라벨 + `focus` + `auto`(기본 배치) + `rest`(비워 둔 자리)                             | `domain/schedule.ts`    |
+| `windows` `TransferWindow`           | 이적창 — 리그별(`leagueId`)이면 그 협회만                                             | `domain/records.ts`     |
+| `euroEntrants` `EuroEntry`           | 이번 시즌 대항전 참가 팀 — **추첨은 이미 일어난 사실**                                | `competition/europe.ts` |
+| `leagueHistory` `LeagueFinalTable`   | 최근 세 시즌 리그별 최종 순위 — 체급 재산정의 성적 축이 읽는다                        | `domain/records.ts`     |
 
 `ScheduleEntry.refId`가 type별 대상을 가리킨다: `match`→`MATCH.id`,
 `training`→`TRAINING_SESSION.id`, `window-*`→`TRANSFER_WINDOW.id`,

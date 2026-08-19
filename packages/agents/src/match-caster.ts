@@ -1,4 +1,4 @@
-import type { MatchEvent, StrengthPacket } from "@story-fm/domain";
+import type { MatchEvent, ShootoutKick, ShootoutOutcome, StrengthPacket } from "@story-fm/domain";
 
 /**
  * 매치 캐스터 — 경기 장면의 GM. 사건은 코어가 xg로 이미 확정하고
@@ -113,6 +113,16 @@ const STOP_KO: Record<string, string> = {
   extra_half_time: "연장 전반이 끝났다",
   full_time: "경기가 끝났다 — 마무리 중계",
   flow: "특별한 사건 없이 시간이 흘렀다",
+  shootout_start: "120분이 승부를 못 가렸다 — 승부차기로 간다",
+  shootout_kick: "승부차기 한 발이 끝났다 — 다음 키커가 준비한다",
+  /** 진행 정지점이 아니라 승부차기의 끝 — 승부가 갈린 자리다 (`shootoutSettled`) */
+  shootout_done: "승부차기가 끝났다 — 승부가 갈렸다",
+};
+
+const SHOOTOUT_OUTCOME_KO: Record<ShootoutOutcome, string> = {
+  scored: "성공",
+  saved: "골키퍼 선방",
+  missed: "골문을 벗어났다",
 };
 
 /**
@@ -145,6 +155,40 @@ export function buildSegmentMessage(
   return [
     "[이번 구간에 일어난 일 — 이대로 중계하라]",
     lines.length > 0 ? lines.join("\n") : "- (사건 없음)",
+    "",
+    `[구간 종료] ${STOP_KO[stop] ?? stop}`,
+  ].join("\n");
+}
+
+/**
+ * 승부차기 한 발의 대본 — 선수는 이름으로 준다(id를 주면 중계에 id가 샌다).
+ *
+ * 킥을 굴리는 것은 코어이고 이 함수가 하는 일은 **확정된 한 발을 문장으로 옮기는
+ * 것**뿐이다 — 다른 정지점과 같은 분업이다 (match.md §2). 킥의 성공 확률은 싣지
+ * 않는다: 화자가 입에 담지 않는 게임 내부 수치다.
+ *
+ * 아직 한 발도 굴리지 않은 턴(`kick`이 `null`)은 감독이 **키커 순서를 정할
+ * 자리**이므로 대본이 그 사실을 밝힌다.
+ */
+export function buildShootoutMessage(
+  kick: ShootoutKick | null,
+  tally: { home: number; away: number },
+  done: boolean,
+  nameOf: (id: string) => string,
+  sideName: (side: "home" | "away") => string,
+): string {
+  const tallyLine = `합계 ${sideName("home")} ${tally.home} : ${tally.away} ${sideName("away")}`;
+  const lines = kick
+    ? [
+        `- ${kick.round}번째 키커 · ${sideName(kick.team)} ${nameOf(kick.taker)}` +
+          (kick.keeper ? ` ↔ 골키퍼 ${nameOf(kick.keeper)}` : "") +
+          ` · ${SHOOTOUT_OUTCOME_KO[kick.outcome]} · ${tallyLine}`,
+      ]
+    : ["- (이번 턴에 찬 발은 없다 — 감독이 키커 순서를 정할 자리다)", `- ${tallyLine}`];
+  const stop = done ? "shootout_done" : kick ? "shootout_kick" : "shootout_start";
+  return [
+    "[이번 구간에 일어난 일 — 이대로 중계하라]",
+    lines.join("\n"),
     "",
     `[구간 종료] ${STOP_KO[stop] ?? stop}`,
   ].join("\n");
