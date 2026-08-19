@@ -2,14 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   applyPressOutcome,
   buildMatchPress,
+  buildTransferPress,
   declinePress,
   describePendingPress,
   openPress,
   pendingPress,
+  reportersOf,
   respondToMedia,
   userPlayers,
   type GameState,
 } from "@story-fm/engine";
+import { PressConferenceSchema } from "@story-fm/domain";
 import type { GamePlayer, MatchRecord, PressConference } from "@story-fm/domain";
 import { createTestGame } from "./helpers";
 
@@ -325,5 +328,52 @@ describe("기자회견 — 질문은 장부에서 나온다", () => {
     const named = press.facts.filter((f) => f.about !== null);
     expect(named.length).toBeGreaterThan(0);
     expect(named[0]!.text).toContain(slump.name);
+  });
+});
+
+describe("기자회견 — 누가 묻는가", () => {
+  /** 스쿼드에서 가장 나은 선수 — 이적 회견은 핵심 자원에만 열린다 */
+  function bestPlayer(state: GameState): GamePlayer {
+    return [...userPlayers(state)].sort((a, b) => b.attributes.overall - a.attributes.overall)[0]!;
+  }
+
+  it("자리의 성격이 기자를 정한다 — 경기 뒤는 전국지, 이적은 타블로이드", () => {
+    const state = createTestGame();
+    // 순서는 REPORTER_ARCHETYPES 그대로: 0 지역지 · 1 전국지 · 2 타블로이드
+    const [, national, tabloid] = reportersOf(state);
+
+    const match = playAndOpen(state);
+    expect(match.trigger).toBe("match");
+    expect(match.reporterId).toBe(national!.characterId);
+
+    const transfer = buildTransferPress(state, {
+      playerId: bestPlayer(state).id,
+      kind: "out",
+      fee: 40_000_000,
+    });
+    expect(transfer!.reporterId).toBe(tabloid!.characterId);
+    // 이적 회견과 경기 회견은 다른 사람이 묻는다
+    expect(transfer!.reporterId).not.toBe(match.reporterId);
+
+    // 회견장에 앉는 얼굴이 매 경기 달라지면 회견은 그냥 질문 목록이 된다
+    const next = nextUserMatch(state, "competitive");
+    settle(state, next, { us: 3, them: 0 });
+    expect(buildMatchPress(state, next.id)!.reporterId).toBe(match.reporterId);
+  });
+
+  it("구단의 내일을 묻는 자리는 지역지가 연다", () => {
+    const state = createTestGame();
+    for (let i = 0; i < 2; i++) {
+      settle(state, nextUserMatch(state, "competitive"), { us: 0, them: 1 });
+    }
+    const press = playAndOpen(state, { us: 1, them: 1 });
+    expect(press.trigger).toBe("pressure");
+    expect(press.reporterId).toBe(reportersOf(state)[0]!.characterId);
+  });
+
+  it("기자를 모르는 옛 세이브의 회견도 막히지 않는다", () => {
+    const { reporterId, ...old } = fakeConference({ reporterId: "누군가" });
+    expect(reporterId).toBe("누군가");
+    expect(PressConferenceSchema.safeParse(old).success).toBe(true);
   });
 });

@@ -16,6 +16,7 @@ import { clampForm, formLabel, moraleToForm } from "../squad/form";
 import { recentOutcomes } from "../squad/slump";
 import { issueReasonText } from "../squad/mood";
 import { isFriendly } from "../competition/friendly";
+import { reportersOf } from "../world/persona";
 import type { SkillResult } from "../skills";
 
 /**
@@ -88,6 +89,24 @@ function weightOf(trigger: PressTrigger, sharp: boolean): 1 | 2 | 3 {
   if (trigger === "pressure") return 3;
   if (trigger === "transfer") return 2;
   return sharp ? 2 : 1;
+}
+
+/**
+ * 이 자리를 여는 기자 — **누가 묻는가는 자리의 성격이 정한다.**
+ *
+ * 경기 뒤는 장면과 전술을 캐는 **전국지**, 이적은 사람 사이를 캐는 **타블로이드**,
+ * 무승·압박처럼 구단의 내일을 묻는 자리는 팬을 대신하는 **지역지**다. 같은 회견은
+ * 언제나 같은 기자가 물어야 "저 친구는 늘 라커룸부터 캔다"가 성립한다.
+ *
+ * ⚠️ 배열 인덱스다 — `reportersOf`가 주는 순서는 언제나 `REPORTER_ARCHETYPES`의
+ * 순서이고(persona.ts), 그것은 **0 지역지 베테랑 · 1 전국지 전술 기자 · 2 타블로이드**다.
+ */
+const REPORTER_AT: Record<PressTrigger, number> = { pressure: 0, match: 1, transfer: 2 };
+
+/** 그 자리를 여는 기자의 `characterId` — 기자단이 짧으면 첫 기자가, 없으면 아무도 묻지 않는다 */
+function reporterFor(state: GameState, trigger: PressTrigger): string | undefined {
+  const reporters = reportersOf(state);
+  return (reporters[REPORTER_AT[trigger]] ?? reporters[0])?.characterId;
 }
 
 /** 우리 시각의 결과 */
@@ -197,6 +216,7 @@ export function buildMatchPress(state: GameState, matchId: string): PressConfere
     id: `press-${matchId}`,
     date: state.date,
     trigger,
+    reporterId: reporterFor(state, trigger),
     context:
       `${opponent}전 ${score} ${outcomeKo}` + (winless ? ` · 최근 ${recent.length}경기 무승` : ""),
     facts,
@@ -287,6 +307,7 @@ export function buildTransferPress(
     id: `press-transfer-${input.playerId}-${state.date}`,
     date: state.date,
     trigger: "transfer",
+    reporterId: reporterFor(state, "transfer"),
     context:
       `${player.name} ${input.kind === "in" ? "영입" : "매각"}` +
       (input.fee > 0 ? ` · ${formatMoney(input.fee)}` : ""),

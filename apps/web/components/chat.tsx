@@ -33,7 +33,7 @@ import {
  * 남의 팀 사람)에는 **사람 아이콘**이 선다 — 틀린 직책을 다느니 "누군가 말한다"까지만
  * 말한다. 자리는 화면이 추측하지 않는다: `speakerRoles`가 코어에서 정해 실어 보낸다.
  */
-const KIND_ICON: Record<SpeakerKind, IconComponent> = {
+const KIND_ICON: Partial<Record<SpeakerKind, IconComponent>> = {
   head_coach: IconCoach,
   owner: IconOwner,
   reporter: IconReporter,
@@ -107,7 +107,7 @@ function UtteranceBlock({
   const isBroadcast = speaker === BROADCAST_SPEAKER;
   // 직책은 모델이 아니라 세이브가 안다 — 이름만 맞으면 어떤 턴에서도 함께 보인다
   const role = roles?.[normalizeSpeaker(speaker)];
-  const Icon = isBroadcast ? IconBroadcast : role ? KIND_ICON[role.kind] : IconPerson;
+  const Icon = isBroadcast ? IconBroadcast : (role && KIND_ICON[role.kind]) || IconPerson;
   return (
     <div className={`say${isBroadcast ? " broadcast" : ""}`}>
       <div className="say-who">
