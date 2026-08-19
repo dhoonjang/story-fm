@@ -36,7 +36,7 @@ import { reportMood } from "./mood-rater";
 import { reportTraining } from "./training-rater";
 import { buildNoSegmentMessage, MATCH_CASTER_SYSTEM } from "./match-caster";
 import { buildOnboardingTurn, runMockGmTurn } from "./mock-gm";
-import { retryOnce } from "./retry";
+import { retryOnce, ModelOutputError } from "./retry";
 import { GM_SYSTEM } from "./gm-prompt";
 import { buildGmTools } from "./gm-tools";
 import { runMatchIntent } from "./match-intent";
@@ -165,11 +165,11 @@ export async function runOnboardingTurn(state: GameState, llm?: GameLLM): Promis
     });
     // 상한에 걸린 응답은 문장이 끊겨 있다 — 문법 검사를 통과해도 걸러낸다
     if (result.stopReason === "truncated") {
-      throw new Error("첫 장면이 출력 상한에 걸려 문장이 잘렸습니다");
+      throw new ModelOutputError("첫 장면이 출력 상한에 걸려 문장이 잘렸습니다");
     }
     const text = humanizePlayerIds(state, result.text.trim());
     if (!isValidOnboardingText(state, text)) {
-      throw new Error(`첫 장면이 출력 문법을 어겼습니다:\n${text}`);
+      throw new ModelOutputError(`첫 장면이 출력 문법을 어겼습니다:\n${text}`);
     }
     // 첫 장면은 시계를 옮기지 않는다 — 헤더가 없으면 세워 준다
     const stamped = parseSceneHeader(text).point
