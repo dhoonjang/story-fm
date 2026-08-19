@@ -997,11 +997,22 @@ export function weeklyWagesOf(state: GameState, teamId: string): number {
   return weeklyWageLinesOf(state, teamId).reduce((sum, l) => sum + l.weekly, 0);
 }
 
-/** 시즌 누적 경고 — BOOKING에서 파생 */
+/**
+ * 시즌 누적 경고 — BOOKING에서 파생.
+ *
+ * **한 경기에서 두 장을 받은 경기의 경고는 세지 않는다** — 경고 2회 퇴장은 그 자리에서
+ * 퇴장 정지 한 건으로 값을 치렀고, 그 두 장까지 누적에 넣으면 한 사건에 정지가 두 번
+ * 걸린다 (match.md §5). 장부의 두 줄은 그대로 둔다 — 경기 기록은 실제로 그랬다.
+ */
 export function seasonYellowsOf(state: GameState, playerId: string, season: number): number {
-  return state.bookings.filter(
-    (b) => b.gamePlayerId === playerId && b.season === season && b.card === "yellow",
-  ).length;
+  const perMatch = new Map<string, number>();
+  for (const b of state.bookings) {
+    if (b.gamePlayerId !== playerId || b.season !== season || b.card !== "yellow") continue;
+    perMatch.set(b.matchId, (perMatch.get(b.matchId) ?? 0) + 1);
+  }
+  let counted = 0;
+  for (const inMatch of perMatch.values()) if (inMatch < 2) counted += inMatch;
+  return counted;
 }
 
 export function financeOf(state: GameState, teamId: string): TeamFinance {
