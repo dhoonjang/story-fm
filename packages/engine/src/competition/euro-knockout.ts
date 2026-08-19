@@ -357,13 +357,30 @@ function reportOurTie(
 }
 
 /**
+ * 리그 페이즈에서 이미 떨어졌는가 — 최종 순위가 통과선(`directSlots + playoffSlots`) 밖.
+ *
+ * ⚠️ **플레이오프 결장으로는 판정할 수 없다.** 직행 팀도 그 단계에 없기 때문이다.
+ * 통과선 밖 팀(UEL 13~16위·UECL 7~10위)이 살아 있는 것으로 남으면, 다음 단계가
+ * 뽑혀 "거기 없다"가 드러날 때까지 4~5월 자리를 붙들고 있게 된다.
+ *
+ * 순위가 확정되는 것은 리그 페이즈를 완주한 순간이다 — 그 전 순위는 잠정이다.
+ */
+function outOfLeaguePhase(state: GameState, cup: CupCatalogEntry, teamId: string): boolean {
+  if (!euroLeaguePhaseDone(state, cup.id)) return false;
+  // 순위표에 없는 팀(-1)은 판정하지 않는다 — 예약을 잘못 지우는 쪽이 대가가 크다
+  const rank = leaguePhaseSeeds(state, cup.id).indexOf(teamId);
+  return rank >= 0 && rank >= cup.directSlots + cup.playoffSlots;
+}
+
+/**
  * 이 팀에게 **아직 유효한** 대항전 예약일 — 컵 편성·리그 연기가 비워 둬야 할 자리.
  *
  * 예약의 근거는 하나다: **그 경기는 나중에 편성되므로 지금 장부에 없다**
  * (`reservedEuroDates`). 녹아웃에서는 그 근거가 두 자리에서 사라진다.
  *
  * ① **이미 뽑힌 단계** — 그 경기는 장부에 있고 48시간 규칙이 직접 잰다.
- * ② **이미 떨어진 팀** — 그 경기는 영영 생기지 않는다.
+ * ② **이미 떨어진 팀** — 그 경기는 영영 생기지 않는다. 리그 페이즈 통과선 밖도
+ *    여기다(`outOfLeaguePhase`) — 다음 단계가 뽑히기를 기다릴 이유가 없다.
  *
  * ⚠️ **걸러내지 않으면 4~5월 주중이 통째로 잠긴다.** 준결승 예약일(4/28·5/5)이 그
  * 대회에 나갔던 **모든** 팀을 막아, 국내 컵은 주중으로 못 가고 리그 연기도 자리를
@@ -382,6 +399,8 @@ export function reservedEuroDatesFor(state: GameState, teamId: string): string[]
   if (!cup) return [];
 
   const dates: string[] = [...euroMatchdayDates(state.season)];
+  if (outOfLeaguePhase(state, cup, teamId)) return dates;
+
   let alive = true;
   for (const stage of knockoutStages(cup)) {
     const drawn = euroStageMatches(state, entry.cupId, stage);

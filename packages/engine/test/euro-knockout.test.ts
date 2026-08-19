@@ -13,6 +13,7 @@ import {
   knockoutDates,
   knockoutStages,
   reservedEuroDates,
+  reservedEuroDatesFor,
   resolveEuroTie,
   buildMatchweekDates,
   diffDays,
@@ -309,6 +310,28 @@ describe("게임 상태 반영", () => {
     const table = computeStandings(state, "ucl");
     const cup = cupCatalogById("ucl")!;
     for (const row of table) expect(row.played).toBeLessThanOrEqual(cup.matchesPerTeam);
+  });
+
+  it("리그 페이즈 통과선 밖의 팀은 그 순간부터 녹아웃 날짜를 예약하지 않는다", () => {
+    const state = createTestGame(42);
+    const cup = cupCatalogById("uel")!;
+    const cutoff = cup.directSlots + cup.playoffSlots; // 통과선 — 그 아래는 탈락
+    const knockoutAll = knockoutStages(cup).flatMap((s) => knockoutDates(state.season, s));
+
+    // 리그 페이즈가 끝나기 전 순위는 잠정이다 — 아무도 지우지 않는다
+    const before = new Map(
+      entrantsOf(state.euroEntrants, "uel").map((id) => [id, reservedEuroDatesFor(state, id)]),
+    );
+
+    fillResults(leaguePhaseOf(state, "uel"));
+    const seeds = computeStandings(state, "uel").map((r) => r.teamId);
+    const dropped = seeds[cutoff]!; // 13위
+    const survivor = seeds[cutoff - 1]!; // 12위 — 플레이오프 마지막 자리
+
+    for (const d of knockoutAll) expect(before.get(dropped), d).toContain(d);
+    expect(reservedEuroDatesFor(state, dropped).filter((d) => knockoutAll.includes(d))).toEqual([]);
+    // 통과한 팀은 아직 아무 단계도 안 뽑혔으니 전부 그대로 비워 둔다
+    for (const d of knockoutAll) expect(reservedEuroDatesFor(state, survivor), d).toContain(d);
   });
 
   it("우리 팀 단계 통과·탈락이 한 번만 보고된다", () => {
