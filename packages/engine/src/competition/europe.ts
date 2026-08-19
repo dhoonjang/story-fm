@@ -222,9 +222,14 @@ export type CupWinners = Record<string, { uel?: string; uecl?: string } | undefi
 
 /**
  * 한 리그의 유럽 진출 배정 — 순위 순으로 UCL → UEL → UECL을 채우고,
- * **국내 컵 우승팀이 순위로 못 들어왔으면** 그 대회의 마지막 자리를 내준다.
- * 밀려난 팀은 한 단계 아래 대회의 마지막 자리로 내려가고, 맨 아래에서 밀리면
- * 유럽에 못 간다 — 실제 규칙의 연쇄 배정과 같다.
+ * **국내 컵 우승팀이 순위로 못 들어왔으면** 그 대회 배정분에서 순위가 가장 낮은
+ * 팀이 자리를 내준다. 밀려난 팀은 한 단계 아래 대회로 내려가 거기서 다시 순위가
+ * 가장 낮은 팀을 밀어내고, 맨 아래에서 밀리면 유럽에 못 간다 — 실제 규칙의
+ * 연쇄 배정과 같다.
+ *
+ * 자리를 내주는 기준은 **목록의 마지막이 아니라 순위**다. 컵 우승팀이 둘이면
+ * 첫 우승팀의 연쇄로 목록의 주인이 이미 바뀌어 있어, 들어온 순서로 고르면 위
+ * 순위 팀이 밀린다.
  *
  * 리그별 티켓 수는 그대로라 대회 정원(UCL 24·UEL 16·UECL 10)과 짝수 제약이
  * 흔들리지 않는다. 자리의 **주인만** 바뀐다.
@@ -243,6 +248,10 @@ function allocateEuropeanSlots(
   }
   if (!winners) return alloc;
 
+  /** 순위 — 리그 순위표에 없는 팀(하부 리그 컵 우승팀)은 맨 아래로 본다 */
+  const rank = new Map(ranked.map((id, i) => [id, i] as const));
+  const rankOf = (teamId: string) => rank.get(teamId) ?? ranked.length;
+
   const order = cupCatalog().map((c) => c.id);
   const qualified = new Set(order.flatMap((id) => alloc[id] ?? []));
   for (const target of ["uel", "uecl"] as const) {
@@ -252,8 +261,9 @@ function allocateEuropeanSlots(
     for (let i = order.indexOf(target); i < order.length && incoming; i++) {
       const list = alloc[order[i]!];
       if (!list || list.length === 0) continue;
-      const displaced = list.pop()!;
-      list.push(incoming);
+      const displaced = list.reduce((low, id) => (rankOf(id) > rankOf(low) ? id : low));
+      list.splice(list.indexOf(displaced), 1, incoming);
+      list.sort((a, b) => rankOf(a) - rankOf(b));
       qualified.add(incoming);
       qualified.delete(displaced);
       incoming = displaced;
