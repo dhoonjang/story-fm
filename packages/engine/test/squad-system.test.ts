@@ -19,7 +19,9 @@ import {
   playerCatalog,
   squadRegistrationOf,
   reservePlayers,
+  applyMonthlyDevelopment,
   developsByCore,
+  recordGrowth,
   setLineup,
   setSquadLevel,
   userPlayers,
@@ -27,6 +29,9 @@ import {
 } from "../src";
 import { createTestGame, playMockMatch } from "./helpers";
 import { assignSquadNumber, ensureSquadNumbers } from "@story-fm/engine";
+
+/** 열두 달 뒤에도 찾을 수 있어야 하는 첫 달의 표식 */
+const FIRST_MONTH_NOTE = "부임 첫 달 훈련";
 
 describe("1·2군 스쿼드", () => {
   it("새 게임의 1군은 **등록 규칙을 지킨 채** 짜인다 (25 + U21)", () => {
@@ -134,6 +139,32 @@ describe("1·2군 스쿼드", () => {
       state.growthLog.some((g) => g.source === "development" && firstIds.has(g.gamePlayerId)),
       "1군이 코어 월간 성장을 받았다",
     ).toBe(false);
+  });
+
+  it("월간 성장 로그는 감독 팀만 남긴다 — 한 시즌을 굴려도 첫 달 훈련 행이 살아 있다", () => {
+    const state = createTestGame();
+    // 부임 첫 달의 훈련 기록 한 줄. 열두 달 뒤에도 이 줄이 로그 안에 있어야 한다
+    const ours = new Set(userPlayers(state).map((p) => p.id));
+    const first = userPlayers(state)[0]!;
+    recordGrowth(state, first.id, null, "training", "passing", 1, FIRST_MONTH_NOTE);
+
+    // 능력치는 매달 굴러도 로그는 우리 팀 몫만 쌓인다 — tick을 태우지 않고
+    // 성장 함수만 열두 번 부른다(시즌 완주는 분 단위고 여기서 볼 것도 아니다)
+    for (let month = 0; month < 12; month++) {
+      const year = 2026 + Math.floor((6 + month) / 12);
+      const mm = String(((6 + month) % 12) + 1).padStart(2, "0");
+      state.date = `${year}-${mm}-01`;
+      applyMonthlyDevelopment(state);
+    }
+
+    const strangers = state.growthLog.filter(
+      (g) => g.source === "development" && !ours.has(g.gamePlayerId),
+    );
+    expect(strangers, "타 팀 성장이 로그에 남았다").toHaveLength(0);
+    expect(
+      state.growthLog.some((g) => g.note === FIRST_MONTH_NOTE),
+      "첫 달 훈련 행이 월간 성장에 밀려났다",
+    ).toBe(true);
   });
 });
 
