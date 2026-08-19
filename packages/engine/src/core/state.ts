@@ -3,6 +3,7 @@ import type {
   AxisValues,
   Booking,
   CharacterInjection,
+  CharacterMemory,
   Contract,
   DeferredScout,
   FinanceReport,
@@ -10,6 +11,7 @@ import type {
   GamePlayer,
   GameTeam,
   GrowthEntry,
+  HistoryDigest,
   Injury,
   LeagueFinalTable,
   Manager,
@@ -679,6 +681,21 @@ export interface GameState {
   mirrorProficiencyStripped?: boolean;
   narrative: NarrativeNote[];
   chat: ChatTurn[];
+  /**
+   * 이력 압축의 자국 — 없으면 아직 한 번도 접지 않았다
+   * (→ [docs/llm/agents.md](../../../../docs/llm/agents.md) §5-1).
+   *
+   * 접는 것은 프롬프트 조립뿐이라 `chat`은 그대로 남는다. 판정은
+   * `core/history-window.ts`의 순수 함수가 한다. 옛 세이브엔 없다
+   * (optional — SAVE_VERSION 유지).
+   */
+  historyDigest?: HistoryDigest;
+  /**
+   * 인물이 소유하는 기억 — 압축이 남긴다
+   * (→ [docs/data/people.md](../../../../docs/data/people.md) §9-1).
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  characterMemories?: CharacterMemory[];
 }
 
 // ── 팀·선수 조회 ────────────────────────────────────────
