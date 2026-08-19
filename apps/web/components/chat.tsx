@@ -5,7 +5,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import type { CardMark, ChatTurn, GoalMark, ToolCallRecord } from "@story-fm/engine";
 import { cutStamps } from "../lib/scene-stamp";
 import { hasRailHint } from "../lib/panel-hints";
-import { weaveTurn } from "../lib/turn-pieces";
+import { splitStaging, weaveTurn } from "../lib/turn-pieces";
 import { BROADCAST_SPEAKER, formatMoney, normalizeSpeaker } from "@story-fm/domain";
 import type { ScoutReportCard } from "@story-fm/domain";
 import { MarketCardView } from "@/components/market-card";
@@ -42,19 +42,13 @@ const KIND_ICON: Record<SpeakerKind, IconComponent> = {
 };
 
 /**
- * *연출* 구간을 <em>으로 렌더.
- * 스트리밍 중 아직 닫히지 않은 트레일링 `*...`도 연출로 취급해
- * 별표가 그대로 노출되는 깜빡임을 막는다.
+ * *연출* 구간을 <em>으로 렌더 — 나누는 규칙은 `splitStaging`이 갖는다(연속 별표·
+ * 짝이 안 맞는 별표·스트리밍 중 열린 채 끝난 `*…`).
  */
 function renderStaging(text: string) {
-  const parts = text.split(/(\*[^*]+\*?)/g);
-  return parts.map((part, i) => {
-    if (part.startsWith("*") && part.length > 1) {
-      const closed = part.endsWith("*") && part.length > 2;
-      return <em key={i}>{closed ? part.slice(1, -1) : part.slice(1)}</em>;
-    }
-    return <Fragment key={i}>{part}</Fragment>;
-  });
+  return splitStaging(text).map((part, i) =>
+    part.staging ? <em key={i}>{part.text}</em> : <Fragment key={i}>{part.text}</Fragment>,
+  );
 }
 
 /**
@@ -529,11 +523,12 @@ export function ChatTurnView({
   const text = useMemo(() => humanize(turn.text, playerNames), [turn.text, playerNames]);
   const press = useLongPress(onLongPress);
 
-  // 감독의 말은 오른쪽 말풍선이라 그 자체로 갈린다 — 구간 표시는 모델 턴이 맡는다
+  // 감독의 말은 오른쪽 말풍선이라 그 자체로 갈린다 — 구간 표시는 모델 턴이 맡는다.
+  // 다만 문법은 같다: 감독이 쓴 `*…*`도 연출로 서고, 새어 든 id도 이름으로 편다
   if (turn.role === "user") {
     return (
       <div className="turn-user" {...press}>
-        {turn.text}
+        {renderStaging(text)}
       </div>
     );
   }

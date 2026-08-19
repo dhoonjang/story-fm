@@ -2530,6 +2530,12 @@ textarea {
   line-height: 1.65;
   white-space: pre-wrap;
 }
+/* 감독의 연출도 대사와 층위가 갈려야 한다 — 다만 말풍선 바탕이 짙어 `--muted`로는
+   글자가 묻는다. 같은 글자색을 낮춰 대비를 지킨다 */
+.turn-user em {
+  font-style: italic;
+  opacity: 0.72;
+}
 .turn-model {
   /* 읽는 폭은 `.chat-pane`이 정한다 — 여기서 또 좁히면 입력창과 끝이 어긋난다 */
   align-self: stretch;
