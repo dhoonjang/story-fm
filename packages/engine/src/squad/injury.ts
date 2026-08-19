@@ -1,12 +1,11 @@
 import type { GamePlayer, InjurySeverity } from "@story-fm/domain";
-import { naturalPositionOf } from "@story-fm/domain";
 import { INJURY_PER_MATCH } from "@story-fm/sim";
 import { addDays, diffDays } from "../competition/calendar";
 import { playerCatalog } from "../world/catalog";
 import { INJURY_HISTORY } from "../data/injury-history";
 import { recordMedicalCost } from "../club/finance";
 import { pick, randInt } from "../core/rng";
-import { openInjury, playerById, userPlayers, type GameState } from "../core/state";
+import { openInjury, playerById, type GameState } from "../core/state";
 
 /**
  * 부상 — 발생·복귀·성향.
@@ -323,15 +322,4 @@ export function seedInjuryHistory(state: GameState): void {
     }
     player.state.injuryProneness = pronenessFromDaysOut(unionDays(spans));
   }
-}
-
-/** 현재 부상 요약 (유저 팀) — 브리핑·뷰용 */
-export function injuryReport(state: GameState): string[] {
-  return userPlayers(state)
-    .map((p) => {
-      const inj = openInjury(state, p.id);
-      if (!inj) return null;
-      return `${p.name} (${naturalPositionOf(p).position}) — ${inj.bodyPart} ${inj.severity}, 복귀 예상 ${inj.expectedReturn}`;
-    })
-    .filter((x): x is string => x !== null);
 }

@@ -15,7 +15,7 @@ import {
   seasonYear,
 } from "./calendar";
 import { toFreeAgency } from "../market/departures";
-import { teamCatalog, isClubTeam, leagueOfTeam } from "../data/team-catalog";
+import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import { cupCatalog, competitionShortName, isCup, isEuroCup } from "../data/cup-catalog";
 import { domesticCupCatalog } from "../data/domestic-cup-catalog";
 import {
@@ -780,5 +780,4 @@ export function endSeason(state: GameState): string[] {
   return digest;
 }
 
-export { teamCatalog };
 export type { GamePlayer };

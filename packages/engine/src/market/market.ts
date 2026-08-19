@@ -305,11 +305,6 @@ export interface DealTerms {
   pitched?: readonly PitchClaimKind[];
 }
 
-/** 매각 상대 — 우리가 부른 값을 낼 구단 (오퍼를 넣은 쪽) */
-export interface SellContext {
-  buyerTeamId: string;
-}
-
 /**
  * **임대 중인 선수는 계약이 소유 구단의 것이다** — 그 계약을 움직이려는 모든 문이
  * 여기를 지난다 (transfer.md §2).
@@ -1164,13 +1159,6 @@ export function oddsText(odds: Pick<DealOdds, "probability" | "fuzzy">): string 
   return odds.fuzzy ? oddsLabel(odds.probability) : `${odds.probability}%`;
 }
 
-/** 협상 상대 — buy는 선수의 현 소속, sell은 오퍼를 넣은 구단 */
-export function counterpartOf(state: GameState, playerId: string): string | null {
-  const player = playerById(state, playerId);
-  if (!player || player.teamId === state.userTeamId) return null;
-  return player.teamId;
-}
-
 export { teamName, teamCatalogById };
 
 // ── 이적 시장 전용 리그 (사우디·MLS) ─────────────────────
@@ -1227,8 +1215,3 @@ export function marketBiasOf(state: GameState, teamId: string): MarketBias {
  * 깎인다. "돈을 포기하고 돌아온다"는 결정이 그래서 이야기가 된다.
  */
 export const RETURN_RESISTANCE = 0.65;
-
-export function isFromMarketLeague(state: GameState, playerId: string): boolean {
-  const player = playerById(state, playerId);
-  return player !== null && isMarketOnlyLeague(leagueOfTeam(player.teamId));
-}

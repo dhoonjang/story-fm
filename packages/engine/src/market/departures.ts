@@ -303,15 +303,6 @@ export function loanedOut(state: GameState): GamePlayer[] {
   return state.players.filter((p) => p.loan?.fromTeamId === state.userTeamId);
 }
 
-/** 골키퍼가 둘 아래로 내려가는지 등은 squadShortfall이 본다 — 여기선 재확인만 */
-export function canLeave(state: GameState, player: GamePlayer): string | null {
-  if (groupOf(player) === "GK") {
-    const keepers = playersOf(state, state.userTeamId).filter((p) => groupOf(p) === "GK");
-    if (keepers.length <= 2) return "골키퍼가 둘뿐입니다";
-  }
-  return null;
-}
-
 // ── 무소속 시장 — 남의 팀이 데려간다 ────────────────────
 
 /** 무소속 선수 한 명이 하루에 팀을 찾을 기본 확률 */

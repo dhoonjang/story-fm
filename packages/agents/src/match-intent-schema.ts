@@ -5,14 +5,9 @@ import { TALK_OUTCOMES, TEAM_TALK_OUTCOMES } from "@story-fm/engine";
 /**
  * 경기 중 감독의 말 → **구조화된 의도 하나** (docs/llm/agents.md §3).
  *
- * 예전에는 캐스터가 도구 아홉을 쥐고 무엇을 부를지 고르면서 구간까지 굴리고 중계도
- * 썼다. 세 가지가 거기서 어긋났다: 중계가 자기가 방금 바꾼 판을 못 보고 썼고("지시
- * 먼저, 진행 나중"이 프롬프트 한 줄로만 지켜졌고), 선수와 한 마디 하는 턴도 도구
- * 아홉의 정의와 패킷 전체를 짊어졌다.
- *
- * 이제 해석은 **이 객체 하나**를 내고 끝난다. 도구가 없으므로 고정층이 시스템
- * 프롬프트뿐이고, 무엇보다 **순서가 구조다** — 한 번에 다 보므로 지시를 먼저 걸고
- * 나중에 진행하라고 시킬 필요가 없다.
+ * 해석은 **이 객체 하나**를 내고 끝난다. 도구가 없으므로 고정층은 시스템 프롬프트
+ * 뿐이고, **순서가 구조다** — 한 번에 다 보므로 지시를 먼저 걸고 나중에 진행하라고
+ * 시킬 필요가 없다.
  *
  * ## 이 스키마가 지키는 경계
  *
@@ -130,10 +125,6 @@ export const MatchIntentSchema = z.object({
 });
 
 export type MatchIntent = z.infer<typeof MatchIntentSchema>;
-export type PlayerTalkIntent = z.infer<typeof PlayerTalkSchema>;
-export type TeamTalkIntent = z.infer<typeof TeamTalkSchema>;
-export type PlayerTacticIntent = z.infer<typeof PlayerTacticSchema>;
-export type MatchPlanIntent = z.infer<typeof MatchPlanSchema>;
 
 /**
  * 판을 건드리는 의도가 하나라도 있는가 — 없으면 **대화 턴**이다.

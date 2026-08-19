@@ -9,7 +9,7 @@ import type { PlayerState } from "@story-fm/domain";
  * 부상은 여기서 다루지 않는다 — 부상자는 애초에 라인업에 배치되지 않는다 (v6).
  */
 export function stateModifier(state: PlayerState): number {
-  // 폼은 −1~1 — 양 끝에서 ±9% (예전 −3~3 × 3%와 같은 총량)
+  // 폼은 −1~1 — 양 끝에서 ±9%
   const formMod = state.form * 0.09;
   const conditionMod = (state.condition - 75) * 0.0025;
   return Math.max(0.4, 1 + formMod + conditionMod);

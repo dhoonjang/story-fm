@@ -787,9 +787,8 @@ export function buildGmTools(
  * **중계 문장을 되읽지 않고 장부의 사건에서 만든다** — 모델이 쓴 글에서 스코어를
  * 되짚으면 중계가 틀린 순간 화면도 함께 틀린다.
  *
- * 예전에는 `advance_match` 도구의 핸들러 안에 있었다. 도구가 사라져도(경기 중 도구
- * 표면은 0이다 — agents.md §3) 표식은 화면의 것이라 남아야 하므로, 코어가 구간을
- * 굴린 뒤 부르는 순수 함수로 서 있다.
+ * 경기 중 도구 표면은 0이지만(agents.md §3) 표식은 화면의 것이라, 코어가 구간을
+ * 굴린 뒤 부르는 순수 함수로 선다.
  */
 export function collectMatchMarks(
   state: GameState,

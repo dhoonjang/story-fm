@@ -19,7 +19,7 @@ import { retryOnce, requireToolCall, anchorStands } from "./retry";
 
 /**
  * 경기 후 평점 — 코어가 장부 사실로 앵커를 박고, LLM이 사건 목록을 읽어
- * 앵커 ±RATING_BAND 안에서 다시 매긴다 (협상 판정과 같은 구조 — ADR 0002).
+ * 앵커 ±RATING_BAND 안에서 다시 매긴다 (협상 판정과 같은 구조 — agents.md §4).
  * 실패하면 앵커가 그대로 남으므로 경기는 언제나 완결된다.
  */
 export const MATCH_RATER_SYSTEM = `당신은 방금 끝난 축구 경기를 채점하는 분석가다.

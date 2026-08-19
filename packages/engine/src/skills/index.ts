@@ -68,7 +68,6 @@ import {
 } from "../squad/scouting";
 import { creditSettling, settlingAnchor, settlingOf } from "../squad/settling";
 import {
-  assignmentsOf,
   groupOf,
   isInjured,
   isSuspended,
@@ -1461,14 +1460,8 @@ function shiftFactor(player: Player | null): number {
 }
 
 /**
- * ⚠️ 적합도를 **점수로 환산해 더하던 계수는 없앴다** (`DIRECTION_WEIGHT`·
- * `TRANSFER_LOSS`). 이제 적합도는 `personalDistance`에서 **거리를 늘리거나 줄이는
- * 비율**로 들어간다 — 더하기로 얹으면 도착 수준이 기억과 어긋나 왕복이 샌다.
- */
-
-/**
  * 경기 중 전술 변경이 치르는 적응도 대가의 비율 — 훈련장에서 바꿀 때의 몇 배인가.
- * ⚠️ 밸런스 값 — 아래 시뮬레이션으로 잡았다.
+ * ⚠️ 밸런스 값.
  */
 const IN_MATCH_FAMILIARITY_LOSS = 0.25;
 
@@ -2389,20 +2382,6 @@ export function scoutPlayer(state: GameState, ref: string): MarketSkillResult {
       `${player.name}(${teamName(player.teamId)}) 스카우트 파견 — 보고 예정 ${dueOn}` +
       (done > 0 ? ` (${done + 1}번째 파견)` : ""),
   };
-}
-
-export function describeTactics(state: GameState): string {
-  const t = userTactics(state);
-  const starters = assignmentsOf(state, state.userTeamId, "starting");
-  const avgFam =
-    starters.length > 0
-      ? Math.round(starters.reduce((s, a) => s + a.familiarity, 0) / starters.length)
-      : 60;
-  const lineup = starters.map((a) => `${a.position} ${playerName(state, a.playerId)}`).join(", ");
-  return (
-    `${t.spec.formation} · 멘탈리티 ${t.spec.mentality} · 압박 ${t.spec.pressing} · 템포 ${t.spec.tempo} · ` +
-    `패스 ${t.spec.passStyle} · 평균 전술 적응도 ${avgFam}\n선발: ${lineup}`
-  );
 }
 
 export { MATCHDAY_BENCH, groupOf, tacticsOf };
