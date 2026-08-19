@@ -77,7 +77,7 @@
 | 카탈로그               | 무엇                                                      | 어디                                                         |
 | ---------------------- | --------------------------------------------------------- | ------------------------------------------------------------ |
 | `PLAYER_CATALOG`       | 선수 초기치 — 15축·잠재력·포지션·주발·체격·주급           | `world/catalog.ts` (`playerCatalog()`)                       |
-| `TEAM_CATALOG`         | 구단 — 이름·약칭·리그·**초기** 체급(1~4)·기본 포메이션    | `data/team-catalog.ts`                                       |
+| `TEAM_CATALOG`         | 구단 — 이름·약칭·리그·**초기** 체급(1\~4)·기본 포메이션   | `data/team-catalog.ts`                                       |
 | `LEAGUE_CATALOG`       | 리그 — 나라·`kind`·계수·실선수 여부·중계권 배율·티켓 단가 | `data/league-catalog.ts`                                     |
 | `CUP_CATALOG`          | 유럽 대항전 3종 — 규모·티켓·통과 방식·상금                | `data/cup-catalog.ts`                                        |
 | `DOMESTIC_CUP_CATALOG` | 국내 컵 6종 — 진입 라운드·추첨 방식·홈 배정·날짜          | `data/domestic-cup-catalog.ts`                               |
@@ -143,10 +143,10 @@
 | `teams` `GameTeam`               | AI 전술 역량치 · 현 감독 이름/부임일 + 카탈로그에서 복사한 정체성(이름·약칭·소속·체급·구장·브랜드) | `domain/team.ts`    |
 | `players` `GamePlayer`           | 15축·상태·포지션 목록·주장·임대·성장 캐리                                                          | `domain/player.ts`  |
 | ↳ `PlayerAttributes`             | 15축 + `overall`(파생 캐시) + `potential`                                                          | `domain/player.ts`  |
-| ↳ `PlayerState`                  | 폼(−1~~1) · 체력(0~~100) · 부상 성향 · 심경 한 줄                                                  | `domain/player.ts`  |
+| ↳ `PlayerState`                  | 폼(−1\~1) · 체력(0\~100) · 부상 성향 · 심경 한 줄                                                  | `domain/player.ts`  |
 | ↳ `PlayerPosition`               | 가능 포지션 + 적응도 + `isNatural`(하나 이상)                                                      | `domain/player.ts`  |
 | `tactics` `TeamTactics`          | 팀당 1개 — `spec` + `assignments` + `shelved` + 팀 기억                                            | `domain/tactics.ts` |
-| ↳ `TacticsSpec`                  | 모양 이름(파생 — 프리셋 밖도 담는다) + 전술 6축(각 1~5)                                            | `domain/tactics.ts` |
+| ↳ `TacticsSpec`                  | 모양 이름(파생 — 프리셋 밖도 담는다) + 전술 6축(각 1\~5)                                           | `domain/tactics.ts` |
 | ↳ `TacticAssignment`             | **라인업의 원본** — 자리·좌표·역할·적응도·개인 지시·개인 기억                                      | `domain/tactics.ts` |
 | ↳ `PlayerDirective`              | 결과에 닿는 개인 지시 5종 (`instruction`은 사람이 읽는 말)                                         | `domain/tactics.ts` |
 | ↳ `DrilledTactics`               | 전술 지문 → 그때 도달한 적응도 (선수별)                                                            | `domain/tactics.ts` |
@@ -226,7 +226,7 @@ row, 지난 일 = 그대로 이력.**
 | `seasonRecords` `SeasonRecord`                     | 시즌 성적 — 감독에 소속(팀을 옮겨도 남는다)                                      | `domain/records.ts` |
 | `trophies` `Trophy` · `achievements` `Achievement` | 우승 · 업적                                                                      | `domain/records.ts` |
 | `personas` `Persona`                               | 인물 — 수석코치·구단주·기자. 성격·동기·말투+예시 대사                            | `domain/persona.ts` |
-| `narrative` `NarrativeNote`                        | GM 기억 — 날짜·문장·중요도(1~5)                                                  | `domain/records.ts` |
+| `narrative` `NarrativeNote`                        | GM 기억 — 날짜·문장·중요도(1\~5)                                                 | `domain/records.ts` |
 | `chat` `ChatTurn`                                  | 대화 이력 — `user`/`model`/`operator`                                            | `core/state.ts`     |
 | ↳ `ToolCallRecord`                                 | 스킬 호출 — 요약·항목(`brief`)·카드 payload·톤·`silent`·장면 안 줄 위치          | `core/state.ts`     |
 | ↳ `SkillBrief`                                     | 화면이 세우는 요약 — 머리줄 + 항목. 없는 기록은 요약 문자열로 폴백               | `core/state.ts`     |
@@ -369,8 +369,8 @@ erDiagram
 | 빈 배열 채우기             | `ARRAY_FIELDS`(`core/migrations.ts`)에 든 배열 **전부** — 순수한 목록·이력이라 "비어 있음"이 곧 유효한 초기 상태인 테이블들이다. `GameState`에 배열을 더하면 그 목록에도 넣는다 (§8)                                                                                   |
 | 감독 능력치 4축 → 5축      | `media → analysis`, `training`은 50(XP는 0)으로 채우고 `media`를 지운다                                                                                                                                                                                                |
 | `squadLevel` 분류          | 미분류가 있을 때만 — 전술 배치 선수 + OVR 상위로 25명을 1군에                                                                                                                                                                                                          |
-| 패스 스타일                | 세 갈래 문자열 → 1~5 눈금. **전술 지문**(`drilled.signature`)까지 함께 옮긴다                                                                                                                                                                                          |
-| 폼 눈금                    | `formUnitScale`이 없으면 −3~~3을 3으로 나눠 −1~~1로. 마커를 세워 한 번만                                                                                                                                                                                               |
+| 패스 스타일                | 세 갈래 문자열 → 1\~5 눈금. **전술 지문**(`drilled.signature`)까지 함께 옮긴다                                                                                                                                                                                         |
+| 폼 눈금                    | `formUnitScale`이 없으면 −3\~3을 3으로 나눠 −1\~1로. 마커를 세워 한 번만                                                                                                                                                                                               |
 | 사기·피로 → 체력           | `condition`이 없을 때만 — 화면이 쓰던 공식 그대로 합친다                                                                                                                                                                                                               |
 | 경기 중 통계 축            | 중단된 경기(`pendingMatch`)의 선수별 기록에 `scoringExpectation`이 없으면 0으로 — 합산이 `NaN`이 되는 자리다 (`match-flow.ts`)                                                                                                                                         |
 | 미러 자리 주발 보정        | `mirrorProficiencyStripped`가 없을 때만 — 좌우 미러 묶음(CB↔LCB·RCB…)에 적혀 있던 주발 보정을 주 포지션 값으로 벗기고 마커를 세운다. 다시 돌면 경기·훈련이 그 자리에 쌓은 적응도를 같이 민다 (→ [player](player.md) §8)                                                |
