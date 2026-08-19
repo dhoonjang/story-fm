@@ -1275,21 +1275,30 @@ export function finalizeMatch(state: GameState): MatchDigest {
       );
     }
 
-    // 카드 → BOOKING, 누적/퇴장 → SUSPENSION. 친선의 카드는 어느 대회에도 쌓이지 않는다
+    /**
+     * 카드 → BOOKING, 누적/퇴장 → SUSPENSION. 친선의 카드는 어느 대회에도 쌓이지 않는다.
+     *
+     * **정지 한 건에 브리핑 한 줄** — 줄을 정지 id에 매달아 두었다가 마지막에 넘긴다.
+     * 두 번째 경고는 앞선 경고가 걸어 둔 누적 정지를 물리므로(discipline.ts), 카드마다
+     * 바로 digest에 밀어 넣으면 한 사건에 두 줄이 남아 감독은 두 경기 결장으로 읽는다.
+     */
+    const notes = new Map<string, string>();
     for (const e of friendly ? [] : events) {
       if (e.type !== "yellow_card" && e.type !== "red_card") continue;
       const target = e.actors[0];
       if (!target || !playerById(state, target)) continue;
       // 카드 → BOOKING·SUSPENSION은 **간이 시뮬과 같은 문**을 지난다 (discipline.ts)
-      const note = recordCard(state, {
+      const ruling = recordCard(state, {
         playerId: target,
         matchId: match.id,
         card: e.type === "yellow_card" ? "yellow" : "red",
         minute: e.minute,
       });
-      // 우리 선수의 정지는 감독이 바로 알아야 한다 (남의 팀 것은 조회로 안다)
-      if (note && ours) digest.push(note);
+      if (ruling.revoked) notes.delete(ruling.revoked);
+      if (ruling.issued && ruling.note) notes.set(ruling.issued, ruling.note);
     }
+    // 우리 선수의 정지는 감독이 바로 알아야 한다 (남의 팀 것은 조회로 안다)
+    if (ours) digest.push(...notes.values());
   };
   settleSide("home");
   settleSide("away");
