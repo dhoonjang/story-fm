@@ -230,6 +230,10 @@ export class OpenAiGameLLM implements GameLLM {
         parameters: tool.inputSchema as Record<string, unknown>,
       },
     }));
+    const forcedTool =
+      typeof req.toolChoice === "object"
+        ? ({ type: "function", function: { name: req.toolChoice.name } } as const)
+        : undefined;
 
     const usage: TurnUsage = {
       inputTokens: 0,
@@ -256,6 +260,9 @@ export class OpenAiGameLLM implements GameLLM {
         reasoning_effort: "none" as const,
         messages,
         ...(toolDefs.length > 0 ? { tools: toolDefs } : {}),
+        // 강제는 첫 요청에만 — 도구 결과를 돌려준 뒤에도 걸어 두면 모델이 턴을
+        // 끝낼 수 없어 왕복 상한까지 같은 도구를 다시 부른다 (TurnRequest.toolChoice)
+        ...(iter === 0 && forcedTool ? { tool_choice: forcedTool } : {}),
       };
 
       let turn: Assistant;

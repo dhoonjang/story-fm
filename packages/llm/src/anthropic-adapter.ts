@@ -178,6 +178,8 @@ export class AnthropicGameLLM implements GameLLM {
       description: t.description,
       input_schema: t.inputSchema as Anthropic.Tool.InputSchema,
     }));
+    const forcedTool: Anthropic.ToolChoiceTool | undefined =
+      typeof req.toolChoice === "object" ? { type: "tool", name: req.toolChoice.name } : undefined;
 
     // 시스템 블록 — 앞이 더 안정적. 이력 마커 몫으로 1개를 남긴다
     const systemTexts = (Array.isArray(req.system) ? req.system : [req.system]).filter(
@@ -223,6 +225,9 @@ export class AnthropicGameLLM implements GameLLM {
         thinking: { type: "disabled" },
         system,
         ...(toolDefs.length > 0 ? { tools: toolDefs } : {}),
+        // 강제는 첫 요청에만 — 도구 결과를 돌려준 뒤에도 걸어 두면 모델이 턴을
+        // 끝낼 수 없어 왕복 상한까지 같은 도구를 다시 부른다 (TurnRequest.toolChoice)
+        ...(iter === 0 && forcedTool ? { tool_choice: forcedTool } : {}),
         messages: withBreakpoint(messages, markUpto),
       };
 
