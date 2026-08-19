@@ -1,10 +1,11 @@
 import {
   CAPTAIN_ROLE_LABEL,
   HEAD_COACH_ROLE_LABEL,
-  PERSONA_ROLE_LABEL,
   normalizeSpeaker,
+  personaRoleLabel,
   type Negotiation,
   type Persona,
+  type PersonaRole,
 } from "@story-fm/domain";
 import { realCoachNameOf } from "../data/coach-seeds";
 import { realOwnerNameOf } from "../data/owner-seeds";
@@ -344,7 +345,7 @@ interface SpeakerSource {
  * 선수다: 대화마다 `(선수)`가 따라붙으면 시끄럽지만, 유니폼 아이콘 하나는
  * "지금 말하는 사람이 선수구나"를 조용히 알린다.
  */
-export type SpeakerKind = "head_coach" | "owner" | "reporter" | "captain" | "player";
+export type SpeakerKind = PersonaRole | "captain";
 export interface SpeakerRole {
   kind: SpeakerKind;
   /** 이름 옆에 글자로 붙는 직책 — 없으면 아이콘만 선다 */
@@ -397,7 +398,10 @@ export function speakerRoles(state: SpeakerSource): Record<string, SpeakerRole> 
       label:
         persona.role === "reporter" && persona.outlet
           ? persona.outlet
-          : PERSONA_ROLE_LABEL[persona.role],
+          : // 선수는 유니폼 아이콘이 이미 말한다 — 대화마다 `(선수)`가 따라붙으면 시끄럽다
+            persona.role === "player"
+            ? undefined
+            : personaRoleLabel(persona.role),
     });
   }
 
