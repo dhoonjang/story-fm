@@ -95,11 +95,17 @@ function writeMonolith(id: string, body: Record<string, unknown>): void {
   writeFileSync(path.join(dataDir(), `${id}.json`), JSON.stringify(body), "utf8");
 }
 
-/** 이 게임의 조각 파일 이름들 */
+/** 이 게임의 조각 파일 이름들 — 한 조각이 두 벌(`…json`·`…json.bak`)이라 둘 다 센다 */
 function shardFiles(id: string): string[] {
   return readdirSync(dataDir())
-    .filter((f) => f.startsWith(`${id}.shard-`) && f.endsWith(".json"))
+    .filter((f) => f.startsWith(`${id}.shard-`) && /\.json(\.bak)?$/.test(f))
     .sort();
+}
+
+/** 한 조각의 두 벌이 놓이는 자리 */
+function shardPaths(id: string, hash: string): [string, string] {
+  const file = path.join(dataDir(), `${id}.shard-${hash}.json`);
+  return [file, `${file}.bak`];
 }
 
 /** 본체가 지금 가리키는 조각 해시 */
@@ -485,7 +491,7 @@ describe("조각 저장 — 바뀐 것만 쓴다", () => {
     expect(loaded.tactics[0]!.spec.mentality).toBe(spec.mentality);
   });
 
-  it("본체가 가리키는 조각을 잃으면 반쪽을 읽지 않고 .bak으로 폴백한다", () => {
+  it("조각이 두 벌 다 죽으면 반쪽을 읽지 않고 .bak으로 폴백한다", () => {
     const state = createTestGame();
     state.date = "2026-08-01";
     saveGame(state);
@@ -496,7 +502,7 @@ describe("조각 저장 — 바뀐 것만 쓴다", () => {
     const second = shardMap(state.id).players!;
     expect(second).not.toBe(first);
 
-    rmSync(path.join(dataDir(), `${state.id}.shard-${second}.json`));
+    for (const file of shardPaths(state.id, second)) rmSync(file);
     const loaded = loadGame(state.id);
     expect(loaded, "조각을 잃자 세이브가 통째로 날아갔다").not.toBeNull();
     // 직전 저장이 온전히 남는다 — 본체도 그 조각도 함께 살아 있다
@@ -523,8 +529,8 @@ describe("조각 저장 — 바뀐 것만 쓴다", () => {
       state.players[0]!.state.condition = 40 + i;
       saveGame(state);
     }
-    // 살아남는 건 본체와 `.bak`이 가리키는 것뿐 — 선수 2세대 + 그대로인 계약 1개
-    expect(shardFiles(state.id)).toHaveLength(3);
+    // 살아남는 건 본체와 `.bak`이 가리키는 것뿐 — 선수 2세대 + 그대로인 계약 1개, 각 두 벌
+    expect(shardFiles(state.id)).toHaveLength(6);
   });
 
   it(".bak은 복사가 아니라 밀어낸 것이다 — 옮길 바이트가 없다", () => {
@@ -534,6 +540,48 @@ describe("조각 저장 — 바뀐 것만 쓴다", () => {
     state.date = "2026-12-01";
     saveGame(state);
     expect(statSync(path.join(dataDir(), `${state.id}.json.bak`)).ino).toBe(before);
+  });
+
+  it("지워진 조각을 다음 저장이 다시 놓는다", () => {
+    const state = createTestGame();
+    saveGame(state);
+    const [file, mirror] = shardPaths(state.id, shardMap(state.id).players!);
+    rmSync(file);
+    rmSync(mirror);
+
+    saveGame(state);
+    expect(existsSync(file), "본 벌이 돌아오지 않았다").toBe(true);
+    expect(existsSync(mirror), "사본이 돌아오지 않았다").toBe(true);
+    expect(loadGame(state.id)!.players).toHaveLength(state.players.length);
+  });
+
+  it("잘린 조각을 다음 저장이 크기로 알아보고 다시 쓴다", () => {
+    const state = createTestGame();
+    saveGame(state);
+    const [file] = shardPaths(state.id, shardMap(state.id).players!);
+    const intact = readFileSync(file, "utf8");
+    writeFileSync(file, intact.slice(0, 100), "utf8"); // 쓰다 만 조각
+    expect(loadGame(state.id), "잘린 조각을 그대로 읽었다").not.toBeNull();
+
+    saveGame(state);
+    expect(readFileSync(file, "utf8")).toBe(intact);
+  });
+
+  it("크기까지 같게 상한 벌은 사본이 읽어 내고, 상한 자리는 되돌려 놓는다", () => {
+    const state = createTestGame();
+    saveGame(state);
+    const [file] = shardPaths(state.id, shardMap(state.id).players!);
+    const intact = readFileSync(file, "utf8");
+    // 줄 둘을 맞바꾼다 — 바이트 수도 JSON 형태도 그대로라 크기 대조로는 잡히지 않는다
+    const rows = JSON.parse(intact) as unknown[];
+    [rows[0], rows[1]] = [rows[1], rows[0]];
+    const bent = JSON.stringify(rows);
+    expect(Buffer.byteLength(bent)).toBe(Buffer.byteLength(intact));
+    writeFileSync(file, bent, "utf8");
+
+    const loaded = loadGame(state.id)!;
+    expect(loaded.players[0]!.id, "상한 벌을 그대로 읽었다").toBe(state.players[0]!.id);
+    expect(readFileSync(file, "utf8"), "상한 벌이 그대로 남았다").toBe(intact);
   });
 
   it("목록은 조각을 게임으로 세지 않고, 삭제는 조각까지 거둔다", () => {
