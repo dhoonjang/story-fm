@@ -386,16 +386,22 @@ export function buildGmStateNote(
 
 /**
  * 경기 장부 + 현재 판세 — 매 턴 갱신되는 휘발성 블록. 패킷도 여기(캐시 밖)에
- * 담되 JSON을 통째로 붓지 않고 캐스터가 실제로 읽는 것만 요약한다.
+ * 담되 JSON을 통째로 붓지 않고 읽는 쪽이 실제로 쓰는 것만 요약한다.
  *
- * `withPacket: false`는 **킥오프 턴**이다 — 아직 아무 일도 일어나지 않았는데
- * 판세를 쥐여 주면 첫 마디부터 우열을 읊는다. 그때 필요한 것은 대진과 선발뿐이다.
+ * 읽는 쪽이 둘이라 `withPacket`이 세 갈래다.
+ * - `true` — 중계가 판을 읽는 턴. 판세와 공략 표적을 함께 싣는다.
+ * - `false` — 킥오프·대화만 건 턴. 아직 아무 일도 일어나지 않았는데 판세를 쥐여 주면
+ *   첫 마디부터 우열을 읊는다. 그때 필요한 것은 대진과 선발뿐이다.
+ * - 생략 — 지시 해석기. 감독의 말을 갈래로 나누는 데 기대 득점·상성·소화율은 쓰이지
+ *   않는다. 명단·6축·공략 표적만 읽는다 (`exploits`는 그 표적의 id로만 채워진다).
  */
 export function buildLedgerNote(state: GameState, options: { withPacket?: boolean } = {}): string {
   const pending = state.pendingMatch;
   const ledger = pending?.ledger;
   if (!ledger || !pending) return "";
-  const packet = options.withPacket === false ? null : pending.packet;
+  const packet = options.withPacket === true ? pending.packet : null;
+  /** 표적 목록은 판세와 갈린다 — 해석기는 수치 없이 이 목록만 읽는다 */
+  const targets = options.withPacket === false ? [] : (pending.packet?.targets ?? []);
   // 온필드 명단에 개인 전력(패킷의 effective)을 붙인다 — 존 평균만으론 "누가 안 도는가"가 안 보인다
   const effective = new Map(
     [...(packet?.home.lineup ?? []), ...(packet?.away.lineup ?? [])].map((p) => [p.id, p] as const),
@@ -433,26 +439,22 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
             ? ` — ${packet.away.tactical.notes.join(" / ")}`
             : ""
         }`,
-        // 공략 후보 — exploit_point는 이 목록의 id만 받는다 (없는 지점은 코어가 반려)
-        ...(packet.targets.length > 0
-          ? [
-              `[공략 가능한 지점 — exploit_point로 겨냥한다, 동시에 ${MAX_EXPLOITS}곳까지]`,
-              ...packet.targets.map((t) => `  ${t.id} — ${t.label}`),
-              pending.exploits && pending.exploits.length > 0
-                ? `지금 노리는 중: ${pending.exploits.join(", ")}`
-                : `지금 노리는 곳 없음`,
-            ]
-          : []),
       ]
     : [];
+  // 공략 후보 — 노릴 수 있는 지점은 이 목록이 전부다 (없는 지점은 코어가 반려)
+  const targetLines =
+    targets.length > 0
+      ? [
+          `[공략 가능한 지점 — 동시에 ${MAX_EXPLOITS}곳까지]`,
+          ...targets.map((t) => `  ${t.id} — ${t.label}`),
+          pending.exploits && pending.exploits.length > 0
+            ? `지금 노리는 중: ${pending.exploits.join(", ")}`
+            : `지금 노리는 곳 없음`,
+        ]
+      : [];
   /**
-   * **지금 내가 무엇을 걸어 뒀는가** — 되비추지 않으면 도구를 옳게 부를 수 없다.
-   *
-   * 경기 중에는 이 블록만 실리고 평시 스냅샷(6축이 적힌 줄)은 안 실린다. 그런데
-   * `set_tactics`는 "현재 값과 다른 축만" 보내라 하고, `set_match_plan`은 동시
-   * 두 곳까지이며, `set_player_tactic`은 "생략한 항목은 기존 값 유지"다 — 셋 다
-   * 지금 값을 알아야 성립하는 규칙인데 그 값이 화면에 없었다. 그래서 "압박 올려"에
-   * 모델이 숫자를 지어냈다.
+   * **지금 내가 무엇을 걸어 뒀는가** — 경기 중에는 평시 스냅샷(6축이 적힌 줄)이
+   * 실리지 않아 여기가 유일한 자리다. 없으면 "압박 올려"에 지금 값이 지어내진다.
    */
   const ourTactics = tacticsOf(state, state.userTeamId).spec;
   const assignments = tacticsOf(state, state.userTeamId).assignments.filter(
@@ -460,10 +462,9 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
   );
   const standingLines = [
     ``,
-    `[지금 걸어 둔 것 — 바꾸려면 그 도구를 부른다]`,
+    `[지금 걸어 둔 것]`,
     `전술 ${ourTactics.formation} · 멘탈${ourTactics.mentality} 라인${ourTactics.defensiveLine} ` +
-      `압박${ourTactics.pressing} 템포${ourTactics.tempo} 폭${ourTactics.width} 패스${ourTactics.passStyle}` +
-      ` (set_tactics — 감독이 말한 축만 바꾼다)`,
+      `압박${ourTactics.pressing} 템포${ourTactics.tempo} 폭${ourTactics.width} 패스${ourTactics.passStyle}`,
     pending.regionalPlans && pending.regionalPlans.length > 0
       ? `지역 전술: ${pending.regionalPlans
           .map((r) => `${r.band}/${r.lane} ${r.intent} "${r.note}"`)
@@ -499,6 +500,7 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
     ledger.sentOff.length > 0 ? `퇴장: ${withNames(ledger.sentOff)}` : "",
     ...standingLines,
     ...packetLines,
+    ...targetLines,
   ]
     .filter(Boolean)
     .join("\n");

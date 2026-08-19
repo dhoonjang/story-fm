@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   DEFAULT_SKILL_DESCRIPTIONS,
   GM_SYSTEM,
+  MATCH_INTENT_SYSTEM,
   SKILL_CATALOG,
   SKILL_NAMES,
   buildGmTools,
@@ -50,23 +51,32 @@ describe("스킬 설명 — 코드가 유일한 원본이다", () => {
  *
  * 한 도구의 사용법은 **그 도구의 설명에만** 있다. 프롬프트의 문구를 여기서 고정하면
  * 프롬프트를 고칠 수 없으므로(AGENTS.md §6-5) 재는 것은 문구가 아니라 **중복이
- * 생기지 않는다**는 것 하나다: 사용법이 설명으로 넘어간 도구를 시스템 프롬프트가
- * 다시 부르면, 같은 규칙이 두 곳에 살아 한쪽만 고쳐진다.
+ * 생기지 않는다**는 것 하나다: 도구 이름이 시스템 프롬프트에 서면 같은 규칙이 두 곳에
+ * 살아 한쪽만 고쳐지고, 경기 프롬프트에 서면 그 층에는 도구 표면이 아예 없어(§2) 부를
+ * 수 없는 것을 부르라는 말이 된다.
  */
 describe("규칙이 사는 자리", () => {
-  /**
-   * 사용법이 설명으로 넘어간 도구들. (프롬프트가 이름을 부르는 도구가 아예 없지는
-   * 않다 — 오퍼 판정처럼 **언제 부르는지**가 라우팅인 자리는 프롬프트의 몫이다.)
-   */
-  const MOVED = ["team_talk", "talk_to_player", "respond_to_media", "deal_odds", "send_offer"];
+  /** `substitutions`가 `substitute`로 잡히지 않게 — 이름 전체가 서야 중복이다 */
+  const mentions = (prompt: string, name: string) => new RegExp(`\\b${name}\\b`).test(prompt);
 
-  it("시스템 프롬프트는 넘긴 도구의 사용법을 다시 적지 않는다", () => {
-    for (const name of MOVED) {
-      expect(GM_SYSTEM, name).not.toContain(name);
-      expect(
-        DEFAULT_SKILL_DESCRIPTIONS[name as (typeof SKILL_NAMES)[number]].length,
-      ).toBeGreaterThan(0);
+  it("어느 프롬프트 층도 도구 이름을 적지 않는다", () => {
+    for (const name of SKILL_NAMES) {
+      expect(mentions(GM_SYSTEM, name), `GM_SYSTEM: ${name}`).toBe(false);
+      expect(mentions(MATCH_INTENT_SYSTEM, name), `MATCH_INTENT_SYSTEM: ${name}`).toBe(false);
     }
+  });
+
+  /**
+   * 설명은 고정층에 매 턴 실린다 — 길이 예산이 없으면 규칙 하나를 지울 때마다 설명
+   * 두 줄이 붙어도 아무 데서도 드러나지 않는다. 상한은 지금 총량(≈6,200자)에 한 도구
+   * 몫의 여유를 얹은 값이다.
+   */
+  it("설명은 길이 예산 안에 있다", () => {
+    const total = SKILL_CATALOG.reduce((sum, skill) => sum + skill.description.length, 0);
+    for (const skill of SKILL_CATALOG) {
+      expect(skill.description.length, skill.name).toBeLessThanOrEqual(600);
+    }
+    expect(total).toBeLessThanOrEqual(6_500);
   });
 });
 
