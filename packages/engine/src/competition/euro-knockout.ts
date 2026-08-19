@@ -12,8 +12,8 @@ import { completeDraw, drawIsDue, scheduleDraw } from "./draw-schedule";
 import { euroMatchdayDates, knockoutDates } from "./europe";
 import { payLeaguePhasePrizes, payStagePrizes } from "./euro-prize";
 import { makeRng } from "../core/rng";
-import { pairOf, resolveExtraTime, tieAggregate } from "./extra-time";
-import { shootout } from "./shootout";
+import { needsShootout, pairOf, resolveExtraTime, settledTieWinner } from "./extra-time";
+import { resolveShootout } from "./shootout";
 import { pushNarrative, teamNameIn, teamShortNameIn, type GameState } from "../core/state";
 import { computeStandings } from "./season";
 
@@ -54,10 +54,22 @@ export function euroLeaguePhaseDone(state: GameState, cupId: string): boolean {
   return phase.length > 0 && phase.every((m) => m.result !== null);
 }
 
+/** 이 대진의 모든 차전 — 차수 순 */
+function tieLegsOf(
+  state: GameState,
+  cupId: string,
+  stage: MatchStage,
+  pair: number,
+): MatchRecord[] {
+  return euroStageMatches(state, cupId, stage).filter((m) => pairOf(m) === pair);
+}
+
 /**
- * 대진의 승자 — 두 경기(또는 결승 한 경기)가 모두 끝났을 때만.
- * 합계가 같으면 **연장 30분**을 치르고(`extra-time.ts`), 그래도 같으면 승부차기
- * 결과를 2차전 장부에 기록하고 그것으로 가린다.
+ * 대진의 승자 — **이미 적힌 결과만 읽는다.** 갈리지 않았으면 null.
+ *
+ * ⚠️ 여기서 연장·승부차기를 굴리지 않는다. 이 함수는 달력이 예약을 지울 때
+ * (`reservedEuroDatesFor`), 화면이 브래킷을 그릴 때마다 열리는 조회 경로다 —
+ * 굴리는 것은 `resolveEuroTie` 하나다 (competition.md §6).
  */
 export function euroTieWinner(
   state: GameState,
@@ -65,27 +77,29 @@ export function euroTieWinner(
   stage: MatchStage,
   pair: number,
 ): string | null {
-  const legs = euroStageMatches(state, cupId, stage).filter((m) => pairOf(m) === pair);
+  return settledTieWinner(tieLegsOf(state, cupId, stage, pair));
+}
+
+/**
+ * 대진을 **끝까지 치러** 승자를 낸다 — 두 경기(또는 결승 한 경기)가 모두 끝났을 때만.
+ *
+ * 합계가 같으면 **연장 30분**을 치르고(`extra-time.ts`), 그래도 같으면 승부차기를
+ * 굴려 2차전 장부에 킥 목록과 합계를 남긴다(`shootout.ts`). 둘 다 멱등이다.
+ * 부르는 곳은 대회를 진행시키는 `advanceEuroKnockouts`뿐이다.
+ */
+export function resolveEuroTie(
+  state: GameState,
+  cupId: string,
+  stage: MatchStage,
+  pair: number,
+): string | null {
+  const legs = tieLegsOf(state, cupId, stage, pair);
   if (legs.length === 0 || legs.some((m) => !m.result)) return null;
 
   const decider = legs[legs.length - 1]!;
-  const channel = `${cupId}:${stage}:${pair}`;
-  /** 지금 합계로 갈리는 쪽 — 같으면 null */
-  const level = () => {
-    const agg = tieAggregate(legs, decider);
-    if (agg.home === agg.away) return null;
-    return agg.home > agg.away ? decider.homeTeamId : decider.awayTeamId;
-  };
-  const regulation = level();
-  if (regulation) return regulation;
-
-  resolveExtraTime(state, decider, channel);
-  const afterExtra = level();
-  if (afterExtra) return afterExtra;
-
-  const pens = decider.result!.penalties ?? shootout(state, decider, channel);
-  decider.result!.penalties = pens;
-  return pens.home > pens.away ? decider.homeTeamId : decider.awayTeamId;
+  resolveExtraTime(state, decider, `${cupId}:${stage}:${pair}`);
+  if (needsShootout(state, decider)) resolveShootout(state, decider);
+  return settledTieWinner(legs);
 }
 
 /** 리그 페이즈 최종 순위 — 시드의 원본 (녹아웃 경기는 순위표에 들어가지 않는다) */
@@ -291,7 +305,7 @@ export function advanceEuroKnockouts(state: GameState, digest: string[]): void {
       const pairCount = new Set(existing.map((m) => pairOf(m))).size;
       const winners: string[] = [];
       for (let pair = 0; pair < pairCount; pair++) {
-        const winner = euroTieWinner(state, cup.id, stage, pair);
+        const winner = resolveEuroTie(state, cup.id, stage, pair);
         if (winner) winners.push(winner);
       }
       if (winners.length < pairCount) break; // 아직 진행 중

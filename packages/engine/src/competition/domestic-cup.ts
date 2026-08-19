@@ -29,8 +29,8 @@ import { reservedEuroDatesFor } from "./euro-knockout";
 import { formatMoney, payOnce } from "../club/finance";
 import { clearForCup } from "./reschedule";
 import { makeRng } from "../core/rng";
-import { pairOf, resolveExtraTime, tieAggregate } from "./extra-time";
-import { shootout } from "./shootout";
+import { needsShootout, pairOf, resolveExtraTime, settledTieWinner } from "./extra-time";
+import { resolveShootout } from "./shootout";
 import { pushNarrative, teamName, teamShortName, type GameState } from "../core/state";
 
 /**
@@ -623,10 +623,22 @@ function createStage(
   }
 }
 
+/** 이 대진의 모든 차전 — 차수 순 */
+function tieLegsOf(
+  state: GameState,
+  cupId: string,
+  stage: MatchStage,
+  pair: number,
+): MatchRecord[] {
+  return domesticStageMatches(state, cupId, stage).filter((m) => pairOf(m) === pair);
+}
+
 /**
- * 대진의 승자 — 경기가 모두 끝났을 때만.
- * 단판은 90분, 2차전제는 합계가 같으면 **연장 30분**을 먼저 치르고(`extra-time.ts`)
- * 그래도 갈리지 않으면 승부차기다.
+ * 대진의 승자 — **이미 적힌 결과만 읽는다.** 갈리지 않았으면 null.
+ *
+ * ⚠️ 여기서 연장·승부차기를 굴리지 않는다. 승자를 묻는 자리는 화면이 브래킷을
+ * 그릴 때마다, 달력이 예약을 지울 때마다 열리고, 조회가 상태를 바꾸면 그때마다
+ * 결과가 새로 굴러간다. 굴리는 것은 `resolveDomesticTie` 하나다 (competition.md §6).
  */
 export function domesticTieWinner(
   state: GameState,
@@ -634,27 +646,29 @@ export function domesticTieWinner(
   stage: MatchStage,
   pair: number,
 ): string | null {
-  const legs = domesticStageMatches(state, cupId, stage).filter((m) => pairOf(m) === pair);
+  return settledTieWinner(tieLegsOf(state, cupId, stage, pair));
+}
+
+/**
+ * 대진을 **끝까지 치러** 승자를 낸다 — 경기가 모두 끝났을 때만.
+ *
+ * 단판은 90분, 2차전제는 합계가 같으면 **연장 30분**을 먼저 치르고(`extra-time.ts`)
+ * 그래도 갈리지 않으면 승부차기다(`shootout.ts`). 둘 다 멱등이라 여러 번 불러도
+ * 스코어가 자라지 않는다. 부르는 곳은 대회를 진행시키는 `advanceDomesticCups`뿐이다.
+ */
+export function resolveDomesticTie(
+  state: GameState,
+  cupId: string,
+  stage: MatchStage,
+  pair: number,
+): string | null {
+  const legs = tieLegsOf(state, cupId, stage, pair);
   if (legs.length === 0 || legs.some((m) => !m.result)) return null;
 
   const decider = legs[legs.length - 1]!;
-  const channel = `${cupId}:${stage}:${pair}`;
-  /** 지금 합계로 갈리는 쪽 — 같으면 null */
-  const level = () => {
-    const agg = tieAggregate(legs, decider);
-    if (agg.home === agg.away) return null;
-    return agg.home > agg.away ? decider.homeTeamId : decider.awayTeamId;
-  };
-  const regulation = level();
-  if (regulation) return regulation;
-
-  resolveExtraTime(state, decider, channel);
-  const afterExtra = level();
-  if (afterExtra) return afterExtra;
-
-  const pens = decider.result!.penalties ?? shootout(state, decider, channel);
-  decider.result!.penalties = pens;
-  return pens.home > pens.away ? decider.homeTeamId : decider.awayTeamId;
+  resolveExtraTime(state, decider, `${cupId}:${stage}:${pair}`);
+  if (needsShootout(state, decider)) resolveShootout(state, decider);
+  return settledTieWinner(legs);
 }
 
 /** 이 컵의 우승 팀 — 결승이 끝났을 때만 (시즌 리뷰·트로피·유럽 티켓의 원본) */
@@ -786,7 +800,7 @@ export function advanceDomesticCups(state: GameState, digest: string[]): void {
       const pairCount = new Set(existing.map((m) => pairOf(m))).size;
       const winners: string[] = [];
       for (let pair = 0; pair < pairCount; pair++) {
-        const winner = domesticTieWinner(state, cup.id, stage, pair);
+        const winner = resolveDomesticTie(state, cup.id, stage, pair);
         if (winner) winners.push(winner);
       }
       if (winners.length < pairCount) break; // 아직 진행 중

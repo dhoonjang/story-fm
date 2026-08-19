@@ -1,17 +1,30 @@
 import { describe, expect, it } from "vitest";
 import {
   EXTRA_TIME_MINUTES,
+  advanceMatchTo,
   advanceSegment,
+  advanceShootout,
   assignmentsOf,
+  awaitingShootout,
   domesticTieWinner,
   euroTieWinner,
   finalizeMatch,
   finishingXi,
+  keeperSkill,
   needsExtraTime,
   penaltyRate,
+  penaltySkill,
   playersOf,
   quickSimulate,
+  resolveDomesticTie,
+  resolveEuroTie,
   resolveExtraTime,
+  resolveShootout,
+  rollShootoutKick,
+  setShootoutOrder,
+  shootoutFirst,
+  shootoutKeeper,
+  shootoutOrder,
   simulateExtraTime,
   simulateOtherMatches,
   startMatch,
@@ -21,8 +34,16 @@ import {
   userPlayers,
   userSide,
   type GameState,
+  type MatchStop,
 } from "@story-fm/engine";
-import type { MatchRecord, MatchStage } from "@story-fm/domain";
+import type {
+  GamePlayer,
+  MatchRecord,
+  MatchStage,
+  PlayerAttributes,
+  ShootoutKick,
+} from "@story-fm/domain";
+import { SHOOTOUT_ROUNDS, shootoutSettled, shootoutTally } from "@story-fm/domain";
 import { groupOf } from "@story-fm/engine";
 import { createTestGame, simSquad } from "./helpers";
 
@@ -88,6 +109,25 @@ function stageTie(
   return created;
 }
 
+/**
+ * 능력치만 세운 임시 선수 — 승부차기 공식의 몫을 직접 읽기 위한 도구.
+ * 세계의 선수를 복사하므로 원본을 건드리지 않는다.
+ */
+function withAttributes(attrs: Partial<PlayerAttributes>): GamePlayer {
+  const base = playersOf(world(), "arsenal")[0]!;
+  return { ...base, attributes: { ...base.attributes, ...attrs } };
+}
+
+/** 승부차기 기량이 정확히 이 값인 키커 */
+function penaltyKicker(skill: number): GamePlayer {
+  return withAttributes({ finishing: skill, composure: skill, kicking: skill });
+}
+
+/** 승부차기 기량이 정확히 이 값인 골키퍼 */
+function penaltyKeeper(skill: number): GamePlayer {
+  return withAttributes({ goalkeeping: skill, composure: skill });
+}
+
 describe("연장 시뮬 (30분)", () => {
   it("골의 분은 91~120이고 득점자·도움·분의 길이가 같다", () => {
     const state = world();
@@ -128,7 +168,7 @@ describe("녹아웃 무승부 — 연장을 먼저 치르고 그래도 비기면
       { home: "arsenal", away: "mancity", homeGoals: 1, awayGoals: 1 },
     ]);
     const decider = legs[0]!;
-    const winner = domesticTieWinner(state, "facup", "r32", 0);
+    const winner = resolveDomesticTie(state, "facup", "r32", 0);
 
     expect(winner).not.toBeNull();
     expect([decider.homeTeamId, decider.awayTeamId]).toContain(winner);
@@ -153,7 +193,7 @@ describe("녹아웃 무승부 — 연장을 먼저 치르고 그래도 비기면
         { home: "arsenal", away: "mancity", homeGoals: 0, awayGoals: 0 },
       ]);
       const decider = legs[0]!;
-      domesticTieWinner(state, "facup", "r32", pair);
+      resolveDomesticTie(state, "facup", "r32", pair);
       if (decider.result!.homeGoals === decider.result!.awayGoals) goalless = { pair, decider };
     }
     expect(goalless).not.toBeNull();
@@ -171,7 +211,7 @@ describe("녹아웃 무승부 — 연장을 먼저 치르고 그래도 비기면
         { home: "arsenal", away: "mancity", homeGoals: 0, awayGoals: 0 },
       ]);
       const decider = legs[0]!;
-      domesticTieWinner(state, "facup", "r32", pair);
+      resolveDomesticTie(state, "facup", "r32", pair);
       if (decider.result!.homeGoals !== decider.result!.awayGoals) {
         decided = true;
         expect(decider.result!.penalties).toBeUndefined();
@@ -195,7 +235,7 @@ describe("녹아웃 무승부 — 연장을 먼저 치르고 그래도 비기면
       { home: "mancity", away: "liverpool", homeGoals: 1, awayGoals: 1 },
       { home: "liverpool", away: "mancity", homeGoals: 0, awayGoals: 0 },
     ]);
-    const winner = euroTieWinner(state, "ucl", "qf", 1);
+    const winner = resolveEuroTie(state, "ucl", "qf", 1);
     expect(winner).not.toBeNull();
     expect(levelLegs[0]!.result!.aet).toBeUndefined(); // 1차전은 연장을 치르지 않는다
     expect(levelLegs[1]!.result!.aet).toBe(true);
@@ -207,10 +247,10 @@ describe("녹아웃 무승부 — 연장을 먼저 치르고 그래도 비기면
       { home: "arsenal", away: "chelsea", homeGoals: 2, awayGoals: 2 },
     ]);
     const decider = legs[0]!;
-    const first = domesticTieWinner(state, "facup", "r16", 0);
+    const first = resolveDomesticTie(state, "facup", "r16", 0);
     const score = { ...decider.result! };
     for (let i = 0; i < 5; i++) {
-      expect(domesticTieWinner(state, "facup", "r16", 0)).toBe(first);
+      expect(resolveDomesticTie(state, "facup", "r16", 0)).toBe(first);
     }
     expect(decider.result!.homeGoals).toBe(score.homeGoals);
     expect(decider.result!.awayGoals).toBe(score.awayGoals);
@@ -250,7 +290,7 @@ describe("녹아웃 무승부 — 연장을 먼저 치르고 그래도 비기면
         { home: "arsenal", away: "chelsea", homeGoals: 0, awayGoals: 0 },
       ]);
       const decider = legs[0]!;
-      domesticTieWinner(state, "facup", "r16", pair);
+      resolveDomesticTie(state, "facup", "r16", pair);
       const extra = decider
         .result!.scorers.filter((_, i) => (decider.result!.goalMinutes?.[i] ?? 0) > 90)
         .find((tag) => tag.startsWith("home:"));
@@ -436,7 +476,7 @@ describe("유저 경기의 연장 (competition.md §6)", () => {
     let decidedInExtra = 0;
     let wentToPenalties = 0;
     for (const run of runs) {
-      const winner = domesticTieWinner(state, "facup", "qf", run.pair);
+      const winner = resolveDomesticTie(state, "facup", "qf", run.pair);
       expect(winner).not.toBeNull();
       expect([run.match.homeTeamId, run.match.awayTeamId]).toContain(winner);
       const result = run.match.result!;
@@ -459,10 +499,103 @@ describe("유저 경기의 연장 (competition.md §6)", () => {
     for (const run of runs) {
       const before = { ...run.match.result! };
       expect(resolveExtraTime(state, run.match, `facup:qf:${run.pair}`)).toBe(false);
-      for (let i = 0; i < 3; i++) domesticTieWinner(state, "facup", "qf", run.pair);
+      for (let i = 0; i < 3; i++) resolveDomesticTie(state, "facup", "qf", run.pair);
       expect(run.match.result!.homeGoals).toBe(before.homeGoals);
       expect(run.match.result!.awayGoals).toBe(before.awayGoals);
       expect(run.match.result!.scorers).toHaveLength(before.scorers.length);
+    }
+  });
+
+  /**
+   * **감독의 경기는 정지점을 하나 더 갖는다** (match.md §2).
+   *
+   * 120분이 끝나고 승부가 남으면 장부는 `finished`지만 경기는 끝나지 않는다 —
+   * 마감(`finalizeMatch`)이 승부차기 뒤에 온다. 그래서 킥을 굴리는 동안
+   * `match.result`가 `null`이고, 키커 명단은 **살아 있는 장부의 온필드**에서 와야
+   * 한다: 결과부터 읽으면 1군 상위로 밀려나 벤치의 에이스와 퇴장당한 선수가 찬다.
+   */
+  it("120분 무승부는 승부차기 정지점에서 멈추고, 그라운드에 없던 선수는 차지 못한다", () => {
+    const state = extraTimeWorld().state;
+    /** 120분 무승부로 끝나 승부차기 정지점에 선 컵 경기 하나 — 갈린 경기는 닫고 넘어간다 */
+    const stageShootout = (): MatchRecord => {
+      for (let pair = 600; pair < 640; pair++) {
+        for (const teamId of ["arsenal", "chelsea"]) {
+          for (const p of playersOf(state, teamId)) p.state.condition = 100;
+        }
+        const match = stageUserCupMatch(state, pair);
+        const started = startMatch(state);
+        if (!started.ok) throw new Error(started.message);
+        let guard = 90;
+        while (guard-- > 0) {
+          const step = advanceMatchTo(state, 130);
+          if (!step.ok) throw new Error(step.message);
+          const stop: MatchStop | null = step.stop;
+          if (stop === "shootout_start") return match;
+          if (state.pendingMatch?.ledger.phase === "finished") break;
+        }
+        finalizeMatch(state);
+      }
+      throw new Error("120분 무승부로 끝나는 감독의 컵 경기를 찾지 못했습니다");
+    };
+
+    const match = stageShootout();
+    const pending = state.pendingMatch!;
+    // 장부는 아직 마감되지 않았다 — 승부차기가 오프스크린으로 밀려나면 안 된다
+    expect(awaitingShootout(state)).toBe(true);
+    expect(match.result).toBeNull();
+    const score = { ...pending.ledger.score };
+    expect(score.home).toBe(score.away);
+
+    const side = userSide(state);
+    const onPitch = new Set(pending.ledger[side].onPitch);
+    // **그라운드에 없던 선수는 반려된다** — 조용히 버리면 감독은 제 순서로 찬다고 믿는다
+    const off = userPlayers(state).find((p) => !onPitch.has(p.id));
+    expect(off, "온필드 밖 선수를 찾지 못했습니다").toBeDefined();
+    expect(setShootoutOrder(state, { playerIds: [off!.id] }).ok).toBe(false);
+
+    // 감독이 세운 사람이 우리 팀 첫 키커다 (기본 순서에서 맨 뒤였을 사람으로 고른다)
+    const wanted = shootoutOrder(state, match, side).at(-1)!.id;
+    expect(onPitch.has(wanted)).toBe(true);
+    expect(setShootoutOrder(state, { playerIds: [wanted] }).ok).toBe(true);
+
+    const kicks: ShootoutKick[] = [];
+    let guard = 60;
+    for (;;) {
+      if (guard-- <= 0) throw new Error("승부차기가 끝나지 않았습니다");
+      const step = advanceShootout(state);
+      expect(step.ok).toBe(true);
+      if (step.kick) kicks.push(step.kick);
+      if (step.done) break;
+    }
+    expect(kicks.find((k) => k.team === side)?.taker).toBe(wanted);
+    // 차는 사람은 그 경기를 끝낸 사람들뿐이다 — 퇴장당한 선수도 벤치도 아니다
+    for (const kick of kicks.filter((k) => k.team === side)) {
+      expect(onPitch.has(kick.taker), kick.taker).toBe(true);
+    }
+
+    /** 마감 직전의 시즌 골 — 승부차기 골이 여기로 새는지 본다 */
+    const goalsBefore = new Map(
+      state.seasonStats
+        .filter((st) => st.season === state.season)
+        .map((st) => [st.gamePlayerId, st.goals]),
+    );
+    finalizeMatch(state);
+
+    const result = match.result!;
+    // 킥 목록이 그대로 장부에 실린다 — 중계·화면이 인용할 원본이다
+    expect(result.penalties!.kicks).toEqual(kicks);
+    expect(result.penalties!.home).toBe(shootoutTally(kicks).home);
+    // **승부차기 골은 골이 아니다** — 120분 스코어와 득점자 수가 그대로다
+    expect({ home: result.homeGoals, away: result.awayGoals }).toEqual(score);
+    expect(result.scorers).toHaveLength(score.home + score.away);
+    // 시즌 기록에도 새지 않는다 — 넣은 사람에게 오른 골은 필드 골뿐이다
+    for (const kick of kicks) {
+      if (kick.outcome !== "scored") continue;
+      const openPlay = result.scorers.filter((tag) => tag === `${kick.team}:${kick.taker}`).length;
+      const now = state.seasonStats.find(
+        (st) => st.season === state.season && st.gamePlayerId === kick.taker,
+      );
+      expect(now?.goals ?? 0, kick.taker).toBe((goalsBefore.get(kick.taker) ?? 0) + openPlay);
     }
   });
 
@@ -496,6 +629,92 @@ describe("유저 경기의 연장 (competition.md §6)", () => {
     }
     // 무승부가 한 번도 안 나왔다면 이 테스트는 아무것도 증명하지 못한다
     expect(draws).toBeGreaterThan(0);
+  });
+
+  /**
+   * **감독의 경기는 승부차기 정지점을 지난다** (match.md §2).
+   *
+   * 여기서 재는 것은 킥의 확률이 아니라 **문이 열리고 닫히는 순서**다: 120분이
+   * 승부를 못 가르면 장부가 `finished`인데도 경기가 끝나지 않고, 감독이 키커를
+   * 세울 자리가 생기고, 한 발씩 굴러 갈린 뒤에야 마감이 온다. 그 사이 어느
+   * 걸음이 빠져도 승부차기는 예전처럼 오프스크린으로 밀려난다.
+   */
+  it("120분이 승부를 못 가르면 정지점이 서고, 감독이 키커를 세워 한 발씩 찬다", () => {
+    const { state } = extraTimeWorld();
+    let match: MatchRecord | null = null;
+    // 대진 번호가 난수 채널이라 승부차기까지 가는 경기를 찾을 때까지 넓힌다
+    for (let pair = 900; pair < 980; pair++) {
+      for (const teamId of ["arsenal", "chelsea"]) {
+        for (const p of playersOf(state, teamId)) p.state.condition = 100;
+      }
+      const staged = stageUserCupMatch(state, pair);
+      const started = startMatch(state);
+      if (!started.ok) throw new Error(started.message);
+      let guard = 80;
+      while (state.phase === "match" && state.pendingMatch!.ledger.phase !== "finished") {
+        if (guard-- <= 0) throw new Error("경기가 끝나지 않았습니다");
+        const step = advanceSegment(state);
+        if (!step.ok) throw new Error(step.message);
+      }
+      if (awaitingShootout(state)) {
+        match = staged;
+        break;
+      }
+      finalizeMatch(state); // 연장에서 갈린 경기 — 닫고 다음 대진으로
+    }
+    expect(match, "승부차기까지 가는 경기를 찾지 못했습니다").not.toBeNull();
+
+    const pending = state.pendingMatch!;
+    const side = userSide(state);
+    const scoreAt120 = { ...pending.ledger.score };
+    const goalEvents = pending.ledger.events.filter((e) => e.type === "goal").length;
+
+    // ① 장부는 끝났지만 진행 턴은 승부차기 앞에서 멈춘다
+    expect(advanceMatchTo(state, 130).stop).toBe("shootout_start");
+
+    // ② 그라운드에 없던 선수는 찰 수 없다 — 조용히 버리지 않고 반려한다
+    const bench = pending.ledger[side].bench[0]!;
+    const benched = setShootoutOrder(state, { playerIds: [bench] });
+    expect(benched.ok).toBe(false);
+    expect(pending.shootout!.order?.[side]).toBeUndefined();
+
+    // ③ 감독이 세운 사람이 우리 팀의 첫 키커가 된다
+    const first = pending.ledger[side].onPitch.find(
+      (id) => groupOf(userPlayers(state).find((p) => p.id === id)!) !== "GK",
+    )!;
+    expect(setShootoutOrder(state, { playerIds: [first] }).ok).toBe(true);
+
+    // ④ 한 턴에 한 발 — 갈릴 때까지
+    let kicks = 0;
+    while (awaitingShootout(state)) {
+      if (kicks++ > 60) throw new Error("승부차기가 갈리지 않았습니다");
+      expect(advanceShootout(state).ok).toBe(true);
+    }
+    const rolled = pending.shootout!.kicks;
+    expect(rolled.length).toBeGreaterThan(0);
+    expect(rolled.find((k) => k.team === side)!.taker).toBe(first);
+    /**
+     * **찬 사람은 전부 그라운드에 서 있던 사람이다.** 마감이 승부차기 뒤에 오므로
+     * 이 시점 `match.result`는 아직 없다 — 살아 있는 장부를 읽지 않으면 1군 상위
+     * 열한 명으로 밀려나 벤치 선수와 퇴장자가 페널티를 찬다.
+     */
+    const onPitch = new Set(pending.ledger[side].onPitch);
+    for (const kick of rolled.filter((k) => k.team === side)) {
+      expect(onPitch.has(kick.taker), `키커 ${kick.taker}`).toBe(true);
+    }
+
+    // ⑤ 마감은 이제서야 온다 — 킥이 장부에 남고 승부는 갈렸다
+    finalizeMatch(state);
+    const result = match!.result!;
+    const pens = result.penalties!;
+    expect(pens.kicks).toHaveLength(rolled.length);
+    expect(pens.home).not.toBe(pens.away);
+    expect(pens.home + pens.away).toBe(rolled.filter((k) => k.outcome === "scored").length);
+
+    // ⑥ **승부차기 골은 골이 아니다** — 스코어라인도 득점자 목록도 120분 그대로다
+    expect(result.homeGoals).toBe(scoreAt120.home);
+    expect(result.awayGoals).toBe(scoreAt120.away);
+    expect(result.scorers).toHaveLength(goalEvents);
   });
 });
 
@@ -623,14 +842,222 @@ describe("연장·승부차기의 입력 (match.md §7)", () => {
     expect(total(true)).not.toBe(total(false));
   });
 
+  it("승부차기 기량은 결정력·침착성·킥력과 골키핑·침착성이 정한다", () => {
+    // 가중치는 competition.md §6이 쥔다 — 한 능력치만 세워 그 몫을 직접 읽는다
+    expect(penaltySkill(withAttributes({ finishing: 100, composure: 0, kicking: 0 }))).toBeCloseTo(
+      50,
+      10,
+    );
+    expect(penaltySkill(withAttributes({ finishing: 0, composure: 100, kicking: 0 }))).toBeCloseTo(
+      30,
+      10,
+    );
+    expect(penaltySkill(withAttributes({ finishing: 0, composure: 0, kicking: 100 }))).toBeCloseTo(
+      20,
+      10,
+    );
+    expect(keeperSkill(withAttributes({ goalkeeping: 100, composure: 0 }))).toBeCloseTo(70, 10);
+    expect(keeperSkill(withAttributes({ goalkeeping: 0, composure: 100 }))).toBeCloseTo(30, 10);
+    // 골키퍼가 없는 옛 세이브 — 평균적인 키커와 같은 자리에 선다
+    expect(keeperSkill(null)).toBeCloseTo(60, 10);
+  });
+
   it("승부차기 성공률은 0.62~0.80 밖으로 나가지 않는다", () => {
     // 대역은 competition.md §6이 쥔다 — 여기서는 그 밖으로 새지 않는 것만 본다
-    expect(penaltyRate(60)).toBeCloseTo(0.62, 10);
-    expect(penaltyRate(70)).toBeCloseTo(0.67, 10);
-    expect(penaltyRate(96)).toBeCloseTo(0.8, 10);
-    // 양 끝 — 하한이 없던 때는 평균 50인 팀이 0.57까지 내려갔다
-    expect(penaltyRate(20)).toBeCloseTo(0.62, 10);
-    expect(penaltyRate(200)).toBeCloseTo(0.8, 10);
+    const level = penaltyKicker(60);
+    expect(penaltyRate(level, penaltyKeeper(60))).toBeCloseTo(0.71, 10); // 기량이 같으면 가운데
+    expect(penaltyRate(penaltyKicker(80), penaltyKeeper(60))).toBeCloseTo(0.78, 10);
+    expect(penaltyRate(penaltyKicker(60), penaltyKeeper(80))).toBeCloseTo(0.64, 10);
+    // 양 끝 — 클램프가 한쪽만 있던 때는 대역 밖으로 떨어졌다
+    expect(penaltyRate(penaltyKicker(99), penaltyKeeper(1))).toBeCloseTo(0.8, 10);
+    expect(penaltyRate(penaltyKicker(1), penaltyKeeper(99))).toBeCloseTo(0.62, 10);
+    // 골키퍼가 없어도 대역 안이다
+    expect(penaltyRate(level, null)).toBeCloseTo(0.71, 10);
+  });
+});
+
+/**
+ * **승부차기 — 킥 하나가 사건 하나다** (competition.md §6 · match.md §2).
+ *
+ * 여기서 재는 것은 장부의 모양이다: 조기 확정이 규정대로 서는가(3–0이 3–0으로
+ * 적히는가), 서든데스가 상한 없이 갈리는가, 그리고 **한 발씩 굴리는 감독의 경로와
+ * 한 번에 굴리는 타 팀 경로가 같은 결과를 내는가**. 셋 다 화면에 안 보이는 자리라
+ * 갈려도 아무도 모른다 — 옛 코드는 20라운드 뒤에 `h += 1`로 홈을 이기게 했다.
+ */
+describe("승부차기 (competition.md §6)", () => {
+  /** 승부차기까지 간 대진 하나 — 연장을 거치지 않고 킥만 굴린다 (판정은 위에서 본다) */
+  function rolled(pair: number): { decider: MatchRecord; kicks: ShootoutKick[]; state: GameState } {
+    const state = world();
+    const decider = stageTie(state, "facup", "r32", pair, [
+      { home: "arsenal", away: "chelsea", homeGoals: 0, awayGoals: 0 },
+    ])[0]!;
+    resolveShootout(state, decider);
+    return { decider, kicks: decider.result!.penalties!.kicks ?? [], state };
+  }
+
+  /** 앞선 표본 — 한 번 굴려 여러 검증이 나눠 쓴다 (세계 생성이 이 파일 시간의 대부분) */
+  let sample: Array<{ decider: MatchRecord; kicks: ShootoutKick[]; state: GameState }> | null =
+    null;
+  function shootouts() {
+    return (sample ??= Array.from({ length: 40 }, (_, i) => rolled(800 + i)));
+  }
+
+  it("규정대로 조기 확정한다 — 뒤집을 수 없는 순간 뒤로는 아무도 차지 않는다", () => {
+    let early = 0;
+    for (const { decider, kicks } of shootouts()) {
+      expect(kicks.length).toBeGreaterThan(0);
+      // 마지막 킥에서 갈렸고, 그 앞의 어느 자리에서도 갈리지 않았다.
+      // 이 둘이 함께 서면 3–0으로 끝난 승부는 여섯 발로 3–0이 된다.
+      expect(shootoutSettled(kicks)).toBe(true);
+      for (let n = 1; n < kicks.length; n++) {
+        expect(shootoutSettled(kicks.slice(0, n)), `${decider.id} 앞 ${n}발`).toBe(false);
+      }
+      if (kicks.length < SHOOTOUT_ROUNDS * 2) early++;
+    }
+    // 조기 확정이 실제로 일어나야 이 검증이 뜻을 갖는다
+    expect(early).toBeGreaterThan(0);
+  });
+
+  it("3–0으로 끝난 승부는 3–0으로 적힌다 — 5–0이 되지 않는다", () => {
+    const three = shootouts().find(({ decider }) => {
+      const pens = decider.result!.penalties!;
+      return Math.min(pens.home, pens.away) === 0 && Math.max(pens.home, pens.away) === 3;
+    });
+    // 표본에 없으면 위 불변식만으로 충분하다 — 있으면 경계를 눈으로 확인한다
+    if (!three) return;
+    const pens = three.decider.result!.penalties!;
+    expect(shootoutTally(three.kicks)).toEqual({ home: pens.home, away: pens.away });
+    // 정규 열 발을 다 차지 않았고, 진 쪽은 다섯 발을 차 보지도 못했다
+    expect(three.kicks.length).toBeLessThan(SHOOTOUT_ROUNDS * 2);
+    const loser = pens.home === 0 ? "home" : "away";
+    expect(three.kicks.filter((k) => k.team === loser).length).toBeLessThan(SHOOTOUT_ROUNDS);
+  });
+
+  it("서든데스는 상한 없이 갈리고 무승부를 남기지 않는다", () => {
+    let suddenDeath = 0;
+    for (const { decider, kicks } of shootouts()) {
+      const pens = decider.result!.penalties!;
+      // 장부의 두 숫자는 킥 목록에서 세어진다 — 옛 코드의 `h += 1`이 여기서 걸린다
+      expect(shootoutTally(kicks), decider.id).toEqual({ home: pens.home, away: pens.away });
+      expect(pens.home, decider.id).not.toBe(pens.away);
+      if (kicks.length > SHOOTOUT_ROUNDS * 2) {
+        suddenDeath++;
+        // 서든데스는 라운드가 통째로 끝나야 갈린다 — 양 팀이 같은 수를 찼다
+        expect(kicks.filter((k) => k.team === "home")).toHaveLength(
+          kicks.filter((k) => k.team === "away").length,
+        );
+        expect(kicks.at(-1)!.round).toBeGreaterThan(SHOOTOUT_ROUNDS);
+      }
+    }
+    // 서든데스가 표본에 없으면 이 검증은 아무것도 증명하지 못한다
+    expect(suddenDeath).toBeGreaterThan(0);
+  });
+
+  it("한 발씩 굴린 감독의 경로와 한 번에 굴린 경로가 같은 킥 목록을 낸다", () => {
+    // 두 경로가 갈리면 감독의 중계와 장부가 어긋난다 — 난수 채널에 킥 인덱스가
+    // 들어가는 이유가 이것이다
+    for (const { state, decider, kicks } of shootouts().slice(0, 8)) {
+      const first = shootoutFirst(state, decider);
+      const stepped: ShootoutKick[] = [];
+      for (;;) {
+        const kick = rollShootoutKick(state, decider, stepped, first);
+        if (!kick) break;
+        stepped.push(kick);
+      }
+      expect(stepped, decider.id).toEqual(kicks);
+    }
+  });
+
+  it("같은 시드·같은 세이브면 같은 킥 목록이고, 두 번 불러도 스코어가 자라지 않는다", () => {
+    const { state, decider, kicks } = shootouts()[0]!;
+    // 멱등 — 이미 적힌 승부차기는 다시 굴러가지 않는다
+    const again = resolveShootout(state, decider);
+    expect(again).toEqual({
+      home: decider.result!.penalties!.home,
+      away: decider.result!.penalties!.away,
+    });
+    expect(decider.result!.penalties!.kicks).toBe(kicks);
+    // 결정성 — 지우고 다시 굴려도 같은 목록이다 (호출 순서에 기대지 않는다)
+    decider.result!.penalties = undefined;
+    resolveShootout(state, decider);
+    expect(decider.result!.penalties!.kicks).toEqual(kicks);
+  });
+
+  it('킥마다 키커·골키퍼·확률이 남는다 — "왜 그렇게 됐나"의 근거', () => {
+    const { state, decider, kicks } = shootouts()[0]!;
+    const first = shootoutFirst(state, decider);
+    const xi = {
+      home: new Set(finishingXi(state, decider, "home").map((p) => p.id)),
+      away: new Set(finishingXi(state, decider, "away").map((p) => p.id)),
+    };
+    const keeperOf = {
+      home: shootoutKeeper(state, decider, "home")?.id,
+      away: shootoutKeeper(state, decider, "away")?.id,
+    };
+    kicks.forEach((kick, i) => {
+      // 차는 사람은 그 경기를 끝낸 열한 명이다 — 소속 선수 상위 11이 아니다
+      expect(xi[kick.team].has(kick.taker)).toBe(true);
+      expect(kick.keeper).toBe(keeperOf[kick.team === "home" ? "away" : "home"]);
+      expect(kick.probability).toBeGreaterThanOrEqual(0.62);
+      expect(kick.probability).toBeLessThanOrEqual(0.8);
+      // 먼저 차는 쪽부터 한 발씩 번갈아 간다
+      const other = first === "home" ? "away" : "home";
+      expect(kick.team).toBe(i % 2 === 0 ? first : other);
+      expect(kick.round).toBe(Math.floor(i / 2) + 1);
+    });
+  });
+
+  it("기본 순서는 승부차기 기량 순이고 골키퍼가 맨 뒤다", () => {
+    const state = world();
+    const decider = stageTie(state, "facup", "r32", 890, [
+      { home: "arsenal", away: "chelsea", homeGoals: 0, awayGoals: 0 },
+    ])[0]!;
+    const order = shootoutOrder(state, decider, "home");
+    expect(order).toHaveLength(finishingXi(state, decider, "home").length);
+    const keepers = order.filter((p) => groupOf(p) === "GK");
+    for (const keeper of keepers) {
+      expect(order.indexOf(keeper)).toBeGreaterThanOrEqual(order.length - keepers.length);
+    }
+    const field = order.filter((p) => groupOf(p) !== "GK");
+    for (let i = 1; i < field.length; i++) {
+      expect(penaltySkill(field[i - 1]!)).toBeGreaterThanOrEqual(penaltySkill(field[i]!));
+    }
+  });
+
+  it("감독이 세운 사람이 앞에 서고, 뛰지 않은 선수는 걸러진다", () => {
+    const state = world();
+    const decider = stageTie(state, "facup", "r32", 891, [
+      { home: "arsenal", away: "chelsea", homeGoals: 0, awayGoals: 0 },
+    ])[0]!;
+    const base = shootoutOrder(state, decider, "home");
+    const wanted = [base.at(-1)!.id, base[3]!.id];
+    // 그 경기를 뛰지 않은 선수와 중복은 조용히 사라진다
+    const order = shootoutOrder(state, decider, "home", [...wanted, "없는-선수", wanted[0]!]);
+    expect(order.slice(0, 2).map((p) => p.id)).toEqual(wanted);
+    expect(order).toHaveLength(base.length);
+    // 나머지는 기본 순서로 뒤를 잇는다
+    expect(order.slice(2).map((p) => p.id)).toEqual(
+      base.filter((p) => !wanted.includes(p.id)).map((p) => p.id),
+    );
+  });
+
+  it("승자를 **묻는** 자리는 상태를 바꾸지 않는다 — 조회가 승부차기를 굴리면 안 된다", () => {
+    const state = world();
+    const decider = stageTie(state, "facup", "r16", 895, [
+      { home: "arsenal", away: "chelsea", homeGoals: 1, awayGoals: 1 },
+    ])[0]!;
+    for (let i = 0; i < 5; i++) {
+      expect(domesticTieWinner(state, "facup", "r16", 895)).toBeNull();
+    }
+    expect(decider.result!.aet).toBeUndefined();
+    expect(decider.result!.penalties).toBeUndefined();
+    expect(decider.result!.homeGoals).toBe(1);
+    expect(decider.result!.awayGoals).toBe(1);
+
+    // 굴리는 것은 resolve 쪽 하나다 — 그 뒤로는 조회도 같은 승자를 읽는다
+    const winner = resolveDomesticTie(state, "facup", "r16", 895);
+    expect(winner).not.toBeNull();
+    expect(domesticTieWinner(state, "facup", "r16", 895)).toBe(winner);
   });
 });
 
