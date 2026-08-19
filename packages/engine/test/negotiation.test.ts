@@ -10,6 +10,7 @@ import {
   askingPriceFor,
   contractUntil,
   dealOdds,
+  describeNegotiations,
   expireNegotiations,
   expiringContracts,
   financeOf,
@@ -26,6 +27,7 @@ import {
   openNegotiationFor,
   openRenewal,
   pendingOffer,
+  pendingVerdicts,
   playerById,
   playersOf,
   recallLoan,
@@ -1448,5 +1450,126 @@ describe("임대 중인 선수는 소유 구단만 움직인다", () => {
     expect(recallLoan(state, { playerId: ours.id }).ok).toBe(true);
     const listed = setTransferList(state, { playerId: ours.id, listed: true });
     expect(listed.ok, "불러들인 뒤에는 소유 구단이 다시 움직일 수 있다").toBe(true);
+  });
+});
+
+describe("방향은 모든 줄에 실린다", () => {
+  /**
+   * 요약 줄과 주의 줄은 GM이 **사실로 읽는** 문장이다 — 방향이 빠지면 모델은
+   * 감독이 내린 결정의 반대를 장면으로 확정한다 (transfer.md §1).
+   */
+  const state = createTestGame(42);
+  const ours = playersOf(state, state.userTeamId)[0]!;
+  const theirs = target(state);
+  const RIVAL = state.teams.find((t) => t.id !== state.userTeamId && t.id !== theirs.teamId)!.id;
+
+  const KINDS: Negotiation["kind"][] = ["buy", "sell", "loan", "loan_out", "renew"];
+  const WAY: Record<Negotiation["kind"], string> = {
+    buy: "영입",
+    sell: "매각",
+    loan: "임대 영입",
+    loan_out: "임대 송출",
+    renew: "재계약",
+  };
+  /** 그 갈래의 줄에 절대 서면 안 되는 낱말 — 뒤집힘은 이걸로 잡힌다 */
+  const NEVER: Record<Negotiation["kind"], string[]> = {
+    buy: ["매각", "임대", "송출", "재계약"],
+    sell: ["영입", "임대", "송출", "재계약"],
+    loan: ["매각", "송출", "재계약"],
+    loan_out: ["영입", "매각", "재계약"],
+    renew: ["영입", "매각", "임대", "송출"],
+  };
+
+  /** 한 갈래 · 한 차례의 협상을 세운다 (같은 id는 다시 만들지 않는다) */
+  function stage(
+    kind: Negotiation["kind"],
+    by: "us" | "them",
+    opts: { id?: string; answered?: boolean; status?: Negotiation["status"] } = {},
+  ): Negotiation {
+    const incoming = kind === "buy" || kind === "loan";
+    const player = incoming ? theirs : ours;
+    const id = opts.id ?? `neg-${kind}-${by}`;
+    const found = state.negotiations.find((n) => n.id === id);
+    if (found) return found;
+    const negotiation: Negotiation = {
+      id,
+      gamePlayerId: player.id,
+      kind,
+      counterpartTeamId: kind === "renew" ? null : incoming ? player.teamId : RIVAL,
+      windowId: null,
+      openedOn: state.date,
+      expiresOn: addDays(state.date, 10),
+      status: opts.status ?? "open",
+      rounds: [
+        {
+          date: state.date,
+          by,
+          fee: 20_000_000,
+          weeklyWage: 40_000,
+          contractYears: 3,
+          // 우리 차례는 답을 기다리는 중이거나(미래) 답이 도착했거나(오늘)다
+          respondsOn: by === "us" ? (opts.answered ? state.date : addDays(state.date, 3)) : null,
+          probability: 50,
+          verdict: null,
+        },
+      ],
+    };
+    state.negotiations.push(negotiation);
+    return negotiation;
+  }
+
+  /** 그 협상의 요약 줄 */
+  function lineOf(negotiation: Negotiation): string {
+    return describeNegotiations(state)
+      .split("\n")
+      .find((l) => l.startsWith(`${negotiation.id} `))!;
+  }
+
+  it("다섯 갈래 × 두 차례 — 요약 줄이 언제나 갈래를 적는다", () => {
+    for (const kind of KINDS) {
+      for (const by of ["us", "them"] as const) {
+        const line = lineOf(stage(kind, by));
+        expect(line, `${kind}/${by}`).toBeTruthy();
+        expect(line, `${kind}/${by}`).toContain(`${WAY[kind]} —`);
+        for (const wrong of NEVER[kind]) {
+          expect(line, `${kind}/${by}에 "${wrong}"이 섰다`).not.toContain(wrong);
+        }
+      }
+    }
+  });
+
+  it("내보내는 줄의 상대는 선수의 소속이 아니라 거래 상대다", () => {
+    for (const kind of ["sell", "loan_out"] as const) {
+      const line = lineOf(stage(kind, "them"));
+      expect(line).toContain(`${ours.name} → ${teamName(RIVAL)}`);
+      expect(line, "괄호 표기는 선수의 소속으로 읽힌다").not.toContain(`${ours.name}(`);
+    }
+    // 데려오는 갈래에서는 괄호가 선수의 지금 소속이라 그대로 맞다
+    expect(lineOf(stage("buy", "them"))).toContain(`${theirs.name}(${teamName(theirs.teamId)})`);
+  });
+
+  it("주의 줄 라벨에도 갈래가 선다 — 상대 오퍼·우리 오퍼·합의", () => {
+    const cases = [
+      {
+        id: stage("sell", "them", { id: "warn-sell" }).id,
+        want: `${ours.name} 매각 상대 오퍼 도착`,
+      },
+      {
+        id: stage("buy", "us", { id: "warn-buy", answered: true }).id,
+        want: `${theirs.name} 영입 우리 오퍼에 답이`,
+      },
+      {
+        id: stage("loan_out", "us", { id: "warn-loanout", status: "agreed" }).id,
+        want: `${ours.name} 임대 송출 합의됨`,
+      },
+      {
+        id: stage("renew", "us", { id: "warn-renew", answered: true }).id,
+        want: `${ours.name} 재계약 우리 오퍼에 답이`,
+      },
+    ];
+    const labels = new Map(pendingVerdicts(state).map((v) => [v.negotiation.id, v.label]));
+    for (const c of cases) {
+      expect(labels.get(c.id), c.id).toContain(c.want);
+    }
   });
 });
