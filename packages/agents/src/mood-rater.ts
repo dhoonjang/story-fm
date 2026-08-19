@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { MOOD_BATCH, applyMoodNotes, type GameState, type MoodBrief } from "@story-fm/engine";
 import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
-import { retryOnce, anchorStands } from "./retry";
+import { retryOnce, requireToolCall, anchorStands } from "./retry";
 
 /**
  * 심경 결산 — 코어가 낸 앵커 한 줄을 그 선수의 맥락(경기·불만·정착·폼)에 맞는
@@ -38,13 +38,16 @@ export function buildMoodPrompt(brief: MoodBrief): string {
   return [`${brief.from} ~ ${brief.to}`, "", "## 대상", ...rows].join("\n");
 }
 
+/** 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 (agents.md §3) */
+const REPORT_MOOD_TOOL = "report_mood";
+
 function makeReportTool(
   state: GameState,
   brief: MoodBrief,
   onApplied: (count: number) => void,
 ): GameToolSpec {
   return {
-    name: "report_mood",
+    name: REPORT_MOOD_TOOL,
     description:
       "선수별 심경 한 줄을 제출한다. 규칙을 어긴 문장은 코어가 버리고 기준 문장을 남긴다.",
     inputSchema: {
@@ -88,15 +91,17 @@ export async function reportMood(
   let client = llm;
   await retryOnce(
     "rater:mood",
-    () => {
-      client ??= createGameLLM(agentConfig("mood-rater"));
-      return client.runTurn({
-        system: MOOD_RATER_SYSTEM,
-        history: [],
-        user: buildMoodPrompt(brief),
-        tools: [makeReportTool(state, brief, (n) => (applied = n))],
-      });
-    },
+    () =>
+      requireToolCall(REPORT_MOOD_TOOL, () => {
+        client ??= createGameLLM(agentConfig("mood-rater"));
+        return client.runTurn({
+          system: MOOD_RATER_SYSTEM,
+          history: [],
+          user: buildMoodPrompt(brief),
+          tools: [makeReportTool(state, brief, (n) => (applied = n))],
+          toolChoice: { name: REPORT_MOOD_TOOL },
+        });
+      }),
     () => applied > 0, // 이미 심경이 반영됐으면 다시 부르지 않는다
   ).catch(anchorStands("rater:mood"));
   return { applied };
