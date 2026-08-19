@@ -3,6 +3,8 @@
  * 대화 이력 창. 입력은 변경 빈도 순 3층이다 (docs/llm/agents.md).
  */
 import {
+  characterEntry,
+  characterEntryOf,
   clockOf,
   computeStandings,
   dayOfWeek,
@@ -17,10 +19,8 @@ import {
   isSuspended,
   MAX_EXPLOITS,
   openInjury,
-  ownerOf,
   pendingVerdicts,
   playerName,
-  reportersOf,
   scoutingSummary,
   scoutReportLine,
   speakerCues,
@@ -36,10 +36,11 @@ import {
   type ScenePoint,
 } from "@story-fm/engine";
 import {
-  PERSONA_ROLE_LABEL,
   formatMoney,
+  personaRoleLabel,
   slotOfTime,
-  type Persona,
+  type CharacterEntry,
+  type CharacterInjection,
   type ScoutReportCard,
 } from "@story-fm/domain";
 
@@ -51,22 +52,29 @@ const MATCH_DIGEST_DAYS = 3;
 const EXPIRING_ALERT_DAYS = 180;
 
 /**
- * 페르소나 블록 — 인물 카드를 모델이 읽는 형태로 (people.md §1).
- * 예시 대사까지 실어야 모델이 톤을 흉내 내는 대신 그 사람으로 말한다.
- * 세이브당 고정이라 레퍼런스 층(캐시 프리픽스)에 들어간다.
+ * 인물 카드 — 인물지를 모델이 읽는 형태로 (people.md §6).
+ *
+ * 예시 대사까지 실어야 모델이 톤을 흉내 내는 대신 그 사람으로 말한다. 무엇이 실리고
+ * 무엇이 빠지는지는 **깊이**가 정하고, 그 판단은 코어(`characterEntry`)의 것이다 —
+ * 여기서는 온 것을 문장으로 옮기기만 한다.
  */
-export function describePersona(persona: Persona): string {
+export function describePersona(entry: CharacterEntry): string {
+  const label = personaRoleLabel(entry.role);
   return [
-    `[${PERSONA_ROLE_LABEL[persona.role]} — 이 인물로 말할 때의 지침]`,
-    `이름: ${persona.name} (${persona.archetype})`,
-    `성격: ${persona.traits.join(" · ")}`,
-    `동기: ${persona.motivation}`,
-    `말투: ${persona.speechStyle.note}`,
-    ...persona.speechStyle.samples.map((s) => `  예) ${s}`),
+    `[인물] ${entry.name} — ${label ? `${label} · ` : ""}${entry.archetype}`,
+    `성격: ${entry.traits.join(" · ")}`,
+    ...(entry.motivation ? [`동기: ${entry.motivation}`] : []),
+    ...(entry.speechStyle ? [`말투: ${entry.speechStyle.note}`] : []),
+    ...(entry.speechStyle?.samples ?? []).map((s) => `  예) ${s}`),
+    // 감독이 아는 만큼만 그린다 — 소문으로만 아는 사람에게 속내를 주면 만난 적 없는
+    // 사람의 목소리가 난다
+    ...(entry.depth === "rumour"
+      ? [`⚠️ 평판으로만 아는 사람이다 — 말투도 속내도 모른다. 소문의 수준에서만 그려라.`]
+      : []),
     // 직책이 아니라 이름으로 말한다 — 규칙은 시스템 프롬프트(출력 문법)에 한 번만 선다
-    `화자 태그: @${persona.characterId}:`,
+    `화자 태그: @${entry.characterId}:`,
     // 실명 인물 — 평판을 해칠 서사 금지 가드와 세트로만 운용한다 (sources.md §7)
-    ...(persona.real
+    ...(entry.real
       ? [
           `⚠️ 실존 인물이다. 직무 안에서 유능하게 그리고, 실제 인물의 평판을 해칠 서사 — 비위·불화·무능·사생활 — 는 만들지 않는다.`,
         ]
@@ -75,7 +83,29 @@ export function describePersona(persona: Persona): string {
 }
 
 /**
- * 레퍼런스 블록 — 캐시되는 시스템 블록. 감독 프로필 + 인물 카드 + 선수단 규칙.
+ * 이번 장면의 인물들 — 캐릭터북이 고른 카드 묶음 (people.md §6).
+ *
+ * ⚠️ **여기 있는 것은 "이 사람이 누구인가"뿐이다.** 카드는 이력에 굳으므로 변하는
+ * 값(폼·컨디션·부상·심경·계약)이 들어가면 3주 뒤 모델이 낡은 사실로 말한다. 그래서
+ * 블록 끝이 조회를 가리킨다 — 카드가 섰다는 건 그 인물이 이번 장면에 선다는 뜻이고,
+ * 그것이 곧 조회할 근거다. 포인터는 카드마다가 아니라 묶음에 한 번만 선다.
+ */
+export function describeCharacters(entries: readonly CharacterEntry[]): string | null {
+  if (entries.length === 0) return null;
+  return [
+    `[이번 장면의 인물]`,
+    ...entries.map(describePersona),
+    `지금의 사실 — 폼·컨디션·부상·심경·계약·능력치 — 은 이 카드에 없다. 그 인물을 두고 사실을 말하기 전에 조회로 확인하라.`,
+  ].join("\n\n");
+}
+
+/**
+ * 레퍼런스 블록 — 캐시되는 시스템 블록. 감독 프로필 + 선수단 규칙.
+ *
+ * ⚠️ **인물 카드는 여기 없다.** 코치·구단주·기자 다섯 장은 회견도 협상도 없는 턴에
+ * 한 번도 쓰이지 않는데 매 턴 읽혔다. 그렇다고 조건부로 넣었다 뺐다 하면 더 나쁘다 —
+ * 프리픽스가 바뀌는 턴마다 이 블록과 그 뒤 이력이 통째로 무효가 된다. 카드는 캐릭터북이
+ * 골라 **이번 턴 층**에 싣고 다음 턴부터 이력의 일부가 된다 (people.md §6).
  * ⚠️ 선수의 이름도 id도 여기 두지 않는다 — 명단은 영입·매각·2군 승격·주장 변경마다
  * 바뀌고, 한 줄이 달라지면 이 블록과 그 뒤의 이력이 통째로 무효가 된다. 이름은 매 턴
  * 층(`buildGmStateNote`)의 「선수단」 줄이 싣는다.
@@ -91,17 +121,10 @@ export function buildGmReference(state: GameState): string {
     `배경: ${m.background}`,
     `감독 발화 화자 형식: @${m.name}: <발화> — 당신은 이 화자를 대신 연기하지 않는다.`,
     ``,
-    describePersona(headCoachOf(state)),
-    ``,
-    describePersona(ownerOf(state)),
-    ``,
-    // 기자단 카드 — 회견은 세계가 먼저 부르는 자리라, 부를 사람이 카드로 서 있어야 한다
-    ...reportersOf(state).flatMap((r) => [describePersona(r), ``]),
     // ⚠️ 이름이 아니라 규칙이다 — 목록을 되살리면 캐시가 명단과 함께 깨지고,
     // 그 목록은 다시 id 표로 읽혀 한 번 불린 선수만 계속 말한다
     `[${teamName(state.userTeamId)} 선수단]`,
-    `선수는 인물 카드가 없어도 전원 화자다. 이름은 상태 스냅샷의 「선수단」 줄에 있고, 그 이름이 곧 화자 명단이다.`,
-    `스킬의 선수 인자도 그 이름으로 받는다 — 조회가 돌려준 id를 적어도 된다.`,
+    `선수의 이름은 상태 스냅샷의 「선수단」 줄에 있다. 스킬의 선수 인자도 그 이름으로 받는다 — 조회가 돌려준 id를 적어도 된다.`,
     `능력치·배치·컨디션·계약은 get_squad·search_players가 준다.`,
   ].join("\n");
 }
@@ -132,8 +155,9 @@ export function buildMatchReference(state: GameState): string {
     `이름: ${state.manager.name}`,
     `감독 발화 화자 형식: @${state.manager.name}: <발화>`,
     ``,
-    // 벤치에서 감독 옆에 서 있는 사람이다 — 경기 중 조언도 같은 사람의 말투여야 한다
-    describePersona(headCoachOf(state)),
+    // 벤치에서 감독 옆에 서 있는 사람이다 — 경기 중 조언도 같은 사람의 말투여야 한다.
+    // 경기 내내 같은 한 사람이라 여기서는 캐릭터북을 거치지 않고 상주한다
+    describePersona(characterEntry(headCoachOf(state), "full")),
     ``,
     buildMatchBrief(state),
   ].join("\n");
@@ -297,8 +321,9 @@ export function buildGmStateNote(
         : `예정 훈련 없음 — 기본 훈련까지 비워진 상태다`,
     alerts.length > 0 ? `주의: ${alerts.join(" · ")}` : `주의: 없음`,
     /**
-     * 선수단 — **화자 명단이다.** 이 줄이 없으면 카드가 있는 코치·구단주·기자만
-     * 말하고 서른 명은 조회 대상이 된다 (agents.md §6).
+     * 선수단 — **명단이지 화자 명단이 아니다.** 누가 말하는지는 캐릭터북이 세운
+     * 카드가 정하고(people.md §6), 이 줄은 그 앞의 것을 한다: GM은 **모르는 선수를
+     * 조회할 수 없으므로** 세계에 누가 있는지가 먼저 있어야 한다.
      *
      * 이름만 싣는다 — 배치·능력치·컨디션은 조회의 몫이고, 캐시 층이 아니라 여기인
      * 이유는 명단이 영입·승격·주장 변경마다 바뀌기 때문이다 (agents.md §5).
@@ -313,7 +338,7 @@ export function buildGmStateNote(
       // 구분자는 쉼표가 아니라 가운뎃점이다 — 한국어 성명에 공백이 들어가서
       // 쉼표로 이으면 어디서 한 사람이 끝나는지가 흐려진다
       return [
-        `선수단(${players.length}명) — 모두 화자다`,
+        `선수단(${players.length}명)`,
         `  1군 ${first.length}: ${first.join(" · ")}`,
         ...(reserve.length > 0 ? [`  2군 ${reserve.length}: ${reserve.join(" · ")}`] : []),
       ].join("\n");
@@ -789,24 +814,77 @@ function historyEnd(chat: GameState["chat"]): number {
   return 0;
 }
 
-export function buildGmHistory(
+/**
+ * 이력 창 **안에** 서 있는 카드 — 캐릭터북이 「이미 실렸다」를 판단하는 근거다.
+ *
+ * 창 밖으로 밀려난 기록은 여기 오지 않으므로 그 인물은 그 순간 다시 주입 대상이
+ * 된다 — 만료 규칙을 따로 두지 않는 이유다 (people.md §6).
+ */
+export function injectedCharacters(state: GameState): CharacterInjection[] {
+  return windowOf(state).turns.flatMap((turn) => turn.characters ?? []);
+}
+
+/**
+ * 이번 턴의 주입을 **입력으로 밀어 넣은 그 턴에** 기록한다.
+ *
+ * 카드는 감독 발화와 같은 층에 실리므로 이력에서도 그 자리에 다시 서야 한다.
+ * 모델 턴에 붙이면 카드가 답변 뒤로 가 순서가 뒤집힌다. ⚠️ 기록만 남긴다 —
+ * 카드 텍스트를 저장하면 채팅 화면에 프롬프트가 새고 이력이 그때의 문장으로 굳는다.
+ */
+export function recordCharacterInjection(
   state: GameState,
-): Array<{ role: "user" | "assistant"; content: string }> {
+  entries: readonly CharacterEntry[],
+): void {
+  if (entries.length === 0) return;
+  const turn = state.chat[state.chat.length - 1];
+  // 이번 턴에 밀어 넣은 입력이 꼬리다 (`historyEnd`) — 모델 턴이면 저장이 끝난
+  // 이력이라 붙일 자리가 아니다
+  if (!turn || turn.role === "model") return;
+  turn.characters = entries.map((e) => ({ characterId: e.characterId, depth: e.depth }));
+}
+
+/** 이력 창 — 어디서부터 어디까지가 이번 호출의 이력인가 */
+function windowOf(state: GameState): { turns: GameState["chat"] } {
   const chat = relevantTurns(state);
   const upto = historyEnd(chat);
   const start = Math.max(
     0,
     Math.floor(Math.max(0, upto - HISTORY_KEEP) / HISTORY_STEP) * HISTORY_STEP,
   );
-  return chat.slice(start, upto).map((turn) => ({
+  return { turns: chat.slice(start, upto) };
+}
+
+export function buildGmHistory(
+  state: GameState,
+): Array<{ role: "user" | "assistant"; content: string }> {
+  return windowOf(state).turns.map((turn) => ({
     // 오퍼레이터 지시도 user 역할로 간다(제공자 메시지는 user/assistant 교대다).
     // 갈리는 건 **내용의 형식**이다 — 감독 발화인지 조작인지를 본문이 밝힌다.
     role: turn.role === "model" ? ("assistant" as const) : ("user" as const),
     content:
       turn.role === "model"
         ? turn.text
-        : turn.role === "operator"
-          ? buildOperatorMessage(turn.text)
-          : buildManagerMessage(state, turn.text),
+        : // 그 턴에 실었던 카드를 같은 자리에 다시 붙인다 — 세이브에는 기록만 있고
+          // 문장은 매번 여기서 만들어진다 (people.md §6)
+          joinTurn(
+            describeCharacters(entriesOf(state, turn.characters)),
+            turn.role === "operator"
+              ? buildOperatorMessage(turn.text)
+              : buildManagerMessage(state, turn.text),
+          ),
   }));
+}
+
+/** 기록 → 인물지. 세계에서 사라진 이름은 조용히 빠진다 (방출된 선수) */
+function entriesOf(
+  state: GameState,
+  injected: readonly CharacterInjection[] | undefined,
+): CharacterEntry[] {
+  return (injected ?? [])
+    .map((record) => characterEntryOf(state, record.characterId, record.depth))
+    .filter((entry): entry is CharacterEntry => entry !== null);
+}
+
+function joinTurn(cards: string | null, body: string): string {
+  return cards === null ? body : `${cards}\n\n${body}`;
 }

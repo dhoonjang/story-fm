@@ -3,6 +3,7 @@ import {
   addDays,
   advanceTime,
   applyScenePoint,
+  characterEntry,
   createGame,
   clockOf,
   formatMoney,
@@ -12,6 +13,7 @@ import {
   ownerOf,
   pendingPress,
   reportersOf,
+  selectCharacters,
   speakerRoles,
   scoutPlayer,
   scoutReportCard,
@@ -29,6 +31,8 @@ import {
   buildGmReference,
   buildGmStateNote,
   buildGmTools,
+  describeCharacters,
+  injectedCharacters,
   parseSceneHeader,
   runOnboardingTurn,
   type GmToolCall,
@@ -123,20 +127,65 @@ describe("레퍼런스 블록 (캐시되는 시스템 블록)", () => {
     expect(buildGmReference(state)).toBe(before);
   });
 
-  it("수석코치 인물 카드가 레퍼런스에 실린다 (캐시 프리픽스 — 매 턴 정가가 아니다)", () => {
+  it("인물 카드는 레퍼런스에도 상태 스냅샷에도 없다 — 캐릭터북이 이번 턴 층에 싣는다", () => {
     const state = game();
     const coach = headCoachOf(state);
     const reference = buildGmReference(state);
 
-    expect(reference).toContain(coach.name);
-    expect(reference).toContain(coach.archetype);
-    expect(reference).toContain(coach.motivation);
-    // 말투는 지문만으로 붙지 않는다 — 예시 대사가 함께 가야 톤이 실제로 잡힌다
-    expect(reference).toContain(coach.speechStyle.note);
-    for (const sample of coach.speechStyle.samples) expect(reference).toContain(sample);
+    // 회견도 협상도 없는 턴에 다섯 장을 읽히지 않는다. 조건부로 넣었다 뺐다 하면
+    // 프리픽스가 바뀌는 턴마다 이 블록과 그 뒤 이력이 통째로 무효가 된다
+    expect(reference).not.toContain(coach.motivation);
+    expect(reference).not.toContain(coach.speechStyle.note);
+    // 매 턴 새로 읽히는 스냅샷에도 없다 — 카드가 서는 자리는 발화와 같은 층이다
+    expect(buildGmStateNote(state)).not.toContain(coach.motivation);
 
-    // 매 턴 새로 읽히는 상태 스냅샷에는 넣지 않는다 (인물은 세이브당 고정이다)
-    expect(buildGmStateNote(state)).not.toContain(coach.name);
+    // 카드가 서면 말투는 지문만으로 붙지 않는다 — 예시 대사가 함께 가야 톤이 잡힌다
+    const card = describeCharacters([characterEntry(coach, "full")])!;
+    expect(card).toContain(coach.name);
+    expect(card).toContain(coach.archetype);
+    expect(card).toContain(coach.motivation);
+    expect(card).toContain(coach.speechStyle.note);
+    for (const sample of coach.speechStyle.samples) expect(card).toContain(sample);
+  });
+
+  it("레퍼런스는 세이브당 고정이다 — 회견이 열려도 흔들리지 않는다", () => {
+    const state = game();
+    const before = buildGmReference(state);
+    // 카드가 레퍼런스에 있던 시절엔 여기서 프리픽스가 통째로 무효가 됐다
+    const reporter = reportersOf(state)[0]!;
+    state.chat.push({
+      role: "user",
+      text: `${reporter.characterId} 만나겠다`,
+      toolCalls: [],
+      at: state.date,
+      characters: [{ characterId: reporter.characterId, depth: "full" }],
+    });
+    expect(buildGmReference(state)).toBe(before);
+  });
+
+  it("주입한 카드는 이력에서 발화 앞에 다시 선다 — 세이브엔 기록만 있다", () => {
+    const state = game();
+    const coach = headCoachOf(state);
+    state.chat.push({
+      role: "user",
+      text: `${coach.characterId} 불러줘`,
+      toolCalls: [],
+      at: state.date,
+      characters: [{ characterId: coach.characterId, depth: "full" }],
+    });
+    state.chat.push({
+      role: "model",
+      text: "[2026-07-01 AM 9:00]\n@:",
+      toolCalls: [],
+      at: state.date,
+    });
+
+    const turn = buildGmHistory(state).find((h) => h.content.includes("불러줘"))!;
+    expect(turn.content).toContain(coach.motivation);
+    // 카드가 발화보다 앞이다 — 이번 턴에 실었던 순서와 같아야 이력이 재현된다
+    expect(turn.content.indexOf(coach.motivation)).toBeLessThan(turn.content.indexOf("불러줘"));
+    // 창 안에 선 카드는 캐릭터북이 「이미 실렸다」로 읽는다
+    expect(injectedCharacters(state)).toEqual([{ characterId: coach.characterId, depth: "full" }]);
   });
 
   /**
@@ -823,12 +872,12 @@ describe("시계는 장면이 걸린 만큼 민다", () => {
 
 /** 화자 — 코치 말고도 부를 사람이 레퍼런스에 서 있고, 화면이 그 자리를 안다. */
 describe("장면을 여는 사람은 그 일에 가장 가까운 사람이다", () => {
-  it("레퍼런스에 코치 말고도 부를 사람이 서 있다", () => {
+  it("코치 말고도 부를 사람은 이름이 불린 턴에 카드로 선다", () => {
     const state = game();
-    const ref = buildGmReference(state);
-    expect(ref).toContain(headCoachOf(state).characterId);
-    expect(ref).toContain(ownerOf(state).characterId);
-    for (const reporter of reportersOf(state)) expect(ref).toContain(reporter.characterId);
+    const owner = ownerOf(state);
+    const cards = selectCharacters(state, { message: `${owner.characterId} 만나야겠다` });
+    expect(cards.map((c) => c.characterId)).toContain(owner.characterId);
+    expect(describeCharacters(cards)).toContain(owner.motivation);
   });
 
   it("코치가 아닌 화자도 화면이 자리를 안다 — 이름만 뱉어도 붙는다", () => {

@@ -21,6 +21,7 @@ import {
   pendingVerdicts,
   pushNews,
   scoutReportCard,
+  selectCharacters,
   takeNews,
   takeReportCards,
   type AdvanceOutcome,
@@ -45,6 +46,9 @@ import {
   buildGmHistory,
   buildGmReference,
   buildGmStateNote,
+  describeCharacters,
+  injectedCharacters,
+  recordCharacterInjection,
   buildLedgerNote,
   buildManagerMessage,
   buildMatchReference,
@@ -322,6 +326,18 @@ async function runRealGmTurn(
         carriedReports,
       );
   /**
+   * 이번 장면에 설 인물 — **평시만이다.** 경기 중에는 벤치의 코치 한 사람이
+   * 레퍼런스에 상주하고(`buildMatchReference`), 중계가 읽을 것은 판이지 인물지가 아니다.
+   *
+   * 카드는 감독 발화와 같은 층으로 들어가고, 기록이 남아 다음 턴부터 **이력**에서
+   * 같은 자리에 다시 선다 — 그래서 레퍼런스(캐시 프리픽스)가 흔들리지 않는다
+   * (people.md §6 · agents.md §5).
+   */
+  const characters = inMatch
+    ? []
+    : selectCharacters(state, { message, injected: injectedCharacters(state) });
+  const characterBlock = describeCharacters(characters);
+  /**
    * 소식은 **스냅샷에 실린 그 턴에 비워진다** — `pendingEdits`와 같은 규약이다.
    * 경기 중 스냅샷은 장부(`buildLedgerNote`)라 소식을 읽지 않으므로 그때는 남겨 둔다.
    */
@@ -368,6 +384,8 @@ async function runRealGmTurn(
         system,
         history,
         user: [
+          // 인물 카드가 발화 앞에 선다 — 이력에서 다시 그릴 때도 같은 순서다
+          ...(characterBlock !== null ? [characterBlock, ``] : []),
           ...(operatorOrders ?? []).map((order) => buildOperatorMessage(`전술판 조작 — ${order}`)),
           operator ? buildOperatorMessage(message) : buildManagerMessage(state, message),
           // 코어가 이미 굴린 구간 — 예전엔 도구 반환값으로 오던 것이 이제 입력이다.
@@ -517,6 +535,9 @@ async function runRealGmTurn(
    * 굴렀으므로 그 도착은 줄에 남아 다음 턴에 선다 (`pendingReportCards`).
    */
   const reports = [...carriedReports, ...skippedReports];
+  // 실은 카드를 그 턴에 기록한다 — 다음 턴부터 이력이 같은 카드를 다시 그린다.
+  // 턴이 실패하면 상태가 통째로 버려지므로 기록도 함께 없던 일이 된다
+  recordCharacterInjection(state, characters);
   return {
     text,
     toolCalls: calls,
