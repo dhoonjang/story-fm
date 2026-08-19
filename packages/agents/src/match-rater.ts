@@ -15,7 +15,7 @@ import {
 } from "@story-fm/engine";
 import { ATTRIBUTE_AXES } from "@story-fm/domain";
 import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
-import { retryOnce, anchorStands } from "./retry";
+import { retryOnce, requireToolCall, anchorStands } from "./retry";
 
 /**
  * 경기 후 평점 — 코어가 장부 사실로 앵커를 박고, LLM이 사건 목록을 읽어
@@ -109,13 +109,16 @@ export function buildRatingPrompt(brief: MatchRatingBrief): string {
   ].join("\n");
 }
 
+/** 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 (agents.md §3) */
+const RATE_PLAYERS_TOOL = "rate_players";
+
 function makeRateTool(
   state: GameState,
   matchId: string,
   onApplied: (applied: number) => void,
 ): GameToolSpec {
   return {
-    name: "rate_players",
+    name: RATE_PLAYERS_TOOL,
     description:
       "출전한 선수 전원의 경기 평점과 한 줄 근거를 **한 번에** 제출한다. 기준 평점에서 크게 벗어난 값은 코어가 잘라 낸다. 두 번째 제출은 반영되지 않는다.",
     inputSchema: {
@@ -198,15 +201,17 @@ export async function rateMatchPerformances(
   let client = llm;
   await retryOnce(
     "rater:match",
-    () => {
-      client ??= createGameLLM(agentConfig("match-rater"));
-      return client.runTurn({
-        system: MATCH_RATER_SYSTEM,
-        history: [],
-        user: buildRatingPrompt(brief),
-        tools: [makeRateTool(state, brief.matchId, (n) => (applied = n))],
-      });
-    },
+    () =>
+      requireToolCall(RATE_PLAYERS_TOOL, () => {
+        client ??= createGameLLM(agentConfig("match-rater"));
+        return client.runTurn({
+          system: MATCH_RATER_SYSTEM,
+          history: [],
+          user: buildRatingPrompt(brief),
+          tools: [makeRateTool(state, brief.matchId, (n) => (applied = n))],
+          toolChoice: { name: RATE_PLAYERS_TOOL },
+        });
+      }),
     () => matchRated(state, brief.matchId), // 장부에 표식이 섰으면 다시 부르지 않는다
   ).catch(anchorStands("rater:match"));
   return { applied };

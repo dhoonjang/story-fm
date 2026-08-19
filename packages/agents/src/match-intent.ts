@@ -3,7 +3,7 @@ import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@st
 import { DIRECTIVE_INTENSITIES, PLAYER_DIRECTIVE_KINDS } from "@story-fm/domain";
 import { buildLedgerNote } from "./gm-input";
 import { MatchIntentSchema, type MatchIntent } from "./match-intent-schema";
-import { retryOnce } from "./retry";
+import { retryOnce, requireToolCall } from "./retry";
 import { toToolSchema } from "./tool-schema";
 
 /**
@@ -57,9 +57,12 @@ export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조
 # unresolved
 어느 갈래에도 담기지 않은 말은 감독의 표현 그대로 unresolved에 남긴다.`;
 
+/** 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 (agents.md §3) */
+const REPORT_INTENT_TOOL = "report_intent";
+
 function makeReportTool(onIntent: (intent: MatchIntent) => void): GameToolSpec {
   return {
-    name: "report_intent",
+    name: REPORT_INTENT_TOOL,
     description: "감독의 말을 구조화된 의도로 제출한다. 이 도구로만 답한다.",
     inputSchema: toToolSchema(MatchIntentSchema),
     handle: (input: unknown) => {
@@ -95,16 +98,18 @@ export async function runMatchIntent(
   try {
     await retryOnce(
       "match:intent",
-      () => {
-        client ??= createGameLLM(agentConfig("match-intent"));
-        return client.runTurn({
-          system: MATCH_INTENT_SYSTEM,
-          history: [],
-          // 명단·현재 6축·걸린 지시·공략 표적이 여기 다 있다 — 중계가 읽는 것과 같은 블록
-          user: [buildLedgerNote(state), ``, `[감독]`, message].join("\n"),
-          tools: [makeReportTool((value) => (intent = value))],
-        });
-      },
+      () =>
+        requireToolCall(REPORT_INTENT_TOOL, () => {
+          client ??= createGameLLM(agentConfig("match-intent"));
+          return client.runTurn({
+            system: MATCH_INTENT_SYSTEM,
+            history: [],
+            // 명단·현재 6축·걸린 지시·공략 표적이 여기 다 있다 — 중계가 읽는 것과 같은 블록
+            user: [buildLedgerNote(state), ``, `[감독]`, message].join("\n"),
+            tools: [makeReportTool((value) => (intent = value))],
+            toolChoice: { name: REPORT_INTENT_TOOL },
+          });
+        }),
       () => intent !== null,
     );
   } catch (error) {

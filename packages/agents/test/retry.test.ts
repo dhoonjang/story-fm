@@ -71,6 +71,36 @@ describe("runMatchIntent — 의도를 받은 뒤의 실패", () => {
     warn.mockRestore();
   });
 
+  /**
+   * 강제 도구를 실었는데도 본문만 돌아오는 경우 — 예외가 없어 `retryOnce`가 그냥
+   * 지나가면, 해석은 **한 번** 실패에 턴이 취소되고 결산은 로그 한 줄 없이 앵커로
+   * 떨어진다 (agents.md §8).
+   */
+  it("도구 없이 본문만 답하면 다시 부르고, 그래도 없으면 ok:false다", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const llm: GameLLM = {
+      runTurn: () =>
+        Promise.resolve({
+          text: "왼쪽을 두껍게 하겠습니다.",
+          history: { version: 1, provider: "google", model: "test", messages: [] },
+          historyBase: 0,
+          usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+          toolCallCount: 0,
+          stopReason: "completed",
+        }),
+    };
+    const spy = vi.spyOn(llm, "runTurn");
+
+    const result = await runMatchIntent(emptyState, "왼쪽을 두껍게", llm);
+
+    expect(result.ok).toBe(false);
+    expect(spy).toHaveBeenCalledTimes(2);
+    // 요청에 강제 도구가 실렸는지 — 프롬프트 문장만으로는 이 자리가 비어 있었다
+    expect(spy.mock.calls[0]![0].toolChoice).toEqual({ name: "report_intent" });
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it("의도 없이 두 번 실패하면 ok:false다 — 짐작해 채우지 않는다", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const llm: GameLLM = { runTurn: () => Promise.reject(new Error("529")) };

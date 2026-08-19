@@ -79,6 +79,15 @@ export interface ToolCallContext {
 }
 
 /**
+ * 이 호출이 도구를 부르는 방식 — **제공자 중립 계약**이다 (models.md §3-2).
+ *
+ * `"auto"`는 모델이 고른다. `{ name }`은 **그 도구를 반드시 부르게** 한다 —
+ * 산출이 도구 하나뿐인 자리(지시 해석·결산 셋)가 쓰고, 어댑터가 자기 SDK의
+ * 파라미터로 옮긴다.
+ */
+export type ToolChoice = "auto" | { name: string };
+
+/**
  * 게임 도구 — LLM의 tool call을 받아 검증(Zod)·실행하는 계약.
  * handle()은 파싱 실패·규칙 위반을 한국어 메시지로 돌려주고,
  * 어댑터가 이를 tool_result(is_error)로 되돌려 LLM이 수정 재시도하게
@@ -137,6 +146,14 @@ export interface TurnRequest {
    */
   stateNote?: string;
   tools?: GameToolSpec[];
+  /**
+   * 도구 호출을 강제할지 — 기본은 `"auto"`.
+   *
+   * ⚠️ **첫 요청에만 건다.** 도구 결과를 돌려준 뒤에도 계속 강제하면 모델이
+   * 턴을 끝낼 길이 없어 왕복 상한까지 같은 도구를 다시 부른다. 그래서 강제는
+   * 이 턴의 **첫 요청** 하나에만 실리고, 이후 반복은 `"auto"`로 돈다.
+   */
+  toolChoice?: ToolChoice;
   maxTokens?: number;
   /**
    * 텍스트 델타 콜백 — 지정하면 어댑터가 스트리밍 모드로 응답을 받아

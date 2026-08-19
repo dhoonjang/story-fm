@@ -6,6 +6,27 @@
  * 남긴다 — 결산 하나 때문에 경기 결과나 시간 진행이 막히면 안 된다.
  */
 
+import type { TurnResult } from "@story-fm/llm";
+
+/**
+ * 도구를 부르지 않은 응답 — **실패다** (agents.md §8).
+ *
+ * 강제 도구를 실었는데도 본문만 돌아오면 `runTurn`은 정상 resolve하고 산출은
+ * 비어 있다. 예외가 없으면 아래 `retryOnce`가 다시 부르지 않아, 해석은 턴
+ * 취소로 결산은 앵커로 **로그 한 줄 없이** 떨어진다. 그래서 여기서 실패로
+ * 바꾼다 — 그러면 재시도 한 번과 실패 로그가 평소의 길을 그대로 탄다.
+ */
+export async function requireToolCall(
+  tool: string,
+  run: () => Promise<TurnResult>,
+): Promise<TurnResult> {
+  const result = await run();
+  if (result.toolCallCount === 0) {
+    throw new Error(`모델이 ${tool}을 부르지 않고 본문으로 답했습니다`);
+  }
+  return result;
+}
+
 /**
  * `touched`가 true면 재시도하지 않는다 — 도구가 이미 상태를 바꿨거나 화면에
  * 글자가 나간 뒤라, 다시 부르면 이중 반영·중복 출력이 된다.

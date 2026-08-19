@@ -108,13 +108,14 @@ mock은 폴백이 아니라 **모드**이고 규칙 기반 오케스트레이터
 ## 3. 어댑터 — 제공자 중립 계약 하나 (`GameLLM`)
 
 ```
-runTurn({ system, history, user, stateNote?, tools?, maxTokens?, onText?, signal? })
+runTurn({ system, history, user, stateNote?, tools?, toolChoice?, maxTokens?, onText?, signal? })
   → { text, history: StoredLlmHistory, historyBase, usage, toolCallCount, stopReason }
 ```
 
 - `system`은 **블록 배열**이다 — 앞이 더 안정적인 순서로 배치해 캐시 프리픽스를 만든다.
 - 도구는 `GameToolSpec` — 제공자 중립 JSON Schema + `handle()`. 검증 실패·규칙 위반은
   한국어 메시지로 돌아가 모델이 고쳐 다시 부른다.
+- `toolChoice`는 도구 호출을 강제할지다 — `"auto"`(기본) 또는 `{ name }` (§3-2).
 - 한 턴의 도구 왕복 상한은 셋 다 **8회**(`MAX_TOOL_ITERATIONS`).
 - `signal`은 **팩토리가 시한에서 만들어 넣는다** — 호출하는 쪽(agents)이 주는 값이
   아니다. 어댑터는 그 신호를 자기 SDK가 아는 자리로 옮기기만 한다 (§1-1).
@@ -174,6 +175,26 @@ chunk에만 실린다 — 그 옵션이 없으면 계측이 이 에이전트를 
   부르고도 `STOP`/`stop`을 보고할 수 있어, 도구 왕복을 계속할지 여기서 갈린다.
 - **`truncated`가 잘린 턴의 유일한 신호다** — 첫 장면은 그 자리에서 실패하고
   (agents.md §1), 이미 스트리밍으로 나간 진행 턴은 원인만 로그에 남는다.
+
+## 3-2. `toolChoice` — 도구를 반드시 부르게 하기
+
+산출이 도구 하나뿐인 호출(지시 해석·결산 셋 — agents.md §3·§4)은 "이 도구로만 답한다"는
+**프롬프트 문장이 아니라 요청 파라미터로** 강제한다. 문장에만 기대면 모델이 본문으로
+답해도 호출은 정상으로 끝나고, 산출이 빈 채 해석은 턴 취소로 결산은 앵커로 떨어진다.
+
+| 중립 값         | Anthropic                            | Google                                       | OpenAI                                              |
+| --------------- | ------------------------------------ | -------------------------------------------- | --------------------------------------------------- |
+| `"auto"` (기본) | `tool_choice` 없음                   | `functionCallingConfig.mode: AUTO`           | `tool_choice` 없음                                  |
+| `{ name }`      | `tool_choice: { type:"tool", name }` | `mode: ANY` + `allowedFunctionNames: [name]` | `tool_choice: { type:"function", function:{name} }` |
+
+- ⚠️ **강제는 그 턴의 첫 요청에만 실린다.** 도구 결과를 돌려준 뒤에도 걸어 두면 모델이
+  턴을 끝낼 길이 없어 왕복 상한(8회)까지 같은 도구를 다시 부른다. 이후 반복은 `"auto"`다.
+- ⚠️ **Gemini의 강제는 per-request config로 간다.** 그 config는 chat 설정을 상속하지 않고
+  **통째로 대체**하므로(SDK 계약) 모드만 얹지 않고 chat 설정을 그대로 펼쳐 넘긴다 — 안
+  그러면 systemInstruction·도구·출력 상한·시한이 첫 요청에서 사라진다.
+- **강제해도 안 부를 수 있다** — 호출이 실패하거나 제공자가 무시하면 `toolCallCount`가 0인
+  응답이 온다. 그것을 실패로 보고 한 번 더 부르는 것은 호출 쪽의 몫이다
+  ([agents.md](./agents.md) §8).
 
 ## 4. 계측과 예산 (`usage-meter.ts`)
 
@@ -254,6 +275,9 @@ chunk에만 실린다 — 그 옵션이 없으면 계측이 이 에이전트를 
   읽는 값은 전부 중립이다 — 종료 사유(§3-1), 사용량(§4), 이력 태그.
 - **설정이 적어 둔 것은 반드시 요청에 실린다.** 실을 수 없으면 무시하는 대신 시작할
   때 실패한다 (§1-2).
+- **구조화 출력은 프롬프트 문장이 아니라 요청 파라미터로 강제한다.** 산출이 도구
+  하나뿐인 호출은 `toolChoice: { name }`을 싣는다 — "이 도구로만 답한다"는 문장만으로는
+  본문으로 답한 응답이 정상 종료로 지나간다 (§3-2).
 - **설정 파싱은 순수 함수로 남긴다**(`parseLlmConfig`) — 환경을 읽는 자리가 늘면 설정 검증 테스트가 깨진다.
 - **출력 상한은 사고와 본문을 함께 덮는다.** "장면이 몇 줄이니 이만큼"으로 좁히면 본문이
   문장 한복판에서 잘린다. 상한은 상한일 뿐 — 과금은 실제 생성분이다.

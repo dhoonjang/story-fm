@@ -196,6 +196,27 @@ export class GeminiGameLLM implements GameLLM {
       history: baseHistory,
     });
 
+    /**
+     * 강제 도구 — 첫 요청에만 건다 (TurnRequest.toolChoice). 계속 걸어 두면
+     * 모델이 턴을 끝낼 길이 없어 왕복 상한까지 같은 도구를 다시 부른다.
+     *
+     * ⚠️ per-request config는 chat 설정을 **통째로 대체**하므로(SDK 계약,
+     * `sendMessage`) 모드만 얹지 않고 `generationConfig`를 그대로 펼쳐 넘긴다 —
+     * 안 그러면 systemInstruction·도구·출력 상한·시한이 첫 요청에서 사라진다.
+     */
+    const forcedConfig: GenerateContentConfig | undefined =
+      typeof req.toolChoice === "object" && tools.length > 0
+        ? {
+            ...generationConfig,
+            toolConfig: {
+              functionCallingConfig: {
+                mode: FunctionCallingConfigMode.ANY,
+                allowedFunctionNames: [req.toolChoice.name],
+              },
+            },
+          }
+        : undefined;
+
     const usage: TurnUsage = {
       inputTokens: 0,
       outputTokens: 0,
@@ -213,8 +234,10 @@ export class GeminiGameLLM implements GameLLM {
       let response: GenerateContentResponse | undefined;
       let responseText = "";
 
+      const perRequest = iter === 0 && forcedConfig ? { config: forcedConfig } : {};
+
       if (req.onText) {
-        const stream = await chat.sendMessageStream({ message });
+        const stream = await chat.sendMessageStream({ message, ...perRequest });
         for await (const chunk of stream) {
           response = chunk;
           const delta = visibleText(chunk);
@@ -224,7 +247,7 @@ export class GeminiGameLLM implements GameLLM {
           }
         }
       } else {
-        response = await chat.sendMessage({ message });
+        response = await chat.sendMessage({ message, ...perRequest });
         responseText = visibleText(response);
       }
 
