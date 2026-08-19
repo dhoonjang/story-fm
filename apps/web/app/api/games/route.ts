@@ -12,7 +12,7 @@ import {
   topLeagues,
 } from "@story-fm/engine";
 import { runOnboardingTurn } from "@story-fm/agents";
-import { bindTurnTrace, traceTurn } from "@story-fm/llm";
+import { beginGameUsage, bindTurnTrace, traceTurn } from "@story-fm/llm";
 import { toPayload } from "@/lib/store";
 import { turnErrorMessage } from "@/lib/turn-runner";
 
@@ -98,6 +98,8 @@ export async function POST(request: Request) {
    * 실패하면 **게임을 만들지 않는다** — 규칙 장면으로 열어 두면 유저는 그것이
    * 이 게임의 첫 장면인 줄 알고, 다시 시작할 기회를 잃는다.
    */
+  // 토큰 예산의 단위는 게임이다 — 새 게임의 장부는 첫 장면부터 센다 (models.md §4)
+  beginGameUsage(state.id);
   // 첫 장면의 원문도 그 model 턴에 묶인다 — 묶는 것은 `traceTurn` 범위 안에서만 된다
   const opened = await traceTurn(async () => {
     try {
