@@ -1,17 +1,21 @@
 import {
   CAPTAIN_ROLE_LABEL,
+  CharacterMemorySchema,
   HEAD_COACH_ROLE_LABEL,
   normalizeSpeaker,
   personaRoleLabel,
+  PersonaSchema,
+  type CharacterMemory,
   type Negotiation,
   type Persona,
   type PersonaRole,
+  type SpeechStyle,
 } from "@story-fm/domain";
 import { realCoachNameOf } from "../data/coach-seeds";
 import { realOwnerNameOf } from "../data/owner-seeds";
 import { claimPersonaName, personaNamePoolOf } from "../data/names";
 import { countryOfTeam } from "../data/team-catalog";
-import { makeRng, pick } from "../core/rng";
+import { hashChannel, makeRng, pick } from "../core/rng";
 
 /**
  * 페르소나 생성 — **시드로 결정적**이다 (people.md §2).
@@ -415,6 +419,19 @@ export interface SpeakerRole {
  * 가볍고, 대화에 서는 사람의 대부분이기도 하다.
  */
 export function speakerRoles(state: SpeakerSource): Record<string, SpeakerRole> {
+  const roles: Record<string, SpeakerRole> = {};
+  for (const [key, role] of collectSpeakers(state)) if (role !== null) roles[key] = role;
+  return roles;
+}
+
+/**
+ * 사전을 만들기 **전**의 자리들 — 값이 `null`이면 이름이 겹쳐 판단을 포기한 자리다.
+ *
+ * `speakerRoles`가 걸러 내기 전 단계를 따로 두는 이유는 **이름 충돌 검사**다: 겹쳐서
+ * 빠진 이름은 사전에 없지만 그 이름의 자리는 이미 차 있다. 사전만 보고 등록하면
+ * 하필 그 자리에 새 인물이 선다 (`registerCharacters`).
+ */
+function collectSpeakers(state: SpeakerSource): Map<string, SpeakerRole | null> {
   // null = 이름이 겹쳐 판단을 포기한 자리
   const seen = new Map<string, SpeakerRole | null>();
   const put = (rawName: string, role: SpeakerRole) => {
@@ -471,9 +488,7 @@ export function speakerRoles(state: SpeakerSource): Record<string, SpeakerRole> 
     }
   }
 
-  const roles: Record<string, SpeakerRole> = {};
-  for (const [key, role] of seen) if (role !== null) roles[key] = role;
-  return roles;
+  return seen;
 }
 
 /** 이 세이브의 수석코치 — 옛 세이브라 비어 있으면 시드로 그 자리에서 만든다 */
@@ -638,4 +653,162 @@ export function ensurePersonas(state: {
       persona.keywords = personaKeywords(persona);
     }
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * 캐릭터북 갱신 — 이력이 접힐 때 그 구간이 남기는 것 (people.md §9-1)
+ *
+ * 맡기는 것은 둘뿐이다: **인물별 기억 한 줄**과 **새 화자 등록**. 인물지의
+ * 성격·동기·말투는 시드가 정하고 LLM이 고쳐 쓰지 않는다 — 덮어쓰면 "같은
+ * 세이브는 같은 사람을 만난다"가 깨진다 (AGENTS.md §6.4).
+ * ------------------------------------------------------------------ */
+
+/** 인물당 남기는 기억 — 넘치면 오래된 것부터 민다 */
+export const CHARACTER_MEMORY_KEEP = 6;
+
+/** 모델이 무게를 적지 않았을 때 — 서사 메모리의 기본값(`pushNarrative`)과 같은 눈금이다 */
+const CHARACTER_MEMORY_DEFAULT_SALIENCE = 2;
+
+export interface CharacterMemoryDraft {
+  characterId: string;
+  text: string;
+  /** 없으면 코어가 기본값을 준다 */
+  salience?: number;
+}
+
+/** 기억을 적을 최소 상태 — 날짜는 세이브가 안다 */
+interface CharacterMemorySource extends SpeakerSource {
+  date: string;
+  characterMemories?: CharacterMemory[];
+}
+
+/**
+ * LLM이 낸 기억을 검사해 반영한다 — 걸린 항목만 버리고 나머지는 반영한다
+ * (`applyMoodNotes`와 같은 계약).
+ *
+ * 거르는 조건은 셋이다:
+ * ① **이 세계의 화자가 아닌 이름** — GM이 지어낸 이름에 붙인 기억은 아무에게도
+ *    닿지 않는다. 겹쳐서 사전에서 빠진 이름은 `collectSpeakers`가 여전히 쥐고
+ *    있으므로, 동명이인이라고 그 사람의 기억까지 사라지진 않는다.
+ * ② 스키마 밖 — 길이 120자와 무게 1~5는 `CharacterMemorySchema`가 정한다.
+ * ③ **글자까지 같은 기억** — 압축이 되풀이되면 같은 구간을 다시 읽는다.
+ *
+ * `date`는 모델이 적은 것을 믿지 않고 `state.date`로 채운다.
+ *
+ * @returns 실제로 반영된 수
+ */
+export function applyCharacterMemories(
+  state: CharacterMemorySource,
+  drafts: readonly CharacterMemoryDraft[],
+): number {
+  const speakers = collectSpeakers(state);
+  const memories = state.characterMemories ?? [];
+  let applied = 0;
+  for (const draft of drafts) {
+    const characterId = draft.characterId.trim();
+    if (!speakers.has(normalizeSpeaker(characterId))) continue;
+    const parsed = CharacterMemorySchema.safeParse({
+      characterId,
+      date: state.date,
+      text: draft.text.trim(),
+      salience: draft.salience ?? CHARACTER_MEMORY_DEFAULT_SALIENCE,
+    });
+    if (!parsed.success) continue;
+    const memory = parsed.data;
+    if (memories.some((m) => m.characterId === characterId && m.text === memory.text)) continue;
+    memories.push(memory);
+    // 상한을 넘긴 인물은 **그 인물의** 가장 오래된 것부터 민다 (§9 서사 메모리와 같은 규약)
+    const over = memories
+      .filter((m) => m.characterId === characterId)
+      .slice(0, -CHARACTER_MEMORY_KEEP);
+    for (const old of over) memories.splice(memories.indexOf(old), 1);
+    applied += 1;
+  }
+  state.characterMemories = memories;
+  return applied;
+}
+
+export interface CharacterDraft {
+  characterId: string;
+  name: string;
+  role: PersonaRole;
+  archetype: string;
+  traits: string[];
+  motivation: string;
+  speechStyle: SpeechStyle;
+}
+
+/**
+ * GM이 세울 수 있는 자리 — 나머지 셋은 이유가 다르다.
+ *
+ * `head_coach`·`owner`는 `headCoachOf`/`ownerOf`가 **첫 번째 하나**를 찾는 자리라,
+ * 둘째가 서면 그 세이브의 코치가 조용히 바뀐다. `player`는 선수 페르소나가 저장이
+ * 아니라 파생이라서다 (people.md §6) — 세이브에 밀어 넣으면 그 규약이 깨진다.
+ *
+ * ⚠️ **여기서 역할을 늘리지 마라.** `PersonaRoleSchema`는 열린 집합이라고 적혀 있지만
+ * 실제로는 `z.enum`이라 여섯뿐이고, 하나를 늘리려면 라벨·아이콘·화자 사전이 함께
+ * 움직여야 한다. 상대 감독도 에이전트도 지금은 `friend`로 선다.
+ */
+const REGISTERABLE_ROLES = new Set<PersonaRole>(["reporter", "friend", "supporter"]);
+
+/**
+ * 새 화자를 캐릭터북에 세운다 — 검사에 걸린 항목만 버린다.
+ *
+ * 거르는 조건은 셋이다:
+ * ① 자리가 하나뿐인 역할(→ `REGISTERABLE_ROLES`)
+ * ② **이미 있는 `characterId`** — 기존 인물은 자리를 지킨다. 성격·동기·말투를
+ *    덮어쓰지 않고 그냥 등록하지 않는다. 갱신은 기억을 더하는 것뿐이다.
+ * ③ **이미 선 화자와 겹치는 이름** — 우리 선수와 이름이 같은 에이전트를 세우면
+ *    화면이 두 사람을 한 사람으로 읽는다. 겹친 자리에 아무것도 붙이지 않는
+ *    `speakerRoles`의 원칙(§3 ③)을 등록 쪽에서도 든다.
+ *
+ * `seed`는 모델이 아니라 코어가 (세이브 시드, `characterId`)에서 결정적으로 뽑고,
+ * `keywords`는 `personaKeywords`가 채운다.
+ *
+ * @returns 실제로 등록된 수
+ */
+export function registerCharacters(
+  state: SpeakerSource,
+  drafts: readonly CharacterDraft[],
+): number {
+  const occupied = new Set(collectSpeakers(state).keys());
+  // 페르소나가 빈 세이브에 새 인물만 밀어 넣으면 `speakerRoles`의 시드 폴백이 꺼져
+  // 코치·구단주·기자단이 사전에서 통째로 사라진다. 폴백과 같은 사람들을 함께 세운다
+  const personas = state.personas?.length
+    ? state.personas
+    : [headCoachOf(state), ownerOf(state), ...reportersOf(state)];
+  const ids = new Set(personas.map((p) => p.characterId));
+  const added: Persona[] = [];
+  for (const draft of drafts) {
+    if (!REGISTERABLE_ROLES.has(draft.role)) continue;
+    const characterId = draft.characterId.trim();
+    const name = draft.name.trim();
+    if (ids.has(characterId)) continue;
+    const keys = [normalizeSpeaker(characterId), normalizeSpeaker(name)];
+    if (keys.some((key) => key.length === 0 || occupied.has(key))) continue;
+    const persona = {
+      characterId,
+      name,
+      role: draft.role,
+      archetype: draft.archetype.trim(),
+      traits: draft.traits.map((t) => t.trim()),
+      motivation: draft.motivation.trim(),
+      speechStyle: {
+        note: draft.speechStyle.note.trim(),
+        samples: draft.speechStyle.samples.map((s) => s.trim()),
+      },
+      // 같은 세이브는 같은 사람을 만난다 — 등록된 인물도 시드에서 파생한다
+      seed: (state.seed ^ hashChannel(`persona:registered:${characterId}`)) >>> 0,
+    };
+    const parsed = PersonaSchema.safeParse({
+      ...persona,
+      keywords: personaKeywords(persona),
+    });
+    if (!parsed.success) continue;
+    added.push(parsed.data);
+    ids.add(characterId);
+    for (const key of keys) occupied.add(key);
+  }
+  if (added.length > 0) state.personas = [...personas, ...added];
+  return added.length;
 }

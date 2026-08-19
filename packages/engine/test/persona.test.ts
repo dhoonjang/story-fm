@@ -19,7 +19,13 @@ import {
   generateReporters,
   teamCatalog,
 } from "@story-fm/engine";
-import { personaKeywords } from "../src/world/persona";
+import {
+  applyCharacterMemories,
+  CHARACTER_MEMORY_KEEP,
+  personaKeywords,
+  registerCharacters,
+  type CharacterDraft,
+} from "../src/world/persona";
 import { generatePlayerPersona, PLAYER_ARCHETYPE_LABELS } from "../src/world/player-persona";
 import { createTestGame } from "./helpers";
 
@@ -512,5 +518,134 @@ describe("페르소나 키워드", () => {
     // 선수 페르소나는 파생이라 세이브에 들어가지 않는다
     expect(state.personas?.some((p) => p.role === "player")).toBe(false);
     expect(state.personas).toHaveLength(5);
+  });
+});
+
+/**
+ * 캐릭터북 갱신 — 이력이 접힐 때 LLM에 맡기는 둘 (people.md §9-1).
+ * 성격·동기·말투는 시드의 것이고, 코어가 검사해 통과한 것만 세이브에 남는다.
+ */
+describe("캐릭터북 갱신", () => {
+  const draftOf = (over: Partial<CharacterDraft> = {}): CharacterDraft => ({
+    characterId: "미란다 코스타",
+    name: "미란다 코스타",
+    role: "friend",
+    archetype: "옛 동료",
+    traits: ["직설적", "오래 봤다"],
+    motivation: "감독이 무너지지 않게 옆에 있고 싶다.",
+    speechStyle: { note: "반말. 짧게 자른다.", samples: ["그만 좀 해. 얼굴이 말이 아니야."] },
+    ...over,
+  });
+
+  it("이름이 이미 선 화자와 겹치면 등록하지 않는다", () => {
+    const state = createTestGame();
+    const before = state.personas!.length;
+    const squadName = state.players.find((p) => p.teamId === state.userTeamId)!.name;
+
+    // 우리 선수와 같은 이름의 에이전트 — 화면이 두 사람을 한 사람으로 읽는다
+    expect(registerCharacters(state, [draftOf({ characterId: squadName, name: squadName })])).toBe(
+      0,
+    );
+    // 공백만 다른 이름도 같은 사람이다 (normalizeSpeaker)
+    const spaced = squadName.replace(/\s+/gu, "");
+    expect(registerCharacters(state, [draftOf({ characterId: spaced, name: spaced })])).toBe(0);
+    expect(state.personas).toHaveLength(before);
+
+    // 겹치지 않는 이름은 선다 — 시드와 키워드는 코어가 채운다
+    expect(registerCharacters(state, [draftOf()])).toBe(1);
+    const added = state.personas!.find((p) => p.characterId === "미란다 코스타")!;
+    expect(() => PersonaSchema.parse(added)).not.toThrow();
+    expect(added.keywords).toEqual(expect.arrayContaining(["미란다 코스타", "코스타"]));
+    // 같은 세이브는 같은 사람을 만난다
+    const twin = createTestGame();
+    registerCharacters(twin, [draftOf()]);
+    expect(twin.personas!.at(-1)!.seed).toBe(added.seed);
+    // 두 번째 등록은 이름이 이미 서 있어 걸린다
+    expect(registerCharacters(state, [draftOf()])).toBe(0);
+  });
+
+  it("이미 있는 characterId는 자리를 지킨다 — 성격도 말투도 덮이지 않는다", () => {
+    const state = createTestGame();
+    const coach = headCoachOf(state);
+    const before = structuredClone(coach);
+
+    expect(
+      registerCharacters(state, [
+        draftOf({
+          characterId: coach.characterId,
+          name: coach.name,
+          role: "friend",
+          archetype: "지어낸 원형",
+          traits: ["LLM이 적은 성격"],
+          speechStyle: { note: "지어낸 말투.", samples: ["지어낸 대사."] },
+        }),
+      ]),
+    ).toBe(0);
+    expect(state.personas!.find((p) => p.role === "head_coach")).toEqual(before);
+  });
+
+  it("자리가 하나뿐인 역할과 선수는 등록할 수 없다", () => {
+    const state = createTestGame();
+    const before = state.personas!.length;
+    for (const role of ["head_coach", "owner", "player"] as const) {
+      expect(
+        registerCharacters(state, [
+          draftOf({ characterId: `새 ${role}`, name: `새 ${role}`, role }),
+        ]),
+        role,
+      ).toBe(0);
+    }
+    expect(state.personas).toHaveLength(before);
+  });
+
+  it("화자가 아닌 이름의 기억은 버려지고, 인물당 상한을 넘으면 오래된 것부터 밀린다", () => {
+    const state = createTestGame();
+    const coach = headCoachOf(state);
+
+    // GM이 지어낸 이름에 붙인 기억은 아무에게도 닿지 않는다
+    expect(
+      applyCharacterMemories(state, [{ characterId: "없는 사람", text: "무언가 있었다" }]),
+    ).toBe(0);
+    expect(state.characterMemories ?? []).toHaveLength(0);
+
+    // 스키마 밖 — 120자 상한과 무게 1~5는 CharacterMemorySchema가 정한다
+    expect(
+      applyCharacterMemories(state, [
+        { characterId: coach.characterId, text: "긴".repeat(121) },
+        { characterId: coach.characterId, text: "무게가 범위 밖이다", salience: 9 },
+      ]),
+    ).toBe(0);
+
+    // 날짜는 모델이 아니라 세이브가 적는다. 같은 문장은 두 번 쌓이지 않는다
+    expect(
+      applyCharacterMemories(state, [
+        { characterId: coach.characterId, text: "기억 1" },
+        { characterId: coach.characterId, text: "기억 1" },
+      ]),
+    ).toBe(1);
+    expect(state.characterMemories![0]).toEqual({
+      characterId: coach.characterId,
+      date: state.date,
+      text: "기억 1",
+      salience: 2,
+    });
+
+    const owner = ownerOf(state);
+    applyCharacterMemories(state, [{ characterId: owner.characterId, text: "구단주의 기억" }]);
+    applyCharacterMemories(
+      state,
+      Array.from({ length: CHARACTER_MEMORY_KEEP + 1 }, (_, i) => ({
+        characterId: coach.characterId,
+        text: `기억 ${i + 2}`,
+      })),
+    );
+
+    const mine = state.characterMemories!.filter((m) => m.characterId === coach.characterId);
+    expect(mine).toHaveLength(CHARACTER_MEMORY_KEEP);
+    expect(mine.map((m) => m.text)).toEqual(
+      Array.from({ length: CHARACTER_MEMORY_KEEP }, (_, i) => `기억 ${i + 3}`),
+    );
+    // 다른 인물의 기억은 밀리지 않는다
+    expect(state.characterMemories!.some((m) => m.characterId === owner.characterId)).toBe(true);
   });
 });
