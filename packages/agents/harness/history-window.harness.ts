@@ -165,8 +165,7 @@ describe("평시 이력의 창", () => {
       "압축 뒤 이력 글자": keptChars,
       "창이 미끄러진 턴 비율": slid / TURNS,
       "렌더 배율": ratios.reduce((a, b) => a + b, 0) / Math.max(1, ratios.length),
-      "잔량의 최소 캐시 프리픽스 배수":
-        HISTORY_CHAR_KEEP / CHARS_PER_TOKEN / MIN_CACHEABLE_INPUT,
+      "잔량의 최소 캐시 프리픽스 배수": HISTORY_CHAR_KEEP / CHARS_PER_TOKEN / MIN_CACHEABLE_INPUT,
     };
 
     console.log(
