@@ -181,7 +181,7 @@ row, 지난 일 = 그대로 이력.**
 | `bookings` `Booking`              | 경고·퇴장 (경기·분)                                                                             | `domain/records.ts` |
 | `suspensions` `Suspension`        | 정지 — `status === "active"`, 잔여는 `length − served`                                          | `domain/records.ts` |
 | `transfers` `Transfer`            | **팀 변경 원장** — 이적·임대·자유·유스·은퇴                                                     | `domain/records.ts` |
-| `growthLog` `GrowthEntry`         | 성장 한 칸 — 대상은 축·`pos:CODE`·`tactical`                                                    | `domain/records.ts` |
+| `growthLog` `GrowthEntry`         | 성장 한 칸 — 대상은 축·`pos:CODE`·`tactical`. **감독 팀 선수만** (아래 ⚠️)                      | `domain/records.ts` |
 | `seasonStats` `SeasonStat`        | 시즌 × 팀 — 출전·득점·도움·`ratingSum`                                                          | `domain/records.ts` |
 | `issues` `PlayerIssue`            | 라커룸 불만 (`unhappy`)                                                                         | `domain/records.ts` |
 | `settlingEvents` `SettlingEvent`  | 면담·팀토크·주장 지명이 새 영입에게 남긴 크레딧                                                 | `domain/records.ts` |
@@ -190,6 +190,13 @@ row, 지난 일 = 그대로 이력.**
 | `roleMemory` `RoleMemory`         | 역할 기억 — 선수 × 자리 → 마지막에 맡긴 역할                                                    | `domain/tactics.ts` |
 | `scoutReports` `ScoutReport`      | 스카우트 파견 — `completedOn === null`이 파견 중                                                | `domain/records.ts` |
 | `deferredScouts` `DeferredScout`  | 동시 한도에 막혀 못 나간 파견 요청 — 다음 턴 입력에 사실로 남는다 ([player.md](player.md) §9.4) | `domain/records.ts` |
+
+⚠️ **`growthLog`는 감독 팀 선수 것만 담는다.** 4,000행에서 오래된 쪽부터 잘리는
+로그인데, 코어 월간 성장(`developsByCore` — 우리 2군 + 모든 타 팀)을 전부 남기면
+매월 ≈2,000행이 들어와 두 달이면 감독의 훈련·경기 기록이 밖으로 밀린다. 읽는 곳은
+성장 일지·선수 카드 "최근 성장"·달력 요약 셋뿐이고 전부 우리 선수만 거르므로 타 팀
+행은 자리만 차지한다. **능력치 자체는 소속과 무관하게 그대로 움직인다** — 로그에
+안 남는 것이지 안 자라는 것이 아니다 ([player.md](player.md) §6.3).
 
 ### 3.5 진행 중인 흥정 · 세계의 부름
 

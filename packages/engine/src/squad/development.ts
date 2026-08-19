@@ -96,6 +96,12 @@ export function rollMonthlyAxes(
  * 난수 채널이 (시드, 날짜, 선수, 축)이라 **같은 세이브는 같은 달에 같은 결과**이고,
  * 선수 목록 순서에도 의존하지 않는다.
  *
+ * ⚠️ **능력치는 대상 전원이 움직이지만 `growthLog`에는 감독 팀만 남긴다.** 리그
+ * 전체를 적으면 매월 ≈2,000행이 들어와 4,000행 상한이 두 달 만에 감독의 훈련·경기
+ * 기록을 밀어낸다. 로그를 읽는 곳(성장 일지 · 선수 카드 "최근 성장" · 달력 요약)은
+ * 전부 우리 선수만 거르므로 타 팀 행은 아무도 읽지 않는다
+ * (→ docs/data/game-state.md §3.4).
+ *
  * @returns 감독에게 알릴 우리 팀(2군) 변화 요약
  */
 export function applyMonthlyDevelopment(state: GameState): string[] {
@@ -115,17 +121,17 @@ export function applyMonthlyDevelopment(state: GameState): string[] {
     });
     if (steps.length === 0) continue;
 
+    const ours = player.teamId === state.userTeamId;
+
     for (const { axis, step } of steps) {
       player.attributes[axis] = Math.max(
         ATTRIBUTE_FLOOR,
         Math.min(RATING_MAX, player.attributes[axis] + step),
       );
-      recordGrowth(state, player.id, null, "development", axis, step, "월간 성장");
+      if (ours) recordGrowth(state, player.id, null, "development", axis, step, "월간 성장");
     }
     recomputeOverall(player);
-    if (player.teamId === state.userTeamId) {
-      lines.push(`${player.name} (2군) ${player.attributes.overall}`);
-    }
+    if (ours) lines.push(`${player.name} (2군) ${player.attributes.overall}`);
   }
   return lines;
 }
