@@ -75,6 +75,94 @@ export const MatchEventSchema = z.object({
 export type MatchEvent = z.infer<typeof MatchEventSchema>;
 
 /**
+ * **승부차기 한 발** — 코어가 굴리고 캐스터는 그것을 문장으로 옮긴다
+ * (competition.md §6 · match.md §2).
+ *
+ * `MatchEvent`가 아닌 이유는 시계다: 장부의 사건은 분을 갖고 국면 안에 서지만
+ * 승부차기는 120분이 끝난 뒤에 오고 분이라는 것이 없다. 그래서 결과에 매달린
+ * 별도의 목록으로 남는다 (`MatchResult.penalties.kicks`).
+ */
+export const SHOOTOUT_OUTCOMES = ["scored", "saved", "missed"] as const;
+export const ShootoutOutcomeSchema = z.enum(SHOOTOUT_OUTCOMES);
+export type ShootoutOutcome = z.infer<typeof ShootoutOutcomeSchema>;
+
+/** 정규 라운드 — 5킥씩 차고도 같으면 서든데스다 */
+export const SHOOTOUT_ROUNDS = 5;
+
+export const ShootoutKickSchema = z.object({
+  /** 몇 번째 라운드인가 — 1부터. `SHOOTOUT_ROUNDS`를 넘으면 서든데스다 */
+  round: z.number().int().min(1),
+  team: MatchSideSchema,
+  /** 찬 선수 id */
+  taker: z.string().min(1),
+  /** 막아선 골키퍼 id — 명단에 골키퍼가 없는 옛 세이브에서만 빈다 */
+  keeper: z.string().min(1).optional(),
+  outcome: ShootoutOutcomeSchema,
+  /**
+   * 이 킥의 성공 확률 — **"왜 그렇게 됐나"의 근거다** (설계 원칙 2).
+   * 키커와 골키퍼의 기량이 만든 값이고, 중계·화면이 인용한다.
+   */
+  probability: z.number().min(0).max(1),
+});
+export type ShootoutKick = z.infer<typeof ShootoutKickSchema>;
+
+/** 지금까지의 승부차기 합계 — 킥 목록이 원본이라 따로 세지 않는다 */
+export function shootoutTally(kicks: readonly ShootoutKick[]): { home: number; away: number } {
+  let home = 0;
+  let away = 0;
+  for (const kick of kicks) {
+    if (kick.outcome !== "scored") continue;
+    if (kick.team === "home") home += 1;
+    else away += 1;
+  }
+  return { home, away };
+}
+
+/**
+ * **승부가 갈렸는가** — 남은 킥으로 뒤집을 수 없으면 거기서 끝난다.
+ *
+ * 조기 확정의 규칙이 여기 한 벌만 있다: 코어가 킥을 굴릴 때도, 화면이 승부차기가
+ * 끝났는지 물을 때도 이 함수를 읽는다. 5킥을 다 차기 전이면 **남은 킥 수**로 재고,
+ * 다 찼으면 양 팀이 같은 수를 찬 자리에서만 갈린다(서든데스는 한 라운드가 통째로
+ * 끝나야 판정한다).
+ */
+export function shootoutSettled(kicks: readonly ShootoutKick[]): boolean {
+  const taken = {
+    home: kicks.filter((k) => k.team === "home").length,
+    away: kicks.filter((k) => k.team === "away").length,
+  };
+  const { home, away } = shootoutTally(kicks);
+  const left = {
+    home: Math.max(0, SHOOTOUT_ROUNDS - taken.home),
+    away: Math.max(0, SHOOTOUT_ROUNDS - taken.away),
+  };
+  if (left.home > 0 || left.away > 0) {
+    return home > away + left.away || away > home + left.home;
+  }
+  /**
+   * 서든데스는 **한 라운드가 통째로 끝나야** 판정한다 — 남은 킥으로 재면 먼저 찬
+   * 팀이 넣은 순간 갈렸다고 읽혀 상대가 차 보지도 못한다.
+   */
+  return taken.home === taken.away && home !== away;
+}
+
+/**
+ * 다음에 차는 사람이 선 자리 — 갈렸으면 `null`.
+ *
+ * 순서는 먼저 차는 쪽(`first`)부터 한 발씩 번갈아 간다. 누가 먼저인지는 동전이
+ * 정하므로(shootout.ts) 목록만으로는 알 수 없어 인자로 받는다.
+ */
+export function nextShootoutKick(
+  kicks: readonly ShootoutKick[],
+  first: MatchSide,
+): { round: number; team: MatchSide } | null {
+  if (shootoutSettled(kicks)) return null;
+  const index = kicks.length;
+  const other: MatchSide = first === "home" ? "away" : "home";
+  return { round: Math.floor(index / 2) + 1, team: index % 2 === 0 ? first : other };
+}
+
+/**
  * 선수 한 명의 **경기 중 누적 기록** — 사건으로 두지 않는 것들.
  *
  * 패스는 한 경기에 900회쯤 오간다. 그걸 전부 `MatchEvent`로 만들면 장부가
