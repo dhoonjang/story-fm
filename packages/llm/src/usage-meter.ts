@@ -213,11 +213,15 @@ export class TokenBudgetExceededError extends Error {
 }
 
 /* ------------------------------------------------------------------ *
- * 세션 장부 — 모듈 하나가 프로세스 수명 동안 누적한다.
- * 게임 단위로 보려면 새 게임을 시작할 때 `resetLlmUsage()`를 부른다.
+ * 런타임 장부 — 한 번에 **게임 하나**를 담는다 (models.md §4).
+ *
+ * 프로세스 누적으로 세면 한 게임이 상한을 넘긴 뒤로는 재시작 전까지 모든 게임의
+ * 결산이 꺼진다 — 새 게임을 시작한 감독에게는 이유 없이 평점이 비는 일이다.
  * ------------------------------------------------------------------ */
 
 let sessionLedger = emptyLedger();
+/** 지금 장부가 담고 있는 게임 — 아무 게임도 열지 않았으면 null */
+let ledgerGameId: string | null = null;
 /** 같은 경고를 매 턴 반복하지 않기 위한 자리 — 리셋과 함께 비운다 */
 const warned = new Set<string>();
 
@@ -226,10 +230,24 @@ export function llmUsage(): UsageLedger {
   return sessionLedger;
 }
 
-/** 장부를 비운다 — 새 게임·테스트의 시작점 */
+/** 장부를 비운다 — 테스트의 시작점이자 게임을 갈아탈 때의 바닥 */
 export function resetLlmUsage(): void {
   sessionLedger = emptyLedger();
+  ledgerGameId = null;
   warned.clear();
+}
+
+/**
+ * 이 게임의 장부를 연다 — 턴을 시작하는 자리가 부른다(`runTurnLocked`).
+ *
+ * 담고 있는 게임이 그대로면 아무 일도 하지 않는다. 다른 게임이면 거기서 비운다 —
+ * 두 게임을 번갈아 열면 열 때마다 새로 센다. 상한이 세이브 하나에만 걸린다는
+ * 뜻이고, 그래야 한 게임의 폭주가 다른 게임의 결산을 끄지 않는다.
+ */
+export function beginGameUsage(gameId: string): void {
+  if (ledgerGameId === gameId) return;
+  resetLlmUsage();
+  ledgerGameId = gameId;
 }
 
 function warnOnce(key: string, message: string): void {
@@ -263,7 +281,28 @@ export function meterLlm(llm: GameLLM, agent: AgentName, env: LlmEnv = process.e
         );
       }
 
-      const result = await llm.runTurn(req);
+      // 왕복마다 보고된 몫을 모아 둔다 — 호출이 실패로 끝나면 이것이 장부에
+      // 남는 전부다. 결과를 받은 뒤에만 적으면 여덟 번을 왕복하다 시한에 걸린
+      // 턴, 곧 **가장 많이 쓴 호출**이 0으로 적힌다 (models.md §4).
+      let reported = emptyUsage();
+      const result = await llm
+        .runTurn({
+          ...req,
+          onUsage: (delta) => {
+            reported = addUsage(reported, delta);
+            req.onUsage?.(delta);
+          },
+        })
+        .catch((error: unknown) => {
+          // 보고된 것이 없으면 적지 않는다 — 예산에 걸려 부르지도 않은 호출과
+          // 즉시 끊긴 연결 오류가 `calls`를 부풀리면 `cacheAlerts`의 평균 입력이
+          // 흐려진다.
+          if (billedTokens(reported) > 0) {
+            sessionLedger = recordUsage(sessionLedger, agent, reported);
+          }
+          throw error;
+        });
+      // 성공 경로는 어댑터가 돌려준 합계만 적는다 — 왕복 몫과 두 번 세지 않는다
       sessionLedger = recordUsage(sessionLedger, agent, result.usage);
       for (const broken of cacheAlerts(sessionLedger)) {
         warnOnce(
