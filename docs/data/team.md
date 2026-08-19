@@ -231,8 +231,8 @@ ClubProfile { stadium, capacity, commercialTier: 1|2|3|4 }
 살림(구장·브랜드)은 같은 표에 있으면 재정 밸런싱이 팀 정의를 건드리게 된다.
 재정 계수는 이 표 하나만 만진다.
 
-- `capacity` — 실제 구장 수용인원의 어림값. 팀 간 6배 격차(74k ↔ 11k)가 그대로
-  매치데이 수입 격차다.
+- `capacity` — 실제 구장 수용인원의 어림값. 팀 간 9배 격차(캄 노우 105k ↔
+  피에르루이지 펜초 12k)가 그대로 매치데이 수입 격차다.
 - `commercialTier` — **브랜드 규모. 전력 `tier`와 별개 축이다.** 뉴캐슬·에버튼·
   샬케는 성적보다 브랜드가 크고, 본머스·코모는 반대다. 실제 상업 수입 격차의
   원인이므로 `tier`로 뭉개면 클럽이 구분되지 않는다.
@@ -538,6 +538,3 @@ WorldScope { leagues, teamsPerLeague, cups, markets }
 | 스쿼드 생성 (실선수 시드 · 절차 생성)      | `packages/engine/src/world/catalog.ts` · `generate.ts`            |
 | 축소 세계                                  | `packages/engine/src/world/scope.ts`                              |
 | 구단 주급 예산                             | `packages/engine/src/world/wages.ts`                              |
-
-</content>
-</invoke>
