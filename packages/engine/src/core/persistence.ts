@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { advanceDomesticCups, migrateDomesticPrizeKeys } from "../competition/domestic-cup";
 import { migrateEuroPrizeKeys } from "../competition/euro-prize";
 import { catalogPath, cupCatalogPath, dataDir, leagueCatalogPath, teamCatalogPath } from "./paths";
@@ -274,7 +275,14 @@ export const SAVE_VERSION = 6;
  * (→ [docs/data/game-state.md](../../../../docs/data/game-state.md) §6):
  * 앞의 둘은 파일이 문제고, 뒤의 둘은 **코드가 그 파일을 다루지 못하는 것**이다.
  */
-export type UnreadableReason = "version" | "corrupt" | "migration" | "schema";
+const UNREADABLE_REASONS = ["version", "corrupt", "migration", "schema"] as const;
+
+export type UnreadableReason = (typeof UNREADABLE_REASONS)[number];
+
+/** 사이드카가 적어 둔 사유가 지금 코어가 아는 넷 중 하나인가 */
+function isUnreadableReason(value: unknown): value is UnreadableReason {
+  return typeof value === "string" && (UNREADABLE_REASONS as readonly string[]).includes(value);
+}
 
 interface LoadFailure {
   ok: false;
@@ -526,7 +534,7 @@ export interface GameSummary {
 export interface UnreadableGame {
   readable: false;
   id: string;
-  /** version = 세이브 버전 불일치, corrupt = 파싱 실패거나 필수 테이블 누락 */
+  /** 로드가 멈춘 걸음 — 넷 다 로드를 거부하되 고칠 자리가 다르다 */
   reason: UnreadableReason;
   /** 그 파일이 스스로 말하는 버전. 읽어낼 수 없으면 null */
   saveVersion: number | null;
@@ -566,6 +574,41 @@ function fingerprint(file: string): string | null {
   }
 }
 
+/**
+ * 세이브를 여는 **코드**의 지문 — 실패 캐시가 지금 코드의 판정인지 가리는 값.
+ *
+ * 실패 넷은 파일이 아니라 코드가 내린 판정이다(`version`은 `SAVE_VERSION`,
+ * `corrupt`는 `REQUIRED_TABLES`, `migration`·`schema`는 마이그레이션과 스키마).
+ * 파일 지문은 파일이 바뀐 것만 잡으므로, 마이그레이션 버그를 고쳐도 세이브는
+ * 그대로여서 실패 캐시가 영영 살아남는다 — 고친 코드가 그 세이브를 다시는 보지
+ * 못한다. 그래서 판정을 내린 모듈 셋의 지문을 캐시에 함께 적는다.
+ *
+ * 번들 뒤에는 그 자리에 청크 하나만 서므로 값이 빌드마다 달라진다 — 어느 쪽이든
+ * 코드가 바뀌면 달라진다는 성질은 같다. 제 자리를 못 찾으면 `SAVE_VERSION`만
+ * 남고, 그때는 파일 지문만큼만 무효가 된다.
+ *
+ * 값은 프로세스마다 고정이므로 한 번만 재고 들고 있는다 — 목록 하나에 세이브 수만큼
+ * 불린다.
+ */
+let loaderStampCache: string | null = null;
+
+function loaderStamp(): string {
+  if (loaderStampCache !== null) return loaderStampCache;
+  const parts = [`v${SAVE_VERSION}`];
+  try {
+    const self = fileURLToPath(import.meta.url);
+    const dir = path.dirname(self);
+    for (const file of [self, path.join(dir, "migrations.ts"), path.join(dir, "save-schema.ts")]) {
+      const stamp = fingerprint(file);
+      if (stamp !== null) parts.push(stamp);
+    }
+  } catch {
+    /* 제 소스 자리를 모르는 실행 환경 — 버전만으로 */
+  }
+  loaderStampCache = parts.join("|");
+  return loaderStampCache;
+}
+
 /** 파일이 스스로 날짜를 말하지 못할 때의 정렬 축 — 파일 mtime */
 function fileTime(id: string): string {
   const { main, bak } = paths(id);
@@ -581,8 +624,11 @@ function fileTime(id: string): string {
 
 /**
  * 사이드카 — 형태가 어긋나거나 세이브가 바뀌었으면 없는 셈 친다.
- * 성공과 실패를 모두 읽는다. 실패도 캐시해야 못 여는 세이브가 목록을 열 때마다
- * 수 MB를 다시 파싱하지 않는다.
+ *
+ * 성공과 실패를 모두 읽고, **실패는 사유 넷을 가리지 않는다** — 쓰는 사유와 읽는
+ * 사유가 갈리면 그 사유로 실패한 세이브는 캐시가 매번 버려져, 목록 요청마다 수 MB를
+ * 다시 파싱한다. 대신 실패는 `loaderStamp()`까지 맞아야 인정한다(코드가 고쳐지면
+ * 그 판정은 다시 내려야 한다). 그 필드가 없는 옛 사이드카는 믿지 않는다.
  */
 function readSummary(id: string): GameListEntry | null {
   const { main, meta } = paths(id);
@@ -594,7 +640,8 @@ function readSummary(id: string): GameListEntry | null {
     if (s.unreadable !== undefined) {
       if (!s.unreadable || typeof s.unreadable !== "object") return null;
       const f = s.unreadable as Record<string, unknown>;
-      if (f.reason !== "version" && f.reason !== "corrupt") return null;
+      if (!isUnreadableReason(f.reason)) return null;
+      if (f.loader !== loaderStamp()) return null;
       if (typeof f.createdAt !== "string") return null;
       if (f.saveVersion !== null && typeof f.saveVersion !== "number") return null;
       return {
@@ -639,6 +686,7 @@ function writeSummary(id: string, entry: GameListEntry): void {
           reason: entry.reason,
           saveVersion: entry.saveVersion,
           createdAt: entry.createdAt,
+          loader: loaderStamp(),
         },
       };
   try {
