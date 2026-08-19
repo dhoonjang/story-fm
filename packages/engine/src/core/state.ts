@@ -2,6 +2,7 @@ import type {
   Achievement,
   AxisValues,
   Booking,
+  CharacterInjection,
   Contract,
   DeferredScout,
   FinanceReport,
@@ -235,6 +236,15 @@ export interface ChatTurn {
    * 검색을 다시 해야 했다.
    */
   reports?: ScoutReportCard[];
+  /**
+   * 이 턴에 실린 **인물지** — 카드 텍스트가 아니라 **기록**이다 (people.md §6).
+   *
+   * 이력은 매 턴 `state.chat`에서 다시 렌더링되므로 남길 것은 누구를 어느 깊이로
+   * 실었는가뿐이고, 카드는 그 턴을 렌더링할 때 다시 붙는다. 텍스트를 저장하면
+   * 채팅 화면에 프롬프트가 새고, 이력이 세이브 시점의 문장으로 굳는다.
+   * 옛 세이브엔 없다 — optional이라 세이브 버전을 올리지 않는다.
+   */
+  characters?: CharacterInjection[];
   /**
    * **경기 중에 오간 말인가** — 이력에서 중계와 평시를 가르는 표식.
    *
