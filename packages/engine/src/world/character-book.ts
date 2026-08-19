@@ -111,6 +111,35 @@ export function characterEntry(persona: Persona, depth: CharacterDepth): Charact
   return entry;
 }
 
+/**
+ * 기록된 주입을 인물지로 되돌린다 — **이력을 다시 렌더링할 때의 입구**다.
+ *
+ * 세이브에는 카드 텍스트가 아니라 기록(`characterId` + 깊이)만 남으므로, 그 턴을
+ * 다시 그릴 때 같은 인물지를 여기서 되찾는다. 깊이는 **그때의 것**을 쓴다 — 지금
+ * 눈금으로 다시 접으면 3주 전 이력이 오늘의 지식으로 소급해 자세해진다.
+ *
+ * 이름이 세계에서 사라졌으면(방출된 선수) `null`이다 — 그 턴은 카드 없이 그려진다.
+ */
+export function characterEntryOf(
+  state: GameState,
+  characterId: string,
+  depth: CharacterDepth,
+): CharacterEntry | null {
+  const persona = personaOf(state, characterId);
+  return persona ? characterEntry(persona, depth) : null;
+}
+
+/** 이름으로 페르소나를 찾는다 — 저장된 인물이 먼저, 그다음이 파생하는 선수다 */
+function personaOf(state: GameState, characterId: string): Persona | null {
+  const saved = (state.personas ?? []).find((p) => p.characterId === characterId);
+  if (saved) return saved;
+  for (const persona of [headCoachOf(state), ownerOf(state), ...reportersOf(state)]) {
+    if (persona.characterId === characterId) return persona;
+  }
+  const player = state.players.find((p) => p.name === characterId);
+  return player ? generatePlayerPersona(state.seed, player) : null;
+}
+
 export interface CharacterBookInput {
   /** 이번 턴 감독 발화 — 아직 이력에 없다. "홀란드 불러줘"는 그 턴에 걸려야 한다 */
   message?: string;
