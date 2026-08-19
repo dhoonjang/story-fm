@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { advanceDomesticCups } from "../competition/domestic-cup";
+import { advanceDomesticCups, migrateDomesticPrizeKeys } from "../competition/domestic-cup";
 import { migrateEuroPrizeKeys } from "../competition/euro-prize";
 import { catalogPath, cupCatalogPath, dataDir, leagueCatalogPath, teamCatalogPath } from "./paths";
 import {
@@ -340,6 +340,9 @@ function migrate(save: Record<string, unknown>, state: GameState): void {
   // 리그 페이즈가 끝난 뒤 **매일** 다시 불리므로, 옛 키를 옮기지 않으면 진행 중인
   // 세이브가 이미 받은 상금을 새 키로 한 번 더 받는다.
   migrateEuroPrizeKeys(state);
+  // 국내 컵 상금도 같은 이유로 옮긴다 — 바로 아래 `advanceDomesticCups`가 라운드
+  // 진출 상금을 다시 정산하므로, 옛 라벨 키를 남겨 두면 그 자리에서 두 번 나간다.
+  migrateDomesticPrizeKeys(state);
   // 국내 컵 따라잡기 — 컵 편성은 tick에서 도는데, 컵이 없던 세이브를 **열기만**
   // 해서는 tick이 돌지 않아 달력이 계속 비어 보인다. 새 게임이 생성 시점에
   // 부르는 것과 같은 함수를 로드에서도 한 번 부른다 (결정적·멱등이라 안전하다).
