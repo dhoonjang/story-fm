@@ -6,8 +6,8 @@
  * 모아 둔 것뿐이고, 실제 호출은 `meterLlm`이 감싼 `GameLLM`을 지난다.
  *
  * ⚠️ **상한은 게임을 멈추지 않는다.** 상한을 넘겨도 GM·중계는 계속 돌고, 끊기는
- * 것은 **세 결산 에이전트뿐**이다. 결산은 "실패하면 앵커가 남는" 계약이라
- * (agents.md §4) 건너뛴 자리에 이미 코어의 값이 서 있다.
+ * 것은 **실패해도 대신 설 것이 있는 자리뿐**이다 — 결산 셋은 코어 앵커가 남고
+ * (agents.md §4), 압축은 접지 않은 채 다음 기회를 기다린다(agents.md §5-1).
  */
 
 import { AGENT_NAMES, type AgentName, type LlmEnv } from "./config";
@@ -16,21 +16,32 @@ import type { GameLLM, TurnRequest, TurnResult, TurnUsage } from "./game-llm";
 /**
  * 상한을 넘겼을 때 건너뛰는 에이전트.
  *
- * 결산만 끊는다 — 앵커로 폴백하는 길이 이미 있고(training/match/mood-rater가
- * 실패를 삼킨다), 자주 도는 만큼 예산도 여기서 가장 빨리 샌다.
+ * **건너뛴 자리에 잃는 것이 없는 곳만 끊는다.** 결산 셋은 실패를 삼키고 코어
+ * 앵커가 그대로 남으며, 자주 도는 만큼 예산도 여기서 가장 빨리 샌다. 압축은
+ * 실패하면 접지 않고 다음 기회에 다시 시도하는 계약이라(agents.md §5-1) 건너뛰어도
+ * 이력이 사라지지 않는다.
  */
 const SKIPPABLE_AGENTS: ReadonlySet<AgentName> = new Set<AgentName>([
   "match-rater",
   "training-rater",
   "mood-rater",
+  "history-compactor",
 ]);
 
 /**
- * 캐시 히트율을 신호로 읽기 시작할 입력 크기 — Anthropic의 최소 캐시 프리픽스가
+ * 캐시 히트율을 신호로 읽기 시작할 입력 크기 — 제공자의 **최소 캐시 프리픽스**가
  * 이 눈금이다. 이보다 짧은 입력은 캐시가 애초에 안 걸리므로 히트율 0이
  * "프리픽스가 깨졌다"는 뜻이 아니다 (짧은 결산 프롬프트가 그 부류다).
+ *
+ * 값은 제공자마다 다르다 — Gemini 3.x Flash가 4,096, Anthropic이 1,024다. 그중
+ * **가장 큰 것**을 드는 이유는 이 문턱이 "히트율 0을 경고로 읽어도 되는가"를 가르기
+ * 때문이다: 낮게 잡으면 캐시가 걸릴 수 없는 호출까지 경고가 올라오고, 매번 거짓인
+ * 경고는 진짜 신호가 올라와도 읽히지 않는다.
+ *
+ * 밸런스 하네스도 이 눈금을 읽는다 — 압축의 잔량이 이보다 작으면 접은 직후 이력
+ * 캐시가 아예 안 걸린다 (`packages/agents/harness/history-window.harness.ts`).
  */
-const MIN_CACHEABLE_INPUT = 1024;
+export const MIN_CACHEABLE_INPUT = 4096;
 
 /** 히트율 0을 신호로 읽기 전에 필요한 호출 수 — 첫 호출은 원래 쓰기만 한다 */
 const CACHE_ALERT_AFTER_CALLS = 3;

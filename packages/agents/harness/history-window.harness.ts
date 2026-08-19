@@ -13,6 +13,8 @@ import {
   type GameState,
 } from "@story-fm/engine";
 import { buildGmHistory } from "@story-fm/agents";
+// 최소 캐시 프리픽스 — 눈금의 주인은 계측이다. 여기 숫자를 다시 적으면 둘이 갈린다
+import { MIN_CACHEABLE_INPUT } from "@story-fm/llm";
 import { HISTORY_WINDOW } from "../../engine/harness/catalog";
 import { outOfBand, reportOf, type Readings } from "../../engine/harness/harness";
 
@@ -45,12 +47,6 @@ const USER_TURN_CHARS = 24;
  * 섞어서 재면 왕복 수만큼 나뉜 값이 나온다.
  */
 const CHARS_PER_TOKEN = 1.43;
-
-/**
- * 최소 캐시 프리픽스 — 이보다 짧은 입력은 캐시가 애초에 걸리지 않는다.
- * 눈금의 주인은 `packages/llm/src/usage-meter.ts`다.
- */
-const MIN_CACHE_PREFIX_TOKENS = 4096;
 
 /** 세계 하나 — 이력의 봉투(`@감독이름: `)를 실제 코드가 붙이려면 감독이 있어야 한다 */
 function build(): GameState {
@@ -170,7 +166,7 @@ describe("평시 이력의 창", () => {
       "창이 미끄러진 턴 비율": slid / TURNS,
       "렌더 배율": ratios.reduce((a, b) => a + b, 0) / Math.max(1, ratios.length),
       "잔량의 최소 캐시 프리픽스 배수":
-        HISTORY_CHAR_KEEP / CHARS_PER_TOKEN / MIN_CACHE_PREFIX_TOKENS,
+        HISTORY_CHAR_KEEP / CHARS_PER_TOKEN / MIN_CACHEABLE_INPUT,
     };
 
     console.log(

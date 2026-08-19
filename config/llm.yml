@@ -45,3 +45,14 @@ agents:
     max_tokens: 8000
     timeout_ms: 30000
     thinking_level: minimal
+
+  # 접히는 평시 대화를 한 벌 요약으로 옮긴다 (docs/llm/agents.md §5-1). 결산 셋과 같은
+  # 계약이라 실패는 삼키지만 읽는 양이 다르다 — 한 번에 접히는 구간 전부를 읽고 거기
+  # 새로 선 인물까지 판정하므로 결산 셋의 싼 자리로 보내지 않는다. 압축은 이력이 상한을
+  # 넘을 때만이라 드물게 돈다.
+  history-compactor:
+    provider: google
+    model: gemini-3.6-flash
+    max_tokens: 8000
+    timeout_ms: 60000
+    thinking_level: minimal

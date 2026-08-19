@@ -67,6 +67,11 @@ describe("에이전트별 LLM 설정", () => {
     model: gpt-mood
     max_tokens: 500
     timeout_ms: 5000
+  history-compactor:
+    provider: google
+    model: gemini-compactor
+    max_tokens: 600
+    timeout_ms: 6000
 `),
     );
 
@@ -98,6 +103,7 @@ describe("에이전트별 LLM 설정", () => {
   match-rater: *google
   training-rater: *google
   mood-rater: *google
+  history-compactor: *google
 `),
     );
     expect(config.agents.gm).toMatchObject({ thinkingLevel: "minimal" });
@@ -121,6 +127,7 @@ describe("에이전트별 LLM 설정", () => {
   match-rater: *agent
   training-rater: *agent
   mood-rater: *agent
+  history-compactor: *agent
 `);
 
     expect(() => parseLlmConfig(withProvider("anthropic"))).toThrow("LLM 설정이 올바르지 않습니다");
@@ -132,12 +139,12 @@ describe("에이전트별 LLM 설정", () => {
   });
 
   /** 무너뜨리지 않은 표는 통과한다 — 아래 갈래들이 "무엇이든 던진다"가 아님을 세운다 */
-  it("여섯 자리가 다 선 설정은 그대로 통과한다", () => {
+  it("자리가 다 선 설정은 그대로 통과한다", () => {
     const config = parseLlmConfig(yamlOf(fullAgents()));
     for (const agent of AGENT_NAMES) expect(config.agents[agent].model).toBe("gemini-test");
   });
 
-  it("에이전트는 한 자리만 빠져도 거부된다 — 여섯 자리를 각각 확인한다", () => {
+  it("에이전트는 한 자리만 빠져도 거부된다 — 자리마다 각각 확인한다", () => {
     for (const missing of AGENT_NAMES) {
       const agents = fullAgents();
       delete agents[missing];
