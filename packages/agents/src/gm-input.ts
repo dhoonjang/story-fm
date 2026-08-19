@@ -539,17 +539,25 @@ const PART_OF_DAY: Record<string, string> = {
   밤: "21:00",
 };
 
-/** `AM 9:30` · `PM 7:05` → "HH:MM" (24시간) */
-function toClock(meridiem: string | undefined, hour: string, minute: string): string {
-  const h = Number(hour) % 12;
-  const pm = /^(PM|오후|저녁|밤)$/i.test(meridiem ?? "");
-  return `${String(pm ? h + 12 : h).padStart(2, "0")}:${minute}`;
+/**
+ * `AM 9:30` · `PM 7:05` · `14:30` → "HH:MM" (24시간). 읽을 수 없으면 null.
+ *
+ * ⚠️ **시간대가 붙었는지가 12시간제인지를 가른다.** 시간대 없는 `14:30`까지 12로
+ * 접으면 `02:30`이 되어 시각이 오전으로 뒤집히고, 코어가 되감기를 막으므로 그 턴의
+ * 시계가 통째로 멎는다. 그래서 시간대가 없으면 적힌 값이 곧 24시간 값이다 —
+ * `오전 12:05`는 자정 00:05, 시간대 없는 `12:05`는 정오 12:05.
+ */
+function toClock(meridiem: string | undefined, hour: string, minute: string): string | null {
+  const h = Number(hour);
+  if (h > 23 || Number(minute) > 59) return null;
+  const h24 = meridiem ? (h % 12) + (/^(PM|오후|저녁|밤)$/i.test(meridiem) ? 12 : 0) : h;
+  return `${String(h24).padStart(2, "0")}:${minute}`;
 }
 
-/** 헤더가 가리키는 시각 — 시:분이 있으면 그것, 없으면 시간대의 기본값 */
+/** 헤더가 가리키는 시각 — 시:분이 있으면 그것, 없으면(또는 읽을 수 없으면) 시간대의 기본값 */
 function clockFromHeader(meridiem: string | undefined, hour?: string, minute?: string): string {
-  if (hour && minute) return toClock(meridiem, hour, minute);
-  return PART_OF_DAY[(meridiem ?? "").toLowerCase()] ?? "09:00";
+  const clock = hour && minute ? toClock(meridiem, hour, minute) : null;
+  return clock ?? PART_OF_DAY[(meridiem ?? "").toLowerCase()] ?? "09:00";
 }
 
 /**
