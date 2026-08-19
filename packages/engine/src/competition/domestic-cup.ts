@@ -3,6 +3,7 @@ import {
   MIN_REST_HOURS,
   HARD_MIN_REST_HOURS,
   addDays,
+  cupBlankWeekend,
   dayOfWeek,
   firstCupRoundFloor,
   restHours,
@@ -98,10 +99,8 @@ function finalWeekdaysOf(cup: DomesticCupEntry): Set<number> {
  * 라운드를 이틀에 걸쳐 흩는다 — 실제 컵도 16경기를 하루에 몰지 않는다
  * (FA컵 3라운드는 토·일, 리그컵 라운드는 화·수 이틀에 나뉜다).
  *
- * 뒤쪽 절반은 목표일의 **하루 앞**부터 찾는다. 하루 뒤로 미루면 그 자리가 막혔을 때
- * 계속 뒤로 밀려 라운드가 열흘 넘게 늘어졌다 — 앞으로 당기면 목표일 직전의 컵
- * 요일(수요일 목표면 화요일, 일요일 목표면 토요일)에 자연스럽게 앉는다.
  * 대진이 적은 단계(8강·준결승)는 같은 날 치르는 편이 자연스러워 그대로 둔다.
+ * 갈라진 절반이 **어느 날로** 가는지는 `stageTieTarget`이 정한다.
  */
 function spreadOffset(pair: number, pairCount: number): number {
   if (pairCount < 4) return 0;
@@ -152,6 +151,11 @@ export function domesticCupsOf(teamId: string): DomesticCupEntry[] {
  * 다른 라운드는 설 수 있는 요일이 넷이라(화·수·토·일) 앞으로 하루이틀만 훑으면
  * 자리가 나온다 — 굳이 당기지 않는다.
  *
+ * ⚠️ **달력이 비워 준 라운드만 예외다** (`cupBlankWeekend`). 달력은 그 라운드의
+ * 목표일이 걸리는 주말을 통째로 비우는데, 여기서 원 날짜를 그대로 내주면 비운
+ * 주말은 아무 경기 없이 지나가고 라운드는 주중으로 간다. 그 라운드의 목표는
+ * **비운 주말의 토요일**이다 (competition.md §3.4).
+ *
  * ⚠️ **1라운드만 바닥이 있다** (`firstCupRoundFloor`) — 개막 주말보다 이른 목표일은
  * 개막 라운드 뒤로 밀린다. 코파 이탈리아 1라운드(8/16)·포칼 1라운드(8/18)가 개막
  * 주말에 걸려 세리에 A·분데스리가의 개막 라운드를 통째로 밀어낸 자리다 (season.md §3).
@@ -159,10 +163,42 @@ export function domesticCupsOf(teamId: string): DomesticCupEntry[] {
 export function stageTarget(season: number, cup: DomesticCupEntry, stage: MatchStage): string {
   const target = seasonDate(season, cup.windows[stage]);
   if (stage === "final") return snapToWeekday(target, finalWeekdaysOf(cup));
-  if (stage !== DOMESTIC_STAGES[0]) return target;
   // 1라운드는 개막 라운드 뒤다 — 고정 월·일은 개막 토요일의 흔들림을 모른다
-  const floor = firstCupRoundFloor(season);
-  return target < floor ? floor : target;
+  const floor = stage === DOMESTIC_STAGES[0] ? firstCupRoundFloor(season) : null;
+  // 달력이 이 라운드를 위해 비운 주말이 있으면 **그 토요일이 목표다** — 목표일보다
+  // 앞이든 뒤든(1/10이 화요일이면 비운 주말은 그 앞이다). 다만 바닥보다 이른
+  // 주말은 개막 라운드의 것이라 쓸 수 없다.
+  const blank = cupBlankWeekend(season, cup, stage);
+  if (blank !== null && (floor === null || blank >= floor)) return blank;
+  return floor !== null && target < floor ? floor : target;
+}
+
+/**
+ * 이 대진이 자리를 찾기 시작하는 날 — 라운드를 이틀에 흩은 결과다.
+ *
+ * 달력이 비운 주말에 앉은 라운드는 **그 주말 안에서** 흩는다(토 → 일) — 이틀 다
+ * 리그가 비켜선 자리다.
+ *
+ * 그 밖의 라운드는 목표일의 **하루 앞의 컵 요일**부터 찾는다. 하루 뒤로 미루면 그
+ * 자리가 막혔을 때 계속 뒤로 밀려 라운드가 열흘 넘게 늘어졌다. 그냥 하루만 당기면
+ * 그 날이 컵 요일이 아닐 때(수요일 목표 → 화요일은 되지만, 화요일 목표 → 월요일은
+ * 안 된다) 앞으로 훑다가 결국 같은 날에 앉아 라운드가 하루에 몰린다.
+ */
+export function stageTieTarget(
+  season: number,
+  cup: DomesticCupEntry,
+  stage: MatchStage,
+  pair: number,
+  pairCount: number,
+): string {
+  const base = stageTarget(season, cup, stage);
+  if (stage === "final" || spreadOffset(pair, pairCount) === 0) return base;
+  if (cupBlankWeekend(season, cup, stage) === base) return addDays(base, 1);
+  for (let i = 1; i <= 3; i++) {
+    const back = addDays(base, -i);
+    if (CUP_WEEKDAYS.has(dayOfWeek(back))) return back;
+  }
+  return base;
 }
 
 /** 이 대회의 결승이 설 수 있는 요일 (0=일) — 규정이자 편성의 제약 */
@@ -444,20 +480,7 @@ function createTie(
   const away = home === a ? b : a;
   const twoLegged = cup.twoLegged.includes(stage) && !isFinal;
   const weekdays = isFinal ? finalWeekdaysOf(cup) : CUP_WEEKDAYS;
-  const base = stageTarget(state.season, cup, stage);
-  // 뒤쪽 절반은 **하루 앞의 컵 요일**부터 찾는다. 그냥 하루만 당기면 그 날이 컵
-  // 요일이 아닐 때(수요일 목표 → 화요일은 되지만, 화요일 목표 → 월요일은 안 된다)
-  // 앞으로 훑다가 결국 같은 날에 앉아 라운드가 하루에 몰린다.
-  let target = base;
-  if (!isFinal && spreadOffset(pair, pairCount) < 0) {
-    for (let i = 1; i <= 3; i++) {
-      const back = addDays(base, -i);
-      if (weekdays.has(dayOfWeek(back))) {
-        target = back;
-        break;
-      }
-    }
-  }
+  const target = stageTieTarget(state.season, cup, stage, pair, pairCount);
 
   const first = pickTieDate(state, home, away, target, { weekdays, isFinal, digest });
   const legs: MatchRecord[] = [
