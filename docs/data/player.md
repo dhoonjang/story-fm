@@ -737,7 +737,13 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
 - **저장값은 원값이다** — 목록에 적히는 `proficiency`에 주발은 들어 있지 않다.
   생성(`derivePositions`)도 훈련·경기의 적립도 원값을 적고, 좌우를 가르는 자리는
   `positionProficiency` 하나뿐이다(§4). ⚠️ 미러 자리에 보정을 적어 둔 옛 카탈로그·
-  옛 세이브는 로드할 때 벗긴다 (`stripStoredFootAdjust` — SAVE_VERSION 유지).
+  옛 세이브는 벗긴다 (`stripStoredFootAdjust` — SAVE_VERSION 유지).
+- ⚠️ **세이브를 벗기는 것은 딱 한 번이다** — 마커
+  (`mirrorProficiencyStripped` — [game-state](game-state.md) §6)가 없는 세이브에서만
+  돌고, 벗긴 뒤 마커를 세운다. 벗기기는 묶음의 값을 주 포지션으로 평평하게 미는 일이라
+  로드마다 돌면 경기(`gainMatchProficiency`)·포지션 훈련이 LCB·RCB에 쌓아 둔 적립을
+  같이 지운다 — 성장 로그에는 오른 기록만 남고 값은 되감긴다. 카탈로그 파일은 적립이
+  쌓이는 자리가 아니라 읽을 때마다 벗긴다.
 - 폴백이 **전술판 거리**(`positionDistance`)를 쓰는 이유: 라인 경계만 보면
   ST→CAM이 RB→LB보다 생소하게 나오는 역전이 생기고, 자유 배치에서 자리는 코드가
   아니라 좌표라 거리가 유일하게 일관된 척도다.

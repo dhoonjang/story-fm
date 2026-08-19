@@ -28,6 +28,7 @@ import {
   migrateConditions,
   migrateFormScale,
   migrateMatchStats,
+  migrateMirrorProficiency,
   migratePassStyles,
   migrateSquadLevels,
   stripStoredFootAdjust,
@@ -118,6 +119,27 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
     expect(loaded).not.toBeNull();
     expect(loaded?.season).toBe(3);
     expect(loaded?.teams.length).toBe(teamCatalog().length);
+  });
+
+  it("경기로 오른 좌우 자리 적응도는 저장→로드를 지나도 그대로다", () => {
+    /**
+     * 미러 보정 벗기기는 묶음을 주 포지션 값으로 **평평하게 민다.** 경기·훈련이
+     * LCB에 적립한 폭은 옛 보정 폭과 구분되지 않으므로, 로드마다 돌면 한 시즌
+     * 쌓은 것이 되감긴다 — 마커가 그 두 번째 걸음을 막는다.
+     */
+    const state = createTestGame();
+    const player = state.players.find((p) =>
+      p.positions.some((pos) => pos.isNatural && pos.position === "CB"),
+    )!;
+    const anchor = player.positions.find((pos) => pos.position === "CB")!.proficiency;
+    // 경기가 그 자리에 올리는 것과 같다 (`gainMatchProficiency`) — 묶음이라 항목은 이미 있다
+    const mirror = player.positions.find((pos) => pos.position === "LCB")!;
+    mirror.proficiency = anchor + 1;
+    saveGame(state);
+
+    const loaded = loadGame(state.id)!;
+    const reloaded = loaded.players.find((p) => p.id === player.id)!;
+    expect(reloaded.positions.find((pos) => pos.position === "LCB")?.proficiency).toBe(anchor + 1);
   });
 
   it("등번호 없는 기존 세이브는 실측 시드를 먼저 복원한다", () => {
@@ -595,6 +617,28 @@ describe("옛 세이브를 지금 모양으로", () => {
     ];
     expect(stripStoredFootAdjust(expansion)).toBe(false);
     expect(expansion[1]!.proficiency).toBe(74);
+  });
+
+  it("미러 보정은 세이브당 한 번만 벗긴다 — 마커 뒤의 적립은 그대로 둔다", () => {
+    const save = {
+      players: [
+        {
+          positions: [
+            { position: "CB", proficiency: 93, isNatural: true },
+            { position: "LCB", proficiency: 95, isNatural: false },
+          ],
+        },
+      ],
+      mirrorProficiencyStripped: undefined as boolean | undefined,
+    };
+    migrateMirrorProficiency(save);
+    expect(save.players[0]!.positions.map((p) => p.proficiency)).toEqual([93, 93]);
+    expect(save.mirrorProficiencyStripped).toBe(true);
+
+    // 마커가 선 뒤에 벌어진 차이는 게임 안 적립이다 (경기·포지션 훈련) — 밀지 않는다
+    save.players[0]!.positions[1]!.proficiency = 95;
+    migrateMirrorProficiency(save);
+    expect(save.players[0]!.positions.map((p) => p.proficiency)).toEqual([93, 95]);
   });
 
   it("`squadLevel`이 없던 세이브는 전술 배치 + OVR 상위로 25명을 1군에 세운다", () => {

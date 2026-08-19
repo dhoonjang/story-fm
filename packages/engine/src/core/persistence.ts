@@ -242,7 +242,8 @@ function migrate(save: Record<string, unknown>, state: GameState): void {
   migrateConditions(state);
   migrateMatchStats(state);
   // 좌우 미러 자리에 얹혀 있던 주발 보정을 벗긴다 — 저장은 원값, 주발은 조회 때
-  // (player.md §8).
+  // (player.md §8). 마커가 없는 세이브에서만 한 번: 다시 돌면 경기·훈련이 그
+  // 자리에 쌓은 적응도를 같이 민다.
   migrateMirrorProficiency(state);
   /**
    * **종합은 저장된 값이 아니라 15축의 파생 캐시다** — 로드할 때 다시 계산한다.
