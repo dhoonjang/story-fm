@@ -457,21 +457,31 @@ function readGame(id: string): LoadResult {
 }
 
 export function loadGame(id: string): GameState | null {
+  if (isCatalogId(id)) return null;
   const result = readGame(id);
   return result.ok ? result.state : null;
 }
 
 /**
- * 데이터 디렉터리에 있지만 게임이 아닌 파일 — 어드민이 편집한 카탈로그 오버라이드.
- * 세이브와 같은 자리에 살고 이름도 `.json`이라, 걸러 내지 않으면 목록에 열리지
- * 않는 게임 카드로 선다.
+ * 데이터 디렉터리에 있지만 게임이 아닌 이름 — 어드민이 편집한 카탈로그 오버라이드.
+ * 세이브와 같은 자리에 `<이름>.json`으로 살아서 세이브 id와 생김새가 같다.
+ *
+ * 걸러 내지 않으면 목록에 열리지 않는 게임 카드로 서고, **id 하나로 지워진다**:
+ * `player-catalog`은 라우트의 id 검사(파일 이름에 쓸 수 있는 글자)를 통과하고
+ * `${id}.json`으로 오버라이드 파일 자체를 가리킨다. 어느 이름이 게임이 아닌지는
+ * 오버라이드 경로를 아는 여기서만 알 수 있으므로, 판정도 거절도 엔진이 한다.
  */
-function catalogFiles(): Set<string> {
+function catalogIds(): Set<string> {
   return new Set(
     [catalogPath(), teamCatalogPath(), leagueCatalogPath(), cupCatalogPath()].map((file) =>
-      path.basename(file),
+      path.basename(file, ".json"),
     ),
   );
+}
+
+/** 게임이 아닌 이름인가 — 목록도 로드도 삭제도 이 넷을 지나치지 않는다 */
+function isCatalogId(id: string): boolean {
+  return catalogIds().has(id);
 }
 
 /**
@@ -485,14 +495,18 @@ function catalogFiles(): Set<string> {
 export function listGames(): string[] {
   const dir = dataDir();
   if (!existsSync(dir)) return [];
-  const skip = catalogFiles();
   const ids = new Set<string>();
   for (const name of readdirSync(dir)) {
     // `.meta.json`은 목록용 요약 사이드카, `.shard-….json`은 세이브의 조각 —
     // 둘 다 게임이 아니다
-    if (name.endsWith(".meta.json") || SHARD_FILE.test(name) || skip.has(name)) continue;
-    if (name.endsWith(".json")) ids.add(name.slice(0, -".json".length));
-    else if (name.endsWith(".json.bak")) ids.add(name.slice(0, -".json.bak".length));
+    if (name.endsWith(".meta.json") || SHARD_FILE.test(name)) continue;
+    const id = name.endsWith(".json")
+      ? name.slice(0, -".json".length)
+      : name.endsWith(".json.bak")
+        ? name.slice(0, -".json.bak".length)
+        : null;
+    if (id === null || isCatalogId(id)) continue;
+    ids.add(id);
   }
   return [...ids];
 }
@@ -671,6 +685,7 @@ export function listGameSummaries(): GameListEntry[] {
 }
 
 export function deleteGame(id: string): boolean {
+  if (isCatalogId(id)) return false;
   const { dir, main, bak, meta } = paths(id);
   if (!existsSync(main) && !existsSync(bak)) return false;
   for (const f of [main, bak, meta]) if (existsSync(f)) rmSync(f);

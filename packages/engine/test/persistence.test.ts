@@ -790,13 +790,20 @@ describe("목록과 로드 — 어디서 멈췄는지 가른다", () => {
     expect(loadGame(id)?.date).toBe(firstDate);
   });
 
-  it("카탈로그 오버라이드는 게임이 아니다", () => {
+  it("카탈로그 오버라이드는 게임이 아니다 — 목록도 로드도 삭제도 그 이름을 거절한다", () => {
+    // 열리는 세이브 본문을 오버라이드 이름으로 눕힌다 — 거절이 내용이 아니라 이름 때문이게
+    lay("player-catalog", () => {});
     const override = path.join(dataDir(), "player-catalog.json");
-    writeFileSync(override, "not json", "utf8");
     try {
       expect(listGames()).not.toContain("player-catalog");
+      expect(loadGame("player-catalog")).toBeNull();
+      // 막지 않으면 요청 하나로 어드민이 편집한 카탈로그가 통째로 사라진다
+      for (const name of ["player-catalog", "team-catalog", "league-catalog", "cup-catalog"]) {
+        expect(deleteGame(name)).toBe(false);
+      }
+      expect(existsSync(override)).toBe(true);
     } finally {
-      rmSync(override);
+      rmSync(override, { force: true });
     }
   });
 
