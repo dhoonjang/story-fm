@@ -54,6 +54,10 @@ test("LLM 실패 배너", async ({ page }) => {
  * 스트림이 `done` 없이 끊긴 것으로 재현한다(응답이 잘렸거나 서버가 중간에 죽은
  * 자리). 이 길도 **배너로 끝나야 한다** — 조용히 마감되면 낙관적 유저 발화가
  * 화면에만 남고 감독은 무엇이 반영됐는지 알 수 없다.
+ *
+ * 그리고 그 배너는 "취소"라고 말하지 않는다: 서버는 연결이 끊겨도 턴을 끝까지 돌려
+ * 저장하므로 입력도 되돌아오지 않는다 — 되돌리면 재시도가 같은 지시를 두 번 태운다
+ * (docs/llm/models.md §1-1).
  */
 test("멎은 턴도 실패로 끝나고 다음 턴을 막지 않는다", async ({ page }) => {
   await page.goto("/new");
@@ -81,15 +85,19 @@ test("멎은 턴도 실패로 끝나고 다음 턴을 막지 않는다", async (
 
   await expect(page.getByTestId("turn-error")).toBeVisible({ timeout: 20_000 });
   // 서버가 준 문장이 없는 길이다 — 배너가 세우는 것은 **클라이언트가 지어낸** 문장
-  // (`TURN_TIMEOUT_MESSAGE`, game-screen.tsx). 두 실패를 가르는 것이 이 한 조각뿐이다
-  await expect(page.getByTestId("turn-error")).toContainText("지연");
-  // 반쯤 흘러온 장면은 채팅에 남지 않는다 — 서버도 저장하지 않았다
+  // (`TURN_TIMEOUT_MESSAGE`, turn-stream.ts). 두 실패를 가르는 것이 이 한 조각뿐이다
+  await expect(page.getByTestId("turn-error")).toContainText("기다리기를 멈췄");
+  await expect(page.getByTestId("turn-error")).not.toContainText("취소");
+  // 반쯤 흘러온 장면은 채팅에 남지 않는다 — 이 스펙에서는 서버도 요청을 받지 않았다
   await expect(page.getByTestId("model-turn")).toHaveCount(turnsBefore);
   await expect(page.getByTestId("chat-scroll")).not.toContainText("훈련 잡아줘");
+  // 입력은 되돌아오지 않는다 — 그 말은 서버에 가 있을 수 있다 (`다시 시도`도 잠긴다)
+  await expect(page.getByTestId("chat-input")).toHaveValue("");
 
   // **잠금이 풀렸다** — 같은 세이브의 다음 턴이 그대로 돈다
   await page.unroute("**/turn/stream");
   await expect(page.getByTestId("chat-input")).toBeEnabled();
+  await page.getByTestId("chat-input").fill("훈련 잡아줘");
   await page.getByTestId("chat-send").click();
   await expect(page.getByTestId("model-turn")).toHaveCount(turnsBefore + 1, { timeout: 40_000 });
 });

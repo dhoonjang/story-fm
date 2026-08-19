@@ -10,7 +10,7 @@ import { chatForActiveMatch } from "@/lib/match-chat";
 import { buildTraceIndex } from "@/lib/turn-trace-index";
 import { TurnTracePopup } from "./turn-trace";
 import { mergeMatchOrders, type MatchBoardOrder } from "@/lib/match-orders";
-import { streamTurn } from "@/lib/turn-stream";
+import { streamTurn, type TurnStreamFailure } from "@/lib/turn-stream";
 import { Composer } from "./composer";
 import { RailHints, useRailHints } from "./rail-hints";
 import { Loading } from "./loading";
@@ -275,6 +275,11 @@ export function GameScreen({ gameId }: { gameId: string }) {
   const streamAccRef = useRef("");
   const revealedRef = useRef(0);
   const pendingPayloadRef = useRef<GamePayload | null>(null);
+  /**
+   * 보낸 턴의 일련번호 — 실패 뒤 재조회가 **그 사이 앉은 새 턴 결과를 덮지 않게** 한다.
+   * 재조회는 서버 잠금이 풀리기를 기다리므로 늦게 돌아올 수 있다.
+   */
+  const turnSeqRef = useRef(0);
   const rafRef = useRef(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -327,6 +332,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
     async (text?: string, operator = false) => {
       const message = (text ?? input).trim();
       if (!message || busy || !game) return;
+      const seq = ++turnSeqRef.current;
       setBusy(true);
       setError(null);
       setErrorDetail(null);
@@ -379,16 +385,43 @@ export function GameScreen({ gameId }: { gameId: string }) {
           };
       if (optimistic) setGame((g) => (g ? { ...g, chat: [...g.chat, optimistic] } : g));
 
-      /** 턴 실패 — 낙관적 유저 턴을 지우고 입력을 되돌린다 (채팅엔 아무것도 남기지 않는다) */
-      const fail = (reason: string, detail?: string) => {
-        // 실패한 턴은 없었던 일이 된다 — 지시도 대기함으로 돌려놓는다
-        if (orders.length > 0) ordersRef.current = mergeMatchOrders(orders, ordersRef.current);
+      /**
+       * 턴 실패 — 낙관적 유저 턴을 지우고 배너를 세운다 (채팅엔 아무것도 남기지 않는다).
+       *
+       * **되돌리는 것은 서버가 그 턴을 확실히 버렸을 때뿐이다.** 화면이 기다리기를 멈춘
+       * 뒤에도 서버는 턴을 끝까지 돌려 저장하므로(models.md §1-1), 그때 지시를 대기열로
+       * 돌려놓으면 재시도가 같은 지시를 두 번 태우고 이미 적용된 교체 지시는 400이 된다.
+       * 입력창의 말도 같은 이유로 되돌리지 않는다 — 그 말은 이미 서버에 가 있다.
+       */
+      const fail = (failure: TurnStreamFailure) => {
+        if (failure.settled) {
+          if (orders.length > 0) ordersRef.current = mergeMatchOrders(orders, ordersRef.current);
+          if (text === undefined) setInput((cur) => (cur.trim() ? cur : message));
+        }
         if (optimistic) {
           setGame((g) => (g ? { ...g, chat: g.chat.filter((t) => t !== optimistic) } : g));
         }
-        if (text === undefined) setInput((cur) => (cur.trim() ? cur : message));
-        setError(reason);
-        setErrorDetail(detail ?? null);
+        setError(failure.reason);
+        setErrorDetail(failure.detail ?? null);
+      };
+
+      /**
+       * 서버가 무엇을 저장했는지 다시 받아 화면을 맞춘다.
+       *
+       * `settled=1`은 그 세이브의 잠금이 풀린 **다음에** 읽어 달라는 뜻이다 — 지금
+       * 읽으면 아직 커밋 전이라 옛 상태가 오고, 잠시 뒤 서버가 저장하면 화면은 다시
+       * 어긋난다. 기다리는 동안 감독은 막히지 않는다(다음 턴도 같은 잠금에 줄을 선다).
+       */
+      const resync = async () => {
+        try {
+          const res = await fetch(`/api/games/${gameId}?settled=1`);
+          const data = (await res.json()) as GamePayload | { error: string };
+          // 그 사이 새 턴이 앉았다면 이 응답은 이미 지난 상태다
+          if ("error" in data || turnSeqRef.current !== seq) return;
+          setGame(data);
+        } catch {
+          // 재조회마저 닿지 않으면 화면은 그대로 둔다 — 배너가 이미 서 있다
+        }
       };
 
       let finished = false;
@@ -467,7 +500,11 @@ export function GameScreen({ gameId }: { gameId: string }) {
           },
         },
       );
-      if (failure) fail(failure.reason, failure.detail);
+      if (failure) {
+        fail(failure);
+        // 서버가 그 턴을 마저 돌려 저장했을 수 있다 — 화면을 서버에 맞춘다
+        if (!failure.settled) void resync();
+      }
       if (!pendingPayloadRef.current) commit(null);
     },
     [input, busy, game, liveMatch?.matchId, gameId, saver],
