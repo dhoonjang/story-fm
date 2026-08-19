@@ -65,19 +65,12 @@ export const MatchResultSchema = z.object({
    * 도움 — `scorers`와 **같은 순서·같은 길이·같은 형식**(`"home:playerId"`)이고,
    * 도움이 없는 골은 빈 문자열이다.
    *
-   * 예전엔 득점자만 남기고 도움을 버렸다. 코어는 골의 68%에 도움을 붙이는데
-   * (`pickAssister` — 실측 72%) 경기가 끝나는 순간 그 사실이 사라져, 시즌 합계
-   * 숫자 말고는 **누가 도왔는지 어디에도 없었다**. 달력 상세도 대회 뷰도 득점자만
-   * 읽으니 "어시스트가 기록되지 않는다"로 보이는 게 당연하다.
-   *
    * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   assists: z.array(z.string()).optional(),
   /**
    * 골이 들어간 **분** — `scorers`와 같은 순서·같은 길이.
    *
-   * 스코어만 남기던 때는 "3-1"이 언제 어떻게 만들어진 경기인지 알 수 없었다.
-   * 87분 동점골과 5분 선제골은 같은 1점이 아니고, 그건 남의 팀 경기도 마찬가지다.
    * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   goalMinutes: z.array(z.number().int().min(0)).optional(),

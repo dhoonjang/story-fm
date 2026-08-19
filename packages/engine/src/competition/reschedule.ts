@@ -26,26 +26,6 @@ const REARRANGED_WEEKDAYS = new Set([2, 3]);
 /** 연기 대상 날짜를 찾는 창 */
 const REARRANGE_SEARCH_DAYS = 80;
 
-/**
- * 이 팀이 뛸 수 없는 날 — 이미 잡힌 경기 + (대항전 참가팀이면) 예약된 대항전 날짜.
- *
- * 대항전 녹아웃은 아직 편성되지 않았어도 **날짜가 이미 정해져 있다**
- * (`reservedEuroDatesFor`). 그 자리를 비워 두지 않으면 나중에 편성된 대항전 경기가
- * 컵 경기와 같은 날 겹친다 — 한 팀이 하루에 두 경기를 뛰게 된다.
- *
- * ⚠️ **그 팀에게 아직 유효한 예약만** 본다. 시즌 전체의 예약일을 대항전에 나갔던
- * 모든 팀에게 걸면 4~5월 주중이 통째로 잠겨, 연기할 자리가 없어진다.
- */
-export function teamBusyDates(state: GameState, teamId: string): Set<string> {
-  const dates = new Set<string>();
-  for (const m of state.matches) {
-    if (m.season !== state.season) continue;
-    if (m.homeTeamId === teamId || m.awayTeamId === teamId) dates.add(m.date);
-  }
-  for (const d of reservedEuroDatesFor(state, teamId)) dates.add(d);
-  return dates;
-}
-
 /** 이 대회의 마지막 라운드 번호 — 최종 라운드는 동시 킥오프라 옮기지 않는다 */
 function lastRoundOf(state: GameState, competitionId: string): number {
   let max = 0;

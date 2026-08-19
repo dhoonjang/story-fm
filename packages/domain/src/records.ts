@@ -53,7 +53,7 @@ export const SuspensionSchema = z.object({
 });
 export type Suspension = z.infer<typeof SuspensionSchema>;
 
-/** 시즌 누적 경고 5회당 1경기 정지 (game-loop §5) */
+/** 시즌 누적 경고 5회당 1경기 정지 (match.md §6) */
 export const YELLOWS_PER_SUSPENSION = 5;
 
 // ── 계약 (주급의 원본) ────────────────────────────────
@@ -89,7 +89,6 @@ export const TransferWindowSchema = z.object({
 export type TransferWindow = z.infer<typeof TransferWindowSchema>;
 
 export const TransferTypeSchema = z.enum(["transfer", "loan", "free", "youth", "retire"]);
-export type TransferType = z.infer<typeof TransferTypeSchema>;
 
 /**
  * 팀 변경 원장 — 이적·임대·자유계약·유스 콜업·은퇴까지 모든 이동이 row로 남는다.
@@ -125,7 +124,6 @@ export type Transfer = z.infer<typeof TransferSchema>;
  * 같은 테이블을 탄다 — 부르기(recall)만 흥정이 아니라 우리 결정이다.
  */
 export const NegotiationKindSchema = z.enum(["buy", "sell", "renew", "loan", "loan_out"]);
-export type NegotiationKind = z.infer<typeof NegotiationKindSchema>;
 
 export const NegotiationVerdictSchema = z.enum(["accept", "counter", "reject"]);
 export type NegotiationVerdict = z.infer<typeof NegotiationVerdictSchema>;
@@ -150,8 +148,6 @@ export const NegotiationRoundSchema = z.object({
    */
   pitch: z.array(PitchClaimSchema).optional(),
 });
-export type NegotiationRound = z.infer<typeof NegotiationRoundSchema>;
-
 /**
  * 메디컬 — **합의와 계약 사이에 놓인 하루.**
  *
@@ -204,7 +200,6 @@ export type Negotiation = z.infer<typeof NegotiationSchema>;
  * `reserve`는 옛 2군 개발 프로그램의 출처로, 이전 세이브의 로그에만 남아 있다.
  */
 export const GrowthSourceSchema = z.enum(["training", "match", "reserve", "development"]);
-export type GrowthSource = z.infer<typeof GrowthSourceSchema>;
 
 /** 성장 대상 — 능력치 6축+GK, 포지션 적응도(pos:CODE), 전술 적응도(tactical) */
 export const GrowthEntrySchema = z.object({
@@ -330,10 +325,6 @@ export type SettlingEvent = z.infer<typeof SettlingEventSchema>;
 
 /**
  * 이적 리스트 등재 — **감독이 "이 선수는 팔겠다"고 시장에 알린 사실.**
- *
- * 예전엔 매각이 AI가 먼저 오퍼를 넣어야만 시작됐다(하루 8%). 감독이 팔기로
- * 마음먹어도 할 수 있는 일이 없어서, GM이 2군 강등과 예산 증액으로 매각을
- * 흉내 내는 일이 벌어졌다 — 이야기와 장부가 갈라진다.
  *
  * 등재는 **호가와 함께** 한다. 값을 부르는 것이 감독의 손잡이이기 때문이다 —
  * 싸게 내놓으면 금방 팔리고, 비싸게 부르면 아무도 안 온다.
@@ -523,8 +514,6 @@ export const FinanceHighlightSchema = z.object({
   /** 항상 양수 — 방향은 kind가 정한다 */
   amount: z.number().min(0),
 });
-export type FinanceHighlight = z.infer<typeof FinanceHighlightSchema>;
-
 /**
  * 월간 재정 보고서 (FINANCE_REPORT) — 매월 1일에 지난달을 마감해 만든다.
  * 상세 원장은 3개월 롤링으로 잘리지만 이 요약은 영구 보존되고, `openingBalance`

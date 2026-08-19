@@ -197,12 +197,6 @@ export function isTwoFooted(foot: Foot): boolean {
   return foot.left === foot.right;
 }
 
-/** 더 잘 쓰는 발 (같으면 null) */
-export function strongerFoot(foot: Foot): "L" | "R" | null {
-  if (foot.left === foot.right) return null;
-  return foot.left > foot.right ? "L" : "R";
-}
-
 /** 화면·서사용 한 줄 — "왼발 5 · 오른발 2" / "양발 5" */
 export function footLabel(foot: Foot | undefined): string {
   if (!foot) return "정보 없음";
@@ -400,13 +394,6 @@ export interface RoleDef {
  * 자리별 축 가중치 — **0.1 ~ 3.0, 0.1 해상도**. `overall`·`roleFit`·시뮬 존 점수의
  * 단일 소스다 (player.md §2). 각 자리의 값은 그 자리의 **제네릭 역할**
  * (센터백=CD, 풀백=FB, 윙어=W…)이고, 세부 역할은 여기서의 차이로 정의한다.
- *
- * ## 왜 단계가 아니라 소수인가
- *
- * 예전엔 3(핵심)/2(중요)/1(보조)/바닥 네 칸이었다. 그러면 센터백의 위치선정과
- * 몸싸움이 **똑같이 3**이 되는데, 현대 센터백은 붙기 전에 자리로 막는 쪽이 먼저다.
- * 윙어의 속도와 드리블도, 골키퍼의 킥력과 공중볼도 마찬가지다 — 같은 칸에
- * 들어갈 뿐 같은 무게가 아니다. 네 칸으로는 그 차이를 **적을 자리가 없었다**.
  *
  * ## 눈금
  *
@@ -1326,10 +1313,6 @@ export function tacticalSensitivityOf(position: string): number {
   return TACTICAL_SENSITIVITY[weightSlotOf(position)];
 }
 
-export function weightsFor(position: string): AxisValues {
-  return POSITION_WEIGHTS[weightSlotOf(position)];
-}
-
 /**
  * **역할별 기준점 보정** — `"슬롯:역할"` → 그 역할의 가중 평균이 자리 기본 역할에서
  * 얼마나 벗어나는가 (카탈로그 실측, `scripts` 없이 테스트로 재생성한다).
@@ -1341,10 +1324,8 @@ export function weightsFor(position: string): AxisValues {
  * 그 자리의 어느 역할에서도 같은 값**이고, 갈리는 건 "이 선수가 그 역할에
  * 맞느냐"뿐이다.
  *
- * ⚠️ **자리 사이에는 같은 보정을 두지 않는다.** 한때 `RAW_PIVOT`이 자리마다 수준을
- * 맞췄는데, 그 보정은 되펴기(×1.237)와 한 몸이라 종합을 축 범위 밖으로 밀어냈다.
- * 자리 간 수준 차는 이제 가중치가 정한 그대로 남는다 — 실측 자리별 평균 폭은
- * 5.5로 되펴던 시절(6.5)보다 오히려 좁다 (`attributes.test.ts`).
+ * ⚠️ **자리 사이에는 같은 보정을 두지 않는다.** 자리 간 수준 차는 가중치가 정한
+ * 그대로 남는다 — 실측 자리별 평균 폭은 5.5다 (`attributes.test.ts`).
  */
 const ROLE_PIVOT: Record<string, number> = {
   "AM:advanced-playmaker": 0.1,
@@ -1468,18 +1449,6 @@ export function roleAtSlot(
 ): string {
   return inheritedRole(position, current, remembered) ?? defaultRoleOf(position);
 }
-
-/**
- * 역할 한글 이름 → 약칭 (`컴플리트 포워드` → `CF`).
- *
- * 좁은 자리에서 역할을 부르는 이름은 **전술판과 같아야 한다** — 같은 역할이
- * 화면마다 다른 말로 불리면 같은 것인지 알 수 없다.
- */
-export const ROLE_ABBR: ReadonlyMap<string, string> = new Map(
-  Object.values(ROLE_DEFS)
-    .flat()
-    .map((r) => [r.ko, r.abbr]),
-);
 
 /** 자리+역할 → 축 가중치. 모르는 역할 id는 기본 역할로 떨어진다 */
 export function roleWeights(position: string, role?: string): AxisValues {
@@ -1641,9 +1610,8 @@ export function bestOverall(axes: AxisValues, positions: readonly { position: st
 export const PlayerStateSchema = z.object({
   /**
    * 폼 **−1.0 ‥ +1.0** (실수) — 1이 곧 절정, −1이 곧 바닥이라 값 자체가 비율로
-   * 읽힌다. 규칙은 `engine/form.ts` 한곳에 있다. 예전의 −3~3 정수 7단계는
-   * 눈금이 굵어 "조금씩 오르내림"을 담지 못했고 3이라는 숫자에 뜻도 없었다
-   * (옛 세이브는 로드할 때 3으로 나눠 옮긴다 — `persistence.ts`).
+   * 읽힌다. 규칙은 `engine/form.ts` 한곳에 있다
+   * (옛 −3~3 세이브는 로드할 때 3으로 나눠 옮긴다 — `persistence.ts`).
    */
   form: z.number().min(-1).max(1),
   /**

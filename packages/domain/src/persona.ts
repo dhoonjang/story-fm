@@ -173,8 +173,6 @@ export interface CharacterEntry {
 
 /** 태그를 이름으로 옮기기 전 세이브를 알아보는 표식이기도 하다 */
 export const HEAD_COACH_ROLE_LABEL = PERSONA_ROLE_LABEL.head_coach!;
-export const OWNER_ROLE_LABEL = PERSONA_ROLE_LABEL.owner!;
-export const REPORTER_ROLE_LABEL = PERSONA_ROLE_LABEL.reporter!;
 
 /**
  * 주장 — 페르소나가 아니지만 대화에서 자리가 뜻을 갖는 유일한 선수다.

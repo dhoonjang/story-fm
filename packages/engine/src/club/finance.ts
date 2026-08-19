@@ -90,10 +90,8 @@ const RELEGATED_COMMERCIAL: readonly number[] = [-0.1, -0.25, -0.35];
 /**
  * 상업(스폰서십) 월 정액 — 브랜드 규모별.
  *
- * ⚠️ **이 축이 구단을 가르는 힘이 실제와 가장 크게 달랐다.** 예전 값은 브랜드 1등급이
- * 연 £54M(굿즈 포함 £68M)이라 실측(아스날·바이에른 £220~350M)의 3분의 1이었고, 1:4
- * 등급 폭도 5배뿐이라 실제 격차(15배)를 담지 못했다. 그래서 **구단을 가르는 축이
- * 브랜드가 아니라 구장 크기**가 돼 있었다 — 매치데이만 제 크기였기 때문이다.
+ * ⚠️ **구단을 가르는 힘이 이 축에 실린다.** 등급 폭이 실제 격차(15배)를 담지 못하면
+ * 구단을 가르는 축이 브랜드가 아니라 구장 크기로 넘어간다.
  *
  * 값은 **실측 × 0.67**이다. 우리 세계는 의도적으로 실제의 6~7할 규모이고(§10.1)
  * 중계권이 이미 0.66에 맞춰져 있다 — 상업만 0.32였던 것이 어긋난 자리였다.
@@ -332,14 +330,11 @@ export function monthlyFixedCostOf(teamId: string, state?: GameState): number {
  * 균등 배분에도 **리그 배율을 적용한다** (finance.md §5.1) — 실제로 각국 중계권
  * 규모는 리그마다 크게 다르다 (리그1은 EPL의 0.16).
  *
- * 예전엔 껐다. 주급 곡선이 리그를 몰라(능력치로만 정해져) 약체 리그 구단이 EPL 수준
- * 주급을 내면서 6분의 1 수입을 받아 파산했기 때문이다. **주급이 리그를 알게 되면서**
- * (wages.ts) 그 이유가 사라졌다 — 이제 수입도 리그를 안다.
+ * ⚠️ 주급 곡선도 리그를 알아야 성립한다 (wages.ts) — 수입만 리그를 알면 약체 리그
+ * 구단이 EPL 수준 주급을 내면서 6분의 1 수입을 받는다.
  */
-const EQUAL_SHARE_LEAGUE_SCALED = true;
-
 function equalShareFactor(state: GameState, teamId: string): number {
-  return EQUAL_SHARE_LEAGUE_SCALED ? poolOf(state, teamId) : 1;
+  return poolOf(state, teamId);
 }
 
 /**

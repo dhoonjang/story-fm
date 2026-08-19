@@ -22,7 +22,6 @@ import {
   nextMatchFor,
   windowOpenOn,
 } from "../competition/calendar";
-import { teamCatalog } from "../data/team-catalog";
 import { competitionLabel } from "../data/cup-catalog";
 import { isFriendly } from "../competition/friendly";
 import { advanceDomesticCups } from "../competition/domestic-cup";
@@ -1104,5 +1103,3 @@ export function applyScenePoint(state: GameState, target: ScenePoint): SceneAdva
     short: state.date !== target.date,
   };
 }
-
-export { teamCatalog };

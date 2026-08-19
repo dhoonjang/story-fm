@@ -337,7 +337,7 @@ chunk에만 실린다 — 그 옵션이 없으면 계측이 이 에이전트를 
 
 ## 7. 미해결
 
-- 계측을 화면에 세울지 — 지금은 `usage-meter.ts`의 `llmUsage()`·`describeUsage()`로 코드에서만
+- 계측을 화면에 세울지 — 지금은 `usage-meter.ts`의 `llmUsage()`로 코드에서만
   읽고 `apps/web`에 부르는 자리가 없다. 원문 팝업(§5)은 그 턴의 사용량만 보여 준다.
 - OpenAI Responses API 이전 — 서사를 그쪽으로 옮겨 추론이 필요해지는 날.
   `openai-adapter.ts`는 `chat.completions`만 부른다.
