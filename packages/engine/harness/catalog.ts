@@ -1,3 +1,4 @@
+import { HISTORY_CHAR_KEEP } from "../src/core/history-window";
 import { defineHarness, type Harness } from "./harness";
 
 /**
@@ -9,6 +10,7 @@ import { defineHarness, type Harness } from "./harness";
 
 const MATCH = "docs/simulation/match.md §7";
 const FINANCE = "docs/simulation/finance.md §10";
+const HISTORY = "docs/llm/agents.md §5-1";
 
 export const WORLD_SEASON = defineHarness({
   id: "world-season",
@@ -290,6 +292,23 @@ export const OVERALL_SCALE = defineHarness({
   ],
 });
 
+export const HISTORY_WINDOW = defineHarness({
+  id: "history-window",
+  what: "평시 이력의 창 — 상한·잔량이 몇 턴인가 · 창이 미끄러지는 빈도 · 압축 뒤 잔량",
+  doc: HISTORY,
+  cost: "세계 하나 + 합성 이력 400턴 — 수 초",
+  // prettier-ignore
+  bands: [
+    { metric: "이력 창 (턴)", role: "reference", min: 100, max: 220, unit: "count", why: "상한 ÷ 실측 턴당 글자 — 시즌을 가로지르는 이야기가 창 안에 남아야 한다" },
+    { metric: "압축 뒤 이력 (턴)", role: "reference", min: 30, max: 80, unit: "count", why: "잔량 ÷ 실측 턴당 글자" },
+    { metric: "압축 주기 (턴)", role: "measure", unit: "count", why: "(상한 − 잔량) ÷ 턴당 글자 — 요약 블록이 이만큼마다 한 번 무효가 된다" },
+    { metric: "압축 뒤 이력 글자", role: "guard", max: HISTORY_CHAR_KEEP, unit: "count", why: "잔량 그것 — 넘으면 압축이 제 일을 하지 못한 것이다" },
+    { metric: "창이 미끄러진 턴 비율", role: "guard", max: 0.2, unit: "ratio", why: "6턴 스텝이라 정상은 1/6 — 매 턴 미끄러지면 이력 캐시가 한 번도 적중하지 않는다" },
+    { metric: "렌더 배율", role: "reference", min: 1, max: 1.3, unit: "ratio", why: "코어가 세는 turn.text와 프롬프트에 실리는 형태의 비 — 이보다 벌어지면 글자 상한이 뜻을 잃는다" },
+    { metric: "잔량의 최소 캐시 프리픽스 배수", role: "guard", min: 1, unit: "ratio", why: "그 아래면 압축 직후 이력 캐시가 아예 안 걸린다 (models.md §1)" },
+  ],
+});
+
 /** `pnpm balance --list`가 읽는 목록 — 새 하네스를 여기 넣지 않으면 목록에 서지 않는다 */
 export const HARNESSES: readonly Harness[] = [
   WORLD_SEASON,
@@ -306,4 +325,5 @@ export const HARNESSES: readonly Harness[] = [
   MANAGER_MARKET,
   SQUAD_LONGEVITY,
   OVERALL_SCALE,
+  HISTORY_WINDOW,
 ];
