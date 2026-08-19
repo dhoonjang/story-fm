@@ -67,6 +67,57 @@ function makeStreamClient(streams: unknown[][]) {
 }
 
 describe("OpenAI 어댑터", () => {
+  it("강제 도구는 첫 요청에만 실린다 — 계속 걸면 턴이 끝나지 않는다", async () => {
+    const { client, sent } = makeStubClient([
+      completion(
+        {
+          role: "assistant",
+          tool_calls: [
+            { id: "c1", type: "function", function: { name: "report_mood", arguments: "{}" } },
+          ],
+        },
+        "tool_calls",
+      ),
+      completion({ role: "assistant", content: "끝." }),
+    ]);
+    const tool: GameToolSpec = {
+      name: "report_mood",
+      description: "테스트 도구",
+      inputSchema: { type: "object" as const, properties: {} },
+      handle: () => ({ ok: true, message: "반영" }),
+    };
+
+    const llm = new OpenAiGameLLM(testConfig, client);
+    await llm.runTurn({
+      system: "시스템",
+      history: [],
+      user: "결산",
+      tools: [tool],
+      toolChoice: { name: "report_mood" },
+    });
+
+    expect(sent).toHaveLength(2);
+    expect(sent[0]!.tool_choice).toEqual({ type: "function", function: { name: "report_mood" } });
+    /**
+     * 도구 결과를 돌려준 뒤에도 강제가 남아 있으면 모델이 턴을 끝낼 길이 없어
+     * 왕복 상한까지 같은 도구를 다시 부른다 — 그 회귀를 이 줄이 잡는다.
+     */
+    expect(sent[1]!.tool_choice).toBeUndefined();
+  });
+
+  it("toolChoice가 없으면 tool_choice를 싣지 않는다", async () => {
+    const { client, sent } = makeStubClient([completion({ role: "assistant", content: "됐다" })]);
+    const tool: GameToolSpec = {
+      name: "noop",
+      description: "테스트 도구",
+      inputSchema: { type: "object" as const, properties: {} },
+      handle: () => ({ ok: true, message: "ok" }),
+    };
+    const llm = new OpenAiGameLLM(testConfig, client);
+    await llm.runTurn({ system: "시스템", history: [], user: "안녕", tools: [tool] });
+
+    expect(sent[0]!.tool_choice).toBeUndefined();
+  });
   it("함수 도구를 쓰려면 추론이 꺼져 있어야 한다", async () => {
     const { client, sent } = makeStubClient([completion({ role: "assistant", content: "됐다" })]);
     const llm = new OpenAiGameLLM(testConfig, client);

@@ -100,9 +100,11 @@ e2e/               # Playwright specs — onboarding · game · admin · turn er
 - Domain types live in `packages/domain`; other packages import from there.
 - **The screen imports `@story-fm/engine` for types only.** A value import pulls
   `node:fs` into the browser bundle and `next build` dies — `typecheck` passes, so
-  only the CI e2e job catches it. A pure rule the screen and the core both need
-  (`observedFit`, `roleAtSlot`, `ratingTier`) belongs in `packages/domain`; the
-  engine re-exports it so core-side callers do not move.
+  **`pnpm lint` is what catches it**: `eslint.config.js` bans the value import
+  across `apps/web` — the server-only modules that would drag the engine in with
+  them included — and lists the files exempt from it. A pure rule the screen and
+  the core both need (`observedFit`, `roleAtSlot`, `ratingTier`) belongs in
+  `packages/domain`; the engine re-exports it so core-side callers do not move.
 - kebab-case files and directories, PascalCase types and components, camelCase
   values and functions.
 - Give numbers and formulas names — balance tuning should only need to read that
@@ -252,12 +254,12 @@ folder is a layer. Read the design doc for the domain you are touching before yo
 start, and do not blur the boundary between the deterministic core and the
 non-deterministic LLM.
 
-| Folder        | What                                                     | Docs                                                                                                                                                                                                                      |
-| ------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| —             | Overall structure · the path of one turn · the game loop | [overview.md](./docs/overview.md)                                                                                                                                                                                         |
-| `data/`       | What exists                                              | [game-state](./docs/data/game-state.md) · [player](./docs/data/player.md) · [team](./docs/data/team.md) · [competition](./docs/data/competition.md) · [people](./docs/data/people.md) · [sources](./docs/data/sources.md) |
-| `simulation/` | What happens                                             | [match](./docs/simulation/match.md) · [season](./docs/simulation/season.md) · [transfer](./docs/simulation/transfer.md) · [finance](./docs/simulation/finance.md) · [career](./docs/simulation/career.md)                 |
-| `llm/`        | How it speaks                                            | [models](./docs/llm/models.md) · [agents](./docs/llm/agents.md) · [prompts](./docs/llm/prompts.md)                                                                                                                        |
+| Folder        | What                                                     | Docs                                                                                                                                                                                                                                                                |
+| ------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| —             | Overall structure · the path of one turn · the game loop | [overview.md](./docs/overview.md)                                                                                                                                                                                                                                   |
+| `data/`       | What exists                                              | [game-state](./docs/data/game-state.md) · [player](./docs/data/player.md) · [team](./docs/data/team.md) · [competition](./docs/data/competition.md) · [people](./docs/data/people.md) · [sources](./docs/data/sources.md)                                           |
+| `simulation/` | What happens                                             | [match](./docs/simulation/match.md) · [season](./docs/simulation/season.md) · [transfer](./docs/simulation/transfer.md) · [finance](./docs/simulation/finance.md) · [career](./docs/simulation/career.md) · [balance-harness](./docs/simulation/balance-harness.md) |
+| `llm/`        | How it speaks                                            | [models](./docs/llm/models.md) · [agents](./docs/llm/agents.md) · [prompts](./docs/llm/prompts.md)                                                                                                                                                                  |
 
 ## Status
 

@@ -100,13 +100,28 @@ function openaiHistory(history: TurnHistory, config: OpenAiAgentConfig): ChatMes
   return messages.map((m) => ({ role: m.role, content: m.content }) as ChatMessage);
 }
 
-function addUsage(total: TurnUsage, usage: OpenAI.Completions.CompletionUsage | undefined): void {
-  // prompt_tokens는 캐시분(cached_tokens)을 이미 품고 있다 — 계약이 요구하는
-  // "입력 전부"와 같은 값이라 그대로 더한다.
-  total.inputTokens += usage?.prompt_tokens ?? 0;
-  total.outputTokens += usage?.completion_tokens ?? 0;
-  total.cacheReadTokens += usage?.prompt_tokens_details?.cached_tokens ?? 0;
-  // OpenAI의 프롬프트 캐시는 자동이라 생성 토큰을 따로 청구·보고하지 않는다
+/**
+ * 왕복 하나의 몫을 누적기에 더하고 **그 delta를 돌려준다** — 부르는 쪽이 그대로
+ * `req.onUsage`에 실어 보내므로, 턴이 실패로 끝나도 여기까지 쓴 토큰이 남는다
+ * (models.md §4).
+ */
+function addUsage(
+  total: TurnUsage,
+  usage: OpenAI.Completions.CompletionUsage | undefined,
+): TurnUsage {
+  const delta: TurnUsage = {
+    // prompt_tokens는 캐시분(cached_tokens)을 이미 품고 있다 — 계약이 요구하는
+    // "입력 전부"와 같은 값이라 그대로 더한다.
+    inputTokens: usage?.prompt_tokens ?? 0,
+    outputTokens: usage?.completion_tokens ?? 0,
+    cacheReadTokens: usage?.prompt_tokens_details?.cached_tokens ?? 0,
+    // OpenAI의 프롬프트 캐시는 자동이라 생성 토큰을 따로 청구·보고하지 않는다
+    cacheWriteTokens: 0,
+  };
+  total.inputTokens += delta.inputTokens;
+  total.outputTokens += delta.outputTokens;
+  total.cacheReadTokens += delta.cacheReadTokens;
+  return delta;
 }
 
 /**
@@ -230,6 +245,10 @@ export class OpenAiGameLLM implements GameLLM {
         parameters: tool.inputSchema as Record<string, unknown>,
       },
     }));
+    const forcedTool =
+      typeof req.toolChoice === "object"
+        ? ({ type: "function", function: { name: req.toolChoice.name } } as const)
+        : undefined;
 
     const usage: TurnUsage = {
       inputTokens: 0,
@@ -256,6 +275,9 @@ export class OpenAiGameLLM implements GameLLM {
         reasoning_effort: "none" as const,
         messages,
         ...(toolDefs.length > 0 ? { tools: toolDefs } : {}),
+        // 강제는 첫 요청에만 — 도구 결과를 돌려준 뒤에도 걸어 두면 모델이 턴을
+        // 끝낼 수 없어 왕복 상한까지 같은 도구를 다시 부른다 (TurnRequest.toolChoice)
+        ...(iter === 0 && forcedTool ? { tool_choice: forcedTool } : {}),
       };
 
       let turn: Assistant;
@@ -271,11 +293,14 @@ export class OpenAiGameLLM implements GameLLM {
           requestOptions,
         );
         const collected = await collectStream(stream, req.onText);
-        addUsage(usage, collected.usage);
+        // 왕복 하나가 끝나는 자리에서 그 몫을 보고한다 (models.md §4)
+        const delta = addUsage(usage, collected.usage);
+        req.onUsage?.(delta);
         turn = collected;
       } else {
         const response = await this.client.chat.completions.create(body, requestOptions);
-        addUsage(usage, response.usage);
+        const delta = addUsage(usage, response.usage);
+        req.onUsage?.(delta);
         const choice = response.choices[0];
         const message = choice?.message;
         if (!message) throw new Error("OpenAI가 빈 응답을 반환했습니다.");

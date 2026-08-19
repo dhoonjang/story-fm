@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  LlmTimeoutError,
   TokenBudgetExceededError,
   addUsage,
+  beginGameUsage,
   billedTokens,
   budgetVerdict,
   cacheAlerts,
@@ -15,7 +17,9 @@ import {
   recordUsage,
   resetLlmUsage,
   agentAllowed,
+  withDeadline,
   type GameLLM,
+  type TurnRequest,
   type TurnResult,
   type TurnUsage,
 } from "@story-fm/llm";
@@ -41,6 +45,35 @@ function stubLlm(usage: TurnUsage, calls: { count: number } = { count: 0 }): Gam
         toolCallCount: 0,
         stopReason: "completed",
       };
+    },
+  };
+}
+
+/**
+ * 왕복마다 몫을 보고하는 모델 — 어댑터 셋이 하는 일이 이것이다(`TurnRequest.onUsage`).
+ * `fail`을 주면 다 보고한 뒤 던진다.
+ */
+function reportingLlm(deltas: Partial<TurnUsage>[], fail?: string): GameLLM {
+  return {
+    async runTurn(req: TurnRequest): Promise<TurnResult> {
+      let total = emptyUsage();
+      for (const delta of deltas) {
+        const round = usageOf(delta);
+        total = addUsage(total, round);
+        req.onUsage?.(round);
+      }
+      if (fail !== undefined) throw new Error(fail);
+      return { ...emptyResult, usage: total };
+    },
+  };
+}
+
+/** 왕복 몫을 보고한 뒤 영영 응답하지 않는 모델 — 시한이 겨눈 자리다 */
+function reportingStall(deltas: Partial<TurnUsage>[]): GameLLM {
+  return {
+    runTurn(req: TurnRequest): Promise<TurnResult> {
+      for (const delta of deltas) req.onUsage?.(usageOf(delta));
+      return new Promise<TurnResult>(() => {});
     },
   };
 }
@@ -245,6 +278,65 @@ describe("meterLlm — 계약이 같으므로 부르는 쪽은 감싼 줄 모른
     expect(llmUsage().byAgent["match-rater"].skipped).toBe(1);
   });
 
+  /**
+   * 도구 왕복을 돌다 실패한 호출이 **가장 많이 쓴다**. 결과가 돌아온 뒤에만
+   * 적으면 그 호출이 0으로 적혀, 상한이 정확히 폭주한 호출을 비켜 간다
+   * (models.md §4).
+   */
+  it("실패로 끝난 호출도 그때까지 쓴 토큰을 남긴다", async () => {
+    const llm = meterLlm(reportingLlm([{ inputTokens: 900, outputTokens: 100 }], "터졌다"), "gm");
+
+    await expect(llm.runTurn(request)).rejects.toThrow("터졌다");
+
+    expect(llmUsage().calls).toBe(1);
+    expect(billedTokens(llmUsage().byAgent.gm.usage)).toBe(1000);
+  });
+
+  it("시한에 걸린 턴은 그때까지 돈 왕복을 모두 적는다", async () => {
+    vi.useFakeTimers();
+    try {
+      const inner = reportingStall([
+        { inputTokens: 4000, outputTokens: 200 },
+        { inputTokens: 4500, outputTokens: 300 },
+      ]);
+      const llm = meterLlm(withDeadline(inner, "match-caster", 30_000), "match-caster");
+      const settled = expect(llm.runTurn(request)).rejects.toBeInstanceOf(LlmTimeoutError);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await settled;
+
+      expect(billedTokens(llmUsage().byAgent["match-caster"].usage)).toBe(9000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * 보고된 몫이 없으면 적지 않는다 — 즉시 끊긴 연결이 `calls`를 부풀리면
+   * `cacheAlerts`의 평균 입력이 흐려져 프리픽스가 깨진 자리를 못 본다.
+   */
+  it("아무것도 못 써 본 실패는 호출로 세지 않는다", async () => {
+    const llm = meterLlm(reportingLlm([], "연결 실패"), "gm");
+    await expect(llm.runTurn(request)).rejects.toThrow("연결 실패");
+    expect(llmUsage().calls).toBe(0);
+  });
+
+  it("성공한 호출은 두 번 세지 않는다 — 왕복 몫과 합계 중 합계만 적는다", async () => {
+    const llm = meterLlm(reportingLlm([{ inputTokens: 300, outputTokens: 40 }]), "gm");
+    await llm.runTurn(request);
+
+    expect(llmUsage().calls).toBe(1);
+    expect(llmUsage().byAgent.gm.usage.inputTokens).toBe(300);
+    expect(llmUsage().byAgent.gm.usage.outputTokens).toBe(40);
+  });
+
+  it("부르는 쪽이 준 onUsage도 그대로 받는다", async () => {
+    const seen: TurnUsage[] = [];
+    const llm = meterLlm(reportingLlm([{ inputTokens: 10, outputTokens: 1 }]), "gm");
+    await llm.runTurn({ ...request, onUsage: (delta) => seen.push(delta) });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.inputTokens).toBe(10);
+  });
+
   it("상한을 넘겨도 GM은 계속 돈다 — 경고만 남긴다", async () => {
     const calls = { count: 0 };
     const env = { LLM_TOKEN_BUDGET: "150" };
@@ -258,5 +350,120 @@ describe("meterLlm — 계약이 같으므로 부르는 쪽은 감싼 줄 모른
     expect(calls.count).toBe(3);
     // 같은 경고를 매 턴 반복하지 않는다
     expect(warn.mock.calls.filter((c) => String(c[0]).includes("계속 실행"))).toHaveLength(1);
+  });
+});
+
+/**
+ * 예산의 단위는 **게임**이다 — 프로세스 누적으로 세면 한 게임이 상한을 넘긴 뒤로
+ * 재시작 전까지 모든 게임의 결산이 꺼진다 (models.md §4).
+ */
+describe("beginGameUsage — 장부는 한 번에 게임 하나를 담는다", () => {
+  it("같은 게임이면 이어서 센다", async () => {
+    const llm = meterLlm(stubLlm(usageOf({ inputTokens: 100, outputTokens: 20 })), "gm");
+    beginGameUsage("save-1");
+    await llm.runTurn({ system: "S", history: [], user: "1" });
+    beginGameUsage("save-1");
+    await llm.runTurn({ system: "S", history: [], user: "2" });
+
+    expect(llmUsage().calls).toBe(2);
+    expect(llmUsage().usage.inputTokens).toBe(200);
+  });
+
+  it("다른 게임이면 거기서 비운다 — 한 게임의 폭주가 다른 게임을 끄지 않는다", async () => {
+    const llm = meterLlm(stubLlm(usageOf({ inputTokens: 100, outputTokens: 20 })), "gm");
+    beginGameUsage("save-1");
+    await llm.runTurn({ system: "S", history: [], user: "1" });
+    beginGameUsage("save-2");
+
+    expect(llmUsage().calls).toBe(0);
+    expect(billedTokens(llmUsage().usage)).toBe(0);
+    // 새 게임의 결산은 상한 아래에서 다시 시작한다
+    expect(agentAllowed("mood-rater", budgetVerdict(llmUsage(), 100))).toBe(true);
+  });
+
+  it("리셋은 소유자 표시도 비운다 — 같은 이름의 게임이 다시 열려도 새로 센다", async () => {
+    const llm = meterLlm(stubLlm(usageOf({ inputTokens: 100, outputTokens: 20 })), "gm");
+    beginGameUsage("save-1");
+    await llm.runTurn({ system: "S", history: [], user: "1" });
+    resetLlmUsage();
+    beginGameUsage("save-1");
+
+    expect(llmUsage().calls).toBe(0);
+  });
+});
+
+const emptyResult = {
+  text: "장면",
+  history: { version: 1 as const, provider: "google" as const, model: "m", messages: [] },
+  historyBase: 0,
+  usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+  toolCallCount: 0,
+  stopReason: null,
+};
+
+const request: TurnRequest = { system: "s", history: [], user: "u" };
+
+/** 영영 응답하지 않는 모델 — 이슈가 재현한 자리다 */
+function stalled(): { llm: GameLLM; seen: () => TurnRequest | undefined } {
+  let seen: TurnRequest | undefined;
+  return {
+    llm: {
+      runTurn(req) {
+        seen = req;
+        return new Promise(() => {});
+      },
+    },
+    seen: () => seen,
+  };
+}
+
+describe("모델 호출 시한", () => {
+  it("멎은 호출은 시한 뒤 실패로 끝난다 — 프로미스가 매달리지 않는다", async () => {
+    vi.useFakeTimers();
+    try {
+      const { llm } = stalled();
+      const pending = withDeadline(llm, "gm", 30_000).runTurn(request);
+      const settled = expect(pending).rejects.toBeInstanceOf(LlmTimeoutError);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await settled;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("시한 문구는 화면이 '지연'으로 옮길 수 있어야 한다", () => {
+    const error = new LlmTimeoutError("match-caster", 1_000);
+    expect(error.message.toLowerCase()).toContain("timeout");
+    expect(error.agent).toBe("match-caster");
+  });
+
+  it("시한이 지나면 진행 중인 호출도 끊는다 — 소켓을 물고 있지 않는다", async () => {
+    vi.useFakeTimers();
+    try {
+      const { llm, seen } = stalled();
+      const pending = withDeadline(llm, "gm", 5_000).runTurn(request);
+      const settled = expect(pending).rejects.toBeInstanceOf(LlmTimeoutError);
+      expect(seen()?.signal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(5_000);
+      await settled;
+      expect(seen()?.signal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("시한 안에 끝난 호출은 그대로 통과한다", async () => {
+    const llm: GameLLM = { runTurn: async () => emptyResult };
+    await expect(withDeadline(llm, "gm", 30_000).runTurn(request)).resolves.toEqual(emptyResult);
+  });
+
+  it("부르는 쪽이 준 신호도 함께 따른다", async () => {
+    const { llm, seen } = stalled();
+    const outer = new AbortController();
+    const pending = withDeadline(llm, "gm", 60_000).runTurn({ ...request, signal: outer.signal });
+    outer.abort(new Error("호출자가 끊었습니다"));
+    expect(seen()?.signal?.aborted).toBe(true);
+    // 어댑터가 신호를 받아 거절하는 몫이라 여기서는 매달린 채로 둔다
+    void pending.catch(() => undefined);
   });
 });

@@ -28,11 +28,19 @@ import {
   migrateConditions,
   migrateFormScale,
   migrateMatchStats,
+  migrateMirrorProficiency,
   migratePassStyles,
   migrateSquadLevels,
   stripStoredFootAdjust,
 } from "../src/core/migrations";
 import { createTestGame } from "./helpers";
+
+/**
+ * **세이브 하나하나가 다른 세계일 이유가 없다.** 여기서 재는 것은 파일이 쓰이고
+ * 읽히고 밀려나는 방식이지 세계의 내용이 아니다. 픽스처는 같은 인자면 원본을 한 번만
+ * 세우고 복제를 주므로(`helpers.ts`) 시드를 나누면 그만큼 세계를 더 세울 뿐이고,
+ * 세이브 id는 복제할 때마다 새로 찍히니 파일이 겹치지도 않는다.
+ */
 
 /** 목록에서 한 줄을 집어 갈래까지 좁힌다 — 유니온이므로 테스트가 먼저 밝힌다 */
 function entryOf(id: string): GameListEntry {
@@ -87,11 +95,17 @@ function writeMonolith(id: string, body: Record<string, unknown>): void {
   writeFileSync(path.join(dataDir(), `${id}.json`), JSON.stringify(body), "utf8");
 }
 
-/** 이 게임의 조각 파일 이름들 */
+/** 이 게임의 조각 파일 이름들 — 한 조각이 두 벌(`…json`·`…json.bak`)이라 둘 다 센다 */
 function shardFiles(id: string): string[] {
   return readdirSync(dataDir())
-    .filter((f) => f.startsWith(`${id}.shard-`) && f.endsWith(".json"))
+    .filter((f) => f.startsWith(`${id}.shard-`) && /\.json(\.bak)?$/.test(f))
     .sort();
+}
+
+/** 한 조각의 두 벌이 놓이는 자리 */
+function shardPaths(id: string, hash: string): [string, string] {
+  const file = path.join(dataDir(), `${id}.shard-${hash}.json`);
+  return [file, `${file}.bak`];
 }
 
 /** 본체가 지금 가리키는 조각 해시 */
@@ -104,7 +118,7 @@ function shardMap(id: string): Record<string, string> {
 
 describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아남는다", () => {
   it("저장·로드 왕복이 상태를 보존한다", () => {
-    const state = createTestGame(1);
+    const state = createTestGame();
     state.season = 3;
     saveGame(state);
     const loaded = loadGame(state.id);
@@ -113,8 +127,29 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
     expect(loaded?.teams.length).toBe(teamCatalog().length);
   });
 
+  it("경기로 오른 좌우 자리 적응도는 저장→로드를 지나도 그대로다", () => {
+    /**
+     * 미러 보정 벗기기는 묶음을 주 포지션 값으로 **평평하게 민다.** 경기·훈련이
+     * LCB에 적립한 폭은 옛 보정 폭과 구분되지 않으므로, 로드마다 돌면 한 시즌
+     * 쌓은 것이 되감긴다 — 마커가 그 두 번째 걸음을 막는다.
+     */
+    const state = createTestGame();
+    const player = state.players.find((p) =>
+      p.positions.some((pos) => pos.isNatural && pos.position === "CB"),
+    )!;
+    const anchor = player.positions.find((pos) => pos.position === "CB")!.proficiency;
+    // 경기가 그 자리에 올리는 것과 같다 (`gainMatchProficiency`) — 묶음이라 항목은 이미 있다
+    const mirror = player.positions.find((pos) => pos.position === "LCB")!;
+    mirror.proficiency = anchor + 1;
+    saveGame(state);
+
+    const loaded = loadGame(state.id)!;
+    const reloaded = loaded.players.find((p) => p.id === player.id)!;
+    expect(reloaded.positions.find((pos) => pos.position === "LCB")?.proficiency).toBe(anchor + 1);
+  });
+
   it("등번호 없는 기존 세이브는 실측 시드를 먼저 복원한다", () => {
-    const state = createTestGame(81);
+    const state = createTestGame();
     saveGame(state);
     const raw = readSave(state.id);
     for (const player of raw.players as Array<{ squadNumber?: number }>) delete player.squadNumber;
@@ -133,7 +168,7 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
    * 카탈로그 번호로 되돌아갔으므로, 이적하며 받은 번호도 판정도 없이 뒤집혔다.
    */
   it("세이브가 든 등번호는 로드가 그대로 돌려준다", () => {
-    const state = createTestGame(11);
+    const state = createTestGame();
     const squad = state.players.filter((player) => player.teamId === state.userTeamId);
     const used = new Set(squad.map((player) => player.squadNumber));
     const free = Array.from({ length: 99 }, (_, i) => i + 1).find((n) => !used.has(n))!;
@@ -156,7 +191,7 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
    * 로드가 둘 다 복구해야 감독의 달력이 열자마자 채워진다 (tick을 기다리지 않는다).
    */
   it("컵 이전 세이브를 열면 2부 클럽과 추첨 일정이 함께 붙는다", () => {
-    const state = createTestGame(9);
+    const state = createTestGame();
     const drop = new Set(state.teams.filter((t) => !isTopFlight(t.id)).map((t) => t.id));
     state.teams = state.teams.filter((t) => !drop.has(t.id));
     state.players = state.players.filter((p) => !drop.has(p.teamId));
@@ -178,7 +213,7 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
   });
 
   it("저장 시 직전 세이브를 .bak으로 백업한다", () => {
-    const state = createTestGame(2);
+    const state = createTestGame();
     saveGame(state); // 최초 — bak 없음
     state.season = 2;
     saveGame(state); // 두 번째 — 이전(season1)이 bak으로
@@ -186,7 +221,7 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
   });
 
   it("본 파일이 깨져도 .bak에서 복구한다", () => {
-    const state = createTestGame(3);
+    const state = createTestGame();
     saveGame(state);
     state.date = "2026-09-09";
     saveGame(state); // bak = 첫 저장분
@@ -198,7 +233,7 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
   });
 
   it("세이브에 스키마 버전이 기록된다", () => {
-    const state = createTestGame(4);
+    const state = createTestGame();
     saveGame(state);
     const file = path.join(dataDir(), `${state.id}.json`);
     const raw = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
@@ -206,7 +241,7 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
   });
 
   it("목록은 세이브 본문을 열지 않는다 — 요약 사이드카", () => {
-    const state = createTestGame(41);
+    const state = createTestGame();
     saveGame(state);
     const meta = path.join(dataDir(), `${state.id}.meta.json`);
     expect(existsSync(meta), "저장할 때 요약이 함께 쓰이지 않았다").toBe(true);
@@ -223,7 +258,7 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
   });
 
   it("세이브가 밖에서 바뀌면 캐시된 요약을 믿지 않는다", () => {
-    const state = createTestGame(42);
+    const state = createTestGame();
     saveGame(state);
     listGameSummaries(); // 캐시 데움
     const raw = readSave(state.id);
@@ -234,7 +269,7 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
   });
 
   it("삭제하면 요약도 함께 사라진다", () => {
-    const state = createTestGame(43);
+    const state = createTestGame();
     saveGame(state);
     deleteGame(state.id);
     expect(existsSync(path.join(dataDir(), `${state.id}.meta.json`))).toBe(false);
@@ -242,7 +277,7 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
   });
 
   it("구버전 세이브는 로드를 거부한다 (v6 전면 개편 — 부분 마이그레이션 금지)", () => {
-    const state = createTestGame(41);
+    const state = createTestGame();
     saveGame(state);
     const raw = readSave(state.id);
     // 옛 세이브를 흉내 — 버전이 없고 정규화 테이블도 없다
@@ -259,7 +294,7 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
   });
 
   it("버전이 맞지 않는 세이브는 두 숫자와 함께 목록에 선다", () => {
-    const state = createTestGame(44);
+    const state = createTestGame();
     saveGame(state);
     const file = path.join(dataDir(), `${state.id}.json`);
     const raw = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
@@ -278,7 +313,7 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
   });
 
   it("못 여는 세이브도 사이드카에 적혀 목록을 열 때마다 본문을 다시 파싱하지 않는다", () => {
-    const state = createTestGame(45);
+    const state = createTestGame();
     saveGame(state);
     const file = path.join(dataDir(), `${state.id}.json`);
     const meta = path.join(dataDir(), `${state.id}.meta.json`);
@@ -301,7 +336,7 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
   });
 
   it("코어가 여는 버전이 올라가면 옛 성공 캐시를 믿지 않는다", () => {
-    const state = createTestGame(47);
+    const state = createTestGame();
     saveGame(state);
     const meta = path.join(dataDir(), `${state.id}.meta.json`);
     const cached = JSON.parse(readFileSync(meta, "utf8")) as Record<string, unknown>;
@@ -319,7 +354,7 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
   });
 
   it("실패 캐시는 파일이 바뀌면 무효가 된다 — 다시 판정한다", () => {
-    const state = createTestGame(46);
+    const state = createTestGame();
     saveGame(state);
     const file = path.join(dataDir(), `${state.id}.json`);
     const body = readFileSync(file, "utf8");
@@ -337,7 +372,7 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
      * 새 필드를 채우는 것뿐이라 세이브 버전을 올리지 않는다 (원칙 4) —
      * 대신 로드가 조용히 옮겨 주지 않으면 옛 세이브의 감독이 0축으로 보인다.
      */
-    const state = createTestGame(9);
+    const state = createTestGame();
     saveGame(state);
     const raw = readSave(state.id);
     (raw.manager as { attributes: unknown }).attributes = {
@@ -369,7 +404,7 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
   });
 
   it("필수 테이블이 없는 손상 세이브도 거부한다", () => {
-    const state = createTestGame(42);
+    const state = createTestGame();
     saveGame(state);
     const raw = readSave(state.id);
     delete raw.schedule; // 일정 축 누락
@@ -379,7 +414,7 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
   });
 
   it("목록은 손상된 파일도 멀쩡한 게임과 같은 배열에 세운다", () => {
-    const good = createTestGame(5);
+    const good = createTestGame();
     saveGame(good);
     // 완전히 깨진(백업도 없는) 파일
     writeFileSync(path.join(dataDir(), "game-broken-xxxx.json"), "not json", "utf8");
@@ -393,7 +428,7 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
   });
 
   it("삭제는 본 파일과 백업을 모두 제거한다", () => {
-    const state = createTestGame(6);
+    const state = createTestGame();
     saveGame(state);
     saveGame(state); // bak 생성
     expect(deleteGame(state.id)).toBe(true);
@@ -410,7 +445,7 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
  */
 describe("조각 저장 — 바뀐 것만 쓴다", () => {
   it("전술만 바꾼 저장은 선수·계약 조각을 다시 쓰지 않는다", () => {
-    const state = createTestGame(51);
+    const state = createTestGame();
     saveGame(state);
     const before = shardMap(state.id);
     const shard = path.join(dataDir(), `${state.id}.shard-${before.players}.json`);
@@ -430,7 +465,7 @@ describe("조각 저장 — 바뀐 것만 쓴다", () => {
   });
 
   it("1군·2군을 옮기면 선수 조각이 새로 써진다", () => {
-    const state = createTestGame(52);
+    const state = createTestGame();
     saveGame(state);
     const before = shardMap(state.id);
     const target = state.players.find(
@@ -444,7 +479,7 @@ describe("조각 저장 — 바뀐 것만 쓴다", () => {
   });
 
   it("자동 저장을 여러 번 해도 로드가 온전하다", () => {
-    const state = createTestGame(53);
+    const state = createTestGame();
     const spec = state.tactics[0]!.spec;
     for (let i = 0; i < 5; i++) {
       spec.mentality = (i % 5) + 1;
@@ -456,8 +491,8 @@ describe("조각 저장 — 바뀐 것만 쓴다", () => {
     expect(loaded.tactics[0]!.spec.mentality).toBe(spec.mentality);
   });
 
-  it("본체가 가리키는 조각을 잃으면 반쪽을 읽지 않고 .bak으로 폴백한다", () => {
-    const state = createTestGame(54);
+  it("조각이 두 벌 다 죽으면 반쪽을 읽지 않고 .bak으로 폴백한다", () => {
+    const state = createTestGame();
     state.date = "2026-08-01";
     saveGame(state);
     const first = shardMap(state.id).players!;
@@ -467,7 +502,7 @@ describe("조각 저장 — 바뀐 것만 쓴다", () => {
     const second = shardMap(state.id).players!;
     expect(second).not.toBe(first);
 
-    rmSync(path.join(dataDir(), `${state.id}.shard-${second}.json`));
+    for (const file of shardPaths(state.id, second)) rmSync(file);
     const loaded = loadGame(state.id);
     expect(loaded, "조각을 잃자 세이브가 통째로 날아갔다").not.toBeNull();
     // 직전 저장이 온전히 남는다 — 본체도 그 조각도 함께 살아 있다
@@ -476,7 +511,7 @@ describe("조각 저장 — 바뀐 것만 쓴다", () => {
   });
 
   it("조각 없던 옛 세이브도 그대로 읽히고 다음 저장에서 갈린다", () => {
-    const state = createTestGame(55);
+    const state = createTestGame();
     saveGame(state);
     writeMonolith(state.id, readSave(state.id)); // shards 없는 옛 모양으로 되돌린다
     expect(shardMap(state.id)).toEqual({});
@@ -489,17 +524,17 @@ describe("조각 저장 — 바뀐 것만 쓴다", () => {
   });
 
   it("본체도 .bak도 가리키지 않는 조각은 거둬진다", () => {
-    const state = createTestGame(56);
+    const state = createTestGame();
     for (let i = 0; i < 4; i++) {
       state.players[0]!.state.condition = 40 + i;
       saveGame(state);
     }
-    // 살아남는 건 본체와 `.bak`이 가리키는 것뿐 — 선수 2세대 + 그대로인 계약 1개
-    expect(shardFiles(state.id)).toHaveLength(3);
+    // 살아남는 건 본체와 `.bak`이 가리키는 것뿐 — 선수 2세대 + 그대로인 계약 1개, 각 두 벌
+    expect(shardFiles(state.id)).toHaveLength(6);
   });
 
   it(".bak은 복사가 아니라 밀어낸 것이다 — 옮길 바이트가 없다", () => {
-    const state = createTestGame(57);
+    const state = createTestGame();
     saveGame(state);
     const before = statSync(path.join(dataDir(), `${state.id}.json`)).ino;
     state.date = "2026-12-01";
@@ -507,8 +542,50 @@ describe("조각 저장 — 바뀐 것만 쓴다", () => {
     expect(statSync(path.join(dataDir(), `${state.id}.json.bak`)).ino).toBe(before);
   });
 
+  it("지워진 조각을 다음 저장이 다시 놓는다", () => {
+    const state = createTestGame();
+    saveGame(state);
+    const [file, mirror] = shardPaths(state.id, shardMap(state.id).players!);
+    rmSync(file);
+    rmSync(mirror);
+
+    saveGame(state);
+    expect(existsSync(file), "본 벌이 돌아오지 않았다").toBe(true);
+    expect(existsSync(mirror), "사본이 돌아오지 않았다").toBe(true);
+    expect(loadGame(state.id)!.players).toHaveLength(state.players.length);
+  });
+
+  it("잘린 조각을 다음 저장이 크기로 알아보고 다시 쓴다", () => {
+    const state = createTestGame();
+    saveGame(state);
+    const [file] = shardPaths(state.id, shardMap(state.id).players!);
+    const intact = readFileSync(file, "utf8");
+    writeFileSync(file, intact.slice(0, 100), "utf8"); // 쓰다 만 조각
+    expect(loadGame(state.id), "잘린 조각을 그대로 읽었다").not.toBeNull();
+
+    saveGame(state);
+    expect(readFileSync(file, "utf8")).toBe(intact);
+  });
+
+  it("크기까지 같게 상한 벌은 사본이 읽어 내고, 상한 자리는 되돌려 놓는다", () => {
+    const state = createTestGame();
+    saveGame(state);
+    const [file] = shardPaths(state.id, shardMap(state.id).players!);
+    const intact = readFileSync(file, "utf8");
+    // 줄 둘을 맞바꾼다 — 바이트 수도 JSON 형태도 그대로라 크기 대조로는 잡히지 않는다
+    const rows = JSON.parse(intact) as unknown[];
+    [rows[0], rows[1]] = [rows[1], rows[0]];
+    const bent = JSON.stringify(rows);
+    expect(Buffer.byteLength(bent)).toBe(Buffer.byteLength(intact));
+    writeFileSync(file, bent, "utf8");
+
+    const loaded = loadGame(state.id)!;
+    expect(loaded.players[0]!.id, "상한 벌을 그대로 읽었다").toBe(state.players[0]!.id);
+    expect(readFileSync(file, "utf8"), "상한 벌이 그대로 남았다").toBe(intact);
+  });
+
   it("목록은 조각을 게임으로 세지 않고, 삭제는 조각까지 거둔다", () => {
-    const state = createTestGame(58);
+    const state = createTestGame();
     saveGame(state);
     expect(shardFiles(state.id).length).toBeGreaterThan(0);
     expect(listGames().filter((id) => id.startsWith(state.id))).toEqual([state.id]);
@@ -590,6 +667,28 @@ describe("옛 세이브를 지금 모양으로", () => {
     expect(expansion[1]!.proficiency).toBe(74);
   });
 
+  it("미러 보정은 세이브당 한 번만 벗긴다 — 마커 뒤의 적립은 그대로 둔다", () => {
+    const save = {
+      players: [
+        {
+          positions: [
+            { position: "CB", proficiency: 93, isNatural: true },
+            { position: "LCB", proficiency: 95, isNatural: false },
+          ],
+        },
+      ],
+      mirrorProficiencyStripped: undefined as boolean | undefined,
+    };
+    migrateMirrorProficiency(save);
+    expect(save.players[0]!.positions.map((p) => p.proficiency)).toEqual([93, 93]);
+    expect(save.mirrorProficiencyStripped).toBe(true);
+
+    // 마커가 선 뒤에 벌어진 차이는 게임 안 적립이다 (경기·포지션 훈련) — 밀지 않는다
+    save.players[0]!.positions[1]!.proficiency = 95;
+    migrateMirrorProficiency(save);
+    expect(save.players[0]!.positions.map((p) => p.proficiency)).toEqual([93, 95]);
+  });
+
   it("`squadLevel`이 없던 세이브는 전술 배치 + OVR 상위로 25명을 1군에 세운다", () => {
     const save = {
       players: Array.from({ length: 27 }, (_, i) => ({
@@ -665,7 +764,7 @@ describe("목록과 로드 — 어디서 멈췄는지 가른다", () => {
   let base: Record<string, unknown>;
 
   beforeAll(() => {
-    const state = createTestGame(59);
+    const state = createTestGame();
     state.date = firstDate;
     saveGame(state); // 1회차 — 두 번째 저장이 이걸 `.bak`으로 밀어낸다
     base = readSave(state.id);
@@ -691,13 +790,20 @@ describe("목록과 로드 — 어디서 멈췄는지 가른다", () => {
     expect(loadGame(id)?.date).toBe(firstDate);
   });
 
-  it("카탈로그 오버라이드는 게임이 아니다", () => {
+  it("카탈로그 오버라이드는 게임이 아니다 — 목록도 로드도 삭제도 그 이름을 거절한다", () => {
+    // 열리는 세이브 본문을 오버라이드 이름으로 눕힌다 — 거절이 내용이 아니라 이름 때문이게
+    lay("player-catalog", () => {});
     const override = path.join(dataDir(), "player-catalog.json");
-    writeFileSync(override, "not json", "utf8");
     try {
       expect(listGames()).not.toContain("player-catalog");
+      expect(loadGame("player-catalog")).toBeNull();
+      // 막지 않으면 요청 하나로 어드민이 편집한 카탈로그가 통째로 사라진다
+      for (const name of ["player-catalog", "team-catalog", "league-catalog", "cup-catalog"]) {
+        expect(deleteGame(name)).toBe(false);
+      }
+      expect(existsSync(override)).toBe(true);
     } finally {
-      rmSync(override);
+      rmSync(override, { force: true });
     }
   });
 
@@ -718,6 +824,47 @@ describe("목록과 로드 — 어디서 멈췄는지 가른다", () => {
     });
     expect(loadGame(broken)).toBeNull();
     expect(unreadableOf(broken).reason).toBe("schema");
+  });
+
+  /**
+   * `schema`·`migration`은 **코드가 내린 판정**이다. 캐시하지 않으면 목록 요청마다
+   * 수 MB를 다시 파싱하고, 파일 지문만으로 캐시하면 코드를 고쳐도 그 판정이 영영
+   * 남는다 — 두 방향을 한 자리에서 세운다.
+   */
+  it("스키마 실패도 사이드카에 남고, 코드 지문이 달라지면 다시 판정한다", () => {
+    const broken = lay("game-schema-cache-xxxx", (raw) => {
+      (raw.players as Array<{ birthdate: string }>)[0]!.birthdate = "어제";
+    });
+    const file = path.join(dataDir(), `${broken}.json`);
+    const meta = path.join(dataDir(), `${broken}.meta.json`);
+    const body = readFileSync(file, "utf8");
+
+    expect(unreadableOf(broken).reason).toBe("schema"); // 1회차 — 본문에서 판정
+    expect(existsSync(meta), "실패가 사이드카에 남지 않았다").toBe(true);
+
+    // 2회차는 본문을 열지 않는다 — 세이브 하나가 한 몸에 수 MB다
+    const cachedRun = vi.spyOn(JSON, "parse");
+    expect(unreadableOf(broken).reason).toBe("schema");
+    expect(
+      cachedRun.mock.calls.filter((call) => call[0] === body),
+      "두 번째 목록이 세이브 본문을 다시 파싱했다",
+    ).toHaveLength(0);
+    vi.restoreAllMocks();
+
+    // 마이그레이션·스키마가 고쳐지면 코드 지문이 달라지고, 그 판정은 다시 내려진다
+    const cached = JSON.parse(readFileSync(meta, "utf8")) as {
+      unreadable: { loader?: string };
+    };
+    expect(typeof cached.unreadable.loader, "실패 캐시에 코드 지문이 없다").toBe("string");
+    cached.unreadable.loader = "고쳐진-코드";
+    writeFileSync(meta, JSON.stringify(cached), "utf8");
+
+    const fixedRun = vi.spyOn(JSON, "parse");
+    expect(unreadableOf(broken).reason).toBe("schema");
+    expect(
+      fixedRun.mock.calls.filter((call) => call[0] === body).length,
+      "코드 지문이 달라졌는데 옛 실패 캐시를 그대로 믿었다",
+    ).toBeGreaterThan(0);
   });
 
   /**

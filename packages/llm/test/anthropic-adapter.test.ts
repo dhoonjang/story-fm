@@ -58,6 +58,13 @@ function lastParams(client: Anthropic): Anthropic.MessageCreateParamsNonStreamin
   return calls[calls.length - 1]![0] as Anthropic.MessageCreateParamsNonStreaming;
 }
 
+/** 요청 순서대로의 파라미터 — 강제 도구가 첫 요청에만 실리는지 검증용 */
+function allParams(client: Anthropic): Anthropic.MessageCreateParamsNonStreaming[] {
+  const stream = (client.messages as unknown as { stream: { mock: { calls: unknown[][] } } })
+    .stream;
+  return stream.mock.calls.map((c) => c[0] as Anthropic.MessageCreateParamsNonStreaming);
+}
+
 /** 마지막 요청 옵션 — 시한·중단 신호 검증용 */
 function lastOptions(client: Anthropic): { timeout?: number; signal?: AbortSignal } {
   const stream = (client.messages as unknown as { stream: { mock: { calls: unknown[][] } } })
@@ -179,6 +186,58 @@ describe("AnthropicGameLLM 요청 파라미터", () => {
 });
 
 describe("AnthropicGameLLM tool 루프", () => {
+  it("강제 도구는 첫 요청에만 실린다 — 계속 걸면 턴이 끝나지 않는다", async () => {
+    const stub = makeStubClient([
+      {
+        stop_reason: "tool_use",
+        content: [
+          { type: "tool_use", id: "t1", name: "report_mood", input: {} },
+        ] as Anthropic.ContentBlock[],
+      },
+      {
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: "끝." }] as Anthropic.ContentBlock[],
+      },
+    ]);
+    const tool: GameToolSpec = {
+      name: "report_mood",
+      description: "테스트 도구",
+      inputSchema: { type: "object" as const, properties: {} },
+      handle: () => ({ ok: true, message: "반영" }),
+    };
+
+    const llm = new AnthropicGameLLM(testConfig, stub);
+    await llm.runTurn({
+      system: "sys",
+      history: [],
+      user: "결산",
+      tools: [tool],
+      toolChoice: { name: "report_mood" },
+    });
+
+    const params = allParams(stub);
+    expect(params).toHaveLength(2);
+    expect(params[0]!.tool_choice).toEqual({ type: "tool", name: "report_mood" });
+    /**
+     * 도구 결과를 돌려준 뒤에도 강제가 남아 있으면 모델이 턴을 끝낼 길이 없어
+     * 왕복 상한까지 같은 도구를 다시 부른다 — 그 회귀를 이 줄이 잡는다.
+     */
+    expect(params[1]!.tool_choice).toBeUndefined();
+  });
+
+  it("toolChoice가 없으면 tool_choice를 싣지 않는다", async () => {
+    const stub = makeStubClient([endTurn]);
+    const tool: GameToolSpec = {
+      name: "noop",
+      description: "테스트 도구",
+      inputSchema: { type: "object" as const, properties: {} },
+      handle: () => ({ ok: true, message: "ok" }),
+    };
+    const llm = new AnthropicGameLLM(testConfig, stub);
+    await llm.runTurn({ system: "sys", history: [], user: "안녕", tools: [tool] });
+
+    expect(lastParams(stub).tool_choice).toBeUndefined();
+  });
   it("검증 실패 시 is_error를 돌려주고, 수정 재기록을 받아들인다", async () => {
     const stub = makeStubClient([
       {

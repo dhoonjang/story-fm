@@ -6,6 +6,7 @@
 import {
   advanceTime,
   applyScenePoint,
+  awaitingShootout,
   buildMoodBrief,
   buildRatingBrief,
   buildTrainingBrief,
@@ -20,6 +21,7 @@ import {
   pendingVerdicts,
   pushNews,
   scoutReportCard,
+  selectCharacters,
   takeNews,
   takeReportCards,
   type AdvanceOutcome,
@@ -35,7 +37,7 @@ import { reportMood } from "./mood-rater";
 import { reportTraining } from "./training-rater";
 import { buildNoSegmentMessage, MATCH_CASTER_SYSTEM } from "./match-caster";
 import { buildOnboardingTurn, runMockGmTurn } from "./mock-gm";
-import { retryOnce } from "./retry";
+import { retryOnce, ModelOutputError } from "./retry";
 import { GM_SYSTEM } from "./gm-prompt";
 import { buildGmTools } from "./gm-tools";
 import { runMatchIntent } from "./match-intent";
@@ -44,6 +46,9 @@ import {
   buildGmHistory,
   buildGmReference,
   buildGmStateNote,
+  describeCharacters,
+  injectedCharacters,
+  recordCharacterInjection,
   buildLedgerNote,
   buildManagerMessage,
   buildMatchReference,
@@ -163,11 +168,11 @@ export async function runOnboardingTurn(state: GameState, llm?: GameLLM): Promis
     });
     // 상한에 걸린 응답은 문장이 끊겨 있다 — 문법 검사를 통과해도 걸러낸다
     if (result.stopReason === "truncated") {
-      throw new Error("첫 장면이 출력 상한에 걸려 문장이 잘렸습니다");
+      throw new ModelOutputError("첫 장면이 출력 상한에 걸려 문장이 잘렸습니다");
     }
     const text = humanizePlayerIds(state, result.text.trim());
     if (!isValidOnboardingText(state, text)) {
-      throw new Error(`첫 장면이 출력 문법을 어겼습니다:\n${text}`);
+      throw new ModelOutputError(`첫 장면이 출력 문법을 어겼습니다:\n${text}`);
     }
     // 첫 장면은 시계를 옮기지 않는다 — 헤더가 없으면 세워 준다
     const stamped = parseSceneHeader(text).point
@@ -317,6 +322,18 @@ async function runRealGmTurn(
         carriedReports,
       );
   /**
+   * 이번 장면에 설 인물 — **평시만이다.** 경기 중에는 벤치의 코치 한 사람이
+   * 레퍼런스에 상주하고(`buildMatchReference`), 중계가 읽을 것은 판이지 인물지가 아니다.
+   *
+   * 카드는 감독 발화와 같은 층으로 들어가고, 기록이 남아 다음 턴부터 **이력**에서
+   * 같은 자리에 다시 선다 — 그래서 레퍼런스(캐시 프리픽스)가 흔들리지 않는다
+   * (people.md §6 · agents.md §5).
+   */
+  const characters = inMatch
+    ? []
+    : selectCharacters(state, { message, injected: injectedCharacters(state) });
+  const characterBlock = describeCharacters(characters);
+  /**
    * 소식은 **스냅샷에 실린 그 턴에 비워진다** — `pendingEdits`와 같은 규약이다.
    * 경기 중 스냅샷은 장부(`buildLedgerNote`)라 소식을 읽지 않으므로 그때는 남겨 둔다.
    */
@@ -363,6 +380,8 @@ async function runRealGmTurn(
         system,
         history,
         user: [
+          // 인물 카드가 발화 앞에 선다 — 이력에서 다시 그릴 때도 같은 순서다
+          ...(characterBlock !== null ? [characterBlock, ``] : []),
           ...(operatorOrders ?? []).map((order) => buildOperatorMessage(`전술판 조작 — ${order}`)),
           operator ? buildOperatorMessage(message) : buildManagerMessage(state, message),
           // 코어가 이미 굴린 구간.
@@ -452,7 +471,12 @@ async function runRealGmTurn(
     state.pendingMatch.casterHistory = result.history;
     // 첫 휘슬을 불었다 — 이 뒤로는 패킷과 도구를 쥔 보통의 진행 턴이다
     if (kickoff) markEntered(state);
-    if (state.pendingMatch.ledger.phase === "finished") {
+    /**
+     * 승부차기가 남았으면 마감하지 않는다 — 장부는 `finished`지만 승부는 아직
+     * 갈리지 않았다 (match.md §2). 여기서 마감하면 킥을 한 발도 차지 않은 경기가
+     * 결과로 굳는다.
+     */
+    if (state.pendingMatch.ledger.phase === "finished" && !awaitingShootout(state)) {
       // 브리프는 장부가 살아 있을 때만 만들 수 있다 — finalizeMatch가 지우기 전에
       const brief = buildRatingBrief(state);
       const digest = finalizeMatch(state);
@@ -507,6 +531,9 @@ async function runRealGmTurn(
    * 굴렀으므로 그 도착은 줄에 남아 다음 턴에 선다 (`pendingReportCards`).
    */
   const reports = [...carriedReports, ...skippedReports];
+  // 실은 카드를 그 턴에 기록한다 — 다음 턴부터 이력이 같은 카드를 다시 그린다.
+  // 턴이 실패하면 상태가 통째로 버려지므로 기록도 함께 없던 일이 된다
+  recordCharacterInjection(state, characters);
   return {
     text,
     toolCalls: calls,

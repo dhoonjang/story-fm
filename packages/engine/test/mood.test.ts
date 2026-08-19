@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { clampCondition } from "@story-fm/domain";
+import {
+  clampCondition,
+  ATTRIBUTE_AXES,
+  PlayerStateSchema,
+  type GamePlayer,
+} from "@story-fm/domain";
 import {
   HEAVY_DEFEAT_MARGIN,
   HEAVY_DEFEAT_PENALTY,
@@ -29,8 +34,14 @@ import {
   streakOf,
   userPlayers,
   type GameState,
+  clampForm,
+  decayedForm,
+  formAngle,
+  formDeltaFromMatch,
+  formSwing,
+  seasonStatOf,
 } from "@story-fm/engine";
-import { createTestGame } from "./helpers";
+import { createMiniGame, createTestGame, advanceAndPlay, advanceDays } from "./helpers";
 
 describe("체력 — 몸과 마음이 한 축이다", () => {
   it("0~100 안에 머문다", () => {
@@ -293,6 +304,24 @@ describe("심경 결산 — 코어가 사실을 잡고 결만 맡긴다", () => 
     expect(applyMoodNotes(state, brief, [{ playerId: player.id, text: "가".repeat(130) }])).toBe(0);
   });
 
+  it("길이는 저장할 문장으로 잰다 — 마침표가 붙어 넘치면 버리고 `!`는 그대로 종결이다", () => {
+    const state = createTestGame();
+    const player = withEvent(state);
+    const brief = buildMoodBrief(state, state.date, state.date)!;
+    // 마침표를 붙이면 121자 — 세이브 스키마 상한을 넘으므로 버린다
+    expect(applyMoodNotes(state, brief, [{ playerId: player.id, text: "가".repeat(120) }])).toBe(0);
+    expect(player.state.moodNote).toBeUndefined();
+    // 119자는 마침표까지 정확히 120자 — 저장되고 스키마를 통과한다
+    expect(applyMoodNotes(state, brief, [{ playerId: player.id, text: "가".repeat(119) }])).toBe(1);
+    expect(player.state.moodNote?.text).toHaveLength(120);
+    expect(PlayerStateSchema.safeParse(player.state).success).toBe(true);
+    // `!`로 끝나면 덧붙이지 않는다 — 120자가 그대로 남는다
+    const shout = `${"가".repeat(119)}!`;
+    expect(applyMoodNotes(state, brief, [{ playerId: player.id, text: shout }])).toBe(1);
+    expect(player.state.moodNote?.text).toBe(shout);
+    expect(PlayerStateSchema.safeParse(player.state).success).toBe(true);
+  });
+
   it("사실이 바뀌면 코어가 이긴다 — 다친 선수에게 지난 결이 붙어 있지 않다", () => {
     const state = createTestGame();
     const player = withEvent(state);
@@ -517,5 +546,132 @@ describe("연패·연승이 라커룸에 남는다", () => {
     losingRun(state, SLUMP_ISSUE_LOSSES, "chelsea");
     expect(applyResultMood(state, "chelsea", -1, [])).toContain("연패");
     expect(state.issues).toHaveLength(before);
+  });
+});
+
+// ─── 폼 (form.test.ts에서 옮겨 왔다 — 같은 선수 상태 도메인) ───
+/**
+ * 폼만 보는 최소 선수 — 침착성과 현재 폼이 전부다.
+ *
+ * 게임을 만들어 선수를 빌려오면 안 된다(`createTestGame`은 수천 명을 인스턴스화해
+ * 수 초가 걸리고, 부하가 걸리면 기본 타임아웃 5초를 넘겨 **간헐 실패**한다).
+ * 폼 계산은 `attributes.composure`와 `state.form`만 읽으므로 리터럴로 충분하다.
+ */
+function player(form: number, composure = 70): GamePlayer {
+  const axes = Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, 70])) as Record<string, number>;
+  return {
+    id: "t",
+    catalogId: null,
+    teamId: "t",
+    name: "테스트",
+    birthdate: "2000-01-01",
+    positions: [{ position: "CM", proficiency: 90, isNatural: true }],
+    attributes: { ...axes, composure, overall: 70, potential: 75 } as GamePlayer["attributes"],
+    state: { form, condition: 75 },
+    isCaptain: false,
+  };
+}
+
+describe("폼 — 시간 축을 가진 컨디션 (form.ts)", () => {
+  it("같은 경기라도 평점이 다르면 폼이 다르게 움직인다 (개인차)", () => {
+    const hero = formDeltaFromMatch(player(0), 8.2, "win");
+    const anonymous = formDeltaFromMatch(player(0), 6.3, "win");
+    const flop = formDeltaFromMatch(player(0), 4.8, "win");
+    expect(hero).toBeGreaterThan(anonymous);
+    expect(anonymous).toBeGreaterThan(flop);
+    // **이긴 경기에도 부진하면 내려간다** — 예전엔 열한 명이 똑같이 +1이었다
+    expect(flop).toBeLessThan(0);
+  });
+
+  it("팀 결과는 얹히지만 주인은 개인 활약이다", () => {
+    const won = formDeltaFromMatch(player(0), 7.0, "win");
+    const lost = formDeltaFromMatch(player(0), 7.0, "loss");
+    expect(won).toBeGreaterThan(lost);
+    // 잘한 선수는 진 경기에도 폼이 크게 깎이지 않는다
+    expect(lost).toBeGreaterThan(-0.3);
+  });
+
+  it("기복은 침착성이 정한다 — 침착한 선수는 덜 흔들린다", () => {
+    expect(formSwing(player(0, 99))).toBeLessThan(formSwing(player(0, 20)));
+    const steady = formDeltaFromMatch(player(0, 95), 8.5, "win");
+    const volatile = formDeltaFromMatch(player(0, 25), 8.5, "win");
+    expect(volatile).toBeGreaterThan(steady);
+    // 나쁜 쪽도 마찬가지 — 기복이 큰 선수는 더 깊이 떨어진다
+    expect(formDeltaFromMatch(player(0, 25), 4.5, "loss")).toBeLessThan(
+      formDeltaFromMatch(player(0, 95), 4.5, "loss"),
+    );
+  });
+
+  it("절정에 가까울수록 더 오르기 어렵고, 식는 건 온전히 통한다", () => {
+    const fromFlat = formDeltaFromMatch(player(0), 8.0, "win");
+    const fromPeak = formDeltaFromMatch(player(0.85), 8.0, "win");
+    expect(fromPeak).toBeLessThan(fromFlat * 0.5);
+    // 반대 방향(절정에서 부진)은 감쇠 없이 그대로 깎인다
+    const down = formDeltaFromMatch(player(0.85), 4.5, "loss");
+    expect(down).toBeCloseTo(formDeltaFromMatch(player(0), 4.5, "loss"), 5);
+  });
+
+  it("매일 평균으로 끌린다 — 쉬면 식는다", () => {
+    let hot = 0.8;
+    for (let day = 0; day < 14; day++) hot = decayedForm(hot);
+    expect(hot).toBeLessThan(0.8);
+    expect(hot).toBeGreaterThan(0.5); // 2주에 사라지지는 않는다
+    // 0은 0에 머물고, 음수는 위로 끌린다
+    expect(decayedForm(0)).toBe(0);
+    expect(decayedForm(-1)).toBeGreaterThan(-1);
+    expect(decayedForm(0.001)).toBe(0);
+  });
+
+  it("범위와 해상도 — −1~1 실수이고 그 밖으로 나가지 않는다", () => {
+    expect(clampForm(4.2)).toBe(1);
+    expect(clampForm(-9)).toBe(-1);
+    expect(clampForm(0.12345)).toBe(0.123);
+    // 스키마가 소수를 통과시켜야 세이브에 남는다 (정수였을 때는 잘렸다)
+    expect(() => PlayerStateSchema.parse({ form: 0.42, condition: 75 })).not.toThrow();
+    // 축 밖의 값은 거부한다 — 옛 −3~3 세이브는 로드에서 옮긴다(persistence.ts)
+    expect(() => PlayerStateSchema.parse({ form: 2, condition: 75 })).toThrow();
+  });
+
+  it("각도는 연속이고, 절정에서만 12시를 본다", () => {
+    expect(formAngle(1)).toBe(0); // 12시 — 절정에서만
+    expect(formAngle(0)).toBe(90); // 3시 — 평소
+    expect(formAngle(-1)).toBe(180); // 6시 — 바닥
+    expect(formAngle(0.5)).toBe(45);
+    expect(formAngle(-0.5)).toBe(135);
+    // 눈금이 아니라 연속이다 — 조금만 올라도 각도가 달라진다
+    expect(formAngle(0.42)).not.toBe(formAngle(0.45));
+    // 축 밖은 잘린다 (12시를 넘어 돌지 않는다)
+    expect(formAngle(2)).toBe(0);
+    expect(formAngle(-2)).toBe(180);
+  });
+
+  /**
+   * **축소 세계로 돈다.** 폼이 갈리는 길은 경기 결산 하나뿐이고 그 함수는 세계의
+   * 크기와 무관하다 — 전체 세계로 여덟 판을 치르면 리그 다섯 개와 2부까지 함께
+   * 굴러서 이 한 케이스가 120초 타임아웃을 달아야 했다.
+   */
+  it("경기를 치르면 선수마다 폼이 갈리고, 쉬면 다시 모인다 (통합)", () => {
+    const state = createMiniGame(11);
+    for (let i = 0; i < 8; i++) {
+      const before = state.date;
+      advanceAndPlay(state);
+      if (state.date === before || state.season > 1) break;
+    }
+    const played = userPlayers(state).filter((p) => (seasonStatOf(state, p.id)?.apps ?? 0) > 0);
+    expect(played.length).toBeGreaterThan(10);
+
+    // ① 한 값에 고정되지 않는다 — 예전 모델은 전원이 +3이었다
+    const forms = played.map((p) => p.state.form);
+    expect(new Set(forms.map((f) => f.toFixed(3))).size).toBeGreaterThan(3);
+    expect(Math.max(...forms)).toBeGreaterThan(Math.min(...forms) + 0.15);
+    // ② 소수가 남는다
+    expect(forms.some((f) => !Number.isInteger(f))).toBe(true);
+
+    // ③ 쉬면 평균으로 끌린다
+    const before = played.map((p) => Math.abs(p.state.form));
+    advanceDays(state, 10);
+    const after = played.map((p) => Math.abs(p.state.form));
+    const shrank = after.filter((v, i) => v < before[i]!).length;
+    expect(shrank).toBeGreaterThan(played.length / 2);
   });
 });

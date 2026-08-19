@@ -1,6 +1,11 @@
 "use client";
 
-import { formatMoney, type MarketCard, type MarketTerms } from "@story-fm/domain";
+import {
+  formatMoney,
+  marketDirectionKo,
+  type MarketCard,
+  type MarketTerms,
+} from "@story-fm/domain";
 import { IconFinance, IconInsight, IconPerson, IconTrash } from "@/components/icons";
 
 /**
@@ -24,17 +29,29 @@ const KIND_ICON = {
 
 const VERDICT_KO = { accept: "수락", reject: "거절", counter: "역제안" } as const;
 
-/** 카드 머리의 표식 — 무슨 국면인지 한 낱말로 */
+/**
+ * 카드 머리의 표식 — **무슨 국면인가에 앞서 어느 방향인가.**
+ *
+ * 방향은 협상에서 가장 큰 사실이고 채팅이 유일한 인터페이스라, 배지가 말하지
+ * 않으면 카드만 봐서는 사는 건지 파는 건지 알 길이 없다. 낱말은 `marketDirectionKo`
+ * 하나에서 나온다 — 요약 줄·주의 줄과 같은 말을 써야 같은 거래로 읽힌다.
+ *
+ * 방향이 없는 카드(재계약, 이 축이 생기기 전의 옛 카드)에서는 국면만 선다.
+ */
 function badgeOf(card: MarketCard): string {
+  const way = card.direction && marketDirectionKo(card.direction, card.loan === true);
   switch (card.kind) {
     case "offer":
+      if (way) return `${way} 오퍼`;
       return card.loan === true ? "임대 요청" : "오퍼";
-    case "verdict":
-      return card.verdict ? VERDICT_KO[card.verdict] : "판정";
+    case "verdict": {
+      const phase = card.verdict ? VERDICT_KO[card.verdict] : "판정";
+      return way ? `${way} ${phase}` : phase;
+    }
     case "renewal":
       return "재계약 제안";
     case "withdraw":
-      return "협상 철회";
+      return way ? `${way} 철회` : "협상 철회";
     case "scout":
       return "스카우트 파견";
   }

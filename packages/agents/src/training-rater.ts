@@ -13,7 +13,7 @@ import {
 } from "@story-fm/engine";
 import { ATTRIBUTE_AXES, AXIS_KO, DateString } from "@story-fm/domain";
 import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
-import { retryOnce, anchorStands } from "./retry";
+import { retryOnce, requireToolCall, anchorStands } from "./retry";
 
 /**
  * 훈련 결산 — advance_time이 넘긴 구간의 훈련을 한 묶음으로 판정한다.
@@ -110,13 +110,16 @@ export function buildTrainingPrompt(brief: TrainingBrief): string {
   ].join("\n");
 }
 
+/** 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 (agents.md §3) */
+const REPORT_TRAINING_TOOL = "report_training";
+
 function makeReportTool(
   state: GameState,
   brief: TrainingBrief,
   onApplied: (lines: string[]) => void,
 ): GameToolSpec {
   return {
-    name: "report_training",
+    name: REPORT_TRAINING_TOOL,
     description:
       "이 기간 훈련의 결과를 제출한다. 기준에서 크게 벗어나거나 훈련하지 않은 축은 코어가 잘라 낸다.",
     inputSchema: {
@@ -210,15 +213,17 @@ export async function reportTraining(
   let client = llm;
   await retryOnce(
     "rater:training",
-    () => {
-      client ??= createGameLLM(agentConfig("training-rater"));
-      return client.runTurn({
-        system: TRAINING_RATER_SYSTEM,
-        history: [],
-        user: buildTrainingPrompt(brief),
-        tools: [makeReportTool(state, brief, (l) => (lines = l))],
-      });
-    },
+    () =>
+      requireToolCall(REPORT_TRAINING_TOOL, () => {
+        client ??= createGameLLM(agentConfig("training-rater"));
+        return client.runTurn({
+          system: TRAINING_RATER_SYSTEM,
+          history: [],
+          user: buildTrainingPrompt(brief),
+          tools: [makeReportTool(state, brief, (l) => (lines = l))],
+          toolChoice: { name: REPORT_TRAINING_TOOL },
+        });
+      }),
     // 이미 반영됐으면 다시 부르지 않는다 — 요약 줄이 비어도(소수로만 움직인 구간)
     // 장부는 이미 움직였으므로 반환값이 아니라 상태의 표식을 본다
     () => trainingSettled(state, brief),

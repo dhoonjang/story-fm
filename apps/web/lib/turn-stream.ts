@@ -26,8 +26,15 @@ export type TurnStreamBody = {
   orders?: readonly MatchBoardOrder[];
 };
 
-/** 턴이 실패했다 — 이유는 감독에게, 자세한 것은 배너 툴팁에 */
-export type TurnStreamFailure = { reason: string; detail?: string };
+/**
+ * 턴이 실패했다 — 이유는 감독에게, 자세한 것은 배너 툴팁에.
+ *
+ * `settled`는 **서버가 이 턴을 확실히 버렸는가**다. 서버 쪽 턴은 연결이 끊겨도 끝까지
+ * 돌아 저장하므로(turn/stream 라우트), 화면이 기다리기를 멈춘 것과 서버가 실패한 것은
+ * 서로 다른 사건이다. 참이면 그 턴은 없었던 일이고, 거짓이면 지시가 이미 반영됐을 수
+ * 있어 화면이 서버 상태를 다시 받아야 한다 (models.md §1-1).
+ */
+export type TurnStreamFailure = { reason: string; detail?: string; settled: boolean };
 
 export type TurnStreamHandlers = {
   /** 글자가 왔다 — 화면의 공개 펌프가 받는다 */
@@ -40,18 +47,22 @@ export type TurnStreamHandlers = {
 };
 
 /**
- * 아무것도 오지 않은 채로 이만큼 지나면 턴을 끊는다.
+ * 아무것도 오지 않은 채로 이만큼 지나면 **기다리기를 그만둔다.**
  *
  * 서버는 도구만 도는 조용한 구간에도 하트비트를 흘리므로(turn/stream 라우트,
  * 10초 간격) 이 시계가 끝까지 도는 것은 **연결이 죽었을 때뿐**이다. 값이 하트비트
  * 간격보다 넉넉해야 느린 네트워크가 멀쩡한 턴을 끊지 않는다. 서버 쪽 턴과 잠금은
  * 모델 호출마다 걸린 시한이 푼다 (docs/llm/models.md §1-1) — 여기서 끊는 것은
- * 화면의 기다림뿐이다.
+ * 화면의 기다림뿐이고, 그 턴은 서버에서 계속 돌아 저장까지 마친다.
  */
 const IDLE_TIMEOUT_MS = 60_000;
 
-/** 시한을 넘긴 턴 — 서버의 `turnErrorMessage`와 같은 문구를 쓴다 */
-export const TURN_TIMEOUT_MESSAGE = "응답이 지연돼 턴을 취소했습니다";
+/**
+ * 기다리기를 멈춘 턴 — **"취소"가 아니다.** 서버의 `turnErrorMessage`는 모델 호출이
+ * 시한을 넘겨 턴이 실제로 버려졌을 때 쓰는 문구라, 여기서 같은 말을 하면 거짓이 된다.
+ */
+export const TURN_TIMEOUT_MESSAGE =
+  "응답이 늦어 기다리기를 멈췄습니다 — 결과는 곧 화면에 반영됩니다";
 
 /**
  * 턴 하나를 흘려 받는다 — 성공이면 `null`, 아니면 실패 이유. **던지지 않는다.**
@@ -88,7 +99,12 @@ export async function streamTurn(
     });
     if (!res.ok || !res.body) {
       const data = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
-      return { reason: data.error ?? "턴을 처리하지 못했습니다", detail: data.detail };
+      // 라우트가 턴을 돌리기 전에 반려했다 — 저장된 것이 없다
+      return {
+        reason: data.error ?? "턴을 처리하지 못했습니다",
+        detail: data.detail,
+        settled: true,
+      };
     }
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -123,24 +139,37 @@ export async function streamTurn(
            */
           stopWatch();
         } else if (evt.type === "error") {
-          failure = { reason: evt.error ?? "턴을 처리하지 못했습니다", detail: evt.detail };
+          // 서버가 스스로 실패를 알렸다 — `runTurnLocked`는 성공할 때만 저장한다
+          failure = {
+            reason: evt.error ?? "턴을 처리하지 못했습니다",
+            detail: evt.detail,
+            settled: true,
+          };
           closed = true;
           stopWatch();
         }
       }
     }
     /**
-     * 스트림이 `done`도 `error`도 없이 끊겼다 — 서버가 중간에 죽었거나 응답이
-     * 잘렸다. 그냥 마감하면 낙관적 유저 발화가 화면에만 남고(서버는 아무것도
-     * 저장하지 않았다) 감독은 무엇이 반영됐는지 알 수 없다.
+     * 스트림이 `done`도 `error`도 없이 끊겼다 — 연결이 잘렸거나 서버가 중간에 죽었다.
+     * **저장됐는지는 여기서 알 수 없다**: 라우트는 큐가 닫혀도 턴을 끝까지 돌린다.
      */
-    if (!closed) return { reason: TURN_TIMEOUT_MESSAGE, detail: "스트림이 done 없이 끊겼습니다" };
+    if (!closed)
+      return {
+        reason: TURN_TIMEOUT_MESSAGE,
+        detail: "스트림이 done 없이 끊겼습니다",
+        settled: false,
+      };
     return failure;
   } catch (e) {
-    // 시한을 넘겨 우리가 끊은 것과 연결이 안 된 것은 감독에게 다른 사건이다
+    // 시한을 넘겨 우리가 끊은 것과 연결이 안 된 것은 감독에게 다른 사건이다.
+    // 어느 쪽도 서버가 무엇을 했는지 말해 주지 않으므로 `settled`는 거짓이다 —
+    // 요청이 닿지 않았을 뿐인 경우까지 여기 섞이지만, 되돌려 두 번 태우는 쪽이
+    // 화면을 한 번 더 받아 오는 쪽보다 비싸다.
     return {
       reason: abort.signal.aborted ? TURN_TIMEOUT_MESSAGE : "서버에 연결하지 못했습니다",
       detail: e instanceof Error ? e.message : String(e),
+      settled: false,
     };
   } finally {
     stopWatch();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultRoleOf } from "@story-fm/domain";
+import { defaultRoleOf, formatMoney } from "@story-fm/domain";
 import {
   buildOfficeViews,
   createGame,
@@ -9,6 +9,13 @@ import {
   type GameState,
 } from "@story-fm/engine";
 import { slotOverallOf } from "../lib/slot-overall";
+import { ratingTone, scoutMargin, scoutValue } from "../lib/scout-report-display";
+
+/**
+ * 화면이 만드는 **순수 파생값** — `apps/web/lib`의 표시 규칙들이다. 문자열이 아니라
+ * 공식이라 여기서 잰다: 코어 등급을 색 구간으로 접는 경계, 금액의 눈금, 그리고
+ * 자리·역할에서 나오는 OVR. 어느 것도 화면을 열면 바로 드러나지 않는다.
+ */
 
 /**
  * **명단 OVR·전술판 칩·선발 평균은 같은 규칙에서 나온다.**
@@ -130,5 +137,60 @@ describe("자리와 역할이 값을 움직인다", () => {
   it("같은 자리라도 역할이 다르면 요구가 다르다", () => {
     const cb = shared().rows.find((p) => p.positions.some((x) => x.position === "CB"))!;
     expect(slotOverallOf(cb, "CB", "stopper")).not.toBe(slotOverallOf(cb, "CB", "cover-defender"));
+  });
+});
+
+/**
+ * 재정 활동 피드를 펼치면 선수 한 명 몫의 월 상각이 선다 — 백만 눈금으로는
+ * 전부 `£0.0M`이 되어 서른 줄이 아무 말도 하지 않는다
+ * (docs/simulation/finance.md §8.1).
+ */
+/**
+ * 금액 표기는 자가 하나고 **금액이 눈금을 고른다** (`formatMoney` — overview §5).
+ * 백만으로 고정하면 원장 명세가 전부 `£0.0M`이 되고, 천으로 고정하면 이적료가
+ * `£12000k`가 되어 그대로 모델의 컨텍스트에 들어간다. 그 경계가 여기서 지켜진다.
+ */
+describe("돈의 눈금", () => {
+  it("백만 아래는 천 단위로 읽는다 — 백만 눈금이었다면 £0.0M이 될 값들이다", () => {
+    expect(formatMoney(40_000)).toBe("£40k");
+    expect(formatMoney(120_000)).toBe("£120k");
+    expect(formatMoney(725_000)).toBe("£725k");
+  });
+
+  it("백만부터는 백만 단위다 — 이적료가 £12000k로 서지 않는다", () => {
+    expect(formatMoney(1_000_000)).toBe("£1.0M");
+    expect(formatMoney(1_250_000)).toBe("£1.3M");
+    expect(formatMoney(48_000_000)).toBe("£48.0M");
+  });
+
+  it("눈금은 부호가 아니라 크기가 고른다", () => {
+    expect(formatMoney(-40_000)).toBe("£-40k");
+    expect(formatMoney(-2_000_000)).toBe("£-2.0M");
+  });
+});
+
+describe("스카우트 보고서 표시 호환성", () => {
+  it("옛 세이브의 숫자 종합과 잠재력을 그대로 읽는다", () => {
+    expect(scoutValue(81)).toBe(81);
+    expect(scoutValue(94)).toBe(94);
+    expect(scoutMargin(81)).toBe(0);
+  });
+
+  it("새 보고서의 등급 객체에서는 숫자와 오차만 꺼낸다", () => {
+    const observed = { value: 82, label: "주전급", tier: "first", margin: 3 };
+    expect(scoutValue(observed)).toBe(82);
+    expect(scoutMargin(observed)).toBe(3);
+  });
+
+  /** 색 넷은 코어 등급 일곱을 묶은 것이다 — 경계가 코어와 어긋나면 여기서 잡힌다 */
+  it("능력치 숫자를 코어 등급 경계에 맞춰 네 가지 색 구간으로 접는다", () => {
+    expect([59, 60, 70, 78, 85, 90].map(ratingTone)).toEqual([
+      "low",
+      "solid",
+      "solid",
+      "strong",
+      "top",
+      "top",
+    ]);
   });
 });

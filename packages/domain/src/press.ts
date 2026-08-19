@@ -76,6 +76,17 @@ export const PressConferenceSchema = z.object({
   context: z.string(),
   /** 기자가 물을 수 있는 것의 **전부** — 이 밖의 사실은 세계에 없다 */
   facts: z.array(PressFactSchema).min(1),
+  /**
+   * 이 자리를 여는 기자 (`Persona.characterId`).
+   *
+   * **세계가 먼저 여는 자리는 키워드를 기다리지 않는다.** 회견은 감독이 기자
+   * 이름을 말해서 열리는 게 아니라 세계가 부르는 것이므로, 그 기자의 인물지가
+   * 실릴 근거도 감독의 말이 아니라 **코어가 지목한 사실**이어야 한다
+   * (overview.md §1 철칙 4 — 코어는 사실만 낸다).
+   *
+   * 옛 세이브엔 없다 (optional) — 없다고 로드가 막히면 안 된다.
+   */
+  reporterId: z.string().min(1).optional(),
   status: PressStatusSchema,
   /**
    * 이 자리가 얼마나 큰가 (1~3). 실제로 파장이 다르다 — 평범한 주중 경기 뒤

@@ -2,6 +2,7 @@ import type {
   Achievement,
   AxisValues,
   Booking,
+  CharacterInjection,
   Contract,
   DeferredScout,
   FinanceReport,
@@ -14,6 +15,7 @@ import type {
   Manager,
   ManagerAttributes,
   MatchRecord,
+  MatchSide,
   NarrativeNote,
   Persona,
   PlayerIssue,
@@ -29,6 +31,7 @@ import type {
   ScoutReportCard,
   SeasonRecord,
   SeasonStat,
+  ShootoutKick,
   StrengthPacket,
   Suspension,
   TacticAssignment,
@@ -234,6 +237,15 @@ export interface ChatTurn {
    */
   reports?: ScoutReportCard[];
   /**
+   * 이 턴에 실린 **인물지** — 카드 텍스트가 아니라 **기록**이다 (people.md §6).
+   *
+   * 이력은 매 턴 `state.chat`에서 다시 렌더링되므로 남길 것은 누구를 어느 깊이로
+   * 실었는가뿐이고, 카드는 그 턴을 렌더링할 때 다시 붙는다. 텍스트를 저장하면
+   * 채팅 화면에 프롬프트가 새고, 이력이 세이브 시점의 문장으로 굳는다.
+   * 옛 세이브엔 없다 — optional이라 세이브 버전을 올리지 않는다.
+   */
+  characters?: CharacterInjection[];
+  /**
    * **경기 중에 오간 말인가** — 이력에서 중계와 평시를 가르는 표식.
    *
    * 평시의 GM과 경기의 중계는 다른 에이전트이고 감독이 거는 말도 다르다(훈련·이적
@@ -400,6 +412,20 @@ export interface PendingMatch {
    * 구 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   lastSegment?: { events: import("@story-fm/domain").MatchEvent[]; stop: string };
+  /**
+   * **승부차기가 남았을 때만** — 장부는 `finished`지만 경기는 끝나지 않았다.
+   *
+   * 120분이 끝났는데 승부가 남은 감독의 경기에서만 선다(`advanceMatchTo`가 세운다).
+   * 킥 목록이 원본이고 합계는 세지 않는다(`shootoutTally`). 옛 세이브엔 없다
+   * (optional — SAVE_VERSION 유지).
+   */
+  shootout?: {
+    /** 먼저 차는 쪽 — 동전이 정한다 (`shootoutFirst`) */
+    first: MatchSide;
+    kicks: ShootoutKick[];
+    /** 감독이 지시한 키커 순서 (선수 id) — 없으면 기본 순서 */
+    order?: { home?: string[]; away?: string[] };
+  };
   /**
    * **상대가 경기 중 바꾼 전술** — 이 경기에만 유효하다.
    *
@@ -644,6 +670,13 @@ export interface GameState {
    * (`persistence.ts`). 없으면 옛 −3~3 세이브로 보고 3으로 나눈다.
    */
   formUnitScale?: boolean;
+  /**
+   * 미러 자리에 적혀 있던 주발 보정을 이미 벗긴 세이브인가 — 로드 시 한 번만
+   * 벗기기 위한 마커 (`core/migrations.ts`). 벗기기는 묶음을 주 포지션 값으로
+   * 평평하게 미는 일이라, 마커 없이 매번 돌면 경기·훈련이 LCB·RCB에 쌓은
+   * 적응도까지 같이 지운다 (player.md §8).
+   */
+  mirrorProficiencyStripped?: boolean;
   narrative: NarrativeNote[];
   chat: ChatTurn[];
 }
@@ -990,11 +1023,22 @@ export function weeklyWagesOf(state: GameState, teamId: string): number {
   return weeklyWageLinesOf(state, teamId).reduce((sum, l) => sum + l.weekly, 0);
 }
 
-/** 시즌 누적 경고 — BOOKING에서 파생 */
+/**
+ * 시즌 누적 경고 — BOOKING에서 파생.
+ *
+ * **한 경기에서 두 장을 받은 경기의 경고는 세지 않는다** — 경고 2회 퇴장은 그 자리에서
+ * 퇴장 정지 한 건으로 값을 치렀고, 그 두 장까지 누적에 넣으면 한 사건에 정지가 두 번
+ * 걸린다 (match.md §5). 장부의 두 줄은 그대로 둔다 — 경기 기록은 실제로 그랬다.
+ */
 export function seasonYellowsOf(state: GameState, playerId: string, season: number): number {
-  return state.bookings.filter(
-    (b) => b.gamePlayerId === playerId && b.season === season && b.card === "yellow",
-  ).length;
+  const perMatch = new Map<string, number>();
+  for (const b of state.bookings) {
+    if (b.gamePlayerId !== playerId || b.season !== season || b.card !== "yellow") continue;
+    perMatch.set(b.matchId, (perMatch.get(b.matchId) ?? 0) + 1);
+  }
+  let counted = 0;
+  for (const inMatch of perMatch.values()) if (inMatch < 2) counted += inMatch;
+  return counted;
 }
 
 export function financeOf(state: GameState, teamId: string): TeamFinance {
@@ -2063,6 +2107,9 @@ export function createGame(input: CreateGameInput): GameState {
       ...generateReporters(seed, input.userTeamId),
     ],
     formUnitScale: true,
+    // 카탈로그는 읽을 때 이미 벗겨져 들어온다(`world/catalog.ts`) — 새 세이브에
+    // 벗길 것은 없고, 여기서 서는 자리부터 적립이 쌓인다
+    mirrorProficiencyStripped: true,
     leagueHistory: [],
     seasonRecords: [],
     trophies: [],

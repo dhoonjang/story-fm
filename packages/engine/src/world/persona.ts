@@ -1,10 +1,11 @@
 import {
   CAPTAIN_ROLE_LABEL,
   HEAD_COACH_ROLE_LABEL,
-  PERSONA_ROLE_LABEL,
   normalizeSpeaker,
+  personaRoleLabel,
   type Negotiation,
   type Persona,
+  type PersonaRole,
 } from "@story-fm/domain";
 import { realCoachNameOf } from "../data/coach-seeds";
 import { realOwnerNameOf } from "../data/owner-seeds";
@@ -23,6 +24,49 @@ import { makeRng, pick } from "../core/rng";
  *
  * 같은 세이브는 언제 열어도 같은 사람을 만난다 (시드 해시).
  */
+
+/**
+ * 캐릭터북이 훑는 말 — **한 곳에서만 만든다** (people.md §6).
+ *
+ * 코치·구단주·기자·선수가 같은 헬퍼를 부르고, 옛 세이브를 메우는 `ensurePersonas`도
+ * 여기를 부른다. 자리마다 따로 적으면 한쪽만 고쳐져 같은 이름이 어떤 인물에게는
+ * 걸리고 어떤 인물에게는 걸리지 않는다.
+ *
+ * ⚠️ **나열한 것만 본다** — 성만 쓴 "홀란드"를 같은 사람으로 보는 부분 일치는
+ * 오탐을 만든다는 `normalizeSpeaker`의 원칙이 캐릭터북에도 그대로다.
+ */
+
+/** 두 글자 미만은 키워드가 되지 못한다 — 한 글자는 아무 문장에나 걸린다 */
+const KEYWORD_MIN_LENGTH = 2;
+
+/**
+ * 자리를 부르는 말 — 이름 대신 직책으로 부른 턴에도 그 사람이 선다.
+ *
+ * ⚠️ **매 턴 나오는 말은 넣지 않는다.** 한 턴 상한이 3장이라 "이적" 같은 말이
+ * 자리를 다 채우면 정작 이름으로 불린 인물이 밀린다.
+ */
+const ROLE_KEYWORDS: Partial<Record<PersonaRole, readonly string[]>> = {
+  head_coach: ["수석코치", "코치"],
+  owner: ["구단주", "회장", "보드"],
+  reporter: ["기자", "회견", "인터뷰"],
+};
+
+/** 이 인물이 불렸다고 볼 말들 — 이름 · 이름 조각 · 자리를 부르는 말 · 소속 매체 */
+export function personaKeywords(persona: Pick<Persona, "name" | "role" | "outlet">): string[] {
+  const candidates = [
+    persona.name,
+    ...persona.name.split(/\s+/u),
+    ...(persona.outlet !== undefined ? [persona.outlet] : []),
+    ...(ROLE_KEYWORDS[persona.role] ?? []),
+  ];
+  const keywords: string[] = [];
+  for (const raw of candidates) {
+    const word = raw.trim();
+    if (word.length < KEYWORD_MIN_LENGTH || keywords.includes(word)) continue;
+    keywords.push(word);
+  }
+  return keywords;
+}
 
 interface CoachArchetype {
   key: string;
@@ -194,6 +238,7 @@ export function generateHeadCoach(seed: number, teamId: string): Persona {
     traits: [...archetype.traits],
     motivation: archetype.motivation,
     speechStyle: { note: archetype.speech.note, samples: [...archetype.speech.samples] },
+    keywords: personaKeywords({ name, role: "head_coach" }),
     /** 실존 인물인가 — 서사 가드가 이 표식을 본다 (부정적 실명 서사 금지) */
     real: real !== null ? true : undefined,
     seed,
@@ -307,6 +352,7 @@ export function generateOwner(seed: number, teamId: string): Persona {
     traits: [...archetype.traits],
     motivation: archetype.motivation,
     speechStyle: { note: archetype.speech.note, samples: [...archetype.speech.samples] },
+    keywords: personaKeywords({ name, role: "owner" }),
     real: real !== null ? true : undefined,
     seed,
   };
@@ -344,7 +390,7 @@ interface SpeakerSource {
  * 선수다: 대화마다 `(선수)`가 따라붙으면 시끄럽지만, 유니폼 아이콘 하나는
  * "지금 말하는 사람이 선수구나"를 조용히 알린다.
  */
-export type SpeakerKind = "head_coach" | "owner" | "reporter" | "captain" | "player";
+export type SpeakerKind = PersonaRole | "captain";
 export interface SpeakerRole {
   kind: SpeakerKind;
   /** 이름 옆에 글자로 붙는 직책 — 없으면 아이콘만 선다 */
@@ -397,7 +443,10 @@ export function speakerRoles(state: SpeakerSource): Record<string, SpeakerRole> 
       label:
         persona.role === "reporter" && persona.outlet
           ? persona.outlet
-          : PERSONA_ROLE_LABEL[persona.role],
+          : // 선수는 유니폼 아이콘이 이미 말한다 — 대화마다 `(선수)`가 따라붙으면 시끄럽다
+            persona.role === "player"
+            ? undefined
+            : personaRoleLabel(persona.role),
     });
   }
 
@@ -540,6 +589,7 @@ export function generateReporters(seed: number, teamId: string): Persona[] {
       traits: [...archetype.traits],
       motivation: archetype.motivation,
       speechStyle: { note: archetype.speech.note, samples: [...archetype.speech.samples] },
+      keywords: personaKeywords({ name, role: "reporter", outlet }),
       outlet,
       seed,
     };
@@ -577,5 +627,15 @@ export function ensurePersonas(state: {
       ...(state.personas ?? []),
       ...generateReporters(state.seed, state.userTeamId),
     ];
+  }
+  // 키워드가 없던 세이브 — 캐릭터북이 훑을 말이 없으면 그 인물은 불려도 서지 않는다.
+  // 이름·자리에서 파생하므로 채워도 같은 사람이다 (세이브 버전 유지).
+  //
+  // ⚠️ **선수는 여기서 만들지 않는다.** 선수 페르소나는 파생이라 세이브에 넣지
+  // 않는다 (people.md §6) — 밀어 넣으면 리그 전체가 세이브에 굳는다.
+  for (const persona of state.personas ?? []) {
+    if (persona.keywords === undefined || persona.keywords.length === 0) {
+      persona.keywords = personaKeywords(persona);
+    }
   }
 }

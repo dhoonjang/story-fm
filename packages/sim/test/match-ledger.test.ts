@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { MatchEvent } from "@story-fm/domain";
-import { applyEvents, createLedger } from "@story-fm/sim";
+import {
+  applyEvents,
+  createLedger,
+  finishingGoalProbability,
+  samplePoisson,
+  sampleShotXg,
+  type ApplyResult,
+  type MatchLedgerState,
+} from "@story-fm/sim";
 import { makeLedgerSide, makeSquad } from "./helpers";
 
 const homeSquad = makeSquad("hm", 80);
@@ -14,32 +22,46 @@ const ev = (partial: Partial<MatchEvent> & Pick<MatchEvent, "minute" | "type">):
   ...partial,
 });
 
+/**
+ * 결과에서 값을 꺼내는 두 도구 — **꺼내는 순간 판정이 선다.**
+ *
+ * 원장은 순수 함수라 반려는 곧 셋업이 틀렸다는 뜻인데, `if (r.ok)`로 감싸거나
+ * `if (!r.ok) return`으로 빠지면 그 뒤의 단언이 한 줄도 안 돌고 케이스는 초록으로
+ * 남는다. 여기서 터뜨리면 무엇이 왜 반려됐는지가 그대로 보인다.
+ */
+function passed(result: ApplyResult): MatchLedgerState {
+  if (!result.ok) throw new Error(`반려됐다: ${result.errors.join(" / ")}`);
+  return result.state;
+}
+
+/** 반려를 요구하고 사유를 돌려준다 — 어느 규칙이 걸렸는지까지 한 줄에서 잰다 */
+function refused(result: ApplyResult): string[] {
+  if (result.ok) throw new Error("통과했다 — 반려됐어야 한다");
+  return result.errors;
+}
+
 describe("경기 장부 검증 (match.md §5)", () => {
   it("골을 적용하면 스코어가 오른다", () => {
     const r = applyEvents(createLedger(home, away), [
       ev({ minute: 12, type: "goal", team: "home", actors: ["hm-fw1"] }),
     ]);
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.state.score).toEqual({ home: 1, away: 0 });
+    expect(passed(r).score).toEqual({ home: 1, away: 0 });
   });
 
   it("그라운드에 없는 선수의 골은 반려된다", () => {
     const r = applyEvents(createLedger(home, away), [
       ev({ minute: 12, type: "goal", team: "home", actors: ["hm-sub-fw"] }),
     ]);
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors[0]).toContain("그라운드 위 선수가 아닙니다");
+    expect(refused(r)[0]).toContain("그라운드 위 선수가 아닙니다");
   });
 
   it("도움이 실려도 골은 그대로 기록된다", () => {
     const r = applyEvents(createLedger(home, away), [
       ev({ minute: 12, type: "goal", team: "home", actors: ["hm-fw1", "hm-mf1"] }),
     ]);
-    expect(r.ok).toBe(true);
-    if (r.ok) {
-      expect(r.state.score).toEqual({ home: 1, away: 0 });
-      expect(r.state.events[0]?.actors).toEqual(["hm-fw1", "hm-mf1"]);
-    }
+    const state = passed(r);
+    expect(state.score).toEqual({ home: 1, away: 0 });
+    expect(state.events[0]?.actors).toEqual(["hm-fw1", "hm-mf1"]);
   });
 
   it("못 믿을 도움은 떨구되 **골은 살린다** — 이미 서술된 득점이 사라지면 안 된다", () => {
@@ -48,11 +70,10 @@ describe("경기 장부 검증 (match.md §5)", () => {
         ev({ minute: 12, type: "goal", team: "home", actors: ["hm-fw1", bogus] }),
       ]);
       expect(r.ok, `도움 "${bogus}"가 골을 반려시켰다`).toBe(true);
-      if (r.ok) {
-        expect(r.state.score).toEqual({ home: 1, away: 0 });
-        // 득점자만 남는다 (자기 자신이 도움일 수도 없다)
-        expect(r.state.events[0]?.actors).toEqual(["hm-fw1"]);
-      }
+      const state = passed(r);
+      expect(state.score).toEqual({ home: 1, away: 0 });
+      // 득점자만 남는다 (자기 자신이 도움일 수도 없다)
+      expect(state.events[0]?.actors).toEqual(["hm-fw1"]);
     }
   });
 
@@ -68,8 +89,7 @@ describe("경기 장부 검증 (match.md §5)", () => {
       ev({ minute: 30, type: "red_card", team: "home", actors: ["hm-fw1"] }),
       ev({ minute: 40, type: "goal", team: "home", actors: ["hm-fw1"] }),
     ]);
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors[0]).toContain("퇴장");
+    expect(refused(r)[0]).toContain("퇴장");
   });
 
   it("경고 2회는 자동 퇴장이다", () => {
@@ -78,11 +98,9 @@ describe("경기 장부 검증 (match.md §5)", () => {
       ev({ minute: 55, type: "yellow_card", team: "away", actors: ["aw-df1"] }),
     ]);
     // 55분 이벤트가 전반(half_time 없음)에 오는 건 허용 — 시간 규칙만 본다
-    expect(first.ok).toBe(true);
-    if (first.ok) {
-      expect(first.state.sentOff).toContain("aw-df1");
-      expect(first.state.away.onPitch).not.toContain("aw-df1");
-    }
+    const twoYellows = passed(first);
+    expect(twoYellows.sentOff).toContain("aw-df1");
+    expect(twoYellows.away.onPitch).not.toContain("aw-df1");
 
     // 경고 한 줄 + 퇴장 한 줄 — 두 번째 경고 뒤의 red_card는 온필드를 요구하지 않는다.
     // 사건 목록에 red_card가 남아야 다음 경기 출장 정지가 걸린다 (match.md §7).
@@ -91,17 +109,15 @@ describe("경기 장부 검증 (match.md §5)", () => {
       ev({ minute: 55, type: "yellow_card", team: "away", actors: ["aw-df1"] }),
       ev({ minute: 55, type: "red_card", team: "away", actors: ["aw-df1"] }),
     ]);
-    expect(withRed.ok).toBe(true);
-    if (withRed.ok) {
-      expect(withRed.state.events.map((e) => e.type)).toEqual([
-        "yellow_card",
-        "yellow_card",
-        "red_card",
-      ]);
-      // 퇴장은 한 번뿐이다 — 경고와 레드가 각각 밀어 넣으면 정지가 두 번 걸린다
-      expect(withRed.state.sentOff.filter((id) => id === "aw-df1")).toHaveLength(1);
-      expect(withRed.state.away.onPitch).not.toContain("aw-df1");
-    }
+    const withRedState = passed(withRed);
+    expect(withRedState.events.map((e) => e.type)).toEqual([
+      "yellow_card",
+      "yellow_card",
+      "red_card",
+    ]);
+    // 퇴장은 한 번뿐이다 — 경고와 레드가 각각 밀어 넣으면 정지가 두 번 걸린다
+    expect(withRedState.sentOff.filter((id) => id === "aw-df1")).toHaveLength(1);
+    expect(withRedState.away.onPitch).not.toContain("aw-df1");
   });
 
   it("같은 퇴장에 red_card가 두 줄이면 뒷줄은 반려된다", () => {
@@ -111,8 +127,7 @@ describe("경기 장부 검증 (match.md §5)", () => {
       ev({ minute: 55, type: "red_card", team: "away", actors: ["aw-df1"] }),
       ev({ minute: 56, type: "red_card", team: "away", actors: ["aw-df1"] }),
     ]);
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors[0]).toContain("퇴장");
+    expect(refused(r)[0]).toContain("퇴장");
   });
 
   it("시간 역행은 반려된다", () => {
@@ -120,8 +135,7 @@ describe("경기 장부 검증 (match.md §5)", () => {
       ev({ minute: 30, type: "shot", team: "home", actors: ["hm-fw1"] }),
       ev({ minute: 20, type: "shot", team: "home", actors: ["hm-fw1"] }),
     ]);
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors[0]).toContain("시간 역행");
+    expect(refused(r)[0]).toContain("시간 역행");
   });
 
   it("교체는 벤치 선수만, 5회까지 가능하다", () => {
@@ -134,16 +148,14 @@ describe("경기 장부 검증 (match.md §5)", () => {
     const good = applyEvents(ledger, [
       ev({ minute: 60, type: "substitution", team: "home", actors: ["hm-fw1", "hm-sub-fw"] }),
     ]);
-    expect(good.ok).toBe(true);
-    if (good.ok) {
-      expect(good.state.home.onPitch).toContain("hm-sub-fw");
-      expect(good.state.home.subsUsed).toBe(1);
-      // 교체 아웃된 선수는 더 행동 불가
-      const after = applyEvents(good.state, [
-        ev({ minute: 70, type: "shot", team: "home", actors: ["hm-fw1"] }),
-      ]);
-      expect(after.ok).toBe(false);
-    }
+    const swapped = passed(good);
+    expect(swapped.home.onPitch).toContain("hm-sub-fw");
+    expect(swapped.home.subsUsed).toBe(1);
+    // 교체 아웃된 선수는 더 행동 불가
+    const after = applyEvents(swapped, [
+      ev({ minute: 70, type: "shot", team: "home", actors: ["hm-fw1"] }),
+    ]);
+    expect(after.ok).toBe(false);
   });
 
   it("득점 결과를 임의 상한으로 자르지 않는다 — 7번째 골도 기록된다", () => {
@@ -152,14 +164,12 @@ describe("경기 장부 검증 (match.md §5)", () => {
       const r = applyEvents(state, [
         ev({ minute: 10 + n, type: "goal", team: "home", actors: ["hm-fw1"] }),
       ]);
-      expect(r.ok).toBe(true);
-      if (r.ok) state = r.state;
+      state = passed(r);
     }
     const seventh = applyEvents(state, [
       ev({ minute: 80, type: "goal", team: "home", actors: ["hm-fw1"] }),
     ]);
-    expect(seventh.ok).toBe(true);
-    if (seventh.ok) expect(seventh.state.score.home).toBe(7);
+    expect(passed(seventh).score.home).toBe(7);
   });
 
   it("하프타임 없이 full_time은 불가하고, 순서를 지키면 종료된다", () => {
@@ -170,17 +180,14 @@ describe("경기 장부 검증 (match.md §5)", () => {
     const firstHalf = applyEvents(createLedger(home, away), [
       ev({ minute: 45, type: "half_time" }),
     ]);
-    expect(firstHalf.ok).toBe(true);
-    if (!firstHalf.ok) return;
-    const proper = applyEvents(firstHalf.state, [ev({ minute: 93, type: "full_time" })]);
-    expect(proper.ok).toBe(true);
-    if (proper.ok) {
-      expect(proper.state.phase).toBe("finished");
-      const after = applyEvents(proper.state, [
-        ev({ minute: 94, type: "shot", team: "home", actors: ["hm-fw1"] }),
-      ]);
-      expect(after.ok).toBe(false);
-    }
+    const finished = passed(
+      applyEvents(passed(firstHalf), [ev({ minute: 93, type: "full_time" })]),
+    );
+    expect(finished.phase).toBe("finished");
+    const after = applyEvents(finished, [
+      ev({ minute: 94, type: "shot", team: "home", actors: ["hm-fw1"] }),
+    ]);
+    expect(after.ok).toBe(false);
   });
 
   it("하프타임 뒤에 같은 배치로 사건을 이어붙이면 반려된다 — 강제 정지점", () => {
@@ -188,15 +195,12 @@ describe("경기 장부 검증 (match.md §5)", () => {
       ev({ minute: 45, type: "half_time" }),
       ev({ minute: 50, type: "shot", team: "home", actors: ["hm-fw1"] }),
     ]);
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors[0]).toContain("정지점");
+    expect(refused(r)[0]).toContain("정지점");
   });
 
   it("교체 기회는 하프타임 제외 3회까지다", () => {
     let state = createLedger(home, away);
-    const half = applyEvents(state, [ev({ minute: 45, type: "half_time" })]);
-    if (!half.ok) throw new Error("half fail");
-    state = half.state;
+    state = passed(applyEvents(state, [ev({ minute: 45, type: "half_time" })]));
 
     const subs: Array<[number, string, string]> = [
       [50, "hm-df1", "hm-sub-gk"],
@@ -207,15 +211,13 @@ describe("경기 장부 검증 (match.md §5)", () => {
       const r = applyEvents(state, [
         ev({ minute, type: "substitution", team: "home", actors: [out, into] }),
       ]);
-      expect(r.ok).toBe(true);
-      if (r.ok) state = r.state;
+      state = passed(r);
     }
     // 4번째 창은 반려 (선수 수는 4번째지만 기회가 소진)
     const fourth = applyEvents(state, [
       ev({ minute: 80, type: "substitution", team: "home", actors: ["hm-df4", "hm-sub-fw"] }),
     ]);
-    expect(fourth.ok).toBe(false);
-    if (!fourth.ok) expect(fourth.errors[0]).toContain("교체 기회");
+    expect(refused(fourth)[0]).toContain("교체 기회");
   });
 
   /**
@@ -224,46 +226,42 @@ describe("경기 장부 검증 (match.md §5)", () => {
    */
   it("휴식 정지점의 교체는 창을 쓰지 않는다 — 시각이 45′·46′가 아니어도", () => {
     const bench = Array.from({ length: 8 }, (_, i) => `b${i}`);
-    let state = createLedger({ onPitch: home.onPitch, bench }, away);
+    const opening = createLedger({ onPitch: home.onPitch, bench }, away);
 
-    const half = applyEvents(state, [ev({ minute: 47, type: "half_time" })]);
-    if (!half.ok) throw new Error(half.errors.join(" / "));
-    const atHalf = applyEvents(half.state, [
-      ev({ minute: 47, type: "substitution", team: "home", actors: ["hm-df1", "b0"] }),
-    ]);
-    expect(atHalf.ok).toBe(true);
-    if (!atHalf.ok) return;
-    expect(atHalf.state.home.subWindows).toBe(0);
+    const half = passed(applyEvents(opening, [ev({ minute: 47, type: "half_time" })]));
+    const atHalf = passed(
+      applyEvents(half, [
+        ev({ minute: 47, type: "substitution", team: "home", actors: ["hm-df1", "b0"] }),
+      ]),
+    );
+    expect(atHalf.home.subWindows).toBe(0);
 
     // 경기가 재개되면 같은 자리도 보통의 교체다
-    const resumed = applyEvents(atHalf.state, [
-      ev({ minute: 50, type: "shot", team: "home", actors: ["hm-fw1"] }),
-      ev({ minute: 50, type: "substitution", team: "home", actors: ["hm-df2", "b1"] }),
-    ]);
-    expect(resumed.ok).toBe(true);
-    if (!resumed.ok) return;
-    expect(resumed.state.home.subWindows).toBe(1);
-    state = resumed.state;
+    let state = passed(
+      applyEvents(atHalf, [
+        ev({ minute: 50, type: "shot", team: "home", actors: ["hm-fw1"] }),
+        ev({ minute: 50, type: "substitution", team: "home", actors: ["hm-df2", "b1"] }),
+      ]),
+    );
+    expect(state.home.subWindows).toBe(1);
 
     // 연장의 두 휴식 — 면제 조건 자체가 없어 창을 먹던 자리다
     for (const [minute, type] of [
       [90, "extra_time_start"],
       [105, "extra_half_time"],
     ] as const) {
-      const opened = applyEvents(state, [ev({ minute, type })]);
-      if (!opened.ok) throw new Error(`${type}: ${opened.errors.join(" / ")}`);
-      const sub = applyEvents(opened.state, [
-        ev({
-          minute,
-          type: "substitution",
-          team: "home",
-          actors: [minute === 90 ? "hm-df3" : "hm-df4", minute === 90 ? "b2" : "b3"],
-        }),
-      ]);
-      expect(sub.ok, `${type} 교체가 반려됐다`).toBe(true);
-      if (!sub.ok) return;
-      expect(sub.state.home.subWindows, `${type}에서 창이 소모됐다`).toBe(1);
-      state = sub.state;
+      const opened = passed(applyEvents(state, [ev({ minute, type })]));
+      state = passed(
+        applyEvents(opened, [
+          ev({
+            minute,
+            type: "substitution",
+            team: "home",
+            actors: [minute === 90 ? "hm-df3" : "hm-df4", minute === 90 ? "b2" : "b3"],
+          }),
+        ]),
+      );
+      expect(state.home.subWindows, `${type}에서 창이 소모됐다`).toBe(1);
     }
   });
 
@@ -277,15 +275,14 @@ describe("경기 장부 검증 (match.md §5)", () => {
       ev({ minute: 45, type: "substitution", team: "home", actors: ["hm-df1", "b0"] }),
       ev({ minute: 45, type: "half_time" }),
     ]);
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.state.home.subWindows).toBe(0);
+    expect(passed(r).home.subWindows).toBe(0);
   });
 
   it("킥오프는 한 경기에 한 번만 기록된다", () => {
-    const first = applyEvents(createLedger(home, away), [ev({ minute: 0, type: "kickoff" })]);
-    expect(first.ok).toBe(true);
-    if (!first.ok) return;
-    const dup = applyEvents(first.state, [ev({ minute: 1, type: "kickoff" })]);
+    const first = passed(
+      applyEvents(createLedger(home, away), [ev({ minute: 0, type: "kickoff" })]),
+    );
+    const dup = applyEvents(first, [ev({ minute: 1, type: "kickoff" })]);
     expect(dup.ok).toBe(false);
   });
 
@@ -297,11 +294,11 @@ describe("경기 장부 검증 (match.md §5)", () => {
   });
 
   it("리그처럼 연장이 없는 경기는 후반에서 바로 끝난다 — 국면이 하나 더 생겨도 그대로다", () => {
-    const half = applyEvents(createLedger(home, away), [ev({ minute: 46, type: "half_time" })]);
-    if (!half.ok) throw new Error("half fail");
-    const end = applyEvents(half.state, [ev({ minute: 93, type: "full_time" })]);
-    expect(end.ok).toBe(true);
-    if (end.ok) expect(end.state.phase).toBe("finished");
+    const half = passed(
+      applyEvents(createLedger(home, away), [ev({ minute: 46, type: "half_time" })]),
+    );
+    const end = applyEvents(half, [ev({ minute: 93, type: "full_time" })]);
+    expect(passed(end).phase).toBe("finished");
   });
 });
 
@@ -311,38 +308,26 @@ describe("경기 장부 검증 (match.md §5)", () => {
  */
 describe("연장 장부 (match.md §2)", () => {
   /** 후반까지 흘려 놓은 장부 */
-  function inSecondHalf() {
-    const half = applyEvents(createLedger(home, away), [ev({ minute: 45, type: "half_time" })]);
-    if (!half.ok) throw new Error("half fail");
-    return half.state;
+  function inSecondHalf(): MatchLedgerState {
+    return passed(applyEvents(createLedger(home, away), [ev({ minute: 45, type: "half_time" })]));
   }
 
   it("후반 → 연장 전반 → 연장 후반 → 종료로 이어진다", () => {
-    let state = inSecondHalf();
-    const start = applyEvents(state, [ev({ minute: 92, type: "extra_time_start" })]);
-    expect(start.ok).toBe(true);
-    if (!start.ok) return;
-    expect(start.state.phase).toBe("extra_first");
-    state = start.state;
+    let state = passed(applyEvents(inSecondHalf(), [ev({ minute: 92, type: "extra_time_start" })]));
+    expect(state.phase).toBe("extra_first");
 
     // 연장 전반에도 경기는 굴러간다
-    const goal = applyEvents(state, [
-      ev({ minute: 98, type: "goal", team: "home", actors: ["hm-fw1"] }),
-    ]);
-    expect(goal.ok).toBe(true);
-    if (!goal.ok) return;
-    expect(goal.state.score).toEqual({ home: 1, away: 0 });
-    state = goal.state;
+    state = passed(
+      applyEvents(state, [ev({ minute: 98, type: "goal", team: "home", actors: ["hm-fw1"] })]),
+    );
+    expect(state.score).toEqual({ home: 1, away: 0 });
 
-    const breakTime = applyEvents(state, [ev({ minute: 105, type: "extra_half_time" })]);
-    expect(breakTime.ok).toBe(true);
-    if (!breakTime.ok) return;
-    expect(breakTime.state.phase).toBe("extra_second");
-    state = breakTime.state;
+    state = passed(applyEvents(state, [ev({ minute: 105, type: "extra_half_time" })]));
+    expect(state.phase).toBe("extra_second");
 
-    const end = applyEvents(state, [ev({ minute: 121, type: "full_time" })]);
-    expect(end.ok).toBe(true);
-    if (end.ok) expect(end.state.phase).toBe("finished");
+    expect(passed(applyEvents(state, [ev({ minute: 121, type: "full_time" })])).phase).toBe(
+      "finished",
+    );
   });
 
   it("연장 개시는 후반 90′ 이후에만 — 전반에서도, 89′에도 올 수 없다", () => {
@@ -358,18 +343,17 @@ describe("연장 장부 (match.md §2)", () => {
   });
 
   it("연장 중의 종료는 120′ 이후여야 한다 — 연장 전반에서는 끝낼 수 없다", () => {
-    const start = applyEvents(inSecondHalf(), [ev({ minute: 90, type: "extra_time_start" })]);
-    if (!start.ok) throw new Error("extra fail");
+    const start = passed(
+      applyEvents(inSecondHalf(), [ev({ minute: 90, type: "extra_time_start" })]),
+    );
 
     // 연장 전반에서 곧장 종료 — 연장 후반이 남아 있다
-    const early = applyEvents(start.state, [ev({ minute: 105, type: "full_time" })]);
+    const early = applyEvents(start, [ev({ minute: 105, type: "full_time" })]);
     expect(early.ok).toBe(false);
 
-    const half = applyEvents(start.state, [ev({ minute: 106, type: "extra_half_time" })]);
-    if (!half.ok) throw new Error("extra half fail");
-    const short = applyEvents(half.state, [ev({ minute: 115, type: "full_time" })]);
-    expect(short.ok).toBe(false);
-    if (!short.ok) expect(short.errors[0]).toContain("120′");
+    const half = passed(applyEvents(start, [ev({ minute: 106, type: "extra_half_time" })]));
+    const short = applyEvents(half, [ev({ minute: 115, type: "full_time" })]);
+    expect(refused(short)[0]).toContain("120′");
   });
 
   it("연장 개시도 강제 정지점이다 — 같은 배치에 이후 사건을 이어붙일 수 없다", () => {
@@ -377,8 +361,7 @@ describe("연장 장부 (match.md §2)", () => {
       ev({ minute: 91, type: "extra_time_start" }),
       ev({ minute: 95, type: "shot", team: "home", actors: ["hm-fw1"] }),
     ]);
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors[0]).toContain("정지점");
+    expect(refused(r)[0]).toContain("정지점");
   });
 
   it("연장에는 교체 한 장·한 번이 더 있다 — 6인/4회", () => {
@@ -387,10 +370,9 @@ describe("연장 장부 (match.md §2)", () => {
       onPitch: home.onPitch,
       bench: Array.from({ length: 8 }, (_, i) => `b${i}`),
     };
-    let state = createLedger(deepBench, away);
-    const half = applyEvents(state, [ev({ minute: 45, type: "half_time" })]);
-    if (!half.ok) throw new Error("half fail");
-    state = half.state;
+    let state = passed(
+      applyEvents(createLedger(deepBench, away), [ev({ minute: 45, type: "half_time" })]),
+    );
 
     // 정규시간 — 5인/3회가 한계다
     const regulation: Array<[number, string, string]> = [
@@ -405,7 +387,7 @@ describe("연장 장부 (match.md §2)", () => {
         ev({ minute, type: "substitution", team: "home", actors: [out, into] }),
       ]);
       expect(r.ok, `${minute}′ 교체가 반려됐다`).toBe(true);
-      if (r.ok) state = r.state;
+      state = passed(r);
     }
     expect(state.home.subsUsed).toBe(5);
     expect(state.home.subWindows).toBe(3);
@@ -416,17 +398,14 @@ describe("연장 장부 (match.md §2)", () => {
     ]);
     expect(sixthInRegulation.ok).toBe(false);
 
-    const start = applyEvents(state, [ev({ minute: 92, type: "extra_time_start" })]);
-    if (!start.ok) throw new Error("extra fail");
-    state = start.state;
+    state = passed(applyEvents(state, [ev({ minute: 92, type: "extra_time_start" })]));
 
     // 연장에 들어오면 한 장이 더 열린다 (네 번째 창)
-    const sixth = applyEvents(state, [
-      ev({ minute: 95, type: "substitution", team: "home", actors: ["hm-mf2", "b5"] }),
-    ]);
-    expect(sixth.ok).toBe(true);
-    if (!sixth.ok) return;
-    state = sixth.state;
+    state = passed(
+      applyEvents(state, [
+        ev({ minute: 95, type: "substitution", team: "home", actors: ["hm-mf2", "b5"] }),
+      ]),
+    );
     expect(state.home.subsUsed).toBe(6);
     expect(state.home.subWindows).toBe(4);
 
@@ -434,7 +413,40 @@ describe("연장 장부 (match.md §2)", () => {
     const seventh = applyEvents(state, [
       ev({ minute: 100, type: "substitution", team: "home", actors: ["hm-mf3", "b6"] }),
     ]);
-    expect(seventh.ok).toBe(false);
-    if (!seventh.ok) expect(seventh.errors[0]).toContain("6명 소진");
+    expect(refused(seventh)[0]).toContain("6명 소진");
+  });
+});
+
+function rngOf(seed: number): () => number {
+  let value = seed >>> 0;
+  return () => {
+    value = (value + 0x6d2b79f5) | 0;
+    let mixed = Math.imul(value ^ (value >>> 15), 1 | value);
+    mixed = (mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed)) ^ mixed;
+    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+describe("결정력 — 기회의 질과 실현을 분리한다", () => {
+  it("결정력 75는 기회 xG를 그대로 실현하고, 높고 낮음은 양방향으로 갈린다", () => {
+    expect(finishingGoalProbability(0.1, 75)).toBeCloseTo(0.1, 10);
+    expect(finishingGoalProbability(0.1, 90)).toBeGreaterThan(0.1);
+    expect(finishingGoalProbability(0.1, 40)).toBeLessThan(0.1);
+  });
+
+  it("결과를 알기 전에 뽑는 xG 분포는 지정한 평균을 보존한다", () => {
+    const rng = rngOf(17);
+    const samples = Array.from({ length: 20_000 }, () => sampleShotXg(rng, 0.11));
+    const mean = samples.reduce((sum, value) => sum + value, 0) / samples.length;
+    expect(mean).toBeCloseTo(0.11, 2);
+    expect(samples.every((value) => value > 0 && value < 1)).toBe(true);
+  });
+});
+
+describe("슈팅 수 — 결과를 자르는 상·하한이 없다", () => {
+  it("포아송 분포의 오른쪽 꼬리가 임의의 22회 경계에서 잘리지 않는다", () => {
+    const samples = Array.from({ length: 2_000 }, (_, seed) => samplePoisson(rngOf(seed), 18));
+    expect(Math.max(...samples)).toBeGreaterThan(22);
+    expect(new Set(samples.filter((value) => value > 22)).size).toBeGreaterThan(3);
   });
 });

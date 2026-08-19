@@ -1,13 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { assignmentsOf, playerById, tacticsOf, userPlayers } from "@story-fm/engine";
+import {
+  advanceSegment,
+  assignmentsOf,
+  finalizeMatch,
+  playerById,
+  startMatch,
+  substitutePlayer,
+  tacticsOf,
+  userPlayers,
+  userSide,
+  isClubTeam,
+  simSquadOf,
+  type GameState,
+} from "@story-fm/engine";
 import {
   conditionDrain,
   dailyRecovery,
   GAP_CONDITION,
   RECOVERY_BASE,
   recoveryFactor,
+  buildStrengthPacket,
 } from "@story-fm/sim";
-import { DEFAULT_TACTICS, weightSlotOf } from "@story-fm/domain";
+import { DEFAULT_TACTICS, naturalPositionOf, weightSlotOf } from "@story-fm/domain";
 import {
   advanceDays,
   advanceToMatchday,
@@ -86,22 +100,65 @@ describe("경기 체력 — 소모", () => {
     expect(Math.max(...outfield) - Math.min(...outfield)).toBeGreaterThan(10);
   });
 
+  /**
+   * **감독이 직접 교체를 지시한다.** 예전 이 케이스는 시즌 스탯에서 교체 자원을
+   * 뽑고 비면 `return` 했는데, 시즌 첫 경기는 친선이라 시즌 장부에 한 줄도 안
+   * 남고(season.md §2) mock 경기는 우리 선수를 스스로 빼지도 않는다 — 목록이 늘
+   * 비어서 케이스가 **한 번도 돌지 않았다.**
+   */
   it("교체로 들어온 선수는 뛴 만큼만 지친다 — 상수로 뭉개지 않는다", () => {
     const state = createNeutralGame();
     advanceToMatchday(state);
     for (const p of userPlayers(state)) p.state.condition = 100;
 
-    playMockMatch(state);
+    const started = startMatch(state);
+    expect(started.ok, started.message).toBe(true);
+    const side = userSide(state);
+    const ledger = () => state.pendingMatch!.ledger[side];
+    const starters = startersOf(state);
+    const goingOff = starters.find((x) => x.position !== "GK")!;
+    /**
+     * 벤치의 **필드 플레이어**를 넣는다. 벤치 첫 자리는 백업 골키퍼라, 그를 오른쪽
+     * 수비로 넣으면 지구력 축이 낮아 45분에 90분치를 소모한다 — 재는 것이
+     * "뛴 시간"이 아니라 "잘못 세운 사람"이 된다.
+     */
+    const coming = ledger()
+      .bench.map((id) => playerById(state, id)!)
+      .find((p) => weightSlotOf(naturalPositionOf(p).position) !== "GK")!;
+    expect(coming, "벤치에 필드 플레이어가 없다").toBeDefined();
 
-    const starters = new Set(startersOf(state).map((s) => s.id));
-    const subs = state.seasonStats
-      .filter((s) => s.teamId === state.userTeamId && s.apps > 0 && !starters.has(s.gamePlayerId))
-      .map((s) => playerById(state, s.gamePlayerId)!.state.condition);
-    if (subs.length === 0) return; // 이 시드에서 교체가 없었으면 검증할 게 없다
-    const played90 = startersOf(state)
-      .filter((s) => s.position !== "GK")
-      .map((s) => playerById(state, s.id)!.state.condition);
-    expect(Math.min(...subs)).toBeGreaterThan(Math.min(...played90));
+    // 하프타임까지 굴리고 한 명을 바꾼다 — 그가 뛰는 시간이 절반으로 갈린다
+    let guard = 60;
+    while (state.phase === "match" && guard-- > 0) {
+      const step = advanceSegment(state);
+      expect(step.ok, step.message).toBe(true);
+      if (step.plan?.stop === "half_time") break;
+      expect(step.plan?.stop, "하프타임 전에 경기가 끝났다").not.toBe("full_time");
+    }
+    const swapped = substitutePlayer(state, {
+      out: playerById(state, goingOff.id)!.name,
+      in: coming.name,
+    });
+    expect(swapped.ok, swapped.message).toBe(true);
+
+    guard = 60;
+    while (state.phase === "match" && guard-- > 0) {
+      const step = advanceSegment(state);
+      expect(step.ok, step.message).toBe(true);
+      if (step.plan?.stop === "full_time") {
+        finalizeMatch(state);
+        break;
+      }
+    }
+    expect(state.phase, "경기가 끝나지 않았다").not.toBe("match");
+
+    // 45분만 뛴 선수는 90분을 뛴 누구보다도 덜 닳았다
+    const played90 = starters
+      .filter((x) => x.position !== "GK" && x.id !== goingOff.id)
+      .map((x) => playerById(state, x.id)!.state.condition);
+    expect(played90.length).toBeGreaterThan(5);
+    // 90분을 채운 **누구보다도** 남아 있다 — 상수로 뭉개면 여기가 뒤집힌다
+    expect(playerById(state, coming.id)!.state.condition).toBeGreaterThan(Math.max(...played90));
   });
 
   it("우리와 붙은 상대도 대가를 치른다 — 우리만 지치지 않는다", () => {
@@ -380,5 +437,111 @@ describe("경기 체력 — 후반에 무너지는 사람", () => {
   it("덜 회복돼도 덜 뛰는 자리는 버틴다 — 자리마다 감독의 선택이 다르다", () => {
     expect(gapMinute(of(70, 73), "RCB")).toBeNull();
     expect(gapMinute(of(70, 73), "GK")).toBeNull();
+  });
+});
+
+// ─── 존 매치업 기준선 (zone-baseline.test.ts에서 옮겨 왔다) ───
+/**
+ * **매치업 비율의 기준선은 1이다** (docs/simulation/match.md §1.1).
+ *
+ * 판세 3×3은 감독이 무엇을 손볼지 고르는 화면이다. 그 화면이 상대와 무관하게 늘
+ * 같은 두 문장을 말하면 신호가 0이다 — 실제로 그랬다: 시드 42의 첫 시즌 편성
+ * 400경기에서 공격 존 매치업이 342:7, 수비 존이 7:349였다(평균 비율 1.173 · 0.861).
+ *
+ * 존 가중치(`ZONE_CONTRIBUTION`)가 기울어서가 아니었다 — 전술과 공략을 모두 끄고
+ * 같은 400경기를 재면 세 존이 1.001·1.002·1.001로 이미 같은 눈금에 선다. 기울기는
+ * 존 위에 얹히는 두 층에서 왔고, 그 둘이 **구조적으로 공격 쪽으로만 실린다.**
+ *
+ * 그래서 여기서 지키는 것은 존 하나의 값이 아니라 **리그가 실제로 서 있는 자리의
+ * 기준선**이다. 팀 단위의 이탈은 신호다: 수비가 공격보다 좋은 스쿼드는 공격 존이
+ * 낮게 나와야 맞다. 쏠리면 안 되는 것은 리그 전체다.
+ */
+
+/** 편성에서 앞쪽 N경기의 매치업 판정을 센다 — 전술·공략이 모두 살아 있는 실제 조건 */
+function tallyFixtures(state: GameState, count: number) {
+  const squads = new Map<string, ReturnType<typeof simSquadOf>>();
+  const sideOf = (teamId: string) => {
+    let squad = squads.get(teamId);
+    if (!squad) {
+      squad = simSquadOf(state, teamId);
+      squads.set(teamId, squad);
+    }
+    return {
+      teamId,
+      teamName: teamId,
+      starters: squad.slots ?? [],
+      bench: [],
+      tactics: squad.tactics!,
+      managerTactics: squad.managerTactics ?? 65,
+    };
+  };
+  const tally = {
+    attack: { home: 0, away: 0, even: 0, ratio: 0 },
+    midfield: { home: 0, away: 0, even: 0, ratio: 0 },
+    defense: { home: 0, away: 0, even: 0, ratio: 0 },
+  };
+  const fixtures = state.matches
+    .filter((m) => m.season === state.season && !m.result)
+    .slice(0, count);
+  for (const match of fixtures) {
+    const packet = buildStrengthPacket(sideOf(match.homeTeamId), sideOf(match.awayTeamId));
+    const ratio = {
+      attack: packet.home.zones.attack / packet.away.zones.defense,
+      midfield: packet.home.zones.midfield / packet.away.zones.midfield,
+      defense: packet.home.zones.defense / packet.away.zones.attack,
+    };
+    for (const m of packet.matchups) {
+      tally[m.zone][m.edge] += 1;
+      tally[m.zone].ratio += ratio[m.zone];
+    }
+  }
+  for (const zone of ["attack", "midfield", "defense"] as const) {
+    tally[zone].ratio /= Math.max(1, fixtures.length);
+  }
+  return { tally, played: fixtures.length };
+}
+
+describe("존 눈금의 리그 기준선", () => {
+  // 세계는 한 번만 짓는다 — `createTestGame`은 호출당 1초다 (AGENTS.md §5 테스트)
+  const state = createTestGame(42);
+  const { tally, played } = tallyFixtures(state, 200);
+
+  it("편성의 매치업 비율이 세 존 모두 1 언저리다", () => {
+    expect(played).toBe(200);
+    for (const zone of ["attack", "midfield", "defense"] as const) {
+      expect(tally[zone].ratio, `${zone} 존의 기준선이 1에서 벗어났다`).toBeGreaterThan(0.97);
+      expect(tally[zone].ratio, `${zone} 존의 기준선이 1에서 벗어났다`).toBeLessThan(1.03);
+    }
+  });
+
+  it("판정이 한쪽으로 쏠리지 않는다 — 공격 존이 늘 이기던 자리다", () => {
+    for (const zone of ["attack", "midfield", "defense"] as const) {
+      const { home, away } = tally[zone];
+      const lean = Math.max(home, away) / Math.max(1, Math.min(home, away));
+      // 예전엔 공격 존이 342:7(48.9배) · 수비 존이 7:349였다
+      expect(lean, `${zone} 존 판정이 ${home}:${away}로 쏠렸다`).toBeLessThan(2);
+    }
+  });
+
+  /**
+   * **프리셋 여섯 축의 리그 평균은 3에 서야 한다.**
+   *
+   * 3이 중립이고 전술 델타는 3에서의 편차로 계산되므로, 프리셋이 한쪽으로 쏠리면
+   * 리그 전체가 같은 방향의 이득과 대가를 달고 선다. 예전 프리셋은 여섯 축이 전부
+   * 3 이상이라(멘탈리티 3.30 · 압박 3.47 · 라인 3.30 · 템포 3.34 · 폭 3.78 ·
+   * 패스 3.12) 리그 평균이 공격 +2.4 / 수비 −2.3으로 섰다.
+   */
+  it("전술 프리셋 여섯 축의 리그 평균이 3 근처다", () => {
+    const axes = ["mentality", "defensiveLine", "pressing", "tempo", "width", "passStyle"] as const;
+    // 무소속은 클럽이 아니라 전술을 갖지 않는다 (team.md §4)
+    const specs = state.teams
+      .filter((team) => isClubTeam(team.id))
+      .map((team) => tacticsOf(state, team.id).spec);
+    expect(specs.length).toBeGreaterThan(100);
+    for (const axis of axes) {
+      const mean = specs.reduce((sum, spec) => sum + spec[axis], 0) / specs.length;
+      expect(mean, `${axis}의 리그 평균이 ${mean.toFixed(2)}다`).toBeGreaterThan(2.8);
+      expect(mean, `${axis}의 리그 평균이 ${mean.toFixed(2)}다`).toBeLessThan(3.2);
+    }
   });
 });

@@ -12,8 +12,8 @@ import { completeDraw, drawIsDue, scheduleDraw } from "./draw-schedule";
 import { euroMatchdayDates, knockoutDates } from "./europe";
 import { payLeaguePhasePrizes, payStagePrizes } from "./euro-prize";
 import { makeRng } from "../core/rng";
-import { pairOf, resolveExtraTime, tieAggregate } from "./extra-time";
-import { shootout } from "./shootout";
+import { needsShootout, pairOf, resolveExtraTime, settledTieWinner } from "./extra-time";
+import { resolveShootout } from "./shootout";
 import { pushNarrative, teamNameIn, teamShortNameIn, type GameState } from "../core/state";
 import { computeStandings } from "./season";
 
@@ -54,10 +54,22 @@ export function euroLeaguePhaseDone(state: GameState, cupId: string): boolean {
   return phase.length > 0 && phase.every((m) => m.result !== null);
 }
 
+/** 이 대진의 모든 차전 — 차수 순 */
+function tieLegsOf(
+  state: GameState,
+  cupId: string,
+  stage: MatchStage,
+  pair: number,
+): MatchRecord[] {
+  return euroStageMatches(state, cupId, stage).filter((m) => pairOf(m) === pair);
+}
+
 /**
- * 대진의 승자 — 두 경기(또는 결승 한 경기)가 모두 끝났을 때만.
- * 합계가 같으면 **연장 30분**을 치르고(`extra-time.ts`), 그래도 같으면 승부차기
- * 결과를 2차전 장부에 기록하고 그것으로 가린다.
+ * 대진의 승자 — **이미 적힌 결과만 읽는다.** 갈리지 않았으면 null.
+ *
+ * ⚠️ 여기서 연장·승부차기를 굴리지 않는다. 이 함수는 달력이 예약을 지울 때
+ * (`reservedEuroDatesFor`), 화면이 브래킷을 그릴 때마다 열리는 조회 경로다 —
+ * 굴리는 것은 `resolveEuroTie` 하나다 (competition.md §6).
  */
 export function euroTieWinner(
   state: GameState,
@@ -65,27 +77,29 @@ export function euroTieWinner(
   stage: MatchStage,
   pair: number,
 ): string | null {
-  const legs = euroStageMatches(state, cupId, stage).filter((m) => pairOf(m) === pair);
+  return settledTieWinner(tieLegsOf(state, cupId, stage, pair));
+}
+
+/**
+ * 대진을 **끝까지 치러** 승자를 낸다 — 두 경기(또는 결승 한 경기)가 모두 끝났을 때만.
+ *
+ * 합계가 같으면 **연장 30분**을 치르고(`extra-time.ts`), 그래도 같으면 승부차기를
+ * 굴려 2차전 장부에 킥 목록과 합계를 남긴다(`shootout.ts`). 둘 다 멱등이다.
+ * 부르는 곳은 대회를 진행시키는 `advanceEuroKnockouts`뿐이다.
+ */
+export function resolveEuroTie(
+  state: GameState,
+  cupId: string,
+  stage: MatchStage,
+  pair: number,
+): string | null {
+  const legs = tieLegsOf(state, cupId, stage, pair);
   if (legs.length === 0 || legs.some((m) => !m.result)) return null;
 
   const decider = legs[legs.length - 1]!;
-  const channel = `${cupId}:${stage}:${pair}`;
-  /** 지금 합계로 갈리는 쪽 — 같으면 null */
-  const level = () => {
-    const agg = tieAggregate(legs, decider);
-    if (agg.home === agg.away) return null;
-    return agg.home > agg.away ? decider.homeTeamId : decider.awayTeamId;
-  };
-  const regulation = level();
-  if (regulation) return regulation;
-
-  resolveExtraTime(state, decider, channel);
-  const afterExtra = level();
-  if (afterExtra) return afterExtra;
-
-  const pens = decider.result!.penalties ?? shootout(state, decider, channel);
-  decider.result!.penalties = pens;
-  return pens.home > pens.away ? decider.homeTeamId : decider.awayTeamId;
+  resolveExtraTime(state, decider, `${cupId}:${stage}:${pair}`);
+  if (needsShootout(state, decider)) resolveShootout(state, decider);
+  return settledTieWinner(legs);
 }
 
 /** 리그 페이즈 최종 순위 — 시드의 원본 (녹아웃 경기는 순위표에 들어가지 않는다) */
@@ -291,7 +305,7 @@ export function advanceEuroKnockouts(state: GameState, digest: string[]): void {
       const pairCount = new Set(existing.map((m) => pairOf(m))).size;
       const winners: string[] = [];
       for (let pair = 0; pair < pairCount; pair++) {
-        const winner = euroTieWinner(state, cup.id, stage, pair);
+        const winner = resolveEuroTie(state, cup.id, stage, pair);
         if (winner) winners.push(winner);
       }
       if (winners.length < pairCount) break; // 아직 진행 중
@@ -343,13 +357,30 @@ function reportOurTie(
 }
 
 /**
+ * 리그 페이즈에서 이미 떨어졌는가 — 최종 순위가 통과선(`directSlots + playoffSlots`) 밖.
+ *
+ * ⚠️ **플레이오프 결장으로는 판정할 수 없다.** 직행 팀도 그 단계에 없기 때문이다.
+ * 통과선 밖 팀(UEL 13~16위·UECL 7~10위)이 살아 있는 것으로 남으면, 다음 단계가
+ * 뽑혀 "거기 없다"가 드러날 때까지 4~5월 자리를 붙들고 있게 된다.
+ *
+ * 순위가 확정되는 것은 리그 페이즈를 완주한 순간이다 — 그 전 순위는 잠정이다.
+ */
+function outOfLeaguePhase(state: GameState, cup: CupCatalogEntry, teamId: string): boolean {
+  if (!euroLeaguePhaseDone(state, cup.id)) return false;
+  // 순위표에 없는 팀(-1)은 판정하지 않는다 — 예약을 잘못 지우는 쪽이 대가가 크다
+  const rank = leaguePhaseSeeds(state, cup.id).indexOf(teamId);
+  return rank >= 0 && rank >= cup.directSlots + cup.playoffSlots;
+}
+
+/**
  * 이 팀에게 **아직 유효한** 대항전 예약일 — 컵 편성·리그 연기가 비워 둬야 할 자리.
  *
  * 예약의 근거는 하나다: **그 경기는 나중에 편성되므로 지금 장부에 없다**
  * (`reservedEuroDates`). 녹아웃에서는 그 근거가 두 자리에서 사라진다.
  *
  * ① **이미 뽑힌 단계** — 그 경기는 장부에 있고 48시간 규칙이 직접 잰다.
- * ② **이미 떨어진 팀** — 그 경기는 영영 생기지 않는다.
+ * ② **이미 떨어진 팀** — 그 경기는 영영 생기지 않는다. 리그 페이즈 통과선 밖도
+ *    여기다(`outOfLeaguePhase`) — 다음 단계가 뽑히기를 기다릴 이유가 없다.
  *
  * ⚠️ **걸러내지 않으면 4~5월 주중이 통째로 잠긴다.** 준결승 예약일(4/28·5/5)이 그
  * 대회에 나갔던 **모든** 팀을 막아, 국내 컵은 주중으로 못 가고 리그 연기도 자리를
@@ -368,6 +399,8 @@ export function reservedEuroDatesFor(state: GameState, teamId: string): string[]
   if (!cup) return [];
 
   const dates: string[] = [...euroMatchdayDates(state.season)];
+  if (outOfLeaguePhase(state, cup, teamId)) return dates;
+
   let alive = true;
   for (const stage of knockoutStages(cup)) {
     const drawn = euroStageMatches(state, entry.cupId, stage);

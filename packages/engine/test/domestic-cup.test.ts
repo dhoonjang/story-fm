@@ -19,14 +19,17 @@ import {
   domesticCupEntrants,
   domesticCupWinners,
   domesticCupsOf,
+  domesticStageLabel,
   domesticStageMatches,
   europeanEntrants,
   isPostponable,
   isClubTeam,
   isTopFlight,
   leagueOfTeam,
+  migrateDomesticPrizeKeys,
   playersOf,
   teamName,
+  reviewDomesticCups,
   reviewSeason,
   transitionSeason,
   userStillIn,
@@ -760,6 +763,69 @@ describe("컵 우승 → 트로피와 유럽 티켓", () => {
     expect(europeanEntrants("uel", 2, 42, tables, { epl: { uel: alreadyIn } })).toEqual(
       europeanEntrants("uel", 2, 42, tables),
     );
+  });
+});
+
+describe("상금 멱등 키 — 표시 라벨이 아니라 안정 키다", () => {
+  // 장부를 고쳐 쓰는 검증이라 공유 세이브를 복제해 쓴다
+  const played = structuredClone(seasonOf(23));
+
+  /** 라벨을 그대로 키로 쓰던 시절의 국내 컵 지급 기록 — 안정 키 → 옛 문장 */
+  const legacy = new Map<string, string>();
+  for (const cup of domesticCupCatalog()) {
+    const put = (kind: string, what: string) =>
+      legacy.set(
+        `prize:competition:${cup.id}:${kind}:S${played.season}`,
+        `${cup.short} ${what} 상금 (S${played.season})`,
+      );
+    put("winner", "우승");
+    put("runner-up", "준우승");
+    for (const stage of DOMESTIC_STAGES) {
+      put(`stage:${stage}`, `${domesticStageLabel(cup, stage)} 진출`);
+    }
+  }
+
+  it("라운드 진출 상금이 안정 키로 그 라운드 팀 전원에게 남는다", () => {
+    // 지급 사실은 prizesPaid 키가 갖는다 — AI 팀은 상세 원장을 쌓지 않는다
+    const paidFor = (cupId: string, stage: MatchStage) =>
+      played.finances.filter((f) =>
+        (f.prizesPaid ?? []).includes(
+          `prize:competition:${cupId}:stage:${stage}:S${played.season}`,
+        ),
+      ).length;
+    for (const cup of domesticCupCatalog()) {
+      expect(paidFor(cup.id, "r16"), cup.id).toBe(DOMESTIC_CUP_SIZE / 2);
+      expect(paidFor(cup.id, "sf"), cup.id).toBe(4);
+    }
+  });
+
+  it("옛 라벨 키를 옮긴다 — 라벨을 고쳐도 같은 시즌 상금이 두 번 나가지 않는다", () => {
+    const save = structuredClone(played);
+    reviewDomesticCups(save); // 우승·준우승 상금
+
+    let downgraded = 0;
+    for (const finance of save.finances) {
+      const keys = finance.prizesPaid;
+      if (!keys) continue;
+      for (let i = 0; i < keys.length; i++) {
+        const old = legacy.get(keys[i]!);
+        if (!old) continue;
+        keys[i] = old;
+        downgraded++;
+      }
+    }
+    expect(downgraded).toBeGreaterThan(0);
+
+    const balances = save.finances.map((f) => f.balance);
+    migrateDomesticPrizeKeys(save);
+    migrateDomesticPrizeKeys(save); // 멱등
+    reviewDomesticCups(save);
+
+    expect(save.finances.map((f) => f.balance)).toEqual(balances);
+    const legacyKeys = new Set(legacy.values());
+    expect(
+      save.finances.flatMap((f) => f.prizesPaid ?? []).filter((k) => legacyKeys.has(k)),
+    ).toEqual([]);
   });
 });
 

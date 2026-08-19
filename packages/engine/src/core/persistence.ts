@@ -10,7 +10,8 @@ import {
 } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { advanceDomesticCups } from "../competition/domestic-cup";
+import { fileURLToPath } from "node:url";
+import { advanceDomesticCups, migrateDomesticPrizeKeys } from "../competition/domestic-cup";
 import { migrateEuroPrizeKeys } from "../competition/euro-prize";
 import { catalogPath, cupCatalogPath, dataDir, leagueCatalogPath, teamCatalogPath } from "./paths";
 import {
@@ -45,6 +46,7 @@ export { dataDir };
  * 5. 데이터 디렉터리(.data/)는 gitignore·빌드 산출물 밖 — 재빌드/브랜치 전환
  *    (git clean 포함)에도 세이브가 남는다.
  * 6. 큰 테이블은 조각 파일로 빠지고 **바뀐 조각만** 쓴다 (아래 SHARDED_TABLES).
+ *    조각은 두 벌이고, 저장과 로드가 상한 벌을 서로 고친다 (`writeShard`·`readShard`).
  */
 
 /**
@@ -60,11 +62,83 @@ const SHARDED_TABLES = ["players", "contracts"] as const;
 /** 본체가 어느 조각을 가리키는지 — `<테이블> → 내용 해시` */
 type ShardMap = Partial<Record<(typeof SHARDED_TABLES)[number], string>>;
 
-/** 조각 파일인가 — 목록이 게임으로 착각하지 않게, 청소가 남의 것을 지우지 않게 */
-const SHARD_FILE = /\.shard-[0-9a-f]+\.json$/;
+/**
+ * 조각 파일인가, 그리고 어느 해시인가 — 목록이 게임으로 착각하지 않게, 청소가
+ * 남의 것을 지우지 않게. 두 번째 벌(`.json.bak`)도 조각이다.
+ */
+const SHARD_FILE = /\.shard-([0-9a-f]+)\.json(?:\.bak)?$/;
 
-function shardFile(dir: string, id: string, hash: string): string {
-  return path.join(dir, `${id}.shard-${hash}.json`);
+/**
+ * 한 조각의 두 벌.
+ *
+ * 본체와 `.bak`은 보통 **같은** 조각을 가리킨다 — 해시가 같으려면 그 테이블이
+ * 그대로여야 하고, `players`는 이적이나 1·2군 이동이 있어야 갈린다. 그래서 조각
+ * 하나가 상하면 `.bak` 폴백이 가리키는 곳도 그 파일이고, 세이브의 86%가 백업 밖에
+ * 놓인다. 여기서의 `.bak`은 직전 세대가 아니라 **같은 내용의 사본**이다.
+ */
+function shardCopies(dir: string, id: string, hash: string): [string, string] {
+  const file = path.join(dir, `${id}.shard-${hash}.json`);
+  return [file, `${file}.bak`];
+}
+
+/** 조각 이름이 곧 이 값이다 — 저장이 짓는 이름과 로드가 대조하는 값이 한 함수다 */
+function shardHash(json: string): string {
+  return createHash("sha1").update(json).digest("hex").slice(0, 16);
+}
+
+/** 파일 크기 — 없으면 null. `stat` 하나라 5MB를 읽지 않는다 */
+function fileSize(file: string): number | null {
+  try {
+    return statSync(file).size;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 조각을 두 벌 놓는다 — **크기가 맞는 벌은 손대지 않는다.**
+ *
+ * 이름이 곧 내용의 해시라 이름이 같고 크기까지 같으면 같은 내용이다. 없거나 크기가
+ * 어긋난 벌은 지워졌거나 잘린 것이니 메모리의 표로 다시 쓴다 — `파일이 있으면 쓰지
+ * 않는다`가 상한 조각을 영영 그대로 두던 자리다.
+ */
+function writeShard(dir: string, id: string, hash: string, json: string): void {
+  const size = Buffer.byteLength(json, "utf8");
+  for (const file of shardCopies(dir, id, hash)) {
+    if (fileSize(file) !== size) writeAtomic(file, json);
+  }
+}
+
+/** 이름과 내용이 맞는 벌이면 그 바이트, 아니면 null */
+function readIntactShard(file: string, hash: string): string | null {
+  try {
+    const raw = readFileSync(file, "utf8");
+    return shardHash(raw) === hash ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 조각 한 테이블 — 두 벌 중 성한 것을 읽는다. 둘 다 상했으면 던진다.
+ *
+ * **읽어 낸 바이트로 이름을 다시 지어 대조한다** — 크기가 같은 채로 상한 벌은 저장
+ * 쪽 크기 대조를 빠져나가고, 그것을 알아차릴 수 있는 자리는 표를 실제로 읽는 여기뿐이다.
+ * 값도 따로 들지 않는다: 로드는 어차피 이 표를 한 번 읽는다.
+ */
+function readShard(dir: string, id: string, hash: string): unknown {
+  const [file, mirror] = shardCopies(dir, id, hash);
+  const primary = readIntactShard(file, hash);
+  if (primary !== null) return JSON.parse(primary);
+  const copy = readIntactShard(mirror, hash);
+  if (copy === null) throw new Error(`shard ${hash}: 두 벌 다 상했다`);
+  try {
+    // 성한 벌의 바이트로 상한 벌을 그 자리에 되돌린다 — 다음 로드는 한 벌만 읽는다
+    writeAtomic(file, copy);
+  } catch {
+    /* 되돌리기 실패는 치명적이지 않음 — 이번 읽기는 이미 성공했다 */
+  }
+  return JSON.parse(copy);
 }
 
 /** tmp에 완전히 쓴 뒤 rename — 쓰다 죽어도 반쪽 파일이 이름을 갖지 않는다 */
@@ -97,10 +171,9 @@ export function saveGame(state: GameState): void {
   const shards: ShardMap = {};
   for (const table of SHARDED_TABLES) {
     const json = JSON.stringify(state[table]);
-    const hash = createHash("sha1").update(json).digest("hex").slice(0, 16);
-    const file = shardFile(dir, state.id, hash);
-    // 이름이 곧 내용이라 이미 있으면 같은 내용이다 — 손대지 않은 5,743명을 다시 쓰지 않는다
-    if (!existsSync(file)) writeAtomic(file, json);
+    const hash = shardHash(json);
+    // 이름도 크기도 맞으면 같은 내용이다 — 손대지 않은 5,743명을 다시 쓰지 않는다
+    writeShard(dir, state.id, hash, json);
     shards[table] = hash;
     delete body[table];
   }
@@ -152,8 +225,9 @@ function pruneShards(id: string, live: ShardMap): void {
   const prefix = `${id}.shard-`;
   try {
     for (const name of readdirSync(dir)) {
-      if (!name.startsWith(prefix) || !SHARD_FILE.test(name)) continue;
-      if (keep.has(name.slice(prefix.length, -".json".length))) continue;
+      if (!name.startsWith(prefix)) continue;
+      const hash = SHARD_FILE.exec(name)?.[1];
+      if (hash === undefined || keep.has(hash)) continue;
       rmSync(path.join(dir, name), { force: true });
     }
   } catch {
@@ -164,8 +238,8 @@ function pruneShards(id: string, live: ShardMap): void {
 /**
  * 조각을 본체에 붙인다. `shards`가 없으면 옛 단일 파일 세이브라 그대로 쓴다.
  *
- * 가리키는 조각이 하나라도 없거나 깨졌으면 **반쪽을 읽지 않고** 손상으로 답한다 —
- * 선수 없는 세계를 넘기느니 `.bak`으로 폴백하는 것이 낫다.
+ * 가리키는 조각이 하나라도 **두 벌 다** 없거나 깨졌으면 **반쪽을 읽지 않고** 손상으로
+ * 답한다 — 선수 없는 세계를 넘기느니 `.bak`으로 폴백하는 것이 낫다.
  */
 function attachShards(raw: unknown, id: string): unknown {
   if (!raw || typeof raw !== "object") return raw;
@@ -175,9 +249,11 @@ function attachShards(raw: unknown, id: string): unknown {
   const { dir } = paths(id);
   for (const [table, hash] of Object.entries(map as Record<string, unknown>)) {
     if (typeof hash !== "string") return null;
-    const file = shardFile(dir, id, hash);
-    if (!existsSync(file)) return null;
-    body[table] = JSON.parse(readFileSync(file, "utf8"));
+    try {
+      body[table] = readShard(dir, id, hash);
+    } catch {
+      return null;
+    }
   }
   // 조각은 파일 배치일 뿐 상태가 아니다 — GameState에 남기지 않는다
   delete body.shards;
@@ -199,7 +275,14 @@ export const SAVE_VERSION = 6;
  * (→ [docs/data/game-state.md](../../../../docs/data/game-state.md) §6):
  * 앞의 둘은 파일이 문제고, 뒤의 둘은 **코드가 그 파일을 다루지 못하는 것**이다.
  */
-export type UnreadableReason = "version" | "corrupt" | "migration" | "schema";
+const UNREADABLE_REASONS = ["version", "corrupt", "migration", "schema"] as const;
+
+export type UnreadableReason = (typeof UNREADABLE_REASONS)[number];
+
+/** 사이드카가 적어 둔 사유가 지금 코어가 아는 넷 중 하나인가 */
+function isUnreadableReason(value: unknown): value is UnreadableReason {
+  return typeof value === "string" && (UNREADABLE_REASONS as readonly string[]).includes(value);
+}
 
 interface LoadFailure {
   ok: false;
@@ -242,7 +325,8 @@ function migrate(save: Record<string, unknown>, state: GameState): void {
   migrateConditions(state);
   migrateMatchStats(state);
   // 좌우 미러 자리에 얹혀 있던 주발 보정을 벗긴다 — 저장은 원값, 주발은 조회 때
-  // (player.md §8).
+  // (player.md §8). 마커가 없는 세이브에서만 한 번: 다시 돌면 경기·훈련이 그
+  // 자리에 쌓은 적응도를 같이 민다.
   migrateMirrorProficiency(state);
   /**
    * **종합은 저장된 값이 아니라 15축의 파생 캐시다** — 로드할 때 다시 계산한다.
@@ -264,6 +348,9 @@ function migrate(save: Record<string, unknown>, state: GameState): void {
   // 리그 페이즈가 끝난 뒤 **매일** 다시 불리므로, 옛 키를 옮기지 않으면 진행 중인
   // 세이브가 이미 받은 상금을 새 키로 한 번 더 받는다.
   migrateEuroPrizeKeys(state);
+  // 국내 컵 상금도 같은 이유로 옮긴다 — 바로 아래 `advanceDomesticCups`가 라운드
+  // 진출 상금을 다시 정산하므로, 옛 라벨 키를 남겨 두면 그 자리에서 두 번 나간다.
+  migrateDomesticPrizeKeys(state);
   // 국내 컵 따라잡기 — 컵 편성은 tick에서 도는데, 컵이 없던 세이브를 **열기만**
   // 해서는 tick이 돌지 않아 달력이 계속 비어 보인다. 새 게임이 생성 시점에
   // 부르는 것과 같은 함수를 로드에서도 한 번 부른다 (결정적·멱등이라 안전하다).
@@ -378,21 +465,31 @@ function readGame(id: string): LoadResult {
 }
 
 export function loadGame(id: string): GameState | null {
+  if (isCatalogId(id)) return null;
   const result = readGame(id);
   return result.ok ? result.state : null;
 }
 
 /**
- * 데이터 디렉터리에 있지만 게임이 아닌 파일 — 어드민이 편집한 카탈로그 오버라이드.
- * 세이브와 같은 자리에 살고 이름도 `.json`이라, 걸러 내지 않으면 목록에 열리지
- * 않는 게임 카드로 선다.
+ * 데이터 디렉터리에 있지만 게임이 아닌 이름 — 어드민이 편집한 카탈로그 오버라이드.
+ * 세이브와 같은 자리에 `<이름>.json`으로 살아서 세이브 id와 생김새가 같다.
+ *
+ * 걸러 내지 않으면 목록에 열리지 않는 게임 카드로 서고, **id 하나로 지워진다**:
+ * `player-catalog`은 라우트의 id 검사(파일 이름에 쓸 수 있는 글자)를 통과하고
+ * `${id}.json`으로 오버라이드 파일 자체를 가리킨다. 어느 이름이 게임이 아닌지는
+ * 오버라이드 경로를 아는 여기서만 알 수 있으므로, 판정도 거절도 엔진이 한다.
  */
-function catalogFiles(): Set<string> {
+function catalogIds(): Set<string> {
   return new Set(
     [catalogPath(), teamCatalogPath(), leagueCatalogPath(), cupCatalogPath()].map((file) =>
-      path.basename(file),
+      path.basename(file, ".json"),
     ),
   );
+}
+
+/** 게임이 아닌 이름인가 — 목록도 로드도 삭제도 이 넷을 지나치지 않는다 */
+function isCatalogId(id: string): boolean {
+  return catalogIds().has(id);
 }
 
 /**
@@ -406,14 +503,18 @@ function catalogFiles(): Set<string> {
 export function listGames(): string[] {
   const dir = dataDir();
   if (!existsSync(dir)) return [];
-  const skip = catalogFiles();
   const ids = new Set<string>();
   for (const name of readdirSync(dir)) {
     // `.meta.json`은 목록용 요약 사이드카, `.shard-….json`은 세이브의 조각 —
     // 둘 다 게임이 아니다
-    if (name.endsWith(".meta.json") || SHARD_FILE.test(name) || skip.has(name)) continue;
-    if (name.endsWith(".json")) ids.add(name.slice(0, -".json".length));
-    else if (name.endsWith(".json.bak")) ids.add(name.slice(0, -".json.bak".length));
+    if (name.endsWith(".meta.json") || SHARD_FILE.test(name)) continue;
+    const id = name.endsWith(".json")
+      ? name.slice(0, -".json".length)
+      : name.endsWith(".json.bak")
+        ? name.slice(0, -".json.bak".length)
+        : null;
+    if (id === null || isCatalogId(id)) continue;
+    ids.add(id);
   }
   return [...ids];
 }
@@ -433,7 +534,7 @@ export interface GameSummary {
 export interface UnreadableGame {
   readable: false;
   id: string;
-  /** version = 세이브 버전 불일치, corrupt = 파싱 실패거나 필수 테이블 누락 */
+  /** 로드가 멈춘 걸음 — 넷 다 로드를 거부하되 고칠 자리가 다르다 */
   reason: UnreadableReason;
   /** 그 파일이 스스로 말하는 버전. 읽어낼 수 없으면 null */
   saveVersion: number | null;
@@ -473,6 +574,41 @@ function fingerprint(file: string): string | null {
   }
 }
 
+/**
+ * 세이브를 여는 **코드**의 지문 — 실패 캐시가 지금 코드의 판정인지 가리는 값.
+ *
+ * 실패 넷은 파일이 아니라 코드가 내린 판정이다(`version`은 `SAVE_VERSION`,
+ * `corrupt`는 `REQUIRED_TABLES`, `migration`·`schema`는 마이그레이션과 스키마).
+ * 파일 지문은 파일이 바뀐 것만 잡으므로, 마이그레이션 버그를 고쳐도 세이브는
+ * 그대로여서 실패 캐시가 영영 살아남는다 — 고친 코드가 그 세이브를 다시는 보지
+ * 못한다. 그래서 판정을 내린 모듈 셋의 지문을 캐시에 함께 적는다.
+ *
+ * 번들 뒤에는 그 자리에 청크 하나만 서므로 값이 빌드마다 달라진다 — 어느 쪽이든
+ * 코드가 바뀌면 달라진다는 성질은 같다. 제 자리를 못 찾으면 `SAVE_VERSION`만
+ * 남고, 그때는 파일 지문만큼만 무효가 된다.
+ *
+ * 값은 프로세스마다 고정이므로 한 번만 재고 들고 있는다 — 목록 하나에 세이브 수만큼
+ * 불린다.
+ */
+let loaderStampCache: string | null = null;
+
+function loaderStamp(): string {
+  if (loaderStampCache !== null) return loaderStampCache;
+  const parts = [`v${SAVE_VERSION}`];
+  try {
+    const self = fileURLToPath(import.meta.url);
+    const dir = path.dirname(self);
+    for (const file of [self, path.join(dir, "migrations.ts"), path.join(dir, "save-schema.ts")]) {
+      const stamp = fingerprint(file);
+      if (stamp !== null) parts.push(stamp);
+    }
+  } catch {
+    /* 제 소스 자리를 모르는 실행 환경 — 버전만으로 */
+  }
+  loaderStampCache = parts.join("|");
+  return loaderStampCache;
+}
+
 /** 파일이 스스로 날짜를 말하지 못할 때의 정렬 축 — 파일 mtime */
 function fileTime(id: string): string {
   const { main, bak } = paths(id);
@@ -488,8 +624,11 @@ function fileTime(id: string): string {
 
 /**
  * 사이드카 — 형태가 어긋나거나 세이브가 바뀌었으면 없는 셈 친다.
- * 성공과 실패를 모두 읽는다. 실패도 캐시해야 못 여는 세이브가 목록을 열 때마다
- * 수 MB를 다시 파싱하지 않는다.
+ *
+ * 성공과 실패를 모두 읽고, **실패는 사유 넷을 가리지 않는다** — 쓰는 사유와 읽는
+ * 사유가 갈리면 그 사유로 실패한 세이브는 캐시가 매번 버려져, 목록 요청마다 수 MB를
+ * 다시 파싱한다. 대신 실패는 `loaderStamp()`까지 맞아야 인정한다(코드가 고쳐지면
+ * 그 판정은 다시 내려야 한다). 그 필드가 없는 옛 사이드카는 믿지 않는다.
  */
 function readSummary(id: string): GameListEntry | null {
   const { main, meta } = paths(id);
@@ -501,7 +640,8 @@ function readSummary(id: string): GameListEntry | null {
     if (s.unreadable !== undefined) {
       if (!s.unreadable || typeof s.unreadable !== "object") return null;
       const f = s.unreadable as Record<string, unknown>;
-      if (f.reason !== "version" && f.reason !== "corrupt") return null;
+      if (!isUnreadableReason(f.reason)) return null;
+      if (f.loader !== loaderStamp()) return null;
       if (typeof f.createdAt !== "string") return null;
       if (f.saveVersion !== null && typeof f.saveVersion !== "number") return null;
       return {
@@ -546,6 +686,7 @@ function writeSummary(id: string, entry: GameListEntry): void {
           reason: entry.reason,
           saveVersion: entry.saveVersion,
           createdAt: entry.createdAt,
+          loader: loaderStamp(),
         },
       };
   try {
@@ -592,6 +733,7 @@ export function listGameSummaries(): GameListEntry[] {
 }
 
 export function deleteGame(id: string): boolean {
+  if (isCatalogId(id)) return false;
   const { dir, main, bak, meta } = paths(id);
   if (!existsSync(main) && !existsSync(bak)) return false;
   for (const f of [main, bak, meta]) if (existsSync(f)) rmSync(f);

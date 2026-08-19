@@ -2376,6 +2376,8 @@ export function scoutPlayer(state: GameState, ref: string): MarketSkillResult {
     playerId,
     playerName: player.name,
     counterpart: teamName(player.teamId),
+    // 우리 선수는 위에서 걸러졌다 — 파견이 나갔다면 데려올 선수를 본 것이다
+    direction: "in",
     dueOn,
     ...(done > 0 ? { note: `${done + 1}번째 파견` } : {}),
   };

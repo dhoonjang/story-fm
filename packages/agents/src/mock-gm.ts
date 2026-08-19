@@ -2,6 +2,8 @@ import type { MatchEvent, PressConference } from "@story-fm/domain";
 import {
   acceptDeal,
   advanceSegment,
+  advanceShootout,
+  awaitingShootout,
   advanceTime,
   clockOf,
   formatClock,
@@ -51,7 +53,8 @@ import {
   type SkillBrief,
 } from "@story-fm/engine";
 import type { TrainAttr } from "@story-fm/domain";
-import { positionGroupOfPlayer, MANAGER_ATTRIBUTE_KO } from "@story-fm/domain";
+import { positionGroupOfPlayer, shootoutTally, MANAGER_ATTRIBUTE_KO } from "@story-fm/domain";
+import type { ShootoutOutcome } from "@story-fm/domain";
 import { TIME_PASSED, type GmToolCall, type GmTurnResult } from "./gm-types";
 import type { CardMark, GoalMark } from "@story-fm/engine";
 
@@ -160,6 +163,49 @@ function renderEvent(state: GameState, ev: MatchEvent): string[] {
   }
 }
 
+const SHOOTOUT_KO: Record<ShootoutOutcome, string> = {
+  scored: "성공입니다!",
+  saved: "골키퍼가 막아냅니다!",
+  missed: "골문을 벗어납니다!",
+};
+
+/**
+ * 승부차기 — **mock은 한 턴에 끝까지 몬다.**
+ *
+ * 실모드는 한 발씩 끊어 감독에게 넘기지만(match.md §2), e2e·오프라인에는 진행
+ * 손잡이를 다시 누를 사람이 없다. 여기서 한 발만 굴리고 멈추면 컵 경기가 그 자리에
+ * 갇힌다. 킥을 굴리는 것은 두 모드가 같은 코어 함수다.
+ */
+function runShootoutTurn(state: GameState, calls: GmToolCall[]): string {
+  const lines: string[] = ["@중계: *120분이 승부를 가르지 못했습니다 — 승부차기로 갑니다.*"];
+  // 서든데스에는 상한이 없지만 성공률이 대역 안에 갇혀 있어 언젠가 갈린다.
+  // 이 상한은 판정이 아니라 모의 GM이 무한히 돌지 않게 하는 빗장이다
+  for (let i = 0; i < 60; i += 1) {
+    const kicked = advanceShootout(state);
+    if (!kicked.ok) {
+      lines.push(`${coach(state)} ${kicked.message}`);
+      return lines.join("\n");
+    }
+    const kick = kicked.kick;
+    if (kick) {
+      lines.push(
+        `@중계: ${kick.round}번째 키커 ${playerName(state, kick.taker)} — ${SHOOTOUT_KO[kick.outcome]}`,
+      );
+    }
+    if (kicked.done) break;
+  }
+  const tally = shootoutTally(state.pendingMatch?.shootout?.kicks ?? []);
+  lines.push(`@중계: *승부차기 ${tally.home} : ${tally.away}.*`);
+  calls.push({
+    name: "advance_match",
+    summary: `승부차기 ${tally.home}-${tally.away}`,
+    silent: true,
+  });
+  const digest = finalizeMatch(state);
+  lines.push(`${coach(state)} ${digestLines(digest).join(" · ")}`);
+  return lines.join("\n");
+}
+
 /**
  * 경기 진행 — 실모드와 같은 코어 함수(`advanceSegment`)로 굴린다.
  * 두 모드의 차이는 화자뿐이다 — 여기선 템플릿, 실모드에선 캐스터 LLM.
@@ -170,6 +216,8 @@ function advanceMatchTurn(
   goals: GoalMark[],
   cards: CardMark[] = [],
 ): string {
+  // 장부가 끝났어도 승부가 남은 경기 — 구간이 아니라 승부차기를 굴린다
+  if (awaitingShootout(state)) return runShootoutTurn(state, calls);
   const before = { ...(state.pendingMatch?.ledger.score ?? { home: 0, away: 0 }) };
   const ourSide = userSide(state);
   const step = advanceSegment(state);
@@ -210,7 +258,10 @@ function advanceMatchTurn(
     }
   }
   let text = renderSegment(state, step.plan.events, step.plan.stop);
-  if (step.plan.stop === "full_time") {
+  if (awaitingShootout(state)) {
+    // 120분이 끝났는데 승부가 남았다 — 마감은 승부차기가 갈린 뒤다
+    text += `\n${runShootoutTurn(state, calls)}`;
+  } else if (step.plan.stop === "full_time") {
     // 모의 GM은 화면 장면이 곧 보고다 — 갈래를 나누지 않고 전부 싣는다
     const digest = finalizeMatch(state);
     text += `\n${coach(state)} ${digestLines(digest).join(" · ")}`;

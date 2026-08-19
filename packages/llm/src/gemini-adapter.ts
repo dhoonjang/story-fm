@@ -108,14 +108,26 @@ function functionCalls(content: Content | undefined): FunctionCall[] {
     .filter((call): call is FunctionCall => call !== undefined);
 }
 
-function addUsage(total: TurnUsage, response: GenerateContentResponse): void {
+/**
+ * 왕복 하나의 몫을 누적기에 더하고 **그 delta를 돌려준다** — 부르는 쪽이 그대로
+ * `req.onUsage`에 실어 보내므로, 턴이 실패로 끝나도 여기까지 쓴 토큰이 남는다
+ * (models.md §4).
+ */
+function addUsage(total: TurnUsage, response: GenerateContentResponse): TurnUsage {
   const usage = response.usageMetadata;
-  // promptTokenCount는 캐시분(cachedContentTokenCount)을 이미 품고 있다 —
-  // 계약이 요구하는 "입력 전부"와 같은 값이라 그대로 더한다.
-  total.inputTokens += usage?.promptTokenCount ?? 0;
-  total.outputTokens += usage?.candidatesTokenCount ?? 0;
-  total.cacheReadTokens += usage?.cachedContentTokenCount ?? 0;
-  // Gemini의 implicit cache는 별도 cache creation 토큰을 보고하지 않는다.
+  const delta: TurnUsage = {
+    // promptTokenCount는 캐시분(cachedContentTokenCount)을 이미 품고 있다 —
+    // 계약이 요구하는 "입력 전부"와 같은 값이라 그대로 더한다.
+    inputTokens: usage?.promptTokenCount ?? 0,
+    outputTokens: usage?.candidatesTokenCount ?? 0,
+    cacheReadTokens: usage?.cachedContentTokenCount ?? 0,
+    // Gemini의 implicit cache는 별도 cache creation 토큰을 보고하지 않는다.
+    cacheWriteTokens: 0,
+  };
+  total.inputTokens += delta.inputTokens;
+  total.outputTokens += delta.outputTokens;
+  total.cacheReadTokens += delta.cacheReadTokens;
+  return delta;
 }
 
 function thinkingLevel(level: GoogleAgentConfig["thinkingLevel"]): ThinkingLevel {
@@ -196,6 +208,27 @@ export class GeminiGameLLM implements GameLLM {
       history: baseHistory,
     });
 
+    /**
+     * 강제 도구 — 첫 요청에만 건다 (TurnRequest.toolChoice). 계속 걸어 두면
+     * 모델이 턴을 끝낼 길이 없어 왕복 상한까지 같은 도구를 다시 부른다.
+     *
+     * ⚠️ per-request config는 chat 설정을 **통째로 대체**하므로(SDK 계약,
+     * `sendMessage`) 모드만 얹지 않고 `generationConfig`를 그대로 펼쳐 넘긴다 —
+     * 안 그러면 systemInstruction·도구·출력 상한·시한이 첫 요청에서 사라진다.
+     */
+    const forcedConfig: GenerateContentConfig | undefined =
+      typeof req.toolChoice === "object" && tools.length > 0
+        ? {
+            ...generationConfig,
+            toolConfig: {
+              functionCallingConfig: {
+                mode: FunctionCallingConfigMode.ANY,
+                allowedFunctionNames: [req.toolChoice.name],
+              },
+            },
+          }
+        : undefined;
+
     const usage: TurnUsage = {
       inputTokens: 0,
       outputTokens: 0,
@@ -213,8 +246,10 @@ export class GeminiGameLLM implements GameLLM {
       let response: GenerateContentResponse | undefined;
       let responseText = "";
 
+      const perRequest = iter === 0 && forcedConfig ? { config: forcedConfig } : {};
+
       if (req.onText) {
-        const stream = await chat.sendMessageStream({ message });
+        const stream = await chat.sendMessageStream({ message, ...perRequest });
         for await (const chunk of stream) {
           response = chunk;
           const delta = visibleText(chunk);
@@ -224,12 +259,14 @@ export class GeminiGameLLM implements GameLLM {
           }
         }
       } else {
-        response = await chat.sendMessage({ message });
+        response = await chat.sendMessage({ message, ...perRequest });
         responseText = visibleText(response);
       }
 
       if (!response) throw new Error("Gemini가 빈 스트림을 반환했습니다.");
-      addUsage(usage, response);
+      // 왕복 하나가 끝나는 자리에서 그 몫을 보고한다 (models.md §4)
+      const delta = addUsage(usage, response);
+      req.onUsage?.(delta);
       if (responseText.trim().length > 0) {
         text += (text ? "\n" : "") + responseText;
       }

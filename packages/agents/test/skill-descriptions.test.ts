@@ -11,7 +11,8 @@ import {
 } from "@story-fm/agents";
 import { createGame, interpretBackgroundHeuristic } from "@story-fm/engine";
 
-function testGame() {
+/** 세계는 한 번만 세운다 — 여기서는 아무도 상태를 고치지 않는다 (`createGame`은 판당 수 초) */
+const STATE = (() => {
   const background = "전술 분석가";
   return createGame({
     seed: 17,
@@ -20,14 +21,21 @@ function testGame() {
     background,
     attributes: interpretBackgroundHeuristic(background),
   });
-}
+})();
+
+const TOOLS = buildGmTools(STATE, []);
 
 describe("스킬 설명 — 코드가 유일한 원본이다", () => {
-  it("카탈로그의 설명이 그대로 도구 description이 된다", () => {
-    const state = testGame();
-    for (const tool of buildGmTools(state, [])) {
-      const entry = SKILL_CATALOG.find((s) => s.name === tool.name);
-      if (entry) expect(tool.description).toBe(entry.description);
+  /**
+   * **양방향**이다 — 카탈로그에 없는 도구가 모델에게 가면 설명 없이 서고, 도구가
+   * 되지 못한 카탈로그 항목은 아무 데도 닿지 않은 채 설명만 유지된다.
+   */
+  it("모델이 받는 도구 집합이 카탈로그와 같고, 설명도 그대로다", () => {
+    const toolNames = TOOLS.map((t) => t.name).sort();
+    expect(toolNames).toEqual([...SKILL_NAMES].sort());
+    const described = new Map<string, string>(SKILL_CATALOG.map((s) => [s.name, s.description]));
+    for (const tool of TOOLS) {
+      expect(tool.description, tool.name).toBe(described.get(tool.name));
     }
   });
 
@@ -41,33 +49,34 @@ describe("스킬 설명 — 코드가 유일한 원본이다", () => {
 /**
  * 규칙이 사는 자리 — docs/llm/prompts.md §5.
  *
- * 한 도구의 사용법은 그 도구의 설명에만 있고, 경기 중에는 그 설명이 실리지 않으므로
- * 같은 판정 근거를 `MATCH_INTENT_SYSTEM`이 따로 갖는다. 프롬프트를 옮기다 규칙이
- * 어느 쪽에서도 사라지는 것이 이 셋이 막는 것이다.
+ * 한 도구의 사용법은 **그 도구의 설명에만** 있다. 프롬프트의 문구를 여기서 고정하면
+ * 프롬프트를 고칠 수 없으므로(AGENTS.md §6-5) 재는 것은 문구가 아니라 **중복이
+ * 생기지 않는다**는 것 하나다: 도구 이름이 시스템 프롬프트에 서면 같은 규칙이 두 곳에
+ * 살아 한쪽만 고쳐지고, 경기 프롬프트에 서면 그 층에는 도구 표면이 아예 없어(§2) 부를
+ * 수 없는 것을 부르라는 말이 된다.
  */
 describe("규칙이 사는 자리", () => {
-  const JUDGEMENT_CRITERIA = ["맥락 적합성", "설득 근거", "수용성"];
-  /** 사용법이 설명으로 넘어간 도구들 — 시스템 프롬프트는 이 이름을 다시 부르지 않는다. */
-  const MOVED = ["team_talk", "talk_to_player", "respond_to_media", "deal_odds", "send_offer"];
+  /** `substitutions`가 `substitute`로 잡히지 않게 — 이름 전체가 서야 중복이다 */
+  const mentions = (prompt: string, name: string) => new RegExp(`\\b${name}\\b`).test(prompt);
 
-  it("판정형 도구의 설명이 판정 기준 셋을 갖는다", () => {
-    for (const name of ["team_talk", "talk_to_player"] as const) {
-      for (const word of JUDGEMENT_CRITERIA) {
-        expect(DEFAULT_SKILL_DESCRIPTIONS[name]).toContain(word);
-      }
+  it("어느 프롬프트 층도 도구 이름을 적지 않는다", () => {
+    for (const name of SKILL_NAMES) {
+      expect(mentions(GM_SYSTEM, name), `GM_SYSTEM: ${name}`).toBe(false);
+      expect(mentions(MATCH_INTENT_SYSTEM, name), `MATCH_INTENT_SYSTEM: ${name}`).toBe(false);
     }
   });
 
-  it("경기 프롬프트도 같은 판정 기준 셋을 갖는다 — 경기 중 도구 표면은 0이다", () => {
-    for (const word of JUDGEMENT_CRITERIA) {
-      expect(MATCH_INTENT_SYSTEM).toContain(word);
+  /**
+   * 설명은 고정층에 매 턴 실린다 — 길이 예산이 없으면 규칙 하나를 지울 때마다 설명
+   * 두 줄이 붙어도 아무 데서도 드러나지 않는다. 상한은 지금 총량(≈6,200자)에 한 도구
+   * 몫의 여유를 얹은 값이다.
+   */
+  it("설명은 길이 예산 안에 있다", () => {
+    const total = SKILL_CATALOG.reduce((sum, skill) => sum + skill.description.length, 0);
+    for (const skill of SKILL_CATALOG) {
+      expect(skill.description.length, skill.name).toBeLessThanOrEqual(600);
     }
-  });
-
-  it("시스템 프롬프트는 넘긴 도구의 사용법을 다시 적지 않는다", () => {
-    for (const name of MOVED) {
-      expect(GM_SYSTEM).not.toContain(name);
-    }
+    expect(total).toBeLessThanOrEqual(6_500);
   });
 });
 
@@ -141,7 +150,7 @@ function walk(node: unknown, name = ""): Array<[string, Record<string, unknown>]
 }
 
 describe("같은 종류의 인자는 같은 검증을 지난다", () => {
-  const args = buildGmTools(testGame(), []).flatMap((tool) =>
+  const args = TOOLS.flatMap((tool) =>
     walk(tool.inputSchema).map(([name, node]) => ({ tool: tool.name, name, node })),
   );
   const only = (names: readonly string[]) => args.filter((a) => names.includes(a.name));
@@ -177,7 +186,7 @@ describe("같은 종류의 인자는 같은 검증을 지난다", () => {
   });
 
   it("필수 인자는 전부 선언된 인자다", () => {
-    for (const tool of buildGmTools(testGame(), [])) {
+    for (const tool of TOOLS) {
       for (const [, node] of [["", tool.inputSchema] as const, ...walk(tool.inputSchema)]) {
         const declared = Object.keys((node.properties ?? {}) as Record<string, unknown>);
         for (const key of (node.required ?? []) as string[]) {

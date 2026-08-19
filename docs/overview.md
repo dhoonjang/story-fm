@@ -122,6 +122,8 @@
   아니라 감독의 시도로 해석해 판정한다.
 - 극단 행동도 수용하되 **세계는 반드시 그에 맞게 반응한다.**
 - 직책·아이콘은 화면이 붙인다 → [data/people.md](data/people.md)
+- **`*…*`는 감독의 말에도 선다** — 감독 턴도 다른 발화와 같은 파서를 지나므로 연출은
+  기울고 별표는 남지 않는다. 별표가 몇 개 연달아 오든 구분자 하나로 읽는다.
 
 ## 4. 게임 루프
 
@@ -189,6 +191,10 @@
   뷰 하나를 싣고, 화면은 그것만 갈아끼운다. 턴 응답만 전부를 싣는다 — 시간이
   흐르면 무엇이든 달라질 수 있기 때문이다. 판을 짜는 3초마다 채팅·순위·일정까지
   다시 그리면 감독은 전술판만 만졌는데 화면 전체가 흔들린다.
+- **턴 실패 배너는 서버가 무엇을 했는지까지 말한다.** 화면이 기다리기를 멈춘 것과
+  서버가 턴을 버린 것은 다른 사건이다 — 앞의 경우 서버는 그 턴을 끝까지 돌려 저장하므로
+  화면은 상태를 다시 받아 맞추고, 전술판 대기열과 입력창은 되돌리지 않는다
+  ([models.md](./llm/models.md) §1-1).
 - UI에 조작법 안내 문구를 넣지 않는다 — 조작은 보이는 것으로 알린다.
 
 ## 6. 세계의 규모
@@ -220,21 +226,22 @@
 
 ## 문서 지도
 
-|                | 문서                                             | 다루는 것                                             |
-| -------------- | ------------------------------------------------ | ----------------------------------------------------- |
-| **데이터**     | [data/game-state.md](data/game-state.md)         | 2-레이어 · 엔티티와 관계 · 파생 · 세이브 호환         |
-|                | [data/player.md](data/player.md)                 | 능력치 15축 · 역할 · 폼 · 체력 · 성장 · 적응도 · 안개 |
-|                | [data/team.md](data/team.md)                     | 구단 체급 · 프로필 · 1·2군과 등록 명단 · 팀의 종류    |
-|                | [data/competition.md](data/competition.md)       | 리그 · 국내 컵 · 유럽 대항전 · 승강의 규정            |
-|                | [data/people.md](data/people.md)                 | 페르소나 · 화자 규칙 · 기자회견 · 심경                |
-|                | [data/sources.md](data/sources.md)               | 선수·팀 데이터의 출처와 라이선스 부채                 |
-| **시뮬레이션** | [simulation/match.md](simulation/match.md)       | 전력 패킷 · 점유 · xg 시뮬 · 상성 · 연장 · 평점       |
-|                | [simulation/season.md](simulation/season.md)     | 달력 편성 · tick · 훈련 계획 · 시즌 전환              |
-|                | [simulation/transfer.md](simulation/transfer.md) | 협상 · 설득 · 메디컬 · AI 시장 · 주급                 |
-|                | [simulation/finance.md](simulation/finance.md)   | 수입·지출 · 상각 · PSR · 강등의 타격                  |
-|                | [simulation/career.md](simulation/career.md)     | 감독 능력치 · 평판 · 보드 · 트로피                    |
-| **LLM**        | [llm/models.md](llm/models.md)                   | 에이전트별 모델 설정 · 어댑터 · 토큰 예산             |
-|                | [llm/agents.md](llm/agents.md)                   | GM · 중계 · 결산 라터 · 입력 3층                      |
-|                | [llm/prompts.md](llm/prompts.md)                 | 출력 문법 · 스킬 표면 · 프롬프트 규약                 |
+|                | 문서                                                           | 다루는 것                                             |
+| -------------- | -------------------------------------------------------------- | ----------------------------------------------------- |
+| **데이터**     | [data/game-state.md](data/game-state.md)                       | 2-레이어 · 엔티티와 관계 · 파생 · 세이브 호환         |
+|                | [data/player.md](data/player.md)                               | 능력치 15축 · 역할 · 폼 · 체력 · 성장 · 적응도 · 안개 |
+|                | [data/team.md](data/team.md)                                   | 구단 체급 · 프로필 · 1·2군과 등록 명단 · 팀의 종류    |
+|                | [data/competition.md](data/competition.md)                     | 리그 · 국내 컵 · 유럽 대항전 · 승강의 규정            |
+|                | [data/people.md](data/people.md)                               | 페르소나 · 화자 규칙 · 기자회견 · 심경                |
+|                | [data/sources.md](data/sources.md)                             | 선수·팀 데이터의 출처와 라이선스 부채                 |
+| **시뮬레이션** | [simulation/match.md](simulation/match.md)                     | 전력 패킷 · 점유 · xg 시뮬 · 상성 · 연장 · 평점       |
+|                | [simulation/season.md](simulation/season.md)                   | 달력 편성 · tick · 훈련 계획 · 시즌 전환              |
+|                | [simulation/transfer.md](simulation/transfer.md)               | 협상 · 설득 · 메디컬 · AI 시장 · 주급                 |
+|                | [simulation/finance.md](simulation/finance.md)                 | 수입·지출 · 상각 · PSR · 강등의 타격                  |
+|                | [simulation/career.md](simulation/career.md)                   | 감독 능력치 · 평판 · 보드 · 트로피                    |
+|                | [simulation/balance-harness.md](simulation/balance-harness.md) | 밸런스 하네스 — 무엇을 재고 어느 대역을 지키는가      |
+| **LLM**        | [llm/models.md](llm/models.md)                                 | 에이전트별 모델 설정 · 어댑터 · 토큰 예산             |
+|                | [llm/agents.md](llm/agents.md)                                 | GM · 중계 · 결산 라터 · 입력 3층                      |
+|                | [llm/prompts.md](llm/prompts.md)                               | 출력 문법 · 스킬 표면 · 프롬프트 규약                 |
 
 > 비전과 개발 규약은 저장소 루트의 [AGENTS.md](../AGENTS.md).

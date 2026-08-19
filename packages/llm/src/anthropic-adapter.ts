@@ -137,6 +137,31 @@ function withBreakpoint(
 }
 
 /**
+ * 왕복 하나의 몫을 누적기에 더하고 **그 delta를 돌려준다** — 부르는 쪽이 그대로
+ * `req.onUsage`에 실어 보내므로, 턴이 실패로 끝나도 여기까지 쓴 토큰이 남는다
+ * (models.md §4).
+ *
+ * ⚠️ Anthropic의 input_tokens는 캐시 read/write를 **빼고** 보고한다. 계약은 "이
+ * 호출이 읽은 입력 전부"라(TurnUsage) 여기서 되돌려 놓는다 — 안 그러면 캐시가 잘
+ * 먹을수록 inputTokens가 줄어 히트율이 1을 넘는다.
+ */
+function addUsage(total: TurnUsage, raw: Anthropic.Usage): TurnUsage {
+  const cacheRead = raw.cache_read_input_tokens ?? 0;
+  const cacheWrite = raw.cache_creation_input_tokens ?? 0;
+  const delta: TurnUsage = {
+    inputTokens: raw.input_tokens + cacheRead + cacheWrite,
+    outputTokens: raw.output_tokens,
+    cacheReadTokens: cacheRead,
+    cacheWriteTokens: cacheWrite,
+  };
+  total.inputTokens += delta.inputTokens;
+  total.outputTokens += delta.outputTokens;
+  total.cacheReadTokens += delta.cacheReadTokens;
+  total.cacheWriteTokens += delta.cacheWriteTokens;
+  return delta;
+}
+
+/**
  * role:"system" 중간 메시지를 거부한 400인가.
  * 관측된 두 형태를 모두 잡는다 —
  *   "messages.0: use the top-level 'system' parameter"
@@ -178,6 +203,8 @@ export class AnthropicGameLLM implements GameLLM {
       description: t.description,
       input_schema: t.inputSchema as Anthropic.Tool.InputSchema,
     }));
+    const forcedTool: Anthropic.ToolChoiceTool | undefined =
+      typeof req.toolChoice === "object" ? { type: "tool", name: req.toolChoice.name } : undefined;
 
     // 시스템 블록 — 앞이 더 안정적. 이력 마커 몫으로 1개를 남긴다
     const systemTexts = (Array.isArray(req.system) ? req.system : [req.system]).filter(
@@ -223,6 +250,9 @@ export class AnthropicGameLLM implements GameLLM {
         thinking: { type: "disabled" },
         system,
         ...(toolDefs.length > 0 ? { tools: toolDefs } : {}),
+        // 강제는 첫 요청에만 — 도구 결과를 돌려준 뒤에도 걸어 두면 모델이 턴을
+        // 끝낼 수 없어 왕복 상한까지 같은 도구를 다시 부른다 (TurnRequest.toolChoice)
+        ...(iter === 0 && forcedTool ? { tool_choice: forcedTool } : {}),
         messages: withBreakpoint(messages, markUpto),
       };
 
@@ -256,15 +286,10 @@ export class AnthropicGameLLM implements GameLLM {
         throw err;
       }
 
-      // ⚠️ Anthropic의 input_tokens는 캐시 read/write를 **빼고** 보고한다.
-      // 계약은 "이 호출이 읽은 입력 전부"라(TurnUsage) 여기서 되돌려 놓는다 —
-      // 안 그러면 캐시가 잘 먹을수록 inputTokens가 줄어 히트율이 1을 넘는다.
-      const cacheRead = response.usage.cache_read_input_tokens ?? 0;
-      const cacheWrite = response.usage.cache_creation_input_tokens ?? 0;
-      usage.inputTokens += response.usage.input_tokens + cacheRead + cacheWrite;
-      usage.outputTokens += response.usage.output_tokens;
-      usage.cacheReadTokens += cacheRead;
-      usage.cacheWriteTokens += cacheWrite;
+      // 왕복 하나가 끝나는 자리에서 그 몫을 보고한다 — 다음 왕복에서 시한에
+      // 걸려도 여기까지 쓴 토큰은 장부에 남는다 (models.md §4).
+      const delta = addUsage(usage, response.usage);
+      req.onUsage?.(delta);
       stopReason = toStopReason(response.stop_reason);
 
       for (const block of response.content) {

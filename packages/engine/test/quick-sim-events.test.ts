@@ -15,6 +15,7 @@ import {
   type GameState,
   type WorldScope,
 } from "@story-fm/engine";
+import { recordCard } from "../src/match/discipline";
 import { createTestGame, keepSeat, playMockMatch } from "./helpers";
 
 /**
@@ -80,8 +81,9 @@ describe("골의 분", () => {
 
   it("득점자와 같은 길이로, 시간 순으로 남는다", () => {
     const state = createTestGame(3);
+    // 스쿼드는 한 번만 세운다 — 루프 안에서 다시 세우면 그게 이 케이스의 값이 된다
+    const squads = { home: simSquadOf(state, "mancity"), away: simSquadOf(state, "hull") };
     for (let i = 0; i < 60; i++) {
-      const squads = { home: simSquadOf(state, "mancity"), away: simSquadOf(state, "hull") };
       const r = quickSimulate(squads.home, squads.away, 900 + i, `min:${i}`);
       expect(r.goalMinutes).toHaveLength(r.scorers.length);
       expect(r.assists).toHaveLength(r.scorers.length);
@@ -148,14 +150,11 @@ describe("간이 시뮬 전력 로그", () => {
 describe("카드·퇴장", () => {
   it("두 번째 경고는 경고 한 장 + 퇴장으로 남는다 (실제 기록과 같다)", () => {
     const state = createTestGame(3);
+    const home = simSquadOf(state, "mancity");
+    const away = simSquadOf(state, "hull");
     let secondYellows = 0;
     for (let i = 0; i < 400; i++) {
-      const r = quickSimulate(
-        simSquadOf(state, "mancity"),
-        simSquadOf(state, "hull"),
-        4000 + i,
-        `card:${i}`,
-      );
+      const r = quickSimulate(home, away, 4000 + i, `card:${i}`);
       for (const red of r.cards.filter((c) => c.card === "red")) {
         const yellows = r.cards.filter(
           (c) => c.playerId === red.playerId && c.card === "yellow",
@@ -171,6 +170,84 @@ describe("카드·퇴장", () => {
       }
     }
     expect(secondYellows).toBeGreaterThan(0);
+  });
+
+  /**
+   * **한 사건에 정지 한 건.** 장부가 경고 한 줄 + 퇴장 한 줄로 적히므로, 두 줄을
+   * 각각 세면 누적 정지와 퇴장 정지가 함께 걸려 한 번의 퇴장에 두 경기를 못 뛴다.
+   */
+  it("경고 2회 퇴장은 정지 한 건이고, 그 경기의 경고 두 장은 누적에서 빠진다", () => {
+    const state = createTestGame(3);
+    const player = playersOf(state, state.userTeamId)[0]!;
+    expect(seasonYellowsOf(state, player.id, state.season)).toBe(0);
+    // 눈금 바로 앞까지 쌓아 둔다 — 다음 한 장이 누적 정지에 닿는다
+    for (let i = 0; i < YELLOWS_PER_SUSPENSION - 1; i++) {
+      recordCard(state, {
+        playerId: player.id,
+        matchId: `m-past-${i}`,
+        card: "yellow",
+        minute: 30,
+      });
+    }
+    const dismissal = "m-off";
+    const first = recordCard(state, {
+      playerId: player.id,
+      matchId: dismissal,
+      card: "yellow",
+      minute: 20,
+    });
+    expect(first.issued).toBeTruthy(); // 5장째 — 누적 정지가 걸렸다
+    const second = recordCard(state, {
+      playerId: player.id,
+      matchId: dismissal,
+      card: "yellow",
+      minute: 70,
+    });
+    expect(second.revoked).toBe(first.issued); // 두 번째 경고가 그 정지를 물린다
+    const off = recordCard(state, {
+      playerId: player.id,
+      matchId: dismissal,
+      card: "red",
+      minute: 70,
+    });
+    expect(off.note).toBeTruthy();
+
+    const bans = state.suspensions.filter((s) => s.gamePlayerId === player.id);
+    expect(bans).toHaveLength(1);
+    expect(bans[0]!.cause).toBe("red");
+    expect(bans[0]!.lengthMatches).toBe(1);
+    // 누적에서는 빠지고, 장부의 세 줄은 그대로 남는다 (경기 기록은 실제로 그랬다)
+    expect(seasonYellowsOf(state, player.id, state.season)).toBe(YELLOWS_PER_SUSPENSION - 1);
+    expect(state.bookings.filter((b) => b.matchId === dismissal)).toHaveLength(3);
+  });
+
+  it("한 경기가 같은 선수에게 정지를 두 번 걸지 않는다 — 리그 전체에서", () => {
+    const state = seasonOf(7);
+    // 선수는 하루에 한 경기만 뛴다 — 같은 날 두 정지는 한 경기가 두 번 건 것이다
+    const perDay = new Map<string, number>();
+    for (const s of state.suspensions) {
+      const key = `${s.gamePlayerId}|${s.issuedOn}`;
+      perDay.set(key, (perDay.get(key) ?? 0) + 1);
+    }
+    for (const [key, count] of perDay) expect(count, key).toBe(1);
+
+    // 경고 두 장을 받은 경기가 실제로 나오고, 그 장들은 누적에 들어가지 않는다
+    const yellowsPerMatch = new Map<string, number>();
+    for (const b of state.bookings) {
+      if (b.card !== "yellow" || b.season !== state.season) continue;
+      const key = `${b.gamePlayerId}|${b.matchId}`;
+      yellowsPerMatch.set(key, (yellowsPerMatch.get(key) ?? 0) + 1);
+    }
+    const dismissed = [...yellowsPerMatch].filter(([, n]) => n >= 2).map(([key]) => key);
+    expect(dismissed.length).toBeGreaterThan(0);
+    for (const key of dismissed) {
+      const playerId = key.split("|")[0]!;
+      const carded = state.bookings.filter(
+        (b) => b.gamePlayerId === playerId && b.season === state.season && b.card === "yellow",
+      ).length;
+      const excluded = dismissed.filter((k) => k.startsWith(`${playerId}|`)).length * 2;
+      expect(seasonYellowsOf(state, playerId, state.season), playerId).toBe(carded - excluded);
+    }
   });
 
   it("타 팀 선수도 경고를 쌓고 정지를 받는다 — 우리만의 규칙이 아니다", () => {
@@ -239,7 +316,12 @@ describe("카드·퇴장", () => {
    */
   it("퇴장이 스코어에 닿는다 — 한 명이 빠진 팀은 더 많이 내주고 덜 넣는다", () => {
     const state = createTestGame(3);
-    const MATCHES = 400;
+    /**
+     * 판 수 — **방향이 결정적으로 잡히는 선**이다. 400판일 때 60초를 썼고, 150판으로
+     * 줄여도 세 짝 모두 같은 방향이고 크기 문턱(±10%)도 그대로 넘는다. 시드가 같으니
+     * 이 수는 흔들리는 표본이 아니라 고정된 판이다 — 늘려도 답이 달라지지 않는다.
+     */
+    const MATCHES = 150;
     const pairs: Array<[string, string]> = [
       ["mancity", "hull"],
       ["arsenal", "everton"],
@@ -329,15 +411,12 @@ describe("같은 날 경기는 킥오프 순서대로 굴러간다", () => {
 describe("교체", () => {
   it("양 팀이 모두 교체한다 — 한도는 팀마다 따로다", () => {
     const state = createTestGame(3);
+    const home = simSquadOf(state, "mancity");
+    const away = simSquadOf(state, "hull");
     let homeSubs = 0;
     let awaySubs = 0;
     for (let i = 0; i < 60; i++) {
-      const r = quickSimulate(
-        simSquadOf(state, "mancity"),
-        simSquadOf(state, "hull"),
-        6000 + i,
-        `sub:${i}`,
-      );
+      const r = quickSimulate(home, away, 6000 + i, `sub:${i}`);
       homeSubs += r.subs.filter((s) => s.side === "home").length;
       awaySubs += r.subs.filter((s) => s.side === "away").length;
       expect(r.subs.filter((s) => s.side === "home").length).toBeLessThanOrEqual(4);

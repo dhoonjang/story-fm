@@ -3,6 +3,7 @@ import {
   addDays,
   advanceTime,
   applyScenePoint,
+  characterEntry,
   createGame,
   clockOf,
   formatMoney,
@@ -12,6 +13,7 @@ import {
   ownerOf,
   pendingPress,
   reportersOf,
+  selectCharacters,
   speakerRoles,
   scoutPlayer,
   scoutReportCard,
@@ -21,12 +23,16 @@ import {
 } from "@story-fm/engine";
 import {
   TIME_PASSED,
+  filterSceneStream,
+  sanitizeSceneText,
   parseTimeSkip,
   buildGmHistory,
   buildManagerMessage,
   buildGmReference,
   buildGmStateNote,
   buildGmTools,
+  describeCharacters,
+  injectedCharacters,
   parseSceneHeader,
   runOnboardingTurn,
   type GmToolCall,
@@ -40,16 +46,23 @@ import type { GameLLM, StopReason, TurnRequest } from "@story-fm/llm";
  * 이 경계가 무너지면(레퍼런스에 날짜가 새거나, 순서가 흔들리면) 캐시가 조용히 죽는다.
  */
 
-function game(seed = 31): GameState {
+/**
+ * 세계는 **한 번만** 세우고 케이스마다 복제해 쓴다 — `createGame`은 판당 수 초,
+ * 복제는 그 수십 분의 일이다. 케이스가 상태를 고쳐도 서로 새지 않는다.
+ */
+function build(): GameState {
   const background = "K리그에서 뛰다 은퇴한 수비수 출신 분석가";
   return createGame({
-    seed,
+    seed: 31,
     userTeamId: "arsenal",
     managerName: "김감독",
     background,
     attributes: interpretBackgroundHeuristic(background),
   });
 }
+
+const BASE = build();
+const game = (): GameState => structuredClone(BASE);
 
 describe("레퍼런스 블록 (캐시되는 시스템 블록)", () => {
   it("선수의 id도 이름도 담지 않는다 — 명단 한 줄이 바뀌면 뒤의 이력까지 무효가 된다", () => {
@@ -114,20 +127,65 @@ describe("레퍼런스 블록 (캐시되는 시스템 블록)", () => {
     expect(buildGmReference(state)).toBe(before);
   });
 
-  it("수석코치 인물 카드가 레퍼런스에 실린다 (캐시 프리픽스 — 매 턴 정가가 아니다)", () => {
+  it("인물 카드는 레퍼런스에도 상태 스냅샷에도 없다 — 캐릭터북이 이번 턴 층에 싣는다", () => {
     const state = game();
     const coach = headCoachOf(state);
     const reference = buildGmReference(state);
 
-    expect(reference).toContain(coach.name);
-    expect(reference).toContain(coach.archetype);
-    expect(reference).toContain(coach.motivation);
-    // 말투는 지문만으로 붙지 않는다 — 예시 대사가 함께 가야 톤이 실제로 잡힌다
-    expect(reference).toContain(coach.speechStyle.note);
-    for (const sample of coach.speechStyle.samples) expect(reference).toContain(sample);
+    // 회견도 협상도 없는 턴에 다섯 장을 읽히지 않는다. 조건부로 넣었다 뺐다 하면
+    // 프리픽스가 바뀌는 턴마다 이 블록과 그 뒤 이력이 통째로 무효가 된다
+    expect(reference).not.toContain(coach.motivation);
+    expect(reference).not.toContain(coach.speechStyle.note);
+    // 매 턴 새로 읽히는 스냅샷에도 없다 — 카드가 서는 자리는 발화와 같은 층이다
+    expect(buildGmStateNote(state)).not.toContain(coach.motivation);
 
-    // 매 턴 새로 읽히는 상태 스냅샷에는 넣지 않는다 (인물은 세이브당 고정이다)
-    expect(buildGmStateNote(state)).not.toContain(coach.name);
+    // 카드가 서면 말투는 지문만으로 붙지 않는다 — 예시 대사가 함께 가야 톤이 잡힌다
+    const card = describeCharacters([characterEntry(coach, "full")])!;
+    expect(card).toContain(coach.name);
+    expect(card).toContain(coach.archetype);
+    expect(card).toContain(coach.motivation);
+    expect(card).toContain(coach.speechStyle.note);
+    for (const sample of coach.speechStyle.samples) expect(card).toContain(sample);
+  });
+
+  it("레퍼런스는 세이브당 고정이다 — 회견이 열려도 흔들리지 않는다", () => {
+    const state = game();
+    const before = buildGmReference(state);
+    // 카드가 레퍼런스에 있던 시절엔 여기서 프리픽스가 통째로 무효가 됐다
+    const reporter = reportersOf(state)[0]!;
+    state.chat.push({
+      role: "user",
+      text: `${reporter.characterId} 만나겠다`,
+      toolCalls: [],
+      at: state.date,
+      characters: [{ characterId: reporter.characterId, depth: "full" }],
+    });
+    expect(buildGmReference(state)).toBe(before);
+  });
+
+  it("주입한 카드는 이력에서 발화 앞에 다시 선다 — 세이브엔 기록만 있다", () => {
+    const state = game();
+    const coach = headCoachOf(state);
+    state.chat.push({
+      role: "user",
+      text: `${coach.characterId} 불러줘`,
+      toolCalls: [],
+      at: state.date,
+      characters: [{ characterId: coach.characterId, depth: "full" }],
+    });
+    state.chat.push({
+      role: "model",
+      text: "[2026-07-01 AM 9:00]\n@:",
+      toolCalls: [],
+      at: state.date,
+    });
+
+    const turn = buildGmHistory(state).find((h) => h.content.includes("불러줘"))!;
+    expect(turn.content).toContain(coach.motivation);
+    // 카드가 발화보다 앞이다 — 이번 턴에 실었던 순서와 같아야 이력이 재현된다
+    expect(turn.content.indexOf(coach.motivation)).toBeLessThan(turn.content.indexOf("불러줘"));
+    // 창 안에 선 카드는 캐릭터북이 「이미 실렸다」로 읽는다
+    expect(injectedCharacters(state)).toEqual([{ characterId: coach.characterId, depth: "full" }]);
   });
 
   /**
@@ -154,8 +212,16 @@ describe("레퍼런스 블록 (캐시되는 시스템 블록)", () => {
     expect(buildGmReference(state)).toBe(before);
   });
 
-  it("같은 세이브면 언제나 같은 블록이다", () => {
-    expect(buildGmReference(game(31))).toBe(buildGmReference(game(31)));
+  /**
+   * 조립은 상태만 읽는다 — 시계나 난수가 섞이면 같은 상태의 두 턴이 다른 블록을
+   * 내고 캐시가 조용히 죽는다. (같은 시드가 같은 세계를 만드는지는 세계 쪽의
+   * 몫이다 — `packages/engine/test/world.test.ts`.)
+   */
+  it("같은 상태를 두 번 읽으면 레퍼런스도 명단 줄도 한 글자까지 같다", () => {
+    const state = game();
+    expect(buildGmReference(state)).toBe(buildGmReference(state));
+    const squadLine = (note: string) => note.split("\n").find((l) => l.startsWith("선수단("));
+    expect(squadLine(buildGmStateNote(state))).toBe(squadLine(buildGmStateNote(state)));
   });
 });
 
@@ -184,9 +250,6 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
     expect(squad.length).toBeGreaterThanOrEqual(30);
     for (const p of squad) expect(note).toContain(p.name);
     expect(squad.filter((p) => note.includes(p.id))).toHaveLength(0);
-    // 순서가 결정적이다 — 흔들리면 같은 세이브의 같은 턴이 매번 다른 줄을 낸다
-    const squadLine = (text: string) => text.split("\n").find((l) => l.startsWith("선수단("));
-    expect(squadLine(buildGmStateNote(game(31)))).toBe(squadLine(buildGmStateNote(game(31))));
   });
 
   it("선수 근황을 한 줄로 싣는다 — 이름을 내보내는 자리가 부상·불만뿐이면 같은 선수만 말한다", () => {
@@ -278,9 +341,10 @@ describe("새 게임 첫 장면", () => {
       else process.env.LLM_MODE = previousMode;
     }
 
-    expect(request?.user).toBe("@김감독: *새 감독으로서 구단에 첫 출근한다*");
-    expect(request?.stateNote).toContain("[오퍼레이터 지시 — 새 게임 첫 장면]");
+    // 첫 장면의 지시는 **캐시 밖**(상태 스냅샷)에 실린다 — 문구가 아니라 그 자리를 잰다
     expect(request?.stateNote).toContain(state.date);
+    const system = request?.system;
+    expect(Array.isArray(system) ? system.join("\n") : (system ?? "")).not.toContain(state.date);
     // 시스템은 고정 계층 + 레퍼런스 계층 두 블록이다 (캐시 프리픽스의 모양)
     expect(request?.system).toHaveLength(2);
     // 출력 상한을 따로 좁히지 않는다 — 상한은 사고와 본문을 함께 덮으므로
@@ -322,9 +386,9 @@ describe("새 게임 첫 장면", () => {
   });
 
   /**
-   * **폴백 없음** — 잘린 장면·문법 위반·호출 실패는 한 번 더 부르고, 그래도 안
-   * 되면 오류가 위로 올라간다. 규칙 장면으로 덮으면 실모드가 도는 줄 알고 넘어간다
-   * (실제로 SDK가 비스트리밍을 거부하는 동안 모든 첫 장면이 규칙 장면이었다).
+   * **폴백 없음** — 잘린 장면·문법 위반은 한 번 더 부르고, 그래도 안 되면 오류가
+   * 위로 올라간다. 규칙 장면으로 덮으면 실모드가 도는 줄 알고 넘어간다 (실제로 SDK가
+   * 비스트리밍을 거부하는 동안 모든 첫 장면이 규칙 장면이었다).
    */
   it("잘린 장면은 다시 시도하고, 두 번째가 멀쩡하면 그것으로 연다", async () => {
     const state = game();
@@ -341,7 +405,8 @@ describe("새 게임 첫 장면", () => {
     expect(turn.text).toContain("선수단부터");
   });
 
-  it("두 번 다 실패하면 오류가 올라간다 — 규칙 장면으로 덮지 않는다", async () => {
+  /** 연결 오류는 산출 이전에 끝난 실패다 — 다시 부르지 않고 그대로 올린다 (agents.md §8) */
+  it("호출이 실패하면 한 번에 오류가 올라간다 — 규칙 장면으로 덮지 않는다", async () => {
     const state = game();
     let call = 0;
     const llm: GameLLM = {
@@ -352,7 +417,7 @@ describe("새 게임 첫 장면", () => {
     };
 
     await expect(onboardInRealMode(state, llm)).rejects.toThrow("Connection error");
-    expect(call).toBe(2);
+    expect(call).toBe(1);
   });
 
   it("문법을 어긴 장면도 두 번째까지 어기면 오류다", async () => {
@@ -691,6 +756,25 @@ describe("장면 헤더", () => {
     expect(parseSceneHeader("[2026-08-01 PM 12:30]\n@:").point?.clock).toBe("12:30");
   });
 
+  /**
+   * 스냅샷은 12시간제를 보여 주지만 모델은 `[2026-07-13 14:30]`처럼 적기도 한다.
+   * 시간대 없는 값까지 12로 접으면 `02:30`이 되어 오전으로 뒤집히고, 코어가
+   * 되감기를 막으므로 그 턴의 시계가 통째로 멎는다.
+   */
+  it("시간대가 없으면 24시간제로 읽는다 — 정오와 자정의 경계", () => {
+    const clock = (header: string) => parseSceneHeader(`${header}\n@:`).point?.clock;
+    expect(clock("[2026-08-01 14:30]")).toBe("14:30");
+    expect(clock("[2026-08-01 23:59]")).toBe("23:59");
+    expect(clock("[2026-08-01 09:05]")).toBe("09:05");
+    // 12시가 갈리는 자리다 — 시간대가 없으면 정오, `오전`이 붙으면 자정
+    expect(clock("[2026-08-01 12:05]")).toBe("12:05");
+    expect(clock("[2026-08-01 오전 12:05]")).toBe("00:05");
+    expect(clock("[2026-08-01 오후 12:05]")).toBe("12:05");
+    // 있을 수 없는 시각은 읽지 않는다 — 그 날의 기본값으로 물러선다
+    expect(clock("[2026-08-01 25:00]")).toBe("09:00");
+    expect(clock("[2026-08-01 저녁 25:00]")).toBe("19:00");
+  });
+
   it("경기 헤더는 분으로 읽는다", () => {
     const parsed = parseSceneHeader("[67']\n@중계: 이어갑니다.");
     expect(parsed.minute).toBe(67);
@@ -711,11 +795,10 @@ describe("장면 헤더", () => {
     const start = state.date;
     const moved = applyScenePoint(state, { date: addDays(start, 2), clock: "19:00" });
     expect(moved.ok).toBe(true);
-    // 중간에 경기일·판단이 필요한 일이 없으면 선언한 곳에 닿는다
-    if (!moved.short) {
-      expect(state.date).toBe(addDays(start, 2));
-      expect(clockOf(state)).toBe("19:00");
-    }
+    // 프리시즌 첫 이틀에는 세워 세울 일이 없다 — 선언한 곳에 그대로 닿는다
+    expect(moved.short).toBeFalsy();
+    expect(state.date).toBe(addDays(start, 2));
+    expect(clockOf(state)).toBe("19:00");
     const back = applyScenePoint(state, { date: start, clock: "09:00" });
     expect(state.date).not.toBe(start);
     expect(back.short).toBe(true);
@@ -789,12 +872,12 @@ describe("시계는 장면이 걸린 만큼 민다", () => {
 
 /** 화자 — 코치 말고도 부를 사람이 레퍼런스에 서 있고, 화면이 그 자리를 안다. */
 describe("장면을 여는 사람은 그 일에 가장 가까운 사람이다", () => {
-  it("레퍼런스에 코치 말고도 부를 사람이 서 있다", () => {
+  it("코치 말고도 부를 사람은 이름이 불린 턴에 카드로 선다", () => {
     const state = game();
-    const ref = buildGmReference(state);
-    expect(ref).toContain(headCoachOf(state).characterId);
-    expect(ref).toContain(ownerOf(state).characterId);
-    for (const reporter of reportersOf(state)) expect(ref).toContain(reporter.characterId);
+    const owner = ownerOf(state);
+    const cards = selectCharacters(state, { message: `${owner.characterId} 만나야겠다` });
+    expect(cards.map((c) => c.characterId)).toContain(owner.characterId);
+    expect(describeCharacters(cards)).toContain(owner.motivation);
   });
 
   it("코치가 아닌 화자도 화면이 자리를 안다 — 이름만 뱉어도 붙는다", () => {
@@ -810,5 +893,73 @@ describe("장면을 여는 사람은 그 일에 가장 가까운 사람이다", 
     // 선수도 마찬가지 — 유니폼 아이콘이 서려면 사전에 있어야 한다
     const player = userPlayers(state)[0]!;
     expect(roleOf(player.name)).toBeDefined();
+  });
+});
+
+/**
+ * 장면 위생 — **도구를 부르는 턴의 작업 로그가 대화에 섞이지 않는다.**
+ *
+ * 도구 반복마다 모델은 시점 헤더와 "…확인하겠습니다" 한 줄을 새로 찍는다.
+ * 프롬프트로 눌러도 남는 습성이라 코어가 걷어낸다 — 출력 문법이 허락하는 줄은
+ * 맨 앞 헤더 하나, `@`로 시작하는 줄, 빈 줄뿐이다.
+ */
+describe("sanitizeSceneText", () => {
+  it("도구 앞 서술과 두 번째 헤더를 걷어낸다", () => {
+    const raw = [
+      "[2026-07-01 AM 9:45]",
+      "소집 첫 주는 체력 위주로 잡겠습니다.",
+      "[2026-07-01 AM 9:45]",
+      "[2026-07-01 AM 9:45]",
+      "소집 첫 주(7/13~7/18)를 새로 짜겠습니다.",
+      "[2026-07-01 AM 9:45]",
+      "@스티브 홀랜드: 첫 주는 다리부터 다시 만드는 걸로 채웠습니다.",
+    ].join("\n");
+
+    expect(sanitizeSceneText(raw)).toBe(
+      [
+        "[2026-07-01 AM 9:45]",
+        "@스티브 홀랜드: 첫 주는 다리부터 다시 만드는 걸로 채웠습니다.",
+      ].join("\n"),
+    );
+  });
+
+  it("멀쩡한 장면은 그대로 둔다 (빈 줄은 문단 간격이다)", () => {
+    const scene = ["[2026-07-01 AM 9:30]", "@: *문이 열린다*", "", "@손흥민: 감독님."].join("\n");
+    expect(sanitizeSceneText(scene)).toBe(scene);
+  });
+
+  it("@ 줄이 하나도 없으면 손대지 않는다 — 빈 턴보다 어긴 장면이 낫다", () => {
+    const broken = "오늘은 조용한 하루였습니다.";
+    expect(sanitizeSceneText(broken)).toBe(broken);
+  });
+});
+
+describe("filterSceneStream — 화면에도 같은 위생", () => {
+  const run = (deltas: string[]) => {
+    const out: string[] = [];
+    const feed = filterSceneStream((d) => out.push(d));
+    for (const d of deltas) feed(d);
+    return out.join("");
+  };
+
+  it("걸러진 줄은 화면에 잠깐도 뜨지 않는다", () => {
+    const text = run([
+      "[2026-07-01 ",
+      "AM 9:45]\n브루누의 ",
+      "카드를 확인하겠습니다.\n",
+      "[2026-07-01 AM 9:45]\n",
+      "@스티브 홀랜드: 걱정할 게 ",
+      "없습니다.",
+    ]);
+    expect(text).toBe("[2026-07-01 AM 9:45]\n@스티브 홀랜드: 걱정할 게 없습니다.");
+  });
+
+  it("살아남는 줄은 델타 그대로 흘러간다", () => {
+    const out: string[] = [];
+    const feed = filterSceneStream((d) => out.push(d));
+    for (const d of ["@손", "흥민: 감독", "님."]) feed(d);
+    // 첫 조각만 줄 앞머리 판정에 쓰이고, 그 뒤는 조각 단위로 그대로 나간다
+    expect(out.join("")).toBe("@손흥민: 감독님.");
+    expect(out.length).toBe(3);
   });
 });

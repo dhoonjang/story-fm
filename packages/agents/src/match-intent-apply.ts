@@ -1,14 +1,18 @@
 import {
   advanceMatchTo,
+  advanceShootout,
+  awaitingShootout,
   playerName,
+  setShootoutOrder,
   shapeOfTactics,
   type CardMark,
   type GameState,
   type GoalMark,
 } from "@story-fm/engine";
+import { shootoutTally } from "@story-fm/domain";
 import type { GameToolSpec } from "@story-fm/llm";
 import { buildGmTools, collectMatchMarks, sideTeamName } from "./gm-tools";
-import { buildSegmentMessage } from "./match-caster";
+import { buildSegmentMessage, buildShootoutMessage } from "./match-caster";
 import { touchesPitch, type MatchIntent } from "./match-intent-schema";
 import type { GmToolCall } from "./gm-types";
 
@@ -77,6 +81,16 @@ export function applyMatchIntent(
   for (const one of intent.talk ?? []) call("talk_to_player", one);
 
   /**
+   * 승부차기 키커 순서 — **엔진 함수를 직접 부른다.** 경기 중 도구 표면은 0이라
+   * (agents.md §3) `gm-tools`에 정의를 하나 더 얹으면 모델에게 갈 일이 없는 도구가
+   * 고정층만 부풀린다.
+   */
+  if (intent.shootoutOrder && intent.shootoutOrder.length > 0) {
+    const ordered = setShootoutOrder(state, { playerIds: intent.shootoutOrder });
+    if (ordered.message) notes.push(ordered.message);
+  }
+
+  /**
    * 옮기지 못한 말은 **감독에게 그대로 돌아간다.** 조용히 버리면 감독은 그 지시가
    * 걸린 줄 알고 다음 판단을 그 위에 쌓는다 — 이 저장소가 이미 여러 번 고친 거짓
    * 성공이다.
@@ -86,11 +100,55 @@ export function applyMatchIntent(
   }
 
   const pending = state.pendingMatch;
+  const nameOf = (id: string): string => playerName(state, id);
+  const sideName = (side: "home" | "away"): string => sideTeamName(state, side);
   const shapeChanged = shapeOfTactics(state) !== shapeBefore;
   const wants = intent.advance === "segment";
   if (!pending || !wants || shapeChanged) {
     if (wants && shapeChanged) notes.push(SHAPE_CHANGED_NOTE);
-    return { notes, segment: null, touched: touchesPitch(intent) };
+    /**
+     * 승부차기 정지점은 진행하지 않은 턴에도 자리를 밝힌다 — 대본이 없으면 캐스터가
+     * "공은 120′에 멈춰 있다"로 읽어 키커 순서를 정하는 자리인 줄 모른다.
+     */
+    return {
+      notes,
+      segment: awaitingShootout(state)
+        ? buildShootoutMessage(
+            null,
+            shootoutTally(pending?.shootout?.kicks ?? []),
+            false,
+            nameOf,
+            sideName,
+          )
+        : null,
+      touched: touchesPitch(intent),
+    };
+  }
+
+  /**
+   * 승부차기가 남았으면 **한 턴에 한 발**이다 — 장부는 `finished`지만 승부는 끝나지
+   * 않았고, 굴리는 것은 구간 시뮬레이터가 아니라 `advanceShootout`이다 (match.md §2).
+   */
+  if (awaitingShootout(state)) {
+    const kicked = advanceShootout(state);
+    // 굴러간 한 발은 대본이 갖는다 — 여기 또 실으면 같은 사실이 두 번 간다
+    if (!kicked.ok) {
+      notes.push(kicked.message);
+      return { notes, segment: null, touched: touchesPitch(intent) };
+    }
+    // 세계가 굴러간 기록이지 감독이 부른 스킬이 아니다 — 칩으로 세우지 않는다
+    calls.push({ name: "advance_match", summary: kicked.message, silent: true });
+    return {
+      notes,
+      segment: buildShootoutMessage(
+        kicked.kick,
+        shootoutTally(pending.shootout?.kicks ?? []),
+        kicked.done,
+        nameOf,
+        sideName,
+      ),
+      touched: true,
+    };
   }
 
   const scoreBefore = { ...pending.ledger.score };
@@ -108,12 +166,7 @@ export function applyMatchIntent(
   return {
     notes,
     segment: [
-      buildSegmentMessage(
-        step.events,
-        step.stop ?? "flow",
-        (id: string) => playerName(state, id),
-        (side: "home" | "away") => sideTeamName(state, side),
-      ),
+      buildSegmentMessage(step.events, step.stop ?? "flow", nameOf, sideName),
       ``,
       `[구간 뒤 장부] 스코어 ${ledger.score.home}:${ledger.score.away} · ${ledger.minute}′ · ${ledger.phase}`,
     ].join("\n"),
