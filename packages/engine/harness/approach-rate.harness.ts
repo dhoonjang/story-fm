@@ -1,0 +1,114 @@
+import { describe, expect, it } from "vitest";
+import { addDays, advanceTime, diffDays, pendingApproach, pendingPress } from "@story-fm/engine";
+import type { Approach } from "@story-fm/domain";
+import { createMiniGame, keepSeat, playMockMatch } from "../test/helpers";
+import { APPROACH_RATE } from "./catalog";
+import { outOfBand, reportOf, type Readings } from "./harness";
+
+/**
+ * **세계가 얼마나 자주 먼저 말을 거는가** (→ `docs/data/people.md` §8).
+ *
+ *   pnpm balance approach-rate
+ *
+ * 감독은 아무것도 하지 않는다 — 찾아온 사람을 돌려보내지도 않고 그냥 지나친다.
+ * 그것이 **소음의 상한**이다: 임계를 낮게 잡으면 여기서 건수가 폭발하고, 높게
+ * 잡으면 한 시즌 내내 아무도 오지 않는다. 어느 쪽인지는 시즌을 굴려야 보인다.
+ *
+ * 문(하루 한 건 · 동시 하나 · 화자 쿨다운 · 회견과 겹치지 않기)은 밴드가 아니라
+ * **guard**다 — 벗어나면 눈금 문제가 아니라 구현이 샌 것이다.
+ */
+
+/** 같은 화자가 다시 오기까지 — `approach.ts`의 문과 같은 값 */
+const SPEAKER_COOLDOWN_DAYS = 7;
+
+/** 회견이 자리를 다투는 기간 — `approach.ts`의 문과 같은 값 */
+const PRESS_FRESH_DAYS = 3;
+
+/** 시즌 하나를 못 끝내면 측정이 아니다 */
+const ADVANCE_LIMIT = 480;
+
+describe("한 시즌의 다가옴", () => {
+  it("시드 42 · 축소 세계 · 아무것도 하지 않는 감독", () => {
+    const state = createMiniGame(42);
+    keepSeat(state);
+    const start = state.date;
+
+    const seen = new Map<string, Approach>();
+    /** 하루에 열린 수 — 문이 실제로 서는지는 열린 날짜로만 알 수 있다 */
+    const openedOn = new Map<string, number>();
+    let concurrent = 0;
+    let withPress = 0;
+
+    function sample(): void {
+      const open = pendingApproach(state);
+      if (!open) return;
+      if (!seen.has(open.id)) {
+        seen.set(open.id, { ...open });
+        openedOn.set(open.date, (openedOn.get(open.date) ?? 0) + 1);
+        /**
+         * **갓 열린 회견과 겹쳤는가** — 열린 그 순간에만 셀 수 있다. 사흘이 지난
+         * 회견은 감독이 지나친 것이라 자리를 다투지 않는다 (people.md §8의 다섯째 문).
+         */
+        const press = pendingPress(state);
+        if (press && diffDays(press.date, state.date) < PRESS_FRESH_DAYS) withPress += 1;
+      }
+      // 열려 있는 자리가 둘이면 `pendingApproach`가 하나만 돌려주므로 장부를 직접 본다
+      const pending = (state.approaches ?? []).filter((a) => a.status === "pending").length;
+      if (pending > 1) concurrent += 1;
+    }
+
+    for (let i = 0; i < ADVANCE_LIMIT; i++) {
+      const advanced = advanceTime(state, { days: 1 });
+      sample();
+      if (advanced.stopped === "matchday") {
+        playMockMatch(state);
+        sample();
+      }
+      if (advanced.stopped === "season_end") break;
+      if (advanced.stopped === "blocked") {
+        // 안 치른 경기가 시계를 막으면 그 경기까지 간다 (demotion-grievance와 같은 손잡이)
+        const jumped = advanceTime(state, "next_match");
+        if (!jumped.ok) break;
+        sample();
+        if (jumped.stopped === "matchday") {
+          playMockMatch(state);
+          sample();
+        }
+      }
+    }
+
+    const opened = [...seen.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
+    const byChannel = (channel: Approach["channel"]) =>
+      opened.filter((a) => a.channel === channel).length;
+
+    /** 같은 화자가 쿨다운 안에 다시 왔는가 */
+    let cooldownBreaks = 0;
+    const lastSeen = new Map<string, string>();
+    for (const approach of opened) {
+      const before = lastSeen.get(approach.speakerId);
+      if (before && diffDays(before, approach.date) < SPEAKER_COOLDOWN_DAYS) cooldownBreaks += 1;
+      lastSeen.set(approach.speakerId, approach.date);
+    }
+
+    const readings: Readings<typeof APPROACH_RATE> = {
+      "시즌 다가옴 건수": opened.length,
+      "선수 채널": byChannel("player"),
+      "주장 채널": byChannel("captain"),
+      "구단주 채널": byChannel("owner"),
+      "하루 두 건이 열린 날": [...openedOn.values()].filter((n) => n > 1).length,
+      "동시에 열린 자리": concurrent,
+      "같은 화자 7일 내 재개": cooldownBreaks,
+      "갓 열린 회견과 겹친 자리": withPress,
+      "가장 높이 오른 계단": Math.max(0, ...opened.map((a) => a.step)),
+      "첫 자리까지 걸린 날": opened[0] ? diffDays(start, opened[0].date) : Number.NaN,
+    };
+    console.log(
+      reportOf(
+        APPROACH_RATE,
+        readings,
+        `시드 42 · ${start} ~ ${state.date} (${diffDays(start, addDays(state.date, 0))}일)`,
+      ),
+    );
+    expect(outOfBand(APPROACH_RATE, readings)).toEqual([]);
+  });
+});

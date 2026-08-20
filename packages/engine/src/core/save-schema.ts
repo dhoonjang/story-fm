@@ -21,6 +21,8 @@ import {
   PersonaSchema,
   PlayerIssueSchema,
   PlayerTrainingSchema,
+  ApproachPressureSchema,
+  ApproachSchema,
   PressConferenceSchema,
   RoleMemorySchema,
   ScheduleEntrySchema,
@@ -91,6 +93,8 @@ export const SaveSchema = z
     playerTraining: z.array(PlayerTrainingSchema),
     roleMemory: z.array(RoleMemorySchema),
     pressConferences: z.array(PressConferenceSchema),
+    approaches: z.array(ApproachSchema),
+    approachPressure: z.array(ApproachPressureSchema),
     financeReports: z.array(FinanceReportSchema),
     leagueHistory: z.array(LeagueFinalTableSchema),
     // 없을 수 있는 것 — 로드가 채우지 않는다(없는 것이 곧 뜻이다)

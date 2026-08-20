@@ -1,6 +1,7 @@
 import type {
   GamePlayer,
   MatchRecord,
+  PressAxis,
   PressConference,
   PressFact,
   PressStance,
@@ -48,10 +49,7 @@ export const PRESS_BAND = 4;
  * 표의 요점은 **공짜가 없다**는 것이다. 선수를 감싸면 라커룸을 얻고 언론을 잃고,
  * 날을 세우면 그 반대다. 어느 행도 전부 양수이지 않다 — 그러면 그 스탠스만 쓴다.
  */
-const STANCE_TABLE: Record<
-  PressStance,
-  { board: number; media: number; squad: number; target: number; team: number }
-> = {
+const STANCE_TABLE: Record<PressStance, Record<PressAxis, number>> = {
   defend: { board: -0.2, media: -0.4, squad: 1, target: 1, team: 0.5 },
   own: { board: 0.6, media: 0.2, squad: 0.6, target: 0.3, team: 0.25 },
   criticise: { board: 0.3, media: 0.8, squad: -0.9, target: -1, team: -0.5 },
@@ -64,7 +62,13 @@ const STANCE_TABLE: Record<
  * 그래서 거절은 "아무 일 없음"이 아니라 **언론을 잃는 선택**이다. 라커룸이 조금
  * 오르는 건 감독이 총대를 멘 것으로 읽히기 때문이다.
  */
-const DECLINE = { board: -0.3, media: -1, squad: 0.2, target: 0, team: 0 };
+const DECLINE: Record<PressAxis, number> = {
+  board: -0.3,
+  media: -1,
+  squad: 0.2,
+  target: 0,
+  team: 0,
+};
 
 /** 평판 눈금의 위끝 — 0~100 */
 const REPUTATION_MAX = 100;
@@ -411,34 +415,69 @@ export function applyPressOutcome(
   stance: PressStance | null,
   targetPlayerId?: string | null,
 ): PressEffect {
-  const row = stance === null ? DECLINE : STANCE_TABLE[stance];
-  const band = PRESS_BAND * conference.weight;
-  const lead = leadershipFactor(state);
-
-  const board = Math.round(row.board * band);
-  const media = Math.round(row.media * band);
-  const squad = Math.round(row.squad * band);
-  const rep = state.manager.reputation;
-  rep.board = clampRep(rep.board + board);
-  rep.media = clampRep(rep.media + media);
-  rep.squad = clampRep(rep.squad + squad);
-
-  // 팀 전체 — 라커룸도 회견을 본다
-  const team = Math.round(row.team * band * lead);
-  if (team !== 0) {
-    for (const p of userPlayers(state)) p.state.form = clampForm(p.state.form + moraleToForm(team));
-  }
-
   /**
    * 지목된 선수 — **팀 전체 위에 더 얹는다.** 공개적으로 감싸이거나 잘린 당사자는
    * 같은 말을 남의 이야기로 듣지 않는다. 이름을 부른 질문이 없으면 없다.
    */
   const askedAbout =
     targetPlayerId ?? conference.facts.find((f) => f.about !== null)?.about ?? null;
-  const targetPlayer = askedAbout
-    ? (userPlayers(state).find((p) => p.id === askedAbout) ?? null)
+  return applyStanceOutcome(state, {
+    row: stanceRow(stance),
+    band: PRESS_BAND * conference.weight,
+    targetPlayerId: askedAbout,
+  });
+}
+
+/** 스탠스 한 줄 — `null`이면 답하지 않은 것이다. 표를 여는 유일한 문 */
+export function stanceRow(stance: PressStance | null): Record<PressAxis, number> {
+  return stance === null ? DECLINE : STANCE_TABLE[stance];
+}
+
+/** 자리가 닿을 수 있는 축 전부 — 회견은 마이크 앞이라 하나도 죽지 않는다 */
+const ALL_AXES: readonly PressAxis[] = ["board", "media", "squad", "target", "team"];
+
+/**
+ * 스탠스 한 줄을 실제 변화로 옮긴다 — **표도 리더십 계수도 여기 하나뿐이다.**
+ *
+ * 회견과 다가옴이 같은 함수를 쓰는 이유가 그것이다(people.md §8): 두 자리가 표를
+ * 따로 들면 "감싸기가 라커룸을 얼마나 올리는가"가 두 값이 되고, 한쪽만 고쳐진 채
+ * 오래 산다.
+ *
+ * @param axes 이 자리가 닿는 축. 없으면 전부 — 사석의 대화는 언론 축을 뺀다.
+ */
+export function applyStanceOutcome(
+  state: GameState,
+  input: {
+    row: Record<PressAxis, number>;
+    /** 한도 — 이 자리가 옮길 수 있는 폭 */
+    band: number;
+    targetPlayerId?: string | null;
+    axes?: readonly PressAxis[];
+  },
+): PressEffect {
+  const live = new Set(input.axes ?? ALL_AXES);
+  const on = (axis: PressAxis) => (live.has(axis) ? input.row[axis] : 0);
+  const band = input.band;
+  const lead = leadershipFactor(state);
+
+  const board = Math.round(on("board") * band);
+  const media = Math.round(on("media") * band);
+  const squad = Math.round(on("squad") * band);
+  const rep = state.manager.reputation;
+  rep.board = clampRep(rep.board + board);
+  rep.media = clampRep(rep.media + media);
+  rep.squad = clampRep(rep.squad + squad);
+
+  // 팀 전체 — 라커룸도 회견을 본다
+  const team = Math.round(on("team") * band * lead);
+  if (team !== 0) {
+    for (const p of userPlayers(state)) p.state.form = clampForm(p.state.form + moraleToForm(team));
+  }
+
+  const targetPlayer = input.targetPlayerId
+    ? (userPlayers(state).find((p) => p.id === input.targetPlayerId) ?? null)
     : null;
-  const target = targetPlayer ? Math.round(row.target * band * lead) : 0;
+  const target = targetPlayer ? Math.round(on("target") * band * lead) : 0;
   if (targetPlayer && target !== 0) {
     targetPlayer.state.form = clampForm(targetPlayer.state.form + moraleToForm(target));
   }
@@ -456,7 +495,8 @@ function cardPlayers(state: GameState, conference: PressConference): GamePlayer[
 }
 
 /** 부호를 붙인 한 줄 — 0은 쓰지 않는다 */
-const signed = (label: string, v: number) => (v === 0 ? null : `${label} ${v > 0 ? "+" : ""}${v}`);
+export const signed = (label: string, v: number) =>
+  v === 0 ? null : `${label} ${v > 0 ? "+" : ""}${v}`;
 
 /**
  * `respond_to_media` — 감독이 회견에 답한다. **판정형**이다.
@@ -531,7 +571,7 @@ export function declinePress(state: GameState): SkillResult {
   };
 }
 
-const STANCE_KO: Record<PressStance, string> = {
+export const STANCE_KO: Record<PressStance, string> = {
   defend: "감싸기",
   own: "책임 인정",
   criticise: "공개 비판",

@@ -204,19 +204,23 @@ row, 지난 일 = 그대로 이력.**
 
 ### 3.5 진행 중인 흥정 · 세계의 부름
 
-| 엔티티                               | 무엇                                                          | 정의                   |
-| ------------------------------------ | ------------------------------------------------------------- | ---------------------- |
-| `negotiations` `Negotiation`         | 진행 중 협상 — 영입·매각·재계약·임대(양방향)                  | `domain/records.ts`    |
-| ↳ `NegotiationRound`                 | 오퍼 한 번 — 조건·응답 예정일·코어 확률·판정·`pitch`          | `domain/records.ts`    |
-| ↳ `Medical`                          | 합의와 계약 사이의 검진 — `scheduled`/`passed`/`flagged`      | `domain/records.ts`    |
-| ↳ `PitchClaim`                       | 설득 논거 10종 — 코어가 사실 대조한다                         | `domain/persuasion.ts` |
-| `pressConferences` `PressConference` | 기자회견 — 열린 시점과 답한 시점이 갈린다                     | `domain/press.ts`      |
-| ↳ `PressFact`                        | **사실 카드** (질문 문장이 아니다) — 기자는 이 밖을 못 묻는다 | `domain/press.ts`      |
-| `aiDeals` `AiDeal`                   | 이번 주에 정해진, 날짜가 흩어진 AI 이적                       | `market/ai-market.ts`  |
+| 엔티티                                | 무엇                                                          | 정의                   |
+| ------------------------------------- | ------------------------------------------------------------- | ---------------------- |
+| `negotiations` `Negotiation`          | 진행 중 협상 — 영입·매각·재계약·임대(양방향)                  | `domain/records.ts`    |
+| ↳ `NegotiationRound`                  | 오퍼 한 번 — 조건·응답 예정일·코어 확률·판정·`pitch`          | `domain/records.ts`    |
+| ↳ `Medical`                           | 합의와 계약 사이의 검진 — `scheduled`/`passed`/`flagged`      | `domain/records.ts`    |
+| ↳ `PitchClaim`                        | 설득 논거 10종 — 코어가 사실 대조한다                         | `domain/persuasion.ts` |
+| `pressConferences` `PressConference`  | 기자회견 — 열린 시점과 답한 시점이 갈린다                     | `domain/press.ts`      |
+| ↳ `PressFact`                         | **사실 카드** (질문 문장이 아니다) — 기자는 이 밖을 못 묻는다 | `domain/press.ts`      |
+| `approaches` `Approach`               | 다가옴 — 압력이 임계를 넘어 코어가 연 자리 (people.md §8)     | `domain/press.ts`      |
+| `approachPressure` `ApproachPressure` | 압력 눈금 — 주제별 누적과 계단. 파생할 수 없는 유일한 값      | `domain/press.ts`      |
+| `aiDeals` `AiDeal`                    | 이번 주에 정해진, 날짜가 흩어진 AI 이적                       | `market/ai-market.ts`  |
 
-이 넷이 세이브에 남는 이유는 같다 — **두 시점 사이에 걸쳐 있어** 파생으로 되돌릴
-수 없다. 협상은 며칠에 걸쳐 오퍼가 오가고, 회견은 열린 뒤 감독이 다음 날 답할 수
-있고, AI 이적은 주 단위로 계획해 날짜별로 실행한다.
+이것들이 세이브에 남는 이유는 같다 — **두 시점 사이에 걸쳐 있어** 파생으로 되돌릴
+수 없다. 협상은 며칠에 걸쳐 오퍼가 오가고, 회견과 다가옴은 열린 뒤 감독이 다음 날
+답할 수 있고, AI 이적은 주 단위로 계획해 날짜별로 실행한다. 압력 눈금
+(`approachPressure`)만 결이 다르다 — 그것은 **감독이 무엇을 하지 않았는지의 누적**이라
+애초에 원본이 장부에 없다 (people.md §8).
 
 ### 3.6 감독 · 서사
 

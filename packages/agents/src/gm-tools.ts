@@ -39,6 +39,7 @@ import {
   playerName,
   recallLoan,
   releasePlayer,
+  respondToApproach,
   respondToMedia,
   scheduleView,
   scoutPlayer,
@@ -488,6 +489,15 @@ export function buildGmTools(
           targetPlayerId: input.targetPlayerId ?? null,
         });
       },
+    ),
+    wrap(
+      "respond_to_approach",
+      descriptions.respond_to_approach,
+      z.object({
+        stance: z.enum(PRESS_STANCES).optional(),
+        decline: z.boolean().optional().describe("감독이 자리를 주지 않고 돌려보냈으면 true"),
+      }),
+      (input) => respondToApproach(state, input),
     ),
     wrap(
       "substitute",

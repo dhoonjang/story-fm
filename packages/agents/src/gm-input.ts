@@ -10,6 +10,7 @@ import {
   dayOfWeek,
   describeNegotiations,
   describeNextFixture,
+  describePendingApproach,
   describePendingPress,
   describeWindowState,
   expiringContracts,
@@ -470,6 +471,9 @@ export function buildGmStateNote(
   // 답을 기다리는 기자회견 — 이 줄이 없으면 모델은 회견이 열린 사실 자체를 모른다
   const press = describePendingPress(state);
   if (press) lines.push(press);
+  // 감독을 찾아온 사람 — 세계가 먼저 연 자리다 (people.md §8). 회견과 함께 서지 않는다
+  const approach = describePendingApproach(state);
+  if (approach) lines.push(approach);
   // 협상은 있을 때만 — 없으면 한 줄도 쓰지 않는다 (매 턴 정가로 읽히는 블록이다)
   const negotiations = describeNegotiations(state);
   if (!negotiations.startsWith("진행 중인 협상 없음")) {

@@ -68,7 +68,7 @@ describe("규칙이 사는 자리", () => {
 
   /**
    * 설명은 고정층에 매 턴 실린다 — 길이 예산이 없으면 규칙 하나를 지울 때마다 설명
-   * 두 줄이 붙어도 아무 데서도 드러나지 않는다. 상한은 지금 총량(≈6,980자)에 한 도구
+   * 두 줄이 붙어도 아무 데서도 드러나지 않는다. 상한은 지금 총량(≈7,330자)에 한 도구
    * 몫의 여유를 얹은 값이다 — **도구가 늘 때만** 그만큼 올린다.
    */
   it("설명은 길이 예산 안에 있다", () => {
@@ -76,7 +76,7 @@ describe("규칙이 사는 자리", () => {
     for (const skill of SKILL_CATALOG) {
       expect(skill.description.length, skill.name).toBeLessThanOrEqual(600);
     }
-    expect(total).toBeLessThanOrEqual(7_300);
+    expect(total).toBeLessThanOrEqual(7_700);
   });
 });
 

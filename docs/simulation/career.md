@@ -190,6 +190,22 @@
 | 3       | 12 · 15 · 18               | 11 · 14 · 16             |
 | 4       | 17 · 18 · 20               | 15 · 16 · 18             |
 
+**보드는 순위만 걸지 않는다 — 구단주가 직접 온다.** 순위가 기대 아래로 처져 있는
+동안 압력이 쌓이고 임계를 넘으면 구단주가 감독실 문을 두드린다 (다가옴의 `results`
+주제 — [../data/people.md](../data/people.md) §8). 경고와 눈금을 따로 두는 이유는
+하는 일이 다르기 때문이다.
+
+| 무엇      | 경고 (`reviewUserSeat`)    | 구단주의 다가옴                           |
+| --------- | -------------------------- | ----------------------------------------- |
+| 세는 것   | 위험 순위 아래에 있는가    | 기대 순위 아래에 있던 **날 수**           |
+| 주기      | 한 달에 한 번까지          | 압력 100 · 200 · 300 · 400                |
+| 남기는 것 | 보드 평판 −6 · 경고 카운터 | 감독이 **답할 자리** — 답이 평판을 옮긴다 |
+| 끝        | 3회에서 경질 판정으로 간다 | 계단 3에서 멈춘다 (경질과 무관하다)       |
+
+⚠️ **두 눈금이 같은 사실을 보되 자리를 다투지 않는다.** 경고는 감독의 거취를 재고
+다가옴은 감독에게 말할 자리를 준다 — 잘 답해도 경고는 지워지지 않는다. 경고를 지우는
+것은 순위뿐이다.
+
 **감독의 자리**(`reviewUserSeat` — tick이 매일 본다):
 
 1. 리그 12경기를 치르기 전에는 보지 않는다.
@@ -285,7 +301,8 @@ dismissal: {
 1. `userTeamId`가 새 구단이 되고, 그 구단의 `managerName`이 감독 이름 · `managerSince`가
    오늘이 된다.
 2. `dismissal`이 지워지고 남은 제안은 만료된다.
-3. 보드 경고(`boardWarnings`·`lastWarnedOn`)가 지워진다 — 앞 구단의 경고를 지고 가지 않는다.
+3. 보드 경고(`boardWarnings`·`lastWarnedOn`)와 **다가옴의 압력**(§5의 표 · people.md §8)이
+   지워진다 — 앞 구단의 것을 지고 가지 않는다.
 4. 기본 훈련이 새 선수단으로 다시 깔린다.
 
 ⚠️ **부임 직후엔 자리를 보지 않는다.** 새 구단의 순위는 앞 감독이 만든 것이라
@@ -385,9 +402,10 @@ board: {
 
 ## 8. 미해결
 
-- **보드 요청·목표 시스템이 없다.** `competition/season.ts`의 `boardExpectation`이
-  순위 목표 하나를 돌려주고 `market/manager-market.ts`가 경고·경질·제안만 한다 — 구단주가
-  무언가를 요구하는 길이 없다(설계는 [../data/people.md](../data/people.md)).
+- **보드가 거는 것은 순위 하나다.** 구단주가 먼저 말을 거는 길은 생겼지만(§5) 그
+  자리에서도 재료는 `competition/season.ts`의 `boardExpectation`이 돌려주는 순위
+  목표뿐이다 — 영입 승인·예산 상한·특정 선수 기용 같은 **조건부 요청**이 없고, 감독의
+  답이 그 요청을 이행했는지 판정하는 길도 없다.
 - **이직은 제안 수락까지다** (§5.1). 연봉·계약 기간·이적 예산을 두고 흥정하는 자리가
   없고, 감독이 먼저 자리를 노크할 수도 없다.
 - **경질이 커리어 표에 남지 않는다** — 부임하면 `dismissal` 카드가 지워지고, 잘린 시즌은
@@ -408,6 +426,7 @@ board: {
 | 체력 안개 (`ANALYSIS_FLOOR`)  | `packages/engine/src/squad/scouting.ts`                                                            |
 | 딜 확률 기여                  | `packages/engine/src/market/market.ts`                                                             |
 | 기자회견 스탠스·평판 폭       | `packages/engine/src/club/press.ts`                                                                |
+| 다가옴 압력·임계·응답         | `packages/engine/src/club/approach.ts`                                                             |
 | 보드 기대·시즌 리뷰·업적      | `packages/engine/src/competition/season.ts`                                                        |
 | 경고·경질·제안·부임           | `packages/engine/src/market/manager-market.ts`                                                     |
 | 무직의 tick (`managedTeamId`) | `packages/engine/src/core/tick.ts` · `core/state.ts`                                               |

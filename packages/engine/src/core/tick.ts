@@ -44,6 +44,7 @@ import {
 } from "../club/finance";
 // 핵심 자원의 경계는 회견이 쥔다 — 같은 자를 두 곳에 적으면 한쪽만 움직인다
 import { SQUAD_CORE_SIZE } from "../club/press";
+import { tickApproaches } from "../club/approach";
 import {
   TRAINING_INJURY_PER_SESSION,
   easeProneness,
@@ -497,6 +498,14 @@ function dailyTick(
     warnExpiringContracts(state, digest);
   }
 
+  /**
+   * 세계가 먼저 말을 건다 — 압력이 임계를 넘으면 코어가 자리를 연다 (people.md §8).
+   * **불만·순위·폼이 다 움직인 뒤**에 재야 오늘의 사실로 압력이 쌓인다.
+   *
+   * 무직에게는 찾아올 사람이 없다 — 선수단도 보드도 이제 남의 것이다 (career.md §5.1).
+   */
+  const approached = managed !== null && tickApproaches(state, digest);
+
   // 이적창 개장·폐장 안내
   for (const entry of todays) {
     if (entry.type !== "window-open" && entry.type !== "window-close") continue;
@@ -516,8 +525,11 @@ function dailyTick(
    * 오늘이 기한인 협상 앞에서만 멈춘다 — 무직에게는 그런 협상이 없다.
    * 대신 **감독직 제안**이 붙은 날 멈춘다: 10일 뒤 사라지는 것이라 감독이
    * 모르는 채 지나가면 안 된다 (career.md §5.1).
+   *
+   * **찾아온 사람도 같은 자리에 선다** (people.md §8) — 그 자리는 사흘이면 사라지고,
+   * 시간이 그 위를 지나가면 남는 것은 평판이 깎였다는 다이제스트 한 줄뿐이다.
    */
-  return offered || (managed !== null && standsToday(state, digest));
+  return approached || offered || (managed !== null && standsToday(state, digest));
 }
 
 /** 계약 만료 예고 문턱 — 내림차순, 날 단위 (season.md §5) */

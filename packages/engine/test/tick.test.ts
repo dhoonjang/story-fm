@@ -8,6 +8,7 @@ import {
   assignmentsOf,
   financeOf,
   openInjury,
+  pendingApproach,
   pendingVerdicts,
   playersOf,
   setTraining,
@@ -319,7 +320,7 @@ describe("시간은 웬만하면 지나간다", () => {
     expect(state.date).toBe("2026-07-17");
   });
 
-  it("멈춘 날에는 반드시 오늘이 기한인 협상이 있다", () => {
+  it("멈춘 날에는 반드시 오늘이 기한인 협상이거나 오늘 찾아온 사람이 있다", () => {
     /**
      * **축소 세계로 민다** — 시계가 서는 규칙은 세계의 크기와 무관하다(`tick.ts`의
      * 같은 갈래를 탄다). 전체 세계로 한 시즌을 밀면 이 한 케이스가 30초를 넘게 쓴다.
@@ -328,7 +329,8 @@ describe("시간은 웬만하면 지나간다", () => {
     /**
      * 한 시즌을 통째로 밀면서 **멈춘 이유를 전부 확인**한다. 부상이 나고 불만이
      * 생기고 오퍼가 들어와도 시계는 지나가야 하고, 섰다면 그 자리엔 반드시
-     * 오늘이 마지막 날인 결정이 있어야 한다.
+     * 오늘이 마지막 날인 결정 — 기한인 협상이거나 오늘 열린 다가옴 — 이 있어야 한다
+     * (people.md §8 · season.md §5의 표).
      */
     let injuries = 0;
     let stops = 0;
@@ -337,7 +339,8 @@ describe("시간은 웬만하면 지나간다", () => {
       if (r.stopped === "attention") {
         stops++;
         const due = pendingVerdicts(state).filter((v) => v.negotiation.expiresOn === state.date);
-        expect(due.length, `${state.date}에 기한 없는 멈춤`).toBeGreaterThan(0);
+        const came = pendingApproach(state)?.date === state.date;
+        expect(due.length + (came ? 1 : 0), `${state.date}에 이유 없는 멈춤`).toBeGreaterThan(0);
       }
       if (r.stopped === "matchday") state.phase = "idle";
       if (r.stopped === "season_end") break;

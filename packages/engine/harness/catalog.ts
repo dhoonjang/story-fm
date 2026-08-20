@@ -297,6 +297,34 @@ export const DEMOTION_GRIEVANCE = defineHarness({
 });
 
 /**
+ * 다가옴의 건수 — **세계가 얼마나 자주 먼저 말을 거는가** (`docs/data/people.md` §8).
+ *
+ * 임계·증가량은 코드를 읽어서는 정할 수 없는 값이다. 낮으면 감독이 매주 감독실 문을
+ * 열어 주다 지치고, 높으면 "세계는 감독 없이도 움직인다"가 사기 숫자로만 남는다.
+ * 한 시즌을 **아무것도 하지 않는 감독**으로 굴려 건수와 채널 분포를 잰다 — 방치의
+ * 상한이 곧 이 기능의 소음 상한이다.
+ */
+export const APPROACH_RATE = defineHarness({
+  id: "approach-rate",
+  what: "한 시즌 다가옴 건수 · 채널 분포 · 소음의 문이 실제로 서는가",
+  doc: "docs/data/people.md §8",
+  cost: "축소 세계 한 시즌 · 약 10초",
+  // prettier-ignore
+  bands: [
+    { metric: "시즌 다가옴 건수", role: "guard", min: 3, max: 36, unit: "count", why: "**방치만 하는 감독의 상한**이다. 아래끝은 세계가 조용한 것이고, 위끝은 열흘에 한 번 — 그보다 잦으면 답하는 감독에게도 소음이 된다" },
+    { metric: "선수 채널", role: "measure", unit: "count", why: "자기 일로 온 사람 — 불만 수를 따라간다" },
+    { metric: "주장 채널", role: "measure", unit: "count", why: "라커룸이 식은 구간이 있었는가" },
+    { metric: "구단주 채널", role: "measure", unit: "count", why: "순위가 기대 아래에 머문 구간 — 보드 요청" },
+    { metric: "하루 두 건이 열린 날", role: "guard", max: 0, unit: "count", why: "하루 한 건의 문 (people.md §8)" },
+    { metric: "동시에 열린 자리", role: "guard", max: 0, unit: "count", why: "열려 있는 다가옴은 하나뿐" },
+    { metric: "같은 화자 7일 내 재개", role: "guard", max: 0, unit: "count", why: "같은 화자 쿨다운" },
+    { metric: "갓 열린 회견과 겹친 자리", role: "guard", max: 0, unit: "count", why: "한 번에 답을 요구하는 자리는 하나다 — 사흘 지난 회견은 세지 않는다" },
+    { metric: "가장 높이 오른 계단", role: "measure", unit: "count", why: "방치만 하는 감독이 사다리 끝까지 가는가 — 3이어야 한다" },
+    { metric: "첫 자리까지 걸린 날", role: "measure", unit: "count", why: "임계 100을 채우는 데 걸린 실제 날 수" },
+  ],
+});
+
+/**
  * 종합 눈금 — **그 숫자가 굴리는 것들의 분포** (`docs/data/player.md` §4).
  *
  * 종합은 화면의 숫자 하나가 아니라 시장가·주급 서열·잠재력 간격·등급 색이 함께 읽는
@@ -385,6 +413,7 @@ export const HARNESSES: readonly Harness[] = [
   MANAGER_MARKET,
   SQUAD_LONGEVITY,
   DEMOTION_GRIEVANCE,
+  APPROACH_RATE,
   OVERALL_SCALE,
   HISTORY_WINDOW,
 ];

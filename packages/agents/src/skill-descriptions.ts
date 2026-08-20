@@ -129,6 +129,17 @@ export const SKILL_CATALOG = [
       "회견을 거절하거나 자리를 피한 것도 하나의 답이다.",
   },
   {
+    name: "respond_to_approach",
+    label: "찾아온 사람 응대",
+    group: "대화·서사",
+    readOnly: false,
+    description:
+      "**세계가 먼저 연 자리**에 감독이 답한 결과를 기록한다(스냅샷의 '찾아온 사람'에 화자와 사실이 실려 있다 — 없으면 쓰지 마라). " +
+      "자리가 열려 있으면 지목된 화자로 장면을 열되 사실을 그대로 읽지 말고 그 사람의 말로 옮겨라. 감독이 아직 답하지 않은 턴에는 그 사람의 말까지만 쓰고 부르지 않는다. " +
+      "감독의 발화를 stance 하나로 옮긴다: defend(감싼다) · own(책임을 진다) · criticise(날을 세운다) · bold(도발) · deflect(말을 아낀다). 자리를 주지 않고 돌려보냈으면 decline: true. " +
+      "⚠️ 압력만 되돌린다 — 불만은 talk_to_player·승격·선발로만 풀린다.",
+  },
+  {
     name: "substitute",
     label: "선수 교체",
     group: "경기",

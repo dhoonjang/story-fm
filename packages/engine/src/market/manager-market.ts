@@ -455,6 +455,12 @@ export function acceptManagerOffer(state: GameState, ref: string): SkillResult {
   // 앞 구단의 경고를 지고 가지 않는다
   delete state.manager.boardWarnings;
   delete state.manager.lastWarnedOn;
+  /**
+   * 다가옴의 압력도 마찬가지다 (people.md §8) — 앞 구단 선수의 불만이 쌓아 둔 눈금을
+   * 지고 오면, 새 구단 첫 주에 이미 사다리 중턱에서 시작한다.
+   */
+  state.approaches = [];
+  state.approachPressure = [];
   // 기본 훈련은 새 선수단으로 다시 깔린다
   syncDefaultTraining(state);
 

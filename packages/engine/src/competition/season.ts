@@ -849,6 +849,13 @@ export function transitionSeason(state: GameState): string[] {
   // 새 시즌 프리시즌도 기본 훈련으로 시작한다 — 감독의 지시는 시즌과 함께 지워진다
   installDefaultTraining(state);
   state.issues = [];
+  /**
+   * **압력도 계단도 시즌과 함께 새로 센다** (people.md §8) — 지난 시즌의 방치를
+   * 새 시즌 첫 주에 들고 오면 감독이 무엇을 해도 이미 3계단에서 시작한다.
+   * 불만(`state.issues`)을 지우는 것과 같은 규약이다.
+   */
+  state.approaches = [];
+  state.approachPressure = [];
   // 시즌 단위 징계는 리셋 (경고 이력은 BOOKING에 시즌 키로 남는다)
   for (const s of state.suspensions) if (s.status === "active") s.status = "done";
   state.phase = "idle";

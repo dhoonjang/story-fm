@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { addDays, playerById, speakerCues, userPlayers, type GameState } from "@story-fm/engine";
+import {
+  addDays,
+  APPROACH_THRESHOLD,
+  approachThreshold,
+  pendingApproach,
+  playerById,
+  respondToApproach,
+  speakerCues,
+  tickApproaches,
+  userPlayers,
+  type GameState,
+} from "@story-fm/engine";
+import type { PlayerIssueReason } from "@story-fm/domain";
 import { createTestGame } from "./helpers";
 
 /**
@@ -163,5 +175,197 @@ describe("한 사람이 계속 말하지 않는다", () => {
       state.date = addDays(state.date, 1);
     }
     expect(seen.size).toBeGreaterThan(1);
+  });
+});
+
+/**
+ * 다가옴 — **세계가 먼저 말을 건다** (approach.ts · people.md §8).
+ *
+ * 근황과 같은 파일에 두는 이유는 재는 것이 하나이기 때문이다: 코어가 감독에게
+ * 무엇을 내미는가. 근황은 사실을 흘리고, 다가옴은 답을 요구한다.
+ */
+
+/** 그 선수에게 출전 기회 불만을 건다 — 압력의 원인이 서는 유일한 길이다 */
+function gripe(state: GameState, playerId: string, reason: PlayerIssueReason = "minutes") {
+  state.issues.push({ gamePlayerId: playerId, kind: "unhappy", reason, since: state.date });
+}
+
+/** 하루씩 민다 — tick 전체가 아니라 압력만 굴려 다른 사건이 섞이지 않게 한다 */
+function pressDays(state: GameState, days: number): string[] {
+  const digest: string[] = [];
+  for (let i = 0; i < days; i++) {
+    state.date = addDays(state.date, 1);
+    tickApproaches(state, digest);
+  }
+  return digest;
+}
+
+describe("압력이 임계를 넘어야 자리가 열린다", () => {
+  it("임계 직전까지는 아무도 오지 않는다 — 넘은 날 온다", () => {
+    const state = quiet(createTestGame(11));
+    const target = firsts(state, 1)[0]!;
+    gripe(state, target.id);
+
+    // minutes는 하루 7 — 14일이면 98로 임계 100에 못 미친다
+    pressDays(state, 14);
+    expect(pendingApproach(state)).toBeNull();
+
+    pressDays(state, 1);
+    const open = pendingApproach(state);
+    expect(open?.speakerId).toBe(target.name);
+    expect(open?.about).toBe(target.id);
+    expect(open?.step).toBe(1);
+  });
+
+  it("열려 있는 동안에는 다음 자리가 열리지 않는다", () => {
+    const state = quiet(createTestGame(11));
+    const [a, b] = firsts(state, 2);
+    gripe(state, a!.id);
+    gripe(state, b!.id);
+    pressDays(state, 15);
+    const first = pendingApproach(state);
+    expect(first).not.toBeNull();
+    // 사흘을 넘기면 코어가 닫고, 지나친 그날에는 다음 사람이 오지 않는다
+    pressDays(state, 3);
+    expect(pendingApproach(state)).toBeNull();
+    expect(first?.status).toBe("declined");
+  });
+});
+
+describe("답한 것과 답하지 않은 것의 차이는 남는 압력이다", () => {
+  it("답하면 압력이 0으로, 계단이 하나 오른다 — 다음 임계는 두 배다", () => {
+    const state = quiet(createTestGame(11));
+    const target = firsts(state, 1)[0]!;
+    gripe(state, target.id);
+    pressDays(state, 15);
+
+    expect(respondToApproach(state, { stance: "defend" }).ok).toBe(true);
+    const row = state.approachPressure!.find((r) => r.subject === target.id)!;
+    expect(row.value).toBe(0);
+    expect(row.step).toBe(1);
+    expect(approachThreshold(row.step)).toBe(APPROACH_THRESHOLD * 2);
+
+    // 200을 채우는 데 하루 7이면 29일 — 28일째에는 아직 오지 않는다
+    pressDays(state, 28);
+    expect(pendingApproach(state)).toBeNull();
+    pressDays(state, 1);
+    expect(pendingApproach(state)?.step).toBe(2);
+  });
+
+  it("돌려보내면 직전 임계의 75%가 남는다 — 무시가 다음 계단을 앞당긴다", () => {
+    const state = quiet(createTestGame(11));
+    const target = firsts(state, 1)[0]!;
+    gripe(state, target.id);
+    pressDays(state, 15);
+
+    expect(respondToApproach(state, { decline: true }).ok).toBe(true);
+    const row = state.approachPressure!.find((r) => r.subject === target.id)!;
+    expect(row.value).toBe(APPROACH_THRESHOLD * 0.75);
+    expect(row.step).toBe(1);
+  });
+
+  it("답이 원인을 지우지는 않는다 — 불만은 그대로 남는다", () => {
+    const state = quiet(createTestGame(11));
+    const target = firsts(state, 1)[0]!;
+    gripe(state, target.id);
+    pressDays(state, 15);
+    respondToApproach(state, { stance: "own" });
+    expect(state.issues.some((i) => i.gamePlayerId === target.id)).toBe(true);
+  });
+});
+
+describe("원인이 사라지면 식는다", () => {
+  it("불만이 풀리면 압력이 빠지고, 계단은 남는다", () => {
+    const state = quiet(createTestGame(11));
+    const target = firsts(state, 1)[0]!;
+    gripe(state, target.id);
+    pressDays(state, 15);
+    respondToApproach(state, { stance: "defend" });
+
+    pressDays(state, 5); // 압력 35
+    state.issues = state.issues.filter((i) => i.gamePlayerId !== target.id);
+    pressDays(state, 3); // 하루 12씩 식어 0에서 멈춘다
+    const row = state.approachPressure!.find((r) => r.subject === target.id)!;
+    expect(row.value).toBe(0);
+    expect(row.step).toBe(1);
+  });
+});
+
+describe("찾아온 사람은 근황 줄에 다시 서지 않는다", () => {
+  it("같은 선수를 두 자리가 함께 밀지 않는다", () => {
+    const state = quiet(createTestGame(11));
+    const target = firsts(state, 1)[0]!;
+    target.state.form = -0.8; // 근황이 붙는 폼
+    gripe(state, target.id);
+    pressDays(state, 15);
+    expect(pendingApproach(state)?.about).toBe(target.id);
+    expect(speakerCues(state, 10).some((c) => c.playerId === target.id)).toBe(false);
+  });
+});
+
+describe("자리는 그 자리에 있던 사람에게만 닿는다", () => {
+  it("구단주와 닫고 한 이야기는 언론 평판을 움직이지 않는다", () => {
+    const state = quiet(createTestGame(11));
+    const before = { ...state.manager.reputation };
+    state.approaches = [
+      {
+        id: "approach-results-board-x",
+        date: state.date,
+        channel: "owner",
+        topic: "results",
+        speakerId: "구단주",
+        about: null,
+        context: "리그 15위 · 기대 6위",
+        facts: [{ kind: "standing", text: "리그 15위 · 20경기", about: null, sharp: true }],
+        step: 3,
+        status: "pending",
+      },
+    ];
+    // bold는 언론 +1 · 보드 −0.3인 행이다 — 마스킹이 없으면 언론이 크게 오른다
+    expect(respondToApproach(state, { stance: "bold" }).ok).toBe(true);
+    expect(state.manager.reputation.media).toBe(before.media);
+    expect(state.manager.reputation.board).toBeLessThan(before.board);
+  });
+
+  it("갓 열린 회견이 있으면 아무도 오지 않는다 — 감독이 지나친 회견은 자리를 다투지 않는다", () => {
+    const state = quiet(createTestGame(11));
+    const target = firsts(state, 1)[0]!;
+    gripe(state, target.id);
+    pressDays(state, 14); // 압력 98 — 임계 한 칸 앞
+
+    state.pressConferences = [
+      {
+        id: "press-x",
+        date: addDays(state.date, 1),
+        trigger: "match",
+        context: "웨스트햄전 1-3 패배",
+        facts: [{ kind: "result", text: "웨스트햄전 1-3 패배 (홈)", about: null, sharp: true }],
+        status: "pending",
+        weight: 2,
+      },
+    ];
+    pressDays(state, 1);
+    expect(pendingApproach(state)).toBeNull();
+
+    // 사흘이 지나면 그 회견은 감독이 지나친 것이고, 기다리던 사람이 온다
+    pressDays(state, 3);
+    expect(pendingApproach(state)?.about).toBe(target.id);
+  });
+});
+
+describe("자기 일이 아닌 자리는 대신 오는 사람이 있다", () => {
+  it("라커룸이 식으면 주장이 온다 — 걸린 선수 없이", () => {
+    const state = quiet(createTestGame(11));
+    const squad = userPlayers(state).filter((p) => p.squadLevel === "first");
+    for (const p of squad) p.state.form = -0.5;
+    const captain = squad.find((p) => p.isCaptain) ?? squad[0]!;
+    captain.isCaptain = true;
+
+    // morale은 하루 8 — 13일이면 104로 임계를 넘는다
+    pressDays(state, 13);
+    const open = pendingApproach(state);
+    expect(open?.channel).toBe("captain");
+    expect(open?.speakerId).toBe(captain.name);
+    expect(open?.about).toBeNull();
   });
 });

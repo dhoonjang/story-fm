@@ -91,6 +91,7 @@ export * from "./market/persuasion";
 // club — 구단 재정·기자회견
 export * from "./club/finance";
 export * from "./club/press";
+export * from "./club/approach";
 
 // skills — 감독 지시(GM 도구)의 실행부
 export * from "./skills";
