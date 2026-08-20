@@ -7,6 +7,7 @@ import {
   markEntered,
   startMatch,
   userSide,
+  userTactics,
   type CardMark,
   type GameState,
   type GoalMark,
@@ -22,6 +23,7 @@ import {
   type GmToolCall,
   type MatchIntent,
 } from "@story-fm/agents";
+import type { GameToolSpec } from "@story-fm/llm";
 import { ModelOutputError } from "../src/retry";
 
 /** 실모드 경기 턴이 부르는 모델 — 해석도 중계도 이 하나를 거친다 */
@@ -362,5 +364,74 @@ describe("구간 대본 — 배우 표기", () => {
     expect(script({ minute: 45, type: "half_time", actors: [], causes: [] })).toContain(
       "- 45′ 하프타임",
     );
+  });
+});
+
+/**
+ * **평시 GM 턴 — 도구가 돈 턴은 장면 없이 저장되지 않는다.**
+ *
+ * 조회와 실행으로 왕복 상한(8회)을 채우면 모델은 "확인하겠습니다" 한 줄만 남기거나
+ * 아무것도 쓰지 못한 채 `stopReason: "tool_use"`로 돌아온다. 그때 라인업·전술은 이미
+ * 바뀐 뒤라 되돌릴 수 없으므로, 코어가 이번 턴의 기록으로 model 턴을 세운다
+ * (docs/llm/agents.md §2·§8).
+ */
+describe("평시 GM 턴 — 상한을 도구로 채운 턴", () => {
+  const previousMode = process.env.LLM_MODE;
+  beforeEach(() => {
+    process.env.LLM_MODE = "real";
+    runTurn.mockReset();
+  });
+  afterEach(() => {
+    if (previousMode === undefined) delete process.env.LLM_MODE;
+    else process.env.LLM_MODE = previousMode;
+  });
+
+  /** 부임 첫날의 판 — 도구를 쥐는 것은 평시 GM뿐이다 (경기 중엔 도구 표면이 0) */
+  const IDLE = ((): GameState => {
+    const background = "K리그에서 뛰다 은퇴한 수비수 출신 분석가";
+    return createGame({
+      seed: 11,
+      userTeamId: "arsenal",
+      managerName: "김감독",
+      background,
+      attributes: interpretBackgroundHeuristic(background),
+    });
+  })();
+
+  /** 상한에 걸린 응답 — 도구는 돌았고 장면은 오지 않았다 */
+  const capped = (text: string) => ({
+    text,
+    history: { version: 1 as const, provider: "anthropic" as const, model: "test", messages: [] },
+    historyBase: 0,
+    usage: { inputTokens: 10, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    toolCallCount: 8,
+    stopReason: "tool_use" as const,
+  });
+
+  it("장면이 비어도 코어 기록이 model 턴에 남는다 — 바뀐 전술과 함께", async () => {
+    const state = structuredClone(IDLE);
+    runTurn.mockImplementationOnce(async (req: { tools?: GameToolSpec[] }) => {
+      const tool = req.tools?.find((spec) => spec.name === "set_tactics");
+      expect(tool?.handle({ pressing: 5 }).ok).toBe(true);
+      // 상한을 채운 턴의 증상 — 작업 서술 한 줄만 남고 장면이 없다
+      return capped("압박을 올리겠습니다.");
+    });
+
+    const turn = await runGmTurn(state, "압박 좀 올려줘");
+
+    // 상태는 바뀐 채로 남는다 — 되돌리면 감독의 지시가 함께 사라진다
+    expect(userTactics(state).spec.pressing).toBe(5);
+    expect(turn.toolCalls.map((call) => call.name)).toContain("set_tactics");
+    // 장면 자리에는 코어의 기록이 선다 — 시점 헤더와 `@:` 내레이션
+    expect(turn.text.startsWith("[")).toBe(true);
+    expect(turn.text.split("\n").some((line) => line.startsWith("@:"))).toBe(true);
+    expect(turn.text).not.toContain("압박을 올리겠습니다");
+  });
+
+  it("장면도 기록도 없으면 아무것도 저장하지 않는다", async () => {
+    const state = structuredClone(IDLE);
+    runTurn.mockResolvedValue(capped(""));
+
+    await expect(runGmTurn(state, "오늘은 좀 쉬자")).rejects.toBeInstanceOf(GmTurnFailure);
   });
 });

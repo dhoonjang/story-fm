@@ -94,6 +94,48 @@ function advanceForSkip(state: GameState, skip: TimeSkip): AdvanceOutcome | null
   return days > 0 ? advanceTime(state, { days }) : null;
 }
 
+/** 장면이 섰는가 — 출력 문법이 요구하는 것은 `@`로 여는 줄 하나다 (prompts.md §1) */
+function hasSceneLine(text: string): boolean {
+  return text.split("\n").some((line) => line.trim().startsWith("@"));
+}
+
+/**
+ * 장면이 비어 돌아온 턴을 세우는 **코어의 기록** — 스킬이 남긴 요약을 내레이션
+ * (`@:`) 줄로 옮긴다.
+ *
+ * ⚠️ **대사는 쓰지 않는다.** 여기 서는 것은 장부가 이미 아는 사실뿐이고, 그래서
+ * "장면을 대신 써 주지 않는다"와 어긋나지 않는다 (agents.md §2·§8). 세울 기록이
+ * 없으면 null이다 — 그 턴은 아무것도 하지 않았다.
+ */
+function sceneFromToolCalls(calls: readonly GmToolCall[]): string | null {
+  const lines = calls
+    .map((call) => {
+      const brief = call.brief;
+      const body = brief
+        ? [
+            brief.head,
+            brief.items
+              .map((item) =>
+                [item.label, item.text, item.note ? `(${item.note})` : ""]
+                  .filter((part) => part && part.length > 0)
+                  .join(" "),
+              )
+              .join(" · "),
+          ]
+            .filter((part) => part.length > 0)
+            .join(" — ")
+        : call.summary
+            .split("\n")
+            .map((line) => line.trim())
+            .filter((line) => line.length > 0)
+            .join(" · ");
+      return body.trim();
+    })
+    .filter((line) => line.length > 0)
+    .map((line) => `@: *${line}*`);
+  return lines.length > 0 ? lines.join("\n") : null;
+}
+
 /** 한 턴에 세우는 스카우팅 보고서 카드 상한 — 화면이 카드로 덮이면 장면이 안 읽힌다 */
 const MAX_REPORT_CARDS = 3;
 
@@ -519,12 +561,33 @@ async function runRealGmTurn(
   // 선수 id를 이름으로 바꾸고 헤더를 되붙여 저장한다 — ⚠️ 헤더를 떼면 화면
   // (scene-stamp)의 시각이 스트리밍이 끝나는 순간 사라진다.
   // 경기 장면의 헤더는 모델의 것이 아니라 장부의 분이다 (스트리밍에 나간 것과 같다)
-  const body = humanizePlayerIds(state, scene.body);
+  let body = humanizePlayerIds(state, scene.body);
+  let header = scene.header;
+  /**
+   * **장면이 비어 돌아온 턴** — 왕복 상한을 도구로 채우면(`stopReason === "tool_use"`)
+   * 모델은 "확인하겠습니다" 한 줄만 남기거나 아무것도 쓰지 못한다. 도구는 이미 돌아
+   * 라인업과 훈련이 바뀐 뒤라 되돌릴 수 없으므로, 코어가 이번 턴의 기록으로 세운다
+   * (agents.md §2·§8). 기록도 장면도 없으면 저장하지 않고 턴을 되돌린다.
+   */
+  if (!inMatch && !hasSceneLine(body)) {
+    const record = sceneFromToolCalls(calls);
+    if (record) {
+      console.warn(
+        `[gm] 장면이 비어 코어 기록으로 세웁니다 — 종료 사유: ${result.stopReason ?? "없음"}`,
+      );
+      body = record;
+      // 모델이 헤더도 못 썼으면 코어가 지금 시각을 세운다 — 헤더가 없으면 화면의
+      // 시각이 스트리밍이 끝나는 순간 사라진다
+      header ??= `[${state.date} ${formatClock(clockOf(state))}]`;
+    } else if (body.trim().length === 0) {
+      throw new GmTurnFailure("모델이 아무 장면도 내지 않아 턴을 취소했습니다.");
+    }
+  }
   const text =
     matchMinute !== null
       ? stampMatchScene(body, matchMinute)
-      : scene.header
-        ? `${scene.header}\n${body}`
+      : header
+        ? `${header}\n${body}`
         : body;
   /**
    * 카드는 **모델이 값을 읽은 것만** 선다. 장면 헤더가 시계를 옮긴 턴은 코어가 방금
