@@ -121,8 +121,31 @@ export type Transfer = z.infer<typeof TransferSchema>;
  * 협상의 방향. `loan`은 **임대 영입**(남의 선수를 빌려 온다), `loan_out`은
  * **임대 내보내기**(우리 선수를 빌려준다). 둘 다 상대가 받아 줘야 성립하므로
  * 같은 테이블을 탄다 — 부르기(recall)만 흥정이 아니라 우리 결정이다.
+ *
+ * `release`는 **상호 계약 해지**다. 감독이 정산금을 제시하고 선수가 판정한다 —
+ * 감독이 전액을 물고 그 자리에서 끊는 일방 해지는 흥정이 아니라 우리 결정이라
+ * 이 테이블을 지나지 않는다 (docs/simulation/transfer.md §2).
  */
-export const NegotiationKindSchema = z.enum(["buy", "sell", "renew", "loan", "loan_out"]);
+export const NegotiationKindSchema = z.enum([
+  "buy",
+  "sell",
+  "renew",
+  "loan",
+  "loan_out",
+  "release",
+]);
+export type NegotiationKind = z.infer<typeof NegotiationKindSchema>;
+
+/**
+ * **상대가 선수 본인인 갈래** — 재계약과 해지.
+ *
+ * 구단이 상대인 갈래와 갈리는 자리가 여럿이다: 방향이 없고(카드 배지가 `영입`·`매각`을
+ * 달 수 없다), 이적창과 무관하며, 메디컬을 지나지 않는다(옮겨 갈 구단이 없다).
+ * 자리마다 `kind === "renew"`로 적어 두면 해지가 그 자리마다 구단 취급을 받는다.
+ */
+export function isPlayerDeal(kind: NegotiationKind): boolean {
+  return kind === "renew" || kind === "release";
+}
 
 export const NegotiationVerdictSchema = z.enum(["accept", "counter", "reject"]);
 export type NegotiationVerdict = z.infer<typeof NegotiationVerdictSchema>;
@@ -133,7 +156,8 @@ export const NegotiationRoundSchema = z.object({
   by: z.enum(["us", "them"]),
   fee: z.number().min(0),
   weeklyWage: z.number().min(0),
-  contractYears: z.number().int().min(1).max(6),
+  /** 해지는 0 — 쓸 계약이 없는 협상이다 (`isPlayerDeal`) */
+  contractYears: z.number().int().min(0).max(6),
   /** 상대 응답 예정일 — 우리 오퍼만 가진다 (상황에서 나온 지연) */
   respondsOn: DateString.nullable(),
   /** 이 오퍼 시점에 코어가 계산한 확률 — 사후에 LLM 판정의 분포를 볼 수 있다 */
@@ -172,7 +196,7 @@ export const NegotiationSchema = z.object({
   id: z.string().min(1),
   gamePlayerId: z.string().min(1),
   kind: NegotiationKindSchema,
-  /** renew는 null — 상대가 선수 본인이다 */
+  /** renew·release는 null — 상대가 선수 본인이다 (`isPlayerDeal`) */
   counterpartTeamId: z.string().min(1).nullable(),
   windowId: z.string().min(1).nullable(),
   openedOn: DateString,
@@ -185,7 +209,7 @@ export const NegotiationSchema = z.object({
    */
   pitched: z.array(PitchClaimKindSchema).optional(),
   /**
-   * 합의 뒤 잡힌 메디컬. 재계약은 갖지 않는다 — 팀을 옮기지 않으므로 검진할
+   * 합의 뒤 잡힌 메디컬. 재계약·해지는 갖지 않는다 — 팀을 옮기지 않으므로 검진할
    * 일이 없다. 구 세이브엔 없어 optional (세이브 버전을 올리지 않는다).
    */
   medical: MedicalSchema.optional(),
