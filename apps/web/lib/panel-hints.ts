@@ -49,6 +49,8 @@ export const PANEL_OF: Record<string, PanelKey> = {
   adjust_transfer_budget: "재정",
   // ── 커리어 — 세계가 감독을 보는 눈 ──
   respond_to_media: "커리어",
+  // 부임은 커리어의 사건이다 — 경질 카드가 지워지고 남은 제안이 사라지는 곳이 거기다
+  accept_manager_offer: "커리어",
 };
 
 /**
