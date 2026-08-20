@@ -2,6 +2,7 @@ import type {
   CharacterDepth,
   CharacterEntry,
   CharacterInjection,
+  CharacterMemory,
   Negotiation,
   Persona,
 } from "@story-fm/domain";
@@ -88,7 +89,11 @@ export function characterDepthOf(knowledge: Knowledge): CharacterDepth {
  * 주입한 카드는 이력에 굳으므로 3주 뒤 모델이 낡은 사실로 말하게 된다. 지금의 사실은
  * 발화 직전의 조회가 낸다 (people.md §6).
  */
-export function characterEntry(persona: Persona, depth: CharacterDepth): CharacterEntry {
+export function characterEntry(
+  persona: Persona,
+  depth: CharacterDepth,
+  memories: readonly CharacterMemory[] = [],
+): CharacterEntry {
   const entry: CharacterEntry = {
     characterId: persona.characterId,
     name: persona.name,
@@ -99,6 +104,9 @@ export function characterEntry(persona: Persona, depth: CharacterDepth): Charact
   };
   if (persona.outlet !== undefined) entry.outlet = persona.outlet;
   if (persona.real !== undefined) entry.real = persona.real;
+  // 기억은 깊이가 가르지 않는다 — 소문으로만 아는 사람이라도 **그 대화에 있었던 일**은
+  // 감독이 겪은 것이다. 깊이가 정하는 것은 그 사람의 안쪽(동기·말투)까지 아는가다
+  if (memories.length > 0) entry.memories = [...memories];
   // 소문으로만 아는 사람은 원형과 성격까지다 — 말투를 주면 모델이 만난 적 없는
   // 사람의 목소리를 낸다
   if (depth === "rumour") return entry;
@@ -126,7 +134,19 @@ export function characterEntryOf(
   depth: CharacterDepth,
 ): CharacterEntry | null {
   const persona = personaOf(state, characterId);
-  return persona ? characterEntry(persona, depth) : null;
+  return persona ? characterEntry(persona, depth, memoriesOf(state, characterId)) : null;
+}
+
+/**
+ * 그 인물의 기억 — 압축이 남긴 것들 (people.md §9-1).
+ *
+ * ⚠️ 이력을 다시 그릴 때도 **지금의** 기억이 붙는다. 그래서 압축이 도는 턴에는 이력의
+ * 카드도 함께 달라지지만, 요약 블록이 이력 앞에 서므로(agents.md §5-1) 그 턴은 어차피
+ * 그 뒤가 통째로 무효다 — 캐시로는 공짜이고, 대신 한 인물의 기억이 두 자리에서 갈리지
+ * 않는다.
+ */
+function memoriesOf(state: GameState, characterId: string): CharacterMemory[] {
+  return (state.characterMemories ?? []).filter((m) => m.characterId === characterId);
 }
 
 /** 이름으로 페르소나를 찾는다 — 저장된 인물이 먼저, 그다음이 파생하는 선수다 */
@@ -143,6 +163,14 @@ function personaOf(state: GameState, characterId: string): Persona | null {
 export interface CharacterBookInput {
   /** 이번 턴 감독 발화 — 아직 이력에 없다. "홀란드 불러줘"는 그 턴에 걸려야 한다 */
   message?: string;
+  /**
+   * 호출자가 지목한 인물 — 세이브가 여는 자리(회견)와 **같은 `RANK_POINTED` 자리**로
+   * 합류해 상한·중복 제거·정렬을 그대로 탄다 (people.md §6).
+   *
+   * 이력도 발화도 없는 턴이 여기를 쓴다: 새 게임 첫 장면은 감독이 코치를 부른 적
+   * 없어도 수석코치가 반드시 서는 자리라, 키워드가 걸릴 문장 자체가 없다.
+   */
+  pointed?: readonly string[];
   /**
    * 이력 창 **안에** 이미 서 있는 카드 — 창 밖으로 밀려난 것은 넘어오지 않는다.
    * 만료 규칙을 따로 두지 않는 자리다: 이력 창이 미끄러지면 여기서 저절로 빠지고,
@@ -168,7 +196,7 @@ export function selectCharacters(
 ): CharacterEntry[] {
   const message = input.message ?? "";
   const history = historyWindow(state);
-  const pointed = pointedReporterId(state);
+  const pointed = pointedIds(state, input.pointed);
   const standing = deepestInjected(input.injected ?? []);
 
   const picked: Array<{ rank: number; candidate: Candidate }> = [];
@@ -187,7 +215,13 @@ export function selectCharacters(
   );
   return picked
     .slice(0, CHARACTER_INJECTION_LIMIT)
-    .map(({ candidate }) => characterEntry(candidate.persona, candidate.depth));
+    .map(({ candidate }) =>
+      characterEntry(
+        candidate.persona,
+        candidate.depth,
+        memoriesOf(state, candidate.persona.characterId),
+      ),
+    );
 }
 
 /** 걸렸는가, 어느 자리에서 걸렸는가 — 걸리지 않았으면 `null` */
@@ -195,9 +229,9 @@ function rankOf(
   persona: Persona,
   message: string,
   history: string,
-  pointed: string | undefined,
+  pointed: ReadonlySet<string>,
 ): number | null {
-  if (pointed !== undefined && pointed === persona.characterId) return RANK_POINTED;
+  if (pointed.has(persona.characterId)) return RANK_POINTED;
   if (mentions(message, persona)) return RANK_MESSAGE;
   if (mentions(history, persona)) return RANK_HISTORY;
   return null;
@@ -267,13 +301,20 @@ function historyWindow(state: GameState): string {
 }
 
 /**
- * 세계가 지목한 기자 — 열린 회견은 그 사람을 직접 부른다. 키워드를 기다리지 않는다.
+ * 이번 턴에 지목된 인물 — 세계가 연 자리(열린 회견의 기자)와 호출자가 연 자리(첫
+ * 장면의 수석코치). 둘 다 키워드를 기다리지 않는다.
  *
- * ⚠️ 지목은 나중에 생긴 필드라 **옛 세이브의 회견엔 없다** — 없으면 아무도 지목하지
- * 않은 것이고, 그 회견의 기자는 일반 키워드 경로로만 선다.
+ * ⚠️ 회견의 지목은 나중에 생긴 필드라 **옛 세이브의 회견엔 없다** — 없으면 아무도
+ * 지목하지 않은 것이고, 그 회견의 기자는 일반 키워드 경로로만 선다.
  */
-function pointedReporterId(state: GameState): string | undefined {
-  return pendingPress(state)?.reporterId;
+function pointedIds(
+  state: GameState,
+  byCaller: readonly string[] | undefined,
+): ReadonlySet<string> {
+  const ids = new Set<string>(byCaller ?? []);
+  const reporterId = pendingPress(state)?.reporterId;
+  if (reporterId !== undefined) ids.add(reporterId);
+  return ids;
 }
 
 /** 창 안에 서 있는 카드 중 **가장 자세한 판** — 재주입은 그것보다 깊어야 한다 */

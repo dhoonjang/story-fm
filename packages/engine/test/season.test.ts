@@ -5,6 +5,7 @@ import {
   advanceTime,
   assignmentsOf,
   boardExpectation,
+  buildAllLeagueMatches,
   isClubTeam,
   computeStandings,
   groupOf,
@@ -15,6 +16,7 @@ import {
   quickSimulate,
   recordLeagueHistory,
   reviewSeason,
+  teamsOfLeagueIn,
   transitionSeason,
   userPlayers,
   weeklyWagesOf,
@@ -258,7 +260,24 @@ describe("18팀 리그의 시즌 리뷰", () => {
     });
   });
 
-  it("34경기 무패가 무패 시즌이고, 챔피언은 그 리그 이름으로 남는다", () => {
+  /**
+   * 상위 `top`팀이 자기들끼리만 비기고 전승, 우리는 나머지를 다 잡는 표 —
+   * 우리는 정확히 `top.length + 1`위로 끝난다.
+   */
+  function fabricateUsBelow(state: GameState, leagueId: string, top: string[]): void {
+    const us = state.userTeamId;
+    const isTop = (id: string) => top.includes(id);
+    fabricateLeague(state, leagueId, (home, away) => {
+      if (isTop(home) && isTop(away)) return [1, 1];
+      if (isTop(home)) return [1, 0];
+      if (isTop(away)) return [0, 1];
+      if (home === us) return [1, 0];
+      if (away === us) return [0, 1];
+      return [1, 1];
+    });
+  }
+
+  it("34경기 무패가 무패 시즌이고, 업적은 문장이 아니라 코드와 수치로 남는다", () => {
     const state = createTestGame(7, "paderborn");
     const us = state.userTeamId;
     fabricateLeague(state, "bundesliga", (home, away) =>
@@ -267,10 +286,52 @@ describe("18팀 리그의 시즌 리뷰", () => {
 
     reviewSeason(state);
 
+    // 세이브에 남는 것은 코드와 근거 수치뿐이다 (overview.md §1 철칙 4 · career.md §6)
     const champion = state.achievements.find((a) => a.code === "champion");
-    expect(champion?.description).toBe("분데스리가 우승");
+    expect(champion).toMatchObject({ position: 1, leagueId: "bundesliga" });
+    expect(champion).not.toHaveProperty("description");
+    expect(champion).not.toHaveProperty("name");
     const invincible = state.achievements.find((a) => a.code === "invincible");
-    expect(invincible?.description).toBe("34경기 무패의 완성");
+    expect(invincible?.matches).toBe(34);
+  });
+
+  it("유럽 진출 업적의 경계는 그 리그의 UCL 티켓 수다 — 분데스리가는 5위도 안이다", () => {
+    const state = createTestGame(7, "paderborn");
+    const us = state.userTeamId;
+    const above = teamsOfLeagueIn(state, "bundesliga")
+      .filter((id) => id !== us)
+      .slice(0, 4);
+    fabricateUsBelow(state, "bundesliga", above);
+    expect(computeStandings(state).findIndex((r) => r.teamId === us) + 1).toBe(5);
+
+    reviewSeason(state);
+
+    expect(state.achievements.find((a) => a.code === "ucl-spot")).toMatchObject({
+      position: 5,
+      leagueId: "bundesliga",
+    });
+  });
+
+  it("2부에는 유럽 티켓이 없다 — 4위여도 유럽 진출 업적이 붙지 않는다", () => {
+    const state = createTestGame(7, "paderborn");
+    const us = state.userTeamId;
+    // 강등된 감독의 시즌 — 2부는 감독이 거기 있을 때만 리그전을 돈다 (`extraLeagues`).
+    // 승강은 맞바꿈이라 두 리그의 팀 수는 그대로다 (홀수면 편성이 부전승을 만든다)
+    const promoted = teamsOfLeagueIn(state, "bundesliga2")[0]!;
+    state.leagueOf = { [us]: "bundesliga2", [promoted]: "bundesliga" };
+    state.matches = buildAllLeagueMatches(state.season, state.seed, state.world, {
+      leagueOf: state.leagueOf,
+      extraLeagues: ["bundesliga2"],
+    });
+    const above = teamsOfLeagueIn(state, "bundesliga2")
+      .filter((id) => id !== us)
+      .slice(0, 3);
+    fabricateUsBelow(state, "bundesliga2", above);
+    expect(computeStandings(state).findIndex((r) => r.teamId === us) + 1).toBe(4);
+
+    reviewSeason(state);
+
+    expect(state.achievements.some((a) => a.code === "ucl-spot")).toBe(false);
   });
 
   it("시즌 순위표가 통째로 남는다 — 체급 재산정의 성적 축이 읽는 표다", () => {

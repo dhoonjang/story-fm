@@ -208,7 +208,7 @@ export function tacticsSignature(spec: TacticsSpec): string {
  * (초안 계수)
  */
 /** 포메이션을 갈아엎는 값 — 슬라이더 한 축을 끝까지 미는 것보다 크다 */
-const FORMATION_CHANGE_COST = 25;
+export const FORMATION_CHANGE_COST = 25;
 
 export function tacticsDistance(a: TacticsSpec, b: TacticsSpec): number {
   let d = a.formation !== b.formation ? FORMATION_CHANGE_COST : 0;

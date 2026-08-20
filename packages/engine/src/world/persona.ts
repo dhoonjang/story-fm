@@ -749,7 +749,8 @@ export interface CharacterDraft {
  * 실제로는 `z.enum`이라 여섯뿐이고, 하나를 늘리려면 라벨·아이콘·화자 사전이 함께
  * 움직여야 한다. 상대 감독도 에이전트도 지금은 `friend`로 선다.
  */
-const REGISTERABLE_ROLES = new Set<PersonaRole>(["reporter", "friend", "supporter"]);
+export const REGISTERABLE_ROLES = ["reporter", "friend", "supporter"] as const;
+const REGISTERABLE = new Set<PersonaRole>(REGISTERABLE_ROLES);
 
 /**
  * 새 화자를 캐릭터북에 세운다 — 검사에 걸린 항목만 버린다.
@@ -780,7 +781,7 @@ export function registerCharacters(
   const ids = new Set(personas.map((p) => p.characterId));
   const added: Persona[] = [];
   for (const draft of drafts) {
-    if (!REGISTERABLE_ROLES.has(draft.role)) continue;
+    if (!REGISTERABLE.has(draft.role)) continue;
     const characterId = draft.characterId.trim();
     const name = draft.name.trim();
     if (ids.has(characterId)) continue;

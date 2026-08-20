@@ -1,9 +1,16 @@
 import type { GamePlayer } from "@story-fm/domain";
-import { ageOf } from "@story-fm/domain";
-import { contractUntil, diffDays, seasonYear, windowOpenOn } from "../competition/calendar";
+import { ageOf, RELEASE_NOTE } from "@story-fm/domain";
+import { contractUntil, seasonYear, windowOpenOn } from "../competition/calendar";
 import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import { formatMoney, recordFinance } from "../club/finance";
-import { loanLockOf, transferWindowLabel, windowOpenForTeam } from "./market";
+import { buildDeparturePress, openPress } from "../club/press";
+import { clampForm, moraleToForm } from "../squad/form";
+import {
+  loanLockOf,
+  transferWindowLabel,
+  unilateralSeveranceOf,
+  windowOpenForTeam,
+} from "./market";
 import { estimateWeeklyWage, wageSubjectOf } from "../world/wages";
 import { makeRng } from "../core/rng";
 import { assignSquadNumber } from "../squad/numbers";
@@ -13,6 +20,7 @@ import { forgetRoles } from "../skills/role-memory";
 import { pickAnyPlayer } from "../core/player-ref";
 import {
   activeContract,
+  firstTeamPlayers,
   groupOf,
   playersOf,
   pushNarrative,
@@ -28,27 +36,17 @@ import {
  * 매각만 있으면 나가는 문이 하나뿐이라 감독이 할 수 있는 게 "누가 사 주면"으로
  * 끝난다. 실제 구단은 안 팔리는 계약을 위약금을 물고 끊고, 못 쓰는 유망주를
  * 내보내 뛰게 한다. 둘 다 **대가가 분명한 선택**이라 밸런스가 흔들리지 않는다:
- * 방출은 돈을 잃고, 임대는 전력을 잃는다.
+ * 해지는 돈을 잃고, 임대는 전력을 잃는다.
+ *
+ * 해지의 **값을 흥정하는 길**은 협상 테이블에 있다(`negotiation.ts`의 `openRelease`).
+ * 여기 남은 것은 그 흥정의 종착지와, 흥정 없이 전액을 물고 끊는 바깥값이다.
  */
 
 /**
- * 방출 위약금 — 잔여 계약 주급의 이 비율을 즉시 지불한다.
- * 실제 상호 합의 해지의 정산이 대체로 잔여 급여의 절반 언저리에서 이뤄진다.
+ * 핵심 자원이 떠났을 때 남은 1군이 잃는 사기 — 폼으로는 닷새치 회귀에 해당한다.
+ * 흔적이지 처벌이 아니다 (transfer.md §2).
  */
-export const SEVERANCE_RATE = 0.5;
-/** 위약금이 아무리 커도 이 주 수를 넘겨 세지 않는다 — 5년 계약이 구단을 파산시키지 않게 */
-export const SEVERANCE_WEEKS_CAP = 104;
-
-/** 잔여 계약에 걸린 위약금 */
-export function severanceOf(state: GameState, playerId: string): number {
-  const contract = activeContract(state, playerId);
-  if (!contract) return 0;
-  const weeks = Math.min(
-    SEVERANCE_WEEKS_CAP,
-    Math.max(0, diffDays(state.date, contract.until) / 7),
-  );
-  return Math.round(contract.weeklyWage * weeks * SEVERANCE_RATE);
-}
+export const DEPARTURE_SQUAD_MORALE = -3;
 
 /** 무소속 — 클럽이 아니라 클럽이 없는 상태 (team-catalog `freeagents`) */
 export const FREE_AGENT_TEAM = "freeagents";
@@ -109,12 +107,22 @@ export function toFreeAgency(
 }
 
 /**
- * 계약 해지 — **돈으로 자리를 비운다.**
+ * 계약 해지 — **돈으로 자리를 비운다.** 두 길의 공통 종착지다.
  *
- * 안 팔리는 고액 계약자를 정리하는 유일한 길이다. 잔여 급여의 절반을 즉시
- * 물고(원장에 남아 PSR까지 간다) 주급 총액에서 사라진다.
+ * `severance`가 실려 오면 **합의 해지의 확정**이다(`executeRelease`) — 값은 협상이
+ * 정했다. 안 실려 오면 **일방 해지**이고, 값은 잔여 급여 **전액**이다
+ * (`unilateralSeveranceOf`).
+ *
+ * ⚠️ **일방의 길을 닫지 않는 것이 이 함수의 일이다.** 합의가 끝내 안 되면 감독이
+ * 전액을 물고 끊을 수 있어야 해지 협상이 협상이 된다 — 그 바깥값이 없으면 선수는
+ * 무엇도 받아들일 이유가 없다 (transfer.md §2·§11).
+ *
+ * 어느 길이든 지불액은 즉시 나가고 원장에 남아 PSR까지 가며, 주급 총액에서 사라진다.
  */
-export function releasePlayer(state: GameState, input: { playerId: string }): SkillResult {
+export function releasePlayer(
+  state: GameState,
+  input: { playerId: string; severance?: number },
+): SkillResult {
   const pick = pickAnyPlayer(state, input.playerId);
   if (!pick.ok) return { ok: false, message: pick.message };
   const player = pick.player;
@@ -126,14 +134,18 @@ export function releasePlayer(state: GameState, input: { playerId: string }): Sk
     return { ok: false, message: `${player.name}은(는) 우리 선수가 아닙니다` };
   }
   const short = squadShortfall(state, state.userTeamId, player);
-  if (short) return { ok: false, message: `우리 ${short}` };
+  if (short) return { ok: false, message: `우리 ${short.replace("팔 수", "해지할 수")}` };
 
-  const severance = severanceOf(state, player.id);
+  const agreed = input.severance !== undefined;
+  const severance = Math.max(
+    0,
+    Math.round(input.severance ?? unilateralSeveranceOf(state, player.id)),
+  );
   const finance = state.finances.find((f) => f.teamId === state.userTeamId);
   if (finance && severance > finance.balance) {
     return {
       ok: false,
-      message: `위약금 ${formatMoney(severance)}을 감당할 잔고가 없습니다`,
+      message: `${agreed ? "정산금" : "위약금"} ${formatMoney(severance)}을 감당할 잔고가 없습니다`,
     };
   }
 
@@ -141,21 +153,36 @@ export function releasePlayer(state: GameState, input: { playerId: string }): Sk
     recordFinance(state, state.userTeamId, {
       kind: "expense",
       category: "player_wages",
-      label: `계약 해지 위약금 — ${player.name}`,
+      label: `계약 해지 ${agreed ? "정산금" : "위약금"} — ${player.name}`,
       amount: severance,
       ref: { type: "player", id: player.id },
     });
   }
   const wasCaptain = player.isCaptain;
-  toFreeAgency(state, player, "계약 해지 (방출)");
+  toFreeAgency(state, player, agreed ? RELEASE_NOTE.agreed : RELEASE_NOTE.unilateral);
+
+  /**
+   * **회견이 열릴 만한 자원이었는지가 사기의 문이기도 하다** — 회견을 여는 조건과
+   * 같은 자를 쓴다. 백업 정리에도 라커룸이 상하면 정리 자체가 벌이 된다
+   * (transfer.md §2). 회견 판정은 무소속이 된 **뒤에** 해야 남은 스쿼드와 견준다.
+   */
+  const press = buildDeparturePress(state, { playerId: player.id, severance, wasCaptain });
+  if (press) {
+    openPress(state, press);
+    // 남은 1군만 — 떠난 당사자는 이미 무소속이라 자연히 빠진다
+    for (const mate of firstTeamPlayers(state, state.userTeamId)) {
+      mate.state.form = clampForm(mate.state.form + moraleToForm(DEPARTURE_SQUAD_MORALE));
+    }
+  }
 
   pushNarrative(state, `${player.name} 계약 해지`, wasCaptain ? 5 : 4);
   return {
     ok: true,
     message:
-      `${player.name}과(와) 계약을 해지했습니다 — 위약금 ${formatMoney(severance)}.` +
+      `${player.name}과(와) 계약을 해지했습니다 — ${agreed ? "정산금" : "위약금 전액"} ${formatMoney(severance)}.` +
       " 무소속이 됐습니다 — 다른 구단이 데려갈 수 있습니다." +
-      (wasCaptain ? " 주장이 떠났습니다 — 새 주장을 지명하세요." : ""),
+      (wasCaptain ? " 주장이 떠났습니다 — 새 주장을 지명하세요." : "") +
+      (press ? ` 기자회견이 열렸습니다. 남은 1군 사기 ${DEPARTURE_SQUAD_MORALE}.` : ""),
   };
 }
 

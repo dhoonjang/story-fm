@@ -1,7 +1,8 @@
-import type { GamePlayer, PositionGroup } from "@story-fm/domain";
+import type { Achievement, AchievementCode, GamePlayer, PositionGroup } from "@story-fm/domain";
 import {
   CONDITION_BASE,
   DEFAULT_FORMATION,
+  achievementTitle,
   ageOf,
   anchorOf,
   naturalPositionOf,
@@ -16,7 +17,15 @@ import {
 } from "./calendar";
 import { toFreeAgency } from "../market/departures";
 import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
-import { cupCatalog, competitionShortName, isCup, isEuroCup } from "../data/cup-catalog";
+import {
+  TOP_EURO_CUP_ID,
+  cupCatalog,
+  competitionName,
+  competitionShortName,
+  euroSlotsOf,
+  isCup,
+  isEuroCup,
+} from "../data/cup-catalog";
 import { domesticCupCatalog } from "../data/domestic-cup-catalog";
 import {
   cupRunsThisSeason,
@@ -226,31 +235,82 @@ export function boardExpectation(
   return boardExpectationOfTier(tierOfTeamIn(state, teamId), leagueSizeIn(state, teamId));
 }
 
+/** 골잡이 조련사가 서는 문턱 — 이만큼 넣은 최다 득점자가 우리 팀에 있어야 한다 */
+const SHARPSHOOTER_GOALS = 15;
+
+/**
+ * 업적 검사 — **사실만 남긴다.** 코드와 근거 수치를 적고 이름·설명 문장은 읽는 쪽이
+ * 쓴다 (career.md §6, overview.md §1 철칙 4).
+ */
 function checkAchievements(state: GameState, position: number, row: StandingRow): void {
-  const add = (code: string, name: string, description: string) => {
-    if (state.achievements.some((a) => a.code === code && a.season === state.season)) return;
-    state.achievements.push({ code, season: state.season, name, description });
+  const add = (code: AchievementCode, facts: Omit<Achievement, "code" | "season"> = {}) => {
+    // 컵 업적은 대회마다 하나씩 붙으므로 대회까지 같을 때만 중복이다
+    const dup = state.achievements.some(
+      (a) =>
+        a.code === code && a.season === state.season && a.competitionId === facts.competitionId,
+    );
+    if (dup) return;
+    state.achievements.push({ code, season: state.season, ...facts });
   };
-  const league = leagueOfTeamIn(state, state.userTeamId);
+  const leagueId = leagueOfTeamIn(state, state.userTeamId);
   const size = leagueSizeIn(state, state.userTeamId);
   const rounds = leagueRounds(size);
-  if (position === 1) add("champion", "챔피언", `${leagueName(league)} 우승`);
-  if (row.losses === 0 && row.played >= rounds) {
-    add("invincible", "무패 시즌", `${rounds}경기 무패의 완성`);
-  }
-  if (position <= 4) add("top4", "탑4", "유럽 최상위 대항전 진출권 확보");
+  if (position === 1) add("champion", { position, leagueId });
+  if (row.losses === 0 && row.played >= rounds)
+    add("invincible", { matches: row.played, leagueId });
+  // 유럽 최상위 진출은 **그 리그의 UCL 티켓 안**이다 — 순위 하나로 자르면 티켓이 없는
+  // 2부의 4위에도 붙는다 (티켓 수는 리그마다 다르다, europe.ts의 배정과 같은 표)
+  if (position <= euroSlotsOf(TOP_EURO_CUP_ID, leagueId)) add("ucl-spot", { position, leagueId });
 
   const topScorer = state.seasonStats
-    .filter((s) => s.season === state.season && s.teamId === state.userTeamId && s.goals >= 15)
+    .filter(
+      (s) =>
+        s.season === state.season && s.teamId === state.userTeamId && s.goals >= SHARPSHOOTER_GOALS,
+    )
     .sort((a, b) => b.goals - a.goals)[0];
   if (topScorer) {
     const player = playersOf(state, state.userTeamId).find((p) => p.id === topScorer.gamePlayerId);
-    if (player) add("sharpshooter", "골잡이 조련사", `${player.name} 시즌 ${topScorer.goals}골`);
+    if (player) {
+      add("sharpshooter", {
+        gamePlayerId: player.id,
+        playerName: player.name,
+        goals: topScorer.goals,
+      });
+    }
   }
   const tier = tierOfTeamIn(state, state.userTeamId);
-  if (tier === 4 && position <= safetyLine(size)) {
-    add("survivor", "생존왕", "잔류권 팀을 안전하게 지켜냈다");
+  if (tier === 4 && position <= safetyLine(size)) add("survivor", { position, leagueId });
+
+  // 컵·대항전 우승 — 결산이 먼저 돌아 우승 팀이 이미 정해져 있다 (`reviewSeason`의 순서)
+  for (const cup of domesticCupCatalog()) {
+    if (domesticChampion(state, cup.id) === state.userTeamId) {
+      add("cup-winner", { competitionId: cup.id });
+    }
   }
+  for (const cup of cupCatalog()) {
+    if (euroChampion(state, cup.id) === state.userTeamId) {
+      add("euro-champion", { competitionId: cup.id });
+    }
+  }
+}
+
+/**
+ * 업적 한 줄 — 코드가 주는 이름과 근거 수치로 **읽는 자리에서** 쓴다.
+ * 세이브에는 문장이 없으므로 문구를 고치면 옛 업적도 새 문구로 읽힌다 (career.md §6).
+ * 화면은 같은 사실을 뷰로 받아 제 문장을 쓴다 (`views.ts`).
+ */
+export function achievementLine(a: Achievement): string {
+  const title = achievementTitle(a.code);
+  const detail = achievementDetail(a);
+  return detail ? `${title} — ${detail}` : title;
+}
+
+function achievementDetail(a: Achievement): string {
+  if (a.competitionId) return `${competitionName(a.competitionId)} 우승`;
+  if (a.playerName && a.goals !== undefined) return `${a.playerName} 시즌 ${a.goals}골`;
+  if (a.matches !== undefined) return `${a.matches}경기 무패`;
+  if (a.position !== undefined && a.leagueId) return `${leagueName(a.leagueId)} ${a.position}위`;
+  return "";
 }
 
 /**
@@ -372,7 +432,7 @@ export function reviewSeason(state: GameState): string[] {
     `보드 평가: 기대 ${expectation.label} · 최종 ${position}위 — ${met ? "달성" : "미달"}`,
   );
   for (const a of state.achievements.filter((x) => x.season === state.season)) {
-    digest.push(`업적 달성: ${a.name} — ${a.description}`);
+    digest.push(`업적 달성: ${achievementLine(a)}`);
   }
   pushNarrative(state, `시즌 ${state.season} 최종 ${position}위`, 5);
   return digest;

@@ -25,6 +25,7 @@ import {
   runMedicals,
   offerPlayerOut,
   openNegotiationFor,
+  openRelease,
   openRenewal,
   pendingOffer,
   pendingVerdicts,
@@ -37,13 +38,16 @@ import {
   responseDelayDays,
   resolveMedical,
   sendOffer,
+  severanceOf,
   setTransferList,
   suggestTerms,
   teamName,
+  unilateralSeveranceOf,
   wageExpectationOf,
+  weeklyWagesOf,
   withdrawOffer,
 } from "@story-fm/engine";
-import type { MarketCard, Negotiation } from "@story-fm/domain";
+import { isPlayerDeal, type MarketCard, type Negotiation } from "@story-fm/domain";
 import { completeDeal, createTestGame } from "./helpers";
 
 /**
@@ -1486,6 +1490,194 @@ describe("임대 중인 선수는 소유 구단만 움직인다", () => {
   });
 });
 
+describe("계약 해지 — 값을 흥정하고, 안 되면 전액을 문다", () => {
+  /**
+   * 해지가 협상 상태기계를 지난다 — 선수가 거부하거나 더 요구할 수 있고, 합의가
+   * 끝내 안 되면 감독이 **전액**을 물고 끊는 길이 남는다 (transfer.md §2·§11).
+   * 픽스처는 describe당 하나가 원칙이나 케이스마다 계약을 끊어 놓으므로 각자 세운다.
+   */
+
+  /** 우리 스쿼드에서 자리가 막힌 선수 — 스쿼드 하한에 걸리지 않게 뒤에서 고른다 */
+  function spare(state: GameState) {
+    const squad = playersOf(state, state.userTeamId).sort(
+      (a, b) => a.attributes.overall - b.attributes.overall,
+    );
+    return squad.find((p) => p.positions[0]?.position !== "GK") ?? squad[0]!;
+  }
+
+  const terms = (state: GameState, player: { id: string }, fee: number) => ({
+    playerId: player.id,
+    fee,
+    weeklyWage: 0,
+    years: 0,
+    kind: "release" as const,
+  });
+
+  it("이적창과 무관하게 열리고, 관문이 하나다 (선수가 합의해 줄까)", () => {
+    const state = createTestGame(42);
+    const player = spare(state);
+    for (const w of state.windows) w.closesOn = state.date;
+    state.date = addDays(state.date, 1);
+
+    const anchor = severanceOf(state, player.id);
+    const odds = dealOdds(state, terms(state, player, anchor));
+    expect(odds.blockers).toHaveLength(0);
+    // 이 갈래의 "요구액"은 기대 정산금이고 주급은 흥정거리가 아니다
+    expect(odds.askingPrice).toBe(anchor);
+    expect(odds.wageExpectation).toBe(0);
+
+    const opened = openRelease(state, { playerId: player.id, severance: anchor });
+    expect(opened.ok, opened.message).toBe(true);
+    const negotiation = state.negotiations.find((n) => n.kind === "release")!;
+    expect(negotiation.counterpartTeamId).toBeNull();
+    expect(negotiation.windowId).toBeNull();
+    // 쓸 계약이 없는 협상이다 — 연수도 주급도 라운드에 서지 않는다
+    expect(negotiation.rounds[0]!.contractYears).toBe(0);
+    expect(negotiation.rounds[0]!.weeklyWage).toBe(0);
+    expect(negotiation.rounds[0]!.fee).toBe(anchor);
+  });
+
+  it("정산금을 올릴수록 확률이 오르고, 잔여 계약이 길수록 버틴다", () => {
+    const state = createTestGame(42);
+    const player = spare(state);
+    const contract = activeContract(state, player.id)!;
+    contract.until = addDays(state.date, 400);
+    const anchor = severanceOf(state, player.id);
+
+    const low = dealOdds(state, terms(state, player, Math.round(anchor * 0.5))).probability;
+    const high = dealOdds(state, terms(state, player, Math.round(anchor * 1.5))).probability;
+    expect(high).toBeGreaterThan(low);
+
+    /**
+     * 같은 **비율**을 제시해도 계약이 길수록 합의가 어렵다 — 값이 오르는 것과 확률이
+     * 내려가는 것이 함께 걸려야 잘못 준 계약의 대가가 정해진 수수료가 아니게 된다.
+     */
+    const atSameRatio = (days: number) => {
+      contract.until = addDays(state.date, days);
+      return dealOdds(state, terms(state, player, severanceOf(state, player.id))).probability;
+    };
+    expect(atSameRatio(1500)).toBeLessThan(atSameRatio(200));
+  });
+
+  it("선수가 거부하면 남는 길은 전액을 무는 일방 해지다", () => {
+    const state = createTestGame(42);
+    const player = spare(state);
+    openRelease(state, { playerId: player.id, severance: severanceOf(state, player.id) });
+    const negotiation = state.negotiations.find((n) => n.kind === "release")!;
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+
+    const rejected = respondOffer(state, { negotiationId: negotiation.id, verdict: "reject" });
+    expect(rejected.ok, rejected.message).toBe(true);
+    expect(negotiation.status).toBe("rejected");
+
+    // 결렬이 일방 해지를 막지 않는다 — 그것이 이 협상의 바깥값이다
+    const full = unilateralSeveranceOf(state, player.id);
+    const balanceBefore = financeOf(state, state.userTeamId).balance;
+    const cut = releasePlayer(state, { playerId: player.id });
+    expect(cut.ok, cut.message).toBe(true);
+    expect(balanceBefore - financeOf(state, state.userTeamId).balance).toBe(full);
+  });
+
+  it("역제안은 우리 제시액 초과 · 일방 해지 전액 이하여야 한다", () => {
+    const state = createTestGame(42);
+    const player = spare(state);
+    const anchor = severanceOf(state, player.id);
+    const full = unilateralSeveranceOf(state, player.id);
+    openRelease(state, { playerId: player.id, severance: anchor });
+    const negotiation = state.negotiations.find((n) => n.kind === "release")!;
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+
+    // 전액 위로는 부를 수 없다 — 그 위는 협상을 없애는 값이다
+    expect(
+      respondOffer(state, {
+        negotiationId: negotiation.id,
+        verdict: "counter",
+        fee: full + 1,
+      }).ok,
+    ).toBe(false);
+    // 우리가 이미 부른 값 이하로 되부르는 것도 역제안이 아니다
+    expect(
+      respondOffer(state, { negotiationId: negotiation.id, verdict: "counter", fee: anchor }).ok,
+    ).toBe(false);
+
+    const demanded = Math.round((anchor + full) / 2);
+    const countered = respondOffer(state, {
+      negotiationId: negotiation.id,
+      verdict: "counter",
+      fee: demanded,
+      note: "그 값에는 못 나갑니다",
+    });
+    expect(countered.ok, countered.message).toBe(true);
+    const last = negotiation.rounds[negotiation.rounds.length - 1]!;
+    expect(last.by).toBe("them");
+    expect(last.fee).toBe(demanded);
+    // 카드는 정산금 자리에 값을 싣는다 — 이적료 자리를 빌리면 화면이 이적료라 부른다
+    const card = countered.payload as MarketCard;
+    expect(card.counterTerms?.severance).toBe(demanded);
+    expect(card.counterTerms?.fee).toBeUndefined();
+  });
+
+  it("요구대로 다시 제안하면 합의되고, 확정이 계약을 끊고 정산금을 문다", () => {
+    const state = createTestGame(42);
+    const player = spare(state);
+    const anchor = severanceOf(state, player.id);
+    const wagesBefore = weeklyWagesOf(state, state.userTeamId);
+    const transfersBefore = state.transfers.length;
+    const balanceBefore = financeOf(state, state.userTeamId).balance;
+
+    openRelease(state, { playerId: player.id, severance: anchor });
+    const negotiation = state.negotiations.find((n) => n.kind === "release")!;
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+    const demanded = Math.round(anchor * 1.2);
+    expect(
+      respondOffer(state, { negotiationId: negotiation.id, verdict: "counter", fee: demanded }).ok,
+    ).toBe(true);
+
+    expect(openRelease(state, { playerId: player.id, severance: demanded }).ok).toBe(true);
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+    expect(respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" }).ok).toBe(true);
+    expect(negotiation.status).toBe("agreed");
+
+    /** 상대가 선수 본인인 갈래는 메디컬을 지나지 않는다 — 옮겨 갈 구단이 없다 */
+    const done = acceptDeal(state, negotiation.id);
+    expect(done.ok, done.message).toBe(true);
+    expect(negotiation.status).toBe("completed");
+    expect(negotiation.medical).toBeUndefined();
+
+    // 선수는 무소속이 되고, 주급이 빠지고, 합의한 값만 나간다
+    expect(playersOf(state, state.userTeamId).some((p) => p.id === player.id)).toBe(false);
+    expect(weeklyWagesOf(state, state.userTeamId)).toBeLessThan(wagesBefore);
+    expect(balanceBefore - financeOf(state, state.userTeamId).balance).toBe(demanded);
+    // 팀이 바뀌는 이동이라 원장에는 남는다 (재계약과 갈리는 자리다)
+    expect(state.transfers.length).toBe(transfersBefore + 1);
+  });
+
+  it("잔고를 넘는 정산금으로는 흥정을 시작할 수 없다", () => {
+    const state = createTestGame(42);
+    const player = spare(state);
+    const balance = financeOf(state, state.userTeamId).balance;
+    const opened = openRelease(state, { playerId: player.id, severance: balance + 1 });
+    expect(opened.ok).toBe(false);
+    expect(opened.message).toContain("잔고");
+  });
+
+  it("다른 갈래가 열려 있으면 해지를 열 수 없다 — 실행이 협상의 kind를 고른다", () => {
+    const state = createTestGame(42);
+    const player = spare(state);
+    openRenewal(state, {
+      playerId: player.id,
+      weeklyWage: renewalExpectation(state, player),
+      years: 2,
+    });
+    const opened = openRelease(state, {
+      playerId: player.id,
+      severance: severanceOf(state, player.id),
+    });
+    expect(opened.ok).toBe(false);
+    expect(opened.message).toContain("재계약");
+  });
+});
+
 describe("방향은 모든 줄에 실린다", () => {
   /**
    * 요약 줄과 주의 줄은 GM이 **사실로 읽는** 문장이다 — 방향이 빠지면 모델은
@@ -1496,21 +1688,23 @@ describe("방향은 모든 줄에 실린다", () => {
   const theirs = target(state);
   const RIVAL = state.teams.find((t) => t.id !== state.userTeamId && t.id !== theirs.teamId)!.id;
 
-  const KINDS: Negotiation["kind"][] = ["buy", "sell", "loan", "loan_out", "renew"];
+  const KINDS: Negotiation["kind"][] = ["buy", "sell", "loan", "loan_out", "renew", "release"];
   const WAY: Record<Negotiation["kind"], string> = {
     buy: "영입",
     sell: "매각",
     loan: "임대 영입",
     loan_out: "임대 송출",
     renew: "재계약",
+    release: "계약 해지",
   };
   /** 그 갈래의 줄에 절대 서면 안 되는 낱말 — 뒤집힘은 이걸로 잡힌다 */
   const NEVER: Record<Negotiation["kind"], string[]> = {
-    buy: ["매각", "임대", "송출", "재계약"],
-    sell: ["영입", "임대", "송출", "재계약"],
-    loan: ["매각", "송출", "재계약"],
-    loan_out: ["영입", "매각", "재계약"],
-    renew: ["영입", "매각", "임대", "송출"],
+    buy: ["매각", "임대", "송출", "재계약", "해지"],
+    sell: ["영입", "임대", "송출", "재계약", "해지"],
+    loan: ["매각", "송출", "재계약", "해지"],
+    loan_out: ["영입", "매각", "재계약", "해지"],
+    renew: ["영입", "매각", "임대", "송출", "해지"],
+    release: ["영입", "매각", "임대", "송출", "재계약"],
   };
 
   /** 한 갈래 · 한 차례의 협상을 세운다 (같은 id는 다시 만들지 않는다) */
@@ -1528,7 +1722,7 @@ describe("방향은 모든 줄에 실린다", () => {
       id,
       gamePlayerId: player.id,
       kind,
-      counterpartTeamId: kind === "renew" ? null : incoming ? player.teamId : RIVAL,
+      counterpartTeamId: isPlayerDeal(kind) ? null : incoming ? player.teamId : RIVAL,
       windowId: null,
       openedOn: state.date,
       expiresOn: addDays(state.date, 10),
@@ -1558,7 +1752,7 @@ describe("방향은 모든 줄에 실린다", () => {
       .find((l) => l.startsWith(`${negotiation.id} `))!;
   }
 
-  it("다섯 갈래 × 두 차례 — 요약 줄이 언제나 갈래를 적는다", () => {
+  it("여섯 갈래 × 두 차례 — 요약 줄이 언제나 갈래를 적는다", () => {
     for (const kind of KINDS) {
       for (const by of ["us", "them"] as const) {
         const line = lineOf(stage(kind, by));

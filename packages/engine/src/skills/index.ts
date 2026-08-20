@@ -198,11 +198,28 @@ export function setSquadLevel(
 function applySquadLevel(state: GameState, player: GamePlayer, level: "first" | "reserve"): string {
   if (level === "first") {
     player.squadLevel = "first";
+    /**
+     * **승격이 방치를 끝낸다** (→ docs/data/people.md §5). 내려간 날을 지우면 다시
+     * 내릴 때 그날부터 새로 세고, 그 방치가 낳은 불만도 함께 풀린다 — 다른 사유의
+     * 불만(`minutes` 등)은 남는다. 원인이 사라진 것은 강등뿐이다.
+     */
+    player.state.demotedOn = undefined;
+    const freed = state.issues.some((i) => i.gamePlayerId === player.id && i.reason === "demotion");
+    if (freed) {
+      state.issues = state.issues.filter(
+        (i) => !(i.gamePlayerId === player.id && i.reason === "demotion"),
+      );
+    }
     pushNarrative(state, `${player.name} 1군 승격`, 2);
     const reg = squadRegistrationOf(state, state.userTeamId);
-    return `${player.name}을(를) 1군으로 승격했습니다 — ${registrationLine(reg)}`;
+    return (
+      `${player.name}을(를) 1군으로 승격했습니다 — ${registrationLine(reg)}` +
+      (freed ? " · 2군 불만이 풀렸습니다" : "")
+    );
   }
   player.squadLevel = "reserve";
+  /** 방치의 시작점 — 기간을 파생할 표가 없어 저장한다 (→ docs/data/people.md §5) */
+  player.state.demotedOn = state.date;
   const tactics = userTactics(state);
   /**
    * **배치를 지우기 전에 적응도·기억을 선반으로** (→ docs/data/player.md §7.3).
@@ -1572,9 +1589,10 @@ function shiftFactor(player: Player | null): number {
 
 /**
  * 경기 중 전술 변경이 치르는 적응도 대가의 비율 — 훈련장에서 바꿀 때의 몇 배인가.
- * ⚠️ 밸런스 값.
+ * ⚠️ 밸런스 값. AI 벤치가 판을 갈아 깔 때의 대가도 여기서 파생한다
+ * (`match-flow`의 `AI_SHAPE_FAMILIARITY_COST`) — 두 벤치가 다른 값을 치르지 않는다.
  */
-const IN_MATCH_FAMILIARITY_LOSS = 0.25;
+export const IN_MATCH_FAMILIARITY_LOSS = 0.25;
 
 /**
  * 팀 수준의 변화량을 배치된 선수들에게 나눠 얹는다 — **두 가지가 갈린다**.

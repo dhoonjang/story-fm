@@ -23,6 +23,7 @@ const KIND_ICON = {
   offer: IconFinance,
   verdict: IconFinance,
   renewal: IconPerson,
+  release: IconPerson,
   withdraw: IconTrash,
   scout: IconInsight,
 } as const;
@@ -50,6 +51,8 @@ function badgeOf(card: MarketCard): string {
     }
     case "renewal":
       return "재계약 제안";
+    case "release":
+      return "해지 제안";
     case "withdraw":
       return way ? `${way} 철회` : "협상 철회";
     case "scout":
@@ -57,7 +60,7 @@ function badgeOf(card: MarketCard): string {
   }
 }
 
-/** 조건 한 벌 — 이적료·주급·연수 중 있는 것만 (임대료는 이적료 자리를 쓴다) */
+/** 조건 한 벌 — 정산금·이적료·주급·연수 중 있는 것만 (임대료는 이적료 자리를 쓴다) */
 function Terms({ terms, loan = false }: { terms: MarketTerms; loan?: boolean }) {
   return (
     <>
@@ -65,6 +68,12 @@ function Terms({ terms, loan = false }: { terms: MarketTerms; loan?: boolean }) 
         <span>
           <em>{loan ? "임대료" : "이적료"}</em>
           <b>{formatMoney(terms.fee)}</b>
+        </span>
+      )}
+      {terms.severance !== undefined && (
+        <span>
+          <em>정산금</em>
+          <b>{formatMoney(terms.severance)}</b>
         </span>
       )}
       {terms.weeklyWage !== undefined && (

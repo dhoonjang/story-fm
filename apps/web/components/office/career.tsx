@@ -1,10 +1,25 @@
 "use client";
 
 import type { OfficeViews } from "@story-fm/engine";
-import { MANAGER_ATTRIBUTES, MANAGER_ATTRIBUTE_KO } from "@story-fm/domain";
+import { MANAGER_ATTRIBUTES, MANAGER_ATTRIBUTE_KO, achievementTitle } from "@story-fm/domain";
 import { IconTrophy } from "@/components/icons";
 
 type SeasonRow = OfficeViews["career"]["seasons"][number];
+type AchievementRow = OfficeViews["career"]["achievements"][number];
+
+/**
+ * **업적 한 줄을 쓰는 자리** — 코어는 코드와 근거 수치만 넘긴다
+ * (docs/overview.md §1 철칙 4 · career.md §6). 옛 세이브의 업적도 여기서 문장을 얻으므로
+ * 문구를 고치면 지난 시즌의 업적까지 함께 고쳐진다.
+ */
+function achievementDetailOf(a: AchievementRow): string {
+  if (a.competitionName) return `${a.competitionName} 우승`;
+  if (a.playerName && a.goals !== undefined) return `${a.playerName} 시즌 ${a.goals}골`;
+  if (a.matches !== undefined) return `${a.matches}경기 무패`;
+  if (a.position !== undefined && a.leagueName) return `${a.leagueName} ${a.position}위`;
+  return "";
+}
+
 type CareerView = OfficeViews["career"];
 
 /**
@@ -327,14 +342,18 @@ export function CareerView({
       <div className="section-title">업적</div>
       <div className="trophy-list">
         {career.achievements.length === 0 && <div className="empty">달성한 업적이 없습니다</div>}
-        {career.achievements.map((a, i) => (
-          <div className="achv" key={i}>
-            <div>{a.name}</div>
-            <div className="desc">
-              시즌 {a.season} — {a.description}
+        {career.achievements.map((a, i) => {
+          const detail = achievementDetailOf(a);
+          return (
+            <div className="achv" key={i}>
+              <div>{achievementTitle(a.code)}</div>
+              <div className="desc">
+                시즌 {a.season}
+                {detail && ` — ${detail}`}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="section-title">시즌 기록</div>

@@ -54,9 +54,11 @@ pnpm balance finance       # 파일 이름으로 걸러 하나만
 | `finance-second-tier`  | 리그전을 굴리지 않는 2부의 한 시즌 수지              | [finance](finance.md) §9.5      |
 | `finance-multi-season` | 세 시즌을 굴려도 가라앉는 리그가 없다                | [finance](finance.md) §10.3     |
 | `ai-fitness`           | 한 시즌 뒤 AI 스쿼드 체력 · 출전 분산                | [match](match.md) §7            |
+| `ai-bench`             | 감독의 경기에서 상대 벤치가 쓰는 교체 수·시점·갈래   | [match](match.md) §2            |
 | `ai-market`            | 한 시즌 팀당 이적·임대 건수 · 여름 비중              | [transfer](transfer.md) §6      |
 | `manager-market`       | 한 시즌 감독 경질 구단 수                            | [transfer](transfer.md) §7      |
 | `squad-longevity`      | 15시즌을 넘긴 뒤에도 구단이 선발 XI·계약을 세우는가  | [season](season.md) §6          |
+| `demotion-grievance`   | 한 시즌 2군 강등이 낳는 불만 건수 — 로테이션과 방치  | [people](../data/people.md) §5  |
 | `history-window`       | 평시 이력의 글자 분포 · 압축 주기 · 한국어 글자↔토큰 | [agents](../llm/agents.md) §5-1 |
 
 ## 4. ⚠️ 불변식

@@ -43,6 +43,7 @@ import { buildGmTools } from "./gm-tools";
 import { runMatchIntent } from "./match-intent";
 import { applyMatchIntent, type AppliedIntent } from "./match-intent-apply";
 import {
+  buildGmDigest,
   buildGmHistory,
   buildGmReference,
   buildGmStateNote,
@@ -152,6 +153,17 @@ function takeArrivedReports(state: GameState, limit: number): ScoutReportCard[] 
     .filter((c): c is ScoutReportCard => c !== null);
 }
 
+/**
+ * 평시 시스템 블록 — 고정 · 레퍼런스 · **요약**(압축된 세이브에만) 순
+ * (agents.md §5). 경기 쪽은 이력이 갈려 있어 요약을 싣지 않는다.
+ */
+function peaceSystem(state: GameState): string[] {
+  const digest = buildGmDigest(state);
+  return digest
+    ? [GM_SYSTEM, buildGmReference(state), digest]
+    : [GM_SYSTEM, buildGmReference(state)];
+}
+
 export type LlmMode = "mock" | "real";
 
 export function resolveLlmMode(): LlmMode {
@@ -166,7 +178,7 @@ export function resolveLlmMode(): LlmMode {
  */
 const ONBOARDING_INSTRUCTION = [
   `[오퍼레이터 지시 — 새 게임 첫 장면]`,
-  `오늘은 감독의 부임 첫날이다. 상태와 레퍼런스를 읽고 수석코치의 말로 첫 장면을 열어라.`,
+  `오늘은 감독의 부임 첫날이다. 상태와 인물 카드를 읽고 수석코치의 말로 첫 장면을 열어라.`,
 ].join("\n");
 
 /** 첫 장면 검사 — 문법과 화자(수석코치 등장·감독 미발화)까지만 본다. 내용은 보지 않는다. */
@@ -198,12 +210,25 @@ export async function runOnboardingTurn(state: GameState, llm?: GameLLM): Promis
   if (resolveLlmMode() === "mock") return buildOnboardingTurn(state);
   const client = llm ?? createGameLLM(config);
 
+  /**
+   * 첫 장면의 수석코치는 **지목으로 선다** — 이력도 지난 발화도 없어 키워드가 걸릴
+   * 문장 자체가 없고, 레퍼런스에도 인물 카드는 없다(people.md §6). 검증
+   * (`isValidOnboardingText`)이 요구하는 이름이 프롬프트에 실리는 자리가 여기뿐이다.
+   */
+  const characterBlock = describeCharacters(
+    selectCharacters(state, { pointed: [headCoachOf(state).characterId] }),
+  );
+
   // 도구도 스트리밍도 없는 호출이라 다시 불러도 남는 자국이 없다
   return retryOnce("gm:onboarding", async () => {
     const result = await client.runTurn({
-      system: [GM_SYSTEM, buildGmReference(state)],
+      system: peaceSystem(state),
       history: [],
-      user: buildManagerMessage(state, "*새 감독으로서 구단에 첫 출근한다*"),
+      // 카드가 발화 앞에 선다 — 평시 턴과 같은 순서다
+      user: [
+        ...(characterBlock !== null ? [characterBlock, ``] : []),
+        buildManagerMessage(state, "*새 감독으로서 구단에 첫 출근한다*"),
+      ].join("\n"),
       stateNote: `${ONBOARDING_INSTRUCTION}\n\n${buildGmStateNote(state)}`,
       // ⚠️ maxTokens를 좁히지 않는다 — 상한은 사고(thinking)+본문 합산이라
       // 장면 길이만 보고 잡으면 본문이 문장 한복판에서 잘린다
@@ -341,9 +366,7 @@ async function runRealGmTurn(
 
   // 입력은 안정성 순 3층 — ① 고정 프롬프트 ② 레퍼런스 ③ 발화+상태 스냅샷.
   // 앞 두 층만 캐시 프리픽스(0.1×)다 (docs/llm/agents.md §5)
-  const system = inMatch
-    ? [MATCH_CASTER_SYSTEM, buildMatchReference(state)]
-    : [GM_SYSTEM, buildGmReference(state)];
+  const system = inMatch ? [MATCH_CASTER_SYSTEM, buildMatchReference(state)] : peaceSystem(state);
   /**
    * **대화만 건 턴은 판을 싣지 않는다.** 선수를 부른 한 마디에 패킷 전체를 실으면
    * 중계가 읽지도 않을 판세를 매 턴 정가로 읽는다 (agents.md §5). 킥오프 턴도 같은

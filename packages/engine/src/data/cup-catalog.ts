@@ -137,6 +137,17 @@ export function cupCatalogById(id: string): CupCatalogEntry | null {
   return byId().get(id) ?? null;
 }
 
+/** 유럽 최상위 대항전 — "티켓 안인가"를 묻는 자리가 가리키는 대회 */
+export const TOP_EURO_CUP_ID = "ucl";
+
+/**
+ * 그 리그가 이 대회에 받는 티켓 수 — 배정이 없는 리그(2부·이적 전용)는 0이다.
+ * 순위표의 구역선(`buildStandingZones`)도 유럽 진출 업적도 이 수를 경계로 쓴다.
+ */
+export function euroSlotsOf(cupId: string, leagueId: string): number {
+  return cupCatalogById(cupId)?.slots[leagueId] ?? 0;
+}
+
 /**
  * 대회 id를 묻는 문들은 **널을 받는다** — 널은 어느 대회에도 속하지 않는 경기,
  * 곧 프리시즌 친선이다(`isFriendly` — competition/friendly.ts). 널을 여기서

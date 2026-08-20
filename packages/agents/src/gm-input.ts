@@ -16,6 +16,7 @@ import {
   financeOf,
   formatClock,
   headCoachOf,
+  historyStart,
   isSuspended,
   managedTeamId,
   MAX_EXPLOITS,
@@ -73,6 +74,11 @@ export function describePersona(entry: CharacterEntry): string {
     ...(entry.depth === "rumour"
       ? [`⚠️ 평판으로만 아는 사람이다 — 말투도 속내도 모른다. 소문의 수준에서만 그려라.`]
       : []),
+    // 인물지(성격·동기·말투)는 세이브당 불변이고 기억은 있었던 일이다 — 갱신되는 자리가
+    // 압축 한 곳뿐이라 카드가 이력에 굳어도 낡지 않는다 (people.md §9-1)
+    ...(entry.memories?.length
+      ? [`있었던 일:`, ...entry.memories.map((m) => `  ${m.date} — ${m.text}`)]
+      : []),
     // 직책이 아니라 이름으로 말한다 — 규칙은 시스템 프롬프트(출력 문법)에 한 번만 선다
     `화자 태그: @${entry.characterId}:`,
     // 실명 인물 — 평판을 해칠 서사 금지 가드와 세트로만 운용한다 (sources.md §7)
@@ -128,6 +134,22 @@ export function buildGmReference(state: GameState): string {
     `[${teamName(state.userTeamId)} 선수단]`,
     `선수의 이름은 상태 스냅샷의 「선수단」 줄에 있다. 스킬의 선수 인자도 그 이름으로 받는다 — 조회가 돌려준 id를 적어도 된다.`,
     `능력치·배치·컨디션·계약은 get_squad·search_players가 준다.`,
+  ].join("\n");
+}
+
+/**
+ * 요약 블록 — **레퍼런스 뒤·이력 앞**의 세 번째 시스템 블록 (agents.md §5·§5-1).
+ *
+ * 압축된 세이브에만 선다. 레퍼런스에 섞지 않는 이유는 자리에 있다: 여기 따로 세우면
+ * 압축이 일어난 턴에만 그 뒤가 무효가 되고, 압축은 드물다.
+ */
+export function buildGmDigest(state: GameState): string | null {
+  const digest = state.historyDigest;
+  if (!digest) return null;
+  return [
+    `[접힌 대화의 요약]`,
+    `이력 창 밖으로 밀려난 지난 대화를 ${digest.at}에 요약한 것이다. 아래 이력은 그 뒤부터다.`,
+    digest.text,
   ].join("\n");
 }
 
@@ -820,11 +842,14 @@ export function stampMatchStream(
 }
 
 /**
- * 대화 이력 창 — 시작점을 STEP 단위로만 옮긴다. 매 턴 한 칸씩 미끄러지면
- * 프리픽스가 계속 달라져 이력 캐시가 한 번도 적중하지 않는다.
+ * 지금이 경기 중인가 — 이력을 가르는 기준이자 창을 가르는 기준이다.
+ *
+ * 킥오프 멘트 턴은 아직 **라커룸의 연장**이다 — 경기 이력이 비어 있고 첫 마디를
+ * 여는 근거는 경기 전 대화(팀토크·브리핑)다. 그래서 그 한 턴만 평시로 읽는다.
  */
-const HISTORY_KEEP = 12;
-const HISTORY_STEP = 6;
+function inMatchNow(state: GameState): boolean {
+  return state.phase === "match" && state.pendingMatch?.entered === true;
+}
 
 /**
  * 평시와 경기의 이력을 가른다 — 섞이면 토큰만이 아니라 맥락이 오염된다
@@ -832,11 +857,7 @@ const HISTORY_STEP = 6;
  * buildMatchBrief·matchDigest가 잇는다.
  */
 function relevantTurns(state: GameState): typeof state.chat {
-  /**
-   * 킥오프 멘트 턴은 아직 **라커룸의 연장**이다 — 경기 이력이 비어 있고 첫 마디를
-   * 여는 근거는 경기 전 대화(팀토크·브리핑)다. 그래서 그 한 턴만 평시로 읽는다.
-   */
-  const inMatch = state.phase === "match" && state.pendingMatch?.entered === true;
+  const inMatch = inMatchNow(state);
   const here = state.pendingMatch?.matchId;
   return state.chat.filter((t) =>
     inMatch
@@ -892,14 +913,18 @@ export function recordCharacterInjection(
   turn.characters = entries.map((e) => ({ characterId: e.characterId, depth: e.depth }));
 }
 
-/** 이력 창 — 어디서부터 어디까지가 이번 호출의 이력인가 */
+/**
+ * 이력 창 — 어디서부터 어디까지가 이번 호출의 이력인가. **평시의 시작점은 코어가
+ * 정한다** (`historyStart` → agents.md §5-1: 글자 상한 안에 드는 가장 앞의 6턴 경계).
+ * 코어가 고르는 평시 턴(`peaceTurns`)과 `relevantTurns`의 평시 갈래가 같은 필터
+ * (`inMatch !== true`)라 접힌 지점의 인덱스가 이 목록에 그대로 맞는다.
+ */
 function windowOf(state: GameState): { turns: GameState["chat"] } {
   const chat = relevantTurns(state);
   const upto = historyEnd(chat);
-  const start = Math.max(
-    0,
-    Math.floor(Math.max(0, upto - HISTORY_KEEP) / HISTORY_STEP) * HISTORY_STEP,
-  );
+  // 경기 이력은 접히지 않는다 — 경기마다 리셋돼 자라지 않는다 (agents.md §5-1).
+  // 접은 지점은 평시의 것이라 이 목록에 먹이면 엉뚱한 자리를 자른다
+  const start = inMatchNow(state) ? 0 : historyStart(state);
   return { turns: chat.slice(start, upto) };
 }
 

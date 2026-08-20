@@ -1,4 +1,4 @@
-import { ageOf } from "@story-fm/domain";
+import { ageOf, isReleaseNote } from "@story-fm/domain";
 import type { GamePlayer, MatchRecord, PlayerIssueReason } from "@story-fm/domain";
 import { diffDays } from "../competition/calendar";
 import { formLabel, RATING_BASELINE, type FormLabel } from "./form";
@@ -29,14 +29,17 @@ import {
  * 지친 것과 풀이 죽은 것은 다른 사실이다.
  *
  * 그래서 마음의 근거는 마음 쪽에서 읽는다 — **직전 경기의 결과와 그 선수의
- * 평점**, 불만, 정착, 출전 기회, 폼. 체력은 문턱을 넘었다는 사실로만 곁들인다.
+ * 평점**, 불만, 2군 강등, 정착, 출전 기회, 폼. 체력은 문턱을 넘었다는 사실로만 곁들인다.
  *
  * 우선순위는 "감독이 지금 조치해야 하는 순서"다 — 못 뛰는 사유(부상·정지)가 먼저,
- * 그다음 직전 경기의 여운, 마음(불만·정착), 출전 기회, 폼, 마지막이 몸이다.
+ * 그다음 마음(불만·2군 강등·정착·직전 경기의 여운), 출전 기회, 폼, 마지막이 몸이다.
  */
 
 /** 경기의 여운이 남아 있는 기간 — 이 안이면 심경이 그 경기에 매여 있다 */
 const AFTERGLOW_DAYS = 3;
+
+/** 계약 해지의 여운이 라커룸에 남아 있는 기간 — 지나면 아무도 그 이름을 말하지 않는다 */
+const DEPARTURE_ECHO_DAYS = 3;
 
 /** 자기 경기를 잘했다/못했다로 가르는 평점 폭 — 기준선에서 이만큼 떨어지면 등급이 선다 */
 const AFTERGLOW_RATING_BAND = 0.6;
@@ -70,6 +73,8 @@ export type MoodFact =
       days: number;
       count: number | null;
     }
+  /** 감독이 2군으로 내린 선수만 — 시드가 2군에 세워 둔 선수에겐 서지 않는다 */
+  | { cause: "demotion"; days: number }
   | { cause: "settling"; percent: number; matches: number }
   | {
       cause: "afterglow";
@@ -82,6 +87,8 @@ export type MoodFact =
   | { cause: "no-minutes"; place: "bench" | "out" }
   | { cause: "form"; label: FormLabel }
   | { cause: "condition"; level: "heavy" | "light" }
+  /** 최근 우리 구단에서 계약이 해지된 선수 — 남은 선수단 전원이 같은 카드를 든다 */
+  | { cause: "departure"; name: string; days: number }
   | { cause: "contract-ending"; daysLeft: number }
   | { cause: "captain" }
   | { cause: "young"; age: number }
@@ -187,6 +194,42 @@ function grievanceOf(state: GameState, playerId: string): MoodFact | null {
 }
 
 /**
+ * 감독이 2군으로 내린 지 며칠째인가 — 아니면 null.
+ *
+ * `demotedOn`이 없으면 **감독이 내린 적이 없다**는 뜻이다 (시드가 2군에 세워 둔
+ * 선수·옛 세이브). 방치의 대가는 감독의 결정에만 붙으므로 그때는 카드가 서지 않는다.
+ */
+function demotionDaysOf(state: GameState, player: GamePlayer): number | null {
+  if (player.squadLevel !== "reserve") return null;
+  const on = player.state.demotedOn;
+  if (on === undefined) return null;
+  return Math.max(0, diffDays(on, state.date));
+}
+
+/**
+ * 최근 우리 구단에서 **계약이 해지된** 선수 — 원장에서 파생한다.
+ *
+ * 계약 만료도 해지도 `type: "free"`라 갈리는 것은 `RELEASE_NOTE` 표식뿐이다.
+ * 원장은 날짜 순이므로 뒤에서부터 훑고 창을 벗어나면 멈춘다 — 원장이 아무리 커도
+ * 보는 줄은 몇 줄이다.
+ */
+function recentDeparture(state: GameState): MoodFact | null {
+  for (let i = state.transfers.length - 1; i >= 0; i -= 1) {
+    const transfer = state.transfers[i];
+    if (transfer === undefined) continue;
+    const days = diffDays(transfer.date, state.date);
+    if (days < 0) continue;
+    if (days > DEPARTURE_ECHO_DAYS) break;
+    if (transfer.fromTeamId !== state.userTeamId) continue;
+    if (!isReleaseNote(transfer.note)) continue;
+    const name = playerById(state, transfer.gamePlayerId)?.name;
+    if (name === undefined) continue;
+    return { cause: "departure", name, days };
+  }
+  return null;
+}
+
+/**
  * **코어가 고른 심경의 사실** — 우선순위 순 최대 2장.
  *
  * 화면·조회 도구는 `moodOf`를 부른다. 이 함수를 직접 부르는 곳은 앵커를 세우는
@@ -206,6 +249,7 @@ export function moodFactsOf(
   const stat = seasonStatOf(state, player.id);
   const contract = activeContract(state, player.id);
   const settling = settlingOf(state, player.id);
+  const demotionDays = demotionDaysOf(state, player);
   const { form, condition } = player.state;
 
   // ── 못 뛰는 사유가 있으면 그게 전부다 ──
@@ -229,6 +273,9 @@ export function moodFactsOf(
     // ── 마음 ──
     if (grievance) {
       facts.push(grievance);
+    } else if (demotionDays !== null) {
+      // 출전 기회(`no-minutes`)보다 앞에 선다 — 강등이 곧 못 뛰는 이유다
+      facts.push({ cause: "demotion", days: demotionDays });
     } else if (settling && !settling.done) {
       // 남은 날짜를 내지 않는다 — 얼마나 걸릴지는 감독이 앞으로 뭘 하느냐에 달렸다
       facts.push({
@@ -273,6 +320,17 @@ export function moodFactsOf(
   }
 
   // ── 곁들임: 지금 조치하지 않으면 놓칠 사정 ──
+  /**
+   * 방금 누가 팀을 떠났다 — 라커룸 전체가 같은 사실을 든다. 누가 그와 가까웠는지를
+   * 가를 관계 점수가 아직 없어 카드도 하나뿐이다 (people.md §5).
+   *
+   * ⚠️ **우리 라커룸의 사실이다.** 스카우트가 보는 남의 선수에게 우리 구단의
+   * 해지가 걸리면 그 카드는 거짓말이다.
+   */
+  if (player.teamId === state.userTeamId && facts.length < MOOD_FACT_LIMIT) {
+    const departure = recentDeparture(state);
+    if (departure) facts.push(departure);
+  }
   if (!injury && contract) {
     const left = diffDays(state.date, contract.until);
     if (left >= 0 && left <= CONTRACT_ENDING_DAYS) {
@@ -333,6 +391,8 @@ export function issueReasonText(issue: {
       return issue.count == null ? "연패" : `${issue.count}연패`;
     case "early-return":
       return "휴가 반납 소집";
+    case "demotion":
+      return "2군 강등";
     default:
       return issue.note ?? null;
   }
@@ -355,6 +415,8 @@ function factLine(fact: MoodFact): string {
       return `출장 정지 ${fact.matchesLeft}경기`;
     case "grievance":
       return `불만 ${issueReasonText(fact) ?? "사유 없음"} · ${fact.days}일째`;
+    case "demotion":
+      return `2군 ${fact.days}일째`;
     case "settling":
       return `새 팀 정착 ${fact.percent}% · 출전 ${fact.matches}경기`;
     case "afterglow":
@@ -370,6 +432,8 @@ function factLine(fact: MoodFact): string {
       return fact.level === "heavy"
         ? `체력 ${CONDITION_HEAVY} 이하`
         : `체력 ${CONDITION_LIGHT} 이상`;
+    case "departure":
+      return `${fact.name} 계약 해지 · ${dayWord(fact.days)}`;
     case "contract-ending":
       return `계약 만료 ${fact.daysLeft}일`;
     case "captain":
@@ -447,6 +511,15 @@ export function buildMoodBrief(state: GameState, from: string, to: string): Mood
     if (issue) {
       facts.push(`불만: ${issueReasonText(issue) ?? "팀 상황"} (${issue.since}부터)`);
       weight += 4;
+    }
+    /**
+     * ⚠️ **2군은 경기를 뛰지 않는다** — 여기서 세지 않으면 내린 다음 날부터
+     * 결산에서 조용히 사라진다. 무게는 경기 출전과 같다 (people.md §5).
+     */
+    const demotionDays = demotionDaysOf(state, player);
+    if (demotionDays !== null) {
+      facts.push(`2군 ${demotionDays}일째`);
+      weight += 3;
     }
     const settling = settlingOf(state, player.id);
     if (settling && !settling.done) {
