@@ -111,6 +111,15 @@ export const TransferSchema = z.object({
 });
 export type Transfer = z.infer<typeof TransferSchema>;
 
+/**
+ * 방출을 원장에서 알아보는 표식 — `TRANSFER.note`에 이대로 적힌다.
+ *
+ * 계약 만료도 방출도 `type: "free"`로 같은 줄에 서지만 라커룸이 받는 사실은
+ * 다르다: 하나는 계약이 끝난 것이고 하나는 **감독이 내보낸 것**이다. 심경이
+ * 그 둘을 가르려면 원장에 표식이 있어야 한다 (people.md §5).
+ */
+export const RELEASE_NOTE = "계약 해지 (방출)";
+
 // ── 협상 (진행 중 흥정 — 완료된 이동은 TRANSFER) ────────
 /**
  * 협상은 **원장이 아니다.** TRANSFER가 "일어난 이동"이라면 NEGOTIATION은 "합의되지
@@ -291,7 +300,13 @@ export const SCOUT_DEFER_DAYS = SCOUT_DAYS;
  * 문장으로 적으면 그것을 읽는 자리마다 `"${note}에 불만이 쌓여 있다"` 같은 짜깁기가
  * 생긴다. 코드로 두면 화면 문구를 고치는 것만으로 옛 세이브까지 함께 고쳐진다.
  */
-export const PLAYER_ISSUE_REASONS = ["minutes", "losing-run", "early-return"] as const;
+export const PLAYER_ISSUE_REASONS = [
+  "minutes",
+  "losing-run",
+  "early-return",
+  /** 2군에 내려간 채 방치된 기간 — 기간은 `PlayerState.demotedOn`이 갖는다 */
+  "demotion",
+] as const;
 export type PlayerIssueReason = (typeof PLAYER_ISSUE_REASONS)[number];
 
 export const PlayerIssueSchema = z.object({

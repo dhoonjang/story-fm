@@ -1,5 +1,5 @@
 import type { GamePlayer } from "@story-fm/domain";
-import { ageOf } from "@story-fm/domain";
+import { ageOf, RELEASE_NOTE } from "@story-fm/domain";
 import { contractUntil, diffDays, seasonYear, windowOpenOn } from "../competition/calendar";
 import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import { formatMoney, recordFinance } from "../club/finance";
@@ -147,7 +147,7 @@ export function releasePlayer(state: GameState, input: { playerId: string }): Sk
     });
   }
   const wasCaptain = player.isCaptain;
-  toFreeAgency(state, player, "계약 해지 (방출)");
+  toFreeAgency(state, player, RELEASE_NOTE);
 
   pushNarrative(state, `${player.name} 계약 해지`, wasCaptain ? 5 : 4);
   return {

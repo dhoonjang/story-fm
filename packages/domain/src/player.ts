@@ -1673,6 +1673,19 @@ export const PlayerStateSchema = z.object({
    * 옛 세이브엔 없다 — 없으면 아직 완장을 찬 적 없는 것으로 읽고 버전을 올리지 않는다.
    */
   captainedOn: DateString.optional(),
+  /**
+   * **2군으로 내린 날** — "며칠째 2군인가"를 답하는 유일한 자리.
+   *
+   * 1·2군 이동은 원장에 남지 않는다(`squadLevel`은 지금의 상태일 뿐 언제 바뀌었는지를
+   * 모른다). 그래서 방치의 기간을 파생할 표가 없다 — 강등의 대가가 시간의 결과이려면
+   * 시작점이 저장돼야 한다 (people.md §5).
+   *
+   * 1군으로 올리면 지워진다 — 다시 내리면 그날부터 새로 센다. 시드가 2군에 세워 둔
+   * 선수에겐 없다: 감독이 내린 적 없는 선수는 방치의 대상도 아니다.
+   *
+   * 옛 세이브엔 없다 — 없으면 감독이 내린 적 없는 것으로 읽고 버전을 올리지 않는다.
+   */
+  demotedOn: DateString.optional(),
 });
 export type PlayerState = z.infer<typeof PlayerStateSchema>;
 
