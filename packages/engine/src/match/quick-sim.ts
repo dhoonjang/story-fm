@@ -12,15 +12,18 @@ import {
 } from "@story-fm/domain";
 import {
   ASSIST_RATE,
-  CARDS_PER_MATCH,
-  EXTRA_TIME_SHOT_SHARE,
-  INJURY_PER_MATCH,
+  EVEN_POSSESSION,
+  EXTRA_TIME_DENSITY,
+  EXTRA_TIME_MINUTES,
   STRAIGHT_RED_CHANCE,
   bookingWeight,
   buildStrengthPacket,
   injuryWeight,
+  matchIntensity,
   samplePoisson,
   sampleShot,
+  teamCardRate,
+  teamInjuryRate,
   type LineupSlot,
 } from "@story-fm/sim";
 import { makeRng } from "../core/rng";
@@ -99,6 +102,17 @@ export function quickStrengthFactor(ours: number, theirs: number): number {
   return logRatioFactor(ours / Math.max(MIN_STRENGTH, theirs), STRENGTH_LOG_SCALE);
 }
 
+/**
+ * 이 팀이 경기에 싣는 강도 — 압박·템포에서 나온다(`matchIntensity`, 0.8~1.3).
+ *
+ * 구간 시뮬은 패킷의 `guide.intensity`를 읽지만, 카드·부상은 슈팅과 달리 **경기
+ * 전에 한 번** 뽑아 타임라인 위에 얹으므로 여기서는 패킷을 세우기 전에 같은
+ * 함수를 직접 부른다. 패킷의 값도 이 함수가 낸 것이라 두 경로가 같은 수를 준다.
+ */
+function intensityOf(squad: SimSquad): number {
+  return matchIntensity(squad.tactics ?? DEFAULT_TACTICS);
+}
+
 function outfield(players: readonly GamePlayer[]): GamePlayer[] {
   return players.filter((p) => positionGroupOfPlayer(p) !== "GK");
 }
@@ -135,10 +149,14 @@ function pickAssister(
 }
 
 /**
- * 카드 — **구간 시뮬과 같은 눈금**에서 나온다: 빈도는 `CARDS_PER_MATCH`,
- * 다이렉트 레드는 `STRAIGHT_RED_CHANCE`, 누가 받는지는 `bookingWeight`(거칠기 +
- * 태클 미숙, 이미 경고를 받았으면 관대해진다) — 셋 다 `packages/sim`이 한 벌만
- * 갖는다. 눈금이 갈리면 "우리 팀만 카드를 받는다"가 된다.
+ * 카드 — **구간 시뮬과 같은 눈금**에서 나온다: 빈도는 `teamCardRate`, 다이렉트
+ * 레드는 `STRAIGHT_RED_CHANCE`, 누가 받는지는 `bookingWeight`(거칠기 + 태클 미숙,
+ * 이미 경고를 받았으면 관대해진다) — 셋 다 `packages/sim`이 한 벌만 갖는다.
+ * 눈금이 갈리면 "우리 팀만 카드를 받는다"가 된다.
+ *
+ * **강도도 함께 온다** — 압박·템포를 올린 팀이 자기 카드를 더 받는 것은 구간
+ * 시뮬의 규칙이고(match.md §1.2), 여기서 고정값을 쓰면 압박 5로 서는 AI 팀은
+ * 우리와 붙는 한 경기에서만 그 대가를 치른다.
  */
 function rollCards(
   rng: () => number,
@@ -148,7 +166,7 @@ function rollCards(
   validSubs: QuickSub[],
   into: QuickCard[],
 ): void {
-  const count = samplePoisson(rng, CARDS_PER_MATCH / TEAMS_PER_MATCH);
+  const count = samplePoisson(rng, teamCardRate(intensityOf(squad)));
   /**
    * 분을 **먼저 뽑아 시간 순으로** 돌린다. 뽑는 순서와 분이 따로 놀면 30분에
    * 퇴장한 선수가 80분에 경고를 받은 장부가 나온다 — 그라운드에 없는 선수다.
@@ -194,9 +212,6 @@ function rollCards(
  * AI 팀도 로테이션을 하면 주중 대항전을 뛴 팀의 주말 라인업이 실제로 흔들린다.
  * 예전엔 선발 11명이 90분을 다 뛰어서, 컵과 유럽을 병행하는 팀에 아무 대가가 없었다.
  */
-/** 경기당 값(카드·부상)을 한 팀 몫으로 나눌 때 쓴다 */
-const TEAMS_PER_MATCH = 2;
-
 const SUB_MINUTES = [46, 60, 68, 76, 82];
 /** 이만큼 지쳤으면 무조건 뺀다 — 그 아래면 감독 재량(`SUB_ANYWAY`) */
 const SUB_TIREDNESS = 34;
@@ -281,8 +296,14 @@ function rollInjury(
   if (played.length === 0) return;
   const proneOf = (p: GamePlayer) => squad.proneness?.[p.id] ?? 1;
   const avgProneness = played.reduce((s, p) => s + proneOf(p), 0) / played.length;
-  // 팀당 절반 — 경기당 기대치를 양팀이 나눈다 (구간 시뮬과 같은 눈금)
-  if (rng() >= (INJURY_PER_MATCH / TEAMS_PER_MATCH) * avgProneness) return;
+  /**
+   * 구간 시뮬과 **같은 함수**가 눈금을 쥔다 — 팀당 몫 · 강도 · 성향 평균.
+   *
+   * 저쪽은 이 발생률로 90분을 굴려 사건을 뽑고 이쪽은 한 번의 베르누이로 뽑는다.
+   * 팀당 기대치가 0.05~0.07이라 둘의 차이는 λ와 1 − e^(−λ), 3% 안쪽이다 — 대신
+   * 여기서는 한 팀이 한 경기에 두 명을 잃지 않는다.
+   */
+  if (rng() >= teamInjuryRate(intensityOf(squad), avgProneness)) return;
   const weights = played.map((p) => injuryWeight(p, 0, proneOf(p)));
   const total = weights.reduce((s, w) => s + w, 0);
   if (total <= 0) return;
@@ -340,11 +361,14 @@ export interface QuickResult {
   awayExpectedGoals: number;
 }
 
-/** 연장 30분 — 실제 규정(전·후반 15분) */
-export const EXTRA_TIME_MINUTES = 30;
+/**
+ * 연장 30분 — **구간 시뮬이 국면표에서 유도한 그 값**을 그대로 다시 내보낸다
+ * (분당 밀도 `EXTRA_TIME_DENSITY`도 거기서 온다). 여기서 같은 0.84를 다시
+ * 계산하면 분모를 고친 날 감독의 연장과 세계의 연장이 조용히 갈린다.
+ */
+export { EXTRA_TIME_MINUTES };
 /** 연장의 첫 분 — 골의 분은 91~120이다 */
 const EXTRA_TIME_FIRST_MINUTE = 91;
-const EXTRA_TIME_DENSITY = (EXTRA_TIME_SHOT_SHARE * PHASE_END.second_half) / EXTRA_TIME_MINUTES;
 
 interface QuickShot {
   side: "home" | "away";
@@ -428,9 +452,6 @@ const SECOND_HALF_DENSITY = 48.6 / 49;
 
 /** 감독 정보가 없는 팀(AI 벤치)의 전술 능력 — 리그 평균 언저리 */
 const AI_MANAGER_TACTICS = 65;
-
-/** 아무 구간도 재지 못했을 때의 점유 — 어느 쪽으로도 기울지 않는다 */
-const EVEN_POSSESSION = 0.5;
 
 function shotTimeline(
   rng: () => number,

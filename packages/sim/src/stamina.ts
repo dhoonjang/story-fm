@@ -262,8 +262,11 @@ export function drainVariance(key: string): number {
  */
 export const CHASE_DRAIN = 0.8;
 
-/** 아무도 공을 더 갖지 않은 점유 — 여기서 `chaseFactor`가 1이다 */
-const EVEN_POSSESSION = 0.5;
+/**
+ * 아무도 공을 더 갖지 않은 점유 — 여기서 `chaseFactor`가 1이다.
+ * 간이 시뮬도 "아무 구간도 재지 못했을 때의 점유"로 이 값을 import한다.
+ */
+export const EVEN_POSSESSION = 0.5;
 
 /** 점유(0~1)가 이 팀의 소모에 곱하는 배율 */
 export function chaseFactor(possession: number): number {
