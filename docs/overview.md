@@ -222,7 +222,8 @@
 - 서사 아크·장기 기억 축적 — 최근 몇 건만 스냅샷에 실린다
   ([llm/agents.md](llm/agents.md))
 - 승부차기 연출 — 코어가 조용히 굴린다 ([simulation/match.md](simulation/match.md))
-- 감독 이직 — 경질이 곧 세이브의 끝이다 ([simulation/career.md](simulation/career.md))
+- 감독 이직 — 공석 팀의 제안을 받아 부임하는 데까지다. 연봉·기간 흥정도, 감독이 먼저
+  자리를 노크하는 길도 없다 ([simulation/career.md](simulation/career.md))
 - 유스 아카데미 — 2군은 코어 곡선으로 자랄 뿐 감독의 손잡이가 콜업뿐이다
   ([simulation/season.md](simulation/season.md))
 

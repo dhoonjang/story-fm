@@ -132,7 +132,8 @@
 | `pendingMatch`               | 진행 중인 경기 — 패킷·장부·캐스터 이력·킥오프 전술·입장 여부(`entered`)·구간 시뮬의 연속 시계(`segmentClock`) | `core/state.ts`            |
 | `world?`                     | 이 세계의 범위 (테스트용 축소 세계)                                                                           | `world/scope.ts`           |
 | `leagueOf?`                  | 승강 결과 — 팀 → 지금 속한 리그                                                                               | `competition/promotion.ts` |
-| `dismissal?`                 | 경질됨 — 있으면 시계가 멈춘다                                                                                 | `core/state.ts`            |
+| `dismissal?`                 | 경질 사실 카드 — 있으면 감독은 무직이다 (career.md §5.1)                                                      | `domain/manager.ts`        |
+| `managerOffers?`             | 감독직 제안 — 공석 구단이 무직 감독을 부른 기록                                                               | `domain/manager.ts`        |
 | `formUnitScale?`             | 폼 눈금 마이그레이션 마커 (§6)                                                                                | `core/state.ts`            |
 | `mirrorProficiencyStripped?` | 미러 자리 주발 보정 벗기기 마커 (§6)                                                                          | `core/state.ts`            |
 

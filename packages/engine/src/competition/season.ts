@@ -61,6 +61,7 @@ import { assignSquadNumber } from "../squad/numbers";
 import {
   buildAssignments,
   groupOf,
+  managedTeamId,
   playersOf,
   pushNarrative,
   tacticsOf,
@@ -372,6 +373,20 @@ export function reviewSeason(state: GameState): string[] {
   const row = standings[position - 1];
   if (!row) return digest;
 
+  /**
+   * **무직으로 맞은 시즌 끝은 커리어에 남지 않는다** (career.md §5.1).
+   *
+   * `SEASON_RECORD`·트로피·업적·보드 평판 ±8은 그 자리에 있던 감독의 것이라,
+   * 잘린 뒤 옛 팀이 든 컵이 감독의 것이 되면 안 된다. 구단이 치르는 것 — 리그
+   * 상금과 선수단 성과 보너스 — 은 감독과 무관하므로 그대로 결산된다.
+   */
+  if (managedTeamId(state) === null) {
+    payLeaguePrizes(state, digest);
+    paySeasonBonuses(state, position, digest);
+    digest.push(`시즌 ${state.season} 종료 — 무직으로 맞았다. 이 시즌은 커리어에 남지 않는다`);
+    return digest;
+  }
+
   const expectation = boardExpectation(state, state.userTeamId);
   const met = position <= expectation.target;
   state.manager.reputation.board = Math.max(
@@ -464,6 +479,11 @@ export function recordLeagueHistory(state: GameState): void {
 export function transitionSeason(state: GameState): string[] {
   const digest: string[] = [];
   const rng = makeRng(state.seed, `transition:${state.season}`);
+  /**
+   * 무직으로 넘기는 시즌이면 옛 구단도 **AI 클럽으로** 넘어간다 (career.md §5.1) —
+   * 감독이 없는 구단의 계약이 자동 갱신되지 않으면 선수단이 통째로 걸어 나간다.
+   */
+  const managed = managedTeamId(state);
   const nextSeason = state.season + 1;
   const nextCalendar = buildSeasonCalendar(nextSeason);
   // 나이 판정 기준 — 다음 시즌 개막일
@@ -560,7 +580,7 @@ export function transitionSeason(state: GameState): string[] {
 
     if (retirees.length > 0) {
       const retSet = new Set(retirees);
-      if (team.id === state.userTeamId) {
+      if (team.id === managed) {
         digest.push(
           `은퇴: ${squad
             .filter((p) => retSet.has(p.id))
@@ -603,7 +623,7 @@ export function transitionSeason(state: GameState): string[] {
      * 열 시즌 뒤 골키퍼가 사라진다(소프트락).
      */
     const leavers: string[] = [];
-    if (team.id === state.userTeamId) {
+    if (team.id === managed) {
       for (const contract of contractsByTeam.get(team.id) ?? []) {
         if (contract.status !== "active") continue;
         if (contract.until > nextCalendar.preseasonStart) continue;
@@ -677,7 +697,7 @@ export function transitionSeason(state: GameState): string[] {
         status: "active",
       });
     }
-    if (team.id === state.userTeamId && totalIntake > 0) {
+    if (team.id === managed && totalIntake > 0) {
       digest.push(`유스 합류: 신인 ${totalIntake}명이 2군 개발 스쿼드에 합류했다`);
     }
 

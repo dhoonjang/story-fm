@@ -1,6 +1,7 @@
 import type { MatchEvent, PressConference } from "@story-fm/domain";
 import {
   acceptDeal,
+  acceptManagerOffer,
   advanceSegment,
   advanceShootout,
   awaitingShootout,
@@ -20,6 +21,7 @@ import {
   dealOdds,
   describeNegotiations,
   describeNextFixture,
+  openManagerOffers,
   describeOdds,
   expiringContracts,
   digestLines,
@@ -498,6 +500,39 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
     }
     return {
       text: `${coach(state)} 오늘은 경기일입니다. 라인업·전술을 점검하시고 준비되면 말씀하십시오.`,
+      toolCalls: calls,
+    };
+  }
+
+  /**
+   * ── 무직 ─────────────────────────────────────────────
+   *
+   * 맡은 팀이 없으면 아래 분기는 전부 남의 구단을 만지는 일이라(실모드는
+   * `buildGmTools`가 같은 자리에서 막는다) 여기서 끝난다. 할 수 있는 것은
+   * 들어온 제안을 받는 것뿐이다 (career.md §5.1).
+   */
+  if (state.dismissal) {
+    const offers = openManagerOffers(state);
+    const named = offers.find((o) => msg.includes(teamName(o.teamId)) || msg.includes(o.id));
+    const taking = /수락|받겠|받아|가겠|맡겠|부임|간다|하겠/u.test(msg);
+    const target = named ?? (taking ? offers[0] : undefined);
+    if (target) {
+      const result = acceptManagerOffer(state, target.id);
+      if (result.ok) {
+        calls.push({ name: "accept_manager_offer", summary: result.message, ...carry(result) });
+      }
+      return {
+        text: `@: *새 구단의 회장실, 계약서가 놓인다*\n${coach(state)} ${result.message}`,
+        toolCalls: calls,
+      };
+    }
+    return {
+      text:
+        offers.length > 0
+          ? `${coach(state)} 들어온 자리는 ${offers
+              .map((o) => `${teamName(o.teamId)} (${o.expiresOn}까지)`)
+              .join(" · ")}입니다. 받으시겠습니까?`
+          : `${coach(state)} 아직 부르는 곳이 없습니다. 기다려 보시죠.`,
       toolCalls: calls,
     };
   }

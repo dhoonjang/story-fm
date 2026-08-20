@@ -51,6 +51,8 @@ export const PANEL_OF: Record<string, PanelKey> = {
   respond_to_media: "커리어",
   // 다가옴도 옮기는 것이 평판 3축이다 — 사기 변화는 스쿼드에도 서지만 자리는 하나다
   respond_to_approach: "커리어",
+  // 부임은 커리어의 사건이다 — 경질 카드가 지워지고 남은 제안이 사라지는 곳이 거기다
+  accept_manager_offer: "커리어",
 };
 
 /**

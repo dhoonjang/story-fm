@@ -71,7 +71,7 @@
 
 | 그룹      | 수  | 도구                                                                                                                                                                                             |
 | --------- | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 진행      | 1   | `start_match`                                                                                                                                                                                    |
+| 진행      | 2   | `start_match` · `accept_manager_offer`                                                                                                                                                           |
 | 전술·훈련 | 8   | `set_lineup` · `set_squad_level` · `set_captain` · `set_tactics` · `set_player_tactic` · `exploit_point` · `set_match_plan` · `set_training`                                                     |
 | 대화·서사 | 5   | `team_talk` · `talk_to_player` · `respond_to_media` · `respond_to_approach` · `apply_narrative_event`                                                                                            |
 | 경기      | 1   | `substitute`                                                                                                                                                                                     |

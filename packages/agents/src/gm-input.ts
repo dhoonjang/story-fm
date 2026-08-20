@@ -19,8 +19,10 @@ import {
   headCoachOf,
   historyStart,
   isSuspended,
+  managedTeamId,
   MAX_EXPLOITS,
   openInjury,
+  openManagerOffers,
   pendingVerdicts,
   playerName,
   scoutingSummary,
@@ -272,12 +274,68 @@ const TRAINING_SHOWN = 3;
 const EXPIRING_SHOWN = 3;
 const RECENT_NARRATIVE = 4;
 
+/** 시간이 흘렀다 — 손잡이로 넘긴 턴에만 붙는 꼬리. 재직·무직 스냅샷이 같이 쓴다 */
+function timePassedLine(state: GameState, passed?: TimePassed | null): string | null {
+  if (!passed || (passed.digest.length === 0 && passed.from === state.date)) return null;
+  return [
+    `시간이 흘렀다: ${passed.from} → ${state.date} (${passed.stopped})`,
+    `이미 그날이다 — 첫 줄 헤더에 ${state.date}을(를) 적어라.`,
+    passed.digest.length > 0
+      ? `그 사이 벌어진 일:\n${passed.digest.map((d) => `- ${d}`).join("\n")}`
+      : `그 사이 특별한 일은 없었다.`,
+  ].join("\n");
+}
+
+/**
+ * **무직의 스냅샷** — 맡은 팀이 없다 (career.md §5.1).
+ *
+ * 재직 중에 실리는 것(전술·재정·선수단·훈련·협상)은 전부 **옛 구단의 것**이라,
+ * 그대로 실으면 모델은 아직 그 구단의 감독인 것처럼 장면을 쓴다. 무직에게 필요한
+ * 것은 셋뿐이다 — 왜 무직인가, 무엇이 걸려 있는가, 그 사이 무슨 일이 있었는가.
+ */
+function buildUnemployedNote(state: GameState, passed?: TimePassed | null): string {
+  const card = state.dismissal;
+  const offers = openManagerOffers(state);
+  const lines = [
+    `[상태 스냅샷 — 이 블록은 매 턴 갱신된다]`,
+    `${state.date} (${DOW_KO[dayOfWeek(state.date)]}) ${formatClock(clockOf(state))} · 시즌 ${state.season} · ${describeWindowState(state)}`,
+    `감독 ${state.manager.name}은(는) **무직이다** — 맡은 팀이 없다. 팀 전술·훈련·이적·경기에 관한 도구는 부를 수 없다.`,
+    card
+      ? `경질: ${card.on} ${teamName(card.teamId)}${
+          card.expectation && card.position
+            ? ` — 기대 ${card.expectation}(${card.target}위)에 최종 ${card.position}위`
+            : card.reason
+              ? ` — ${card.reason}`
+              : ""
+        }`
+      : null,
+    `평판: 보드${state.manager.reputation.board} 미디어${state.manager.reputation.media} 선수단${state.manager.reputation.squad}`,
+    offers.length > 0
+      ? `받은 감독직 제안 (accept_manager_offer로 수락한다 — 감독이 받겠다고 할 때만):\n${offers
+          .map(
+            (o) =>
+              `- ${o.id} · ${teamName(o.teamId)} (${o.tier}티어) · 기대 ${o.expectation}(${o.target}위)${
+                o.position ? ` · 현재 ${o.position}위` : ""
+              } · ${o.expiresOn}까지`,
+          )
+          .join("\n")}`
+      : `받은 감독직 제안 없음 — 기다리는 것 말고 감독이 할 수 있는 일은 없다.`,
+    timePassedLine(state, passed),
+  ].filter((x): x is string => x !== null);
+  const recent = state.narrative.slice(-RECENT_NARRATIVE).map((n) => `${n.date} ${n.text}`);
+  if (recent.length > 0) lines.push(`최근 사건: ${recent.join(" / ")}`);
+  return lines.join("\n");
+}
+
 export function buildGmStateNote(
   state: GameState,
   passed?: TimePassed | null,
   /** 이번 턴에 카드로 서는 보고서 — 카드가 프롬프트에 못 가므로 값은 여기로 온다 */
   arrivedReports: readonly ScoutReportCard[] = [],
 ): string {
+  // 무직이면 실을 것이 다른 것들이다 (career.md §5.1)
+  if (managedTeamId(state) === null) return buildUnemployedNote(state, passed);
+
   const standings = computeStandings(state);
   const rank = standings.findIndex((r) => r.teamId === state.userTeamId) + 1;
   // 0경기 순위는 싣지 않는다 — 정렬 순서일 뿐인데 모델이 구단의 처지로 읽는다
@@ -378,17 +436,8 @@ export function buildGmStateNote(
   ].filter((x): x is string => x !== null && x !== "");
   // 그 사이 벌어진 일 — 손잡이로 시간을 넘긴 턴에만. 없으면 모델이 넘긴 구간의
   // 일(부상·오퍼)을 모른 채 장면을 쓴다
-  if (passed && (passed.digest.length > 0 || passed.from !== state.date)) {
-    lines.push(
-      [
-        `시간이 흘렀다: ${passed.from} → ${state.date} (${passed.stopped})`,
-        `이미 그날이다 — 첫 줄 헤더에 ${state.date}을(를) 적어라.`,
-        passed.digest.length > 0
-          ? `그 사이 벌어진 일:\n${passed.digest.map((d) => `- ${d}`).join("\n")}`
-          : `그 사이 특별한 일은 없었다.`,
-      ].join("\n"),
-    );
-  }
+  const passedLine = timePassedLine(state, passed);
+  if (passedLine) lines.push(passedLine);
   /**
    * 도착한 스카우트 보고서 — **이번 턴에 화면 카드로 서는 그것들이다.**
    *

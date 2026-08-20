@@ -164,6 +164,30 @@ export const CARDS_PER_MATCH = 3.4;
  */
 export const INJURY_PER_MATCH = 0.1;
 
+/** 경기당 값(카드·부상)을 한 팀 몫으로 나눈다 — 위 둘은 **양 팀 합**이다 */
+const TEAMS_PER_MATCH = 2;
+
+/**
+ * 한 팀이 90분에 받을 카드 기대치 — **자기 강도에 비례한다** (거칠게 밀어붙이면
+ * 자기가 카드를 받는다).
+ *
+ * 구간 시뮬과 간이 시뮬이 **이 함수 하나**를 부른다. 나누는 수와 강도를 곱하는
+ * 자리가 양쪽에 따로 적혀 있으면 압박 5로 서는 팀이 우리 경기에서만 카드를 더
+ * 받는다 — 리그의 절반이 다른 눈금으로 경고를 세는 것이다.
+ */
+export function teamCardRate(intensity: number): number {
+  return (CARDS_PER_MATCH / TEAMS_PER_MATCH) * intensity;
+}
+
+/**
+ * 한 팀이 90분에 낼 부상 기대 건수 — 강도와 **성향 평균**을 함께 탄다.
+ * 유리몸을 열한 명 세운 팀은 실제로 더 자주 쓰러진다 (누가 걸리는지만 성향으로
+ * 가르면 그 팀의 부상 총량은 철인 열한 명과 같다).
+ */
+export function teamInjuryRate(intensity: number, avgProneness = 1): number {
+  return (INJURY_PER_MATCH / TEAMS_PER_MATCH) * intensity * avgProneness;
+}
+
 interface Rates {
   shot: { home: number; away: number };
   card: { home: number; away: number };
@@ -179,15 +203,9 @@ function ratesOf(packet: StrengthPacket): Rates {
   const per = (v: number) => v / 90;
   return {
     shot: { home: per(shots.home), away: per(shots.away) },
-    // 카드·부상은 **자기 강도**에 비례한다 (거칠게 밀어붙이면 자기가 카드를 받는다)
-    card: {
-      home: per(CARDS_PER_MATCH * 0.5 * it.home),
-      away: per(CARDS_PER_MATCH * 0.5 * it.away),
-    },
-    injury: {
-      home: per(INJURY_PER_MATCH * 0.5 * it.home),
-      away: per(INJURY_PER_MATCH * 0.5 * it.away),
-    },
+    // 카드·부상의 눈금은 간이 시뮬과 **같은 함수**가 쥔다 (성향은 아래에서 곱한다)
+    card: { home: per(teamCardRate(it.home)), away: per(teamCardRate(it.away)) },
+    injury: { home: per(teamInjuryRate(it.home)), away: per(teamInjuryRate(it.away)) },
   };
 }
 
@@ -412,18 +430,23 @@ function causesFor(packet: StrengthPacket, side: MatchSide): string[] {
  * 연장 30분의 기대 득점 — **정규 90분 대비 배율.** 시간 비율(1/3)보다 낮다:
  * 지친 다리로 뛰는 시간이고 승부차기가 보이는 자리라 양 팀 다 잃지 않는 쪽으로 기운다.
  *
- * 간이 시뮬(`engine/quick-sim.ts`의 `EXTRA_TIME_RATE`)과 **같은 눈금**이다 —
- * 갈리면 우리 연장만 조용하거나 시끄러워진다.
+ * 간이 시뮬(`engine/quick-sim.ts`)도 이 값에서 나온다 — 갈리면 우리 연장만
+ * 조용하거나 시끄러워진다.
  */
 export const EXTRA_TIME_SHOT_SHARE = 0.28;
+
+/** 연장의 길이 — 실제 규정(전·후반 15분). 국면표에서 유도한다 */
+export const EXTRA_TIME_MINUTES = PHASE_END.extra_second - PHASE_END.second_half;
 
 /**
  * 연장의 **분당** 발생률 배수 — 30분에 90분의 0.28배를 내려면 분당은 0.84배다.
  * 카드·부상은 그대로 둔다: 지친 다리는 덜 뛰지만 덜 거칠지는 않다.
+ *
+ * 간이 시뮬의 연장(`simulateExtraTime`)이 **이 값을 그대로 import한다** — 같은
+ * 0.84를 두 식으로 내면 분모를 고친 날 감독의 연장과 세계의 연장이 조용히 갈린다.
  */
-const EXTRA_TIME_DENSITY =
-  (EXTRA_TIME_SHOT_SHARE * PHASE_END.second_half) /
-  (PHASE_END.extra_second - PHASE_END.second_half);
+export const EXTRA_TIME_DENSITY =
+  (EXTRA_TIME_SHOT_SHARE * PHASE_END.second_half) / EXTRA_TIME_MINUTES;
 
 /**
  * 다음 정지점까지 굴린다 — 코어가 사건을 확정하고 장부에 넣을 이벤트를 돌려준다.

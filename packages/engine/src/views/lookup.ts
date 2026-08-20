@@ -52,7 +52,7 @@ import { isClubTeam, teamCatalog } from "../data/team-catalog";
 import { leagueOfTeamIn, teamsOfLeagueIn } from "../competition/promotion";
 import { tierOfTeamIn } from "../core/club-tier";
 import { achievementLine, computeStandings } from "../competition/season";
-import { USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
+import { openManagerOffers, USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
 import {
   attributeLine,
   knowledgeNote,
@@ -1311,18 +1311,43 @@ export function careerView(state: GameState): LookupResult {
   // 경고는 세이브가 끝나는 길의 카운터다 — 평판 바로 아래에 세워 압박이 읽히게 한다
   const warnings = m.boardWarnings ?? 0;
 
-  const lines = [
-    `[커리어] ${m.name} — ${teamNameIn(state, state.userTeamId)} 재임 · ${seasonLabel(state)}`,
-    `평판: 보드${m.reputation.board} 미디어${m.reputation.media} 선수단${m.reputation.squad}`,
-    warnings > 0
-      ? `보드 경고: ${warnings}/${USER_WARNINGS_BEFORE_SACK}회` +
-        (m.lastWarnedOn ? ` (마지막 ${m.lastWarnedOn})` : "") +
-        ` — ${USER_WARNINGS_BEFORE_SACK}회째에 자리가 없어진다`
-      : `보드 경고: 없음 (${USER_WARNINGS_BEFORE_SACK}회째에 자리가 없어진다)`,
-    row && row.played > 0
-      ? `이번 시즌 진행: ${competitionName(league)} ${rank}위 · ${row.played}경기 ${row.wins}승 ${row.draws}무 ${row.losses}패 · 승점 ${row.points} (득실 ${row.goalDiff >= 0 ? "+" : ""}${row.goalDiff})`
-      : `이번 시즌 진행: 아직 리그 경기 없음`,
-  ];
+  /**
+   * **무직이면 머리글부터 다르다** (career.md §5.1) — 옛 구단의 순위·경고를 재임
+   * 중인 것처럼 세우면 모델이 그 구단의 감독으로 장면을 쓴다. 잘린 사실과 지금
+   * 열린 제안이 그 자리에 선다.
+   */
+  const card = state.dismissal;
+  const lines = card
+    ? [
+        `[커리어] ${m.name} — 무직 (${card.on} ${teamNameIn(state, card.teamId)}에서 경질) · ${seasonLabel(state)}`,
+        `평판: 보드${m.reputation.board} 미디어${m.reputation.media} 선수단${m.reputation.squad}`,
+        card.expectation && card.position
+          ? `경질 사유: 기대 ${card.expectation}(${card.target}위) · 당시 ${card.position}위`
+          : `경질 사유: ${card.reason ?? "기록 없음"}`,
+        ...(openManagerOffers(state).length > 0
+          ? [
+              `받은 감독직 제안:`,
+              ...openManagerOffers(state).map(
+                (o) =>
+                  `  ${o.id} · ${teamNameIn(state, o.teamId)} (${o.tier}티어) · 기대 ${o.expectation}(${o.target}위)` +
+                  (o.position ? ` · 현재 ${o.position}위` : "") +
+                  ` · ${o.expiresOn}까지`,
+              ),
+            ]
+          : [`받은 감독직 제안: 없음`]),
+      ]
+    : [
+        `[커리어] ${m.name} — ${teamNameIn(state, state.userTeamId)} 재임 · ${seasonLabel(state)}`,
+        `평판: 보드${m.reputation.board} 미디어${m.reputation.media} 선수단${m.reputation.squad}`,
+        warnings > 0
+          ? `보드 경고: ${warnings}/${USER_WARNINGS_BEFORE_SACK}회` +
+            (m.lastWarnedOn ? ` (마지막 ${m.lastWarnedOn})` : "") +
+            ` — ${USER_WARNINGS_BEFORE_SACK}회째에 자리가 없어진다`
+          : `보드 경고: 없음 (${USER_WARNINGS_BEFORE_SACK}회째에 자리가 없어진다)`,
+        row && row.played > 0
+          ? `이번 시즌 진행: ${competitionName(league)} ${rank}위 · ${row.played}경기 ${row.wins}승 ${row.draws}무 ${row.losses}패 · 승점 ${row.points} (득실 ${row.goalDiff >= 0 ? "+" : ""}${row.goalDiff})`
+          : `이번 시즌 진행: 아직 리그 경기 없음`,
+      ];
 
   const records = [...state.seasonRecords].sort((a, b) => b.season - a.season);
   if (records.length === 0) {
