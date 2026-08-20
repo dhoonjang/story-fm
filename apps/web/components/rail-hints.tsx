@@ -48,6 +48,8 @@ const SKILL_ICON: Record<string, IconComponent> = {
   substitute: IconPerson,
   set_transfer_list: IconPerson,
   release_player: IconPerson,
+  // 해지 제안도 사람이 오가는 일이다 — 일방 해지(release_player)와 같은 그림으로 한 갈래로 읽힌다
+  open_release: IconPerson,
   recall_loan: IconPerson,
   // 계약 확정은 재정 장부에도 서므로 사람 쪽으로 — 그 칸의 머리 아이콘이 이미 돈이다
   accept_deal: IconPerson,

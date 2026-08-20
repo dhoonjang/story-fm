@@ -31,6 +31,8 @@ export type MarketCardKind =
   | "verdict"
   /** 재계약 제안 */
   | "renewal"
+  /** 상호 계약 해지 제안 — 정산금을 부른다 */
+  | "release"
   /** 협상을 접었다 */
   | "withdraw"
   /** 스카우트 파견 — 보고서는 며칠 뒤에 온다 */
@@ -41,6 +43,11 @@ export interface MarketTerms {
   fee?: number;
   weeklyWage?: number;
   years?: number;
+  /**
+   * 해지 정산금 — **이적료 자리를 빌리지 않는다.** 같은 숫자를 `fee`에 실으면
+   * 화면이 `이적료`라 이름 붙여, 나가는 선수에게 우리가 이적료를 낸 것으로 읽힌다.
+   */
+  severance?: number;
 }
 
 export interface MarketCard {

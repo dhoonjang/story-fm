@@ -1,5 +1,5 @@
 import type { GamePlayer, Medical, Negotiation } from "@story-fm/domain";
-import { ageOf } from "@story-fm/domain";
+import { ageOf, isPlayerDeal } from "@story-fm/domain";
 import { addDays, diffDays } from "../competition/calendar";
 import { windowOpenForTeam } from "./market";
 import { pronenessValue, raiseProneness } from "../squad/injury";
@@ -49,9 +49,12 @@ const FLAG_CEILING = 0.75;
  */
 const OVERRIDE_SEVERITY = "moderate" as const;
 
-/** 팀을 옮기는 딜만 검진한다 — 재계약은 병원에 갈 일이 없다 */
+/**
+ * 팀을 옮기는 딜만 검진한다 — 재계약은 병원에 갈 일이 없고, 해지는 데려갈 구단이
+ * 아직 없다 (`isPlayerDeal`).
+ */
 export function needsMedical(negotiation: Negotiation): boolean {
-  return negotiation.kind !== "renew";
+  return !isPlayerDeal(negotiation.kind);
 }
 
 /** 이 딜에서 선수를 데려가는 쪽 (소견을 받고 결정하는 주체) */
