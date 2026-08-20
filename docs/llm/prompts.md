@@ -227,6 +227,7 @@ Zod에만 있는 상한은 모델이 모르는 채로 그 도구를 계속 실�
 | 지시 해석 프롬프트·스키마 (`MATCH_INTENT_SYSTEM`) | `packages/agents/src/match-intent.ts` · `match-intent-schema.ts`             |
 | 중계 시스템 프롬프트 (`MATCH_CASTER_SYSTEM`)      | `packages/agents/src/match-caster.ts`                                        |
 | 결산 프롬프트 셋                                  | `packages/agents/src/training-rater.ts` · `match-rater.ts` · `mood-rater.ts` |
+| 이력 요약 프롬프트 (`HISTORY_COMPACTOR_SYSTEM`)   | `packages/agents/src/history-compactor.ts`                                   |
 | 첫 장면 지시 (`ONBOARDING_INSTRUCTION`)           | `packages/agents/src/gm.ts`                                                  |
 | 도구 설명·그룹·표시 이름 (`SKILL_CATALOG`)        | `packages/agents/src/skill-descriptions.ts`                                  |
 | 도구 바인딩·스키마                                | `packages/agents/src/gm-tools.ts`                                            |
