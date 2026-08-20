@@ -5,6 +5,62 @@ import { MANAGER_ATTRIBUTES, MANAGER_ATTRIBUTE_KO } from "@story-fm/domain";
 import { IconTrophy } from "@/components/icons";
 
 type SeasonRow = OfficeViews["career"]["seasons"][number];
+type CareerView = OfficeViews["career"];
+
+/**
+ * **경질 한 줄을 쓰는 자리** — 코어는 등급·순위·기대만 넘긴다
+ * (docs/overview.md §1 철칙 4 · career.md §5.1).
+ *
+ * 같은 17위도 우승을 노리라는 구단에서와 잔류가 기대인 구단에서 다른 사건이라,
+ * 순위 혼자로는 왜 잘렸는지가 읽히지 않는다. 옛 세이브는 카드 대신 평가 문장을
+ * 들고 있어 그것이 폴백이고, 둘 다 없으면 지어내지 않는다.
+ */
+function dismissalLineOf(d: NonNullable<CareerView["dismissal"]>): string {
+  if (d.position === null || d.target === null || d.expectation === null) return d.reason ?? "";
+  return `${d.expectation} — 기대 ${d.target}위, 최종 ${d.position}위`;
+}
+
+/**
+ * **무직 — 경질 카드와 지금 열린 감독직 제안.**
+ *
+ * 커리어 화면의 맨 위에 선다. 잘린 뒤 시계는 계속 흐르므로(career.md §5.1) 이
+ * 화면이 "왜 맡은 팀이 없는가"와 "무엇이 걸려 있는가"를 한자리에서 말해야 한다.
+ * 제안은 **읽는 값이다** — 수락은 감독이 말로 한다.
+ */
+function OutOfWork({ career }: { career: CareerView }) {
+  const d = career.dismissal;
+  if (!d) return null;
+  return (
+    <div className="mgr-outofwork" data-testid="dismissal">
+      <div className="dismissed">
+        <div className="dismissed-head">
+          <b>{d.teamName}</b>
+          <span className="when">{d.on} 경질</span>
+        </div>
+        <div className="dismissed-why">{dismissalLineOf(d)}</div>
+      </div>
+      <div className="offer-list" data-testid="manager-offers">
+        {career.offers.length === 0 ? (
+          <div className="empty">들어온 감독직 제안이 없습니다</div>
+        ) : (
+          career.offers.map((o) => (
+            <div className="offer" key={o.id}>
+              <div className="offer-head">
+                <b>{o.teamName}</b>
+                <span className="tier">{o.tier}티어</span>
+                <span className="until">{o.expiresOn}까지</span>
+              </div>
+              <div className="offer-why">
+                기대 {o.expectation} ({o.target}위)
+                {o.position === null ? "" : ` · 현재 ${o.position}위`}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
 
 /**
  * **보드 평가 한 줄을 쓰는 자리** — 코어는 등급과 근거 수치만 넘긴다
@@ -252,6 +308,8 @@ export function CareerView({
           attrCap={squad.manager.attrCap}
         />
       </div>
+
+      <OutOfWork career={career} />
 
       <div className="section-title">트로피 보관함</div>
       <div className="trophy-list">

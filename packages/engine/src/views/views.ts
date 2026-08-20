@@ -81,7 +81,7 @@ import {
 } from "../squad/scouting";
 import type { ScoutGrade, ScoutReportCard } from "@story-fm/domain";
 import { listingOf } from "../market/negotiation";
-import { USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
+import { openManagerOffers, USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
 import { MANAGER_ATTR_CAP, MANAGER_XP_PER_LEVEL } from "../skills";
 import { askingPriceFor, marketValueOf, wageExpectationOf } from "../market/market";
 import { settlingPercent } from "../squad/settling";
@@ -1019,6 +1019,34 @@ export interface OfficeViews {
     list: CompetitionView[];
   };
   career: {
+    /**
+     * **경질 카드** — 서 있으면 감독은 무직이다 (career.md §5.1). 코어는 사실만
+     * 넘기고("어느 구단에서 몇 위, 기대는 무엇") 문장은 화면이 쓴다.
+     * 옛 세이브는 카드 대신 평가 문장(`reason`)을 들고 있어 그것이 폴백이다.
+     */
+    dismissal: {
+      on: string;
+      season: number;
+      teamName: string;
+      tier: number | null;
+      position: number | null;
+      target: number | null;
+      expectation: string | null;
+      reason: string | null;
+    } | null;
+    /**
+     * **지금 답할 수 있는 감독직 제안** — 만료가 가까운 것이 앞이다.
+     * 수락은 채팅으로 한다(`accept_manager_offer`) — 화면은 무엇이 걸려 있는지만 세운다.
+     */
+    offers: Array<{
+      id: string;
+      teamName: string;
+      tier: number;
+      expiresOn: string;
+      position: number | null;
+      target: number;
+      expectation: string;
+    }>;
     trophies: Array<{ competition: string; season: number; teamName: string }>;
     achievements: Array<{ name: string; description: string; season: number }>;
     seasons: Array<{
@@ -2330,6 +2358,27 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       list: competitionList,
     },
     career: {
+      dismissal: state.dismissal
+        ? {
+            on: state.dismissal.on,
+            season: state.dismissal.season,
+            teamName: teamNameIn(state, state.dismissal.teamId),
+            tier: state.dismissal.tier ?? null,
+            position: state.dismissal.position ?? null,
+            target: state.dismissal.target ?? null,
+            expectation: state.dismissal.expectation ?? null,
+            reason: state.dismissal.reason ?? null,
+          }
+        : null,
+      offers: openManagerOffers(state).map((o) => ({
+        id: o.id,
+        teamName: teamNameIn(state, o.teamId),
+        tier: o.tier,
+        expiresOn: o.expiresOn,
+        position: o.position ?? null,
+        target: o.target,
+        expectation: o.expectation,
+      })),
       trophies: state.trophies.map((t) => ({
         competition: t.competition,
         season: t.season,
