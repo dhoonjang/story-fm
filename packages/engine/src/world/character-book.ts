@@ -164,6 +164,14 @@ export interface CharacterBookInput {
   /** 이번 턴 감독 발화 — 아직 이력에 없다. "홀란드 불러줘"는 그 턴에 걸려야 한다 */
   message?: string;
   /**
+   * 호출자가 지목한 인물 — 세이브가 여는 자리(회견)와 **같은 `RANK_POINTED` 자리**로
+   * 합류해 상한·중복 제거·정렬을 그대로 탄다 (people.md §6).
+   *
+   * 이력도 발화도 없는 턴이 여기를 쓴다: 새 게임 첫 장면은 감독이 코치를 부른 적
+   * 없어도 수석코치가 반드시 서는 자리라, 키워드가 걸릴 문장 자체가 없다.
+   */
+  pointed?: readonly string[];
+  /**
    * 이력 창 **안에** 이미 서 있는 카드 — 창 밖으로 밀려난 것은 넘어오지 않는다.
    * 만료 규칙을 따로 두지 않는 자리다: 이력 창이 미끄러지면 여기서 저절로 빠지고,
    * 빠진 카드는 그 순간 다시 주입 대상이 된다.
@@ -188,7 +196,7 @@ export function selectCharacters(
 ): CharacterEntry[] {
   const message = input.message ?? "";
   const history = historyWindow(state);
-  const pointed = pointedReporterId(state);
+  const pointed = pointedIds(state, input.pointed);
   const standing = deepestInjected(input.injected ?? []);
 
   const picked: Array<{ rank: number; candidate: Candidate }> = [];
@@ -221,9 +229,9 @@ function rankOf(
   persona: Persona,
   message: string,
   history: string,
-  pointed: string | undefined,
+  pointed: ReadonlySet<string>,
 ): number | null {
-  if (pointed !== undefined && pointed === persona.characterId) return RANK_POINTED;
+  if (pointed.has(persona.characterId)) return RANK_POINTED;
   if (mentions(message, persona)) return RANK_MESSAGE;
   if (mentions(history, persona)) return RANK_HISTORY;
   return null;
@@ -293,13 +301,20 @@ function historyWindow(state: GameState): string {
 }
 
 /**
- * 세계가 지목한 기자 — 열린 회견은 그 사람을 직접 부른다. 키워드를 기다리지 않는다.
+ * 이번 턴에 지목된 인물 — 세계가 연 자리(열린 회견의 기자)와 호출자가 연 자리(첫
+ * 장면의 수석코치). 둘 다 키워드를 기다리지 않는다.
  *
- * ⚠️ 지목은 나중에 생긴 필드라 **옛 세이브의 회견엔 없다** — 없으면 아무도 지목하지
- * 않은 것이고, 그 회견의 기자는 일반 키워드 경로로만 선다.
+ * ⚠️ 회견의 지목은 나중에 생긴 필드라 **옛 세이브의 회견엔 없다** — 없으면 아무도
+ * 지목하지 않은 것이고, 그 회견의 기자는 일반 키워드 경로로만 선다.
  */
-function pointedReporterId(state: GameState): string | undefined {
-  return pendingPress(state)?.reporterId;
+function pointedIds(
+  state: GameState,
+  byCaller: readonly string[] | undefined,
+): ReadonlySet<string> {
+  const ids = new Set<string>(byCaller ?? []);
+  const reporterId = pendingPress(state)?.reporterId;
+  if (reporterId !== undefined) ids.add(reporterId);
+  return ids;
 }
 
 /** 창 안에 서 있는 카드 중 **가장 자세한 판** — 재주입은 그것보다 깊어야 한다 */
