@@ -368,6 +368,33 @@ describe("새 게임 첫 장면", () => {
     expect(request?.maxTokens).toBeUndefined();
   });
 
+  /**
+   * **검증과 프롬프트 사이의 계약이다.** `isValidOnboardingText`는 수석코치의
+   * **이름** 태그를 요구하는데, 그 이름이 프롬프트에 없으면 모델은 직책으로 태그를
+   * 달고 첫 장면이 매번 반려된다 — 실모드에서 새 게임을 만들 수 없게 된다.
+   * 레퍼런스에서 인물 카드가 내려간 뒤 실제로 이 계약이 깨졌다.
+   */
+  it("첫 장면 프롬프트가 검증이 요구하는 수석코치의 이름을 담는다", async () => {
+    const state = game();
+    const coachId = headCoachOf(state).characterId;
+    let request: TurnRequest | undefined;
+    const llm: GameLLM = {
+      runTurn: async (input) => {
+        request = input;
+        return reply(scene(state, "무엇부터 보시겠습니까?"));
+      },
+    };
+    await onboardInRealMode(state, llm);
+
+    // 이름은 **이번 턴 층**에 실린다 — 캐시 프리픽스인 레퍼런스에 두면 매 턴 정가다
+    expect(request?.user).toContain(`@${coachId}:`);
+    expect(Array.isArray(request?.system) ? request.system.join("\n") : "").not.toContain(coachId);
+    // 카드가 감독 발화보다 앞에 선다 — 평시 턴·이력과 같은 순서다
+    expect(request?.user.indexOf(coachId)).toBeLessThan(
+      request?.user.indexOf(state.manager.name) ?? -1,
+    );
+  });
+
   /** 실모드에서 첫 장면을 만들어 본다 — LLM_MODE를 되돌리는 것까지 한 자리에서 */
   async function onboardInRealMode(state: GameState, llm: GameLLM) {
     const previousMode = process.env.LLM_MODE;
