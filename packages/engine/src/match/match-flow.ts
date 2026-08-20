@@ -1,4 +1,5 @@
 import type {
+  Formation,
   GamePlayer,
   MatchEvent,
   MatchRecord,
@@ -12,6 +13,7 @@ import type {
 import {
   AI_MANAGER_RATING_FALLBACK,
   ageOf,
+  FORMATION_CHANGE_COST,
   clampCondition,
   naturalPositionOf,
   positionGroupOf,
@@ -25,6 +27,7 @@ import {
 } from "@story-fm/domain";
 import type { SkillResult } from "../skills";
 import {
+  AI_SUB_CAUSE,
   MAX_EXPLOITS,
   addStats,
   advanceClock,
@@ -45,7 +48,7 @@ import { applyMatchFinance } from "../club/finance";
 import { clampForm, formDeltaFromMatch } from "../squad/form";
 import { applyResultMood } from "../squad/slump";
 import { matchRating, type MatchRatingBrief, type PlayerMatchBrief } from "./ratings";
-import { grantManagerXP } from "../skills";
+import { grantManagerXP, IN_MATCH_FAMILIARITY_LOSS } from "../skills";
 import { recallRole } from "../skills/role-memory";
 import { buildMatchPress, openPress } from "../club/press";
 import { easeProneness, openInjuryFor, pronenessOf } from "../squad/injury";
@@ -53,6 +56,8 @@ import { serveSuspensions, simSquadOf, simulateOtherMatches } from "../core/tick
 import {
   activeSuspension,
   assignmentsOf,
+  bestShapeFor,
+  seatOnShape,
   ensureSeasonStat,
   firstTeamPlayers,
   isInjured,
@@ -220,6 +225,56 @@ function slotsFor(state: GameState, teamId: string, ids: string[]): LineupSlot[]
   });
 }
 
+/**
+ * **상대가 판을 갈아 깔 때 치르는 전술 적응도** (match.md §2).
+ *
+ * 감독이 경기 중 포메이션을 바꿀 때 내는 값에서 그대로 파생한다 — 두 벤치가 같은
+ * 일에 다른 값을 치르면, 어느 쪽이 이득인지가 규칙이 아니라 구현의 부작용이 된다.
+ */
+const AI_SHAPE_FAMILIARITY_COST = FORMATION_CHANGE_COST * IN_MATCH_FAMILIARITY_LOSS;
+
+/**
+ * 상대가 갈아 깐 판에 다시 앉힌다 — **좌표가 원본이고 모양 이름은 파생이다**.
+ *
+ * 저장된 배치(`state.tactics`)는 건드리지 않는다. 바뀐 자리는 `pendingMatch.aiShape`
+ * 하나에만 살고 경기와 함께 사라지므로 되돌릴 자리가 필요 없다 — 유저 팀의
+ * `tacticsBefore`/`restoreTactics`에 해당하는 것이 AI에 없는 이유다.
+ *
+ * 값은 두 곳에서 치른다: 낯선 자리에 선 선수는 포지션 적응도로(`proficiency`),
+ * 팀은 전술 적응도로(`AI_SHAPE_FAMILIARITY_COST`). 자리가 그대로인 선수의 역할은
+ * 남기고, 옮긴 선수의 역할은 떨군다 — 센터백의 역할을 그대로 쥔 스트라이커가 되면
+ * 감독이 시킨 적 없는 값이 승부를 움직인다.
+ */
+function reseatOnAiShape(state: GameState, teamId: string, slots: LineupSlot[]): LineupSlot[] {
+  const shape = state.pendingMatch?.aiShape;
+  if (!shape || teamId === state.userTeamId || slots.length === 0) return slots;
+  const squad = new Map(playersOf(state, teamId).map((p) => [p.id, p] as const));
+  const onPitch = slots.flatMap((slot) => {
+    const player = squad.get(slot.player.id);
+    return player ? [player] : [];
+  });
+  const seats = new Map(
+    seatOnShape(onPitch, shape.formation).map((seat) => [seat.playerId, seat] as const),
+  );
+  return slots.map((slot) => {
+    const seat = seats.get(slot.player.id);
+    const player = squad.get(slot.player.id);
+    if (!seat || !player) return slot;
+    const { roleId, ...rest } = slot;
+    return {
+      ...rest,
+      position: seat.position,
+      point: seat.point,
+      proficiency: proficiencyAt(player, seat.position),
+      familiarity: Math.max(
+        0,
+        (slot.familiarity ?? FAMILIARITY_BASELINE) - AI_SHAPE_FAMILIARITY_COST,
+      ),
+      ...(roleId && seat.position === slot.position ? { roleId } : {}),
+    };
+  });
+}
+
 function managerTacticsOf(state: GameState, teamId: string): number {
   if (teamId === state.userTeamId) return state.manager.attributes.tactics;
   return (
@@ -249,7 +304,7 @@ export function refreshPacket(state: GameState): void {
   if (!pending) return;
   const match = currentMatch(state);
   const build = (teamId: string, ledgerSide: { onPitch: string[]; bench: string[] }) => {
-    const starters = slotsFor(state, teamId, ledgerSide.onPitch);
+    const starters = reseatOnAiShape(state, teamId, slotsFor(state, teamId, ledgerSide.onPitch));
     /**
      * **그라운드에 선 순간의 자리를 남긴다** — 경기 뒤 포지션 적응도가 읽는 값이다
      * (match.md §6). 자리를 정하는 곳이 여기 하나이므로 여기서 적는다.
@@ -521,6 +576,24 @@ export function markEntered(state: GameState): void {
 }
 
 /**
+ * **짧게 부른 구간이 AI 벤치의 판단 자리를 여는 최소 간격(분)** — ⚠️ 밸런스 값.
+ *
+ * 정지점 사이가 대개 이만큼은 벌어지므로, 대화만 하는 턴이 이어져도 상대 벤치는
+ * 정지점까지 갔을 때와 비슷한 횟수로 움직인다 (match.md §2).
+ */
+const AI_BRIEF_GAP = 10;
+
+/**
+ * 상대가 던질 때·굳힐 때 서는 모양 — ⚠️ 밸런스 값 (match.md §2).
+ *
+ * 후보를 좁혀 두는 이유는 프리셋 다섯이 전부 후보면 "가장 강한 모양"이 뽑혀
+ * 스코어와 무관한 재배치가 되기 때문이다. 던지는 쪽은 앞을 두껍게 세우는 둘,
+ * 굳히는 쪽은 백5 하나다.
+ */
+const CHASE_SHAPES: readonly Formation[] = ["4-3-3", "3-5-2"];
+const HOLD_SHAPES: readonly Formation[] = ["5-4-1"];
+
+/**
  * 다음 정지점까지 코어가 굴린다 — **경기 결과가 정해지는 단일 지점**.
  *
  * mock과 실모드가 같은 함수를 쓴다. 차이는 사건을 누가 *이야기하는가*뿐이다
@@ -630,30 +703,35 @@ export function advanceSegment(
   });
 
   /**
-   * **짧게 부른 구간은 구간이 아니다** — 상대 벤치는 그 자리에서 움직이지 않는다.
+   * **짧게 부른 구간은 시간으로 센다** — 구간 횟수로 세면 양쪽이 다 무너진다.
    *
-   * AI 교체도 AI 전술 이동도 구간이 끝날 때마다 한 번씩 굴러간다. 1분짜리를 같은
-   * 자리로 세면 감독이 벤치에서 대화를 몇 번 거는 사이에 AI가 교체 카드를 다 쓰고
-   * 강도를 한계까지 올린다 — 감독이 말을 아낄수록 상대가 약해지는 판이 된다.
+   * AI 교체도 AI 전술 이동도 구간이 끝날 때마다 한 번씩 굴러간다. 1분짜리를 정지점과
+   * 같은 자리로 세면 감독이 벤치에서 대화를 몇 번 거는 사이에 AI가 교체 카드를 다
+   * 쓰고 강도를 한계까지 올린다. 반대로 통째로 건너뛰면 감독이 말을 아낄수록 상대가
+   * 약해진다 — 대화만 하는 턴이 이어지면 상대 벤치가 90분 내내 얼어 있다.
+   *
+   * 그래서 **마지막 판단에서 `AI_BRIEF_GAP`분이 지났을 때만** 짧은 구간이 판단 자리를
+   * 연다. 정지점까지 가는 구간은 예전처럼 언제나 연다.
    */
   const brief = options.maxMinutes !== undefined;
+  const benchTurn = !brief || plan.minute - (pending.aiDecidedAt ?? 0) >= AI_BRIEF_GAP;
   // AI 팀 교체 — 상대만 90분을 그대로 뛰면 후반이 늘 우리 쪽으로 기운다
-  const aiSub = brief
-    ? null
-    : planAiSubstitution(
+  const aiSub = benchTurn
+    ? planAiSubstitution(
         aiSide,
         squads[aiSide],
         pending.ledger,
         plan,
         rng,
         pending.matchFatigue ?? {},
-      );
+      )
+    : null;
   /**
    * 부상 교체만은 **사건 뒤**에 붙인다 — 다치기 전에 빼는 장면이 되면 안 된다.
    * 나머지 교체는 정지 사건 앞에 끼워야 장부가 받는다 (`insertBeforeStop`).
    */
   const events = aiSub
-    ? aiSub.causes[0]?.startsWith("부상")
+    ? aiSub.causes.includes(AI_SUB_CAUSE.injury)
       ? [...plan.events, aiSub]
       : insertBeforeStop(plan.events, aiSub)
     : plan.events;
@@ -684,15 +762,45 @@ export function advanceSegment(
    */
   const aiNow = pending.aiTactics ?? aiKickoff;
   // 라커룸에서 판을 다시 짜는 자리 — 하프타임과 연장의 두 휴식이 같다
-  const shift = brief
-    ? null
-    : planAiTacticalShift(aiSide, aiNow, aiKickoff, pending.ledger, isBreak(plan.stop));
+  const shift = benchTurn
+    ? planAiTacticalShift(
+        aiSide,
+        aiNow,
+        aiKickoff,
+        pending.ledger,
+        isBreak(plan.stop),
+        pending.aiShape !== undefined,
+      )
+    : null;
   if (shift) {
-    // AI의 런타임 전술도 사람과 같은 스키마를 지난다. 배치 변경 없이 포메이션
-    // 이름만 바꾸거나 범위를 벗어난 축을 세이브에 남기지 않는다.
-    const guarded = TacticsSpecSchema.safeParse({ ...aiNow, ...shift, formation: aiNow.formation });
+    /**
+     * **모양은 여기서 고른다** — 구간 시뮬은 의도만 낸다. 후보 프리셋 중 지금
+     * 그라운드에 선 열한 명이 가장 잘 서는 것 하나이고, 그게 지금 모양과 같으면
+     * 아무 일도 일어나지 않는다 (`bestShapeFor`).
+     */
+    if (shift.shape && !pending.aiShape) {
+      const onPitch = pending.ledger[aiSide].onPitch
+        .map((id) => playerById(state, id))
+        .filter((p): p is GamePlayer => p !== null);
+      const candidates = shift.shape === "chase" ? CHASE_SHAPES : HOLD_SHAPES;
+      const picked = onPitch.length > 0 ? bestShapeFor(onPitch, candidates) : null;
+      if (picked && picked !== aiNow.formation) {
+        pending.aiShape = { formation: picked, intent: shift.shape };
+      }
+    }
+    /**
+     * AI의 런타임 전술도 사람과 같은 스키마를 지난다. 모양 이름은 **갈아 깐 판에서**
+     * 온다 — 실제 좌표를 옮기지 않은 채 이름만 바꾸면 판은 그대로인데 장부의 모양만
+     * 달라져 화면과 갈라진다 (`reseatOnAiShape`가 그 좌표를 세운다).
+     */
+    const guarded = TacticsSpecSchema.safeParse({
+      ...aiNow,
+      ...shift.axes,
+      formation: pending.aiShape?.formation ?? aiNow.formation,
+    });
     pending.aiTactics = guarded.success ? guarded.data : aiNow;
   }
+  if (benchTurn) pending.aiDecidedAt = plan.minute;
   const worn = (pending.matchFatigue ??= {});
   for (const [id, add] of Object.entries(plan.fatigue)) {
     worn[id] = Math.min(100, (worn[id] ?? 0) + add);
