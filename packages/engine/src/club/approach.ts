@@ -371,14 +371,14 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
  * 순서가 뜻을 갖는다: 사흘을 넘긴 자리를 먼저 닫고(그 대가를 치르게 한 뒤), 압력을
  * 움직이고, 마지막에 하나를 연다. 닫기 전에 열면 감독 앞에 두 자리가 선다.
  */
-export function tickApproaches(state: GameState, digest: string[]): void {
+export function tickApproaches(state: GameState, digest: string[]): boolean {
   const gaveUp = expireApproach(state, digest);
   driftPressure(state);
   /**
    * **감독이 지나친 날에는 다음 사람이 오지 않는다.** 하루 한 건의 문과 같은 뜻이다 —
    * 한 대화가 답 없이 닫힌 그날 다른 대화가 열리면, 방치의 결과가 소음으로 읽힌다.
    */
-  if (!gaveUp) openApproach(state, digest);
+  return gaveUp ? false : openApproach(state, digest);
 }
 
 /** 사흘 동안 답이 없으면 감독이 지나친 것이다 — 거절과 같은 값을 치른다 */
@@ -432,8 +432,8 @@ const APPROACH_TOPIC_ORDER: Record<ApproachTopic, number> = {
  * 겹치면 **가장 많이 넘친 것**이 선다. 절대값이 아니라 임계 대비인 이유는 계단마다
  * 임계가 다르기 때문이다 — 300을 채운 3계단은 100을 채운 1계단보다 급하지 않다.
  */
-function openApproach(state: GameState, digest: string[]): void {
-  if (pendingApproach(state)) return;
+function openApproach(state: GameState, digest: string[]): boolean {
+  if (pendingApproach(state)) return false;
   /**
    * **한 번에 답을 요구하는 자리는 하나다.** 회견장에 앉혀 놓고 감독실 문까지
    * 두드리면 감독은 둘 중 하나를 버리게 되고, 버린 쪽의 대가만 조용히 쌓인다.
@@ -443,10 +443,10 @@ function openApproach(state: GameState, digest: string[]): void {
    * 수 있다 — 실제로 그랬다. 다가옴이 감독을 기다리는 것과 같은 사흘까지만 센다.
    */
   const press = pendingPress(state);
-  if (press && diffDays(press.date, state.date) < APPROACH_PATIENCE_DAYS) return;
+  if (press && diffDays(press.date, state.date) < APPROACH_PATIENCE_DAYS) return false;
   const opened = state.approaches ?? [];
   // 하루 한 건 — 답한 날에도 그날 안에 다음 자리가 열리지 않는다
-  if (opened.some((a) => a.date === state.date)) return;
+  if (opened.some((a) => a.date === state.date)) return false;
 
   const ranked = pressures(state)
     .filter((row) => row.value >= approachThreshold(row.step))
@@ -487,8 +487,9 @@ function openApproach(state: GameState, digest: string[]): void {
       `${scene.speakerId}(${APPROACH_CHANNEL_LABEL[scene.channel]})이(가) 감독을 찾아왔다 — ${scene.context}`,
     );
     pushNarrative(state, `${scene.speakerId} 면담 요청 (${scene.context})`, step >= 3 ? 4 : 3);
-    return;
+    return true;
   }
+  return false;
 }
 
 // ── 응답 ───────────────────────────────────────────────────────

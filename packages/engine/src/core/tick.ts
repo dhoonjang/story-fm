@@ -483,7 +483,7 @@ function dailyTick(
    * 세계가 먼저 말을 건다 — 압력이 임계를 넘으면 코어가 자리를 연다 (people.md §8).
    * **불만·순위·폼이 다 움직인 뒤**에 재야 오늘의 사실로 압력이 쌓인다.
    */
-  tickApproaches(state, digest);
+  const approached = tickApproaches(state, digest);
 
   warnExpiringContracts(state, digest);
 
@@ -502,7 +502,12 @@ function dailyTick(
     pushNarrative(state, `${kindKo} 이적시장 ${entry.type === "window-open" ? "개장" : "마감"}`, 3);
   }
 
-  return standsToday(state, digest);
+  /**
+   * **찾아온 사람 앞에서는 시계가 선다** (people.md §8). 협상 기한과 같은 이유다 —
+   * 사흘이면 그 자리는 사라지고 감독은 답할 기회를 잃는다. 세계가 먼저 말을 걸어도
+   * 시간이 그 위를 지나가 버리면 남는 것은 평판이 깎였다는 다이제스트 한 줄뿐이다.
+   */
+  return approached || standsToday(state, digest);
 }
 
 /** 계약 만료 예고 문턱 — 내림차순, 날 단위 (season.md §5) */
