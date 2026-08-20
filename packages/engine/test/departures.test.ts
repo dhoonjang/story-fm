@@ -207,9 +207,7 @@ describe("해지 값의 양 끝", () => {
     contract.until = addDays(state.date, 70);
     expect(unilateralSeveranceOf(state, target.id)).toBe(contract.weeklyWage * 10);
     contract.until = addDays(state.date, 7 * SEVERANCE_WEEKS_CAP * 3);
-    expect(unilateralSeveranceOf(state, target.id)).toBe(
-      contract.weeklyWage * SEVERANCE_WEEKS_CAP,
-    );
+    expect(unilateralSeveranceOf(state, target.id)).toBe(contract.weeklyWage * SEVERANCE_WEEKS_CAP);
     contract.until = addDays(state.date, -700);
     expect(unilateralSeveranceOf(state, target.id)).toBe(0);
   });

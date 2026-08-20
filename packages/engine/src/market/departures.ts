@@ -128,7 +128,10 @@ export function releasePlayer(
   if (short) return { ok: false, message: `우리 ${short.replace("팔 수", "해지할 수")}` };
 
   const agreed = input.severance !== undefined;
-  const severance = Math.max(0, Math.round(input.severance ?? unilateralSeveranceOf(state, player.id)));
+  const severance = Math.max(
+    0,
+    Math.round(input.severance ?? unilateralSeveranceOf(state, player.id)),
+  );
   const finance = state.finances.find((f) => f.teamId === state.userTeamId);
   if (finance && severance > finance.balance) {
     return {

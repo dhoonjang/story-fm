@@ -104,9 +104,7 @@ const dealTerms = (t: MarketTerms): MarketTerms => ({
  * 낸 것으로 읽힌다 — 값이 옮겨 가는 자리는 여기 하나뿐이어야 한다.
  */
 function termsOfKind(kind: Negotiation["kind"], round: MarketTerms): MarketTerms {
-  return kind === "release"
-    ? dealTerms({ severance: round.fee ?? 0 })
-    : dealTerms(round);
+  return kind === "release" ? dealTerms({ severance: round.fee ?? 0 }) : dealTerms(round);
 }
 
 /** 폭주 방지선 — 인내심 감쇠가 실질 제동이고 이건 상한일 뿐이다 */
@@ -623,9 +621,7 @@ export function respondOffer(
    * 때문이다 — 더 부르는 것은 협상이 아니라 협상을 없애는 값이다 (transfer.md §11).
    */
   const releaseCeiling = releasing ? unilateralSeveranceOf(state, player.id) : 0;
-  const counterSeverance = releasing
-    ? Math.round(input.fee ?? severanceOf(state, player.id))
-    : 0;
+  const counterSeverance = releasing ? Math.round(input.fee ?? severanceOf(state, player.id)) : 0;
   if (
     releasing &&
     input.verdict === "counter" &&
