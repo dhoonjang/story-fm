@@ -9,6 +9,8 @@ import {
   formatMoney,
   headCoachOf,
   interpretBackgroundHeuristic,
+  HISTORY_CHAR_LIMIT,
+  HISTORY_STEP,
   openPress,
   ownerOf,
   pendingPress,
@@ -26,6 +28,7 @@ import {
   filterSceneStream,
   sanitizeSceneText,
   parseTimeSkip,
+  buildGmDigest,
   buildGmHistory,
   buildManagerMessage,
   buildGmReference,
@@ -146,6 +149,19 @@ describe("레퍼런스 블록 (캐시되는 시스템 블록)", () => {
     expect(card).toContain(coach.motivation);
     expect(card).toContain(coach.speechStyle.note);
     for (const sample of coach.speechStyle.samples) expect(card).toContain(sample);
+
+    // 기억은 인물지와 성질이 다르다 — 있었던 일이라 날짜와 함께 선다 (people.md §9-1)
+    const remembered = describeCharacters([
+      characterEntry(coach, "full", [
+        {
+          characterId: coach.characterId,
+          date: "2026-01-05",
+          text: "주장 교체를 놓고 부딪혔다",
+          salience: 3,
+        },
+      ]),
+    ])!;
+    expect(remembered).toContain("2026-01-05 — 주장 교체를 놓고 부딪혔다");
   });
 
   it("레퍼런스는 세이브당 고정이다 — 회견이 열려도 흔들리지 않는다", () => {
@@ -528,12 +544,57 @@ describe("이력 창 — 시작점을 STEP 단위로만 옮긴다", () => {
     ]);
   });
 
-  it("충분히 길어지면 창이 앞으로 이동한다 (무한 성장 방지)", () => {
+  /** 창의 크기를 정하는 것은 턴 수가 아니라 글자 수다 (agents.md §5-1) */
+  const pushLong = (state: GameState, n: number, chars: number) => {
+    for (let i = 0; i < n; i++) {
+      state.chat.push({
+        role: i % 2 === 0 ? "user" : "model",
+        text: `턴 ${i}`.padEnd(chars, "."),
+        toolCalls: [],
+        at: state.date,
+      });
+    }
+  };
+
+  it("글자 상한을 넘길 만큼 길어지면 시작점이 앞으로 간다 (무한 성장 방지)", () => {
     const state = game();
-    push(state, 60);
+    const chars = 2_000;
+    const turns = 30; // 60,000자 — 상한을 넘긴다
+    pushLong(state, turns, chars);
+
     const history = buildGmHistory(state);
-    expect(history.length).toBeLessThanOrEqual(18);
-    expect(history[0]?.content).not.toBe("턴 0");
+    expect(history[0]?.content).not.toContain("턴 0");
+    // 상한 안에 드는 **가장 앞의** STEP 경계다 — 한 블록만 더 실으면 넘는다
+    expect(history.length * chars).toBeLessThanOrEqual(HISTORY_CHAR_LIMIT);
+    expect((history.length + HISTORY_STEP) * chars).toBeGreaterThan(HISTORY_CHAR_LIMIT);
+  });
+
+  it("접힌 구간은 이력에서 아예 빠진다", () => {
+    const state = game();
+    push(state, 30);
+    state.historyDigest = {
+      foldedTurns: 12,
+      text: "부임 첫 달 — 주장과 부딪혔다",
+      at: state.date,
+      rounds: 1,
+    };
+    const contents = buildGmHistory(state).map((h) => h.content);
+    expect(contents[0]).toBe("@김감독: 턴 12");
+    expect(contents.some((c) => c.includes("턴 11"))).toBe(false);
+  });
+
+  it("요약 블록은 압축된 세이브에만 선다", () => {
+    const state = game();
+    expect(buildGmDigest(state)).toBeNull();
+    state.historyDigest = {
+      foldedTurns: 12,
+      text: "부임 첫 달 — 주장과 부딪혔다",
+      at: "2026-01-05",
+      rounds: 1,
+    };
+    const block = buildGmDigest(state)!;
+    expect(block).toContain("부임 첫 달 — 주장과 부딪혔다");
+    expect(block).toContain("2026-01-05");
   });
 });
 

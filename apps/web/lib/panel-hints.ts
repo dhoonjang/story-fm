@@ -64,6 +64,7 @@ export const CARD_SKILLS: ReadonlySet<string> = new Set([
   "send_offer",
   "respond_offer",
   "open_renewal",
+  "open_release",
   "withdraw_offer",
   "scout_player",
 ]);

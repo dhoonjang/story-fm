@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { CharacterMemory } from "./records";
 
 /**
  * 페르소나 — **코드가 아니라 데이터**로 다루는 인물 (AGENTS.md 4장 · people.md §1).
@@ -169,6 +170,12 @@ export interface CharacterEntry {
   outlet?: string;
   real?: boolean;
   depth: CharacterDepth;
+  /**
+   * 그 사람에게 있었던 일 — 이력이 접힐 때만 갱신된다 (people.md §9-1). 변하는 값을
+   * 카드에 넣지 않는다는 위의 ⚠️와 어긋나지 않는 이유가 그것이다: 더해지는 자리가
+   * 압축 한 곳뿐이라 카드가 이력에 굳어도 뒤늦게 낡지 않는다.
+   */
+  memories?: CharacterMemory[];
 }
 
 /** 태그를 이름으로 옮기기 전 세이브를 알아보는 표식이기도 하다 */

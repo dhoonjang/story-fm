@@ -8,7 +8,7 @@ import {
   takeEdits,
   type GameState,
 } from "@story-fm/engine";
-import { GmTurnFailure, runGmTurn } from "@story-fm/agents";
+import { GmTurnFailure, compactHistory, runGmTurn } from "@story-fm/agents";
 import { beginGameUsage, bindTurnTrace, traceTurn } from "@story-fm/llm";
 import { toPayload, type GamePayload } from "./store";
 import type { MatchBoardOrder } from "./match-orders";
@@ -186,6 +186,15 @@ export function runTurnLocked(
          * 다음 발화 때 다시 읽힌다(실패한 턴은 없었던 일이 되어야 한다).
          */
         takeEdits(state);
+        /**
+         * 이력 압축은 **저장 직전**이다 — 모델 턴이 채팅에 들어간 뒤라야 판정이
+         * 이번 턴을 포함하고, 저장 전이라 접힌 지점과 요약이 같은 세이브에 함께
+         * 굳는다 (agents.md §5-1). 실패는 삼킨다: 접지 않은 이력이 그대로 남을
+         * 뿐 이번 턴은 성공으로 끝난다.
+         */
+        await compactHistory(state).catch((error: unknown) => {
+          console.warn(`[turn] 이력 압축을 건너뜁니다 (game=${id}):`, error);
+        });
         saveGame(state);
         return { ok: true as const, payload: toPayload(state) };
       } catch (error) {

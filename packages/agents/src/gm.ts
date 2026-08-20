@@ -43,6 +43,7 @@ import { buildGmTools } from "./gm-tools";
 import { runMatchIntent } from "./match-intent";
 import { applyMatchIntent, type AppliedIntent } from "./match-intent-apply";
 import {
+  buildGmDigest,
   buildGmHistory,
   buildGmReference,
   buildGmStateNote,
@@ -152,6 +153,17 @@ function takeArrivedReports(state: GameState, limit: number): ScoutReportCard[] 
     .filter((c): c is ScoutReportCard => c !== null);
 }
 
+/**
+ * 평시 시스템 블록 — 고정 · 레퍼런스 · **요약**(압축된 세이브에만) 순
+ * (agents.md §5). 경기 쪽은 이력이 갈려 있어 요약을 싣지 않는다.
+ */
+function peaceSystem(state: GameState): string[] {
+  const digest = buildGmDigest(state);
+  return digest
+    ? [GM_SYSTEM, buildGmReference(state), digest]
+    : [GM_SYSTEM, buildGmReference(state)];
+}
+
 export type LlmMode = "mock" | "real";
 
 export function resolveLlmMode(): LlmMode {
@@ -201,7 +213,7 @@ export async function runOnboardingTurn(state: GameState, llm?: GameLLM): Promis
   // 도구도 스트리밍도 없는 호출이라 다시 불러도 남는 자국이 없다
   return retryOnce("gm:onboarding", async () => {
     const result = await client.runTurn({
-      system: [GM_SYSTEM, buildGmReference(state)],
+      system: peaceSystem(state),
       history: [],
       user: buildManagerMessage(state, "*새 감독으로서 구단에 첫 출근한다*"),
       stateNote: `${ONBOARDING_INSTRUCTION}\n\n${buildGmStateNote(state)}`,
@@ -341,9 +353,7 @@ async function runRealGmTurn(
 
   // 입력은 안정성 순 3층 — ① 고정 프롬프트 ② 레퍼런스 ③ 발화+상태 스냅샷.
   // 앞 두 층만 캐시 프리픽스(0.1×)다 (docs/llm/agents.md §5)
-  const system = inMatch
-    ? [MATCH_CASTER_SYSTEM, buildMatchReference(state)]
-    : [GM_SYSTEM, buildGmReference(state)];
+  const system = inMatch ? [MATCH_CASTER_SYSTEM, buildMatchReference(state)] : peaceSystem(state);
   /**
    * **대화만 건 턴은 판을 싣지 않는다.** 선수를 부른 한 마디에 패킷 전체를 실으면
    * 중계가 읽지도 않을 판세를 매 턴 정가로 읽는다 (agents.md §5). 킥오프 턴도 같은

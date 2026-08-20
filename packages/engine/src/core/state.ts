@@ -71,6 +71,7 @@ import {
   buildScheduleEntries,
   buildSeasonCalendar,
   buildTransferWindows,
+  contractUntil,
   FIRST_SEASON,
   seasonYear,
   type SeasonCalendar,
@@ -1113,6 +1114,9 @@ export function ensureSeasonStat(state: GameState, playerId: string, teamId: str
 
 // ── 성장·서사 ───────────────────────────────────────────
 
+/** 성장 원장 보관 한도 — 서사와 같은 이유로 오래된 것부터 버린다 */
+const GROWTH_LOG_LIMIT = 4000;
+
 export function recordGrowth(
   state: GameState,
   playerId: string,
@@ -1133,12 +1137,24 @@ export function recordGrowth(
     delta,
     ...(note ? { note } : {}),
   });
-  if (state.growthLog.length > 4000) state.growthLog.splice(0, state.growthLog.length - 4000);
+  if (state.growthLog.length > GROWTH_LOG_LIMIT) {
+    state.growthLog.splice(0, state.growthLog.length - GROWTH_LOG_LIMIT);
+  }
 }
+
+/**
+ * 서사 노트 보관 한도 — 넘치면 **오래된 것부터** 버린다.
+ *
+ * 세이브에 통째로 담기고 GM 프롬프트의 이력 층이 여기서 나오므로, 한도가 곧
+ * 세이브 크기이자 컨텍스트 비용이다.
+ */
+const NARRATIVE_LIMIT = 200;
 
 export function pushNarrative(state: GameState, text: string, salience = 2): void {
   state.narrative.push({ date: state.date, text, salience });
-  if (state.narrative.length > 200) state.narrative.splice(0, state.narrative.length - 200);
+  if (state.narrative.length > NARRATIVE_LIMIT) {
+    state.narrative.splice(0, state.narrative.length - NARRATIVE_LIMIT);
+  }
 }
 
 /** id를 이룰 수 있는 문자 — 앞뒤에 이것이 붙어 있으면 그 id가 아니라 더 긴 id의 일부다 */
@@ -1382,7 +1398,7 @@ function buildInitialSquads(
   formations: Map<string, Formation>,
   teams: readonly TeamCatalogEntry[] = teamCatalog(),
 ): void {
-  const seasonStartYear = 2026;
+  const seasonStartYear = seasonYear(FIRST_SEASON);
   // 2군을 메울 유스가 여기서 태어난다 — id는 세계 전체에서 유일해야 한다
   const takenIds = new Set(players.map((p) => p.id));
   for (const team of teams) {
@@ -1515,7 +1531,7 @@ function buildInitialSquads(
         team.tier,
         takenIds,
         undefined,
-        2026,
+        seasonStartYear,
         takenNames,
       );
       youth.squadLevel = "reserve";
@@ -2099,7 +2115,7 @@ export function createGame(input: CreateGameInput): GameState {
     weeklyWage: wages.get(p.id) ?? 0,
     since: calendar.preseasonStart,
     // 계약 만료를 1~4년 뒤로 분산 (재계약 서사의 씨앗)
-    until: `${2026 + (1 + (i % 4))}-06-30`,
+    until: contractUntil(calendar.preseasonStart, 1 + (i % 4)),
     status: "active",
   }));
 

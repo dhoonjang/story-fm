@@ -51,7 +51,7 @@ import { drawParts, drawTitle } from "../competition/draw-schedule";
 import { isClubTeam, teamCatalog } from "../data/team-catalog";
 import { leagueOfTeamIn, teamsOfLeagueIn } from "../competition/promotion";
 import { tierOfTeamIn } from "../core/club-tier";
-import { computeStandings } from "../competition/season";
+import { achievementLine, computeStandings } from "../competition/season";
 import { USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
 import {
   attributeLine,
@@ -1351,7 +1351,7 @@ export function careerView(state: GameState): LookupResult {
   if (state.achievements.length > 0) {
     lines.push(
       `업적 ${state.achievements.length}개: ${state.achievements
-        .map((a) => `${a.name}(시즌 ${a.season})`)
+        .map((a) => `${achievementLine(a)} (시즌 ${a.season})`)
         .join(" / ")}`,
     );
   }
