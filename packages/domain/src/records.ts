@@ -67,6 +67,12 @@ export const ContractSchema = z.object({
   until: DateString,
   /** active = 선수당 정확히 1건 */
   status: z.enum(["active", "ended"]),
+  /**
+   * 이 계약에 대해 이미 낸 만료 경고 중 **가장 낮은 문턱**(일). 없으면 아직 안 냈다.
+   * 문턱을 하루로 재면 tick이 지나지 않은 날의 경고는 영영 오지 않으므로,
+   * "이하로 내려왔고 아직 안 냈다"로 판단한다 (simulation/season.md §5).
+   */
+  expiryWarnedStage: z.number().int().positive().optional(),
 });
 export type Contract = z.infer<typeof ContractSchema>;
 
