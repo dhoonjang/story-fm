@@ -172,8 +172,7 @@ describe("오퍼", () => {
     const player = targetWaiting(state);
     const terms = offerFor(state, player.id);
 
-    // 저장되는 확률은 **오퍼를 넣는 순간**의 값이다 (그 뒤에 다시 물으면 같은
-    // 조건 반복으로 잡혀 인내심 감쇠가 걸린 값이 나온다)
+    // 저장되는 확률은 **오퍼를 넣는 순간**의 값이다
     const atOfferTime = dealOdds(state, terms).probability;
     const result = sendOffer(state, terms);
     expect(result.ok, result.message).toBe(true);
@@ -188,8 +187,8 @@ describe("오퍼", () => {
     expect(round.fee).toBe(terms.fee);
     // 확률을 함께 저장한다 — 나중에 LLM 판정의 분포를 집계할 수 있어야 한다
     expect(round.probability).toBe(atOfferTime);
-    // 같은 조건을 또 물으면 감쇠된 값이 나온다 — 난사를 막는 장치가 여기서 보인다
-    expect(dealOdds(state, terms).probability).toBeLessThan(atOfferTime);
+    // 답을 기다리는 그 오퍼는 자기 자신의 반복이 아니다 — 다시 물어도 같은 값이다
+    expect(dealOdds(state, terms).probability).toBe(atOfferTime);
     expect(round.respondsOn! > state.date, "응답은 시간을 쓴다").toBe(true);
     expect(round.verdict).toBeNull();
   });
@@ -224,6 +223,40 @@ describe("상대의 판정 — 코어가 가능한 것만 받는다", () => {
     const early = respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
     expect(early.ok).toBe(false);
     expect(early.message).toContain("아직 답이 오지 않았");
+  });
+
+  /**
+   * 판정 확률이 **감독이 들은 값**이어야 한다. 예전엔 `sendOffer`가 라운드를 쌓기
+   * 전에, `respondOffer`가 쌓은 뒤에 재어 방금 넣은 오퍼가 자기 반복으로 잡혔고,
+   * 첫 오퍼부터 인내심 감쇠(0.72)가 걸렸다 (transfer.md §3).
+   */
+  it("첫 오퍼의 판정 확률은 인용한 값이고, 감쇠는 같은 조건의 두 번째부터다", () => {
+    const state = createTestGame(42);
+    const player = targetWaiting(state);
+    const terms = offerFor(state, player.id);
+
+    const quoted = dealOdds(state, terms).probability;
+    expect(sendOffer(state, terms).ok).toBe(true);
+    const negotiation = openNegotiationFor(state, player.id)!;
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+
+    // 판정을 지나는 확률은 역제안 라운드에 남는다 — 그것이 감독이 들은 값이다
+    expect(respondOffer(state, { negotiationId: negotiation.id, verdict: "counter" }).ok).toBe(
+      true,
+    );
+    expect(negotiation.rounds.at(-1)!.probability).toBe(quoted);
+
+    // 두 번째 같은 조건 — 이제는 감쇠가 걸리고, 그 값이 다시 인용·판정에 함께 쓰인다
+    const repeated = dealOdds(state, terms);
+    expect(repeated.probability).toBeLessThan(quoted);
+    expect(repeated.factors.some((f) => f.label === "상대의 인내심")).toBe(true);
+    expect(sendOffer(state, terms).ok).toBe(true);
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+    expect(respondOffer(state, { negotiationId: negotiation.id, verdict: "counter" }).ok).toBe(
+      true,
+    );
+    // 감쇠는 한 번만 — 판정 중인 라운드가 자기 자신을 또 세지 않는다
+    expect(negotiation.rounds.at(-1)!.probability).toBe(repeated.probability);
   });
 
   it("확률이 바닥이면 수락할 수 없다", () => {
