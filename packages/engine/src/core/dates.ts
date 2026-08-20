@@ -10,6 +10,17 @@ export function dayOfWeek(iso: string): number {
   return new Date(`${iso}T00:00:00Z`).getUTCDay(); // 0=일
 }
 
+/** `dayOfWeek`가 돌려주는 값 — 편성과 주간 결산이 요일을 이름으로 읽게 한다 */
+export const SUNDAY = 0;
+export const MONDAY = 1;
+export const SATURDAY = 6;
+
+/** 주말 경기인가 — 킥오프가 낮과 야간으로 갈리는 경계다 */
+export function isWeekend(iso: string): boolean {
+  const dow = dayOfWeek(iso);
+  return dow === SUNDAY || dow === SATURDAY;
+}
+
 export function diffDays(a: string, b: string): number {
   return Math.round(
     (new Date(`${b}T00:00:00Z`).getTime() - new Date(`${a}T00:00:00Z`).getTime()) / 86_400_000,
@@ -57,7 +68,13 @@ export const MIN_REST_HOURS = 48;
  */
 export const HARD_MIN_REST_HOURS = 40;
 
-const DEFAULT_KICKOFF = "15:00";
+/**
+ * 주말 낮 킥오프 — 이 세계의 기본 슬롯이다.
+ *
+ * 시각이 없는 옛 기록도 이 자리로 읽는다(편성은 언제나 시각을 준다). 폴백과
+ * 슬롯이 한 값인 이유는 그 둘이 실제로 같은 자리이기 때문이다 — 토요일 오후.
+ */
+export const DEFAULT_KICKOFF = "15:00";
 
 /** 경기 시각을 절대 시간(ms)으로 — 시각이 없으면 낮 경기로 본다 */
 export function kickoffAt(date: string, time?: string): number {

@@ -9,7 +9,7 @@ import {
   type CupCatalogEntry,
 } from "../data/cup-catalog";
 import { completeDraw, drawIsDue, scheduleDraw } from "./draw-schedule";
-import { euroMatchdayDates, knockoutDates } from "./europe";
+import { EURO_NIGHT_KICKOFF, euroMatchdayDates, knockoutDates } from "./europe";
 import { payLeaguePhasePrizes, payStagePrizes } from "./euro-prize";
 import { makeRng } from "../core/rng";
 import { needsShootout, pairOf, resolveExtraTime, settledTieWinner } from "./extra-time";
@@ -122,7 +122,7 @@ function registerUserEntries(state: GameState, matches: MatchRecord[]): void {
     state.schedule.push({
       id: `se-${m.id}`,
       date: m.date,
-      time: m.time ?? "21:00",
+      time: m.time ?? EURO_NIGHT_KICKOFF,
       type: "match",
       refId: m.id,
       teamId: state.userTeamId,
@@ -152,7 +152,7 @@ function createTie(
         stage,
         round: 1,
         date: dates[0]!,
-        time: "21:00",
+        time: EURO_NIGHT_KICKOFF,
         neutral: true,
         homeTeamId: better,
         awayTeamId: worse,
@@ -167,7 +167,7 @@ function createTie(
     stage,
     round: leg + 1,
     date: dates[leg] ?? dates[0]!,
-    time: "21:00",
+    time: EURO_NIGHT_KICKOFF,
     // 1차전은 하위 시드 홈, 2차전은 상위 시드 홈 (실제 대회의 이점 배분)
     homeTeamId: leg === 0 ? worse : better,
     awayTeamId: leg === 0 ? better : worse,

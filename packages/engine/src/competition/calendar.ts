@@ -55,14 +55,27 @@ export {
   contractUntil,
   dayOfWeek,
   diffDays,
+  isWeekend,
   seasonYear,
+  MONDAY,
+  SATURDAY,
+  SUNDAY,
+  DEFAULT_KICKOFF,
   MIN_REST_HOURS,
   HARD_MIN_REST_HOURS,
   kickoffAt,
   restHours,
   tooClose,
 } from "../core/dates";
-import { addDays, dayOfWeek, diffDays, kickoffAt, MIN_REST_HOURS, seasonYear } from "../core/dates";
+import {
+  addDays,
+  dayOfWeek,
+  DEFAULT_KICKOFF,
+  diffDays,
+  kickoffAt,
+  MIN_REST_HOURS,
+  seasonYear,
+} from "../core/dates";
 import {
   domesticCupsOfCountry,
   DOMESTIC_STAGES,
@@ -795,7 +808,7 @@ export function buildScheduleEntries(
       id: `se-${m.id}`,
       date: m.date,
       // 킥오프는 경기가 갖는다 — 엔트리는 비추기만 한다 (재계산하면 어긋난다)
-      time: m.time ?? "15:00",
+      time: m.time ?? DEFAULT_KICKOFF,
       type: "match",
       refId: m.id,
       teamId: involvesUser ? userTeamId : null,

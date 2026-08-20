@@ -253,6 +253,16 @@ function checkAchievements(state: GameState, position: number, row: StandingRow)
 }
 
 /**
+ * 대항전 우승·준우승이 감독 평판에 남기는 몫.
+ *
+ * ⚠️ **국내 컵(`domestic-cup.ts`)과 값이 다르다** — 유럽을 들어 올린 감독과
+ * 국내 컵을 든 감독은 같은 무게로 읽히지 않는다. 한 값으로 합치지 말 것.
+ */
+const EURO_TITLE_MEDIA = 10;
+const EURO_TITLE_BOARD = 10;
+const EURO_RUNNER_UP_MEDIA = 4;
+
+/**
  * 대항전 결산 — 우승/준우승을 트로피·평판에 반영한다.
  *
  * 결승은 리그 최종전 다음 토요일이라 `allMatchesDone`이 그것까지 기다린다.
@@ -270,12 +280,21 @@ function reviewEuropeanCampaign(state: GameState): string[] {
       (finalMatch.homeTeamId === state.userTeamId || finalMatch.awayTeamId === state.userTeamId);
     if (champion === state.userTeamId) {
       state.trophies.push({ season: state.season, competition: cup.name, teamId: champion });
-      state.manager.reputation.media = Math.min(100, state.manager.reputation.media + 10);
-      state.manager.reputation.board = Math.min(100, state.manager.reputation.board + 10);
+      state.manager.reputation.media = Math.min(
+        100,
+        state.manager.reputation.media + EURO_TITLE_MEDIA,
+      );
+      state.manager.reputation.board = Math.min(
+        100,
+        state.manager.reputation.board + EURO_TITLE_BOARD,
+      );
       digest.push(`🏆 ${cup.name} 우승`);
       pushNarrative(state, `${cup.name} 우승`, 5);
     } else if (ours) {
-      state.manager.reputation.media = Math.min(100, state.manager.reputation.media + 4);
+      state.manager.reputation.media = Math.min(
+        100,
+        state.manager.reputation.media + EURO_RUNNER_UP_MEDIA,
+      );
       digest.push(`${competitionShortName(cup.id)} 준우승 — 결승 상대 ${teamName(champion)}`);
       pushNarrative(state, `${competitionShortName(cup.id)} 준우승`, 4);
     } else {
@@ -444,6 +463,11 @@ export function transitionSeason(state: GameState): string[] {
    */
   const RETIRE_OVERALL = 68;
 
+  /** 종합과 무관하게 은퇴하는 나이 */
+  const RETIRE_AGE = 35;
+  /** 이 나이부터는 `RETIRE_OVERALL` 아래면 은퇴한다 */
+  const RETIRE_AGE_MARGINAL = 33;
+
   for (const team of state.teams) {
     /**
      * **무소속은 클럽이 아니다** — 은퇴만 태우고 유스 유입·배치·계약 갱신은
@@ -462,7 +486,10 @@ export function transitionSeason(state: GameState): string[] {
        * 감독이 겪은 것 없이 숫자만 달라진다. 이제 **매달 조금씩** 움직인다
        * (`development.ts`). 시즌 전환이 하는 건 은퇴 판정과 명단 정리뿐이다.
        */
-      if (age >= 35 || (age >= 33 && player.attributes.overall < RETIRE_OVERALL)) {
+      if (
+        age >= RETIRE_AGE ||
+        (age >= RETIRE_AGE_MARGINAL && player.attributes.overall < RETIRE_OVERALL)
+      ) {
         retirees.push(player.id);
       }
       // 새 시즌 리셋

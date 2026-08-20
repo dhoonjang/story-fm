@@ -12,7 +12,14 @@ import {
   FINANCE_INCOME_CATEGORIES,
   formatMoney,
 } from "@story-fm/domain";
-import { addDays, buildSeasonCalendar, dayOfWeek, FIRST_SEASON } from "../competition/calendar";
+import {
+  addDays,
+  buildSeasonCalendar,
+  dayOfWeek,
+  DEFAULT_KICKOFF,
+  FIRST_SEASON,
+  SATURDAY,
+} from "../competition/calendar";
 import { clubProfile } from "../data/club-profile";
 import { clubEconomyLevel, leagueEconomyLevel } from "../data/league-economy";
 import { isMarketOnlyLeague, isTopLeague, leagueCatalogById } from "../data/league-catalog";
@@ -456,8 +463,8 @@ export function isTelevised(match: MatchRecord): boolean {
   // 친선은 리그 중계 계약 밖의 경기다 — 어느 대회에도 속하지 않으니 배분도 없다
   if (isFriendly(match)) return false;
   if (isCup(match.competitionId)) return false;
-  const time = match.time ?? "15:00";
-  return !(dayOfWeek(match.date) === 6 && time === "15:00");
+  const time = match.time ?? DEFAULT_KICKOFF;
+  return !(dayOfWeek(match.date) === SATURDAY && time === DEFAULT_KICKOFF);
 }
 
 // ── 매치데이 ────────────────────────────────────────────
