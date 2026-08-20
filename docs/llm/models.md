@@ -145,10 +145,11 @@ runTurn({ system, history, user, stateNote?, tools?, toolChoice?, maxTokens?, on
   한국어 메시지로 돌아가 모델이 고쳐 다시 부른다.
 - `toolChoice`는 도구 호출을 강제할지다 — `"auto"`(기본) 또는 `{ name }` (§3-2).
 - 한 턴의 도구 왕복 상한은 셋 다 **8회**(`MAX_TOOL_ITERATIONS`)이고, **마지막 한 번은
-  도구를 못 부르게 걸어 보낸다**(`toolChoice`를 "없음"으로 — Anthropic `tool_choice:
-{type:"none"}`, Gemini `mode: NONE`, OpenAI `tool_choice:"none"`). 상한에 닿은 턴도
-  문장으로 끝나야 하기 때문이다(agents.md §2). ⚠️ **도구 정의는 그대로 둔다** — 정의를
-  빼면 이력에 남은 도구 호출이 짝을 잃어 요청 자체가 거부된다.
+  도구를 못 부르게 걸어 보낸다** — 상한에 닿은 턴도 문장으로 끝나야 하기 때문이다
+  (agents.md §2). 거는 자리는 제공자마다 다르다: Anthropic은 `tool_choice`의 `none`,
+  Gemini는 `functionCallingConfig.mode: NONE`, OpenAI는 `tool_choice: "none"`.
+  ⚠️ **도구 정의는 그대로 둔다** — 정의를 빼면 이력에 남은 도구 호출이 짝을 잃어 요청
+  자체가 거부된다.
 - **잘린 응답(`truncated`)의 도구 호출은 실행하지 않는다** — 인자가 문장 한복판에서
   끊겨 있다. 그 밖에는 함수 호출이 실린 응답이면 사유와 무관하게 실행한다(§3-1).
 - **실행하지 않은 호출은 셋 다 합성 오류 결과로 닫는다.** 짝이 없는 호출이 이력에
