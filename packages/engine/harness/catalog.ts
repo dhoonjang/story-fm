@@ -258,6 +258,31 @@ export const SQUAD_LONGEVITY = defineHarness({
 });
 
 /**
+ * 2군 강등이 낳는 불만 — **문턱이 로테이션과 방치를 가르는가** (`docs/data/people.md` §5).
+ *
+ * 상수 하나(21일)가 두 가지 플레이를 동시에 정한다: 짧으면 선수를 잠깐 내렸다
+ * 올리는 로테이션이 곧 반란이 되고, 길면 강등이 지금처럼 **비용 0인 손잡이**로
+ * 남는다. 어느 쪽인지는 한 시즌을 굴려 봐야 보인다 — 코드를 읽어서는 알 수 없고,
+ * 고정 기댓값이 있는 단위 테스트로도 잡히지 않는다.
+ */
+export const DEMOTION_GRIEVANCE = defineHarness({
+  id: "demotion-grievance",
+  what: "한 시즌 2군 강등이 낳는 불만 — 로테이션은 공짜고 방치는 값을 치르는가",
+  doc: "docs/data/people.md §5",
+  cost: "축소 세계 한 시즌 · 약 10초",
+  // prettier-ignore
+  bands: [
+    { metric: "로테이션 강등 횟수", role: "measure", unit: "count", why: "아래 두 줄의 표본 — 0이면 로테이션을 재지 못한 것이다" },
+    { metric: "로테이션 복귀 실패", role: "guard", max: 0, unit: "count", why: "올리지 못한 선수는 방치와 구분되지 않는다 — 실패가 있으면 아래 줄이 로테이션을 재는 것이 아니다" },
+    { metric: "로테이션 자원에 걸린 불만", role: "guard", max: 0, unit: "count", why: "열흘 안에 되돌리는 감독은 대가를 치르지 않는다 — 여기가 1이면 로테이션이 곧 반란이다" },
+    { metric: "방치한 핵심 자원", role: "guard", min: 3, max: 3, unit: "count", why: "아래 줄의 분모 — 스쿼드 하한에 걸려 덜 내려갔으면 밴드가 공허하다" },
+    { metric: "방치 끝에 불만이 걸린 수", role: "guard", min: 3, max: 3, unit: "count", why: "한 시즌을 그대로 두고도 조용하면 강등은 여전히 비용 0인 손잡이다" },
+    { metric: "첫 방치 불만까지 걸린 날", role: "guard", min: 21, max: 27, unit: "count", why: "문턱 21일 + 판정이 주에 한 번이라 최대 엿새가 밀린다" },
+    { metric: "시즌 강등발 불만 건수", role: "measure", unit: "count", why: "감독 하나가 한 시즌에 몇 번 이 자리를 만나는가" },
+  ],
+});
+
+/**
  * 종합 눈금 — **그 숫자가 굴리는 것들의 분포** (`docs/data/player.md` §4).
  *
  * 종합은 화면의 숫자 하나가 아니라 시장가·주급 서열·잠재력 간격·등급 색이 함께 읽는
@@ -345,6 +370,7 @@ export const HARNESSES: readonly Harness[] = [
   AI_MARKET,
   MANAGER_MARKET,
   SQUAD_LONGEVITY,
+  DEMOTION_GRIEVANCE,
   OVERALL_SCALE,
   HISTORY_WINDOW,
 ];

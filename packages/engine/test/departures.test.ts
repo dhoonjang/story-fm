@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_LOAN_WAGE_SHARE,
+  DEPARTURE_SQUAD_MORALE,
   SEVERANCE_RATE,
   SEVERANCE_WEEKS_CAP,
   activeContract,
   addDays,
   loanPlayer,
   loanedOut,
+  moraleToForm,
   playersOf,
   recallLoan,
   releasePlayer,
@@ -96,6 +98,57 @@ describe("일방 해지 — 전액을 물고 자리를 비운다", () => {
     const state = createTestGame(11);
     const theirs = playersOf(state, "chelsea").find((p) => p.teamId !== state.userTeamId)!;
     expect(releasePlayer(state, { playerId: theirs.id }).ok).toBe(false);
+  });
+});
+
+/**
+ * 방출이 라커룸에 남기는 것 — **돈으로만 끝나지 않는다** (transfer.md §2).
+ * 회견이 열리느냐와 사기가 움직이느냐가 **같은 문**을 지나므로, 한쪽만 움직이면
+ * 조용히 어긋난다.
+ */
+describe("방출의 여파 — 회견과 남은 선수단", () => {
+  /** 스쿼드에서 가장 좋은 선수 — 회견이 열리는 쪽 */
+  const core = (state: GameState) =>
+    [...userPlayers(state)].sort((a, b) => b.attributes.overall - a.attributes.overall)[0]!;
+
+  /** 남은 1군의 폼을 선수별로 — 순서에 기대지 않는다 */
+  const formsById = (state: GameState) =>
+    new Map(
+      userPlayers(state)
+        .filter((p) => p.squadLevel !== "reserve")
+        .map((p) => [p.id, p.state.form] as const),
+    );
+
+  it("핵심 자원이 나가면 회견이 열리고 남은 1군의 사기가 내려간다", () => {
+    const state = createTestGame(11);
+    const target = core(state);
+    const before = formsById(state);
+
+    expect(releasePlayer(state, { playerId: target.id }).ok).toBe(true);
+
+    const press = state.pressConferences?.find((c) => c.status === "pending");
+    expect(press?.facts[0]?.kind).toBe("departure");
+    expect(press?.facts[0]?.about).toBe(target.id);
+    // 카드는 장부 한 줄이다 — 물음표도 평가어도 없다
+    expect(press?.facts[0]?.text).not.toContain("?");
+
+    const after = formsById(state);
+    expect(after.has(target.id)).toBe(false);
+    const drop = moraleToForm(DEPARTURE_SQUAD_MORALE);
+    for (const [id, form] of after) expect(form).toBeCloseTo(before.get(id)! + drop, 10);
+  });
+
+  it("백업 정리는 회견도 사기도 움직이지 않는다 — 회견이 흔해지면 무게를 잃는다", () => {
+    const state = createTestGame(11);
+    const target = spare(state);
+    const before = formsById(state);
+
+    expect(releasePlayer(state, { playerId: target.id }).ok).toBe(true);
+
+    expect(state.pressConferences?.some((c) => c.status === "pending")).toBeFalsy();
+    const after = formsById(state);
+    expect(after.has(target.id)).toBe(false);
+    for (const [id, form] of after) expect(form).toBeCloseTo(before.get(id)!, 10);
   });
 });
 

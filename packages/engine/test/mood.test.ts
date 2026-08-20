@@ -8,6 +8,7 @@ import {
 import {
   HEAVY_DEFEAT_MARGIN,
   HEAVY_DEFEAT_PENALTY,
+  DEMOTION_PATIENCE_DAYS,
   MOOD_BATCH,
   MOOD_NOTE_DAYS,
   RUN_MAX,
@@ -39,7 +40,9 @@ import {
   formAngle,
   formDeltaFromMatch,
   formSwing,
+  dayOfWeek,
   seasonStatOf,
+  setSquadLevel,
 } from "@story-fm/engine";
 import { createMiniGame, createTestGame, advanceAndPlay, advanceDays } from "./helpers";
 
@@ -673,5 +676,110 @@ describe("폼 — 시간 축을 가진 컨디션 (form.ts)", () => {
     const after = played.map((p) => Math.abs(p.state.form));
     const shrank = after.filter((v, i) => v < before[i]!).length;
     expect(shrank).toBeGreaterThan(played.length / 2);
+  });
+});
+
+/**
+ * 2군 강등 — **방치의 대가는 규칙이 아니라 시간의 결과다** (people.md §5).
+ *
+ * 값이 조용히 흐르는 자리다: 카드도 불만도 화면에 뜨지만, **언제** 서느냐는
+ * 날짜 하나가 정하고 그것이 어긋나도 아무도 못 본다.
+ */
+describe("2군 강등 — 내린 결정이 사실로 남는다", () => {
+  /** 스쿼드에서 가장 좋은 선수를 2군으로 — 강등 경로를 그대로 지난다 */
+  function demoteCore(state: GameState) {
+    const core = [...userPlayers(state)].sort(
+      (a, b) => b.attributes.overall - a.attributes.overall,
+    )[0]!;
+    expect(setSquadLevel(state, { playerId: core.id, level: "reserve" }).ok).toBe(true);
+    return core;
+  }
+
+  /** 그 요일에 설 때까지 하루씩 민다 — 방치 판정은 월요일에만 돈다 */
+  function advanceToDow(state: GameState, dow: number) {
+    for (let i = 0; i < 8 && dayOfWeek(state.date) !== dow; i++) advanceDays(state, 1);
+    expect(dayOfWeek(state.date)).toBe(dow);
+  }
+
+  /** 월요일을 적어도 한 번 지난다 */
+  function passAMonday(state: GameState) {
+    for (let i = 0; i < 8; i++) advanceDays(state, 1);
+  }
+
+  it("내린 날은 사실 카드만 선다 — 불만은 아직 없다", () => {
+    const state = createTestGame();
+    const core = demoteCore(state);
+    expect(core.state.demotedOn).toBe(state.date);
+    expect(moodFactsOf(state, core)[0]).toEqual({ cause: "demotion", days: 0 });
+    expect(state.issues.some((i) => i.gamePlayerId === core.id)).toBe(false);
+  });
+
+  it("시드가 2군에 세워 둔 선수에겐 카드가 없다 — 감독이 내린 적이 없다", () => {
+    const state = createTestGame();
+    const seeded = userPlayers(state).find((p) => p.squadLevel === "reserve");
+    if (!seeded) return; // 축소 세계에 2군이 없으면 볼 것이 없다
+    expect(seeded.state.demotedOn).toBeUndefined();
+    expect(moodFactsOf(state, seeded).some((f) => f.cause === "demotion")).toBe(false);
+  });
+
+  it("2군 선수는 결산 대상에서 빠지지 않는다 — 경기를 뛰지 않아 사라지던 자리", () => {
+    const state = createTestGame();
+    const core = demoteCore(state);
+    const brief = buildMoodBrief(state, state.date, state.date);
+    expect(brief?.targets.some((t) => t.playerId === core.id)).toBe(true);
+  });
+
+  /**
+   * 판정일(월요일)에 며칠째로 서느냐가 전부다 — 일요일에 날짜를 맞추고 하루를
+   * 민다. 한 주를 통째로 밀면 20일째를 볼 수 없다(판정이 주에 한 번이라 27일째로
+   * 건너뛴다).
+   */
+  it("문턱 하루 전은 아직 불만이 아니다 — 20일째", () => {
+    const state = createTestGame();
+    const core = demoteCore(state);
+    advanceToDow(state, 0); // 일요일
+    core.state.demotedOn = addDays(state.date, -(DEMOTION_PATIENCE_DAYS - 2));
+    advanceDays(state, 1); // 월요일 판정 — 20일째
+    expect(state.issues.some((i) => i.gamePlayerId === core.id)).toBe(false);
+  });
+
+  it("21일을 그대로 두면 불만이 걸린다 — 사유 코드로, 수치 없이", () => {
+    const state = createTestGame();
+    const core = demoteCore(state);
+    advanceToDow(state, 0); // 일요일
+    core.state.demotedOn = addDays(state.date, -(DEMOTION_PATIENCE_DAYS - 1));
+    advanceDays(state, 1); // 월요일 판정 — 21일째
+    const issue = state.issues.find((i) => i.gamePlayerId === core.id);
+    expect(issue?.reason).toBe("demotion");
+    expect(issue?.kind).toBe("unhappy");
+    // 기간은 `demotedOn`이 갖는다 — 같은 값을 두 곳에 적지 않는다
+    expect(issue?.count).toBeUndefined();
+    expect(issue?.note).toBeUndefined();
+  });
+
+  it("승격이 그 불만을 푼다 — 내린 날도 함께 지워진다", () => {
+    const state = createTestGame();
+    const core = demoteCore(state);
+    core.state.demotedOn = addDays(state.date, -DEMOTION_PATIENCE_DAYS);
+    passAMonday(state);
+    expect(state.issues.some((i) => i.gamePlayerId === core.id)).toBe(true);
+
+    expect(setSquadLevel(state, { playerId: core.id, level: "first" }).ok).toBe(true);
+    expect(core.state.demotedOn).toBeUndefined();
+    expect(state.issues.some((i) => i.gamePlayerId === core.id)).toBe(false);
+  });
+
+  it("승격은 다른 사유의 불만까지 풀지는 않는다 — 사라진 원인은 강등뿐이다", () => {
+    const state = createTestGame();
+    const core = demoteCore(state);
+    state.issues.push({
+      gamePlayerId: core.id,
+      kind: "unhappy",
+      reason: "losing-run",
+      count: 3,
+      since: state.date,
+    });
+    expect(setSquadLevel(state, { playerId: core.id, level: "first" }).ok).toBe(true);
+    expect(state.issues.filter((i) => i.gamePlayerId === core.id)).toHaveLength(1);
   });
 });

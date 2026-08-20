@@ -51,6 +51,8 @@ function grievanceSubject(fact: Extract<MoodFact, { cause: "grievance" }>): stri
       return fact.count === null ? "연패" : `${fact.count}연패`;
     case "early-return":
       return "휴가를 반납한 소집";
+    case "demotion":
+      return "2군 강등";
     default:
       return fact.note ?? "팀 상황";
   }
@@ -79,6 +81,8 @@ function sentenceOf(fact: MoodFact): string {
       return `출장 정지 ${fact.matchesLeft}경기가 남아 몸이 근질거린다`;
     case "grievance":
       return `${grievanceSubject(fact)}에 불만이 쌓여 있다`;
+    case "demotion":
+      return fact.days === 0 ? "오늘 2군으로 내려갔다" : `2군에 내려간 지 ${fact.days}일째다`;
     case "settling":
       // 남은 날짜를 말하지 않는다 — 얼마나 걸릴지는 감독이 앞으로 뭘 하느냐에 달렸다
       return fact.matches === 0
@@ -95,6 +99,9 @@ function sentenceOf(fact: MoodFact): string {
     case "condition":
       // 몸은 몸의 말로 — 여기서 감정을 읽으면 경기 다음 날 선수단 전원이 침울해진다
       return fact.level === "heavy" ? "다리가 무겁다" : "몸이 가볍다";
+    case "departure":
+      // 라커룸 전체가 같은 사실을 든다 — 누가 그와 가까웠는지는 아직 아무도 모른다
+      return `${dayWord(fact.days)} ${fact.name} 계약 해지 소식에 라커룸이 뒤숭숭하다`;
     case "contract-ending":
       return "계약이 반년 안에 끝난다";
     case "captain":
