@@ -192,6 +192,7 @@ describe("딜 확률", () => {
       openedOn: state.date,
       expiresOn: state.windows[0]!.closesOn,
       status: "open",
+      // 답을 **받은** 라운드만 반복으로 잡힌다 (`sameTermsRepeats`)
       rounds: [1, 2].map(() => ({
         date: state.date,
         by: "us" as const,
@@ -200,7 +201,7 @@ describe("딜 확률", () => {
         contractYears: 4,
         respondsOn: state.date,
         probability: first,
-        verdict: null,
+        verdict: "counter" as const,
       })),
     });
     const repeated = dealOdds(state, terms);

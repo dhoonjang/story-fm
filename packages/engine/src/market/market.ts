@@ -1049,7 +1049,14 @@ function renewOdds(
 /** 사는 쪽이 낼 수 있는 상한 — 시장가의 이 배수 (구단은 시장가를 크게 넘기지 않는다) */
 const BUYER_CEILING_MULTIPLE = 1.15;
 
-/** 이 선수에게 같은 조건으로 몇 번 제안했는가 — 인내심 감쇠의 근거 */
+/**
+ * 이 선수에게 같은 조건으로 몇 번 제안했는가 — 인내심 감쇠의 근거.
+ *
+ * **상대가 이미 답한 라운드만 센다.** 답을 기다리는 라운드는 자기 자신의 반복이
+ * 아니다: `sendOffer`는 라운드를 쌓기 전에 확률을 재어 감독에게 말하고
+ * `respondOffer`는 쌓인 뒤에 다시 재므로, 대기 중인 오퍼를 세면 같은 오퍼가
+ * 인용될 때와 판정될 때 다른 확률을 갖는다 (transfer.md §3).
+ */
 export function sameTermsRepeats(state: GameState, terms: DealTerms): number {
   const negotiation = state.negotiations.find(
     (n) => n.gamePlayerId === terms.playerId && n.status === "open",
@@ -1058,6 +1065,7 @@ export function sameTermsRepeats(state: GameState, terms: DealTerms): number {
   return negotiation.rounds.filter(
     (r) =>
       r.by === "us" &&
+      r.verdict !== null &&
       near(r.fee, terms.fee, SAME_TERMS_TOLERANCE) &&
       near(r.weeklyWage, terms.weeklyWage, SAME_TERMS_TOLERANCE),
   ).length;
