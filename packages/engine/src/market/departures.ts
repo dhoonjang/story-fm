@@ -3,6 +3,8 @@ import { ageOf, RELEASE_NOTE } from "@story-fm/domain";
 import { contractUntil, diffDays, seasonYear, windowOpenOn } from "../competition/calendar";
 import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import { formatMoney, recordFinance } from "../club/finance";
+import { buildDeparturePress, openPress } from "../club/press";
+import { clampForm, moraleToForm } from "../squad/form";
 import { loanLockOf, transferWindowLabel, windowOpenForTeam } from "./market";
 import { estimateWeeklyWage, wageSubjectOf } from "../world/wages";
 import { makeRng } from "../core/rng";
@@ -13,6 +15,7 @@ import { forgetRoles } from "../skills/role-memory";
 import { pickAnyPlayer } from "../core/player-ref";
 import {
   activeContract,
+  firstTeamPlayers,
   groupOf,
   playersOf,
   pushNarrative,
@@ -38,6 +41,12 @@ import {
 export const SEVERANCE_RATE = 0.5;
 /** 위약금이 아무리 커도 이 주 수를 넘겨 세지 않는다 — 5년 계약이 구단을 파산시키지 않게 */
 export const SEVERANCE_WEEKS_CAP = 104;
+
+/**
+ * 핵심 자원이 방출됐을 때 남은 1군이 잃는 사기 — 폼으로는 닷새치 회귀에 해당한다.
+ * 흔적이지 처벌이 아니다 (transfer.md §2).
+ */
+export const DEPARTURE_SQUAD_MORALE = -3;
 
 /** 잔여 계약에 걸린 위약금 */
 export function severanceOf(state: GameState, playerId: string): number {
@@ -149,13 +158,28 @@ export function releasePlayer(state: GameState, input: { playerId: string }): Sk
   const wasCaptain = player.isCaptain;
   toFreeAgency(state, player, RELEASE_NOTE);
 
+  /**
+   * **회견이 열릴 만한 자원이었는지가 사기의 문이기도 하다** — 회견을 여는 조건과
+   * 같은 자를 쓴다. 백업 정리에도 라커룸이 상하면 정리 자체가 벌이 된다
+   * (transfer.md §2). 회견 판정은 무소속이 된 **뒤에** 해야 남은 스쿼드와 견준다.
+   */
+  const press = buildDeparturePress(state, { playerId: player.id, severance, wasCaptain });
+  if (press) {
+    openPress(state, press);
+    // 남은 1군만 — 방출된 당사자는 이미 무소속이라 자연히 빠진다
+    for (const mate of firstTeamPlayers(state, state.userTeamId)) {
+      mate.state.form = clampForm(mate.state.form + moraleToForm(DEPARTURE_SQUAD_MORALE));
+    }
+  }
+
   pushNarrative(state, `${player.name} 계약 해지`, wasCaptain ? 5 : 4);
   return {
     ok: true,
     message:
       `${player.name}과(와) 계약을 해지했습니다 — 위약금 ${formatMoney(severance)}.` +
       " 무소속이 됐습니다 — 다른 구단이 데려갈 수 있습니다." +
-      (wasCaptain ? " 주장이 떠났습니다 — 새 주장을 지명하세요." : ""),
+      (wasCaptain ? " 주장이 떠났습니다 — 새 주장을 지명하세요." : "") +
+      (press ? ` 기자회견이 열렸습니다. 남은 1군 사기 ${DEPARTURE_SQUAD_MORALE}.` : ""),
   };
 }
 

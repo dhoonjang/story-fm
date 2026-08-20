@@ -250,7 +250,7 @@ const BIG_FEE = 25_000_000;
  * 핵심 자원의 경계 — 스쿼드에서 그보다 나은 선수가 이만큼 있으면 핵심이 아니다.
  * 선발 열하나에 로테이션 몇을 더한 수다.
  */
-const SQUAD_CORE_SIZE = 14;
+export const SQUAD_CORE_SIZE = 14;
 
 /**
  * 이적 회견 — **큰 이동에만** 붙는다.
@@ -267,10 +267,7 @@ export function buildTransferPress(
    * 우리 명단에 없으므로 "명단 상위 14명"으로 물으면 팔린 순간 아무도 핵심이 아니다.
    * 대신 우리 스쿼드에서 그보다 나은 선수가 몇인지를 센다.
    */
-  const better = playersOf(state, state.userTeamId).filter(
-    (p) => p.id !== player.id && p.attributes.overall > player.attributes.overall,
-  ).length;
-  if (better >= SQUAD_CORE_SIZE && input.fee < BIG_FEE) return null;
+  if (betterThanInSquad(state, player) >= SQUAD_CORE_SIZE && input.fee < BIG_FEE) return null;
 
   const pos = naturalPositionOf(player).position;
   const fee = input.fee > 0 ? ` · 이적료 ${formatMoney(input.fee)}` : " · 이적료 없음";
@@ -312,6 +309,51 @@ export function buildTransferPress(
       `${player.name} ${input.kind === "in" ? "영입" : "매각"}` +
       (input.fee > 0 ? ` · ${formatMoney(input.fee)}` : ""),
     facts,
+    status: "pending",
+    weight: 2,
+  };
+}
+
+/**
+ * 우리 스쿼드에서 그보다 나은 선수가 몇인가 — **명단 순위가 아니라 스쿼드 대비다.**
+ * 나간 선수는 이미 우리 명단에 없으므로 "상위 14명 안"으로 물으면 떠난 순간
+ * 아무도 핵심이 아니다 (people.md §4).
+ */
+function betterThanInSquad(state: GameState, player: GamePlayer): number {
+  return playersOf(state, state.userTeamId).filter(
+    (p) => p.id !== player.id && p.attributes.overall > player.attributes.overall,
+  ).length;
+}
+
+/**
+ * 방출 회견 — **주장이었거나 핵심 자원이었을 때만.**
+ * 백업 정리까지 회견이 붙으면 회견이 흔해져 무게를 잃는다 (transfer.md §2).
+ */
+export function buildDeparturePress(
+  state: GameState,
+  input: { playerId: string; severance: number; wasCaptain: boolean },
+): PressConference | null {
+  const player = state.players.find((p) => p.id === input.playerId);
+  if (!player) return null;
+  if (!input.wasCaptain && betterThanInSquad(state, player) >= SQUAD_CORE_SIZE) return null;
+
+  const pos = naturalPositionOf(player).position;
+  const severance =
+    input.severance > 0 ? ` · 위약금 ${formatMoney(input.severance)}` : " · 위약금 없음";
+  return {
+    id: `press-release-${player.id}-${state.date}`,
+    date: state.date,
+    trigger: "transfer",
+    reporterId: reporterFor(state, "transfer"),
+    context: `${player.name} 계약 해지`,
+    facts: [
+      {
+        kind: "departure",
+        text: `${player.name} 계약 해지 (${pos})${severance}`,
+        about: player.id,
+        sharp: true,
+      },
+    ],
     status: "pending",
     weight: 2,
   };
