@@ -1572,9 +1572,10 @@ function shiftFactor(player: Player | null): number {
 
 /**
  * 경기 중 전술 변경이 치르는 적응도 대가의 비율 — 훈련장에서 바꿀 때의 몇 배인가.
- * ⚠️ 밸런스 값.
+ * ⚠️ 밸런스 값. AI 벤치가 판을 갈아 깔 때의 대가도 여기서 파생한다
+ * (`match-flow`의 `AI_SHAPE_FAMILIARITY_COST`) — 두 벤치가 다른 값을 치르지 않는다.
  */
-const IN_MATCH_FAMILIARITY_LOSS = 0.25;
+export const IN_MATCH_FAMILIARITY_LOSS = 0.25;
 
 /**
  * 팀 수준의 변화량을 배치된 선수들에게 나눠 얹는다 — **두 가지가 갈린다**.

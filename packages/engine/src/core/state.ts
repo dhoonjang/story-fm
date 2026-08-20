@@ -437,6 +437,27 @@ export interface PendingMatch {
    * pendingMatch와 함께 사라지므로 되돌릴 것도 없다.
    */
   aiTactics?: import("@story-fm/domain").TacticsSpec;
+  /**
+   * **상대가 경기 중 갈아 깐 판의 모양** — 이 경기에만 유효하다 (match.md §2).
+   *
+   * 저장된 배치(`state.tactics`)는 건드리지 않는다. 여기 이름 하나만 남기고
+   * 좌표는 패킷을 세울 때마다 다시 앉히므로(`reseatOnAiShape`), 교체로 사람이
+   * 바뀌어도 판은 갈아 깐 그 모양 그대로다. 되돌릴 자리가 필요 없는 이유이기도
+   * 하다 — pendingMatch와 함께 사라진다. 옛 세이브엔 없다 (optional).
+   */
+  aiShape?: {
+    formation: import("@story-fm/domain").Formation;
+    /** 어느 쪽으로 던진 판인가 — 경기당 한 번이라 이 값이 서면 다시 묻지 않는다 */
+    intent: "chase" | "hold";
+  };
+  /**
+   * **상대 벤치가 마지막으로 판단한 분.**
+   *
+   * 짧게 부른 구간(`maxMinutes`)이 판단 자리를 여는 간격을 여기서 잰다
+   * (`AI_BRIEF_GAP`). 구간 횟수로 세면 감독이 말을 걸수록 상대가 빨라지거나
+   * 얼어붙는다. 옛 세이브엔 없다 (optional).
+   */
+  aiDecidedAt?: number;
 }
 
 export interface MatchScriptSegment {
@@ -1863,6 +1884,51 @@ export function pickFormation(
     }
   }
   return best;
+}
+
+/**
+ * **이 선수들이 가장 잘 서는 모양** — 후보 중에서 고른다 (`pickFormation`과 같은 잣대).
+ *
+ * 경기 중 상대 벤치가 판을 갈아 깔 때 부른다(match.md §2). 어느 프리셋인지는
+ * 구간 시뮬이 정할 수 없다 — 센터백이 둘뿐인 팀을 백3에 세우지 않으려면 명단과
+ * 적응도를 봐야 하고, 그건 코어만 안다.
+ */
+export function bestShapeFor(
+  players: GamePlayer[],
+  candidates: readonly Formation[],
+): Formation | null {
+  const fit = memoFit();
+  let best: Formation | null = null;
+  let bestScore = -Infinity;
+  for (const formation of candidates) {
+    const score = shapeStrength(players, formation, fit);
+    if (score > bestScore) {
+      bestScore = score;
+      best = formation;
+    }
+  }
+  return best;
+}
+
+/** 그 모양의 한 자리 — 누가 어느 좌표에 서는가 */
+export interface ShapeSeat {
+  playerId: string;
+  position: string;
+  point: import("@story-fm/domain").BoardPoint;
+}
+
+/**
+ * 프리셋 좌표에 이 선수들을 앉힌다 — **라인업을 짜는 것과 같은 잣대**(`fillSlots`).
+ *
+ * 인원이 열한 명보다 적으면(퇴장) 앞선 자리부터 채우고 남는 자리는 비운다.
+ * 좌표가 원본이고 모양 이름은 그 파생이다 (`shapeOf`).
+ */
+export function seatOnShape(players: GamePlayer[], formation: Formation): ShapeSeat[] {
+  const slots = FORMATION_SLOTS[formation];
+  const layout = FORMATION_LAYOUTS[formation];
+  return fillSlots(players, slots, memoFit()).flatMap((player, index) =>
+    player ? [{ playerId: player.id, position: slots[index]!, point: layout[index]! }] : [],
+  );
 }
 
 /** 지정 선발 가산이 붙는 최소 적응도 — "그 자리를 볼 수는 있다"의 문턱.
