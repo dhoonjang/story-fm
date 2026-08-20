@@ -14,8 +14,10 @@ import type {
   HistoryDigest,
   Injury,
   LeagueFinalTable,
+  Dismissal,
   Manager,
   ManagerAttributes,
+  ManagerOffer,
   MatchRecord,
   MatchSide,
   NarrativeNote,
@@ -588,10 +590,16 @@ export interface GameState {
    */
   aiPlannedThrough?: string;
   /**
-   * **경질됐다** — 있으면 감독은 더 이상 이 구단의 사람이 아니다.
-   * 시계는 여기서 멈춘다 (`advanceTime`). 옛 세이브엔 없다.
+   * **경질됐다** — 있으면 감독은 더 이상 이 구단의 사람이 아니다. 시계는 그대로
+   * 흐르고(무직), 새 자리에 부임하면 지워진다 (career.md §5.1). 옛 세이브엔 없다.
    */
-  dismissal?: { on: string; season: number; teamId: string; reason: string };
+  dismissal?: Dismissal;
+  /**
+   * **감독직 제안** — 공석이 된 구단이 무직 감독을 부른 기록 (career.md §5.1).
+   * 만료·수락한 것도 남는다 — 부르지 않은 구단이 다시 부르지 않게 하는 근거다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  managerOffers?: ManagerOffer[];
   /**
    * **아직 GM이 읽지 않은 화면 조작** — 전술판·명단·역할을 직접 만진 것.
    *
@@ -831,6 +839,18 @@ export function reservePlayers(state: GameState, teamId: string): GamePlayer[] {
 
 export function userPlayers(state: GameState): GamePlayer[] {
   return playersOf(state, state.userTeamId);
+}
+
+/**
+ * **감독이 지금 맡고 있는 팀** — 경질돼 무직이면 없다 (career.md §5.1).
+ *
+ * `userTeamId`는 경질된 뒤에도 옛 구단을 가리킨다. 그 구단의 선수단과 장부는
+ * 그대로 돌아야 하기 때문이다 — 세계가 감독을 따라 사라지지는 않는다. 그래서
+ * **감독에게 무언가를 적립하는 자리**(트로피·시즌 기록·평판)는 `userTeamId`가
+ * 아니라 이것을 물어야 한다. 안 그러면 잘린 뒤 옛 팀이 든 컵이 감독의 것이 된다.
+ */
+export function managedTeamId(state: GameState): string | null {
+  return state.dismissal ? null : state.userTeamId;
 }
 
 export function playerById(state: GameState, id: string): GamePlayer | null {
