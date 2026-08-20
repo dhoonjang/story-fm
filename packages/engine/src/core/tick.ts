@@ -40,6 +40,8 @@ import {
   payWeeklyWages,
   runMonthlyFinance,
 } from "../club/finance";
+// 핵심 자원의 경계는 회견이 쥔다 — 같은 자를 두 곳에 적으면 한쪽만 움직인다
+import { SQUAD_CORE_SIZE } from "../club/press";
 import {
   TRAINING_INJURY_PER_SESSION,
   easeProneness,
@@ -195,6 +197,15 @@ function resolveScouting(state: GameState, digest: string[]): void {
  * 하루 뒤에 처리해도 결과가 같다. 그것들은 digest로 쌓여 **그 구간이 끝난 뒤 한
  * 번에** 보고된다. 멈춰야 하는 것은 오늘이 지나면 기회 자체가 없어지는 일뿐이다.
  */
+/**
+ * **2군에 내려둔 채 방치할 수 있는 기간** — 이 날수를 그대로 두면 불만이 걸린다
+ * (→ docs/data/people.md §5).
+ *
+ * 짧으면 로테이션이 곧 반란이 되고 길면 강등이 지금처럼 **비용 0인 손잡이**로 남는다.
+ * 2주 강등은 대가 없이 되돌릴 수 있고 한 달을 두면 값을 치른다는 폭이다.
+ */
+export const DEMOTION_PATIENCE_DAYS = 21;
+
 function dailyTick(
   state: GameState,
   digest: string[],
@@ -393,6 +404,47 @@ function dailyTick(
       const apps = seasonStatOf(state, gripe.id)?.apps ?? 0;
       digest.push(`${gripe.name} 출전 기회 불만 — 시즌 출전 ${apps}경기, 비선발`);
       pushNarrative(state, `${gripe.name} 출전 불만`, 3);
+    }
+  }
+
+  /**
+   * 2군 방치 불만 — **추첨이 없다** (→ docs/data/people.md §5). 문턱을 넘으면 걸리므로
+   * 감독이 날짜를 셀 수 있고, 방치의 대가가 확률이 아니라 시간의 결과가 된다.
+   *
+   * 개막일 문을 걸지 않는 이유: 벤치 불만은 "아직 뛸 경기가 없다"가 성립하지만,
+   * 프리시즌에 2군으로 내려 21일을 둔 것은 개막 뒤와 같은 사실이다.
+   */
+  if (dow === 1) {
+    const neglected = players.filter((p) => {
+      if (squadLevelOf(p) !== "reserve") return false;
+      const since = p.state.demotedOn;
+      if (!since || diffDays(since, state.date) < DEMOTION_PATIENCE_DAYS) return false;
+      if (state.issues.some((i) => i.gamePlayerId === p.id)) return false;
+      const better = players.filter(
+        (o) => o.id !== p.id && o.attributes.overall > p.attributes.overall,
+      ).length;
+      return better < SQUAD_CORE_SIZE;
+    });
+    if (neglected.length > 0) {
+      for (const p of neglected) {
+        // `count`는 없다 — 기간은 `demotedOn`이 갖는다
+        state.issues.push({
+          gamePlayerId: p.id,
+          kind: "unhappy",
+          reason: "demotion",
+          since: state.date,
+        });
+      }
+      /** 여럿이 한날 문턱을 넘으면 전부 걸리되, 줄은 하나다 — 이름이 화면을 채우지 않게 */
+      const longest = Math.max(
+        ...neglected.map((p) => diffDays(p.state.demotedOn ?? state.date, state.date)),
+      );
+      const line =
+        neglected.length === 1
+          ? `${neglected[0]!.name} 2군 방치 불만 — 2군 ${longest}일째`
+          : `2군 방치 불만 ${neglected.length}명 — 최장 ${longest}일째`;
+      digest.push(line);
+      pushNarrative(state, line, 3);
     }
   }
 
