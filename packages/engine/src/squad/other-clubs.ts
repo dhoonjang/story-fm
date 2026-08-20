@@ -1,6 +1,6 @@
 import { applyFamiliarityGain, clampCondition } from "@story-fm/domain";
 import { dailyRecovery, type RecoveryKind } from "@story-fm/sim";
-import type { GameState } from "../core/state";
+import { managedTeamId, type GameState } from "../core/state";
 import { addDays } from "../core/dates";
 import { isClubTeam } from "../data/team-catalog";
 import { matchesOn } from "../competition/calendar";
@@ -46,8 +46,10 @@ function recoveryKindOf(state: GameState, teamId: string): RecoveryKind {
 /** AI 구단의 하루 — 회복과 폼 회귀 (감독 팀은 `dailyTick`이 같은 눈금으로 처리한다) */
 export function tickOtherClubs(state: GameState): void {
   const kinds = new Map<string, RecoveryKind>();
+  // 감독이 잘려 무직이면 옛 구단도 여기서 돈다 — `managedTeamId`가 null이다
+  const managed = managedTeamId(state);
   for (const player of state.players) {
-    if (player.teamId === state.userTeamId) continue;
+    if (player.teamId === managed) continue;
     if (!isClubTeam(player.teamId)) continue; // 무소속·시장 전용 리그는 경기가 없다
     let kind = kinds.get(player.teamId);
     if (kind === undefined) {
@@ -61,8 +63,9 @@ export function tickOtherClubs(state: GameState): void {
 
 /** 하루치 전술 적응 — AI 클럽만, 천장까지 */
 export function driftFamiliarity(state: GameState): void {
+  const managed = managedTeamId(state);
   for (const tactics of state.tactics) {
-    if (tactics.teamId === state.userTeamId) continue;
+    if (tactics.teamId === managed) continue;
     if (!isClubTeam(tactics.teamId)) continue;
     for (const assignment of tactics.assignments) {
       if (assignment.familiarity >= FAMILIARITY_DRIFT_CAP) continue;
