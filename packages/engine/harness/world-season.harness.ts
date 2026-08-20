@@ -91,6 +91,29 @@ function seasonReadings(state: GameState): Readings<typeof WORLD_SEASON> {
   const at = (i: number) => table[i]?.points ?? 0;
   const usIndex = table.findIndex((r) => r.teamId === state.userTeamId);
   const bookings = state.bookings.filter((b) => played.some((m) => m.id === b.matchId));
+  /**
+   * **어느 시뮬레이터가 그 경기를 굴렸는가로 카드를 가른다** (match.md §7).
+   *
+   * 감독의 경기만 구간 시뮬을 지나고 나머지는 간이 시뮬이다. 두 눈금이 갈리면
+   * 여기가 벌어진다 — 그게 이 갈래를 찍는 이유다. ⚠️ **판정은 여기서 하지
+   * 않는다**: 감독의 리그 경기는 38판뿐이라 카드가 130장이고 상대 잡음이 9%다.
+   * 강도를 한쪽만 곱하는 정도(10~20%)가 그 잡음에 묻히므로 밴드로 걸면 시드마다
+   * 빨갛거나 초록이다. 표본을 키워 판정하는 자리는 `injury-rate` 하네스다.
+   *
+   * 부상은 여기서 아예 못 가른다 — `Injury`에는 경기 id가 없고, 있어도 감독 팀의
+   * 한 시즌 부상은 서너 건이라 잴 것이 없다.
+   */
+  const ourMatchIds = new Set(
+    played
+      .filter((m) => m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId)
+      .map((m) => m.id),
+  );
+  const cardsIn = (mine: boolean, card: "yellow" | "red") =>
+    bookings.filter((b) => b.card === card && ourMatchIds.has(b.matchId) === mine).length;
+  const ourGames = ourMatchIds.size;
+  const otherGames = played.length - ourGames;
+  const ourYellows = ratio(cardsIn(true, "yellow"), ourGames);
+  const otherYellows = ratio(cardsIn(false, "yellow"), otherGames);
 
   const homeWin = played.filter((m) => m.result!.homeGoals > m.result!.awayGoals).length;
   const draw = played.filter((m) => m.result!.homeGoals === m.result!.awayGoals).length;
@@ -132,6 +155,11 @@ function seasonReadings(state: GameState): Readings<typeof WORLD_SEASON> {
     "승점 최하위": at(table.length - 1),
     "옐로/경기": ratio(bookings.filter((b) => b.card === "yellow").length, n),
     "레드/경기": ratio(bookings.filter((b) => b.card === "red").length, n),
+    "옐로/경기 (감독 경기 · 구간 시뮬)": ourYellows,
+    "옐로/경기 (타 팀 경기 · 간이 시뮬)": otherYellows,
+    "옐로 — 감독/타 팀": ourYellows / Math.max(1e-9, otherYellows),
+    "레드/경기 (감독 경기 · 구간 시뮬)": ratio(cardsIn(true, "red"), ourGames),
+    "레드/경기 (타 팀 경기 · 간이 시뮬)": ratio(cardsIn(false, "red"), otherGames),
     "감독 팀 순위": usIndex + 1,
     "감독 팀 승점": table[usIndex]?.points ?? 0,
     "리그 경기 수": played.length,
