@@ -1,4 +1,4 @@
-import type { GamePlayer, PitchClaim, PitchClaimKind } from "@story-fm/domain";
+import type { GamePlayer, NegotiationKind, PitchClaim, PitchClaimKind } from "@story-fm/domain";
 import { ageOf, naturalPositionOf } from "@story-fm/domain";
 import { diffDays, windowOpenOn } from "../competition/calendar";
 import { claimLabel, evaluatePitch } from "./persuasion";
@@ -16,6 +16,7 @@ import {
   financeOf,
   playerById,
   playersOf,
+  squadShortfall,
   teamName,
   weeklyWagesOf,
   type GameState,
@@ -286,11 +287,12 @@ export interface DealTerms {
   /** 계약 연수 */
   years: number;
   /**
-   * 영입·매각·재계약 — 기본은 영입.
+   * 영입·매각·재계약·해지 — 기본은 영입.
    * 매각이면 관문이 뒤집히고(**사는 쪽이 낼까** + **선수가 떠날까**),
    * 재계약은 관문이 하나다 (**선수가 남을까**) — 이적료가 없다.
+   * 해지도 관문이 하나이고(**선수가 합의해 줄까**) `fee`가 제시 **정산금**이다.
    */
-  kind?: "buy" | "sell" | "renew" | "loan" | "loan_out";
+  kind?: NegotiationKind;
   /**
    * 매각 상대 구단 — 주면 **그 협회의 이적창**으로 판정한다.
    * 사우디·MLS는 우리보다 늦게 닫히므로 이 값이 없으면 판정이 틀린다.
@@ -398,10 +400,23 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
         `${buyerTeamId ? transferWindowLabel(state, buyerTeamId) : "이적시장"}이 닫혀 있습니다`,
       );
     }
-  } else if (terms.kind === "renew") {
-    // 재계약은 이적창과 무관하다 — 상대가 선수 본인이기 때문이다
+  } else if (terms.kind === "renew" || terms.kind === "release") {
+    // 재계약·해지는 이적창과 무관하다 — 상대가 선수 본인이기 때문이다
     if (player.teamId !== state.userTeamId) {
       blockers.push(`${player.name}은(는) 우리 선수가 아닙니다`);
+    }
+    if (terms.kind === "release") {
+      // 계약이 없으면 해지할 것이 없다 — 그날로 끝난 계약은 이미 무소속으로 간다
+      if (!activeContract(state, player.id)) {
+        blockers.push(`${player.name}은(는) 해지할 계약이 없습니다`);
+      }
+      // 나가는 문은 다 같은 하한을 지킨다 — 다 내보내고 경기를 못 뛰는 일이 없게
+      const short = squadShortfall(state, state.userTeamId, player);
+      if (short) blockers.push(`우리 ${short.replace("팔 수", "해지할 수")}`);
+      // 정산금은 합의한 날 즉시 나간다 — 낼 수 없는 값으로 흥정을 시작하지 않는다
+      if (terms.fee > financeOf(state, state.userTeamId).balance) {
+        blockers.push(`정산금 ${formatMoney(terms.fee)}을 감당할 잔고가 없습니다`);
+      }
     }
   } else {
     if (player.teamId === state.userTeamId) {
@@ -458,6 +473,9 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
   }
   if (terms.kind === "renew") {
     return renewOdds(state, terms, player, blockers, knowledge);
+  }
+  if (terms.kind === "release") {
+    return releaseOdds(state, terms, player, blockers, knowledge);
   }
 
   /**
@@ -910,6 +928,81 @@ function sellOdds(
   };
 }
 
+// ── 계약 해지 — 두 길의 값이 잔여 급여 하나에서 나온다 ────
+
+/**
+ * 합의 해지의 기대 정산금이 무는 잔여 주급의 비율 — 실제 상호 합의 해지의 정산이
+ * 대체로 잔여 급여의 절반 언저리에서 이뤄진다.
+ */
+export const SEVERANCE_RATE = 0.5;
+/** 잔여가 아무리 길어도 이 주 수를 넘겨 세지 않는다 — 5년 계약이 구단을 파산시키지 않게 */
+export const SEVERANCE_WEEKS_CAP = 104;
+
+/** 잔여 계약에 걸린 급여 — 합의 해지와 일방 해지의 값이 함께 여기서 나온다 */
+function remainingWagesOf(state: GameState, playerId: string): number {
+  const contract = activeContract(state, playerId);
+  if (!contract) return 0;
+  const weeks = Math.min(
+    SEVERANCE_WEEKS_CAP,
+    Math.max(0, diffDays(state.date, contract.until) / 7),
+  );
+  return contract.weeklyWage * weeks;
+}
+
+/**
+ * **합의 해지의 기대 정산금** — 해지 협상의 앵커다.
+ *
+ * 잔여가 길수록 이 값이 오르고 동시에 선수가 합의해 줄 확률은 내려간다
+ * (`releaseOdds`의 잔여 계약 항). 두 방향이 함께 걸려야 잘못 준 계약의 대가가
+ * 정해진 수수료가 아니라 흥정해야 하는 값이 된다 (transfer.md §3).
+ */
+export function severanceOf(state: GameState, playerId: string): number {
+  return Math.round(remainingWagesOf(state, playerId) * SEVERANCE_RATE);
+}
+
+/**
+ * **일방 해지의 값 — 잔여 급여 전액.**
+ *
+ * 감독이 합의 없이 그 자리에서 끊을 때 무는 값이라 해지 협상의 바깥값(BATNA)이고,
+ * 그래서 선수가 역제안으로 부를 수 있는 상한도 이 값이다: 합의가 깨져도 그가 받을
+ * 수 있는 가장 좋은 결말이 전액이므로 그 위는 협상이 아니라 협상을 없애는 값이다
+ * (transfer.md §1·§11).
+ */
+export function unilateralSeveranceOf(state: GameState, playerId: string): number {
+  return Math.round(remainingWagesOf(state, playerId));
+}
+
+/** 관심이 많다고 보는 기준 — 곧바로 주전으로 쓸 구단이 이만큼이면 갈 곳이 있다 */
+export const RELEASE_SUITORS_MANY = 3;
+/** 이 나이부터는 다음 자리를 장담할 수 없어 남은 계약을 지키려 한다 */
+export const RELEASE_AGE_HOLD = 32;
+/** 이 나이까지는 커리어가 길어 뛸 자리를 찾아 나서는 편이 낫다 */
+export const RELEASE_AGE_MOVE = 25;
+
+/**
+ * 지금 그를 데려가면 **곧바로 주전으로 쓸** 구단 수 — 해지 판정에서 "다른 구단의
+ * 관심"의 자다.
+ *
+ * 갈 곳이 많은 선수는 정산금을 깎아서라도 나가고, 없는 선수는 남은 계약을 지킨다.
+ * 세계 전체에 `betterAtPosition`을 물으므로 기량과 자리가 한 값으로 접힌다 —
+ * 자리마다 색인을 다시 세우지 않도록 `squadDepthOf` 한 벌로 훑는다.
+ *
+ * **선수가 없는 팀은 세지 않는다** — 그 자리에 아무도 없어 "더 나은 선수 0명"이
+ * 되지만, 스쿼드가 빈 팀은 데려갈 구단이 아니라 데이터의 빈자리다.
+ */
+export function suitorCountOf(state: GameState, player: GamePlayer): number {
+  const depth = squadDepthOf(state);
+  const squadSize = new Map<string, number>();
+  for (const p of state.players) squadSize.set(p.teamId, (squadSize.get(p.teamId) ?? 0) + 1);
+  let count = 0;
+  for (const team of state.teams) {
+    if (team.id === state.userTeamId || !isClubTeam(team.id)) continue;
+    if ((squadSize.get(team.id) ?? 0) === 0) continue;
+    if (depth.betterThan(team.id, player) === 0) count += 1;
+  }
+  return count;
+}
+
 /**
  * 재계약 때 선수가 원하는 주급 — 이적 때보다 기준이 높다.
  *
@@ -1039,6 +1132,137 @@ function renewOdds(
     marketValue: marketValueOf(state, player),
     askingPrice: 0, // 재계약에 이적료는 없다
     wageExpectation: expectation,
+    knowledge,
+    fuzzy: false,
+    factors,
+    blockers,
+  };
+}
+
+/**
+ * 해지 확률 — 관문이 하나다. **선수가 합의해 줄까.**
+ *
+ * 기준은 제시 정산금이 기대치(`severanceOf`)의 몇 %인가이고, 그 위에 **버틸 이유와
+ * 나갈 이유**가 붙는다. 재계약과 관문의 수는 같지만 **부호가 반대인 항이 있다** —
+ * 자리가 막혀 있고 라커룸이 불편할수록 재계약은 어려워지고 해지는 쉬워진다.
+ *
+ * 합의가 안 돼도 감독에겐 전액을 물고 끊는 길이 남아 있다(`unilateralSeveranceOf`) —
+ * 이 확률이 낮다는 것은 "해지할 수 없다"가 아니라 "싸게는 못 끊는다"는 뜻이다.
+ */
+function releaseOdds(
+  state: GameState,
+  terms: DealTerms,
+  player: GamePlayer,
+  blockers: string[],
+  knowledge: Knowledge,
+): DealOdds {
+  const expectation = severanceOf(state, player.id);
+  const contributions: Array<{ score: number; label: string; why: string }> = [];
+
+  const ratio = expectation > 0 ? terms.fee / expectation : 1;
+  contributions.push({
+    score: (ratio - 1) * 6,
+    label: "제시 정산금",
+    why: `정산 기대는 ${formatMoney(expectation)} (제시액은 그 ${Math.round(ratio * 100)}%)`,
+  });
+
+  const yearsLeft = contractYearsLeft(state, player.id);
+  contributions.push({
+    score: -(yearsLeft - 1) * 0.55,
+    label: "잔여 계약",
+    why:
+      yearsLeft >= 1
+        ? `계약이 ${yearsLeft.toFixed(1)}년 남았다 — 버틸수록 지켜야 할 돈이 크다`
+        : `계약이 ${Math.max(0, Math.round(yearsLeft * 12))}개월 남았다 — 붙잡을 것이 얼마 없다`,
+  });
+
+  const age = ageOf(player.birthdate, state.date);
+  if (age >= RELEASE_AGE_HOLD) {
+    contributions.push({
+      score: -0.5,
+      label: "나이",
+      why: `${age}세 — 다음 자리를 장담할 수 없어 남은 계약을 지키려 한다`,
+    });
+  } else if (age <= RELEASE_AGE_MOVE) {
+    contributions.push({
+      score: 0.4,
+      label: "나이",
+      why: `${age}세 — 아직 커리어가 길다, 뛸 자리를 찾는 편이 낫다`,
+    });
+  }
+
+  const suitors = suitorCountOf(state, player);
+  if (suitors >= RELEASE_SUITORS_MANY) {
+    contributions.push({
+      score: 0.6,
+      label: "다른 구단의 관심",
+      why: `그를 곧바로 주전으로 쓸 구단이 ${suitors}곳이다 — 나가도 갈 곳이 있다`,
+    });
+  } else if (suitors === 0) {
+    contributions.push({
+      score: -0.6,
+      label: "다른 구단의 관심",
+      why: "지금 그를 주전으로 쓸 구단이 없다 — 나가면 갈 곳이 없다",
+    });
+  }
+
+  // 재계약과 부호가 반대다 — 여기 남아 뛸 수 있는 선수는 정산금을 받을 이유가 없다
+  const blockedBy = betterAtPosition(state, state.userTeamId, player);
+  if (blockedBy >= 2) {
+    contributions.push({
+      score: 0.5,
+      label: "출전 기회",
+      why: `우리 그 자리에 더 나은 선수가 ${blockedBy}명 있다 — 남아도 뛰지 못한다`,
+    });
+  } else if (blockedBy === 0) {
+    contributions.push({
+      score: -0.5,
+      label: "출전 기회",
+      why: "이 자리의 주전이다 — 떠날 이유가 없다",
+    });
+  }
+
+  if (hasIssue(state, player.id)) {
+    contributions.push({
+      score: 0.5,
+      label: "선수의 마음",
+      why: "라커룸에 불만이 쌓여 있다 — 정리하고 나가는 쪽으로 기운다",
+    });
+  }
+
+  const negotiation = state.manager.attributes.negotiation;
+  if (Math.abs(negotiation - 50) >= 5) {
+    contributions.push({
+      score: (negotiation - 50) / 100,
+      label: "감독 협상력",
+      why: `협상 ${negotiation}`,
+    });
+  }
+
+  const sum = (skip?: number) =>
+    contributions.reduce((acc, c, i) => acc + (i === skip ? 0 : c.score), MEETS_ASKING_SCORE);
+  // 관문이 하나이므로 확률은 시그모이드 하나다 (재계약과 같다)
+  const raw = sigmoid(sum()) * 100;
+  const factors: DealFactor[] = [
+    {
+      label: "기준",
+      delta: Math.round(sigmoid(MEETS_ASKING_SCORE) * 100),
+      why: "기대 정산금을 그대로 맞췄을 때",
+    },
+    ...contributions.map((c, i) => ({
+      label: c.label,
+      delta: Math.round(raw - sigmoid(sum(i)) * 100),
+      why: c.why,
+    })),
+  ];
+
+  return {
+    latitude: 0,
+    probability: Math.max(0, Math.min(100, Math.round(raw))),
+    marketValue: marketValueOf(state, player),
+    // 이 갈래에서 "요구액"은 선수가 기대하는 정산금이다 — 주급은 흥정 대상이 아니다
+    askingPrice: expectation,
+    wageExpectation: 0,
     knowledge,
     fuzzy: false,
     factors,

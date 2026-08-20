@@ -11,6 +11,7 @@ import {
   recallLoan,
   releasePlayer,
   severanceOf,
+  unilateralSeveranceOf,
   userPlayers,
   userTactics,
   weeklyWagesOf,
@@ -30,7 +31,7 @@ const spare = (state: GameState) => {
   return squad.find((p) => p.positions[0]?.position !== "GK") ?? squad[0]!;
 };
 
-describe("방출 — 돈으로 자리를 비운다", () => {
+describe("일방 해지 — 전액을 물고 자리를 비운다", () => {
   it("위약금을 물고 계약이 끝난다 — 주급 총액에서 사라진다", () => {
     const state = createTestGame(11);
     const target = spare(state);
@@ -42,6 +43,36 @@ describe("방출 — 돈으로 자리를 비운다", () => {
     expect(res.ok, res.message).toBe(true);
     expect(activeContract(state, target.id)?.teamId).not.toBe(state.userTeamId);
     expect(weeklyWagesOf(state, state.userTeamId)).toBeLessThan(wagesBefore);
+  });
+
+  /**
+   * **일방 해지의 값이 협상의 바깥값이다** (transfer.md §2·§11). 합의 앵커와 같은
+   * 값을 물면 흥정할 이유가 사라지고, 선수가 무엇을 받아들일 까닭도 없어진다.
+   */
+  it("협상 없이 끊으면 잔여 급여 전액을 문다 — 합의 앵커의 두 배", () => {
+    const state = createTestGame(11);
+    const target = spare(state);
+    const anchor = severanceOf(state, target.id);
+    const full = unilateralSeveranceOf(state, target.id);
+    expect(full).toBe(Math.round(anchor / SEVERANCE_RATE));
+
+    const balanceBefore = state.finances.find((f) => f.teamId === state.userTeamId)!.balance;
+    expect(releasePlayer(state, { playerId: target.id }).ok).toBe(true);
+    const finance = state.finances.find((f) => f.teamId === state.userTeamId)!;
+    expect(balanceBefore - finance.balance).toBe(full);
+  });
+
+  /** 협상이 정한 값으로도 같은 문을 지난다 — 종착지가 하나여야 원장이 한 벌이다 */
+  it("합의된 정산금이 실려 오면 그 값만 나간다", () => {
+    const state = createTestGame(11);
+    const target = spare(state);
+    const agreed = Math.round(severanceOf(state, target.id) * 0.6);
+    const balanceBefore = state.finances.find((f) => f.teamId === state.userTeamId)!.balance;
+
+    expect(releasePlayer(state, { playerId: target.id, severance: agreed }).ok).toBe(true);
+    const finance = state.finances.find((f) => f.teamId === state.userTeamId)!;
+    expect(balanceBefore - finance.balance).toBe(agreed);
+    expect(finance.ledger.some((e) => e.label.includes("계약 해지 정산금"))).toBe(true);
   });
 
   it("위약금이 원장에 남는다 — PSR까지 간다", () => {
@@ -139,11 +170,11 @@ describe("임대 — 전력을 내주고 성장을 산다", () => {
 });
 
 /**
- * 위약금의 눈금 — **잔여 계약 주급의 절반**, 다만 세는 데 양 끝이 있다.
- * 상한이 없으면 5년 계약 하나가 구단을 파산시키고, 하한이 없으면 이미 끝난 계약이
- * 음수 주 수로 돈을 만든다.
+ * 해지 값의 눈금 — 합의의 앵커는 **잔여 계약 주급의 절반**, 일방 해지는 전액이고,
+ * 세는 데 양 끝이 있다. 상한이 없으면 5년 계약 하나가 구단을 파산시키고, 하한이
+ * 없으면 이미 끝난 계약이 음수 주 수로 돈을 만든다.
  */
-describe("위약금의 양 끝", () => {
+describe("해지 값의 양 끝", () => {
   /** 픽스처는 describe당 하나 — 세 케이스가 같은 선수의 계약 만료일만 옮겨 쓴다 */
   const state = createTestGame(11);
   const target = spare(state);
@@ -170,5 +201,16 @@ describe("위약금의 양 끝", () => {
   it("이미 끝난 계약은 0이다 — 음수 주 수가 돈을 만들지 않는다", () => {
     expect(severanceWith(state.date)).toBe(0);
     expect(severanceWith(addDays(state.date, -700))).toBe(0);
+  });
+
+  it("일방 해지도 같은 양 끝을 쓴다 — 비율만 다르다", () => {
+    contract.until = addDays(state.date, 70);
+    expect(unilateralSeveranceOf(state, target.id)).toBe(contract.weeklyWage * 10);
+    contract.until = addDays(state.date, 7 * SEVERANCE_WEEKS_CAP * 3);
+    expect(unilateralSeveranceOf(state, target.id)).toBe(
+      contract.weeklyWage * SEVERANCE_WEEKS_CAP,
+    );
+    contract.until = addDays(state.date, -700);
+    expect(unilateralSeveranceOf(state, target.id)).toBe(0);
   });
 });
