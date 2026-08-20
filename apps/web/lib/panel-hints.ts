@@ -26,6 +26,7 @@ export type PanelKey = "스쿼드" | "달력" | "재정" | "대회" | "커리어
 export const PANEL_OF: Record<string, PanelKey> = {
   // ── 스쿼드 — 선수단과 판이 바뀐 것 ──
   set_lineup: "스쿼드",
+  set_squad_level: "스쿼드",
   set_tactics: "스쿼드",
   set_player_tactic: "스쿼드",
   set_captain: "스쿼드",

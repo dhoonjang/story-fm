@@ -150,6 +150,10 @@ function ourSlot(state: GameState, slot: LineupSlotInput): LineupSlotInput | str
   return pick.ok ? { ...slot, playerId: pick.player.id } : pick.message;
 }
 
+/** 옮길 것이 없다는 한 문장 — 두 입구가 같은 말을 해야 감독이 같은 답으로 읽는다 */
+const alreadyAtLevel = (player: GamePlayer, level: "first" | "reserve"): string =>
+  `${player.name}은(는) 이미 ${level === "first" ? "1군" : "2군"}입니다`;
+
 /**
  * 1·2군 이동 — 상한은 임의의 숫자가 아니라 **등록 명단 규칙**이다.
  * 만 21세 초과는 25명까지, 그중 홈그로운 8명(= 비홈그로운 17명 상한).
@@ -168,23 +172,36 @@ export function setSquadLevel(
       ok: true,
       // 바뀐 것이 없다는 사실은 **반환값이** 말한다 — 부르는 쪽이 문구를 뒤지지 않게
       unchanged: true,
-      message: `${player.name}은(는) 이미 ${input.level === "first" ? "1군" : "2군"}입니다`,
+      message: alreadyAtLevel(player, input.level),
     };
   }
   if (input.level === "first") {
     const allowed = canRegisterFor(state, player, state.userTeamId);
     if (!allowed.ok) return { ok: false, message: `${player.name}: ${allowed.reason}` };
-    player.squadLevel = "first";
-    pushNarrative(state, `${player.name} 1군 승격`, 2);
-    const reg = squadRegistrationOf(state, state.userTeamId);
-    return {
-      ok: true,
-      message: `${player.name}을(를) 1군으로 승격했습니다 — ${registrationLine(reg)}`,
-    };
+    return { ok: true, message: applySquadLevel(state, player, "first") };
   }
 
   const first = userPlayers(state).filter((p) => squadLevelOf(p) === "first");
   if (first.length <= MATCHDAY_SQUAD) return { ok: false, message: matchdaySquadFloor() };
+  return { ok: true, message: applySquadLevel(state, player, "reserve") };
+}
+
+/**
+ * 층을 실제로 옮긴다 — **검증은 부르는 쪽이 이미 끝냈다.**
+ *
+ * 규칙을 여기서 다시 재지 않는 이유는 **여럿을 한 요청으로 옮길 때**다
+ * (`setSquadLevels`). 스무 명짜리 1군에서 하나를 내리고 하나를 올리는 요청은 전체로
+ * 보면 적법한데, 옮기는 순간마다 혼자 다시 재면 어느 순서로 놓아도 중간에 걸린다 —
+ * 먼저 올리면 명단이 차 있고, 먼저 내리면 하한을 뚫는다. 그래서 잰 뒤에 옮기는 이
+ * 두 걸음을 갈라 둔다.
+ */
+function applySquadLevel(state: GameState, player: GamePlayer, level: "first" | "reserve"): string {
+  if (level === "first") {
+    player.squadLevel = "first";
+    pushNarrative(state, `${player.name} 1군 승격`, 2);
+    const reg = squadRegistrationOf(state, state.userTeamId);
+    return `${player.name}을(를) 1군으로 승격했습니다 — ${registrationLine(reg)}`;
+  }
   player.squadLevel = "reserve";
   const tactics = userTactics(state);
   /**
@@ -209,7 +226,101 @@ export function setSquadLevel(
       : dropped?.role === "bench"
         ? " — 매치데이 벤치에서 함께 빠집니다"
         : "";
-  return { ok: true, message: `${player.name}을(를) 2군으로 이동했습니다${note}` };
+  return `${player.name}을(를) 2군으로 이동했습니다${note}`;
+}
+
+/**
+ * 1·2군 이동 — **여러 명을 한 번에, 배치는 건드리지 않는다.**
+ *
+ * 감독의 "저 선수 2군으로 내려"가 닿는 문이다. 층만 옮기므로 선발 열한 자리를 다시
+ * 적게 하지 않는다 — 배치와 층이 **함께** 정해지는 자리는 전술판과 `set_lineup`의
+ * `squadLevels`가 갖는다 (→ docs/data/team.md §5).
+ *
+ * 규칙은 `setSquadLevel` 한 벌이 갖고, 여기는 **여럿을 한 요청으로 받는 데서 생기는
+ * 것만** 더한다: 누적 검증과 전부-아니면-전무. 한 명씩 재면 남은 한 자리에 둘이 함께
+ * 들어간다고 답하고, 반쯤 적용된 요청은 반려를 읽은 감독의 스쿼드를 이미 바꿔 놓는다.
+ */
+export function setSquadLevels(
+  state: GameState,
+  input: { moves: Array<{ playerId: string; level: "first" | "reserve" }> },
+): SkillResult {
+  if (input.moves.length === 0) return { ok: false, message: "누구를 옮길지 알려주세요" };
+
+  // ── 검증 ───────────────────────────────────────────────
+  // 여기서는 아무것도 바꾸지 않는다. 하나라도 걸리면 상태는 부른 그대로다.
+  const promoting: GamePlayer[] = [];
+  const demoting: GamePlayer[] = [];
+  /** 이미 그 층인 선수 — 옮길 것이 없다는 사실도 감독에게는 답이다 */
+  const already: GamePlayer[] = [];
+  const asked = new Map<string, "first" | "reserve">();
+  for (const move of input.moves) {
+    const pick = pickOurPlayer(state, move.playerId);
+    if (!pick.ok) return pick;
+    const player = pick.player;
+    const before = asked.get(player.id);
+    if (before !== undefined) {
+      // 같은 선수를 양쪽으로 부르는 요청은 어느 쪽을 따라도 감독의 뜻이 아니다
+      if (before !== move.level) {
+        return { ok: false, message: `${player.name}을(를) 1군과 2군 양쪽으로 옮길 수 없습니다` };
+      }
+      continue; // 같은 지시를 두 번 적은 것뿐이다
+    }
+    asked.set(player.id, move.level);
+    if (squadLevelOf(player) === move.level) already.push(player);
+    else (move.level === "first" ? promoting : demoting).push(player);
+  }
+
+  /**
+   * 승격 가능 여부는 **누적으로** 잰다 — 한 명씩 재면 마지막 한 자리를 여럿에게 준다.
+   * 이번에 내리는 선수가 비우는 자리도 함께 셈한다: "하나 내리고 하나 올려"는 명단이
+   * 찬 팀이 가장 흔히 하는 교대다.
+   */
+  if (promoting.length > 0) {
+    const leaving = new Set(demoting.map((p) => p.id));
+    const allowed = canRegisterAllFor(state, promoting, state.userTeamId, leaving);
+    if (!allowed.ok) {
+      return { ok: false, message: `${playerName(state, allowed.playerId)}: ${allowed.reason}` };
+    }
+  }
+  /** 하한도 이번에 오르내리는 인원을 다 셈한 뒤의 1군 수로 잰다 */
+  if (demoting.length > 0) {
+    const firstAfter =
+      userPlayers(state).filter((p) => squadLevelOf(p) === "first").length +
+      promoting.length -
+      demoting.length;
+    if (firstAfter < MATCHDAY_SQUAD) return { ok: false, message: matchdaySquadFloor() };
+  }
+
+  // ── 적용 ───────────────────────────────────────────────
+  // 여기서부터는 실패하지 않는다 — 잰 것은 위에서 다 쟀다 (`applySquadLevel`).
+  // 강등 먼저: 등록 한 줄과 남은 선발 수를 끝난 뒤의 명단으로 적게 된다.
+  const notes = [
+    ...demoting.map((p) => applySquadLevel(state, p, "reserve")),
+    ...promoting.map((p) => applySquadLevel(state, p, "first")),
+    ...already.map((p) => alreadyAtLevel(p, asked.get(p.id)!)),
+  ];
+
+  const items: SkillBriefItem[] = [];
+  if (promoting.length > 0) {
+    items.push(item({ label: "1군 승격", text: briefNames(promoting.map((p) => p.name)) }));
+  }
+  if (demoting.length > 0) {
+    items.push(item({ label: "2군 이동", text: briefNames(demoting.map((p) => p.name)) }));
+  }
+  /**
+   * **판이 열 명이 된 것은 말풍선도 말한다** (→ docs/data/team.md §6). 2군은 배치를
+   * 갖지 않으므로 주전을 내리면 선발이 빈다 — 줄글에만 적으면 칩을 펴 보지 않은
+   * 감독이 모자란 선발로 경기를 맞는다.
+   */
+  const startersNeeded = MATCHDAY_SQUAD - MATCHDAY_BENCH;
+  const starting = userTactics(state).assignments.filter((a) => a.role === "starting").length;
+  if (demoting.length > 0 && starting < startersNeeded) {
+    items.push(item({ label: "선발", text: `${starting}명`, note: "자리가 빕니다" }));
+  }
+  const message = notes.join(" · ");
+  // 아무도 층을 옮기지 않았으면 세울 항목이 없다 — 그 사실은 줄글이 이미 말한다
+  if (items.length === 0) return { ok: true, unchanged: true, message };
+  return { ok: true, message, brief: { head: "1·2군 이동", items } };
 }
 
 /** 1군 인원 하한을 말하는 한 문장 — 두 스킬이 같은 말을 해야 감독이 같은 규칙으로 읽는다 */
