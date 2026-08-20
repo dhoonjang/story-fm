@@ -2,12 +2,14 @@ import { z } from "zod";
 import {
   AchievementSchema,
   BookingSchema,
+  CharacterMemorySchema,
   ContractSchema,
   DeferredScoutSchema,
   FinanceReportSchema,
   GamePlayerSchema,
   GameTeamSchema,
   GrowthEntrySchema,
+  HistoryDigestSchema,
   InjurySchema,
   LeagueFinalTableSchema,
   ManagerSchema,
@@ -92,5 +94,7 @@ export const SaveSchema = z
     // 없을 수 있는 것 — 로드가 채우지 않는다(없는 것이 곧 뜻이다)
     personas: z.array(PersonaSchema).optional(),
     deferredScouts: z.array(DeferredScoutSchema).optional(),
+    historyDigest: HistoryDigestSchema.optional(),
+    characterMemories: z.array(CharacterMemorySchema).optional(),
   })
   .passthrough();

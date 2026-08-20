@@ -42,21 +42,22 @@ pnpm balance finance       # 파일 이름으로 걸러 하나만
 목록의 원본은 `pnpm balance --list`다. 여기 적는 것은 어느 문서가 그 밴드의 근거를
 쥐고 있는지뿐이다.
 
-| 하네스                 | 무엇을 재는가                                       | 근거                        |
-| ---------------------- | --------------------------------------------------- | --------------------------- |
-| `world-season`         | 한 시즌 득점·슈팅 분포 · 승점 곡선 · 카드           | [match](match.md) §7        |
-| `ai-rotation`          | AI 스쿼드 체력 분포 · 로테이션 문턱 발동률          | [match](match.md) §7        |
-| `assist-rate`          | 골에 도움이 붙는 비율                               | [match](match.md) §7        |
-| `segment-shots`        | 구간 시뮬의 경기당 슈팅이 패킷 기대 슈팅과 같은가   | [match](match.md) §1.4      |
-| `injury-rate`          | 경기당 부상 건수 · 성향이 빈도에 닿는 폭            | [match](match.md) §7        |
-| `finance-tier1`        | tier1 한 시즌 장부 손익 · 현금 · 급여 비중 · 수입   | [finance](finance.md) §10.1 |
-| `finance-leagues`      | 리그별 잔고 — 어느 리그도 구조적 적자가 아니다      | [finance](finance.md) §10.3 |
-| `finance-second-tier`  | 리그전을 굴리지 않는 2부의 한 시즌 수지             | [finance](finance.md) §9.5  |
-| `finance-multi-season` | 세 시즌을 굴려도 가라앉는 리그가 없다               | [finance](finance.md) §10.3 |
-| `ai-fitness`           | 한 시즌 뒤 AI 스쿼드 체력 · 출전 분산               | [match](match.md) §7        |
-| `ai-market`            | 한 시즌 팀당 이적·임대 건수 · 여름 비중             | [transfer](transfer.md) §6  |
-| `manager-market`       | 한 시즌 감독 경질 구단 수                           | [transfer](transfer.md) §7  |
-| `squad-longevity`      | 15시즌을 넘긴 뒤에도 구단이 선발 XI·계약을 세우는가 | [season](season.md) §6      |
+| 하네스                 | 무엇을 재는가                                        | 근거                            |
+| ---------------------- | ---------------------------------------------------- | ------------------------------- |
+| `world-season`         | 한 시즌 득점·슈팅 분포 · 승점 곡선 · 카드            | [match](match.md) §7            |
+| `ai-rotation`          | AI 스쿼드 체력 분포 · 로테이션 문턱 발동률           | [match](match.md) §7            |
+| `assist-rate`          | 골에 도움이 붙는 비율                                | [match](match.md) §7            |
+| `segment-shots`        | 구간 시뮬의 경기당 슈팅이 패킷 기대 슈팅과 같은가    | [match](match.md) §1.4          |
+| `injury-rate`          | 경기당 부상 건수 · 성향이 빈도에 닿는 폭             | [match](match.md) §7            |
+| `finance-tier1`        | tier1 한 시즌 장부 손익 · 현금 · 급여 비중 · 수입    | [finance](finance.md) §10.1     |
+| `finance-leagues`      | 리그별 잔고 — 어느 리그도 구조적 적자가 아니다       | [finance](finance.md) §10.3     |
+| `finance-second-tier`  | 리그전을 굴리지 않는 2부의 한 시즌 수지              | [finance](finance.md) §9.5      |
+| `finance-multi-season` | 세 시즌을 굴려도 가라앉는 리그가 없다                | [finance](finance.md) §10.3     |
+| `ai-fitness`           | 한 시즌 뒤 AI 스쿼드 체력 · 출전 분산                | [match](match.md) §7            |
+| `ai-market`            | 한 시즌 팀당 이적·임대 건수 · 여름 비중              | [transfer](transfer.md) §6      |
+| `manager-market`       | 한 시즌 감독 경질 구단 수                            | [transfer](transfer.md) §7      |
+| `squad-longevity`      | 15시즌을 넘긴 뒤에도 구단이 선발 XI·계약을 세우는가  | [season](season.md) §6          |
+| `history-window`       | 평시 이력의 글자 분포 · 압축 주기 · 한국어 글자↔토큰 | [agents](../llm/agents.md) §5-1 |
 
 ## 4. ⚠️ 불변식
 
@@ -72,14 +73,16 @@ pnpm balance finance       # 파일 이름으로 걸러 하나만
 
 - **하네스는 CI에 없다.** 한 번 돌리는 데 몇 분이라 손으로 돌린다. 밸런스 상수를
   만진 PR이 그 결과를 본문에 적는 것이 지금의 규약이다.
-- **`packages/engine/harness/` 하나뿐이다.** `packages/sim`의 분포를 재는 자리도
-  결국 세계를 세워야 해서 엔진 쪽에 있다.
+- **하네스는 두 패키지에 있다.** 대부분은 `packages/engine/harness/`이고 — `packages/sim`의
+  분포를 재는 자리도 결국 세계를 세워야 해서 엔진 쪽이다 — 프롬프트 조립을 재는
+  `history-window`만 `packages/agents/harness/`다. 엔진은 에이전트를 import할 수 없다.
+  서술자(`harness.ts`)는 그대로 엔진 것 하나를 쓴다.
 
 ## 코드 위치
 
-| 무엇                           | 어디                                   |
-| ------------------------------ | -------------------------------------- |
-| 서술자 · 밴드 대조 · 목록 출력 | `packages/engine/harness/harness.ts`   |
-| `pnpm balance` 진입점          | `packages/engine/harness/cli.ts`       |
-| 하네스 본체                    | `packages/engine/harness/*.harness.ts` |
-| 하네스 전용 vitest 설정        | `vitest.balance.config.ts`             |
+| 무엇                           | 어디                                            |
+| ------------------------------ | ----------------------------------------------- |
+| 서술자 · 밴드 대조 · 목록 출력 | `packages/engine/harness/harness.ts`            |
+| `pnpm balance` 진입점          | `packages/engine/harness/cli.ts`                |
+| 하네스 본체                    | `packages/{engine,agents}/harness/*.harness.ts` |
+| 하네스 전용 vitest 설정        | `vitest.balance.config.ts`                      |
