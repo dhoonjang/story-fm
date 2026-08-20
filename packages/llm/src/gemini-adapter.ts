@@ -20,6 +20,7 @@ import {
   type TurnRequest,
   type TurnResult,
   type TurnUsage,
+  UNRUN_CALL,
 } from "./game-llm";
 
 /** 한 턴 안에서 함수 호출 왕복 허용 횟수. */
@@ -229,6 +230,22 @@ export class GeminiGameLLM implements GameLLM {
           }
         : undefined;
 
+    /**
+     * **마지막 왕복은 도구를 못 부르게 걸어 보낸다** — 상한에 닿은 턴도 문장으로
+     * 끝나야 한다 (models.md §3). 도구 **선언**은 그대로 둔 채 모드만 `NONE`이다:
+     * 선언을 빼면 이력에 남은 함수 호출이 짝을 잃는다. 위 강제와 같은 이유로
+     * `generationConfig`를 통째로 펼쳐 넘긴다.
+     */
+    const noToolsConfig: GenerateContentConfig | undefined =
+      tools.length > 0
+        ? {
+            ...generationConfig,
+            toolConfig: {
+              functionCallingConfig: { mode: FunctionCallingConfigMode.NONE },
+            },
+          }
+        : undefined;
+
     const usage: TurnUsage = {
       inputTokens: 0,
       outputTokens: 0,
@@ -242,11 +259,18 @@ export class GeminiGameLLM implements GameLLM {
     let danglingResults: Part[] | null = null;
 
     for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
+      const lastRound = iter === MAX_TOOL_ITERATIONS - 1;
       const historyLengthBeforeSend = chat.getHistory().length;
       let response: GenerateContentResponse | undefined;
       let responseText = "";
 
-      const perRequest = iter === 0 && forcedConfig ? { config: forcedConfig } : {};
+      const perRequest = lastRound
+        ? noToolsConfig
+          ? { config: noToolsConfig }
+          : {}
+        : iter === 0 && forcedConfig
+          ? { config: forcedConfig }
+          : {};
 
       if (req.onText) {
         const stream = await chat.sendMessageStream({ message, ...perRequest });
@@ -279,10 +303,27 @@ export class GeminiGameLLM implements GameLLM {
         .slice(historyLengthBeforeSend + 1)
         .filter((content) => content.role === "model")
         .flatMap(functionCalls);
-      // 함수 호출이 실린 턴은 Gemini가 STOP을 보고해도 도구 왕복이다
+      // 함수 호출이 실린 턴은 Gemini가 STOP을 보고해도 도구 왕복이다 — 잘린 응답만
+      // 예외로 남는다 (models.md §3-1)
+      const reported = toStopReason(response.candidates?.[0]?.finishReason);
       stopReason =
-        calls.length > 0 ? "tool_use" : toStopReason(response.candidates?.[0]?.finishReason);
+        reported === "truncated" ? "truncated" : calls.length > 0 ? "tool_use" : reported;
       if (calls.length === 0) break;
+
+      /**
+       * **잘린 응답의 도구 호출은 실행하지 않는다** — 인자가 문장 한복판에서 끊겨
+       * 있다 (models.md §3). 짝 없는 호출은 합성 결과로 닫아 다음 요청을 지킨다.
+       */
+      if (stopReason !== "tool_use") {
+        danglingResults = calls.map((call) => ({
+          functionResponse: {
+            ...(call.id ? { id: call.id } : {}),
+            name: call.name ?? "unknown_function",
+            response: { error: UNRUN_CALL },
+          },
+        }));
+        break;
+      }
 
       const results: Part[] = calls.map((call) => {
         toolCallCount++;
@@ -301,7 +342,9 @@ export class GeminiGameLLM implements GameLLM {
         };
       });
 
-      if (iter === MAX_TOOL_ITERATIONS - 1) {
+      // 마지막 왕복은 `NONE`으로 나가 여기 닿지 않는 것이 정상이다 — 제공자가 그
+      // 모드를 무시하고 함수를 부른 경우에만 결과를 합성 content로 닫고 끝낸다
+      if (lastRound) {
         danglingResults = results;
         break;
       }
