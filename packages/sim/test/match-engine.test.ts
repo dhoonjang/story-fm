@@ -1,13 +1,21 @@
 import { describe, expect, it } from "vitest";
 import {
   AI_SHIFT_BOUND,
+  AI_SHAPE_CHASE_MINUTE,
+  AI_SHAPE_HOLD_MINUTE,
+  AI_SUB_CAUSE,
   EXTRA_TIME_SUBS,
+  SUB_CHASE_MAX,
+  SUB_CHASE_MINUTE,
+  SUB_CHASE_MINUTE_TWO,
+  SUB_HOLD_MINUTE,
   LEDGER_LIMITS,
   advanceClock,
   applyEvents,
   buildStrengthPacket,
   createLedger,
   simulateSegment,
+  type AiBenchShift,
   type MatchLedgerState,
   type SegmentPlan,
   planAiTacticalShift,
@@ -488,7 +496,8 @@ describe("AI 전술 반응", () => {
     ledger: MatchLedgerState,
     halftime = false,
     kickoff: TacticsSpec = current,
-  ) => planAiTacticalShift("home", current, kickoff, ledger, halftime);
+    shapeMoved = false,
+  ) => planAiTacticalShift("home", current, kickoff, ledger, halftime, shapeMoved);
 
   it("전반에는 움직이지 않는다", () => {
     expect(shiftAt(spec, ledgerAt(30, 0, 1))).toBeNull();
@@ -496,29 +505,50 @@ describe("AI 전술 반응", () => {
 
   it("지고 있으면 무게를 앞으로 옮긴다", () => {
     const shift = shiftAt(spec, ledgerAt(60, 0, 1));
-    expect(shift?.mentality).toBeGreaterThan(spec.mentality);
-    expect(shift?.tempo).toBeGreaterThan(spec.tempo);
+    expect(shift?.axes?.mentality).toBeGreaterThan(spec.mentality);
+    expect(shift?.axes?.tempo).toBeGreaterThan(spec.tempo);
   });
 
-  it("실제 선수 재배치 없이 포메이션 이름만 바꾸지 않는다", () => {
+  /**
+   * 어느 프리셋인지는 명단과 적응도를 아는 코어(engine)가 고른다 — 구간 시뮬이
+   * 이름을 직접 내면 센터백이 둘뿐인 팀이 백3에 선다 (match.md §2).
+   */
+  it("구간 시뮬은 프리셋 이름을 고르지 않는다 — 의도만 낸다", () => {
     const shift = shiftAt({ ...spec, formation: "5-4-1" }, ledgerAt(45, 0, 1), true);
-    expect(shift?.formation).toBeUndefined();
+    expect(shift?.axes?.formation).toBeUndefined();
+    // 하프타임은 모양을 바꾸는 시각이 아니다 — 축만 옮긴다
+    expect(shift?.shape).toBeUndefined();
   });
 
   it("늦게까지 두 골 차로 지면 라인까지 올려 던진다", () => {
     const shift = shiftAt(spec, ledgerAt(80, 0, 2));
-    expect(shift?.mentality).toBe(5);
-    expect(shift?.defensiveLine).toBeGreaterThan(spec.defensiveLine);
+    expect(shift?.axes?.mentality).toBe(5);
+    expect(shift?.axes?.defensiveLine).toBeGreaterThan(spec.defensiveLine);
   });
 
   it("이기고 있고 시간이 없으면 내려선다", () => {
     const shift = shiftAt(spec, ledgerAt(80, 2, 1));
-    expect(shift?.mentality).toBeLessThan(spec.mentality);
-    expect(shift?.defensiveLine).toBeLessThan(spec.defensiveLine);
+    expect(shift?.axes?.mentality).toBeLessThan(spec.mentality);
+    expect(shift?.axes?.defensiveLine).toBeLessThan(spec.defensiveLine);
   });
 
   it("이기고 있어도 시간이 남았으면 서두르지 않는다", () => {
     expect(shiftAt(spec, ledgerAt(60, 2, 1))).toBeNull();
+  });
+
+  it("모양은 AI_SHAPE_CHASE_MINUTE부터 던진다 — 한 분 전에는 축만 옮긴다", () => {
+    expect(shiftAt(spec, ledgerAt(AI_SHAPE_CHASE_MINUTE - 1, 0, 1))?.shape).toBeUndefined();
+    expect(shiftAt(spec, ledgerAt(AI_SHAPE_CHASE_MINUTE, 0, 1))?.shape).toBe("chase");
+  });
+
+  it("앞서서 굳히는 모양은 그보다 늦다", () => {
+    expect(shiftAt(spec, ledgerAt(AI_SHAPE_HOLD_MINUTE - 1, 2, 1))?.shape).toBeUndefined();
+    expect(shiftAt(spec, ledgerAt(AI_SHAPE_HOLD_MINUTE, 2, 1))?.shape).toBe("hold");
+  });
+
+  it("모양은 경기당 한 번이다 — 이미 바꿨으면 다시 내지 않는다", () => {
+    const again = shiftAt(spec, ledgerAt(85, 0, 2), false, spec, true);
+    expect(again?.shape).toBeUndefined();
   });
 
   /**
@@ -529,10 +559,11 @@ describe("AI 전술 반응", () => {
     // 수비적으로 시작한 팀 — 상한이 눈금 끝(1~5)이 아니라 킥오프 값에 걸린다
     const kickoff: TacticsSpec = { ...DEFAULT_TACTICS, mentality: 1, tempo: 2 };
     let current = kickoff;
-    let shift: Partial<TacticsSpec> | null = null;
+    let shift: AiBenchShift | null = null;
     for (let stop = 0; stop < 8; stop++) {
-      shift = shiftAt(current, ledgerAt(80, 0, 2), false, kickoff);
-      if (shift) current = { ...current, ...shift };
+      // 모양은 이미 바꾼 뒤라고 둔다 — 여기서 재는 것은 축의 상한이다
+      shift = shiftAt(current, ledgerAt(80, 0, 2), false, kickoff, true);
+      if (shift?.axes) current = { ...current, ...shift.axes };
     }
     // 상한에 닿으면 더 옮길 것이 없다 — 움직이지 않는 이동은 이동이 아니다
     expect(shift).toBeNull();
@@ -545,14 +576,31 @@ describe("AI 전술 반응", () => {
 });
 
 describe("AI 교체 판단", () => {
-  const ledger = (minute: number, subsUsed = 0) =>
+  const ledger = (
+    minute: number,
+    subsUsed = 0,
+    score: { home: number; away: number } = { home: 0, away: 0 },
+    events: unknown[] = [],
+  ) =>
     ({
       minute,
       phase: "second_half",
-      score: { home: 0, away: 0 },
+      score,
+      events,
       home: { subsUsed, subWindows: 0 },
       away: { subsUsed: 0, subWindows: 0 },
     }) as never;
+  /** 이미 쓴 승부수 — 장수를 세는 자리가 장부의 근거라 사건으로 만들어 넣는다 */
+  const spentChase = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      minute: 60 + i,
+      type: "substitution",
+      team: "home",
+      actors: ["out", "in"],
+      causes: [AI_SUB_CAUSE.chase],
+    }));
+  const groupOfId = (squad: ReturnType<typeof squadOf>, id: string | undefined) =>
+    [...squad.onPitch, ...squad.bench].find((p) => p.id === id)?.positions[0]?.position ?? "";
   const squadOf = (base: number) => {
     const s = makeSquad("t", base);
     return { onPitch: s.starters, bench: s.bench };
@@ -674,5 +722,94 @@ describe("AI 교체 판단", () => {
       worn,
     );
     expect(breakStop?.type).toBe("substitution");
+  });
+
+  /**
+   * 여기부터는 **스코어와 남은 시간**을 읽는 갈래다 (match.md §2). 싱싱한 팀이라
+   * 체력 갈래는 열리지 않는다 — 교체가 나온다면 그건 스코어를 본 것이다.
+   * 난수는 `() => 0`으로 고정한다: 재는 것은 문턱이지 검토 확률이 아니다.
+   */
+  const chaseAt = (minute: number, score: { home: number; away: number }, spent = 0) =>
+    planAiSubstitution(
+      "home",
+      squadOf(75),
+      ledger(minute, 0, score, spentChase(spent)),
+      plan(minute),
+      () => 0,
+      {},
+    );
+
+  it("한 골 차로 뒤지면 SUB_CHASE_MINUTE부터 던진다 — 한 분 전에는 아무도 안 바꾼다", () => {
+    expect(chaseAt(SUB_CHASE_MINUTE - 1, { home: 0, away: 1 })).toBeNull();
+    expect(chaseAt(SUB_CHASE_MINUTE, { home: 0, away: 1 })?.causes).toEqual([AI_SUB_CAUSE.chase]);
+  });
+
+  it("두 골 차로 뒤지면 그만큼 이르다", () => {
+    expect(chaseAt(SUB_CHASE_MINUTE_TWO, { home: 0, away: 1 })).toBeNull();
+    expect(chaseAt(SUB_CHASE_MINUTE_TWO, { home: 0, away: 2 })?.causes).toEqual([
+      AI_SUB_CAUSE.chase,
+    ]);
+  });
+
+  it("승부수는 수비를 빼고 공격 자원을 넣는다", () => {
+    const squad = squadOf(75);
+    const sub = chaseAt(SUB_CHASE_MINUTE, { home: 0, away: 1 });
+    expect(groupOfId(squad, sub?.actors[0])).toMatch(/B$/); // RB·LB·RCB·LCB
+    expect(groupOfId(squad, sub?.actors[1])).toBe("ST");
+  });
+
+  it("승부수는 경기당 SUB_CHASE_MAX장이다", () => {
+    expect(chaseAt(80, { home: 0, away: 1 }, SUB_CHASE_MAX - 1)).not.toBeNull();
+    expect(chaseAt(80, { home: 0, away: 1 }, SUB_CHASE_MAX)).toBeNull();
+  });
+
+  it("비기고 있으면 스코어 갈래가 열리지 않는다", () => {
+    expect(chaseAt(80, { home: 1, away: 1 })).toBeNull();
+  });
+
+  it("앞서면 SUB_HOLD_MINUTE부터 공격을 빼고 수비를 넣는다", () => {
+    const squad = squadOf(75);
+    expect(chaseAt(SUB_HOLD_MINUTE - 1, { home: 1, away: 0 })).toBeNull();
+    const sub = chaseAt(SUB_HOLD_MINUTE, { home: 1, away: 0 });
+    expect(sub?.causes).toEqual([AI_SUB_CAUSE.hold]);
+    expect(groupOfId(squad, sub?.actors[0])).toBe("ST");
+    expect(groupOfId(squad, sub?.actors[1])).toBe("CB");
+  });
+
+  /**
+   * 줄이 무너지는 교체는 하지 않는다 (`LINE_FLOOR`). 이게 없으면 두 골 차로 뒤진
+   * 팀이 수비 둘로 남은 30분을 뛴다.
+   */
+  it("수비가 최소 인원이면 미드필더를 대신 내준다", () => {
+    const full = squadOf(75);
+    const thin = {
+      onPitch: full.onPitch.filter((p) => p.id !== "t-df1"),
+      bench: full.bench,
+    };
+    const sub = planAiSubstitution(
+      "home",
+      thin,
+      ledger(SUB_CHASE_MINUTE, 0, { home: 0, away: 1 }),
+      plan(SUB_CHASE_MINUTE),
+      () => 0,
+      {},
+    );
+    expect(groupOfId(full, sub?.actors[0])).toMatch(/M$/); // RM·LM·RCM·LCM
+    expect(sub?.causes).toEqual([AI_SUB_CAUSE.chase]);
+  });
+
+  it("부상이 먼저다 — 뒤지고 있어도 다친 선수부터 뺀다", () => {
+    const squad = squadOf(75);
+    const hurt = squad.onPitch[5]!;
+    const sub = planAiSubstitution(
+      "home",
+      squad,
+      ledger(80, 0, { home: 0, away: 2 }),
+      hurtPlan(80, hurt.id),
+      () => 0,
+      {},
+    );
+    expect(sub?.actors[0]).toBe(hurt.id);
+    expect(sub?.causes).toEqual([AI_SUB_CAUSE.injury]);
   });
 });
