@@ -10,6 +10,7 @@ import {
   type TurnRequest,
   type TurnResult,
   type TurnUsage,
+  UNRUN_CALL,
 } from "./game-llm";
 
 /** 한 턴 안에서 tool call 왕복 허용 횟수 — 조회 + 실행이 같이 도므로 여유를 둔다 */
@@ -239,6 +240,22 @@ export class AnthropicGameLLM implements GameLLM {
     let stopReason: StopReason | null = null;
 
     for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
+      /**
+       * **마지막 왕복은 도구를 못 부르게 걸어 보낸다** — 상한에 닿은 턴도 문장으로
+       * 끝나야 한다 (models.md §3). ⚠️ 도구 **정의**는 그대로 둔다: 빼면 이력에 남은
+       * `tool_use` 블록이 짝 잃은 채 실려 요청 자체가 거부된다.
+       */
+      const lastRound = iter === MAX_TOOL_ITERATIONS - 1;
+      const toolChoice: Anthropic.ToolChoice | undefined =
+        toolDefs.length === 0
+          ? undefined
+          : lastRound
+            ? { type: "none" }
+            : // 강제는 첫 요청에만 — 도구 결과를 돌려준 뒤에도 걸어 두면 모델이 턴을
+              // 끝낼 수 없어 왕복 상한까지 같은 도구를 다시 부른다 (TurnRequest.toolChoice)
+              iter === 0
+              ? forcedTool
+              : undefined;
       // 증분 캐시 — 첫 요청은 이력 끝까지, 이후 반복은 직전 메시지까지 캐시한다
       const markUpto = iter === 0 ? baseHistory.length - 1 : messages.length - 1;
       const params: Anthropic.MessageCreateParamsNonStreaming = {
@@ -250,9 +267,7 @@ export class AnthropicGameLLM implements GameLLM {
         thinking: { type: "disabled" },
         system,
         ...(toolDefs.length > 0 ? { tools: toolDefs } : {}),
-        // 강제는 첫 요청에만 — 도구 결과를 돌려준 뒤에도 걸어 두면 모델이 턴을
-        // 끝낼 수 없어 왕복 상한까지 같은 도구를 다시 부른다 (TurnRequest.toolChoice)
-        ...(iter === 0 && forcedTool ? { tool_choice: forcedTool } : {}),
+        ...(toolChoice ? { tool_choice: toolChoice } : {}),
         messages: withBreakpoint(messages, markUpto),
       };
 
@@ -301,7 +316,11 @@ export class AnthropicGameLLM implements GameLLM {
       // thinking 블록 포함 전체 content를 그대로 이력에 보존해야 한다
       messages.push({ role: "assistant", content: response.content });
 
-      if (response.stop_reason !== "tool_use") break;
+      /**
+       * **잘린 응답의 도구 호출은 실행하지 않는다** — 인자가 문장 한복판에서 끊겨
+       * 있다 (models.md §3). 실행하지 않은 호출은 아래 이력 위생이 합성 결과로 닫는다.
+       */
+      if (stopReason !== "tool_use") break;
 
       const results: Anthropic.ToolResultBlockParam[] = [];
       for (const block of response.content) {
@@ -336,7 +355,7 @@ export class AnthropicGameLLM implements GameLLM {
           content: dangling.map((b): Anthropic.ToolResultBlockParam => ({
             type: "tool_result",
             tool_use_id: b.id,
-            content: "턴이 중단되어 이 도구 호출은 처리되지 않았습니다 — 필요하면 다시 호출하세요.",
+            content: UNRUN_CALL,
             is_error: true,
           })),
         });

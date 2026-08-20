@@ -10,6 +10,7 @@ import {
   type TurnRequest,
   type TurnResult,
   type TurnUsage,
+  UNRUN_CALL,
 } from "./game-llm";
 
 /** 한 턴 안에서 함수 호출 왕복 허용 횟수 (다른 어댑터와 같은 값) */
@@ -268,16 +269,28 @@ export class OpenAiGameLLM implements GameLLM {
     };
 
     for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
+      /**
+       * **마지막 왕복은 도구를 못 부르게 걸어 보낸다** — 상한에 닿은 턴도 문장으로
+       * 끝나야 한다 (models.md §3). ⚠️ 도구 **정의**는 그대로 둔다: 빼면 이력에 남은
+       * `tool_calls`가 짝 잃은 채 실려 요청 자체가 거부된다.
+       */
+      const lastRound = iter === MAX_TOOL_ITERATIONS - 1;
+      const toolChoice = lastRound
+        ? ("none" as const)
+        : // 강제는 첫 요청에만 — 도구 결과를 돌려준 뒤에도 걸어 두면 모델이 턴을
+          // 끝낼 수 없어 왕복 상한까지 같은 도구를 다시 부른다 (TurnRequest.toolChoice)
+          iter === 0
+          ? forcedTool
+          : undefined;
       const body = {
         model: this.config.model,
         max_completion_tokens: req.maxTokens ?? this.config.maxTokens,
         // 함수 도구를 쓰려면 추론을 꺼야 한다 (위 주석 참고)
         reasoning_effort: "none" as const,
         messages,
-        ...(toolDefs.length > 0 ? { tools: toolDefs } : {}),
-        // 강제는 첫 요청에만 — 도구 결과를 돌려준 뒤에도 걸어 두면 모델이 턴을
-        // 끝낼 수 없어 왕복 상한까지 같은 도구를 다시 부른다 (TurnRequest.toolChoice)
-        ...(iter === 0 && forcedTool ? { tool_choice: forcedTool } : {}),
+        ...(toolDefs.length > 0
+          ? { tools: toolDefs, ...(toolChoice ? { tool_choice: toolChoice } : {}) }
+          : {}),
       };
 
       let turn: Assistant;
@@ -321,9 +334,23 @@ export class OpenAiGameLLM implements GameLLM {
       if (turn.text.trim().length > 0) text += (text ? "\n" : "") + turn.text;
       messages.push(turn.message);
 
-      // 도구를 부른 턴은 OpenAI가 "stop"을 보고해도 도구 왕복이다
-      stopReason = turn.calls.length > 0 ? "tool_use" : toStopReason(turn.finishReason);
+      // 도구를 부른 턴은 OpenAI가 "stop"을 보고해도 도구 왕복이다 — 잘린 응답만
+      // 예외로 남는다 (models.md §3-1)
+      const reported = toStopReason(turn.finishReason);
+      stopReason =
+        reported === "truncated" ? "truncated" : turn.calls.length > 0 ? "tool_use" : reported;
       if (turn.calls.length === 0) break;
+
+      /**
+       * **잘린 응답의 도구 호출은 실행하지 않는다** — 인자가 문장 한복판에서 끊겨
+       * 있다 (models.md §3). 짝 없는 호출은 합성 결과로 닫아 다음 요청을 지킨다.
+       */
+      if (stopReason !== "tool_use") {
+        for (const call of turn.calls) {
+          messages.push({ role: "tool", tool_call_id: call.id, content: UNRUN_CALL });
+        }
+        break;
+      }
 
       for (const call of turn.calls) {
         toolCallCount++;
