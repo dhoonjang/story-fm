@@ -43,6 +43,7 @@ export const SKILL_LABEL: Record<string, string> = {
   release_player: "계약 해지",
   recall_loan: "임대 복귀",
   open_renewal: "재계약 제안",
+  open_release: "해지 제안",
   // 스킬이 아니라 코어가 남기는 기록 — 카탈로그에 없지만 칩으로 선다
   finalize_match: "경기 종료",
 };
