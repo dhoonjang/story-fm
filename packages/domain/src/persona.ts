@@ -31,6 +31,15 @@ export const PersonaRoleSchema = z.enum([
    * 유일이므로 집단은 페르소나가 될 수 없다. "관중석이 술렁였다"는 화자 없는 내레이션의 몫.
    */
   "supporter",
+  /**
+   * 타 팀 감독 — 상대 벤치에 서는 사람이다. ⚠️ **`head_coach`가 아니다**: 그 자리는
+   * 우리 구단의 수석코치, 감독(유저)이 매일 옆에 두는 사람이다 (people.md §2-1).
+   */
+  "manager",
+  /** 에이전트 — 협상 테이블 건너편 */
+  "agent",
+  /** 해설 — 중계석과 스튜디오. 축구계에 남은 은퇴 인물이 대개 여기 선다 */
+  "pundit",
 ]);
 export type PersonaRole = z.infer<typeof PersonaRoleSchema>;
 
@@ -104,6 +113,9 @@ export const PERSONA_ROLE_LABEL: Partial<Record<PersonaRole, string>> = {
   owner: "구단주",
   reporter: "기자",
   player: "선수",
+  manager: "감독",
+  agent: "에이전트",
+  pundit: "해설위원",
 };
 
 /** 아는 자리면 직책 이름, 모르면 없다 — 없는 것이 곧 "이름까지만 말한다"는 뜻이다 */

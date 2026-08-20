@@ -82,6 +82,7 @@ import { rankByName } from "./name-match";
 import { defaultXiIds, playerCatalog } from "../world/catalog";
 import { estimateSquadWages, wageSubjectOf } from "../world/wages";
 import { clubEconomyLevel } from "../data/league-economy";
+import { worldFigureManagerOf } from "../data/world-figures";
 import { generateYouthPlayer } from "../world/generate";
 import { ensureSquadNumbers } from "../squad/numbers";
 import { hasCups, scopedTeams, type WorldScope } from "../world/scope";
@@ -1342,6 +1343,42 @@ const CORE_GK = 2;
  *
  * @returns 추가된 클럽 수 (0이면 최신 세이브)
  */
+/**
+ * 세계 인물 명부가 이 벤치에 세운 감독 — 없으면 빈 객체다 (people.md §2-1).
+ *
+ * **명부가 이름을 심는 자리는 여기 하나뿐이다.** 심고 나면 그 사람이 어디에 있는지는
+ * 명부가 아니라 `managerName`이 답한다 — 경질과 선임은 감독 시장의 일이고
+ * (`market/manager-market.ts`), 인물지에 변하는 값을 넣지 않는다는 원칙이 여기서도 같다.
+ *
+ * **유저가 맡은 팀은 비운다** — 그 자리를 감독(유저)이 받았으므로 명부의 그 사람은
+ * 이 세계에 부임한 적이 없다 (`worldFigures`가 후보에서도 뺀다).
+ */
+function seededManagerName(
+  teamId: string,
+  state: { userTeamId: string },
+): { managerName?: string } {
+  if (teamId === state.userTeamId) return {};
+  const figure = worldFigureManagerOf(teamId);
+  return figure ? { managerName: figure.name } : {};
+}
+
+/**
+ * 로드 보정 — 명부의 감독을 이름 없는 벤치에 채운다 (people.md §2-1).
+ *
+ * 명부가 생기기 전 세이브의 AI 구단은 감독 이름이 아예 없다(경질이 한 번 돌기
+ * 전까지). `ensurePersonas`와 같은 결의 보정이라 **세이브 버전을 올리지 않는다** —
+ * 없던 필드를 채우는 것이고, 명부가 결정적이라 채워도 그 세이브의 사람은 같다.
+ *
+ * ⚠️ **이미 이름이 있으면 건드리지 않는다.** 그 벤치는 감독 시장이 한 번 다녀간
+ * 자리이고, 덮으면 경질된 사람이 로드할 때마다 되살아난다.
+ */
+export function ensureSeededManagers(state: GameState): void {
+  for (const team of state.teams) {
+    if (team.managerName !== undefined || !isClubTeam(team.id)) continue;
+    Object.assign(team, seededManagerName(team.id, state));
+  }
+}
+
 export function addMissingClubs(state: GameState): number {
   const present = new Set(state.teams.map((t) => t.id));
   const seed = new Map(TEAM_CATALOG_SEED.map((t) => [t.id, t]));
@@ -1362,7 +1399,9 @@ export function addMissingClubs(state: GameState): number {
       id: team.id,
       ...copiedTeamFields(team, CLUB_PROFILES_SEED[team.id]),
       // 감독은 클럽에만 있다 — 무소속은 클럽이 아니다 (team.md §4)
-      ...(isClubTeam(team.id) ? { aiManagerTacticsRating: randInt(rng, 55, 82) } : {}),
+      ...(isClubTeam(team.id)
+        ? { aiManagerTacticsRating: randInt(rng, 55, 82), ...seededManagerName(team.id, state) }
+        : {}),
     });
     // 무소속은 스쿼드도 배치도 갖지 않는다 — 팀 엔티티만 있으면 된다
     if (!isClubTeam(team.id)) continue;
@@ -2069,6 +2108,7 @@ export function createGame(input: CreateGameInput): GameState {
           aiManagerTacticsRating: randInt(rng, 55, 82),
           // 부임일 — 감독 시장이 "얼마나 됐나"를 여기서 잰다 (`manager-market.ts`)
           managerSince: calendar.preseasonStart,
+          ...seededManagerName(t.id, { userTeamId: input.userTeamId }),
         }
       : {}),
   }));

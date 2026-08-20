@@ -13,6 +13,7 @@ import {
 } from "@story-fm/domain";
 import { realCoachNameOf } from "../data/coach-seeds";
 import { realOwnerNameOf } from "../data/owner-seeds";
+import { WORLD_FIGURE_SEEDS, type WorldFigureSeed } from "../data/world-figures";
 import { claimPersonaName, personaNamePoolOf } from "../data/names";
 import { countryOfTeam } from "../data/team-catalog";
 import { hashChannel, makeRng, pick } from "../core/rng";
@@ -609,6 +610,66 @@ export function generateReporters(seed: number, teamId: string): Persona[] {
       seed,
     };
   });
+}
+
+/* ------------------------------------------------------------------ *
+ * 세계 인물 명부 — 구단 밖의 이름들 (people.md §2-1)
+ * ------------------------------------------------------------------ */
+
+/**
+ * 명부는 **뽑히지 않는다** — 성격도 말투도 표가 직접 적으므로 재현할 추첨이 없다.
+ * 스키마가 `seed`를 요구하는 자리에 그 사실을 그대로 적는다.
+ */
+const WORLD_FIGURE_SEED_MARK = 0;
+
+/**
+ * 명부 인물의 키워드 — **전체 이름과 성**이다.
+ *
+ * `personaKeywords`처럼 이름 조각을 전부 담지 않는 이유: "펩"·"루이스"·"사비"는
+ * 다른 사람의 이름 안에도 있어서, 담으면 한 턴 상한 3장을 남의 이름이 먹는다.
+ * 성이 흔한 말과 겹치는 사람(치부·캐릭)은 표가 직접 키워드를 적어 성 호출을 끈다.
+ */
+function worldFigureKeywords(seed: WorldFigureSeed): string[] {
+  if (seed.keywords !== undefined) return [...seed.keywords];
+  const parts = seed.name.split(/\s+/u);
+  const surname = parts[parts.length - 1] ?? "";
+  return surname.length >= KEYWORD_MIN_LENGTH && surname !== seed.name
+    ? [seed.name, surname]
+    : [seed.name];
+}
+
+function worldFigurePersonaOf(seed: WorldFigureSeed): Persona {
+  return {
+    characterId: seed.name,
+    name: seed.name,
+    role: seed.role,
+    archetype: seed.archetype,
+    traits: [...seed.traits],
+    motivation: seed.motivation,
+    speechStyle: { note: seed.speech.note, samples: [...seed.speech.samples] },
+    keywords: worldFigureKeywords(seed),
+    real: true,
+    seed: WORLD_FIGURE_SEED_MARK,
+  };
+}
+
+/**
+ * 이 세이브가 사는 세계의 명부 (people.md §2-1).
+ *
+ * **세이브에 넣지 않는다** — 불변 초기치라 읽는 자리에서 파생하고, 표를 비우면 그
+ * 인물은 세계에서 사라진다. 코치·구단주 시드와 같은 청산 구조다.
+ *
+ * 한 사람만 빠진다: **유저가 맡은 팀의 감독**이다. 그 자리를 감독(유저)이 받았으므로
+ * 이 세계에 부임한 적이 없는 사람이다.
+ */
+export function worldFigures(state: { userTeamId: string }): Persona[] {
+  return WORLD_FIGURE_SEEDS.filter((f) => f.teamId !== state.userTeamId).map(worldFigurePersonaOf);
+}
+
+/** 명부에서 이 이름을 찾는다 — 이력을 다시 그릴 때의 입구 (`characterEntryOf`) */
+export function worldFigureByName(state: { userTeamId: string }, name: string): Persona | null {
+  const seed = WORLD_FIGURE_SEEDS.find((f) => f.name === name && f.teamId !== state.userTeamId);
+  return seed ? worldFigurePersonaOf(seed) : null;
 }
 
 /**

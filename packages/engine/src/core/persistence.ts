@@ -29,7 +29,7 @@ import type { GamePhase, GameState } from "./state";
 import { ensurePersonas } from "../world/persona";
 import { ensureSquadNumbers } from "../squad/numbers";
 import { playerCatalog } from "../world/catalog";
-import { addMissingClubs, recomputeOverall, teamNameIn } from "./state";
+import { addMissingClubs, ensureSeededManagers, recomputeOverall, teamNameIn } from "./state";
 
 export { dataDir };
 
@@ -358,6 +358,9 @@ function migrate(save: Record<string, unknown>, state: GameState): void {
   // 페르소나 도입 — 수석코치가 없던 세이브를 채운다. 생성이 시드로 결정적이라
   // 그 세이브의 코치는 늘 같은 사람이고, 그래서 버전을 올리지 않아도 된다.
   ensurePersonas(state);
+  // 세계 인물 명부 도입 — 이름 없이 서 있던 AI 구단 벤치에 명부의 감독을 채운다.
+  // 명부가 결정적이라 채워도 그 세이브의 사람은 같다 (people.md §2-1).
+  ensureSeededManagers(state);
 }
 
 /**
