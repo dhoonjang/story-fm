@@ -426,19 +426,7 @@ function dailyTick(
     );
   }
 
-  /**
-   * 계약 만료 예고 — **한 번만.** 시즌이 끝나면 우리 선수도 자유계약으로 떠나므로
-   * (season.ts) 감독이 모르고 잃는 일이 없어야 한다. 매일 알리면 소음이 되니
-   * 6개월·3개월·1개월 문턱을 넘는 날에만 세운다.
-   */
-  for (const { player, contract } of expiringContracts(state, 180)) {
-    const left = diffDays(state.date, contract.until);
-    if (![180, 90, 30].includes(left)) continue;
-    digest.push(
-      `⏳ ${player.name}의 계약이 ${left}일 남았습니다 (${contract.until}) — 재계약하지 않으면 시즌 뒤 떠납니다`,
-    );
-    pushNarrative(state, `${player.name} 계약 ${left}일 남음`, left <= 90 ? 4 : 3);
-  }
+  warnExpiringContracts(state, digest);
 
   // 이적창 개장·폐장 안내
   for (const entry of todays) {
@@ -456,6 +444,46 @@ function dailyTick(
   }
 
   return standsToday(state, digest);
+}
+
+/** 계약 만료 예고 문턱 — 내림차순, 날 단위 (season.md §5) */
+const EXPIRY_WARN_STAGES = [180, 90, 30] as const;
+
+/**
+ * 오늘 낼 만료 경고 문턱 — 넘어선 것 중 **가장 낮은 것**, 아직 안 낸 것만.
+ *
+ * "남은 날이 정확히 그 수인 날"로 재면 tick이 지나지 않은 날의 문턱은 영영 오지
+ * 않는다. 최종전과 07-01 사이는 시즌 종료로 곧장 건너뛰므로, 계약이 늘 06-30에
+ * 끝나는 30일 문턱(=05-31)은 최종 라운드가 5월 마지막 날인 해에만 걸렸다.
+ *
+ * @param left 남은 날. 시즌 종료 tick은 0을 넘겨 남은 문턱을 한 번에 소진한다.
+ * @param warned 이미 낸 문턱 중 가장 낮은 것
+ */
+export function dueExpiryStage(left: number, warned: number | undefined): number | null {
+  const stage = EXPIRY_WARN_STAGES.filter((days) => left <= days).at(-1);
+  if (stage === undefined) return null;
+  if (warned !== undefined && warned <= stage) return null;
+  return stage;
+}
+
+/**
+ * 계약 만료 예고 — **문턱마다 한 번만.** 시즌이 끝나면 우리 선수도 자유계약으로
+ * 떠나므로(season.ts) 감독이 모르고 잃는 일이 없어야 한다. 매일 알리면 소음이 되니
+ * 6개월·3개월·1개월 문턱을 넘어선 첫 날에만 세우고, 어디까지 알렸는지는 계약에 남는다.
+ *
+ * @param final 시즌이 끝나는 tick — 이 뒤로 그 계약에 닿는 날이 없으니 남은 문턱을 낸다
+ */
+export function warnExpiringContracts(state: GameState, digest: string[], final = false): void {
+  for (const { player, contract } of expiringContracts(state, EXPIRY_WARN_STAGES[0])) {
+    const left = diffDays(state.date, contract.until);
+    const stage = dueExpiryStage(final ? 0 : left, contract.expiryWarnedStage);
+    if (stage === null) continue;
+    contract.expiryWarnedStage = stage;
+    digest.push(
+      `⏳ ${player.name}의 계약이 ${left}일 남았습니다 (${contract.until}) — 재계약하지 않으면 시즌 뒤 떠납니다`,
+    );
+    pushNarrative(state, `${player.name} 계약 ${left}일 남음`, stage <= 90 ? 4 : 3);
+  }
 }
 
 /**
@@ -959,6 +987,8 @@ export function advanceTime(
   for (let d = 0; d < maxDays; d++) {
     // 시즌 종료 체크 — 남은 경기가 없으면 시즌 리뷰 + 전환
     if (allMatchesDone(state)) {
+      // 남은 만료 문턱은 여기서 낸다 — 이 뒤로 그 계약에 닿는 tick이 없다
+      warnExpiringContracts(state, digest, true);
       digest.push(...endSeason(state));
       return { ok: true, digest, stopped: "season_end", trained };
     }
