@@ -5,6 +5,7 @@ import {
   TRAINING_XP_PER_SESSION,
   USER_WARNINGS_BEFORE_SACK,
   acceptDeal,
+  acceptManagerOffer,
   addDays,
   advanceTime,
   applyTrainingOutcomes,
@@ -17,6 +18,7 @@ import {
   isTopFlight,
   leagueOfTeamIn,
   managerTrainingUptake,
+  openManagerOffers,
   openNegotiationFor,
   pendingOffer,
   playerById,
@@ -133,24 +135,6 @@ describe("감독도 잘린다 — 다만 경고가 먼저다", () => {
     state.date = "2027-03-04";
     expect(reviewUserSeat(state, [])).toBe(true);
     expect(state.dismissal?.teamId).toBe(state.userTeamId);
-  });
-
-  it("경질되면 시계가 멈춘다 — 더 이상 그 구단의 사람이 아니다", () => {
-    const state = createTestGame(7);
-    // 경질장은 위 케이스가 만드는 것과 같은 값이다 — 여기서 보는 것은 그 뒤의 시계다
-    state.dismissal = {
-      on: state.date,
-      season: state.season,
-      teamId: state.userTeamId,
-      reason: "기대에 한참 못 미쳤다",
-    };
-    const before = state.date;
-
-    const advanced = advanceTime(state, { days: 7 });
-
-    expect(advanced.ok).toBe(false);
-    expect(state.date).toBe(before);
-    expect(advanced.digest.join(" ")).toContain("경질");
   });
 
   /**
@@ -443,5 +427,140 @@ describe("쓰는 만큼 오른다 — 세 축이 각자 자란다", () => {
     advanceTime(state, { days: SCOUT_DAYS });
     expect(state.scoutReports.some((r) => r.completedOn !== null)).toBe(true);
     expect(totalXP(state, "analysis", base), "보고서가 감독의 눈을 기르지 않는다").toBe(8);
+  });
+});
+
+/**
+ * 경질은 끝이 아니라 상태다 (docs/simulation/career.md §5.1).
+ *
+ * 값을 하는 것은 **상태 전이**다 — 경질장이 문장이 아니라 사실로 남는가, 무직에게
+ * 제안이 붙는가(그리고 눈높이에 안 맞는 자리는 부르지 않는가), 수락이 감독을 정말
+ * 옮기는가. 하나의 세이브를 순서대로 잇는다: 픽스처는 비싸고, 이 셋은 실제로 한
+ * 이야기의 세 마디다.
+ */
+describe("경질 뒤 — 무직으로 흐르고, 제안을 받고, 부임한다", () => {
+  const state = createTestGame(7);
+  fabricateUserSlump(state);
+  const sackedFrom = state.userTeamId;
+  for (const date of ["2027-01-01", "2027-02-01"]) {
+    state.date = date;
+    reviewUserSeat(state, []);
+  }
+  state.manager.reputation.board = 25;
+  state.date = "2027-03-04";
+  const sackedToday = reviewUserSeat(state, []);
+
+  /** 그 리그의 꼴찌 자리를 만들어 준다 — 공석이 될 구단은 여기서 나온다 */
+  function bottomTierOne(state: GameState, leagueId: string): string {
+    const team = state.teams.find(
+      (t) => leagueOfTeamIn(state, t.id) === leagueId && tierOfTeamIn(state, t.id) === 1,
+    );
+    if (!team) throw new Error(`${leagueId}에 tier 1 구단이 없다`);
+    fabricateBottom(state, team.id);
+    return team.id;
+  }
+
+  /**
+   * 하루씩 감독 시장을 돌린다.
+   *
+   * @param stopAtOffer 제안이 붙은 날 멈춘다. 끄면 날 수를 다 채운다 — "부르지
+   *   않는다"를 재는 쪽은 공석이 실제로 날 때까지 돌려야 무언가를 증명한다.
+   */
+  function runDays(state: GameState, days: number, stopAtOffer = true): boolean {
+    let offered = false;
+    for (let i = 0; i < days; i++) {
+      if (runManagerMarket(state, [])) {
+        offered = true;
+        if (stopAtOffer) return true;
+      }
+      state.date = addDays(state.date, 1);
+    }
+    return offered;
+  }
+
+  it("경질장은 평가 문장이 아니라 등급·순위·기대로 남는다", () => {
+    expect(sackedToday).toBe(true);
+    const card = state.dismissal!;
+    expect(card.teamId).toBe(sackedFrom);
+    expect(card.on).toBe("2027-03-04");
+    expect(card.tier).toBe(tierOfTeamIn(state, sackedFrom));
+    expect(card.position).toBeGreaterThan(0);
+    expect(card.target).toBeGreaterThan(0);
+    expect(card.expectation, "기대의 이름이 없다").toBeTruthy();
+    expect(card.reason, "장부에 문장을 적었다").toBeUndefined();
+
+    // 감독이 없는 구단은 세계에 없다 — 옛 구단은 그날로 후임을 세웠다
+    const old = state.teams.find((t) => t.id === sackedFrom)!;
+    expect(old.managerName).not.toBe(state.manager.name);
+    expect(old.managerSince).toBe("2027-03-04");
+  });
+
+  /**
+   * 경질이 세이브의 끝이던 자리다 — `advanceTime`이 `blocked`로 돌아섰다.
+   * 이제 무직으로 흐른다: 시계는 가고, 감독의 일만 없다 (career.md §5.1).
+   */
+  it("경질 뒤에도 시계가 흐른다 — 다만 훈련장도 경기장도 감독의 일이 아니다", () => {
+    const from = state.date;
+    const advanced = advanceTime(state, { days: 7 });
+
+    expect(advanced.ok, advanced.digest.join(" ")).toBe(true);
+    expect(advanced.stopped, "경질이 시계를 세웠다").not.toBe("blocked");
+    expect(state.date > from, "무직인데 날짜가 그대로다").toBe(true);
+    expect(advanced.trained?.sessions ?? [], "무직인데 훈련을 소화했다").toHaveLength(0);
+    // 옛 구단의 경기는 감독 없이 간이 시뮬로 끝난다 — 경기일에 멈춰 세우지 않는다
+    expect(state.phase, "무직인데 경기일에 붙들렸다").toBe("idle");
+    const theirs = state.matches.filter(
+      (m) =>
+        m.date > from &&
+        m.date <= state.date &&
+        (m.homeTeamId === sackedFrom || m.awayTeamId === sackedFrom),
+    );
+    for (const match of theirs) {
+      expect(match.result, `${match.date} 옛 구단 경기가 결과 없이 남았다`).not.toBeNull();
+    }
+  });
+
+  it("평판이 등급 문턱 아래면 공석이 나도 부르지 않는다", () => {
+    // 경질 직후의 평판은 (25 + 50) / 2 — tier 1의 문턱 70에 한참 못 미친다
+    expect((state.manager.reputation.board + state.manager.reputation.media) / 2).toBeLessThan(70);
+    const vacancyId = bottomTierOne(state, "bundesliga");
+    const vacancy = state.teams.find((t) => t.id === vacancyId)!;
+    const before = vacancy.managerSince;
+
+    runDays(state, 60, false);
+
+    // 자리는 실제로 비었다 — 비지 않았다면 아래 단언은 아무것도 증명하지 않는다
+    expect(vacancy.managerSince, "공석이 나지 않아 문턱을 시험하지 못했다").not.toBe(before);
+    expect(
+      (state.managerOffers ?? []).some((o) => o.teamId === vacancyId),
+      "문턱 아래인데 그 자리가 감독을 불렀다",
+    ).toBe(false);
+  });
+
+  it("문턱을 넘으면 제안이 붙고, 수락하면 그날부로 새 구단의 감독이 된다", () => {
+    state.manager.reputation.board = 90;
+    state.manager.reputation.media = 90;
+    bottomTierOne(state, "laliga");
+
+    expect(runDays(state, 200), "문턱을 넘었는데 아무도 부르지 않았다").toBe(true);
+    const offer = openManagerOffers(state)[0]!;
+    expect(offer.status).toBe("open");
+    expect(offer.expiresOn > state.date).toBe(true);
+
+    const accepted = acceptManagerOffer(state, offer.id);
+    expect(accepted.ok, accepted.message).toBe(true);
+    expect(state.userTeamId).toBe(offer.teamId);
+    expect(state.userTeamId, "옛 구단으로 돌아갔다").not.toBe(sackedFrom);
+    expect(state.dismissal, "부임했는데 경질장이 남았다").toBeUndefined();
+    expect(state.manager.boardWarnings, "앞 구단의 경고를 지고 갔다").toBeUndefined();
+
+    const now = state.teams.find((t) => t.id === offer.teamId)!;
+    expect(now.managerName).toBe(state.manager.name);
+    expect(now.managerSince).toBe(state.date);
+
+    // 부임 직후엔 자리를 보지 않는다 — 새 구단의 순위는 앞 감독이 만든 것이다
+    expect(reviewUserSeat(state, [])).toBe(false);
+    // 같은 제안을 두 번 받을 수는 없다
+    expect(acceptManagerOffer(state, offer.id).ok).toBe(false);
   });
 });

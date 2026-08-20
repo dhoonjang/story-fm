@@ -245,6 +245,21 @@ dismissal: {
 | 월간 재정·성장, 주급, 부상 회복, 이적창         | 들어오는 이적 오퍼·계약 만료 예고      |
 | **감독직 제안**                                 | 벤치 불만, 협상 기한 앞에서 멈춰 서기  |
 
+가르는 것은 **`managedTeamId(state)` 하나**다 — 무직이면 `null`이라, 감독 팀으로
+갈라지던 자리가 전부 "그런 팀 없음"으로 떨어지고 옛 구단은 `tickOtherClubs`가 도는 AI
+클럽의 길로 넘어간다. **시즌 전환에서도 그렇다**: 계약 자동 갱신을 감독 팀만 건너뛰므로,
+무직으로 시즌을 넘기면 옛 구단은 AI처럼 자동 갱신한다(안 그러면 감독도 없는 구단의
+선수단이 통째로 걸어 나간다).
+
+**제안이 붙은 날은 시계가 멈춘다** (`stopped: "attention"`) — 10일 뒤 사라지는 것이라
+감독이 모르는 채 지나가면 안 된다.
+
+**무직인 감독이 부를 수 있는 조작 도구는 `accept_manager_offer` 하나다.** 경질돼도
+`userTeamId`는 옛 구단을 가리키므로(그 구단의 장부는 계속 돌아야 한다) 막지 않으면 GM이
+남의 구단의 라인업을 짜고 남의 선수를 판다. 조회는 그대로 연다 — 무직 감독도 세계를 읽을
+수는 있다. **기자회견도 막힌다**: 미디어 평판이 곧 다음 자리의 문턱이라, 무직 중의 회견
+반복이 승진 경로가 된다.
+
 시즌이 무직 중에 끝나면 **그 시즌은 커리어에 남지 않는다** — `SEASON_RECORD`·트로피·
 업적·보드 평판 ±8은 자리에 있던 감독의 것이다. 리그 상금·성과 보너스처럼 구단이 치르는
 것은 그대로 결산된다.
@@ -275,6 +290,12 @@ dismissal: {
 유예와 같은 값이다.
 ⚠️ 시즌 중에 부임하면 그 시즌의 `SEASON_RECORD`는 **부임 전 경기까지 포함한 새 팀의 최종
 성적**으로 남는다. 순위표가 감독이 아니라 구단 단위이기 때문이다.
+
+**화면과 조회** — 커리어 화면 맨 위에 경질 카드와 열린 제안이 선다. 제안은 **읽는
+값이다**: 버튼이 아니라 카드고, 수락은 감독이 말로 한다(`accept_manager_offer`). 상태
+스냅샷과 `get_career`도 무직이면 다른 것을 싣는다 — 전술·재정·선수단·훈련은 전부 옛
+구단의 것이라 그대로 실으면 GM이 아직 그 구단의 감독인 것처럼 장면을 쓴다. 그 자리에
+경질 사실과 열린 제안 목록이 선다.
 
 ## 6. 커리어 기록
 
@@ -351,18 +372,19 @@ board: {
 
 ## 코드 위치
 
-| 무엇                         | 어디                                                                                               |
-| ---------------------------- | -------------------------------------------------------------------------------------------------- |
-| 배경 해석·기준선·전문 분야   | `packages/engine/src/world/onboarding.ts`                                                          |
-| 능력치·평판 타입             | `packages/domain/src/manager.ts`                                                                   |
-| XP·팀토크·면담 계수          | `packages/engine/src/skills/index.ts`                                                              |
-| 소화율·`tacticalFit`         | `packages/sim/src/strength-packet.ts`                                                              |
-| 훈련 결산 흡수율·인원 상한   | `packages/engine/src/squad/training-report.ts`                                                     |
-| 키포인트 개수·정밀도         | `packages/sim/src/key-points.ts`                                                                   |
-| 체력 안개 (`ANALYSIS_FLOOR`) | `packages/engine/src/squad/scouting.ts`                                                            |
-| 딜 확률 기여                 | `packages/engine/src/market/market.ts`                                                             |
-| 기자회견 스탠스·평판 폭      | `packages/engine/src/club/press.ts`                                                                |
-| 보드 기대·시즌 리뷰·업적     | `packages/engine/src/competition/season.ts`                                                        |
-| 경고·경질·제안·부임          | `packages/engine/src/market/manager-market.ts`                                                     |
-| 커리어 기록 타입             | `packages/domain/src/records.ts`                                                                   |
-| 커리어 뷰·조회 도구          | `packages/engine/src/views/views.ts` · `views/lookup.ts` · `apps/web/components/office/career.tsx` |
+| 무엇                          | 어디                                                                                               |
+| ----------------------------- | -------------------------------------------------------------------------------------------------- |
+| 배경 해석·기준선·전문 분야    | `packages/engine/src/world/onboarding.ts`                                                          |
+| 능력치·평판 타입              | `packages/domain/src/manager.ts`                                                                   |
+| XP·팀토크·면담 계수           | `packages/engine/src/skills/index.ts`                                                              |
+| 소화율·`tacticalFit`          | `packages/sim/src/strength-packet.ts`                                                              |
+| 훈련 결산 흡수율·인원 상한    | `packages/engine/src/squad/training-report.ts`                                                     |
+| 키포인트 개수·정밀도          | `packages/sim/src/key-points.ts`                                                                   |
+| 체력 안개 (`ANALYSIS_FLOOR`)  | `packages/engine/src/squad/scouting.ts`                                                            |
+| 딜 확률 기여                  | `packages/engine/src/market/market.ts`                                                             |
+| 기자회견 스탠스·평판 폭       | `packages/engine/src/club/press.ts`                                                                |
+| 보드 기대·시즌 리뷰·업적      | `packages/engine/src/competition/season.ts`                                                        |
+| 경고·경질·제안·부임           | `packages/engine/src/market/manager-market.ts`                                                     |
+| 무직의 tick (`managedTeamId`) | `packages/engine/src/core/tick.ts` · `core/state.ts`                                               |
+| 커리어 기록 타입              | `packages/domain/src/records.ts`                                                                   |
+| 커리어 뷰·조회 도구           | `packages/engine/src/views/views.ts` · `views/lookup.ts` · `apps/web/components/office/career.tsx` |
