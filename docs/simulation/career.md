@@ -187,6 +187,22 @@
 | 3       | 12 · 15 · 18               | 11 · 14 · 16             |
 | 4       | 17 · 18 · 20               | 15 · 16 · 18             |
 
+**보드는 순위만 걸지 않는다 — 구단주가 직접 온다.** 순위가 기대 아래로 처져 있는
+동안 압력이 쌓이고 임계를 넘으면 구단주가 감독실 문을 두드린다 (다가옴의 `results`
+주제 — [../data/people.md](../data/people.md) §8). 경고와 눈금을 따로 두는 이유는
+하는 일이 다르기 때문이다.
+
+| 무엇      | 경고 (`reviewUserSeat`)    | 구단주의 다가옴                           |
+| --------- | -------------------------- | ----------------------------------------- |
+| 세는 것   | 위험 순위 아래에 있는가    | 기대 순위 아래에 있던 **날 수**           |
+| 주기      | 한 달에 한 번까지          | 압력 100 · 200 · 300 · 400                |
+| 남기는 것 | 보드 평판 −6 · 경고 카운터 | 감독이 **답할 자리** — 답이 평판을 옮긴다 |
+| 끝        | 3회에서 경질 판정으로 간다 | 계단 3에서 멈춘다 (경질과 무관하다)       |
+
+⚠️ **두 눈금이 같은 사실을 보되 자리를 다투지 않는다.** 경고는 감독의 거취를 재고
+다가옴은 감독에게 말할 자리를 준다 — 잘 답해도 경고는 지워지지 않는다. 경고를 지우는
+것은 순위뿐이다.
+
 **감독의 자리**(`reviewUserSeat` — tick이 매일 본다):
 
 1. 리그 12경기를 치르기 전에는 보지 않는다.
@@ -296,9 +312,10 @@ board: {
 
 ## 8. 미해결
 
-- **보드 요청·목표 시스템이 없다.** `competition/season.ts`의 `boardExpectation`이
-  순위 목표 하나를 돌려주고 `market/manager-market.ts`가 경고·경질만 한다 — 구단주가
-  무언가를 요구하는 길이 없다(설계는 [../data/people.md](../data/people.md)).
+- **보드가 거는 것은 순위 하나다.** 구단주가 먼저 말을 거는 길은 생겼지만(§5) 그
+  자리에서도 재료는 `competition/season.ts`의 `boardExpectation`이 돌려주는 순위
+  목표뿐이다 — 영입 승인·예산 상한·특정 선수 기용 같은 **조건부 요청**이 없고, 감독의
+  답이 그 요청을 이행했는지 판정하는 길도 없다.
 - **이직 경로가 없다** — `core/tick.ts`가 `state.dismissal`을 보면 진행을 멈출 뿐 새
   자리를 주는 코드가 없어, 경질이 곧 세이브의 끝이다. 스키마(`teamId`)는 준비돼 있다.
 - 경질된 뒤의 화면이 없다 — `views/views.ts`도 오피스 뷰 어느 것도 `dismissal`을 읽지
@@ -319,6 +336,7 @@ board: {
 | 체력 안개 (`ANALYSIS_FLOOR`) | `packages/engine/src/squad/scouting.ts`                                                            |
 | 딜 확률 기여                 | `packages/engine/src/market/market.ts`                                                             |
 | 기자회견 스탠스·평판 폭      | `packages/engine/src/club/press.ts`                                                                |
+| 다가옴 압력·임계·응답        | `packages/engine/src/club/approach.ts`                                                             |
 | 보드 기대·시즌 리뷰·업적     | `packages/engine/src/competition/season.ts`                                                        |
 | 경고·경질·AI 감독 시장       | `packages/engine/src/market/manager-market.ts`                                                     |
 | 커리어 기록 타입             | `packages/domain/src/records.ts`                                                                   |
