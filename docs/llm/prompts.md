@@ -73,7 +73,7 @@
 | --------- | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 진행      | 1   | `start_match`                                                                                                                                                                                    |
 | 전술·훈련 | 8   | `set_lineup` · `set_squad_level` · `set_captain` · `set_tactics` · `set_player_tactic` · `exploit_point` · `set_match_plan` · `set_training`                                                     |
-| 대화·서사 | 4   | `team_talk` · `talk_to_player` · `respond_to_media` · `apply_narrative_event`                                                                                                                    |
+| 대화·서사 | 5   | `team_talk` · `talk_to_player` · `respond_to_media` · `respond_to_approach` · `apply_narrative_event`                                                                                            |
 | 경기      | 1   | `substitute`                                                                                                                                                                                     |
 | 이적      | 11  | `deal_odds` · `list_negotiations` · `send_offer` · `respond_offer` · `accept_deal` · `open_renewal` · `open_release` · `set_transfer_list` · `withdraw_offer` · `release_player` · `recall_loan` |
 | 재정      | 2   | `apply_finance_event` · `adjust_transfer_budget`                                                                                                                                                 |

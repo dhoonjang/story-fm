@@ -8,6 +8,7 @@ import type {
 } from "@story-fm/domain";
 import { isDeeperThan } from "@story-fm/domain";
 import type { GameState } from "../core/state";
+import { pendingApproach } from "../club/approach";
 import { pendingPress } from "../club/press";
 import { knowledgeOf, type Knowledge } from "../squad/scouting";
 import { headCoachOf, ownerOf, reportersOf } from "./persona";
@@ -301,8 +302,8 @@ function historyWindow(state: GameState): string {
 }
 
 /**
- * 이번 턴에 지목된 인물 — 세계가 연 자리(열린 회견의 기자)와 호출자가 연 자리(첫
- * 장면의 수석코치). 둘 다 키워드를 기다리지 않는다.
+ * 이번 턴에 지목된 인물 — 세계가 연 자리(열린 회견의 기자, 찾아온 사람)와 호출자가
+ * 연 자리(첫 장면의 수석코치). 셋 다 키워드를 기다리지 않는다.
  *
  * ⚠️ 회견의 지목은 나중에 생긴 필드라 **옛 세이브의 회견엔 없다** — 없으면 아무도
  * 지목하지 않은 것이고, 그 회견의 기자는 일반 키워드 경로로만 선다.
@@ -314,6 +315,9 @@ function pointedIds(
   const ids = new Set<string>(byCaller ?? []);
   const reporterId = pendingPress(state)?.reporterId;
   if (reporterId !== undefined) ids.add(reporterId);
+  // 감독실 문 앞에 서 있는 사람 — 감독이 이름을 부르기를 기다리지 않는다 (people.md §8)
+  const speakerId = pendingApproach(state)?.speakerId;
+  if (speakerId !== undefined) ids.add(speakerId);
   return ids;
 }
 

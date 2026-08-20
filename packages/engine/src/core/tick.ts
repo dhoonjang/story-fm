@@ -44,6 +44,7 @@ import {
 } from "../club/finance";
 // 핵심 자원의 경계는 회견이 쥔다 — 같은 자를 두 곳에 적으면 한쪽만 움직인다
 import { SQUAD_CORE_SIZE } from "../club/press";
+import { tickApproaches } from "../club/approach";
 import {
   TRAINING_INJURY_PER_SESSION,
   easeProneness,
@@ -477,6 +478,12 @@ function dailyTick(
       `📨 ${teamNameIn(state, negotiation.counterpartTeamId ?? "")}에서 ${player.name} 오퍼(${formatMoney(offer.fee)})에 대한 답이 도착했습니다`,
     );
   }
+
+  /**
+   * 세계가 먼저 말을 건다 — 압력이 임계를 넘으면 코어가 자리를 연다 (people.md §8).
+   * **불만·순위·폼이 다 움직인 뒤**에 재야 오늘의 사실로 압력이 쌓인다.
+   */
+  tickApproaches(state, digest);
 
   warnExpiringContracts(state, digest);
 

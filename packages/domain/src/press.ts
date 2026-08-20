@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { DateString } from "./date-string";
+import { ApproachChannelSchema, type ApproachChannel } from "./persona";
+import { PLAYER_ISSUE_REASONS } from "./records";
 
 /**
  * 기자회견 (PRESS_CONFERENCE) — 세계가 감독에게 **대답을 요구하는 자리**.
@@ -41,6 +44,14 @@ export const PressFactKindSchema = z.enum([
   "departure",
   /** 그 영입으로 자리가 겹치는 선수들 */
   "squeezed",
+  /** 출전 기회 — 시즌 출전 수와 선발 수 (다가옴 · people.md §8) */
+  "minutes",
+  /** 2군에 내려간 채 흐른 날 */
+  "demoted",
+  /** 라커룸의 온도 — 1군 평균 폼 */
+  "morale",
+  /** 리그에서 지금 서 있는 자리와 보드가 건 자리 */
+  "standing",
 ]);
 /**
  * 회견의 재료 — **사실 한 줄.** 질문이 아니다.
@@ -116,3 +127,92 @@ export const PRESS_STANCES = [
   "deflect",
 ] as const;
 export type PressStance = (typeof PRESS_STANCES)[number];
+
+/**
+ * 다가옴 (APPROACH) — **세계가 회견 밖에서 감독에게 말을 거는 자리** (people.md §8).
+ *
+ * 회견과 같은 것이 둘, 다른 것이 둘이다. 같은 것: **사실 카드**(`PressFact`)를 넘기고
+ * 문장은 GM이 쓴다는 것, 그리고 감독의 답을 스탠스 5종으로 옮긴다는 것. 다른 것:
+ * 회견은 경기·이적이라는 **사건**이 열지만 다가옴은 **시간**이 연다(압력이 임계를
+ * 넘는다), 그리고 마이크 앞이 아니라 복도와 감독실이라 언론에 실리지 않는다.
+ */
+
+/**
+ * 무엇 때문에 오는가 — **선수 채널의 주제는 라커룸 불만의 사유 코드 그대로다**
+ * (`PLAYER_ISSUE_REASONS`). 사유가 하나 늘면 다가옴의 주제도 함께 는다: 같은 사실을
+ * 두 개의 이름으로 부르면 어느 쪽이 진짜인지 코드가 매번 다시 정해야 한다.
+ */
+export const APPROACH_TOPICS = [
+  ...PLAYER_ISSUE_REASONS,
+  /** 라커룸이 식었다 — 주장이 대신 온다 */
+  "morale",
+  /** 성적이 보드 기대 아래다 — 구단주가 온다 (보드 요청, career.md §5) */
+  "results",
+] as const;
+export const ApproachTopicSchema = z.enum(APPROACH_TOPICS);
+export type ApproachTopic = z.infer<typeof ApproachTopicSchema>;
+
+/** 사다리의 꼭대기 — 보드 경고가 3/3에 서는 것과 같은 규약 (people.md §8) */
+export const APPROACH_MAX_STEP = 3;
+
+/**
+ * 압력 눈금 — **감독이 무엇을 하지 않았는지의 누적.**
+ *
+ * 세이브가 드는 값 중 장부에서 파생할 수 없는 유일한 것이다. 불만도 순위도 폼도
+ * 지금의 사실이지만, "그 사실을 며칠째 두었는가"는 어디에도 원본이 없다.
+ */
+export const ApproachPressureSchema = z.object({
+  /**
+   * 이 압력의 주인 — 선수 채널이면 `GAME_PLAYER.id`, 주장·구단주 채널은 그 자리를
+   * 가리키는 고정 열쇠다(선수가 바뀌어도 라커룸은 라커룸이다).
+   */
+  subject: z.string().min(1),
+  topic: ApproachTopicSchema,
+  /** 쌓인 압력 — 임계(`100 × (계단 + 1)`)를 넘으면 장면이 열린다 */
+  value: z.number().min(0),
+  /** 지금까지 오른 계단 — 0이면 아직 한 번도 열리지 않았다 */
+  step: z.number().int().min(0).max(APPROACH_MAX_STEP),
+  /** 마지막으로 이 주제의 장면이 열린 날 — 같은 화자 쿨다운이 여기서 센다 */
+  openedOn: DateString.optional(),
+});
+export type ApproachPressure = z.infer<typeof ApproachPressureSchema>;
+
+export const ApproachSchema = z.object({
+  id: z.string().min(1),
+  /** 열린 날 */
+  date: DateString,
+  channel: ApproachChannelSchema,
+  topic: ApproachTopicSchema,
+  /**
+   * 말을 거는 사람 (`Persona.characterId`). 선수·주장은 그 선수의 이름이고
+   * 구단주는 구단주의 이름이다 — 회견의 `reporterId`와 같은 자리로 캐릭터북에
+   * 실린다(people.md §6). **세계가 먼저 여는 자리는 감독이 이름을 부르기를
+   * 기다리지 않는다.**
+   */
+  speakerId: z.string().min(1),
+  /** 이 자리가 걸린 선수 — 팀·구단에 대한 자리면 없다 */
+  about: z.string().nullable(),
+  /** 한 줄 배경 — 사실을 읽는 데 필요한 최소한만. 물음표도 평가어도 없다 */
+  context: z.string(),
+  /** 그 사람이 아는 것의 **전부** — 이 밖의 사실은 이 자리에 없다 */
+  facts: z.array(PressFactSchema).min(1),
+  /** 사다리의 몇 번째 칸인가 — 효과의 폭이 여기 비례한다 */
+  step: z.number().int().min(1).max(APPROACH_MAX_STEP),
+  status: PressStatusSchema,
+});
+export type Approach = z.infer<typeof ApproachSchema>;
+
+/** 스탠스가 옮기는 축 — 평판 3축과 사기 둘 (`club/press.ts`의 표가 채운다) */
+export type PressAxis = "board" | "media" | "squad" | "target" | "team";
+
+/**
+ * 채널이 닿는 축 — **그 자리에 있던 사람에게만 닿는다** (people.md §8).
+ *
+ * 회견의 스탠스 표를 그대로 쓰되 언론 축이 죽는 이유가 이것이다: 감독실 문을 닫고
+ * 한 이야기가 다음 날 신문에 실리면, 사석과 마이크 앞을 가른 의미가 없다.
+ */
+export const APPROACH_AXES: Record<ApproachChannel, readonly PressAxis[]> = {
+  player: ["squad", "target", "team"],
+  captain: ["squad", "team"],
+  owner: ["board"],
+};

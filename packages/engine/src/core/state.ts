@@ -1,5 +1,7 @@
 import type {
   Achievement,
+  Approach,
+  ApproachPressure,
   AxisValues,
   Booking,
   CharacterInjection,
@@ -674,6 +676,20 @@ export interface GameState {
    * 협상처럼 세이브가 들고 있어야 한다. 옛 세이브엔 없다(로드 시 빈 배열).
    */
   pressConferences?: PressConference[];
+  /**
+   * 다가옴 — 압력이 임계를 넘어 코어가 연 자리 (people.md §8). 회견과 같은 이유로
+   * 세이브가 든다: 열린 시점과 감독이 답한 시점이 갈린다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  approaches?: Approach[];
+  /**
+   * **압력 눈금** — 주제별 누적과 계단 (people.md §8).
+   *
+   * 세이브가 드는 값 중 장부에서 파생할 수 없는 유일한 것이다. 불만도 순위도 폼도
+   * 지금의 사실이지만, 감독이 그것을 **며칠째 그대로 두었는가**는 어디에도 원본이
+   * 없다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  approachPressure?: ApproachPressure[];
 
   // ── 감독 ──
   manager: Manager;
@@ -2189,6 +2205,8 @@ export function createGame(input: CreateGameInput): GameState {
     aiDeals: [],
     negotiations: [],
     pressConferences: [],
+    approaches: [],
+    approachPressure: [],
 
     manager: {
       name: input.managerName,

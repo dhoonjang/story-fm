@@ -187,6 +187,28 @@ export const HEAD_COACH_ROLE_LABEL = PERSONA_ROLE_LABEL.head_coach!;
  */
 export const CAPTAIN_ROLE_LABEL = "주장";
 
+/**
+ * 다가옴의 채널 — **누가 감독에게 먼저 오는가** (people.md §8).
+ *
+ * 페르소나의 `role`을 그대로 쓰지 않는 이유는 주장 때문이다: 주장은 자리가 뜻을 갖되
+ * 페르소나가 아니라 **선수**이고(`CAPTAIN_ROLE_LABEL`), 같은 `player` 역할이라도
+ * 자기 문제로 오는 것과 라커룸을 대신해 오는 것은 다른 자리다. 채널은 그 자리를
+ * 가리키고, 효과가 어느 축에 닿는지도 여기서 갈린다.
+ */
+export const APPROACH_CHANNELS = ["player", "captain", "owner"] as const;
+export const ApproachChannelSchema = z.enum(APPROACH_CHANNELS);
+export type ApproachChannel = z.infer<typeof ApproachChannelSchema>;
+
+/**
+ * 채널 → 그 자리에 온 사람의 **직책 이름**. 화자 태그가 아니다 — 태그는 언제나
+ * 사람 이름이고(§1), 이 값은 코어가 사실 줄에 "누구로서 왔는가"를 적을 때 쓴다.
+ */
+export const APPROACH_CHANNEL_LABEL: Record<ApproachChannel, string> = {
+  player: PERSONA_ROLE_LABEL.player!,
+  captain: CAPTAIN_ROLE_LABEL,
+  owner: PERSONA_ROLE_LABEL.owner!,
+};
+
 /** 중계 — 무대 밖의 목소리. 이름이 곧 자리다 */
 export const BROADCAST_SPEAKER = "중계";
 

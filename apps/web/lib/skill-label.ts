@@ -22,6 +22,7 @@ export const SKILL_LABEL: Record<string, string> = {
   team_talk: "팀 토크",
   talk_to_player: "선수 면담",
   respond_to_media: "기자회견 대응",
+  respond_to_approach: "찾아온 사람 응대",
   substitute: "선수 교체",
   apply_narrative_event: "서사 상태 반영",
   apply_finance_event: "재정 이벤트",

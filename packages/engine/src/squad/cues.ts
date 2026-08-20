@@ -2,6 +2,7 @@ import type { GamePlayer } from "@story-fm/domain";
 import { formLabel } from "./form";
 import { isSettling } from "./settling";
 import { diffDays } from "../competition/calendar";
+import { pendingApproach } from "../club/approach";
 import { openInjury, playersOf, squadLevelOf, type GameState } from "../core/state";
 
 /**
@@ -101,8 +102,16 @@ export function speakerCues(state: GameState, limit = 3): SpeakerCue[] {
   const spoke = recentSpeakers(state, 6);
   const cues: Array<SpeakerCue & { rank: number }> = [];
 
+  /**
+   * **이미 감독 앞에 서 있는 사람은 근황이 아니다** (people.md §8). 코어가 그 선수로
+   * 자리를 열어 놓고 근황 줄로 같은 이름을 다시 밀면, 모델은 같은 이야기를 두 번
+   * 열거나 둘 중 하나를 버린다.
+   */
+  const atTheDoor = pendingApproach(state)?.about ?? null;
+
   for (const player of playersOf(state, state.userTeamId)) {
     if (squadLevelOf(player) !== "first") continue;
+    if (player.id === atTheDoor) continue;
     let benched = 0;
     for (const lineup of lineups) {
       if (lineup.has(player.id)) break;

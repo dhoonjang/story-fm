@@ -10,7 +10,9 @@ import {
   answerIncomingOffer,
   applyTeamTalk,
   applyTalkToPlayer,
+  pendingApproach,
   pendingPress,
+  respondToApproach,
   respondToMedia,
   declinePress,
   arrivedResponses,
@@ -751,6 +753,40 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
   if (press) {
     return {
       text: `@: *회견장 문 앞*\n${coach(state)} 기자단이 기다리고 있습니다 — ${press.context}.\n${reporter(state, press)} ${mockQuestion(press)}`,
+      toolCalls: calls,
+    };
+  }
+
+  /**
+   * 찾아온 사람 — 열려 있으면 답하거나 돌려보낸다 (approach.ts).
+   *
+   * 회견처럼 **잡아 두지는 않는다**: 다가옴은 감독이 부르지 않아도 사흘 뒤 코어가
+   * 닫으므로, 열려 있다는 이유만으로 mock의 모든 턴을 가로채면 다른 지시가 막힌다.
+   */
+  const approach = pendingApproach(state);
+  if (approach && /면담|찾아|만나|불만|들어보|얘기|이야기/u.test(msg)) {
+    const decline = /거절|돌려보|나중|안 만나|안만나|바쁘/u.test(msg);
+    const input = decline
+      ? ({ decline: true } as const)
+      : ({
+          stance: /비판|질책|문제/u.test(msg)
+            ? ("criticise" as const)
+            : /내 탓|내 책임|제 책임/u.test(msg)
+              ? ("own" as const)
+              : /말을 아끼|노코멘트/u.test(msg)
+                ? ("deflect" as const)
+                : ("defend" as const),
+        } as const);
+    const result = respondToApproach(state, input);
+    calls.push({
+      name: "respond_to_approach",
+      summary: result.message,
+      ...(result.tone ? { tone: result.tone } : {}),
+      input,
+      line: 2,
+    });
+    return {
+      text: `@: *감독실 문이 열린다*\n@${approach.speakerId}: ${approach.facts[0]!.text}\n${coach(state)} ${result.message}`,
       toolCalls: calls,
     };
   }
