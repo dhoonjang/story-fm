@@ -48,6 +48,7 @@ import {
   setRegionalPlan,
   setPlayerTactic,
   setPlayerTraining,
+  setSquadLevels,
   setTactics,
   setTraining,
   setTransferList,
@@ -281,6 +282,21 @@ export function buildGmTools(
           .describe("1·2군 이동 — 2군 선수를 선발에 넣으려면 여기에 first로 함께 적는다"),
       }),
       (input) => setLineup(state, input),
+    ),
+    wrap(
+      "set_squad_level",
+      descriptions.set_squad_level,
+      z.object({
+        /**
+         * 상한을 두지 않는다 — 몇 명까지 옮길 수 있는지는 임의의 숫자가 아니라
+         * 등록 명단과 매치데이 하한이 정하고, 그건 코어가 누적으로 잰다.
+         */
+        moves: z
+          .array(z.object({ playerId: playerRef, level: z.enum(["first", "reserve"]) }))
+          .min(1)
+          .describe("옮길 선수와 갈 곳 — first는 1군 승격, reserve는 2군 이동"),
+      }),
+      (input) => setSquadLevels(state, input),
     ),
     wrap("set_captain", descriptions.set_captain, z.object({ playerId: playerRef }), (input) =>
       setCaptain(state, input.playerId),

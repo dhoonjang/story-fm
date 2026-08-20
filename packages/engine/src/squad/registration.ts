@@ -63,15 +63,20 @@ export function canRegisterFor(
  * 한 명씩 따로 재면 남은 한 자리에 둘이 함께 들어간다고 답한다. 라인업 저장은
  * 승격을 적용하기 **전에** 전부 검증해야 하므로(→ docs/data/team.md §6), 앞사람이
  * 이미 올라간 명단 위에서 다음 사람을 잰다.
+ *
+ * `leaving`은 **같은 요청이 내리는 선수**다. 그들이 비운 자리를 셈하지 않으면
+ * "하나 내리고 하나 올려"가 명단이 찼다는 이유로 반려된다 — 감독이 가장 흔히 하는
+ * 교대인데도.
  */
 export function canRegisterAllFor(
   state: GameState,
   players: readonly Pick<GamePlayer, "id" | "birthdate" | "homegrownCountry">[],
   teamId: string,
+  leaving: ReadonlySet<string> = new Set(),
 ): { ok: true } | { ok: false; playerId: string; reason: string } {
   const joining = new Set(players.map((p) => p.id));
   const squad = firstTeamPlayers(state, teamId)
-    .filter((p) => !joining.has(p.id))
+    .filter((p) => !joining.has(p.id) && !leaving.has(p.id))
     .map((p) => registrableOf(state, p, teamId));
   const year = seasonYear(state.season);
   for (const player of players) {
