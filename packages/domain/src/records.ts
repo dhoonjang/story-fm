@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DateString } from "./date-string";
 import { PitchClaimKindSchema, PitchClaimSchema } from "./persuasion";
 
 /**
@@ -6,8 +7,6 @@ import { PitchClaimKindSchema, PitchClaimSchema } from "./persuasion";
  * 공통 패턴: "현재 상태 = 아직 닫히지 않은 row, 지난 일 = 그대로 이력".
  * 부상은 returnedOn=null, 정지·계약은 status=active가 현재를 뜻한다.
  */
-
-const DateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 // ── 부상 ──────────────────────────────────────────────
 export const InjurySeveritySchema = z.enum(["minor", "moderate", "major"]);
