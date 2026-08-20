@@ -59,23 +59,25 @@
 
 ## 2. 스킬 표면 — 한 판단은 한 도구
 
-도구는 **32개**이고 **전부 평시 GM의 것**이다. 경기 중에는 도구 표면이 **0**이다 —
+도구는 **33개**이고 **전부 평시 GM의 것**이다. 경기 중에는 도구 표면이 **0**이다 —
 지시 해석이 JSON 하나를 내고 코어가 같은 스킬 함수를 부른다
 ([agents.md](./agents.md) §3). 같은 순간에 함께 정해지는 것들이
 갈려 있으면 GM이 하나를 빠뜨린다 — 라인업은 1·2군 이동까지 한 요청(`set_lineup`의
 `squadLevels`), 한 선수의 자리·역할·개인 지시는 `set_player_tactic` 하나, 오퍼는 방향을
 인자로(`send_offer` kind=buy/sell/loan/loan_out), 오퍼 판정은 누가 답할 차례인지 협상이
-알아서 처리한다(`respond_offer`).
+알아서 처리한다(`respond_offer`). 거꾸로 **함께 정해지지 않는 것은 가르는 것이 맞다** —
+층만 옮기는 1·2군 이동은 `set_squad_level`이 따로 받는다. `set_lineup`으로 보내면 선발
+열한 자리를 다시 적게 해, 감독이 말하지 않은 배치까지 이 한마디에 딸려 바뀐다.
 
-| 그룹      | 수  | 도구                                                                                                                                                                            |
-| --------- | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 진행      | 1   | `start_match`                                                                                                                                                                   |
-| 전술·훈련 | 7   | `set_lineup` · `set_captain` · `set_tactics` · `set_player_tactic` · `exploit_point` · `set_match_plan` · `set_training`                                                        |
-| 대화·서사 | 4   | `team_talk` · `talk_to_player` · `respond_to_media` · `apply_narrative_event`                                                                                                   |
-| 경기      | 1   | `substitute`                                                                                                                                                                    |
-| 이적      | 10  | `deal_odds` · `list_negotiations` · `send_offer` · `respond_offer` · `accept_deal` · `open_renewal` · `set_transfer_list` · `withdraw_offer` · `release_player` · `recall_loan` |
-| 재정      | 2   | `apply_finance_event` · `adjust_transfer_budget`                                                                                                                                |
-| 조회      | 7   | `search_players` · `get_squad` · `get_team` · `get_league` · `get_career` · `get_finance` · `scout_player`                                                                      |
+| 그룹      | 수  | 도구                                                                                                                                                                                             |
+| --------- | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 진행      | 1   | `start_match`                                                                                                                                                                                    |
+| 전술·훈련 | 8   | `set_lineup` · `set_squad_level` · `set_captain` · `set_tactics` · `set_player_tactic` · `exploit_point` · `set_match_plan` · `set_training`                                                     |
+| 대화·서사 | 4   | `team_talk` · `talk_to_player` · `respond_to_media` · `apply_narrative_event`                                                                                                                    |
+| 경기      | 1   | `substitute`                                                                                                                                                                                     |
+| 이적      | 11  | `deal_odds` · `list_negotiations` · `send_offer` · `respond_offer` · `accept_deal` · `open_renewal` · `open_release` · `set_transfer_list` · `withdraw_offer` · `release_player` · `recall_loan` |
+| 재정      | 2   | `apply_finance_event` · `adjust_transfer_budget`                                                                                                                                                 |
+| 조회      | 7   | `search_players` · `get_squad` · `get_team` · `get_league` · `get_career` · `get_finance` · `scout_player`                                                                                       |
 
 ### 계약은 넷으로 갈린다
 
@@ -225,6 +227,7 @@ Zod에만 있는 상한은 모델이 모르는 채로 그 도구를 계속 실�
 | 지시 해석 프롬프트·스키마 (`MATCH_INTENT_SYSTEM`) | `packages/agents/src/match-intent.ts` · `match-intent-schema.ts`             |
 | 중계 시스템 프롬프트 (`MATCH_CASTER_SYSTEM`)      | `packages/agents/src/match-caster.ts`                                        |
 | 결산 프롬프트 셋                                  | `packages/agents/src/training-rater.ts` · `match-rater.ts` · `mood-rater.ts` |
+| 이력 요약 프롬프트 (`HISTORY_COMPACTOR_SYSTEM`)   | `packages/agents/src/history-compactor.ts`                                   |
 | 첫 장면 지시 (`ONBOARDING_INSTRUCTION`)           | `packages/agents/src/gm.ts`                                                  |
 | 도구 설명·그룹·표시 이름 (`SKILL_CATALOG`)        | `packages/agents/src/skill-descriptions.ts`                                  |
 | 도구 바인딩·스키마                                | `packages/agents/src/gm-tools.ts`                                            |

@@ -31,6 +31,7 @@ import {
   NARRATIVE_INCOME_CATEGORIES,
   offerPlayerOut,
   openNegotiationFor,
+  openRelease,
   openRenewal,
   pickAnyPlayer,
   playerCard,
@@ -48,9 +49,11 @@ import {
   setRegionalPlan,
   setPlayerTactic,
   setPlayerTraining,
+  setSquadLevels,
   setTactics,
   setTraining,
   setTransferList,
+  severanceOf,
   squadView,
   startMatch,
   substitutePlayer,
@@ -281,6 +284,21 @@ export function buildGmTools(
           .describe("1·2군 이동 — 2군 선수를 선발에 넣으려면 여기에 first로 함께 적는다"),
       }),
       (input) => setLineup(state, input),
+    ),
+    wrap(
+      "set_squad_level",
+      descriptions.set_squad_level,
+      z.object({
+        /**
+         * 상한을 두지 않는다 — 몇 명까지 옮길 수 있는지는 임의의 숫자가 아니라
+         * 등록 명단과 매치데이 하한이 정하고, 그건 코어가 누적으로 잰다.
+         */
+        moves: z
+          .array(z.object({ playerId: playerRef, level: z.enum(["first", "reserve"]) }))
+          .min(1)
+          .describe("옮길 선수와 갈 곳 — first는 1군 승격, reserve는 2군 이동"),
+      }),
+      (input) => setSquadLevels(state, input),
     ),
     wrap("set_captain", descriptions.set_captain, z.object({ playerId: playerRef }), (input) =>
       setCaptain(state, input.playerId),
@@ -603,10 +621,10 @@ export function buildGmTools(
         weeklyWage: money(WAGE_MAX).optional(),
         years: z.number().int().min(1).max(6).optional(),
         kind: z
-          .enum(["buy", "sell", "renew", "loan", "loan_out"])
+          .enum(["buy", "sell", "renew", "loan", "loan_out", "release"])
           .optional()
           .describe(
-            "buy=영입(기본) · sell=매각 · renew=재계약 · loan=임대 영입 · loan_out=임대 송출",
+            "buy=영입(기본) · sell=매각 · renew=재계약 · loan=임대 영입 · loan_out=임대 송출 · release=합의 해지(fee가 제시 정산금)",
           ),
         teamId: z
           .string()
@@ -641,9 +659,11 @@ export function buildGmTools(
         const fee =
           input.kind === "renew"
             ? 0
-            : input.kind === "loan" || input.kind === "loan_out"
-              ? Math.round(marketValueOf(state, player) * LOAN_FEE_RATE)
-              : suggested.fee;
+            : input.kind === "release"
+              ? severanceOf(state, player.id)
+              : input.kind === "loan" || input.kind === "loan_out"
+                ? Math.round(marketValueOf(state, player) * LOAN_FEE_RATE)
+                : suggested.fee;
         const odds = dealOdds(state, {
           ...suggested,
           fee,
@@ -750,6 +770,17 @@ export function buildGmTools(
         years: z.number().int().min(1).max(6),
       }),
       (input) => openRenewal(state, input),
+    ),
+    wrap(
+      "open_release",
+      descriptions.open_release,
+      z.object({
+        playerId: playerRef,
+        severance: money(MONEY_MAX).describe(
+          "제시 정산금 — 잔여 주급 전액이 아니라 합의로 깎아 부르는 값이다",
+        ),
+      }),
+      (input) => openRelease(state, input),
     ),
     wrap(
       "set_transfer_list",

@@ -2,6 +2,7 @@ import type {
   CharacterDepth,
   CharacterEntry,
   CharacterInjection,
+  CharacterMemory,
   Negotiation,
   Persona,
 } from "@story-fm/domain";
@@ -88,7 +89,11 @@ export function characterDepthOf(knowledge: Knowledge): CharacterDepth {
  * 주입한 카드는 이력에 굳으므로 3주 뒤 모델이 낡은 사실로 말하게 된다. 지금의 사실은
  * 발화 직전의 조회가 낸다 (people.md §6).
  */
-export function characterEntry(persona: Persona, depth: CharacterDepth): CharacterEntry {
+export function characterEntry(
+  persona: Persona,
+  depth: CharacterDepth,
+  memories: readonly CharacterMemory[] = [],
+): CharacterEntry {
   const entry: CharacterEntry = {
     characterId: persona.characterId,
     name: persona.name,
@@ -99,6 +104,9 @@ export function characterEntry(persona: Persona, depth: CharacterDepth): Charact
   };
   if (persona.outlet !== undefined) entry.outlet = persona.outlet;
   if (persona.real !== undefined) entry.real = persona.real;
+  // 기억은 깊이가 가르지 않는다 — 소문으로만 아는 사람이라도 **그 대화에 있었던 일**은
+  // 감독이 겪은 것이다. 깊이가 정하는 것은 그 사람의 안쪽(동기·말투)까지 아는가다
+  if (memories.length > 0) entry.memories = [...memories];
   // 소문으로만 아는 사람은 원형과 성격까지다 — 말투를 주면 모델이 만난 적 없는
   // 사람의 목소리를 낸다
   if (depth === "rumour") return entry;
@@ -126,7 +134,19 @@ export function characterEntryOf(
   depth: CharacterDepth,
 ): CharacterEntry | null {
   const persona = personaOf(state, characterId);
-  return persona ? characterEntry(persona, depth) : null;
+  return persona ? characterEntry(persona, depth, memoriesOf(state, characterId)) : null;
+}
+
+/**
+ * 그 인물의 기억 — 압축이 남긴 것들 (people.md §9-1).
+ *
+ * ⚠️ 이력을 다시 그릴 때도 **지금의** 기억이 붙는다. 그래서 압축이 도는 턴에는 이력의
+ * 카드도 함께 달라지지만, 요약 블록이 이력 앞에 서므로(agents.md §5-1) 그 턴은 어차피
+ * 그 뒤가 통째로 무효다 — 캐시로는 공짜이고, 대신 한 인물의 기억이 두 자리에서 갈리지
+ * 않는다.
+ */
+function memoriesOf(state: GameState, characterId: string): CharacterMemory[] {
+  return (state.characterMemories ?? []).filter((m) => m.characterId === characterId);
 }
 
 /** 이름으로 페르소나를 찾는다 — 저장된 인물이 먼저, 그다음이 파생하는 선수다 */
@@ -187,7 +207,13 @@ export function selectCharacters(
   );
   return picked
     .slice(0, CHARACTER_INJECTION_LIMIT)
-    .map(({ candidate }) => characterEntry(candidate.persona, candidate.depth));
+    .map(({ candidate }) =>
+      characterEntry(
+        candidate.persona,
+        candidate.depth,
+        memoriesOf(state, candidate.persona.characterId),
+      ),
+    );
 }
 
 /** 걸렸는가, 어느 자리에서 걸렸는가 — 걸리지 않았으면 `null` */

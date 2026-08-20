@@ -326,7 +326,7 @@ function betterThanInSquad(state: GameState, player: GamePlayer): number {
 }
 
 /**
- * 방출 회견 — **주장이었거나 핵심 자원이었을 때만.**
+ * 계약 해지 회견 — **주장이었거나 핵심 자원이었을 때만.**
  * 백업 정리까지 회견이 붙으면 회견이 흔해져 무게를 잃는다 (transfer.md §2).
  */
 export function buildDeparturePress(

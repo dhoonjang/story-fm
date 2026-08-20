@@ -15,6 +15,7 @@ import {
   playersOf,
   squadLevelOf,
   firstTeamPlayers,
+  isHomegrownFor,
   isTopFlight,
   playerCatalog,
   squadRegistrationOf,
@@ -22,8 +23,10 @@ import {
   applyMonthlyDevelopment,
   developsByCore,
   recordGrowth,
+  setCaptain,
   setLineup,
   setSquadLevel,
+  setSquadLevels,
   userPlayers,
   userTactics,
 } from "../src";
@@ -222,6 +225,82 @@ describe("승격·강등은 등록 규칙을 따른다", () => {
     const res = setSquadLevel(state, { playerId: first[0]!.id, level: "reserve" });
     expect(res.ok).toBe(false);
     expect(res.message).toContain("선발 11 + 벤치 9");
+  });
+});
+
+describe("1·2군 이동 — 한 요청이 여럿을 옮긴다", () => {
+  it("주전을 내리면 배치·주장·적응도가 함께 정리된다", () => {
+    const state = createTestGame();
+    const starter = userTactics(state).assignments.find((a) => a.role === "starting")!;
+    const player = userPlayers(state).find((p) => p.id === starter.playerId)!;
+    expect(setCaptain(state, player.id).ok).toBe(true);
+
+    const res = setSquadLevels(state, { moves: [{ playerId: player.id, level: "reserve" }] });
+
+    expect(res.ok).toBe(true);
+    expect(squadLevelOf(player)).toBe("reserve");
+    // 2군은 배치를 갖지 않는다 — 판에서도 완장에서도 함께 빠진다
+    expect(userTactics(state).assignments.some((a) => a.playerId === player.id)).toBe(false);
+    expect(player.isCaptain).toBe(false);
+    // 적응도는 선반으로 — 없으면 하루 다녀온 주전이 신입으로 돌아온다 (player.md §7.3)
+    expect(userTactics(state).shelved?.some((s) => s.playerId === player.id)).toBe(true);
+    // 판이 열 명이 된 것은 결과가 적는다 (team.md §6)
+    expect(res.brief?.items.some((i) => i.label === "선발")).toBe(true);
+  });
+
+  it("명단이 차 있어도 자리를 비우는 강등과 함께면 올라온다", () => {
+    const state = createTestGame();
+    const seasonStart = 2026;
+    const team = state.userTeamId;
+    // 21세 초과를 전부 올려 명단을 닫는다
+    for (const p of reservePlayers(state, team)) {
+      if (isUnder21(p.birthdate, seasonStart)) continue;
+      setSquadLevel(state, { playerId: p.id, level: "first" });
+    }
+    const blocked = reservePlayers(state, team).find((p) => !isUnder21(p.birthdate, seasonStart));
+    expect(blocked, "명단이 닫히지 않았다").toBeDefined();
+    expect(setSquadLevel(state, { playerId: blocked!.id, level: "first" }).ok).toBe(false);
+
+    // 비우는 자리는 **같은 종류여야** 한다 — 홈그로운 자리는 홈그로운이 비운다
+    const out = userPlayers(state).find(
+      (p) =>
+        squadLevelOf(p) === "first" &&
+        !isUnder21(p.birthdate, seasonStart) &&
+        isHomegrownFor(p, team) === isHomegrownFor(blocked!, team),
+    )!;
+    const res = setSquadLevels(state, {
+      moves: [
+        { playerId: out.id, level: "reserve" },
+        { playerId: blocked!.id, level: "first" },
+      ],
+    });
+
+    expect(res.ok, res.message).toBe(true);
+    expect(squadLevelOf(out)).toBe("reserve");
+    expect(squadLevelOf(blocked!)).toBe("first");
+  });
+
+  it("하한을 뚫는 요청은 **아무도** 옮기지 않는다", () => {
+    const state = createTestGame();
+    // 하한 바로 위까지 미리 줄여 둔다 — 둘을 함께 내리면 그때 하한을 뚫는다
+    let guard = 60;
+    while (guard-- > 0) {
+      const first = userPlayers(state).filter((p) => squadLevelOf(p) === "first");
+      if (first.length <= MATCHDAY_SQUAD + 1) break;
+      setSquadLevel(state, { playerId: first[first.length - 1]!.id, level: "reserve" });
+    }
+    const first = userPlayers(state).filter((p) => squadLevelOf(p) === "first");
+    expect(first.length).toBe(MATCHDAY_SQUAD + 1);
+
+    const two = first.slice(0, 2);
+    const res = setSquadLevels(state, {
+      moves: two.map((p) => ({ playerId: p.id, level: "reserve" as const })),
+    });
+
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain("선발 11 + 벤치 9");
+    // 한 명씩 재고 그때그때 적용했다면 앞사람은 이미 내려가 있다
+    expect(two.map((p) => squadLevelOf(p))).toEqual(["first", "first"]);
   });
 });
 

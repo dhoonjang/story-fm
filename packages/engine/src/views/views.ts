@@ -30,7 +30,7 @@ import {
   shootoutTally,
   slotOfTime,
 } from "@story-fm/domain";
-import { diffDays, nextMatchFor, seasonEndDate } from "../competition/calendar";
+import { DEFAULT_KICKOFF, diffDays, nextMatchFor, seasonEndDate } from "../competition/calendar";
 import {
   categoryOf,
   currentMonthSummary,
@@ -89,7 +89,7 @@ import { INJURY_SEVERITY_KO } from "../squad/injury";
 import { boardExpectation, computeStandings, type StandingRow } from "../competition/season";
 import { hasRelegation, leagueOfTeamIn } from "../competition/promotion";
 import { RELEGATION_SLOTS } from "../core/league-shape";
-import { isCupOnlyLeague } from "../data/league-catalog";
+import { isCupOnlyLeague, leagueName } from "../data/league-catalog";
 import {
   activeContract,
   activeSuspension,
@@ -1020,7 +1020,21 @@ export interface OfficeViews {
   };
   career: {
     trophies: Array<{ competition: string; season: number; teamName: string }>;
-    achievements: Array<{ name: string; description: string; season: number }>;
+    /**
+     * 업적 — **코드와 근거 수치**다. 세이브가 문장을 갖지 않으므로(career.md §6)
+     * 이름과 근거 문장은 화면이 코드로 쓴다(`achievementTitle`). 여기서 하는 일은
+     * id를 표시명으로 푸는 것까지다 — 화면은 리그·대회 카탈로그를 읽지 못한다.
+     */
+    achievements: Array<{
+      code: string;
+      season: number;
+      position?: number;
+      leagueName?: string;
+      competitionName?: string;
+      playerName?: string;
+      goals?: number;
+      matches?: number;
+    }>;
     seasons: Array<{
       season: number;
       teamName: string;
@@ -1585,7 +1599,7 @@ function nextMatchView(state: GameState, m: MatchRecord, label: string): NextMat
   const userTeamId = state.userTeamId;
   return {
     date: m.date,
-    time: m.time ?? "15:00",
+    time: m.time ?? DEFAULT_KICKOFF,
     label,
     opponent: teamNameIn(state, m.homeTeamId === userTeamId ? m.awayTeamId : m.homeTeamId),
     venue: m.neutral ? "neutral" : m.homeTeamId === userTeamId ? "home" : "away",
@@ -1630,7 +1644,7 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
     round.matches.push({
       id: m.id,
       date: m.date,
-      time: m.time ?? "15:00",
+      time: m.time ?? DEFAULT_KICKOFF,
       homeName: teamNameIn(state, m.homeTeamId),
       awayName: teamNameIn(state, m.awayTeamId),
       homeShort: teamShortNameIn(state, m.homeTeamId),
@@ -2335,10 +2349,15 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         season: t.season,
         teamName: teamNameIn(state, t.teamId),
       })),
-      achievements: state.achievements.map(({ name, description, season }) => ({
-        name,
-        description,
-        season,
+      achievements: state.achievements.map((a) => ({
+        code: a.code,
+        season: a.season,
+        position: a.position,
+        leagueName: a.leagueId ? leagueName(a.leagueId) : undefined,
+        competitionName: a.competitionId ? competitionName(a.competitionId) : undefined,
+        playerName: a.playerName,
+        goals: a.goals,
+        matches: a.matches,
       })),
       seasons: state.seasonRecords.map((s) => ({
         season: s.season,

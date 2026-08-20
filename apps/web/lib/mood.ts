@@ -101,7 +101,7 @@ function sentenceOf(fact: MoodFact): string {
       return fact.level === "heavy" ? "다리가 무겁다" : "몸이 가볍다";
     case "departure":
       // 라커룸 전체가 같은 사실을 든다 — 누가 그와 가까웠는지는 아직 아무도 모른다
-      return `${dayWord(fact.days)} ${fact.name} 방출 소식에 라커룸이 뒤숭숭하다`;
+      return `${dayWord(fact.days)} ${fact.name} 계약 해지 소식에 라커룸이 뒤숭숭하다`;
     case "contract-ending":
       return "계약이 반년 안에 끝난다";
     case "captain":

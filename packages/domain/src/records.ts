@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DateString } from "./date-string";
 import { PitchClaimKindSchema, PitchClaimSchema } from "./persuasion";
 
 /**
@@ -6,8 +7,6 @@ import { PitchClaimKindSchema, PitchClaimSchema } from "./persuasion";
  * 공통 패턴: "현재 상태 = 아직 닫히지 않은 row, 지난 일 = 그대로 이력".
  * 부상은 returnedOn=null, 정지·계약은 status=active가 현재를 뜻한다.
  */
-
-const DateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 // ── 부상 ──────────────────────────────────────────────
 export const InjurySeveritySchema = z.enum(["minor", "moderate", "major"]);
@@ -68,6 +67,12 @@ export const ContractSchema = z.object({
   until: DateString,
   /** active = 선수당 정확히 1건 */
   status: z.enum(["active", "ended"]),
+  /**
+   * 이 계약에 대해 이미 낸 만료 경고 중 **가장 낮은 문턱**(일). 없으면 아직 안 냈다.
+   * 문턱을 하루로 재면 tick이 지나지 않은 날의 경고는 영영 오지 않으므로,
+   * "이하로 내려왔고 아직 안 냈다"로 판단한다 (simulation/season.md §5).
+   */
+  expiryWarnedStage: z.number().int().positive().optional(),
 });
 export type Contract = z.infer<typeof ContractSchema>;
 
@@ -112,13 +117,24 @@ export const TransferSchema = z.object({
 export type Transfer = z.infer<typeof TransferSchema>;
 
 /**
- * 방출을 원장에서 알아보는 표식 — `TRANSFER.note`에 이대로 적힌다.
+ * 계약 해지를 원장에서 알아보는 표식 — `TRANSFER.note`에 이대로 적힌다.
  *
- * 계약 만료도 방출도 `type: "free"`로 같은 줄에 서지만 라커룸이 받는 사실은
+ * 계약 만료도 해지도 `type: "free"`로 같은 줄에 서지만 라커룸이 받는 사실은
  * 다르다: 하나는 계약이 끝난 것이고 하나는 **감독이 내보낸 것**이다. 심경이
  * 그 둘을 가르려면 원장에 표식이 있어야 한다 (people.md §5).
+ *
+ * 흥정을 거친 상호 합의와 전액을 물고 끊는 일방을 나눠 적는다 — 원장은 어느 길로
+ * 나갔는지를 알아야 하고, 라커룸에는 **사람이 사라졌다**는 같은 사실이 남는다.
  */
-export const RELEASE_NOTE = "계약 해지 (방출)";
+export const RELEASE_NOTE = {
+  agreed: "계약 해지 (상호 합의)",
+  unilateral: "계약 해지 (일방)",
+} as const;
+
+/** 이 원장 줄이 계약 해지인가 — 두 갈래를 한 자리에서 가른다 */
+export function isReleaseNote(note: string | undefined): boolean {
+  return note === RELEASE_NOTE.agreed || note === RELEASE_NOTE.unilateral;
+}
 
 // ── 협상 (진행 중 흥정 — 완료된 이동은 TRANSFER) ────────
 /**
@@ -131,8 +147,31 @@ export const RELEASE_NOTE = "계약 해지 (방출)";
  * 협상의 방향. `loan`은 **임대 영입**(남의 선수를 빌려 온다), `loan_out`은
  * **임대 내보내기**(우리 선수를 빌려준다). 둘 다 상대가 받아 줘야 성립하므로
  * 같은 테이블을 탄다 — 부르기(recall)만 흥정이 아니라 우리 결정이다.
+ *
+ * `release`는 **상호 계약 해지**다. 감독이 정산금을 제시하고 선수가 판정한다 —
+ * 감독이 전액을 물고 그 자리에서 끊는 일방 해지는 흥정이 아니라 우리 결정이라
+ * 이 테이블을 지나지 않는다 (docs/simulation/transfer.md §2).
  */
-export const NegotiationKindSchema = z.enum(["buy", "sell", "renew", "loan", "loan_out"]);
+export const NegotiationKindSchema = z.enum([
+  "buy",
+  "sell",
+  "renew",
+  "loan",
+  "loan_out",
+  "release",
+]);
+export type NegotiationKind = z.infer<typeof NegotiationKindSchema>;
+
+/**
+ * **상대가 선수 본인인 갈래** — 재계약과 해지.
+ *
+ * 구단이 상대인 갈래와 갈리는 자리가 여럿이다: 방향이 없고(카드 배지가 `영입`·`매각`을
+ * 달 수 없다), 이적창과 무관하며, 메디컬을 지나지 않는다(옮겨 갈 구단이 없다).
+ * 자리마다 `kind === "renew"`로 적어 두면 해지가 그 자리마다 구단 취급을 받는다.
+ */
+export function isPlayerDeal(kind: NegotiationKind): boolean {
+  return kind === "renew" || kind === "release";
+}
 
 export const NegotiationVerdictSchema = z.enum(["accept", "counter", "reject"]);
 export type NegotiationVerdict = z.infer<typeof NegotiationVerdictSchema>;
@@ -143,7 +182,8 @@ export const NegotiationRoundSchema = z.object({
   by: z.enum(["us", "them"]),
   fee: z.number().min(0),
   weeklyWage: z.number().min(0),
-  contractYears: z.number().int().min(1).max(6),
+  /** 해지는 0 — 쓸 계약이 없는 협상이다 (`isPlayerDeal`) */
+  contractYears: z.number().int().min(0).max(6),
   /** 상대 응답 예정일 — 우리 오퍼만 가진다 (상황에서 나온 지연) */
   respondsOn: DateString.nullable(),
   /** 이 오퍼 시점에 코어가 계산한 확률 — 사후에 LLM 판정의 분포를 볼 수 있다 */
@@ -182,7 +222,7 @@ export const NegotiationSchema = z.object({
   id: z.string().min(1),
   gamePlayerId: z.string().min(1),
   kind: NegotiationKindSchema,
-  /** renew는 null — 상대가 선수 본인이다 */
+  /** renew·release는 null — 상대가 선수 본인이다 (`isPlayerDeal`) */
   counterpartTeamId: z.string().min(1).nullable(),
   windowId: z.string().min(1).nullable(),
   openedOn: DateString,
@@ -195,7 +235,7 @@ export const NegotiationSchema = z.object({
    */
   pitched: z.array(PitchClaimKindSchema).optional(),
   /**
-   * 합의 뒤 잡힌 메디컬. 재계약은 갖지 않는다 — 팀을 옮기지 않으므로 검진할
+   * 합의 뒤 잡힌 메디컬. 재계약·해지는 갖지 않는다 — 팀을 옮기지 않으므로 검진할
    * 일이 없다. 구 세이브엔 없어 optional (세이브 버전을 올리지 않는다).
    */
   medical: MedicalSchema.optional(),
@@ -626,11 +666,66 @@ export const TrophySchema = z.object({
 });
 export type Trophy = z.infer<typeof TrophySchema>;
 
+/**
+ * 업적 코드 — **세이브에 남는 것은 이 코드와 근거 수치뿐이다** (overview.md §1 철칙 4).
+ *
+ * 이름과 설명 문장을 함께 저장하면 문구를 고쳐도 옛 세이브는 옛 문장 그대로다.
+ * 화면과 `get_career`는 코드로 이름을 얻고(`achievementTitle`) 문장은 수치로 쓴다.
+ */
+export const ACHIEVEMENT_CODES = [
+  "champion",
+  "invincible",
+  "ucl-spot",
+  "sharpshooter",
+  "survivor",
+  "cup-winner",
+  "euro-champion",
+] as const;
+export type AchievementCode = (typeof ACHIEVEMENT_CODES)[number];
+
+/**
+ * 업적 이름 — 코드가 그 자리에서 읽히게 하는 유일한 표.
+ *
+ * ⚠️ `top4`는 **옛 세이브만** 갖는다 — 리그를 보지 않고 4위로 잘랐던 옛 조건이라
+ * `ucl-spot`으로 바뀌었다. 코드를 지우면 옛 세이브의 업적이 이름 없이 남으므로 표에
+ * 남긴다 (career.md §6).
+ */
+const ACHIEVEMENT_TITLES: Record<string, string> = {
+  champion: "챔피언",
+  invincible: "무패 시즌",
+  "ucl-spot": "유럽 최상위 진출",
+  sharpshooter: "골잡이 조련사",
+  survivor: "생존왕",
+  "cup-winner": "컵 우승",
+  "euro-champion": "유럽 정복",
+  top4: "탑4",
+};
+
+export function achievementTitle(code: string): string {
+  return ACHIEVEMENT_TITLES[code] ?? code;
+}
+
+/**
+ * 업적 한 건 — 코드 + **그 업적이 선 근거 수치**. 어느 항목을 채우는가는 코드가 정한다
+ * (career.md §6). 옛 세이브의 `name`·`description`은 읽지 않는다 (스키마가 버린다).
+ */
 export const AchievementSchema = z.object({
   code: z.string().min(1),
   season: z.number().int(),
-  name: z.string().min(1),
-  description: z.string(),
+  /** 리그 성적에서 나온 업적의 근거 — 최종 순위와 그 시즌에 뛴 리그 */
+  position: z.number().int().positive().optional(),
+  leagueId: z.string().min(1).optional(),
+  /** `invincible`이 센 경기 수 — 리그 규모마다 다르다 */
+  matches: z.number().int().positive().optional(),
+  /** `cup-winner`·`euro-champion`이 가리키는 대회 */
+  competitionId: z.string().min(1).optional(),
+  /**
+   * `sharpshooter`의 그 선수와 시즌 골. 이름을 함께 남기는 이유는 은퇴한 선수가
+   * `state.players`에서 사라져 id로는 더 못 찾기 때문이다 — 이름은 사실이지 문장이 아니다.
+   */
+  gamePlayerId: z.string().min(1).optional(),
+  playerName: z.string().min(1).optional(),
+  goals: z.number().int().nonnegative().optional(),
 });
 export type Achievement = z.infer<typeof AchievementSchema>;
 

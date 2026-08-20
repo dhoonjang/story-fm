@@ -1,4 +1,4 @@
-import { ageOf, RELEASE_NOTE } from "@story-fm/domain";
+import { ageOf, isReleaseNote } from "@story-fm/domain";
 import type { GamePlayer, MatchRecord, PlayerIssueReason } from "@story-fm/domain";
 import { diffDays } from "../competition/calendar";
 import { formLabel, RATING_BASELINE, type FormLabel } from "./form";
@@ -38,7 +38,7 @@ import {
 /** 경기의 여운이 남아 있는 기간 — 이 안이면 심경이 그 경기에 매여 있다 */
 const AFTERGLOW_DAYS = 3;
 
-/** 방출의 여운이 라커룸에 남아 있는 기간 — 지나면 아무도 그 이름을 말하지 않는다 */
+/** 계약 해지의 여운이 라커룸에 남아 있는 기간 — 지나면 아무도 그 이름을 말하지 않는다 */
 const DEPARTURE_ECHO_DAYS = 3;
 
 /** 자기 경기를 잘했다/못했다로 가르는 평점 폭 — 기준선에서 이만큼 떨어지면 등급이 선다 */
@@ -87,7 +87,7 @@ export type MoodFact =
   | { cause: "no-minutes"; place: "bench" | "out" }
   | { cause: "form"; label: FormLabel }
   | { cause: "condition"; level: "heavy" | "light" }
-  /** 최근 우리 구단에서 방출된 선수 — 남은 선수단 전원이 같은 카드를 든다 */
+  /** 최근 우리 구단에서 계약이 해지된 선수 — 남은 선수단 전원이 같은 카드를 든다 */
   | { cause: "departure"; name: string; days: number }
   | { cause: "contract-ending"; daysLeft: number }
   | { cause: "captain" }
@@ -207,9 +207,9 @@ function demotionDaysOf(state: GameState, player: GamePlayer): number | null {
 }
 
 /**
- * 최근 우리 구단에서 **방출된** 선수 — 원장에서 파생한다.
+ * 최근 우리 구단에서 **계약이 해지된** 선수 — 원장에서 파생한다.
  *
- * 계약 만료도 방출도 `type: "free"`라 갈리는 것은 `RELEASE_NOTE` 표식뿐이다.
+ * 계약 만료도 해지도 `type: "free"`라 갈리는 것은 `RELEASE_NOTE` 표식뿐이다.
  * 원장은 날짜 순이므로 뒤에서부터 훑고 창을 벗어나면 멈춘다 — 원장이 아무리 커도
  * 보는 줄은 몇 줄이다.
  */
@@ -221,7 +221,7 @@ function recentDeparture(state: GameState): MoodFact | null {
     if (days < 0) continue;
     if (days > DEPARTURE_ECHO_DAYS) break;
     if (transfer.fromTeamId !== state.userTeamId) continue;
-    if (transfer.note !== RELEASE_NOTE) continue;
+    if (!isReleaseNote(transfer.note)) continue;
     const name = playerById(state, transfer.gamePlayerId)?.name;
     if (name === undefined) continue;
     return { cause: "departure", name, days };
@@ -321,11 +321,11 @@ export function moodFactsOf(
 
   // ── 곁들임: 지금 조치하지 않으면 놓칠 사정 ──
   /**
-   * 방금 누가 방출됐다 — 라커룸 전체가 같은 사실을 든다. 누가 그와 가까웠는지를
+   * 방금 누가 팀을 떠났다 — 라커룸 전체가 같은 사실을 든다. 누가 그와 가까웠는지를
    * 가를 관계 점수가 아직 없어 카드도 하나뿐이다 (people.md §5).
    *
    * ⚠️ **우리 라커룸의 사실이다.** 스카우트가 보는 남의 선수에게 우리 구단의
-   * 방출이 걸리면 그 카드는 거짓말이다.
+   * 해지가 걸리면 그 카드는 거짓말이다.
    */
   if (player.teamId === state.userTeamId && facts.length < MOOD_FACT_LIMIT) {
     const departure = recentDeparture(state);
@@ -433,7 +433,7 @@ function factLine(fact: MoodFact): string {
         ? `체력 ${CONDITION_HEAVY} 이하`
         : `체력 ${CONDITION_LIGHT} 이상`;
     case "departure":
-      return `${fact.name} 방출 · ${dayWord(fact.days)}`;
+      return `${fact.name} 계약 해지 · ${dayWord(fact.days)}`;
     case "contract-ending":
       return `계약 만료 ${fact.daysLeft}일`;
     case "captain":

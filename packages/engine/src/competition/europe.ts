@@ -69,26 +69,32 @@ export function euroMatchdayDates(season: number): string[] {
   });
 }
 
+/** 대항전 킥오프는 이 두 자리뿐이다 — 이른 저녁과 야간 */
+const EURO_EARLY_KICKOFF = "18:45";
+
+/** 녹아웃은 리그 페이즈와 달리 야간 한 자리만 쓴다 (`euro-knockout.ts`) */
+export const EURO_NIGHT_KICKOFF = "21:00";
+
 /**
  * 대항전 킥오프 슬롯 — [기준 수요일로부터의 일수, 킥오프].
  *
- * UCL은 실제처럼 화·수로 쪼개고, 유로파·컨퍼런스는 목요일에 모은다. 킥오프는
- * 18:45 / 21:00 두 슬롯. 리그와 마찬가지로 **날짜와 시간을 함께** 정한다.
+ * UCL은 실제처럼 화·수로 쪼개고, 유로파·컨퍼런스는 목요일에 모은다.
+ * 리그와 마찬가지로 **날짜와 시간을 함께** 정한다.
  */
 const EURO_SLOTS: Record<string, Array<readonly [number, string]>> = {
   ucl: [
-    [-1, "18:45"],
-    [-1, "21:00"],
-    [0, "18:45"],
-    [0, "21:00"],
+    [-1, EURO_EARLY_KICKOFF],
+    [-1, EURO_NIGHT_KICKOFF],
+    [0, EURO_EARLY_KICKOFF],
+    [0, EURO_NIGHT_KICKOFF],
   ],
   uel: [
-    [1, "18:45"],
-    [1, "21:00"],
+    [1, EURO_EARLY_KICKOFF],
+    [1, EURO_NIGHT_KICKOFF],
   ],
   uecl: [
-    [1, "18:45"],
-    [1, "21:00"],
+    [1, EURO_EARLY_KICKOFF],
+    [1, EURO_NIGHT_KICKOFF],
   ],
 };
 
