@@ -833,8 +833,49 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
  */
 const SUB_FATIGUE = 65;
 const SUB_FATIGUE_HALFTIME = 58;
+/** 체력만으로 벤치가 움직이기 시작하는 분 — 휴식 정지점은 이보다 앞이라도 연다 */
+const SUB_FATIGUE_MINUTE = 58;
 /** 정지점마다 교체를 검토할 확률 — 58분 이후 구간이 두셋뿐이라 낮으면 기회 자체가 없다 */
 const SUB_CHANCE = 0.8;
+
+/**
+ * **승부수와 굳히기가 열리는 시각** — ⚠️ 밸런스 값 (match.md §2·§6).
+ *
+ * 실제 경기의 교체는 60~80분에 몰린다. 이보다 이르면 상대가 후반 초입에 이미 판을
+ * 흔들어 감독이 반응할 시간이 남지 않고, 늦으면 벤치가 손을 놓은 것과 같다.
+ * 두 골 이상 뒤진 팀만 열 분을 당겨 쓴다 — 한 골과 두 골은 남은 시간의 무게가 다르다.
+ */
+export const SUB_CHASE_MINUTE = 60;
+export const SUB_CHASE_MINUTE_TWO = 50;
+export const SUB_HOLD_MINUTE = 75;
+/**
+ * 한 경기에 쓰는 승부수·굳히기 장수 — ⚠️ 밸런스 값.
+ *
+ * 상한이 없으면 정지점이 잦은 경기에서 교체 카드(6인/4회)가 스코어 하나에 통째로
+ * 쓰이고, 그다음 부상에 댈 자원이 남지 않는다. **세는 자리는 장부의 `causes`다** —
+ * 세이브에 칸을 두지 않으므로 옛 세이브에서도 셈이 맞는다.
+ */
+export const SUB_CHASE_MAX = 2;
+export const SUB_HOLD_MAX = 1;
+
+/**
+ * 교체의 근거 — **중계가 그대로 인용하고, 장수를 세는 열쇠이기도 하다.**
+ * 하네스가 갈래를 나눠 세는 자리도 여기라 문자열이 두 곳에 적히지 않는다.
+ */
+export const AI_SUB_CAUSE = {
+  injury: "부상 — 교체 불가피",
+  chase: "승부수 — 공격 자원 투입",
+  hold: "리드 굳히기 — 수비 보강",
+  fatigue: "체력 저하 — 로테이션",
+} as const;
+const CHASE_CAUSE = AI_SUB_CAUSE.chase;
+const HOLD_CAUSE = AI_SUB_CAUSE.hold;
+
+/**
+ * 그 줄이 무너지지 않는 최소 인원 — 승부수가 수비를 셋 밑으로 깎지 않는다.
+ * 이게 없으면 두 골 차로 뒤진 팀이 수비 둘로 남은 30분을 뛴다.
+ */
+const LINE_FLOOR: Record<"DF" | "MF" | "FW", number> = { DF: 3, MF: 2, FW: 1 };
 
 /** 벤치가 판을 다시 짜는 정지점 — 문턱이 낮아진다 (장부의 `BREAK_EVENTS`와 같은 자리) */
 const BREAK_STOPS: ReadonlySet<SegmentStop> = new Set<SegmentStop>([
@@ -909,7 +950,7 @@ export function planAiSubstitution(
         type: "substitution",
         team: side,
         actors: [hurt.id, cover.id],
-        causes: ["부상 — 교체 불가피"],
+        causes: [AI_SUB_CAUSE.injury],
       };
     }
   }
@@ -920,7 +961,15 @@ export function planAiSubstitution(
    * 연장 개시·연장 하프타임도 같다: 90분을 뛴 다리를 그대로 30분 더 세우지 않는다.
    */
   const atBreak = BREAK_STOPS.has(plan.stop);
-  if (!atBreak && (plan.minute < 58 || rng() > SUB_CHANCE)) return null;
+  /** 어느 갈래도 아직 열리지 않은 시각 — 여기선 난수를 굴리지도 않는다 */
+  const earliest = Math.min(SUB_CHASE_MINUTE_TWO, SUB_FATIGUE_MINUTE);
+  if (!atBreak && plan.minute < earliest) return null;
+  /**
+   * **검토 여부는 정지점마다 한 번만 굴린다.** 갈래마다 따로 굴리면 갈래를 늘릴
+   * 때마다 교체 빈도가 함께 오른다 — 스코어를 읽는 벤치를 더한 대가로 체력 교체가
+   * 잦아지는 것은 아무도 고르지 않은 밸런스 변경이다.
+   */
+  if (!atBreak && rng() > SUB_CHANCE) return null;
 
   /**
    * 교체는 이 구간의 **앞쪽**에 끼워지므로, 뺄 선수가 구간의 다른 사건에 등장하면
@@ -928,16 +977,33 @@ export function planAiSubstitution(
    * 이 구간에 퇴장한 선수도 대상에서 뺀다 (이미 그라운드에 없다).
    */
   const busy = new Set(plan.events.flatMap((e) => e.actors));
+  const unavailable = new Set([...busy, ...gone]);
   /** 지친 정도 — 남은 체력의 반대. 경기 중 소모분을 더해 본다 */
   const tiredness = (p: Player) =>
     100 - p.state.condition + (worn[p.id] ?? 0) + (plan.fatigue[p.id] ?? 0);
-  const tired = [...squad.onPitch]
-    .filter((p) => positionGroupOfPlayer(p) !== "GK" && !busy.has(p.id) && !gone.has(p.id))
-    .sort((a, b) => tiredness(b) - tiredness(a))[0];
+  const field = squad.onPitch.filter(
+    (p) => positionGroupOfPlayer(p) !== "GK" && !busy.has(p.id) && !gone.has(p.id),
+  );
+
+  const scoreSub = planScoreSubstitution({
+    side,
+    squad,
+    ledger,
+    plan,
+    field,
+    unavailable,
+    tiredness,
+    bestOf,
+  });
+  if (scoreSub) return scoreSub;
+
+  // 체력만 보는 갈래는 후반에만 — 휴식 정지점은 그 전에도 문턱을 낮춰 연다
+  if (!atBreak && plan.minute < SUB_FATIGUE_MINUTE) return null;
+  const tired = [...field].sort((a, b) => tiredness(b) - tiredness(a))[0];
   // 휴식 시간엔 문턱을 낮춘다 — 전반에 이미 다리가 무거운 선수는 그때 바꾼다
   if (!tired || tiredness(tired) < (atBreak ? SUB_FATIGUE_HALFTIME : SUB_FATIGUE)) return null;
 
-  const replacement = bestOf(positionGroupOfPlayer(tired), new Set([...busy, ...gone]));
+  const replacement = bestOf(positionGroupOfPlayer(tired), unavailable);
   if (!replacement) return null;
 
   return {
@@ -945,7 +1011,81 @@ export function planAiSubstitution(
     type: "substitution",
     team: side,
     actors: [tired.id, replacement.id],
-    causes: ["체력 저하 — 로테이션"],
+    causes: [AI_SUB_CAUSE.fatigue],
+  };
+}
+
+/**
+ * **스코어와 남은 시간을 읽은 교체** — 뒤지면 공격 자원을, 앞서면 수비 자원을.
+ *
+ * 부상과 체력만 보는 벤치는 스코어가 몇 대 몇이든 같은 교체를 한다. 그러면 감독의
+ * 후반 우위가 구조적이 되고, 중계가 인용할 "상대가 승부수를 던졌다"는 장면이
+ * 생기지 않는다. 문턱과 장수는 `SUB_CHASE_*`·`SUB_HOLD_*` — ⚠️ 밸런스 값.
+ *
+ * **줄이 무너지는 교체는 하지 않는다** (`LINE_FLOOR`). 뺄 줄에 여유가 없으면
+ * 미드필드에서 한 명을 내주고, 그마저 없으면 이 갈래는 접는다.
+ */
+function planScoreSubstitution(input: {
+  side: MatchSide;
+  squad: SegmentSquad;
+  ledger: MatchLedgerState;
+  plan: SegmentPlan;
+  /** 지금 그라운드에 서 있고 뺄 수 있는 필드 선수 */
+  field: Player[];
+  unavailable: Set<string>;
+  tiredness: (p: Player) => number;
+  bestOf: (group: string, exclude: Set<string>) => Player | undefined;
+}): MatchEvent | null {
+  const { side, squad, ledger, plan, field, unavailable, tiredness, bestOf } = input;
+  const mine = side === "home" ? ledger.score.home : ledger.score.away;
+  const theirs = side === "home" ? ledger.score.away : ledger.score.home;
+  const diff = mine - theirs;
+  if (diff === 0) return null;
+
+  /** 이 경기에 이미 쓴 장수 — 장부의 근거로 센다 */
+  const spent = (cause: string) =>
+    ledger.events.filter(
+      (e) => e.type === "substitution" && e.team === side && e.causes.includes(cause),
+    ).length;
+
+  /** 그 줄에서 가장 지친 선수 — 줄의 최소 인원을 깨지 않을 때만 */
+  const spare = (group: "DF" | "MF" | "FW") => {
+    const line = field.filter((p) => positionGroupOfPlayer(p) === group);
+    if (line.length <= LINE_FLOOR[group]) return undefined;
+    return [...line].sort((a, b) => tiredness(b) - tiredness(a))[0];
+  };
+  /** 벤치의 자원 — 같은 계열이 없으면 미드필더를 그 성향으로 골라 세운다 */
+  const bench = (group: "DF" | "FW", lean: (p: Player) => number) =>
+    bestOf(group, unavailable) ??
+    squad.bench
+      .filter((p) => positionGroupOfPlayer(p) === "MF" && !unavailable.has(p.id))
+      .sort((a, b) => lean(b) - lean(a))[0];
+
+  if (diff < 0) {
+    const from = diff <= -2 ? SUB_CHASE_MINUTE_TWO : SUB_CHASE_MINUTE;
+    if (plan.minute < from || spent(CHASE_CAUSE) >= SUB_CHASE_MAX) return null;
+    const coming = bench("FW", (p) => p.attributes.finishing + p.attributes.dribbling);
+    const going = spare("DF") ?? spare("MF");
+    if (!coming || !going) return null;
+    return {
+      minute: plan.minute,
+      type: "substitution",
+      team: side,
+      actors: [going.id, coming.id],
+      causes: [CHASE_CAUSE],
+    };
+  }
+
+  if (plan.minute < SUB_HOLD_MINUTE || spent(HOLD_CAUSE) >= SUB_HOLD_MAX) return null;
+  const coming = bench("DF", (p) => p.attributes.tackling + p.attributes.positioning);
+  const going = spare("FW") ?? spare("MF");
+  if (!coming || !going) return null;
+  return {
+    minute: plan.minute,
+    type: "substitution",
+    team: side,
+    actors: [going.id, coming.id],
+    causes: [HOLD_CAUSE],
   };
 }
 
@@ -987,6 +1127,31 @@ function settleShift(
 }
 
 /**
+ * **AI가 판의 모양을 바꾸는 시각** — ⚠️ 밸런스 값 (match.md §2·§6).
+ *
+ * 축을 미는 것과 모양을 갈아엎는 것은 무게가 다르다. 자리를 옮긴 선수는 적응도를
+ * 치르므로(`match-flow`의 `AI_SHAPE_FAMILIARITY_COST`) 늦게, 한 번만 연다.
+ */
+export const AI_SHAPE_CHASE_MINUTE = 65;
+export const AI_SHAPE_HOLD_MINUTE = 80;
+
+/**
+ * 벤치가 판을 다시 깔려는 **의도** — 어느 프리셋인지는 여기서 고르지 않는다.
+ *
+ * 스쿼드가 그 모양에 설 수 있는지는 명단과 적응도를 아는 코어(engine)만 안다.
+ * 구간 시뮬이 "3-5-2"를 직접 고르면 센터백 둘로 백3에 서는 팀이 나온다.
+ */
+export type AiShapeIntent = "chase" | "hold";
+
+/** 벤치가 이 정지점에 옮기려는 것 — 축과 모양 (둘 다 없으면 판단 자체가 null이다) */
+export interface AiBenchShift {
+  /** 바꿀 축만 담은 부분 전술 */
+  axes?: Partial<TacticsSpec>;
+  /** 판의 모양을 어느 쪽으로 — 프리셋 고르기는 호출부의 몫 */
+  shape?: AiShapeIntent;
+}
+
+/**
  * AI 팀의 경기 중 전술 반응 — **상대도 벤치에서 판단한다.**
  *
  * 이게 없으면 상대는 킥오프 전술로 90분을 버티는 고정 표적이고, 감독의 조정은
@@ -996,18 +1161,20 @@ function settleShift(
  * 판단은 단순하다 — 스코어와 남은 시간. 실제 감독의 후반 조정도 대개 그 둘이다.
  * 여기서 나온 값은 **그 경기에만** 쓰이고 팀의 저장된 전술은 건드리지 않는다.
  *
- * @returns 바꿀 축만 담은 부분 전술 (바꿀 것이 없으면 null)
+ * @returns 옮길 축과 모양 (옮길 것이 없으면 null)
  */
 export function planAiTacticalShift(
   side: MatchSide,
   /** 지금 걸려 있는 전술 — 앞선 정지점에서 옮긴 값이 실려 있다 */
   current: TacticsSpec,
-  /** 킥오프 전술 — 이동의 상한이 여기서 선다 (`AI_SHIFT_BOUND`) */
+  /** 킥오프 전술 — 축 이동의 상한이 여기서 선다 (`AI_SHIFT_BOUND`) */
   kickoff: TacticsSpec,
   ledger: MatchLedgerState,
   /** 라커룸에서 강도를 다시 정하는 자리 */
   halftime = false,
-): Partial<TacticsSpec> | null {
+  /** 이 경기에서 이미 모양을 바꿨는가 — 경기당 한 번이다 */
+  shapeMoved = false,
+): AiBenchShift | null {
   const minute = ledger.minute;
   if (!halftime && minute < 55) return null; // 전반 중에는 웬만하면 그대로 간다
   const mine = side === "home" ? ledger.score.home : ledger.score.away;
@@ -1015,6 +1182,17 @@ export function planAiTacticalShift(
   const diff = mine - theirs;
   /** 시간이 없을수록 과감해진다 — 75분의 한 골과 55분의 한 골은 무게가 다르다 */
   const urgent = minute >= 72;
+  const shaped = (shape: AiShapeIntent, from: number): AiShapeIntent | undefined =>
+    !shapeMoved && minute >= from ? shape : undefined;
+
+  const settled = (
+    wanted: Partial<Record<AiShiftAxis, number>>,
+    shape: AiShapeIntent | undefined,
+  ): AiBenchShift | null => {
+    const axes = settleShift(wanted, current, kickoff);
+    if (!axes && !shape) return null;
+    return { ...(axes ? { axes } : {}), ...(shape ? { shape } : {}) };
+  };
 
   if (diff < 0) {
     // 지고 있다 — 무게를 앞으로. 두 골 차로 늦었으면 라인까지 올려 던진다
@@ -1028,18 +1206,17 @@ export function planAiTacticalShift(
     if (halftime) {
       push.pressing = current.pressing + 1;
     }
-    return settleShift(push, current, kickoff);
+    return settled(push, shaped("chase", AI_SHAPE_CHASE_MINUTE));
   }
   if (diff > 0 && urgent) {
     // 이기고 있고 시간이 얼마 없다 — 내려서서 지킨다
-    return settleShift(
+    return settled(
       {
         mentality: current.mentality - 1,
         defensiveLine: current.defensiveLine - 1,
         tempo: current.tempo - 1,
       },
-      current,
-      kickoff,
+      shaped("hold", AI_SHAPE_HOLD_MINUTE),
     );
   }
   return null;

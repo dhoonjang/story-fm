@@ -190,7 +190,14 @@ export function advanceToMatchday(state: GameState): void {
  * 경기일 상태에서 코어 구간 시뮬레이터로 경기를 끝까지 치른다.
  * 실모드와 같은 함수를 쓴다 — 차이는 서술을 LLM이 맡는지뿐이다.
  */
-export function playMockMatch(state: GameState): string[] {
+export function playMockMatch(
+  state: GameState,
+  /**
+   * 결산 직전의 `pendingMatch`를 보는 자리 — 장부는 `finalizeMatch`가 걷어 간다.
+   * 경기 중에만 있는 것(AI가 옮긴 전술·갈아 깐 판)을 재려면 여기서 읽어야 한다.
+   */
+  onFullTime?: (state: GameState) => void,
+): string[] {
   const started = startMatch(state);
   if (!started.ok) throw new Error(started.message);
   let guard = 60;
@@ -198,6 +205,7 @@ export function playMockMatch(state: GameState): string[] {
     const step = advanceSegment(state);
     if (!step.ok) throw new Error(step.message);
     if (step.plan?.stop === "full_time") {
+      onFullTime?.(state);
       // 갈래를 나눈 결산을 여기선 평탄화해 돌려준다 — 이 반환을 읽는 테스트가 여럿이다
       return digestLines(finalizeMatch(state));
     }

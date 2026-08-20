@@ -191,6 +191,27 @@ export const AI_FITNESS = defineHarness({
   ],
 });
 
+export const AI_BENCH = defineHarness({
+  id: "ai-bench",
+  what: "감독의 경기에서 상대 벤치가 쓰는 교체 수·시점·갈래",
+  doc: "docs/simulation/match.md §2",
+  cost: "시드당 수십 초 × 2시드",
+  // prettier-ignore
+  bands: [
+    { metric: "AI 교체/경기", role: "reference", min: 3.5, max: 5, unit: "count", why: "실제 1부는 5인 교체제에서 4.3 — 지금은 그 밑이다(match.md §9). 한도(5)는 장부가 막는다" },
+    { metric: "승부수 교체/경기", role: "measure", unit: "count", why: "스코어를 읽은 갈래가 실제로 얼마나 쓰이는가" },
+    { metric: "굳히기 교체/경기", role: "measure", unit: "count", why: "리드를 지키는 갈래 — 승부수보다 드물어야 정상이다" },
+    { metric: "체력 교체/경기", role: "measure", unit: "count", why: "예전부터 있던 갈래 — 스코어 갈래가 이걸 밀어내지 않았는지" },
+    { metric: "부상 교체/경기", role: "measure", unit: "count", why: "INJURY_PER_MATCH의 파생 — 다치면 언제나 뺀다" },
+    { metric: "끝까지 뒤진 경기에서 승부수를 던진 비율", role: "guard", min: 0.5, unit: "ratio", why: "0이면 이 기능이 죽은 것이다 — 벤치가 스코어를 읽는가의 단일 지표" },
+    { metric: "끝까지 앞선 경기에서 굳힌 비율", role: "measure", unit: "ratio", why: "굳히기는 75′이고 교체 카드를 먼저 쓴 팀은 못 쓴다" },
+    { metric: "AI 교체의 60′ 이후 비율", role: "reference", min: 0.5, max: 0.95, unit: "ratio", why: "실제 교체는 후반에 몰린다 — 전부 후반이면 하프타임 갈래가 죽은 것이다" },
+    { metric: "AI 교체 중앙 분", role: "measure", unit: "score", why: "실제 1부는 60분대 — 우리는 체력 문턱(SUB_FATIGUE)이 늦어 그보다 뒤다" },
+    { metric: "판의 모양을 바꾼 경기 비율", role: "measure", unit: "ratio", why: "경기당 한 번 — 스코어가 벌어진 경기에서만 선다" },
+    { metric: "잰 경기 수", role: "measure", unit: "count", why: "표본이 있는가" },
+  ],
+});
+
 export const AI_MARKET = defineHarness({
   id: "ai-market",
   what: "한 시즌의 AI↔AI 시장 규모 — 팀당 이적·임대와 여름 비중",
@@ -233,6 +254,31 @@ export const SQUAD_LONGEVITY = defineHarness({
     { metric: "가장 얕은 스쿼드 인원", role: "measure", unit: "count", why: "평균은 한 구단의 고갈을 감춘다" },
     { metric: "가장 얕은 GK 보유", role: "measure", unit: "count", why: "1이면 버틴 것이고 2면 숫자가 살아 있다" },
     { metric: "스쿼드 평균 나이", role: "measure", why: "은퇴와 콜업의 균형 — 해마다 오르면 언젠가 선발 XI가 깨진다" },
+  ],
+});
+
+/**
+ * 2군 강등이 낳는 불만 — **문턱이 로테이션과 방치를 가르는가** (`docs/data/people.md` §5).
+ *
+ * 상수 하나(21일)가 두 가지 플레이를 동시에 정한다: 짧으면 선수를 잠깐 내렸다
+ * 올리는 로테이션이 곧 반란이 되고, 길면 강등이 지금처럼 **비용 0인 손잡이**로
+ * 남는다. 어느 쪽인지는 한 시즌을 굴려 봐야 보인다 — 코드를 읽어서는 알 수 없고,
+ * 고정 기댓값이 있는 단위 테스트로도 잡히지 않는다.
+ */
+export const DEMOTION_GRIEVANCE = defineHarness({
+  id: "demotion-grievance",
+  what: "한 시즌 2군 강등이 낳는 불만 — 로테이션은 공짜고 방치는 값을 치르는가",
+  doc: "docs/data/people.md §5",
+  cost: "축소 세계 한 시즌 · 약 10초",
+  // prettier-ignore
+  bands: [
+    { metric: "로테이션 강등 횟수", role: "measure", unit: "count", why: "아래 두 줄의 표본 — 0이면 로테이션을 재지 못한 것이다" },
+    { metric: "로테이션 복귀 실패", role: "guard", max: 0, unit: "count", why: "올리지 못한 선수는 방치와 구분되지 않는다 — 실패가 있으면 아래 줄이 로테이션을 재는 것이 아니다" },
+    { metric: "로테이션 자원에 걸린 불만", role: "guard", max: 0, unit: "count", why: "열흘 안에 되돌리는 감독은 대가를 치르지 않는다 — 여기가 1이면 로테이션이 곧 반란이다" },
+    { metric: "방치한 핵심 자원", role: "guard", min: 3, max: 3, unit: "count", why: "아래 줄의 분모 — 스쿼드 하한에 걸려 덜 내려갔으면 밴드가 공허하다" },
+    { metric: "방치 끝에 불만이 걸린 수", role: "guard", min: 3, max: 3, unit: "count", why: "한 시즌을 그대로 두고도 조용하면 강등은 여전히 비용 0인 손잡이다" },
+    { metric: "첫 방치 불만까지 걸린 날", role: "guard", min: 21, max: 27, unit: "count", why: "문턱 21일 + 판정이 주에 한 번이라 최대 엿새가 밀린다" },
+    { metric: "시즌 강등발 불만 건수", role: "measure", unit: "count", why: "감독 하나가 한 시즌에 몇 번 이 자리를 만나는가" },
   ],
 });
 
@@ -324,6 +370,7 @@ export const HARNESSES: readonly Harness[] = [
   AI_MARKET,
   MANAGER_MARKET,
   SQUAD_LONGEVITY,
+  DEMOTION_GRIEVANCE,
   OVERALL_SCALE,
   HISTORY_WINDOW,
 ];
