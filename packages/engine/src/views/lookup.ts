@@ -830,12 +830,17 @@ export function teamProfile(state: GameState, team: string): LookupResult {
     .sort((a, b) => sortRating(state, b) - sortRating(state, a))
     .slice(0, 6);
 
+  const managerName = state.teams.find((t) => t.id === teamId)?.managerName;
+
   const lines = [
     `[팀 프로필] ${teamNameIn(state, teamId)} — ${competitionName(leagueOfTeamIn(state, teamId))} ` +
       (row && row.played > 0
         ? `${rank || "?"}위 (${row.played}경기 ${row.wins}승 ${row.draws}무 ${row.losses}패 · 승점 ${row.points} · 득실 ${row.goalDiff >= 0 ? "+" : ""}${row.goalDiff})`
         : "순위 미정 (아직 경기 없음)"),
     `전술: ${tactics.spec.formation} · 멘탈리티${tactics.spec.mentality} 압박${tactics.spec.pressing} 템포${tactics.spec.tempo} 패스${tactics.spec.passStyle}`,
+    // 상대 벤치에 서는 사람 — 이름이 여기 나와야 캐릭터북이 그 인물지를 세운다
+    // (people.md §2-1). 이름을 모르는 구단은 줄이 서지 않는다
+    ...(managerName !== undefined ? [`감독: ${managerName}`] : []),
     `스쿼드: ${squad.length}명 · 평균 ${avgAge.toFixed(1)}세 · 구단 등급 ${tierOfTeamIn(state, teamId)}`,
     recent.length > 0 ? `최근 5경기: ${recent.join(" / ")}` : "최근 경기 없음",
   ];

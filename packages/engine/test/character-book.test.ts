@@ -168,4 +168,70 @@ describe("캐릭터북 — 이번 턴에 실을 인물지", () => {
     expect(characterDepthOf("seen")).toBe("outline");
     expect(characterDepthOf("rumoured")).toBe("rumour");
   });
+
+  /* ── 후보의 세 겹 — 우리 사람 · 이름난 현역 · 세계 인물 명부 (people.md §6) ── */
+
+  it("이름난 현역은 우리 팀이 아니어도 카드가 선다 — 시장 전용 리그 시드는 능력치를 묻지 않는다", () => {
+    const state = structuredClone(base);
+    const legend = state.players.find((p) => p.name === "리오넬 메시")!;
+    // 이 선은 능력치가 아니라 명단이 긋는다 — 나이가 깎은 것은 기량이지 이름값이 아니다
+    expect(legend.attributes.overall).toBeLessThan(82);
+
+    const [card] = selectCharacters(state, { message: "메시 같은 자원이면 데려올 만한가" });
+    expect(card?.characterId).toBe("리오넬 메시");
+    // 소문으로만 아는 사람이다 — 말투도 속내도 서지 않는다
+    expect(card?.depth).toBe("rumour");
+  });
+
+  it("명부 인물은 말투와 예시 대사까지 선다 — 원형으로 뽑을 수 없어 표가 직접 적는다", () => {
+    const state = structuredClone(base);
+    const [card] = selectCharacters(state, { message: "무리뉴가 저 라인을 그냥 둘 리 없다" });
+    expect(card?.characterId).toBe("조제 무리뉴");
+    expect(card?.role).toBe("manager");
+    expect(card?.depth).toBe("full");
+    expect(card?.speechStyle?.note).toBeTruthy();
+    expect(card?.speechStyle?.samples.length).toBeGreaterThan(0);
+    // 실명 가드와 세트로만 운용한다 (sources.md §7)
+    expect(card?.real).toBe(true);
+  });
+
+  it("유저가 맡은 팀의 명부 감독은 세계에 없다 — 그 자리를 감독이 받았다", () => {
+    const state = structuredClone(base);
+    expect(state.userTeamId).toBe("arsenal");
+    expect(names(state, "아르테타는 저 상황을 어떻게 봤을까")).toEqual([]);
+    expect(state.teams.find((t) => t.id === "arsenal")?.managerName).toBeUndefined();
+    // 다른 구단의 벤치에는 명부가 이름을 심는다
+    expect(state.teams.find((t) => t.id === "mancity")?.managerName).toBe("펩 과르디올라");
+  });
+
+  it("상한 경합 — 같은 문장에 함께 불려도 우리 선수단이 세계의 이름보다 앞선다", () => {
+    const state = structuredClone(base);
+    const ours = squad.slice(0, CHARACTER_INJECTION_LIMIT);
+    const picked = names(
+      state,
+      `${ours.map((p) => p.name).join(", ")} 를 두고 과르디올라와 메시 이야기가 나왔다`,
+    );
+    // 상한이 셋이고 우리 쪽이 셋 이상 걸렸으므로 세계의 이름은 한 장도 서지 못한다.
+    // **누가** 섰는지는 세지 않는다 — 키워드가 이름 조각까지 보므로("크리스티안"이
+    // "리스"를 품는다) 우리 선수단 안에서 누가 걸리는지는 시드가 정한다
+    expect(picked).toHaveLength(CHARACTER_INJECTION_LIMIT);
+    const squadNames = new Set(squad.map((p) => p.name));
+    expect(picked.every((name) => squadNames.has(name))).toBe(true);
+  });
+
+  it("이름이 겹치면 우리 쪽이 자리를 지킨다 — `characterId`는 전역 유일이다", () => {
+    const state = structuredClone(base);
+    const ourPlayer = state.players.find((p) => p.teamId === state.userTeamId)!;
+    ourPlayer.name = "펩 과르디올라";
+
+    const [card] = selectCharacters(state, { message: "과르디올라 어떻게 지내나" });
+    expect(card?.characterId).toBe("펩 과르디올라");
+    expect(card?.role).toBe("player");
+  });
+
+  it("같은 상태·같은 입력이면 같은 목록, 같은 순서다", () => {
+    const state = structuredClone(base);
+    const message = `${squad[0]!.name}와 메시, 그리고 무리뉴 이야기`;
+    expect(selectCharacters(state, { message })).toEqual(selectCharacters(state, { message }));
+  });
 });

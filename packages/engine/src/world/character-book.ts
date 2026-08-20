@@ -10,7 +10,8 @@ import { isDeeperThan } from "@story-fm/domain";
 import type { GameState } from "../core/state";
 import { pendingPress } from "../club/press";
 import { knowledgeOf, type Knowledge } from "../squad/scouting";
-import { headCoachOf, ownerOf, reportersOf } from "./persona";
+import { headCoachOf, ownerOf, reportersOf, worldFigureByName, worldFigures } from "./persona";
+import { MARKET_LEAGUE_SQUADS } from "../data/market-leagues";
 import { generatePlayerPersona } from "./player-persona";
 
 /**
@@ -43,6 +44,32 @@ const HISTORY_WINDOW_TURNS = 1;
 const MIN_KEYWORD_LENGTH = 2;
 
 /**
+ * **이름난 현역의 선** — 종합이 이만큼이면 세계가 그 이름을 안다 (people.md §6).
+ *
+ * 세계에 명성 필드가 없어 능력치로 긋는다. 시장가는 나이 먹은 레전드를 0으로 만들어
+ * **정확히 담아야 할 이름을 떨어뜨리고**, 잠재력은 85 이상이 대부분 스물 미만이라
+ * 더 나쁘다. 82는 세계 5,300명 중 58명이 서는 선이다 — 여기를 낮추면 동명이인이
+ * 늘어 정작 우리 선수가 사라진다(`candidatesOf`).
+ */
+const FAMOUS_PLAYER_OVERALL = 82;
+
+/**
+ * 능력치가 답하지 못하는 이름들 — **시장 전용 리그(사우디·MLS)의 시드 명단**.
+ *
+ * 마흔한 살 호날두는 82지만 서른아홉 메시는 80이고 수아레스는 75다. 나이가 깎은
+ * 것은 기량이지 이름값이 아니다. 그 표는 이미 "감독이 데려올 만한 이름"만 담기로
+ * 하고 만든 명단이므로(`data/market-leagues.ts`), **표가 곧 명성의 선이다** —
+ * 표에서 지우면 그 이름은 세계에서 사라진다.
+ *
+ * 팀이 아니라 이름으로 본다: 그 선수가 유럽으로 돌아와도 세계가 아는 이름은 그대로다.
+ */
+const MARKET_LEGEND_NAMES: ReadonlySet<string> = new Set(
+  Object.values(MARKET_LEAGUE_SQUADS)
+    .flat()
+    .map((seed) => seed.nameKo),
+);
+
+/**
  * 상한에 걸렸을 때 자르는 순서 — 작을수록 먼저 선다.
  *
  * 세계가 연 자리가 감독의 이번 발화보다 앞선다: 회견장에 앉은 기자는 감독이 이름을
@@ -51,6 +78,16 @@ const MIN_KEYWORD_LENGTH = 2;
 const RANK_POINTED = 0;
 const RANK_MESSAGE = 1;
 const RANK_HISTORY = 2;
+
+/**
+ * 같은 자리 안의 순서 — **우리 사람이 먼저 선다** (people.md §6).
+ *
+ * 후보가 우리 선수단 밖으로 넓어지면서 한 턴 3장을 두고 겹이 다툰다. 자리가 먼저이고
+ * (지목 → 이번 턴 발화 → 직전 턴), 자리가 같을 때 라커룸 쪽이 앞선다: 한 문장에
+ * 우리 선수 셋과 남의 팀 이름 하나가 함께 있으면 감독이 매일 보는 셋이 선다.
+ */
+const NEAR_OURS = 0;
+const NEAR_WORLD = 1;
 
 /**
  * 끝난 협상 — 나머지(`open`·`agreed`)는 아직 테이블에 사람이 앉아 있다.
@@ -149,7 +186,14 @@ function memoriesOf(state: GameState, characterId: string): CharacterMemory[] {
   return (state.characterMemories ?? []).filter((m) => m.characterId === characterId);
 }
 
-/** 이름으로 페르소나를 찾는다 — 저장된 인물이 먼저, 그다음이 파생하는 선수다 */
+/**
+ * 이름으로 페르소나를 찾는다 — 저장된 인물이 먼저, 그다음이 파생하는 선수다.
+ *
+ * ⚠️ **찾는 순서가 곧 이름 충돌의 답이다** (people.md §6). `characterId`는 전역
+ * 유일이므로 명부의 이름이 세이브의 현역과 같으면 한 사람만 남는데, 선수를 먼저 보는
+ * 이 순서가 `candidatesOf`가 후보를 모으는 순서와 같아야 이력이 그때 실은 카드를
+ * 그대로 되찾는다.
+ */
 function personaOf(state: GameState, characterId: string): Persona | null {
   const saved = (state.personas ?? []).find((p) => p.characterId === characterId);
   if (saved) return saved;
@@ -157,7 +201,8 @@ function personaOf(state: GameState, characterId: string): Persona | null {
     if (persona.characterId === characterId) return persona;
   }
   const player = state.players.find((p) => p.name === characterId);
-  return player ? generatePlayerPersona(state.seed, player) : null;
+  if (player) return generatePlayerPersona(state.seed, player);
+  return worldFigureByName(state, characterId);
 }
 
 export interface CharacterBookInput {
@@ -179,10 +224,19 @@ export interface CharacterBookInput {
   injected?: readonly CharacterInjection[];
 }
 
-/** 후보 한 명 — 페르소나와 **지금 감독이 아는 만큼** */
+/** 후보 한 명 — 페르소나와 **어느 겹의 사람인가** (people.md §6) */
 interface Candidate {
   persona: Persona;
-  depth: CharacterDepth;
+  /** `NEAR_OURS` | `NEAR_WORLD` — 같은 자리에서 상한을 다툴 때의 순서 */
+  near: number;
+  /**
+   * 지금 감독이 아는 만큼 — **뽑힌 뒤에 묻는다.**
+   *
+   * `knowledgeOf`가 세이브의 경기 기록을 통째로 훑으므로 후보 전원에게 물으면 그
+   * 비용이 후보 수에 비례한다. 카드가 되는 것은 최대 세 장이고, 그전에 깊이가
+   * 필요한 자리는 이미 서 있는 카드를 다시 실을지 판단할 때뿐이다.
+   */
+  depthOf: () => CharacterDepth;
 }
 
 /**
@@ -205,12 +259,15 @@ export function selectCharacters(
     if (rank === null) continue;
     const shown = standing.get(candidate.persona.characterId);
     // 창 안에 이미 서 있으면 다시 싣지 않는다. 눈금이 올라 더 자세한 판이 된 경우만 예외다
-    if (shown !== undefined && !isDeeperThan(candidate.depth, shown)) continue;
+    if (shown !== undefined && !isDeeperThan(candidate.depthOf(), shown)) continue;
     picked.push({ rank, candidate });
   }
+  // 자리가 먼저, **같은 자리에서는 우리 사람이 먼저** — 상한이 셋이라 이 순서가 곧
+  // 누가 밀려나는가다 (people.md §6)
   picked.sort(
     (a, b) =>
       a.rank - b.rank ||
+      a.candidate.near - b.candidate.near ||
       compareIds(a.candidate.persona.characterId, b.candidate.persona.characterId),
   );
   return picked
@@ -218,7 +275,7 @@ export function selectCharacters(
     .map(({ candidate }) =>
       characterEntry(
         candidate.persona,
-        candidate.depth,
+        candidate.depthOf(),
         memoriesOf(state, candidate.persona.characterId),
       ),
     );
@@ -238,25 +295,36 @@ function rankOf(
 }
 
 /**
- * 후보 — 세이브의 페르소나 + **우리 선수단** + 협상 테이블에 앉은 상대 선수.
+ * 후보 — **세 겹**이다 (people.md §6).
  *
- * 리그 4,000명을 훑지 않는 이유는 `speakerRoles`가 사전에 전원을 담지 않는 이유와
- * 같다 (people.md §3 원칙 ③): 남의 팀 3군까지 넣으면 동명이인이 늘어 정작 우리
- * 선수가 사라진다.
+ * | 겹              | 누구                                                                    |
+ * | --------------- | ----------------------------------------------------------------------- |
+ * | 우리 사람       | 세이브의 페르소나 · 우리 선수단 · 협상 테이블에 앉은 상대 선수          |
+ * | 이름난 현역     | 종합 `FAMOUS_PLAYER_OVERALL` 이상 · 시장 전용 리그 시드 명단의 이름     |
+ * | 세계 인물 명부  | 타 팀 감독 · 에이전트 · 해설 (`data/world-figures.ts`)                  |
+ *
+ * 리그 4,000명을 **전부** 훑지 않는 이유는 `speakerRoles`가 사전에 전원을 담지 않는
+ * 이유와 같다 (people.md §3 원칙 ③): 남의 팀 3군까지 넣으면 동명이인이 늘어 정작
+ * 우리 선수가 사라진다. 그래서 이름난 이들만 담고, 담긴 뒤에도 두 장치가 우리 쪽을
+ * 지킨다 — **이름이 겹치면 먼저 들어온 쪽이 자리를 지키고**(우리 사람이 먼저다),
+ * 상한을 다투면 `near`가 우리 쪽을 앞세운다.
  */
 function candidatesOf(state: GameState): Candidate[] {
   const byId = new Map<string, Candidate>();
-  const add = (persona: Persona, depth: CharacterDepth) => {
-    if (!byId.has(persona.characterId)) byId.set(persona.characterId, { persona, depth });
+  const add = (persona: Persona, near: number, depthOf: () => CharacterDepth) => {
+    if (!byId.has(persona.characterId)) byId.set(persona.characterId, { persona, near, depthOf });
   };
+  const always = (depth: CharacterDepth) => () => depth;
+  const asKnown = (playerId: string) => () => characterDepthOf(knowledgeOf(state, playerId));
 
+  // ── 우리 사람 ──
   // 자리가 하나뿐인 인물 — 감독이 매일 보는 사람이라 언제나 `full`이다.
   // 옛 세이브라 비어 있으면 이 함수들이 시드로 그 자리에서 만든다
-  add(headCoachOf(state), "full");
-  add(ownerOf(state), "full");
-  for (const reporter of reportersOf(state)) add(reporter, "full");
+  add(headCoachOf(state), NEAR_OURS, always("full"));
+  add(ownerOf(state), NEAR_OURS, always("full"));
+  for (const reporter of reportersOf(state)) add(reporter, NEAR_OURS, always("full"));
   for (const persona of state.personas ?? []) {
-    if (persona.role !== "player") add(persona, "full");
+    if (persona.role !== "player") add(persona, NEAR_OURS, always("full"));
   }
 
   // 선수 — 페르소나는 저장되지 않고 (시드, 선수 id)에서 파생하고, 깊이는 지식 눈금이 정한다
@@ -265,9 +333,25 @@ function candidatesOf(state: GameState): Candidate[] {
   );
   for (const player of state.players) {
     if (player.teamId !== state.userTeamId && !negotiating.has(player.id)) continue;
-    add(generatePlayerPersona(state.seed, player), characterDepthOf(knowledgeOf(state, player.id)));
+    add(generatePlayerPersona(state.seed, player), NEAR_OURS, asKnown(player.id));
   }
+
+  // ── 이름난 현역 ── 우리 선수단을 먼저 담은 **뒤**여야 동명이인 자리를 우리가 지킨다
+  for (const player of state.players) {
+    if (!isFamous(player.attributes.overall, player.name)) continue;
+    add(generatePlayerPersona(state.seed, player), NEAR_WORLD, asKnown(player.id));
+  }
+
+  // ── 세계 인물 명부 ── 선수가 아니라 `knowledgeOf`가 답하지 않는 자리다.
+  // 원형으로 뽑을 수 없어 성격·말투를 표가 직접 적으므로 깊이는 언제나 `full`이다
+  for (const figure of worldFigures(state)) add(figure, NEAR_WORLD, always("full"));
+
   return [...byId.values()];
+}
+
+/** 세계가 이 이름을 아는가 — 능력치의 선, 또는 시장 전용 리그의 시드 명단 */
+function isFamous(overall: number, name: string): boolean {
+  return overall >= FAMOUS_PLAYER_OVERALL || MARKET_LEGEND_NAMES.has(name);
 }
 
 /**
