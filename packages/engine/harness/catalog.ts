@@ -191,6 +191,27 @@ export const AI_FITNESS = defineHarness({
   ],
 });
 
+export const AI_BENCH = defineHarness({
+  id: "ai-bench",
+  what: "감독의 경기에서 상대 벤치가 쓰는 교체 수·시점·갈래",
+  doc: "docs/simulation/match.md §2",
+  cost: "시드당 수십 초 × 2시드",
+  // prettier-ignore
+  bands: [
+    { metric: "AI 교체/경기", role: "reference", min: 3.5, max: 5, unit: "count", why: "실제 1부는 5인 교체제에서 4.3 — 지금은 그 밑이다(match.md §9). 한도(5)는 장부가 막는다" },
+    { metric: "승부수 교체/경기", role: "measure", unit: "count", why: "스코어를 읽은 갈래가 실제로 얼마나 쓰이는가" },
+    { metric: "굳히기 교체/경기", role: "measure", unit: "count", why: "리드를 지키는 갈래 — 승부수보다 드물어야 정상이다" },
+    { metric: "체력 교체/경기", role: "measure", unit: "count", why: "예전부터 있던 갈래 — 스코어 갈래가 이걸 밀어내지 않았는지" },
+    { metric: "부상 교체/경기", role: "measure", unit: "count", why: "INJURY_PER_MATCH의 파생 — 다치면 언제나 뺀다" },
+    { metric: "끝까지 뒤진 경기에서 승부수를 던진 비율", role: "guard", min: 0.5, unit: "ratio", why: "0이면 이 기능이 죽은 것이다 — 벤치가 스코어를 읽는가의 단일 지표" },
+    { metric: "끝까지 앞선 경기에서 굳힌 비율", role: "measure", unit: "ratio", why: "굳히기는 75′이고 교체 카드를 먼저 쓴 팀은 못 쓴다" },
+    { metric: "AI 교체의 60′ 이후 비율", role: "reference", min: 0.5, max: 0.95, unit: "ratio", why: "실제 교체는 후반에 몰린다 — 전부 후반이면 하프타임 갈래가 죽은 것이다" },
+    { metric: "AI 교체 중앙 분", role: "measure", unit: "score", why: "실제 1부는 60분대 — 우리는 체력 문턱(SUB_FATIGUE)이 늦어 그보다 뒤다" },
+    { metric: "판의 모양을 바꾼 경기 비율", role: "measure", unit: "ratio", why: "경기당 한 번 — 스코어가 벌어진 경기에서만 선다" },
+    { metric: "잰 경기 수", role: "measure", unit: "count", why: "표본이 있는가" },
+  ],
+});
+
 export const AI_MARKET = defineHarness({
   id: "ai-market",
   what: "한 시즌의 AI↔AI 시장 규모 — 팀당 이적·임대와 여름 비중",
