@@ -90,3 +90,55 @@ export const ManagerSchema = z.object({
   teamTalkedOn: TeamTalkLogSchema.optional(),
 });
 export type Manager = z.infer<typeof ManagerSchema>;
+
+/**
+ * **경질 — 감독이 그 구단의 사람이 아니게 된 날** (career.md §5.1).
+ *
+ * 이 카드가 서 있는 동안 감독은 무직이다. 시계는 그대로 흐르고, 부임하면 지워진다.
+ *
+ * **사실만 적는다** — 등급·순위·기대가 있으면 "우승을 노리라는 구단에서 17위"와
+ * "잔류가 기대인 구단에서 17위"가 갈리고, 그 문장은 화면과 GM이 쓴다
+ * (overview.md §1 철칙 4).
+ */
+export const DismissalSchema = z.object({
+  on: DateString,
+  season: z.number().int(),
+  /** 어느 구단에서 잘렸나 */
+  teamId: z.string().min(1),
+  /** 그 구단의 등급 — 같은 순위가 어디서는 성공이고 어디서는 해고인 이유 */
+  tier: z.number().int().min(1).max(4).optional(),
+  /** 경질일의 리그 순위 */
+  position: z.number().int().min(1).optional(),
+  /** 보드가 걸었던 기대 순위 */
+  target: z.number().int().min(1).optional(),
+  /** 기대의 이름 — `boardExpectationOfTier`의 label */
+  expectation: z.string().min(1).optional(),
+  /** 옛 세이브가 들고 있는 평가 문장 — 더는 쓰지 않는다 (카드의 폴백) */
+  reason: z.string().optional(),
+});
+export type Dismissal = z.infer<typeof DismissalSchema>;
+
+/**
+ * **감독직 제안** — 공석이 된 구단이 무직 감독을 부른 기록 (career.md §5.1).
+ *
+ * 이적 협상(`Negotiation`)과 달리 오가는 흥정이 없다. 구단이 부르고 감독이 받거나
+ * 받지 않을 뿐이라 라운드 표가 필요 없다 — 답하지 않으면 만료된다.
+ *
+ * 여기 적힌 등급·순위·기대도 **부를 때의 사실**이다. 감독이 무엇을 받아들이는지는
+ * 그 셋이 말하고, 문장은 화면과 GM이 쓴다.
+ */
+export const ManagerOfferSchema = z.object({
+  id: z.string().min(1),
+  teamId: z.string().min(1),
+  madeOn: DateString,
+  /** 이 날이 지나면 사라진다 */
+  expiresOn: DateString,
+  tier: z.number().int().min(1).max(4),
+  /** 부를 때의 리그 순위 — 아직 리그전을 치르지 않았으면 없다 */
+  position: z.number().int().min(1).optional(),
+  /** 그 자리에 걸리는 기대 순위와 그 이름 */
+  target: z.number().int().min(1),
+  expectation: z.string().min(1),
+  status: z.enum(["open", "accepted", "expired"]),
+});
+export type ManagerOffer = z.infer<typeof ManagerOfferSchema>;

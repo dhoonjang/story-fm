@@ -5,6 +5,7 @@ import {
   CharacterMemorySchema,
   ContractSchema,
   DeferredScoutSchema,
+  DismissalSchema,
   FinanceReportSchema,
   GamePlayerSchema,
   GameTeamSchema,
@@ -12,6 +13,7 @@ import {
   HistoryDigestSchema,
   InjurySchema,
   LeagueFinalTableSchema,
+  ManagerOfferSchema,
   ManagerSchema,
   MatchRecordSchema,
   NarrativeNoteSchema,
@@ -94,6 +96,8 @@ export const SaveSchema = z
     // 없을 수 있는 것 — 로드가 채우지 않는다(없는 것이 곧 뜻이다)
     personas: z.array(PersonaSchema).optional(),
     deferredScouts: z.array(DeferredScoutSchema).optional(),
+    dismissal: DismissalSchema.optional(),
+    managerOffers: z.array(ManagerOfferSchema).optional(),
     historyDigest: HistoryDigestSchema.optional(),
     characterMemories: z.array(CharacterMemorySchema).optional(),
   })

@@ -82,6 +82,7 @@ import {
   firstTeamPlayers,
   isInjured,
   isSuspended,
+  managedTeamId,
   MATCHDAY_BENCH,
   playerById,
   proficiencyAt,
@@ -213,16 +214,26 @@ function dailyTick(
   digest: string[],
   trained?: { sessions: TrainedSession[] },
 ): boolean {
-  const players = userPlayers(state);
+  /**
+   * **무직의 하루** — 시계는 그대로 돌지만 감독의 일이 없다 (career.md §5.1).
+   *
+   * 옛 구단은 경질된 날부터 남의 팀이라, 이 아래에서 감독 팀으로 갈라지던 자리는
+   * 전부 이 하나를 묻는다 — 그러면 그 구단은 `tickOtherClubs`가 도는 AI 클럽의
+   * 길로 자연히 넘어간다. 세계가 감독을 따라 멈추지는 않는다.
+   */
+  const managed = managedTeamId(state);
+  const players = managed ? userPlayers(state) : [];
   const dow = dayOfWeek(state.date);
   const rng = makeRng(state.seed, `tick:${state.date}`);
   const issuePlayers = new Set(state.issues.map((i) => i.gamePlayerId));
   // 복귀일이 지난 임대는 오늘 돌아온다
   returnDueLoans(state, digest);
-  // 경기일엔 훈련하지 않는다 — 나중에 편성된 컵 경기가 이미 깔린 훈련과 겹칠 수 있다
+  // 경기일엔 훈련하지 않는다 — 나중에 편성된 컵 경기가 이미 깔린 훈련과 겹칠 수 있다.
+  // 무직이면 훈련장 자체가 없으므로 깔려 있던 것을 그날로 거둔다.
   if (
+    managed === null ||
     matchesOn(state.matches, state.date).some(
-      (m) => !m.result && (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+      (m) => !m.result && (m.homeTeamId === managed || m.awayTeamId === managed),
     )
   ) {
     cancelTrainingOn(state, state.date);
@@ -287,7 +298,7 @@ function dailyTick(
 
   // 감독 팀은 기억(`drilled`)만 갱신한다 — **시간은 적응도를 올리지 않는다**
   // (skills/index.ts의 계약). 상승 경로는 훈련·경기 결산 판정뿐이다.
-  settleTactics(state, state.date);
+  if (managed) settleTactics(state, state.date);
 
   // 휴식은 소화할 것이 없다 — 지나갔다는 표시만 남긴다
   for (const entry of trainingEntries) {
@@ -386,10 +397,13 @@ function dailyTick(
   const BENCHED_GRIPE_CHANCE = 0.15;
   // 벤치 불만 발생 — 월요일, 고평가 비선발 자원 (간이).
   // 리그 개막 후에만 — 프리시즌엔 아직 "출전 기회"를 논할 경기가 없다 (v6)
-  if (dow === MONDAY && state.date >= state.calendar.start && rng() < BENCHED_GRIPE_CHANCE) {
-    const starters = new Set(
-      assignmentsOf(state, state.userTeamId, "starting").map((a) => a.playerId),
-    );
+  if (
+    managed &&
+    dow === MONDAY &&
+    state.date >= state.calendar.start &&
+    rng() < BENCHED_GRIPE_CHANCE
+  ) {
+    const starters = new Set(assignmentsOf(state, managed, "starting").map((a) => a.playerId));
     const benched = players.filter(
       (p) =>
         squadLevelOf(p) === "first" &&
@@ -452,14 +466,15 @@ function dailyTick(
     }
   }
 
-  // 협상 — 기한 경과 처리 + 들어오는 오퍼 + 상대의 답 도착
-  expireNegotiations(state, digest);
+  // 협상 — 기한 경과 처리 + 들어오는 오퍼 + 상대의 답 도착.
+  // 무직이면 흥정할 구단이 없다 — 경질과 함께 진행 중이던 협상은 이미 사라졌다
+  if (managed) expireNegotiations(state, digest);
   /**
    * 메디컬 — 합의한 딜은 검진일에 계약이 된다. **통과는 시계를 세우지 않는다**:
    * 감독이 이미 결정한 일이라 확인만 남았다. 소견이 붙어도 오늘 답할 필요는
    * 없으므로 여기서 멈추지 않고, 주의 줄에 서서 다음 턴에 감독을 기다린다.
    */
-  runMedicals(state, digest);
+  if (managed) runMedicals(state, digest);
   // 다른 구단의 재계약 — 노리던 선수를 놓칠 수 있다
   runAiRenewals(state, digest);
   // 무소속 시장 — 우리가 안 데려가면 남이 데려간다
@@ -467,18 +482,20 @@ function dailyTick(
   // 남의 팀끼리의 이적·임대 — 세계는 감독 없이도 돈다 (ai-market.ts)
   runAiTransfers(state, digest);
   // 벤치의 사람도 바뀐다 — 라이벌의 경질·선임 (manager-market.ts)
-  runManagerMarket(state, digest);
-  generateIncomingOffers(state, digest);
-  for (const negotiation of arrivedResponses(state)) {
-    const player = playerById(state, negotiation.gamePlayerId);
-    const offer = pendingOffer(negotiation);
-    if (!player || !offer) continue;
-    digest.push(
-      `📨 ${teamNameIn(state, negotiation.counterpartTeamId ?? "")}에서 ${player.name} 오퍼(${formatMoney(offer.fee)})에 대한 답이 도착했습니다`,
-    );
+  // 무직이면 그 자리 중 하나가 감독의 것이 될 수도 있다 (career.md §5.1)
+  const offered = runManagerMarket(state, digest);
+  if (managed) {
+    generateIncomingOffers(state, digest);
+    for (const negotiation of arrivedResponses(state)) {
+      const player = playerById(state, negotiation.gamePlayerId);
+      const offer = pendingOffer(negotiation);
+      if (!player || !offer) continue;
+      digest.push(
+        `📨 ${teamNameIn(state, negotiation.counterpartTeamId ?? "")}에서 ${player.name} 오퍼(${formatMoney(offer.fee)})에 대한 답이 도착했습니다`,
+      );
+    }
+    warnExpiringContracts(state, digest);
   }
-
-  warnExpiringContracts(state, digest);
 
   // 이적창 개장·폐장 안내
   for (const entry of todays) {
@@ -495,7 +512,12 @@ function dailyTick(
     pushNarrative(state, `${kindKo} 이적시장 ${entry.type === "window-open" ? "개장" : "마감"}`, 3);
   }
 
-  return standsToday(state, digest);
+  /**
+   * 오늘이 기한인 협상 앞에서만 멈춘다 — 무직에게는 그런 협상이 없다.
+   * 대신 **감독직 제안**이 붙은 날 멈춘다: 10일 뒤 사라지는 것이라 감독이
+   * 모르는 채 지나가면 안 된다 (career.md §5.1).
+   */
+  return offered || (managed !== null && standsToday(state, digest));
 }
 
 /** 계약 만료 예고 문턱 — 내림차순, 날 단위 (season.md §5) */
@@ -608,7 +630,7 @@ function boardSlotOf(state: GameState, player: GamePlayer) {
 
 /** 이 팀을 이끄는 사람의 전술 눈금 — 감독 팀이면 감독 본인, 아니면 AI 감독 */
 function managerTacticsOf(state: GameState, teamId: string): number {
-  return teamId === state.userTeamId
+  return teamId === managedTeamId(state)
     ? state.manager.attributes.tactics
     : (state.teams.find((team) => team.id === teamId)?.aiManagerTacticsRating ??
         AI_MANAGER_RATING_FALLBACK);
@@ -782,14 +804,16 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
  * 경기의 결과를 우리 경기 전에 알 수는 없다.
  */
 export function simulateOtherMatches(state: GameState, digest: string[]): void {
+  // 무직이면 옛 구단 경기도 여기서 굴러간다 — 감독이 들어갈 경기가 없다 (career.md §5.1)
+  const managed = managedTeamId(state);
   const ours = matchesOn(state.matches, state.date).find(
-    (m) => !m.result && (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+    (m) => !m.result && (m.homeTeamId === managed || m.awayTeamId === managed),
   );
   const cutoff = ours ? (ours.time ?? DEFAULT_KICKOFF) : null;
   const played: string[] = [];
   for (const match of matchesOn(state.matches, state.date)) {
     if (match.result) continue;
-    if (match.homeTeamId === state.userTeamId || match.awayTeamId === state.userTeamId) continue;
+    if (match.homeTeamId === managed || match.awayTeamId === managed) continue;
     if (cutoff !== null && (match.time ?? DEFAULT_KICKOFF) >= cutoff) continue;
     const squads = {
       home: simSquadOf(state, match.homeTeamId),
@@ -992,17 +1016,6 @@ export function advanceTime(
   state: GameState,
   until: "next_match" | { days: number } | { clock: string },
 ): AdvanceOutcome {
-  /**
-   * **경질된 뒤에는 시계가 흐르지 않는다.** 감독이 더 이상 이 구단의 사람이
-   * 아니므로 훈련도 이적도 경기도 그의 일이 아니다 (`manager-market.ts`).
-   */
-  if (state.dismissal) {
-    return {
-      ok: false,
-      digest: [`${state.dismissal.on}에 경질되었습니다 — ${state.dismissal.reason}`],
-      stopped: "blocked",
-    };
-  }
   if (state.phase !== "idle") {
     return {
       ok: false,
@@ -1065,14 +1078,16 @@ export function advanceTime(
     // 편성되므로 그 순간엔 3주 창 밖이라 아무 일도 일어나지 않고, 날짜가 다가와도
     // 다시 부를 계기가 없었다. 리그 경기 연기는 경기 수를 바꾸지도 않는다.
     // 판정은 배치를 다시 계산해 비교하는 sync가 직접 한다
-    syncDefaultTraining(state);
+    // 무직이면 깔 훈련장이 없다 — 옛 구단의 마이크로사이클은 감독의 것이 아니다
+    if (managedTeamId(state)) syncDefaultTraining(state);
 
+    const managed = managedTeamId(state);
     const userMatch = matchesOn(state.matches, state.date).find(
-      (m) => !m.result && (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+      (m) => !m.result && (m.homeTeamId === managed || m.awayTeamId === managed),
     );
     if (userMatch) {
       state.phase = "matchday";
-      const home = userMatch.homeTeamId === state.userTeamId;
+      const home = userMatch.homeTeamId === managed;
       digest.push(
         `경기일 — ${competitionLabel(userMatch.competitionId, userMatch.stage ?? "league", userMatch.round)} ${userMatch.neutral ? "중립" : home ? "홈" : "원정"} vs ${teamNameIn(state, home ? userMatch.awayTeamId : userMatch.homeTeamId)}`,
       );
@@ -1106,9 +1121,11 @@ export function describeWindowState(state: GameState): string {
 }
 
 export function describeNextFixture(state: GameState): string {
-  const next = nextMatchFor(state.matches, state.userTeamId, state.date);
+  const managed = managedTeamId(state);
+  if (!managed) return "맡은 팀이 없습니다 — 다음 자리를 기다리는 중입니다.";
+  const next = nextMatchFor(state.matches, managed, state.date);
   if (!next) return "남은 일정이 없습니다 — 시즌 마무리 국면입니다.";
-  const home = next.homeTeamId === state.userTeamId;
+  const home = next.homeTeamId === managed;
   return `다음 경기: ${competitionLabel(next.competitionId, next.stage ?? "league", next.round)} ${next.date} ${next.neutral ? "중립" : home ? "홈" : "원정"} vs ${teamNameIn(state, home ? next.awayTeamId : next.homeTeamId)}`;
 }
 

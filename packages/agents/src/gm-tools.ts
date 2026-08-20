@@ -7,6 +7,7 @@
 import { z } from "zod";
 import {
   acceptDeal,
+  acceptManagerOffer,
   adjustTransferBudget,
   answerOffer,
   applyFinanceEvent,
@@ -232,6 +233,17 @@ export function buildGmTools(
     }
     return result;
   };
+  /**
+   * **무직인 감독이 부를 수 있는 조작 도구는 하나뿐이다** (career.md §5.1).
+   *
+   * 경질돼도 `userTeamId`는 옛 구단을 가리키므로(그 구단의 장부는 계속 돌아야
+   * 한다) 막지 않으면 모델은 남의 구단의 라인업을 짜고 남의 선수를 팔 수 있다.
+   * 조회는 그대로 둔다 — 무직 감독도 세계를 읽을 수는 있다.
+   *
+   * 기자회견도 여기서 막힌다: 미디어 평판이 곧 다음 자리의 문턱이라
+   * (`OFFER_REPUTATION_GATE`) 무직 중에 회견을 반복하는 것이 승진 경로가 된다.
+   */
+  const OUT_OF_WORK_TOOLS = new Set(["accept_manager_offer"]);
   const wrap = <T>(
     name: string,
     description: string,
@@ -242,6 +254,12 @@ export function buildGmTools(
     description,
     inputSchema: toToolSchema(schema),
     handle(input: unknown, context?: ToolCallContext) {
+      if (state.dismissal && !OUT_OF_WORK_TOOLS.has(name)) {
+        return {
+          ok: false,
+          message: `${state.manager.name} 감독은 지금 맡은 팀이 없습니다 — 부임한 뒤에 할 수 있는 일입니다`,
+        };
+      }
       const parsed = schema.safeParse(input);
       if (!parsed.success) return inputError(parsed.error);
       return record(name, run(parsed.data), parsed.data, context);
@@ -564,6 +582,12 @@ export function buildGmTools(
     ),
 
     read("get_career", descriptions.get_career, z.object({}), () => careerView(state)),
+    wrap(
+      "accept_manager_offer",
+      descriptions.accept_manager_offer,
+      z.object({ offer: z.string().min(1).describe("제안 id 또는 구단 이름·약칭") }),
+      (input) => acceptManagerOffer(state, input.offer),
+    ),
     read(
       "get_finance",
       descriptions.get_finance,

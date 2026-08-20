@@ -4,9 +4,25 @@ import { tierOfTeamIn } from "../core/club-tier";
 import { positionAt, relegationLine } from "../core/league-shape";
 import { inventPersonName } from "../world/persona";
 import { makeRng, randInt } from "../core/rng";
+import { addDays } from "../core/dates";
 import { boardExpectation, computeStandings, type StandingRow } from "../competition/season";
-import { AI_MANAGER_RATING_FALLBACK, clampCondition } from "@story-fm/domain";
-import { playersOf, pushNarrative, teamName, teamShortName, type GameState } from "../core/state";
+import { syncDefaultTraining } from "../squad/training-plan";
+import {
+  AI_MANAGER_RATING_FALLBACK,
+  clampCondition,
+  type GameTeam,
+  type ManagerOffer,
+} from "@story-fm/domain";
+import {
+  playersOf,
+  pushNarrative,
+  teamName,
+  teamNameIn,
+  teamShortName,
+  teamShortNameIn,
+  type GameState,
+} from "../core/state";
+import type { SkillResult } from "../skills";
 
 /**
  * 감독 시장 — **벤치의 사람도 바뀐다.**
@@ -65,6 +81,24 @@ const SACKINGS_PER_DAY = 2;
 const SACK_CHANCE = 0.09;
 /** 새 감독 효과 — 실제로 관측되는 반등(잠깐이지만 분명하다) */
 const NEW_MANAGER_BOUNCE = 6;
+
+/**
+ * **무직 감독을 부르는 평판 문턱** — `(보드 + 미디어) / 2` (career.md §5.1).
+ *
+ * 경질 직후의 보드 평판은 25 이하라 합이 대개 40 언저리다. 그래서 잘린 감독이
+ * 곧장 가는 곳은 tier 3·4이고, 위로 올라가려면 그 자리에서 성적을 내야 한다.
+ * tier 4는 문턱이 없다 — 잔류가 기대인 구단은 사람을 가리지 않는다.
+ */
+const OFFER_REPUTATION_GATE: Partial<Record<1 | 2 | 3 | 4, number>> = { 1: 70, 2: 55, 3: 40 };
+/** 문턱을 넘은 공석이 오늘 부를 확률 — 매번 부르면 경질이 하루짜리 사건이 된다 */
+const OFFER_CHANCE = 0.2;
+/** 제안이 살아 있는 날 수 — 답을 미루는 것도 답이다 */
+const OFFER_DAYS = 10;
+/**
+ * 이만큼 무직이었는데 아직 한 번도 부른 곳이 없으면 다음 문턱을 넘는 자리는
+ * 확률을 건너뛴다 — 세이브가 무직으로 굳지 않게 하는 안전판이다 (career.md §5.1).
+ */
+const OFFER_DRY_SPELL_DAYS = 120;
 
 /** 감독 팀의 경고 단계 — 이 횟수를 넘기면 경질된다 */
 export const USER_WARNINGS_BEFORE_SACK = 3;
@@ -136,16 +170,114 @@ function daysInCharge(state: GameState, team: { managerSince?: string } | undefi
 }
 
 /**
- * AI 구단의 경질·선임 — tick이 매일 부른다.
+ * 새 감독을 앉힌다 — 이름·전술 역량치·부임일, 그리고 선수단의 짧은 반등.
+ *
+ * 유저가 잘린 구단도 이 길로 후임을 세운다. 감독이 없는 구단은 세계에 없다.
+ */
+function installNewManager(state: GameState, team: GameTeam, rng: () => number): void {
+  // 순위표가 없는 팀은 부르는 쪽에서 걸러지므로 무소속은 여기 닿지 않는다 —
+  // 폴백은 값 없는 팀(무소속·옛 세이브)을 위한 것이다 (평균 AI 감독)
+  const before = team.aiManagerTacticsRating ?? AI_MANAGER_RATING_FALLBACK;
+  team.aiManagerTacticsRating = Math.min(92, Math.max(50, before + randInt(rng, -4, 10)));
+  team.managerName = inventPersonName(rng, team.id);
+  team.managerSince = state.date;
+
+  /**
+   * **새 감독 효과** — 실제로 관측되는 짧은 반등이다. 선수단이 다시 뛴다:
+   * 폼과 컨디션이 조금 오르고, 그 덕에 다음 몇 경기의 결과가 달라진다.
+   */
+  for (const player of playersOf(state, team.id)) {
+    player.state.condition = clampCondition(player.state.condition + NEW_MANAGER_BOUNCE);
+    player.state.form = Math.min(1, player.state.form + 0.1);
+  }
+}
+
+/** 지금 열려 있는 제안 — 만료일 순 (가장 먼저 사라질 것이 앞) */
+export function openManagerOffers(state: GameState): ManagerOffer[] {
+  return (state.managerOffers ?? [])
+    .filter((o) => o.status === "open" && o.expiresOn >= state.date)
+    .sort((a, b) => a.expiresOn.localeCompare(b.expiresOn) || a.id.localeCompare(b.id));
+}
+
+/** 기한이 지난 제안은 사라진다 — 답하지 않은 것도 답이다 */
+function expireStaleOffers(state: GameState, digest: string[]): void {
+  for (const offer of state.managerOffers ?? []) {
+    if (offer.status !== "open" || offer.expiresOn >= state.date) continue;
+    offer.status = "expired";
+    digest.push(`💼 ${teamShortNameIn(state, offer.teamId)}의 감독직 제안이 만료됐다`);
+  }
+}
+
+/**
+ * 공석이 된 구단이 무직 감독을 부른다 (career.md §5.1).
+ *
+ * @returns 오늘 제안이 붙었으면 true
+ */
+function offerVacancy(
+  state: GameState,
+  teamId: string,
+  position: number,
+  digest: string[],
+): boolean {
+  const dismissal = state.dismissal;
+  if (!dismissal) return false;
+  // 감독이 답할 자리는 한 번에 하나다
+  if (openManagerOffers(state).length > 0) return false;
+  const offers = state.managerOffers ?? [];
+  // 한 번 부른 구단은 다시 부르지 않는다 — 만료·수락한 기록이 남는 이유다
+  if (offers.some((o) => o.teamId === teamId)) return false;
+
+  const tier = tierOfTeamIn(state, teamId);
+  const gate = OFFER_REPUTATION_GATE[tier];
+  const reputation = (state.manager.reputation.board + state.manager.reputation.media) / 2;
+  if (gate !== undefined && reputation < gate) return false;
+
+  const dry = offers.length === 0 && daysBetween(dismissal.on, state.date) >= OFFER_DRY_SPELL_DAYS;
+  // 구단·날짜마다 채널을 갈라 뽑는다 — AI 경질의 난수열을 흔들지 않는다
+  const rng = makeRng(state.seed, `manager-offer:${state.date}:${teamId}`);
+  if (!dry && rng() > OFFER_CHANCE) return false;
+
+  const expectation = boardExpectation(state, teamId);
+  state.managerOffers = [
+    ...offers,
+    {
+      // 같은 시드·같은 날이면 같은 id — 난수로 지으면 재현이 깨진다
+      id: `mgr-offer-${teamId}-${state.date}`,
+      teamId,
+      madeOn: state.date,
+      expiresOn: addDays(state.date, OFFER_DAYS),
+      tier,
+      position,
+      target: expectation.target,
+      expectation: expectation.label,
+      status: "open",
+    },
+  ];
+  digest.push(
+    `💼 ${teamShortNameIn(state, teamId)}가 감독직을 제안했다 — 기대는 ${expectation.label}` +
+      ` · ${OFFER_DAYS}일 안에 답해야 한다`,
+  );
+  pushNarrative(state, `${teamNameIn(state, teamId)} 감독직 제안`, 5);
+  return true;
+}
+
+/**
+ * AI 구단의 경질·선임 + **무직 감독에게 오는 제안** — tick이 매일 부른다.
  *
  * 새 감독은 **전술 역량치를 새로 뽑고**(직전보다 조금 높게 나오는 쪽으로 기울인다 —
- * 구단은 더 나은 사람을 데려오려 한다) 선수단에 짧은 반등을 남긴다.
+ * 구단은 더 나은 사람을 데려오려 한다) 선수단에 짧은 반등을 남긴다. 그렇게 빈
+ * 자리가 무직 감독의 눈높이에 맞으면 그날 제안이 붙는다 (career.md §5.1).
+ *
+ * @returns 오늘 새 제안이 붙었으면 true — tick이 거기서 멈춰 세운다
  */
-export function runManagerMarket(state: GameState, digest: string[]): void {
+export function runManagerMarket(state: GameState, digest: string[]): boolean {
   const rng = makeRng(state.seed, `manager-market:${state.date}`);
   let sacked = 0;
+  let offered = false;
   const ourLeague = leagueOfTeamIn(state, state.userTeamId);
   const tableOf = standingsCache(state);
+
+  expireStaleOffers(state, digest);
 
   for (const team of state.teams) {
     if (sacked >= SACKINGS_PER_DAY) break;
@@ -160,29 +292,19 @@ export function runManagerMarket(state: GameState, digest: string[]): void {
      */
     if (rng() > SACK_CHANCE) continue;
 
-    // 순위표가 없는 팀은 위에서 걸러지므로 무소속은 여기 닿지 않는다 —
-    // 폴백은 값 없는 팀(무소속·옛 세이브)을 위한 것이다 (평균 AI 감독)
-    const before = team.aiManagerTacticsRating ?? AI_MANAGER_RATING_FALLBACK;
-    team.aiManagerTacticsRating = Math.min(92, Math.max(50, before + randInt(rng, -4, 10)));
-    team.managerName = inventPersonName(rng, team.id);
-    team.managerSince = state.date;
+    installNewManager(state, team, rng);
     sacked += 1;
-
-    /**
-     * **새 감독 효과** — 실제로 관측되는 짧은 반등이다. 선수단이 다시 뛴다:
-     * 폼과 컨디션이 조금 오르고, 그 덕에 다음 몇 경기의 결과가 달라진다.
-     */
-    for (const player of playersOf(state, team.id)) {
-      player.state.condition = clampCondition(player.state.condition + NEW_MANAGER_BOUNCE);
-      player.state.form = Math.min(1, player.state.form + 0.1);
-    }
 
     // 우리 리그의 일만 브리핑한다 — 5대 리그 전체를 올리면 소음이다
     if (leagueOfTeamIn(state, team.id) === ourLeague) {
       digest.push(`📰 ${teamShortName(team.id)}가 감독을 경질했다 — 후임은 ${team.managerName}`);
       pushNarrative(state, `${teamName(team.id)} 감독 경질`, 3);
     }
+
+    // 그 자리가 무직 감독의 것이 될 수도 있다
+    if (!offered) offered = offerVacancy(state, team.id, standing.position, digest);
   }
+  return offered;
 }
 
 /**
@@ -192,10 +314,23 @@ export function runManagerMarket(state: GameState, digest: string[]): void {
  * 이어지면 보드가 먼저 말하고(`state.manager.boardWarnings`), 그 뒤에도 나아지지
  * 않으면 자리가 없어진다.
  *
- * @returns 오늘 경질됐으면 true — tick이 시계를 세운다
+ * @returns **오늘** 경질됐으면 true — tick이 그날 하루만 시계를 세운다.
+ *          이미 무직이면 볼 자리가 없어 false다 (career.md §5.1).
  */
 export function reviewUserSeat(state: GameState, digest: string[]): boolean {
-  if (state.dismissal) return true;
+  if (state.dismissal) return false;
+  /**
+   * 부임 직후엔 보지 않는다 — 새 구단의 순위는 앞 감독이 만든 것이다.
+   * 시즌 중 부임이 가능해지면서 생긴 자리다 (career.md §5.1).
+   */
+  if (
+    daysInCharge(
+      state,
+      state.teams.find((t) => t.id === state.userTeamId),
+    ) < GRACE_DAYS
+  ) {
+    return false;
+  }
   const standing = seatStatus(state, state.userTeamId);
   if (!standing || standing.played < USER_MIN_MATCHES) return false;
   const seat = seatOf(state, state.userTeamId);
@@ -235,15 +370,103 @@ export function reviewUserSeat(state: GameState, digest: string[]): boolean {
     return false;
   }
 
+  /**
+   * 경질 카드는 **사실만** 남긴다 — 등급·순위·기대가 있으면 "우승을 노리라는
+   * 구단에서 17위"와 "잔류가 기대인 구단에서 17위"가 갈린다. 문장은 화면과 GM이
+   * 쓴다 (overview.md §1 철칙 4).
+   */
+  const sackedTeamId = state.userTeamId;
   state.dismissal = {
     on: state.date,
     season: state.season,
-    teamId: state.userTeamId,
-    reason: `기대 ${expectation.label} · 현재 ${standing.position}위`,
+    teamId: sackedTeamId,
+    tier: tierOfTeamIn(state, sackedTeamId),
+    position: standing.position,
+    target: expectation.target,
+    expectation: expectation.label,
   };
-  digest.push(`💼 경질 — ${teamName(state.userTeamId)}가 감독 계약을 해지했다`);
-  pushNarrative(state, `${teamName(state.userTeamId)} 경질`, 5);
+
+  // 감독이 없는 구단은 세계에 없다 — 옛 구단은 그날로 후임을 세운다
+  const team = state.teams.find((t) => t.id === sackedTeamId);
+  if (team) installNewManager(state, team, makeRng(state.seed, `user-sacked:${state.date}`));
+
+  /**
+   * **진행 중이던 협상은 전부 사라진다** — 감독이 없는 구단의 흥정이고, 무직인
+   * 감독이 남의 구단 선수를 계속 흥정할 수는 없다 (career.md §5.1).
+   */
+  for (const negotiation of state.negotiations) {
+    if (negotiation.status === "open" || negotiation.status === "agreed") {
+      negotiation.status = "expired";
+    }
+  }
+
+  digest.push(`💼 경질 — ${teamNameIn(state, sackedTeamId)}가 감독 계약을 해지했다`);
+  pushNarrative(state, `${teamNameIn(state, sackedTeamId)} 경질`, 5);
   return true;
+}
+
+/** 부르는 말을 견주기 위한 정규화 — 사이의 공백·구두점은 같은 말이다 */
+const norm = (q: string) => q.replace(/[\s·・\-_.]/g, "").toLowerCase();
+
+/** 제안이 가리키는 말인가 — 제안 id 또는 그 구단의 id·약칭·이름 */
+function offerMatches(state: GameState, offer: ManagerOffer, ref: string): boolean {
+  const key = norm(ref);
+  return (
+    norm(offer.id) === key ||
+    norm(offer.teamId) === key ||
+    norm(teamShortNameIn(state, offer.teamId)) === key ||
+    norm(teamNameIn(state, offer.teamId)) === key
+  );
+}
+
+/**
+ * **제안을 받아들인다 — 그날부로 부임한다** (career.md §5.1).
+ *
+ * 시즌 중이어도 막지 않는다. 순위표는 감독이 아니라 구단 단위라 부임 전 경기까지
+ * 포함한 성적이 그 시즌의 기록이 된다 — 그것이 감독이 물려받는 것이다.
+ *
+ * @param ref 제안 id 또는 구단 이름·약칭
+ */
+export function acceptManagerOffer(state: GameState, ref: string): SkillResult {
+  if (!state.dismissal) {
+    return { ok: false, message: `${teamNameIn(state, state.userTeamId)} 감독으로 재직 중입니다` };
+  }
+  const offer = (state.managerOffers ?? []).find((o) => offerMatches(state, o, ref));
+  if (!offer) return { ok: false, message: `"${ref}"에 해당하는 감독직 제안이 없습니다` };
+  if (offer.status !== "open" || offer.expiresOn < state.date) {
+    return {
+      ok: false,
+      message: `${teamNameIn(state, offer.teamId)}의 제안은 ${offer.expiresOn}에 만료됐습니다`,
+    };
+  }
+
+  offer.status = "accepted";
+  const team = state.teams.find((t) => t.id === offer.teamId);
+  state.userTeamId = offer.teamId;
+  if (team) {
+    team.managerName = state.manager.name;
+    team.managerSince = state.date;
+  }
+  delete state.dismissal;
+  // 답할 자리는 하나였으니 남은 것은 이제 답할 필요가 없다
+  for (const other of state.managerOffers ?? []) {
+    if (other.status === "open") other.status = "expired";
+  }
+  // 앞 구단의 경고를 지고 가지 않는다
+  delete state.manager.boardWarnings;
+  delete state.manager.lastWarnedOn;
+  // 기본 훈련은 새 선수단으로 다시 깔린다
+  syncDefaultTraining(state);
+
+  const name = teamNameIn(state, offer.teamId);
+  pushNarrative(state, `${name} 부임`, 5);
+  return {
+    ok: true,
+    message:
+      `${name} 감독으로 부임했습니다 (${state.date}) — 보드의 기대는 ${offer.expectation},` +
+      ` 지금 순위는 ${offer.position ?? "-"}위입니다`,
+    tone: "good",
+  };
 }
 
 function daysBetween(from: string, to: string): number {
