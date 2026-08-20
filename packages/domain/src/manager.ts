@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { RatingSchema } from "./player";
-
-const DateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+import { DateString } from "./date-string";
 
 /**
  * 감독 능력치 **5축** — 유저 플레이 × 능력치 계수 구조 (career.md §2).

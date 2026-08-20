@@ -5,7 +5,9 @@ import {
   addDays,
   cupBlankWeekend,
   dayOfWeek,
+  DEFAULT_KICKOFF,
   firstCupRoundFloor,
+  isWeekend,
   restHours,
   seasonDate,
   snapToWeekday,
@@ -425,10 +427,12 @@ function pickTieDate(
   return { date: start, time: kickoffFor(start) };
 }
 
+/** 주중 야간 킥오프 — 컵 라운드가 주말을 못 쓸 때 앉는 자리 */
+const CUP_MIDWEEK_KICKOFF = "19:45";
+
 /** 주말은 오후, 주중은 야간 — 실제 컵 라운드의 킥오프 */
 function kickoffFor(date: string): string {
-  const dow = dayOfWeek(date);
-  return dow === 0 || dow === 6 ? "15:00" : "19:45";
+  return isWeekend(date) ? DEFAULT_KICKOFF : CUP_MIDWEEK_KICKOFF;
 }
 
 /** 감독의 달력에 우리 팀 컵 경기를 올린다 (남의 컵 경기는 장부에만 남는다) */
@@ -441,7 +445,7 @@ function registerUserEntries(state: GameState, matches: MatchRecord[]): void {
     state.schedule.push({
       id: `se-${m.id}`,
       date: m.date,
-      time: m.time ?? "19:45",
+      time: m.time ?? CUP_MIDWEEK_KICKOFF,
       type: "match",
       refId: m.id,
       teamId: state.userTeamId,
@@ -945,7 +949,7 @@ function syncCupRounds(state: GameState): void {
     state.schedule.push({
       id,
       date,
-      time: dayOfWeek(date) === 0 || dayOfWeek(date) === 6 ? "15:00" : "19:45",
+      time: kickoffFor(date),
       type: "cup-round",
       refId: drawRefId(cup.id, stage),
       teamId: state.userTeamId,
@@ -955,6 +959,16 @@ function syncCupRounds(state: GameState): void {
   }
   if (changed) state.schedule = sortEntries(state.schedule);
 }
+
+/**
+ * 국내 컵 우승·준우승이 감독 평판에 남기는 몫.
+ *
+ * ⚠️ **대항전(`season.ts`)과 값이 다르다** — 국내 컵은 유럽보다 가볍게 읽힌다.
+ * 한 값으로 합치지 말 것.
+ */
+const CUP_TITLE_MEDIA = 8;
+const CUP_TITLE_BOARD = 6;
+const CUP_RUNNER_UP_MEDIA = 3;
 
 /**
  * 시즌 리뷰의 국내 컵 결산 — 우승 트로피·상금·평판.
@@ -987,12 +1001,21 @@ export function reviewDomesticCups(state: GameState): string[] {
 
     if (champion === state.userTeamId) {
       state.trophies.push({ season: state.season, competition: cup.name, teamId: champion });
-      state.manager.reputation.media = Math.min(100, state.manager.reputation.media + 8);
-      state.manager.reputation.board = Math.min(100, state.manager.reputation.board + 6);
+      state.manager.reputation.media = Math.min(
+        100,
+        state.manager.reputation.media + CUP_TITLE_MEDIA,
+      );
+      state.manager.reputation.board = Math.min(
+        100,
+        state.manager.reputation.board + CUP_TITLE_BOARD,
+      );
       digest.push(`🏆 ${cup.name} 우승`);
       pushNarrative(state, `${cup.name} 우승`, 5);
     } else if (ours) {
-      state.manager.reputation.media = Math.min(100, state.manager.reputation.media + 3);
+      state.manager.reputation.media = Math.min(
+        100,
+        state.manager.reputation.media + CUP_RUNNER_UP_MEDIA,
+      );
       digest.push(`${cup.short} 준우승 — 결승 상대 ${teamName(champion)}`);
       pushNarrative(state, `${cup.short} 준우승`, 4);
     } else if (cup.country === countryOf(state.userTeamId)) {

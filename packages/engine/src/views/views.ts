@@ -30,7 +30,7 @@ import {
   shootoutTally,
   slotOfTime,
 } from "@story-fm/domain";
-import { diffDays, nextMatchFor, seasonEndDate } from "../competition/calendar";
+import { DEFAULT_KICKOFF, diffDays, nextMatchFor, seasonEndDate } from "../competition/calendar";
 import {
   categoryOf,
   currentMonthSummary,
@@ -1585,7 +1585,7 @@ function nextMatchView(state: GameState, m: MatchRecord, label: string): NextMat
   const userTeamId = state.userTeamId;
   return {
     date: m.date,
-    time: m.time ?? "15:00",
+    time: m.time ?? DEFAULT_KICKOFF,
     label,
     opponent: teamNameIn(state, m.homeTeamId === userTeamId ? m.awayTeamId : m.homeTeamId),
     venue: m.neutral ? "neutral" : m.homeTeamId === userTeamId ? "home" : "away",
@@ -1630,7 +1630,7 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
     round.matches.push({
       id: m.id,
       date: m.date,
-      time: m.time ?? "15:00",
+      time: m.time ?? DEFAULT_KICKOFF,
       homeName: teamNameIn(state, m.homeTeamId),
       awayName: teamNameIn(state, m.awayTeamId),
       homeShort: teamShortNameIn(state, m.homeTeamId),
