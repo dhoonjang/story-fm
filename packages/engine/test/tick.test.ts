@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { ageOf } from "@story-fm/domain";
 import {
   advanceTime,
+  diffDays,
+  dueExpiryStage,
+  seasonYear,
   assignmentsOf,
   financeOf,
   openInjury,
@@ -12,7 +15,14 @@ import {
   userPlayers,
   weeklyWagesOf,
 } from "@story-fm/engine";
-import { advanceDays, advanceToMatchday, createMiniGame, createTestGame } from "./helpers";
+import {
+  advanceDays,
+  advanceToMatchday,
+  createMiniGame,
+  createTestGame,
+  drillUserTactics,
+  playMockMatch,
+} from "./helpers";
 
 describe("advance_time — 시간은 스킬로만 흐른다 (season.md §5)", () => {
   it("프리시즌에서 다음 경기일까지 전진하면 개막전에서 멈춘다", () => {
@@ -370,5 +380,53 @@ describe("시간은 웬만하면 지나간다", () => {
     expect(result.stopped).toBe("attention");
     expect(state.date).toBe("2026-07-13");
     expect(result.digest.join(" ")).toContain("오늘이 기한");
+  });
+});
+
+describe("계약 만료 예고 — 문턱마다 한 번 (season.md §5)", () => {
+  it("넘어선 문턱 중 가장 낮은 것만, 이미 낸 단계는 다시 내지 않는다", () => {
+    expect(dueExpiryStage(181, undefined)).toBeNull();
+    expect(dueExpiryStage(180, undefined)).toBe(180);
+    // 하루로 재지 않는다 — 문턱 날에 tick이 없었어도 다음 날 선다
+    expect(dueExpiryStage(179, undefined)).toBe(180);
+    expect(dueExpiryStage(100, 180)).toBeNull();
+    expect(dueExpiryStage(89, 180)).toBe(90);
+    // 최종전이 5월 말인 시즌 — 30일 문턱(05-31)에 닿는 날이 아예 없다
+    expect(dueExpiryStage(31, 90)).toBeNull();
+    // 시즌이 끝나는 tick은 남은 문턱을 소진한다
+    expect(dueExpiryStage(0, 90)).toBe(30);
+    expect(dueExpiryStage(0, 30)).toBeNull();
+  });
+
+  it("최종전 뒤 30일 문턱에 tick이 없는 시즌에도 세 문턱이 한 번씩 나간다", () => {
+    const state = createMiniGame();
+    const player = userPlayers(state)[0]!;
+    const contract = state.contracts.find(
+      (c) => c.gamePlayerId === player.id && c.status === "active",
+    )!;
+    const expiresOn = `${seasonYear(state.season) + 1}-06-30`;
+    contract.until = expiresOn;
+
+    const warnings: string[] = [];
+    let lastTicked = state.date;
+    for (let i = 0; i < 400; i++) {
+      const result = advanceTime(state, "next_match");
+      expect(result.ok, result.digest.join(" / ")).toBe(true);
+      warnings.push(...result.digest.filter((d) => d.includes(`${player.name}의 계약이`)));
+      if (result.stopped === "season_end") break;
+      lastTicked = state.date;
+      if (result.stopped === "matchday") {
+        drillUserTactics(state, 7);
+        playMockMatch(state);
+      }
+    }
+
+    // 이 시즌은 30일 문턱을 지나지 않는다 — 최종전이 05-31보다 앞이다
+    expect(diffDays(lastTicked, expiresOn)).toBeGreaterThan(30);
+    expect(warnings.map((line) => line.match(/계약이 (\d+)일/)?.[1])).toEqual([
+      "180",
+      "90",
+      String(diffDays(lastTicked, expiresOn)),
+    ]);
   });
 });
