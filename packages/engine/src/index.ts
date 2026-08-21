@@ -94,6 +94,7 @@ export * from "./market/persuasion";
 export * from "./club/finance";
 export * from "./club/press";
 export * from "./club/approach";
+export * from "./club/board-demand";
 
 // skills — 감독 지시(GM 도구)의 실행부
 export * from "./skills";

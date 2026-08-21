@@ -78,7 +78,7 @@ const DECLINE: Record<PressAxis, number> = {
 /** 평판 눈금의 위끝 — 0~100 */
 const REPUTATION_MAX = 100;
 
-const clampRep = (v: number) => Math.max(0, Math.min(REPUTATION_MAX, Math.round(v)));
+export const clampRep = (v: number) => Math.max(0, Math.min(REPUTATION_MAX, Math.round(v)));
 
 /** 리더십 0이 갖는 울림 */
 const LEADERSHIP_FACTOR_MIN = 0.7;
