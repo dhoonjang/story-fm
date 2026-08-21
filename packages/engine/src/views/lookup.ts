@@ -1354,20 +1354,46 @@ export function careerView(state: GameState): LookupResult {
           : `이번 시즌 진행: 아직 리그 경기 없음`,
       ];
 
-  const records = [...state.seasonRecords].sort((a, b) => b.season - a.season);
-  if (records.length === 0) {
+  const yearOf = (season: number) => {
+    const year = seasonYear(season);
+    return `${year}-${String((year + 1) % 100).padStart(2, "0")}`;
+  };
+  /**
+   * 시즌 기록과 경질 이력을 한 표로 잇는다 (career.md §6) — 잘린 시즌은
+   * `SEASON_RECORD`가 없으므로 경질 줄이 그 해를 채운다. 최신 시즌이 앞이고,
+   * 같은 시즌 안에서는 시즌 결산(시즌 끝)이 경질(시즌 중)보다 앞이다.
+   */
+  const sackings = state.dismissals ?? [];
+  const rows = [
+    ...state.seasonRecords.map((r) => ({
+      season: r.season,
+      atEnd: 1,
+      on: "",
+      text:
+        `  시즌 ${r.season} (${yearOf(r.season)}) ${teamNameIn(state, r.teamId)} ` +
+        `${r.position}위 · ${r.wins}승 ${r.draws}무 ${r.losses}패 · 득 ${r.goalsFor} 실 ${r.goalsAgainst}` +
+        boardLine(r),
+    })),
+    ...sackings.map((d) => ({
+      season: d.season,
+      atEnd: 0,
+      on: d.on,
+      text:
+        `  시즌 ${d.season} (${yearOf(d.season)}) ${teamNameIn(state, d.teamId)} — ${d.on} 경질` +
+        (d.expectation && d.position
+          ? ` (기대 ${d.expectation} ${d.target}위 · 당시 ${d.position}위)`
+          : ""),
+    })),
+  ].sort((a, b) => b.season - a.season || b.atEnd - a.atEnd || b.on.localeCompare(a.on));
+  if (rows.length === 0) {
     lines.push("지난 시즌 기록: 없음 (첫 시즌이다)");
   } else {
-    lines.push(`지난 시즌 기록 ${records.length}시즌:`);
-    for (const r of records.slice(0, 10)) {
-      const year = seasonYear(r.season);
-      lines.push(
-        `  시즌 ${r.season} (${year}-${String((year + 1) % 100).padStart(2, "0")}) ${teamNameIn(state, r.teamId)} ` +
-          `${r.position}위 · ${r.wins}승 ${r.draws}무 ${r.losses}패 · 득 ${r.goalsFor} 실 ${r.goalsAgainst}` +
-          boardLine(r),
-      );
-    }
-    if (records.length > 10) lines.push(`  …그 외 ${records.length - 10}시즌`);
+    lines.push(
+      `지난 시즌 기록 ${state.seasonRecords.length}시즌:` +
+        (sackings.length > 0 ? ` (경질 ${sackings.length}회)` : ""),
+    );
+    for (const r of rows.slice(0, 10)) lines.push(r.text);
+    if (rows.length > 10) lines.push(`  …그 외 ${rows.length - 10}줄`);
   }
 
   lines.push(

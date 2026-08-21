@@ -1035,6 +1035,18 @@ export interface OfficeViews {
       reason: string | null;
     } | null;
     /**
+     * **경질 이력** — 부임이 카드를 옮겨 남긴 지난 경질들 (career.md §6).
+     * 잘린 시즌은 `SEASON_RECORD`가 없으므로 시즌 표가 이 줄로 그 해를 채운다.
+     */
+    dismissals: Array<{
+      on: string;
+      season: number;
+      teamName: string;
+      position: number | null;
+      target: number | null;
+      expectation: string | null;
+    }>;
+    /**
      * **지금 답할 수 있는 감독직 제안** — 만료가 가까운 것이 앞이다.
      * 수락은 채팅으로 한다(`accept_manager_offer`) — 화면은 무엇이 걸려 있는지만 세운다.
      */
@@ -2384,6 +2396,14 @@ export function buildOfficeViews(state: GameState): OfficeViews {
             reason: state.dismissal.reason ?? null,
           }
         : null,
+      dismissals: (state.dismissals ?? []).map((d) => ({
+        on: d.on,
+        season: d.season,
+        teamName: teamNameIn(state, d.teamId),
+        position: d.position ?? null,
+        target: d.target ?? null,
+        expectation: d.expectation ?? null,
+      })),
       offers: openManagerOffers(state).map((o) => ({
         id: o.id,
         teamName: teamNameIn(state, o.teamId),
