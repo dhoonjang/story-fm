@@ -228,7 +228,7 @@ export const CAPTAIN_ROLE_LABEL = "주장";
  * 자기 문제로 오는 것과 라커룸을 대신해 오는 것은 다른 자리다. 채널은 그 자리를
  * 가리키고, 효과가 어느 축에 닿는지도 여기서 갈린다.
  */
-export const APPROACH_CHANNELS = ["player", "captain", "owner"] as const;
+export const APPROACH_CHANNELS = ["player", "captain", "owner", "agent"] as const;
 export const ApproachChannelSchema = z.enum(APPROACH_CHANNELS);
 export type ApproachChannel = z.infer<typeof ApproachChannelSchema>;
 
@@ -240,6 +240,7 @@ export const APPROACH_CHANNEL_LABEL: Record<ApproachChannel, string> = {
   player: PERSONA_ROLE_LABEL.player!,
   captain: CAPTAIN_ROLE_LABEL,
   owner: PERSONA_ROLE_LABEL.owner!,
+  agent: PERSONA_ROLE_LABEL.agent!,
 };
 
 /** 중계 — 무대 밖의 목소리. 이름이 곧 자리다 */

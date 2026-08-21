@@ -25,6 +25,10 @@ export const PressTriggerSchema = z.enum([
   "transfer",
   /** 연패·부진 등 감독 자리가 흔들릴 때 */
   "pressure",
+  /** 시즌 개막 전야 — 우리 첫 리그 경기 전날 */
+  "opening",
+  /** 더비 전야 — 더비 표의 대진 전날 */
+  "derby",
 ]);
 export type PressTrigger = z.infer<typeof PressTriggerSchema>;
 
@@ -52,6 +56,12 @@ export const PressFactKindSchema = z.enum([
   "morale",
   /** 리그에서 지금 서 있는 자리와 보드가 건 자리 */
   "standing",
+  /** 전야 회견의 대진 — 상대와 날짜 (개막·더비) */
+  "fixture",
+  /** 언론 유출 — 방치된 불만이 신문에 실렸다 (people.md §8 계단 4) */
+  "leak",
+  /** 이적 요청 — 에이전트가 대리로 들고 온다 (people.md §8 계단 5) */
+  "transfer-request",
 ]);
 /**
  * 회견의 재료 — **사실 한 줄.** 질문이 아니다.
@@ -152,8 +162,26 @@ export const APPROACH_TOPICS = [
 export const ApproachTopicSchema = z.enum(APPROACH_TOPICS);
 export type ApproachTopic = z.infer<typeof ApproachTopicSchema>;
 
-/** 사다리의 꼭대기 — 보드 경고가 3/3에 서는 것과 같은 규약 (people.md §8) */
-export const APPROACH_MAX_STEP = 3;
+/**
+ * 사다리의 절대 상한 — 스키마가 막는 값. 꼭대기는 채널마다 다르다
+ * (`APPROACH_TOP_STEP`): 선수의 사다리만 언론 유출(4)·이적 요청(5)으로 이어진다.
+ */
+export const APPROACH_MAX_STEP = 5;
+
+/** 언론 유출이 서는 계단 — 자리가 아니라 사건이다 (people.md §8) */
+export const APPROACH_LEAK_STEP = 4;
+
+/**
+ * 채널별 사다리 꼭대기 (people.md §8). 주장·구단주가 3에 멈추는 것은 보드 경고가
+ * 3/3에 서는 것과 같은 규약이고, 선수 주제는 에이전트 대리 방문(5)까지 오른다 —
+ * `agent`는 선수 주제의 꼭대기 계단이 서는 채널이라 같은 값이다.
+ */
+export const APPROACH_TOP_STEP: Record<ApproachChannel, number> = {
+  player: APPROACH_MAX_STEP,
+  agent: APPROACH_MAX_STEP,
+  captain: 3,
+  owner: 3,
+};
 
 /**
  * 압력 눈금 — **감독이 무엇을 하지 않았는지의 누적.**
@@ -202,6 +230,21 @@ export const ApproachSchema = z.object({
 });
 export type Approach = z.infer<typeof ApproachSchema>;
 
+/**
+ * 언론 유출 — **사다리 계단 4의 사건** (people.md §8). 방치된 불만이 신문에
+ * 흘러나왔고, **다음 회견이 실어 갈 때까지만** 여기 남는다 — 회견은 두 시점에
+ * 걸쳐 있어 세이브가 들지만, 유출은 소비되는 순간 카드가 되어 회견으로 옮겨
+ * 간다. 옛 세이브엔 없다 (빈 배열 로드 — 세이브 버전 유지).
+ */
+export const PressLeakSchema = z.object({
+  /** 불만의 주인 (`GAME_PLAYER.id`) — 유출은 선수 주제에만 있다 */
+  playerId: z.string().min(1),
+  topic: ApproachTopicSchema,
+  /** 흘러나온 날 */
+  date: DateString,
+});
+export type PressLeak = z.infer<typeof PressLeakSchema>;
+
 /** 스탠스가 옮기는 축 — 평판 3축과 사기 둘 (`club/press.ts`의 표가 채운다) */
 export type PressAxis = "board" | "media" | "squad" | "target" | "team";
 
@@ -215,4 +258,7 @@ export const APPROACH_AXES: Record<ApproachChannel, readonly PressAxis[]> = {
   player: ["squad", "target", "team"],
   captain: ["squad", "team"],
   owner: ["board"],
+  // 당사자는 자리에 없지만 답은 에이전트를 타고 그에게 닿고, 라커룸은
+  // 감독이 선수의 에이전트를 어떻게 대하는지 듣는다. 팀 전체는 방 밖이다.
+  agent: ["squad", "target"],
 };

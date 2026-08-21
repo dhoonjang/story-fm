@@ -1488,6 +1488,28 @@ describe("임대 중인 선수는 소유 구단만 움직인다", () => {
     const listed = setTransferList(state, { playerId: ours.id, listed: true });
     expect(listed.ok, "불러들인 뒤에는 소유 구단이 다시 움직일 수 있다").toBe(true);
   });
+
+  /**
+   * 계단 5 — 이적 요청이 선 선수는 감독이 내놓지 않아도 시장이 노린다
+   * (people.md §8). 평소 후보 순위에 오르지 않을 선수를 골라, 요청 하나로
+   * 오퍼가 붙는지만 본다.
+   */
+  it("이적 요청이 선 선수에게 시장이 먼저 온다", () => {
+    const state = createTestGame(42);
+    const byValue = [...playersOf(state, state.userTeamId)].sort(
+      (a, b) => marketValueOf(state, a) - marketValueOf(state, b),
+    );
+    const quiet = byValue[Math.floor(byValue.length / 2)]!;
+    quiet.state.transferRequestedOn = state.date;
+
+    const digest: string[] = [];
+    const offered = () => state.negotiations.some((n) => n.gamePlayerId === quiet.id);
+    for (let i = 0; i < 120 && !offered(); i++) {
+      state.date = addDays(state.date, 1);
+      generateIncomingOffers(state, digest);
+    }
+    expect(offered(), "요청이 서 있으면 창이 열린 뒤 오퍼가 붙는다").toBe(true);
+  });
 });
 
 describe("계약 해지 — 값을 흥정하고, 안 되면 전액을 문다", () => {

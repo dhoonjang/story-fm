@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  addDays,
   applyPressOutcome,
   buildMatchPress,
   buildTransferPress,
   declinePress,
   describePendingPress,
+  leagueOfTeamIn,
+  openEvePress,
   openPress,
   pendingPress,
   reportersOf,
@@ -375,5 +378,99 @@ describe("기자회견 — 누가 묻는가", () => {
     const { reporterId, ...old } = fakeConference({ reporterId: "누군가" });
     expect(reporterId).toBe("누군가");
     expect(PressConferenceSchema.safeParse(old).success).toBe(true);
+  });
+});
+
+describe("기자회견 — 언론 유출은 다음 자리가 싣는다", () => {
+  it("유출은 다음 회견에 sharp 카드로 실리고 자리를 키운다", () => {
+    const state = createTestGame();
+    const player = userPlayers(state)[0]!;
+    state.pressLeaks = [{ playerId: player.id, topic: "minutes", date: state.date }];
+
+    const conference = fakeConference({ weight: 1 });
+    openPress(state, conference);
+
+    const leak = conference.facts.find((f) => f.kind === "leak");
+    expect(leak, "유출이 회견에 실리지 않았다").toBeDefined();
+    expect(leak!.about).toBe(player.id);
+    expect(leak!.sharp).toBe(true);
+    expect(leak!.text).toContain(player.name);
+    expect(leak!.text).not.toContain("?");
+    expect(conference.weight).toBeGreaterThanOrEqual(2);
+    // 실어 간 유출은 남지 않는다 — 남으면 다음 회견이 같은 사실을 다시 묻는다
+    expect(state.pressLeaks).toEqual([]);
+  });
+
+  it("떠난 선수의 유출은 실리지 않고 조용히 버려진다", () => {
+    const state = createTestGame();
+    const gone = userPlayers(state)[0]!;
+    gone.teamId = "chelsea";
+    state.pressLeaks = [{ playerId: gone.id, topic: "demotion", date: state.date }];
+
+    const conference = fakeConference({ weight: 1 });
+    openPress(state, conference);
+
+    expect(conference.facts.some((f) => f.kind === "leak")).toBe(false);
+    expect(conference.weight).toBe(1);
+    // 버린 것도 비운다 — 우리 라커룸 밖의 불만이 장부에 눌러앉지 않는다
+    expect(state.pressLeaks).toEqual([]);
+  });
+});
+
+describe("기자회견 — 전야", () => {
+  /** 우리 리그 경기 — 컵도 대항전도 친선도 아닌 것 */
+  function leagueMatches(state: GameState): MatchRecord[] {
+    const league = leagueOfTeamIn(state, state.userTeamId);
+    return state.matches
+      .filter(
+        (m) =>
+          m.competitionId === league &&
+          (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+      )
+      .sort((a, b) => (a.date < b.date ? -1 : 1));
+  }
+
+  /** 그 경기 전날로 시계를 옮긴다 — 전야 회견은 하루 전에만 선다 */
+  function eveOf(state: GameState, match: MatchRecord): void {
+    state.date = addDays(match.date, -1);
+  }
+
+  it("첫 리그 경기 전날에 개막 회견이 열린다 — 같은 날 두 번 불러도 하나다", () => {
+    const state = createTestGame();
+    const opener = leagueMatches(state)[0]!;
+    eveOf(state, opener);
+
+    openEvePress(state);
+    openEvePress(state);
+
+    const opened = (state.pressConferences ?? []).filter((c) => c.trigger === "opening");
+    expect(opened).toHaveLength(1);
+    expect(opened[0]!.weight).toBe(1);
+    expect(opened[0]!.status).toBe("pending");
+    for (const f of opened[0]!.facts) expect(f.text).not.toContain("?");
+    expect(opened[0]!.facts.some((f) => f.kind === "fixture")).toBe(true);
+  });
+
+  it("더비 전야는 더비 회견이다 — 개막이 아니어도 열린다", () => {
+    const state = createTestGame();
+    const derby = leagueMatches(state).find(
+      (m) => m.homeTeamId === "tottenham" || m.awayTeamId === "tottenham",
+    );
+    expect(derby, "북런던 더비가 대진표에 없다").toBeDefined();
+    eveOf(state, derby!);
+
+    openEvePress(state);
+
+    const press = pendingPress(state)!;
+    expect(press.trigger).toBe("derby");
+    expect(press.weight).toBe(2);
+    expect(press.context).toContain("북런던 더비");
+  });
+
+  it("친선 전날에는 아무 자리도 서지 않는다", () => {
+    const state = createTestGame();
+    eveOf(state, nextUserMatch(state, "friendly"));
+    openEvePress(state);
+    expect(pendingPress(state)).toBeNull();
   });
 });

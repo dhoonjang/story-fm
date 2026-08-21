@@ -9,6 +9,7 @@ import {
   speakerCues,
   tickApproaches,
   userPlayers,
+  worldFigures,
   type GameState,
 } from "@story-fm/engine";
 import type { PlayerIssueReason } from "@story-fm/domain";
@@ -367,5 +368,99 @@ describe("자기 일이 아닌 자리는 대신 오는 사람이 있다", () => 
     expect(open?.channel).toBe("captain");
     expect(open?.speakerId).toBe(captain.name);
     expect(open?.about).toBeNull();
+  });
+});
+
+/**
+ * 사다리의 위쪽 두 계단 — **방치가 행동이 된다** (people.md §8).
+ *
+ * 아래 세 계단은 사람이 오지만 4·5는 세계가 움직인다: 불만이 신문에 새고, 그다음엔
+ * 에이전트가 이적 요청을 들고 온다. 계단마다 임계가 달라 눈으로는 맞출 수 없다.
+ */
+
+/** 그 압력 줄 */
+const rowOf = (state: GameState, subject: string) =>
+  state.approachPressure!.find((r) => r.subject === subject)!;
+
+/** 사다리를 그 계단까지 올린다 — 자리가 열릴 때마다 감독이 답한다(압력은 0으로) */
+function climbTo(state: GameState, subject: string, step: number): void {
+  for (let day = 0; day < 400; day++) {
+    if ((state.approachPressure?.find((r) => r.subject === subject)?.step ?? 0) >= step) return;
+    pressDays(state, 1);
+    if (pendingApproach(state)) respondToApproach(state, { stance: "defend" });
+  }
+  throw new Error(`${subject}의 사다리가 ${step}계단까지 오르지 않았다`);
+}
+
+describe("계단 4·5 — 언론 유출과 이적 요청", () => {
+  it("계단 3을 지나 임계 400을 채우면 자리가 아니라 유출이 선다", () => {
+    const state = quiet(createTestGame(11));
+    const target = firsts(state, 1)[0]!;
+    gripe(state, target.id);
+    climbTo(state, target.id, 3);
+
+    // minutes는 하루 7 — 57일이면 399로 임계 400에 못 미친다
+    pressDays(state, 57);
+    expect(state.pressLeaks ?? []).toEqual([]);
+
+    pressDays(state, 1);
+    expect(pendingApproach(state)).toBeNull();
+    expect(state.pressLeaks).toEqual([{ playerId: target.id, topic: "minutes", date: state.date }]);
+    const row = rowOf(state, target.id);
+    expect(row.step).toBe(4);
+    // 유출은 압력을 풀지 않는다 — 직전 임계(400)의 75%가 남는다
+    expect(row.value).toBe(300);
+  });
+
+  it("유출 뒤 임계 500을 채우면 에이전트가 이적 요청을 들고 온다", () => {
+    const state = quiet(createTestGame(11));
+    const target = firsts(state, 1)[0]!;
+    gripe(state, target.id);
+    climbTo(state, target.id, 3);
+    pressDays(state, 58); // 유출 — 300이 남는다
+
+    pressDays(state, 29); // 300 + 203 = 503
+    const open = pendingApproach(state);
+    expect(open?.channel).toBe("agent");
+    expect(open?.step).toBe(5);
+    expect(open?.about).toBe(target.id);
+    expect(worldFigures(state).some((f) => f.characterId === open?.speakerId)).toBe(true);
+    expect(open?.facts[0]?.kind).toBe("transfer-request");
+    // 자리가 열리는 순간 요청이 선다 — 감독의 답을 기다리지 않는다
+    expect(target.state.transferRequestedOn).toBe(state.date);
+  });
+
+  it("요청이 서 있는 동안 압력은 더 쌓이지 않고, 불만이 풀리면 걷힌다", () => {
+    const state = quiet(createTestGame(11));
+    const target = firsts(state, 1)[0]!;
+    gripe(state, target.id);
+    climbTo(state, target.id, 3);
+    pressDays(state, 58);
+    pressDays(state, 29);
+    expect(respondToApproach(state, { stance: "defend" }).ok).toBe(true);
+    // 꼭대기 계단에서는 남는 압력이 없다
+    expect(rowOf(state, target.id).value).toBe(0);
+    // 답은 요청을 지우지 못한다
+    expect(target.state.transferRequestedOn).not.toBeUndefined();
+
+    pressDays(state, 5);
+    expect(rowOf(state, target.id).value).toBe(0);
+
+    state.issues = state.issues.filter((i) => i.gamePlayerId !== target.id);
+    pressDays(state, 1);
+    expect(target.state.transferRequestedOn).toBeUndefined();
+  });
+
+  it("주장의 사다리는 3에서 멈춘다 — 유출도 에이전트도 서지 않는다", () => {
+    const state = quiet(createTestGame(11));
+    for (const p of userPlayers(state).filter((x) => x.squadLevel === "first")) p.state.form = -0.5;
+    climbTo(state, "squad", 3);
+
+    // morale은 하루 8 — 400을 채우고도 계단은 3에 선다
+    pressDays(state, 50);
+    const open = pendingApproach(state);
+    expect(open?.channel).toBe("captain");
+    expect(open?.step).toBe(3);
+    expect(state.pressLeaks ?? []).toEqual([]);
   });
 });

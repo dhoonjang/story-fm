@@ -2,6 +2,7 @@ import type {
   Achievement,
   Approach,
   ApproachPressure,
+  PressLeak,
   AxisValues,
   Booking,
   CharacterInjection,
@@ -706,6 +707,12 @@ export interface GameState {
    * 없다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   approachPressure?: ApproachPressure[];
+  /**
+   * 언론 유출 — 사다리 계단 4의 사건 (people.md §8). **다음 회견이 실어 갈 때까지만**
+   * 남는다: `openPress`가 소비해 사실 카드로 옮긴다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  pressLeaks?: PressLeak[];
 
   // ── 감독 ──
   manager: Manager;
@@ -2312,6 +2319,7 @@ export function createGame(input: CreateGameInput): GameState {
     pressConferences: [],
     approaches: [],
     approachPressure: [],
+    pressLeaks: [],
 
     manager: {
       name: input.managerName,
