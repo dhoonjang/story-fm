@@ -461,6 +461,8 @@ export function acceptManagerOffer(state: GameState, ref: string): SkillResult {
    */
   state.approaches = [];
   state.approachPressure = [];
+  // 라커룸 불만도 앞 구단의 것이다 (people.md §5) — 지고 오면 주의 줄이 옛 이름을 나열한다
+  state.issues = [];
   // 기본 훈련은 새 선수단으로 다시 깔린다
   syncDefaultTraining(state);
 

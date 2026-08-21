@@ -162,6 +162,13 @@ describe("매각 제안 — 특정 구단에 직접 묻는다", () => {
     const state = createTestGame(11);
     state.date = "2026-08-01";
     const target = sellable(state);
+    // 불만을 풀려고 파는 것이 가장 자연스러운 해소책이다 — 팔면 불만도 끝나야 한다 (people.md §5)
+    state.issues.push({
+      gamePlayerId: target.id,
+      kind: "unhappy",
+      reason: "minutes",
+      since: state.date,
+    });
     setTransferList(state, { playerId: target.id, listed: true });
     const buyer = buyerOf(state);
     // 상대가 응할 만한 값 — 낮게 불러 확률을 올린다
@@ -184,6 +191,10 @@ describe("매각 제안 — 특정 구단에 직접 묻는다", () => {
       state.finances.find((f) => f.teamId === state.userTeamId)!.transferBudget,
     ).toBeGreaterThan(budgetBefore);
     expect(listingOf(state, target.id)).toBeNull();
+    expect(
+      state.issues.some((i) => i.gamePlayerId === target.id),
+      "판 선수의 불만이 장부에 남았다",
+    ).toBe(false);
   });
 });
 
