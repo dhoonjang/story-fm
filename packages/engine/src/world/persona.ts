@@ -14,6 +14,7 @@ import {
 import { realCoachNameOf } from "../data/coach-seeds";
 import { realOwnerNameOf } from "../data/owner-seeds";
 import { WORLD_FIGURE_SEEDS, type WorldFigureSeed } from "../data/world-figures";
+import { MARKET_LEAGUE_SQUADS } from "../data/market-leagues";
 import { claimPersonaName, personaNamePoolOf } from "../data/names";
 import { countryOfTeam } from "../data/team-catalog";
 import { hashChannel, makeRng, pick } from "../core/rng";
@@ -379,12 +380,54 @@ const CLOSED_NEGOTIATION = new Set<string>([
   "expired",
 ] satisfies Negotiation["status"][]);
 
+/**
+ * **이름난 현역의 선** — 종합이 이만큼이면 세계가 그 이름을 안다 (people.md §6).
+ *
+ * 세계에 명성 필드가 없어 능력치로 긋는다. 시장가는 나이 먹은 레전드를 0으로 만들어
+ * **정확히 담아야 할 이름을 떨어뜨리고**, 잠재력은 85 이상이 대부분 스물 미만이라
+ * 더 나쁘다. 82는 세계 5,300명 중 58명이 서는 선이다 — 여기를 낮추면 동명이인이
+ * 늘어 정작 우리 선수가 사라진다(`candidatesOf`).
+ */
+const FAMOUS_PLAYER_OVERALL = 82;
+
+/**
+ * 능력치가 답하지 못하는 이름들 — **시장 전용 리그(사우디·MLS)의 시드 명단**.
+ *
+ * 마흔한 살 호날두는 82지만 서른아홉 메시는 80이고 수아레스는 75다. 나이가 깎은
+ * 것은 기량이지 이름값이 아니다. 그 표는 이미 "감독이 데려올 만한 이름"만 담기로
+ * 하고 만든 명단이므로(`data/market-leagues.ts`), **표가 곧 명성의 선이다** —
+ * 표에서 지우면 그 이름은 세계에서 사라진다.
+ *
+ * 팀이 아니라 이름으로 본다: 그 선수가 유럽으로 돌아와도 세계가 아는 이름은 그대로다.
+ */
+const MARKET_LEGEND_NAMES: ReadonlySet<string> = new Set(
+  Object.values(MARKET_LEAGUE_SQUADS)
+    .flat()
+    .map((seed) => seed.nameKo),
+);
+
+/**
+ * 세계가 이 이름을 아는가 — 능력치의 선, 또는 시장 전용 리그의 시드 명단.
+ * 캐릭터북(`candidatesOf`)과 화자 사전(`collectSpeakers`)이 같은 선을 든다 —
+ * 두 곳이 다른 세계를 알면 화면·기억·등록 검사가 서로 어긋난다.
+ */
+export function isFamousPlayer(overall: number, name: string): boolean {
+  return overall >= FAMOUS_PLAYER_OVERALL || MARKET_LEGEND_NAMES.has(name);
+}
+
 /** 화자 사전을 만들 최소 상태 — 세이브 전체가 아니라 필요한 것만 받는다 */
 interface SpeakerSource {
   seed: number;
   userTeamId: string;
   personas?: Persona[];
-  players?: Array<{ id?: string; name: string; teamId: string; isCaptain?: boolean }>;
+  players?: Array<{
+    id?: string;
+    name: string;
+    teamId: string;
+    isCaptain?: boolean;
+    /** 이름난 현역 판정용 — 없으면(축약 픽스처) 이름난 현역으로 서지 않는다 */
+    attributes?: { overall: number };
+  }>;
   negotiations?: Array<{ gamePlayerId: string; status: string }>;
 }
 
@@ -410,10 +453,13 @@ export interface SpeakerRole {
  * ① **모델의 출력에 기대지 않는다.** LLM은 이름만 뱉고(태그에 직책을 쓰지 말라고
  *    지시했으니 당연하다), 직책은 세이브가 안다. 그래야 어떤 턴에서도 빠지지 않는다.
  * ② **수석코치만 특별대우하지 않는다.** 자리를 아는 화자는 다 알려 준다 — 페르소나(수석코치·구단주)·
- *    **주장**·**우리 선수단**, 그리고 협상 테이블에 앉은 상대 선수까지. 포지션은
+ *    **주장**·**우리 선수단**·협상 테이블에 앉은 상대 선수, 그리고 **이름난 현역과
+ *    세계 인물 명부**까지(캐릭터북의 세 겹 그대로 — people.md §6). 포지션은
  *    넣지 않는다: 대화마다 따라붙기엔 시끄럽고, 그건 명단이 답하는 정보다.
  * ③ **잘못된 자리보다 없는 게 낫다.** 같은 이름이 둘이면(코치와 선수가 동명이인)
  *    무엇을 붙여도 절반은 틀리므로 **아예 붙이지 않는다** — 화면은 사람 아이콘만 세운다.
+ *    이름난 현역·명부는 예외다: 뒤 겹은 이미 찬 자리를 넘보지 않으므로(캐릭터북과
+ *    같은 답) 그쪽과 겹쳐도 우리 쪽 칩이 사라지지 않는다.
  *
  * 사전에 **전 리그 4,000명을 담지 않는 이유**도 ③과 같다: 남의 팀 3군까지 넣으면
  * 동명이인이 늘어 정작 우리 선수가 사라진다. 우리 선수단은 40명 남짓이라 사전이
@@ -487,6 +533,26 @@ function collectSpeakers(state: SpeakerSource): Map<string, SpeakerRole | null> 
       if (player.id !== undefined && negotiating.has(player.id))
         put(player.name, { kind: "player" });
     }
+  }
+
+  // ── 이름난 현역 · 세계 인물 명부 — 캐릭터북의 세 겹 그대로 (people.md §3·§6) ──
+  // **이미 찬 자리는 넘보지 않는다**: 캐릭터북이 후보를 모으는 순서와 같은 답이라,
+  // 뒤 겹 때문에 우리 선수가 칩을 잃지 않는다. `put`의 "둘 다 버린다"는 우리
+  // 사람끼리 겹쳤을 때의 것이다 — 그때는 어느 쪽을 골라도 절반은 틀린다.
+  const claim = (rawName: string, role: SpeakerRole) => {
+    const key = normalizeSpeaker(rawName);
+    if (key && !seen.has(key)) seen.set(key, role);
+  };
+  for (const player of state.players ?? []) {
+    if (player.attributes !== undefined && isFamousPlayer(player.attributes.overall, player.name))
+      // 유니폼 아이콘이 이미 말한다 — 라벨을 붙일 직책이 없다
+      claim(player.name, { kind: "player" });
+  }
+  for (const figure of worldFigures(state)) {
+    claim(figure.characterId, {
+      kind: figure.role,
+      label: personaRoleLabel(figure.role),
+    });
   }
 
   return seen;
@@ -744,13 +810,34 @@ interface CharacterMemorySource extends SpeakerSource {
 }
 
 /**
+ * 이 세계가 이름을 아는 사람 전부 — **캐릭터북이 이름을 찾는 해석(`personaOf`)과
+ * 같은 범위**다 (people.md §9-1): 화자 사전이 아는 자리 전부(페르소나·우리 선수단·
+ * 협상 상대·이름난 현역·명부)에 **리그의 선수 전부**를 더한다. 선수 페르소나는
+ * 이름에서 파생하므로(`generatePlayerPersona`) 이름이 곧 그 사람이다.
+ *
+ * 기억 필터와 등록 검사가 같은 집합을 들어야 두 곳이 갈리지 않는다 — 필터가 화자
+ * 사전만 보면 파생 선수 앞으로 적힌 기억이 버려지고, 등록 검사가 좁으면 압축이
+ * 실존 이름 위에 지어낸 인격을 세운다.
+ */
+function knownSpeakerKeys(state: SpeakerSource): Set<string> {
+  const keys = new Set(collectSpeakers(state).keys());
+  for (const player of state.players ?? []) {
+    const key = normalizeSpeaker(player.name);
+    if (key) keys.add(key);
+  }
+  return keys;
+}
+
+/**
  * LLM이 낸 기억을 검사해 반영한다 — 걸린 항목만 버리고 나머지는 반영한다
  * (`applyMoodNotes`와 같은 계약).
  *
  * 거르는 조건은 셋이다:
- * ① **이 세계의 화자가 아닌 이름** — GM이 지어낸 이름에 붙인 기억은 아무에게도
- *    닿지 않는다. 겹쳐서 사전에서 빠진 이름은 `collectSpeakers`가 여전히 쥐고
- *    있으므로, 동명이인이라고 그 사람의 기억까지 사라지진 않는다.
+ * ① **이 세계가 이름을 모르는 사람** — GM이 지어낸 이름에 붙인 기억은 아무에게도
+ *    닿지 않는다. 범위는 캐릭터북과 같은 해석이다(`knownSpeakerKeys`) — 명부
+ *    인물·파생 선수 앞으로 적힌 기억이 버려지면 카드가 설 때 함께 실릴 것이 없다.
+ *    겹쳐서 사전에서 빠진 이름도 집합에는 남으므로, 동명이인이라고 그 사람의
+ *    기억까지 사라지진 않는다.
  * ② 스키마 밖 — 길이 120자와 무게 1~5는 `CharacterMemorySchema`가 정한다.
  * ③ **글자까지 같은 기억** — 압축이 되풀이되면 같은 구간을 다시 읽는다.
  *
@@ -762,7 +849,7 @@ export function applyCharacterMemories(
   state: CharacterMemorySource,
   drafts: readonly CharacterMemoryDraft[],
 ): number {
-  const speakers = collectSpeakers(state);
+  const speakers = knownSpeakerKeys(state);
   const memories = state.characterMemories ?? [];
   let applied = 0;
   for (const draft of drafts) {
@@ -807,8 +894,9 @@ export interface CharacterDraft {
  * 아니라 파생이라서다 (people.md §6) — 세이브에 밀어 넣으면 그 규약이 깨진다.
  *
  * ⚠️ **여기서 역할을 늘리지 마라.** `PersonaRoleSchema`는 열린 집합이라고 적혀 있지만
- * 실제로는 `z.enum`이라 여섯뿐이고, 하나를 늘리려면 라벨·아이콘·화자 사전이 함께
- * 움직여야 한다. 상대 감독도 에이전트도 지금은 `friend`로 선다.
+ * 실제로는 `z.enum`이고, 하나를 늘리려면 라벨·아이콘·화자 사전이 함께 움직여야
+ * 한다. `manager`·`agent`·`pundit`은 등록이 아니라 **세계 인물 명부로 선다**
+ * (people.md §2-1) — 표가 직접 적은 인격이라 GM이 세울 자리가 아니다.
  */
 export const REGISTERABLE_ROLES = ["reporter", "friend", "supporter"] as const;
 const REGISTERABLE = new Set<PersonaRole>(REGISTERABLE_ROLES);
@@ -820,9 +908,11 @@ const REGISTERABLE = new Set<PersonaRole>(REGISTERABLE_ROLES);
  * ① 자리가 하나뿐인 역할(→ `REGISTERABLE_ROLES`)
  * ② **이미 있는 `characterId`** — 기존 인물은 자리를 지킨다. 성격·동기·말투를
  *    덮어쓰지 않고 그냥 등록하지 않는다. 갱신은 기억을 더하는 것뿐이다.
- * ③ **이미 선 화자와 겹치는 이름** — 우리 선수와 이름이 같은 에이전트를 세우면
- *    화면이 두 사람을 한 사람으로 읽는다. 겹친 자리에 아무것도 붙이지 않는
- *    `speakerRoles`의 원칙(§3 ③)을 등록 쪽에서도 든다.
+ * ③ **이 세계가 이미 이름을 아는 사람** — 범위는 기억 필터와 같은 집합이다
+ *    (`knownSpeakerKeys`: 화자 사전 전부 + 명부 + 리그의 선수 전부). 우리 선수와
+ *    이름이 같은 에이전트를 세우면 화면이 두 사람을 한 사람으로 읽고, **명부·파생
+ *    선수의 이름 위에 등록하면 캐릭터북이 저장된 페르소나를 먼저 찾으므로 표가
+ *    적은 인격이 LLM이 지어낸 인격에 가려진다** (people.md §9-1).
  *
  * `seed`는 모델이 아니라 코어가 (세이브 시드, `characterId`)에서 결정적으로 뽑고,
  * `keywords`는 `personaKeywords`가 채운다.
@@ -833,7 +923,7 @@ export function registerCharacters(
   state: SpeakerSource,
   drafts: readonly CharacterDraft[],
 ): number {
-  const occupied = new Set(collectSpeakers(state).keys());
+  const occupied = knownSpeakerKeys(state);
   // 페르소나가 빈 세이브에 새 인물만 밀어 넣으면 `speakerRoles`의 시드 폴백이 꺼져
   // 코치·구단주·기자단이 사전에서 통째로 사라진다. 폴백과 같은 사람들을 함께 세운다
   const personas = state.personas?.length

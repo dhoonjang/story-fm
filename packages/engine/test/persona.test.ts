@@ -11,6 +11,7 @@ import {
   ensurePersonas,
   generateHeadCoach,
   headCoachOf,
+  isFamousPlayer,
   speakerRoles,
   ownerOf,
   generateOwner,
@@ -158,7 +159,10 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
 
   it("남의 팀 선수는 협상 테이블에 앉았을 때만 사전에 든다", () => {
     const state = createTestGame(42, "manutd");
-    const outsider = state.players.find((p) => p.teamId !== "manutd")!;
+    // 이름난 현역은 협상 없이도 사전에 있다 — 이 테스트의 자리는 무명의 것이다
+    const outsider = state.players.find(
+      (p) => p.teamId !== "manutd" && !isFamousPlayer(p.attributes.overall, p.name),
+    )!;
     expect(speakerRoles(state)[normalizeSpeaker(outsider.name)]).toBeUndefined();
 
     state.negotiations.push({
@@ -196,7 +200,9 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
   it("끝난 협상은 화자를 남기지 않는다", () => {
     for (const status of ["completed", "rejected", "expired"] as const) {
       const state = createTestGame(42, "manutd");
-      const outsider = state.players.find((p) => p.teamId !== "manutd")!;
+      const outsider = state.players.find(
+        (p) => p.teamId !== "manutd" && !isFamousPlayer(p.attributes.overall, p.name),
+      )!;
       state.negotiations.push({
         id: `neg-${status}`,
         gamePlayerId: outsider.id,
@@ -219,6 +225,37 @@ describe("수석코치 페르소나 — 데이터로 다루는 인물 (people.md
     const captain = state.players.find((p) => p.teamId === "manutd" && p.isCaptain)!;
     captain.name = coach.name;
     expect(speakerRoles(state)[normalizeSpeaker(coach.name)]).toBeUndefined();
+  });
+
+  it("세계 인물 명부가 직책 라벨과 함께 선다 — 유저 팀의 명부 감독만 빠진다", () => {
+    const roles = speakerRoles({ seed: 1, userTeamId: "manutd" });
+    expect(roles[normalizeSpeaker("펩 과르디올라")]).toEqual({ kind: "manager", label: "감독" });
+    expect(roles[normalizeSpeaker("조르제 멘데스")]).toEqual({ kind: "agent", label: "에이전트" });
+    expect(roles[normalizeSpeaker("게리 네빌")]).toEqual({ kind: "pundit", label: "해설위원" });
+    // 유저가 맡은 팀의 명부 감독은 이 세계에 부임한 적이 없다
+    expect(
+      speakerRoles({ seed: 1, userTeamId: "mancity" })[normalizeSpeaker("펩 과르디올라")],
+    ).toBeUndefined();
+  });
+
+  it("이름난 현역이 사전에 든다 — 아이콘만, 이미 찬 자리는 넘보지 않는다", () => {
+    const roles = speakerRoles({
+      seed: 1,
+      userTeamId: "manutd",
+      players: [
+        { name: "우리 주장", teamId: "manutd", isCaptain: true },
+        // 주장과 동명의 남의 팀 스타 — 뒤 겹은 완장을 밀어내지 못한다
+        { name: "우리 주장", teamId: "chelsea", attributes: { overall: 90 } },
+        { name: "남의 팀 스타", teamId: "chelsea", attributes: { overall: 82 } },
+        { name: "무명 선수", teamId: "chelsea", attributes: { overall: 81 } },
+        // 능력치가 답하지 못하는 레전드 — 시장 리그 시드 명단이 답한다
+        { name: "리오넬 메시", teamId: "intermiami", attributes: { overall: 80 } },
+      ],
+    });
+    expect(roles[normalizeSpeaker("남의 팀 스타")]).toEqual({ kind: "player" });
+    expect(roles[normalizeSpeaker("리오넬 메시")]).toEqual({ kind: "player" });
+    expect(roles[normalizeSpeaker("무명 선수")]).toBeUndefined();
+    expect(roles[normalizeSpeaker("우리 주장")]).toEqual({ kind: "captain", label: "주장" });
   });
 
   it("personas가 빈 배열이어도 직책이 사라지지 않는다", () => {
@@ -596,6 +633,30 @@ describe("캐릭터북 갱신", () => {
       ).toBe(0);
     }
     expect(state.personas).toHaveLength(before);
+  });
+
+  it("명부와 리그의 이름 위에는 등록할 수 없고, 그 앞으로 적힌 기억은 반영된다", () => {
+    const state = createTestGame();
+    const before = state.personas!.length;
+
+    // 명부 이름으로 friend를 세우면 캐릭터북이 등록본을 먼저 찾아 표의 인격이 가려진다
+    expect(
+      registerCharacters(state, [draftOf({ characterId: "조제 무리뉴", name: "조제 무리뉴" })]),
+    ).toBe(0);
+    // 사전 밖 리그 선수의 이름도 이 세계가 이미 아는 이름이다 — 파생 선수가 가려진다
+    const outsider = state.players.find((p) => p.teamId !== state.userTeamId)!;
+    expect(
+      registerCharacters(state, [draftOf({ characterId: outsider.name, name: outsider.name })]),
+    ).toBe(0);
+    expect(state.personas).toHaveLength(before);
+
+    // 압축이 적은 명부 인물·파생 선수의 기억은 조용히 버려지지 않는다
+    expect(
+      applyCharacterMemories(state, [
+        { characterId: "조르제 멘데스", text: "재계약 조건을 두고 한 차례 부딪혔다" },
+        { characterId: outsider.name, text: "경기 뒤 터널에서 짧게 인사를 나눴다" },
+      ]),
+    ).toBe(2);
   });
 
   it("화자가 아닌 이름의 기억은 버려지고, 인물당 상한을 넘으면 오래된 것부터 밀린다", () => {
