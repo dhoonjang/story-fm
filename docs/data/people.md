@@ -368,6 +368,11 @@ Persona {
 셀 수 있고, **1군 승격이 그 불만을 지운다**(면담이 잘 풀려도 지워진다 — 사유를
 가리지 않는 기존 경로다). 내려간 날은 `PlayerState.demotedOn`이 들고 있다.
 
+**팀을 떠나면 불만도 끝난다** — 매각·방출·임대 송출·계약 만료 어느 문으로
+나가든 공통 지점(`clearDepartedState`)이 그 선수의 불만을 지우고, 감독이
+이직하면 옛 구단의 불만을 통째로 비운다(`acceptManagerOffer` —
+`approachPressure`를 비우는 것과 같은 결).
+
 옛 세이브는 사유 대신 문장(`note`)을 들고 있다 — 읽는 쪽이 `reason ?? note`로
 받는다 (둘 다 optional, 세이브 버전 유지).
 

@@ -299,7 +299,8 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
   }
 
   if (channel === "captain") {
-    const captain = userPlayers(state).find((p) => p.isCaptain);
+    const squad = userPlayers(state);
+    const captain = squad.find((p) => p.isCaptain);
     const form = firstTeamForm(state);
     // 주장이 없으면 라커룸을 대신할 사람도 없다 — 코어가 화자를 지어내지 않는다
     if (!captain || form === null) return null;
@@ -315,7 +316,8 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
         sharp: true,
       });
     }
-    const unhappy = state.issues.length;
+    // 옛 세이브의 유령 방어 — 떠난 선수의 불만을 주장이 세지 않는다 (people.md §5)
+    const unhappy = state.issues.filter((i) => squad.some((p) => p.id === i.gamePlayerId)).length;
     if (unhappy > 0) {
       facts.push({ kind: "unhappy", text: `라커룸 불만 ${unhappy}건`, about: null, sharp: false });
     }

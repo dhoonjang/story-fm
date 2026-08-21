@@ -146,7 +146,8 @@ function questionablePlayer(state: GameState, seed: number): GamePlayer | null {
     .sort((a, b) => a.state.form - b.state.form)
     .slice(0, SLUMP_CANDIDATES);
   if (slumping.length > 0) return pick(makeRng(seed, "press"), slumping);
-  const issue = state.issues[0];
+  // 첫 줄이 아니라 **스쿼드에 있는 첫 불만** — 옛 세이브의 유령이 진짜 불만을 가리지 않게 (people.md §5)
+  const issue = state.issues.find((i) => squad.some((p) => p.id === i.gamePlayerId));
   if (issue) return squad.find((p) => p.id === issue.gamePlayerId) ?? null;
   return null;
 }

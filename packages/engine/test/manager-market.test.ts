@@ -32,6 +32,7 @@ import {
   suggestTerms,
   tierOfTeamIn,
   trainingAttrCap,
+  userPlayers,
   wageExpectationOf,
   type GameState,
   type TrainingBrief,
@@ -547,12 +548,20 @@ describe("경질 뒤 — 무직으로 흐르고, 제안을 받고, 부임한다"
     expect(offer.status).toBe("open");
     expect(offer.expiresOn > state.date).toBe(true);
 
+    // 옛 구단 라커룸의 불만 — 지고 오면 새 구단 주의 줄이 옛 이름을 나열한다 (people.md §5)
+    state.issues.push({
+      gamePlayerId: userPlayers(state)[0]!.id,
+      kind: "unhappy",
+      reason: "minutes",
+      since: state.date,
+    });
     const accepted = acceptManagerOffer(state, offer.id);
     expect(accepted.ok, accepted.message).toBe(true);
     expect(state.userTeamId).toBe(offer.teamId);
     expect(state.userTeamId, "옛 구단으로 돌아갔다").not.toBe(sackedFrom);
     expect(state.dismissal, "부임했는데 경질장이 남았다").toBeUndefined();
     expect(state.manager.boardWarnings, "앞 구단의 경고를 지고 갔다").toBeUndefined();
+    expect(state.issues, "옛 구단의 불만을 지고 왔다").toHaveLength(0);
 
     const now = state.teams.find((t) => t.id === offer.teamId)!;
     expect(now.managerName).toBe(state.manager.name);

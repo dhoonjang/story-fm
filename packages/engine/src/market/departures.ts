@@ -63,14 +63,17 @@ export function freeAgents(state: GameState): GamePlayer[] {
 /**
  * 떠나는 선수가 **남기고 가는 것들** — 어느 문으로 나가든 같다.
  *
- * 전술 배치 · 이적 리스트 · 개인 훈련 · 역할 기억 · 주장 완장은 그 선수가 이 팀에
- * 있을 때만 뜻이 있는 값이다. 문 하나에만 적어 두면 판 선수의 훈련 계획이 장부에
- * 남아 다음 시즌 보고서까지 따라온다 (transfer.md §2).
+ * 전술 배치 · 이적 리스트 · 개인 훈련 · 역할 기억 · 주장 완장 · 라커룸 불만은 그
+ * 선수가 이 팀에 있을 때만 뜻이 있는 값이다. 문 하나에만 적어 두면 판 선수의 훈련
+ * 계획이 장부에 남아 다음 시즌 보고서까지 따라온다 (transfer.md §2). 불만도 같다 —
+ * 팀을 떠나면 불만도 끝난다 (people.md §5). 호출부마다 따로 지우면 다음 이탈
+ * 경로가 생길 때 또 샌다.
  */
 export function clearDepartedState(state: GameState, player: GamePlayer, from: string): void {
   releaseFromTactics(state, from, player.id);
   state.transferList = state.transferList.filter((l) => l.gamePlayerId !== player.id);
   state.playerTraining = state.playerTraining.filter((t) => t.gamePlayerId !== player.id);
+  state.issues = state.issues.filter((i) => i.gamePlayerId !== player.id);
   forgetRoles(state, player.id);
   player.isCaptain = false;
 }
