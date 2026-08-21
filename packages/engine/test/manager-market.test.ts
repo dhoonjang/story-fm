@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  OFFER_DRY_SPELL_DAYS,
   TRAINING_ATTR_CAP,
   TRAINING_ATTR_CAP_MIN,
   TRAINING_XP_PER_SESSION,
@@ -18,6 +19,8 @@ import {
   isTopFlight,
   leagueOfTeamIn,
   managerTrainingUptake,
+  offerDrySpell,
+  offerVacancy,
   openManagerOffers,
   openNegotiationFor,
   pendingOffer,
@@ -37,7 +40,12 @@ import {
   type GameState,
   type TrainingBrief,
 } from "@story-fm/engine";
-import { MANAGER_ATTRIBUTES, SCOUT_DAYS, type ManagerAttributes } from "@story-fm/domain";
+import {
+  MANAGER_ATTRIBUTES,
+  SCOUT_DAYS,
+  type ManagerAttributes,
+  type ManagerOffer,
+} from "@story-fm/domain";
 import { afterSquadReturn, completeDeal, createTestGame } from "./helpers";
 
 /**
@@ -571,5 +579,89 @@ describe("경질 뒤 — 무직으로 흐르고, 제안을 받고, 부임한다"
     expect(reviewUserSeat(state, [])).toBe(false);
     // 같은 제안을 두 번 받을 수는 없다
     expect(acceptManagerOffer(state, offer.id).ok).toBe(false);
+  });
+
+  /**
+   * `delete state.dismissal`이 사건까지 지우던 자리다 — 잘린 시즌은 `SEASON_RECORD`가
+   * 없으므로, 이력이 남지 않으면 커리어 표에서 그 해가 통째로 빈다 (career.md §6).
+   */
+  it("재부임해도 경질은 지워지지 않는다 — 커리어 이력으로 남는다", () => {
+    expect(state.dismissal).toBeUndefined();
+    const history = state.dismissals ?? [];
+    expect(history).toHaveLength(1);
+    const past = history[0]!;
+    expect(past.teamId).toBe(sackedFrom);
+    expect(past.on).toBe("2027-03-04");
+    // 카드의 사실이 그대로 옮겨 왔다 — 화면이 "왜 잘렸는가"를 쓸 재료다
+    expect(past.expectation, "기대의 이름이 이력에서 사라졌다").toBeTruthy();
+    expect(past.position).toBeGreaterThan(0);
+  });
+
+  /**
+   * 제안 기록은 세이브 전체에 쌓인다 — 부름 제한을 전체로 걸면 경질이 되풀이될수록
+   * 부를 수 있는 구단 풀 자체가 준다 (career.md §5.1). 제한은 한 무직 기간 안이다.
+   */
+  it("두 번째 무직에서는 지난 기간에 불렀던 구단이 다시 부를 수 있다", () => {
+    const previouslyCalled = state.userTeamId; // 첫 무직 기간에 제안을 냈고 부임까지 한 구단
+    expect(
+      (state.managerOffers ?? []).some((o) => o.teamId === previouslyCalled),
+      "지난 기간의 제안 기록이 없다 — 이 테스트가 재는 것이 없다",
+    ).toBe(true);
+
+    // 두 번째 경질 — 판정 경로는 위에서 쟀으니 카드를 직접 세운다
+    state.date = addDays(state.date, 200);
+    state.dismissal = { on: state.date, season: state.season, teamId: previouslyCalled };
+    // 안전판 자리까지 무직으로 흘렀다 — 문턱을 넘는 자리는 확률을 건너뛰고 반드시 부른다
+    state.date = addDays(state.date, OFFER_DRY_SPELL_DAYS);
+
+    const called = offerVacancy(state, previouslyCalled, 18, []);
+    expect(called, "지난 무직 기간의 제안 기록이 구단 풀을 줄였다").toBe(true);
+    const offer = openManagerOffers(state)[0]!;
+    expect(offer.teamId).toBe(previouslyCalled);
+    expect(offer.madeOn).toBe(state.date);
+  });
+});
+
+/**
+ * 무직 안전판 — **마지막 제안에서 다시 선다** (career.md §5.1).
+ *
+ * 기준이 "제안이 하나도 없었다"이면 첫 제안(10일 만료)을 놓친 뒤로는 안전판이
+ * 없다 — 확률 문(20%)에 계속 지는 꼬리에서 세이브가 무직으로 굳는다.
+ */
+describe("무직 안전판은 마지막 제안에서 다시 선다", () => {
+  const dismissal = { on: "2027-03-04" };
+  const offerFrom = (teamId: string, madeOn: string): ManagerOffer => ({
+    id: `mgr-offer-${teamId}-${madeOn}`,
+    teamId,
+    madeOn,
+    expiresOn: addDays(madeOn, 10),
+    tier: 3,
+    target: 12,
+    expectation: "중위권",
+    status: "expired",
+  });
+
+  it("제안이 없었으면 경질일로부터 120일 — 그 전날은 아니다", () => {
+    const eve = addDays(dismissal.on, OFFER_DRY_SPELL_DAYS - 1);
+    const day = addDays(dismissal.on, OFFER_DRY_SPELL_DAYS);
+    expect(offerDrySpell([], dismissal, eve)).toBe(false);
+    expect(offerDrySpell([], dismissal, day)).toBe(true);
+    expect(offerDrySpell(undefined, dismissal, day)).toBe(true);
+  });
+
+  it("첫 제안을 놓쳐도 꺼지지 않는다 — 마지막 제안으로부터 다시 잰다", () => {
+    const madeOn = addDays(dismissal.on, 30);
+    const missed = [offerFrom("fulham", madeOn)];
+    // 경질일로부터는 120일이 지났지만 마지막 제안으로부터는 아직이다
+    expect(offerDrySpell(missed, dismissal, addDays(dismissal.on, OFFER_DRY_SPELL_DAYS))).toBe(
+      false,
+    );
+    // 마지막 제안으로부터 120일 — 안전판이 다시 선다
+    expect(offerDrySpell(missed, dismissal, addDays(madeOn, OFFER_DRY_SPELL_DAYS))).toBe(true);
+  });
+
+  it("지난 무직 기간의 제안은 기준을 밀지 않는다", () => {
+    const past = [offerFrom("fulham", "2026-11-01")];
+    expect(offerDrySpell(past, dismissal, addDays(dismissal.on, OFFER_DRY_SPELL_DAYS))).toBe(true);
   });
 });

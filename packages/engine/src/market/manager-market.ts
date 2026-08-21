@@ -95,10 +95,11 @@ const OFFER_CHANCE = 0.2;
 /** 제안이 살아 있는 날 수 — 답을 미루는 것도 답이다 */
 const OFFER_DAYS = 10;
 /**
- * 이만큼 무직이었는데 아직 한 번도 부른 곳이 없으면 다음 문턱을 넘는 자리는
+ * 마지막 제안으로부터 이만큼 지나도록 새 제안이 없으면 다음 문턱을 넘는 자리는
  * 확률을 건너뛴다 — 세이브가 무직으로 굳지 않게 하는 안전판이다 (career.md §5.1).
+ * 기준이 "제안이 아예 없었다"이면 첫 제안(10일 만료)을 놓친 뒤로는 안전판이 없다.
  */
-const OFFER_DRY_SPELL_DAYS = 120;
+export const OFFER_DRY_SPELL_DAYS = 120;
 
 /** 감독 팀의 경고 단계 — 이 횟수를 넘기면 경질된다 */
 export const USER_WARNINGS_BEFORE_SACK = 3;
@@ -209,11 +210,30 @@ function expireStaleOffers(state: GameState, digest: string[]): void {
 }
 
 /**
+ * 무직 안전판 — **이번 무직 기간의 마지막 제안**으로부터 120일이 지났는가
+ * (career.md §5.1). 제안이 아직 없었으면 경질일에서 잰다.
+ *
+ * 지난 무직 기간의 제안(`madeOn < dismissal.on`)은 세지 않는다 — 기준일이
+ * 경질일에서 시작하므로 그보다 앞선 기록은 저절로 걸러진다.
+ */
+export function offerDrySpell(
+  offers: ManagerOffer[] | undefined,
+  dismissal: { on: string },
+  today: string,
+): boolean {
+  const anchor = (offers ?? []).reduce(
+    (latest, o) => (o.madeOn > latest ? o.madeOn : latest),
+    dismissal.on,
+  );
+  return daysBetween(anchor, today) >= OFFER_DRY_SPELL_DAYS;
+}
+
+/**
  * 공석이 된 구단이 무직 감독을 부른다 (career.md §5.1).
  *
  * @returns 오늘 제안이 붙었으면 true
  */
-function offerVacancy(
+export function offerVacancy(
   state: GameState,
   teamId: string,
   position: number,
@@ -224,15 +244,19 @@ function offerVacancy(
   // 감독이 답할 자리는 한 번에 하나다
   if (openManagerOffers(state).length > 0) return false;
   const offers = state.managerOffers ?? [];
-  // 한 번 부른 구단은 다시 부르지 않는다 — 만료·수락한 기록이 남는 이유다
-  if (offers.some((o) => o.teamId === teamId)) return false;
+  /**
+   * 한 번 부른 구단은 다시 부르지 않는다 — 단 **이번 무직 기간** 안에서다.
+   * 기록은 세이브 전체에 쌓이므로 전부 세면 경질이 되풀이될수록 부를 수 있는
+   * 구단 풀 자체가 준다.
+   */
+  if (offers.some((o) => o.madeOn >= dismissal.on && o.teamId === teamId)) return false;
 
   const tier = tierOfTeamIn(state, teamId);
   const gate = OFFER_REPUTATION_GATE[tier];
   const reputation = (state.manager.reputation.board + state.manager.reputation.media) / 2;
   if (gate !== undefined && reputation < gate) return false;
 
-  const dry = offers.length === 0 && daysBetween(dismissal.on, state.date) >= OFFER_DRY_SPELL_DAYS;
+  const dry = offerDrySpell(offers, dismissal, state.date);
   // 구단·날짜마다 채널을 갈라 뽑는다 — AI 경질의 난수열을 흔들지 않는다
   const rng = makeRng(state.seed, `manager-offer:${state.date}:${teamId}`);
   if (!dry && rng() > OFFER_CHANCE) return false;
@@ -447,6 +471,11 @@ export function acceptManagerOffer(state: GameState, ref: string): SkillResult {
     team.managerName = state.manager.name;
     team.managerSince = state.date;
   }
+  /**
+   * 경질장은 지워지지 않고 **이력으로 옮겨진다** (career.md §6) — 잘린 시즌은
+   * `SEASON_RECORD`가 없으므로, 이 줄이 없으면 그 해가 커리어 표에서 통째로 빈다.
+   */
+  state.dismissals = [...(state.dismissals ?? []), state.dismissal];
   delete state.dismissal;
   // 답할 자리는 하나였으니 남은 것은 이제 답할 필요가 없다
   for (const other of state.managerOffers ?? []) {

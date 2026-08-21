@@ -28,11 +28,17 @@ type CareerView = OfficeViews["career"];
  *
  * 같은 17위도 우승을 노리라는 구단에서와 잔류가 기대인 구단에서 다른 사건이라,
  * 순위 혼자로는 왜 잘렸는지가 읽히지 않는다. 옛 세이브는 카드 대신 평가 문장을
- * 들고 있어 그것이 폴백이고, 둘 다 없으면 지어내지 않는다.
+ * 들고 있어 그것이 폴백이고, 둘 다 없으면 지어내지 않는다. 무직 카드와 시즌
+ * 표의 경질 이력 줄(career.md §6)이 같은 문장을 쓴다.
  */
-function dismissalLineOf(d: NonNullable<CareerView["dismissal"]>): string {
+function dismissalLineOf(d: {
+  position: number | null;
+  target: number | null;
+  expectation: string | null;
+  reason?: string | null;
+}): string {
   if (d.position === null || d.target === null || d.expectation === null) return d.reason ?? "";
-  return `${d.expectation} — 기대 ${d.target}위, 최종 ${d.position}위`;
+  return `${d.expectation} — 기대 ${d.target}위, 당시 ${d.position}위`;
 }
 
 /**
@@ -227,6 +233,8 @@ function ManagerRadar({
 }
 
 // ── 커리어 ──────────────────────────────────────────────
+type DismissalRow = CareerView["dismissals"][number];
+
 export function CareerView({
   squad,
   career,
@@ -234,6 +242,23 @@ export function CareerView({
   squad: OfficeViews["squad"];
   career: OfficeViews["career"];
 }) {
+  /**
+   * 시즌 기록과 경질 이력이 **한 표에 선다** (career.md §6) — 잘린 시즌은 시즌
+   * 기록이 없으므로 경질 줄이 그 해를 채운다. 같은 시즌 안에서는 경질(시즌 중)이
+   * 시즌 결산(시즌 끝)보다 앞이라, 결산 줄에는 끝의 날짜를 세워 정렬한다.
+   */
+  const seasonRows: Array<
+    | { kind: "season"; season: number; at: string; s: SeasonRow }
+    | { kind: "dismissal"; season: number; at: string; d: DismissalRow }
+  > = [
+    ...career.seasons.map((s) => ({ kind: "season" as const, season: s.season, at: "9999", s })),
+    ...career.dismissals.map((d) => ({
+      kind: "dismissal" as const,
+      season: d.season,
+      at: d.on,
+      d,
+    })),
+  ].sort((a, b) => a.season - b.season || a.at.localeCompare(b.at));
   return (
     <div data-testid="view-career">
       {/**
@@ -357,7 +382,7 @@ export function CareerView({
       </div>
 
       <div className="section-title">시즌 기록</div>
-      {career.seasons.length === 0 ? (
+      {seasonRows.length === 0 ? (
         <div className="empty">첫 시즌 진행 중</div>
       ) : (
         <table>
@@ -371,18 +396,28 @@ export function CareerView({
             </tr>
           </thead>
           <tbody>
-            {career.seasons.map((s) => (
-              <tr key={s.season}>
-                <td>{s.season}</td>
-                <td>{s.teamName}</td>
-                <td>{s.position}위</td>
-                <td>{s.record}</td>
-                {/* 순위와 전적이 말하지 않는 것 — 같은 4위가 어느 구단에서는 성공이고
-                    어느 구단에서는 실패다. 코어는 등급과 기대 순위만 넘기고 문장은
-                    여기서 쓴다 (docs/overview.md §1 철칙 4) */}
-                <td className="career-verdict">{boardVerdictOf(s)}</td>
-              </tr>
-            ))}
+            {seasonRows.map((r) =>
+              r.kind === "season" ? (
+                <tr key={`season-${r.s.season}`}>
+                  <td>{r.s.season}</td>
+                  <td>{r.s.teamName}</td>
+                  <td>{r.s.position}위</td>
+                  <td>{r.s.record}</td>
+                  {/* 순위와 전적이 말하지 않는 것 — 같은 4위가 어느 구단에서는 성공이고
+                      어느 구단에서는 실패다. 코어는 등급과 기대 순위만 넘기고 문장은
+                      여기서 쓴다 (docs/overview.md §1 철칙 4) */}
+                  <td className="career-verdict">{boardVerdictOf(r.s)}</td>
+                </tr>
+              ) : (
+                <tr key={`dismissal-${r.d.on}`} data-testid="career-dismissal">
+                  <td>{r.d.season}</td>
+                  <td>{r.d.teamName}</td>
+                  <td>—</td>
+                  <td className="career-sacked">{r.d.on} 경질</td>
+                  <td className="career-verdict">{dismissalLineOf(r.d)}</td>
+                </tr>
+              ),
+            )}
           </tbody>
         </table>
       )}
