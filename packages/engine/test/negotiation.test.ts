@@ -466,6 +466,102 @@ describe("합의 실행 — 장부가 움직인다", () => {
   });
 });
 
+/**
+ * 분할 지급 — 미래의 돈이 표에 앉는다 (transfer.md §5-2).
+ *
+ * 여기서 재는 것은 **상태 전이**다: 못 내는 일시금이 무산 대신 분할 역제안으로
+ * 넘어가는가, 그리고 확정이 일정 표를 세우고 오늘 첫 회분만 무는가.
+ */
+describe("분할 지급 — 관문은 첫 회분을 잰다", () => {
+  /** 손으로 세운 매각 합의 — 상대와 창은 실제로 붙은 오퍼의 것을 그대로 쓴다 */
+  function stagedSale(state: GameState, fee: number) {
+    const { negotiation } = waitForIncoming(state);
+    const offer = incomingOffer(negotiation!)!;
+    offer.fee = fee;
+    offer.verdict = "accept";
+    negotiation!.status = "agreed";
+    negotiation!.medical = { onDate: state.date, status: "passed" };
+    return { negotiation: negotiation!, buyerTeamId: negotiation!.counterpartTeamId! };
+  }
+
+  const SALE_FEE = 40_000_000;
+
+  it("사는 쪽이 일시금을 못 내면 같은 총액의 분할 역제안으로 되돌아온다", () => {
+    const state = createTestGame(42);
+    const { negotiation, buyerTeamId } = stagedSale(state, SALE_FEE);
+    const playerId = negotiation.gamePlayerId;
+    // 일시금은 못 내고 2년 분할의 첫 회분이면 들어오는 예산
+    financeOf(state, buyerTeamId).transferBudget = Math.floor(SALE_FEE / 2);
+
+    const result = acceptDeal(state, negotiation.id);
+    expect(result.ok).toBe(false);
+    // 무산이 아니라 감독이 답할 자리로 돌아온다
+    expect(negotiation.status).toBe("open");
+    const last = negotiation.rounds[negotiation.rounds.length - 1]!;
+    expect(last.by).toBe("them");
+    expect(last.verdict).toBe("counter");
+    // 총액은 그대로고 바뀐 것은 시점뿐이다
+    expect(last.fee).toBe(SALE_FEE);
+    expect(last.paymentYears).toBe(2);
+    expect(playerById(state, playerId)!.teamId).toBe(state.userTeamId);
+    expect(state.paymentSchedules ?? []).toHaveLength(0);
+
+    // 4년으로도 첫 회분을 못 내면 그때가 무산이다
+    const broke = createTestGame(42);
+    const second = stagedSale(broke, SALE_FEE);
+    financeOf(broke, second.buyerTeamId).transferBudget = Math.floor(SALE_FEE / 4) - 1;
+    const failed = acceptDeal(broke, second.negotiation.id);
+    expect(failed.ok).toBe(false);
+    expect(second.negotiation.status).toBe("expired");
+  });
+
+  it("분할 영입은 일정 표가 지고 오늘은 첫 회분만 나간다", () => {
+    const state = createTestGame(42);
+    const player = target(state);
+    const fromTeamId = player.teamId;
+    const budget = financeOf(state, state.userTeamId).transferBudget;
+    /**
+     * 일시금으로는 예산을 넘고 3년 분할의 첫 회분이면 들어오는 값 — 관문이 총액을
+     * 재면 여기서 막힌다. 홀수라 마지막 회분이 잔차를 진다.
+     */
+    const fee = budget * 2 + 1;
+    const negotiation = stagedNegotiation(state, {
+      id: "neg-buy-split",
+      kind: "buy",
+      playerId: player.id,
+      counterpartTeamId: fromTeamId,
+      fee,
+      weeklyWage: 40_000,
+      years: 4,
+    });
+    negotiation.rounds[0]!.paymentYears = 3;
+    const theirBudget = financeOf(state, fromTeamId).transferBudget;
+    const theirBalance = financeOf(state, fromTeamId).balance;
+
+    const done = acceptDeal(state, negotiation.id);
+    expect(done.ok, done.message).toBe(true);
+    expect(negotiation.status).toBe("completed");
+
+    // 원장은 총액이고, 나뉜 것은 현금의 시점이다
+    expect(state.transfers.find((t) => t.gamePlayerId === player.id)?.fee).toBe(fee);
+    const schedule = state.paymentSchedules!.find((s) => s.gamePlayerId === player.id)!;
+    expect(schedule.payerTeamId).toBe(state.userTeamId);
+    expect(schedule.payeeTeamId).toBe(fromTeamId);
+    expect(schedule.installments).toHaveLength(3);
+    // 일정의 합은 언제나 합의 총액과 같다 — 잔차는 마지막 회분이 진다 (§11)
+    expect(schedule.installments.reduce((sum, i) => sum + i.amount, 0)).toBe(fee);
+
+    const first = Math.floor(fee / 3);
+    expect(schedule.installments[0]!.paidOn).toBe(state.date);
+    expect(schedule.installments[1]!.paidOn).toBeNull();
+    expect(schedule.installments[2]!.paidOn).toBeNull();
+    // 예산도 잔고도 오늘 나간 첫 회분만큼만 움직인다
+    expect(financeOf(state, state.userTeamId).transferBudget).toBe(budget - first);
+    expect(financeOf(state, fromTeamId).transferBudget).toBe(theirBudget + first);
+    expect(financeOf(state, fromTeamId).balance).toBe(theirBalance + first);
+  });
+});
+
 describe("시간이 흐르면", () => {
   it("기한을 넘긴 협상은 무효가 된다", () => {
     const state = createTestGame(42);

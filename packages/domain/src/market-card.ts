@@ -48,6 +48,8 @@ export interface MarketTerms {
    * 화면이 `이적료`라 이름 붙여, 나가는 선수에게 우리가 이적료를 낸 것으로 읽힌다.
    */
   severance?: number;
+  /** 분할 지급 연수 — 2 이상일 때만 싣는다 (일시금은 조건이 아니다 · transfer.md §5-2) */
+  paymentYears?: number;
 }
 
 export interface MarketCard {

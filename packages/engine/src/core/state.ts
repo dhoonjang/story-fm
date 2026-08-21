@@ -25,6 +25,7 @@ import type {
   MatchSide,
   NarrativeArc,
   NarrativeNote,
+  PaymentSchedule,
   Persona,
   PlayerIssue,
   SettlingEvent,
@@ -769,6 +770,11 @@ export interface GameState {
    * (optional — SAVE_VERSION 유지).
    */
   arcs?: NarrativeArc[];
+  /**
+   * 지급 일정 표 — 분할로 합의된 이적료·해지 정산금의 미래 회분
+   * (transfer.md §5-2). 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  paymentSchedules?: PaymentSchedule[];
 }
 
 // ── 팀·선수 조회 ────────────────────────────────────────
