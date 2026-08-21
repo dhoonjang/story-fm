@@ -59,7 +59,7 @@
 
 ## 2. 스킬 표면 — 한 판단은 한 도구
 
-도구는 **33개**이고 **전부 평시 GM의 것**이다. 경기 중에는 도구 표면이 **0**이다 —
+도구는 **37개**이고 **전부 평시 GM의 것**이다. 경기 중에는 도구 표면이 **0**이다 —
 지시 해석이 JSON 하나를 내고 코어가 같은 스킬 함수를 부른다
 ([agents.md](./agents.md) §3). 같은 순간에 함께 정해지는 것들이
 갈려 있으면 GM이 하나를 빠뜨린다 — 라인업은 1·2군 이동까지 한 요청(`set_lineup`의
@@ -72,7 +72,7 @@
 | 그룹      | 수  | 도구                                                                                                                                                                                             |
 | --------- | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 진행      | 2   | `start_match` · `accept_manager_offer`                                                                                                                                                           |
-| 전술·훈련 | 8   | `set_lineup` · `set_squad_level` · `set_captain` · `set_tactics` · `set_player_tactic` · `exploit_point` · `set_match_plan` · `set_training`                                                     |
+| 전술·훈련 | 9   | `set_lineup` · `set_squad_level` · `set_captain` · `set_tactics` · `set_player_tactic` · `exploit_point` · `set_match_plan` · `set_training` · `set_development_focus`                          |
 | 대화·서사 | 5   | `team_talk` · `talk_to_player` · `respond_to_media` · `respond_to_approach` · `apply_narrative_event`                                                                                            |
 | 경기      | 1   | `substitute`                                                                                                                                                                                     |
 | 이적      | 11  | `deal_odds` · `list_negotiations` · `send_offer` · `respond_offer` · `accept_deal` · `open_renewal` · `open_release` · `set_transfer_list` · `withdraw_offer` · `release_player` · `recall_loan` |
