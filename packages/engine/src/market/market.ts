@@ -1,5 +1,5 @@
 import type { GamePlayer, NegotiationKind, PitchClaim, PitchClaimKind } from "@story-fm/domain";
-import { ageOf, naturalPositionOf } from "@story-fm/domain";
+import { MAX_PAYMENT_YEARS, ageOf, effectiveFeeOf, naturalPositionOf } from "@story-fm/domain";
 import { diffDays, windowOpenOn } from "../competition/calendar";
 import { claimLabel, evaluatePitch } from "./persuasion";
 import { isMarketOnlyLeague, leagueCatalogById } from "../data/league-catalog";
@@ -305,6 +305,41 @@ export interface DealTerms {
   pitch?: readonly PitchClaim[];
   /** 이 협상에서 이미 인정된 논거 — 반복은 다시 쳐주지 않는다 */
   pitched?: readonly PitchClaimKind[];
+  /**
+   * 이적료·정산금의 **분할 연수** — 없거나 1이면 일시금 (transfer.md §5-2).
+   * 확률은 유효가(`effectiveFeeOf`)로 재고 관문은 첫 회분만 본다.
+   */
+  paymentYears?: number;
+}
+
+/**
+ * 분할 연수의 정규화 — 없거나 1이면 일시금(`undefined`), 그 밖은 2~`MAX_PAYMENT_YEARS`로
+ * 자른다. 값이 스키마를 지나오지 않는 호출부(코어 내부 전환)도 같은 자를 쓴다.
+ */
+export function paymentYearsOf(years?: number): number | undefined {
+  if (years === undefined) return undefined;
+  const n = Math.floor(years);
+  if (n <= 1) return undefined;
+  return Math.min(MAX_PAYMENT_YEARS, n);
+}
+
+/**
+ * **관문이 재는 값은 오늘 나갈 첫 회분이다** (transfer.md §5-2) — 분할의 존재
+ * 이유가 "지금 다 못 내는 돈"이라 예산·잔고는 총액이 아니라 이 값을 본다. 남은
+ * 회분은 지급일에 무조건 나간다 (`settleDuePayments`).
+ *
+ * 등분 규칙은 `buildPaymentInstallments`와 같은 `floor(총액/n)`이다 — 잔차는
+ * 마지막 회분이 진다.
+ */
+export function firstInstallmentOf(total: number, paymentYears?: number): number {
+  const n = paymentYearsOf(paymentYears);
+  return n === undefined ? total : Math.floor(total / n);
+}
+
+/** 확률 근거에 붙는 분할 표기 — 깎여 보인 값을 함께 적지 않으면 %가 설명되지 않는다 */
+function splitNote(terms: DealTerms, effective: number): string {
+  const n = paymentYearsOf(terms.paymentYears);
+  return n === undefined ? "" : ` · ${n}년 분할이라 ${formatMoney(effective)}으로 친다`;
 }
 
 /**
@@ -413,9 +448,11 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
       // 나가는 문은 다 같은 하한을 지킨다 — 다 내보내고 경기를 못 뛰는 일이 없게
       const short = squadShortfall(state, state.userTeamId, player);
       if (short) blockers.push(`우리 ${short.replace("팔 수", "해지할 수")}`);
-      // 정산금은 합의한 날 즉시 나간다 — 낼 수 없는 값으로 흥정을 시작하지 않는다
-      if (terms.fee > financeOf(state, state.userTeamId).balance) {
-        blockers.push(`정산금 ${formatMoney(terms.fee)}을 감당할 잔고가 없습니다`);
+      // 정산금은 합의한 날 즉시 나간다 — 낼 수 없는 값으로 흥정을 시작하지 않는다.
+      // 분할이면 오늘 나갈 것은 첫 회분뿐이다 (transfer.md §5-2)
+      const dueNow = firstInstallmentOf(terms.fee, terms.paymentYears);
+      if (dueNow > financeOf(state, state.userTeamId).balance) {
+        blockers.push(`정산금 ${formatMoney(dueNow)}을 감당할 잔고가 없습니다`);
       }
     }
   } else {
@@ -440,7 +477,8 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
         `보드가 이적 예산을 동결했습니다${budgetFreezeLabel(state, state.userTeamId)} — 먼저 매각해야 합니다`,
       );
     }
-    if (terms.fee > ourFinance.transferBudget) {
+    // 분할이면 이번 창에 나갈 것은 첫 회분뿐이다 (transfer.md §5-2)
+    if (firstInstallmentOf(terms.fee, terms.paymentYears) > ourFinance.transferBudget) {
       blockers.push(`이적 예산을 넘습니다 — 가용 ${formatMoney(ourFinance.transferBudget)}`);
     }
     /**
@@ -492,14 +530,19 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
 
   // ① 파는 구단 — 제시 이적료와 상대 사정
   const stance = sellerStance(state, player);
-  const feeRatio = askingPrice > 0 ? terms.fee / askingPrice : 2;
+  /**
+   * **파는 쪽은 늦게 오는 돈을 깎아 본다** — 분할 오퍼는 유효 이적료(현재가치)로
+   * 재어진다. 같은 확률을 원하면 총액을 올려 불러야 한다 (transfer.md §5-2).
+   */
+  const offeredFee = effectiveFeeOf(terms.fee, terms.paymentYears);
+  const feeRatio = askingPrice > 0 ? offeredFee / askingPrice : 2;
   contributions.push({
     gate: "club",
     score: (feeRatio - 1) * 8,
     label: "제시 이적료",
     why:
       askingPrice > 0
-        ? `상대는 ${formatMoney(askingPrice)}을 기대한다 (제시액은 그 ${Math.round(feeRatio * 100)}%)`
+        ? `상대는 ${formatMoney(askingPrice)}을 기대한다 (제시액은 그 ${Math.round(feeRatio * 100)}%${splitNote(terms, offeredFee)})`
         : "계약이 만료돼 이적료가 필요 없다",
   });
   for (const why of stance.why) {
@@ -840,12 +883,14 @@ function sellOdds(
     why: string;
   }> = [];
 
-  const feeRatio = terms.fee > 0 ? buyerCeiling / terms.fee : 2;
+  // 사는 쪽도 늦게 낼 돈은 가볍게 본다 — 분할은 같은 총액을 상한 안으로 들인다
+  const askedFee = effectiveFeeOf(terms.fee, terms.paymentYears);
+  const feeRatio = askedFee > 0 ? buyerCeiling / askedFee : 2;
   contributions.push({
     gate: "club",
     score: (feeRatio - 1) * 8,
     label: "우리가 부른 값",
-    why: `사는 쪽이 낼 수 있는 상한은 ${formatMoney(buyerCeiling)} 정도다 (부른 값은 그 ${Math.round((terms.fee / Math.max(1, buyerCeiling)) * 100)}%)`,
+    why: `사는 쪽이 낼 수 있는 상한은 ${formatMoney(buyerCeiling)} 정도다 (부른 값은 그 ${Math.round((askedFee / Math.max(1, buyerCeiling)) * 100)}%${splitNote(terms, askedFee)})`,
   });
 
   const blockedBy = betterAtPosition(state, state.userTeamId, player);
@@ -1159,11 +1204,13 @@ function releaseOdds(
   const expectation = severanceOf(state, player.id);
   const contributions: Array<{ score: number; label: string; why: string }> = [];
 
-  const ratio = expectation > 0 ? terms.fee / expectation : 1;
+  // 선수도 늦게 받을 돈은 깎아 본다 — 정산금이 같은 표를 탄다 (transfer.md §5-2)
+  const offered = effectiveFeeOf(terms.fee, terms.paymentYears);
+  const ratio = expectation > 0 ? offered / expectation : 1;
   contributions.push({
     score: (ratio - 1) * 6,
     label: "제시 정산금",
-    why: `정산 기대는 ${formatMoney(expectation)} (제시액은 그 ${Math.round(ratio * 100)}%)`,
+    why: `정산 기대는 ${formatMoney(expectation)} (제시액은 그 ${Math.round(ratio * 100)}%${splitNote(terms, offered)})`,
   });
 
   const yearsLeft = contractYearsLeft(state, player.id);
@@ -1291,7 +1338,9 @@ export function sameTermsRepeats(state: GameState, terms: DealTerms): number {
       r.by === "us" &&
       r.verdict !== null &&
       near(r.fee, terms.fee, SAME_TERMS_TOLERANCE) &&
-      near(r.weeklyWage, terms.weeklyWage, SAME_TERMS_TOLERANCE),
+      near(r.weeklyWage, terms.weeklyWage, SAME_TERMS_TOLERANCE) &&
+      // 연수가 다르면 같은 조건이 아니다 — 분할도 흥정의 손잡이다 (transfer.md §5-2)
+      (r.paymentYears ?? 1) === (terms.paymentYears ?? 1),
   ).length;
 }
 

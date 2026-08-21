@@ -1569,7 +1569,8 @@ describe("지급 일정 — 분할은 표를 타고 나간다", () => {
 
   /** 유저 팀이 아닌 아무 구단 — 받는 쪽 */
   function otherClub(state: GameState): string {
-    return state.finances.find((f) => f.teamId !== state.userTeamId && isClubTeam(f.teamId))!.teamId;
+    return state.finances.find((f) => f.teamId !== state.userTeamId && isClubTeam(f.teamId))!
+      .teamId;
   }
 
   const TOTAL = 60_000_001;
