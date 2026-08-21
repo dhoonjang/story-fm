@@ -9,6 +9,7 @@ import {
   SUB_CHASE_MINUTE,
   SUB_CHASE_MINUTE_TWO,
   SUB_HOLD_MINUTE,
+  SUB_WINDOW_MAX,
   LEDGER_LIMITS,
   advanceClock,
   applyEvents,
@@ -616,18 +617,18 @@ describe("AI 교체 판단", () => {
     const squad = squadOf(75);
     const worn: Record<string, number> = {};
     for (const p of squad.onPitch) worn[p.id] = 50; // 90분 가까이 뛴 상태
-    const sub = planAiSubstitution("home", squad, ledger(70), plan(70), () => 0, worn);
-    expect(sub?.type).toBe("substitution");
+    const subs = planAiSubstitution("home", squad, ledger(70), plan(70), () => 0, worn);
+    expect(subs[0]?.type).toBe("substitution");
   });
 
   it("싱싱한 팀은 바꾸지 않는다", () => {
-    expect(planAiSubstitution("home", squadOf(75), ledger(70), plan(70), () => 0, {})).toBeNull();
+    expect(planAiSubstitution("home", squadOf(75), ledger(70), plan(70), () => 0, {})).toEqual([]);
   });
 
   it("부상은 시각·확률·문턱을 건너뛰고 무조건 교체한다", () => {
     const squad = squadOf(75);
     const hurt = squad.onPitch[5]!;
-    const sub = planAiSubstitution(
+    const subs = planAiSubstitution(
       "home",
       squad,
       ledger(20),
@@ -635,7 +636,8 @@ describe("AI 교체 판단", () => {
       () => 0.99, // 확률 판정을 통과할 수 없는 값
       {},
     );
-    expect(sub?.actors[0]).toBe(hurt.id);
+    expect(subs).toHaveLength(1);
+    expect(subs[0]?.actors[0]).toBe(hurt.id);
   });
 
   it("다친 필드 선수를 예비 골키퍼로 메우지 않는다", () => {
@@ -645,14 +647,14 @@ describe("AI 교체 판단", () => {
     const squad = { onPitch: full.onPitch, bench: full.bench.filter((p) => p.id.endsWith("-gk")) };
     expect(
       planAiSubstitution("home", squad, ledger(20), hurtPlan(20, hurt.id), () => 0.99, {}),
-    ).toBeNull();
+    ).toEqual([]);
   });
 
   it("골키퍼가 쓰러졌는데 벤치에 키퍼가 없으면 필드 선수가 장갑을 낀다", () => {
     const full = squadOf(75);
     const hurt = full.onPitch[0]!; // GK
     const bench = full.bench.filter((p) => !p.id.endsWith("-gk"));
-    const sub = planAiSubstitution(
+    const subs = planAiSubstitution(
       "home",
       { onPitch: full.onPitch, bench },
       ledger(20),
@@ -660,9 +662,9 @@ describe("AI 교체 판단", () => {
       () => 0.99,
       {},
     );
-    // null이면 다친 골키퍼가 90분까지 그대로 선다
-    expect(sub?.actors[0]).toBe(hurt.id);
-    expect(bench.map((p) => p.id)).toContain(sub?.actors[1]);
+    // 빈 배열이면 다친 골키퍼가 90분까지 그대로 선다
+    expect(subs[0]?.actors[0]).toBe(hurt.id);
+    expect(bench.map((p) => p.id)).toContain(subs[0]?.actors[1]);
   });
 
   it("교체 한도는 장부와 같다 (5명·3회)", () => {
@@ -677,7 +679,7 @@ describe("AI 교체 판단", () => {
       () => 0,
       worn,
     );
-    expect(full).toBeNull();
+    expect(full).toEqual([]);
   });
 
   it("연장에서는 한 장이 더 있다 — 장부와 같은 함수를 본다", () => {
@@ -695,7 +697,7 @@ describe("AI 교체 판단", () => {
     // 90분의 한도(5)를 다 쓴 팀도 연장에서는 한 번 더 움직일 수 있다
     expect(
       planAiSubstitution("home", squad, inExtra(LEDGER_LIMITS.maxSubs), plan(100), () => 0, worn),
-    ).not.toBeNull();
+    ).not.toEqual([]);
     expect(
       planAiSubstitution(
         "home",
@@ -705,7 +707,7 @@ describe("AI 교체 판단", () => {
         () => 0,
         worn,
       ),
-    ).toBeNull();
+    ).toEqual([]);
   });
 
   it("연장 개시도 벤치가 판을 다시 짜는 자리다 — 문턱이 하프타임과 같다", () => {
@@ -721,7 +723,7 @@ describe("AI 교체 판단", () => {
       () => 0.99, // 확률 판정은 통과하지 못하는 값 — 정지점 자체가 자격이어야 한다
       worn,
     );
-    expect(breakStop?.type).toBe("substitution");
+    expect(breakStop[0]?.type).toBe("substitution");
   });
 
   /**
@@ -740,37 +742,39 @@ describe("AI 교체 판단", () => {
     );
 
   it("한 골 차로 뒤지면 SUB_CHASE_MINUTE부터 던진다 — 한 분 전에는 아무도 안 바꾼다", () => {
-    expect(chaseAt(SUB_CHASE_MINUTE - 1, { home: 0, away: 1 })).toBeNull();
-    expect(chaseAt(SUB_CHASE_MINUTE, { home: 0, away: 1 })?.causes).toEqual([AI_SUB_CAUSE.chase]);
+    expect(chaseAt(SUB_CHASE_MINUTE - 1, { home: 0, away: 1 })).toEqual([]);
+    expect(chaseAt(SUB_CHASE_MINUTE, { home: 0, away: 1 })[0]?.causes).toEqual([
+      AI_SUB_CAUSE.chase,
+    ]);
   });
 
   it("두 골 차로 뒤지면 그만큼 이르다", () => {
-    expect(chaseAt(SUB_CHASE_MINUTE_TWO, { home: 0, away: 1 })).toBeNull();
-    expect(chaseAt(SUB_CHASE_MINUTE_TWO, { home: 0, away: 2 })?.causes).toEqual([
+    expect(chaseAt(SUB_CHASE_MINUTE_TWO, { home: 0, away: 1 })).toEqual([]);
+    expect(chaseAt(SUB_CHASE_MINUTE_TWO, { home: 0, away: 2 })[0]?.causes).toEqual([
       AI_SUB_CAUSE.chase,
     ]);
   });
 
   it("승부수는 수비를 빼고 공격 자원을 넣는다", () => {
     const squad = squadOf(75);
-    const sub = chaseAt(SUB_CHASE_MINUTE, { home: 0, away: 1 });
+    const sub = chaseAt(SUB_CHASE_MINUTE, { home: 0, away: 1 })[0];
     expect(groupOfId(squad, sub?.actors[0])).toMatch(/B$/); // RB·LB·RCB·LCB
     expect(groupOfId(squad, sub?.actors[1])).toBe("ST");
   });
 
   it("승부수는 경기당 SUB_CHASE_MAX장이다", () => {
-    expect(chaseAt(80, { home: 0, away: 1 }, SUB_CHASE_MAX - 1)).not.toBeNull();
-    expect(chaseAt(80, { home: 0, away: 1 }, SUB_CHASE_MAX)).toBeNull();
+    expect(chaseAt(80, { home: 0, away: 1 }, SUB_CHASE_MAX - 1)).not.toEqual([]);
+    expect(chaseAt(80, { home: 0, away: 1 }, SUB_CHASE_MAX)).toEqual([]);
   });
 
   it("비기고 있으면 스코어 갈래가 열리지 않는다", () => {
-    expect(chaseAt(80, { home: 1, away: 1 })).toBeNull();
+    expect(chaseAt(80, { home: 1, away: 1 })).toEqual([]);
   });
 
   it("앞서면 SUB_HOLD_MINUTE부터 공격을 빼고 수비를 넣는다", () => {
     const squad = squadOf(75);
-    expect(chaseAt(SUB_HOLD_MINUTE - 1, { home: 1, away: 0 })).toBeNull();
-    const sub = chaseAt(SUB_HOLD_MINUTE, { home: 1, away: 0 });
+    expect(chaseAt(SUB_HOLD_MINUTE - 1, { home: 1, away: 0 })).toEqual([]);
+    const sub = chaseAt(SUB_HOLD_MINUTE, { home: 1, away: 0 })[0];
     expect(sub?.causes).toEqual([AI_SUB_CAUSE.hold]);
     expect(groupOfId(squad, sub?.actors[0])).toBe("ST");
     expect(groupOfId(squad, sub?.actors[1])).toBe("CB");
@@ -793,7 +797,7 @@ describe("AI 교체 판단", () => {
       plan(SUB_CHASE_MINUTE),
       () => 0,
       {},
-    );
+    )[0];
     expect(groupOfId(full, sub?.actors[0])).toMatch(/M$/); // RM·LM·RCM·LCM
     expect(sub?.causes).toEqual([AI_SUB_CAUSE.chase]);
   });
@@ -801,7 +805,7 @@ describe("AI 교체 판단", () => {
   it("부상이 먼저다 — 뒤지고 있어도 다친 선수부터 뺀다", () => {
     const squad = squadOf(75);
     const hurt = squad.onPitch[5]!;
-    const sub = planAiSubstitution(
+    const subs = planAiSubstitution(
       "home",
       squad,
       ledger(80, 0, { home: 0, away: 2 }),
@@ -809,7 +813,59 @@ describe("AI 교체 판단", () => {
       () => 0,
       {},
     );
-    expect(sub?.actors[0]).toBe(hurt.id);
-    expect(sub?.causes).toEqual([AI_SUB_CAUSE.injury]);
+    expect(subs).toHaveLength(1);
+    expect(subs[0]?.actors[0]).toBe(hurt.id);
+    expect(subs[0]?.causes).toEqual([AI_SUB_CAUSE.injury]);
+  });
+
+  /**
+   * **한 정지점은 교체 창 하나다** (match.md §2) — 실제 벤치처럼 한 번 일어설 때
+   * 여러 장을 쓴다. 정지점마다 한 장이던 시절 AI 교체 총량이 실제(4.3/경기)의
+   * 절반에 못 미쳤다.
+   */
+  it("한 정지점에서 승부수와 체력 교체가 한 창에 선다 — 상한은 SUB_WINDOW_MAX", () => {
+    const squad = squadOf(75);
+    const worn: Record<string, number> = {};
+    for (const p of squad.onPitch) worn[p.id] = 80; // 전원이 문턱 위
+    const subs = planAiSubstitution(
+      "home",
+      squad,
+      ledger(70, 0, { home: 0, away: 1 }),
+      plan(70),
+      () => 0,
+      worn,
+    );
+    expect(subs.length).toBe(SUB_WINDOW_MAX);
+    expect(subs[0]?.causes).toEqual([AI_SUB_CAUSE.chase]);
+    expect(subs[1]?.causes).toEqual([AI_SUB_CAUSE.fatigue]);
+    // 한 창 안에서 같은 선수가 두 번 나가거나 두 번 들어오지 않는다
+    const outs = subs.map((s) => s.actors[0]);
+    const ins = subs.map((s) => s.actors[1]);
+    expect(new Set(outs).size).toBe(subs.length);
+    expect(new Set(ins).size).toBe(subs.length);
+  });
+
+  it("창이 소진돼도 휴식 정지점에서는 움직인다 — 장부와 같은 규칙", () => {
+    const squad = squadOf(75);
+    const worn: Record<string, number> = {};
+    for (const p of squad.onPitch) worn[p.id] = 80;
+    const spentWindows = (minute: number, stop?: string) =>
+      planAiSubstitution(
+        "home",
+        squad,
+        {
+          minute,
+          phase: "second_half",
+          score: { home: 0, away: 0 },
+          events: [],
+          home: { subsUsed: 3, subWindows: LEDGER_LIMITS.maxSubWindows },
+          away: { subsUsed: 0, subWindows: 0 },
+        } as never,
+        stop ? plan(minute, { stop }) : plan(minute),
+        () => 0,
+        worn,
+      );
+    expect(spentWindows(70)).toEqual([]);
+    expect(spentWindows(45, "half_time").length).toBeGreaterThan(0);
   });
 });
