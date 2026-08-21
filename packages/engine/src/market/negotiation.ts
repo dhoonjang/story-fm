@@ -868,6 +868,10 @@ const INCOMING_OFFER_CHANCE = 0.08;
 const LISTED_OFFER_CHANCE = 0.34;
 /** 사는 쪽이 호가에서 깎고 들어오는 폭 */
 const LISTED_DISCOUNT = 0.22;
+/** 이적 요청이 선 선수에게 오퍼가 올 확률 — 나가고 싶다는 말은 시장에도 들린다 */
+const REQUESTED_OFFER_CHANCE = 0.25;
+/** 사는 쪽이 시장가에서 깎고 들어오는 폭 — 급한 쪽이 파는 쪽인 걸 안다 */
+const REQUESTED_DISCOUNT = 0.3;
 
 /** 이 선수가 이적 리스트에 올라 있는가 */
 export function listingOf(state: GameState, playerId: string) {
@@ -1132,6 +1136,21 @@ export function generateIncomingOffers(state: GameState, digest: string[]): void
     }
   }
 
+  /**
+   * **이적 요청이 선 선수가 그다음이다** (people.md §8 계단 5). 감독이 내놓지
+   * 않았어도 나가고 싶어 하는 것을 시장이 알고, 그만큼 시장가 아래로 들어온다.
+   */
+  const requested = playersOf(state, state.userTeamId).filter(
+    (p) => p.state.transferRequestedOn !== undefined && free(p),
+  );
+  if (requested.length > 0) {
+    const pick = requested[Math.floor(rng() * requested.length)]!;
+    if (rng() < REQUESTED_OFFER_CHANCE) {
+      openRequestedOffer(state, pick, rng, digest);
+      return;
+    }
+  }
+
   if (rng() > INCOMING_OFFER_CHANCE) return;
 
   const squad = playersOf(state, state.userTeamId);
@@ -1204,15 +1223,16 @@ export function generateIncomingOffers(state: GameState, digest: string[]): void
 }
 
 /**
- * 등재 선수에게 오퍼가 붙는다 — 값은 **호가에서 깎고 들어온다.**
- * "얼마면 팔겠다"를 이미 밝힌 상태라 시장가가 아니라 그 숫자가 기준이 된다.
+ * 우리 선수에게 매각 오퍼 하나가 붙는다 — **구단 고르기·창·협상 레코드·서사는
+ * 어느 갈래든 같다.** 갈래마다 다른 것은 값의 기준(`quote`)과 다이제스트 한 줄뿐.
  */
-function openListedOffer(
+function openIncomingSellOffer(
   state: GameState,
   player: GamePlayer,
-  askingPrice: number,
   rng: () => number,
   digest: string[],
+  quote: (feeBias: number) => number,
+  line: (ctx: { buyerName: string; fee: number; expiresOn: Negotiation["expiresOn"] }) => string,
 ): void {
   const buyer = pickBuyer(state, player, rng);
   if (!buyer) return;
@@ -1220,8 +1240,7 @@ function openListedOffer(
   if (!window) return;
 
   const bias = marketBiasOf(state, buyer);
-  const fee =
-    Math.round((askingPrice * (1 - LISTED_DISCOUNT * rng()) * bias.fee) / 100_000) * 100_000;
+  const fee = quote(bias.fee);
   const wage = Math.round(wageExpectationOf(state, player) * (1.05 + rng() * 0.2) * bias.wage);
   const negotiation: Negotiation = {
     id: `neg-in-${player.id}-${state.date}`,
@@ -1253,10 +1272,54 @@ function openListedOffer(
     ],
   };
   state.negotiations.push(negotiation);
-  digest.push(
-    `📩 ${teamName(buyer)}가 이적 리스트의 ${player.name}에게 오퍼를 넣었습니다 — ${formatMoney(fee)} (호가 ${formatMoney(askingPrice)} · 기한 ${negotiation.expiresOn})`,
-  );
+  digest.push(line({ buyerName: teamName(buyer), fee, expiresOn: negotiation.expiresOn }));
   pushNarrative(state, `${teamName(buyer)}의 ${player.name} 오퍼 (${formatMoney(fee)})`, 3);
+}
+
+/**
+ * 등재 선수에게 오퍼가 붙는다 — 값은 **호가에서 깎고 들어온다.**
+ * "얼마면 팔겠다"를 이미 밝힌 상태라 시장가가 아니라 그 숫자가 기준이 된다.
+ */
+function openListedOffer(
+  state: GameState,
+  player: GamePlayer,
+  askingPrice: number,
+  rng: () => number,
+  digest: string[],
+): void {
+  openIncomingSellOffer(
+    state,
+    player,
+    rng,
+    digest,
+    (feeBias) =>
+      Math.round((askingPrice * (1 - LISTED_DISCOUNT * rng()) * feeBias) / 100_000) * 100_000,
+    ({ buyerName, fee, expiresOn }) =>
+      `📩 ${buyerName}가 이적 리스트의 ${player.name}에게 오퍼를 넣었습니다 — ${formatMoney(fee)} (호가 ${formatMoney(askingPrice)} · 기한 ${expiresOn})`,
+  );
+}
+
+/**
+ * 이적 요청이 선 선수에게 오퍼가 붙는다 — 값은 **시장가 아래로 온다.**
+ * 나가고 싶어 하는 것을 시장이 알고, 그만큼 깎고 들어온다.
+ */
+function openRequestedOffer(
+  state: GameState,
+  player: GamePlayer,
+  rng: () => number,
+  digest: string[],
+): void {
+  const market = marketValueOf(state, player);
+  openIncomingSellOffer(
+    state,
+    player,
+    rng,
+    digest,
+    (feeBias) =>
+      Math.round((market * (1 - REQUESTED_DISCOUNT * rng()) * feeBias) / 100_000) * 100_000,
+    ({ buyerName, fee, expiresOn }) =>
+      `📩 ${buyerName}가 이적을 요청한 ${player.name}에게 오퍼를 넣었습니다 — ${formatMoney(fee)} (기한 ${expiresOn})`,
+  );
 }
 
 /** 우리 스쿼드에서 그 자리를 더 잘 보는 선수 수 — 오퍼가 올 만한 선수 판별 */
