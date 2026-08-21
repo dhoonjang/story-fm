@@ -1,4 +1,5 @@
 import type {
+  ApproachTopic,
   GamePlayer,
   MatchRecord,
   PressAxis,
@@ -7,16 +8,20 @@ import type {
   PressStance,
   PressTrigger,
 } from "@story-fm/domain";
-import { isNaturalAt, naturalPositionOf, RATING_MAX } from "@story-fm/domain";
+import { isNaturalAt, naturalPositionOf, PLAYER_ISSUE_REASONS, RATING_MAX } from "@story-fm/domain";
 import type { GameState } from "../core/state";
 import { playerById, playersOf, pushNarrative, teamNameIn, userPlayers } from "../core/state";
 import { pickPlayerAmong } from "../core/player-ref";
+import { addDays } from "../core/dates";
 import { formatMoney } from "./finance";
 import { makeRng, pick } from "../core/rng";
 import { clampForm, formLabel, moraleToForm } from "../squad/form";
 import { recentOutcomes } from "../squad/slump";
 import { issueReasonText } from "../squad/mood";
 import { isFriendly } from "../competition/friendly";
+import { boardExpectation, computeStandings } from "../competition/season";
+import { leagueOfTeamIn } from "../competition/promotion";
+import { derbyNameOf } from "../data/derbies";
 import { reportersOf } from "../world/persona";
 import type { SkillResult } from "../skills";
 
@@ -371,6 +376,229 @@ export function buildDeparturePress(
   };
 }
 
+// ── 언론 유출 ──────────────────────────────────────────────────
+
+/**
+ * 유출된 주제를 사실어로 — **라커룸 불만과 같은 말을 쓴다**(`issueReasonText`).
+ * 같은 사실을 두 이름으로 부르면 어느 쪽이 진짜인지 코드가 매번 다시 정한다.
+ * 유출은 선수 주제에서만 나므로(people.md §8) 팀 주제는 표에 없고, 없으면 폴백이다.
+ */
+function leakTopicText(topic: ApproachTopic): string {
+  const reason = PLAYER_ISSUE_REASONS.find((r) => r === topic) ?? null;
+  return issueReasonText({ reason }) ?? "사유 불명";
+}
+
+/**
+ * 방치된 불만이 신문에 실렸다 — **다음에 열리는 회견이 그것을 싣는다** (people.md §4).
+ *
+ * ⚠️ 빌더가 아니라 `openPress`에 있다. 회견은 어느 트리거든 이 문 하나를 지나므로,
+ * 여기 두면 나중에 생기는 빌더가 유출을 조용히 빠뜨릴 수 없다. 유출이 스스로 자리를
+ * 열지 않는 것도 같은 이유다 — 회견은 이미 경기마다 열린다.
+ */
+function loadLeaks(state: GameState, conference: PressConference): void {
+  const leaks = state.pressLeaks ?? [];
+  if (leaks.length === 0) return;
+  let loaded = false;
+  for (const leak of leaks) {
+    const player = playerById(state, leak.playerId);
+    // 떠난 선수의 유출은 조용히 버린다 — 우리 라커룸에 없는 사람의 불만은 물을 자리가 아니다
+    if (!player || player.teamId !== state.userTeamId) continue;
+    conference.facts.push({
+      kind: "leak",
+      text: `${player.name}의 ${leakTopicText(leak.topic)} 불만이 언론에 보도됐다`,
+      about: player.id,
+      sharp: true,
+    });
+    loaded = true;
+  }
+  // 실렸든 버려졌든 유출은 이 자리를 지나면 없다 — 다음 회견이 같은 사실을 다시 묻지 않는다
+  state.pressLeaks = [];
+  if (loaded) conference.weight = Math.max(conference.weight, 2);
+}
+
+// ── 전야 회견 ──────────────────────────────────────────────────
+
+/** 전야에 실리는 최근 폼의 창 — 경기 뒤 회견의 무승 창과 같은 자 */
+const FORM_WINDOW = WINLESS_WINDOW;
+
+const OUTCOME_KO = { win: "승", draw: "무", loss: "패" } as const;
+
+/** 홈/원정 한 글자 — 대진 카드가 이것 없이는 반쪽이다 */
+const sideKo = (home: boolean) => (home ? "홈" : "원정");
+
+/** 이번 시즌 우리 리그 경기 — 개막이 언제였는지도, 순위도 여기서 센다 */
+function leagueMatchesOfSeason(state: GameState, leagueId: string): MatchRecord[] {
+  return state.matches.filter(
+    (m) =>
+      m.season === state.season &&
+      m.competitionId === leagueId &&
+      (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+  );
+}
+
+/** 지금 리그에서 우리와 상대가 선 자리 — 한 경기도 안 치렀으면 순위가 없다 */
+function placeFact(state: GameState, opponentId: string, opponent: string): PressFact | null {
+  const standings = computeStandings(state);
+  const us = standings.findIndex((row) => row.ours);
+  const them = standings.findIndex((row) => row.teamId === opponentId);
+  if (us < 0 || them < 0 || standings[us]!.played === 0) return null;
+  return {
+    kind: "standing",
+    text: `리그 ${us + 1}위 · ${opponent} ${them + 1}위`,
+    about: null,
+    sharp: false,
+  };
+}
+
+/**
+ * 더비 전야 — **어느 대진이 더비인가는 표가 정한다** (`data/derbies.ts`).
+ * 무게 2인 것은 더비가 결과와 무관하게 팬과 구단의 자리이기 때문이다.
+ */
+function buildDerbyPress(
+  state: GameState,
+  match: MatchRecord,
+  input: { derby: string; opponentId: string; opponent: string; home: boolean },
+): PressConference {
+  const facts: PressFact[] = [
+    {
+      kind: "fixture",
+      text: `${input.derby} — ${input.opponent}전 (${sideKo(input.home)})`,
+      about: null,
+      sharp: true,
+    },
+  ];
+  // 시즌 첫 더비면 아직 센 경기가 없다 — 없는 폼을 "최근 0경기"로 쓰지 않는다
+  const recent = recentOutcomes(state, state.userTeamId, FORM_WINDOW);
+  if (recent.length > 0) {
+    facts.push({
+      kind: "result",
+      text: `최근 ${recent.length}경기 ${recent.map((r) => OUTCOME_KO[r]).join("")}`,
+      about: null,
+      sharp: false,
+    });
+  }
+  const place = placeFact(state, input.opponentId, input.opponent);
+  if (place) facts.push(place);
+
+  return {
+    id: `press-derby-${match.id}`,
+    date: state.date,
+    trigger: "derby",
+    reporterId: reporterFor(state, "derby"),
+    context: `${input.derby} 전야 · ${input.opponent}전`,
+    facts,
+    status: "pending",
+    weight: 2,
+  };
+}
+
+/**
+ * 시즌 개막 전야 — 한 시즌에 한 번뿐인 자리라 id도 시즌으로 잡는다.
+ * 무게 1인 것은 아직 아무 일도 일어나지 않았기 때문이다 — 물을 수 있는 것은 기대뿐이다.
+ */
+function buildOpeningPress(
+  state: GameState,
+  input: { opponent: string; home: boolean },
+): PressConference {
+  const expectation = boardExpectation(state, state.userTeamId);
+  const facts: PressFact[] = [
+    {
+      kind: "fixture",
+      text: `개막전 ${input.opponent} (${sideKo(input.home)})`,
+      about: null,
+      sharp: false,
+    },
+    {
+      kind: "standing",
+      text: `보드 기대 ${expectation.target}위 (${expectation.label})`,
+      about: null,
+      sharp: false,
+    },
+  ];
+  const signing = biggestSigning(state);
+  if (signing) {
+    facts.push({
+      kind: "arrival",
+      text: `여름 최대 영입 ${signing.player.name} (${formatMoney(signing.fee)})`,
+      about: signing.player.id,
+      sharp: false,
+    });
+  }
+
+  return {
+    id: `press-opening-${state.season}`,
+    date: state.date,
+    trigger: "opening",
+    reporterId: reporterFor(state, "opening"),
+    context: `시즌 개막 전야 · ${input.opponent}전`,
+    facts,
+    status: "pending",
+    weight: 1,
+  };
+}
+
+/** 이번 시즌 우리가 가장 크게 지른 영입 — 없으면 없는 대로 (이적료 0은 지른 것이 아니다) */
+function biggestSigning(state: GameState): { player: GamePlayer; fee: number } | null {
+  let best: { player: GamePlayer; fee: number } | null = null;
+  for (const t of state.transfers) {
+    if (t.toTeamId !== state.userTeamId || t.date < state.calendar.preseasonStart) continue;
+    if (t.fee <= 0 || (best && t.fee <= best.fee)) continue;
+    const player = playerById(state, t.gamePlayerId);
+    if (player) best = { player, fee: t.fee };
+  }
+  return best;
+}
+
+/**
+ * 전야 회견 — **경기 전날에 선다** (people.md §4). tick이 하루에 한 번 부른다.
+ *
+ * 경기를 치르고 나면 경기 뒤 회견이 이 자리를 밀어내므로(`openPress`) 전야가
+ * 아니면 자리가 없다. 트리거는 둘이고 **더비가 개막을 이긴다** — 개막전이 더비면
+ * 물어야 할 것은 더비 쪽이다.
+ */
+export function openEvePress(state: GameState, digest?: string[]): void {
+  const leagueId = leagueOfTeamIn(state, state.userTeamId);
+  const tomorrow = addDays(state.date, 1);
+  /**
+   * **우리 리그 경기만이다.** 친선은 회견이 없고(season.md §2), 컵과 대항전은
+   * 대회 id로 갈린다 — 대항전 리그 페이즈는 `stage`가 없어 단계로는 리그와
+   * 구분되지 않는다.
+   */
+  const match = state.matches.find(
+    (m) =>
+      m.date === tomorrow &&
+      !m.result &&
+      m.competitionId === leagueId &&
+      !isFriendly(m) &&
+      (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+  );
+  if (!match) return;
+
+  const home = match.homeTeamId === state.userTeamId;
+  const opponentId = home ? match.awayTeamId : match.homeTeamId;
+  const opponent = teamNameIn(state, opponentId);
+  const derby = derbyNameOf(state.userTeamId, opponentId);
+
+  const conference = derby
+    ? buildDerbyPress(state, match, { derby, opponentId, opponent, home })
+    : isSeasonOpener(state, match, leagueId)
+      ? buildOpeningPress(state, { opponent, home })
+      : null;
+  if (!conference) return;
+  // 하루에 한 번 — 같은 날을 다시 지나도 자리가 둘이 되지 않는다
+  if ((state.pressConferences ?? []).some((c) => c.id === conference.id)) return;
+  openPress(state, conference, digest);
+}
+
+/** 이 경기가 이번 시즌 우리 첫 리그 경기인가 */
+function isSeasonOpener(state: GameState, match: MatchRecord, leagueId: string): boolean {
+  const first = leagueMatchesOfSeason(state, leagueId).reduce<string | null>(
+    (min, m) => (min === null || m.date < min ? m.date : min),
+    null,
+  );
+  return first !== null && match.date === first;
+}
+
 /** 답을 기다리는 회견 — 언제나 하나뿐이다 */
 export function pendingPress(state: GameState): PressConference | null {
   return (state.pressConferences ?? []).find((c) => c.status === "pending") ?? null;
@@ -392,6 +620,7 @@ export function openPress(state: GameState, conference: PressConference, digest?
     digest?.push(`${stale.context} 회견에 감독이 나타나지 않았다 — 언론 평판 하락`);
     pushNarrative(state, `기자회견 불참 (${stale.context})`, 2);
   }
+  loadLeaks(state, conference);
   state.pressConferences.push(conference);
   // 지나간 회견은 서사에 남지 상태로 쌓일 이유가 없다
   if (state.pressConferences.length > KEPT_CONFERENCES) {
