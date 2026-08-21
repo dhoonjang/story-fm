@@ -101,6 +101,7 @@ export const SaveSchema = z
     personas: z.array(PersonaSchema).optional(),
     deferredScouts: z.array(DeferredScoutSchema).optional(),
     dismissal: DismissalSchema.optional(),
+    dismissals: z.array(DismissalSchema).optional(),
     managerOffers: z.array(ManagerOfferSchema).optional(),
     historyDigest: HistoryDigestSchema.optional(),
     characterMemories: z.array(CharacterMemorySchema).optional(),

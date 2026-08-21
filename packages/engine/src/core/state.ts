@@ -619,9 +619,15 @@ export interface GameState {
    */
   dismissal?: Dismissal;
   /**
+   * **경질 이력** — 부임이 `dismissal` 카드를 지울 때 여기로 옮겨 남는다 (career.md §6).
+   * 잘린 시즌은 `SEASON_RECORD`가 없으므로 커리어 표가 그 해의 경질 줄을 여기서
+   * 읽는다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  dismissals?: Dismissal[];
+  /**
    * **감독직 제안** — 공석이 된 구단이 무직 감독을 부른 기록 (career.md §5.1).
-   * 만료·수락한 것도 남는다 — 부르지 않은 구단이 다시 부르지 않게 하는 근거다.
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * 만료·수락한 것도 남는다 — 같은 무직 기간에 같은 구단이 다시 부르지 않게 하는
+   * 근거다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   managerOffers?: ManagerOffer[];
   /**

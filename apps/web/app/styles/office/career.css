@@ -198,6 +198,11 @@
   color: var(--muted);
   font-size: var(--fs-sm);
 }
+/* 경질 이력 줄 — 무직 카드(.dismissed-head .when)와 같은 붉은 표식을 쓴다 */
+.career-sacked {
+  color: var(--danger);
+  font-size: var(--fs-sm);
+}
 
 /**
  * 무직 — **경질 카드와 열린 제안.** 커리어 화면 맨 위에 선다.
