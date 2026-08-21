@@ -7,6 +7,7 @@ import {
   applyHistoryDigest,
   planHistoryFold,
   registerCharacters,
+  worldFigures,
   type GameState,
   type HistoryFoldBrief,
 } from "@story-fm/engine";
@@ -47,8 +48,8 @@ export const HISTORY_COMPACTOR_SYSTEM = `당신은 구단의 기록 담당이다
 - 그 구간에서 **처음 이름을 갖고 말한 사람**만 세운다.
 - **이미 있는 인물의 성격·동기·말투는 고쳐 쓰지 않는다. 새로 세우는 사람만 적는다.**
   선수단·수석코치·구단주는 이미 서 있다.
-- 자리는 셋뿐이다 — 기자는 reporter, 구단 밖 사람(상대 팀 감독·에이전트·지인)은
-  friend, 이름 있는 서포터는 supporter.
+- 자리는 셋뿐이다 — 기자는 reporter, 감독의 지인 등 구단 밖 사람은 friend, 이름
+  있는 서포터는 supporter.
 - 집단은 사람이 아니다. 이름 없는 "취재진"·"관중"은 세우지 않는다.
 
 반드시 report_digest 도구로만 답한다. 그 밖의 텍스트는 쓰지 않는다.`;
@@ -87,14 +88,16 @@ function speakerOf(role: HistoryFoldBrief["turns"][number]["role"]): string {
 
 /** 브리프를 프롬프트 본문으로 — 이전 요약 + 이미 선 사람 + 접히는 원문 */
 export function buildCompactionPrompt(
-  personas: readonly Persona[] | undefined,
+  state: { personas?: Persona[]; userTeamId: string },
   brief: HistoryFoldBrief,
 ): string {
   const blocks: string[] = [];
   if (brief.previous !== null) {
     blocks.push(`## 이전 요약 (${brief.rounds - 1}겹째까지)`, brief.previous, "");
   }
-  const standing = (personas ?? []).map((p) => {
+  // 세계 인물 명부도 이미 선 사람이다 — 목록에 없으면 모델이 상대 감독·에이전트를
+  // 새로 세우려 하고, 그 등록은 코어가 어차피 거절한다 (people.md §9-1)
+  const standing = [...(state.personas ?? []), ...worldFigures(state)].map((p) => {
     const label = personaRoleLabel(p.role);
     return label === undefined ? `- ${p.characterId}` : `- ${p.characterId} (${label})`;
   });
@@ -233,7 +236,7 @@ export async function compactHistory(state: GameState, llm?: GameLLM): Promise<C
         return client.runTurn({
           system: HISTORY_COMPACTOR_SYSTEM,
           history: [],
-          user: buildCompactionPrompt(state.personas, brief),
+          user: buildCompactionPrompt(state, brief),
           tools: [makeReportTool(state, brief, (r) => (result = r))],
           toolChoice: { name: REPORT_DIGEST_TOOL },
         });
