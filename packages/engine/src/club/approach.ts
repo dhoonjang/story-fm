@@ -24,6 +24,7 @@ import { issueReasonText } from "../squad/mood";
 import { recentOutcomes } from "../squad/slump";
 import { makeRng, pick } from "../core/rng";
 import { ownerOf, worldFigures } from "../world/persona";
+import { boardDemandFact } from "./board-demand";
 import { applyStanceOutcome, pendingPress, signed, stanceRow, STANCE_KO } from "./press";
 import type { SkillResult } from "../skills";
 
@@ -423,6 +424,12 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
       sharp: true,
     });
   }
+  /**
+   * 열린 보드 요청은 구단주가 아는 사실이다 (career.md §5.2) — 순위 이야기를 하러
+   * 온 자리라도 자기가 건 조건을 빼놓고 말하지 않는다.
+   */
+  const demand = boardDemandFact(state);
+  if (demand) facts.push(demand);
   return {
     channel: "owner",
     speakerId: ownerOf(state).characterId,
