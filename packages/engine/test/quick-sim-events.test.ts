@@ -15,6 +15,7 @@ import {
   type GameState,
   type WorldScope,
 } from "@story-fm/engine";
+import { LEDGER_LIMITS } from "@story-fm/sim";
 import { recordCard } from "../src/match/discipline";
 import { createTestGame, keepSeat, playMockMatch } from "./helpers";
 
@@ -409,7 +410,7 @@ describe("같은 날 경기는 킥오프 순서대로 굴러간다", () => {
 });
 
 describe("교체", () => {
-  it("양 팀이 모두 교체한다 — 한도는 팀마다 따로다", () => {
+  it("양 팀이 모두 교체한다 — 한도는 장부와 같다 (5인/3창, 하프타임 미소모)", () => {
     const state = createTestGame(3);
     const home = simSquadOf(state, "mancity");
     const away = simSquadOf(state, "hull");
@@ -417,10 +418,15 @@ describe("교체", () => {
     let awaySubs = 0;
     for (let i = 0; i < 60; i++) {
       const r = quickSimulate(home, away, 6000 + i, `sub:${i}`);
+      for (const side of ["home", "away"] as const) {
+        const mine = r.subs.filter((s) => s.side === side);
+        expect(mine.length).toBeLessThanOrEqual(LEDGER_LIMITS.maxSubs);
+        // 창(같은 분의 연속 교체 = 한 창)도 장부의 한도를 넘지 않는다 — 하프타임(45′)은 미소모
+        const windows = new Set(mine.filter((s) => s.minute !== 45).map((s) => s.minute)).size;
+        expect(windows).toBeLessThanOrEqual(LEDGER_LIMITS.maxSubWindows);
+      }
       homeSubs += r.subs.filter((s) => s.side === "home").length;
       awaySubs += r.subs.filter((s) => s.side === "away").length;
-      expect(r.subs.filter((s) => s.side === "home").length).toBeLessThanOrEqual(4);
-      expect(r.subs.filter((s) => s.side === "away").length).toBeLessThanOrEqual(4);
       // 같은 선수가 나갔다 들어오지 않는다
       const out = r.subs.map((s) => s.out);
       expect(new Set(out).size).toBe(out.length);

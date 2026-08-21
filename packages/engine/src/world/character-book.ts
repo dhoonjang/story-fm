@@ -12,6 +12,7 @@ import { pendingApproach } from "../club/approach";
 import { pendingPress } from "../club/press";
 import { knowledgeOf, type Knowledge } from "../squad/scouting";
 import {
+  generateVirtualManager,
   headCoachOf,
   isFamousPlayer,
   ownerOf,
@@ -198,7 +199,14 @@ function personaOf(state: GameState, characterId: string): Persona | null {
   }
   const player = state.players.find((p) => p.name === characterId);
   if (player) return generatePlayerPersona(state.seed, player);
-  return worldFigureByName(state, characterId);
+  const figure = worldFigureByName(state, characterId);
+  if (figure) return figure;
+  // 타 팀 벤치의 가상 감독 — 후보를 모으는 순서(candidatesOf)의 마지막 겹 그대로
+  const bench = state.teams.find((t) => t.id !== state.userTeamId && t.managerName === characterId);
+  if (bench?.managerName !== undefined) {
+    return generateVirtualManager(state.seed, bench.id, bench.managerName);
+  }
+  return null;
 }
 
 export interface CharacterBookInput {
@@ -300,7 +308,7 @@ function rankOf(
  * | --------------- | ----------------------------------------------------------------------- |
  * | 우리 사람       | 세이브의 페르소나 · 우리 선수단 · 협상 테이블에 앉은 상대 선수          |
  * | 이름난 현역     | 종합 `FAMOUS_PLAYER_OVERALL` 이상 · 시장 전용 리그 시드 명단의 이름     |
- * | 세계 인물 명부  | 타 팀 감독 · 에이전트 · 해설 (`data/world-figures.ts`)                  |
+ * | 세계 인물 명부  | 타 팀 감독(명부 + 가상) · 에이전트 · 해설 (`data/world-figures.ts` · people.md §2) |
  *
  * 리그 4,000명을 **전부** 훑지 않는 이유는 `speakerRoles`가 사전에 전원을 담지 않는
  * 이유와 같다 (people.md §3 원칙 ③): 남의 팀 3군까지 넣으면 동명이인이 늘어 정작
@@ -344,6 +352,14 @@ function candidatesOf(state: GameState): Candidate[] {
   // ── 세계 인물 명부 ── 선수가 아니라 `knowledgeOf`가 답하지 않는 자리다.
   // 원형으로 뽑을 수 없어 성격·말투를 표가 직접 적으므로 깊이는 언제나 `full`이다
   for (const figure of worldFigures(state)) add(figure, NEAR_WORLD, always("full"));
+
+  // ── 가상 감독 ── 명부가 답하지 않는 벤치 — (시드, 팀, 이름)에서 파생한다
+  // (people.md §2). 명부 감독의 벤치는 같은 이름이 위에서 이미 자리를 지켰다.
+  // 감독은 스카우팅으로 알게 되는 상대가 아니라 깊이는 명부와 같이 `full`이다
+  for (const team of state.teams) {
+    if (team.id === state.userTeamId || team.managerName === undefined) continue;
+    add(generateVirtualManager(state.seed, team.id, team.managerName), NEAR_WORLD, always("full"));
+  }
 
   return [...byId.values()];
 }

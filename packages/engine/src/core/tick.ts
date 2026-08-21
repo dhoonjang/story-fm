@@ -688,6 +688,11 @@ export function simSquadFor(
     ),
     tactics: tacticsOf(state, teamId).spec,
     managerTactics: managerTacticsOf(state, teamId),
+    // 연장의 부상 추첨도 성향을 탄다 — 90분(simSquadOf)과 같은 눈금 (match.md §7)
+    proneness: pronenessOf(
+      state,
+      players.map((p) => p.id),
+    ),
   };
 }
 
@@ -735,7 +740,7 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
   /**
    * **쉬게 한 선수는 그 경기에서 아예 빠진다** — 벤치에도 없고, 뒤 슬롯의 대체
    * 자원도 아니다. 벤치가 OVR 순이라 방금 지쳐서 뺀 에이스가 맨 위에 서면,
-   * 투입 후보를 포지션군과 OVR로만 고르는 `planSubs`가 그를 46분에 되돌린다 —
+   * 투입 후보를 포지션군과 OVR로만 고르는 벤치 정책(`planBenchSubs`)이 그를 되돌린다 —
    * 로테이션이 선발 명단에서만 일어나고 출전 시간에서는 일어나지 않는 것이다.
    * 거르는 자리는 여기 하나다 (match.md §7).
    */
