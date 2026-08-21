@@ -4,11 +4,17 @@ import type {
   ApproachPressure,
   ApproachTopic,
   GamePlayer,
+  Persona,
   PlayerIssue,
   PressFact,
   PressStance,
 } from "@story-fm/domain";
-import { APPROACH_AXES, APPROACH_CHANNEL_LABEL, APPROACH_MAX_STEP } from "@story-fm/domain";
+import {
+  APPROACH_AXES,
+  APPROACH_CHANNEL_LABEL,
+  APPROACH_LEAK_STEP,
+  APPROACH_TOP_STEP,
+} from "@story-fm/domain";
 import type { GameState } from "../core/state";
 import { playerById, pushNarrative, seasonStatOf, squadLevelOf, userPlayers } from "../core/state";
 import { diffDays } from "../competition/calendar";
@@ -16,7 +22,8 @@ import { boardExpectation, computeStandings } from "../competition/season";
 import { formLabel } from "../squad/form";
 import { issueReasonText } from "../squad/mood";
 import { recentOutcomes } from "../squad/slump";
-import { ownerOf } from "../world/persona";
+import { makeRng, pick } from "../core/rng";
+import { ownerOf, worldFigures } from "../world/persona";
 import { applyStanceOutcome, pendingPress, signed, stanceRow, STANCE_KO } from "./press";
 import type { SkillResult } from "../skills";
 
@@ -78,11 +85,17 @@ export const APPROACH_PATIENCE_DAYS = 3;
 const SPEAKER_COOLDOWN_DAYS = 7;
 
 /**
- * 이 자리 하나가 옮길 수 있는 기본 폭 — 계단(1~3)에 비례해 3~9다.
+ * 이 자리 하나가 옮길 수 있는 기본 폭 — 계단에 비례해 3~9다.
  * 회견(`PRESS_BAND` 4)보다 좁은 이유는 자리가 좁기 때문이다 — 마이크 앞에서 한 말이
  * 복도에서 한 말보다 멀리 간다.
  */
 export const APPROACH_BAND = 3;
+
+/**
+ * 폭이 더는 넓어지지 않는 계단 — **위 계단이라고 사석의 말이 회견보다 멀리 가지는
+ * 않는다** (people.md §8). 선수 사다리가 5까지 오르는 것은 무게이지 파급이 아니다.
+ */
+const BAND_STEP_CAP = 3;
 
 /** 상태에 남기는 지난 다가옴 수 — 그 뒤는 서사에만 남는다 (회견과 같은 규약) */
 const KEPT_APPROACHES = 20;
@@ -112,6 +125,15 @@ const CHANNEL_OF: Record<ApproachTopic, ApproachChannel> = {
   morale: "captain",
   results: "owner",
 };
+
+/**
+ * 이 주제의 사다리 꼭대기 — **채널마다 다르다** (선수 5 · 주장·구단주 3, people.md §8).
+ * 주장·구단주가 3에 멈추는 것은 보드 경고가 3/3에 서는 것과 같은 규약이고, 위쪽 두
+ * 계단(언론 유출·이적 요청)은 선수 한 사람의 불만에만 있는 자리라서다.
+ */
+function topStepOf(topic: ApproachTopic): number {
+  return APPROACH_TOP_STEP[CHANNEL_OF[topic]];
+}
 
 /**
  * 답하지 않은 자리 — **무시가 공짜면 아무도 답하지 않는다.**
@@ -191,9 +213,19 @@ function leaguePlace(state: GameState): { position: number; played: number } | n
 function causesToday(state: GameState): Cause[] {
   const causes: Cause[] = [];
   const ours = new Set(userPlayers(state).map((p) => p.id));
+  /**
+   * **이적 요청이 서 있는 동안 그 선수의 압력은 쌓이지 않는다** — 그 일은 이제
+   * 시장의 것이다 (people.md §8). 원인으로 나오지 않은 줄은 하루 12씩 식는다.
+   */
+  const requested = new Set(
+    userPlayers(state)
+      .filter((p) => p.state.transferRequestedOn !== undefined)
+      .map((p) => p.id),
+  );
 
   for (const issue of state.issues) {
     if (!ours.has(issue.gamePlayerId)) continue;
+    if (requested.has(issue.gamePlayerId)) continue;
     const topic = issue.reason;
     // 사유가 없는 옛 불만은 어느 주제로도 옮길 수 없다 — 사실이 없으면 자리도 없다
     if (topic === undefined) continue;
@@ -278,6 +310,18 @@ function playerFacts(
   ];
 }
 
+/**
+ * 이적 요청을 들고 올 에이전트 — **(시드, 선수)에서 결정적으로 뽑는다.** 같은 세이브의
+ * 같은 선수는 언제나 같은 사람이 대리한다 (people.md §1 일관성).
+ *
+ * 명부에 에이전트가 한 사람도 없으면 `null`이다 — 코어는 화자를 지어내지 않는다.
+ */
+function agentFor(state: GameState, playerId: string): Persona | null {
+  const agents = worldFigures(state).filter((f) => f.role === "agent");
+  if (agents.length === 0) return null;
+  return pick(makeRng(state.seed, `agent-of:${playerId}`), agents);
+}
+
 /** 그 압력 줄이 지금 세울 수 있는 자리 — 사람이 없거나 사실이 사라졌으면 `null` */
 function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene | null {
   const channel = CHANNEL_OF[row.topic];
@@ -289,6 +333,29 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
       (i) => i.gamePlayerId === row.subject && i.reason === row.topic,
     );
     if (!player || player.teamId !== state.userTeamId || !issue) return null;
+    /**
+     * 꼭대기 계단 — **에이전트가 대리로 온다.** 선수가 같은 말을 네 번 하러 오지
+     * 않는다. 자리를 여는 사실은 이적 요청 그 자체라 맨 앞에 sharp로 선다.
+     */
+    if (step === topStepOf(row.topic)) {
+      const agent = agentFor(state, player.id);
+      const reason = issueReasonText(issue) ?? "사유 불명";
+      const request: PressFact = {
+        kind: "transfer-request",
+        text: `${player.name} 이적 요청 — ${reason} 불만 ${issueDays(state, issue)}일째`,
+        about: player.id,
+        sharp: true,
+      };
+      return {
+        // 명부를 비운 세계에서는 대리할 사람이 없으니 선수 본인이 온다 — 없는 사람을
+        // 세우는 대신 자리를 한 칸 낮춘다.
+        channel: agent ? "agent" : "player",
+        speakerId: agent?.characterId ?? player.name,
+        about: player.id,
+        context: `${player.name} 이적 요청 · ${reason}`,
+        facts: [request, ...playerFacts(state, player, issue, row.topic, sharp)],
+      };
+    }
     return {
       channel,
       speakerId: player.name,
@@ -374,6 +441,7 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
  * 움직이고, 마지막에 하나를 연다. 닫기 전에 열면 감독 앞에 두 자리가 선다.
  */
 export function tickApproaches(state: GameState, digest: string[]): boolean {
+  withdrawRequests(state, digest);
   const gaveUp = expireApproach(state, digest);
   driftPressure(state);
   /**
@@ -392,6 +460,21 @@ function expireApproach(state: GameState, digest: string[]): boolean {
   digest.push(`${open.context} — 감독이 답하지 않았다${effectSuffix(effect)}`);
   pushNarrative(state, `${open.context} (응답 없음)`, open.step >= 3 ? 4 : 3);
   return true;
+}
+
+/**
+ * **불만이 전부 풀리면 요청이 걷힌다** — 면담·승격·선발이 원인을 지운 자리다
+ * (people.md §8). 감독의 스탠스는 이 필드를 건드리지 못하고, 팀을 떠난 선수의 요청은
+ * `clearDepartedState`가 다른 상태와 함께 지운다.
+ */
+function withdrawRequests(state: GameState, digest: string[]): void {
+  for (const player of userPlayers(state)) {
+    if (player.state.transferRequestedOn === undefined) continue;
+    if (state.issues.some((i) => i.gamePlayerId === player.id)) continue;
+    player.state.transferRequestedOn = undefined;
+    digest.push(`${player.name} 이적 요청 철회 — 불만이 남아 있지 않다`);
+    pushNarrative(state, `${player.name} 이적 요청 철회`, 4);
+  }
 }
 
 /** 원인이 선 줄은 쌓이고 나머지는 식는다. 압력이 0이고 계단도 0인 줄은 사라진다 */
@@ -429,6 +512,32 @@ const APPROACH_TOPIC_ORDER: Record<ApproachTopic, number> = {
 };
 
 /**
+ * 계단 4 — **언론에 말한다.** 자리가 아니라 **사건**이라 감독이 답할 곳이 따로 없고,
+ * 값은 그 유출을 실어 갈 다음 회견에서 치른다 (`state.pressLeaks` → 회견의 사실 카드).
+ *
+ * ⚠️ **유출은 압력을 풀지 않는다** — 말한 것은 신문이지 감독이 아니다. 직전 임계의
+ * 75%가 남아 다음 계단(이적 요청)을 앞당긴다 (people.md §8).
+ */
+function leakToPress(state: GameState, row: ApproachPressure, digest: string[]): boolean {
+  const player = playerById(state, row.subject);
+  const issue = state.issues.find((i) => i.gamePlayerId === row.subject && i.reason === row.topic);
+  if (!player || player.teamId !== state.userTeamId || !issue) return false;
+
+  const leaks = (state.pressLeaks ??= []);
+  // 아직 회견이 실어 가지 않은 유출이 있으면 같은 불만이 두 번 새지 않는다
+  if (!leaks.some((l) => l.playerId === player.id && l.topic === row.topic)) {
+    leaks.push({ playerId: player.id, topic: row.topic, date: state.date });
+  }
+  row.step = APPROACH_LEAK_STEP;
+  row.value = approachThreshold(APPROACH_LEAK_STEP - 1) * IGNORE_CARRY;
+
+  const reason = issueReasonText(issue) ?? "불만";
+  digest.push(`${player.name}의 ${reason} 불만이 언론에 흘러나왔다`);
+  pushNarrative(state, `${player.name} ${reason} 불만 언론 유출`, 4);
+  return true;
+}
+
+/**
  * 임계를 넘은 자리 하나를 연다 — **소음을 막는 네 개의 문**을 지나서만 (people.md §8).
  *
  * 겹치면 **가장 많이 넘친 것**이 선다. 절대값이 아니라 임계 대비인 이유는 계단마다
@@ -461,7 +570,15 @@ function openApproach(state: GameState, digest: string[]): boolean {
     );
 
   for (const { row } of ranked) {
-    const step = Math.min(row.step + 1, APPROACH_MAX_STEP);
+    const step = Math.min(row.step + 1, topStepOf(row.topic));
+    /**
+     * 계단 4에서는 문이 열리는 대신 신문이 열린다 — **하루에 세계가 움직이는 것은
+     * 한 번**이라는 규약은 그대로라, 유출이 섰으면 오늘은 여기서 끝난다.
+     */
+    if (CHANNEL_OF[row.topic] === "player" && step === APPROACH_LEAK_STEP) {
+      if (leakToPress(state, row, digest)) return true;
+      continue;
+    }
     const scene = sceneFor(state, row, step);
     if (!scene) continue;
     // 같은 화자 7일 쿨다운 — 계단이 올랐어도 그 사람은 아직 복도에 있다
@@ -489,6 +606,18 @@ function openApproach(state: GameState, digest: string[]): boolean {
       `${scene.speakerId}(${APPROACH_CHANNEL_LABEL[scene.channel]})이(가) 감독을 찾아왔다 — ${scene.context}`,
     );
     pushNarrative(state, `${scene.speakerId} 면담 요청 (${scene.context})`, step >= 3 ? 4 : 3);
+    /**
+     * **자리가 열리는 순간 요청이 선다.** 감독의 답은 압력만 되돌릴 뿐 요청을 지우지
+     * 못한다 — 답이 원인을 지우지 않는 규칙 그대로다 (people.md §8).
+     */
+    if (CHANNEL_OF[row.topic] === "player" && step === topStepOf(row.topic)) {
+      const player = scene.about === null ? null : playerById(state, scene.about);
+      if (player && player.state.transferRequestedOn === undefined) {
+        player.state.transferRequestedOn = state.date;
+        digest.push(`${player.name} 이적 요청 — 에이전트가 구단에 전달했다`);
+        pushNarrative(state, `${player.name} 이적 요청`, 4);
+      }
+    }
     return true;
   }
   return false;
@@ -519,7 +648,7 @@ function closeApproach(
 ): ApproachEffect {
   const effect = applyStanceOutcome(state, {
     row: stance === null ? IGNORED : stanceRow(stance),
-    band: APPROACH_BAND * approach.step,
+    band: APPROACH_BAND * Math.min(approach.step, BAND_STEP_CAP),
     targetPlayerId: approach.about,
     axes: APPROACH_AXES[approach.channel],
   });
@@ -532,11 +661,12 @@ function closeApproach(
      * **답한 것과 답하지 않은 것의 차이는 남는 압력이다.** 무시하면 직전 임계의
      * 75%가 남아 다음 계단이 그만큼 앞당겨진다 — 같은 사람이 더 빨리 더 크게 온다.
      *
-     * ⚠️ **꼭대기에서는 앞당길 것이 없다.** 계단이 3에 서면 남기는 몫도 0이다. 안 그러면
-     * 마지막 임계(400)의 75%가 늘 깔려 있어 100만 더 채우면 다시 오고, 만성 불만
-     * 다섯이 2주에 한 번씩 문을 두드린다 — 사다리의 끝이 가장 시끄러운 자리가 된다.
+     * ⚠️ **그 채널의 꼭대기에서는 앞당길 것이 없다.** 더 오를 칸이 없으면 남기는 몫도
+     * 0이다. 안 그러면 마지막 임계의 75%가 늘 깔려 있어 얼마 안 채우고 다시 오고,
+     * 만성 불만 다섯이 2주에 한 번씩 문을 두드린다 — 사다리의 끝이 가장 시끄러운
+     * 자리가 된다.
      */
-    const exhausted = row.step >= APPROACH_MAX_STEP;
+    const exhausted = row.step >= APPROACH_TOP_STEP[approach.channel];
     row.value = stance === null && !exhausted ? approachThreshold(row.step) * IGNORE_CARRY : 0;
     row.step = approach.step;
   }
@@ -545,7 +675,8 @@ function closeApproach(
 
 /** 그 자리의 압력 열쇠 — 선수 채널만 사람을 가리킨다 */
 function subjectOf(approach: Approach): string {
-  if (approach.channel === "player") return approach.about ?? "";
+  // 에이전트는 대리로 왔을 뿐이라 압력 줄은 그가 대리한 선수의 것이다
+  if (approach.channel === "player" || approach.channel === "agent") return approach.about ?? "";
   return approach.channel === "captain" ? SQUAD_SUBJECT : BOARD_SUBJECT;
 }
 
@@ -610,7 +741,7 @@ export function describePendingApproach(state: GameState): string | null {
   const waited = diffDays(a.date, state.date);
   return [
     `찾아온 사람 (${a.id}) — ${a.speakerId}(${APPROACH_CHANNEL_LABEL[a.channel]}) · ${a.context}` +
-      ` · 계단 ${a.step}/${APPROACH_MAX_STEP}${a.step >= 3 ? " · 큰 자리다" : ""}` +
+      ` · 계단 ${a.step}/${APPROACH_TOP_STEP[a.channel]}${a.step >= 3 ? " · 큰 자리다" : ""}` +
       (waited > 0 ? ` · ${waited}일째 기다린다` : ""),
     `  그가 아는 사실 (이 밖은 말하지 못한다):`,
     ...a.facts.map((f) => `  · ${f.text}${f.about ? ` [${f.about}]` : ""}${f.sharp ? " ⚡" : ""}`),
