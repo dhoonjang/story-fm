@@ -9,7 +9,7 @@ import {
   tickArcs,
 } from "../src/world/arcs";
 import { addDays } from "../src/core/dates";
-import type { GameState } from "../src/core/state";
+import { topNarrative, type GameState } from "../src/core/state";
 
 /**
  * 아크 판정이 읽는 조각만 든 세계 — `createTestGame()`은 여기 필요 없다.
@@ -318,5 +318,41 @@ describe("아크 이름 짓기", () => {
     expect(describeActiveArcs(state)).toBe("- [절정] p1 불만 출전 기회 · 31일째");
     applyArcTitles(state, [{ arcId: activeArcs(state)[0]?.id ?? "", title: "등을 돌린 밤" }]);
     expect(describeActiveArcs(state)).toBe("- [절정] 등을 돌린 밤 — p1 불만 출전 기회 · 31일째");
+  });
+});
+
+describe("서사 기억의 가중 주입 (topNarrative)", () => {
+  const noteOf = (daysAgo: number, salience: number) => ({
+    date: addDays(TODAY, -daysAgo),
+    text: `d${daysAgo}s${salience}`,
+    salience,
+  });
+
+  it("무게 5는 반감기를 세 번 지나도 오늘의 1을 이긴다", () => {
+    // 5 × 0.5^3 = 0.625 < 1 이지만, 21일이면 세 번이 채 안 돼 1.25 > 1 — 경계는 3반감기다
+    const state = stateOf({
+      narrative: [noteOf(14, 5), ...Array.from({ length: 4 }, (_, i) => noteOf(i, 1))],
+    });
+    const picked = topNarrative(state, 4).map((n) => n.text);
+    expect(picked).toContain("d14s5");
+    // 뽑힌 뒤에는 시간순으로 선다 — 무게 5가 가장 오래됐으니 맨 앞이다
+    expect(picked[0]).toBe("d14s5");
+  });
+
+  it("반감기를 충분히 지난 무게 5는 오늘의 1에 밀린다", () => {
+    const state = stateOf({
+      narrative: [noteOf(28, 5), ...Array.from({ length: 4 }, (_, i) => noteOf(i, 1))],
+    });
+    // 5 × 0.5^4 = 0.3125 < 1 × 0.5^(3/7)
+    expect(topNarrative(state, 4).map((n) => n.text)).not.toContain("d28s5");
+  });
+
+  it("가중치가 같으면 최신이 이기고, 결과는 결정적이다", () => {
+    const state = stateOf({
+      narrative: Array.from({ length: 6 }, (_, i) => ({ ...noteOf(0, 2), text: `same-${i}` })),
+    });
+    const a = topNarrative(state, 4).map((n) => n.text);
+    expect(a).toEqual(topNarrative(state, 4).map((n) => n.text));
+    expect(a).toEqual(["same-2", "same-3", "same-4", "same-5"]);
   });
 });

@@ -34,6 +34,8 @@ export * from "./world/catalog";
 export * from "./world/persona";
 export * from "./world/player-persona";
 export * from "./world/character-book";
+export * from "./world/relations";
+export * from "./world/arcs";
 export * from "./world/generate";
 export * from "./world/wages";
 export * from "./world/onboarding";

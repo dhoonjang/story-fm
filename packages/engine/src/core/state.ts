@@ -1223,7 +1223,9 @@ export function topNarrative(state: GameState, limit: number): NarrativeNote[] {
     .map((note, index) => ({
       note,
       index,
-      weight: note.salience * Math.pow(0.5, Math.max(0, today - day(note.date)) / NARRATIVE_HALF_LIFE_DAYS),
+      weight:
+        note.salience *
+        Math.pow(0.5, Math.max(0, today - day(note.date)) / NARRATIVE_HALF_LIFE_DAYS),
     }))
     .sort((a, b) => b.weight - a.weight || b.index - a.index)
     .slice(0, limit)

@@ -764,9 +764,9 @@ describe("페르소나 사이의 관계 초기값 (people.md §6)", () => {
 
     // 중립은 관계를 만들지 않는다 — 몸 · 화제는 짝 표에 없다
     const neutral = withAxes("야전 조련사형", "흥행가형");
-    expect(stanceWith(neutral, headCoachOf(neutral).characterId, ownerOf(neutral).characterId)).toBe(
-      undefined,
-    );
+    expect(
+      stanceWith(neutral, headCoachOf(neutral).characterId, ownerOf(neutral).characterId),
+    ).toBe(undefined);
     // 그 코치에게 서는 것은 전국지 기자(몸 · 경기) 하나뿐이다
     expect(personaRelations(neutral, headCoachOf(neutral).characterId)).toEqual([
       {
@@ -782,9 +782,9 @@ describe("페르소나 사이의 관계 초기값 (people.md §6)", () => {
   it("자기 자신과는 관계가 서지 않는다 — 같은 축이라도", () => {
     const state = withAxes("축구광형", "축구광형");
     for (const persona of [headCoachOf(state), ownerOf(state), ...reportersOf(state)]) {
-      expect(
-        personaRelations(state, persona.characterId).map((r) => r.characterId),
-      ).not.toContain(persona.characterId);
+      expect(personaRelations(state, persona.characterId).map((r) => r.characterId)).not.toContain(
+        persona.characterId,
+      );
     }
     // 선수도 세계 인물 명부도 대상이 아니다
     expect(personaRelations(state, state.players[0]!.name)).toEqual([]);

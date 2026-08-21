@@ -6,6 +6,7 @@ import {
   characterEntry,
   characterEntryOf,
   clockOf,
+  describeActiveArcs,
   computeStandings,
   dayOfWeek,
   describeNegotiations,
@@ -34,6 +35,7 @@ import {
   subLimitsOf,
   tacticsOf,
   teamName,
+  topNarrative,
   userPlayers,
   weeklyWagesOf,
   type GameState,
@@ -70,6 +72,11 @@ export function describePersona(entry: CharacterEntry): string {
     ...(entry.motivation ? [`동기: ${entry.motivation}`] : []),
     ...(entry.speechStyle ? [`말투: ${entry.speechStyle.note}`] : []),
     ...(entry.speechStyle?.samples ?? []).map((s) => `  예) ${s}`),
+    // 관계 초기값 — 원형에서 파생한 첫인상이다 (people.md §6). 그 뒤의 일은 기억이 갖는다
+    ...(entry.relations ?? []).map(
+      (r) =>
+        `관계: ${r.name} — ${r.stance === "aligned" ? "결이 맞는다" : "결이 부딪힌다"} (먼저 보는 것: 나 ${r.ours} · 상대 ${r.theirs})`,
+    ),
     // 감독이 아는 만큼만 그린다 — 소문으로만 아는 사람에게 속내를 주면 만난 적 없는
     // 사람의 목소리가 난다
     ...(entry.depth === "rumour"
@@ -274,6 +281,14 @@ const TRAINING_SHOWN = 3;
 const EXPIRING_SHOWN = 3;
 const RECENT_NARRATIVE = 4;
 
+/**
+ * 최근 사건 — 최신 4건이 아니라 **salience×recency 가중 상위 4건**이다 (people.md §9).
+ * 고르는 눈금은 코어의 것(`topNarrative`)이고, 여기서는 줄로 옮기기만 한다.
+ */
+function recentNarrativeLines(state: GameState): string[] {
+  return topNarrative(state, RECENT_NARRATIVE).map((n) => `${n.date} ${n.text}`);
+}
+
 /** 시간이 흘렀다 — 손잡이로 넘긴 턴에만 붙는 꼬리. 재직·무직 스냅샷이 같이 쓴다 */
 function timePassedLine(state: GameState, passed?: TimePassed | null): string | null {
   if (!passed || (passed.digest.length === 0 && passed.from === state.date)) return null;
@@ -322,7 +337,7 @@ function buildUnemployedNote(state: GameState, passed?: TimePassed | null): stri
       : `받은 감독직 제안 없음 — 기다리는 것 말고 감독이 할 수 있는 일은 없다.`,
     timePassedLine(state, passed),
   ].filter((x): x is string => x !== null);
-  const recent = state.narrative.slice(-RECENT_NARRATIVE).map((n) => `${n.date} ${n.text}`);
+  const recent = recentNarrativeLines(state);
   if (recent.length > 0) lines.push(`최근 사건: ${recent.join(" / ")}`);
   return lines.join("\n");
 }
@@ -479,7 +494,11 @@ export function buildGmStateNote(
   if (!negotiations.startsWith("진행 중인 협상 없음")) {
     lines.push(`협상:\n${negotiations}`);
   }
-  const recent = state.narrative.slice(-RECENT_NARRATIVE).map((n) => `${n.date} ${n.text}`);
+  // 활성 서사 아크 — 닫힐 때까지 매 턴 실려 GM이 시즌을 가로지르는 흐름을 잃지 않는다
+  // (people.md §9). 개폐도 사실 줄도 코어의 것이다
+  const arcs = describeActiveArcs(state);
+  if (arcs) lines.push(`이어지는 이야기:\n${arcs}`);
+  const recent = recentNarrativeLines(state);
   if (recent.length > 0) lines.push(`최근 사건: ${recent.join(" / ")}`);
   return lines.join("\n");
 }
