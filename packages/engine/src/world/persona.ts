@@ -214,10 +214,40 @@ function personaNames(
 /**
  * 그 나라 사람다운 가상 이름 하나 — 수석코치·기자와 같은 풀을 쓴다.
  * 감독 시장(`manager-market.ts`)이 후임 감독의 이름을 여기서 얻는다.
+ *
+ * `taken`과 겹치면 같은 rng로 다시 뽑는다 — 이름이 곧 `characterId`(전역 유일)라,
+ * 다른 벤치의 감독과 겹치면 두 벤치가 한 사람으로 읽힌다 (people.md §2).
  */
-export function inventPersonName(rng: () => number, teamId: string): string {
-  const pool = personaNamePoolOf(countryOfTeam(teamId));
-  return `${pick(rng, pool.given)} ${pick(rng, pool.family)}`;
+export function inventPersonName(rng: () => number, teamId: string, taken?: Set<string>): string {
+  return claimPersonaName(rng, personaNamePoolOf(countryOfTeam(teamId)), taken ?? new Set());
+}
+
+/**
+ * 이미 서 있는 사람들의 이름 — 가상 감독 이름을 뽑을 때 피해야 할 집합이다.
+ *
+ * 벤치의 감독 전원과 세이브의 페르소나, 감독(유저) 본인까지 담는다. 선수 이름은
+ * 담지 않는다 — 선수 풀과 인물 풀은 성을 나눠 가져 조합이 겹칠 수 없다 (people.md §2).
+ */
+export function occupiedPersonNames(state: {
+  teams: Array<{ managerName?: string }>;
+  personas?: Persona[];
+  manager?: { name: string };
+}): Set<string> {
+  return new Set([
+    ...state.teams.map((t) => t.managerName).filter((n): n is string => n !== undefined),
+    ...(state.personas ?? []).map((p) => p.name),
+    ...(state.manager !== undefined ? [state.manager.name] : []),
+  ]);
+}
+
+/**
+ * 빈 벤치의 가상 감독 이름 — **(시드, 팀) 채널로 결정적**이다 (people.md §2).
+ *
+ * 세계 생성과 로드 보정(`ensureSeededManagers`)이 같은 채널을 쓰므로, 옛 세이브를
+ * 채워도 그 벤치의 사람은 늘 같다 — 세이브 버전을 올리지 않는 근거다.
+ */
+export function seededVirtualManagerName(seed: number, teamId: string, taken: Set<string>): string {
+  return inventPersonName(makeRng(seed, `persona:manager-name:${teamId}`), teamId, taken);
 }
 
 /**
@@ -371,6 +401,125 @@ export const OWNER_ARCHETYPE_LABELS = OWNER_ARCHETYPES.map((a) => a.label);
 export const HEAD_COACH_ARCHETYPES = COACH_ARCHETYPES.map((a) => a.label);
 
 /**
+ * 타 팀 감독 원형 — **어떤 축구로 이기려는 사람이고, 마이크 앞에서 무엇을 말하는가.**
+ *
+ * 수석코치(감독을 돕는 사람)·구단주(감독을 고용한 사람)와 자리가 다르다: 이 사람들은
+ * 감독의 **맞수**다. 말은 회견장과 중계, 경기 전후의 악수에서 들린다 — 존대는
+ * 하되 동료 감독의 거리다.
+ */
+const MANAGER_ARCHETYPES: readonly CoachArchetype[] = [
+  {
+    key: "structure_architect",
+    label: "구조 설계자형",
+    traits: ["이론가", "완벽주의", "내용 우선", "자기 확신"],
+    motivation: "결과보다 먼저, 경기가 자기 그림대로 굴러가는 것을 보고 싶다.",
+    speech: {
+      note: "경기를 구조와 공간의 언어로 설명한다. 패배 뒤에도 내용을 먼저 말한다.",
+      samples: [
+        "점수는 그렇게 나왔지만, 60분까지는 우리가 설계한 경기였습니다.",
+        "상대가 잘한 게 아니라 우리가 간격을 잃은 겁니다. 그건 고칠 수 있습니다.",
+      ],
+    },
+  },
+  {
+    key: "winner",
+    label: "승부사형",
+    traits: ["결과 지상주의", "도발을 즐긴다", "승부처를 읽는다"],
+    motivation: "말은 남지 않는다 — 이긴 기록만 남는다.",
+    speech: {
+      note: "짧게 자르고 단정한다. 웃는 얼굴로 찌르는 말을 한다.",
+      samples: [
+        "내용이요? 순위표에는 내용을 적는 칸이 없습니다.",
+        "저쪽 벤치가 무슨 말을 했는지는 모르겠고, 스코어는 제가 기억합니다.",
+      ],
+    },
+  },
+  {
+    key: "pragmatist",
+    label: "실용주의형",
+    traits: ["상대 분석 우선", "유연함", "계산된 겸손"],
+    motivation: "가진 패로 이길 수 있는 판을 만든다.",
+    speech: {
+      note: "자기 팀을 낮추고 상대를 올리는 말로 시작하지만, 준비한 수는 정확히 안다.",
+      samples: [
+        "우리가 더 좋은 팀이라고는 안 했습니다. 오늘 더 준비된 팀이었을 뿐이죠.",
+        "상대가 강하면 판을 바꾸면 됩니다. 자존심은 순위표 옆에 두고 옵니다.",
+      ],
+    },
+  },
+  {
+    key: "firebrand",
+    label: "열혈 지휘관형",
+    traits: ["감정이 크다", "선수를 끌어안는다", "터치라인의 소란"],
+    motivation: "선수들이 자기를 위해 뛰게 만든다 — 전술은 그다음이다.",
+    speech: {
+      note: "목소리가 크고 감정이 그대로 드러난다. 심판과 일정 이야기가 자주 나온다.",
+      samples: [
+        "우리 선수들은 오늘 전부를 쏟았습니다. 그걸 못 보셨다면 다른 경기를 보신 겁니다.",
+        "그 판정 하나에 경기가 갈렸습니다. 말 안 하고 넘어갈 수는 없죠.",
+      ],
+    },
+  },
+  {
+    key: "youth_believer",
+    label: "육성 신봉형",
+    traits: ["장기 시야", "어린 선수 신뢰", "인내"],
+    motivation: "3년 뒤에 완성될 팀을 지금부터 만든다.",
+    speech: {
+      note: "결과 질문에 성장의 언어로 답한다. 어린 선수의 이름을 자주 부른다.",
+      samples: [
+        "오늘 데뷔한 열여덟 살을 보셨습니까? 이 경기에서 우리가 가져가는 건 그 아이입니다.",
+        "지금 순위로 우리를 판단하셔도 됩니다. 2년 뒤에 다시 이야기하죠.",
+      ],
+    },
+  },
+  {
+    key: "bolt_realist",
+    label: "빗장 현실주의형",
+    traits: ["수비 조직 신봉", "냉정한 계산", "낭만 없음"],
+    motivation: "가진 것보다 많이 내주지 않는 팀으로 살아남는다.",
+    speech: {
+      note: "실점과 승점의 산수로 말한다. 화려함을 물으면 예산 이야기로 답한다.",
+      samples: [
+        "아름다운 축구요? 우리 임금 총액으로는 승점 1점이 아름답습니다.",
+        "무실점이면 최소 승점 1입니다. 우리는 거기서 시작합니다.",
+      ],
+    },
+  },
+];
+
+/** 원형 목록 — 테스트·어드민이 전수를 훑을 때 쓴다 */
+export const MANAGER_ARCHETYPE_LABELS = MANAGER_ARCHETYPES.map((a) => a.label);
+
+/**
+ * 가상 감독을 만든다 — **저장하지 않고 (시드, 팀, 이름)에서 파생한다** (people.md §2).
+ *
+ * 선수 페르소나와 같은 규약이다: 리그 95개 벤치분 카드를 세이브에 넣을 이유가 없고,
+ * 생성이 결정적이라 파생으로 충분하다. **이름이 채널에 들어가는 것이 핵심이다** —
+ * 경질로 `managerName`이 갈리면 후임은 전임과 독립인 추첨을 받는다.
+ *
+ * 키워드는 명부 인물의 규칙을 따른다(전체 이름 + 성) — 이름 조각을 전부 담으면
+ * 흔한 이름 조각이 남의 문장에 걸려 한 턴 상한 3장을 남의 이름이 먹는다.
+ */
+export function generateVirtualManager(seed: number, teamId: string, name: string): Persona {
+  const rng = makeRng(seed, `persona:manager:${teamId}:${name}`);
+  const archetype = pick(rng, MANAGER_ARCHETYPES);
+  const parts = name.split(/\s+/u);
+  const surname = parts[parts.length - 1] ?? "";
+  return {
+    characterId: name,
+    name,
+    role: "manager",
+    archetype: archetype.label,
+    traits: [...archetype.traits],
+    motivation: archetype.motivation,
+    speechStyle: { note: archetype.speech.note, samples: [...archetype.speech.samples] },
+    keywords: surname.length >= KEYWORD_MIN_LENGTH && surname !== name ? [name, surname] : [name],
+    seed,
+  };
+}
+
+/**
  * 끝난 협상 — 나머지(`open`·`agreed`)는 아직 테이블에 사람이 앉아 있다.
  * 종료 상태를 빼는 방향이라 상태가 하나 늘어도 화자가 조용히 사라지지 않는다.
  */
@@ -429,6 +578,8 @@ interface SpeakerSource {
     attributes?: { overall: number };
   }>;
   negotiations?: Array<{ gamePlayerId: string; status: string }>;
+  /** 가상 감독 판정용 — 없으면(축약 픽스처) 타 팀 벤치가 사전에 서지 않는다 */
+  teams?: Array<{ id: string; managerName?: string }>;
 }
 
 /**
@@ -454,8 +605,9 @@ export interface SpeakerRole {
  *    지시했으니 당연하다), 직책은 세이브가 안다. 그래야 어떤 턴에서도 빠지지 않는다.
  * ② **수석코치만 특별대우하지 않는다.** 자리를 아는 화자는 다 알려 준다 — 페르소나(수석코치·구단주)·
  *    **주장**·**우리 선수단**·협상 테이블에 앉은 상대 선수, 그리고 **이름난 현역과
- *    세계 인물 명부**까지(캐릭터북의 세 겹 그대로 — people.md §6). 포지션은
- *    넣지 않는다: 대화마다 따라붙기엔 시끄럽고, 그건 명단이 답하는 정보다.
+ *    세계 인물 명부, 타 팀 벤치의 가상 감독**까지(캐릭터북의 세 겹 그대로 —
+ *    people.md §6). 포지션은 넣지 않는다: 대화마다 따라붙기엔 시끄럽고, 그건
+ *    명단이 답하는 정보다.
  * ③ **잘못된 자리보다 없는 게 낫다.** 같은 이름이 둘이면(코치와 선수가 동명이인)
  *    무엇을 붙여도 절반은 틀리므로 **아예 붙이지 않는다** — 화면은 사람 아이콘만 세운다.
  *    이름난 현역·명부는 예외다: 뒤 겹은 이미 찬 자리를 넘보지 않으므로(캐릭터북과
@@ -553,6 +705,12 @@ function collectSpeakers(state: SpeakerSource): Map<string, SpeakerRole | null> 
       kind: figure.role,
       label: personaRoleLabel(figure.role),
     });
+  }
+  // 타 팀 벤치의 감독 — 명부 감독은 위에서 이미 섰고(같은 이름), 나머지가 가상 감독이다.
+  // 유저 팀 벤치는 유저의 것이라 빠진다 (people.md §2)
+  for (const team of state.teams ?? []) {
+    if (team.id === state.userTeamId || team.managerName === undefined) continue;
+    claim(team.managerName, { kind: "manager", label: personaRoleLabel("manager") });
   }
 
   return seen;
