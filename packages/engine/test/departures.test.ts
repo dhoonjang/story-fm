@@ -265,3 +265,47 @@ describe("해지 값의 양 끝", () => {
     expect(unilateralSeveranceOf(state, target.id)).toBe(0);
   });
 });
+
+describe("불만의 수명 — 팀을 떠나면 불만도 끝난다 (people.md §5)", () => {
+  /** 픽스처는 describe당 하나 — 문마다 다른 선수를 내보내며 같은 불변식을 잰다 */
+  const state = createTestGame(11);
+  const gripe = (playerId: string) =>
+    state.issues.push({
+      gamePlayerId: playerId,
+      kind: "unhappy",
+      reason: "minutes",
+      since: state.date,
+    });
+  /** 불변식 — 장부의 불만이 전부 지금 우리 스쿼드의 것인가 */
+  const noGhosts = () => {
+    const ours = new Set(userPlayers(state).map((p) => p.id));
+    return state.issues.every((i) => ours.has(i.gamePlayerId));
+  };
+
+  it("방출 — 일방 해지 뒤 그 선수의 불만이 장부에 없다", () => {
+    const target = spare(state);
+    gripe(target.id);
+    const res = releasePlayer(state, { playerId: target.id });
+    expect(res.ok, res.message).toBe(true);
+    expect(state.issues.some((i) => i.gamePlayerId === target.id)).toBe(false);
+    expect(noGhosts()).toBe(true);
+  });
+
+  it("해지 — 합의 정산도 같은 문을 지나 불만을 지운다", () => {
+    const target = spare(state);
+    gripe(target.id);
+    const res = releasePlayer(state, { playerId: target.id, severance: 0 });
+    expect(res.ok, res.message).toBe(true);
+    expect(state.issues.some((i) => i.gamePlayerId === target.id)).toBe(false);
+    expect(noGhosts()).toBe(true);
+  });
+
+  it("임대 송출 — 라커룸을 떠나면 불만도 따라가지 않는다", () => {
+    const target = spare(state);
+    gripe(target.id);
+    const res = loanPlayer(state, { playerId: target.id, teamId: "chelsea" });
+    expect(res.ok, res.message).toBe(true);
+    expect(state.issues.some((i) => i.gamePlayerId === target.id)).toBe(false);
+    expect(noGhosts()).toBe(true);
+  });
+});
