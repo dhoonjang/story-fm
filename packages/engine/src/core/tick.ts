@@ -41,10 +41,12 @@ import {
   formatMoney,
   payWeeklyWages,
   runMonthlyFinance,
+  settleDuePayments,
 } from "../club/finance";
 // 핵심 자원의 경계는 회견이 쥔다 — 같은 자를 두 곳에 적으면 한쪽만 움직인다
 import { openEvePress, SQUAD_CORE_SIZE } from "../club/press";
 import { tickApproaches } from "../club/approach";
+import { tickBoardDemands } from "../club/board-demand";
 import { tickArcs } from "../world/arcs";
 import {
   TRAINING_INJURY_PER_SESSION,
@@ -390,6 +392,10 @@ function dailyTick(
   // 주급 (월요일) — 활성 계약 합에서 파생, 구단 전체에 적용 (무소속 제외 — finance.ts)
   if (dow === MONDAY) payWeeklyWages(state);
 
+  // 분할 이적료·해지 정산금의 기일이 된 회분 (finance.md §6.4).
+  // 기일은 요일을 모르므로 매일 본다 — 주급·월초 정산과 달리 조건이 없다
+  settleDuePayments(state, digest);
+
   /**
    * 벤치 불만을 낼 만한 자원인가 — **종합의 눈금을 탄다.**
    * 옛 78과 같은 인원 비율(상위 17%)에 서는 값이다 (player.md §4).
@@ -512,6 +518,12 @@ function dailyTick(
    *
    * 무직에게는 찾아올 사람이 없다 — 선수단도 보드도 이제 남의 것이다 (career.md §5.1).
    */
+  /**
+   * 보드 요청 — 구단주 원형이 이적창마다 거는 조건 (career.md §5.2). 다가옴보다
+   * 먼저 판정해야 구단주가 오는 자리의 사실 카드가 오늘의 요청 상태를 싣는다.
+   * 무직에게는 요청이 서지도 판정되지도 않는다 — 보드도 이제 남의 것이다.
+   */
+  if (managed !== null) tickBoardDemands(state, digest);
   const approached = managed !== null && tickApproaches(state, digest);
 
   /**

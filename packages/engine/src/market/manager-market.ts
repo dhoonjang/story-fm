@@ -563,6 +563,8 @@ export function acceptManagerOffer(state: GameState, ref: string): SkillResult {
    */
   state.approaches = [];
   state.approachPressure = [];
+  // 보드 요청도 앞 구단주의 것이다 (career.md §5.2) — 새 구단주의 조건은 새 창이 건다
+  state.boardDemands = [];
   // 라커룸 불만도 앞 구단의 것이다 (people.md §5) — 지고 오면 주의 줄이 옛 이름을 나열한다
   state.issues = [];
   // 기본 훈련은 새 선수단으로 다시 깔린다

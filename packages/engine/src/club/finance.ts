@@ -793,6 +793,70 @@ export function skippedWageWeeks(from: string, until: string): number {
   return weeks;
 }
 
+// ── 지급 일정 ───────────────────────────────────────────
+
+/**
+ * 지급일이 된 미지급 회분을 전부 문다 — **분할 지급의 유일한 문**이다
+ * (finance.md §6.4). 확정 그 자리의 첫 회분도, 몇 년 뒤의 마지막 회분도 여기를
+ * 지나므로 "일정 완납 시 잔액 변화 = 일시금"이 경로 하나로 지켜진다.
+ *
+ * 회분은 지급일에 **무조건** 나간다 — 잔고가 없어도 나가고, 그 압박은 부채
+ * 이자(§9.4)가 실체로 만든다. 이적 회분만 이적 예산을 함께 옮긴다 — 정산금은
+ * 급여이지 이적 지출이 아니다 (일시금 해지도 예산을 건드리지 않는다).
+ *
+ * tick이 매일 부르고, 확정(`executeDeal`·`executeSale`·`releasePlayer`)이 그
+ * 자리에서 한 번 부른다.
+ */
+export function settleDuePayments(state: GameState, digest?: string[]): void {
+  for (const schedule of state.paymentSchedules ?? []) {
+    const total = schedule.installments.length;
+    const name =
+      state.players.find((p) => p.id === schedule.gamePlayerId)?.name ?? schedule.gamePlayerId;
+    for (const [index, installment] of schedule.installments.entries()) {
+      if (installment.paidOn !== null || installment.dueOn > state.date) continue;
+      const part = total > 1 ? ` (${index + 1}/${total}회)` : "";
+      const ref = { type: "player" as const, id: schedule.gamePlayerId };
+      if (schedule.kind === "severance") {
+        recordFinance(state, schedule.payerTeamId, {
+          kind: "expense",
+          category: "player_wages",
+          label: `계약 해지 정산금${part} — ${name}`,
+          amount: installment.amount,
+          ref,
+        });
+      } else {
+        recordFinance(state, schedule.payerTeamId, {
+          kind: "expense",
+          category: "transfer_out",
+          label: `이적료${part} — ${name}`,
+          amount: installment.amount,
+          ref,
+        });
+        financeOf(state, schedule.payerTeamId).transferBudget -= installment.amount;
+      }
+      if (schedule.payeeTeamId) {
+        recordFinance(state, schedule.payeeTeamId, {
+          kind: "income",
+          category: "transfer_in",
+          label: `이적료${part} — ${name}`,
+          amount: installment.amount,
+          ref,
+        });
+        if (schedule.kind === "transfer") {
+          financeOf(state, schedule.payeeTeamId).transferBudget += installment.amount;
+        }
+      }
+      installment.paidOn = state.date;
+      // 확정일의 첫 회분은 확정 메시지가 이미 말한다 — 일지는 뒤에 오는 회분만
+      if (index > 0) {
+        digest?.push(
+          `💷 ${name} ${schedule.kind === "severance" ? "정산금" : "이적료"} 분할 ${index + 1}/${total}회분 ${formatMoney(installment.amount)} 지급`,
+        );
+      }
+    }
+  }
+}
+
 // ── 상각 ────────────────────────────────────────────────
 
 function monthsBetween(from: string, to: string): number {

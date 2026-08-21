@@ -2,6 +2,7 @@ import type {
   Achievement,
   Approach,
   ApproachPressure,
+  BoardDemand,
   PressLeak,
   AxisValues,
   Booking,
@@ -26,6 +27,7 @@ import type {
   MatchSide,
   NarrativeArc,
   NarrativeNote,
+  PaymentSchedule,
   Persona,
   PlayerIssue,
   SettlingEvent,
@@ -728,6 +730,12 @@ export interface GameState {
    * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   pressLeaks?: PressLeak[];
+  /**
+   * 보드 요청 — 구단주 원형이 이적창마다 거는 조건 (career.md §5.2). 발행 시점과
+   * 판정 시점이 갈리고 발행 순간의 기준값(주급 총액·기준 이적료)을 들므로 세이브가
+   * 든다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  boardDemands?: BoardDemand[];
 
   // ── 감독 ──
   manager: Manager;
@@ -778,6 +786,11 @@ export interface GameState {
    * (optional — SAVE_VERSION 유지).
    */
   arcs?: NarrativeArc[];
+  /**
+   * 지급 일정 표 — 분할로 합의된 이적료·해지 정산금의 미래 회분
+   * (transfer.md §5-2). 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  paymentSchedules?: PaymentSchedule[];
 }
 
 // ── 팀·선수 조회 ────────────────────────────────────────
@@ -2346,6 +2359,7 @@ export function createGame(input: CreateGameInput): GameState {
     approaches: [],
     approachPressure: [],
     pressLeaks: [],
+    boardDemands: [],
 
     manager: {
       name: input.managerName,
