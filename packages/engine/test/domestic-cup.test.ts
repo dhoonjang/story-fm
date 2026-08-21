@@ -36,6 +36,7 @@ import {
   type GameState,
 } from "@story-fm/engine";
 import type { MatchRecord, MatchStage } from "@story-fm/domain";
+import { isReserveMatch } from "@story-fm/domain";
 import { createTestGame, keepSeat, playMockMatch } from "./helpers";
 
 /**
@@ -151,6 +152,9 @@ function expectNoDoubleBooking(state: GameState): void {
   const seen = new Map<string, string>();
   for (const m of state.matches) {
     if (m.season !== state.season) continue;
+    // 2군 경기는 다른 스쿼드의 경기다 — 1군 경기와 같은 날이어도 tick이 간이 시뮬로
+    // 그날 소화하므로(우리 경기 컷오프·finalizeMatch 재호출) 영원히 남지 않는다
+    if (isReserveMatch(m)) continue;
     for (const teamId of [m.homeTeamId, m.awayTeamId]) {
       const key = `${teamId}@${m.date}`;
       expect(seen.get(key), `${key}: ${seen.get(key)} ↔ ${m.id}`).toBeUndefined();
@@ -171,6 +175,8 @@ function minRestHours(state: GameState): { hours: number; where: string } {
   const byTeam = new Map<string, MatchRecord[]>();
   for (const m of state.matches) {
     if (m.season !== state.season) continue;
+    // 2군 경기는 다른 열한 명의 경기다 — 1군 휴식 눈금에 들어가지 않는다 (season.md §2)
+    if (isReserveMatch(m)) continue;
     for (const teamId of [m.homeTeamId, m.awayTeamId]) {
       const list = byTeam.get(teamId);
       if (list) list.push(m);
