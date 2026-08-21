@@ -153,8 +153,8 @@ function runSegment(): { note: string; stop: string } {
     rng,
   });
   matchClock = plan.clock;
-  const aiSub = planAiSubstitution("away", squads.away, ledger, plan, rng);
-  const events: MatchEvent[] = aiSub ? [aiSub, ...plan.events] : plan.events;
+  const aiSubs = planAiSubstitution("away", squads.away, ledger, plan, rng);
+  const events: MatchEvent[] = [...aiSubs, ...plan.events];
   const result = applyEvents(ledger, events);
   if (!result.ok) return { note: `[진행 실패] ${result.errors.join(" / ")}`, stop: plan.stop };
   ledger = result.state;

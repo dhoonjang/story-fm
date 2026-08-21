@@ -1,12 +1,14 @@
 import type { GamePlayer } from "@story-fm/domain";
-import { ageOf, RELEASE_NOTE } from "@story-fm/domain";
+import { ageOf, buildPaymentInstallments, RELEASE_NOTE } from "@story-fm/domain";
 import { contractUntil, seasonYear, windowOpenOn } from "../competition/calendar";
 import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
-import { formatMoney, recordFinance } from "../club/finance";
+import { formatMoney, recordFinance, settleDuePayments } from "../club/finance";
 import { buildDeparturePress, openPress } from "../club/press";
 import { clampForm, moraleToForm } from "../squad/form";
 import {
+  firstInstallmentOf,
   loanLockOf,
+  paymentYearsOf,
   transferWindowLabel,
   unilateralSeveranceOf,
   windowOpenForTeam,
@@ -88,7 +90,7 @@ export function toFreeAgency(
   player: GamePlayer,
   note: string,
   on = state.date,
-): void {
+): string {
   const contract = activeContract(state, player.id);
   if (contract) contract.status = "ended";
   const from = player.teamId;
@@ -97,8 +99,10 @@ export function toFreeAgency(
   player.squadNumber = undefined;
   player.squadLevel = "first";
   player.loan = undefined;
+  // 해지 정산의 지급 일정이 이 row를 근거(`transferId`)로 삼는다 (transfer.md §5-2)
+  const id = `tr-free-${player.id}-${on}`;
   state.transfers.push({
-    id: `tr-free-${player.id}-${on}`,
+    id,
     gamePlayerId: player.id,
     windowId: null,
     fromTeamId: from,
@@ -108,6 +112,7 @@ export function toFreeAgency(
     fee: 0,
     note,
   });
+  return id;
 }
 
 /**
@@ -125,7 +130,7 @@ export function toFreeAgency(
  */
 export function releasePlayer(
   state: GameState,
-  input: { playerId: string; severance?: number },
+  input: { playerId: string; severance?: number; paymentYears?: number },
 ): SkillResult {
   const pick = pickAnyPlayer(state, input.playerId);
   if (!pick.ok) return { ok: false, message: pick.message };
@@ -145,25 +150,49 @@ export function releasePlayer(
     0,
     Math.round(input.severance ?? unilateralSeveranceOf(state, player.id)),
   );
+  /**
+   * **일방 해지는 분할을 타지 않는다** — 전액 일시금이 협상의 바깥값(BATNA)이고,
+   * 그 값이 누그러지면 합의 해지에 응할 이유가 함께 사라진다 (transfer.md §11).
+   */
+  const paymentYears = agreed ? paymentYearsOf(input.paymentYears) : undefined;
+  const dueNow = firstInstallmentOf(severance, paymentYears);
   const finance = state.finances.find((f) => f.teamId === state.userTeamId);
-  if (finance && severance > finance.balance) {
+  if (finance && dueNow > finance.balance) {
     return {
       ok: false,
-      message: `${agreed ? "정산금" : "위약금"} ${formatMoney(severance)}을 감당할 잔고가 없습니다`,
+      message: `${agreed ? "정산금" : "위약금"} ${formatMoney(dueNow)}을 감당할 잔고가 없습니다`,
     };
   }
 
-  if (severance > 0) {
-    recordFinance(state, state.userTeamId, {
-      kind: "expense",
-      category: "player_wages",
-      label: `계약 해지 ${agreed ? "정산금" : "위약금"} — ${player.name}`,
-      amount: severance,
-      ref: { type: "player", id: player.id },
-    });
-  }
   const wasCaptain = player.isCaptain;
-  toFreeAgency(state, player, agreed ? RELEASE_NOTE.agreed : RELEASE_NOTE.unilateral);
+  const transferId = toFreeAgency(
+    state,
+    player,
+    agreed ? RELEASE_NOTE.agreed : RELEASE_NOTE.unilateral,
+  );
+  if (severance > 0) {
+    if (paymentYears !== undefined) {
+      // 받는 쪽이 선수 본인이라 표가 payee를 갖지 않는다 — 원장은 우리 지출만 적는다
+      (state.paymentSchedules ??= []).push({
+        id: `pay-${transferId}`,
+        transferId,
+        gamePlayerId: player.id,
+        payerTeamId: state.userTeamId,
+        payeeTeamId: null,
+        kind: "severance",
+        installments: buildPaymentInstallments(severance, paymentYears, state.date),
+      });
+      settleDuePayments(state);
+    } else {
+      recordFinance(state, state.userTeamId, {
+        kind: "expense",
+        category: "player_wages",
+        label: `계약 해지 ${agreed ? "정산금" : "위약금"} — ${player.name}`,
+        amount: severance,
+        ref: { type: "player", id: player.id },
+      });
+    }
+  }
 
   /**
    * **회견이 열릴 만한 자원이었는지가 사기의 문이기도 하다** — 회견을 여는 조건과
@@ -183,7 +212,10 @@ export function releasePlayer(
   return {
     ok: true,
     message:
-      `${player.name}과(와) 계약을 해지했습니다 — ${agreed ? "정산금" : "위약금 전액"} ${formatMoney(severance)}.` +
+      `${player.name}과(와) 계약을 해지했습니다 — ${agreed ? "정산금" : "위약금 전액"} ${formatMoney(severance)}` +
+      (paymentYears === undefined
+        ? "."
+        : ` (${paymentYears}년 분할 — 첫 회분 ${formatMoney(dueNow)}).`) +
       " 무소속이 됐습니다 — 다른 구단이 데려갈 수 있습니다." +
       (wasCaptain ? " 주장이 떠났습니다 — 새 주장을 지명하세요." : "") +
       (press ? ` 기자회견이 열렸습니다. 남은 1군 사기 ${DEPARTURE_SQUAD_MORALE}.` : ""),

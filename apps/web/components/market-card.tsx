@@ -60,7 +60,7 @@ function badgeOf(card: MarketCard): string {
   }
 }
 
-/** 조건 한 벌 — 정산금·이적료·주급·연수 중 있는 것만 (임대료는 이적료 자리를 쓴다) */
+/** 조건 한 벌 — 정산금·이적료·분할·주급·연수 중 있는 것만 (임대료는 이적료 자리를 쓴다) */
 function Terms({ terms, loan = false }: { terms: MarketTerms; loan?: boolean }) {
   return (
     <>
@@ -74,6 +74,13 @@ function Terms({ terms, loan = false }: { terms: MarketTerms; loan?: boolean }) 
         <span>
           <em>정산금</em>
           <b>{formatMoney(terms.severance)}</b>
+        </span>
+      )}
+      {/* 분할은 금액에 붙은 조건이라 이적료·정산금 바로 뒤에 선다 — 계약 `기간`과 붙여 두면 어느 연수인지 헷갈린다 */}
+      {terms.paymentYears !== undefined && (
+        <span>
+          <em>지급</em>
+          <b>{terms.paymentYears}년 분할</b>
         </span>
       )}
       {terms.weeklyWage !== undefined && (

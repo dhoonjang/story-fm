@@ -19,6 +19,7 @@ import {
   NarrativeArcSchema,
   NarrativeNoteSchema,
   NegotiationSchema,
+  PaymentScheduleSchema,
   PersonaSchema,
   PlayerIssueSchema,
   PlayerTrainingSchema,
@@ -111,5 +112,6 @@ export const SaveSchema = z
     historyDigest: HistoryDigestSchema.optional(),
     characterMemories: z.array(CharacterMemorySchema).optional(),
     arcs: z.array(NarrativeArcSchema).optional(),
+    paymentSchedules: z.array(PaymentScheduleSchema).optional(),
   })
   .passthrough();

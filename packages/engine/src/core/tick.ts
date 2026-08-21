@@ -41,6 +41,7 @@ import {
   formatMoney,
   payWeeklyWages,
   runMonthlyFinance,
+  settleDuePayments,
 } from "../club/finance";
 // 핵심 자원의 경계는 회견이 쥔다 — 같은 자를 두 곳에 적으면 한쪽만 움직인다
 import { openEvePress, SQUAD_CORE_SIZE } from "../club/press";
@@ -391,6 +392,10 @@ function dailyTick(
   // 주급 (월요일) — 활성 계약 합에서 파생, 구단 전체에 적용 (무소속 제외 — finance.ts)
   if (dow === MONDAY) payWeeklyWages(state);
 
+  // 분할 이적료·해지 정산금의 기일이 된 회분 (finance.md §6.4).
+  // 기일은 요일을 모르므로 매일 본다 — 주급·월초 정산과 달리 조건이 없다
+  settleDuePayments(state, digest);
+
   /**
    * 벤치 불만을 낼 만한 자원인가 — **종합의 눈금을 탄다.**
    * 옛 78과 같은 인원 비율(상위 17%)에 서는 값이다 (player.md §4).
@@ -690,6 +695,11 @@ export function simSquadFor(
     ),
     tactics: tacticsOf(state, teamId).spec,
     managerTactics: managerTacticsOf(state, teamId),
+    // 연장의 부상 추첨도 성향을 탄다 — 90분(simSquadOf)과 같은 눈금 (match.md §7)
+    proneness: pronenessOf(
+      state,
+      players.map((p) => p.id),
+    ),
   };
 }
 
@@ -737,7 +747,7 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
   /**
    * **쉬게 한 선수는 그 경기에서 아예 빠진다** — 벤치에도 없고, 뒤 슬롯의 대체
    * 자원도 아니다. 벤치가 OVR 순이라 방금 지쳐서 뺀 에이스가 맨 위에 서면,
-   * 투입 후보를 포지션군과 OVR로만 고르는 `planSubs`가 그를 46분에 되돌린다 —
+   * 투입 후보를 포지션군과 OVR로만 고르는 벤치 정책(`planBenchSubs`)이 그를 되돌린다 —
    * 로테이션이 선발 명단에서만 일어나고 출전 시간에서는 일어나지 않는 것이다.
    * 거르는 자리는 여기 하나다 (match.md §7).
    */
