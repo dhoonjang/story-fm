@@ -16,6 +16,9 @@ import {
   cancelTrainingOn,
   computeStandings,
   financeOf,
+  generateHeadCoach,
+  generateOwner,
+  generateReporters,
   isTopFlight,
   leagueOfTeamIn,
   managerTrainingUptake,
@@ -582,6 +585,34 @@ describe("경질 뒤 — 무직으로 흐르고, 제안을 받고, 부임한다"
   });
 
   /**
+   * `userTeamId`만 갈리고 `personas`가 남던 자리다 — 부임 첫 장면에 옛 구단의
+   * 수석코치가 새 구단 집무실에 서 있었다 (career.md §5.1 전이 5).
+   */
+  it("부임하면 벤치의 사람도 갈린다 — 수석코치·구단주가 새 구단 시드의 인물이다", () => {
+    const coach = state.personas!.find((p) => p.role === "head_coach")!;
+    const owner = state.personas!.find((p) => p.role === "owner")!;
+    expect(coach.characterId).toBe(generateHeadCoach(state.seed, state.userTeamId).characterId);
+    expect(owner.characterId).toBe(generateOwner(state.seed, state.userTeamId).characterId);
+    expect(coach.characterId, "옛 구단의 수석코치가 따라왔다").not.toBe(
+      generateHeadCoach(state.seed, sackedFrom).characterId,
+    );
+    expect(owner.characterId, "옛 구단의 구단주가 따라왔다").not.toBe(
+      generateOwner(state.seed, sackedFrom).characterId,
+    );
+
+    // 리그를 건넌 이직이다 — 기자단도 새 리그의 사람들로 갈렸다
+    expect(leagueOfTeamIn(state, sackedFrom)).not.toBe(leagueOfTeamIn(state, state.userTeamId));
+    const reporters = state.personas!.filter((p) => p.role === "reporter");
+    expect(reporters.map((r) => r.characterId)).toEqual(
+      generateReporters(state.seed, state.userTeamId).map((r) => r.characterId),
+    );
+    expect(
+      reporters.map((r) => r.characterId),
+      "리그를 건넜는데 옛 리그 기자단이 따라왔다",
+    ).not.toEqual(generateReporters(state.seed, sackedFrom).map((r) => r.characterId));
+  });
+
+  /**
    * `delete state.dismissal`이 사건까지 지우던 자리다 — 잘린 시즌은 `SEASON_RECORD`가
    * 없으므로, 이력이 남지 않으면 커리어 표에서 그 해가 통째로 빈다 (career.md §6).
    */
@@ -619,6 +650,38 @@ describe("경질 뒤 — 무직으로 흐르고, 제안을 받고, 부임한다"
     const offer = openManagerOffers(state)[0]!;
     expect(offer.teamId).toBe(previouslyCalled);
     expect(offer.madeOn).toBe(state.date);
+  });
+
+  /** 기자단은 구단이 아니라 리그를 따라다닌다 — 같은 리그 이직에는 갈 이유가 없다 */
+  it("같은 리그 이직에서는 기자단이 그대로다 — 수석코치·구단주만 갈린다", () => {
+    const league = leagueOfTeamIn(state, state.userTeamId);
+    const target = state.teams.find(
+      (t) => t.id !== state.userTeamId && leagueOfTeamIn(state, t.id) === league,
+    )!;
+    const before = state.personas!.filter((p) => p.role === "reporter").map((r) => r.characterId);
+    expect(before, "기자단 없이 재는 것이 없다").toHaveLength(3);
+
+    // 앞 테스트가 두 번째 무직 카드를 세워 뒀다 — 같은 리그의 다른 자리가 부른다
+    const offer: ManagerOffer = {
+      id: "offer-same-league",
+      teamId: target.id,
+      madeOn: state.date,
+      expiresOn: addDays(state.date, 10),
+      tier: tierOfTeamIn(state, target.id),
+      target: 10,
+      expectation: "중위권",
+      status: "open",
+    };
+    state.managerOffers = [...(state.managerOffers ?? []), offer];
+    const accepted = acceptManagerOffer(state, offer.id);
+    expect(accepted.ok, accepted.message).toBe(true);
+
+    const coach = state.personas!.find((p) => p.role === "head_coach")!;
+    const owner = state.personas!.find((p) => p.role === "owner")!;
+    expect(coach.characterId).toBe(generateHeadCoach(state.seed, target.id).characterId);
+    expect(owner.characterId).toBe(generateOwner(state.seed, target.id).characterId);
+    const after = state.personas!.filter((p) => p.role === "reporter").map((r) => r.characterId);
+    expect(after, "같은 리그로 옮겼는데 기자단이 갈렸다").toEqual(before);
   });
 });
 

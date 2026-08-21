@@ -169,6 +169,22 @@ export type CharacterInjection = z.infer<typeof CharacterInjectionSchema>;
  * ⚠️ **변하는 값은 여기 없다** — 폼·컨디션·부상·심경·계약·관측 능력치는 주입한 카드가
  * 이력에 굳는 순간 낡은 사실이 된다. 그것들은 발화 직전의 조회가 낸다 (people.md §6).
  */
+/**
+ * 페르소나 사이의 관계 초기값 — 원형 조합에서 결정적으로 나온다 (people.md §6).
+ *
+ * 세이브에 저장하지 않는다: 원형이 세이브당 불변이므로 관계도 파생이다. 중립은
+ * 만들지 않는다 — 카드에 서는 것은 결이 통하거나 부딪히는 사이뿐이다. 사건이
+ * 관계를 움직이는 점수는 아직 없다 (§10) — 이 값은 첫인상이다.
+ */
+export interface PersonaRelation {
+  characterId: string;
+  name: string;
+  stance: "aligned" | "tense";
+  /** 내가 먼저 보는 것 · 상대가 먼저 보는 것 — 문장은 프롬프트가 쓴다 */
+  ours: string;
+  theirs: string;
+}
+
 export interface CharacterEntry {
   characterId: string;
   name: string;
@@ -188,6 +204,11 @@ export interface CharacterEntry {
    * 압축 한 곳뿐이라 카드가 이력에 굳어도 뒤늦게 낡지 않는다.
    */
   memories?: CharacterMemory[];
+  /**
+   * 다른 페르소나와의 관계 초기값 — 원형에서 파생하므로 세이브당 불변이라 카드에
+   * 실려도 낡지 않는다. `full` 깊이에만 있다 — 사이의 결은 매일 보는 사람이나 안다.
+   */
+  relations?: PersonaRelation[];
 }
 
 /** 태그를 이름으로 옮기기 전 세이브를 알아보는 표식이기도 하다 */
@@ -207,7 +228,7 @@ export const CAPTAIN_ROLE_LABEL = "주장";
  * 자기 문제로 오는 것과 라커룸을 대신해 오는 것은 다른 자리다. 채널은 그 자리를
  * 가리키고, 효과가 어느 축에 닿는지도 여기서 갈린다.
  */
-export const APPROACH_CHANNELS = ["player", "captain", "owner"] as const;
+export const APPROACH_CHANNELS = ["player", "captain", "owner", "agent"] as const;
 export const ApproachChannelSchema = z.enum(APPROACH_CHANNELS);
 export type ApproachChannel = z.infer<typeof ApproachChannelSchema>;
 
@@ -219,6 +240,7 @@ export const APPROACH_CHANNEL_LABEL: Record<ApproachChannel, string> = {
   player: PERSONA_ROLE_LABEL.player!,
   captain: CAPTAIN_ROLE_LABEL,
   owner: PERSONA_ROLE_LABEL.owner!,
+  agent: PERSONA_ROLE_LABEL.agent!,
 };
 
 /** 중계 — 무대 밖의 목소리. 이름이 곧 자리다 */

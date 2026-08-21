@@ -2,6 +2,7 @@ import type {
   Achievement,
   Approach,
   ApproachPressure,
+  PressLeak,
   AxisValues,
   Booking,
   CharacterInjection,
@@ -22,6 +23,7 @@ import type {
   ManagerOffer,
   MatchRecord,
   MatchSide,
+  NarrativeArc,
   NarrativeNote,
   Persona,
   PlayerIssue,
@@ -705,6 +707,12 @@ export interface GameState {
    * 없다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   approachPressure?: ApproachPressure[];
+  /**
+   * 언론 유출 — 사다리 계단 4의 사건 (people.md §8). **다음 회견이 실어 갈 때까지만**
+   * 남는다: `openPress`가 소비해 사실 카드로 옮긴다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  pressLeaks?: PressLeak[];
 
   // ── 감독 ──
   manager: Manager;
@@ -749,6 +757,12 @@ export interface GameState {
    * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   characterMemories?: CharacterMemory[];
+  /**
+   * 서사 아크 — 기억을 이야기로 엮는 골격 (people.md §9). 개폐는 장부에서
+   * 결정적으로 판정한다(`world/arcs.ts`). 옛 세이브엔 없다
+   * (optional — SAVE_VERSION 유지).
+   */
+  arcs?: NarrativeArc[];
 }
 
 // ── 팀·선수 조회 ────────────────────────────────────────
@@ -1198,6 +1212,38 @@ export function pushNarrative(state: GameState, text: string, salience = 2): voi
   if (state.narrative.length > NARRATIVE_LIMIT) {
     state.narrative.splice(0, state.narrative.length - NARRATIVE_LIMIT);
   }
+}
+
+/**
+ * 무게의 반감기 — 이 일수가 지날 때마다 사건의 무게가 절반이 된다.
+ *
+ * salience 5는 반감기를 네 번 지나야 오늘의 1 아래로 내려간다 — 지난주의 경질
+ * 임박이 어제의 스카우트 한 줄에 밀리지 않는 눈금이다 (people.md §9).
+ */
+const NARRATIVE_HALF_LIFE_DAYS = 7;
+
+/**
+ * 스냅샷에 실을 서사 기억 — **salience×recency 가중 상위 `limit`건** (people.md §9).
+ *
+ * 최신순이 아니다: `slice(-4)`는 무게 5의 사건을 나흘 만에 밀어냈다. 가중치가
+ * 같으면 최신이 이기고, 뽑힌 뒤에는 시간순으로 선다 — GM이 읽는 것은 순위가 아니라
+ * 흐름이다. 결정적이다 — 같은 날 같은 세이브면 같은 목록.
+ */
+export function topNarrative(state: GameState, limit: number): NarrativeNote[] {
+  const day = (d: string) => new Date(`${d}T00:00:00Z`).getTime() / 86400000;
+  const today = day(state.date);
+  return state.narrative
+    .map((note, index) => ({
+      note,
+      index,
+      weight:
+        note.salience *
+        Math.pow(0.5, Math.max(0, today - day(note.date)) / NARRATIVE_HALF_LIFE_DAYS),
+    }))
+    .sort((a, b) => b.weight - a.weight || b.index - a.index)
+    .slice(0, limit)
+    .sort((a, b) => a.index - b.index)
+    .map((x) => x.note);
 }
 
 /** id를 이룰 수 있는 문자 — 앞뒤에 이것이 붙어 있으면 그 id가 아니라 더 긴 id의 일부다 */
@@ -2273,6 +2319,7 @@ export function createGame(input: CreateGameInput): GameState {
     pressConferences: [],
     approaches: [],
     approachPressure: [],
+    pressLeaks: [],
 
     manager: {
       name: input.managerName,

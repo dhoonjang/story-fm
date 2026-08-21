@@ -655,7 +655,8 @@ const OUTLET_NAMES: Record<string, string[]> = {
 
 /**
  * 기자단 — 한 세이브에 셋. 구단이 아니라 **리그**를 따라다니므로 시드 채널에
- * 팀을 넣지 않는다. 감독이 다른 팀으로 옮겨도 같은 기자를 만난다.
+ * 팀을 넣지 않는다. 같은 리그 안에서 팀을 옮기면 같은 기자를 만나고, 리그를
+ * 건너면 부임이 갈아 세운다 (`reseatClubPersonas`).
  */
 export function generateReporters(seed: number, teamId: string): Persona[] {
   const names = personaNames(seed, teamId);
@@ -736,6 +737,36 @@ export function worldFigures(state: { userTeamId: string }): Persona[] {
 export function worldFigureByName(state: { userTeamId: string }, name: string): Persona | null {
   const seed = WORLD_FIGURE_SEEDS.find((f) => f.name === name && f.teamId !== state.userTeamId);
   return seed ? worldFigurePersonaOf(seed) : null;
+}
+
+/**
+ * 부임 — 구단에 묶인 자리를 새 구단 기준으로 다시 세운다 (career.md §5.1).
+ *
+ * 수석코치·구단주는 구단의 사람이라 언제나 갈리고, 기자단은 리그를 따라다니므로
+ * 리그를 건널 때만 갈린다. 생성이 시드로 결정적이라 같은 세이브가 같은 이직을
+ * 하면 같은 사람을 만나고, 실명 시드가 있는 구단이면 그 실명 코치·구단주가 선다.
+ *
+ * `characterMemories`는 건드리지 않는다 — 기억은 `characterId`에 묶여 있어 옛
+ * 코치의 기억은 옛 이름에 남고, 새 코치는 빈 채로 시작한다. GM이 등록한 인물
+ * (friend·supporter)도 그대로다 — 구단이 아니라 감독의 사람들이다.
+ *
+ * 빈자리를 지우기만 하고 `ensurePersonas`에 맡기지 않는 이유: 그 보정은 로드에서
+ * 돌므로, 부임한 세션의 남은 턴이 코치 없는 세이브로 흐른다.
+ */
+export function reseatClubPersonas(
+  state: { seed: number; personas?: Persona[] },
+  teamId: string,
+  options: { crossedLeague: boolean },
+): void {
+  const clubBound = new Set<PersonaRole>(
+    options.crossedLeague ? ["head_coach", "owner", "reporter"] : ["head_coach", "owner"],
+  );
+  state.personas = [
+    ...(state.personas ?? []).filter((p) => !clubBound.has(p.role)),
+    generateHeadCoach(state.seed, teamId),
+    generateOwner(state.seed, teamId),
+    ...(options.crossedLeague ? generateReporters(state.seed, teamId) : []),
+  ];
 }
 
 /**

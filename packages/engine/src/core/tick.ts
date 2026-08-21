@@ -43,8 +43,9 @@ import {
   runMonthlyFinance,
 } from "../club/finance";
 // 핵심 자원의 경계는 회견이 쥔다 — 같은 자를 두 곳에 적으면 한쪽만 움직인다
-import { SQUAD_CORE_SIZE } from "../club/press";
+import { openEvePress, SQUAD_CORE_SIZE } from "../club/press";
 import { tickApproaches } from "../club/approach";
+import { tickArcs } from "../world/arcs";
 import {
   TRAINING_INJURY_PER_SESSION,
   easeProneness,
@@ -499,12 +500,25 @@ function dailyTick(
   }
 
   /**
+   * 전야 회견 — 내일이 개막이거나 더비면 오늘 자리가 선다 (people.md §4).
+   * **다가옴보다 먼저** 부른다: 갓 열린 회견이 그날의 다가옴을 막는 문이 서려면
+   * 자리가 이미 있어야 한다.
+   */
+  if (managed) openEvePress(state, digest);
+
+  /**
    * 세계가 먼저 말을 건다 — 압력이 임계를 넘으면 코어가 자리를 연다 (people.md §8).
    * **불만·순위·폼이 다 움직인 뒤**에 재야 오늘의 사실로 압력이 쌓인다.
    *
    * 무직에게는 찾아올 사람이 없다 — 선수단도 보드도 이제 남의 것이다 (career.md §5.1).
    */
   const approached = managed !== null && tickApproaches(state, digest);
+
+  /**
+   * 서사 아크 — **오늘의 사실이 이야기를 열고·올리고·닫는다** (people.md §9).
+   * 불만·부상·연속 기록·협상이 다 움직인 뒤라야 오늘의 장부로 판정한다.
+   */
+  tickArcs(state, digest);
 
   // 이적창 개장·폐장 안내
   for (const entry of todays) {

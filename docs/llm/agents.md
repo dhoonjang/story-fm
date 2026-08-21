@@ -277,6 +277,10 @@ GM 한 걸음이다. `phase`는 **라우팅 전용**이라 모델 입력에는 �
 - **압축하는 김에 캐릭터북을 갱신한다** — 그 구간에 새로 선 인물을 등록하고, 인물별
   기억 한 줄을 남긴다. **성격·동기·말투는 고쳐 쓰지 않는다**
   (→ [../data/people.md](../data/people.md) §9-1).
+- **이름 없는 활성 아크의 제목도 여기서 제안한다** — 개폐는 코어가 장부에서
+  결정적으로 판정하고, 모델이 하는 것은 이름 짓기뿐이다. 검증은 등록과 같은 계약:
+  아크가 있고 · 활성이고 · 아직 이름이 없어야 받는다
+  (→ [../data/people.md](../data/people.md) §9).
 
 상한과 잔량의 근거는 밴드에 있다 — `packages/agents/harness/history-window.harness.ts`
 (→ [../simulation/balance-harness.md](../simulation/balance-harness.md)). 숫자를 여기
@@ -318,6 +322,12 @@ GM 한 걸음이다. `phase`는 **라우팅 전용**이라 모델 입력에는 �
   그리고 읽을 자리가 없는 사실은 지어내진다.
 - 열린 기자회견의 **사실 카드**와 진행 중인 협상 목록은 **있을 때만** 붙는다 — 매 턴
   정가로 읽히는 블록이다.
+- **활성 서사 아크**도 있을 때만 선다 — 단계(발단/고조/절정)와 코어가 장부에서 뽑은
+  사실 줄, 압축이 이름을 붙였으면 그 제목. 닫힐 때까지 매 턴 실리므로 GM이 시즌을
+  가로지르는 흐름을 잃지 않는다 (→ [../data/people.md](../data/people.md) §9).
+- **최근 사건은 최신순이 아니라 salience×recency 가중 상위 4건**이다 — 무게 5의
+  사건은 반감기(7일)를 몇 번 지나도 무게 1의 오늘 일과 겨룬다
+  (→ [../data/people.md](../data/people.md) §9).
 
 ## 7. 조회 — 창이 아니라 검색
 
@@ -415,9 +425,9 @@ GM 한 걸음이다. `phase`는 **라우팅 전용**이라 모델 입력에는 �
   `config/llm.yml`에 협상 자리가 없다.
 - 출력 후검증 실패 시 재생성 전략(부분 vs 전체) — `retry.ts`의 `retryOnce`가 호출 전체를
   한 번 다시 부르는 것뿐이다.
-- 서사 아크 — `gm-input.ts`의 `buildGmStateNote`가 `state.narrative` 최근 4건만 싣고,
-  아크를 open→climax→resolved로 엮는 골격은 설계로만 있다
-  (→ [../data/people.md](../data/people.md) §9).
+- 아크의 갈래가 다섯뿐이다 — 장부 한 줄로 열리는 것(부상·불만·연속·협상)까지고,
+  유망주 성장처럼 여러 사실을 겹쳐 읽어야 하는 갈래는 아직 없다
+  (→ [../data/people.md](../data/people.md) §10).
 
 ## 코드 위치
 
@@ -427,6 +437,7 @@ GM 한 걸음이다. `phase`는 **라우팅 전용**이라 모델 입력에는 �
 | 입력 빌더 (레퍼런스·스냅샷·이력·헤더) | `packages/agents/src/gm-input.ts`                                                     |
 | 이력 압축 판정 (코어 순수 함수)       | `packages/engine/src/core/history-window.ts`                                          |
 | 이력 요약 (LLM)                       | `packages/agents/src/history-compactor.ts`                                            |
+| 서사 아크 판정·제목 검증 (코어)       | `packages/engine/src/world/arcs.ts`                                                   |
 | 중계 프롬프트·구간 대본               | `packages/agents/src/match-caster.ts`                                                 |
 | 결산 셋                               | `packages/agents/src/training-rater.ts` · `match-rater.ts` · `mood-rater.ts`          |
 | 결산 한도·검사 (코어)                 | `packages/engine/src/squad/training-report.ts` · `match/ratings.ts` · `squad/mood.ts` |

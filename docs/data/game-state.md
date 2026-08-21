@@ -214,6 +214,7 @@ row, 지난 일 = 그대로 이력.**
 | ↳ `PressFact`                         | **사실 카드** (질문 문장이 아니다) — 기자는 이 밖을 못 묻는다 | `domain/press.ts`      |
 | `approaches` `Approach`               | 다가옴 — 압력이 임계를 넘어 코어가 연 자리 (people.md §8)     | `domain/press.ts`      |
 | `approachPressure` `ApproachPressure` | 압력 눈금 — 주제별 누적과 계단. 파생할 수 없는 유일한 값      | `domain/press.ts`      |
+| `pressLeaks` `PressLeak`              | 언론 유출 — 다음 회견이 실어 갈 때까지만 남는다 (§8 계단 4)   | `domain/press.ts`      |
 | `aiDeals` `AiDeal`                    | 이번 주에 정해진, 날짜가 흩어진 AI 이적                       | `market/ai-market.ts`  |
 
 이것들이 세이브에 남는 이유는 같다 — **두 시점 사이에 걸쳐 있어** 파생으로 되돌릴
@@ -232,6 +233,7 @@ row, 지난 일 = 그대로 이력.**
 | `trophies` `Trophy` · `achievements` `Achievement` | 우승 · 업적                                                                      | `domain/records.ts` |
 | `personas` `Persona`                               | 인물 — 수석코치·구단주·기자. 성격·동기·말투+예시 대사                            | `domain/persona.ts` |
 | `narrative` `NarrativeNote`                        | GM 기억 — 날짜·문장·중요도(1\~5)                                                 | `domain/records.ts` |
+| `arcs` `NarrativeArc`                              | 서사 아크 — 갈래·주인·단계·제목. 개폐는 장부에서 결정적 (people.md §9)           | `domain/records.ts` |
 | `chat` `ChatTurn`                                  | 대화 이력 — `user`/`model`/`operator`                                            | `core/state.ts`     |
 | ↳ `ToolCallRecord`                                 | 스킬 호출 — 요약·항목(`brief`)·카드 payload·톤·`silent`·장면 안 줄 위치          | `core/state.ts`     |
 | ↳ `SkillBrief`                                     | 화면이 세우는 요약 — 머리줄 + 항목. 없는 기록은 요약 문자열로 폴백               | `core/state.ts`     |
