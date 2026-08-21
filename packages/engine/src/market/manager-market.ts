@@ -2,7 +2,7 @@ import { topLeagues } from "../data/league-catalog";
 import { leagueOfTeamIn, leagueSizeIn } from "../competition/promotion";
 import { tierOfTeamIn } from "../core/club-tier";
 import { positionAt, relegationLine } from "../core/league-shape";
-import { inventPersonName, reseatClubPersonas } from "../world/persona";
+import { inventPersonName, occupiedPersonNames, reseatClubPersonas } from "../world/persona";
 import { makeRng, randInt } from "../core/rng";
 import { addDays } from "../core/dates";
 import { boardExpectation, computeStandings, type StandingRow } from "../competition/season";
@@ -180,7 +180,9 @@ function installNewManager(state: GameState, team: GameTeam, rng: () => number):
   // 폴백은 값 없는 팀(무소속·옛 세이브)을 위한 것이다 (평균 AI 감독)
   const before = team.aiManagerTacticsRating ?? AI_MANAGER_RATING_FALLBACK;
   team.aiManagerTacticsRating = Math.min(92, Math.max(50, before + randInt(rng, -4, 10)));
-  team.managerName = inventPersonName(rng, team.id);
+  // 이미 선 사람들의 이름은 피한다 — 전임도 그 집합에 있으므로 후임은 반드시
+  // 다른 이름, 곧 다른 사람이다 (원형 채널에 이름이 들어간다 — people.md §2)
+  team.managerName = inventPersonName(rng, team.id, occupiedPersonNames(state));
   team.managerSince = state.date;
 
   /**

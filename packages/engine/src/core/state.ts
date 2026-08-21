@@ -114,7 +114,13 @@ import { advanceDomesticCups } from "../competition/domestic-cup";
 import { buildEuroEntrants, type EuroEntry } from "../competition/europe";
 import { buildSeasonFixtures, isUserFixture } from "../competition/fixtures";
 import { seedInjuryHistory } from "../squad/injury";
-import { generateHeadCoach, generateOwner, generateReporters } from "../world/persona";
+import {
+  generateHeadCoach,
+  generateOwner,
+  generateReporters,
+  occupiedPersonNames,
+  seededVirtualManagerName,
+} from "../world/persona";
 import { makeRng, randInt } from "./rng";
 // domestic-cup과 같은 이유로 안전하다 — training-plan은 state를 **타입으로만** 읽는다
 import { installDefaultTraining } from "../squad/training-plan";
@@ -1431,19 +1437,30 @@ function seededManagerName(
 }
 
 /**
- * 로드 보정 — 명부의 감독을 이름 없는 벤치에 채운다 (people.md §2-1).
+ * 이름 없는 벤치를 전부 채운다 — 명부의 감독이 먼저, 나머지는 가상 이름이다
+ * (people.md §2). 세계 생성과 로드 보정이 같은 길을 지난다.
  *
- * 명부가 생기기 전 세이브의 AI 구단은 감독 이름이 아예 없다(경질이 한 번 돌기
- * 전까지). `ensurePersonas`와 같은 결의 보정이라 **세이브 버전을 올리지 않는다** —
- * 없던 필드를 채우는 것이고, 명부가 결정적이라 채워도 그 세이브의 사람은 같다.
+ * 옛 세이브의 AI 구단은 감독 이름이 없을 수 있다(명부 밖 구단은 경질이 한 번 돌기
+ * 전까지 없었다). `ensurePersonas`와 같은 결의 보정이라 **세이브 버전을 올리지
+ * 않는다** — 없던 필드를 채우는 것이고, 가상 이름이 (시드, 팀) 채널로 결정적이라
+ * 채워도 그 세이브의 사람은 같다.
  *
  * ⚠️ **이미 이름이 있으면 건드리지 않는다.** 그 벤치는 감독 시장이 한 번 다녀간
- * 자리이고, 덮으면 경질된 사람이 로드할 때마다 되살아난다.
+ * 자리일 수 있고, 덮으면 경질된 사람이 로드할 때마다 되살아난다.
+ *
+ * ⚠️ **유저 팀 벤치는 채우지 않는다** — 그 자리는 유저의 것이다. 로드 순서상
+ * `ensurePersonas` 뒤에 돌아야 우리 구단 인물의 이름을 피해서 뽑는다
+ * (`persistence.ts`).
  */
 export function ensureSeededManagers(state: GameState): void {
+  const taken = occupiedPersonNames(state);
   for (const team of state.teams) {
     if (team.managerName !== undefined || !isClubTeam(team.id)) continue;
-    Object.assign(team, seededManagerName(team.id, state));
+    if (team.id === state.userTeamId) continue;
+    const name =
+      worldFigureManagerOf(team.id)?.name ?? seededVirtualManagerName(state.seed, team.id, taken);
+    team.managerName = name;
+    taken.add(name);
   }
 }
 
@@ -2349,6 +2366,9 @@ export function createGame(input: CreateGameInput): GameState {
     chat: [],
   };
 
+  // 명부 밖 벤치의 가상 감독 — 페르소나 다섯이 선 뒤에 채워야 그 이름들을 피해서
+  // 뽑는다. 로드 보정과 같은 채널이라 새 게임과 옛 세이브가 같은 사람을 만난다
+  ensureSeededManagers(state);
   // 국내 컵 1라운드 추첨일을 미리 달력에 올린다 — tick을 기다리면 부임 첫날의
   // 달력이 비어 보인다 ("리그컵 추첨이 7월 말"이라는 사실은 시작부터 알 수 있다)
   if (hasCups(world)) advanceDomesticCups(state, []);

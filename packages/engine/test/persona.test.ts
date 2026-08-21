@@ -23,10 +23,14 @@ import {
 import {
   applyCharacterMemories,
   CHARACTER_MEMORY_KEEP,
+  generateVirtualManager,
+  MANAGER_ARCHETYPE_LABELS,
   personaKeywords,
   registerCharacters,
   type CharacterDraft,
 } from "../src/world/persona";
+import { ensureSeededManagers } from "../src/core/state";
+import { worldFigureManagerOf } from "../src/data/world-figures";
 import { generatePlayerPersona, PLAYER_ARCHETYPE_LABELS } from "../src/world/player-persona";
 import { personaRelations } from "../src/world/relations";
 import { selectCharacters } from "../src/world/character-book";
@@ -517,6 +521,75 @@ describe("선수 페르소나 — 파생되는 카드", () => {
     // 나이가 라벨과 어긋나는 자리는 아예 서지 않는다
     expect(countOf(veteranCentreBack, "불안한 유망주")).toBe(0);
     expect(countOf(youngStriker, "불안한 유망주")).toBeGreaterThan(0);
+  });
+});
+
+describe("가상 감독 — 명부 밖 벤치의 사람 (people.md §2)", () => {
+  it("같은 (시드, 팀, 이름)이면 같은 사람이다 — 저장하지 않아도 복원된다", () => {
+    const manager = generateVirtualManager(42, "dortmund", "옌스 바그너");
+    expect(manager).toEqual(generateVirtualManager(42, "dortmund", "옌스 바그너"));
+    expect(() => PersonaSchema.parse(manager)).not.toThrow();
+    expect(manager.role).toBe("manager");
+    expect(manager.characterId).toBe("옌스 바그너");
+    expect(MANAGER_ARCHETYPE_LABELS).toContain(manager.archetype);
+    // 지어낸 이름이라 실존 표식이 없다 — 서사 가드가 볼 것도 없다
+    expect(manager.real).toBeUndefined();
+    // 키워드는 명부 규칙 그대로 — 전체 이름과 성, 이름 조각은 담지 않는다
+    expect(manager.keywords).toEqual(["옌스 바그너", "바그너"]);
+  });
+
+  it("이름이 시드 채널에 들어간다 — 경질로 이름이 갈리면 새 추첨이다", () => {
+    const names = ["가브리엘 로시", "마르코 벨리", "루카 페라리", "엔조 콘티", "다비드 리치"];
+    const labels = new Set(names.map((n) => generateVirtualManager(42, "lecce", n).archetype));
+    // 같은 (시드, 팀)이라도 이름이 다르면 독립 추첨 — 후임이 전임의 사람됨을 물려받지 않는다
+    expect(labels.size).toBeGreaterThan(1);
+  });
+
+  it("모든 클럽 벤치에 감독이 선다 — 명부가 먼저, 이름은 겹치지 않고, 유저 팀만 빈다", () => {
+    const state = createTestGame();
+    // 유저 팀 벤치는 유저의 것
+    expect(state.teams.find((t) => t.id === state.userTeamId)?.managerName).toBeUndefined();
+    // 클럽(AI 감독 역량치를 받은 팀)인데 이름 없는 벤치가 없다
+    const clubs = state.teams.filter(
+      (t) => t.aiManagerTacticsRating !== undefined && t.id !== state.userTeamId,
+    );
+    expect(clubs.length).toBeGreaterThan(0);
+    for (const team of clubs) expect(team.managerName, team.id).toBeDefined();
+    // 명부의 벤치는 명부의 그 사람
+    expect(state.teams.find((t) => t.id === "mancity")?.managerName).toBe("펩 과르디올라");
+    // 이름이 곧 characterId(전역 유일) — 벤치끼리도, 우리 구단 인물·유저와도 겹치지 않는다
+    const names = clubs.map((t) => t.managerName!);
+    const occupied = new Set([...state.personas!.map((p) => p.name), state.manager.name]);
+    expect(new Set(names).size).toBe(names.length);
+    for (const name of names) expect(occupied.has(name), name).toBe(false);
+  });
+
+  it("빈 벤치는 로드 보정이 채운다 — 채워도 같은 사람이다 (버전을 올리지 않는다)", () => {
+    const state = createTestGame();
+    const before = state.teams.map((t) => t.managerName);
+    for (const team of state.teams) if (team.id !== state.userTeamId) delete team.managerName;
+    ensureSeededManagers(state);
+    // (시드, 팀) 채널이라 다시 채워도 그 벤치의 사람은 같다
+    expect(state.teams.map((t) => t.managerName)).toEqual(before);
+  });
+
+  it("화자 사전과 캐릭터북이 상대 벤치를 안다 — 감독 라벨, 이름으로 걸리는 카드", () => {
+    const state = createTestGame();
+    const bench = state.teams.find(
+      (t) =>
+        t.id !== state.userTeamId &&
+        t.managerName !== undefined &&
+        worldFigureManagerOf(t.id) === null,
+    )!;
+    const name = bench.managerName!;
+    // 화면이 붙일 직책 — 명부 감독과 같은 자리다
+    expect(speakerRoles(state)[normalizeSpeaker(name)]).toEqual({ kind: "manager", label: "감독" });
+    // 이름이 불리면 카드가 선다 — 파생이라 세이브에 없어도 같은 사람이 복원된다
+    const cards = selectCharacters(state, { message: name });
+    const card = cards.find((c) => c.characterId === name)!;
+    expect(card.role).toBe("manager");
+    expect(card.depth).toBe("full");
+    expect(MANAGER_ARCHETYPE_LABELS).toContain(card.archetype);
   });
 });
 
