@@ -574,9 +574,13 @@ function openApproach(state: GameState, digest: string[]): boolean {
     /**
      * 계단 4에서는 문이 열리는 대신 신문이 열린다 — **하루에 세계가 움직이는 것은
      * 한 번**이라는 규약은 그대로라, 유출이 섰으면 오늘은 여기서 끝난다.
+     *
+     * ⚠️ 그래도 **시계는 세우지 않는다**(false). 시계가 서는 날엔 반드시 오늘 답해야
+     * 할 것이 있어야 하는데(season.md §5 — 기한인 협상·찾아온 사람), 유출은 자리가
+     * 아니라 사건이라 감독이 답할 곳이 없다 — 값은 다음 회견에서 치른다.
      */
     if (CHANNEL_OF[row.topic] === "player" && step === APPROACH_LEAK_STEP) {
-      if (leakToPress(state, row, digest)) return true;
+      if (leakToPress(state, row, digest)) return false;
       continue;
     }
     const scene = sceneFor(state, row, step);
