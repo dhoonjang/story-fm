@@ -1,4 +1,5 @@
 import type { GamePlayer } from "@story-fm/domain";
+import { isReserveMatch } from "@story-fm/domain";
 import { formLabel } from "./form";
 import { isSettling } from "./settling";
 import { diffDays } from "../competition/calendar";
@@ -44,15 +45,18 @@ const EPOCH = "2000-01-01";
  * (`mood.ts`·`slump.ts`도 같은 이유로 날짜순이다).
  */
 function recentLineups(state: GameState, limit: number): Array<ReadonlySet<string>> {
-  return state.matches
-    .filter((m) => m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId)
-    .filter((m) => m.result !== null)
-    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
-    .slice(0, limit)
-    .map((m) => {
-      const home = m.homeTeamId === state.userTeamId;
-      return new Set(m.result?.[home ? "homeLineup" : "awayLineup"] ?? []);
-    });
+  return (
+    state.matches
+      .filter((m) => m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId)
+      // 2군 경기 명단은 1군 명단 제외의 근거가 아니다 — 1군 전원이 "제외"로 읽힌다
+      .filter((m) => m.result !== null && !isReserveMatch(m))
+      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+      .slice(0, limit)
+      .map((m) => {
+        const home = m.homeTeamId === state.userTeamId;
+        return new Set(m.result?.[home ? "homeLineup" : "awayLineup"] ?? []);
+      })
+  );
 }
 
 /**

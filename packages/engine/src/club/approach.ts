@@ -9,6 +9,7 @@ import type {
   PressFact,
   PressStance,
 } from "@story-fm/domain";
+import { isReserveMatch } from "@story-fm/domain";
 import {
   APPROACH_AXES,
   APPROACH_CHANNEL_LABEL,
@@ -184,6 +185,8 @@ interface Cause {
 function startedRecently(state: GameState, playerId: string): boolean {
   return state.matches.some((m) => {
     if (!m.result) return false;
+    // 2군 경기 출전은 출전 시간 불만을 풀지 못한다 — 그 불만의 자리는 1군이다
+    if (isReserveMatch(m)) return false;
     const home = m.homeTeamId === state.userTeamId;
     if (!home && m.awayTeamId !== state.userTeamId) return false;
     if (diffDays(m.date, state.date) > STARTED_WINDOW) return false;

@@ -1,4 +1,5 @@
 import type { MatchRecord } from "@story-fm/domain";
+import { isReserveMatch } from "@story-fm/domain";
 import { addDays, dayOfWeek, tooClose } from "./calendar";
 import { competitionShortName, isCup } from "../data/cup-catalog";
 import { isCupOnlyLeague, isTopLeague } from "../data/league-catalog";
@@ -116,6 +117,8 @@ export function postponeMatch(
     (m) =>
       m !== match &&
       m.season === state.season &&
+      // 2군 경기는 1군 일정의 제약이 아니다 — 뛰는 스쿼드가 다르다 (season.md §2)
+      !isReserveMatch(m) &&
       (teams.has(m.homeTeamId) || teams.has(m.awayTeamId)),
   );
   // 예약된 대항전 날짜는 시각을 모르니 하루를 통째로 막는다
@@ -170,6 +173,8 @@ export function clashesToClear(
   const clashes = state.matches.filter(
     (m) =>
       m.season === state.season &&
+      // 2군 경기는 1군 일정의 제약이 아니다 — 안 걸러내면 연기 불가로 읽혀 컵이 밀린다
+      !isReserveMatch(m) &&
       (window.has(m.date) || tooClose(m, slot)) &&
       (teamSet.has(m.homeTeamId) || teamSet.has(m.awayTeamId)),
   );

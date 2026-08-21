@@ -15,6 +15,7 @@ import {
   onSummerBreak,
   userPlayers,
 } from "@story-fm/engine";
+import { isReserveMatch } from "@story-fm/domain";
 import { createTestGame, advanceAndPlay, playMockMatch } from "./helpers";
 
 /** 그 날짜의 예정 훈련 label 목록 (오전→오후) */
@@ -30,7 +31,12 @@ function userMatchDates(state: GameState): string[] {
   return [
     ...new Set(
       state.matches
-        .filter((m) => m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId)
+        // 2군 경기일은 1군 마이크로사이클의 경기일이 아니다 — 본체와 같은 게이트
+        .filter(
+          (m) =>
+            !isReserveMatch(m) &&
+            (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+        )
         .map((m) => m.date),
     ),
   ].sort();

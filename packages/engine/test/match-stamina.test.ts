@@ -21,7 +21,7 @@ import {
   recoveryFactor,
   buildStrengthPacket,
 } from "@story-fm/sim";
-import { DEFAULT_TACTICS, naturalPositionOf, weightSlotOf } from "@story-fm/domain";
+import { DEFAULT_TACTICS, isReserveMatch, naturalPositionOf, weightSlotOf } from "@story-fm/domain";
 import {
   advanceDays,
   advanceToMatchday,
@@ -292,7 +292,11 @@ describe("경기 체력 — 회복", () => {
     // **방금 치른 경기**를 집는다 — 앞선 친선들도 결과를 갖고 있어 배열 순서로는 안 된다
     const match = state.matches
       .filter(
-        (m) => m.result && (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+        (m) =>
+          m.result &&
+          // 2군 경기는 1군 선발이 뛴 경기가 아니다 — 같은 날의 2군 라인업을 집으면 0명이 된다
+          !isReserveMatch(m) &&
+          (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
       )
       .sort((a, b) => (a.date < b.date ? -1 : 1))
       .at(-1);

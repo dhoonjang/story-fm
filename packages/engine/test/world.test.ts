@@ -9,6 +9,7 @@ import {
   TeamTacticsSchema,
   clusterOf,
   isMirrorPair,
+  isReserveMatch,
   naturalPositionOf,
   positionGroupOfPlayer,
   sameCluster,
@@ -753,15 +754,17 @@ describe("축소 세계 — 같은 규칙의 작은 세계", () => {
   it("컵이 없는 세계 — 대항전 참가도 컵 경기도 없다", () => {
     const state = createMiniGame();
     expect(state.euroEntrants).toHaveLength(0);
-    // 리그 경기 아니면 친선(대회 없음)뿐이다 — 컵은 한 경기도 없다
-    expect(state.matches.every((m) => m.competitionId === "epl" || isFriendly(m))).toBe(true);
+    // 리그·친선·2군 리그뿐이다 — 컵은 한 경기도 없다
+    expect(
+      state.matches.every((m) => m.competitionId === "epl" || isFriendly(m) || isReserveMatch(m)),
+    ).toBe(true);
   });
 
   it("리그전은 그대로 더블 라운드로빈이다", () => {
     const state = createMiniGame();
     const n = MINI_WORLD.teamsPerLeague;
-    // 프리시즌 친선은 리그전이 아니다 — 라운드로빈은 리그 경기만 센다
-    const league = state.matches.filter((m) => !isFriendly(m));
+    // 프리시즌 친선·2군 리그는 리그전이 아니다 — 라운드로빈은 리그 경기만 센다
+    const league = state.matches.filter((m) => !isFriendly(m) && !isReserveMatch(m));
     expect(league).toHaveLength(n * (n - 1));
     // 팀마다 홈·원정이 같은 수만큼
     for (const team of state.teams.filter((t) => t.id !== "freeagents")) {
@@ -782,9 +785,9 @@ describe("축소 세계 — 같은 규칙의 작은 세계", () => {
     // 시즌 전환 — 새 일정이 깔린다
     advanceTime(state, { days: 1 });
     expect(state.season).toBe(2);
-    expect(state.matches.filter((m) => m.season === 2 && !isFriendly(m))).toHaveLength(
-      MINI_WORLD.teamsPerLeague * (MINI_WORLD.teamsPerLeague - 1),
-    );
+    expect(
+      state.matches.filter((m) => m.season === 2 && !isFriendly(m) && !isReserveMatch(m)),
+    ).toHaveLength(MINI_WORLD.teamsPerLeague * (MINI_WORLD.teamsPerLeague - 1));
   });
 
   it("두 리그 세계도 각자 리그전을 돈다", () => {
@@ -798,7 +801,7 @@ describe("축소 세계 — 같은 규칙의 작은 세계", () => {
       world: MINI_WORLD_TWO_LEAGUES,
     });
     const leagues = new Set(
-      state.matches.filter((m) => !isFriendly(m)).map((m) => m.competitionId),
+      state.matches.filter((m) => !isFriendly(m) && !isReserveMatch(m)).map((m) => m.competitionId),
     );
     expect([...leagues].sort()).toEqual(["epl", "laliga"]);
   });

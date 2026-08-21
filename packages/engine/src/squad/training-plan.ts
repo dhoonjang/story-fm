@@ -1,5 +1,5 @@
 import type { ScheduleEntry, Slot, TrainAttr, TrainingSession } from "@story-fm/domain";
-import { SLOT_TIME } from "@story-fm/domain";
+import { SLOT_TIME, isReserveMatch } from "@story-fm/domain";
 import { addDays, dayOfWeek, diffDays, sortEntries, squadReturnOf } from "../competition/calendar";
 import type { GameState } from "../core/state";
 
@@ -112,6 +112,8 @@ function userMatchDates(state: GameState): string[] {
   const dates = new Set<string>();
   for (const m of state.matches) {
     if (m.homeTeamId !== state.userTeamId && m.awayTeamId !== state.userTeamId) continue;
+    // 2군 경기는 1군 마이크로사이클의 경기일이 아니다 — 뛰는 스쿼드가 다르다
+    if (isReserveMatch(m)) continue;
     dates.add(m.date);
   }
   return [...dates].sort();

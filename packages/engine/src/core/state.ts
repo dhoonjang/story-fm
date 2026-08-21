@@ -592,6 +592,12 @@ export interface GameState {
   transfers: Transfer[];
   growthLog: GrowthEntry[];
   seasonStats: SeasonStat[];
+  /**
+   * 집중 육성 명단 — 감독이 지정한 우리 2군 유망주(`set_development_focus`).
+   * 월간 성장 확률에 배율이 붙는다 (squad/development.ts — season.md §2 2군 리그).
+   * 승격·이적으로 떠나면 걷어낸다. 구 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  developmentFocus?: string[];
   issues: PlayerIssue[];
   /**
    * 정착 이벤트 — 면담·팀토크·주장 지명이 새 영입의 적응에 남긴 것.

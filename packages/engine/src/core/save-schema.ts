@@ -115,5 +115,6 @@ export const SaveSchema = z
     characterMemories: z.array(CharacterMemorySchema).optional(),
     arcs: z.array(NarrativeArcSchema).optional(),
     paymentSchedules: z.array(PaymentScheduleSchema).optional(),
+    developmentFocus: z.array(z.string()).optional(),
   })
   .passthrough();

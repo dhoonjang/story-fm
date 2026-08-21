@@ -49,6 +49,7 @@ export * from "./world/scope";
 export * from "./competition/calendar";
 export * from "./competition/fixtures";
 export * from "./competition/friendly";
+export * from "./competition/reserve";
 export * from "./competition/season";
 export * from "./competition/europe";
 export * from "./competition/euro-knockout";

@@ -1,4 +1,5 @@
 import type { GamePlayer } from "@story-fm/domain";
+import { isReserveMatch } from "@story-fm/domain";
 import type { GameState } from "../core/state";
 import { playerById, playersOf } from "../core/state";
 import { isFriendly } from "../competition/friendly";
@@ -61,6 +62,8 @@ export function recentOutcomes(state: GameState, teamId: string, limit: number):
         m.result &&
         m.season === state.season &&
         !isFriendly(m) &&
+        // 2군 리그는 1군의 연속 기록이 아니다 — 섞이면 2군 2패 + 리그 1패가 3연패가 된다
+        !isReserveMatch(m) &&
         (m.homeTeamId === teamId || m.awayTeamId === teamId),
     )
     .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))

@@ -1,4 +1,5 @@
 import type { AttributeAxis, DeferredScout, GamePlayer, ScoutReport } from "@story-fm/domain";
+import { isReserveMatch } from "@story-fm/domain";
 import {
   ATTRIBUTE_AXES,
   AXIS_KO,
@@ -164,6 +165,8 @@ export function hasSeenPlay(state: GameState, playerId: string): boolean {
   if (!player) return false;
   for (const match of state.matches) {
     if (!match.result) continue;
+    // 2군 경기는 감독이 보지 않는다 — 결과는 출전·성장에만 닿는다 (season.md §2)
+    if (isReserveMatch(match)) continue;
     const userIsHome = match.homeTeamId === state.userTeamId;
     const userIsAway = match.awayTeamId === state.userTeamId;
     if (!userIsHome && !userIsAway) continue; // 우리가 없던 경기는 못 봤다

@@ -8,6 +8,7 @@ import {
 import { leagueOfTeam } from "../data/team-catalog";
 import { buildAllEuroMatches, type EuroEntry } from "./europe";
 import { buildFriendlyMatches } from "./friendly";
+import { buildReserveFixtures, isReserveMatch } from "./reserve";
 import type { WorldScope } from "../world/scope";
 
 /**
@@ -35,7 +36,9 @@ export function buildSeasonFixtures(
   const euro = buildAllEuroMatches(season, seed, entrants);
   relaxEuroAdjacency(league, euro);
   const friendly = buildFriendlyMatches(season, seed, world, membership, userTeamId);
-  return [...friendly, ...league, ...euro];
+  // 2군 리그는 월요일 낮이라 리그·대항전과 휴식 충돌이 없다 — 해소에 참여하지 않는다
+  const reserve = buildReserveFixtures(season, seed, world, membership, userTeamId);
+  return [...friendly, ...league, ...euro, ...reserve];
 }
 
 /**
@@ -50,6 +53,8 @@ export function isUserFixture(
   /** 감독이 지금 있는 리그 — 강등되면 카탈로그와 갈린다 (`leagueOfTeamIn`) */
   leagueId = leagueOfTeam(userTeamId),
 ): boolean {
+  // 2군 경기는 감독 달력에 오르지 않는다 — 올리면 기본 훈련이 "다음 경기"로 읽는다
+  if (isReserveMatch(match)) return false;
   return (
     match.competitionId === leagueId ||
     match.homeTeamId === userTeamId ||

@@ -11,6 +11,7 @@ import type {
   ShootoutOutcome,
   SquadRegistration,
 } from "@story-fm/domain";
+import { isReserveMatch } from "@story-fm/domain";
 import {
   ATTRIBUTE_AXES,
   AXIS_GROUPS,
@@ -2319,7 +2320,13 @@ export function buildOfficeViews(state: GameState): OfficeViews {
   const stadium = clubProfileIn(state, userTeamId);
 
   const recentResults = state.matches
-    .filter((m) => m.result && (m.homeTeamId === userTeamId || m.awayTeamId === userTeamId))
+    // 2군 경기는 1군의 최근 결과가 아니다 — 다이제스트와 선수 기록으로만 보인다
+    .filter(
+      (m) =>
+        m.result &&
+        !isReserveMatch(m) &&
+        (m.homeTeamId === userTeamId || m.awayTeamId === userTeamId),
+    )
     .sort((a, b) => (a.date < b.date ? -1 : 1))
     .slice(-5)
     .map(

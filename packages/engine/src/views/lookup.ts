@@ -5,6 +5,7 @@ import type {
   SeasonRecord,
   SeasonStat,
 } from "@story-fm/domain";
+import { isReserveMatch } from "@story-fm/domain";
 import {
   YELLOWS_PER_SUSPENSION,
   ageOf,
@@ -230,7 +231,9 @@ function ourRow(state: GameState, p: GamePlayer): string {
   const suspension = activeSuspension(state, p.id);
   const role =
     squadLevelOf(p) === "reserve"
-      ? "[2군]"
+      ? (state.developmentFocus?.includes(p.id) ?? false)
+        ? "[2군·집중 육성]"
+        : "[2군]"
       : assignment
         ? `[${assignment.role === "starting" ? "선발" : "벤치"}:${assignment.position}]`
         : "[1군]";
@@ -250,14 +253,26 @@ function ourRow(state: GameState, p: GamePlayer): string {
   );
 }
 
-/** 시즌 기록 축약 — 출전/득점/도움, 평점은 출전이 있을 때만 */
+/** 시즌 기록 축약 — 출전/득점/도움, 평점은 출전이 있을 때만. 2군 리그 기록은 따로 */
 function statLine(
-  stat: { apps: number; goals: number; assists?: number; ratingSum?: number } | null,
+  stat: {
+    apps: number;
+    goals: number;
+    assists?: number;
+    ratingSum?: number;
+    reserveApps?: number;
+    reserveGoals?: number;
+  } | null,
 ): string {
   const rating = seasonRating(stat);
+  const reserve =
+    (stat?.reserveApps ?? 0) > 0
+      ? ` · 2군 출전${stat?.reserveApps}/득점${stat?.reserveGoals ?? 0}`
+      : "";
   return (
     `출전${stat?.apps ?? 0}/득점${stat?.goals ?? 0}/도움${stat?.assists ?? 0}` +
-    (rating === null ? "" : `/평점${rating.toFixed(2)}`)
+    (rating === null ? "" : `/평점${rating.toFixed(2)}`) +
+    reserve
   );
 }
 
@@ -784,8 +799,11 @@ export function teamProfile(state: GameState, team: string): LookupResult {
       ? squad.reduce((s, p) => s + ageOf(p.birthdate, state.date), 0) / squad.length
       : 0;
 
-  // 날짜순 정렬 — state.matches는 리그 뒤에 대항전이 붙은 순서라 그대로 자르면 섞인다
-  const byDate = [...state.matches].sort((a, b) => (a.date < b.date ? -1 : 1));
+  // 날짜순 정렬 — state.matches는 리그 뒤에 대항전이 붙은 순서라 그대로 자르면 섞인다.
+  // 2군 경기는 팀 프로필의 최근 결과·전적·다음 맞대결 어디에도 서지 않는다
+  const byDate = [...state.matches]
+    .filter((m) => !isReserveMatch(m))
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
   const recent = byDate
     .filter((m) => m.result && (m.homeTeamId === teamId || m.awayTeamId === teamId))
     .slice(-5)
@@ -1100,6 +1118,8 @@ function fixturesView(state: GameState, input: LeagueViewInput): LookupResult {
 
   const pool = state.matches
     .filter((m) => {
+      // 2군 경기는 일정 조회에 서지 않는다 — 달력과 같은 답이어야 한다 (season.md §2)
+      if (isReserveMatch(m)) return false;
       if (teamId && m.homeTeamId !== teamId && m.awayTeamId !== teamId) return false;
       if (opponentId && m.homeTeamId !== opponentId && m.awayTeamId !== opponentId) return false;
       if (competitionId && m.competitionId !== competitionId) return false;

@@ -10,6 +10,7 @@ import type {
   ShootoutKick,
   TacticAssignment,
 } from "@story-fm/domain";
+import { isReserveMatch } from "@story-fm/domain";
 import {
   AI_MANAGER_RATING_FALLBACK,
   ageOf,
@@ -518,7 +519,11 @@ export function startMatch(state: GameState): FlowResult {
     return { ok: false, message: "오늘은 경기일이 아닙니다 — 먼저 경기일로 이동하세요" };
   }
   const match = matchesOn(state.matches, state.date).find(
-    (m) => !m.result && (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+    (m) =>
+      // 2군 경기는 감독이 들어갈 경기가 아니다 — 간이 시뮬이 조용히 소화한다
+      !m.result &&
+      !isReserveMatch(m) &&
+      (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
   );
   if (!match) return { ok: false, message: "오늘 예정된 경기를 찾지 못했습니다" };
 

@@ -1,8 +1,9 @@
-import type { GamePlayer, ScheduleEntry, TrainingSession } from "@story-fm/domain";
+import type { GamePlayer, MatchRecord, ScheduleEntry, TrainingSession } from "@story-fm/domain";
 import {
   AI_MANAGER_RATING_FALLBACK,
   FAMILIARITY_BASELINE,
   clampCondition,
+  isReserveMatch,
   naturalPositionOf,
   positionGroupOfPlayer,
   slotOfTime,
@@ -92,6 +93,7 @@ import {
   proficiencyAt,
   pushNarrative,
   pushReportCards,
+  reservePlayers,
   seasonStatOf,
   squadLevelOf,
   tacticsOf,
@@ -237,7 +239,11 @@ function dailyTick(
   if (
     managed === null ||
     matchesOn(state.matches, state.date).some(
-      (m) => !m.result && (m.homeTeamId === managed || m.awayTeamId === managed),
+      (m) =>
+        !m.result &&
+        // 2군 경기일에도 1군 훈련은 그대로 선다 — 뛰는 스쿼드가 다르다
+        !isReserveMatch(m) &&
+        (m.homeTeamId === managed || m.awayTeamId === managed),
     )
   ) {
     cancelTrainingOn(state, state.date);
@@ -850,14 +856,20 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
   // 무직이면 옛 구단 경기도 여기서 굴러간다 — 감독이 들어갈 경기가 없다 (career.md §5.1)
   const managed = managedTeamId(state);
   const ours = matchesOn(state.matches, state.date).find(
-    (m) => !m.result && (m.homeTeamId === managed || m.awayTeamId === managed),
+    (m) =>
+      !m.result && !isReserveMatch(m) && (m.homeTeamId === managed || m.awayTeamId === managed),
   );
   const cutoff = ours ? (ours.time ?? DEFAULT_KICKOFF) : null;
   const played: string[] = [];
   for (const match of matchesOn(state.matches, state.date)) {
     if (match.result) continue;
-    if (match.homeTeamId === managed || match.awayTeamId === managed) continue;
     if (cutoff !== null && (match.time ?? DEFAULT_KICKOFF) >= cutoff) continue;
+    // 2군 리그는 감독 팀 경기라도 조용히 돈다 — 결과는 출전·성장에만 닿는다
+    if (isReserveMatch(match)) {
+      simulateReserveMatch(state, match, digest);
+      continue;
+    }
+    if (match.homeTeamId === managed || match.awayTeamId === managed) continue;
     const squads = {
       home: simSquadOf(state, match.homeTeamId),
       away: simSquadOf(state, match.awayTeamId),
@@ -1046,6 +1058,115 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
 }
 
 /**
+ * 2군 경기의 XI — 가용한 2군에서 종합 순으로 뽑고, 열한 명이 안 되면 **가장 어린**
+ * 가용 1군으로 채운다. 상대가 2부 클럽이면 2군이 없다(전원 1군 — team.md §5).
+ */
+function reserveXI(state: GameState, teamId: string): GamePlayer[] {
+  const available = (p: GamePlayer) => !isInjured(state, p.id) && !isSuspended(state, p.id);
+  const xi = reservePlayers(state, teamId)
+    .filter(available)
+    .sort((a, b) => b.attributes.overall - a.attributes.overall)
+    .slice(0, 11);
+  if (xi.length < 11) {
+    const used = new Set(xi.map((p) => p.id));
+    const youth = firstTeamPlayers(state, teamId)
+      .filter((p) => !used.has(p.id) && available(p))
+      .sort((a, b) => (a.birthdate < b.birthdate ? 1 : -1));
+    for (const p of youth) {
+      if (xi.length >= 11) break;
+      xi.push(p);
+    }
+  }
+  return xi;
+}
+
+/**
+ * 2군 리그 경기 간이 시뮬 — **결과는 출전과 성장에만 닿는다** (season.md §2 2군 리그).
+ *
+ * 정산은 `SEASON_STAT`의 2군 전용 열(`reserveApps` 등)뿐이다. 폼·체력·부상·카드·
+ * 정지·라커룸·재정에 손대지 않는 것은 빠뜨린 게 아니라 설계다 — 2군 경기가 1군
+ * 몸 상태에 닿기 시작하면 콜업 직후 선수의 상태를 감독이 설명할 수 없게 되는데,
+ * 감독에게는 그 일정을 조정할 손잡이가 없다. 영향은 성장 확률 한 축으로 모인다
+ * (`applyMonthlyDevelopment`가 지난달 출전을 센다).
+ *
+ * 벤치 없이 열한 명으로 90분을 굴린다(`simSquadFor`) — 교체가 없으니 출전자가 곧
+ * 선발이고, 라인업이 그대로 출전 기록의 원본이다.
+ */
+export function simulateReserveMatch(state: GameState, match: MatchRecord, digest: string[]): void {
+  const squads = {
+    home: simSquadFor(state, match.homeTeamId, reserveXI(state, match.homeTeamId)),
+    away: simSquadFor(state, match.awayTeamId, reserveXI(state, match.awayTeamId)),
+  };
+  const result = quickSimulate(
+    squads.home,
+    squads.away,
+    state.seed,
+    `${state.season}:${match.competitionId}:${match.stage ?? "league"}:${match.round}:${match.homeTeamId}-${match.awayTeamId}`,
+  );
+  // 벤치가 없어 교체가 없고, 카드·부상·점유율은 정산하지 않는다 — 결과만 남긴다
+  match.result = {
+    homeGoals: result.homeGoals,
+    awayGoals: result.awayGoals,
+    scorers: result.scorers,
+    assists: result.assists,
+    goalMinutes: result.goalMinutes,
+    homeShots: result.homeShots,
+    awayShots: result.awayShots,
+    homeXg: result.homeXg,
+    awayXg: result.awayXg,
+    homeExpectedGoals: result.homeExpectedGoals,
+    awayExpectedGoals: result.awayExpectedGoals,
+    homeLineup: squads.home.starters.map((p) => p.id),
+    awayLineup: squads.away.starters.map((p) => p.id),
+    homeOnPitch: squads.home.starters.map((p) => p.id),
+    awayOnPitch: squads.away.starters.map((p) => p.id),
+  };
+  for (const side of ["home", "away"] as const) {
+    const teamId = side === "home" ? match.homeTeamId : match.awayTeamId;
+    const scored = result.scorers
+      .filter((s) => s.startsWith(`${side}:`))
+      .map((s) => s.slice(side.length + 1));
+    const assisted = result.assists
+      .filter((s) => s.startsWith(`${side}:`))
+      .map((s) => s.slice(side.length + 1));
+    const goalsFor = side === "home" ? result.homeGoals : result.awayGoals;
+    const conceded = side === "home" ? result.awayGoals : result.homeGoals;
+    const outcome = goalsFor > conceded ? "win" : goalsFor === conceded ? "draw" : "loss";
+    for (const p of squads[side].starters) {
+      const goals = scored.filter((id) => id === p.id).length;
+      const assists = assisted.filter((id) => id === p.id).length;
+      const rating = matchRating({
+        group: positionGroupOfPlayer(p),
+        goals,
+        assists,
+        yellows: 0,
+        reds: 0,
+        conceded,
+        outcome,
+      });
+      const stat = ensureSeasonStat(state, p.id, teamId);
+      stat.reserveApps = (stat.reserveApps ?? 0) + 1;
+      if (goals > 0) stat.reserveGoals = (stat.reserveGoals ?? 0) + goals;
+      if (assists > 0) stat.reserveAssists = (stat.reserveAssists ?? 0) + assists;
+      stat.reserveRatingSum = (stat.reserveRatingSum ?? 0) + rating;
+    }
+  }
+  // 감독 팀 경기만 한 줄 — 2군 리그는 감독 팀만 편성되지만, 문은 명시적으로 지킨다
+  if (match.homeTeamId === state.userTeamId || match.awayTeamId === state.userTeamId) {
+    const ourGoals = state.userTeamId === match.homeTeamId ? result.homeGoals : result.awayGoals;
+    const scorers = result.scorers
+      .filter((s) => s.startsWith(state.userTeamId === match.homeTeamId ? "home:" : "away:"))
+      .map((s) => playerById(state, s.slice(s.indexOf(":") + 1))?.name)
+      .filter((name): name is string => name !== undefined);
+    digest.push(
+      `2군 리그 ${match.round}R — ${teamShortNameIn(state, match.homeTeamId)} ${result.homeGoals}-${result.awayGoals} ${teamShortNameIn(state, match.awayTeamId)}${
+        ourGoals > 0 && scorers.length > 0 ? ` (득점: ${scorers.join(", ")})` : ""
+      }`,
+    );
+  }
+}
+
+/**
  * 한 번의 진행이 넘길 수 있는 날 — **호출자에게 보이지 않게 걸리는 상한이다.**
  *
  * 일수를 지정하면 그 값과 30일 중 작은 쪽까지, "다음 경기까지"처럼 목적지만 주면
@@ -1126,7 +1247,9 @@ export function advanceTime(
 
     const managed = managedTeamId(state);
     const userMatch = matchesOn(state.matches, state.date).find(
-      (m) => !m.result && (m.homeTeamId === managed || m.awayTeamId === managed),
+      (m) =>
+        // 2군 경기는 시계를 세우지 않는다 — 간이 시뮬이 이미 소화했다 (season.md §2)
+        !m.result && !isReserveMatch(m) && (m.homeTeamId === managed || m.awayTeamId === managed),
     );
     if (userMatch) {
       state.phase = "matchday";

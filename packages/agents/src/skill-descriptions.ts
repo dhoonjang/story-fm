@@ -47,6 +47,15 @@ export const SKILL_CATALOG = [
       "내려간 선수는 전술 배치에서 함께 빠진다. 2군 선수를 곧바로 선발에 넣는 지시라면 set_lineup에 squadLevels로 함께 실어라.",
   },
   {
+    name: "set_development_focus",
+    label: "집중 육성",
+    group: "전술·훈련",
+    readOnly: false,
+    description:
+      "2군 유망주를 집중 육성으로 지정한다(최대 3명) — 성장이 빨라지고, 2군 리그 출전과 겹치면 더 빠르다. " +
+      "**지정 전체를 다시 적는 목록 교체다** — playerIds를 생략하면 해제. 2군만 지정할 수 있고, 승격하면 풀린다.",
+  },
+  {
     name: "set_captain",
     label: "주장 지정",
     group: "전술·훈련",

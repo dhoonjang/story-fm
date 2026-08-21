@@ -1,4 +1,5 @@
 import type { Achievement, AchievementCode, GamePlayer, PositionGroup } from "@story-fm/domain";
+import { isReserveMatch } from "@story-fm/domain";
 import {
   CONDITION_BASE,
   DEFAULT_FORMATION,
@@ -455,8 +456,8 @@ export function recordLeagueHistory(state: GameState): void {
     if (match.season !== state.season || !match.result) continue;
     if ((match.stage ?? "league") !== "league") continue;
     const id = match.competitionId;
-    // 친선(대회 없음)도 컵도 줄을 세우지 않는다 — 리그전만 순위표를 갖는다
-    if (id === null || isCup(id)) continue;
+    // 친선(대회 없음)도 컵도 2군 리그도 줄을 세우지 않는다 — 리그전만 순위표를 갖는다
+    if (id === null || isCup(id) || isReserveMatch(match)) continue;
     leagueIds.add(id);
   }
   const kept = (state.leagueHistory ?? []).filter(

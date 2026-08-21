@@ -272,6 +272,27 @@ export const SQUAD_LONGEVITY = defineHarness({
 });
 
 /**
+ * 유스 육성 — **2군 리그가 돌고, 감독의 선택이 유망주의 성장 속도를 가르는가**
+ * (`docs/simulation/season.md` §2 2군 리그).
+ */
+export const YOUTH_DEVELOPMENT = defineHarness({
+  id: "youth-development",
+  what: "2군 경기 수 · 출전·집중 육성이 가르는 성장 격차",
+  doc: "docs/simulation/season.md §2",
+  cost: "세계 하나 · 한 시즌 완주 · 수 분",
+  // prettier-ignore
+  bands: [
+    { metric: "2군 경기 수", role: "guard", min: 15, max: 23, unit: "count", why: "리그 상대 싱글 라운드로빈(20팀이면 19경기)이 실제로 편성돼 돈다" },
+    { metric: "결과 없는 2군 경기", role: "guard", max: 0, unit: "count", why: "시즌 종료 판정은 2군 리그를 기다리지 않는다 — 일정이 늦으면 조용히 안 치러진 채 남는다" },
+    { metric: "2군 평균 출전", role: "guard", min: 5, unit: "count", why: "출전이 쌓여야 '2군 선수의 시즌 기록에 경기가 쌓인다'가 성립한다" },
+    { metric: "집중 육성 시즌 성장", role: "measure", unit: "score", why: "집중 육성 + 2군 출전을 다 받은 유망주의 종합 상승" },
+    { metric: "무지정 우리 2군 U21 성장", role: "measure", unit: "score", why: "출전 배율만 받은 유망주 — 손잡이 하나의 몫을 가른다" },
+    { metric: "타 팀 2군 U21 성장", role: "measure", unit: "score", why: "배율이 없는 기준선 — 코어 월간 성장 그대로" },
+    { metric: "집중 육성 격차", role: "reference", min: 0, unit: "score", why: "집중 육성 − 타 팀 기준선. 음수면 손잡이가 아무것도 가르지 않은 것이다" },
+  ],
+});
+
+/**
  * 2군 강등이 낳는 불만 — **문턱이 로테이션과 방치를 가르는가** (`docs/data/people.md` §5).
  *
  * 상수 하나(21일)가 두 가지 플레이를 동시에 정한다: 짧으면 선수를 잠깐 내렸다
@@ -414,6 +435,7 @@ export const HARNESSES: readonly Harness[] = [
   AI_MARKET,
   MANAGER_MARKET,
   SQUAD_LONGEVITY,
+  YOUTH_DEVELOPMENT,
   DEMOTION_GRIEVANCE,
   APPROACH_RATE,
   OVERALL_SCALE,

@@ -48,6 +48,7 @@ import {
   searchPlayers,
   sendOffer,
   setCaptain,
+  setDevelopmentFocus,
   setExploits,
   setLineup,
   setRegionalPlan,
@@ -328,6 +329,18 @@ export function buildGmTools(
     ),
     wrap("set_captain", descriptions.set_captain, z.object({ playerId: playerRef }), (input) =>
       setCaptain(state, input.playerId),
+    ),
+    wrap(
+      "set_development_focus",
+      descriptions.set_development_focus,
+      z.object({
+        playerIds: z
+          .array(playerRef)
+          .min(1)
+          .optional()
+          .describe("집중 육성할 2군 유망주 — 지정 전체를 다시 적는다. 생략하면 해제"),
+      }),
+      (input) => setDevelopmentFocus(state, input),
     ),
     wrap(
       "set_tactics",

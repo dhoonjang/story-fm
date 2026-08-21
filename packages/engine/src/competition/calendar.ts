@@ -1,4 +1,5 @@
 import type { MatchRecord, MatchStage, ScheduleEntry, TransferWindow } from "@story-fm/domain";
+import { isReserveMatch } from "@story-fm/domain";
 import { scopedLeagues, scopedTeams, scopedTeamsOfLeague, type WorldScope } from "../world/scope";
 import { makeRng } from "../core/rng";
 import { isEuroWeek } from "./europe";
@@ -623,7 +624,7 @@ export function firstHalfPairs(teamIds: string[]): Array<Array<[string, string]>
 }
 
 /** 시드 기반 결정적 셔플 — 시즌·라운드마다 다른 배치를 만들되 재현 가능하게 */
-function shuffled<T>(items: readonly T[], seed: number, channel: string): T[] {
+export function shuffled<T>(items: readonly T[], seed: number, channel: string): T[] {
   const rng = makeRng(seed, channel);
   const out = [...items];
   for (let i = out.length - 1; i > 0; i--) {
@@ -884,6 +885,8 @@ export function nextMatchFor(
   for (const m of matches) {
     if (m.result || m.date < date || m.id === skipId) continue;
     if (m.homeTeamId !== teamId && m.awayTeamId !== teamId) continue;
+    // 2군 경기는 1군의 "다음 경기"가 아니다 — 훈련 리듬도 회견도 여기 걸리면 안 된다
+    if (isReserveMatch(m)) continue;
     if (best === null || m.date < best.date) best = m;
   }
   return best;
