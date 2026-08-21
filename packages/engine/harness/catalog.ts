@@ -133,7 +133,7 @@ export const INJURY_RATE = defineHarness({
     { metric: "카드 기대 대비 배율 (구간)", role: "guard", min: 1, max: 1.1, why: "같은 기대치 · 같은 두 줄 규칙 — 두 시뮬이 같은 자리에 서야 한다" },
     { metric: "카드 — 간이/구간", role: "guard", min: 0.96, max: 1.04, unit: "ratio", why: "**두 시뮬이 한 눈금에 서는가 — 가장 날카로운 지표.** 강도를 한쪽만 곱하면 여기가 1/강도로 벌어진다 — 압박 5 팀에서 15%다. 표본이 팔당 45,000장이라 잡음은 1% 아래다" },
     { metric: "유리몸 팀 배율", role: "guard", min: 1.3, why: "선발 전원 성향 2.2일 때 건강한 팀 대비 — 성향이 빈도에 닿는지" },
-    { metric: "유리몸 한 명의 부상 점유율", role: "guard", min: 0.11, unit: "ratio", why: "뛴 선수(선발 11 + 교체 최대 4) 중 한 명이면 균등은 7~9%" },
+    { metric: "유리몸 한 명의 부상 점유율", role: "guard", min: 0.08, unit: "ratio", why: "뛴 선수(선발 11 + 교체 최대 5) 중 한 명이면 균등은 6~7% — 성향 2.2가 그 위로 띄운다" },
   ],
 });
 
@@ -212,7 +212,7 @@ export const AI_BENCH = defineHarness({
   cost: "시드당 수십 초 × 2시드",
   // prettier-ignore
   bands: [
-    { metric: "AI 교체/경기", role: "reference", min: 3.5, max: 5, unit: "count", why: "실제 1부는 5인 교체제에서 4.3 — 지금은 그 밑이다(match.md §9). 한도(5)는 장부가 막는다" },
+    { metric: "AI 교체/경기", role: "guard", min: 3.5, max: 5, unit: "count", why: "실제 1부는 5인 교체제에서 4.3 — 정지점을 창으로 세는 정책(SUB_WINDOW_MAX·SUB_CHANCE·SUB_FATIGUE)이 그 부근에 세운다. 한도(5)는 장부가 막는다" },
     { metric: "승부수 교체/경기", role: "measure", unit: "count", why: "스코어를 읽은 갈래가 실제로 얼마나 쓰이는가" },
     { metric: "굳히기 교체/경기", role: "measure", unit: "count", why: "리드를 지키는 갈래 — 승부수보다 드물어야 정상이다" },
     { metric: "체력 교체/경기", role: "measure", unit: "count", why: "예전부터 있던 갈래 — 스코어 갈래가 이걸 밀어내지 않았는지" },
@@ -220,7 +220,7 @@ export const AI_BENCH = defineHarness({
     { metric: "끝까지 뒤진 경기에서 승부수를 던진 비율", role: "guard", min: 0.5, unit: "ratio", why: "0이면 이 기능이 죽은 것이다 — 벤치가 스코어를 읽는가의 단일 지표" },
     { metric: "끝까지 앞선 경기에서 굳힌 비율", role: "measure", unit: "ratio", why: "굳히기는 75′이고 교체 카드를 먼저 쓴 팀은 못 쓴다" },
     { metric: "AI 교체의 60′ 이후 비율", role: "reference", min: 0.5, max: 0.95, unit: "ratio", why: "실제 교체는 후반에 몰린다 — 전부 후반이면 하프타임 갈래가 죽은 것이다" },
-    { metric: "AI 교체 중앙 분", role: "measure", unit: "score", why: "실제 1부는 60분대 — 우리는 체력 문턱(SUB_FATIGUE)이 늦어 그보다 뒤다" },
+    { metric: "AI 교체 중앙 분", role: "measure", unit: "score", why: "실제 1부는 60분대 — 우리는 정지점(골·조용한 25분)이 후반에 몰려 그보다 뒤다" },
     { metric: "판의 모양을 바꾼 경기 비율", role: "measure", unit: "ratio", why: "경기당 한 번 — 스코어가 벌어진 경기에서만 선다" },
     { metric: "잰 경기 수", role: "measure", unit: "count", why: "표본이 있는가" },
   ],

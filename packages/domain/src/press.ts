@@ -62,6 +62,8 @@ export const PressFactKindSchema = z.enum([
   "leak",
   /** 이적 요청 — 에이전트가 대리로 들고 온다 (people.md §8 계단 5) */
   "transfer-request",
+  /** 열린 보드 요청 — 구단주가 이 창에 건 조건 (career.md §5.2) */
+  "board-demand",
 ]);
 /**
  * 회견의 재료 — **사실 한 줄.** 질문이 아니다.

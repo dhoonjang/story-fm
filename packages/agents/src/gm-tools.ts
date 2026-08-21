@@ -77,6 +77,7 @@ import {
   DateString,
   DIRECTIVE_INTENSITIES,
   type MatchEvent,
+  MAX_PAYMENT_YEARS,
   MAX_PITCH_CLAIMS,
   PitchClaimSchema,
   PLAYER_DIRECTIVE_KINDS,
@@ -667,6 +668,13 @@ export function buildGmTools(
         fee: money(MONEY_MAX).optional(),
         weeklyWage: money(WAGE_MAX).optional(),
         years: z.number().int().min(1).max(6).optional(),
+        paymentYears: z
+          .number()
+          .int()
+          .min(1)
+          .max(MAX_PAYMENT_YEARS)
+          .optional()
+          .describe("분할 연수 — 늦게 오는 돈은 깎여 보이므로 확률이 그만큼 낮게 잡힌다"),
         kind: z
           .enum(["buy", "sell", "renew", "loan", "loan_out", "release"])
           .optional()
@@ -718,6 +726,7 @@ export function buildGmTools(
           ...(input.weeklyWage !== undefined ? { weeklyWage: input.weeklyWage } : {}),
           ...(input.years !== undefined ? { years: input.years } : {}),
           ...(input.kind ? { kind: input.kind } : {}),
+          ...(input.paymentYears === undefined ? {} : { paymentYears: input.paymentYears }),
           ...(input.teamId ? { counterpartTeamId: input.teamId } : {}),
           ...(input.pitch ? { pitch: input.pitch } : {}),
           pitched: openNegotiationFor(state, player.id)?.pitched ?? [],
@@ -751,6 +760,15 @@ export function buildGmTools(
         fee: money(MONEY_MAX),
         weeklyWage: money(WAGE_MAX),
         years: z.number().int().min(1).max(6).optional(),
+        paymentYears: z
+          .number()
+          .int()
+          .min(1)
+          .max(MAX_PAYMENT_YEARS)
+          .optional()
+          .describe(
+            "이적료·정산금 분할 연수 — 없거나 1이면 일시금. 파는 쪽은 늦은 돈을 깎아 보므로 분할은 총액을 올려 부르는 흥정이다",
+          ),
         pitch: z
           .array(PitchClaimSchema)
           .max(MAX_PITCH_CLAIMS)
@@ -772,6 +790,7 @@ export function buildGmTools(
             weeklyWage: input.weeklyWage,
             ...(input.kind === "loan_out" ? { loan: true } : {}),
             ...(input.years === undefined ? {} : { years: input.years }),
+            ...(input.paymentYears === undefined ? {} : { paymentYears: input.paymentYears }),
           });
         }
         return sendOffer(state, {
@@ -780,6 +799,7 @@ export function buildGmTools(
           weeklyWage: input.weeklyWage,
           years: input.years ?? 4,
           ...(input.kind === "loan" ? { kind: "loan" as const } : {}),
+          ...(input.paymentYears === undefined ? {} : { paymentYears: input.paymentYears }),
           ...(input.pitch ? { pitch: input.pitch } : {}),
         });
       },
@@ -792,6 +812,15 @@ export function buildGmTools(
         verdict: z.enum(["accept", "counter", "reject"]),
         fee: money(MONEY_MAX).optional(),
         weeklyWage: money(WAGE_MAX).optional(),
+        paymentYears: z
+          .number()
+          .int()
+          .min(1)
+          .max(MAX_PAYMENT_YEARS)
+          .optional()
+          .describe(
+            "이적료·정산금 분할 연수 — 없거나 1이면 일시금. 파는 쪽은 늦은 돈을 깎아 보므로 분할은 총액을 올려 부르는 흥정이다",
+          ),
         note: z.string().min(1).max(200).optional(),
       }),
       (input) =>
@@ -826,6 +855,15 @@ export function buildGmTools(
         severance: money(MONEY_MAX).describe(
           "제시 정산금 — 잔여 주급 전액이 아니라 합의로 깎아 부르는 값이다",
         ),
+        paymentYears: z
+          .number()
+          .int()
+          .min(1)
+          .max(MAX_PAYMENT_YEARS)
+          .optional()
+          .describe(
+            "이적료·정산금 분할 연수 — 없거나 1이면 일시금. 파는 쪽은 늦은 돈을 깎아 보므로 분할은 총액을 올려 부르는 흥정이다",
+          ),
       }),
       (input) => openRelease(state, input),
     ),

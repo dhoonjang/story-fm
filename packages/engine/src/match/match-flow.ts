@@ -720,8 +720,9 @@ export function advanceSegment(
    */
   const brief = options.maxMinutes !== undefined;
   const benchTurn = !brief || plan.minute - (pending.aiDecidedAt ?? 0) >= AI_BRIEF_GAP;
-  // AI 팀 교체 — 상대만 90분을 그대로 뛰면 후반이 늘 우리 쪽으로 기운다
-  const aiSub = benchTurn
+  // AI 팀 교체 — 상대만 90분을 그대로 뛰면 후반이 늘 우리 쪽으로 기운다.
+  // 한 정지점은 교체 창 하나라 여러 장이 함께 올 수 있다 (match.md §2)
+  const aiSubs = benchTurn
     ? planAiSubstitution(
         aiSide,
         squads[aiSide],
@@ -730,16 +731,17 @@ export function advanceSegment(
         rng,
         pending.matchFatigue ?? {},
       )
-    : null;
+    : [];
   /**
    * 부상 교체만은 **사건 뒤**에 붙인다 — 다치기 전에 빼는 장면이 되면 안 된다.
    * 나머지 교체는 정지 사건 앞에 끼워야 장부가 받는다 (`insertBeforeStop`).
    */
-  const events = aiSub
-    ? aiSub.causes.includes(AI_SUB_CAUSE.injury)
-      ? [...plan.events, aiSub]
-      : insertBeforeStop(plan.events, aiSub)
-    : plan.events;
+  const events =
+    aiSubs.length > 0
+      ? aiSubs[0]!.causes.includes(AI_SUB_CAUSE.injury)
+        ? [...plan.events, ...aiSubs]
+        : aiSubs.reduce((acc, sub) => insertBeforeStop(acc, sub), plan.events)
+      : plan.events;
 
   let message = `사건 없이 ${plan.minute}′까지 흘렀습니다`;
   if (events.length > 0) {

@@ -116,6 +116,95 @@ export const TransferSchema = z.object({
 });
 export type Transfer = z.infer<typeof TransferSchema>;
 
+// ── 지급 일정 ─────────────────────────────────────────
+/**
+ * 분할 지급의 연수 상한 — 실제 이적의 분할이 2~4년이고, 그 위는 흥정의 폭이
+ * 아니라 관문(예산·잔고) 회피의 폭이다 (transfer.md §5-2).
+ */
+export const MAX_PAYMENT_YEARS = 4;
+
+/**
+ * 늦게 오는 회분을 판정이 깎아 보는 비율 — 1년 늦을 때마다 곱한다.
+ * 분할이 공짜 신용이 되지 않게 하는 손잡이다 (`effectiveFeeOf`).
+ */
+export const INSTALLMENT_DISCOUNT = 0.9;
+
+/** 지급 일정의 한 회분 — `paidOn=null`이 미지급 (기록 테이블 공통 패턴) */
+export const PaymentInstallmentSchema = z.object({
+  dueOn: DateString,
+  amount: z.number().min(0),
+  /** null = 아직 안 냈다 — 지급되면 낸 날이 적힌다 */
+  paidOn: DateString.nullable(),
+});
+export type PaymentInstallment = z.infer<typeof PaymentInstallmentSchema>;
+
+/**
+ * 지급 일정 표 (PAYMENT_SCHEDULE) — **미래의 지급을 담는 자리** (transfer.md §5-2).
+ *
+ * 받는 쪽을 표가 직접 갖는 것은 해지 때문이다: 해지의 원장 row는 무소속행이라
+ * `toTeamId`로는 받는 쪽을 되짚을 수 없다. 회분의 합은 합의 총액과 같아야 한다 —
+ * 이적은 `TRANSFER.fee`, 해지는 합의 정산금.
+ */
+export const PaymentScheduleSchema = z.object({
+  id: z.string().min(1),
+  /** 근거 원장 — TRANSFER row */
+  transferId: z.string().min(1),
+  gamePlayerId: z.string().min(1),
+  /** 내는 구단 */
+  payerTeamId: z.string().min(1),
+  /** 받는 구단 — 해지 정산은 받는 쪽이 선수 본인이라 null */
+  payeeTeamId: z.string().min(1).nullable(),
+  /** 무엇의 분할인가 — 원장 카테고리·라벨이 여기서 갈린다 */
+  kind: z.enum(["transfer", "severance"]),
+  installments: z.array(PaymentInstallmentSchema),
+});
+export type PaymentSchedule = z.infer<typeof PaymentScheduleSchema>;
+
+/**
+ * YYYY-MM-DD에 해를 더한다 — 2월 29일만 2월 28일로 접는다.
+ * 지급 기일이 윤년마다 하루 흔들리면 일정이 결정적이지 않다.
+ */
+function addYearsTo(date: string, years: number): string {
+  const [y, md] = [Number(date.slice(0, 4)), date.slice(5)];
+  return `${y + years}-${md === "02-29" ? "02-28" : md}`;
+}
+
+/**
+ * 지급 일정의 회분 목록 — 총액을 등분해 첫 회분은 `firstDueOn`, 이후 해마다.
+ * 각 회분은 `floor(총액/n)`이고 **마지막 회분이 잔차를 진다** — 합은 언제나
+ * 총액과 같다 (transfer.md §11).
+ */
+export function buildPaymentInstallments(
+  total: number,
+  years: number,
+  firstDueOn: string,
+): PaymentInstallment[] {
+  const n = Math.max(1, Math.min(MAX_PAYMENT_YEARS, Math.floor(years)));
+  const per = Math.floor(total / n);
+  return Array.from({ length: n }, (_, k) => ({
+    dueOn: addYearsTo(firstDueOn, k),
+    amount: k === n - 1 ? total - per * (n - 1) : per,
+    paidOn: null,
+  }));
+}
+
+/**
+ * 분할 오퍼의 **유효 이적료** — 회분마다 해마다 `INSTALLMENT_DISCOUNT`를 곱한
+ * 현재가치다. 파는 쪽은 늦게 오는 돈을 깎아 보므로 딜 판정(`dealOdds`)은 이
+ * 값으로 잰다 — 같은 확률을 원하면 분할은 총액을 올려 불러야 한다 (transfer.md §5-2).
+ */
+export function effectiveFeeOf(fee: number, paymentYears?: number): number {
+  const n = Math.max(1, Math.min(MAX_PAYMENT_YEARS, Math.floor(paymentYears ?? 1)));
+  if (n <= 1) return fee;
+  let sum = 0;
+  let weight = 1;
+  for (let k = 0; k < n; k += 1) {
+    sum += (fee / n) * weight;
+    weight *= INSTALLMENT_DISCOUNT;
+  }
+  return Math.round(sum);
+}
+
 /**
  * 계약 해지를 원장에서 알아보는 표식 — `TRANSFER.note`에 이대로 적힌다.
  *
@@ -196,6 +285,11 @@ export const NegotiationRoundSchema = z.object({
    * 판정하는 LLM이 읽어야 하므로 라운드에 붙인다 (구 세이브엔 없어 optional).
    */
   pitch: z.array(PitchClaimSchema).optional(),
+  /**
+   * 분할 지급 연수 — 없거나 1이면 일시금. 확정되면 지급 일정 표가 된다
+   * (transfer.md §5-2 · 구 세이브엔 없어 optional).
+   */
+  paymentYears: z.number().int().min(1).max(MAX_PAYMENT_YEARS).optional(),
 });
 /**
  * 메디컬 — **합의와 계약 사이에 놓인 하루.**

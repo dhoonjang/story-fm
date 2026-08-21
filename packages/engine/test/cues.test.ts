@@ -3,11 +3,18 @@ import {
   addDays,
   APPROACH_THRESHOLD,
   approachThreshold,
+  BOARD_DEMAND,
+  boardDemandFact,
+  DEMAND_OF_ARCHETYPE,
+  financeOf,
+  openBoardDemand,
+  OWNER_ARCHETYPE_LABELS,
   pendingApproach,
   playerById,
   respondToApproach,
   speakerCues,
   tickApproaches,
+  tickBoardDemands,
   userPlayers,
   worldFigures,
   type GameState,
@@ -462,5 +469,139 @@ describe("계단 4·5 — 언론 유출과 이적 요청", () => {
     expect(open?.channel).toBe("captain");
     expect(open?.step).toBe(3);
     expect(state.pressLeaks ?? []).toEqual([]);
+  });
+});
+
+/**
+ * 보드 요청 — **구단주 원형이 이적창마다 거는 조건 하나** (board-demand.ts ·
+ * career.md §5.2). 같은 파일에 두는 이유는 위와 같다: 세계가 감독에게 무엇을
+ * 내미는가 — 요청은 다가옴의 구단주 자리가 실어 나른다.
+ */
+describe("보드 요청 — 요청 → 이행/불이행 → 평판", () => {
+  /** 구단주의 원형을 고른다 — 페르소나는 세이브의 데이터다 (people.md §1) */
+  function ownedBy(state: GameState, archetype: string): GameState {
+    state.personas!.find((p) => p.role === "owner")!.archetype = archetype;
+    return state;
+  }
+
+  /** 이 창의 이동 한 건 — 판정이 읽는 유일한 장부다 */
+  function moved(state: GameState, windowId: string, dir: "in" | "out", fee: number, id: string) {
+    state.transfers.push({
+      id,
+      gamePlayerId: `gp-${id}`,
+      windowId,
+      fromTeamId: dir === "out" ? state.userTeamId : "chelsea",
+      toTeamId: dir === "out" ? "chelsea" : state.userTeamId,
+      date: state.date,
+      type: "transfer",
+      fee,
+    });
+  }
+
+  it("여섯 원형 전부에 요청의 결이 있다 — 원형이 늘거나 이름이 바뀌면 여기서 선다", () => {
+    for (const label of OWNER_ARCHETYPE_LABELS) {
+      expect(DEMAND_OF_ARCHETYPE[label], label).toBeDefined();
+    }
+  });
+
+  it("투자자형 — 매각이 앞서면 이행 +3, 판정은 창이 닫힌 다음 날이다", () => {
+    const state = ownedBy(createTestGame(11), "투자자형");
+    tickBoardDemands(state, []);
+    const demand = openBoardDemand(state)!;
+    expect(demand.kind).toBe("net-profit");
+    expect(demand.deadline).toBeDefined();
+
+    moved(state, demand.windowId, "out", 10_000_000, "t-sale");
+    moved(state, demand.windowId, "in", 6_000_000, "t-buy");
+    // 창이 닫히기 전에는 판정하지 않는다 — 마지막 날의 매각 한 건이 판을 뒤집을 수 있다
+    tickBoardDemands(state, []);
+    expect(demand.status).toBe("open");
+
+    const before = state.manager.reputation.board;
+    state.date = addDays(demand.deadline, 1);
+    tickBoardDemands(state, []);
+    expect(demand.status).toBe("met");
+    expect(state.manager.reputation.board).toBe(before + BOARD_DEMAND.MET_BOARD);
+  });
+
+  it("투자자형 — 지출이 앞서면 불이행 −6", () => {
+    const state = ownedBy(createTestGame(11), "투자자형");
+    tickBoardDemands(state, []);
+    const demand = openBoardDemand(state)!;
+    moved(state, demand.windowId, "in", 6_000_000, "t-buy");
+
+    const before = state.manager.reputation.board;
+    state.date = addDays(demand.deadline, 1);
+    tickBoardDemands(state, []);
+    expect(demand.status).toBe("failed");
+    expect(state.manager.reputation.board).toBe(before + BOARD_DEMAND.FAILED_BOARD);
+  });
+
+  it("축구광형 — 1군 최고를 지목하고, 떠나는 순간 불이행으로 일찍 닫힌다", () => {
+    const state = ownedBy(createTestGame(11), "축구광형");
+    tickBoardDemands(state, []);
+    const demand = openBoardDemand(state)!;
+    expect(demand.kind).toBe("keep-player");
+    const star = userPlayers(state)
+      .filter((p) => p.squadLevel === "first")
+      .sort((a, b) => b.attributes.overall - a.attributes.overall || (a.id < b.id ? -1 : 1))[0]!;
+    expect(demand.playerId).toBe(star.id);
+    // 열린 동안에는 구단주의 사실 카드에 요청 줄이 선다
+    expect(boardDemandFact(state)?.kind).toBe("board-demand");
+    expect(boardDemandFact(state)?.about).toBe(star.id);
+
+    const before = state.manager.reputation.board;
+    playerById(state, star.id)!.teamId = "chelsea";
+    state.date = addDays(state.date, 1);
+    tickBoardDemands(state, []);
+    // 기한 전인데도 닫힌다 — 떠난 선수는 창이 닫혀도 돌아오지 않는다
+    expect(demand.status).toBe("failed");
+    expect(state.manager.reputation.board).toBe(before + BOARD_DEMAND.FAILED_BOARD);
+    // 같은 창에는 다시 서지 않고, 요청 줄도 내려간다
+    expect(openBoardDemand(state)).toBeNull();
+    expect(boardDemandFact(state)).toBeNull();
+  });
+
+  it("흥행가형 — 기준 이적료를 넘는 영입이 닿는 순간 이행으로 닫힌다", () => {
+    const state = ownedBy(createTestGame(11), "흥행가형");
+    tickBoardDemands(state, []);
+    const demand = openBoardDemand(state)!;
+    expect(demand.kind).toBe("sign-star");
+    const budget = financeOf(state, state.userTeamId).transferBudget;
+    expect(demand.baseline).toBe(Math.round(budget * BOARD_DEMAND.STAR_FEE_OF_BUDGET));
+
+    const before = state.manager.reputation.board;
+    moved(state, demand.windowId, "in", demand.baseline!, "t-star");
+    state.date = addDays(state.date, 1);
+    tickBoardDemands(state, []);
+    expect(demand.status).toBe("met");
+    expect(state.manager.reputation.board).toBe(before + BOARD_DEMAND.MET_BOARD);
+  });
+
+  it("흥행가형 — 예산이 하한 아래거나 동결이면 요청이 서지 않는다", () => {
+    const state = ownedBy(createTestGame(11), "흥행가형");
+    financeOf(state, state.userTeamId).transferBudget = BOARD_DEMAND.SIGN_STAR_MIN_BUDGET - 1;
+    tickBoardDemands(state, []);
+    expect(openBoardDemand(state)).toBeNull();
+  });
+
+  it("산업가형 — 임금 동결의 허용 폭은 2%다: 이내면 이행, 넘으면 불이행", () => {
+    for (const [bump, status] of [
+      [1.01, "met"],
+      [1.05, "failed"],
+    ] as const) {
+      const state = ownedBy(createTestGame(11), "산업가형");
+      tickBoardDemands(state, []);
+      const demand = openBoardDemand(state)!;
+      expect(demand.kind).toBe("wage-freeze");
+
+      const contract = state.contracts.find(
+        (c) => c.status === "active" && c.teamId === state.userTeamId && c.weeklyWage > 0,
+      )!;
+      contract.weeklyWage += demand.baseline! * (bump - 1);
+      state.date = addDays(demand.deadline, 1);
+      tickBoardDemands(state, []);
+      expect(demand.status, `주급 ×${bump}`).toBe(status);
+    }
   });
 });
