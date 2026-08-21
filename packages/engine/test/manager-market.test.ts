@@ -9,6 +9,11 @@ import {
   acceptManagerOffer,
   addDays,
   advanceTime,
+  applyForManagerJob,
+  contractUntil,
+  counterHeadroom,
+  counterManagerOffer,
+  KNOCK_SALARY_RATE,
   applyTrainingOutcomes,
   askingPriceFor,
   assignmentsOf,
@@ -45,6 +50,7 @@ import {
 } from "@story-fm/engine";
 import {
   MANAGER_ATTRIBUTES,
+  MANAGER_TERMS_BY_TIER,
   SCOUT_DAYS,
   type ManagerAttributes,
   type ManagerOffer,
@@ -726,5 +732,105 @@ describe("무직 안전판은 마지막 제안에서 다시 선다", () => {
   it("지난 무직 기간의 제안은 기준을 밀지 않는다", () => {
     const past = [offerFrom("fulham", "2026-11-01")];
     expect(offerDrySpell(past, dismissal, addDays(dismissal.on, OFFER_DRY_SPELL_DAYS))).toBe(true);
+  });
+});
+
+/**
+ * 감독 계약과 흥정 — **조건이 실리고 한 차례 되부른다** (career.md §5.1).
+ *
+ * 경계가 조용히 무너지는 자리들이다: 흥정 천장이 뚫리면 역제안이 공짜 인상이 되고,
+ * 노크의 평판 문턱이 새면 경질 직후의 감독이 빅클럽 벤치로 걸어 들어간다.
+ */
+describe("감독 계약과 흥정 — 조건이 실리고 한 차례 되부른다", () => {
+  const state = createTestGame(11);
+
+  it("새 게임은 부임 구단 등급의 기본 계약으로 시작한다", () => {
+    const terms = MANAGER_TERMS_BY_TIER[tierOfTeamIn(state, state.userTeamId)];
+    expect(state.manager.contract?.salary).toBe(terms.salary);
+    expect(state.manager.contract?.until).toBe(contractUntil(state.date, terms.years));
+  });
+
+  it("흥정의 여유는 문턱 턱걸이 5%에서 상한 30%까지다", () => {
+    expect(counterHeadroom(55, 2)).toBeCloseTo(0.05); // tier 2 문턱 55에 턱걸이
+    expect(counterHeadroom(90, 3)).toBeCloseTo(0.3); // 문턱 40 + 50 — 정확히 상한
+    expect(counterHeadroom(100, 4)).toBeCloseTo(0.3); // tier 4는 기준점 25 — 상한에서 잘린다
+  });
+
+  it("역제안은 천장 아래면 그대로, 넘으면 천장에서 멈춘다 — 그리고 한 차례뿐이다", () => {
+    // 경질 판정 경로는 위 describe가 쟀다 — 카드만 세워 무직으로 만든다
+    state.dismissal = { on: state.date, season: state.season, teamId: state.userTeamId };
+    delete state.manager.contract;
+    state.manager.reputation.board = 55;
+    state.manager.reputation.media = 55; // 평판 55 — tier 2 문턱 턱걸이, 여유 5%
+    const team = state.teams.find(
+      (t) => t.id !== state.userTeamId && tierOfTeamIn(state, t.id) === 2,
+    )!;
+    state.managerOffers = [
+      {
+        id: "offer-terms-test",
+        teamId: team.id,
+        madeOn: state.date,
+        expiresOn: addDays(state.date, 10),
+        tier: 2,
+        target: 6,
+        expectation: "유럽 대항전권",
+        salary: 3_000_000,
+        years: 3,
+        budgetPledge: 15_000_000,
+        via: "vacancy",
+        status: "open",
+      },
+    ];
+
+    const first = counterManagerOffer(state, "offer-terms-test", {
+      salary: 3_100_000,
+      transferBudget: 20_000_000,
+    });
+    expect(first.ok, first.message).toBe(true);
+    const offer = state.managerOffers[0]!;
+    expect(offer.salary, "천장(3.15M) 아래의 요구가 깎였다").toBe(3_100_000);
+    expect(offer.budgetPledge, "천장을 넘는 요구가 그대로 통했다").toBe(15_750_000);
+    expect(offer.counteredOn).toBe(state.date);
+
+    const second = counterManagerOffer(state, "offer-terms-test", { salary: 3_150_000 });
+    expect(second.ok, "흥정이 두 차례 열렸다").toBe(false);
+  });
+
+  it("노크 — 평판 문턱 아래면 거절, 넘으면 깎인 연봉의 제안이 선다", () => {
+    state.managerOffers = []; // 답할 자리를 비운다
+    const vacancyTeam = state.teams.find(
+      (t) => t.id !== state.userTeamId && tierOfTeamIn(state, t.id) === 3,
+    )!;
+    state.managerVacancies = [{ teamId: vacancyTeam.id, on: state.date, position: 12 }];
+
+    state.manager.reputation.board = 25;
+    state.manager.reputation.media = 50; // 37.5 — tier 3 문턱 40 아래
+    const refused = applyForManagerJob(state, vacancyTeam.id);
+    expect(refused.ok).toBe(true);
+    expect(refused.tone).toBe("bad");
+    expect(openManagerOffers(state), "문턱 아래인데 제안이 섰다").toHaveLength(0);
+
+    state.manager.reputation.board = 30; // 40 — 문턱에 턱걸이
+    const applied = applyForManagerJob(state, vacancyTeam.id);
+    expect(applied.ok, applied.message).toBe(true);
+    const offer = openManagerOffers(state)[0]!;
+    expect(offer.teamId).toBe(vacancyTeam.id);
+    expect(offer.via).toBe("knock");
+    expect(offer.salary, "지원한 쪽인데 연봉이 깎이지 않았다").toBe(
+      Math.round(MANAGER_TERMS_BY_TIER[3].salary * KNOCK_SALARY_RATE),
+    );
+    // 열린 제안이 있는 동안에는 어느 공석도 두드릴 수 없다
+    expect(applyForManagerJob(state, vacancyTeam.id).ok).toBe(false);
+  });
+
+  it("수락하면 제안의 조건이 계약이 되고, 예산 약속은 그날 이행된다", () => {
+    const offer = openManagerOffers(state)[0]!;
+    const before = financeOf(state, offer.teamId).transferBudget;
+    const accepted = acceptManagerOffer(state, offer.id);
+    expect(accepted.ok, accepted.message).toBe(true);
+    expect(state.manager.contract?.salary).toBe(offer.salary);
+    expect(state.manager.contract?.until).toBe(contractUntil(state.date, offer.years!));
+    expect(financeOf(state, offer.teamId).transferBudget).toBe(before + offer.budgetPledge!);
+    expect(state.managerVacancies, "부임했는데 공석 명부가 남았다").toHaveLength(0);
   });
 });

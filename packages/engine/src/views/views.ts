@@ -89,6 +89,7 @@ import { INJURY_SEVERITY_KO } from "../squad/injury";
 import { boardExpectation, computeStandings, type StandingRow } from "../competition/season";
 import { hasRelegation, leagueOfTeamIn } from "../competition/promotion";
 import { RELEGATION_SLOTS } from "../core/league-shape";
+import { tierOfTeamIn } from "../core/club-tier";
 import { isCupOnlyLeague, leagueName } from "../data/league-catalog";
 import {
   activeContract,
@@ -1058,7 +1059,20 @@ export interface OfficeViews {
       position: number | null;
       target: number;
       expectation: string;
+      /** 제시 조건 — 옛 세이브의 제안엔 없다 (career.md §5.1) */
+      salary: number | null;
+      years: number | null;
+      budgetPledge: number | null;
+      /** 서 있으면 흥정은 끝났다 — 한 차례뿐이다 */
+      counteredOn: string | null;
     }>;
+    /**
+     * **공석 명부** — 무직 감독이 먼저 지원할 수 있는 자리 (career.md §5.1).
+     * 지원은 채팅으로 한다(`apply_manager_job`) — 화면은 어느 문이 열려 있는지만 세운다.
+     */
+    vacancies: Array<{ teamName: string; tier: number; on: string; position: number | null }>;
+    /** 감독 계약 — 옛 세이브엔 없다 (career.md §5.1) */
+    contract: { salary: number; until: string } | null;
     trophies: Array<{ competition: string; season: number; teamName: string }>;
     /**
      * 업적 — **코드와 근거 수치**다. 세이브가 문장을 갖지 않으므로(career.md §6)
@@ -2412,7 +2426,23 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         position: o.position ?? null,
         target: o.target,
         expectation: o.expectation,
+        salary: o.salary ?? null,
+        years: o.years ?? null,
+        budgetPledge: o.budgetPledge ?? null,
+        counteredOn: o.counteredOn ?? null,
       })),
+      // 무직일 때만 문이다 — 재직 중의 명부는 어차피 비어 있다 (career.md §5.1)
+      vacancies: state.dismissal
+        ? (state.managerVacancies ?? []).map((v) => ({
+            teamName: teamNameIn(state, v.teamId),
+            tier: tierOfTeamIn(state, v.teamId),
+            on: v.on,
+            position: v.position ?? null,
+          }))
+        : [],
+      contract: state.manager.contract
+        ? { salary: state.manager.contract.salary, until: state.manager.contract.until }
+        : null,
       trophies: state.trophies.map((t) => ({
         competition: t.competition,
         season: t.season,

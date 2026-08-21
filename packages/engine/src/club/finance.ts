@@ -1281,6 +1281,16 @@ function postMonthlyItems(state: GameState): void {
       label: "코칭·사무 스태프 급여",
       amount: weeklyWagesOf(state, team.id) * (52 / 12) * STAFF_WAGE_RATE[tier],
     });
+    // 감독 연봉 — 계약이 있는 것은 감독 팀뿐이다 (career.md §5.1, 경질은 계약을
+    // 지운다). AI 벤치의 몫은 위 스태프 급여율에 이미 뭉쳐 있다
+    if (team.id === state.userTeamId && state.manager.contract) {
+      recordFinance(state, team.id, {
+        kind: "expense",
+        category: "staff_wages",
+        label: "감독 연봉",
+        amount: Math.round(state.manager.contract.salary / 12),
+      });
+    }
     recordFinance(state, team.id, {
       kind: "expense",
       category: "facility",

@@ -66,6 +66,35 @@ export type TeamTalkLog = z.infer<typeof TeamTalkLogSchema>;
 /** 팀토크를 꺼낸 **자리** — 하루 한 번을 세는 단위이기도 하다 (career.md §2) */
 export type TeamTalkOccasion = keyof TeamTalkLog;
 
+/**
+ * **감독 계약** — 연봉·체결일·만료일 (career.md §5.1).
+ *
+ * 새 게임은 부임 구단 등급의 기본 조건(`MANAGER_TERMS_BY_TIER`)으로 시작하고,
+ * 부임은 제안의 조건으로 계약을 다시 세운다. 경질은 계약을 지운다 — 위약금은
+ * 아직 없다 (career.md §8). 옛 세이브엔 없다 (optional — 세이브 버전 유지).
+ */
+export const ManagerContractSchema = z.object({
+  /** 연봉 (£/년) — 매월 1일 구단 지출에 1/12로 선다 (finance.md §6) */
+  salary: z.number().int().min(0),
+  signedOn: DateString,
+  until: DateString,
+});
+export type ManagerContract = z.infer<typeof ManagerContractSchema>;
+
+/**
+ * **감독직 조건의 등급 표** — 제안의 기본 연봉·계약 연수·이적 예산 약속
+ * (career.md §5.1). 흥정의 천장도 이 값에서 출발한다.
+ */
+export const MANAGER_TERMS_BY_TIER: Record<
+  1 | 2 | 3 | 4,
+  { salary: number; years: number; budgetPledge: number }
+> = {
+  1: { salary: 6_000_000, years: 3, budgetPledge: 30_000_000 },
+  2: { salary: 3_000_000, years: 3, budgetPledge: 15_000_000 },
+  3: { salary: 1_500_000, years: 2, budgetPledge: 6_000_000 },
+  4: { salary: 800_000, years: 2, budgetPledge: 2_000_000 },
+};
+
 export const ManagerSchema = z.object({
   name: z.string().min(1),
   /** 온보딩에서 유저가 직접 입력한 배경 서술 (career.md §1) */
@@ -88,6 +117,8 @@ export const ManagerSchema = z.object({
    * 세이브 버전을 올리지 않는다.
    */
   teamTalkedOn: TeamTalkLogSchema.optional(),
+  /** 감독 계약 — 옛 세이브엔 없다 (없으면 연봉 지출도 없다, 세이브 버전 유지) */
+  contract: ManagerContractSchema.optional(),
 });
 export type Manager = z.infer<typeof ManagerSchema>;
 
@@ -121,11 +152,10 @@ export type Dismissal = z.infer<typeof DismissalSchema>;
 /**
  * **감독직 제안** — 공석이 된 구단이 무직 감독을 부른 기록 (career.md §5.1).
  *
- * 이적 협상(`Negotiation`)과 달리 오가는 흥정이 없다. 구단이 부르고 감독이 받거나
- * 받지 않을 뿐이라 라운드 표가 필요 없다 — 답하지 않으면 만료된다.
+ * 이적 협상(`Negotiation`)과 달리 라운드 표가 없다 — 흥정은 제안당 **한 차례**라
+ * `counteredOn` 하나로 충분하다. 답하지 않으면 만료된다.
  *
- * 여기 적힌 등급·순위·기대도 **부를 때의 사실**이다. 감독이 무엇을 받아들이는지는
- * 그 셋이 말하고, 문장은 화면과 GM이 쓴다.
+ * 여기 적힌 등급·순위·기대·조건도 **부를 때의 사실**이다. 문장은 화면과 GM이 쓴다.
  */
 export const ManagerOfferSchema = z.object({
   id: z.string().min(1),
@@ -139,6 +169,32 @@ export const ManagerOfferSchema = z.object({
   /** 그 자리에 걸리는 기대 순위와 그 이름 */
   target: z.number().int().min(1),
   expectation: z.string().min(1),
+  /**
+   * 제시 조건 — 연봉·계약 연수·이적 예산 약속 (career.md §5.1).
+   * 옛 세이브의 제안엔 없다 — 수락하는 순간 등급 표의 기본으로 선다.
+   */
+  salary: z.number().int().min(0).optional(),
+  years: z.number().int().min(1).optional(),
+  budgetPledge: z.number().int().min(0).optional(),
+  /** 어떻게 섰나 — 공석이 불렀나(`vacancy`), 감독이 두드렸나(`knock`) */
+  via: z.enum(["vacancy", "knock"]).optional(),
+  /** 역제안이 오간 날 — 서 있으면 흥정은 끝났다 (한 차례뿐이다) */
+  counteredOn: DateString.optional(),
   status: z.enum(["open", "accepted", "expired"]),
 });
 export type ManagerOffer = z.infer<typeof ManagerOfferSchema>;
+
+/**
+ * **공석 명부의 한 줄** — AI 구단이 감독을 자른 자리 (career.md §5.1).
+ *
+ * 무직인 동안만 쌓이고 14일 뒤 지워진다. 무직 감독이 먼저 지원(`apply_manager_job`)
+ * 할 수 있는 문이다. 옛 세이브엔 없다 (optional — 세이브 버전 유지).
+ */
+export const ManagerVacancySchema = z.object({
+  teamId: z.string().min(1),
+  /** 공석이 난 날 — 경질일 */
+  on: DateString,
+  /** 그날의 리그 순위 */
+  position: z.number().int().min(1).optional(),
+});
+export type ManagerVacancy = z.infer<typeof ManagerVacancySchema>;

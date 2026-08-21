@@ -1336,13 +1336,31 @@ export function careerView(state: GameState): LookupResult {
                 (o) =>
                   `  ${o.id} · ${teamNameIn(state, o.teamId)} (${o.tier}티어) · 기대 ${o.expectation}(${o.target}위)` +
                   (o.position ? ` · 현재 ${o.position}위` : "") +
+                  (o.salary
+                    ? ` · 연봉 ${formatMoney(o.salary)}·${o.years ?? "-"}년·이적 예산 약속 ${formatMoney(o.budgetPledge ?? 0)}`
+                    : "") +
+                  (o.counteredOn ? ` · 흥정 완료` : "") +
                   ` · ${o.expiresOn}까지`,
               ),
             ]
           : [`받은 감독직 제안: 없음`]),
+        ...((state.managerVacancies ?? []).length > 0
+          ? [
+              `최근 공석 (지원할 수 있는 자리):`,
+              ...(state.managerVacancies ?? []).map(
+                (v) =>
+                  `  ${teamNameIn(state, v.teamId)} (${tierOfTeamIn(state, v.teamId)}티어)` +
+                  (v.position ? ` · 현재 ${v.position}위` : "") +
+                  ` · ${v.on} 공석`,
+              ),
+            ]
+          : []),
       ]
     : [
         `[커리어] ${m.name} — ${teamNameIn(state, state.userTeamId)} 재임 · ${seasonLabel(state)}`,
+        ...(m.contract
+          ? [`계약: 연봉 ${formatMoney(m.contract.salary)} · ${m.contract.until}까지`]
+          : []),
         `평판: 보드${m.reputation.board} 미디어${m.reputation.media} 선수단${m.reputation.squad}`,
         warnings > 0
           ? `보드 경고: ${warnings}/${USER_WARNINGS_BEFORE_SACK}회` +

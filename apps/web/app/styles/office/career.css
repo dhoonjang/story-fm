@@ -164,6 +164,12 @@
   flex: 0 0 auto;
   padding: 0;
 }
+/* 계약 — 평판·경고와 같은 단의 읽는 사실 한 줄 */
+.mgr-contract {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
 .trophy-list {
   display: flex;
   flex-direction: column;
@@ -248,6 +254,13 @@
   border: 1px solid var(--accent-2);
   border-radius: var(--r-md);
   padding: 10px 14px;
+}
+/* 공석 — 제안이 아니라 문이다: 답을 기다리는 강조 테두리를 물려받지 않는다 */
+.offer.vacant {
+  border-color: var(--border);
+}
+.offer.vacant .offer-head .until {
+  color: var(--muted);
 }
 .offer-head {
   display: flex;

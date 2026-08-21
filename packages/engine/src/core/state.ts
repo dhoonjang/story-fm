@@ -22,6 +22,7 @@ import type {
   Manager,
   ManagerAttributes,
   ManagerOffer,
+  ManagerVacancy,
   MatchRecord,
   MatchSide,
   NarrativeArc,
@@ -57,6 +58,7 @@ import {
   ATTRIBUTE_AXES,
   DEFAULT_FORMATION,
   FAMILIARITY_BASELINE,
+  MANAGER_TERMS_BY_TIER,
   FORMATIONS,
   FIRST_TEAM_LIMIT,
   MATCHDAY_BENCH,
@@ -85,6 +87,7 @@ import {
   type SeasonCalendar,
 } from "../competition/calendar";
 import { rankByName } from "./name-match";
+import { tierOfTeamIn } from "./club-tier";
 import { defaultXiIds, playerCatalog } from "../world/catalog";
 import { estimateSquadWages, wageSubjectOf } from "../world/wages";
 import { clubEconomyLevel } from "../data/league-economy";
@@ -640,6 +643,12 @@ export interface GameState {
    * 근거다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   managerOffers?: ManagerOffer[];
+  /**
+   * **공석 명부** — AI 구단이 감독을 자른 자리, 무직인 동안만 쌓인다
+   * (career.md §5.1). 무직 감독이 먼저 지원하는(`apply_manager_job`) 문이고,
+   * 14일 뒤 지워진다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  managerVacancies?: ManagerVacancy[];
   /**
    * **아직 GM이 읽지 않은 화면 조작** — 전술판·명단·역할을 직접 만진 것.
    *
@@ -2383,6 +2392,16 @@ export function createGame(input: CreateGameInput): GameState {
   // 명부 밖 벤치의 가상 감독 — 페르소나 다섯이 선 뒤에 채워야 그 이름들을 피해서
   // 뽑는다. 로드 보정과 같은 채널이라 새 게임과 옛 세이브가 같은 사람을 만난다
   ensureSeededManagers(state);
+  // 감독도 계약으로 서 있다 (career.md §5.1) — 부임 구단 등급의 기본 조건.
+  // 체급은 세이브가 가지므로 state가 선 뒤에야 읽을 수 있다
+  {
+    const terms = MANAGER_TERMS_BY_TIER[tierOfTeamIn(state, input.userTeamId)];
+    state.manager.contract = {
+      salary: terms.salary,
+      signedOn: state.date,
+      until: contractUntil(state.date, terms.years),
+    };
+  }
   // 국내 컵 1라운드 추첨일을 미리 달력에 올린다 — tick을 기다리면 부임 첫날의
   // 달력이 비어 보인다 ("리그컵 추첨이 7월 말"이라는 사실은 시작부터 알 수 있다)
   if (hasCups(world)) advanceDomesticCups(state, []);

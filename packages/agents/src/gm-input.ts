@@ -326,15 +326,27 @@ function buildUnemployedNote(state: GameState, passed?: TimePassed | null): stri
       : null,
     `평판: 보드${state.manager.reputation.board} 미디어${state.manager.reputation.media} 선수단${state.manager.reputation.squad}`,
     offers.length > 0
-      ? `받은 감독직 제안 (accept_manager_offer로 수락한다 — 감독이 받겠다고 할 때만):\n${offers
+      ? `받은 감독직 제안 (accept_manager_offer로 수락한다 — 감독이 받겠다고 할 때만. 수락 전 counter_manager_offer로 한 차례 조건을 되부를 수 있다):\n${offers
           .map(
             (o) =>
               `- ${o.id} · ${teamName(o.teamId)} (${o.tier}티어) · 기대 ${o.expectation}(${o.target}위)${
                 o.position ? ` · 현재 ${o.position}위` : ""
+              }${o.salary ? ` · 연봉 ${formatMoney(o.salary)}·${o.years ?? "-"}년·이적 예산 약속 ${formatMoney(o.budgetPledge ?? 0)}` : ""}${
+                o.counteredOn ? " · 흥정은 끝났다 — 수락 여부만 남았다" : ""
               } · ${o.expiresOn}까지`,
           )
           .join("\n")}`
-      : `받은 감독직 제안 없음 — 기다리는 것 말고 감독이 할 수 있는 일은 없다.`,
+      : `받은 감독직 제안 없음.`,
+    (state.managerVacancies ?? []).length > 0
+      ? `최근 공석 (apply_manager_job으로 먼저 지원할 수 있다 — 평판이 그 등급의 문턱을 넘어야 하고, 감독이 원한다고 말할 때만):\n${(
+          state.managerVacancies ?? []
+        )
+          .map(
+            (v) =>
+              `- ${teamName(v.teamId)}${v.position ? ` · 현재 ${v.position}위` : ""} · ${v.on} 공석`,
+          )
+          .join("\n")}`
+      : null,
     timePassedLine(state, passed),
   ].filter((x): x is string => x !== null);
   const recent = recentNarrativeLines(state);
