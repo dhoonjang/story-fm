@@ -1686,6 +1686,18 @@ export const PlayerStateSchema = z.object({
    * 옛 세이브엔 없다 — 없으면 감독이 내린 적 없는 것으로 읽고 버전을 올리지 않는다.
    */
   demotedOn: DateString.optional(),
+  /**
+   * **이적 요청이 선 날** — 다가옴 사다리의 꼭대기(계단 5)에서 에이전트가 세운다
+   * (people.md §8). 서 있는 동안 AI 시장이 이 선수를 노리기 쉬워지고, 그 선수의
+   * 다가옴 압력은 더 쌓이지 않는다.
+   *
+   * 걷히는 길은 둘뿐이다: 불만이 전부 풀리면 거둬들이고(`tickApproaches`), 팀을
+   * 떠나면 다른 상태와 함께 지워진다(`clearDepartedState`). 감독의 스탠스는 요청을
+   * 지우지 못한다.
+   *
+   * 옛 세이브엔 없다 — 없으면 요청한 적 없는 것으로 읽고 버전을 올리지 않는다.
+   */
+  transferRequestedOn: DateString.optional(),
 });
 export type PlayerState = z.infer<typeof PlayerStateSchema>;
 

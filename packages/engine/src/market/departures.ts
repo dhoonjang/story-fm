@@ -74,6 +74,7 @@ export function clearDepartedState(state: GameState, player: GamePlayer, from: s
   state.transferList = state.transferList.filter((l) => l.gamePlayerId !== player.id);
   state.playerTraining = state.playerTraining.filter((t) => t.gamePlayerId !== player.id);
   state.issues = state.issues.filter((i) => i.gamePlayerId !== player.id);
+  player.state.transferRequestedOn = undefined;
   forgetRoles(state, player.id);
   player.isCaptain = false;
 }
