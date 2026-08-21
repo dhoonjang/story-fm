@@ -11,8 +11,14 @@ import type { GameState } from "../core/state";
 import { pendingApproach } from "../club/approach";
 import { pendingPress } from "../club/press";
 import { knowledgeOf, type Knowledge } from "../squad/scouting";
-import { headCoachOf, ownerOf, reportersOf, worldFigureByName, worldFigures } from "./persona";
-import { MARKET_LEAGUE_SQUADS } from "../data/market-leagues";
+import {
+  headCoachOf,
+  isFamousPlayer,
+  ownerOf,
+  reportersOf,
+  worldFigureByName,
+  worldFigures,
+} from "./persona";
 import { generatePlayerPersona } from "./player-persona";
 
 /**
@@ -43,32 +49,6 @@ const HISTORY_WINDOW_TURNS = 1;
 
 /** 한 글자짜리 키워드는 어느 문장에나 걸린다 — 키워드가 되지 못한다 (people.md §6) */
 const MIN_KEYWORD_LENGTH = 2;
-
-/**
- * **이름난 현역의 선** — 종합이 이만큼이면 세계가 그 이름을 안다 (people.md §6).
- *
- * 세계에 명성 필드가 없어 능력치로 긋는다. 시장가는 나이 먹은 레전드를 0으로 만들어
- * **정확히 담아야 할 이름을 떨어뜨리고**, 잠재력은 85 이상이 대부분 스물 미만이라
- * 더 나쁘다. 82는 세계 5,300명 중 58명이 서는 선이다 — 여기를 낮추면 동명이인이
- * 늘어 정작 우리 선수가 사라진다(`candidatesOf`).
- */
-const FAMOUS_PLAYER_OVERALL = 82;
-
-/**
- * 능력치가 답하지 못하는 이름들 — **시장 전용 리그(사우디·MLS)의 시드 명단**.
- *
- * 마흔한 살 호날두는 82지만 서른아홉 메시는 80이고 수아레스는 75다. 나이가 깎은
- * 것은 기량이지 이름값이 아니다. 그 표는 이미 "감독이 데려올 만한 이름"만 담기로
- * 하고 만든 명단이므로(`data/market-leagues.ts`), **표가 곧 명성의 선이다** —
- * 표에서 지우면 그 이름은 세계에서 사라진다.
- *
- * 팀이 아니라 이름으로 본다: 그 선수가 유럽으로 돌아와도 세계가 아는 이름은 그대로다.
- */
-const MARKET_LEGEND_NAMES: ReadonlySet<string> = new Set(
-  Object.values(MARKET_LEAGUE_SQUADS)
-    .flat()
-    .map((seed) => seed.nameKo),
-);
 
 /**
  * 상한에 걸렸을 때 자르는 순서 — 작을수록 먼저 선다.
@@ -339,7 +319,7 @@ function candidatesOf(state: GameState): Candidate[] {
 
   // ── 이름난 현역 ── 우리 선수단을 먼저 담은 **뒤**여야 동명이인 자리를 우리가 지킨다
   for (const player of state.players) {
-    if (!isFamous(player.attributes.overall, player.name)) continue;
+    if (!isFamousPlayer(player.attributes.overall, player.name)) continue;
     add(generatePlayerPersona(state.seed, player), NEAR_WORLD, asKnown(player.id));
   }
 
@@ -348,11 +328,6 @@ function candidatesOf(state: GameState): Candidate[] {
   for (const figure of worldFigures(state)) add(figure, NEAR_WORLD, always("full"));
 
   return [...byId.values()];
-}
-
-/** 세계가 이 이름을 아는가 — 능력치의 선, 또는 시장 전용 리그의 시드 명단 */
-function isFamous(overall: number, name: string): boolean {
-  return overall >= FAMOUS_PLAYER_OVERALL || MARKET_LEGEND_NAMES.has(name);
 }
 
 /**
