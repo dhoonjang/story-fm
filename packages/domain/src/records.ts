@@ -738,6 +738,72 @@ export const NarrativeNoteSchema = z.object({
 });
 export type NarrativeNote = z.infer<typeof NarrativeNoteSchema>;
 
+/**
+ * 서사 아크의 갈래 — **장부 한 줄이 열고 닫을 수 있는 것만** 갈래가 된다
+ * (people.md §9). 개폐 규칙은 `engine/world/arcs.ts`가 전부 갖는다.
+ */
+export const ARC_KINDS = [
+  /** 예상 결장 30일 이상의 부상 → 재활 → 복귀 */
+  "injury-comeback",
+  /** 곪는 불만 — `PlayerIssue`가 7일을 넘기면 이야기가 된다 */
+  "grievance",
+  /** 리그 3연승부터 */
+  "winning-run",
+  /** 리그 3연패부터 */
+  "losing-run",
+  /** 협상 2라운드 이상 — 한 방에 끝난 오퍼는 사가가 아니다 */
+  "transfer-saga",
+] as const;
+export const ArcKindSchema = z.enum(ARC_KINDS);
+export type ArcKind = z.infer<typeof ArcKindSchema>;
+
+/** 아크의 단계 — 한 방향으로만 움직인다 (people.md §9) */
+export const ARC_STAGES = ["open", "rising", "climax", "resolved"] as const;
+export const ArcStageSchema = z.enum(ARC_STAGES);
+export type ArcStage = z.infer<typeof ArcStageSchema>;
+
+/** 단계가 앞으로만 가는가를 비교하는 서열 — 되감기면 GM이 지난 턴과 다른 흐름을 읽는다 */
+export const ARC_STAGE_RANK: Record<ArcStage, number> = {
+  open: 0,
+  rising: 1,
+  climax: 2,
+  resolved: 3,
+};
+
+/** 단계 이름 — 스냅샷·화면이 같은 말을 쓴다 */
+export const ARC_STAGE_KO: Record<ArcStage, string> = {
+  open: "발단",
+  rising: "고조",
+  climax: "절정",
+  resolved: "해소",
+};
+
+/** 압축 에이전트가 제안하는 제목의 길이 상한 — 넘으면 통째로 버려진다 */
+export const ARC_TITLE_MAX = 30;
+
+/**
+ * 서사 아크 — **기억을 이야기로 엮는 골격** (people.md §9).
+ *
+ * 개폐는 코어가 장부의 사실(부상·불만·경기·협상)에서 결정적으로 판정하고, 모델이
+ * 하는 것은 이름 짓기뿐이다. 아크는 데이터일 뿐 강제 이벤트가 아니다 — 코어 상태를
+ * 바꾸지 않고, GM이 시즌을 가로지르는 흐름을 읽는 재료로만 선다.
+ */
+export const NarrativeArcSchema = z.object({
+  id: z.string().min(1),
+  kind: ArcKindSchema,
+  /** 아크의 주인 — 선수 아크는 `GAME_PLAYER.id`, 연속 기록 아크는 팀 id */
+  subjectId: z.string().min(1),
+  stage: ArcStageSchema,
+  openedOn: DateString,
+  /** 단계가 마지막으로 움직인 날 */
+  updatedOn: DateString,
+  /** null = 아직 활성 */
+  resolvedOn: DateString.nullable(),
+  /** 압축 에이전트가 제안하고 코어가 검증한 이름 — 없으면 코어 사실 줄이 대신 선다 */
+  title: z.string().min(1).max(ARC_TITLE_MAX).optional(),
+});
+export type NarrativeArc = z.infer<typeof NarrativeArcSchema>;
+
 // ── 이력 압축 ─────────────────────────────────────────
 /**
  * 이력 압축의 자국 — **접힌 구간의 요약과 어디까지 접었는가** (agents.md §5).

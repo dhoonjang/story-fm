@@ -28,6 +28,9 @@ import {
   type CharacterDraft,
 } from "../src/world/persona";
 import { generatePlayerPersona, PLAYER_ARCHETYPE_LABELS } from "../src/world/player-persona";
+import { personaRelations } from "../src/world/relations";
+import { selectCharacters } from "../src/world/character-book";
+import type { GameState } from "../src/core/state";
 import { createTestGame } from "./helpers";
 
 /**
@@ -708,5 +711,98 @@ describe("캐릭터북 갱신", () => {
     );
     // 다른 인물의 기억은 밀리지 않는다
     expect(state.characterMemories!.some((m) => m.characterId === owner.characterId)).toBe(true);
+  });
+});
+
+describe("페르소나 사이의 관계 초기값 (people.md §6)", () => {
+  // 관계는 원형에서만 나오므로 나머지는 그대로 두고 원형만 갈아 끼운다.
+  // 기자의 원형은 건드리지 않는다 — `"타블로이드 · 데일리 버즈"`처럼 매체가 붙은
+  // 실제 문자열에서도 축이 나와야 한다
+  const base = createTestGame(42);
+  const withAxes = (coach: string, owner: string): GameState => ({
+    ...base,
+    personas: (base.personas ?? []).map((p) =>
+      p.role === "head_coach"
+        ? { ...p, archetype: coach }
+        : p.role === "owner"
+          ? { ...p, archetype: owner }
+          : p,
+    ),
+  });
+  const stanceWith = (state: GameState, from: string, to: string) =>
+    personaRelations(state, from).find((r) => r.characterId === to)?.stance;
+
+  it("같은 세이브는 언제 물어도 같은 관계다", () => {
+    const state = withAxes("인간관계형", "산업가형");
+    const coach = headCoachOf(state);
+    expect(personaRelations(state, coach.characterId)).toEqual(
+      personaRelations(state, coach.characterId),
+    );
+  });
+
+  it("축이 부딪히면 tense, 통하면 aligned, 나머지는 목록에 없다", () => {
+    // 사람 · 효율 — 라커룸을 보는 코치와 손익을 보는 구단주
+    const tense = withAxes("인간관계형", "산업가형");
+    const coach = headCoachOf(tense);
+    const owner = ownerOf(tense);
+    expect(stanceWith(tense, coach.characterId, owner.characterId)).toBe("tense");
+    // 관계는 양쪽에서 같은 결로 보인다
+    expect(stanceWith(tense, owner.characterId, coach.characterId)).toBe("tense");
+
+    // 구단 · 연고
+    const aligned = withAxes("구단 토박이형", "지역 유지형");
+    expect(
+      stanceWith(aligned, headCoachOf(aligned).characterId, ownerOf(aligned).characterId),
+    ).toBe("aligned");
+
+    // 같은 축은 통한다 — 경기를 먼저 보는 구단주와 전술 기자
+    const national = reportersOf(aligned).find((r) => r.archetype.startsWith("전국지"))!;
+    const sameAxis = withAxes("구단 토박이형", "축구광형");
+    expect(stanceWith(sameAxis, ownerOf(sameAxis).characterId, national.characterId)).toBe(
+      "aligned",
+    );
+
+    // 중립은 관계를 만들지 않는다 — 몸 · 화제는 짝 표에 없다
+    const neutral = withAxes("야전 조련사형", "흥행가형");
+    expect(
+      stanceWith(neutral, headCoachOf(neutral).characterId, ownerOf(neutral).characterId),
+    ).toBe(undefined);
+    // 그 코치에게 서는 것은 전국지 기자(몸 · 경기) 하나뿐이다
+    expect(personaRelations(neutral, headCoachOf(neutral).characterId)).toEqual([
+      {
+        characterId: national.characterId,
+        name: national.name,
+        stance: "aligned",
+        ours: "몸",
+        theirs: "경기",
+      },
+    ]);
+  });
+
+  it("자기 자신과는 관계가 서지 않는다 — 같은 축이라도", () => {
+    const state = withAxes("축구광형", "축구광형");
+    for (const persona of [headCoachOf(state), ownerOf(state), ...reportersOf(state)]) {
+      expect(personaRelations(state, persona.characterId).map((r) => r.characterId)).not.toContain(
+        persona.characterId,
+      );
+    }
+    // 선수도 세계 인물 명부도 대상이 아니다
+    expect(personaRelations(state, state.players[0]!.name)).toEqual([]);
+  });
+
+  it("full 깊이의 카드에만 실린다", () => {
+    const state = withAxes("인간관계형", "산업가형");
+    const coach = headCoachOf(state);
+    const card = selectCharacters(state, { pointed: [coach.characterId] }).find(
+      (e) => e.characterId === coach.characterId,
+    )!;
+    expect(card.depth).toBe("full");
+    expect(card.relations).toEqual(personaRelations(state, coach.characterId));
+    // 선수 카드에는 관계 필드 자체가 없다
+    const player = state.players[0]!;
+    const playerCard = selectCharacters(state, { pointed: [player.name] }).find(
+      (e) => e.characterId === player.name,
+    )!;
+    expect(playerCard.relations).toBeUndefined();
   });
 });

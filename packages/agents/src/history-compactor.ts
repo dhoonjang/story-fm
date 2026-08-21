@@ -1,10 +1,13 @@
 import { z } from "zod";
-import { personaRoleLabel, type Persona } from "@story-fm/domain";
+import { ARC_STAGE_KO, ARC_TITLE_MAX, personaRoleLabel, type Persona } from "@story-fm/domain";
 import {
   HISTORY_DIGEST_CHARS,
   REGISTERABLE_ROLES,
+  activeArcs,
+  applyArcTitles,
   applyCharacterMemories,
   applyHistoryDigest,
+  arcFactLine,
   planHistoryFold,
   registerCharacters,
   type GameState,
@@ -51,6 +54,11 @@ export const HISTORY_COMPACTOR_SYSTEM = `당신은 구단의 기록 담당이다
   friend, 이름 있는 서포터는 supporter.
 - 집단은 사람이 아니다. 이름 없는 "취재진"·"관중"은 세우지 않는다.
 
+## 아크 제목
+- "이름 없는 이야기" 목록이 주어지면, 그 아크에 어울리는 제목을 제안한다.
+- 제목은 ${ARC_TITLE_MAX}자 이내 — 사실 줄을 되풀이하지 말고 이야기의 결을 잡아라.
+- 목록에 없는 아크에는 제목을 붙이지 않는다. 목록이 없으면 비운다.
+
 반드시 report_digest 도구로만 답한다. 그 밖의 텍스트는 쓰지 않는다.`;
 
 const MemorySchema = z.object({
@@ -72,10 +80,16 @@ const CharacterSchema = z.object({
   }),
 });
 
+const ArcTitleSchema = z.object({
+  arcId: z.string().min(1),
+  title: z.string().min(1).max(ARC_TITLE_MAX),
+});
+
 const ReportInputSchema = z.object({
   summary: z.string().min(1),
   memories: z.array(MemorySchema).optional(),
   characters: z.array(CharacterSchema).optional(),
+  arcTitles: z.array(ArcTitleSchema).optional(),
 });
 
 /** 접히는 구간의 화자 — 세이브의 역할을 사람이 읽는 말로 */
@@ -85,10 +99,11 @@ function speakerOf(role: HistoryFoldBrief["turns"][number]["role"]): string {
   return "감독";
 }
 
-/** 브리프를 프롬프트 본문으로 — 이전 요약 + 이미 선 사람 + 접히는 원문 */
+/** 브리프를 프롬프트 본문으로 — 이전 요약 + 이미 선 사람 + 이름 없는 아크 + 접히는 원문 */
 export function buildCompactionPrompt(
   personas: readonly Persona[] | undefined,
   brief: HistoryFoldBrief,
+  arcs: readonly { id: string; line: string }[] = [],
 ): string {
   const blocks: string[] = [];
   if (brief.previous !== null) {
@@ -101,11 +116,31 @@ export function buildCompactionPrompt(
   if (standing.length > 0) {
     blocks.push("## 이미 캐릭터북에 선 사람 — 다시 세우지 않는다", ...standing, "");
   }
+  if (arcs.length > 0) {
+    blocks.push(
+      "## 이름 없는 이야기 — arcTitles로 제목을 제안하라",
+      ...arcs.map((a) => `- ${a.id} · ${a.line}`),
+      "",
+    );
+  }
   blocks.push(`## 접히는 구간 (${brief.turns.length}턴)`);
   for (const turn of brief.turns) {
     blocks.push(`### ${turn.at} · ${speakerOf(turn.role)}`, turn.text);
   }
   return blocks.join("\n");
+}
+
+/**
+ * 제목이 없는 활성 아크 — 압축 브리프에 실리는 목록이다 (people.md §9).
+ * 사실 줄은 코어의 것(`arcFactLine`)이고, 단계를 붙여 이야기의 지금을 알린다.
+ */
+export function untitledArcs(state: GameState): { id: string; line: string }[] {
+  return activeArcs(state)
+    .filter((arc) => arc.title === undefined)
+    .map((arc) => ({
+      id: arc.id,
+      line: `${arcFactLine(state, arc)} (${ARC_STAGE_KO[arc.stage]})`,
+    }));
 }
 
 /**
@@ -150,6 +185,21 @@ function makeReportTool(
               salience: { type: "integer", description: "1~5" },
             },
             required: ["characterId", "text"],
+          },
+        },
+        arcTitles: {
+          type: "array",
+          description: "이름 없는 이야기에 제안하는 제목 — 목록이 없으면 비운다",
+          items: {
+            type: "object",
+            properties: {
+              arcId: { type: "string", description: "목록의 아크 id 그대로" },
+              title: {
+                type: "string",
+                description: `이야기의 결을 잡는 제목 (${ARC_TITLE_MAX}자 이내)`,
+              },
+            },
+            required: ["arcId", "title"],
           },
         },
         characters: {
@@ -204,8 +254,13 @@ function makeReportTool(
       // 등록이 기억보다 먼저다 — 새로 선 사람은 등록된 뒤에야 이 세계의 화자가 된다
       const characters = registerCharacters(state, parsed.data.characters ?? []);
       const memories = applyCharacterMemories(state, parsed.data.memories ?? []);
+      // 제목은 코어가 검증한다 — 아크가 있고·활성이고·아직 이름이 없을 때만 (people.md §9)
+      const titles = applyArcTitles(state, parsed.data.arcTitles ?? []);
       onApplied({ folded: true, memories, characters });
-      return { ok: true, message: `요약 갱신 · 기억 ${memories} · 인물 ${characters}` };
+      return {
+        ok: true,
+        message: `요약 갱신 · 기억 ${memories} · 인물 ${characters} · 아크 제목 ${titles}`,
+      };
     },
   };
 }
@@ -233,7 +288,7 @@ export async function compactHistory(state: GameState, llm?: GameLLM): Promise<C
         return client.runTurn({
           system: HISTORY_COMPACTOR_SYSTEM,
           history: [],
-          user: buildCompactionPrompt(state.personas, brief),
+          user: buildCompactionPrompt(state.personas, brief, untitledArcs(state)),
           tools: [makeReportTool(state, brief, (r) => (result = r))],
           toolChoice: { name: REPORT_DIGEST_TOOL },
         });

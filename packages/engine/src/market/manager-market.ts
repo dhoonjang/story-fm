@@ -2,7 +2,7 @@ import { topLeagues } from "../data/league-catalog";
 import { leagueOfTeamIn, leagueSizeIn } from "../competition/promotion";
 import { tierOfTeamIn } from "../core/club-tier";
 import { positionAt, relegationLine } from "../core/league-shape";
-import { inventPersonName } from "../world/persona";
+import { inventPersonName, reseatClubPersonas } from "../world/persona";
 import { makeRng, randInt } from "../core/rng";
 import { addDays } from "../core/dates";
 import { boardExpectation, computeStandings, type StandingRow } from "../competition/season";
@@ -466,6 +466,8 @@ export function acceptManagerOffer(state: GameState, ref: string): SkillResult {
 
   offer.status = "accepted";
   const team = state.teams.find((t) => t.id === offer.teamId);
+  // 경질 뒤에도 `userTeamId`는 옛 구단이다 (§5.1) — 떠나기 전에 리그를 읽어 둔다
+  const fromLeague = leagueOfTeamIn(state, state.userTeamId);
   state.userTeamId = offer.teamId;
   if (team) {
     team.managerName = state.manager.name;
@@ -494,6 +496,11 @@ export function acceptManagerOffer(state: GameState, ref: string): SkillResult {
   state.issues = [];
   // 기본 훈련은 새 선수단으로 다시 깔린다
   syncDefaultTraining(state);
+  // 수석코치·구단주는 구단의 사람이라 새 구단 기준으로 다시 서고,
+  // 기자단은 리그를 따라다니므로 리그를 건널 때만 갈린다 (career.md §5.1)
+  reseatClubPersonas(state, offer.teamId, {
+    crossedLeague: fromLeague !== leagueOfTeamIn(state, offer.teamId),
+  });
 
   const name = teamNameIn(state, offer.teamId);
   pushNarrative(state, `${name} 부임`, 5);
