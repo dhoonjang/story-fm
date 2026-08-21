@@ -405,9 +405,7 @@ describe("계단 4·5 — 언론 유출과 이적 요청", () => {
 
     pressDays(state, 1);
     expect(pendingApproach(state)).toBeNull();
-    expect(state.pressLeaks).toEqual([
-      { playerId: target.id, topic: "minutes", date: state.date },
-    ]);
+    expect(state.pressLeaks).toEqual([{ playerId: target.id, topic: "minutes", date: state.date }]);
     const row = rowOf(state, target.id);
     expect(row.step).toBe(4);
     // 유출은 압력을 풀지 않는다 — 직전 임계(400)의 75%가 남는다
