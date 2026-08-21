@@ -4,16 +4,19 @@ import { tierOfTeamIn } from "../core/club-tier";
 import { positionAt, relegationLine } from "../core/league-shape";
 import { inventPersonName, occupiedPersonNames, reseatClubPersonas } from "../world/persona";
 import { makeRng, randInt } from "../core/rng";
-import { addDays } from "../core/dates";
+import { addDays, contractUntil } from "../core/dates";
 import { boardExpectation, computeStandings, type StandingRow } from "../competition/season";
 import { syncDefaultTraining } from "../squad/training-plan";
 import {
   AI_MANAGER_RATING_FALLBACK,
+  MANAGER_TERMS_BY_TIER,
   clampCondition,
+  formatMoney,
   type GameTeam,
   type ManagerOffer,
 } from "@story-fm/domain";
 import {
+  financeOf,
   playersOf,
   pushNarrative,
   teamName,
@@ -100,6 +103,31 @@ const OFFER_DAYS = 10;
  * 기준이 "제안이 아예 없었다"이면 첫 제안(10일 만료)을 놓친 뒤로는 안전판이 없다.
  */
 export const OFFER_DRY_SPELL_DAYS = 120;
+/**
+ * 공석 명부가 열려 있는 날 수 — 경질 뒤 이만큼은 무직 감독이 먼저 두드릴 수 있다
+ * (career.md §5.1). 새 감독은 그날로 서지만, 갓 앉은 벤치는 아직 굳지 않았다.
+ */
+export const VACANCY_KNOCK_DAYS = 14;
+/** 지원해서 선 제안의 연봉 배율 — 아쉬운 쪽이 깎인다 (career.md §5.1) */
+export const KNOCK_SALARY_RATE = 0.85;
+/**
+ * tier 4의 흥정 기준점 — 문턱이 없는 등급이라 여유의 출발점만 여기서 잰다.
+ * 경질 직후 보드 평판의 바닥(`USER_BOARD_FLOOR`)과 같은 값이다: 그 처지에서는
+ * 여유도 바닥에서 시작한다.
+ */
+const TIER4_HEADROOM_ANCHOR = 25;
+
+/**
+ * **흥정의 여유** — 보드가 제시 조건 위로 물러설 수 있는 비율 (career.md §5.1).
+ *
+ * 문턱(`OFFER_REPUTATION_GATE`)을 얼마나 넘어서 있느냐가 폭이다: 문턱에 턱걸이면
+ * 5%, 50을 넘으면 상한 30%. 평판이 문턱 아래인 제안(안전판·tier 4)은 최저 폭만
+ * 받는다.
+ */
+export function counterHeadroom(reputation: number, tier: 1 | 2 | 3 | 4): number {
+  const anchor = OFFER_REPUTATION_GATE[tier] ?? TIER4_HEADROOM_ANCHOR;
+  return Math.min(0.3, 0.05 + Math.max(0, reputation - anchor) / 200);
+}
 
 /** 감독 팀의 경고 단계 — 이 횟수를 넘기면 경질된다 */
 export const USER_WARNINGS_BEFORE_SACK = 3;
@@ -211,6 +239,14 @@ function expireStaleOffers(state: GameState, digest: string[]): void {
   }
 }
 
+/** 14일이 지난 공석은 명부에서 내려간다 — 새 벤치가 굳은 자리다 (career.md §5.1) */
+function pruneVacancies(state: GameState): void {
+  if (!state.managerVacancies?.length) return;
+  state.managerVacancies = state.managerVacancies.filter(
+    (v) => daysBetween(v.on, state.date) < VACANCY_KNOCK_DAYS,
+  );
+}
+
 /**
  * 무직 안전판 — **이번 무직 기간의 마지막 제안**으로부터 120일이 지났는가
  * (career.md §5.1). 제안이 아직 없었으면 경질일에서 잰다.
@@ -264,6 +300,7 @@ export function offerVacancy(
   if (!dry && rng() > OFFER_CHANCE) return false;
 
   const expectation = boardExpectation(state, teamId);
+  const terms = MANAGER_TERMS_BY_TIER[tier];
   state.managerOffers = [
     ...offers,
     {
@@ -276,12 +313,16 @@ export function offerVacancy(
       position,
       target: expectation.target,
       expectation: expectation.label,
+      salary: terms.salary,
+      years: terms.years,
+      budgetPledge: terms.budgetPledge,
+      via: "vacancy",
       status: "open",
     },
   ];
   digest.push(
     `💼 ${teamShortNameIn(state, teamId)}가 감독직을 제안했다 — 기대는 ${expectation.label}` +
-      ` · ${OFFER_DAYS}일 안에 답해야 한다`,
+      ` · 연봉 ${formatMoney(terms.salary)}·${terms.years}년 · ${OFFER_DAYS}일 안에 답해야 한다`,
   );
   pushNarrative(state, `${teamNameIn(state, teamId)} 감독직 제안`, 5);
   return true;
@@ -304,6 +345,7 @@ export function runManagerMarket(state: GameState, digest: string[]): boolean {
   const tableOf = standingsCache(state);
 
   expireStaleOffers(state, digest);
+  pruneVacancies(state);
 
   for (const team of state.teams) {
     if (sacked >= SACKINGS_PER_DAY) break;
@@ -320,6 +362,15 @@ export function runManagerMarket(state: GameState, digest: string[]): boolean {
 
     installNewManager(state, team, rng);
     sacked += 1;
+
+    // 공석 명부 — 무직 감독이 먼저 두드릴 수 있는 문이다. 무직인 동안만 쌓는다:
+    // 재직 중의 공석은 감독의 것이 아니고, 세이브에 쌓일 이유도 없다 (career.md §5.1)
+    if (state.dismissal) {
+      state.managerVacancies = [
+        ...(state.managerVacancies ?? []),
+        { teamId: team.id, on: state.date, position: standing.position },
+      ];
+    }
 
     // 우리 리그의 일만 브리핑한다 — 5대 리그 전체를 올리면 소음이다
     if (leagueOfTeamIn(state, team.id) === ourLeague) {
@@ -412,6 +463,10 @@ export function reviewUserSeat(state: GameState, digest: string[]): boolean {
     expectation: expectation.label,
   };
 
+  // 경질은 계약을 지운다 — 위약금은 아직 없다: 감독 개인의 지갑이 게임에 없어
+  // 받을 자리가 없다 (career.md §8)
+  delete state.manager.contract;
+
   // 감독이 없는 구단은 세계에 없다 — 옛 구단은 그날로 후임을 세운다
   const team = state.teams.find((t) => t.id === sackedTeamId);
   if (team) installNewManager(state, team, makeRng(state.seed, `user-sacked:${state.date}`));
@@ -476,6 +531,20 @@ export function acceptManagerOffer(state: GameState, ref: string): SkillResult {
     team.managerSince = state.date;
   }
   /**
+   * **감독 계약이 선다** — 제안의 조건으로 (career.md §5.1). 옛 세이브의 제안엔
+   * 조건이 없어 그 순간 등급 표의 기본으로 선다. 이적 예산 약속은 그 자리에서
+   * 새 구단의 예산에 더해진다 — 약속은 부임과 함께 이행되는 사실이다.
+   */
+  const base = MANAGER_TERMS_BY_TIER[offer.tier as 1 | 2 | 3 | 4];
+  const salary = offer.salary ?? base.salary;
+  const years = offer.years ?? base.years;
+  const contract = { salary, signedOn: state.date, until: contractUntil(state.date, years) };
+  state.manager.contract = contract;
+  const pledge = offer.budgetPledge ?? 0;
+  if (pledge > 0) financeOf(state, offer.teamId).transferBudget += pledge;
+  // 부임한 감독에게 공석은 더 이상 문이 아니다
+  state.managerVacancies = [];
+  /**
    * 경질장은 지워지지 않고 **이력으로 옮겨진다** (career.md §6) — 잘린 시즌은
    * `SEASON_RECORD`가 없으므로, 이 줄이 없으면 그 해가 커리어 표에서 통째로 빈다.
    */
@@ -510,8 +579,181 @@ export function acceptManagerOffer(state: GameState, ref: string): SkillResult {
     ok: true,
     message:
       `${name} 감독으로 부임했습니다 (${state.date}) — 보드의 기대는 ${offer.expectation},` +
-      ` 지금 순위는 ${offer.position ?? "-"}위입니다`,
+      ` 지금 순위는 ${offer.position ?? "-"}위입니다.` +
+      ` 계약은 연봉 ${formatMoney(salary)}에 ${contract.until}까지` +
+      (pledge > 0 ? `, 이적 예산 ${formatMoney(pledge)}이 약속대로 더해졌습니다` : `입니다`),
     tone: "good",
+  };
+}
+
+/**
+ * **제안에 한 차례 조건을 되부른다** — 연봉·이적 예산 약속 (career.md §5.1).
+ *
+ * 보드의 답은 천장이 정한다: 제시 조건 × (1 + `counterHeadroom`). 되부른 값이
+ * 천장 이하면 그대로, 넘으면 천장에서 멈춘다. 어느 쪽이든 흥정은 이 한 번으로
+ * 끝난다(`counteredOn`) — 남는 것은 수락 여부뿐이다.
+ *
+ * @param ref 제안 id 또는 구단 이름·약칭
+ */
+export function counterManagerOffer(
+  state: GameState,
+  ref: string,
+  ask: { salary?: number; transferBudget?: number },
+): SkillResult {
+  if (!state.dismissal) {
+    return { ok: false, message: `${teamNameIn(state, state.userTeamId)} 감독으로 재직 중입니다` };
+  }
+  const offer = (state.managerOffers ?? []).find((o) => offerMatches(state, o, ref));
+  if (!offer) return { ok: false, message: `"${ref}"에 해당하는 감독직 제안이 없습니다` };
+  if (offer.status !== "open" || offer.expiresOn < state.date) {
+    return {
+      ok: false,
+      message: `${teamNameIn(state, offer.teamId)}의 제안은 ${offer.expiresOn}에 만료됐습니다`,
+    };
+  }
+  if (offer.counteredOn) {
+    return {
+      ok: false,
+      message: `${teamNameIn(state, offer.teamId)}와의 흥정은 이미 한 차례 끝났습니다 — 남은 것은 수락 여부뿐입니다`,
+    };
+  }
+  if (ask.salary === undefined && ask.transferBudget === undefined) {
+    return { ok: false, message: "연봉·이적 예산 중 하나는 불러야 합니다" };
+  }
+
+  const tier = offer.tier as 1 | 2 | 3 | 4;
+  const base = MANAGER_TERMS_BY_TIER[tier];
+  const reputation = (state.manager.reputation.board + state.manager.reputation.media) / 2;
+  const headroom = counterHeadroom(reputation, tier);
+  const parts: string[] = [];
+
+  /** 한 축의 흥정 — 제시액 아래로는 내려가지 않고, 천장 위로는 올라가지 않는다 */
+  const settle = (label: string, offered: number, asked: number): number => {
+    const ceiling = Math.round(offered * (1 + headroom));
+    if (asked <= offered) {
+      parts.push(`${label} ${formatMoney(offered)} — 제시액 아래로는 내려가지 않는다`);
+      return offered;
+    }
+    if (asked <= ceiling) {
+      parts.push(`${label} ${formatMoney(asked)} — 요구대로`);
+      return asked;
+    }
+    parts.push(`${label} ${formatMoney(ceiling)} — 천장에서 멈췄다 (요구 ${formatMoney(asked)})`);
+    return ceiling;
+  };
+
+  // 흥정이 끝난 제안의 조건은 확정 사실로 적힌다 — 옛 세이브의 빈 칸도 여기서 찬다
+  offer.salary =
+    ask.salary === undefined
+      ? (offer.salary ?? base.salary)
+      : settle("연봉", offer.salary ?? base.salary, ask.salary);
+  offer.budgetPledge =
+    ask.transferBudget === undefined
+      ? (offer.budgetPledge ?? base.budgetPledge)
+      : settle("이적 예산 약속", offer.budgetPledge ?? base.budgetPledge, ask.transferBudget);
+  offer.years = offer.years ?? base.years;
+  offer.counteredOn = state.date;
+
+  pushNarrative(state, `${teamNameIn(state, offer.teamId)} 조건 흥정`, 4);
+  return {
+    ok: true,
+    message:
+      `${teamNameIn(state, offer.teamId)}가 답했습니다 — ${parts.join(" · ")}.` +
+      ` 흥정은 여기까지입니다 — 남은 것은 수락 여부입니다 (${offer.expiresOn}까지)`,
+  };
+}
+
+/**
+ * **노크 — 무직 감독이 공석에 먼저 지원한다** (career.md §5.1).
+ *
+ * 공석 명부(`state.managerVacancies`)에 있는 구단만 두드릴 수 있고, 평판 문턱은
+ * 제안과 같은 표(`OFFER_REPUTATION_GATE`)다. 확률이 없다 — 문은 열리거나 안
+ * 열리거나다. 성사된 제안은 연봉이 기본의 0.85배다: 아쉬운 쪽이 깎인다.
+ *
+ * @param teamRef 구단 id 또는 이름·약칭
+ */
+export function applyForManagerJob(state: GameState, teamRef: string): SkillResult {
+  const dismissal = state.dismissal;
+  if (!dismissal) {
+    return { ok: false, message: `${teamNameIn(state, state.userTeamId)} 감독으로 재직 중입니다` };
+  }
+  if (openManagerOffers(state).length > 0) {
+    return {
+      ok: false,
+      message: "열린 제안이 있는 동안에는 지원할 수 없습니다 — 답할 자리는 한 번에 하나입니다",
+    };
+  }
+  pruneVacancies(state);
+  const key = norm(teamRef);
+  const vacancy = (state.managerVacancies ?? []).find(
+    (v) =>
+      norm(v.teamId) === key ||
+      norm(teamShortNameIn(state, v.teamId)) === key ||
+      norm(teamNameIn(state, v.teamId)) === key,
+  );
+  if (!vacancy) {
+    const open = (state.managerVacancies ?? []).map((v) => teamShortNameIn(state, v.teamId));
+    return {
+      ok: false,
+      message:
+        open.length > 0
+          ? `"${teamRef}"은(는) 최근 공석이 아닙니다 — 지금 공석: ${open.join(", ")}`
+          : `"${teamRef}"은(는) 최근 공석이 아닙니다 — 지금 지원할 수 있는 공석이 없습니다`,
+    };
+  }
+  if (
+    (state.managerOffers ?? []).some((o) => o.madeOn >= dismissal.on && o.teamId === vacancy.teamId)
+  ) {
+    return {
+      ok: false,
+      message: `${teamNameIn(state, vacancy.teamId)}와는 이번 무직 기간에 이미 이야기가 오갔습니다`,
+    };
+  }
+
+  const tier = tierOfTeamIn(state, vacancy.teamId);
+  const gate = OFFER_REPUTATION_GATE[tier];
+  const reputation = (state.manager.reputation.board + state.manager.reputation.media) / 2;
+  if (gate !== undefined && reputation < gate) {
+    // 거절도 게임의 사실이다 — 기록은 남기지 않는다: 평판을 회복하면 다시 두드릴 수 있다
+    pushNarrative(state, `${teamNameIn(state, vacancy.teamId)} 감독직 지원 거절`, 3);
+    return {
+      ok: true,
+      tone: "bad",
+      message:
+        `${teamNameIn(state, vacancy.teamId)}가 정중히 거절했습니다 —` +
+        ` 평판 ${Math.round(reputation)}이 ${tier}티어의 문턱 ${gate}에 미치지 못합니다`,
+    };
+  }
+
+  const expectation = boardExpectation(state, vacancy.teamId);
+  const terms = MANAGER_TERMS_BY_TIER[tier];
+  const salary = Math.round(terms.salary * KNOCK_SALARY_RATE);
+  state.managerOffers = [
+    ...(state.managerOffers ?? []),
+    {
+      id: `mgr-offer-${vacancy.teamId}-${state.date}`,
+      teamId: vacancy.teamId,
+      madeOn: state.date,
+      expiresOn: addDays(state.date, OFFER_DAYS),
+      tier,
+      ...(vacancy.position !== undefined ? { position: vacancy.position } : {}),
+      target: expectation.target,
+      expectation: expectation.label,
+      salary,
+      years: terms.years,
+      budgetPledge: terms.budgetPledge,
+      via: "knock",
+      status: "open",
+    },
+  ];
+  pushNarrative(state, `${teamNameIn(state, vacancy.teamId)} 감독직 제안 (지원)`, 5);
+  return {
+    ok: true,
+    tone: "good",
+    message:
+      `${teamNameIn(state, vacancy.teamId)}가 제안으로 답했습니다 — 기대는 ${expectation.label},` +
+      ` 연봉 ${formatMoney(salary)}·${terms.years}년·이적 예산 약속 ${formatMoney(terms.budgetPledge)}.` +
+      ` 지원한 쪽이라 연봉은 기본보다 짭니다. ${OFFER_DAYS}일 안에 답해야 합니다`,
   };
 }
 

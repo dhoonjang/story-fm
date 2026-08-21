@@ -1,7 +1,12 @@
 "use client";
 
 import type { OfficeViews } from "@story-fm/engine";
-import { MANAGER_ATTRIBUTES, MANAGER_ATTRIBUTE_KO, achievementTitle } from "@story-fm/domain";
+import {
+  MANAGER_ATTRIBUTES,
+  MANAGER_ATTRIBUTE_KO,
+  achievementTitle,
+  formatMoney,
+} from "@story-fm/domain";
 import { IconTrophy } from "@/components/icons";
 
 type SeasonRow = OfficeViews["career"]["seasons"][number];
@@ -75,10 +80,36 @@ function OutOfWork({ career }: { career: CareerView }) {
                 기대 {o.expectation} ({o.target}위)
                 {o.position === null ? "" : ` · 현재 ${o.position}위`}
               </div>
+              {o.salary !== null && (
+                <div className="offer-why">
+                  연봉 {formatMoney(o.salary)} · {o.years ?? "-"}년 · 이적 예산 약속{" "}
+                  {formatMoney(o.budgetPledge ?? 0)}
+                  {o.counteredOn === null ? "" : " · 흥정 완료"}
+                </div>
+              )}
             </div>
           ))
         )}
       </div>
+      {/**
+       * 공석 명부 — **제안이 아니라 문이다** (career.md §5.1). 제안 카드의 강조
+       * 테두리를 물려받으면 답을 기다리는 것처럼 읽히므로 가라앉은 테두리로 가른다.
+       * 지원은 감독이 말로 한다 — 화면은 어느 문이 열려 있는지만 세운다.
+       */}
+      {career.vacancies.length > 0 && (
+        <div className="offer-list" data-testid="manager-vacancies">
+          {career.vacancies.map((v, i) => (
+            <div className="offer vacant" key={i}>
+              <div className="offer-head">
+                <b>{v.teamName}</b>
+                <span className="tier">{v.tier}티어</span>
+                <span className="until">{v.on} 공석</span>
+              </div>
+              {v.position !== null && <div className="offer-why">현재 {v.position}위</div>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -339,6 +370,18 @@ export function CareerView({
                 ))}
               </div>
             </div>
+            {/**
+             * 계약 — 평판·경고와 같은 단의 세 번째 사실이다 (career.md §5.1).
+             * 옛 세이브엔 계약이 없어 그때는 칸 자체가 서지 않는다.
+             */}
+            {career.contract && (
+              <div className="mgr-warn">
+                <div className="mgr-rep-title">계약</div>
+                <div className="mgr-contract">
+                  연봉 {formatMoney(career.contract.salary)} · {career.contract.until}까지
+                </div>
+              </div>
+            )}
           </div>
         </div>
         <ManagerRadar

@@ -53,6 +53,9 @@ export const PANEL_OF: Record<string, PanelKey> = {
   respond_to_approach: "커리어",
   // 부임은 커리어의 사건이다 — 경질 카드가 지워지고 남은 제안이 사라지는 곳이 거기다
   accept_manager_offer: "커리어",
+  // 흥정·지원도 같은 자리다 — 제안 카드의 조건과 공석 명부가 커리어 화면에 선다
+  counter_manager_offer: "커리어",
+  apply_manager_job: "커리어",
 };
 
 /**

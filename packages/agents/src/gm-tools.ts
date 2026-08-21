@@ -9,12 +9,14 @@ import {
   acceptDeal,
   acceptManagerOffer,
   adjustTransferBudget,
+  applyForManagerJob,
   answerOffer,
   applyFinanceEvent,
   applyNarrativeEvent,
   applyTalkToPlayer,
   applyTeamTalk,
   careerView,
+  counterManagerOffer,
   dealOdds,
   declinePress,
   describeNegotiation,
@@ -244,7 +246,11 @@ export function buildGmTools(
    * 기자회견도 여기서 막힌다: 미디어 평판이 곧 다음 자리의 문턱이라
    * (`OFFER_REPUTATION_GATE`) 무직 중에 회견을 반복하는 것이 승진 경로가 된다.
    */
-  const OUT_OF_WORK_TOOLS = new Set(["accept_manager_offer"]);
+  const OUT_OF_WORK_TOOLS = new Set([
+    "accept_manager_offer",
+    "counter_manager_offer",
+    "apply_manager_job",
+  ]);
   const wrap = <T>(
     name: string,
     description: string,
@@ -597,6 +603,26 @@ export function buildGmTools(
       descriptions.accept_manager_offer,
       z.object({ offer: z.string().min(1).describe("제안 id 또는 구단 이름·약칭") }),
       (input) => acceptManagerOffer(state, input.offer),
+    ),
+    wrap(
+      "counter_manager_offer",
+      descriptions.counter_manager_offer,
+      z.object({
+        offer: z.string().min(1).describe("제안 id 또는 구단 이름·약칭"),
+        salary: money(MONEY_MAX).optional().describe("되부르는 연봉 (£/년)"),
+        transferBudget: money(MONEY_MAX).optional().describe("되부르는 이적 예산 약속 (£)"),
+      }),
+      (input) =>
+        counterManagerOffer(state, input.offer, {
+          ...(input.salary === undefined ? {} : { salary: input.salary }),
+          ...(input.transferBudget === undefined ? {} : { transferBudget: input.transferBudget }),
+        }),
+    ),
+    wrap(
+      "apply_manager_job",
+      descriptions.apply_manager_job,
+      z.object({ team: z.string().min(1).describe("구단 id 또는 이름·약칭") }),
+      (input) => applyForManagerJob(state, input.team),
     ),
     read(
       "get_finance",
