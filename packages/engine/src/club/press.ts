@@ -105,7 +105,14 @@ function weightOf(trigger: PressTrigger, sharp: boolean): 1 | 2 | 3 {
  * ⚠️ 배열 인덱스다 — `reportersOf`가 주는 순서는 언제나 `REPORTER_ARCHETYPES`의
  * 순서이고(persona.ts), 그것은 **0 지역지 베테랑 · 1 전국지 전술 기자 · 2 타블로이드**다.
  */
-const REPORTER_AT: Record<PressTrigger, number> = { pressure: 0, match: 1, transfer: 2 };
+const REPORTER_AT: Record<PressTrigger, number> = {
+  pressure: 0,
+  match: 1,
+  transfer: 2,
+  // 전야 회견은 팬을 대신해 묻는 자리다 — 개막의 기대도 더비의 정서도 지역지의 것
+  opening: 0,
+  derby: 0,
+};
 
 /** 그 자리를 여는 기자의 `characterId` — 기자단이 짧으면 첫 기자가, 없으면 아무도 묻지 않는다 */
 function reporterFor(state: GameState, trigger: PressTrigger): string | undefined {

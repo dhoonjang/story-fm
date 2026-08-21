@@ -24,6 +24,7 @@ import {
   ApproachPressureSchema,
   ApproachSchema,
   PressConferenceSchema,
+  PressLeakSchema,
   RoleMemorySchema,
   ScheduleEntrySchema,
   ScoutReportSchema,
@@ -95,6 +96,7 @@ export const SaveSchema = z
     pressConferences: z.array(PressConferenceSchema),
     approaches: z.array(ApproachSchema),
     approachPressure: z.array(ApproachPressureSchema),
+    pressLeaks: z.array(PressLeakSchema),
     financeReports: z.array(FinanceReportSchema),
     leagueHistory: z.array(LeagueFinalTableSchema),
     // 없을 수 있는 것 — 로드가 채우지 않는다(없는 것이 곧 뜻이다)
