@@ -279,6 +279,15 @@ export const SeasonStatSchema = z.object({
    * 평균을 저장하면 경기마다 재계산해야 하고 반올림 오차가 누적된다.
    */
   ratingSum: z.number().min(0).optional(),
+  /**
+   * 2군 리그 기록 — 1군 기록(`apps` 등)과 섞이지 않는다. 섞으면 화면의 "출전 N"이
+   * 1·2군 혼합값이 된다 (simulation/season.md §2 2군 리그).
+   * 구 세이브엔 없어 optional (SAVE_VERSION 유지).
+   */
+  reserveApps: z.number().int().min(0).optional(),
+  reserveGoals: z.number().int().min(0).optional(),
+  reserveAssists: z.number().int().min(0).optional(),
+  reserveRatingSum: z.number().min(0).optional(),
 });
 export type SeasonStat = z.infer<typeof SeasonStatSchema>;
 

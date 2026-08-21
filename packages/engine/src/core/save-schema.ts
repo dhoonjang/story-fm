@@ -109,5 +109,6 @@ export const SaveSchema = z
     historyDigest: HistoryDigestSchema.optional(),
     characterMemories: z.array(CharacterMemorySchema).optional(),
     arcs: z.array(NarrativeArcSchema).optional(),
+    developmentFocus: z.array(z.string()).optional(),
   })
   .passthrough();

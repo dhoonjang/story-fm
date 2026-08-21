@@ -17,7 +17,7 @@ import {
   teamProfile,
   userPlayers,
 } from "@story-fm/engine";
-import { SCOUT_DAYS } from "@story-fm/domain";
+import { SCOUT_DAYS, isReserveMatch } from "@story-fm/domain";
 import { createTestGame } from "./helpers";
 
 /**
@@ -281,7 +281,9 @@ describe("get_league — 일정 검색", () => {
   const meetings = (state: ReturnType<typeof createTestGame>, a: string, b: string) =>
     state.matches.filter(
       (m) =>
-        (m.homeTeamId === a && m.awayTeamId === b) || (m.homeTeamId === b && m.awayTeamId === a),
+        // 2군 리그 대진은 맞대결이 아니다 — 일정 조회와 같은 게이트 (season.md §2)
+        !isReserveMatch(m) &&
+        ((m.homeTeamId === a && m.awayTeamId === b) || (m.homeTeamId === b && m.awayTeamId === a)),
     );
   const fixtureLines = (message: string) =>
     message.split("\n").filter((l) => l.startsWith("  지난") || l.startsWith("  예정"));

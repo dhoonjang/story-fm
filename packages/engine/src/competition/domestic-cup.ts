@@ -1,4 +1,5 @@
 import type { MatchRecord, MatchStage } from "@story-fm/domain";
+import { isReserveMatch } from "@story-fm/domain";
 import {
   MIN_REST_HOURS,
   HARD_MIN_REST_HOURS,
@@ -260,6 +261,8 @@ function pickTieDate(
     const played: Array<{ date: string; time?: string }> = [];
     for (const m of state.matches) {
       if (m.season !== state.season) continue;
+      // 2군 경기는 1군 일정의 제약이 아니다 — 뛰는 스쿼드가 다르다 (season.md §2)
+      if (isReserveMatch(m)) continue;
       if (m.homeTeamId === home || m.awayTeamId === home) played.push(m);
       else if (m.homeTeamId === away || m.awayTeamId === away) played.push(m);
     }

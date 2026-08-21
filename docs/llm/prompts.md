@@ -72,7 +72,7 @@
 | 그룹      | 수  | 도구                                                                                                                                                                                             |
 | --------- | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 진행      | 2   | `start_match` · `accept_manager_offer`                                                                                                                                                           |
-| 전술·훈련 | 9   | `set_lineup` · `set_squad_level` · `set_captain` · `set_tactics` · `set_player_tactic` · `exploit_point` · `set_match_plan` · `set_training` · `set_development_focus`                          |
+| 전술·훈련 | 9   | `set_lineup` · `set_squad_level` · `set_captain` · `set_tactics` · `set_player_tactic` · `exploit_point` · `set_match_plan` · `set_training` · `set_development_focus`                           |
 | 대화·서사 | 5   | `team_talk` · `talk_to_player` · `respond_to_media` · `respond_to_approach` · `apply_narrative_event`                                                                                            |
 | 경기      | 1   | `substitute`                                                                                                                                                                                     |
 | 이적      | 11  | `deal_odds` · `list_negotiations` · `send_offer` · `respond_offer` · `accept_deal` · `open_renewal` · `open_release` · `set_transfer_list` · `withdraw_offer` · `release_player` · `recall_loan` |

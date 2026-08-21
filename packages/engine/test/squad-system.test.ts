@@ -23,7 +23,9 @@ import {
   applyMonthlyDevelopment,
   developsByCore,
   recordGrowth,
+  seasonYear,
   setCaptain,
+  setDevelopmentFocus,
   setLineup,
   setSquadLevel,
   setSquadLevels,
@@ -490,5 +492,38 @@ describe("등번호 배정 (squad/numbers.ts)", () => {
     ensureSquadNumbers(squad);
     expect(numbersOf(squad)).toEqual([1, 13]);
     expect(naturalPositionOf(squad[0]!).position).toBe("GK");
+  });
+});
+
+describe("집중 육성 (set_development_focus)", () => {
+  it("우리 2군만, 상한 3, 목록 교체이고 생략하면 해제다", () => {
+    const state = createTestGame();
+    const [a, b, c, d] = reservePlayers(state, state.userTeamId);
+    expect(setDevelopmentFocus(state, { playerIds: [a!.id, b!.id, c!.id, d!.id] }).ok).toBe(false); // 상한 3
+    expect(setDevelopmentFocus(state, { playerIds: [a!.id, b!.id] }).ok).toBe(true);
+    expect(state.developmentFocus).toEqual([a!.id, b!.id]);
+    // 목록 교체 — 더하기가 아니다
+    expect(setDevelopmentFocus(state, { playerIds: [c!.id] }).ok).toBe(true);
+    expect(state.developmentFocus).toEqual([c!.id]);
+    // 1군은 지정할 수 없다
+    const firstTeamer = firstTeamPlayers(state, state.userTeamId)[0]!;
+    expect(setDevelopmentFocus(state, { playerIds: [firstTeamer.id] }).ok).toBe(false);
+    // 목록을 생략하면 해제 — 도구 스키마도 빈 배열 대신 생략을 받는다
+    expect(setDevelopmentFocus(state, {}).ok).toBe(true);
+    expect(state.developmentFocus).toEqual([]);
+  });
+
+  it("승격하면 지정이 풀린다 — 1군은 결산 판정의 몫이다", () => {
+    const state = createTestGame();
+    // U21은 명단을 차지하지 않아 승격이 언제나 가능하다
+    const prospect = reservePlayers(state, state.userTeamId).find((p) =>
+      isUnder21(p.birthdate, seasonYear(state.season)),
+    )!;
+    expect(setDevelopmentFocus(state, { playerIds: [prospect.id] }).ok).toBe(true);
+    const promoted = setSquadLevels(state, {
+      moves: [{ playerId: prospect.id, level: "first" }],
+    });
+    expect(promoted.ok).toBe(true);
+    expect(state.developmentFocus).toEqual([]);
   });
 });

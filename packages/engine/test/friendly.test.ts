@@ -1,15 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
   FRIENDLY_ROUNDS,
+  RESERVE_KICKOFF,
+  addDays,
+  advanceTime,
   allMatchesDone,
   applyMatchFinance,
   buildEuroEntrants,
   buildFriendlyMatches,
+  buildReserveFixtures,
   buildSeasonCalendar,
   buildSeasonFixtures,
   computeStandings,
   dayOfWeek,
   diffDays,
+  seasonStatOf,
   financeOf,
   isFriendly,
   isPostponable,
@@ -23,6 +28,7 @@ import {
   MINI_WORLD,
 } from "@story-fm/engine";
 import type { MatchRecord } from "@story-fm/domain";
+import { isReserveMatch } from "@story-fm/domain";
 import { advanceAndPlay, createMiniGame, createTestGame } from "./helpers";
 
 /**
@@ -403,5 +409,92 @@ describe("감독이 치르는 프리시즌", () => {
     expect(state.seasonStats.filter((s) => s.season === state.season)).toEqual([]);
     expect(state.bookings).toEqual([]);
     expect(state.suspensions).toEqual([]);
+  });
+});
+
+describe("2군 리그 — 감독 팀만, 장부에만, 출전·성장에만 (season.md §2)", () => {
+  const reserve = buildReserveFixtures(1, 42, undefined, undefined, USER);
+
+  it("우리 리그 상대 전부와 한 번씩 — 개막 다음 월요일부터 격주 14:00, 홈·원정 교대", () => {
+    expect(reserve.length).toBe(19);
+    for (const m of reserve) {
+      expect(m.homeTeamId === USER || m.awayTeamId === USER).toBe(true);
+      expect(dayOfWeek(m.date)).toBe(1);
+      expect(m.time).toBe(RESERVE_KICKOFF);
+      expect(isReserveMatch(m)).toBe(true);
+      expect(isFriendly(m)).toBe(false);
+    }
+    const opponents = reserve.map((m) => (m.homeTeamId === USER ? m.awayTeamId : m.homeTeamId));
+    expect(new Set(opponents).size).toBe(19);
+    const dates = reserve.map((m) => m.date).sort();
+    expect(dates[0]).toBe(addDays(calendar.start, 3));
+    for (let i = 1; i < dates.length; i++) expect(diffDays(dates[i - 1]!, dates[i]!)).toBe(14);
+    const home = reserve.filter((m) => m.homeTeamId === USER).length;
+    expect(Math.abs(home - (reserve.length - home))).toBeLessThanOrEqual(1);
+  });
+
+  it("시즌 편성의 같은 입구에서 나오되 감독 달력에는 오르지 않는다", () => {
+    const fixtures = buildSeasonFixtures(1, 42, [], undefined, undefined, USER);
+    const rs = fixtures.filter(isReserveMatch);
+    expect(rs.length).toBe(19);
+    for (const m of rs) expect(isUserFixture(m, USER)).toBe(false);
+    // 마지막 2군 경기는 리그 최종전보다 앞이다 — 시즌 종료가 기다릴 일도, 남길 일도 없다
+    const lastReserve = rs.reduce((max, m) => (m.date > max ? m.date : max), "");
+    const lastLeague = fixtures
+      .filter((m) => m.competitionId === "epl")
+      .reduce((max, m) => (m.date > max ? m.date : max), "");
+    expect(lastReserve < lastLeague).toBe(true);
+  });
+
+  it("간이 시뮬이 조용히 소화한다 — 출전은 2군 열에만, 폼·체력·순위표는 그대로", () => {
+    const state = createTestGame();
+    const match = state.matches
+      .filter(isReserveMatch)
+      .sort((a, b) => (a.date < b.date ? -1 : 1))[0]!;
+    state.date = match.date;
+    const bodies = new Map(
+      state.players.map((p) => [p.id, { condition: p.state.condition, form: p.state.form }]),
+    );
+    const digest: string[] = [];
+    simulateOtherMatches(state, digest);
+
+    expect(match.result).not.toBeNull();
+    const ourSide = match.homeTeamId === state.userTeamId ? "homeLineup" : "awayLineup";
+    const lineup = match.result![ourSide] ?? [];
+    expect(lineup.length).toBe(11);
+    for (const id of lineup) {
+      const stat = seasonStatOf(state, id);
+      expect(stat?.reserveApps).toBe(1);
+      expect(stat?.apps ?? 0).toBe(0);
+      // 몸에 남지 않는다 — 체력·폼 모두 경기 전 그대로다
+      const player = state.players.find((p) => p.id === id)!;
+      expect(player.state.condition).toBe(bodies.get(id)!.condition);
+      expect(player.state.form).toBe(bodies.get(id)!.form);
+    }
+    const row = computeStandings(state).find((r) => r.ours)!;
+    expect(row.played).toBe(0);
+    expect(digest.some((line) => line.includes("2군 리그"))).toBe(true);
+  });
+
+  it("2군 경기일은 시계를 세우지 않는다 — matchday 없이 그날로 흐른다", () => {
+    const state = createTestGame();
+    const userFirstTeamDates = new Set(
+      state.matches
+        .filter(
+          (m) =>
+            !isReserveMatch(m) &&
+            (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+        )
+        .map((m) => m.date),
+    );
+    const match = state.matches
+      .filter((m) => isReserveMatch(m) && !userFirstTeamDates.has(m.date))
+      .sort((a, b) => (a.date < b.date ? -1 : 1))[0]!;
+    state.date = addDays(match.date, -1);
+    const advanced = advanceTime(state, { days: 1 });
+    expect(state.date).toBe(match.date);
+    expect(advanced.stopped).not.toBe("matchday");
+    expect(state.phase).toBe("idle");
+    expect(match.result).not.toBeNull();
   });
 });

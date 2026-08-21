@@ -7,11 +7,18 @@ import {
   attributeGainScale,
   growChance,
   monthlyGrowthFactor,
+  reserveAppsBoost,
+  reserveAppsByPlayer,
   rollAxis,
   rollMonthlyAxes,
   type AgingCurve,
 } from "@story-fm/engine";
-import { ATTRIBUTE_AXES, type AttributeAxis, type AxisValues } from "@story-fm/domain";
+import {
+  ATTRIBUTE_AXES,
+  type AttributeAxis,
+  type AxisValues,
+  type MatchRecord,
+} from "@story-fm/domain";
 
 /**
  * 능력치가 오르는 **속도**의 계약 — 잠재력 여유 · 나이 · 현재 수준.
@@ -287,5 +294,60 @@ describe("월간 축 선택", () => {
       expect(Math.min(...counts), label).toBeGreaterThan(0);
       expect(Math.max(...counts) / Math.min(...counts), label).toBeLessThan(1.3);
     }
+  });
+});
+
+describe("2군 출전·집중 육성 배율 (season.md §2 2군 리그)", () => {
+  it("출전 배율 — 0경기는 1, 경기당 +0.3, 상한 1.6", () => {
+    expect(reserveAppsBoost(0)).toBe(1);
+    expect(reserveAppsBoost(1)).toBeCloseTo(1.3);
+    expect(reserveAppsBoost(2)).toBeCloseTo(1.6);
+    expect(reserveAppsBoost(9)).toBeCloseTo(1.6);
+  });
+
+  it("배율은 성장 확률에만 곱한다 — 문턱 사이의 난수가 배율로만 넘어간다", () => {
+    // passing은 25세에 노화 곡선이 +1(늦게까지 성장)이라 성장 확률이 그대로 선다
+    const monthly = growChance(12, 25) / 12;
+    const rng = () => monthly * 1.2; // 기본 문턱과 ×1.5 문턱 사이
+    expect(rollAxis("passing", 25, 60, 85, rng)).toBe(0);
+    expect(rollAxis("passing", 25, 60, 85, rng, 1.5)).toBe(1);
+  });
+
+  it("노화 하락에는 붙지 않는다 — 서른셋의 스피드는 출전과 무관하게 꺾인다", () => {
+    const rng = () => 0.2; // 하락 확률 3/12 = 0.25 아래 — 배율이 붙으면 결과가 갈렸을 값
+    expect(rollAxis("pace", 33, 70, 85, rng, 3)).toBe(rollAxis("pace", 33, 70, 85, () => 0.2));
+  });
+
+  it("지난달 창 — 지난달 1일부터 오늘 전까지의 2군 경기만 센다", () => {
+    const reserveMatch = (id: string, date: string, competitionId: string | null) =>
+      ({
+        id,
+        season: 1,
+        competitionId,
+        round: 1,
+        date,
+        homeTeamId: "arsenal",
+        awayTeamId: "chelsea",
+        result: {
+          homeGoals: 1,
+          awayGoals: 0,
+          scorers: [],
+          homeLineup: ["p1"],
+          awayLineup: ["p2"],
+        },
+      }) as unknown as MatchRecord;
+    const state = {
+      date: "2026-03-01",
+      matches: [
+        reserveMatch("in-1", "2026-02-03", "reserve:epl"),
+        reserveMatch("in-2", "2026-02-17", "reserve:epl"),
+        reserveMatch("too-old", "2026-01-31", "reserve:epl"),
+        reserveMatch("today", "2026-03-01", "reserve:epl"),
+        reserveMatch("league", "2026-02-10", "epl"),
+      ],
+    } as unknown as Parameters<typeof reserveAppsByPlayer>[0];
+    const counts = reserveAppsByPlayer(state);
+    expect(counts.get("p1")).toBe(2);
+    expect(counts.get("p2")).toBe(2);
   });
 });

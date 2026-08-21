@@ -11,6 +11,7 @@ import {
   FINANCE_EXPENSE_CATEGORIES,
   FINANCE_INCOME_CATEGORIES,
   formatMoney,
+  isReserveMatch,
 } from "@story-fm/domain";
 import {
   addDays,
@@ -501,7 +502,12 @@ export function matchdayRevenue(state: GameState, match: MatchRecord): MatchdayR
   // 남는다 (season.md §2)
   const recent = state.matches
     .filter(
-      (m) => m.result && !isFriendly(m) && (m.homeTeamId === teamId || m.awayTeamId === teamId),
+      (m) =>
+        m.result &&
+        !isFriendly(m) &&
+        // 2군 리그도 표를 팔지 않는다 — 1군 성적만 관중을 움직인다 (season.md §2)
+        !isReserveMatch(m) &&
+        (m.homeTeamId === teamId || m.awayTeamId === teamId),
     )
     .slice(-5);
   if (recent.length > 0) {
@@ -974,8 +980,8 @@ export function amortisationOf(state: GameState, teamId: string): AmortisationLi
 function recentWinRates(state: GameState, window: number): Map<string, number> {
   const results = new Map<string, boolean[]>();
   for (const m of state.matches) {
-    // 친선은 세지 않는다 — 머천다이징이 프리시즌 성적을 읽을 자리가 아니다 (season.md §2)
-    if (!m.result || isFriendly(m)) continue;
+    // 친선·2군 리그는 세지 않는다 — 머천다이징이 읽을 성적은 1군 대회뿐이다 (season.md §2)
+    if (!m.result || isFriendly(m) || isReserveMatch(m)) continue;
     const push = (teamId: string, won: boolean) => {
       const list = results.get(teamId) ?? [];
       list.push(won);

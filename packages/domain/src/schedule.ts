@@ -188,6 +188,23 @@ export const MatchRecordSchema = z.object({
 export type MatchRecord = z.infer<typeof MatchRecordSchema>;
 
 /**
+ * 2군 리그의 대회 id 접두 — 순위표·시즌 종료 판정·컵 편성 등 대회를 세는 자리는
+ * 이 id를 모르므로 아무것도 따라붙지 않는다. 친선의 널과 달리 id를 갖는 이유는
+ * **감독 팀 경기 판정과 갈라야** 하기 때문이다 — 2군 경기의 한쪽은 감독 팀 id라서,
+ * 표식이 없으면 matchday가 서고 시계가 멈춘다 (simulation/season.md §2 2군 리그).
+ */
+export const RESERVE_COMPETITION_PREFIX = "reserve:";
+
+export function reserveCompetitionId(leagueId: string): string {
+  return `${RESERVE_COMPETITION_PREFIX}${leagueId}`;
+}
+
+/** 이 경기가 2군 리그인가 — 팀 경기를 세는 자리가 대회 판정보다 먼저 묻는다 */
+export function isReserveMatch(match: Pick<MatchRecord, "competitionId">): boolean {
+  return match.competitionId !== null && match.competitionId.startsWith(RESERVE_COMPETITION_PREFIX);
+}
+
+/**
  * 훈련 효과 대상 — 능력치 15축 + 전술 적응도(tactical) + 회복(recovery).
  * GM(LLM)이 자연어 훈련을 이 focus 목록으로 해석하고, 코어가 효과를 준다.
  * (15축이므로 "측면 크로스 반복" → kicking·passing 처럼 해상도가 올라간다)

@@ -5,7 +5,7 @@ import type {
   TrainingSession,
   Transfer,
 } from "@story-fm/domain";
-import { ageOf } from "@story-fm/domain";
+import { ageOf, isReserveMatch } from "@story-fm/domain";
 import { diffDays } from "../competition/calendar";
 import { countryOfTeam } from "../data/team-catalog";
 import { playerById, playersOf, teamNameIn, type GameState } from "../core/state";
@@ -176,6 +176,8 @@ function matchesSince(state: GameState, playerId: string, since: string): number
   let count = 0;
   for (const match of state.matches) {
     if (!match.result || match.date < since) continue;
+    // 정착은 1군 무대의 것이다 — 2군 경기로는 새 팀에 녹아들었다고 말하지 않는다
+    if (isReserveMatch(match)) continue;
     const lineup =
       match.homeTeamId === state.userTeamId
         ? match.result.homeLineup

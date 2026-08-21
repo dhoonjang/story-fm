@@ -54,6 +54,7 @@ import { settleRoleCost, shelveFamiliarity, unshelveFamiliarity } from "./famili
 import { recallRole, rememberRole } from "./role-memory";
 import { addDays, diffDays, sortEntries, squadReturnOf } from "../competition/calendar";
 import { clampForm, moraleToForm } from "../squad/form";
+import { DEVELOPMENT_FOCUS_LIMIT, pruneDevelopmentFocus } from "../squad/development";
 import {
   canRegisterAllFor,
   canRegisterFor,
@@ -204,6 +205,10 @@ function applySquadLevel(state: GameState, player: GamePlayer, level: "first" | 
      * 불만(`minutes` 등)은 남는다. 원인이 사라진 것은 강등뿐이다.
      */
     player.state.demotedOn = undefined;
+    // 집중 육성은 2군의 것이다 — 올라온 선수는 결산 판정(LLM)이 움직인다 (season.md §2)
+    if (state.developmentFocus?.includes(player.id)) {
+      state.developmentFocus = state.developmentFocus.filter((id) => id !== player.id);
+    }
     const freed = state.issues.some((i) => i.gamePlayerId === player.id && i.reason === "demotion");
     if (freed) {
       state.issues = state.issues.filter(
@@ -344,6 +349,63 @@ export function setSquadLevels(
 function matchdaySquadFloor(): string {
   const starters = MATCHDAY_SQUAD - MATCHDAY_BENCH;
   return `1군은 매치데이 명단(선발 ${starters} + 벤치 ${MATCHDAY_BENCH})을 채울 ${MATCHDAY_SQUAD}명 이상이어야 합니다`;
+}
+
+/**
+ * 집중 육성 — 감독이 코치진의 눈을 둘 2군 유망주를 지정한다 (season.md §2 2군 리그).
+ *
+ * **목록 교체다** — 부를 때마다 지정 전체를 다시 적고, 목록을 생략하면 해제다. 더하기·
+ * 빼기를 따로 받으면 감독이 지금 명단을 모른 채 상한에 걸린다. 우리 2군만 지정할
+ * 수 있고, 승격하면 풀린다(`applySquadLevel`) — 1군은 결산 판정(LLM)의 몫이라
+ * 코어 배율이 닿을 자리가 없다.
+ */
+export function setDevelopmentFocus(
+  state: GameState,
+  input: { playerIds?: string[] },
+): SkillResult {
+  const players: GamePlayer[] = [];
+  for (const id of input.playerIds ?? []) {
+    const pick = pickOurPlayer(state, id);
+    if (!pick.ok) return pick;
+    const player = pick.player;
+    if (squadLevelOf(player) !== "reserve") {
+      return {
+        ok: false,
+        message: `${player.name}은(는) 1군입니다 — 집중 육성은 2군 유망주에게 겁니다`,
+      };
+    }
+    if (!players.some((p) => p.id === player.id)) players.push(player);
+  }
+  if (players.length > DEVELOPMENT_FOCUS_LIMIT) {
+    return {
+      ok: false,
+      message: `집중 육성은 ${DEVELOPMENT_FOCUS_LIMIT}명까지입니다 — 코치진의 눈은 거기까지 닿습니다`,
+    };
+  }
+
+  const before = pruneDevelopmentFocus(state);
+  const after = players.map((p) => p.id);
+  if (before.length === after.length && before.every((id) => after.includes(id))) {
+    return {
+      ok: true,
+      unchanged: true,
+      message:
+        players.length === 0
+          ? "집중 육성 지정이 없습니다"
+          : `이미 그 명단입니다 — ${briefNames(players.map((p) => p.name))}`,
+    };
+  }
+  state.developmentFocus = after;
+  if (players.length === 0) return { ok: true, message: "집중 육성 지정을 해제했습니다" };
+  pushNarrative(state, `집중 육성 지정 — ${players.map((p) => p.name).join(", ")}`, 1);
+  return {
+    ok: true,
+    message: `집중 육성: ${players.map((p) => p.name).join(", ")} — 2군 경기 출전이 성장을 끌어올립니다`,
+    brief: {
+      head: "집중 육성",
+      items: [item({ label: "지정", text: briefNames(players.map((p) => p.name)) })],
+    },
+  };
 }
 
 // 체력 클램프는 도메인이 단일 소스 (clampCondition)
