@@ -23,9 +23,10 @@
  * 1라운드(64팀)·쿠프 32강(64팀)은 우리가 절반이라, **같은 이름의 라운드에 절반의
  * 클럽**이 있다. 그래서 8강부터는 이름이 규모와 다시 맞는다(8·4·2).
  *
- * 남는 차이 둘 — ① 우리 2부 클럽은 앞 라운드를 치르지 않고 바로 이 라운드에
- * 들어온다(실제라면 대부분 그 전에 탈락한다) ② 코파 이탈리아의 시드 8팀은
- * 실제로 16강부터 나오지만 우리는 1라운드부터 뛴다. 둘 다 32클럽 규모의 대가다.
+ * 우리 2부 12클럽은 실제 진입 라운드의 **하부리그 생존자 몫**에 선다 — 실제
+ * 리그컵 3라운드의 EFL 생존자도 그 언저리 숫자다 (competition.md §3.1).
+ * 코파 이탈리아만 시드 8팀이 16강부터 합류하고(`seedEntry`), 그만큼 1라운드
+ * 정원이 줄어 2부 일부가 앞 라운드에서 탈락한 것으로 처리된다 (§3.2-1).
  *
  * 실제 대회에서 그대로 가져온 것: **라운드 이름과 날짜**, **2차전제를 쓰는 단계**
  * (리그컵·코파·코파 이탈리아의 준결승만), **중립 결승**, **추첨 방식**(라운드별 /
@@ -98,11 +99,19 @@ export interface DomesticCupEntry {
    */
   europeanTicket: "uel" | "uecl";
   /**
+   * 시드 진입 라운드 — 상위 `count`팀(전력 서열)이 `stage`부터 합류한다.
+   * 코파 이탈리아만 갖는다(시드 8팀이 16강부터). 없으면 전 클럽이 첫 라운드를
+   * 뛴다. 산수 제약(첫 라운드 뒤·결승 앞·정원 미만)은 카탈로그 불변식이 지킨다
+   * (competition.md §3.2-1·§7).
+   */
+  seedEntry?: { stage: MatchStage; count: number };
+  /**
    * 상금 (£) — 라운드 진출 + 우승/준우승.
    *
-   * ⚠️ **밸런스 임시값.** 실제 국내 컵 상금은 유럽 대항전에 비해 아주 작다
-   * (FA컵 우승 £2.1M · 카라바오컵 우승 £0.1M vs UCL 참가비만 £12M). 그 비율은
-   * 지키되 매치데이 수입·서사 가치가 진짜 보상이 되게 뒀다.
+   * **실제 공표·보도치를 £로 환산해 반올림한 값**이다 (competition.md §3.5).
+   * 라운드 상금을 공표하지 않는 대회(리그컵)는 라운드 몫이 비고, 우리 필드가
+   * 절반인 라운드는 실제 배분표에서 같은 이름의 라운드 값을 쓴다. 국내 컵
+   * 상금은 대항전에 비해 아주 작다 — 진짜 보상은 매치데이 수입과 서사다.
    */
   prize: {
     round: Partial<Record<MatchStage, number>>;
@@ -177,10 +186,12 @@ export const DOMESTIC_CUP_CATALOG_SEED: readonly DomesticCupEntry[] = [
     // 1부·2부가 함께 들어오는 라운드가 실제로 3라운드다 (그 앞은 하부리그의 몫)
     stageNames: { r32: "3라운드", r16: "4라운드" },
     europeanTicket: "uel",
+    // FA 프라이즈 펀드 실측 — 3R 승 £115k · 4R 승 £120k(5R가 없어 8강 몫은 5R 승
+    // £225k) · 준결승 진출 £450k · 우승 £2M · 준우승 £1M
     prize: {
-      round: { r16: 250_000, qf: 500_000, sf: 1_000_000 },
-      winner: 3_000_000,
-      runnerUp: 1_500_000,
+      round: { r16: 115_000, qf: 225_000, sf: 450_000 },
+      winner: 2_000_000,
+      runnerUp: 1_000_000,
     },
   },
   {
@@ -215,10 +226,12 @@ export const DOMESTIC_CUP_CATALOG_SEED: readonly DomesticCupEntry[] = [
     },
     stageNames: { r32: "3라운드", r16: "4라운드" },
     europeanTicket: "uecl",
+    // 리그컵 상금은 실제로 상징적이다 — 우승 £100k · 준우승 £50k, 라운드 몫도
+    // EFL 배분표의 소액이다. 이 대회의 보상은 유럽 티켓과 매치데이다.
     prize: {
-      round: { r16: 60_000, qf: 120_000, sf: 250_000 },
-      winner: 1_000_000,
-      runnerUp: 500_000,
+      round: { r16: 25_000, qf: 35_000, sf: 50_000 },
+      winner: 100_000,
+      runnerUp: 50_000,
     },
   },
   {
@@ -249,10 +262,11 @@ export const DOMESTIC_CUP_CATALOG_SEED: readonly DomesticCupEntry[] = [
       final: [4, 25],
     },
     europeanTicket: "uel",
+    // RFEF 배분 보도치(€→£) — 우승 €1.8M ≈ £1.5M, 준우승 절반. 라운드 몫은 작다
     prize: {
-      round: { r16: 200_000, qf: 400_000, sf: 800_000 },
-      winner: 2_500_000,
-      runnerUp: 1_200_000,
+      round: { r16: 60_000, qf: 140_000, sf: 350_000 },
+      winner: 1_500_000,
+      runnerUp: 750_000,
     },
   },
   {
@@ -282,9 +296,6 @@ export const DOMESTIC_CUP_CATALOG_SEED: readonly DomesticCupEntry[] = [
      * 준결승은 실제로 2월(2023-24)과 4월(2024-25) 사이를 오간다. 우리는 **3월**로
      * 잡는다 — 4월에 두면 밀려난 세리에 A 경기가 5월에 쌓여, 결승 전날 결승 팀이
      * 리그를 뛰는 자리가 생긴다(시드 42에서 실제로 그랬다).
-     *
-     * ⚠️ 실제로 **시드 8팀은 16강부터** 나온다(세리에 A 9~20위만 1라운드를 뛴다).
-     * 우리는 32클럽뿐이라 시드도 1라운드부터 뛴다 — 이 대회의 유일한 규정 이탈이다.
      */
     windows: {
       league: [8, 26],
@@ -298,11 +309,16 @@ export const DOMESTIC_CUP_CATALOG_SEED: readonly DomesticCupEntry[] = [
     stageNames: { r32: "1라운드" },
     // 실제 코파 이탈리아 결승은 **수요일 밤 올림피코**다 (2024·2025 모두 수요일)
     finalMidweek: true,
+    // 실제 규정 — 시드 8팀은 16강(ottavi)부터 나온다. 1라운드는 나머지 24 중
+    // 16팀이고 8팀은 모델 밖 앞 라운드에서 탈락 처리된다 (competition.md §3.2-1)
+    seedEntry: { stage: "r16", count: 8 },
     europeanTicket: "uel",
+    // 레가 세리에 A 배분 보도치(€→£) — ottavi €300k · quarti €500k · 준결승
+    // €1.2M · 우승 €4.5M · 준우승 €2M 안팎
     prize: {
-      round: { r16: 180_000, qf: 350_000, sf: 700_000 },
-      winner: 2_200_000,
-      runnerUp: 1_000_000,
+      round: { r16: 250_000, qf: 400_000, sf: 1_000_000 },
+      winner: 3_800_000,
+      runnerUp: 1_700_000,
     },
   },
   {
@@ -336,10 +352,12 @@ export const DOMESTIC_CUP_CATALOG_SEED: readonly DomesticCupEntry[] = [
     },
     stageNames: { r32: "1라운드", r16: "2라운드" },
     europeanTicket: "uel",
+    // DFB 배분 실측(€→£) — 2R €431k · 8강 €862k · 준결승 €1.72M · 우승 €4.32M ·
+    // 준우승 €2.88M. 국내 컵 중 가장 후한 배분이다
     prize: {
-      round: { r16: 300_000, qf: 600_000, sf: 1_200_000 },
-      winner: 3_500_000,
-      runnerUp: 1_800_000,
+      round: { r16: 370_000, qf: 730_000, sf: 1_460_000 },
+      winner: 3_700_000,
+      runnerUp: 2_450_000,
     },
   },
   {
@@ -373,10 +391,11 @@ export const DOMESTIC_CUP_CATALOG_SEED: readonly DomesticCupEntry[] = [
       final: [5, 22],
     },
     europeanTicket: "uel",
+    // FFF 배분 보도치(€→£) — 라운드 몫이 작고 우승도 €1.5M 안팎의 검소한 대회다
     prize: {
-      round: { r16: 120_000, qf: 250_000, sf: 500_000 },
-      winner: 1_600_000,
-      runnerUp: 800_000,
+      round: { r16: 50_000, qf: 100_000, sf: 300_000 },
+      winner: 1_300_000,
+      runnerUp: 650_000,
     },
   },
 ];

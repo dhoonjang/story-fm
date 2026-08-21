@@ -319,6 +319,7 @@ const DOMESTIC_PATCH_FIELDS = [
   "windows",
   "stageNames",
   "finalMidweek",
+  "seedEntry",
   "europeanTicket",
   "prize",
 ] as const;
@@ -372,6 +373,13 @@ function validateDomesticCup(entry: DomesticCupEntry): string | null {
   }
   if (entry.finalMidweek !== undefined && typeof entry.finalMidweek !== "boolean") {
     return "결승 주중 여부는 참·거짓이어야 합니다";
+  }
+  if (entry.seedEntry !== undefined) {
+    const seed = asRecord(entry.seedEntry);
+    if (seed === null || !isMatchStage(seed.stage) || intAtLeast(seed.count, 1) === null) {
+      return "시드 진입은 { stage, count } 꼴이어야 합니다 (count는 1 이상의 정수)";
+    }
+    // 산수 제약(첫 라운드 뒤·결승 앞·정원 절반 이하)은 카탈로그 불변식이 마저 본다
   }
   if (entry.europeanTicket !== "uel" && entry.europeanTicket !== "uecl") {
     return `알 수 없는 유럽 티켓: ${String(entry.europeanTicket)}`;

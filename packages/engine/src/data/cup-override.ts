@@ -61,6 +61,17 @@ export function missingCupWindows(value: unknown): string[] {
   return PLAYED_STAGES.filter((stage) => !isMonthDay(windows[stage]));
 }
 
+/** 시드 진입 라운드 `{ stage, count }` — 산수 제약은 카탈로그 불변식의 몫이다 */
+function isSeedEntry(value: unknown): boolean {
+  const o = asRecord(value);
+  return (
+    o !== null &&
+    typeof o.stage === "string" &&
+    (STAGES as readonly string[]).includes(o.stage) &&
+    typeof o.count === "number"
+  );
+}
+
 function isStageList(value: unknown): boolean {
   return (
     Array.isArray(value) &&
@@ -115,6 +126,7 @@ function isDomesticEntry(value: unknown): value is DomesticCupEntry {
     missingCupWindows(windows).length === 0 &&
     (o.stageNames === undefined || isStageMap(o.stageNames)) &&
     (o.finalMidweek === undefined || typeof o.finalMidweek === "boolean") &&
+    (o.seedEntry === undefined || isSeedEntry(o.seedEntry)) &&
     (o.europeanTicket === "uel" || o.europeanTicket === "uecl") &&
     isStageMap(prize.round) &&
     isNumberMap(prize.round) &&
