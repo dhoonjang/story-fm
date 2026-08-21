@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { FINANCE_CATEGORY_KO, type FinanceCategory, type LedgerEntry } from "@story-fm/domain";
+import {
+  buildPaymentInstallments,
+  effectiveFeeOf,
+  FINANCE_CATEGORY_KO,
+  MAX_PAYMENT_YEARS,
+  type FinanceCategory,
+  type LedgerEntry,
+  type PaymentSchedule,
+} from "@story-fm/domain";
 import type { GameState } from "@story-fm/engine";
 import {
+  addDays,
   annualRevenueEstimate,
   bookValueOf,
   debtLimitOf,
@@ -37,6 +46,7 @@ import {
   monthOf,
   psrStatus,
   recordFinance,
+  settleDuePayments,
   summarise,
   topUpTransferBudget,
   transitionSeason,
@@ -1484,5 +1494,169 @@ describe("재정이 도는 범위", () => {
      * 이제 장부 자체가 없다 — 월초 정산이 그 자리를 만들어 내지도 않는다.
      */
     expect(hasLedger(), "월초 정산이 무소속 장부를 만들었다").toBe(false);
+  });
+});
+
+describe("지급 일정 — 분할은 표를 타고 나간다", () => {
+  /** 회분의 합·기일만 보는 순수 검증에 쓰는 기준일 */
+  const FIRST_DUE = "2026-08-15";
+
+  it("회분의 합은 언제나 총액과 같다 — 잔차는 마지막 회분이 진다", () => {
+    for (const [total, years] of [
+      [60_000_001, 3],
+      [48_000_000, 4],
+      [7, 4],
+      [0, 2],
+    ] as const) {
+      const parts = buildPaymentInstallments(total, years, FIRST_DUE);
+      expect(parts.reduce((sum, p) => sum + p.amount, 0)).toBe(total);
+    }
+    const odd = buildPaymentInstallments(60_000_001, 3, FIRST_DUE);
+    expect(odd.map((p) => p.amount)).toEqual([20_000_000, 20_000_000, 20_000_001]);
+    expect(odd.map((p) => p.dueOn)).toEqual(["2026-08-15", "2027-08-15", "2028-08-15"]);
+    expect(odd.every((p) => p.paidOn === null)).toBe(true);
+  });
+
+  it("연수는 1..MAX_PAYMENT_YEARS로 접힌다", () => {
+    expect(buildPaymentInstallments(40_000_000, 9, FIRST_DUE)).toHaveLength(MAX_PAYMENT_YEARS);
+    expect(buildPaymentInstallments(40_000_000, 1, FIRST_DUE)).toHaveLength(1);
+    expect(buildPaymentInstallments(40_000_000, 0, FIRST_DUE)).toHaveLength(1);
+    // 상한까지 접혀도 합은 총액이다
+    expect(
+      buildPaymentInstallments(40_000_001, 9, FIRST_DUE).reduce((s, p) => s + p.amount, 0),
+    ).toBe(40_000_001);
+  });
+
+  it("유효 이적료는 일시금이면 그대로, 분할이 길수록 단조 감소한다", () => {
+    const fee = 50_000_000;
+    expect(effectiveFeeOf(fee, 1)).toBe(fee);
+    expect(effectiveFeeOf(fee)).toBe(fee);
+    const byYears = [1, 2, 3, 4].map((y) => effectiveFeeOf(fee, y));
+    for (let i = 1; i < byYears.length; i += 1) {
+      expect(byYears[i]).toBeLessThan(byYears[i - 1]!);
+    }
+    // 깎여도 총액 밑의 양수다 — 분할이 공짜 신용도, 몰수도 아니다
+    expect(byYears[3]).toBeGreaterThan(0);
+  });
+
+  /** 잔액·이적 예산 두 축을 한 번에 뜬다 */
+  function books(state: GameState, teamId: string): { balance: number; budget: number } {
+    const f = financeOf(state, teamId);
+    return { balance: f.balance, budget: f.transferBudget };
+  }
+
+  /** 지급 일정 하나를 state에 직접 꽂는다 — 협상 흐름은 negotiation.test.ts가 검증한다 */
+  function pushSchedule(
+    state: GameState,
+    kind: PaymentSchedule["kind"],
+    total: number,
+    years: number,
+    payeeTeamId: string | null,
+  ): PaymentSchedule {
+    const player = state.players.find((p) => p.teamId !== state.userTeamId)!;
+    const schedule: PaymentSchedule = {
+      id: `ps-${kind}`,
+      transferId: `tr-${kind}`,
+      gamePlayerId: player.id,
+      payerTeamId: state.userTeamId,
+      payeeTeamId,
+      kind,
+      installments: buildPaymentInstallments(total, years, state.date),
+    };
+    state.paymentSchedules = [...(state.paymentSchedules ?? []), schedule];
+    return schedule;
+  }
+
+  /** 유저 팀이 아닌 아무 구단 — 받는 쪽 */
+  function otherClub(state: GameState): string {
+    return state.finances.find((f) => f.teamId !== state.userTeamId && isClubTeam(f.teamId))!.teamId;
+  }
+
+  const TOTAL = 60_000_001;
+
+  it("일정이 전부 지급되면 잔액·이적 예산 변화가 일시금 한 번과 같다", () => {
+    const split = createMiniGame();
+    const lump = createMiniGame();
+    const payee = otherClub(split);
+    expect(otherClub(lump)).toBe(payee);
+
+    const beforeSplit = { payer: books(split, split.userTeamId), payee: books(split, payee) };
+    const beforeLump = { payer: books(lump, lump.userTeamId), payee: books(lump, payee) };
+
+    const schedule = pushSchedule(split, "transfer", TOTAL, 4, payee);
+    pushSchedule(lump, "transfer", TOTAL, 1, payee);
+
+    // 마지막 기일까지 흘려보내면 네 회분이 모두 미지급이 아니게 된다
+    split.date = schedule.installments[schedule.installments.length - 1]!.dueOn;
+    settleDuePayments(split);
+    settleDuePayments(lump);
+
+    expect(schedule.installments.every((i) => i.paidOn === split.date)).toBe(true);
+    for (const teamId of [split.userTeamId, payee] as const) {
+      const side = teamId === payee ? "payee" : "payer";
+      const splitDelta = {
+        balance: books(split, teamId).balance - beforeSplit[side].balance,
+        budget: books(split, teamId).budget - beforeSplit[side].budget,
+      };
+      const lumpDelta = {
+        balance: books(lump, teamId).balance - beforeLump[side].balance,
+        budget: books(lump, teamId).budget - beforeLump[side].budget,
+      };
+      expect(splitDelta).toEqual(lumpDelta);
+    }
+    // 방향까지 고정한다 — 내는 쪽은 총액만큼 줄고 받는 쪽은 그만큼 는다
+    expect(books(split, split.userTeamId).balance).toBe(beforeSplit.payer.balance - TOTAL);
+    expect(books(split, split.userTeamId).budget).toBe(beforeSplit.payer.budget - TOTAL);
+    expect(books(split, payee).balance).toBe(beforeSplit.payee.balance + TOTAL);
+    expect(books(split, payee).budget).toBe(beforeSplit.payee.budget + TOTAL);
+  });
+
+  it("지급일이 안 된 회분은 건드리지 않는다", () => {
+    const state = createMiniGame();
+    const payee = otherClub(state);
+    const before = books(state, state.userTeamId);
+    const schedule = pushSchedule(state, "transfer", TOTAL, 4, payee);
+
+    settleDuePayments(state); // 첫 회분의 기일 = 오늘
+    expect(schedule.installments[0]!.paidOn).toBe(state.date);
+    expect(schedule.installments.slice(1).every((i) => i.paidOn === null)).toBe(true);
+    expect(books(state, state.userTeamId).balance).toBe(
+      before.balance - schedule.installments[0]!.amount,
+    );
+
+    // 하루 뒤에도 두 번째 기일은 1년 뒤다
+    state.date = addDays(state.date, 1);
+    settleDuePayments(state);
+    expect(schedule.installments[1]!.paidOn).toBe(null);
+  });
+
+  it("같은 날 두 번 불러도 두 번 내지 않는다", () => {
+    const state = createMiniGame();
+    const payee = otherClub(state);
+    pushSchedule(state, "transfer", TOTAL, 4, payee);
+
+    settleDuePayments(state);
+    const after = books(state, state.userTeamId);
+    const entries = financeOf(state, state.userTeamId).ledger.length;
+
+    settleDuePayments(state);
+    expect(books(state, state.userTeamId)).toEqual(after);
+    expect(financeOf(state, state.userTeamId).ledger.length).toBe(entries);
+  });
+
+  it("해지 정산금은 인건비로 나가고 이적 예산을 움직이지 않는다", () => {
+    const state = createMiniGame();
+    const before = books(state, state.userTeamId);
+    const severance = 3_000_000;
+    pushSchedule(state, "severance", severance, 2, null);
+
+    settleDuePayments(state);
+    const f = financeOf(state, state.userTeamId);
+    const paid = f.ledger[f.ledger.length - 1]!;
+    expect(categoryOf(paid)).toBe("player_wages");
+    expect(paid.kind).toBe("expense");
+    expect(paid.amount).toBe(Math.floor(severance / 2));
+    expect(f.balance).toBe(before.balance - Math.floor(severance / 2));
+    expect(f.transferBudget).toBe(before.budget); // 이적 예산은 그대로
   });
 });

@@ -41,6 +41,7 @@ import {
   formatMoney,
   payWeeklyWages,
   runMonthlyFinance,
+  settleDuePayments,
 } from "../club/finance";
 // 핵심 자원의 경계는 회견이 쥔다 — 같은 자를 두 곳에 적으면 한쪽만 움직인다
 import { openEvePress, SQUAD_CORE_SIZE } from "../club/press";
@@ -389,6 +390,10 @@ function dailyTick(
 
   // 주급 (월요일) — 활성 계약 합에서 파생, 구단 전체에 적용 (무소속 제외 — finance.ts)
   if (dow === MONDAY) payWeeklyWages(state);
+
+  // 분할 이적료·해지 정산금의 기일이 된 회분 (finance.md §6.4).
+  // 기일은 요일을 모르므로 매일 본다 — 주급·월초 정산과 달리 조건이 없다
+  settleDuePayments(state, digest);
 
   /**
    * 벤치 불만을 낼 만한 자원인가 — **종합의 눈금을 탄다.**
