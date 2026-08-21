@@ -214,6 +214,7 @@ row, 지난 일 = 그대로 이력.**
 | ↳ `PressFact`                         | **사실 카드** (질문 문장이 아니다) — 기자는 이 밖을 못 묻는다 | `domain/press.ts`      |
 | `approaches` `Approach`               | 다가옴 — 압력이 임계를 넘어 코어가 연 자리 (people.md §8)     | `domain/press.ts`      |
 | `approachPressure` `ApproachPressure` | 압력 눈금 — 주제별 누적과 계단. 파생할 수 없는 유일한 값      | `domain/press.ts`      |
+| `pressLeaks` `PressLeak`              | 언론 유출 — 다음 회견이 실어 갈 때까지만 남는다 (§8 계단 4)   | `domain/press.ts`      |
 | `aiDeals` `AiDeal`                    | 이번 주에 정해진, 날짜가 흩어진 AI 이적                       | `market/ai-market.ts`  |
 
 이것들이 세이브에 남는 이유는 같다 — **두 시점 사이에 걸쳐 있어** 파생으로 되돌릴

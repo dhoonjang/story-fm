@@ -11,7 +11,7 @@
 | 방향   | 시작                                                                                        | 비고                                                             |
 | ------ | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | 영입   | `send_offer` kind=buy                                                                       | 이적료 + 주급 제시                                               |
-| 매각   | 이적 리스트 등재(`set_transfer_list`) · 특정 구단에 `send_offer` kind=sell · AI가 먼저 노림 | 리스트 등재 선수는 하루 34%로 오퍼가 붙고 호가가 비쌀수록 더디다 |
+| 매각   | 이적 리스트 등재(`set_transfer_list`) · 특정 구단에 `send_offer` kind=sell · AI가 먼저 노림 | 리스트 등재 선수는 하루 34%로 오퍼가 붙고 호가가 비쌀수록 더디다. **이적 요청이 선 선수**(people.md §8 계단 5)는 하루 25%로 붙되 값이 시장가 아래로 온다 — 나가고 싶어 하는 것을 시장이 안다 |
 | 재계약 | `open_renewal`                                                                              | 만료 전 언제든                                                   |
 | 해지   | `open_release`(합의) · `release_player`(일방)                                               | 상대가 선수 본인 — 합의는 정산금 흥정, 일방은 **전액**           |
 | 임대   | `send_offer` kind=loan(빌려옴) / loan_out(빌려줌)                                           | **양쪽 다 흥정** — 같은 협상 테이블                              |
@@ -467,6 +467,7 @@ tick이 매일 시장을 굴린다 — 1부 클럽당 시즌 이적 3.4건 · �
 | `PATIENCE_DECAY` · `SAME_TERMS_TOLERANCE`                        | 0.72 · 0.03            | 같은 조건 반복마다 확률에 곱해지는 값과 "같은 조건"으로 보는 폭            |
 | `INCOMING_OFFER_CHANCE` · `MAX_INCOMING`                         | 8% · 3                 | 창이 열린 하루에 오퍼가 들어올 확률과 동시에 안고 있을 수 있는 수          |
 | `LISTED_OFFER_CHANCE` · `LISTED_DISCOUNT`                        | 34% · 0.22             | 이적 리스트 등재 선수에게 오퍼가 붙을 확률과 깎고 들어오는 폭              |
+| `REQUESTED_OFFER_CHANCE` · `REQUESTED_DISCOUNT`                  | 25% · 0.3              | 이적 요청이 선 선수에게 오퍼가 붙을 확률과 시장가에서 깎고 들어오는 폭     |
 | `BUDGET_ADJUST_WAGE_LIMIT`                                       | 10                     | `adjust_transfer_budget`의 하루 누적 한도 — 주급 총액의 배수               |
 | `MEDICAL_DAYS_MIN` · `MAX`                                       | 1 · 2                  | 합의 다음 날부터 검진까지의 날 (창 마감일이면 그날)                        |
 | `MEDICAL_DECISION_DAYS`                                          | 3                      | 소견이 붙은 뒤 강행·철회·재협상을 고를 시간                                |
