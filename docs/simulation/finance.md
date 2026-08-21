@@ -574,7 +574,7 @@ clubWageBudget(주) = 그 값 ÷ 52
 
 ### 6.4 이적료 지급 일정 — 현금이 표를 타고 나뉜다
 
-분할로 합의된 이적료·해지 정산금은 `TRANSFER.schedule`의 지급 일정 표대로
+분할로 합의된 이적료·해지 정산금은 지급 일정 표(`state.paymentSchedules`)대로
 나간다 (transfer.md §5-2). 재정이 갖는 규칙은 셋이다:
 
 - **지급의 문은 하나다** — `settleDuePayments`. 지급일이 된 미지급 회분을
