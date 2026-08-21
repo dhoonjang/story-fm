@@ -20,6 +20,7 @@ import {
   worldFigures,
 } from "./persona";
 import { generatePlayerPersona } from "./player-persona";
+import { personaRelations } from "./relations";
 
 /**
  * 캐릭터북 — **「이 인물이 지금 필요하다」를 판정해 그 턴에만 싣는다** (people.md §6).
@@ -152,7 +153,21 @@ export function characterEntryOf(
   depth: CharacterDepth,
 ): CharacterEntry | null {
   const persona = personaOf(state, characterId);
-  return persona ? characterEntry(persona, depth, memoriesOf(state, characterId)) : null;
+  if (!persona) return null;
+  return withRelations(state, characterEntry(persona, depth, memoriesOf(state, characterId)));
+}
+
+/**
+ * 인물지에 관계 초기값을 붙인다 — **`full` 깊이의 저장 페르소나에만** (people.md §6).
+ *
+ * `characterEntry`가 아니라 여기서 붙이는 이유는 관계가 세이브의 다른 페르소나를
+ * 봐야 나오기 때문이다 — 순수 함수인 그쪽은 상대가 누구인지 모른다. 비면 필드 자체를
+ * 두지 않는다: 중립뿐인 사이는 카드에 서지 않는다.
+ */
+function withRelations(state: GameState, entry: CharacterEntry): CharacterEntry {
+  if (entry.depth !== "full") return entry;
+  const relations = personaRelations(state, entry.characterId);
+  return relations.length > 0 ? { ...entry, relations } : entry;
 }
 
 /**
@@ -254,10 +269,13 @@ export function selectCharacters(
   return picked
     .slice(0, CHARACTER_INJECTION_LIMIT)
     .map(({ candidate }) =>
-      characterEntry(
-        candidate.persona,
-        candidate.depthOf(),
-        memoriesOf(state, candidate.persona.characterId),
+      withRelations(
+        state,
+        characterEntry(
+          candidate.persona,
+          candidate.depthOf(),
+          memoriesOf(state, candidate.persona.characterId),
+        ),
       ),
     );
 }

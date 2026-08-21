@@ -16,6 +16,7 @@ import {
   ManagerOfferSchema,
   ManagerSchema,
   MatchRecordSchema,
+  NarrativeArcSchema,
   NarrativeNoteSchema,
   NegotiationSchema,
   PersonaSchema,
@@ -105,5 +106,6 @@ export const SaveSchema = z
     managerOffers: z.array(ManagerOfferSchema).optional(),
     historyDigest: HistoryDigestSchema.optional(),
     characterMemories: z.array(CharacterMemorySchema).optional(),
+    arcs: z.array(NarrativeArcSchema).optional(),
   })
   .passthrough();
