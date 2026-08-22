@@ -1,5 +1,6 @@
 import type { GamePlayer, Player, SubCause, TacticsSpec } from "@story-fm/domain";
 import {
+  AI_MANAGER_RATING_FALLBACK,
   CONDITION_MAX,
   DEFAULT_TACTICS,
   FAMILIARITY_BASELINE,
@@ -404,9 +405,6 @@ const HALF_TIME = PHASE_END.first_half;
 const FIRST_HALF_DENSITY = 2 * QUICK_FIRST_HALF_SHARE;
 const SECOND_HALF_DENSITY = 2 * (1 - QUICK_FIRST_HALF_SHARE);
 
-/** 감독 정보가 없는 팀(AI 벤치)의 전술 능력 — 리그 평균 언저리 */
-const AI_MANAGER_TACTICS = 65;
-
 interface TimelineInput {
   squads: { home: SimSquad; away: SimSquad };
   from: number;
@@ -470,7 +468,7 @@ function runTimeline(input: TimelineInput): {
     starters: slotsAt(squads[side], activeAt(side, t), sideSubs(side)),
     bench: [],
     tactics: squads[side].tactics ?? DEFAULT_TACTICS,
-    managerTactics: squads[side].managerTactics ?? AI_MANAGER_TACTICS,
+    managerTactics: squads[side].managerTactics ?? AI_MANAGER_RATING_FALLBACK,
   });
 
   /** 그 분까지 뛴 시간 — 교체 투입은 들어온 분부터 센다 */

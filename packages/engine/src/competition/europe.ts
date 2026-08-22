@@ -1,9 +1,9 @@
 import type { MatchRecord } from "@story-fm/domain";
-import { addDays, dayOfWeek, firstHalfPairs } from "./calendar";
+import { addDays, dayOfWeek, diffDays, firstHalfPairs } from "./calendar";
 import { cupCatalog, cupCatalogById } from "../data/cup-catalog";
 import { leagueCatalogById } from "../data/league-catalog";
 import { leagueOfTeam, teamCatalogById, teamsOfLeague } from "../data/team-catalog";
-import { makeRng } from "../core/rng";
+import { makeRng, shuffled } from "../core/rng";
 import { catalogTierOf } from "../core/club-tier";
 import { seasonYear } from "./calendar";
 
@@ -27,8 +27,6 @@ const LEAGUE_LAST_DAY = "05-31";
 
 /** 이 날짜 안에 대항전이 있으면 그 주중은 리그가 비켜준다 */
 const EURO_WEEK_MARGIN_DAYS = 2;
-
-const MS_PER_DAY = 86_400_000;
 
 /**
  * 지난 시즌 표가 없을 때 세우는 임시 순위 — 체급이 자리를 정하고, 그 안에서만
@@ -167,13 +165,7 @@ export function reservedEuroDates(season: number): string[] {
 /** 이 날짜가 대항전 주중인가 — 리그 주중 라운드가 피해야 하는 자리 */
 export function isEuroWeek(season: number, date: string): boolean {
   return reservedEuroDates(season).some(
-    (d) => Math.abs(daysBetween(d, date)) <= EURO_WEEK_MARGIN_DAYS,
-  );
-}
-
-function daysBetween(a: string, b: string): number {
-  return Math.round(
-    (new Date(`${b}T00:00:00Z`).getTime() - new Date(`${a}T00:00:00Z`).getTime()) / MS_PER_DAY,
+    (d) => Math.abs(diffDays(d, date)) <= EURO_WEEK_MARGIN_DAYS,
   );
 }
 
@@ -510,16 +502,6 @@ export function buildEuroLeaguePhase(
 }
 
 /** 시드 기반 결정적 셔플 — 같은 (seed, channel)이면 항상 같은 순서 */
-function shuffled<T>(items: readonly T[], seed: number, channel: string): T[] {
-  const rng = makeRng(seed, channel);
-  const out = [...items];
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [out[i], out[j]] = [out[j]!, out[i]!];
-  }
-  return out;
-}
-
 /** 전 대항전 리그 페이즈 — 새 시즌 생성·전환에서 함께 만든다 */
 export function buildAllEuroMatches(
   season: number,

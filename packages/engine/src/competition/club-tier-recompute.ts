@@ -7,11 +7,12 @@
  * tier 1로 남아 우승 경쟁을 요구받는다.
  */
 import { boardExpectationText } from "@story-fm/domain";
-import { playersOf, savedClubProfile, teamNameIn, type GameState } from "../core/state";
+import { savedClubProfile, teamNameIn, type GameState } from "../core/state";
 import { boardExpectationOfTier, tierOfTeamIn } from "../core/club-tier";
 import { isCupOnlyLeague, isTopLeague } from "../data/league-catalog";
 import { clubProfiles, type ClubProfile } from "../data/club-profile";
 import { leagueOfTeamIn, leagueSizeIn } from "./promotion";
+import { squadRating } from "../squad/depth";
 
 // ── 눈금 ──────────────────────────────────────────────
 // 밸런스를 만지려면 이 블록만 읽으면 된다.
@@ -80,14 +81,6 @@ function percentileIn(values: readonly number[], value: number): number {
     else if (v === value) equal += 1;
   }
   return (below + equal / 2) / values.length;
-}
-
-/** 스쿼드 상위 열한 명의 평균 OVR — 전력 축의 자 */
-function squadRating(state: GameState, teamId: string): number {
-  const squad = playersOf(state, teamId);
-  if (squad.length === 0) return 0;
-  const top = [...squad].sort((a, b) => b.attributes.overall - a.attributes.overall).slice(0, 11);
-  return top.reduce((sum, p) => sum + p.attributes.overall, 0) / top.length;
 }
 
 /**

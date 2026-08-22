@@ -443,18 +443,21 @@ finance 하네스(`pnpm balance finance`)의 밴드가 감시한다.
 
 ## 코드 위치
 
-| 무엇                                             | 어디                                                                 |
-| ------------------------------------------------ | -------------------------------------------------------------------- |
-| 리그 카탈로그                                    | `packages/engine/src/data/league-catalog.ts`                         |
-| 유럽 대항전 카탈로그 (규모·티켓·상금)            | `packages/engine/src/data/cup-catalog.ts`                            |
-| 국내 컵 카탈로그 (진입 라운드·추첨·홈 배정·날짜) | `packages/engine/src/data/domestic-cup-catalog.ts`                   |
-| 카탈로그 오버라이드 (읽기·쓰기·캐시)             | `packages/engine/src/data/catalog-source.ts` · `cup-override.ts`     |
-| 리그·컵 어드민 (조회 · 편집 · 추가 · 삭제)       | `packages/engine/src/world/admin-competition.ts`                     |
-| 카탈로그 불변식 (순수)                           | `packages/engine/src/world/catalog-invariants.ts`                    |
-| 순위표 · 진출권 구역                             | `packages/engine/src/competition/season.ts` · `views/views.ts`       |
-| 국내 컵 진행                                     | `packages/engine/src/competition/domestic-cup.ts`                    |
-| 대항전 배정 · 리그 페이즈 편성                   | `packages/engine/src/competition/europe.ts`                          |
-| 대항전 녹아웃                                    | `packages/engine/src/competition/euro-knockout.ts` · `euro-prize.ts` |
-| 연장 · 승부차기                                  | `packages/engine/src/competition/extra-time.ts` · `shootout.ts`      |
-| 추첨 일정                                        | `packages/engine/src/competition/draw-schedule.ts`                   |
-| 승강                                             | `packages/engine/src/competition/promotion.ts`                       |
+| 무엇                                             | 어디                                                                  |
+| ------------------------------------------------ | --------------------------------------------------------------------- |
+| 리그 카탈로그                                    | `packages/engine/src/data/league-catalog.ts`                          |
+| 유럽 대항전 카탈로그 (규모·티켓·상금)            | `packages/engine/src/data/cup-catalog.ts`                             |
+| 국내 컵 카탈로그 (진입 라운드·추첨·홈 배정·날짜) | `packages/engine/src/data/domestic-cup-catalog.ts`                    |
+| 카탈로그 오버라이드 (읽기·쓰기·캐시)             | `packages/engine/src/data/catalog-source.ts` · `cup-override.ts`      |
+| 리그·컵 어드민 (조회 · 편집 · 추가 · 삭제)       | `packages/engine/src/world/admin-competition.ts`                      |
+| 카탈로그 불변식 (순수)                           | `packages/engine/src/world/catalog-invariants.ts`                     |
+| 순위표 · 진출권 구역                             | `packages/engine/src/competition/season.ts` · `views/views.ts`        |
+| 국내 컵 진행                                     | `packages/engine/src/competition/domestic-cup.ts`                     |
+| 대항전 배정 · 리그 페이즈 편성                   | `packages/engine/src/competition/europe.ts`                           |
+| 대항전 녹아웃                                    | `packages/engine/src/competition/euro-knockout.ts` · `euro-prize.ts`  |
+| 상금 멱등 키·라벨·옛 키 이관                     | `packages/engine/src/competition/prize.ts` (국내 컵·대항전 공용)      |
+| 녹아웃 공용 (유저 일정 등록·대진 다리·통과 보고) | `packages/engine/src/competition/knockout.ts` (국내 컵·대항전 공용)   |
+| 스쿼드 상위 11인 평균 OVR (`squadRating`)        | `packages/engine/src/squad/depth.ts` (승강·체급 재산정이 같이 부른다) |
+| 연장 · 승부차기                                  | `packages/engine/src/competition/extra-time.ts` · `shootout.ts`       |
+| 추첨 일정                                        | `packages/engine/src/competition/draw-schedule.ts`                    |
+| 승강                                             | `packages/engine/src/competition/promotion.ts`                        |

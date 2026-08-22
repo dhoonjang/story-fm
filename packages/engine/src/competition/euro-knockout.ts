@@ -1,5 +1,5 @@
 import type { MatchRecord, MatchStage } from "@story-fm/domain";
-import { addDays, sortEntries } from "./calendar";
+import { addDays } from "./calendar";
 import {
   cupCatalog,
   competitionShortName,
@@ -11,7 +11,8 @@ import {
 import { completeDraw, drawIsDue, scheduleDraw } from "./draw-schedule";
 import { EURO_NIGHT_KICKOFF, euroMatchdayDates, knockoutDates } from "./europe";
 import { payLeaguePhasePrizes, payStagePrizes } from "./euro-prize";
-import { makeRng } from "../core/rng";
+import { makeRng, shuffleInPlace } from "../core/rng";
+import { registerUserEntries, reportOurTie, stageMatchesOf, tieLegsOf } from "./knockout";
 import { needsShootout, pairOf, resolveExtraTime, settledTieWinner } from "./extra-time";
 import { resolveShootout } from "./shootout";
 import { pushNarrative, teamNameIn, teamShortNameIn, type GameState } from "../core/state";
@@ -35,15 +36,7 @@ function knockoutId(cupId: string, season: number, stage: MatchStage, pair: numb
 }
 
 /** 이 대회 이 단계의 경기 — 대진 번호, 그다음 차수 순 */
-export function euroStageMatches(
-  state: GameState,
-  cupId: string,
-  stage: MatchStage,
-): MatchRecord[] {
-  return state.matches
-    .filter((m) => m.season === state.season && m.competitionId === cupId && m.stage === stage)
-    .sort((a, b) => pairOf(a) - pairOf(b) || a.round - b.round);
-}
+export { stageMatchesOf as euroStageMatches } from "./knockout";
 
 /** 리그 페이즈 완주 여부 — 녹아웃 편성의 전제 */
 export function euroLeaguePhaseDone(state: GameState, cupId: string): boolean {
@@ -55,13 +48,13 @@ export function euroLeaguePhaseDone(state: GameState, cupId: string): boolean {
 }
 
 /** 이 대진의 모든 차전 — 차수 순 */
-function tieLegsOf(
+function euroTieLegs(
   state: GameState,
   cupId: string,
   stage: MatchStage,
   pair: number,
 ): MatchRecord[] {
-  return euroStageMatches(state, cupId, stage).filter((m) => pairOf(m) === pair);
+  return tieLegsOf(stageMatchesOf(state, cupId, stage), pair);
 }
 
 /**
@@ -77,7 +70,7 @@ export function euroTieWinner(
   stage: MatchStage,
   pair: number,
 ): string | null {
-  return settledTieWinner(tieLegsOf(state, cupId, stage, pair));
+  return settledTieWinner(euroTieLegs(state, cupId, stage, pair));
 }
 
 /**
@@ -93,7 +86,7 @@ export function resolveEuroTie(
   stage: MatchStage,
   pair: number,
 ): string | null {
-  const legs = tieLegsOf(state, cupId, stage, pair);
+  const legs = euroTieLegs(state, cupId, stage, pair);
   if (legs.length === 0 || legs.some((m) => !m.result)) return null;
 
   const decider = legs[legs.length - 1]!;
@@ -111,25 +104,6 @@ function leaguePhaseSeeds(state: GameState, cupId: string): string[] {
 function seedIndex(seeds: string[], teamId: string): number {
   const i = seeds.indexOf(teamId);
   return i < 0 ? seeds.length : i;
-}
-
-function registerUserEntries(state: GameState, matches: MatchRecord[]): void {
-  const ours = matches.filter(
-    (m) => m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId,
-  );
-  if (ours.length === 0) return;
-  for (const m of ours) {
-    state.schedule.push({
-      id: `se-${m.id}`,
-      date: m.date,
-      time: m.time ?? EURO_NIGHT_KICKOFF,
-      type: "match",
-      refId: m.id,
-      teamId: state.userTeamId,
-      status: "scheduled",
-    });
-  }
-  state.schedule = sortEntries(state.schedule);
 }
 
 /** 대진 하나를 2차전제로 만든다 — 상위 시드가 2차전 홈 */
@@ -191,7 +165,7 @@ function createStage(
     created.push(...createTie(state, cup, stage, pair, better, worse));
   });
   state.matches.push(...created);
-  registerUserEntries(state, created);
+  registerUserEntries(state, created, EURO_NIGHT_KICKOFF);
   payStagePrizes(state, cup.id, stage, pairs.flat(), digest);
 
   const short = competitionShortName(cup.id);
@@ -236,10 +210,7 @@ function mainDrawPairs(
   const direct = seeds.slice(0, cup.directSlots);
   const rng = makeRng(state.seed, `draw:${cup.id}:${state.season}`);
   const pool = [...winners];
-  for (let i = pool.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [pool[i], pool[j]] = [pool[j]!, pool[i]!];
-  }
+  shuffleInPlace(pool, rng);
   return direct.map((teamId, i) => [teamId, pool[i] ?? pool[pool.length - 1]!]);
 }
 
@@ -248,6 +219,26 @@ function pairUp(teams: string[]): Array<[string, string]> {
   const pairs: Array<[string, string]> = [];
   for (let i = 0; i + 1 < teams.length; i += 2) pairs.push([teams[i]!, teams[i + 1]!]);
   return pairs;
+}
+
+/** 우리 팀이 뛴 단계의 결과 보고 — 다음 단계 편성과 같은 시점에 한 번만 */
+function reportEuroTie(
+  state: GameState,
+  cup: CupCatalogEntry,
+  stage: MatchStage,
+  winners: string[],
+  digest: string[],
+): void {
+  reportOurTie(
+    state,
+    {
+      matches: stageMatchesOf(state, cup.id, stage),
+      short: competitionShortName(cup.id),
+      label: stageLabel(stage, 1, false),
+      winners,
+    },
+    digest,
+  );
 }
 
 /**
@@ -270,7 +261,7 @@ export function advanceEuroKnockouts(state: GameState, digest: string[]): void {
 
     for (let i = 0; i < stages.length; i++) {
       const stage = stages[i]!;
-      const existing = euroStageMatches(state, cup.id, stage);
+      const existing = stageMatchesOf(state, cup.id, stage);
       if (existing.length === 0) {
         const previous = i > 0 ? stages[i - 1]! : null;
         const pairs =
@@ -287,13 +278,13 @@ export function advanceEuroKnockouts(state: GameState, digest: string[]): void {
         // 결승만 예외다: 준결승 승자 둘이 곧 대진이라 뽑을 게 없다.
         if (stage === "final") {
           if (previous && previousWinners) {
-            reportOurTie(state, cup, previous, previousWinners, digest);
+            reportEuroTie(state, cup, previous, previousWinners, digest);
           }
         } else {
           // 예약이 새로 잡히는 순간에만 직전 라운드 결과를 보고한다 (중복 방지)
           if (scheduleEuroDraw(state, cup, stage, pairs.flat(), digest)) {
             if (previous && previousWinners) {
-              reportOurTie(state, cup, previous, previousWinners, digest);
+              reportEuroTie(state, cup, previous, previousWinners, digest);
             }
           }
           if (!drawIsDue(state, cup.id, stage)) break;
@@ -335,25 +326,6 @@ function scheduleEuroDraw(
     digest.push(`🎲 ${short} ${stageLabel(stage, 1, false)} 대진 추첨 — ${date}`);
   }
   return created;
-}
-
-/** 우리 팀이 뛴 단계의 결과 보고 — 다음 단계 편성과 같은 시점에 한 번만 */
-function reportOurTie(
-  state: GameState,
-  cup: CupCatalogEntry,
-  stage: MatchStage,
-  winners: string[],
-  digest: string[],
-): void {
-  const played = euroStageMatches(state, cup.id, stage).some(
-    (m) => m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId,
-  );
-  if (!played) return;
-  const short = competitionShortName(cup.id);
-  const label = stageLabel(stage, 1, false);
-  const advanced = winners.includes(state.userTeamId);
-  digest.push(advanced ? `${short} ${label} 통과` : `${short} ${label} 탈락`);
-  pushNarrative(state, `${short} ${label} ${advanced ? "통과" : "탈락"}`, 4);
 }
 
 /**
@@ -403,7 +375,7 @@ export function reservedEuroDatesFor(state: GameState, teamId: string): string[]
 
   let alive = true;
   for (const stage of knockoutStages(cup)) {
-    const drawn = euroStageMatches(state, entry.cupId, stage);
+    const drawn = stageMatchesOf(state, entry.cupId, stage);
     if (drawn.length === 0) {
       // 아직 안 뽑혔다 — 살아 있는 동안은 그 자리를 비워 둬야 한다
       if (alive) dates.push(...knockoutDates(state.season, stage));

@@ -1387,14 +1387,16 @@ UI의 같은 탭은 반대로 **고른 대회의** 다음 우리 경기를 세�
 
 ## 코드 위치
 
-| 무엇                          | 어디                                                                      |
-| ----------------------------- | ------------------------------------------------------------------------- |
-| 전력 패킷·키포인트·공략       | `packages/sim/src/strength-packet.ts` · `key-points.ts` · `exploits.ts`   |
-| 슈팅 xG·결정력·표집 분포      | `packages/sim/src/shot-model.ts`                                          |
-| 개인 지시·판세 격자           | `packages/sim/src/directives.ts` · `zone-grid.ts`                         |
-| 구간 시뮬레이터·장부          | `packages/sim/src/match-engine.ts` · `match-ledger.ts`                    |
-| 전술 상성·체력                | `packages/sim/src/tactical-counters.ts` · `stamina.ts`                    |
-| 경기 흐름·정지점·마감         | `packages/engine/src/match/match-flow.ts`                                 |
-| 연장 판정·타 팀 연장·승부차기 | `packages/engine/src/competition/extra-time.ts` · `shootout.ts`           |
-| 간이 시뮬·평점·징계           | `packages/engine/src/match/quick-sim.ts` · `ratings.ts` · `discipline.ts` |
-| 경기 화면                     | `apps/web/components/match-view.tsx`                                      |
+| 무엇                             | 어디                                                                       |
+| -------------------------------- | -------------------------------------------------------------------------- |
+| 시드 난수 (`makeRng`·`shuffled`) | `packages/sim/src/rng.ts` — 엔진(`core/rng.ts`)과 match-cli가 같이 부른다  |
+| 구간 사건 정렬·누적 피로         | `packages/sim/src/segment.ts` — 엔진의 진행 루프와 match-cli가 같이 부른다 |
+| 전력 패킷·키포인트·공략          | `packages/sim/src/strength-packet.ts` · `key-points.ts` · `exploits.ts`    |
+| 슈팅 xG·결정력·표집 분포         | `packages/sim/src/shot-model.ts`                                           |
+| 개인 지시·판세 격자              | `packages/sim/src/directives.ts` · `zone-grid.ts`                          |
+| 구간 시뮬레이터·장부             | `packages/sim/src/match-engine.ts` · `match-ledger.ts`                     |
+| 전술 상성·체력                   | `packages/sim/src/tactical-counters.ts` · `stamina.ts`                     |
+| 경기 흐름·정지점·마감            | `packages/engine/src/match/match-flow.ts`                                  |
+| 연장 판정·타 팀 연장·승부차기    | `packages/engine/src/competition/extra-time.ts` · `shootout.ts`            |
+| 간이 시뮬·평점·징계              | `packages/engine/src/match/quick-sim.ts` · `ratings.ts` · `discipline.ts`  |
+| 경기 화면                        | `apps/web/components/match-view.tsx`                                       |

@@ -1,10 +1,10 @@
 import type { GamePlayer, PitchClaim, PitchClaimKind } from "@story-fm/domain";
-import { PITCH_CLAIM_KO, ageOf, naturalPositionOf } from "@story-fm/domain";
+import { PITCH_CLAIM_KO, ageOf } from "@story-fm/domain";
 import { euroCompetitionOf } from "../competition/europe";
 import { countryOfTeam, isClubTeam } from "../data/team-catalog";
 import { computeStandings } from "../competition/season";
-import { diffDays } from "../competition/calendar";
-import { activeContract, playerById, playersOf, teamName, type GameState } from "../core/state";
+import { contractYearsLeft, playerById, playersOf, teamName, type GameState } from "../core/state";
+import { betterAtPosition } from "../squad/depth";
 
 /**
  * 설득 검증 — 감독의 논거를 **상태와 대조해** 인정/기각한다.
@@ -58,27 +58,6 @@ const LIE_PENALTY = 1.4;
  * 보는 숫자이기 때문이다 — 걸리는 데가 없는 `+12%p`는 대조할 수 없는 장식이다.
  */
 export const LATITUDE_PER_CLAIM = 12;
-
-/**
- * 계약 잔여 연수 — market.ts에도 같은 계산이 있지만 여기서 가져다 쓰면
- * market ↔ persuasion 순환 import가 된다. 두 줄짜리 파생이라 여기 둔다.
- */
-function yearsLeftOn(state: GameState, playerId: string): number {
-  const contract = activeContract(state, playerId);
-  if (!contract) return 0;
-  return Math.max(0, diffDays(state.date, contract.until) / 365);
-}
-
-/** 우리 스쿼드에서 그 자리를 더 잘 보는 선수 수 */
-function betterAtSamePosition(state: GameState, player: GamePlayer): number {
-  const position = naturalPositionOf(player).position;
-  return playersOf(state, state.userTeamId).filter(
-    (p) =>
-      p.id !== player.id &&
-      naturalPositionOf(p).position === position &&
-      p.attributes.overall > player.attributes.overall,
-  ).length;
-}
 
 /** 한 구단에 있었던 구간 — `[from, to)` (원장이 모르는 시작은 `EPOCH`) */
 interface Spell {
@@ -163,7 +142,7 @@ function verifyOne(
         : { verified: false, why: "우리는 올 시즌 대항전에 나가지 않는다 — 선수가 확인한다" };
     }
     case "starting_role": {
-      const blocked = betterAtSamePosition(state, player);
+      const blocked = betterAtPosition(state, state.userTeamId, player);
       return blocked === 0
         ? { verified: true, why: "그 자리에 그보다 나은 선수가 없다 — 주전 약속이 사실이다" }
         : {
@@ -220,7 +199,7 @@ function verifyOne(
     }
     case "last_chance": {
       const age = ageOf(player.birthdate, state.date);
-      const left = yearsLeftOn(state, player.id);
+      const left = contractYearsLeft(state, player.id);
       return age >= 33 || left <= 1
         ? {
             verified: true,
