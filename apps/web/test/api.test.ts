@@ -44,7 +44,7 @@ import {
   FRIENDLY_ROUNDS,
   teamsOfLeague,
 } from "@story-fm/engine";
-import { FORMATION_LAYOUTS } from "@story-fm/domain";
+import { FORMATION_LAYOUTS, boardExpectationText } from "@story-fm/domain";
 import type { ChatTurn } from "@story-fm/engine";
 import { visibleChat } from "../lib/store";
 import type { GamePayload, GameSlice } from "../lib/store";
@@ -108,7 +108,10 @@ describe("API — 온보딩부터 경기까지", () => {
     // 보드 기대는 시즌 평가가 쓰는 문구 그대로 — 화면이 tier로 따로 만들지 않는다
     const teams = data.teams as Array<{ id: string; expectation: string }>;
     expect(teams.find((t) => t.id === "arsenal")?.expectation).toBe(
-      boardExpectationOfTier(catalogTierOf("arsenal"), teamsOfLeague("epl").length).label,
+      (() => {
+        const e = boardExpectationOfTier(catalogTierOf("arsenal"), teamsOfLeague("epl").length);
+        return boardExpectationText(e.code, e.target);
+      })(),
     );
 
     // 랜딩이 받는 것 — 카탈로그는 한 조각도 실리지 않는다

@@ -43,6 +43,10 @@ import {
 } from "@story-fm/engine";
 import {
   formatMoney,
+  matchupText,
+  normalizePacket,
+  packetTagContext,
+  packetTagText,
   personaRoleLabel,
   slotOfTime,
   type CharacterEntry,
@@ -530,9 +534,17 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
   const pending = state.pendingMatch;
   const ledger = pending?.ledger;
   if (!ledger || !pending) return "";
-  const packet = options.withPacket === true ? pending.packet : null;
+  const packet =
+    options.withPacket === true && pending.packet ? normalizePacket(pending.packet) : null;
+  /** 태그가 이름을 대는 자리 — 표적 목록은 패킷이 없는 턴에도 선다 */
+  const tagCtx = pending.packet ? packetTagContext(normalizePacket(pending.packet)) : undefined;
   /** 표적 목록은 판세와 갈린다 — 해석기는 수치 없이 이 목록만 읽는다 */
-  const targets = options.withPacket === false ? [] : (pending.packet?.targets ?? []);
+  const targets =
+    options.withPacket === false
+      ? []
+      : pending.packet
+        ? normalizePacket(pending.packet).targets
+        : [];
   // 온필드 명단에 개인 전력(패킷의 effective)을 붙인다 — 존 평균만으론 "누가 안 도는가"가 안 보인다
   const effective = new Map(
     [...(packet?.home.lineup ?? []), ...(packet?.away.lineup ?? [])].map((p) => [p.id, p] as const),
@@ -558,16 +570,16 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
         `[현재 판세 — 구간마다 갱신]`,
         // 판세를 읽는 것은 모델의 일이다 — 코어는 이름·수치·상성 근거만 싣는다
         `${packet.home.teamName}(홈) vs ${packet.away.teamName} — 기대 득점 ${packet.guide.expectedGoals.home} : ${packet.guide.expectedGoals.away}`,
-        packet.matchups.map((m) => m.why).join(" / "),
-        ...packet.keyPoints.map((k) => `· ${k}`),
+        packet.matchups.map((m) => matchupText(m)).join(" / "),
+        ...packet.keyPoints.map((k) => `· ${packetTagText(k, tagCtx)}`),
         `홈 전술 소화: ${Math.round(packet.home.tactical.uptake * 100)}%${
           packet.home.tactical.notes.length > 0
-            ? ` — ${packet.home.tactical.notes.join(" / ")}`
+            ? ` — ${packet.home.tactical.notes.map((n) => packetTagText(n, tagCtx)).join(" / ")}`
             : ""
         }`,
         `어웨이 전술 소화: ${Math.round(packet.away.tactical.uptake * 100)}%${
           packet.away.tactical.notes.length > 0
-            ? ` — ${packet.away.tactical.notes.join(" / ")}`
+            ? ` — ${packet.away.tactical.notes.map((n) => packetTagText(n, tagCtx)).join(" / ")}`
             : ""
         }`,
       ]
@@ -577,7 +589,7 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
     targets.length > 0
       ? [
           `[공략 가능한 지점 — 동시에 ${MAX_EXPLOITS}곳까지]`,
-          ...targets.map((t) => `  ${t.id} — ${t.label}`),
+          ...targets.map((t) => `  ${t.id} — ${packetTagText(t.tag, tagCtx)}`),
           pending.exploits && pending.exploits.length > 0
             ? `지금 노리는 중: ${pending.exploits.join(", ")}`
             : `지금 노리는 곳 없음`,

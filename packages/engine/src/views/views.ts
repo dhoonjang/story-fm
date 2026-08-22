@@ -10,8 +10,16 @@ import type {
   ScheduleType,
   ShootoutOutcome,
   SquadRegistration,
+  TacticalRead,
+  BoardExpectationCode,
 } from "@story-fm/domain";
-import { isReserveMatch } from "@story-fm/domain";
+import {
+  boardExpectationText,
+  isReserveMatch,
+  normalizePacket,
+  packetTagContext,
+  packetTagText,
+} from "@story-fm/domain";
 import {
   ATTRIBUTE_AXES,
   AXIS_GROUPS,
@@ -35,6 +43,7 @@ import { DEFAULT_KICKOFF, diffDays, nextMatchFor, seasonEndDate } from "../compe
 import {
   categoryOf,
   currentMonthSummary,
+  financeNoteTexts,
   formatMoney,
   isJournalMoney,
   monthOf,
@@ -1376,8 +1385,10 @@ function buildMatchView(state: GameState): MatchView | null {
   const pending = state.pendingMatch;
   if (!pending || state.phase !== "match") return null;
   const match = state.matches.find((m) => m.id === pending.matchId);
-  const packet = pending.packet;
+  /** 진행 중이던 옛 세이브의 패킷은 문장 배열을 들고 온다 — 여기서 한 번 태그로 옮긴다 */
+  const packet = pending.packet ? normalizePacket(pending.packet) : null;
   if (!match || !packet) return null;
+  const tagCtx = packetTagContext(packet);
 
   const ledger = pending.ledger;
   const worn = pending.matchFatigue ?? {};
@@ -1507,12 +1518,12 @@ function buildMatchView(state: GameState): MatchView | null {
     away: rowsOf(packet.away.lineup, ledger.away.onPitch, match.awayTeamId),
   };
 
-  const tacticsOfSide = (teamId: string, tactical: { uptake: number; notes: string[] }) => ({
+  const tacticsOfSide = (teamId: string, tactical: TacticalRead) => ({
     ...(teamId !== state.userTeamId && pending.aiTactics
       ? pending.aiTactics
       : tacticsOf(state, teamId).spec),
     uptake: tactical.uptake,
-    notes: tactical.notes,
+    notes: tactical.notes.map((tag) => packetTagText(tag, tagCtx)),
   });
 
   return {
@@ -1602,14 +1613,17 @@ function buildMatchView(state: GameState): MatchView | null {
      * 유불리는 **우리 편 기준**으로 접어서 넘긴다 — 화면이 홈/원정 중 어느 쪽이
      * 우리인지 다시 따지지 않아도 되게. 편을 모르는 옛 세이브는 `null`이다.
      */
-    keyPoints: packet.keyPoints.map((text, i) => {
-      const favours = packet.keyPointSides?.[i];
+    keyPoints: packet.keyPoints.map((tag) => {
       const ourSide = match.homeTeamId === state.userTeamId ? "home" : "away";
-      return { text, ours: favours === undefined ? null : favours === ourSide };
+      return {
+        text: packetTagText(tag, tagCtx),
+        ours: tag.favours === null ? null : tag.favours === ourSide,
+      };
     }),
     exploiting: (pending.exploits ?? [])
-      .map((id) => packet.targets.find((t) => t.id === id)?.label)
-      .filter((x): x is string => x !== undefined),
+      .map((id) => packet.targets.find((t) => t.id === id))
+      .filter((t): t is NonNullable<typeof t> => t !== undefined)
+      .map((t) => packetTagText(t.tag, tagCtx)),
     tactics: {
       home: tacticsOfSide(match.homeTeamId, packet.home.tactical),
       away: tacticsOfSide(match.awayTeamId, packet.away.tactical),
@@ -1761,6 +1775,19 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
     // 통과 경계선은 리그 페이즈가 있는 대항전에만 있다 (국내 컵은 순위표가 없다)
     europe: isEuroCup(competitionId) ? buildEuropeView(state, competitionId) : null,
   };
+}
+
+/**
+ * 보드 기대의 이름 — **코드가 원본이고 옛 세이브의 라벨은 폴백이다** (career.md §6).
+ * 코드도 라벨도 없는 카드는 기대를 모르는 카드라 `null`이다.
+ */
+function expectationTextOf(card: {
+  expectationCode?: BoardExpectationCode;
+  expectation?: string;
+  target?: number;
+}): string | null {
+  if (card.expectationCode) return boardExpectationText(card.expectationCode, card.target);
+  return card.expectation ?? null;
 }
 
 export function buildOfficeViews(state: GameState): OfficeViews {
@@ -2306,7 +2333,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       pnlNet: r.pnlNet,
       wageRatio: r.wageRatio,
       wageTone: wageRatioTone(r.wageRatio),
-      notes: r.notes,
+      notes: financeNoteTexts(r),
     }));
   const now = currentMonthSummary(state);
   const current: FinanceMonthView = {
@@ -2388,7 +2415,10 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       weeklyWages: weeklyWagesOf(state, userTeamId),
       transferBudget: finance.transferBudget,
       budgetFrozen: finance.budgetFrozen === true,
-      boardExpectation: boardExpectation(state, userTeamId),
+      boardExpectation: (() => {
+        const be = boardExpectation(state, userTeamId);
+        return { target: be.target, label: boardExpectationText(be.code, be.target) };
+      })(),
       stadium: { name: stadium.stadium, capacity: stadium.capacity },
       // 시즌 누계 기준 — 한 달만 보면 프리시즌에 100%를 넘어 무의미하다
       wageRatio: seasonWageRatio(state),
@@ -2420,7 +2450,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
             tier: state.dismissal.tier ?? null,
             position: state.dismissal.position ?? null,
             target: state.dismissal.target ?? null,
-            expectation: state.dismissal.expectation ?? null,
+            expectation: expectationTextOf(state.dismissal),
             reason: state.dismissal.reason ?? null,
           }
         : null,
@@ -2430,7 +2460,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         teamName: teamNameIn(state, d.teamId),
         position: d.position ?? null,
         target: d.target ?? null,
-        expectation: d.expectation ?? null,
+        expectation: expectationTextOf(d),
       })),
       offers: openManagerOffers(state).map((o) => ({
         id: o.id,
@@ -2439,7 +2469,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         expiresOn: o.expiresOn,
         position: o.position ?? null,
         target: o.target,
-        expectation: o.expectation,
+        expectation: expectationTextOf(o) ?? "",
         salary: o.salary ?? null,
         years: o.years ?? null,
         budgetPledge: o.budgetPledge ?? null,
@@ -2458,7 +2488,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         ? { salary: state.manager.contract.salary, until: state.manager.contract.until }
         : null,
       trophies: state.trophies.map((t) => ({
-        competition: t.competition,
+        competition: t.competitionId ? competitionName(t.competitionId) : (t.competition ?? ""),
         season: t.season,
         teamName: teamNameIn(state, t.teamId),
       })),
@@ -2478,7 +2508,11 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         position: s.position,
         record: `${s.wins}승 ${s.draws}무 ${s.losses}패`,
         board: s.board
-          ? { grade: s.board.grade, target: s.board.target, expectation: s.board.expectation }
+          ? {
+              grade: s.board.grade,
+              target: s.board.target,
+              expectation: expectationTextOf(s.board) ?? "",
+            }
           : null,
         boardVerdict: s.boardVerdict ?? null,
       })),

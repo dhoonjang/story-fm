@@ -11,10 +11,17 @@ import {
   teamsOfLeague,
   topLeagues,
 } from "@story-fm/engine";
+import { boardExpectationText } from "@story-fm/domain";
 import { runOnboardingTurn } from "@story-fm/agents";
 import { beginGameUsage, bindTurnTrace, traceTurn } from "@story-fm/llm";
 import { toPayload } from "@/lib/store";
 import { turnErrorMessage } from "@/lib/turn-runner";
+
+/** 보드 기대의 이름 — 코드와 목표 순위에서 만든다 (career.md §6) */
+const expectationLabel = (e: {
+  code: Parameters<typeof boardExpectationText>[0];
+  target: number;
+}) => boardExpectationText(e.code, e.target);
 
 const CreateSchema = z.object({
   teamId: z.string().min(1),
@@ -58,7 +65,9 @@ export function GET(request: Request) {
       .filter((t) => ids.has(t.leagueId))
       .map((t) => ({
         ...t,
-        expectation: boardExpectationOfTier(catalogTierOf(t.id), sizeOf.get(t.leagueId) ?? 0).label,
+        expectation: expectationLabel(
+          boardExpectationOfTier(catalogTierOf(t.id), sizeOf.get(t.leagueId) ?? 0),
+        ),
       })),
   });
 }
