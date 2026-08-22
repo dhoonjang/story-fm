@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ATTRIBUTE_AXES, AXIS_KO } from "./player";
-import { ShootoutKickSchema } from "./match";
+import { ShootoutKickSchema, type MatchSide } from "./match";
 import { DateString } from "./date-string";
 
 /**
@@ -142,6 +142,55 @@ export const MatchResultSchema = z.object({
   rated: z.boolean().optional(),
 });
 export type MatchResult = z.infer<typeof MatchResultSchema>;
+
+/**
+ * 득점자·도움 한 칸의 **형식은 도메인이 갖는다** — `"home:playerId"`.
+ *
+ * 만드는 곳(경기 장부·간이 시뮬)과 읽는 곳(달력 일지·조회 도구)이 저마다 `split`을
+ * 쓰던 동안, 편이 붙지 않은 옛 칸을 한쪽은 우리 편으로 한쪽은 상대로 읽었다.
+ * 형식을 아는 함수는 한 쌍이면 된다 (→ docs/data/competition.md §7).
+ */
+export function scorerEntry(side: MatchSide, playerId: string): string {
+  return `${side}:${playerId}`;
+}
+
+export interface ScorerEntry {
+  /** 어느 편의 골인가 — 편이 붙지 않은 옛 칸은 null이다(기준 팀의 것으로 읽는다) */
+  side: MatchSide | null;
+  playerId: string;
+}
+
+export function parseScorerEntry(entry: string): ScorerEntry {
+  const at = entry.indexOf(":");
+  if (at < 0) return { side: null, playerId: entry };
+  const side = entry.slice(0, at);
+  const playerId = entry.slice(at + 1);
+  return { side: side === "home" || side === "away" ? side : null, playerId };
+}
+
+/**
+ * 2차전제 경기 id — `m-<컵>-<시즌>-<단계>-p<대진>-l<차수>`.
+ *
+ * 대진 번호는 브래킷이 두 다리를 한 대진으로 묶는 열쇠다. 만드는 쪽(국내 컵·유럽
+ * 녹아웃)과 읽는 쪽(브래킷 뷰)이 갈라져 있으면 id 모양을 고치는 날 브래킷이 조용히
+ * 대진마다 한 다리씩만 세운다.
+ */
+export function cupLegMatchId(parts: {
+  cupId: string;
+  season: number;
+  stage: string;
+  pair: number;
+  leg: number;
+}): string {
+  return `m-${parts.cupId}-${parts.season}-${parts.stage}-p${parts.pair}-l${parts.leg}`;
+}
+
+const CUP_PAIR = /-p(\d+)-/;
+
+/** 그 경기가 속한 대진 번호 — 대진 번호가 없는 id(리그·친선)는 `"0"`으로 묶인다 */
+export function pairOfMatchId(matchId: string): string {
+  return CUP_PAIR.exec(matchId)?.[1] ?? "0";
+}
 
 /**
  * 대회 단계 — 리그(정규 라운드)와 녹아웃. 없으면 리그로 본다(구 세이브 호환).

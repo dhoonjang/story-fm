@@ -89,6 +89,7 @@ import {
   type SkillBriefItem,
 } from "../core/state";
 import { pickAnyPlayer, pickOurPlayer } from "../core/player-ref";
+import { briefNames, deltaItems, item, signed } from "./brief";
 
 /**
  * 스킬 = 상태 변경의 유일한 통로 (overview §2.2·§5).
@@ -104,8 +105,11 @@ export interface SkillResult {
    * **화면이 항목으로 세우는 요약** (`SkillBrief`) — 말풍선과 칩이 이걸 읽는다.
    *
    * 손댄 것을 다 이어 붙인 `message`를 화면이 되쪼개면 한 줄이 글자 벽이 된다.
-   * 여러 가지를 한 번에 바꾸는 스킬(라인업·훈련·개인 전술)은 반드시 채운다.
-   * 비우면 화면은 `message` 첫 줄을 그대로 세운다 — 한 가지만 바꾸는 스킬은 그걸로 족하다.
+   *
+   * ⚠️ **말풍선을 갖는 스킬(`PANEL_OF`)은 모두 채운다** — 비우면 그 호출은 말풍선에
+   * 서지 않는다. `message`는 모델에게 돌려주는 줄이지 화면의 항목이 아니라서,
+   * 화면이 그 줄을 갈라 세우면 코어가 쓴 문장의 첫 줄이 곧 UI가 된다
+   * (→ docs/data/game-state.md §3.6).
    */
   brief?: SkillBrief;
   /**
@@ -401,7 +405,13 @@ export function setDevelopmentFocus(
     };
   }
   state.developmentFocus = after;
-  if (players.length === 0) return { ok: true, message: "집중 육성 지정을 해제했습니다" };
+  if (players.length === 0) {
+    return {
+      ok: true,
+      message: "집중 육성 지정을 해제했습니다",
+      brief: { head: "집중 육성", items: [item({ text: "해제" })] },
+    };
+  }
   pushNarrative(state, `집중 육성 지정 — ${players.map((p) => p.name).join(", ")}`, 1);
   return {
     ok: true,
@@ -562,6 +572,17 @@ export function applyTeamTalk(
       `팀 전체 사기 ${bounded >= 0 ? "+" : ""}${bounded}` +
       (settled > 0 ? ` · 적응 중인 ${settled}명이 한 걸음 가까워졌습니다` : "") +
       (xpMsg ? ` · ${xpMsg}` : ""),
+    /**
+     * 사기 변화는 **항목 하나**다 — 부호는 `delta`가 나르고 화면이 색을 준다.
+     * 감독이 무슨 말을 어떻게 했는지는 장면의 것이지 알림의 것이 아니다.
+     */
+    brief: {
+      head: `${OCCASION_KO[input.occasion]} 팀토크`,
+      items: [
+        item({ label: "팀 사기", text: signed(bounded), delta: bounded }),
+        ...(settled > 0 ? [item({ label: "적응", text: `${settled}명` })] : []),
+      ],
+    },
   };
 }
 
@@ -649,6 +670,16 @@ export function applyTalkToPlayer(
       (hadIssue ? " · 불만 해소" : "") +
       (settling ? ` · 적응 ${Math.round(settling.progress * 100)}%` : "") +
       (xpMsg ? ` · ${xpMsg}` : ""),
+    brief: {
+      head: `${player.name} 면담`,
+      items: [
+        item({ label: "사기", text: signed(bounded), delta: bounded }),
+        ...(hadIssue ? [item({ text: "불만 해소" })] : []),
+        ...(settling
+          ? [item({ label: "적응", text: `${Math.round(settling.progress * 100)}%` })]
+          : []),
+      ],
+    },
   };
 }
 
@@ -708,31 +739,6 @@ const NAMES_SHOWN = 3;
 const nameList = (names: readonly string[]): string =>
   names.slice(0, NAMES_SHOWN).join(", ") +
   (names.length > NAMES_SHOWN ? ` 외 ${names.length - NAMES_SHOWN}명` : "");
-
-/**
- * 말풍선 항목에 적는 이름 — **둘에서 접는다.**
- *
- * `message`는 모델이 읽으므로 셋까지 적지만(`nameList`) 항목 하나는 말풍선 한
- * 줄이라 더 좁다. 누가 더 있는지는 스쿼드 화면이 갖고 있다.
- */
-const BRIEF_NAMES_SHOWN = 2;
-
-const briefNames = (names: readonly string[]): string =>
-  names.slice(0, BRIEF_NAMES_SHOWN).join(", ") +
-  (names.length > BRIEF_NAMES_SHOWN ? ` 외 ${names.length - BRIEF_NAMES_SHOWN}명` : "");
-
-/** 부호를 붙인 수 — 항목의 증감 표기 (`+2` · `−2`) */
-const signed = (n: number): string => (n < 0 ? `−${Math.abs(n)}` : `+${n}`);
-
-/**
- * 말풍선 항목 하나 — **앞의 이름(`label`) · 값(`text`) · 뒤의 갈래(`note`).**
- * 빈 조각은 달지 않는다 (없는 키와 빈 문자열이 화면에서 달리 그려지지 않게).
- */
-const item = (parts: { label?: string; text: string; note?: string }): SkillBriefItem => ({
-  ...(parts.label ? { label: parts.label } : {}),
-  text: parts.text,
-  ...(parts.note ? { note: parts.note } : {}),
-});
 
 /**
  * 배치가 **실제로 바꾼 것** — 포메이션 · 들고 나감 · 자리 이동.
@@ -1422,7 +1428,11 @@ export function setPlayerTraining(
   if (input.clear || (!input.axis && !input.position)) {
     if (index < 0) return { ok: false, message: `${player.name}에게 걸린 개인 훈련이 없습니다` };
     state.playerTraining.splice(index, 1);
-    return { ok: true, message: `${player.name}의 개인 훈련을 거뒀습니다` };
+    return {
+      ok: true,
+      message: `${player.name}의 개인 훈련을 거뒀습니다`,
+      brief: { head: `${player.name} 개인 훈련`, items: [item({ text: "거둠" })] },
+    };
   }
 
   const axis = input.axis?.trim();
@@ -1445,12 +1455,22 @@ export function setPlayerTraining(
   else state.playerTraining.push(program);
 
   const parts: string[] = [];
-  if (axis) parts.push(AXIS_KO[axis as (typeof ATTRIBUTE_AXES)[number]]);
+  const items: SkillBriefItem[] = [];
+  if (axis) {
+    const ko = AXIS_KO[axis as (typeof ATTRIBUTE_AXES)[number]];
+    parts.push(ko);
+    items.push(item({ label: "능력치", text: ko }));
+  }
   if (position) {
     const fit = player.positions.find((p) => p.position === position)?.proficiency ?? 0;
     parts.push(`${position} 전향 (지금 적응도 ${fit})`);
+    items.push(item({ label: "전향", text: position, note: `적응도 ${fit}` }));
   }
-  return { ok: true, message: `${player.name} 개인 훈련 — ${parts.join(" · ")}` };
+  return {
+    ok: true,
+    message: `${player.name} 개인 훈련 — ${parts.join(" · ")}`,
+    brief: { head: `${player.name} 개인 훈련`, items },
+  };
 }
 
 /**
@@ -1602,6 +1622,15 @@ export function setCaptain(state: GameState, playerId: string): SkillResult {
     message:
       `${player.name}을(를) 주장으로 지명했습니다` +
       (settling ? ` · 적응 ${Math.round(settling.progress * 100)}%` : ""),
+    brief: {
+      head: "주장 지정",
+      items: [
+        item({ label: "주장", text: player.name }),
+        ...(settling
+          ? [item({ label: "적응", text: `${Math.round(settling.progress * 100)}%` })]
+          : []),
+      ],
+    },
   };
 }
 
@@ -1890,6 +1919,23 @@ export function setTactics(state: GameState, spec: Partial<TacticsSpec>): SkillR
   return {
     ok: true,
     message: `전술 변경 — ${parsed.data.formation}, 멘탈리티 ${parsed.data.mentality}${note}`,
+    brief: {
+      head: "전술 변경",
+      items: [
+        item({ label: "포메이션", text: parsed.data.formation }),
+        item({ label: "멘탈리티", text: `${parsed.data.mentality}` }),
+        /**
+         * 적응도는 **도달한 값이 값이고 움직인 폭이 부호다** — `delta`가 0이어도
+         * 싣는다. "그대로다"는 이 항목이 말하는 사실이지 증감을 말하지 않는 것이 아니다.
+         */
+        item({
+          label: "전술 적응도",
+          text: `${now}`,
+          note: delta < 0 ? "재적응 필요" : delta > 0 ? "익혀 둔 전술" : "그대로",
+          delta,
+        }),
+      ],
+    },
   };
 }
 
@@ -2510,16 +2556,27 @@ export function applyNarrativeEvent(
    * 항목은 **대상과 수치까지만.** `note`는 LLM이 쓴 자유 문장이라 상한이 없고,
    * 이미 서사 로그와 장면에 남아 있다 — 알림이 그것을 다시 옮겨 적을 자리가 아니다.
    * 폼은 모델이 말한 단계(−1/0/+1)로 적는다 — 화면에 0.12는 뜻이 없다.
+   *
+   * 축은 **한 줄에 하나씩** 선다 — 항목 하나가 한 줄이고 `delta` 하나가 그 줄의
+   * 부호라, 컨디션과 폼을 한 `note`에 묶으면 부호가 둘인 줄이 된다.
    */
-  const deltas = [
-    ...(condition !== 0 ? [`컨디션 ${signed(condition)}`] : []),
-    ...(formStep !== 0 ? [`폼 ${signed(formStep)}`] : []),
-  ];
-  const moved = deltas.length > 0 ? deltas.join(" · ") : "수치 변화 없음";
+  const moved = deltaItems([
+    ["컨디션", condition],
+    ["폼", formStep],
+  ]);
   return {
     ok: true,
     message: `서사 이벤트 반영(${touched.join(", ")}) — ${input.note}`,
-    brief: { head: "서사 이벤트", items: [item({ text: briefNames(touched), note: moved })] },
+    brief: {
+      head: "서사 이벤트",
+      items: [
+        item({
+          text: briefNames(touched),
+          ...(moved.length === 0 ? { note: "수치 변화 없음" } : {}),
+        }),
+        ...moved,
+      ],
+    },
   };
 }
 

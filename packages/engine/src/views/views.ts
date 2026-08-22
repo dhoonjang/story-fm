@@ -24,7 +24,6 @@ import {
   ATTRIBUTE_AXES,
   AXIS_GROUPS,
   AXIS_GROUP_KO,
-  AXIS_KO,
   FINANCE_CATEGORY_KO,
   TRAIN_ATTR_KO,
   ageOf,
@@ -32,7 +31,10 @@ import {
   clampCondition,
   conditionLabel,
   defaultRoleOf,
+  growthLabel,
   naturalPositionOf,
+  pairOfMatchId,
+  parseScorerEntry,
   rolesFor,
   seasonRating,
   separateBoardPoints,
@@ -147,8 +149,7 @@ function growthSummary(state: GameState, date: string, entryId?: string): string
   if (rows.length === 0) return null;
   const counts = new Map<string, number>();
   for (const g of rows) {
-    const label = g.target === "tactical" ? "전술" : (AXIS_KO[g.target as never] ?? g.target);
-    const key = `${label} ${g.delta > 0 ? "+" : ""}${g.delta}`;
+    const key = `${growthLabel(g.target)} ${g.delta > 0 ? "+" : ""}${g.delta}`;
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   return [...counts]
@@ -381,7 +382,7 @@ interface SquadViewRowMeta {
    * 잠재력 **추정 구간** — 참값은 노출하지 않는다. 우리 선수도 단정할 수 없고
    * (출전이 쌓이면 좁아진다), 근거가 없으면 null이다 (scouting.ts §잠재력).
    */
-  potential: { low: number; high: number; margin: number } | null;
+  potential: { low: number; high: number; margin: number; confidence: string } | null;
   squadLevel: "first" | "reserve";
   form: number;
   /** 폼의 말 — "절정"·"상승세"·"평소"·"침체"·"바닥" (form.ts와 같은 경계) */
@@ -607,6 +608,29 @@ export interface NextMatchView {
   venue: "home" | "away" | "neutral";
   /** 오늘로부터 며칠 뒤인가 — 0이면 오늘이다 */
   inDays: number;
+}
+
+/**
+ * 최근 결과 한 줄 — **사실만** (competition.md §7).
+ *
+ * `"EPL R7 TOT 2-1 ARS (승부차기 4-3)"`처럼 붙여 내면 화면은 승패 색을 칠하려고 그
+ * 문자열을 도로 가르고, 승부차기 괄호 규칙이 코어의 템플릿 문자열 안에 숨는다.
+ * 조각으로 내려가면 화면이 스코어를 굵게, 우리 편을 진하게, 승패를 색으로 세운다.
+ */
+export interface RecentResultView {
+  /** 어느 경기인가 — `EPL R7` · `FA컵 8강` · `친선` */
+  label: string;
+  /** 홈 팀 약칭 — 우리 편이 어느 쪽인지는 `venue`가 말한다 */
+  home: string;
+  away: string;
+  homeGoals: number;
+  awayGoals: number;
+  /** 승부차기로 갈린 경기만 — 스코어를 바꾸지 않고 옆에 선다 (competition.md §6) */
+  penalties: { home: number; away: number } | null;
+  /** 우리가 어느 쪽이었나 — 중립 결승도 있다 */
+  venue: "home" | "away" | "neutral";
+  /** 우리 시점의 결과 */
+  outcome: "W" | "D" | "L";
 }
 
 /**
@@ -1026,7 +1050,8 @@ export interface OfficeViews {
      * 언제 누구인가지 그 대회의 다음 라운드가 아니다.
      */
     nextMatch: NextMatchView | null;
-    recentResults: string[];
+    /** 최근 다섯 경기 — **사실만**. 문장은 화면이 잇는다 (competition.md §7) */
+    recentResults: RecentResultView[];
     /** 탭 순서: 우리 리그 → 우리 대항전 */
     list: CompetitionView[];
   };
@@ -1104,7 +1129,8 @@ export interface OfficeViews {
       season: number;
       teamName: string;
       position: number;
-      record: string;
+      /** 그 시즌의 전적 — `"20승 8무 10패"`는 화면이 잇는다 (career.md §6) */
+      record: { wins: number; draws: number; losses: number };
       /**
        * 그 시즌에 대한 **보드 평가 카드** — 등급과 근거 수치 (career.md §6).
        * 순위와 전적이 말하지 않는 것이 여기 있다: 같은 4위가 어느 구단에서는
@@ -1146,7 +1172,7 @@ function buildBracket(state: GameState, competitionId: string): BracketStageView
     if (matches.length === 0) continue;
     const byPair = new Map<string, typeof matches>();
     for (const m of matches) {
-      const pair = /-p(\d+)-/.exec(m.id)?.[1] ?? "0";
+      const pair = pairOfMatchId(m.id);
       const legs = byPair.get(pair);
       if (legs) legs.push(m);
       else byPair.set(pair, [m]);
@@ -2128,15 +2154,17 @@ export function buildOfficeViews(state: GameState): OfficeViews {
            */
           const assistIds = m.result.assists ?? [];
           const minutes = m.result.goalMinutes ?? [];
-          const scorers = (m.result.scorers ?? []).map((s, i) => {
-            const [sSide, id] = s.includes(":") ? (s.split(":", 2) as [string, string]) : ["", s];
-            const name = playerName(state, id ?? s);
-            const rawAssist = assistIds[i] ?? "";
-            const assistId = rawAssist.includes(":") ? rawAssist.split(":", 2)[1] : rawAssist;
-            const withAssist = assistId ? `${name} (${playerName(state, assistId)})` : name;
+          const scorers = (m.result.scorers ?? []).map((entry, i) => {
+            const goal = parseScorerEntry(entry);
+            const name = playerName(state, goal.playerId);
+            const assist = parseScorerEntry(assistIds[i] ?? "");
+            const withAssist = assist.playerId
+              ? `${name} (${playerName(state, assist.playerId)})`
+              : name;
             // 분이 붙으면 스코어가 이야기가 된다 — 87분 동점골과 5분 선제골은 다르다
             const at = minutes[i] !== undefined ? `${withAssist} ${minutes[i]}′` : withAssist;
-            return sSide === mySide || sSide === "" ? at : `${at} (상대)`;
+            // 편이 붙지 않은 옛 칸은 기준 팀의 골로 읽는다
+            return goal.side === null || goal.side === mySide ? at : `${at} (상대)`;
           });
           detail = scorers.length > 0 ? `득점: ${scorers.join(", ")}` : null;
         }
@@ -2220,11 +2248,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
   const growthByDate = new Map<string, { counts: Map<string, number>; lines: string[] }>();
   for (const g of state.growthLog) {
     if (!ourPlayers.has(g.gamePlayerId)) continue;
-    const label = g.target.startsWith("pos:")
-      ? `${g.target.slice(4)} 적응도`
-      : g.target === "tactical"
-        ? "전술 적응도"
-        : (AXIS_KO[g.target as never] ?? g.target);
+    const label = growthLabel(g.target);
     const sign = g.delta > 0 ? "+" : "";
     const day = growthByDate.get(g.date) ?? {
       counts: new Map<string, number>(),
@@ -2363,10 +2387,25 @@ export function buildOfficeViews(state: GameState): OfficeViews {
     )
     .sort((a, b) => (a.date < b.date ? -1 : 1))
     .slice(-5)
-    .map(
-      (m) =>
-        `${fixtureLabel(m.competitionId, m.stage ?? "league", m.round)} ${teamShortNameIn(state, m.homeTeamId)} ${m.result?.homeGoals}-${m.result?.awayGoals} ${teamShortNameIn(state, m.awayTeamId)}${m.result?.penalties ? ` (승부차기 ${m.result.penalties.home}-${m.result.penalties.away})` : ""}`,
-    );
+    .map((m): RecentResultView | null => {
+      const result = m.result;
+      const outcome = outcomeFor(m, userTeamId);
+      // 위 필터가 결과 있는 우리 경기만 남긴다 — 타입을 좁히는 자리다
+      if (!result || !outcome) return null;
+      return {
+        label: fixtureLabel(m.competitionId, m.stage ?? "league", m.round),
+        home: teamShortNameIn(state, m.homeTeamId),
+        away: teamShortNameIn(state, m.awayTeamId),
+        homeGoals: result.homeGoals,
+        awayGoals: result.awayGoals,
+        penalties: result.penalties
+          ? { home: result.penalties.home, away: result.penalties.away }
+          : null,
+        venue: m.neutral ? "neutral" : m.homeTeamId === userTeamId ? "home" : "away",
+        outcome,
+      };
+    })
+    .filter((r): r is RecentResultView => r !== null);
 
   return {
     match: buildMatchView(state),
@@ -2506,7 +2545,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         season: s.season,
         teamName: teamNameIn(state, s.teamId),
         position: s.position,
-        record: `${s.wins}승 ${s.draws}무 ${s.losses}패`,
+        record: { wins: s.wins, draws: s.draws, losses: s.losses },
         board: s.board
           ? {
               grade: s.board.grade,

@@ -73,6 +73,7 @@ import { evaluatePitch, latitudeOf } from "./persuasion";
 import { makeRng } from "../core/rng";
 import type { MarketSkillResult, SkillResult } from "../skills";
 import { grantManagerXP } from "../skills";
+import { item } from "../skills/brief";
 import { buildTransferPress, openPress } from "../club/press";
 import { pickAnyPlayer } from "../core/player-ref";
 import {
@@ -974,7 +975,11 @@ export function setTransferList(
   if (!input.listed) {
     if (index < 0) return { ok: false, message: `${player.name}은(는) 이적 리스트에 없습니다` };
     state.transferList.splice(index, 1);
-    return { ok: true, message: `${player.name}을(를) 이적 리스트에서 뺐습니다` };
+    return {
+      ok: true,
+      message: `${player.name}을(를) 이적 리스트에서 뺐습니다`,
+      brief: { head: "이적 리스트", items: [item({ label: "해제", text: player.name })] },
+    };
   }
 
   const askingPrice = Math.max(0, Math.round(input.askingPrice ?? askingPriceFor(state, player)));
@@ -988,16 +993,33 @@ export function setTransferList(
   else state.transferList.push(listing);
 
   const market = marketValueOf(state, player);
+  /**
+   * 호가가 시장가의 어디에 섰나 — **모델에게 줄 줄과 말풍선의 갈래가 같은 자에서 갈린다.**
+   * 눈금을 두 곳에 적으면 문구를 다듬는 날 둘이 어긋난다.
+   */
   const stance =
-    askingPrice > market * 1.2
-      ? "시장가보다 비싸게 불렀습니다 — 관심이 더디 붙습니다"
-      : askingPrice < market * 0.85
-        ? "시장가보다 싸게 내놨습니다 — 금방 붙을 것입니다"
-        : "시장가 언저리입니다";
+    askingPrice > market * 1.2 ? "above" : askingPrice < market * 0.85 ? "below" : "at";
+  const STANCE_LINE: Record<typeof stance, string> = {
+    above: "시장가보다 비싸게 불렀습니다 — 관심이 더디 붙습니다",
+    below: "시장가보다 싸게 내놨습니다 — 금방 붙을 것입니다",
+    at: "시장가 언저리입니다",
+  };
+  const STANCE_NOTE: Record<typeof stance, string> = {
+    above: "시장가 위",
+    below: "시장가 아래",
+    at: "시장가 언저리",
+  };
   pushNarrative(state, `${player.name} 이적 리스트 등재 (${formatMoney(askingPrice)})`, 3);
   return {
     ok: true,
-    message: `${player.name}을(를) 이적 리스트에 올렸습니다 — 호가 ${formatMoney(askingPrice)}. ${stance}`,
+    message: `${player.name}을(를) 이적 리스트에 올렸습니다 — 호가 ${formatMoney(askingPrice)}. ${STANCE_LINE[stance]}`,
+    brief: {
+      head: "이적 리스트",
+      items: [
+        item({ label: "등재", text: player.name }),
+        item({ label: "호가", text: formatMoney(askingPrice), note: STANCE_NOTE[stance] }),
+      ],
+    },
   };
 }
 
@@ -1859,7 +1881,17 @@ function executeLoanOut(
       amount: agreed.fee,
     });
   }
-  return { ok: true, message: `${res.message} · 임대료 ${formatMoney(agreed.fee)}` };
+  return {
+    ok: true,
+    message: `${res.message} · 임대료 ${formatMoney(agreed.fee)}`,
+    brief: {
+      head: res.brief?.head ?? "임대",
+      items: [
+        ...(res.brief?.items ?? []),
+        item({ label: "임대료", text: formatMoney(agreed.fee) }),
+      ],
+    },
+  };
 }
 
 /**
@@ -1950,6 +1982,17 @@ function executeLoanIn(
       `${player.name}을(를) ${teamName(from)}에서 임대로 데려왔습니다 — ${until}까지 · ` +
       `임대료 ${formatMoney(agreed.fee)} · 주급 ${Math.round(wageShare * 100)}% 부담` +
       (slot.ok ? "" : ` ⚠ ${registrationBlockText(slot.block)} — 2군으로 들어왔습니다`),
+    brief: {
+      head: "임대 영입",
+      items: [
+        item({ label: "영입", text: player.name, note: `${teamName(from)} · ${until}까지` }),
+        item({ label: "임대료", text: formatMoney(agreed.fee) }),
+        item({ label: "주급 부담", text: `${Math.round(wageShare * 100)}%` }),
+        ...(slot.ok
+          ? []
+          : [item({ label: "등록", text: "2군", note: registrationBlockText(slot.block) })]),
+      ],
+    },
   };
 }
 
@@ -1992,6 +2035,17 @@ function executeRenewal(
     message:
       `${player.name} 재계약 완료 — 주급 ${formatMoney(agreed.weeklyWage)}, ` +
       `${contractUntil(state.date, agreed.contractYears)}까지. 주급 총액이 늘어납니다`,
+    brief: {
+      head: "재계약",
+      items: [
+        item({ label: "선수", text: player.name }),
+        item({
+          label: "주급",
+          text: formatMoney(agreed.weeklyWage),
+          note: `${contractUntil(state.date, agreed.contractYears)}까지`,
+        }),
+      ],
+    },
   };
 }
 
@@ -2041,6 +2095,13 @@ function passMedicalGate(
         message:
           `${player.name} 이적에 합의했습니다 — ${where}은 ${medical.onDate}입니다. ` +
           `검진을 통과하면 그날 계약이 확정됩니다 (오늘 발표할 수 있는 것은 없습니다)`,
+        brief: {
+          head: "이적 합의",
+          items: [
+            item({ label: "선수", text: player.name }),
+            item({ label: where, text: medical.onDate }),
+          ],
+        },
       };
     }
     /**
@@ -2099,6 +2160,10 @@ function medicalFlagResult(
       message:
         `${player.name} 메디컬에서 소견이 나왔습니다 — ${note}. ` +
         `그대로 데려오려면 accept_deal을 한 번 더, 물러서려면 withdraw_offer입니다`,
+      brief: {
+        head: "메디컬 소견",
+        items: [item({ label: player.name, text: note })],
+      },
     };
   }
   const counter = openMedicalCounter(state, negotiation, player);
@@ -2109,6 +2174,17 @@ function medicalFlagResult(
       `${teamName(receivingTeamOf(state, negotiation))}의 메디컬에서 ${player.name}에게 소견이 ` +
       `나왔습니다 — ${note}. ${formatMoney(counter.agreedFee)}에서 ${formatMoney(counter.cut)}로 깎아 다시 ` +
       `불렀습니다 — 답해야 합니다`,
+    brief: {
+      head: "메디컬 소견",
+      items: [
+        item({ label: player.name, text: note }),
+        item({
+          label: "되부른 값",
+          text: `${formatMoney(counter.agreedFee)} → ${formatMoney(counter.cut)}`,
+          delta: counter.cut - counter.agreedFee,
+        }),
+      ],
+    },
   };
 }
 
@@ -2428,6 +2504,28 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
         : ` (${paymentYears}년 분할 — 첫 회분 ${formatMoney(dueNow)})`) +
       `, 주급 ${formatMoney(agreed.weeklyWage)} ${agreed.contractYears}년. 남은 이적 예산 ${formatMoney(ourFinance.transferBudget)}` +
       (slot.ok ? "" : ` ⚠ ${registrationBlockText(slot.block)} — 2군으로 들어왔습니다`),
+    brief: {
+      head: "영입 완료",
+      items: [
+        item({ label: "영입", text: player.name, note: teamName(fromTeamId) }),
+        item({
+          label: "이적료",
+          text: formatMoney(agreed.fee),
+          ...(paymentYears === undefined
+            ? {}
+            : { note: `${paymentYears}년 분할 · 첫 회분 ${formatMoney(dueNow)}` }),
+        }),
+        item({
+          label: "주급",
+          text: formatMoney(agreed.weeklyWage),
+          note: `${agreed.contractYears}년`,
+        }),
+        item({ label: "남은 이적 예산", text: formatMoney(ourFinance.transferBudget) }),
+        ...(slot.ok
+          ? []
+          : [item({ label: "등록", text: "2군", note: registrationBlockText(slot.block) })]),
+      ],
+    },
   };
 }
 
@@ -2618,6 +2716,21 @@ function executeSale(
         : ` (${paymentYears}년 분할 — 첫 회분 ${formatMoney(dueNow)})`) +
       "." +
       `${captainNote} 이적 예산 ${formatMoney(ourFinance?.transferBudget ?? 0)}`,
+    brief: {
+      head: "매각 완료",
+      items: [
+        item({ label: "매각", text: player.name, note: teamName(buyerTeamId) }),
+        item({
+          label: "이적료",
+          text: formatMoney(agreed.fee),
+          ...(paymentYears === undefined
+            ? {}
+            : { note: `${paymentYears}년 분할 · 첫 회분 ${formatMoney(dueNow)}` }),
+        }),
+        item({ label: "이적 예산", text: formatMoney(ourFinance?.transferBudget ?? 0) }),
+        ...(wasCaptain ? [item({ text: "주장 공석" })] : []),
+      ],
+    },
   };
 }
 
