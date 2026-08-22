@@ -8,6 +8,9 @@ import {
   buildAllLeagueMatches,
   isClubTeam,
   computeStandings,
+  cupCatalogById,
+  domesticCupById,
+  financeOf,
   groupOf,
   isFriendly,
   leagueOfTeamIn,
@@ -332,6 +335,58 @@ describe("18팀 리그의 시즌 리뷰", () => {
     reviewSeason(state);
 
     expect(state.achievements.some((a) => a.code === "ucl-spot")).toBe(false);
+  });
+
+  /**
+   * 컵 결승 하나를 손으로 적어 우승을 만든다 — 대회 진행 전체를 굴리지 않고
+   * `domesticChampion`·`euroChampion`이 읽는 것만 만든다.
+   */
+  function fabricateFinal(state: GameState, cupId: string, champion: string, loser: string): void {
+    state.matches.push({
+      id: `m-${cupId}-${state.season}-final-p0-l1`,
+      season: state.season,
+      competitionId: cupId,
+      stage: "final",
+      round: 1,
+      date: state.date,
+      neutral: true,
+      homeTeamId: champion,
+      awayTeamId: loser,
+      result: { homeGoals: 2, awayGoals: 0, scorers: [] },
+    });
+  }
+
+  it("무직으로 맞은 시즌 끝에도 옛 구단의 컵·대항전 상금은 결산된다 — 트로피·평판은 아니다", () => {
+    const state = createTestGame(7, "paderborn");
+    const us = state.userTeamId;
+    const loser = teamsOfLeagueIn(state, "bundesliga").find((id) => id !== us)!;
+    fabricateFinal(state, "dfbpokal", us, loser);
+    fabricateFinal(state, "ucl", us, loser);
+    // 경질 — 이 시즌은 감독의 것이 아니지만 옛 구단의 장부는 계속 돈다 (career.md §5.1)
+    state.dismissal = { on: state.date, season: state.season, teamId: us };
+    const media = state.manager.reputation.media;
+    const board = state.manager.reputation.board;
+
+    reviewSeason(state);
+
+    const paid = financeOf(state, us).prizesPaid ?? [];
+    expect(paid).toContain(`prize:competition:dfbpokal:winner:S${state.season}`);
+    expect(paid).toContain(`prize:competition:ucl:winner:S${state.season}`);
+    const prizes = financeOf(state, us).ledger.filter((e) => e.label.includes("우승 상금"));
+    expect(prizes.map((e) => e.amount)).toEqual([
+      cupCatalogById("ucl")!.prize.winner,
+      domesticCupById("dfbpokal")!.prize.winner,
+    ]);
+    // 준우승 상금도 그 구단의 몫이다
+    expect(financeOf(state, loser).prizesPaid ?? []).toContain(
+      `prize:competition:dfbpokal:runner-up:S${state.season}`,
+    );
+
+    // 감독에게는 아무것도 남지 않는다
+    expect(state.trophies).toEqual([]);
+    expect(state.seasonRecords).toEqual([]);
+    expect(state.manager.reputation.media).toBe(media);
+    expect(state.manager.reputation.board).toBe(board);
   });
 
   it("시즌 순위표가 통째로 남는다 — 체급 재산정의 성적 축이 읽는 표다", () => {

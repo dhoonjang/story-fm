@@ -28,9 +28,9 @@ import {
   isTopFlight,
   leagueOfTeam,
   migrateDomesticPrizeKeys,
+  payDomesticCupPrizes,
   playersOf,
   teamName,
-  reviewDomesticCups,
   reviewSeason,
   transitionSeason,
   userStillIn,
@@ -852,7 +852,7 @@ describe("상금 멱등 키 — 표시 라벨이 아니라 안정 키다", () =>
 
   it("옛 라벨 키를 옮긴다 — 라벨을 고쳐도 같은 시즌 상금이 두 번 나가지 않는다", () => {
     const save = structuredClone(played);
-    reviewDomesticCups(save); // 우승·준우승 상금
+    payDomesticCupPrizes(save, []); // 우승·준우승 상금
 
     let downgraded = 0;
     for (const finance of save.finances) {
@@ -870,7 +870,7 @@ describe("상금 멱등 키 — 표시 라벨이 아니라 안정 키다", () =>
     const balances = save.finances.map((f) => f.balance);
     migrateDomesticPrizeKeys(save);
     migrateDomesticPrizeKeys(save); // 멱등
-    reviewDomesticCups(save);
+    payDomesticCupPrizes(save, []);
 
     expect(save.finances.map((f) => f.balance)).toEqual(balances);
     const legacyKeys = new Set(legacy.values());

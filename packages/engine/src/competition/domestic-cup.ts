@@ -1080,17 +1080,17 @@ const CUP_TITLE_BOARD = 6;
 const CUP_RUNNER_UP_MEDIA = 3;
 
 /**
- * 시즌 리뷰의 국내 컵 결산 — 우승 트로피·상금·평판.
- * 결승이 리그 최종전보다 앞설 수 있지만, 우승 확정은 시즌 리뷰 한 곳에서만 한다
- * (매일 tick에서 중복 보고하지 않기 위해서다).
+ * 국내 컵 우승·준우승 **상금** — 구단이 받는 돈이라 감독의 커리어와 갈라져 있다.
+ *
+ * 트로피·평판을 적는 `reviewDomesticCups`와 따로 부르는 이유는 **무직으로 맞은 시즌
+ * 끝**이다: 그 시즌은 감독에게 남지 않지만 옛 구단의 장부는 계속 돌아야 하고, 시즌 키가
+ * 바뀌므로 여기서 안 주면 영영 못 준다 (career.md §5.1).
  */
-export function reviewDomesticCups(state: GameState): string[] {
-  const digest: string[] = [];
+export function payDomesticCupPrizes(state: GameState, digest: string[]): void {
   for (const cup of domesticCupCatalog()) {
     const champion = domesticChampion(state, cup.id);
     if (!champion) continue;
     const runnerUp = domesticRunnerUp(state, cup.id);
-    const ours = champion === state.userTeamId || runnerUp === state.userTeamId;
 
     const payTo = (teamId: string, kind: PrizeKind, what: string, amount: number) => {
       const label = prizeLabel(cup, state.season, what);
@@ -1107,6 +1107,22 @@ export function reviewDomesticCups(state: GameState): string[] {
     };
     payTo(champion, "winner", "우승", cup.prize.winner);
     if (runnerUp) payTo(runnerUp, "runner-up", "준우승", cup.prize.runnerUp);
+  }
+}
+
+/**
+ * 시즌 리뷰의 국내 컵 결산 — 우승 트로피·평판. **상금은 여기 없다**
+ * (`payDomesticCupPrizes`).
+ * 결승이 리그 최종전보다 앞설 수 있지만, 우승 확정은 시즌 리뷰 한 곳에서만 한다
+ * (매일 tick에서 중복 보고하지 않기 위해서다).
+ */
+export function reviewDomesticCups(state: GameState): string[] {
+  const digest: string[] = [];
+  for (const cup of domesticCupCatalog()) {
+    const champion = domesticChampion(state, cup.id);
+    if (!champion) continue;
+    const runnerUp = domesticRunnerUp(state, cup.id);
+    const ours = champion === state.userTeamId || runnerUp === state.userTeamId;
 
     if (champion === state.userTeamId) {
       state.trophies.push({ season: state.season, competition: cup.name, teamId: champion });
