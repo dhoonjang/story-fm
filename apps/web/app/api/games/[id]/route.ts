@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { deleteGame, loadGame } from "@story-fm/engine";
 import { deleteTurnTraces } from "@story-fm/llm";
 import { toPayload } from "@/lib/store";
-import { withGameLock } from "@/lib/turn-runner";
+import { LOCK_WAIT_MS, busyResponse, withGameLock } from "@/lib/turn-runner";
 import { invalidGameId } from "@/app/api/games/game-id";
 
 /**
@@ -13,14 +13,19 @@ import { invalidGameId } from "@/app/api/games/game-id";
  * 저장하므로, 지금 읽으면 아직 저장 전이라 옛 상태가 돌아오고 잠시 뒤 커밋과 함께
  * 화면이 다시 어긋난다 (docs/llm/models.md §1-1).
  *
- * 잠금은 프로세스 안 뮤텍스라 서버리스 배포에서는 보통 읽기와 다르지 않다.
+ * **기다림에는 상한이 있다** — 그 안에 잠금이 풀리지 않으면 409로 물러난다. 도는 턴은
+ * 계속 돌고 있으니 화면이 다시 물어보면 된다. 상한이 없던 자리에서는 분 단위로 도는
+ * 턴 하나가 이 GET을 그만큼 매달았다.
  */
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
   const bad = invalidGameId(id);
   if (bad) return bad;
   const settled = new URL(request.url).searchParams.get("settled") === "1";
-  const state = settled ? await withGameLock(id, async () => loadGame(id)) : loadGame(id);
+  const state = settled
+    ? await withGameLock(id, async () => loadGame(id), LOCK_WAIT_MS.settled).catch(busyResponse)
+    : loadGame(id);
+  if (state instanceof Response) return state;
   if (!state) return NextResponse.json({ error: "게임을 찾을 수 없습니다" }, { status: 404 });
   return NextResponse.json(toPayload(state));
 }

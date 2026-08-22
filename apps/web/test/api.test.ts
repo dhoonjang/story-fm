@@ -47,6 +47,7 @@ import {
 import { FORMATION_LAYOUTS, boardExpectationText } from "@story-fm/domain";
 import type { ChatTurn } from "@story-fm/engine";
 import { visibleChat } from "../lib/store";
+import { withGameLock } from "../lib/turn-runner";
 import type { GamePayload, GameSlice } from "../lib/store";
 
 /** API 통합 테스트 — 라우트 핸들러를 직접 호출 (mock GM 모드) */
@@ -906,5 +907,61 @@ describe("채팅 기록 필터", () => {
   it("거를 것이 없으면 턴을 그대로 둔다 — 화면이 쥔 것과 같은 객체다", () => {
     const kept = turn([{ name: "set_lineup", summary: "라인업 확정" }]);
     expect(visibleChat([kept])[0]).toBe(kept);
+  });
+});
+
+/**
+ * 게임 잠금 — **한 게임에 손 하나.** 턴 하나가 LLM 호출 여럿으로 분 단위를 쥐는 동안
+ * 뒤에 선 요청이 그만큼 매달리던 자리다. 이제 상한만큼만 기다리고 409로 물러난다
+ * (docs/llm/models.md §1-1).
+ */
+describe("게임 잠금 — 겹친 요청", () => {
+  it("잠금을 쥔 요청이 있으면 뒤에 온 저장·턴이 상한 뒤 409로 물러난다", async () => {
+    const created = await createGame(
+      json({ teamId: "everton", managerName: "잠금테스트", background: "분석가", seed: 71 }),
+    );
+    const game = (await created.json()) as GamePayload;
+    const squad = game.views.squad!;
+    // 지금 서 있는 판을 그대로 되보낸다 — 반려당하지 않는 가장 짧은 본문이다
+    const starting = squad.players
+      .filter((p) => p.role === "선발")
+      .map((p) => ({ playerId: p.id, position: p.assignedPosition! }));
+    const bench = squad.players.filter((p) => p.role === "벤치").map((p) => ({ playerId: p.id }));
+    expect(starting).toHaveLength(11);
+
+    // 끝나지 않는 턴 하나가 잠금을 쥔 상태 — 모델 호출이 늘어진 그 순간이다
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const held = withGameLock(game.id, () => gate);
+    await new Promise((r) => setTimeout(r, 30));
+
+    const [lineup, turnEvents] = await Promise.all([
+      postLineup(json({ starting, bench }), params(game.id)),
+      (async () => {
+        const res = await postTurn(json({ message: "겹친 턴" }), params(game.id));
+        return (await res.text())
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as { type: string; error?: string });
+      })(),
+    ]);
+
+    // 전술판 저장은 409 + `retry` — 그 편집은 화면의 대기열에 남아 다시 온다
+    expect(lineup.status).toBe(409);
+    const rejected = (await lineup.json()) as { error: string; retry?: boolean };
+    expect(rejected.retry).toBe(true);
+    expect(rejected.error).toContain("진행 중");
+    // 턴은 스트림이라 상태 코드가 아니라 실패 이벤트로 온다 — 저장된 것은 없다
+    const failure = turnEvents.find((e) => e.type === "error");
+    expect(failure?.error).toContain("진행 중");
+    expect(turnEvents.some((e) => e.type === "done")).toBe(false);
+
+    // 놓으면 같은 저장이 그대로 통한다 — 잠금은 시간이 아니라 홀더가 푼다
+    release();
+    await held;
+    const after = await postLineup(json({ starting, bench }), params(game.id));
+    expect(after.status).toBe(200);
   });
 });
