@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { RatingSchema } from "./player";
+import { BoardExpectationCodeSchema } from "./records";
 import { DateString } from "./date-string";
 
 /**
@@ -142,7 +143,9 @@ export const DismissalSchema = z.object({
   position: z.number().int().min(1).optional(),
   /** 보드가 걸었던 기대 순위 */
   target: z.number().int().min(1).optional(),
-  /** 기대의 이름 — `boardExpectationOfTier`의 label */
+  /** 기대의 갈래 — 이름은 화면이 만든다 (career.md §6). 옛 세이브엔 없다(optional) */
+  expectationCode: BoardExpectationCodeSchema.optional(),
+  /** 옛 세이브가 들고 있는 기대의 이름 — 새 카드는 적지 않는다 (`expectationCode`의 폴백) */
   expectation: z.string().min(1).optional(),
   /** 옛 세이브가 들고 있는 평가 문장 — 더는 쓰지 않는다 (카드의 폴백) */
   reason: z.string().optional(),
@@ -166,9 +169,11 @@ export const ManagerOfferSchema = z.object({
   tier: z.number().int().min(1).max(4),
   /** 부를 때의 리그 순위 — 아직 리그전을 치르지 않았으면 없다 */
   position: z.number().int().min(1).optional(),
-  /** 그 자리에 걸리는 기대 순위와 그 이름 */
+  /** 그 자리에 걸리는 기대 순위와 그 갈래 — 이름은 화면이 만든다 */
   target: z.number().int().min(1),
-  expectation: z.string().min(1),
+  expectationCode: BoardExpectationCodeSchema.optional(),
+  /** 옛 세이브가 들고 있는 기대의 이름 — 새 제안은 적지 않는다 (`expectationCode`의 폴백) */
+  expectation: z.string().min(1).optional(),
   /**
    * 제시 조건 — 연봉·계약 연수·이적 예산 약속 (career.md §5.1).
    * 옛 세이브의 제안엔 없다 — 수락하는 순간 등급 표의 기본으로 선다.

@@ -30,8 +30,52 @@ export interface Matchup {
   zone: MatchupZone;
   edge: EdgeSide;
   size: EdgeSize;
-  /** 한국어 근거 한 줄 — 원인 태그의 인용 원문 */
-  why: string;
+  /** 그 존의 양팀 값 — 근거 문장이 유일한 보관처였던 수치 */
+  homeValue?: number;
+  awayValue?: number;
+  /** 진행 중인 옛 세이브가 들고 있는 근거 문장 — 새 패킷은 적지 않는다 */
+  why?: string;
+}
+
+/**
+ * 패킷이 싣는 **사실 태그** — 키포인트·상성·구멍·개인 지시·공략·지역 플랜이 전부
+ * 이 한 모양이다 (match.md §1).
+ *
+ * 코어가 한국어 문장을 만들어 실으면 그 문장이 원인 태그로 골에 복사되고 진행 중인
+ * 세이브에 굳는다 — 그러면 문구를 고치는 순간 전술 XP의 근거가 달라진다. 태그를
+ * 문장으로 옮기는 것은 그것을 읽는 쪽(화면·중계·CLI)이 같은 렌더러 하나로 한다.
+ */
+export interface PacketTag {
+  /** 어느 갈래에서 나왔나 */
+  source:
+    | "counter"
+    | "gap"
+    | "mismatch"
+    | "zone-plan"
+    | "directive"
+    | "directive-dropped"
+    | "exploit"
+    | "exploit-dropped"
+    | "tactical"
+    /** 진행 중인 옛 세이브가 들고 있던 문장 — `text`만 갖는다 */
+    | "legacy";
+  /** 축·상성·지시의 코드 — 판정과 집계의 열쇠 ("space_behind" · "backline-pace") */
+  code: string;
+  /** 이 사실이 **이로운 편** — 약점을 가진 쪽이 아니다. 편이 없는 사실이면 null */
+  favours: MatchSide | null;
+  /**
+   * 수치를 드러내도 되는가 — 감독의 눈(분석)이 정한다. `false`면 렌더러가 흐린
+   * 문장을 낸다 (match.md §1.6 — 못 본 수치가 노트로 새어 들어오지 않게 하는 칸).
+   */
+  sharp: boolean;
+  /** 이름이 서는 선수들 — 팀 단위 사실이면 빈 배열 */
+  playerIds: string[];
+  /** 라벨 붙은 수치 — `{ pace: 88, defencePace: 61 }` */
+  values: Record<string, number>;
+  /** 문장 안에 숨어 있던 조건부 축 — "sweeper" · "trap-unfamiliar" */
+  flags: string[];
+  /** 구조로 못 옮기는 자유 문장 — 지역 플랜의 모델 원문, 옛 세이브의 줄 */
+  text?: string;
 }
 
 /**
@@ -45,8 +89,8 @@ export interface Matchup {
 export interface TacticalRead {
   /** 지시 적용률 0.45~1.0 — 감독 전술 능력 + 팀 전술 적응도 */
   uptake: number;
-  /** 이득·대가를 적은 한국어 한 줄들 (지시가 수치를 움직였을 때만) */
-  notes: string[];
+  /** 이득·대가의 사실 태그 (지시가 수치를 움직였을 때만) */
+  notes: PacketTag[];
 }
 
 export type RegionalBand = MatchupZone;
@@ -165,8 +209,8 @@ export interface ExploitTarget {
   id: string;
   /** 어느 팀의 약점인가 — 우리가 노리는 쪽 */
   side: MatchSide;
-  /** 한 줄 설명 — 감독이 본 그 문장 (안개를 지난 뒤의 표현) */
-  label: string;
+  /** 그 지점의 사실 태그 — 감독이 본 해상도가 `sharp`에 실린다 */
+  tag: PacketTag;
   /** 공략이 닿는 존 */
   zone: MatchupZone;
   /**
@@ -187,15 +231,12 @@ export interface StrengthPacket {
   home: SidePacket;
   away: SidePacket;
   matchups: Matchup[];
-  /** 위협/약점 포인트 — 한국어 문장 (예: "사카(pace 88) vs 좌측 풀백(pace 61)") */
-  keyPoints: string[];
+  /** 위협/약점 포인트 — 사실 태그. 이로운 편은 태그의 `favours`가 갖는다 */
+  keyPoints: PacketTag[];
   /**
    * 각 키포인트가 **누구에게 이로운가** — `keyPoints`와 같은 순서.
    *
-   * 문장은 팀 이름으로 시작할 뿐 유불리를 말하지 않는다("맨유 수비가 …
-   * 강요당한다"와 "맨유 뒷공간 공략: …"은 정반대다). 화면이 문장을 되짚어
-   * 추측하면 틀리므로 코어가 함께 싣는다. 진행 중인 경기를 담은 **옛 세이브에는
-   * 없다** — 그때는 화면이 색 없이 세운다.
+   * 진행 중인 경기를 담은 **옛 세이브만** 갖는다 (지금은 태그의 `favours`가 원본).
    */
   keyPointSides?: MatchSide[];
   /**

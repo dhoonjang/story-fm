@@ -123,27 +123,50 @@ export function squadRegistration(
 }
 
 /**
- * 이 선수를 1군에 더 올릴 수 있는가 — 못 올리면 이유를 돌려준다.
+ * 등록이 막힌 이유 — **코드와 수치다** (overview.md §1 철칙 4).
+ *
+ * 조언 문장("먼저 내려야 합니다")을 코어가 돌려주면 그 문구를 고치려고 규칙 파일을
+ * 열어야 하고, 문장을 읽어 갈래를 가르는 자리가 생긴다. 문장은
+ * `registrationBlockText`가 한 자리에서 만든다.
+ */
+export type RegistrationBlock =
+  /** 등록 명단이 찼다 — `listed`가 지금 등록 인원, `limit`이 상한 */
+  | { code: "list-full"; listed: number; limit: number }
+  /** 홈그로운이 모자라 남은 자리를 못 쓴다 — `homegrown`이 지금 수, `limit`이 최소 */
+  | { code: "homegrown-short"; homegrown: number; limit: number };
+
+/**
+ * 이 선수를 1군에 더 올릴 수 있는가 — 못 올리면 막은 이유를 카드로 돌려준다.
  * U21은 언제나 가능하다 (명단을 차지하지 않는다).
  */
 export function canRegister(
   squad: readonly RegistrablePlayer[],
   player: RegistrablePlayer,
   seasonStartYear: number,
-): { ok: true } | { ok: false; reason: string } {
+): { ok: true } | { ok: false; block: RegistrationBlock } {
   if (isUnder21(player.birthdate, seasonStartYear)) return { ok: true };
   const reg = squadRegistration(squad, seasonStartYear);
   if (reg.listed >= SQUAD_LIST_LIMIT) {
     return {
       ok: false,
-      reason: `등록 명단이 찼습니다 (${reg.listed}/${SQUAD_LIST_LIMIT}) — 21세 초과 선수를 먼저 내려야 합니다`,
+      block: { code: "list-full", listed: reg.listed, limit: SQUAD_LIST_LIMIT },
     };
   }
   if (!player.homegrown && reg.openNonHomegrown <= 0) {
     return {
       ok: false,
-      reason: `홈그로운이 모자랍니다 (${reg.homegrown}/${HOMEGROWN_MIN}) — 남은 자리는 홈그로운만 채울 수 있습니다`,
+      block: { code: "homegrown-short", homegrown: reg.homegrown, limit: HOMEGROWN_MIN },
     };
   }
   return { ok: true };
+}
+
+/** 막힌 이유를 사람 말로 — 문구는 여기 한 자리에만 있다 */
+export function registrationBlockText(block: RegistrationBlock): string {
+  switch (block.code) {
+    case "list-full":
+      return `등록 명단이 찼습니다 (${block.listed}/${block.limit}) — 21세 초과 선수를 먼저 내려야 합니다`;
+    case "homegrown-short":
+      return `홈그로운이 모자랍니다 (${block.homegrown}/${block.limit}) — 남은 자리는 홈그로운만 채울 수 있습니다`;
+  }
 }

@@ -49,14 +49,61 @@ export const TEAM_EVENT_TYPES: ReadonlySet<MatchEventType> = new Set([
  */
 export const MATCH_MINUTE_MAX = 130;
 
+/**
+ * 벤치가 교체를 낸 이유 — **코드다.** 중계가 인용하는 문장은 이 코드를 읽는 쪽이
+ * 만든다 (match.md §4).
+ */
+export const SubCauseSchema = z.enum(["injury", "chase", "hold", "fatigue"]);
+export type SubCause = z.infer<typeof SubCauseSchema>;
+
+/**
+ * 장부에 실리는 사실 태그의 Zod 판 — 모양은 `PacketTag`(packet.ts)와 같다.
+ *
+ * 패킷 자체는 세이브 스키마의 검사 밖이지만(진행 중인 경기 한 덩어리) 장부의
+ * 사건은 스키마를 지나므로 여기에 한 벌이 있어야 한다.
+ */
+export const PacketTagSchema = z.object({
+  source: z.enum([
+    "counter",
+    "gap",
+    "mismatch",
+    "zone-plan",
+    "directive",
+    "directive-dropped",
+    "exploit",
+    "exploit-dropped",
+    "tactical",
+    "legacy",
+  ]),
+  code: z.string().min(1),
+  favours: MatchSideSchema.nullable(),
+  sharp: z.boolean(),
+  playerIds: z.array(z.string()).default([]),
+  values: z.record(z.string(), z.number()).default({}),
+  flags: z.array(z.string()).default([]),
+  text: z.string().optional(),
+});
+
 export const MatchEventSchema = z.object({
   minute: z.number().int().min(0).max(MATCH_MINUTE_MAX),
   type: MatchEventTypeSchema,
   team: MatchSideSchema.optional(),
   /** 선수 id — substitution은 [나가는 선수, 들어오는 선수] 순서 */
   actors: z.array(z.string()).default([]),
-  /** 원인 태그 — 전력 분석 패킷 항목을 인용해야 한다 (match.md §4) */
-  causes: z.array(z.string()).default([]),
+  /**
+   * 원인 태그 — 전력 분석 패킷 항목을 **그대로** 싣는다 (match.md §4).
+   *
+   * 감독의 전술 XP가 이 태그에 걸리므로 검증 없는 자유 문자열을 두지 않는다.
+   * 진행 중인 옛 세이브의 장부는 문장 배열을 들고 있어, 읽을 때 `source: "legacy"`
+   * 태그로 옮겨 본다.
+   */
+  causes: z.array(PacketTagSchema).default([]),
+  /**
+   * 교체의 **갈래** — 한 경기에 쓸 수 있는 승부수·굳히기 장수를 세고 부상 교체를
+   * 먼저 세우는 것이 이 코드다. 근거 문구로 세던 자리라, 문구를 고치면 벤치의
+   * 판단이 조용히 달라졌다 (match.md §4).
+   */
+  subCause: SubCauseSchema.optional(),
   detail: z.string().optional(),
   /**
    * **이 슛의 질** — 기대 득점 0~1. `shot`·`goal`에만 붙는다.

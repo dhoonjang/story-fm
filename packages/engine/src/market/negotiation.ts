@@ -14,6 +14,7 @@ import {
   isPlayerDeal,
   marketDirectionKo,
   naturalPositionOf,
+  registrationBlockText,
 } from "@story-fm/domain";
 import {
   addDays,
@@ -1921,7 +1922,7 @@ function executeLoanIn(
     message:
       `${player.name}을(를) ${teamName(from)}에서 임대로 데려왔습니다 — ${until}까지 · ` +
       `임대료 ${formatMoney(agreed.fee)} · 주급 ${Math.round(wageShare * 100)}% 부담` +
-      (slot.ok ? "" : ` ⚠ ${slot.reason} — 2군으로 들어왔습니다`),
+      (slot.ok ? "" : ` ⚠ ${registrationBlockText(slot.block)} — 2군으로 들어왔습니다`),
   };
 }
 
@@ -2394,7 +2395,7 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
         ? ""
         : ` (${paymentYears}년 분할 — 첫 회분 ${formatMoney(dueNow)})`) +
       `, 주급 ${formatMoney(agreed.weeklyWage)} ${agreed.contractYears}년. 남은 이적 예산 ${formatMoney(ourFinance.transferBudget)}` +
-      (slot.ok ? "" : ` ⚠ ${slot.reason} — 2군으로 들어왔습니다`),
+      (slot.ok ? "" : ` ⚠ ${registrationBlockText(slot.block)} — 2군으로 들어왔습니다`),
   };
 }
 

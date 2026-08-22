@@ -1,4 +1,4 @@
-import { MANAGER_ATTRIBUTE_KO } from "@story-fm/domain";
+import { MANAGER_ATTRIBUTE_KO, registrationBlockText } from "@story-fm/domain";
 import type {
   BoardPoint,
   GamePlayer,
@@ -178,7 +178,9 @@ export function setSquadLevel(
   }
   if (input.level === "first") {
     const allowed = canRegisterFor(state, player, state.userTeamId);
-    if (!allowed.ok) return { ok: false, message: `${player.name}: ${allowed.reason}` };
+    if (!allowed.ok) {
+      return { ok: false, message: `${player.name}: ${registrationBlockText(allowed.block)}` };
+    }
     return { ok: true, message: applySquadLevel(state, player, "first") };
   }
 
@@ -301,7 +303,10 @@ export function setSquadLevels(
     const leaving = new Set(demoting.map((p) => p.id));
     const allowed = canRegisterAllFor(state, promoting, state.userTeamId, leaving);
     if (!allowed.ok) {
-      return { ok: false, message: `${playerName(state, allowed.playerId)}: ${allowed.reason}` };
+      return {
+        ok: false,
+        message: `${playerName(state, allowed.playerId)}: ${registrationBlockText(allowed.block)}`,
+      };
     }
   }
   /** 하한도 이번에 오르내리는 인원을 다 셈한 뒤의 1군 수로 잰다 */
@@ -974,7 +979,10 @@ export function setLineup(
   if (promoting.length > 0) {
     const allowed = canRegisterAllFor(state, promoting, state.userTeamId, demotingIds);
     if (!allowed.ok) {
-      return { ok: false, message: `${playerName(state, allowed.playerId)}: ${allowed.reason}` };
+      return {
+        ok: false,
+        message: `${playerName(state, allowed.playerId)}: ${registrationBlockText(allowed.block)}`,
+      };
     }
   }
   /**

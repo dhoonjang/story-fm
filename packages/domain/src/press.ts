@@ -77,10 +77,31 @@ export const PressFactKindSchema = z.enum([
  * `about`이 있으면 **그 선수에 대한 사실**이다 — 감독의 답이 그 선수의 사기에
  * 직접 닿는다. 공개적으로 감쌀 수도, 공개적으로 자를 수도 있는 자리다.
  */
+/**
+ * 사실 카드가 드는 **수치** — 갈래(`kind`)마다 채우는 칸이 다르다.
+ *
+ * 한 줄의 한국어는 이 카드를 읽는 쪽이 만든다. 문장을 세이브에 적어 두면 문구를
+ * 고쳐도 지난 회견은 옛 말로 남고, 기자의 성격도 그날의 맥락도 그 문장에 닿지
+ * 못한다 (→ docs/data/people.md §4).
+ */
+export const PressFactDataSchema = z.object({
+  /** 이 사실이 함께 가리키는 대상 — 상대 팀·자리가 겹치는 선수 (id) */
+  refId: z.string().min(1).optional(),
+  /** 그때의 이름 — 카탈로그가 이름을 고쳐도 그 줄이 말한 상대는 그 사람이다 */
+  name: z.string().min(1).optional(),
+  /** 라벨 붙은 수치 — `{ for: 1, against: 3 }` · `{ days: 32 }` · `{ rank: 14, target: 7 }` */
+  values: z.record(z.string(), z.number()).optional(),
+  /** 갈래 안의 갈래 — 승/무/패 · 홈/원정 · 불만 사유 · 유출 주제 · 포지션 코드 */
+  tags: z.array(z.string().min(1)).optional(),
+});
+export type PressFactData = z.infer<typeof PressFactDataSchema>;
+
 export const PressFactSchema = z.object({
   kind: PressFactKindSchema,
-  /** 장부에서 읽은 한 줄 — **물음표도 평가어도 없다** ("웨스트햄전 1-3 패배") */
-  text: z.string().min(1),
+  /** 그 갈래의 수치 — 옛 세이브엔 없다(optional) */
+  data: PressFactDataSchema.optional(),
+  /** 옛 세이브가 들고 있는 사실 문장 — 새 카드는 적지 않는다 (`data`의 폴백) */
+  text: z.string().min(1).optional(),
   /** 이 사실이 걸린 선수 (`GAME_PLAYER.id`) — 없으면 팀·감독에 대한 사실 */
   about: z.string().nullable(),
   /** 날 선 자리인가 — 답변의 파장(한도)을 키운다 */
@@ -212,6 +233,30 @@ export const ApproachPressureSchema = z.object({
 });
 export type ApproachPressure = z.infer<typeof ApproachPressureSchema>;
 
+/**
+ * 다가옴의 **한 줄 배경** — 코드와 수치. 문장은 읽는 쪽이 만든다
+ * (→ docs/data/people.md §8).
+ */
+export const ApproachContextSchema = z.object({
+  code: z.enum([
+    /** 이적 요청 — 에이전트가 대리로 들고 온다 */
+    "transfer-request",
+    /** 방치된 불만 — `reason`이 그 사유, `days`가 그 기간 */
+    "grievance",
+    /** 라커룸의 온도 — 1군 평균 폼 */
+    "dressing-room-form",
+    /** 리그에서 서 있는 자리와 보드가 건 자리 */
+    "standing",
+  ]),
+  /** 불만의 사유 코드 (`PLAYER_ISSUE_REASONS`) — 있는 갈래에만 */
+  reason: z.enum(PLAYER_ISSUE_REASONS).optional(),
+  /** 그 코드가 가리키는 값 — 기간(일)·평균 폼·현재 순위 */
+  value: z.number().optional(),
+  /** 그 값이 견주는 자리 — 보드가 건 순위 */
+  limit: z.number().optional(),
+});
+export type ApproachContext = z.infer<typeof ApproachContextSchema>;
+
 export const ApproachSchema = z.object({
   id: z.string().min(1),
   /** 열린 날 */
@@ -227,8 +272,10 @@ export const ApproachSchema = z.object({
   speakerId: z.string().min(1),
   /** 이 자리가 걸린 선수 — 팀·구단에 대한 자리면 없다 */
   about: z.string().nullable(),
-  /** 한 줄 배경 — 사실을 읽는 데 필요한 최소한만. 물음표도 평가어도 없다 */
-  context: z.string(),
+  /** 한 줄 배경의 카드 — 옛 세이브엔 없다(optional) */
+  contextCard: ApproachContextSchema.optional(),
+  /** 옛 세이브가 들고 있는 배경 문장 — 새 자리는 적지 않는다 (`contextCard`의 폴백) */
+  context: z.string().optional(),
   /** 그 사람이 아는 것의 **전부** — 이 밖의 사실은 이 자리에 없다 */
   facts: z.array(PressFactSchema).min(1),
   /** 사다리의 몇 번째 칸인가 — 효과의 폭이 여기 비례한다 */
