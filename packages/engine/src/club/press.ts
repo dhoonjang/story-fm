@@ -605,6 +605,18 @@ export function pendingPress(state: GameState): PressConference | null {
 }
 
 /**
+ * 열린 회견을 **대가 없이** 닫는다 — 이직이 유일한 자리다 (career.md §5.1).
+ *
+ * `openPress`의 방치와 갈리는 지점: 감독이 답하지 않은 것이 아니라 **물을 구단이
+ * 없어진 것**이다. 그대로 두면 새 구단의 첫 회견이 앞 구단의 자리를 거절로 닫아
+ * 이유 없이 언론 평판이 깎인다.
+ */
+export function expirePendingPress(state: GameState): void {
+  const open = pendingPress(state);
+  if (open) open.status = "expired";
+}
+
+/**
  * 회견을 상태에 올린다.
  *
  * ⚠️ **앞의 회견이 열린 채로 새 회견이 오면 앞의 것은 거절로 닫힌다.** 감독이
