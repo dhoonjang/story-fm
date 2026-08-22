@@ -20,7 +20,7 @@ import {
   worldFigures,
   type GameState,
 } from "@story-fm/engine";
-import type { PlayerIssueReason } from "@story-fm/domain";
+import type { PlayerIssueReason, Transfer } from "@story-fm/domain";
 import { createTestGame } from "./helpers";
 
 /**
@@ -502,7 +502,14 @@ describe("보드 요청 — 요청 → 이행/불이행 → 평판", () => {
   }
 
   /** 이 창의 이동 한 건 — 판정이 읽는 유일한 장부다 */
-  function moved(state: GameState, windowId: string, dir: "in" | "out", fee: number, id: string) {
+  function moved(
+    state: GameState,
+    windowId: string,
+    dir: "in" | "out",
+    fee: number,
+    id: string,
+    type: Transfer["type"] = "transfer",
+  ) {
     state.transfers.push({
       id,
       gamePlayerId: `gp-${id}`,
@@ -510,7 +517,7 @@ describe("보드 요청 — 요청 → 이행/불이행 → 평판", () => {
       fromTeamId: dir === "out" ? state.userTeamId : "chelsea",
       toTeamId: dir === "out" ? "chelsea" : state.userTeamId,
       date: state.date,
-      type: "transfer",
+      type,
       fee,
     });
   }
@@ -652,6 +659,32 @@ describe("보드 요청 — 요청 → 이행/불이행 → 평판", () => {
     tickBoardDemands(state, []);
     expect(state.boardDemands).toHaveLength(1);
     expect(openBoardDemand(state)!.id).toBe(demand.id);
+  });
+
+  /**
+   * 임대료는 이적 예산에서 실제로 빠져나가는 현금이라 **두 요청이 같은 셈으로 잡는다**
+   * (career.md §5.2). 한쪽만 세면 같은 한 건이 요청마다 다른 무게를 갖는다.
+   */
+  it("임대 한 건이 스타 영입에도 순이익에도 같은 무게로 잡힌다", () => {
+    const showman = ownedBy(createTestGame(11), "흥행가형");
+    tickBoardDemands(showman, []);
+    const signStar = openBoardDemand(showman)!;
+    const fee = signStar.baseline!;
+    // 이적이 아니라 임대로 들어와도 기준액을 낸 영입이다
+    moved(showman, signStar.windowId, "in", fee, "t-loan-star", "loan");
+    showman.date = addDays(showman.date, 1);
+    tickBoardDemands(showman, []);
+    expect(signStar.status).toBe("met");
+
+    const investor = ownedBy(createTestGame(11), "투자자형");
+    tickBoardDemands(investor, []);
+    const netProfit = openBoardDemand(investor)!;
+    // 같은 임대료가 순지출로도 잡힌다 — 매각 수입보다 1원 앞서면 불이행이다
+    moved(investor, netProfit.windowId, "out", fee, "t-sale");
+    moved(investor, netProfit.windowId, "in", fee + 1, "t-loan-star", "loan");
+    investor.date = addDays(netProfit.deadline, 1);
+    tickBoardDemands(investor, []);
+    expect(netProfit.status).toBe("failed");
   });
 
   it("산업가형 — 임금 동결의 허용 폭은 2%다: 이내면 이행, 넘으면 불이행", () => {
