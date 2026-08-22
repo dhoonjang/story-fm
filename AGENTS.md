@@ -63,9 +63,9 @@ apps/
   match-cli/       # match prototype — strength packet → caster → ledger, one cycle
 packages/
   domain/          # domain models + Zod schemas (player, tactics, records, schedule, persona)
-  sim/             # match sim core — strength packet · xG-interval sim · matchups · stamina
+  sim/             # match sim core — seeded rng · strength packet · xG-interval sim · matchups · stamina
   engine/          # game engine — each folder is a domain:
-                   #   core/(state, save, tick, dates) world/(catalog, generation, wages)
+                   #   core/(state, save, tick, dates, rng) world/(catalog, generation, wages)
                    #   competition/(calendar, league, cup, europe) match/(match flow, quick sim)
                    #   squad/(form, morale, injury, training, scouting) market/(transfers, negotiation)
                    #   club/(finance, press) skills/(manager instructions) views/(screens, queries)
@@ -105,6 +105,14 @@ e2e/               # Playwright specs — onboarding · game · admin · turn er
   them included — and lists the files exempt from it. A pure rule the screen and
   the core both need (`observedFit`, `roleAtSlot`, `ratingTier`) belongs in
   `packages/domain`; the engine re-exports it so core-side callers do not move.
+- **One rule, one definition — and a circular import is not a reason to copy.**
+  When two modules need the same rule, the rule moves **down** to the package
+  both already depend on, and the old sites import it: a pure data rule to
+  `packages/domain`, a determinism primitive the match core and the CLI share
+  (`makeRng`, `shuffled`) to `packages/sim`, an engine-only rule to the engine
+  folder that owns it. `packages/engine` re-exports what it moved down, so
+  core-side callers do not move. Two copies of one formula do not diverge
+  loudly; they diverge on the day someone tunes one of them.
 - kebab-case files and directories, PascalCase types and components, camelCase
   values and functions.
 - Give numbers and formulas names — balance tuning should only need to read that
