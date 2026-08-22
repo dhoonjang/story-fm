@@ -1,4 +1,4 @@
-import { ageOf, isRelease, issueReasonKo } from "@story-fm/domain";
+import { ageOf, isRelease, issueReasonKo, MOOD_NOTE_MAX } from "@story-fm/domain";
 import type { GamePlayer, MatchRecord, PlayerIssueReason } from "@story-fm/domain";
 import { diffDays } from "../competition/calendar";
 import { formLabel, RATING_BASELINE, type FormLabel } from "./form";
@@ -551,10 +551,10 @@ export function buildMoodBrief(state: GameState, from: string, to: string): Mood
 }
 
 /**
- * 저장할 문장의 상한 — `GamePlayerSchema`의 `moodNote.text`가 `max(120)`이라,
- * 이 문을 넘긴 문장은 다음 로드에서 세이브 전체를 스키마 실패로 만든다.
+ * 저장할 문장의 상한 — 정의는 스키마를 가진 `packages/domain`에 있다. 여기서
+ * 다시 적으면 한쪽만 손봤을 때 세이브가 스키마 실패로 깨진다.
  */
-export const MOOD_NOTE_MAX = 120;
+export { MOOD_NOTE_MAX };
 
 /** 이미 끝난 문장 — `?`·`!`도 종결이라 마침표를 덧붙이지 않는다 */
 const SENTENCE_END = /[.!?]$/u;
