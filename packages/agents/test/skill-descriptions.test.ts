@@ -44,6 +44,28 @@ describe("스킬 설명 — 코드가 유일한 원본이다", () => {
       expect(DEFAULT_SKILL_DESCRIPTIONS[name].trim().length).toBeGreaterThan(0);
     }
   });
+
+  /**
+   * **문서가 세는 수는 코드가 늘 때 조용히 어긋난다** — docs/llm/prompts.md §2의 표는
+   * 도구를 그룹째 열거하고 수를 함께 적는다. 도구 하나가 붙어도 화면도 프롬프트도
+   * 아무 말을 하지 않으므로, 어긋남이 드러나는 자리는 여기뿐이다. **수를 고칠 때는
+   * 그 표도 함께 고친다.**
+   */
+  it("도구 수·그룹별 수·읽기 전용 수가 문서의 표와 같다", () => {
+    const perGroup: Record<string, number> = {};
+    for (const skill of SKILL_CATALOG) perGroup[skill.group] = (perGroup[skill.group] ?? 0) + 1;
+    expect(perGroup).toEqual({
+      진행: 4,
+      "전술·훈련": 9,
+      "대화·서사": 5,
+      경기: 1,
+      이적: 11,
+      재정: 2,
+      조회: 7,
+    });
+    expect(SKILL_CATALOG.length).toBe(39);
+    expect(SKILL_CATALOG.filter((s) => s.readOnly).length).toBe(8);
+  });
 });
 
 /**
