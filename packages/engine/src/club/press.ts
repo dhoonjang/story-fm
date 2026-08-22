@@ -30,6 +30,7 @@ import { leagueOfTeamIn } from "../competition/promotion";
 import { derbyNameOf } from "../data/derbies";
 import { reportersOf } from "../world/persona";
 import type { SkillResult } from "../skills";
+import { deltaItems } from "../skills/brief";
 
 /**
  * 기자회견 — **코어는 자리를 만들고 한도를 정하고, 판정은 LLM이 한다.**
@@ -814,6 +815,20 @@ export function respondToMedia(
     message:
       `기자회견 대응(${STANCE_KO[input.stance]})` +
       (parts.length > 0 ? ` — ${parts.join(" · ")}` : ""),
+    /**
+     * 축마다 한 줄이다 — `delta` 하나가 그 줄의 부호라, 여럿을 한 항목에 묶으면
+     * 화면이 다시 갈라야 한다. 감독이 무슨 말을 했는지는 장면의 것이다.
+     */
+    brief: {
+      head: `기자회견 대응(${STANCE_KO[input.stance]})`,
+      items: deltaItems([
+        ["보드", effect.board],
+        ["언론", effect.media],
+        ["선수단", effect.squad],
+        effect.targetName ? [`${effect.targetName} 사기`, effect.target] : null,
+        ["팀 사기", effect.team],
+      ]),
+    },
   };
 }
 
@@ -835,6 +850,14 @@ export function declinePress(state: GameState): SkillResult {
   return {
     ok: true,
     message: `기자회견에 응하지 않았습니다` + (parts.length > 0 ? ` — ${parts.join(" · ")}` : ""),
+    brief: {
+      head: "기자회견 거절",
+      items: deltaItems([
+        ["보드", effect.board],
+        ["언론", effect.media],
+        ["선수단", effect.squad],
+      ]),
+    },
   };
 }
 

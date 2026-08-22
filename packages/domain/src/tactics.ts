@@ -21,11 +21,26 @@ import { normalizedLogCurve, reflectedLogCurve } from "./log-curves";
 export const FamiliaritySchema = z.number().min(0).max(100);
 
 /**
- * 프리셋 다섯 — **입력 어휘**다. 감독이 "4-4-2로 가자"라고 말할 때의 낱말이고,
+ * 프리셋 일곱 — **입력 어휘**다. 감독이 "4-4-2로 가자"라고 말할 때의 낱말이고,
  * 구단 카탈로그의 리서치 값이며, 판을 다시 까는 명령(`setTactics`)의 인자다.
  * 지금 판의 모양 이름은 여기 갇히지 않는다 (`ShapeSchema`).
+ *
+ * 백3/백5는 `3-4-3`·`5-3-2`까지 둘씩이다 — 그 계열을 실제로 가르는 축은 앞을
+ * 셋으로 세우느냐와 뒤를 다섯으로 앉히느냐 둘뿐이고, 나머지 변형(3-4-2-1 등)은
+ * 칩 하나를 옮기면 나오며 이름도 좌표에서 따라온다 (team.md §6).
+ *
+ * ⚠️ **새 프리셋은 목록 끝에 붙인다.** `pickFormation`이 이 순서로 훑고 동점이면
+ * 앞의 것을 남기므로, 가운데에 끼우면 아무 값도 바꾸지 않은 구단의 첫 모양이 갈린다.
  */
-export const FormationSchema = z.enum(["4-4-2", "4-3-3", "4-2-3-1", "3-5-2", "5-4-1"]);
+export const FormationSchema = z.enum([
+  "4-4-2",
+  "4-3-3",
+  "4-2-3-1",
+  "3-5-2",
+  "5-4-1",
+  "3-4-3",
+  "5-3-2",
+]);
 export type Formation = z.infer<typeof FormationSchema>;
 /** 프리셋 전체 — 스쿼드에 맞는 모양을 고를 때 훑는다 */
 export const FORMATIONS = FormationSchema.options;
@@ -69,6 +84,87 @@ export const TacticsSpecSchema = z.object({
   passStyle: Scale5,
 });
 export type TacticsSpec = z.infer<typeof TacticsSpecSchema>;
+
+/** 슬라이더가 아닌 축 — 모양은 좌표에서 읽는 이름이라 눈금이 없다 */
+export type TacticAxisKey = Exclude<keyof TacticsSpec, "formation">;
+
+export interface TacticAxis {
+  key: TacticAxisKey;
+  /** 축의 이름 — 전술판·상대 전술 카드가 세우는 그것 */
+  label: string;
+  /** 값과 **함께** 한 줄에 설 때의 짧은 이름 — "맹렬히"만 있으면 압박인지 템포인지 모른다 */
+  brief: string;
+  /** 눈금 1~5의 낱말 — 인덱스는 `값 - TACTIC_SCALE_MIN` */
+  words: readonly [string, string, string, string, string];
+}
+
+/**
+ * **여섯 축의 낱말표는 여기 하나다** (→ docs/simulation/match.md §1.2).
+ *
+ * 전술판·상대 전술 카드·GM 도구 설명이 모두 이 표를 읽는다. 표가 둘이면 같은 `4`가
+ * 한쪽에서는 `공격적`, 다른 쪽에서는 `보통`으로 서고 감독은 어느 것이 지금 값인지
+ * 알 수 없다. 낱말은 GM이 이해하는 축(match.md §1.2)과 같은 뜻이어야 한다.
+ */
+export const TACTIC_AXES: readonly TacticAxis[] = [
+  {
+    key: "mentality",
+    label: "멘탈리티",
+    brief: "멘탈",
+    words: ["매우 수비적", "수비적", "균형", "공격적", "매우 공격적"],
+  },
+  {
+    key: "defensiveLine",
+    label: "수비 라인",
+    brief: "라인",
+    words: ["매우 낮게", "낮게", "보통", "높게", "매우 높게"],
+  },
+  {
+    key: "pressing",
+    label: "압박",
+    brief: "압박",
+    words: ["최소", "약하게", "보통", "강하게", "맹렬히"],
+  },
+  {
+    key: "tempo",
+    label: "템포",
+    brief: "템포",
+    words: ["매우 느리게", "느리게", "보통", "빠르게", "매우 빠르게"],
+  },
+  {
+    key: "width",
+    label: "공격 폭",
+    brief: "폭",
+    words: ["매우 좁게", "좁게", "보통", "넓게", "매우 넓게"],
+  },
+  {
+    key: "passStyle",
+    label: "패스",
+    brief: "패스",
+    words: ["매우 짧게", "짧게", "혼합", "길게", "매우 길게"],
+  },
+];
+
+const TACTIC_AXIS_BY_KEY: ReadonlyMap<TacticAxisKey, TacticAxis> = new Map(
+  TACTIC_AXES.map((axis) => [axis.key, axis]),
+);
+
+export function tacticAxisOf(key: TacticAxisKey): TacticAxis {
+  return TACTIC_AXIS_BY_KEY.get(key)!;
+}
+
+/** 눈금 하나의 낱말 — 눈금 밖의 값은 양 끝으로 접는다(옛 세이브의 값도 낱말을 갖는다) */
+export function tacticWord(key: TacticAxisKey, value: number): string {
+  const axis = tacticAxisOf(key);
+  const step = Math.min(TACTIC_SCALE_MAX, Math.max(TACTIC_SCALE_MIN, Math.round(value)));
+  return axis.words[step - TACTIC_SCALE_MIN]!;
+}
+
+/** 모델에게 눈금을 설명하는 한 조각 — `멘탈리티(1 매우 수비적~5 매우 공격적)` */
+export function tacticAxisScaleText(axis: TacticAxis): string {
+  const low = axis.words[0];
+  const high = axis.words[axis.words.length - 1]!;
+  return `${axis.label}(${TACTIC_SCALE_MIN} ${low}~${TACTIC_SCALE_MAX} ${high})`;
+}
 
 /** 리서치 값이 없는 구단이 서는 모양 — 프리셋이어야 좌표를 꺼낼 수 있다 */
 export const DEFAULT_FORMATION: Formation = "4-3-3";
@@ -126,17 +222,17 @@ export function migrateSignature(signature: string): string {
  * 트리거를 공유해야 한다 — 그래서 비싸다. 반대로 패스 길이나 템포는 **공을 가진
  * 선수의 선택**에 가깝다. "조금 더 길게 가자"는 말 한마디로 다음 경기부터 바뀐다.
  */
-const AXIS_COST = {
+const AXIS_COST: Record<TacticAxisKey, number> = {
   mentality: 3, // 팀 전체의 무게중심 — 라인 간격에 얹히지만 구조는 그대로
   defensiveLine: 4, // 넷이 함께 움직여야 성립한다
   pressing: 4, // 트리거를 공유해야 한다
   tempo: 2, // 속도 감각 — 개인이 맞추기 쉽다
   width: 3, // 측면·중앙의 간격 문제
   passStyle: 1.5, // 공 가진 선수의 선택에 가깝다
-} as const;
+};
 
-type TacticAxis = keyof typeof AXIS_COST;
-const TACTIC_AXES = Object.keys(AXIS_COST) as TacticAxis[];
+/** 여섯 축의 키만 — 지문·거리 계산이 훑는 순서다. `TACTIC_AXES`가 그 순서를 갖는다 */
+const TACTIC_AXIS_KEYS: readonly TacticAxisKey[] = TACTIC_AXES.map((axis) => axis.key);
 
 /**
  * 축의 **양 끝이 요구하는 능력**.
@@ -149,7 +245,7 @@ const TACTIC_AXES = Object.keys(AXIS_COST) as TacticAxis[];
  * 짧은 패스의 연결, 압박의 지구력(`tacticalDeltas`). 그 축으로 이득을 보는 능력이
  * 곧 그 축에 익숙한 능력이다.
  */
-const AXIS_AFFINITY: Record<TacticAxis, { high: AttributeAxis[]; low: AttributeAxis[] }> = {
+const AXIS_AFFINITY: Record<TacticAxisKey, { high: AttributeAxis[]; low: AttributeAxis[] }> = {
   // 공격적 ↔ 수비적
   mentality: { high: ["finishing", "dribbling"], low: ["tackling", "positioning"] },
   // 높은 라인(뒷공간을 발로 덮는다) ↔ 내려선 수비(박스를 자리로 지킨다)
@@ -166,7 +262,7 @@ const AXIS_AFFINITY: Record<TacticAxis, { high: AttributeAxis[]; low: AttributeA
 
 /** 이 축에서 이 선수가 **어느 쪽에 가까운가** — +1이면 높은 쪽, −1이면 낮은 쪽 */
 const AFFINITY_SPAN = 30;
-function axisFit(attrs: AxisValues, axis: TacticAxis): number {
+function axisFit(attrs: AxisValues, axis: TacticAxisKey): number {
   const { high, low } = AXIS_AFFINITY[axis];
   const mean = (list: AttributeAxis[]) => list.reduce((s, a) => s + attrs[a], 0) / list.length;
   return Math.max(-1, Math.min(1, (mean(high) - mean(low)) / AFFINITY_SPAN));
@@ -185,7 +281,7 @@ export function tacticsAffinityShift(
   after: TacticsSpec,
 ): number {
   let sum = 0;
-  for (const axis of TACTIC_AXES) {
+  for (const axis of TACTIC_AXIS_KEYS) {
     const steps = after[axis] - before[axis];
     if (steps !== 0) sum += steps * AXIS_COST[axis] * axisFit(attrs, axis);
   }
@@ -198,7 +294,7 @@ export function tacticsAffinityShift(
  * 되찾을 수 있다 (`drilled` 기억의 키).
  */
 export function tacticsSignature(spec: TacticsSpec): string {
-  return [spec.formation, ...TACTIC_AXES.map((a) => spec[a])].join("|");
+  return [spec.formation, ...TACTIC_AXIS_KEYS.map((a) => spec[a])].join("|");
 }
 
 /**
@@ -212,7 +308,7 @@ export const FORMATION_CHANGE_COST = 25;
 
 export function tacticsDistance(a: TacticsSpec, b: TacticsSpec): number {
   let d = a.formation !== b.formation ? FORMATION_CHANGE_COST : 0;
-  for (const axis of TACTIC_AXES) d += Math.abs(a[axis] - b[axis]) * AXIS_COST[axis];
+  for (const axis of TACTIC_AXIS_KEYS) d += Math.abs(a[axis] - b[axis]) * AXIS_COST[axis];
   return d;
 }
 
@@ -762,6 +858,34 @@ export const FORMATION_LAYOUTS: Record<Formation, ReadonlyArray<BoardPoint>> = {
     { x: 38, y: 47 },
     { x: 14, y: 43 },
     { x: 50, y: 9 },
+  ],
+  // 백3에 윙어 둘 — 백3 좌표는 3-5-2, 앞 셋은 4-3-3에서 가져와 줄이 같은 자로 선다
+  "3-4-3": [
+    { x: 50, y: 90 },
+    { x: 72, y: 76 },
+    { x: 50, y: 79 },
+    { x: 28, y: 76 },
+    { x: 86, y: 45 },
+    { x: 64, y: 48 },
+    { x: 36, y: 48 },
+    { x: 14, y: 45 },
+    { x: 84, y: 19 },
+    { x: 50, y: 7 },
+    { x: 16, y: 19 },
+  ],
+  // 윙백을 내려 앉힌 백5 + 중원 셋 + 투톱 — 백5는 5-4-1, 투톱은 3-5-2와 같은 자리
+  "5-3-2": [
+    { x: 50, y: 90 },
+    { x: 89, y: 65 },
+    { x: 68, y: 77 },
+    { x: 50, y: 80 },
+    { x: 32, y: 77 },
+    { x: 11, y: 65 },
+    { x: 50, y: 57 },
+    { x: 66, y: 46 },
+    { x: 34, y: 46 },
+    { x: 60, y: 10 },
+    { x: 40, y: 10 },
   ],
 };
 

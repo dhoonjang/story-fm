@@ -22,6 +22,7 @@ import {
   packetTagText,
   positionGroupOf,
   positionGroupOfPlayer,
+  positionGrowthTarget,
   PROFICIENCY_MAX,
   shootoutSettled,
   shootoutTally,
@@ -83,8 +84,10 @@ import {
   MATCHDAY_BENCH,
   type GameState,
   type PendingMatch,
+  type SkillBrief,
 } from "../core/state";
 import { pickOurPlayer } from "../core/player-ref";
+import { briefNames, item } from "../skills/brief";
 import { competitionLabel } from "../data/cup-catalog";
 import { isFriendly } from "../competition/friendly";
 import { advanceDomesticCups } from "../competition/domestic-cup";
@@ -99,6 +102,8 @@ import { makeRng } from "../core/rng";
 export interface FlowResult {
   ok: boolean;
   message: string;
+  /** 화면이 항목으로 세우는 요약 — `SkillResult.brief`와 같은 계약이다 */
+  brief?: SkillBrief;
 }
 
 function currentMatch(state: GameState): MatchRecord {
@@ -575,7 +580,18 @@ export function startMatch(state: GameState): FlowResult {
   state.phase = "match";
   refreshPacket(state);
   const note = lineup.replaced.length > 0 ? ` (자동 대체: ${lineup.replaced.join(", ")})` : "";
-  return { ok: true, message: `킥오프 준비 완료${note}` };
+  return {
+    ok: true,
+    message: `킥오프 준비 완료${note}`,
+    brief: {
+      head: "킥오프 준비",
+      // 감독이 짠 대로 섰으면 알릴 것은 머리줄뿐이다 — 대체가 있었을 때만 항목이 선다
+      items:
+        lineup.replaced.length > 0
+          ? [item({ label: "자동 대체", text: briefNames(lineup.replaced) })]
+          : [],
+    },
+  };
 }
 
 /**
@@ -982,7 +998,17 @@ export function substitutePlayer(state: GameState, input: { out: string; in: str
   ]);
   if (result.ok) refreshPacket(state); // 교체가 존 전력에 반영되도록
   return result.ok
-    ? { ok: true, message: `교체 완료 — ${outgoing.name} OUT, ${incoming.name} IN` }
+    ? {
+        ok: true,
+        message: `교체 완료 — ${outgoing.name} OUT, ${incoming.name} IN`,
+        brief: {
+          head: "교체",
+          items: [
+            item({ label: "OUT", text: outgoing.name }),
+            item({ label: "IN", text: incoming.name }),
+          ],
+        },
+      }
     : result;
 }
 
@@ -1348,7 +1374,7 @@ function gainMatchProficiency(
     player.id,
     entryId,
     "match",
-    `pos:${position}`,
+    positionGrowthTarget(position),
     MATCH_PROFICIENCY_GAIN,
     "match-minutes",
   );

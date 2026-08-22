@@ -9,6 +9,7 @@ import {
   type OfficeViews,
   type ChatTurn,
 } from "@story-fm/engine";
+import { parseScorerEntry } from "@story-fm/domain";
 import { STALLED_CLOCK_TURNS } from "@story-fm/agents";
 
 /** 응답에 실을 장부 — 라우트가 **자기가 바꾼 것만** 고른다 */
@@ -147,9 +148,10 @@ function matchLogsOf(state: GameState): GamePayload["matchLogs"] {
     const ours = m.homeTeamId === state.userTeamId;
     const opponent = teamName(ours ? m.awayTeamId : m.homeTeamId);
     const nameOf = (pid: string) => playerById.get(pid)?.name ?? pid;
-    const goals = (m.result?.scorers ?? []).map((tag, i) => {
+    const goals = (m.result?.scorers ?? []).map((entry, i) => {
       const minute = m.result?.goalMinutes?.[i];
-      return `${minute !== undefined ? `${minute}′ ` : ""}${nameOf(tag.split(":")[1] ?? tag)}`;
+      // 득점자 항목의 형식은 도메인이 안다 — 여기서 `split`으로 갈라 읽지 않는다
+      return `${minute !== undefined ? `${minute}′ ` : ""}${nameOf(parseScorerEntry(entry).playerId)}`;
     });
     /** 평점은 **우리 팀 선수만** 남는다 — 장부가 온전한 경기의 파생값이다 */
     const best = Object.entries(m.result?.ratings ?? {})

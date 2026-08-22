@@ -25,6 +25,11 @@ function achievementDetailOf(a: AchievementRow): string {
   return "";
 }
 
+/** 전적 한 칸 — 코어는 셋을 세고, `20승 8무 10패`로 잇는 것은 화면이다 */
+function recordText({ wins, draws, losses }: SeasonRow["record"]): string {
+  return `${wins}승 ${draws}무 ${losses}패`;
+}
+
 type CareerView = OfficeViews["career"];
 
 /**
@@ -445,7 +450,7 @@ export function CareerView({
                   <td>{r.s.season}</td>
                   <td>{r.s.teamName}</td>
                   <td>{r.s.position}위</td>
-                  <td>{r.s.record}</td>
+                  <td>{recordText(r.s.record)}</td>
                   {/* 순위와 전적이 말하지 않는 것 — 같은 4위가 어느 구단에서는 성공이고
                       어느 구단에서는 실패다. 코어는 등급과 기대 순위만 넘기고 문장은
                       여기서 쓴다 (docs/overview.md §1 철칙 4) */}

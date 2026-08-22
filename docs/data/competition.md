@@ -363,6 +363,17 @@ finance 하네스(`pnpm balance finance`)의 밴드가 감시한다.
 
 ## 7. ⚠️ 불변식
 
+- **득점자 항목과 2차전제 경기 id는 도메인이 조립하고 도메인이 되읽는다.**
+  `MatchResult.scorers`의 한 칸은 `"home:playerId"`고 2차전제 경기 id는
+  `m-<컵>-<시즌>-<단계>-p<대진>-l<차수>`다. 두 형식 모두 만드는 함수와 읽는 함수를
+  `packages/domain/src/schedule.ts`가 짝으로 갖는다(`scorerEntry`/`parseScorerEntry`
+  · `cupLegMatchId`/`pairOfMatchId`). 읽는 쪽이 저마다 `split`과 정규식을 쓰면 형식이
+  바뀌는 날 어느 화면이 조용히 비는지 알 수 없다.
+- **최근 결과·시즌 전적은 문장이 아니라 사실로 내려간다** — 대회 뷰의 최근 다섯
+  경기는 `{ competition, home, away, homeGoals, awayGoals, penalties, outcome }`,
+  시즌 표의 전적은 `{ wins, draws, losses }`다. `"EPL R7 TOT 2-1 ARS"`나
+  `"20승 8무 10패"`를 뷰가 붙여 내면 화면은 승패 색을 칠하려고 그 문자열을 도로
+  가른다 (→ [../overview.md](../overview.md) §5).
 - **나라별 참가 클럽은 정확히 32다.** 브래킷이 2의 거듭제곱이 아니면 부전승이
   생기고, 32가 아니면 그 시즌 컵이 아예 열리지 않는다(`cupRunsThisSeason`).
 - **대항전 리그 페이즈 참가 팀은 짝수여야 한다.** 홀수면 라운드마다 한 팀이 쉬어
