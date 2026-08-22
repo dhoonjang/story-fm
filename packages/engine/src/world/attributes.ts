@@ -80,6 +80,17 @@ export function derivedGoalkeeping(nameEn: string, physical: number): number {
 }
 
 /**
+ * **골키퍼의 침투** — 뜻이 없는 축이라 낮게 깔린다. 화면에는 서므로 수준은 맞추되
+ * 전력 가중치가 바닥(0.05)이라 종합에는 닿지 않는다. 기울임 식(`splitPositioning`)
+ * 밖에 있는 이유는 골키퍼의 위치선정이 태클·결정력이 아니라 **골문 커맨드**라,
+ * 그 값을 기울이면 태클 낮은 골키퍼의 침투가 천장까지 밀려 올라가기 때문이다.
+ * 옛 세이브를 옮기는 자리도 같은 이 함수를 부른다 (`core/migrations.ts`).
+ */
+export function keeperOffTheBall(goalkeeping: number): number {
+  return goalkeeping * 0.28 + 9.5;
+}
+
+/**
  * 시드 6축 + 자리 + 나이 → 16축.
  *
  * `age`는 카탈로그 기준일(CATALOG_AGE_REF) 나이다 — composure·leadership이
@@ -177,12 +188,8 @@ export function deriveAxes(
   const positioning = clamp99(
     (isGk ? goalkeeping * 1.3 - 26.4 : split.positioning) + jitter(nameEn, "positioning", 5),
   );
-  /**
-   * 골키퍼의 침투는 뜻이 없는 축이라 낮게 깔린다 — 화면에는 서므로 수준은 맞춘다.
-   * 전력 가중치가 바닥(0.05)이라 종합에는 닿지 않는다.
-   */
   const offTheBall = clamp99(
-    (isGk ? goalkeeping * 0.28 + 9.5 : split.offTheBall) + jitter(nameEn, "offTheBall", 5),
+    (isGk ? keeperOffTheBall(goalkeeping) : split.offTheBall) + jitter(nameEn, "offTheBall", 5),
   );
 
   const composure = clamp99(

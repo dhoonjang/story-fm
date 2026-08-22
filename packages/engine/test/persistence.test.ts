@@ -796,12 +796,14 @@ describe("옛 세이브를 지금 모양으로", () => {
         player("CB", { positioning: 70, tackling: 80, finishing: 30 }),
         // 공격 쪽으로 기운 9번 — 반대로 갈린다
         player("ST", { positioning: 72, tackling: 35, finishing: 82 }),
+        // 골키퍼는 기울임 식 밖 — 위치선정은 골문 커맨드라 그대로 두고 침투만 세운다
+        player("GK", { positioning: 90, tackling: 28, finishing: 65, goalkeeping: 87 }),
         // 이미 갈린 세이브는 다시 기울지 않는다
         player("CB", { positioning: 64, offTheBall: 41, tackling: 80, finishing: 30 }),
       ],
     };
     splitPositioningAxis(save);
-    const [cb, st, done] = save.players.map((p) => p.attributes);
+    const [cb, st, gk, done] = save.players.map((p) => p.attributes);
     expect(cb!.positioning).toBeGreaterThan(70);
     expect(cb!.offTheBall).toBeLessThan(70);
     expect(st!.positioning).toBeLessThan(72);
@@ -811,6 +813,9 @@ describe("옛 세이브를 지금 모양으로", () => {
       attrs.positioning! * (1 - share) + attrs.offTheBall! * share;
     expect(blend(cb!, SLOT_ATTACK_SHARE.CB)).toBeCloseTo(70, 0);
     expect(blend(st!, SLOT_ATTACK_SHARE.ST)).toBeCloseTo(72, 0);
+    // 골키퍼는 태클 28·결정력 65라 기울이면 침투가 천장까지 밀린다 — 그 식 밖이다
+    expect(gk!.positioning).toBe(90);
+    expect(gk!.offTheBall).toBeLessThan(50);
     // 멱등 — `offTheBall`의 부재가 마커다 (SAVE_VERSION을 올리지 않는 근거)
     expect(done).toEqual({ positioning: 64, offTheBall: 41, tackling: 80, finishing: 30 });
     splitPositioningAxis(save);

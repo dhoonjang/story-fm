@@ -8,6 +8,7 @@ import {
   weightSlotOf,
 } from "@story-fm/domain";
 import type { GamePlayer } from "@story-fm/domain";
+import { keeperOffTheBall } from "../world/attributes";
 
 /**
  * 옛 세이브를 지금 모양으로 옮기는 함수들 — **로드의 두 번째 걸음**
@@ -117,6 +118,14 @@ export function splitPositioningAxis(save: PositioningSplitSave): void {
     // 자리 없는 선수는 스키마가 뒤에서 막는다 — 여기서 넘어지면 손상이 코드 탓이 된다
     const slot =
       player.positions.length > 0 ? weightSlotOf(naturalPositionOf(player).position) : "CM";
+    /**
+     * 골키퍼는 기울임 식 밖이다 — 그 위치선정은 골문 커맨드라 태클·결정력에서 오지
+     * 않는다. 세이브의 값을 그대로 두고 침투만 골키핑에서 세운다 (player.md §13.5).
+     */
+    if (slot === "GK" && typeof attrs.goalkeeping === "number") {
+      attrs.offTheBall = clampAxis(keeperOffTheBall(attrs.goalkeeping));
+      continue;
+    }
     const split = splitPositioning(slot, base, tackling, finishing);
     attrs.positioning = clampAxis(split.positioning);
     attrs.offTheBall = clampAxis(split.offTheBall);
