@@ -200,6 +200,23 @@ describe("시즌 전환 (season.md §6)", () => {
     expect(club.transferBudget).toBeGreaterThan(0);
   });
 
+  /**
+   * 전환의 마지막 걸음인 편성은 던질 수 있는데(라운드 날짜 수 · 리그 인원 홀수 ·
+   * 대항전 참가 홀수), 그 자리는 계약 만료·은퇴·승강·`season++`가 전부 끝난 뒤다.
+   * 예외가 그대로 나가면 세이브가 반만 넘어간 채 남고 되돌릴 길이 없다 (season.md §6).
+   */
+  it("편성이 던지면 세이브는 한 글자도 달라지지 않는다", () => {
+    const state = createMiniGame();
+    const league = leagueOfTeamIn(state, state.userTeamId);
+    // 리그를 홀수로 만든다 — 더블 라운드로빈 편성이 던진다(`buildMatches`)
+    const victim = teamsOfLeagueIn(state, league).find((id) => id !== state.userTeamId)!;
+    state.leagueOf = { ...(state.leagueOf ?? {}), [victim]: "free" };
+    const before = structuredClone(state);
+
+    expect(() => transitionSeason(state)).toThrow(/짝수/);
+    expect(state).toEqual(before);
+  });
+
   it("주장이 은퇴하면 새 주장이 지명된다", () => {
     const state = createTestGame(5);
     const captain = userPlayers(state).find((p) => p.isCaptain)!;

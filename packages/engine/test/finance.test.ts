@@ -1046,10 +1046,12 @@ describe("PSR", () => {
       label: "시즌 마지막 달의 큰 수입",
       amount: 300_000_000,
     });
-    const finance = financeOf(state, state.userTeamId);
-    finance.transferBudget = 0; // 이월을 빼고 이번 보충만 본다
+    financeOf(state, state.userTeamId).transferBudget = 0; // 이월을 빼고 이번 보충만 본다
 
     const digest = endSeason(state);
+    // 시즌 종료는 복제본 위에서 돌고 성공했을 때만 옮겨 붙는다 (season.md §6) —
+    // 넘기기 전에 쥔 장부 객체는 낡은 것이므로 다시 읽는다
+    const finance = financeOf(state, state.userTeamId);
 
     const june = state.financeReports.find(
       (r) => r.month === "2027-06" && r.teamId === state.userTeamId,
