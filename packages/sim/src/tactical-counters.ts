@@ -1,7 +1,8 @@
-import type { MatchSide, Player, PositionGroup, TacticsSpec } from "@story-fm/domain";
+import type { MatchSide, PacketTag, Player, PositionGroup, TacticsSpec } from "@story-fm/domain";
 import {
   FAMILIARITY_BASELINE,
   FAMILIARITY_MAX,
+  otherSide,
   positionGroupOf,
   positionGroupOfPlayer,
 } from "@story-fm/domain";
@@ -17,8 +18,9 @@ import type { LineupSlot } from "./strength-packet";
  *    치렀다**(라인을 올렸는데 상대가 안 빠르면 뒷공간만 열린 셈). 근거 없는 지시가
  *    손해가 되는 구조가 여기서 완성된다 — 설득 시스템(`persuasion.ts`)과 같은 원리다.
  *
- * ② **발동하면 문장으로 드러난다.** `why`가 패킷의 키포인트로 올라가 중계가
- *    인용하고 골의 원인 태그가 된다. 수치만 움직이면 감독은 왜 이겼는지 모른다.
+ * ② **발동하면 사실 태그로 드러난다.** 태그가 패킷의 키포인트로 올라가 중계가
+ *    인용하고 골의 원인이 된다. 수치만 움직이면 감독은 왜 이겼는지 모른다.
+ *    코드는 상성의 id 그대로이고, 문장은 그것을 읽는 쪽이 만든다 (match.md §1).
  *
  * ③ **효과는 작다(3~8%).** 세게 잡으면 "정답 전술"을 찾는 게임이 되고 상대
  *    정체성만 알면 승부가 끝난다. 존에 실린 폭은 경로 우위를 지나 슈팅 양과 질
@@ -38,8 +40,11 @@ export interface CounterEffect {
   attack?: number;
   midfield?: number;
   defense?: number;
-  /** 한국어 한 줄 — 키포인트·원인 태그로 그대로 나간다 */
-  why: string;
+  /**
+   * 이 상성이 남기는 사실 — 수치와 조건. 짝을 이루는 뒷면 효과(상대 존을 함께
+   * 깎는 쪽)에는 없다: 한 상성은 한 줄로만 말한다.
+   */
+  note?: { values?: Record<string, number>; flags?: string[] };
   /** 이득인가(적용률이 곱해진다) 대가인가(온전히) */
   kind: "gain" | "cost";
 }
@@ -47,7 +52,6 @@ export interface CounterEffect {
 /** 한 팀의 전술·구성 요약 — 상성 조건이 읽는 값 */
 export interface CounterContext {
   side: MatchSide;
-  name: string;
   spec: TacticsSpec;
   uptake: number;
   slots: LineupSlot[];
@@ -105,7 +109,6 @@ const ABSENT_GROUP = {
 
 export function buildCounterContext(
   side: MatchSide,
-  name: string,
   slots: LineupSlot[],
   spec: TacticsSpec,
   uptake: number,
@@ -117,7 +120,6 @@ export function buildCounterContext(
   const wide = slots.filter(isWide);
   return {
     side,
-    name,
     spec,
     uptake,
     slots,
@@ -195,10 +197,13 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
           side: us.side,
           defense: size,
           kind: "cost",
-          why:
-            `${us.name}의 높은 라인 뒤가 열린다 — ${them.name} 전방 스피드 ${Math.round(them.fwPace)} vs 수비 ${Math.round(us.cbPace)}` +
-            (sweeper > 0.5 ? ` (골키퍼가 커버 범위를 넓혀 버틴다)` : "") +
-            (trap > 1.2 ? ` · 오프사이드 트랩이 아직 손에 안 익었다` : ""),
+          note: {
+            values: { fwPace: them.fwPace, cbPace: us.cbPace },
+            flags: [
+              ...(sweeper > 0.5 ? ["sweeper"] : []),
+              ...(trap > 1.2 ? ["trap-unfamiliar"] : []),
+            ],
+          },
         },
       ];
     },
@@ -224,9 +229,9 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
           side: us.side,
           attack: 0.04 * power,
           kind: "gain",
-          why: `${us.name}의 압박이 ${them.name}의 짧은 빌드업을 높은 곳에서 끊는다 (상대 후방 연결 ${Math.round((them.buildUp + them.pressResist) / 2)})`,
+          note: { values: { link: (them.buildUp + them.pressResist) / 2 } },
         },
-        { id: "press_trap", side: them.side, midfield: -0.05 * power, kind: "cost", why: "" },
+        { id: "press_trap", side: them.side, midfield: -0.05 * power, kind: "cost" },
       ];
     },
   },
@@ -251,10 +256,10 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
           side: us.side,
           midfield: -0.05 * evade * (us.spec.pressing - 3),
           kind: "cost",
-          why:
-            longBall >= resistant
-              ? `${them.name}이(가) 압박을 롱볼로 넘겨 버린다 — ${us.name}의 전방 압박이 허공을 뛴다`
-              : `${them.name} 중원이 압박을 견딘다 (압박 저항 ${Math.round(them.pressResist)})`,
+          note: {
+            values: { pressResist: them.pressResist },
+            flags: longBall >= resistant ? ["long-ball"] : [],
+          },
         },
       ];
     },
@@ -278,7 +283,7 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
           side: us.side,
           defense: -0.06 * shaky,
           kind: "cost",
-          why: `${us.name}의 후방이 짧은 연결을 감당하지 못한다 (빌드업 ${Math.round(us.buildUp)}) — 압박에 위험 지역에서 흘린다`,
+          note: { values: { buildUp: us.buildUp } },
         },
       ];
     },
@@ -302,7 +307,10 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
           side: us.side,
           midfield: 0.035 * edge * stretched,
           kind: "gain",
-          why: `중원 숫자에서 ${us.name}이(가) ${edge}명 앞선다 (${us.count.MF} vs ${them.count.MF})${stretched < 0.8 ? " — 다만 폭을 넓게 써 중앙이 얇아진다" : ""}`,
+          note: {
+            values: { edge, mf: us.count.MF, rivalMf: them.count.MF },
+            flags: stretched < 0.8 ? ["stretched"] : [],
+          },
         },
       ];
     },
@@ -326,7 +334,7 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
           side: us.side,
           attack: 0.03 * size,
           kind: "gain",
-          why: `${them.name}이(가) 중앙에 몰려 측면이 비었다 — ${us.name} 측면 자원 ${Math.round(us.wideQuality)}`,
+          note: { values: { wideQuality: us.wideQuality } },
         },
       ];
     },
@@ -350,7 +358,7 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
           side: us.side,
           attack: 0.05 * air,
           kind: "gain",
-          why: `${us.name}이(가) 측면에서 올려 제공권으로 해결한다 (전방 공중볼 ${Math.round(us.aerialAtk)} vs 수비 ${Math.round(them.aerialDef)})`,
+          note: { values: { aerialAtk: us.aerialAtk, aerialDef: them.aerialDef } },
         },
       ];
     },
@@ -378,7 +386,7 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
           side: us.side,
           attack: -0.06 * dull * (1 - spark * 0.5),
           kind: "cost",
-          why: `${them.name}의 밀집 수비를 ${us.name}이(가) 느리고 좁게 두드린다 — 공은 갖되 길이 없다`,
+          note: {},
         },
       ];
     },
@@ -404,7 +412,7 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
           side: us.side,
           attack: 0.05 * shake,
           kind: "gain",
-          why: `${us.name}이(가) 빠르고 넓게 움직여 ${them.name}의 블록을 좌우로 흔든다`,
+          note: {},
         },
       ];
     },
@@ -430,7 +438,7 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
           side: us.side,
           attack: 0.07 * speed * room,
           kind: "gain",
-          why: `${us.name}이(가) 내려서서 역습을 노린다 — ${them.name}이(가) 올라온 뒤가 넓다 (전방 스피드 ${Math.round(us.fwPace)})`,
+          note: { values: { fwPace: us.fwPace } },
         },
       ];
     },
@@ -459,7 +467,9 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
           side: us.side,
           midfield: -0.05 * severity,
           kind: "cost",
-          why: `${us.name}의 전후 간격이 벌어졌다 — 멘탈리티 ${us.spec.mentality}에 수비 라인 ${us.spec.defensiveLine}, 중원이 빈다`,
+          note: {
+            values: { mentality: us.spec.mentality, defensiveLine: us.spec.defensiveLine },
+          },
         },
       ];
     },
@@ -485,7 +495,7 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
           side: us.side,
           defense: -0.05 * risk * (us.spec.tempo - 3),
           kind: "cost",
-          why: `${us.name}이(가) 서두르다 ${them.name}의 압박에 흘린다 (중원 침착성 ${Math.round(us.pressResist)})`,
+          note: { values: { pressResist: us.pressResist } },
         },
       ];
     },
@@ -509,10 +519,7 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
           side: us.side,
           defense: 0.025 * spare,
           kind: spare > 0 ? "gain" : "cost",
-          why:
-            spare > 0
-              ? `${us.name} 수비 ${us.count.DF}명이 상대 전방 ${them.count.FW}명을 두고 남는다 — 커버가 두텁다`
-              : `${us.name} 수비 ${us.count.DF}명이 상대 전방 ${them.count.FW}명에게 커버 없는 일대일을 강요당한다`,
+          note: { values: { spare, df: us.count.DF, fw: them.count.FW } },
         },
       ];
     },
@@ -539,26 +546,19 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
           side: us.side,
           attack: 0.04 * gap * ramp(us.spec.width, 2, 5),
           kind: "gain",
-          why: `측면 속도에서 ${us.name}이(가) 앞선다 (${Math.round(wideAttack)} vs ${Math.round(wideDefend)}) — 폭을 쓰는 만큼 살아난다`,
+          note: { values: { wideAttack, wideDefend } },
         },
       ];
     },
   },
 ];
 
-/** 발동한 상성 한 줄 — 문장과 **누구에게 이로운가** */
-export interface CounterNote {
-  text: string;
-  /** 이 상성이 이롭게 작용하는 쪽 — 이득은 받은 팀에, 대가는 그 반대편에 */
-  favours: MatchSide;
-}
-
 export interface CounterResult {
   /** 존별 가산 (배율에 더한다) */
   home: { attack: number; midfield: number; defense: number };
   away: { attack: number; midfield: number; defense: number };
-  /** 발동한 상성의 문장 — 키포인트로 나간다 (빈 문자열은 짝 효과라 제외) */
-  notes: CounterNote[];
+  /** 발동한 상성의 사실 태그 — 키포인트로 나간다 (짝 효과는 태그를 내지 않는다) */
+  notes: PacketTag[];
 }
 
 /**
@@ -583,8 +583,17 @@ export function evaluateCounters(home: CounterContext, away: CounterContext): Co
       bucket.midfield += (e.midfield ?? 0) * scale;
       bucket.defense += (e.defense ?? 0) * scale;
       // 대가(`cost`)는 받은 팀이 손해를 보는 것이므로 이로운 쪽은 반대편이다
-      const favours: MatchSide = e.kind === "gain" ? e.side : e.side === "home" ? "away" : "home";
-      if (e.why) result.notes.push({ text: e.why, favours });
+      const favours: MatchSide = e.kind === "gain" ? e.side : otherSide(e.side);
+      if (e.note)
+        result.notes.push({
+          source: "counter",
+          code: e.id,
+          favours,
+          sharp: true,
+          playerIds: [],
+          values: e.note.values ?? {},
+          flags: e.note.flags ?? [],
+        });
     }
   };
   for (const counter of COUNTERS) {

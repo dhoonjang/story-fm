@@ -228,6 +228,15 @@ export const TrainingSessionSchema = z.object({
   label: z.string().min(1),
   focus: z.array(TrainAttrSchema),
   /**
+   * 기본 훈련 메뉴의 **id** — `auto`인 세션만 갖는다.
+   *
+   * 일정이 움직이면 tick이 기대 배치와 실제 배치를 대조해 어긋난 자리만 다시 깐다
+   * (season.md §4). 그 대조를 메뉴의 한국어 이름으로 하면 문구 한 글자를 고치는
+   * 순간 시즌 전체의 기본 훈련이 한 번 다시 깔린다. 옛 세이브의 세션엔 없어
+   * (optional) 그때는 이름으로 대조한다.
+   */
+  menuId: z.string().min(1).optional(),
+  /**
    * 코어가 깐 **기본 훈련**인가 — 감독이 지시한 세션과 구분한다.
    * 경기가 새로 편성되면 그 주변의 기본 세션만 걷어내고 다시 깔 수 있어야 하기 때문.
    * 구 세이브엔 없다(옵셔널) — 없으면 감독 지시로 본다.

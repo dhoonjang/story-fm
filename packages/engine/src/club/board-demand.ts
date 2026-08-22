@@ -222,9 +222,15 @@ function describeDemand(state: GameState, demand: BoardDemand): string {
 export function boardDemandFact(state: GameState): PressFact | null {
   const demand = openBoardDemand(state);
   if (!demand) return null;
+  const player = demand.playerId ? playerById(state, demand.playerId) : null;
   return {
     kind: "board-demand",
-    text: `보드 요청 — ${describeDemand(state, demand)} · 기한 ${demand.deadline}`,
+    data: {
+      tags: [demand.kind],
+      date: demand.deadline,
+      ...(player ? { name: player.name } : {}),
+      ...(demand.baseline === undefined ? {} : { values: { baseline: demand.baseline } }),
+    },
     about: demand.playerId ?? null,
     sharp: true,
   };

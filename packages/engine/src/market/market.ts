@@ -20,6 +20,7 @@ import {
   teamName,
   weeklyWagesOf,
   type GameState,
+  type SquadShortfall,
   hasIssue,
 } from "../core/state";
 
@@ -220,30 +221,64 @@ export function squadDepthOf(state: GameState): SquadDepth {
   };
 }
 
+/**
+ * 파는 쪽 사정의 갈래 — **확률에 실리는 부호가 여기서 갈린다.**
+ *
+ * 대체 불가는 딜을 미는 유일한 사정이고 나머지 셋은 당긴다. 그 갈래를 사정
+ * 문장에 `"대체 불가"`가 들어 있는지로 가르던 자리라, 문구를 다듬는 순간 상대가
+ * 핵심 선수를 순순히 내주는 쪽으로 뒤집혔다 (overview.md §1 철칙 4).
+ */
+export type SellerReasonKind =
+  /** 그 자리에 이만한 선수가 없다 — 값을 올려 부르고 딜을 민다 */
+  | "irreplaceable"
+  /** 같은 자리가 넘친다 */
+  | "surplus"
+  /** 계약이 1년도 남지 않았다 */
+  | "contract-short"
+  /** 상대 구단의 잔고가 빠듯하다 */
+  | "cash-tight";
+
+/** 갈래마다의 확률 기여 — 부호가 뜻이고, 크기가 그 사정의 무게다 */
+const SELLER_REASON_SCORE: Record<SellerReasonKind, number> = {
+  irreplaceable: -0.9,
+  surplus: 0.75,
+  "contract-short": 0.75,
+  "cash-tight": 0.75,
+};
+
+/** 파는 쪽 사정 한 장 — 코드가 판정을, 한 줄이 감독에게 보이는 표시를 맡는다 */
+export interface SellerReason {
+  kind: SellerReasonKind;
+  why: string;
+}
+
 /** 파는 쪽의 태도 — 요구액이 시장가에서 얼마나 벌어지는가 */
-function sellerStance(state: GameState, player: GamePlayer): { multiple: number; why: string[] } {
-  const why: string[] = [];
+function sellerStance(
+  state: GameState,
+  player: GamePlayer,
+): { multiple: number; reasons: SellerReason[] } {
+  const reasons: SellerReason[] = [];
   let multiple = 1.1; // 기본적으로 시장가보다 조금 높게 부른다
   const better = betterAtPosition(state, player.teamId, player);
   if (better === 0) {
     multiple += 0.25;
-    why.push("팀의 대체 불가 자원이다");
+    reasons.push({ kind: "irreplaceable", why: "팀의 대체 불가 자원이다" });
   } else if (better >= 2) {
     multiple -= 0.15;
-    why.push(`같은 자리에 더 나은 선수가 ${better}명 있다`);
+    reasons.push({ kind: "surplus", why: `같은 자리에 더 나은 선수가 ${better}명 있다` });
   }
   const yearsLeft = contractYearsLeft(state, player.id);
   if (yearsLeft < 1) {
     multiple -= 0.2;
-    why.push("계약이 1년도 남지 않았다");
+    reasons.push({ kind: "contract-short", why: "계약이 1년도 남지 않았다" });
   }
   // 무소속엔 파는 구단이 없다 — 장부도 없다 (team.md §4)
   const finance = isClubTeam(player.teamId) ? financeOf(state, player.teamId) : null;
   if (finance && finance.balance < weeklyWagesOf(state, player.teamId) * 20) {
     multiple -= 0.15;
-    why.push("상대 구단의 재정이 빠듯하다");
+    reasons.push({ kind: "cash-tight", why: "상대 구단의 재정이 빠듯하다" });
   }
-  return { multiple: Math.max(0.7, multiple), why };
+  return { multiple: Math.max(0.7, multiple), reasons };
 }
 
 /** 상대가 기대하는 이적료 */
@@ -447,7 +482,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
       }
       // 나가는 문은 다 같은 하한을 지킨다 — 다 내보내고 경기를 못 뛰는 일이 없게
       const short = squadShortfall(state, state.userTeamId, player);
-      if (short) blockers.push(`우리 ${short.replace("팔 수", "해지할 수")}`);
+      if (short) blockers.push(`우리 ${squadShortfallText(short, "release")}`);
       // 정산금은 합의한 날 즉시 나간다 — 낼 수 없는 값으로 흥정을 시작하지 않는다.
       // 분할이면 오늘 나갈 것은 첫 회분뿐이다 (transfer.md §5-2)
       const dueNow = firstInstallmentOf(terms.fee, terms.paymentYears);
@@ -545,12 +580,12 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
         ? `상대는 ${formatMoney(askingPrice)}을 기대한다 (제시액은 그 ${Math.round(feeRatio * 100)}%${splitNote(terms, offeredFee)})`
         : "계약이 만료돼 이적료가 필요 없다",
   });
-  for (const why of stance.why) {
+  for (const reason of stance.reasons) {
     contributions.push({
       gate: "club",
-      score: why.includes("대체 불가") ? -0.9 : 0.75,
+      score: SELLER_REASON_SCORE[reason.kind],
       label: "상대 사정",
-      why,
+      why: reason.why,
     });
   }
 
@@ -1463,6 +1498,30 @@ export function transferWindowLabel(state: GameState, teamId: string): string {
   return isMarketOnlyLeague(leagueId)
     ? `${leagueCatalogById(leagueId)?.name ?? "상대 리그"}의 이적시장`
     : "이적시장";
+}
+
+/**
+ * 나가는 문의 갈래 — 막히는 이유는 같아도 감독이 하려던 일의 동사가 다르다.
+ * 매각·해지·임대 송출이 스쿼드 하한 하나를 함께 지킨다 (transfer.md §2).
+ */
+export type DepartureAction = "sell" | "release" | "loan-out";
+
+const DEPARTURE_VERB: Record<DepartureAction, string> = {
+  sell: "팔",
+  release: "해지할",
+  "loan-out": "보낼",
+};
+
+/**
+ * 스쿼드 하한에 걸렸다는 한 줄 — **카드에서 만든다.**
+ *
+ * 코어가 내는 것은 `{ code, remaining, limit }`뿐이다. 예전엔 코어가 "팔 수
+ * 없습니다"까지 적고 부르는 쪽이 그 문장의 동사를 `replace`로 바꿔치기했다 —
+ * 문구를 고치는 순간 해지·임대의 안내가 매각의 말로 되돌아가던 자리다.
+ */
+export function squadShortfallText(short: SquadShortfall, action: DepartureAction): string {
+  const subject = short.code === "squad-min" ? "스쿼드" : "골키퍼";
+  return `${subject}가 ${short.limit}명 아래로 내려가 ${DEPARTURE_VERB[action]} 수 없습니다`;
 }
 
 /**

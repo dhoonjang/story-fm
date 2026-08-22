@@ -1,4 +1,4 @@
-import type { GamePlayer, Player, TacticsSpec } from "@story-fm/domain";
+import type { GamePlayer, Player, SubCause, TacticsSpec } from "@story-fm/domain";
 import {
   CONDITION_MAX,
   DEFAULT_TACTICS,
@@ -241,13 +241,13 @@ export interface QuickCard {
   minute: number;
 }
 
-/** 교체 한 번 — `cause`는 구간 시뮬의 `AI_SUB_CAUSE`와 같은 문자열이다 */
+/** 교체 한 번 — `cause`는 구간 시뮬과 같은 갈래 코드다 (`SubCause`) */
 export interface QuickSub {
   side: "home" | "away";
   out: string;
   in: string;
   minute: number;
-  cause: string;
+  cause: SubCause;
 }
 
 export interface QuickResult {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AI_SUB_CAUSE } from "@story-fm/sim";
+import type { SubCause } from "@story-fm/domain";
 import type { GameState } from "@story-fm/engine";
 import { createTestGame, keepSeat } from "../test/helpers";
 import { AI_BENCH } from "./catalog";
@@ -12,7 +12,7 @@ import { outOfBand, reportOf, type Readings } from "./harness";
  *
  * 재는 것은 손잡이(`SUB_CHASE_MINUTE`·`SUB_HOLD_MINUTE`·장수 상한)가 실제 경기
  * 분포로 번역됐는가다. 문턱을 여기에 다시 적지 않는다 — 갈래를 가르는 열쇠는
- * 구간 시뮬이 쥔 `AI_SUB_CAUSE` 그것이고, 밴드는 서술자가 쥔다.
+ * 구간 시뮬이 쥔 `subCause` 그것이고, 밴드는 서술자가 쥔다.
  *
  *   pnpm balance ai-bench
  */
@@ -46,22 +46,22 @@ function collect(state: GameState, tally: Tally): void {
   const diff = aiSide === "home" ? score.home - score.away : score.away - score.home;
 
   const subs = pending.ledger.events.filter((e) => e.type === "substitution" && e.team === aiSide);
-  const of = (cause: string) => subs.filter((e) => e.causes.includes(cause)).length;
+  const of = (cause: SubCause) => subs.filter((e) => e.subCause === cause).length;
 
   tally.matches += 1;
   for (const sub of subs) tally.subs.push(sub.minute);
-  tally.chase += of(AI_SUB_CAUSE.chase);
-  tally.hold += of(AI_SUB_CAUSE.hold);
-  tally.fatigue += of(AI_SUB_CAUSE.fatigue);
-  tally.injury += of(AI_SUB_CAUSE.injury);
+  tally.chase += of("chase");
+  tally.hold += of("hold");
+  tally.fatigue += of("fatigue");
+  tally.injury += of("injury");
   if (pending.aiShape) tally.reshaped += 1;
   if (diff < 0) {
     tally.trailed += 1;
-    if (of(AI_SUB_CAUSE.chase) > 0) tally.trailedChased += 1;
+    if (of("chase") > 0) tally.trailedChased += 1;
   }
   if (diff > 0) {
     tally.led += 1;
-    if (of(AI_SUB_CAUSE.hold) > 0) tally.ledHeld += 1;
+    if (of("hold") > 0) tally.ledHeld += 1;
   }
 }
 

@@ -65,7 +65,6 @@ export function openInjuryFor(
     occurredOn: state.date,
     expectedReturn: addDays(state.date, days),
     returnedOn: null,
-    note: cause === "training" ? "훈련 중 부상" : "경기 중 부상",
   });
   // 다친 사실은 그 선수에게 남는다 — 다음 부상이 조금 더 가까워진다
   raiseProneness(player, severity);
@@ -308,12 +307,12 @@ export function seedInjuryHistory(state: GameState): void {
         gamePlayerId: player.id,
         bodyPart: row.part,
         severity: severityOfDays(days),
-        // 어디서 다쳤는지까지는 출처가 말하지 않는다 — 지어내지 않는다
-        cause: "other",
+        // 경기도 훈련도 아닌 제3의 출처 — 감독이 오기 전의 몸이다 (player.md §5.3).
+        // 어디서 다쳤는지까지는 출처가 말하지 않으므로 지어내지 않는다
+        cause: "pre_appointment",
         occurredOn: row.from,
         expectedReturn: row.until,
         returnedOn: stillOut ? null : row.until,
-        note: "부임 전 이력",
       });
       // 창과 겹치는 부분만 센다 — 창을 걸친 장기 부상은 걸친 만큼만
       const from = row.from > windowStart ? row.from : windowStart;

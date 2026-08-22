@@ -194,7 +194,7 @@ export function applyMonthlyDevelopment(state: GameState): string[] {
         ATTRIBUTE_FLOOR,
         Math.min(RATING_MAX, player.attributes[axis] + step),
       );
-      if (ours) recordGrowth(state, player.id, null, "development", axis, step, "월간 성장");
+      if (ours) recordGrowth(state, player.id, null, "development", axis, step, "monthly");
     }
     recomputeOverall(player);
     if (ours) lines.push(`${player.name} (2군) ${player.attributes.overall}`);

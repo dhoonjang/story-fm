@@ -238,7 +238,9 @@ describe("경기 흐름 (overview §4)", () => {
     const after = packetSide();
     expect(after.regional?.[0]?.note).toContain("하프스페이스");
     expect(
-      state.pendingMatch!.packet.keyPoints.some((point) => point.includes("하프스페이스")),
+      state.pendingMatch!.packet.keyPoints.some(
+        (tag) => tag.source === "zone-plan" && tag.text?.includes("하프스페이스"),
+      ),
     ).toBe(true);
     expect(
       zoneGrid(state.pendingMatch!.packet).find(

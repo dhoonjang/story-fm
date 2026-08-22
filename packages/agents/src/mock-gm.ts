@@ -57,7 +57,16 @@ import {
   type SkillBrief,
 } from "@story-fm/engine";
 import type { TrainAttr } from "@story-fm/domain";
-import { positionGroupOfPlayer, shootoutTally, MANAGER_ATTRIBUTE_KO } from "@story-fm/domain";
+import {
+  positionGroupOfPlayer,
+  shootoutTally,
+  MANAGER_ATTRIBUTE_KO,
+  matchupText,
+  normalizePacket,
+  packetTagContext,
+  packetTagText,
+  pressFactText,
+} from "@story-fm/domain";
 import type { ShootoutOutcome } from "@story-fm/domain";
 import { TIME_PASSED, type GmToolCall, type GmTurnResult } from "./gm-types";
 import type { CardMark, GoalMark } from "@story-fm/engine";
@@ -145,7 +154,7 @@ function renderEvent(state: GameState, ev: MatchEvent): string[] {
     case "kickoff":
       return [`@중계: 킥오프! 경기가 시작됩니다.`];
     case "goal": {
-      const cause = ev.causes[0] ? ` (${ev.causes[0]})` : "";
+      const cause = ev.causes[0] ? ` (${packetTagText(ev.causes[0])})` : "";
       return [`@중계: *${ev.minute}′ — ${name}, 골입니다!* ${scoreLine(state)}${cause}`];
     }
     case "shot":
@@ -484,13 +493,16 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
       if (!started.ok) return { text: `${coach(state)} ${started.message}`, toolCalls: calls };
       // `startMatch`는 `FlowResult`라 실을 카드도 항목도 없다
       calls.push({ name: "start_match", summary: started.message });
-      const packet = state.pendingMatch?.packet;
+      const packet = state.pendingMatch?.packet
+        ? normalizePacket(state.pendingMatch.packet)
+        : undefined;
+      const tagCtx = packet ? packetTagContext(packet) : undefined;
       // 킥오프는 여기서 굴리지 않는다 — 공은 감독이 입장 확인 창을 누를 때 구른다
       const briefing = packet
         ? [
             `${coach(state)} 전력 분석입니다 — ${packet.home.teamName}(홈) vs ${packet.away.teamName}, 기대 득점 ${packet.guide.expectedGoals.home} : ${packet.guide.expectedGoals.away}`,
-            ...packet.matchups.map((m) => `${coach(state)} · ${m.why}`),
-            ...packet.keyPoints.map((k) => `${coach(state)} ★ ${k}`),
+            ...packet.matchups.map((m) => `${coach(state)} · ${matchupText(m)}`),
+            ...packet.keyPoints.map((k) => `${coach(state)} ★ ${packetTagText(k, tagCtx)}`),
           ].join("\n")
         : "";
       return {
@@ -821,7 +833,7 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
       line: 2,
     });
     return {
-      text: `@: *감독실 문이 열린다*\n@${approach.speakerId}: ${approach.facts[0]!.text}\n${coach(state)} ${result.message}`,
+      text: `@: *감독실 문이 열린다*\n@${approach.speakerId}: ${pressFactText(approach.facts[0]!)}\n${coach(state)} ${result.message}`,
       toolCalls: calls,
     };
   }
@@ -1015,5 +1027,5 @@ export function buildOnboardingTurn(state: GameState): GmTurnResult {
  */
 function mockQuestion(press: PressConference): string {
   const fact = press.facts.find((f) => f.sharp) ?? press.facts[0];
-  return fact ? `${fact.text} — 한 말씀 해주시죠.` : "한 말씀 해주시죠.";
+  return fact ? `${pressFactText(fact)} — 한 말씀 해주시죠.` : "한 말씀 해주시죠.";
 }

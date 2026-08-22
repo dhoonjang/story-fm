@@ -1,16 +1,11 @@
 import type {
   AttributeAxis,
   DirectiveIntensity,
+  PacketTag,
   Player,
   PlayerDirectiveKind,
 } from "@story-fm/domain";
-import {
-  anchorOf,
-  DIRECTIVE_INTENSITY_KO,
-  PLAYER_DIRECTIVE_KO,
-  positionGroupOf,
-  positionGroupOfPlayer,
-} from "@story-fm/domain";
+import { anchorOf, positionGroupOf, positionGroupOfPlayer } from "@story-fm/domain";
 import type { LineupSlot } from "./strength-packet";
 import {
   addFocused,
@@ -41,8 +36,8 @@ import {
  *    공략과 **한 예산을 나눠 쓰게** 막는다 — 지시는 그 상한을 우회하지 않는다.
  * 4. **선수의 역량을 탄다** — 그 지시를 소화할 능력이 없으면 **이득이 줄고 대가가
  *    커진다.** 지구력 없는 풀백에게 "계속 올라가"는 앞도 못 만들고 뒤만 연다.
- * 5. **발동하면 문장으로 드러난다** — 노트가 `tactical.notes`로 올라가 중계·감독
- *    화면이 그대로 인용한다. **걸리지 않은 지시도 마찬가지다**: 조용히 버리면
+ * 5. **발동하면 사실 태그로 드러난다** — 태그가 `tactical.notes`로 올라가 중계·감독
+ *    화면이 인용할 문장이 된다. **걸리지 않은 지시도 마찬가지다**: 조용히 버리면
  *    그 노트를 인용하는 중계도 화면도 걸리지 않은 지시가 걸린 줄 안다.
  *
  * ## 판과 같은 해상도로 실린다
@@ -304,15 +299,6 @@ function costScale(spec: DirectiveSpec, gainApt: number, attrs: Player["attribut
   return spec.costMode === "loss" ? apt : 1 + (1 - apt) * DIRECTIVE_TUNING.COST_SENSITIVITY;
 }
 
-/** 소화력을 감독이 읽는 말로 — 노트가 "왜 그렇게 됐는지"를 말해야 한다 */
-function readOf(apt: number): string {
-  return apt >= 1.15 ? "여유가 있다" : apt >= 0.95 ? "감당할 만하다" : "버거워 보인다";
-}
-
-function duelReadOf(rate: number): string {
-  return rate >= 0.6 ? "따라붙을 만하다" : rate >= 0.4 ? "버거운 싸움이다" : "상대가 한 수 위다";
-}
-
 export interface DirectiveOutcome {
   /**
    * 지시를 내린 쪽의 **칸 조정** — 대가가 주로 여기 남는다.
@@ -324,7 +310,28 @@ export interface DirectiveOutcome {
    * 홈의 왼쪽이 원정의 오른쪽과 만나는 뒤집기는 `zoneGrid`가 이미 한다.
    */
   them: LaneCells;
-  notes: string[];
+  notes: PacketTag[];
+}
+
+/** 지시가 남기는 사실 태그 — 코드는 지시의 갈래, 문장은 렌더러가 만든다 */
+function directiveTag(
+  source: PacketTag["source"],
+  code: string,
+  playerIds: string[],
+  values: Record<string, number> = {},
+  intensity?: DirectiveIntensity,
+): PacketTag {
+  return {
+    source,
+    code,
+    // 지시는 그것을 내린 쪽의 노트에 실린다 — 편은 그 자리가 이미 안다
+    favours: null,
+    sharp: true,
+    playerIds,
+    values,
+    // 세기가 보통이 아니면 그 사실이 남는다 — 감독이 고른 정도가 결과에 있다
+    flags: intensity && intensity !== "normal" ? [`intensity:${intensity}`] : [],
+  };
 }
 
 /** 지시가 실릴 칸 — 밴드는 맡은 자리가, 레인은 전술판 좌표가 정한다 */
@@ -367,24 +374,17 @@ function cellOfSlot(slot: LineupSlot): Cell {
  * 수는 없다 — 조용히 버리면 노트를 인용하는 중계도 화면도 걸린 줄 안다.
  *
  * @param uptake 지시 적용률 — **이득에만** 곱한다 (대가는 온전히 남는다)
- * @param usBench 우리 벤치 — 걸리지 않은 지시의 **이름을 찾는 데만** 쓴다
- * @param themBench 상대 벤치 — 교체로 나간 표적의 이름을 찾는 데만 쓴다
  */
 export function applyDirectives(
   directives: readonly DirectiveInput[] | undefined,
   usXI: readonly LineupSlot[],
   themXI: readonly LineupSlot[],
   uptake: number,
-  usBench?: readonly LineupSlot[],
-  themBench?: readonly LineupSlot[],
 ): DirectiveOutcome {
   const out: DirectiveOutcome = { us: zeroCells(), them: zeroCells(), notes: [] };
   if (!directives || directives.length === 0) return out;
 
   const byId = (slots: readonly LineupSlot[], id: string) => slots.find((s) => s.player.id === id);
-  /** 걸리지 않은 지시도 사람 이름으로 말한다 — id를 인용하는 노트는 감독이 못 읽는다 */
-  const nameIn = (slots: readonly LineupSlot[] | undefined, id: string) =>
-    slots?.find((s) => s.player.id === id)?.player.name;
 
   /**
    * **한 선수에게 하나까지, 팀 전체로 셋까지.** 배치(`TacticAssignment.directive`)가
@@ -403,18 +403,18 @@ export function applyDirectives(
   const seen = new Set<string>();
   /** 걸리는 지시와 그 자리에서 버려진 노트가 감독이 내린 순서대로 섞여 선다 */
   const steps: Array<
-    { note: string } | { d: DirectiveInput; me: LineupSlot; target?: LineupSlot }
+    { note: PacketTag } | { d: DirectiveInput; me: LineupSlot; target?: LineupSlot }
   > = [];
   let effective = 0;
   /** 넘쳐서 못 걸린 지시의 노트 — 뒤에 붙여 노트가 감독이 내린 순서대로 읽히게 한다 */
-  const overflow: string[] = [];
+  const overflow: PacketTag[] = [];
   for (const d of directives) {
     if (seen.has(d.by)) continue;
     seen.add(d.by);
     const me = byId(usXI, d.by);
     if (!me) {
       // 벤치에 앉은 선수에게 내린 지시는 효력이 없다
-      steps.push({ note: DROPPED_KO.offPitch(nameIn(usBench, d.by)) });
+      steps.push({ note: directiveTag("directive-dropped", "off-pitch", [d.by]) });
       continue;
     }
     const target =
@@ -422,15 +422,19 @@ export function applyDirectives(
     if (DIRECTIVE_EFFECTS[d.kind].duel && !target) {
       // 대상이 그라운드에 없다 — 지시가 성립하지 않는다 (교체로 나갔거나 없는 id)
       steps.push({
-        note: DROPPED_KO.goneTarget(
-          me.player.name,
-          d.targetId ? nameIn(themBench, d.targetId) : undefined,
-        ),
+        note: directiveTag("directive-dropped", "gone-target", [
+          d.by,
+          ...(d.targetId ? [d.targetId] : []),
+        ]),
       });
       continue;
     }
     if (effective >= DIRECTIVE_TUNING.MAX_EFFECTIVE) {
-      overflow.push(DROPPED_KO.overflow(me.player.name));
+      overflow.push(
+        directiveTag("directive-dropped", "overflow", [d.by], {
+          limit: DIRECTIVE_TUNING.MAX_EFFECTIVE,
+        }),
+      );
       continue;
     }
     effective += 1;
@@ -446,11 +450,7 @@ export function applyDirectives(
     const spec = DIRECTIVE_EFFECTS[d.kind];
     const mul = intensityOf(d.intensity);
     const attrs = me.player.attributes;
-    const name = me.player.name;
     const mine = cellOfSlot(me);
-    /** 세기가 보통이 아니면 그 사실이 노트에 남는다 — 감독이 고른 정도가 결과에 있다 */
-    const tag =
-      d.intensity && d.intensity !== "normal" ? ` (${DIRECTIVE_INTENSITY_KO[d.intensity]})` : "";
 
     if (spec.duel && entry.target) {
       const target = entry.target;
@@ -477,7 +477,15 @@ export function applyDirectives(
        * 상대를 따라간 레인이 아니라 내가 떠난 레인이 열린다.
        */
       payCost(out, mine, spec.cost * mul.cost * costScale(spec, apt, attrs));
-      out.notes.push(`${NOTE_KO[d.kind](name, target.player.name)} — ${duelReadOf(rate)}${tag}`);
+      out.notes.push(
+        directiveTag(
+          "directive",
+          d.kind,
+          [me.player.id, target.player.id],
+          { duel: rate },
+          d.intensity,
+        ),
+      );
       continue;
     }
 
@@ -488,45 +496,10 @@ export function applyDirectives(
     // 오른쪽 풀백이 올라가면 열리는 것은 오른쪽 뒷공간이다
     if (spec.gainZone !== "target") addFocused(out.us, spec.gainZone, mine.lane, gain);
     payCost(out, spec.costZone === "own" ? mine : { band: spec.costZone, lane: mine.lane }, cost);
-    out.notes.push(`${NOTE_KO[d.kind](name)} — ${readOf(apt)}${tag}`);
+    out.notes.push(
+      directiveTag("directive", d.kind, [me.player.id], { aptitude: apt }, d.intensity),
+    );
   }
   out.notes.push(...overflow);
   return out;
 }
-
-/**
- * **판에 닿지 못한 지시** — 조용히 버리면 거짓 성공이 된다.
- *
- * 이 노트가 없으면 `tactical.notes`를 인용하는 중계도 감독 화면도 걸리지 않은 지시를
- * 걸린 것으로 읽고, GM은 그것을 전제로 다음 장면을 쓴다. 그래서 꼴이 하나다:
- * **`무엇이 안 걸렸는가 — 왜`.** 한 줄만 읽어도 다시 내릴지 말지가 정해져야 한다.
- *
- * 이름을 못 찾는 갈래가 있는 것은 지어낸 id도 여기로 오기 때문이다 — 그때는 이름
- * 없이 사실만 남긴다.
- */
-const DROPPED_KO = {
-  overflow: (name?: string): string =>
-    `${name ? `${name}에게 내린 지시가` : "지시 하나가"} 판에 닿지 않았다 — 한 경기에 ${DIRECTIVE_TUNING.MAX_EFFECTIVE}개까지다`,
-  offPitch: (name?: string): string =>
-    name
-      ? `${name}은(는) 그라운드에 없어 지시가 걸리지 않았다`
-      : `그라운드에 없는 선수에게 내린 지시라 걸리지 않았다`,
-  goneTarget: (by: string, target?: string): string =>
-    `${by}의 지시가 걸리지 않았다 — ${target ? `${target}은(는) 이미 그라운드를 떠났다` : "겨냥한 상대가 그라운드에 없다"}`,
-} as const;
-
-/**
- * 지시가 그라운드에서 무엇으로 보이는가 — 감독 화면·중계가 그대로 인용한다.
- *
- * 꼴은 하나다: **`무엇을 한다, 무엇을 내준다 — 감당하는가`.** 노트 한 줄만 읽어도
- * 이득과 대가가 함께 보여야 지시가 공짜로 읽히지 않는다. 지시의 이름은
- * `PLAYER_DIRECTIVE_KO`에서 가져와 화면 라벨과 어긋나지 않게 둔다.
- */
-const NOTE_KO: Record<PlayerDirectiveKind, (name: string, target?: string) => string> = {
-  man_mark: (n, t) => `${n}이(가) ${t}을(를) ${PLAYER_DIRECTIVE_KO.man_mark}, 본업을 던다`,
-  press_target: (n, t) =>
-    `${n}이(가) ${t}을(를) ${PLAYER_DIRECTIVE_KO.press_target}, 자리를 비운다`,
-  focus_play: (n) => `${n}에게 공격을 몰아준다, 다른 길이 줄어든다`,
-  stay_back: (n) => `${n}은(는) 뒤에 남는다, 앞의 인원이 준다`,
-  join_attack: (n) => `${n}이(가) 적극적으로 올라간다, 뒷공간을 내준다`,
-};

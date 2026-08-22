@@ -551,7 +551,7 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
      * 다만 이 게임에서 벌어진 일은 아직 하나도 없다.
      */
     expect(state.injuries.length).toBeGreaterThan(0);
-    expect(state.injuries.every((i) => i.note === "부임 전 이력")).toBe(true);
+    expect(state.injuries.every((i) => i.cause === "pre_appointment")).toBe(true);
     expect(state.bookings).toHaveLength(0);
     expect(state.suspensions).toHaveLength(0);
     expect(state.growthLog).toHaveLength(0);

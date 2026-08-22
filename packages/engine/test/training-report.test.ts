@@ -118,7 +118,9 @@ describe("결과는 훈련 날짜별로 남는다", () => {
     );
 
     // 판정은 마지막 날 한 번 돌았지만 기록은 세 날에 나뉜다
-    const dates = new Set(state.growthLog.filter((g) => g.note === "훈련 결산").map((g) => g.date));
+    const dates = new Set(
+      state.growthLog.filter((g) => g.origin === "training-settlement").map((g) => g.date),
+    );
     expect(dates.size, "결과가 하루에 몰렸다").toBeGreaterThan(1);
     for (const d of dates) expect(days).toContain(d);
   });
@@ -130,7 +132,7 @@ describe("결과는 훈련 날짜별로 남는다", () => {
     applyTrainingOutcomes(state, brief, [
       { playerId: target.playerId, tacticGain: 1, attribute: null, note: "", date: "1999-01-01" },
     ]);
-    const logged = state.growthLog.filter((g) => g.note === "훈련 결산");
+    const logged = state.growthLog.filter((g) => g.origin === "training-settlement");
     expect(logged.length).toBeGreaterThan(0);
     for (const g of logged) {
       expect(brief.sessions.map((x) => x.date)).toContain(g.date);
@@ -367,7 +369,8 @@ describe("한 결산은 장부를 한 번만 움직인다", () => {
 
     expect(player.attributes.stamina, "같은 선수가 능력치를 두 번 가져갔다").toBe(61);
     const logged = state.growthLog.filter(
-      (g) => g.gamePlayerId === target && g.target === "tactical" && g.note === "훈련 결산",
+      (g) =>
+        g.gamePlayerId === target && g.target === "tactical" && g.origin === "training-settlement",
     );
     expect(logged, "적응도가 행 수만큼 쌓였다").toHaveLength(1);
   });

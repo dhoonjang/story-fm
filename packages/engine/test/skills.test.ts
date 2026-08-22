@@ -29,6 +29,7 @@ import {
   movePlayerSlot,
   moraleToForm,
   playerById,
+  pushNarrative,
   recordEdit,
   occupiesSquadList,
   isHomegrownFor,
@@ -1257,6 +1258,29 @@ describe("서사 이벤트 — 체력·폼만, 한도 내 (overview §7)", () =>
     // 날이 바뀌면 다시 세 번이 열린다 — 한도의 단위는 하루다
     state.date = addDays(state.date, 1);
     expect(fire().ok).toBe(true);
+  });
+
+  /**
+   * 한도를 세는 열쇠는 **갈래**다 (records.ts `NarrativeKind`). 접두 문장으로
+   * 가르던 자리라, 문구를 다듬는 것만으로 상한이 사라지던 판정이다
+   * (overview.md §1 철칙 4).
+   */
+  it("한도는 문구가 아니라 갈래로 센다", () => {
+    const state = createTestGame();
+    const player = userPlayers(state)[0]!;
+    const fire = () => applyNarrativeEvent(state, { playerIds: [player.id], note: "장면" });
+    expect(fire().ok).toBe(true);
+
+    const line = state.narrative[state.narrative.length - 1]!;
+    expect(line.kind, "갈래 없이 적혔다").toBe("gm-event");
+    expect(line.text, "문구에 표식이 박혔다").toBe("장면");
+
+    // 같은 날의 다른 갈래는 한도에 안 든다 — 경기·이적 줄이 서사 이벤트를 막지 않는다
+    pushNarrative(state, "리그 3연승", 3, "match");
+    pushNarrative(state, "갈래를 모르는 옛 줄", 3);
+    expect(fire().ok).toBe(true);
+    expect(fire().ok).toBe(true);
+    expect(fire().ok, "네 번째가 통과했다").toBe(false);
   });
 
   it("폼은 −1/0/+1 단계로만 말하고 코어가 0.12씩 옮긴다", () => {

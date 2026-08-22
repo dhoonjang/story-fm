@@ -233,7 +233,7 @@ export function applyMatchAttributes(
       spent,
       cap: MATCH_ATTR_CAP,
       source: "match",
-      note: "경기 결산",
+      origin: "match-settlement",
     });
     if (!moved) continue;
     spent += 1;

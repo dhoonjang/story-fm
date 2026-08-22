@@ -511,10 +511,15 @@ describe("풀 시즌 통합 — 리그 완주 후 커리어 기록·전환", () 
     const board = record.board!;
     expect(board.position).toBe(record.position);
     expect(board.grade).toBe(record.position <= board.target ? "met" : "missed");
-    // 우승했다면 트로피에 당시 팀이 남는다
+    /**
+     * 우승했다면 트로피에 당시 팀이 남는다 — **대회는 id로** 적힌다 (career.md §6).
+     * 표시 이름을 박으면 어드민이 대회 이름을 고친 뒤의 우승이 보관함에 다른 대회로
+     * 서고, id가 없으니 되돌릴 길도 없다.
+     */
     if (record.position === 1) {
       const trophy = state.trophies.find((t) => t.season === 1);
-      expect(trophy?.competition).toBe("프리미어리그");
+      expect(trophy?.competitionId).toBe("epl");
+      expect(trophy?.competition, "장부에 표시 이름을 적었다").toBeUndefined();
       expect(trophy?.teamId).toBe("arsenal");
     }
   }, 30_000);
