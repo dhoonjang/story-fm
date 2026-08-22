@@ -5,6 +5,7 @@ export * from "./directives";
 export * from "./key-points";
 export * from "./exploits";
 export * from "./match-ledger";
+export * from "./segment";
 export * from "./tactical-counters";
 export * from "./stamina";
 export * from "./match-engine";

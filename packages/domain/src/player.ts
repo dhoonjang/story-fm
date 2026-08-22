@@ -174,9 +174,13 @@ export const HeightSchema = z.number().int().min(150).max(215);
 export const WeightSchema = z.number().int().min(50).max(120);
 
 /**
- * 부상 성향 배수의 천장 — 1.0이 평균이고, 여기 닿으면 유리몸 중의 유리몸이다.
+ * 부상 성향 배수의 바닥과 천장 — 1.0이 평균, 천장에 닿으면 동료의 2.2배로 다친다.
+ *
+ * ⚠️ **세이브 스키마의 범위와 엔진의 클램프가 같은 값을 읽는다** (`clampProneness`).
+ * 코어가 절대 만들지 않는 값을 스키마가 받아들이면 천장이 두 개가 된다.
  */
-export const INJURY_PRONENESS_MAX = 5;
+export const INJURY_PRONENESS_MIN = 0.55;
+export const INJURY_PRONENESS_MAX = 2.2;
 
 /** 체격 한 줄 — "188cm · 82kg" */
 export function physiqueLabel(height?: number, weight?: number): string {
@@ -1637,7 +1641,7 @@ export const PlayerStateSchema = z.object({
    *
    * 옛 세이브엔 없다 — 없으면 1.0(`PRONENESS_BASE`)으로 읽고 버전을 올리지 않는다.
    */
-  injuryProneness: z.number().min(0).max(INJURY_PRONENESS_MAX).optional(),
+  injuryProneness: z.number().min(INJURY_PRONENESS_MIN).max(INJURY_PRONENESS_MAX).optional(),
   /**
    * **맥락을 읽고 다시 쓴 심경 한 줄** — 코어 앵커(`describeMood`) 위에 얹힌다.
    *

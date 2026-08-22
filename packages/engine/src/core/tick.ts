@@ -1,6 +1,5 @@
 import type { GamePlayer, MatchRecord, ScheduleEntry, TrainingSession } from "@story-fm/domain";
 import {
-  AI_MANAGER_RATING_FALLBACK,
   FAMILIARITY_BASELINE,
   clampCondition,
   isReserveMatch,
@@ -69,6 +68,7 @@ import {
   runMedicals,
 } from "../market/negotiation";
 import { playedIn, quickSimulate, type SimSquad } from "../match/quick-sim";
+import { managerTacticsOf } from "../match/manager-tactics";
 import { recordCard } from "../match/discipline";
 import { runAiTransfers } from "../market/ai-market";
 import { reviewUserSeat, runManagerMarket } from "../market/manager-market";
@@ -670,14 +670,6 @@ function boardSlotOf(state: GameState, player: GamePlayer) {
     proficiency: proficiencyAt(player, position),
     familiarity: assignment?.familiarity ?? FAMILIARITY_BASELINE,
   };
-}
-
-/** 이 팀을 이끄는 사람의 전술 눈금 — 감독 팀이면 감독 본인, 아니면 AI 감독 */
-function managerTacticsOf(state: GameState, teamId: string): number {
-  return teamId === managedTeamId(state)
-    ? state.manager.attributes.tactics
-    : (state.teams.find((team) => team.id === teamId)?.aiManagerTacticsRating ??
-        AI_MANAGER_RATING_FALLBACK);
 }
 
 /**

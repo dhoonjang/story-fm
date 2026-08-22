@@ -24,10 +24,13 @@ import {
   subCauseText,
 } from "@story-fm/domain";
 import {
+  accumulateFatigue,
   applyEvents,
   buildStrengthPacket,
   createLedger,
   describeLedger,
+  makeRng,
+  mergeSubstitutions,
   planAiSubstitution,
   simulateSegment,
   type MatchLedgerState,
@@ -136,22 +139,6 @@ const squadOf = (side: z.infer<typeof SideSchema>, s: { onPitch: string[]; bench
   bench: s.bench.map((id) => byId.get(id)!).filter(Boolean),
 });
 const seed = Number(flag("seed") ?? 42);
-/** mulberry32 — 엔진의 `makeRng`와 같은 알고리즘 (CLI는 엔진에 의존하지 않는다) */
-function makeRng(base: number, channel: string): () => number {
-  let h = 2166136261;
-  for (let i = 0; i < channel.length; i++) {
-    h ^= channel.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  let a = (base ^ (h >>> 0)) >>> 0;
-  return () => {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 let segmentIndex = 0;
 const matchFatigue: Record<string, number> = {};
 /** 구간 시뮬의 연속 시계 — 장부의 정수 분이 잘라 버린 소수 자리를 다음 구간에 잇는다 */
@@ -174,14 +161,13 @@ function runSegment(): { note: string; stop: string } {
   });
   matchClock = plan.clock;
   const aiSubs = planAiSubstitution("away", squads.away, ledger, plan, rng);
-  const events: MatchEvent[] = [...aiSubs, ...plan.events];
+  // 끼우는 순서는 엔진과 한 벌이다 (sim/segment.ts) — 부상 교체만 사건 뒤에 선다
+  const events: MatchEvent[] = mergeSubstitutions(plan.events, aiSubs);
   const result = applyEvents(ledger, events);
   if (!result.ok) return { note: `[진행 실패] ${result.errors.join(" / ")}`, stop: plan.stop };
   ledger = result.state;
   segmentIndex += 1;
-  for (const [id, add] of Object.entries(plan.fatigue)) {
-    matchFatigue[id] = Math.min(100, (matchFatigue[id] ?? 0) + add);
-  }
+  accumulateFatigue(matchFatigue, plan.fatigue);
   return {
     note: buildSegmentMessage(events, plan.stop, nameOf, (side) =>
       side === "home" ? names.home : names.away,
