@@ -129,7 +129,11 @@ export function domesticStageMatches(
     .sort((a, b) => pairOf(a) - pairOf(b) || a.round - b.round);
 }
 
-/** 이 컵의 참가 클럽 — 그 나라 1부 + 2부 전체 (카탈로그가 32팀으로 맞춰져 있다) */
+/**
+ * 이 컵의 참가 **명단** — 그 나라 1부 + 2부 전체 (카탈로그가 32팀으로 맞춰져 있다).
+ * 시드 진입 라운드가 있는 대회는 이 중 누가 실제로 뛰는지를 `domesticCupField`가
+ * 가른다 — 32라는 수는 대회 성립의 불변식이라 여기서 줄이지 않는다.
+ */
 export function domesticCupEntrants(cupId: string): string[] {
   const cup = domesticCupById(cupId);
   if (!cup) return [];
@@ -216,6 +220,15 @@ export function userStillIn(state: GameState, cupId: string): boolean {
     if (domesticStageMatches(state, cupId, stage).length > 0) latest = stage;
   }
   if (latest === null) return true; // 아직 시작 전 — 전 클럽이 나간다
+  // 시드는 진입 라운드 전까지 대진에 없어도 살아 있다 (§3.2-1)
+  const cup = domesticCupById(cupId);
+  if (
+    cup?.seedEntry &&
+    DOMESTIC_STAGES.indexOf(latest) < DOMESTIC_STAGES.indexOf(cup.seedEntry.stage) &&
+    domesticCupField(state, cup).seeds.includes(state.userTeamId)
+  ) {
+    return true;
+  }
   const matches = domesticStageMatches(state, cupId, latest);
   const ours = matches.find(
     (m) => m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId,
@@ -613,30 +626,108 @@ function shuffled<T>(items: readonly T[], seed: number, channel: string): T[] {
 }
 
 /**
- * 대진표 확정형(코파 이탈리아)의 1라운드 자리 배치 — 시드 8팀을 브래킷에 흩는다.
- *
- * 실제 코파 이탈리아는 직전 시즌 상위 8팀을 시드로 두고 대진표를 미리 확정한다
- * (인테르·로마·피오렌티나·나폴리가 한쪽, 볼로냐·라치오·유베·아탈란타가 반대쪽).
- * 16대진 토너먼트에서 시드가 8강 전에 만나지 않으려면 이 자리들에 앉혀야 한다.
+ * 브래킷 시딩 순서 — `order[대진] = 그 대진에 앉는 서열`. 8대진이면
+ * [0,7,3,4,1,6,2,5] (1·8·4·5·2·7·3·6) — 상위 둘이 결승 전에 만나지 않는 표준 배치다.
  */
-const SEED_SLOTS = [0, 15, 8, 7, 4, 11, 12, 3];
+function bracketSeedOrder(pairCount: number): number[] {
+  let order = [0];
+  while (order.length < pairCount) {
+    const size = order.length * 2;
+    order = order.flatMap((s) => [s, size - 1 - s]);
+  }
+  return order;
+}
 
+/** 시드 진입 라운드의 정원 — 32강이 32, 16강이 16 … 단계 index가 반씩 줄인다 */
+function stageTeamCount(stage: MatchStage): number {
+  return DOMESTIC_CUP_SIZE >> DOMESTIC_STAGES.indexOf(stage);
+}
+
+export interface DomesticCupField {
+  /** 진입 라운드부터 합류하는 시드 — 전력 서열 상위 `seedEntry.count` */
+  seeds: string[];
+  /** 첫 라운드를 실제로 뛰는 클럽 */
+  opening: string[];
+  /** 모델 밖 앞 라운드에서 탈락 처리된 클럽 — 경기도 상금도 없다 */
+  eliminated: string[];
+}
+
+/**
+ * 참가 명단 32를 시드·첫 라운드·앞 라운드 탈락으로 가른다 (competition.md §3.2-1).
+ *
+ * 시드가 `count`자리를 진입 라운드에서 갖으므로 첫 라운드는
+ * `2 × (진입 라운드 정원 − count)`팀이고, 명단에서 정확히 `count`팀이 남아
+ * 앞 라운드 탈락으로 처리된다. 1부 비시드는 전원 직행(실제 세리에 A 9~20위가
+ * primo turno를 뛴다), 남는 자리는 2부의 시드 셔플 추첨이다.
+ *
+ * **감독 구단은 추첨에서 밀려나지 않는다** — 앞 라운드 추상화는 배경 클럽의
+ * 것이고, 감독의 컵은 경기로 치른다.
+ */
+export function domesticCupField(state: GameState, cup: DomesticCupEntry): DomesticCupField {
+  const entrants = domesticCupEntrants(cup.id);
+  const entry = cup.seedEntry;
+  if (!entry) return { seeds: [], opening: entrants, eliminated: [] };
+  const byStrength = [...entrants].sort((a, b) => rankOf(state, a) - rankOf(state, b));
+  const seeds = byStrength.slice(0, entry.count);
+  const rest = byStrength.slice(entry.count);
+  const openingSize = 2 * (stageTeamCount(entry.stage) - entry.count);
+  const direct = new Set(rest.filter((id) => isTopFlightIn(state, id)).slice(0, openingSize));
+  const pool = rest.filter((id) => !direct.has(id));
+  const slots = openingSize - direct.size;
+  const drawn = shuffled(pool, state.seed, `cupprelim:${cup.id}:${state.season}`).slice(0, slots);
+  if (slots > 0 && pool.includes(state.userTeamId) && !drawn.includes(state.userTeamId)) {
+    drawn[drawn.length - 1] = state.userTeamId;
+  }
+  const survives = new Set(drawn);
+  const opening = rest.filter((id) => direct.has(id) || survives.has(id));
+  return { seeds, opening, eliminated: rest.filter((id) => !direct.has(id) && !survives.has(id)) };
+}
+
+/**
+ * 대진표 확정형(코파 이탈리아)의 첫 라운드 자리 배치 — 강한 절반을 브래킷 시딩
+ * 순서로 흩는다. 실제 tabellone도 서열대로 자리를 미리 배정해 상위끼리 늦게
+ * 만난다. 각 대진의 앞자리가 강한 쪽이고, 약한 절반은 시드 셔플로 상대를 정한다.
+ */
 function seededBracket(state: GameState, cup: DomesticCupEntry, teams: string[]): string[] {
   const byStrength = [...teams].sort((a, b) => rankOf(state, a) - rankOf(state, b));
-  const seeds = byStrength.slice(0, SEED_SLOTS.length);
-  const rest = shuffled(
-    byStrength.slice(SEED_SLOTS.length),
+  const pairCount = Math.floor(teams.length / 2);
+  const strong = byStrength.slice(0, pairCount);
+  const weak = shuffled(
+    byStrength.slice(pairCount),
     state.seed,
     `cupbracket:${cup.id}:${state.season}`,
   );
-  // 시드는 각자의 대진에서 홈(앞자리), 나머지는 남은 자리를 차례로 채운다
-  const order: Array<string | null> = new Array(teams.length).fill(null);
-  seeds.forEach((id, i) => {
-    order[SEED_SLOTS[i]! * 2] = id;
+  const order: string[] = [];
+  bracketSeedOrder(pairCount).forEach((rank, tie) => {
+    order[tie * 2] = strong[rank]!;
+    order[tie * 2 + 1] = weak[tie]!;
+  });
+  return order;
+}
+
+/**
+ * 시드 진입 라운드의 대진 — 시드가 브래킷 시딩 순서로 흩어져 직전 라운드 승자와
+ * 만난다 (competition.md §3.2-1). 라운드별 추첨 대회라면 어차피 뒤에서 셔플되므로
+ * 합치기만 한다. 진입 라운드가 아니면 승자 목록 그대로다.
+ */
+function withSeedEntrants(
+  state: GameState,
+  cup: DomesticCupEntry,
+  stage: MatchStage,
+  winners: string[],
+): string[] {
+  const entry = cup.seedEntry;
+  if (!entry || entry.stage !== stage) return winners;
+  const seeds = domesticCupField(state, cup).seeds;
+  if (cup.drawStyle !== "fixed-bracket") return [...seeds, ...winners];
+  const pairCount = (seeds.length + winners.length) / 2;
+  const order: Array<string | null> = new Array(pairCount * 2).fill(null);
+  bracketSeedOrder(pairCount).forEach((rank, tie) => {
+    if (rank < seeds.length) order[tie * 2] = seeds[rank]!;
   });
   let next = 0;
   for (let slot = 0; slot < order.length; slot++) {
-    if (order[slot] === null) order[slot] = rest[next++]!;
+    if (order[slot] === null) order[slot] = winners[next++]!;
   }
   return order as string[];
 }
@@ -855,7 +946,8 @@ export function advanceDomesticCups(state: GameState, digest: string[]): void {
       const existing = domesticStageMatches(state, cup.id, stage);
       if (existing.length === 0) {
         if (i === 0) {
-          // 1라운드 — 실제 대회의 추첨일에 그 나라 전 클럽으로 뽑는다
+          // 1라운드 — 실제 대회의 추첨일에 뽑는다. 명단은 전 클럽이지만 실제로
+          // 뛰는 필드는 시드·앞 라운드 탈락을 가른 뒤의 것이다 (§3.2-1)
           const entrants = domesticCupEntrants(cup.id);
           scheduleDraw(
             state,
@@ -865,13 +957,19 @@ export function advanceDomesticCups(state: GameState, digest: string[]): void {
             entrants.includes(state.userTeamId),
           );
           if (!drawIsDue(state, cup.id, stage)) break;
-          createStage(state, cup, stage, entrants, digest);
+          createStage(state, cup, stage, domesticCupField(state, cup).opening, digest);
         } else {
           if (!previousWinners || previousWinners.length < 2) break;
           // 추첨일은 직전 라운드를 편성할 때 이미 잡혀 있다 (없으면 추첨 없는 단계)
           if (drawEntryOf(state, cup.id, stage) && !drawIsDue(state, cup.id, stage)) break;
           reportOurTie(state, cup, DOMESTIC_STAGES[i - 1]!, previousWinners, digest);
-          createStage(state, cup, stage, previousWinners, digest);
+          createStage(
+            state,
+            cup,
+            stage,
+            withSeedEntrants(state, cup, stage, previousWinners),
+            digest,
+          );
         }
         completeDraw(state, cup.id, stage);
         break; // 한 번에 한 단계만 — 다음 단계는 이 단계가 끝난 뒤
@@ -907,6 +1005,14 @@ export function advanceDomesticCups(state: GameState, digest: string[]): void {
 function securedStage(state: GameState, cup: DomesticCupEntry): MatchStage | null {
   const next = DOMESTIC_STAGES.find((s) => domesticStageMatches(state, cup.id, s).length === 0);
   if (!next) return null; // 결승까지 다 추첨됐다
+  // 시드의 첫 자리는 규정이 확보해 둔 진입 라운드다 — 그 전 라운드는 시드의 것이 아니다
+  if (
+    cup.seedEntry &&
+    DOMESTIC_STAGES.indexOf(next) <= DOMESTIC_STAGES.indexOf(cup.seedEntry.stage) &&
+    domesticCupField(state, cup).seeds.includes(state.userTeamId)
+  ) {
+    return cup.seedEntry.stage;
+  }
   const prevIdx = DOMESTIC_STAGES.indexOf(next) - 1;
   if (prevIdx < 0) return next; // 1라운드 — 전 클럽 참가
   const prev = DOMESTIC_STAGES[prevIdx]!;

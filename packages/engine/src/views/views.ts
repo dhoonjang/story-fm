@@ -57,7 +57,7 @@ import {
 } from "../data/cup-catalog";
 import { isFriendly } from "../competition/friendly";
 import { DOMESTIC_STAGES, domesticCupById } from "../data/domestic-cup-catalog";
-import { domesticCupsOf } from "../competition/domestic-cup";
+import { domesticCupsOf, userStillIn } from "../competition/domestic-cup";
 import { drawParts, drawTitle } from "../competition/draw-schedule";
 import { euroCompetitionOf } from "../competition/europe";
 import { formAngle, formLabel, formTone } from "../squad/form";
@@ -1737,6 +1737,14 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
     state.pendingMatch?.matchId ?? null,
   );
   const bracket = cup ? buildBracket(state, competitionId) : [];
+  const progress = cupProgressOf(bracket);
+  // 시드는 진입 라운드 전까지 대진에 없어도 탈락이 아니다 — 아직 안 뽑힌 것으로 읽는다
+  const cupProgress =
+    progress.outcome === "out" &&
+    domesticCupById(competitionId) !== null &&
+    userStillIn(state, competitionId)
+      ? { stage: null, outcome: "undrawn" as const }
+      : progress;
   return {
     id: competitionId,
     name: competitionName(competitionId),
@@ -1748,7 +1756,7 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
     nextMatch: nextOurs ? nextMatchView(state, nextOurs, roundLabelOf(nextOurs)) : null,
     rounds,
     bracket,
-    cupProgress: cupProgressOf(bracket),
+    cupProgress,
     // 통과 경계선은 리그 페이즈가 있는 대항전에만 있다 (국내 컵은 순위표가 없다)
     europe: isEuroCup(competitionId) ? buildEuropeView(state, competitionId) : null,
   };

@@ -17,6 +17,7 @@ import {
   diffDays,
   domesticChampion,
   domesticCupEntrants,
+  domesticCupField,
   domesticCupWinners,
   domesticCupsOf,
   domesticStageLabel,
@@ -491,12 +492,56 @@ describe("컵은 1부가 들어오는 라운드에서 시작한다", () => {
     expect(ours.every((m) => m.date >= first.date)).toBe(true);
   }, 30_000);
 
-  it("모든 1부 클럽이 같은 라운드에서 시작한다 — 부전승도 예선도 없다", () => {
+  it("첫 라운드가 부전승 없이 꽉 찬다 — 시드 진입 대회만 정원이 절반이다", () => {
     const state = seasonOf(7);
     for (const cup of domesticCupCatalog()) {
       const opening = domesticStageMatches(state, cup.id, "r32");
       const teams = new Set(opening.flatMap((m) => [m.homeTeamId, m.awayTeamId]));
-      expect(teams.size, `${cup.id} 첫 라운드 참가`).toBe(DOMESTIC_CUP_SIZE);
+      // 시드가 진입 라운드 정원에서 자리를 갖는 만큼 첫 라운드가 준다 (§3.2-1의 산수)
+      const expected = cup.seedEntry
+        ? 2 *
+          (DOMESTIC_CUP_SIZE / 2 ** DOMESTIC_STAGES.indexOf(cup.seedEntry.stage) -
+            cup.seedEntry.count)
+        : DOMESTIC_CUP_SIZE;
+      expect(teams.size, `${cup.id} 첫 라운드 참가`).toBe(expected);
+    }
+  }, 30_000);
+
+  /**
+   * **불변식 — 시드는 자기 진입 라운드 전에 대진표에 등장하지 않는다** (#351).
+   *
+   * 코파 이탈리아 시드 8팀은 실제로 16강(ottavi)부터 나온다. 명단 32는 시드 8 ·
+   * 1라운드 16 · 앞 라운드 탈락 8로 갈리고, 16강의 여덟 대진은 전부 시드 대
+   * 1라운드 승자다 (competition.md §3.2-1).
+   */
+  it("코파 이탈리아 시드 8팀은 16강부터다 — 진입 라운드 전엔 대진표에 없다", () => {
+    const state = seasonOf(7);
+    const coppa = domesticCupCatalog().find((c) => c.id === "coppaitalia")!;
+    const field = domesticCupField(state, coppa);
+    expect(field.seeds).toHaveLength(8);
+    expect(field.opening).toHaveLength(16);
+    expect(field.eliminated).toHaveLength(8);
+    const roster = [...field.seeds, ...field.opening, ...field.eliminated];
+    expect(new Set(roster).size).toBe(DOMESTIC_CUP_SIZE);
+    // 시드는 전원 1부(전력 서열 상위 8), 탈락 처리는 전원 2부다
+    for (const id of field.seeds) expect(isTopFlight(id), id).toBe(true);
+    for (const id of field.eliminated) expect(isTopFlight(id), id).toBe(false);
+
+    const opening = new Set(
+      domesticStageMatches(state, coppa.id, "r32").flatMap((m) => [m.homeTeamId, m.awayTeamId]),
+    );
+    for (const id of field.seeds)
+      expect(opening.has(id), `시드 ${id}가 1라운드에 있다`).toBe(false);
+    for (const id of field.eliminated) {
+      expect(opening.has(id), `탈락 처리된 ${id}가 1라운드에 있다`).toBe(false);
+    }
+    // 16강 = 시드 8 + 1라운드 승자 8 — 대진마다 시드가 정확히 하나다
+    const r16 = domesticStageMatches(state, coppa.id, "r16").filter((m) => m.round === 1);
+    expect(r16).toHaveLength(8);
+    for (const m of r16) {
+      const seeded = [m.homeTeamId, m.awayTeamId].filter((id) => field.seeds.includes(id));
+      expect(seeded, `${m.id} 시드 수`).toHaveLength(1);
+      expect(opening.has(seeded[0] === m.homeTeamId ? m.awayTeamId : m.homeTeamId)).toBe(true);
     }
   }, 30_000);
 });

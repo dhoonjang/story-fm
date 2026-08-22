@@ -2,7 +2,11 @@ import type { TeamCatalogEntry } from "../data/team-catalog";
 import type { LeagueCatalogEntry } from "../data/league-catalog";
 import type { CupCatalogEntry } from "../data/cup-catalog";
 import { knockoutBracketSize } from "../data/cup-catalog";
-import { DOMESTIC_CUP_SIZE, type DomesticCupEntry } from "../data/domestic-cup-catalog";
+import {
+  DOMESTIC_CUP_SIZE,
+  DOMESTIC_STAGES,
+  type DomesticCupEntry,
+} from "../data/domestic-cup-catalog";
 
 /**
  * 카탈로그 불변식 — **새 게임이 시작할 수 있는가**를 저장 전에 묻는다.
@@ -142,8 +146,31 @@ export function checkEuroCupInvariants(
 }
 
 export function checkDomesticCupInvariants(cups: readonly DomesticCupEntry[]): string[] {
+  const problems: string[] = [];
   const duplicated = cups.filter((c, i) => cups.findIndex((x) => x.id === c.id) !== i);
-  return duplicated.map((cup) => `국내 컵 id가 중복됩니다: ${cup.id}`);
+  for (const cup of duplicated) problems.push(`국내 컵 id가 중복됩니다: ${cup.id}`);
+
+  /**
+   * 시드 진입 라운드의 산수 (competition.md §3.2-1·§7) — 첫 라운드 뒤·결승 앞이고,
+   * 시드 수는 정원의 절반 이하여야 시드가 진입 라운드에서 서로 만나지 않는다.
+   * 어긋나면 시드가 앉을 자리가 없거나 앞 라운드가 비어 결승이 만들어지지 않는다.
+   */
+  for (const cup of cups) {
+    const entry = cup.seedEntry;
+    if (!entry) continue;
+    const stageIdx = DOMESTIC_STAGES.indexOf(entry.stage);
+    if (stageIdx < 1 || entry.stage === "final") {
+      problems.push(`${cup.name}: 시드 진입 라운드는 첫 라운드 뒤·결승 앞이어야 합니다`);
+      continue;
+    }
+    const capacity = DOMESTIC_CUP_SIZE >> stageIdx;
+    if (!Number.isInteger(entry.count) || entry.count < 1 || entry.count > capacity / 2) {
+      problems.push(
+        `${cup.name}: 시드 수는 1 이상, 진입 라운드 정원의 절반(${capacity / 2}) 이하여야 합니다 (지금 ${entry.count})`,
+      );
+    }
+  }
+  return problems;
 }
 
 /** 세 층을 한 번에 — 팀·리그가 함께 바뀌는 편집(팀 이동·리그 삭제)의 관문 */
