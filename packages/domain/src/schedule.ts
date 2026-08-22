@@ -254,9 +254,9 @@ export function isReserveMatch(match: Pick<MatchRecord, "competitionId">): boole
 }
 
 /**
- * 훈련 효과 대상 — 능력치 15축 + 전술 적응도(tactical) + 회복(recovery).
+ * 훈련 효과 대상 — 능력치 16축 + 전술 적응도(tactical) + 회복(recovery).
  * GM(LLM)이 자연어 훈련을 이 focus 목록으로 해석하고, 코어가 효과를 준다.
- * (15축이므로 "측면 크로스 반복" → kicking·passing 처럼 해상도가 올라간다)
+ * (16축이므로 "측면 크로스 반복" → kicking·passing 처럼 해상도가 올라간다)
  */
 export const TrainAttrSchema = z.enum([...ATTRIBUTE_AXES, "tactical", "recovery"]);
 export type TrainAttr = z.infer<typeof TrainAttrSchema>;

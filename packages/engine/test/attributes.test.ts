@@ -4,12 +4,15 @@ import {
   AXIS_GROUPS,
   FLOOR_WEIGHT,
   POSITION_WEIGHTS,
+  SLOT_ATTACK_SHARE,
+  SPLIT_TILT,
   bestOverall,
   defaultRoleOf,
   naturalPositionOf,
   roleFit,
   roleWeights,
   rolesFor,
+  splitPositioning,
   weightSlotOf,
   type WeightSlot,
 } from "@story-fm/domain";
@@ -34,23 +37,23 @@ import {
 } from "../src/world/synthesis";
 
 /**
- * 능력치 15축 · 포지션 가중치 · 노화 곡선 (player.md §1·§2·§6).
+ * 능력치 16축 · 포지션 가중치 · 노화 곡선 (player.md §1·§2·§6).
  * 관측 가능성(§9)은 scouting.test.ts가 다룬다.
  */
 
-describe("15축 구성", () => {
-  it("축 묶음이 15축을 빠짐없이·중복 없이 덮는다", () => {
+describe("16축 구성", () => {
+  it("축 묶음이 16축을 빠짐없이·중복 없이 덮는다", () => {
     const grouped = Object.values(AXIS_GROUPS).flat();
     expect(new Set(grouped).size).toBe(ATTRIBUTE_AXES.length);
     expect([...grouped].sort()).toEqual([...ATTRIBUTE_AXES].sort());
   });
 
-  it("실측 7축 + 파생 8축 = 15축 (데이터 부채 목록이 정확하다)", () => {
+  it("실측 7축 + 파생 9축 = 16축 (데이터 부채 목록이 정확하다)", () => {
     expect(SEEDED_AXES.length + DERIVED_AXES.length).toBe(ATTRIBUTE_AXES.length);
     expect([...SEEDED_AXES, ...DERIVED_AXES].sort()).toEqual([...ATTRIBUTE_AXES].sort());
   });
 
-  it("전 선수가 15축 전부를 유효 범위로 갖는다 — 포지션 예외 분기 없음", () => {
+  it("전 선수가 16축 전부를 유효 범위로 갖는다 — 포지션 예외 분기 없음", () => {
     for (const e of playerCatalog()) {
       for (const axis of ATTRIBUTE_AXES) {
         expect(e[axis], `${e.nameEn}.${axis}`).toBeGreaterThanOrEqual(1);
@@ -62,7 +65,7 @@ describe("15축 구성", () => {
 
 describe("파생 축이 실측 축과 같은 눈금에 있다", () => {
   /**
-   * 파생 8축은 6축에서 만들어내므로 **눈금이 어긋나기 쉽다**. 실제로 composure가
+   * 파생 9축은 6축에서 만들어내므로 **눈금이 어긋나기 쉽다**. 실제로 composure가
    * 평균 14, aggression이 10 낮게 깔려 있었고, 그게 가중평균인 `overall`을 통째로
    * 끌어내려 EA 공개 등급 대비 −2.5로 벌어졌다 (전수 대조로 잡았다).
    *
@@ -119,19 +122,72 @@ describe("파생 축이 실측 축과 같은 눈금에 있다", () => {
   it("자리별로도 특정 축이 통째로 낮게 깔리지 않는다", () => {
     // **아래쪽만** 본다. 위로 벌어지는 건 자리의 성격이라 정상이다 —
     // 센터백의 공중볼은 그 선수의 스피드·마무리보다 당연히 높다.
+    //
+    // 위치선정·침투는 **짝으로** 본다. 둘은 옛 한 값을 자리의 공격 지분으로 나눠
+    // 가진 것이라(player.md §13.5), 윙어의 수비 위치선정이 낮은 것은 눈금이 어긋난
+    // 게 아니라 그 축의 뜻이다 — 되섞은 밑값이 낮게 깔릴 때만 파생이 흐른 것이다.
+    const blend = (e: (typeof real)[number], slot: WeightSlot) =>
+      e.positioning * (1 - SLOT_ATTACK_SHARE[slot]) + e.offTheBall * SLOT_ATTACK_SHARE[slot];
     for (const axis of DERIVED_AXES) {
       if (axis === "leadership") continue;
+      if (axis === "offTheBall") continue; // positioning 쪽에서 짝으로 잰다
       for (const slot of new Set(real.map((e) => weightSlotOf(naturalPositionOf(e).position)))) {
         if (slot === "GK") continue; // GK는 필드 축이 의도적으로 낮다
         const inSlot = real.filter((e) => weightSlotOf(naturalPositionOf(e).position) === slot);
         const own = mean(
           inSlot.flatMap((e) => SEEDED_AXES.filter((a) => a !== "goalkeeping").map((a) => e[a])),
         );
-        const got = mean(inSlot.map((e) => e[axis]));
+        const got =
+          axis === "positioning"
+            ? mean(inSlot.map((e) => blend(e, slot)))
+            : mean(inSlot.map((e) => e[axis]));
         expect(got, `${slot}.${axis} ${got.toFixed(1)} vs 실측 ${own.toFixed(1)}`).toBeGreaterThan(
           own - 12,
         );
       }
+    }
+  });
+
+  /**
+   * **기울임은 값을 만들지 않고 나눠 가진다** (player.md §13.5). 이 항등식이 깨지면
+   * 축을 나눈 것만으로 자리의 눈금이 통째로 움직인다 — 밸런스가 조용히 옮겨간다.
+   */
+  it("위치선정과 침투를 지분으로 되섞으면 옛 한 값이다", () => {
+    for (const slot of Object.keys(SLOT_ATTACK_SHARE) as WeightSlot[]) {
+      const share = SLOT_ATTACK_SHARE[slot];
+      for (const [tackling, finishing] of [
+        [80, 30],
+        [40, 78],
+        [65, 65],
+        [99, 1],
+      ]) {
+        const base = tackling! * (1 - share) + finishing! * share;
+        const split = splitPositioning(slot, base, tackling!, finishing!);
+        expect(
+          split.positioning * (1 - share) + split.offTheBall * share,
+          `${slot} 되섞음`,
+        ).toBeCloseTo(base, 9);
+        // 벌어지는 폭은 그 선수의 기울기가 정한다 — 0이면 나눈 적이 없는 것이다
+        expect(split.positioning - split.offTheBall, `${slot} 벌어짐`).toBeCloseTo(
+          (tackling! - finishing!) * SPLIT_TILT,
+          9,
+        );
+      }
+    }
+  });
+
+  /**
+   * 파생과 가중치가 **같은 지분**을 읽어야 두 축의 가중합이 갈리기 전과 같다.
+   * 표의 값은 0.05 눈금으로 떨어뜨린 것이라 그만큼의 어긋남만 남는다.
+   */
+  it("자리 가중치의 위치선정:침투 비가 그 자리의 공격 지분이다", () => {
+    for (const slot of Object.keys(SLOT_ATTACK_SHARE) as WeightSlot[]) {
+      const w = POSITION_WEIGHTS[slot];
+      const share = w.offTheBall / (w.positioning + w.offTheBall);
+      expect(share, `${slot} ${share.toFixed(3)} vs ${SLOT_ATTACK_SHARE[slot]}`).toBeCloseTo(
+        SLOT_ATTACK_SHARE[slot],
+        1,
+      );
     }
   });
 });
@@ -161,7 +217,7 @@ describe("포지션 가중치", () => {
         expect(Math.round(v * 20) / 20, `${slot}: ${v}는 0.05 눈금이 아니다`).toBe(v);
       }
       /**
-       * 15축이 세 값으로 뭉쳐 있으면 소수로 쓴 의미가 없다. **바닥 위에서** 센다 —
+       * 16축이 세 값으로 뭉쳐 있으면 소수로 쓴 의미가 없다. **바닥 위에서** 센다 —
        * 골키퍼는 지구력·결정력·태클처럼 정말 무관한 축이 일곱이라 다 바닥에 깔리고,
        * 그건 뭉친 게 아니라 그 자리의 사실이다.
        */
@@ -186,7 +242,7 @@ describe("포지션 가중치", () => {
     expect(new Set(fingerprints).size).toBe(fingerprints.length);
   });
 
-  it("어느 자리에도 가중치 0인 축이 없다 — 15축 전부가 조금씩은 전력에 닿는다", () => {
+  it("어느 자리에도 가중치 0인 축이 없다 — 16축 전부가 조금씩은 전력에 닿는다", () => {
     // 스트라이커의 태클도 전방 압박·역습 지연으로 쓰인다. 0으로 두면 태클 30인
     // 9번과 60인 9번이 완전히 같은 선수가 된다.
     for (const [slot, w] of Object.entries(POSITION_WEIGHTS)) {
@@ -408,7 +464,7 @@ describe("세부 역할 (FM 역할 체계)", () => {
 describe("종합(overall) — 가장 잘 맞는 자리 · 기본 역할", () => {
   it("종합은 그 선수 축의 범위 안에 있다 — 어느 자리·어느 역할에서도", () => {
     /**
-     * **이 불변식이 종합의 정의다** (player.md §4). 15축을 함께 펼쳐 놓은 화면에서
+     * **이 불변식이 종합의 정의다** (player.md §4). 16축을 함께 펼쳐 놓은 화면에서
      * 종합이 어느 축보다 높으면 감독은 계산이 틀렸다고 읽는다 — 실제로 그랬다:
      * 축 최대 92인 선수의 종합이 93으로 나왔고, 카탈로그 5,780명 중 52명이 그랬다.
      *
@@ -476,7 +532,7 @@ describe("overall 분포 — 밴드 의미가 유지된다", () => {
      *
      * 문턱이 90이 아니라 84인 이유: 종합이 축 가중 평균이라 90+는 구조적으로 비어
      * 있고(§4), 옛 90과 같은 인원 비율에 서는 값이 84다. `RATING_TIERS`의 라벨은
-     * 여기 따라오지 않는다 — 그 자는 15축에도 함께 걸려 있어 축의 눈금을 흔들 수
+     * 여기 따라오지 않는다 — 그 자는 16축에도 함께 걸려 있어 축의 눈금을 흔들 수
      * 없다 (player.md §10).
      */
     const real = playerCatalog()

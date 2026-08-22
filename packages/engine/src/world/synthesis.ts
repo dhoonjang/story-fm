@@ -386,11 +386,11 @@ function seedOf(raw: Record<SeedAxisName, number>, isGk: boolean): SeedAxes {
  * **체급 · 깊이 · 자리 · 나이만으로 한 사람을 세운다** (player.md §13).
  *
  * 네 단계다: 꼭대기(`squadApexOf`) → 깊이 낙차(`depthDropAt`)로 목표 종합 →
- * 자리 모양 + 개인 지문으로 6축 → `deriveAxes`가 낸 15축의 `bestOverall`이 목표에
+ * 자리 모양 + 개인 지문으로 6축 → `deriveAxes`가 낸 16축의 `bestOverall`이 목표에
  * 닿을 때까지 6축을 통째로 미는 되맞춤.
  *
- * 되맞춤이 필요한 것은 파생 8축이 비선형이기 때문이다 — 6축을 목표에 맞춰 놓아도
- * 종합은 15축에서 나오므로 자리마다 다른 편향이 남는다.
+ * 되맞춤이 필요한 것은 파생 9축이 비선형이기 때문이다 — 6축을 목표에 맞춰 놓아도
+ * 종합은 16축에서 나오므로 자리마다 다른 편향이 남는다.
  */
 export function synthesizeSeed(input: SynthesisInput): SynthesizedPlayer {
   const { key, tier, rank, positions, secondDivision = false } = input;

@@ -246,8 +246,8 @@ const TACTIC_AXIS_KEYS: readonly TacticAxisKey[] = TACTIC_AXES.map((axis) => axi
  * 곧 그 축에 익숙한 능력이다.
  */
 const AXIS_AFFINITY: Record<TacticAxisKey, { high: AttributeAxis[]; low: AttributeAxis[] }> = {
-  // 공격적 ↔ 수비적
-  mentality: { high: ["finishing", "dribbling"], low: ["tackling", "positioning"] },
+  // 공격적(들어가서 끝낸다) ↔ 수비적(자리를 지키고 끊는다)
+  mentality: { high: ["finishing", "dribbling", "offTheBall"], low: ["tackling", "positioning"] },
   // 높은 라인(뒷공간을 발로 덮는다) ↔ 내려선 수비(박스를 자리로 지킨다)
   defensiveLine: { high: ["pace", "aggression"], low: ["positioning", "aerial"] },
   // 맹렬한 압박(뛰고 물어야 한다) ↔ 자리 지키기(읽고 선다)

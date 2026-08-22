@@ -1450,7 +1450,7 @@ function instantiatePlayers(seed: number, only?: (teamId: string) => boolean): G
       ...(entry.height === undefined ? {} : { height: entry.height }),
       ...(entry.weight === undefined ? {} : { weight: entry.weight }),
       attributes: {
-        // 카탈로그의 15축을 그대로 복사 (2-레이어 분리 — 이후 변화는 GAME_PLAYER에만)
+        // 카탈로그의 16축을 그대로 복사 (2-레이어 분리 — 이후 변화는 GAME_PLAYER에만)
         ...(Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, entry[a]])) as AxisValues),
         overall: 50, // 아래 recomputeOverall이 주 포지션 가중치로 채운다
         potential: entry.potential,

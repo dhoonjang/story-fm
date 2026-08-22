@@ -766,9 +766,9 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
   expect(hereState.color).toBe(hereState.natural ? gold : hereState.foreign ? dim : silver);
   // 밑줄만이 "여기"를 말한다 — 그 밑줄은 강조색 두 번째 축이다
   expect(hereState.shadow).toContain(await token(page, "--accent-2"));
-  // 펼치면 15축이 전부 보이고, 체력이 왜 그런지 한 문장으로 설명한다
+  // 펼치면 16축이 전부 보이고, 체력이 왜 그런지 한 문장으로 설명한다
   await expect(page.getByTestId("player-mood")).not.toBeEmpty();
-  await expect(page.locator(".detail-row .pd-axis")).toHaveCount(15);
+  await expect(page.locator(".detail-row .pd-axis")).toHaveCount(16);
   // 명단은 사기·피로 두 열이 아니라 체력 한 열이다
   await expect(page.locator(".squad-table thead")).toContainText("체력");
   await expect(page.locator(".squad-table thead")).not.toContainText("사기");

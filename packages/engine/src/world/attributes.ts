@@ -1,12 +1,17 @@
 import type { AttributeAxis, AxisValues, WeightSlot } from "@story-fm/domain";
-import { normalizedLogCurve, weightSlotOf } from "@story-fm/domain";
+import {
+  normalizedLogCurve,
+  SLOT_ATTACK_SHARE,
+  splitPositioning,
+  weightSlotOf,
+} from "@story-fm/domain";
 import { hashOf } from "./name-hash";
 
 /**
- * 15축 파생 — 능력치 모델의 데이터 계층 (player.md §1 · §12).
+ * 16축 파생 — 능력치 모델의 데이터 계층 (player.md §1 · §12).
  *
- * 시드 데이터(epl-players.ts)는 EA FC 계열 **6축 + GK**만 갖는다. 15축 중 7축은
- * 1:1로 옮겨오고, 나머지 8축은 여기서 **결정적으로 파생**한다 (1단계).
+ * 시드 데이터(epl-players.ts)는 EA FC 계열 **6축 + GK**만 갖는다. 16축 중 7축은
+ * 1:1로 옮겨오고, 나머지 9축은 여기서 **결정적으로 파생**한다 (1단계).
  * 실측값은 별도 데이터 마일스톤에서 채워 파생값을 교체한다 (2단계).
  *
  * 파생 규칙은 두 가지를 지킨다.
@@ -15,13 +20,14 @@ import { hashOf } from "./name-hash";
  *    노이즈가 되고, 완전히 종속시키면 축을 늘린 의미가 없다. 그래서 상관 + 소폭 편차.
  */
 
-/** 시드에 실측이 없어 파생으로 채우는 8축 — 부채 목록 (2단계에서 비운다) */
+/** 시드에 실측이 없어 파생으로 채우는 9축 — 부채 목록 (2단계에서 비운다) */
 export const DERIVED_AXES: readonly AttributeAxis[] = [
   "stamina",
   "aerial",
   "kicking",
   "vision",
   "positioning",
+  "offTheBall",
   "composure",
   "aggression",
   "leadership",
@@ -74,7 +80,18 @@ export function derivedGoalkeeping(nameEn: string, physical: number): number {
 }
 
 /**
- * 시드 6축 + 자리 + 나이 → 15축.
+ * **골키퍼의 침투** — 뜻이 없는 축이라 낮게 깔린다. 화면에는 서므로 수준은 맞추되
+ * 전력 가중치가 바닥(0.05)이라 종합에는 닿지 않는다. 기울임 식(`splitPositioning`)
+ * 밖에 있는 이유는 골키퍼의 위치선정이 태클·결정력이 아니라 **골문 커맨드**라,
+ * 그 값을 기울이면 태클 낮은 골키퍼의 침투가 천장까지 밀려 올라가기 때문이다.
+ * 옛 세이브를 옮기는 자리도 같은 이 함수를 부른다 (`core/migrations.ts`).
+ */
+export function keeperOffTheBall(goalkeeping: number): number {
+  return goalkeeping * 0.28 + 9.5;
+}
+
+/**
+ * 시드 6축 + 자리 + 나이 → 16축.
  *
  * `age`는 카탈로그 기준일(CATALOG_AGE_REF) 나이다 — composure·leadership이
  * 나이와 상관을 갖기 때문에 필요하다. 성장·쇠퇴는 게임 중 별도 경로가 다룬다.
@@ -110,7 +127,7 @@ export function deriveAxes(
     ? goalkeeping
     : (pace + finishing + passing + dribbling + tackling + strength) / 6;
 
-  // ── 파생 8축 ──
+  // ── 파생 9축 ──
   // 패스가 지구력을 예측한다 — 중원 자원이 많이 뛰기 때문이다. 빼고 재면
   // 상관이 0.51에 그치는데 넣으면 0.64로 오른다 (EA 실측 회귀).
   const stamina = clamp99(
@@ -152,26 +169,27 @@ export function deriveAxes(
       jitter(nameEn, "vision", 6),
   );
 
-  // 수비 자리는 수비 지표에서, 공격 자리는 마무리 지표에서 끌어온다.
-  // 골키퍼의 위치선정은 필드 지표와 무관해 골키핑에서 바로 끌어온다.
-  const attackShare = {
-    GK: 0.1,
-    CB: 0.2,
-    FB: 0.3,
-    DM: 0.2,
-    CM: 0.5,
-    AM: 0.65,
-    W: 0.65,
-    CF: 0.75,
-    ST: 0.8,
-  }[slot];
+  /**
+   * **위치선정과 침투는 한 값을 기울여 가른다** (player.md §13.5).
+   *
+   * 밑값은 옛 한 축 그대로다 — 수비 자리는 수비 지표에서, 공격 자리는 마무리
+   * 지표에서 끌어온다. 거기서 그 선수의 기울기(태클 − 결정력)만큼 한쪽을 올리고
+   * 다른 쪽을 내린다. 자리 가중치가 **같은 공격 지분**으로 갈리므로 두 축의
+   * 가중합은 나누기 전과 같다 — 갈린 것은 선수 사이의 순서지 자리의 눈금이 아니다.
+   *
+   * 편차는 축마다 따로 굴린다. 같은 밑값을 가진 두 선수가 통째로 같은 짝을 갖는
+   * 것은 축을 나눈 뜻을 지운다.
+   */
+  const positioningBase =
+    tackling * (1 - SLOT_ATTACK_SHARE[slot]) +
+    finishing * SLOT_ATTACK_SHARE[slot] +
+    bias(slot, { FB: 3, CF: 2, W: 1, CB: -1, DM: -1, CM: -1, AM: -1, ST: -1 });
+  const split = splitPositioning(slot, positioningBase, tackling, finishing);
   const positioning = clamp99(
-    (isGk
-      ? goalkeeping * 1.3 - 26.4
-      : tackling * (1 - attackShare) +
-        finishing * attackShare +
-        bias(slot, { FB: 3, CF: 2, W: 1, CB: -1, DM: -1, CM: -1, AM: -1, ST: -1 })) +
-      jitter(nameEn, "positioning", 5),
+    (isGk ? goalkeeping * 1.3 - 26.4 : split.positioning) + jitter(nameEn, "positioning", 5),
+  );
+  const offTheBall = clamp99(
+    (isGk ? keeperOffTheBall(goalkeeping) : split.offTheBall) + jitter(nameEn, "offTheBall", 5),
   );
 
   const composure = clamp99(
@@ -213,6 +231,7 @@ export function deriveAxes(
     tackling,
     vision,
     positioning,
+    offTheBall,
     composure,
     aggression,
     leadership,
@@ -223,7 +242,7 @@ export function deriveAxes(
 // ── 노화 곡선 (player.md §6.3) ────────────────────
 
 /**
- * 축별 노화 곡선 — 15축 분리의 최대 수확.
+ * 축별 노화 곡선 — 16축 분리의 최대 수확.
  * "다리는 죽었지만 머리로 뛰는 베테랑"이 데이터에서 자동으로 나온다.
  */
 export type AgingCurve = "early" | "mid" | "late" | "flat";
@@ -244,6 +263,8 @@ export const AXIS_AGING: Record<AttributeAxis, AgingCurve> = {
   kicking: "late",
   vision: "late",
   positioning: "late",
+  // 침투는 다리가 아니라 머리가 한다 — 서른 넘어서도 자리를 찾는 9번이 그것이다
+  offTheBall: "late",
   composure: "late",
   leadership: "late",
   // 성향 — 거의 불변
@@ -301,39 +322,32 @@ const LEVEL_FLOOR = 60;
 const LEVEL_LOG_SCALE = 1;
 
 /**
- * 나이대별 성장 배율 — **두 경로가 같은 경계를 읽는다** (player.md §6.3).
- * `judgment`는 결산 판정 한 칸이 실제로 남기는 몫(`attributeGainScale`),
- * `monthly`는 월간 성장 확률의 나이 가중(`squad/development.ts`)이다.
+ * 나이대별 성장 배율 — **한 열이고 두 경로가 같이 읽는다** (player.md §6.3).
+ * 결산 판정 한 칸이 실제로 남기는 몫(`attributeGainScale`)과 월간 성장 확률의
+ * 나이 가중(`squad/development.ts`)이 같은 값을 본다.
  *
- * ⚠️ 두 열의 **값**은 아직 다르다(스물하나·스물넷·서른하나부터). 한 열로 합치는
- * 것은 4,000명의 성장 속도를 한꺼번에 옮기는 일이라 밸런스 결정이 먼저다.
+ * 한때 두 경로가 같은 경계에 다른 값을 두었다(스물하나·스물넷·서른하나부터).
+ * 남은 한 열은 결산 쪽 값이다 — 열여덟까지의 가산과 서른하나부터의 한 칸이 월간
+ * 쪽에는 아예 없어, 그쪽만 `AXIS_AGING`의 "머리는 늦게까지 큰다"와 어긋나 있었다.
+ * 월간이 그만큼 빨라지지는 않는다: `growChance`가 여유 배율을 곱한 뒤 0.35에서
+ * 자르므로 여유가 5 이상인 선수는 옛 값에서 이미 천장에 붙어 있었다.
  */
 const AGE_GROWTH_BANDS = [
-  { untilAge: 18, judgment: 1.15, monthly: 1 },
-  { untilAge: 20, judgment: 1, monthly: 1 },
-  { untilAge: 21, judgment: 1, monthly: 0.85 },
-  { untilAge: 23, judgment: 0.85, monthly: 0.85 },
-  { untilAge: 24, judgment: 0.85, monthly: 0.6 },
-  { untilAge: 27, judgment: 0.6, monthly: 0.6 },
-  { untilAge: 30, judgment: 0.4, monthly: 0.35 },
-  { untilAge: 33, judgment: 0.25, monthly: 0.15 },
+  { untilAge: 18, factor: 1.15 },
+  { untilAge: 20, factor: 1 },
+  { untilAge: 23, factor: 0.85 },
+  { untilAge: 27, factor: 0.6 },
+  { untilAge: 30, factor: 0.4 },
+  { untilAge: 33, factor: 0.25 },
 ] as const;
 
 /** 표의 마지막 줄 — 어느 경계에도 걸리지 않는 나이(34+) */
-const AGE_GROWTH_OLDEST = { judgment: 0.15, monthly: 0.15 } as const;
+const AGE_GROWTH_OLDEST = 0.15;
 
-function ageGrowthBand(age: number): { judgment: number; monthly: number } {
-  return AGE_GROWTH_BANDS.find((band) => age <= band.untilAge) ?? AGE_GROWTH_OLDEST;
-}
-
-/** 결산 판정 쪽 나이 배율 — 스물셋까지가 가장 빠르다 */
+/** 나이 배율 — 스물셋까지가 가장 빠르다. 결산 판정과 월간 성장이 같이 읽는다 */
 export function ageGrowthFactor(age: number): number {
-  return ageGrowthBand(age).judgment;
-}
-
-/** 월간 성장 쪽 나이 배율 — 경계는 결산과 같은 표에서 온다 */
-export function monthlyGrowthFactor(age: number): number {
-  return ageGrowthBand(age).monthly;
+  return (AGE_GROWTH_BANDS.find((band) => age <= band.untilAge) ?? { factor: AGE_GROWTH_OLDEST })
+    .factor;
 }
 
 /**
