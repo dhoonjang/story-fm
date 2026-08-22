@@ -14,6 +14,7 @@ import {
   playersOf,
   recallLoan,
   releasePlayer,
+  returnDueLoans,
   severanceOf,
   squadFloorShortfall,
   unilateralSeveranceOf,
@@ -218,6 +219,36 @@ describe("임대 — 전력을 내주고 성장을 산다", () => {
     expect(weeklyWagesOf(state, state.userTeamId)).toBeCloseTo(before - wage * 0.5, 0);
   });
 
+  /**
+   * 분담 비율은 **0~1 사이**로 잘린다. 눈금 밖의 값이 그대로 들어가면 주급이 없던
+   * 돈을 만든다: 음수면 선수를 내보내고도 우리 부담이 **늘고**(−0.5는 계약의 1.5배),
+   * 1을 넘으면 우리 몫이 음수가 돼 명세에서 통째로 사라지는데 빌린 구단은 계약보다
+   * 많이 문다. 잔고만 보면 아무 표시도 나지 않는 어긋남이라 경계를 못 박는다.
+   */
+  it("주급 분담 비율은 0~1로 잘린다", () => {
+    const state = createTestGame(11);
+
+    const none = spare(state);
+    const before = weeklyWagesOf(state, state.userTeamId);
+    const chelseaAtStart = weeklyWagesOf(state, "chelsea");
+    expect(loanPlayer(state, { playerId: none.id, teamId: "chelsea", wageShare: -0.5 }).ok).toBe(
+      true,
+    );
+    expect(state.players.find((p) => p.id === none.id)!.loan!.wageShare).toBe(0);
+    // 0으로 잘렸으니 주급은 한 푼도 넘어가지 않는다 — 우리가 전액을 문다
+    expect(weeklyWagesOf(state, state.userTeamId)).toBeCloseTo(before, 0);
+    expect(weeklyWagesOf(state, "chelsea")).toBeCloseTo(chelseaAtStart, 0);
+
+    const all = spare(state);
+    const allWage = activeContract(state, all.id)!.weeklyWage;
+    const chelseaBefore = weeklyWagesOf(state, "chelsea");
+    expect(loanPlayer(state, { playerId: all.id, teamId: "chelsea", wageShare: 4 }).ok).toBe(true);
+    expect(state.players.find((p) => p.id === all.id)!.loan!.wageShare).toBe(1);
+    // 1로 잘렸으니 빌린 구단이 무는 것은 계약 주급 **그대로**다 (그 배수가 아니다)
+    expect(weeklyWagesOf(state, "chelsea")).toBeCloseTo(chelseaBefore + allWage, 0);
+    expect(weeklyWagesOf(state, state.userTeamId)).toBeCloseTo(before - allWage, 0);
+  });
+
   it("계약보다 길게 보낼 수 없다", () => {
     const state = createTestGame(11);
     const target = spare(state);
@@ -245,6 +276,33 @@ describe("임대 — 전력을 내주고 성장을 산다", () => {
     ).toHaveLength(1);
     expect(after.squadLevel).toBe("reserve");
     expect(after.loan).toBeUndefined();
+  });
+
+  /**
+   * 복귀일의 경계는 **당일**이다 (`until > state.date`면 아직 남는다). 하루가
+   * 어긋나면 6월 30일 복귀가 7월 1일 시즌 전환 뒤로 밀려, 전환이 스쿼드를 셀 때
+   * 그 선수가 남의 팀에 있다 — 아무도 화면에서 알아채지 못하는 종류의 어긋남이다.
+   */
+  it("복귀는 복귀일 당일에 일어난다 — 하루 전에는 아직 남의 팀 선수다", () => {
+    const state = createTestGame(11);
+    const target = spare(state);
+    const until = addDays(state.date, 3);
+    expect(loanPlayer(state, { playerId: target.id, teamId: "chelsea", until }).ok).toBe(true);
+
+    // 복귀일 하루 전 — 아직 그쪽 선수다
+    state.date = addDays(until, -1);
+    returnDueLoans(state, []);
+    expect(state.players.find((p) => p.id === target.id)!.teamId).toBe("chelsea");
+
+    // 복귀일 당일 — 돌아온다 (2군으로, 감독의 일지에 한 줄)
+    state.date = until;
+    const digest: string[] = [];
+    returnDueLoans(state, digest);
+    const after = state.players.find((p) => p.id === target.id)!;
+    expect(after.teamId).toBe(state.userTeamId);
+    expect(after.squadLevel).toBe("reserve");
+    expect(after.loan).toBeUndefined();
+    expect(digest.some((d) => d.includes(target.name))).toBe(true);
   });
 
   /**

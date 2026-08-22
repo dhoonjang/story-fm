@@ -24,6 +24,8 @@
     "@eslint/js": "^10.0.1",
     "@next/eslint-plugin-next": "^15.5.23",
     "@playwright/test": "^1.61.1",
+    "@story-fm/agents": "workspace:*",
+    "@story-fm/engine": "workspace:*",
     "@types/node": "^26.1.1",
     "eslint": "^10.7.0",
     "eslint-plugin-react-hooks": "^7.1.1",

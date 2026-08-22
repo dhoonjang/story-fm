@@ -11,6 +11,7 @@ import { defineHarness, type Harness } from "./harness";
 const MATCH = "docs/simulation/match.md §7";
 const FINANCE = "docs/simulation/finance.md §10";
 const HISTORY = "docs/llm/agents.md §5-1";
+const PROMPTS = "docs/llm/prompts.md §7";
 
 export const WORLD_SEASON = defineHarness({
   id: "world-season",
@@ -474,6 +475,32 @@ export const HISTORY_WINDOW = defineHarness({
   ],
 });
 
+export const PROMPT_REGRESSION = defineHarness({
+  id: "prompt-regression",
+  what: "프롬프트 층의 글자·프리픽스 안정성 · 모의 세션의 장면 문법과 스킬 적중률",
+  doc: PROMPTS,
+  cost: "세계 둘 + 모의 GM 세션 — 수 초",
+  // prettier-ignore
+  bands: [
+    { metric: "고정층 글자", role: "guard", max: 30000, unit: "count", why: "매 턴 캐시 프리픽스로 나가는 하한 — 프롬프트는 지우는 방향으로 고친다 (prompts.md §5)" },
+    { metric: "시스템 프롬프트 글자", role: "reference", min: 1500, max: 3000, unit: "count", why: "도구와 무관하게 매 턴 서는 규칙만 — 도구 사용법이 새어 들어오면 늘어난다" },
+    { metric: "도구 스펙 글자", role: "measure", unit: "count", why: "설명 + Zod에서 파생된 JSON 스키마 — 고정층의 대부분이다" },
+    { metric: "도구 설명 총 글자", role: "measure", unit: "count", why: "상한은 skill-descriptions.test.ts가 쥔다 — 여기서는 그 안 어디쯤인지만 읽는다" },
+    { metric: "가장 긴 도구 설명 글자", role: "measure", unit: "count", why: "한 도구가 설명 예산을 혼자 먹고 있는가" },
+    { metric: "레퍼런스층 글자", role: "reference", max: 600, unit: "count", why: "감독 프로필과 선수단 규칙뿐이다 — 이름·수치가 들어오면 캐시가 그것과 함께 깨진다" },
+    { metric: "매 턴 층 글자", role: "reference", max: 3000, unit: "count", why: "캐시가 걸리지 않는 유일한 층 — 매 턴 정가로 나간다" },
+    { metric: "고정층 비중", role: "measure", unit: "ratio", why: "고정 ÷ (고정 + 레퍼런스 + 매 턴) — 캐시가 덮는 몫" },
+    { metric: "고정층 프리픽스 안정성", role: "guard", min: 1, max: 1, unit: "ratio", why: "다른 세계 둘에서 바이트까지 같아야 한다 — 날짜·id가 한 글자 섞이면 매 턴 뒤가 전부 정가로 읽힌다 (models.md §4)" },
+    { metric: "레퍼런스층 프리픽스 안정성", role: "guard", min: 1, max: 1, unit: "ratio", why: "같은 세이브라면 날짜가 흘러도 같아야 한다 — 여기가 바뀌면 이 층과 그 뒤 이력이 통째로 무효가 된다" },
+    { metric: "장면 문법 준수율", role: "guard", min: 1, unit: "ratio", why: "시점 헤더 한 줄 + `@`로 여는 줄 — 문법 밖의 줄은 화면에도 저장에도 서지 않는다 (prompts.md §1)" },
+    { metric: "위생이 걷어낸 줄 비율", role: "guard", max: 0, unit: "ratio", why: "모의 장면은 이미 문법 안이다 — 위생이 무엇이든 걷었다면 문법이나 위생 한쪽이 움직인 것이다" },
+    { metric: "시점 헤더 파싱 성공률", role: "guard", min: 1, unit: "ratio", why: "헤더를 못 읽으면 그 턴의 시계가 멎는다 (prompts.md §1)" },
+    { metric: "평균 장면 글자", role: "measure", unit: "count", why: "모의 GM의 장면 길이 — 실모드의 400~800 예산과는 다른 눈금이다" },
+    { metric: "스킬 적중률", role: "guard", min: 1, unit: "ratio", why: "코퍼스가 겨냥한 스킬을 실제로 불렀는가 — 떨어지면 스킬 표면이나 모의 GM이 갈린 것이다 (agents.md §8)" },
+    { metric: "불린 스킬 가짓수", role: "measure", unit: "count", why: "코퍼스가 훑는 표면의 폭" },
+  ],
+});
+
 /** `pnpm balance --list`가 읽는 목록 — 새 하네스를 여기 넣지 않으면 목록에 서지 않는다 */
 export const HARNESSES: readonly Harness[] = [
   WORLD_SEASON,
@@ -495,4 +522,5 @@ export const HARNESSES: readonly Harness[] = [
   OVERALL_SCALE,
   ATTRIBUTE_MODEL,
   HISTORY_WINDOW,
+  PROMPT_REGRESSION,
 ];
