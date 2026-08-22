@@ -10,20 +10,36 @@ import {
   SUB_HOLD_MINUTE,
   SUB_WINDOW_MAX,
   LEDGER_LIMITS,
+  BOOKED_AGAIN_WEIGHT,
+  CARDS_PER_MATCH,
+  EXTRA_TIME_DENSITY,
+  EXTRA_TIME_MINUTES,
+  EXTRA_TIME_SHOT_SHARE,
+  INJURY_PER_MATCH,
   advanceClock,
   applyEvents,
+  bookingWeight,
   buildStrengthPacket,
   createLedger,
+  injuryWeight,
   simulateSegment,
+  teamCardRate,
+  teamInjuryRate,
   type AiBenchShift,
   type MatchLedgerState,
   type SegmentPlan,
   planAiTacticalShift,
   planAiSubstitution,
 } from "@story-fm/sim";
-import { DEFAULT_TACTICS, matchupTag } from "@story-fm/domain";
-import type { GamePlayer, StrengthPacket, TacticsSpec } from "@story-fm/domain";
-import { makeLedgerSide, makeSide, makeSquad } from "./helpers";
+import { DEFAULT_TACTICS, PHASE_END, matchupTag } from "@story-fm/domain";
+import type {
+  GamePlayer,
+  MatchSide,
+  PacketTag,
+  StrengthPacket,
+  TacticsSpec,
+} from "@story-fm/domain";
+import { makeLedgerSide, makePlayer, makeSide, makeSquad } from "./helpers";
 
 /** mulberry32 — 엔진 `makeRng`와 같은 알고리즘 (sim은 엔진에 의존하지 않는다) */
 function rngOf(seed: number): () => number {
@@ -273,6 +289,62 @@ describe("구간 시뮬레이터 — 결과는 코어가 정한다", () => {
       expect(goal.shotOutcome).toBe("goal");
       expect(goal.xg).toBeGreaterThan(0);
       expect(goal.goalProbability).toBeGreaterThan(0);
+    }
+  });
+
+  /**
+   * **없으면 비운다** — 폴백 태그를 세우면 모든 골에 근거가 붙어 "전술이 근거로 붙은
+   * 골"이라는 전술 XP의 조건이 조건이 아니게 된다 (career.md §3). 패킷이 그 편에 줄
+   * 근거를 하나도 갖지 않은 경기는 실제로 있다.
+   */
+  it("패킷에 인용할 근거가 없으면 골의 원인은 빈 배열이다", () => {
+    const s = setup(88, 62);
+    const bare: StrengthPacket = {
+      ...s.packet,
+      matchups: [],
+      keyPoints: [],
+      home: { ...s.packet.home, tactical: { ...s.packet.home.tactical, notes: [] } },
+      away: { ...s.packet.away, tactical: { ...s.packet.away.tactical, notes: [] } },
+    };
+    const { ledger } = playMatch({ ...s, packet: bare }, 5);
+    const goals = ledger.events.filter((e) => e.type === "goal");
+    expect(goals.length).toBeGreaterThan(0);
+    for (const goal of goals) expect(goal.causes).toEqual([]);
+  });
+
+  /**
+   * 근거는 **한 갈래에서 하나만** 실린다. 앞선 갈래가 있으면 뒤는 보지 않으므로,
+   * 키포인트가 선 편의 골에 전술 노트가 따라붙지 않는다.
+   */
+  it("키포인트가 있으면 전술 노트는 쓰이지 않는다 — 갈래 순서대로 하나만", () => {
+    const s = setup(88, 62);
+    const tag = (source: PacketTag["source"], side: MatchSide): PacketTag => ({
+      source,
+      code: `${source}-${side}`,
+      favours: side,
+      sharp: true,
+      playerIds: [],
+      values: {},
+      flags: [],
+    });
+    const keyed: StrengthPacket = {
+      ...s.packet,
+      matchups: [],
+      keyPoints: [tag("mismatch", "home"), tag("mismatch", "away")],
+      home: {
+        ...s.packet.home,
+        tactical: { ...s.packet.home.tactical, notes: [tag("tactical", "home")] },
+      },
+      away: {
+        ...s.packet.away,
+        tactical: { ...s.packet.away.tactical, notes: [tag("tactical", "away")] },
+      },
+    };
+    const { ledger } = playMatch({ ...s, packet: keyed }, 5);
+    const goals = ledger.events.filter((e) => e.type === "goal");
+    expect(goals.length).toBeGreaterThan(0);
+    for (const goal of goals) {
+      expect(goal.causes).toEqual([tag("mismatch", goal.team!)]);
     }
   });
 
@@ -863,5 +935,81 @@ describe("AI 교체 판단", () => {
       );
     expect(spentWindows(70)).toEqual([]);
     expect(spentWindows(45, "half_time").length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * 사건의 눈금 — **구간 시뮬과 간이 시뮬이 함께 쓰는 손잡이들**이다
+ * (`engine/quick-sim.ts`가 같은 함수·같은 상수를 import한다). 한쪽에서 나누는 수나
+ * 곱하는 자리를 다시 적으면 "우리 경기만 카드를 받는다"가 조용히 시작된다.
+ */
+describe("카드·부상·연장의 눈금", () => {
+  it("경기당 손잡이를 두 팀으로 나눈다 — 강도 1의 양 팀 합이 손잡이 그대로다", () => {
+    expect(teamCardRate(1) * 2).toBeCloseTo(CARDS_PER_MATCH);
+    expect(teamInjuryRate(1) * 2).toBeCloseTo(INJURY_PER_MATCH);
+    // 강도에 정비례한다 — 거칠게 밀어붙이면 자기가 받는다
+    expect(teamCardRate(1.3)).toBeCloseTo(teamCardRate(1) * 1.3);
+    expect(teamCardRate(0.8)).toBeCloseTo(teamCardRate(1) * 0.8);
+    expect(teamCardRate(0)).toBe(0);
+    // 부상 빈도는 성향 평균까지 탄다 — 유리몸을 열한 명 세우면 실제로 더 자주 쓰러진다
+    expect(teamInjuryRate(1, 2)).toBeCloseTo(teamInjuryRate(1) * 2);
+    expect(teamInjuryRate(1.2, 1.5)).toBeCloseTo(teamInjuryRate(1) * 1.2 * 1.5);
+  });
+
+  it("카드 가중은 적극성에서 오르고 태클에서 내린다 — 경고를 안은 선수는 그만큼 덜 받는다", () => {
+    const rough = makePlayer("rough", "home", "CB", "DF", 70, { aggression: 80, tackling: 59 });
+    // 적극성 × 1.5 + (99 − 태클) × 0.5
+    expect(bookingWeight(rough, false)).toBeCloseTo(80 * 1.5 + (99 - 59) * 0.5);
+    expect(bookingWeight(rough, true)).toBeCloseTo(
+      bookingWeight(rough, false) * BOOKED_AGAIN_WEIGHT,
+    );
+
+    const calm = makePlayer("calm", "home", "CB", "DF", 70, { aggression: 40, tackling: 59 });
+    const clean = makePlayer("clean", "home", "CB", "DF", 70, { aggression: 80, tackling: 90 });
+    expect(bookingWeight(calm, false)).toBeLessThan(bookingWeight(rough, false));
+    expect(bookingWeight(clean, false)).toBeLessThan(bookingWeight(rough, false));
+  });
+
+  it("부상 가중은 지침·몸싸움·성향을 탄다 — 쌓인 피로와 떨어진 컨디션이 같은 눈금이다", () => {
+    const p = makePlayer("p", "home", "CB", "DF", 70, { strength: 60 }, { condition: 75 });
+    // 40 + (100 − 컨디션 + 누적 피로) × 0.8 + (99 − 몸싸움) × 0.3
+    expect(injuryWeight(p)).toBeCloseTo(40 + 25 * 0.8 + (99 - 60) * 0.3);
+    // 경기 중 쌓인 피로 25는 저장된 컨디션 25칸과 같은 자리로 들어간다
+    const drained = makePlayer(
+      "drained",
+      "home",
+      "CB",
+      "DF",
+      70,
+      { strength: 60 },
+      { condition: 50 },
+    );
+    expect(injuryWeight(p, 25)).toBeCloseTo(injuryWeight(drained));
+    // 성향은 배수다 — 굴림 횟수가 아니라 누가 걸리는지만 가른다
+    expect(injuryWeight(p, 0, 1.5)).toBeCloseTo(injuryWeight(p) * 1.5);
+    const sturdy = makePlayer(
+      "sturdy",
+      "home",
+      "CB",
+      "DF",
+      70,
+      { strength: 90 },
+      { condition: 75 },
+    );
+    expect(injuryWeight(sturdy)).toBeLessThan(injuryWeight(p));
+  });
+
+  /**
+   * 간이 시뮬의 연장이 이 값을 그대로 import한다 — 같은 0.84를 두 식으로 내면
+   * 분모를 고친 날 감독의 연장과 세계의 연장이 조용히 갈린다.
+   */
+  it("연장의 분당 밀도는 30분 총량이 90분의 EXTRA_TIME_SHOT_SHARE배가 되는 값이다", () => {
+    expect(EXTRA_TIME_MINUTES).toBe(30);
+    expect(EXTRA_TIME_DENSITY).toBeCloseTo(0.84);
+    // 30분 × 밀도 = 90분 × 0.28 — 시간 비율(1/3)보다 낮게 잡은 자리다
+    expect(EXTRA_TIME_DENSITY * EXTRA_TIME_MINUTES).toBeCloseTo(
+      EXTRA_TIME_SHOT_SHARE * PHASE_END.second_half,
+    );
+    expect(EXTRA_TIME_DENSITY).toBeLessThan(1);
   });
 });

@@ -1,14 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { ATTRIBUTE_AXES, matchupText, packetTagContext, packetTagText } from "@story-fm/domain";
 import {
+  addFocused,
   buildStrengthPacket,
   edgeOf,
   famFactor,
   instructionUptake,
+  laneBiasOf,
   matchIntensity,
   profFactor,
+  readKeyPoints,
   stateModifier,
   tacticalFit,
+  zeroCells,
+  zoneMeanOf,
+  type KeyPoint,
   type SideInput,
 } from "@story-fm/sim";
 import { makeSide, tactics } from "./helpers";
@@ -851,5 +857,100 @@ describe("사실 태그는 전부 문장이 된다", () => {
       }
     }
     for (const m of packet.matchups) expect(matchupText(m), m.zone).not.toBe("");
+  });
+});
+
+/**
+ * 감독의 눈 — **분석이 개수를, 전술이 정밀도를 정한다** (match.md §1.6). 패킷의
+ * `keyPoints`가 이 함수의 산출이라, 두 문턱이 흔들리면 감독의 두 능력치가 화면에서
+ * 아무 뜻도 갖지 않게 된다.
+ */
+describe("감독이 읽는 키포인트 (readKeyPoints)", () => {
+  /** 축과 편은 여기서 상관없다 — 보는 것은 개수와 안개뿐이다 */
+  const point = (code: string, weight: number): KeyPoint => ({
+    id: `${code}:someone`,
+    side: "home",
+    favours: "home",
+    zone: "midfield",
+    playerIds: [],
+    values: {},
+    weight,
+  });
+  const many = Array.from({ length: 20 }, (_, i) => point(`axis-${i}`, 1));
+
+  it("분석이 개수를 정한다 — 0이어도 둘은 보이고 최고여도 열을 넘지 않는다", () => {
+    const count = (analysis: number) => readKeyPoints(many, analysis, 0).length;
+    expect(count(0)).toBe(2);
+    expect(count(30)).toBe(4);
+    expect(count(85)).toBe(9);
+    expect(count(99)).toBe(10);
+    // 눈금 밖의 값이 문을 밀지 못한다
+    expect(count(-50)).toBe(2);
+    expect(count(200)).toBe(10);
+  });
+
+  it("자르는 것은 앞에서부터다 — 눈이 어두워도 가장 큰 구멍은 보인다", () => {
+    const seen = readKeyPoints([point("a", 40), point("b", 20), point("c", 5)], 0, 0);
+    expect(seen.map((tag) => tag.code)).toEqual(["a", "b"]);
+  });
+
+  it("전술이 정밀도를 정한다 — 문턱을 넘어야 이름과 수치가 드러난다", () => {
+    const sharpAt = (weight: number, tactics: number) =>
+      readKeyPoints([point("a", weight)], 99, tactics)[0]!.sharp;
+    // 능력만으로 문턱을 넘으려면 전술이 73은 돼야 한다
+    expect(sharpAt(0, 72)).toBe(false);
+    expect(sharpAt(0, 73)).toBe(true);
+    // 크게 벌어진 짝은 낮은 전술로도 또렷하다
+    expect(sharpAt(60, 39)).toBe(false);
+    expect(sharpAt(60, 40)).toBe(true);
+    // 그 몫은 상한에서 멎는다 — 열 배로 벌어져도 더 또렷해지지 않는다
+    expect(sharpAt(600, 39)).toBe(false);
+    expect(sharpAt(600, 40)).toBe(true);
+  });
+});
+
+/**
+ * 격자에 실리는 몫 — **줄 평균을 뺀 나머지**다 (`SidePacket.laneBias`, match.md §1.7).
+ * 개인 지시·공략의 산출은 아홉 칸으로 나오고 두 갈래로 접힌다: 줄 평균은 존 델타로,
+ * 줄 안의 편차만 격자로. 평균을 양쪽에 다 실으면 그 전력이 두 번 세어진다.
+ */
+describe("줄 안의 기울기 (laneBiasOf)", () => {
+  const shareOf = (bias: ReturnType<typeof laneBiasOf>, band: string, lane: string) =>
+    bias.find((entry) => entry.band === band && entry.lane === lane)?.share ?? 0;
+
+  it("겨냥한 칸이 오르고 나머지 둘이 내린다 — 세 칸의 합이 0이라 존 전력은 그대로다", () => {
+    const cells = zeroCells();
+    addFocused(cells, "attack", "left", 0.06);
+    // 존으로 접히는 몫은 amount 그대로다
+    expect(zoneMeanOf(cells).attack).toBeCloseTo(0.06);
+
+    const bias = laneBiasOf(cells);
+    expect(shareOf(bias, "attack", "left")).toBeCloseTo(0.09);
+    expect(shareOf(bias, "attack", "center")).toBeCloseTo(-0.045);
+    expect(shareOf(bias, "attack", "right")).toBeCloseTo(-0.045);
+    expect(bias.reduce((sum, entry) => sum + entry.share, 0)).toBeCloseTo(0);
+    // 움직이지 않는 줄은 싣지 않는다 — 패킷이 늘 아홉 줄을 달고 다니지 않게
+    expect(bias.map((entry) => entry.band)).toEqual(["attack", "attack", "attack"]);
+  });
+
+  it("레인이 없는 산출은 격자를 움직이지 않는다 — 존 델타만 남는다", () => {
+    const cells = zeroCells();
+    addFocused(cells, "midfield", undefined, 0.08);
+    expect(zoneMeanOf(cells).midfield).toBeCloseTo(0.08);
+    expect(laneBiasOf(cells)).toEqual([]);
+  });
+
+  /**
+   * 지시 셋과 공략 둘이 한 칸에 겹칠 수 있어, 상한이 없으면 정규화 전 값이 음수로
+   * 내려가고 격자가 뒤집힌다. 상한에 걸린 줄은 합이 0이 아니게 되지만, 격자를 세울 때
+   * 줄 전체를 존 전력에 맞춰 되늘리므로(`zoneGrid`의 `normalize`) 존은 움직이지 않는다.
+   */
+  it("한 칸이 기울 수 있는 폭은 ±0.3에서 멎는다", () => {
+    const cells = zeroCells();
+    addFocused(cells, "defense", "right", 0.5);
+    const bias = laneBiasOf(cells);
+    for (const entry of bias) expect(Math.abs(entry.share)).toBeLessThanOrEqual(0.3);
+    expect(shareOf(bias, "defense", "right")).toBeCloseTo(0.3);
+    expect(shareOf(bias, "defense", "left")).toBeCloseTo(-0.3);
   });
 });
