@@ -1025,10 +1025,11 @@ export function awaitingShootout(state: GameState): boolean {
 /**
  * 페널티를 찰 수 있는 사람 — **그 경기를 끝낸 열한 명**이다(퇴장이 있었으면 그보다 적다).
  *
- * `finishingXi`를 쓰지 않는다: 그쪽은 `match.result`를 읽는데 감독의 경기는 마감이
- * 승부차기 **뒤**에 오므로 아직 결과가 없고, 그러면 1군 상위 열한 명으로 물러서서
- * 벤치에 앉아 있던 에이스가 키커 목록에 오른다. 장부의 온필드가 곧 그 열한 명이고,
- * 마감이 `homeOnPitch`로 적는 것도 이 목록이다.
+ * `finishingXi`(`competition/extra-time.ts`)와 같은 목록을 낸다 — 그쪽도 진행 중인
+ * 장부의 온필드를 결과보다 먼저 읽는다. 여기서 그 함수를 부르지 않는 것은 인자가
+ * 다르기 때문이다: 저쪽은 `MatchRecord`가 있어야 하는데 감독의 경기는 마감이
+ * 승부차기 **뒤**에 와서 아직 기록이 서지 않았고, 여기 있는 것은 장부뿐이다.
+ * 장부의 온필드가 곧 그 열한 명이고, 마감이 `homeOnPitch`로 적는 것도 이 목록이다.
  */
 function shootoutTakers(pending: PendingMatch, side: MatchSide): ReadonlySet<string> {
   return new Set(pending.ledger[side].onPitch);
