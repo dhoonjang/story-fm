@@ -39,12 +39,25 @@ function isStageMap(value: unknown): boolean {
   return o !== null && Object.keys(o).every((k) => (STAGES as readonly string[]).includes(k));
 }
 
-/** `[월, 일]` 쌍 */
+/**
+ * 달마다 실제 일수 — 2월은 **윤년을 넓게 보아 29까지** 받는다. 목표일은 해가 없는
+ * `[월, 일]`이라 어느 시즌에 놓일지 이 표가 알지 못한다.
+ */
+const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as const;
+
+/**
+ * `[월, 일]` 쌍 — **그 달에 실제로 있는 날이어야 한다.**
+ *
+ * `[2, 30]`처럼 없는 날을 통과시키면 그 목표일이 3월로 굴러가 라운드 순서가
+ * 뒤집힌다 — 저장한 순간이 아니라 그 라운드를 편성하는 시즌 중에.
+ */
 export function isMonthDay(value: unknown): boolean {
   if (!Array.isArray(value) || value.length !== 2) return false;
   const [month, day] = value as unknown[];
   if (typeof month !== "number" || typeof day !== "number") return false;
-  return month >= 1 && month <= 12 && day >= 1 && day <= 31;
+  if (!Number.isInteger(month) || !Number.isInteger(day)) return false;
+  if (month < 1 || month > 12) return false;
+  return day >= 1 && day <= DAYS_IN_MONTH[month - 1]!;
 }
 
 /**

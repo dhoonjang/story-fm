@@ -28,8 +28,8 @@ import { INJURY_HISTORY } from "../src/data/injury-history";
 import { advanceToMatchday, createTestGame } from "./helpers";
 
 /**
- * 조사된 선수 수는 **표가 정한다** — `INJURY_HISTORY`의 키 중 시드에 있는 이름
- * 전부다. 여기 숫자를 손으로 적어 두면 표에 한 줄 넣는 것만으로 테스트가 빨개진다
+ * 조사된 선수 수는 **표가 정한다** — `INJURY_HISTORY`의 키(위키데이터 QID) 전부다.
+ * 여기 숫자를 손으로 적어 두면 표에 한 줄 넣는 것만으로 테스트가 빨개진다
  * (그리고 그때 고쳐지는 것은 코드가 아니라 이 숫자다).
  */
 const RESEARCHED = Object.keys(INJURY_HISTORY);
@@ -171,16 +171,16 @@ describe("부상은 팀을 가리지 않는다", () => {
 
 describe("부임 전 부상 이력 — 조사된 선수만", () => {
   const state = createTestGame(42);
-  /** 조인 키는 카탈로그의 `nameEn`이다 (`seedInjuryHistory`) */
-  const nameById = new Map(playerCatalog().map((e) => [e.id, e.nameEn]));
-  const nameOf = (playerId: string) => {
+  /** 조인 키는 카탈로그의 `wikidataId`(QID)다 (`seedInjuryHistory`) */
+  const qidById = new Map(playerCatalog().map((e) => [e.id, e.wikidataId]));
+  const qidOf = (playerId: string) => {
     const player = playerById(state, playerId)!;
-    return player.catalogId === null ? undefined : nameById.get(player.catalogId);
+    return player.catalogId === null ? undefined : qidById.get(player.catalogId);
   };
-  /** 표에 이름이 있고 이 세계에 실제로 있는 선수 */
+  /** 표에 QID가 있고 이 세계에 실제로 있는 선수 */
   const researched = state.players.filter((p) => {
-    const nameEn = p.catalogId === null ? undefined : nameById.get(p.catalogId);
-    return nameEn !== undefined && INJURY_HISTORY[nameEn] !== undefined;
+    const qid = p.catalogId === null ? undefined : qidById.get(p.catalogId);
+    return qid !== undefined && INJURY_HISTORY[qid] !== undefined;
   });
   const seededRows = state.injuries.filter((i) => i.note === "부임 전 이력");
 
@@ -200,14 +200,14 @@ describe("부임 전 부상 이력 — 조사된 선수만", () => {
   it("씨앗 부상 행은 표에서만 나오고 날짜를 그대로 옮긴다", () => {
     expect(seededRows.length, "씨앗 부상 행이 하나도 없다").toBeGreaterThan(0);
     for (const row of seededRows) {
-      const nameEn = nameOf(row.gamePlayerId);
-      expect(nameEn, `${row.gamePlayerId}: 카탈로그에 없는 선수에게 이력이 붙었다`).toBeDefined();
-      const entry = INJURY_HISTORY[nameEn!]?.find((e) => e.from === row.occurredOn);
-      expect(entry, `${nameEn} ${row.occurredOn}: 표에 없는 부상이다`).toBeDefined();
-      expect(row.bodyPart, `${nameEn} ${row.occurredOn} 부위`).toBe(entry!.part);
-      expect(row.expectedReturn, `${nameEn} ${row.occurredOn} 복귀 예정`).toBe(entry!.until);
+      const qid = qidOf(row.gamePlayerId);
+      expect(qid, `${row.gamePlayerId}: QID 없는 선수에게 이력이 붙었다`).toBeDefined();
+      const entry = INJURY_HISTORY[qid!]?.find((e) => e.from === row.occurredOn);
+      expect(entry, `${qid} ${row.occurredOn}: 표에 없는 부상이다`).toBeDefined();
+      expect(row.bodyPart, `${qid} ${row.occurredOn} 부위`).toBe(entry!.part);
+      expect(row.expectedReturn, `${qid} ${row.occurredOn} 복귀 예정`).toBe(entry!.until);
       // 부임일 전에 끝난 부상만 닫혀 있다 — 아직 안 끝난 것은 열린 채로 온다
-      expect(row.returnedOn, `${nameEn} ${row.occurredOn} 복귀일`).toBe(
+      expect(row.returnedOn, `${qid} ${row.occurredOn} 복귀일`).toBe(
         entry!.until > state.date ? null : entry!.until,
       );
     }

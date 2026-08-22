@@ -288,7 +288,8 @@ function deriveHomegrownCountry(
   teamId: string,
   seeded: boolean | undefined,
 ): string | undefined {
-  const country = countryOfTeam(teamId);
+  // 카탈로그가 모르는 팀에는 협회가 없다 — 누구의 홈그로운도 아니다
+  const country = countryOfTeam(teamId) ?? undefined;
   if (seeded !== undefined) return seeded ? country : undefined;
   const division = isTopFlight(teamId) ? 1 : 2;
   const key = `homegrown:${who.nameEn}:${who.birthdate}`;
@@ -307,6 +308,8 @@ function entryFromSeed(teamId: string, s: RealPlayerSeed): CatalogDraft {
     teamId,
     nameKo: s.nameKo,
     nameEn: s.nameEn,
+    // 동명이인을 가르는 유일한 키 — 이름으로 잇는 표(부상 이력)가 이걸 쓴다
+    ...(s.wikidataId === undefined ? {} : { wikidataId: s.wikidataId }),
     ...(s.squadNumber === undefined ? {} : { squadNumber: s.squadNumber }),
     birthdate: s.birthdate,
     positions,
