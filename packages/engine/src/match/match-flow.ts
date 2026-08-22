@@ -23,6 +23,7 @@ import {
   packetTagText,
   positionGroupOf,
   positionGroupOfPlayer,
+  positionGrowthTarget,
   PROFICIENCY_MAX,
   shootoutSettled,
   shootoutTally,
@@ -1388,7 +1389,7 @@ function gainMatchProficiency(
     player.id,
     entryId,
     "match",
-    `pos:${position}`,
+    positionGrowthTarget(position),
     MATCH_PROFICIENCY_GAIN,
     "match-minutes",
   );

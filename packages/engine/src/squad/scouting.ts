@@ -304,16 +304,17 @@ export function overallView(state: GameState, player: GamePlayer): string {
 /** 추정 폭이 이 안이면 그 말로 부른다 — 넘으면 "대강 짐작"이다 */
 const CONFIDENCE_MARGIN = { 거의확실: 3, 대체로신뢰: 6 } as const;
 
+/** 추정 폭을 부르는 말 — 구간을 내는 자리는 모두 이 함수를 지난다 */
+export function potentialConfidence(margin: number): string {
+  if (margin <= CONFIDENCE_MARGIN.거의확실) return "거의 확실";
+  if (margin <= CONFIDENCE_MARGIN.대체로신뢰) return "대체로 신뢰";
+  return "대강 짐작";
+}
+
 export function potentialView(state: GameState, player: GamePlayer): string {
   const band = potentialBand(state, player);
   if (!band) return "미지 (성장 여력을 짐작할 근거가 없다)";
-  const confidence =
-    band.margin <= CONFIDENCE_MARGIN.거의확실
-      ? "거의 확실"
-      : band.margin <= CONFIDENCE_MARGIN.대체로신뢰
-        ? "대체로 신뢰"
-        : "대강 짐작";
-  return `${band.low}~${band.high} (${confidence} · ±${band.margin})`;
+  return `${band.low}~${band.high} (${band.confidence} · ±${band.margin})`;
 }
 
 /** 한 줄 요약이 꼽는 강점·약점 축의 수 */
@@ -529,6 +530,12 @@ export interface PotentialBand {
   high: number;
   /** 추정 반폭 — 좁을수록 확신이 크다 */
   margin: number;
+  /**
+   * 그 폭을 부르는 말 — `거의 확실` · `대체로 신뢰` · `대강 짐작` (player.md §9.1).
+   * 구간과 **함께** 낸다: 경계는 코어의 것이고, 읽는 쪽이 폭을 다시 재면 표를 고치는
+   * 날 한쪽만 따라간다.
+   */
+  confidence: string;
 }
 
 /**
@@ -558,6 +565,7 @@ export function potentialBand(state: GameState, player: GamePlayer): PotentialBa
     low: Math.max(floor, center - margin),
     high: Math.min(99, Math.max(truth, center + margin)),
     margin,
+    confidence: potentialConfidence(margin),
   };
 }
 

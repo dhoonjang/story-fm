@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DateString } from "./date-string";
+import { AXIS_KO, type AttributeAxis } from "./player";
 import { PitchClaimKindSchema, PitchClaimSchema } from "./persuasion";
 
 /**
@@ -449,6 +450,27 @@ export const GrowthEntrySchema = z.object({
   note: z.string().optional(),
 });
 export type GrowthEntry = z.infer<typeof GrowthEntrySchema>;
+
+/** 포지션 적응도 대상의 접두 — 적는 쪽과 읽는 쪽이 같은 상수를 쓴다 */
+export const GROWTH_POSITION_PREFIX = "pos:";
+
+export function positionGrowthTarget(position: string): string {
+  return `${GROWTH_POSITION_PREFIX}${position}`;
+}
+
+/**
+ * 성장 한 줄이 무엇에 대한 것인가 — **낱말은 여기 하나다.**
+ *
+ * 달력 일지와 훈련 결과줄이 각자 이 분기를 적던 동안 한쪽에 `pos:` 갈래가 빠져 있어
+ * 전향 훈련의 결과줄이 `pos:CB +1`로 섰다. 코드는 코드고 낱말은 낱말이다.
+ */
+export function growthLabel(target: string): string {
+  if (target.startsWith(GROWTH_POSITION_PREFIX)) {
+    return `${target.slice(GROWTH_POSITION_PREFIX.length)} 적응도`;
+  }
+  if (target === "tactical") return "전술 적응도";
+  return AXIS_KO[target as AttributeAxis] ?? target;
+}
 
 // ── 시즌 기록 ─────────────────────────────────────────
 export const SeasonStatSchema = z.object({
