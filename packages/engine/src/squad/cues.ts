@@ -1,5 +1,5 @@
 import type { GamePlayer } from "@story-fm/domain";
-import { isReserveMatch } from "@story-fm/domain";
+import { isReserveMatch, normalizeSpeaker } from "@story-fm/domain";
 import { formLabel } from "./form";
 import { isSettling } from "./settling";
 import { diffDays } from "../competition/calendar";
@@ -66,6 +66,10 @@ function recentLineups(state: GameState, limit: number): Array<ReadonlySet<strin
  * 그 상태가 이어지는 몇 주 내내 후보 맨 앞에 서고, 그 사이 다른 선수는 한 번도
  * 차례가 오지 않는다. 지우지 않고 미는 이유는 어제 말한 선수라도 오늘 부상에서
  * 돌아왔으면 그게 더 큰 사건이기 때문이다.
+ *
+ * ⚠️ 이름은 `normalizeSpeaker`로 맞춘 뒤 견준다 — 모델은 같은 사람을 "스티브 홀랜드"로도
+ * "스티브홀랜드"로도 쓴다. 원문 그대로 견주면 공백 하나가 다른 순간 방금 말한 선수가
+ * 회전에서 빠져 계속 맨 앞에 선다 (people.md §1과 같은 규칙 · 부분 일치는 하지 않는다).
  */
 function recentSpeakers(state: GameState, turns: number): ReadonlySet<string> {
   const names = new Set<string>();
@@ -73,7 +77,7 @@ function recentSpeakers(state: GameState, turns: number): ReadonlySet<string> {
   for (const turn of models) {
     for (const line of turn.text.split("\n")) {
       const match = line.match(/^@([^:]+):/u);
-      if (match) names.add(match[1]!.trim());
+      if (match) names.add(normalizeSpeaker(match[1]!));
     }
   }
   return names;
@@ -128,7 +132,7 @@ export function speakerCues(state: GameState, limit = 3): SpeakerCue[] {
       name: player.name,
       fact,
       // 최근에 말한 사람은 뒤로 — 그 안에서는 날짜로 회전한다
-      rank: spoke.has(player.name) ? 1 : 0,
+      rank: spoke.has(normalizeSpeaker(player.name)) ? 1 : 0,
     });
   }
   if (cues.length === 0) return [];
