@@ -1484,6 +1484,8 @@ export function answerIncomingOffer(
     fee: offer.fee,
     weeklyWage: offer.weeklyWage,
     years: offer.contractYears,
+    // 분할 연수도 넘긴다 — 일시금으로 되부르면 예산 관문이 같은 분할 역제안을 다시 세운다
+    ...(offer.paymentYears === undefined ? {} : { paymentYears: offer.paymentYears }),
     // 갈래를 그대로 넘긴다 — 임대 송출을 매각으로 재면 임대료가 이적료 눈금에 걸린다
     kind: negotiation.kind,
     ...(negotiation.counterpartTeamId ? { counterpartTeamId: negotiation.counterpartTeamId } : {}),
@@ -1560,7 +1562,11 @@ export function answerIncomingOffer(
       verdict: "counter",
       offer,
       odds: oddsText(odds),
-      counterTerms: dealTerms({ fee: demanded, weeklyWage: wage }),
+      counterTerms: dealTerms({
+        fee: demanded,
+        weeklyWage: wage,
+        paymentYears: terms.paymentYears,
+      }),
       dueOn: respondsOn,
       ...(input.note ? { note: input.note } : {}),
     }),
@@ -2469,7 +2475,8 @@ function executeSale(
         paymentYears: split,
         respondsOn: null,
         probability: odds.probability,
-        verdict: "counter",
+        // 답을 기다리는 상대 오퍼다 — `incomingOffer`가 `verdict: null`로 집는다
+        verdict: null,
       });
       negotiation.status = "open";
       return {
