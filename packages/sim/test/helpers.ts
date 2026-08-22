@@ -8,7 +8,7 @@ import type {
 import { ATTRIBUTE_AXES, DEFAULT_TACTICS } from "@story-fm/domain";
 import type { LedgerSide, LineupSlot, SideInput } from "@story-fm/sim";
 
-/** 테스트용 선수 — 15축 전부 보유, positions[], 부상은 상태에 없음 */
+/** 테스트용 선수 — 16축 전부 보유, positions[], 부상은 상태에 없음 */
 export function makePlayer(
   id: string,
   teamId: string,
@@ -26,7 +26,7 @@ export function makePlayer(
     birthdate: "2000-01-01",
     positions: [{ position, proficiency: 90, isNatural: true }],
     attributes: {
-      // 15축 전부를 base로 채우고, GK만 goalkeeping을 따로 준다
+      // 16축 전부를 base로 채우고, GK만 goalkeeping을 따로 준다
       ...(Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, base])) as AxisValues),
       goalkeeping: group === "GK" ? base : 22,
       overall: base,

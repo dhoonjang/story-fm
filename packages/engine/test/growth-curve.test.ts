@@ -104,6 +104,7 @@ describe("노화 곡선의 나이 경계", () => {
       "kicking",
       "vision",
       "positioning",
+      "offTheBall",
       "composure",
       "leadership",
     ]);
