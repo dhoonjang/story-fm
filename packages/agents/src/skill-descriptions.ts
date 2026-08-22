@@ -1,3 +1,5 @@
+import { TACTIC_AXES, tacticAxisScaleText } from "@story-fm/domain";
+
 export type SkillGroup = "진행" | "전술·훈련" | "대화·서사" | "조회" | "경기" | "이적" | "재정";
 
 export interface SkillCatalogEntry {
@@ -71,8 +73,7 @@ export const SKILL_CATALOG = [
     readOnly: false,
     description:
       "팀 전술 6축을 변경한다. 축은 모두 1~5이며 3이 보통이다 — " +
-      "멘탈리티(1 수비적~5 공격적) · 수비 라인(1 낮게~5 높게) · 압박(1 최소~5 맹렬히) · " +
-      "템포(1 느리게~5 빠르게) · 폭(1 좁게~5 넓게) · 패스(1 짧게~5 길게). " +
+      `${TACTIC_AXES.map(tacticAxisScaleText).join(" · ")}. ` +
       "현재 값과 다른 축 중 감독이 변경을 명시한 축만 보내라. 언급하지 않은 축을 균형값이나 추천값으로 보정하지 않는다. 포메이션과 선수 배치는 이 도구로 바꾸지 않는다.",
   },
   {
