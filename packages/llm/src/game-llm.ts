@@ -130,7 +130,11 @@ export interface TurnUsage {
   outputTokens: number;
   /** 제공자가 캐시에서 읽었다고 보고한 입력 토큰. */
   cacheReadTokens: number;
-  /** 명시적 캐시 생성 토큰. implicit cache만 있는 제공자는 0이다. */
+  /**
+   * 이번 호출이 캐시에 **새로 쓴** 입력 토큰 — 보고하지 않는 제공자는 0이다.
+   * ⚠️ 과금을 여기서 읽지 않는다: 생성분을 따로 청구하는 제공자와 입력에 포함해
+   * 청구하는 제공자가 갈린다 (models.md §4).
+   */
   cacheWriteTokens: number;
 }
 
@@ -192,7 +196,7 @@ export interface TurnRequest {
  *
  * ⚠️ 값에 제공자의 낱말을 쓰지 않는다. 원문을 그대로 흘리면 잘림 검사가 제공자
  * 하나에만 맞는다: Anthropic의 `max_tokens`를 신호로 삼으면 Gemini는 `MAX_TOKENS`를
- * 소문자로 바꾼 값이 우연히 같아 돌고 OpenAI(`length`)에서는 아무 말 없이 꺼진다.
+ * 소문자로 바꾼 값이 우연히 같아 돌고 OpenAI(`max_output_tokens`)에서는 아무 말 없이 꺼진다.
  * 이름이 우연히 겹치는 것은 계약이 아니다.
  */
 export const STOP_REASONS = ["completed", "truncated", "tool_use", "filtered", "other"] as const;
