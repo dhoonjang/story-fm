@@ -97,6 +97,34 @@ describe("전술판 좌표 → 포지션 코드 (자유 배치의 원본)", () =
       "LM",
       "ST",
     ]);
+    // 백3에 윙어 둘 — 3-5-2의 백3과 4-3-3의 앞 셋이 만나는 자리다
+    expect(FORMATION_SLOTS["3-4-3"]).toEqual([
+      "GK",
+      "RCB",
+      "CB",
+      "LCB",
+      "RM",
+      "RCM",
+      "LCM",
+      "LM",
+      "RW",
+      "ST",
+      "LW",
+    ]);
+    // 윙백을 내려 앉힌 백5 — 5-4-1과 같은 뒤에 중원 셋·투톱
+    expect(FORMATION_SLOTS["5-3-2"]).toEqual([
+      "GK",
+      "RWB",
+      "RCB",
+      "CB",
+      "LCB",
+      "LWB",
+      "CDM",
+      "RCM",
+      "LCM",
+      "RST",
+      "LST",
+    ]);
     // 투톱도 좌우로 갈린다
     expect(FORMATION_SLOTS["4-4-2"]).toEqual([
       "GK",
@@ -321,7 +349,7 @@ describe("카드 겹침 해소 (separateBoardPoints)", () => {
 });
 
 describe("포메이션 숫자 자동 감지 (shapeOf)", () => {
-  it("프리셋을 그대로 두면 프리셋 이름이 나온다 — 다섯 개 모두", () => {
+  it("프리셋을 그대로 두면 프리셋 이름이 나온다 — 일곱 개 모두", () => {
     for (const f of FORMATIONS) {
       expect(shapeOf(FORMATION_LAYOUTS[f]), `${f}`).toBe(f);
     }
