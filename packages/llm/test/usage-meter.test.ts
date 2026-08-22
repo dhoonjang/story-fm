@@ -167,6 +167,21 @@ describe("캐시 히트율 — 프리픽스가 살아 있는가", () => {
     const ledger = recordUsage(emptyLedger(), "gm", usageOf({ inputTokens: 9000 }));
     expect(cacheAlerts(ledger)).toEqual([]);
   });
+
+  /**
+   * 문턱은 그 에이전트가 부르는 **제공자**의 최소 캐시 프리픽스다 (models.md §4).
+   * 셋 중 큰 값 하나로 재면 Anthropic 결산 호출(1k~4k)이 통째로 문턱 아래에 들어앉아,
+   * 프리픽스가 매 턴 깨져도 경고가 영영 올라오지 않는다 — 그 구멍을 이 줄이 잡는다.
+   */
+  it("문턱이 낮은 제공자의 짧은 호출도 신호로 잡는다", () => {
+    let ledger = emptyLedger();
+    for (let i = 0; i < 3; i++) {
+      ledger = recordUsage(ledger, "mood-rater", usageOf({ inputTokens: 2000 }));
+    }
+    // 4,096 하나로 재면 안 보인다
+    expect(cacheAlerts(ledger, () => 4096)).toEqual([]);
+    expect(cacheAlerts(ledger, () => 1024)).toEqual(["mood-rater"]);
+  });
 });
 
 describe("예산 상한 읽기", () => {

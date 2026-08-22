@@ -118,16 +118,22 @@ describe("OpenAI 어댑터", () => {
 
     expect(sent[0]!.tool_choice).toBeUndefined();
   });
-  it("함수 도구를 쓰려면 추론이 꺼져 있어야 한다", async () => {
+  /**
+   * 추론을 모르는 모델은 `reasoning_effort`가 실린 요청 자체를 400으로 거부한다 —
+   * 값을 박아 두면 `config/llm.yml`이 모델을 못 바꾼다 (models.md §1-2).
+   */
+  it("사고를 적지 않으면 reasoning_effort를 싣지 않는다", async () => {
     const { client, sent } = makeStubClient([completion({ role: "assistant", content: "됐다" })]);
     const llm = new OpenAiGameLLM(testConfig, client);
     await llm.runTurn({ system: "시스템", history: [], user: "안녕" });
-    /**
-     * GPT-5.6 계열은 Chat Completions에서 **추론을 켠 채로 함수 도구를 쓸 수 없다**.
-     * 현재 어댑터는 사고를 최소로 둔다. 이 값이 조용히 바뀌면 함수 도구 호출이
-     * 400을 맞는다.
-     */
-    expect(sent[0]?.reasoning_effort).toBe("none");
+    expect(sent[0]).not.toHaveProperty("reasoning_effort");
+  });
+
+  it("사고를 적으면 그 값을 reasoning_effort로 싣는다", async () => {
+    const { client, sent } = makeStubClient([completion({ role: "assistant", content: "됐다" })]);
+    const llm = new OpenAiGameLLM({ ...testConfig, thinkingLevel: "medium" }, client);
+    await llm.runTurn({ system: "시스템", history: [], user: "안녕" });
+    expect(sent[0]?.reasoning_effort).toBe("medium");
   });
 
   it("설정의 시한과 중단 신호를 요청 옵션으로 넘긴다 — SDK 기본값에 기대지 않는다", async () => {

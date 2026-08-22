@@ -35,34 +35,60 @@ interface BaseAgentConfig {
 
 export interface AnthropicAgentConfig extends BaseAgentConfig {
   provider: "anthropic";
+  /** 없으면 어댑터가 사고 파라미터를 **아예 싣지 않는다** — 모델 기본이 그대로 돈다 */
+  thinkingLevel?: ThinkingLevel;
 }
 
 export interface GoogleAgentConfig extends BaseAgentConfig {
   provider: "google";
+  /** Gemini는 사고 수준을 반드시 실어야 해서 여기만 기본값(`minimal`)을 갖는다 */
   thinkingLevel: ThinkingLevel;
 }
 
 export interface OpenAiAgentConfig extends BaseAgentConfig {
   provider: "openai";
+  /** 없으면 `reasoning_effort`를 싣지 않는다 — 추론을 모르는 모델은 그 값에 400을 낸다 */
+  thinkingLevel?: ThinkingLevel;
 }
 
 export type AgentConfig = AnthropicAgentConfig | GoogleAgentConfig | OpenAiAgentConfig;
 
+/** 모델이 아니라 **제공자**가 정하는 값들 (models.md §1-2·§4) */
+export interface ProviderTraits {
+  /**
+   * 사고 수준을 요청에 실을 수 있는가.
+   *
+   * 설정이 적어 둔 것은 반드시 요청에 실려야 한다 (models.md §1-2). 어댑터가 실을
+   * 자리가 없는 옵션은 조용히 무시하는 대신 시작할 때 걸린다 — 설정과 실제로 도는
+   * 것이 갈리면 "GM만 사고가 얕은" 이유를 알 수 없다.
+   */
+  thinkingLevel: boolean;
+  /**
+   * 캐시가 걸리기 시작하는 최소 프리픽스(토큰).
+   *
+   * 이보다 짧은 입력은 캐시가 애초에 안 걸리므로 히트율 0이 "프리픽스가 깨졌다"는
+   * 뜻이 아니다. **제공자마다 다르고, 큰 값 하나로 통일하면 작은 쪽이 안 보인다** —
+   * Anthropic 결산 호출(1k~4k)은 Gemini의 4,096 문턱 아래에 통째로 들어앉는다.
+   */
+  minCacheableInput: number;
+}
+
 /**
- * 제공자가 흡수할 수 있는 설정 — **제공자 이름으로 분기하는 유일한 표**다.
+ * 제공자별 특성 — **제공자 이름으로 분기하는 유일한 표**다.
  *
- * 설정이 적어 둔 것은 반드시 요청에 실려야 한다 (models.md §1-2). 어댑터가 실을
- * 자리가 없는 옵션은 조용히 무시하는 대신 여기서 걸려 시작할 때 실패한다 — 설정과
- * 실제로 도는 것이 갈리면 "GM만 사고가 얕은" 이유를 알 수 없다. 어댑터가 그 옵션을
- * 다루기 시작하면 바뀌는 것은 이 표의 한 칸뿐이다.
+ * 어댑터가 다루는 것이 달라지면 바뀌는 것은 이 표의 한 칸뿐이고, 제공자 이름을 보고
+ * 갈라지는 자리는 이 밖에 없다.
  */
-const PROVIDER_CAPABILITIES: Record<LlmProvider, { thinkingLevel: boolean }> = {
-  // 사고를 끄고 부른다 — 출력 상한을 본문이 온전히 쓴다
-  anthropic: { thinkingLevel: false },
-  google: { thinkingLevel: true },
-  // 함수 도구를 쓰려면 Chat Completions에서 추론을 꺼야 한다
-  openai: { thinkingLevel: false },
+const PROVIDER_TRAITS: Record<LlmProvider, ProviderTraits> = {
+  anthropic: { thinkingLevel: true, minCacheableInput: 1024 },
+  // Gemini 3.x Flash
+  google: { thinkingLevel: true, minCacheableInput: 4096 },
+  openai: { thinkingLevel: true, minCacheableInput: 1024 },
 };
+
+export function providerTraits(provider: LlmProvider): ProviderTraits {
+  return PROVIDER_TRAITS[provider];
+}
 
 const RawAgentConfigSchema = z
   .object({
@@ -74,7 +100,7 @@ const RawAgentConfigSchema = z
   })
   .strict()
   .refine(
-    (raw) => raw.thinking_level === undefined || PROVIDER_CAPABILITIES[raw.provider].thinkingLevel,
+    (raw) => raw.thinking_level === undefined || PROVIDER_TRAITS[raw.provider].thinkingLevel,
     (raw) => ({
       message: `${raw.provider} 어댑터는 thinking_level을 요청에 싣지 않습니다 — 지우거나 제공자를 바꾸세요`,
       path: ["thinking_level"],
@@ -119,8 +145,19 @@ function toAgentConfig(agent: AgentName, raw: RawAgentConfig): AgentConfig {
       thinkingLevel: raw.thinking_level ?? "minimal",
     };
   }
-  if (raw.provider === "openai") return { ...base, provider: "openai" };
-  return { ...base, provider: "anthropic" };
+  // 나머지 둘은 **적힌 값만** 싣는다 — 없으면 그 파라미터가 요청에 없다 (models.md §1-2)
+  if (raw.provider === "openai") {
+    return {
+      ...base,
+      provider: "openai",
+      ...(raw.thinking_level && { thinkingLevel: raw.thinking_level }),
+    };
+  }
+  return {
+    ...base,
+    provider: "anthropic",
+    ...(raw.thinking_level && { thinkingLevel: raw.thinking_level }),
+  };
 }
 
 /** YAML 문자열을 순수하게 검증·정규화한다 — 파일 IO 없이 설정 테스트에 쓴다. */
@@ -172,6 +209,16 @@ export const LLM_CONFIG = loadLlmConfig();
 
 export function agentConfig(name: AgentName): AgentConfig {
   return LLM_CONFIG.agents[name];
+}
+
+/**
+ * 이 에이전트가 부르는 제공자에서 캐시가 걸리기 시작하는 입력 크기.
+ *
+ * 계측(`cacheAlerts`)과 원문 기록이 같은 자리를 읽는다 — 문턱은 자리마다 그 자리의
+ * 제공자에게 물어야 한다 (models.md §4).
+ */
+export function agentMinCacheableInput(name: AgentName): number {
+  return PROVIDER_TRAITS[agentConfig(name).provider].minCacheableInput;
 }
 
 export function hasKey(provider: LlmProvider, env: LlmEnv = process.env): boolean {
