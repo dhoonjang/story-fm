@@ -1497,6 +1497,18 @@ function pruneLedger(state: GameState): void {
 }
 
 /**
+ * 지금 구단의 보고서만 (finance.md §4.3).
+ *
+ * ⚠️ **`state.financeReports`를 그대로 읽는 자리가 있으면 안 된다.** 이직해도 옛
+ * 구단의 보고서는 세이브에 남으므로(커리어의 사실이다 — career.md §5.1), 거르지
+ * 않으면 새 구단의 PSR·시즌 누계·성과 보너스·급여 비중·월간 조회가 옛 구단의
+ * 숫자를 합산한다.
+ */
+export function userReports(state: GameState): FinanceReport[] {
+  return state.financeReports.filter((r) => r.teamId === state.userTeamId);
+}
+
+/**
  * 한 카테고리의 한 줄 — **방향은 `kind`가 정한다.**
  *
  * 카테고리만으로 접으면 수입·지출 양쪽에 설 수 있는 `other`(카테고리 도입 전 세이브)가
@@ -1581,9 +1593,7 @@ function closeMonths(state: GameState, digest: string[], through: string): void 
     .filter((m) => m <= through)
     .sort();
   for (const month of months) {
-    if (state.financeReports.some((r) => r.month === month && r.teamId === state.userTeamId)) {
-      continue;
-    }
+    if (userReports(state).some((r) => r.month === month)) continue;
     const report = buildReport(state, month, finance.ledger);
     state.financeReports.push(report);
     digest.push(
@@ -1609,7 +1619,7 @@ function buildReport(state: GameState, month: string, ledger: LedgerEntry[]): Fi
   const openingBalance = closingBalance - s.cashNet;
 
   const season = seasonOfMonth(state, month);
-  const sameSeason = state.financeReports.filter((r) => r.season === season);
+  const sameSeason = userReports(state).filter((r) => r.season === season);
   const seasonToDate = {
     income: sameSeason.reduce((x, r) => x + r.incomeTotal, 0) + s.incomeTotal,
     expense: sameSeason.reduce((x, r) => x + r.expenseTotal, 0) + s.expenseTotal,
@@ -1699,7 +1709,7 @@ function seasonOfMonth(state: GameState, month: string): number {
 function rollingPnl(state: GameState, season: number, pending = 0): number {
   const from = season - (PSR_SEASONS - 1);
   return (
-    state.financeReports
+    userReports(state)
       .filter((r) => r.season >= from && r.season <= season)
       .reduce((s, r) => s + r.pnlNet, 0) + pending
   );
@@ -1875,7 +1885,7 @@ const BUDGET_CARRY_SEASONS = 1;
  */
 function operatingPnlOf(state: GameState, season: number): number {
   let total = 0;
-  for (const report of state.financeReports) {
+  for (const report of userReports(state)) {
     if (report.season !== season) continue;
     const sold = report.income.find((l) => l.category === "transfer_in")?.amount ?? 0;
     total += report.pnlNet - sold;
@@ -2152,9 +2162,7 @@ export function adjustTransferBudget(
  */
 export function seasonWageRatio(state: GameState): number {
   const months = [
-    ...state.financeReports.filter(
-      (r) => r.teamId === state.userTeamId && r.season === state.season,
-    ),
+    ...userReports(state).filter((r) => r.season === state.season),
     currentMonthSummary(state),
   ];
   let wages = 0;
@@ -2182,9 +2190,8 @@ export function currentMonthSummary(state: GameState) {
 export function financeLookup(state: GameState, month?: string): { ok: boolean; message: string } {
   const finance = financeOf(state, state.userTeamId);
   const lines: string[] = [];
-  const report = month
-    ? state.financeReports.find((r) => r.month === month)
-    : [...state.financeReports].reverse()[0];
+  const reports = userReports(state);
+  const report = month ? reports.find((r) => r.month === month) : [...reports].reverse()[0];
 
   const debt = debtOf(state, state.userTeamId);
   lines.push(
@@ -2198,7 +2205,7 @@ export function financeLookup(state: GameState, month?: string): { ok: boolean; 
 
   if (month && !report) {
     lines.push(
-      `${month} 보고서가 없습니다 — 발행된 달: ${state.financeReports.map((r) => r.month).join(", ") || "없음"}`,
+      `${month} 보고서가 없습니다 — 발행된 달: ${reports.map((r) => r.month).join(", ") || "없음"}`,
     );
   }
 

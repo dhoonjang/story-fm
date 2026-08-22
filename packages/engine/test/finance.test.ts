@@ -895,6 +895,53 @@ describe("PSR", () => {
     expect(finance.transferBudget).toBe(budget); // 보충 없음
   });
 
+  /**
+   * 이직해도 앞 구단의 보고서는 세이브에 남는다 (career.md §5.1) — 읽는 자리가
+   * 거르지 않으면 새 구단의 PSR과 성과 보너스가 남의 장부로 계산된다.
+   */
+  it("앞 구단의 보고서는 새 구단의 PSR·성과 보너스에 섞이지 않는다", () => {
+    const state = createTestGame();
+    const previous = state.teams.find((t) => t.id !== state.userTeamId)!.id;
+    const report = (teamId: string, pnl: number) => ({
+      id: `fr-${teamId}`,
+      teamId,
+      month: "2026-08",
+      season: 1,
+      openingBalance: 0,
+      closingBalance: 0,
+      income: [],
+      expense: [],
+      incomeTotal: 0,
+      expenseTotal: Math.max(0, -pnl),
+      cashNet: 0,
+      pnlNet: pnl,
+      wageRatio: 0.9,
+      seasonToDate: { income: 0, expense: 0, cashNet: 0, pnlNet: 0 },
+      psr: null,
+      notes: [],
+    });
+    // 앞 구단에서 한도를 통째로 날린 시즌 — 새 구단의 여유는 그대로여야 한다
+    state.financeReports.push(report(previous, -(PSR_LOSS_LIMIT + 20_000_000)));
+    expect(psrStatus(state).rolling3Season).toBe(0);
+    expect(psrStatus(state).headroom).toBe(PSR_LOSS_LIMIT);
+
+    const finance = financeOf(state, state.userTeamId);
+    finance.transferBudget = 0; // 이월을 빼고 이번 보충만 본다
+    topUpTransferBudget(state, state.userTeamId, 45_000_000, []);
+    expect(finance.budgetFrozen, "앞 구단의 적자로 새 구단 예산이 얼었다").toBe(false);
+    const withoutOld = finance.transferBudget;
+
+    // 새 구단의 흑자는 반영되지만 앞 구단의 흑자는 아니다
+    state.season = 2;
+    state.financeReports.push(report(previous, 40_000_000));
+    finance.transferBudget = 0;
+    topUpTransferBudget(state, state.userTeamId, 45_000_000, []);
+    expect(finance.transferBudget, "앞 구단의 흑자가 성과 보너스로 왔다").toBe(withoutOld);
+
+    // 월간 조회도 남의 달을 발행된 것으로 세지 않는다
+    expect(financeLookup(state, "2026-08").message).toContain("보고서가 없습니다");
+  });
+
   it("여유가 있으면 지난 시즌 손익이 예산에 반영된다", () => {
     const state = createTestGame();
     state.season = 2;
