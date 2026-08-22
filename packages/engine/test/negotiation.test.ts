@@ -499,7 +499,9 @@ describe("분할 지급 — 관문은 첫 회분을 잰다", () => {
     expect(negotiation.status).toBe("open");
     const last = negotiation.rounds[negotiation.rounds.length - 1]!;
     expect(last.by).toBe("them");
-    expect(last.verdict).toBe("counter");
+    // 답을 기다리는 상대 오퍼다 — 감독이 답하는 경로에 잡혀야 "답해야 합니다"가 참이다
+    expect(last.verdict).toBeNull();
+    expect(incomingOffers(state).map((n) => n.id)).toContain(negotiation.id);
     // 총액은 그대로고 바뀐 것은 시점뿐이다
     expect(last.fee).toBe(SALE_FEE);
     expect(last.paymentYears).toBe(2);
@@ -513,6 +515,65 @@ describe("분할 지급 — 관문은 첫 회분을 잰다", () => {
     const failed = acceptDeal(broke, second.negotiation.id);
     expect(failed.ok).toBe(false);
     expect(second.negotiation.status).toBe("expired");
+  });
+
+  it("분할 역제안을 감독이 받으면 그 연수로 계약이 선다", () => {
+    const state = createTestGame(42);
+    const { negotiation, buyerTeamId } = stagedSale(state, SALE_FEE);
+    const playerId = negotiation.gamePlayerId;
+    financeOf(state, buyerTeamId).transferBudget = Math.floor(SALE_FEE / 2);
+    expect(acceptDeal(state, negotiation.id).ok).toBe(false);
+
+    const answered = answerIncomingOffer(state, {
+      negotiationId: negotiation.id,
+      verdict: "accept",
+    });
+    expect(answered.ok, answered.message).toBe(true);
+    expect(negotiation.status).toBe("agreed");
+
+    const done = acceptDeal(state, negotiation.id);
+    expect(done.ok, done.message).toBe(true);
+    expect(negotiation.status).toBe("completed");
+    expect(playerById(state, playerId)!.teamId).toBe(buyerTeamId);
+    const schedule = state.paymentSchedules!.find((s) => s.gamePlayerId === playerId)!;
+    expect(schedule.installments).toHaveLength(2);
+    expect(schedule.installments.reduce((sum, i) => sum + i.amount, 0)).toBe(SALE_FEE);
+  });
+
+  it("분할 오퍼에 값을 올려 되불러도 분할 연수는 남는다", () => {
+    const state = createTestGame(42);
+    const { negotiation, buyerTeamId } = stagedSale(state, SALE_FEE);
+    const playerId = negotiation.gamePlayerId;
+    // 올린 총액의 2년 첫 회분까지는 들어오고 일시금은 못 내는 예산
+    const demanded = SALE_FEE + 1_000_000;
+    const budget = Math.ceil(demanded / 2);
+    financeOf(state, buyerTeamId).transferBudget = budget;
+    expect(acceptDeal(state, negotiation.id).ok).toBe(false);
+
+    // 일시금으로 되부르면 관문이 같은 분할 역제안을 다시 세운다 — 연수가 남아야 닫힌다
+    const countered = answerIncomingOffer(state, {
+      negotiationId: negotiation.id,
+      verdict: "counter",
+      fee: demanded,
+    });
+    expect(countered.ok, countered.message).toBe(true);
+    const ours = pendingOffer(negotiation)!;
+    expect(ours.by).toBe("us");
+    expect(ours.fee).toBe(demanded);
+    expect(ours.paymentYears).toBe(2);
+
+    // 상대가 받으면 합의 라운드가 분할을 지고 와서 관문을 첫 회분으로 지난다
+    state.date = ours.respondsOn!;
+    const accepted = respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
+    expect(accepted.ok, accepted.message).toBe(true);
+    const done = acceptDeal(state, negotiation.id);
+    expect(done.ok, done.message).toBe(true);
+    expect(negotiation.status).toBe("completed");
+    expect(playerById(state, playerId)!.teamId).toBe(buyerTeamId);
+    const schedule = state.paymentSchedules!.find((s) => s.gamePlayerId === playerId)!;
+    expect(schedule.installments).toHaveLength(2);
+    expect(schedule.installments[0]!.amount).toBeLessThanOrEqual(budget);
+    expect(schedule.installments.reduce((sum, i) => sum + i.amount, 0)).toBe(demanded);
   });
 
   it("분할 영입은 일정 표가 지고 오늘은 첫 회분만 나간다", () => {
