@@ -427,15 +427,23 @@ export function grantManagerXP(
   amount: number,
 ): string | null {
   state.managerXP[axis] += amount;
-  if (
+  // 한 번에 여러 칸치가 들어오면 그 한 번에 다 오른다 — 나눠 받은 것과 같아야 한다
+  let grown = false;
+  while (
     state.managerXP[axis] >= MANAGER_XP_PER_LEVEL &&
     state.manager.attributes[axis] < MANAGER_ATTR_CAP
   ) {
     state.managerXP[axis] -= MANAGER_XP_PER_LEVEL;
     state.manager.attributes[axis] += 1;
-    return `감독 성장 — ${MANAGER_ATTRIBUTE_KO[axis]} ${state.manager.attributes[axis]}`;
+    grown = true;
   }
-  return null;
+  // 상한에 닿은 축은 더 갈 칸이 없다 — 장부가 무한히 커지지 않게 한 칸 직전에서 멈춘다
+  if (state.manager.attributes[axis] >= MANAGER_ATTR_CAP) {
+    state.managerXP[axis] = Math.min(state.managerXP[axis], MANAGER_XP_PER_LEVEL - 1);
+  }
+  return grown
+    ? `감독 성장 — ${MANAGER_ATTRIBUTE_KO[axis]} ${state.manager.attributes[axis]}`
+    : null;
 }
 
 // ---- 판정형: team_talk / talk_to_player ----
