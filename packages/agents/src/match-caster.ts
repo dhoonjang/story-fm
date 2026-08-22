@@ -1,4 +1,5 @@
 import type { MatchEvent, ShootoutKick, ShootoutOutcome, StrengthPacket } from "@story-fm/domain";
+import { packetTagText, subCauseText } from "@story-fm/domain";
 
 /**
  * 매치 캐스터 — 경기 장면의 GM. 사건은 코어가 xg로 이미 확정하고
@@ -148,7 +149,12 @@ export function buildSegmentMessage(
   const lines = events.map((ev) => {
     const who = actorsNote(ev, nameOf);
     const team = ev.team ? `${sideName(ev.team)} ` : "";
-    const cause = ev.causes.length > 0 ? ` · 근거: ${ev.causes.join(" / ")}` : "";
+    /** 교체의 갈래는 `subCause`가, 골의 근거는 패킷 태그가 갖는다 (match.md §4) */
+    const reasons = [
+      ...(ev.subCause ? [subCauseText(ev.subCause)] : []),
+      ...ev.causes.map((tag) => packetTagText(tag)),
+    ];
+    const cause = reasons.length > 0 ? ` · 근거: ${reasons.join(" / ")}` : "";
     const detail = ev.detail ? ` · ${ev.detail}` : "";
     return `- ${ev.minute}′ ${team}${EVENT_KO[ev.type]}${who ? `: ${who}` : ""}${cause}${detail}`;
   });

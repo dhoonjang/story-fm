@@ -11,7 +11,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { GamePlayerSchema, TacticsSpecSchema, type MatchEvent } from "@story-fm/domain";
-import { naturalPositionOf } from "@story-fm/domain";
+import {
+  matchupText,
+  naturalPositionOf,
+  packetTagContext,
+  packetTagText,
+  subCauseText,
+} from "@story-fm/domain";
 import {
   applyEvents,
   buildStrengthPacket,
@@ -91,8 +97,9 @@ const packet = buildStrengthPacket(toSideInput(fixture.home), toSideInput(fixtur
 
 console.log("═══ 전력 분석 패킷 ═══");
 console.log(`${packet.home.teamName}(홈) vs ${packet.away.teamName}`);
-for (const m of packet.matchups) console.log(`  · ${m.why}`);
-for (const k of packet.keyPoints) console.log(`  ★ ${k}`);
+const tagCtx = packetTagContext(packet);
+for (const m of packet.matchups) console.log(`  · ${matchupText(m)}`);
+for (const k of packet.keyPoints) console.log(`  ★ ${packetTagText(k, tagCtx)}`);
 console.log(
   `  기대 득점 ${packet.guide.expectedGoals.home} : ${packet.guide.expectedGoals.away} · 업셋 확률 ${Math.round(packet.guide.upsetChance * 100)}%`,
 );
@@ -215,7 +222,11 @@ console.log("\n이벤트 로그:");
 for (const e of ledger.events) {
   const team = e.team ? ` [${e.team}]` : "";
   const actors = e.actors.length > 0 ? ` ${e.actors.join(" → ")}` : "";
-  const causes = e.causes.length > 0 ? `  ⟵ ${e.causes.join(", ")}` : "";
+  const reasons = [
+    ...(e.subCause ? [subCauseText(e.subCause)] : []),
+    ...e.causes.map((t) => packetTagText(t, tagCtx)),
+  ];
+  const causes = reasons.length > 0 ? `  ⟵ ${reasons.join(", ")}` : "";
   console.log(`  ${String(e.minute).padStart(3)}′ ${e.type}${team}${actors}${causes}`);
 }
 console.log(

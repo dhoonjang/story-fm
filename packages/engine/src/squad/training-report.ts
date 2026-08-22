@@ -1,4 +1,4 @@
-import type { AttributeAxis, TrainAttr } from "@story-fm/domain";
+import type { AttributeAxis, GrowthOrigin, TrainAttr } from "@story-fm/domain";
 import {
   ATTRIBUTE_AXES,
   AXIS_KO,
@@ -429,7 +429,7 @@ export function applyTrainingOutcomes(
             "training",
             "tactical",
             moved,
-            "훈련 결산",
+            "training-settlement",
             session.date,
           );
           lines.push(`${player.name} 전술 ${moved > 0 ? "+" : ""}${moved}`);
@@ -471,7 +471,7 @@ export function applyTrainingOutcomes(
             "training",
             `pos:${program.position}`,
             gained,
-            "전향 훈련",
+            "position-conversion",
             session.date,
           );
           lines.push(`${player.name} ${program.position} 적응 +${gained}`);
@@ -498,7 +498,7 @@ export function applyTrainingOutcomes(
       cap: attrCap,
       factor: uptake,
       source: "training",
-      note: "훈련 결산",
+      origin: "training-settlement",
       entryId: session.entryId,
       on: session.date,
     });
@@ -553,7 +553,8 @@ export function applyAttributeStep(
      */
     factor?: number;
     source: "training" | "match";
-    note: string;
+    /** 어느 경로로 올랐나 — 문장이 아니라 코드다 (records.ts `GrowthOrigin`) */
+    origin: GrowthOrigin;
     /** 출처 일정·날짜 — 결산은 지나간 훈련 날짜를 가리킨다 */
     entryId?: string;
     on?: string;
@@ -605,7 +606,7 @@ export function applyAttributeStep(
     opts.source,
     axis,
     applied,
-    opts.note,
+    opts.origin,
     opts.on,
   );
   return { axis, step: applied, value: attrs[axis]! };

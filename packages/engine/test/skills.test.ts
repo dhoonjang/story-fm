@@ -29,6 +29,7 @@ import {
   movePlayerSlot,
   moraleToForm,
   playerById,
+  pushNarrative,
   recordEdit,
   occupiesSquadList,
   isHomegrownFor,
@@ -251,8 +252,10 @@ describe("판정형 스킬 — 변화량은 공식이 정한다 (overview §7)",
 });
 
 describe("감독 성장 — XP 100당 +1, 상한 90", () => {
+  // 월드는 검증 대상이 아니다 — 픽스처 하나를 나눠 쓰고, 케이스마다 축의 초기값을 세운다
+  const state = createTestGame();
+
   it("XP 임계 도달 시 능력치가 오른다", () => {
-    const state = createTestGame();
     const before = state.manager.attributes.leadership;
     let leveled: string | null = null;
     for (let i = 0; i < 13 && !leveled; i++) {
@@ -261,11 +264,41 @@ describe("감독 성장 — XP 100당 +1, 상한 90", () => {
     expect(state.manager.attributes.leadership).toBe(before + 1);
   });
 
-  it("상한 90에서는 더 오르지 않는다", () => {
-    const state = createTestGame();
+  it("상한 90에서는 더 오르지 않고 XP도 한 칸 직전에서 멈춘다", () => {
     state.manager.attributes.tactics = 90;
+    state.managerXP.tactics = 0;
     expect(grantManagerXP(state, "tactics", 500)).toBeNull();
     expect(state.manager.attributes.tactics).toBe(90);
+    expect(state.managerXP.tactics).toBe(99);
+    // 몇 번을 더 줘도 장부는 그대로다 — 상한 뒤 XP가 세이브에서 무한히 자라지 않는다
+    grantManagerXP(state, "tactics", 500);
+    expect(state.managerXP.tactics).toBe(99);
+  });
+
+  it("상한 뒤 XP가 부풀어 있던 옛 세이브도 다음 부여에서 잘린다", () => {
+    state.manager.attributes.negotiation = 90;
+    state.managerXP.negotiation = 4000;
+    expect(grantManagerXP(state, "negotiation", 15)).toBeNull();
+    expect(state.managerXP.negotiation).toBe(99);
+  });
+
+  it("한 번에 준 큰 XP는 나눠 준 것과 같은 칸수를 올린다", () => {
+    state.manager.attributes.training = 60;
+    state.managerXP.training = 0;
+    state.manager.attributes.analysis = 60;
+    state.managerXP.analysis = 0;
+    expect(grantManagerXP(state, "training", 250)).not.toBeNull();
+    for (let i = 0; i < 500; i++) grantManagerXP(state, "analysis", 0.5);
+    expect(state.manager.attributes.training).toBe(state.manager.attributes.analysis);
+    expect(state.managerXP.training).toBeCloseTo(state.managerXP.analysis, 9);
+  });
+
+  it("상한을 넘겨 준 XP는 상한까지만 쓰인다", () => {
+    state.manager.attributes.leadership = 88;
+    state.managerXP.leadership = 0;
+    expect(grantManagerXP(state, "leadership", 1000)).not.toBeNull();
+    expect(state.manager.attributes.leadership).toBe(90);
+    expect(state.managerXP.leadership).toBe(99);
   });
 });
 
@@ -1225,6 +1258,29 @@ describe("서사 이벤트 — 체력·폼만, 한도 내 (overview §7)", () =>
     // 날이 바뀌면 다시 세 번이 열린다 — 한도의 단위는 하루다
     state.date = addDays(state.date, 1);
     expect(fire().ok).toBe(true);
+  });
+
+  /**
+   * 한도를 세는 열쇠는 **갈래**다 (records.ts `NarrativeKind`). 접두 문장으로
+   * 가르던 자리라, 문구를 다듬는 것만으로 상한이 사라지던 판정이다
+   * (overview.md §1 철칙 4).
+   */
+  it("한도는 문구가 아니라 갈래로 센다", () => {
+    const state = createTestGame();
+    const player = userPlayers(state)[0]!;
+    const fire = () => applyNarrativeEvent(state, { playerIds: [player.id], note: "장면" });
+    expect(fire().ok).toBe(true);
+
+    const line = state.narrative[state.narrative.length - 1]!;
+    expect(line.kind, "갈래 없이 적혔다").toBe("gm-event");
+    expect(line.text, "문구에 표식이 박혔다").toBe("장면");
+
+    // 같은 날의 다른 갈래는 한도에 안 든다 — 경기·이적 줄이 서사 이벤트를 막지 않는다
+    pushNarrative(state, "리그 3연승", 3, "match");
+    pushNarrative(state, "갈래를 모르는 옛 줄", 3);
+    expect(fire().ok).toBe(true);
+    expect(fire().ok).toBe(true);
+    expect(fire().ok, "네 번째가 통과했다").toBe(false);
   });
 
   it("폼은 −1/0/+1 단계로만 말하고 코어가 0.12씩 옮긴다", () => {

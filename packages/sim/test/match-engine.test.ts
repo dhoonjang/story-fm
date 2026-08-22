@@ -3,7 +3,6 @@ import {
   AI_SHIFT_BOUND,
   AI_SHAPE_CHASE_MINUTE,
   AI_SHAPE_HOLD_MINUTE,
-  AI_SUB_CAUSE,
   EXTRA_TIME_SUBS,
   SUB_CHASE_MAX,
   SUB_CHASE_MINUTE,
@@ -22,7 +21,7 @@ import {
   planAiTacticalShift,
   planAiSubstitution,
 } from "@story-fm/sim";
-import { DEFAULT_TACTICS } from "@story-fm/domain";
+import { DEFAULT_TACTICS, matchupTag } from "@story-fm/domain";
 import type { GamePlayer, StrengthPacket, TacticsSpec } from "@story-fm/domain";
 import { makeLedgerSide, makeSide, makeSquad } from "./helpers";
 
@@ -252,25 +251,25 @@ describe("구간 시뮬레이터 — 결과는 코어가 정한다", () => {
     }
   });
 
-  it("골의 원인 태그는 패킷에서 인용한 문장뿐이다 — 지어낸 문장은 붙지 않는다", () => {
+  it("골의 원인 태그는 패킷에서 인용한 태그뿐이다 — 지어낸 태그는 붙지 않는다", () => {
     const s = setup(88, 62);
     const { ledger } = playMatch(s, 5);
     /**
-     * 코어가 인용할 수 있는 문장의 전부 — 여기 없는 문자열이 붙으면 그게 곧
-     * 검증되지 않은 태그다. **비어 있는 것은 정상이다**: 패킷이 그 편에 줄 근거를
-     * 하나도 갖지 않은 경기가 있고, 폴백 문장을 세우면 모든 골이 "전술이 근거로
+     * 코어가 인용할 수 있는 태그의 전부 — 여기 없는 태그가 붙으면 그게 곧
+     * 검증되지 않은 근거다. **비어 있는 것은 정상이다**: 패킷이 그 편에 줄 근거를
+     * 하나도 갖지 않은 경기가 있고, 폴백 태그를 세우면 모든 골이 "전술이 근거로
      * 붙은 골"이 되어 감독의 전술 XP 조건이 조건이 아니게 된다 (career.md §3).
      */
-    const quotable = new Set([
-      ...s.packet.matchups.map((m) => m.why),
+    const quotable = [
+      ...s.packet.matchups.map((m) => matchupTag(m)),
       ...s.packet.keyPoints,
       ...s.packet.home.tactical.notes,
       ...s.packet.away.tactical.notes,
-    ]);
+    ];
     const goals = ledger.events.filter((e) => e.type === "goal");
     expect(goals.length).toBeGreaterThan(0);
     for (const goal of goals) {
-      for (const cause of goal.causes) expect(quotable).toContain(cause);
+      for (const cause of goal.causes) expect(quotable).toContainEqual(cause);
       expect(goal.shotOutcome).toBe("goal");
       expect(goal.xg).toBeGreaterThan(0);
       expect(goal.goalProbability).toBeGreaterThan(0);
@@ -598,7 +597,8 @@ describe("AI 교체 판단", () => {
       type: "substitution",
       team: "home",
       actors: ["out", "in"],
-      causes: [AI_SUB_CAUSE.chase],
+      causes: [],
+      subCause: "chase",
     }));
   const groupOfId = (squad: ReturnType<typeof squadOf>, id: string | undefined) =>
     [...squad.onPitch, ...squad.bench].find((p) => p.id === id)?.positions[0]?.position ?? "";
@@ -743,16 +743,12 @@ describe("AI 교체 판단", () => {
 
   it("한 골 차로 뒤지면 SUB_CHASE_MINUTE부터 던진다 — 한 분 전에는 아무도 안 바꾼다", () => {
     expect(chaseAt(SUB_CHASE_MINUTE - 1, { home: 0, away: 1 })).toEqual([]);
-    expect(chaseAt(SUB_CHASE_MINUTE, { home: 0, away: 1 })[0]?.causes).toEqual([
-      AI_SUB_CAUSE.chase,
-    ]);
+    expect(chaseAt(SUB_CHASE_MINUTE, { home: 0, away: 1 })[0]?.subCause).toBe("chase");
   });
 
   it("두 골 차로 뒤지면 그만큼 이르다", () => {
     expect(chaseAt(SUB_CHASE_MINUTE_TWO, { home: 0, away: 1 })).toEqual([]);
-    expect(chaseAt(SUB_CHASE_MINUTE_TWO, { home: 0, away: 2 })[0]?.causes).toEqual([
-      AI_SUB_CAUSE.chase,
-    ]);
+    expect(chaseAt(SUB_CHASE_MINUTE_TWO, { home: 0, away: 2 })[0]?.subCause).toBe("chase");
   });
 
   it("승부수는 수비를 빼고 공격 자원을 넣는다", () => {
@@ -775,7 +771,7 @@ describe("AI 교체 판단", () => {
     const squad = squadOf(75);
     expect(chaseAt(SUB_HOLD_MINUTE - 1, { home: 1, away: 0 })).toEqual([]);
     const sub = chaseAt(SUB_HOLD_MINUTE, { home: 1, away: 0 })[0];
-    expect(sub?.causes).toEqual([AI_SUB_CAUSE.hold]);
+    expect(sub?.subCause).toBe("hold");
     expect(groupOfId(squad, sub?.actors[0])).toBe("ST");
     expect(groupOfId(squad, sub?.actors[1])).toBe("CB");
   });
@@ -799,7 +795,7 @@ describe("AI 교체 판단", () => {
       {},
     )[0];
     expect(groupOfId(full, sub?.actors[0])).toMatch(/M$/); // RM·LM·RCM·LCM
-    expect(sub?.causes).toEqual([AI_SUB_CAUSE.chase]);
+    expect(sub?.subCause).toBe("chase");
   });
 
   it("부상이 먼저다 — 뒤지고 있어도 다친 선수부터 뺀다", () => {
@@ -815,7 +811,7 @@ describe("AI 교체 판단", () => {
     );
     expect(subs).toHaveLength(1);
     expect(subs[0]?.actors[0]).toBe(hurt.id);
-    expect(subs[0]?.causes).toEqual([AI_SUB_CAUSE.injury]);
+    expect(subs[0]?.subCause).toBe("injury");
   });
 
   /**
@@ -836,8 +832,8 @@ describe("AI 교체 판단", () => {
       worn,
     );
     expect(subs.length).toBe(SUB_WINDOW_MAX);
-    expect(subs[0]?.causes).toEqual([AI_SUB_CAUSE.chase]);
-    expect(subs[1]?.causes).toEqual([AI_SUB_CAUSE.fatigue]);
+    expect(subs[0]?.subCause).toBe("chase");
+    expect(subs[1]?.subCause).toBe("fatigue");
     // 한 창 안에서 같은 선수가 두 번 나가거나 두 번 들어오지 않는다
     const outs = subs.map((s) => s.actors[0]);
     const ins = subs.map((s) => s.actors[1]);

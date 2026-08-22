@@ -4,12 +4,14 @@ import type {
   PlayerShotRoute,
   MatchSide,
   MatchStatLine,
+  PacketTag,
   PlayPhase,
   Player,
   StrengthPacket,
+  SubCause,
   TacticsSpec,
 } from "@story-fm/domain";
-import { PHASE_END, PHASE_START, positionGroupOfPlayer } from "@story-fm/domain";
+import { matchupTag, PHASE_END, PHASE_START, positionGroupOfPlayer } from "@story-fm/domain";
 import { directiveDrain, type DirectiveInput } from "./directives";
 import { subLimitsOf, type MatchLedgerState } from "./match-ledger";
 import { conditionDrain, drainVariance } from "./stamina";
@@ -415,17 +417,12 @@ function pickInjured(
  * 골"이라는 전술 XP의 조건이 조건이 아니게 된다 (career.md §3). 패킷이 그 편에 줄
  * 근거를 하나도 갖지 않은 경기는 실제로 있다.
  */
-function causesFor(packet: StrengthPacket, side: MatchSide): string[] {
+function causesFor(packet: StrengthPacket, side: MatchSide): PacketTag[] {
   const zone = side === "home" ? "attack" : "defense";
   const hit = packet.matchups.find((m) => m.zone === zone && m.edge === side);
-  if (hit) return [hit.why];
-  /**
-   * 키포인트 문장은 팀 이름·상성 이름으로 시작해 **편이 문장에 없다.** 어느 편에
-   * 이로운지는 패킷이 같은 순서로 실어 보낸 `keyPointSides`가 원본이다
-   * (`strength-packet.ts`).
-   */
-  const at = packet.keyPointSides?.indexOf(side) ?? -1;
-  const key = at >= 0 ? packet.keyPoints[at] : undefined;
+  if (hit) return [matchupTag(hit)];
+  /** 어느 편에 이로운지는 태그의 `favours`가 원본이다 (`strength-packet.ts`) */
+  const key = packet.keyPoints.find((tag) => tag.favours === side);
   if (key) return [key];
   const note = (side === "home" ? packet.home : packet.away).tactical.notes[0];
   return note ? [note] : [];
@@ -881,8 +878,8 @@ export const SUB_HOLD_MINUTE = 75;
  * 한 경기에 쓰는 승부수·굳히기 장수 — ⚠️ 밸런스 값.
  *
  * 상한이 없으면 정지점이 잦은 경기에서 교체 카드(6인/4회)가 스코어 하나에 통째로
- * 쓰이고, 그다음 부상에 댈 자원이 남지 않는다. **세는 자리는 장부의 `causes`다** —
- * 세이브에 칸을 두지 않으므로 옛 세이브에서도 셈이 맞는다.
+ * 쓰이고, 그다음 부상에 댈 자원이 남지 않는다. **세는 자리는 장부의 `subCause`다** —
+ * 세이브에 칸을 따로 두지 않으므로 갈래를 모르는 옛 교체는 셈에 들지 않는다.
  */
 export const SUB_CHASE_MAX = 2;
 export const SUB_HOLD_MAX = 1;
@@ -894,19 +891,6 @@ export const SUB_HOLD_MAX = 1;
  * 재는 자리는 `pnpm balance ai-bench`다.
  */
 export const SUB_WINDOW_MAX = 3;
-
-/**
- * 교체의 근거 — **중계가 그대로 인용하고, 장수를 세는 열쇠이기도 하다.**
- * 하네스가 갈래를 나눠 세는 자리도 여기라 문자열이 두 곳에 적히지 않는다.
- */
-export const AI_SUB_CAUSE = {
-  injury: "부상 — 교체 불가피",
-  chase: "승부수 — 공격 자원 투입",
-  hold: "리드 굳히기 — 수비 보강",
-  fatigue: "체력 저하 — 로테이션",
-} as const;
-const CHASE_CAUSE = AI_SUB_CAUSE.chase;
-const HOLD_CAUSE = AI_SUB_CAUSE.hold;
 
 /**
  * 그 줄이 무너지지 않는 최소 인원 — 승부수가 수비를 셋 밑으로 깎지 않는다.
@@ -937,8 +921,8 @@ export interface BenchView {
   diff: number;
   subsUsed: number;
   subWindows: number;
-  /** 이 경기에 이미 쓴 갈래별 장수 — 장부의 교체 사건이 쥔 `causes`가 원본이다 */
-  spent: (cause: string) => number;
+  /** 이 경기에 이미 쓴 갈래별 장수 — 장부의 교체 사건이 쥔 `subCause`가 원본이다 */
+  spent: (cause: SubCause) => number;
   /** 지금 그라운드에 서 있고 뺄 수 있는 필드 선수 — GK·퇴장·이 구간의 사건 당사자 제외 */
   field: Player[];
   /** 남은 벤치 자원 */
@@ -951,7 +935,7 @@ export interface BenchView {
 export interface BenchSub {
   out: Player;
   in: Player;
-  cause: string;
+  cause: SubCause;
 }
 
 /**
@@ -1005,7 +989,7 @@ export function planBenchSubs(view: BenchView, rng: () => number): BenchSub[] {
       if (view.tiredness(player) < threshold) break;
       const replacement = benchOf(positionGroupOfPlayer(player));
       if (!replacement) continue;
-      take({ out: player, in: replacement, cause: AI_SUB_CAUSE.fatigue });
+      take({ out: player, in: replacement, cause: "fatigue" });
     }
   }
   return subs;
@@ -1079,7 +1063,8 @@ export function planAiSubstitution(
           type: "substitution",
           team: side,
           actors: [hurt.id, cover.id],
-          causes: [AI_SUB_CAUSE.injury],
+          causes: [],
+          subCause: "injury",
         },
       ];
     }
@@ -1109,10 +1094,10 @@ export function planAiSubstitution(
       diff: mine - theirs,
       subsUsed: team.subsUsed,
       subWindows: team.subWindows,
-      /** 이 경기에 이미 쓴 장수 — 장부의 근거로 센다 */
+      /** 이 경기에 이미 쓴 장수 — 장부의 갈래 코드로 센다 */
       spent: (cause) =>
         ledger.events.filter(
-          (e) => e.type === "substitution" && e.team === side && e.causes.includes(cause),
+          (e) => e.type === "substitution" && e.team === side && e.subCause === cause,
         ).length,
       field,
       bench: squad.bench.filter((p) => !unavailable.has(p.id)),
@@ -1122,10 +1107,15 @@ export function planAiSubstitution(
   );
   return picked.map((sub) => ({
     minute: plan.minute,
-    type: "substitution",
+    type: "substitution" as const,
     team: side,
     actors: [sub.out.id, sub.in.id],
-    causes: [sub.cause],
+    /**
+     * **갈래만 싣는다** — 원인 태그는 비운다. 여기에 태그를 한 장 넣으면 교체마다
+     * 근거가 붙어, 그 태그로 세는 자리(전술 XP·장수)가 갈래를 잃는다 (match.md §4).
+     */
+    causes: [],
+    subCause: sub.cause,
   }));
 }
 
@@ -1164,18 +1154,18 @@ function planScoreSubstitution(
 
   if (diff < 0) {
     const from = diff <= -2 ? SUB_CHASE_MINUTE_TWO : SUB_CHASE_MINUTE;
-    if (minute < from || spent(CHASE_CAUSE) >= SUB_CHASE_MAX) return null;
+    if (minute < from || spent("chase") >= SUB_CHASE_MAX) return null;
     const coming = bench("FW", (p) => p.attributes.finishing + p.attributes.dribbling);
     const going = spare("DF") ?? spare("MF");
     if (!coming || !going) return null;
-    return { out: going, in: coming, cause: CHASE_CAUSE };
+    return { out: going, in: coming, cause: "chase" };
   }
 
-  if (minute < SUB_HOLD_MINUTE || spent(HOLD_CAUSE) >= SUB_HOLD_MAX) return null;
+  if (minute < SUB_HOLD_MINUTE || spent("hold") >= SUB_HOLD_MAX) return null;
   const coming = bench("DF", (p) => p.attributes.tackling + p.attributes.positioning);
   const going = spare("FW") ?? spare("MF");
   if (!coming || !going) return null;
-  return { out: going, in: coming, cause: HOLD_CAUSE };
+  return { out: going, in: coming, cause: "hold" };
 }
 
 /**

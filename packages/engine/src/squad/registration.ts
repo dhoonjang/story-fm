@@ -1,4 +1,5 @@
 import type { GamePlayer, RegistrablePlayer, SquadRegistration } from "@story-fm/domain";
+import type { RegistrationBlock } from "@story-fm/domain";
 import { FIRST_TEAM_LIMIT, canRegister, isUnder21, squadRegistration } from "@story-fm/domain";
 import { seasonYear } from "../competition/calendar";
 import { countryOfTeam } from "../data/team-catalog";
@@ -50,7 +51,7 @@ export function canRegisterFor(
   state: GameState,
   player: Pick<GamePlayer, "id" | "birthdate" | "homegrownCountry">,
   teamId: string,
-): { ok: true } | { ok: false; reason: string } {
+): { ok: true } | { ok: false; block: RegistrationBlock } {
   const squad = firstTeamPlayers(state, teamId)
     .filter((p) => p.id !== player.id)
     .map((p) => registrableOf(state, p, teamId));
@@ -73,7 +74,7 @@ export function canRegisterAllFor(
   players: readonly Pick<GamePlayer, "id" | "birthdate" | "homegrownCountry">[],
   teamId: string,
   leaving: ReadonlySet<string> = new Set(),
-): { ok: true } | { ok: false; playerId: string; reason: string } {
+): { ok: true } | { ok: false; playerId: string; block: RegistrationBlock } {
   const joining = new Set(players.map((p) => p.id));
   const squad = firstTeamPlayers(state, teamId)
     .filter((p) => !joining.has(p.id) && !leaving.has(p.id))
@@ -82,7 +83,7 @@ export function canRegisterAllFor(
   for (const player of players) {
     const entry = registrableOf(state, player, teamId);
     const allowed = canRegister(squad, entry, year);
-    if (!allowed.ok) return { ok: false, playerId: player.id, reason: allowed.reason };
+    if (!allowed.ok) return { ok: false, playerId: player.id, block: allowed.block };
     squad.push(entry);
   }
   return { ok: true };

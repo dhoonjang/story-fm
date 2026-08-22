@@ -335,7 +335,13 @@ function potentialNote(state: GameState, playerId: string, knowledge: Knowledge)
   return margin === null ? "잠재력은 짐작할 근거가 없다" : `잠재력은 구간으로만 안다(±${margin})`;
 }
 
-/** 안개 상태 안내문 — GM이 확신의 정도를 말로 표현할 근거 */
+/**
+ * 안개 상태 **카드** — 눈금·오차폭·잠재력 마진·파견 예정일까지의 사실만 싣는다.
+ *
+ * ⚠️ **지시문은 여기 서지 않는다.** 눈금이 낮을 때 어떻게 말할지는 그 선수에 대한
+ * 사실이 아니라 모델에게 내리는 지시라 GM 시스템 프롬프트가 한 줄로 갖는다
+ * (player.md §10, llm/prompts.md §5).
+ */
 export function knowledgeNote(state: GameState, playerId: string): string {
   const knowledge = knowledgeOf(state, playerId);
   const margin = KNOWLEDGE_MARGIN[knowledge];
@@ -361,10 +367,7 @@ export function knowledgeNote(state: GameState, playerId: string): string {
     );
   }
   const source = knowledge === "seen" ? "직접 상대해 봤다" : "리그 평판·소문 수준";
-  return (
-    `${source} — 평가에 오차가 있다(실행 ±${margin} · 판단 ±${analytical}). ` +
-    `${potential} · 단정하지 말고 인상으로 말하라${pending}`
-  );
+  return `${source} — 평가에 오차가 있다(실행 ±${margin} · 판단 ±${analytical}). ${potential}${pending}`;
 }
 
 /** 강점·약점 지목 — seen 이상에서만 의미가 있다 (관측값 기준) */

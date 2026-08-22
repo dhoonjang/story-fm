@@ -1,4 +1,4 @@
-import { ageOf, isReleaseNote } from "@story-fm/domain";
+import { ageOf, isRelease, issueReasonKo } from "@story-fm/domain";
 import type { GamePlayer, MatchRecord, PlayerIssueReason } from "@story-fm/domain";
 import { diffDays } from "../competition/calendar";
 import { formLabel, RATING_BASELINE, type FormLabel } from "./form";
@@ -209,7 +209,8 @@ function demotionDaysOf(state: GameState, player: GamePlayer): number | null {
 /**
  * 최근 우리 구단에서 **계약이 해지된** 선수 — 원장에서 파생한다.
  *
- * 계약 만료도 해지도 `type: "free"`라 갈리는 것은 `RELEASE_NOTE` 표식뿐이다.
+ * 계약 만료도 해지도 `type: "free"`라 갈리는 것은 `reason` 코드뿐이다 — 옛 세이브만
+ * 문장으로 떨어진다(`isRelease`, game-state.md §6의 유일한 판정 예외).
  * 원장은 날짜 순이므로 뒤에서부터 훑고 창을 벗어나면 멈춘다 — 원장이 아무리 커도
  * 보는 줄은 몇 줄이다.
  */
@@ -221,7 +222,7 @@ function recentDeparture(state: GameState): MoodFact | null {
     if (days < 0) continue;
     if (days > DEPARTURE_ECHO_DAYS) break;
     if (transfer.fromTeamId !== state.userTeamId) continue;
-    if (!isReleaseNote(transfer.note)) continue;
+    if (!isRelease(transfer)) continue;
     const name = playerById(state, transfer.gamePlayerId)?.name;
     if (name === undefined) continue;
     return { cause: "departure", name, days };
@@ -384,18 +385,7 @@ export function issueReasonText(issue: {
   note?: string | null;
   count?: number | null;
 }): string | null {
-  switch (issue.reason) {
-    case "minutes":
-      return "출전 기회";
-    case "losing-run":
-      return issue.count == null ? "연패" : `${issue.count}연패`;
-    case "early-return":
-      return "휴가 반납 소집";
-    case "demotion":
-      return "2군 강등";
-    default:
-      return issue.note ?? null;
-  }
+  return issueReasonKo(issue.reason, issue.count) ?? issue.note ?? null;
 }
 
 /** 며칠 전 경기인가 — 날짜를 셈으로만 옮긴다 */
@@ -570,18 +560,34 @@ const MOOD_NOTE_MAX = 120;
 const SENTENCE_END = /[.!?]$/u;
 
 /**
+ * 결산이 제출하는 한 줄 — **문장과 그 문장에 대한 사실 하나.**
+ *
+ * `acknowledgesIssue`는 문장을 쓴 쪽만 답할 수 있는 것이다. 코어가 `"불만"`이라는
+ * 낱말이 들어 있는지 세던 자리라, 같은 뜻의 다른 말("서운하다", "받아들이지
+ * 못한다")은 전부 버려지고 낱말만 박아 넣은 문장은 통과했다 — 문구를 판정에 쓰면
+ * 언제나 그렇게 갈린다 (overview.md §1 철칙 4).
+ */
+export interface MoodNoteSubmission {
+  playerId: string;
+  text: string;
+  /** 이 문장이 그 선수에게 걸린 불만을 안고 있는가 — 쓴 쪽이 말한다 */
+  acknowledgesIssue: boolean;
+}
+
+/**
  * 결산 결과를 장부에 적는다 — **사실은 코어가 잡고 결만 받는다.**
  *
  * 버려지는 문장은 사실 카드를 남긴다(빈 자리가 되지 않는다). 거르는 조건은 셋이다:
- * ① 대상이 아닌 선수 ② 한 문장이 아니거나 너무 긴 문장 ③ **불만이 걸린 선수인데
- * 그 사실이 문장에 없는 것** — 감독이 손을 써야 하는 일이 결에 묻히면 안 된다.
+ * ① 대상이 아닌 선수 ② 한 문장이 아니거나 너무 긴 문장 — **저장할 문장의 형태
+ * 검사다** ③ **불만이 걸린 선수인데 그 사실을 안지 않은 문장** — 감독이 손을 써야
+ * 하는 일이 결에 묻히면 안 된다.
  *
  * @returns 실제로 반영된 수
  */
 export function applyMoodNotes(
   state: GameState,
   brief: MoodBrief,
-  notes: Array<{ playerId: string; text: string }>,
+  notes: MoodNoteSubmission[],
 ): number {
   const byId = new Map(brief.targets.map((t) => [t.playerId, t] as const));
   let applied = 0;
@@ -595,7 +601,7 @@ export function applyMoodNotes(
     // 재는 것은 **저장할 문장**이다 — 마침표를 붙인 뒤 재지 않으면 121자가 세이브로 나간다
     const sentence = SENTENCE_END.test(text) ? text : `${text}.`;
     if (sentence.length > MOOD_NOTE_MAX) continue;
-    if (target.hasIssue && !text.includes("불만")) continue;
+    if (target.hasIssue && !note.acknowledgesIssue) continue;
     const player = playerById(state, note.playerId);
     if (!player) continue;
     player.state.moodNote = { text: sentence, on: state.date };

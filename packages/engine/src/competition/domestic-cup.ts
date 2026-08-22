@@ -1141,7 +1141,7 @@ export function reviewDomesticCups(state: GameState): string[] {
     const ours = champion === state.userTeamId || runnerUp === state.userTeamId;
 
     if (champion === state.userTeamId) {
-      state.trophies.push({ season: state.season, competition: cup.name, teamId: champion });
+      state.trophies.push({ season: state.season, competitionId: cup.id, teamId: champion });
       state.manager.reputation.media = Math.min(
         100,
         state.manager.reputation.media + CUP_TITLE_MEDIA,

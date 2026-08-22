@@ -1,6 +1,7 @@
 import type {
   Contract,
   FinanceCategory,
+  FinanceNote,
   FinanceReport,
   FinanceReportLine,
   LedgerEntry,
@@ -1599,7 +1600,7 @@ function closeMonths(state: GameState, digest: string[], through: string): void 
     state.financeReports.push(report);
     digest.push(
       `📊 ${month.replace("-", "년 ")}월 재정 보고서 — 수입 ${money(report.incomeTotal)} / 지출 ${money(report.expenseTotal)} / 순 ${report.cashNet >= 0 ? "+" : "−"}${money(Math.abs(report.cashNet))}`,
-      ...report.notes.map((n) => `   ${n}`),
+      ...financeNoteTexts(report).map((n) => `   ${n}`),
     );
     pushNarrative(
       state,
@@ -1631,35 +1632,38 @@ function buildReport(state: GameState, month: string, ledger: LedgerEntry[]): Fi
   const rolling = rollingPnl(state, season, s.pnlNet);
   const psr = { rolling3Season: rolling, headroom: PSR_LOSS_LIMIT + rolling };
 
-  const notes: string[] = [];
+  const noteCards: FinanceNote[] = [];
   const tone = wageRatioTone(s.wageRatio);
   if (tone === "danger") {
-    notes.push(`급여 비중 ${Math.round(s.wageRatio * 100)}% — 위험 구간`);
+    noteCards.push({ code: "wage-ratio-danger", value: s.wageRatio, limit: WAGE_RATIO_DANGER });
   } else if (tone === "caution") {
-    notes.push(`급여 비중 ${Math.round(s.wageRatio * 100)}% — 주의 구간`);
+    noteCards.push({ code: "wage-ratio-caution", value: s.wageRatio, limit: WAGE_RATIO_CAUTION });
   }
   const transferOut = s.expense.find((l) => l.category === "transfer_out")?.amount ?? 0;
   if (s.cashNet < 0 && transferOut > 0) {
-    notes.push(`이적 지출 ${money(transferOut)}으로 현금이 ${money(Math.abs(s.cashNet))} 줄었다`);
+    noteCards.push({
+      code: "cash-deficit-transfer",
+      value: Math.abs(s.cashNet),
+      limit: transferOut,
+    });
   } else if (s.cashNet < 0) {
-    notes.push(`운영만으로 ${money(Math.abs(s.cashNet))} 적자`);
+    noteCards.push({ code: "cash-deficit-operating", value: Math.abs(s.cashNet) });
   }
   if (psr.headroom < 0) {
-    notes.push(`PSR 위반 — 3시즌 누적 ${money(rolling)}, 한도를 ${money(-psr.headroom)} 넘었다`);
+    noteCards.push({ code: "psr-breach", value: rolling, limit: PSR_LOSS_LIMIT });
   } else if (psr.headroom < PSR_LOSS_LIMIT * PSR_HEADROOM_WARN) {
-    notes.push(
-      `PSR 여유 ${money(psr.headroom)} (한도의 ${Math.round(PSR_HEADROOM_WARN * 100)}% 미만)`,
-    );
+    noteCards.push({ code: "psr-headroom-low", value: psr.headroom, limit: PSR_LOSS_LIMIT });
   }
   // 부채는 잔고의 부호로 읽는다 — 감독이 이자를 물고 있다는 사실을 여기서 본다
   const debt = debtOf(state, state.userTeamId);
   if (debt > 0) {
     const limit = debtLimitOf(state, state.userTeamId);
-    notes.push(
-      debt > limit
-        ? `부채 ${money(debt)} — 한도 ${money(limit)}를 넘어 이적 예산이 동결됐다. 연 이자 ${money(debt * DEBT_INTEREST_ANNUAL)}가 매달 나간다`
-        : `부채 ${money(debt)} (동결선 ${money(limit)}) — 연 이자 ${money(debt * DEBT_INTEREST_ANNUAL)}`,
-    );
+    noteCards.push({
+      code: debt > limit ? "debt-over-limit" : "debt-under-limit",
+      value: debt,
+      limit,
+      extra: debt * DEBT_INTEREST_ANNUAL,
+    });
   }
 
   return {
@@ -1678,7 +1682,7 @@ function buildReport(state: GameState, month: string, ledger: LedgerEntry[]): Fi
     wageRatio: s.wageRatio,
     seasonToDate,
     psr,
-    notes,
+    noteCards,
     /**
      * 큰 비정기 항목은 **절단 전에** 여기로 옮겨 적는다 — 그러지 않으면 3개월 뒤
      * 남는 것이 카테고리 합계뿐이라 "그 돈이 언제 들어왔나"에 답할 자리가 없다.
@@ -1694,6 +1698,47 @@ function buildReport(state: GameState, month: string, ledger: LedgerEntry[]): Fi
         amount: e.amount,
       })),
   };
+}
+
+/**
+ * 월간 보고서 노트 한 줄 — **카드에서 만든다** (finance.md §4.3).
+ *
+ * 세이브가 드는 것은 `{ code, value, limit }`뿐이다. 문장을 적어 두면 문구 하나를
+ * 고쳐도 지난 달의 보고서는 옛 말로 남고, 화면·GM·브리핑이 각자 다른 말을 쓴다.
+ * 조언도 판정도 담지 않는다 — 동결은 `budgetFrozen`이 말한다 (§9.2).
+ */
+export function financeNoteText(note: FinanceNote): string {
+  const pct = (v: number | undefined) => `${Math.round((v ?? 0) * 100)}%`;
+  switch (note.code) {
+    case "wage-ratio-danger":
+      return `급여 비중 ${pct(note.value)} — 위험 구간 (${pct(note.limit)} 이상)`;
+    case "wage-ratio-caution":
+      return `급여 비중 ${pct(note.value)} — 주의 구간 (${pct(note.limit)} 이상)`;
+    case "cash-deficit-transfer":
+      return `이적 지출 ${money(note.limit ?? 0)}으로 현금이 ${money(note.value ?? 0)} 줄었다`;
+    case "cash-deficit-operating":
+      return `운영만으로 ${money(note.value ?? 0)} 적자`;
+    case "psr-breach":
+      return `PSR 위반 — 3시즌 누적 ${money(note.value ?? 0)}, 한도를 ${money(-((note.limit ?? 0) + (note.value ?? 0)))} 넘었다`;
+    case "psr-headroom-low":
+      return `PSR 여유 ${money(note.value ?? 0)} (한도의 ${Math.round(PSR_HEADROOM_WARN * 100)}% 미만)`;
+    case "debt-over-limit":
+      return (
+        `부채 ${money(note.value ?? 0)} — 한도 ${money(note.limit ?? 0)}를 넘어 이적 예산이 ` +
+        `동결됐다. 연 이자 ${money(note.extra ?? 0)}가 매달 나간다`
+      );
+    case "debt-under-limit":
+      return `부채 ${money(note.value ?? 0)} (동결선 ${money(note.limit ?? 0)}) — 연 이자 ${money(note.extra ?? 0)}`;
+  }
+}
+
+/**
+ * 보고서의 노트 줄들 — **카드가 먼저, 옛 문장은 폴백이다** (game-state.md §6).
+ * 보여 주는 자리에만 쓴다: 판정은 노트가 아니라 장부와 `budgetFrozen`이 한다.
+ */
+export function financeNoteTexts(report: FinanceReport): string[] {
+  if (report.noteCards) return report.noteCards.map(financeNoteText);
+  return report.notes ?? [];
 }
 
 /**
@@ -2224,7 +2269,7 @@ export function financeLookup(state: GameState, month?: string): { ok: boolean; 
         `PSR: 3시즌 누적 ${money(report.psr.rolling3Season)} · 여유 ${money(report.psr.headroom)}`,
       );
     }
-    if (report.notes.length > 0) lines.push(...report.notes.map((n) => `※ ${n}`));
+    lines.push(...financeNoteTexts(report).map((n) => `※ ${n}`));
   }
 
   if (!month) {

@@ -17,7 +17,7 @@ import {
   userPlayers,
   type GameState,
 } from "@story-fm/engine";
-import { PressConferenceSchema } from "@story-fm/domain";
+import { PressConferenceSchema, pressFactText } from "@story-fm/domain";
 import type { GamePlayer, ManagerOffer, MatchRecord, PressConference } from "@story-fm/domain";
 import { createTestGame } from "./helpers";
 
@@ -89,9 +89,12 @@ describe("기자회견 — 자리 만들기", () => {
     const press = playAndOpen(state);
     expect(press.status).toBe("pending");
     expect(press.facts.length).toBeGreaterThan(0);
-    // 코어는 사실만 넘긴다 — 스코어는 실려 있고 물음표는 없다
+    // 코어는 사실만 넘긴다 — 스코어는 실려 있고, 세이브에 남는 것은 문장이 아니라 카드다
     expect(press.context).toMatch(/\d+-\d+/);
-    for (const f of press.facts) expect(f.text).not.toContain("?");
+    for (const f of press.facts) {
+      expect(f.text, "코어가 사실 문장을 저장했다").toBeUndefined();
+      expect(f.data, "사실 카드가 없다").toBeDefined();
+    }
   });
 
   it("이미 열린 회견이 있으면 새 회견이 앞의 것을 거절로 닫는다", () => {
@@ -162,7 +165,7 @@ describe("기자회견 — 자리 만들기", () => {
     const state = createTestGame();
     const press = playAndOpen(state);
     const note = describePendingPress(state)!;
-    for (const f of press.facts) expect(note).toContain(f.text);
+    for (const f of press.facts) expect(note).toContain(pressFactText(f));
   });
 });
 
@@ -370,7 +373,7 @@ describe("기자회견 — 질문은 장부에서 나온다", () => {
     const press = playAndOpen(state);
     const named = press.facts.filter((f) => f.about !== null);
     expect(named.length).toBeGreaterThan(0);
-    expect(named[0]!.text).toContain(slump.name);
+    expect(named[0]!.data?.name).toBe(slump.name);
   });
 });
 
@@ -434,8 +437,8 @@ describe("기자회견 — 언론 유출은 다음 자리가 싣는다", () => {
     expect(leak, "유출이 회견에 실리지 않았다").toBeDefined();
     expect(leak!.about).toBe(player.id);
     expect(leak!.sharp).toBe(true);
-    expect(leak!.text).toContain(player.name);
-    expect(leak!.text).not.toContain("?");
+    expect(leak!.data?.name).toBe(player.name);
+    expect(leak!.data?.tags?.[0], "유출의 사유가 코드로 실리지 않았다").toBe("minutes");
     expect(conference.weight).toBeGreaterThanOrEqual(2);
     // 실어 간 유출은 남지 않는다 — 남으면 다음 회견이 같은 사실을 다시 묻는다
     expect(state.pressLeaks).toEqual([]);
@@ -487,7 +490,7 @@ describe("기자회견 — 전야", () => {
     expect(opened).toHaveLength(1);
     expect(opened[0]!.weight).toBe(1);
     expect(opened[0]!.status).toBe("pending");
-    for (const f of opened[0]!.facts) expect(f.text).not.toContain("?");
+    for (const f of opened[0]!.facts) expect(f.text).toBeUndefined();
     expect(opened[0]!.facts.some((f) => f.kind === "fixture")).toBe(true);
   });
 
