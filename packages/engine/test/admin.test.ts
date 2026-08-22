@@ -56,7 +56,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-/** 어드민 추가 입력 — 15축을 전부 채워야 하므로 기본값 위에 덮어쓴다 */
+/** 어드민 추가 입력 — 16축을 전부 채워야 하므로 기본값 위에 덮어쓴다 */
 function addInput(
   over: Partial<CatalogPlayerInput> & Pick<CatalogPlayerInput, "nameKo" | "position">,
 ): CatalogPlayerInput {

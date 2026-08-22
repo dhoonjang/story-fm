@@ -167,7 +167,7 @@ export const FootRatingSchema = z.number().int().min(1).max(5);
 
 /**
  * 신체 — 키(cm)와 체중(kg). **능력치가 아니라 묘사다.**
- * 공중볼·몸싸움은 이미 15축에 있으므로 전력 계산에 다시 넣지 않는다.
+ * 공중볼·몸싸움은 이미 16축에 있으므로 전력 계산에 다시 넣지 않는다.
  * 대신 서사와 판단의 재료가 된다 — "저 팀 세트피스에 190 넘는 선수가 넷이다".
  */
 export const HeightSchema = z.number().int().min(150).max(215);
@@ -233,9 +233,13 @@ export function footAdjust(position: string, foot: Foot | undefined): number {
 }
 
 /**
- * 능력치 15축 (player.md §1) — 전 선수가 15축 **전부**를 갖는다.
+ * 능력치 16축 (player.md §1) — 전 선수가 16축 **전부**를 갖는다.
  * 포지션별 예외 분기는 없다: 어떤 축이 그 선수에게 의미 있는지는
  * POSITION_WEIGHTS(§2)가 정한다. goalkeeping도 필드 플레이어가 낮은 값으로 보유.
+ *
+ * `positioning`(공이 상대에게 있을 때 어디에 서는가)과 `offTheBall`(공이 우리에게
+ * 있을 때 어디로 가는가)은 **다른 일이다.** 한 축이던 시절 둘은 자리의 공격 지분
+ * (`SLOT_ATTACK_SHARE`)으로 미리 섞여 있었다 (player.md §13.5).
  */
 export const ATTRIBUTE_AXES = [
   // 신체 4
@@ -249,9 +253,10 @@ export const ATTRIBUTE_AXES = [
   "passing",
   "kicking",
   "tackling",
-  // 정신 5
+  // 정신 6
   "vision",
   "positioning",
+  "offTheBall",
   "composure",
   "aggression",
   "leadership",
@@ -273,6 +278,7 @@ export const AXIS_KO: Record<AttributeAxis, string> = {
   tackling: "태클",
   vision: "시야",
   positioning: "위치선정",
+  offTheBall: "침투",
   composure: "침착성",
   aggression: "적극성",
   leadership: "리더십",
@@ -283,7 +289,7 @@ export const AXIS_KO: Record<AttributeAxis, string> = {
 export const AXIS_GROUPS = {
   physical: ["pace", "stamina", "strength", "aerial"],
   technical: ["finishing", "dribbling", "passing", "kicking", "tackling"],
-  mental: ["vision", "positioning", "composure", "aggression", "leadership"],
+  mental: ["vision", "positioning", "offTheBall", "composure", "aggression", "leadership"],
   goalkeeping: ["goalkeeping"],
 } as const satisfies Record<string, readonly AttributeAxis[]>;
 
@@ -305,7 +311,7 @@ export const PlayerAttributesSchema = z.object({
 });
 export type PlayerAttributes = z.infer<typeof PlayerAttributesSchema>;
 
-/** 15축만 담은 값 묶음 — overall·potential 없이 계산에 쓰는 입력 타입 */
+/** 16축만 담은 값 묶음 — overall·potential 없이 계산에 쓰는 입력 타입 */
 export type AxisValues = Record<AttributeAxis, number>;
 
 // ── 포지션 가중치 (player.md §2) ───────────────
@@ -357,6 +363,50 @@ const SLOT_OF_POSITION: Record<string, WeightSlot> = {
 
 export function weightSlotOf(position: string): WeightSlot {
   return SLOT_OF_POSITION[position.toUpperCase()] ?? "CM";
+}
+
+/**
+ * **자리의 공격 지분** — 그 자리에서 "어디에 서는가"와 "어디로 가는가"가 나뉘는 비율
+ * (player.md §13.5). 센터백은 대부분 서는 일이고 9번은 대부분 가는 일이다.
+ *
+ * 두 자리에서 읽는다. ① `POSITION_WEIGHTS`의 `positioning`·`offTheBall` 무게가 옛
+ * 한 몫을 이 비율로 나눈 것이고, ② 시드 파생(`deriveAxes`)과 옛 세이브
+ * (`splitPositioningAxis`)이 옛 한 값을 같은 비율로 기울여 두 축을 세운다.
+ * **같은 수를 두 곳이 읽어야** 두 축의 가중합이 나누기 전과 같다.
+ */
+export const SLOT_ATTACK_SHARE: Record<WeightSlot, number> = {
+  GK: 0.1,
+  CB: 0.2,
+  FB: 0.3,
+  DM: 0.2,
+  CM: 0.5,
+  AM: 0.65,
+  W: 0.65,
+  CF: 0.75,
+  ST: 0.8,
+};
+
+/**
+ * 옛 `positioning` 한 값을 두 축으로 — **기울임은 값을 만들지 않고 나눠 가진다.**
+ * 두 축의 가중합이 `w × base`, 곧 나누기 전과 같다 (player.md §13.5).
+ *
+ * `SPLIT_TILT`가 1이면 두 축이 태클·결정력의 복사본이 되고 0이면 나눈 적이 없는
+ * 것이 된다. 시드 파생과 옛 세이브가 **같은 이 함수**를 부른다.
+ */
+export const SPLIT_TILT = 0.55;
+
+export function splitPositioning(
+  slot: WeightSlot,
+  base: number,
+  tackling: number,
+  finishing: number,
+): { positioning: number; offTheBall: number } {
+  const share = SLOT_ATTACK_SHARE[slot];
+  const tilt = (tackling - finishing) * SPLIT_TILT;
+  return {
+    positioning: base + tilt * share,
+    offTheBall: base - tilt * (1 - share),
+  };
 }
 
 /**
@@ -428,7 +478,8 @@ export const POSITION_WEIGHTS: Record<WeightSlot, AxisValues> = {
     kicking: 0.35,
     tackling: 0.05,
     vision: 0.05,
-    positioning: 0.4,
+    positioning: 0.35,
+    offTheBall: 0.05,
     composure: 0.2,
     aggression: 0.05,
     leadership: 0.1,
@@ -445,7 +496,8 @@ export const POSITION_WEIGHTS: Record<WeightSlot, AxisValues> = {
     kicking: 0.1,
     tackling: 2.65,
     vision: 0.05,
-    positioning: 1.35,
+    positioning: 1.1,
+    offTheBall: 0.25,
     composure: 0.65,
     aggression: 1.0,
     leadership: 0.15,
@@ -462,7 +514,8 @@ export const POSITION_WEIGHTS: Record<WeightSlot, AxisValues> = {
     kicking: 0.6,
     tackling: 2.25,
     vision: 0.25,
-    positioning: 1.85,
+    positioning: 1.3,
+    offTheBall: 0.55,
     composure: 0.35,
     aggression: 0.45,
     leadership: 0.1,
@@ -477,9 +530,10 @@ export const POSITION_WEIGHTS: Record<WeightSlot, AxisValues> = {
     dribbling: 0.35,
     passing: 2.5,
     kicking: 0.8,
-    tackling: 2.95,
+    tackling: 3.0,
     vision: 1.35,
-    positioning: 3.0,
+    positioning: 2.4,
+    offTheBall: 0.6,
     composure: 1.1,
     aggression: 1.1,
     leadership: 0.35,
@@ -496,7 +550,8 @@ export const POSITION_WEIGHTS: Record<WeightSlot, AxisValues> = {
     kicking: 0.6,
     tackling: 1.0,
     vision: 1.95,
-    positioning: 0.55,
+    positioning: 0.3,
+    offTheBall: 0.25,
     composure: 0.85,
     aggression: 0.35,
     leadership: 0.15,
@@ -513,7 +568,8 @@ export const POSITION_WEIGHTS: Record<WeightSlot, AxisValues> = {
     kicking: 0.55,
     tackling: 0.05,
     vision: 3.0,
-    positioning: 0.7,
+    positioning: 0.25,
+    offTheBall: 0.45,
     composure: 0.9,
     aggression: 0.1,
     leadership: 0.1,
@@ -530,7 +586,8 @@ export const POSITION_WEIGHTS: Record<WeightSlot, AxisValues> = {
     kicking: 0.5,
     tackling: 0.05,
     vision: 0.5,
-    positioning: 0.6,
+    positioning: 0.2,
+    offTheBall: 0.4,
     composure: 0.5,
     aggression: 0.1,
     leadership: 0.05,
@@ -547,7 +604,8 @@ export const POSITION_WEIGHTS: Record<WeightSlot, AxisValues> = {
     kicking: 0.5,
     tackling: 0.05,
     vision: 0.9,
-    positioning: 1.65,
+    positioning: 0.4,
+    offTheBall: 1.25,
     composure: 1.95,
     aggression: 0.2,
     leadership: 0.1,
@@ -564,7 +622,8 @@ export const POSITION_WEIGHTS: Record<WeightSlot, AxisValues> = {
     kicking: 0.1,
     tackling: 0.05,
     vision: 0.3,
-    positioning: 1.85,
+    positioning: 0.35,
+    offTheBall: 1.5,
     composure: 1.75,
     aggression: 0.1,
     leadership: 0.05,
@@ -732,6 +791,7 @@ const ROLE_DEFS: Record<WeightSlot, RoleDef[]> = {
         kicking: 0.3,
         tackling: -0.6,
         positioning: -0.4,
+        offTheBall: 0.3,
       },
     },
     {
@@ -749,6 +809,7 @@ const ROLE_DEFS: Record<WeightSlot, RoleDef[]> = {
         tackling: -0.75,
         vision: 0.25,
         positioning: -0.55,
+        offTheBall: 0.45,
         composure: 0.2,
       },
     },
@@ -892,6 +953,7 @@ const ROLE_DEFS: Record<WeightSlot, RoleDef[]> = {
         tackling: -0.45,
         vision: -0.35,
         positioning: -0.3,
+        offTheBall: 0.75,
       },
     },
   ],
@@ -912,6 +974,7 @@ const ROLE_DEFS: Record<WeightSlot, RoleDef[]> = {
         tackling: 0.2,
         vision: -0.75,
         positioning: 0.15,
+        offTheBall: 0.5,
       },
     },
     {
@@ -944,7 +1007,7 @@ const ROLE_DEFS: Record<WeightSlot, RoleDef[]> = {
         dribbling: 0.65,
         tackling: -0.55,
         vision: 0.25,
-        positioning: 0.05,
+        offTheBall: 0.45,
       },
     },
     {
@@ -1030,7 +1093,7 @@ const ROLE_DEFS: Record<WeightSlot, RoleDef[]> = {
         passing: -1.25,
         kicking: -0.2,
         vision: -1.15,
-        positioning: 0.7,
+        offTheBall: 0.9,
         composure: 0.2,
       },
     },
@@ -1060,6 +1123,7 @@ const ROLE_DEFS: Record<WeightSlot, RoleDef[]> = {
         passing: 0.15,
         kicking: 0.25,
         positioning: -0.3,
+        offTheBall: -0.2,
         composure: 0.45,
         aggression: -0.05,
       },
@@ -1092,7 +1156,7 @@ const ROLE_DEFS: Record<WeightSlot, RoleDef[]> = {
         dribbling: 0.15,
         passing: -0.2,
         kicking: -0.3,
-        positioning: 0.4,
+        offTheBall: 0.65,
         composure: 0.3,
       },
     },
@@ -1124,7 +1188,7 @@ const ROLE_DEFS: Record<WeightSlot, RoleDef[]> = {
         finishing: -0.7,
         dribbling: -1.2,
         tackling: 0.4,
-        positioning: 0.3,
+        positioning: 0.5,
         aggression: 0.3,
       },
     },
@@ -1153,7 +1217,8 @@ const ROLE_DEFS: Record<WeightSlot, RoleDef[]> = {
         dribbling: -1.55,
         passing: -0.3,
         kicking: -0.4,
-        positioning: 0.75,
+        positioning: -0.1,
+        offTheBall: 1.2,
         composure: 0.35,
       },
     },
@@ -1180,6 +1245,7 @@ const ROLE_DEFS: Record<WeightSlot, RoleDef[]> = {
         passing: 0.45,
         vision: 0.3,
         positioning: -0.35,
+        offTheBall: -0.4,
         composure: 0.6,
       },
     },
@@ -1194,7 +1260,7 @@ const ROLE_DEFS: Record<WeightSlot, RoleDef[]> = {
         strength: 0.3,
         aerial: 0.45,
         kicking: 0.2,
-        positioning: 0.55,
+        offTheBall: 0.55,
       },
     },
     {
@@ -1210,6 +1276,7 @@ const ROLE_DEFS: Record<WeightSlot, RoleDef[]> = {
         passing: 0.15,
         vision: 0.25,
         positioning: -0.45,
+        offTheBall: -0.35,
         composure: 0.6,
         aggression: -0.1,
       },
@@ -1235,7 +1302,7 @@ const ROLE_DEFS: Record<WeightSlot, RoleDef[]> = {
         passing: -0.1,
         kicking: -0.05,
         vision: -0.25,
-        positioning: 0.25,
+        offTheBall: 0.7,
         composure: 0.4,
       },
     },
@@ -1330,41 +1397,39 @@ export function tacticalSensitivityOf(position: string): number {
 const ROLE_PIVOT: Record<string, number> = {
   "AM:advanced-playmaker": 0.1,
   "AM:enganche": 0.2,
-  "AM:shadow-striker": -0.7,
-  "AM:trequartista": 0.1,
-  "CB:ball-playing-defender": -1.2,
+  "AM:shadow-striker": -0.4,
+  "AM:trequartista": 0.2,
+  "CB:ball-playing-defender": -1.3,
   "CB:cover-defender": -1.4,
-  "CB:libero": -1.9,
+  "CB:libero": -2.1,
   "CB:no-nonsense-cb": 0.5,
-  "CB:stopper": 0.3,
-  "CB:wide-centre-back": -1.1,
-  "CF:false-nine": -0.2,
-  "CF:trequartista": 0.1,
+  "CB:stopper": 0.4,
+  "CB:wide-centre-back": -1.2,
+  "CF:false-nine": 0.1,
+  "CF:trequartista": 0.4,
   "CM:advanced-playmaker": -0.2,
-  "CM:ball-winning-midfielder": -0.2,
-  "CM:box-to-box": -0.4,
-  "CM:mezzala": -0.1,
+  "CM:box-to-box": -0.3,
   "CM:roaming-playmaker": 0.2,
-  "DM:ball-winning-midfielder": 0.6,
-  "DM:deep-lying-playmaker": -0.3,
+  "DM:anchor": 0.2,
+  "DM:ball-winning-midfielder": 0.8,
+  "DM:deep-lying-playmaker": -0.4,
   "DM:half-back": -0.1,
-  "DM:regista": -0.3,
-  "DM:segundo-volante": -0.1,
-  "FB:complete-wing-back": -0.8,
-  "FB:inverted-full-back": -0.5,
-  "FB:inverted-wing-back": -0.5,
-  "FB:no-nonsense-fb": 0.1,
-  "FB:wing-back": -0.4,
-  "GK:sweeper-keeper": -2.7,
-  "ST:complete-forward": -0.5,
+  "DM:regista": -0.4,
+  "DM:segundo-volante": -0.3,
+  "FB:complete-wing-back": -1,
+  "FB:inverted-full-back": -0.2,
+  "FB:inverted-wing-back": -0.4,
+  "FB:no-nonsense-fb": 0.4,
+  "FB:wing-back": -0.6,
+  "GK:sweeper-keeper": -2.2,
+  "ST:complete-forward": -0.3,
   "ST:poacher": 0.2,
-  "ST:pressing-forward": -0.6,
-  "ST:target-forward": 0.2,
-  "W:defensive-winger": -1.8,
-  "W:inside-forward": -0.1,
+  "ST:pressing-forward": -0.7,
+  "ST:target-forward": -0.1,
+  "W:defensive-winger": -2.1,
   "W:inverted-winger": -0.3,
-  "W:raumdeuter": -1,
-  "W:wide-midfielder": -1.6,
+  "W:raumdeuter": -0.5,
+  "W:wide-midfielder": -1.8,
   "W:wide-playmaker": -0.7,
 };
 
@@ -1470,7 +1535,7 @@ export function roleWeights(position: string, role?: string): AxisValues {
 }
 
 /**
- * 이 자리·이 역할에서의 전력 — **15축의 가중 평균이고, 축 범위를 벗어나지 않는다.**
+ * 이 자리·이 역할에서의 전력 — **16축의 가중 평균이고, 축 범위를 벗어나지 않는다.**
  *
  * 같은 선수라도 **자리에 따라** 다르고(라이스를 DM에 두면 tackling·positioning이
  * 지배하고 AM에 올리면 vision·dribbling이 지배한다), 같은 자리에서도 **역할에 따라**
@@ -1480,7 +1545,7 @@ export function roleWeights(position: string, role?: string): AxisValues {
  *
  * ⚠️ **평균을 되펴지 않는다.** 한동안 자리 기준점에서 ×1.237로 되펴 6축 시절
  * 분포(평균 70 · 최대 94)에 맞췄는데, 그러면 종합이 **그 선수 어느 축보다도 높게**
- * 나온다 — 15축을 함께 펼쳐 놓은 화면에서 그건 계산이 틀린 것으로 읽힌다
+ * 나온다 — 16축을 함께 펼쳐 놓은 화면에서 그건 계산이 틀린 것으로 읽힌다
  * (`docs/data/player.md` §4).
  */
 /**
@@ -1573,7 +1638,7 @@ export function roleFit(axes: AxisValues, position: string, role?: string): numb
   let lowest = Infinity;
   let highest = -Infinity;
   for (const axis of ATTRIBUTE_AXES) {
-    // 0인 축은 없다 (`FLOOR_WEIGHT`) — 15축 전부가 조금씩이라도 전력에 닿는다
+    // 0인 축은 없다 (`FLOOR_WEIGHT`) — 16축 전부가 조금씩이라도 전력에 닿는다
     const weight = w[axis];
     const value = axes[axis];
     sum += value * weight;
@@ -1825,7 +1890,7 @@ export type Player = GamePlayer;
 
 /**
  * 선수 카탈로그 (PLAYER_CATALOG) — 모든 게임이 공유하는 불변 초기치 DB.
- * 15축을 평면 필드로 갖는다 (overall은 파생이라 저장하지 않는다).
+ * 16축을 평면 필드로 갖는다 (overall은 파생이라 저장하지 않는다).
  */
 export interface PlayerCatalogMeta {
   id: string;
@@ -1876,7 +1941,7 @@ export type PlayerCatalogEntry = PlayerCatalogMeta & AxisValues;
  * 스키마를 지나야 카탈로그가 된다. 어긋난 파일을 그대로 읽으면 실패가 저장한
  * 순간이 아니라 한참 뒤 새 게임을 세울 때 터진다 (data/team.md §1).
  *
- * 15축은 `ATTRIBUTE_AXES`에서 펼친다 — 축이 늘어도 스키마가 따라온다.
+ * 16축은 `ATTRIBUTE_AXES`에서 펼친다 — 축이 늘어도 스키마가 따라온다.
  * `overall`은 파생이라 담기지 않는다 (`PlayerCatalogMeta`와 같은 목록).
  */
 export const PlayerCatalogEntrySchema = z.object({
@@ -1996,7 +2061,7 @@ export interface ScoutReportCard {
   height: number | null;
   weight: number | null;
   /**
-   * 종합 — **가장 잘 맞는 자리에서 기본 역할로 낸 15축 가중 평균**(`bestOverall`),
+   * 종합 — **가장 잘 맞는 자리에서 기본 역할로 낸 16축 가중 평균**(`bestOverall`),
    * 거기에 안개를 씌운 값이다. 몸값·잠재력·폼은 섞이지 않는다.
    * 스카우트가 가져온 숫자에는 늘 ±가 붙으므로 얼굴은 등급이다.
    */

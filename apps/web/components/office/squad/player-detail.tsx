@@ -74,7 +74,7 @@ function potentialHint(band: SquadRow["potential"]): string {
   return `추정 폭 ±${band.margin} — ${confidence}. 함께 뛴 경기가 쌓이면 좁아집니다`;
 }
 
-/** 선택한 선수 상세 — 그 자리 적응도와 능력치 15축 */
+/** 선택한 선수 상세 — 그 자리 적응도와 능력치 16축 */
 export function PlayerDetail({
   p,
   slotCode,
@@ -151,7 +151,7 @@ export function PlayerDetail({
           쪼개지 않고 한 줄로 훑는다 */}
       <div className="pd-summary">
         {/**
-         * **이 선수를 얼마나 아는가** — 아래 열다섯 숫자 전부에 걸리는 단서다.
+         * **이 선수를 얼마나 아는가** — 아래 열여섯 숫자 전부에 걸리는 단서다.
          * 명단의 `±N`은 종합값 하나에 붙지만, 상세는 축을 펼쳐 놓은 자리라
          * "이 화면의 숫자들이 어느 정도 정확한가"를 먼저 밝혀야 한다.
          * 정확히 아는 선수(대부분)에게는 아무것도 그리지 않는다.
@@ -299,7 +299,7 @@ export function PlayerDetail({
           )}
         </div>
 
-        {/* 능력치 15축 — 묶음별 한 줄, 값은 세로로 줄 맞춰 훑기 쉽게 */}
+        {/* 능력치 16축 — 묶음별 한 줄, 값은 세로로 줄 맞춰 훑기 쉽게 */}
         <div className="pd-axis-groups">
           {AXIS_GROUP_ORDER.map((group) => (
             <div className="pd-axis-group" key={group}>

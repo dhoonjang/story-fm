@@ -6,7 +6,6 @@ import {
   attributeDeclineScale,
   attributeGainScale,
   growChance,
-  monthlyGrowthFactor,
   reserveAppsBoost,
   reserveAppsByPlayer,
   rollAxis,
@@ -149,29 +148,34 @@ describe("노화 곡선의 나이 경계", () => {
   });
 });
 
-describe("나이 배율 — 월간·결산이 한 표를 읽는다", () => {
-  /** player.md §6.3 나이 표의 경계 — 여기 없는 나이에서 값이 움직이면 표가 둘로 갈렸다 */
-  const BAND_EDGES = [18, 20, 21, 23, 24, 27, 30, 33];
-  const columns = [
-    ["월간", monthlyGrowthFactor],
-    ["결산", ageGrowthFactor],
-  ] as const;
+describe("나이 배율 — 월간·결산이 한 열을 읽는다", () => {
+  /** player.md §6.3 나이 표의 경계 — 여기 없는 나이에서 값이 움직이면 열이 둘로 갈렸다 */
+  const BAND_EDGES = [18, 20, 23, 27, 30, 33];
 
   it("밴드 안에서는 값이 움직이지 않고, 경계에서만 내려간다", () => {
     for (let age = 15; age <= 44; age++) {
-      for (const [name, factor] of columns) {
-        const label = `${name} ${age}→${age + 1}`;
-        if (BAND_EDGES.includes(age))
-          expect(factor(age + 1), label).toBeLessThanOrEqual(factor(age));
-        else expect(factor(age + 1), `${label} — 표에 없는 경계가 생겼다`).toBe(factor(age));
-      }
+      const label = `${age}→${age + 1}`;
+      if (BAND_EDGES.includes(age))
+        expect(ageGrowthFactor(age + 1), label).toBeLessThan(ageGrowthFactor(age));
+      else
+        expect(ageGrowthFactor(age + 1), `${label} — 표에 없는 경계가 생겼다`).toBe(
+          ageGrowthFactor(age),
+        );
     }
   });
 
   it("나이가 들수록 줄지만 어느 나이에도 0이 되지는 않는다", () => {
-    for (const [name, factor] of columns) {
-      expect(factor(17), name).toBeGreaterThan(factor(35));
-      for (let age = 15; age <= 45; age++) expect(factor(age), `${name} ${age}`).toBeGreaterThan(0);
+    expect(ageGrowthFactor(17)).toBeGreaterThan(ageGrowthFactor(35));
+    for (let age = 15; age <= 45; age++) expect(ageGrowthFactor(age), `${age}`).toBeGreaterThan(0);
+  });
+
+  /**
+   * **두 경로가 한 값을 본다** — 월간 성장이 나이 배율을 따로 갖던 시절, 같은 경계에
+   * 다른 값이 서 있어 열여덟의 가산과 서른하나부터의 한 칸이 한쪽에만 있었다.
+   */
+  it("월간 성장의 나이 가중이 결산 배율 그 값이다", () => {
+    for (const age of [17, 21, 24, 31]) {
+      expect(growChance(50, age), `${age}`).toBe(Math.min(0.35, ageGrowthFactor(age)));
     }
   });
 

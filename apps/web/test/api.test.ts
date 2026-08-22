@@ -524,7 +524,7 @@ describe("API — 온보딩부터 경기까지", () => {
         nameEn: "New Guy",
         birthdate: "2007-03-01",
         position: "ST",
-        // 능력치 15축 전부 (API가 요구한다)
+        // 능력치 16축 전부 (API가 요구한다)
         pace: 82,
         stamina: 74,
         strength: 70,
@@ -536,6 +536,7 @@ describe("API — 온보딩부터 경기까지", () => {
         tackling: 35,
         vision: 60,
         positioning: 76,
+        offTheBall: 72,
         composure: 70,
         aggression: 58,
         leadership: 40,

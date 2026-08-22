@@ -1,4 +1,13 @@
-import { clampCondition, migratePassStyle, migrateSignature, mirrorBaseOf } from "@story-fm/domain";
+import {
+  clampCondition,
+  migratePassStyle,
+  migrateSignature,
+  mirrorBaseOf,
+  naturalPositionOf,
+  splitPositioning,
+  weightSlotOf,
+} from "@story-fm/domain";
+import type { GamePlayer } from "@story-fm/domain";
 
 /**
  * 옛 세이브를 지금 모양으로 옮기는 함수들 — **로드의 두 번째 걸음**
@@ -78,6 +87,43 @@ export function migrateManagerAxes(save: ManagerAxesSave): void {
   };
   move(save.manager?.attributes, 50);
   move(save.managerXP, 0);
+}
+
+interface PositioningSplitSave {
+  players: Array<Pick<GamePlayer, "positions"> & { attributes: Record<string, unknown> }>;
+}
+
+/**
+ * `positioning` 한 축 → 위치선정 · 침투 (player.md §13.5).
+ *
+ * 세이브가 든 옛 `positioning`이 곧 파생의 **밑값**이라, 시드 파생과 **같은 함수**로
+ * 그 자리에서 두 축을 세운다 — 옮긴 선수와 새로 만든 선수가 같은 눈금에 선다.
+ * 자리 가중치도 같은 공격 지분으로 갈리므로 두 축의 가중합은 갈리기 전과 같다.
+ *
+ * 세이브 버전은 올리지 않는다: **`offTheBall`의 부재가 곧 마커**다
+ * (→ [docs/data/game-state.md](../../../../docs/data/game-state.md) §6). 채워진
+ * 세이브는 두 번째 로드에서 이 함수를 지나가지 않으므로 값이 두 번 기울지 않는다.
+ */
+export function splitPositioningAxis(save: PositioningSplitSave): void {
+  for (const player of save.players) {
+    const attrs = player.attributes;
+    if (typeof attrs.offTheBall === "number") continue;
+    const base = attrs.positioning;
+    const tackling = attrs.tackling;
+    const finishing = attrs.finishing;
+    if (typeof base !== "number" || typeof tackling !== "number" || typeof finishing !== "number") {
+      continue;
+    }
+    const slot = weightSlotOf(naturalPositionOf(player).position);
+    const split = splitPositioning(slot, base, tackling, finishing);
+    attrs.positioning = clampAxis(split.positioning);
+    attrs.offTheBall = clampAxis(split.offTheBall);
+  }
+}
+
+/** 축의 눈금 — 1~99 정수 (`RatingSchema`가 로드에서 다시 본다) */
+function clampAxis(value: number): number {
+  return Math.max(1, Math.min(99, Math.round(value)));
 }
 
 interface SquadLevelSave {

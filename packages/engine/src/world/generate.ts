@@ -129,7 +129,7 @@ export function generateYouthPlayer(
   const month = randInt(rng, 1, 12);
   const day = randInt(rng, 1, 28);
   const birthdate = `${refYear - age}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-  // 시드 6축 → 15축 (실선수 카탈로그와 같은 파생 공식)
+  // 시드 6축 → 16축 (실선수 카탈로그와 같은 파생 공식)
   const axes = deriveAxes(
     `${nameEn}-${slugifyName(teamId)}-${season}-${index}`,
     position,

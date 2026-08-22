@@ -273,7 +273,7 @@ export function derivePositions(nameEn: string, natural: string): PlayerPosition
  * 홈그로운 자격 협회 — ⚠️ **결정적 대체 규칙**이다.
  *
  * 진짜 판정 근거는 "만 21세 이전에 그 협회 클럽에서 3시즌 등록"이라는 **경력
- * 이력**인데, 시드에 그 이력이 없다. 능력치 15축을 6축에서 파생하는 것과 같은
+ * 이력**인데, 시드에 그 이력이 없다. 능력치 16축을 6축에서 파생하는 것과 같은
  * 종류의 데이터 부채로 다루고(sources.md §7), 시드에 `homegrown`이
  * 명시돼 있으면 그것을 우선한다.
  *
@@ -301,7 +301,7 @@ type CatalogDraft = Omit<PlayerCatalogEntry, "id">;
 
 function entryFromSeed(teamId: string, s: RealPlayerSeed): CatalogDraft {
   const homegrownCountry = deriveHomegrownCountry(s, teamId, s.homegrown);
-  // 시드는 6축 + GK — 15축은 여기서 파생한다 (attributes.ts, 부채는 §8 2단계)
+  // 시드는 6축 + GK — 16축은 여기서 파생한다 (attributes.ts, 부채는 §8 2단계)
   const axes = deriveAxes(s.nameEn, s.position, s, ageOf(s.birthdate, CATALOG_AGE_REF));
   const positions = derivePositions(s.nameEn, s.position);
   return {
