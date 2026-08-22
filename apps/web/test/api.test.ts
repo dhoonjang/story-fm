@@ -36,6 +36,9 @@ import {
 } from "../app/api/admin/catalog/league/[leagueId]/route";
 import { GET as cupGet, DELETE as cupReset } from "../app/api/admin/catalog/cup/route";
 import { adminWritesEnabled } from "../app/api/admin/admin-guard";
+import { GET as usageGet } from "../app/api/admin/usage/route";
+import { beginGameUsage, meterLlm, resetLlmUsage, type TurnResult } from "@story-fm/llm";
+import type { UsageResponse } from "../app/admin/types";
 import { PATCH as cupPatch } from "../app/api/admin/catalog/cup/[cupId]/route";
 import {
   boardExpectationOfTier,
@@ -963,5 +966,65 @@ describe("게임 잠금 — 겹친 요청", () => {
     await held;
     const after = await postLineup(json({ starting, bench }), params(game.id));
     expect(after.status).toBe(200);
+  });
+});
+
+/**
+ * 계측 라우트 — **판정이 라우트에 있고 화면은 읽기만 한다** (models.md §5-1).
+ *
+ * 여기서 재는 것은 히트율의 **문턱 하나**다. 문턱 아래 호출은 캐시가 애초에 걸리지
+ * 않아 0%가 「깨진 프리픽스」와 같은 모양이 되므로 비율 대신 null로 내려보내는데,
+ * 그 갈림은 **실모드로 실제 호출이 오갈 때만** 화면에 드러난다 — 뒤집혀도 조용하다.
+ */
+describe("계측 라우트 — 히트율의 문턱", () => {
+  /** 사용량만 돌려주는 가짜 호출 — 장부는 `meterLlm`을 지나야만 움직인다 */
+  function call(agent: "gm" | "match-rater", usage: TurnResult["usage"]) {
+    const llm = meterLlm(
+      {
+        async runTurn(): Promise<TurnResult> {
+          return {
+            text: "",
+            history: { version: 1, provider: "google", model: "x", messages: [] },
+            historyBase: 0,
+            usage,
+            toolCallCount: 0,
+            stopReason: null,
+          };
+        },
+      },
+      agent,
+    );
+    return llm.runTurn({ system: [], history: [], user: "" });
+  }
+
+  it("문턱 아래 입력은 비율 대신 null이고, 넘으면 비를 낸다", async () => {
+    resetLlmUsage();
+    beginGameUsage("usage-test");
+    // gm은 Google — 최소 캐시 프리픽스 4,096 토큰. 그 아래로 한 번 부른다
+    await call("gm", {
+      inputTokens: 1000,
+      outputTokens: 100,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    });
+    // match-rater도 Google이지만 이쪽은 문턱을 넘겨 부른다
+    await call("match-rater", {
+      inputTokens: 10_000,
+      outputTokens: 200,
+      cacheReadTokens: 4_000,
+      cacheWriteTokens: 0,
+    });
+
+    const body = (await (await usageGet()).json()) as UsageResponse;
+    expect(body.gameId).toBe("usage-test");
+    const gm = body.agents.find((a) => a.agent === "gm")!;
+    const rater = body.agents.find((a) => a.agent === "match-rater")!;
+    expect(gm.avgInput).toBe(1000);
+    expect(gm.cacheHitRate).toBeNull();
+    expect(rater.cacheHitRate).toBeCloseTo(0.4, 6);
+    // 부르지 않은 자리는 「캐시가 안 걸렸다」가 아니라 잰 것이 없다
+    expect(body.agents.find((a) => a.agent === "mood-rater")!.cacheHitRate).toBeNull();
+    expect(body.totals.billed).toBe(11_300);
+    resetLlmUsage();
   });
 });

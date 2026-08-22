@@ -676,6 +676,35 @@ textarea {
   border-color: var(--danger);
   color: var(--danger);
 }
+/* ── 계측 탭 — 표는 .admin-list를 그대로 쓰고, 여기 있는 것은 그 위의 칩과 강조뿐 */
+.usage-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.usage-chip {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 4px 10px;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+/* 열이 열둘이라 글자를 한 눈금 줄여야 한 화면에 든다 */
+.usage-list {
+  font-size: var(--fs-sm);
+}
+.usage-list .muted {
+  color: var(--muted);
+}
+/* 프리픽스가 깨진 것으로 보이는 자리와 예산을 넘긴 자리 — 요금만 오르고 화면엔
+   증상이 없는 부류라(models.md §4) 표에서 눈에 걸려야 한다 */
+.usage-alert {
+  color: var(--danger);
+  font-weight: 600;
+}
+
 .admin-pager {
   display: flex;
   align-items: center;

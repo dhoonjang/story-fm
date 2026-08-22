@@ -7,14 +7,18 @@ import { CupsPanel } from "./cups-panel";
 import { LeaguesPanel } from "./leagues-panel";
 import { PlayersPanel } from "./players-panel";
 import { TeamsPanel } from "./teams-panel";
+import { UsagePanel } from "./usage-panel";
 
 /**
- * Database — 게임과 무관한 **초기치 DB(카탈로그)**만 편집한다.
- * 여기서의 변경은 이후 새로 시작하는 게임에 반영되고, 진행 중인 게임은 그대로다.
+ * Database — 게임과 무관한 **초기치 DB(카탈로그)**를 편집하고, LLM 계측을 읽는다.
+ * 카탈로그 편집은 이후 새로 시작하는 게임에 반영되고, 진행 중인 게임은 그대로다.
  *
  * 이 파일은 껍데기다: 탭과 공용 배너, 그리고 **네 층의 카탈로그**를 갖고, 층별
  * 편집은 각 패널이 맡는다. 탭을 옮기면 패널은 언마운트되지만 카탈로그는 여기
  * 남아 있어 다시 받지 않는다 (`catalog-store.ts`).
+ *
+ * ⚠️ **계측 탭만 카탈로그를 쓰지 않는다** — 세션 장부는 서버 쪽에서 저 혼자
+ * 움직이므로(턴을 돌 때마다) 그 패널이 제 손으로 받는다 (models.md §5-1).
  */
 
 const TABS = [
@@ -22,6 +26,7 @@ const TABS = [
   { key: "teams", label: "팀" },
   { key: "leagues", label: "리그" },
   { key: "cups", label: "컵" },
+  { key: "usage", label: "계측" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -115,6 +120,7 @@ export default function AdminPage() {
             onError={setErr}
           />
         )}
+        {tab === "usage" && <UsagePanel onError={setErr} />}
       </div>
     </main>
   );
