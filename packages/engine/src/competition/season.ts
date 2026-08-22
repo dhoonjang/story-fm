@@ -69,6 +69,7 @@ import {
   tacticsOf,
   teamName,
   teamShortName,
+  inTransaction,
   FAMILIARITY_BASELINE,
   type GameState,
 } from "../core/state";
@@ -494,8 +495,11 @@ export function recordLeagueHistory(state: GameState): void {
 /**
  * 시즌 전환 — 쇠퇴·은퇴·유스 유입·계약 갱신·새 일정 (season.md §6).
  * 다음 시즌의 7월 1일(프리시즌 시작 = 여름 이적창 개장)로 이동한다.
+ *
+ * ⚠️ **세이브에 직접 쓰지 않는다** — 초안 위에서만 돈다. 원본에 옮겨 붙이는 경계는
+ * `transitionSeason`·`endSeason`이 긋는다 (전부 되거나 아무것도 안 된다).
  */
-export function transitionSeason(state: GameState): string[] {
+function applyTransition(state: GameState): string[] {
   const digest: string[] = [];
   const rng = makeRng(state.seed, `transition:${state.season}`);
   /**
@@ -907,10 +911,23 @@ export function transitionSeason(state: GameState): string[] {
  * 마지막 달을 뺀 성과로 결정된다 (finance.md §7.1).
  */
 export function endSeason(state: GameState): string[] {
-  const digest = reviewSeason(state);
-  closeSeasonBooks(state, digest);
-  digest.push(...transitionSeason(state));
-  return digest;
+  return inTransaction(state, (draft) => {
+    const digest = reviewSeason(draft);
+    closeSeasonBooks(draft, digest);
+    digest.push(...applyTransition(draft));
+    return digest;
+  });
+}
+
+/**
+ * 시즌 전환 하나만 — 세이브에 옮겨 붙이는 경계는 `endSeason`과 같다.
+ *
+ * ⚠️ 마지막 걸음인 편성(`buildEuroEntrants`·`buildSeasonFixtures`)은 던질 수 있는데,
+ * 그 자리는 계약 만료·은퇴·승강·`season++`가 전부 끝난 **뒤**다. 그래서 전이 전체가
+ * 복제본 위에서 돌고, 끝까지 성공했을 때만 세이브가 된다 (season.md §6).
+ */
+export function transitionSeason(state: GameState): string[] {
+  return inTransaction(state, applyTransition);
 }
 
 export type { GamePlayer };
