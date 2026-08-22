@@ -32,6 +32,7 @@ import {
   cupRunsThisSeason,
   domesticChampion,
   domesticCupWinners,
+  payDomesticCupPrizes,
   reviewDomesticCups,
 } from "./domestic-cup";
 import { hasPendingDraw } from "./draw-schedule";
@@ -325,7 +326,20 @@ const EURO_TITLE_BOARD = 10;
 const EURO_RUNNER_UP_MEDIA = 4;
 
 /**
- * 대항전 결산 — 우승/준우승을 트로피·평판에 반영한다.
+ * 대항전 우승 **상금** — 구단이 받는 돈이라 감독의 커리어와 갈라져 있다.
+ * 무직으로 맞은 시즌 끝에도 옛 구단의 장부에는 앉아야 한다 (career.md §5.1).
+ */
+function payEuropeanWinnerPrizes(state: GameState, digest: string[]): void {
+  for (const cup of cupCatalog()) {
+    const champion = euroChampion(state, cup.id);
+    if (!champion) continue;
+    payWinnerPrize(state, cup.id, champion, digest);
+  }
+}
+
+/**
+ * 대항전 결산 — 우승/준우승을 트로피·평판에 반영한다. **상금은 여기 없다**
+ * (`payEuropeanWinnerPrizes`).
  *
  * 결승은 리그 최종전 다음 토요일이라 `allMatchesDone`이 그것까지 기다린다.
  * 시즌 리뷰가 우승을 확정하는 단일 지점이다 (매일 tick에서 중복 보고하지 않는다).
@@ -335,7 +349,6 @@ function reviewEuropeanCampaign(state: GameState): string[] {
   for (const cup of cupCatalog()) {
     const champion = euroChampion(state, cup.id);
     if (!champion) continue;
-    payWinnerPrize(state, cup.id, champion, digest);
     const finalMatch = euroStageMatches(state, cup.id, "final")[0];
     const ours =
       finalMatch !== undefined &&
@@ -378,10 +391,13 @@ export function reviewSeason(state: GameState): string[] {
    * **무직으로 맞은 시즌 끝은 커리어에 남지 않는다** (career.md §5.1).
    *
    * `SEASON_RECORD`·트로피·업적·보드 평판 ±8은 그 자리에 있던 감독의 것이라,
-   * 잘린 뒤 옛 팀이 든 컵이 감독의 것이 되면 안 된다. 구단이 치르는 것 — 리그
-   * 상금과 선수단 성과 보너스 — 은 감독과 무관하므로 그대로 결산된다.
+   * 잘린 뒤 옛 팀이 든 컵이 감독의 것이 되면 안 된다. **돈은 반대다** — 컵·대항전
+   * 상금도 리그 상금·성과 보너스와 똑같이 구단이 받는 것이라 그대로 결산한다.
+   * 시즌 키가 바뀌므로 여기서 건너뛰면 그 상금은 영영 장부에 앉지 않는다.
    */
   if (managedTeamId(state) === null) {
+    payEuropeanWinnerPrizes(state, digest);
+    payDomesticCupPrizes(state, digest);
     payLeaguePrizes(state, digest);
     paySeasonBonuses(state, position, digest);
     digest.push(`시즌 ${state.season} 종료 — 무직으로 맞았다. 이 시즌은 커리어에 남지 않는다`);
@@ -403,7 +419,9 @@ export function reviewSeason(state: GameState): string[] {
     });
     digest.push(`🏆 ${leagueName(leagueOfTeamIn(state, state.userTeamId))} 우승`);
   }
+  payEuropeanWinnerPrizes(state, digest);
   digest.push(...reviewEuropeanCampaign(state));
+  payDomesticCupPrizes(state, digest);
   digest.push(...reviewDomesticCups(state));
   // 재정 — 리그 순위 상금(전 팀)과 선수단 성과 보너스
   payLeaguePrizes(state, digest);
