@@ -22,6 +22,8 @@ import {
   simSquadOf,
   simulateOtherMatches,
   startMatch,
+  TRAINING_INJURY_PER_SESSION,
+  trainingExposure,
   userSide,
 } from "@story-fm/engine";
 import { INJURY_HISTORY } from "../src/data/injury-history";
@@ -356,5 +358,43 @@ describe("장부는 한 공식만 쓴다", () => {
     // 성향도 치료비도 한 부상에 한 번뿐
     expect(pronenessValue(mine)).toBe(proneness);
     expect(ledger()).toBe(spent);
+  });
+});
+
+/**
+ * 훈련도 노출이다 (`trainingExposure`) — 순수 환산 하나라 세계가 필요 없다.
+ *
+ * 훈련장에서도 다치므로 훈련만 하는 기간에도 성향이 오른다. 내려가는 길을 출전
+ * 하나로만 두면 유저 팀만 훈련 부상만큼 계속 위로 밀리고, 훈련이 없는 타 팀과
+ * 눈금이 갈린다 — 그 어긋남은 화면 어디에도 적히지 않는다.
+ */
+describe("훈련 하루는 경기 몇 번어치 노출인가", () => {
+  it("훈련이 올리는 몫을 그대로 되돌린다 — 훈련만 하는 팀도 제자리다", () => {
+    for (const [sessions, squad] of [
+      [1, 25],
+      [3, 18],
+      [7, 30],
+    ] as const) {
+      const rise = (TRAINING_INJURY_PER_SESSION * sessions) / squad; // 한 선수가 그 기간에 다칠 확률
+      // 기대 상승(확률 × 평균 상승) = 환산 노출 × 출전 한 번의 하강
+      expect(
+        trainingExposure(sessions, squad) * FALL_PER_APPEARANCE,
+        `${sessions}세션 / ${squad}명`,
+      ).toBeCloseTo(rise * AVG_PRONENESS_RISE, 12);
+    }
+  });
+
+  it("세션이 많을수록 크고, 나눠 지는 인원이 많을수록 작다", () => {
+    expect(trainingExposure(3, 25)).toBeGreaterThan(trainingExposure(1, 25));
+    expect(trainingExposure(3, 25)).toBeCloseTo(trainingExposure(1, 25) * 3, 12);
+    expect(trainingExposure(3, 50)).toBeCloseTo(trainingExposure(3, 25) / 2, 12);
+    // 한 주의 본훈련도 경기 한 번의 노출에는 못 미친다 — 손잡이는 출전이다
+    expect(trainingExposure(5, 25)).toBeLessThan(1);
+  });
+
+  it("스쿼드가 비면 0이다 — 나눌 사람이 없는 날에 노출이 발산하지 않는다", () => {
+    expect(trainingExposure(3, 0)).toBe(0);
+    expect(trainingExposure(3, -1)).toBe(0);
+    expect(trainingExposure(0, 25)).toBe(0);
   });
 });
