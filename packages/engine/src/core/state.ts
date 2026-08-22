@@ -333,12 +333,6 @@ export interface PendingMatch {
   matchId: string;
   packet: StrengthPacket;
   ledger: MatchLedgerState;
-  /**
-   * ⚠️ 폐기된 필드 — 구간 시뮬레이터(`advanceSegment`)가 사건을 그때그때 굴리므로
-   * 경기 전체를 미리 만들지 않는다. 옛 세이브 호환으로만 남긴다 (읽지 않는다).
-   */
-  script: MatchScriptSegment[] | null;
-  scriptCursor: number;
   /** 진행한 구간 수 — 난수 채널에 들어가 같은 경기가 재현된다 */
   segment?: number;
   /**
@@ -477,11 +471,6 @@ export interface PendingMatch {
    * 얼어붙는다. 옛 세이브엔 없다 (optional).
    */
   aiDecidedAt?: number;
-}
-
-export interface MatchScriptSegment {
-  events: import("@story-fm/domain").MatchEvent[];
-  stop: "goal" | "half_time" | "full_time" | "incident";
 }
 
 export type GamePhase = "idle" | "matchday" | "match";
