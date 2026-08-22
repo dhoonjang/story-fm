@@ -283,7 +283,12 @@ export function derivePositions(nameEn: string, natural: string): PlayerPosition
  */
 const HOMEGROWN_RATE: Record<1 | 2, number> = { 1: 40, 2: 75 };
 
-function deriveHomegrownCountry(
+/**
+ * 이 선수가 그 클럽 협회의 홈그로운인가 — 시드가 답을 갖고 있으면 그것, 없으면
+ * 이름·생일에서 결정적으로 굴린다. 게임 중에 태어나는 선수(승격 보강)도 같은
+ * 비율을 따라야 등록 명단의 홈그로운 셈이 세계와 같은 눈금에 선다.
+ */
+export function deriveHomegrownCountry(
   who: { nameEn: string; birthdate: string },
   teamId: string,
   seeded: boolean | undefined,

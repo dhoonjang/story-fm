@@ -10,6 +10,7 @@ import {
   transitionSeason,
   type GameState,
 } from "@story-fm/engine";
+import { positionGroupOfPlayer } from "@story-fm/domain";
 import { createMiniGame, createTestGame } from "./helpers";
 
 /**
@@ -121,6 +122,52 @@ describe("승강 — 시즌 전환에서 자리를 바꾼다", () => {
     for (const id of promoted) {
       expect(epl.some((m) => m.homeTeamId === id || m.awayTeamId === id)).toBe(true);
     }
+  });
+});
+
+describe("승격 클럽 보강 — 스무 명으로 1부를 돌지 않는다", () => {
+  /** 이 팀이 이번 전환에서 받은 보강 선수들 (원장의 `tr-promo-` 항목) */
+  function signingsOf(state: GameState, teamId: string) {
+    const ids = new Set(
+      state.transfers
+        .filter((t) => t.id.startsWith("tr-promo-") && t.toTeamId === teamId)
+        .map((t) => t.gamePlayerId),
+    );
+    return state.players.filter((p) => ids.has(p.id));
+  }
+
+  it("올라온 팀은 1군 25명 이상으로 새 시즌을 시작한다", () => {
+    const { state, promoted } = afterSwap();
+    for (const teamId of promoted) {
+      const first = state.players.filter((p) => p.teamId === teamId && p.squadLevel !== "reserve");
+      expect(first.length, teamId).toBeGreaterThanOrEqual(25);
+      // 골키퍼 셋 — 인원만 세면 키퍼 둘짜리 팀이 공격수만 받는다
+      expect(
+        first.filter((p) => positionGroupOfPlayer(p) === "GK").length,
+        teamId,
+      ).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it("보강은 전력이 아니라 뎁스다 — 그 팀 최고 선수를 넘지 않는다", () => {
+    const { state, promoted } = afterSwap();
+    let seen = 0;
+    for (const teamId of promoted) {
+      const squad = state.players.filter((p) => p.teamId === teamId);
+      const signings = signingsOf(state, teamId);
+      if (signings.length === 0) continue;
+      seen += signings.length;
+      const best = Math.max(...squad.map((p) => p.attributes.overall));
+      for (const s of signings) expect(s.attributes.overall, s.name).toBeLessThan(best);
+      // 계약 없이 명단에만 서는 선수는 없다 — 주급이 장부에 오르지 않는다
+      for (const s of signings) {
+        expect(state.contracts.some((c) => c.gamePlayerId === s.id && c.status === "active")).toBe(
+          true,
+        );
+      }
+    }
+    // 절차 생성 스무 명짜리 2부 클럽이 올라왔으니 보강이 아예 없을 수는 없다
+    expect(seen).toBeGreaterThan(0);
   });
 });
 
