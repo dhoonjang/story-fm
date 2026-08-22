@@ -76,7 +76,7 @@ agents:
 | `rate_limit` | 한도·쿼터를 넘겼다    | 429 (`rate_limit_error`)                            | 429                                                    | 429                                     |
 | `timeout`    | 시한을 넘겼다         | `APIConnectionTimeoutError` · 중단 신호 · 408 · 504 | 중단 신호 · 408 · 504                                  | `APIConnectionTimeoutError` · 408 · 504 |
 | `auth`       | 키가 없거나 안 먹는다 | 401 (`authentication_error`) · 403                  | 401 · 403                                              | 401 · 403                               |
-| `filtered`   | 안전 정책이 막았다    | `stop_reason: "refusal"`                            | `finishReason: SAFETY…` · `promptFeedback.blockReason` | `finish_reason: "content_filter"`       |
+| `filtered`   | 안전 정책이 막았다    | `stop_reason: "refusal"`                            | `finishReason: SAFETY…` · `promptFeedback.blockReason` | `reason: "content_filter"` · `refusal`  |
 | `budget`     | 토큰 예산 상한 (§4)   | 우리 쪽 판정 — 부르기 전에 끊는다                   | ←                                                      | ←                                       |
 | `unknown`    | 나머지 전부           | 400·404·연결 오류 등                                | ←                                                      | ←                                       |
 
@@ -86,6 +86,10 @@ agents:
 - **키가 없으면 부르기 전에 `auth`로 실패한다** — 팩토리가 어댑터를 세우는 자리다.
 - ⚠️ **문구로 분류하지 않는다.** 표의 오른쪽 세 칸은 전부 코드값(HTTP 상태·SDK 오류
   클래스·열거된 종료 사유)이다. 제공자가 사람이 읽는 문장을 바꿔도 분류는 그대로다.
+- **OpenAI에는 HTTP 200으로 오는 실패가 하나 더 있다** — Responses가 `status: "failed"`로
+  돌려주는 응답이다. 상태 코드가 없으므로 `error.code`를 같은 종류로 옮긴다:
+  `server_error` → `overloaded`, `rate_limit_exceeded` → `rate_limit`, 그 밖은 `unknown`.
+  종류를 새로 세우지 않는다 — 화면이 할 말이 이미 있는 실패다.
 
 ### 재시도 (`max_retries`)
 
@@ -224,7 +228,7 @@ OpenAI는 2회를 기본으로 돌고 `@google/genai`는 **옵션을 주지 않�
 가정하지 않는다**: 설정이 값을 적으면 그 값이 실리고, 적지 않으면 그 파라미터가 아예
 요청에 실리지 않아 모델의 기본 사고가 그대로 돈다.
 
-| 설정 값   | Anthropic                                             | Google (`thinkingConfig.thinkingLevel`) | OpenAI (`reasoning_effort`) |
+| 설정 값   | Anthropic                                             | Google (`thinkingConfig.thinkingLevel`) | OpenAI (`reasoning.effort`) |
 | --------- | ----------------------------------------------------- | --------------------------------------- | --------------------------- |
 | `minimal` | `thinking: adaptive` + `output_config.effort: low`    | `MINIMAL`                               | `minimal`                   |
 | `low`     | `thinking: adaptive` + `output_config.effort: low`    | `LOW`                                   | `low`                       |
@@ -241,9 +245,8 @@ OpenAI는 2회를 기본으로 돌고 `@google/genai`는 **옵션을 주지 않�
   `minimal`·`low`가 둘 다 `low`로 간다. 없는 값을 지어내 400을 맞는 것보다 낫고, 게임의
   자리는 전부 이 눈금 아래쪽이라 잃는 것이 없다.
 - **OpenAI에서 생략은 곧 비추론 모델을 위한 자리다** — 추론을 모르는 모델에
-  `reasoning_effort`를 실으면 400이다. 반대로 추론 모델을 이 자리에 두면서 함수 도구를
-  함께 쓸 때는 값을 적어 한 번 확인해야 한다: Chat Completions가 그 조합을 막으면
-  Responses API로 갈아타야 하고, 그때 저장 이력의 모양이 통째로 바뀐다(§3).
+  `reasoning`을 실으면 400이다. 추론 모델과 함수 도구를 함께 쓰는 조합은 Responses
+  API에서 제약이 없다 — 사고 아이템을 다음 왕복으로 넘기는 자리를 어댑터가 갖고 있다(§3).
 - ⚠️ **못 싣는 제공자에 적으면 시작할 때 실패한다** — 조용히 무시하지 않는다. 설정이
   적어 둔 것과 실제로 도는 것이 갈리면 "GM만 사고가 얕은" 이유를 알 수 없다. 키가 없을
   때 폴백하지 않는 것과 같은 규칙이다 (§2).
@@ -316,7 +319,7 @@ runTurn({ system, history, user, stateNote?, tools?, toolChoice?, maxTokens?, on
 | --------- | ------------------------------------------ | ------------------ | ------------------------------- | --------------------------------------------- | ----------------------------------------------------------- |
 | Anthropic | `cache_control` 브레이크포인트(요청당 4개) | 1,024 토큰         | `messages` 안의 `role:"system"` | `thinking: adaptive` + `output_config.effort` | `messages.stream(body, { signal, timeout })`                |
 | Gemini    | implicit (동일 프리픽스)                   | 4,096 토큰         | 없음 — 늘 접어 넣는다           | `thinkingConfig.thinkingLevel`                | `chats.create`의 `config.abortSignal`·`httpOptions.timeout` |
-| OpenAI    | 자동 프롬프트 캐시                         | 1,024 토큰         | `role:"developer"`              | `reasoning_effort`                            | `chat.completions.create(body, { signal, timeout })`        |
+| OpenAI    | 자동 프롬프트 캐시                         | 1,024 토큰         | `role:"developer"`              | `reasoning.effort`                            | `responses.create(body, { signal, timeout })`               |
 
 **사고·최소 캐시 프리픽스 두 칸은 설정이 읽는 값이지 어댑터에 박힌 상수가 아니다** —
 사고는 `thinking_level`이 정하고(§1-2), 프리픽스 문턱은 `PROVIDER_TRAITS`가 갖는다(§4).
@@ -336,20 +339,48 @@ runTurn({ system, history, user, stateNote?, tools?, toolChoice?, maxTokens?, on
 Chat 이력을 원형으로 저장한다. 스트리밍은 chunk마다 model content를 따로 남기므로
 이번 응답의 **모든** model content에서 함수 호출을 훑는다.
 
-**OpenAI** — ⚠️ **`reasoning_effort`는 설정이 적었을 때만 실린다.** 값을 박아 두면 그
-파라미터를 모르는 모델은 400으로 죽고, 아는 모델은 설정이 무엇을 적었든 그 값으로
-고정된다 — 어느 쪽이든 `config/llm.yml`이 모델을 못 바꾼다. Chat Completions에서 함수
-도구와 추론의 조합이 막히는 모델이 있어, 서사를 이쪽으로 보내려면 그 자리에서 한 번
-확인해야 한다. 막히면 Responses API로 갈아타야 하고 그때 저장 이력의 모양이 통째로
-바뀐다(`messages[]` → input item[]).
-스트리밍의 도구 호출은 **`index`가 자리를 정하고**(id·이름은 첫 조각에만, 인자는 문자
-단위로 쪼개져 온다), 사용량은 `stream_options.include_usage`가 붙여 주는 마지막
-chunk에만 실린다 — 그 옵션이 없으면 계측이 이 에이전트를 못 본다.
-⚠️ **도구 결과에 실패 표시 자리가 없다** — `tool` 메시지는 본문 한 칸뿐이라, 성공과
-실패가 같은 모양으로 나가면 모델은 자기 호출이 통했는지 문장으로 짐작해야 한다.
-Anthropic의 `is_error`, Gemini의 `{ error }`에 해당하는 것을 이 어댑터는 **`오류:`
-접두**로 세우고, 그것을 붙이는 자리는 어댑터 안의 함수 하나다 — 인자 JSON 파싱 실패,
-도구가 돌려준 실패, 실행하지 않은 호출 셋이 같은 모양으로 나간다 (§3).
+**OpenAI** — **Responses API**(`responses.create`)를 부른다. 요청은 시스템 프롬프트를
+싣는 `instructions`와 아이템 배열 `input` 둘로 갈리고, 아이템은 네 갈래다: 메시지
+(`role: user`·`assistant`·`developer`), `function_call`, `function_call_output`,
+`reasoning`. **저장 이력은 그 `input` 아이템 배열이다** — 시스템 프롬프트는 애초에
+아이템이 아니라 걷어낼 것이 없다.
+
+- ⚠️ **`reasoning`은 설정이 적었을 때만 실린다.** 값을 박아 두면 그 파라미터를 모르는
+  모델은 400으로 죽고, 아는 모델은 설정이 무엇을 적었든 그 값으로 고정된다 — 어느
+  쪽이든 `config/llm.yml`이 모델을 못 바꾼다 (§1-2).
+- ⚠️ **도구 정의는 내부 태깅이고 `strict`를 반드시 적는다.** `{ type:"function", name,
+description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `function: {}` 중첩이
+  아니다). **`strict`를 생략하면 Responses는 strict 모드를 시도한다** — 게임의 도구
+  스키마는 `additionalProperties: false`도 아니고 전 필드가 `required`도 아니라, 생략하면
+  도구 전부가 한꺼번에 거절당한다. 그래서 `strict: false`를 명시한다.
+- **응답의 output 아이템은 손대지 않고 그대로 다음 요청의 `input`에 붙인다.** `reasoning`
+  아이템의 `encrypted_content`가 빠지면 추론 모델의 도구 왕복이 그 자리에서 끊긴다 —
+  이력을 평탄화하지 않는다는 규칙(§6)이 여기서는 그 뜻이다.
+- **`store: false`** — 게임은 자기 이력을 세이브에 갖고 있어 서버 보관으로 얻을 것이
+  없고, 끄면 대화 전문이 제공자 쪽에 남지 않는다. `previous_response_id`도 쓰지 않는다:
+  매 요청이 이력 전부를 싣는다. 추론을 켠 자리는 `include: ["reasoning.encrypted_content"]`를
+  함께 실어 사고를 다음 왕복으로 넘긴다 — 보관을 끈 채로는 그것이 사고가 건너가는
+  유일한 길이다.
+- **캐시는 자동이다** — 브레이크포인트를 손으로 놓지 않고(`prompt_cache_options`는
+  기본값 그대로), 같은 프리픽스를 공유하는 호출이 같은 기계로 가도록 `prompt_cache_key`에
+  **에이전트 이름**을 싣는다. 배치가 에이전트 단위라(§1) 고정층을 공유하는 단위도 그것이다.
+- **스트리밍은 이벤트다** — 본문은 `response.output_text.delta`, 완성된 아이템은
+  `response.output_item.done`, 사용량과 종료 사유는 마지막 `response.completed` ·
+  `response.incomplete` · `response.failed`가 응답 전체를 실어 온다. Chat Completions처럼
+  사용량 옵션을 따로 켜거나 도구 호출 조각을 `index`로 이어 붙일 일이 없다. 마지막
+  이벤트가 오기 전에 스트림이 끊기면 그때까지 받은 아이템으로 턴을 닫는다 — 사용량은
+  0으로 남지만 게임은 계속 돈다.
+- ⚠️ **도구 결과에 실패 표시 자리가 없다** — `function_call_output`은 본문 한 칸(`output`)
+  뿐이라, 성공과 실패가 같은 모양으로 나가면 모델은 자기 호출이 통했는지 문장으로
+  짐작해야 한다. Anthropic의 `is_error`, Gemini의 `{ error }`에 해당하는 것을 이 어댑터는
+  **`오류:` 접두**로 세우고, 그것을 붙이는 자리는 어댑터 안의 함수 하나다 — 인자 JSON
+  파싱 실패, 도구가 돌려준 실패, 실행하지 않은 호출 셋이 같은 모양으로 나간다 (§3).
+- ⚠️ **Chat Completions 시절의 `openai` 이력은 통째로 버린다.** 태그(제공자·모델)가 같아도
+  아이템 모양이 다르면 그 이력은 쓸 수 없다 — 아이템 하나라도 모양이 아니면 이력 전부를
+  비운다. 골라서 남기면 `call_id` 짝이 반쪽만 살아 다음 요청이 400이다.
+- **응답이 `status: "failed"`로 돌아오면 던진다** — HTTP는 200이지만 `error.code`가
+  실패를 말한다. 코드를 종류로 옮기는 자리는 상태 코드 표 옆의 작은 표 하나다
+  (`server_error` → 혼잡, `rate_limit_exceeded` → 한도, 그 밖 → 분류 못 함, §1-1).
 
 ## 3-1. `stopReason` — 턴이 왜 멈췄는가
 
@@ -357,20 +388,20 @@ Anthropic의 `is_error`, Gemini의 `{ error }`에 해당하는 것을 이 어댑
 값을 아래 다섯 중 하나로 옮기고, 게임 코드는 이 다섯만 읽는다. 제공자가 사유를 보고하지
 않으면 `null`이다.
 
-| 중립 값     | 뜻                      | Anthropic                    | Google                                                                             | OpenAI                         |
-| ----------- | ----------------------- | ---------------------------- | ---------------------------------------------------------------------------------- | ------------------------------ |
-| `completed` | 모델이 턴을 마쳤다      | `end_turn` · `stop_sequence` | `STOP`                                                                             | `stop`                         |
-| `truncated` | 출력 상한에 걸려 잘렸다 | `max_tokens`                 | `MAX_TOKENS`                                                                       | `length`                       |
-| `tool_use`  | 도구를 부르고 멈췄다    | `tool_use`                   | 함수 호출이 실린 턴                                                                | `tool_calls` · `function_call` |
-| `filtered`  | 제공자가 내용을 막았다  | `refusal`                    | `SAFETY` · `RECITATION` · `BLOCKLIST` · `PROHIBITED_CONTENT` · `SPII` · `LANGUAGE` | `content_filter`               |
-| `other`     | 위 어디에도 들지 않는다 | `pause_turn`                 | `OTHER` · `MALFORMED_FUNCTION_CALL` · `UNEXPECTED_TOOL_CALL` 등                    | 그 밖                          |
+| 중립 값     | 뜻                      | Anthropic                    | Google                                                                             | OpenAI (Responses)                                           |
+| ----------- | ----------------------- | ---------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `completed` | 모델이 턴을 마쳤다      | `end_turn` · `stop_sequence` | `STOP`                                                                             | `status: completed`                                          |
+| `truncated` | 출력 상한에 걸려 잘렸다 | `max_tokens`                 | `MAX_TOKENS`                                                                       | `incomplete_details.reason: max_output_tokens`               |
+| `tool_use`  | 도구를 부르고 멈췄다    | `tool_use`                   | 함수 호출이 실린 턴                                                                | `function_call` 아이템이 실린 턴                             |
+| `filtered`  | 제공자가 내용을 막았다  | `refusal`                    | `SAFETY` · `RECITATION` · `BLOCKLIST` · `PROHIBITED_CONTENT` · `SPII` · `LANGUAGE` | `incomplete_details.reason: content_filter` · `refusal` 파트 |
+| `other`     | 위 어디에도 들지 않는다 | `pause_turn`                 | `OTHER` · `MALFORMED_FUNCTION_CALL` · `UNEXPECTED_TOOL_CALL` 등                    | `cancelled` 등 그 밖                                         |
 
 - ⚠️ **중립 값에 제공자의 낱말을 쓰지 않는다.** 원문을 그대로 흘리면 잘림 검사가 제공자
   하나에만 맞는다 — Anthropic의 `max_tokens`를 신호로 삼으면 Gemini는 `MAX_TOKENS`를
-  소문자로 바꾼 값이 우연히 같아 돌고 OpenAI(`length`)에서는 아무 말 없이 꺼진다. 이름이
-  우연히 겹치는 것은 계약이 아니다.
+  소문자로 바꾼 값이 우연히 같아 돌고 OpenAI(`max_output_tokens`)에서는 아무 말 없이
+  꺼진다. 이름이 우연히 겹치는 것은 계약이 아니다.
 - **함수 호출이 있는 턴은 제공자가 뭐라 하든 `tool_use`다.** Gemini·OpenAI는 도구를
-  부르고도 `STOP`/`stop`을 보고할 수 있어, 도구 왕복을 계속할지 여기서 갈린다.
+  부르고도 `STOP`/`status: completed`를 보고하므로, 도구 왕복을 계속할지 여기서 갈린다.
   **`truncated`만은 예외로 그대로 남는다** — 잘린 호출은 실행하지 않으므로(§3) 그 턴이
   멈춘 이유는 도구가 아니라 출력 상한이다.
 - **`truncated`가 잘린 턴의 유일한 신호다** — 첫 장면은 그 자리에서 실패하고
@@ -382,10 +413,10 @@ Anthropic의 `is_error`, Gemini의 `{ error }`에 해당하는 것을 이 어댑
 **프롬프트 문장이 아니라 요청 파라미터로** 강제한다. 문장에만 기대면 모델이 본문으로
 답해도 호출은 정상으로 끝나고, 산출이 빈 채 해석은 턴 취소로 결산은 앵커로 떨어진다.
 
-| 중립 값         | Anthropic                            | Google                                       | OpenAI                                              |
-| --------------- | ------------------------------------ | -------------------------------------------- | --------------------------------------------------- |
-| `"auto"` (기본) | `tool_choice` 없음                   | `functionCallingConfig.mode: AUTO`           | `tool_choice` 없음                                  |
-| `{ name }`      | `tool_choice: { type:"tool", name }` | `mode: ANY` + `allowedFunctionNames: [name]` | `tool_choice: { type:"function", function:{name} }` |
+| 중립 값         | Anthropic                            | Google                                       | OpenAI                                   |
+| --------------- | ------------------------------------ | -------------------------------------------- | ---------------------------------------- |
+| `"auto"` (기본) | `tool_choice` 없음                   | `functionCallingConfig.mode: AUTO`           | `tool_choice` 없음                       |
+| `{ name }`      | `tool_choice: { type:"tool", name }` | `mode: ANY` + `allowedFunctionNames: [name]` | `tool_choice: { type:"function", name }` |
 
 - ⚠️ **강제는 그 턴의 첫 요청에만 실린다.** 도구 결과를 돌려준 뒤에도 걸어 두면 모델이
   턴을 끝낼 길이 없어 왕복 상한(8회)까지 같은 도구를 다시 부른다. 이후 반복은 `"auto"`다.
@@ -445,6 +476,11 @@ Anthropic의 `is_error`, Gemini의 `{ error }`에 해당하는 것을 이 어댑
 - ⚠️ **`inputTokens`는 캐시분을 포함한 입력 전부**다. Gemini·OpenAI는 프롬프트 합계에
   이미 포함하지만 Anthropic은 빼고 보고하므로 어댑터가 되돌려 놓는다 — 안 그러면 캐시가
   잘 먹을수록 분모가 줄어 히트율이 1을 넘는다.
+- **`cacheWriteTokens`는 이번 호출이 캐시에 새로 쓴 입력 토큰이다** — Anthropic의
+  `cache_creation_input_tokens`, OpenAI의 `input_tokens_details.cache_write_tokens`가
+  그 자리고, 보고하지 않는 Gemini는 0이다. 히트율과 나란히 보면 프리픽스가 매 턴 다시
+  쓰이고 있는지가 드러난다. ⚠️ **과금은 이 값에서 읽지 않는다** — 캐시 생성분을 따로
+  청구하는 제공자와 입력에 포함해 청구하는 제공자가 갈린다.
 - **히트율 0은 프리픽스가 조용히 무효화됐다는 신호다** — 고정층에 날짜·id가 섞이면 매 턴
   앞이 바뀌어 뒤가 전부 정가로 읽히는데, 화면엔 아무 증상이 없고 요금만 오른다. 결산의
   짧은 프롬프트는 애초에 캐시가 안 걸려 신호가 아니라서 문턱을 둔다.
@@ -583,8 +619,6 @@ Anthropic의 `is_error`, Gemini의 `{ error }`에 해당하는 것을 이 어댑
 
 ## 7. 미해결
 
-- OpenAI Responses API 이전 — 서사를 그쪽으로 옮겨 추론이 필요해지는 날.
-  `openai-adapter.ts`는 `chat.completions`만 부른다.
 - 계측은 **프로세스가 사는 동안만** 남는다. 세이브에도 디스크에도 적지 않으므로 dev
   서버를 재시작하면 장부가 0에서 다시 센다 — 며칠에 걸친 추이를 묻는 자리는 아직 없다.
 
