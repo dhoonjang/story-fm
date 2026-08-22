@@ -244,6 +244,28 @@ export function migrateConditions(save: ConditionSave): void {
   }
 }
 
+interface GrowthSourceSave {
+  growthLog: Array<{ source: string }>;
+}
+
+/**
+ * 폐기된 성장 출처 `reserve`를 지금 있는 갈래로 옮긴다.
+ *
+ * 옛 2군 개발 프로그램이 적던 값이고, 그 프로그램이 사라진 뒤로는 아무도 쓰지도
+ * 읽지도 않는다. **스키마에서 갈래를 빼면 그 값을 든 세이브는 parse에서 막히므로**
+ * (`GrowthSourceSchema`는 로드가 통과해야 하는 문이다 — `save-schema.ts`) 옮기는
+ * 자리가 여기여야 한다.
+ *
+ * 가는 곳이 `development`인 이유: 2군 선수가 굴러서 오른 몫이라는 뜻이 그쪽과 같고,
+ * 갈래를 따로 거르는 유일한 자리(훈련 결산 요약의 `source === "training"`)에 걸리지
+ * 않아 옮겨도 화면이 달라지지 않는다. 옮기고 나면 `reserve`가 남지 않아 멱등이다.
+ */
+export function migrateGrowthSources(save: GrowthSourceSave): void {
+  for (const entry of save.growthLog) {
+    if (entry.source === "reserve") entry.source = "development";
+  }
+}
+
 interface MatchStatsSave {
   pendingMatch?: {
     ledger?: { stats?: Record<string, { scoringExpectation?: number }> };

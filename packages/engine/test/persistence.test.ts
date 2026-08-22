@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { hostname } from "node:os";
+import { GrowthSourceSchema } from "@story-fm/domain";
 import {
   teamCatalog,
   acquireSaveLock,
@@ -32,6 +33,7 @@ import {
 import {
   migrateConditions,
   migrateFormScale,
+  migrateGrowthSources,
   migrateMatchStats,
   migrateMirrorProficiency,
   migratePassStyles,
@@ -834,6 +836,20 @@ describe("옛 세이브를 지금 모양으로", () => {
       undefined,
       "4-3-3|3|2|4|3|3|5",
     ]);
+  });
+
+  it("폐기된 성장 출처 reserve가 development로 옮겨진다 — 두 번 돌려도 같다", () => {
+    // 스키마에서 갈래를 뺐으므로 남아 있으면 멀쩡한 세이브가 parse에서 막힌다
+    const save = {
+      growthLog: [{ source: "reserve" }, { source: "training" }, { source: "development" }],
+    };
+    migrateGrowthSources(save);
+    expect(save.growthLog.map((g) => g.source)).toEqual(["development", "training", "development"]);
+    migrateGrowthSources(save);
+    expect(save.growthLog.map((g) => g.source)).toEqual(["development", "training", "development"]);
+    // 옮긴 뒤의 값은 지금 스키마를 통과한다 — 그것이 이 마이그레이션의 존재 이유다
+    for (const g of save.growthLog)
+      expect(GrowthSourceSchema.safeParse(g.source).success).toBe(true);
   });
 
   it("경기 도중 저장된 옛 세이브의 빈 기대 득점 칸이 0으로 선다", () => {

@@ -409,9 +409,12 @@ export type Negotiation = z.infer<typeof NegotiationSchema>;
 /**
  * 성장의 출처. `development`는 **코어의 월간 성장·쇠퇴** — 감독 팀 1군 밖의 선수
  * (우리 2군 · 모든 타 팀)가 나이·잠재력·난수로 조금씩 움직이는 몫이다.
- * `reserve`는 옛 2군 개발 프로그램의 출처로, 이전 세이브의 로그에만 남아 있다.
+ *
+ * ⚠️ 갈래를 빼는 변경은 **마이그레이션과 한 PR**이다. 이 스키마는 로드가 통과해야
+ * 하는 문이라(`core/save-schema.ts`), 뺀 값을 든 옛 세이브는 그 자리에서 막힌다 —
+ * 폐기된 `reserve`가 `migrateGrowthSources`를 갖는 이유다.
  */
-export const GrowthSourceSchema = z.enum(["training", "match", "reserve", "development"]);
+export const GrowthSourceSchema = z.enum(["training", "match", "development"]);
 
 /**
  * 그 한 칸이 **어느 경로로** 올랐나 — `source`보다 한 단 세분한 코드.
