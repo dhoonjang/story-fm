@@ -321,10 +321,18 @@ export function recallLoan(state: GameState, input: { playerId: string }): Skill
   };
 }
 
-/** 임대 복귀 — 원소속으로 되돌린다. 자리는 감독이 정한다(2군으로 들어온다) */
+/**
+ * 임대 복귀 — 원소속으로 되돌린다. 자리는 감독이 정한다(2군으로 들어온다).
+ *
+ * **빌린 구단의 배치는 비운다** — 복귀도 그 구단에서 보면 나가는 문이라, 안 비우면
+ * 떠난 선수의 id가 그 팀 라인업에 남는다 (transfer.md §2). 다만 `clearDepartedState`
+ * 전체를 지나지는 않는다: 이적 리스트·개인 훈련·역할 기억은 **소유 구단**의 값이라
+ * 우리가 내보낸 선수가 돌아오는 자리에서 지우면 우리 기억을 우리가 잃는다.
+ */
 function returnFromLoan(state: GameState, player: GamePlayer): void {
   const loan = player.loan;
   if (!loan) return;
+  releaseFromTactics(state, player.teamId, player.id);
   const window = windowOpenOn(state.windows, state.date);
   state.transfers.push({
     id: `tr-loanback-${player.id}-${state.date}`,
