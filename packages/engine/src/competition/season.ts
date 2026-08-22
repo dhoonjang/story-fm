@@ -127,6 +127,7 @@ export function computeStandings(
       points: 0,
     });
   }
+  const counted: CountedMatch[] = [];
   for (const match of state.matches) {
     if (!match.result || match.season !== state.season) continue;
     if (match.competitionId !== competitionId) continue;
@@ -136,6 +137,13 @@ export function computeStandings(
     const away = rows.get(match.awayTeamId);
     if (!home || !away) continue;
     const { homeGoals, awayGoals } = match.result;
+    // 맞대결 표는 이 표에 실제로 반영된 경기만 본다 (아래 sortStandings)
+    counted.push({
+      homeTeamId: match.homeTeamId,
+      awayTeamId: match.awayTeamId,
+      homeGoals,
+      awayGoals,
+    });
     home.played++;
     away.played++;
     home.goalsFor += homeGoals;
@@ -159,9 +167,90 @@ export function computeStandings(
   }
   const list = [...rows.values()];
   for (const row of list) row.goalDiff = row.goalsFor - row.goalsAgainst;
-  return list.sort(
-    (a, b) => b.points - a.points || b.goalDiff - a.goalDiff || b.goalsFor - a.goalsFor,
-  );
+  return sortStandings(list, counted);
+}
+
+/** 순위표에 실제로 반영된 리그 경기 — 맞대결 표가 다시 도는 대상 */
+interface CountedMatch {
+  homeTeamId: string;
+  awayTeamId: string;
+  homeGoals: number;
+  awayGoals: number;
+}
+
+/** 승점 → 골득실 → 다득점. 여기까지 같은 팀들이 "완전 동률" 무리다. */
+function byMainKeys(a: StandingRow, b: StandingRow): number {
+  return b.points - a.points || b.goalDiff - a.goalDiff || b.goalsFor - a.goalsFor;
+}
+
+/** 마지막 못 — 팀이 세이브에 담긴 순서가 아니라 팀 자체에서 나오는 키 */
+function byTeamId(a: StandingRow, b: StandingRow): number {
+  return a.teamId < b.teamId ? -1 : a.teamId > b.teamId ? 1 : 0;
+}
+
+interface MiniRow {
+  points: number;
+  goalDiff: number;
+  goalsFor: number;
+}
+
+/** 무리 안 팀들끼리 치른 경기만으로 다시 만든 표 */
+function headToHead(
+  group: readonly StandingRow[],
+  matches: readonly CountedMatch[],
+): Map<string, MiniRow> {
+  const mini = new Map<string, MiniRow>();
+  for (const row of group) mini.set(row.teamId, { points: 0, goalDiff: 0, goalsFor: 0 });
+  for (const m of matches) {
+    const home = mini.get(m.homeTeamId);
+    const away = mini.get(m.awayTeamId);
+    if (!home || !away) continue;
+    home.goalsFor += m.homeGoals;
+    away.goalsFor += m.awayGoals;
+    home.goalDiff += m.homeGoals - m.awayGoals;
+    away.goalDiff += m.awayGoals - m.homeGoals;
+    if (m.homeGoals > m.awayGoals) home.points += 3;
+    else if (m.homeGoals < m.awayGoals) away.points += 3;
+    else {
+      home.points++;
+      away.points++;
+    }
+  }
+  return mini;
+}
+
+/**
+ * 순위 정렬 — 승점 → 골득실 → 다득점 → **맞대결** → 다승 → `teamId` 사전순
+ * (competition.md §2).
+ *
+ * ⚠️ **맞대결은 앞 세 키가 같은 무리 안에서 표를 다시 만들어 가른다.** 비교 함수
+ * 안에서 두 팀을 짝지어 붙이면 세 팀이 물고 물릴 때 추이성이 깨지고, `Array.sort`
+ * 결과가 다시 입력 순서를 탄다 — 이 함수가 없애려는 그 의존이다.
+ */
+function sortStandings(list: StandingRow[], matches: readonly CountedMatch[]): StandingRow[] {
+  const sorted = list.sort((a, b) => byMainKeys(a, b) || b.wins - a.wins || byTeamId(a, b));
+  for (let i = 0; i < sorted.length;) {
+    let j = i + 1;
+    while (j < sorted.length && byMainKeys(sorted[i]!, sorted[j]!) === 0) j++;
+    if (j - i > 1) {
+      const group = sorted.slice(i, j);
+      const mini = headToHead(group, matches);
+      group.sort((a, b) => {
+        const x = mini.get(a.teamId)!;
+        const y = mini.get(b.teamId)!;
+        return (
+          y.points - x.points ||
+          y.goalDiff - x.goalDiff ||
+          y.goalsFor - x.goalsFor ||
+          b.wins - a.wins ||
+          byTeamId(a, b)
+        );
+      });
+      sorted.splice(i, group.length, ...group);
+    }
+    i = j;
+  }
+  return sorted;
 }
 
 /**
