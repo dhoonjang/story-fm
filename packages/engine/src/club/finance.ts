@@ -6,6 +6,7 @@ import type {
   FinanceReportLine,
   LedgerEntry,
   MatchRecord,
+  Transfer,
 } from "@story-fm/domain";
 import {
   FINANCE_CATEGORY_KO,
@@ -940,6 +941,71 @@ function contractChainsOf(state: GameState, teamId: string): Map<string, Contrac
 }
 
 /**
+ * 이 팀과 이 선수 사이의 **이동** — 선수별로 날짜 순. 사슬을 끊는 자리(떠남)와
+ * 취득원가(유상 도착)가 둘 다 여기서 나온다.
+ *
+ * **임대는 세지 않는다** — 소유가 그대로라 자산이 장부에 남는다.
+ *
+ * 사슬과 같은 이유로 팀 단위로 한 번에 접는다. 선수마다 원장을 다시 훑으면 월초
+ * 정산이 (시즌마다 수백 줄씩 쌓이는) 이적 원장 × 스쿼드 수만큼 느려진다.
+ */
+function movesByPlayerOf(state: GameState, teamId: string): Map<string, Transfer[]> {
+  const moves = new Map<string, Transfer[]>();
+  for (const transfer of state.transfers) {
+    if (transfer.type === "loan") continue;
+    if (transfer.fromTeamId !== teamId && transfer.toTeamId !== teamId) continue;
+    const list = moves.get(transfer.gamePlayerId);
+    if (list) list.push(transfer);
+    else moves.set(transfer.gamePlayerId, [transfer]);
+  }
+  for (const list of moves.values()) {
+    list.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  }
+  return moves;
+}
+
+/** 한 번의 취득 — 그 취득이 연 계약들과, 이 구간을 연 떠남의 날짜(첫 취득은 없다) */
+type Acquisition = { rows: Contract[]; openedAt: string | null };
+
+/**
+ * 사슬을 **취득 단위로 자른다** — 그 팀을 떠난 자리에서 끊긴다 (§6.1).
+ *
+ * 팔았다가 되사 온 선수는 그 팀에서의 계약이 두 덩이인데, 한 사슬로 읽으면 취득원가가
+ * 첫 이적료에 묶여 **두 번째 이적료가 장부에 아예 들어오지 않는다.** 게다가 매각 때 이미
+ * 털어 낸 잔존가가 복귀와 함께 되살아나 다시 상각된다.
+ *
+ * ⚠️ **"이전 계약 `until` 뒤에 시작한 계약"으로 가르면 안 된다.** AI 팀의 자동 갱신은
+ * 만기 다음 날(프리시즌 시작일)에 새 계약을 쓰므로 그 규칙은 평범한 재계약을 전부 새
+ * 취득으로 만들고, 취득원가가 재계약 시점으로 옮겨 앉는 이중 계상을 되살린다.
+ */
+function acquisitionsOf(chain: Contract[], moves: Transfer[], teamId: string): Acquisition[] {
+  const acquisitions: Acquisition[] = [];
+  for (const [i, contract] of chain.entries()) {
+    const previous = chain[i - 1];
+    // 이전 계약과 이 계약 사이에 팀을 떠났으면 그 뒤는 새 취득이다
+    const left = previous
+      ? moves.find(
+          (t) => t.fromTeamId === teamId && t.date >= previous.since && t.date <= contract.since,
+        )
+      : undefined;
+    const current = acquisitions[acquisitions.length - 1];
+    if (!current || left) acquisitions.push({ rows: [contract], openedAt: left?.date ?? null });
+    else current.rows.push(contract);
+  }
+  return acquisitions;
+}
+
+/** 그 달의 장부를 지고 있는 취득 — 아직 아무 취득도 시작하지 않았으면 첫 취득 */
+function acquisitionAt(acquisitions: Acquisition[], at: string): Acquisition | undefined {
+  const target = monthOf(at);
+  let picked = acquisitions[0];
+  for (const acquisition of acquisitions) {
+    if (monthOf(acquisition.rows[0]!.since) <= target) picked = acquisition;
+  }
+  return picked;
+}
+
+/**
  * **취득원가** — 재계약이 이것을 바꾸지 않는다.
  *
  * 예전엔 레거시 갈래가 "계약 시작일 == 게임 시작일"로 판정했다. 그래서 **재계약하는
@@ -947,29 +1013,33 @@ function contractChainsOf(state: GameState, teamId: string): Map<string, Contrac
  * 손익이 £16.7M → £202.2M으로 올라갔다(§10.3의 3번 최대 원인). 실제 회계는 재계약으로
  * 잔존가를 지우지 않는다.
  */
-function acquisitionCostOf(state: GameState, teamId: string, chain: Contract[]): number {
-  const first = chain[0];
+function acquisitionCostOf(acquisition: Acquisition, moves: Transfer[], teamId: string): number {
+  const first = acquisition.rows[0];
   if (!first) return 0;
   const months = monthsBetween(first.since, first.until) + 1;
   if (months <= 0) return 0;
 
-  // 유상으로 데려왔으면 이적료가 취득원가다
-  const paid = state.transfers.find(
-    (t) =>
-      t.toTeamId === teamId &&
-      t.gamePlayerId === first.gamePlayerId &&
-      t.fee > 0 &&
-      first.since >= t.date,
-  );
+  /**
+   * 유상으로 데려왔으면 이적료가 취득원가다 — **이 취득이 열린 뒤**의 마지막 도착 행이다.
+   * 되사 온 선수는 옛 이적료가 원장에 그대로 남아 있으므로 앞에서부터 집으면 첫 이적료가
+   * 잡히고, 무상으로 돌아온 선수는 옛 이적료를 장부에 다시 세운다.
+   */
+  let paid: Transfer | undefined;
+  for (const transfer of moves) {
+    if (transfer.toTeamId !== teamId || transfer.fee <= 0) continue;
+    if (transfer.date > first.since) break; // 날짜 순이다
+    if (acquisition.openedAt !== null && transfer.date < acquisition.openedAt) continue;
+    paid = transfer;
+  }
   if (paid) return paid.fee;
 
   // 시작 스쿼드는 주급에서 파생한다 (§6.1) — 그 외(무상 이적·유스)는 장부가 없다
-  if (first.since > GAME_START_DATE) return 0;
+  if (acquisition.openedAt !== null || first.since > GAME_START_DATE) return 0;
   return first.weeklyWage * WEEKS_PER_MONTH * LEGACY_AMORTISATION_WAGE_RATE * months;
 }
 
 /**
- * 그 달의 **장부상 잔존가** — 취득원가를 계약 사슬을 따라 접은 나머지.
+ * 그 달의 **장부상 잔존가** — 취득원가를 그 취득의 계약들을 따라 접은 나머지.
  *
  * ⚠️ **첫 계약의 직선이 아니다.** 재계약은 그 시점의 잔존가를 새 기간에 다시 펴므로
  * 잔존가는 계약마다 기울기가 갈리는 **꺾은선**이다. 첫 계약의 직선으로만 읽으면
@@ -977,14 +1047,17 @@ function acquisitionCostOf(state: GameState, teamId: string, chain: Contract[]):
  * 짧게 재계약한 뒤 또 재계약하면 이미 더 빨리 턴 값이 원래 눈금으로 되살아나고,
  * 만기를 넘겨 재계약하면 원래 눈금이 이미 0이라 남은 값이 통째로 사라진다.
  */
-function residualOf(state: GameState, teamId: string, chain: Contract[], at: string): number {
-  let value = acquisitionCostOf(state, teamId, chain);
+function residualOf(chain: Contract[], moves: Transfer[], teamId: string, at: string): number {
+  const acquisition = acquisitionAt(acquisitionsOf(chain, moves, teamId), at);
+  if (!acquisition) return 0;
+  let value = acquisitionCostOf(acquisition, moves, teamId);
   if (value <= 0) return 0;
 
   const target = monthOf(at);
-  for (let i = 0; i < chain.length; i++) {
-    const contract = chain[i]!;
-    const next = chain[i + 1];
+  const rows = acquisition.rows;
+  for (let i = 0; i < rows.length; i++) {
+    const contract = rows[i]!;
+    const next = rows[i + 1];
     const nextMonth = next ? monthOf(next.since) : null;
     // 이 계약이 상각을 지고 있던 구간 — 다음 계약이 시작하거나 기준 달에 닿을 때까지
     const until = nextMonth !== null && nextMonth < target ? nextMonth : target;
@@ -1000,6 +1073,9 @@ function residualOf(state: GameState, teamId: string, chain: Contract[], at: str
 
 /**
  * 지금 남은 **장부상 잔존가**. 매각 시 처분 이익(§6.1)과 월 상각이 같은 식을 쓴다.
+ *
+ * 매각 잔존가는 **매각일**로 묻는다 — 되사 온 뒤에 물어도 그날을 담은 취득의 값이지
+ * 새 취득의 값이 아니다.
  */
 export function bookValueOf(
   state: GameState,
@@ -1008,7 +1084,8 @@ export function bookValueOf(
   at?: string,
 ): number {
   const chain = contractChainsOf(state, teamId).get(playerId) ?? [];
-  return residualOf(state, teamId, chain, at ?? state.date);
+  const moves = movesByPlayerOf(state, teamId).get(playerId) ?? [];
+  return residualOf(chain, moves, teamId, at ?? state.date);
 }
 
 /**
@@ -1025,12 +1102,13 @@ export function bookValueOf(
 export function amortisationOf(state: GameState, teamId: string): AmortisationLine[] {
   const lines: AmortisationLine[] = [];
   const chains = contractChainsOf(state, teamId);
+  const moves = movesByPlayerOf(state, teamId);
   for (const [playerId, chain] of chains) {
     const contract = chain.find((c) => c.status === "active");
     if (!contract) continue;
     if (amortisationMonthsLeft(state, contract.since, contract.until) <= 0) continue;
 
-    const residual = residualOf(state, teamId, chain, contract.since);
+    const residual = residualOf(chain, moves.get(playerId) ?? [], teamId, contract.since);
     if (residual <= 0) continue;
     const months = monthsBetween(contract.since, contract.until) + 1;
     if (months <= 0) continue;
