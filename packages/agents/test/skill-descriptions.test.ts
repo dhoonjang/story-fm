@@ -12,12 +12,16 @@ import {
   REPORT_MOOD_TOOL,
   REPORT_TRAINING_INPUT,
   REPORT_TRAINING_TOOL,
+  MATCH_RATER_SYSTEM,
   SKILL_CATALOG,
   SKILL_NAMES,
+  TRAINING_RATER_SYSTEM,
+  agingDeclineLine,
   buildGmTools,
   toToolSchema,
 } from "@story-fm/agents";
-import { createGame, interpretBackgroundHeuristic } from "@story-fm/engine";
+import { ATTRIBUTE_AXES, AXIS_KO } from "@story-fm/domain";
+import { AXIS_AGING, agingDelta, createGame, interpretBackgroundHeuristic } from "@story-fm/engine";
 
 /** 세계는 한 번만 세운다 — 여기서는 아무도 상태를 고치지 않는다 (`createGame`은 판당 수 초) */
 const STATE = (() => {
@@ -107,6 +111,25 @@ describe("규칙이 사는 자리", () => {
       expect(skill.description.length, skill.name).toBeLessThanOrEqual(600);
     }
     expect(total).toBeLessThanOrEqual(8_300);
+  });
+
+  /**
+   * 나이로 먼저 꺾이는 축과 그 나이는 코어의 노화 곡선이 갖는다 — 프롬프트가 손으로
+   * 적으면 곡선을 조율해도 옛 나이를 계속 말하고, 두 결산이 서로 다른 나이를 믿는다.
+   * 화면에 드러나지 않는 어긋남이라 여기서 잰다 (prompts.md §5).
+   */
+  it("결산 둘의 나이 문장은 코어의 노화 곡선에서 온다", () => {
+    const early = ATTRIBUTE_AXES.filter((axis) => AXIS_AGING[axis] === "early");
+    const line = agingDeclineLine();
+    for (const axis of early) expect(line, axis).toContain(AXIS_KO[axis]);
+
+    // 문장이 적은 나이가 곧 그 축들이 처음 꺾이는 해다 — 한 해 전까지는 꺾이지 않는다
+    const age = Number(/^(\d+)세/.exec(line)?.[1]);
+    expect(early.every((axis) => agingDelta(axis, age) < 0)).toBe(true);
+    expect(early.every((axis) => agingDelta(axis, age - 1) < 0)).toBe(false);
+
+    expect(MATCH_RATER_SYSTEM).toContain(line);
+    expect(TRAINING_RATER_SYSTEM).toContain(line);
   });
 });
 

@@ -1,4 +1,4 @@
-import type { MatchEvent, ShootoutKick, ShootoutOutcome, StrengthPacket } from "@story-fm/domain";
+import type { MatchEvent, ShootoutKick, ShootoutOutcome } from "@story-fm/domain";
 import { packetTagText, subCauseText } from "@story-fm/domain";
 
 /**
@@ -67,15 +67,6 @@ export const MATCH_CASTER_SYSTEM = `당신은 스토리 기반 풋볼 매니저�
 한국어. 국내 축구 중계의 관용 표현을 쓴다. 하이라이트 위주로 리듬감 있게.
 화자는 게임 내부의 수치를 입에 담지 않는다 — 능력치·전력 점수·소화율·확률.
 "pace 88" 대신 "리그 최고 수준의 스피드", "소화율 68%" 대신 "지시가 아직 덜 붙었습니다".`;
-
-/** 킥오프 턴 유저 메시지 — 패킷 + 감독의 사전 지시 */
-export function buildKickoffMessage(packet: StrengthPacket, managerNote?: string): string {
-  const note = managerNote ? `\n\n[감독의 경기 전 지시]\n${managerNote}` : "";
-  return (
-    `아래 전력 분석 패킷을 근거로 경기를 시작하라. 킥오프부터 첫 정지점까지 진행한다.` +
-    `\n\n[전력 분석 패킷]\n${JSON.stringify(packet, null, 2)}${note}`
-  );
-}
 
 /** 진행 턴 유저 메시지 — 장부 스냅샷 + 감독 발화 */
 export function buildContinueMessage(ledgerSummary: string, managerInput: string): string {
