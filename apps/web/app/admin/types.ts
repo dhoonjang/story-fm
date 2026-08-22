@@ -1,3 +1,4 @@
+import type { AgentName } from "@story-fm/llm";
 import {
   ATTRIBUTE_AXES,
   mirrorBaseOf,
@@ -250,4 +251,58 @@ export function changedFields<T extends object>(before: T, after: T): Partial<T>
     if (JSON.stringify(after[key]) !== JSON.stringify(before[key])) patch[key] = after[key];
   }
   return patch;
+}
+
+/* ── 계측 (`/api/admin/usage`) ─────────────────────────── */
+
+/**
+ * 계측 행 하나 — 에이전트의 배치와 장부를 합친 것 (models.md §5-1).
+ * **판정은 라우트가 낸다** — 화면은 이 값을 세우기만 한다.
+ */
+export interface UsageAgentRow {
+  agent: AgentName;
+  provider: string;
+  model: string;
+  maxTokens: number;
+  timeoutMs: number;
+  maxRetries: number;
+  /** 설정이 사고 수준을 적지 않았으면 null — 어댑터가 그 파라미터를 아예 싣지 않는다 */
+  thinkingLevel: string | null;
+  calls: number;
+  skipped: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  billed: number;
+  /** 호출당 평균 입력 — 아래 문턱과 나란히 읽어야 히트율이 뜻을 갖는다 */
+  avgInput: number | null;
+  /** 그 자리 제공자의 최소 캐시 프리픽스 (토큰) */
+  minCacheableInput: number;
+  /**
+   * 캐시 히트율 — **문턱 아래이거나 호출이 없으면 null**이다.
+   *
+   * 0%로 적으면 애초에 캐시가 걸릴 수 없는 짧은 호출과 프리픽스가 깨진 호출이 한
+   * 모양이 된다 (models.md §4·§5).
+   */
+  cacheHitRate: number | null;
+  /** 프리픽스가 조용히 깨진 것으로 보이는가 — `cacheAlerts`의 판정 그대로 */
+  cacheAlert: boolean;
+}
+
+export interface UsageResponse {
+  /** 장부가 담고 있는 세이브 — 아무 게임도 열지 않았으면 null */
+  gameId: string | null;
+  mode: "mock" | "real";
+  totals: {
+    calls: number;
+    skipped: number;
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+    billed: number;
+  };
+  budget: { limit: number | null; used: number; over: boolean; ratio: number };
+  agents: UsageAgentRow[];
 }

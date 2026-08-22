@@ -15,6 +15,7 @@ include(`packages/*/test/**/*.test.ts`)가 그 경로를 걷지 않으므로 파
 pnpm balance --list        # 어떤 하네스가 있고 무엇을 어느 밴드로 재는가
 pnpm balance               # 전부 돌린다 (수 분)
 pnpm balance finance       # 파일 이름으로 걸러 하나만
+pnpm balance --report out  # 전부 돌리고 측정값을 out/에 남긴다 (주간 워크플로가 쓴다 — §5)
 ```
 
 `--list`는 세계를 세우지 않는다 — 서술자만 읽어 이름·무엇을 재는가·지표별 밴드·그
@@ -61,7 +62,9 @@ pnpm balance finance       # 파일 이름으로 걸러 하나만
 | `youth-development`    | 2군 경기 수 · 출전·집중 육성이 가르는 성장 격차      | [season](season.md) §2          |
 | `demotion-grievance`   | 한 시즌 2군 강등이 낳는 불만 건수 — 로테이션과 방치  | [people](../data/people.md) §5  |
 | `approach-rate`        | 한 시즌 다가옴 건수 · 채널 분포 · 소음 문이 서는가   | [people](../data/people.md) §8  |
+| `overall-scale`        | 종합을 읽는 눈금 — 리그별·연령별 분포                | [match](match.md) §7            |
 | `history-window`       | 평시 이력의 글자 분포 · 압축 주기 · 한국어 글자↔토큰 | [agents](../llm/agents.md) §5-1 |
+| `prompt-regression`    | 프롬프트 층의 글자·프리픽스 안정성 · 장면 문법·스킬  | [prompts](../llm/prompts.md) §7 |
 
 ## 4. ⚠️ 불변식
 
@@ -73,14 +76,46 @@ pnpm balance finance       # 파일 이름으로 걸러 하나만
 - **하네스의 문턱은 재려는 대상이 쓰는 상수 그것이다.** 로테이션 발동률을 재면서
   문턱을 따로 적으면 재는 자리와 재려는 대상이 다른 눈금을 쓴다.
 
-## 5. 미해결
+## 5. 주간 스케줄 (`.github/workflows/balance.yml`)
 
-- **하네스는 CI에 없다.** 한 번 돌리는 데 몇 분이라 손으로 돌린다. 밸런스 상수를
-  만진 PR이 그 결과를 본문에 적는 것이 지금의 규약이다.
-- **하네스는 두 패키지에 있다.** 대부분은 `packages/engine/harness/`이고 — `packages/sim`의
-  분포를 재는 자리도 결국 세계를 세워야 해서 엔진 쪽이다 — 프롬프트 조립을 재는
-  `history-window`만 `packages/agents/harness/`다. 엔진은 에이전트를 import할 수 없다.
-  서술자(`harness.ts`)는 그대로 엔진 것 하나를 쓴다.
+**하네스는 PR 게이트가 아니라 주 1회 일정으로 돈다** — 일요일 18:00 UTC(월요일
+03:00 KST), 그리고 손으로 부를 수 있게 `workflow_dispatch`가 함께 열려 있다.
+
+- **왜 게이트가 아닌가.** 전부 도는 데 총 CPU 10분 안팎을 쓰는데(가장 무거운 것이
+  세 시즌짜리 하나로 그 절반이다) `ci.yml`의 초록까지 벽시계는 지금 4분대다(그 파일의
+  측정 주석). 하네스를 거기 얹으면 PR마다 그만큼을 더 물고, 정작 밴드를 움직이는
+  커밋은 드물다. 게이트가 지키는 것은 **고정 기대값의 회귀**이고 (AGENTS.md §5)
+  밴드는 그런 값이 아니다.
+- **왜 주 1회인가.** 밸런스 손잡이는 하루 단위로 움직이지 않는다. 주 1회면 이탈이
+  생긴 주의 커밋 범위가 한 주로 좁아 원인을 되짚을 수 있고, 러너 분은 월 두어 시간에
+  머문다. 월요일 새벽에 도는 것은 주말 머지분까지 담아 **사람이 읽는 시간에 결과가 서
+  있게** 하기 위해서다.
+- **판정은 `guard`만 한다** (§2). `reference` 이탈은 지금도 여럿이라 이슈로 열면
+  매주 같은 소음이 서고, 그 소음 속에서 진짜 신호가 읽히지 않는다 — 표는 아티팩트와
+  잡 요약에 그대로 서므로 읽을 값은 사라지지 않는다.
+- **하네스가 아예 보고하지 못한 것도 이탈이다.** 서술자 목록(`HARNESSES`)에 있는데
+  측정값이 한 줄도 오지 않았다면 그 하네스는 터졌거나 시한에 걸린 것이고, 그것은
+  "밴드 안"이 아니다. 리포트는 그 자리를 `missing`으로 적는다.
+
+### 이탈이 사람 손 없이 보이는 길
+
+| 어디           | 무엇                                                                     |
+| -------------- | ------------------------------------------------------------------------ |
+| 잡 요약        | 하네스별 표 — 지표·측정·구간·판정 (`summary.md`)                         |
+| 아티팩트       | 측정값 원본 `readings.jsonl` · 요약 · 이탈 목록 (90일)                   |
+| 이슈           | `guard` 이탈이 하나라도 있으면 — 라벨 `balance` + `priority/high`        |
+| 이미 열린 이슈 | 같은 라벨의 열린 이슈가 있으면 새로 열지 않고 그 주의 표를 댓글로 붙인다 |
+
+이슈에 **`priority/` 라벨이 반드시 붙는다** — `resolve`는 그 라벨 없는 이슈를 후보로
+집지 않으므로, 라벨이 없으면 이슈는 열리기만 하고 아무도 집지 않는다. 본문은
+`## 무엇이` · `## 작업` 형태로 서므로 그대로 작업 목록이 된다.
+
+## 6. 미해결
+
+- **하네스는 두 패키지에 있다.** 대부분은 `packages/engine/harness/`이고 —
+  `packages/sim`의 분포를 재는 자리도 결국 세계를 세워야 해서 엔진 쪽이다 — 프롬프트를
+  재는 둘(`history-window` · `prompt-regression`)만 `packages/agents/harness/`다. 엔진은
+  에이전트를 import할 수 없다. 서술자(`harness.ts`)는 그대로 엔진 것 하나를 쓴다.
 
 ## 코드 위치
 
@@ -90,3 +125,5 @@ pnpm balance finance       # 파일 이름으로 걸러 하나만
 | `pnpm balance` 진입점          | `packages/engine/harness/cli.ts`                |
 | 하네스 본체                    | `packages/{engine,agents}/harness/*.harness.ts` |
 | 하네스 전용 vitest 설정        | `vitest.balance.config.ts`                      |
+| 측정값 파일 · 요약 · 이탈 목록 | `packages/engine/harness/report.ts`             |
+| 주간 스케줄 워크플로           | `.github/workflows/balance.yml`                 |
