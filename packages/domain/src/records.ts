@@ -862,7 +862,7 @@ export type BoardExpectationCode = z.infer<typeof BoardExpectationCodeSchema>;
 
 /** 코드 → 기대의 이름. 순위는 `target`이 갖는다 — 문구를 고쳐도 옛 세이브가 함께 고쳐진다 */
 export function boardExpectationText(code: BoardExpectationCode, target?: number): string {
-  const scope = target === undefined ? "" : ` (${target}위 이내)`;
+  const scope = target === undefined ? "" : `(${target}위 이내)`;
   switch (code) {
     case "title":
       return "우승 경쟁";
