@@ -9,8 +9,9 @@
  * 읽는 그 디렉터리에 써야 한다. 두 곳에 따로 적으면 슬롯을 옮길 때 한쪽만 옮는다.
  */
 const BASE_PORT = 3399;
-// 슬롯을 늘리면 apps/web/tsconfig.json의 include에도 그 distDir을 함께 적는다 —
-// Next가 처음 보는 distDir을 tsconfig에 자동으로 덧붙여 추적 파일을 더럽힌다.
+// 상한을 옮겨도 다른 파일을 따라 고칠 일은 없다 — apps/web/tsconfig.json은 슬롯을
+// 하나씩 적는 대신 `.next-e2e*/types`로 받는다. (그 줄이 있어야 Next가 처음 보는
+// distDir을 tsconfig에 제멋대로 덧붙여 추적 파일을 더럽히는 것을 막는다.)
 const MAX_SLOT = 9;
 
 function readSlot(): number {
