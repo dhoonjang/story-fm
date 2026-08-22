@@ -74,6 +74,22 @@ export function kindOfStatus(status: number | undefined): LlmErrorKind {
 }
 
 /**
+ * 다시 불러 볼 만한 응답인가 — **어댑터가 직접 재시도할 때 읽는 표** (models.md §1-1).
+ *
+ * Anthropic·OpenAI SDK가 재시도하는 상태와 같은 집합이다: 408 요청 시한, 409 잠금
+ * 충돌, 429 한도, 그리고 5xx 전부. 그 둘은 SDK가 알아서 하므로 이 함수를 부르는 것은
+ * 재시도를 손으로 도는 Gemini 어댑터뿐이다.
+ *
+ * ⚠️ **`LlmErrorKind`로 판정하지 않는다.** 종류는 화면이 문구를 고르는 눈금이라
+ * 400·404·연결 오류가 다 `unknown`으로 모이는데, 재시도는 그 안에서 갈라야 한다 —
+ * 5xx는 다시 부를 만하고 404는 몇 번을 불러도 404다.
+ */
+export function isRetryableStatus(status: number | undefined): boolean {
+  if (status === undefined) return false;
+  return status === 408 || status === 409 || status === 429 || status >= 500;
+}
+
+/**
  * 중단 신호로 끝난 호출인가 — 신호를 거는 곳은 시한 하나뿐이라(`withDeadline`,
  * models.md §1-1) 이것은 곧 시한 초과다. SDK마다 던지는 물건이 달라서
  * (`APIUserAbortError`·`AbortError`·`DOMException`) 이름으로 모은다.
