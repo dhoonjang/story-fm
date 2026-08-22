@@ -15,6 +15,8 @@ const testConfig = {
   model: "gpt-test",
   maxTokens: 1024,
   timeoutMs: 30_000,
+  maxRetries: 2,
+  operatorChannel: true,
 };
 
 const usage = {
@@ -250,7 +252,51 @@ describe("OpenAI 어댑터", () => {
     expect(handle).not.toHaveBeenCalled();
     expect(result.text).toBe("고쳤다");
     const second = sent[1]?.messages as Array<{ role: string; content?: unknown }>;
-    expect(second.some((m) => m.role === "tool" && String(m.content).includes("JSON"))).toBe(true);
+    const toolMessage = second.find((m) => m.role === "tool");
+    expect(String(toolMessage?.content)).toContain("JSON");
+    /**
+     * ⚠️ **성공 경로와 같은 모양으로 나가면 안 된다.** `tool` 메시지에는 본문 한 칸뿐이라
+     * (Anthropic의 `is_error`, Gemini의 `{ error }`에 해당하는 자리가 없다) 실패 표시가
+     * 없으면 모델은 이 문장을 도구의 산출로 읽는다 (models.md §3).
+     */
+    expect(String(toolMessage?.content).startsWith("오류:")).toBe(true);
+  });
+
+  /** 실행하지 않은 호출도 같은 모양으로 닫는다 — 셋이 갈리면 표시의 뜻이 흐려진다 */
+  it("도구 결과의 실패 표시는 세 자리가 같은 모양이다", async () => {
+    const { client, sent } = makeStubClient([
+      completion(
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            {
+              id: "c1",
+              type: "function",
+              function: { name: "t", arguments: JSON.stringify({ a: 1 }) },
+            },
+          ],
+        },
+        "tool_calls",
+      ),
+      completion({ role: "assistant", content: "끝" }),
+    ]);
+    await new OpenAiGameLLM(testConfig, client).runTurn({
+      system: "S",
+      history: [],
+      user: "u",
+      tools: [
+        {
+          name: "t",
+          description: "t",
+          inputSchema: { type: "object" },
+          handle: () => ({ ok: false, message: "그런 선수는 없습니다" }),
+        },
+      ],
+    });
+    const second = sent[1]?.messages as Array<{ role: string; content?: unknown }>;
+    const toolMessage = second.find((m) => m.role === "tool");
+    expect(String(toolMessage?.content)).toBe("오류: 그런 선수는 없습니다");
   });
 
   it("상태 스냅샷은 developer 롤로 넣고 이력에는 남기지 않는다", async () => {
@@ -270,6 +316,30 @@ describe("OpenAI 어댑터", () => {
     expect(saved.some((m) => m.role === "developer")).toBe(false);
     expect(saved.some((m) => m.role === "system")).toBe(false);
     expect(saved.some((m) => m.role === "user" && m.content === "안녕")).toBe(true);
+  });
+
+  /**
+   * 오퍼레이터 롤을 받는지는 **설정이 정한다** (models.md §3-3). 꺼 두면 발화에 접어
+   * 넣되, 저장 이력에는 어느 쪽이든 휘발 상태가 남지 않는다 — 남으면 다음 턴부터
+   * 지난 날짜가 감독이 한 말처럼 쌓인다.
+   */
+  it("operator_channel이 꺼진 자리는 발화에 접어 넣고 이력에는 발화만 남긴다", async () => {
+    const { client, sent } = makeStubClient([completion({ role: "assistant", content: "됐다" })]);
+    const result = await new OpenAiGameLLM(
+      { ...testConfig, operatorChannel: false },
+      client,
+    ).runTurn({
+      system: "시스템",
+      history: [],
+      user: "안녕",
+      stateNote: "[상태] 오늘은 7월 1일",
+    });
+    const first = sent[0]?.messages as Array<{ role: string; content?: unknown }>;
+    expect(first.some((m) => m.role === "developer")).toBe(false);
+    expect(first.some((m) => m.content === "[상태] 오늘은 7월 1일\n\n안녕")).toBe(true);
+
+    const saved = result.history.messages as Array<{ role: string; content?: unknown }>;
+    expect(saved.filter((m) => m.role === "user")).toEqual([{ role: "user", content: "안녕" }]);
   });
 
   it("이력에 제공자·모델을 태깅한다 — 남의 이력은 버린다", async () => {

@@ -95,6 +95,8 @@ const testConfig = {
   model: "test-model",
   maxTokens: 1024,
   timeoutMs: 30_000,
+  maxRetries: 2,
+  operatorChannel: true,
 };
 
 describe("AnthropicGameLLM 요청 파라미터", () => {
@@ -425,34 +427,13 @@ describe("입력 조립 — 캐시 계층과 상태 채널", () => {
     expect(hasCacheMarker(storedMessages(result.history)[0]!.content)).toBe(false);
   });
 
-  it("role:system을 거부하는 모델은 유저 메시지에 접어 넣고 재시도한다", async () => {
-    const stub = makeStubClient([
-      // 실제 400 형태 — 에러 본문이 메시지에 그대로 실린다
-      new AnthropicSdk.APIError(
-        400,
-        {
-          type: "error",
-          error: {
-            type: "invalid_request_error",
-            message: "messages.1: use the top-level 'system' parameter",
-          },
-        },
-        undefined,
-        undefined,
-      ),
-      endTurn,
-    ]);
-
-    const llm = new AnthropicGameLLM(
-      {
-        agent: "gm",
-        provider: "anthropic",
-        model: "legacy-model",
-        maxTokens: 512,
-        timeoutMs: 30_000,
-      },
-      stub,
-    );
+  /**
+   * 오퍼레이터 롤을 받는지는 **설정이 정한다** (models.md §3-3) — 400을 맞아 가며
+   * 알아내지 않는다. 꺼 두면 첫 요청부터 접어 넣고, 요청은 한 번만 나간다.
+   */
+  it("operator_channel이 꺼진 자리는 발화에 접어 넣고 요청을 한 번만 보낸다", async () => {
+    const stub = makeStubClient([endTurn]);
+    const llm = new AnthropicGameLLM({ ...testConfig, operatorChannel: false }, stub);
     const result = await llm.runTurn({
       system: "sys",
       history: [],
@@ -462,11 +443,12 @@ describe("입력 조립 — 캐시 계층과 상태 채널", () => {
 
     expect(
       (stub.messages as unknown as { stream: { mock: { calls: unknown[][] } } }).stream.mock.calls,
-    ).toHaveLength(2);
+    ).toHaveLength(1);
     const messages = lastParams(stub).messages as Array<{ role: string; content: string }>;
     expect(messages).toHaveLength(1);
     expect(messages[0]?.role).toBe("user");
     expect(messages[0]?.content).toBe("[상태] 스냅샷\n\n[감독]\n발화");
+    // 접어 넣어도 휘발 상태는 세이브에 남지 않는다
     expect(storedMessages(result.history)[0]).toEqual({
       role: "user",
       content: "[감독]\n발화",
