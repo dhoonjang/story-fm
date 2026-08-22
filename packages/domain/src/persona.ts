@@ -150,7 +150,8 @@ export function isDeeperThan(b: CharacterDepth, a: CharacterDepth): boolean {
 }
 
 /**
- * 주입 기록 — **어느 턴에 누구를, 어느 깊이로 실었는가** (people.md §6).
+ * 주입 기록 — **어느 턴에 누구를, 어느 깊이로, 기억 몇 줄과 함께 실었는가**
+ * (people.md §6).
  *
  * ⚠️ 카드 텍스트는 세이브에 넣지 않는다. 이력은 매 턴 `state.chat`에서 다시
  * 렌더링되므로, 남길 것은 이 기록뿐이고 카드는 그 턴을 렌더링할 때 다시 붙는다.
@@ -159,6 +160,12 @@ export function isDeeperThan(b: CharacterDepth, a: CharacterDepth): boolean {
 export const CharacterInjectionSchema = z.object({
   characterId: z.string().min(1),
   depth: CharacterDepthSchema,
+  /**
+   * 그때 카드에 실린 기억 줄 수 — 기억은 이력의 카드에 서지 않으므로(§6), 늘어난
+   * 것을 재주입으로 나르려면 그때의 수가 있어야 한다. **없으면 재주입하지 않는다** —
+   * 이 자리가 생기기 전의 기록을 0으로 읽으면 옛 세이브의 카드가 한꺼번에 다시 선다.
+   */
+  memories: z.number().int().min(0).optional(),
 });
 export type CharacterInjection = z.infer<typeof CharacterInjectionSchema>;
 
