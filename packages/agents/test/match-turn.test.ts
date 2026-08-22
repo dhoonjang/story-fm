@@ -23,7 +23,7 @@ import {
   type GmToolCall,
   type MatchIntent,
 } from "@story-fm/agents";
-import type { GameToolSpec } from "@story-fm/llm";
+import { LlmTimeoutError, type GameToolSpec } from "@story-fm/llm";
 import { ModelOutputError } from "../src/retry";
 
 /** 실모드 경기 턴이 부르는 모델 — 해석도 중계도 이 하나를 거친다 */
@@ -262,12 +262,30 @@ describe("경기 턴의 실패 — 어느 걸음이 흔들렸나", () => {
   it("지시 해석이 실패하면 장면 대신 오류가 올라간다", async () => {
     const state = rolling();
     const minute = state.pendingMatch!.ledger.minute;
-    runTurn.mockRejectedValue(new Error("Connection error"));
+    // 도구를 부르지 않은 응답 — 두 번 불러도 의도가 비면 턴을 취소한다
+    runTurn.mockResolvedValue(casted("해석해 보겠습니다."));
 
     await expect(runGmTurn(state, "압박 올려", undefined, false)).rejects.toBeInstanceOf(
       GmTurnFailure,
     );
-    // 해석에서 끊겼으므로 중계는 불리지 않았고, 판도 그대로다 — 연결 오류는 다시 부르지 않는다
+    // 해석에서 끊겼으므로 중계는 불리지 않았고, 판도 그대로다
+    expect(runTurn).toHaveBeenCalledTimes(2);
+    expect(state.pendingMatch!.ledger.minute).toBe(minute);
+  });
+
+  /**
+   * **호출 실패는 안내로 둔갑하지 않는다** (models.md §1-1). 시한·혼잡·인증을
+   * "다시 말씀해 주세요"로 바꾸면 감독은 자기 말이 잘못된 줄 알고 같은 말을 다시
+   * 쳐서 같은 시한을 한 번 더 기다린다 — 화면은 종류를 보고 무슨 일인지 안내한다.
+   */
+  it("해석 호출이 시한을 넘기면 그 오류가 종류를 든 채 올라간다", async () => {
+    const state = rolling();
+    const minute = state.pendingMatch!.ledger.minute;
+    const thrown = new LlmTimeoutError("match-intent", 60_000);
+    runTurn.mockRejectedValue(thrown);
+
+    await expect(runGmTurn(state, "압박 올려", undefined, false)).rejects.toBe(thrown);
+    // 시한을 넘긴 호출은 다시 부르지 않는다 — 잠금 안의 대기가 두 배가 된다
     expect(runTurn).toHaveBeenCalledTimes(1);
     expect(state.pendingMatch!.ledger.minute).toBe(minute);
   });

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GameState } from "@story-fm/engine";
 import type { GameLLM } from "@story-fm/llm";
-import { LlmTimeoutError, TokenBudgetExceededError } from "@story-fm/llm";
+import { LlmCallError, LlmTimeoutError, TokenBudgetExceededError } from "@story-fm/llm";
 import { retryOnce, anchorStands, ModelOutputError } from "../src/retry";
 import { runMatchIntent } from "../src/match-intent";
 
@@ -124,17 +124,18 @@ describe("runMatchIntent — 의도를 받은 뒤의 실패", () => {
     warn.mockRestore();
   });
 
-  /** 혼잡은 다시 불러도 같은 답이다 — 한 번에 끝내고 턴을 취소한다 */
-  it("의도 없이 혼잡으로 실패하면 한 번만 부르고 ok:false다 — 짐작해 채우지 않는다", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const llm: GameLLM = { runTurn: () => Promise.reject(new Error("529")) };
+  /**
+   * 혼잡은 다시 불러도 같은 답이다 — 한 번에 끝낸다. 그리고 **삼키지 않는다**:
+   * 시한·혼잡을 "다시 말씀해 주세요"로 바꾸면 감독은 자기 말이 잘못된 줄 알고 같은
+   * 말을 다시 쳐서 같은 시한을 한 번 더 기다린다 (agents.md §8, models.md §1-1).
+   */
+  it("의도 없이 혼잡으로 실패하면 한 번만 부르고 그대로 올린다", async () => {
+    const thrown = new LlmCallError("overloaded", "529");
+    const llm: GameLLM = { runTurn: () => Promise.reject(thrown) };
     const spy = vi.spyOn(llm, "runTurn");
 
-    const result = await runMatchIntent(emptyState, "왼쪽을 두껍게", llm);
-
-    expect(result.ok).toBe(false);
+    await expect(runMatchIntent(emptyState, "왼쪽을 두껍게", llm)).rejects.toBe(thrown);
     expect(spy).toHaveBeenCalledTimes(1);
-    warn.mockRestore();
   });
 });
 
