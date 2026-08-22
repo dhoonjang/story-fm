@@ -16,9 +16,8 @@ import { hashOf } from "./name-hash";
 import { catalogPath, dataDir } from "../core/paths";
 import { stripStoredFootAdjust } from "../core/migrations";
 import { catalogCacheKey } from "../data/catalog-source";
-import { REAL_SQUADS, type RealPlayerSeed } from "../data/epl-players";
-import { EU_SQUADS } from "../data/eu-squads";
-import { MARKET_LEAGUE_SQUADS } from "../data/market-leagues";
+import { type RealPlayerSeed } from "../data/epl-players";
+import { SQUAD_SEEDS } from "../data/squad-seeds";
 import {
   teamCatalog,
   type TeamCatalogEntry,
@@ -617,12 +616,6 @@ function fallbackEntries(
 }
 
 /** 시드에서 파생한 기본 카탈로그 (결정적) */
-/** 실선수 스쿼드 — EPL + 유럽 4대 리그. 시드가 없는 클럽은 절차 생성으로 채운다 */
-const ALL_SQUADS: Record<string, readonly RealPlayerSeed[]> = {
-  ...REAL_SQUADS,
-  ...EU_SQUADS,
-  ...MARKET_LEAGUE_SQUADS,
-};
 
 /**
  * 이적 시장 전용 클럽의 스쿼드 — **경기를 안 하므로 작게 둔다.**
@@ -662,7 +655,7 @@ function teamDrafts(team: TeamCatalogEntry): CatalogDraft[] {
   // 이적 시장 전용 클럽 — 레전드 시드 + 절차 생성으로 작은 스쿼드를 만든다.
   // 2부와 달리 전력 감점이 없다 (약한 리그가 아니라 경기를 안 하는 리그다)
   if (isMarketOnlyLeague(team.leagueId)) {
-    const seeds = ALL_SQUADS[team.id] ?? [];
+    const seeds = SQUAD_SEEDS[team.id] ?? [];
     const real = seeds.map((seed) => entryFromSeed(team.id, seed));
     return [
       ...real,
@@ -681,7 +674,7 @@ function teamDrafts(team: TeamCatalogEntry): CatalogDraft[] {
       academyFrom: SECOND_DIVISION_ACADEMY_FROM,
     });
   }
-  const seeds = ALL_SQUADS[team.id];
+  const seeds = SQUAD_SEEDS[team.id];
   if (seeds && seeds.length > 0) {
     const real = seeds.map((s) => entryFromSeed(team.id, s));
     return [
