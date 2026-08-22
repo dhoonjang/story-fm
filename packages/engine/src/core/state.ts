@@ -2454,6 +2454,26 @@ export function createGame(input: CreateGameInput): GameState {
 export const MIN_SQUAD_AFTER_SALE = 18;
 
 /**
+ * 스쿼드 하한 — **떠난 뒤에 남는 인원으로 잰다** (transfer.md §2).
+ *
+ * 감독의 매각·방출·임대 송출과 AI 시장이 **같은 상수·같은 부등호**를 쓰도록 판정을
+ * 여기 하나로 둔다. 같은 규칙을 두 자리에 적으면 한쪽만 고쳐져 "AI는 19명 아래로 못
+ * 파는데 감독은 18명까지 판다" 같은 어긋남이 소리 없이 생긴다.
+ *
+ * 남는 인원을 받는 것은 **부르는 쪽이 스쿼드를 어떻게 아는지가 다르기** 때문이다 —
+ * 감독 경로는 전 선수를 훑고(`squadShortfall`), AI 시장은 하루 색인을 넘긴다.
+ */
+export function squadFloorShortfall(remaining: readonly GamePlayer[]): string | null {
+  if (remaining.length < MIN_SQUAD_AFTER_SALE) {
+    return `스쿼드가 ${MIN_SQUAD_AFTER_SALE}명 아래로 내려가 팔 수 없습니다`;
+  }
+  if (remaining.filter((p) => groupOf(p) === "GK").length < 2) {
+    return "골키퍼가 2명 아래로 내려가 팔 수 없습니다";
+  }
+  return null;
+}
+
+/**
  * 이 선수가 빠지면 스쿼드가 무너지는가 — 무너지면 그 이유를 돌려준다.
  * `negotiation`·`departures`가 함께 쓰므로 여기 둔다(둘이 서로를 import하면 순환).
  */
@@ -2462,14 +2482,7 @@ export function squadShortfall(
   teamId: string,
   leaving: { id: string },
 ): string | null {
-  const remaining = playersOf(state, teamId).filter((p) => p.id !== leaving.id);
-  if (remaining.length < MIN_SQUAD_AFTER_SALE) {
-    return `스쿼드가 ${MIN_SQUAD_AFTER_SALE}명 아래로 내려가 팔 수 없습니다`;
-  }
-  if (remaining.filter((p) => groupOf(p) === "GK").length < 2) {
-    return "골키퍼가 2명 아래로 내려가 팔 수 없습니다";
-  }
-  return null;
+  return squadFloorShortfall(playersOf(state, teamId).filter((p) => p.id !== leaving.id));
 }
 
 /**

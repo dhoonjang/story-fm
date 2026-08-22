@@ -1248,6 +1248,41 @@ describe("임대료 — 검사한 값이 빠진다", () => {
     expect(financeOf(state, borrowerId).balance).toBe(theirBalance - LOAN_FEE);
     expect(financeOf(state, borrowerId).transferBudget).toBe(theirBudget - LOAN_FEE);
   });
+
+  /**
+   * **사는 쪽 예산은 매각만 보던 문이다** (transfer.md §2). 임대료도 이적 예산에서
+   * 같은 값이 빠지므로, 검사 없이 빼면 AI 구단의 예산이 음수가 된다 — 그 구단은
+   * 다음 창에서 마이너스를 안고 시장에 선다.
+   */
+  it("빌리는 쪽 예산이 모자라면 무산된다 — 상대 예산은 음수가 되지 않는다", () => {
+    const state = createTestGame(42);
+    const ours = [...playersOf(state, state.userTeamId)].sort(
+      (a, b) => a.attributes.overall - b.attributes.overall,
+    )[0]!;
+    const borrowerId = state.players.find((p) => p.teamId !== state.userTeamId)!.teamId;
+    financeOf(state, borrowerId).transferBudget = LOAN_FEE - 1;
+    const theirBudget = financeOf(state, borrowerId).transferBudget;
+
+    const negotiation = agreedLoan(state, {
+      id: "neg-loan-broke",
+      kind: "loan_out",
+      playerId: ours.id,
+      counterpartTeamId: borrowerId,
+    });
+    const blocked = acceptDeal(state, negotiation.id);
+
+    expect(blocked.ok, "임대료를 못 내는 구단에 확정되어서는 안 된다").toBe(false);
+    expect(financeOf(state, borrowerId).transferBudget, "예산은 음수가 되지 않는다").toBe(
+      theirBudget,
+    );
+    expect(
+      playerById(state, ours.id)!.loan,
+      "무산된 딜에 선수만 옮겨 가서는 안 된다",
+    ).toBeUndefined();
+    expect(playerById(state, ours.id)!.teamId).toBe(state.userTeamId);
+    // 결렬이면 이번 창에 값을 낮춰 다시 붙을 길까지 닫힌다
+    expect(state.negotiations.find((n) => n.id === negotiation.id)!.status).toBe("expired");
+  });
 });
 
 /**
