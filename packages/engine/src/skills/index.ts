@@ -52,6 +52,7 @@ import {
 import { DIRECTIVE_TUNING } from "@story-fm/sim";
 import { settleRoleCost, shelveFamiliarity, unshelveFamiliarity } from "./familiarity-memory";
 import { recallRole, rememberRole } from "./role-memory";
+import { diffLineup, type LineupSide, type LineupSlotRef } from "./lineup-diff";
 import { addDays, diffDays, sortEntries, squadReturnOf } from "../competition/calendar";
 import { clampForm, moraleToForm } from "../squad/form";
 import { DEVELOPMENT_FOCUS_LIMIT, pruneDevelopmentFocus } from "../squad/development";
@@ -749,40 +750,48 @@ function lineupChanges(
   next: readonly TacticAssignment[],
 ): { notes: string[]; items: SkillBriefItem[] } {
   const nameOf = (id: string) => playerName(state, id);
-  const was = [...prev.values()].filter((a) => a.role === "starting");
-  const now = next.filter((a) => a.role === "starting");
   const pointOf = (a: TacticAssignment) => a.point ?? anchorOf(a.position);
-  // 앞선 배치가 없다면(첫 편성) 견줄 것이 없다 — 지금의 모양만 말한다
-  if (was.length === 0) {
-    const shape = shapeOf(now.map(pointOf));
+  const sideOf = (list: readonly TacticAssignment[]): LineupSide => {
+    const starting = list.filter((a) => a.role === "starting");
     return {
-      notes: [`선발 ${now.length}명 편성 · ${shape}`],
-      items: [item({ label: "선발 편성", text: shape })],
+      shape: shapeOf(starting.map(pointOf)),
+      starting: starting.map((a) => ({ playerId: a.playerId, position: a.position })),
+      squad: list.map((a) => a.playerId),
+    };
+  };
+  const diff = diffLineup(sideOf([...prev.values()]), sideOf(next));
+
+  // 앞선 배치가 없다면(첫 편성) 견줄 것이 없다 — 지금의 모양만 말한다
+  if (diff.firstSetup) {
+    return {
+      notes: [`선발 ${diff.added.length}명 편성 · ${diff.shapeAfter}`],
+      items: [item({ label: "선발 편성", text: diff.shapeAfter })],
     };
   }
 
   const notes: string[] = [];
   const items: SkillBriefItem[] = [];
-  const shapeBefore = shapeOf(was.map(pointOf));
-  const shapeAfter = shapeOf(now.map(pointOf));
-  if (shapeBefore !== shapeAfter) {
-    notes.push(`포메이션 ${shapeBefore} → ${shapeAfter}`);
-    items.push(item({ label: "포메이션", text: `${shapeBefore} → ${shapeAfter}` }));
+  if (diff.shapeChanged) {
+    const move = `${diff.shapeBefore} → ${diff.shapeAfter}`;
+    notes.push(`포메이션 ${move}`);
+    items.push(item({ label: "포메이션", text: move }));
   }
 
-  const startedBefore = new Set(was.map((a) => a.playerId));
-  const startsNow = new Set(now.map((a) => a.playerId));
-  const added = now.filter((a) => !startedBefore.has(a.playerId));
-  const gone = was.filter((a) => !startsNow.has(a.playerId));
-  if (added.length > 0) {
-    notes.push(`선발 투입 ${nameList(added.map((a) => `${nameOf(a.playerId)} ${a.position}`))}`);
+  if (diff.added.length > 0) {
+    notes.push(
+      `선발 투입 ${nameList(
+        diff.added.map((s) =>
+          s.position ? `${nameOf(s.playerId)} ${s.position}` : nameOf(s.playerId),
+        ),
+      )}`,
+    );
     // 항목에는 포지션 코드를 붙이지 않는다 — 누가 어디에 섰는지는 전술판이 그림으로 갖고 있다
     items.push(
-      item({ label: "선발 투입", text: briefNames(added.map((a) => nameOf(a.playerId))) }),
+      item({ label: "선발 투입", text: briefNames(diff.added.map((s) => nameOf(s.playerId))) }),
     );
   }
-  if (gone.length > 0) {
-    const names = gone.map((a) => nameOf(a.playerId));
+  if (diff.gone.length > 0) {
+    const names = diff.gone.map((s) => nameOf(s.playerId));
     notes.push(`선발 제외 ${nameList(names)}`);
     items.push(item({ label: "선발 제외", text: briefNames(names) }));
   }
@@ -791,28 +800,18 @@ function lineupChanges(
    * 남아 있는 선수의 **자리 이동** — 감독이 판에서 가장 자주 하는 조정이고,
    * 인원이 그대로라 다른 항목에는 아무 흔적도 남지 않는다.
    */
-  const moved = now.filter((a) => {
-    const old = prev.get(a.playerId);
-    return old?.role === "starting" && old.position !== a.position;
-  });
-  if (moved.length > 0) {
-    const moves = moved.map(
-      (a) => `${nameOf(a.playerId)} ${prev.get(a.playerId)!.position} → ${a.position}`,
-    );
+  if (diff.moved.length > 0) {
+    const moves = diff.moved.map((m) => `${nameOf(m.playerId)} ${m.from} → ${m.to}`);
     notes.push(`자리 이동 ${nameList(moves)}`);
     // 한 명이면 어디서 어디로까지 한 줄에 든다. 여럿이면 이름만 — 자리는 판이 보여준다
     const one = moves[0]!;
-    const many = briefNames(moved.map((a) => nameOf(a.playerId)));
-    items.push(item({ label: "자리 이동", text: moved.length === 1 ? one : many }));
+    const many = briefNames(diff.moved.map((m) => nameOf(m.playerId)));
+    items.push(item({ label: "자리 이동", text: diff.moved.length === 1 ? one : many }));
   }
 
   if (notes.length > 0) return { notes, items };
   // 선발이 그대로면 남은 차이는 명단 쪽뿐이다 — 누가 오갔는지까지는 적지 않는다
-  const squadBefore = new Set(prev.keys());
-  const squadNow = new Set(next.map((a) => a.playerId));
-  const sameSquad =
-    squadBefore.size === squadNow.size && [...squadNow].every((id) => squadBefore.has(id));
-  const line = sameSquad ? "바뀐 것 없음" : "벤치 명단 조정";
+  const line = diff.squadChanged ? "벤치 명단 조정" : "바뀐 것 없음";
   return { notes: [line], items: [item({ text: line })] };
 }
 
@@ -1191,21 +1190,29 @@ export function lineupChangeNote(
   state: GameState,
   before: { starting: readonly string[]; shape: string; signature: string },
 ): string | null {
-  const tactics = userTactics(state);
-  const now = tactics.assignments.filter((a) => a.role === "starting").map((a) => a.playerId);
   const nameOf = (id: string) => playerById(state, id)?.name ?? id;
+  const diff = diffLineup(
+    {
+      shape: before.shape,
+      starting: before.starting.map((playerId) => ({ playerId })),
+      signature: before.signature,
+    },
+    {
+      shape: shapeOfTactics(state),
+      starting: userTactics(state)
+        .assignments.filter((a) => a.role === "starting")
+        .map((a) => ({ playerId: a.playerId, position: a.position })),
+      signature: lineupSignature(state),
+    },
+  );
+
   const parts: string[] = [];
-
-  const shape = shapeOfTactics(state);
-  if (shape !== before.shape) parts.push(`포메이션 ${before.shape} → ${shape}`);
-
-  const gone = before.starting.filter((id) => !now.includes(id));
-  const added = now.filter((id) => !before.starting.includes(id));
-  if (added.length > 0 || gone.length > 0) {
-    parts.push(
-      `선발 교체 — 들어옴: ${added.map(nameOf).join(", ") || "없음"} / 빠짐: ${gone.map(nameOf).join(", ") || "없음"}`,
-    );
-  } else if (parts.length === 0 && lineupSignature(state) !== before.signature) {
+  if (diff.shapeChanged) parts.push(`포메이션 ${diff.shapeBefore} → ${diff.shapeAfter}`);
+  const names = (slots: readonly LineupSlotRef[]) =>
+    slots.map((s) => nameOf(s.playerId)).join(", ") || "없음";
+  if (diff.added.length > 0 || diff.gone.length > 0) {
+    parts.push(`선발 교체 — 들어옴: ${names(diff.added)} / 빠짐: ${names(diff.gone)}`);
+  } else if (parts.length === 0 && diff.pointsChanged === true) {
     // 인원도 모양도 그대로인데 지문이 다르다 — 자리를 미세 조정했다는 뜻
     parts.push("전술판에서 자리를 조정했다");
   }
