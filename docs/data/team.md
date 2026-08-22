@@ -70,6 +70,34 @@ TeamCatalogEntry {
 32클럽만은 **경고**다 — 어기면 컵이 열리지 않을 뿐 크래시가 아니고, 막으면 클럽을
 한 팀도 더하거나 뺄 수 없다.
 
+### 새 게임을 세울 때 다시 묻는다 (`assertCatalogValid`)
+
+저장 시점의 검사만으로는 부족하다 — 오버라이드 파일은 손으로도 고칠 수 있고, 코드의
+시드도 사람이 고친다. 그래서 **`createGame`이 세계를 세우기 전에 같은 불변식을 다시
+묻고, 어기면 위반 목록을 담아 `throw`한다.** 폴백하지 않는다: 반쪽만 성립하는
+카탈로그로 세운 세계는 실패가 몇 시즌 뒤 엉뚱한 자리에서 터진다.
+
+- 검사 결과는 **편집 세대마다 한 번** 계산한다(`catalogSource` 캐시) — 새 게임을
+  세울 때마다 169팀을 다시 훑지 않는다.
+- **조회는 막지 않는다.** 어드민 화면은 깨진 카탈로그도 읽어야 고칠 수 있다 —
+  문이 걸리는 자리는 새 게임 하나뿐이다.
+- 어드민 저장이 보는 목록과 같은 목록이다(`world/catalog-invariants.ts`). 저장이
+  거절하는 편집은 새 게임도 거절한다.
+
+### 카탈로그에 없는 팀을 물으면 `null`
+
+`leagueOfTeam` · `countryOfTeam`은 모르는 id에 **`null`**을 돌려준다. 예전에는
+`"epl"`과 `"잉글랜드"`를 돌려줬는데, 그러면 잘못된 id가 EPL 소속으로 상금·경제
+수준·컵 참가를 받고 그 선수들이 잉글랜드 홈그로운이 된다 — 틀린 답이 정상적인
+값의 얼굴을 하고 흘러간다.
+
+- `isClubTeam`은 모르는 팀에 `false`다 — 클럽이 아니라 **클럽인지 알 수 없는 id**고,
+  스쿼드·배치·전력을 논하는 순회에서는 어느 쪽이든 빠져야 한다.
+- 지금 소속을 묻는 `leagueOfTeamIn`은 여전히 `string`이지만, **세이브에도
+  카탈로그에도 없는 팀이면 `throw`한다.** 세 층(`state.leagueOf` → `GAME_TEAM` →
+  카탈로그) 어디도 모르는 id는 데이터가 아니라 호출부의 버그이고, 돌려줄 옳은 값이
+  없다.
+
 ### `GAME_TEAM`이 카탈로그에서 복사하는 것
 
 새 게임을 시작할 때(`createGame`) 세이브가 **한 번 복사하고 그 뒤로는 세이브가
@@ -269,6 +297,25 @@ ClubProfile { stadium, capacity, commercialTier: 1|2|3|4 }
   [competition.md](competition.md) §5.
 - **시장 전용 리그는 약한 리그가 아니라 경기를 안 하는 리그**다. 전력 감점이 없고
   (감점을 얹으면 레전드가 헐값이 된다) 이적창이 우리와 다르다.
+
+#### `realSquads`는 `kind`에 따라 세기가 다르다
+
+`LeagueCatalogEntry.realSquads`는 "이 리그의 클럽 명단이 실명 시드에서 온다"는
+표시다. **얼마나 오는지는 `kind`가 정한다** — 사우디·MLS는 `realSquads: true`지만
+클럽당 3\~10명뿐이고, 그건 결함이 아니라 설계다(경기를 안 하는 클럽에 40명을
+조사할 이유가 없다).
+
+| kind          | `realSquads`     | 뜻                                                               |
+| ------------- | ---------------- | ---------------------------------------------------------------- |
+| `playable`    | `true`           | **전체 시드** — 클럽마다 11명 이상, 골키퍼 최소 1명              |
+| `market-only` | `true`           | **부분 시드** — 데려올 만한 이름만. 클럽마다 1명 이상, GK는 선택 |
+| `cup-only`    | `false`여야 한다 | 절차 생성 20명                                                   |
+| `free`        | `false`여야 한다 | 스쿼드가 없다                                                    |
+
+부분 시드의 나머지 자리는 `MARKET_LEAGUE_TEMPLATE`이 절차 생성으로 채우므로
+(GK 두 자리가 그 앞머리다) 시드에 골키퍼가 없어도 명단은 성립한다. 이 표가 §8의
+불변식이고, 새 게임을 세울 때 검사한다.
+
 - **무소속(`free`)은 리그가 아니라 리그 밖**이다. `GAME_PLAYER.teamId`가 필수라
   자리를 하나 두되 클럽이 아닌 것으로 다룬다 — 초기 스쿼드도, 일정도, 순위표도,
   재정도 없다. 스쿼드·배치·전력을 논하는 순회는 전부 `isClubTeam`으로 거른다.
@@ -403,6 +450,11 @@ EPL 20팀만 갖는 11인 명단이다. **순서가 아니라 구성**을 뜻한
 적합도 상위 선수가 채운다. 그래서 어드민 편집·이적으로 명단이 바뀌어도 라인업이
 깨지지 않는다. 나머지 리그는 포메이션만 정해 두고 11명은 엔진이 고른다.
 
+⚠️ **그 관용은 편집에만 열려 있다.** 슬러그는 **그 클럽 시드 스쿼드의 `nameEn`**과
+맞아야 하고, 어긋나면 새 게임을 세울 때 걸린다(§8) — 시드가 갱신돼 떠난 선수가
+`DEFAULT_XI`에 남아 있으면 그 팀은 열 명으로 시작하는데, 아무도 그 사실을 모른다.
+편집·이적이 명단을 바꾸는 것은 그 뒤의 일이라 검사가 닿지 않는다.
+
 ### 모양 고르기 (`pickFormation`)
 
 프리셋 5종(`4-4-2` · `4-3-3` · `4-2-3-1` · `3-5-2` · `5-4-1`)을 전부 채워 보고
@@ -511,6 +563,22 @@ WorldScope { leagues, teamsPerLeague, cups, markets }
 - **어드민 편집도 이 불변식을 지킨다.** 팀의 `leagueId` 변경·추가·삭제는 저장
   시점에 막힌다(`world/catalog-invariants.ts`) — 어기면 실패가 편집한 순간이 아니라
   한참 뒤 새 게임을 시작할 때 터진다.
+- **새 게임도 같은 문을 지난다.** `createGame`이 세계를 세우기 전에 같은 목록을 다시
+  묻고, 어기면 위반을 전부 담아 `throw`한다(§1) — 손으로 고친 오버라이드와 코드
+  시드는 저장 검사를 지나지 않는다.
+- **모르는 팀 id에는 답이 없다.** `leagueOfTeam` · `countryOfTeam`은 `null`이고,
+  `leagueOfTeamIn`은 `throw`한다 (§1). 그럴듯한 기본값을 돌려주면 잘못된 id가
+  EPL 소속으로 상금·경제 수준·컵 참가를 받는다.
+- **`realSquads: true`인 리그의 클럽은 전부 시드 스쿼드를 갖는다** — `playable`은
+  11명 이상에 골키퍼 하나, `market-only`는 1명 이상 (§4). `cup-only`·`free`는
+  `realSquads`가 `false`여야 한다.
+- **`DEFAULT_XI`의 슬러그는 그 클럽 시드 스쿼드에 실재한다** (§6). 팀마다 11명이고
+  중복이 없다.
+- **인물·프로필 시드의 `teamId`는 카탈로그의 팀을 가리킨다** — 더비(`derbies.ts`) ·
+  수석코치(`coach-seeds.ts`) · 구단주(`owner-seeds.ts`) · 구단 프로필
+  (`club-profile.ts`) · 세계 인물(`world-figures.ts`). 어긋난 줄은 크래시가 아니라
+  **조용히 안 쓰인다** — 아스날 구단주가 가명이 되고 아무도 이유를 모른다. 더비는
+  같은 팀 둘을 짝지을 수도 없다.
 - **팀 id는 카탈로그 안에서 유일하다.** 중복되면 `teamCatalogById`가 하나만 답해
   나머지 동명 클럽이 스쿼드·일정·순위표에서 통째로 사라진다.
 - **나라별 1부 + 2부는 정확히 32클럽이다.** 국내 컵 브래킷이 2의 거듭제곱이어야
@@ -551,7 +619,8 @@ WorldScope { leagues, teamsPerLeague, cups, markets }
 | 구단 프로필 (구장 · 브랜드)                | `packages/engine/src/data/club-profile.ts`                        |
 | 카탈로그 오버라이드 (읽기·쓰기·캐시)       | `packages/engine/src/data/catalog-source.ts` · `team-override.ts` |
 | 팀 어드민 (조회 · 편집 · 추가 · 삭제)      | `packages/engine/src/world/admin-team.ts`                         |
-| 카탈로그 불변식 (순수)                     | `packages/engine/src/world/catalog-invariants.ts`                 |
+| 카탈로그 불변식 (순수) · 로드 시 검사      | `packages/engine/src/world/catalog-invariants.ts`                 |
+| 실선수 시드 합본 (팀 → 명단)               | `packages/engine/src/data/squad-seeds.ts`                         |
 | 등록 명단 규칙 (순수)                      | `packages/domain/src/squad-rules.ts`                              |
 | 등록 명단 — 상태에 붙이는 층               | `packages/engine/src/squad/registration.ts`                       |
 | 팀 엔티티 (Zod)                            | `packages/domain/src/team.ts`                                     |

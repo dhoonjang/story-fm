@@ -84,7 +84,7 @@
 | `CLUB_PROFILES`        | 구장 규모·상업 브랜드 — 재정의 기준선                     | `data/club-profile.ts`                                       |
 | 인물 시드              | 실제 수석코치·구단주 이름                                 | `data/coach-seeds.ts` · `owner-seeds.ts`                     |
 | 선수 시드              | EPL 실선수 · 유럽 4대 리그 · 시장 전용 리그               | `data/epl-players.ts` · `eu-squads.ts` · `market-leagues.ts` |
-| 부상 이력 시드         | 유리몸 성향의 출발점                                      | `data/injury-history.ts`                                     |
+| 부상 이력 시드         | 유리몸 성향의 출발점 — `wikidataId`로 시드에 붙는다       | `data/injury-history.ts`                                     |
 | 이름 풀                | 절차 생성 선수·가상 인물의 이름 — 나라별                  | `data/names.ts`                                              |
 
 - `PLAYER_CATALOG`은 시드에서 **결정적으로 파생**된다(`deriveAxes`) — 저장된 표가
@@ -108,6 +108,10 @@
   보고(선수 카탈로그는 Zod 스키마) 어긋나면 통째로 시드로 돌아간다 — 반쪽만 읽은
   카탈로그로 새 게임을 세우면 실패가 저장한 순간이 아니라 한참 뒤에 터진다.
   손으로 고친 파일도 같은 문을 지난다.
+- **모양을 통과해도 성립하지 않을 수 있다.** 그래서 `createGame`이 세계를 세우기
+  전에 **불변식을 한 번 더 묻고 어기면 `throw`한다**(`assertCatalogValid`) — 폴백은
+  없다. 조회는 막지 않으므로 어드민 화면은 깨진 카탈로그도 열어 고칠 수 있다
+  ([team.md](team.md) §1 · [competition.md](competition.md) §7).
 - `LeagueCatalogEntry.kind`가 그 리그가 게임에서 하는 일을 정한다 —
   `playable`(5대 리그) · `cup-only`(2부, 컵만) · `market-only`(사우디·MLS, 경기 없음) ·
   `free`(무소속 — 리그가 아니라 리그 밖). ⚠️ **부(division) 필드는 없다.** 1부인지
