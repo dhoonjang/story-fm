@@ -20,6 +20,7 @@ import { assignSquadNumber } from "../squad/numbers";
 import { arrivingSquadLevel } from "../squad/registration";
 import type { SkillResult } from "../skills";
 import { forgetRoles } from "../skills/role-memory";
+import { item, signed } from "../skills/brief";
 import { pickAnyPlayer } from "../core/player-ref";
 import {
   activeContract,
@@ -208,6 +209,29 @@ export function releasePlayer(
   pushNarrative(state, `${player.name} 계약 해지`, wasCaptain ? 5 : 4);
   return {
     ok: true,
+    brief: {
+      head: "계약 해지",
+      items: [
+        item({ label: "해지", text: player.name, note: "무소속" }),
+        item({
+          label: agreed ? "정산금" : "위약금",
+          text: formatMoney(severance),
+          ...(paymentYears === undefined
+            ? {}
+            : { note: `${paymentYears}년 분할 · 첫 회분 ${formatMoney(dueNow)}` }),
+        }),
+        ...(wasCaptain ? [item({ text: "주장 공석" })] : []),
+        ...(press
+          ? [
+              item({
+                label: "1군 사기",
+                text: signed(DEPARTURE_SQUAD_MORALE),
+                delta: DEPARTURE_SQUAD_MORALE,
+              }),
+            ]
+          : []),
+      ],
+    },
     message:
       `${player.name}과(와) 계약을 해지했습니다 — ${agreed ? "정산금" : "위약금 전액"} ${formatMoney(severance)}` +
       (paymentYears === undefined
@@ -295,6 +319,17 @@ export function loanPlayer(
     message:
       `${player.name}을(를) ${teamName(destination.id)}에 임대 보냈습니다 — ${until} 복귀 · ` +
       `주급 ${Math.round(wageShare * 100)}%를 그쪽이 부담합니다`,
+    brief: {
+      head: "임대",
+      items: [
+        item({
+          label: "임대",
+          text: player.name,
+          note: `${teamName(destination.id)} · ${until} 복귀`,
+        }),
+        item({ label: "그쪽 주급 부담", text: `${Math.round(wageShare * 100)}%` }),
+      ],
+    },
   };
 }
 
@@ -314,6 +349,10 @@ export function recallLoan(state: GameState, input: { playerId: string }): Skill
   return {
     ok: true,
     message: `${player.name}을(를) ${teamName(from)}에서 불러들였습니다 — 2군으로 복귀했습니다`,
+    brief: {
+      head: "임대 복귀",
+      items: [item({ label: "복귀", text: player.name, note: `${teamName(from)} · 2군` })],
+    },
   };
 }
 

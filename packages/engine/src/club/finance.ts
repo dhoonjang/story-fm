@@ -40,7 +40,9 @@ import {
   weeklyWageLinesOf,
   weeklyWagesOf,
   type GameState,
+  type SkillBrief,
 } from "../core/state";
+import { item } from "../skills/brief";
 import { makeRng } from "../core/rng";
 import { catalogTierOf, tierOfTeamIn } from "../core/club-tier";
 
@@ -2177,7 +2179,7 @@ export interface FinanceEventInput {
 export function applyFinanceEvent(
   state: GameState,
   input: FinanceEventInput,
-): { ok: boolean; message: string } {
+): { ok: boolean; message: string; brief?: SkillBrief } {
   const allowed: readonly string[] =
     input.kind === "income" ? NARRATIVE_INCOME_CATEGORIES : NARRATIVE_EXPENSE_CATEGORIES;
   if (!allowed.includes(input.category)) {
@@ -2223,9 +2225,20 @@ export function applyFinanceEvent(
     source: "narrative",
   });
   pushNarrative(state, `${input.note} (${input.kind === "income" ? "+" : "-"}${money(amount)})`, 3);
+  const moved = input.kind === "income" ? amount : -amount;
   return {
     ok: true,
     message: `${FINANCE_CATEGORY_KO[input.category]} ${input.kind === "income" ? "수입" : "지출"} ${money(amount)} — ${input.note}`,
+    /**
+     * 원장 라벨(`note`)은 LLM이 쓴 자유 문장이라 항목에 싣지 않는다 — 갈래는
+     * 항목 이름(`FINANCE_CATEGORY_KO`)이 이미 말하고, 그 문장은 장면과 원장에 남는다.
+     */
+    brief: {
+      head: input.kind === "income" ? "수입" : "지출",
+      items: [
+        item({ label: FINANCE_CATEGORY_KO[input.category], text: money(amount), delta: moved }),
+      ],
+    },
   };
 }
 
@@ -2240,7 +2253,7 @@ export function applyFinanceEvent(
 export function adjustTransferBudget(
   state: GameState,
   input: { delta: number; note: string },
-): { ok: boolean; message: string } {
+): { ok: boolean; message: string; brief?: SkillBrief } {
   const finance = financeOf(state, state.userTeamId);
   const delta = Math.round(input.delta);
   if (delta === 0) return { ok: false, message: "금액이 0입니다" };
@@ -2274,6 +2287,17 @@ export function adjustTransferBudget(
   return {
     ok: true,
     message: `이적 예산 ${moved > 0 ? "+" : "-"}${money(Math.abs(moved))} → ${money(finance.transferBudget)} — ${input.note}`,
+    brief: {
+      head: "이적 예산",
+      items: [
+        item({
+          label: moved > 0 ? "증액" : "감액",
+          text: money(Math.abs(moved)),
+          delta: moved,
+        }),
+        item({ label: "남은 예산", text: money(finance.transferBudget) }),
+      ],
+    },
   };
 }
 
