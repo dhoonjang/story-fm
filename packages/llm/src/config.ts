@@ -63,7 +63,7 @@ export interface GoogleAgentConfig extends BaseAgentConfig {
 
 export interface OpenAiAgentConfig extends BaseAgentConfig {
   provider: "openai";
-  /** 없으면 `reasoning_effort`를 싣지 않는다 — 추론을 모르는 모델은 그 값에 400을 낸다 */
+  /** 없으면 `reasoning`을 싣지 않는다 — 추론을 모르는 모델은 그 값에 400을 낸다 */
   thinkingLevel?: ThinkingLevel;
 }
 

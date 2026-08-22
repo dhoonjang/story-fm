@@ -24,10 +24,15 @@ import {
   type GameState,
 } from "@story-fm/engine";
 import {
+  MATCH_ADVANCED,
   TIME_PASSED,
   filterSceneStream,
   sanitizeSceneText,
-  parseTimeSkip,
+  noteSceneHeader,
+  operationLabel,
+  MAX_SKIP_DAYS,
+  STALLED_CLOCK_TURNS,
+  TurnOperationSchema,
   buildGmDigest,
   buildGmHistory,
   buildManagerMessage,
@@ -675,7 +680,7 @@ describe("도구 구성", () => {
     // 시간 진행은 스킬이 아니다 — 모델이 첫 줄 헤더로 선언하고 코어가 받는다
     expect(names).not.toContain("advance_time");
     expect(names).not.toContain(TIME_PASSED);
-    expect(names).not.toContain("advance_match");
+    expect(names).not.toContain(MATCH_ADVANCED);
   });
 
   it("get_league는 상대·방향·개수로 특정 경기를 찾아준다", () => {
@@ -923,6 +928,28 @@ describe("장면 헤더", () => {
     expect(state.date).not.toBe(start);
     expect(back.short).toBe(true);
   });
+
+  /**
+   * 헤더를 못 읽은 턴 — **조용히 지나가면 시계가 영영 멎는다.**
+   *
+   * 자유 텍스트가 상태를 움직이는 유일한 경로라 실패가 누적되는데, 예전에는
+   * `console.warn` 한 줄이 전부였다. 셋이 되면 그 수가 턴 결과로 올라간다.
+   */
+  it("헤더를 연달아 못 읽으면 그 수가 화면까지 올라간다", () => {
+    const state: { sceneHeaderMisses?: number } = {};
+    for (let turn = 1; turn < STALLED_CLOCK_TURNS; turn++) {
+      // 한두 번은 이어지는 대화일 수 있다 — 알리지 않는다
+      expect(noteSceneHeader(state, false)).toBeNull();
+    }
+    expect(noteSceneHeader(state, false)).toBe(STALLED_CLOCK_TURNS);
+    // 넘어서도 계속 오른다 — 며칠째 멎었는지가 그대로 보여야 한다
+    expect(noteSceneHeader(state, false)).toBe(STALLED_CLOCK_TURNS + 1);
+
+    // 한 번 읽히면 없던 일이다 — 장부에 흔적도 남지 않는다
+    expect(noteSceneHeader(state, true)).toBeNull();
+    expect(state.sceneHeaderMisses).toBeUndefined();
+    expect(noteSceneHeader(state, false)).toBeNull();
+  });
 });
 
 /**
@@ -934,18 +961,42 @@ describe("장면 헤더", () => {
  * 먼저 굴리고, 모델은 도착한 자리에서 **보고**를 한다.
  */
 describe("시간 이동 손잡이", () => {
-  it("조작 문장에서 목표를 읽는다", () => {
-    expect(parseTimeSkip("시간 진행 — 하루")).toEqual({ kind: "days", days: 1 });
-    expect(parseTimeSkip("시간 진행 — 일주일")).toEqual({ kind: "days", days: 7 });
-    expect(parseTimeSkip("시간 진행 — 다음 경기 (2026-08-15)")).toEqual({
-      kind: "date",
-      date: "2026-08-15",
-    });
-  });
+  /**
+   * 손잡이가 보내는 것은 **구조체**다. 예전에는 화면이 만든 문장을 서버가 되읽어
+   * (`시간 진행 — 하루`) 시계를 옮겼고, 그래서 UI 문구 한 글자가 곧 계약이었다.
+   * 여기서 지키는 것은 그 경계 — 요청 본문으로 들어오는 값이므로 화면이 보내는
+   * 두 눈금 말고도 터무니없는 것이 온다.
+   */
+  it("조작의 경계 — 구조체만 통과하고, 표시 문구는 거기서 나온다", () => {
+    const day = TurnOperationSchema.parse({ kind: "skip_days", days: 1 });
+    expect(day).toEqual({ kind: "skip_days", days: 1 });
+    expect(operationLabel(day)).toBe("시간 진행 — 하루");
+    expect(operationLabel({ kind: "skip_days", days: 7 })).toBe("시간 진행 — 일주일");
+    // 눈금 밖의 일수도 뜻이 통해야 한다 — 문장은 숫자로 적는다
+    expect(operationLabel({ kind: "skip_days", days: 3 })).toBe("시간 진행 — 3일");
+    expect(operationLabel({ kind: "skip_to_next_match", date: "2026-08-15" })).toBe(
+      "시간 진행 — 다음 경기 (2026-08-15)",
+    );
+    expect(operationLabel({ kind: "advance_match" })).toBe("경기 진행");
 
-  it("감독의 말은 손잡이가 아니다 — 시계를 앞질러 옮기지 않는다", () => {
-    expect(parseTimeSkip("내일 훈련은 회복으로 가자")).toBeNull();
-    expect(parseTimeSkip("다음 경기 상대가 누구야?")).toBeNull();
+    // 0일·소수·상한 초과는 시계를 뒤로 돌리거나 세계를 통째로 굴린다
+    expect(TurnOperationSchema.safeParse({ kind: "skip_days", days: 0 }).success).toBe(false);
+    expect(TurnOperationSchema.safeParse({ kind: "skip_days", days: -1 }).success).toBe(false);
+    expect(TurnOperationSchema.safeParse({ kind: "skip_days", days: 1.5 }).success).toBe(false);
+    expect(TurnOperationSchema.safeParse({ kind: "skip_days", days: MAX_SKIP_DAYS }).success).toBe(
+      true,
+    );
+    expect(
+      TurnOperationSchema.safeParse({ kind: "skip_days", days: MAX_SKIP_DAYS + 1 }).success,
+    ).toBe(false);
+    // 날짜는 게임 안의 한 표기뿐이다 (`DateString`)
+    expect(TurnOperationSchema.safeParse({ kind: "skip_to_next_match" }).success).toBe(false);
+    expect(
+      TurnOperationSchema.safeParse({ kind: "skip_to_next_match", date: "2026-8-15" }).success,
+    ).toBe(false);
+    // 조작 문장은 이제 조작이 아니다 — 되읽는 자리가 없다
+    expect(TurnOperationSchema.safeParse("시간 진행 — 하루").success).toBe(false);
+    expect(TurnOperationSchema.safeParse({ kind: "next_match" }).success).toBe(false);
   });
 
   it("그 사이 벌어진 일이 상태에 실린다 — 모델이 보고할 거리다", () => {

@@ -225,6 +225,17 @@ export function llmUsage(): UsageLedger {
   return sessionLedger;
 }
 
+/**
+ * 지금 장부가 담고 있는 게임 — 아무 게임도 열지 않았으면 null.
+ *
+ * 장부의 단위가 **게임 하나**라(§4) 계측을 세우는 자리는 그 수치가 어느 세이브의
+ * 것인지를 함께 말해야 한다. 그 답이 없으면 다른 게임을 열고 온 사람이 0을 「모델을
+ * 안 불렀다」로 읽는다.
+ */
+export function llmUsageGameId(): string | null {
+  return ledgerGameId;
+}
+
 /** 장부를 비운다 — 테스트의 시작점이자 게임을 갈아탈 때의 바닥 */
 export function resetLlmUsage(): void {
   sessionLedger = emptyLedger();

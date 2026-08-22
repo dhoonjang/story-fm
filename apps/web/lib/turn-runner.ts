@@ -10,7 +10,13 @@ import {
   type GameState,
   type SaveLockHandle,
 } from "@story-fm/engine";
-import { GmTurnFailure, compactHistory, runGmTurn } from "@story-fm/agents";
+import {
+  GmTurnFailure,
+  compactHistory,
+  operationLabel,
+  runGmTurn,
+  type TurnOperation,
+} from "@story-fm/agents";
 import {
   beginGameUsage,
   bindTurnTrace,
@@ -242,13 +248,17 @@ export function errorDetail(error: unknown): { detail?: string } {
  */
 export function runTurnLocked(
   id: string,
-  message: string,
+  /** 감독이 친 말 — 조작 턴에는 없다 (`operation`이 문장을 만든다) */
+  message: string | undefined,
   onDelta?: (text: string) => void,
   /**
-   * 감독의 발화가 아니라 **화면 조작**인가 (시간 이동 손잡이).
+   * 감독의 발화가 아니라 **화면 조작**인가 (시간 이동·경기 진행 손잡이).
    * 채팅에 그리지 않고, 모델 이력에도 오퍼레이터 지시로 들어간다.
+   *
+   * **구조체로 온다.** 모델이 읽을 `[조작: …]` 문장은 여기서 만들므로
+   * (`operationLabel`) 화면의 문구가 계약이 아니다 — 되읽는 코드가 없다.
    */
-  operator = false,
+  operation?: TurnOperation,
   /**
    * 전술판에서 쌓인 조작 — 감독의 말보다 **먼저** 들어간다.
    *
@@ -301,15 +311,20 @@ export function runTurnLocked(
           ...mark,
         });
       }
+      /**
+       * 모델이 읽을 한 줄 — 조작이면 **구조체에서 만든다.** 감독이 친 말이 아니라
+       * 손잡이라, 이 문장은 표시일 뿐이고 되읽는 코드가 없다 (agents.md §2).
+       */
+      const said = operation ? operationLabel(operation) : (message ?? "");
       state.chat.push({
-        role: operator ? "operator" : "user",
-        text: message,
+        role: operation ? "operator" : "user",
+        text: said,
         toolCalls: [],
         at: state.date,
         ...mark,
       });
       try {
-        const turn = await runGmTurn(state, message, onDelta, operator, appliedOrders);
+        const turn = await runGmTurn(state, said, onDelta, operation, appliedOrders);
         state.chat.push({
           role: "model",
           text: turn.text,

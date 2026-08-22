@@ -14,7 +14,7 @@ import type { GameToolSpec } from "@story-fm/llm";
 import { buildGmTools, collectMatchMarks, sideTeamName } from "./gm-tools";
 import { buildSegmentMessage, buildShootoutMessage } from "./match-caster";
 import { touchesPitch, type MatchIntent } from "./match-intent-schema";
-import type { GmToolCall } from "./gm-types";
+import { MATCH_ADVANCED, type GmToolCall } from "./gm-types";
 
 /**
  * 의도 → 상태. **경기 턴의 ③이다** (docs/llm/agents.md §3).
@@ -137,7 +137,7 @@ export function applyMatchIntent(
       return { notes, segment: null, touched: touchesPitch(intent) };
     }
     // 세계가 굴러간 기록이지 감독이 부른 스킬이 아니다 — 칩으로 세우지 않는다
-    calls.push({ name: "advance_match", summary: kicked.message, silent: true });
+    calls.push({ name: MATCH_ADVANCED, summary: kicked.message, silent: true });
     return {
       notes,
       segment: buildShootoutMessage(
@@ -160,7 +160,7 @@ export function applyMatchIntent(
   pending.lastSegment = { events: step.events, stop: step.stop ?? "flow" };
   collectMatchMarks(state, step.events, scoreBefore, goals, cards);
   // 세계가 굴러간 기록이지 감독이 부른 스킬이 아니다 — 칩으로 세우지 않는다
-  calls.push({ name: "advance_match", summary: step.message, silent: true });
+  calls.push({ name: MATCH_ADVANCED, summary: step.message, silent: true });
 
   const ledger = pending.ledger;
   return {

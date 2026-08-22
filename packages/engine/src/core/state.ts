@@ -341,12 +341,6 @@ export interface PendingMatch {
   matchId: string;
   packet: StrengthPacket;
   ledger: MatchLedgerState;
-  /**
-   * ⚠️ 폐기된 필드 — 구간 시뮬레이터(`advanceSegment`)가 사건을 그때그때 굴리므로
-   * 경기 전체를 미리 만들지 않는다. 옛 세이브 호환으로만 남긴다 (읽지 않는다).
-   */
-  script: MatchScriptSegment[] | null;
-  scriptCursor: number;
   /** 진행한 구간 수 — 난수 채널에 들어가 같은 경기가 재현된다 */
   segment?: number;
   /**
@@ -487,11 +481,6 @@ export interface PendingMatch {
   aiDecidedAt?: number;
 }
 
-export interface MatchScriptSegment {
-  events: import("@story-fm/domain").MatchEvent[];
-  stop: "goal" | "half_time" | "full_time" | "incident";
-}
-
 export type GamePhase = "idle" | "matchday" | "match";
 
 /** 하루가 열리는 시각 — 아무 선언도 없으면 여기서 시작한다 */
@@ -543,6 +532,15 @@ export interface GameState {
    * 구 세이브엔 없다 — 읽을 때 09:00으로 본다 (`clockOf`).
    */
   clock?: string;
+  /**
+   * **첫 줄 헤더를 연달아 못 읽은 평시 턴 수** — 읽히면 지워진다.
+   *
+   * 모델이 적은 시점이 시계를 움직이는 유일한 자유 텍스트 경로라(agents.md §2)
+   * 그 실패는 조용히 쌓인다. 세이브가 드는 이유는 "연달아"가 턴을 건너 세는
+   * 값이라서다 — 어디에서도 파생할 수 없다. 옛 세이브엔 없다
+   * (optional — SAVE_VERSION 유지).
+   */
+  sceneHeaderMisses?: number;
   calendar: SeasonCalendar;
   userTeamId: string;
   phase: GamePhase;

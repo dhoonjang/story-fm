@@ -13,6 +13,7 @@ import {
 } from "@story-fm/engine";
 import { ATTRIBUTE_AXES, AXIS_KO, DateString } from "@story-fm/domain";
 import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
+import { agingDeclineLine } from "./aging-line";
 import { retryOnce, requireToolCall, anchorStands } from "./retry";
 import { inputError, toToolSchema } from "./tool-schema";
 
@@ -37,8 +38,7 @@ export const TRAINING_RATER_SYSTEM = `당신은 축구 구단의 훈련장을 �
 - 전술 적응도는 **${TACTIC_GAIN_MIN} ~ ${TACTIC_GAIN_MAX} 중 하나**다. 대부분은 0~1이고, ${TACTIC_GAIN_MIN}은
   지친 선수를 굴려 오히려 흐트러졌을 때다.
 - 능력치는 **0~${TRAINING_ATTR_CAP}명**, 각 한 축 **+${ATTR_STEP_MAX} 또는 −${-ATTR_STEP_MIN}**, **그 기간에 실제로 훈련한 축만**.
-  아무에게도 변화가 없는 구간이 정상이다. 서른을 넘긴 선수의 스피드·체력·드리블은
-  훈련해도 내려간다.
+  아무에게도 변화가 없는 구간이 정상이다. ${agingDeclineLine()}
 - **개인 훈련으로 자리를 배우는 선수**(대상 표에 "전향 …"으로 표시)에게는
   positionGain을 **0~${POSITION_TRAIN_MAX}**으로 적는다. 전향이 걸리지 않은 선수에게는 적지 않는다.
 - 대상 전원을 빠뜨리지 마라.

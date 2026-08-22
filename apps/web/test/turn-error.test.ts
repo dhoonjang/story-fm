@@ -235,7 +235,7 @@ describe("기다리기를 멈춘 턴", () => {
     const call = async (res: Response) => {
       vi.stubGlobal("fetch", async () => res);
       try {
-        return await streamTurn("g", { message: "훈련 잡아줘", operator: false }, handlers);
+        return await streamTurn("g", { message: "훈련 잡아줘" }, handlers);
       } finally {
         vi.unstubAllGlobals();
       }

@@ -58,6 +58,10 @@ import {
   MINI_WORLD,
   MINI_WORLD_TWO_LEAGUES,
   scopedTeams,
+  countryOfTeam,
+  pseudonymClubs,
+  pseudonymSquad,
+  type PlayerNameInput,
 } from "@story-fm/engine";
 import { createTestGame, userFixtureCount, createMiniGame, playFullSeason } from "./helpers";
 
@@ -823,5 +827,46 @@ describe("축소 세계 — 같은 규칙의 작은 세계", () => {
   it("전체 세계는 그대로다 — 범위를 주지 않으면 카탈로그 전부", () => {
     expect(scopedTeams().length).toBeGreaterThan(150);
     expect(scopedTeams(MINI_WORLD)).toHaveLength(MINI_WORLD.teamsPerLeague + 1);
+  });
+});
+
+/**
+ * 가명 매핑 — 라이선스 부채의 가명화 갈래 (sources.md §7.3).
+ *
+ * 여기서 지키는 것은 둘뿐이다: **결정성**과 **유일성**. 어떤 이름이 나오는가는
+ * 풀을 고치면 바뀌는 값이라 잡아 둘 것이 아니고, 이 둘이 깨지면 파이프라인을 두 번
+ * 돌린 diff가 시드 변경분이 아니게 되거나(결정성) 한 클럽에 동명이인이 서서 화자
+ * 판별이 무너진다(유일성 — people.md §2).
+ */
+describe("가명 매핑 (sources.md §7.3)", () => {
+  const clubs = SQUAD_TEAMS.map((t) => ({ id: t.id, country: countryOfTeam(t.id) }));
+  const named = pseudonymClubs(clubs);
+
+  const squad: PlayerNameInput[] = Array.from({ length: 45 }, (_, i) => ({
+    nameEn: `Seed Player ${i}`,
+    birthdate: `199${i % 10}-0${(i % 9) + 1}-15`,
+    wikidataId: `Q${1000 + i}`,
+  }));
+
+  it("같은 입력은 같은 가명 — 나열 순서는 결과를 움직이지 않는다", () => {
+    const again = pseudonymClubs([...clubs].reverse());
+    for (const club of clubs) expect(again.get(club.id)).toEqual(named.get(club.id));
+
+    const first = pseudonymSquad("잉글랜드", squad);
+    const reversed = pseudonymSquad("잉글랜드", [...squad].reverse());
+    expect([...reversed].reverse()).toEqual(first);
+  });
+
+  it("클럽 이름·약어·구장은 전 클럽에서 유일하다", () => {
+    // shortName은 리그를 넘나드는 표시라 겹치면 두 클럽이 같은 얼굴로 선다
+    expect(new Set([...named.values()].map((c) => c.shortName)).size).toBe(named.size);
+    expect(new Set([...named.values()].map((c) => c.name)).size).toBe(named.size);
+    expect(new Set([...named.values()].map((c) => c.stadium)).size).toBe(named.size);
+  });
+
+  it("한 클럽 안에 동명이인이 서지 않는다", () => {
+    const names = pseudonymSquad("이탈리아", squad);
+    expect(new Set(names.map((n) => n.nameKo)).size).toBe(squad.length);
+    expect(new Set(names.map((n) => n.nameEn)).size).toBe(squad.length);
   });
 });

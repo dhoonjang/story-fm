@@ -41,17 +41,14 @@ export const HISTORY_COMPACTOR_SYSTEM = `당신은 구단의 기록 담당이다
 
 ## 요약
 - 이전 요약이 함께 주어지면 새 구간과 합쳐 **한 벌로 다시 쓴다.** 이어 붙이지 않는다.
-- **${HISTORY_DIGEST_CHARS}자 이내.** 넘으면 잘리는 것이 아니라 통째로 거절당한다.
+- **${HISTORY_DIGEST_CHARS}자 이내.**
 - 남길 것 — 감독이 내린 결정과 그 이유, 사람들 사이에 생긴 일, 아직 끝나지 않은 일
   (진행 중인 협상·약속·갈등).
 - 버릴 것 — 장부가 이미 아는 수치(순위·이적료·평점·일정), 인사말, 되풀이된 말.
 - 시간순으로 적는다. 원문에 없는 사실을 지어내지 마라.
 
 ## 인물별 기억
-- 그 구간에 그 사람에게 있었던 일 한 줄. 120자 이내.
-- 이름은 원문의 \`@태그\`에 있는 그대로 적는다. 이 세계에 없는 이름은 버려진다.
 - 감독과 실제로 무언가 오간 사람만 적는다. 아무 일도 없던 사람은 적지 않는다.
-- 무게는 1~5 — 지나가는 일이 1, 관계를 바꾼 일이 5.
 
 ## 새 인물
 - 그 구간에서 **처음 이름을 갖고 말한 사람**만 세운다.
@@ -78,7 +75,9 @@ const CARD_TEXT_MAX = 200;
 const MemorySchema = z.object({
   characterId: z.string().min(1).describe("원문 @태그의 이름 그대로"),
   text: CharacterMemorySchema.shape.text.describe("그 사람에게 있었던 일 한 줄 (120자 이내)"),
-  salience: CharacterMemorySchema.shape.salience.optional().describe("1~5"),
+  salience: CharacterMemorySchema.shape.salience
+    .optional()
+    .describe("1~5 — 지나가는 일이 1, 관계를 바꾼 일이 5"),
 });
 
 const CharacterSchema = z.object({

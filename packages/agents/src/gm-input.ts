@@ -107,17 +107,13 @@ export function describePersona(entry: CharacterEntry): string {
  * 이번 장면의 인물들 — 캐릭터북이 고른 카드 묶음 (people.md §6).
  *
  * ⚠️ **여기 있는 것은 "이 사람이 누구인가"뿐이다.** 카드는 이력에 굳으므로 변하는
- * 값(폼·컨디션·부상·심경·계약)이 들어가면 3주 뒤 모델이 낡은 사실로 말한다. 그래서
- * 블록 끝이 조회를 가리킨다 — 카드가 섰다는 건 그 인물이 이번 장면에 선다는 뜻이고,
- * 그것이 곧 조회할 근거다. 포인터는 카드마다가 아니라 묶음에 한 번만 선다.
+ * 값(폼·컨디션·부상·심경·계약)이 들어가면 3주 뒤 모델이 낡은 사실로 말한다. 지금의
+ * 사실은 조회 도구가 갖고, **조회하고 답하라는 지시는 이 블록이 아니라 `GM_SYSTEM`의
+ * 철칙과 그 도구의 설명이 갖는다** — 카드에는 사실만 선다 (prompts.md §5).
  */
 export function describeCharacters(entries: readonly CharacterEntry[]): string | null {
   if (entries.length === 0) return null;
-  return [
-    `[이번 장면의 인물]`,
-    ...entries.map(describePersona),
-    `지금의 사실 — 폼·컨디션·부상·심경·계약·능력치 — 은 이 카드에 없다. 그 인물을 두고 사실을 말하기 전에 조회로 확인하라.`,
-  ].join("\n\n");
+  return [`[이번 장면의 인물]`, ...entries.map(describePersona)].join("\n\n");
 }
 
 /**

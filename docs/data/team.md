@@ -276,6 +276,33 @@ ClubProfile { stadium, capacity, commercialTier: 1|2|3|4 }
 
 수입 공식은 [../simulation/finance.md](../simulation/finance.md).
 
+### 3.1 시각 정체성 — 문장은 생성하고, 실물은 담지 않는다
+
+**엠블럼·킷·리그 로고·구장 사진은 어떤 형태로도 저장소에 들어오지 않는다.** 실물을
+보고 다시 그린 것도 포함이다 — 미술저작물과 상표가 겹쳐 걸리는 자리라 이 프로젝트의
+라이선스 부채 중 가장 위험하고, 동시에 **담지 않는 것만으로 청산되는** 자리다
+([sources.md](sources.md) §7.1).
+
+화면이 클럽을 그려야 하면 **클럽 id에서 결정적으로 뽑은 문장(紋章)**을 쓴다
+(`domain/src/crest.ts`).
+
+| 무엇      | 어디서                          | 왜                                                       |
+| --------- | ------------------------------- | -------------------------------------------------------- |
+| 색 두 벌  | id 해시 → 색상환의 두 자리      | 실물 색을 옮기지 않는다. 옮기는 순간 다시 그 클럽이 된다 |
+| 방패 모양 | id 해시 → 네 가지               | 리그가 아니라 클럽마다 다르다 — 명단에서 한눈에 갈린다   |
+| 분할·도형 | id 해시 → 세로·가로·사선·테두리 | 같은 색 조합이라도 모양이 갈라 준다                      |
+| 글자      | `shortName`                     | 클럽을 실제로 가리키는 것은 결국 이 두세 글자다          |
+
+- **자산 파일이 없다.** 함수가 SVG 문자열을 내므로 `public/`에 들어가는 그림도,
+  빌드 산출물도 없다. 96팀이든 어드민이 방금 만든 클럽이든 같은 경로다.
+- **`packages/domain`에 산다.** 화면과 가명화 파이프라인이 함께 부르는 순수 규칙이라
+  엔진에 두면 화면이 값으로 가져올 수 없다 (AGENTS.md §5).
+- **결정적이다.** 같은 클럽 id는 언제나 같은 문장이라, 세이브에 저장할 것이 없고
+  어드민이 클럽 이름을 바꿔도 문장은 그대로다 — 문장이 가리키는 것은 이름이 아니라
+  id다.
+- ⚠️ **실물과 닮게 조율하지 않는다.** "아스널은 빨강이니까"로 색을 손보는 순간
+  §7.1의 미탑재가 깨진다. 색은 id가 정하고, 그 결과가 실물과 다른 것이 정상이다.
+
 ## 4. 팀의 종류
 
 `LeagueCatalogEntry.kind`가 그 리그의 클럽이 게임에서 **하는 일**을 정한다.
@@ -619,19 +646,21 @@ WorldScope { leagues, teamsPerLeague, cups, markets }
 
 ## 코드 위치
 
-| 무엇                                       | 어디                                                              |
-| ------------------------------------------ | ----------------------------------------------------------------- |
-| 팀 카탈로그 · 체급 · 지정 선발             | `packages/engine/src/data/team-catalog.ts`                        |
-| 리그 카탈로그 (`kind` · 계수 · 중계권)     | `packages/engine/src/data/league-catalog.ts`                      |
-| 구단 프로필 (구장 · 브랜드)                | `packages/engine/src/data/club-profile.ts`                        |
-| 카탈로그 오버라이드 (읽기·쓰기·캐시)       | `packages/engine/src/data/catalog-source.ts` · `team-override.ts` |
-| 팀 어드민 (조회 · 편집 · 추가 · 삭제)      | `packages/engine/src/world/admin-team.ts`                         |
-| 카탈로그 불변식 (순수) · 로드 시 검사      | `packages/engine/src/world/catalog-invariants.ts`                 |
-| 실선수 시드 합본 (팀 → 명단)               | `packages/engine/src/data/squad-seeds.ts`                         |
-| 등록 명단 규칙 (순수)                      | `packages/domain/src/squad-rules.ts`                              |
-| 등록 명단 — 상태에 붙이는 층               | `packages/engine/src/squad/registration.ts`                       |
-| 팀 엔티티 (Zod)                            | `packages/domain/src/team.ts`                                     |
-| 초기 스쿼드 분류 · 모양 고르기 · 슬롯 배치 | `packages/engine/src/core/state.ts`                               |
-| 스쿼드 생성 (실선수 시드 · 절차 생성)      | `packages/engine/src/world/catalog.ts` · `generate.ts`            |
-| 축소 세계                                  | `packages/engine/src/world/scope.ts`                              |
-| 구단 주급 예산                             | `packages/engine/src/world/wages.ts`                              |
+| 무엇                                       | 어디                                                                |
+| ------------------------------------------ | ------------------------------------------------------------------- |
+| 팀 카탈로그 · 체급 · 지정 선발             | `packages/engine/src/data/team-catalog.ts`                          |
+| 리그 카탈로그 (`kind` · 계수 · 중계권)     | `packages/engine/src/data/league-catalog.ts`                        |
+| 구단 프로필 (구장 · 브랜드)                | `packages/engine/src/data/club-profile.ts`                          |
+| 카탈로그 오버라이드 (읽기·쓰기·캐시)       | `packages/engine/src/data/catalog-source.ts` · `team-override.ts`   |
+| 팀 어드민 (조회 · 편집 · 추가 · 삭제)      | `packages/engine/src/world/admin-team.ts`                           |
+| 카탈로그 불변식 (순수) · 로드 시 검사      | `packages/engine/src/world/catalog-invariants.ts`                   |
+| 실선수 시드 합본 (팀 → 명단)               | `packages/engine/src/data/squad-seeds.ts`                           |
+| 등록 명단 규칙 (순수)                      | `packages/domain/src/squad-rules.ts`                                |
+| 등록 명단 — 상태에 붙이는 층               | `packages/engine/src/squad/registration.ts`                         |
+| 팀 엔티티 (Zod)                            | `packages/domain/src/team.ts`                                       |
+| 절차 생성 문장 (§3.1)                      | `packages/domain/src/crest.ts`                                      |
+| 가명화 파이프라인 (클럽·구장 이름)         | `packages/engine/src/data/pseudonym.ts` · `scripts/pseudonymize.ts` |
+| 초기 스쿼드 분류 · 모양 고르기 · 슬롯 배치 | `packages/engine/src/core/state.ts`                                 |
+| 스쿼드 생성 (실선수 시드 · 절차 생성)      | `packages/engine/src/world/catalog.ts` · `generate.ts`              |
+| 축소 세계                                  | `packages/engine/src/world/scope.ts`                                |
+| 구단 주급 예산                             | `packages/engine/src/world/wages.ts`                                |

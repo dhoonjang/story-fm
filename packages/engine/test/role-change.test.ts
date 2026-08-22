@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultRoleOf, rolesFor } from "@story-fm/domain";
+import { defaultRoleOf, inheritedRole, roleAtSlot, rolesFor } from "@story-fm/domain";
 import {
   advanceSegment,
   assignmentsOf,
@@ -189,5 +189,50 @@ describe("경기 중에 바꾼 역할은 기억에 남지 않는다", () => {
     });
     expect(saved.ok, saved.message).toBe(true);
     expect(recallRole(state, id, position)).toBe(peace.id);
+  });
+});
+
+/**
+ * 자리를 옮겼을 때 되찾는 역할 (`inheritedRole`) — 세계 없이 규칙만 본다.
+ *
+ * 코어의 배치(`setLineup`)와 전술판이 **같은 이 함수**를 부른다. 순서를 한쪽에
+ * 옮겨 적으면 감독이 누른 적 없는 역할 변경이 자동 저장 응답과 함께 혼자 일어나고,
+ * 역할은 `roleFit`으로 전력에 그대로 닿는다.
+ */
+describe("역할 되찾기 3단 (inheritedRole · roleAtSlot)", () => {
+  const cbRoles = rolesFor("CB").map((r) => r.id);
+  const stRoles = rolesFor("ST").map((r) => r.id);
+  /** 센터백에만 있는 역할 — 최전방으로 옮기면 목록에서 사라진다 */
+  const cbOnly = cbRoles.find((id) => !stRoles.includes(id))!;
+  const cbOther = cbRoles.find((id) => id !== cbOnly && !stRoles.includes(id))!;
+  /** 최전방에만 있는 역할 — 센터백 자리에서는 목록에 없다 */
+  const stOnly = stRoles.find((id) => !cbRoles.includes(id))!;
+
+  it("① 지금 걸린 역할이 새 자리 목록에 있으면 기억보다 그것이 먼저다", () => {
+    expect(inheritedRole("CB", cbOnly, cbOther)).toBe(cbOnly);
+  });
+
+  it("② 목록에 없으면 그 자리의 기억이 선다", () => {
+    expect(inheritedRole("CB", stOnly, cbOther)).toBe(cbOther);
+    expect(inheritedRole("CB", null, cbOther)).toBe(cbOther);
+    expect(inheritedRole("CB", undefined, cbOther)).toBe(cbOther);
+  });
+
+  it("③ 둘 다 없으면 undefined다 — 코어는 스스로 닿는 값을 배치에 적지 않는다", () => {
+    expect(inheritedRole("CB", null, null)).toBeUndefined();
+    expect(inheritedRole("CB", undefined, undefined)).toBeUndefined();
+    // 그 자리에 없는 기억도 없는 것과 같다 — 옛 세이브의 역할 id가 되살아나지 않는다
+    expect(inheritedRole("CB", null, "지어낸-역할")).toBeUndefined();
+    expect(inheritedRole("ST", cbOnly, cbOnly)).toBeUndefined();
+    // 화면은 값이 있어야 알약을 그리므로 기본 역할까지 얹은 쪽을 부른다
+    expect(roleAtSlot("CB", null, null)).toBe(defaultRoleOf("CB"));
+    expect(roleAtSlot("ST", cbOnly, cbOnly)).toBe(defaultRoleOf("ST"));
+    expect(roleAtSlot("CB", cbOnly, null)).toBe(cbOnly);
+  });
+
+  it("자리가 바뀌었는지는 보지 않는다 — CB→LCB처럼 코드만 바뀌는 이동에서 값이 갈리지 않는다", () => {
+    expect(inheritedRole("LCB", cbOnly, cbOther)).toBe(inheritedRole("CB", cbOnly, cbOther));
+    expect(roleAtSlot("LCB", null, cbOther)).toBe(roleAtSlot("CB", null, cbOther));
+    expect(roleAtSlot("LCB", null, null)).toBe(defaultRoleOf("CB"));
   });
 });

@@ -18,6 +18,7 @@ import {
   fillEmptyTables,
   migrateConditions,
   migrateFormScale,
+  migrateGrowthSources,
   migrateManagerAxes,
   migrateMatchStats,
   migrateMirrorProficiency,
@@ -370,6 +371,9 @@ function migrate(save: Record<string, unknown>, state: GameState): void {
   migrateFormScale(state);
   migrateConditions(state);
   migrateMatchStats(state);
+  // 폐기된 성장 출처(`reserve`)를 옮긴다 — 스키마에서 그 갈래를 뺐으므로 parse보다
+  // 앞이어야 한다. 남아 있으면 멀쩡한 세이브가 `schema`로 막힌다 (migrations.ts).
+  migrateGrowthSources(state);
   // 좌우 미러 자리에 얹혀 있던 주발 보정을 벗긴다 — 저장은 원값, 주발은 조회 때
   // (player.md §8). 마커가 없는 세이브에서만 한 번: 다시 돌면 경기·훈련이 그
   // 자리에 쌓은 적응도를 같이 민다.
