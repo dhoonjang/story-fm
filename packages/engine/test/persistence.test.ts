@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -436,6 +437,61 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
     expect(existsSync(path.join(dataDir(), `${state.id}.json.bak`))).toBe(false);
     expect(loadGame(state.id)).toBeNull();
     expect(deleteGame(state.id)).toBe(false); // 없는 게임
+  });
+
+  /**
+   * tmp 이름이 `<본이름>.tmp`로 고정이면 같은 `.data/`에 동시에 쓰는 두 쓰기가 한 tmp를
+   * 나눠 갖는다 — 한쪽이 쓴 바이트를 다른 쪽이 제 이름으로 rename해 내용이 뒤바뀐 파일이
+   * 서고, 늦은 쪽은 이미 사라진 tmp를 찾다 넘어진다. 게임 락은 한 프로세스 안의 한
+   * 게임까지만 지킨다 (dev 서버 둘, 서버와 CLI, e2e와 손 저장이 한 디렉터리를 볼 때).
+   */
+  it("같은 디렉터리의 다른 쓰기가 쥔 tmp를 저장이 밟지 않는다", () => {
+    const state = createTestGame();
+    saveGame(state);
+    const [shard] = shardPaths(state.id, shardMap(state.id).players!);
+    rmSync(shard); // 이 벌은 다음 저장이 **같은 이름으로** 다시 쓴다
+
+    // 다른 쓰기가 쓰다 만 tmp — 옛 이름 규칙이면 저장이 이 자리를 그대로 겹쳐 쓴다
+    const inflight = [path.join(dataDir(), `${state.id}.json.tmp`), `${shard}.tmp`];
+    for (const file of inflight) writeFileSync(file, "남이 쥔 바이트", "utf8");
+
+    saveGame(state);
+
+    for (const file of inflight)
+      expect(readFileSync(file, "utf8"), `${path.basename(file)}: 남의 tmp를 밟았다`).toBe(
+        "남이 쥔 바이트",
+      );
+    expect(readFileSync(shard, "utf8"), "제 조각을 제자리에 놓지 못했다").toBe(
+      readFileSync(`${shard}.bak`, "utf8"),
+    );
+    expect(loadGame(state.id)!.players).toHaveLength(state.players.length);
+    // 제가 지은 tmp는 rename으로 사라진다 — 남은 것은 심어 둔 둘뿐이다
+    expect(
+      readdirSync(dataDir()).filter((f) => f.startsWith(`${state.id}.`) && f.endsWith(".tmp")),
+    ).toHaveLength(inflight.length);
+
+    for (const file of inflight) rmSync(file);
+  });
+
+  /**
+   * 본체 rename이 끝난 순간 그 턴은 디스크에 남았다. 그 뒤의 요약 사이드카·조각 청소가
+   * 던진 예외를 올려보내면 이미 저장된 턴에 라우트가 500을 돌려주고 화면은 "저장 실패"를
+   * 읽는다 — 잃은 것이 없는데 감독은 방금 한 일을 잃었다고 믿는다.
+   */
+  it("본체를 건 뒤 뒷정리가 넘어져도 저장은 실패가 아니다 — 로그만 남는다", () => {
+    const state = createTestGame();
+    saveGame(state);
+    // 청소가 지우려 드는 자리에 디렉터리를 놓는다 — `rmSync`는 디렉터리를 만나면 던진다
+    const trap = path.join(dataDir(), `${state.id}.shard-deadbeef.json`);
+    mkdirSync(trap);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    state.players[0]!.state.condition = 47;
+    expect(() => saveGame(state)).not.toThrow();
+
+    expect(warn, "삼키기만 하고 로그를 남기지 않았다").toHaveBeenCalled();
+    expect(loadGame(state.id)!.players[0]!.state.condition).toBe(47);
+    rmSync(trap, { recursive: true });
   });
 });
 
