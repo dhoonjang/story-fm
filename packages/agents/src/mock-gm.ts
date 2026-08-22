@@ -36,7 +36,6 @@ import {
   sendOffer,
   suggestTerms,
   setCaptain,
-  setPlayerTactic,
   setTactics,
   setTraining,
   clearTraining,
@@ -68,7 +67,7 @@ import {
   pressFactText,
 } from "@story-fm/domain";
 import type { ShootoutOutcome } from "@story-fm/domain";
-import { TIME_PASSED, type GmToolCall, type GmTurnResult } from "./gm-types";
+import { TIME_PASSED, type GmToolCall, type GmTurnResult, type TurnOperation } from "./gm-types";
 import type { CardMark, GoalMark } from "@story-fm/engine";
 
 /**
@@ -330,8 +329,14 @@ export function runMockGmTurn(
   state: GameState,
   message: string,
   onText?: (delta: string) => void,
+  /**
+   * 손잡이가 보낸 조작 — **말이 아니라 구조체다.** 있으면 아래의 자연어 해석을
+   * 지나친다. mock이 실모드와 갈라지던 자리가 여기였다: 화면이 보낸 문장을
+   * 정규식으로 되읽었기 때문에 문구가 바뀌면 mock만 조용히 멎었다.
+   */
+  operation?: TurnOperation | null,
 ): GmTurnResult {
-  const computed = computeMockGmTurn(state, message);
+  const computed = computeMockGmTurn(state, message, operation);
   // 실모드와 같은 모양으로 첫 줄에 시점을 세운다 — mock은 시계를 직접 옮기므로
   // (advanceTime) 헤더는 파싱 대상이 아니라 표시일 뿐이다
   const stamp =
@@ -355,9 +360,36 @@ export function runMockGmTurn(
   return result;
 }
 
-function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
+function computeMockGmTurn(
+  state: GameState,
+  message: string,
+  operation?: TurnOperation | null,
+): GmTurnResult {
   const calls: GmToolCall[] = [];
   const msg = message.trim();
+
+  /**
+   * ── 손잡이 — **아래의 자연어보다 먼저 갈린다** ────────────────────────
+   *
+   * `message`는 조작에서 만든 표시 문구일 뿐이라 여기서 되읽지 않는다. 아래로
+   * 흘려보내면 그 문구가 다른 갈래의 정규식에 걸려 손잡이 하나가 엉뚱한 스킬을
+   * 부른다 — mock이 실모드와 갈라지던 자리가 여기였다 (agents.md §2).
+   *
+   * 시간 이동은 **평시에만** 뜻이 있다 — 실모드의 `advanceForOperation`과 같은
+   * 문이다. 경기 중에는 시간을 달력이 아니라 경기가 밀고(아래 경기 블록), 경기일엔
+   * 넘길 곳이 오늘뿐이라 코어가 손잡이를 받지 않는다.
+   */
+  if (operation != null && operation.kind !== "advance_match" && state.phase === "idle") {
+    return mockAdvance(
+      state,
+      calls,
+      operation.kind === "skip_days"
+        ? operation.days
+        : operation.kind === "skip_to_next_match"
+          ? Math.max(1, diffDays(state.date, operation.date))
+          : null,
+    );
+  }
 
   // ── 경기 중 ──────────────────────────────────────────
   if (state.phase === "match") {
@@ -380,34 +412,27 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
         toolCalls: calls,
       };
     }
-    const positionOrders = [...msg.matchAll(/자리 변경 — (.+?)을\(를\) ([A-Z]+)로/gu)];
-    const roleOrders = [...msg.matchAll(/역할 변경 — (.+?)을\(를\) .+?\(([a-z0-9_-]+)\)로/gu)];
-    if (positionOrders.length > 0 || roleOrders.length > 0) {
-      const roster = userPlayers(state);
-      const positionResults = positionOrders.map((order) => {
-        const name = order[1]?.trim() ?? "";
-        const position = order[2] ?? "";
-        const player = roster.find((candidate) => candidate.name === name);
-        if (!player) return `${name}: 선수를 찾을 수 없습니다`;
-        const input = { playerId: player.id, position };
-        const result = setPlayerTactic(state, input);
-        calls.push({ name: "set_player_tactic", summary: result.message, input, ...carry(result) });
-        return result.message;
-      });
-      const roleResults = roleOrders.map((order) => {
-        const name = order[1]?.trim() ?? "";
-        const role = order[2] ?? "";
-        const player = roster.find((candidate) => candidate.name === name);
-        if (!player) return `${name}: 선수를 찾을 수 없습니다`;
-        const input = { playerId: player.id, role };
-        const result = setPlayerTactic(state, input);
-        calls.push({ name: "set_player_tactic", summary: result.message, input, ...carry(result) });
-        return result.message;
-      });
-      const results = [...positionResults, ...roleResults];
+    /**
+     * 손잡이로 온 진행 — **해석할 것이 없다.** 전술판 조작은 코어가 이미
+     * 적용했고(turn-runner), `advance_match`가 뜻하는 것은 한 구간 더뿐이다.
+     *
+     * 예전에는 이 자리에서 `자리 변경 — X을(를) Y로` 같은 문장을 정규식으로
+     * 되읽어 스킬을 다시 걸었다. 화면이 그 문구를 보내지 않게 된 뒤로는 한
+     * 글자도 걸리지 않았고, 대신 **이미 반영된 교체 문구**가 아래 `/교체/`에
+     * 걸려 같은 교체가 두 번 일어났다 (실모드에는 없는 갈래다).
+     *
+     * 조작의 종류를 가리지 않는 것은 실모드와 같다 — 경기 중 손잡이가 뜻하는
+     * 것은 진행 하나뿐이다 (gm.ts의 `advance: "segment"`).
+     */
+    if (operation != null) {
+      const goals: GoalMark[] = [];
+      const cards: CardMark[] = [];
+      const text = advanceMatchTurn(state, calls, goals, cards);
       return {
-        text: `${coach(state)} 전술판 변경을 반영했습니다. ${results.join(" · ")}`,
+        text,
         toolCalls: calls,
+        ...(goals.length > 0 ? { goals } : {}),
+        ...(cards.length > 0 ? { cards } : {}),
       };
     }
     const formationMatch = msg.match(/([345])-\d(-\d)?(-\d)?/u);
@@ -904,44 +929,17 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
 
   // 진행은 명령형 발화만 — "다음 경기 언제야?" 같은 조회가 시간을 흘리면 안 된다 (리뷰 발견)
   const isQuestion = /언제|뭐|누구|얼마|어때|\?/u.test(msg);
-  // "시간 진행 — 하루"는 화면의 시간 이동 손잡이가 보내는 조작 문장이다
-  // (`TIME_SKIPS`) — 감독의 구어체 지시와 함께 여기서 받는다
-  const wantsAdvance = /가자|진행해|진행하자|넘어가|넘기자|스킵|보내자|경기일로|시간 진행/u.test(
-    msg,
-  );
+  /**
+   * 감독의 **구어체** 지시만 여기서 읽는다 — mock이 LLM 대신 서는 자리다.
+   * 손잡이는 말이 아니라 구조체로 오고(`operation`) 위에서 이미 갈렸다.
+   *
+   * 얼마나 넘기는지도 말에서 읽는다 — 전부 next_match로 처리하면 프리시즌에
+   * "하루만 넘기자"고 한 감독이 개막까지 날아간다.
+   */
+  const wantsAdvance = /가자|진행해|진행하자|넘어가|넘기자|스킵|보내자|경기일로/u.test(msg);
   if (wantsAdvance && !isQuestion) {
-    // 얼마나 넘기는지도 말에서 읽는다 — 버튼 문장을 그대로 받으므로 전부
-    // next_match로 처리하면 프리시즌에 하루를 누른 감독이 개막까지 날아간다.
-    // 날짜가 적혀 오면 그날까지 간다 (실모드에선 applyScenePoint가 하는 일)
-    const dated = /\((\d{4}-\d{2}-\d{2})\)/u.exec(msg)?.[1] ?? null;
-    const days = dated
-      ? Math.max(1, diffDays(state.date, dated))
-      : /하루|내일/u.test(msg)
-        ? 1
-        : /일주일|한 ?주/u.test(msg)
-          ? 7
-          : null;
-    const input = days === null ? ({ until: "next_match" } as const) : { days };
-    const result = advanceTime(state, days === null ? "next_match" : { days });
-    calls.push({
-      name: TIME_PASSED,
-      summary: result.stopped === "season_end" ? "시즌 종료 처리" : `${state.date}까지 진행`,
-      input,
-      silent: true,
-    });
-    const digestText = result.digest.map((d) => `${coach(state)} ${d}`).join("\n");
-    const closer =
-      result.stopped === "matchday"
-        ? `\n${coach(state)} 오늘이 경기일입니다. 라인업과 전술을 점검하시죠.`
-        : result.stopped === "attention"
-          ? `\n${coach(state)} 오늘이 기한인 협상이 있어 여기서 멈췄습니다.`
-          : result.stopped === "season_end"
-            ? `\n@: *한 시즌이 막을 내렸다*`
-            : "";
-    return {
-      text: `@: *시간이 흐른다 — ${state.date}*\n${digestText}${closer}`,
-      toolCalls: calls,
-    };
+    const days = /하루|내일/u.test(msg) ? 1 : /일주일|한 ?주/u.test(msg) ? 7 : null;
+    return mockAdvance(state, calls, days);
   }
 
   // 기본 응답 — 조회/대화
@@ -952,6 +950,34 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
       (issues.length > 0
         ? `\n${coach(state)} ${issues.join(", ")}의 불만이 쌓이고 있습니다 — 면담을 권합니다.`
         : ""),
+    toolCalls: calls,
+  };
+}
+
+/**
+ * 시계를 옮기고 그 사이의 일을 장면으로 낸다 — 손잡이도 감독의 말도 여기로 모인다.
+ * `days`가 null이면 다음 경기일까지.
+ */
+function mockAdvance(state: GameState, calls: GmToolCall[], days: number | null): GmTurnResult {
+  const input = days === null ? ({ until: "next_match" } as const) : { days };
+  const result = advanceTime(state, days === null ? "next_match" : { days });
+  calls.push({
+    name: TIME_PASSED,
+    summary: result.stopped === "season_end" ? "시즌 종료 처리" : `${state.date}까지 진행`,
+    input,
+    silent: true,
+  });
+  const digestText = result.digest.map((d) => `${coach(state)} ${d}`).join("\n");
+  const closer =
+    result.stopped === "matchday"
+      ? `\n${coach(state)} 오늘이 경기일입니다. 라인업과 전술을 점검하시죠.`
+      : result.stopped === "attention"
+        ? `\n${coach(state)} 오늘이 기한인 협상이 있어 여기서 멈췄습니다.`
+        : result.stopped === "season_end"
+          ? `\n@: *한 시즌이 막을 내렸다*`
+          : "";
+  return {
+    text: `@: *시간이 흐른다 — ${state.date}*\n${digestText}${closer}`,
     toolCalls: calls,
   };
 }

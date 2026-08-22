@@ -36,6 +36,15 @@ export interface GmTurnResult {
   /** 이번 턴에 도착한 스카우팅 보고서 — 채팅이 카드로 편다 */
   reports?: ScoutReportCard[];
   /**
+   * **시계가 멎은 채로 이어진 평시 턴 수** — 첫 줄 헤더를 연달아 못 읽었다
+   * (`STALLED_CLOCK_TURNS` 이상일 때만 실린다).
+   *
+   * 턴이 실패한 것은 아니므로 배너가 아니고 장면도 아니다. 화면이 띠로 세워
+   * "세계가 오늘에 머물러 있다"를 사실로 알린다 — 그러지 않으면 이 정지는
+   * `console.warn` 한 줄로만 쌓인다.
+   */
+  clockStalled?: number;
+  /**
    * 토큰 사용량 (실모드만). Anthropic은 명시적 캐시 read/write를, Gemini는
    * implicit cached content를 cacheRead에 매핑한다. 제공자별 캐시 적중 조건과
    * 최소 프리픽스가 다르므로 같은 수치를 직접 비교하지 않는다.
@@ -76,23 +85,50 @@ export class GmTurnFailure extends Error {
 export const TIME_PASSED = "시간 경과";
 
 /**
- * 시간 이동 손잡이가 보내는 조작 — `[조작: 시간 진행 — 일주일]` (`TIME_SKIPS`).
+ * 시간 이동 손잡이가 보내는 조작 — `{ kind: "skip_days", days: 1 }`
+ * (→ `TurnOperation`, packages/domain).
  *
  * **이것만은 모델을 거치지 않는다.** 다른 시간 이동은 모델이 첫 줄 헤더에 시점을
  * 적고 코어가 따라가지만(`applyScenePoint`), 손잡이는 감독이 얼마를 넘길지 이미
  * 정해서 누른 것이라 물어볼 것이 없다. 코어가 **먼저** 그만큼을 굴리고, 모델은
  * 도착한 자리에서 "그동안 무슨 일이 있었는지"를 읽고 장면을 연다 — 그래야
  * 모델이 자기가 넘긴 일주일에 무엇이 있었는지 모르는 채로 쓰지 않는다.
+ *
+ * 화면도 코어도 같은 것을 쓰므로 정의는 도메인에 있고 여기서 다시 낸다 —
+ * 조작을 다루는 코드는 이 파일에서 GM 계약을 읽는다.
  */
-export type TimeSkip =
-  { kind: "days"; days: number } | { kind: "date"; date: string } | { kind: "next_match" };
+export {
+  MAX_SKIP_DAYS,
+  operationLabel,
+  TurnOperationSchema,
+  type TurnOperation,
+} from "@story-fm/domain";
 
-/** 조작 문장에서 목표를 읽는다 — 손잡이가 보낸 것이 아니면 null */
-export function parseTimeSkip(message: string): TimeSkip | null {
-  if (!/시간 진행/u.test(message)) return null;
-  const dated = /\((\d{4}-\d{2}-\d{2})\)/u.exec(message)?.[1];
-  if (dated) return { kind: "date", date: dated };
-  if (/하루|내일/u.test(message)) return { kind: "days", days: 1 };
-  if (/일주일|한 ?주/u.test(message)) return { kind: "days", days: 7 };
-  return { kind: "next_match" };
+/**
+ * 헤더를 못 읽은 평시 턴이 이만큼 연달으면 **화면이 알아야 한다.**
+ *
+ * 모델의 첫 줄이 시계를 움직이는 유일한 자유 텍스트 경로라(agents.md §2), 그
+ * 실패는 로그 한 줄로만 남고 감독에게는 "세계가 오늘에 머문다"로만 보였다.
+ * 한 턴은 이어지는 대화일 수 있어 세지 않고, 셋이면 우연이 아니다.
+ */
+export const STALLED_CLOCK_TURNS = 3;
+
+/**
+ * 이번 턴의 헤더를 읽었는가를 장부에 적고, **알려야 할 만큼 쌓였으면** 그 수를 낸다.
+ *
+ * 세는 것은 평시 턴뿐이다 — 경기의 시각은 장부가 주고 코어가 찍는다. 손잡이가
+ * 시계를 옮긴 턴도 읽힌 것으로 친다: 그 턴의 헤더는 날짜를 또 밀지 못하는 것이
+ * 정상이라, 실패로 세면 손잡이만 누르는 감독에게 없는 경고가 선다.
+ */
+export function noteSceneHeader(
+  state: { sceneHeaderMisses?: number },
+  read: boolean,
+): number | null {
+  if (read) {
+    delete state.sceneHeaderMisses;
+    return null;
+  }
+  const misses = (state.sceneHeaderMisses ?? 0) + 1;
+  state.sceneHeaderMisses = misses;
+  return misses >= STALLED_CLOCK_TURNS ? misses : null;
 }
