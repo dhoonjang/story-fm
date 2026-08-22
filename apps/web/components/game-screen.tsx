@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { GamePayload, GameSlice } from "@/lib/store";
 import { mergeSlice } from "@/lib/game-slice";
 import type { ChatTurn } from "@story-fm/engine";
+import type { TurnOperation } from "@story-fm/agents";
 import { ChatTurnView, turnStamp } from "./chat";
 import { chatForActiveMatch } from "@/lib/match-chat";
 import { buildTraceIndex } from "@/lib/turn-trace-index";
@@ -336,9 +337,9 @@ export function GameScreen({ gameId }: { gameId: string }) {
    * 세계는 아무 말도 하지 않는다 — 이 게임에서 시간 진행은 서사의 입구다.
    */
   const send = useCallback(
-    async (text?: string, operator = false) => {
-      const message = (text ?? input).trim();
-      if (!message || busy || !game) return;
+    async (text?: string, operation?: TurnOperation) => {
+      const message = operation ? "" : (text ?? input).trim();
+      if ((!message && !operation) || busy || !game) return;
       const seq = ++turnSeqRef.current;
       setBusy(true);
       setError(null);
@@ -367,7 +368,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
       // 여러 번 만진 기록이 과거 배열에 남아 있어도 마지막 선택 하나만 보낸다.
       const orders = mergeMatchOrders([], ordersRef.current);
       ordersRef.current = [];
-      if (text === undefined) setInput("");
+      if (!operation && text === undefined) setInput("");
       streamAccRef.current = "";
       revealedRef.current = 0;
       pendingPayloadRef.current = null;
@@ -376,12 +377,12 @@ export function GameScreen({ gameId }: { gameId: string }) {
        * 낙관적 표시 — 유저 턴 먼저. 턴이 실패하면 이 항목을 정확히 되돌린다
        * (서버도 실패한 턴은 저장하지 않는다 — lib/turn-runner.ts).
        *
-       * `operator`면 아무것도 띄우지 않는다: 감독이 친 말이 아니라 손잡이를 누른
+       * 조작이면 아무것도 띄우지 않는다: 감독이 친 말이 아니라 손잡이를 누른
        * 것이라, 화면에는 진행 결과만 나타나야 한다. 기다리는 동안은 `busy`가
        * 띄우는 점 세 개(`.thinking`)가 이미 말해 준다.
        */
       const activeMatchId = liveMatch?.matchId;
-      const optimistic = operator
+      const optimistic = operation
         ? null
         : {
             role: "user" as const,
@@ -403,7 +404,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
       const fail = (failure: TurnStreamFailure) => {
         if (failure.settled) {
           if (orders.length > 0) ordersRef.current = mergeMatchOrders(orders, ordersRef.current);
-          if (text === undefined) setInput((cur) => (cur.trim() ? cur : message));
+          if (!operation && text === undefined) setInput((cur) => (cur.trim() ? cur : message));
         }
         if (optimistic) {
           setGame((g) => (g ? { ...g, chat: g.chat.filter((t) => t !== optimistic) } : g));
@@ -509,7 +510,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
        */
       const failure = await streamTurn(
         gameId,
-        { message, operator, orders },
+        { ...(operation ? { operation } : { message }), orders },
         {
           onDelta: (text) => {
             streamAccRef.current += text;
@@ -766,10 +767,24 @@ export function GameScreen({ gameId }: { gameId: string }) {
           </div>
         </div>
       )}
+      {/**
+       * 시계가 멎었다 — **오류가 아니라 사실이다.** 모델의 첫 줄 헤더가 연달아
+       * 읽히지 않으면 세계는 오늘에 머무는데, 그건 화면 어디에도 보이지 않고
+       * 서버 로그에만 쌓였다 (docs/llm/agents.md §2). 무엇을 하라고 이르지는
+       * 않는다 — 시간을 넘기는 손잡이는 바로 아래에 이미 서 있다.
+       */}
+      {game.clockStalled !== undefined && (
+        <div className="turn-notice" data-testid="clock-stalled" role="status">
+          <span>
+            ⏸ 시계가 {game.clockStalled}턴째 {game.date} {game.timeOfDay}에 멈춰 있습니다
+          </span>
+        </div>
+      )}
       <Composer
         input={input}
         onInput={setInput}
         onSend={send}
+        onOperate={(operation) => void send(undefined, operation)}
         busy={busy}
         inMatch={inMatch}
         canSkip={canSkip}
@@ -924,7 +939,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
               className="primary-btn"
               autoFocus
               disabled={busy}
-              onClick={() => void send("경기장 입장", true)}
+              /* 경기의 문도 손잡이다 — 킥오프 턴인지는 장부가 안다(`beforeKickoff`) */
+              onClick={() => void send(undefined, { kind: "advance_match" })}
               data-testid="kickoff-enter"
             >
               경기장 입장
