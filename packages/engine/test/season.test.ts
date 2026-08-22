@@ -226,6 +226,44 @@ describe("시즌 전환 (season.md §6)", () => {
     }
   });
 
+  /**
+   * 유입 수는 **빠진 인원과 최소 인원 보충 중 큰 쪽**이고, 바닥이 1이다. 둘을 더하면
+   * 은퇴가 몰린 시즌에 스쿼드가 한꺼번에 부풀고, 바닥이 없으면 조용한 팀은 은퇴로만
+   * 마르다가 열 시즌 뒤 골키퍼가 없어진다(소프트락). 어느 쪽도 그 시즌 화면에는
+   * 아무 표시가 나지 않는다.
+   *
+   * 바닥 1은 동시에 **아무도 나가지 않은 AI 구단도 매 시즌 한 명씩 는다**는 뜻이다 —
+   * 스쿼드 크기가 어디로 수렴하는지는 밴드라 하네스가 잰다.
+   */
+  it("유스 유입은 빠진 인원만큼이고, 아무도 나가지 않아도 한 명은 온다", () => {
+    const state = createTestGame(5);
+    const club = state.teams.find((t) => isClubTeam(t.id) && t.id !== state.userTeamId)!;
+    // 이 구단에서만 강제 은퇴를 낸다 (다음 시즌 개막에 39세)
+    for (const p of playersOf(state, club.id).slice(0, 3)) p.birthdate = "1988-01-01";
+
+    transitionSeason(state);
+
+    const day = state.calendar.preseasonStart;
+    const youthAt = (teamId: string) =>
+      state.transfers.filter((t) => t.type === "youth" && t.toTeamId === teamId && t.date === day)
+        .length;
+    const retiredAt = (teamId: string) =>
+      state.transfers.filter(
+        (t) => t.type === "retire" && t.fromTeamId === teamId && t.date === day,
+      ).length;
+
+    // 은퇴가 난 구단은 **그 수만큼** — 최소 인원 보충 몫이 여기에 더해지지 않는다
+    expect(retiredAt(club.id)).toBeGreaterThanOrEqual(3);
+    expect(youthAt(club.id)).toBe(retiredAt(club.id));
+
+    // 아무도 나가지 않은 구단도 정확히 한 명을 받는다 (감독 팀은 계약 만료가 따로 센다)
+    const quiet = state.teams.filter(
+      (t) => isClubTeam(t.id) && t.id !== state.userTeamId && retiredAt(t.id) === 0,
+    );
+    expect(quiet.length).toBeGreaterThan(0);
+    for (const t of quiet) expect(youthAt(t.id), t.id).toBe(1);
+  });
+
   it("배치가 재구성되고 주급 총액도 새 스쿼드 기준이 된다", () => {
     const state = createTestGame(5);
     transitionSeason(state);

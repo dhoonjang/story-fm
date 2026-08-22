@@ -16,6 +16,7 @@ import {
   tickApproaches,
   tickBoardDemands,
   userPlayers,
+  windowOpenForTeam,
   worldFigures,
   type GameState,
 } from "@story-fm/engine";
@@ -583,6 +584,58 @@ describe("보드 요청 — 요청 → 이행/불이행 → 평판", () => {
     financeOf(state, state.userTeamId).transferBudget = BOARD_DEMAND.SIGN_STAR_MIN_BUDGET - 1;
     tickBoardDemands(state, []);
     expect(openBoardDemand(state)).toBeNull();
+  });
+
+  it("지역 유지형 — 기준값 없는 요청이다: 창이 닫힌 다음 날의 잔고 하나로 갈린다", () => {
+    for (const [balance, status] of [
+      [0, "met"],
+      [-1, "failed"],
+    ] as const) {
+      const state = ownedBy(createTestGame(11), "지역 유지형");
+      tickBoardDemands(state, []);
+      const demand = openBoardDemand(state)!;
+      expect(demand.kind).toBe("stay-solvent");
+      // 발행 순간의 사실을 붙들지 않는다 — 선은 언제나 0이다
+      expect(demand.baseline).toBeUndefined();
+
+      financeOf(state, state.userTeamId).balance = balance;
+      // 창이 열려 있는 동안에는 판정하지 않는다
+      tickBoardDemands(state, []);
+      expect(demand.status, `잔고 ${balance}`).toBe("open");
+
+      const before = state.manager.reputation.board;
+      state.date = addDays(demand.deadline, 1);
+      tickBoardDemands(state, []);
+      expect(demand.status, `잔고 ${balance}`).toBe(status);
+      expect(state.manager.reputation.board).toBe(
+        before + (status === "met" ? BOARD_DEMAND.MET_BOARD : BOARD_DEMAND.FAILED_BOARD),
+      );
+    }
+  });
+
+  it("국부펀드형 — 겨울 창은 조르지 않는다. 여름 창에 하나 서고 그 창에 다시 서지 않는다", () => {
+    const state = ownedBy(createTestGame(11), "국부펀드형");
+    const summer = state.date;
+    const winter = state.windows.find((w) => w.kind === "winter")!;
+
+    // 큰 그림의 사람은 겨울 땜질을 조르지 않는다 (people.md §2)
+    state.date = winter.opensOn;
+    expect(windowOpenForTeam(state, state.userTeamId)?.kind, "겨울 창이 안 열렸다").toBe("winter");
+    tickBoardDemands(state, []);
+    expect(openBoardDemand(state)).toBeNull();
+    expect(state.boardDemands ?? []).toEqual([]);
+
+    state.date = summer;
+    tickBoardDemands(state, []);
+    const demand = openBoardDemand(state)!;
+    expect(demand.kind).toBe("sign-star");
+    expect(demand.windowId).not.toBe(winter.id);
+
+    // 창마다 최대 하나 — 며칠이 더 지나도 두 번째 요청이 서지 않는다
+    state.date = addDays(state.date, 5);
+    tickBoardDemands(state, []);
+    expect(state.boardDemands).toHaveLength(1);
+    expect(openBoardDemand(state)!.id).toBe(demand.id);
   });
 
   it("산업가형 — 임금 동결의 허용 폭은 2%다: 이내면 이행, 넘으면 불이행", () => {
