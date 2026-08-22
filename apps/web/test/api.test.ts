@@ -35,6 +35,7 @@ import {
   DELETE as leagueDelete,
 } from "../app/api/admin/catalog/league/[leagueId]/route";
 import { GET as cupGet, DELETE as cupReset } from "../app/api/admin/catalog/cup/route";
+import { adminWritesEnabled } from "../app/api/admin/admin-guard";
 import { PATCH as cupPatch } from "../app/api/admin/catalog/cup/[cupId]/route";
 import {
   boardExpectationOfTier,
@@ -836,6 +837,37 @@ describe("API — 팀·리그·컵 카탈로그 어드민", () => {
     expect(reset.edited).toBe(false);
     // 편집이 실제로 걷혔다 — 시드가 무엇을 적어 뒀는지는 시드의 몫이다
     expect(reset.europe.find((c) => c.id === "ucl")!.short).not.toBe("챔스");
+  });
+
+  /**
+   * 쓰기의 문 (game-state.md §2). 값의 갈래는 순수 함수로 보고, 라우트가 실제로 그
+   * 문을 지나는지는 PATCH 하나로 본다 — 닫히면 본문 없는 404이고 조회는 그대로다.
+   */
+  it("가드 — 닫힌 환경에서 쓰기는 404, 조회는 열려 있다", async () => {
+    expect(adminWritesEnabled({ NODE_ENV: "development" })).toBe(true);
+    expect(adminWritesEnabled({ NODE_ENV: "production" })).toBe(false);
+    // 명시된 값이 NODE_ENV보다 먼저다 — 양쪽 방향 모두
+    expect(adminWritesEnabled({ NODE_ENV: "production", ADMIN_ENABLED: "1" })).toBe(true);
+    expect(adminWritesEnabled({ NODE_ENV: "production", ADMIN_ENABLED: "true" })).toBe(true);
+    expect(adminWritesEnabled({ NODE_ENV: "development", ADMIN_ENABLED: "0" })).toBe(false);
+    // 빈 문자열은 값을 준 것이 아니다 — 셸이 비운 변수가 문을 열어서는 안 된다
+    expect(adminWritesEnabled({ NODE_ENV: "production", ADMIN_ENABLED: "" })).toBe(false);
+    expect(adminWritesEnabled({ NODE_ENV: "development", ADMIN_ENABLED: "" })).toBe(true);
+
+    const before = process.env.ADMIN_ENABLED;
+    process.env.ADMIN_ENABLED = "0";
+    try {
+      const blocked = await teamPatch(json({ name: "닫힌 문" }), tparams("arsenal"));
+      expect(blocked.status).toBe(404);
+      expect(await blocked.text()).toBe("");
+      expect(teamGet().status).toBe(200);
+      // 편집은 디스크에 닿지 않았다
+      const list = (await teamGet().json()) as TeamPayload;
+      expect(list.teams.find((t) => t.id === "arsenal")!.name).not.toBe("닫힌 문");
+    } finally {
+      if (before === undefined) delete process.env.ADMIN_ENABLED;
+      else process.env.ADMIN_ENABLED = before;
+    }
   });
 });
 

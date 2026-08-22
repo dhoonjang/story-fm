@@ -7,6 +7,7 @@ import {
   adminRemoveCatalogPlayer,
   isCatalogEdited,
 } from "@story-fm/engine";
+import { adminWrite } from "@/app/api/admin/admin-guard";
 
 const attr = z.number().int().min(1).max(99).optional();
 /**
@@ -43,7 +44,10 @@ const PatchSchema = z.object({
 });
 
 /** 카탈로그 선수 편집 */
-export async function PATCH(request: Request, context: { params: Promise<{ playerId: string }> }) {
+export const PATCH = adminWrite(async function (
+  request: Request,
+  context: { params: Promise<{ playerId: string }> },
+) {
   const { playerId } = await context.params;
   let raw: unknown;
   try {
@@ -68,10 +72,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ playe
     teams: adminCatalog(),
     edited: isCatalogEdited(),
   });
-}
+});
 
 /** 카탈로그에서 선수 삭제 */
-export async function DELETE(
+export const DELETE = adminWrite(async function (
   _request: Request,
   context: { params: Promise<{ playerId: string }> },
 ) {
@@ -84,4 +88,4 @@ export async function DELETE(
     teams: adminCatalog(),
     edited: isCatalogEdited(),
   });
-}
+});

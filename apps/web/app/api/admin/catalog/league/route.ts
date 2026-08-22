@@ -7,6 +7,7 @@ import {
   adminResetLeagueCatalog,
   isLeagueCatalogEdited,
 } from "@story-fm/engine";
+import { adminWrite } from "@/app/api/admin/admin-guard";
 
 /**
  * 리그 카탈로그 어드민 — 대회의 불변 정의(종류·계수·중계권·티켓 단가)를 편집한다.
@@ -48,7 +49,7 @@ export function GET() {
 }
 
 /** 카탈로그에 새 리그 추가 */
-export async function POST(request: Request) {
+export const POST = adminWrite(async function (request: Request) {
   let raw: unknown;
   try {
     raw = await request.json();
@@ -65,10 +66,10 @@ export async function POST(request: Request) {
   const res = adminAddLeague(body.data);
   if (!res.ok) return NextResponse.json({ error: res.message }, { status: 400 });
   return NextResponse.json(payload(res.message));
-}
+});
 
 /** 리그 카탈로그를 시드 기본값으로 되돌린다 */
-export async function DELETE() {
+export const DELETE = adminWrite(async function () {
   const res = adminResetLeagueCatalog();
   return NextResponse.json(payload(res.message));
-}
+});

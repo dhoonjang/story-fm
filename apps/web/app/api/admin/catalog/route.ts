@@ -8,6 +8,7 @@ import {
   isCatalogEdited,
   CATALOG_AGE_REF,
 } from "@story-fm/engine";
+import { adminWrite } from "@/app/api/admin/admin-guard";
 
 /**
  * 선수 카탈로그 어드민 — 게임과 무관한 초기치 DB를 편집한다.
@@ -43,7 +44,7 @@ const AddSchema = z.object({
 });
 
 /** 카탈로그에 새 선수 추가 */
-export async function POST(request: Request) {
+export const POST = adminWrite(async function (request: Request) {
   let raw: unknown;
   try {
     raw = await request.json();
@@ -67,10 +68,10 @@ export async function POST(request: Request) {
     teams: adminCatalog(),
     edited: isCatalogEdited(),
   });
-}
+});
 
 /** 카탈로그를 시드 기본값으로 되돌린다 */
-export async function DELETE() {
+export const DELETE = adminWrite(async function () {
   const res = adminResetCatalog();
   return NextResponse.json({
     ok: true,
@@ -78,4 +79,4 @@ export async function DELETE() {
     teams: adminCatalog(),
     edited: isCatalogEdited(),
   });
-}
+});

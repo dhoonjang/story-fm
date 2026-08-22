@@ -115,6 +115,10 @@ export default defineConfig({
     env: {
       PORT: String(port),
       LLM_MODE: "mock",
+      // CI는 `next start`로 도므로 NODE_ENV가 production이다 — 어드민 쓰기 라우트의
+      // 기본 문이 닫히는 자리다(game-state.md §2). 어드민 스펙이 카탈로그를 고쳐야
+      // 하므로 여기서 명시적으로 연다.
+      ADMIN_ENABLED: "1",
       STORY_FM_DATA_DIR: `/tmp/story-fm-e2e${suffix}`,
       // 개발 서버(.next)와 빌드 산출물을 나눠 쓴다 — 공유하면 재컴파일 때
       // 서로의 청크를 지워 테스트가 무작위로 깨진다
