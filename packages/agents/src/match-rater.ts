@@ -15,6 +15,7 @@ import {
 } from "@story-fm/engine";
 import { ATTRIBUTE_AXES } from "@story-fm/domain";
 import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
+import { agingDeclineLine } from "./aging-line";
 import { retryOnce, requireToolCall, anchorStands } from "./retry";
 import { inputError, toToolSchema } from "./tool-schema";
 
@@ -42,7 +43,7 @@ export const MATCH_RATER_SYSTEM = `당신은 방금 끝난 축구 경기를 채�
 
 ## 능력치 (attribute / attributeStep)
 이 경기로 한 축이 움직인 선수를 적는다. **0~${MATCH_ATTR_CAP}명**, 각 한 축 **+${ATTR_STEP_MAX} 또는 −${-ATTR_STEP_MIN}**.
-서른을 넘긴 선수는 내려가는 쪽이 자연스럽다 — 특히 스피드·체력·드리블.
+${agingDeclineLine()}
 
 ## 규칙
 - **기준 평점에서 ±${RATING_BAND}를 넘지 않는다.** 사건 목록에 실제로 나온 것만 이유로 삼는다.
