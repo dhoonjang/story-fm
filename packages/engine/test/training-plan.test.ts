@@ -161,15 +161,15 @@ describe("기본 훈련 — 시즌 달력에 미리 깔려 있다", () => {
     expect(checked).toBeGreaterThan(0);
   });
 
-  it("보편 메뉴가 15축을 골고루 훑는다", () => {
+  it("보편 메뉴가 16축을 골고루 훑는다", () => {
     const state = createTestGame();
     const seen = new Map<string, number>();
     for (const s of state.trainingSessions) {
       for (const f of s.focus) seen.set(f, (seen.get(f) ?? 0) + 1);
     }
-    // 능력치 15축이 모두 훈련 대상이 된다 — 영영 안 자라는 축은 없다
+    // 능력치 16축이 모두 훈련 대상이 된다 — 영영 안 자라는 축은 없다
     const axes = [...seen.keys()].filter((k) => k !== "tactical" && k !== "recovery");
-    expect(axes).toHaveLength(15);
+    expect(axes).toHaveLength(16);
     const counts = axes.map((a) => seen.get(a)!);
     expect(Math.min(...counts)).toBeGreaterThan(5);
     // 완전 균등은 아니다 — 본훈련이 잡히는 날은 경기 일정이 정하고, 프리시즌은
