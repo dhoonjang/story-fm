@@ -98,16 +98,36 @@ const testConfig = {
 };
 
 describe("AnthropicGameLLM 요청 파라미터", () => {
-  it("사고를 끄고 출력 상한을 티어 값으로 보낸다", async () => {
+  /**
+   * 설정이 사고를 적지 않으면 **그 파라미터가 요청에 없다** (models.md §1-2).
+   * 값을 박아 두면 모델을 바꾸는 순간 400이 난다 — 사고를 끌 수 있는지가 모델마다
+   * 다르기 때문이다.
+   */
+  it("사고를 적지 않으면 사고 파라미터를 싣지 않는다", async () => {
     const stub = makeStubClient([endTurn]);
     const llm = new AnthropicGameLLM(testConfig, stub);
     await llm.runTurn({ system: "sys", history: [], user: "안녕" });
 
     const params = lastParams(stub);
-    // 사고는 끈다 — 상한(max_tokens)은 사고와 본문을 함께 덮으므로,
-    // 켜 두면 본문이 예산을 잃고 문장 한복판에서 잘린다
-    expect(params.thinking).toEqual({ type: "disabled" });
+    expect(params.thinking).toBeUndefined();
+    expect(params.output_config).toBeUndefined();
     expect(params.max_tokens).toBe(testConfig.maxTokens);
+  });
+
+  /** Anthropic의 눈금은 `low`에서 시작한다 — `minimal`도 거기로 간다 */
+  it.each([
+    ["minimal", "low"],
+    ["low", "low"],
+    ["medium", "medium"],
+    ["high", "high"],
+  ] as const)("사고 수준 %s를 adaptive + effort %s로 옮긴다", async (level, effort) => {
+    const stub = makeStubClient([endTurn]);
+    const llm = new AnthropicGameLLM({ ...testConfig, thinkingLevel: level }, stub);
+    await llm.runTurn({ system: "sys", history: [], user: "안녕" });
+
+    const params = lastParams(stub);
+    expect(params.thinking).toEqual({ type: "adaptive" });
+    expect(params.output_config).toEqual({ effort });
   });
 
   it("설정의 시한과 중단 신호를 요청 옵션으로 넘긴다 — SDK 기본값에 기대지 않는다", async () => {

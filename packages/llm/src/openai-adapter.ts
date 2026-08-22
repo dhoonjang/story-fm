@@ -199,8 +199,8 @@ async function collectStream(
  * 필요해지면 Responses API로 갈아타야 한다.
  *
  * **스트리밍은 Chat Completions 위에 붙였다** — Responses API로 갈아타지 않았다.
- * 막고 있던 것은 스트리밍이 아니라 **추론 + 함수 도구**의 조합이라, 사고를 최소로
- * 두는 현재 설정에서는 두 API의 차이가 없다. 반면 갈아타면 저장 이력의
+ * 막고 있던 것은 스트리밍이 아니라 **추론 + 함수 도구**의 조합이라, 사고를 얕게 두는
+ * 현재 설정에서는 두 API의 차이가 없다. 반면 갈아타면 저장 이력의
  * 모양이 통째로 바뀌어(messages[] → input item[]) 이미 `openai` 태그가 붙은
  * 세이브가 버려진다 — 얻는 것 없이 치르는 대가다. 서사를 이쪽으로 옮겨 추론이
  * 필요해지는 날, 그때 Responses로 간다.
@@ -285,8 +285,10 @@ export class OpenAiGameLLM implements GameLLM {
       const body = {
         model: this.config.model,
         max_completion_tokens: req.maxTokens ?? this.config.maxTokens,
-        // 함수 도구를 쓰려면 추론을 꺼야 한다 (위 주석 참고)
-        reasoning_effort: "none" as const,
+        // 설정이 적었을 때만 싣는다 — 값을 박아 두면 이 파라미터를 모르는 모델은
+        // 400으로 죽고, 아는 모델은 설정이 무엇을 적든 그 값으로 고정된다
+        // (models.md §1-2). 눈금은 OpenAI의 것과 낱말이 같아 그대로 간다.
+        ...(this.config.thinkingLevel && { reasoning_effort: this.config.thinkingLevel }),
         messages,
         ...(toolDefs.length > 0
           ? { tools: toolDefs, ...(toolChoice ? { tool_choice: toolChoice } : {}) }
