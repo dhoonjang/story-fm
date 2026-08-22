@@ -61,6 +61,7 @@ pnpm balance --report out  # 전부 돌리고 측정값을 out/에 남긴다 (�
 | `manager-market`       | 한 시즌 감독 경질 구단 수                               | [transfer](transfer.md) §7      |
 | `squad-longevity`      | 15시즌을 넘긴 뒤에도 구단이 선발 XI·계약을 세우는가     | [season](season.md) §6          |
 | `youth-development`    | 2군 경기 수 · 출전·집중 육성이 가르는 성장 격차         | [season](season.md) §2          |
+| `attribute-model`      | 자체 산정 모델이 낸 분포와 지금 시드 분포의 간격        | [player](../data/player.md) §13 |
 | `demotion-grievance`   | 한 시즌 2군 강등이 낳는 불만 건수 — 로테이션과 방치     | [people](../data/people.md) §5  |
 | `approach-rate`        | 한 시즌 다가옴 건수 · 채널 분포 · 소음 문이 서는가      | [people](../data/people.md) §8  |
 | `overall-scale`        | 종합을 읽는 눈금 — 리그별·연령별 분포                   | [match](match.md) §7            |
