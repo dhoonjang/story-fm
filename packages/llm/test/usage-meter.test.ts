@@ -10,6 +10,7 @@ import {
   cacheHitRate,
   emptyLedger,
   emptyUsage,
+  llmErrorKind,
   llmUsage,
   meterLlm,
   parseTokenBudget,
@@ -446,10 +447,24 @@ describe("모델 호출 시한", () => {
     }
   });
 
-  it("시한 문구는 화면이 '지연'으로 옮길 수 있어야 한다", () => {
+  /**
+   * 화면이 "응답이 지연돼…"를 고르는 근거는 **종류 하나**다 (models.md §1-1) —
+   * 예전에는 문구에 `timeout`이 남아 있어야 했고, 그 낱말이 곧 계약이었다.
+   */
+  it("시한 초과는 종류가 timeout이다 — 문구가 아니라", () => {
     const error = new LlmTimeoutError("match-caster", 1_000);
-    expect(error.message.toLowerCase()).toContain("timeout");
+    expect(llmErrorKind(error)).toBe("timeout");
     expect(error.agent).toBe("match-caster");
+  });
+
+  /** 예산 상한도 종류를 든다 — 결산이 삼켜도 장면 호출은 배너로 나간다 */
+  it("예산 상한은 종류가 budget이다", () => {
+    const error = new TokenBudgetExceededError("gm", {
+      limit: 100,
+      used: 200,
+      over: true,
+    } as never);
+    expect(llmErrorKind(error)).toBe("budget");
   });
 
   it("시한이 지나면 진행 중인 호출도 끊는다 — 소켓을 물고 있지 않는다", async () => {

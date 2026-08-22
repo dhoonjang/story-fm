@@ -12,6 +12,13 @@ import {
   type TurnUsage,
   UNRUN_CALL,
 } from "./game-llm";
+import {
+  blockedTurnError,
+  isAbortError,
+  kindOfStatus,
+  withErrorKind,
+  type LlmErrorKind,
+} from "./llm-error";
 
 /** 한 턴 안에서 함수 호출 왕복 허용 횟수 (다른 어댑터와 같은 값) */
 const MAX_TOOL_ITERATIONS = 8;
@@ -48,6 +55,20 @@ function toStopReason(reason: string | null): StopReason | null {
     default:
       return "other";
   }
+}
+
+/**
+ * SDK 오류를 종류로 (models.md §1-1) — 상태 코드 하나로 갈리므로 셋이 공유하는
+ * 표를 그대로 쓴다.
+ */
+function classifyOpenAi(error: unknown): LlmErrorKind {
+  // 신호로 끊긴 호출 — 신호를 거는 곳은 시한 하나뿐이다 (⚠️ SDK 오류는 `name`을
+  // 세우지 않아 이름으로는 못 가른다)
+  if (error instanceof OpenAI.APIUserAbortError) return "timeout";
+  if (error instanceof OpenAI.APIConnectionTimeoutError) return "timeout";
+  if (isAbortError(error)) return "timeout";
+  if (error instanceof OpenAI.APIError) return kindOfStatus(error.status);
+  return "unknown";
 }
 
 /**
@@ -216,7 +237,12 @@ export class OpenAiGameLLM implements GameLLM {
     this.client = client ?? (sharedClient ??= newSharedClient());
   }
 
-  async runTurn(req: TurnRequest): Promise<TurnResult> {
+  /** 이 문 하나를 지나 나가는 실패에는 모두 종류가 실린다 (models.md §1-1) */
+  runTurn(req: TurnRequest): Promise<TurnResult> {
+    return withErrorKind(classifyOpenAi, () => this.turn(req));
+  }
+
+  private async turn(req: TurnRequest): Promise<TurnResult> {
     const tools = req.tools ?? [];
     const system = (Array.isArray(req.system) ? req.system : [req.system])
       .filter((block) => block.trim().length > 0)
@@ -380,6 +406,10 @@ export class OpenAiGameLLM implements GameLLM {
         });
       }
     }
+
+    // 막혀서 아무것도 못 받은 턴은 실패다 — 나온 것이 있으면 그대로 돌려준다
+    const blocked = blockedTurnError(stopReason, text, toolCallCount);
+    if (blocked) throw blocked;
 
     /**
      * 저장 이력 — **시스템 프롬프트와 상태 스냅샷은 뺀다.**

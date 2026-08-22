@@ -2,6 +2,7 @@ import { AnthropicGameLLM } from "./anthropic-adapter";
 import { hasKey, keyNamesFor, type AgentConfig } from "./config";
 import { withDeadline } from "./deadline";
 import type { GameLLM } from "./game-llm";
+import { LlmCallError } from "./llm-error";
 import { GeminiGameLLM } from "./gemini-adapter";
 import { OpenAiGameLLM } from "./openai-adapter";
 import { tapLlm } from "./turn-trace";
@@ -46,7 +47,9 @@ export function createGameLLM(config: AgentConfig): GameLLM {
   const cached = adapters.get(config);
   if (cached) return cached;
   if (!hasKey(config.provider)) {
-    throw new Error(
+    // 부르기 전에 끊는 인증 실패다 — 화면은 제공자가 401을 준 것과 같게 안내한다
+    throw new LlmCallError(
+      "auth",
       `${config.agent} 에이전트의 ${config.provider} 키가 없습니다: ${keyNamesFor(config.provider)}`,
     );
   }

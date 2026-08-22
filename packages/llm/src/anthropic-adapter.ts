@@ -12,6 +12,13 @@ import {
   type TurnUsage,
   UNRUN_CALL,
 } from "./game-llm";
+import {
+  blockedTurnError,
+  isAbortError,
+  kindOfStatus,
+  withErrorKind,
+  type LlmErrorKind,
+} from "./llm-error";
 
 /** 한 턴 안에서 tool call 왕복 허용 횟수 — 조회 + 실행이 같이 도므로 여유를 둔다 */
 const MAX_TOOL_ITERATIONS = 8;
@@ -191,6 +198,36 @@ function isMidSystemRejection(err: unknown): boolean {
 }
 
 /**
+ * SDK 오류를 종류로 (models.md §1-1) — **읽는 것은 코드값뿐이다.**
+ *
+ * `APIError.type`은 열거된 오류 종류(`overloaded_error` 등)라 상태 코드가 겹치는
+ * 자리를 가른다. 상태만으로 갈리는 나머지는 셋이 공유하는 표가 맡는다.
+ */
+function classifyAnthropic(error: unknown): LlmErrorKind {
+  // 신호로 끊긴 호출 — 신호를 거는 곳은 시한 하나뿐이다 (⚠️ SDK 오류는 `name`을
+  // 세우지 않아 이름으로는 못 가른다)
+  if (error instanceof Anthropic.APIUserAbortError) return "timeout";
+  if (error instanceof Anthropic.APIConnectionTimeoutError) return "timeout";
+  if (isAbortError(error)) return "timeout";
+  if (error instanceof Anthropic.APIError) {
+    switch (error.type) {
+      case "overloaded_error":
+        return "overloaded";
+      case "rate_limit_error":
+        return "rate_limit";
+      case "authentication_error":
+      case "permission_error":
+        return "auth";
+      case "timeout_error":
+        return "timeout";
+      default:
+        return kindOfStatus(error.status);
+    }
+  }
+  return "unknown";
+}
+
+/**
  * Anthropic 어댑터 — 캐시 계층(도구+시스템 / 명부·패킷 / 이력), 사고 설정,
  * tool call 루프(검증 실패 시 is_error로 재시도 유도)를 처리한다.
  *
@@ -213,7 +250,12 @@ export class AnthropicGameLLM implements GameLLM {
     this.client = client ?? (sharedClient ??= new Anthropic());
   }
 
-  async runTurn(req: TurnRequest): Promise<TurnResult> {
+  /** 이 문 하나를 지나 나가는 실패에는 모두 종류가 실린다 (models.md §1-1) */
+  runTurn(req: TurnRequest): Promise<TurnResult> {
+    return withErrorKind(classifyAnthropic, () => this.turn(req));
+  }
+
+  private async turn(req: TurnRequest): Promise<TurnResult> {
     const tools = req.tools ?? [];
     const effort = this.config.thinkingLevel && EFFORT[this.config.thinkingLevel];
     const toolDefs: Anthropic.Tool[] = tools.map((t) => ({
@@ -380,6 +422,10 @@ export class AnthropicGameLLM implements GameLLM {
 
     // 상태 스냅샷은 이력에 남기지 않는다 — 매 턴 새로 주입되므로 누적되면
     // 지난 날짜·지난 스코어가 이력에 쌓여 모델을 혼란시킨다.
+    // 막혀서 아무것도 못 받은 턴은 실패다 — 나온 것이 있으면 그대로 돌려준다
+    const blocked = blockedTurnError(stopReason, text, toolCallCount);
+    if (blocked) throw blocked;
+
     const history = messages.filter((m) => m.role !== "system");
     // role:system 미지원 폴백에서도 휘발 상태를 세이브에 남기지 않는다.
     const currentUser = history[baseHistory.length];

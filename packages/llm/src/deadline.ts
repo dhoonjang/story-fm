@@ -13,20 +13,20 @@
 
 import type { AgentName } from "./config";
 import type { GameLLM, TurnRequest, TurnResult } from "./game-llm";
+import { LlmCallError } from "./llm-error";
 
 /**
- * 시한을 넘긴 호출.
+ * 시한을 넘긴 호출 — 종류 `timeout` (models.md §1-1).
  *
- * ⚠️ 문구에 `timeout`이 남아 있어야 한다 — 화면 문구를 고르는
- * `turnErrorMessage`(apps/web)가 이 낱말로 "응답이 지연돼 턴을 취소했습니다"를
- * 고른다. 새 실패 상태를 만들지 않고 이미 있는 실패 경로로 들어간다.
+ * 새 실패 상태를 만들지 않고 이미 있는 실패 경로로 들어간다. 화면이 고르는 문구는
+ * 이 문장이 아니라 `kind`가 정하므로, 메시지는 로그가 읽기 좋게만 쓰면 된다.
  */
-export class LlmTimeoutError extends Error {
+export class LlmTimeoutError extends LlmCallError {
   constructor(
     readonly agent: AgentName,
     readonly timeoutMs: number,
   ) {
-    super(`${agent} 에이전트가 ${timeoutMs}ms 안에 응답하지 않았습니다 (timeout)`);
+    super("timeout", `${agent} 에이전트가 ${timeoutMs}ms 안에 응답하지 않았습니다`);
     this.name = "LlmTimeoutError";
   }
 }
