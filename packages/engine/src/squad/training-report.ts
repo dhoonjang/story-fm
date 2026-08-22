@@ -448,8 +448,7 @@ export function applyTrainingOutcomes(
         // 처음 배우는 자리는 **주발을 벗긴 원값**에서 출발한다 — 저장에 보정을
         // 남기면 조회가 다시 얹는다 (player.md §8)
         const before =
-          slot?.proficiency ??
-          storedProficiencyFor(player.positions, program.position, player.foot);
+          slot?.proficiency ?? storedProficiencyFor(player.positions, program.position);
         const after = Math.min(99, before + gain);
         /**
          * **실제로 넘어간 만큼만 장부에 적는다.** 99에 닿은 자리는 판정이 +2를

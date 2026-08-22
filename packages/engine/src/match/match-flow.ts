@@ -1364,7 +1364,7 @@ function gainMatchProficiency(
       position,
       proficiency: Math.min(
         PROFICIENCY_MAX,
-        storedProficiencyFor(player.positions, position, player.foot) + MATCH_PROFICIENCY_GAIN,
+        storedProficiencyFor(player.positions, position) + MATCH_PROFICIENCY_GAIN,
       ),
       isNatural: false,
     });
