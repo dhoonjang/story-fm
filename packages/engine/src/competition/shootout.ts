@@ -1,5 +1,5 @@
 import type { GamePlayer, MatchRecord, MatchSide, ShootoutKick } from "@story-fm/domain";
-import { nextShootoutKick, shootoutTally } from "@story-fm/domain";
+import { nextShootoutKick, shootoutSettled, shootoutTally } from "@story-fm/domain";
 import { makeRng } from "../core/rng";
 import { finishingXi } from "./extra-time";
 import { groupOf, type GameState } from "../core/state";
@@ -209,6 +209,15 @@ export function resolveShootout(
     kicks.push(kick);
   }
   const tally = shootoutTally(kicks);
+  /**
+   * **갈린 뒤에만 적는다** — 유저 경기의 마감(`finalizeMatch`)과 같은 규칙이다.
+   *
+   * 위 루프가 갈리지 않은 채 멈추는 길은 찰 사람이 아무도 없는 명단 하나뿐인데,
+   * 그때 동점 합계를 적으면 그것이 멱등의 문지기가 되어 다시 굴러가지 않고
+   * (`written`), 동점 합계는 승자를 못 내므로(`settledTieWinner`) 그 대진이 영영
+   * 안 끝난다 — 결승이 없으니 시즌도 넘어가지 않는다.
+   */
+  if (!shootoutSettled(kicks)) return tally;
   result.penalties = { ...tally, kicks };
   return tally;
 }

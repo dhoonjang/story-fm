@@ -1027,11 +1027,12 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
       });
     }
     /**
-     * 부상 — 심각도·기간은 **유저 경기와 같은 공식**(`openInjuryFor`)으로 굴린다.
+     * 부상 — 심각도·기간은 **유저 경기와 같은 공식**(`openInjuryFor`)으로, 난수도
+     * **같은 모양의 채널**(`injury:<경기 id>`)에서 굴린다 (match.md §7).
      * digest에는 올리지 않는다: 하루 열 경기의 부상을 전부 나열하면 브리핑이
      * 소음이 된다. 감독은 상대를 조회할 때(`get_squad`·`search_players`) 알게 된다.
      */
-    const injuryRng = makeRng(state.seed, `quick-injury:${match.id}`);
+    const injuryRng = makeRng(state.seed, `injury:${match.id}`);
     for (const tag of hurt) {
       const [side, playerId] = tag.split(":") as ["home" | "away", string];
       const player = onPitch[side].find((p) => p.id === playerId);
