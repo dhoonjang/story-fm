@@ -1187,8 +1187,9 @@ function postMonthlyItems(state: GameState): void {
     // 이적 시장 전용 구단은 원장 대신 상시 예산만 유지한다
     if (isOutsideOurEconomy(team.id)) {
       const finance = state.finances.find((f) => f.teamId === team.id);
-      if (finance) {
-        finance.transferBudget = MARKET_LEAGUE_BUDGET[leagueOfTeam(team.id)] ?? 50_000_000;
+      const marketLeague = leagueOfTeam(team.id);
+      if (finance && marketLeague !== null) {
+        finance.transferBudget = MARKET_LEAGUE_BUDGET[marketLeague] ?? 50_000_000;
       }
       continue;
     }
@@ -1383,7 +1384,7 @@ const UNPLAYED_HOME_MATCHES = 19;
  * 전형적인 홈 경기 수입 — 매치데이 공식의 기본값(순위·폼·상대 보정과 난수 없이).
  * 경기를 아직 하나도 치르지 않은 날에도 읽히므로 서사 이벤트 한도의 자가 된다.
  */
-function typicalHomeGate(teamId: string, leagueId: string, state?: GameState): number {
+function typicalHomeGate(teamId: string, leagueId: string | null, state?: GameState): number {
   const tier = tierOf(state, teamId);
   const { capacity } = profileOf(state, teamId);
   const price = (leagueCatalogById(leagueId)?.avgTicketPrice ?? 30) * TICKET_TIER_FACTOR[tier];
