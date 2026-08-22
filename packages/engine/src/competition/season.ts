@@ -1,4 +1,10 @@
-import type { Achievement, AchievementCode, GamePlayer, PositionGroup } from "@story-fm/domain";
+import type {
+  Achievement,
+  AchievementCode,
+  BoardExpectationCode,
+  GamePlayer,
+  PositionGroup,
+} from "@story-fm/domain";
 import { isReserveMatch } from "@story-fm/domain";
 import {
   CONDITION_BASE,
@@ -6,6 +12,7 @@ import {
   achievementTitle,
   ageOf,
   anchorOf,
+  boardExpectationText,
   naturalPositionOf,
   presetOf,
 } from "@story-fm/domain";
@@ -230,11 +237,14 @@ export function seasonBudgetBaseOf(state: GameState, teamId: string): number {
   return Math.round((SEASON_BUDGET_TOPUP[tier] ?? 0) * clubEconomyLevelIn(state, teamId));
 }
 
-/** 이 세이브에서 그 구단이 지고 있는 기대 — 체급은 세이브가 갖는다 */
+/**
+ * 이 세이브에서 그 구단이 지고 있는 기대 — 체급은 세이브가 갖는다.
+ * **코드와 목표 순위뿐이다** — 이름은 `boardExpectationText`가 만든다 (career.md §6).
+ */
 export function boardExpectation(
   state: GameState,
   teamId: string,
-): { target: number; label: string } {
+): { target: number; code: BoardExpectationCode } {
   return boardExpectationOfTier(tierOfTeamIn(state, teamId), leagueSizeIn(state, teamId));
 }
 
@@ -355,7 +365,7 @@ function reviewEuropeanCampaign(state: GameState): string[] {
       finalMatch !== undefined &&
       (finalMatch.homeTeamId === state.userTeamId || finalMatch.awayTeamId === state.userTeamId);
     if (champion === state.userTeamId) {
-      state.trophies.push({ season: state.season, competition: cup.name, teamId: champion });
+      state.trophies.push({ season: state.season, competitionId: cup.id, teamId: champion });
       state.manager.reputation.media = Math.min(
         100,
         state.manager.reputation.media + EURO_TITLE_MEDIA,
@@ -415,7 +425,7 @@ export function reviewSeason(state: GameState): string[] {
   if (position === 1) {
     state.trophies.push({
       season: state.season,
-      competition: leagueName(leagueOfTeamIn(state, state.userTeamId)),
+      competitionId: leagueOfTeamIn(state, state.userTeamId),
       teamId: state.userTeamId,
     });
     digest.push(`🏆 ${leagueName(leagueOfTeamIn(state, state.userTeamId))} 우승`);
@@ -442,14 +452,14 @@ export function reviewSeason(state: GameState): string[] {
       grade: met ? "met" : "missed",
       position,
       target: expectation.target,
-      expectation: expectation.label,
+      expectationCode: expectation.code,
     },
     leagueId: leagueOfTeamIn(state, state.userTeamId),
   });
 
   digest.push(
     `시즌 ${state.season} 종료 — 최종 ${position}위 (${row.wins}승 ${row.draws}무 ${row.losses}패, 득실 ${row.goalDiff > 0 ? "+" : ""}${row.goalDiff})`,
-    `보드 평가: 기대 ${expectation.label} · 최종 ${position}위 — ${met ? "달성" : "미달"}`,
+    `보드 평가: 기대 ${boardExpectationText(expectation.code, expectation.target)} · 최종 ${position}위 — ${met ? "달성" : "미달"}`,
   );
   for (const a of state.achievements.filter((x) => x.season === state.season)) {
     digest.push(`업적 달성: ${achievementLine(a)}`);
@@ -622,7 +632,7 @@ function applyTransition(state: GameState): string[] {
           date: nextCalendar.preseasonStart,
           type: "retire",
           fee: 0,
-          note: "현역 은퇴",
+          reason: "retire",
         });
         const contract = state.contracts.find(
           (c) => c.gamePlayerId === id && c.status === "active",
@@ -656,7 +666,7 @@ function applyTransition(state: GameState): string[] {
           continue;
         }
         leavers.push(player.id);
-        toFreeAgency(state, player, "계약 만료 — 자유계약", nextCalendar.preseasonStart);
+        toFreeAgency(state, player, "contract-expiry", nextCalendar.preseasonStart);
         digest.push(`계약 만료로 떠남: ${player.name} (무소속)`);
       }
       if (leavers.length > 0) {
@@ -703,7 +713,7 @@ function applyTransition(state: GameState): string[] {
         date: nextCalendar.preseasonStart,
         type: "youth",
         fee: 0,
-        note: "아카데미 승격",
+        reason: "youth-callup",
       });
       state.contracts.push({
         id: `c-${youth.id}`,

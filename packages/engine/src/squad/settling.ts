@@ -80,10 +80,22 @@ export const EVENT_BAND: Record<SettlingEvent["kind"], number> = {
   captain: 5,
 };
 
-/** 난이도 배수 한 줄 — 감독에게 왜 오래 걸리는지 그대로 보인다 */
+/**
+ * 난이도 배수 한 줄 — **코드와 수치다** (player.md §9.3).
+ *
+ * 저장되지 않는 파생값이지만, 연출어(`"스페인에서 건너왔다"`)를 여기서 지으면 화면과
+ * 선수 카드가 그 문장을 그대로 실어 나르고 문구를 고치려면 엔진을 고쳐야 한다.
+ * 문장은 `settlingFactorText`가 만든다 (overview.md §1 철칙 4).
+ */
 export interface SettlingFactor {
-  label: string;
+  code: "abroad" | "compatriot" | "young" | "veteran";
   multiplier: number;
+  /** `abroad` — 건너온 나라 */
+  from?: string;
+  /** `compatriot` — 라커룸에 있는 같은 협회 출신 */
+  playerId?: string;
+  /** `young`·`veteran` — 그때의 나이 */
+  age?: number;
 }
 
 export interface Settling {
@@ -233,18 +245,37 @@ function loadFactors(state: GameState, player: GamePlayer, from: string | null):
     const before = countryOfTeam(from);
     const here = countryOfTeam(state.userTeamId);
     if (before && here && before !== here) {
-      factors.push({ label: `${before}에서 건너왔다`, multiplier: 1.3 });
+      factors.push({ code: "abroad", multiplier: 1.3, from: before });
     }
   }
 
   const mate = compatriotIn(state, player);
-  if (mate) factors.push({ label: `라커룸에 ${mate.name}이(가) 있다`, multiplier: 0.85 });
+  if (mate) factors.push({ code: "compatriot", multiplier: 0.85, playerId: mate.id });
 
   const age = ageOf(player.birthdate, state.date);
-  if (age <= 21) factors.push({ label: `${age}세 — 처음 겪는 무대다`, multiplier: 1.2 });
-  else if (age >= 30) factors.push({ label: `${age}세 — 여러 팀을 겪어 봤다`, multiplier: 0.9 });
+  if (age <= 21) factors.push({ code: "young", multiplier: 1.2, age });
+  else if (age >= 30) factors.push({ code: "veteran", multiplier: 0.9, age });
 
   return factors;
+}
+
+/**
+ * 배수 한 줄의 **문장** — 코드와 수치를 읽어 여기서만 짓는다.
+ * 이름을 잃은 선수(이미 떠났다)는 그 줄을 내지 않는다.
+ */
+export function settlingFactorText(state: GameState, factor: SettlingFactor): string | null {
+  switch (factor.code) {
+    case "abroad":
+      return factor.from ? `${factor.from}에서 건너왔다` : null;
+    case "compatriot": {
+      const mate = factor.playerId ? playerById(state, factor.playerId) : null;
+      return mate ? `라커룸에 ${mate.name}이(가) 있다` : null;
+    }
+    case "young":
+      return factor.age === undefined ? null : `${factor.age}세 — 처음 겪는 무대다`;
+    case "veteran":
+      return factor.age === undefined ? null : `${factor.age}세 — 여러 팀을 겪어 봤다`;
+  }
 }
 
 /**
@@ -380,7 +411,10 @@ export function settlingNote(state: GameState, playerId: string): string | null 
     (t) => t.gamePlayerId === playerId && t.date === a.joinedOn && t.fromTeamId !== null,
   );
   const origin = from?.fromTeamId ? `${teamNameIn(state, from.fromTeamId)}에서 온 뒤 ` : "";
-  const load = a.factors.map((f) => f.label).join(" · ");
+  const load = a.factors
+    .map((f) => settlingFactorText(state, f))
+    .filter((t): t is string => t !== null)
+    .join(" · ");
   return (
     `적응 ${Math.round(a.progress * 100)}% — ${origin}${done.length > 0 ? done.join(" · ") : "아직 경기도 훈련도 없다"}` +
     (load ? ` (${load})` : "")

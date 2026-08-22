@@ -2453,15 +2453,19 @@ export function clearTraining(state: GameState, input: ClearTrainingInput): Skil
 
 // ---- 창발 보조: 서사 이벤트 (GM 전용, 능력치 접근 불가 — overview §7) ----
 
-const NARRATIVE_EVENT_MARKER = "[서사]";
 const MAX_NARRATIVE_EVENTS_PER_DAY = 3;
 
 export function applyNarrativeEvent(
   state: GameState,
   input: { playerIds: string[]; conditionDelta?: number; formDelta?: number; note: string },
 ): SkillResult {
+  /**
+   * 하루 한도는 **갈래로 센다.** 접두 문장(`"[서사]"`)으로 가르면 그 문구를 고치는
+   * 순간 한도가 사라진다 (records.ts `NarrativeKind`, overview.md §1 철칙 4).
+   * 갈래가 없는 옛 세이브의 줄은 세지 않는다 — 한도는 그날 쌓인 줄만 본다.
+   */
   const todayCount = state.narrative.filter(
-    (n) => n.date === state.date && n.text.startsWith(NARRATIVE_EVENT_MARKER),
+    (n) => n.date === state.date && n.kind === "gm-event",
   ).length;
   if (todayCount >= MAX_NARRATIVE_EVENTS_PER_DAY) {
     return {
@@ -2493,7 +2497,7 @@ export function applyNarrativeEvent(
     player.state.form = clampForm(player.state.form + form);
     touched.push(player.name);
   }
-  pushNarrative(state, `${NARRATIVE_EVENT_MARKER} ${input.note}`, 3);
+  pushNarrative(state, input.note, 3, "gm-event");
   /**
    * 항목은 **대상과 수치까지만.** `note`는 LLM이 쓴 자유 문장이라 상한이 없고,
    * 이미 서사 로그와 장면에 남아 있다 — 알림이 그것을 다시 옮겨 적을 자리가 아니다.
