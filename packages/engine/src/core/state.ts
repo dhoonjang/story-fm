@@ -3,6 +3,7 @@ import type {
   Approach,
   ApproachPressure,
   BoardDemand,
+  BoardRequest,
   PressLeak,
   AxisValues,
   Booking,
@@ -749,6 +750,14 @@ export interface GameState {
    * 든다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   boardDemands?: BoardDemand[];
+  /**
+   * 감독이 보드에 건 요청 — 예산·주급 한도·구장 (finance.md §9.6). 구단주 요청과
+   * **방향이 반대인 별개 상태**다: 저쪽은 보드가 감독에게 걸고 평판이 오가며,
+   * 이쪽은 감독이 걸고 평판은 움직이지 않는다. 건 날과 답이 오는 날이 갈리고
+   * 구장은 완공일까지 더 갈리므로 세이브가 든다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  boardRequests?: BoardRequest[];
 
   // ── 감독 ──
   manager: Manager;
@@ -2450,6 +2459,7 @@ export function createGame(input: CreateGameInput): GameState {
     approachPressure: [],
     pressLeaks: [],
     boardDemands: [],
+    boardRequests: [],
 
     manager: {
       name: input.managerName,

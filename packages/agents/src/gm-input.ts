@@ -11,6 +11,7 @@ import {
   dayOfWeek,
   describeNegotiations,
   describeNextFixture,
+  describeBoardRequests,
   describePendingApproach,
   describePendingPress,
   describeWindowState,
@@ -502,6 +503,12 @@ export function buildGmStateNote(
   // 감독을 찾아온 사람 — 세계가 먼저 연 자리다 (people.md §8). 회견과 함께 서지 않는다
   const approach = describePendingApproach(state);
   if (approach) lines.push(approach);
+  /**
+   * 감독이 보드에 건 요청 — 답을 기다리는 것·공사 중인 구장·열려 있는 주급 상향
+   * (finance.md §9.6). 없으면 한 줄도 쓰지 않는다. 답이 도착한 날은 digest가 나른다.
+   */
+  const boardRequests = describeBoardRequests(state);
+  if (boardRequests) lines.push(boardRequests);
   // 협상은 있을 때만 — 없으면 한 줄도 쓰지 않는다 (매 턴 정가로 읽히는 블록이다)
   const negotiations = describeNegotiations(state);
   if (!negotiations.startsWith("진행 중인 협상 없음")) {

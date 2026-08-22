@@ -48,6 +48,7 @@ import {
 import { openEvePress, SQUAD_CORE_SIZE } from "../club/press";
 import { tickApproaches } from "../club/approach";
 import { tickBoardDemands } from "../club/board-demand";
+import { tickBoardRequests } from "../club/board-request";
 import { tickArcs } from "../world/arcs";
 import {
   TRAINING_INJURY_PER_SESSION,
@@ -530,6 +531,12 @@ function dailyTick(
    * 무직에게는 요청이 서지도 판정되지도 않는다 — 보드도 이제 남의 것이다.
    */
   if (managed !== null) tickBoardDemands(state, digest);
+  /**
+   * 감독이 보드에 건 요청 — 오늘 답이 도착했으면 판정하고 그 자리에서 반영한다
+   * (finance.md §9.6). 구단주 요청과 방향이 반대인 별개 상태라 눈금을 나누지
+   * 않는다. 무직에게는 답할 보드가 없다.
+   */
+  if (managed !== null) tickBoardRequests(state, digest);
   const approached = managed !== null && tickApproaches(state, digest);
 
   /**

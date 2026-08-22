@@ -9,7 +9,7 @@ import { leagueOfTeamIn } from "../competition/promotion";
 import { euroCompetitionOf } from "../competition/europe";
 import { hashChannel } from "../core/rng";
 import { knowledgeOf, KNOWLEDGE_KO, type Knowledge } from "../squad/scouting";
-import { USER_WAGE_HEADROOM, wageRoomOf } from "../world/wages";
+import { userWageRoom } from "../club/board-request";
 import { budgetFreezeLabel, formatMoney } from "../club/finance";
 import {
   activeContract,
@@ -521,12 +521,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
      * AI 시장이 지키는 것과 같은 자다(`wageRoomOf`) — 예전엔 이 관문이 AI에만
      * 걸려 있어서 감독만 임금 총액을 무제한으로 불릴 수 있었다.
      */
-    const room = wageRoomOf(
-      state.userTeamId,
-      weeklyWagesOf(state, state.userTeamId),
-      USER_WAGE_HEADROOM,
-      state,
-    );
+    const room = userWageRoom(state);
     if (terms.weeklyWage > room) {
       blockers.push(
         room <= 0

@@ -4,6 +4,7 @@ export * from "./squad-rules";
 export * from "./persuasion";
 export * from "./press";
 export * from "./board-demand";
+export * from "./board-request";
 export * from "./manager";
 export * from "./persona";
 export * from "./tactics";
