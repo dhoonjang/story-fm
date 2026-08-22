@@ -501,7 +501,13 @@ export const PROMPT_REGRESSION = defineHarness({
   ],
 });
 
-/** `pnpm balance --list`가 읽는 목록 — 새 하네스를 여기 넣지 않으면 목록에 서지 않는다 */
+/**
+ * `pnpm balance --list`가 읽는 목록.
+ *
+ * **`*.harness.ts`와 일대일이다** — 여기 없는 하네스는 돌면서도 리포트의 「몇 개가
+ * 보고했다」 분모에서 빠지고, 여기만 있는 서술자는 목록에 서면서 돌지 않는다. 둘 다
+ * 조용해서 오래 사니 `harness-catalog.test.ts`가 그 짝을 못 박는다.
+ */
 export const HARNESSES: readonly Harness[] = [
   WORLD_SEASON,
   AI_ROTATION,
@@ -513,6 +519,7 @@ export const HARNESSES: readonly Harness[] = [
   FINANCE_SECOND_TIER,
   FINANCE_MULTI_SEASON,
   AI_FITNESS,
+  AI_BENCH,
   AI_MARKET,
   MANAGER_MARKET,
   SQUAD_LONGEVITY,

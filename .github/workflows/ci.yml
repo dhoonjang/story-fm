@@ -59,6 +59,12 @@ concurrency:
 # 10분/4분 25초 → 9분/3분 57초였고, 그 뒤 main이 테스트를 더 들여오면서 그 잡이
 # 다시 선을 넘었다.
 #
+# 액션은 **커밋 SHA로 핀한다.** `@v4`는 움직이는 태그라 같은 커밋의 CI가 어제와 다른
+# 코드를 돌릴 수 있고, 그 코드는 러너에서 저장소 체크아웃과 토큰을 함께 본다. 뒤의
+# `# v4.x.y`는 사람이 읽을 자리이자 dependabot이 올릴 때 함께 고치는 자리다
+# (`.github/dependabot.yml`가 주 1회 PR을 연다). 핀을 손으로 옮기지 마라 — 그 PR을
+# 머지하는 것이 갱신 경로다.
+#
 # ⚠️ 그래서 벽시계도 과금도 이제 unit + api **하나**가 정한다. 그 잡은 같은 커밋에서도
 # 188~243초로 흔들리고(Ubicloud 편차), 테스트 파일이 하나 늘 때마다 되돌릴 수 없이
 # 올라간다(AGENTS.md §5 · vitest.config.ts). 더 줄이는 손잡이는 코어뿐인데 그건 이
@@ -130,9 +136,9 @@ jobs:
     runs-on: ${{ vars.CI_RUNNER_LIGHT || 'ubuntu-latest' }}
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -148,7 +154,8 @@ jobs:
       # match-cli 픽스처는 도메인 스키마로 **런타임에** 파싱된다 — tsc도 eslint도
       # JSON 안을 보지 않으므로 스키마가 움직이면 아무 잡도 빨개지지 않은 채 썩는다.
       # `--dry`는 LLM을 부르지 않고 전력 패킷까지만 굴린다(키 불필요, 1초).
-      - if: ${{ !cancelled() }}
+      - name: match-cli dry run
+        if: ${{ !cancelled() }}
         run: pnpm match --dry
 
   test:
@@ -180,9 +187,9 @@ jobs:
       matrix:
         shard: ${{ fromJSON(vars.CI_SHARDS || '[1]') }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -207,9 +214,9 @@ jobs:
     runs-on: ${{ vars.CI_RUNNER_LIGHT || 'ubuntu-latest' }}
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -219,7 +226,7 @@ jobs:
       - name: Resolve playwright version
         id: pw
         run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         id: pw-cache
         with:
           path: ~/.cache/ms-playwright
@@ -236,7 +243,7 @@ jobs:
       # 빨간 e2e를 읽는 유일한 창 — 러너 로그에는 실패한 단언 한 줄뿐이고 그 순간
       # 화면이 무엇이었는지가 없다. playwright.config.ts가 CI에서만 html 리포트와
       # 트레이스·스크린샷을 남기고, 그 둘을 여기서 올린다 (`merge` §4가 받아 본다).
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
           name: playwright-report

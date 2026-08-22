@@ -253,6 +253,29 @@ describe("매치데이", () => {
     expect(gate!.ref?.type).toBe("match");
     expect(ledger.some((e) => categoryOf(e) === "matchday_opex")).toBe(true);
   });
+
+  /**
+   * 리그전을 굴리지 않는 리그는 홈 경기가 없어 매치데이가 0이다 — 그 몫을 월 정산이
+   * 같은 공식으로 되돌린다 (finance.md §9.5). **굴리는 리그에는 붙지 않는다**:
+   * 그쪽 매치데이는 경기가 만든다. 둘 다 붙으면 1부가 입장 수입을 두 번 번다.
+   *
+   * 아무 경기도 치르지 않은 t=0에서 재므로 매치데이 항목의 출처는 이 보정 하나뿐이다.
+   */
+  it("리그 홈경기 보정은 리그전을 굴리지 않는 리그에만 붙는다", () => {
+    const matchdayIncome = (state: GameState) =>
+      financeOf(state, state.userTeamId)
+        .ledger.filter((e) => e.kind === "income" && categoryOf(e) === "matchday")
+        .reduce((sum, e) => sum + e.amount, 0);
+
+    const top = createTestGame();
+    ensureMonthlyPosted(top);
+    expect(matchdayIncome(top)).toBe(0);
+
+    const second = createTestGame();
+    (second.leagueOf ??= {})[second.userTeamId] = "championship";
+    ensureMonthlyPosted(second);
+    expect(matchdayIncome(second)).toBeGreaterThan(0);
+  });
 });
 
 /**
