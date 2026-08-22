@@ -11,7 +11,14 @@ import {
   type SaveLockHandle,
 } from "@story-fm/engine";
 import { GmTurnFailure, compactHistory, runGmTurn } from "@story-fm/agents";
-import { beginGameUsage, bindTurnTrace, traceTurn } from "@story-fm/llm";
+import {
+  beginGameUsage,
+  bindTurnTrace,
+  llmErrorKind,
+  traceEnabled,
+  traceTurn,
+  type LlmErrorKind,
+} from "@story-fm/llm";
 import { NextResponse } from "next/server";
 import { toPayload, type GamePayload } from "./store";
 import type { MatchBoardOrder } from "./match-orders";
@@ -186,25 +193,36 @@ export type TurnOutcome =
 
 /**
  * LLM 실패를 감독에게 보일 한 줄로 — **게임 밖의 사건**이므로 픽션 밖 말투로.
- * 원인 문자열은 서버 로그에만 남기고, 화면에는 **무슨 일이 났는지만** 적는다 —
  * 다시 걸어 보라는 말은 배너의 `다시 시도` 버튼이 이미 하고 있다.
  * 새 게임 첫 장면(`/api/games`)도 같은 문구를 쓴다 — 폴백 장면은 없다.
+ *
+ * **고르는 근거는 `kind` 하나다** (models.md §1-1). 오류 문자열에서 낱말을 찾던
+ * 예전 분류는 제공자가 메시지 문안을 손보는 날 조용히 무너졌고, 그 낱말을 지키느라
+ * 오류 문구까지 코드의 제약이 됐다.
  */
-export function turnErrorMessage(detail: string): string {
-  const d = detail.toLowerCase();
-  if (d.includes("overloaded") || d.includes("529")) {
-    return "모델 서버가 혼잡합니다";
-  }
-  if (d.includes("rate limit") || d.includes("429")) {
-    return "요청 한도를 넘었습니다";
-  }
-  if (d.includes("timeout") || d.includes("etimedout") || d.includes("abort")) {
-    return "응답이 지연돼 턴을 취소했습니다";
-  }
-  if (d.includes("api key") || d.includes("authentication") || d.includes("401")) {
-    return "LLM 인증 정보가 올바르지 않습니다";
-  }
-  return "응답을 받지 못해 지시를 반영하지 못했습니다";
+const TURN_ERROR_MESSAGE: Record<LlmErrorKind, string> = {
+  overloaded: "모델 서버가 혼잡합니다",
+  rate_limit: "요청 한도를 넘었습니다",
+  timeout: "응답이 지연돼 턴을 취소했습니다",
+  auth: "LLM 인증 정보가 올바르지 않습니다",
+  filtered: "모델이 이 요청을 거절했습니다",
+  budget: "이 게임의 토큰 예산 상한에 닿았습니다",
+  unknown: "응답을 받지 못해 지시를 반영하지 못했습니다",
+};
+
+export function turnErrorMessage(kind: LlmErrorKind): string {
+  return TURN_ERROR_MESSAGE[kind];
+}
+
+/**
+ * 원인 문자열을 응답에 실을지 — **개발 모드에서만 싣는다** (models.md §1-1).
+ *
+ * 내부 예외 원문에는 프롬프트 조각·모델 ID·경로가 섞여 나온다. 프로덕션에서는
+ * 서버 로그에만 남고, 화면이 받는 것은 `error` 한 줄뿐이다.
+ */
+export function errorDetail(error: unknown): { detail?: string } {
+  if (!traceEnabled()) return {};
+  return { detail: error instanceof Error ? error.message : String(error) };
 }
 
 /**
@@ -239,103 +257,101 @@ export function runTurnLocked(
   orders?: readonly MatchBoardOrder[],
 ): Promise<TurnOutcome> {
   // 이 턴에 오간 원문은 model 턴을 채팅에 밀어 넣는 자리에서 그 인덱스에 묶인다
-  return withGameLock(
-    id,
-    () =>
-      traceTurn(async (): Promise<TurnOutcome> => {
-        // 토큰 예산의 단위는 게임이다 — 다른 게임의 턴이면 여기서 장부를 비운다
-        // (models.md §4). 잠금 안이라 한 프로세스에서 두 게임이 겹치지 않는다.
-        beginGameUsage(id);
-        const state = loadGame(id);
-        if (!state) return { ok: false as const, status: 404, error: "게임을 찾을 수 없습니다" };
+  // 잠금을 기다리는 상한은 기본값 `LOCK_WAIT_MS.turn`이다
+  return withGameLock(id, () =>
+    traceTurn(async (): Promise<TurnOutcome> => {
+      // 토큰 예산의 단위는 게임이다 — 다른 게임의 턴이면 여기서 장부를 비운다
+      // (models.md §4). 잠금 안이라 한 프로세스에서 두 게임이 겹치지 않는다.
+      beginGameUsage(id);
+      const state = loadGame(id);
+      if (!state) return { ok: false as const, status: 404, error: "게임을 찾을 수 없습니다" };
 
-        /**
-         * 경기 턴인가 — **턴을 시작할 때** 본다. 이 턴에서 경기가 끝나더라도 감독이
-         * 말을 건 상대는 중계였으므로 그 턴은 경기 이력에 속하고, 반대로 이 턴에
-         * `start_match`로 경기가 열렸어도 화자는 아직 평시 GM이라 평시 이력에 남는다
-         * (agents.md §5) — 중계는 그다음 턴(킥오프)부터다.
-         */
-        const inMatch = state.phase === "match";
-        const matchId = state.pendingMatch?.matchId;
-        const mark = inMatch ? { inMatch: true as const, ...(matchId ? { matchId } : {}) } : {};
-        // 판에서 쌓인 조작은 LLM이 다시 해석하지 않는다. 구조화된 ID·값을 코어 스킬로
-        // 먼저 적용하고, 모델에는 이미 반영된 사실만 넘긴다.
-        const appliedOrders: string[] = [];
-        if (orders !== undefined && orders.length > 0) {
-          for (const order of orders) {
-            const result = applyMatchBoardOrder(state, order);
-            if (!result.ok) {
-              return {
-                ok: false as const,
-                status: 400,
-                error: "전술판 지시를 반영하지 못했습니다",
-                detail: result.message,
-              };
-            }
-            appliedOrders.push(`전술판 적용 완료 — ${result.message} (다시 적용하지 말 것)`);
+      /**
+       * 경기 턴인가 — **턴을 시작할 때** 본다. 이 턴에서 경기가 끝나더라도 감독이
+       * 말을 건 상대는 중계였으므로 그 턴은 경기 이력에 속하고, 반대로 이 턴에
+       * `start_match`로 경기가 열렸어도 화자는 아직 평시 GM이라 평시 이력에 남는다
+       * (agents.md §5) — 중계는 그다음 턴(킥오프)부터다.
+       */
+      const inMatch = state.phase === "match";
+      const matchId = state.pendingMatch?.matchId;
+      const mark = inMatch ? { inMatch: true as const, ...(matchId ? { matchId } : {}) } : {};
+      // 판에서 쌓인 조작은 LLM이 다시 해석하지 않는다. 구조화된 ID·값을 코어 스킬로
+      // 먼저 적용하고, 모델에는 이미 반영된 사실만 넘긴다.
+      const appliedOrders: string[] = [];
+      if (orders !== undefined && orders.length > 0) {
+        for (const order of orders) {
+          const result = applyMatchBoardOrder(state, order);
+          if (!result.ok) {
+            return {
+              ok: false as const,
+              status: 400,
+              error: "전술판 지시를 반영하지 못했습니다",
+              detail: result.message,
+            };
           }
-          refreshPacket(state);
-          state.chat.push({
-            role: "operator",
-            text: appliedOrders.join("\n"),
-            toolCalls: [],
-            at: state.date,
-            ...mark,
-          });
+          appliedOrders.push(`전술판 적용 완료 — ${result.message} (다시 적용하지 말 것)`);
         }
+        refreshPacket(state);
         state.chat.push({
-          role: operator ? "operator" : "user",
-          text: message,
+          role: "operator",
+          text: appliedOrders.join("\n"),
           toolCalls: [],
           at: state.date,
           ...mark,
         });
-        try {
-          const turn = await runGmTurn(state, message, onDelta, operator, appliedOrders);
-          state.chat.push({
-            role: "model",
-            text: turn.text,
-            toolCalls: turn.toolCalls,
-            at: state.date,
-            ...(turn.goals && turn.goals.length > 0 ? { goals: turn.goals } : {}),
-            ...(turn.cards && turn.cards.length > 0 ? { cards: turn.cards } : {}),
-            ...(turn.reports && turn.reports.length > 0 ? { reports: turn.reports } : {}),
-            // 유저 턴과 같은 표식 — 한 턴의 두 줄이 서로 다른 이력으로 갈리면 안 된다
-            ...mark,
-          });
-          bindTurnTrace(id, state.chat.length - 1);
+      }
+      state.chat.push({
+        role: operator ? "operator" : "user",
+        text: message,
+        toolCalls: [],
+        at: state.date,
+        ...mark,
+      });
+      try {
+        const turn = await runGmTurn(state, message, onDelta, operator, appliedOrders);
+        state.chat.push({
+          role: "model",
+          text: turn.text,
+          toolCalls: turn.toolCalls,
+          at: state.date,
+          ...(turn.goals && turn.goals.length > 0 ? { goals: turn.goals } : {}),
+          ...(turn.cards && turn.cards.length > 0 ? { cards: turn.cards } : {}),
+          ...(turn.reports && turn.reports.length > 0 ? { reports: turn.reports } : {}),
+          // 유저 턴과 같은 표식 — 한 턴의 두 줄이 서로 다른 이력으로 갈리면 안 된다
+          ...mark,
+        });
+        bindTurnTrace(id, state.chat.length - 1);
+        /**
+         * 화면 조작 기록은 **읽힌 뒤에** 비운다 — 턴이 실패하면 그대로 남아
+         * 다음 발화 때 다시 읽힌다(실패한 턴은 없었던 일이 되어야 한다).
+         */
+        takeEdits(state);
+        /**
+         * 이력 압축은 **저장 직전**이다 — 모델 턴이 채팅에 들어간 뒤라야 판정이
+         * 이번 턴을 포함하고, 저장 전이라 접힌 지점과 요약이 같은 세이브에 함께
+         * 굳는다 (agents.md §5-1). 실패는 삼킨다: 접지 않은 이력이 그대로 남을
+         * 뿐 이번 턴은 성공으로 끝난다.
+         */
+        await compactHistory(state).catch((error: unknown) => {
+          console.warn(`[turn] 이력 압축을 건너뜁니다 (game=${id}):`, error);
+        });
+        saveGame(state);
+        return { ok: true as const, payload: toPayload(state) };
+      } catch (error) {
+        const kind = llmErrorKind(error);
+        console.error(`[turn] GM 턴 실패 (game=${id}, kind=${kind}):`, error);
+        return {
+          ok: false as const,
+          status: 502,
           /**
-           * 화면 조작 기록은 **읽힌 뒤에** 비운다 — 턴이 실패하면 그대로 남아
-           * 다음 발화 때 다시 읽힌다(실패한 턴은 없었던 일이 되어야 한다).
+           * `GmTurnFailure`는 감독에게 보일 문구를 이미 들고 온다 — 원인을 짐작해
+           * 바꿔 쓰면 "지시를 옮기지 못했다"가 "응답을 받지 못했다"로 둔갑한다.
            */
-          takeEdits(state);
-          /**
-           * 이력 압축은 **저장 직전**이다 — 모델 턴이 채팅에 들어간 뒤라야 판정이
-           * 이번 턴을 포함하고, 저장 전이라 접힌 지점과 요약이 같은 세이브에 함께
-           * 굳는다 (agents.md §5-1). 실패는 삼킨다: 접지 않은 이력이 그대로 남을
-           * 뿐 이번 턴은 성공으로 끝난다.
-           */
-          await compactHistory(state).catch((error: unknown) => {
-            console.warn(`[turn] 이력 압축을 건너뜁니다 (game=${id}):`, error);
-          });
-          saveGame(state);
-          return { ok: true as const, payload: toPayload(state) };
-        } catch (error) {
-          const detail = error instanceof Error ? error.message : String(error);
-          console.error(`[turn] GM 턴 실패 (game=${id}):`, error);
-          return {
-            ok: false as const,
-            status: 502,
-            /**
-             * `GmTurnFailure`는 감독에게 보일 문구를 이미 들고 온다 — 원인을 짐작해
-             * 바꿔 쓰면 "지시를 옮기지 못했다"가 "응답을 받지 못했다"로 둔갑한다.
-             */
-            error: error instanceof GmTurnFailure ? error.message : turnErrorMessage(detail),
-            detail,
-          };
-        }
-      }),
-    LOCK_WAIT_MS.turn,
+          error: error instanceof GmTurnFailure ? error.message : turnErrorMessage(kind),
+          ...errorDetail(error),
+        };
+      }
+    }),
   ).catch((error: unknown) => {
     /**
      * 이미 도는 턴이 있다 — **줄을 서지 않는다.** 화면의 유휴 시계(60초)가 그 턴보다

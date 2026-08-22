@@ -1,4 +1,5 @@
 import {
+  ApiError,
   FinishReason,
   FunctionCallingConfigMode,
   GoogleGenAI,
@@ -22,6 +23,13 @@ import {
   type TurnUsage,
   UNRUN_CALL,
 } from "./game-llm";
+import {
+  blockedTurnError,
+  isAbortError,
+  kindOfStatus,
+  withErrorKind,
+  type LlmErrorKind,
+} from "./llm-error";
 
 /** 한 턴 안에서 함수 호출 왕복 허용 횟수. */
 const MAX_TOOL_ITERATIONS = 8;
@@ -58,6 +66,16 @@ function toStopReason(reason: FinishReason | undefined): StopReason | null {
   if (reason === FinishReason.STOP) return "completed";
   if (reason === FinishReason.MAX_TOKENS) return "truncated";
   return BLOCKED.has(reason) ? "filtered" : "other";
+}
+
+/**
+ * SDK 오류를 종류로 (models.md §1-1) — Gemini의 `ApiError`가 드는 것은 HTTP 상태
+ * 하나뿐이라, 셋이 공유하는 표를 그대로 쓴다.
+ */
+function classifyGemini(error: unknown): LlmErrorKind {
+  if (isAbortError(error)) return "timeout";
+  if (error instanceof ApiError) return kindOfStatus(error.status);
+  return "unknown";
 }
 
 function isGeminiContent(value: unknown): value is Content {
@@ -162,7 +180,12 @@ export class GeminiGameLLM implements GameLLM {
     this.client = client ?? (sharedClient ??= newSharedClient());
   }
 
-  async runTurn(req: TurnRequest): Promise<TurnResult> {
+  /** 이 문 하나를 지나 나가는 실패에는 모두 종류가 실린다 (models.md §1-1) */
+  runTurn(req: TurnRequest): Promise<TurnResult> {
+    return withErrorKind(classifyGemini, () => this.turn(req));
+  }
+
+  private async turn(req: TurnRequest): Promise<TurnResult> {
     const tools = req.tools ?? [];
     const baseHistory = geminiHistory(req.history, this.config);
     const systemInstruction = (Array.isArray(req.system) ? req.system : [req.system])
@@ -305,7 +328,10 @@ export class GeminiGameLLM implements GameLLM {
         .flatMap(functionCalls);
       // 함수 호출이 실린 턴은 Gemini가 STOP을 보고해도 도구 왕복이다 — 잘린 응답만
       // 예외로 남는다 (models.md §3-1)
-      const reported = toStopReason(response.candidates?.[0]?.finishReason);
+      // 발화 자체가 막힌 응답은 후보가 없다 — 사유는 `promptFeedback`에만 실린다
+      const reported = response.promptFeedback?.blockReason
+        ? "filtered"
+        : toStopReason(response.candidates?.[0]?.finishReason);
       stopReason =
         reported === "truncated" ? "truncated" : calls.length > 0 ? "tool_use" : reported;
       if (calls.length === 0) break;
@@ -350,6 +376,10 @@ export class GeminiGameLLM implements GameLLM {
       }
       message = results;
     }
+
+    // 막혀서 아무것도 못 받은 턴은 실패다 — 나온 것이 있으면 그대로 돌려준다
+    const blocked = blockedTurnError(stopReason, text, toolCallCount);
+    if (blocked) throw blocked;
 
     const savedHistory = chat.getHistory().map((content) => ({
       ...content,

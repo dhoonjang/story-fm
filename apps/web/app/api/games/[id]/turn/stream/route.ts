@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { runTurnLocked } from "@/lib/turn-runner";
+import { llmErrorKind } from "@story-fm/llm";
+import { errorDetail, runTurnLocked, turnErrorMessage } from "@/lib/turn-runner";
 import { invalidGameId } from "@/app/api/games/game-id";
 
 const TurnSchema = z.object({
@@ -111,9 +112,21 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           body.data.orders,
         );
         if (outcome.ok) send({ type: "done", payload: outcome.payload });
-        else send({ type: "error", error: outcome.error, detail: outcome.detail });
+        // `detail`은 개발 모드에서만 실려 온다 (turn-runner의 `errorDetail`)
+        else
+          send({
+            type: "error",
+            error: outcome.error,
+            ...(outcome.detail ? { detail: outcome.detail } : {}),
+          });
       } catch (error) {
-        send({ type: "error", error: error instanceof Error ? error.message : String(error) });
+        // 내부 예외 원문은 화면으로 가지 않는다 — 종류가 고른 한 줄만 간다
+        console.error(`[turn] 스트림이 실패했습니다 (game=${id}):`, error);
+        send({
+          type: "error",
+          error: turnErrorMessage(llmErrorKind(error)),
+          ...errorDetail(error),
+        });
       } finally {
         clearInterval(heartbeat);
         try {

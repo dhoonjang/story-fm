@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import AnthropicSdk from "@anthropic-ai/sdk";
 import type Anthropic from "@anthropic-ai/sdk";
-import { AnthropicGameLLM } from "@story-fm/llm";
-import type { GameToolSpec, StopReason } from "@story-fm/llm";
+import { AnthropicGameLLM, llmErrorKind } from "@story-fm/llm";
+import type { GameToolSpec, LlmErrorKind, StopReason } from "@story-fm/llm";
 
 /** 모킹된 API 응답 시퀀스로 어댑터의 tool 재시도 루프를 검증한다 (LLM 호출 없음) */
 
@@ -497,5 +497,64 @@ describe("AnthropicGameLLM 종료 사유", () => {
       user: "안녕",
     });
     expect(result.stopReason).toBe(neutral);
+  });
+});
+
+/**
+ * **분류는 코드값이 한다 — 문장이 아니라** (models.md §1-1). 제공자가 오류 메시지
+ * 문안을 손봐도 화면이 고르는 문구는 그대로여야 한다.
+ */
+describe("AnthropicGameLLM 오류 종류", () => {
+  /** SDK가 실제로 만드는 그대로 — 상태·본문에서 오류 클래스를 세운다 */
+  const apiError = (status: number, type: string) =>
+    AnthropicSdk.APIError.generate(
+      status,
+      { type: "error", error: { type, message: "문안은 언제든 바뀐다" } },
+      undefined,
+      new Headers(),
+    );
+
+  const cases: Array<[string, Error, LlmErrorKind]> = [
+    ["529 혼잡", apiError(529, "overloaded_error"), "overloaded"],
+    ["429 한도", apiError(429, "rate_limit_error"), "rate_limit"],
+    ["401 인증", apiError(401, "authentication_error"), "auth"],
+    ["403 권한", apiError(403, "permission_error"), "auth"],
+    ["400 잘못된 요청", apiError(400, "invalid_request_error"), "unknown"],
+    ["중단 신호", new AnthropicSdk.APIUserAbortError(), "timeout"],
+    ["연결 시한", new AnthropicSdk.APIConnectionTimeoutError(), "timeout"],
+  ];
+
+  it.each(cases)("%s는 %s로 옮긴다", async (_label, thrown, kind) => {
+    const stub = makeStubClient([thrown]);
+    const llm = new AnthropicGameLLM(testConfig, stub);
+    const error = await llm
+      .runTurn({ system: "sys", history: [], user: "안녕" })
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(llmErrorKind(error)).toBe(kind);
+  });
+
+  /**
+   * 막혔는데 **아무것도 못 받은** 턴만 실패다. 한 글자라도 나온 뒤에 막힌 턴은
+   * 그 산출이 이미 화면에 흘렀으므로 없던 일로 만들 수 없다 (agents.md §8).
+   */
+  it("막혀서 아무것도 못 받은 턴은 filtered로 실패한다", async () => {
+    const stub = makeStubClient([{ stop_reason: "refusal", content: [] }]);
+    const error = await new AnthropicGameLLM(testConfig, stub)
+      .runTurn({ system: "sys", history: [], user: "안녕" })
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(llmErrorKind(error)).toBe("filtered");
+  });
+
+  it("문장이 나온 뒤 막힌 턴은 그 산출을 그대로 돌려준다", async () => {
+    const stub = makeStubClient([{ ...endTurn, stop_reason: "refusal" }]);
+    const result = await new AnthropicGameLLM(testConfig, stub).runTurn({
+      system: "sys",
+      history: [],
+      user: "안녕",
+    });
+    expect(result.stopReason).toBe("filtered");
+    expect(result.text).toContain("알겠습니다");
   });
 });

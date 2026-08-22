@@ -1,6 +1,19 @@
-import { FinishReason, type Content, type GenerateContentResponse, type Part } from "@google/genai";
+import {
+  ApiError,
+  BlockedReason,
+  FinishReason,
+  type Content,
+  type GenerateContentResponse,
+  type Part,
+} from "@google/genai";
 import { describe, expect, it, vi } from "vitest";
-import { GeminiGameLLM, type GameToolSpec, type StopReason } from "@story-fm/llm";
+import {
+  GeminiGameLLM,
+  llmErrorKind,
+  type GameToolSpec,
+  type LlmErrorKind,
+  type StopReason,
+} from "@story-fm/llm";
 
 const testConfig = {
   agent: "match-caster" as const,
@@ -416,5 +429,55 @@ describe("GeminiGameLLM 종료 사유", () => {
       user: "@김감독: 계속.",
     });
     expect(result.stopReason).toBe(neutral);
+  });
+});
+
+/**
+ * **분류는 코드값이 한다 — 문장이 아니라** (models.md §1-1). Gemini의 `ApiError`가
+ * 드는 것은 HTTP 상태 하나뿐이라 어댑터 셋이 나눠 쓰는 표를 그대로 쓴다.
+ */
+describe("GeminiGameLLM 오류 종류", () => {
+  const cases: Array<[number, LlmErrorKind]> = [
+    [503, "overloaded"],
+    [429, "rate_limit"],
+    [401, "auth"],
+    [403, "auth"],
+    [504, "timeout"],
+    [400, "unknown"],
+  ];
+
+  /** 첫 요청에서 그대로 거절하는 chat — 이력도 응답도 없다 */
+  const rejecting = (thrown: Error) => ({
+    chats: {
+      create: () => ({
+        sendMessage: () => Promise.reject(thrown),
+        sendMessageStream: vi.fn(),
+        getHistory: () => [] as Content[],
+      }),
+    },
+  });
+
+  it.each(cases)("%s는 %s로 옮긴다", async (status, kind) => {
+    const client = rejecting(new ApiError({ status, message: "문안은 언제든 바뀐다" }));
+    const error = await new GeminiGameLLM(testConfig, client as never)
+      .runTurn({ system: "sys", history: [], user: "@김감독: 계속." })
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(llmErrorKind(error)).toBe(kind);
+  });
+
+  /**
+   * 발화 자체가 막힌 응답에는 **후보가 없다** — 사유는 `promptFeedback`에만 실린다.
+   * 종료 사유만 읽으면 이 실패가 "모델이 아무 말도 안 했다"로 조용히 지나간다.
+   */
+  it("발화가 막힌 응답은 filtered로 실패한다", async () => {
+    const stub = makeStubClient([
+      { promptFeedback: { blockReason: BlockedReason.SAFETY }, usageMetadata } as never,
+    ]);
+    const error = await new GeminiGameLLM(testConfig, stub.client as never)
+      .runTurn({ system: "sys", history: [], user: "@김감독: 계속." })
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(llmErrorKind(error)).toBe("filtered");
   });
 });
