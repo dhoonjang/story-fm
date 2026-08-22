@@ -16,6 +16,7 @@ import {
 import { ATTRIBUTE_AXES } from "@story-fm/domain";
 import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
 import { retryOnce, requireToolCall, anchorStands } from "./retry";
+import { inputError, toToolSchema } from "./tool-schema";
 
 /**
  * 경기 후 평점 — 코어가 장부 사실로 앵커를 박고, LLM이 사건 목록을 읽어
@@ -66,16 +67,39 @@ const MAX_RATED_PLAYERS = 30;
 const NOTE_MAX = 200;
 
 const RatingEntrySchema = z.object({
-  playerId: z.string().min(1),
-  rating: z.number().min(0).max(ACCEPTED_RATING_MAX),
-  drill: z.number().min(-ACCEPTED_DRILL_BOUND).max(ACCEPTED_DRILL_BOUND).optional(),
-  attribute: z.enum(ATTRIBUTE_AXES).nullish(),
-  attributeStep: z.number().min(ATTR_STEP_MIN).max(ATTR_STEP_MAX).nullish(),
-  note: z.string().max(NOTE_MAX).optional(),
+  playerId: z.string().min(1).describe("채점 대상 목록의 id 그대로"),
+  rating: z
+    .number()
+    .min(0)
+    .max(ACCEPTED_RATING_MAX)
+    .describe(`${RATING_MIN}~${RATING_MAX}, 소수 첫째 자리. 기준 평점 ±${RATING_BAND} 안`),
+  drill: z
+    .number()
+    .min(-ACCEPTED_DRILL_BOUND)
+    .max(ACCEPTED_DRILL_BOUND)
+    .optional()
+    .describe(`전술 적응도 변화 — ${MATCH_FAMILIARITY_MIN}~${MATCH_FAMILIARITY_MAX}`),
+  attribute: z
+    .enum(ATTRIBUTE_AXES)
+    .nullish()
+    .describe(`움직일 능력치 축 (${MATCH_ATTR_CAP}명까지)`),
+  attributeStep: z
+    .number()
+    .min(ATTR_STEP_MIN)
+    .max(ATTR_STEP_MAX)
+    .nullish()
+    .describe(`그 축의 방향 — ${ATTR_STEP_MAX} 또는 ${ATTR_STEP_MIN}`),
+  note: z.string().max(NOTE_MAX).optional().describe("한 문장 근거 (40자 안팎)"),
 });
 const RateInputSchema = z.object({
   ratings: z.array(RatingEntrySchema).min(1).max(MAX_RATED_PLAYERS),
 });
+
+/** 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 (agents.md §3) */
+export const RATE_PLAYERS_TOOL = "rate_players";
+
+/** 모델이 보는 입력 — 위 Zod 한 벌에서 파생한다 (prompts.md §2) */
+export const RATE_PLAYERS_INPUT = toToolSchema(RateInputSchema);
 
 /** 브리프를 프롬프트 본문으로 — 표 한 장 + 사건 목록 */
 export function buildRatingPrompt(brief: MatchRatingBrief): string {
@@ -109,9 +133,6 @@ export function buildRatingPrompt(brief: MatchRatingBrief): string {
   ].join("\n");
 }
 
-/** 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 (agents.md §3) */
-const RATE_PLAYERS_TOOL = "rate_players";
-
 function makeRateTool(
   state: GameState,
   matchId: string,
@@ -121,46 +142,10 @@ function makeRateTool(
     name: RATE_PLAYERS_TOOL,
     description:
       "출전한 선수 전원의 경기 평점과 한 줄 근거를 **한 번에** 제출한다. 기준 평점에서 크게 벗어난 값은 코어가 잘라 낸다. 두 번째 제출은 반영되지 않는다.",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        ratings: {
-          type: "array",
-          minItems: 1,
-          items: {
-            type: "object",
-            properties: {
-              playerId: { type: "string", description: "채점 대상 목록의 id 그대로" },
-              rating: {
-                type: "number",
-                description: `${RATING_MIN}~${RATING_MAX}, 소수 첫째 자리. 기준 평점 ±${RATING_BAND} 안`,
-              },
-              drill: {
-                type: "number",
-                description: `전술 적응도 변화 — ${MATCH_FAMILIARITY_MIN}~${MATCH_FAMILIARITY_MAX}`,
-              },
-              attribute: {
-                type: "string",
-                enum: [...ATTRIBUTE_AXES],
-                description: `움직일 능력치 축 (${MATCH_ATTR_CAP}명까지)`,
-              },
-              attributeStep: { type: "number", description: "그 축의 방향 — 1 또는 -1" },
-              note: { type: "string", description: "한 문장 근거 (40자 안팎)" },
-            },
-            required: ["playerId", "rating"],
-          },
-        },
-      },
-      required: ["ratings"],
-    },
+    inputSchema: RATE_PLAYERS_INPUT,
     handle(input: unknown) {
       const parsed = RateInputSchema.safeParse(input);
-      if (!parsed.success) {
-        const issues = parsed.error.issues
-          .map((i) => `${i.path.join(".")}: ${i.message}`)
-          .join(" / ");
-        return { ok: false, message: `평점 형식 오류 — ${issues}` };
-      }
+      if (!parsed.success) return inputError(parsed.error);
       // 평점·전술 적응도·능력치는 한 표식 아래 한 번만 — 코어가 두 번째 호출을 막는다
       const { applied, skipped, already } = settleMatchRating(state, matchId, parsed.data.ratings);
       if (already) {

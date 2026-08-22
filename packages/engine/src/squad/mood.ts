@@ -554,7 +554,7 @@ export function buildMoodBrief(state: GameState, from: string, to: string): Mood
  * 저장할 문장의 상한 — `GamePlayerSchema`의 `moodNote.text`가 `max(120)`이라,
  * 이 문을 넘긴 문장은 다음 로드에서 세이브 전체를 스키마 실패로 만든다.
  */
-const MOOD_NOTE_MAX = 120;
+export const MOOD_NOTE_MAX = 120;
 
 /** 이미 끝난 문장 — `?`·`!`도 종결이라 마침표를 덧붙이지 않는다 */
 const SENTENCE_END = /[.!?]$/u;
