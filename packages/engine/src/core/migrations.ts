@@ -114,7 +114,9 @@ export function splitPositioningAxis(save: PositioningSplitSave): void {
     if (typeof base !== "number" || typeof tackling !== "number" || typeof finishing !== "number") {
       continue;
     }
-    const slot = weightSlotOf(naturalPositionOf(player).position);
+    // 자리 없는 선수는 스키마가 뒤에서 막는다 — 여기서 넘어지면 손상이 코드 탓이 된다
+    const slot =
+      player.positions.length > 0 ? weightSlotOf(naturalPositionOf(player).position) : "CM";
     const split = splitPositioning(slot, base, tackling, finishing);
     attrs.positioning = clampAxis(split.positioning);
     attrs.offTheBall = clampAxis(split.offTheBall);
