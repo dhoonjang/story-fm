@@ -33,3 +33,8 @@ blob-report/
 # Claude Code 로컬 설정 — 개인 권한·환경은 공유하지 않는다.
 # (.claude/launch.json 같은 프로젝트 공용 설정은 커밋한다)
 .claude/settings.local.json
+
+# 가명 전환 산출물 — `pnpm pseudonymize --out`이 낸 가명본 시드. 시드에서 언제든
+# 다시 나오는 값이고, 전환 시점은 유저가 정하는 결정이라 저장소에 남기지 않는다
+# (docs/data/sources.md §7.4).
+.pseudonymized/
