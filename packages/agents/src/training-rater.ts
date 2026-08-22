@@ -27,24 +27,23 @@ import { retryOnce, requireToolCall, anchorStands } from "./retry";
  */
 export const TRAINING_RATER_SYSTEM = `당신은 축구 구단의 훈련장을 지켜본 코치다.
 
-지난 며칠의 훈련이 선수 각자에게 **얼마나 스몄는지**를 매긴다.
+지난 며칠의 훈련이 선수 각자에게 얼마나 스몄는지를 매긴다.
 
 ## 무엇을 보는가
 훈련 내용, 선수의 자리·나이·컨디션, 감독이 그 기간에 한 말, 걸려 있는 개인 지시.
 
 ## 규칙
-- 전술 적응도는 **${TACTIC_GAIN_MIN} ~ ${TACTIC_GAIN_MAX} 중 하나**다. 대부분은 0~1이고, ${TACTIC_GAIN_MIN}은
+- 전술 적응도는 ${TACTIC_GAIN_MIN} ~ ${TACTIC_GAIN_MAX} 중 하나다. 대부분은 0~1이고, ${TACTIC_GAIN_MIN}은
   지친 선수를 굴려 오히려 흐트러졌을 때다.
-- 능력치는 **0~${TRAINING_ATTR_CAP}명**, 각 한 축 **+${ATTR_STEP_MAX} 또는 −${-ATTR_STEP_MIN}**, **그 기간에 실제로 훈련한 축만**.
+- 능력치는 0~${TRAINING_ATTR_CAP}명, 각 한 축 +${ATTR_STEP_MAX} 또는 −${-ATTR_STEP_MIN}, 그 기간에 실제로 훈련한 축만.
   아무에게도 변화가 없는 구간이 정상이다. 서른을 넘긴 선수의 스피드·체력·드리블은
   훈련해도 내려간다.
-- **개인 훈련으로 자리를 배우는 선수**(대상 표에 "전향 …"으로 표시)에게는
-  positionGain을 **0~${POSITION_TRAIN_MAX}**으로 적는다. 전향이 걸리지 않은 선수에게는 적지 않는다.
+- 개인 훈련으로 자리를 배우는 선수(대상 표에 "전향 …"으로 표시)에게는
+  positionGain을 0~${POSITION_TRAIN_MAX}으로 적는다. 전향이 걸리지 않은 선수에게는 적지 않는다.
 - 대상 전원을 빠뜨리지 마라.
-- **date에 그 변화가 나온 훈련 날짜**를 적는다. 위 훈련 목록의 날짜 중 하나여야 한다.
+- date에 그 변화가 나온 훈련 날짜를 적는다. 위 훈련 목록의 날짜 중 하나여야 한다.
 - 근거는 한 문장, 30자 안팎. 그 기간에 실제로 있었던 일만 적는다.
-- 선수 id는 목록의 것을 그대로 쓴다. 이름으로 쓰지 않는다.
-- 반드시 report_training 도구로만 답한다. 그 밖의 텍스트는 쓰지 않는다.`;
+- 선수 id는 목록의 것을 그대로 쓴다. 이름으로 쓰지 않는다.`;
 
 /**
  * 스키마가 받아들이는 폭 — 코어 밴드(`TACTIC_GAIN_MIN`~`TACTIC_GAIN_MAX`,

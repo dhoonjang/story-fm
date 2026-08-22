@@ -275,7 +275,7 @@ export function generateHeadCoach(seed: number, teamId: string): Persona {
     motivation: archetype.motivation,
     speechStyle: { note: archetype.speech.note, samples: [...archetype.speech.samples] },
     keywords: personaKeywords({ name, role: "head_coach" }),
-    /** 실존 인물인가 — 서사 가드가 이 표식을 본다 (부정적 실명 서사 금지) */
+    /** 실존 인물인가 — 실명 부채의 장부가 이 표식으로 센다 (sources.md §7). 프롬프트는 읽지 않는다 */
     real: real !== null ? true : undefined,
     seed,
   };

@@ -881,7 +881,7 @@ function computeMockGmTurn(state: GameState, message: string): GmTurnResult {
   }
 
   if (/명단|스쿼드|상태 보여|선수단/u.test(msg)) {
-    // 채팅에서는 숫자를 읊지 않는다 — 서술로 (prompts.md §1)
+    // 채팅에서는 숫자를 읊지 않는다 — 서술로 (prompts.md §3)
     const views = buildOfficeViews(state);
     const top = views.squad.players.slice(0, 4).map((p) => p.name);
     return {

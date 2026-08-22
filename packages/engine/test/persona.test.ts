@@ -532,7 +532,7 @@ describe("가상 감독 — 명부 밖 벤치의 사람 (people.md §2)", () => 
     expect(manager.role).toBe("manager");
     expect(manager.characterId).toBe("옌스 바그너");
     expect(MANAGER_ARCHETYPE_LABELS).toContain(manager.archetype);
-    // 지어낸 이름이라 실존 표식이 없다 — 서사 가드가 볼 것도 없다
+    // 지어낸 이름이라 실존 표식이 없다 — 실명 부채 장부가 셀 것도 없다
     expect(manager.real).toBeUndefined();
     // 키워드는 명부 규칙 그대로 — 전체 이름과 성, 이름 조각은 담지 않는다
     expect(manager.keywords).toEqual(["옌스 바그너", "바그너"]);

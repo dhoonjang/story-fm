@@ -43,7 +43,7 @@ const shape = (lines: string[], parts: Parameters<typeof weaveTurn>[1]) =>
   });
 
 /**
- * 연출 구간 나누기 — 화면이 문법 밖의 출력을 흡수하는 자리다(docs/llm/prompts.md §1).
+ * 연출 구간 나누기 — 화면이 문법 밖의 출력을 흡수하는 자리다(docs/llm/prompts.md §3).
  * 별표를 하나씩 세면 `**`에서 경계가 밀려 **말이 통째로 연출로 뒤집힌다.**
  */
 describe("splitStaging", () => {

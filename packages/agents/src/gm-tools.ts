@@ -91,7 +91,7 @@ import { toToolSchema } from "./tool-schema";
 import type { GmToolCall } from "./gm-types";
 
 /**
- * 인자의 갈래 — **같은 종류는 같은 검증을 지난다** (prompts.md §2).
+ * 인자의 갈래 — **같은 종류는 같은 검증을 지난다** (prompts.md §5).
  *
  * 이름 자리는 감독이 부른 말이 그대로 실려 오고(agents.md §7), 금액은 한 벌의 상한을
  * 나눠 쓰며, 장부·피드에 영구히 남는 자유 문구는 전부 길이를 갖는다. 상한이 없던 자리는

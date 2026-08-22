@@ -63,11 +63,16 @@ const EXPIRING_ALERT_DAYS = 180;
  * 예시 대사까지 실어야 모델이 톤을 흉내 내는 대신 그 사람으로 말한다. 무엇이 실리고
  * 무엇이 빠지는지는 **깊이**가 정하고, 그 판단은 코어(`characterEntry`)의 것이다 —
  * 여기서는 온 것을 문장으로 옮기기만 한다.
+ *
+ * ⚠️ **카드는 데이터다 — 지시문을 싣지 않는다** (prompts.md §1·§8). 조회 포인터도
+ * 실명 가드도 여기 없다: 규칙은 시스템 프롬프트가 한 번 갖고, 실명 인물의 사람됨은
+ * 원형과 장부의 사실이 묶는다. 화자 태그는 머리글에 붙는다 — 태그와 이름이 갈리는
+ * 동명이인에서 모델이 태그를 알 자리가 여기뿐이다.
  */
 export function describePersona(entry: CharacterEntry): string {
   const label = personaRoleLabel(entry.role);
   return [
-    `[인물] ${entry.name} — ${label ? `${label} · ` : ""}${entry.archetype}`,
+    `[인물] ${entry.name} (@${entry.characterId}:) — ${label ? `${label} · ` : ""}${entry.archetype}`,
     `성격: ${entry.traits.join(" · ")}`,
     ...(entry.motivation ? [`동기: ${entry.motivation}`] : []),
     ...(entry.speechStyle ? [`말투: ${entry.speechStyle.note}`] : []),
@@ -78,22 +83,12 @@ export function describePersona(entry: CharacterEntry): string {
         `관계: ${r.name} — ${r.stance === "aligned" ? "결이 맞는다" : "결이 부딪힌다"} (먼저 보는 것: 나 ${r.ours} · 상대 ${r.theirs})`,
     ),
     // 감독이 아는 만큼만 그린다 — 소문으로만 아는 사람에게 속내를 주면 만난 적 없는
-    // 사람의 목소리가 난다
-    ...(entry.depth === "rumour"
-      ? [`⚠️ 평판으로만 아는 사람이다 — 말투도 속내도 모른다. 소문의 수준에서만 그려라.`]
-      : []),
+    // 사람의 목소리가 난다. 사실로 적는다: 카드의 지시문은 모델이 그 문장대로 쓴다
+    ...(entry.depth === "rumour" ? [`감독과의 거리: 평판으로만 안다 — 말투도 속내도 모른다`] : []),
     // 인물지(성격·동기·말투)는 세이브당 불변이고 기억은 있었던 일이다 — 갱신되는 자리가
     // 압축 한 곳뿐이라 카드가 이력에 굳어도 낡지 않는다 (people.md §9-1)
     ...(entry.memories?.length
       ? [`있었던 일:`, ...entry.memories.map((m) => `  ${m.date} — ${m.text}`)]
-      : []),
-    // 직책이 아니라 이름으로 말한다 — 규칙은 시스템 프롬프트(출력 문법)에 한 번만 선다
-    `화자 태그: @${entry.characterId}:`,
-    // 실명 인물 — 평판을 해칠 서사 금지 가드와 세트로만 운용한다 (sources.md §7)
-    ...(entry.real
-      ? [
-          `⚠️ 실존 인물이다. 직무 안에서 유능하게 그리고, 실제 인물의 평판을 해칠 서사 — 비위·불화·무능·사생활 — 는 만들지 않는다.`,
-        ]
       : []),
   ].join("\n");
 }
@@ -102,21 +97,21 @@ export function describePersona(entry: CharacterEntry): string {
  * 이번 장면의 인물들 — 캐릭터북이 고른 카드 묶음 (people.md §6).
  *
  * ⚠️ **여기 있는 것은 "이 사람이 누구인가"뿐이다.** 카드는 이력에 굳으므로 변하는
- * 값(폼·컨디션·부상·심경·계약)이 들어가면 3주 뒤 모델이 낡은 사실로 말한다. 그래서
- * 블록 끝이 조회를 가리킨다 — 카드가 섰다는 건 그 인물이 이번 장면에 선다는 뜻이고,
- * 그것이 곧 조회할 근거다. 포인터는 카드마다가 아니라 묶음에 한 번만 선다.
+ * 값(폼·컨디션·부상·심경·계약)이 들어가면 3주 뒤 모델이 낡은 사실로 말한다. 지금의
+ * 사실을 조회로 확인하라는 규칙은 시스템 프롬프트의 「입력」이 한 번 갖는다 — 묶음
+ * 끝에 포인터를 달면 같은 규칙이 턴마다 이력에 쌓인다 (prompts.md §8).
  */
 export function describeCharacters(entries: readonly CharacterEntry[]): string | null {
   if (entries.length === 0) return null;
-  return [
-    `[이번 장면의 인물]`,
-    ...entries.map(describePersona),
-    `지금의 사실 — 폼·컨디션·부상·심경·계약·능력치 — 은 이 카드에 없다. 그 인물을 두고 사실을 말하기 전에 조회로 확인하라.`,
-  ].join("\n\n");
+  return [`[이번 장면의 인물]`, ...entries.map(describePersona)].join("\n\n");
 }
 
 /**
- * 레퍼런스 블록 — 캐시되는 시스템 블록. 감독 프로필 + 선수단 규칙.
+ * 레퍼런스 블록 — 캐시되는 시스템 블록. 세이브당 고정인 것만 — 구단, 감독의 이름과 배경.
+ *
+ * **데이터만 싣는다** (prompts.md §1). 선수 이름이 스냅샷에 있다는 것, 선수 인자는
+ * 이름으로 받는다는 것, 감독을 대신 연기하지 않는다는 것은 전부 시스템 프롬프트가
+ * 한 번 갖는 규칙이라 여기 다시 적지 않는다 (prompts.md §8).
  *
  * ⚠️ **인물 카드는 여기 없다.** 코치·구단주·기자 다섯 장은 회견도 협상도 없는 턴에
  * 한 번도 쓰이지 않는데 매 턴 읽혔다. 그렇다고 조건부로 넣었다 뺐다 하면 더 나쁘다 —
@@ -132,16 +127,10 @@ export function describeCharacters(entries: readonly CharacterEntry[]): string |
 export function buildGmReference(state: GameState): string {
   const m = state.manager;
   return [
-    `[감독 프로필]`,
-    `이름: ${m.name}`,
+    `[구단과 감독]`,
+    `구단: ${teamName(state.userTeamId)}`,
+    `감독: ${m.name} — 화자 태그 @${m.name}:`,
     `배경: ${m.background}`,
-    `감독 발화 화자 형식: @${m.name}: <발화> — 당신은 이 화자를 대신 연기하지 않는다.`,
-    ``,
-    // ⚠️ 이름이 아니라 규칙이다 — 목록을 되살리면 캐시가 명단과 함께 깨지고,
-    // 그 목록은 다시 id 표로 읽혀 한 번 불린 선수만 계속 말한다
-    `[${teamName(state.userTeamId)} 선수단]`,
-    `선수의 이름은 상태 스냅샷의 「선수단」 줄에 있다. 스킬의 선수 인자도 그 이름으로 받는다 — 조회가 돌려준 id를 적어도 된다.`,
-    `능력치·배치·컨디션·계약은 get_squad·search_players가 준다.`,
   ].join("\n");
 }
 
@@ -170,7 +159,7 @@ export function buildManagerMessage(state: GameState, message: string): string {
  * 화면 조작 — 감독의 발화가 아니다. **모델의 출력 문법 밖 봉투로 싣는다**
  * (`[조작: 시간 진행 — 하루]`). `@:`는 GM이 내레이션을 쓰는 채널이라 거기 담으면
  * 감독의 화면 조작이 모델 자신의 문법으로 이력에 서고, 인물이 그 손잡이를 아는
- * 것으로 읽힌다 (docs/llm/prompts.md §1).
+ * 것으로 읽힌다 (docs/llm/prompts.md §3).
  */
 export function buildOperatorMessage(message: string): string {
   return `[조작: ${message}]`;
@@ -183,9 +172,9 @@ export function buildOperatorMessage(message: string): string {
  */
 export function buildMatchReference(state: GameState): string {
   return [
-    `[감독]`,
-    `이름: ${state.manager.name}`,
-    `감독 발화 화자 형식: @${state.manager.name}: <발화>`,
+    `[구단과 감독]`,
+    `구단: ${teamName(state.userTeamId)}`,
+    `감독: ${state.manager.name} — 화자 태그 @${state.manager.name}:`,
     ``,
     // 벤치에서 감독 옆에 서 있는 사람이다 — 경기 중 조언도 같은 사람의 말투여야 한다.
     // 경기 내내 같은 한 사람이라 여기서는 캐릭터북을 거치지 않고 상주한다
@@ -293,8 +282,7 @@ function recentNarrativeLines(state: GameState): string[] {
 function timePassedLine(state: GameState, passed?: TimePassed | null): string | null {
   if (!passed || (passed.digest.length === 0 && passed.from === state.date)) return null;
   return [
-    `시간이 흘렀다: ${passed.from} → ${state.date} (${passed.stopped})`,
-    `이미 그날이다 — 첫 줄 헤더에 ${state.date}을(를) 적어라.`,
+    `시간이 흘렀다: ${passed.from} → ${state.date} (${passed.stopped}) — 장면은 ${state.date}에서 연다.`,
     passed.digest.length > 0
       ? `그 사이 벌어진 일:\n${passed.digest.map((d) => `- ${d}`).join("\n")}`
       : `그 사이 특별한 일은 없었다.`,
@@ -312,9 +300,10 @@ function buildUnemployedNote(state: GameState, passed?: TimePassed | null): stri
   const card = state.dismissal;
   const offers = openManagerOffers(state);
   const lines = [
-    `[상태 스냅샷 — 이 블록은 매 턴 갱신된다]`,
+    `[상태 스냅샷]`,
     `${state.date} (${DOW_KO[dayOfWeek(state.date)]}) ${formatClock(clockOf(state))} · 시즌 ${state.season} · ${describeWindowState(state)}`,
-    `감독 ${state.manager.name}은(는) **무직이다** — 맡은 팀이 없다. 팀 전술·훈련·이적·경기에 관한 도구는 부를 수 없다.`,
+    // 팀의 도구가 막힌다는 말은 싣지 않는다 — 코어가 부르는 자리에서 막는다 (prompts.md §8)
+    `감독 ${state.manager.name}은(는) 무직이다 — 맡은 팀이 없다.`,
     card
       ? `경질: ${card.on} ${teamName(card.teamId)}${
           card.expectation && card.position
@@ -326,7 +315,7 @@ function buildUnemployedNote(state: GameState, passed?: TimePassed | null): stri
       : null,
     `평판: 보드${state.manager.reputation.board} 미디어${state.manager.reputation.media} 선수단${state.manager.reputation.squad}`,
     offers.length > 0
-      ? `받은 감독직 제안 (accept_manager_offer로 수락한다 — 감독이 받겠다고 할 때만. 수락 전 counter_manager_offer로 한 차례 조건을 되부를 수 있다):\n${offers
+      ? `받은 감독직 제안:\n${offers
           .map(
             (o) =>
               `- ${o.id} · ${teamName(o.teamId)} (${o.tier}티어) · 기대 ${o.expectation}(${o.target}위)${
@@ -338,9 +327,7 @@ function buildUnemployedNote(state: GameState, passed?: TimePassed | null): stri
           .join("\n")}`
       : `받은 감독직 제안 없음.`,
     (state.managerVacancies ?? []).length > 0
-      ? `최근 공석 (apply_manager_job으로 먼저 지원할 수 있다 — 평판이 그 등급의 문턱을 넘어야 하고, 감독이 원한다고 말할 때만):\n${(
-          state.managerVacancies ?? []
-        )
+      ? `최근 공석 (경질 뒤 14일 안):\n${(state.managerVacancies ?? [])
           .map(
             (v) =>
               `- ${teamName(v.teamId)}${v.position ? ` · 현재 ${v.position}위` : ""} · ${v.on} 공석`,
@@ -411,7 +398,7 @@ export function buildGmStateNote(
   ].filter((x): x is string => x !== null);
 
   const lines = [
-    `[상태 스냅샷 — 이 블록은 매 턴 갱신된다]`,
+    `[상태 스냅샷]`,
     `${state.date} (${DOW_KO[dayOfWeek(state.date)]}) ${formatClock(clockOf(state))} · 시즌 ${state.season}${
       played > 0 && rank > 0 ? ` · 리그 ${rank}위` : ""
     } · ${describeWindowState(state)}`,
@@ -419,11 +406,11 @@ export function buildGmStateNote(
     `전술: ${tac.formation} · 멘탈${tac.mentality} 라인${tac.defensiveLine} 압박${tac.pressing} 템포${tac.tempo} 폭${tac.width} 패스${tac.passStyle} · 선발 평균 적응 ${Math.round(squadFamiliarity(state, state.userTeamId))}`,
     `재정: 잔고 ${formatMoney(finance.balance)} · 주급 ${formatMoney(weeklyWagesOf(state, state.userTeamId))}/주 · 이적예산 ${formatMoney(finance.transferBudget)}`,
     // 감독의 수치는 캐시 밖이다 — 평판은 경기마다 움직이고 능력도 자란다.
-    // 레퍼런스(감독 프로필)엔 이름·배경만 남는다
+    // 레퍼런스([구단과 감독])엔 이름·배경만 남는다
     `감독 ${state.manager.name}: 리더십${state.manager.attributes.leadership} 전술${state.manager.attributes.tactics} 훈련${state.manager.attributes.training} 협상${state.manager.attributes.negotiation} 분석${state.manager.attributes.analysis} · 평판 보드${state.manager.reputation.board} 미디어${state.manager.reputation.media} 선수단${state.manager.reputation.squad}`,
     // 부임 직후엔 선수단이 여름 휴가 중 — 소집일을 밝혀야 빈 훈련장을 지어내지 않는다
     state.date < squadReturnOf(state.calendar)
-      ? `선수단 여름 휴가 중 — ${squadReturnOf(state.calendar)} 소집 (그 전에는 훈련을 잡을 수 없다)`
+      ? `선수단 여름 휴가 중 — ${squadReturnOf(state.calendar)} 소집`
       : trainingCount > 0
         ? `예정 훈련 ${trainingCount}건: ${training.join(" / ")}${trainingCount > training.length ? " …" : ""}`
         : `예정 훈련 없음 — 기본 훈련까지 비워진 상태다`,
@@ -474,7 +461,7 @@ export function buildGmStateNote(
    */
   if (arrivedReports.length > 0) {
     lines.push(
-      `도착한 스카우트 보고서 (감독 화면에 카드로 선다 — 금액은 이 값 그대로 말해라):\n${arrivedReports
+      `도착한 스카우트 보고서:\n${arrivedReports
         .map((c) => `- ${scoutReportLine(state, c.playerId) ?? c.name}`)
         .join("\n")}`,
     );

@@ -95,7 +95,7 @@ function advanceForSkip(state: GameState, skip: TimeSkip): AdvanceOutcome | null
   return days > 0 ? advanceTime(state, { days }) : null;
 }
 
-/** 장면이 섰는가 — 출력 문법이 요구하는 것은 `@`로 여는 줄 하나다 (prompts.md §1) */
+/** 장면이 섰는가 — 출력 문법이 요구하는 것은 `@`로 여는 줄 하나다 (prompts.md §3) */
 function hasSceneLine(text: string): boolean {
   return text.split("\n").some((line) => line.trim().startsWith("@"));
 }
@@ -473,7 +473,7 @@ async function runRealGmTurn(
   );
 
   // 도구 앞에 흘린 작업 서술과 두 번째 헤더를 걷어낸다 — 중계에는 걸지 않는다
-  // (구간마다 헤더를 새로 찍는 것이 정상이다 — prompts.md §1)
+  // (구간마다 헤더를 새로 찍는 것이 정상이다 — prompts.md §3)
   const sceneText = inMatch ? result.text : sanitizeSceneText(result.text);
   // 첫 줄 헤더가 시계를 움직인다 — 모델의 선언을 코어가 따라가되 그대로 믿지 않고,
   // 경기일·기한 앞에서 멈춘 뒤 그 사실을 기록으로 남긴다

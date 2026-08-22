@@ -245,6 +245,6 @@
 |                | [simulation/balance-harness.md](simulation/balance-harness.md) | 밸런스 하네스 — 무엇을 재고 어느 대역을 지키는가      |
 | **LLM**        | [llm/models.md](llm/models.md)                                 | 에이전트별 모델 설정 · 어댑터 · 토큰 예산             |
 |                | [llm/agents.md](llm/agents.md)                                 | GM · 중계 · 결산 라터 · 입력 3층                      |
-|                | [llm/prompts.md](llm/prompts.md)                               | 출력 문법 · 스킬 표면 · 프롬프트 규약                 |
+|                | [llm/prompts.md](llm/prompts.md)                               | 프롬프트 원칙 · 입력의 해부 · 출력 문법 · 스킬 표면   |
 
 > 비전과 개발 규약은 저장소 루트의 [AGENTS.md](../AGENTS.md).

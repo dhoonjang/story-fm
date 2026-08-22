@@ -89,7 +89,8 @@ export const PersonaSchema = z.object({
   outlet: z.string().min(1).optional(),
   /**
    * 실존 인물인가 — 이름만 실제이고 성격·대사는 게임이 지어낸 것이다.
-   * 서사 가드가 이 표식을 보고 **부정적 실명 서사를 막는다** (sources.md §7).
+   * 실명 부채의 장부(sources.md §7)가 이 표식으로 센다. **프롬프트에는 실리지 않는다**
+   * (docs/llm/prompts.md §8) — 사람됨은 원형이, 부정적 전개는 장부의 사실이 묶는다.
    * 가상 인물엔 없다(옵셔널).
    */
   real: z.boolean().optional(),
