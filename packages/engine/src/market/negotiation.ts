@@ -67,7 +67,7 @@ import {
 import { isClubTeam } from "../data/team-catalog";
 import { arrivingSquadLevel, canRegisterFor } from "../squad/registration";
 import { assignSquadNumber } from "../squad/numbers";
-import { USER_WAGE_HEADROOM, wageRoomOf } from "../world/wages";
+import { userWageRoom } from "../club/board-request";
 import { marketBiasOf, squadShortfallText, transferWindowLabel, windowOpenForTeam } from "./market";
 import { evaluatePitch, latitudeOf } from "./persuasion";
 import { makeRng } from "../core/rng";
@@ -84,7 +84,6 @@ import {
   playersOf,
   pushNarrative,
   teamName,
-  weeklyWagesOf,
   type GameState,
   hasIssue,
 } from "../core/state";
@@ -2270,12 +2269,7 @@ function affordabilityGate(
       message: `이적 예산이 부족합니다 — 필요 ${formatMoney(deal.fee)} / 가용 ${formatMoney(finance.transferBudget)}`,
     };
   }
-  const room = wageRoomOf(
-    state.userTeamId,
-    weeklyWagesOf(state, state.userTeamId),
-    USER_WAGE_HEADROOM,
-    state,
-  );
+  const room = userWageRoom(state);
   if (deal.weeklyWage > room) {
     return {
       ok: false,

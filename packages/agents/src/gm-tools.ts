@@ -41,6 +41,7 @@ import {
   playerName,
   recallLoan,
   releasePlayer,
+  requestBoard,
   respondToApproach,
   respondToMedia,
   scheduleView,
@@ -75,6 +76,7 @@ import {
 } from "@story-fm/engine";
 import {
   ATTRIBUTE_AXES,
+  BOARD_REQUEST_KINDS,
   DateString,
   DIRECTIVE_INTENSITIES,
   type MatchEvent,
@@ -535,6 +537,24 @@ export function buildGmTools(
           .describe(`무슨 돈인가 — 한 줄로 (${LEDGER_NOTE}자까지)`),
       }),
       (input) => adjustTransferBudget(state, input),
+    ),
+    wrap(
+      "request_board",
+      descriptions.request_board,
+      z.object({
+        kind: z.enum(BOARD_REQUEST_KINDS),
+        /**
+         * 단위는 종류가 안다 — 예산·주급은 원, 구장은 좌석이다. 상한은 오타를
+         * 막는 자리이고 실제 판정은 코어의 한도가 한다 (finance.md §9.6).
+         */
+        amount: z
+          .number()
+          .int()
+          .min(1)
+          .max(MONEY_MAX)
+          .describe("이적 예산·주급 한도는 금액(원), 구장은 좌석 수"),
+      }),
+      (input) => requestBoard(state, input),
     ),
 
     // ── 조회 (읽기 전용) — 컨텍스트에 없는 사실은 전부 여기로 ──
