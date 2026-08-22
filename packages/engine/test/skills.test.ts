@@ -30,7 +30,10 @@ import {
   moraleToForm,
   playerById,
   recordEdit,
+  occupiesSquadList,
+  isHomegrownFor,
   reservePlayers,
+  setSquadLevels,
   squadLevelOf,
   startingIdsOf,
   takeEdits,
@@ -497,6 +500,51 @@ describe("라인업 스킬은 검증 뒤에 적용한다 (team.md §6)", () => {
     expect(res.ok, res.message).toBe(true);
     expect(squadLevelOf(target!)).toBe("first");
     expect(startingIdsOf(state)).toContain(target!.id);
+  });
+
+  /**
+   * 명단이 찬 팀의 "하나 내리고 하나 올려" — 두 문이 같은 셈을 하는지가 이 케이스다
+   * (team.md §6). `set_lineup`만 강등을 빈자리로 안 세던 때는 같은 지시가 전술판에서만
+   * 반려됐다.
+   */
+  it("같은 요청이 내리는 자리를 승격이 쓴다 — set_squad_level과 같은 답", () => {
+    const up = reservePlayers(state, state.userTeamId).find(
+      (p) => occupiesSquadList(state, p) && !canRegisterFor(state, p, state.userTeamId).ok,
+    );
+    expect(up, "명단이 차서 혼자서는 못 올라가는 2군이 없다").toBeDefined();
+    const seated = new Set(assignmentsOf(state, state.userTeamId).map((a) => a.playerId));
+    const down = userPlayers(state).find(
+      (p) =>
+        squadLevelOf(p) === "first" &&
+        !seated.has(p.id) &&
+        occupiesSquadList(state, p) &&
+        // 홈그로운 하한은 이 교대가 재는 것이 아니다 — 같은 갈래끼리 맞바꾼다
+        isHomegrownFor(p, state.userTeamId) === isHomegrownFor(up!, state.userTeamId),
+    );
+    expect(down, "배치 밖에서 맞바꿀 1군이 없다").toBeDefined();
+
+    const swap = [
+      { playerId: up!.id, level: "first" as const },
+      { playerId: down!.id, level: "reserve" as const },
+    ];
+    const back = {
+      moves: [
+        { playerId: down!.id, level: "first" as const },
+        { playerId: up!.id, level: "reserve" as const },
+      ],
+    };
+
+    // 말로 하는 문 — 여기서는 원래 통과했다
+    expect(setSquadLevels(state, { moves: swap }).ok).toBe(true);
+    expect(squadLevelOf(up!)).toBe("first");
+    expect(setSquadLevels(state, back).ok).toBe(true);
+
+    // 전술판·set_lineup의 문 — 같은 교대에 같은 답이어야 한다
+    const res = setLineup(state, { starting: currentLineup(state), squadLevels: swap });
+    expect(res.ok, res.message).toBe(true);
+    expect(squadLevelOf(up!)).toBe("first");
+    expect(squadLevelOf(down!)).toBe("reserve");
+    setSquadLevels(state, back); // 뒤 케이스를 위해 제자리로
   });
 
   it("자리를 옮기고 역할이 반려되면 결과로 알린다 — 옮긴 자리를 되돌리지 않는다", () => {
@@ -1115,6 +1163,35 @@ describe("훈련 스킬 = 일정 생성 (규칙 테이블 없음)", () => {
     const back = setTraining(state, { clear: { rest: false } });
     expect(back.ok).toBe(true);
     expect(state.schedule.filter((e) => e.type === "training")).toHaveLength(0);
+  });
+
+  /**
+   * 조기 소집은 체력·불만·소집일을 한꺼번에 움직이는 **되돌릴 수 없는** 걸음이다
+   * (season.md §4). 뒤따르는 세션 하나가 걸리면 반려를 읽은 감독의 선수단이 이미
+   * 지쳐 있었다 — 검증이 전부 끝난 뒤에 적용해야 하는 이유다.
+   */
+  it("뒤에서 반려되면 조기 소집도 남지 않는다", () => {
+    const state = createTestGame();
+    const was = squadReturnOf(state.calendar);
+    const day = addDays(state.date, 1);
+    expect(day < was, "테스트 시작일이 이미 소집일 뒤다").toBe(true);
+    const condition = userPlayers(state).map((p) => p.state.condition);
+    const issues = state.issues.length;
+    const sessions = state.trainingSessions.length;
+
+    const res = setTraining(state, {
+      recallSquad: true,
+      sessions: [
+        { date: day, slot: "am", label: "복귀 훈련", focus: ["strength"] },
+        // 설명이 없는 세션 — 예전에는 여기서 반려하면서 소집일만 앞당겨져 있었다
+        { date: addDays(day, 1), slot: "am", label: "", focus: ["strength"] },
+      ],
+    });
+    expect(res.ok).toBe(false);
+    expect(squadReturnOf(state.calendar)).toBe(was);
+    expect(userPlayers(state).map((p) => p.state.condition)).toEqual(condition);
+    expect(state.issues).toHaveLength(issues);
+    expect(state.trainingSessions).toHaveLength(sessions);
   });
 
   it("같은 날 같은 슬롯을 다시 지정하면 덮어쓴다", () => {
