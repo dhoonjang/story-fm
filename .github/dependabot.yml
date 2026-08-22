@@ -1,0 +1,25 @@
+# 액션 SHA 핀을 갱신하는 자리 — `ci.yml`·`balance.yml`이 `@v4`가 아니라 커밋 SHA를
+# 쥐고 있어, 사람이 열어 보지 않으면 그 핀은 영원히 그 자리에 머문다. 여기서 주 1회
+# PR을 열어 SHA와 뒤의 `# v4.x.y` 주석을 함께 옮긴다.
+#
+# 대상은 액션뿐이다. npm 의존성은 pnpm 워크스페이스라 `pnpm-lock.yaml` 하나가
+# 여섯 패키지를 쥐고 있고, 그걸 잘게 올리는 PR은 매주 서지만 읽는 사람이 없다 —
+# 필요할 때 `pnpm up`으로 한 번에 올리는 편이 낫다.
+#
+# ⚠️ dependabot PR은 드래프트가 아니다 — 열리는 즉시 `ci.yml`이 돈다. 주 1회에
+# 묶어 두는 이유가 그것이고, `open-pull-requests-limit`이 그 상한이다.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: sunday
+      time: "18:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: chore
+      include: scope
+    labels:
+      - dependencies

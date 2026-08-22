@@ -14,6 +14,7 @@ import {
   type GameState,
 } from "@story-fm/engine";
 import { createTestGame } from "../test/helpers";
+import { potentialGapBand } from "../src/world/synthesis";
 import { OVERALL_SCALE } from "./catalog";
 import { outOfBand, reportOf, type Readings } from "./harness";
 
@@ -26,26 +27,6 @@ function quantile(sorted: number[], q: number): number {
   if (sorted.length === 0) return 0;
   return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))]!;
 }
-
-/** `docs/data/player.md` §6.5 대역 상한 — seed-join.test.ts와 같은 표 */
-const GAP_MAX: Readonly<Record<number, number>> = {
-  16: 31,
-  17: 26,
-  18: 28,
-  19: 29,
-  20: 25,
-  21: 22,
-  22: 17,
-  23: 16,
-  24: 16,
-  25: 13,
-  26: 14,
-  27: 12,
-  28: 10,
-  29: 11,
-  30: 11,
-};
-const gapLimit = (age: number): number => (age <= 15 ? 31 : (GAP_MAX[age] ?? 9));
 
 function meanOf(values: number[]): number {
   return values.length ? values.reduce((a, b) => a + b, 0) / values.length : Number.NaN;
@@ -82,7 +63,7 @@ function scaleReadings(state: GameState): Readings<typeof OVERALL_SCALE> {
 
   const gaps = all.map((p) => ({
     gap: p.attributes.potential - p.attributes.overall,
-    limit: gapLimit(ageOf(p.birthdate, state.date)),
+    limit: potentialGapBand(ageOf(p.birthdate, state.date)).max,
   }));
   const sortedGaps = gaps.map((g) => g.gap).sort((a, b) => a - b);
 
