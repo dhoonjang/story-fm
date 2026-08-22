@@ -707,6 +707,58 @@ describe("이적료 — 현금과 장부 두 축", () => {
   });
 
   /**
+   * **되사 온 선수는 새 취득이다** (§6.1). 사슬을 통째로 읽으면 취득원가가 첫 이적료에
+   * 묶여 두 번째 이적료가 장부에 아예 안 선다 — 게다가 매각 때 털어 낸 잔존가가 복귀와
+   * 함께 되살아나 다시 상각된다(£48M 취득에서 £78M이 나간다).
+   */
+  it("팔았다가 되사 오면 두 번째 이적료가 취득원가가 된다", () => {
+    const state = createTestGame(42, "arsenal");
+    const target = state.players.find((p) => p.teamId !== state.userTeamId)!;
+    state.contracts = state.contracts.filter((c) => c.gamePlayerId !== target.id);
+    const move = (id: string, date: string, fee: number, out: boolean) =>
+      state.transfers.push({
+        id,
+        gamePlayerId: target.id,
+        windowId: null,
+        fromTeamId: out ? state.userTeamId : "everton",
+        toTeamId: out ? "everton" : state.userTeamId,
+        date,
+        type: "transfer",
+        fee,
+      });
+    const sign = (id: string, since: string, until: string, status: "active" | "ended") =>
+      state.contracts.push({
+        id,
+        gamePlayerId: target.id,
+        teamId: state.userTeamId,
+        weeklyWage: 100_000,
+        since,
+        until,
+        status,
+      });
+
+    // £48M · 48개월(2026-07~2030-06) → 12개월 뒤 매각 → 2028-01 £21M · 54개월로 복귀
+    move("tr-in-1", "2026-07-01", 48_000_000, false);
+    sign("c-1", "2026-07-01", "2030-06-30", "ended");
+    move("tr-out", "2027-07-01", 50_000_000, true);
+    move("tr-in-2", "2028-01-01", 21_000_000, false);
+    sign("c-2", "2028-01-01", "2032-06-30", "active");
+    target.teamId = state.userTeamId;
+    state.date = "2028-01-01";
+
+    // 매각 잔존가는 여전히 매각 당시 취득의 값이다 — 48M − 12개월 × 1M
+    expect(bookValueOf(state, state.userTeamId, target.id, "2027-07-01")).toBe(36_000_000);
+    // 복귀 뒤는 새 취득 — 21M을 54개월에 편다 (옛 취득의 잔존가 30M이 아니다)
+    const line = amortisationOf(state, state.userTeamId).find((l) => l.playerId === target.id);
+    expect(Math.round(line!.monthly)).toBe(Math.round(21_000_000 / 54));
+    expect(bookValueOf(state, state.userTeamId, target.id, "2028-01-01")).toBe(21_000_000);
+
+    // 무상으로 돌아왔으면 장부가 없다 — 옛 이적료가 되살아나지 않는다
+    state.transfers = state.transfers.filter((t) => t.id !== "tr-in-2");
+    expect(bookValueOf(state, state.userTeamId, target.id, "2028-01-01")).toBe(0);
+  });
+
+  /**
    * **불변식: 한 취득에서 털어 내는 상각의 총합은 취득원가와 같다** (§6.1).
    *
    * 잔존가를 첫 계약의 직선으로만 읽으면 재계약이 두 번 겹치는 순간 양쪽으로 깨진다 —
