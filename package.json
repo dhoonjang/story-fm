@@ -16,6 +16,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "match": "tsx apps/match-cli/src/main.ts",
+    "pseudonymize": "tsx scripts/pseudonymize.ts",
     "e2e": "playwright test",
     "dev": "pnpm --filter @story-fm/web dev"
   },
