@@ -7,6 +7,7 @@ import {
   adminUpdateLeague,
   isLeagueCatalogEdited,
 } from "@story-fm/engine";
+import { adminWrite } from "@/app/api/admin/admin-guard";
 
 /** 모든 필드 optional — 보낸 것만 갱신한다 */
 const PatchSchema = z.object({
@@ -29,7 +30,10 @@ function payload(message: string) {
 }
 
 /** 카탈로그 리그 편집 */
-export async function PATCH(request: Request, context: { params: Promise<{ leagueId: string }> }) {
+export const PATCH = adminWrite(async function (
+  request: Request,
+  context: { params: Promise<{ leagueId: string }> },
+) {
   const { leagueId } = await context.params;
   let raw: unknown;
   try {
@@ -47,10 +51,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ leagu
   const res = adminUpdateLeague(leagueId, body.data);
   if (!res.ok) return NextResponse.json({ error: res.message }, { status: 400 });
   return NextResponse.json(payload(res.message));
-}
+});
 
 /** 카탈로그에서 리그 삭제 — 소속 팀이 남아 있으면 엔진이 막는다 */
-export async function DELETE(
+export const DELETE = adminWrite(async function (
   _request: Request,
   context: { params: Promise<{ leagueId: string }> },
 ) {
@@ -58,4 +62,4 @@ export async function DELETE(
   const res = adminRemoveLeague(leagueId);
   if (!res.ok) return NextResponse.json({ error: res.message }, { status: 400 });
   return NextResponse.json(payload(res.message));
-}
+});

@@ -8,6 +8,7 @@ import {
   adminTeamCatalog,
   isTeamCatalogEdited,
 } from "@story-fm/engine";
+import { adminWrite } from "@/app/api/admin/admin-guard";
 
 /**
  * 팀 카탈로그 어드민 — 클럽의 정체성(이름·리그·체급·포메이션)과 살림을 편집한다.
@@ -56,7 +57,7 @@ export function GET() {
 }
 
 /** 카탈로그에 새 팀 추가 — 스쿼드는 엔진이 함께 채운다 */
-export async function POST(request: Request) {
+export const POST = adminWrite(async function (request: Request) {
   let raw: unknown;
   try {
     raw = await request.json();
@@ -73,10 +74,10 @@ export async function POST(request: Request) {
   const res = adminAddTeam(body.data);
   if (!res.ok) return NextResponse.json({ error: res.message }, { status: 400 });
   return NextResponse.json(payload(res.message));
-}
+});
 
 /** 팀 카탈로그를 시드 기본값으로 되돌린다 (전술 성향·구단 프로필 포함) */
-export async function DELETE() {
+export const DELETE = adminWrite(async function () {
   const res = adminResetTeamCatalog();
   return NextResponse.json(payload(res.message));
-}
+});

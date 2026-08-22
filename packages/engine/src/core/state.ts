@@ -799,6 +799,33 @@ export interface GameState {
   paymentSchedules?: PaymentSchedule[];
 }
 
+/**
+ * **전부 되거나 아무것도 안 된다** — 복제본 위에서 돌리고, 끝까지 성공했을 때만
+ * 원본에 옮겨 붙인다.
+ *
+ * 시즌 전환처럼 **되돌릴 수 없는 걸음을 여럿 밟은 끝에 던질 수 있는** 전이가 쓴다
+ * (→ docs/simulation/season.md §6). 예외가 그대로 나가면 세이브는 반만 넘어간 채
+ * 남고, 그 상태에는 회복 경로가 없다.
+ *
+ * 옮겨 붙이기는 `state`가 가리키는 **그 객체를 고친다** — 호출부가 쥔 참조가
+ * 그대로 새 값을 본다. 다만 그 안의 배열·객체는 통째로 갈리므로, 이 경계를 넘어
+ * 선수 하나를 붙들고 있던 참조는 낡은 것이 된다.
+ *
+ * 값은 전이 하나당 깊은 복제 하나다. 시즌 전환은 시즌에 한 번이고 그 자체가
+ * 전 클럽의 명단과 편성을 다시 짜는 걸음이라, 복제 한 번은 그 안에 묻힌다.
+ */
+export function inTransaction<T>(state: GameState, run: (draft: GameState) => T): T {
+  const draft = structuredClone(state);
+  const result = run(draft);
+  const target = state as unknown as Record<string, unknown>;
+  // 초안이 지운 필드는 원본에서도 지운다 — `Object.assign`은 덮기만 한다
+  for (const key of Object.keys(target)) {
+    if (!(key in draft)) delete target[key];
+  }
+  Object.assign(target, draft as unknown as Record<string, unknown>);
+  return result;
+}
+
 // ── 팀·선수 조회 ────────────────────────────────────────
 
 export function teamById(state: GameState, id: string): GameTeam {

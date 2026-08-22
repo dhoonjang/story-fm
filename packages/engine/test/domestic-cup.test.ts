@@ -258,6 +258,19 @@ describe("한 시즌을 돌리면 컵이 끝까지 진행된다", () => {
     expectNoDoubleBooking(state);
   });
 
+  /**
+   * 컵 자리 탐색은 못 찾을수록 창을 넓혀 마지막엔 150일까지 뻗는다. 시즌 밖에 앉은
+   * 경기는 다음 시즌 전환이 `state.matches`를 갈아 끼우며 지우거나, 그 전에 날짜가
+   * 오면 새 시즌 달력에 선다 — 상한은 다음 프리시즌 전날이다 (season.md §3).
+   */
+  it("경기는 시즌 밖으로 밀리지 않는다 — 상한은 6월 30일", () => {
+    const lastDay = `${Number(state.calendar.preseasonStart.slice(0, 4)) + 1}-06-30`;
+    for (const m of state.matches) {
+      if (m.season !== state.season) continue;
+      expect(m.date <= lastDay, `${m.id} ${m.date}`).toBe(true);
+    }
+  });
+
   it("우리 팀 컵 경기는 감독의 달력(SCHEDULE_ENTRY)에 오른다", () => {
     const ourCupIds = new Set(domesticCupsOf(state.userTeamId).map((c) => c.id));
     const ourCupMatches = state.matches.filter(

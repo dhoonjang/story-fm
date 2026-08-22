@@ -9,6 +9,7 @@ import {
   isCupCatalogEdited,
   isDomesticCup,
 } from "@story-fm/engine";
+import { adminWrite } from "@/app/api/admin/admin-guard";
 
 /**
  * 컵 편집 — 유럽 대항전과 국내 컵이 **한 경로**를 쓴다. 어느 쪽인지는 id로 가른다
@@ -100,7 +101,10 @@ function badRequest(message: string) {
 }
 
 /** 컵 편집 — 유럽·국내 모두 이 경로를 쓴다 */
-export async function PATCH(request: Request, context: { params: Promise<{ cupId: string }> }) {
+export const PATCH = adminWrite(async function (
+  request: Request,
+  context: { params: Promise<{ cupId: string }> },
+) {
   const { cupId } = await context.params;
   let raw: unknown;
   try {
@@ -122,4 +126,4 @@ export async function PATCH(request: Request, context: { params: Promise<{ cupId
   const res = adminUpdateCup(cupId, body.data);
   if (!res.ok) return badRequest(res.message);
   return NextResponse.json(payload(res.message));
-}
+});
