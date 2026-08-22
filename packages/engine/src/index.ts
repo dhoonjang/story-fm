@@ -11,6 +11,7 @@ export * from "./core/player-ref";
 export * from "./core/league-shape";
 export * from "./core/club-tier";
 export * from "./core/persistence";
+export * from "./core/save-lock";
 export * from "./core/tick";
 
 // data — 카탈로그·시드 (불변 초기치)

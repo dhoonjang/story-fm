@@ -58,6 +58,13 @@ type Panel = (typeof PANELS)[number]["key"];
 const PANEL_ANIM_MS = 260;
 
 /**
+ * 턴이 끝난 뒤 서버 상태를 다시 받아 오는 시도 횟수 — 한 번은 `settled=1`의 상한
+ * (30초)만큼 기다리므로 셋이면 1분 30초다. 그보다 오래 도는 턴은 감독이 다음 조작을
+ * 할 때 어차피 새 상태를 받는다 (docs/llm/models.md §1-1).
+ */
+const RESYNC_TRIES = 3;
+
+/**
  * 경기 중 탭 — **화면이 통째로 바뀐다.**
  *
  * 경기 90분 안에 볼 것만 남긴다: 재정·커리어는 그때 갈 곳이 아니다. 감독이
@@ -413,14 +420,26 @@ export function GameScreen({ gameId }: { gameId: string }) {
        * 어긋난다. 기다리는 동안 감독은 막히지 않는다(다음 턴도 같은 잠금에 줄을 선다).
        */
       const resync = async () => {
-        try {
-          const res = await fetch(`/api/games/${gameId}?settled=1`);
-          const data = (await res.json()) as GamePayload | { error: string };
+        /**
+         * 잠금을 기다리는 데는 상한이 있어(models.md §1-1) 아직 도는 턴은 409로
+         * 돌아온다. **몇 번은 다시 묻는다** — 한 번에 그만두면 긴 턴이 커밋한 결과를
+         * 화면이 영영 못 받고, 무한히 물으면 상한을 둔 뜻이 없어진다.
+         */
+        for (let tries = 0; tries < RESYNC_TRIES; tries++) {
           // 그 사이 새 턴이 앉았다면 이 응답은 이미 지난 상태다
-          if ("error" in data || turnSeqRef.current !== seq) return;
-          setGame(data);
-        } catch {
-          // 재조회마저 닿지 않으면 화면은 그대로 둔다 — 배너가 이미 서 있다
+          if (turnSeqRef.current !== seq) return;
+          try {
+            const res = await fetch(`/api/games/${gameId}?settled=1`);
+            const data = (await res.json()) as GamePayload | { error: string; retry?: boolean };
+            if (!("error" in data)) {
+              if (turnSeqRef.current === seq) setGame(data);
+              return;
+            }
+            if (data.retry !== true) return;
+          } catch {
+            // 재조회마저 닿지 않으면 화면은 그대로 둔다 — 배너가 이미 서 있다
+            return;
+          }
         }
       };
 
