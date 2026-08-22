@@ -17,12 +17,21 @@ import {
   DERIVED_AXES,
   SEEDED_AXES,
   agingDelta,
+  derivePositions,
   isTopFlight,
   playerCatalog,
   footOf,
   physiqueOf,
   syntheticFoot,
 } from "@story-fm/engine";
+import {
+  RETARGET_MAX_PASSES,
+  depthDropAt,
+  potentialGapBand,
+  squadApexOf,
+  synthesizeSeed,
+  type SynthesizedPlayer,
+} from "../src/world/synthesis";
 
 /**
  * 능력치 15축 · 포지션 가중치 · 노화 곡선 (player.md §1·§2·§6).
@@ -656,6 +665,91 @@ describe("신체 — 능력치와 앞뒤가 맞는다", () => {
       const bmi = e.weight / (e.height / 100) ** 2;
       expect(bmi, `${e.nameEn} BMI`).toBeGreaterThan(18.5);
       expect(bmi, `${e.nameEn} BMI`).toBeLessThan(28.5);
+    }
+  });
+});
+
+/**
+ * 자체 산정 모델 (player.md §13) — **분포가 사람 사는 범위인가는 여기서 안 본다.**
+ * 그것은 `harness/attribute-model.harness.ts`가 두 분포의 간격으로 잰다. 못 박히는
+ * 것은 조용히 틀어지는 것들이다: 되맞춤이 멎는가 · 같은 입력이 같은 사람을 내는가 ·
+ * 값이 눈금 안에 있는가 · 낙차 표가 단조인가.
+ */
+describe("자체 산정 모델 — 체급·깊이·자리·나이만으로 세운다", () => {
+  /** 자리마다 하나씩 — `WeightSlot` 아홉을 다 덮는 포지션 코드 */
+  const POSITIONS = ["GK", "CB", "RB", "DM", "CM", "AM", "RW", "CF", "ST"];
+  const TIERS = [1, 2, 3, 4] as const;
+  const RANKS = [0, 1, 5, 11, 18, 25, 33, 42];
+
+  /**
+   * 되맞춤이 상한에서 멎어도 목표에서 이만큼 밖으로는 안 나간다.
+   * (실측 최악 1.5 — 종합이 정수라 인접한 두 값 사이에서 진동하는 자리다)
+   */
+  const RETARGET_WORST = 2;
+
+  function everyone(): { key: string; player: SynthesizedPlayer }[] {
+    const out: { key: string; player: SynthesizedPlayer }[] = [];
+    for (const tier of TIERS) {
+      for (const position of POSITIONS) {
+        for (const rank of RANKS) {
+          for (const secondDivision of [false, true]) {
+            const key = `${tier}:${position}:${rank}:${secondDivision}`;
+            const positions = derivePositions(key, position);
+            out.push({
+              key,
+              player: synthesizeSeed({ key, tier, rank, positions, secondDivision }),
+            });
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  it("되맞춤은 유한 회 안에 멎고 목표 종합에 붙는다", () => {
+    for (const { key, player } of everyone()) {
+      expect(player.passes, key).toBeLessThanOrEqual(RETARGET_MAX_PASSES);
+      expect(Math.abs(player.target - player.overall), key).toBeLessThanOrEqual(RETARGET_WORST);
+    }
+  });
+
+  it("같은 입력은 언제나 같은 사람을 낸다", () => {
+    const positions = derivePositions("Deterministic Sample", "CM");
+    const once = synthesizeSeed({ key: "Deterministic Sample", tier: 2, rank: 7, positions });
+    const twice = synthesizeSeed({ key: "Deterministic Sample", tier: 2, rank: 7, positions });
+    expect(twice).toEqual(once);
+  });
+
+  it("축은 1~99, 잠재력은 종합 이상이고 나이 대역 안이다", () => {
+    for (const { key, player } of everyone()) {
+      for (const [axis, value] of Object.entries(player.seed)) {
+        // 필드 플레이어의 goalkeeping은 시드가 비우는 자리다 — `deriveAxes`가 만든다
+        if (axis === "goalkeeping" && (value === 0 || value === undefined)) continue;
+        if (value === undefined) throw new Error(`${key} ${axis} 없음`);
+        expect(value, `${key} ${axis}`).toBeGreaterThanOrEqual(1);
+        expect(value, `${key} ${axis}`).toBeLessThanOrEqual(99);
+      }
+      const room = player.potential - player.overall;
+      const band = potentialGapBand(player.age);
+      expect(player.potential, key).toBeLessThanOrEqual(99);
+      expect(room, key).toBeGreaterThanOrEqual(0);
+      // 99 천장에 잘린 선수는 하한 아래로 접힌다 — 그때만 대역 밑이 정상이다
+      if (player.potential < 99) expect(room, key).toBeGreaterThanOrEqual(band.min);
+      expect(room, key).toBeLessThanOrEqual(band.max);
+    }
+  });
+
+  it("낙차는 순번이 깊어질수록 단조로 떨어진다", () => {
+    expect(depthDropAt(0)).toBe(0);
+    for (let rank = 1; rank <= 50; rank++) {
+      expect(depthDropAt(rank), `순번 ${rank}`).toBeLessThan(depthDropAt(rank - 1));
+    }
+  });
+
+  it("꼭대기는 체급 순이고 2부는 그 아래에서 시작한다", () => {
+    for (const tier of [2, 3, 4] as const) {
+      expect(squadApexOf(tier)).toBeLessThan(squadApexOf((tier - 1) as 1 | 2 | 3));
+      expect(squadApexOf(tier, true)).toBeLessThan(squadApexOf(tier));
     }
   });
 });
