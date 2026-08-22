@@ -75,6 +75,19 @@ const FINAL_NEAR_DAYS = 14;
 const LAST_RESORT_DAYS = 150;
 
 /**
+ * **탐색은 시즌 밖으로 나가지 않는다** — 그 시즌의 마지막 날 = 다음 프리시즌 개시
+ * 전날(6월 30일).
+ *
+ * 창은 자리를 못 찾을수록 넓어지고, 마지막 단 150일은 5월 결승에서 10월까지 뻗는다.
+ * 거기 앉은 경기는 시즌 전환이 `state.matches`를 통째로 갈아 끼우는 순간 사라지고,
+ * 전환 전에 날짜가 오면 지난 시즌의 컵 경기가 새 시즌 달력에 선다
+ * (→ docs/simulation/season.md §3).
+ */
+function seasonLastDay(season: number): string {
+  return seasonDate(season, [6, 30]);
+}
+
+/**
  * 리그를 비켜세워서라도 지키는 목표 구간 — 목표일부터 이만큼.
  * 실제 대회도 라운드를 하루이틀 안에서 조정하지 몇 주씩 옮기지는 않는다.
  */
@@ -403,11 +416,14 @@ function pickTieDate(
   // ② 그래도 걸리면 뒤로 밀어 자리를 찾는다.
   // (목표일이 이미 지난 세이브는 내일부터 — 과거 날짜 경기는 tick이 소화하지 못한다)
   const start = target;
+  const lastDay = seasonLastDay(state.season);
   for (const pass of passes) {
     let picked: string | null = null;
     let pickedScore: ReturnType<typeof scoreAt> | null = null;
     for (let i = 0; i <= pass.days; i++) {
       const date = addDays(start, i);
+      // 시즌 밖으로는 밀지 않는다 — 잘려서 아무 자리도 안 남으면 목표일에 그대로 앉는다
+      if (date > lastDay) break;
       if (pass.weekdays && !pass.weekdays.has(dayOfWeek(date))) continue;
       if (!pass.ok(date)) continue;
       if (!pass.best) return { date, time: kickoffFor(date) };
