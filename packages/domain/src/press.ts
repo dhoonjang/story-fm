@@ -88,7 +88,12 @@ export const PressFactSchema = z.object({
 });
 export type PressFact = z.infer<typeof PressFactSchema>;
 
-export const PressStatusSchema = z.enum(["pending", "answered", "declined"]);
+/**
+ * 자리의 끝 — 답했나(`answered`), 거절·방치했나(`declined`), 아니면 **자리 자체가
+ * 사라졌나**(`expired`). 만료는 감독의 선택이 아니라 세계의 사정이라 대가가 없다:
+ * 이직하면 앞 구단의 열린 회견이 여기로 닫힌다 (people.md §4 · career.md §5.1).
+ */
+export const PressStatusSchema = z.enum(["pending", "answered", "declined", "expired"]);
 
 export const PressConferenceSchema = z.object({
   id: z.string().min(1),

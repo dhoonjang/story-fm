@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  acceptManagerOffer,
   addDays,
   applyPressOutcome,
   buildMatchPress,
@@ -12,11 +13,12 @@ import {
   pendingPress,
   reportersOf,
   respondToMedia,
+  tierOfTeamIn,
   userPlayers,
   type GameState,
 } from "@story-fm/engine";
 import { PressConferenceSchema } from "@story-fm/domain";
-import type { GamePlayer, MatchRecord, PressConference } from "@story-fm/domain";
+import type { GamePlayer, ManagerOffer, MatchRecord, PressConference } from "@story-fm/domain";
 import { createTestGame } from "./helpers";
 
 /**
@@ -103,6 +105,44 @@ describe("기자회견 — 자리 만들기", () => {
     // 무시가 공짜면 아무도 답하지 않는다
     expect(state.manager.reputation.media).toBeLessThan(beforeMedia);
     expect(pendingPress(state)?.id).toBe("press-second");
+  });
+
+  /**
+   * 이직은 방치가 아니다 (career.md §5.1). 그대로 두면 새 구단의 첫 회견이 앞
+   * 구단의 자리를 거절로 닫아 이유 없이 언론 평판이 깎인다.
+   */
+  it("부임하면 앞 구단의 회견이 대가 없이 만료된다", () => {
+    const state = createTestGame();
+    playAndOpen(state);
+    const stale = state.pressConferences![0]!;
+    const before = state.manager.reputation.media;
+
+    const league = leagueOfTeamIn(state, state.userTeamId);
+    const to = state.teams.find(
+      (t) => t.id !== state.userTeamId && leagueOfTeamIn(state, t.id) === league,
+    )!.id;
+    state.dismissal = { on: state.date, season: state.season, teamId: state.userTeamId };
+    const offer: ManagerOffer = {
+      id: "offer-move",
+      teamId: to,
+      madeOn: state.date,
+      expiresOn: addDays(state.date, 10),
+      tier: tierOfTeamIn(state, to),
+      target: 10,
+      expectation: "중위권",
+      status: "open",
+    };
+    state.managerOffers = [offer];
+    const accepted = acceptManagerOffer(state, offer.id);
+    expect(accepted.ok, accepted.message).toBe(true);
+
+    expect(stale.status).toBe("expired");
+    expect(pendingPress(state)).toBeNull();
+    expect(state.manager.reputation.media, "떠난 구단의 회견에 불참 대가를 물었다").toBe(before);
+
+    // 새 구단의 첫 회견도 앞 구단의 자리를 방치로 읽지 않는다
+    openPress(state, fakeConference({ id: "press-new-club" }));
+    expect(state.manager.reputation.media).toBe(before);
   });
 
   it("답을 기다리는 회견은 언제나 하나뿐이다", () => {

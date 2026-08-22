@@ -40,6 +40,7 @@ import {
   monthOf,
   psrStatus,
   seasonWageRatio,
+  userReports,
   wageRatioTone,
   type WageRatioTone,
 } from "../club/finance";
@@ -2278,8 +2279,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
     if (!isJournalMoney(e, finance.balance)) continue;
     push(e.date, { kind: "money", text: moneyText(e) });
   }
-  for (const r of state.financeReports) {
-    if (r.teamId !== userTeamId) continue;
+  for (const r of userReports(state)) {
     // highlights는 마감 때 이미 걸러진 것이라 문턱을 다시 재지 않는다
     for (const h of r.highlights ?? []) {
       if (h.date > state.date) continue;
@@ -2293,8 +2293,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
     label: FINANCE_CATEGORY_KO[l.category as keyof typeof FINANCE_CATEGORY_KO] ?? l.category,
     amount: l.amount,
   });
-  const reports: FinanceMonthView[] = [...state.financeReports]
-    .filter((r) => r.teamId === userTeamId)
+  const reports: FinanceMonthView[] = [...userReports(state)]
     .sort((a, b) => (a.month < b.month ? 1 : -1))
     .map((r) => ({
       month: r.month,
@@ -2394,7 +2393,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       // 시즌 누계 기준 — 한 달만 보면 프리시즌에 100%를 넘어 무의미하다
       wageRatio: seasonWageRatio(state),
       wageTone: wageRatioTone(seasonWageRatio(state)),
-      psr: state.financeReports.length > 0 ? psrStatus(state) : null,
+      psr: reports.length > 0 ? psrStatus(state) : null,
       current,
       reports,
       feed,

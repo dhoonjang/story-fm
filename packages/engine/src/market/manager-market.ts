@@ -7,6 +7,7 @@ import { makeRng, randInt } from "../core/rng";
 import { addDays, contractUntil } from "../core/dates";
 import { boardExpectation, computeStandings, type StandingRow } from "../competition/season";
 import { syncDefaultTraining } from "../squad/training-plan";
+import { expirePendingPress } from "../club/press";
 import {
   AI_MANAGER_RATING_FALLBACK,
   MANAGER_TERMS_BY_TIER,
@@ -567,6 +568,12 @@ export function acceptManagerOffer(state: GameState, ref: string): SkillResult {
   state.boardDemands = [];
   // 라커룸 불만도 앞 구단의 것이다 (people.md §5) — 지고 오면 주의 줄이 옛 이름을 나열한다
   state.issues = [];
+  /**
+   * 답을 기다리던 회견도 앞 구단의 자리다 (people.md §4) — 그대로 두면 새 구단의
+   * 첫 회견이 그것을 방치로 읽어 이유 없이 언론 평판을 깎는다. 감독이 무시한 것이
+   * 아니라 물을 구단이 없어진 것이므로 대가 없이 만료다.
+   */
+  expirePendingPress(state);
   // 기본 훈련은 새 선수단으로 다시 깔린다
   syncDefaultTraining(state);
   // 수석코치·구단주는 구단의 사람이라 새 구단 기준으로 다시 서고,
