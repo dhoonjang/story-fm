@@ -3,7 +3,7 @@ import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@st
 import { DIRECTIVE_INTENSITIES, PLAYER_DIRECTIVE_KINDS } from "@story-fm/domain";
 import { buildLedgerNote } from "./gm-input";
 import { MatchIntentSchema, type MatchIntent } from "./match-intent-schema";
-import { retryOnce, requireToolCall } from "./retry";
+import { ModelOutputError, retryOnce, requireToolCall } from "./retry";
 import { toToolSchema } from "./tool-schema";
 
 /**
@@ -113,6 +113,16 @@ export async function runMatchIntent(
       () => intent !== null,
     );
   } catch (error) {
+    /**
+     * **쓸 수 없는 산출만 삼킨다** (agents.md §8). 시한·예산·인증·혼잡·차단은 그대로
+     * 올라가 화면이 무슨 일인지 안내한다 — 그것을 "다시 말씀해 주세요"로 바꾸면
+     * 감독은 자기 말이 잘못된 줄 알고 같은 말을 다시 쳐서 같은 시한을 한 번 더
+     * 기다린다.
+     *
+     * 단, **의도가 이미 나왔으면 이 걸음은 끝났다** — 그 뒤에 깨진 요청은 위 규칙대로
+     * 실패가 아니다.
+     */
+    if (intent === null && !(error instanceof ModelOutputError)) throw error;
     // 삼키는 것이 아니라 판정을 아래로 미룬다 — 무슨 일이 있었는지는 남아야 한다
     console.warn("[match:intent] 해석 호출이 실패했습니다:", error);
   }

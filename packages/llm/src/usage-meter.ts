@@ -12,6 +12,7 @@
 
 import { AGENT_NAMES, agentMinCacheableInput, type AgentName, type LlmEnv } from "./config";
 import type { GameLLM, TurnRequest, TurnResult, TurnUsage } from "./game-llm";
+import { LlmCallError } from "./llm-error";
 
 /**
  * 상한을 넘겼을 때 건너뛰는 에이전트.
@@ -189,13 +190,17 @@ export function cacheAlerts(
   });
 }
 
-/** 상한에 걸려 부르지 않았다 — 결산의 "실패하면 앵커" 경로로 떨어진다 */
-export class TokenBudgetExceededError extends Error {
+/**
+ * 상한에 걸려 부르지 않았다 — 종류 `budget` (models.md §1-1).
+ * 결산의 "실패하면 앵커" 경로로 떨어지고, 장면을 쓰는 호출이면 화면의 배너가 된다.
+ */
+export class TokenBudgetExceededError extends LlmCallError {
   constructor(
     readonly agent: AgentName,
     readonly verdict: BudgetVerdict,
   ) {
     super(
+      "budget",
       `토큰 예산 상한(${verdict.limit})을 넘겨 ${agent} 호출을 건너뜁니다 — 누적 ${verdict.used}`,
     );
     this.name = "TokenBudgetExceededError";
