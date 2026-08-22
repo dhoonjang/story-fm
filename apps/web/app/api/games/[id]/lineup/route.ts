@@ -14,7 +14,7 @@ import {
   startingIdsOf,
 } from "@story-fm/engine";
 import { toPayload } from "@/lib/store";
-import { withGameLock } from "@/lib/turn-runner";
+import { LOCK_WAIT_MS, busyResponse, withGameLock } from "@/lib/turn-runner";
 import { invalidGameId } from "@/app/api/games/game-id";
 
 const SlotSchema = z.object({
@@ -67,7 +67,10 @@ const LineupSchema = z.object({
 /**
  * 라인업 편집 (스쿼드 탭) — 포지션 변경 후 선발/벤치 확정.
  * 경기 중(phase=match)에는 채팅 교체만 허용하므로 반려한다.
- * 턴 뮤텍스를 공유해 진행 중인 GM 턴과 저장이 엉키지 않게 한다.
+ * 게임 잠금을 턴과 공유해 진행 중인 GM 턴과 저장이 엉키지 않게 한다 — **그 잠금을
+ * 기다리는 데는 상한이 있다.** 넘기면 409 + `retry`라, 그 편집은 화면의 대기열에 남아
+ * 다음 자동 저장에 다시 실린다. 여기서 몇 분씩 기다리면 감독이 손을 놓고 기다리게 되고,
+ * 기다린 끝에 저장되는 배치는 이미 지난 턴의 것이다 (docs/llm/models.md §1-1).
  */
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
@@ -85,7 +88,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ error: "라인업 형식이 올바르지 않습니다" }, { status: 400 });
   }
 
-  return withGameLock(id, async () => {
+  return withGameLock(id, LOCK_WAIT_MS.lineup, async () => {
     const state = loadGame(id);
     if (!state) return NextResponse.json({ error: "게임을 찾을 수 없습니다" }, { status: 404 });
     // 서버는 **사실만** 낸다 — 그 다음에 무엇을 하라는 말은 GM이 쓴다
@@ -158,5 +161,5 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
      * 409로 막았으니 `match`도 달라지지 않는다.
      */
     return NextResponse.json(toPayload(state, ["squad"]));
-  });
+  }).catch(busyResponse);
 }

@@ -11,8 +11,12 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { hostname } from "node:os";
 import {
   teamCatalog,
+  acquireSaveLock,
+  saveLockPath,
   dataDir,
   deleteGame,
   isTopFlight,
@@ -932,5 +936,103 @@ describe("목록과 로드 — 어디서 멈췄는지 가른다", () => {
       raw.clock = "18:30"; // 스키마에 없는 축 (하루 안의 시각)
     });
     expect(loadGame(kept)?.clock).toBe("18:30");
+  });
+});
+
+/**
+ * 세이브 파일 락 — **프로세스 경계를 넘는 잠금.** 프로세스 안 뮤텍스(apps/web)는
+ * `next start` 인스턴스가 둘이면 서로를 모른다. 여기서 재는 것은 그 파일 하나가
+ * 누구를 막고 누구를 회수하느냐다 (docs/llm/models.md §1-1).
+ */
+describe("세이브 파일 락 — 프로세스 경계", () => {
+  /** 남이 쥔 것처럼 락 파일을 세운다 — 이 프로세스가 만들지 않은 락이다 */
+  function foreignLock(id: string, record: Record<string, unknown>): string {
+    const file = saveLockPath(id);
+    writeFileSync(file, JSON.stringify(record), "utf8");
+    return file;
+  }
+
+  /** 확실히 죽은 pid — 끝날 때까지 기다렸다 거둔 자식의 번호다 */
+  function deadPid(): number {
+    const child = spawnSync(process.execPath, ["-e", ""]);
+    if (typeof child.pid !== "number") throw new Error("자식 프로세스를 띄우지 못했다");
+    return child.pid;
+  }
+
+  it("살아 있는 다른 프로세스가 쥐고 있으면 상한만큼 기다렸다 물러난다", async () => {
+    const id = "lock-live";
+    // 이 테스트 프로세스의 pid — 살아 있는 홀더의 가장 확실한 표본이다
+    const file = foreignLock(id, {
+      pid: process.pid,
+      host: hostname(),
+      at: new Date().toISOString(),
+      token: "남의-것",
+    });
+
+    const started = Date.now();
+    expect(await acquireSaveLock(id, 60)).toBeNull();
+    expect(Date.now() - started).toBeGreaterThanOrEqual(50);
+    // 빼앗지 않는다 — 파일도 그 안의 토큰도 그대로다
+    expect(JSON.parse(readFileSync(file, "utf8")).token).toBe("남의-것");
+    rmSync(file, { force: true });
+  });
+
+  it("홀더가 죽었으면 곧바로 회수한다 — 나이를 기다리지 않는다", async () => {
+    const id = "lock-dead";
+    foreignLock(id, {
+      pid: deadPid(),
+      host: hostname(),
+      at: new Date().toISOString(), // 방금 세운 락이어도 홀더가 없으면 회수 대상이다
+      token: "죽은-것",
+    });
+
+    const lock = await acquireSaveLock(id, 0);
+    expect(lock).not.toBeNull();
+    expect(JSON.parse(readFileSync(saveLockPath(id), "utf8")).pid).toBe(process.pid);
+    lock!.release();
+    expect(existsSync(saveLockPath(id))).toBe(false);
+  });
+
+  it("회수당한 뒤에 놓아도 남의 락을 지우지 않는다", async () => {
+    const id = "lock-token";
+    const lock = await acquireSaveLock(id, 0);
+    expect(lock).not.toBeNull();
+    // 그 사이 누가 이 락을 늙었다고 보고 회수한 뒤 제 락을 세웠다
+    foreignLock(id, {
+      pid: process.pid,
+      host: hostname(),
+      at: new Date().toISOString(),
+      token: "뒤에-온-것",
+    });
+    lock!.release();
+    expect(JSON.parse(readFileSync(saveLockPath(id), "utf8")).token).toBe("뒤에-온-것");
+    rmSync(saveLockPath(id), { force: true });
+  });
+
+  it("한 게임의 락은 하나뿐이고, 놓으면 다음이 가져간다", async () => {
+    const id = "lock-one";
+    const first = await acquireSaveLock(id, 0);
+    expect(first).not.toBeNull();
+    expect(await acquireSaveLock(id, 0)).toBeNull();
+    first!.release();
+    const second = await acquireSaveLock(id, 0);
+    expect(second).not.toBeNull();
+    second!.release();
+  });
+
+  it("게임을 지우면 락 파일도 함께 사라진다", async () => {
+    const game = createTestGame(91);
+    saveGame(game);
+    const lock = await acquireSaveLock(game.id, 0);
+    lock!.release();
+    // 놓은 락은 이미 없다 — 크래시로 남은 락을 흉내 내 다시 세운다
+    foreignLock(game.id, {
+      pid: deadPid(),
+      host: hostname(),
+      at: new Date().toISOString(),
+      token: "남은-것",
+    });
+    expect(deleteGame(game.id)).toBe(true);
+    expect(existsSync(saveLockPath(game.id))).toBe(false);
   });
 });

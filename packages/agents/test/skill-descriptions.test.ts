@@ -4,6 +4,14 @@ import {
   DEFAULT_SKILL_DESCRIPTIONS,
   GM_SYSTEM,
   MATCH_INTENT_SYSTEM,
+  RATE_PLAYERS_INPUT,
+  RATE_PLAYERS_TOOL,
+  REPORT_DIGEST_INPUT,
+  REPORT_DIGEST_TOOL,
+  REPORT_MOOD_INPUT,
+  REPORT_MOOD_TOOL,
+  REPORT_TRAINING_INPUT,
+  REPORT_TRAINING_TOOL,
   SKILL_CATALOG,
   SKILL_NAMES,
   buildGmTools,
@@ -156,6 +164,61 @@ describe("입력 스키마 — Zod 한 벌에서 파생한다", () => {
   it("옮길 수 없는 갈래는 조용히 통과하지 않고 던진다", () => {
     expect(() => toToolSchema(z.object({ when: z.date() }))).toThrow();
   });
+
+  /** `.partial()`은 모든 자리를 optional로 감싼다 — 필수가 하나도 남지 않는다 */
+  it("partial은 required를 남기지 않는다", () => {
+    const derived = toToolSchema(z.object({ a: z.string(), b: z.number() }).partial());
+    expect(derived.required).toBeUndefined();
+    expect(derived.properties?.a).toEqual({ type: "string" });
+  });
+
+  /**
+   * `null`과 기본값은 Zod 쪽의 관용이라 모델이 볼 것은 안쪽 갈래 하나다 —
+   * `type: ["string","null"]`을 내면 제공자마다 받는 부분집합이 갈린다.
+   * 대신 **빼도 된다는 것**은 `required`가 말한다.
+   */
+  it("nullish와 기본값은 안쪽 갈래만 보이고 required에서 빠진다", () => {
+    const derived = toToolSchema(
+      z.object({
+        axis: z.enum(["pace", "vision"]).nullish(),
+        weight: z.number().int().min(1).max(5).default(3),
+        kept: z.string(),
+      }),
+    );
+    expect(derived.properties?.axis).toEqual({ type: "string", enum: ["pace", "vision"] });
+    expect(derived.properties?.weight).toEqual({ type: "integer", minimum: 1, maximum: 5 });
+    expect(derived.required).toEqual(["kept"]);
+  });
+
+  /** 중첩된 객체·배열도 같은 규칙을 지난다 — 안쪽에서 제약이 사라지면 아무도 못 본다 */
+  it("중첩된 객체와 배열 항목도 끝까지 옮겨진다", () => {
+    const derived = toToolSchema(
+      z.object({
+        style: z.object({
+          note: z.string().max(20),
+          samples: z.array(z.object({ text: z.string().min(1), tone: z.enum(["dry", "warm"]) })),
+        }),
+      }),
+    );
+    expect(derived.properties?.style).toEqual({
+      type: "object",
+      properties: {
+        note: { type: "string", maxLength: 20 },
+        samples: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              text: { type: "string", minLength: 1 },
+              tone: { type: "string", enum: ["dry", "warm"] },
+            },
+            required: ["text", "tone"],
+          },
+        },
+      },
+      required: ["note", "samples"],
+    });
+  });
 });
 
 /** JSON 스키마를 훑으며 (이름, 노드) 쌍을 모은다 — 중첩된 배열 항목까지 */
@@ -171,8 +234,19 @@ function walk(node: unknown, name = ""): Array<[string, Record<string, unknown>]
   return found;
 }
 
+/**
+ * 결산 넷은 GM 도구가 아니라 저마다의 호출이 강제하는 도구 하나다 — 카탈로그에도
+ * `buildGmTools`에도 서지 않는다. 그래도 모델이 받는 입력이라 계약은 같다.
+ */
+const RATER_TOOLS = [
+  { name: RATE_PLAYERS_TOOL, inputSchema: RATE_PLAYERS_INPUT },
+  { name: REPORT_TRAINING_TOOL, inputSchema: REPORT_TRAINING_INPUT },
+  { name: REPORT_MOOD_TOOL, inputSchema: REPORT_MOOD_INPUT },
+  { name: REPORT_DIGEST_TOOL, inputSchema: REPORT_DIGEST_INPUT },
+];
+
 describe("같은 종류의 인자는 같은 검증을 지난다", () => {
-  const args = TOOLS.flatMap((tool) =>
+  const args = [...TOOLS, ...RATER_TOOLS].flatMap((tool) =>
     walk(tool.inputSchema).map(([name, node]) => ({ tool: tool.name, name, node })),
   );
   const only = (names: readonly string[]) => args.filter((a) => names.includes(a.name));
@@ -208,7 +282,7 @@ describe("같은 종류의 인자는 같은 검증을 지난다", () => {
   });
 
   it("필수 인자는 전부 선언된 인자다", () => {
-    for (const tool of TOOLS) {
+    for (const tool of [...TOOLS, ...RATER_TOOLS]) {
       for (const [, node] of [["", tool.inputSchema] as const, ...walk(tool.inputSchema)]) {
         const declared = Object.keys((node.properties ?? {}) as Record<string, unknown>);
         for (const key of (node.required ?? []) as string[]) {

@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { ARC_STAGE_KO, ARC_TITLE_MAX, personaRoleLabel, type Persona } from "@story-fm/domain";
+import {
+  ARC_STAGE_KO,
+  ARC_TITLE_MAX,
+  CharacterMemorySchema,
+  personaRoleLabel,
+  type Persona,
+} from "@story-fm/domain";
 import {
   HISTORY_DIGEST_CHARS,
   REGISTERABLE_ROLES,
@@ -16,6 +22,7 @@ import {
 import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
 import { resolveLlmMode } from "./gm";
 import { retryOnce, requireToolCall } from "./retry";
+import { inputError, toToolSchema } from "./tool-schema";
 
 /**
  * 이력 압축 — 창 밖으로 밀려나는 평시 구간을 요약 한 벌로 옮기고, 그 김에
@@ -61,36 +68,70 @@ export const HISTORY_COMPACTOR_SYSTEM = `당신은 구단의 기록 담당이다
 
 반드시 report_digest 도구로만 답한다. 그 밖의 텍스트는 쓰지 않는다.`;
 
+/**
+ * 인물 카드의 자유 문구 상한 — 카드는 불린 턴마다 레퍼런스 층에 통째로 실린다
+ * (agents.md §5). 상한이 없으면 모델이 쓴 한 문장이 문단이 되어 그 층을 밀어낸다.
+ */
+const CARD_TEXT_MAX = 200;
+
+/** 길이와 무게는 세이브의 계약이 정한다 — 여기 다시 적으면 그 자리가 갈린다 */
 const MemorySchema = z.object({
-  characterId: z.string().min(1),
-  text: z.string().min(1).max(120),
-  salience: z.number().int().min(1).max(5).optional(),
+  characterId: z.string().min(1).describe("원문 @태그의 이름 그대로"),
+  text: CharacterMemorySchema.shape.text.describe("그 사람에게 있었던 일 한 줄 (120자 이내)"),
+  salience: CharacterMemorySchema.shape.salience.optional().describe("1~5"),
 });
 
 const CharacterSchema = z.object({
-  characterId: z.string().min(1),
+  characterId: z.string().min(1).describe("그 사람의 이름 (전역 유일)"),
   name: z.string().min(1),
   role: z.enum(REGISTERABLE_ROLES),
-  archetype: z.string().min(1),
-  traits: z.array(z.string().min(1)).min(1),
-  motivation: z.string().min(1),
+  archetype: z.string().min(1).max(CARD_TEXT_MAX).describe("어떤 유형의 사람인가"),
+  traits: z.array(z.string().min(1).max(CARD_TEXT_MAX)).min(1).describe("성격 3~5개"),
+  motivation: z.string().min(1).max(CARD_TEXT_MAX).describe("이 사람이 원하는 것 한 문장"),
   speechStyle: z.object({
-    note: z.string().min(1),
-    samples: z.array(z.string().min(1)).min(1),
+    note: z.string().min(1).max(CARD_TEXT_MAX).describe("말투 지문 한 문장"),
+    samples: z
+      .array(z.string().min(1).max(CARD_TEXT_MAX))
+      .min(1)
+      .describe("이 사람이라면 이렇게 말한다 — 2~3개"),
   }),
 });
 
 const ArcTitleSchema = z.object({
-  arcId: z.string().min(1),
-  title: z.string().min(1).max(ARC_TITLE_MAX),
+  arcId: z.string().min(1).describe("목록의 아크 id 그대로"),
+  title: z
+    .string()
+    .min(1)
+    .max(ARC_TITLE_MAX)
+    .describe(`이야기의 결을 잡는 제목 (${ARC_TITLE_MAX}자 이내)`),
 });
 
 const ReportInputSchema = z.object({
-  summary: z.string().min(1),
-  memories: z.array(MemorySchema).optional(),
-  characters: z.array(CharacterSchema).optional(),
-  arcTitles: z.array(ArcTitleSchema).optional(),
+  /**
+   * 상한은 코어도 잰다(`applyHistoryDigest` — 자르지 않고 거절한다). 같은 상수를
+   * 두 곳이 읽되 모델에게 닿는 것은 이 한 벌이고, 반려 문구도 여기 것이 나간다.
+   */
+  summary: z
+    .string()
+    .min(1)
+    .max(HISTORY_DIGEST_CHARS, `요약은 ${HISTORY_DIGEST_CHARS}자 이내여야 합니다`)
+    .describe(`이전 요약과 이번 구간을 합친 한 벌 (${HISTORY_DIGEST_CHARS}자 이내)`),
+  memories: z
+    .array(MemorySchema)
+    .optional()
+    .describe("그 구간에 사람들에게 있었던 일 — 없으면 비운다"),
+  characters: z
+    .array(CharacterSchema)
+    .optional()
+    .describe("이 구간에서 처음 선 인물 — 없으면 비운다"),
+  arcTitles: z
+    .array(ArcTitleSchema)
+    .optional()
+    .describe("이름 없는 이야기에 제안하는 제목 — 목록이 없으면 비운다"),
 });
+
+/** 모델이 보는 입력 — 위 Zod 한 벌에서 파생한다 (prompts.md §2) */
+export const REPORT_DIGEST_INPUT = toToolSchema(ReportInputSchema);
 
 /** 접히는 구간의 화자 — 세이브의 역할을 사람이 읽는 말로 */
 function speakerOf(role: HistoryFoldBrief["turns"][number]["role"]): string {
@@ -150,7 +191,7 @@ export function untitledArcs(state: GameState): { id: string; line: string }[] {
  * **하나**를 강제하고 그것도 첫 요청에만 걸리므로, 둘로 나누면 나머지 하나는
  * 모델이 부를 수도 안 부를 수도 있는 자리가 된다.
  */
-const REPORT_DIGEST_TOOL = "report_digest";
+export const REPORT_DIGEST_TOOL = "report_digest";
 
 interface CompactionResult {
   folded: boolean;
@@ -167,89 +208,19 @@ function makeReportTool(
     name: REPORT_DIGEST_TOOL,
     description:
       "접히는 구간의 요약 한 벌과 캐릭터북 갱신을 함께 제출한다. 검사에 걸린 항목은 코어가 버린다.",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        summary: {
-          type: "string",
-          description: `이전 요약과 이번 구간을 합친 한 벌 (${HISTORY_DIGEST_CHARS}자 이내)`,
-        },
-        memories: {
-          type: "array",
-          description: "그 구간에 사람들에게 있었던 일 — 없으면 비운다",
-          items: {
-            type: "object",
-            properties: {
-              characterId: { type: "string", description: "원문 @태그의 이름 그대로" },
-              text: { type: "string", description: "그 사람에게 있었던 일 한 줄 (120자 이내)" },
-              salience: { type: "integer", description: "1~5" },
-            },
-            required: ["characterId", "text"],
-          },
-        },
-        arcTitles: {
-          type: "array",
-          description: "이름 없는 이야기에 제안하는 제목 — 목록이 없으면 비운다",
-          items: {
-            type: "object",
-            properties: {
-              arcId: { type: "string", description: "목록의 아크 id 그대로" },
-              title: {
-                type: "string",
-                description: `이야기의 결을 잡는 제목 (${ARC_TITLE_MAX}자 이내)`,
-              },
-            },
-            required: ["arcId", "title"],
-          },
-        },
-        characters: {
-          type: "array",
-          description: "이 구간에서 처음 선 인물 — 없으면 비운다",
-          items: {
-            type: "object",
-            properties: {
-              characterId: { type: "string", description: "그 사람의 이름 (전역 유일)" },
-              name: { type: "string" },
-              role: { type: "string", enum: [...REGISTERABLE_ROLES] },
-              archetype: { type: "string", description: "어떤 유형의 사람인가" },
-              traits: { type: "array", items: { type: "string" }, description: "성격 3~5개" },
-              motivation: { type: "string", description: "이 사람이 원하는 것 한 문장" },
-              speechStyle: {
-                type: "object",
-                properties: {
-                  note: { type: "string", description: "말투 지문 한 문장" },
-                  samples: {
-                    type: "array",
-                    items: { type: "string" },
-                    description: "이 사람이라면 이렇게 말한다 — 2~3개",
-                  },
-                },
-                required: ["note", "samples"],
-              },
-            },
-            required: [
-              "characterId",
-              "name",
-              "role",
-              "archetype",
-              "traits",
-              "motivation",
-              "speechStyle",
-            ],
-          },
-        },
-      },
-      required: ["summary"],
-    },
+    inputSchema: REPORT_DIGEST_INPUT,
     handle: (input: unknown) => {
       const parsed = ReportInputSchema.safeParse(input);
-      if (!parsed.success) return { ok: false, message: "형식이 맞지 않습니다" };
+      if (!parsed.success) return inputError(parsed.error);
       /**
        * 요약이 먼저다 — 거절당하면 이 턴은 접지 않으므로 캐릭터북도 건드리지 않는다.
-       * 모델은 이 메시지를 받아 같은 호출 안에서 짧게 다시 낸다.
+       * 길이는 위 스키마가 먼저 거르므로 여기 남는 것은 빈 문장과 낡은 브리프다.
        */
       if (!applyHistoryDigest(state, brief, parsed.data.summary)) {
-        return { ok: false, message: `요약은 ${HISTORY_DIGEST_CHARS}자 이내여야 합니다` };
+        return {
+          ok: false,
+          message: "요약을 반영하지 못했습니다 — 빈 문장이거나 이미 접힌 구간입니다",
+        };
       }
       // 등록이 기억보다 먼저다 — 새로 선 사람은 등록된 뒤에야 이 세계의 화자가 된다
       const characters = registerCharacters(state, parsed.data.characters ?? []);

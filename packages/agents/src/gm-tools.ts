@@ -87,7 +87,7 @@ import {
 } from "@story-fm/domain";
 import type { GameToolSpec, ToolCallContext } from "@story-fm/llm";
 import { skillDescriptions } from "./skill-descriptions";
-import { toToolSchema } from "./tool-schema";
+import { inputError, toToolSchema } from "./tool-schema";
 import type { GmToolCall } from "./gm-types";
 
 /**
@@ -183,14 +183,6 @@ const TRAINING_INPUT = z
       .describe("한 선수만 겨냥한 개인 훈련 — 팀 훈련 위에 얹힌다. clear=true면 거둔다"),
   })
   .partial();
-
-/** 스키마를 못 지난 입력 — 모델이 무엇을 고쳐야 하는지까지 돌려준다 */
-function inputError(error: z.ZodError): { ok: false; message: string } {
-  return {
-    ok: false,
-    message: `입력 오류 — ${error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(" / ")}`,
-  };
-}
 
 /**
  * 지금까지 쓰인 본문 줄 수 — 스킬 칩이 설 자리.

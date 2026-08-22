@@ -1,7 +1,14 @@
 import { z } from "zod";
-import { MOOD_BATCH, applyMoodNotes, type GameState, type MoodBrief } from "@story-fm/engine";
+import {
+  MOOD_BATCH,
+  MOOD_NOTE_MAX,
+  applyMoodNotes,
+  type GameState,
+  type MoodBrief,
+} from "@story-fm/engine";
 import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
 import { retryOnce, requireToolCall, anchorStands } from "./retry";
+import { inputError, toToolSchema } from "./tool-schema";
 
 /**
  * 심경 결산 — 코어가 낸 앵커 한 줄을 그 선수의 맥락(경기·불만·정착·폼)에 맞는
@@ -27,12 +34,18 @@ export const MOOD_RATER_SYSTEM = `당신은 선수단을 매일 보는 구단 �
 - 반드시 report_mood 도구로만 답한다. 그 밖의 텍스트는 쓰지 않는다.`;
 
 const NoteSchema = z.object({
-  playerId: z.string().min(1),
-  text: z.string().min(1).max(120),
+  playerId: z.string().min(1).describe("대상 목록의 id 그대로"),
+  text: z.string().min(1).max(MOOD_NOTE_MAX).describe("그 선수의 심경 한 문장 (60자 안팎)"),
   /** 그 문장이 불만을 담았는가 — 코어는 낱말을 세지 않는다 (people.md §5) */
-  acknowledgesIssue: z.boolean(),
+  acknowledgesIssue: z.boolean().describe("그 문장이 이 선수의 불만을 담았는가"),
 });
 const ReportInputSchema = z.object({ notes: z.array(NoteSchema).max(MOOD_BATCH) });
+
+/** 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 (agents.md §3) */
+export const REPORT_MOOD_TOOL = "report_mood";
+
+/** 모델이 보는 입력 — 위 Zod 한 벌에서 파생한다 (prompts.md §2) */
+export const REPORT_MOOD_INPUT = toToolSchema(ReportInputSchema);
 
 /** 브리프를 프롬프트 본문으로 — 앵커 + 그 선수에게 있었던 일 */
 export function buildMoodPrompt(brief: MoodBrief): string {
@@ -41,9 +54,6 @@ export function buildMoodPrompt(brief: MoodBrief): string {
   );
   return [`${brief.from} ~ ${brief.to}`, "", "## 대상", ...rows].join("\n");
 }
-
-/** 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 (agents.md §3) */
-const REPORT_MOOD_TOOL = "report_mood";
 
 function makeReportTool(
   state: GameState,
@@ -54,30 +64,10 @@ function makeReportTool(
     name: REPORT_MOOD_TOOL,
     description:
       "선수별 심경 한 줄을 제출한다. 규칙을 어긴 문장은 코어가 버리고 기준 문장을 남긴다.",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        notes: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              playerId: { type: "string", description: "대상 목록의 id 그대로" },
-              text: { type: "string", description: "그 선수의 심경 한 문장 (60자 안팎)" },
-              acknowledgesIssue: {
-                type: "boolean",
-                description: "그 문장이 이 선수의 불만을 담았는가",
-              },
-            },
-            required: ["playerId", "text", "acknowledgesIssue"],
-          },
-        },
-      },
-      required: ["notes"],
-    },
+    inputSchema: REPORT_MOOD_INPUT,
     handle: (input: unknown) => {
       const parsed = ReportInputSchema.safeParse(input);
-      if (!parsed.success) return { ok: false, message: "형식이 맞지 않습니다" };
+      if (!parsed.success) return inputError(parsed.error);
       const applied = applyMoodNotes(state, brief, parsed.data.notes);
       onApplied(applied);
       return { ok: true, message: `심경 ${applied}명 반영` };

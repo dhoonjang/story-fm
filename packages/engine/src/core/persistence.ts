@@ -25,6 +25,7 @@ import {
   migrateSquadLevels,
 } from "./migrations";
 import { SaveSchema } from "./save-schema";
+import { saveLockPath } from "./save-lock";
 import type { GamePhase, GameState } from "./state";
 import { ensurePersonas } from "../world/persona";
 import { ensureSquadNumbers } from "../squad/numbers";
@@ -150,7 +151,8 @@ let tmpSerial = 0;
  *
  * 이름이 `<본이름>.tmp`로 고정이면 두 쓰기가 한 tmp를 나눠 갖는다: 한쪽이 쓴 바이트를
  * 다른 쪽이 제 이름으로 rename해 내용이 뒤바뀐 파일이 서고, 늦은 쪽은 이미 사라진 tmp를
- * 찾다 넘어진다. 게임 락은 한 프로세스 안의 한 게임까지만 지킨다.
+ * 찾다 넘어진다. 게임 락(`save-lock.ts`)은 **한 게임**의 쓰기만 줄 세우므로, 같은
+ * 디렉터리에서 서로 다른 게임이 동시에 저장되는 길은 그대로 열려 있다.
  *
  * ⚠️ 이 꼬리는 **파일 이름에만** 산다 — 세이브 내용에도 시뮬 시드에도 섞이지 않으므로
  * 코어의 결정론과 무관하다.
@@ -784,7 +786,8 @@ export function deleteGame(id: string): boolean {
   if (isCatalogId(id)) return false;
   const { dir, main, bak, meta } = paths(id);
   if (!existsSync(main) && !existsSync(bak)) return false;
-  for (const f of [main, bak, meta]) if (existsSync(f)) rmSync(f);
+  // 락 파일도 함께 — 지켜야 할 세이브가 없어지면 그 락은 아무 뜻도 없다 (save-lock.ts)
+  for (const f of [main, bak, meta, saveLockPath(id)]) if (existsSync(f)) rmSync(f);
   // 조각도 함께 — 본체가 사라지면 아무도 가리키지 않는다
   const prefix = `${id}.shard-`;
   try {
