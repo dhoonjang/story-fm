@@ -610,6 +610,38 @@ describe("이력 창 — 시작점을 STEP 단위로만 옮긴다", () => {
     expect(contents.some((c) => c.includes("턴 11"))).toBe(false);
   });
 
+  /**
+   * 인물지에서 유일하게 자라는 값이 기억이다 — 이력의 카드를 지금의 인물지로 다시
+   * 그리면 압축 한 번에 지난 턴들의 바이트가 함께 달라져, 요약 블록만 무효가 되면
+   * 될 것이 이력 전체로 번진다 (agents.md §5).
+   */
+  it("기억이 늘어도 지난 턴의 렌더가 한 글자도 달라지지 않는다", () => {
+    const state = game();
+    const coach = headCoachOf(state);
+    state.chat.push({
+      role: "user",
+      text: `${coach.characterId} 불러줘`,
+      toolCalls: [],
+      at: state.date,
+      characters: [{ characterId: coach.characterId, depth: "full", memories: 0 }],
+    });
+    state.chat.push({ role: "model", text: "@코치: 알겠습니다", toolCalls: [], at: state.date });
+    const before = buildGmHistory(state);
+
+    state.characterMemories = [
+      {
+        characterId: coach.characterId,
+        date: "2026-01-05",
+        text: "주장 교체를 놓고 부딪혔다",
+        salience: 3,
+      },
+    ];
+
+    const after = buildGmHistory(state);
+    expect(after).toEqual(before);
+    expect(after.map((h) => h.content).join("\n")).not.toContain("주장 교체를 놓고 부딪혔다");
+  });
+
   it("요약 블록은 압축된 세이브에만 선다", () => {
     const state = game();
     expect(buildGmDigest(state)).toBeNull();

@@ -82,8 +82,9 @@ export function describePersona(entry: CharacterEntry): string {
     ...(entry.depth === "rumour"
       ? [`⚠️ 평판으로만 아는 사람이다 — 말투도 속내도 모른다. 소문의 수준에서만 그려라.`]
       : []),
-    // 인물지(성격·동기·말투)는 세이브당 불변이고 기억은 있었던 일이다 — 갱신되는 자리가
-    // 압축 한 곳뿐이라 카드가 이력에 굳어도 낡지 않는다 (people.md §9-1)
+    // 기억은 **이번 턴에 세우는 카드에만** 온다 — 이력이 다시 그리는 카드
+    // (`characterEntryOf`)는 기억 없이 오므로 이 줄이 서지 않는다. 압축이 더한 기억이
+    // 지난 턴의 바이트를 바꾸지 않는 자리다 (people.md §6 · agents.md §5)
     ...(entry.memories?.length
       ? [`있었던 일:`, ...entry.memories.map((m) => `  ${m.date} — ${m.text}`)]
       : []),
@@ -935,6 +936,9 @@ export function injectedCharacters(state: GameState): CharacterInjection[] {
  * 카드는 감독 발화와 같은 층에 실리므로 이력에서도 그 자리에 다시 서야 한다.
  * 모델 턴에 붙이면 카드가 답변 뒤로 가 순서가 뒤집힌다. ⚠️ 기록만 남긴다 —
  * 카드 텍스트를 저장하면 채팅 화면에 프롬프트가 새고 이력이 그때의 문장으로 굳는다.
+ *
+ * 기억 줄 수도 함께 적는다 — 기억은 이 턴 층에만 서므로(§6), 그 뒤에 늘어난 것을
+ * 재주입으로 나르려면 캐릭터북이 **그때 실린 수**를 알아야 한다.
  */
 export function recordCharacterInjection(
   state: GameState,
@@ -945,7 +949,11 @@ export function recordCharacterInjection(
   // 이번 턴에 밀어 넣은 입력이 꼬리다 (`historyEnd`) — 모델 턴이면 저장이 끝난
   // 이력이라 붙일 자리가 아니다
   if (!turn || turn.role === "model") return;
-  turn.characters = entries.map((e) => ({ characterId: e.characterId, depth: e.depth }));
+  turn.characters = entries.map((e) => ({
+    characterId: e.characterId,
+    depth: e.depth,
+    memories: e.memories?.length ?? 0,
+  }));
 }
 
 /**
