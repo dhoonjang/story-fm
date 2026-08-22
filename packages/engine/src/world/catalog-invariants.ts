@@ -283,7 +283,6 @@ export function checkSeedInvariants(
   leagues: readonly LeagueCatalogEntry[] = LEAGUE_CATALOG_SEED,
 ): string[] {
   const problems: string[] = [];
-  const leagueById = new Map(leagues.map((l) => [l.id, l]));
   const teamIds = new Set(TEAM_CATALOG_SEED.map((t) => t.id));
   const teamName = new Map(TEAM_CATALOG_SEED.map((t) => [t.id, t.name]));
 
@@ -297,7 +296,7 @@ export function checkSeedInvariants(
       continue;
     }
     for (const team of TEAM_CATALOG_SEED) {
-      if (leagueById.get(team.leagueId) !== league) continue;
+      if (team.leagueId !== league.id) continue;
       const seeded = (SQUAD_SEEDS[team.id] ?? []).length;
       if (league.kind === "market-only") {
         // 부분 시드 — 데려올 만한 이름만 있으면 된다 (나머지는 절차 생성)
