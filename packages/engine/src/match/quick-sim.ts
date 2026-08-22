@@ -73,19 +73,35 @@ export interface SimSquad {
  * 사건의 분 — **후반이 조금 더 붐빈다.**
  *
  * 실측은 전반 46% · 후반 54%다(체력이 떨어지고 뒤진 팀이 밀어붙인다). 균등
- * 분포로 두면 90분 내내 같은 밀도라 추가시간의 결승골 같은 게 나오지 않는다.
+ * 분포로 두면 90분 내내 같은 밀도라 막판의 결승골 같은 게 나오지 않는다.
  */
 function sampleMinute(rng: () => number): number {
   return quickMinuteOf(rng());
 }
 
-/** 골 시각 분포의 로그 눈금 — 전반 약 46%, 후반 약 54%. */
-export const QUICK_MINUTE_LOG_SCALE = 0.2;
+/** 사건이 전반에 실리는 몫 — 밀도와 카드 분의 눈금이 여기서 유도된다 (match.md §7) */
+export const QUICK_FIRST_HALF_SHARE = 0.46;
 
-/** 사건이 실릴 수 있는 마지막 분 — 정규 90분 + 추가시간 */
-const LAST_MINUTE = 94;
+/**
+ * 사건이 실릴 수 있는 마지막 분 — **구간 시뮬과 같은 시계다.**
+ *
+ * 정규 경기는 90′에 끝나고 추가시간은 시계에 얹지 않는다(match.md §2). 91′부터는
+ * 연장의 시각이라, 여기가 그 위로 넘으면 정규 93′ 골 뒤에 연장 91′ 골이 붙어
+ * `goalMinutes`가 역행한다.
+ */
+const LAST_MINUTE = PHASE_END.second_half;
 
-/** 0~1 균등 난수를 후반이 조금 더 붐비는 1~94분으로 옮긴다. */
+/**
+ * 골 시각 분포의 로그 눈금 — **몫에서 유도한다.**
+ *
+ * `N(u, s) = ln(1 + su) / ln(1 + s)`가 경기의 절반에 `p`를 실으려면
+ * `(1 + sp)² = 1 + s`, 곧 `s = (1 − 2p) / p²`다. 두 하프가 같은 길이라 "절반"이
+ * 곧 하프타임이고, 눈금을 손으로 적으면 몫을 고친 날 카드만 옛 비율로 남는다.
+ */
+export const QUICK_MINUTE_LOG_SCALE =
+  (1 - 2 * QUICK_FIRST_HALF_SHARE) / QUICK_FIRST_HALF_SHARE ** 2;
+
+/** 0~1 균등 난수를 후반이 조금 더 붐비는 1~90분으로 옮긴다. */
 export function quickMinuteOf(unit: number): number {
   return Math.max(
     1,
@@ -189,6 +205,25 @@ export function playedIn(
 }
 
 /**
+ * 부상 추첨의 후보 — **뛴 선수에서 퇴장자를 뺀다.**
+ *
+ * 구간 시뮬은 퇴장한 선수를 `gone`으로 걸러 후보에서 뺀다(`pickInjured`). 그라운드를
+ * 떠난 발은 다치지 않는다 — 같은 경기의 장부가 "40분에 퇴장, 그 경기에서 부상"이라고
+ * 두 말을 하면 안 된다. 성향 하강(`easeProneness`)은 호출부가 뛴 선수 전원에게 그대로
+ * 건다: 뛴 것은 사실이다 (match.md §7).
+ */
+function injuryCandidates(
+  played: readonly GamePlayer[],
+  side: "home" | "away",
+  cards: readonly QuickCard[],
+): GamePlayer[] {
+  const sentOff = new Set(
+    cards.filter((card) => card.side === side && card.card === "red").map((card) => card.playerId),
+  );
+  return played.filter((player) => !sentOff.has(player.id));
+}
+
+/**
  * 부상 — **여기서는 사건만 고르고 장부는 호출부가 쓴다.**
  *
  * 심각도·결장 일수·치료비는 `openInjuryFor`가 유저 경기와 **같은 공식**으로 정한다.
@@ -197,8 +232,9 @@ export function playedIn(
  * **빈도도 성향을 탄다** — 유리몸을 열한 명 세운 팀은 실제로 더 자주 쓰러진다.
  * 누가 걸리는지만 성향으로 가르면 그 팀의 부상 총량은 철인 열한 명과 같아진다.
  *
- * 후보는 선발이 아니라 **뛴 선수 전원**이다. 선발만 뽑으면 교체 자원은 영원히
- * 안 다치고, 호출부가 거는 성향 하강도 함께 선발에만 갇힌다.
+ * 후보는 선발이 아니라 **뛴 선수 전원**이다(퇴장자만 뺀다 — `injuryCandidates`).
+ * 선발만 뽑으면 교체 자원은 영원히 안 다치고, 호출부가 거는 성향 하강도 함께
+ * 선발에만 갇힌다.
  */
 function rollInjury(
   rng: () => number,
@@ -361,11 +397,12 @@ function playersAt(
 const HALF_TIME = PHASE_END.first_half;
 
 /**
- * 90분 치 슈팅이 두 하프에 실리는 밀도 — 전반 46%가 45분에, 후반 54%가 추가시간까지
- * 49분에 실린다 (`QUICK_MINUTE_LOG_SCALE`의 골 시각 분포와 같은 비율).
+ * 90분 치 슈팅이 두 하프에 실리는 밀도 — 전반 46%가 45분에, 후반 54%가 45분에
+ * 실린다 (카드의 분과 같은 몫, `QUICK_FIRST_HALF_SHARE`). 두 하프가 같은 길이라
+ * 배수는 몫의 두 배이고, 합은 45×0.92 + 45×1.08 = 90분 그대로다.
  */
-const FIRST_HALF_DENSITY = 0.92;
-const SECOND_HALF_DENSITY = 48.6 / 49;
+const FIRST_HALF_DENSITY = 2 * QUICK_FIRST_HALF_SHARE;
+const SECOND_HALF_DENSITY = 2 * (1 - QUICK_FIRST_HALF_SHARE);
 
 /** 감독 정보가 없는 팀(AI 벤치)의 전술 능력 — 리그 평균 언저리 */
 const AI_MANAGER_TACTICS = 65;
@@ -685,12 +722,22 @@ export function simulateExtraTime(
   }
   /**
    * 부상 — 90분과 같은 모양: 슛 난수에 밀리지 않는 독립 채널에서 한 번의
-   * 베르누이로 뽑고, 후보는 연장을 뛴 전원이다 (교체가 없으니 곧 명단이다).
+   * 베르누이로 뽑고, 후보는 연장을 뛴 전원에서 퇴장자를 뺀 사람들이다 (교체가
+   * 없으니 명단이 곧 온필드다).
    */
   const injuries: string[] = [];
   const injuryRng = makeRng(seed, `et:${channel}:injury`);
-  rollInjury(injuryRng, home, home.starters, "home", injuries, share);
-  rollInjury(injuryRng, away, away.starters, "away", injuries, share);
+  for (const side of ["home", "away"] as const) {
+    const squad = squads[side];
+    rollInjury(
+      injuryRng,
+      squad,
+      injuryCandidates(squad.starters, side, sampled.cards),
+      side,
+      injuries,
+      share,
+    );
+  }
   const sum = (side: "home" | "away", read: (shot: QuickShot) => number) =>
     sampled.shots
       .filter((shot) => shot.side === side)
@@ -761,8 +808,16 @@ export function quickSimulate(
   const injuries: string[] = [];
   // 부상은 슈팅 수에 따라 난수 소비 위치가 밀리지 않는 독립 채널에서 뽑는다.
   const injuryRng = makeRng(seed, `quick:${channel}:injury`);
-  rollInjury(injuryRng, home, playedIn(home, "home", subs), "home", injuries);
-  rollInjury(injuryRng, away, playedIn(away, "away", subs), "away", injuries);
+  for (const side of ["home", "away"] as const) {
+    const squad = squads[side];
+    rollInjury(
+      injuryRng,
+      squad,
+      injuryCandidates(playedIn(squad, side, subs), side, cards),
+      side,
+      injuries,
+    );
+  }
   const sum = (side: "home" | "away", read: (shot: QuickShot) => number) =>
     sampled.shots
       .filter((shot) => shot.side === side)

@@ -1646,10 +1646,12 @@ export function finalizeMatch(state: GameState): MatchDigest {
    * 나오는데 다음 경기엔 멀쩡히 선발로 섰다. 우리만 주전을 잃는 비대칭이기도 했다.
    * 결장 일수는 우리 선수에게만 알린다 — 남의 부상 정도는 우리가 진단하지 않는다.
    */
-  const rng = makeRng(
-    state.seed,
-    `injury:${state.season}:${match.competitionId ?? "friendly"}:${match.stage ?? "league"}:${match.round}`,
-  );
+  /**
+   * 난수 채널은 **경기 하나에 하나**다 — 간이 시뮬도 같은 모양을 쓴다(match.md §7).
+   * 시즌·대회·차수로 엮으면 차수가 겹치는 경기(친선)가 같은 난수열을 받아 같은
+   * 자리에서 같은 부상이 반복된다.
+   */
+  const rng = makeRng(state.seed, `injury:${match.id}`);
   for (const e of ledger.events) {
     if (e.type !== "injury" || !e.actors[0]) continue;
     const player = playerById(state, e.actors[0]);

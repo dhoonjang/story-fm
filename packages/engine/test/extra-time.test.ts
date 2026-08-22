@@ -1047,6 +1047,22 @@ describe("승부차기 (competition.md §6)", () => {
     expect(suddenDeath).toBeGreaterThan(0);
   });
 
+  it("갈리지 않은 승부차기는 장부에 적지 않는다 — 동점 합계는 승자를 못 낸다", () => {
+    /**
+     * 찰 사람이 아무도 없는 명단에서만 루프가 갈리지 않은 채 멈춘다. 그때 0–0을
+     * 적으면 그것이 멱등의 문지기가 되어 다시 굴러가지 않고, 동점 합계는
+     * `settledTieWinner`가 null로 읽어 그 대진이 영영 안 끝난다 (competition.md §7).
+     */
+    const state = world();
+    const [decider] = stageTie(state, "facup", "r32", 890, [
+      { home: "ghost-home", away: "ghost-away", homeGoals: 0, awayGoals: 0 },
+    ]);
+    const tally = resolveShootout(state, decider!);
+    expect(tally).toEqual({ home: 0, away: 0 });
+    expect(decider!.result!.penalties).toBeUndefined();
+    expect(domesticTieWinner(state, "facup", "r32", 890)).toBeNull();
+  });
+
   it("한 발씩 굴린 감독의 경로와 한 번에 굴린 경로가 같은 킥 목록을 낸다", () => {
     // 두 경로가 갈리면 감독의 중계와 장부가 어긋난다 — 난수 채널에 킥 인덱스가
     // 들어가는 이유가 이것이다
