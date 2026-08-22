@@ -1,6 +1,7 @@
 import type { MatchRecord } from "@story-fm/domain";
 import { isReserveMatch, reserveCompetitionId } from "@story-fm/domain";
-import { addDays, buildSeasonCalendar, shuffled, type LeagueMembership } from "./calendar";
+import { addDays, buildSeasonCalendar, type LeagueMembership } from "./calendar";
+import { shuffled } from "../core/rng";
 import { isMarketOnlyLeague } from "../data/league-catalog";
 import { leagueOfTeam } from "../data/team-catalog";
 import { scopedTeams, type WorldScope } from "../world/scope";

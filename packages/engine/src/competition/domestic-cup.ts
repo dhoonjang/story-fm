@@ -32,7 +32,7 @@ import { isTopFlightIn } from "./promotion";
 import { reservedEuroDatesFor } from "./euro-knockout";
 import { formatMoney, payOnce } from "../club/finance";
 import { clearForCup } from "./reschedule";
-import { makeRng } from "../core/rng";
+import { shuffled } from "../core/rng";
 import { needsShootout, pairOf, resolveExtraTime, settledTieWinner } from "./extra-time";
 import { resolveShootout } from "./shootout";
 import { pushNarrative, teamName, teamShortName, type GameState } from "../core/state";
@@ -631,16 +631,6 @@ function payRoundPrize(
 }
 
 /** 결정적 셔플 — 같은 (seed, channel)이면 항상 같은 추첨 */
-function shuffled<T>(items: readonly T[], seed: number, channel: string): T[] {
-  const rng = makeRng(seed, channel);
-  const out = [...items];
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [out[i], out[j]] = [out[j]!, out[i]!];
-  }
-  return out;
-}
-
 /**
  * 브래킷 시딩 순서 — `order[대진] = 그 대진에 앉는 서열`. 8대진이면
  * [0,7,3,4,1,6,2,5] (1·8·4·5·2·7·3·6) — 상위 둘이 결승 전에 만나지 않는 표준 배치다.

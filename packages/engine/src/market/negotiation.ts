@@ -46,11 +46,11 @@ import {
   renewalExpectation,
   responseDelayDays,
   severanceOf,
-  squadDepthOf,
   unilateralSeveranceOf,
   wageExpectationOf,
   type DealTerms,
 } from "./market";
+import { betterAtPosition, squadDepthOf } from "../squad/depth";
 import { clearDepartedState, isFreeAgent, loanPlayer, releasePlayer } from "./departures";
 import {
   describeMedical,
@@ -1406,14 +1406,7 @@ function openRequestedOffer(
 /** 우리 스쿼드에서 그 자리를 더 잘 보는 선수 수 — 오퍼가 올 만한 선수 판별 */
 function betterAtPositionInSquad(state: GameState, player: { id: string }): number {
   const target = playerById(state, player.id);
-  if (!target) return 0;
-  const position = naturalPositionOf(target).position;
-  return playersOf(state, state.userTeamId).filter(
-    (p) =>
-      p.id !== target.id &&
-      naturalPositionOf(p).position === position &&
-      p.attributes.overall > target.attributes.overall,
-  ).length;
+  return target ? betterAtPosition(state, state.userTeamId, target) : 0;
 }
 
 /** 오퍼를 넣을 구단 — 그 자리가 우리보다 약하고 예산이 되는 곳 */

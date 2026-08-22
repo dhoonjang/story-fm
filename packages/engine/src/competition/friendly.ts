@@ -1,6 +1,6 @@
 import type { MatchRecord } from "@story-fm/domain";
 import { addDays, buildSeasonCalendar, squadReturnOf, type LeagueMembership } from "./calendar";
-import { makeRng } from "../core/rng";
+import { makeRng, shuffleInPlace } from "../core/rng";
 import { isMarketOnlyLeague } from "../data/league-catalog";
 import { strengthBase, type TeamCatalogEntry } from "../data/team-catalog";
 import { scopedTeams, type WorldScope } from "../world/scope";
@@ -139,14 +139,6 @@ function rampOpponent(
     if (best === null || distance < best.distance) best = { team, distance };
   }
   return best?.team ?? null;
-}
-
-/** 시드 난수로 제자리 섞기 — 호출 순서가 고정이라 같은 시드는 같은 배치다 */
-function shuffleInPlace<T>(items: T[], rng: () => number): void {
-  for (let i = items.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [items[i], items[j]] = [items[j]!, items[i]!];
-  }
 }
 
 /**

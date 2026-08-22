@@ -3,7 +3,7 @@ import { addDays, dayOfWeek, firstHalfPairs } from "./calendar";
 import { cupCatalog, cupCatalogById } from "../data/cup-catalog";
 import { leagueCatalogById } from "../data/league-catalog";
 import { leagueOfTeam, teamCatalogById, teamsOfLeague } from "../data/team-catalog";
-import { makeRng } from "../core/rng";
+import { makeRng, shuffled } from "../core/rng";
 import { catalogTierOf } from "../core/club-tier";
 import { seasonYear } from "./calendar";
 
@@ -510,16 +510,6 @@ export function buildEuroLeaguePhase(
 }
 
 /** 시드 기반 결정적 셔플 — 같은 (seed, channel)이면 항상 같은 순서 */
-function shuffled<T>(items: readonly T[], seed: number, channel: string): T[] {
-  const rng = makeRng(seed, channel);
-  const out = [...items];
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [out[i], out[j]] = [out[j]!, out[i]!];
-  }
-  return out;
-}
-
 /** 전 대항전 리그 페이즈 — 새 시즌 생성·전환에서 함께 만든다 */
 export function buildAllEuroMatches(
   season: number,

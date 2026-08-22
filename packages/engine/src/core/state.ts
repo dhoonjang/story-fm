@@ -86,6 +86,7 @@ import {
   seasonYear,
   type SeasonCalendar,
 } from "../competition/calendar";
+import { diffDays } from "./dates";
 import { rankByName } from "./name-match";
 import { tierOfTeamIn } from "./club-tier";
 import { defaultXiIds, playerCatalog } from "../world/catalog";
@@ -1143,6 +1144,19 @@ export function isAvailable(state: GameState, playerId: string): boolean {
 
 export function activeContract(state: GameState, playerId: string): Contract | null {
   return state.contracts.find((c) => c.gamePlayerId === playerId && c.status === "active") ?? null;
+}
+
+/**
+ * 계약 잔여 연수 (소수, 만료 뒤는 0) — 몸값·설득·재계약이 같은 자를 읽는다.
+ *
+ * 이적가(`market.ts`)와 설득 판정(`persuasion.ts`)이 각자 적던 값이다. 그 둘은
+ * `market → persuasion` 한 방향으로만 이어져 있어 아래쪽이 위를 부를 수 없었고,
+ * 그래서 두 줄이 두 벌로 살았다 — 계약이 곧 상태라 자리는 여기다 (AGENTS.md §5).
+ */
+export function contractYearsLeft(state: GameState, playerId: string): number {
+  const contract = activeContract(state, playerId);
+  if (!contract) return 0;
+  return Math.max(0, diffDays(state.date, contract.until) / 365);
 }
 
 /** 팀 주급 총액 — 활성 계약의 합 (저장하지 않는 파생값) */

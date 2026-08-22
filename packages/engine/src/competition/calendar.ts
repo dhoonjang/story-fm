@@ -1,7 +1,7 @@
 import type { MatchRecord, MatchStage, ScheduleEntry, TransferWindow } from "@story-fm/domain";
 import { isReserveMatch } from "@story-fm/domain";
 import { scopedLeagues, scopedTeams, scopedTeamsOfLeague, type WorldScope } from "../world/scope";
-import { makeRng } from "../core/rng";
+import { shuffled } from "../core/rng";
 import { isEuroWeek } from "./europe";
 
 /**
@@ -621,17 +621,6 @@ export function firstHalfPairs(teamIds: string[]): Array<Array<[string, string]>
     rounds.push(pairs);
   }
   return rounds;
-}
-
-/** 시드 기반 결정적 셔플 — 시즌·라운드마다 다른 배치를 만들되 재현 가능하게 */
-export function shuffled<T>(items: readonly T[], seed: number, channel: string): T[] {
-  const rng = makeRng(seed, channel);
-  const out = [...items];
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [out[i], out[j]] = [out[j]!, out[i]!];
-  }
-  return out;
 }
 
 /**

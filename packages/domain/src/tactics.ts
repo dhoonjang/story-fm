@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DateString } from "./date-string";
+import { DateString, diffDays } from "./date-string";
 import {
   type AttributeAxis,
   type AxisValues,
@@ -1189,11 +1189,13 @@ export const MEMORY_FADE_DAYS = 14;
 /** 거리 1당 전이 손실 — 비슷한 전술일수록 많이 물려받는다 (초안) */
 const TRANSFER_LOSS = 0.8;
 
+/**
+ * 기억이 잊히는 데 쓰는 경과 일수 — **음수도 깨진 날짜도 0으로 접는다.**
+ * 자 자체는 `diffDays` 하나이고, 여기서는 "아직 안 지났다"로 읽을 뿐이다.
+ */
 function daysBetween(from: string, to: string): number {
-  const a = Date.parse(`${from}T00:00:00Z`);
-  const b = Date.parse(`${to}T00:00:00Z`);
-  if (Number.isNaN(a) || Number.isNaN(b)) return 0;
-  return Math.max(0, Math.round((b - a) / 86_400_000));
+  const days = diffDays(from, to);
+  return Number.isNaN(days) ? 0 : Math.max(0, days);
 }
 
 /** 지문 → 설정 (기억에서 거리를 재려면 되돌려야 한다). 형식이 깨졌으면 null */

@@ -11,7 +11,7 @@ import {
 import { completeDraw, drawIsDue, scheduleDraw } from "./draw-schedule";
 import { EURO_NIGHT_KICKOFF, euroMatchdayDates, knockoutDates } from "./europe";
 import { payLeaguePhasePrizes, payStagePrizes } from "./euro-prize";
-import { makeRng } from "../core/rng";
+import { makeRng, shuffleInPlace } from "../core/rng";
 import { needsShootout, pairOf, resolveExtraTime, settledTieWinner } from "./extra-time";
 import { resolveShootout } from "./shootout";
 import { pushNarrative, teamNameIn, teamShortNameIn, type GameState } from "../core/state";
@@ -236,10 +236,7 @@ function mainDrawPairs(
   const direct = seeds.slice(0, cup.directSlots);
   const rng = makeRng(state.seed, `draw:${cup.id}:${state.season}`);
   const pool = [...winners];
-  for (let i = pool.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [pool[i], pool[j]] = [pool[j]!, pool[i]!];
-  }
+  shuffleInPlace(pool, rng);
   return direct.map((teamId, i) => [teamId, pool[i] ?? pool[pool.length - 1]!]);
 }
 
