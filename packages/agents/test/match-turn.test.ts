@@ -17,6 +17,7 @@ import {
   buildLedgerNote,
   buildSegmentMessage,
   GmTurnFailure,
+  MATCH_ADVANCED,
   runGmTurn,
   stampMatchScene,
   stampMatchStream,
@@ -250,7 +251,7 @@ describe("경기 턴의 실패 — 어느 걸음이 흔들렸나", () => {
     expect(runTurn).toHaveBeenCalledTimes(2);
     expect(turn.text).toContain("다시 이어갑니다");
     // 구간은 해석 뒤 코어가 굴린 것 하나뿐 — 재시도가 판을 한 번 더 밀지 않는다
-    expect(turn.toolCalls.filter((c) => c.name === "advance_match")).toHaveLength(1);
+    expect(turn.toolCalls.filter((c) => c.name === MATCH_ADVANCED)).toHaveLength(1);
     expect(state.pendingMatch!.ledger.minute).toBeGreaterThan(0);
   });
 

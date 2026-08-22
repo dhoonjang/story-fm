@@ -72,7 +72,6 @@ import {
   type CardMark,
   type GameState,
   type GoalMark,
-  type SkillBrief,
 } from "@story-fm/engine";
 import {
   ATTRIBUTE_AXES,
@@ -88,7 +87,7 @@ import {
 import type { GameToolSpec, ToolCallContext } from "@story-fm/llm";
 import { skillDescriptions } from "./skill-descriptions";
 import { inputError, toToolSchema } from "./tool-schema";
-import type { GmToolCall } from "./gm-types";
+import { recordCall, type GmToolCall, type SkillReturn } from "./gm-types";
 
 /**
  * 인자의 갈래 — **같은 종류는 같은 검증을 지난다** (prompts.md §2).
@@ -192,15 +191,6 @@ function writtenLines(text: string): number {
   return text.split("\n").filter((line) => line.trim().length > 0).length;
 }
 
-/** 엔진 스킬이 돌려주는 것 — `SkillResult`와 같은 모양이되 도구 쪽에서 좁게 읽는다 */
-type SkillReturn = {
-  ok: boolean;
-  message: string;
-  brief?: SkillBrief;
-  payload?: unknown;
-  tone?: "good" | "bad";
-};
-
 /** 실모드 GM의 스킬 도구 바인딩 — 엔진 함수를 GameToolSpec으로 감싼다 */
 export function buildGmTools(
   state: GameState,
@@ -208,30 +198,13 @@ export function buildGmTools(
   options?: { deferNegotiationIds?: ReadonlySet<string> },
 ): GameToolSpec[] {
   const descriptions = skillDescriptions();
-  const record = (
-    name: string,
-    result: SkillReturn,
-    input?: unknown,
-    context?: ToolCallContext,
-  ) => {
-    // 구조화된 결과·톤은 있을 때만 싣는다 — 없으면 화면이 칩 + 요약으로 폴백한다
-    if (result.ok) {
-      calls.push({
-        name,
-        summary: result.message,
-        input,
-        // 항목 요약은 코어가 낸 그대로 실어 보낸다 — 여기서 문자열로 접으면 화면이 도로 쪼갠다
-        ...(result.brief === undefined ? {} : { brief: result.brief }),
-        ...(result.payload === undefined ? {} : { payload: result.payload }),
-        ...(result.tone === undefined ? {} : { tone: result.tone }),
-        // 이 스킬이 불린 자리 — 화면이 장면 중간에 칩을 세운다
-        ...(context ? { line: writtenLines(context.text) } : {}),
-      });
-    }
-    return result;
-  };
+  const record = (name: string, result: SkillReturn, input?: unknown, context?: ToolCallContext) =>
+    recordCall(calls, name, result, {
+      input,
+      ...(context ? { line: writtenLines(context.text) } : {}),
+    });
   /**
-   * **무직인 감독이 부를 수 있는 조작 도구는 하나뿐이다** (career.md §5.1).
+   * **무직인 감독이 부를 수 있는 조작 도구는 셋뿐이다** (career.md §5.1).
    *
    * 경질돼도 `userTeamId`는 옛 구단을 가리키므로(그 구단의 장부는 계속 돌아야
    * 한다) 막지 않으면 모델은 남의 구단의 라인업을 짜고 남의 선수를 팔 수 있다.
