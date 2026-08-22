@@ -1,0 +1,149 @@
+name: balance
+
+# 밸런스 하네스 — **PR 게이트가 아니다** (→ docs/simulation/balance-harness.md §5).
+#
+# 하네스가 재는 것은 고정 기대값이 아니라 밴드다. 전부 도는 데 총 CPU 10분 안팎이고
+# (`ci.yml`의 초록까지 벽시계는 지금 4분대다) 여기 얹으면 PR마다 그만큼을 더 문다.
+# 정작 밴드를 움직이는 커밋은 드무니, 판정은 주 1회로 모아 한다.
+#
+# 일요일 18:00 UTC = 월요일 03:00 KST — 주말 머지분까지 담고, 사람이 읽는 시간
+# (월요일 아침)에 결과가 서 있다. 손으로 부를 자리도 함께 열어 둔다.
+#
+# ⚠️ 스케줄은 기본 브랜치(main)의 이 파일로만 돈다. 브랜치에서 고친 주기는
+# 머지되기 전까지 아무 효과가 없고, 그동안 확인하는 길은 `workflow_dispatch`다.
+on:
+  schedule:
+    - cron: "0 18 * * 0"
+  workflow_dispatch:
+
+# 앞선 실행을 죽이지 않는다 — 주 1회라 겹칠 일이 없고, 겹친다면 그건 지난 실행이
+# 아직 도는 중이라는 뜻이라 버릴 값이 아니다.
+concurrency:
+  group: balance
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  # 밴드 이탈을 이슈로 여는 스텝이 쓴다 — 그 밖에는 아무것도 쓰지 않는다
+  issues: write
+
+jobs:
+  balance:
+    name: 밸런스 하네스
+    # 하네스는 vitest가 파일 단위로 병렬로 돌리므로 코어가 듣는다 — `ci.yml`의 test
+    # 잡과 같은 손잡이를 쓴다(`gh variable list`가 지금 값을 답한다). 주 1회 몇 분이라
+    # 어느 러너로 가든 무료분 안에 머문다.
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    # 12코어에서 벽시계 3분(총 CPU 9분 반) — 러너 코어가 적으면 그만큼 길어진다.
+    # 여유를 크게 두는 이유는 시한에 걸린 하네스가 「보고 없음」으로 이슈에 서기 때문이다.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # LLM 키는 주지 않는다 — 하네스는 코어와 프롬프트 조립만 재고, 프롬프트 회귀
+      # 하네스는 `LLM_MODE=mock`으로 돈다 (AGENTS.md §5)
+      #
+      # `guard` 이탈이면 vitest가 빨갛게 끝난다. 그래도 판정은 아래 스텝이 파일로
+      # 읽으므로 여기서 잡을 멈추지 않는다 — 멈추면 리포트도 이슈도 서지 않는다.
+      - name: pnpm balance
+        id: run
+        continue-on-error: true
+        env:
+          LLM_MODE: mock
+        run: pnpm balance --report balance-report
+
+      # 잡 요약 — 하네스별 표가 실행 화면에 그대로 선다
+      - name: 잡 요약
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -f balance-report/summary.md ]; then
+            cat balance-report/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "리포트가 없다 — \`pnpm balance\`가 시작조차 못 했다." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: 리포트 아티팩트
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: balance-report
+          path: balance-report/
+          # 비어 있으면 스텝이 조용히 지나간다 — 리포트가 안 나온 것을 여기서 만난다
+          if-no-files-found: error
+          # 밴드가 언제부터 어긋났는지는 지난 실행과 나란히 놓아야 보인다 — 주 1회라
+          # 90일이면 열세 번치다
+          retention-days: 90
+
+      # 밴드 이탈을 사람 손 없이 보이게 하는 마지막 자리.
+      #
+      # 판정은 `guard`만 한다 — `reference` 이탈은 지금도 여럿이라(그게 읽을 값이다)
+      # 이슈로 열면 매주 같은 소음이 서고 진짜 신호가 그 안에 묻힌다. 표는 위의
+      # 요약·아티팩트에 그대로 서므로 읽을 값이 사라지지는 않는다.
+      - name: 밴드 이탈을 이슈로
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ ! -f balance-report/breaches.json ]; then
+            echo "리포트가 없다 — 이슈를 열지 않는다"; exit 1
+          fi
+          count=$(jq 'length' balance-report/breaches.json)
+          echo "이탈 $count건"
+          if [ "$count" -eq 0 ]; then exit 0; fi
+
+          # 이탈 표 — 밴드 숫자는 전부 리포트에서 온다(서술자가 원본)
+          {
+            echo "## 무엇이"
+            echo
+            echo "주간 밸런스 하네스가 \`guard\` 밴드 이탈 ${count}건을 냈다 — [실행 로그](${RUN_URL})."
+            echo "표 전체와 측정값 원본은 그 실행의 \`balance-report\` 아티팩트에 있다."
+            echo
+            echo "| 하네스 | 지표 | 측정 | 구간 | 왜 그 구간인가 | 근거 |"
+            echo "| --- | --- | --- | --- | --- | --- |"
+            jq -r '.[] | "| `\(.harness)` | \(.metric) | \(.measured) | \(.range) | \(.why) | \(.doc) |"' \
+              balance-report/breaches.json
+            echo
+            echo "## 작업"
+            echo
+            jq -r '.[] | "- [ ] `\(.harness)` — \(.metric)이 \(.range)로 돌아오게 하거나, 밴드가 틀렸다면 서술자를 고친다"' \
+              balance-report/breaches.json
+            echo
+            echo "## 완료 조건"
+            echo
+            echo "- [ ] \`pnpm balance\`가 \`guard\` 이탈 없이 끝난다"
+          } > issue-body.md
+
+          # 라벨이 없으면 `gh issue create`가 통째로 실패한다 — 먼저 세운다(있으면 그대로)
+          gh label create balance --color ededed --description "밸런스 밴드 이탈" 2>/dev/null || true
+
+          # 이미 열린 이슈가 있으면 새로 열지 않는다 — 매주 같은 이슈가 쌓이면
+          # 백로그의 우선순위가 이 자동화 하나로 덮인다
+          open=$(gh issue list --state open --label balance --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --body-file issue-body.md
+            echo "기존 이슈 #$open 에 이번 주 표를 붙였다"
+          else
+            # ⚠️ priority 라벨을 반드시 붙인다 — `resolve`는 그 라벨 없는 이슈를
+            # 후보로 집지 않아, 라벨이 없으면 이슈는 열리기만 하고 아무도 집지 않는다.
+            # `guard`는 깨지면 게임이 성립하지 않는 선이라 high다.
+            gh issue create \
+              --title "fix(balance): 밸런스 밴드 이탈 ${count}건 — 주간 하네스" \
+              --body-file issue-body.md \
+              --label balance --label bug --label priority/high
+          fi
+
+      # 하네스가 빨갰다면 잡도 빨개야 한다 — 위에서 `continue-on-error`로 넘긴 것을
+      # 여기서 되돌린다. 이슈·리포트는 이미 남았다.
+      - name: 하네스 판정
+        if: ${{ steps.run.outcome == 'failure' }}
+        run: |
+          echo "하네스가 빨갛게 끝났다 — 위의 요약과 아티팩트를 읽어라"
+          exit 1

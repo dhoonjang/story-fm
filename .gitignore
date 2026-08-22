@@ -24,6 +24,10 @@ playwright-report-*/
 blob-report/
 .playwright-mcp/
 
+# 밸런스 하네스 리포트 — `pnpm balance --report`의 산출물. 판정은 주간 워크플로가
+# 아티팩트로 들고 가고, 로컬 실행분은 다음 실행이 지운다.
+balance-report/
+
 # 게임 세이브 — 로컬 플레이 데이터. 커밋·git clean 대상에서 제외해
 # 업데이트·브랜치 전환에도 유저 게임이 날아가지 않게 한다.
 .data/
