@@ -1,5 +1,8 @@
 /** 날짜·시각 유틸 — ISO 문자열(YYYY-MM-DD), 시간대 이슈를 피해 UTC로만 계산한다. */
 
+/** 날짜 차의 원본은 `packages/domain/src/date-string.ts`다 — 여기서는 재수출만 한다 */
+export { diffDays } from "@story-fm/domain";
+
 export function addDays(iso: string, days: number): string {
   const d = new Date(`${iso}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
@@ -19,12 +22,6 @@ export const SATURDAY = 6;
 export function isWeekend(iso: string): boolean {
   const dow = dayOfWeek(iso);
   return dow === SUNDAY || dow === SATURDAY;
-}
-
-export function diffDays(a: string, b: string): number {
-  return Math.round(
-    (new Date(`${b}T00:00:00Z`).getTime() - new Date(`${a}T00:00:00Z`).getTime()) / 86_400_000,
-  );
 }
 
 /** 시즌 n의 기준 연도 — 시즌 1 = 2026 */

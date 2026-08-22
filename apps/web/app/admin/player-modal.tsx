@@ -387,7 +387,7 @@ export function PlayerModal({
 
       <section>
         <div className="admin-section-head">
-          <b className="admin-section-title">능력치 15축</b>
+          <b className="admin-section-title">능력치 16축</b>
           <span className="admin-section-note">1–99 · OVR은 파생값이라 저장하지 않습니다</span>
         </div>
         <div className="admin-axis-groups">

@@ -108,7 +108,7 @@ export interface SideInput {
 }
 
 /**
- * 존 기여 점수 — **맡은 자리의 가중치**로 계산한 15축 가중합 × 상태 보정.
+ * 존 기여 점수 — **맡은 자리의 가중치**로 계산한 16축 가중합 × 상태 보정.
  * 포지션군별 하드코딩 공식이 아니라 POSITION_WEIGHTS(도메인) 하나에서 나온다
  * (player.md §2 — overall·roleFit·존 점수의 단일 소스).
  */
@@ -162,7 +162,7 @@ export function famFactor(familiarity: number, position: string): number {
 /**
  * 이 선수가 **지금 이 자리에서** 내는 전력 — 패킷이 노출하는 개인 유효 능력치.
  *
- *   roleFit(15축 × 자리 가중치) × 상태(폼·사기·피로) × 포지션 적응도 × 전술 적응도
+ *   roleFit(16축 × 자리 가중치) × 상태(폼·사기·피로) × 포지션 적응도 × 전술 적응도
  *
  * 존 전력은 이 값들의 평균일 뿐이라, 감독이 "누가 지금 안 돌아가는가"를 물으면
  * 여기서 답이 나온다. 중계 LLM도 같은 숫자를 본다.
@@ -849,8 +849,13 @@ function buildPlayerShotProfiles(
       const roleShotWeight = roleWeights(slot.position, slot.roleId).finishing;
       const creation = creationEffectiveOf(slot);
       const attrs = slot.player.attributes;
+      /**
+       * **기회의 질은 어디에 서느냐가 아니라 어디로 가느냐가 정한다** — 뒷공간으로
+       * 들어가고 마크를 벗는 일이라 수비 위치선정이 아니라 침투다
+       * (player.md §13.5 · match.md §1.4).
+       */
       const chanceSkill =
-        attrs.positioning * 0.4 + attrs.dribbling * 0.25 + attrs.pace * 0.2 + attrs.aerial * 0.15;
+        attrs.offTheBall * 0.4 + attrs.dribbling * 0.25 + attrs.pace * 0.2 + attrs.aerial * 0.15;
       const rawRouteWeights = GRID_LANES.map((route) => ({
         route,
         weight: (1 / (1 + Math.abs(point.x - LANE_X[route]) / ROUTE_REACH)) * (1 + focus(route)),

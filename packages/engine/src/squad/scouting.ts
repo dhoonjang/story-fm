@@ -80,11 +80,12 @@ export const AXIS_OBSERVABILITY: Record<AttributeAxis, Observability> = {
   aggression: "observable",
   // GK는 매 경기 슛을 받으니 표본이 빨리 쌓인다
   goalkeeping: "observable",
-  // 분석형 — 결정력은 경기당 유효 슈팅이 2~3회뿐이고, 위치선정·시야는 화면 밖에서
+  // 분석형 — 결정력은 경기당 유효 슈팅이 2~3회뿐이고, 위치선정·침투·시야는 화면 밖에서
   // 일어나며, 침착성·리더십은 큰 경기와 라커룸에서만 확인된다
   finishing: "analytical",
   vision: "analytical",
   positioning: "analytical",
+  offTheBall: "analytical",
   composure: "analytical",
   leadership: "analytical",
 };
@@ -133,7 +134,7 @@ export function observationMargin(
 /** 실행 계열의 오차 — 안개 안내문이 "무엇까지 믿어도 되나"를 말할 때 쓴다 */
 export const KNOWLEDGE_MARGIN: Record<Knowledge, number> = OBSERVATION_MARGIN.observable;
 
-/** 안개를 씌워 노출하는 축 — 15축 전부 */
+/** 안개를 씌워 노출하는 축 — 16축 전부 */
 export const SCOUT_ATTRS = ATTRIBUTE_AXES;
 export type ScoutAttr = AttributeAxis;
 
@@ -224,7 +225,7 @@ export function observedRating(
  * 이제 안개는 **축에만** 씌우고(`AxisValues`가 이미 관측값이다) 합성값은 그
  * 축에서 파생시킨다 — 그러면 어느 자리로 옮겨 계산해도 서로 어긋날 수 없다.
  * `overallOffset`은 그 파생값에 얹는 **하나의** 오프셋이다: 축 평균만으로는
- * 오차가 상쇄돼(15축이 각자 흩어진다) 평판만 아는 선수의 종합이 실제보다
+ * 오차가 상쇄돼(16축이 각자 흩어진다) 평판만 아는 선수의 종합이 실제보다
  * 정확해진다. 자리마다 같은 값이 얹히므로 **자리끼리의 비교는 흔들리지 않는다.**
  */
 export interface Observation {
@@ -271,7 +272,7 @@ export interface ScoutedAttribute {
   label: string;
 }
 
-/** 능력치 15축을 지식 수준 × 축별 관측 가능성에 맞춰 노출 */
+/** 능력치 16축을 지식 수준 × 축별 관측 가능성에 맞춰 노출 */
 export function scoutedAttributes(state: GameState, player: GamePlayer): ScoutedAttribute[] {
   const knowledge = knowledgeOf(state, player.id);
   return SCOUT_ATTRS.map((key) => {

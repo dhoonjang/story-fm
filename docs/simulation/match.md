@@ -67,7 +67,7 @@ PacketTag {
 ### 1.1 전력은 개인에서 시작한다
 
 ```
-effective(선수) = roleFit(15축 × 자리 가중치)
+effective(선수) = roleFit(16축 × 자리 가중치)
                 × stateModifier(폼 + 체력·경기 중 피로)
                 × profFactor(포지션 적응도)           0.10~1.00
                 × famFactor(전술 적응도 × 자리 민감도) 0.79~1.00
@@ -245,7 +245,7 @@ logit(μᵢᵣ) = logit(BASE_SHOT_XG)
            + ROUTE_XG_LOGIT_WEIGHT        × 포화시킨 최종 공격 지역 우위
            + SHOT_DEPTH_XG_LOGIT_WEIGHT   × (전술판 전진 깊이 − 0.5)
            + CHANCE_SKILL_XG_LOGIT_WEIGHT × (기회 능력 − 65) / 34
-           기회 능력 = 위치선정 0.4 + 드리블 0.25 + 스피드 0.2 + 공중볼 0.15
+           기회 능력 = 침투 0.4 + 드리블 0.25 + 스피드 0.2 + 공중볼 0.15
 
 qᵢⱼ ~ Beta(μᵢᵣ κ, (1−μᵢᵣ) κ)                κ = SHOT_XG_CONCENTRATION
 
@@ -1061,7 +1061,7 @@ DF +1.4 · MF +1.1 · FW +0.9 · 도움 +0.6 · 무실점 GK +0.8/DF +0.5 · 실
 | `FINISHING_ACCESS_LOG_WEIGHT`                    | 0.10                                            | 결정력이 슈팅 접근에 주는 작은 효과                                         |
 | `FINISHING_PIVOT` · `FINISHING_SCALE`            | 75 · 34                                         | 기회 xG를 그대로 실현하는 슈팅 가중 리그 기준점과 그 주변의 대칭 눈금       |
 | `FINISHING_LOGIT_WEIGHT`                         | 0.55                                            | 같은 xG를 실제 골로 바꾸는 결정력 효과                                      |
-| `CHANCE_SKILL_XG_LOGIT_WEIGHT`                   | 0.45                                            | 위치선정·돌파·스피드·공중볼이 슈팅 질에 닿는 세기                           |
+| `CHANCE_SKILL_XG_LOGIT_WEIGHT`                   | 0.45                                            | 침투·돌파·스피드·공중볼이 슈팅 질에 닿는 세기                               |
 | `ROUTE_SHOT_LOG_WEIGHT`                          | 0.75                                            | 경로 우위가 슈팅량에 닿는 세기                                              |
 | `ROUTE_XG_LOGIT_WEIGHT`                          | 0.7                                             | 최종 공격 지역 우위가 슈팅 질에 닿는 세기                                   |
 | `HOME_SHOT_EXPOSURE` · `AWAY_SHOT_EXPOSURE`      | 1.06 · 0.96                                     | 홈·원정이 슈팅량에 곱하는 노출 — 중립 경기는 둘 다 1                        |
@@ -1387,14 +1387,16 @@ UI의 같은 탭은 반대로 **고른 대회의** 다음 우리 경기를 세�
 
 ## 코드 위치
 
-| 무엇                          | 어디                                                                      |
-| ----------------------------- | ------------------------------------------------------------------------- |
-| 전력 패킷·키포인트·공략       | `packages/sim/src/strength-packet.ts` · `key-points.ts` · `exploits.ts`   |
-| 슈팅 xG·결정력·표집 분포      | `packages/sim/src/shot-model.ts`                                          |
-| 개인 지시·판세 격자           | `packages/sim/src/directives.ts` · `zone-grid.ts`                         |
-| 구간 시뮬레이터·장부          | `packages/sim/src/match-engine.ts` · `match-ledger.ts`                    |
-| 전술 상성·체력                | `packages/sim/src/tactical-counters.ts` · `stamina.ts`                    |
-| 경기 흐름·정지점·마감         | `packages/engine/src/match/match-flow.ts`                                 |
-| 연장 판정·타 팀 연장·승부차기 | `packages/engine/src/competition/extra-time.ts` · `shootout.ts`           |
-| 간이 시뮬·평점·징계           | `packages/engine/src/match/quick-sim.ts` · `ratings.ts` · `discipline.ts` |
-| 경기 화면                     | `apps/web/components/match-view.tsx`                                      |
+| 무엇                             | 어디                                                                       |
+| -------------------------------- | -------------------------------------------------------------------------- |
+| 시드 난수 (`makeRng`·`shuffled`) | `packages/sim/src/rng.ts` — 엔진(`core/rng.ts`)과 match-cli가 같이 부른다  |
+| 구간 사건 정렬·누적 피로         | `packages/sim/src/segment.ts` — 엔진의 진행 루프와 match-cli가 같이 부른다 |
+| 전력 패킷·키포인트·공략          | `packages/sim/src/strength-packet.ts` · `key-points.ts` · `exploits.ts`    |
+| 슈팅 xG·결정력·표집 분포         | `packages/sim/src/shot-model.ts`                                           |
+| 개인 지시·판세 격자              | `packages/sim/src/directives.ts` · `zone-grid.ts`                          |
+| 구간 시뮬레이터·장부             | `packages/sim/src/match-engine.ts` · `match-ledger.ts`                     |
+| 전술 상성·체력                   | `packages/sim/src/tactical-counters.ts` · `stamina.ts`                     |
+| 경기 흐름·정지점·마감            | `packages/engine/src/match/match-flow.ts`                                  |
+| 연장 판정·타 팀 연장·승부차기    | `packages/engine/src/competition/extra-time.ts` · `shootout.ts`            |
+| 간이 시뮬·평점·징계              | `packages/engine/src/match/quick-sim.ts` · `ratings.ts` · `discipline.ts`  |
+| 경기 화면                        | `apps/web/components/match-view.tsx`                                       |

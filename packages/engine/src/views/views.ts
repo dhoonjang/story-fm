@@ -326,7 +326,7 @@ export interface RecentRatingView {
   tone: RatingTone;
 }
 
-/** 스쿼드 행 = 메타 + 15축 (오피스 뷰는 우리 선수라 숫자를 그대로 준다) */
+/** 스쿼드 행 = 메타 + 16축 (오피스 뷰는 우리 선수라 숫자를 그대로 준다) */
 export type SquadViewRow = SquadViewRowMeta & AxisValues;
 interface SquadViewRowMeta {
   id: string;
@@ -2566,7 +2566,7 @@ export { assignmentsOf };
 /**
  * 스카우트가 가져온 **보고서 한 장**을 조립한다 — 안개는 `observedRating`이 이미 씌운다.
  *
- * **한 번 읽고 넘어갈 정보가 아니다** — 능력치 15축·주발·잠재력 구간·몸값이
+ * **한 번 읽고 넘어갈 정보가 아니다** — 능력치 16축·주발·잠재력 구간·몸값이
  * 한자리에 있어야 "지금 지를까, 더 볼까"가 판단된다. 그래서 카드다.
  */
 export function scoutReportCard(state: GameState, playerId: string): ScoutReportCard | null {

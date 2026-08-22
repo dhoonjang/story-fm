@@ -136,8 +136,11 @@ const AXIS_THRESHOLD = {
   keeper: 73,
   /** 강점 — 골키퍼 passing */
   "keeper-distribution": 77,
-  /** 약점 — 백라인 평균 positioning */
-  "backline-shape": 70,
+  /**
+   * 약점 — 백라인 평균 positioning. 축이 수비 위치선정만 남으면서 백라인 평균이
+   * 2.8 올라, 같은 빈도로 잡히도록 문턱도 그만큼 옮겼다 (player.md §13.5)
+   */
+  "backline-shape": 73,
   /** 약점 — 백라인 최고 leadership */
   "backline-leader": 50,
   /** 격차 — 최전방 strength vs 수비 strength */

@@ -12,7 +12,6 @@ import type {
 } from "@story-fm/domain";
 import { isReserveMatch } from "@story-fm/domain";
 import {
-  AI_MANAGER_RATING_FALLBACK,
   ageOf,
   FORMATION_CHANGE_COST,
   clampCondition,
@@ -34,12 +33,14 @@ import {
 import type { SkillResult } from "../skills";
 import {
   MAX_EXPLOITS,
+  accumulateFatigue,
   addStats,
   advanceClock,
   applyEvents,
   buildStrengthPacket,
   createLedger,
   GAP_THRESHOLD,
+  mergeSubstitutions,
   planAiSubstitution,
   planAiTacticalShift,
   simulateSegment,
@@ -52,6 +53,7 @@ import { matchesOn } from "../competition/calendar";
 import { applyMatchFinance } from "../club/finance";
 import { clampForm, formDeltaFromMatch } from "../squad/form";
 import { applyResultMood } from "../squad/slump";
+import { managerTacticsOf } from "./manager-tactics";
 import { matchRating, type MatchRatingBrief, type PlayerMatchBrief } from "./ratings";
 import { grantManagerXP, IN_MATCH_FAMILIARITY_LOSS } from "../skills";
 import { recallRole } from "../skills/role-memory";
@@ -282,13 +284,6 @@ function reseatOnAiShape(state: GameState, teamId: string, slots: LineupSlot[]):
       ...(roleId && seat.position === slot.position ? { roleId } : {}),
     };
   });
-}
-
-function managerTacticsOf(state: GameState, teamId: string): number {
-  if (teamId === state.userTeamId) return state.manager.attributes.tactics;
-  return (
-    state.teams.find((t) => t.id === teamId)?.aiManagerTacticsRating ?? AI_MANAGER_RATING_FALLBACK
-  );
 }
 
 /**
@@ -761,16 +756,8 @@ export function advanceSegment(
         pending.matchFatigue ?? {},
       )
     : [];
-  /**
-   * 부상 교체만은 **사건 뒤**에 붙인다 — 다치기 전에 빼는 장면이 되면 안 된다.
-   * 나머지 교체는 정지 사건 앞에 끼워야 장부가 받는다 (`insertBeforeStop`).
-   */
-  const events =
-    aiSubs.length > 0
-      ? aiSubs[0]!.subCause === "injury"
-        ? [...plan.events, ...aiSubs]
-        : aiSubs.reduce((acc, sub) => insertBeforeStop(acc, sub), plan.events)
-      : plan.events;
+  // 끼우는 순서의 규칙은 sim이 쥔다 — match-cli도 같은 것을 부른다 (segment.ts)
+  const events = mergeSubstitutions(plan.events, aiSubs);
 
   let message = `사건 없이 ${plan.minute}′까지 흘렀습니다`;
   if (events.length > 0) {
@@ -837,10 +824,7 @@ export function advanceSegment(
     pending.aiTactics = guarded.success ? guarded.data : aiNow;
   }
   if (benchTurn) pending.aiDecidedAt = plan.minute;
-  const worn = (pending.matchFatigue ??= {});
-  for (const [id, add] of Object.entries(plan.fatigue)) {
-    worn[id] = Math.min(100, (worn[id] ?? 0) + add);
-  }
+  accumulateFatigue((pending.matchFatigue ??= {}), plan.fatigue);
   // 피로가 쌓였으니 다음 구간의 전력이 달라진다 (교체·전술 변경과 같은 경로)
   refreshPacket(state);
   /**
@@ -966,28 +950,6 @@ export type MatchStop = SegmentStop | "shootout_start" | "shootout_kick";
 /** 벤치가 판을 다시 짜는 정지점 — 하프타임 · 연장 개시 · 연장 하프타임 */
 function isBreak(stop: SegmentStop): boolean {
   return stop === "half_time" || stop === "extra_time_start" || stop === "extra_half_time";
-}
-
-/** 뒤에 사건을 붙일 수 없는 사건 — 장부가 그 자리에서 배치를 끊는다 */
-const STOP_EVENTS: ReadonlySet<MatchEvent["type"]> = new Set([
-  "goal",
-  "half_time",
-  "extra_time_start",
-  "extra_half_time",
-  "full_time",
-]);
-
-/**
- * 정지 사건(골·하프타임·연장 개시·종료) **앞에** 끼워 넣는다 — 그 뒤에 오는
- * 사건은 장부가 반려하고, 골 뒤에 붙은 교체는 "골 먹고 바로 뺐다"로 읽혀
- * 부자연스럽다.
- */
-function insertBeforeStop(events: MatchEvent[], extra: MatchEvent): MatchEvent[] {
-  const stopIndex = events.findIndex((e) => STOP_EVENTS.has(e.type));
-  const at = stopIndex < 0 ? events.length : stopIndex;
-  const minute = Math.min(extra.minute, events[at]?.minute ?? extra.minute);
-  const clamped = { ...extra, minute: Math.max(minute, events[at - 1]?.minute ?? 0) };
-  return [...events.slice(0, at), clamped, ...events.slice(at)];
 }
 
 /** 캐스터(LLM/mock)가 만든 사건을 장부 검증으로 반영 */

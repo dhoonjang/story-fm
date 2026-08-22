@@ -4,7 +4,7 @@ import { tierOfTeamIn } from "../core/club-tier";
 import { positionAt, relegationLine } from "../core/league-shape";
 import { inventPersonName, occupiedPersonNames, reseatClubPersonas } from "../world/persona";
 import { makeRng, randInt } from "../core/rng";
-import { addDays, contractUntil } from "../core/dates";
+import { addDays, contractUntil, diffDays } from "../core/dates";
 import { boardExpectation, computeStandings, type StandingRow } from "../competition/season";
 import { syncDefaultTraining } from "../squad/training-plan";
 import { expirePendingPress } from "../club/press";
@@ -198,7 +198,8 @@ function seatStatus(
 /** 부임한 지 얼마나 됐나 — 옛 세이브엔 없어 시즌 시작으로 본다 */
 function daysInCharge(state: GameState, team: { managerSince?: string } | undefined): number {
   const since = team?.managerSince ?? state.calendar.preseasonStart;
-  return Math.max(0, Math.round((Date.parse(state.date) - Date.parse(since)) / 86_400_000));
+  // 부임일이 오늘보다 뒤인 세이브는 없지만, 음수를 그대로 흘리면 유예 판정이 뒤집힌다
+  return Math.max(0, diffDays(since, state.date));
 }
 
 /**
@@ -246,7 +247,7 @@ function expireStaleOffers(state: GameState, digest: string[]): void {
 function pruneVacancies(state: GameState): void {
   if (!state.managerVacancies?.length) return;
   state.managerVacancies = state.managerVacancies.filter(
-    (v) => daysBetween(v.on, state.date) < VACANCY_KNOCK_DAYS,
+    (v) => diffDays(v.on, state.date) < VACANCY_KNOCK_DAYS,
   );
 }
 
@@ -266,7 +267,7 @@ export function offerDrySpell(
     (latest, o) => (o.madeOn > latest ? o.madeOn : latest),
     dismissal.on,
   );
-  return daysBetween(anchor, today) >= OFFER_DRY_SPELL_DAYS;
+  return diffDays(anchor, today) >= OFFER_DRY_SPELL_DAYS;
 }
 
 /**
@@ -429,7 +430,7 @@ export function reviewUserSeat(state: GameState, digest: string[]): boolean {
   }
   if (standing.position < seat.danger) return false;
   // 경고는 **한 달에 한 번까지** — 매일 같은 말을 반복하지 않는다
-  if (manager.lastWarnedOn && daysBetween(manager.lastWarnedOn, state.date) < 30) return false;
+  if (manager.lastWarnedOn && diffDays(manager.lastWarnedOn, state.date) < 30) return false;
 
   const board = manager.reputation.board;
   // 경고 수는 마지막 단계에서 멈춘다 — 4/3은 화면이 그릴 수 없는 숫자다.
@@ -810,8 +811,4 @@ export function applyForManagerJob(state: GameState, teamRef: string): SkillResu
       ],
     },
   };
-}
-
-function daysBetween(from: string, to: string): number {
-  return Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000);
 }

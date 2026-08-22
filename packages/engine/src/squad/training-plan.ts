@@ -24,7 +24,7 @@ import type { GameState } from "../core/state";
  *
  * **능력치를 겨냥한 focus는 본훈련에만 둔다.** 경기 전후 세션까지 축을 얹으면 특정
  * 축(킥·위치선정)만 매주 반복돼 성장이 그쪽으로 쏠린다. 본훈련은 메뉴를 순환시켜
- * 15축을 골고루 훑는다.
+ * 16축을 골고루 훑는다.
  *
  * 두 가지 불변식으로 감독의 지시를 지킨다:
  *   ① 이미 훈련이 있는 슬롯은 건드리지 않는다 (감독 지시가 이긴다)
@@ -46,16 +46,18 @@ interface SessionPlan extends MenuItem {
 }
 
 /**
- * 본훈련 메뉴 — 순환하며 15축을 모두 훑는다. 요일 고정이 아닌 이유는, 경기 전후를
+ * 본훈련 메뉴 — 순환하며 16축을 모두 훑는다. 요일 고정이 아닌 이유는, 경기 전후를
  * 걷어내고 나면 주에 두어 번밖에 남지 않아 요일로 묶으면 같은 축만 계속 훈련하게
- * 되기 때문이다. 9개(홀수)라 7일 주기와 어긋나며 돌아 요일 편중도 없다.
+ * 되기 때문이다. 10개라 7일 주기와 서로소여서 돌아 요일 편중도 없다.
+ *
+ * 넷은 한 축만 겨냥한다 — 10개가 모두 2축이면 네 축이 중복돼 그쪽만 빨리 자란다.
+ *
+ * **나열 순서에도 뜻이 있다.** 본훈련이 잡히는 날은 경기 일정이 정하므로 순환이
+ * 고르게 돌지 않고, 한 자리는 시즌 내내 손에 꼽게 걸린다. 거기에는 프리시즌 기초
+ * 체력기가 따로 채워 주는 체력 메뉴를 둔다 — 다른 축을 두면 그 축만 얇아진다
+ * (`training-plan.test.ts`가 축별 최소 횟수로 못 박는다).
  */
 const GENERAL_MENU: ReadonlyArray<MenuItem> = [
-  {
-    menuId: "general-conditioning",
-    label: "체력 강화 — 인터벌 러닝·웨이트",
-    focus: ["stamina", "strength"],
-  },
   {
     menuId: "general-possession",
     label: "볼 소유 — 론도·짧은 패스 연결",
@@ -81,14 +83,23 @@ const GENERAL_MENU: ReadonlyArray<MenuItem> = [
     label: "세트피스·제공권 — 코너·프리킥",
     focus: ["kicking", "aerial"],
   },
-  // 아래 셋은 한 축만 겨냥한다 — 9개 메뉴 × 2축이면 세 축이 중복돼 그쪽만 빨리 자란다
   { menuId: "general-pressing", label: "압박 강도 — 전방 압박 트리거", focus: ["aggression"] },
+  {
+    menuId: "general-conditioning",
+    label: "체력 강화 — 인터벌 러닝·웨이트",
+    focus: ["stamina", "strength"],
+  },
   {
     menuId: "general-goalkeeping",
     label: "GK 전담 — 슈팅 스톱·크로스 대응",
     focus: ["goalkeeping"],
   },
   { menuId: "general-team-building", label: "팀 빌딩 — 소통·리더십 세션", focus: ["leadership"] },
+  {
+    menuId: "general-off-the-ball",
+    label: "오프더볼 — 뒷공간 침투·마킹 이탈",
+    focus: ["offTheBall"],
+  },
 ];
 
 /**

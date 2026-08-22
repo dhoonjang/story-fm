@@ -87,6 +87,7 @@ import {
   seasonYear,
   type SeasonCalendar,
 } from "../competition/calendar";
+import { diffDays } from "./dates";
 import { rankByName } from "./name-match";
 import { tierOfTeamIn } from "./club-tier";
 import { defaultXiIds, playerCatalog } from "../world/catalog";
@@ -1151,6 +1152,19 @@ export function activeContract(state: GameState, playerId: string): Contract | n
   return state.contracts.find((c) => c.gamePlayerId === playerId && c.status === "active") ?? null;
 }
 
+/**
+ * 계약 잔여 연수 (소수, 만료 뒤는 0) — 몸값·설득·재계약이 같은 자를 읽는다.
+ *
+ * 이적가(`market.ts`)와 설득 판정(`persuasion.ts`)이 각자 적던 값이다. 그 둘은
+ * `market → persuasion` 한 방향으로만 이어져 있어 아래쪽이 위를 부를 수 없었고,
+ * 그래서 두 줄이 두 벌로 살았다 — 계약이 곧 상태라 자리는 여기다 (AGENTS.md §5).
+ */
+export function contractYearsLeft(state: GameState, playerId: string): number {
+  const contract = activeContract(state, playerId);
+  if (!contract) return 0;
+  return Math.max(0, diffDays(state.date, contract.until) / 365);
+}
+
 /** 팀 주급 총액 — 활성 계약의 합 (저장하지 않는 파생값) */
 /** 이번 주 주급 한 줄 — 선수 한 명이 이 구단에 지우는 부담 */
 export interface WeeklyWageLine {
@@ -1445,7 +1459,7 @@ function instantiatePlayers(seed: number, only?: (teamId: string) => boolean): G
       ...(entry.height === undefined ? {} : { height: entry.height }),
       ...(entry.weight === undefined ? {} : { weight: entry.weight }),
       attributes: {
-        // 카탈로그의 15축을 그대로 복사 (2-레이어 분리 — 이후 변화는 GAME_PLAYER에만)
+        // 카탈로그의 16축을 그대로 복사 (2-레이어 분리 — 이후 변화는 GAME_PLAYER에만)
         ...(Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, entry[a]])) as AxisValues),
         overall: 50, // 아래 recomputeOverall이 주 포지션 가중치로 채운다
         potential: entry.potential,

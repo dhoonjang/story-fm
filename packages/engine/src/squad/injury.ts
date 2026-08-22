@@ -1,4 +1,6 @@
 import type { GamePlayer, InjurySeverity } from "@story-fm/domain";
+// 성향의 바닥·천장은 세이브 스키마와 같은 상수를 읽는다 (player.md §5.3)
+import { INJURY_PRONENESS_MAX, INJURY_PRONENESS_MIN } from "@story-fm/domain";
 import { INJURY_PER_MATCH } from "@story-fm/sim";
 import { addDays, diffDays } from "../competition/calendar";
 import { playerCatalog } from "../world/catalog";
@@ -106,10 +108,6 @@ export function resolveInjuries(state: GameState, digest: string[]): void {
  * 쉰 선수가 재활하는 동안 성향이 회복돼, 돌아온 날 멀쩡한 몸이 된다.
  */
 export const PRONENESS_BASE = 1;
-/** 하한 — 아무리 튼튼해도 부상이 사라지지는 않는다 */
-const PRONENESS_MIN = 0.55;
-/** 상한 — 유리몸이라도 동료의 2.2배까지 */
-const PRONENESS_MAX = 2.2;
 
 /**
  * 심각도별 결장 일수 [최소, 최대] — 굴림과 **되읽는 쪽(`severityOfDays`)이 같은 표를
@@ -170,7 +168,7 @@ export function trainingExposure(hardSessions: number, squadSize: number): numbe
 }
 
 function clampProneness(value: number): number {
-  return Math.max(PRONENESS_MIN, Math.min(PRONENESS_MAX, value));
+  return Math.max(INJURY_PRONENESS_MIN, Math.min(INJURY_PRONENESS_MAX, value));
 }
 
 /** 지금 값 — 옛 세이브엔 필드가 없다 */
@@ -237,7 +235,7 @@ const PRONENESS_ANCHORS: ReadonlyArray<readonly [days: number, value: number]> =
   [40, 1.0],
   [120, 1.45],
   [250, 1.9],
-  [400, PRONENESS_MAX],
+  [400, INJURY_PRONENESS_MAX],
 ];
 
 export function pronenessFromDaysOut(days: number): number {

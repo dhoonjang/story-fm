@@ -295,6 +295,8 @@ const FOCUS_KEYWORDS: Array<[RegExp, TrainAttr[], string]> = [
   [/스피드|스프린트|가속/u, ["pace"], "스프린트"],
   [/지구력|체력|피지컬|피트니스|러닝/u, ["stamina", "strength"], "피지컬"],
   [/회복|휴식|리커버리/u, ["recovery"], "회복 훈련"],
+  // 침투는 수비 위치선정과 다른 축이다 — 위 줄들과 겹치는 낱말이 없어 맨 뒤에 선다
+  [/침투|뒷공간|오프더볼/u, ["offTheBall"], "오프더볼 침투"],
 ];
 const WEEKDAY_KEYWORDS: Array<[RegExp, string]> = [
   [/일요일/u, "0"],

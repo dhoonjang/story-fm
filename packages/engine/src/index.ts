@@ -70,6 +70,7 @@ export * from "./match/quick-sim";
 export * from "./match/ratings";
 
 // squad — 선수단 상태(폼·심경·부상·정착)와 성장·훈련·스카우팅
+export * from "./squad/depth";
 export * from "./squad/form";
 export * from "./squad/slump";
 export * from "./squad/other-clubs";

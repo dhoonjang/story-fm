@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DateString } from "./date-string";
+import { DateString, diffDays } from "./date-string";
 import {
   type AttributeAxis,
   type AxisValues,
@@ -246,8 +246,8 @@ const TACTIC_AXIS_KEYS: readonly TacticAxisKey[] = TACTIC_AXES.map((axis) => axi
  * 곧 그 축에 익숙한 능력이다.
  */
 const AXIS_AFFINITY: Record<TacticAxisKey, { high: AttributeAxis[]; low: AttributeAxis[] }> = {
-  // 공격적 ↔ 수비적
-  mentality: { high: ["finishing", "dribbling"], low: ["tackling", "positioning"] },
+  // 공격적(들어가서 끝낸다) ↔ 수비적(자리를 지키고 끊는다)
+  mentality: { high: ["finishing", "dribbling", "offTheBall"], low: ["tackling", "positioning"] },
   // 높은 라인(뒷공간을 발로 덮는다) ↔ 내려선 수비(박스를 자리로 지킨다)
   defensiveLine: { high: ["pace", "aggression"], low: ["positioning", "aerial"] },
   // 맹렬한 압박(뛰고 물어야 한다) ↔ 자리 지키기(읽고 선다)
@@ -1313,11 +1313,13 @@ export const MEMORY_FADE_DAYS = 14;
 /** 거리 1당 전이 손실 — 비슷한 전술일수록 많이 물려받는다 (초안) */
 const TRANSFER_LOSS = 0.8;
 
+/**
+ * 기억이 잊히는 데 쓰는 경과 일수 — **음수도 깨진 날짜도 0으로 접는다.**
+ * 자 자체는 `diffDays` 하나이고, 여기서는 "아직 안 지났다"로 읽을 뿐이다.
+ */
 function daysBetween(from: string, to: string): number {
-  const a = Date.parse(`${from}T00:00:00Z`);
-  const b = Date.parse(`${to}T00:00:00Z`);
-  if (Number.isNaN(a) || Number.isNaN(b)) return 0;
-  return Math.max(0, Math.round((b - a) / 86_400_000));
+  const days = diffDays(from, to);
+  return Number.isNaN(days) ? 0 : Math.max(0, days);
 }
 
 /** 지문 → 설정 (기억에서 거리를 재려면 되돌려야 한다). 형식이 깨졌으면 null */

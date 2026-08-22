@@ -24,6 +24,7 @@ import {
   migrateMirrorProficiency,
   migratePassStyles,
   migrateSquadLevels,
+  splitPositioningAxis,
 } from "./migrations";
 import { SaveSchema } from "./save-schema";
 import { saveLockPath } from "./save-lock";
@@ -366,6 +367,9 @@ const REQUIRED_TABLES = [
 function migrate(save: Record<string, unknown>, state: GameState): void {
   fillEmptyTables(save);
   migrateManagerAxes(save);
+  // 위치선정 한 축 → 위치선정·침투. `offTheBall`의 부재가 마커라 한 번만 돈다
+  // (player.md §13.5) — 아래 종합 재계산이 갈린 두 축을 읽는다
+  splitPositioningAxis(state);
   migrateSquadLevels(state);
   migratePassStyles(state);
   migrateFormScale(state);
@@ -379,7 +383,7 @@ function migrate(save: Record<string, unknown>, state: GameState): void {
   // 자리에 쌓은 적응도를 같이 민다.
   migrateMirrorProficiency(state);
   /**
-   * **종합은 저장된 값이 아니라 15축의 파생 캐시다** — 로드할 때 다시 계산한다.
+   * **종합은 저장된 값이 아니라 16축의 파생 캐시다** — 로드할 때 다시 계산한다.
    *
    * 세이브에 든 `overall`은 저장된 그 순간의 공식으로 찍힌 값이라, 공식이
    * 움직이면 옛 눈금을 그대로 들고 들어온다 (player.md §4). 그러면 한 세이브
