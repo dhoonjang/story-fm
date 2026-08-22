@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import { token } from "./palette";
+import { COLD_MS } from "./timeouts";
 
 /**
  * 핵심 유저 여정 e2e (mock GM):
@@ -35,6 +36,42 @@ async function openBoard(page: Page) {
   await page.getByTestId("tab-스쿼드").click();
   await pressBoardToggle(page);
   await expect(page.getByTestId("pitch-board")).toBeVisible();
+}
+
+/**
+ * 비선발 필드 플레이어 중 **소화 가능 자리를 가진** 첫 선수의 행 id.
+ *
+ * 포지션 칩의 색 대응(선호=금 · 소화 가능=은)은 그 칩이 서 있어야 잴 수 있는데,
+ * 어느 선수가 그것을 갖는지는 카탈로그가 정한다. 예전엔 단언을 `if (있으면)`으로
+ * 감쌌고, 없는 선수가 뽑힌 날에는 **아무것도 재지 않은 채 초록**이었다 — 고르는
+ * 쪽을 결정적으로 만들고 단언은 조건 없이 세운다.
+ *
+ * 백업 GK는 뽑지 않는다 — 골키퍼는 필드 슬롯에 못 서서, 뒤의 교체가 화면이 아니라
+ * 검증을 시험하게 된다.
+ *
+ * 상세는 열어 보고 **닫아 두고** 돌려준다 — 부르는 쪽은 아무도 손대지 않은 명단을
+ * 받는다.
+ */
+async function pickPlayableBenchRow(page: Page): Promise<string> {
+  const ids = await page
+    .locator(
+      ".squad-table tbody tr.row-tier.t-bench:not(.detail-row)," +
+        ".squad-table tbody tr.row-tier.t-squad:not(.detail-row)",
+    )
+    .filter({ hasNot: page.locator("td:nth-child(2):text-is('GK')") })
+    .evaluateAll((rows) => rows.map((r) => r.getAttribute("data-testid") ?? ""));
+  for (const id of ids) {
+    const row = page.getByTestId(id);
+    await row.click();
+    await expect(page.getByTestId("player-detail")).toBeVisible();
+    const playable = await page
+      .locator('[data-testid="player-detail"] .pd-pos:not(.natural):not(.foreign)')
+      .count();
+    await row.click();
+    await expect(page.getByTestId("player-detail")).toHaveCount(0);
+    if (playable > 0) return id;
+  }
+  throw new Error("소화 가능 자리를 가진 비선발 필드 플레이어가 명단에 없다");
 }
 
 async function expectOvrConsistent(page: Page) {
@@ -77,12 +114,12 @@ async function expectOvrConsistent(page: Page) {
 test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page }) => {
   // ── 랜딩(게임 목록) → 새 게임 ──
   await page.goto("/");
-  await expect(page.getByTestId("new-game")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("new-game")).toBeVisible({ timeout: COLD_MS });
   await page.getByTestId("new-game").click();
-  await expect(page).toHaveURL(/\/new$/, { timeout: 20_000 });
+  await expect(page).toHaveURL(/\/new$/, { timeout: COLD_MS });
 
   // ── 온보딩 ──
-  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: COLD_MS });
   await page.getByTestId("league-epl").click();
   await expect(page.getByTestId("team-grid")).toBeVisible();
   await page.getByTestId("team-arsenal").click();
@@ -93,7 +130,7 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   await page.getByTestId("start-game").click();
 
   // ── 부임 브리핑 (온보딩 모델 턴) ──
-  await expect(page.getByTestId("chat-scroll")).toContainText("김테스트", { timeout: 30_000 });
+  await expect(page.getByTestId("chat-scroll")).toContainText("김테스트", { timeout: COLD_MS });
   // 화자는 이름으로 말하고, 직책은 화면이 붙인다 — `알베르트 스투이벤베르흐 (수석코치)`
   // 직함은 괄호가 아니라 칩이다 — 테두리가 경계를 말한다
   await expect(page.locator(".say-who .speaker-role").first()).toHaveText("수석코치");
@@ -112,7 +149,7 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
    * 선다. 그 지시는 채팅에도 칩으로 남는다: 알림은 다음 클릭에 닫히므로 되짚을
    * 자리가 있어야 한다.
    */
-  await expect(page.getByTestId("hint-달력")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("hint-달력")).toBeVisible();
   const trainChip = page.getByTestId("tool-set_training").first();
   await expect(trainChip).toBeVisible();
   // 답이 끝나면 커서가 입력칸으로 돌아온다 — 감독은 대개 이어서 말한다
@@ -127,7 +164,7 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
   // ── 전술 변경 ──
   await input.fill("4-4-2로 바꾸고 공격적으로 가자");
   await page.getByTestId("chat-send").click();
-  await expect(page.getByTestId("hint-스쿼드")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("hint-스쿼드")).toBeVisible();
 
   // ── 경기일로 진행 (부상·불만 발생 시 중간에 멈추므로 반복) ──
   // 정지 횟수는 세이브 시드마다 달라 넉넉히 돈다 — 6회로는 간간이 못 닿았다
@@ -136,9 +173,9 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
     if (phase === "matchday") break;
     await input.fill("다음 경기로 가자");
     await page.getByTestId("chat-send").click();
-    await expect(input).toBeEnabled({ timeout: 20_000 });
+    await expect(input).toBeEnabled();
   }
-  await expect(page.locator(".app")).toHaveAttribute("data-phase", "matchday", { timeout: 20_000 });
+  await expect(page.locator(".app")).toHaveAttribute("data-phase", "matchday");
   // 시계 이동은 스킬이 아니라 코어의 처리 결과다 — **칩으로 세우지 않는다**.
   // 시간이 흘렀다는 증거는 위의 phase(=matchday)이고, 칩은 감독이 부른 것만 선다
   await expect(page.getByTestId("tool-시간 경과")).toHaveCount(0);
@@ -150,16 +187,16 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
    */
   await input.fill("경기 시작하자");
   await page.getByTestId("chat-send").click();
-  await expect(page.getByTestId("kickoff-gate")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("kickoff-gate")).toBeVisible();
   // 중계는 화자다 — 문구가 아니라 그 화자의 말풍선(`.say.broadcast`)이 섰는지를 본다
   // (`BROADCAST_SPEAKER`, packages/domain/src/persona.ts)
   const broadcast = page.locator(".say.broadcast");
   await expect(broadcast).toHaveCount(0);
   await page.getByTestId("kickoff-enter").click();
-  await expect(page.getByTestId("kickoff-gate")).toHaveCount(0, { timeout: 20_000 });
-  await expect(broadcast.first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("kickoff-gate")).toHaveCount(0);
+  await expect(broadcast.first()).toBeVisible();
   // 첫 휘슬 턴은 시계를 움직이지 않는다 — 0분에서 감독의 차례로 돌아온다
-  await expect(page.getByTestId("match-clock").locator("b")).toHaveText("0′", { timeout: 10_000 });
+  await expect(page.getByTestId("match-clock").locator("b")).toHaveText("0′");
 
   /**
    * 중계 판세 — 스코어는 **화면에 붙어 있고**, 선수 기록은 실시간으로 붙는다.
@@ -270,14 +307,14 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
     const phase = await page.locator(".app").getAttribute("data-phase");
     if (phase === "idle") break;
     await page.getByTestId("match-advance").click();
-    await expect(input).toBeEnabled({ timeout: 20_000 });
+    await expect(input).toBeEnabled();
   }
   await expect(page.locator(".app")).toHaveAttribute("data-phase", "idle");
   /*
    * 종료 화면 — 휘슬과 평시 사이의 한 걸음. 스코어·득점·잘한 선수까지만 짧게.
    */
   const fulltime = page.getByTestId("fulltime");
-  await expect(fulltime).toBeVisible({ timeout: 20_000 });
+  await expect(fulltime).toBeVisible();
   await expect(fulltime).toContainText("경기 종료");
   await page.getByTestId("fulltime-close").click();
   await expect(fulltime).toHaveCount(0);
@@ -348,27 +385,82 @@ test("게임 목록에서 새 게임 → 첫 경기 완주까지", async ({ page
 
   // ── 로고 → 게임 목록으로 나가기 (진행한 게임이 목록에 남아 있다) ──
   await page.getByTestId("home-link").click();
-  await expect(page).toHaveURL(/localhost:\d+\/$/, { timeout: 20_000 });
+  await expect(page).toHaveURL(/localhost:\d+\/$/, { timeout: COLD_MS });
   await expect(page.getByTestId("new-game")).toBeVisible();
   /*
    * 진행한 게임이 목록에 남아 있다 — **첫 카드로 못박지 않는다.** 다른 스펙이
    * 같은 데이터 디렉터리에 세이브를 만들면 그쪽이 위에 설 수 있다(최근 생성 순).
    */
   await expect(page.locator(".game-card", { hasText: "아스날" }).first()).toBeVisible({
-    timeout: 20_000,
+    timeout: COLD_MS,
   });
+});
+
+/**
+ * **게임은 이어서 하는 것이다** — 목록에서 다시 열면 그때의 대화가 그대로 있어야
+ * 하고, 지우면 디스크에서 없어져야 한다.
+ *
+ * 대화를 되찾는지까지 보는 이유: 세이브가 열리는 것만으로는 모자란다. 채팅은 조각
+ * 파일로 빠지지 않는 축이라(`persistence.ts`) 저장·로드 어느 쪽이 어긋나도 화면은
+ * "빈 채팅으로 잘 열린 게임"으로 보인다.
+ */
+test("목록에서 재개하면 대화가 그대로고, 지우면 사라진다", async ({ page }) => {
+  await page.goto("/new");
+  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: COLD_MS });
+  await page.getByTestId("league-epl").click();
+  await expect(page.getByTestId("team-grid")).toBeVisible();
+  await page.getByTestId("team-tottenham").click();
+  await page.getByTestId("manager-name").fill("재개테스트");
+  await page.getByTestId("manager-background").fill("아카데미에서 올라온 지도자");
+  await page.getByTestId("start-game").click();
+  await expect(page.getByTestId("chat-scroll")).toContainText("재개테스트", { timeout: COLD_MS });
+
+  // 세이브 id는 주소가 갖는다 — 목록에서 이 게임의 카드를 이름이 아니라 id로 집는다
+  const gameId = /\/game\/([^/?#]+)/.exec(page.url())?.[1] ?? "";
+  expect(gameId, "게임 주소에서 id를 읽지 못했다").not.toBe("");
+
+  // 감독이 한마디 남긴다 — 재개했을 때 되찾을 것
+  const note = "수비 조직부터 손보자";
+  await page.getByTestId("chat-input").fill(note);
+  await page.getByTestId("chat-send").click();
+  await expect(page.getByTestId("model-turn")).toHaveCount(2);
+
+  // ── 목록 → 재개 ──
+  await page.getByTestId("home-link").click();
+  const card = page.getByTestId(`game-${gameId}`);
+  await expect(card).toBeVisible({ timeout: COLD_MS });
+  await expect(card).toContainText("토트넘");
+  await card.click();
+  await expect(page).toHaveURL(new RegExp(`/game/${gameId}$`), { timeout: COLD_MS });
+  await expect(page.getByTestId("chat-scroll")).toContainText(note, { timeout: COLD_MS });
+  await expect(page.getByTestId("model-turn")).toHaveCount(2);
+
+  // ── 삭제 — 되돌릴 수 없으므로 확인을 받는다 ──
+  await page.getByTestId("home-link").click();
+  await expect(page.getByTestId(`delete-${gameId}`)).toBeVisible({ timeout: COLD_MS });
+  page.once("dialog", (dialog) => void dialog.dismiss());
+  await page.getByTestId(`delete-${gameId}`).click();
+  await expect(card).toBeVisible(); // 물러섰으니 그대로다
+
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByTestId(`delete-${gameId}`).click();
+  await expect(card).toHaveCount(0);
+  // 화면에서만 지운 것이 아니다 — 새로 읽어도 돌아오지 않는다
+  await page.reload();
+  await expect(page.getByTestId("new-game")).toBeVisible({ timeout: COLD_MS });
+  await expect(card).toHaveCount(0);
 });
 
 test("면담 시나리오 — 판정형 스킬과 사기 반영", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: COLD_MS });
   await page.getByTestId("league-epl").click();
   await expect(page.getByTestId("team-grid")).toBeVisible();
   await page.getByTestId("team-chelsea").click();
   await page.getByTestId("manager-name").fill("박테스트");
   await page.getByTestId("manager-background").fill("에이전트 출신 협상가");
   await page.getByTestId("start-game").click();
-  await expect(page.getByTestId("chat-scroll")).toContainText("박테스트", { timeout: 30_000 });
+  await expect(page.getByTestId("chat-scroll")).toContainText("박테스트", { timeout: COLD_MS });
 
   // 스쿼드에서 첫 선수 이름을 읽어와 면담 지시
   await page.getByTestId("tab-스쿼드").click();
@@ -394,7 +486,7 @@ test("면담 시나리오 — 판정형 스킬과 사기 반영", async ({ page 
    * 펼치지 않아도 잘 풀렸는지는 보여야 하므로 칩이 결(`good`/`bad`)을 갖는다.
    */
   const chip = page.getByTestId("tool-talk_to_player").first();
-  await expect(chip).toBeVisible({ timeout: 15_000 });
+  await expect(chip).toBeVisible();
   await expect(chip).toHaveClass(/good|bad/);
   await expect(page.getByTestId("hint-스쿼드")).toBeVisible();
 
@@ -429,14 +521,14 @@ test("면담 시나리오 — 판정형 스킬과 사기 반영", async ({ page 
  */
 test("협상은 카드로 선다 — 재계약 제안", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: COLD_MS });
   await page.getByTestId("league-epl").click();
   await expect(page.getByTestId("team-grid")).toBeVisible();
   await page.getByTestId("team-arsenal").click();
   await page.getByTestId("manager-name").fill("협테스트");
   await page.getByTestId("manager-background").fill("스카우트 출신");
   await page.getByTestId("start-game").click();
-  await expect(page.getByTestId("chat-scroll")).toContainText("협테스트", { timeout: 30_000 });
+  await expect(page.getByTestId("chat-scroll")).toContainText("협테스트", { timeout: COLD_MS });
 
   // 계약이 급한 선수에게 재계약 제안 — mock GM이 코어의 기대 주급으로 연다
   const input = page.getByTestId("chat-input");
@@ -444,7 +536,7 @@ test("협상은 카드로 선다 — 재계약 제안", async ({ page }) => {
   await page.getByTestId("chat-send").click();
 
   const card = page.getByTestId("market-renewal").first();
-  await expect(card).toBeVisible({ timeout: 15_000 });
+  await expect(card).toBeVisible();
   // 카드가 조건과 기한을 함께 갖는다 — 금액 두 벌과 답할 기한을 펼치지 않고 읽는다
   await expect(card).toContainText("주급");
   await expect(card).toContainText("기간");
@@ -457,20 +549,20 @@ test("협상은 카드로 선다 — 재계약 제안", async ({ page }) => {
 
 test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: COLD_MS });
   await page.getByTestId("league-epl").click();
   await expect(page.getByTestId("team-grid")).toBeVisible();
   await page.getByTestId("team-liverpool").click();
   await page.getByTestId("manager-name").fill("정테스트");
   await page.getByTestId("manager-background").fill("전술 분석가 출신");
   await page.getByTestId("start-game").click();
-  await expect(page.getByTestId("chat-scroll")).toContainText("정테스트", { timeout: 30_000 });
+  await expect(page.getByTestId("chat-scroll")).toContainText("정테스트", { timeout: COLD_MS });
 
   // 채팅에서 자연어 훈련 지시 → set_training 스킬
   const chat = page.getByTestId("chat-input");
   await chat.fill("월요일 오전은 세트피스 반복 훈련 잡아줘");
   await page.getByTestId("chat-send").click();
-  await expect(page.getByTestId("hint-달력")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("hint-달력")).toBeVisible();
 
   // 달력 — 경기 셀 클릭 → 상세 패널 (상대·라운드). 편집 UI 없음(읽기 전용)
   await page.getByTestId("tab-달력").click();
@@ -512,7 +604,7 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
   await page.getByTestId("tab-채팅").click();
   await page.getByTestId("chat-input").fill("4-4-2로 수비적으로 가자");
   await page.getByTestId("chat-send").click();
-  await expect(page.getByTestId("hint-스쿼드")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("hint-스쿼드")).toBeVisible();
   // 그 화면을 열면 알림은 사라진다 — 읽었으면 할 일이 끝난 알림이다
   await openBoard(page);
   await expect(page.getByTestId("hint-스쿼드")).toHaveCount(0);
@@ -542,19 +634,11 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
   const benchBtn = page.getByTestId(/^benchtoggle-/).first();
   await expect(benchBtn).toHaveText("벤치에서 빼기");
   await benchBtn.click();
-  await expect(page.getByTestId("view-squad")).toHaveAttribute("data-save", "saved", {
-    // 자동 저장 디바운스가 3초다 — 왕복까지 감안해 여유를 둔다
-    timeout: 15_000,
-  });
+  await expect(page.getByTestId("view-squad")).toHaveAttribute("data-save", "saved");
   await page.getByTestId(benchRowTid!).click(); // 상세를 닫는다
 
   // **명단 행 클릭은 상세 보기뿐** — 라인업이 바뀌면 안 된다
-  // 비선발 중 **필드 플레이어**를 고른다 — 백업 GK를 뽑으면 아래 교체가 규칙에
-  // 막혀(골키퍼는 필드 슬롯에 못 선다) 화면이 아니라 검증을 시험하게 된다
-  const benchRow = page
-    .locator(".squad-table tbody tr.row-tier.t-bench, .squad-table tbody tr.row-tier.t-squad")
-    .filter({ hasNot: page.locator("td:nth-child(2):text-is('GK')") })
-    .first();
+  const benchRow = page.getByTestId(await pickPlayableBenchRow(page));
   // 이름 칸엔 교체 화살표·표식·상태 배지가 함께 선다 — 이름은 자체 요소에서, 그
   // 안에서도 등번호를 뺀 몫만 읽는다 (전술판 칩도 같은 이름을 그대로 세운다)
   const inName = await benchRow.locator(".row-name").evaluate((el) => {
@@ -585,29 +669,9 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
       .first()
       .evaluate((n) => getComputedStyle(n).color);
   expect(await colorOf(".pd-pos.natural")).toBe(gold);
-  const playable = page.locator(
-    '[data-testid="player-detail"] .pd-pos:not(.natural):not(.foreign)',
-  );
-  if ((await playable.count()) > 0) {
-    expect(await playable.first().evaluate((n) => getComputedStyle(n).color)).toBe(silver);
-  }
-  /**
-   * **지금 자리라고 글자색을 바꾸지 않는다.** 밑줄만 얹는다 — 색까지 바꾸면
-   * 그 자리가 선호인지 무리한 배치인지가 화면에서 사라진다.
-   */
-  // 벤치 선수는 맡은 자리가 없어 `.here`가 아예 없다 — 있을 때만 본다
-  const here = page.locator('[data-testid="player-detail"] .pd-pos.here');
-  if ((await here.count()) > 0) {
-    const state = await here.first().evaluate((n) => ({
-      color: getComputedStyle(n).color,
-      shadow: getComputedStyle(n).boxShadow,
-      natural: n.classList.contains("natural"),
-      foreign: n.classList.contains("foreign"),
-    }));
-    expect(state.color).toBe(state.natural ? gold : state.foreign ? dim : silver);
-    // 밑줄만이 "여기"를 말한다 — 그 밑줄은 강조색 두 번째 축이다
-    expect(state.shadow).toContain(await token(page, "--accent-2"));
-  }
+  expect(await colorOf(".pd-pos:not(.natural):not(.foreign)")).toBe(silver);
+  // 비선발은 맡은 자리가 없다 — `.here`는 아예 서지 않는다 (그 밑줄은 선발 상세에서 본다)
+  await expect(page.locator('[data-testid="player-detail"] .pd-pos.here')).toHaveCount(0);
   /**
    * 포지션은 **테두리 없는 글자**이고 역할만 알약이다 — 읽는 값과 누르는 물건이
    * 같은 모양이면 감독은 눌러 보고 고장인 줄 안다. 테두리가 그 경계를 말한다.
@@ -630,21 +694,19 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
   await benchRow.click();
   await expect(page.locator(".swap-btn")).toHaveCount(0);
 
-  // 예비 ↔ 벤치처럼 선발이 끼지 않는 조합도 열린다 (칸이 다르면 전부)
-  const yebiRow = page.locator(".squad-table tbody tr.row-tier.t-squad").first();
-  if ((await yebiRow.count()) > 0) {
-    await yebiRow.click();
-    const benchArrow = page
-      .locator(".squad-table tbody tr.row-tier.t-bench")
-      .filter({ has: page.locator(".swap-btn") })
-      .first();
-    await expect(benchArrow).toHaveCount(1);
-    await benchArrow.getByTestId(/^swapin-/).click();
-    await expect(page.getByTestId("view-squad")).toHaveAttribute("data-save", "saved", {
-      timeout: 15_000,
-    });
-    await expect(page.getByTestId("lineup-error")).toHaveCount(0);
-  }
+  // 예비 ↔ 벤치처럼 선발이 끼지 않는 조합도 열린다 (칸이 다르면 전부).
+  // 예비 칸은 25인 명단 밖의 자리라 어느 구단에도 있다 — 없으면 그것이 회귀다
+  const yebiRow = page.locator(".squad-table tbody tr.row-tier.t-squad:not(.detail-row)").first();
+  await expect(yebiRow).toBeVisible();
+  await yebiRow.click();
+  const benchArrow = page
+    .locator(".squad-table tbody tr.row-tier.t-bench")
+    .filter({ has: page.locator(".swap-btn") })
+    .first();
+  await expect(benchArrow).toHaveCount(1);
+  await benchArrow.getByTestId(/^swapin-/).click();
+  await expect(page.getByTestId("view-squad")).toHaveAttribute("data-save", "saved");
+  await expect(page.getByTestId("lineup-error")).toHaveCount(0);
 
   // 선발을 고르면 반대로 비선발 행에 화살표가 뜬다
   await page.getByTestId("slot-10").click();
@@ -688,6 +750,22 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
   const rolePill = page.locator('[data-testid="player-detail"] .pd-role').first();
   await expect(rolePill).toBeVisible();
   expect(await rolePill.evaluate((n) => getComputedStyle(n).borderTopWidth)).not.toBe("0px");
+  /**
+   * **지금 자리라고 글자색을 바꾸지 않는다.** 밑줄만 얹는다 — 색까지 바꾸면 그 자리가
+   * 선호인지 무리한 배치인지가 화면에서 사라진다. 선발은 맡은 자리가 있으니 그 칩이
+   * 반드시 하나 선다 (비선발 상세에서는 아예 없다 — 위에서 그것을 못박았다).
+   */
+  const here = page.locator('[data-testid="player-detail"] .pd-pos.here');
+  await expect(here).toHaveCount(1);
+  const hereState = await here.evaluate((n) => ({
+    color: getComputedStyle(n).color,
+    shadow: getComputedStyle(n).boxShadow,
+    natural: n.classList.contains("natural"),
+    foreign: n.classList.contains("foreign"),
+  }));
+  expect(hereState.color).toBe(hereState.natural ? gold : hereState.foreign ? dim : silver);
+  // 밑줄만이 "여기"를 말한다 — 그 밑줄은 강조색 두 번째 축이다
+  expect(hereState.shadow).toContain(await token(page, "--accent-2"));
   // 펼치면 15축이 전부 보이고, 체력이 왜 그런지 한 문장으로 설명한다
   await expect(page.getByTestId("player-mood")).not.toBeEmpty();
   await expect(page.locator(".detail-row .pd-axis")).toHaveCount(15);
@@ -764,10 +842,7 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
   await openTactics(page);
   await page.getByTestId("tactic-mentality-5").click();
   await expect(page.getByTestId("tactics-panel")).toContainText("매우 공격적");
-  await expect(page.getByTestId("view-squad")).toHaveAttribute("data-save", "saved", {
-    // 자동 저장 디바운스가 3초다 — 왕복까지 감안해 여유를 둔다
-    timeout: 15_000,
-  });
+  await expect(page.getByTestId("view-squad")).toHaveAttribute("data-save", "saved");
   // 하한 아래로는 절대 안 내려간다 (증감 폭은 유닛 테스트가 고정한다)
   const famShifted = await famOf();
   expect(famShifted).toBeGreaterThan(0);
@@ -785,20 +860,14 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
    * 왕복이 손해로 남지 않는다는 것 하나다.
    */
   await page.getByTestId("tactic-mentality-3").click();
-  await expect(page.getByTestId("view-squad")).toHaveAttribute("data-save", "saved", {
-    // 자동 저장 디바운스가 3초다 — 왕복까지 감안해 여유를 둔다
-    timeout: 15_000,
-  });
+  await expect(page.getByTestId("view-squad")).toHaveAttribute("data-save", "saved");
   expect(await famOf(), "되돌렸는데 손해가 남았다").toBeGreaterThanOrEqual(famBefore);
 
   await page.getByTestId("tactic-passStyle-5").click();
   await expect(page.getByTestId("tactics-panel")).toContainText("매우 길게");
 
   // 자동 저장이 끝나면 서버 값이 그대로 반영되어 있다 — 탭을 떠났다 와도 남는다
-  await expect(page.getByTestId("view-squad")).toHaveAttribute("data-save", "saved", {
-    // 자동 저장 디바운스가 3초다 — 왕복까지 감안해 여유를 둔다
-    timeout: 15_000,
-  });
+  await expect(page.getByTestId("view-squad")).toHaveAttribute("data-save", "saved");
   await page.getByTestId("tab-달력").click();
   await page.getByTestId("tab-스쿼드").click();
   await expect(page.getByTestId("tactics-panel")).toContainText("매우 길게");
@@ -812,14 +881,14 @@ test("달력 상세와 전술판 라인업 편집", async ({ page }) => {
 
 test("전술판 자유 배치 — 드래그로 한 자리만 세밀하게 조정한다", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: COLD_MS });
   await page.getByTestId("league-epl").click();
   await expect(page.getByTestId("team-grid")).toBeVisible();
   await page.getByTestId("team-mancity").click();
   await page.getByTestId("manager-name").fill("배치테스트");
   await page.getByTestId("manager-background").fill("포지션 실험을 즐기는 전술가");
   await page.getByTestId("start-game").click();
-  await expect(page.getByTestId("chat-scroll")).toContainText("배치테스트", { timeout: 30_000 });
+  await expect(page.getByTestId("chat-scroll")).toContainText("배치테스트", { timeout: COLD_MS });
 
   await openBoard(page);
   const board = page.getByTestId("pitch-board");
@@ -920,10 +989,7 @@ test("전술판 자유 배치 — 드래그로 한 자리만 세밀하게 조정
 
   // 자동 저장 — 손을 뗀 뒤 잠시 지나면 서버에 반영된다 (저장 버튼이 없다)
   await expect(page.getByTestId("save-lineup")).toHaveCount(0);
-  await expect(page.getByTestId("view-squad")).toHaveAttribute("data-save", "saved", {
-    // 자동 저장 디바운스가 3초다 — 왕복까지 감안해 여유를 둔다
-    timeout: 15_000,
-  });
+  await expect(page.getByTestId("view-squad")).toHaveAttribute("data-save", "saved");
 
   // 9번을 조금 끌어내리면 CF가 된다 (요구 역량이 다른 자리 — 정통 9번이 아닌 전방)
   const st = page
@@ -950,10 +1016,7 @@ test("전술판 자유 배치 — 드래그로 한 자리만 세밀하게 조정
   ).toHaveText("CF");
   await expect(st).toHaveCount(0);
   // 명단의 포지션 열은 지금 맡은 자리를 그대로 보여준다 (저장 반영 후 CF)
-  await expect(page.getByTestId("view-squad")).toHaveAttribute("data-save", "saved", {
-    // 자동 저장 디바운스가 3초다 — 왕복까지 감안해 여유를 둔다
-    timeout: 15_000,
-  });
+  await expect(page.getByTestId("view-squad")).toHaveAttribute("data-save", "saved");
   await expect(page.locator(".squad-table tbody")).toContainText("CF");
 
   // 감지된 숫자는 언제나 필드 10명을 나눈 합이다
@@ -961,10 +1024,7 @@ test("전술판 자유 배치 — 드래그로 한 자리만 세밀하게 조정
     .split("-")
     .reduce((sum, n) => sum + Number(n), 0);
   expect(shapeSum).toBe(10);
-  await expect(page.getByTestId("view-squad")).toHaveAttribute("data-save", "saved", {
-    // 자동 저장 디바운스가 3초다 — 왕복까지 감안해 여유를 둔다
-    timeout: 15_000,
-  });
+  await expect(page.getByTestId("view-squad")).toHaveAttribute("data-save", "saved");
 
   // 탭을 떠났다 돌아와도 옮긴 자리가 그대로다 (서버가 좌표를 기록했다)
   const movedName = (beforeName ?? "").replace("Ⓒ", "").trim();
@@ -989,14 +1049,14 @@ test("전술판 자유 배치 — 드래그로 한 자리만 세밀하게 조정
  */
 test("전술판 편집은 턴보다 먼저 서버에 닿는다", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: COLD_MS });
   await page.getByTestId("league-epl").click();
   await expect(page.getByTestId("team-grid")).toBeVisible();
   await page.getByTestId("team-arsenal").click();
   await page.getByTestId("manager-name").fill("순서정");
   await page.getByTestId("manager-background").fill("전술 분석가 출신");
   await page.getByTestId("start-game").click();
-  await expect(page.getByTestId("chat-scroll")).toContainText("순서정", { timeout: 30_000 });
+  await expect(page.getByTestId("chat-scroll")).toContainText("순서정", { timeout: COLD_MS });
 
   await openBoard(page);
   await openTactics(page);
@@ -1021,13 +1081,9 @@ test("전술판 편집은 턴보다 먼저 서버에 닿는다", async ({ page }
   await page.getByTestId("chat-send").click();
 
   // 저장이 끝난 뒤에야 턴이 나간다 — 그래야 세계가 지금 판으로 답한다
-  await expect
-    .poll(() => wire.filter((w) => w === "턴→").length, { timeout: 20_000 })
-    .toBeGreaterThan(0);
+  await expect.poll(() => wire.filter((w) => w === "턴→").length).toBeGreaterThan(0);
   expect(wire.slice(0, 3)).toEqual(["저장→", "←저장", "턴→"]);
-  await expect(page.getByTestId("view-squad")).toHaveAttribute("data-save", "saved", {
-    timeout: 15_000,
-  });
+  await expect(page.getByTestId("view-squad")).toHaveAttribute("data-save", "saved");
 
   // 턴이 끝나도 바꾼 전술 그대로다 — 늦게 도착한 저장 응답이 턴 결과를 되감지 않는다
   await expect(page.getByTestId("chat-scroll")).toContainText("이 전술로 가자");

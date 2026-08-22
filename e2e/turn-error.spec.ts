@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { COLD_MS } from "./timeouts";
+
 /** 서버가 돌려주는 실패 문장 — 이 스펙이 만들어 넣고 배너에서 그대로 되찾는다 */
 const SERVER_ERROR = "모델 서버가 혼잡합니다";
 
@@ -12,13 +14,13 @@ const SERVER_ERROR = "모델 서버가 혼잡합니다";
  */
 test("LLM 실패 배너", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: COLD_MS });
   await page.getByTestId("league-epl").click();
   await page.getByTestId("team-arsenal").click();
   await page.getByTestId("manager-name").fill("에러확인");
   await page.getByTestId("manager-background").fill("분석가 출신");
   await page.getByTestId("start-game").click();
-  await expect(page.getByTestId("chat-scroll")).toContainText("에러확인", { timeout: 40_000 });
+  await expect(page.getByTestId("chat-scroll")).toContainText("에러확인", { timeout: COLD_MS });
 
   const turnsBefore = await page.getByTestId("model-turn").count();
 
@@ -37,7 +39,7 @@ test("LLM 실패 배너", async ({ page }) => {
   await page.getByTestId("chat-input").fill("훈련 잡아줘");
   await page.getByTestId("chat-send").click();
 
-  await expect(page.getByTestId("turn-error")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("turn-error")).toBeVisible();
   // 배너는 **서버가 준 문장 그대로**를 세운다 — 이 문구의 주인은 위 라우트다
   await expect(page.getByTestId("turn-error")).toContainText(SERVER_ERROR);
   // 채팅에는 유저 발화도, 사과 대사도 남지 않는다
@@ -61,13 +63,13 @@ test("LLM 실패 배너", async ({ page }) => {
  */
 test("멎은 턴도 실패로 끝나고 다음 턴을 막지 않는다", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: COLD_MS });
   await page.getByTestId("league-epl").click();
   await page.getByTestId("team-arsenal").click();
   await page.getByTestId("manager-name").fill("무응답확인");
   await page.getByTestId("manager-background").fill("분석가 출신");
   await page.getByTestId("start-game").click();
-  await expect(page.getByTestId("chat-scroll")).toContainText("무응답확인", { timeout: 40_000 });
+  await expect(page.getByTestId("chat-scroll")).toContainText("무응답확인", { timeout: COLD_MS });
 
   const turnsBefore = await page.getByTestId("model-turn").count();
 
@@ -83,7 +85,7 @@ test("멎은 턴도 실패로 끝나고 다음 턴을 막지 않는다", async (
   await page.getByTestId("chat-input").fill("훈련 잡아줘");
   await page.getByTestId("chat-send").click();
 
-  await expect(page.getByTestId("turn-error")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("turn-error")).toBeVisible();
   // 서버가 준 문장이 없는 길이다 — 배너가 세우는 것은 **클라이언트가 지어낸** 문장
   // (`TURN_TIMEOUT_MESSAGE`, turn-stream.ts). 두 실패를 가르는 것이 이 한 조각뿐이다
   await expect(page.getByTestId("turn-error")).toContainText("기다리기를 멈췄");
@@ -99,5 +101,5 @@ test("멎은 턴도 실패로 끝나고 다음 턴을 막지 않는다", async (
   await expect(page.getByTestId("chat-input")).toBeEnabled();
   await page.getByTestId("chat-input").fill("훈련 잡아줘");
   await page.getByTestId("chat-send").click();
-  await expect(page.getByTestId("model-turn")).toHaveCount(turnsBefore + 1, { timeout: 40_000 });
+  await expect(page.getByTestId("model-turn")).toHaveCount(turnsBefore + 1, { timeout: COLD_MS });
 });
