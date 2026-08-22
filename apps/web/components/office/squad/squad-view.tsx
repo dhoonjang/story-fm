@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   MATCHDAY_BENCH,
+  TACTIC_AXES,
   adaptationOf,
   anchorOf,
   defaultRoleOf,
@@ -33,7 +34,7 @@ import { useBoardDrag } from "./board-drag";
 import { Margin, fitAt } from "./marks";
 import { PlayerDetail } from "./player-detail";
 import { SquadTable, type SortKey } from "./squad-table";
-import { TACTIC_AXES, TacticsPanel } from "./tactics-panel";
+import { TacticsPanel } from "./tactics-panel";
 import type { BoardSlot, Selection, SquadRow, TacticsView, Tier } from "./types";
 
 /**

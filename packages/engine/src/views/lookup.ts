@@ -14,6 +14,7 @@ import {
   footLabel,
   physiqueLabel,
   naturalPositionOf,
+  parseScorerEntry,
   roleFit,
   rolesFor,
   seasonRating,
@@ -935,12 +936,10 @@ function scorerNote(state: GameState, m: MatchRecord): string {
   if (scorers.length === 0) return "";
   const minutes = m.result?.goalMinutes ?? [];
   const named = scorers.map((entry, i) => {
-    const [side, id] = entry.includes(":")
-      ? (entry.split(":", 2) as [string, string])
-      : ["", entry];
-    const team = side === "home" ? m.homeTeamId : side === "away" ? m.awayTeamId : null;
+    const goal = parseScorerEntry(entry);
+    const team = goal.side === "home" ? m.homeTeamId : goal.side === "away" ? m.awayTeamId : null;
     const at = minutes[i] !== undefined ? ` ${minutes[i]}′` : "";
-    return `${playerName(state, id ?? entry)}${at}${team ? `(${teamShortNameIn(state, team)})` : ""}`;
+    return `${playerName(state, goal.playerId)}${at}${team ? `(${teamShortNameIn(state, team)})` : ""}`;
   });
   return ` · 득점 ${named.join(", ")}`;
 }

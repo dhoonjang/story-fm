@@ -32,6 +32,7 @@ import { USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
 import { boardDemandFact } from "./board-demand";
 import { applyStanceOutcome, pendingPress, signed, stanceRow, STANCE_KO } from "./press";
 import type { SkillResult } from "../skills";
+import { deltaItems } from "../skills/brief";
 
 /**
  * 다가옴 — **세계가 회견 밖에서 먼저 말을 건다** (→ docs/data/people.md §8).
@@ -795,6 +796,15 @@ export function respondToApproach(
     ok: true,
     tone: net >= 0 ? ("good" as const) : ("bad" as const),
     message: `${approach.speakerId} 응대(${label})${effectSuffix(effect)}`,
+    brief: {
+      head: `${approach.speakerId} 응대(${label})`,
+      items: deltaItems([
+        ["보드", effect.board],
+        ["선수단", effect.squad],
+        effect.targetName ? [`${effect.targetName} 사기`, effect.target] : null,
+        ["팀 사기", effect.team],
+      ]),
+    },
   };
 }
 

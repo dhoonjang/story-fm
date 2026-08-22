@@ -57,6 +57,7 @@ import { buildEuroEntrants, entrantsOf, type LeagueTables } from "./europe";
 import { buildSeasonFixtures, isUserFixture } from "./fixtures";
 import {
   applyPromotionRelegation,
+  reinforcePromotedSquads,
   clubEconomyLevelIn,
   leagueOfTeamIn,
   leagueSizeIn,
@@ -926,7 +927,7 @@ function applyTransition(state: GameState): string[] {
    * 승강 — 티켓과 **같은 최종 순위표**를 쓰고, 새 일정을 짜기 **전에** 자리를 바꾼다.
    * 순서가 뒤집히면 강등된 팀이 그 리그의 다음 시즌 일정에 그대로 남는다.
    */
-  applyPromotionRelegation(state, finalTables, digest);
+  const promoted = applyPromotionRelegation(state, finalTables, digest);
   /**
    * 체급 재산정 — 승강 **뒤**여야 한다. 승격·강등한 팀은 리그가 바뀌면서 다른 풀에
    * 들어가고, 그게 곧 완전 재산정이다 (team.md §2.1). 아래 이적 예산 보충도 새
@@ -938,6 +939,12 @@ function applyTransition(state: GameState): string[] {
   state.calendar = nextCalendar;
   // 새 시즌은 7월 1일(프리시즌·여름 이적창 개장)에서 시작한다
   state.date = nextCalendar.preseasonStart;
+  /**
+   * **승격 팀 명단 채우기** — 승강·체급 재산정 뒤이고 새 일정을 짜기 전이다
+   * ([../data/team.md](../data/team.md) §5). 시즌·날짜를 넘긴 뒤에 서는 이유는
+   * 계약 시작일과 난수 채널이 **새 시즌**의 것이어야 하기 때문이다.
+   */
+  reinforcePromotedSquads(state, promoted, digest);
   const windows = buildTransferWindows(nextSeason);
   state.euroEntrants = hasCups(state.world)
     ? buildEuroEntrants(nextSeason, state.seed, finalTables, cupWinners, (id) =>

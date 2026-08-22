@@ -26,8 +26,10 @@ import {
   teamShortName,
   teamShortNameIn,
   type GameState,
+  type SkillBriefItem,
 } from "../core/state";
 import type { SkillResult } from "../skills";
+import { item } from "../skills/brief";
 
 /**
  * 감독 시장 — **벤치의 사람도 바뀐다.**
@@ -592,6 +594,16 @@ export function acceptManagerOffer(state: GameState, ref: string): SkillResult {
       ` 계약은 연봉 ${formatMoney(salary)}에 ${contract.until}까지` +
       (pledge > 0 ? `, 이적 예산 ${formatMoney(pledge)}이 약속대로 더해졌습니다` : `입니다`),
     tone: "good",
+    brief: {
+      head: "부임",
+      items: [
+        item({ label: "구단", text: name, note: `기대 ${offer.expectation}` }),
+        item({ label: "연봉", text: formatMoney(salary), note: `${contract.until}까지` }),
+        ...(pledge > 0
+          ? [item({ label: "이적 예산", text: formatMoney(pledge), delta: pledge })]
+          : []),
+      ],
+    },
   };
 }
 
@@ -635,19 +647,24 @@ export function counterManagerOffer(
   const reputation = (state.manager.reputation.board + state.manager.reputation.media) / 2;
   const headroom = counterHeadroom(reputation, tier);
   const parts: string[] = [];
+  /** 흥정이 실제로 선 값 — 축마다 한 줄이다 (모델이 읽는 줄과 같은 자에서 갈린다) */
+  const items: SkillBriefItem[] = [];
 
   /** 한 축의 흥정 — 제시액 아래로는 내려가지 않고, 천장 위로는 올라가지 않는다 */
   const settle = (label: string, offered: number, asked: number): number => {
     const ceiling = Math.round(offered * (1 + headroom));
     if (asked <= offered) {
       parts.push(`${label} ${formatMoney(offered)} — 제시액 아래로는 내려가지 않는다`);
+      items.push(item({ label, text: formatMoney(offered), note: "제시액 그대로" }));
       return offered;
     }
     if (asked <= ceiling) {
       parts.push(`${label} ${formatMoney(asked)} — 요구대로`);
+      items.push(item({ label, text: formatMoney(asked), note: "요구대로" }));
       return asked;
     }
     parts.push(`${label} ${formatMoney(ceiling)} — 천장에서 멈췄다 (요구 ${formatMoney(asked)})`);
+    items.push(item({ label, text: formatMoney(ceiling), note: "천장에서 멈췄다" }));
     return ceiling;
   };
 
@@ -669,6 +686,10 @@ export function counterManagerOffer(
     message:
       `${teamNameIn(state, offer.teamId)}가 답했습니다 — ${parts.join(" · ")}.` +
       ` 흥정은 여기까지입니다 — 남은 것은 수락 여부입니다 (${offer.expiresOn}까지)`,
+    brief: {
+      head: `${teamNameIn(state, offer.teamId)} 조건 흥정`,
+      items: [...items, item({ label: "기한", text: `${offer.expiresOn}까지` })],
+    },
   };
 }
 
@@ -731,6 +752,17 @@ export function applyForManagerJob(state: GameState, teamRef: string): SkillResu
       message:
         `${teamNameIn(state, vacancy.teamId)}가 정중히 거절했습니다 —` +
         ` 평판 ${Math.round(reputation)}이 ${tier}티어의 문턱 ${gate}에 미치지 못합니다`,
+      brief: {
+        head: "감독직 지원",
+        items: [
+          item({ label: teamNameIn(state, vacancy.teamId), text: "거절" }),
+          item({
+            label: "평판",
+            text: `${Math.round(reputation)}`,
+            note: `${tier}티어 문턱 ${gate}`,
+          }),
+        ],
+      },
     };
   }
 
@@ -763,6 +795,18 @@ export function applyForManagerJob(state: GameState, teamRef: string): SkillResu
       `${teamNameIn(state, vacancy.teamId)}가 제안으로 답했습니다 — 기대는 ${boardExpectationText(expectation.code, expectation.target)},` +
       ` 연봉 ${formatMoney(salary)}·${terms.years}년·이적 예산 약속 ${formatMoney(terms.budgetPledge)}.` +
       ` 지원한 쪽이라 연봉은 기본보다 짭니다. ${OFFER_DAYS}일 안에 답해야 합니다`,
+    brief: {
+      head: "감독직 지원",
+      items: [
+        item({
+          label: teamNameIn(state, vacancy.teamId),
+          text: "제안",
+          note: boardExpectationText(expectation.code, expectation.target),
+        }),
+        item({ label: "연봉", text: formatMoney(salary), note: `${terms.years}년` }),
+        item({ label: "이적 예산 약속", text: formatMoney(terms.budgetPledge) }),
+      ],
+    },
   };
 }
 

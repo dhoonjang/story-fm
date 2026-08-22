@@ -66,12 +66,14 @@ function FootMarks({ foot }: { foot: SquadRow["foot"] }) {
   );
 }
 
-/** 추정 폭을 말로 — 같은 "잠재력 78~86"도 확신의 정도가 다르다 */
+/**
+ * 추정 폭을 말로 — 같은 "잠재력 78~86"도 확신의 정도가 다르다.
+ * 폭이 어느 정도부터 무슨 낱말인지는 **스카우팅이 정한다**(`potentialConfidence`).
+ * 화면은 그 낱말을 받아 문장에 끼울 뿐, 임계값을 다시 재지 않는다.
+ */
 function potentialHint(band: SquadRow["potential"]): string {
   if (!band) return "성장 여력을 짐작할 근거가 없습니다";
-  const confidence =
-    band.margin <= 3 ? "거의 확실" : band.margin <= 6 ? "대체로 신뢰" : "대강 짐작";
-  return `추정 폭 ±${band.margin} — ${confidence}. 함께 뛴 경기가 쌓이면 좁아집니다`;
+  return `추정 폭 ±${band.margin} — ${band.confidence}. 함께 뛴 경기가 쌓이면 좁아집니다`;
 }
 
 /** 선택한 선수 상세 — 그 자리 적응도와 능력치 16축 */

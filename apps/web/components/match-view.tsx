@@ -2,7 +2,13 @@
 
 import { Fragment } from "react";
 import type { OfficeViews } from "@story-fm/engine";
-import { anchorOf, positionGroupOf, separateBoardPoints } from "@story-fm/domain";
+import {
+  TACTIC_AXES,
+  anchorOf,
+  positionGroupOf,
+  separateBoardPoints,
+  tacticWord,
+} from "@story-fm/domain";
 import { pitchPointOf, spreadMarkers, type PitchPoint } from "@/lib/pitch-layout";
 import { IconBoard } from "@/components/icons";
 import { ConditionBar } from "@/components/condition-bar";
@@ -415,15 +421,6 @@ function Orders({ exploiting, notes }: { exploiting: string[]; notes: string[] }
   );
 }
 
-const AXES = [
-  { key: "mentality", label: "멘탈리티", low: "수비적", high: "공격적" },
-  { key: "defensiveLine", label: "수비 라인", low: "낮게", high: "높게" },
-  { key: "pressing", label: "압박", low: "최소", high: "맹렬" },
-  { key: "tempo", label: "템포", low: "느리게", high: "빠르게" },
-  { key: "width", label: "폭", low: "좁게", high: "넓게" },
-  { key: "passStyle", label: "패스", low: "짧게", high: "길게" },
-] as const;
-
 /**
  * 상대 전술 6축 — **읽기 전용.**
  *
@@ -444,13 +441,13 @@ function SideTactics({ tactics }: { tactics: Match["tactics"]["home"] }) {
           <i>{tactics.formation}</i> · 소화 {Math.round(tactics.uptake * 100)}%
         </span>
       </div>
-      {AXES.map((axis) => {
+      {TACTIC_AXES.map((axis) => {
         const v = tactics[axis.key];
         return (
           <div className="mv-tac-row one" key={axis.key}>
             <span className="mv-tac-axis">{axis.label}</span>
             <Dots value={v} align="left" title={`${axis.label} ${v}`} />
-            <span className="mv-tac-word">{v >= 4 ? axis.high : v <= 2 ? axis.low : "보통"}</span>
+            <span className="mv-tac-word">{tacticWord(axis.key, v)}</span>
           </div>
         );
       })}
