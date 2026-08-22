@@ -81,6 +81,8 @@ export const PacketTagSchema = z.object({
   ]),
   code: z.string().min(1),
   favours: MatchSideSchema.nullable(),
+  /** 그 사실을 가진 쪽 — 미스매치만 싣는다. 없으면 이로운 편의 반대다 */
+  holder: MatchSideSchema.optional(),
   sharp: z.boolean(),
   playerIds: z.array(z.string()).default([]),
   values: z.record(z.string(), z.number()).default({}),

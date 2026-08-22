@@ -57,6 +57,13 @@ export interface KeyPoint {
   id: string;
   /** 이 지점을 **가진 쪽** — 공략하는 쪽이 아니다 */
   side: MatchSide;
+  /**
+   * 이 지점이 **이로운 쪽** — `side`와 갈리는 것은 강점 축이다.
+   *
+   * 느린 센터백은 가진 쪽이 잃지만 창조자는 가진 쪽이 얻는다. 한쪽으로만 접으면
+   * 우리 에이스가 상대에게 이로운 사실로 실린다 (`AXIS_FAVOURS_HOLDER`).
+   */
+  favours: MatchSide;
   /** 공략이 닿는 존 */
   zone: MatchupZone;
   /**
@@ -143,6 +150,36 @@ const AXIS_THRESHOLD = {
   discipline: 22,
 } as const;
 
+/** 축 id — `AXIS_THRESHOLD`가 목록의 원본이다 */
+type AxisId = keyof typeof AXIS_THRESHOLD;
+
+/**
+ * 그 축이 **가진 쪽에게 이로운가** — 태그의 `favours`는 여기서 나온다.
+ *
+ * `side`는 그 지점을 가진 쪽이고(공략은 언제나 상대 쪽 지점을 노린다), 이로운 쪽은
+ * **축마다 갈린다.** 느린 센터백을 가진 쪽은 잃고 창조자를 가진 쪽은 얻는다.
+ *
+ * `AXIS_THRESHOLD`의 세 종류(격차·약점·강점)와 겹치지 않으므로 식으로 되짚을 수
+ * 없다 — `discipline`은 능력치에서 문턱을 빼는 **강점 꼴**이지만 거친 선수를 가진
+ * 쪽이 대가를 치른다. 축을 더하면 여기에도 한 줄이 있어야 한다(타입이 막는다).
+ */
+const AXIS_FAVOURS_HOLDER: Record<AxisId, boolean> = {
+  "backline-pace": false,
+  "wing-duel": false,
+  aerial: false,
+  "press-resistance": false,
+  creator: true,
+  finisher: true,
+  keeper: false,
+  "keeper-distribution": true,
+  "backline-shape": false,
+  "backline-leader": false,
+  physical: false,
+  stamina: false,
+  "set-piece": true,
+  discipline: false,
+};
+
 /**
  * 백라인에 조율자가 없다고 부를 리더십 상한 — 최고 리더십이 이보다 높으면 부를
  * 사람이 있다고 본다. `AXIS_THRESHOLD["backline-leader"]` 보다 낮아, 지점이
@@ -150,8 +187,12 @@ const AXIS_THRESHOLD = {
  */
 const BACKLINE_LEADER_GATE = 45;
 
+/** 한 방향 안에서의 편 — `buildKeyPoints`가 절대 좌표(home/away)로 옮긴다 */
+type RelSide = "us" | "them";
+const otherRel = (s: RelSide): RelSide => (s === "us" ? "them" : "us");
+
 /** 한쪽 팀이 상대에게 갖는 우위·약점 — 두 방향으로 각각 부른다 */
-type RawPoint = Omit<KeyPoint, "side"> & { side: "us" | "them" };
+type RawPoint = Omit<KeyPoint, "side" | "favours"> & { side: RelSide; favours: RelSide };
 
 function sidePoints(atk: LineupSlot[], def: LineupSlot[]): RawPoint[] {
   const out: RawPoint[] = [];
@@ -161,9 +202,9 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[]): RawPoint[] {
    * 넘기면 공략이 반대편 레인에 걸린다.
    */
   const push = (
-    axis: string,
+    axis: AxisId,
     who: LineupSlot | undefined,
-    side: RawPoint["side"],
+    side: RelSide,
     zone: KeyPoint["zone"],
     weight: number,
     values: Record<string, number>,
@@ -174,6 +215,8 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[]): RawPoint[] {
       out.push({
         id: `${axis}:${who?.player.id ?? "team"}`,
         side,
+        // 이로운 편은 축이 정한다 — 가진 쪽이 얻는 축과 잃는 축이 섞여 있다
+        favours: AXIS_FAVOURS_HOLDER[axis] ? side : otherRel(side),
         zone,
         weight,
         values,
@@ -387,11 +430,10 @@ export function buildKeyPoints(homeXI: LineupSlot[], awayXI: LineupSlot[]): KeyP
    * 절대 좌표(home/away)로 옮긴다. 이걸 빠뜨리면 공략이 반대편에 걸린다
    * (실제로 우리가 노렸는데 상대 xG가 올랐다).
    */
-  const absolute = (points: RawPoint[], usSide: MatchSide): KeyPoint[] =>
-    points.map((p) => ({
-      ...p,
-      side: p.side === "us" ? usSide : usSide === "home" ? "away" : "home",
-    }));
+  const absolute = (points: RawPoint[], usSide: MatchSide): KeyPoint[] => {
+    const abs = (rel: RelSide): MatchSide => (rel === "us" ? usSide : otherSide(usSide));
+    return points.map((p) => ({ ...p, side: abs(p.side), favours: abs(p.favours) }));
+  };
   return [
     ...absolute(sidePoints(homeXI, awayXI), "home"),
     ...absolute(sidePoints(awayXI, homeXI), "away"),
@@ -429,15 +471,16 @@ const GAP_CLARITY_FULL = 60;
 const SHARP_CLARITY = 0.55;
 
 /**
- * 키포인트 → 사실 태그. **`favours`는 이로운 편이다** — `KeyPoint.side`는 그 지점을
- * 가진 쪽이라 여기서 한 번 뒤집는다. 두 뜻을 한 칸에 담으면 골의 원인과 화면의
- * 색이 정반대가 된다 (match.md §1).
+ * 키포인트 → 사실 태그. **두 편을 따로 싣는다** — `favours`는 이로운 편이고
+ * `holder`는 그 지점을 가진 쪽(문장의 주어)이다. 한 칸으로 접으면 강점 축에서
+ * 골의 원인과 화면의 색이 정반대가 된다 (match.md §1).
  */
 export function keyPointTag(point: KeyPoint, sharp: boolean): PacketTag {
   return {
     source: "mismatch",
     code: point.id.split(":")[0] ?? point.id,
-    favours: otherSide(point.side),
+    favours: point.favours,
+    holder: point.side,
     sharp,
     playerIds: point.playerIds,
     values: point.values,

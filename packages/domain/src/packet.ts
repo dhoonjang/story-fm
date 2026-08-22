@@ -67,6 +67,14 @@ export interface PacketTag {
   /** 이 사실이 **이로운 편** — 약점을 가진 쪽이 아니다. 편이 없는 사실이면 null */
   favours: MatchSide | null;
   /**
+   * 이 사실을 **가진 쪽** — 이름이 서는 선수들의 팀이자 미스매치 문장의 주어다.
+   *
+   * `favours`와 갈리는 것은 강점 축이다: 창조자·마무리·골키퍼 배급·세트피스 키커는
+   * 가진 쪽이 곧 이로운 쪽이고, 나머지 축은 반대다 (sim `key-points.ts`). 없으면
+   * (구멍·옛 세이브처럼 가진 쪽이 언제나 잃는 갈래) 이로운 편의 반대로 본다.
+   */
+  holder?: MatchSide;
+  /**
    * 수치를 드러내도 되는가 — 감독의 눈(분석)이 정한다. `false`면 렌더러가 흐린
    * 문장을 낸다 (match.md §1.6 — 못 본 수치가 노트로 새어 들어오지 않게 하는 칸).
    */
@@ -672,8 +680,8 @@ export function packetTagText(tag: PacketTag, ctx?: PacketTagContext): string {
       if (tag.code.startsWith("zone-")) return zoneMatchupText(tag);
       const entry = MISMATCH_KO[tag.code];
       if (!entry || !tag.favours) return tag.text ?? "";
-      // 미스매치의 주어는 그 지점을 **가진** 쪽 — 이로운 편의 반대다
-      const s = sides(otherSide(tag.favours));
+      // 미스매치의 주어는 그 지점을 **가진** 쪽 — 강점 축은 그게 이로운 편 자신이다
+      const s = sides(tag.holder ?? otherSide(tag.favours));
       return tag.sharp ? entry.sharp(s) : entry.vague(s);
     }
     case "tactical":
