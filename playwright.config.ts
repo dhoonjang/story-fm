@@ -1,5 +1,8 @@
 import { defineConfig } from "@playwright/test";
 
+import { DATA_DIR, PORT, SUFFIX } from "./e2e/slot";
+import { TURN_MS } from "./e2e/timeouts";
+
 /**
  * e2e — mock GM 모드로 LLM 없이 전체 시나리오를 브라우저에서 검증한다.
  * 실모드 시나리오는 스모크로 별도 수행 (config/llm.yml의 GM 제공자 키 필요).
@@ -8,32 +11,13 @@ import { defineConfig } from "@playwright/test";
  * 개발용 플레이 서버(3311, 실모드일 수 있음)를 reuseExistingServer가 재사용해
  * mock 기대가 깨지는 사고를 막는다.
  *
- * `E2E_SLOT=1`~`9`는 한 워크트리에서 e2e를 동시에 돌리기 위한 슬롯이다. 포트·빌드
- * 산출물·세이브 디렉터리·실패 아티팩트가 슬롯 하나에서 함께 갈라진다 — 하나만
- * 나누면 동시 실행이 서로를 밟으므로 개별 변수로는 열지 않는다.
+ * 슬롯이 무엇을 가르는지는 `e2e/slot.ts`가 갖는다 — 스펙도 같은 자리를 알아야
+ * 하기 때문이다(세이브 디렉터리).
  */
-const BASE_PORT = 3399;
-// 슬롯을 늘리면 apps/web/tsconfig.json의 include에도 그 distDir을 함께 적는다 —
-// Next가 처음 보는 distDir을 tsconfig에 자동으로 덧붙여 추적 파일을 더럽힌다.
-const MAX_SLOT = 9;
-
-function readSlot(): number {
-  const raw = process.env.E2E_SLOT;
-  if (raw === undefined || raw === "") return 0;
-  const slot = Number(raw);
-  if (!Number.isInteger(slot) || slot < 0 || slot > MAX_SLOT) {
-    throw new Error(`E2E_SLOT은 0~${MAX_SLOT} 정수여야 한다 (받은 값: "${raw}")`);
-  }
-  return slot;
-}
-
-const slot = readSlot();
-const suffix = slot === 0 ? "" : `-${slot}`;
-const port = BASE_PORT + slot;
-const url = `http://localhost:${port}`;
+const url = `http://localhost:${PORT}`;
 // 리포트·트레이스도 슬롯을 따라 갈린다 — 두 슬롯이 한 디렉터리에 쓰면 나중 실행이
 // 앞 실행의 실패 증거를 지운다. ci.yml이 올리는 것은 슬롯 0의 이름이다.
-const reportDir = `playwright-report${suffix}`;
+const reportDir = `playwright-report${SUFFIX}`;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -65,10 +49,15 @@ export default defineConfig({
    * 나눠 쓰면 겹칠 여유 자체가 없다 — 그래서 아래 webServer가 **일을 줄인다**.
    */
   workers: 4,
-  // 냉간 왕복이 7초를 넘기기도 한다(dev 서버에서 컴파일 2.6s + 첫 요청 4.8s를
-  // 관측). Playwright 기본값 5초는 이 환경을 잰 값이 아니다 — 기다림만 늘리고
-  // 무엇을 확인하는지는 그대로 둔다.
-  expect: { timeout: 15_000 },
+  /**
+   * 왕복 한 번이 기본값이다 (`e2e/timeouts.ts`). Playwright 기본값 5초는 이 환경을
+   * 잰 값이 아니다 — 냉간 왕복이 7초를 넘기기도 한다(dev 서버에서 컴파일 2.6s +
+   * 첫 요청 4.8s를 관측).
+   *
+   * 그래서 **스펙은 이 부류의 기다림을 적지 않는다**. 스펙에 숫자가 서 있으면 그건
+   * 냉간(`COLD_MS`)이라는 뜻이다.
+   */
+  expect: { timeout: TURN_MS },
   /**
    * **빨간 e2e는 아티팩트로 읽는다.** 러너 로그에 남는 것은 실패한 단언 한 줄뿐이라
    * 그 순간 화면이 무엇이었는지가 없다 — html 리포트·트레이스·스크린샷이 그 자리를
@@ -80,7 +69,7 @@ export default defineConfig({
   reporter: process.env.CI
     ? [["html", { open: "never", outputFolder: reportDir }], ["dot"]]
     : "list",
-  outputDir: `test-results${suffix}`,
+  outputDir: `test-results${SUFFIX}`,
   use: {
     baseURL: url,
     // 실패한 시도만 남긴다 — 초록 실행에서는 지워지므로 러너 디스크를 먹지 않는다
@@ -113,16 +102,16 @@ export default defineConfig({
     // 빌드가 앞에 붙는다 — dev 서버가 서기만 기다리던 2분으로는 모자란다
     timeout: 300_000,
     env: {
-      PORT: String(port),
+      PORT: String(PORT),
       LLM_MODE: "mock",
       // CI는 `next start`로 도므로 NODE_ENV가 production이다 — 어드민 쓰기 라우트의
       // 기본 문이 닫히는 자리다(game-state.md §2). 어드민 스펙이 카탈로그를 고쳐야
       // 하므로 여기서 명시적으로 연다.
       ADMIN_ENABLED: "1",
-      STORY_FM_DATA_DIR: `/tmp/story-fm-e2e${suffix}`,
+      STORY_FM_DATA_DIR: DATA_DIR,
       // 개발 서버(.next)와 빌드 산출물을 나눠 쓴다 — 공유하면 재컴파일 때
       // 서로의 청크를 지워 테스트가 무작위로 깨진다
-      NEXT_DIST_DIR: `.next-e2e${suffix}`,
+      NEXT_DIST_DIR: `.next-e2e${SUFFIX}`,
     },
   },
 });
