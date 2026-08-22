@@ -25,6 +25,46 @@ export interface GmToolCall {
   line?: number;
 }
 
+/** 엔진 스킬이 돌려주는 것 — `SkillResult`와 같은 모양이되 GM 쪽에서 좁게 읽는다 */
+export type SkillReturn = {
+  ok: boolean;
+  message: string;
+  brief?: SkillBrief;
+  payload?: unknown;
+  tone?: "good" | "bad";
+};
+
+/**
+ * 스킬 호출을 턴의 기록에 세운다 — **두 모드가 같은 함수를 쓴다** (agents.md §8).
+ *
+ * - **성공한 호출만 남긴다.** 실패한 스킬은 세계를 움직이지 않았으니 칩도 말풍선도
+ *   설 자리가 없다. 갈라져 있던 시절 mock에만 실패 칩이 서서, e2e가 실모드에는 없는
+ *   칩을 보고 통과했다.
+ * - **함께 실려야 하는 것을 빠뜨리지 않는다** — 카드(`payload`)·항목(`brief`)·결(`tone`).
+ *   없으면 화면이 조용히 폴백한다: 카드 없이 줄글로, 항목 없이 요약 문자열로.
+ */
+export function recordCall(
+  calls: GmToolCall[],
+  name: string,
+  result: SkillReturn,
+  extra?: { input?: unknown; line?: number; silent?: boolean },
+): SkillReturn {
+  if (!result.ok) return result;
+  calls.push({
+    name,
+    summary: result.message,
+    ...(extra?.input === undefined ? {} : { input: extra.input }),
+    // 항목 요약은 코어가 낸 그대로 실어 보낸다 — 여기서 문자열로 접으면 화면이 도로 쪼갠다
+    ...(result.brief === undefined ? {} : { brief: result.brief }),
+    ...(result.payload === undefined ? {} : { payload: result.payload }),
+    ...(result.tone === undefined ? {} : { tone: result.tone }),
+    // 이 스킬이 불린 자리 — 화면이 장면 중간에 칩을 세운다
+    ...(extra?.line === undefined ? {} : { line: extra.line }),
+    ...(extra?.silent === true ? { silent: true } : {}),
+  });
+  return result;
+}
+
 export interface GmTurnResult {
   /** 모델 턴 텍스트 — @문법 (overview.md §3) */
   text: string;
@@ -83,6 +123,16 @@ export class GmTurnFailure extends Error {
  * mock-gm도 이 이름을 쓴다.
  */
 export const TIME_PASSED = "시간 경과";
+
+/**
+ * 경기가 한 구간 굴렀다는 기록의 이름 — **시계 이동과 같은 자리**다.
+ *
+ * 구간을 미는 것은 감독이 부른 스킬이 아니라 코어가 한 일이라(`advanceSegment`)
+ * 스킬 카탈로그에 이름이 없다. `advance_match`라고 적으면 영문 스킬 이름들 사이에
+ * 섞여 트레이스에 미등록 스킬이 불린 것처럼 남으므로, `TIME_PASSED`와 같은 규약으로
+ * 한글 이름을 쓴다. 화면에 세우지 않는 것은 이름이 아니라 `silent`가 정한다.
+ */
+export const MATCH_ADVANCED = "경기 진행";
 
 /**
  * 시간 이동 손잡이가 보내는 조작 — `{ kind: "skip_days", days: 1 }`
