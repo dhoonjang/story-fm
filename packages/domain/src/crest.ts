@@ -59,7 +59,14 @@ function pick<T>(id: string, axis: string, choices: readonly [T, ...T[]]): T {
  * 색상환의 자리 12곳. `lift`는 명도 보정 — 같은 L이라도 노랑은 밝게, 남색은
  * 어둡게 보이므로 그대로 두면 명단에서 한 벌로 읽히지 않는다.
  */
-const CREST_HUES = [
+interface CrestHue {
+  /** 색상환의 각도 */
+  readonly hue: number;
+  /** 명도 보정 — 같은 L이라도 노랑은 밝게, 남색은 어둡게 보인다 */
+  readonly lift: number;
+}
+
+const CREST_HUES: readonly [CrestHue, ...CrestHue[]] = [
   { hue: 352, lift: 0 }, // 진홍
   { hue: 14, lift: -2 }, // 주홍
   { hue: 32, lift: -6 }, // 호박
@@ -72,7 +79,7 @@ const CREST_HUES = [
   { hue: 236, lift: 4 }, // 남색
   { hue: 268, lift: 3 }, // 보라
   { hue: 316, lift: 0 }, // 자주
-] as const;
+];
 
 /**
  * 채도·명도는 좁은 대역에 묶는다 — 아무 조합이나 나오면 서른 개가 나란히 설 때

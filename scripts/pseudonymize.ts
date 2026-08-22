@@ -404,12 +404,12 @@ if (args.includes("--help")) {
   }
 } else {
   const at = args.indexOf("--out");
-  const out = at === -1 ? null : args[at + 1];
+  const out = at === -1 ? undefined : args[at + 1];
   if (at !== -1 && (out === undefined || out.startsWith("--"))) {
     throw new Error("--out 뒤에 디렉터리가 없다");
   }
   const { files, stats } = generate();
-  const target = out === undefined || out === null ? null : path.resolve(out);
+  const target = out === undefined ? null : path.resolve(out);
   if (target !== null) {
     assertWritable(target);
     mkdirSync(target, { recursive: true });
