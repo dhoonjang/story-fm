@@ -182,7 +182,7 @@ describe("부임 전 부상 이력 — 조사된 선수만", () => {
     const qid = p.catalogId === null ? undefined : qidById.get(p.catalogId);
     return qid !== undefined && INJURY_HISTORY[qid] !== undefined;
   });
-  const seededRows = state.injuries.filter((i) => i.note === "부임 전 이력");
+  const seededRows = state.injuries.filter((i) => i.cause === "pre_appointment");
 
   it("표가 게임에 닿는다 — 값을 갖는 선수는 조사분 그들뿐이다", () => {
     expect(researched.length, "표의 이름이 한 명도 게임에 닿지 않았다").toBeGreaterThan(0);

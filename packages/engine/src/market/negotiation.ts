@@ -3,6 +3,7 @@ import type {
   MarketCard,
   MarketDirection,
   MarketTerms,
+  MedicalConcern,
   Negotiation,
   NegotiationVerdict,
 } from "@story-fm/domain";
@@ -14,6 +15,7 @@ import {
   isPlayerDeal,
   marketDirectionKo,
   naturalPositionOf,
+  registrationBlockText,
 } from "@story-fm/domain";
 import {
   addDays,
@@ -53,6 +55,8 @@ import { clearDepartedState, isFreeAgent, loanPlayer, releasePlayer } from "./de
 import {
   describeMedical,
   isIncomingDeal,
+  medicalConcernText,
+  medicalNoteText,
   needsMedical,
   overrideMedical,
   receivingTeamOf,
@@ -64,7 +68,7 @@ import { isClubTeam } from "../data/team-catalog";
 import { arrivingSquadLevel, canRegisterFor } from "../squad/registration";
 import { assignSquadNumber } from "../squad/numbers";
 import { USER_WAGE_HEADROOM, wageRoomOf } from "../world/wages";
-import { marketBiasOf, transferWindowLabel, windowOpenForTeam } from "./market";
+import { marketBiasOf, squadShortfallText, transferWindowLabel, windowOpenForTeam } from "./market";
 import { evaluatePitch, latitudeOf } from "./persuasion";
 import { makeRng } from "../core/rng";
 import type { MarketSkillResult, SkillResult } from "../skills";
@@ -1512,8 +1516,9 @@ export function answerIncomingOffer(
 
   if (input.verdict === "accept") {
     const shortfall = squadShortfall(state, state.userTeamId, player);
-    if (shortfall) return { ok: false, message: `우리 ${shortfall}` };
-    const renegotiated = offer.note?.startsWith("메디컬 소견") === true;
+    if (shortfall) return { ok: false, message: `우리 ${squadShortfallText(shortfall, "sell")}` };
+    // 메디컬을 보고 깎아 다시 부른 오퍼인가 — 소견 문구가 아니라 코드가 가른다
+    const renegotiated = offer.origin === "medical";
     const card = verdictCardOf({
       player,
       counterpart,
@@ -1925,7 +1930,6 @@ function executeLoanIn(
     date: state.date,
     type: "loan",
     fee: agreed.fee,
-    note: `임대 영입 (복귀 ${until} · 주급 분담 ${Math.round(wageShare * 100)}%)`,
   });
   player.teamId = state.userTeamId;
   player.squadNumber = undefined;
@@ -1945,7 +1949,7 @@ function executeLoanIn(
     message:
       `${player.name}을(를) ${teamName(from)}에서 임대로 데려왔습니다 — ${until}까지 · ` +
       `임대료 ${formatMoney(agreed.fee)} · 주급 ${Math.round(wageShare * 100)}% 부담` +
-      (slot.ok ? "" : ` ⚠ ${slot.reason} — 2군으로 들어왔습니다`),
+      (slot.ok ? "" : ` ⚠ ${registrationBlockText(slot.block)} — 2군으로 들어왔습니다`),
   };
 }
 
@@ -2046,7 +2050,9 @@ function passMedicalGate(
      * 치른다 (transfer.md §5).
      */
     const outcome = resolveMedical(state, negotiation, player);
-    if (!outcome.passed) return medicalFlagResult(state, negotiation, player, outcome.note);
+    if (!outcome.passed && outcome.concern) {
+      return medicalFlagResult(state, negotiation, player, outcome.concern);
+    }
   }
 
   const medical = negotiation.medical;
@@ -2083,8 +2089,9 @@ function medicalFlagResult(
   state: GameState,
   negotiation: Negotiation,
   player: GamePlayer,
-  note: string,
+  concern: MedicalConcern,
 ): SkillResult {
+  const note = medicalConcernText(concern);
   if (isIncomingDeal(negotiation)) {
     pushNarrative(state, `${player.name} 메디컬 소견 — ${note}`, 4);
     return {
@@ -2094,7 +2101,7 @@ function medicalFlagResult(
         `그대로 데려오려면 accept_deal을 한 번 더, 물러서려면 withdraw_offer입니다`,
     };
   }
-  const counter = openMedicalCounter(state, negotiation, player, note);
+  const counter = openMedicalCounter(state, negotiation, player);
   if (!counter) return { ok: false, message: "합의된 조건을 찾지 못했습니다" };
   return {
     ok: true,
@@ -2116,7 +2123,6 @@ function openMedicalCounter(
   state: GameState,
   negotiation: Negotiation,
   player: GamePlayer,
-  note: string,
 ): { agreedFee: number; cut: number } | null {
   const agreed = [...negotiation.rounds].reverse().find((r) => r.verdict === "accept");
   if (!agreed) return null;
@@ -2132,7 +2138,8 @@ function openMedicalCounter(
     respondsOn: null,
     probability: agreed.probability,
     verdict: null,
-    note: `메디컬 소견 — ${note}`,
+    // 이 오퍼가 어디서 나왔나 — 소견 문장이 아니라 코드가 그것을 말한다
+    origin: "medical",
   });
   pushNarrative(
     state,
@@ -2297,7 +2304,10 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
   // 무소속은 클럽이 아니라 클럽이 없는 상태다 — 지킬 스쿼드가 없다
   const sellerShort = isFreeAgent(player) ? null : squadShortfall(state, player.teamId, player);
   if (sellerShort) {
-    return { ok: false, message: `${teamName(player.teamId)}이(가) ${sellerShort}` };
+    return {
+      ok: false,
+      message: `${teamName(player.teamId)}이(가) ${squadShortfallText(sellerShort, "sell")}`,
+    };
   }
 
   // 돈과 원장의 상대는 **계약을 가진 구단**이다 — 지금 뛰는 팀과 갈라지는 자리가 임대다
@@ -2316,7 +2326,6 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
     date: state.date,
     type: agreed.fee > 0 ? "transfer" : "free",
     fee: agreed.fee,
-    note: `${teamName(fromTeamId)} → ${teamName(state.userTeamId)}`,
   });
 
   // 계약 — 기존 계약을 끝내고 새로 쓴다 (주급의 원본은 CONTRACT다)
@@ -2418,7 +2427,7 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
         ? ""
         : ` (${paymentYears}년 분할 — 첫 회분 ${formatMoney(dueNow)})`) +
       `, 주급 ${formatMoney(agreed.weeklyWage)} ${agreed.contractYears}년. 남은 이적 예산 ${formatMoney(ourFinance.transferBudget)}` +
-      (slot.ok ? "" : ` ⚠ ${slot.reason} — 2군으로 들어왔습니다`),
+      (slot.ok ? "" : ` ⚠ ${registrationBlockText(slot.block)} — 2군으로 들어왔습니다`),
   };
 }
 
@@ -2460,7 +2469,7 @@ function executeSale(
     };
   }
   const shortfall = squadShortfall(state, state.userTeamId, player);
-  if (shortfall) return { ok: false, message: `우리 ${shortfall}` };
+  if (shortfall) return { ok: false, message: `우리 ${squadShortfallText(shortfall, "sell")}` };
   /**
    * **사는 쪽도 돈이 있어야 한다.** 오퍼가 붙을 때 `pickBuyer`가 본 것은 그때의
    * 시장가였고, 감독의 역제안은 그 위로 얼마든 부를 수 있다 — 그사이 그 구단이
@@ -2530,7 +2539,6 @@ function executeSale(
     date: state.date,
     type: agreed.fee > 0 ? "transfer" : "free",
     fee: agreed.fee,
-    note: `${teamName(state.userTeamId)} → ${teamName(buyerTeamId)}`,
   });
 
   const previous = activeContract(state, player.id);
@@ -2679,7 +2687,9 @@ export function runMedicals(state: GameState, digest: string[]): void {
      * 돌아가 감독이 답할 차례가 된다. 유리몸을 비싸게 파는 일이 그래서 어려워진다.
      * 두 갈래의 문장은 `accept_deal`이 마감일에 쓰는 것과 같다.
      */
-    const flagged = medicalFlagResult(state, negotiation, player, outcome.note);
+    // 통과하지 않았으면 소견 카드가 반드시 붙는다 (`resolveMedical`)
+    if (!outcome.concern) continue;
+    const flagged = medicalFlagResult(state, negotiation, player, outcome.concern);
     if (flagged.ok) digest.push(`🩺 ${flagged.message}`);
   }
 }
@@ -2767,7 +2777,7 @@ export function pendingVerdicts(state: GameState): Array<{
         label:
           medical?.status === "flagged"
             ? isIncomingDeal(negotiation)
-              ? `${who} 메디컬 소견 — ${medical.note ?? "이상 소견"} · 강행하려면 accept_deal, 물러서려면 withdraw_offer`
+              ? `${who} 메디컬 소견 — ${medicalNoteText(medical)} · 강행하려면 accept_deal, 물러서려면 withdraw_offer`
               : // 상대 구단의 소견이라 우리가 강행할 것이 없다 — 깎인 값에 합의한 상태다
                 `${who} 상대 메디컬 소견을 반영한 값에 합의했습니다 — accept_deal로 확정하세요`
             : // 검진은 통과했는데 아직 합의 상태다 = 계약이 걸렸다 (예산·명단 등)

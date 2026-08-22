@@ -107,8 +107,6 @@ describe("개인 지시 — 중립성", () => {
  */
 const XI = () => makeSide("us", 78).starters;
 const THEM_XI = () => makeSide("them", 78).starters;
-const BENCH = () => makeSide("us", 78).bench;
-const THEM_BENCH = () => makeSide("them", 78).bench;
 /** 소화율 1 — 이득이 깎이지 않아야 상한과 세기 배수를 그대로 읽을 수 있다 */
 const FULL = 1;
 
@@ -117,8 +115,7 @@ const THEIR_RIGHT = "them-mf2"; // RCM · x=67 → 오른쪽
 const LEFT_BACK = "us-df4"; // LB · x=11
 const RIGHT_BACK = "us-df1"; // RB · x=89
 
-const run = (d: DirectiveInput[]) =>
-  applyDirectives(d, XI(), THEM_XI(), FULL, BENCH(), THEM_BENCH());
+const run = (d: DirectiveInput[]) => applyDirectives(d, XI(), THEM_XI(), FULL);
 
 describe("개인 지시 — 판과 같은 해상도", () => {
   it("겨냥한 선수가 선 레인이 결과에 남는다 — 좌우가 같은 답을 내지 않는다", () => {
@@ -214,8 +211,8 @@ describe("개인 지시 — 세기", () => {
 
 /**
  * **거짓 성공을 막는 자리.** 노트가 없으면 `tactical.notes`를 인용하는 중계도
- * 화면도 걸리지 않은 지시가 걸린 줄 안다. 문장을 박아 두지는 않는다 — 지켜야 하는
- * 것은 "노트가 하나 남고 거기에 그 사람 이름이 있다"까지다.
+ * 화면도 걸리지 않은 지시가 걸린 줄 안다. 지켜야 하는 것은 "태그가 하나 남고
+ * 무엇이 왜 안 걸렸는지가 코드와 선수 id로 남는다"까지다 — 문구는 렌더러의 몫이다.
  */
 describe("개인 지시 — 판에 닿지 못한 지시는 조용하지 않다", () => {
   const THREE: DirectiveInput[] = [
@@ -229,21 +226,24 @@ describe("개인 지시 — 판에 닿지 못한 지시는 조용하지 않다",
     const four = run([...THREE, { by: LEFT_BACK, kind: "stay_back" }]);
     expect(four.us).toEqual(three.us);
     expect(four.notes).toHaveLength(three.notes.length + 1);
-    const dropped = four.notes.filter((n) => n.includes(LEFT_BACK));
+    const dropped = four.notes.filter((n) => n.playerIds.includes(LEFT_BACK));
     expect(dropped).toHaveLength(1);
+    expect(dropped[0]!.code).toBe("overflow");
   });
 
-  it("그라운드에 없는 선수의 지시는 벤치에서 이름을 찾아 남긴다", () => {
+  it("그라운드에 없는 선수의 지시는 그 사실을 코드로 남긴다", () => {
     const out = run([{ by: "us-sub-fw", kind: "join_attack" }]);
     expect(out.us).toEqual(run([]).us);
     expect(out.notes).toHaveLength(1);
-    expect(out.notes[0]).toContain("us-sub-fw");
+    expect(out.notes[0]!.code).toBe("off-pitch");
+    expect(out.notes[0]!.playerIds).toContain("us-sub-fw");
   });
 
   it("교체로 나간 표적의 지시도 노트를 남긴다 — 이름을 못 찾아도 사실은 남는다", () => {
     const gone = run([{ by: MARKER, kind: "man_mark", targetId: "them-sub-fw" }]);
     expect(gone.notes).toHaveLength(1);
-    expect(gone.notes[0]).toContain("them-sub-fw");
+    expect(gone.notes[0]!.code).toBe("gone-target");
+    expect(gone.notes[0]!.playerIds).toContain("them-sub-fw");
 
     const invented = run([{ by: MARKER, kind: "man_mark", targetId: "없는-선수" }]);
     expect(invented.them).toEqual(run([]).them);
@@ -266,7 +266,7 @@ describe("개인 지시 — 판에 닿지 못한 지시는 조용하지 않다",
       expect(withDead.them).toEqual(three.them);
       // 걸린 셋 + 걸리지 못한 하나 — 노트는 감독이 내린 순서대로 선다
       expect(withDead.notes).toHaveLength(three.notes.length + 1);
-      expect(withDead.notes[0]).toBe(run([dead]).notes[0]);
+      expect(withDead.notes[0]).toEqual(run([dead]).notes[0]);
     }
   });
 
@@ -300,8 +300,8 @@ describe("개인 지시 — 이득과 대가", () => {
           after.away.zones[z] !== before.away.zones[z],
       );
       expect(moved, `${label}이 어떤 존도 움직이지 않았다`).toBe(true);
-      // 발동하면 문장으로 드러난다 — 중계·감독 화면이 그대로 인용한다
-      const note = after.home.tactical.notes.find((n) => n.includes(d.by));
+      // 발동하면 사실 태그로 드러난다 — 중계·감독 화면이 그것을 문장으로 옮긴다
+      const note = after.home.tactical.notes.find((n) => n.playerIds.includes(d.by));
       expect(note, `${label} 노트가 없다`).toBeDefined();
     }
   });

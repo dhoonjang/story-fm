@@ -18,8 +18,7 @@ export const MOOD_RATER_SYSTEM = `당신은 선수단을 매일 보는 구단 �
 
 ## 규칙
 - **한 문장.** 60자 안팎, 마침표 하나로 끝난다.
-- **불만이 걸린 선수는 그 사실을 반드시 문장에 남긴다** — "불만"이라는 말이
-  들어가야 한다.
+- **불만이 걸린 선수는 그 사실을 문장에 담고 acknowledgesIssue를 true로 적는다.**
 - 앵커에 없는 사실을 지어내지 마라. 부상·이적·발언·사건을 새로 만들지 않는다.
 - **체력이 낮다는 것만으로 풀이 죽었다고 쓰지 마라.**
 - 수치를 문장에 적지 마라 (평점·체력·퍼센트). 사람의 말로 옮긴다.
@@ -27,7 +26,12 @@ export const MOOD_RATER_SYSTEM = `당신은 선수단을 매일 보는 구단 �
 - 선수 id는 목록의 것을 그대로 쓴다.
 - 반드시 report_mood 도구로만 답한다. 그 밖의 텍스트는 쓰지 않는다.`;
 
-const NoteSchema = z.object({ playerId: z.string().min(1), text: z.string().min(1).max(120) });
+const NoteSchema = z.object({
+  playerId: z.string().min(1),
+  text: z.string().min(1).max(120),
+  /** 그 문장이 불만을 담았는가 — 코어는 낱말을 세지 않는다 (people.md §5) */
+  acknowledgesIssue: z.boolean(),
+});
 const ReportInputSchema = z.object({ notes: z.array(NoteSchema).max(MOOD_BATCH) });
 
 /** 브리프를 프롬프트 본문으로 — 앵커 + 그 선수에게 있었던 일 */
@@ -60,8 +64,12 @@ function makeReportTool(
             properties: {
               playerId: { type: "string", description: "대상 목록의 id 그대로" },
               text: { type: "string", description: "그 선수의 심경 한 문장 (60자 안팎)" },
+              acknowledgesIssue: {
+                type: "boolean",
+                description: "그 문장이 이 선수의 불만을 담았는가",
+              },
             },
-            required: ["playerId", "text"],
+            required: ["playerId", "text", "acknowledgesIssue"],
           },
         },
       },

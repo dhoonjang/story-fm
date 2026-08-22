@@ -24,6 +24,13 @@ export interface ClaimVerdict {
   score: number;
   /** 왜 인정됐는지 / 왜 기각됐는지 (감독에게 그대로 보인다) */
   why: string;
+  /**
+   * 이 협상에서 **이미 한 이야기인가** — 여유(`latitude`)를 여는 것은 새 논거뿐이다.
+   *
+   * 예전엔 그 사실을 `why` 뒤에 `"(이미 한 이야기다)"`로 붙이고 다시 그 문장을
+   * 읽어 셌다. 문구를 고치는 순간 반복이 전부 새 논거가 되어 여유가 무한정 열렸다.
+   */
+  repeated: boolean;
   note?: string;
 }
 
@@ -271,11 +278,12 @@ export function evaluatePitch(
       // 거짓만 코어가 결정적으로 벌한다 (남용 방지)
       score: verified || claim.kind === "other" ? 0 : -LIE_PENALTY,
       why: repeated && verified ? `${why} (이미 한 이야기다)` : why,
+      repeated,
       ...(claim.note === undefined ? {} : { note: claim.note }),
     });
   }
   // 이번에 **새로** 확인된 논거만 여유를 연다 (같은 말의 반복은 설득이 아니다)
-  const fresh = verdicts.filter((v) => v.verified && !v.why.includes("이미 한 이야기"));
+  const fresh = verdicts.filter((v) => v.verified && !v.repeated);
   return {
     verdicts,
     score: verdicts.reduce((sum, v) => sum + v.score, 0),

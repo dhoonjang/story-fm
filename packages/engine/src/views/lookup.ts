@@ -1436,9 +1436,13 @@ export function careerView(state: GameState): LookupResult {
 
   lines.push(
     state.trophies.length > 0
-      ? // TROPHY.competition은 id가 아니라 **표시 이름**으로 기록된다 (season.ts)
+      ? // TROPHY는 대회 id로 남는다 — 이름은 여기서 카탈로그가 만든다 (career.md §6)
         `트로피 ${state.trophies.length}개: ${state.trophies
-          .map((t) => `${t.competition} (시즌 ${t.season}, ${teamShortNameIn(state, t.teamId)})`)
+          .map(
+            (t) =>
+              `${t.competitionId ? competitionName(t.competitionId) : (t.competition ?? "")} ` +
+              `(시즌 ${t.season}, ${teamShortNameIn(state, t.teamId)})`,
+          )
           .join(" / ")}`
       : "트로피: 없음",
   );

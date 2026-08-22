@@ -485,6 +485,53 @@ describe("일정이 바뀌면 훈련도 따라 바뀐다", () => {
   }, 60_000);
 });
 
+describe("기본 훈련의 대조는 이름이 아니라 id로 한다", () => {
+  /**
+   * 메뉴의 한국어 이름을 고치는 것은 표시의 변경이지 일정의 변경이 아니다.
+   * 이름으로 대조하던 때는 문구 한 글자만 고쳐도 남은 시즌의 기본 훈련이 통째로
+   * 다시 깔렸다 (season.md §4).
+   */
+  it("메뉴 이름만 바꾸면 아무것도 다시 깔지 않는다", () => {
+    const state = createTestGame(3);
+    syncDefaultTraining(state);
+    const autos = state.trainingSessions.filter((t) => t.auto === true);
+    expect(autos.length, "기본 훈련이 깔려 있지 않다").toBeGreaterThan(0);
+    for (const session of autos) session.label = `${session.label} (문구 수정)`;
+    const ids = autos.map((t) => t.id).sort();
+
+    syncDefaultTraining(state);
+
+    expect(
+      state.trainingSessions
+        .filter((t) => t.auto === true)
+        .map((t) => t.id)
+        .sort(),
+      "이름을 고쳤다고 훈련이 다시 깔렸다",
+    ).toEqual(ids);
+    // 고친 이름이 그대로 남아 있다 = 그 세션이 지워지지 않았다
+    expect(state.trainingSessions.find((t) => t.id === ids[0])?.label).toContain("문구 수정");
+  });
+
+  it("옛 세이브의 세션은 id가 없어 이름으로 대조한다 — 열자마자 다시 깔리지 않는다", () => {
+    const state = createTestGame(3);
+    syncDefaultTraining(state);
+    const autos = state.trainingSessions.filter((t) => t.auto === true);
+    // 카드가 들어오기 전에 저장된 세이브 — 이름만 있고 `menuId`가 없다
+    for (const session of autos) delete session.menuId;
+    const ids = autos.map((t) => t.id).sort();
+
+    syncDefaultTraining(state);
+
+    expect(
+      state.trainingSessions
+        .filter((t) => t.auto === true)
+        .map((t) => t.id)
+        .sort(),
+      "옛 세이브의 기본 훈련이 통째로 다시 깔렸다",
+    ).toEqual(ids);
+  });
+});
+
 describe("경기일 훈련은 취소된다", () => {
   it("cancelTrainingOn은 그날 예정 훈련을 세션까지 지운다", () => {
     const state = createTestGame();

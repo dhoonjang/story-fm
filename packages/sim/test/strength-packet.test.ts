@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ATTRIBUTE_AXES } from "@story-fm/domain";
+import { ATTRIBUTE_AXES, matchupText, packetTagContext, packetTagText } from "@story-fm/domain";
 import {
   buildStrengthPacket,
   edgeOf,
@@ -343,7 +343,8 @@ describe("buildStrengthPacket", () => {
     // 이득이 들어와도 뒷공간 대가가 더 크다 — 크면 압박이 공짜 축이 된다
     expect(hard.home.zones.midfield).toBeGreaterThan(eased.home.zones.midfield);
     expect(hard.home.zones.defense).toBeLessThan(eased.home.zones.defense);
-    expect(hard.home.tactical.notes.join(" ")).toContain("앞에서 끊되");
+    // 축이 움직였다는 사실은 태그의 코드로 남는다 — 문구가 아니다
+    expect(hard.home.tactical.notes.some((n) => n.code === "pressing")).toBe(true);
   });
 
   /**
@@ -792,5 +793,63 @@ describe("업셋 확률 (upsetChance)", () => {
       expect(packet.guide.upsetChance).toBeLessThanOrEqual(0.45);
       previous = packet.guide.upsetChance;
     }
+  });
+});
+
+/**
+ * **코어가 내는 코드에는 렌더러가 있어야 한다** (match.md §1).
+ *
+ * 축을 하나 더하고 `packetTagText`의 표를 잊으면 그 사실은 화면에서 **빈 줄**로
+ * 사라진다 — 예외도 오류도 없이. 문구를 검사하는 것이 아니라 "그 코드가 문장이
+ * 되는가"만 본다.
+ */
+describe("사실 태그는 전부 문장이 된다", () => {
+  it("키포인트·전술 노트·표적·매치업 어느 코드도 빈 줄이 되지 않는다", () => {
+    const us = makeSide("us", 80, {
+      tactics: tactics({
+        pressing: 5,
+        defensiveLine: 5,
+        tempo: 5,
+        width: 5,
+        passStyle: 5,
+        mentality: 5,
+      }),
+    });
+    us.managerAnalysis = 99;
+    us.directives = [
+      { by: "us-df1", kind: "join_attack", intensity: "heavy" },
+      { by: "us-mf1", kind: "man_mark", targetId: "them-fw1" },
+      { by: "us-mf2", kind: "man_mark", targetId: "없는-선수" },
+      { by: "us-mf3", kind: "stay_back" },
+      { by: "us-mf4", kind: "press_target", targetId: "them-mf1" },
+    ];
+    us.regional = [
+      { band: "attack", lane: "left", intent: "overload", note: "왼쪽에 사람을 모은다" },
+    ];
+    // 구멍 한 자리 — 다리가 멈춘 선수가 있어야 `gap` 코드가 선다
+    us.starters = us.starters.map((s) => (s.position === "LB" ? { ...s, matchFatigue: 80 } : s));
+    const packet = buildStrengthPacket(
+      us,
+      makeSide("them", 74, {
+        tactics: tactics({ passStyle: 1, width: 1, mentality: 1, defensiveLine: 1, pressing: 1 }),
+      }),
+    );
+
+    const ctx = packetTagContext(packet);
+    const tags = [
+      ...packet.keyPoints,
+      ...packet.home.tactical.notes,
+      ...packet.away.tactical.notes,
+      ...packet.targets.map((t) => t.tag),
+    ];
+    // 갈래가 한둘만 선 판으로는 이 검사가 아무것도 못 지킨다
+    expect(new Set(tags.map((t) => t.source)).size).toBeGreaterThanOrEqual(5);
+    for (const tag of tags) {
+      // 안개가 낀 쪽도 문장이 있어야 한다 — 해상도만 다른 같은 사실이다
+      for (const sharp of [true, false]) {
+        expect(packetTagText({ ...tag, sharp }, ctx), `${tag.source}/${tag.code}`).not.toBe("");
+      }
+    }
+    for (const m of packet.matchups) expect(matchupText(m), m.zone).not.toBe("");
   });
 });

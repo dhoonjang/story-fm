@@ -132,8 +132,9 @@ describe("방출의 여파 — 회견과 남은 선수단", () => {
     const press = state.pressConferences?.find((c) => c.status === "pending");
     expect(press?.facts[0]?.kind).toBe("departure");
     expect(press?.facts[0]?.about).toBe(target.id);
-    // 카드는 장부 한 줄이다 — 물음표도 평가어도 없다
-    expect(press?.facts[0]?.text).not.toContain("?");
+    // 카드는 장부 한 줄이다 — 문장이 아니라 코드와 수치다
+    expect(press?.facts[0]?.text, "코어가 사실 문장을 저장했다").toBeUndefined();
+    expect(press?.facts[0]?.data?.tags?.[0]).toBe("released");
 
     const after = formsById(state);
     expect(after.has(target.id)).toBe(false);
@@ -174,13 +175,15 @@ describe("스쿼드 하한 — 남는 인원으로 잰다", () => {
 
   it(`${MIN_SQUAD_AFTER_SALE}명이 남으면 되고 하나 모자라면 막힌다`, () => {
     expect(squadFloorShortfall(remaining(2, MIN_SQUAD_AFTER_SALE - 2))).toBeNull();
-    expect(squadFloorShortfall(remaining(2, MIN_SQUAD_AFTER_SALE - 3))).toContain(
-      `${MIN_SQUAD_AFTER_SALE}명`,
-    );
+    expect(squadFloorShortfall(remaining(2, MIN_SQUAD_AFTER_SALE - 3))).toEqual({
+      code: "squad-min",
+      remaining: MIN_SQUAD_AFTER_SALE - 1,
+      limit: MIN_SQUAD_AFTER_SALE,
+    });
   });
 
   it("골키퍼가 하나뿐이면 인원이 넉넉해도 막힌다", () => {
-    expect(squadFloorShortfall(remaining(1, MIN_SQUAD_AFTER_SALE + 5))).toContain("골키퍼");
+    expect(squadFloorShortfall(remaining(1, MIN_SQUAD_AFTER_SALE + 5))?.code).toBe("gk-min");
   });
 });
 

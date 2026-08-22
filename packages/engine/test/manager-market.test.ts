@@ -504,7 +504,8 @@ describe("경질 뒤 — 무직으로 흐르고, 제안을 받고, 부임한다"
     expect(card.tier).toBe(tierOfTeamIn(state, sackedFrom));
     expect(card.position).toBeGreaterThan(0);
     expect(card.target).toBeGreaterThan(0);
-    expect(card.expectation, "기대의 이름이 없다").toBeTruthy();
+    expect(card.expectationCode, "기대의 갈래가 없다").toBeTruthy();
+    expect(card.expectation, "장부에 기대의 이름을 적었다").toBeUndefined();
     expect(card.reason, "장부에 문장을 적었다").toBeUndefined();
 
     // 감독이 없는 구단은 세계에 없다 — 옛 구단은 그날로 후임을 세웠다
@@ -630,7 +631,7 @@ describe("경질 뒤 — 무직으로 흐르고, 제안을 받고, 부임한다"
     expect(past.teamId).toBe(sackedFrom);
     expect(past.on).toBe("2027-03-04");
     // 카드의 사실이 그대로 옮겨 왔다 — 화면이 "왜 잘렸는가"를 쓸 재료다
-    expect(past.expectation, "기대의 이름이 이력에서 사라졌다").toBeTruthy();
+    expect(past.expectationCode, "기대의 갈래가 이력에서 사라졌다").toBeTruthy();
     expect(past.position).toBeGreaterThan(0);
   });
 
@@ -675,7 +676,7 @@ describe("경질 뒤 — 무직으로 흐르고, 제안을 받고, 부임한다"
       expiresOn: addDays(state.date, 10),
       tier: tierOfTeamIn(state, target.id),
       target: 10,
-      expectation: "중위권",
+      expectationCode: "mid",
       status: "open",
     };
     state.managerOffers = [...(state.managerOffers ?? []), offer];
@@ -706,7 +707,7 @@ describe("무직 안전판은 마지막 제안에서 다시 선다", () => {
     expiresOn: addDays(madeOn, 10),
     tier: 3,
     target: 12,
-    expectation: "중위권",
+    expectationCode: "mid",
     status: "expired",
   });
 
@@ -773,7 +774,7 @@ describe("감독 계약과 흥정 — 조건이 실리고 한 차례 되부른�
         expiresOn: addDays(state.date, 10),
         tier: 2,
         target: 6,
-        expectation: "유럽 대항전권",
+        expectationCode: "europe",
         salary: 3_000_000,
         years: 3,
         budgetPledge: 15_000_000,

@@ -11,6 +11,7 @@ import { expirePendingPress } from "../club/press";
 import {
   AI_MANAGER_RATING_FALLBACK,
   MANAGER_TERMS_BY_TIER,
+  boardExpectationText,
   clampCondition,
   formatMoney,
   type GameTeam,
@@ -312,7 +313,7 @@ export function offerVacancy(
       tier,
       position,
       target: expectation.target,
-      expectation: expectation.label,
+      expectationCode: expectation.code,
       salary: terms.salary,
       years: terms.years,
       budgetPledge: terms.budgetPledge,
@@ -321,7 +322,7 @@ export function offerVacancy(
     },
   ];
   digest.push(
-    `💼 ${teamShortNameIn(state, teamId)}가 감독직을 제안했다 — 기대는 ${expectation.label}` +
+    `💼 ${teamShortNameIn(state, teamId)}가 감독직을 제안했다 — 기대는 ${boardExpectationText(expectation.code, expectation.target)}` +
       ` · 연봉 ${formatMoney(terms.salary)}·${terms.years}년 · ${OFFER_DAYS}일 안에 답해야 한다`,
   );
   pushNarrative(state, `${teamNameIn(state, teamId)} 감독직 제안`, 5);
@@ -440,7 +441,7 @@ export function reviewUserSeat(state: GameState, digest: string[]): boolean {
     manager.boardWarnings = next;
     manager.reputation.board = Math.max(0, board - 6);
     digest.push(
-      `⚠️ 보드가 성적을 문제 삼았다 — 기대는 ${expectation.label}인데 현재 ${standing.position}위다` +
+      `⚠️ 보드가 성적을 문제 삼았다 — 기대는 ${boardExpectationText(expectation.code, expectation.target)}인데 현재 ${standing.position}위다` +
         ` (경고 ${next}/${USER_WARNINGS_BEFORE_SACK})`,
     );
     pushNarrative(state, `보드 경고 ${next}회`, 4);
@@ -460,7 +461,7 @@ export function reviewUserSeat(state: GameState, digest: string[]): boolean {
     tier: tierOfTeamIn(state, sackedTeamId),
     position: standing.position,
     target: expectation.target,
-    expectation: expectation.label,
+    expectationCode: expectation.code,
   };
 
   // 경질은 계약을 지운다 — 위약금은 아직 없다: 감독 개인의 지갑이 게임에 없어
@@ -746,7 +747,7 @@ export function applyForManagerJob(state: GameState, teamRef: string): SkillResu
       tier,
       ...(vacancy.position !== undefined ? { position: vacancy.position } : {}),
       target: expectation.target,
-      expectation: expectation.label,
+      expectationCode: expectation.code,
       salary,
       years: terms.years,
       budgetPledge: terms.budgetPledge,
@@ -759,7 +760,7 @@ export function applyForManagerJob(state: GameState, teamRef: string): SkillResu
     ok: true,
     tone: "good",
     message:
-      `${teamNameIn(state, vacancy.teamId)}가 제안으로 답했습니다 — 기대는 ${expectation.label},` +
+      `${teamNameIn(state, vacancy.teamId)}가 제안으로 답했습니다 — 기대는 ${boardExpectationText(expectation.code, expectation.target)},` +
       ` 연봉 ${formatMoney(salary)}·${terms.years}년·이적 예산 약속 ${formatMoney(terms.budgetPledge)}.` +
       ` 지원한 쪽이라 연봉은 기본보다 짭니다. ${OFFER_DAYS}일 안에 답해야 합니다`,
   };

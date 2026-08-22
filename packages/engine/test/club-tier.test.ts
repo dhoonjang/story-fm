@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ageOf, bestOverall, naturalPositionOf } from "@story-fm/domain";
+import { ageOf, bestOverall, boardExpectationText, naturalPositionOf } from "@story-fm/domain";
 import {
   activeContract,
   annualRevenueEstimate,
@@ -46,11 +46,14 @@ describe("리그 크기가 문턱을 정한다", () => {
     expect(safetyLine(20)).toBe(17);
     expect(relegationLine(20)).toBe(18);
     expect(leagueRounds(20)).toBe(38);
-    // 보드 기대 — 문구까지 예전 그대로다 (화면과 GM이 이 문장을 읽는다)
-    expect(boardExpectationOfTier(1, 20)).toEqual({ target: 2, label: "우승 경쟁" });
-    expect(boardExpectationOfTier(2, 20)).toEqual({ target: 6, label: "유럽 대항전권(6위 이내)" });
-    expect(boardExpectationOfTier(3, 20)).toEqual({ target: 12, label: "중위권 안착(12위 이내)" });
-    expect(boardExpectationOfTier(4, 20)).toEqual({ target: 17, label: "잔류(17위 이내)" });
+    /**
+     * 보드 기대는 **코드와 목표 순위뿐이다** — 이름은 화면이 짓는다 (career.md §6).
+     * 문구를 고쳐도 이 자가 흔들리지 않는 것이 카드로 옮긴 이유다.
+     */
+    expect(boardExpectationOfTier(1, 20)).toEqual({ target: 2, code: "title" });
+    expect(boardExpectationOfTier(2, 20)).toEqual({ target: 6, code: "europe" });
+    expect(boardExpectationOfTier(3, 20)).toEqual({ target: 12, code: "mid" });
+    expect(boardExpectationOfTier(4, 20)).toEqual({ target: 17, code: "survival" });
     // 경질 위험선·경질선이 쓰는 비율 — 6·10 / 10·14 / 15·18
     expect([0.3, 0.5, 0.7, 0.75, 0.9].map((f) => positionAt(20, f))).toEqual([6, 10, 14, 15, 18]);
   });
@@ -60,11 +63,31 @@ describe("리그 크기가 문턱을 정한다", () => {
     expect(safetyLine(18)).toBe(15);
     expect(relegationLine(18)).toBe(16);
     expect(leagueRounds(18)).toBe(34);
-    expect(boardExpectationOfTier(4, 18)).toEqual({ target: 15, label: "잔류(15위 이내)" });
+    expect(boardExpectationOfTier(4, 18)).toEqual({ target: 15, code: "survival" });
     expect(([1, 2, 3] as const).map((t) => boardExpectationOfTier(t, 18).target)).toEqual([
       2, 5, 11,
     ]);
     expect([0.3, 0.5, 0.7, 0.75, 0.9].map((f) => positionAt(18, f))).toEqual([5, 9, 13, 14, 16]);
+  });
+
+  /**
+   * 세이브에 남는 것은 코드뿐이므로, 코드가 이름으로 옮겨지는 자리는 하나여야 한다
+   * (`boardExpectationText`). 순위는 `target`이 갖고 문장은 그 값을 끼워 넣는다 —
+   * 라벨을 저장하던 때와 달리 체급 표를 손봐도 옛 세이브가 옛 문구로 남지 않는다.
+   */
+  it("기대의 이름은 코드와 목표 순위 하나에서만 나온다", () => {
+    const nameOf = (tier: 1 | 2 | 3 | 4, size: number) => {
+      const e = boardExpectationOfTier(tier, size);
+      return boardExpectationText(e.code, e.target);
+    };
+    expect(nameOf(1, 20)).toBe("우승 경쟁");
+    expect(nameOf(2, 20)).toBe("유럽 대항전권(6위 이내)");
+    expect(nameOf(3, 20)).toBe("중위권 안착(12위 이내)");
+    expect(nameOf(4, 20)).toBe("잔류(17위 이내)");
+    // 리그가 작아지면 같은 코드가 다른 순위를 문다 — 문구는 하나다
+    expect(nameOf(4, 18)).toBe("잔류(15위 이내)");
+    // 우승 경쟁만 순위를 달지 않는다 — 1위 말고 달 자리가 없다
+    expect(boardExpectationText("title")).toBe("우승 경쟁");
   });
 
   it("리그가 강등 칸보다 작아도 자리가 1위 밖으로 나가지 않는다", () => {

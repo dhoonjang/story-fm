@@ -208,21 +208,21 @@
 전부 `gamePlayerId`로 선수를 참조한다. 공통 패턴: **현재 상태 = 아직 닫히지 않은
 row, 지난 일 = 그대로 이력.**
 
-| 엔티티                            | 무엇 · "현재"의 표현                                                                            | 정의                |
-| --------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------- |
-| `injuries` `Injury`               | 부위·심각도·원인 — `returnedOn === null`이 현재 부상                                            | `domain/records.ts` |
-| `bookings` `Booking`              | 경고·퇴장 (경기·분)                                                                             | `domain/records.ts` |
-| `suspensions` `Suspension`        | 정지 — `status === "active"`, 잔여는 `length − served`                                          | `domain/records.ts` |
-| `transfers` `Transfer`            | **팀 변경 원장** — 이적·임대·자유·유스·은퇴                                                     | `domain/records.ts` |
-| `growthLog` `GrowthEntry`         | 성장 한 칸 — 대상은 축·`pos:CODE`·`tactical`. **감독 팀 선수만** (아래 ⚠️)                      | `domain/records.ts` |
-| `seasonStats` `SeasonStat`        | 시즌 × 팀 — 출전·득점·도움·`ratingSum`                                                          | `domain/records.ts` |
-| `issues` `PlayerIssue`            | 라커룸 불만 (`unhappy`)                                                                         | `domain/records.ts` |
-| `settlingEvents` `SettlingEvent`  | 면담·팀토크·주장 지명이 새 영입에게 남긴 크레딧                                                 | `domain/records.ts` |
-| `transferList` `TransferListing`  | 이적 리스트 등재 — 호가와 함께                                                                  | `domain/records.ts` |
-| `playerTraining` `PlayerTraining` | 개인 훈련 — 겨냥한 축·배우는 자리                                                               | `domain/records.ts` |
-| `roleMemory` `RoleMemory`         | 역할 기억 — 선수 × 자리 → 마지막에 맡긴 역할                                                    | `domain/tactics.ts` |
-| `scoutReports` `ScoutReport`      | 스카우트 파견 — `completedOn === null`이 파견 중                                                | `domain/records.ts` |
-| `deferredScouts` `DeferredScout`  | 동시 한도에 막혀 못 나간 파견 요청 — 다음 턴 입력에 사실로 남는다 ([player.md](player.md) §9.4) | `domain/records.ts` |
+| 엔티티                            | 무엇 · "현재"의 표현                                                                             | 정의                |
+| --------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------- |
+| `injuries` `Injury`               | 부위·심각도·원인 — `returnedOn === null`이 현재 부상                                             | `domain/records.ts` |
+| `bookings` `Booking`              | 경고·퇴장 (경기·분)                                                                              | `domain/records.ts` |
+| `suspensions` `Suspension`        | 정지 — `status === "active"`, 잔여는 `length − served`                                           | `domain/records.ts` |
+| `transfers` `Transfer`            | **팀 변경 원장** — 이적·임대·자유·유스·은퇴                                                      | `domain/records.ts` |
+| `growthLog` `GrowthEntry`         | 성장 한 칸 — 대상은 축·`pos:CODE`·`tactical`, 출처는 `origin` 코드. **감독 팀 선수만** (아래 ⚠️) | `domain/records.ts` |
+| `seasonStats` `SeasonStat`        | 시즌 × 팀 — 출전·득점·도움·`ratingSum`                                                           | `domain/records.ts` |
+| `issues` `PlayerIssue`            | 라커룸 불만 (`unhappy`)                                                                          | `domain/records.ts` |
+| `settlingEvents` `SettlingEvent`  | 면담·팀토크·주장 지명이 새 영입에게 남긴 크레딧                                                  | `domain/records.ts` |
+| `transferList` `TransferListing`  | 이적 리스트 등재 — 호가와 함께                                                                   | `domain/records.ts` |
+| `playerTraining` `PlayerTraining` | 개인 훈련 — 겨냥한 축·배우는 자리                                                                | `domain/records.ts` |
+| `roleMemory` `RoleMemory`         | 역할 기억 — 선수 × 자리 → 마지막에 맡긴 역할                                                     | `domain/tactics.ts` |
+| `scoutReports` `ScoutReport`      | 스카우트 파견 — `completedOn === null`이 파견 중                                                 | `domain/records.ts` |
+| `deferredScouts` `DeferredScout`  | 동시 한도에 막혀 못 나간 파견 요청 — 다음 턴 입력에 사실로 남는다 ([player.md](player.md) §9.4)  | `domain/records.ts` |
 
 ⚠️ **`growthLog`는 감독 팀 선수 것만 담는다.** 4,000행에서 오래된 쪽부터 잘리는
 로그인데, 코어 월간 성장(`developsByCore` — 우리 2군 + 모든 타 팀)을 전부 남기면
@@ -381,6 +381,34 @@ erDiagram
 - 새 테이블은 로드 시 **빈 배열**로 채운다.
 - 새 필드는 **optional**로 두고 읽는 쪽이 기본값을 안다.
 - 생성이 **결정적**이면(시드에서 늘 같은 값이 나오면) 로드 때 조용히 채운다.
+
+#### 문장에서 카드로 — 옛 세이브가 든 문장
+
+코어는 장부에 완성 문장을 적지 않는다(→ [overview.md](../overview.md) §1 철칙 4).
+그 규칙보다 먼저 저장된 세이브는 아직 문장을 들고 있으므로, **문장 칸은 지우지 않고
+optional로 넓혀 두고 읽는 쪽이 `카드 ?? 옛 문장` 순으로 본다.** 새로 쓰는 값에는
+카드만 적는다 — 두 칸을 함께 채우면 어느 쪽이 원본인지 갈린다.
+
+| 표·필드                                | 새 칸 (카드)                     | 옛 칸 (읽기 폴백)    |
+| -------------------------------------- | -------------------------------- | -------------------- |
+| `TRANSFER`                             | `reason`                         | `note`               |
+| `INJURY`                               | `cause` (`pre_appointment` 포함) | `note`               |
+| `GROWTH_ENTRY`                         | `origin`                         | `note`               |
+| `NEGOTIATION.medical` · `OFFER`        | `concern` · `origin`             | `note`               |
+| `FINANCE_REPORT`                       | `noteCards`                      | `notes`              |
+| `PRESS_FACT` (회견 · 다가옴)           | `data`                           | `text`               |
+| `APPROACH`                             | `contextCard`                    | `context`            |
+| `TROPHY`                               | `competitionId`                  | `competition`        |
+| `SEASON_RECORD.board` · `DISMISSAL`    | `expectationCode`                | `expectation`        |
+| `NARRATIVE_NOTE`                       | `kind`                           | `[서사]` 접두 문장   |
+| `TRAINING_SESSION`                     | `menuId`                         | `label`              |
+| `PENDING_MATCH.packet` · `MATCH_EVENT` | 패킷 태그 · `subCause`           | 문자열 키포인트·근거 |
+
+⚠️ **판정하는 자리에는 폴백을 두지 않는다.** 읽어서 **보여 주는** 값만 옛 문장으로
+떨어지고, 갈래를 가르는 자리(해지인가·승부수인가·기본 훈련인가)는 카드가 없으면
+"모른다"로 본다 — 옛 문구를 다시 대조하기 시작하면 문장을 지운 뜻이 사라진다.
+예외는 하나, `TRANSFER.reason`이다: 라커룸이 계약 해지를 알아보는 유일한 표식이라
+옛 세이브에서도 갈려야 해서, 없을 때만 옛 문장 두 개와 대조한다.
 
 ### 로드가 하는 일 (`validate`)
 

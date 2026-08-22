@@ -4,12 +4,15 @@
  * 이 패킷은 "LLM에게 주는 힌트"가 아니라 **결과를 정하는 수치**다. 선수×경로
  * 슈팅 프로필(`guide.shotProfiles`)이 두 시뮬레이터의 발생률 원본이고, 사건은
  * 코어가 굴린다. LLM은 그 사건을 중계·연출한다
- * (match.md §1·§2). 숫자와 한국어 해석을 함께 담는 이유는 그대로다 —
- * 중계와 원인 태그가 같은 문장을 인용해야 "왜 그렇게 됐는지"가 설명된다.
+ * (match.md §1·§2).
+ *
+ * **패킷이 싣는 것은 사실 태그(`PacketTag`)뿐이고 문장은 이 파일의 렌더러
+ * 하나(`packetTagText`)가 만든다** — 화면·중계·CLI·테스트가 같은 함수를 부른다.
  */
 
-import type { MatchSide } from "./match";
-import type { BoardPoint } from "./tactics";
+import { legacyTag, otherSide, type MatchSide, type SubCause } from "./match";
+import { AXIS_KO } from "./player";
+import { DIRECTIVE_INTENSITY_KO, PLAYER_DIRECTIVE_KO, type BoardPoint } from "./tactics";
 
 export interface ZoneStrength {
   attack: number;
@@ -30,8 +33,60 @@ export interface Matchup {
   zone: MatchupZone;
   edge: EdgeSide;
   size: EdgeSize;
-  /** 한국어 근거 한 줄 — 원인 태그의 인용 원문 */
-  why: string;
+  /** 그 존의 양팀 값 — 근거 문장이 유일한 보관처였던 수치 */
+  homeValue?: number;
+  awayValue?: number;
+  /** 진행 중인 옛 세이브가 들고 있는 근거 문장 — 새 패킷은 적지 않는다 */
+  why?: string;
+}
+
+/**
+ * 패킷이 싣는 **사실 태그** — 키포인트·상성·구멍·개인 지시·공략·지역 플랜이 전부
+ * 이 한 모양이다 (match.md §1).
+ *
+ * 코어가 한국어 문장을 만들어 실으면 그 문장이 원인 태그로 골에 복사되고 진행 중인
+ * 세이브에 굳는다 — 그러면 문구를 고치는 순간 전술 XP의 근거가 달라진다. 태그를
+ * 문장으로 옮기는 것은 그것을 읽는 쪽(화면·중계·CLI)이 같은 렌더러 하나로 한다.
+ */
+export interface PacketTag {
+  /** 어느 갈래에서 나왔나 */
+  source:
+    | "counter"
+    | "gap"
+    | "mismatch"
+    | "zone-plan"
+    | "directive"
+    | "directive-dropped"
+    | "exploit"
+    | "exploit-dropped"
+    | "tactical"
+    /** 진행 중인 옛 세이브가 들고 있던 문장 — `text`만 갖는다 */
+    | "legacy";
+  /** 축·상성·지시의 코드 — 판정과 집계의 열쇠 ("space_behind" · "backline-pace") */
+  code: string;
+  /** 이 사실이 **이로운 편** — 약점을 가진 쪽이 아니다. 편이 없는 사실이면 null */
+  favours: MatchSide | null;
+  /**
+   * 이 사실을 **가진 쪽** — 이름이 서는 선수들의 팀이자 미스매치 문장의 주어다.
+   *
+   * `favours`와 갈리는 것은 강점 축이다: 창조자·마무리·골키퍼 배급·세트피스 키커는
+   * 가진 쪽이 곧 이로운 쪽이고, 나머지 축은 반대다 (sim `key-points.ts`). 없으면
+   * (구멍·옛 세이브처럼 가진 쪽이 언제나 잃는 갈래) 이로운 편의 반대로 본다.
+   */
+  holder?: MatchSide;
+  /**
+   * 수치를 드러내도 되는가 — 감독의 눈(분석)이 정한다. `false`면 렌더러가 흐린
+   * 문장을 낸다 (match.md §1.6 — 못 본 수치가 노트로 새어 들어오지 않게 하는 칸).
+   */
+  sharp: boolean;
+  /** 이름이 서는 선수들 — 팀 단위 사실이면 빈 배열 */
+  playerIds: string[];
+  /** 라벨 붙은 수치 — `{ pace: 88, defencePace: 61 }` */
+  values: Record<string, number>;
+  /** 문장 안에 숨어 있던 조건부 축 — "sweeper" · "trap-unfamiliar" */
+  flags: string[];
+  /** 구조로 못 옮기는 자유 문장 — 지역 플랜의 모델 원문, 옛 세이브의 줄 */
+  text?: string;
 }
 
 /**
@@ -45,8 +100,8 @@ export interface Matchup {
 export interface TacticalRead {
   /** 지시 적용률 0.45~1.0 — 감독 전술 능력 + 팀 전술 적응도 */
   uptake: number;
-  /** 이득·대가를 적은 한국어 한 줄들 (지시가 수치를 움직였을 때만) */
-  notes: string[];
+  /** 이득·대가의 사실 태그 (지시가 수치를 움직였을 때만) */
+  notes: PacketTag[];
 }
 
 export type RegionalBand = MatchupZone;
@@ -165,8 +220,8 @@ export interface ExploitTarget {
   id: string;
   /** 어느 팀의 약점인가 — 우리가 노리는 쪽 */
   side: MatchSide;
-  /** 한 줄 설명 — 감독이 본 그 문장 (안개를 지난 뒤의 표현) */
-  label: string;
+  /** 그 지점의 사실 태그 — 감독이 본 해상도가 `sharp`에 실린다 */
+  tag: PacketTag;
   /** 공략이 닿는 존 */
   zone: MatchupZone;
   /**
@@ -187,15 +242,12 @@ export interface StrengthPacket {
   home: SidePacket;
   away: SidePacket;
   matchups: Matchup[];
-  /** 위협/약점 포인트 — 한국어 문장 (예: "사카(pace 88) vs 좌측 풀백(pace 61)") */
-  keyPoints: string[];
+  /** 위협/약점 포인트 — 사실 태그. 이로운 편은 태그의 `favours`가 갖는다 */
+  keyPoints: PacketTag[];
   /**
    * 각 키포인트가 **누구에게 이로운가** — `keyPoints`와 같은 순서.
    *
-   * 문장은 팀 이름으로 시작할 뿐 유불리를 말하지 않는다("맨유 수비가 …
-   * 강요당한다"와 "맨유 뒷공간 공략: …"은 정반대다). 화면이 문장을 되짚어
-   * 추측하면 틀리므로 코어가 함께 싣는다. 진행 중인 경기를 담은 **옛 세이브에는
-   * 없다** — 그때는 화면이 색 없이 세운다.
+   * 진행 중인 경기를 담은 **옛 세이브만** 갖는다 (지금은 태그의 `favours`가 원본).
    */
   keyPointSides?: MatchSide[];
   /**
@@ -225,5 +277,501 @@ export interface StrengthPacket {
     upsetChance: number;
     /** 경기 강도 0.8~1.3 — 압박·템포에서 나온다. 피로·파울·부상률을 함께 움직인다 */
     intensity: { home: number; away: number };
+  };
+}
+
+// ── 태그 → 문장 ───────────────────────────────────────
+/**
+ * 태그가 이름을 대는 자리 — **패킷이 원본이다** (`packetTagContext`).
+ *
+ * 태그는 선수 id와 편만 들고 다닌다. 이름은 그때그때의 명단에서 오는 것이라
+ * 태그에 굳혀 두면 교체로 사라진 선수의 이름이 세이브에 남는다.
+ */
+export interface PacketTagContext {
+  home: string;
+  away: string;
+  player: (id: string) => { name: string; position: string } | undefined;
+}
+
+/** 패킷 하나에서 이름표를 만든다 — 라인업과 벤치를 함께 본다(판을 떠난 선수도 부른다) */
+export function packetTagContext(packet: StrengthPacket): PacketTagContext {
+  const byId = new Map<string, PacketPlayer>();
+  for (const side of [packet.home, packet.away]) {
+    for (const p of [...side.lineup, ...side.bench]) byId.set(p.id, p);
+  }
+  return {
+    home: packet.home.teamName,
+    away: packet.away.teamName,
+    player: (id) => byId.get(id),
+  };
+}
+
+/** 교체의 갈래를 부르는 말 — 세는 것은 `subCause` 코드다 (match.md §4) */
+const SUB_CAUSE_KO: Record<SubCause, string> = {
+  injury: "부상 — 교체 불가피",
+  chase: "승부수 — 공격 자원 투입",
+  hold: "리드 굳히기 — 수비 보강",
+  fatigue: "체력 저하 — 로테이션",
+};
+
+export function subCauseText(code: SubCause): string {
+  return SUB_CAUSE_KO[code];
+}
+
+const SIZE_KO: Record<EdgeSize, string> = {
+  slight: "근소한",
+  clear: "뚜렷한",
+  big: "압도적인",
+};
+
+const ZONE_MATCHUP_KO: Record<MatchupZone, string> = {
+  attack: "홈 공격 vs 어웨이 수비",
+  defense: "어웨이 공격 vs 홈 수비",
+  midfield: "중원",
+};
+/** 코드에서 되짚는 자리 — 옛 세이브가 모르는 존 이름을 들고 와도 그대로 세운다 */
+const ZONE_MATCHUP_KO_BY_CODE: Record<string, string | undefined> = ZONE_MATCHUP_KO;
+
+/** 존 우열의 태그 코드 — 원인 태그가 매치업을 인용할 때 쓰는 열쇠 */
+const zoneCode = (zone: MatchupZone) => `zone-${zone}`;
+
+/**
+ * 존 우열 → 사실 태그. **매치업도 태그 하나로 읽힌다** — 골의 원인이 매치업일 때
+ * 장부에 실리는 것이 이 태그다 (`sim/match-engine.ts`의 `causesFor`).
+ */
+export function matchupTag(m: Matchup): PacketTag {
+  const values: Record<string, number> =
+    m.homeValue !== undefined && m.awayValue !== undefined
+      ? { home: m.homeValue, away: m.awayValue }
+      : {};
+  return {
+    source: "mismatch",
+    code: zoneCode(m.zone),
+    favours: m.edge === "even" ? null : m.edge,
+    sharp: true,
+    playerIds: [],
+    values,
+    flags: [m.size],
+    // 값을 잃은 옛 세이브의 매치업만 문장을 들고 있다
+    ...(Object.keys(values).length === 0 && m.why ? { text: m.why } : {}),
+  };
+}
+
+export function matchupText(m: Matchup): string {
+  return packetTagText(matchupTag(m));
+}
+
+/** 지시를 얼마나 감당하나 — 소화력 한 눈금을 감독이 읽는 말로 */
+const aptitudeRead = (apt: number): string =>
+  apt >= 1.15 ? "여유가 있다" : apt >= 0.95 ? "감당할 만하다" : "버거워 보인다";
+
+/** 겨눈 상대와의 싸움 — 듀얼 성공률을 말로 */
+const duelRead = (rate: number): string =>
+  rate >= 0.6 ? "따라붙을 만하다" : rate >= 0.4 ? "버거운 싸움이다" : "상대가 한 수 위다";
+
+/** 지시가 그라운드에서 무엇으로 보이는가 — 이득과 대가가 한 줄에 함께 선다 */
+const DIRECTIVE_KO: Record<string, (by: string, target: string) => string> = {
+  man_mark: (n, t) => `${n}이(가) ${t}을(를) ${PLAYER_DIRECTIVE_KO.man_mark}, 본업을 던다`,
+  press_target: (n, t) =>
+    `${n}이(가) ${t}을(를) ${PLAYER_DIRECTIVE_KO.press_target}, 자리를 비운다`,
+  focus_play: (n) => `${n}에게 공격을 몰아준다, 다른 길이 줄어든다`,
+  stay_back: (n) => `${n}은(는) 뒤에 남는다, 앞의 인원이 준다`,
+  join_attack: (n) => `${n}이(가) 적극적으로 올라간다, 뒷공간을 내준다`,
+};
+
+/** 공략이 그라운드에서 무엇으로 보이는가 — 축 하나가 한 낱말이다 */
+const EXPLOIT_KO: Record<string, string> = {
+  "backline-pace": "뒷공간으로 계속 넘긴다",
+  "wing-duel": "측면에서 계속 걸어 들어간다",
+  aerial: "크로스를 계속 올린다",
+  "press-resistance": "상대 중원을 물고 늘어진다",
+  keeper: "먼 거리에서도 때린다",
+  "keeper-distribution": "골문까지 압박을 올린다",
+  "backline-shape": "라인 사이로 파고든다",
+  "backline-leader": "라인 사이로 파고든다",
+  physical: "최전방에 붙여 두고 걷어 올린다",
+  "set-piece": "세트피스에 사람을 올린다",
+  discipline: "그 선수 앞으로 계속 몰고 간다",
+  creator: "중원 배급을 끊는다",
+  finisher: "최전방을 가둔다",
+  stamina: "속도를 올려 체력을 갉는다",
+};
+
+/** `축:값` 꼴 flag의 값 — 세기·축처럼 낱말 하나가 실리는 자리 */
+function flagValue(tag: PacketTag, key: string): string | undefined {
+  const at = tag.flags.find((f) => f.startsWith(`${key}:`));
+  return at?.slice(key.length + 1);
+}
+
+/** 세기의 한국어 — flag가 실어 온 낱말은 검증 밖이라 표에서 찾는다 */
+const DIRECTIVE_INTENSITY_KO_BY_CODE: Record<string, string | undefined> = DIRECTIVE_INTENSITY_KO;
+
+/** 태그가 문장으로 설 때 필요한 것 — 이름·수치·조건 */
+interface Render {
+  /** 이 사실이 **선 팀** — 상성은 그 수를 둔 쪽, 미스매치는 그 지점을 가진 쪽 */
+  subject: string;
+  /** 그 반대편 */
+  rival: string;
+  /** 이름이 선 선수 (없으면 id, 그마저 없으면 빈 문자열) */
+  who: (i: number) => string;
+  /** 이름을 찾았는가 — 지어낸 id와 벤치를 가른다 */
+  named: (i: number) => string | undefined;
+  v: (key: string, fallback?: number) => number;
+  has: (flag: string) => boolean;
+}
+
+/**
+ * 상성 열넷 — **주어가 이득을 본 쪽인가 대가를 치른 쪽인가**를 함께 적는다.
+ * `favours`는 이로운 편이므로, 대가의 주어는 그 반대편이다.
+ */
+const COUNTER_KO: Record<
+  string,
+  { blames?: true | ((r: Render) => boolean); text: (r: Render) => string }
+> = {
+  space_behind: {
+    blames: true,
+    text: (r) =>
+      `${r.subject}의 높은 라인 뒤가 열린다 — ${r.rival} 전방 스피드 ${Math.round(r.v("fwPace"))} vs 수비 ${Math.round(r.v("cbPace"))}` +
+      (r.has("sweeper") ? " (골키퍼가 커버 범위를 넓혀 버틴다)" : "") +
+      (r.has("trap-unfamiliar") ? " · 오프사이드 트랩이 아직 손에 안 익었다" : ""),
+  },
+  press_trap: {
+    text: (r) =>
+      `${r.subject}의 압박이 ${r.rival}의 짧은 빌드업을 높은 곳에서 끊는다 (상대 후방 연결 ${Math.round(r.v("link"))})`,
+  },
+  press_bypassed: {
+    blames: true,
+    text: (r) =>
+      r.has("long-ball")
+        ? `${r.rival}이(가) 압박을 롱볼로 넘겨 버린다 — ${r.subject}의 전방 압박이 허공을 뛴다`
+        : `${r.rival} 중원이 압박을 견딘다 (압박 저항 ${Math.round(r.v("pressResist"))})`,
+  },
+  buildup_collapse: {
+    blames: true,
+    text: (r) =>
+      `${r.subject}의 후방이 짧은 연결을 감당하지 못한다 (빌드업 ${Math.round(r.v("buildUp"))}) — 압박에 위험 지역에서 흘린다`,
+  },
+  midfield_overload: {
+    text: (r) =>
+      `중원 숫자에서 ${r.subject}이(가) ${r.v("edge")}명 앞선다 (${r.v("mf")} vs ${r.v("rivalMf")})` +
+      (r.has("stretched") ? " — 다만 폭을 넓게 써 중앙이 얇아진다" : ""),
+  },
+  wing_space: {
+    text: (r) =>
+      `${r.rival}이(가) 중앙에 몰려 측면이 비었다 — ${r.subject} 측면 자원 ${Math.round(r.v("wideQuality"))}`,
+  },
+  crossing_barrage: {
+    text: (r) =>
+      `${r.subject}이(가) 측면에서 올려 제공권으로 해결한다 (전방 공중볼 ${Math.round(r.v("aerialAtk"))} vs 수비 ${Math.round(r.v("aerialDef"))})`,
+  },
+  sterile_possession: {
+    blames: true,
+    text: (r) =>
+      `${r.rival}의 밀집 수비를 ${r.subject}이(가) 느리고 좁게 두드린다 — 공은 갖되 길이 없다`,
+  },
+  stretch_block: {
+    text: (r) => `${r.subject}이(가) 빠르고 넓게 움직여 ${r.rival}의 블록을 좌우로 흔든다`,
+  },
+  counter_attack: {
+    text: (r) =>
+      `${r.subject}이(가) 내려서서 역습을 노린다 — ${r.rival}이(가) 올라온 뒤가 넓다 (전방 스피드 ${Math.round(r.v("fwPace"))})`,
+  },
+  stretched_shape: {
+    blames: true,
+    text: (r) =>
+      `${r.subject}의 전후 간격이 벌어졌다 — 멘탈리티 ${r.v("mentality")}에 수비 라인 ${r.v("defensiveLine")}, 중원이 빈다`,
+  },
+  rushed_errors: {
+    blames: true,
+    text: (r) =>
+      `${r.subject}이(가) 서두르다 ${r.rival}의 압박에 흘린다 (중원 침착성 ${Math.round(r.v("pressResist"))})`,
+  },
+  backline_numbers: {
+    // 남으면 이득, 모자라면 대가 — 주어는 언제나 그 수비진을 세운 팀이다
+    blames: (r) => r.v("spare") < 0,
+    text: (r) =>
+      r.v("spare") > 0
+        ? `${r.subject} 수비 ${r.v("df")}명이 상대 전방 ${r.v("fw")}명을 두고 남는다 — 커버가 두텁다`
+        : `${r.subject} 수비 ${r.v("df")}명이 상대 전방 ${r.v("fw")}명에게 커버 없는 일대일을 강요당한다`,
+  },
+  flank_mismatch: {
+    text: (r) =>
+      `측면 속도에서 ${r.subject}이(가) 앞선다 (${Math.round(r.v("wideAttack"))} vs ${Math.round(r.v("wideDefend"))}) — 폭을 쓰는 만큼 살아난다`,
+  },
+};
+
+/**
+ * 미스매치 열넷 — **정밀한 문장과 흐린 문장은 같은 사실의 두 해상도다.**
+ *
+ * 어느 쪽을 낼지는 태그의 `sharp`가 가른다(match.md §1.6). 주어(`subject`)는 그
+ * 지점을 **가진 쪽**이고 상대(`rival`)가 그것으로 득을 보는 쪽이다.
+ */
+const MISMATCH_KO: Record<string, { sharp: (r: Render) => string; vague: (r: Render) => string }> =
+  {
+    "backline-pace": {
+      sharp: (r) =>
+        `${r.rival} 뒷공간 공략: ${r.who(0)}(${AXIS_KO.pace} ${r.v("pace")}) vs ${r.who(1)}(${AXIS_KO.pace} ${r.v("defencePace")})`,
+      vague: (r) => `${r.subject} 최종 수비가 발이 느리다 — 뒷공간이 열린다`,
+    },
+    "wing-duel": {
+      sharp: (r) =>
+        `${r.rival} 1대1 우위: ${r.who(0)}(${AXIS_KO.dribbling} ${r.v("dribbling")}) vs ${r.who(1)}(${AXIS_KO.tackling} ${r.v("tackling")})`,
+      vague: (r) => `${r.rival}는 측면에서 사람을 벗겨낼 수 있다`,
+    },
+    aerial: {
+      sharp: (r) =>
+        `${r.rival} 제공권 우위: ${r.who(0)}(${AXIS_KO.aerial} ${r.v("aerial")}) vs ${r.who(1)}(${r.v("defenceAerial")})`,
+      vague: (r) => `${r.rival}가 공중에서 앞선다 — 크로스와 세트피스가 통한다`,
+    },
+    "press-resistance": {
+      sharp: (r) =>
+        `${r.subject} 빌드업 약점: ${r.who(0)}(${AXIS_KO.composure} ${r.v("composure")} · ${AXIS_KO.passing} ${r.v("passing")}) — 압박하면 흔들린다`,
+      vague: (r) => `${r.subject} 중원은 압박에 약하다`,
+    },
+    creator: {
+      sharp: (r) =>
+        `${r.subject} 창조의 축: ${r.who(0)}(${AXIS_KO.vision} ${r.v("vision")}) — 이 선수를 지우면 공격이 멎는다`,
+      vague: (r) => `${r.subject}의 공격은 중원 한 명에게서 시작된다`,
+    },
+    finisher: {
+      sharp: (r) =>
+        `${r.subject} 결정력: ${r.who(0)}(${AXIS_KO.finishing} ${r.v("finishing")}) — 한 번의 기회로 끝낸다`,
+      vague: (r) => `${r.subject} 최전방은 기회를 놓치지 않는다`,
+    },
+    keeper: {
+      sharp: (r) =>
+        `${r.subject} 골문 불안: ${r.who(0)}(${AXIS_KO.goalkeeping} ${r.v("goalkeeping")})`,
+      vague: (r) => `${r.subject} 골키퍼가 미덥지 않다`,
+    },
+    "keeper-distribution": {
+      sharp: (r) =>
+        `${r.subject} 골키퍼 배급: ${r.who(0)}(${AXIS_KO.passing} ${r.v("passing")}) — 뒤에서부터 풀어 나온다`,
+      vague: (r) => `${r.subject}는 골키퍼부터 빌드업한다`,
+    },
+    "backline-shape": {
+      sharp: (r) =>
+        `${r.subject} 수비 조직: 백라인 평균 ${AXIS_KO.positioning} ${Math.round(r.v("positioning"))} — 라인이 자주 어긋난다`,
+      vague: (r) => `${r.subject} 수비는 짜임새가 헐겁다`,
+    },
+    "backline-leader": {
+      sharp: (r) =>
+        `${r.subject} 백라인에 조율자가 없다 (최고 ${AXIS_KO.leadership} ${r.v("leadership")})`,
+      vague: (r) => `${r.subject} 수비는 서로를 부르지 않는다`,
+    },
+    physical: {
+      sharp: (r) =>
+        `${r.rival} 몸싸움 우위: ${r.who(0)}(${AXIS_KO.strength} ${r.v("strength")}) vs ${r.who(1)}(${r.v("defenceStrength")})`,
+      vague: (r) => `${r.rival} 최전방이 등지고 버틴다`,
+    },
+    stamina: {
+      sharp: (r) =>
+        `${r.subject} 중원 활동량 부족: 평균 ${AXIS_KO.stamina} ${Math.round(r.v("stamina"))} — 후반에 밀린다`,
+      vague: (r) => `${r.subject} 중원은 후반에 다리가 무거워진다`,
+    },
+    "set-piece": {
+      sharp: (r) => `${r.subject} 세트피스 키커: ${r.who(0)}(${AXIS_KO.kicking} ${r.v("kicking")})`,
+      vague: (r) => `${r.subject}는 죽은 공이 위협적이다`,
+    },
+    discipline: {
+      sharp: (r) =>
+        `${r.subject} 카드 위험: ${r.who(0)}(${AXIS_KO.aggression} ${r.v("aggression")} · ${AXIS_KO.composure} ${r.v("composure")})`,
+      vague: (r) => `${r.subject}에 발끈하는 선수가 있다`,
+    },
+  };
+
+/** 전술 6축이 존에 남긴 이득과 대가 — 눈금 하나가 한 줄이다 */
+const TACTICAL_KO: Record<string, (r: Render) => string> = {
+  mentality: (r) =>
+    r.v("step") > 0
+      ? "공격적 멘탈리티: 앞선 가중, 후방 노출"
+      : "수비적 멘탈리티: 뒤를 두껍게, 공격 포기",
+  pressing: (r) =>
+    r.v("step") > 0
+      ? `강한 압박: 중원 주도권(${AXIS_KO.stamina} ${r.v("stamina") >= 1 ? "충분" : "부족"}), 빌드업을 앞에서 끊되 뒷공간 위험`
+      : "압박 완화: 중원을 내주고 자리를 지킨다",
+  "defensive-line": (r) =>
+    r.v("step") > 0
+      ? `높은 수비 라인: 압축 이득, 상대 스피드에 뒷공간 노출(위험 ×${r.v("paceRisk").toFixed(2)})`
+      : "내려선 수비 라인: 뒷공간을 지우고 전진을 포기",
+  tempo: (r) =>
+    r.v("step") > 0
+      ? `빠른 템포: 기회 증가, ${AXIS_KO.composure}(${r.v("composure") >= 1 ? "양호" : "불안"})만큼 실책 위험`
+      : "느린 템포: 안정적으로 돌리되 기회가 준다",
+  width: (r) =>
+    r.v("step") > 0
+      ? `측면 확장: 폭을 쓰는 이득(측면 자원 ${r.v("wide") >= 1 ? "우수" : "평범"}), 중앙 밀집 약화`
+      : "중앙 집중: 중원을 두껍게, 폭을 포기",
+  "pass-style": (r) =>
+    r.v("step") > 0
+      ? `롱볼 지향: 제공권 ${r.v("aerial") >= 1 ? "우위" : "열세"}, 중원 점유 포기`
+      : `짧은 패스: 점유로 중원 장악 (연결 ${r.v("passing") >= 1 ? "안정" : "불안"}), 전진은 느리다`,
+};
+
+/**
+ * **판에 닿지 못한 지시·공략** — 조용히 버리면 거짓 성공이 된다.
+ * 꼴은 하나다: `무엇이 안 걸렸는가 — 왜`. 한 줄만 읽어도 다시 내릴지가 정해져야 한다.
+ */
+const DROPPED_KO: Record<string, (r: Render) => string> = {
+  "off-pitch": (r) =>
+    r.named(0)
+      ? `${r.who(0)}은(는) 그라운드에 없어 지시가 걸리지 않았다`
+      : "그라운드에 없는 선수에게 내린 지시라 걸리지 않았다",
+  "gone-target": (r) =>
+    `${r.who(0)}의 지시가 걸리지 않았다 — ` +
+    (r.named(1) ? `${r.who(1)}은(는) 이미 그라운드를 떠났다` : "겨냥한 상대가 그라운드에 없다"),
+  overflow: (r) =>
+    `${r.named(0) ? `${r.who(0)}에게 내린 지시가` : "지시 하나가"} 판에 닿지 않았다 — 한 경기에 ${r.v("limit")}개까지다`,
+};
+
+/** 공략이 걸리지 않은 까닭 */
+const EXPLOIT_DROPPED_KO: Record<string, (r: Render) => string> = {
+  missing: () => "그 지점이 그라운드에 없어 걸리지 않았다",
+  "own-side": () => "우리 쪽 약점이라 노릴 수 없다",
+  overflow: (r) => `동시에 ${r.v("limit")}곳까지라 이 공략은 걸리지 않았다`,
+};
+
+/**
+ * 사실 태그 → 한 줄. **문장을 만드는 자리는 여기 하나뿐이다** (match.md §1).
+ *
+ * 코드와 수치와 flags 로 같은 문장이 나오므로, 문구를 고쳐도 판정과 집계는
+ * 그대로다 — 그게 태그를 상태에 싣는 이유다.
+ */
+export function packetTagText(tag: PacketTag, ctx?: PacketTagContext): string {
+  const named = (i: number) => {
+    const id = tag.playerIds[i];
+    return id === undefined ? undefined : ctx?.player(id)?.name;
+  };
+  const r: Render = {
+    subject: "",
+    rival: "",
+    who: (i) => named(i) ?? tag.playerIds[i] ?? "",
+    named,
+    v: (key, fallback = 0) => tag.values[key] ?? fallback,
+    has: (flag) => tag.flags.includes(flag),
+  };
+  const nameOf = (side: MatchSide) =>
+    side === "home" ? (ctx?.home ?? "홈") : (ctx?.away ?? "어웨이");
+  /** 태그의 편 기준으로 주어와 상대를 세운다 — 편이 없는 태그는 이름을 쓰지 않는다 */
+  const sides = (subject: MatchSide | null): Render => {
+    if (!subject) return r;
+    return { ...r, subject: nameOf(subject), rival: nameOf(otherSide(subject)) };
+  };
+
+  switch (tag.source) {
+    case "legacy":
+      return tag.text ?? "";
+    case "zone-plan":
+      return `${tag.favours ? nameOf(tag.favours) : ""} 지역 플랜: ${tag.text ?? ""}`.trim();
+    case "gap": {
+      // 구멍은 그 팀의 것이다 — 이로운 쪽은 반대편이라 주어를 되짚는다
+      const holder = tag.favours ? otherSide(tag.favours) : null;
+      const at = ctx?.player(tag.playerIds[0] ?? "");
+      const s = sides(holder);
+      return `${s.subject} ${at?.position ?? ""}에 구멍: ${s.who(0)}의 다리가 멈췄다 — 교체하지 않으면 그 자리가 계속 열린다`;
+    }
+    case "counter": {
+      const entry = COUNTER_KO[tag.code];
+      if (!entry || !tag.favours) return tag.text ?? "";
+      const blames = typeof entry.blames === "function" ? entry.blames(r) : entry.blames === true;
+      // 대가의 주어는 이로운 편의 반대다
+      return entry.text(sides(blames ? otherSide(tag.favours) : tag.favours));
+    }
+    case "mismatch": {
+      if (tag.code.startsWith("zone-")) return zoneMatchupText(tag);
+      const entry = MISMATCH_KO[tag.code];
+      if (!entry || !tag.favours) return tag.text ?? "";
+      // 미스매치의 주어는 그 지점을 **가진** 쪽 — 강점 축은 그게 이로운 편 자신이다
+      const s = sides(tag.holder ?? otherSide(tag.favours));
+      return tag.sharp ? entry.sharp(s) : entry.vague(s);
+    }
+    case "tactical":
+      return TACTICAL_KO[tag.code]?.(r) ?? tag.text ?? "";
+    case "directive": {
+      const line = DIRECTIVE_KO[tag.code]?.(r.who(0), r.who(1));
+      if (line === undefined) return tag.text ?? "";
+      const read =
+        tag.values.duel !== undefined
+          ? duelRead(tag.values.duel)
+          : aptitudeRead(r.v("aptitude", 1));
+      const intensity = flagValue(tag, "intensity");
+      const ko = intensity === undefined ? undefined : DIRECTIVE_INTENSITY_KO_BY_CODE[intensity];
+      return `${line} — ${read}${ko ? ` (${ko})` : ""}`;
+    }
+    case "directive-dropped":
+      return DROPPED_KO[tag.code]?.(r) ?? tag.text ?? "";
+    case "exploit": {
+      const note = EXPLOIT_KO[tag.code];
+      if (!note) return tag.text ?? "";
+      return `${note} (${packetTagText({ ...tag, source: "mismatch" }, ctx)})`;
+    }
+    case "exploit-dropped": {
+      const axis = flagValue(tag, "axis");
+      const note = axis === undefined ? undefined : EXPLOIT_KO[axis];
+      const why = EXPLOIT_DROPPED_KO[tag.code]?.(r) ?? tag.text ?? "";
+      return `${note ?? "노린 지점을 찾지 못했다"} — ${why}`;
+    }
+  }
+}
+
+function zoneMatchupText(tag: PacketTag): string {
+  const zone = tag.code.slice("zone-".length);
+  const head = ZONE_MATCHUP_KO_BY_CODE[zone] ?? zone;
+  const values =
+    tag.values.home !== undefined && tag.values.away !== undefined
+      ? ` (${tag.values.home} vs ${tag.values.away})`
+      : "";
+  // 값을 잃은 옛 세이브의 매치업 — 그때는 들고 온 문장이 전부다
+  if (values === "" && tag.text) return tag.text;
+  if (!tag.favours) return `${head}: 팽팽하다${values}`;
+  const size = tag.flags.find((f): f is EdgeSize => f in SIZE_KO);
+  const ko = size ? SIZE_KO[size] : "";
+  return `${head}: ${tag.favours === "home" ? "홈" : "어웨이"}의 ${ko} 우위${values}`;
+}
+
+// ── 옛 세이브 읽기 ────────────────────────────────────
+/** 진행 중이던 옛 세이브의 패킷 — 문장이 서 있던 칸들 */
+interface LegacyPacket {
+  keyPoints: Array<PacketTag | string>;
+  keyPointSides?: MatchSide[];
+  targets: Array<ExploitTarget & { label?: string }>;
+  home: { tactical: { notes: Array<PacketTag | string> } };
+  away: { tactical: { notes: Array<PacketTag | string> } };
+}
+
+/**
+ * 진행 중이던 경기의 옛 패킷을 태그로 — **읽는 자리에서 한 번만** 지난다.
+ *
+ * `PendingMatch.packet`은 세이브 스키마의 검사 밖(passthrough)이라 옛 세이브는
+ * `keyPoints: string[]`·`tactical.notes: string[]`·`targets[].label`을 들고 온다.
+ * 판정은 이 폴백을 보지 않는다 — 옛 문장으로 다시 갈래를 가르면 이 구조가 뜻을
+ * 잃으므로, 옮겨진 태그는 `code: "legacy"` 하나다 (match.md §4).
+ */
+export function normalizePacket(packet: StrengthPacket): StrengthPacket {
+  const raw = packet as unknown as LegacyPacket;
+  const notes = (list: Array<PacketTag | string>) =>
+    list.map((n) => (typeof n === "string" ? legacyTag(n) : n));
+  const stale =
+    raw.keyPoints.some((k) => typeof k === "string") ||
+    raw.home.tactical.notes.some((n) => typeof n === "string") ||
+    raw.away.tactical.notes.some((n) => typeof n === "string") ||
+    raw.targets.some((t) => t.tag === undefined);
+  if (!stale) return packet;
+  return {
+    ...packet,
+    keyPoints: raw.keyPoints.map((k, i) => {
+      if (typeof k !== "string") return k;
+      const tag = legacyTag(k);
+      const favours = raw.keyPointSides?.[i];
+      return favours ? { ...tag, favours } : tag;
+    }),
+    targets: raw.targets.map((t) => (t.tag ? t : { ...t, tag: legacyTag(t.label ?? t.id) })),
+    home: {
+      ...packet.home,
+      tactical: { ...packet.home.tactical, notes: notes(raw.home.tactical.notes) },
+    },
+    away: {
+      ...packet.away,
+      tactical: { ...packet.away.tactical, notes: notes(raw.away.tactical.notes) },
+    },
   };
 }
