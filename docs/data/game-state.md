@@ -116,6 +116,31 @@
   표현할 수 없다.
 - 데이터 출처와 라이선스는 [sources.md](sources.md).
 
+### 어드민 쓰기는 열려 있을 때만 연다
+
+**카탈로그 오버라이드는 디스크에 쓰는 길이고, 어드민 라우트에는 로그인이 없다.**
+배포된 인스턴스에서 그 길이 열려 있으면 요청 하나로 세계의 초기치가 바뀌고
+`catalog-reset`은 편집을 통째로 지운다. 그래서 `apps/web/app/api/admin/catalog/**`의
+`POST`·`PATCH`·`DELETE`는 문을 먼저 지난다.
+
+| 무엇         | 값                                                                                    |
+| ------------ | ------------------------------------------------------------------------------------- |
+| 켜지는 조건  | `ADMIN_ENABLED`가 있으면 그 값(`1`·`true`가 열림), 없으면 `NODE_ENV !== "production"` |
+| 닫혔을 때    | **본문 없는 404** — 없는 길이 된다. 400도 403도 아니다                                |
+| 거는 자리    | 래퍼 `adminWrite()` 하나 (`apps/web/app/api/admin/admin-guard.ts`)                    |
+| 열려 있는 것 | 조회(`GET`)는 막지 않는다 — 카탈로그를 읽는 것으로는 아무것도 바뀌지 않는다           |
+
+- **`ADMIN_ENABLED`가 먼저다.** 배포한 인스턴스에서 자기 카탈로그를 고쳐야 하면
+  `ADMIN_ENABLED=1`이 그 길이고, 개발 서버에서 닫힌 동작을 확인하려면
+  `ADMIN_ENABLED=0`이 그 반대다. `NODE_ENV`는 아무도 값을 주지 않았을 때의 기본값일
+  뿐이다. 빈 문자열은 값을 준 것이 아니다 — 셸이 비운 변수가 문을 열어 버리면 안 된다.
+- **문은 래퍼로 건다.** 라우트마다 첫 줄을 적는 방식이면 다음에 붙는 쓰기 핸들러가
+  그 줄을 빠뜨려도 아무도 모른다. `export const PATCH = adminWrite(async (…) => …)`는
+  빠뜨릴 자리가 없다.
+- **e2e는 빌드된 앱(`next start`)을 보므로 `NODE_ENV`가 production이다.**
+  `playwright.config.ts`의 webServer가 `ADMIN_ENABLED=1`을 주어 어드민 스펙이 그대로
+  돈다 — 그 한 줄이 탈출구가 실제로 작동한다는 증거이기도 하다.
+
 ## 3. 게임 세이브 — 엔티티 지도
 
 `GameState`(`packages/engine/src/core/state.ts`)가 세이브 전체다. Zod 스키마가
@@ -662,4 +687,5 @@ id와 생김새가 같다. 목록만이 아니라 **로드와 삭제도 그 넷�
 | 파생 — 순위표 · 등록 · 안개 · 정착 | `competition/season.ts` · `squad/registration.ts` · `squad/scouting.ts` · `squad/settling.ts`                            |
 | 승강 (`leagueOf`)                  | `packages/engine/src/competition/promotion.ts`                                                                           |
 | 어드민 카탈로그 편집               | `packages/engine/src/world/admin.ts`(선수) · `admin-team.ts` · `admin-competition.ts` · `apps/web/app/admin/`            |
+| 어드민 쓰기 가드                   | `apps/web/app/api/admin/admin-guard.ts`                                                                                  |
 | 카탈로그 오버라이드 배관 · 불변식  | `packages/engine/src/data/catalog-source.ts` · `world/catalog-invariants.ts`                                             |
