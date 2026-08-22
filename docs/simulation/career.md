@@ -456,6 +456,9 @@ dismissal: {
 ±8 → 리그 트로피 → 유럽·국내 컵 결산(트로피·평판·상금) → 리그 상금·성과 보너스 → 업적 →
 `SEASON_RECORD` 적재. 그다음이 시즌 전환이다 ([season.md](./season.md) §6).
 
+**전적도 마찬가지다** — 시즌 표에 내려가는 것은 `{ wins, draws, losses }`고
+`"20승 8무 10패"`는 화면이 잇는다 (overview.md §5).
+
 **보드 평가는 등급과 근거 수치로 남는다** (`SEASON_RECORD.board`) — 문장이 아니다
 (overview.md §1 철칙 4).
 

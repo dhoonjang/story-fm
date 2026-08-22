@@ -254,23 +254,32 @@ row, 지난 일 = 그대로 이력.**
 
 ### 3.6 감독 · 서사
 
-| 엔티티                                             | 무엇                                                                             | 정의                |
-| -------------------------------------------------- | -------------------------------------------------------------------------------- | ------------------- |
-| `manager` `Manager`                                | 이름·배경 · 능력치 5축 · 평판 3축 · 보드 경고                                    | `domain/manager.ts` |
-| `managerXP`                                        | 축별 누적 경험치                                                                 | `core/state.ts`     |
-| `seasonRecords` `SeasonRecord`                     | 시즌 성적 — 감독에 소속(팀을 옮겨도 남는다)                                      | `domain/records.ts` |
-| `trophies` `Trophy` · `achievements` `Achievement` | 우승 · 업적                                                                      | `domain/records.ts` |
-| `personas` `Persona`                               | 인물 — 수석코치·구단주·기자. 성격·동기·말투+예시 대사                            | `domain/persona.ts` |
-| `narrative` `NarrativeNote`                        | GM 기억 — 날짜·문장·중요도(1\~5)                                                 | `domain/records.ts` |
-| `arcs` `NarrativeArc`                              | 서사 아크 — 갈래·주인·단계·제목. 개폐는 장부에서 결정적 (people.md §9)           | `domain/records.ts` |
-| `chat` `ChatTurn`                                  | 대화 이력 — `user`/`model`/`operator`                                            | `core/state.ts`     |
-| ↳ `ToolCallRecord`                                 | 스킬 호출 — 요약·항목(`brief`)·카드 payload·톤·`silent`·장면 안 줄 위치          | `core/state.ts`     |
-| ↳ `SkillBrief`                                     | 화면이 세우는 요약 — 머리줄 + 항목. 없는 기록은 요약 문자열로 폴백               | `core/state.ts`     |
-| ↳ `SkillBriefItem`                                 | 항목 하나 — 이름(`label`) · 값(`text`) · 갈래(`note`). 화면이 자리마다 톤을 준다 | `core/state.ts`     |
-| ↳ `GoalMark` `CardMark`                            | 그 턴의 골·카드 — 장부의 사건이지 중계 문장의 파싱이 아니다                      | `core/state.ts`     |
-| `pendingEdits` `PendingEdit`                       | 아직 GM이 읽지 않은 화면 조작 — 같은 키는 마지막 것만                            | `core/state.ts`     |
-| `pendingNews`                                      | 아직 GM이 읽지 않은 경기 밖 소식 — 결산이 함께 굴린 재정·다른 경기               | `core/state.ts`     |
-| `pendingReportCards`                               | 아직 카드로 세우지 않은 스카우트 보고서 — 모델이 그 줄을 읽은 턴에 비워진다      | `core/state.ts`     |
+| 엔티티                                             | 무엇                                                                        | 정의                |
+| -------------------------------------------------- | --------------------------------------------------------------------------- | ------------------- |
+| `manager` `Manager`                                | 이름·배경 · 능력치 5축 · 평판 3축 · 보드 경고                               | `domain/manager.ts` |
+| `managerXP`                                        | 축별 누적 경험치                                                            | `core/state.ts`     |
+| `seasonRecords` `SeasonRecord`                     | 시즌 성적 — 감독에 소속(팀을 옮겨도 남는다)                                 | `domain/records.ts` |
+| `trophies` `Trophy` · `achievements` `Achievement` | 우승 · 업적                                                                 | `domain/records.ts` |
+| `personas` `Persona`                               | 인물 — 수석코치·구단주·기자. 성격·동기·말투+예시 대사                       | `domain/persona.ts` |
+| `narrative` `NarrativeNote`                        | GM 기억 — 날짜·문장·중요도(1\~5)                                            | `domain/records.ts` |
+| `arcs` `NarrativeArc`                              | 서사 아크 — 갈래·주인·단계·제목. 개폐는 장부에서 결정적 (people.md §9)      | `domain/records.ts` |
+| `chat` `ChatTurn`                                  | 대화 이력 — `user`/`model`/`operator`                                       | `core/state.ts`     |
+| ↳ `ToolCallRecord`                                 | 스킬 호출 — 요약·항목(`brief`)·카드 payload·톤·`silent`·장면 안 줄 위치     | `core/state.ts`     |
+| ↳ `SkillBrief`                                     | 화면이 세우는 요약 — 머리줄 + 항목. 없는 기록은 말풍선에 서지 않는다        | `core/state.ts`     |
+| ↳ `SkillBriefItem`                                 | 항목 하나 — 이름(`label`) · 값(`text`) · 갈래(`note`) · 증감(`delta`)       | `core/state.ts`     |
+| ↳ `GoalMark` `CardMark`                            | 그 턴의 골·카드 — 장부의 사건이지 중계 문장의 파싱이 아니다                 | `core/state.ts`     |
+| `pendingEdits` `PendingEdit`                       | 아직 GM이 읽지 않은 화면 조작 — 같은 키는 마지막 것만                       | `core/state.ts`     |
+| `pendingNews`                                      | 아직 GM이 읽지 않은 경기 밖 소식 — 결산이 함께 굴린 재정·다른 경기          | `core/state.ts`     |
+| `pendingReportCards`                               | 아직 카드로 세우지 않은 스카우트 보고서 — 모델이 그 줄을 읽은 턴에 비워진다 | `core/state.ts`     |
+
+⚠️ **말풍선 항목의 증감은 숫자로 온다** — `delta`가 있으면 그 항목은 오르내린 값을
+말하는 것이고 화면은 **부호로 색을 준다**. 문자열의 `+`·`−`를 찾아 색을 칠하면 포메이션
+(`4-2-3-1`)과 증감이 같은 자를 지나고, 코어가 문구를 바꾸는 날 조용히 꺼진다.
+
+⚠️ **`brief`가 없는 기록은 말풍선에 서지 않는다.** 요약 문자열(`summary`)은 모델에게
+돌려주는 줄이지 화면의 항목이 아니다 — 화면이 그 줄을 갈라 세우면 코어가 쓴 문장의
+첫 줄이 곧 UI가 된다. 조작형 스킬은 모두 `brief`를 낸다(`skill-brief.test.ts`);
+없는 것은 그 규약보다 오래된 세이브의 기록뿐이고, 그 지시는 채팅의 칩으로 남는다.
 
 ⚠️ **능력치 5축은 평판의 `media`와 다른 것이다** — 능력치(`leadership` `tactics`
 `training` `negotiation` `analysis`)는 감독이 가진 역량, 평판(`board` `media`
