@@ -354,13 +354,14 @@ describe("월간 보고서", () => {
     expect(s.expense.find((l) => l.category === "other")?.amount).toBe(1_000_000);
   });
 
-  it("급여 비중과 판단 재료(notes)가 붙는다", () => {
+  it("급여 비중과 판단 재료가 붙는다 — 노트는 문장이 아니라 카드다", () => {
     const state = createMiniGame();
     advanceUntil(state, "2026-10-03");
     const report = state.financeReports.find((r) => r.month === "2026-09")!;
     expect(report.wageRatio).toBeGreaterThan(0);
     expect(report.wageRatio).toBeLessThan(2);
-    expect(Array.isArray(report.notes)).toBe(true);
+    expect(Array.isArray(report.noteCards)).toBe(true);
+    expect(report.notes, "코어가 노트 문장을 저장했다").toBeUndefined();
     expect(report.psr).not.toBeNull();
   });
 });
@@ -805,12 +806,12 @@ describe("성적이 돈이 되는 자리", () => {
     });
     const cup = clause("2026-11", () => {
       state.euroEntrants = [];
-      state.trophies = [{ season: state.season - 1, competition: "FA컵", teamId: us }];
+      state.trophies = [{ season: state.season - 1, competitionId: "facup", teamId: us }];
     });
     const two = clause("2026-12", () => {
       state.trophies = [
-        { season: state.season - 1, competition: "FA컵", teamId: us },
-        { season: state.season - 1, competition: "프리미어리그", teamId: us },
+        { season: state.season - 1, competitionId: "facup", teamId: us },
+        { season: state.season - 1, competitionId: "epl", teamId: us },
       ];
     });
 

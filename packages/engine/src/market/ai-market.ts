@@ -18,7 +18,6 @@ import {
   isInjured,
   pushNarrative,
   squadLevelOf,
-  teamNameIn,
   teamShortNameIn,
   weeklyWagesOf,
   type GameState,
@@ -232,7 +231,6 @@ function moveClub(
     date: state.date,
     type: input.type,
     fee: input.fee,
-    note: `${teamNameIn(state, fromTeamId)} → ${teamNameIn(state, toTeamId)}`,
   });
 
   const previous = activeContract(state, player.id);
@@ -533,7 +531,6 @@ function settle(state: GameState, deal: AiDeal, rng: () => number): GamePlayer |
       date: state.date,
       type: "loan",
       fee: 0,
-      note: `${teamNameIn(state, fromId)} → ${teamNameIn(state, deal.toTeamId)} 임대`,
     });
     clearDepartedState(state, player, fromId);
     player.teamId = deal.toTeamId;

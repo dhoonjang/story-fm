@@ -129,8 +129,9 @@ describe("방출의 여파 — 회견과 남은 선수단", () => {
     const press = state.pressConferences?.find((c) => c.status === "pending");
     expect(press?.facts[0]?.kind).toBe("departure");
     expect(press?.facts[0]?.about).toBe(target.id);
-    // 카드는 장부 한 줄이다 — 물음표도 평가어도 없다
-    expect(press?.facts[0]?.text).not.toContain("?");
+    // 카드는 장부 한 줄이다 — 문장이 아니라 코드와 수치다
+    expect(press?.facts[0]?.text, "코어가 사실 문장을 저장했다").toBeUndefined();
+    expect(press?.facts[0]?.data?.tags?.[0]).toBe("released");
 
     const after = formsById(state);
     expect(after.has(target.id)).toBe(false);

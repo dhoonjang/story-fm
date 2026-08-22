@@ -1136,7 +1136,7 @@ describe("시장의 문 — 한쪽에만 걸려 있던 관문들", () => {
       if (outcome.passed) continue;
 
       expect(negotiation.medical!.status).toBe("flagged");
-      expect(negotiation.medical!.note, "소견에는 읽을 문장이 있어야 한다").toBeTruthy();
+      expect(negotiation.medical!.concern, "소견에는 읽을 카드가 있어야 한다").toBeDefined();
       expect(
         negotiation.expiresOn > state.date,
         "소견을 읽고 강행·철회를 고를 날이 남아야 한다",

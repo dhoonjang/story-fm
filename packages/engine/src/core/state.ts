@@ -1242,7 +1242,8 @@ export function recordGrowth(
   source: GrowthEntry["source"],
   target: string,
   delta: number,
-  note?: string,
+  /** 어느 경로로 올랐나 — 문장이 아니라 코드다 (records.ts `GrowthOrigin`) */
+  origin?: GrowthEntry["origin"],
   /** 실제로 그 일이 있었던 날 — 안 주면 오늘. 결산은 **지나간 훈련 날짜**를 준다 */
   on?: string,
 ): void {
@@ -1253,7 +1254,7 @@ export function recordGrowth(
     source,
     target,
     delta,
-    ...(note ? { note } : {}),
+    ...(origin ? { origin } : {}),
   });
   if (state.growthLog.length > GROWTH_LOG_LIMIT) {
     state.growthLog.splice(0, state.growthLog.length - GROWTH_LOG_LIMIT);
@@ -1268,8 +1269,14 @@ export function recordGrowth(
  */
 const NARRATIVE_LIMIT = 200;
 
-export function pushNarrative(state: GameState, text: string, salience = 2): void {
-  state.narrative.push({ date: state.date, text, salience });
+export function pushNarrative(
+  state: GameState,
+  text: string,
+  salience = 2,
+  /** 갈래 — 하루 한도를 세는 열쇠다. 접두 문장으로 가르지 않는다 (records.ts `NarrativeKind`) */
+  kind?: NarrativeNote["kind"],
+): void {
+  state.narrative.push({ date: state.date, text, salience, ...(kind ? { kind } : {}) });
   if (state.narrative.length > NARRATIVE_LIMIT) {
     state.narrative.splice(0, state.narrative.length - NARRATIVE_LIMIT);
   }
@@ -2453,21 +2460,40 @@ export function createGame(input: CreateGameInput): GameState {
 /** 매각·방출·임대 뒤 유지해야 하는 최소 인원 */
 export const MIN_SQUAD_AFTER_SALE = 18;
 
+/** 매각·방출·임대 뒤 남아야 하는 최소 골키퍼 수 */
+export const MIN_GK_AFTER_SALE = 2;
+
 /**
- * 이 선수가 빠지면 스쿼드가 무너지는가 — 무너지면 그 이유를 돌려준다.
+ * 스쿼드가 무너지는 갈래 — **코드와 수치**. 문장은 부르는 쪽이 만든다.
+ *
+ * 막히는 이유는 같아도 감독이 하려던 일은 매각·해지·임대 송출로 갈리고 동사가
+ * 다르다. 코어가 한 문장으로 못 박아 두면 부르는 쪽이 그 문장의 동사를 바꿔치기해
+ * 읽게 되고, 문구를 고치는 순간 그 자리가 깨진다 (overview.md §1 철칙 4).
+ */
+export type SquadShortfall = {
+  code: "squad-min" | "gk-min";
+  /** 그 선수가 빠진 뒤 남는 수 — 인원 또는 골키퍼 */
+  remaining: number;
+  /** 그 수가 견주는 하한 */
+  limit: number;
+};
+
+/**
+ * 이 선수가 빠지면 스쿼드가 무너지는가 — 무너지면 그 갈래를 돌려준다.
  * `negotiation`·`departures`가 함께 쓰므로 여기 둔다(둘이 서로를 import하면 순환).
  */
 export function squadShortfall(
   state: GameState,
   teamId: string,
   leaving: { id: string },
-): string | null {
+): SquadShortfall | null {
   const remaining = playersOf(state, teamId).filter((p) => p.id !== leaving.id);
   if (remaining.length < MIN_SQUAD_AFTER_SALE) {
-    return `스쿼드가 ${MIN_SQUAD_AFTER_SALE}명 아래로 내려가 팔 수 없습니다`;
+    return { code: "squad-min", remaining: remaining.length, limit: MIN_SQUAD_AFTER_SALE };
   }
-  if (remaining.filter((p) => groupOf(p) === "GK").length < 2) {
-    return "골키퍼가 2명 아래로 내려가 팔 수 없습니다";
+  const keepers = remaining.filter((p) => groupOf(p) === "GK").length;
+  if (keepers < MIN_GK_AFTER_SALE) {
+    return { code: "gk-min", remaining: keepers, limit: MIN_GK_AFTER_SALE };
   }
   return null;
 }

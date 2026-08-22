@@ -1,5 +1,5 @@
-import type { GamePlayer } from "@story-fm/domain";
-import { ageOf, buildPaymentInstallments, RELEASE_NOTE } from "@story-fm/domain";
+import type { GamePlayer, TransferReason } from "@story-fm/domain";
+import { ageOf, buildPaymentInstallments } from "@story-fm/domain";
 import { contractUntil, seasonYear, windowOpenOn } from "../competition/calendar";
 import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import { formatMoney, recordFinance, settleDuePayments } from "../club/finance";
@@ -9,6 +9,7 @@ import {
   firstInstallmentOf,
   loanLockOf,
   paymentYearsOf,
+  squadShortfallText,
   transferWindowLabel,
   unilateralSeveranceOf,
   windowOpenForTeam,
@@ -88,7 +89,7 @@ export function clearDepartedState(state: GameState, player: GamePlayer, from: s
 export function toFreeAgency(
   state: GameState,
   player: GamePlayer,
-  note: string,
+  reason: TransferReason,
   on = state.date,
 ): string {
   const contract = activeContract(state, player.id);
@@ -110,7 +111,7 @@ export function toFreeAgency(
     date: on,
     type: "free",
     fee: 0,
-    note,
+    reason,
   });
   return id;
 }
@@ -143,7 +144,7 @@ export function releasePlayer(
     return { ok: false, message: `${player.name}은(는) 우리 선수가 아닙니다` };
   }
   const short = squadShortfall(state, state.userTeamId, player);
-  if (short) return { ok: false, message: `우리 ${short.replace("팔 수", "해지할 수")}` };
+  if (short) return { ok: false, message: `우리 ${squadShortfallText(short, "release")}` };
 
   const agreed = input.severance !== undefined;
   const severance = Math.max(
@@ -165,11 +166,7 @@ export function releasePlayer(
   }
 
   const wasCaptain = player.isCaptain;
-  const transferId = toFreeAgency(
-    state,
-    player,
-    agreed ? RELEASE_NOTE.agreed : RELEASE_NOTE.unilateral,
-  );
+  const transferId = toFreeAgency(state, player, agreed ? "release-agreed" : "release-unilateral");
   if (severance > 0) {
     if (paymentYears !== undefined) {
       // 받는 쪽이 선수 본인이라 표가 payee를 갖지 않는다 — 원장은 우리 지출만 적는다
@@ -261,7 +258,7 @@ export function loanPlayer(
     };
   }
   const short = squadShortfall(state, state.userTeamId, player);
-  if (short) return { ok: false, message: `우리 ${short.replace("팔 수", "보낼 수")}` };
+  if (short) return { ok: false, message: `우리 ${squadShortfallText(short, "loan-out")}` };
   const contract = activeContract(state, player.id);
   if (!contract) return { ok: false, message: `${player.name}은(는) 계약이 없습니다` };
 
@@ -290,7 +287,6 @@ export function loanPlayer(
     date: state.date,
     type: "loan",
     fee: 0,
-    note: `임대 (복귀 ${until} · 주급 분담 ${Math.round(wageShare * 100)}%)`,
   });
 
   pushNarrative(state, `${player.name} ${teamName(destination.id)} 임대 (복귀 ${until})`, 3);
@@ -335,7 +331,6 @@ function returnFromLoan(state: GameState, player: GamePlayer): void {
     date: state.date,
     type: "loan",
     fee: 0,
-    note: "임대 복귀",
   });
   player.teamId = loan.fromTeamId;
   player.squadNumber = undefined;
@@ -473,7 +468,6 @@ function signWithClub(
     date: state.date,
     type: "free",
     fee: 0,
-    note: "자유계약",
   });
   // 남은 활성 계약을 끝내고 쓴다 — 안 끝내면 한 선수의 주급이 두 구단에서 세어진다
   const previous = activeContract(state, player.id);
