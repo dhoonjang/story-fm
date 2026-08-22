@@ -175,6 +175,22 @@ describe("한 사람이 계속 말하지 않는다", () => {
     expect(speakerCues(state, 1)[0]!.playerId).toBe(b!.id);
   });
 
+  it("공백만 다른 이름도 같은 사람이다 — 모델이 붙여 써도 회전에서 빠지지 않는다", () => {
+    const state = quiet(createTestGame(11));
+    const [a, b] = firsts(state, 2);
+    a!.state.form = 0.8;
+    b!.state.form = 0.8;
+    // 모델은 같은 사람을 "스티브 홀랜드"로도 "스티브홀랜드"로도 쓴다
+    const spaced = a!.name.replace(/^(.)/u, "$1 ");
+    state.chat.push({
+      role: "model",
+      text: `[${state.date} AM 9:00]\n@${spaced}: 감독님, 드릴 말씀이 있습니다.`,
+      toolCalls: [],
+      at: state.date,
+    });
+    expect(speakerCues(state, 1)[0]!.playerId).toBe(b!.id);
+  });
+
   it("날짜가 바뀌면 차례가 돈다 — 근황이 그대로여도", () => {
     const state = quiet(createTestGame(11));
     for (const p of firsts(state, 4)) p.state.form = 0.8;
