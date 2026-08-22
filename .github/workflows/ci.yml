@@ -243,7 +243,7 @@ jobs:
       # 빨간 e2e를 읽는 유일한 창 — 러너 로그에는 실패한 단언 한 줄뿐이고 그 순간
       # 화면이 무엇이었는지가 없다. playwright.config.ts가 CI에서만 html 리포트와
       # 트레이스·스크린샷을 남기고, 그 둘을 여기서 올린다 (`merge` §4가 받아 본다).
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
         with:
           name: playwright-report
