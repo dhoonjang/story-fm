@@ -17,6 +17,10 @@ import {
   FORMATION_CHANGE_COST,
   clampCondition,
   naturalPositionOf,
+  normalizeCauses,
+  normalizePacket,
+  packetTagContext,
+  packetTagText,
   positionGroupOf,
   positionGroupOfPlayer,
   PROFICIENCY_MAX,
@@ -28,7 +32,6 @@ import {
 } from "@story-fm/domain";
 import type { SkillResult } from "../skills";
 import {
-  AI_SUB_CAUSE,
   MAX_EXPLOITS,
   addStats,
   advanceClock,
@@ -303,6 +306,18 @@ function directivesOnPitch(state: GameState, teamId: string, onPitch: readonly s
 export function refreshPacket(state: GameState): void {
   const pending = state.pendingMatch;
   if (!pending) return;
+  /**
+   * 진행 중이던 옛 세이브의 장부는 `causes`에 문장을 들고 온다 — 굴리기 전에 한 번
+   * 태그로 옮긴다. 판정은 이 폴백을 보지 않는다(태그의 코드와 `subCause`가 가른다).
+   * 패킷 자체는 바로 아래에서 새로 세워지므로 여기서 손댈 것이 없다.
+   */
+  for (const events of [pending.ledger.events, pending.lastSegment?.events]) {
+    if (!events) continue;
+    for (const event of events) {
+      const moved = normalizeCauses(event.causes);
+      if (moved !== event.causes) event.causes = moved;
+    }
+  }
   const match = currentMatch(state);
   const build = (teamId: string, ledgerSide: { onPitch: string[]; bench: string[] }) => {
     const starters = reseatOnAiShape(state, teamId, slotsFor(state, teamId, ledgerSide.onPitch));
@@ -738,7 +753,7 @@ export function advanceSegment(
    */
   const events =
     aiSubs.length > 0
-      ? aiSubs[0]!.causes.includes(AI_SUB_CAUSE.injury)
+      ? aiSubs[0]!.subCause === "injury"
         ? [...plan.events, ...aiSubs]
         : aiSubs.reduce((acc, sub) => insertBeforeStop(acc, sub), plan.events)
       : plan.events;
@@ -1374,7 +1389,7 @@ function gainMatchProficiency(
     "match",
     `pos:${position}`,
     MATCH_PROFICIENCY_GAIN,
-    slot ? "실전 경험" : "새 포지션 경험",
+    "match-minutes",
   );
 }
 
@@ -1719,6 +1734,7 @@ export function finalizeMatch(state: GameState): MatchDigest {
     state,
     `${competitionLabel(match.competitionId, match.stage ?? "league", match.round)} vs ${teamNameIn(state, opponentId)} ${scoreline} ${outcomeKo}`,
     outcome === "win" ? 4 : 3,
+    "match",
   );
   digest.push(`최종 스코어 ${scoreline} — ${outcomeKo}`, ...messages);
   /**
@@ -1781,7 +1797,8 @@ export { MAX_EXPLOITS, subLimitsOf };
 export function setExploits(state: GameState, input: { targetIds: string[] }): SkillResult {
   const pending = state.pendingMatch;
   if (!pending) return { ok: false, message: "경기 중이 아닙니다" };
-  const live = new Map((pending.packet?.targets ?? []).map((t) => [t.id, t] as const));
+  const packet = pending.packet ? normalizePacket(pending.packet) : null;
+  const live = new Map((packet?.targets ?? []).map((t) => [t.id, t] as const));
   const kept = input.targetIds.filter((id) => live.has(id));
   const missing = input.targetIds.filter((id) => !live.has(id));
   if (kept.length === 0) {
@@ -1795,8 +1812,11 @@ export function setExploits(state: GameState, input: { targetIds: string[] }): S
   refreshPacket(state);
   return {
     ok: true,
-    message: `공략 지정 — ${chosen.map((id) => live.get(id)?.label ?? id).join(" / ")}${
-      kept.length > MAX_EXPLOITS ? ` (동시에 ${MAX_EXPLOITS}곳까지)` : ""
-    }`,
+    message: `공략 지정 — ${chosen
+      .map((id) => {
+        const target = live.get(id);
+        return target && packet ? packetTagText(target.tag, packetTagContext(packet)) : id;
+      })
+      .join(" / ")}${kept.length > MAX_EXPLOITS ? ` (동시에 ${MAX_EXPLOITS}곳까지)` : ""}`,
   };
 }
