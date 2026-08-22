@@ -566,8 +566,6 @@ export function startMatch(state: GameState): FlowResult {
       userIsHome ? userSideLedger : aiSideLedger,
       userIsHome ? aiSideLedger : userSideLedger,
     ),
-    script: null,
-    scriptCursor: 0,
     segment: 0,
     matchFatigue: {},
     casterHistory: [],

@@ -24,6 +24,7 @@ import {
   type GameState,
 } from "@story-fm/engine";
 import {
+  MATCH_ADVANCED,
   TIME_PASSED,
   filterSceneStream,
   sanitizeSceneText,
@@ -679,7 +680,7 @@ describe("도구 구성", () => {
     // 시간 진행은 스킬이 아니다 — 모델이 첫 줄 헤더로 선언하고 코어가 받는다
     expect(names).not.toContain("advance_time");
     expect(names).not.toContain(TIME_PASSED);
-    expect(names).not.toContain("advance_match");
+    expect(names).not.toContain(MATCH_ADVANCED);
   });
 
   it("get_league는 상대·방향·개수로 특정 경기를 찾아준다", () => {

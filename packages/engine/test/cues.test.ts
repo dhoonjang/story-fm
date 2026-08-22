@@ -16,10 +16,11 @@ import {
   tickApproaches,
   tickBoardDemands,
   userPlayers,
+  windowOpenForTeam,
   worldFigures,
   type GameState,
 } from "@story-fm/engine";
-import type { PlayerIssueReason } from "@story-fm/domain";
+import type { PlayerIssueReason, Transfer } from "@story-fm/domain";
 import { createTestGame } from "./helpers";
 
 /**
@@ -168,6 +169,22 @@ describe("한 사람이 계속 말하지 않는다", () => {
     state.chat.push({
       role: "model",
       text: `[${state.date} AM 9:00]\n@${a!.name}: 감독님, 드릴 말씀이 있습니다.`,
+      toolCalls: [],
+      at: state.date,
+    });
+    expect(speakerCues(state, 1)[0]!.playerId).toBe(b!.id);
+  });
+
+  it("공백만 다른 이름도 같은 사람이다 — 모델이 붙여 써도 회전에서 빠지지 않는다", () => {
+    const state = quiet(createTestGame(11));
+    const [a, b] = firsts(state, 2);
+    a!.state.form = 0.8;
+    b!.state.form = 0.8;
+    // 모델은 같은 사람을 "스티브 홀랜드"로도 "스티브홀랜드"로도 쓴다
+    const spaced = a!.name.replace(/^(.)/u, "$1 ");
+    state.chat.push({
+      role: "model",
+      text: `[${state.date} AM 9:00]\n@${spaced}: 감독님, 드릴 말씀이 있습니다.`,
       toolCalls: [],
       at: state.date,
     });
@@ -485,7 +502,14 @@ describe("보드 요청 — 요청 → 이행/불이행 → 평판", () => {
   }
 
   /** 이 창의 이동 한 건 — 판정이 읽는 유일한 장부다 */
-  function moved(state: GameState, windowId: string, dir: "in" | "out", fee: number, id: string) {
+  function moved(
+    state: GameState,
+    windowId: string,
+    dir: "in" | "out",
+    fee: number,
+    id: string,
+    type: Transfer["type"] = "transfer",
+  ) {
     state.transfers.push({
       id,
       gamePlayerId: `gp-${id}`,
@@ -493,7 +517,7 @@ describe("보드 요청 — 요청 → 이행/불이행 → 평판", () => {
       fromTeamId: dir === "out" ? state.userTeamId : "chelsea",
       toTeamId: dir === "out" ? "chelsea" : state.userTeamId,
       date: state.date,
-      type: "transfer",
+      type,
       fee,
     });
   }
@@ -583,6 +607,84 @@ describe("보드 요청 — 요청 → 이행/불이행 → 평판", () => {
     financeOf(state, state.userTeamId).transferBudget = BOARD_DEMAND.SIGN_STAR_MIN_BUDGET - 1;
     tickBoardDemands(state, []);
     expect(openBoardDemand(state)).toBeNull();
+  });
+
+  it("지역 유지형 — 기준값 없는 요청이다: 창이 닫힌 다음 날의 잔고 하나로 갈린다", () => {
+    for (const [balance, status] of [
+      [0, "met"],
+      [-1, "failed"],
+    ] as const) {
+      const state = ownedBy(createTestGame(11), "지역 유지형");
+      tickBoardDemands(state, []);
+      const demand = openBoardDemand(state)!;
+      expect(demand.kind).toBe("stay-solvent");
+      // 발행 순간의 사실을 붙들지 않는다 — 선은 언제나 0이다
+      expect(demand.baseline).toBeUndefined();
+
+      financeOf(state, state.userTeamId).balance = balance;
+      // 창이 열려 있는 동안에는 판정하지 않는다
+      tickBoardDemands(state, []);
+      expect(demand.status, `잔고 ${balance}`).toBe("open");
+
+      const before = state.manager.reputation.board;
+      state.date = addDays(demand.deadline, 1);
+      tickBoardDemands(state, []);
+      expect(demand.status, `잔고 ${balance}`).toBe(status);
+      expect(state.manager.reputation.board).toBe(
+        before + (status === "met" ? BOARD_DEMAND.MET_BOARD : BOARD_DEMAND.FAILED_BOARD),
+      );
+    }
+  });
+
+  it("국부펀드형 — 겨울 창은 조르지 않는다. 여름 창에 하나 서고 그 창에 다시 서지 않는다", () => {
+    const state = ownedBy(createTestGame(11), "국부펀드형");
+    const summer = state.date;
+    const winter = state.windows.find((w) => w.kind === "winter")!;
+
+    // 큰 그림의 사람은 겨울 땜질을 조르지 않는다 (people.md §2)
+    state.date = winter.opensOn;
+    expect(windowOpenForTeam(state, state.userTeamId)?.kind, "겨울 창이 안 열렸다").toBe("winter");
+    tickBoardDemands(state, []);
+    expect(openBoardDemand(state)).toBeNull();
+    expect(state.boardDemands ?? []).toEqual([]);
+
+    state.date = summer;
+    tickBoardDemands(state, []);
+    const demand = openBoardDemand(state)!;
+    expect(demand.kind).toBe("sign-star");
+    expect(demand.windowId).not.toBe(winter.id);
+
+    // 창마다 최대 하나 — 며칠이 더 지나도 두 번째 요청이 서지 않는다
+    state.date = addDays(state.date, 5);
+    tickBoardDemands(state, []);
+    expect(state.boardDemands).toHaveLength(1);
+    expect(openBoardDemand(state)!.id).toBe(demand.id);
+  });
+
+  /**
+   * 임대료는 이적 예산에서 실제로 빠져나가는 현금이라 **두 요청이 같은 셈으로 잡는다**
+   * (career.md §5.2). 한쪽만 세면 같은 한 건이 요청마다 다른 무게를 갖는다.
+   */
+  it("임대 한 건이 스타 영입에도 순이익에도 같은 무게로 잡힌다", () => {
+    const showman = ownedBy(createTestGame(11), "흥행가형");
+    tickBoardDemands(showman, []);
+    const signStar = openBoardDemand(showman)!;
+    const fee = signStar.baseline!;
+    // 이적이 아니라 임대로 들어와도 기준액을 낸 영입이다
+    moved(showman, signStar.windowId, "in", fee, "t-loan-star", "loan");
+    showman.date = addDays(showman.date, 1);
+    tickBoardDemands(showman, []);
+    expect(signStar.status).toBe("met");
+
+    const investor = ownedBy(createTestGame(11), "투자자형");
+    tickBoardDemands(investor, []);
+    const netProfit = openBoardDemand(investor)!;
+    // 같은 임대료가 순지출로도 잡힌다 — 매각 수입보다 1원 앞서면 불이행이다
+    moved(investor, netProfit.windowId, "out", fee, "t-sale");
+    moved(investor, netProfit.windowId, "in", fee + 1, "t-loan-star", "loan");
+    investor.date = addDays(netProfit.deadline, 1);
+    tickBoardDemands(investor, []);
+    expect(netProfit.status).toBe("failed");
   });
 
   it("산업가형 — 임금 동결의 허용 폭은 2%다: 이내면 이행, 넘으면 불이행", () => {

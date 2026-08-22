@@ -253,6 +253,29 @@ describe("매치데이", () => {
     expect(gate!.ref?.type).toBe("match");
     expect(ledger.some((e) => categoryOf(e) === "matchday_opex")).toBe(true);
   });
+
+  /**
+   * 리그전을 굴리지 않는 리그는 홈 경기가 없어 매치데이가 0이다 — 그 몫을 월 정산이
+   * 같은 공식으로 되돌린다 (finance.md §9.5). **굴리는 리그에는 붙지 않는다**:
+   * 그쪽 매치데이는 경기가 만든다. 둘 다 붙으면 1부가 입장 수입을 두 번 번다.
+   *
+   * 아무 경기도 치르지 않은 t=0에서 재므로 매치데이 항목의 출처는 이 보정 하나뿐이다.
+   */
+  it("리그 홈경기 보정은 리그전을 굴리지 않는 리그에만 붙는다", () => {
+    const matchdayIncome = (state: GameState) =>
+      financeOf(state, state.userTeamId)
+        .ledger.filter((e) => e.kind === "income" && categoryOf(e) === "matchday")
+        .reduce((sum, e) => sum + e.amount, 0);
+
+    const top = createTestGame();
+    ensureMonthlyPosted(top);
+    expect(matchdayIncome(top)).toBe(0);
+
+    const second = createTestGame();
+    (second.leagueOf ??= {})[second.userTeamId] = "championship";
+    ensureMonthlyPosted(second);
+    expect(matchdayIncome(second)).toBeGreaterThan(0);
+  });
 });
 
 /**
@@ -310,6 +333,43 @@ describe("월간 보고서", () => {
     expect(months.size).toBeLessThanOrEqual(3);
     expect(months.has("2026-07")).toBe(false); // 잘렸다
     expect(state.financeReports.some((r) => r.month === "2026-07")).toBe(true); // 요약은 영구
+  });
+
+  /**
+   * 절단 기준월은 **월 번호를 빼서** 만든다 — 1·2월이면 그 뺄셈이 0 이하로 내려가
+   * 지난해로 넘어가는 갈래를 탄다(`12 + cutoffMonth`). 그 갈래가 틀리면 겨울에
+   * 원장이 통째로 날아가거나 한 해치가 그대로 쌓이는데, 보고서는 남으므로 화면의
+   * 숫자는 어디도 달라지지 않는다.
+   */
+  it("원장 절단의 창은 해를 넘어서도 석 달이다", () => {
+    /** 원장을 손으로 깔고 그 달 1일의 월초 정산만 돌린다 — 반년을 흘려보내지 않는다 */
+    const monthsAfterPrune = (today: string, months: string[]): string[] => {
+      const state = createMiniGame();
+      state.date = today;
+      const finance = financeOf(state, state.userTeamId);
+      finance.ledger = months.map((m) => ({
+        id: `led-${m}`,
+        date: `${m}-05`,
+        kind: "expense" as const,
+        label: "테스트 지출",
+        amount: 1_000,
+      }));
+      runMonthlyFinance(state, []);
+      return [...new Set(finance.ledger.map((e) => monthOf(e.date)))].sort();
+    };
+
+    // 1월 — 창의 앞끝이 **지난해 11월**이다
+    expect(monthsAfterPrune("2027-01-01", ["2026-09", "2026-10", "2026-11", "2026-12"])).toEqual([
+      "2026-11",
+      "2026-12",
+      "2027-01",
+    ]);
+    // 2월 — 뺄셈이 정확히 0인 자리 (12월이 앞끝)
+    expect(monthsAfterPrune("2027-02-01", ["2026-10", "2026-11", "2026-12", "2027-01"])).toEqual([
+      "2026-12",
+      "2027-01",
+      "2027-02",
+    ]);
   });
 
   it("석 달이 지나 원장이 잘려도 큰 건의 날짜는 달력 일지에 남는다", () => {
@@ -995,6 +1055,49 @@ describe("PSR", () => {
     expect(financeLookup(state, "2026-08").message).toContain("보고서가 없습니다");
   });
 
+  /**
+   * PSR의 창은 **지금 시즌을 포함한 3시즌**이다 (`season-2 … season`). 창이 한 칸
+   * 어긋나면 이미 시효가 지난 적자가 계속 감독을 묶거나, 반대로 갓 낸 적자가 세어지지
+   * 않는다 — 어느 쪽도 보고서 숫자로는 드러나지 않고 동결 여부로만 나타난다.
+   */
+  it("PSR 3시즌 창은 지금 시즌부터 뒤로 셋이다", () => {
+    const state = createTestGame();
+    const report = (season: number, pnl: number) => ({
+      id: `fr-psr-${season}`,
+      teamId: state.userTeamId,
+      month: `${2025 + season}-05`,
+      season,
+      openingBalance: 0,
+      closingBalance: 0,
+      income: [],
+      expense: [],
+      incomeTotal: 0,
+      expenseTotal: -pnl,
+      cashNet: pnl,
+      pnlNet: pnl,
+      wageRatio: 0.6,
+      seasonToDate: { income: 0, expense: 0, cashNet: 0, pnlNet: 0 },
+      psr: null,
+      notes: [],
+    });
+    state.financeReports.push(
+      report(1, -50_000_000),
+      report(2, -40_000_000),
+      report(3, -30_000_000),
+      report(4, -20_000_000),
+    );
+
+    state.season = 3;
+    expect(psrStatus(state).rolling3Season).toBe(-120_000_000); // 시즌 1·2·3
+    expect(psrStatus(state).headroom).toBe(PSR_LOSS_LIMIT - 120_000_000);
+
+    // 시즌이 하나 가면 앞의 한 시즌이 창 밖으로 빠지고, 아직 오지 않은 시즌은 안 센다
+    state.season = 4;
+    expect(psrStatus(state).rolling3Season).toBe(-90_000_000); // 시즌 2·3·4
+    state.season = 5;
+    expect(psrStatus(state).rolling3Season).toBe(-50_000_000); // 시즌 3·4 (5는 보고서가 없다)
+  });
+
   it("여유가 있으면 지난 시즌 손익이 예산에 반영된다", () => {
     const state = createTestGame();
     state.season = 2;
@@ -1041,6 +1144,32 @@ describe("PSR", () => {
 
     // 이월 45M + base 45M (지난 시즌 보고서가 없어 성과는 0)
     expect(finance.transferBudget).toBe(90_000_000);
+  });
+
+  /**
+   * 예산은 **음수로 내려갈 수 있다** — 분할 이적료의 회차는 잔액을 보지 않고 빠진다
+   * (`settleDuePayments`). 그 상태로 시즌이 바뀌면 이월 상한(`Math.min`)이 음수를
+   * 자르지 못하므로 빚이 그대로 넘어와 새 시즌 base를 깎고, 회수 문구도 서지 않는다
+   * (잘려 나간 몫이 0이다). 다만 바닥은 0이라 다음 시즌으로 또 넘어가지는 않는다.
+   */
+  it("음수 예산은 그대로 이월돼 새 시즌 base를 깎고, 바닥은 0이다", () => {
+    const state = createTestGame();
+    state.season = 2;
+    const finance = financeOf(state, state.userTeamId);
+
+    finance.transferBudget = -20_000_000; // 분할 회차가 잔액을 넘어 빠진 뒤
+    const digest: string[] = [];
+    topUpTransferBudget(state, state.userTeamId, 45_000_000, digest);
+    expect(finance.transferBudget).toBe(25_000_000); // base 45M − 빚 20M
+    expect(
+      digest.some((d) => d.includes("거둬들였다")),
+      "잘린 이월분이 없다",
+    ).toBe(false);
+
+    // base보다 큰 빚은 0에서 멈춘다 — 음수가 다음 시즌까지 따라가지는 않는다
+    finance.transferBudget = -80_000_000;
+    topUpTransferBudget(state, state.userTeamId, 45_000_000, []);
+    expect(finance.transferBudget).toBe(0);
   });
 
   /**

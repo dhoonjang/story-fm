@@ -7,6 +7,8 @@ import {
   buildOfficeViews,
   buildSeasonCalendar,
   buildTransferWindows,
+  clashesToClear,
+  clearForCup,
   dayOfWeek,
   diffDays,
   cupBlankWeekend,
@@ -25,6 +27,7 @@ import {
   domesticChampion,
   domesticStageMatches,
   finalWeekdays,
+  postponeMatch,
   type GameState,
 } from "@story-fm/engine";
 import { type MatchRecord } from "@story-fm/domain";
@@ -551,5 +554,98 @@ describe("두 시즌을 이어 돌려도 컵이 끝난다", () => {
       expect(final, `${cup.id} 결승 없음`).toBeTruthy();
       expect(finalWeekdays(cup), `${cup.id} 결승 ${final!.date}`).toContain(dayOf(final!.date));
     }
+  });
+});
+
+/**
+ * **컵이 리그를 밀어낼 때, 반쯤 밀다 마는 일은 없다** (season.md §3).
+ *
+ * 걸린 리그 경기를 하나라도 옮기지 못하면 컵은 어차피 그 날짜에 들어가지 못한다.
+ * 그런데 그때까지 옮긴 경기가 새 날짜에 남으면 달력만 흐트러진 최악의 상태가 된다 —
+ * 컵은 제 자리를 못 얻고, 리그 경기 하나는 아무 이유 없이 주중으로 가 있다.
+ * 화면에는 "연기됐다"는 말조차 서지 않으므로(일지는 성공했을 때만 쓴다) 아무도
+ * 알아채지 못한 채 그 시즌을 지낸다.
+ */
+describe("컵을 위한 비켜서기 — 하나라도 실패하면 전부 원위치", () => {
+  /** 연기된 경기가 앉는 요일 — 화·수 (`reschedule.ts`) */
+  const MIDWEEK = new Set([2, 3]);
+
+  it("옮길 자리를 못 찾는 경기가 하나라도 있으면 앞서 옮긴 경기도 되돌아온다", () => {
+    const state = createTestGame();
+    /** 컵이 앉으려는 자리 — 토요일 낮 */
+    const CUP_KICKOFF = "15:00";
+    const league = state.matches.filter((m) => m.season === 1 && m.competitionId === "epl");
+
+    /**
+     * 같은 날 두 경기가 걸리고 **감독 경기가 먼저 옮겨지는** 라운드를 찾는다.
+     * 라운드 번호를 못 박지 않는 이유는 컵·대항전 날짜가 시즌마다 달라 어느 주말이
+     * 이 모양이 되는지도 함께 움직이기 때문이다.
+     */
+    let picked: { date: string; teams: string[]; clashes: MatchRecord[] } | null = null;
+    for (const round of [...new Set(league.map((m) => m.round))].sort((a, b) => a - b)) {
+      const mine = league.find(
+        (m) =>
+          m.round === round &&
+          (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+      );
+      const other = league.find((m) => m.round === round && m !== mine && m.date === mine?.date);
+      if (!mine || !other) continue;
+      const teams = [state.userTeamId, other.homeTeamId];
+      const clashes = clashesToClear(state, teams, mine.date, CUP_KICKOFF);
+      if (clashes?.length === 2 && clashes[0] === mine) {
+        picked = { date: mine.date, teams, clashes };
+        break;
+      }
+    }
+    if (!picked) throw new Error("두 경기가 걸리는 주말을 찾지 못했습니다");
+    const [movable, stuck] = picked.clashes as [MatchRecord, MatchRecord];
+
+    // 두 번째 경기의 팀에게 남은 주중(화·수)을 전부 채워 옮길 자리를 없앤다
+    const cupId = domesticCupCatalog()[0]!.id;
+    for (let i = 3; i <= 95; i++) {
+      const date = addDays(stuck.date, i);
+      if (!MIDWEEK.has(dayOfWeek(date))) continue;
+      state.matches.push({
+        id: `blocker-${date}`,
+        season: 1,
+        competitionId: cupId,
+        round: 1,
+        date,
+        time: "19:45",
+        homeTeamId: stuck.homeTeamId,
+        awayTeamId: "blocker-opponent",
+        result: null,
+      });
+    }
+    // 막은 경기들은 컵 주말 바깥이라 걸리는 경기 목록은 그대로다
+    expect(clashesToClear(state, picked.teams, picked.date, CUP_KICKOFF)).toHaveLength(2);
+
+    // 앞의 것은 옮길 자리가 있고 뒤의 것은 없다 — 복제본에서 미리 못 박는다
+    const probe = structuredClone(state);
+    expect(
+      postponeMatch(
+        probe,
+        probe.matches.find((m) => m.id === movable.id)!,
+      ),
+    ).toBe(true);
+    expect(
+      postponeMatch(
+        probe,
+        probe.matches.find((m) => m.id === stuck.id)!,
+      ),
+    ).toBe(false);
+
+    const before = { date: movable.date, time: movable.time };
+    const entry = state.schedule.find((e) => e.type === "match" && e.refId === movable.id)!;
+    const entryBefore = { date: entry.date, time: entry.time };
+
+    const digest: string[] = [];
+    expect(clearForCup(state, picked.teams, picked.date, digest, CUP_KICKOFF)).toBe(false);
+
+    // 경기도, 감독 달력의 엔트리도 원래 자리에 있다 — 일지에도 아무 말이 남지 않는다
+    expect({ date: movable.date, time: movable.time }).toEqual(before);
+    expect({ date: entry.date, time: entry.time }).toEqual(entryBefore);
+    expect(stuck.date).toBe(picked.date);
+    expect(digest).toEqual([]);
   });
 });

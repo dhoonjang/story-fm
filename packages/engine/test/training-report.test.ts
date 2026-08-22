@@ -1,14 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
+  ATTR_STEP_MAX,
+  ATTR_STEP_MIN,
+  MATCH_ATTR_CAP,
   POSITION_TRAIN_MAX,
   TRAINING_ATTR_CAP,
   TACTIC_GAIN_MAX,
   TACTIC_GAIN_MIN,
   advanceTime,
+  applyAttributeStep,
   applyTrainingOutcomes,
   assignmentsOf,
   buildTrainingBrief,
   playerById,
+  playersOf,
   setPlayerTraining,
   setTraining,
   userTactics,
@@ -564,5 +569,148 @@ describe("전향 훈련 — 상한과 완료 전이", () => {
       state.playerTraining.some((t) => t.gamePlayerId === target),
       "전향이 끝났는데 개인 훈련이 남았다",
     ).toBe(false);
+  });
+});
+
+/**
+ * 한 칸의 규칙 (`applyAttributeStep`) — **훈련 결산과 경기 결산이 같은 이 함수를
+ * 쓴다.** 위 describe들은 훈련 쪽 입구에서 보고, 여기서는 그 규칙 자체를 본다:
+ * 규칙이 두 벌이 되면 한쪽만 조여지고 다른 쪽이 샌다.
+ *
+ * 여기서 틀려도 화면에는 "능력치 +1"이라고만 적힌다 — 두 칸이 뛴 날도, 잠재력
+ * 위로 오른 날도 같은 한 줄이다.
+ */
+describe("한 칸의 규칙 (applyAttributeStep)", () => {
+  let shared: GameState | null = null;
+  let cursor = 0;
+
+  /** 케이스마다 다른 선수를 쓴다 — 세계 하나를 나눠 쓰되 서로의 장부를 안 밟는다 */
+  function subject(age: number) {
+    const state = (shared ??= createTestGame(7));
+    const player = playersOf(state, state.userTeamId)[cursor++]!;
+    player.birthdate = `${Number(state.date.slice(0, 4)) - age}-01-01`;
+    player.growthCarry = {};
+    return { state, player };
+  }
+
+  /** 경기 결산과 같은 인자 — 축 제한 없이 한 명분 */
+  const step = (
+    state: GameState,
+    player: ReturnType<typeof subject>["player"],
+    axis: "stamina" | "pace",
+    value: number,
+    opts: {
+      allowed?: ReadonlySet<"stamina" | "pace"> | null;
+      spent?: number;
+      factor?: number;
+    } = {},
+  ) =>
+    applyAttributeStep(state, player, axis, value, {
+      allowed: opts.allowed ?? null,
+      spent: opts.spent ?? 0,
+      cap: MATCH_ATTR_CAP,
+      ...(opts.factor === undefined ? {} : { factor: opts.factor }),
+      source: "match",
+      origin: "match-settlement",
+    });
+
+  it("못 채운 몫은 캐리에 남고, 밀려 있어도 한 번에 한 칸씩만 나간다", () => {
+    const { state, player } = subject(18);
+    player.attributes.stamina = 60;
+    player.attributes.potential = 85;
+    // 앞선 판정들이 남긴 몫 — 유망주의 곡선은 한 번에 1을 넘으므로 여기에 쌓인다
+    player.growthCarry = { stamina: 0.9 };
+
+    const moved = step(state, player, "stamina", 1);
+    expect(moved).toEqual({ axis: "stamina", step: 1, value: 61 });
+    // 캐리가 두 칸어치가 돼도 장부는 한 칸만 움직이고, 남은 몫은 그대로 들고 간다
+    expect(player.growthCarry!.stamina).toBeGreaterThan(1);
+    expect(step(state, player, "stamina", 1)!.value).toBe(62);
+    expect(player.attributes.stamina).toBe(62);
+  });
+
+  it("판정이 몇 칸을 적어 오든 ±1로 접힌다", () => {
+    const up = subject(18);
+    up.player.attributes.stamina = 60;
+    up.player.attributes.potential = 85;
+    up.player.growthCarry = { stamina: 0.9 };
+    expect(step(up.state, up.player, "stamina", 9)!.step).toBe(ATTR_STEP_MAX);
+    expect(up.player.attributes.stamina).toBe(61);
+
+    const down = subject(34);
+    down.player.attributes.pace = 70;
+    down.player.attributes.potential = 85;
+    expect(step(down.state, down.player, "pace", -9)!.step).toBe(ATTR_STEP_MIN);
+    expect(down.player.attributes.pace).toBe(69);
+
+    // 0은 방향이 없다 — 없는 판정이다. 숫자가 아닌 값은 한 칸으로 읽는다
+    expect(step(up.state, up.player, "stamina", 0)).toBeNull();
+    expect(step(up.state, up.player, "stamina", Number.NaN)!.step).toBe(1);
+  });
+
+  it("문지기 — 축 제한·인원 상한·축 없음 앞에서는 아무것도 움직이지 않는다", () => {
+    const { state, player } = subject(18);
+    player.attributes.stamina = 60;
+    player.attributes.potential = 85;
+    const before = player.attributes.stamina;
+
+    expect(step(state, player, "stamina", 1, { allowed: new Set(["pace"]) })).toBeNull();
+    expect(step(state, player, "stamina", 1, { spent: MATCH_ATTR_CAP })).toBeNull();
+    expect(
+      applyAttributeStep(state, player, null, 1, {
+        allowed: null,
+        spent: 0,
+        cap: MATCH_ATTR_CAP,
+        source: "match",
+        origin: "match-settlement",
+      }),
+    ).toBeNull();
+    expect(player.attributes.stamina).toBe(before);
+    expect(player.growthCarry!.stamina ?? 0).toBe(0);
+  });
+
+  it("잠재력은 **오를 때만** 막는다 — 이미 넘은 선수도 늙는다", () => {
+    const { state, player } = subject(34);
+    player.attributes.stamina = 70;
+    player.attributes.potential = 70;
+    expect(step(state, player, "stamina", 1), "잠재력에 닿았는데 올랐다").toBeNull();
+    expect(player.growthCarry!.stamina ?? 0, "닿은 뒤에도 캐리가 쌓인다").toBe(0);
+
+    // 잠재력 위에 있는 능력치도 내려간다 — 천장은 내려가는 데 무의미하다
+    player.attributes.pace = 90;
+    const declined = step(state, player, "pace", -1);
+    expect(declined, "잠재력 위의 선수가 안 내려갔다").not.toBeNull();
+    expect(player.attributes.pace).toBe(89);
+  });
+
+  it("눈금의 양 끝 — 99 위로 오르지 않고 1 아래로 내려가지 않는다", () => {
+    const { state, player } = subject(34);
+    player.attributes.stamina = 99;
+    player.attributes.potential = 99;
+    expect(step(state, player, "stamina", 1)).toBeNull();
+    player.attributes.pace = 1;
+    expect(step(state, player, "pace", -1)).toBeNull();
+    expect(player.attributes.pace).toBe(1);
+  });
+
+  it("감독 계수는 상승에만 곱한다 — 나쁜 감독 밑에서 노화가 느려지지 않는다", () => {
+    const { state, player } = subject(30);
+    player.attributes.stamina = 80;
+    player.attributes.potential = 88;
+
+    const carryAfterGain = (factor: number) => {
+      player.growthCarry = {};
+      step(state, player, "stamina", 1, { factor });
+      return player.growthCarry!.stamina ?? 0;
+    };
+    expect(carryAfterGain(0.5)).toBeCloseTo(carryAfterGain(1) * 0.5, 12);
+
+    const carryAfterDecline = (factor: number) => {
+      player.growthCarry = {};
+      step(state, player, "stamina", -1, { factor });
+      return player.growthCarry!.stamina ?? 0;
+    };
+    expect(carryAfterDecline(0.5)).toBe(carryAfterDecline(1));
+    expect(carryAfterDecline(1)).toBeLessThan(0);
   });
 });

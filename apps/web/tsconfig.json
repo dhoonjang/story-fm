@@ -27,16 +27,7 @@
   "include": [
     "**/*.ts",
     "**/*.tsx",
-    ".next-e2e-1/types/**/*.ts",
-    ".next-e2e-2/types/**/*.ts",
-    ".next-e2e-3/types/**/*.ts",
-    ".next-e2e-4/types/**/*.ts",
-    ".next-e2e-5/types/**/*.ts",
-    ".next-e2e-6/types/**/*.ts",
-    ".next-e2e-7/types/**/*.ts",
-    ".next-e2e-8/types/**/*.ts",
-    ".next-e2e-9/types/**/*.ts",
-    ".next-e2e/types/**/*.ts",
+    ".next-e2e*/types/**/*.ts",
     ".next/types/**/*.ts",
     "next-env.d.ts"
   ],

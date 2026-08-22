@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { COLD_MS } from "./timeouts";
+
 /**
  * 이 파일만 파일 단위 직렬로 되돌린다 (`fullyParallel`에서 빠진다).
  *
@@ -27,7 +29,7 @@ test("카탈로그 어드민이 500 없이 동작한다", async ({ page }) => {
   const adminResponse = await page.goto("/admin");
   expect(adminResponse?.status()).toBe(200);
   await expect(page.getByTestId("admin-count")).not.toHaveText("0명", {
-    timeout: 20_000,
+    timeout: COLD_MS,
   });
 
   // 탭 셸 — 선수가 기본 층이고, 네 층이 모두 목록을 갖는다
@@ -72,9 +74,9 @@ test("탭을 오가도 카탈로그를 다시 받지 않는다", async ({ page }
   });
 
   await page.goto("/admin");
-  await expect(page.getByTestId("admin-count")).not.toHaveText("0명", { timeout: 20_000 });
+  await expect(page.getByTestId("admin-count")).not.toHaveText("0명", { timeout: COLD_MS });
   await page.getByTestId("admin-tab-teams").click();
-  await expect(page.getByTestId("team-row-arsenal")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("team-row-arsenal")).toBeVisible({ timeout: COLD_MS });
 
   const onLoad = new Map(calls);
   // 리그 목록은 세 패널이 각자가 아니라 페이지가 받는다 — 선수 카탈로그와 같은 횟수다
@@ -103,7 +105,7 @@ test("선수 팝업과 팀 명단에서 소속을 옮긴다", async ({ page }) =
   });
 
   await page.goto("/admin");
-  await expect(page.getByTestId("admin-count")).not.toHaveText("0명", { timeout: 20_000 });
+  await expect(page.getByTestId("admin-count")).not.toHaveText("0명", { timeout: COLD_MS });
 
   // ── 선수 쪽 — 편집 팝업의 팀 셀렉트가 소속을 옮긴다 (방출 = 무소속으로 옮기기)
   await page.getByTestId("admin-team-filter").selectOption("arsenal");
@@ -124,7 +126,7 @@ test("선수 팝업과 팀 명단에서 소속을 옮긴다", async ({ page }) =
   // ── 팀 쪽 — 스쿼드 칸이 명단 창을 열고, 거기서도 소속을 옮긴다
   await page.getByTestId("admin-tab-teams").click();
   const squadBtn = page.getByTestId("team-squad-arsenal");
-  await expect(squadBtn).toBeVisible({ timeout: 20_000 });
+  await expect(squadBtn).toBeVisible({ timeout: COLD_MS });
   const before = Number((await squadBtn.innerText()).replace(/\D/g, ""));
   await squadBtn.click();
   const squadModal = page.getByTestId("squad-modal");
@@ -162,7 +164,7 @@ test("팀·리그·컵 탭이 팝업으로 카탈로그를 고친다", async ({ 
   // ── 팀 — 살림 값을 고치면 목록과 "편집됨"이 함께 바뀐다
   await page.getByTestId("admin-tab-teams").click();
   const teamRow = page.getByTestId("team-row-arsenal");
-  await expect(teamRow).toBeVisible({ timeout: 20_000 });
+  await expect(teamRow).toBeVisible({ timeout: COLD_MS });
   const teamModal = page.getByTestId("team-modal");
   await teamRow.click();
   await expect(teamModal).toBeVisible();

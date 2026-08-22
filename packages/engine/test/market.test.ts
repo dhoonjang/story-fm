@@ -12,6 +12,7 @@ import {
   marketValueOf,
   playersOf,
   responseDelayDays,
+  sameTermsRepeats,
   squadDepthOf,
   wageExpectationOf,
 } from "@story-fm/engine";
@@ -215,6 +216,74 @@ describe("딜 확률", () => {
     const raised = dealOdds(state, { ...terms, fee: Math.round(terms.fee * 1.2) });
     expect(raised.factors.some((f) => f.label === "상대의 인내심")).toBe(false);
     expect(raised.probability).toBeGreaterThan(repeated.probability);
+  });
+
+  /**
+   * **감쇠는 영입 갈래에만 걸린다** — 매각·임대는 관문 계산이 통째로 다른 함수
+   * (`sellOdds`·`loanOdds`)로 빠지고, 그 함수들은 확률에 곱하는 항(마감 임박·인내심)을
+   * 아예 만들지 않는다. 그래서 같은 값을 몇 번을 되불러도 확률이 그대로다.
+   *
+   * 지금 동작을 못 박아 둔다: 감쇠를 이쪽에도 걸기로 한다면 그건 밸런스 결정이고,
+   * 이 케이스가 그때 함께 움직여야 하는 자리다.
+   */
+  it("매각·임대에는 인내심 감쇠가 걸리지 않는다 — 영입 갈래만 닳는다", () => {
+    const state = createTestGame(42);
+    const ours = playersOf(state, state.userTeamId)[0]!;
+    const target = pick(state, 74);
+    const sell = {
+      playerId: ours.id,
+      fee: marketValueOf(state, ours),
+      weeklyWage: wageExpectationOf(state, ours),
+      years: 4,
+      kind: "sell" as const,
+      counterpartTeamId: target.teamId,
+    };
+    const loanIn = {
+      playerId: target.id,
+      fee: 0,
+      weeklyWage: wageExpectationOf(state, target),
+      years: 1,
+      kind: "loan" as const,
+    };
+    const before = { sell: dealOdds(state, sell), loan: dealOdds(state, loanIn) };
+
+    /** 답을 받은 라운드 둘 — 영입이라면 여기서 PATIENCE_DECAY²가 곱해진다 */
+    const staged = (id: string, kind: "sell" | "loan", terms: typeof sell | typeof loanIn) => {
+      state.negotiations.push({
+        id,
+        gamePlayerId: terms.playerId,
+        kind,
+        counterpartTeamId: target.teamId,
+        windowId: state.windows[0]!.id,
+        openedOn: state.date,
+        expiresOn: state.windows[0]!.closesOn,
+        status: "open",
+        rounds: [1, 2].map(() => ({
+          date: state.date,
+          by: "us" as const,
+          fee: terms.fee,
+          weeklyWage: terms.weeklyWage,
+          contractYears: terms.years,
+          respondsOn: state.date,
+          probability: 50,
+          verdict: "counter" as const,
+        })),
+      });
+    };
+    staged("neg-sell", "sell", sell);
+    staged("neg-loan", "loan", loanIn);
+
+    // 반복은 세어지지만(같은 조건이다) 확률에도 근거에도 닿지 않는다
+    expect(sameTermsRepeats(state, sell)).toBe(2);
+    expect(sameTermsRepeats(state, loanIn)).toBe(2);
+    for (const [label, terms, was] of [
+      ["매각", sell, before.sell],
+      ["임대", loanIn, before.loan],
+    ] as const) {
+      const again = dealOdds(state, terms);
+      expect(again.probability, `${label} 확률이 반복으로 움직였다`).toBe(was.probability);
+      expect(again.factors.some((f) => f.label === "상대의 인내심")).toBe(false);
+    }
   });
 
   it("차단은 확률과 별개로 보고된다", () => {

@@ -275,3 +275,83 @@ describe("mock GM — 재계약", () => {
     expect(activeContract(state, player.id)!.until > addDays(state.date, 120)).toBe(true);
   });
 });
+
+/**
+ * **mock의 기록 조건은 실모드와 같다** — `recordCall` 하나를 쓰므로 성공한 호출만
+ * 남는다 (agents.md §8). 갈라져 있던 시절 mock에만 실패 칩이 서서, e2e가 실모드에는
+ * 없는 칩을 보고 통과했다.
+ */
+describe("mock GM — 기록은 성공한 호출만", () => {
+  it("같은 선수에게 재계약을 두 번 열면 두 번째는 기록에 서지 않는다", () => {
+    const state = newGame();
+    const player = playersOf(state, state.userTeamId)[0]!;
+    activeContract(state, player.id)!.until = addDays(state.date, 120);
+
+    const first = runMockGmTurn(state, `${player.name} 재계약 하자`);
+    expect(first.toolCalls.map((c) => c.name)).toContain("open_renewal");
+
+    // 같은 날 다시 — 협상이 이미 열려 있어 코어가 막는다
+    const second = runMockGmTurn(state, `${player.name} 재계약 하자`);
+    expect(second.toolCalls.map((c) => c.name)).not.toContain("open_renewal");
+    // 왜 안 됐는지는 장면이 말한다 — 칩이 없다고 감독이 모르는 것은 아니다
+    expect(second.text.length).toBeGreaterThan(0);
+    expect(state.negotiations.filter((n) => n.kind === "renew")).toHaveLength(1);
+  });
+});
+
+/**
+ * **무직이 아는 도구도 셋이다** — 수락·흥정·노크 (career.md §5.1). 실모드가 여는
+ * 도구 집합과 같아야 mock으로 도는 경로가 실모드에 없는 길을 만들지 않는다.
+ */
+describe("mock GM — 무직", () => {
+  /** 경질장과 열린 제안 하나를 직접 세운다 — 판정 경로는 엔진 테스트가 잰다 */
+  function dismissed(): { state: GameState; offerId: string } {
+    const state = newGame();
+    const target = state.teams.find((t) => t.id !== state.userTeamId)!;
+    state.dismissal = { on: state.date, season: state.season, teamId: state.userTeamId };
+    const offerId = "mgr-offer-test";
+    state.managerOffers = [
+      {
+        id: offerId,
+        teamId: target.id,
+        madeOn: state.date,
+        expiresOn: addDays(state.date, 10),
+        tier: 2,
+        target: 10,
+        expectationCode: "mid",
+        salary: 3_000_000,
+        years: 3,
+        budgetPledge: 20_000_000,
+        status: "open",
+      },
+    ];
+    return { state, offerId };
+  }
+
+  it("흥정 → 수락 — 옛 구단 수석코치가 화자로 서지 않는다", () => {
+    const { state, offerId } = dismissed();
+
+    const haggled = runMockGmTurn(state, "연봉을 더 받아내자");
+    expect(haggled.toolCalls.map((c) => c.name)).toContain("counter_manager_offer");
+    expect(state.managerOffers![0]!.counteredOn).toBe(state.date);
+    // 무직인 감독 옆에는 구단의 사람이 없다 — 장면은 내레이션뿐이다
+    for (const line of haggled.text.split("\n").slice(1)) {
+      expect(line.startsWith("@:"), `무직 장면에 화자가 섰다: "${line}"`).toBe(true);
+    }
+
+    const taken = runMockGmTurn(state, "그 자리 수락하겠다");
+    expect(taken.toolCalls.map((c) => c.name)).toContain("accept_manager_offer");
+    expect(state.dismissal).toBeUndefined();
+    expect(state.managerOffers!.find((o) => o.id === offerId)!.status).toBe("accepted");
+  });
+
+  it("부르는 곳이 없으면 공석에 먼저 지원한다", () => {
+    const { state } = dismissed();
+    const vacant = state.teams.find((t) => t.id !== state.userTeamId)!;
+    state.managerOffers = [];
+    state.managerVacancies = [{ teamId: vacant.id, on: state.date }];
+
+    const knocked = runMockGmTurn(state, "그 자리에 지원해보자");
+    expect(knocked.toolCalls.map((c) => c.name)).toContain("apply_manager_job");
+  });
+});

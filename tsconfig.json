@@ -24,6 +24,7 @@
     "packages/*/test/**/*.ts",
     "packages/*/harness/**/*.ts",
     "apps/match-cli/src/**/*.ts",
+    "scripts/**/*.ts",
     "vitest.config.ts",
     "vitest.balance.config.ts"
   ]

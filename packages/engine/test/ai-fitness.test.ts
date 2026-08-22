@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest";
 import type { GamePlayer } from "@story-fm/domain";
 import {
+  FAMILIARITY_DRIFT_CAP,
+  FAMILIARITY_DRIFT_PER_DAY,
   advanceTime,
   assignmentFor,
+  driftFamiliarity,
   playersOf,
   proficiencyAt,
   simSquadOf,
   tickOtherClubs,
   type GameState,
 } from "@story-fm/engine";
+import { applyFamiliarityGain } from "@story-fm/domain";
 import { dailyRecovery } from "@story-fm/sim";
 import { createTestGame, playMockMatch } from "./helpers";
 
@@ -157,5 +161,51 @@ describe("로테이션으로 뺀 선수는 그 경기에서 빠진다", () => {
     const again = simSquadOf(state, "mancity");
     expect(again.slots![index]!.player.id).toBe(incoming.id);
     expect(again.slots![index]!.familiarity).toBe(42);
+  });
+});
+
+/**
+ * 남의 팀 전술 적응도 — **체력과 같은 이유로 여기 있다.** 이게 없으면 AI 팀은
+ * 영원히 기준선(60)에 멈추고 감독 팀만 결산 판정으로 올라, 시즌이 갈수록 전력
+ * 우위가 벌어진다. 다만 붙는 자리는 감독이 닿는 곳보다 낮아야 한다 —
+ * 전술을 파고든 감독이 남의 팀보다 나은 자리가 남아야 하기 때문이다.
+ */
+describe("타 팀의 전술 적응도는 천장까지만 붙는다", () => {
+  const tacticsOfTeam = (state: GameState, teamId: string) =>
+    state.tactics.find((t) => t.teamId === teamId)!;
+
+  it("하루치가 곡선대로 붙고, 감독 팀은 이 손으로 움직이지 않는다", () => {
+    const state = createTestGame(7);
+    const theirs = tacticsOfTeam(state, "mancity").assignments[0]!;
+    const ours = tacticsOfTeam(state, state.userTeamId).assignments[0]!;
+    theirs.familiarity = 60;
+    ours.familiarity = 60;
+
+    driftFamiliarity(state);
+
+    // 하루치는 곡선을 그대로 통과한다 — 눈금을 여기서 따로 계산하지 않는다
+    expect(theirs.familiarity).toBe(
+      applyFamiliarityGain(60, FAMILIARITY_DRIFT_PER_DAY, "training"),
+    );
+    expect(theirs.familiarity).toBeGreaterThan(60);
+    // 감독 팀의 적응도는 훈련·경기 결산 판정만이 움직인다 (training-report의 계약)
+    expect(ours.familiarity, "감독 팀이 공짜로 붙었다").toBe(60);
+  });
+
+  it("천장 80에서 멎고, 이미 그 위에 있는 값은 깎지 않는다", () => {
+    const state = createTestGame(7);
+    const [near, over] = tacticsOfTeam(state, "mancity").assignments;
+    near!.familiarity = FAMILIARITY_DRIFT_CAP - 0.2;
+    // 감독이 경질돼 팀이 바뀌면 결산으로 95까지 올린 배치가 그대로 AI 팀의 것이 된다
+    over!.familiarity = 95;
+
+    for (let day = 0; day < 60; day++) {
+      driftFamiliarity(state);
+      expect(near!.familiarity, `${day}일차`).toBeLessThanOrEqual(FAMILIARITY_DRIFT_CAP);
+    }
+    expect(near!.familiarity).toBe(FAMILIARITY_DRIFT_CAP);
+    expect(over!.familiarity, "천장 위의 값이 천장으로 끌려 내려왔다").toBe(95);
+    // 감독이 결산으로 닿는 95·100보다 낮다 — 파고든 감독의 자리가 남는다
+    expect(FAMILIARITY_DRIFT_CAP).toBeLessThan(95);
   });
 });
