@@ -109,19 +109,12 @@ describe("에이전트별 LLM 설정", () => {
     expect(config.agents.gm).toMatchObject({ thinkingLevel: "minimal" });
   });
 
-  /**
-   * 설정이 적어 둔 것은 반드시 요청에 실려야 한다 (models.md §1-2). 못 싣는 제공자에
-   * 적어 둔 값을 조용히 무시하면, 설정과 실제로 도는 것이 갈려도 화면에 아무 증상이
-   * 없다 — 키가 없을 때 폴백하지 않는 것과 같은 규칙이다.
-   */
-  it("thinking_level을 못 싣는 제공자에 적으면 시작 전에 거부한다", () => {
-    const withProvider = (provider: string): string =>
-      yamlWith(`  gm: &agent
+  const withProvider = (provider: string, extra = ""): string =>
+    yamlWith(`  gm: &agent
     provider: ${provider}
     model: test-model
     max_tokens: 100
-    timeout_ms: 1000
-    thinking_level: high
+    timeout_ms: 1000${extra}
   match-intent: *agent
   match-caster: *agent
   match-rater: *agent
@@ -130,12 +123,27 @@ describe("에이전트별 LLM 설정", () => {
   history-compactor: *agent
 `);
 
-    expect(() => parseLlmConfig(withProvider("anthropic"))).toThrow("LLM 설정이 올바르지 않습니다");
-    expect(() => parseLlmConfig(withProvider("openai"))).toThrow("LLM 설정이 올바르지 않습니다");
-    // 실을 수 있는 제공자는 그대로 통과한다
-    expect(parseLlmConfig(withProvider("google")).agents.gm).toMatchObject({
-      thinkingLevel: "high",
-    });
+  /**
+   * `thinking_level`은 제공자 중립 눈금이라 셋 다 싣는다 (models.md §1-2) — 어댑터가
+   * 각자의 파라미터로 옮긴다. 설정이 적어 둔 것이 조용히 무시되는 자리는 없어야 한다.
+   */
+  it("thinking_level은 세 제공자가 다 싣는다", () => {
+    for (const provider of ["anthropic", "google", "openai"]) {
+      expect(
+        parseLlmConfig(withProvider(provider, "\n    thinking_level: high")).agents.gm,
+      ).toMatchObject({ provider, thinkingLevel: "high" });
+    }
+  });
+
+  /**
+   * 생략은 "얕게"가 아니라 **파라미터를 싣지 말라**는 뜻이다 — 사고를 모르는 모델이
+   * 그 값 하나로 400을 맞는 자리를 설정이 비켜 갈 수 있어야 한다. Gemini만은 반드시
+   * 실어야 해서 기본값을 갖는다.
+   */
+  it("Anthropic·OpenAI에서 thinking_level 생략은 값이 서지 않는 것이다", () => {
+    for (const provider of ["anthropic", "openai"]) {
+      expect(parseLlmConfig(withProvider(provider)).agents.gm).not.toHaveProperty("thinkingLevel");
+    }
   });
 
   /** 무너뜨리지 않은 표는 통과한다 — 아래 갈래들이 "무엇이든 던진다"가 아님을 세운다 */

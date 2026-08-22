@@ -10,7 +10,7 @@
  * (agents.md §4), 압축은 접지 않은 채 다음 기회를 기다린다(agents.md §5-1).
  */
 
-import { AGENT_NAMES, type AgentName, type LlmEnv } from "./config";
+import { AGENT_NAMES, agentMinCacheableInput, type AgentName, type LlmEnv } from "./config";
 import type { GameLLM, TurnRequest, TurnResult, TurnUsage } from "./game-llm";
 
 /**
@@ -27,21 +27,6 @@ const SKIPPABLE_AGENTS: ReadonlySet<AgentName> = new Set<AgentName>([
   "mood-rater",
   "history-compactor",
 ]);
-
-/**
- * 캐시 히트율을 신호로 읽기 시작할 입력 크기 — 제공자의 **최소 캐시 프리픽스**가
- * 이 눈금이다. 이보다 짧은 입력은 캐시가 애초에 안 걸리므로 히트율 0이
- * "프리픽스가 깨졌다"는 뜻이 아니다 (짧은 결산 프롬프트가 그 부류다).
- *
- * 값은 제공자마다 다르다 — Gemini 3.x Flash가 4,096, Anthropic이 1,024다. 그중
- * **가장 큰 것**을 드는 이유는 이 문턱이 "히트율 0을 경고로 읽어도 되는가"를 가르기
- * 때문이다: 낮게 잡으면 캐시가 걸릴 수 없는 호출까지 경고가 올라오고, 매번 거짓인
- * 경고는 진짜 신호가 올라와도 읽히지 않는다.
- *
- * 밸런스 하네스도 이 눈금을 읽는다 — 압축의 잔량이 이보다 작으면 접은 직후 이력
- * 캐시가 아예 안 걸린다 (`packages/agents/harness/history-window.harness.ts`).
- */
-export const MIN_CACHEABLE_INPUT = 4096;
 
 /** 히트율 0을 신호로 읽기 전에 필요한 호출 수 — 첫 호출은 원래 쓰기만 한다 */
 const CACHE_ALERT_AFTER_CALLS = 3;
@@ -186,12 +171,20 @@ export function agentAllowed(agent: AgentName, verdict: BudgetVerdict): boolean 
 /**
  * 프리픽스가 조용히 깨진 것으로 보이는 에이전트 — 캐시가 걸릴 만한 크기를 여러 번
  * 보냈는데 히트율이 0인 곳이다.
+ *
+ * **문턱은 그 에이전트가 부르는 제공자의 최소 캐시 프리픽스다** (models.md §4).
+ * 셋 중 큰 값 하나로 재면 작은 쪽이 통째로 문턱 아래에 들어앉아, 프리픽스가 매 턴
+ * 깨져도 경고가 영영 올라오지 않는다 — Anthropic 결산 호출(1k~4k)이 그 자리다.
+ * `minInput`은 설정을 읽지 않는 테스트가 문턱을 직접 주기 위한 자리다.
  */
-export function cacheAlerts(ledger: UsageLedger): AgentName[] {
+export function cacheAlerts(
+  ledger: UsageLedger,
+  minInput: (agent: AgentName) => number = agentMinCacheableInput,
+): AgentName[] {
   return AGENT_NAMES.filter((agent) => {
     const entry = ledger.byAgent[agent];
     if (entry.calls < CACHE_ALERT_AFTER_CALLS) return false;
-    if (entry.usage.inputTokens / entry.calls < MIN_CACHEABLE_INPUT) return false;
+    if (entry.usage.inputTokens / entry.calls < minInput(agent)) return false;
     return entry.usage.cacheReadTokens === 0;
   });
 }

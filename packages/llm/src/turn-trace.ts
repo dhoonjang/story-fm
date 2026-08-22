@@ -31,7 +31,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 
-import type { AgentName, LlmEnv } from "./config";
+import { agentMinCacheableInput, type AgentName, type LlmEnv } from "./config";
 import {
   isStoredLlmHistory,
   type GameLLM,
@@ -90,6 +90,12 @@ export interface TurnTraceCall {
   agent: AgentName;
   /** 응답이 태그한 모델 — 실패한 호출은 `null`이다 */
   model: string | null;
+  /**
+   * 이 호출의 제공자에서 캐시가 걸리기 시작하는 입력 크기 (models.md §4).
+   * 이보다 짧은 입력은 히트율 0이 신호가 아니라 당연한 값이라, 그 둘을 화면에서
+   * 가르는 데 쓴다. 이 필드가 서기 전에 남은 기록에는 없다.
+   */
+  minCacheableInput?: number;
   durationMs: number;
   request: TurnTraceRequest;
   /** 실패한 호출은 `null` — 그때는 `error`가 이유를 갖는다 */
@@ -281,6 +287,7 @@ export function tapLlm(llm: GameLLM, agent: AgentName, env: LlmEnv = process.env
       const call: TurnTraceCall = {
         agent,
         model: null,
+        minCacheableInput: agentMinCacheableInput(agent),
         durationMs: 0,
         request,
         response: null,

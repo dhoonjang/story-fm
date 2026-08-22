@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { AnthropicAgentConfig } from "./config";
+import type { AnthropicAgentConfig, ThinkingLevel } from "./config";
 import {
   isStoredLlmHistory,
   isTextHistoryMessage,
@@ -18,6 +18,22 @@ const MAX_TOOL_ITERATIONS = 8;
 
 /** 요청당 캐시 브레이크포인트 상한 (Anthropic 제약) */
 const MAX_BREAKPOINTS = 4;
+
+/**
+ * 설정의 사고 눈금(models.md §1-2)을 Anthropic의 effort로 옮긴다 — **모델을 가정하는
+ * 자리는 이 표 하나뿐이다.**
+ *
+ * ⚠️ 끄는 값은 없다. 사고를 끌 수 있는지가 모델마다 갈려서(현행 레퍼런스 기준 Fable 5는
+ * `thinking: { type: "disabled" }`가 400, Opus 5는 그 설정에서 도구 호출을 `tool_use`
+ * 블록 대신 보이는 본문으로 흘린다) 끄는 쪽을 코드가 고르면 설정이 모델을 못 바꾼다.
+ * 얕게는 effort로 내린다 — Anthropic의 눈금이 `low`에서 시작해 `minimal`도 거기로 간다.
+ */
+const EFFORT: Record<ThinkingLevel, "low" | "medium" | "high"> = {
+  minimal: "low",
+  low: "low",
+  medium: "medium",
+  high: "high",
+};
 
 /**
  * role:"system" 중간 메시지를 거부한 모델 — 한 번 400을 맞으면 이후 폴백으로 고정한다.
@@ -199,6 +215,7 @@ export class AnthropicGameLLM implements GameLLM {
 
   async runTurn(req: TurnRequest): Promise<TurnResult> {
     const tools = req.tools ?? [];
+    const effort = this.config.thinkingLevel && EFFORT[this.config.thinkingLevel];
     const toolDefs: Anthropic.Tool[] = tools.map((t) => ({
       name: t.name,
       description: t.description,
@@ -261,10 +278,9 @@ export class AnthropicGameLLM implements GameLLM {
       const params: Anthropic.MessageCreateParamsNonStreaming = {
         model: this.config.model,
         max_tokens: req.maxTokens ?? this.config.maxTokens,
-        // 사고(thinking)는 끈다 — 출력 상한을 본문이 온전히 쓰고 지연도 줄어든다.
-        // 대신 모델이 추론을 **보이는 응답에 흘릴 수** 있어
-        // 시스템 프롬프트가 "최종 답만" 규약을 함께 건다 (GM_SYSTEM).
-        thinking: { type: "disabled" },
+        // 사고는 **설정이 적었을 때만** 건다 — 적지 않으면 두 파라미터가 다 빠져
+        // 모델의 기본 사고가 그대로 돈다 (models.md §1-2)
+        ...(effort && { thinking: { type: "adaptive" as const }, output_config: { effort } }),
         system,
         ...(toolDefs.length > 0 ? { tools: toolDefs } : {}),
         ...(toolChoice ? { tool_choice: toolChoice } : {}),
