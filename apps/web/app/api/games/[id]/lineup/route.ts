@@ -88,82 +88,78 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ error: "라인업 형식이 올바르지 않습니다" }, { status: 400 });
   }
 
-  return withGameLock(
-    id,
-    async () => {
-      const state = loadGame(id);
-      if (!state) return NextResponse.json({ error: "게임을 찾을 수 없습니다" }, { status: 404 });
-      // 서버는 **사실만** 낸다 — 그 다음에 무엇을 하라는 말은 GM이 쓴다
-      if (state.phase === "match") {
-        return NextResponse.json({ error: "경기 중 — 전술판 잠금" }, { status: 409 });
-      }
+  return withGameLock(id, LOCK_WAIT_MS.lineup, async () => {
+    const state = loadGame(id);
+    if (!state) return NextResponse.json({ error: "게임을 찾을 수 없습니다" }, { status: 404 });
+    // 서버는 **사실만** 낸다 — 그 다음에 무엇을 하라는 말은 GM이 쓴다
+    if (state.phase === "match") {
+      return NextResponse.json({ error: "경기 중 — 전술판 잠금" }, { status: 409 });
+    }
 
-      // 저장 전 모습 — 무엇이 달라졌는지는 결과로만 말한다 (`lineupChangeNote`)
-      const before = {
-        starting: startingIdsOf(state),
-        shape: shapeOfTactics(state),
-        signature: lineupSignature(state),
-      };
+    // 저장 전 모습 — 무엇이 달라졌는지는 결과로만 말한다 (`lineupChangeNote`)
+    const before = {
+      starting: startingIdsOf(state),
+      shape: shapeOfTactics(state),
+      signature: lineupSignature(state),
+    };
 
-      // 전술 6축이 먼저 — 한 번만 호출해야 적응도 하락(tacticsChangeDrop)도 한 번만
-      // 적용된다. 배치가 만드는 모양 이름은 아래 setLineup이 좌표에서 다시 읽는다
-      const axes = body.data.tactics ?? {};
-      if (Object.keys(axes).length > 0) {
-        const res = setTactics(state, axes);
-        if (!res.ok) return NextResponse.json({ error: res.message }, { status: 400 });
-      }
-      /**
-       * v6: 전술판 배치는 TACTIC_ASSIGNMENT를 갱신한다 (주 포지션은 바꾸지 않는다).
-       *
-       * 1·2군 이동도 **같은 호출로** 넘긴다 — 순서(승격 → 배치 → 강등)와 검증은 코어가
-       * 한 벌만 갖는다(`setLineup` · team.md §6). 라우트가 승격을 따로 부르던 때는
-       * 배치가 반려돼도 승격만 남았고, 같은 규칙이 두 곳에 적혀 한쪽만 고쳐졌다.
-       */
-      const res = setLineup(state, {
-        starting: body.data.starting,
-        bench: body.data.bench,
-        ...(body.data.squadLevels ? { squadLevels: body.data.squadLevels } : {}),
-      });
+    // 전술 6축이 먼저 — 한 번만 호출해야 적응도 하락(tacticsChangeDrop)도 한 번만
+    // 적용된다. 배치가 만드는 모양 이름은 아래 setLineup이 좌표에서 다시 읽는다
+    const axes = body.data.tactics ?? {};
+    if (Object.keys(axes).length > 0) {
+      const res = setTactics(state, axes);
       if (!res.ok) return NextResponse.json({ error: res.message }, { status: 400 });
+    }
+    /**
+     * v6: 전술판 배치는 TACTIC_ASSIGNMENT를 갱신한다 (주 포지션은 바꾸지 않는다).
+     *
+     * 1·2군 이동도 **같은 호출로** 넘긴다 — 순서(승격 → 배치 → 강등)와 검증은 코어가
+     * 한 벌만 갖는다(`setLineup` · team.md §6). 라우트가 승격을 따로 부르던 때는
+     * 배치가 반려돼도 승격만 남았고, 같은 규칙이 두 곳에 적혀 한쪽만 고쳐졌다.
+     */
+    const res = setLineup(state, {
+      starting: body.data.starting,
+      bench: body.data.bench,
+      ...(body.data.squadLevels ? { squadLevels: body.data.squadLevels } : {}),
+    });
+    if (!res.ok) return NextResponse.json({ error: res.message }, { status: 400 });
 
-      /**
-       * 역할은 **배치 뒤에** — 방금 선발이 된 선수에게도 걸 수 있어야 한다.
-       *
-       * 그리고 **역할 하나의 반려가 배치를 되돌리지 않는다** (player.md §3.1).
-       * 역할은 한 요청에 묶여 오는 값 중 가장 늦게 정해지고 가장 잘 어긋나는 것이라
-       * (자리를 옮긴 직후의 화면이 보낸다) 400으로 빠져나오면 옳게 바꾼 배치까지
-       * 함께 날아가고, 화면은 같은 역할을 계속 보내 저장 불가 상태로 굳는다.
-       * 걸리는 것만 걸고, 반려는 삼키지 않고 결과로 남긴다.
-       */
-      const rejectedRoles: string[] = [];
-      for (const pick of body.data.roles ?? []) {
-        const applied = setPlayerRole(state, { playerId: pick.playerId, role: pick.role });
-        if (!applied.ok) {
-          rejectedRoles.push(applied.message);
-          continue;
-        }
-        recordEdit(state, `role:${pick.playerId}`, applied.message);
+    /**
+     * 역할은 **배치 뒤에** — 방금 선발이 된 선수에게도 걸 수 있어야 한다.
+     *
+     * 그리고 **역할 하나의 반려가 배치를 되돌리지 않는다** (player.md §3.1).
+     * 역할은 한 요청에 묶여 오는 값 중 가장 늦게 정해지고 가장 잘 어긋나는 것이라
+     * (자리를 옮긴 직후의 화면이 보낸다) 400으로 빠져나오면 옳게 바꾼 배치까지
+     * 함께 날아가고, 화면은 같은 역할을 계속 보내 저장 불가 상태로 굳는다.
+     * 걸리는 것만 걸고, 반려는 삼키지 않고 결과로 남긴다.
+     */
+    const rejectedRoles: string[] = [];
+    for (const pick of body.data.roles ?? []) {
+      const applied = setPlayerRole(state, { playerId: pick.playerId, role: pick.role });
+      if (!applied.ok) {
+        rejectedRoles.push(applied.message);
+        continue;
       }
-      // 사유는 코어가 쓴 문장 그대로다. 고정 키라 열 번 저장해도 마지막 것만 남는다
-      if (rejectedRoles.length > 0) recordEdit(state, "role:rejected", rejectedRoles.join(" · "));
+      recordEdit(state, `role:${pick.playerId}`, applied.message);
+    }
+    // 사유는 코어가 쓴 문장 그대로다. 고정 키라 열 번 저장해도 마지막 것만 남는다
+    if (rejectedRoles.length > 0) recordEdit(state, "role:rejected", rejectedRoles.join(" · "));
 
-      /**
-       * 전술판 저장은 채팅 턴을 만들지 않는다 — 판을 짜는 동안 열 번을 만지는데
-       * 그때마다 턴이 되면 채팅이 조작 로그가 된다. 대신 **바뀐 결과 한 줄**을
-       * 모아 두고 다음 발화 때 GM이 읽는다. 여러 번 저장해도 `lineup` 키로
-       * 접히므로 마지막 결과만 남는다.
-       */
-      const note = lineupChangeNote(state, before);
-      if (note) recordEdit(state, "lineup", note);
-      saveGame(state);
-      /**
-       * **바꾼 것은 스쿼드 하나다.** 전술판은 조작이 멎을 때마다 저장하므로 판을 짜는
-       * 동안 이 응답이 3초마다 나간다 — 전부를 실으면 감독은 전술판만 만졌는데
-       * 채팅·순위·일정까지 매번 다시 그려진다. `edits`는 뷰에 없고, 경기 중에는 위에서
-       * 409로 막았으니 `match`도 달라지지 않는다.
-       */
-      return NextResponse.json(toPayload(state, ["squad"]));
-    },
-    LOCK_WAIT_MS.lineup,
-  ).catch(busyResponse);
+    /**
+     * 전술판 저장은 채팅 턴을 만들지 않는다 — 판을 짜는 동안 열 번을 만지는데
+     * 그때마다 턴이 되면 채팅이 조작 로그가 된다. 대신 **바뀐 결과 한 줄**을
+     * 모아 두고 다음 발화 때 GM이 읽는다. 여러 번 저장해도 `lineup` 키로
+     * 접히므로 마지막 결과만 남는다.
+     */
+    const note = lineupChangeNote(state, before);
+    if (note) recordEdit(state, "lineup", note);
+    saveGame(state);
+    /**
+     * **바꾼 것은 스쿼드 하나다.** 전술판은 조작이 멎을 때마다 저장하므로 판을 짜는
+     * 동안 이 응답이 3초마다 나간다 — 전부를 실으면 감독은 전술판만 만졌는데
+     * 채팅·순위·일정까지 매번 다시 그려진다. `edits`는 뷰에 없고, 경기 중에는 위에서
+     * 409로 막았으니 `match`도 달라지지 않는다.
+     */
+    return NextResponse.json(toPayload(state, ["squad"]));
+  }).catch(busyResponse);
 }

@@ -23,7 +23,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (bad) return bad;
   const settled = new URL(request.url).searchParams.get("settled") === "1";
   const state = settled
-    ? await withGameLock(id, async () => loadGame(id), LOCK_WAIT_MS.settled).catch(busyResponse)
+    ? await withGameLock(id, LOCK_WAIT_MS.settled, async () => loadGame(id)).catch(busyResponse)
     : loadGame(id);
   if (state instanceof Response) return state;
   if (!state) return NextResponse.json({ error: "게임을 찾을 수 없습니다" }, { status: 404 });

@@ -47,7 +47,7 @@ import {
 import { FORMATION_LAYOUTS, boardExpectationText } from "@story-fm/domain";
 import type { ChatTurn } from "@story-fm/engine";
 import { visibleChat } from "../lib/store";
-import { withGameLock } from "../lib/turn-runner";
+import { LOCK_WAIT_MS, withGameLock } from "../lib/turn-runner";
 import type { GamePayload, GameSlice } from "../lib/store";
 
 /** API 통합 테스트 — 라우트 핸들러를 직접 호출 (mock GM 모드) */
@@ -934,7 +934,7 @@ describe("게임 잠금 — 겹친 요청", () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const held = withGameLock(game.id, () => gate);
+    const held = withGameLock(game.id, LOCK_WAIT_MS.turn, () => gate);
     await new Promise((r) => setTimeout(r, 30));
 
     const [lineup, turnEvents] = await Promise.all([

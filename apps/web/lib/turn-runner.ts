@@ -83,7 +83,9 @@ export const LOCK_WAIT_MS = {
 /** 상한 안에 잠금을 얻지 못했다 — 라우트는 이걸 409로 옮긴다 */
 export class GameBusyError extends Error {
   constructor(readonly gameId: string) {
-    super("턴이 진행 중입니다 — 잠시 후 다시 시도하세요");
+    // 서버는 **사실만** 낸다 — "다시 시도하라"는 말은 화면의 `다시 시도`가 이미 하고
+    // 있고, 다시 보내도 되는지는 응답의 `retry`가 데이터로 말한다
+    super("턴이 진행 중입니다");
     this.name = "GameBusyError";
   }
 }
@@ -150,8 +152,8 @@ function acquireLocal(id: string, waitMs: number): Promise<Release | null> {
  */
 export async function withGameLock<T>(
   id: string,
+  waitMs: number,
   fn: () => Promise<T>,
-  waitMs: number = LOCK_WAIT_MS.turn,
 ): Promise<T> {
   const deadline = Date.now() + waitMs;
   const local = await acquireLocal(id, waitMs);
@@ -257,8 +259,7 @@ export function runTurnLocked(
   orders?: readonly MatchBoardOrder[],
 ): Promise<TurnOutcome> {
   // 이 턴에 오간 원문은 model 턴을 채팅에 밀어 넣는 자리에서 그 인덱스에 묶인다
-  // 잠금을 기다리는 상한은 기본값 `LOCK_WAIT_MS.turn`이다
-  return withGameLock(id, () =>
+  return withGameLock(id, LOCK_WAIT_MS.turn, () =>
     traceTurn(async (): Promise<TurnOutcome> => {
       // 토큰 예산의 단위는 게임이다 — 다른 게임의 턴이면 여기서 장부를 비운다
       // (models.md §4). 잠금 안이라 한 프로세스에서 두 게임이 겹치지 않는다.
