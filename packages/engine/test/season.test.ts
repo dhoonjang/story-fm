@@ -57,6 +57,69 @@ describe("순위표", () => {
     expect(second!.teamId).toBe(round1[1]!.homeTeamId);
   });
 
+  describe("완전 동률 (competition.md §2)", () => {
+    // 한 세이브를 공유하고, 매 케이스가 리그 결과를 통째로 다시 깐다
+    const state = createTestGame();
+    const league = leagueOfTeamIn(state, state.userTeamId);
+    const fixtures = state.matches.filter(
+      (m) => m.competitionId === league && m.season === state.season,
+    );
+    const [a, b, c, d, e, f] = teamsOfLeagueIn(state, league);
+
+    /** 리그 전 경기를 0-0으로 깔고, 준 짝만 홈 1-0으로 바꾼다 */
+    function leagueOfDraws(wins: readonly (readonly [string, string])[]): void {
+      for (const m of fixtures) m.result = { homeGoals: 0, awayGoals: 0, scorers: [] };
+      for (const [home, away] of wins) {
+        const m = fixtures.find((m) => m.homeTeamId === home && m.awayTeamId === away);
+        expect(m, `${home} 홈 ${away} 경기가 없다`).toBeDefined();
+        m!.result = { homeGoals: 1, awayGoals: 0, scorers: [] };
+      }
+    }
+
+    /** 팀 배열 순서를 뒤집고 다시 계산 — 삽입 순서에 기대면 여기서 갈린다 */
+    function orderWithTeamsReversed(): string[] {
+      state.teams.reverse();
+      const order = computeStandings(state, league).map((r) => r.teamId);
+      state.teams.reverse();
+      return order;
+    }
+
+    it("승점·골득실·다득점이 같으면 맞대결이 가르고, 팀 배열 순서를 뒤집어도 같다", () => {
+      // a·b 모두 1승 1패 + 나머지 무승부(득 1 · 실 1)로 끝나고, 맞대결만 a가 이겼다
+      leagueOfDraws([
+        [a!, b!],
+        [b!, c!],
+        [d!, a!],
+      ]);
+      const table = computeStandings(state, league);
+      const rowA = table.find((r) => r.teamId === a)!;
+      const rowB = table.find((r) => r.teamId === b)!;
+      expect([rowA.points, rowA.goalDiff, rowA.goalsFor, rowA.wins], "완전 동률이 아니다").toEqual([
+        rowB.points,
+        rowB.goalDiff,
+        rowB.goalsFor,
+        rowB.wins,
+      ]);
+      const order = table.map((r) => r.teamId);
+      expect(order.indexOf(a!), "맞대결 승자가 아래에 섰다").toBeLessThan(order.indexOf(b!));
+      expect(orderWithTeamsReversed()).toEqual(order);
+    });
+
+    it("맞대결까지 같으면 teamId 사전순이 가른다 — 표 전체가 팀 배열 순서와 무관하다", () => {
+      // a·b는 서로 두 판 다 0-0이고, 승패는 다른 팀에게서 하나씩 얻고 잃었다
+      leagueOfDraws([
+        [a!, c!],
+        [d!, a!],
+        [b!, e!],
+        [f!, b!],
+      ]);
+      const order = computeStandings(state, league).map((r) => r.teamId);
+      const [first, second] = [a!, b!].sort();
+      expect(order.indexOf(first!)).toBeLessThan(order.indexOf(second!));
+      expect(orderWithTeamsReversed()).toEqual(order);
+    });
+  });
+
   it("프리시즌 친선은 아무리 크게 이겨도 순위표에 잡히지 않는다", () => {
     const state = createTestGame();
     const friendlies = state.matches.filter(isFriendly);

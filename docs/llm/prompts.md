@@ -59,7 +59,7 @@
 
 ## 2. 스킬 표면 — 한 판단은 한 도구
 
-도구는 **37개**이고 **전부 평시 GM의 것**이다. 경기 중에는 도구 표면이 **0**이다 —
+도구는 **39개**이고 **전부 평시 GM의 것**이다. 경기 중에는 도구 표면이 **0**이다 —
 지시 해석이 JSON 하나를 내고 코어가 같은 스킬 함수를 부른다
 ([agents.md](./agents.md) §3). 같은 순간에 함께 정해지는 것들이
 갈려 있으면 GM이 하나를 빠뜨린다 — 라인업은 1·2군 이동까지 한 요청(`set_lineup`의
@@ -71,7 +71,7 @@
 
 | 그룹      | 수  | 도구                                                                                                                                                                                             |
 | --------- | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 진행      | 2   | `start_match` · `accept_manager_offer`                                                                                                                                                           |
+| 진행      | 4   | `start_match` · `accept_manager_offer` · `counter_manager_offer` · `apply_manager_job`                                                                                                           |
 | 전술·훈련 | 9   | `set_lineup` · `set_squad_level` · `set_captain` · `set_tactics` · `set_player_tactic` · `exploit_point` · `set_match_plan` · `set_training` · `set_development_focus`                           |
 | 대화·서사 | 5   | `team_talk` · `talk_to_player` · `respond_to_media` · `respond_to_approach` · `apply_narrative_event`                                                                                            |
 | 경기      | 1   | `substitute`                                                                                                                                                                                     |
@@ -92,7 +92,10 @@
   않는다 — 조회 로그가 스킬 칩을 덮는다. `scout_player`는 상태를 바꾸므로 조회 그룹이지만
   읽기 전용이 아니다.
 - **도구 설명도 프롬프트다.** `SKILL_CATALOG`이 원본이고 표시 이름(label)·그룹까지 함께
-  갖는다. 화면의 칩 이름은 웹이 따로 가진 표를 쓰고 어긋남은 테스트가 지킨다.
+  갖는다. 화면의 칩 이름은 웹이 따로 가진 표를 쓰고 어긋남은 테스트가 지킨다. **위
+  표의 수도 마찬가지다** — 도구 수와 그룹별 수를
+  `packages/agents/test/skill-descriptions.test.ts`가 고정한다. 도구가 하나 붙어도
+  화면도 프롬프트도 아무 말을 하지 않아 표만 조용히 어긋난다.
 - **설명에는 길이 예산이 있다** — 한 도구의 상한과 카탈로그 총량을
   `packages/agents/test/skill-descriptions.test.ts`가 잰다. 고정층에 매 턴 실리는 문장이라
   규칙 하나를 지울 때마다 설명 두 줄이 붙는 것이 아무 데서도 드러나지 않았다.

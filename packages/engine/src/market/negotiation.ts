@@ -1804,6 +1804,30 @@ function executeLoanOut(
 ): SkillResult {
   const player = playerById(state, negotiation.gamePlayerId);
   if (!player) return { ok: false, message: "선수를 찾지 못했습니다" };
+  /**
+   * **빌리는 쪽도 임대료를 낼 수 있어야 한다** (transfer.md §2). 임대료는 이적
+   * 예산에서 같은 값이 빠지므로, 검사 없이 빼면 상대 예산이 음수가 된다 — 매각
+   * (`executeSale`)이 이미 지나는 문이다. 오퍼가 붙은 뒤 감독이 값을 올렸을 수도,
+   * 그사이 그 구단이 다른 영입에 예산을 썼을 수도 있다.
+   *
+   * 못 내면 **무산**(`expired`)이지 결렬(`rejected`)이 아니다 — 값을 낮춰 다시 붙는
+   * 길이 이번 창에 남아야 한다. 매각과 달리 분할로 되불러 오지 않는다: 임대료는 한
+   * 시즌짜리 돈이라 일시금뿐이다 (transfer.md §5-2).
+   *
+   * ⚠️ **선수를 옮기기 전에 본다.** `loanPlayer`가 지나간 뒤에 막으면 돈은 안 오가고
+   * 선수만 남의 팀에 가 있다.
+   */
+  const borrowerTeamId = negotiation.counterpartTeamId;
+  const borrowerFinance = state.finances.find((f) => f.teamId === borrowerTeamId);
+  if (agreed.fee > 0 && borrowerFinance && agreed.fee > borrowerFinance.transferBudget) {
+    negotiation.status = "expired";
+    return {
+      ok: false,
+      message:
+        `${teamName(borrowerTeamId ?? "")}가 임대료 ${formatMoney(agreed.fee)}를 마련하지 못했습니다 — ` +
+        `가용 ${formatMoney(borrowerFinance.transferBudget)}. 이 건은 무산됐습니다`,
+    };
+  }
   const contract = activeContract(state, player.id);
   const share = contract ? agreed.weeklyWage / Math.max(1, contract.weeklyWage) : 0.5;
   const res = loanPlayer(state, {
@@ -2939,10 +2963,21 @@ export function runAiRenewals(state: GameState, digest: string[]): void {
   const byId = new Map(state.players.map((p) => [p.id, p] as const));
   const depth = squadDepthOf(state);
 
-  for (const contract of state.contracts) {
-    if (contract.status !== "active") continue;
-    if (contract.teamId === state.userTeamId) continue;
-    if (contract.until > limit || contract.until <= state.date) continue;
+  /**
+   * 대상을 **먼저 걸러 두고** 돈다 — 재계약은 같은 배열에 새 계약을 `push`하므로,
+   * `state.contracts`를 직접 순회하면 이번 턴이 만든 계약까지 훑는다. 지금은 새
+   * 계약의 만료가 검토 창(240일) 밖이라 무해하지만, 순회 중 변이는 창이 넓어지는
+   * 날 조용히 이 순회를 자기가 만든 일로 채운다.
+   */
+  const due = state.contracts.filter(
+    (c) =>
+      c.status === "active" &&
+      c.teamId !== state.userTeamId &&
+      c.until <= limit &&
+      c.until > state.date,
+  );
+
+  for (const contract of due) {
     const player = byId.get(contract.gamePlayerId);
     if (!player || player.teamId !== contract.teamId) continue;
     if (player.loan) continue; // 임대 중엔 원소속이 따로 판단한다
