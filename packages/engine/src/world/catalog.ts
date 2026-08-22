@@ -16,9 +16,8 @@ import { hashOf } from "./name-hash";
 import { catalogPath, dataDir } from "../core/paths";
 import { stripStoredFootAdjust } from "../core/migrations";
 import { catalogCacheKey } from "../data/catalog-source";
-import { REAL_SQUADS, type RealPlayerSeed } from "../data/epl-players";
-import { EU_SQUADS } from "../data/eu-squads";
-import { MARKET_LEAGUE_SQUADS } from "../data/market-leagues";
+import { type RealPlayerSeed } from "../data/epl-players";
+import { SQUAD_SEEDS } from "../data/squad-seeds";
 import {
   teamCatalog,
   type TeamCatalogEntry,
@@ -289,7 +288,8 @@ function deriveHomegrownCountry(
   teamId: string,
   seeded: boolean | undefined,
 ): string | undefined {
-  const country = countryOfTeam(teamId);
+  // 카탈로그가 모르는 팀에는 협회가 없다 — 누구의 홈그로운도 아니다
+  const country = countryOfTeam(teamId) ?? undefined;
   if (seeded !== undefined) return seeded ? country : undefined;
   const division = isTopFlight(teamId) ? 1 : 2;
   const key = `homegrown:${who.nameEn}:${who.birthdate}`;
@@ -308,6 +308,8 @@ function entryFromSeed(teamId: string, s: RealPlayerSeed): CatalogDraft {
     teamId,
     nameKo: s.nameKo,
     nameEn: s.nameEn,
+    // 동명이인을 가르는 유일한 키 — 이름으로 잇는 표(부상 이력)가 이걸 쓴다
+    ...(s.wikidataId === undefined ? {} : { wikidataId: s.wikidataId }),
     ...(s.squadNumber === undefined ? {} : { squadNumber: s.squadNumber }),
     birthdate: s.birthdate,
     positions,
@@ -617,12 +619,6 @@ function fallbackEntries(
 }
 
 /** 시드에서 파생한 기본 카탈로그 (결정적) */
-/** 실선수 스쿼드 — EPL + 유럽 4대 리그. 시드가 없는 클럽은 절차 생성으로 채운다 */
-const ALL_SQUADS: Record<string, readonly RealPlayerSeed[]> = {
-  ...REAL_SQUADS,
-  ...EU_SQUADS,
-  ...MARKET_LEAGUE_SQUADS,
-};
 
 /**
  * 이적 시장 전용 클럽의 스쿼드 — **경기를 안 하므로 작게 둔다.**
@@ -662,7 +658,7 @@ function teamDrafts(team: TeamCatalogEntry): CatalogDraft[] {
   // 이적 시장 전용 클럽 — 레전드 시드 + 절차 생성으로 작은 스쿼드를 만든다.
   // 2부와 달리 전력 감점이 없다 (약한 리그가 아니라 경기를 안 하는 리그다)
   if (isMarketOnlyLeague(team.leagueId)) {
-    const seeds = ALL_SQUADS[team.id] ?? [];
+    const seeds = SQUAD_SEEDS[team.id] ?? [];
     const real = seeds.map((seed) => entryFromSeed(team.id, seed));
     return [
       ...real,
@@ -681,7 +677,7 @@ function teamDrafts(team: TeamCatalogEntry): CatalogDraft[] {
       academyFrom: SECOND_DIVISION_ACADEMY_FROM,
     });
   }
-  const seeds = ALL_SQUADS[team.id];
+  const seeds = SQUAD_SEEDS[team.id];
   if (seeds && seeds.length > 0) {
     const real = seeds.map((s) => entryFromSeed(team.id, s));
     return [

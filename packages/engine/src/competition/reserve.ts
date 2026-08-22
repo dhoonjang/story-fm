@@ -42,10 +42,11 @@ export function buildReserveFixtures(
   userTeamId?: string,
 ): MatchRecord[] {
   if (userTeamId === undefined) return [];
-  const leagueOfIn = (teamId: string, fallback: string): string =>
+  const leagueOfIn = (teamId: string, fallback: string | null): string | null =>
     membership?.leagueOf?.[teamId] ?? fallback;
   const league = leagueOfIn(userTeamId, leagueOfTeam(userTeamId));
-  if (isMarketOnlyLeague(league)) return [];
+  // 카탈로그가 모르는 팀에는 2군 리그도 없다 — 상대를 고를 리그가 없다
+  if (league === null || isMarketOnlyLeague(league)) return [];
   const opponents = scopedTeams(world)
     .filter((t) => t.id !== userTeamId && leagueOfIn(t.id, t.leagueId) === league)
     .map((t) => t.id)

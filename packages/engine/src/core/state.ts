@@ -89,6 +89,7 @@ import {
 import { rankByName } from "./name-match";
 import { tierOfTeamIn } from "./club-tier";
 import { defaultXiIds, playerCatalog } from "../world/catalog";
+import { assertCatalogValid } from "../world/catalog-invariants";
 import { estimateSquadWages, wageSubjectOf } from "../world/wages";
 import { clubEconomyLevel } from "../data/league-economy";
 import { worldFigureManagerOf } from "../data/world-figures";
@@ -889,9 +890,14 @@ export function clubProfileIn(state: GameState, teamId: string): ClubProfile {
  * `leagueOfTeamIn`과 갈리는 것은 승강이다 — 이쪽은 승강 **전**의 원 소속이라,
  * "이 구단이 원래 어느 리그의 클럽인가"를 묻는 자리(브랜드 보정)가 쓴다. 지금
  * 어디 있는가는 언제나 `leagueOfTeamIn`이다 (game-state.md §1).
+ *
+ * ⚠️ **세이브에도 카탈로그에도 없는 팀이면 던진다.** 폴백할 옳은 값이 없다 —
+ * 리그를 하나 지어내면 그 팀이 남의 리그 상금과 경제 수준을 받는다 (team.md §1).
  */
 export function catalogLeagueIn(state: GameState | undefined, teamId: string): string {
-  return state?.teams.find((t) => t.id === teamId)?.leagueId ?? leagueOfTeam(teamId);
+  const leagueId = state?.teams.find((t) => t.id === teamId)?.leagueId ?? leagueOfTeam(teamId);
+  if (leagueId === null) throw new Error(`세이브에도 카탈로그에도 없는 팀: ${teamId}`);
+  return leagueId;
 }
 
 /**
@@ -2226,6 +2232,9 @@ export function buildAssignments(
 export { MATCHDAY_BENCH };
 
 export function createGame(input: CreateGameInput): GameState {
+  // 세계를 세우기 전에 카탈로그가 성립하는지 먼저 묻는다 — 어긋난 카탈로그로 세운
+  // 세계는 실패가 몇 시즌 뒤 엉뚱한 자리에서 터진다 (team.md §1)
+  assertCatalogValid();
   const seed = input.seed ?? randInt(makeRng(Date.now() % 2 ** 31, "seed"), 1, 2 ** 30);
   if (!teamCatalog().some((t) => t.id === input.userTeamId)) {
     throw new Error(`알 수 없는 팀: ${input.userTeamId}`);

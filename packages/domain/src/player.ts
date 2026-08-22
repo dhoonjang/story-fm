@@ -1834,6 +1834,14 @@ export interface PlayerCatalogMeta {
   nameKo: string;
   nameEn: string;
   /**
+   * **위키데이터 QID** — 사람을 가리는 유일한 키(시드의 `RealPlayerSeed.wikidataId`).
+   * 시드에 동명이인이 있어 이름으로 잇는 표(부상 이력)는 한 사람의 기록을 남의
+   * 몸에 붙인다. 그래서 QID가 시드에서 카탈로그까지 흘러야 한다 — 카탈로그가
+   * 게임 선수와 시드 사이의 유일한 다리다.
+   * 위키 문서가 없는 선수(합성·아카데미)는 QID가 없다.
+   */
+  wikidataId?: string;
+  /**
    * 실존 시드가 아니라 절차 생성으로 채운 사람 — 아카데미·2부 스쿼드가 그렇다.
    * id에는 아무 표시가 없으므로(선수 id는 출신도 소속도 담지 않는다) 여기서 안다.
    */
@@ -1876,6 +1884,7 @@ export const PlayerCatalogEntrySchema = z.object({
   teamId: z.string().min(1),
   nameKo: z.string().min(1),
   nameEn: z.string().min(1),
+  wikidataId: z.string().min(1).optional(),
   synthetic: z.boolean().optional(),
   squadNumber: z.number().int().min(0).max(SQUAD_NUMBER_MAX).optional(),
   birthdate: DateString,

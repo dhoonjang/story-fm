@@ -1072,22 +1072,36 @@ export function teamsOfLeague(leagueId: string): TeamCatalogEntry[] {
   return teamCatalog().filter((t) => t.leagueId === leagueId);
 }
 
-/** 이 팀이 속한 리그 id */
-export function leagueOfTeam(teamId: string): string {
-  return byId().get(teamId)?.leagueId ?? "epl";
+/**
+ * 이 팀이 속한 리그 id — **카탈로그에 없는 팀이면 `null`.**
+ *
+ * 폴백하지 않는다. `"epl"`을 돌려주던 시절에는 잘못된 id가 EPL 소속으로 상금·경제
+ * 수준·컵 참가를 받았다 — 틀린 답이 정상적인 값의 얼굴을 하고 흘러갔다 (team.md §1).
+ * 지금 어디 있는가는 언제나 `leagueOfTeamIn`이다.
+ */
+export function leagueOfTeam(teamId: string): string | null {
+  return byId().get(teamId)?.leagueId ?? null;
 }
 
-/** 이 팀이 속한 나라 — 홈그로운 판정(협회 기준)의 근거 */
 /**
  * **클럽인가** — 무소속(`free`)은 클럽이 아니라 클럽이 없는 상태다.
  * 스쿼드·배치·전력을 논하는 자리에서는 전부 이걸로 걸러야 한다.
+ *
+ * 카탈로그가 모르는 id도 `false`다 — 클럽이 아니라 **클럽인지 알 수 없는 id**고,
+ * 어느 쪽이든 그 순회에서 빠져야 한다.
  */
 export function isClubTeam(teamId: string): boolean {
-  return leagueOfTeam(teamId) !== "free";
+  const leagueId = leagueOfTeam(teamId);
+  return leagueId !== null && leagueId !== "free";
 }
 
-export function countryOfTeam(teamId: string): string {
-  return leagueCatalogById(leagueOfTeam(teamId))?.country ?? "잉글랜드";
+/**
+ * 이 팀이 속한 나라 — 홈그로운 판정(협회 기준)의 근거.
+ * 카탈로그가 모르는 팀이면 `null`이다 (`leagueOfTeam`과 같은 이유).
+ */
+export function countryOfTeam(teamId: string): string | null {
+  const leagueId = leagueOfTeam(teamId);
+  return leagueId === null ? null : (leagueCatalogById(leagueId)?.country ?? null);
 }
 
 /** 이 팀이 1부인가 — 2부 클럽은 리그전·순위표·이적 시장 밖에 있다 */

@@ -54,7 +54,7 @@ for (const seed of [42, 7]) {
       state = createTestGame(seed, "arsenal");
       secondTierBefore = new Map(
         state.teams
-          .filter((t) => SECOND_TIERS.includes(leagueOfTeam(t.id)))
+          .filter((t) => SECOND_TIERS.includes(leagueOfTeam(t.id) ?? ""))
           .map((t) => [t.id, financeOf(state, t.id).balance] as const),
       );
       playSeasonKeepingSeat(state);
@@ -89,6 +89,7 @@ for (const seed of [42, 7]) {
       const byLeague = new Map<string, number[]>();
       for (const f of state.finances) {
         const league = leagueOfTeam(f.teamId);
+        if (league === null) continue;
         byLeague.set(league, [...(byLeague.get(league) ?? []), f.balance]);
       }
       const readings: Readings<typeof FINANCE_LEAGUES> = {
@@ -147,7 +148,7 @@ describe("세 시즌", () => {
     for (const f of state.finances) {
       const league = leagueOfTeam(f.teamId);
       // 자유계약 자리와 시장 전용 리그는 클럽이 아니다 — 낼 것도 받을 것도 없다
-      if (league === "free" || isMarketOnlyLeague(league)) continue;
+      if (league === null || league === "free" || isMarketOnlyLeague(league)) continue;
       byLeague.set(league, [...(byLeague.get(league) ?? []), f.balance]);
     }
     const readings: Readings<typeof FINANCE_MULTI_SEASON> = {

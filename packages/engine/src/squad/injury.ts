@@ -288,13 +288,21 @@ function unionDays(spans: ReadonlyArray<readonly [string, string]>): number {
  * **복귀일이 부임일보다 뒤면 아직 안 나은 것**이라 열린 행(`returnedOn: null`)으로
  * 들어간다. 감독은 그 선수를 다친 채로 넘겨받고, tick이 복귀일에 닫는다.
  * 표에 없는 선수는 손대지 않는다 — 성향은 1.0(평균)에 남는다.
+ *
+ * 조인 키는 **위키데이터 QID**다. 이름은 시드에 동명이인이 있어 한 사람의 이력을
+ * 남의 몸에 붙인다. QID가 없는 카탈로그 엔트리(합성·아카데미)는 이력이 없는 것으로
+ * 지나간다.
  */
 export function seedInjuryHistory(state: GameState): void {
-  const nameById = new Map(playerCatalog().map((e) => [e.id, e.nameEn]));
+  const qidById = new Map(
+    playerCatalog().flatMap((e) =>
+      e.wikidataId === undefined ? [] : [[e.id, e.wikidataId] as const],
+    ),
+  );
   const windowStart = addDays(state.date, -SEED_WINDOW_DAYS);
   for (const player of state.players) {
-    const nameEn = player.catalogId === null ? undefined : nameById.get(player.catalogId);
-    const history = nameEn === undefined ? undefined : INJURY_HISTORY[nameEn];
+    const wikidataId = player.catalogId === null ? undefined : qidById.get(player.catalogId);
+    const history = wikidataId === undefined ? undefined : INJURY_HISTORY[wikidataId];
     if (!history) continue;
     const spans: Array<readonly [string, string]> = [];
     for (const row of history) {
