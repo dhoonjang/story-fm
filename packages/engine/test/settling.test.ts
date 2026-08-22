@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   EVENT_BAND,
+  EVENT_CREDIT,
   MATCH_CREDIT,
   addDays,
+  clampSettlingCredit,
   settlingAnchor,
   applyTalkToPlayer,
   applyTeamTalk,
@@ -402,5 +404,49 @@ describe("무게는 GM이 정하고 경계는 코어가 쥔다", () => {
     expect(state.settlingEvents[0]!.credit).toBe(
       settlingAnchor("team_talk", { intensity: 2 }) + EVENT_BAND.team_talk,
     );
+  });
+});
+
+/**
+ * 앵커와 대역의 **눈금 자체** — 스킬을 거치지 않고 두 함수만 본다.
+ *
+ * 위 describe가 보는 건 "GM이 준 무게가 어떻게 실리는가"이고, 여기서 고정하는 건
+ * 그 무게가 서는 자리다: 종류마다 기본 무게가 다르고(면담 > 팀토크, 주장 지명이
+ * 가장 크다), 대역은 **앵커를 따라 움직인다**. 대역을 0에 고정하면 나쁜 면담을
+ * GM이 후하게 매겨 좋은 일로 뒤집을 수 있다.
+ */
+describe("앵커와 대역 (settlingAnchor · clampSettlingCredit)", () => {
+  const KINDS = ["talk", "team_talk", "captain"] as const;
+
+  it("앵커는 종류의 기본 무게 × 방향 × (강도/2)다", () => {
+    for (const kind of KINDS) {
+      // 강도 2가 기준 — 그때가 그 종류의 기본 무게 그대로다
+      expect(settlingAnchor(kind), kind).toBe(EVENT_CREDIT[kind]);
+      expect(settlingAnchor(kind, { intensity: 4 }), kind).toBe(EVENT_CREDIT[kind] * 2);
+      expect(settlingAnchor(kind, { direction: -1, intensity: 2 }), kind).toBe(-EVENT_CREDIT[kind]);
+      expect(settlingAnchor(kind, { intensity: 0 }), kind).toBe(0);
+    }
+    // 말은 계기이고 녹아드는 건 그라운드에서다 — 어느 대화도 경기 한 번을 못 넘는다
+    for (const kind of KINDS)
+      expect(Math.abs(EVENT_CREDIT[kind]), kind).toBeLessThan(MATCH_CREDIT * 2);
+    expect(EVENT_CREDIT.team_talk).toBeLessThan(EVENT_CREDIT.talk);
+  });
+
+  it("대역 안의 제안은 그대로 실리고, 밖은 앵커±EVENT_BAND에서 잘린다", () => {
+    for (const kind of KINDS) {
+      const anchor = settlingAnchor(kind);
+      const band = EVENT_BAND[kind];
+      expect(clampSettlingCredit(kind, anchor, anchor + band / 2), kind).toBe(anchor + band / 2);
+      expect(clampSettlingCredit(kind, anchor, 999), kind).toBe(anchor + band);
+      expect(clampSettlingCredit(kind, anchor, -999), kind).toBe(anchor - band);
+    }
+  });
+
+  it("대역은 앵커를 따라간다 — 나쁜 판정이 GM의 후한 무게로 뒤집히지 않는다", () => {
+    for (const kind of KINDS) {
+      const bad = settlingAnchor(kind, { direction: -1, intensity: 3 });
+      expect(clampSettlingCredit(kind, bad, 999), kind).toBe(bad + EVENT_BAND[kind]);
+      expect(clampSettlingCredit(kind, bad, 999), kind).toBeLessThan(0);
+    }
   });
 });

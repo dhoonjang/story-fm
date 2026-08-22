@@ -39,11 +39,17 @@ import {
 import type {
   GamePlayer,
   MatchRecord,
+  MatchSide,
   MatchStage,
   PlayerAttributes,
   ShootoutKick,
 } from "@story-fm/domain";
-import { SHOOTOUT_ROUNDS, shootoutSettled, shootoutTally } from "@story-fm/domain";
+import {
+  SHOOTOUT_ROUNDS,
+  nextShootoutKick,
+  shootoutSettled,
+  shootoutTally,
+} from "@story-fm/domain";
 import { groupOf } from "@story-fm/engine";
 import { createTestGame, simSquad } from "./helpers";
 
@@ -1180,5 +1186,78 @@ describe("대진 합계", () => {
     ]);
     const agg = tieAggregate(legs, legs[1]!);
     expect(agg).toEqual({ home: 2, away: 2 }); // arsenal 2 : mancity 2
+  });
+});
+
+/**
+ * 차는 자리 하나 (`nextShootoutKick`) — 세계 없이 목록만 본다.
+ *
+ * 위 describe는 굴린 표본으로 규칙을 확인하고, 여기서는 **표본이 잘 안 만드는
+ * 경계**를 손으로 세운다: 서든데스의 라운드 번호와, 먼저 찬 쪽이 넣은 그 순간에도
+ * 상대가 차야 한다는 것. 남은 킥으로만 재면 여기서 상대가 차 보지도 못하고 진다.
+ */
+describe("다음에 차는 사람이 선 자리", () => {
+  const kick = (team: MatchSide, round: number, scored: boolean): ShootoutKick => ({
+    round,
+    team,
+    taker: `${team}-${round}`,
+    outcome: scored ? "scored" : "missed",
+    probability: 0.7,
+  });
+
+  /** 양 팀이 나란히 실패하는 목록 — 갈리지 않으므로 계속 이어진다 */
+  const allMissed = (count: number, first: MatchSide): ShootoutKick[] =>
+    Array.from({ length: count }, (_, i) =>
+      kick(i % 2 === 0 ? first : first === "home" ? "away" : "home", Math.floor(i / 2) + 1, false),
+    );
+
+  it("먼저 차는 쪽부터 번갈아 가고, 라운드는 두 발마다 오른다 — 서든데스에도 이어진다", () => {
+    for (const first of ["home", "away"] as const) {
+      const other: MatchSide = first === "home" ? "away" : "home";
+      for (let taken = 0; taken <= SHOOTOUT_ROUNDS * 2 + 3; taken++) {
+        expect(nextShootoutKick(allMissed(taken, first), first), `${first} ${taken}발`).toEqual({
+          round: Math.floor(taken / 2) + 1,
+          team: taken % 2 === 0 ? first : other,
+        });
+      }
+      // 정규 열 발 뒤는 6라운드 — 서든데스에 상한이 없다
+      expect(nextShootoutKick(allMissed(SHOOTOUT_ROUNDS * 2, first), first)!.round).toBe(
+        SHOOTOUT_ROUNDS + 1,
+      );
+    }
+  });
+
+  it("서든데스는 먼저 찬 쪽이 넣어도 상대가 찬다 — 갈린 뒤에야 null이다", () => {
+    // 5-5로 정규 라운드를 마쳤다
+    const level: ShootoutKick[] = Array.from({ length: SHOOTOUT_ROUNDS * 2 }, (_, i) =>
+      kick(i % 2 === 0 ? "home" : "away", Math.floor(i / 2) + 1, true),
+    );
+    expect(shootoutSettled(level)).toBe(false);
+    expect(shootoutTally(level)).toEqual({ home: 5, away: 5 });
+
+    const homeScored = [...level, kick("home", SHOOTOUT_ROUNDS + 1, true)];
+    expect(nextShootoutKick(homeScored, "home")).toEqual({
+      round: SHOOTOUT_ROUNDS + 1,
+      team: "away",
+    });
+    // 그 라운드가 통째로 끝나야 판정한다
+    expect(
+      nextShootoutKick([...homeScored, kick("away", SHOOTOUT_ROUNDS + 1, false)], "home"),
+    ).toBeNull();
+    expect(
+      nextShootoutKick([...homeScored, kick("away", SHOOTOUT_ROUNDS + 1, true)], "home"),
+    ).toEqual({ round: SHOOTOUT_ROUNDS + 2, team: "home" });
+  });
+
+  it("뒤집을 수 없으면 남은 킥이 있어도 끝이다 — 조기 확정", () => {
+    // 홈 3득점 · 원정 3실패 — 원정이 남은 두 발을 다 넣어도 못 따라잡는다
+    const kicks: ShootoutKick[] = [];
+    for (let round = 1; round <= 3; round++) {
+      kicks.push(kick("home", round, true));
+      kicks.push(kick("away", round, false));
+    }
+    expect(nextShootoutKick(kicks, "home")).toBeNull();
+    // 한 발 전에는 아직 살아 있다 — 3-0이 되기 전이라 원정에게 세 발이 남아 있다
+    expect(nextShootoutKick(kicks.slice(0, 4), "home")).toEqual({ round: 3, team: "home" });
   });
 });

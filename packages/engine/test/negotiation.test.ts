@@ -43,7 +43,9 @@ import {
   suggestTerms,
   teamName,
   unilateralSeveranceOf,
+  USER_WAGE_HEADROOM,
   wageExpectationOf,
+  wageRoomOf,
   weeklyWagesOf,
   withdrawOffer,
 } from "@story-fm/engine";
@@ -960,6 +962,54 @@ describe("재계약 — 상대가 선수 본인이다", () => {
     const accepted = respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
     expect(accepted.ok, accepted.message).toBe(true);
     expect(negotiation.status).toBe("agreed");
+  });
+
+  /**
+   * **주급 여력의 자는 영입에만 서 있다** (`dealOdds`의 buy 갈래). 재계약은 관문이
+   * 하나(선수가 남을까)인 `renewOdds`로 빠지고, `executeRenewal`도 총액을 보지
+   * 않는다 — 그래서 한도의 몇 배짜리 재계약이 열리고 확정까지 그대로 간다.
+   *
+   * 여기 있는 것은 현재 동작의 못이다. 재계약에도 여력을 걸기로 한다면 그건 밸런스
+   * 결정(감독이 한 선수에게 임금 총액을 다 몰 수 있는가)이고, 이 케이스가 그때
+   * 함께 움직여야 하는 자리다.
+   */
+  it("재계약에는 주급 여력 관문이 없다 — 같은 값이 영입이면 막힌다", () => {
+    const state = createTestGame(42);
+    const player = expiringPlayer(state);
+    const wagesBefore = weeklyWagesOf(state, state.userTeamId);
+    const room = wageRoomOf(state.userTeamId, wagesBefore, USER_WAGE_HEADROOM, state);
+    const absurd = Math.round(room * 5) + 1_000_000;
+
+    // 같은 주급을 영입에 실으면 관문이 막아선다
+    const buying = dealOdds(state, { ...offerFor(state, target(state).id), weeklyWage: absurd });
+    expect(buying.blockers.some((b) => b.includes("주급 여력"))).toBe(true);
+
+    // 재계약은 그대로 지나간다 — 차단도 없고 협상도 열린다
+    const renewTerms = {
+      playerId: player.id,
+      fee: 0,
+      weeklyWage: absurd,
+      years: 3,
+      kind: "renew" as const,
+    };
+    expect(dealOdds(state, renewTerms).blockers).toHaveLength(0);
+    expect(openRenewal(state, { playerId: player.id, weeklyWage: absurd, years: 3 }).ok).toBe(true);
+
+    // 확정까지 가면 계약이 그 값으로 서고 임금 총액이 한도를 넘긴다
+    const negotiation = state.negotiations.find((n) => n.kind === "renew")!;
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+    expect(respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" }).ok).toBe(true);
+    const done = acceptDeal(state, negotiation.id);
+    expect(done.ok, done.message).toBe(true);
+    expect(activeContract(state, player.id)!.weeklyWage).toBe(absurd);
+    expect(
+      wageRoomOf(
+        state.userTeamId,
+        weeklyWagesOf(state, state.userTeamId),
+        USER_WAGE_HEADROOM,
+        state,
+      ),
+    ).toBeLessThan(0);
   });
 
   it("확정하면 계약만 새로 쓰고 이적 원장은 남기지 않는다", () => {
