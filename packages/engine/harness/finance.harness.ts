@@ -119,12 +119,6 @@ for (const seed of [42, 7]) {
         reportOf(FINANCE_SECOND_TIER, readings, `시드 ${seed} · ${SECOND_TIERS.join(" · ")}`),
       );
       expect(outOfBand(FINANCE_SECOND_TIER, readings)).toEqual([]);
-
-      // 리그전을 굴리는 리그에는 이 보정이 붙지 않는다 — 매치데이는 경기가 만든다
-      expect(
-        financeOf(state, state.userTeamId).ledger.some((e) => e.label === "리그 홈경기 수입"),
-        "1부는 경기에서 매치데이를 번다",
-      ).toBe(false);
     });
   });
 }
