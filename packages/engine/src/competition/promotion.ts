@@ -8,12 +8,12 @@ import { startParachute, stopParachute } from "../club/finance";
 import {
   catalogLeagueIn,
   clubProfileIn,
-  playersOf,
   pushNarrative,
   teamNameIn,
   teamShortNameIn,
   type GameState,
 } from "../core/state";
+import { squadRating } from "../squad/depth";
 
 /**
  * 승강 — 1부 하위 세 팀과 그 나라 2부 상위 세 팀이 자리를 바꾼다.
@@ -106,19 +106,6 @@ export function hasRelegation(state: GameState, leagueId: string): boolean {
   const second = secondTierOf(leagueId);
   if (!second) return false;
   return teamsOfLeagueIn(state, second).length >= RELEGATION_SLOTS;
-}
-
-/** 판에 서는 인원 — 스쿼드의 힘은 이만큼의 평균으로 잰다 */
-const STARTING_XI = 11;
-
-/** 스쿼드 상위 열한 명의 평균 OVR — 2부 클럽을 줄 세우는 잣대 */
-function squadRating(state: GameState, teamId: string): number {
-  const squad = playersOf(state, teamId);
-  if (squad.length === 0) return 0;
-  const top = [...squad]
-    .sort((a, b) => b.attributes.overall - a.attributes.overall)
-    .slice(0, STARTING_XI);
-  return top.reduce((s, p) => s + p.attributes.overall, 0) / top.length;
 }
 
 /** 이 리그가 이번 시즌 실제로 경기를 했는가 — 안 뛴 리그는 강등도 없다 */
