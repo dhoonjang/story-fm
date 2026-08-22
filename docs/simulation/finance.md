@@ -198,7 +198,7 @@ FinanceReport = {
   wageRatio: number,    // (player_wages + staff_wages) / 매출
   seasonToDate: { income, expense, cashNet, pnlNet },
   psr: { rolling3Season: number, headroom: number } | null,
-  notes: string[],      // 코어가 결정적으로 붙이는 **사실 줄** — 조언은 없다 (§7.1)
+  noteCards: FinanceNote[],  // 코어가 결정적으로 붙이는 **사실 카드** — 조언은 없다 (§7.1)
   highlights: Array<{   // 그달의 큰 비정기 항목 — 날짜와 금액을 남긴다 (§8.2)
     date, kind, category, label, amount
   }>,
@@ -206,6 +206,23 @@ FinanceReport = {
 ```
 
 `state.financeReports` — **유저 팀만** 생성한다.
+
+노트는 문장이 아니라 카드다 — `{ code, value?, limit? }` 셋이면 월간 보고가 말할 수
+있는 것이 전부 담긴다 (→ [overview.md](../overview.md) §1 철칙 4).
+
+| `code`                   | `value`         | `limit`   |
+| ------------------------ | --------------- | --------- |
+| `wage-ratio-danger`      | 급여 비중       | 위험 문턱 |
+| `wage-ratio-caution`     | 급여 비중       | 주의 문턱 |
+| `cash-deficit-transfer`  | 현금 감소액     | 이적 지출 |
+| `cash-deficit-operating` | 현금 감소액     | —         |
+| `psr-breach`             | 3시즌 누적 손익 | PSR 한도  |
+| `psr-headroom-low`       | 남은 여유       | PSR 한도  |
+| `debt-over-limit`        | 부채            | 부채 한도 |
+| `debt-under-limit`       | 부채            | 부채 한도 |
+
+⚠️ **동결은 노트가 아니라 `budgetFrozen`이 말한다** (§9.2·§9.4). 판정을 노트 문장에
+실어 두면 문구를 고칠 때 예산이 함께 풀린다. 문장은 화면과 GM이 만든다.
 
 ⚠️ **읽을 때는 언제나 `teamId === userTeamId`로 거른다** (`userReports`). 이직하면
 옛 구단의 보고서가 그대로 세이브에 남는데(커리어의 사실이라 지우지 않는다 —
