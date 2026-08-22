@@ -966,9 +966,13 @@ export function setLineup(
   /**
    * 승격 가능 여부는 **누적으로** 잰다 — 한 명씩 따로 재면 남은 한 자리에 둘이 함께
    * 들어간다고 답한다. 실제로 올리는 것은 검증이 다 끝난 뒤다.
+   *
+   * 이번에 내리는 선수가 비우는 자리도 함께 셈한다(`demotingIds`) — `set_squad_level`이
+   * 쓰는 셈과 같은 것이다(→ docs/data/team.md §6). 여기만 빼면 명단이 찬 팀의 "하나
+   * 내리고 하나 올려"가 전술판에서만 반려된다.
    */
   if (promoting.length > 0) {
-    const allowed = canRegisterAllFor(state, promoting, state.userTeamId);
+    const allowed = canRegisterAllFor(state, promoting, state.userTeamId, demotingIds);
     if (!allowed.ok) {
       return { ok: false, message: `${playerName(state, allowed.playerId)}: ${allowed.reason}` };
     }
@@ -1000,11 +1004,15 @@ export function setLineup(
   // 여기서부터는 실패하지 않는다 — 실패할 수 있는 것은 위에서 전부 걸렀다.
   const levelNotes: string[] = [];
   const levelMoved: Record<"first" | "reserve", string[]> = { first: [], reserve: [] };
-  // 승격 먼저 — 2군 선수를 선발에 넣으려면 올라와 있어야 한다
+  /**
+   * 승격 먼저 — 2군 선수를 선발에 넣으려면 올라와 있어야 한다.
+   *
+   * **재는 걸음과 옮기는 걸음을 갈라 둔다**(`applySquadLevel` — team.md §5). 옮기는
+   * 순간마다 `setSquadLevel`로 혼자 다시 재면, 강등이 배치 뒤에 오는 이 순서에서는
+   * 올릴 때 명단이 아직 차 있다 — 위에서 통과시킨 교대가 적용 중에 걸린다.
+   */
   for (const player of promoting) {
-    const res = setSquadLevel(state, { playerId: player.id, level: "first" });
-    if (!res.ok) return res; // 검증이 놓친 것 — 배치는 아직 손대지 않았다
-    levelNotes.push(res.message);
+    levelNotes.push(applySquadLevel(state, player, "first"));
     levelMoved.first.push(player.name);
   }
 
@@ -1105,11 +1113,10 @@ export function setLineup(
   // 모양 이름은 실제 좌표에서 읽는다 — 프리셋 다섯 밖의 숫자도 그대로 담긴다
   tactics.spec.formation = shapeOf(startPoints);
 
-  // 강등은 배치 뒤에 — 배치에서 빠진 뒤라야 2군으로 내려도 라인업이 안 깨진다
+  // 강등은 배치 뒤에 — 배치에서 빠진 뒤라야 2군으로 내려도 라인업이 안 깨진다.
+  // 여기도 다시 재지 않는다: 하한은 오르내리는 인원을 다 셈한 뒤의 수로 위에서 쟀다
   for (const player of demoting) {
-    const res = setSquadLevel(state, { playerId: player.id, level: "reserve" });
-    if (!res.ok) return res; // 검증이 놓친 것 — 위에서 인원과 배치를 이미 쟀다
-    levelNotes.push(res.message);
+    levelNotes.push(applySquadLevel(state, player, "reserve"));
     levelMoved.reserve.push(player.name);
   }
   const items = [...changes.items];
@@ -1469,7 +1476,9 @@ export function setPlayerRole(
   }
   const from = assignment.roleId ?? defaultRoleOf(assignment.position);
   if (from === def.id) {
-    return { ok: true, message: `${player.name}은 이미 ${def.ko}입니다` };
+    // 바뀐 것이 없다는 사실은 **반환값이** 말한다 (→ docs/data/player.md §3.1) —
+    // 표식이 없으면 `setPlayerTactic`이 이 걸음을 "바꿨다"로 세어 뒤따르는 반려를 접는다
+    return { ok: true, unchanged: true, message: `${player.name}은 이미 ${def.ko}입니다` };
   }
 
   /**
@@ -1813,7 +1822,7 @@ export function setTactics(state: GameState, spec: Partial<TacticsSpec>): SkillR
   const unchanged = tacticsSignature(before) === tacticsSignature(parsed.data);
   if (unchanged) {
     tactics.spec = parsed.data;
-    return { ok: true, message: `전술 유지 — ${parsed.data.formation}` };
+    return { ok: true, unchanged: true, message: `전술 유지 — ${parsed.data.formation}` };
   }
 
   const wasAt = currentFamiliarity(tactics);
@@ -2173,6 +2182,75 @@ export function setTraining(state: GameState, input: TrainingPlanInput): SkillRe
    * `message`에 남아 GM이 장면으로 푼다.
    */
   const items: SkillBriefItem[] = [];
+  const sessions = input.sessions ?? [];
+  const repeats = input.repeatWeekly ?? [];
+
+  // ── 검증 ───────────────────────────────────────────────
+  // 여기서는 아무것도 바꾸지 않는다. 하나라도 걸리면 상태는 부른 그대로다
+  // (→ docs/simulation/season.md §4). 조기 소집은 체력을 깎고 불만을 남기고 소집일을
+  // 옮기는 **되돌릴 수 없는** 걸음이라, 그 뒤에서 세션 하나가 걸리면 "반려했습니다"를
+  // 읽은 감독의 선수단이 이미 지쳐 있었다.
+
+  /**
+   * **지난 날짜에는 훈련을 잡지 못한다.**
+   *
+   * 그 자리의 tick은 이미 지나갔으므로 엔트리가 영영 `scheduled`로 남아 달력에
+   * "예정"으로 서고, 같은 날짜가 조기 소집으로 흘러가면 대가(`recallSquadEarly`)가
+   * 오늘까지의 날수만큼 부풀려 매겨진다.
+   */
+  for (const s of sessions) {
+    if (!DATE_RE.test(s.date)) return { ok: false, message: `날짜 형식이 잘못됨: ${s.date}` };
+    if (s.date < state.date) {
+      return {
+        ok: false,
+        message: `${s.date}은 이미 지난 날입니다 — 훈련은 오늘(${state.date})부터 잡을 수 있습니다`,
+      };
+    }
+    if (!s.label?.trim()) return { ok: false, message: "훈련 설명(label)이 필요합니다" };
+    const err = validFocus(s.focus);
+    if (err) return { ok: false, message: err };
+  }
+  for (const r of repeats) {
+    if (!Number.isInteger(r.dow) || r.dow < 0 || r.dow > 6) {
+      return { ok: false, message: `요일이 잘못됨: ${r.dow} (0~6)` };
+    }
+    if (!r.label?.trim()) return { ok: false, message: "훈련 설명(label)이 필요합니다" };
+    const err = validFocus(r.focus);
+    if (err) return { ok: false, message: err };
+  }
+
+  /**
+   * **여름 휴가엔 훈련이 없다 — 감독이 소집을 앞당기지 않는 한.**
+   *
+   * 소집일 전까지 선수단은 구단에 없다. 실수로 그 자리에 세션이 깔리는 것은
+   * 막아야 하지만(부임 첫날 "월·수·금 훈련"이 그대로 통과하던 문제), **막는 것과
+   * 못 하게 하는 것은 다르다.** 휴가를 깨고 부르는 것은 실제 감독이 할 수 있는
+   * 일이고, 대가는 선수단의 반발이다 — 코어는 가능하게 하고 값을 물린다
+   * (이적 설득과 같은 태도: 확률이 낮다고 길을 막지 않는다).
+   *
+   * 그래서 `recallSquad` 없이는 거부하고, 있으면 소집일 자체를 앞당긴다. 여기서는
+   * **앞당겼다고 치면 언제인가**만 구한다 — 옮기는 것은 아래 적용 단계다.
+   */
+  const squadReturn = squadReturnOf(state.calendar);
+  const wanted = [...sessions.map((x) => x.date), ...(repeats.length > 0 ? [state.date] : [])];
+  const earliest = [...wanted].sort()[0];
+  const recallTo =
+    input.recallSquad === true && earliest !== undefined && earliest < squadReturn
+      ? earliest
+      : undefined;
+  const effectiveReturn = recallTo ?? squadReturn;
+  for (const s of sessions) {
+    if (s.date < effectiveReturn) {
+      return {
+        ok: false,
+        message:
+          `${s.date}은 선수단 여름 휴가 기간입니다 — 훈련은 소집일(${effectiveReturn})부터 잡을 수 있습니다. ` +
+          `감독이 휴가를 접고 조기 소집하겠다고 했다면 recallSquad를 함께 보내세요 (선수단이 반발합니다).`,
+      };
+    }
+  }
+
+  // ── 적용 ───────────────────────────────────────────────
 
   /**
    * 1) 비우기 먼저 — "월요일 훈련 다 지우고 새로" 같은 지시를 한 번에 처리.
@@ -2180,6 +2258,9 @@ export function setTraining(state: GameState, input: TrainingPlanInput): SkillRe
    * **`clearTraining`과 같은 규칙을 쓴다** — 예전엔 도구가 둘로 갈려 있어서
    * "쉬게 하자"와 "훈련 빼줘"가 서로 다른 코드로 처리됐고, 한쪽만 휴식 세션을
    * 남겼다(그래서 다음 tick이 기본 훈련을 도로 깔았다).
+   *
+   * 적용의 **첫 걸음**이라 여기 반려는 아직 아무것도 바꾸지 않았다 — `clearTraining`
+   * 자신도 검증을 다 끝낸 뒤에 지운다.
    */
   if (input.clear) {
     const opt = input.clear === true ? {} : input.clear;
@@ -2194,63 +2275,12 @@ export function setTraining(state: GameState, input: TrainingPlanInput): SkillRe
     items.push(...(cleared.brief?.items ?? []));
   }
 
-  /**
-   * **지난 날짜에는 훈련을 잡지 못한다 — 소집을 건드리기 전에 거른다.**
-   *
-   * 그 자리의 tick은 이미 지나갔으므로 엔트리가 영영 `scheduled`로 남아 달력에
-   * "예정"으로 서고, 같은 날짜가 조기 소집으로 흘러가면 대가(`recallSquadEarly`)가
-   * 오늘까지의 날수만큼 부풀려 매겨진다. 그래서 검증이 승격보다 먼저다 — 뒤에서
-   * 걸러도 소집일은 이미 옮겨져 있다.
-   */
-  for (const s of input.sessions ?? []) {
-    if (!DATE_RE.test(s.date)) return { ok: false, message: `날짜 형식이 잘못됨: ${s.date}` };
-    if (s.date < state.date) {
-      return {
-        ok: false,
-        message: `${s.date}은 이미 지난 날입니다 — 훈련은 오늘(${state.date})부터 잡을 수 있습니다`,
-      };
-    }
-  }
-
-  /**
-   * **여름 휴가엔 훈련이 없다 — 감독이 소집을 앞당기지 않는 한.**
-   *
-   * 소집일 전까지 선수단은 구단에 없다. 실수로 그 자리에 세션이 깔리는 것은
-   * 막아야 하지만(부임 첫날 "월·수·금 훈련"이 그대로 통과하던 문제), **막는 것과
-   * 못 하게 하는 것은 다르다.** 휴가를 깨고 부르는 것은 실제 감독이 할 수 있는
-   * 일이고, 대가는 선수단의 반발이다 — 코어는 가능하게 하고 값을 물린다
-   * (이적 설득과 같은 태도: 확률이 낮다고 길을 막지 않는다).
-   *
-   * 그래서 `recallSquad` 없이는 거부하고, 있으면 소집일 자체를 앞당긴다.
-   */
-  const squadReturn = squadReturnOf(state.calendar);
-  const wanted = [
-    ...(input.sessions ?? []).map((x) => x.date),
-    ...((input.repeatWeekly ?? []).length > 0 ? [state.date] : []),
-  ];
-  const earliest = wanted.sort()[0];
-
-  if (input.recallSquad && earliest !== undefined && earliest < squadReturn) {
-    const recall = recallSquadEarly(state, earliest);
-    applied.push(recall);
-  }
-  const effectiveReturn = squadReturnOf(state.calendar);
+  if (recallTo !== undefined) applied.push(recallSquadEarly(state, recallTo));
 
   // 2) 특정 날짜 세션
   const dated: Array<{ date: string; slot: Slot }> = [];
   const datedFocus = new Set<TrainAttr>();
-  for (const s of input.sessions ?? []) {
-    if (!s.label?.trim()) return { ok: false, message: "훈련 설명(label)이 필요합니다" };
-    const err = validFocus(s.focus);
-    if (err) return { ok: false, message: err };
-    if (s.date < effectiveReturn) {
-      return {
-        ok: false,
-        message:
-          `${s.date}은 선수단 여름 휴가 기간입니다 — 훈련은 소집일(${effectiveReturn})부터 잡을 수 있습니다. ` +
-          `감독이 휴가를 접고 조기 소집하겠다고 했다면 recallSquad를 함께 보내세요 (선수단이 반발합니다).`,
-      };
-    }
+  for (const s of sessions) {
     addTrainingEntry(state, s.date, s.slot, s.label.trim(), s.focus);
     applied.push(`${s.date} ${slotKo(s.slot)}=${s.label}${focusKo(s.focus)}`);
     dated.push({ date: s.date, slot: s.slot });
@@ -2276,13 +2306,7 @@ export function setTraining(state: GameState, input: TrainingPlanInput): SkillRe
   let repeatPerWeek = 0;
   let repeatWeeks = 0;
   const repeatFocus = new Set<TrainAttr>();
-  for (const r of input.repeatWeekly ?? []) {
-    if (!Number.isInteger(r.dow) || r.dow < 0 || r.dow > 6) {
-      return { ok: false, message: `요일이 잘못됨: ${r.dow} (0~6)` };
-    }
-    if (!r.label?.trim()) return { ok: false, message: "훈련 설명(label)이 필요합니다" };
-    const err = validFocus(r.focus);
-    if (err) return { ok: false, message: err };
+  for (const r of repeats) {
     let made = 0;
     let skipped = 0;
     // 휴가 중이면 소집일부터 센다 — "3주간 반복"은 훈련할 수 있는 3주를 뜻한다
