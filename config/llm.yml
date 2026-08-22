@@ -1,5 +1,16 @@
 version: 1
 
+# max_retries — 요청 **하나**를 다시 부르는 횟수다(최초 호출은 세지 않는다). 에이전트
+# 밖에 있는 이유: SDK 클라이언트가 제공자마다 프로세스에 하나라 자리별로 다른 값을
+# 들 곳이 없다. 적지 않으면 SDK 기본값이 Anthropic 2 · OpenAI 2 · Google 0으로 갈려,
+# 같은 설정이 제공자마다 다르게 돈다 (docs/llm/models.md §1-1).
+max_retries: 2
+
+# operator_channel — 휘발 상태 스냅샷을 오퍼레이터 롤 메시지로 넣을지다. 에이전트마다
+# 적고, 생략하면 거짓(감독 발화 앞에 접어 넣는다). Google에는 그 롤이 없어 참을 적으면
+# 시작할 때 거부된다 — Anthropic(`role:"system"`)·OpenAI(`role:"developer"`)로 옮기는
+# 자리에서, 그 모델이 그 롤을 받는지 확인한 뒤 켠다 (docs/llm/models.md §3-3).
+
 # thinking_level — 제공자 중립 눈금(minimal·low·medium·high)이다. 어댑터 셋이 각자의
 # 파라미터로 옮긴다: Anthropic은 `thinking: adaptive` + `output_config.effort`,
 # Google은 `thinkingConfig.thinkingLevel`, OpenAI는 `reasoning_effort`.

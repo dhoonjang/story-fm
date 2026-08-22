@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import type { OpenAiAgentConfig } from "./config";
+import { resolveApiKey, type OpenAiAgentConfig } from "./config";
 import {
   isStoredLlmHistory,
   isTextHistoryMessage,
@@ -30,12 +30,29 @@ type OpenAiClient = Pick<OpenAI, "chat">;
 /**
  * SDK 클라이언트는 프로세스에 하나다 — 에이전트마다 새로 만들면 연결 풀과 재시도
  * 설정이 호출 수만큼 따로 서고, 그 이득은 아무 데도 없다.
+ *
+ * 재시도 횟수는 설정 파일에 값이 하나뿐이라(models.md §1-1) 누가 먼저 세우든 같은
+ * 값이 실린다.
  */
 let sharedClient: OpenAI | undefined;
 
-function newSharedClient(): OpenAI {
-  const apiKey = process.env.OPENAI_API_KEY;
-  return new OpenAI(apiKey ? { apiKey } : {});
+function newSharedClient(maxRetries: number): OpenAI {
+  // 키를 읽는 자리는 설정 하나다 (models.md §2)
+  const apiKey = resolveApiKey("openai");
+  return new OpenAI({ maxRetries, ...(apiKey ? { apiKey } : {}) });
+}
+
+/**
+ * 도구 결과에 실은 **실패 표시** — Anthropic의 `is_error`, Gemini의 `{ error }`에
+ * 해당하는 자리다 (models.md §3).
+ *
+ * OpenAI의 `tool` 메시지에는 본문 한 칸뿐이라 성공과 실패가 같은 모양으로 나가면
+ * 모델이 자기 호출이 통했는지 문장으로 짐작해야 한다. 붙이는 자리를 함수 하나로
+ * 모아 두어, 인자 파싱 실패·도구가 돌려준 실패·실행하지 않은 호출 셋이 갈리지 않게
+ * 한다.
+ */
+function toolError(message: string): string {
+  return `오류: ${message}`;
 }
 
 /** OpenAI의 종료 사유를 중립 계약으로 옮긴다 (models.md §3-1) */
@@ -234,7 +251,7 @@ export class OpenAiGameLLM implements GameLLM {
     private readonly config: OpenAiAgentConfig,
     client?: OpenAiClient,
   ) {
-    this.client = client ?? (sharedClient ??= newSharedClient());
+    this.client = client ?? (sharedClient ??= newSharedClient(config.maxRetries));
   }
 
   /** 이 문 하나를 지나 나가는 실패에는 모두 종류가 실린다 (models.md §1-1) */
@@ -250,13 +267,21 @@ export class OpenAiGameLLM implements GameLLM {
     const baseHistory = openaiHistory(req.history, this.config);
 
     /**
-     * 상태 스냅샷은 **`developer` 롤**로 넣는다 — Anthropic의 오퍼레이터 채널과
-     * 같은 자리다. 감독 발화에 접어 넣으면 다음 턴 이력에서 그 문장이 감독이 한
-     * 말처럼 남는다. 아래에서 저장 이력을 만들 때 이 메시지는 걷어낸다.
+     * 상태 스냅샷을 **`developer` 롤**(Anthropic의 오퍼레이터 채널과 같은 자리)로
+     * 넣을지는 **설정이 정한다** (models.md §3-3) — 그 롤을 받는 모델인지 400을
+     * 맞아 가며 알아내지 않는다. 거짓이면 감독 발화 앞에 접어 넣고, 저장 이력에서는
+     * 어느 쪽이든 걷어낸다: 그러지 않으면 다음 턴 이력에서 지난 날짜·지난 스코어가
+     * 감독이 한 말처럼 쌓인다.
      */
+    const useDeveloperNote = req.stateNote !== undefined && this.config.operatorChannel;
     const turnMessages: ChatMessage[] = [
-      ...(req.stateNote ? [{ role: "developer" as const, content: req.stateNote }] : []),
-      { role: "user" as const, content: req.user },
+      ...(useDeveloperNote && req.stateNote
+        ? [{ role: "developer" as const, content: req.stateNote }]
+        : []),
+      {
+        role: "user" as const,
+        content: useDeveloperNote || !req.stateNote ? req.user : `${req.stateNote}\n\n${req.user}`,
+      },
     ];
     const messages: ChatMessage[] = [
       ...(system ? [{ role: "system" as const, content: system }] : []),
@@ -375,7 +400,7 @@ export class OpenAiGameLLM implements GameLLM {
        */
       if (stopReason !== "tool_use") {
         for (const call of turn.calls) {
-          messages.push({ role: "tool", tool_call_id: call.id, content: UNRUN_CALL });
+          messages.push({ role: "tool", tool_call_id: call.id, content: toolError(UNRUN_CALL) });
         }
         break;
       }
@@ -387,11 +412,12 @@ export class OpenAiGameLLM implements GameLLM {
         try {
           input = call.arguments ? JSON.parse(call.arguments) : {};
         } catch {
-          // 인자가 깨졌으면 도구를 부르지 않고 그 사실을 되돌려 준다 (재시도 규약)
+          // 인자가 깨졌으면 도구를 부르지 않고 그 사실을 되돌려 준다 (재시도 규약).
+          // 성공 경로와 같은 모양으로 나가면 모델이 이것을 도구의 산출로 읽는다.
           messages.push({
             role: "tool",
             tool_call_id: call.id,
-            content: "인자가 올바른 JSON이 아닙니다",
+            content: toolError("인자가 올바른 JSON이 아닙니다"),
           });
           continue;
         }
@@ -402,7 +428,7 @@ export class OpenAiGameLLM implements GameLLM {
         messages.push({
           role: "tool",
           tool_call_id: call.id,
-          content: outcome.ok ? outcome.message : `오류: ${outcome.message}`,
+          content: outcome.ok ? outcome.message : toolError(outcome.message),
         });
       }
     }
@@ -418,6 +444,11 @@ export class OpenAiGameLLM implements GameLLM {
     const saved = messages.filter(
       (m) => m.role !== "system" && !(m.role === "developer" && m.content === req.stateNote),
     );
+    // 접어 넣은 쪽에서도 휘발 상태를 세이브에 남기지 않는다 (models.md §3-3)
+    const currentUser = saved[baseHistory.length];
+    if (!useDeveloperNote && req.stateNote && currentUser?.role === "user") {
+      saved[baseHistory.length] = { role: "user", content: req.user };
+    }
 
     return {
       text,

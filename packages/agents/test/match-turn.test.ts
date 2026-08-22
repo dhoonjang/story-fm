@@ -245,7 +245,7 @@ describe("경기 턴의 실패 — 어느 걸음이 흔들렸나", () => {
     runTurn.mockRejectedValueOnce(new ModelOutputError("중계가 출력 문법을 어겼습니다"));
     runTurn.mockResolvedValueOnce(casted("[12']\n@중계: 다시 이어갑니다."));
 
-    const turn = await runGmTurn(state, "계속", undefined, true);
+    const turn = await runGmTurn(state, "경기 진행", undefined, { kind: "advance_match" });
 
     expect(runTurn).toHaveBeenCalledTimes(2);
     expect(turn.text).toContain("다시 이어갑니다");
@@ -265,9 +265,7 @@ describe("경기 턴의 실패 — 어느 걸음이 흔들렸나", () => {
     // 도구를 부르지 않은 응답 — 두 번 불러도 의도가 비면 턴을 취소한다
     runTurn.mockResolvedValue(casted("해석해 보겠습니다."));
 
-    await expect(runGmTurn(state, "압박 올려", undefined, false)).rejects.toBeInstanceOf(
-      GmTurnFailure,
-    );
+    await expect(runGmTurn(state, "압박 올려")).rejects.toBeInstanceOf(GmTurnFailure);
     // 해석에서 끊겼으므로 중계는 불리지 않았고, 판도 그대로다
     expect(runTurn).toHaveBeenCalledTimes(2);
     expect(state.pendingMatch!.ledger.minute).toBe(minute);
@@ -284,7 +282,7 @@ describe("경기 턴의 실패 — 어느 걸음이 흔들렸나", () => {
     const thrown = new LlmTimeoutError("match-intent", 60_000);
     runTurn.mockRejectedValue(thrown);
 
-    await expect(runGmTurn(state, "압박 올려", undefined, false)).rejects.toBe(thrown);
+    await expect(runGmTurn(state, "압박 올려")).rejects.toBe(thrown);
     // 시한을 넘긴 호출은 다시 부르지 않는다 — 잠금 안의 대기가 두 배가 된다
     expect(runTurn).toHaveBeenCalledTimes(1);
     expect(state.pendingMatch!.ledger.minute).toBe(minute);

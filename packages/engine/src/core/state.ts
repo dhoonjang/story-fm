@@ -535,6 +535,15 @@ export interface GameState {
    * 구 세이브엔 없다 — 읽을 때 09:00으로 본다 (`clockOf`).
    */
   clock?: string;
+  /**
+   * **첫 줄 헤더를 연달아 못 읽은 평시 턴 수** — 읽히면 지워진다.
+   *
+   * 모델이 적은 시점이 시계를 움직이는 유일한 자유 텍스트 경로라(agents.md §2)
+   * 그 실패는 조용히 쌓인다. 세이브가 드는 이유는 "연달아"가 턴을 건너 세는
+   * 값이라서다 — 어디에서도 파생할 수 없다. 옛 세이브엔 없다
+   * (optional — SAVE_VERSION 유지).
+   */
+  sceneHeaderMisses?: number;
   calendar: SeasonCalendar;
   userTeamId: string;
   phase: GamePhase;

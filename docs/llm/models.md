@@ -11,6 +11,7 @@
 
 ```yaml
 version: 1
+max_retries: 2 # 요청 하나를 다시 부르는 횟수 — 제공자 셋이 함께 쓴다 (§1-1)
 agents:
   gm:            { provider: google, model: gemini-3.6-flash,      max_tokens: 64000, timeout_ms: 180000, thinking_level: minimal }
   match-intent:  { provider: google, model: gemini-3.5-flash-lite, max_tokens: 16000, timeout_ms: 60000,  thinking_level: minimal }
@@ -46,8 +47,14 @@ agents:
   넘을 때만 도니 드물다.
 - 사고 수준(`thinking_level`)은 그 에이전트 항목이 함께 갖는다 — 제공자 중립 눈금이라
   셋 다 실을 수 있다 (§1-2).
+- **`max_retries`만은 에이전트 밖, 파일 맨 위에 있다** — 재시도는 요청 하나를 다시
+  거는 전송 계층의 값이고, SDK 클라이언트는 **제공자마다 프로세스에 하나**라(연결 풀을
+  나눠 쓴다) 에이전트마다 다른 값을 들 자리가 애초에 없다. 자리별로 다르게 주고 싶은
+  것은 재시도가 아니라 시한이고, 그것이 `timeout_ms`다 (§1-1).
+- 상태 스냅샷을 오퍼레이터 롤로 넣을 수 있는지(`operator_channel`)도 그 에이전트
+  항목이 갖는다 — 모델마다 갈리는 능력이라 설정이 정한다 (§3).
 
-## 1-1. 호출 실패 — 종류와 시한 (`timeout_ms`)
+## 1-1. 호출 실패 — 종류 · 재시도 (`max_retries`) · 시한 (`timeout_ms`)
 
 ### 오류에는 종류가 있다
 
@@ -79,6 +86,41 @@ agents:
 - **키가 없으면 부르기 전에 `auth`로 실패한다** — 팩토리가 어댑터를 세우는 자리다.
 - ⚠️ **문구로 분류하지 않는다.** 표의 오른쪽 세 칸은 전부 코드값(HTTP 상태·SDK 오류
   클래스·열거된 종료 사유)이다. 제공자가 사람이 읽는 문장을 바꿔도 분류는 그대로다.
+
+### 재시도 (`max_retries`)
+
+**`max_retries`는 요청 하나를 다시 부르는 횟수다** — 최초 호출은 세지 않으므로 `2`면
+한 요청이 최대 세 번 나간다. 시한과 같은 이유로 SDK 기본값에 맡기지 않는다: Anthropic·
+OpenAI는 2회를 기본으로 돌고 `@google/genai`는 **옵션을 주지 않으면 한 번도 다시 부르지
+않아**, 같은 설정으로 도는 어댑터 셋이 서로 다른 계약을 지킨다.
+
+- **기본값은 2다.** 다시 부를 만한 실패는 붐빔·한도·일시적 5xx뿐이고, 그런 실패는 한두
+  번 안에 풀리거나 그 자리에서 안 풀린다 — 더 늘리면 감독은 배너 대신 침묵을 더 오래
+  볼 뿐이다. 셋 중 둘의 SDK 기본값과도 같아, 이 값을 적는 것이 동작을 바꾸는 자리는
+  Gemini 하나다.
+- ⚠️ **다시 부르는 것은 요청 하나이지 턴이 아니다.** 도구가 이미 돈 턴을 다시 부르면
+  스킬이 두 번 돌아 장부가 두 번 움직인다 (agents.md §8). 그래서 재시도는 전송 계층
+  안쪽에만 있고, `runTurn`을 감싸는 자리(`withDeadline`·계측)에는 없다.
+- ⚠️ **재시도는 시한을 늘리지 않는다.** `timeout_ms`는 요청 하나마다 다시 걸리므로
+  전송만 보면 최악이 `timeout_ms × (max_retries + 1)`이지만, 턴 전체는 `withDeadline`이
+  `timeout_ms`에서 끊는다 — 재시도는 그 시한 **안에서만** 일어난다. 시한을 넘긴 호출을
+  다시 부르지 않는 규칙(아래)은 그래서 재시도와 부딪히지 않는다.
+- **키가 없어 실패한 호출은 재시도가 없다** — 부르기 전에 팩토리가 끊는다 (§2).
+
+| 제공자    | 재시도가 도는 자리                                    | 다시 부르는 응답                                          |
+| --------- | ----------------------------------------------------- | --------------------------------------------------------- |
+| Anthropic | SDK 클라이언트 옵션 `maxRetries`                      | 408 · 409 · 429 · 5xx · 연결 오류 · `x-should-retry` 헤더 |
+| OpenAI    | SDK 클라이언트 옵션 `maxRetries`                      | ←                                                         |
+| Google    | **어댑터가 직접** — `sendMessage` 한 번을 다시 부른다 | `ApiError`의 408 · 409 · 429 · 5xx                        |
+
+⚠️ **Gemini만 SDK의 재시도를 쓰지 않는다 — 그것을 켜면 오류의 종류가 무너지기
+때문이다.** `@google/genai`의 `httpOptions.retryOptions`를 주면 SDK가 응답을 `ApiError`로
+세우기 **전에** 재시도 래퍼가 가로채, 상태를 잃은 맨 `Error`(재시도 대상)나 이름이
+`AbortError`인 오류(재시도 대상이 아닌 것)로 바꿔 던진다. 그러면 끝내 실패한 429는
+`unknown`이 되고 **401은 중단 신호로 읽혀 `timeout`이 된다** — 키가 틀린 감독이 "응답이
+지연됐다"는 배너를 본다. 재시도 횟수보다 종류가 값진 값이라, 어댑터가 같은 자리(응답
+하나가 오기 전, 아무것도 소비하지 않은 시점)에서 직접 다시 부른다. 스트림이 흐르기
+시작한 뒤의 실패는 다시 부르지 않는다 — 이미 화면에 나간 문장을 두 번 쓸 수는 없다.
 
 ### 시한 (`timeout_ms`)
 
@@ -226,6 +268,14 @@ agents:
 | google    | `GOOGLE_API_KEY` \| `GEMINI_API_KEY` |
 | openai    | `OPENAI_API_KEY`                     |
 
+- **키를 읽는 자리는 하나다** — `resolveApiKey(provider, env)`. "키가 있는가"를 묻는
+  팩토리와 실제로 클라이언트에 싣는 어댑터가 같은 함수를 부른다. 둘이 갈리면
+  **키가 있는데도 조용히 mock으로 도는** 조합이 생긴다: 이름이 둘인 Google에서 하나는
+  `??`로 다른 하나는 `||`로 고르면 `GOOGLE_API_KEY=""`·`GEMINI_API_KEY=<값>`인 환경이
+  판정은 "없음", 클라이언트는 "있음"이 된다.
+- **빈 문자열은 키가 아니다.** 셸이 정의만 하고 값을 비워 둔 변수는 없는 것과 같게
+  읽는다 — 그러지 않으면 그 변수가 뒤의 이름을 가린다.
+
 **`LLM_MODE=mock|real`** — 미지정이면 GM 에이전트의 제공자 키가 있는지로 정한다.
 mock은 폴백이 아니라 **모드**이고 규칙 기반 오케스트레이터가 대신 돈다 (agents.md §8).
 
@@ -262,10 +312,10 @@ runTurn({ system, history, user, stateNote?, tools?, toolChoice?, maxTokens?, on
   user 턴 하나, Anthropic은 빈 텍스트 메시지 제거, 태그가 다르면 통째로 버림) 보낸
   이력의 길이로는 경계를 셀 수 없다. 이 턴이 새로 붙인 것만 읽는 자리가 이 값을 쓴다(§5).
 
-| 어댑터    | 캐싱                                       | 최소 캐시 프리픽스 | 상태 스냅샷 자리                | 사고 (§1-2)                                   | 시한을 거는 자리                                            |
+| 어댑터    | 캐싱                                       | 최소 캐시 프리픽스 | 오퍼레이터 채널 (§3-3)          | 사고 (§1-2)                                   | 시한을 거는 자리                                            |
 | --------- | ------------------------------------------ | ------------------ | ------------------------------- | --------------------------------------------- | ----------------------------------------------------------- |
-| Anthropic | `cache_control` 브레이크포인트(요청당 4개) | 1,024 토큰         | `role:"system"` 오퍼레이터 채널 | `thinking: adaptive` + `output_config.effort` | `messages.stream(body, { signal, timeout })`                |
-| Gemini    | implicit (동일 프리픽스)                   | 4,096 토큰         | 유저 발화 앞에 접어 넣음        | `thinkingConfig.thinkingLevel`                | `chats.create`의 `config.abortSignal`·`httpOptions.timeout` |
+| Anthropic | `cache_control` 브레이크포인트(요청당 4개) | 1,024 토큰         | `messages` 안의 `role:"system"` | `thinking: adaptive` + `output_config.effort` | `messages.stream(body, { signal, timeout })`                |
+| Gemini    | implicit (동일 프리픽스)                   | 4,096 토큰         | 없음 — 늘 접어 넣는다           | `thinkingConfig.thinkingLevel`                | `chats.create`의 `config.abortSignal`·`httpOptions.timeout` |
 | OpenAI    | 자동 프롬프트 캐시                         | 1,024 토큰         | `role:"developer"`              | `reasoning_effort`                            | `chat.completions.create(body, { signal, timeout })`        |
 
 **사고·최소 캐시 프리픽스 두 칸은 설정이 읽는 값이지 어댑터에 박힌 상수가 아니다** —
@@ -279,8 +329,8 @@ runTurn({ system, history, user, stateNote?, tools?, toolChoice?, maxTokens?, on
 (`calculateNonstreamingTimeout`). `onText`는 델타를 받을지만 가르고 최종 메시지는 같다.
 `input_tokens`가 캐시분을 빼고 오므로 어댑터가 되돌려 놓는다(§4). 미해결 `tool_use`가
 마지막 턴에 남으면 합성 `tool_result`로 닫는다 — 안 닫으면 그 이력을 재사용하는 다음
-요청이 400이다. `role:"system"` 중간 메시지를 거부하는 모델은 한 번 400을 맞은 뒤
-유저 발화에 접어 넣는 폴백으로 고정된다.
+요청이 400이다. `role:"system"` 중간 메시지를 받는지는 **설정이 정한다** — 오류 문장을 보고
+갈아타지 않는다 (§3-3).
 
 **Gemini** — thought signature와 function call id를 위치까지 그대로 보존해야 해서 SDK
 Chat 이력을 원형으로 저장한다. 스트리밍은 chunk마다 model content를 따로 남기므로
@@ -295,6 +345,11 @@ Chat 이력을 원형으로 저장한다. 스트리밍은 chunk마다 model cont
 스트리밍의 도구 호출은 **`index`가 자리를 정하고**(id·이름은 첫 조각에만, 인자는 문자
 단위로 쪼개져 온다), 사용량은 `stream_options.include_usage`가 붙여 주는 마지막
 chunk에만 실린다 — 그 옵션이 없으면 계측이 이 에이전트를 못 본다.
+⚠️ **도구 결과에 실패 표시 자리가 없다** — `tool` 메시지는 본문 한 칸뿐이라, 성공과
+실패가 같은 모양으로 나가면 모델은 자기 호출이 통했는지 문장으로 짐작해야 한다.
+Anthropic의 `is_error`, Gemini의 `{ error }`에 해당하는 것을 이 어댑터는 **`오류:`
+접두**로 세우고, 그것을 붙이는 자리는 어댑터 안의 함수 하나다 — 인자 JSON 파싱 실패,
+도구가 돌려준 실패, 실행하지 않은 호출 셋이 같은 모양으로 나간다 (§3).
 
 ## 3-1. `stopReason` — 턴이 왜 멈췄는가
 
@@ -340,6 +395,35 @@ chunk에만 실린다 — 그 옵션이 없으면 계측이 이 에이전트를 
 - **강제해도 안 부를 수 있다** — 호출이 실패하거나 제공자가 무시하면 `toolCallCount`가 0인
   응답이 온다. 그것을 실패로 보고 한 번 더 부르는 것은 호출 쪽의 몫이다
   ([agents.md](./agents.md) §8).
+
+## 3-3. `operator_channel` — 상태 스냅샷을 어디에 넣는가
+
+턴마다 새로 주입되는 휘발 상태(`stateNote` — 오늘 날짜, 스코어, 잔여 예산)는 감독의 말이
+아니다. 감독 발화에 접어 넣으면 다음 턴 이력에 그 문장이 **감독이 한 말처럼** 남고,
+지난 날짜와 지난 스코어가 이력에 쌓인다. 그래서 제공자가 오퍼레이터 롤을 주면 거기로
+넣는다 — Anthropic은 `messages` 안의 `role:"system"`, OpenAI는 `role:"developer"`.
+
+**그 롤을 받는지는 모델마다 갈리고, 그 사실은 설정이 갖는다.** 에이전트 항목의
+`operator_channel`(참/거짓, 생략하면 거짓)이다.
+
+| `operator_channel` | 스냅샷이 가는 곳                              | 저장 이력                      |
+| ------------------ | --------------------------------------------- | ------------------------------ |
+| `true`             | 오퍼레이터 롤 메시지 하나 — 유저 발화 **뒤**  | 그 메시지를 걷어낸다           |
+| `false` (기본)     | 유저 발화 앞에 접어 넣는다 (`스냅샷\n\n발화`) | 발화만 남긴다 — 접은 것은 뺀다 |
+
+- ⚠️ **기본이 거짓인 이유는 모르는 모델에서 400이 나지 않는 쪽이어야 하기 때문**이다.
+  켜는 것은 그 모델이 그 롤을 받는다고 확인한 뒤 설정 한 줄이고, 어느 쪽이든 저장
+  이력에 휘발 상태가 남지 않는 것은 같다.
+- ⚠️ **오류 문장을 보고 갈아타지 않는다.** 예전에는 Anthropic이 400의 메시지에서
+  `system`·`role`·`not supported` 같은 낱말을 찾아 폴백으로 고정했다. 그것은 §1-1이
+  금지하는 문구 분류를 오류 처리 밖에서 되살린 것이고, 제공자가 문안을 손보는 날
+  **첫 턴마다 400을 한 번씩 맞고** 지나간다. 능력은 물어보는 것이 아니라 적어 두는 것이다.
+- **Google에는 이 채널이 없다** — `operator_channel: true`는 시작할 때 거부된다.
+  `thinking_level`을 못 싣는 제공자에 적었을 때와 같은 규칙이다 (§1-2): 조용히 무시하면
+  설정과 실제로 도는 것이 갈린다.
+- **참일 때 스냅샷은 유저 발화 뒤 마지막 자리에 선다** — Anthropic의 중간 시스템
+  메시지는 유저 턴 뒤에 와야 하고 `messages[0]`일 수 없다(현행 레퍼런스). 캐시로도
+  그 자리가 맞다: 고정 프리픽스(도구·시스템·이력)가 앞이고, 매 턴 바뀌는 것은 뒤다 (§4).
 
 ## 4. 계측과 예산 (`usage-meter.ts`)
 
@@ -455,8 +539,16 @@ chunk에만 실린다 — 그 옵션이 없으면 계측이 이 에이전트를 
 - **어댑터가 이력을 평탄화하지 않는다.** thought signature·function call id·thinking
   블록이 사라지면 다음 호출이 실패한다.
 - **키가 없으면 폴백하지 않고 실패한다** — 조용한 폴백은 설정과 실제를 갈라놓는다.
+  **키를 읽는 자리도 하나다**(`resolveApiKey`) — 판정과 클라이언트가 서로 다른 규칙으로
+  고르면 키가 있는 환경이 조용히 mock으로 돈다 (§2).
 - **시한 없는 모델 호출을 만들지 않는다.** 제공자 기본값은 셋이 다르고 적혀 있지도
-  않다 — 시한은 `config/llm.yml`에서만 온다.
+  않다 — 시한은 `config/llm.yml`에서만 온다. **재시도 횟수도 같다**(`max_retries`,
+  §1-1): SDK 기본값은 2·2·0이라, 적지 않으면 같은 설정이 제공자마다 다르게 돈다.
+- **재시도는 요청 하나에만 건다.** 도구가 이미 돈 턴을 다시 부르면 스킬이 두 번 돈다
+  (§1-1).
+- **제공자의 능력은 설정이 적는다 — 오류 문장을 보고 알아내지 않는다.** 사고를 실을 수
+  있는지(§1-2), 오퍼레이터 롤을 받는지(§3-3) 둘 다 표에 있고, 못 하는 조합은 시작할 때
+  거부된다.
 - **잠금을 시간으로 풀지 않는다.** 상한이 걸리는 것은 **기다림**이지 잠금이 아니다 —
   기다리다 지친 요청은 409로 물러나고 아무것도 쓰지 않는다. 끝나지 않는 호출은 호출
   쪽에서 끝낸다 (§1-1).
@@ -486,6 +578,8 @@ chunk에만 실린다 — 그 옵션이 없으면 계측이 이 에이전트를 
 | 종료 사유 중립 enum          | `packages/llm/src/game-llm.ts` (`StopReason`) · 매핑은 어댑터 셋                    |
 | 제공자 특성 표(사고·캐시)    | `packages/llm/src/config.ts` (`PROVIDER_TRAITS`)                                    |
 | 시한 래퍼                    | `packages/llm/src/deadline.ts`                                                      |
+| 오류 종류·재시도 판정        | `packages/llm/src/llm-error.ts` (`kindOfStatus` · `isRetryableStatus`)              |
+| 키 해석 (제공자별 환경변수)  | `packages/llm/src/config.ts` (`resolveApiKey`)                                      |
 | 게임 잠금 (대기 상한·409)    | `apps/web/lib/turn-runner.ts` (`withGameLock`)                                      |
 | 세이브 파일 락               | `packages/engine/src/core/save-lock.ts`                                             |
 | 스트리밍 턴의 하트비트       | `apps/web/app/api/games/[id]/turn/stream/route.ts`                                  |
