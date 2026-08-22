@@ -13,9 +13,9 @@ import {
 } from "@story-fm/engine";
 import { boardExpectationText } from "@story-fm/domain";
 import { runOnboardingTurn } from "@story-fm/agents";
-import { beginGameUsage, bindTurnTrace, traceTurn } from "@story-fm/llm";
+import { beginGameUsage, bindTurnTrace, llmErrorKind, traceTurn } from "@story-fm/llm";
 import { toPayload } from "@/lib/store";
-import { turnErrorMessage } from "@/lib/turn-runner";
+import { errorDetail, turnErrorMessage } from "@/lib/turn-runner";
 
 /** 보드 기대의 이름 — 코드와 목표 순위에서 만든다 (career.md §6) */
 const expectationLabel = (e: {
@@ -122,14 +122,13 @@ export async function POST(request: Request) {
       bindTurnTrace(state.id, state.chat.length - 1);
       return { ok: true as const };
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
       console.error("[games] 첫 장면 생성 실패 — 게임을 만들지 않는다:", error);
-      return { ok: false as const, detail };
+      return { ok: false as const, error };
     }
   });
   if (!opened.ok) {
     return NextResponse.json(
-      { error: turnErrorMessage(opened.detail), detail: opened.detail },
+      { error: turnErrorMessage(llmErrorKind(opened.error)), ...errorDetail(opened.error) },
       { status: 502 },
     );
   }

@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
+import OpenAI from "openai";
 import {
   OpenAiGameLLM,
   isStoredLlmHistory,
+  llmErrorKind,
   type GameToolSpec,
+  type LlmErrorKind,
   type StopReason,
 } from "@story-fm/llm";
 
@@ -553,5 +556,45 @@ describe("OpenAiGameLLM 종료 사유", () => {
     });
     expect(result.toolCallCount).toBe(1);
     expect(result.stopReason).toBe("completed");
+  });
+});
+
+/**
+ * **분류는 코드값이 한다 — 문장이 아니라** (models.md §1-1). 상태 코드 하나로
+ * 갈리므로 어댑터 셋이 나눠 쓰는 표를 그대로 쓴다.
+ */
+describe("OpenAiGameLLM 오류 종류", () => {
+  const apiError = (status: number) =>
+    OpenAI.APIError.generate(
+      status,
+      { error: { message: "문안은 언제든 바뀐다" } },
+      undefined,
+      new Headers(),
+    );
+
+  const cases: Array<[string, Error, LlmErrorKind]> = [
+    ["503 혼잡", apiError(503), "overloaded"],
+    ["429 한도", apiError(429), "rate_limit"],
+    ["401 인증", apiError(401), "auth"],
+    ["중단 신호", new OpenAI.APIUserAbortError(), "timeout"],
+  ];
+
+  it.each(cases)("%s는 %s로 옮긴다", async (_label, thrown, kind) => {
+    const stub = makeStubClient([]);
+    stub.create.mockRejectedValueOnce(thrown);
+    const error = await new OpenAiGameLLM(testConfig, stub.client)
+      .runTurn({ system: "sys", history: [], user: "안녕" })
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(llmErrorKind(error)).toBe(kind);
+  });
+
+  it("막혀서 아무것도 못 받은 턴은 filtered로 실패한다", async () => {
+    const stub = makeStubClient([completion({ role: "assistant", content: "" }, "content_filter")]);
+    const error = await new OpenAiGameLLM(testConfig, stub.client)
+      .runTurn({ system: "sys", history: [], user: "안녕" })
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(llmErrorKind(error)).toBe("filtered");
   });
 });

@@ -9,7 +9,14 @@ import {
   type GameState,
 } from "@story-fm/engine";
 import { GmTurnFailure, compactHistory, runGmTurn } from "@story-fm/agents";
-import { beginGameUsage, bindTurnTrace, traceTurn } from "@story-fm/llm";
+import {
+  beginGameUsage,
+  bindTurnTrace,
+  llmErrorKind,
+  traceEnabled,
+  traceTurn,
+  type LlmErrorKind,
+} from "@story-fm/llm";
 import { toPayload, type GamePayload } from "./store";
 import type { MatchBoardOrder } from "./match-orders";
 
@@ -65,25 +72,36 @@ export type TurnOutcome =
 
 /**
  * LLM 실패를 감독에게 보일 한 줄로 — **게임 밖의 사건**이므로 픽션 밖 말투로.
- * 원인 문자열은 서버 로그에만 남기고, 화면에는 **무슨 일이 났는지만** 적는다 —
  * 다시 걸어 보라는 말은 배너의 `다시 시도` 버튼이 이미 하고 있다.
  * 새 게임 첫 장면(`/api/games`)도 같은 문구를 쓴다 — 폴백 장면은 없다.
+ *
+ * **고르는 근거는 `kind` 하나다** (models.md §1-1). 오류 문자열에서 낱말을 찾던
+ * 예전 분류는 제공자가 메시지 문안을 손보는 날 조용히 무너졌고, 그 낱말을 지키느라
+ * 오류 문구까지 코드의 제약이 됐다.
  */
-export function turnErrorMessage(detail: string): string {
-  const d = detail.toLowerCase();
-  if (d.includes("overloaded") || d.includes("529")) {
-    return "모델 서버가 혼잡합니다";
-  }
-  if (d.includes("rate limit") || d.includes("429")) {
-    return "요청 한도를 넘었습니다";
-  }
-  if (d.includes("timeout") || d.includes("etimedout") || d.includes("abort")) {
-    return "응답이 지연돼 턴을 취소했습니다";
-  }
-  if (d.includes("api key") || d.includes("authentication") || d.includes("401")) {
-    return "LLM 인증 정보가 올바르지 않습니다";
-  }
-  return "응답을 받지 못해 지시를 반영하지 못했습니다";
+const TURN_ERROR_MESSAGE: Record<LlmErrorKind, string> = {
+  overloaded: "모델 서버가 혼잡합니다",
+  rate_limit: "요청 한도를 넘었습니다",
+  timeout: "응답이 지연돼 턴을 취소했습니다",
+  auth: "LLM 인증 정보가 올바르지 않습니다",
+  filtered: "모델이 이 요청을 거절했습니다",
+  budget: "이 게임의 토큰 예산 상한에 닿았습니다",
+  unknown: "응답을 받지 못해 지시를 반영하지 못했습니다",
+};
+
+export function turnErrorMessage(kind: LlmErrorKind): string {
+  return TURN_ERROR_MESSAGE[kind];
+}
+
+/**
+ * 원인 문자열을 응답에 실을지 — **개발 모드에서만 싣는다** (models.md §1-1).
+ *
+ * 내부 예외 원문에는 프롬프트 조각·모델 ID·경로가 섞여 나온다. 프로덕션에서는
+ * 서버 로그에만 남고, 화면이 받는 것은 `error` 한 줄뿐이다.
+ */
+export function errorDetail(error: unknown): { detail?: string } {
+  if (!traceEnabled()) return {};
+  return { detail: error instanceof Error ? error.message : String(error) };
 }
 
 /**
@@ -198,8 +216,8 @@ export function runTurnLocked(
         saveGame(state);
         return { ok: true as const, payload: toPayload(state) };
       } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        console.error(`[turn] GM 턴 실패 (game=${id}):`, error);
+        const kind = llmErrorKind(error);
+        console.error(`[turn] GM 턴 실패 (game=${id}, kind=${kind}):`, error);
         return {
           ok: false as const,
           status: 502,
@@ -207,8 +225,8 @@ export function runTurnLocked(
            * `GmTurnFailure`는 감독에게 보일 문구를 이미 들고 온다 — 원인을 짐작해
            * 바꿔 쓰면 "지시를 옮기지 못했다"가 "응답을 받지 못했다"로 둔갑한다.
            */
-          error: error instanceof GmTurnFailure ? error.message : turnErrorMessage(detail),
-          detail,
+          error: error instanceof GmTurnFailure ? error.message : turnErrorMessage(kind),
+          ...errorDetail(error),
         };
       }
     }),
