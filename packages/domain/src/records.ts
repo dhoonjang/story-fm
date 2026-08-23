@@ -787,6 +787,8 @@ export const FINANCE_EXPENSE_CATEGORIES = [
   "agent_fee",
   "transfer_out",
   "amortisation",
+  "capex",
+  "depreciation",
 ] as const;
 
 export const FinanceCategorySchema = z.enum([
@@ -816,6 +818,10 @@ export const FINANCE_CATEGORY_KO: Record<FinanceCategory, string> = {
   transfer_out: "이적료 지출",
   /** 감독이 읽는 이름 — `이적료 지출`(한 번에 나간 현금)과 이름만으로 갈린다 */
   amortisation: "이적료 분할 비용",
+  /** 자산을 산 현금 — 손익 밖이다. 선수 쪽의 `transfer_out`과 같은 자리 */
+  capex: "구장·시설 투자",
+  /** 그 자산을 내용연수에 나눠 무는 몫 — 선수 쪽의 `amortisation`과 같은 자리 */
+  depreciation: "자산 상각",
   other: "기타",
 };
 
@@ -898,6 +904,37 @@ export const TeamFinanceSchema = z.object({
       /** 받는 햇수 — 보통 3년, 승격 1시즌 만의 재강등이면 2년 */
       years: z.number().int().positive(),
     })
+    .optional(),
+  /**
+   * **감독이 정한 티켓 가격** — 기준가 대비 배율 (finance.md §5.2).
+   *
+   * 금액이 아니라 배율인 이유는 승강이다: 기준가는 리그가 정하므로(`avgTicketPrice`)
+   * 강등하면 £45가 그 리그의 두 배 값이 된다. 배율로 들면 감독의 선택("우리는 조금
+   * 비싸게 판다")이 리그를 건너도 그대로 남는다. 감독의 구단에만 선다.
+   * 옛 세이브엔 없다 (optional — 세이브 버전 유지).
+   */
+  ticketPrice: z.object({ ratio: z.number().positive(), setOn: DateString }).optional(),
+  /**
+   * **자본 자산** — 현금은 한 번 나가고 손익은 내용연수에 나눠 무는 것 (finance.md §6.1-1).
+   *
+   * 선수의 취득원가·상각 기간은 계약 이력에서 파생하지만(§6.1) 구장에는 파생할 이력이
+   * 없다. 그래서 이 축만 줄을 갖는다 — 취득원가와 기간이 곧 자산의 정체다.
+   * 옛 세이브엔 없다 (optional — 세이브 버전 유지).
+   */
+  assets: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        /** 원장 라벨에 그대로 실린다 */
+        label: z.string().min(1),
+        /** 취득원가 — 상각의 총합은 이 값을 넘지 않는다 */
+        cost: z.number().min(0),
+        /** 상각 시작 — 착공일 */
+        since: DateString,
+        /** 내용연수 (개월) */
+        months: z.number().int().positive(),
+      }),
+    )
     .optional(),
 });
 export type TeamFinance = z.infer<typeof TeamFinanceSchema>;
