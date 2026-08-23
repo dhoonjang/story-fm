@@ -112,6 +112,42 @@ export const MANAGER_TERMS_BY_TIER: Record<
   4: { salary: 800_000, years: 2, budgetPledge: 2_000_000 },
 };
 
+/**
+ * **지갑에서 나가는 갈래** (career.md §5.4).
+ *
+ * 갈래가 몇이든 잔고를 깎는 함수는 하나이므로(`spendFromWallet`), 여기 줄을 더하는
+ * 것이 곧 지출처를 여는 것이다.
+ */
+export const MANAGER_SPEND_KINDS = ["transfer-fund", "player-bonus", "buyout"] as const;
+export const ManagerSpendKindSchema = z.enum(MANAGER_SPEND_KINDS);
+export type ManagerSpendKind = z.infer<typeof ManagerSpendKindSchema>;
+
+/** 갈래의 이름 — 감독이 읽는 말은 여기서만 온다 */
+export const MANAGER_SPEND_KIND_KO: Record<ManagerSpendKind, string> = {
+  "transfer-fund": "이적 예산 사재 출연",
+  "player-bonus": "선수 사재 보너스",
+  buyout: "사임 위약금",
+};
+
+/**
+ * **감독이 쓴 돈 한 줄** — 구단 원장이 아니라 **감독의 이력**이다 (career.md §5.4).
+ *
+ * 구단 원장은 구단의 것이라, 이 돈이 구단 원장에도 서는 것은 그 돈이 실제로 구단에
+ * 들어갈 때뿐이다(사임 위약금 — finance.md §9.7). 여기 적히는 것은 **사실뿐**이고,
+ * 감독이 왜 그 돈을 썼는지는 GM이 쓴다 (overview.md §1 철칙 4).
+ */
+export const ManagerSpendSchema = z.object({
+  id: z.string().min(1),
+  on: DateString,
+  kind: ManagerSpendKindSchema,
+  amount: z.number().int().min(0),
+  /** 시즌 상한을 그 시즌 안에서만 세기 위한 자리 */
+  season: z.number().int(),
+  /** 갈래가 가리키는 대상 — 선수 보너스는 선수 id, 나머지는 구단 id */
+  ref: z.string().min(1).optional(),
+});
+export type ManagerSpend = z.infer<typeof ManagerSpendSchema>;
+
 export const ManagerSchema = z.object({
   name: z.string().min(1),
   /** 온보딩에서 유저가 직접 입력한 배경 서술 (career.md §1) */
@@ -144,6 +180,13 @@ export const ManagerSchema = z.object({
    * 흔든다. 옛 세이브엔 없다 (없으면 0 — 세이브 버전 유지).
    */
   wallet: z.number().int().min(0).optional(),
+  /**
+   * **감독이 쓴 돈의 이력** — 최근 `MANAGER_SPEND_KEPT`건 (career.md §5.4).
+   *
+   * 시즌 상한을 세는 자리이기도 하다. 옛 세이브엔 없다 (없으면 빈 배열 —
+   * 세이브 버전 유지).
+   */
+  spending: z.array(ManagerSpendSchema).optional(),
 });
 export type Manager = z.infer<typeof ManagerSchema>;
 
@@ -160,11 +203,12 @@ export const DismissalSchema = z.object({
   on: DateString,
   season: z.number().int(),
   /**
-   * 자리를 잃은 갈래 — 경질(`sacked`)인가 계약 만료(`expired`)인가 (career.md §5.4).
-   * 무직은 **상태지 사유가 아니라서** 카드 하나가 둘을 다 든다. 옛 세이브엔 없다
-   * (없으면 경질 — 만료 판정이 생기기 전의 카드는 전부 경질이다).
+   * 자리를 잃은 갈래 — 경질(`sacked`) · 계약 만료(`expired`) · 감독이 스스로 물고
+   * 나간 사임(`resigned`) (career.md §5.4). 무직은 **상태지 사유가 아니라서** 카드
+   * 하나가 셋을 다 든다. 옛 세이브엔 없다 (없으면 경질 — 만료 판정이 생기기 전의
+   * 카드는 전부 경질이다).
    */
-  kind: z.enum(["sacked", "expired"]).optional(),
+  kind: z.enum(["sacked", "expired", "resigned"]).optional(),
   /** 어느 구단에서 잘렸나 */
   teamId: z.string().min(1),
   /** 그 구단의 등급 — 같은 순위가 어디서는 성공이고 어디서는 해고인 이유 */
@@ -180,8 +224,10 @@ export const DismissalSchema = z.object({
   /** 옛 세이브가 들고 있는 평가 문장 — 더는 쓰지 않는다 (카드의 폴백) */
   reason: z.string().optional(),
   /**
-   * 구단이 문 위약금 (£) — 경질에만 붙는다 (career.md §5.4). 만료는 끝까지 간
-   * 계약이라 물 것이 없고, 계약이 없던 옛 세이브의 경질도 0이라 적지 않는다.
+   * 위약금 (£) — **누가 물었는지는 `kind`가 안다** (career.md §5.4). 경질이면 구단이
+   * 물어 지갑에 들어온 돈이고, 사임이면 감독이 지갑에서 물어 옛 구단에 들어간 돈이다.
+   * 만료는 끝까지 간 계약이라 물 것이 없고, 계약이 없던 옛 세이브의 경질도 0이라
+   * 적지 않는다.
    */
   severance: z.number().int().min(0).optional(),
 });

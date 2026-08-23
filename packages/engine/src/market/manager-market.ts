@@ -8,7 +8,8 @@ import { addDays, contractUntil, diffDays } from "../core/dates";
 import { boardExpectation, computeStandings, type StandingRow } from "../competition/season";
 import { syncDefaultTraining } from "../squad/training-plan";
 import { expirePendingPress } from "../club/press";
-import { payManagerSeverance } from "../club/finance";
+import { payManagerSeverance, recordFinance } from "../club/finance";
+import { spendFromWallet, walletOf } from "../club/manager-wallet";
 import {
   AI_MANAGER_RATING_FALLBACK,
   MANAGER_TERMS_BY_TIER,
@@ -23,6 +24,7 @@ import {
 import {
   clampReputation,
   financeOf,
+  managedTeamId,
   playersOf,
   pushNarrative,
   teamName,
@@ -461,8 +463,11 @@ function leaveClub(state: GameState, card: Dismissal, channel: string): void {
   /**
    * **위약금은 구단이 무는 구단의 지출이다** (career.md §5.4) — 계약을 지우기 전에
    * 잰다. 만료는 끝까지 간 계약이라 잔여가 0이고, 계약이 없던 옛 세이브도 0이다.
+   *
+   * ⚠️ **사임은 여기 오지 않는다** — 그쪽은 감독이 지갑에서 무는 돈이라 방향이
+   * 반대다. `resignPost`가 카드를 세우기 **전에** 지갑과 원장을 함께 적는다.
    */
-  if (contract) {
+  if (contract && card.kind !== "resigned") {
     const severance = managerSeveranceOf(contract, state.date);
     if (severance > 0) {
       payManagerSeverance(state, teamId, severance);
@@ -489,6 +494,71 @@ function leaveClub(state: GameState, card: Dismissal, channel: string): void {
   for (const offer of state.managerOffers ?? []) {
     if (offer.status === "open") offer.status = "expired";
   }
+}
+
+/**
+ * `resign` — **감독이 계약을 물고 스스로 떠난다** (career.md §5.4 · finance.md §9.7).
+ *
+ * 경질의 거울상이다: 금액은 같은 식(`managerSeveranceOf`)이고, 나가는 곳만 반대라
+ * 지갑에서 빠져 옛 구단의 원장에 수입으로 선다. 그다음은 경질·만료와 **한 길**이다 —
+ * `leaveClub`이 후임을 세우고 협상을 닫고 무직의 길을 연다.
+ *
+ * **지갑이 모자라면 못 나간다** — 물지 못하는 계약은 깨지지 않는다.
+ */
+export function resignPost(state: GameState): SkillResult {
+  const teamId = managedTeamId(state);
+  if (teamId === null) return { ok: false, message: "이미 무직입니다" };
+
+  const contract = state.manager.contract;
+  const buyout = contract ? managerSeveranceOf(contract, state.date) : 0;
+  if (buyout > 0) {
+    const spend = spendFromWallet(state, { kind: "buyout", amount: buyout, ref: teamId });
+    if (!spend.ok) {
+      return {
+        ok: false,
+        message: `${teamNameIn(state, teamId)}와의 계약을 물려면 ${formatMoney(buyout)}가 필요합니다 — 지갑엔 ${formatMoney(walletOf(state))}뿐입니다`,
+      };
+    }
+    recordFinance(state, teamId, {
+      kind: "income",
+      category: "manager_buyout",
+      label: "감독 사임 위약금",
+      amount: buyout,
+    });
+  }
+
+  const expectation = boardExpectation(state, teamId);
+  const standing = seatStatus(state, teamId);
+  leaveClub(
+    state,
+    {
+      on: state.date,
+      season: state.season,
+      kind: "resigned",
+      teamId,
+      tier: tierOfTeamIn(state, teamId),
+      ...(standing ? { position: standing.position } : {}),
+      target: expectation.target,
+      expectationCode: expectation.code,
+      ...(buyout > 0 ? { severance: buyout } : {}),
+    },
+    "user-resigned",
+  );
+
+  const line = `사임 — ${teamNameIn(state, teamId)}를 떠났다${buyout > 0 ? ` · 위약금 ${formatMoney(buyout)}` : ""}`;
+  pushNarrative(state, line, 5);
+  return {
+    ok: true,
+    message: `${line}. 지갑 ${formatMoney(walletOf(state))} — 이제 무직입니다`,
+    brief: {
+      head: "사임",
+      items: [
+        item({ label: "구단", text: teamShortNameIn(state, teamId) }),
+        ...(buyout > 0 ? [item({ label: "위약금", text: formatMoney(buyout) })] : []),
+        item({ label: "지갑", text: formatMoney(walletOf(state)) }),
+      ],
+    },
+  };
 }
 
 /**

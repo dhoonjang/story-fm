@@ -207,6 +207,35 @@ export const SKILL_CATALOG = [
       "답을 기다리는 요청이 있거나 같은 안건을 최근에 물었으면 반려된다.",
   },
   {
+    name: "fund_transfer_budget",
+    label: "사재 출연",
+    group: "재정",
+    readOnly: false,
+    description:
+      "감독의 지갑에서 구단 이적 예산으로 사재를 넣는다 — 구단 돈이 아니다. " +
+      "부른 금액을 그대로 amount에 실어라(£). 액수를 말하지 않았으면 물어라. " +
+      "지갑과 시즌 남은 한도는 스냅샷에 있고, 넘겨 부르면 한도까지만 나간다. 되돌릴 수 없다.",
+  },
+  {
+    name: "pay_player_bonus",
+    label: "사재 보너스",
+    group: "재정",
+    readOnly: false,
+    description:
+      "감독의 사재로 우리 선수 한 명에게 보너스를 준다 — 사기가 오른다. " +
+      "눈금은 그 선수 주급의 배수다: 4주치 미만은 반려, 12주치에서 멈춘다. 선수당 시즌 1회·시즌 3명.",
+  },
+  {
+    name: "resign",
+    label: "사임",
+    group: "진행",
+    readOnly: false,
+    description:
+      "감독이 계약을 물고 떠난다 — 잔여에 비례한 위약금이 지갑에서 나간다. " +
+      "감독이 명확히 사임하겠다고 말했을 때만 부른다. 불만·이직 고민은 사임이 아니다. " +
+      "부르면 무직이 되고 되돌릴 수 없다.",
+  },
+  {
     name: "set_ticket_price",
     label: "티켓 가격",
     group: "재정",

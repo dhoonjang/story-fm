@@ -1399,6 +1399,11 @@ export interface CreateGameInput {
   managerName: string;
   background: string;
   attributes: ManagerAttributes;
+  /**
+   * 시작 지갑 (£) — 배경 판정이 앵커 ± 한도 안에서 정한 값 (career.md §1).
+   * 생략하면 0이다: 판정도 앵커도 없이 세우는 문맥(테스트·절차 생성)의 몫이다.
+   */
+  wallet?: number;
   /** 세계의 범위 — 없으면 카탈로그 전체 (`world/scope.ts`) */
   world?: WorldScope;
 }
@@ -2500,6 +2505,7 @@ export function createGame(input: CreateGameInput): GameState {
       background: input.background,
       attributes: input.attributes,
       reputation: { board: 50, media: 50, squad: 50 },
+      ...(input.wallet !== undefined && input.wallet > 0 ? { wallet: input.wallet } : {}),
     },
     managerXP: { leadership: 0, tactics: 0, training: 0, negotiation: 0, analysis: 0 },
     // 부임하면 사람이 먼저 기다린다 — 수석코치는 시드로 결정되므로

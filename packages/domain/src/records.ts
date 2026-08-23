@@ -775,6 +775,7 @@ export const FINANCE_INCOME_CATEGORIES = [
   "merchandising",
   "prize",
   "transfer_in",
+  "manager_buyout",
 ] as const;
 
 export const FINANCE_EXPENSE_CATEGORIES = [
@@ -809,6 +810,8 @@ export const FINANCE_CATEGORY_KO: Record<FinanceCategory, string> = {
   merchandising: "머천다이징",
   prize: "대회 상금",
   transfer_in: "이적료 수입",
+  /** 감독이 계약을 물고 나간 돈 — 구단이 무는 `severance`의 반대편 (career.md §5.4) */
+  manager_buyout: "감독 사임 위약금",
   player_wages: "선수 주급",
   staff_wages: "스태프 급여",
   bonus: "성적 보너스",

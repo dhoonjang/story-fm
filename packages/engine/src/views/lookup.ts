@@ -22,6 +22,7 @@ import {
 } from "@story-fm/domain";
 import { rankByName } from "../core/name-match";
 import { formatMoney } from "../club/finance";
+import { spendLine, transferFundRoom } from "../club/manager-wallet";
 import { outcomeFor, outcomeLabel } from "./views";
 import { addDays, dayOfWeek, diffDays, seasonYear, squadReturnOf } from "../competition/calendar";
 import { entrantsOf } from "../competition/europe";
@@ -74,6 +75,7 @@ import {
   familiarityOf,
   groupOf,
   isAvailable,
+  managedTeamId,
   openInjury,
   playerById,
   playerName,
@@ -1388,7 +1390,16 @@ export function careerView(state: GameState): LookupResult {
                 (m.contract.renewalOffered === false ? ` · 보드는 재계약하지 않기로 했다` : ""),
             ]
           : []),
-        `지갑: ${formatMoney(m.wallet ?? 0)}`,
+        `지갑: ${formatMoney(m.wallet ?? 0)}` +
+          // 지갑은 눈금이 아니라 쓸 수 있는 돈이다 — 남은 문이 그 자리에 함께 선다 (career.md §5.4)
+          (managedTeamId(state) === null
+            ? ""
+            : ` · 이번 시즌 사재 출연 여력 ${formatMoney(transferFundRoom(state))}`),
+        ...((m.spending ?? []).length > 0
+          ? [
+              `최근 사재 지출: ${[...(m.spending ?? [])].reverse().slice(0, 5).map(spendLine).join(" / ")}`,
+            ]
+          : []),
         // 재직 중에 서는 제안은 재계약 하나다 — 답할 자리라 여기 선다 (career.md §5.4)
         ...openManagerOffers(state)
           .filter((o) => o.via === "renewal")

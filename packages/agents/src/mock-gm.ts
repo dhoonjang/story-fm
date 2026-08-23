@@ -7,6 +7,9 @@ import type {
 import {
   acceptDeal,
   acceptManagerOffer,
+  fundTransferBudget,
+  payPlayerBonus,
+  resignPost,
   applyForManagerJob,
   counterManagerOffer,
   advanceSegment,
@@ -348,6 +351,22 @@ function detectPlayer(state: GameState, message: string, scope: "ours" | "all" =
 }
 
 /**
+ * 감독의 말에서 금액 한 덩이 — mock이 읽는 눈금은 **숫자와 단위 하나**다.
+ *
+ * 못 읽으면 `null`이고, 부르는 쪽은 지어내는 대신 되묻는다 — 실모드의 도구 설명도
+ * "액수를 말하지 않았으면 지어내지 말고 물어라"이므로 두 모드가 같은 결이어야 한다.
+ */
+function detectMoney(message: string): number | null {
+  const m = message.match(/([\d,]+(?:\.\d+)?)\s*(백만|만|[mM]\b)?/u);
+  if (!m?.[1]) return null;
+  const n = Number(m[1].replace(/,/gu, ""));
+  if (!Number.isFinite(n) || n <= 0) return null;
+  if (m[2] === "만") return Math.round(n * 10_000);
+  if (m[2] !== undefined && m[2] !== "만") return Math.round(n * 1_000_000);
+  return Math.round(n);
+}
+
+/**
  * mock GM 턴 — 규칙 기반. onText를 주면 완성된 서사 텍스트를 청크로 쪼개
  * 즉시 방출한다 (실모드의 진짜 스트리밍과 동일한 인터페이스를 흉내).
  */
@@ -632,6 +651,40 @@ function computeMockGmTurn(
               .join(" · ")}`
           : `부르는 곳도, 비어 있는 자리도 아직 없다`;
     return { text: `@: *${waiting}*`, toolCalls: calls };
+  }
+
+  /**
+   * ── 사재 — 감독의 지갑에서 나가는 셋 (career.md §5.4) ───
+   *
+   * 무직 분기 뒤에 선다 — 셋 다 맡은 팀이 있어야 하는 일이고, 실모드도 같은 자리에서
+   * 막는다(`buildGmTools`).
+   */
+  if (/사임|사퇴|그만두겠|물러나겠/u.test(msg)) {
+    const result = resignPost(state);
+    recordCall(calls, "resign", result);
+    return { text: `@: *${result.message}*`, toolCalls: calls };
+  }
+  if (/사재|내 돈|개인 돈|지갑/u.test(msg) && /예산|보강|영입|출연/u.test(msg)) {
+    const amount = detectMoney(msg);
+    if (amount === null) {
+      return { text: `${coach(state)} 얼마를 넣으시겠습니까?`, toolCalls: calls };
+    }
+    const result = fundTransferBudget(state, { amount });
+    recordCall(calls, "fund_transfer_budget", result, { input: { amount } });
+    return { text: `${coach(state)} ${result.message}`, toolCalls: calls };
+  }
+  if (/보너스|포상/u.test(msg)) {
+    const who = detectPlayer(state, msg);
+    if (!who) {
+      return { text: `${coach(state)} 누구에게 주시겠습니까?`, toolCalls: calls };
+    }
+    const amount = detectMoney(msg);
+    if (amount === null) {
+      return { text: `${coach(state)} ${who.name}에게 얼마를 주시겠습니까?`, toolCalls: calls };
+    }
+    const result = payPlayerBonus(state, { playerId: who.id, amount });
+    recordCall(calls, "pay_player_bonus", result, { input: { playerId: who.id, amount } });
+    return { text: `${coach(state)} ${result.message}`, toolCalls: calls };
   }
 
   // ── 일상 ─────────────────────────────────────────────
