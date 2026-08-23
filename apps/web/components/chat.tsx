@@ -5,7 +5,8 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import type { CardMark, ChatTurn, GoalMark, ToolCallRecord } from "@story-fm/engine";
 import { cutStamps } from "../lib/scene-stamp";
 import { hasRailHint } from "../lib/panel-hints";
-import { splitStaging, weaveTurn } from "../lib/turn-pieces";
+import { groupPieces, splitStaging, weaveTurn } from "../lib/turn-pieces";
+import type { Utterance } from "../lib/turn-pieces";
 import { BROADCAST_SPEAKER, formatMoney, normalizeSpeaker } from "@story-fm/domain";
 import type { ScoutReportCard } from "@story-fm/domain";
 import { MarketCardView } from "@/components/market-card";
@@ -49,36 +50,6 @@ function renderStaging(text: string) {
   return splitStaging(text).map((part, i) =>
     part.staging ? <em key={i}>{part.text}</em> : <Fragment key={i}>{part.text}</Fragment>,
   );
-}
-
-/**
- * 한 화자의 연속 발화 — 파싱된 줄을 말한 사람 단위로 묶은 것.
- * `speaker === ""`이면 화자 없는 내레이션이다.
- */
-interface Utterance {
-  speaker: string;
-  lines: string[];
-}
-
-/**
- * @화자 문법을 화자 단위로 묶는다 (overview §3).
- *
- * 줄마다 이름을 다시 적으면 **대사보다 이름이 먼저 눈에 들어온다.** 대본이 그렇듯
- * 이어 말하는 동안은 이름을 한 번만 적고 대사를 아래로 잇는다 — 그래야 대사의
- * 시작점이 한 줄로 맞아 눈이 흐르고, 누가 말하는지도 계속 분명하다.
- */
-function groupUtterances(lines: string[]): Utterance[] {
-  const groups: Utterance[] = [];
-  for (const line of lines) {
-    const match = line.match(/^@([^:]*):\s?(.*)$/u);
-    const speaker = match ? (match[1] ?? "") : "";
-    const content = match ? (match[2] ?? "") : line;
-    const last = groups[groups.length - 1];
-    // 화자가 있는 줄만 잇는다 — 내레이션은 저마다 독립된 장면 지문이다
-    if (last && speaker !== "" && last.speaker === speaker) last.lines.push(content);
-    else groups.push({ speaker, lines: [content] });
-  }
-  return groups;
 }
 
 /** 화자 없는 줄 — 장면 지문 */
@@ -587,6 +558,8 @@ export function ChatTurnView({
     stamps,
     cuts: cut.cuts,
   });
+  /** 조각마다의 말 묶음 — 화자가 조각 경계를 넘어 이어지므로 턴 전체를 한 번에 묶는다 */
+  const grouped = groupPieces(pieces);
 
   return (
     <div
@@ -598,7 +571,7 @@ export function ChatTurnView({
         if (!piece.mark) {
           return (
             <div className="says" key={`s${i}`}>
-              {groupUtterances(piece.lines).map((utterance, j) => (
+              {grouped[i]?.map((utterance, j) => (
                 <UtteranceBlock key={j} utterance={utterance} roles={speakerRoles} />
               ))}
             </div>
