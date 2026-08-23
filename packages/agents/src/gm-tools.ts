@@ -51,6 +51,7 @@ import {
   sendOffer,
   setCaptain,
   setDevelopmentFocus,
+  setReserveTraining,
   setExploits,
   setLineup,
   setRegionalPlan,
@@ -86,6 +87,7 @@ import {
   PitchClaimSchema,
   PLAYER_DIRECTIVE_KINDS,
   PRESS_STANCES,
+  RESERVE_TRAINING_POLICIES,
 } from "@story-fm/domain";
 import type { GameToolSpec, ToolCallContext } from "@story-fm/llm";
 import { skillDescriptions } from "./skill-descriptions";
@@ -309,6 +311,16 @@ export function buildGmTools(
           .describe("집중 육성할 2군 유망주 — 지정 전체를 다시 적는다. 생략하면 해제"),
       }),
       (input) => setDevelopmentFocus(state, input),
+    ),
+    wrap(
+      "set_reserve_training",
+      descriptions.set_reserve_training,
+      z.object({
+        policy: z
+          .enum(RESERVE_TRAINING_POLICIES)
+          .describe("겨냥할 갈래 — physical 신체 · technical 기술 · mental 정신 · balanced 해제"),
+      }),
+      (input) => setReserveTraining(state, input),
     ),
     wrap(
       "set_tactics",

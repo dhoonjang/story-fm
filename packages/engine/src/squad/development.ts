@@ -1,7 +1,13 @@
-import type { AttributeAxis, AxisValues, GamePlayer } from "@story-fm/domain";
+import type {
+  AttributeAxis,
+  AxisValues,
+  GamePlayer,
+  ReserveTrainingPolicy,
+} from "@story-fm/domain";
 import { ATTRIBUTE_AXES, ageOf, isReserveMatch, RATING_MAX } from "@story-fm/domain";
 import { ageGrowthFactor, agingDelta } from "../world/attributes";
 import { makeRng } from "../core/rng";
+import { reserveTrainingMultiplier } from "./training-plan";
 import { recomputeOverall, recordGrowth, squadLevelOf, type GameState } from "../core/state";
 
 /**
@@ -133,6 +139,8 @@ export function rollMonthlyAxes(
     potential: number;
     /** 감독의 육성 손잡이 — 2군 출전 × 집중 육성. 성장 쪽에만 곱한다 (기본 1) */
     boost?: number;
+    /** 2군 훈련 방침 — 축마다 다른 배율을 얹는다. 없으면 어느 축도 흔들리지 않는다 */
+    policy?: ReserveTrainingPolicy;
   },
   axes: readonly AttributeAxis[] = ATTRIBUTE_AXES,
 ): { axis: AttributeAxis; step: number }[] {
@@ -141,7 +149,10 @@ export function rollMonthlyAxes(
       const rng = makeRng(input.seed, `development:${input.date}:${input.playerId}:${axis}`);
       // 뽑히는 순서도 난수다 — 축 이름으로 세우면 편향이 자리만 옮긴다
       const priority = rng();
-      const step = rollAxis(axis, input.age, input.values[axis], input.potential, rng, input.boost);
+      // 배율이 1이면 곱하지 않는다 — 방침 없는 세이브가 부동소수로 흔들리지 않게
+      const aim = input.policy ? reserveTrainingMultiplier(input.policy, axis) : 1;
+      const boost = aim === 1 ? input.boost : (input.boost ?? 1) * aim;
+      const step = rollAxis(axis, input.age, input.values[axis], input.potential, rng, boost);
       return { axis, step, priority };
     })
     .filter((rolled) => rolled.step !== 0)
@@ -186,6 +197,7 @@ export function applyMonthlyDevelopment(state: GameState): string[] {
       values: player.attributes,
       potential: player.attributes.potential,
       boost,
+      ...(ours && state.reserveTraining ? { policy: state.reserveTraining } : {}),
     });
     if (steps.length === 0) continue;
 
