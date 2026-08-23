@@ -44,6 +44,9 @@ import {
   exerciseBuyBack,
   releasePlayer,
   requestBoard,
+  resignPost,
+  fundTransferBudget,
+  payPlayerBonus,
   setTicketPrice,
   respondToApproach,
   respondToMedia,
@@ -573,6 +576,25 @@ export function buildGmTools(
       }),
       (input) => requestBoard(state, input),
     ),
+    wrap(
+      "fund_transfer_budget",
+      descriptions.fund_transfer_budget,
+      z.object({
+        /** 상한은 오타를 막는 자리다 — 실제 문은 지갑 잔고와 시즌 한도가 건다 */
+        amount: money(MONEY_MAX).describe("지갑에서 이적 예산으로 넣을 금액 (£)"),
+      }),
+      (input) => fundTransferBudget(state, input),
+    ),
+    wrap(
+      "pay_player_bonus",
+      descriptions.pay_player_bonus,
+      z.object({
+        playerId: playerRef,
+        amount: money(MONEY_MAX).describe("지갑에서 그 선수에게 줄 금액 (£)"),
+      }),
+      (input) => payPlayerBonus(state, input),
+    ),
+    wrap("resign", descriptions.resign, z.object({}), () => resignPost(state)),
     wrap(
       "set_ticket_price",
       descriptions.set_ticket_price,

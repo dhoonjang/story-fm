@@ -129,6 +129,12 @@ function Renewal({ career }: { career: CareerView }) {
  * 화면이 "왜 맡은 팀이 없는가"와 "무엇이 걸려 있는가"를 한자리에서 말해야 한다.
  * 제안은 **읽는 값이다** — 수락은 감독이 말로 한다.
  */
+/** 지갑 아래에 세우는 지출 줄 수 — 그 위는 커리어 표가 아니라 가계부가 된다 */
+const SPENDING_SHOWN = 3;
+
+/** 자리를 잃은 갈래의 이름 — 코드가 사실이고 문장은 화면이 만든다 (career.md §5.4) */
+const LEAVE_KO = { expired: "계약 만료", resigned: "사임", sacked: "경질" } as const;
+
 function OutOfWork({ career }: { career: CareerView }) {
   const d = career.dismissal;
   if (!d) return null;
@@ -138,12 +144,16 @@ function OutOfWork({ career }: { career: CareerView }) {
         <div className="dismissed-head">
           <b>{d.teamName}</b>
           <span className="when">
-            {d.on} {d.kind === "expired" ? "계약 만료" : "경질"}
+            {d.on} {LEAVE_KO[d.kind]}
           </span>
         </div>
         <div className="dismissed-why">{dismissalLineOf(d)}</div>
         {d.severance !== null && (
-          <div className="dismissed-why">위약금 {formatMoney(d.severance)}</div>
+          <div className="dismissed-why">
+            위약금 {formatMoney(d.severance)}
+            {/* 누가 물었는지는 갈래가 안다 — 사임만 감독이 지갑에서 문다 (career.md §5.4) */}
+            {d.kind === "resigned" ? " (감독 부담)" : ""}
+          </div>
         )}
       </div>
       <div className="offer-list" data-testid="manager-offers">
@@ -454,7 +464,28 @@ export function CareerView({
              */}
             <div className="mgr-warn">
               <div className="mgr-rep-title">지갑</div>
-              <div className="mgr-contract">{formatMoney(career.wallet)}</div>
+              <div className="mgr-contract">
+                {formatMoney(career.wallet)}
+                {career.transferFundRoom > 0 && (
+                  <span className="mgr-fund-room">
+                    사재 출연 여력 {formatMoney(career.transferFundRoom)}
+                  </span>
+                )}
+              </div>
+              {career.spending.length > 0 && (
+                <div className="mgr-spending">
+                  {career.spending.slice(0, SPENDING_SHOWN).map((s, i) => (
+                    <div className="mgr-spend" key={i}>
+                      <span className="when">{s.on}</span>
+                      <span>
+                        {s.kind}
+                        {s.playerName ? ` — ${s.playerName}` : ""}
+                      </span>
+                      <b>−{formatMoney(s.amount)}</b>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -549,7 +580,7 @@ export function CareerView({
                   <td>{r.d.teamName}</td>
                   <td>—</td>
                   <td className="career-sacked">
-                    {r.d.on} {r.d.kind === "expired" ? "계약 만료" : "경질"}
+                    {r.d.on} {LEAVE_KO[r.d.kind]}
                   </td>
                   <td className="career-verdict">{dismissalLineOf(r.d)}</td>
                 </tr>
