@@ -153,8 +153,11 @@ export function advanceSuperCups(state: GameState, digest: string[]): void {
   for (const cup of SUPER_CUP_CATALOG) {
     const match = superCupMatch(state, cup.id);
     if (!match?.result) continue;
-    resolveExtraTime(state, match, `${cup.id}:${state.season}`);
-    if (needsShootout(state, match)) resolveShootout(state, match);
+    // 이미 갈린 경기는 다시 굴리지 않는다 — 이 함수는 남은 시즌 내내 매일 불린다
+    if (settledTieWinner([match]) === null) {
+      resolveExtraTime(state, match, `${cup.id}:${state.season}`);
+      if (needsShootout(state, match)) resolveShootout(state, match);
+    }
     const champion = settledTieWinner([match]);
     if (champion === null) continue;
     const runnerUp = match.homeTeamId === champion ? match.awayTeamId : match.homeTeamId;
