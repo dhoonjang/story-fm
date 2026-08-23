@@ -9,6 +9,7 @@ import {
   formatMoney,
   headCoachOf,
   interpretBackgroundHeuristic,
+  leagueOfTeamIn,
   HISTORY_CHAR_LIMIT,
   HISTORY_STEP,
   openPress,
@@ -19,6 +20,7 @@ import {
   speakerRoles,
   scoutPlayer,
   scoutReportCard,
+  squadReturnOf,
   playersOf,
   userPlayers,
   type GameState,
@@ -45,7 +47,7 @@ import {
   runOnboardingTurn,
   type GmToolCall,
 } from "@story-fm/agents";
-import { normalizeSpeaker, SCOUT_DAYS } from "@story-fm/domain";
+import { awardTitle, normalizeSpeaker, SCOUT_DAYS } from "@story-fm/domain";
 import type { GameLLM, StopReason, TurnRequest } from "@story-fm/llm";
 
 /**
@@ -309,6 +311,45 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
     expect(note).toContain(formatMoney(card.wageExpectation));
     // 실리지 않은 턴에는 한 줄도 쓰지 않는다 — 매 턴 정가로 읽히는 블록이다
     expect(buildGmStateNote(state)).not.toContain("도착한 스카우트 보고서");
+  });
+
+  /**
+   * 오프시즌 블록의 두 경계 — **소집 전까지만**, **방금 끝난 시즌의 것만**
+   * (season.md §6). 둘 다 조용히 틀린다: 창이 새면 시즌 내내 지난해 시상이 서고,
+   * 시즌을 한 칸 잘못 세면 어느 해에도 서지 않는다.
+   */
+  it("시상은 소집 전까지만 · 방금 끝난 시즌의 것만 싣는다", () => {
+    const state = game();
+    // 전환이 지나간 자리 — 시즌은 이미 다음 것이고 시상은 지난 시즌의 것이다
+    state.season += 1;
+    state.date = state.calendar.preseasonStart;
+    const winner = playersOf(state, "chelsea")[0]!;
+    state.awards = [
+      {
+        code: "top-scorer",
+        season: state.season - 1,
+        leagueId: leagueOfTeamIn(state, state.userTeamId),
+        gamePlayerId: winner.id,
+        playerName: winner.name,
+        teamId: "chelsea",
+        apps: 38,
+        goals: 24,
+        assists: 7,
+      },
+    ];
+    const note = buildGmStateNote(state);
+    expect(note).toContain("오프시즌 사실");
+    expect(note).toContain(awardTitle("top-scorer"));
+    expect(note).toContain(winner.name);
+
+    // 소집일이 지나면 블록 자체가 사라진다 — 오프시즌의 자리는 오프시즌에 있다
+    state.date = squadReturnOf(state.calendar);
+    expect(buildGmStateNote(state)).not.toContain("오프시즌 사실");
+
+    // 이번 시즌의 상은 아직 없다 — 시즌을 한 칸 잘못 세면 여기서 걸린다
+    state.date = state.calendar.preseasonStart;
+    state.awards[0]!.season = state.season;
+    expect(buildGmStateNote(state)).not.toContain("오프시즌 사실");
   });
 
   it("날짜가 흐르면 내용이 바뀐다 (캐시 밖에 있어야 하는 이유)", () => {

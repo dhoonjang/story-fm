@@ -58,6 +58,16 @@ export const SKILL_CATALOG = [
       "**지정 전체를 다시 적는 목록 교체다** — playerIds를 생략하면 해제. 2군만 지정할 수 있고, 승격하면 풀린다.",
   },
   {
+    name: "set_reserve_training",
+    label: "2군 훈련 방침",
+    group: "전술·훈련",
+    readOnly: false,
+    description:
+      "우리 2군이 어느 축을 겨냥해 자랄지 정한다 — physical(신체 4축) · technical(기술 5축) · mental(정신 6축) · balanced(해제). " +
+      "**총량은 늘지 않는다** — 겨냥한 축이 빨라지는 만큼 나머지 필드 축이 느려진다. 골키핑은 어느 방침에도 닿지 않는다. " +
+      "팀 하나에 방침 하나이고, 1군과 타 팀에는 닿지 않는다.",
+  },
+  {
     name: "set_captain",
     label: "주장 지정",
     group: "전술·훈련",

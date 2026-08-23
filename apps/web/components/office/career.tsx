@@ -5,12 +5,14 @@ import {
   MANAGER_ATTRIBUTES,
   MANAGER_ATTRIBUTE_KO,
   achievementTitle,
+  awardTitle,
   formatMoney,
 } from "@story-fm/domain";
 import { IconTrophy } from "@/components/icons";
 
 type SeasonRow = OfficeViews["career"]["seasons"][number];
 type AchievementRow = OfficeViews["career"]["achievements"][number];
+type AwardRow = OfficeViews["career"]["awards"][number];
 
 /**
  * **업적 한 줄을 쓰는 자리** — 코어는 코드와 근거 수치만 넘긴다
@@ -23,6 +25,25 @@ function achievementDetailOf(a: AchievementRow): string {
   if (a.matches !== undefined) return `${a.matches}경기 무패`;
   if (a.position !== undefined && a.leagueName) return `${a.leagueName} ${a.position}위`;
   return "";
+}
+
+/**
+ * **시상 한 줄의 근거를 쓰는 자리** — 코어는 코드와 근거 수치만 넘긴다
+ * (docs/overview.md §1 철칙 4 · career.md §6). 어느 칸이 그 상의 근거인가는
+ * 상마다 다르다: 득점왕은 골, 도움왕은 도움, 올해의 선수는 평점, 영플레이어는
+ * 나이와 평점. 출전은 넷 모두의 바탕이라 늘 뒤에 붙는다.
+ */
+function awardDetailOf(a: AwardRow): string {
+  const rating = a.rating === undefined ? null : `평점 ${a.rating.toFixed(2)}`;
+  const grounds =
+    a.code === "top-scorer"
+      ? [`${a.goals}골`]
+      : a.code === "top-assister"
+        ? [`${a.assists}도움`]
+        : a.code === "young-player"
+          ? [a.age === undefined ? null : `${a.age}세`, rating]
+          : [rating];
+  return [...grounds, `${a.apps}경기`].filter((x): x is string => x !== null).join(" · ");
 }
 
 /** 전적 한 칸 — 코어는 셋을 세고, `20승 8무 10패`로 잇는 것은 화면이다 */
@@ -427,6 +448,23 @@ export function CareerView({
             </div>
           );
         })}
+      </div>
+
+      {/**
+       * 시상 — **감독의 상이 아니라 선수의 상이다** (career.md §6). 코어가 내려
+       * 주는 것은 코드와 근거 수치뿐이라 상의 이름도 근거 문장도 여기서 쓴다.
+       */}
+      <div className="section-title">시상</div>
+      <div className="trophy-list">
+        {career.awards.length === 0 && <div className="empty">받은 시상이 없습니다</div>}
+        {career.awards.map((a, i) => (
+          <div className="achv" key={i}>
+            <div>{awardTitle(a.code)}</div>
+            <div className="desc">
+              시즌 {a.season} · {a.leagueName} — {a.playerName} ({a.teamName}) · {awardDetailOf(a)}
+            </div>
+          </div>
+        ))}
       </div>
 
       <div className="section-title">시즌 기록</div>

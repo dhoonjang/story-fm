@@ -6,6 +6,7 @@ import type {
   DrilledTactics,
   MarketCard,
   Player,
+  ReserveTrainingPolicy,
   ScheduleEntry,
   Slot,
   TacticAssignment,
@@ -26,6 +27,7 @@ import {
   MATCHDAY_SQUAD,
   POSITION_CODES,
   RATING_MAX,
+  reserveTrainingTitle,
   SCOUT_CONCURRENT_LIMIT,
   SCOUT_DAYS,
   SLOT_TIME,
@@ -57,6 +59,7 @@ import { diffLineup, type LineupSide, type LineupSlotRef } from "./lineup-diff";
 import { addDays, diffDays, sortEntries, squadReturnOf } from "../competition/calendar";
 import { clampForm, moraleToForm } from "../squad/form";
 import { DEVELOPMENT_FOCUS_LIMIT, pruneDevelopmentFocus } from "../squad/development";
+import { reserveTrainingAxes } from "../squad/training-plan";
 import {
   canRegisterAllFor,
   canRegisterFor,
@@ -421,6 +424,59 @@ export function setDevelopmentFocus(
     brief: {
       head: "집중 육성",
       items: [item({ label: "지정", text: briefNames(players.map((p) => p.name)) })],
+    },
+  };
+}
+
+/**
+ * 2군 훈련 방침 — 코치진이 어느 축을 겨냥해 유망주를 기르는가 (season.md §2).
+ *
+ * **총량을 옮길 뿐 늘리지 않는다** — 겨냥한 축이 빨라지는 만큼 나머지 필드 축이
+ * 느려진다. 그래서 메시지는 얻는 것과 함께 포기하는 것도 말한다: 무엇을
+ * 포기했는지가 이 손잡이의 값이다. `balanced`가 기본값이자 해제고, 상태에 남는
+ * 것은 코드 하나라 옛 세이브도 그대로 읽힌다.
+ */
+export function setReserveTraining(
+  state: GameState,
+  input: { policy: ReserveTrainingPolicy },
+): SkillResult {
+  const { policy } = input;
+  const title = reserveTrainingTitle(policy);
+  const current = state.reserveTraining ?? "balanced";
+  if (current === policy) {
+    return {
+      ok: true,
+      unchanged: true,
+      message:
+        policy === "balanced"
+          ? "2군 훈련 방침이 없습니다 — 어느 축도 겨냥하지 않습니다"
+          : `이미 ${title} 방침입니다`,
+    };
+  }
+
+  state.reserveTraining = policy;
+  if (policy === "balanced") {
+    pushNarrative(state, "2군 훈련 방침 해제 — 겨냥하는 축 없음", 1);
+    return {
+      ok: true,
+      message: "2군 훈련 방침을 해제했습니다 — 유망주는 다시 고르게 자랍니다",
+      brief: { head: "2군 훈련 방침", items: [item({ text: "해제" })] },
+    };
+  }
+
+  const aimed = reserveTrainingAxes(policy)
+    .map((axis) => AXIS_KO[axis])
+    .join("·");
+  pushNarrative(state, `2군 훈련 방침 — ${title}`, 1);
+  return {
+    ok: true,
+    message: `2군 훈련 방침을 ${title}으로 잡았습니다 — ${aimed}이(가) 빨리 자라는 대신 나머지 필드 축은 그만큼 느려집니다`,
+    brief: {
+      head: "2군 훈련 방침",
+      items: [
+        item({ label: "겨냥", text: title }),
+        item({ label: "축", text: aimed, note: "나머지 필드 축은 느려집니다" }),
+      ],
     },
   };
 }
