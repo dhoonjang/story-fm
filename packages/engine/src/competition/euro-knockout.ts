@@ -253,8 +253,6 @@ function reportEuroTie(
 export function advanceEuroKnockouts(state: GameState, digest: string[]): void {
   for (const cup of cupCatalog()) {
     if (!euroLeaguePhaseDone(state, cup.id)) continue;
-    // 참가비·승무 수당 — 리그 페이즈가 끝나면 한 번에 정산된다
-    payLeaguePhasePrizes(state, cup.id, digest);
     const stages = knockoutStages(cup);
     const seeds = leaguePhaseSeeds(state, cup.id);
     let previousWinners: string[] | null = null;
@@ -289,6 +287,12 @@ export function advanceEuroKnockouts(state: GameState, digest: string[]): void {
           }
           if (!drawIsDue(state, cup.id, stage)) break;
         }
+        /**
+         * 참가비·승무 수당은 **첫 녹아웃을 편성하는 이 순간 한 번**이다. 지급 자체는
+         * `prizesPaid` 키가 막지만, 이 함수는 매일 tick에서 불리므로 위에 두면 시즌이
+         * 끝날 때까지 세 대회의 리그 페이즈 전 경기를 매일 다시 훑는다.
+         */
+        if (i === 0) payLeaguePhasePrizes(state, cup.id, digest);
         createStage(state, cup, stage, pairs, digest);
         completeDraw(state, cup.id, stage);
         break; // 한 번에 한 단계만 — 다음 단계는 이 단계가 끝난 뒤

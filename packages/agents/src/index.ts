@@ -5,6 +5,7 @@ export * from "./match-intent";
 export * from "./match-intent-apply";
 export * from "./match-rater";
 export * from "./mood-rater";
+export * from "./negotiator";
 export * from "./history-compactor";
 export * from "./training-rater";
 export * from "./gm-types";

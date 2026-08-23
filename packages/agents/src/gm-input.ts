@@ -362,6 +362,11 @@ export function buildGmStateNote(
   passed?: TimePassed | null,
   /** 이번 턴에 카드로 서는 보고서 — 카드가 프롬프트에 못 가므로 값은 여기로 온다 */
   arrivedReports: readonly ScoutReportCard[] = [],
+  /**
+   * 장면보다 먼저 교섭 상대가 낸 답 (agents.md §4-1) — GM은 판정하지 않고 **전한다**.
+   * 판정이 이미 끝났으므로 아래 `pendingVerdicts`에는 그 협상이 서지 않는다.
+   */
+  counterpartyReplies: readonly string[] = [],
 ): string {
   // 무직이면 실을 것이 다른 것들이다 (career.md §5.1)
   if (managedTeamId(state) === null) return buildUnemployedNote(state, passed);
@@ -395,7 +400,9 @@ export function buildGmStateNote(
   ).length;
 
   const alerts = [
-    // 판정 대기 협상이 맨 앞 — 답은 다음 턴 입력에 실리므로 여기서 세우지 않으면 잊힌다
+    // 상대가 방금 낸 답이 맨 앞 — 이 줄이 없으면 GM은 협상이 움직인 줄 모른다
+    ...counterpartyReplies.map((line) => `📨 ${line}`),
+    // 판정 대기 협상이 그다음 — 답은 다음 턴 입력에 실리므로 여기서 세우지 않으면 잊힌다
     ...pendingVerdicts(state).map((v) => `❗ ${v.label} (${v.negotiation.id})`),
     injured.length > 0 ? `부상 ${injured.length} (${injured.join(", ")})` : null,
     suspended.length > 0 ? `정지 ${suspended.length} (${suspended.join(", ")})` : null,

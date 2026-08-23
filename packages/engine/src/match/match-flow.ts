@@ -8,6 +8,7 @@ import type {
   RegionalIntent,
   RegionalLane,
   ShootoutKick,
+  StrengthPacket,
   TacticAssignment,
 } from "@story-fm/domain";
 import { isReserveMatch } from "@story-fm/domain";
@@ -35,7 +36,6 @@ import {
   MAX_EXPLOITS,
   accumulateFatigue,
   addStats,
-  advanceClock,
   applyEvents,
   buildStrengthPacket,
   createLedger,
@@ -308,6 +308,24 @@ function directivesOnPitch(state: GameState, teamId: string, onPitch: readonly s
 export function refreshPacket(state: GameState): void {
   const pending = state.pendingMatch;
   if (!pending) return;
+  pending.packet = buildPacketFor(state, pending, currentMatch(state), state.phase === "match");
+}
+
+/**
+ * 진행 중인 경기의 패킷을 세운다 — **`state.pendingMatch`에 앉기 전에도 부를 수 있다.**
+ *
+ * 킥오프는 아직 없는 패킷을 채우려고 `null`을 꽂아 두고 곧바로 다시 세우는 순서였다.
+ * 그 사이에 여기서 예외가 나면(전술 없음·명단 없음) 세이브에는 패킷이 비어 있는
+ * `pendingMatch`가 남고, 그 상태에는 회복 경로가 없다. 그래서 패킷을 **먼저** 세우고
+ * 조립은 한 번에 한다.
+ */
+function buildPacketFor(
+  state: GameState,
+  pending: Omit<PendingMatch, "packet">,
+  match: MatchRecord,
+  /** 경기 중인가 — 킥오프 조립은 `state.phase`가 아직 넘어가기 전에 부른다 */
+  inMatch: boolean,
+): StrengthPacket {
   /**
    * 진행 중이던 옛 세이브의 장부는 `causes`에 문장을 들고 온다 — 굴리기 전에 한 번
    * 태그로 옮긴다. 판정은 이 폴백을 보지 않는다(태그의 코드와 `subCause`가 가른다).
@@ -320,7 +338,6 @@ export function refreshPacket(state: GameState): void {
       if (moved !== event.causes) event.causes = moved;
     }
   }
-  const match = currentMatch(state);
   const build = (teamId: string, ledgerSide: { onPitch: string[]; bench: string[] }) => {
     const starters = reseatOnAiShape(state, teamId, slotsFor(state, teamId, ledgerSide.onPitch));
     /**
@@ -355,10 +372,10 @@ export function refreshPacket(state: GameState): void {
       directives: directivesOnPitch(state, teamId, ledgerSide.onPitch),
     };
   };
-  pending.packet = buildStrengthPacket(
+  return buildStrengthPacket(
     build(match.homeTeamId, pending.ledger.home),
     build(match.awayTeamId, pending.ledger.away),
-    { neutral: match.neutral === true, inMatch: state.phase === "match" },
+    { neutral: match.neutral === true, inMatch },
   );
 }
 
@@ -566,9 +583,12 @@ export function startMatch(state: GameState): FlowResult {
   const userSideLedger = { onPitch: lineup.onPitch, bench: lineup.bench };
   const aiSideLedger = { onPitch: aiIds, bench: aiBench };
 
-  state.pendingMatch = {
+  /**
+   * **패킷을 먼저 세우고 한 번에 앉힌다** — 반쪽짜리 `pendingMatch`를 만들지 않는다.
+   * 패킷을 세우다 예외가 나면 이 자리에서 나가고 세이브는 경기 전 그대로다.
+   */
+  const opening = {
     matchId: match.id,
-    packet: null as never, // 바로 아래 refreshPacket이 채운다
     ledger: createLedger(
       userIsHome ? userSideLedger : aiSideLedger,
       userIsHome ? aiSideLedger : userSideLedger,
@@ -579,8 +599,9 @@ export function startMatch(state: GameState): FlowResult {
     servingSuspension: serving,
     tacticsBefore: snapshotTactics(state),
   };
+  const packet = buildPacketFor(state, opening, match, true);
+  state.pendingMatch = { ...opening, packet };
   state.phase = "match";
-  refreshPacket(state);
   const note = lineup.replaced.length > 0 ? ` (자동 대체: ${lineup.replaced.join(", ")})` : "";
   return {
     ok: true,
@@ -607,14 +628,6 @@ export function markEntered(state: GameState): void {
 }
 
 /**
- * **짧게 부른 구간이 AI 벤치의 판단 자리를 여는 최소 간격(분)** — ⚠️ 밸런스 값.
- *
- * 정지점 사이가 대개 이만큼은 벌어지므로, 대화만 하는 턴이 이어져도 상대 벤치는
- * 정지점까지 갔을 때와 비슷한 횟수로 움직인다 (match.md §2).
- */
-const AI_BRIEF_GAP = 10;
-
-/**
  * 상대가 던질 때·굳힐 때 서는 모양 — ⚠️ 밸런스 값 (match.md §2).
  *
  * 후보를 좁혀 두는 이유는 프리셋 다섯이 전부 후보면 "가장 강한 모양"이 뽑혀
@@ -635,14 +648,7 @@ const HOLD_SHAPES: readonly Formation[] = ["5-4-1"];
  * 구간 번호를 난수 채널에 넣으므로 같은 세이브·같은 개입이면 같은 경기가 나오고,
  * 감독이 개입하면 패킷이 달라져 그다음 구간부터 확률이 바뀐다.
  */
-export function advanceSegment(
-  state: GameState,
-  /**
-   * 이 구간의 길이 상한 — 없으면 정지점까지. 감독이 대화·지시만 한 턴은 1분이다
-   * (`advance_match`의 `pace`, match.md §2).
-   */
-  options: { maxMinutes?: number } = {},
-): {
+export function advanceSegment(state: GameState): {
   ok: boolean;
   plan: SegmentPlan | null;
   message: string;
@@ -723,7 +729,6 @@ export function advanceSegment(
      * 구간 시뮬은 대회도 대진도 모르고 이 답만 받는다 (extra-time.ts).
      */
     toExtraTime: needsExtraTime(state, match, pending.ledger.score),
-    maxMinutes: options.maxMinutes,
     /**
      * **앞 구간이 멈춘 소수 시각에서 잇는다** — 장부의 분에서 다시 출발하면 정지점마다
      * 최대 1분이 되감겨 그 시간이 두 번 굴려진다 (match.md §1.4). 옛 세이브에는 이
@@ -733,31 +738,16 @@ export function advanceSegment(
     rng,
   });
 
-  /**
-   * **짧게 부른 구간은 시간으로 센다** — 구간 횟수로 세면 양쪽이 다 무너진다.
-   *
-   * AI 교체도 AI 전술 이동도 구간이 끝날 때마다 한 번씩 굴러간다. 1분짜리를 정지점과
-   * 같은 자리로 세면 감독이 벤치에서 대화를 몇 번 거는 사이에 AI가 교체 카드를 다
-   * 쓰고 강도를 한계까지 올린다. 반대로 통째로 건너뛰면 감독이 말을 아낄수록 상대가
-   * 약해진다 — 대화만 하는 턴이 이어지면 상대 벤치가 90분 내내 얼어 있다.
-   *
-   * 그래서 **마지막 판단에서 `AI_BRIEF_GAP`분이 지났을 때만** 짧은 구간이 판단 자리를
-   * 연다. 정지점까지 가는 구간은 예전처럼 언제나 연다.
-   */
-  const brief = options.maxMinutes !== undefined;
-  const benchTurn = !brief || plan.minute - (pending.aiDecidedAt ?? 0) >= AI_BRIEF_GAP;
   // AI 팀 교체 — 상대만 90분을 그대로 뛰면 후반이 늘 우리 쪽으로 기운다.
   // 한 정지점은 교체 창 하나라 여러 장이 함께 올 수 있다 (match.md §2)
-  const aiSubs = benchTurn
-    ? planAiSubstitution(
-        aiSide,
-        squads[aiSide],
-        pending.ledger,
-        plan,
-        rng,
-        pending.matchFatigue ?? {},
-      )
-    : [];
+  const aiSubs = planAiSubstitution(
+    aiSide,
+    squads[aiSide],
+    pending.ledger,
+    plan,
+    rng,
+    pending.matchFatigue ?? {},
+  );
   // 끼우는 순서의 규칙은 sim이 쥔다 — match-cli도 같은 것을 부른다 (segment.ts)
   const events = mergeSubstitutions(plan.events, aiSubs);
 
@@ -767,15 +757,6 @@ export function advanceSegment(
     if (!applied.ok) return { ok: false, plan: null, message: applied.message };
     message = applied.message;
   }
-  /**
-   * 짧게 부른 구간만 시계를 따로 민다 — **장부의 시각은 마지막 사건의 시각**이라,
-   * 사건이 없거나(빈 배치는 장부가 반려한다) 사건이 구간 앞머리에만 있으면 1분을
-   * 불러도 시각이 그대로다. 그러면 호출부가 목표 분에 닿을 때까지 구간을 더 굴려
-   * "1분만"이 무너진다. 긴 구간은 건드리지 않는다: 마지막 사건까지가 장부의
-   * 시각이라는 규칙은 그쪽에선 이미 맞다.
-   */
-  if (brief) pending.ledger = advanceClock(pending.ledger, plan.minute);
-
   // 흐름의 양(패스·슛·xg·선방)은 사건이 아니라 숫자로 쌓인다
   pending.ledger = addStats(pending.ledger, plan.stats);
   pending.segment = segment + 1;
@@ -787,16 +768,14 @@ export function advanceSegment(
    */
   const aiNow = pending.aiTactics ?? aiKickoff;
   // 라커룸에서 판을 다시 짜는 자리 — 하프타임과 연장의 두 휴식이 같다
-  const shift = benchTurn
-    ? planAiTacticalShift(
-        aiSide,
-        aiNow,
-        aiKickoff,
-        pending.ledger,
-        isBreak(plan.stop),
-        pending.aiShape !== undefined,
-      )
-    : null;
+  const shift = planAiTacticalShift(
+    aiSide,
+    aiNow,
+    aiKickoff,
+    pending.ledger,
+    isBreak(plan.stop),
+    pending.aiShape !== undefined,
+  );
   if (shift) {
     /**
      * **모양은 여기서 고른다** — 구간 시뮬은 의도만 낸다. 후보 프리셋 중 지금
@@ -825,7 +804,6 @@ export function advanceSegment(
     });
     pending.aiTactics = guarded.success ? guarded.data : aiNow;
   }
-  if (benchTurn) pending.aiDecidedAt = plan.minute;
   accumulateFatigue((pending.matchFatigue ??= {}), plan.fatigue);
   // 피로가 쌓였으니 다음 구간의 전력이 달라진다 (교체·전술 변경과 같은 경로)
   refreshPacket(state);
@@ -850,15 +828,10 @@ export function advanceSegment(
  * 부른다. 다만 **사건이 나면 거기서 멈춘다** — 골·퇴장·부상·하프타임은 감독이
  * 반응할 자리이고, 그것을 지나쳐 목표 분까지 밀어붙이면 개입할 순간이 사라진다.
  * 그래서 선언한 분은 "여기까지 가 보자"이지 "무조건 여기까지"가 아니다.
- *
- * `maxMinutes`는 그 위에 얹는 **구간 자체의 상한**이다. 목표 분만으로는 짧게 갈 수
- * 없다 — 구간 하나가 이미 정지점까지 가기 때문에, 감독이 말만 건 1분을 만들려면
- * 구간을 그만큼에서 끊어야 한다 (match.md §2).
  */
 export function advanceMatchTo(
   state: GameState,
   targetMinute: number,
-  options: { maxMinutes?: number } = {},
 ): {
   ok: boolean;
   events: MatchEvent[];
@@ -879,7 +852,7 @@ export function advanceMatchTo(
     if (ledger.phase === "finished") break;
     if (ledger.minute >= targetMinute && events.length > 0) break;
 
-    const step = advanceSegment(state, options);
+    const step = advanceSegment(state);
     if (!step.ok || !step.plan) {
       return {
         ok: events.length > 0,

@@ -228,7 +228,7 @@ export function applyMatchAttributes(
   for (const entry of entries) {
     const player = playerById(state, entry.playerId);
     if (!player || player.teamId !== state.userTeamId) continue;
-    const moved = applyAttributeStep(state, player as never, entry.attribute, entry.attributeStep, {
+    const moved = applyAttributeStep(state, player, entry.attribute, entry.attributeStep, {
       allowed: null,
       spent,
       cap: MATCH_ATTR_CAP,

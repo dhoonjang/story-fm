@@ -5,7 +5,6 @@ import type {
   ApproachPressure,
   ApproachTopic,
   GamePlayer,
-  Persona,
   PlayerIssue,
   PressFact,
   PressStance,
@@ -26,8 +25,7 @@ import { boardExpectation, computeStandings } from "../competition/season";
 import { formLabel } from "../squad/form";
 import { issueReasonText } from "../squad/mood";
 import { recentOutcomes } from "../squad/slump";
-import { makeRng, pick } from "../core/rng";
-import { ownerOf, worldFigures } from "../world/persona";
+import { agentForPlayer, ownerOf } from "../world/persona";
 import { USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
 import { boardDemandFact } from "./board-demand";
 import { applyStanceOutcome, pendingPress, signed, stanceRow, STANCE_KO } from "./press";
@@ -86,7 +84,7 @@ const STARTED_WINDOW = 7;
 const IGNORE_CARRY = 0.75;
 
 /** 열린 자리가 답을 기다리는 날 — 이 뒤엔 감독이 지나친 것으로 닫힌다 */
-export const APPROACH_PATIENCE_DAYS = 3;
+const APPROACH_PATIENCE_DAYS = 3;
 
 /** 같은 화자가 다시 오기까지 — 어제 감독실에 왔던 사람이 오늘 또 오지 않는다 */
 const SPEAKER_COOLDOWN_DAYS = 7;
@@ -96,7 +94,7 @@ const SPEAKER_COOLDOWN_DAYS = 7;
  * 회견(`PRESS_BAND` 4)보다 좁은 이유는 자리가 좁기 때문이다 — 마이크 앞에서 한 말이
  * 복도에서 한 말보다 멀리 간다.
  */
-export const APPROACH_BAND = 3;
+const APPROACH_BAND = 3;
 
 /**
  * 폭이 더는 넓어지지 않는 계단 — **위 계단이라고 사석의 말이 회견보다 멀리 가지는
@@ -330,18 +328,6 @@ function playerFacts(
   ];
 }
 
-/**
- * 이적 요청을 들고 올 에이전트 — **(시드, 선수)에서 결정적으로 뽑는다.** 같은 세이브의
- * 같은 선수는 언제나 같은 사람이 대리한다 (people.md §1 일관성).
- *
- * 명부에 에이전트가 한 사람도 없으면 `null`이다 — 코어는 화자를 지어내지 않는다.
- */
-function agentFor(state: GameState, playerId: string): Persona | null {
-  const agents = worldFigures(state).filter((f) => f.role === "agent");
-  if (agents.length === 0) return null;
-  return pick(makeRng(state.seed, `agent-of:${playerId}`), agents);
-}
-
 /** 그 압력 줄이 지금 세울 수 있는 자리 — 사람이 없거나 사실이 사라졌으면 `null` */
 function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene | null {
   const channel = CHANNEL_OF[row.topic];
@@ -358,7 +344,7 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
      * 않는다. 자리를 여는 사실은 이적 요청 그 자체라 맨 앞에 sharp로 선다.
      */
     if (step === topStepOf(row.topic)) {
-      const agent = agentFor(state, player.id);
+      const agent = agentForPlayer(state, player.id);
       const request: PressFact = {
         kind: "transfer-request",
         data: {

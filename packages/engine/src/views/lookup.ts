@@ -290,7 +290,7 @@ function theirRow(state: GameState, p: GamePlayer): string {
   );
 }
 
-export function playerRow(state: GameState, p: GamePlayer): string {
+function playerRow(state: GameState, p: GamePlayer): string {
   return p.teamId === state.userTeamId ? ourRow(state, p) : theirRow(state, p);
 }
 
