@@ -20,12 +20,14 @@ import { LlmCallError } from "./llm-error";
  * **건너뛴 자리에 잃는 것이 없는 곳만 끊는다.** 결산 셋은 실패를 삼키고 코어
  * 앵커가 그대로 남으며, 자주 도는 만큼 예산도 여기서 가장 빨리 샌다. 압축은
  * 실패하면 접지 않고 다음 기회에 다시 시도하는 계약이라(agents.md §5-1) 건너뛰어도
- * 이력이 사라지지 않는다.
+ * 이력이 사라지지 않는다. 교섭 상대도 같은 계약이다 — 건너뛰면 코어 앵커가 그대로
+ * 협상에 반영된다(agents.md §4-1).
  */
 const SKIPPABLE_AGENTS: ReadonlySet<AgentName> = new Set<AgentName>([
   "match-rater",
   "training-rater",
   "mood-rater",
+  "negotiator",
   "history-compactor",
 ]);
 
