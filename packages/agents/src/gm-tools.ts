@@ -11,6 +11,7 @@ import {
   adjustTransferBudget,
   applyForManagerJob,
   answerOffer,
+  arrivedResponses,
   applyFinanceEvent,
   applyNarrativeEvent,
   applyTalkToPlayer,
@@ -835,13 +836,27 @@ export function buildGmTools(
           ),
         note: z.string().min(1).max(200).optional(),
       }),
-      (input) =>
-        options?.deferNegotiationIds?.has(input.negotiationId)
-          ? {
-              ok: false,
-              message: "방금 도착한 오퍼는 감독에게 조건을 먼저 보고하고 다음 지시를 기다리세요",
-            }
-          : answerOffer(state, input),
+      (input) => {
+        if (options?.deferNegotiationIds?.has(input.negotiationId)) {
+          return {
+            ok: false,
+            message: "방금 도착한 오퍼는 감독에게 조건을 먼저 보고하고 다음 지시를 기다리세요",
+          };
+        }
+        /**
+         * **우리 오퍼에 대한 답은 감독이 판정하지 않는다** (agents.md §4-1).
+         * 그 자리는 장면보다 먼저 교섭 상대가 끝내 두므로 여기 남을 일이 없지만,
+         * 남는다면 그것은 그 호출이 협상을 건너뛰었다는 뜻이다 — GM이 대신 판정하면
+         * 갈라 둔 자리가 조용히 되돌아온다.
+         */
+        if (arrivedResponses(state).some((n) => n.id === input.negotiationId)) {
+          return {
+            ok: false,
+            message: "우리 오퍼에 대한 상대의 답은 이미 나왔습니다 — 감독이 판정할 자리가 아닙니다",
+          };
+        }
+        return answerOffer(state, input);
+      },
     ),
     wrap(
       "accept_deal",

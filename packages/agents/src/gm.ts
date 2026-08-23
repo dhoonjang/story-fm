@@ -18,6 +18,7 @@ import {
   humanizePlayerIds,
   markEntered,
   minutesOfClock,
+  arrivedResponses,
   pendingVerdicts,
   pushNews,
   scoutReportCard,
@@ -37,6 +38,7 @@ import { reportMood } from "./mood-rater";
 import { reportTraining } from "./training-rater";
 import { buildNoSegmentMessage, MATCH_CASTER_SYSTEM } from "./match-caster";
 import { buildOnboardingTurn, runMockGmTurn } from "./mock-gm";
+import { runNegotiator } from "./negotiator";
 import { retryOnce, ModelOutputError } from "./retry";
 import { GM_SYSTEM } from "./gm-prompt";
 import { buildGmTools } from "./gm-tools";
@@ -64,6 +66,7 @@ import {
   GmTurnFailure,
   TIME_PASSED,
   noteSceneHeader,
+  recordCall,
   type GmToolCall,
   type GmTurnResult,
   type TurnOperation,
@@ -257,6 +260,25 @@ export async function runOnboardingTurn(state: GameState, llm?: GameLLM): Promis
  * 심경 결산 (mood-rater) — 다른 결산과 같은 계약: 대상이 없으면 부르지 않고,
  * 실패하면 앵커가 남는다. 감독이 부른 적 없는 내부 판정이라 칩으로 세우지 않는다.
  */
+/**
+ * 오늘 답이 도착한 협상을 **상대가 판정한다** — GM 턴이 시작하기 전이다 (agents.md §4-1).
+ *
+ * 협상 하나에 호출 하나이고, 실패해도 코어 앵커가 반영되므로 여기서 턴이 막히지
+ * 않는다. 반영된 판정은 스킬 기록(`respond_offer`)으로 서고, 감독이 읽을 한 줄은
+ * 상태 스냅샷의 맨 앞으로 간다 — 장면은 그것을 전한다.
+ */
+async function answerCounterparties(state: GameState, calls: GmToolCall[]): Promise<string[]> {
+  const lines: string[] = [];
+  // 목록을 먼저 굳힌다 — 판정이 협상의 상태를 바꾸므로 도중에 다시 재면 안 된다
+  for (const negotiation of [...arrivedResponses(state)]) {
+    const answered = await runNegotiator(state, negotiation);
+    if (!answered) continue;
+    recordCall(calls, "respond_offer", answered.result, { input: answered.input });
+    if (answered.result.ok) lines.push(answered.result.message);
+  }
+  return lines;
+}
+
 async function rateMood(state: GameState, from: string): Promise<void> {
   const brief = buildMoodBrief(state, from, state.date);
   if (brief) await reportMood(state, brief);
@@ -336,6 +358,14 @@ async function runRealGmTurn(
       : [],
   );
   /**
+   * **협상의 상대는 GM이 아니다** (agents.md §4-1).
+   *
+   * 오늘 답이 도착한 협상은 장면보다 먼저, 별도 호출로 판정된다. 여기서 끝내 두는
+   * 덕에 아래 GM 턴에는 그 협상이 판정 대기로 서지 않고, GM은 이미 일어난 일을
+   * 전한다 — 감독의 뜻을 읽어야 하는 **들어온 오퍼**만 도구로 남는다.
+   */
+  const counterpartyReplies = inMatch ? [] : await answerCounterparties(state, calls);
+  /**
    * **경기 턴의 ②·③** — 해석이 먼저, 중계가 나중이다 (docs/llm/agents.md §3).
    *
    * 감독의 말을 의도 하나로 옮기고 코어가 스킬로 적용한 뒤 구간까지 굴려 둔다.
@@ -390,6 +420,7 @@ async function runRealGmTurn(
             }
           : null,
         carriedReports,
+        counterpartyReplies,
       );
   /**
    * 이번 장면에 설 인물 — **평시만이다.** 경기 중에는 벤치의 코치 한 사람이

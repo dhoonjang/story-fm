@@ -210,6 +210,7 @@ Zod에만 있는 상한은 모델이 모르는 채로 그 도구를 계속 실�
 | 도구 설명 (`SKILL_CATALOG`)             | 그 도구를 **언제 부르고, 인자를 어떻게 채우고, 결과를 장면에 어떻게 옮기는가**       |
 | 경기 프롬프트 (`MATCH_INTENT_SYSTEM`)   | 경기 중 필요한 판정·해석 근거 전부 — 도구 표면이 0이라(§2) 도구 설명이 실리지 않는다 |
 | 상태 스냅샷 (`describePendingPress` 등) | 그 블록의 표기를 읽는 법 — "기자가 아는 사실 (이 밖은 묻지 못한다)"                  |
+| 교섭 프롬프트 (`NEGOTIATOR_SYSTEM`)     | 협상 테이블 건너편의 화자·판정 사다리·움직일 수 있는 폭 — 게임 도구가 없다           |
 
 - **한 도구의 사용법을 시스템 프롬프트가 다시 적지 않는다.** 원본이 둘이면 갈린다 — 같은
   도구를 한쪽은 "확률대로 판정하라"로, 다른 쪽은 "확률은 참고일 뿐"으로 말하게 되고 둘 다
@@ -318,6 +319,7 @@ prompt-regression`, 밴드는 서술자가 쥔다
 | 중계 시스템 프롬프트 (`MATCH_CASTER_SYSTEM`)      | `packages/agents/src/match-caster.ts`                                        |
 | 결산 프롬프트 셋                                  | `packages/agents/src/training-rater.ts` · `match-rater.ts` · `mood-rater.ts` |
 | 이력 요약 프롬프트 (`HISTORY_COMPACTOR_SYSTEM`)   | `packages/agents/src/history-compactor.ts`                                   |
+| 교섭 상대 프롬프트 (`NEGOTIATOR_SYSTEM`)          | `packages/agents/src/negotiator.ts`                                          |
 | 첫 장면 지시 (`ONBOARDING_INSTRUCTION`)           | `packages/agents/src/gm.ts`                                                  |
 | 도구 설명·그룹·표시 이름 (`SKILL_CATALOG`)        | `packages/agents/src/skill-descriptions.ts`                                  |
 | 도구 바인딩·스키마                                | `packages/agents/src/gm-tools.ts`                                            |

@@ -1,4 +1,9 @@
-import type { MatchEvent, PressConference } from "@story-fm/domain";
+import type {
+  MatchEvent,
+  Negotiation,
+  NegotiationVerdict,
+  PressConference,
+} from "@story-fm/domain";
 import {
   acceptDeal,
   acceptManagerOffer,
@@ -19,6 +24,10 @@ import {
   respondToMedia,
   declinePress,
   arrivedResponses,
+  counterpartyAnchor,
+  settleCounterparty,
+  type CounterpartyRuling,
+  type MarketSkillResult,
   buildOfficeViews,
   dealOdds,
   describeNegotiations,
@@ -34,7 +43,6 @@ import {
   incomingOffers,
   pendingOffer,
   playerById,
-  respondOffer,
   sendOffer,
   suggestTerms,
   setCaptain,
@@ -85,15 +93,35 @@ import type { CardMark, GoalMark } from "@story-fm/engine";
  * 아니라 "시나리오가 끝까지 도는가"를 보장하는 것이 목적이다.
  */
 
-/** mock 협상 판정 문턱 — 성사 확률이 이 이상이면 수락, 다음 구간이면 역제안 */
-const MOCK_ACCEPT_PROB = 50;
-const MOCK_COUNTER_PROB = 25;
-/** mock 역제안 — 이적료는 받은 오퍼의 1.25배로 되부른다 */
+/** mock 역제안 — 이적료는 받은 오퍼의 1.25배로 되부른다 (감독이 답하는 자리다) */
 const MOCK_COUNTER_FEE_RATE = 1.25;
-/** mock 재계약 역제안 — 선수가 주급 기대치의 1.15배를 부른다 */
-const MOCK_RENEWAL_WAGE_RATE = 1.15;
 /** mock 감독직 흥정 — 제시 조건의 1.2배를 되부른다 (천장은 코어가 자른다) */
 const MOCK_MANAGER_COUNTER_RATE = 1.2;
+
+/**
+ * 우리 오퍼에 상대가 답한다 — **mock은 코어 앵커를 그대로 읽는다** (agents.md §4-1).
+ *
+ * 실모드의 폴백과 같은 함수(`settleCounterparty`)를 지나므로, mock이 자기 확률 구간을
+ * 따로 들고 있다가 코어와 갈릴 자리가 없다. 판정도 금액도 코어가 정하고 mock이 더하는
+ * 것은 감독에게 남길 한 줄뿐이다.
+ */
+function answerAsCounterparty(
+  state: GameState,
+  negotiation: Negotiation,
+  notes: readonly [string, string],
+): { input: CounterpartyRuling; result: MarketSkillResult; verdict: NegotiationVerdict } {
+  const anchor = counterpartyAnchor(state, negotiation);
+  if (!anchor) {
+    return {
+      input: { negotiationId: negotiation.id, verdict: "reject" },
+      result: { ok: false, message: "답할 오퍼가 없습니다" },
+      verdict: "reject",
+    };
+  }
+  const note = anchor.verdict === "accept" ? notes[0] : notes[1];
+  const { input, result } = settleCounterparty(state, anchor, { verdict: anchor.verdict, note });
+  return { input, result, verdict: input.verdict };
+}
 
 /** 수석코치 화자 태그 — 직책이 아니라 그 사람의 이름이다 (people.md §3) */
 function coach(state: GameState): string {
@@ -690,21 +718,10 @@ function computeMockGmTurn(
     const waiting = renewal ? pendingOffer(renewal) : null;
     // 답이 도착했으면 선수 본인이 되어 확률대로 판정한다
     if (renewal && waiting && waiting.respondsOn !== null && waiting.respondsOn <= state.date) {
-      const verdict =
-        waiting.probability >= MOCK_ACCEPT_PROB
-          ? "accept"
-          : waiting.probability >= MOCK_COUNTER_PROB
-            ? "counter"
-            : "reject";
-      const input = {
-        negotiationId: renewal.id,
-        verdict,
-        ...(verdict === "counter"
-          ? { weeklyWage: Math.round(renewalExpectation(state, who) * MOCK_RENEWAL_WAGE_RATE) }
-          : {}),
-        note: verdict === "accept" ? "여기 남겠습니다" : "조건을 더 봐야겠습니다",
-      } as const;
-      const result = respondOffer(state, input);
+      const { input, result, verdict } = answerAsCounterparty(state, renewal, [
+        "여기 남겠습니다",
+        "조건을 더 봐야겠습니다",
+      ]);
       recordCall(calls, "respond_offer", result, { input });
       let text = `@${who.name}: ${result.message}`;
       if (result.ok && verdict === "accept") {
@@ -770,19 +787,10 @@ function computeMockGmTurn(
     // ② 답이 도착한 우리 오퍼가 있으면 상대편이 되어 판정한다
     const arrived = arrivedResponses(state)[0];
     if (arrived) {
-      const offer = pendingOffer(arrived)!;
-      const verdict =
-        offer.probability >= MOCK_ACCEPT_PROB
-          ? "accept"
-          : offer.probability >= MOCK_COUNTER_PROB
-            ? "counter"
-            : "reject";
-      const input = {
-        negotiationId: arrived.id,
-        verdict,
-        note: verdict === "accept" ? "그 값이면 놓아준다" : "그 값으로는 어렵다",
-      } as const;
-      const result = respondOffer(state, input);
+      const { input, result, verdict } = answerAsCounterparty(state, arrived, [
+        "그 값이면 놓아준다",
+        "그 값으로는 어렵다",
+      ]);
       recordCall(calls, "respond_offer", result, { input });
       let text = `${coach(state)} ${result.message}`;
       if (result.ok && verdict === "accept") {
