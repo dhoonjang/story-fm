@@ -6,6 +6,7 @@ import type {
   MedicalConcern,
   Negotiation,
   NegotiationVerdict,
+  Transfer,
 } from "@story-fm/domain";
 import {
   MAX_PAYMENT_YEARS,
@@ -31,6 +32,7 @@ import {
   recordFinance,
   settleDuePayments,
 } from "../club/finance";
+import { attachClauses, settleSellOn } from "./clauses";
 import {
   LOAN_FEE_RATE,
   askingPriceFor,
@@ -2379,7 +2381,7 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
   const hostTeamId = player.teamId;
   // 원장 — TRANSFER row가 이력의 원본 (GamePlayer.teamId는 현재값일 뿐)
   const transferId = `tr-in-${player.id}-${state.date}`;
-  state.transfers.push({
+  const transfer: Transfer = {
     // 방향이 id에 든다 — 같은 날 사고판 선수는 `tr-<id>-<date>` 하나로 겹친다
     id: transferId,
     gamePlayerId: player.id,
@@ -2389,6 +2391,16 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
     date: state.date,
     type: agreed.fee > 0 ? "transfer" : "free",
     fee: agreed.fee,
+  };
+  // 파는 쪽이 어린 선수를 내보내는 자리면 그 구단이 조항을 들고 간다 (transfer.md §5-3)
+  attachClauses(state, transfer, player);
+  state.transfers.push(transfer);
+  // 파는 구단이 무는 셀온은 이 이적으로 발동한다 — 우리 장부는 지나가지 않는다
+  settleSellOn(state, {
+    gamePlayerId: player.id,
+    sellerTeamId: fromTeamId,
+    resaleFee: agreed.fee,
+    resaleTransferId: transferId,
   });
 
   // 계약 — 기존 계약을 끝내고 새로 쓴다 (주급의 원본은 CONTRACT다)
@@ -2615,7 +2627,7 @@ function executeSale(
   }
 
   const transferId = `tr-out-${player.id}-${state.date}`;
-  state.transfers.push({
+  const transfer: Transfer = {
     id: transferId,
     gamePlayerId: player.id,
     windowId: window.id,
@@ -2624,6 +2636,19 @@ function executeSale(
     date: state.date,
     type: agreed.fee > 0 ? "transfer" : "free",
     fee: agreed.fee,
+  };
+  // 조항은 딜의 모양이 붙인다 — 파는 쪽이 우리든 AI든 같은 함수다 (transfer.md §5-3)
+  attachClauses(state, transfer, player);
+  state.transfers.push(transfer);
+  /**
+   * 우리가 데려올 때 걸린 셀온은 **이 매각으로 발동한다** — 원 소속 구단이 이익의
+   * 일부를 가져간다. 원장은 지급 일정 표의 한 문을 지나 양쪽에 대칭으로 선다.
+   */
+  const sellOnPaid = settleSellOn(state, {
+    gamePlayerId: player.id,
+    sellerTeamId: state.userTeamId,
+    resaleFee: agreed.fee,
+    resaleTransferId: transferId,
   });
 
   const previous = activeContract(state, player.id);
@@ -2702,6 +2727,7 @@ function executeSale(
         ? ""
         : ` (${paymentYears}년 분할 — 첫 회분 ${formatMoney(dueNow)})`) +
       "." +
+      (sellOnPaid > 0 ? ` 셀온 조항으로 ${formatMoney(sellOnPaid)}가 나갔습니다.` : "") +
       `${captainNote} 이적 예산 ${formatMoney(ourFinance?.transferBudget ?? 0)}`,
     brief: {
       head: "매각 완료",
@@ -2714,6 +2740,7 @@ function executeSale(
             ? {}
             : { note: `${paymentYears}년 분할 · 첫 회분 ${formatMoney(dueNow)}` }),
         }),
+        ...(sellOnPaid > 0 ? [item({ label: "셀온 지급", text: formatMoney(sellOnPaid) })] : []),
         item({ label: "이적 예산", text: formatMoney(ourFinance?.transferBudget ?? 0) }),
         ...(wasCaptain ? [item({ text: "주장 공석" })] : []),
       ],
