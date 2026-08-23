@@ -123,12 +123,65 @@ const MERCHANDISING_MONTHLY: Record<1 | 2 | 3 | 4, number> = {
   3: 500_000,
   4: 210_000,
 };
+/**
+ * 머천다이징에 붙는 성적 보정 — 최근 승률이 `PAR` 에서 벗어난 만큼 `SLOPE` 로
+ * 기울고 ±`SWING` 에서 멈춘다. 승률을 보는 창은 `MERCH_FORM_MATCHES`.
+ */
+const MERCH_FORM_MATCHES = 6;
+const MERCH_PAR_WIN_RATE = 0.4;
+const MERCH_FORM_SLOPE = 0.25;
+const MERCH_FORM_SWING = 0.1;
+
+/**
+ * 스폰서 계약의 성과 조항 — 상업 정액에 더해지는 비율 (`commercialClause`).
+ * 대항전은 참가만으로 걸리고(무대의 값이다), 우승은 지난 시즌의 것이 한 해 간다.
+ */
+const COMMERCIAL_UCL_CLAUSE = 0.15;
+const COMMERCIAL_UEL_CLAUSE = 0.06;
+const COMMERCIAL_UECL_CLAUSE = 0.03;
+const COMMERCIAL_TROPHY_CLAUSE = 0.2;
+
+/** 리그 팀 수를 세지 못했을 때의 자 — 성적 수당의 계단 수가 여기서 나온다 */
+const DEFAULT_LEAGUE_SIZE = 20;
+/** 시장 전용 리그의 예산 표에 그 리그가 없을 때의 자 */
+const DEFAULT_MARKET_LEAGUE_BUDGET = 50_000_000;
 
 /** 매치데이 — 기본 점유율(전력 등급별)과 호스피탈리티 가산율 */
 const OCCUPANCY_BASE: Record<1 | 2 | 3 | 4, number> = { 1: 0.97, 2: 0.9, 3: 0.85, 4: 0.8 };
 const HOSPITALITY_RATE: Record<1 | 2 | 3 | 4, number> = { 1: 0.35, 2: 0.28, 3: 0.2, 4: 0.15 };
 /** 티켓 단가 보정 — 리그 평균가에 곱한다 */
 const TICKET_TIER_FACTOR: Record<1 | 2 | 3 | 4, number> = { 1: 1.3, 2: 1.1, 3: 0.95, 4: 0.8 };
+/** 리그 카탈로그에 평균 티켓가가 없을 때의 자 (£) */
+const DEFAULT_TICKET_PRICE = 30;
+/** 대항전 홈경기 단가 — 리그 경기보다 이만큼 비싸게 판다 */
+const EURO_TICKET_FACTOR = 1.15;
+
+// 점유율을 움직이는 것들 — 기본 점유율(`OCCUPANCY_BASE`) 위에 더해지고, 전부 더한
+// 뒤 `OCCUPANCY_FLOOR`~1로 잘린다 (finance.md §5.2).
+
+/** 순위 보정 — 이 순위가 0점이고, 한 계단마다 `RANK_SWING / RANK_SPAN`씩 움직인다 */
+const OCCUPANCY_RANK_PIVOT = 11;
+const OCCUPANCY_RANK_SPAN = 10;
+const OCCUPANCY_RANK_SWING = 0.04;
+/** 최근 폼 — 이만큼의 대회 경기를 보고, 이 승률이 0점이다 */
+const OCCUPANCY_FORM_MATCHES = 5;
+const OCCUPANCY_PAR_WIN_RATE = 0.4;
+const OCCUPANCY_FORM_SWING = 0.05;
+/** 상대 매력도 — 큰 구단이 오면 표가 더 팔린다 (3등급은 0) */
+const OCCUPANCY_BY_OPPONENT_TIER: Record<1 | 2 | 3 | 4, number> = {
+  1: 0.04,
+  2: 0.02,
+  3: 0,
+  4: -0.02,
+};
+/** 컵 경기 가산 */
+const OCCUPANCY_CUP_BONUS = 0.02;
+/** 평일(월~목) 저녁 킥오프가 깎는 몫 */
+const OCCUPANCY_WEEKNIGHT_PENALTY = 0.03;
+/** 결정적 미세 변동의 폭 — 시드 해시로 ±절반이 흔들린다 */
+const OCCUPANCY_JITTER = 0.04;
+/** 아무리 못해도 이 아래로는 내려가지 않는다 (친선 배율은 이 clamp **뒤에** 곱한다) */
+const OCCUPANCY_FLOOR = 0.45;
 /** 경기 운영비 — 매치데이 수입 대비 */
 const MATCHDAY_OPEX_RATE = 0.12;
 /**
@@ -141,6 +194,8 @@ const MATCHDAY_OPEX_RATE = 0.12;
 const FRIENDLY_ATTENDANCE_FACTOR = 0.6;
 const FRIENDLY_TICKET_FACTOR = 0.6;
 
+/** 주급을 월액으로 옮기는 자 — 한 해 52주를 열두 달로 고르게 편다 */
+const WEEKS_PER_MONTH = 52 / 12;
 /** 스태프 급여 — 월 선수 급여 대비 (하위 팀일수록 상대 비중이 크다) */
 const STAFF_WAGE_RATE: Record<1 | 2 | 3 | 4, number> = { 1: 0.22, 2: 0.24, 3: 0.26, 4: 0.28 };
 /** 승리 수당 — 주급 총액 대비 */
@@ -166,6 +221,8 @@ const FINANCE_COST_MONTHLY: Record<1 | 2 | 3 | 4, number> = {
   3: 700_000,
   4: 400_000,
 };
+/** 리그 카탈로그에 중계권 배율이 없을 때의 자 — EPL 대비 몫이다 */
+const DEFAULT_BROADCAST_POOL = 0.3;
 /** 원정 비용 — 국내/유럽 */
 const TRAVEL_DOMESTIC = 120_000;
 const TRAVEL_EUROPE = 400_000;
@@ -294,7 +351,7 @@ function profileOf(state: GameState | undefined, teamId: string) {
 }
 
 function poolOf(state: GameState, teamId: string): number {
-  return leagueCatalogById(leagueOfTeamIn(state, teamId))?.broadcastPool ?? 0.3;
+  return leagueCatalogById(leagueOfTeamIn(state, teamId))?.broadcastPool ?? DEFAULT_BROADCAST_POOL;
 }
 
 /** 브랜드가 중계 몫을 끌어올리는 배수 — 경제 수준 ÷ 리그 수준 (브랜드 보정만 남긴다) */
@@ -433,6 +490,12 @@ export function payOnce(
 // ── 중계권 ──────────────────────────────────────────────
 
 /**
+ * 지난 시즌 순위를 알 수 없을 때 성적 수당이 쓰는 자 — 등급이 곧 순위 어림이다.
+ * AI 팀엔 시즌 기록이 없고, 유저 팀도 승강한 시즌엔 앞 리그의 순위를 쓸 수 없다.
+ */
+const ASSUMED_RANK_BY_TIER: Record<1 | 2 | 3 | 4, number> = { 1: 3, 2: 7, 3: 12, 4: 17 };
+
+/**
  * 이 팀의 지난 시즌 리그 순위 — 성적 수당의 기준.
  *
  * 유저 팀은 시즌 기록에서 정확히 알 수 있다. AI 팀은 지난 시즌 순위표를
@@ -450,8 +513,7 @@ function previousRankOf(state: GameState, teamId: string): number {
       last?.leagueId === undefined || last.leagueId === leagueOfTeamIn(state, teamId);
     if (last && sameLeague) return last.position;
   }
-  const tier = tierOf(state, teamId);
-  return tier === 1 ? 3 : tier === 2 ? 7 : tier === 3 ? 12 : 17;
+  return ASSUMED_RANK_BY_TIER[tierOf(state, teamId)];
 }
 
 /** 리그 팀 수 — 성적 수당의 계단 수 (18팀 리그는 계단이 짧다) */
@@ -501,7 +563,9 @@ export function matchdayRevenue(state: GameState, match: MatchRecord): MatchdayR
   // 순위 — 상위권일수록 표가 팔린다 (순위표가 아직 없으면 보정 없음)
   const standings = computeStandings(state, leagueOfTeamIn(state, teamId));
   const rank = standings.findIndex((r) => r.teamId === teamId) + 1;
-  if (rank > 0) occupancy += ((11 - rank) / 10) * 0.04;
+  if (rank > 0) {
+    occupancy += ((OCCUPANCY_RANK_PIVOT - rank) / OCCUPANCY_RANK_SPAN) * OCCUPANCY_RANK_SWING;
+  }
 
   // 최근 5경기 폼 — **대회 경기만.** 친선의 승패가 표를 팔면 프리시즌 성적이 살림에
   // 남는다 (season.md §2)
@@ -514,7 +578,7 @@ export function matchdayRevenue(state: GameState, match: MatchRecord): MatchdayR
         !isReserveMatch(m) &&
         (m.homeTeamId === teamId || m.awayTeamId === teamId),
     )
-    .slice(-5);
+    .slice(-OCCUPANCY_FORM_MATCHES);
   if (recent.length > 0) {
     const wins = recent.filter((m) => {
       const home = m.homeTeamId === teamId;
@@ -522,31 +586,32 @@ export function matchdayRevenue(state: GameState, match: MatchRecord): MatchdayR
       const theirs = home ? m.result!.awayGoals : m.result!.homeGoals;
       return mine > theirs;
     }).length;
-    occupancy += (wins / recent.length - 0.4) * 0.05;
+    occupancy += (wins / recent.length - OCCUPANCY_PAR_WIN_RATE) * OCCUPANCY_FORM_SWING;
   }
 
   // 상대 매력도 · 대회 · 슬롯
   const oppTier = tierOf(state, opponentId);
-  occupancy += oppTier === 1 ? 0.04 : oppTier === 2 ? 0.02 : oppTier === 4 ? -0.02 : 0;
-  if (isCup(match.competitionId)) occupancy += 0.02;
+  occupancy += OCCUPANCY_BY_OPPONENT_TIER[oppTier];
+  if (isCup(match.competitionId)) occupancy += OCCUPANCY_CUP_BONUS;
   const dow = dayOfWeek(match.date);
-  if (dow === 1 || dow === 2 || dow === 3 || dow === 4) occupancy -= 0.03;
+  if (dow === 1 || dow === 2 || dow === 3 || dow === 4) occupancy -= OCCUPANCY_WEEKNIGHT_PENALTY;
 
   // 결정적 미세 변동
   const rng = makeRng(state.seed, `attendance:${match.id}`);
-  occupancy += (rng() - 0.5) * 0.04;
+  occupancy += (rng() - 0.5) * OCCUPANCY_JITTER;
 
-  occupancy = Math.max(0.45, Math.min(1, occupancy));
+  occupancy = Math.max(OCCUPANCY_FLOOR, Math.min(1, occupancy));
   // 친선은 하한을 지난 뒤에 깎는다 — 프리시즌 관중을 만석 판정에 넣지 않는다
   const friendly = isFriendly(match);
   if (friendly) occupancy *= FRIENDLY_ATTENDANCE_FACTOR;
   const attendance = Math.round(capacity * occupancy);
 
-  const basePrice = leagueCatalogById(leagueOfTeamIn(state, teamId))?.avgTicketPrice ?? 30;
+  const basePrice =
+    leagueCatalogById(leagueOfTeamIn(state, teamId))?.avgTicketPrice ?? DEFAULT_TICKET_PRICE;
   const price =
     basePrice *
     TICKET_TIER_FACTOR[tier] *
-    (isEuroCup(match.competitionId) ? 1.15 : 1) *
+    (isEuroCup(match.competitionId) ? EURO_TICKET_FACTOR : 1) *
     (friendly ? FRIENDLY_TICKET_FACTOR : 1);
   const gate = attendance * price;
   const income = Math.round(gate * (1 + HOSPITALITY_RATE[tier]));
@@ -670,9 +735,9 @@ export function applyAiMatchFinance(state: GameState, match: MatchRecord): void 
     if (side === "home" && !match.neutral) {
       const { capacity } = profileOf(state, teamId);
       const price =
-        (leagueCatalogById(leagueOfTeamIn(state, teamId))?.avgTicketPrice ?? 30) *
+        (leagueCatalogById(leagueOfTeamIn(state, teamId))?.avgTicketPrice ?? DEFAULT_TICKET_PRICE) *
         TICKET_TIER_FACTOR[tier] *
-        (isEuroCup(match.competitionId) ? 1.15 : 1) *
+        (isEuroCup(match.competitionId) ? EURO_TICKET_FACTOR : 1) *
         (friendly ? FRIENDLY_TICKET_FACTOR : 1);
       const occupancy = OCCUPANCY_BASE[tier] * (friendly ? FRIENDLY_ATTENDANCE_FACTOR : 1);
       const gate = capacity * occupancy * price * (1 + HOSPITALITY_RATE[tier]);
@@ -906,7 +971,6 @@ export interface AmortisationLine {
  * 같은 비중)이 되고, tier1 유저의 연 장부 손익이 §10.1 밴드 안에 든다.
  */
 const LEGACY_AMORTISATION_WAGE_RATE = 0.7;
-const WEEKS_PER_MONTH = 52 / 12;
 
 /**
  * 게임이 시작한 날 — 시작 스쿼드의 계약이 전부 이 날에 놓인다(`createGame`).
@@ -1260,7 +1324,7 @@ function relegatedYear(state: GameState, teamId: string): number | null {
 
 function postMonthlyItems(state: GameState): void {
   // 96팀 × 전 경기 순회를 피한다 (월초 정산은 전 팀에 적용된다)
-  const winRates = recentWinRates(state, 6);
+  const winRates = recentWinRates(state, MERCH_FORM_MATCHES);
   const leagueSizes = new Map<string, number>();
   for (const t of state.teams) {
     const league = leagueOfTeamIn(state, t.id);
@@ -1280,7 +1344,7 @@ function postMonthlyItems(state: GameState): void {
       const finance = state.finances.find((f) => f.teamId === team.id);
       const marketLeague = leagueOfTeam(team.id);
       if (finance && marketLeague !== null) {
-        finance.transferBudget = MARKET_LEAGUE_BUDGET[marketLeague] ?? 50_000_000;
+        finance.transferBudget = MARKET_LEAGUE_BUDGET[marketLeague] ?? DEFAULT_MARKET_LEAGUE_BUDGET;
       }
       continue;
     }
@@ -1310,7 +1374,7 @@ function postMonthlyItems(state: GameState): void {
       amount: (BROADCAST_EQUAL_SEASON * equalShareFactor(state, team.id)) / BROADCAST_MONTHS,
     });
     const rank = previousRankOf(state, team.id);
-    const size = leagueSizes.get(leagueOfTeamIn(state, team.id)) ?? 20;
+    const size = leagueSizes.get(leagueOfTeamIn(state, team.id)) ?? DEFAULT_LEAGUE_SIZE;
     const steps = Math.max(1, size + 1 - rank);
     recordFinance(state, team.id, {
       kind: "income",
@@ -1345,7 +1409,13 @@ function postMonthlyItems(state: GameState): void {
     });
     // 머천다이징은 성적에 붙는다 — 최근 승률 ±10%
     const winRate = winRates.get(team.id);
-    const form = winRate === undefined ? 0 : Math.max(-0.1, Math.min(0.1, (winRate - 0.4) * 0.25));
+    const form =
+      winRate === undefined
+        ? 0
+        : Math.max(
+            -MERCH_FORM_SWING,
+            Math.min(MERCH_FORM_SWING, (winRate - MERCH_PAR_WIN_RATE) * MERCH_FORM_SLOPE),
+          );
     recordFinance(state, team.id, {
       kind: "income",
       category: "merchandising",
@@ -1378,7 +1448,7 @@ function postMonthlyItems(state: GameState): void {
       kind: "expense",
       category: "staff_wages",
       label: "코칭·사무 스태프 급여",
-      amount: weeklyWagesOf(state, team.id) * (52 / 12) * STAFF_WAGE_RATE[tier],
+      amount: weeklyWagesOf(state, team.id) * WEEKS_PER_MONTH * STAFF_WAGE_RATE[tier],
     });
     // 감독 연봉 — 계약이 있는 것은 감독 팀뿐이다 (career.md §5.1, 경질은 계약을
     // 지운다). AI 벤치의 몫은 위 스태프 급여율에 이미 뭉쳐 있다
@@ -1478,7 +1548,9 @@ const UNPLAYED_HOME_MATCHES = 19;
 function typicalHomeGate(teamId: string, leagueId: string | null, state?: GameState): number {
   const tier = tierOf(state, teamId);
   const { capacity } = profileOf(state, teamId);
-  const price = (leagueCatalogById(leagueId)?.avgTicketPrice ?? 30) * TICKET_TIER_FACTOR[tier];
+  const price =
+    (leagueCatalogById(leagueId)?.avgTicketPrice ?? DEFAULT_TICKET_PRICE) *
+    TICKET_TIER_FACTOR[tier];
   return capacity * OCCUPANCY_BASE[tier] * price * (1 + HOSPITALITY_RATE[tier]);
 }
 
@@ -1553,7 +1625,8 @@ export function catalogRevenueEstimate(
    */
   const pool = Math.min(
     1,
-    (leagueCatalogById(leagueId)?.broadcastPool ?? 0.3) * brandPoolLift(state, teamId),
+    (leagueCatalogById(leagueId)?.broadcastPool ?? DEFAULT_BROADCAST_POOL) *
+      brandPoolLift(state, teamId),
   );
   const broadcast =
     (BROADCAST_EQUAL_SEASON +
@@ -1570,10 +1643,17 @@ function commercialClause(state: GameState, teamId: string): number {
   let bonus = 0;
   for (const entry of state.euroEntrants) {
     if (!entry.teams.includes(teamId)) continue;
-    bonus += entry.cupId === "ucl" ? 0.15 : entry.cupId === "uel" ? 0.06 : 0.03;
+    bonus +=
+      entry.cupId === "ucl"
+        ? COMMERCIAL_UCL_CLAUSE
+        : entry.cupId === "uel"
+          ? COMMERCIAL_UEL_CLAUSE
+          : COMMERCIAL_UECL_CLAUSE;
   }
   const lastSeason = state.season - 1;
-  if (state.trophies.some((t) => t.teamId === teamId && t.season === lastSeason)) bonus += 0.2;
+  if (state.trophies.some((t) => t.teamId === teamId && t.season === lastSeason)) {
+    bonus += COMMERCIAL_TROPHY_CLAUSE;
+  }
   return bonus;
 }
 

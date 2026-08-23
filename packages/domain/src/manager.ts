@@ -40,11 +40,18 @@ export const MANAGER_ATTRIBUTES = Object.keys(MANAGER_ATTRIBUTE_KO) as Array<
   keyof ManagerAttributes
 >;
 
+/** 평판 눈금의 아래끝 — 0에서 더 내려가지 않는다 (career.md §4) */
+export const REPUTATION_MIN = 0;
+/** 평판 눈금의 위끝 — 보드·미디어·선수단 모두 같은 0~100 축이다 (career.md §4) */
+export const REPUTATION_MAX = 100;
+
 /** 평판 — 세계가 감독을 어떻게 보는가 (능력치와 구분, career.md §4) */
+export const ReputationSchema = z.number().int().min(REPUTATION_MIN).max(REPUTATION_MAX);
+
 export const ManagerReputationSchema = z.object({
-  board: z.number().int().min(0).max(100),
-  media: z.number().int().min(0).max(100),
-  squad: z.number().int().min(0).max(100),
+  board: ReputationSchema,
+  media: ReputationSchema,
+  squad: ReputationSchema,
 });
 
 /**

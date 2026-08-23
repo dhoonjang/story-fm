@@ -16,12 +16,17 @@ import {
   EXTRA_TIME_MINUTES,
   EXTRA_TIME_SHOT_SHARE,
   INJURY_PER_MATCH,
+  BLOCKED_SHARE,
+  FINISHING_PIVOT,
   advanceClock,
   applyEvents,
   bookingWeight,
   buildStrengthPacket,
   createLedger,
   injuryWeight,
+  sampleShot,
+  sampleShotXg,
+  savedShare,
   simulateSegment,
   teamCardRate,
   teamInjuryRate,
@@ -1011,5 +1016,48 @@ describe("카드·부상·연장의 눈금", () => {
       EXTRA_TIME_SHOT_SHARE * PHASE_END.second_half,
     );
     expect(EXTRA_TIME_DENSITY).toBeLessThan(1);
+  });
+});
+
+/**
+ * 비득점 분해는 **스코어에 닿지 않는다** — 유효슈팅·블록·유효슈팅 실패의 비율만
+ * 정한다. 그래서 경기 결과 테스트로는 절대 잡히지 않고, 여기서만 잡힌다.
+ */
+describe("골이 되지 못한 슛의 분해", () => {
+  it("기회가 좋을수록 선방으로 남는다 — 곡선의 양 끝이 두 계수를 고정한다", () => {
+    expect(savedShare(0)).toBeCloseTo(0.2405, 4);
+    expect(savedShare(1)).toBeCloseTo(0.7211, 4);
+    // 단조 증가 — 좋은 기회일수록 골문 안으로 간다
+    expect(savedShare(0.25)).toBeGreaterThan(savedShare(0));
+    expect(savedShare(0.75)).toBeGreaterThan(savedShare(0.25));
+  });
+
+  /**
+   * xG 표집이 난수를 몇 번 먹는지는 표집 방식이 정하므로 세어서 맞춘다 — 그 뒤의
+   * 세 굴림이 골 여부 · 선방 여부 · 블록 여부다.
+   */
+  const shotWithRolls = (meanXg: number, tail: number[]) => {
+    let used = 0;
+    const xg = sampleShotXg(() => {
+      used += 1;
+      return 0.5;
+    }, meanXg);
+    const values = [...Array<number>(used).fill(0.5), ...tail];
+    let i = 0;
+    const shot = sampleShot(() => values[i++] ?? 0.5, { meanXg }, FINISHING_PIVOT);
+    expect(shot.xg).toBeCloseTo(xg);
+    return shot;
+  };
+
+  it("선방 문턱 바로 아래는 선방, 위는 블록 문턱이 다시 가른다", () => {
+    const saved = savedShare(0.5);
+    // 결정력이 기준점이면 골 확률이 곧 xG다 — 0.9는 그 위라 골이 아니다
+    expect(shotWithRolls(0.5, [0.9, saved - 1e-6]).outcome).toBe("saved");
+    // 블록 문턱은 0.38 — 굴림을 그 양옆에 두어 값 자체를 잡는다
+    expect(BLOCKED_SHARE).toBeCloseTo(0.38, 4);
+    expect(shotWithRolls(0.5, [0.9, saved + 1e-6, 0.3799]).outcome).toBe("blocked");
+    expect(shotWithRolls(0.5, [0.9, saved + 1e-6, 0.3801]).outcome).toBe("off_target");
+    // 문턱 아래로 굴리면 골이고, 그때는 분해 자체가 없다
+    expect(shotWithRolls(0.5, [0.49]).outcome).toBe("goal");
   });
 });

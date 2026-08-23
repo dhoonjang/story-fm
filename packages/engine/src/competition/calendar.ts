@@ -439,6 +439,13 @@ function finalSunday(year: number): string {
 }
 
 /**
+ * 리그 골격의 라운드 수 — 20팀 더블 라운드로빈이다. 팀이 적은 리그(18팀 34라운드,
+ * 2부 12·14팀 22·26라운드)는 이 골격에서 덜어내 앉으므로(`anchorsFor`),
+ * 여기가 달력이 세우는 라운드의 최대치이기도 하다.
+ */
+const LEAGUE_ROUNDS = 38;
+
+/**
  * 38라운드의 기준 날짜 — 실제 EPL 캘린더 골격을 재현한다.
  * 주말 라운드(휴식기 제외) + 박싱데이 + 성탄 연전 + 부족분 주중 라운드 + 최종 라운드.
  *
@@ -483,7 +490,7 @@ function buildAnchors(season: number): Anchor[] {
    */
   for (const gapFirst of [true, false]) {
     for (const w of MIDWEEK_WINDOWS) {
-      if (anchors.length >= 37) break;
+      if (anchors.length >= LEAGUE_ROUNDS - 1) break;
       const pad = (n: number) => String(n).padStart(2, "0");
       const at = (md: [number, number]) =>
         `${md[0] >= 8 ? year : year + 1}-${pad(md[0])}-${pad(md[1])}`;
@@ -498,9 +505,10 @@ function buildAnchors(season: number): Anchor[] {
   }
 
   anchors.sort((a, b) => (a.date < b.date ? -1 : 1));
-  const weeks: Anchor[] = [...anchors.slice(0, 37), { date: last, kind: "final" }];
-  if (weeks.length !== 38) {
-    throw new Error(`시즌 ${season}: 라운드 날짜가 ${weeks.length}개 (38 필요)`);
+  // 최종 라운드는 날짜가 고정이라 따로 세운다 — 앵커는 그 앞의 한 라운드까지다
+  const weeks: Anchor[] = [...anchors.slice(0, LEAGUE_ROUNDS - 1), { date: last, kind: "final" }];
+  if (weeks.length !== LEAGUE_ROUNDS) {
+    throw new Error(`시즌 ${season}: 라운드 날짜가 ${weeks.length}개 (${LEAGUE_ROUNDS} 필요)`);
   }
   return weeks;
 }

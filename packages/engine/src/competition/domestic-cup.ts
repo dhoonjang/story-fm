@@ -36,7 +36,13 @@ import { clearForCup } from "./reschedule";
 import { shuffled } from "../core/rng";
 import { needsShootout, pairOf, resolveExtraTime, settledTieWinner } from "./extra-time";
 import { resolveShootout } from "./shootout";
-import { pushNarrative, teamName, teamShortName, type GameState } from "../core/state";
+import {
+  clampReputation,
+  pushNarrative,
+  teamName,
+  teamShortName,
+  type GameState,
+} from "../core/state";
 
 /**
  * 국내 컵 — FA컵·리그컵·코파 델 레이·코파 이탈리아·DFB-포칼·쿠프 드 프랑스.
@@ -1063,19 +1069,16 @@ export function reviewDomesticCups(state: GameState): string[] {
 
     if (champion === state.userTeamId) {
       state.trophies.push({ season: state.season, competitionId: cup.id, teamId: champion });
-      state.manager.reputation.media = Math.min(
-        100,
+      state.manager.reputation.media = clampReputation(
         state.manager.reputation.media + CUP_TITLE_MEDIA,
       );
-      state.manager.reputation.board = Math.min(
-        100,
+      state.manager.reputation.board = clampReputation(
         state.manager.reputation.board + CUP_TITLE_BOARD,
       );
       digest.push(`🏆 ${cup.name} 우승`);
       pushNarrative(state, `${cup.name} 우승`, 5);
     } else if (ours) {
-      state.manager.reputation.media = Math.min(
-        100,
+      state.manager.reputation.media = clampReputation(
         state.manager.reputation.media + CUP_RUNNER_UP_MEDIA,
       );
       digest.push(`${cup.short} 준우승 — 결승 상대 ${teamName(champion)}`);

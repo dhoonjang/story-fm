@@ -73,6 +73,7 @@ import {
   playerById,
   playersOf,
   proficiencyAt,
+  clampReputation,
   pushNarrative,
   recordGrowth,
   reservePlayers,
@@ -1401,6 +1402,32 @@ export function digestLines(digest: MatchDigest): string[] {
   return [...digest.ours, ...digest.finance, ...digest.others];
 }
 
+/**
+ * 한 경기가 감독 평판을 움직이는 폭 — 보드·선수단에 같은 값으로 걸린다.
+ * 승리 `+`, 패배 `-`, 무승부는 0. 프리시즌은 이 계산 자체를 지나간다.
+ */
+export const MATCH_REPUTATION_SWING = 2;
+/** 승리 하나가 주는 리더십 XP */
+export const WIN_LEADERSHIP_XP = 10;
+/** 원인 태그가 달린 골 하나가 주는 전술 XP */
+export const TACTICAL_XP_PER_GOAL = 12;
+/**
+ * 한 경기에서 받을 수 있는 전술 XP의 위끝 — 대량 득점 한 경기가 감독의 전술
+ * 성장을 통째로 앞당기지 않게 하는 문. 골 세 개면 이미 천장이다.
+ */
+export const TACTICAL_XP_CAP = 30;
+
+/**
+ * 원인 태그가 달린 골이 주는 전술 XP — **천장이 있다.** 한 경기 대승이
+ * 감독의 전술 축을 통째로 앞당기면, 약체를 골라 몰아치는 것이 성장 전략이 된다.
+ */
+export function tacticalXpFor(taggedGoals: number): number {
+  return Math.min(TACTICAL_XP_CAP, Math.max(0, taggedGoals) * TACTICAL_XP_PER_GOAL);
+}
+/** 경기 한 줄의 서사 무게 (1~5 눈금, `pushNarrative`) — 승리만 한 칸 위다 */
+const MATCH_SALIENCE_WIN = 4;
+const MATCH_SALIENCE_OTHER = 3;
+
 /** 경기 후 반영 — 사건은 창발, 반영은 공식 (match.md §6) */
 export function finalizeMatch(state: GameState): MatchDigest {
   const pending = state.pendingMatch;
@@ -1683,18 +1710,13 @@ export function finalizeMatch(state: GameState): MatchDigest {
    */
   const messages: string[] = [];
   if (!friendly) {
-    const repDelta = outcome === "win" ? 2 : outcome === "loss" ? -2 : 0;
-    state.manager.reputation.board = Math.max(
-      0,
-      Math.min(100, state.manager.reputation.board + repDelta),
-    );
-    state.manager.reputation.squad = Math.max(
-      0,
-      Math.min(100, state.manager.reputation.squad + repDelta),
-    );
+    const repDelta =
+      outcome === "win" ? MATCH_REPUTATION_SWING : outcome === "loss" ? -MATCH_REPUTATION_SWING : 0;
+    state.manager.reputation.board = clampReputation(state.manager.reputation.board + repDelta);
+    state.manager.reputation.squad = clampReputation(state.manager.reputation.squad + repDelta);
 
     if (outcome === "win") {
-      const msg = grantManagerXP(state, "leadership", 10);
+      const msg = grantManagerXP(state, "leadership", WIN_LEADERSHIP_XP);
       if (msg) messages.push(msg);
     }
     /** 원인 태그가 빈 골은 세지 않는다 — 패킷이 우리 편에 줄 근거를 갖지 않은 경기다 */
@@ -1702,7 +1724,7 @@ export function finalizeMatch(state: GameState): MatchDigest {
       (e) => e.type === "goal" && e.team === side && e.causes.length > 0,
     ).length;
     if (tacticalGoals > 0) {
-      const msg = grantManagerXP(state, "tactics", Math.min(30, tacticalGoals * 12));
+      const msg = grantManagerXP(state, "tactics", tacticalXpFor(tacticalGoals));
       if (msg) messages.push(msg);
     }
   }
@@ -1722,7 +1744,7 @@ export function finalizeMatch(state: GameState): MatchDigest {
   pushNarrative(
     state,
     `${competitionLabel(match.competitionId, match.stage ?? "league", match.round)} vs ${teamNameIn(state, opponentId)} ${scoreline} ${outcomeKo}`,
-    outcome === "win" ? 4 : 3,
+    outcome === "win" ? MATCH_SALIENCE_WIN : MATCH_SALIENCE_OTHER,
     "match",
   );
   digest.push(`최종 스코어 ${scoreline} — ${outcomeKo}`, ...messages);
