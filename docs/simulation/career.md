@@ -360,7 +360,7 @@ dismissal: {
 없다). 새 게임은 부임 구단 등급의 기본 조건으로 시작하고, 부임은 제안의 조건으로
 계약을 다시 세운다. 연봉은 매월 1일 구단 지출(`staff_wages`)에 연봉/12로 선다 — AI
 벤치의 몫은 스태프 급여율에 이미 뭉쳐 있다 ([finance.md](./finance.md) §6). 경질은
-계약을 지운다 — 위약금은 아직 없다 (§8).
+계약을 지우고 **위약금을 남긴다** — 만료·재계약·위약금·지갑은 §5.4다.
 
 **수락은 언제든 된다** — 시즌 중이어도 그날부로 부임한다(`acceptManagerOffer`). 상태
 전이는 여섯이다:
@@ -473,6 +473,74 @@ dismissal: {
 종류·한도 공식·응답 지연·구장 공사비는 전부
 [../simulation/finance.md](../simulation/finance.md) §9.6이 한 곳에 이름 붙여 갖는다.
 
+### 5.4 계약 — 만료·재계약·위약금·지갑
+
+계약(`Manager.contract`)은 **연봉·체결일·만료일**이고, 만료일은 선수 계약과 같은 자다
+(그해 6월 30일 — `contractUntil`). 여기 적히는 것은 전부 **수치와 기간**이다: 보드가
+무슨 말로 재계약을 꺼내는지, 에이전트가 뭐라고 답하는지는 GM이 쓴다
+([../overview.md](../overview.md) §1 철칙 4).
+
+**만료 판정은 하루를 건너뛰지 않는다.** tick이 매일 `reviewManagerContract`를 부르고,
+판정은 `오늘 > 만료일` 하나다 — 날짜가 단조 증가하므로 그 날을 밟지 않고 지나쳐도
+다음 tick에 반드시 걸리고, 판정이 계약을 지우므로 두 번 걸리지 않는다.
+
+⚠️ **"만료일 당일"로 재면 영영 오지 않는다.** 리그 최종전과 07-01 사이는 시즌 전환이
+통째로 건너뛰므로 06-30은 tick이 밟는 날이 아니다 — 선수 계약의 만료 예고가 이미 같은
+함정을 밟았다(`dueExpiryStage`). 그래서 문턱은 **넘어섰는가**로만 재고, 지운 계약이
+두 번째 판정을 막는다.
+
+**보드는 만료 90일 전에 한 번 판정한다** (`RENEWAL_NOTICE_DAYS` · 판정일은
+`contract.renewalDecidedOn`에 남는다). 매일 다시 보면 평판이 오르내릴 때마다 통보가
+번복되고, 그러면 감독은 어느 말을 믿어야 할지 알 수 없다.
+
+| 그날의 보드 평판              | 무슨 일이 일어나나                                      |
+| ----------------------------- | ------------------------------------------------------- |
+| `RENEWAL_BOARD_GATE`(40) 이상 | **재계약 제안**이 선다 — 답하지 않으면 10일 뒤 사라진다 |
+| 문턱 아래                     | **비갱신 통보** — 만료일에 감독은 무직이 된다           |
+
+- 재계약 제안은 **지금 구단 등급의 기본 조건**(`MANAGER_TERMS_BY_TIER`)으로 서되, 현
+  연봉이 그보다 높으면 현 연봉을 유지한다 — 구단이 스스로 깎아 부르지는 않는다.
+- 제안은 `ManagerOffer`(`via: "renewal"`)로 서고 **흥정도 수락도 이직 제안과 같은 길**을
+  탄다(`counter_manager_offer` 한 차례 · `accept_manager_offer`). 평판이 조건을 넓히는
+  자리는 `counterHeadroom` 하나면 된다 — 재계약에 두 번째 표를 만들지 않는다.
+- 수락하면 그날부터 계약이 다시 선다(`signedOn` 오늘 · `until`은 오늘에서 연수만큼).
+  구단도 자리도 그대로이므로 **§5.1의 부임 전이는 하나도 일어나지 않는다** — 경고도
+  압력도 훈련도 사람도 앞 구단의 것이 아니라 지금 구단의 것이다.
+
+**만료는 경질이 아니다 — 위약금이 없다.** 만료로 자리를 잃으면 경질 카드가
+`kind: "expired"`로 서고 무직의 길(§5.1)이 그대로 돈다: 옛 구단은 그날로 후임을 세우고,
+진행 중이던 협상은 사라지고, 제안·노크·공석 명부가 열린다. 두 사건이 갈리는 것은
+`kind` 하나다 — **무직은 상태지 사유가 아니다.**
+
+**위약금은 구단이 무는 구단의 지출이다** (`severance` — [finance.md](./finance.md) §4.2):
+
+```
+위약금 = min(연봉, round(연봉 × 잔여일/365 × SEVERANCE_RATE 0.5))
+```
+
+- 경질 당일 옛 구단의 원장에 서고, **같은 금액이 감독의 지갑에 들어간다.**
+- 잔여 전액을 물리면 tier 1의 3년 계약이 £18M이다 — 이적 예산 한 시즌치가 경질 하루에
+  사라진다. 절반·연봉 1년치 상한이면 tier 1이 최대 £6M이고, 잔여가 짧을수록 싸져
+  **시즌 말 경질이 구단에 싸다**는 실제 결이 그대로 남는다.
+- **급여 비중(`wageRatio`)에는 들어가지 않는다** — 일회성 지출이라 인건비 축을 흔들면
+  안 된다. 손익과 현금에는 그대로 선다 ([finance.md](./finance.md) §4.3).
+- 계약이 없는 옛 세이브의 경질은 위약금이 0이다. 만료로 떠나는 날도 0이다 — 끝까지 간
+  계약에 물 것이 없다.
+
+**지갑은 감독의 것이다** (`Manager.wallet` — 옛 세이브엔 없다, 없으면 0):
+
+- 쌓이는 자리는 둘이다 — **매월 1일 구단이 낸 연봉 1/12**과 **경질 위약금**. 같은 돈의
+  양면이라 구단 지출을 적는 그 자리에서 함께 오른다.
+- **구단을 옮겨도 따라간다.** 부임이 지우는 것은 구단에 묶인 것(경고·압력·구단주 요청·
+  회견·라커룸)뿐이고 지갑은 감독에게 붙어 있다 — 옛 구단의 상태가 새 구단에 새지 않게
+  하는 경계(§5.1)와 같은 자다: 구단의 것은 구단에, 감독의 것은 감독에게.
+- **쓰는 자리는 아직 없다.** 지갑에 지출처를 여는 것은 "돈으로 무엇을 사는가"라는 밸런스
+  축을 새로 만드는 일이라 여기서 정하지 않는다. 지금 지갑은 **커리어의 눈금**이고,
+  위약금이 설 자리다 (§8).
+
+숫자는 전부 `market/manager-market.ts`가 한 곳에 이름 붙여 갖는다 — 통보 시점·평판
+문턱·위약금 비율과 상한이 그 표다.
+
 ## 6. 커리어 기록
 
 | 기록            | 무엇이 남나                                                | 언제                                       |
@@ -574,6 +642,11 @@ board: {
   보는 눈이라, 합치면 "잘하는데 안 알려진 감독"이 표현되지 않는다.
 - **같은 말은 두 번 남지 않는다.** 면담·팀토크·주장 지명은 반복해도 사기·체력·XP·정착을
   더 쌓지 않는다. 반복이 이득이면 최적 전략은 말 연타가 되고, 감독의 판단은 버튼 연타가 된다.
+- **지갑은 감독의 것이고 위약금은 구단의 것이다** (§5.4). 지갑은 이직을 따라가고 위약금은
+  옛 구단의 원장에 선다 — 섞으면 감독의 돈이 구단 잔고를 흔들거나 옛 구단의 지출이 새
+  구단 장부에 앉는다.
+- **만료 판정은 날짜 비교 하나여야 한다** (§5.4). "만료일 당일"로 재면 시즌 전환이 통째로
+  건너뛰는 06-30에 걸려 영영 오지 않고, 판정한 뒤에도 계약이 남아 있으면 다음 날 또 걸린다.
 
 ## 8. 미해결
 
@@ -583,31 +656,34 @@ board: {
 - **감독의 요청에 흥정이 없다** (§5.3). 부른 값과 한도를 견줘 승인·부분 승인·거절이
   그 자리에서 갈릴 뿐, 보드가 조건을 되걸거나(“판다면 준다”) 감독이 되묻는 왕복이
   없다. 영입 건별 승인도 없다 — 예산은 총액으로만 오간다.
-- **감독 계약에 만료·위약금 판정이 없다** (§5.1). `until`이 지나도 아무 일도 일어나지
-  않고 — 재계약 흥정도 비갱신 통보도 없다 — 경질돼도 잔여 연봉을 무는 쪽이 없다:
-  감독 개인의 지갑이 게임에 없어 받을 자리가 없다.
+- **지갑에 쓰는 자리가 없다** (§5.4). 연봉과 위약금이 쌓이지만 감독이 그 돈으로 하는
+  일은 없다 — 지금 지갑은 커리어의 눈금이다. 지출처를 여는 것은 "돈으로 무엇을 사는가"라는
+  밸런스 축을 새로 만드는 일이라 계약 판정과 같은 자리에서 정하지 않았다.
+- **감독이 무는 위약금은 없다.** 이직은 무직에서만 일어나므로(§5.1) 계약을 남기고 떠나는
+  길 자체가 없다 — 재직 중인 감독에게 다른 구단이 손을 뻗는 자리가 생기면 그때 반대편
+  위약금이 필요해진다.
 - 전 축이 상한(`skills/index.ts`의 `MANAGER_ATTR_CAP` 90)에 닿은 시나리오의 **게임감**이
   검증되지 않았다. XP는 §3대로 99에서 멈춰 장부는 닫혔지만, 더 오를 곳이 없는 감독에게
   성장 말고 무엇이 남는지는 설계에 없다.
 
 ## 코드 위치
 
-| 무엇                          | 어디                                                                                               |
-| ----------------------------- | -------------------------------------------------------------------------------------------------- |
-| 배경 해석·기준선·전문 분야    | `packages/engine/src/world/onboarding.ts`                                                          |
-| 능력치·평판·계약·조건 표      | `packages/domain/src/manager.ts`                                                                   |
-| XP·팀토크·면담 계수           | `packages/engine/src/skills/index.ts`                                                              |
-| 소화율·`tacticalFit`          | `packages/sim/src/strength-packet.ts`                                                              |
-| 훈련 결산 흡수율·인원 상한    | `packages/engine/src/squad/training-report.ts`                                                     |
-| 키포인트 개수·정밀도          | `packages/sim/src/key-points.ts`                                                                   |
-| 체력 안개 (`ANALYSIS_FLOOR`)  | `packages/engine/src/squad/scouting.ts`                                                            |
-| 딜 확률 기여                  | `packages/engine/src/market/market.ts`                                                             |
-| 기자회견 스탠스·평판 폭       | `packages/engine/src/club/press.ts`                                                                |
-| 다가옴 압력·임계·응답         | `packages/engine/src/club/approach.ts`                                                             |
-| 보드 요청 발생·판정           | `packages/engine/src/club/board-demand.ts` (+ `packages/domain/src/board-demand.ts`)               |
-| 감독의 보드 요청 접수·판정    | `packages/engine/src/club/board-request.ts` (+ `packages/domain/src/board-request.ts`)             |
-| 보드 기대·시즌 리뷰·업적      | `packages/engine/src/competition/season.ts`                                                        |
-| 경고·경질·제안·흥정·노크·부임 | `packages/engine/src/market/manager-market.ts`                                                     |
-| 무직의 tick (`managedTeamId`) | `packages/engine/src/core/tick.ts` · `core/state.ts`                                               |
-| 커리어 기록 타입              | `packages/domain/src/records.ts`                                                                   |
-| 커리어 뷰·조회 도구           | `packages/engine/src/views/views.ts` · `views/lookup.ts` · `apps/web/components/office/career.tsx` |
+| 무엇                               | 어디                                                                                               |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------- |
+| 배경 해석·기준선·전문 분야         | `packages/engine/src/world/onboarding.ts`                                                          |
+| 능력치·평판·계약·조건 표           | `packages/domain/src/manager.ts`                                                                   |
+| XP·팀토크·면담 계수                | `packages/engine/src/skills/index.ts`                                                              |
+| 소화율·`tacticalFit`               | `packages/sim/src/strength-packet.ts`                                                              |
+| 훈련 결산 흡수율·인원 상한         | `packages/engine/src/squad/training-report.ts`                                                     |
+| 키포인트 개수·정밀도               | `packages/sim/src/key-points.ts`                                                                   |
+| 체력 안개 (`ANALYSIS_FLOOR`)       | `packages/engine/src/squad/scouting.ts`                                                            |
+| 딜 확률 기여                       | `packages/engine/src/market/market.ts`                                                             |
+| 기자회견 스탠스·평판 폭            | `packages/engine/src/club/press.ts`                                                                |
+| 다가옴 압력·임계·응답              | `packages/engine/src/club/approach.ts`                                                             |
+| 보드 요청 발생·판정                | `packages/engine/src/club/board-demand.ts` (+ `packages/domain/src/board-demand.ts`)               |
+| 감독의 보드 요청 접수·판정         | `packages/engine/src/club/board-request.ts` (+ `packages/domain/src/board-request.ts`)             |
+| 보드 기대·시즌 리뷰·업적           | `packages/engine/src/competition/season.ts`                                                        |
+| 경고·경질·제안·흥정·노크·부임·계약 | `packages/engine/src/market/manager-market.ts`                                                     |
+| 무직의 tick (`managedTeamId`)      | `packages/engine/src/core/tick.ts` · `core/state.ts`                                               |
+| 커리어 기록 타입                   | `packages/domain/src/records.ts`                                                                   |
+| 커리어 뷰·조회 도구                | `packages/engine/src/views/views.ts` · `views/lookup.ts` · `apps/web/components/office/career.tsx` |
