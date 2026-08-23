@@ -35,12 +35,14 @@ import type {
   TransferListing,
   PlayerTraining,
   PositionGroup,
+  ReserveTrainingPolicy,
   RoleMemory,
   ScheduleEntry,
   Negotiation,
   PressConference,
   ScoutReport,
   ScoutReportCard,
+  SeasonAward,
   SeasonRecord,
   SeasonStat,
   ShootoutKick,
@@ -601,6 +603,13 @@ export interface GameState {
    * 승격·이적으로 떠나면 걷어낸다. 구 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   developmentFocus?: string[];
+  /**
+   * 2군 훈련 방침 — 감독이 고른 축 갈래(`set_reserve_training`). 우리 2군의 월간
+   * 성장에서 **어느 축이 뽑히는지**에 배율로 얹힌다
+   * (squad/training-plan.ts · development.ts — season.md §2 2군 리그).
+   * 없으면 `balanced`다 — 옛 세이브도 그대로 읽힌다 (optional — SAVE_VERSION 유지).
+   */
+  reserveTraining?: ReserveTrainingPolicy;
   issues: PlayerIssue[];
   /**
    * 정착 이벤트 — 면담·팀토크·주장 지명이 새 영입의 적응에 남긴 것.
@@ -760,6 +769,14 @@ export interface GameState {
   seasonRecords: SeasonRecord[];
   trophies: Trophy[];
   achievements: Achievement[];
+  /**
+   * 리그 시상 — **세계 전체**의 상이다(모든 리그·모든 클럽). 감독의 기록이 아니라
+   * 리그가 주는 상이므로 여기 통째로 쌓이고, 커리어 표는 그중 감독이 그 시즌 맡고
+   * 있던 팀의 것만 골라 세운다 (season.md §6 · career.md §6).
+   * 코드와 근거 수치뿐이다 — 이름도 문장도 없다 (overview.md §1 철칙 4).
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  awards?: SeasonAward[];
 
   // ── 서사 ──
   /**
@@ -2501,6 +2518,7 @@ export function createGame(input: CreateGameInput): GameState {
     seasonRecords: [],
     trophies: [],
     achievements: [],
+    awards: [],
 
     narrative: [],
     chat: [],
