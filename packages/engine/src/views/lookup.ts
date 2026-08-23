@@ -11,6 +11,8 @@ import {
   ageOf,
   anchorOf,
   conditionLabel,
+  describeReputation,
+  familiarityLabel,
   footLabel,
   physiqueLabel,
   naturalPositionOf,
@@ -740,7 +742,7 @@ export function squadView(state: GameState, input: SquadViewInput = {}): LookupR
   const lines = [
     `[스쿼드] ${teamNameIn(state, teamId)} — ${spec.formation} · 멘탈${spec.mentality} 라인${spec.defensiveLine} ` +
       `압박${spec.pressing} 템포${spec.tempo} 폭${spec.width} 패스${spec.passStyle} · ` +
-      `선발 평균 적응 ${Math.round(squadFamiliarity(state, teamId))}`,
+      `선발 평균 적응 ${familiarityLabel(squadFamiliarity(state, teamId))}`,
     `1군 ${firstCount}명 (선발 ${tactics.assignments.filter((a) => a.role === "starting").length} · ` +
       `벤치 ${tactics.assignments.filter((a) => a.role === "bench").length}) · ` +
       `2군 ${squad.length - firstCount}명 · 조회 대상: ${
@@ -1348,7 +1350,7 @@ export function careerView(state: GameState): LookupResult {
         `[커리어] ${m.name} — 무직 (${card.on} ${teamNameIn(state, card.teamId)}에서 ${
           card.kind === "expired" ? "계약 만료" : "경질"
         }) · ${seasonLabel(state)}`,
-        `평판: 보드${m.reputation.board} 미디어${m.reputation.media} 선수단${m.reputation.squad}`,
+        `평판: ${describeReputation(m.reputation)}`,
         card.expectation && card.position
           ? `자리를 잃은 자리: 기대 ${card.expectation}(${card.target}위) · 당시 ${card.position}위`
           : `자리를 잃은 자리: ${card.reason ?? "기록 없음"}`,
@@ -1410,7 +1412,7 @@ export function careerView(state: GameState): LookupResult {
               (o.counteredOn ? ` · 흥정 완료` : "") +
               ` · ${o.expiresOn}까지`,
           ),
-        `평판: 보드${m.reputation.board} 미디어${m.reputation.media} 선수단${m.reputation.squad}`,
+        `평판: ${describeReputation(m.reputation)}`,
         warnings > 0
           ? `보드 경고: ${warnings}/${USER_WARNINGS_BEFORE_SACK}회` +
             (m.lastWarnedOn ? ` (마지막 ${m.lastWarnedOn})` : "") +
