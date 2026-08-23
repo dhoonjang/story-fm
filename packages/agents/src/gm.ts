@@ -57,6 +57,7 @@ import {
   buildMatchReference,
   buildOperatorMessage,
   filterSceneStream,
+  lastScenePoint,
   parseSceneHeader,
   sanitizeSceneText,
   stampMatchScene,
@@ -508,12 +509,18 @@ async function runRealGmTurn(
     inMatch ? () => streamed : () => streamed || calls.some((c) => c.name !== TIME_PASSED),
   );
 
-  // 도구 앞에 흘린 작업 서술과 두 번째 헤더를 걷어낸다 — 중계에는 걸지 않는다
+  // 도구 앞에 흘린 작업 서술과 값이 같은 반복 헤더를 걷어낸다 — 중계에는 걸지 않는다
   // (구간마다 헤더를 새로 찍는 것이 정상이다 — prompts.md §1)
   const sceneText = inMatch ? result.text : sanitizeSceneText(result.text);
-  // 첫 줄 헤더가 시계를 움직인다 — 모델의 선언을 코어가 따라가되 그대로 믿지 않고,
-  // 경기일·기한 앞에서 멈춘 뒤 그 사실을 기록으로 남긴다
+  // 첫 줄 헤더가 본문과 갈린다 — 저장할 때 되붙일 것이고, 경기 턴은 분을 여기서 읽는다
   const scene = parseSceneHeader(sceneText);
+  /**
+   * 시계를 움직이는 것은 **턴이 닿은 시각**, 곧 마지막 시점 헤더다 — 모델의 선언을
+   * 코어가 따라가되 그대로 믿지 않고, 경기일·기한 앞에서 멈춘 뒤 그 사실을 기록으로
+   * 남긴다. 한 턴이 오전 훈련에서 오후 면담으로 넘어갔으면 채팅에도 오후가 서므로,
+   * 첫 헤더로만 밀면 상단 띠와 채팅이 갈린다 (agents.md §2).
+   */
+  const scenePoint = lastScenePoint(sceneText);
   // 중계가 적은 분은 쓰이지 않지만, 장부와 갈렸다는 사실은 프롬프트가 흔들린 신호다
   if (matchMinute !== null && scene.minute !== null && scene.minute !== matchMinute) {
     console.warn(`[gm] 중계의 시각 ${scene.minute}′ — 장부(${matchMinute}′)로 세웁니다`);
@@ -526,8 +533,8 @@ async function runRealGmTurn(
    */
   let clockStalled: number | null = null;
   if (!inMatch) {
-    clockStalled = noteSceneHeader(state, scene.point !== null || skipped !== null);
-    if (!scene.point) {
+    clockStalled = noteSceneHeader(state, scenePoint !== null || skipped !== null);
+    if (!scenePoint) {
       const first = sceneText.split("\n").find((line) => line.trim().length > 0) ?? "";
       console.warn(
         `[gm] 장면 헤더를 읽지 못해 시계가 멈춥니다: ${JSON.stringify(first.slice(0, 80))}`,
@@ -536,24 +543,23 @@ async function runRealGmTurn(
   }
   // 헤더는 읽혔는데 시각이 안 움직인 턴 — 이어지는 대화면 정상이지만 몇 턴이고
   // 반복되면 세계가 정지하므로 로그로 드러낸다
-  if (!inMatch && !skipped && scene.point && scene.point.date === turnFrom) {
-    if (minutesOfClock(scene.point.clock) <= minutesOfClock(clockFrom)) {
+  if (!inMatch && !skipped && scenePoint && scenePoint.date === turnFrom) {
+    if (minutesOfClock(scenePoint.clock) <= minutesOfClock(clockFrom)) {
+      // 헤더가 여럿이면 시계를 정하는 것은 마지막 것이라, 읽어낸 시점을 그대로 적는다
       console.warn(
-        `[gm] 시계가 제자리입니다 (${turnFrom} ${clockFrom}) — 헤더: ${JSON.stringify(
-          (scene.header ?? "").slice(0, 60),
-        )}`,
+        `[gm] 시계가 제자리입니다 (${turnFrom} ${clockFrom}) — 헤더가 닿은 곳: ${scenePoint.date} ${scenePoint.clock}`,
       );
     }
   }
-  if (inMatch && scene.point) {
+  if (inMatch && scenePoint) {
     // 경기 중엔 날짜를 막고 그날 안의 시각만 따라간다 — 안 그러면 상단 시계가
     // 킥오프 시각에 얼어붙는다
-    applyScenePoint(state, { date: state.date, clock: scene.point.clock });
-  } else if (!inMatch && scene.point && skipped) {
+    applyScenePoint(state, { date: state.date, clock: scenePoint.clock });
+  } else if (!inMatch && scenePoint && skipped) {
     // 손잡이가 이미 시계를 옮긴 턴 — 헤더의 날짜까지 따르면 하루를 눌렀는데 이틀이 간다
-    applyScenePoint(state, { date: state.date, clock: scene.point.clock });
-  } else if (!inMatch && scene.point) {
-    const moved = applyScenePoint(state, scene.point);
+    applyScenePoint(state, { date: state.date, clock: scenePoint.clock });
+  } else if (!inMatch && scenePoint) {
+    const moved = applyScenePoint(state, scenePoint);
     if (moved.digest.length > 0 || moved.short) {
       const head = `${state.date} ${formatClock(clockOf(state))}${
         moved.short ? ` — ${ADVANCE_STOP_KO[moved.stopped] ?? "멈췄다"}` : ""
