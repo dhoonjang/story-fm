@@ -332,21 +332,21 @@ export class OpenAiGameLLM implements GameLLM {
     /**
      * 상태 스냅샷을 **`developer` 롤**(Anthropic의 오퍼레이터 채널과 같은 자리)로
      * 넣을지는 **설정이 정한다** (models.md §3-3) — 그 롤을 받는 모델인지 400을
-     * 맞아 가며 알아내지 않는다. 거짓이면 감독 발화 앞에 접어 넣고, 저장 이력에서는
-     * 어느 쪽이든 걷어낸다: 그러지 않으면 다음 턴 이력에서 지난 날짜·지난 스코어가
-     * 감독이 한 말처럼 쌓인다.
+     * 맞아 가며 알아내지 않는다. 어느 쪽이든 자리는 감독 발화 **뒤**다 — 거짓이면
+     * 발화 꼬리에 접어 넣는다. 저장 이력에서는 어느 쪽이든 걷어낸다: 그러지 않으면
+     * 다음 턴 이력에서 지난 날짜·지난 스코어가 감독이 한 말처럼 쌓인다.
      */
     const useDeveloperNote = req.stateNote !== undefined && this.config.operatorChannel;
     const userItem: InputItem = {
       role: "user",
-      content: useDeveloperNote || !req.stateNote ? req.user : `${req.stateNote}\n\n${req.user}`,
+      content: useDeveloperNote || !req.stateNote ? req.user : `${req.user}\n\n${req.stateNote}`,
     };
     const input: InputItem[] = [
       ...baseHistory,
+      userItem,
       ...(useDeveloperNote && req.stateNote
         ? [{ role: "developer" as const, content: req.stateNote }]
         : []),
-      userItem,
     ];
 
     const toolDefs: OpenAI.Responses.FunctionTool[] = tools.map((tool) => ({

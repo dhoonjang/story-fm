@@ -36,7 +36,7 @@ import {
   type MatchLedgerState,
 } from "@story-fm/sim";
 import { agentConfig, createGameLLM, type TurnHistory, type TurnUsage } from "@story-fm/llm";
-import { MATCH_CASTER_SYSTEM, buildContinueMessage, buildSegmentMessage } from "@story-fm/agents";
+import { MATCH_CASTER_SYSTEM, buildSegmentMessage } from "@story-fm/agents";
 
 /**
  * 킥오프 턴 유저 메시지 — 패킷 + 감독의 사전 지시. **이 프로토타입만 읽는다.**
@@ -194,7 +194,9 @@ for (let turn = 1; turn <= maxTurns && !finished; turn++) {
   const userMessage =
     turn === 1
       ? `${buildKickoffMessage(packet, managerNote)}\n\n${segment.note}`
-      : `${buildContinueMessage(describeLedger(ledger, names), "좋아, 계속 진행해.")}\n\n${segment.note}`;
+      : // 감독의 말 → 구간 → 장부 — 웹과 같은 순서다 (docs/llm/prompts.md §5-1).
+        // 프로토타입만 읽는 문구라 여기 산다 (prompts.md §5 원칙 13)
+        [`@감독: 좋아, 계속 진행해.`, segment.note, describeLedger(ledger, names)].join("\n\n");
   const result = await llm.runTurn({
     system: MATCH_CASTER_SYSTEM,
     history,

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   addDays,
   advanceTime,
@@ -39,18 +39,31 @@ import {
   TurnOperationSchema,
   buildGmDigest,
   buildGmHistory,
+  buildGmTurnMessage,
   buildManagerMessage,
   buildGmReference,
   buildGmStateNote,
   buildGmTools,
+  buildMatchReference,
   describeCharacters,
+  describeClub,
+  describeManager,
   injectedCharacters,
   parseSceneHeader,
+  recordCharacterInjection,
+  runGmTurn,
   runOnboardingTurn,
   type GmToolCall,
 } from "@story-fm/agents";
 import { awardTitle, normalizeSpeaker, SCOUT_DAYS } from "@story-fm/domain";
-import type { GameLLM, StopReason, TurnRequest } from "@story-fm/llm";
+import type { GameLLM, StopReason, TurnRequest, TurnResult } from "@story-fm/llm";
+
+/** 실모드 평시 턴이 부르는 모델 — `llm`을 따로 받지 않는 `runGmTurn`의 길이다 */
+const { stubRunTurn } = vi.hoisted(() => ({ stubRunTurn: vi.fn() }));
+vi.mock("@story-fm/llm", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@story-fm/llm")>();
+  return { ...actual, createGameLLM: () => ({ runTurn: stubRunTurn }) };
+});
 
 /**
  * GM 입력 조립 — 캐시 계층의 경계가 지켜지는지 검증한다 (docs/llm/agents.md).
@@ -76,7 +89,41 @@ function build(): GameState {
 const BASE = build();
 const game = (): GameState => structuredClone(BASE);
 
-describe("레퍼런스 블록 (캐시되는 시스템 블록)", () => {
+describe("레퍼런스 층 — <club>·<manager> (캐시되는 시스템 블록)", () => {
+  /**
+   * 이슈 #489 — 블록의 이름이 싣는 것을 말한다. 구단 이름은 `<character name>`과 같은
+   * 표기로 여는 태그의 속성이고, 세 에이전트(평시·중계·교섭)가 같은 두 블록을 읽는다.
+   */
+  it("구단은 <club name>, 감독은 <manager name tag>다 — <reference>는 없다", () => {
+    const state = game();
+    const ref = buildGmReference(state);
+    expect(ref).not.toContain("<reference>");
+    expect(describeClub(state)).toBe(`<club name="아스날" />`);
+    expect(describeManager(state.manager)).toBe(
+      [
+        `<manager name="김감독" tag="@김감독:">`,
+        `배경: ${state.manager.background}`,
+        `</manager>`,
+      ].join("\n"),
+    );
+    expect(ref).toBe(`${describeClub(state)}\n\n${describeManager(state.manager)}`);
+    // 중계의 레퍼런스도 같은 두 블록으로 연다 — 수석코치 카드는 그 뒤다
+    expect(buildMatchReference(state).startsWith(ref)).toBe(true);
+    expect(buildMatchReference(state)).toContain(headCoachOf(state).name);
+  });
+
+  it("무직이면 <club>이 서지 않는다 — 옛 구단을 세우면 아직 그 구단의 감독처럼 쓴다", () => {
+    const state = game();
+    state.dismissal = {
+      kind: "sacked",
+      on: state.date,
+      season: state.season,
+      teamId: state.userTeamId,
+    };
+    expect(describeClub(state)).toBeNull();
+    expect(buildGmReference(state)).toBe(describeManager(state.manager));
+  });
+
   it("선수의 id도 이름도 담지 않는다 — 명단 한 줄이 바뀌면 뒤의 이력까지 무효가 된다", () => {
     const state = game();
     const ref = buildGmReference(state);
@@ -211,7 +258,8 @@ describe("레퍼런스 블록 (캐시되는 시스템 블록)", () => {
 
     const turn = buildGmHistory(state).find((h) => h.content.includes("불러줘"))!;
     expect(turn.content).toContain(coach.motivation);
-    // 카드가 발화보다 앞이다 — 이번 턴에 실었던 순서와 같아야 이력이 재현된다
+    // 카드가 발화보다 앞이다 — 이력에 남는 것들 안의 순서라 캐시와 무관하고, 보낼 때와
+    // 같은 함수가 그리므로 같은 순서다 (`renderTurnGroup`)
     expect(turn.content.indexOf(coach.motivation)).toBeLessThan(turn.content.indexOf("불러줘"));
     // 창 안에 선 카드는 캐릭터북이 「이미 실렸다」로 읽는다
     expect(injectedCharacters(state)).toEqual([{ characterId: coach.characterId, depth: "full" }]);
@@ -553,6 +601,109 @@ describe("새 게임 첫 장면", () => {
 
     await expect(onboardInRealMode(state, llm)).rejects.toThrow("출력 문법");
     expect(call).toBe(2);
+  });
+});
+
+/**
+ * 이슈 #489의 완료 조건 — **이번 턴 유저 메시지는 다음 턴 이력의 같은 자리와 글자까지
+ * 같다** (agents.md §5 · prompts.md §6). 한 턴은 채팅에 조작과 발화 둘을 남기고 카드는
+ * 그 뒤에 기록되는데, 보낼 때와 다시 그릴 때가 다른 손이면 같은 자리가 글자부터 갈려
+ * 캐시 프리픽스가 지난 발화 앞에서 매 턴 끊긴다 — 화면에는 아무 증상이 없다.
+ */
+describe("이번 턴 유저 메시지는 다음 턴 이력의 같은 자리와 같다", () => {
+  it("조작 → 발화 → 카드까지 글자까지 같다", () => {
+    const state = game();
+    const coach = headCoachOf(state);
+    state.chat.push({ role: "user", text: "지난 발화", toolCalls: [], at: state.date });
+    state.chat.push({ role: "model", text: "@코치: 알겠습니다", toolCalls: [], at: state.date });
+    // 이번 턴 — 전술판 조작이 먼저, 발화가 뒤 (turn-runner가 미는 순서)
+    state.chat.push({
+      role: "operator",
+      text: "전술판 적용 완료 — 압박 상향\n전술판 적용 완료 — 라인 상향",
+      toolCalls: [],
+      at: state.date,
+    });
+    state.chat.push({
+      role: "user",
+      text: `${coach.characterId} 불러줘`,
+      toolCalls: [],
+      at: state.date,
+    });
+    const cards = selectCharacters(state, { pointed: [coach.characterId] });
+
+    const sent = buildGmTurnMessage(state, cards);
+    // 한 메시지다 — 카드 → 조작 → 발화. 스냅샷은 여기 없다 (어댑터가 뒤에 붙인다)
+    expect(sent.startsWith("<characters>")).toBe(true);
+    expect(sent).toContain(
+      "<operator>전술판 적용 완료 — 압박 상향\n전술판 적용 완료 — 라인 상향</operator>",
+    );
+    expect(sent.endsWith(`@김감독: ${coach.characterId} 불러줘`)).toBe(true);
+    expect(sent).not.toContain("<snapshot>");
+
+    // 턴이 끝나면 카드가 기록되고 모델 턴이 붙는다 — 다음 턴의 이력이 이 자리를 다시 그린다
+    recordCharacterInjection(state, cards);
+    state.chat.push({ role: "model", text: "@코치: 왔습니다", toolCalls: [], at: state.date });
+    const history = buildGmHistory(state);
+    expect(history.at(-2)?.content).toBe(sent);
+    expect(history.at(-1)).toEqual({ role: "assistant", content: "@코치: 왔습니다" });
+  });
+
+  /**
+   * 같은 불변식을 **요청 층에서** 잰다 — `runGmTurn`이 보낸 `user`가 곧 다음 턴 이력의
+   * 그 자리다. 빌더 둘이 같아도 gm.ts가 발화를 다른 손으로 조립하면 깨지는 자리라,
+   * turn-runner가 미는 순서 그대로 채팅을 세우고 실모드로 한 턴을 돌린다.
+   */
+  it("실모드 평시 턴이 보낸 유저 메시지가 곧 다음 턴 이력이다 — 스냅샷은 그 밖에 선다", async () => {
+    const state = game();
+    const coach = headCoachOf(state);
+    const orders = ["전술판 적용 완료 — 압박 상향 (다시 적용하지 말 것)"];
+    const said = `${coach.characterId} 불러줘`;
+    state.chat.push({ role: "operator", text: orders.join("\n"), toolCalls: [], at: state.date });
+    state.chat.push({ role: "user", text: said, toolCalls: [], at: state.date });
+
+    let request: TurnRequest | undefined;
+    stubRunTurn.mockImplementation(async (input: TurnRequest): Promise<TurnResult> => {
+      request = input;
+      return {
+        text: `[${state.date} AM 10:00]\n@${coach.characterId}: 부르셨습니까.`,
+        history: { version: 1, provider: "google", model: "test", messages: [] },
+        historyBase: 0,
+        usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        toolCallCount: 0,
+        stopReason: "completed",
+      };
+    });
+    const previousMode = process.env.LLM_MODE;
+    process.env.LLM_MODE = "real";
+    try {
+      const turn = await runGmTurn(state, said, undefined, null, orders);
+      state.chat.push({
+        role: "model",
+        text: turn.text,
+        toolCalls: turn.toolCalls,
+        at: state.date,
+      });
+    } finally {
+      if (previousMode === undefined) delete process.env.LLM_MODE;
+      else process.env.LLM_MODE = previousMode;
+    }
+
+    expect(request?.user).toContain(`<operator>${orders[0]}</operator>`);
+    expect(request?.user).toContain(coach.motivation);
+    expect(request?.user.endsWith(`@김감독: ${said}`)).toBe(true);
+    // 스냅샷은 유저 메시지 밖이다 — 어댑터가 발화 뒤에 붙이고 이력에서 걷는다
+    expect(request?.user).not.toContain("<snapshot>");
+    expect(request?.stateNote).toContain("<snapshot>");
+    // 다음 턴의 이력이 같은 자리를 같은 글자로 다시 그린다
+    expect(buildGmHistory(state).at(-2)?.content).toBe(request?.user);
+  });
+
+  it("카드도 조작도 없는 턴은 발화 한 줄이 곧 메시지다", () => {
+    const state = game();
+    state.chat.push({ role: "user", text: "분위기 어때?", toolCalls: [], at: state.date });
+    expect(buildGmTurnMessage(state, [])).toBe("@김감독: 분위기 어때?");
+    state.chat.push({ role: "model", text: "@코치: 좋습니다", toolCalls: [], at: state.date });
+    expect(buildGmHistory(state)[0]?.content).toBe("@김감독: 분위기 어때?");
   });
 });
 

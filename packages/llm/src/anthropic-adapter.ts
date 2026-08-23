@@ -223,8 +223,10 @@ function classifyAnthropic(error: unknown): LlmErrorKind {
  *
  * 캐시 배치 (실측 기준: 도구+시스템 프리픽스만 5천 토큰 규모):
  *   tools → system 블록들(각 브레이크포인트) → 이력(마지막에 증분 브레이크포인트)
- *   → 이번 턴 유저 발화 → 상태 스냅샷(`operator_channel`이 참일 때 role:"system")
- * 앞의 세 구간은 캐시 read(0.1×), 뒤 두 구간만 정가로 읽힌다.
+ *   → 이번 턴 유저 발화 → 상태 스냅샷(`operator_channel`이 참이면 role:"system",
+ *   아니면 발화 꼬리에 접는다)
+ * 앞의 세 구간은 캐시 read(0.1×), 뒤 두 구간만 정가로 읽힌다. 발화가 스냅샷보다
+ * 앞이라 다음 턴 이력의 같은 자리와 글자까지 같다 (models.md §3-3).
  *
  * 다른 제공자 어댑터도 GameLLM 계약(출력 문법·tool call·Zod 검증)은
  * 동일하게 지킨다 (models.md §3).
@@ -270,14 +272,14 @@ export class AnthropicGameLLM implements GameLLM {
     /**
      * 상태 스냅샷을 오퍼레이터 채널(`role:"system"`)로 넣을지 — **설정이 정한다**
      * (models.md §3-3). 그 롤을 받는 모델인지 400을 맞아 가며 알아내지 않는다.
-     * 거짓이면 감독 발화 앞에 접어 넣고, 저장 이력에서는 어느 쪽이든 걷어낸다.
+     * 거짓이면 감독 발화 **뒤**에 접어 넣고, 저장 이력에서는 어느 쪽이든 걷어낸다.
      */
     const useSystemNote = req.stateNote !== undefined && this.config.operatorChannel;
     const messages: Anthropic.MessageParam[] = [
       ...baseHistory,
       {
         role: "user",
-        content: useSystemNote || !req.stateNote ? req.user : `${req.stateNote}\n\n${req.user}`,
+        content: useSystemNote || !req.stateNote ? req.user : `${req.user}\n\n${req.stateNote}`,
       },
       // 오퍼레이터 메시지는 유저 턴 **뒤** 마지막 자리다 — 앞에 오면 요청이 거부되고,
       // 매 턴 바뀌는 것이 뒤에 서야 캐시 프리픽스가 산다 (models.md §3-3)

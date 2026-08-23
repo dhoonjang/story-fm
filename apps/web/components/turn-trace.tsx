@@ -228,7 +228,7 @@ function TraceCallView({
       <TraceSide
         dir="in"
         facts={inFacts}
-        hint="모델이 이 순서로 읽는다 — 앞이 캐시 프리픽스(system·history), 끝이 이번 턴의 발화다."
+        hint="모델이 이 순서로 읽는다 — 앞이 캐시 프리픽스(system·history), 그다음이 이번 턴의 발화, 끝이 이력에 남지 않는 스냅샷이다."
       >
         {request.system.map((block, i) => (
           <TraceBlock
@@ -245,14 +245,15 @@ function TraceCallView({
             {pretty(request.history)}
           </TraceBlock>
         )}
+        <TraceBlock label="user" meta={`${num(request.user.length)}자`} open>
+          {request.user}
+        </TraceBlock>
+        {/* 스냅샷은 발화 뒤다 — 어댑터가 그 자리에 붙인다 (models.md §3-3) */}
         {request.stateNote !== undefined && (
           <TraceBlock label="stateNote" meta={`${num(request.stateNote.length)}자`} open>
             {request.stateNote}
           </TraceBlock>
         )}
-        <TraceBlock label="user" meta={`${num(request.user.length)}자`} open>
-          {request.user}
-        </TraceBlock>
         {request.tools.length > 0 && (
           <TraceBlock label="tools" meta={`${request.tools.length}개`} open={expandAll} json>
             {pretty(request.tools)}

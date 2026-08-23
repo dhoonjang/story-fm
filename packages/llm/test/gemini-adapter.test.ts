@@ -251,6 +251,9 @@ describe("GeminiGameLLM", () => {
       provider: "google",
       model: "gemini-test",
     });
+    // 스냅샷은 발화 **뒤**에 접혀 나간다 — 저장 이력의 그 자리(발화만)가 보낸 메시지의
+    // 프리픽스 그대로라야 다음 턴의 캐시가 이 발화를 지나 이어진다 (models.md §3-3)
+    expect(stub.sent[0]?.parts?.[0]?.text).toBe("@김감독: 계속 진행해.\n\n[경기 장부] 17분 0:0");
     const saved = result.history.messages as Content[];
     expect(saved[0]).toEqual({
       role: "user",

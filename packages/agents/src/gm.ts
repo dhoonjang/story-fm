@@ -49,16 +49,16 @@ import {
   buildGmHistory,
   buildGmReference,
   buildGmStateNote,
-  describeCharacters,
+  buildGmTurnMessage,
   injectedCharacters,
   recordCharacterInjection,
   buildLedgerNote,
-  buildManagerMessage,
   buildMatchReference,
   buildOperatorMessage,
   filterSceneStream,
   lastScenePoint,
   parseSceneHeader,
+  renderTurnGroup,
   sanitizeSceneText,
   stampMatchScene,
   stampMatchStream,
@@ -223,20 +223,21 @@ export async function runOnboardingTurn(state: GameState, llm?: GameLLM): Promis
    * 문장 자체가 없고, 레퍼런스에도 인물 카드는 없다(people.md §6). 검증
    * (`isValidOnboardingText`)이 요구하는 이름이 프롬프트에 실리는 자리가 여기뿐이다.
    */
-  const characterBlock = describeCharacters(
-    selectCharacters(state, { pointed: [headCoachOf(state).characterId] }),
-  );
+  const characters = selectCharacters(state, { pointed: [headCoachOf(state).characterId] });
 
   // 도구도 스트리밍도 없는 호출이라 다시 불러도 남는 자국이 없다
   return retryOnce("gm:onboarding", async () => {
     const result = await client.runTurn({
       system: peaceSystem(state),
       history: [],
-      // 카드가 발화 앞에 선다 — 평시 턴과 같은 순서다
-      user: [
-        ...(characterBlock !== null ? [characterBlock, ``] : []),
-        buildManagerMessage(state, "*새 감독으로서 구단에 첫 출근한다*"),
-      ].join("\n"),
+      // 평시 턴과 같은 모양이다 — 카드 → 발화, 그 뒤에 어댑터가 스냅샷을 붙인다.
+      // 이 발화는 채팅에 남지 않으므로 꼬리가 아니라 여기서 만든다
+      user: renderTurnGroup(
+        state,
+        [{ role: "user", text: "*새 감독으로서 구단에 첫 출근한다*" }],
+        characters,
+      ),
+      // 첫 장면 지시는 그 턴만의 오퍼레이터 지시라 스냅샷과 함께 발화 뒤에 선다
       stateNote: `${ONBOARDING_INSTRUCTION}\n\n${buildGmStateNote(state)}`,
       // ⚠️ maxTokens를 좁히지 않는다 — 상한은 사고(thinking)+본문 합산이라
       // 장면 길이만 보고 잡으면 본문이 문장 한복판에서 잘린다
@@ -434,7 +435,25 @@ async function runRealGmTurn(
   const characters = inMatch
     ? []
     : selectCharacters(state, { message, injected: injectedCharacters(state) });
-  const characterBlock = describeCharacters(characters);
+  /**
+   * 이번 턴의 유저 메시지 — **평시는 채팅 꼬리에서 그린다.** 다음 턴 이력이 같은 꼬리를
+   * 같은 함수로 다시 그리므로 둘이 글자까지 같고, 캐시 프리픽스가 이 발화를 지나
+   * 이어진다 (agents.md §5). 경기 턴은 이력이 제공자 원형(`casterHistory`)이라
+   * 어댑터가 보낸 것을 그대로 남기므로 여기서 만든다 — 킥오프 턴의 발화는 경기
+   * 이력으로 갈려 평시 꼬리에 없기도 하다. 전술판 조작은 채팅에 선 그 문장 그대로다.
+   */
+  const turnMessage = inMatch
+    ? renderTurnGroup(
+        state,
+        [
+          ...(operatorOrders && operatorOrders.length > 0
+            ? [{ role: "operator" as const, text: operatorOrders.join("\n") }]
+            : []),
+          { role: operator ? ("operator" as const) : ("user" as const), text: message },
+        ],
+        [],
+      )
+    : buildGmTurnMessage(state, characters);
   /**
    * 소식은 **스냅샷에 실린 그 턴에 비워진다** — `pendingEdits`와 같은 규약이다.
    * 경기 중 스냅샷은 장부(`buildLedgerNote`)라 소식을 읽지 않으므로 그때는 남겨 둔다.
@@ -482,10 +501,7 @@ async function runRealGmTurn(
         system,
         history,
         user: [
-          // 인물 카드가 발화 앞에 선다 — 이력에서 다시 그릴 때도 같은 순서다
-          ...(characterBlock !== null ? [characterBlock, ``] : []),
-          ...(operatorOrders ?? []).map((order) => buildOperatorMessage(`전술판 조작 — ${order}`)),
-          operator ? buildOperatorMessage(message) : buildManagerMessage(state, message),
+          turnMessage,
           // 코어가 이미 굴린 구간.
           // 진행이 없는 턴도 그 사실을 싣는다 — 안 실으면 킥오프 턴과 입력이 같아져
           // 캐스터가 첫 휘슬 대신 지어낸 시각과 슛을 중계한다

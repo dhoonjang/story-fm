@@ -440,9 +440,9 @@ describe("OpenAI 어댑터", () => {
       stateNote: "[상태] 오늘은 7월 1일",
     });
     const first = inputOf(sent[0]);
-    expect(
-      first.some((item) => item.role === "developer" && item.content === "[상태] 오늘은 7월 1일"),
-    ).toBe(true);
+    // 유저 발화 **뒤** 마지막 자리다 — Anthropic의 오퍼레이터 채널과 같은 자리 (models.md §3-3)
+    expect(first.at(-2)).toEqual({ role: "user", content: "안녕" });
+    expect(first.at(-1)).toEqual({ role: "developer", content: "[상태] 오늘은 7월 1일" });
     // 다음 턴 이력에는 감독 발화만 남는다 — 스냅샷은 이번 턴에만 유효하다
     const saved = result.history.messages as InputItem[];
     expect(saved.some((item) => item.role === "developer")).toBe(false);
@@ -454,7 +454,7 @@ describe("OpenAI 어댑터", () => {
    * 넣되, 저장 이력에는 어느 쪽이든 휘발 상태가 남지 않는다 — 남으면 다음 턴부터
    * 지난 날짜가 감독이 한 말처럼 쌓인다.
    */
-  it("operator_channel이 꺼진 자리는 발화에 접어 넣고 이력에는 발화만 남긴다", async () => {
+  it("operator_channel이 꺼진 자리는 발화 뒤에 접어 넣고 이력에는 발화만 남긴다", async () => {
     const { client, sent } = makeStubClient([response([message("됐다")])]);
     const result = await new OpenAiGameLLM(
       { ...testConfig, operatorChannel: false },
@@ -467,7 +467,7 @@ describe("OpenAI 어댑터", () => {
     });
     const first = inputOf(sent[0]);
     expect(first.some((item) => item.role === "developer")).toBe(false);
-    expect(first.some((item) => item.content === "[상태] 오늘은 7월 1일\n\n안녕")).toBe(true);
+    expect(first.some((item) => item.content === "안녕\n\n[상태] 오늘은 7월 1일")).toBe(true);
 
     const saved = result.history.messages as InputItem[];
     expect(saved.filter((item) => item.role === "user")).toEqual([
