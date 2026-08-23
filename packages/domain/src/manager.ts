@@ -53,6 +53,100 @@ export const ManagerReputationSchema = z.object({
   media: ReputationSchema,
   squad: ReputationSchema,
 });
+export type ManagerReputation = z.infer<typeof ManagerReputationSchema>;
+
+/** 평판 3축의 표시 순서 + 한글 이름 */
+export const REPUTATION_AXIS_KO: Record<keyof ManagerReputation, string> = {
+  board: "보드",
+  media: "미디어",
+  squad: "선수단",
+};
+export const REPUTATION_AXES = Object.keys(REPUTATION_AXIS_KO) as Array<keyof ManagerReputation>;
+
+/**
+ * **평판 구간 → 어휘.** 판정이 전부 코어 안에서 끝나는 눈금이라 LLM에는 숫자가 아니라
+ * 이 말이 실린다 (prompts.md §5-2). 날수치를 실으면 프롬프트가 그것을 다시 말로
+ * 되돌려야 하고, 같은 42가 턴마다 다른 말로 나온다.
+ *
+ * 경계는 코어가 이미 쓰는 자리다 — 80은 보드 신뢰 계수가 1.0에 닿는 눈금
+ * (`board-request.ts`), 60은 설득 논거 `manager_reputation`이 통하는 문턱,
+ * 30은 그 신뢰 계수가 0으로 바닥나는 자리, 45\~59는 시작값 50을 낀 중립 구간이다
+ * (career.md §4 · §5.3).
+ *
+ * 축마다 말이 다른 것은 세계가 감독을 보는 눈이 셋이기 때문이다 — 보드는 신임,
+ * 미디어는 논조, 선수단은 신뢰다.
+ */
+export const REPUTATION_TIERS = [
+  { key: "absolute", min: 80, ko: { board: "절대적", media: "극찬", squad: "절대적" } },
+  { key: "firm", min: 60, ko: { board: "두터움", media: "호평", squad: "두터움" } },
+  { key: "watching", min: 45, ko: { board: "관망", media: "관망", squad: "관망" } },
+  { key: "shaky", min: 30, ko: { board: "흔들림", media: "싸늘", squad: "동요" } },
+  { key: "lost", min: 0, ko: { board: "등돌림", media: "뭇매", squad: "불신" } },
+] as const;
+
+export type ReputationTier = (typeof REPUTATION_TIERS)[number]["key"];
+
+const reputationTierOf = (value: number) =>
+  REPUTATION_TIERS.find((t) => value >= t.min) ?? REPUTATION_TIERS[REPUTATION_TIERS.length - 1]!;
+
+/** 평판 구간 키 — 화면이 색을 고르는 자리 */
+export function reputationTier(value: number): ReputationTier {
+  return reputationTierOf(value).key;
+}
+
+/** 그 축의 평판을 말로 — LLM 입력이 읽는 유일한 형태 */
+export function reputationLabel(axis: keyof ManagerReputation, value: number): string {
+  return reputationTierOf(value).ko[axis];
+}
+
+/**
+ * 평판 3축 한 줄 — `보드 두터움 · 미디어 관망 · 선수단 동요`.
+ *
+ * 스냅샷과 `get_career`가 같은 줄을 낸다. 두 벌로 두면 한쪽만 어휘가 바뀌는 날
+ * 같은 평판이 두 화면에서 다른 말을 한다.
+ */
+export function describeReputation(reputation: ManagerReputation): string {
+  return REPUTATION_AXES.map(
+    (axis) => `${REPUTATION_AXIS_KO[axis]} ${reputationLabel(axis, reputation[axis])}`,
+  ).join(" · ");
+}
+
+/**
+ * **감독 능력 구간 → 어휘.** 평판과 같은 이유로 LLM에는 숫자가 아니라 이 말이 실린다.
+ *
+ * 경계는 캐릭터 생성의 커리어 기준선이다 (career.md §1) — `elite` 58 · `major` 50 ·
+ * `minor` 42 · `none` 34. 특화 가산이 얹혀 기준선을 넘어선 축이 66부터다.
+ */
+export const MANAGER_SKILL_TIERS = [
+  { key: "outstanding", min: 66, ko: "출중" },
+  { key: "strong", min: 58, ko: "강점" },
+  { key: "solid", min: 50, ko: "무난" },
+  { key: "thin", min: 42, ko: "미흡" },
+  { key: "weak", min: 0, ko: "약점" },
+] as const;
+
+export type ManagerSkillTier = (typeof MANAGER_SKILL_TIERS)[number]["key"];
+
+const managerSkillTierOf = (value: number) =>
+  MANAGER_SKILL_TIERS.find((t) => value >= t.min) ??
+  MANAGER_SKILL_TIERS[MANAGER_SKILL_TIERS.length - 1]!;
+
+/** 감독 능력 구간 키 — 화면이 색을 고르는 자리 */
+export function managerSkillTier(value: number): ManagerSkillTier {
+  return managerSkillTierOf(value).key;
+}
+
+/** 감독 능력 한 축을 말로 */
+export function managerSkillLabel(value: number): string {
+  return managerSkillTierOf(value).ko;
+}
+
+/** 감독 능력 5축 한 줄 — `리더십 강점 · 전술 출중 · …` */
+export function describeManagerSkills(attributes: ManagerAttributes): string {
+  return MANAGER_ATTRIBUTES.map(
+    (axis) => `${MANAGER_ATTRIBUTE_KO[axis]} ${managerSkillLabel(attributes[axis])}`,
+  ).join(" · ");
+}
 
 /**
  * **자리별 마지막 팀토크 날짜** — 같은 자리의 팀토크를 하루 한 번으로 자르는 문
