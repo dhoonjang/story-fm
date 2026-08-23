@@ -713,6 +713,67 @@ describe("온보딩 — 배경 직접 입력 해석 (career.md §1)", () => {
     expect(interpretBackgroundHeuristic(bg, "없는팀")).toEqual(nobody);
   });
 
+  it("부정 구문 안의 낱말은 등급도 특화 가산도 올리지 않는다", () => {
+    // `감독`이 minor를 찍고 리더십 +6까지 얹던 자리 — 경력을 부정하는 문장이 능력치를 올렸다
+    expect(careerTierOf("감독 경험이 전혀 없는 사람이다")).toBe("none");
+    expect(specialtyAxesOf("감독 경험이 전혀 없는 사람이다")).toEqual([]);
+    expect(careerTierOf("선수 생활을 해본 적이 없다")).toBe("none");
+    expect(careerTierOf("축구에는 문외한이다")).toBe("none");
+    expect(careerTierOf("무경력자입니다")).toBe("none");
+
+    // 지우는 단위는 문장이 아니라 **절**이다 — 부정은 자기 절만 뒤집는다
+    expect(careerTierOf("선수로 뛰었고 우승은 없다")).toBe("minor");
+    expect(specialtyAxesOf("전술은 공부했지만 분석은 해본 적 없다")).toEqual(["tactics"]);
+
+    // `없이`는 부정 표지가 아니다 — 부정하는 것이 경력이 아니라 부상이다
+    expect(careerTierOf("부상 없이 10년을 뛴 프리미어리그 수비수")).toBe("major");
+  });
+
+  it("배경이 이력을 명시적으로 부정하면 구단 하한이 물러난다", () => {
+    // 하한은 "이 구단이 뽑았으니 이력이 있을 것"이라는 추론이고, 배경이 그 반례다
+    const denied = "감독 경험이 전혀 없는 사람이다";
+    expect(interpretBackgroundHeuristic(denied, "arsenal")).toEqual(
+      interpretBackgroundHeuristic(denied),
+    );
+
+    // 부정한 적이 없으면 구단의 선택은 여전히 정보다 (위 테스트가 지키는 하한)
+    const silent = "축구를 좋아하는 평범한 회사원입니다";
+    expect(interpretBackgroundHeuristic(silent, "arsenal").leadership).toBe(teamFloorOf("arsenal"));
+  });
+
+  it("낙하산은 `none` 아래 칸이고 구단 하한을 뚫는다", () => {
+    const parachute = "낙하산 인사다. 축구 경력은 전혀 없다.";
+    expect(careerTierOf(parachute)).toBe("parachute");
+    expect(careerTierOf("구단주 아들이다")).toBe("parachute");
+    expect(careerTierOf("오너 일가의 조카고 축구는 문외한이다")).toBe("parachute");
+
+    // 다른 등급 신호가 하나라도 있으면 그쪽이다 — 낙하산은 바닥이지 딱지가 아니다
+    expect(careerTierOf("인맥으로 들어온 스포츠 기자 출신이다")).toBe("minor");
+
+    // tier 1 구단에 부임해도 무경력(34)은커녕 그 아래로 선다
+    const atBigClub = interpretBackgroundHeuristic(parachute, "arsenal");
+    expect(sum(atBigClub)).toBeLessThan(sum(interpretBackgroundHeuristic("축구 팬입니다")));
+    expect(atBigClub).toEqual(interpretBackgroundHeuristic(parachute));
+
+    // 사다리의 바닥 — 시작 범위(20~80)의 아래 끝이 배경으로 닿는 눈금이 된다
+    const floor = Math.min(...MANAGER_ATTRIBUTES.map((axis) => atBigClub[axis]));
+    expect(floor).toBeGreaterThanOrEqual(START_MIN_AXIS);
+    expect(floor - START_MIN_AXIS).toBeLessThanOrEqual(10);
+  });
+
+  it("지갑은 낙하산과 함께 내려가지 않는다 (career.md §1)", () => {
+    const parachute = "낙하산 인사다. 축구 경력은 전혀 없다.";
+    // 앵커는 `none`과 같고 — 구단주 아들은 무경력이지 무일푼이 아니다
+    expect(startingWalletAnchor(parachute)).toBe(startingWalletAnchor("축구 팬입니다"));
+    // 구단 하한도 능력치와 달리 물러나지 않는다: 돈은 있는데 실력이 없다
+    expect(startingWalletAnchor(parachute, "arsenal")).toBe(
+      startingWalletAnchor("축구 팬입니다", "arsenal"),
+    );
+    expect(startingWalletAnchor(parachute, "arsenal")).toBeGreaterThan(
+      startingWalletAnchor(parachute),
+    );
+  });
+
   it("시작 지갑 앵커는 등급이 올리고 구단이 하한을 건다 (career.md §1)", () => {
     const nobody = "축구를 좋아하는 평범한 회사원입니다";
     const legend = "챔피언스리그를 우승한 감독";
