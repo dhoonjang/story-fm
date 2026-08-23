@@ -111,11 +111,12 @@ describe("레퍼런스 블록 (캐시되는 시스템 블록)", () => {
     expect(buildGmReference(state)).toBe(before);
 
     // 셋 다 매 턴 층은 따라 움직인다 — 레퍼런스에서 뺀 것이지 지운 것이 아니다.
-    // 영입은 인원이, 승격은 1군 수가, 주장은 이름이 나른다 (agents.md §6)
+    // 영입은 인원이, 승격은 1군 수가, 주장은 이름 뒤의 표시가 나른다 (agents.md §6)
     const note = buildGmStateNote(state);
     // 영입 하나 + 승격은 1군 둘을 늘린다
-    expect(note).toContain(`선수단 ${size + 1}명 (1군 ${firstTeam + 2}`);
-    expect(note).toContain(`주장 ${captain.name}`);
+    expect(note).toContain(`선수단 ${size + 1}명`);
+    expect(note).toContain(`- 1군 ${firstTeam + 2}: `);
+    expect(note).toContain(`${captain.name}(주장)`);
   });
 
   it("능력치·컨디션을 담지 않는다 — 상세는 조회 도구의 몫", () => {
@@ -266,27 +267,37 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
   });
 
   /**
-   * 선수단은 **인원과 주장 한 명**이다 — 마흔 명 남짓의 이름은 캐시가 걸리지 않는
-   * 이 층의 절반을 먹고 조회가 이미 그 값을 낸다 (agents.md §5·§6).
+   * 선수단은 **이름 명단이되 이름뿐**이다 — "누가 우리 팀인가"가 매 장면의 전제라
+   * 전원이 서야 하고, 상세가 따라오면 캐시가 걸리지 않는 이 층의 절반을 먹는다
+   * (agents.md §5·§6).
    *
-   * 이름이 도로 기어드는 것을 잡는 자리라, 세는 것은 「없는가」다: 근황·주의에
-   * 사실로 붙는 몇을 뺀 나머지 선수는 스냅샷 어디에도 서지 않아야 한다.
+   * 그래서 세는 것은 둘이다: 전원이 **있는가**, 그리고 이름 밖의 것(id·수치)이
+   * **없는가**.
    */
-  it("선수단은 인원과 주장만 싣는다 — 명단도 id도 없다", () => {
+  it("선수단은 이름 명단을 싣는다 — 전원이 서고 id도 수치도 없다", () => {
     const state = game();
     const note = buildGmStateNote(state);
     const squad = userPlayers(state);
     expect(squad.length).toBeGreaterThanOrEqual(30);
 
     const first = squad.filter((p) => p.squadLevel === "first").length;
-    expect(note).toContain(`선수단 ${squad.length}명 (1군 ${first}`);
+    expect(note).toContain(`선수단 ${squad.length}명`);
+    expect(note).toContain(`- 1군 ${first}: `);
     const captain = squad.find((p) => p.isCaptain)!;
-    expect(note).toContain(`주장 ${captain.name}`);
+    expect(note).toContain(`${captain.name}(주장)`);
 
-    // 주장과 근황·주의에 사실이 붙은 몇 말고는 이름이 서지 않는다
-    const named = squad.filter((p) => note.includes(p.name));
-    expect(named.length).toBeLessThan(squad.length / 4);
+    // 전원이 선다 — 한 명이라도 빠지면 GM이 그 선수를 모른다
+    expect(squad.filter((p) => !note.includes(p.name))).toHaveLength(0);
+    // 이름뿐이다 — id도 능력치도 따라오지 않는다
     expect(squad.filter((p) => note.includes(p.id))).toHaveLength(0);
+    const squadLines = note
+      .split("\n")
+      .filter((l) => l.startsWith("- 1군 ") || l.startsWith("- 2군 "));
+    expect(squadLines.length).toBeGreaterThan(0);
+    for (const line of squadLines) {
+      // 인원 접두(`- 1군 25: `) 뒤로는 숫자가 없다
+      expect(line.replace(/^- [12]군 \d+: /, "")).not.toMatch(/\d/);
+    }
   });
 
   it("선수 근황을 한 줄로 싣는다 — 이름을 내보내는 자리가 부상·불만뿐이면 같은 선수만 말한다", () => {

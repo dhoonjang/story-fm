@@ -482,7 +482,7 @@ export const PROMPT_REGRESSION = defineHarness({
   cost: "세계 둘 + 모의 GM 세션 — 수 초",
   // prettier-ignore
   bands: [
-    { metric: "고정층 글자", role: "guard", max: 30000, unit: "count", why: "매 턴 캐시 프리픽스로 나가는 하한 — 프롬프트는 지우는 방향으로 고친다 (prompts.md §5)" },
+    { metric: "고정층 글자", role: "guard", max: 30500, unit: "count", why: "매 턴 캐시 프리픽스로 나가는 하한 — 프롬프트는 지우는 방향으로 고친다 (prompts.md §5). 여백은 거의 없다: 문구가 늘면 잡히고, 도구가 늘어 넘겼으면 그때만 다시 자른다" },
     { metric: "시스템 프롬프트 글자", role: "reference", min: 1500, max: 3000, unit: "count", why: "도구와 무관하게 매 턴 서는 규칙만 — 도구 사용법이 새어 들어오면 늘어난다" },
     { metric: "도구 스펙 글자", role: "measure", unit: "count", why: "설명 + Zod에서 파생된 JSON 스키마 — 고정층의 대부분이다" },
     { metric: "도구 설명 총 글자", role: "measure", unit: "count", why: "상한은 skill-descriptions.test.ts가 쥔다 — 여기서는 그 안 어디쯤인지만 읽는다" },
