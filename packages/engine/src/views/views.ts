@@ -2000,7 +2000,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
             : null,
         assignedPoint: liveSlot?.entry.point ?? pointOf.get(p.id) ?? null,
         // 저장은 소수지만 화면은 눈금이다 — 87.4와 87.7을 감독이 구분할 일은 없다
-        familiarity: Math.round(assignment?.familiarity ?? 60),
+        familiarity: Math.round(assignment?.familiarity ?? FAMILIARITY_BASELINE),
         familiarityIfSlotted: Math.round(assignment?.familiarity ?? ifSlotted(p.id)),
         positionFit: proficiencyAt(p, assignedSlot ?? natural.position),
         adaptation: adaptationOf(

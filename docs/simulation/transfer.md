@@ -568,7 +568,12 @@ tick이 매일 시장을 굴린다 — 1부 클럽당 시즌 이적 3.4건 · �
   경고하고, 최종전 뒤 tick 없이 시즌이 끝나면 남은 문턱은 시즌 종료 tick이 낸다
   ([season.md](./season.md) §5).
 - **다른 구단도 계약을 관리한다**(`runAiRenewals`) — 만료 240일 안의 AI 계약을
-  매일 검토, 주전일수록·어릴수록 서둘러 잡는다. 재계약이 성사되면 우리가 노리던
+  매일 검토, 주전일수록·어릴수록 서둘러 잡는다. 서두름은 **자리 × 나이**가
+  하루 확률에 곱해지는 것이다 — 자리는 자기 앞을 막는 선수 수로 재서 0명이면
+  `RENEWAL_URGENCY_STARTER`(2.2), 1명이면 `RENEWAL_URGENCY_ROTATION`(1.2), 그
+  밖은 `RENEWAL_URGENCY_FRINGE`(0.5)이고, 나이는 `RENEWAL_VETERAN_AGE`(33) 이상
+  0.3배 · `RENEWAL_YOUNG_AGE`(24) 이하 1.4배다. 새 계약은
+  `RENEWAL_YEARS_MIN`(2)\~4년에 주급 `RENEWAL_WAGE_BASE`(1.05)\~1.30배로 쓴다. 재계약이 성사되면 우리가 노리던
   협상은 그 자리에서 끝난다 — 기다림에 대가가 있어야 "계약 1년 남은 선수를
   싸게"가 성립한다.
 
@@ -636,46 +641,52 @@ tick이 매일 시장을 굴린다 — 1부 클럽당 시즌 이적 3.4건 · �
 
 ## 10. 손잡이 한눈에
 
-| 상수                                                             | 값                     | 무엇을 정하나                                                              |
-| ---------------------------------------------------------------- | ---------------------- | -------------------------------------------------------------------------- |
-| `MAX_ROUNDS`                                                     | 8                      | 한 협상이 쌓을 수 있는 오퍼 라운드 — 실질 제동은 인내심 감쇠다             |
-| `NEGOTIATION_DAYS`                                               | 14                     | 협상 유효기간 — 창 마감이 더 이르면 그쪽이 먼저 온다                       |
-| `REJECT_COOLDOWN_DAYS`                                           | 30                     | 결렬이 식는 데 걸리는 날 — 그 뒤에는 다시 오퍼가 붙는다                    |
-| `MIN_ACCEPT_PROBABILITY`                                         | 5%                     | 이 아래로는 상대가 수락할 수 없다 — 설득의 여유가 이 하한을 내린다         |
-| `COUNTER_CEILING`                                                | 1.15                   | 상대가 요구액의 이 배수를 넘겨 부를 수 없다                                |
-| `SELL_COUNTER_FLOOR`                                             | 0.55                   | 내보내는 딜에서 사는 쪽이 깎을 수 있는 하한 (갈래별 기대치 대비)           |
-| `COUNTER_WAGE_CEILING`                                           | 1.4                    | 역제안으로 부를 수 있는 주급 — 재계약·영입 공통 (기대치 대비)              |
-| `RELEASE_SUITORS_MANY` · `RELEASE_AGE_HOLD` · `RELEASE_AGE_MOVE` | 3곳 · 32세 · 25세      | 해지 판정에서 관심이 많다고 보는 구단 수와 버티는·나서는 나이의 경계       |
-| `PATIENCE_DECAY` · `SAME_TERMS_TOLERANCE`                        | 0.72 · 0.03            | 같은 조건 반복마다 확률에 곱해지는 값과 "같은 조건"으로 보는 폭            |
-| `INCOMING_OFFER_CHANCE` · `MAX_INCOMING`                         | 8% · 3                 | 창이 열린 하루에 오퍼가 들어올 확률과 동시에 안고 있을 수 있는 수          |
-| `LISTED_OFFER_CHANCE` · `LISTED_DISCOUNT`                        | 34% · 0.22             | 이적 리스트 등재 선수에게 오퍼가 붙을 확률과 깎고 들어오는 폭              |
-| `REQUESTED_OFFER_CHANCE` · `REQUESTED_DISCOUNT`                  | 25% · 0.3              | 이적 요청이 선 선수에게 오퍼가 붙을 확률과 시장가에서 깎고 들어오는 폭     |
-| `BUDGET_ADJUST_WAGE_LIMIT`                                       | 10                     | `adjust_transfer_budget`의 하루 누적 한도 — 주급 총액의 배수               |
-| `MAX_PAYMENT_YEARS` · `INSTALLMENT_DISCOUNT`                     | 4 · 0.9                | 분할 지급의 연수 상한과, 해마다 늦는 회분을 판정이 깎아 보는 비율 (§5-2)   |
-| `MEDICAL_DAYS_MIN` · `MAX`                                       | 1 · 2                  | 합의 다음 날부터 검진까지의 날 (창 마감일이면 그날)                        |
-| `MEDICAL_DECISION_DAYS`                                          | 3                      | 소견이 붙은 뒤 강행·철회·재협상을 고를 시간                                |
-| `MEDICAL_DISCOUNT`                                               | 0.85                   | 우리가 파는 딜에 소견이 붙었을 때 사는 쪽이 깎아 부르는 값                 |
-| `FLAG_BASE` · `FLAG_BY_PRONENESS` · `FLAG_CEILING`               | 0.05 · 0.06 · 0.75     | 스물다섯의 기본 소견 확률 · 성향이 싣는 폭 · 아무리 나빠도 넘지 않는 값    |
-| `LATITUDE_PER_CLAIM` · `LIE_PENALTY`                             | 12%p · 1.4             | 확인된 논거가 수락 하한을 내리는 폭과 확인 안 된 주장이 근거에서 빼는 점수 |
-| `MARKET_VALUE_AT_PEAK`                                           | £65M                   | 80 OVR 정점기 선수의 시장가 — 곡선 전체가 여기에 비례한다 (§3)             |
-| `LOAN_FEE_RATE`                                                  | 0.08                   | 시즌 임대료 — 시장가 대비                                                  |
-| `DEFAULT_LOAN_WAGE_SHARE`                                        | 0.5                    | 임대 팀이 내는 주급 비율의 기본값                                          |
-| `SEVERANCE_RATE` · `SEVERANCE_WEEKS_CAP`                         | 0.5 · 104주            | 합의 해지의 기대 정산금이 무는 잔여 주급의 비율과 세는 주 수의 상한        |
-| `unilateralSeveranceOf`                                          | 잔여 주급 **전액**     | 일방 해지의 값 — 협상의 바깥값이자 역제안의 상한 (§2)                      |
-| `WAGE_HEADROOM` · `USER_WAGE_HEADROOM`                           | 1.1 · 1.35             | 주급 한도 위로 허용되는 폭 — AI와 감독이 다르다 (§3)                       |
-| `RETURN_RESISTANCE`                                              | 0.65                   | 시장 전용 리그에서 5대 리그로 돌아올 때 확률에 걸리는 저항                 |
-| `SEASON_BUDGET_TOPUP`                                            | £45M / 30M / 18M / 12M | 등급별 시즌 예산 보충 — 구단 경제 수준이 곱해진다                          |
-| `ATTEMPTS_PER_DAY` · `LOAN_SHARE` · `DEADLINE_RUSH`              | 62 · 0.42 · 2.2        | AI 시장이 창이 열린 하루에 시도하는 수 · 그중 임대 비중 · 마감 주의 배수   |
-| `LEVEL_BAND`                                                     | 6                      | 사는 쪽 수준과 선수 종합이 벌어질 수 있는 폭                               |
-| `MIN_SQUAD_AFTER_SALE` · `MIN_FIRST_TEAM`                        | 18 · 20                | 떠난 뒤 남아야 할 전체 인원(감독·AI 공통 · §2)과 AI가 더 보는 1군 인원     |
-| `MAX_FIRST_TEAM` · `MAX_SQUAD`                                   | 30 · 52                | 사는 쪽 1군 상한(`FIRST_TEAM_LIMIT`)과 전체 인원 상한                      |
-| `CASH_FLOOR_TOP` · `CASH_FLOOR_OTHER`                            | −£10M · £0             | 이적료를 내고도 남아 있어야 할 현금 — 1부와 그 밖                          |
-| `LOAN_MAX_AGE`                                                   | 23                     | AI 임대로 나가는 선수의 나이 상한                                          |
-| `NOTABLE_FEE` · `NOTABLE_OVERALL` · `NOTABLE_PER_DAY`            | £25M · 78 · 2          | 감독의 브리핑에 올라가는 이적의 문턱과 하루 줄 수                          |
-| `AI_RENEWAL_WINDOW_DAYS` · `AI_RENEWAL_CHANCE`                   | 240 · 2%               | AI가 재계약을 검토하기 시작하는 잔여 기간과 검토한 날 성사될 확률          |
-| `FREE_AGENT_SIGN_CHANCE` · `FREE_AGENT_SIGNINGS_PER_DAY`         | 6% · 2                 | 무소속 선수가 하루에 팀을 찾을 확률과 하루 성사 상한                       |
-| `SACK_CHANCE` · `SACKINGS_PER_DAY` · `GRACE_DAYS`                | 9% · 2 · 75일          | AI 감독이 문턱 아래에서 잘릴 하루 확률 · 하루 상한 · 부임 유예             |
-| `USER_WARNINGS_BEFORE_SACK` · `USER_BOARD_FLOOR`                 | 3 · 25                 | 감독이 잘리기까지의 경고 수와 보드 신뢰 — 순위 문턱은 career.md §5         |
+| 상수                                                             | 값                     | 무엇을 정하나                                                                                                                                                                          |
+| ---------------------------------------------------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MAX_ROUNDS`                                                     | 8                      | 한 협상이 쌓을 수 있는 오퍼 라운드 — 실질 제동은 인내심 감쇠다                                                                                                                         |
+| `NEGOTIATION_DAYS`                                               | 14                     | 협상 유효기간 — 창 마감이 더 이르면 그쪽이 먼저 온다                                                                                                                                   |
+| `REJECT_COOLDOWN_DAYS`                                           | 30                     | 결렬이 식는 데 걸리는 날 — 그 뒤에는 다시 오퍼가 붙는다                                                                                                                                |
+| `MIN_ACCEPT_PROBABILITY`                                         | 5%                     | 이 아래로는 상대가 수락할 수 없다 — 설득의 여유가 이 하한을 내린다                                                                                                                     |
+| `COUNTER_CEILING`                                                | 1.15                   | 상대가 요구액의 이 배수를 넘겨 부를 수 없다                                                                                                                                            |
+| `SELL_COUNTER_FLOOR`                                             | 0.55                   | 내보내는 딜에서 사는 쪽이 깎을 수 있는 하한 (갈래별 기대치 대비)                                                                                                                       |
+| `COUNTER_WAGE_CEILING`                                           | 1.4                    | 역제안으로 부를 수 있는 주급 — 재계약·영입 공통 (기대치 대비)                                                                                                                          |
+| `RELEASE_SUITORS_MANY` · `RELEASE_AGE_HOLD` · `RELEASE_AGE_MOVE` | 3곳 · 32세 · 25세      | 해지 판정에서 관심이 많다고 보는 구단 수와 버티는·나서는 나이의 경계                                                                                                                   |
+| `PATIENCE_DECAY` · `SAME_TERMS_TOLERANCE`                        | 0.72 · 0.03            | 같은 조건 반복마다 확률에 곱해지는 값과 "같은 조건"으로 보는 폭                                                                                                                        |
+| `INCOMING_OFFER_CHANCE` · `MAX_INCOMING`                         | 8% · 3                 | 창이 열린 하루에 오퍼가 들어올 확률과 동시에 안고 있을 수 있는 수                                                                                                                      |
+| `LISTED_OFFER_CHANCE` · `LISTED_DISCOUNT`                        | 34% · 0.22             | 이적 리스트 등재 선수에게 오퍼가 붙을 확률과 깎고 들어오는 폭                                                                                                                          |
+| `REQUESTED_OFFER_CHANCE` · `REQUESTED_DISCOUNT`                  | 25% · 0.3              | 이적 요청이 선 선수에게 오퍼가 붙을 확률과 시장가에서 깎고 들어오는 폭                                                                                                                 |
+| `BUDGET_ADJUST_WAGE_LIMIT`                                       | 10                     | `adjust_transfer_budget`의 하루 누적 한도 — 주급 총액의 배수                                                                                                                           |
+| `MAX_PAYMENT_YEARS` · `INSTALLMENT_DISCOUNT`                     | 4 · 0.9                | 분할 지급의 연수 상한과, 해마다 늦는 회분을 판정이 깎아 보는 비율 (§5-2)                                                                                                               |
+| `MEDICAL_DAYS_MIN` · `MAX`                                       | 1 · 2                  | 합의 다음 날부터 검진까지의 날 (창 마감일이면 그날)                                                                                                                                    |
+| `MEDICAL_DECISION_DAYS`                                          | 3                      | 소견이 붙은 뒤 강행·철회·재협상을 고를 시간                                                                                                                                            |
+| `MEDICAL_DISCOUNT`                                               | 0.85                   | 우리가 파는 딜에 소견이 붙었을 때 사는 쪽이 깎아 부르는 값                                                                                                                             |
+| `FLAG_BASE` · `FLAG_BY_PRONENESS` · `FLAG_CEILING`               | 0.05 · 0.06 · 0.75     | 스물다섯의 기본 소견 확률 · 성향이 싣는 폭 · 아무리 나빠도 넘지 않는 값                                                                                                                |
+| `LATITUDE_PER_CLAIM` · `LIE_PENALTY`                             | 12%p · 1.4             | 확인된 논거가 수락 하한을 내리는 폭과 확인 안 된 주장이 근거에서 빼는 점수                                                                                                             |
+| `MARKET_VALUE_AT_PEAK`                                           | £65M                   | 80 OVR 정점기 선수의 시장가 — 곡선 전체가 여기에 비례한다 (§3)                                                                                                                         |
+| `LOAN_FEE_RATE`                                                  | 0.08                   | 시즌 임대료 — 시장가 대비                                                                                                                                                              |
+| `DEFAULT_LOAN_WAGE_SHARE`                                        | 0.5                    | 임대 팀이 내는 주급 비율의 기본값                                                                                                                                                      |
+| `SEVERANCE_RATE` · `SEVERANCE_WEEKS_CAP`                         | 0.5 · 104주            | 합의 해지의 기대 정산금이 무는 잔여 주급의 비율과 세는 주 수의 상한                                                                                                                    |
+| `unilateralSeveranceOf`                                          | 잔여 주급 **전액**     | 일방 해지의 값 — 협상의 바깥값이자 역제안의 상한 (§2)                                                                                                                                  |
+| `WAGE_HEADROOM` · `USER_WAGE_HEADROOM`                           | 1.1 · 1.35             | 주급 한도 위로 허용되는 폭 — AI와 감독이 다르다 (§3)                                                                                                                                   |
+| `RETURN_RESISTANCE`                                              | 0.65                   | 시장 전용 리그에서 5대 리그로 돌아올 때 확률에 걸리는 저항                                                                                                                             |
+| `SEASON_BUDGET_TOPUP`                                            | £45M / 30M / 18M / 12M | 등급별 시즌 예산 보충 — 구단 경제 수준이 곱해진다                                                                                                                                      |
+| `ATTEMPTS_PER_DAY` · `LOAN_SHARE` · `DEADLINE_RUSH`              | 62 · 0.42 · 2.2        | AI 시장이 창이 열린 하루에 시도하는 수 · 그중 임대 비중 · 마감 주의 배수                                                                                                               |
+| `LEVEL_BAND`                                                     | 6                      | 사는 쪽 수준과 선수 종합이 벌어질 수 있는 폭                                                                                                                                           |
+| `MIN_SQUAD_AFTER_SALE` · `MIN_FIRST_TEAM`                        | 18 · 20                | 떠난 뒤 남아야 할 전체 인원(감독·AI 공통 · §2)과 AI가 더 보는 1군 인원                                                                                                                 |
+| `MAX_FIRST_TEAM` · `MAX_SQUAD`                                   | 30 · 52                | 사는 쪽 1군 상한(`FIRST_TEAM_LIMIT`)과 전체 인원 상한                                                                                                                                  |
+| `CASH_FLOOR_TOP` · `CASH_FLOOR_OTHER`                            | −£10M · £0             | 이적료를 내고도 남아 있어야 할 현금 — 1부와 그 밖                                                                                                                                      |
+| `LOAN_MAX_AGE`                                                   | 23                     | AI 임대로 나가는 선수의 나이 상한                                                                                                                                                      |
+| `LOAN_ASKING_LIFT`                                               | 1.6                    | 임대 협상의 호가 — `LOAN_FEE_RATE`로 잰 임대료의 이 배수가 자다 (`COUNTER_CEILING`이 그 위에 다시 얹힌다)                                                                              |
+| `LOAN_STARTER_RANK`                                              | 12                     | 보내는 쪽의 주전선 — 스쿼드 전력 순위가 이 안이면 내보내지 않는다                                                                                                                      |
+| `LOAN_HOST_LEVEL_GAP` · `LOAN_HOST_GROUP_CROWD`                  | 2 · 7                  | 받는 쪽이 내려서 있어야 할 수준 차와, 그 포지션군의 포화선                                                                                                                             |
+| `FREE_AGENT_SUITOR_SQUAD_CAP`                                    | 40                     | 무소속을 더 받지 않는 **전체 인원** — 등록 상한도 1군 상한도 `MAX_SQUAD`(52)도 아닌 **세 번째 상한**이다. 그 상한까지 무소속으로 채우면 감독이 시장에 나가기 전에 남는 선수가 소화된다 |
+| `SUITOR_GROUP_CROWD` · `SUITOR_LEVEL_SAMPLE`                     | 8 · 15                 | 무소속을 데려갈 구단을 고를 때 그 자리가 포화라고 보는 인원과, 팀 수준을 재는 표본                                                                                                     |
+| `FREE_AGENT_OLD_AGE` · `FREE_AGENT_VETERAN_AGE`                  | 34 · 31                | 나이가 이름값에 곱하는 몫이 꺾이는 두 경계 (0.35 · 0.7배)                                                                                                                              |
+| `NOTABLE_FEE` · `NOTABLE_OVERALL` · `NOTABLE_PER_DAY`            | £25M · 78 · 2          | 감독의 브리핑에 올라가는 이적의 문턱과 하루 줄 수                                                                                                                                      |
+| `AI_RENEWAL_WINDOW_DAYS` · `AI_RENEWAL_CHANCE`                   | 240 · 2%               | AI가 재계약을 검토하기 시작하는 잔여 기간과 검토한 날 성사될 확률                                                                                                                      |
+| `FREE_AGENT_SIGN_CHANCE` · `FREE_AGENT_SIGNINGS_PER_DAY`         | 6% · 2                 | 무소속 선수가 하루에 팀을 찾을 확률과 하루 성사 상한                                                                                                                                   |
+| `SACK_CHANCE` · `SACKINGS_PER_DAY` · `GRACE_DAYS`                | 9% · 2 · 75일          | AI 감독이 문턱 아래에서 잘릴 하루 확률 · 하루 상한 · 부임 유예                                                                                                                         |
+| `USER_WARNINGS_BEFORE_SACK` · `USER_BOARD_FLOOR`                 | 3 · 25                 | 감독이 잘리기까지의 경고 수와 보드 신뢰 — 순위 문턱은 career.md §5                                                                                                                     |
 
 ## 11. ⚠️ 불변식
 
@@ -757,9 +768,12 @@ tick이 매일 시장을 굴린다 — 1부 클럽당 시즌 이적 3.4건 · �
 - **모델이 죽어도 협상은 굴러간다.** 두 번 실패하면 앵커가 그대로 반영된다. 답이 도착한
   자리를 비워 두면 감독은 다음 턴에도 같은 화면을 보고, 기한(`expiresOn`)은 그동안
   줄어든다.
-- **협상 서류에는 사람이 실린다** — 상대 구단(또는 선수)과 **그 선수의 에이전트**
-  인물지가 함께 간다. 수수료로만 존재하던 사람이 말을 갖는 자리가 여기다
-  ([people](../data/people.md) §2-1).
+- **협상 서류에는 사람이 실린다** — 선수 본인과 **그를 대리하는 에이전트**의 인물지가
+  함께 간다(`agentForPlayer`). 수수료(`agent_fee`)로만 존재하던 사람이 말을 갖는 자리가
+  여기다 ([people](../data/people.md) §2-1).
+- ⚠️ **감독이 읽는 협상 요약을 그대로 넘기지 않는다.** `describeNegotiation`은 감독의
+  자리에서 쓰여 라운드가 `우리`·`상대`로 적힌다 — 테이블 건너편이 읽으면 감독의 오퍼가
+  자기 것이 된다. 서류는 **양쪽을 이름으로** 부르는 한 벌을 따로 만든다.
 
 ## 12. 미해결
 

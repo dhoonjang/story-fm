@@ -1360,7 +1360,7 @@ function specOfSignature(signature: string): TacticsSpec | null {
  *
  * 엔진(`rememberTactics`)과 웹(저장 전 예고)이 **같은 함수**를 써야 한다. 웹이 이걸
  * 빼먹으면 현재 전술이 기억에 없는 상태로 전이를 계산해, 슬라이더 한 칸만 옮겨도
- * 하한(40)까지 떨어지는 것처럼 예고된다 — 실제 서버 결과와 어긋난다.
+ * 하한(`FAMILIARITY_MIN`)까지 떨어지는 것처럼 예고된다 — 실제 서버 결과와 어긋난다.
  */
 export function withCurrentDrilled(
   drilled: readonly DrilledTactics[] | undefined,

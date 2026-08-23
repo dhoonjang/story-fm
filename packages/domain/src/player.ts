@@ -94,7 +94,7 @@ export const POSITION_CLUSTERS: readonly (readonly string[])[] = [
  *
  * 키는 **중앙 표기**, 값은 그 자리의 좌·우 변형이다.
  */
-export const MIRROR_VARIANTS: Record<string, readonly [left: string, right: string]> = {
+const MIRROR_VARIANTS: Record<string, readonly [left: string, right: string]> = {
   CB: ["LCB", "RCB"],
   CDM: ["LDM", "RDM"],
   CM: ["LCM", "RCM"],
@@ -197,7 +197,7 @@ export const FootSchema = z.object({
 export type Foot = z.infer<typeof FootSchema>;
 
 /** 두 발이 같으면 양발 — 어느 쪽도 유리하지 않다 */
-export function isTwoFooted(foot: Foot): boolean {
+function isTwoFooted(foot: Foot): boolean {
   return foot.left === foot.right;
 }
 
@@ -212,7 +212,7 @@ export function footLabel(foot: Foot | undefined): string {
  * 두 발 차이 1당 보정 폭. 차이가 클수록 좌우가 갈린다 —
  * 5/4는 ±1, 5/3·5/2는 ±2, 5/1은 ±3. 양발(5/5)은 0이다.
  */
-export const FOOT_STEP = 0.75;
+const FOOT_STEP = 0.75;
 
 /**
  * 주발 보정 — **그 쪽 발이 반대쪽보다 얼마나 나은가**로 정한다.
@@ -1675,6 +1675,13 @@ export function bestOverall(axes: AxisValues, positions: readonly { position: st
   return best;
 }
 
+/**
+ * 심경 한 줄의 글자 상한 — 스키마가 문이고, 이 문을 넘긴 문장은 다음 로드에서
+ * 세이브 전체를 스키마 실패로 만든다. 제출을 자르는 쪽(`engine/squad/mood.ts`)이
+ * 같은 값을 다시 적으면 한쪽만 손봤을 때 세이브가 깨진다.
+ */
+export const MOOD_NOTE_MAX = 120;
+
 /** 빠르게 변하는 컨디션 — 부상은 별도 INJURY 테이블 (player.md §5) */
 export const PlayerStateSchema = z.object({
   /**
@@ -1689,7 +1696,7 @@ export const PlayerStateSchema = z.object({
    * 몸의 준비 상태만 나타낸다. 심리적 사기 효과는 `form`으로 환산하므로
    * "잘 쉬었지만 폼이 꺾인 선수"와 "지쳤지만 기세가 오른 선수"가 함께 성립한다.
    *
-   * 경기·훈련이 깎고 휴식·회복이 채운다. 왜 낮은지는 `describeMood`가 말한다.
+   * 경기·훈련이 깎고 휴식·회복이 채운다. 왜 낮은지는 `moodOf`가 말한다.
    * 옛 세이브는 로드할 때 두 값을 합쳐 옮긴다 (`persistence.ts`).
    */
   condition: z.number().int().min(0).max(CONDITION_MAX),
@@ -1708,7 +1715,7 @@ export const PlayerStateSchema = z.object({
    */
   injuryProneness: z.number().min(INJURY_PRONENESS_MIN).max(INJURY_PRONENESS_MAX).optional(),
   /**
-   * **맥락을 읽고 다시 쓴 심경 한 줄** — 코어 앵커(`describeMood`) 위에 얹힌다.
+   * **맥락을 읽고 다시 쓴 심경 한 줄** — 코어 앵커(`moodAnchor`) 위에 얹힌다.
    *
    * 파생하지 않고 저장하는 이유는 `SETTLING_EVENT`와 같다: 이 문장의 원본은
    * 그 구간의 대화·사건이고 그건 어디에도 표로 남지 않는다. 결산이 지나가면
@@ -1720,7 +1727,7 @@ export const PlayerStateSchema = z.object({
    *
    * 옛 세이브엔 없다 — 없으면 앵커를 쓰고 버전을 올리지 않는다.
    */
-  moodNote: z.object({ text: z.string().min(1).max(120), on: DateString }).optional(),
+  moodNote: z.object({ text: z.string().min(1).max(MOOD_NOTE_MAX), on: DateString }).optional(),
   /**
    * **마지막으로 면담한 날** — 같은 선수의 면담을 하루 한 번으로 자르는 문
    * (career.md §2). 한 경기는 하루 안에서 끝나므로 이것이 곧 경기당 한 번이다.
@@ -1880,7 +1887,7 @@ export const GamePlayerSchema = z.object({
    * **아직 한 칸을 못 채운 성장** — 축별로 −1 < x < 1.
    *
    * 능력치는 정수라 "이번 훈련이 반 칸쯤 남겼다"를 표현할 자리가 없다. 그래서
-   * 판정이 낸 값을 곡선으로 깎아 여기 쌓고(`applyAttributeGain`), 1을 넘는 순간
+   * 판정이 낸 값을 곡선으로 깎아 여기 쌓고(`applyAttributeStep`), 1을 넘는 순간
    * 능력치가 1 오른다. 이 그릇이 없으면 스물아홉 살 85짜리 선수는 아무리 훈련해도
    * 영영 그대로다 — 곡선이 그의 몫을 언제나 1보다 작게 만들기 때문이다.
    *

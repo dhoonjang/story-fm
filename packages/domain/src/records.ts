@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DateString } from "./date-string";
+import { MATCH_MINUTE_MAX } from "./match";
 import { AXIS_KO, type AttributeAxis } from "./player";
 import { PitchClaimKindSchema, PitchClaimSchema } from "./persuasion";
 
@@ -43,7 +44,7 @@ export const BookingSchema = z.object({
   matchId: z.string().min(1),
   season: z.number().int(),
   card: z.enum(["yellow", "red"]),
-  minute: z.number().int().min(0).max(130),
+  minute: z.number().int().min(0).max(MATCH_MINUTE_MAX),
 });
 export type Booking = z.infer<typeof BookingSchema>;
 
@@ -564,10 +565,10 @@ export const GrowthOriginSchema = z.enum([
 ]);
 export type GrowthOrigin = z.infer<typeof GrowthOriginSchema>;
 
-/** 성장 대상 — 능력치 6축+GK, 포지션 적응도(pos:CODE), 전술 적응도(tactical) */
+/** 성장 대상 — 능력치 16축, 포지션 적응도(pos:CODE), 전술 적응도(tactical) */
 export const GrowthEntrySchema = z.object({
   gamePlayerId: z.string().min(1),
-  /** 출처 일정 (SCHEDULE_ENTRY) — 훈련 세션 또는 경기 */
+  /** 출처 일정 (SCHEDULE_ENTRY) — 훈련 세션 또는 경기. 코어 월간 성장은 없다(null) */
   entryId: z.string().min(1).nullable(),
   date: DateString,
   source: GrowthSourceSchema,
@@ -642,9 +643,10 @@ export function seasonRating(
 
 // ── 스카우팅 ──────────────────────────────────────────
 /**
- * 스카우트 파견 (SCOUT_REPORT) — **선수 단위**. 완료되면 그 선수의 능력치 안개가
- * 걷힌다(정확 공개). 단 잠재력은 끝까지 알 수 없다 — 성장 여력은 스카우트도
- * 단정하지 못한다는 규약. 지식 수준 파생은 engine/squad/scouting.ts 참고.
+ * 스카우트 파견 (SCOUT_REPORT) — **선수 단위**. 완료되면 안개가 좁혀진다: 관측형은
+ * ±1, 분석형은 ±3이 남는다(정답 공개가 아니다). 잠재력은 끝까지 폭으로만 안다 —
+ * 성장 여력은 스카우트도 단정하지 못한다는 규약. 지식 수준 파생은
+ * engine/squad/scouting.ts 참고.
  */
 export const ScoutReportSchema = z.object({
   id: z.string().min(1),
@@ -744,18 +746,17 @@ export type TransferListing = z.infer<typeof TransferListingSchema>;
  * 개인 훈련 프로그램 — **팀 훈련 위에 한 선수만 겨냥해 얹는 것.**
  *
  * `set_training`은 팀 전체 메뉴라 "이 선수의 결정력을 손보자", "풀백을 센터백으로
- * 전향시키자" 같은 판단이 표현되지 않았다. 축(`axis`)은 훈련 결산(LLM)의 입력이
- * 되고, 자리(`position`)는 **코어가 결정적으로** 적응도를 올린다 — 실전보다 느리게.
+ * 전향시키자" 같은 판단이 표현되지 않았다. 축(`axis`)도 자리(`position`)도 훈련
+ * 결산의 입력이고, 자리는 결산 한 번에 `POSITION_TRAIN_MAX`까지만 오른다 —
+ * 실전보다 느리게.
  */
 export const PlayerTrainingSchema = z.object({
   gamePlayerId: z.string().min(1),
   /** 겨냥한 능력치 축 — 훈련 결산에 실린다 */
   axis: z.string().min(1).optional(),
-  /** 배우는 자리 — 적응도가 훈련일마다 조금씩 오른다 */
+  /** 배우는 자리 — 훈련 결산이 적응도를 조금씩 올린다 */
   position: z.string().min(1).optional(),
   since: DateString,
-  /** 자리 훈련이 쌓은 훈련일 수 — 일정 수마다 적응도 +1 */
-  sessions: z.number().int().min(0).optional(),
 });
 export type PlayerTraining = z.infer<typeof PlayerTrainingSchema>;
 

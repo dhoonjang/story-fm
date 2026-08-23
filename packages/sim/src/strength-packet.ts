@@ -29,6 +29,7 @@ import {
   positionGroupOf,
   positionGroupOfPlayer,
   proficiencyReadiness,
+  RATING_MAX,
   roleFit,
   roleWeights,
   tacticalSensitivityOf,
@@ -208,10 +209,22 @@ export function isGassed(slot: LineupSlot): boolean {
   return totalFatigue(slot) >= GAP_THRESHOLD;
 }
 
+/** 전술 능력 0인 감독의 소화율 — 지시가 팀에 스미는 바닥 */
+const TACTICAL_FIT_FLOOR = 0.92;
+/** 전술 능력이 그 위에 얹는 폭 — 바닥+폭이 곧 만점 감독의 소화율이다 */
+const TACTICAL_FIT_SPAN = 0.16;
+
 /** 전술 소화율 — 같은 지시도 감독에 따라 팀에 스며드는 정도가 다르다 (0.92~1.08) */
 export function tacticalFit(managerTactics: number): number {
-  return round2(0.92 + (managerTactics / 99) * 0.16);
+  return round2(TACTICAL_FIT_FLOOR + (managerTactics / RATING_MAX) * TACTICAL_FIT_SPAN);
 }
+
+/** 아무것도 갖추지 못한 감독의 지시 적용률 — 말이 통하는 바닥 */
+const UPTAKE_FLOOR = 0.45;
+/** 감독 전술 능력이 얹는 폭 */
+const UPTAKE_TACTICS_SPAN = 0.35;
+/** 선발 평균 전술 적응도가 얹는 폭 — 세 값의 합이 1.0(완전 소화)이어야 한다 */
+const UPTAKE_FAMILIARITY_SPAN = 0.2;
 
 /**
  * 지시 적용률 — **감독의 말이 그라운드에 스미는 정도** (0.45~1.0).
@@ -230,7 +243,11 @@ export function instructionUptake(
   squadFamiliarity = FAMILIARITY_MAX,
 ): number {
   const fam = Math.max(0, Math.min(1, squadFamiliarity / FAMILIARITY_MAX));
-  return round2(0.45 + 0.35 * (managerTactics / 99) + 0.2 * fam);
+  return round2(
+    UPTAKE_FLOOR +
+      UPTAKE_TACTICS_SPAN * (managerTactics / RATING_MAX) +
+      UPTAKE_FAMILIARITY_SPAN * fam,
+  );
 }
 
 /** 팀 구성이 그 지시에 맞는가 — 1.0이 평균, 크면 그 지시로 얻는 게 많다 */
@@ -659,6 +676,13 @@ function gapNotes(slots: LineupSlot[], side: MatchSide): PacketTag[] {
   }));
 }
 
+/** 이 전력비부터 "압도적" — 위 셋은 서로 넘어설 수 없다 (big > clear > even) */
+const EDGE_BIG_RATIO = 1.15;
+/** 이 전력비부터 "뚜렷한 우위" */
+const EDGE_CLEAR_RATIO = 1.07;
+/** 이 아래는 편을 가르지 않는다 — 여기서만 "팽팽하다"가 나온다 */
+const EDGE_EVEN_RATIO = 1.035;
+
 /**
  * 우열 라벨 — 문턱이 좁으면 지시 한 칸이 "팽팽하다"를 "뚜렷한 우위"로 뒤집는다.
  * LLM은 숫자보다 이 라벨을 읽으므로 밴드를 넉넉히 둔다.
@@ -674,8 +698,9 @@ function gapNotes(slots: LineupSlot[], side: MatchSide): PacketTag[] {
  */
 export function edgeOf(ratio: number): { edge: EdgeSide; size: EdgeSize } {
   const abs = ratio >= 1 ? ratio : 1 / ratio;
-  const size: EdgeSize = abs >= 1.15 ? "big" : abs >= 1.07 ? "clear" : "slight";
-  const edge: EdgeSide = abs < 1.035 ? "even" : ratio > 1 ? "home" : "away";
+  const size: EdgeSize =
+    abs >= EDGE_BIG_RATIO ? "big" : abs >= EDGE_CLEAR_RATIO ? "clear" : "slight";
+  const edge: EdgeSide = abs < EDGE_EVEN_RATIO ? "even" : ratio > 1 ? "home" : "away";
   return { edge, size };
 }
 
@@ -1143,20 +1168,6 @@ export function buildStrengthPacket(
     away: round2(sumProfiles("away", (profile) => profile.expectedGoals)),
   };
 
-  const overallGap =
-    Math.abs(
-      home.zones.attack +
-        home.zones.midfield +
-        home.zones.defense -
-        (away.zones.attack + away.zones.midfield + away.zones.defense),
-    ) / 3;
-  /**
-   * 전력 차 1당 업셋 확률이 깎이는 폭 — `edgeOf`와 같은 이유로 존 값의 눈금을 탄다.
-   * 폭이 ×0.81로 좁아진 만큼 계수를 되편다(0.01 → 0.0123).
-   */
-  const UPSET_PER_GAP = 0.0123;
-  const upsetChance = round2(Math.min(0.45, Math.max(0.05, 0.35 - overallGap * UPSET_PER_GAP)));
-
   /**
    * 키포인트 = **발동한 상성**(전술이 만난 결과) + 구멍(교체 신호) + 전술 미스매치.
    * 상성이 앞에 온다 — 감독이 지금 무엇을 바꿔야 하는지가 먼저다. 상성과 구멍은
@@ -1198,7 +1209,6 @@ export function buildStrengthPacket(
       chanceXg,
       shotProfiles,
       possession,
-      upsetChance,
       intensity: {
         home: matchIntensity(homeIn.tactics),
         away: matchIntensity(awayIn.tactics),

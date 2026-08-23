@@ -60,6 +60,8 @@ import {
   DEFAULT_FORMATION,
   FAMILIARITY_BASELINE,
   MANAGER_TERMS_BY_TIER,
+  REPUTATION_MAX,
+  REPUTATION_MIN,
   FORMATIONS,
   FIRST_TEAM_LIMIT,
   MATCHDAY_BENCH,
@@ -473,14 +475,6 @@ export interface PendingMatch {
     /** 어느 쪽으로 던진 판인가 — 경기당 한 번이라 이 값이 서면 다시 묻지 않는다 */
     intent: "chase" | "hold";
   };
-  /**
-   * **상대 벤치가 마지막으로 판단한 분.**
-   *
-   * 짧게 부른 구간(`maxMinutes`)이 판단 자리를 여는 간격을 여기서 잰다
-   * (`AI_BRIEF_GAP`). 구간 횟수로 세면 감독이 말을 걸수록 상대가 빨라지거나
-   * 얼어붙는다. 옛 세이브엔 없다 (optional).
-   */
-  aiDecidedAt?: number;
 }
 
 export type GamePhase = "idle" | "matchday" | "match";
@@ -992,6 +986,15 @@ export function userPlayers(state: GameState): GamePlayer[] {
  */
 export function managedTeamId(state: GameState): string | null {
   return state.dismissal ? null : state.userTeamId;
+}
+
+/**
+ * 평판을 눈금 안으로 자른다 — 경기·시즌·컵·경질이 저마다 다른 폭으로 더하고 빼도
+ * 나가는 값은 `ManagerReputationSchema`가 받는 0~100이라야 한다. **여기가 유일한
+ * 문이다** — 호출부가 각자 `Math.min(100, …)`을 적으면 스키마를 옮긴 날 한쪽만 남는다.
+ */
+export function clampReputation(value: number): number {
+  return Math.max(REPUTATION_MIN, Math.min(REPUTATION_MAX, value));
 }
 
 export function playerById(state: GameState, id: string): GamePlayer | null {

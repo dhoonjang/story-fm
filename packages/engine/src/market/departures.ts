@@ -423,6 +423,29 @@ const THIN_GROUP = 5;
 const FREE_AGENT_PAR_RATING = 67;
 /** 구단과 선수의 수준이 맞다고 보는 폭 — 같은 이유로 눈금을 탄다 (8 → 7) */
 const SUITOR_LEVEL_BAND = 7;
+/**
+ * 그 포지션군이 포화라고 보는 인원 — 이만큼 있으면 데려가지 않고, 이 아래로
+ * 모자란 만큼 뽑기에 이름을 더 넣는다. **두 자리가 같은 수를 읽어야 한다** —
+ * 문턱과 가중치가 갈리면 아무도 뽑히지 않는 구간이 생긴다.
+ */
+const SUITOR_GROUP_CROWD = THIN_GROUP + 3;
+/** 팀 수준을 재는 표본 — 전력 상위 이만큼의 평균이 그 구단의 눈금이다 */
+const SUITOR_LEVEL_SAMPLE = 15;
+/** 나이가 이름값에 곱하는 몫 — 나이가 많을수록 팀을 더디게 찾는다 */
+const FREE_AGENT_OLD_AGE = 34;
+const FREE_AGENT_OLD_APPEAL = 0.35;
+const FREE_AGENT_VETERAN_AGE = 31;
+const FREE_AGENT_VETERAN_APPEAL = 0.7;
+/**
+ * 무소속을 더 받지 않는 **전체 인원**(1군·2군·유스 합) — 이만큼 데리고 있는 구단은
+ * 공짜라도 한 명을 더 얹지 않는다.
+ *
+ * ⚠️ 스쿼드 상한이 아니다. 규정의 등록 상한(`SQUAD_LIST_LIMIT`)도, 1군 운영 상한
+ * (`FIRST_TEAM_LIMIT`)도, AI 시장의 전체 최후 상한(`MAX_SQUAD` = 52)도 아니고
+ * 그보다 이른 자리다 — 그 상한까지 무소속으로 채우면 감독이 시장에 나가기 전에
+ * 세계의 남는 선수가 전부 소화된다.
+ */
+const FREE_AGENT_SUITOR_SQUAD_CAP = 40;
 
 /**
  * 무소속 선수를 다른 구단이 데려간다 — tick이 **이적창이 열린 날** 부른다.
@@ -446,7 +469,11 @@ export function signFreeAgents(state: GameState, digest: string[]): void {
     // 이름값이 클수록 빨리, 나이가 많을수록 더디게 (기준 등급은 종합 눈금을 탄다)
     const appeal =
       (player.attributes.overall / FREE_AGENT_PAR_RATING) *
-      (age >= 34 ? 0.35 : age >= 31 ? 0.7 : 1);
+      (age >= FREE_AGENT_OLD_AGE
+        ? FREE_AGENT_OLD_APPEAL
+        : age >= FREE_AGENT_VETERAN_AGE
+          ? FREE_AGENT_VETERAN_APPEAL
+          : 1);
     if (rng() > FREE_AGENT_SIGN_CHANCE * appeal) continue;
 
     const suitor = pickSuitor(state, player, rng);
@@ -467,24 +494,24 @@ function pickSuitor(state: GameState, player: GamePlayer, rng: () => number): st
     if (team.id === FREE_AGENT_TEAM) continue;
     if (leagueOfTeam(team.id) === "free") continue;
     const squad = playersOf(state, team.id);
-    if (squad.length === 0 || squad.length >= 40) continue;
+    if (squad.length === 0 || squad.length >= FREE_AGENT_SUITOR_SQUAD_CAP) continue;
 
     // 자리가 얇은가
     const atGroup = squad.filter((p) => groupOf(p) === group).length;
-    if (atGroup >= THIN_GROUP + 3) continue;
+    if (atGroup >= SUITOR_GROUP_CROWD) continue;
 
-    // 수준이 비슷한가 — 팀 상위 15명 평균과 견준다
+    // 수준이 비슷한가 — 팀 상위 몇 명의 평균과 견준다 (`SUITOR_LEVEL_SAMPLE`)
     const level =
       squad
         .map((p) => p.attributes.overall)
         .sort((a, b) => b - a)
-        .slice(0, 15)
-        .reduce((sum, v) => sum + v, 0) / Math.min(15, squad.length);
+        .slice(0, SUITOR_LEVEL_SAMPLE)
+        .reduce((sum, v) => sum + v, 0) / Math.min(SUITOR_LEVEL_SAMPLE, squad.length);
     const gap = Math.abs(level - player.attributes.overall);
     if (gap > SUITOR_LEVEL_BAND) continue;
 
     // 급할수록 여러 번 이름을 넣는다 (결정적 rng 하나로 뽑기 위해)
-    const weight = Math.max(1, THIN_GROUP + 3 - atGroup);
+    const weight = Math.max(1, SUITOR_GROUP_CROWD - atGroup);
     for (let i = 0; i < weight; i++) candidates.push(team.id);
   }
   if (candidates.length === 0) return null;

@@ -44,7 +44,7 @@ import { squadRating } from "../squad/depth";
  * 2부 클럽보다 열다섯 점쯤 높아서, 어떤 난수를 얹어도 매년 그 셋이 그대로 올라온다.
  * 서열로 재면 눈금이 아니라 자리만 남아 4~5위도 올라올 수 있다.
  */
-export const PROMOTION_LUCK = 4;
+const PROMOTION_LUCK = 4;
 
 /**
  * 이 팀이 지금 속한 리그 — 세 층을 순서대로 본다.

@@ -325,6 +325,12 @@ export function euroPotCount(size: number): number {
   return size % 4 === 0 ? 4 : 2;
 }
 
+/**
+ * 카탈로그에 리그 계수가 없는 팀이 받는 계수 — **수가 클수록 약한 리그**라
+ * 5대 리그의 맨 아래(리그 1)와 같은 자리에 세운다.
+ */
+const UNKNOWN_LEAGUE_COEFFICIENT = 5;
+
 /** 이 대회의 전력대 배정 — 추첨 품질 검증·표시용 */
 export function euroPots(cupId: string, seed: number, teamIds: string[]): Map<string, number> {
   return potsOf(teamIds, seed, cupId, euroPotCount(teamIds.length));
@@ -344,7 +350,9 @@ function potsOf(
    * 세이브가 다시 읽지는 않는다.
    */
   const strength = (id: string) => {
-    const league = leagueCatalogById(teamCatalogById(id)?.leagueId ?? "")?.coefficient ?? 5;
+    const league =
+      leagueCatalogById(teamCatalogById(id)?.leagueId ?? "")?.coefficient ??
+      UNKNOWN_LEAGUE_COEFFICIENT;
     return catalogTierOf(id) * CATALOG_TIER_STEP + league;
   };
   const sorted = [...teamIds].sort(
