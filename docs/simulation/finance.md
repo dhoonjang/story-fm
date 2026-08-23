@@ -250,7 +250,8 @@ AI 팀은 **엔트리를 남기지 않고 잔고만 갱신**한다. `market.ts`�
 **재정이 도는 구단은 `isClubTeam && !isOutsideOurEconomy`다** — 무소속
 (`freeagents`)은 클럽이 아니라 클럽이 없는 상태라 낼 주급도 받을 수입도 없고,
 이적 시장 전용 리그(사우디·MLS)는 경기를 하지 않아 원장 대신 상시 이적 예산
-(`MARKET_LEAGUE_BUDGET`)만 유지한다. 카탈로그의 169개 자리에서 그 아홉을 빼면
+(`MARKET_LEAGUE_BUDGET`, 표에 없는 리그는 `DEFAULT_MARKET_LEAGUE_BUDGET` £50M)만
+유지한다. 카탈로그의 169개 자리에서 그 아홉을 빼면
 160개 구단이다.
 
 그래서 상금 중복 지급은 원장 조회가 아니라 **`FINANCE.prizesPaid` 키가 막는다.**
@@ -311,7 +312,10 @@ LeagueCatalogEntry += {
   본다(실제 블랙아웃 규약). 시즌 38경기 중 약 32경기가 편성된다.
 - **대항전은 생중계 수당 없음** — 유럽 방송 수입은 이미 UEFA 배분(참가비·승무
   수당)에 들어 있어 이중 계상이 된다.
-- **첫 시즌은 전 시즌 순위가 없다** → 구단 `tier`로 대체한다
+- **첫 시즌은 전 시즌 순위가 없다** → 구단 `tier`로 대체한다 —
+  `ASSUMED_RANK_BY_TIER`(1등급 3위 · 2등급 7위 · 3등급 12위 · 4등급 17위)가 그 자다.
+  리그 팀 수를 세지 못하면 `DEFAULT_LEAGUE_SIZE`(20)를 쓰고, 리그 카탈로그에
+  배율이 없으면 `DEFAULT_BROADCAST_POOL`(0.3)을 쓴다.
   (`euroEntrants`의 첫 시즌 처리와 같은 패턴). AI 팀은 지난 시즌 순위표를 저장하지
   않으므로(시즌 전환에서 파생 후 버린다) 항상 tier 어림을 쓴다 — AI 재정은 잔고만
   읽히므로 충분하다.
@@ -358,17 +362,20 @@ occupancy  = clamp(base + Σ보정, 0.45, 1.00)
 수입       = attendance × 단가 × (1 + 호스피탈리티율)
 ```
 
-| 요인          | 값                                                |
-| ------------- | ------------------------------------------------- |
-| base          | tier1 0.97 · tier2 0.90 · tier3 0.85 · tier4 0.80 |
-| 순위          | `(11 − 현재순위) / 10 × 0.04`                     |
-| 최근 5경기 폼 | `(승률 − 0.40) × 0.05` → −0.02 \~ +0.03           |
-| 상대 매력도   | 상대 tier1 +0.04 · tier2 +0.02 · tier4 −0.02      |
-| 대회          | 컵 경기(국내 컵·대항전) +0.02                     |
-| 킥오프 슬롯   | 월\~목요일 −0.03                                  |
-| 시드 해시     | ±0.02 (결정적 미세 변동)                          |
+| 요인        | 값                                                                                                                      |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------- |
+| base        | `OCCUPANCY_BASE` — tier1 0.97 · tier2 0.90 · tier3 0.85 · tier4 0.80                                                    |
+| 순위        | `(OCCUPANCY_RANK_PIVOT(11) − 현재순위) / OCCUPANCY_RANK_SPAN(10) × OCCUPANCY_RANK_SWING(0.04)`                          |
+| 최근 폼     | `OCCUPANCY_FORM_MATCHES`(5)경기 — `(승률 − OCCUPANCY_PAR_WIN_RATE(0.40)) × OCCUPANCY_FORM_SWING(0.05)` → −0.02 \~ +0.03 |
+| 상대 매력도 | `OCCUPANCY_BY_OPPONENT_TIER` — tier1 +0.04 · tier2 +0.02 · tier3 0 · tier4 −0.02                                        |
+| 대회        | `OCCUPANCY_CUP_BONUS` — 컵 경기(국내 컵·대항전) +0.02                                                                   |
+| 킥오프 슬롯 | `OCCUPANCY_WEEKNIGHT_PENALTY` — 월\~목요일 −0.03                                                                        |
+| 시드 해시   | `OCCUPANCY_JITTER`(0.04) — ±0.02 (결정적 미세 변동)                                                                     |
+| 하한        | `OCCUPANCY_FLOOR`(0.45) — 친선 배율은 이 clamp **뒤에** 곱한다                                                          |
 
-단가 = `리그 avgTicketPrice × tier 보정(1.3 / 1.1 / 0.95 / 0.8)`, 유럽전 ×1.15.
+단가 = `리그 avgTicketPrice × tier 보정(1.3 / 1.1 / 0.95 / 0.8)`, 유럽전
+×`EURO_TICKET_FACTOR`(1.15). 카탈로그에 평균가가 없으면
+`DEFAULT_TICKET_PRICE`(£30)를 쓴다.
 호스피탈리티율 = tier1 0.35 · 2 0.28 · 3 0.20 · 4 0.15.
 
 **리그 평균 단가는 EPL 대비 비율로 잡는다** — 실제로도 다섯 리그의 티켓 가격 차는
@@ -421,7 +428,10 @@ occupancy  = clamp(base + Σ보정, 0.45, 1.00)
 ```
 commercial   = base(commercialTier) × (1 + 조항)
 조항         = UCL 진출 +0.15 · UEL 진출 +0.06 · UECL 진출 +0.03 · 지난 시즌 트로피 +0.20
-merchandising = base(commercialTier) × (1 + 최근 승률 보정 ±0.10 — 6경기, 친선 제외)
+               (`COMMERCIAL_UCL/UEL/UECL_CLAUSE` · `COMMERCIAL_TROPHY_CLAUSE`)
+merchandising = base(commercialTier) × (1 + 최근 승률 보정)
+보정          = clamp((승률 − MERCH_PAR_WIN_RATE 0.40) × MERCH_FORM_SLOPE 0.25, ±MERCH_FORM_SWING 0.10)
+               창은 MERCH_FORM_MATCHES(6)경기, 친선 제외
 ```
 
 | 브랜드 | 연 상업+굿즈 | 실제 어림 | 누가                      |
