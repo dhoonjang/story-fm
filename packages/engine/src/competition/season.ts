@@ -56,6 +56,7 @@ import {
 } from "../club/finance";
 import { buildEuroEntrants, entrantsOf, type LeagueTables } from "./europe";
 import { buildSeasonFixtures, isUserFixture } from "./fixtures";
+import type { SuperCupSource } from "./super-cup";
 import {
   applyPromotionRelegation,
   reinforcePromotedSquads,
@@ -609,6 +610,22 @@ const YOUTH_INTAKE_SEED_OFFSET = 101;
  * ⚠️ **세이브에 직접 쓰지 않는다** — 초안 위에서만 돈다. 원본에 옮겨 붙이는 경계는
  * `transitionSeason`·`endSeason`이 긋는다 (전부 되거나 아무것도 안 된다).
  */
+/**
+ * 대회별 우승 팀 — 우승자가 없는 대회는 목록에서 빠진다.
+ * 슈퍼컵 대진의 원본이라 "없다"가 곧 "그 슈퍼컵은 그해 서지 않는다"가 된다.
+ */
+function championsOf(
+  cups: readonly { id: string }[],
+  championOf: (cupId: string) => string | null,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const cup of cups) {
+    const champion = championOf(cup.id);
+    if (champion) out[cup.id] = champion;
+  }
+  return out;
+}
+
 function applyTransition(state: GameState): string[] {
   const digest: string[] = [];
   const rng = makeRng(state.seed, `transition:${state.season}`);
@@ -931,6 +948,18 @@ function applyTransition(state: GameState): string[] {
     finalTables[league.id] = computeStandings(state, league.id).map((r) => r.teamId);
   }
   const cupWinners = domesticCupWinners(state);
+  /**
+   * 슈퍼컵 대진의 원본 — 티켓과 **같은 시점**에 읽어야 한다. 리그 최종 순위도 컵·
+   * 대항전 우승도 `state.season`으로 걸러 읽고, 그 뒤 `state.matches`가 새 시즌
+   * 것으로 통째로 교체된다 (competition.md §4-1).
+   */
+  const superCups: SuperCupSource | null = hasCups(state.world)
+    ? {
+        leagueTables: finalTables,
+        domesticChampions: championsOf(domesticCupCatalog(), (id) => domesticChampion(state, id)),
+        euroChampions: championsOf(cupCatalog(), (id) => euroChampion(state, id)),
+      }
+    : null;
   // 성적 축의 원본 — 승강이 소속을 옮기기 **전에** 그해 순위표를 남긴다 (team.md §2.1)
   recordLeagueHistory(state);
   /**
@@ -976,6 +1005,7 @@ function applyTransition(state: GameState): string[] {
       ...(isCupOnlyLeague(ourLeague) ? { extraLeagues: [ourLeague] } : {}),
     },
     state.userTeamId,
+    superCups,
   );
   state.windows = windows;
   state.matches = matches;

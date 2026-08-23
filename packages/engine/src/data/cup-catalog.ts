@@ -4,14 +4,17 @@
  * 리그처럼 대회(Competition)의 불변 정의이고 `MATCH.competitionId`가 이 id를 가리킨다.
  * 2024-25부터의 실제 포맷(단일 리그 페이즈 + 플레이오프 + 16강)을 따른다.
  *
- * ⚠️ **규모는 축소했다.** 실제 UCL 리그 페이즈는 36팀이지만 그중 12팀은 우리가
- * 모델링하지 않은 리그(에레디비시·프리메이라·스코티시 등)에서 온다. 5대 리그만
- * 있는 지금 36팀을 채우면 96클럽의 1/3이 UCL에 나가는 비현실이 된다. 그래서
- * **5대 리그 배정분만** 참가한다 (UCL 24 · UEL 16 · UECL 10 = 50클럽).
- * 하위 리그를 추가하면 아약스·벤피카·셀틱 같은 실제 참가 팀으로 36팀을 채운다.
+ * **정원의 절반 남짓은 2부가 선다.** 실제 UCL 36팀 중 12팀은 우리가 모델링하지 않은
+ * 리그(에레디비시·프리메이라·스코티시 등)에서 온다. 그 몫을 5대 리그 1부에 얹으면
+ * 96클럽의 1/3이 UCL에 나가는 비현실이 되므로, **1부 티켓은 실제 배정분 그대로 두고
+ * 남는 자리를 2부 64클럽 풀이 채운다** — 그 클럽들이 "모델 밖 유럽"을 대신 서는
+ * 자리다 (UCL 36 · UEL 24 · UECL 24 = 84클럽, 그중 2부가 34).
+ * 하위 리그를 추가하면 아약스·벤피카·셀틱 같은 실제 참가 팀이 그 자리에 들어선다
+ * (competition.md §4).
  */
 import type { MatchStage } from "@story-fm/domain";
 import { domesticCupById, domesticStageLabel, isDomesticCup } from "./domestic-cup-catalog";
+import { isSuperCup, superCupById } from "./super-cup-catalog";
 import { leagueName } from "./league-catalog";
 import { catalogSource } from "./catalog-source";
 import { readCupOverride } from "./cup-override";
@@ -30,6 +33,11 @@ export interface CupCatalogEntry {
   /**
    * 리그별 티켓 수 — 도메스틱 최종 순위 상위부터 배정한다.
    * UCL 5장(잉글랜드·스페인·이탈리아·독일) + 4장(프랑스)은 실제 배정과 같다.
+   *
+   * **2부 리그에도 티켓이 있다** — 우리가 모델링하지 않은 유럽 리그의 몫이다. 2부는
+   * 리그전을 돌지 않아 지난 시즌 표가 없으므로, 첫 시즌과 같은 규칙(체급 + 시드)이
+   * 매 시즌 새로 줄을 세운다 (`rankedTeams` — europe.ts). 그래서 나가는 클럽이
+   * 해마다 조금씩 바뀐다. 계수가 강한 리그가 UCL 자리를 더 갖는다.
    */
   slots: Record<string, number>;
   /**
@@ -37,8 +45,8 @@ export interface CupCatalogEntry {
    * 플레이오프(2차전제)를 거친다. 나머지는 탈락이다.
    *
    * 본선 대진 수는 `directSlots + playoffSlots / 2`이고 **2의 거듭제곱**이어야
-   * 한다 (테스트로 고정). 실제 UCL은 36팀 = 8직행 + 16플레이오프 + 12탈락이고,
-   * 우리는 5대 리그 배정분만 참가하므로 24 = 8 + 16 + 0이다.
+   * 한다 (테스트로 고정). UCL은 실제 그대로 36 = 8직행 + 16플레이오프 + 12탈락이고,
+   * 24팀인 UEL·UECL은 4 + 8 + 12탈락이라 **리그 페이즈에서 절반이 떨어진다**.
    */
   directSlots: number;
   playoffSlots: number;
@@ -68,9 +76,21 @@ export const CUP_CATALOG_SEED: readonly CupCatalogEntry[] = [
     id: "ucl",
     name: "UEFA 챔피언스리그",
     short: "UCL",
-    size: 24,
+    size: 36,
     matchesPerTeam: 8,
-    slots: { epl: 5, laliga: 5, seriea: 5, bundesliga: 5, ligue1: 4 },
+    slots: {
+      epl: 5,
+      laliga: 5,
+      seriea: 5,
+      bundesliga: 5,
+      ligue1: 4,
+      // 모델 밖 유럽의 몫 — 계수가 강한 리그가 더 갖는다 (합 12)
+      championship: 3,
+      segunda: 3,
+      serieb: 2,
+      bundesliga2: 2,
+      ligue2: 2,
+    },
     directSlots: 8,
     playoffSlots: 16,
     prize: {
@@ -91,9 +111,21 @@ export const CUP_CATALOG_SEED: readonly CupCatalogEntry[] = [
     id: "uel",
     name: "UEFA 유로파리그",
     short: "UEL",
-    size: 16,
-    matchesPerTeam: 6,
-    slots: { epl: 4, laliga: 3, seriea: 3, bundesliga: 3, ligue1: 3 },
+    size: 24,
+    matchesPerTeam: 8,
+    slots: {
+      epl: 4,
+      laliga: 3,
+      seriea: 3,
+      bundesliga: 3,
+      ligue1: 3,
+      // 모델 밖 유럽의 몫 (합 8)
+      championship: 2,
+      segunda: 2,
+      serieb: 2,
+      bundesliga2: 1,
+      ligue2: 1,
+    },
     directSlots: 4,
     playoffSlots: 8,
     prize: {
@@ -108,11 +140,23 @@ export const CUP_CATALOG_SEED: readonly CupCatalogEntry[] = [
     id: "uecl",
     name: "UEFA 컨퍼런스리그",
     short: "UECL",
-    size: 10,
+    size: 24,
     matchesPerTeam: 6,
-    slots: { epl: 2, laliga: 2, seriea: 2, bundesliga: 2, ligue1: 2 },
-    directSlots: 2,
-    playoffSlots: 4,
+    slots: {
+      epl: 2,
+      laliga: 2,
+      seriea: 2,
+      bundesliga: 2,
+      ligue1: 2,
+      // 모델 밖 유럽의 몫 — 가장 작은 대회라 2부가 절반을 넘는다 (합 14)
+      championship: 3,
+      segunda: 3,
+      serieb: 3,
+      bundesliga2: 3,
+      ligue2: 2,
+    },
+    directSlots: 4,
+    playoffSlots: 8,
     prize: {
       participation: 2_000_000,
       win: 300_000,
@@ -160,9 +204,12 @@ export function isEuroCup(competitionId: string | null): boolean {
   return competitionId !== null && byId().has(competitionId);
 }
 
-/** 컵인가 (유럽 대항전 + 국내 컵) — "리그가 아니다"를 물을 때 쓴다. 친선은 컵도 아니다 */
+/** 컵인가 (유럽 대항전 + 국내 컵 + 슈퍼컵) — "리그가 아니다"를 물을 때 쓴다. 친선은 컵도 아니다 */
 export function isCup(competitionId: string | null): boolean {
-  return competitionId !== null && (byId().has(competitionId) || isDomesticCup(competitionId));
+  return (
+    competitionId !== null &&
+    (byId().has(competitionId) || isDomesticCup(competitionId) || isSuperCup(competitionId))
+  );
 }
 
 /** 대회 표시명 — 리그든 컵이든 competitionId 하나로 이름을 얻는다 */
@@ -171,6 +218,7 @@ export function competitionName(competitionId: string | null): string {
   return (
     byId().get(competitionId)?.name ??
     domesticCupById(competitionId)?.name ??
+    superCupById(competitionId)?.name ??
     leagueName(competitionId)
   );
 }
@@ -180,6 +228,7 @@ export function competitionShortName(competitionId: string | null): string {
   return (
     byId().get(competitionId)?.short ??
     domesticCupById(competitionId)?.short ??
+    superCupById(competitionId)?.short ??
     leagueName(competitionId)
   );
 }
@@ -191,7 +240,7 @@ export function knockoutBracketSize(cup: CupCatalogEntry): number {
 
 /**
  * 이 대회가 치르는 단계 순서 — 플레이오프부터 결승까지.
- * 본선 대진 수가 대회 규모마다 달라서(UCL 16 · UEL 8 · UECL 4) 시작 단계도 다르다.
+ * 본선 대진 수가 대회 규모마다 달라서(UCL 16 · UEL·UECL 8) 시작 단계도 다르다.
  */
 export function knockoutStages(cup: CupCatalogEntry): MatchStage[] {
   const bracket = knockoutBracketSize(cup);
@@ -232,6 +281,8 @@ export function competitionStageLabel(
 ): string {
   // 친선엔 단계가 없다 — 이름(`competitionShortName`)만으로 다 말한 경기다
   if (competitionId === null) return "";
+  // 슈퍼컵도 마찬가지다 — 대회 하나가 경기 하나라 "결승"을 붙일 자리가 없다
+  if (isSuperCup(competitionId)) return "";
   const domestic = domesticCupById(competitionId);
   if (domestic) {
     return domesticStageLabel(domestic, stage, round, domestic.twoLegged.includes(stage));
@@ -273,7 +324,7 @@ export function fixtureLabel(competitionId: string | null, stage: MatchStage, ro
 }
 
 export function competitionStageName(competitionId: string | null, stage: MatchStage): string {
-  if (competitionId === null) return "";
+  if (competitionId === null || isSuperCup(competitionId)) return "";
   const domestic = domesticCupById(competitionId);
   return domestic ? domesticStageLabel(domestic, stage) : stageLabel(stage, 1, false);
 }

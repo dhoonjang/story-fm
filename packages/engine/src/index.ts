@@ -22,6 +22,7 @@ export * from "./data/owner-seeds";
 export * from "./data/league-catalog";
 export * from "./data/cup-catalog";
 export * from "./data/domestic-cup-catalog";
+export * from "./data/super-cup-catalog";
 export * from "./data/club-profile";
 export * from "./data/pseudonym";
 export * from "./data/league-economy";
@@ -61,6 +62,7 @@ export * from "./competition/extra-time";
 export * from "./competition/promotion";
 export * from "./competition/club-tier-recompute";
 export * from "./competition/domestic-cup";
+export * from "./competition/super-cup";
 export * from "./competition/draw-schedule";
 export * from "./competition/reschedule";
 

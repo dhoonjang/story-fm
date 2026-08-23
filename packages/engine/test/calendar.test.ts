@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   addDays,
+  buildEuroEntrants,
   buildMatches,
   buildMatchweekDates,
   buildScheduleEntries,
   buildOfficeViews,
   buildSeasonCalendar,
+  buildSeasonFixtures,
   buildTransferWindows,
   clashesToClear,
   clearForCup,
@@ -13,15 +15,24 @@ import {
   diffDays,
   cupBlankWeekend,
   domesticCupCatalog,
+  isReserveMatch,
+  isSuperCup,
   restHours,
   seasonDate,
   squadReturnOf,
   stageTarget,
   stageTieTarget,
   teamsOfLeague,
+  superCupChampion,
+  superCupMatch,
+  topLeagueOfCountry,
+  topLeagues,
   DOMESTIC_CUP_SIZE,
   FRIENDLY_ROUNDS,
+  HARD_MIN_REST_HOURS,
   MIN_REST_HOURS,
+  SUPER_CUP_CATALOG,
+  type SuperCupSource,
   advanceTime,
   allMatchesDone,
   domesticChampion,
@@ -502,6 +513,99 @@ describe("메이저 컵 진입 라운드는 달력이 비운 주말에 앉는다
   });
 });
 
+/**
+ * **대회 규모를 키울 때 가장 먼저 깨지는 자리다.**
+ *
+ * 한 팀이 같은 날 두 경기에 서면 그 중 하나는 영영 소화되지 않고, 시즌 종료 판정이
+ * 그 경기를 기다리다 달력만 흐른다 — 게임 소프트락이다. 리그 페이즈 정원(UCL 36 ·
+ * UEL·UECL 24)과 슈퍼컵 두 수요일이 이 검사를 통과한 만큼이다
+ * ([competition.md](../../../docs/data/competition.md) §4·§4-1).
+ *
+ * 여기서 재는 것은 **시즌 시작에 이미 서 있는 편성**이다 — 친선·슈퍼컵·리그·대항전
+ * 리그 페이즈. 나중에 편성되는 녹아웃과 국내 컵 라운드는 예약된 날짜를 쓰고, 그것이
+ * 실제로 끝까지 가는지는 아래 "두 시즌을 이어 돌려도 컵이 끝난다"가 본다.
+ */
+describe("한 시즌 편성에 달력 충돌이 없다", () => {
+  /** 지난 시즌이 남긴 우승자 — 규모만 재는 자리라 카탈로그로 세운다 */
+  const superCups = (): SuperCupSource => {
+    const ranked = Object.fromEntries(
+      topLeagues().map((l) => [l.id, teamsOfLeague(l.id).map((t) => t.id)]),
+    );
+    return {
+      leagueTables: ranked,
+      // 컵 우승은 리그 우승과 갈라 둔다 — 더블이면 슈퍼컵이 한 경기 줄어 검사가 헐거워진다
+      domesticChampions: Object.fromEntries(
+        domesticCupCatalog().map((c) => [
+          c.id,
+          ranked[topLeagueOfCountry(c.country) ?? ""]?.[1] ?? "",
+        ]),
+      ),
+      // UCL 우승팀이 자기 리그 우승팀이기도 한 경우 — 한 클럽이 슈퍼컵 둘에 선다
+      euroChampions: { ucl: ranked.epl![0]!, uel: ranked.laliga![1]! },
+    };
+  };
+
+  for (const season of [1, 2, 3, 4]) {
+    const matches = buildSeasonFixtures(
+      season,
+      7,
+      buildEuroEntrants(season, 7),
+      undefined,
+      undefined,
+      undefined,
+      superCups(),
+      // 2군 경기는 1군과 다른 명단이라 같은 날에 서도 충돌이 아니다
+    ).filter((m) => !isReserveMatch(m));
+
+    const byTeam = new Map<string, MatchRecord[]>();
+    for (const m of matches) {
+      for (const teamId of [m.homeTeamId, m.awayTeamId]) {
+        const list = byTeam.get(teamId) ?? [];
+        list.push(m);
+        byTeam.set(teamId, list);
+      }
+    }
+    for (const list of byTeam.values()) {
+      list.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    }
+
+    it(`시즌 ${season} — 한 팀이 하루에 두 경기를 뛰지 않는다`, () => {
+      const clashes: string[] = [];
+      for (const [teamId, list] of byTeam) {
+        for (let i = 1; i < list.length; i++) {
+          if (list[i]!.date === list[i - 1]!.date) {
+            clashes.push(`${teamId} ${list[i]!.date}: ${list[i - 1]!.id} + ${list[i]!.id}`);
+          }
+        }
+      }
+      expect(clashes).toEqual([]);
+    });
+
+    it(`시즌 ${season} — 연속 두 경기 사이가 ${HARD_MIN_REST_HOURS}시간을 밑돌지 않는다`, () => {
+      const tight: string[] = [];
+      for (const [teamId, list] of byTeam) {
+        for (let i = 1; i < list.length; i++) {
+          const gap = restHours(list[i - 1]!, list[i]!);
+          if (gap < HARD_MIN_REST_HOURS) tight.push(`${teamId} ${list[i]!.id}: ${gap}h`);
+        }
+      }
+      expect(tight).toEqual([]);
+    });
+
+    it(`시즌 ${season} — 슈퍼컵 여섯이 개막 전 서로 다른 두 수요일에 선다`, () => {
+      const cups = matches.filter((m) => isSuperCup(m.competitionId));
+      expect(cups).toHaveLength(SUPER_CUP_CATALOG.length);
+      const opener = buildSeasonCalendar(season).start;
+      const dates = new Set(cups.map((m) => m.date));
+      expect(dates.size, [...dates].join(" ")).toBe(2);
+      for (const date of dates) {
+        expect(dayOfWeek(date), date).toBe(3);
+        expect(date < opener, `${date} — 개막 ${opener}`).toBe(true);
+      }
+    });
+  }
+});
+
 describe("두 시즌을 이어 돌려도 컵이 끝난다", () => {
   /**
    * 시즌 1만 보면 안 드러난다 — 2027년엔 쿠프 결승 5/22가 토요일이라 제자리에
@@ -553,6 +657,20 @@ describe("두 시즌을 이어 돌려도 컵이 끝난다", () => {
       const final = domesticStageMatches(state, cup.id, "final")[0];
       expect(final, `${cup.id} 결승 없음`).toBeTruthy();
       expect(finalWeekdays(cup), `${cup.id} 결승 ${final!.date}`).toContain(dayOf(final!.date));
+    }
+  });
+
+  /**
+   * 첫 시즌엔 지난 시즌이 없어 슈퍼컵도 없다 — 시즌 2의 프리시즌이 첫 자리다.
+   * 우승 팀까지 봐야 하는 이유: 무승부로 끝난 슈퍼컵의 승부를 아무도 가리지 않으면
+   * 그 대회는 우승자 없이 지나간다 (`advanceSuperCups`).
+   */
+  it("슈퍼컵은 시즌 2 프리시즌에 서고 전부 우승 팀을 낸다", () => {
+    for (const cup of SUPER_CUP_CATALOG) {
+      const match = superCupMatch(state, cup.id);
+      expect(match, `${cup.id} 경기 없음`).toBeTruthy();
+      expect(match!.date < state.calendar.start, `${cup.id} ${match!.date}`).toBe(true);
+      expect(superCupChampion(state, cup.id), `${cup.id} 우승 팀 없음`).toBeTruthy();
     }
   });
 });

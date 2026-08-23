@@ -459,20 +459,24 @@ describe("실제 대회 규정을 따른다", () => {
  * **1부는 1라운드에 나오지 않는다.**
  *
  * 실제 컵은 하부리그가 먼저 몇 달을 싸우고 1부는 한참 뒤에 들어온다. 우리는
- * 그 앞부분을 모델링하지 않으므로 **1부가 들어오는 라운드에서 대회를 시작한다** —
- * 아스날의 리그컵 첫 경기는 9월 말 3라운드이지 8월 1라운드가 아니다.
+ * 그 앞부분을 모델링하지 않으므로 **1부가 들어오는 라운드의 날짜에서 대회를
+ * 시작한다** — 아스날의 리그컵 첫 경기는 9월 말이지 8월이 아니다.
+ *
+ * **이름은 32클럽이 실제로 서는 라운드의 것**이다 (competition.md §3.1). 진입
+ * 라운드가 64팀인 FA컵·포칼만 한 칸 뒤의 이름이라, FA컵은 4라운드·포칼은
+ * 2라운드로 연다 — 진입 라운드 이름을 쓰면 FA컵에 5라운드가, 포칼에 16강이 없다.
  */
 describe("컵은 1부가 들어오는 라운드에서 시작한다", () => {
   const ENTRY = {
-    facup: { label: "3라운드", month: 1 },
+    facup: { label: "4라운드", month: 1 },
     eflcup: { label: "3라운드", month: 9 },
     copadelrey: { label: "32강", month: 1 },
     coppaitalia: { label: "1라운드", month: 8 },
-    dfbpokal: { label: "1라운드", month: 8 },
+    dfbpokal: { label: "2라운드", month: 8 },
     coupedefrance: { label: "32강", month: 1 },
   } as const;
 
-  it("첫 라운드 이름이 실제 진입 라운드다 — 리그컵·FA컵은 3라운드", () => {
+  it("첫 라운드 이름은 32클럽이 서는 라운드다 — FA컵 4라운드·포칼 2라운드", () => {
     for (const cup of domesticCupCatalog()) {
       const expected = ENTRY[cup.id as keyof typeof ENTRY];
       expect(competitionStageLabel(cup.id, "r32"), cup.id).toBe(expected.label);
