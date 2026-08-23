@@ -1252,15 +1252,8 @@ export const FAMILIARITY_TIERS = [
   { key: "alien", min: 0, ko: "생소" },
 ] as const;
 
-export type FamiliarityTier = (typeof FAMILIARITY_TIERS)[number]["key"];
-
 const familiarityTierOf = (value: number) =>
   FAMILIARITY_TIERS.find((t) => value >= t.min) ?? FAMILIARITY_TIERS[FAMILIARITY_TIERS.length - 1]!;
-
-/** 팀 적응 구간 키 — 화면이 색을 고르는 자리 */
-export function familiarityTier(value: number): FamiliarityTier {
-  return familiarityTierOf(value).key;
-}
 
 /** 팀 평균 전술 적응을 말로 — LLM 입력이 읽는 유일한 형태 */
 export function familiarityLabel(value: number): string {

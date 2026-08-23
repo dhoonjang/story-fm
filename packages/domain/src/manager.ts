@@ -84,15 +84,8 @@ export const REPUTATION_TIERS = [
   { key: "lost", min: 0, ko: { board: "등돌림", media: "뭇매", squad: "불신" } },
 ] as const;
 
-export type ReputationTier = (typeof REPUTATION_TIERS)[number]["key"];
-
 const reputationTierOf = (value: number) =>
   REPUTATION_TIERS.find((t) => value >= t.min) ?? REPUTATION_TIERS[REPUTATION_TIERS.length - 1]!;
-
-/** 평판 구간 키 — 화면이 색을 고르는 자리 */
-export function reputationTier(value: number): ReputationTier {
-  return reputationTierOf(value).key;
-}
 
 /** 그 축의 평판을 말로 — LLM 입력이 읽는 유일한 형태 */
 export function reputationLabel(axis: keyof ManagerReputation, value: number): string {
@@ -125,16 +118,9 @@ export const MANAGER_SKILL_TIERS = [
   { key: "weak", min: 0, ko: "약점" },
 ] as const;
 
-export type ManagerSkillTier = (typeof MANAGER_SKILL_TIERS)[number]["key"];
-
 const managerSkillTierOf = (value: number) =>
   MANAGER_SKILL_TIERS.find((t) => value >= t.min) ??
   MANAGER_SKILL_TIERS[MANAGER_SKILL_TIERS.length - 1]!;
-
-/** 감독 능력 구간 키 — 화면이 색을 고르는 자리 */
-export function managerSkillTier(value: number): ManagerSkillTier {
-  return managerSkillTierOf(value).key;
-}
 
 /** 감독 능력 한 축을 말로 */
 export function managerSkillLabel(value: number): string {
