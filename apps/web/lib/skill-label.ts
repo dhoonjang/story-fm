@@ -32,6 +32,7 @@ export const SKILL_LABEL: Record<string, string> = {
   apply_finance_event: "재정 이벤트",
   adjust_transfer_budget: "이적 예산 조정",
   request_board: "보드에 요청",
+  set_ticket_price: "티켓 가격",
   search_players: "선수 검색",
   get_squad: "스쿼드·라인업 조회",
   get_team: "팀 조회",

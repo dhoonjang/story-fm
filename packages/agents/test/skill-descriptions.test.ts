@@ -72,10 +72,10 @@ describe("스킬 설명 — 코드가 유일한 원본이다", () => {
       "대화·서사": 5,
       경기: 1,
       이적: 12,
-      재정: 3,
+      재정: 4,
       조회: 7,
     });
-    expect(SKILL_CATALOG.length).toBe(41);
+    expect(SKILL_CATALOG.length).toBe(42);
     expect(SKILL_CATALOG.filter((s) => s.readOnly).length).toBe(8);
   });
 });
@@ -102,7 +102,7 @@ describe("규칙이 사는 자리", () => {
 
   /**
    * 설명은 고정층에 매 턴 실린다 — 길이 예산이 없으면 규칙 하나를 지울 때마다 설명
-   * 두 줄이 붙어도 아무 데서도 드러나지 않는다. 상한은 지금 총량(≈8,340자)에 한 도구
+   * 두 줄이 붙어도 아무 데서도 드러나지 않는다. 상한은 지금 총량(≈8,800자)에 한 도구
    * 몫의 여유를 얹은 값이다 — **도구가 늘 때만** 그만큼 올린다.
    */
   it("설명은 길이 예산 안에 있다", () => {
@@ -110,7 +110,7 @@ describe("규칙이 사는 자리", () => {
     for (const skill of SKILL_CATALOG) {
       expect(skill.description.length, skill.name).toBeLessThanOrEqual(600);
     }
-    expect(total).toBeLessThanOrEqual(8_700);
+    expect(total).toBeLessThanOrEqual(9_150);
   });
 
   /**

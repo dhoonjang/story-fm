@@ -10,7 +10,7 @@ import {
 } from "../core/state";
 import { addDays, diffDays, seasonYear } from "../core/dates";
 import { USER_WAGE_HEADROOM, clubWageBudget, wageRoomOf } from "../world/wages";
-import { formatMoney, recordFinance, seasonWageRatio } from "./finance";
+import { formatMoney, recordCapitalAsset, seasonWageRatio, STADIUM_ASSET_MONTHS } from "./finance";
 import { item } from "../skills/brief";
 import type { SkillResult } from "../skills";
 
@@ -277,11 +277,16 @@ function apply(state: GameState, request: BoardRequest, granted: number): void {
       };
       return;
     case "stadium": {
-      recordFinance(state, teamId, {
-        kind: "expense",
-        category: "facility",
-        label: `구장 증설 공사 (${granted.toLocaleString("en-US")}석)`,
-        amount: granted * BOARD_REQUEST.SEAT_COST,
+      /**
+       * 공사비는 **자본 지출**이다 — 현금은 오늘 나가지만 손익은 내용연수에 나눠 문다
+       * (finance.md §6.1-1). 착공 달 하나가 PSR을 통째로 먹으면 그다음 아홉 시즌은
+       * 좌석을 공짜로 쓰는 셈이 된다.
+       */
+      recordCapitalAsset(state, teamId, {
+        id: `asset-${request.id}`,
+        label: `구장 증설 (${granted.toLocaleString("en-US")}석)`,
+        cost: granted * BOARD_REQUEST.SEAT_COST,
+        months: STADIUM_ASSET_MONTHS,
       });
       request.deliversOn = addDays(state.date, BOARD_REQUEST.BUILD_DAYS);
       return;
