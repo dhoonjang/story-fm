@@ -3,6 +3,7 @@
  * 대화 이력 창. 입력은 변경 빈도 순 3층이다 (docs/llm/agents.md).
  */
 import {
+  awardLine,
   characterEntry,
   characterEntryOf,
   clockOf,
@@ -22,11 +23,14 @@ import {
   headCoachOf,
   historyStart,
   isSuspended,
+  leagueOfTeamIn,
   managedTeamId,
   MAX_EXPLOITS,
+  onSummerBreak,
   openInjury,
   openManagerOffers,
   pendingVerdicts,
+  playerById,
   playerName,
   scoutingSummary,
   scoutReportLine,
@@ -44,6 +48,7 @@ import {
   type ScenePoint,
 } from "@story-fm/engine";
 import {
+  ageOf,
   formatMoney,
   matchupText,
   normalizePacket,
@@ -357,6 +362,69 @@ function buildUnemployedNote(state: GameState, passed?: TimePassed | null): stri
   return lines.join("\n");
 }
 
+/**
+ * 우리 팀 은퇴 — **이번 오프시즌의 원장 줄**만이다. 전환이 은퇴를 다음 시즌
+ * 프리시즌 시작일로 남기므로 날짜가 그 하루와 같은 줄이 방금 끝난 시즌의 은퇴다.
+ *
+ * ⚠️ 은퇴하면 선수는 `state.players`에서 빠진다 — 이름이 없으면 그 줄을 세우지
+ * 않는다. id를 이름 자리에 흘리면 GM이 그것을 사람 이름으로 읽고 장면에 적는다.
+ */
+function retirementFacts(state: GameState): string[] {
+  return state.transfers
+    .filter(
+      (t) =>
+        t.type === "retire" &&
+        t.fromTeamId === state.userTeamId &&
+        t.date === state.calendar.preseasonStart,
+    )
+    .map((t) => {
+      const player = playerById(state, t.gamePlayerId);
+      if (!player) return null;
+      // 우리 팀에서의 기록 — 시즌 기록은 팀별로 갈려 있어 우리 팀 행만 합산한다
+      const ours = state.seasonStats.filter(
+        (s) => s.gamePlayerId === t.gamePlayerId && s.teamId === state.userTeamId,
+      );
+      const apps = ours.reduce((sum, s) => sum + s.apps, 0);
+      const goals = ours.reduce((sum, s) => sum + s.goals, 0);
+      return `은퇴: ${player.name} ${ageOf(player.birthdate, t.date)}세 · 우리 팀에서 ${apps}경기 ${goals}골`;
+    })
+    .filter((x): x is string => x !== null);
+}
+
+/**
+ * 방금 끝난 시즌의 시상 중 **우리 리그**의 것 — 우리 선수든 남의 선수든 함께
+ * 싣고, 어느 쪽인가는 팀 이름이 말한다.
+ *
+ * 줄은 코어가 이미 갖고 있는 것을 쓴다(`awardLine` — 시즌 리뷰의 다이제스트가 쓰는
+ * 그 줄이다). 여기서 다시 쓰면 같은 상이 다이제스트와 스냅샷에 다른 문장으로 선다.
+ */
+function awardFacts(state: GameState): string[] {
+  const ourLeague = leagueOfTeamIn(state, state.userTeamId);
+  return (state.awards ?? [])
+    .filter((a) => a.season === state.season - 1 && a.leagueId === ourLeague)
+    .map((a) => awardLine(a));
+}
+
+/**
+ * 오프시즌 사실 블록 — **선수단 소집 전에만** 선다 (season.md §6 오프시즌).
+ * 소집일이 지나면 사라진다: 오프시즌의 자리는 오프시즌에 있다.
+ *
+ * 전환은 `season++` 뒤 다음 시즌 7월 1일로 건너뛰므로, 여기 서는 시상은 지금
+ * 시즌이 아니라 **방금 끝난 시즌**(`state.season - 1`)의 것이다.
+ *
+ * ⚠️ 물음표도 평가어도 없는 장부 줄이다 — 회견의 `PressFact`와 같은 결이다
+ * (people.md §4). 코어는 사실만 낸다: 은퇴식을 어떻게 열지, 상을 누가 어떤 말로
+ * 전할지는 GM의 몫이다. 사실이 하나도 없으면 블록을 세우지 않는다.
+ */
+function offseasonFacts(state: GameState): string | null {
+  if (!onSummerBreak(state.calendar, state.date)) return null;
+  const facts = [...retirementFacts(state), ...awardFacts(state)];
+  if (facts.length === 0) return null;
+  return `오프시즌 사실 (지난 시즌이 닫히며 남은 것 — 자리를 어떻게 열지, 누가 무슨 말을 하는지는 네가 정한다):\n${facts
+    .map((f) => `- ${f}`)
+    .join("\n")}`;
+}
+
 export function buildGmStateNote(
   state: GameState,
   passed?: TimePassed | null,
@@ -463,6 +531,8 @@ export function buildGmStateNote(
         : null;
     })(),
     matchDigest(state),
+    // 오프시즌 — 은퇴와 시상. 소집 전에만 서고, 없으면 한 줄도 쓰지 않는다
+    offseasonFacts(state),
   ].filter((x): x is string => x !== null && x !== "");
   // 그 사이 벌어진 일 — 손잡이로 시간을 넘긴 턴에만. 없으면 모델이 넘긴 구간의
   // 일(부상·오퍼)을 모른 채 장면을 쓴다
