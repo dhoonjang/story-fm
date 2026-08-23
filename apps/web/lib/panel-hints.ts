@@ -35,6 +35,7 @@ export const PANEL_OF: Record<string, PanelKey> = {
   set_transfer_list: "스쿼드",
   release_player: "스쿼드",
   recall_loan: "스쿼드",
+  exercise_buyback: "스쿼드",
   accept_deal: "스쿼드",
   apply_narrative_event: "스쿼드",
   // 대화형 — 바뀌는 것은 사기·심경이고 그건 명단이 보여준다

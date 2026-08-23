@@ -40,6 +40,7 @@ import {
   playerCard,
   playerName,
   recallLoan,
+  exerciseBuyBack,
   releasePlayer,
   respondToApproach,
   respondToMedia,
@@ -877,6 +878,12 @@ export function buildGmTools(
     ),
     wrap("recall_loan", descriptions.recall_loan, z.object({ playerId: playerRef }), (input) =>
       recallLoan(state, input),
+    ),
+    wrap(
+      "exercise_buyback",
+      descriptions.exercise_buyback,
+      z.object({ playerId: playerRef }),
+      (input) => exerciseBuyBack(state, input),
     ),
 
     wrap(

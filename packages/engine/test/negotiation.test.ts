@@ -13,10 +13,12 @@ import {
   describeNegotiations,
   expireNegotiations,
   expiringContracts,
+  exerciseBuyBack,
   financeOf,
   generateIncomingOffers,
   incomingOffer,
   incomingOffers,
+  isClubTeam,
   marketValueOf,
   loanPlayer,
   LOAN_FEE_RATE,
@@ -27,6 +29,7 @@ import {
   openNegotiationFor,
   openRelease,
   openRenewal,
+  ourBuyBackRights,
   pendingOffer,
   pendingVerdicts,
   playerById,
@@ -49,7 +52,20 @@ import {
   weeklyWagesOf,
   withdrawOffer,
 } from "@story-fm/engine";
-import { isPlayerDeal, type MarketCard, type Negotiation } from "@story-fm/domain";
+import {
+  BUYBACK_MARKUP,
+  BUYBACK_MAX_AGE,
+  CLAUSE_MAX_AGE,
+  SELL_ON_MAX_RATE,
+  SELL_ON_MIN_RATE,
+  SELL_ON_PEAK_AGE,
+  clausesForSale,
+  isPlayerDeal,
+  sellOnAmountOf,
+  sellOnRateForAge,
+  type MarketCard,
+  type Negotiation,
+} from "@story-fm/domain";
 import { completeDeal, createTestGame } from "./helpers";
 
 /**
@@ -2062,5 +2078,158 @@ describe("방향은 모든 줄에 실린다", () => {
     for (const c of cases) {
       expect(labels.get(c.id), c.id).toContain(c.want);
     }
+  });
+});
+
+describe("조건부 조항 — 딜의 모양이 붙이고, 되사기는 흥정이 아니다", () => {
+  const AUGUST = "2026-08-10";
+
+  it("붙는 문은 이적료와 나이다", () => {
+    // 무상·자유계약엔 붙을 미래가 없다
+    expect(clausesForSale({ age: 19, fee: 0, date: AUGUST })).toBeUndefined();
+    // 나이 위 끝을 넘으면 아무것도 붙지 않는다
+    expect(
+      clausesForSale({ age: CLAUSE_MAX_AGE + 1, fee: 10_000_000, date: AUGUST }),
+    ).toBeUndefined();
+    // 위 끝 그 자리엔 셀온만 — 되사기는 더 좁다
+    const edge = clausesForSale({ age: CLAUSE_MAX_AGE, fee: 10_000_000, date: AUGUST })!;
+    expect(edge.sellOn?.rate).toBe(SELL_ON_MIN_RATE);
+    expect(edge.buyBack).toBeUndefined();
+    const young = clausesForSale({ age: BUYBACK_MAX_AGE, fee: 10_000_000, date: AUGUST })!;
+    expect(young.buyBack).toEqual({
+      fee: 10_000_000 * BUYBACK_MARKUP,
+      until: "2028-08-10",
+      exercisedOn: null,
+    });
+  });
+
+  it("셀온 비율은 나이를 따라 단조 증가하고 밴드 밖으로 나가지 않는다", () => {
+    expect(sellOnRateForAge(CLAUSE_MAX_AGE)).toBe(SELL_ON_MIN_RATE);
+    expect(sellOnRateForAge(SELL_ON_PEAK_AGE)).toBe(SELL_ON_MAX_RATE);
+    // 최대가 서는 나이 아래로는 더 오르지 않는다
+    expect(sellOnRateForAge(SELL_ON_PEAK_AGE - 4)).toBe(SELL_ON_MAX_RATE);
+    expect(sellOnRateForAge(CLAUSE_MAX_AGE + 5)).toBe(SELL_ON_MIN_RATE);
+    const band = [17, 18, 19, 20, 21, 22, 23].map(sellOnRateForAge);
+    for (let i = 1; i < band.length; i += 1) expect(band[i]).toBeLessThan(band[i - 1]!);
+  });
+
+  it("셀온은 이익에만 붙는다", () => {
+    expect(sellOnAmountOf({ originalFee: 10_000_000, resaleFee: 30_000_000, rate: 0.2 })).toBe(
+      4_000_000,
+    );
+    // 같은 값에 팔거나 손해를 봤으면 £0 — 총액에 붙이면 손해 본 구단이 더 문다
+    expect(sellOnAmountOf({ originalFee: 10_000_000, resaleFee: 10_000_000, rate: 0.2 })).toBe(0);
+    expect(sellOnAmountOf({ originalFee: 10_000_000, resaleFee: 4_000_000, rate: 0.2 })).toBe(0);
+  });
+
+  it("실제 매각 경로가 원장에 조항을 얹는다 — 나이가 문이다", () => {
+    const state = createTestGame(42);
+    const { negotiation } = waitForIncoming(state);
+    const offer = incomingOffer(negotiation!)!;
+    const player = playerById(state, negotiation!.gamePlayerId)!;
+    // 스무 살로 맞춘다 — 조항이 붙는 자리는 나이가 정한다
+    player.birthdate = `${Number(state.date.slice(0, 4)) - 20}-01-01`;
+    offer.fee = 12_000_000;
+    offer.verdict = "accept";
+    negotiation!.status = "agreed";
+    negotiation!.medical = { onDate: state.date, status: "passed" };
+    financeOf(state, negotiation!.counterpartTeamId!).transferBudget = 100_000_000;
+
+    expect(acceptDeal(state, negotiation!.id).ok).toBe(true);
+    const transfer = state.transfers.find((t) => t.gamePlayerId === player.id)!;
+    expect(transfer.clauses?.sellOn?.rate).toBe(sellOnRateForAge(20));
+    expect(transfer.clauses?.sellOn?.settledOn).toBe(null);
+    // 스물하나 아래라 되사기도 함께 선다
+    expect(transfer.clauses?.buyBack?.fee).toBe(12_000_000 * BUYBACK_MARKUP);
+    expect(ourBuyBackRights(state).map((r) => r.player.id)).toEqual([player.id]);
+  });
+
+  /**
+   * 우리가 판 어린 선수 하나를 상대 구단에 앉히고 되사기를 걸어 둔다 —
+   * 매각 협상을 다 굴리지 않고 **행사만** 본다.
+   */
+  function soldWithBuyBack(state: GameState, input: { fee: number; until: string }) {
+    const player = playersOf(state, state.userTeamId).find((p) => !p.loan)!;
+    const buyer = state.finances.find(
+      (f) => f.teamId !== state.userTeamId && isClubTeam(f.teamId),
+    )!.teamId;
+    const contract = activeContract(state, player.id)!;
+    contract.status = "ended";
+    state.contracts.push({
+      id: `c-seed-${player.id}`,
+      gamePlayerId: player.id,
+      teamId: buyer,
+      weeklyWage: contract.weeklyWage,
+      since: state.date,
+      until: contractUntil(state.date, 4),
+      status: "active",
+    });
+    player.teamId = buyer;
+    state.transfers.push({
+      id: `tr-seed-${player.id}`,
+      gamePlayerId: player.id,
+      windowId: null,
+      fromTeamId: state.userTeamId,
+      toTeamId: buyer,
+      date: state.date,
+      type: "transfer",
+      fee: Math.round(input.fee / BUYBACK_MARKUP),
+      clauses: { buyBack: { fee: input.fee, until: input.until, exercisedOn: null } },
+    });
+    return { player, buyer };
+  }
+
+  const FEE = 8_000_000;
+
+  it("권리를 쓰면 선수가 그 자리에서 돌아오고 돈은 양쪽에 대칭으로 선다", () => {
+    const state = createTestGame();
+    const { player, buyer } = soldWithBuyBack(state, { fee: FEE, until: "2028-06-30" });
+    financeOf(state, state.userTeamId).transferBudget = FEE * 2;
+    const before = {
+      us: { ...financeOf(state, state.userTeamId) },
+      them: { ...financeOf(state, buyer) },
+    };
+    expect(ourBuyBackRights(state).map((r) => r.player.id)).toEqual([player.id]);
+
+    const done = exerciseBuyBack(state, { playerId: player.id });
+    expect(done.ok).toBe(true);
+    expect(playerById(state, player.id)!.teamId).toBe(state.userTeamId);
+    expect(activeContract(state, player.id)!.teamId).toBe(state.userTeamId);
+    // 조항 값만 오간다 — 에이전트 수수료는 사는 쪽만 문다 (세계 밖으로 나가는 돈)
+    expect(financeOf(state, buyer).balance).toBe(before.them.balance + FEE);
+    expect(financeOf(state, buyer).transferBudget).toBe(before.them.transferBudget + FEE);
+    expect(financeOf(state, state.userTeamId).transferBudget).toBe(before.us.transferBudget - FEE);
+    // 되산 이적에는 조항이 다시 붙지 않는다
+    const back = state.transfers[state.transfers.length - 1]!;
+    expect(back.toTeamId).toBe(state.userTeamId);
+    expect(back.clauses).toBeUndefined();
+  });
+
+  it("한 번 행사하면 권리가 사라진다", () => {
+    const state = createTestGame();
+    const { player } = soldWithBuyBack(state, { fee: FEE, until: "2028-06-30" });
+    financeOf(state, state.userTeamId).transferBudget = FEE * 2;
+
+    expect(exerciseBuyBack(state, { playerId: player.id }).ok).toBe(true);
+    expect(ourBuyBackRights(state)).toHaveLength(0);
+    const again = exerciseBuyBack(state, { playerId: player.id });
+    expect(again.ok).toBe(false);
+    expect(again.message).toContain("되사기");
+  });
+
+  it("창이 지난 권리는 보이지도 서지도 않는다", () => {
+    const state = createTestGame();
+    const { player } = soldWithBuyBack(state, { fee: FEE, until: addDays(state.date, -1) });
+    expect(ourBuyBackRights(state)).toHaveLength(0);
+    expect(exerciseBuyBack(state, { playerId: player.id }).ok).toBe(false);
+  });
+
+  it("이적 예산이 조항 값을 못 덮으면 서지 않는다", () => {
+    const state = createTestGame();
+    const { player } = soldWithBuyBack(state, { fee: FEE, until: "2028-06-30" });
+    financeOf(state, state.userTeamId).transferBudget = FEE - 1;
+    const blocked = exerciseBuyBack(state, { playerId: player.id });
+    expect(blocked.ok).toBe(false);
+    expect(playerById(state, player.id)!.teamId).not.toBe(state.userTeamId);
   });
 });

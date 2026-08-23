@@ -6,6 +6,7 @@ import type {
   FinanceReportLine,
   LedgerEntry,
   MatchRecord,
+  PaymentSchedule,
   Transfer,
 } from "@story-fm/domain";
 import {
@@ -806,6 +807,13 @@ export function skippedWageWeeks(from: string, until: string): number {
 
 // ── 지급 일정 ───────────────────────────────────────────
 
+/** 회분이 원장에 적히는 이름 — 갈래가 라벨로만 갈린다 */
+const PAYMENT_KIND_KO: Record<PaymentSchedule["kind"], string> = {
+  transfer: "이적료",
+  severance: "계약 해지 정산금",
+  sell_on: "셀온 정산금",
+};
+
 /**
  * 지급일이 된 미지급 회분을 전부 문다 — **분할 지급의 유일한 문**이다
  * (finance.md §6.4). 확정 그 자리의 첫 회분도, 몇 년 뒤의 마지막 회분도 여기를
@@ -827,11 +835,13 @@ export function settleDuePayments(state: GameState, digest?: string[]): void {
       if (installment.paidOn !== null || installment.dueOn > state.date) continue;
       const part = total > 1 ? ` (${index + 1}/${total}회)` : "";
       const ref = { type: "player" as const, id: schedule.gamePlayerId };
+      // 조항 정산은 이적료와 같은 카테고리·같은 예산 이동을 탄다 — 라벨만 다르다
+      const what = PAYMENT_KIND_KO[schedule.kind];
       if (schedule.kind === "severance") {
         recordFinance(state, schedule.payerTeamId, {
           kind: "expense",
           category: "player_wages",
-          label: `계약 해지 정산금${part} — ${name}`,
+          label: `${what}${part} — ${name}`,
           amount: installment.amount,
           ref,
         });
@@ -839,7 +849,7 @@ export function settleDuePayments(state: GameState, digest?: string[]): void {
         recordFinance(state, schedule.payerTeamId, {
           kind: "expense",
           category: "transfer_out",
-          label: `이적료${part} — ${name}`,
+          label: `${what}${part} — ${name}`,
           amount: installment.amount,
           ref,
         });
@@ -849,11 +859,11 @@ export function settleDuePayments(state: GameState, digest?: string[]): void {
         recordFinance(state, schedule.payeeTeamId, {
           kind: "income",
           category: "transfer_in",
-          label: `이적료${part} — ${name}`,
+          label: `${what}${part} — ${name}`,
           amount: installment.amount,
           ref,
         });
-        if (schedule.kind === "transfer") {
+        if (schedule.kind !== "severance") {
           financeOf(state, schedule.payeeTeamId).transferBudget += installment.amount;
         }
       }
@@ -861,7 +871,7 @@ export function settleDuePayments(state: GameState, digest?: string[]): void {
       // 확정일의 첫 회분은 확정 메시지가 이미 말한다 — 일지는 뒤에 오는 회분만
       if (index > 0) {
         digest?.push(
-          `💷 ${name} ${schedule.kind === "severance" ? "정산금" : "이적료"} 분할 ${index + 1}/${total}회분 ${formatMoney(installment.amount)} 지급`,
+          `💷 ${name} ${what} 분할 ${index + 1}/${total}회분 ${formatMoney(installment.amount)} 지급`,
         );
       }
     }

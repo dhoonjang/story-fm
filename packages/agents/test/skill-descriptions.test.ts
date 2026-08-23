@@ -71,11 +71,11 @@ describe("스킬 설명 — 코드가 유일한 원본이다", () => {
       "전술·훈련": 9,
       "대화·서사": 5,
       경기: 1,
-      이적: 11,
+      이적: 12,
       재정: 2,
       조회: 7,
     });
-    expect(SKILL_CATALOG.length).toBe(39);
+    expect(SKILL_CATALOG.length).toBe(40);
     expect(SKILL_CATALOG.filter((s) => s.readOnly).length).toBe(8);
   });
 });
