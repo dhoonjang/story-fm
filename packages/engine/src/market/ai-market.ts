@@ -435,6 +435,12 @@ function planTransfer(
  * 뛴다. 그래서 보내는 쪽은 수준이 위여야 하고, 받는 쪽은 그 자리가 얇아야 한다.
  */
 const LOAN_MAX_AGE = 23;
+/** 보내는 쪽의 주전선 — 스쿼드 전력 순위가 이 안이면 자리가 있다는 뜻이라 내보내지 않는다 */
+const LOAN_STARTER_RANK = 12;
+/** 받는 쪽이 내려서 있어야 할 스쿼드 수준 차 — 같거나 위인 팀으로는 보내지 않는다 */
+const LOAN_HOST_LEVEL_GAP = 2;
+/** 받는 쪽 포지션군의 포화선 — 이만큼 있으면 그 자리는 얇지 않다 */
+const LOAN_HOST_GROUP_CROWD = 7;
 
 /**
  * 주급 분담 — **받는 쪽의 형편이 정한다.**
@@ -476,18 +482,20 @@ function planLoan(
   // 내보내는 문은 매각과 같다 — 임대도 스쿼드를 하한 아래로 깎을 수 없다
   if (!squadFloorHolds(squad, target)) return null;
   if (plannedFirstTeam(squads, fromId, ledger) <= MIN_FIRST_TEAM) return null;
-  // 그 팀에서 주전이면 내보내지 않는다 — 상위 12명 안이면 자리가 있다는 뜻이다
+  // 그 팀에서 주전이면 내보내지 않는다 (`LOAN_STARTER_RANK`)
   const rank = squad
     .map((p) => p.attributes.overall)
     .sort((a, b) => b - a)
     .indexOf(target.attributes.overall);
-  if (rank >= 0 && rank < 12) return null;
+  if (rank >= 0 && rank < LOAN_STARTER_RANK) return null;
   // 받는 쪽은 한 단계 아래여야 하고, 그 자리가 얇아야 한다
   const host = squads.of(toId);
   if (host.length >= MAX_SQUAD) return null;
   if (plannedFirstTeam(squads, toId, ledger) >= MAX_FIRST_TEAM) return null;
-  if (squadLevel(host) > squadLevel(squad) - 2) return null;
-  if (host.filter((p) => groupOf(p) === groupOf(target)).length >= 7) return null;
+  if (squadLevel(host) > squadLevel(squad) - LOAN_HOST_LEVEL_GAP) return null;
+  if (host.filter((p) => groupOf(p) === groupOf(target)).length >= LOAN_HOST_GROUP_CROWD) {
+    return null;
+  }
   // 받는 쪽이 분담할 주급도 형편 안이어야 한다
   const share = (activeContract(state, target.id)?.weeklyWage ?? 0) * loanWageShare(state, toId);
   if (weeklyWagesOf(state, toId) + share > clubWageBudget(toId, undefined, state) * WAGE_HEADROOM)
