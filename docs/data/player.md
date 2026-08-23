@@ -791,6 +791,10 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
   생성(`derivePositions`)도 훈련·경기의 적립도 원값을 적고, 좌우를 가르는 자리는
   `positionProficiency` 하나뿐이다(§4). ⚠️ 미러 자리에 보정을 적어 둔 옛 카탈로그·
   옛 세이브는 벗긴다 (`stripStoredFootAdjust` — SAVE_VERSION 유지).
+- **저장값은 조회값에서 되빼서 얻지 않는다** — 새 자리를 목록에 적는
+  `storedProficiencyFor`는 주발을 얹기 **전** 값을 클램프한다. 조회값(천장 99)에서
+  보정을 빼면 왼발 선수의 98짜리 LCB가 96으로 적혀, 천장 부근에서만 저장값이 조용히
+  깎인다.
 - ⚠️ **세이브를 벗기는 것은 딱 한 번이다** — 마커
   (`mirrorProficiencyStripped` — [game-state](game-state.md) §6)가 없는 세이브에서만
   돌고, 벗긴 뒤 마커를 세운다. 벗기기는 묶음의 값을 주 포지션으로 평평하게 미는 일이라

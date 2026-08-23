@@ -1620,7 +1620,7 @@ export function setPlayerPosition(
     // 원값**이다: 보정을 적어 두면 조회가 다시 얹는다 (player.md §8)
     player.positions.push({
       position: code,
-      proficiency: storedProficiencyFor(player.positions, code, player.foot),
+      proficiency: storedProficiencyFor(player.positions, code),
       isNatural: true,
     });
   }

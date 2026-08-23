@@ -738,10 +738,25 @@ export function positionProficiency(
    * ⚠️ **주발은 여기서만 붙는다.** 저장된 `proficiency`는 주발이 빠진 원값이라
    * (player.md §8) 어느 가지를 타든 목표 자리의 보정을 **한 번만** 얹는다.
    * 생성·훈련이 미리 얹어 두면 조회가 다시 얹어 폭이 두 배가 된다.
+   *
+   * ⚠️ 자르는 것은 **보정을 얹은 뒤 한 번뿐이다.** 원값 쪽에서 미리 자르면
+   * 천장에 붙은 자리가 보정을 받을 칸을 잃는다.
    */
-  const adjust = footAdjust(code, foot);
+  return clampRating(proficiencyBase(positions, code) + footAdjust(code, foot));
+}
+
+/**
+ * 주발을 벗긴 **원값** — 조회도 저장도 여기서 갈린다 (player.md §8).
+ * 자르지 않은 채 돌려준다: 클램프는 부르는 쪽이 자기 값에 한 번만 건다.
+ *
+ * @param code 대문자로 맞춘 목표 자리
+ */
+function proficiencyBase(
+  positions: ReadonlyArray<{ position: string; proficiency: number }>,
+  code: string,
+): number {
   const exact = positions.find((p) => p.position.toUpperCase() === code);
-  if (exact) return clampRating(exact.proficiency + adjust);
+  if (exact) return exact.proficiency;
 
   /**
    * **좌우 분화는 감점이 없다.** CB를 94로 소화하는 센터백은 LCB·RCB도 94다 —
@@ -750,16 +765,14 @@ export function positionProficiency(
    * 묶음 감점이 남는다.
    */
   const mirrored = positions.filter((p) => isMirrorPair(p.position, code));
-  if (mirrored.length > 0) {
-    return clampRating(Math.max(...mirrored.map((p) => p.proficiency)) + adjust);
-  }
+  if (mirrored.length > 0) return Math.max(...mirrored.map((p) => p.proficiency));
 
   const cluster = clusterOf(code);
   const sameSpot = cluster
     ? positions.filter((p) => cluster.includes(p.position.toUpperCase()))
     : [];
   if (sameSpot.length > 0) {
-    return clampRating(Math.max(...sameSpot.map((p) => p.proficiency)) - CLUSTER_PENALTY + adjust);
+    return Math.max(...sameSpot.map((p) => p.proficiency)) - CLUSTER_PENALTY;
   }
 
   const targetGroup = positionGroupOf(code);
@@ -773,7 +786,7 @@ export function positionProficiency(
       LINE_PENALTY * linesBetween(positionGroupOf(heldCode), targetGroup);
     best = Math.max(best, held.proficiency - penalty);
   }
-  return clampRating(best + adjust);
+  return best;
 }
 
 /**
@@ -781,13 +794,16 @@ export function positionProficiency(
  *
  * 훈련·경기가 새 자리를 적립할 때 `positionProficiency`가 낸 값을 그대로 적으면
  * 그 안에 든 주발 보정이 저장에 남고, 다음 조회가 또 얹어 폭이 두 배가 된다.
+ *
+ * ⚠️ **조회값에서 보정을 되빼서 얻지 않는다.** 조회값은 이미 천장(99)에서 잘려
+ * 있어, 왼발 선수의 98짜리 LCB가 99 − 3 = 96으로 적힌다. 주발은 원값에 없으므로
+ * 이 함수는 `foot`을 받지 않는다.
  */
 export function storedProficiencyFor(
   positions: ReadonlyArray<{ position: string; proficiency: number }>,
   target: string,
-  foot?: Foot,
 ): number {
-  return clampRating(positionProficiency(positions, target, foot) - footAdjust(target, foot));
+  return clampRating(proficiencyBase(positions, target.toUpperCase()));
 }
 
 const clampRating = (v: number) => Math.max(PROFICIENCY_MIN, Math.min(99, Math.round(v)));

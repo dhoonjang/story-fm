@@ -1,4 +1,10 @@
-import { ageOf, normalizedLogCurve, FIRST_TEAM_LIMIT, type GamePlayer } from "@story-fm/domain";
+import {
+  ageOf,
+  normalizedLogCurve,
+  FIRST_TEAM_LIMIT,
+  type GamePlayer,
+  type Transfer,
+} from "@story-fm/domain";
 import {
   addDays,
   contractUntil,
@@ -14,6 +20,7 @@ import { marketBiasOf, marketValueOf, windowOpenForTeam } from "./market";
 import { makeRng } from "../core/rng";
 import {
   activeContract,
+  firstTeamPlayers,
   groupOf,
   isInjured,
   pushNarrative,
@@ -26,6 +33,7 @@ import {
 import { WAGE_HEADROOM, clubWageBudget, estimateWeeklyWage, wageSubjectOf } from "../world/wages";
 import { assignSquadNumber } from "../squad/numbers";
 import { clearDepartedState } from "./departures";
+import { attachClauses, runBuyBacks, settleSellOn } from "./clauses";
 
 /**
  * 남의 팀끼리의 이적 시장 — **세계가 감독 없이도 돈다.**
@@ -224,12 +232,13 @@ function moveClub(
   squads: Squads,
   player: GamePlayer,
   toTeamId: string,
-  input: { fee: number; type: "transfer" | "free"; rng: () => number },
+  input: { fee: number; type: "transfer" | "free"; rng: () => number; digest?: string[] },
 ): void {
   const fromTeamId = player.teamId;
   const windowId = windowOpenForTeam(state, toTeamId)?.id ?? null;
-  state.transfers.push({
-    id: `tr-ai-${player.id}-${state.date}`,
+  const transferId = `tr-ai-${player.id}-${state.date}`;
+  const transfer: Transfer = {
+    id: transferId,
     gamePlayerId: player.id,
     windowId,
     fromTeamId,
@@ -237,6 +246,17 @@ function moveClub(
     date: state.date,
     type: input.type,
     fee: input.fee,
+  };
+  // 조항은 유저의 딜과 같은 함수가 붙인다 — 한쪽만 붙이면 규칙이 갈라진다 (§5-3)
+  attachClauses(state, transfer, player);
+  state.transfers.push(transfer);
+  // 파는 구단이 무는 셀온은 이 이적으로 발동한다
+  settleSellOn(state, {
+    gamePlayerId: player.id,
+    sellerTeamId: fromTeamId,
+    resaleFee: input.fee,
+    resaleTransferId: transferId,
+    digest: input.digest,
   });
 
   const previous = activeContract(state, player.id);
@@ -512,7 +532,12 @@ function planLoan(
  * 한 주 전에 정해진 일이라 그사이 사정이 바뀌었을 수 있다: 다치거나, 이미
  * 옮겼거나, 돈이 없어졌으면 조용히 무산된다 (실제 시장의 결렬이다).
  */
-function settle(state: GameState, deal: AiDeal, rng: () => number): GamePlayer | null {
+function settle(
+  state: GameState,
+  deal: AiDeal,
+  rng: () => number,
+  digest: string[],
+): GamePlayer | null {
   const player = state.players.find((p) => p.id === deal.gamePlayerId);
   if (!player || player.teamId === deal.toTeamId) return null;
   if (isInjured(state, player.id)) return null;
@@ -574,6 +599,8 @@ function settle(state: GameState, deal: AiDeal, rng: () => number): GamePlayer |
     fee: deal.fee,
     type: deal.fee > 0 ? "transfer" : "free",
     rng,
+    // 우리가 걸어 둔 셀온이 서면 그날 일지에 오른다 — 우리 돈이 오가는 자리다
+    digest,
   });
   return player;
 }
@@ -661,7 +688,7 @@ export function runAiTransfers(state: GameState, digest: string[]): void {
   const due = queue.filter((d) => d.date <= state.date);
   const settled: { player: GamePlayer; deal: AiDeal }[] = [];
   for (const deal of due) {
-    const player = settle(state, deal, rng);
+    const player = settle(state, deal, rng, digest);
     if (player) settled.push({ player, deal });
   }
   state.aiDeals = queue.filter((d) => d.date > state.date);
@@ -677,6 +704,20 @@ export function runAiTransfers(state: GameState, digest: string[]): void {
     state.aiDeals = [...state.aiDeals, ...planned.deals];
     state.aiPlannedThrough = planned.through;
   }
+
+  /**
+   * ③ 되사기 조항 — **계획을 타지 않는다.** 권리라 흥정도 협상도 없고, 창이
+   * 열려 있고 값이 오른 날 그 자리에서 선다 (transfer.md §5-3).
+   */
+  runBuyBacks(state, digest, (teamId, fee) => {
+    const finance = state.finances.find((f) => f.teamId === teamId);
+    if (!finance || finance.budgetFrozen) return false;
+    if (fee > finance.transferBudget) return false;
+    const floor = isTopFlightIn(state, teamId) ? CASH_FLOOR_TOP : CASH_FLOOR_OTHER;
+    // 일반 영입과 같은 자 — 에이전트 수수료가 같은 날 함께 빠진다
+    if (finance.balance - fee * (1 + AGENT_FEE_RATE) < floor) return false;
+    return firstTeamPlayers(state, teamId).length < MAX_FIRST_TEAM;
+  });
 
   /** 감독의 리그에서 벌어진 큰 건만 — 그것도 하루 두 줄까지 */
   const ourLeague = leagueOfTeamIn(state, state.userTeamId);
