@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   activeContract,
   advanceTime,
+  careerView,
   assignmentsOf,
   ensureSeasonStat,
   leagueView,
@@ -425,6 +426,31 @@ describe("get_squad", () => {
     const row = res.message.split("\n").find((l) => l.includes(starter.id))!;
     expect(row).toContain("부상(발목");
     expect(row).toContain("정지 임박");
+  });
+
+  /**
+   * 판정이 코어에서 끝나는 눈금은 어휘로 실린다 (prompts.md §5-2). 팀 평균 적응이
+   * 그렇고, 선수 **개인**의 적응은 GM이 둘을 견주어 세울 사람을 고르는 판정 재료라
+   * 숫자로 남는다 — 이 경계가 한쪽으로 무너지는 것이 여기서 잡는 것이다.
+   */
+  it("선발 평균 적응은 날수치를 싣지 않고, 선수 개인 적응은 숫자로 남는다", () => {
+    const state = createTestGame(21);
+    const res = squadView(state);
+    const [header, ...rest] = res.message.split("\n");
+    expect(header).toContain("선발 평균 적응");
+    expect(header).not.toMatch(/선발 평균 적응 \d/);
+    expect(rest.find((l) => l.startsWith("  "))).toMatch(/전술적응\d+/);
+  });
+});
+
+describe("get_career", () => {
+  // 평판 3축도 판정이 코어에만 있는 눈금이다 — 재임 분기의 평판 줄에 숫자가 서면 안 된다
+  it("평판 줄은 날수치를 싣지 않는다", () => {
+    const state = createTestGame(21);
+    const line = careerView(state)
+      .message.split("\n")
+      .find((l) => l.startsWith("평판:"))!;
+    expect(line).not.toMatch(/\d/);
   });
 });
 
