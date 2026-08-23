@@ -281,7 +281,7 @@ textarea {
   margin: 0;
 }
 /* 좁은 화면 — 고리는 그대로 두고 칩만 줄인다 (판이 정사각형이라 같이 준다) */
-@media (max-width: 560px) {
+@media (max-width: 699px) {
   .league-node {
     min-width: 0;
     padding: 8px 10px;
@@ -446,7 +446,7 @@ textarea {
   border-color: var(--border);
   color: var(--text);
 }
-@media (max-width: 560px) {
+@media (max-width: 699px) {
   .home-head {
     flex-direction: column;
     align-items: stretch;
@@ -461,7 +461,7 @@ textarea {
 /* ── 카탈로그 어드민 (게임 무관 초기치 편집) ───── */
 .admin {
   padding: var(--sp-5) var(--sp-4);
-  max-width: 1200px;
+  max-width: var(--bp-lg);
   margin: 0 auto;
 }
 .admin-head {
@@ -1147,7 +1147,7 @@ textarea {
   font-size: var(--fs-2xs);
   text-align: right;
 }
-@media (max-width: 960px) {
+@media (max-width: 1023px) {
   .skill-grid {
     grid-template-columns: 1fr;
   }
@@ -1651,7 +1651,7 @@ textarea {
     transform: translateY(-4px);
   }
 }
-@media (max-width: 700px) {
+@media (max-width: 699px) {
   /* 좁은 화면에선 말풍선이 화면을 덮는다 — 점만 남긴다 */
   .rail-hints {
     display: none;
@@ -1785,7 +1785,7 @@ textarea {
  * 어디로 갈지다. 다만 **지우지는 않는다**: 팀 이름을 없애 두었던 때는 경기가
  * 끝나고 띠만 봤을 때 어느 팀의 화면인지 알 수 없었다 (`.topbar-meta`가 접는다).
  */
-@media (max-width: 700px) {
+@media (max-width: 699px) {
   .rail.match-rail button {
     width: 34px;
   }
@@ -2150,10 +2150,10 @@ textarea {
  * 고칠 때마다 두 화면이 조금씩 갈라졌다. 폭의 갈림은 아래 `--drawer` 두 줄이
  * 혼자 맡고, 몸통은 그 값을 묻는 한 블록이 갖는다.
  *
- * 갈리는 이유: 경기 무대는 992부터 반반이고(장부와 달리 덮지 않는다) 장부는
- * 1200부터다. 그 아래에서는 얹을 채팅 칸이 애초에 옆에 없다.
+ * 갈리는 이유: 경기 무대는 `--bp-md`부터 반반이고(장부와 달리 덮지 않는다) 장부는
+ * `--bp-lg`부터다. 그 아래에서는 얹을 채팅 칸이 애초에 옆에 없다.
  */
-@media (min-width: 992px) {
+@media (min-width: 1024px) {
   .stage-split.panel-split.with-board.open.board-open {
     --drawer: 1;
   }
@@ -2189,7 +2189,7 @@ textarea {
  *
  * 컨테이너 질의는 폭의 조건만 걸 뿐 특이도를 보태지 않는다. `.squad-layout`
  * 하나로 적어 두었더니, 파일 뒤쪽의 `@media (min-width: 1200px) and
- * (min-height: 860px)`이 같은 특이도로 뒤에 와서 이겨 **명단이 다시 두 열로
+ * (min-height: 901px)`이 같은 특이도로 뒤에 와서 이겨 **명단이 다시 두 열로
  * 갈렸다**(서랍은 흐름 밖이라 명단이 왼쪽 460px 트랙에 들어앉았다).
  * 조건은 질의가, 힘은 이 클래스가 갖는다.
  */
@@ -3486,6 +3486,12 @@ textarea {
  * 한 줄일 때 **버튼과 키가 같아야** 위아래 여백이 같다.
  * 21(line-height 1.5 × 14) + 7 + 7 = 35 = 버튼 35. 예전엔 텍스트가 39, 버튼이 34라
  * 위쪽만 5px 더 떠 보였다(`align-items: flex-end`라 남는 자리가 위로 몰린다).
+ *
+ * 거기서부터 **쓴 만큼 자라고, 상한은 여기 한 번만 적는다.** 예전엔 `scrollHeight`를
+ * 재서 `style.height`에 얹는 자바스크립트가 따로 있었고 그 안에 상한 160이 한 번 더
+ * 박혀 있었다. 두 숫자는 같이 움직이지 않는다 — 여기만 고치면 입력창은 예전 높이에서
+ * 멈추고, 왜 안 늘어나는지 스타일만 봐선 알 수 없었다. `field-sizing`이 같은 일을
+ * 브라우저 쪽에서 하므로 상한도 `max-height` 하나로 돌아온다.
  */
 .chat-input textarea {
   flex: 1;
@@ -3495,6 +3501,10 @@ textarea {
   color: var(--text);
   resize: none;
   overflow-y: auto;
+  field-sizing: content;
+  /* 내용이 폭도 밀지 않게 — `field-sizing`은 가로도 내용에 맞추려 들고,
+     flex 자식의 기본 하한(`min-width: auto`)이 그것을 그대로 받는다 */
+  min-width: 0;
   max-height: 160px;
   line-height: 1.5;
   font-family: inherit;
