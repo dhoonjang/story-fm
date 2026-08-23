@@ -1,7 +1,7 @@
 import type { MarketSkillResult } from "../skills";
-import type { Negotiation, NegotiationVerdict } from "@story-fm/domain";
-import { MAX_PAYMENT_YEARS, ageOf, naturalPositionOf } from "@story-fm/domain";
-import { dealOdds } from "./market";
+import type { GamePlayer, Negotiation, NegotiationVerdict } from "@story-fm/domain";
+import { MAX_PAYMENT_YEARS, PITCH_CLAIM_KO, ageOf, naturalPositionOf } from "@story-fm/domain";
+import { askingPriceFor, dealOdds, marketValueOf, wageExpectationOf } from "./market";
 import {
   bandOpen,
   clampToBand,
@@ -9,15 +9,10 @@ import {
   type CounterBand,
   type CounterBounds,
 } from "./counter-bounds";
-import {
-  KIND_KO,
-  counterpartOf,
-  describeNegotiation,
-  pendingOffer,
-  respondOffer,
-} from "./negotiation";
+import { KIND_KO, counterpartOf, pendingOffer, respondOffer, splitLabel } from "./negotiation";
 import { agentForPlayer } from "../world/persona";
 import { contractYearsLeft, hasIssue, playerById, teamName, type GameState } from "../core/state";
+import { formatMoney } from "../club/finance";
 
 /**
  * **협상 테이블 건너편 — 코어가 박는 앵커와 자르는 한도**
@@ -250,11 +245,46 @@ export interface CounterpartyBrief {
   ourClub: string;
   /** 선수의 지금 — 카드에 굳지 않는 값이라 매 호출 새로 싣는다 */
   playerFacts: string[];
-  /** 라운드 이력 · 확인된 설득 논거 · 확률 근거 */
-  dossier: string;
+  /** 오퍼 이력 · 값의 자 · 사실로 확인된 설득 논거 — **양쪽을 이름으로 부른다** */
+  dossier: string[];
   /** 이 자리에 설 사람들 — 선수와 그의 에이전트. 카드는 부르는 쪽이 그린다 */
   characterIds: string[];
   anchor: CounterpartyAnchor;
+}
+
+/**
+ * 오퍼 이력 — **양쪽을 이름으로 부른다.**
+ *
+ * 감독이 읽는 요약(`describeNegotiation`)을 그대로 쓸 수 없는 이유가 여기다: 그쪽은
+ * 감독의 자리에서 쓰여 우리 라운드가 `우리`, 상대 라운드가 `상대`로 적힌다. 그 문서를
+ * 테이블 건너편에 넘기면 상대가 감독의 오퍼를 자기 것으로 읽는다.
+ */
+function dossierOf(state: GameState, negotiation: Negotiation, player: GamePlayer): string[] {
+  const us = teamName(state.userTeamId);
+  const them = counterpartOf(negotiation, player);
+  const money = negotiation.kind === "release" ? "정산금" : "이적료";
+  return [
+    `[오퍼 이력] 기한 ${negotiation.expiresOn}`,
+    ...negotiation.rounds.map(
+      (r) =>
+        `${r.date} ${r.by === "us" ? us : them} — ${money} ${formatMoney(r.fee)}` +
+        splitLabel(r.paymentYears) +
+        ` · 주급 ${formatMoney(r.weeklyWage)} · ${r.contractYears}년` +
+        (r.verdict ? ` → ${r.verdict}` : "") +
+        (r.note ? ` — ${r.note}` : "") +
+        (r.pitch && r.pitch.length > 0
+          ? `\n    감독이 든 이야기: ${r.pitch
+              .map((c) => `${PITCH_CLAIM_KO[c.kind]}${c.note ? ` ("${c.note}")` : ""}`)
+              .join(" · ")}`
+          : ""),
+    ),
+    `[값의 자] 시장가 ${formatMoney(marketValueOf(state, player))} · 호가 ${formatMoney(
+      askingPriceFor(state, player),
+    )} · 선수 주급 기대 ${formatMoney(wageExpectationOf(state, player))}`,
+    ...((negotiation.pitched?.length ?? 0) > 0
+      ? [`[사실로 확인된 이야기] ${negotiation.pitched!.map((k) => PITCH_CLAIM_KO[k]).join(" · ")}`]
+      : []),
+  ];
 }
 
 export function buildCounterpartyBrief(
@@ -273,11 +303,11 @@ export function buildCounterpartyBrief(
     counterpart: counterpartOf(negotiation, player),
     ourClub: teamName(state.userTeamId),
     playerFacts: [
-      `${player.name} · ${ageOf(player.birthdate, state.date)}세 · ${naturalPositionOf(player)}`,
-      `소속 ${teamName(player.teamId)} · 계약 잔여 ${years}년`,
+      `${player.name} · ${ageOf(player.birthdate, state.date)}세 · ${naturalPositionOf(player).position}`,
+      `소속 ${teamName(player.teamId)} · 계약 잔여 ${years.toFixed(1)}년`,
       ...(hasIssue(state, player.id) ? ["라커룸에 불만이 서 있다"] : []),
     ],
-    dossier: describeNegotiation(state, negotiation.id),
+    dossier: dossierOf(state, negotiation, player),
     characterIds: [player.name, ...(agent ? [agent.characterId] : [])],
     anchor,
   };

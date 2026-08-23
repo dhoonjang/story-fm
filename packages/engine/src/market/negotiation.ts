@@ -117,7 +117,7 @@ const dealTerms = (t: MarketTerms): MarketTerms => ({
  * 조건 줄에 붙는 분할 표기 — **빠지는 자리가 곧 오독이다** (transfer.md §1·§5-2).
  * 방향과 같은 이유로 메시지·요약이 모두 이 한 함수를 지난다.
  */
-function splitLabel(paymentYears?: number): string {
+export function splitLabel(paymentYears?: number): string {
   const n = paymentYearsOf(paymentYears);
   return n === undefined ? "" : ` · ${n}년 분할`;
 }
