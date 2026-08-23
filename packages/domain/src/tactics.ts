@@ -1232,6 +1232,33 @@ export const clampFamiliarity = (x: number): number =>
  * 선반(`ShelvedFamiliarity`)에 있고 그게 이긴다 (→ docs/data/player.md §7.3).
  */
 export const FAMILIARITY_BASELINE = 60;
+
+/**
+ * **팀 전술 적응 구간 → 어휘.** 판정이 전부 코어 안에서 끝나는 눈금이라 LLM에는
+ * 숫자가 아니라 이 말이 실린다 (prompts.md §5-2).
+ *
+ * 경계는 적응도가 오르는 곡선이 갈리는 자리다 — 훈련 판정이 전액으로 실리는 상한이
+ * 65이고, 훈련의 몫은 90 언저리에서 0에 닿아 그 위는 경기를 뛴 선수만 올라간다
+ * (`GAIN_CURVE`). 신입 기준선 60은 「익히는 중」이다.
+ *
+ * ⚠️ **선수 개인의 적응도에는 쓰지 않는다.** 조회가 주는 그 숫자는 둘을 견주어
+ * 세울 사람을 고르는 판정 재료라 숫자로 남는다.
+ */
+export const FAMILIARITY_TIERS = [
+  { key: "drilled", min: 90, ko: "완숙" },
+  { key: "settled", min: 65, ko: "익숙" },
+  { key: "learning", min: 45, ko: "익히는 중" },
+  { key: "raw", min: 25, ko: "서투름" },
+  { key: "alien", min: 0, ko: "생소" },
+] as const;
+
+const familiarityTierOf = (value: number) =>
+  FAMILIARITY_TIERS.find((t) => value >= t.min) ?? FAMILIARITY_TIERS[FAMILIARITY_TIERS.length - 1]!;
+
+/** 팀 평균 전술 적응을 말로 — LLM 입력이 읽는 유일한 형태 */
+export function familiarityLabel(value: number): string {
+  return familiarityTierOf(value).ko;
+}
 /** 아래 구간에서 판정을 그대로 받는 배율 — 가속은 두지 않는다 */
 const GAIN_EARLY_BOOST = 1;
 

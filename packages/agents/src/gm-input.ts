@@ -51,6 +51,9 @@ import {
 } from "@story-fm/engine";
 import {
   ageOf,
+  describeManagerSkills,
+  describeReputation,
+  familiarityLabel,
   formatMoney,
   matchupText,
   normalizePacket,
@@ -139,8 +142,8 @@ export function describeCharacters(entries: readonly CharacterEntry[]): string |
  * 바뀌고, 한 줄이 달라지면 이 블록과 그 뒤의 이력이 통째로 무효가 된다. 이름은 매 턴
  * 층(`buildGmStateNote`)의 「선수단」 줄이 싣는다.
  * ⚠️ 감독의 능력·평판도 마찬가지다 — 경기마다 평판이 움직이고 능력도 자라므로
- * 여기 있으면 경기 한 번에 이 블록과 그 뒤가 통째로 무효가 된다. 수치는 매 턴 층
- * (`buildGmStateNote`)이 싣고 여기엔 이름과 배경만 남는다.
+ * 여기 있으면 경기 한 번에 이 블록과 그 뒤가 통째로 무효가 된다. 능력과 평판은 매 턴
+ * 층(`buildGmStateNote`)이 구간 어휘로 싣고 여기엔 이름과 배경만 남는다.
  */
 export function buildGmReference(state: GameState): string {
   const m = state.manager;
@@ -398,10 +401,7 @@ function buildUnemployedNote(state: GameState, passed?: TimePassed | null): stri
           : null,
       ),
     ),
-    block(
-      "manager",
-      `평판: 보드${state.manager.reputation.board} 미디어${state.manager.reputation.media} 선수단${state.manager.reputation.squad}`,
-    ),
+    block("manager", `평판: ${describeReputation(state.manager.reputation)}`),
     // 제안이 없는 것도 무직에겐 사실이다 — 기다리는 중인지 고를 자리가 있는지가 갈린다
     block(
       "job_offers",
@@ -593,7 +593,7 @@ export function buildGmStateNote(
       lines(
         // 6축 슬라이더는 싣지 않는다 — 화자가 입에 담지 않는 수치이고 `get_squad`가
         // 배치와 함께 낸다. 모양과 적응도는 코치의 말에 그대로 실린다
-        `전술: ${tac.formation} · 선발 평균 적응 ${Math.round(squadFamiliarity(state, state.userTeamId))}`,
+        `전술: ${tac.formation} · 선발 평균 적응 ${familiarityLabel(squadFamiliarity(state, state.userTeamId))}`,
         `재정: 잔고 ${formatMoney(finance.balance)} · 주급 ${formatMoney(weeklyWagesOf(state, state.userTeamId))}/주 · 이적예산 ${formatMoney(finance.transferBudget)}`,
         /**
          * 선수단 — **이름 명단이다. 이름뿐이다.** "누가 우리 팀인가"는 매 장면의 전제라
@@ -624,10 +624,10 @@ export function buildGmStateNote(
     block(
       "manager",
       lines(
-        // 감독의 수치는 캐시 밖이다 — 평판은 경기마다 움직이고 능력도 자란다.
+        // 감독의 능력·평판은 캐시 밖이다 — 평판은 경기마다 움직이고 능력도 자란다.
         // 레퍼런스(감독 프로필)엔 이름·배경만 남는다
-        `${state.manager.name}: 리더십${state.manager.attributes.leadership} 전술${state.manager.attributes.tactics} 훈련${state.manager.attributes.training} 협상${state.manager.attributes.negotiation} 분석${state.manager.attributes.analysis}`,
-        `평판: 보드${state.manager.reputation.board} 미디어${state.manager.reputation.media} 선수단${state.manager.reputation.squad}`,
+        `${state.manager.name}: ${describeManagerSkills(state.manager.attributes)}`,
+        `평판: ${describeReputation(state.manager.reputation)}`,
         // 감독 자신의 계약 — 재계약 제안은 **답할 자리**라 스냅샷에 서야 한다 (career.md §5.4)
         managerContractLine(state),
       ),

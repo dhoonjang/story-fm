@@ -25,6 +25,7 @@ import {
   userPlayers,
   type GameState,
 } from "@story-fm/engine";
+import { describeManagerSkills, describeReputation } from "@story-fm/domain";
 import {
   MATCH_ADVANCED,
   TIME_PASSED,
@@ -220,19 +221,23 @@ describe("레퍼런스 블록 (캐시되는 시스템 블록)", () => {
    * 감독의 수치는 경기 한 번에 움직인다(평판) — 캐시 층에 두면 그 한 번에
    * 레퍼런스와 그 뒤가 통째로 무효가 된다 (agents.md §5).
    */
-  it("감독의 능력·평판은 레퍼런스가 아니라 스냅샷에 있다", () => {
+  it("감독의 능력·평판은 레퍼런스가 아니라 스냅샷에 있고, 숫자가 아니라 어휘다", () => {
     const state = game();
     const { attributes, reputation } = state.manager;
     const ref = buildGmReference(state);
 
     // 이름·배경은 레퍼런스에 남는다 — 안 바뀌는 것들이다
     expect(ref).toContain(state.manager.name);
-    expect(ref).not.toContain(`리더십${attributes.leadership}`);
-    expect(ref).not.toContain(`보드${reputation.board}`);
+    expect(ref).not.toContain(describeManagerSkills(attributes));
+    expect(ref).not.toContain(describeReputation(reputation));
 
     const note = buildGmStateNote(state);
-    expect(note).toContain(`리더십${attributes.leadership}`);
-    expect(note).toContain(`보드${reputation.board}`);
+    expect(note).toContain(describeManagerSkills(attributes));
+    expect(note).toContain(describeReputation(reputation));
+
+    // 판정이 코어에만 있는 눈금이라 날수치는 한 자리도 새지 않는다 (prompts.md §5-2)
+    expect(note).not.toContain(`리더십${attributes.leadership}`);
+    expect(note).not.toContain(`보드${reputation.board}`);
 
     // 평판이 움직여도 캐시 프리픽스는 그대로다
     const before = buildGmReference(state);
