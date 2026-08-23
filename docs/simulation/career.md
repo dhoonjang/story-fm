@@ -515,7 +515,7 @@ dismissal: {
 **위약금은 구단이 무는 구단의 지출이다** (`severance` — [finance.md](./finance.md) §4.2):
 
 ```
-위약금 = min(연봉, round(연봉 × 잔여일/365 × SEVERANCE_RATE 0.5))
+위약금 = min(연봉, round(연봉 × 잔여일/365 × MANAGER_SEVERANCE_RATE 0.5))
 ```
 
 - 경질 당일 옛 구단의 원장에 서고, **같은 금액이 감독의 지갑에 들어간다.**
