@@ -31,6 +31,7 @@ import { hasCups } from "../world/scope";
 import { driftFamiliarity, tickOtherClubs } from "../squad/other-clubs";
 import { applyResultMood } from "../squad/slump";
 import { advanceEuroKnockouts } from "../competition/euro-knockout";
+import { advanceSuperCups } from "../competition/super-cup";
 import { applyMonthlyDevelopment } from "../squad/development";
 import { returnDueLoans, signFreeAgents } from "../market/departures";
 import { clampForm, decayedForm, formDeltaFromMatch } from "../squad/form";
@@ -1236,6 +1237,8 @@ export function advanceTime(
     if (hasCups(state.world)) {
       advanceEuroKnockouts(state, digest);
       advanceDomesticCups(state, digest);
+      // 슈퍼컵은 한 경기라 편성할 다음 단계가 없다 — 끝난 경기의 승부만 가린다
+      advanceSuperCups(state, digest);
     }
     // 경기 일정이 바뀌었으면 기본 훈련을 다시 깐다 (감독 지시 세션은 그대로).
     // ⚠️ 예전엔 "경기 수가 늘었을 때"만 불렀는데, 컵 대진은 **경기일 몇 주 전에**

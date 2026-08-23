@@ -100,7 +100,7 @@ describe("녹아웃 정의", () => {
   it("단계 순서는 플레이오프 → 본선 → 결승이고 대진 수와 맞물린다", () => {
     expect(knockoutStages(cupCatalogById("ucl")!)).toEqual(["playoff", "r16", "qf", "sf", "final"]);
     expect(knockoutStages(cupCatalogById("uel")!)).toEqual(["playoff", "qf", "sf", "final"]);
-    expect(knockoutStages(cupCatalogById("uecl")!)).toEqual(["playoff", "sf", "final"]);
+    expect(knockoutStages(cupCatalogById("uecl")!)).toEqual(["playoff", "qf", "sf", "final"]);
   });
 
   it("녹아웃 경기일은 수요일이고 결승은 리그 최종전 뒤 토요일이다", () => {

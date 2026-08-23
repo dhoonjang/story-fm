@@ -8,7 +8,9 @@ import { migratePrizeKeys, payPrize, prizeKey, prizeLabel } from "./prize";
  *
  * 금액은 카탈로그(`CupCatalogEntry.prize`)가 갖고 여기서는 **언제 누구에게**만
  * 정한다. 실제 대회처럼 참가만 해도 큰돈이 들어오고, 한 단계 올라갈 때마다
- * 더해진다. 리그와 마찬가지로 96팀 모두에게 적용한다 (재정은 팀에 소속).
+ * 더해진다. 나선 클럽 전부에게 적용한다 — 정원의 절반 남짓을 채우는 **2부 클럽도
+ * 같은 참가비를 받는다**(competition.md §4). 그 돈이 그 클럽의 연 매출을 웃돌지만,
+ * 실제로도 작은 리그의 클럽에게 UEFA 배분이 그렇다 (finance.md §5.1.1).
  *
  * 중복 지급은 `FINANCE.prizesPaid`의 키가 막는다 — 원장이 아니다. 원장은 최근
  * 3개월만 남기고 AI 팀은 아예 쌓지 않으므로(finance.md §4.4·§4.5) "원장이 곧 사실"이

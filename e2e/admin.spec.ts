@@ -213,14 +213,15 @@ test("팀·리그·컵 탭이 팝업으로 카탈로그를 고친다", async ({ 
   await cupRow.click();
   await expect(cupModal).toBeVisible();
   await page.getByTestId("cup-modal-slot-epl").fill("7");
-  await expect(page.getByTestId("cup-modal-slot-sum")).toContainText("합계 26 / 참가 24");
+  // 어긋남만 본다 — 합계와 정원의 실제 숫자는 카탈로그가 정하고 규모 조정마다 움직인다
+  await expect(page.getByTestId("cup-modal-slot-sum")).toContainText("같아야 저장됩니다");
   await page.getByTestId("cup-modal-save").click();
   await expect(page.getByTestId("cup-modal-err")).toContainText("티켓 합");
   await expect(cupModal).toBeVisible();
 
   // 합을 맞추면 저장된다
   await page.getByTestId("cup-modal-slot-ligue1").fill("2");
-  await expect(page.getByTestId("cup-modal-slot-sum")).toContainText("합계 24 / 참가 24");
+  await expect(page.getByTestId("cup-modal-slot-sum")).not.toContainText("같아야 저장됩니다");
   await page.getByTestId("cup-modal-save").click();
   await expect(cupModal).toHaveCount(0);
   await expect(page.getByTestId("cups-edited")).toBeVisible();

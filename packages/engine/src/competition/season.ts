@@ -50,7 +50,12 @@ import {
   reviewDomesticCups,
 } from "./domestic-cup";
 import { hasPendingDraw } from "./draw-schedule";
-import { isCupOnlyLeague, isMarketOnlyLeague, leagueName } from "../data/league-catalog";
+import {
+  isCupOnlyLeague,
+  isMarketOnlyLeague,
+  isTopLeague,
+  leagueName,
+} from "../data/league-catalog";
 import { hasCups, scopedLeagues } from "../world/scope";
 import { euroChampion, euroStageMatches } from "./euro-knockout";
 import { payWinnerPrize } from "./euro-prize";
@@ -62,6 +67,7 @@ import {
 } from "../club/finance";
 import { buildEuroEntrants, entrantsOf, type LeagueTables } from "./europe";
 import { buildSeasonFixtures, isUserFixture } from "./fixtures";
+import type { SuperCupSource } from "./super-cup";
 import {
   applyPromotionRelegation,
   reinforcePromotedSquads,
@@ -371,7 +377,11 @@ function checkAchievements(state: GameState, position: number, row: StandingRow)
     add("invincible", { matches: row.played, leagueId });
   // 유럽 최상위 진출은 **그 리그의 UCL 티켓 안**이다 — 순위 하나로 자르면 티켓이 없는
   // 2부의 4위에도 붙는다 (티켓 수는 리그마다 다르다, europe.ts의 배정과 같은 표)
-  if (position <= euroSlotsOf(TOP_EURO_CUP_ID, leagueId)) add("ucl-spot", { position, leagueId });
+  // 2부의 UCL 티켓은 **순위표가 아니라 전력 서열**이 정한다 (europe.ts `rankedTeams`) —
+  // 리그전을 도는 리그에서만 "몇 위면 유럽"이 사실이다
+  if (isTopLeague(leagueId) && position <= euroSlotsOf(TOP_EURO_CUP_ID, leagueId)) {
+    add("ucl-spot", { position, leagueId });
+  }
 
   const topScorer = state.seasonStats
     .filter(
@@ -863,6 +873,22 @@ const YOUTH_INTAKE_SEED_OFFSET = 101;
  * ⚠️ **세이브에 직접 쓰지 않는다** — 초안 위에서만 돈다. 원본에 옮겨 붙이는 경계는
  * `transitionSeason`·`endSeason`이 긋는다 (전부 되거나 아무것도 안 된다).
  */
+/**
+ * 대회별 우승 팀 — 우승자가 없는 대회는 목록에서 빠진다.
+ * 슈퍼컵 대진의 원본이라 "없다"가 곧 "그 슈퍼컵은 그해 서지 않는다"가 된다.
+ */
+function championsOf(
+  cups: readonly { id: string }[],
+  championOf: (cupId: string) => string | null,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const cup of cups) {
+    const champion = championOf(cup.id);
+    if (champion) out[cup.id] = champion;
+  }
+  return out;
+}
+
 function applyTransition(state: GameState): string[] {
   const digest: string[] = [];
   const rng = makeRng(state.seed, `transition:${state.season}`);
@@ -1185,6 +1211,18 @@ function applyTransition(state: GameState): string[] {
     finalTables[league.id] = computeStandings(state, league.id).map((r) => r.teamId);
   }
   const cupWinners = domesticCupWinners(state);
+  /**
+   * 슈퍼컵 대진의 원본 — 티켓과 **같은 시점**에 읽어야 한다. 리그 최종 순위도 컵·
+   * 대항전 우승도 `state.season`으로 걸러 읽고, 그 뒤 `state.matches`가 새 시즌
+   * 것으로 통째로 교체된다 (competition.md §4-1).
+   */
+  const superCups: SuperCupSource | null = hasCups(state.world)
+    ? {
+        leagueTables: finalTables,
+        domesticChampions: championsOf(domesticCupCatalog(), (id) => domesticChampion(state, id)),
+        euroChampions: championsOf(cupCatalog(), (id) => euroChampion(state, id)),
+      }
+    : null;
   // 성적 축의 원본 — 승강이 소속을 옮기기 **전에** 그해 순위표를 남긴다 (team.md §2.1)
   recordLeagueHistory(state);
   /**
@@ -1211,8 +1249,14 @@ function applyTransition(state: GameState): string[] {
   reinforcePromotedSquads(state, promoted, digest);
   const windows = buildTransferWindows(nextSeason);
   state.euroEntrants = hasCups(state.world)
-    ? buildEuroEntrants(nextSeason, state.seed, finalTables, cupWinners, (id) =>
-        tierOfTeamIn(state, id),
+    ? buildEuroEntrants(
+        nextSeason,
+        state.seed,
+        finalTables,
+        cupWinners,
+        (id) => tierOfTeamIn(state, id),
+        // 2부 몫을 뽑는 자리라 소속은 승강 뒤의 것이어야 한다 (europe.ts `LeagueMembers`)
+        (leagueId) => teamsOfLeagueIn(state, leagueId),
       )
     : [];
   /**
@@ -1230,6 +1274,7 @@ function applyTransition(state: GameState): string[] {
       ...(isCupOnlyLeague(ourLeague) ? { extraLeagues: [ourLeague] } : {}),
     },
     state.userTeamId,
+    superCups,
   );
   state.windows = windows;
   state.matches = matches;

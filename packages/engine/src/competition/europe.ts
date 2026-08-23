@@ -187,6 +187,18 @@ export interface EuroEntry {
 export type TierLookup = (teamId: string) => 1 | 2 | 3 | 4;
 
 /**
+ * 그 리그에 **지금** 있는 클럽 — 승강이 카탈로그를 이긴다(`teamsOfLeagueIn`).
+ * 새 게임처럼 세이브가 없는 자리는 카탈로그가 답한다.
+ *
+ * 2부 몫을 뽑을 때 이것이 중요해진다: 소속을 카탈로그로 물으면 승격한 클럽이
+ * 1부 표와 2부 풀 **양쪽**에 서서 한 팀이 한 대회에 두 번 편성된다.
+ */
+export type LeagueMembers = (leagueId: string) => string[];
+
+/** 세이브가 없는 자리의 소속 — 카탈로그 그대로 */
+const catalogMembers: LeagueMembers = (leagueId) => teamsOfLeague(leagueId).map((t) => t.id);
+
+/**
  * 리그 내 서열 — 대항전 티켓 배정 기준.
  *
  * **지난 시즌 리그 최종 순위**가 있으면 그것을 쓴다 (4위로 마치면 다음 시즌 UCL —
@@ -199,15 +211,25 @@ function rankedTeams(
   seed: number,
   tables: LeagueTables | null,
   tierOf: TierLookup,
+  membersOf: LeagueMembers,
 ): string[] {
   const previous = tables?.[leagueId];
   if (previous && previous.length > 0) return previous;
+  /**
+   * 지난 시즌 표가 없는 리그 — **첫 시즌의 1부이거나, 언제나 2부**다. 2부는 리그전을
+   * 돌지 않아 표가 생길 일이 없고, 감독이 내려가 그 리그가 도는 시즌에도 그 표는
+   * 여기 오지 않는다(`finalTables`는 리그전을 도는 리그만 담는다) — 오면 **강등이 곧
+   * 다음 시즌 유럽행**이 된다.
+   *
+   * 같은 이유로 **지난 시즌 1부에서 뛴 클럽은 2부 몫에서 뺀다.** 강등된 클럽은 그
+   * 리그에서 가장 강해 서열 맨 위에 서므로, 두면 매년 강등 팀이 유럽에 나간다.
+   * 빼고도 정원은 남는다 — 12~14클럽에서 셋이 빠지고 티켓은 5~8장이다.
+   */
+  const playedTopFlight = new Set(Object.values(tables ?? {}).flat());
   const rng = makeRng(seed, `euro:${leagueId}:${season}`);
-  return teamsOfLeague(leagueId)
-    .map((t) => ({
-      id: t.id,
-      key: tierOf(t.id) * TIER_ORDER_STEP + Math.floor(rng() * TIER_JITTER),
-    }))
+  return membersOf(leagueId)
+    .filter((id) => !playedTopFlight.has(id))
+    .map((id) => ({ id, key: tierOf(id) * TIER_ORDER_STEP + Math.floor(rng() * TIER_JITTER) }))
     .sort((a, b) => a.key - b.key)
     .map((x) => x.id);
 }
@@ -229,7 +251,7 @@ export type CupWinners = Record<string, { uel?: string; uecl?: string } | undefi
  * 첫 우승팀의 연쇄로 목록의 주인이 이미 바뀌어 있어, 들어온 순서로 고르면 위
  * 순위 팀이 밀린다.
  *
- * 리그별 티켓 수는 그대로라 대회 정원(UCL 24·UEL 16·UECL 10)과 짝수 제약이
+ * 리그별 티켓 수는 그대로라 대회 정원(UCL 36·UEL 24·UECL 24)과 짝수 제약이
  * 흔들리지 않는다. 자리의 **주인만** 바뀐다.
  */
 function allocateEuropeanSlots(
@@ -278,12 +300,13 @@ export function europeanEntrants(
   tables: LeagueTables | null = null,
   cupWinners: CupWinners = {},
   tierOf: TierLookup = catalogTierOf,
+  membersOf: LeagueMembers = catalogMembers,
 ): string[] {
   const cup = cupCatalogById(cupId);
   if (!cup) return [];
   const out: string[] = [];
   for (const leagueId of Object.keys(cup.slots)) {
-    const ranked = rankedTeams(leagueId, season, seed, tables, tierOf);
+    const ranked = rankedTeams(leagueId, season, seed, tables, tierOf, membersOf);
     out.push(...(allocateEuropeanSlots(leagueId, ranked, cupWinners[leagueId])[cupId] ?? []));
   }
   return out;
@@ -296,10 +319,11 @@ export function buildEuroEntrants(
   tables: LeagueTables | null = null,
   cupWinners: CupWinners = {},
   tierOf: TierLookup = catalogTierOf,
+  membersOf: LeagueMembers = catalogMembers,
 ): EuroEntry[] {
   return cupCatalog().map((cup) => ({
     cupId: cup.id,
-    teams: europeanEntrants(cup.id, season, seed, tables, cupWinners, tierOf),
+    teams: europeanEntrants(cup.id, season, seed, tables, cupWinners, tierOf, membersOf),
   }));
 }
 
@@ -411,8 +435,8 @@ function drawCost(
  * 같은 리그 대결을 없애고 포트 분포를 고른다. 자리만 바꾸므로 편성 불변식은
  * 그대로 남는다 — 라운드마다 완전 매칭, 팀당 경기 수·홈 절반 모두 자리에 딸린 값이다.
  *
- * 실제 대회의 "같은 협회 클럽과는 만나지 않는다"를 하드 제약으로 걸면 축소된
- * 규모(UCL 24팀 중 5팀이 잉글랜드)에서 해가 없을 수 있어 무거운 벌점으로 둔다.
+ * 실제 대회의 "같은 협회 클럽과는 만나지 않는다"를 하드 제약으로 걸면 우리 규모
+ * (한 나라에서 최대 여덟 팀 — 1부 5 + 2부 3)에서 해가 없을 수 있어 무거운 벌점으로 둔다.
  */
 function drawOrder(teamIds: string[], seed: number, cupId: string, rounds: number): string[] {
   // 난수는 정렬 **전에** 셔플로 한 번만 쓴다 — 비교자에 넣으면 같은 쌍에 매번 다른

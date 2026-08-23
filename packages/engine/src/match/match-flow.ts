@@ -93,6 +93,7 @@ import { competitionLabel } from "../data/cup-catalog";
 import { isFriendly } from "../competition/friendly";
 import { advanceDomesticCups } from "../competition/domestic-cup";
 import { advanceEuroKnockouts } from "../competition/euro-knockout";
+import { advanceSuperCups } from "../competition/super-cup";
 import { needsExtraTime, needsShootout } from "../competition/extra-time";
 import { rollShootoutKick, shootoutFirst } from "../competition/shootout";
 import { recordCard } from "./discipline";
@@ -1753,6 +1754,7 @@ export function finalizeMatch(state: GameState): MatchDigest {
   // (승부차기 판정·다음 단계 편성이 바로 달력에 오른다)
   advanceEuroKnockouts(state, otherLines);
   advanceDomesticCups(state, otherLines);
+  advanceSuperCups(state, otherLines);
   /**
    * 회견은 **대회 경기마다** 열린다 (press.ts). 이긴 경기에만 열면 회견이 상이 되고,
    * 감독이 세계에 대답할 자리가 결과에 따라 사라진다. 친선은 자리 자체가 없다 —
