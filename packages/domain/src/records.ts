@@ -1155,6 +1155,95 @@ export const AchievementSchema = z.object({
 });
 export type Achievement = z.infer<typeof AchievementSchema>;
 
+// ── 시상 ──────────────────────────────────────────────
+/**
+ * 리그 시상 코드 — **세이브에 남는 것은 이 코드와 근거 수치뿐이다**
+ * (overview.md §1 철칙 4 · `AchievementCode`와 같은 규약).
+ *
+ * 표시명("올해의 선수")도 평가 문장("빛나는 시즌이었다")도 적지 않는다. 이름은
+ * `awardTitle`이 코드에서 만들고, 문장은 GM(장면)과 화면(커리어 표)이 쓴다.
+ * 선정과 동점 처리 규칙은 simulation/season.md §6이 원본이다.
+ */
+export const SEASON_AWARD_CODES = [
+  /** 그 리그 소속 선수의 시즌 최다 득점 */
+  "top-scorer",
+  /** 최다 도움 */
+  "top-assister",
+  /** 출전 문턱을 넘은 선수 중 시즌 평점 1위 */
+  "player-of-season",
+  /** 같은 눈금, 시즌 종료일 기준 `YOUNG_PLAYER_MAX_AGE`세 이하 */
+  "young-player",
+] as const;
+export type SeasonAwardCode = (typeof SEASON_AWARD_CODES)[number];
+
+/** 영플레이어의 나이 상한 — 시즌 종료일 기준 만 나이 */
+export const YOUNG_PLAYER_MAX_AGE = 23;
+
+/** 코드 → 상의 이름. 코드가 그 자리에서 읽히게 하는 유일한 표 */
+const SEASON_AWARD_TITLES: Record<string, string> = {
+  "top-scorer": "득점왕",
+  "top-assister": "도움왕",
+  "player-of-season": "올해의 선수",
+  "young-player": "영플레이어",
+};
+
+export function awardTitle(code: string): string {
+  return SEASON_AWARD_TITLES[code] ?? code;
+}
+
+/**
+ * 시상 한 건 — 코드 + **그 상이 선 근거 수치**.
+ *
+ * 수상자 **이름**을 함께 적는 것은 그것이 사실이라서다 — 은퇴하면
+ * `state.players`에서 사라져 id로는 더 못 찾는다 (`Achievement.playerName`과 같은 이유).
+ */
+export const SeasonAwardSchema = z.object({
+  code: z.string().min(1),
+  season: z.number().int(),
+  /** 어느 리그의 상인가 — 그해 그 선수가 뛴 리그 */
+  leagueId: z.string().min(1),
+  gamePlayerId: z.string().min(1),
+  /** 그때의 이름 */
+  playerName: z.string().min(1),
+  /** 그 리그에서 가장 많이 뛴 팀 */
+  teamId: z.string().min(1),
+  /** 근거 수치 — 어느 칸을 채우는가는 코드가 정한다 */
+  apps: z.number().int().nonnegative(),
+  goals: z.number().int().nonnegative(),
+  assists: z.number().int().nonnegative(),
+  /** 시즌 평점 — 출전이 없으면 없다 (`seasonRating`과 같은 눈금) */
+  rating: z.number().optional(),
+  /** `young-player`가 센 나이 — 시즌 종료일 기준 */
+  age: z.number().int().positive().optional(),
+});
+export type SeasonAward = z.infer<typeof SeasonAwardSchema>;
+
+// ── 2군 훈련 방침 ─────────────────────────────────────
+/**
+ * 2군 훈련 방침 — **어느 축으로 자라는지**를 정하는 코드 (season.md §2).
+ *
+ * 결산 없는 2군에서 축을 겨냥할 자리는 월간 성장의 축 선택뿐이라, 방침은 거기에
+ * 얹힌다. 코드만 상태에 남고(`GAME_STATE.reserveTraining`), 어느 축이 그 갈래에
+ * 드는지와 배율은 `engine/squad/training-plan.ts`가 한 자리에서 갖는다.
+ *
+ * `balanced`가 기본값이자 해제다 — 옛 세이브는 값이 없으므로 그것으로 읽힌다.
+ */
+export const RESERVE_TRAINING_POLICIES = ["balanced", "physical", "technical", "mental"] as const;
+export const ReserveTrainingPolicySchema = z.enum(RESERVE_TRAINING_POLICIES);
+export type ReserveTrainingPolicy = z.infer<typeof ReserveTrainingPolicySchema>;
+
+/** 코드 → 방침의 이름 — 화면과 프롬프트가 코드를 읽는 유일한 표 */
+const RESERVE_TRAINING_TITLES: Record<ReserveTrainingPolicy, string> = {
+  balanced: "균형",
+  physical: "신체",
+  technical: "기술",
+  mental: "정신",
+};
+
+export function reserveTrainingTitle(policy: ReserveTrainingPolicy): string {
+  return RESERVE_TRAINING_TITLES[policy];
+}
+
 // ── 서사 ──────────────────────────────────────────────
 /**
  * 서사 줄의 갈래 — **하루 한도를 세는 열쇠.**
