@@ -248,17 +248,12 @@ export function PlayerModal({
           <input
             value={nameKo}
             onChange={(e) => setNameKo(e.target.value)}
-            placeholder="예: 김선수"
             data-testid="player-modal-name"
           />
         </label>
         <label className="admin-field grow">
           로마자
-          <input
-            value={nameEn}
-            onChange={(e) => setNameEn(e.target.value)}
-            placeholder="예: Kim Player"
-          />
+          <input value={nameEn} onChange={(e) => setNameEn(e.target.value)} />
         </label>
         <label className="admin-field">
           생년월일
