@@ -48,6 +48,7 @@ export const SKILL_LABEL: Record<string, string> = {
   withdraw_offer: "협상 철회",
   release_player: "계약 해지",
   recall_loan: "임대 복귀",
+  exercise_buyback: "되사기 행사",
   open_renewal: "재계약 제안",
   open_release: "해지 제안",
   // 스킬이 아니라 코어가 남기는 기록 — 카탈로그에 없지만 칩으로 선다

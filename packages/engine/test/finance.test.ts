@@ -47,6 +47,7 @@ import {
   psrStatus,
   recordFinance,
   settleDuePayments,
+  settleSellOn,
   summarise,
   topUpTransferBudget,
   transitionSeason,
@@ -1890,5 +1891,166 @@ describe("지급 일정 — 분할은 표를 타고 나간다", () => {
     expect(paid.amount).toBe(Math.floor(severance / 2));
     expect(f.balance).toBe(before.balance - Math.floor(severance / 2));
     expect(f.transferBudget).toBe(before.budget); // 이적 예산은 그대로
+  });
+});
+
+describe("조건부 조항 — 셀온 정산은 양쪽에 대칭으로 선다", () => {
+  /** 잔액·이적 예산 두 축을 한 번에 뜬다 */
+  function books(state: GameState, teamId: string) {
+    const f = financeOf(state, teamId);
+    return { balance: f.balance, budget: f.transferBudget };
+  }
+
+  /** 두 AI 구단 — 원 소속(조항을 쥔 쪽)과 지금 소속(무는 쪽) */
+  function twoClubs(state: GameState): [string, string] {
+    const ids = state.finances
+      .map((f) => f.teamId)
+      .filter(
+        (id) => id !== state.userTeamId && isClubTeam(id) && !isMarketOnlyLeague(leagueOfTeam(id)),
+      );
+    return [ids[0]!, ids[1]!];
+  }
+
+  /**
+   * 셀온이 걸린 원장 한 줄을 직접 꽂는다 — 협상을 다 굴리지 않고 **정산만** 본다.
+   * @returns 선수 id
+   */
+  function sellOnSold(
+    state: GameState,
+    from: string,
+    to: string,
+    input: { fee: number; rate: number },
+  ): string {
+    const player = state.players.find((p) => p.teamId === to)!;
+    state.transfers.push({
+      id: `tr-seed-${player.id}`,
+      gamePlayerId: player.id,
+      windowId: null,
+      fromTeamId: from,
+      toTeamId: to,
+      date: "2026-07-05",
+      type: "transfer",
+      fee: input.fee,
+      clauses: { sellOn: { rate: input.rate, settledOn: null } },
+    });
+    return player.id;
+  }
+
+  const ORIGINAL = 10_000_000;
+  const RESALE = 30_000_000;
+  const RATE = 0.2;
+  /** 이익 £20M의 20% */
+  const DUE = 4_000_000;
+
+  it("이익의 비율이 무는 쪽에서 나가 받는 쪽으로 그대로 들어간다", () => {
+    const state = createMiniGame();
+    const [holder, owing] = twoClubs(state);
+    const playerId = sellOnSold(state, holder, owing, { fee: ORIGINAL, rate: RATE });
+    const before = { holder: books(state, holder), owing: books(state, owing) };
+
+    const paid = settleSellOn(state, {
+      gamePlayerId: playerId,
+      sellerTeamId: owing,
+      resaleFee: RESALE,
+      resaleTransferId: "tr-resale-1",
+    });
+
+    expect(paid).toBe(DUE);
+    // **대칭** — 나간 만큼 들어오고, 이적 예산도 같은 크기로 오간다
+    expect(books(state, owing).balance).toBe(before.owing.balance - DUE);
+    expect(books(state, owing).budget).toBe(before.owing.budget - DUE);
+    expect(books(state, holder).balance).toBe(before.holder.balance + DUE);
+    expect(books(state, holder).budget).toBe(before.holder.budget + DUE);
+    // 세계의 돈은 늘지도 줄지도 않는다
+    const delta =
+      books(state, owing).balance -
+      before.owing.balance +
+      (books(state, holder).balance - before.holder.balance);
+    expect(delta).toBe(0);
+
+    const schedule = state.paymentSchedules!.find((s) => s.kind === "sell_on")!;
+    expect(schedule.installments).toHaveLength(1);
+    expect(schedule.installments[0]!.paidOn).toBe(state.date);
+  });
+
+  it("한 번 정산되면 다시 발동하지 않는다", () => {
+    const state = createMiniGame();
+    const [holder, owing] = twoClubs(state);
+    const playerId = sellOnSold(state, holder, owing, { fee: ORIGINAL, rate: RATE });
+
+    expect(
+      settleSellOn(state, {
+        gamePlayerId: playerId,
+        sellerTeamId: owing,
+        resaleFee: RESALE,
+        resaleTransferId: "tr-resale-1",
+      }),
+    ).toBe(DUE);
+    const after = books(state, owing);
+    expect(
+      settleSellOn(state, {
+        gamePlayerId: playerId,
+        sellerTeamId: owing,
+        resaleFee: RESALE,
+        resaleTransferId: "tr-resale-2",
+      }),
+    ).toBe(0);
+    expect(books(state, owing)).toEqual(after);
+  });
+
+  it("손해 보고 팔면 한 푼도 나가지 않는다 — 조항은 그래도 소진된다", () => {
+    const state = createMiniGame();
+    const [holder, owing] = twoClubs(state);
+    const playerId = sellOnSold(state, holder, owing, { fee: ORIGINAL, rate: RATE });
+    const before = books(state, owing);
+
+    expect(
+      settleSellOn(state, {
+        gamePlayerId: playerId,
+        sellerTeamId: owing,
+        resaleFee: ORIGINAL - 1,
+        resaleTransferId: "tr-resale-1",
+      }),
+    ).toBe(0);
+    expect(books(state, owing)).toEqual(before);
+    const clause = state.transfers.find((t) => t.clauses?.sellOn)!.clauses!.sellOn!;
+    expect(clause.settledOn).toBe(state.date);
+    expect(clause.settledAmount).toBe(0);
+  });
+
+  it("무는 쪽이 아닌 구단이 팔면 발동하지 않는다", () => {
+    const state = createMiniGame();
+    const [holder, owing] = twoClubs(state);
+    const playerId = sellOnSold(state, holder, owing, { fee: ORIGINAL, rate: RATE });
+    expect(
+      settleSellOn(state, {
+        gamePlayerId: playerId,
+        // 조항을 쥔 구단이 파는 것으로는 서지 않는다 — 무는 쪽은 toTeamId다
+        sellerTeamId: holder,
+        resaleFee: RESALE,
+        resaleTransferId: "tr-resale-1",
+      }),
+    ).toBe(0);
+  });
+
+  it("유저가 무는 셀온은 원장에 셀온 정산금으로 적힌다", () => {
+    const state = createMiniGame();
+    const [holder] = twoClubs(state);
+    const playerId = sellOnSold(state, holder, state.userTeamId, {
+      fee: ORIGINAL,
+      rate: RATE,
+    });
+
+    settleSellOn(state, {
+      gamePlayerId: playerId,
+      sellerTeamId: state.userTeamId,
+      resaleFee: RESALE,
+      resaleTransferId: "tr-resale-1",
+    });
+    const f = financeOf(state, state.userTeamId);
+    const paid = f.ledger[f.ledger.length - 1]!;
+    expect(categoryOf(paid)).toBe("transfer_out");
+    expect(paid.label).toContain("셀온 정산금");
+    expect(paid.amount).toBe(DUE);
   });
 });
