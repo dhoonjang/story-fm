@@ -9,6 +9,7 @@ import { isReserveMatch } from "@story-fm/domain";
 import {
   CONDITION_BASE,
   DEFAULT_FORMATION,
+  MATCHDAY_SQUAD,
   achievementTitle,
   ageOf,
   anchorOf,
@@ -70,6 +71,7 @@ import { generateYouthPlayer } from "../world/generate";
 import { assignSquadNumber } from "../squad/numbers";
 import {
   buildAssignments,
+  clampReputation,
   groupOf,
   managedTeamId,
   playersOf,
@@ -427,6 +429,12 @@ const EURO_TITLE_BOARD = 10;
 const EURO_RUNNER_UP_MEDIA = 4;
 
 /**
+ * 시즌 리뷰가 보드 평판에 남기는 폭 — 기대 순위를 지켰으면 +, 못 지켰으면 −로
+ * **같은 크기**가 선다 (career.md §5.1).
+ */
+const BOARD_SEASON_SWING = 8;
+
+/**
  * 대항전 우승 **상금** — 구단이 받는 돈이라 감독의 커리어와 갈라져 있다.
  * 무직으로 맞은 시즌 끝에도 옛 구단의 장부에는 앉아야 한다 (career.md §5.1).
  */
@@ -456,19 +464,16 @@ function reviewEuropeanCampaign(state: GameState): string[] {
       (finalMatch.homeTeamId === state.userTeamId || finalMatch.awayTeamId === state.userTeamId);
     if (champion === state.userTeamId) {
       state.trophies.push({ season: state.season, competitionId: cup.id, teamId: champion });
-      state.manager.reputation.media = Math.min(
-        100,
+      state.manager.reputation.media = clampReputation(
         state.manager.reputation.media + EURO_TITLE_MEDIA,
       );
-      state.manager.reputation.board = Math.min(
-        100,
+      state.manager.reputation.board = clampReputation(
         state.manager.reputation.board + EURO_TITLE_BOARD,
       );
       digest.push(`🏆 ${cup.name} 우승`);
       pushNarrative(state, `${cup.name} 우승`, 5);
     } else if (ours) {
-      state.manager.reputation.media = Math.min(
-        100,
+      state.manager.reputation.media = clampReputation(
         state.manager.reputation.media + EURO_RUNNER_UP_MEDIA,
       );
       digest.push(`${competitionShortName(cup.id)} 준우승 — 결승 상대 ${teamName(champion)}`);
@@ -507,9 +512,8 @@ export function reviewSeason(state: GameState): string[] {
 
   const expectation = boardExpectation(state, state.userTeamId);
   const met = position <= expectation.target;
-  state.manager.reputation.board = Math.max(
-    0,
-    Math.min(100, state.manager.reputation.board + (met ? 8 : -8)),
+  state.manager.reputation.board = clampReputation(
+    state.manager.reputation.board + (met ? BOARD_SEASON_SWING : -BOARD_SEASON_SWING),
   );
 
   if (position === 1) {
@@ -591,6 +595,12 @@ export function recordLeagueHistory(state: GameState): void {
   }
   state.leagueHistory = kept;
 }
+
+/**
+ * 유스 콜업 난수를 세이브 시드에서 갈라 내는 오프셋 — 같은 `state.seed`를 쓰는
+ * 다른 생성기(세계를 세울 때의 2군 채우기 등)와 같은 선수를 뽑지 않게 한다.
+ */
+const YOUTH_INTAKE_SEED_OFFSET = 101;
 
 /**
  * 시즌 전환 — 쇠퇴·은퇴·유스 유입·계약 갱신·새 일정 (season.md §6).
@@ -779,7 +789,7 @@ function applyTransition(state: GameState): string[] {
     const takenNames = new Set(squad.map((p) => p.name));
     for (let i = 0; i < totalIntake; i++) {
       const youth = generateYouthPlayer(
-        state.seed + 101,
+        state.seed + YOUTH_INTAKE_SEED_OFFSET,
         team.id,
         nextSeason,
         i,
@@ -824,13 +834,13 @@ function applyTransition(state: GameState): string[] {
       digest.push(`유스 합류: 신인 ${totalIntake}명이 2군 개발 스쿼드에 합류했다`);
     }
 
-    // 은퇴로 1군이 너무 얇아졌을 때만 2군 상위 자원을 자동 승격한다.
-    // 그 외 승강은 감독의 결정으로 남긴다.
+    // 1군이 매치데이 명단(선발 11 + 벤치 9)을 못 채울 때만 2군 상위 자원을
+    // 자동 승격한다. 그 외 승강은 감독의 결정으로 남긴다.
     const firstCount = () => squad.filter((p) => p.squadLevel !== "reserve").length;
     for (const player of [...squad]
       .filter((p) => p.squadLevel === "reserve")
       .sort((a, b) => b.attributes.overall - a.attributes.overall)) {
-      if (firstCount() >= 20) break;
+      if (firstCount() >= MATCHDAY_SQUAD) break;
       player.squadLevel = "first";
     }
 
