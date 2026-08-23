@@ -359,6 +359,14 @@ export const SKILL_CATALOG = [
       "합의로 깎으려면 open_release가 먼저다. 감독의 확인을 받고 호출하라.",
   },
   {
+    name: "exercise_buyback",
+    label: "되사기 행사",
+    group: "이적",
+    readOnly: false,
+    description:
+      "우리가 판 선수에게 걸어 둔 **되사기 조항**을 행사해 정해진 값에 그 자리에서 데려온다. 협상도 메디컬도 없다 — 권리라 상대는 거부할 수 없다. 쓸 수 있는 권리가 있으면 턴 블록에 서므로, 없는 선수에게 부르지 마라. 이적창이 열려 있고 이적 예산이 조항 값을 덮을 때만 선다.",
+  },
+  {
     name: "recall_loan",
     label: "임대 복귀",
     group: "이적",

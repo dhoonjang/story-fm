@@ -9,6 +9,7 @@ import {
   describeActiveArcs,
   computeStandings,
   dayOfWeek,
+  describeBuyBackRights,
   describeNegotiations,
   describeNextFixture,
   describeBoardRequests,
@@ -514,6 +515,9 @@ export function buildGmStateNote(
   if (!negotiations.startsWith("진행 중인 협상 없음")) {
     lines.push(`협상:\n${negotiations}`);
   }
+  // 쓸 수 있는 되사기 권리 — 이 줄이 없으면 모델은 그 자리가 있는 줄도 모른다
+  const buyBacks = describeBuyBackRights(state);
+  if (buyBacks) lines.push(`행사할 수 있는 되사기 조항:\n${buyBacks}`);
   // 활성 서사 아크 — 닫힐 때까지 매 턴 실려 GM이 시즌을 가로지르는 흐름을 잃지 않는다
   // (people.md §9). 개폐도 사실 줄도 코어의 것이다
   const arcs = describeActiveArcs(state);
