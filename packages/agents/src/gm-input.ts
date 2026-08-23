@@ -820,15 +820,34 @@ function clockFromHeader(meridiem: string | undefined, hour?: string, minute?: s
   return clock ?? PART_OF_DAY[(meridiem ?? "").toLowerCase()] ?? "09:00";
 }
 
+/** 위생이 지금까지 본 것 — 헤더가 섰나, 장면이 열렸나 */
+interface SceneScan {
+  headerSeen: boolean;
+  /** 첫 `@` 줄이 지나갔다 — 그 뒤의 태그 없는 줄은 이어쓰기다 */
+  sceneOpen: boolean;
+}
+
 /**
- * 장면에 설 수 있는 줄인가 — 출력 문법이 허락하는 것은 셋뿐이다:
- * 시점 헤더(맨 앞 하나), `@`로 시작하는 화자·내레이션, 빈 줄(문단 간격).
+ * 장면에 설 수 있는 줄인가 — 시점 헤더(맨 앞 하나), `@`로 시작하는 화자·내레이션,
+ * 빈 줄(문단 간격), 그리고 **장면이 선 뒤의 이어쓰기 줄**(prompts.md §1).
+ *
+ * ⚠️ 이어쓰기가 되는 것은 첫 `@` 줄 **뒤**부터다 — 그 앞의 태그 없는 줄은 도구
+ * 앞에 흘린 작업 로그라, 살리면 "…확인하겠습니다"가 코치의 대사로 붙는다.
+ * 헤더 꼴(`[`)은 이어쓰기보다 헤더 규칙이 앞선다.
  */
-function keepsSceneLine(line: string, headerSeen: boolean): boolean {
+function keepsSceneLine(line: string, scan: SceneScan): boolean {
   const trimmed = line.trim();
   if (trimmed.length === 0) return true;
   if (trimmed.startsWith("@")) return true;
-  return !headerSeen && trimmed.startsWith("[");
+  if (trimmed.startsWith("[")) return !scan.headerSeen;
+  return scan.sceneOpen;
+}
+
+/** 판정을 마친 줄이 다음 판정에 남기는 것 */
+function afterSceneLine(line: string, scan: SceneScan): void {
+  const trimmed = line.trim();
+  if (trimmed.startsWith("[")) scan.headerSeen = true;
+  if (trimmed.startsWith("@")) scan.sceneOpen = true;
 }
 
 /**
@@ -836,7 +855,8 @@ function keepsSceneLine(line: string, headerSeen: boolean): boolean {
  *
  * 도구를 부르는 턴에서 모델은 반복마다 "…확인하겠습니다" 한 줄과 헤더를 새로
  * 찍는다(프롬프트로 몇 번을 눌러도 남는 습성이다). 그 줄들은 장면이 아니라
- * 작업 로그인데 화면에는 코치의 말과 나란히 선다.
+ * 작업 로그인데 화면에는 코치의 말과 나란히 선다. 걷는 것은 **장면이 서기 전**의
+ * 태그 없는 줄까지다 — 그 뒤의 것은 이어쓰기라 살린다.
  *
  * ⚠️ **@ 줄이 하나도 없으면 손대지 않는다** — 규약을 통째로 어긴 응답까지
  * 지우면 빈 턴이 되어 무슨 일이 있었는지조차 사라진다.
@@ -844,11 +864,11 @@ function keepsSceneLine(line: string, headerSeen: boolean): boolean {
 export function sanitizeSceneText(text: string): string {
   const lines = text.split("\n");
   if (!lines.some((line) => line.trim().startsWith("@"))) return text;
-  let headerSeen = false;
+  const scan: SceneScan = { headerSeen: false, sceneOpen: false };
   const kept: string[] = [];
   for (const line of lines) {
-    if (!keepsSceneLine(line, headerSeen)) continue;
-    if (line.trim().startsWith("[")) headerSeen = true;
+    if (!keepsSceneLine(line, scan)) continue;
+    afterSceneLine(line, scan);
     kept.push(line);
   }
   // 걷어낸 자리에 남은 빈 줄이 겹치지 않게 (문단 간격은 하나면 족하다)
@@ -860,13 +880,13 @@ export function sanitizeSceneText(text: string): string {
 
 /**
  * 스트리밍에도 같은 위생을 건다 — 걸러진 줄이 화면에 잠깐 떴다 사라지면
- * 그것대로 눈에 띈다. 줄의 **첫 글자**만 보면 판정되므로, 지연되는 것은
- * 줄 앞머리뿐이고 그다음 델타는 그대로 흘러간다.
+ * 그것대로 눈에 띈다. 줄의 **첫 글자**와 여기까지 지나온 것(`SceneScan`)만 보면
+ * 판정되므로, 지연되는 것은 줄 앞머리뿐이고 그다음 델타는 그대로 흘러간다.
  */
 export function filterSceneStream(emit: (delta: string) => void): (delta: string) => void {
   let pending = ""; // 아직 판정하지 못한 줄 앞머리 (공백만 들어온 상태)
   let keeping: boolean | null = null; // 이 줄을 내보내는가 — null이면 판정 전
-  let headerSeen = false;
+  const scan: SceneScan = { headerSeen: false, sceneOpen: false };
 
   const startLine = () => {
     pending = "";
@@ -880,8 +900,8 @@ export function filterSceneStream(emit: (delta: string) => void): (delta: string
     }
     pending += chunk;
     if (pending.trim().length === 0) return; // 아직 공백뿐 — 판정 보류
-    keeping = keepsSceneLine(pending, headerSeen);
-    if (pending.trim().startsWith("[")) headerSeen = true;
+    keeping = keepsSceneLine(pending, scan);
+    afterSceneLine(pending, scan);
     if (keeping) emit(pending);
     pending = "";
   };
