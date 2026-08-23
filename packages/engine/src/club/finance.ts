@@ -265,7 +265,7 @@ const JOURNAL_MONEY_FLOOR = 100_000;
 const JOURNAL_MONEY_CATEGORIES: readonly FinanceCategory[] = ["prize"];
 
 /** 이 잔고에서 일지에 설 수 있는 최소 금액 */
-export function journalMoneyThreshold(balance: number): number {
+function journalMoneyThreshold(balance: number): number {
   return Math.max(
     JOURNAL_MONEY_FLOOR,
     Math.min(JOURNAL_MONEY_ABSOLUTE, balance * JOURNAL_MONEY_BALANCE_RATE),
@@ -1611,7 +1611,7 @@ export function affordableWageBill(teamId: string, leagueId?: string, state?: Ga
  * 없다(`initialWages`). 리그를 주지 않으면 카탈로그 리그로 본다. 승강은 세이브에만
  * 있으므로 t=0에서는 두 값이 같다.
  */
-export function catalogRevenueEstimate(
+function catalogRevenueEstimate(
   teamId: string,
   leagueId = leagueOfTeam(teamId),
   state?: GameState,
@@ -2194,7 +2194,7 @@ export const NARRATIVE_FINANCE_MIN_AMOUNT = 10_000;
 /** 어떤 카테고리에서도 넘을 수 없는 절대 상한 — 도구 스키마의 바깥 울타리 */
 export const NARRATIVE_FINANCE_MAX_AMOUNT = 10_000_000;
 /** 이적 예산 지원·삭감의 하루 상한 (같은 주급 배수 자) — 예산은 매출보다 큰 단위로 움직인다 */
-export const BUDGET_ADJUST_WAGE_LIMIT = 10;
+const BUDGET_ADJUST_WAGE_LIMIT = 10;
 
 // 건당 상한의 배수 — 새 금액이 아니라 같은 축의 기존 상수에서 파생한다
 /** 포상·회식 — 주급 총액 대비. `WIN_BONUS_RATE`(승리 수당)의 2.5배 = 큰 경기 하나의 무게 */

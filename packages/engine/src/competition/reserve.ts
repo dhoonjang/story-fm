@@ -19,10 +19,7 @@ import { scopedTeams, type WorldScope } from "../world/scope";
 export const RESERVE_KICKOFF = "14:00";
 
 /** 라운드 간격(일) — 격주. 리그 상대 전부를 한 번씩 만나면 4월 안에 끝난다 */
-export const RESERVE_ROUND_INTERVAL_DAYS = 14;
-
-/** 감독에게 보이는 이름 */
-export const RESERVE_LABEL = "2군 리그";
+const RESERVE_ROUND_INTERVAL_DAYS = 14;
 
 // id 판정(`isReserveMatch` · `reserveCompetitionId`)은 domain/schedule.ts에 있다 —
 // 팀 경기를 세는 자리 전부가 대회 판정보다 먼저 물어야 해서 경계가 도메인이다.

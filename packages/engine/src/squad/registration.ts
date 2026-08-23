@@ -28,7 +28,7 @@ export function occupiesSquadList(
   return !isUnder21(player.birthdate, seasonYear(state.season));
 }
 
-export function registrableOf(
+function registrableOf(
   state: GameState,
   player: Pick<GamePlayer, "id" | "birthdate" | "homegrownCountry">,
   teamId: string,

@@ -35,7 +35,7 @@ import {
  */
 
 /**
- * **80 OVR 정점기(24~27세) 선수의 시장가.** ⚠️ 밸런스 임시값 (사용자 확인 대기).
+ * **80 OVR 정점기(24~27세) 선수의 시장가.** ⚠️ 밸런스 값.
  * 곡선 전체가 이 한 값에 비례하므로 조정은 여기서 끝난다.
  *
  * 이적료를 주급에 비례시키지 않는 이유: 실제 축구에서 주급은 완만하고 이적료는
@@ -1005,7 +1005,7 @@ export const RELEASE_AGE_MOVE = 25;
  * **선수가 없는 팀은 세지 않는다** — 그 자리에 아무도 없어 "더 나은 선수 0명"이
  * 되지만, 스쿼드가 빈 팀은 데려갈 구단이 아니라 데이터의 빈자리다.
  */
-export function suitorCountOf(state: GameState, player: GamePlayer): number {
+function suitorCountOf(state: GameState, player: GamePlayer): number {
   const depth = squadDepthOf(state);
   const squadSize = new Map<string, number>();
   for (const p of state.players) squadSize.set(p.teamId, (squadSize.get(p.teamId) ?? 0) + 1);
@@ -1391,7 +1391,7 @@ export function describeOdds(odds: DealOdds): string {
 }
 
 /** 안개가 낀 확률은 숫자 대신 라벨로 — 기존 안개 규칙과 같은 태도 */
-export function oddsLabel(probability: number): string {
+function oddsLabel(probability: number): string {
   if (probability >= 80) return "거의 확실하다";
   if (probability >= 60) return "해볼 만하다";
   if (probability >= 40) return "반반이다";
