@@ -57,7 +57,7 @@ import {
   wageRatioTone,
   type WageRatioTone,
 } from "../club/finance";
-import { transferFundRoom, walletOf } from "../club/manager-wallet";
+import { walletOf } from "../club/manager-wallet";
 import {
   cupCatalog,
   competitionLabel,
@@ -1141,8 +1141,6 @@ export interface OfficeViews {
      * (`MANAGER_SPEND_KIND_KO`) — 화면이 코드를 문장으로 옮기지 않는다.
      */
     spending: Array<{ on: string; kind: string; amount: number; playerName: string | null }>;
-    /** 이번 시즌 사재로 더 넣을 수 있는 이적 예산 — 0이면 문이 닫혔다 (career.md §5.4) */
-    transferFundRoom: number;
     trophies: Array<{ competition: string; season: number; teamName: string }>;
     /**
      * 업적 — **코드와 근거 수치**다. 세이브가 문장을 갖지 않으므로(career.md §6)
@@ -2613,7 +2611,6 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         playerName:
           s.kind === "player-bonus" && s.ref ? (playerById(state, s.ref)?.name ?? null) : null,
       })),
-      transferFundRoom: transferFundRoom(state),
       trophies: state.trophies.map((t) => ({
         competition: t.competitionId ? competitionName(t.competitionId) : (t.competition ?? ""),
         season: t.season,
