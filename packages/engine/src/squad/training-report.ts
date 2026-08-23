@@ -1,4 +1,4 @@
-import type { AttributeAxis, GrowthOrigin, TrainAttr } from "@story-fm/domain";
+import type { AttributeAxis, GamePlayer, GrowthOrigin, TrainAttr } from "@story-fm/domain";
 import {
   ATTRIBUTE_AXES,
   AXIS_KO,
@@ -534,13 +534,7 @@ export function applyTrainingOutcomes(
  */
 export function applyAttributeStep(
   state: GameState,
-  player: {
-    id: string;
-    name: string;
-    birthdate?: string;
-    attributes: Record<string, number> & { potential: number };
-    growthCarry?: Record<string, number>;
-  },
+  player: GamePlayer,
   axis: AttributeAxis | null,
   step: number | null | undefined,
   opts: {
@@ -567,8 +561,7 @@ export function applyAttributeStep(
   const move = Math.max(ATTR_STEP_MIN, Math.min(ATTR_STEP_MAX, raw));
   if (move === 0) return null;
 
-  const attrs = player.attributes as unknown as Record<string, number>;
-  const value = attrs[axis] ?? 0;
+  const value = player.attributes[axis] ?? 0;
   if (move > 0 && (value >= player.attributes.potential || value >= 99)) return null;
   if (move < 0 && value <= 1) return null;
 
@@ -597,8 +590,8 @@ export function applyAttributeStep(
   const applied = Math.sign(whole);
   player.growthCarry = { ...(player.growthCarry ?? {}), [axis]: carry - applied };
 
-  attrs[axis] = value + applied;
-  recomputeOverall(player as never);
+  player.attributes[axis] = value + applied;
+  recomputeOverall(player);
   recordGrowth(
     state,
     player.id,
@@ -609,7 +602,7 @@ export function applyAttributeStep(
     opts.origin,
     opts.on,
   );
-  return { axis, step: applied, value: attrs[axis]! };
+  return { axis, step: applied, value: player.attributes[axis] };
 }
 
 /** 판정값을 −1~3으로 접는다 — 값이 없거나 숫자가 아니면 0 */
