@@ -14,6 +14,7 @@ export const AGENT_NAMES = [
   "mood-rater",
   "negotiator",
   "history-compactor",
+  "onboarding-judge",
 ] as const;
 
 export type AgentName = (typeof AGENT_NAMES)[number];
@@ -163,6 +164,7 @@ const LlmConfigFileSchema = z
         "mood-rater": RawAgentConfigSchema,
         negotiator: RawAgentConfigSchema,
         "history-compactor": RawAgentConfigSchema,
+        "onboarding-judge": RawAgentConfigSchema,
       })
       .strict(),
   })
