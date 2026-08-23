@@ -8,13 +8,16 @@ import { addDays, contractUntil, diffDays } from "../core/dates";
 import { boardExpectation, computeStandings, type StandingRow } from "../competition/season";
 import { syncDefaultTraining } from "../squad/training-plan";
 import { expirePendingPress } from "../club/press";
+import { payManagerSeverance } from "../club/finance";
 import {
   AI_MANAGER_RATING_FALLBACK,
   MANAGER_TERMS_BY_TIER,
   boardExpectationText,
   clampCondition,
   formatMoney,
+  type Dismissal,
   type GameTeam,
+  type ManagerContract,
   type ManagerOffer,
 } from "@story-fm/domain";
 import {
@@ -115,6 +118,28 @@ export const OFFER_DRY_SPELL_DAYS = 120;
 export const VACANCY_KNOCK_DAYS = 14;
 /** 지원해서 선 제안의 연봉 배율 — 아쉬운 쪽이 깎인다 (career.md §5.1) */
 export const KNOCK_SALARY_RATE = 0.85;
+/**
+ * 보드가 재계약 여부를 판정하는 시점 — **만료 이 날 수 앞에서 한 번**
+ * (career.md §5.4). 매일 다시 보면 평판이 오르내릴 때마다 통보가 번복된다.
+ */
+export const RENEWAL_NOTICE_DAYS = 90;
+/** 재계약 제안이 서는 보드 평판 문턱 — 아래면 비갱신 통보다 */
+export const RENEWAL_BOARD_GATE = 40;
+/**
+ * 경질 위약금이 무는 **잔여 연봉의 비율** (career.md §5.4).
+ *
+ * 잔여 전액을 물리면 tier 1의 3년 계약이 £18M — 이적 예산 한 시즌치가 경질 하루에
+ * 사라진다. 절반이면 tier 1 최대 £6M이고, 잔여가 짧을수록 싸져 시즌 말 경질이
+ * 구단에 싸다는 실제 결이 남는다.
+ *
+ * 선수 합의 해지의 정산 비율(`market.ts`의 `SEVERANCE_RATE`)과 값이 같지만 **다른
+ * 손잡이다** — 하나는 선수가 합의해 줄 앵커고 하나는 구단이 무는 대가라, 합치면
+ * 어느 한쪽을 조율할 때 다른 쪽이 딸려 움직인다.
+ */
+export const MANAGER_SEVERANCE_RATE = 0.5;
+/** 잔여를 연 단위로 환산하는 자 — 위약금은 남은 **날**에 비례한다 */
+const DAYS_PER_YEAR = 365;
+
 /**
  * tier 4의 흥정 기준점 — 문턱이 없는 등급이라 여유의 출발점만 여기서 잰다.
  * 경질 직후 보드 평판의 바닥(`USER_BOARD_FLOOR`)과 같은 값이다: 그 처지에서는
@@ -254,7 +279,11 @@ function expireStaleOffers(state: GameState, digest: string[]): void {
   for (const offer of state.managerOffers ?? []) {
     if (offer.status !== "open" || offer.expiresOn >= state.date) continue;
     offer.status = "expired";
-    digest.push(`💼 ${teamShortNameIn(state, offer.teamId)}의 감독직 제안이 만료됐다`);
+    digest.push(
+      offer.via === "renewal"
+        ? `💼 ${teamShortNameIn(state, offer.teamId)}의 재계약 제안이 만료됐다`
+        : `💼 ${teamShortNameIn(state, offer.teamId)}의 감독직 제안이 만료됐다`,
+    );
   }
 }
 
@@ -404,6 +433,168 @@ export function runManagerMarket(state: GameState, digest: string[]): boolean {
 }
 
 /**
+ * **경질 위약금** — 잔여 계약에 비례하되 연봉 1년치에서 멈춘다 (career.md §5.4).
+ *
+ * 만료로 끝난 계약에는 잔여가 없어 0이다 — 끝까지 간 계약에 물 것은 없다.
+ */
+export function managerSeveranceOf(contract: ManagerContract, today: string): number {
+  const left = Math.max(0, diffDays(today, contract.until));
+  return Math.min(
+    contract.salary,
+    Math.round((contract.salary * left * MANAGER_SEVERANCE_RATE) / DAYS_PER_YEAR),
+  );
+}
+
+/**
+ * **감독이 그 구단의 사람이 아니게 되는 하루** — 경질과 계약 만료가 함께 쓴다
+ * (career.md §5.1 · §5.4).
+ *
+ * 갈리는 것은 카드의 `kind`와 위약금뿐이다. 무직은 **상태지 사유가 아니라서**,
+ * 그 뒤로 도는 길(제안·노크·공석 명부·무직의 tick)은 어느 쪽이든 같아야 한다.
+ *
+ * @param channel 후임 감독을 뽑는 rng 채널 — 경질과 만료가 같은 날 같은 사람을
+ *                세우지 않게 갈라 둔다
+ */
+function leaveClub(state: GameState, card: Dismissal, channel: string): void {
+  const teamId = card.teamId;
+  const contract = state.manager.contract;
+  /**
+   * **위약금은 구단이 무는 구단의 지출이다** (career.md §5.4) — 계약을 지우기 전에
+   * 잰다. 만료는 끝까지 간 계약이라 잔여가 0이고, 계약이 없던 옛 세이브도 0이다.
+   */
+  if (contract) {
+    const severance = managerSeveranceOf(contract, state.date);
+    if (severance > 0) {
+      payManagerSeverance(state, teamId, severance);
+      card.severance = severance;
+    }
+  }
+  state.dismissal = card;
+  delete state.manager.contract;
+
+  // 감독이 없는 구단은 세계에 없다 — 옛 구단은 그날로 후임을 세운다
+  const team = state.teams.find((t) => t.id === teamId);
+  if (team) installNewManager(state, team, makeRng(state.seed, `${channel}:${state.date}`));
+
+  /**
+   * **진행 중이던 협상은 전부 사라진다** — 감독이 없는 구단의 흥정이고, 무직인
+   * 감독이 남의 구단 선수를 계속 흥정할 수는 없다 (career.md §5.1).
+   */
+  for (const negotiation of state.negotiations) {
+    if (negotiation.status === "open" || negotiation.status === "agreed") {
+      negotiation.status = "expired";
+    }
+  }
+  // 답을 기다리던 재계약 제안도 닫힌다 — 다시 계약할 구단이 없어졌다 (career.md §5.4)
+  for (const offer of state.managerOffers ?? []) {
+    if (offer.status === "open") offer.status = "expired";
+  }
+}
+
+/**
+ * **재계약 제안** — 지금 구단이 거는 다음 임기 (career.md §5.4).
+ *
+ * 조건은 지금 등급의 기본 표이되 현 연봉이 그보다 높으면 현 연봉을 유지한다 —
+ * 구단이 스스로 깎아 부르지는 않는다. 흥정도 수락도 이직 제안과 같은 길을 탄다.
+ */
+function standRenewalOffer(state: GameState, contract: ManagerContract, digest: string[]): void {
+  const teamId = state.userTeamId;
+  const tier = tierOfTeamIn(state, teamId);
+  const terms = MANAGER_TERMS_BY_TIER[tier];
+  const expectation = boardExpectation(state, teamId);
+  const salary = Math.max(contract.salary, terms.salary);
+  state.managerOffers = [
+    ...(state.managerOffers ?? []),
+    {
+      id: `mgr-renewal-${teamId}-${state.date}`,
+      teamId,
+      madeOn: state.date,
+      expiresOn: addDays(state.date, OFFER_DAYS),
+      tier,
+      target: expectation.target,
+      expectationCode: expectation.code,
+      salary,
+      years: terms.years,
+      budgetPledge: terms.budgetPledge,
+      via: "renewal",
+      status: "open",
+    },
+  ];
+  digest.push(
+    `💼 보드가 재계약을 제안했다 — 연봉 ${formatMoney(salary)}·${terms.years}년 ·` +
+      ` 이적 예산 약속 ${formatMoney(terms.budgetPledge)} · ${OFFER_DAYS}일 안에 답해야 한다`,
+  );
+  pushNarrative(state, `${teamNameIn(state, teamId)} 재계약 제안`, 5);
+}
+
+/**
+ * **감독 계약의 하루** — 만료 판정과 재계약 통보 (career.md §5.4). tick이 매일 부른다.
+ *
+ * 만료는 `오늘 > 만료일` 하나로 잰다. ⚠️ **"만료일 당일"로 재면 영영 오지 않는다** —
+ * 리그 최종전과 07-01 사이를 시즌 전환이 통째로 건너뛰므로 계약이 끝나는 06-30은
+ * tick이 밟는 날이 아니다(선수 계약의 만료 예고가 이미 밟은 함정이다 —
+ * `dueExpiryStage`). 날짜는 단조 증가하므로 건너뛴 날은 다음 tick에 걸리고, 판정이
+ * 계약을 지우므로 두 번 걸리지 않는다.
+ *
+ * @returns 오늘 감독이 알아야 할 일 — 자리를 잃었으면 `"expired"`, 보드의 통보가
+ *          섰으면 `"notice"`. tick이 거기서 시계를 세운다.
+ */
+export function reviewManagerContract(
+  state: GameState,
+  digest: string[],
+): "expired" | "notice" | null {
+  // 무직에겐 계약이 없다 — 경질이 이미 지웠다
+  if (state.dismissal) return null;
+  const contract = state.manager.contract;
+  if (!contract) return null;
+
+  if (state.date > contract.until) {
+    const teamId = state.userTeamId;
+    const expectation = boardExpectation(state, teamId);
+    // 순위는 있으면 싣는다 — 만료는 성적이 부른 일이 아니지만 그날의 자리는 사실이다
+    const standing = seatStatus(state, teamId);
+    leaveClub(
+      state,
+      {
+        on: state.date,
+        season: state.season,
+        kind: "expired",
+        teamId,
+        tier: tierOfTeamIn(state, teamId),
+        ...(standing ? { position: standing.position } : {}),
+        target: expectation.target,
+        expectationCode: expectation.code,
+      },
+      "contract-expired",
+    );
+    digest.push(
+      `💼 계약 만료 — ${teamNameIn(state, teamId)}와의 계약이 ${contract.until}로 끝났다`,
+    );
+    pushNarrative(state, `${teamNameIn(state, teamId)} 계약 만료`, 5);
+    return "expired";
+  }
+
+  // 보드의 판정은 만료 90일 전에 한 번뿐이다 — 매일 다시 보면 통보가 번복된다
+  if (contract.renewalDecidedOn) return null;
+  if (diffDays(state.date, contract.until) > RENEWAL_NOTICE_DAYS) return null;
+  contract.renewalDecidedOn = state.date;
+
+  const board = state.manager.reputation.board;
+  if (board < RENEWAL_BOARD_GATE) {
+    contract.renewalOffered = false;
+    digest.push(
+      `💼 보드가 재계약하지 않기로 했다 — 계약은 ${contract.until}에 끝난다` +
+        ` (보드 평판 ${board} · 문턱 ${RENEWAL_BOARD_GATE})`,
+    );
+    pushNarrative(state, `재계약 불가 통보 — ${contract.until} 만료`, 5);
+    return "notice";
+  }
+  contract.renewalOffered = true;
+  standRenewalOffer(state, contract, digest);
+  return "notice";
+}
+
+/**
  * 감독 팀의 자리 — **경고가 먼저, 경질은 나중.**
  *
  * 예고 없이 끝나면 사건이 아니라 사고다. 그래서 기대에 못 미치는 상태가
@@ -474,33 +665,20 @@ export function reviewUserSeat(state: GameState, digest: string[]): boolean {
    * 쓴다 (overview.md §1 철칙 4).
    */
   const sackedTeamId = state.userTeamId;
-  state.dismissal = {
-    on: state.date,
-    season: state.season,
-    teamId: sackedTeamId,
-    tier: tierOfTeamIn(state, sackedTeamId),
-    position: standing.position,
-    target: expectation.target,
-    expectationCode: expectation.code,
-  };
-
-  // 경질은 계약을 지운다 — 위약금은 아직 없다: 감독 개인의 지갑이 게임에 없어
-  // 받을 자리가 없다 (career.md §8)
-  delete state.manager.contract;
-
-  // 감독이 없는 구단은 세계에 없다 — 옛 구단은 그날로 후임을 세운다
-  const team = state.teams.find((t) => t.id === sackedTeamId);
-  if (team) installNewManager(state, team, makeRng(state.seed, `user-sacked:${state.date}`));
-
-  /**
-   * **진행 중이던 협상은 전부 사라진다** — 감독이 없는 구단의 흥정이고, 무직인
-   * 감독이 남의 구단 선수를 계속 흥정할 수는 없다 (career.md §5.1).
-   */
-  for (const negotiation of state.negotiations) {
-    if (negotiation.status === "open" || negotiation.status === "agreed") {
-      negotiation.status = "expired";
-    }
-  }
+  leaveClub(
+    state,
+    {
+      on: state.date,
+      season: state.season,
+      kind: "sacked",
+      teamId: sackedTeamId,
+      tier: tierOfTeamIn(state, sackedTeamId),
+      position: standing.position,
+      target: expectation.target,
+      expectationCode: expectation.code,
+    },
+    "user-sacked",
+  );
 
   digest.push(`💼 경질 — ${teamNameIn(state, sackedTeamId)}가 감독 계약을 해지했다`);
   pushNarrative(state, `${teamNameIn(state, sackedTeamId)} 경질`, 5);
@@ -522,6 +700,61 @@ function offerMatches(state: GameState, offer: ManagerOffer, ref: string): boole
 }
 
 /**
+ * **재계약을 받아들인다 — 같은 구단에서 임기가 다시 시작된다** (career.md §5.4).
+ *
+ * 계약만 다시 서고 그 밖에는 아무것도 움직이지 않는다: 경고도 압력도 사람도 훈련도
+ * 지금 구단의 것이라 지울 이유가 없다. 이적 예산 약속은 부임과 같이 그 자리에서
+ * 이행된다.
+ */
+function acceptRenewal(state: GameState, offer: ManagerOffer): SkillResult {
+  if (offer.teamId !== state.userTeamId) {
+    return { ok: false, message: `${teamNameIn(state, offer.teamId)}의 제안이 아닙니다` };
+  }
+  if (offer.status !== "open" || offer.expiresOn < state.date) {
+    return {
+      ok: false,
+      message: `보드의 재계약 제안은 ${offer.expiresOn}에 만료됐습니다`,
+    };
+  }
+  offer.status = "accepted";
+  const base = MANAGER_TERMS_BY_TIER[offer.tier as 1 | 2 | 3 | 4];
+  const salary = offer.salary ?? base.salary;
+  const years = offer.years ?? base.years;
+  // 새 임기의 계약이라 재계약 판정 자국은 지고 가지 않는다 — 다음 만료 90일 전에 다시 선다
+  state.manager.contract = {
+    salary,
+    signedOn: state.date,
+    until: contractUntil(state.date, years),
+  };
+  const pledge = offer.budgetPledge ?? 0;
+  if (pledge > 0) financeOf(state, state.userTeamId).transferBudget += pledge;
+
+  const name = teamNameIn(state, state.userTeamId);
+  pushNarrative(state, `${name} 재계약`, 5);
+  return {
+    ok: true,
+    tone: "good",
+    message:
+      `${name}와 재계약했습니다 — 연봉 ${formatMoney(salary)}에 ${state.manager.contract.until}까지` +
+      (pledge > 0 ? `, 이적 예산 ${formatMoney(pledge)}이 약속대로 더해졌습니다` : `입니다`),
+    brief: {
+      head: "재계약",
+      items: [
+        item({ label: "구단", text: name }),
+        item({
+          label: "연봉",
+          text: formatMoney(salary),
+          note: `${state.manager.contract.until}까지`,
+        }),
+        ...(pledge > 0
+          ? [item({ label: "이적 예산", text: formatMoney(pledge), delta: pledge })]
+          : []),
+      ],
+    },
+  };
+}
+
+/**
  * **제안을 받아들인다 — 그날부로 부임한다** (career.md §5.1).
  *
  * 시즌 중이어도 막지 않는다. 순위표는 감독이 아니라 구단 단위라 부임 전 경기까지
@@ -530,10 +763,15 @@ function offerMatches(state: GameState, offer: ManagerOffer, ref: string): boole
  * @param ref 제안 id 또는 구단 이름·약칭
  */
 export function acceptManagerOffer(state: GameState, ref: string): SkillResult {
+  const offer = (state.managerOffers ?? []).find((o) => offerMatches(state, o, ref));
+  /**
+   * **재계약은 부임이 아니다** (career.md §5.4) — 구단도 자리도 그대로라 아래의
+   * 전이는 하나도 일어나지 않는다. 재직 중에 설 수 있는 제안은 이것뿐이다.
+   */
   if (!state.dismissal) {
+    if (offer?.via === "renewal") return acceptRenewal(state, offer);
     return { ok: false, message: `${teamNameIn(state, state.userTeamId)} 감독으로 재직 중입니다` };
   }
-  const offer = (state.managerOffers ?? []).find((o) => offerMatches(state, o, ref));
   if (!offer) return { ok: false, message: `"${ref}"에 해당하는 감독직 제안이 없습니다` };
   if (offer.status !== "open" || offer.expiresOn < state.date) {
     return {
@@ -641,10 +879,11 @@ export function counterManagerOffer(
   ref: string,
   ask: { salary?: number; transferBudget?: number },
 ): SkillResult {
-  if (!state.dismissal) {
+  const offer = (state.managerOffers ?? []).find((o) => offerMatches(state, o, ref));
+  // 재직 중에 되부를 수 있는 것은 보드의 재계약 제안뿐이다 (career.md §5.4)
+  if (!state.dismissal && offer?.via !== "renewal") {
     return { ok: false, message: `${teamNameIn(state, state.userTeamId)} 감독으로 재직 중입니다` };
   }
-  const offer = (state.managerOffers ?? []).find((o) => offerMatches(state, o, ref));
   if (!offer) return { ok: false, message: `"${ref}"에 해당하는 감독직 제안이 없습니다` };
   if (offer.status !== "open" || offer.expiresOn < state.date) {
     return {

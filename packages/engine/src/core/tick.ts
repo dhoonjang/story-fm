@@ -72,7 +72,7 @@ import { playedIn, quickSimulate, type SimSquad } from "../match/quick-sim";
 import { managerTacticsOf } from "../match/manager-tactics";
 import { recordCard } from "../match/discipline";
 import { runAiTransfers } from "../market/ai-market";
-import { reviewUserSeat, runManagerMarket } from "../market/manager-market";
+import { reviewManagerContract, reviewUserSeat, runManagerMarket } from "../market/manager-market";
 import { matchRating } from "../match/ratings";
 import { scoutReportLine } from "../views/views";
 import { pruneDeferredScouts } from "../squad/scouting";
@@ -1229,6 +1229,18 @@ export function advanceTime(
     // 감독의 자리 — 경고가 먼저 오고, 그래도 안 되면 여기서 시계가 멈춘다
     if (reviewUserSeat(state, digest)) {
       return { ok: true, digest, stopped: "blocked", trained };
+    }
+    /**
+     * 감독의 계약 — 만료 판정과 보드의 재계약 통보 (career.md §5.4). 경질 뒤에
+     * 봐야 지운 계약을 다시 재지 않는다. 자리를 잃은 날은 경질과 같은 무게로
+     * 시계를 세우고, 통보가 선 날은 답할 자리가 생긴 날이라 주의로 멈춘다.
+     */
+    const contractDay = reviewManagerContract(state, digest);
+    if (contractDay === "expired") {
+      return { ok: true, digest, stopped: "blocked", trained };
+    }
+    if (contractDay === "notice") {
+      return { ok: true, digest, stopped: "attention", trained };
     }
     simulateOtherMatches(state, digest);
     // 녹아웃 — 직전 단계가 끝났으면 다음 단계를 편성한다.
