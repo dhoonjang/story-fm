@@ -9,6 +9,7 @@ import {
   formatMoney,
   headCoachOf,
   interpretBackgroundHeuristic,
+  leagueOfTeamIn,
   HISTORY_CHAR_LIMIT,
   HISTORY_STEP,
   openPress,
@@ -19,15 +20,21 @@ import {
   speakerRoles,
   scoutPlayer,
   scoutReportCard,
+  squadReturnOf,
   playersOf,
   userPlayers,
   type GameState,
 } from "@story-fm/engine";
 import {
+  MATCH_ADVANCED,
   TIME_PASSED,
   filterSceneStream,
   sanitizeSceneText,
-  parseTimeSkip,
+  noteSceneHeader,
+  operationLabel,
+  MAX_SKIP_DAYS,
+  STALLED_CLOCK_TURNS,
+  TurnOperationSchema,
   buildGmDigest,
   buildGmHistory,
   buildManagerMessage,
@@ -40,7 +47,7 @@ import {
   runOnboardingTurn,
   type GmToolCall,
 } from "@story-fm/agents";
-import { normalizeSpeaker, SCOUT_DAYS } from "@story-fm/domain";
+import { awardTitle, normalizeSpeaker, SCOUT_DAYS } from "@story-fm/domain";
 import type { GameLLM, StopReason, TurnRequest } from "@story-fm/llm";
 
 /**
@@ -304,6 +311,45 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
     expect(note).toContain(formatMoney(card.wageExpectation));
     // 실리지 않은 턴에는 한 줄도 쓰지 않는다 — 매 턴 정가로 읽히는 블록이다
     expect(buildGmStateNote(state)).not.toContain("도착한 스카우트 보고서");
+  });
+
+  /**
+   * 오프시즌 블록의 두 경계 — **소집 전까지만**, **방금 끝난 시즌의 것만**
+   * (season.md §6). 둘 다 조용히 틀린다: 창이 새면 시즌 내내 지난해 시상이 서고,
+   * 시즌을 한 칸 잘못 세면 어느 해에도 서지 않는다.
+   */
+  it("시상은 소집 전까지만 · 방금 끝난 시즌의 것만 싣는다", () => {
+    const state = game();
+    // 전환이 지나간 자리 — 시즌은 이미 다음 것이고 시상은 지난 시즌의 것이다
+    state.season += 1;
+    state.date = state.calendar.preseasonStart;
+    const winner = playersOf(state, "chelsea")[0]!;
+    state.awards = [
+      {
+        code: "top-scorer",
+        season: state.season - 1,
+        leagueId: leagueOfTeamIn(state, state.userTeamId),
+        gamePlayerId: winner.id,
+        playerName: winner.name,
+        teamId: "chelsea",
+        apps: 38,
+        goals: 24,
+        assists: 7,
+      },
+    ];
+    const note = buildGmStateNote(state);
+    expect(note).toContain("오프시즌 사실");
+    expect(note).toContain(awardTitle("top-scorer"));
+    expect(note).toContain(winner.name);
+
+    // 소집일이 지나면 블록 자체가 사라진다 — 오프시즌의 자리는 오프시즌에 있다
+    state.date = squadReturnOf(state.calendar);
+    expect(buildGmStateNote(state)).not.toContain("오프시즌 사실");
+
+    // 이번 시즌의 상은 아직 없다 — 시즌을 한 칸 잘못 세면 여기서 걸린다
+    state.date = state.calendar.preseasonStart;
+    state.awards[0]!.season = state.season;
+    expect(buildGmStateNote(state)).not.toContain("오프시즌 사실");
   });
 
   it("날짜가 흐르면 내용이 바뀐다 (캐시 밖에 있어야 하는 이유)", () => {
@@ -610,6 +656,38 @@ describe("이력 창 — 시작점을 STEP 단위로만 옮긴다", () => {
     expect(contents.some((c) => c.includes("턴 11"))).toBe(false);
   });
 
+  /**
+   * 인물지에서 유일하게 자라는 값이 기억이다 — 이력의 카드를 지금의 인물지로 다시
+   * 그리면 압축 한 번에 지난 턴들의 바이트가 함께 달라져, 요약 블록만 무효가 되면
+   * 될 것이 이력 전체로 번진다 (agents.md §5).
+   */
+  it("기억이 늘어도 지난 턴의 렌더가 한 글자도 달라지지 않는다", () => {
+    const state = game();
+    const coach = headCoachOf(state);
+    state.chat.push({
+      role: "user",
+      text: `${coach.characterId} 불러줘`,
+      toolCalls: [],
+      at: state.date,
+      characters: [{ characterId: coach.characterId, depth: "full", memories: 0 }],
+    });
+    state.chat.push({ role: "model", text: "@코치: 알겠습니다", toolCalls: [], at: state.date });
+    const before = buildGmHistory(state);
+
+    state.characterMemories = [
+      {
+        characterId: coach.characterId,
+        date: "2026-01-05",
+        text: "주장 교체를 놓고 부딪혔다",
+        salience: 3,
+      },
+    ];
+
+    const after = buildGmHistory(state);
+    expect(after).toEqual(before);
+    expect(after.map((h) => h.content).join("\n")).not.toContain("주장 교체를 놓고 부딪혔다");
+  });
+
   it("요약 블록은 압축된 세이브에만 선다", () => {
     const state = game();
     expect(buildGmDigest(state)).toBeNull();
@@ -643,7 +721,7 @@ describe("도구 구성", () => {
     // 시간 진행은 스킬이 아니다 — 모델이 첫 줄 헤더로 선언하고 코어가 받는다
     expect(names).not.toContain("advance_time");
     expect(names).not.toContain(TIME_PASSED);
-    expect(names).not.toContain("advance_match");
+    expect(names).not.toContain(MATCH_ADVANCED);
   });
 
   it("get_league는 상대·방향·개수로 특정 경기를 찾아준다", () => {
@@ -891,6 +969,28 @@ describe("장면 헤더", () => {
     expect(state.date).not.toBe(start);
     expect(back.short).toBe(true);
   });
+
+  /**
+   * 헤더를 못 읽은 턴 — **조용히 지나가면 시계가 영영 멎는다.**
+   *
+   * 자유 텍스트가 상태를 움직이는 유일한 경로라 실패가 누적되는데, 예전에는
+   * `console.warn` 한 줄이 전부였다. 셋이 되면 그 수가 턴 결과로 올라간다.
+   */
+  it("헤더를 연달아 못 읽으면 그 수가 화면까지 올라간다", () => {
+    const state: { sceneHeaderMisses?: number } = {};
+    for (let turn = 1; turn < STALLED_CLOCK_TURNS; turn++) {
+      // 한두 번은 이어지는 대화일 수 있다 — 알리지 않는다
+      expect(noteSceneHeader(state, false)).toBeNull();
+    }
+    expect(noteSceneHeader(state, false)).toBe(STALLED_CLOCK_TURNS);
+    // 넘어서도 계속 오른다 — 며칠째 멎었는지가 그대로 보여야 한다
+    expect(noteSceneHeader(state, false)).toBe(STALLED_CLOCK_TURNS + 1);
+
+    // 한 번 읽히면 없던 일이다 — 장부에 흔적도 남지 않는다
+    expect(noteSceneHeader(state, true)).toBeNull();
+    expect(state.sceneHeaderMisses).toBeUndefined();
+    expect(noteSceneHeader(state, false)).toBeNull();
+  });
 });
 
 /**
@@ -902,18 +1002,42 @@ describe("장면 헤더", () => {
  * 먼저 굴리고, 모델은 도착한 자리에서 **보고**를 한다.
  */
 describe("시간 이동 손잡이", () => {
-  it("조작 문장에서 목표를 읽는다", () => {
-    expect(parseTimeSkip("시간 진행 — 하루")).toEqual({ kind: "days", days: 1 });
-    expect(parseTimeSkip("시간 진행 — 일주일")).toEqual({ kind: "days", days: 7 });
-    expect(parseTimeSkip("시간 진행 — 다음 경기 (2026-08-15)")).toEqual({
-      kind: "date",
-      date: "2026-08-15",
-    });
-  });
+  /**
+   * 손잡이가 보내는 것은 **구조체**다. 예전에는 화면이 만든 문장을 서버가 되읽어
+   * (`시간 진행 — 하루`) 시계를 옮겼고, 그래서 UI 문구 한 글자가 곧 계약이었다.
+   * 여기서 지키는 것은 그 경계 — 요청 본문으로 들어오는 값이므로 화면이 보내는
+   * 두 눈금 말고도 터무니없는 것이 온다.
+   */
+  it("조작의 경계 — 구조체만 통과하고, 표시 문구는 거기서 나온다", () => {
+    const day = TurnOperationSchema.parse({ kind: "skip_days", days: 1 });
+    expect(day).toEqual({ kind: "skip_days", days: 1 });
+    expect(operationLabel(day)).toBe("시간 진행 — 하루");
+    expect(operationLabel({ kind: "skip_days", days: 7 })).toBe("시간 진행 — 일주일");
+    // 눈금 밖의 일수도 뜻이 통해야 한다 — 문장은 숫자로 적는다
+    expect(operationLabel({ kind: "skip_days", days: 3 })).toBe("시간 진행 — 3일");
+    expect(operationLabel({ kind: "skip_to_next_match", date: "2026-08-15" })).toBe(
+      "시간 진행 — 다음 경기 (2026-08-15)",
+    );
+    expect(operationLabel({ kind: "advance_match" })).toBe("경기 진행");
 
-  it("감독의 말은 손잡이가 아니다 — 시계를 앞질러 옮기지 않는다", () => {
-    expect(parseTimeSkip("내일 훈련은 회복으로 가자")).toBeNull();
-    expect(parseTimeSkip("다음 경기 상대가 누구야?")).toBeNull();
+    // 0일·소수·상한 초과는 시계를 뒤로 돌리거나 세계를 통째로 굴린다
+    expect(TurnOperationSchema.safeParse({ kind: "skip_days", days: 0 }).success).toBe(false);
+    expect(TurnOperationSchema.safeParse({ kind: "skip_days", days: -1 }).success).toBe(false);
+    expect(TurnOperationSchema.safeParse({ kind: "skip_days", days: 1.5 }).success).toBe(false);
+    expect(TurnOperationSchema.safeParse({ kind: "skip_days", days: MAX_SKIP_DAYS }).success).toBe(
+      true,
+    );
+    expect(
+      TurnOperationSchema.safeParse({ kind: "skip_days", days: MAX_SKIP_DAYS + 1 }).success,
+    ).toBe(false);
+    // 날짜는 게임 안의 한 표기뿐이다 (`DateString`)
+    expect(TurnOperationSchema.safeParse({ kind: "skip_to_next_match" }).success).toBe(false);
+    expect(
+      TurnOperationSchema.safeParse({ kind: "skip_to_next_match", date: "2026-8-15" }).success,
+    ).toBe(false);
+    // 조작 문장은 이제 조작이 아니다 — 되읽는 자리가 없다
+    expect(TurnOperationSchema.safeParse("시간 진행 — 하루").success).toBe(false);
+    expect(TurnOperationSchema.safeParse({ kind: "next_match" }).success).toBe(false);
   });
 
   it("그 사이 벌어진 일이 상태에 실린다 — 모델이 보고할 거리다", () => {

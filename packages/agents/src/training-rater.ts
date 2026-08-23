@@ -13,7 +13,9 @@ import {
 } from "@story-fm/engine";
 import { ATTRIBUTE_AXES, AXIS_KO, DateString } from "@story-fm/domain";
 import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
+import { agingDeclineLine } from "./aging-line";
 import { retryOnce, requireToolCall, anchorStands } from "./retry";
+import { inputError, toToolSchema } from "./tool-schema";
 
 /**
  * 훈련 결산 — advance_time이 넘긴 구간의 훈련을 한 묶음으로 판정한다.
@@ -36,8 +38,7 @@ export const TRAINING_RATER_SYSTEM = `당신은 축구 구단의 훈련장을 �
 - 전술 적응도는 ${TACTIC_GAIN_MIN} ~ ${TACTIC_GAIN_MAX} 중 하나다. 대부분은 0~1이고, ${TACTIC_GAIN_MIN}은
   지친 선수를 굴려 오히려 흐트러졌을 때다.
 - 능력치는 0~${TRAINING_ATTR_CAP}명, 각 한 축 +${ATTR_STEP_MAX} 또는 −${-ATTR_STEP_MIN}, 그 기간에 실제로 훈련한 축만.
-  아무에게도 변화가 없는 구간이 정상이다. 서른을 넘긴 선수의 스피드·체력·드리블은
-  훈련해도 내려간다.
+  아무에게도 변화가 없는 구간이 정상이다. ${agingDeclineLine()}
 - 개인 훈련으로 자리를 배우는 선수(대상 표에 "전향 …"으로 표시)에게는
   positionGain을 0~${POSITION_TRAIN_MAX}으로 적는다. 전향이 걸리지 않은 선수에게는 적지 않는다.
 - 대상 전원을 빠뜨리지 마라.
@@ -59,15 +60,41 @@ const MAX_TRAINED_PLAYERS = 60;
 const NOTE_MAX = 200;
 
 const OutcomeSchema = z.object({
-  playerId: z.string().min(1),
-  tacticGain: z.number().min(-ACCEPTED_GAIN_BOUND).max(ACCEPTED_GAIN_BOUND).optional(),
-  positionGain: z.number().min(0).max(ACCEPTED_GAIN_BOUND).optional(),
-  attribute: z.enum(ATTRIBUTE_AXES).nullish(),
-  attributeStep: z.number().min(ATTR_STEP_MIN).max(ATTR_STEP_MAX).nullish(),
-  date: DateString.optional(),
-  note: z.string().max(NOTE_MAX).optional(),
+  playerId: z.string().min(1).describe("대상 목록의 id 그대로"),
+  tacticGain: z
+    .number()
+    .min(-ACCEPTED_GAIN_BOUND)
+    .max(ACCEPTED_GAIN_BOUND)
+    .optional()
+    .describe(`전술 적응도 변화 — ${TACTIC_GAIN_MIN}~${TACTIC_GAIN_MAX} 중 하나`),
+  positionGain: z
+    .number()
+    .min(0)
+    .max(ACCEPTED_GAIN_BOUND)
+    .optional()
+    .describe(`전향 훈련이 올린 자리 적응도 — 0~${POSITION_TRAIN_MAX} (전향 중인 선수만)`),
+  attribute: z
+    .enum(ATTRIBUTE_AXES)
+    .nullish()
+    .describe(`움직일 능력치 축 (그 기간에 훈련한 축만, ${TRAINING_ATTR_CAP}명까지)`),
+  attributeStep: z
+    .number()
+    .min(ATTR_STEP_MIN)
+    .max(ATTR_STEP_MAX)
+    .nullish()
+    .describe(`그 축의 방향 — ${ATTR_STEP_MAX} 또는 ${ATTR_STEP_MIN}`),
+  date: DateString.optional().describe(
+    "이 변화가 나온 훈련 날짜 (YYYY-MM-DD, 위 훈련 목록 중 하나)",
+  ),
+  note: z.string().max(NOTE_MAX).optional().describe("한 문장 근거 (30자 안팎)"),
 });
 const ReportInputSchema = z.object({ results: z.array(OutcomeSchema).max(MAX_TRAINED_PLAYERS) });
+
+/** 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 (agents.md §3) */
+export const REPORT_TRAINING_TOOL = "report_training";
+
+/** 모델이 보는 입력 — 위 Zod 한 벌에서 파생한다 (prompts.md §2) */
+export const REPORT_TRAINING_INPUT = toToolSchema(ReportInputSchema);
 
 /** 브리프를 프롬프트 본문으로 — 훈련 일지 + 대화 + 대상 표 */
 export function buildTrainingPrompt(brief: TrainingBrief): string {
@@ -109,9 +136,6 @@ export function buildTrainingPrompt(brief: TrainingBrief): string {
   ].join("\n");
 }
 
-/** 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 (agents.md §3) */
-const REPORT_TRAINING_TOOL = "report_training";
-
 function makeReportTool(
   state: GameState,
   brief: TrainingBrief,
@@ -121,44 +145,7 @@ function makeReportTool(
     name: REPORT_TRAINING_TOOL,
     description:
       "이 기간 훈련의 결과를 제출한다. 기준에서 크게 벗어나거나 훈련하지 않은 축은 코어가 잘라 낸다.",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        results: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              playerId: { type: "string", description: "대상 목록의 id 그대로" },
-              tacticGain: {
-                type: "number",
-                description: `전술 적응도 변화 — ${TACTIC_GAIN_MIN}~${TACTIC_GAIN_MAX} 중 하나`,
-              },
-              positionGain: {
-                type: "number",
-                description: `전향 훈련이 올린 자리 적응도 — 0~${POSITION_TRAIN_MAX} (전향 중인 선수만)`,
-              },
-              attribute: {
-                type: "string",
-                enum: [...ATTRIBUTE_AXES],
-                description: `움직일 능력치 축 (그 기간에 훈련한 축만, ${TRAINING_ATTR_CAP}명까지)`,
-              },
-              attributeStep: {
-                type: "number",
-                description: `그 축의 방향 — ${ATTR_STEP_MAX} 또는 ${ATTR_STEP_MIN}`,
-              },
-              date: {
-                type: "string",
-                description: "이 변화가 나온 훈련 날짜 (YYYY-MM-DD, 위 훈련 목록 중 하나)",
-              },
-              note: { type: "string", description: "한 문장 근거 (30자 안팎)" },
-            },
-            required: ["playerId"],
-          },
-        },
-      },
-      required: ["results"],
-    },
+    inputSchema: REPORT_TRAINING_INPUT,
     handle(input: unknown) {
       /**
        * **한 구간은 한 번만 결산된다** — 도구 루프는 같은 도구를 여러 번 부를 수
@@ -172,12 +159,7 @@ function makeReportTool(
         };
       }
       const parsed = ReportInputSchema.safeParse(input);
-      if (!parsed.success) {
-        const issues = parsed.error.issues
-          .map((i) => `${i.path.join(".")}: ${i.message}`)
-          .join(" / ");
-        return { ok: false, message: `훈련 결산 형식 오류 — ${issues}` };
-      }
+      if (!parsed.success) return inputError(parsed.error);
       const lines = applyTrainingOutcomes(
         state,
         brief,

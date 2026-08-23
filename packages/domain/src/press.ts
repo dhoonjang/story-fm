@@ -1,7 +1,14 @@
 import { z } from "zod";
 import { DateString } from "./date-string";
+import { BOARD_DEMAND_LABEL, type BoardDemandKind } from "./board-demand";
+import { formatMoney } from "./money";
 import { ApproachChannelSchema, type ApproachChannel } from "./persona";
-import { PLAYER_ISSUE_REASONS } from "./records";
+import {
+  boardExpectationText,
+  PLAYER_ISSUE_REASONS,
+  type BoardExpectationCode,
+  type PlayerIssueReason,
+} from "./records";
 
 /**
  * 기자회견 (PRESS_CONFERENCE) — 세계가 감독에게 **대답을 요구하는 자리**.
@@ -77,10 +84,38 @@ export const PressFactKindSchema = z.enum([
  * `about`이 있으면 **그 선수에 대한 사실**이다 — 감독의 답이 그 선수의 사기에
  * 직접 닿는다. 공개적으로 감쌀 수도, 공개적으로 자를 수도 있는 자리다.
  */
+/**
+ * 사실 카드가 드는 **수치** — 갈래(`kind`)마다 채우는 칸이 다르다.
+ *
+ * 한 줄의 한국어는 이 카드를 읽는 쪽이 만든다. 문장을 세이브에 적어 두면 문구를
+ * 고쳐도 지난 회견은 옛 말로 남고, 기자의 성격도 그날의 맥락도 그 문장에 닿지
+ * 못한다 (→ docs/data/people.md §4).
+ */
+export const PressFactDataSchema = z.object({
+  /** 이 사실이 함께 가리키는 대상 — 상대 팀·자리가 겹치는 선수 (id) */
+  refId: z.string().min(1).optional(),
+  /** 그때의 이름 — 카탈로그가 이름을 고쳐도 그 줄이 말한 상대는 그 사람이다 */
+  name: z.string().min(1).optional(),
+  /** 라벨 붙은 수치 — `{ for: 1, against: 3 }` · `{ days: 32 }` · `{ rank: 14, target: 7 }` */
+  values: z.record(z.string(), z.number()).optional(),
+  /**
+   * 갈래 안의 갈래 — **`tags[0]`이 그 갈래의 하위 코드다.** 한 `kind`가 여러 모양의
+   * 사실을 담는 자리(경기 결과와 최근 폼, 영입 확정과 여름 최대 영입)를 그것으로
+   * 가른다. 나머지 칸은 그 하위 코드가 정한다: 승/무/패 · 홈/원정 · 불만 사유 ·
+   * 포지션 코드 · 폼 라벨.
+   */
+  tags: z.array(z.string().min(1)).optional(),
+  /** 그 사실이 가리키는 날 — 보드 요청의 기한처럼 수치가 아닌 날짜 */
+  date: DateString.optional(),
+});
+export type PressFactData = z.infer<typeof PressFactDataSchema>;
+
 export const PressFactSchema = z.object({
   kind: PressFactKindSchema,
-  /** 장부에서 읽은 한 줄 — **물음표도 평가어도 없다** ("웨스트햄전 1-3 패배") */
-  text: z.string().min(1),
+  /** 그 갈래의 수치 — 옛 세이브엔 없다(optional) */
+  data: PressFactDataSchema.optional(),
+  /** 옛 세이브가 들고 있는 사실 문장 — 새 카드는 적지 않는다 (`data`의 폴백) */
+  text: z.string().min(1).optional(),
   /** 이 사실이 걸린 선수 (`GAME_PLAYER.id`) — 없으면 팀·감독에 대한 사실 */
   about: z.string().nullable(),
   /** 날 선 자리인가 — 답변의 파장(한도)을 키운다 */
@@ -88,7 +123,12 @@ export const PressFactSchema = z.object({
 });
 export type PressFact = z.infer<typeof PressFactSchema>;
 
-export const PressStatusSchema = z.enum(["pending", "answered", "declined"]);
+/**
+ * 자리의 끝 — 답했나(`answered`), 거절·방치했나(`declined`), 아니면 **자리 자체가
+ * 사라졌나**(`expired`). 만료는 감독의 선택이 아니라 세계의 사정이라 대가가 없다:
+ * 이직하면 앞 구단의 열린 회견이 여기로 닫힌다 (people.md §4 · career.md §5.1).
+ */
+export const PressStatusSchema = z.enum(["pending", "answered", "declined", "expired"]);
 
 export const PressConferenceSchema = z.object({
   id: z.string().min(1),
@@ -207,6 +247,30 @@ export const ApproachPressureSchema = z.object({
 });
 export type ApproachPressure = z.infer<typeof ApproachPressureSchema>;
 
+/**
+ * 다가옴의 **한 줄 배경** — 코드와 수치. 문장은 읽는 쪽이 만든다
+ * (→ docs/data/people.md §8).
+ */
+export const ApproachContextSchema = z.object({
+  code: z.enum([
+    /** 이적 요청 — 에이전트가 대리로 들고 온다 */
+    "transfer-request",
+    /** 방치된 불만 — `reason`이 그 사유, `days`가 그 기간 */
+    "grievance",
+    /** 라커룸의 온도 — 1군 평균 폼 */
+    "dressing-room-form",
+    /** 리그에서 서 있는 자리와 보드가 건 자리 */
+    "standing",
+  ]),
+  /** 불만의 사유 코드 (`PLAYER_ISSUE_REASONS`) — 있는 갈래에만 */
+  reason: z.enum(PLAYER_ISSUE_REASONS).optional(),
+  /** 그 코드가 가리키는 값 — 기간(일)·평균 폼·현재 순위 */
+  value: z.number().optional(),
+  /** 그 값이 견주는 자리 — 보드가 건 순위 */
+  limit: z.number().optional(),
+});
+export type ApproachContext = z.infer<typeof ApproachContextSchema>;
+
 export const ApproachSchema = z.object({
   id: z.string().min(1),
   /** 열린 날 */
@@ -222,8 +286,10 @@ export const ApproachSchema = z.object({
   speakerId: z.string().min(1),
   /** 이 자리가 걸린 선수 — 팀·구단에 대한 자리면 없다 */
   about: z.string().nullable(),
-  /** 한 줄 배경 — 사실을 읽는 데 필요한 최소한만. 물음표도 평가어도 없다 */
-  context: z.string(),
+  /** 한 줄 배경의 카드 — 옛 세이브엔 없다(optional) */
+  contextCard: ApproachContextSchema.optional(),
+  /** 옛 세이브가 들고 있는 배경 문장 — 새 자리는 적지 않는다 (`contextCard`의 폴백) */
+  context: z.string().optional(),
   /** 그 사람이 아는 것의 **전부** — 이 밖의 사실은 이 자리에 없다 */
   facts: z.array(PressFactSchema).min(1),
   /** 사다리의 몇 번째 칸인가 — 효과의 폭이 여기 비례한다 */
@@ -264,3 +330,148 @@ export const APPROACH_AXES: Record<ApproachChannel, readonly PressAxis[]> = {
   // 감독이 선수의 에이전트를 어떻게 대하는지 듣는다. 팀 전체는 방 밖이다.
   agent: ["squad", "target"],
 };
+
+// ── 카드에서 문장으로 ──────────────────────────────────────────
+
+/**
+ * 불만 사유의 **한국어 이름** — 문장이 아니라 이름이다 (people.md §5).
+ *
+ * 회견 카드·다가옴 배경·심경 사실이 같은 표를 읽는다. 사유를 자리마다 옮겨 적으면
+ * 같은 불만이 화면에서 두 이름으로 선다.
+ */
+export const ISSUE_REASON_KO: Record<PlayerIssueReason, string> = {
+  minutes: "출전 기회",
+  "losing-run": "연패",
+  "early-return": "휴가 반납 소집",
+  demotion: "2군 강등",
+};
+
+/** 사유 이름 — 연패만 수치를 앞에 단다. 코드가 없으면 `null` */
+export function issueReasonKo(
+  reason: PlayerIssueReason | null | undefined,
+  count?: number | null,
+): string | null {
+  if (!reason) return null;
+  if (reason === "losing-run") return count == null ? ISSUE_REASON_KO[reason] : `${count}연패`;
+  return ISSUE_REASON_KO[reason];
+}
+
+const OUTCOME_KO: Record<string, string> = { win: "승", draw: "무", loss: "패" };
+const SIDE_KO: Record<string, string> = { home: "홈", away: "원정" };
+
+/** 이적료·위약금 한 조각 — 0이면 "없음"이라고 말한다 (없는 것도 사실이다) */
+function feeSuffix(label: string, amount: number | undefined): string {
+  return amount !== undefined && amount > 0
+    ? ` · ${label} ${formatMoney(amount)}`
+    : ` · ${label} 없음`;
+}
+
+/**
+ * 사실 카드 한 줄 — **화면·GM·테스트가 같은 함수를 부른다** (people.md §4).
+ *
+ * 코어가 세이브에 적는 것은 카드뿐이라, 문구를 고치면 지난 회견의 줄까지 함께
+ * 고쳐진다. 옛 세이브는 카드 없이 문장만 들고 있어 그때만 `text`로 떨어진다 —
+ * **보여 주는 자리의 폴백이지 판정의 폴백이 아니다** (game-state.md §6).
+ */
+export function pressFactText(fact: PressFact): string {
+  const d = fact.data;
+  if (!d) return fact.text ?? "";
+  const v = d.values ?? {};
+  const tags = d.tags ?? [];
+  const sub = tags[0];
+  const name = d.name ?? "";
+  const reason = issueReasonKo((tags[1] ?? null) as PlayerIssueReason | null) ?? "사유 불명";
+  switch (fact.kind) {
+    case "result":
+      return sub === "recent"
+        ? `최근 ${v.matches ?? 0}경기 ${tags
+            .slice(1)
+            .map((t) => OUTCOME_KO[t] ?? t)
+            .join("")}`
+        : `${name}전 ${v.for ?? 0}-${v.against ?? 0} ${outcomeWord(tags[1])} (${SIDE_KO[tags[2] ?? "home"] ?? ""})`;
+    case "winless":
+      return `최근 ${v.matches ?? 0}경기 무승 (${tags.map((t) => OUTCOME_KO[t] ?? t).join("")})`;
+    case "slump":
+      return name ? `${name} 폼 ${sub ?? ""}` : `폼 ${sub ?? ""}`;
+    case "unhappy":
+      if (sub === "count") return `라커룸 불만 ${v.count ?? 0}건`;
+      if (sub === "grievance") return `${reason} 불만 ${v.days ?? 0}일째`;
+      return `${name} 라커룸 불만 (${reason})`;
+    case "arrival":
+      return sub === "summer-top"
+        ? `여름 최대 영입 ${name} (${formatMoney(v.fee ?? 0)})`
+        : `${name} 영입 확정 (${tags[1] ?? ""})${feeSuffix("이적료", v.fee)}`;
+    case "departure":
+      return sub === "released"
+        ? `${name} 계약 해지 (${tags[1] ?? ""})${feeSuffix("위약금", v.severance)}`
+        : `${name} 매각 확정 (${tags[1] ?? ""})${feeSuffix("이적료", v.fee)}`;
+    case "squeezed":
+      return `${name}이(가) 같은 자리(${sub ?? ""})를 봐 왔다`;
+    case "minutes":
+      return `출전 기회 불만 ${v.days ?? 0}일째 · 시즌 출전 ${v.apps ?? 0}경기`;
+    case "demoted":
+      return `2군 ${v.days ?? 0}일째 · 불만 ${v.issueDays ?? 0}일째`;
+    case "morale":
+      return `1군 평균 폼 ${sub ?? ""}`;
+    case "standing":
+      if (sub === "board-target") {
+        return `보드 기대 ${v.rank ?? 0}위 (${boardExpectationText((tags[1] ?? "mid") as BoardExpectationCode)})`;
+      }
+      if (sub === "warnings") return `보드 경고 ${v.count ?? 0}/${v.limit ?? 3}`;
+      if (sub === "versus") return `리그 ${v.rank ?? 0}위 · ${name} ${v.opponentRank ?? 0}위`;
+      return `리그 ${v.rank ?? 0}위 · ${v.played ?? 0}경기`;
+    case "fixture":
+      return sub === "derby"
+        ? `${tags[1] ?? "더비"} — ${name}전 (${SIDE_KO[tags[2] ?? "home"] ?? ""})`
+        : `개막전 ${name} (${SIDE_KO[tags[1] ?? "home"] ?? ""})`;
+    case "leak":
+      return `${name}의 ${reasonOf(tags[0])} 불만이 언론에 보도됐다`;
+    case "transfer-request":
+      return `${name} 이적 요청 — ${reasonOf(tags[0])} 불만 ${v.days ?? 0}일째`;
+    case "board-demand":
+      return `보드 요청 — ${demandText(sub, name, v.baseline)}${d.date ? ` · 기한 ${d.date}` : ""}`;
+  }
+}
+
+function outcomeWord(tag: string | undefined): string {
+  return tag === "win" ? "승리" : tag === "draw" ? "무승부" : "패배";
+}
+
+/** `tags[0]`이 사유 코드인 갈래 — 유출·이적 요청 */
+function reasonOf(tag: string | undefined): string {
+  return issueReasonKo((tag ?? null) as PlayerIssueReason | null) ?? "사유 불명";
+}
+
+/** 보드 요청 한 조각 — 이름은 표가 갖고, 기준값은 발행 순간의 사실이다 */
+function demandText(kind: string | undefined, name: string, baseline: number | undefined): string {
+  const label = BOARD_DEMAND_LABEL[(kind ?? "") as BoardDemandKind] ?? kind ?? "요청";
+  if (kind === "keep-player") return name ? `${label} (${name})` : label;
+  if (kind === "sign-star") return `${label} (기준 ${formatMoney(baseline ?? 0)})`;
+  if (kind === "wage-freeze") return `${label} (기준 ${formatMoney(baseline ?? 0)}/주)`;
+  return label;
+}
+
+/**
+ * 다가옴의 배경 한 줄 — 카드에서 만든다 (people.md §8).
+ *
+ * `labels`는 코어만 아는 이름이다: 자리의 주인(선수 이름)과 폼 라벨. 카드에 이름을
+ * 적어 두면 카탈로그가 이름을 고쳐도 옛 자리가 옛 이름으로 남고, 폼 눈금은 엔진의
+ * 자라 도메인이 알 수 없다.
+ */
+export function approachContextText(
+  context: ApproachContext,
+  labels: { subject?: string; form?: string } = {},
+): string {
+  const who = labels.subject ?? "";
+  const reason = issueReasonKo(context.reason ?? null) ?? "불만";
+  switch (context.code) {
+    case "transfer-request":
+      return `${who} 이적 요청 · ${reason}`;
+    case "grievance":
+      return `${who} · ${reason}`;
+    case "dressing-room-form":
+      return `라커룸 · 1군 평균 폼 ${labels.form ?? ""}`.trimEnd();
+    case "standing":
+      return `리그 ${context.value ?? 0}위 · 기대 ${context.limit ?? 0}위`;
+  }
+}

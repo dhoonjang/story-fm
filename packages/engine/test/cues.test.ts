@@ -4,22 +4,36 @@ import {
   APPROACH_THRESHOLD,
   approachThreshold,
   BOARD_DEMAND,
+  BOARD_REQUEST,
   boardDemandFact,
+  boardRequestCeiling,
+  boardThriftFactor,
+  boardTrustFactor,
+  clubProfileIn,
   DEMAND_OF_ARCHETYPE,
   financeOf,
   openBoardDemand,
   OWNER_ARCHETYPE_LABELS,
   pendingApproach,
+  openBoardRequest,
   playerById,
+  requestBoard,
   respondToApproach,
   speakerCues,
   tickApproaches,
   tickBoardDemands,
+  tickBoardRequests,
   userPlayers,
+  userWageRoom,
+  wageLiftOf,
+  windowOpenForTeam,
   worldFigures,
   type GameState,
+  categoryOf,
+  STADIUM_ASSET_MONTHS,
 } from "@story-fm/engine";
-import type { PlayerIssueReason } from "@story-fm/domain";
+import type { BoardRequestKind, PlayerIssueReason, Transfer } from "@story-fm/domain";
+import { BOARD_REQUEST_KINDS } from "@story-fm/domain";
 import { createTestGame } from "./helpers";
 
 /**
@@ -168,6 +182,22 @@ describe("한 사람이 계속 말하지 않는다", () => {
     state.chat.push({
       role: "model",
       text: `[${state.date} AM 9:00]\n@${a!.name}: 감독님, 드릴 말씀이 있습니다.`,
+      toolCalls: [],
+      at: state.date,
+    });
+    expect(speakerCues(state, 1)[0]!.playerId).toBe(b!.id);
+  });
+
+  it("공백만 다른 이름도 같은 사람이다 — 모델이 붙여 써도 회전에서 빠지지 않는다", () => {
+    const state = quiet(createTestGame(11));
+    const [a, b] = firsts(state, 2);
+    a!.state.form = 0.8;
+    b!.state.form = 0.8;
+    // 모델은 같은 사람을 "스티브 홀랜드"로도 "스티브홀랜드"로도 쓴다
+    const spaced = a!.name.replace(/^(.)/u, "$1 ");
+    state.chat.push({
+      role: "model",
+      text: `[${state.date} AM 9:00]\n@${spaced}: 감독님, 드릴 말씀이 있습니다.`,
       toolCalls: [],
       at: state.date,
     });
@@ -485,7 +515,14 @@ describe("보드 요청 — 요청 → 이행/불이행 → 평판", () => {
   }
 
   /** 이 창의 이동 한 건 — 판정이 읽는 유일한 장부다 */
-  function moved(state: GameState, windowId: string, dir: "in" | "out", fee: number, id: string) {
+  function moved(
+    state: GameState,
+    windowId: string,
+    dir: "in" | "out",
+    fee: number,
+    id: string,
+    type: Transfer["type"] = "transfer",
+  ) {
     state.transfers.push({
       id,
       gamePlayerId: `gp-${id}`,
@@ -493,7 +530,7 @@ describe("보드 요청 — 요청 → 이행/불이행 → 평판", () => {
       fromTeamId: dir === "out" ? state.userTeamId : "chelsea",
       toTeamId: dir === "out" ? "chelsea" : state.userTeamId,
       date: state.date,
-      type: "transfer",
+      type,
       fee,
     });
   }
@@ -585,6 +622,84 @@ describe("보드 요청 — 요청 → 이행/불이행 → 평판", () => {
     expect(openBoardDemand(state)).toBeNull();
   });
 
+  it("지역 유지형 — 기준값 없는 요청이다: 창이 닫힌 다음 날의 잔고 하나로 갈린다", () => {
+    for (const [balance, status] of [
+      [0, "met"],
+      [-1, "failed"],
+    ] as const) {
+      const state = ownedBy(createTestGame(11), "지역 유지형");
+      tickBoardDemands(state, []);
+      const demand = openBoardDemand(state)!;
+      expect(demand.kind).toBe("stay-solvent");
+      // 발행 순간의 사실을 붙들지 않는다 — 선은 언제나 0이다
+      expect(demand.baseline).toBeUndefined();
+
+      financeOf(state, state.userTeamId).balance = balance;
+      // 창이 열려 있는 동안에는 판정하지 않는다
+      tickBoardDemands(state, []);
+      expect(demand.status, `잔고 ${balance}`).toBe("open");
+
+      const before = state.manager.reputation.board;
+      state.date = addDays(demand.deadline, 1);
+      tickBoardDemands(state, []);
+      expect(demand.status, `잔고 ${balance}`).toBe(status);
+      expect(state.manager.reputation.board).toBe(
+        before + (status === "met" ? BOARD_DEMAND.MET_BOARD : BOARD_DEMAND.FAILED_BOARD),
+      );
+    }
+  });
+
+  it("국부펀드형 — 겨울 창은 조르지 않는다. 여름 창에 하나 서고 그 창에 다시 서지 않는다", () => {
+    const state = ownedBy(createTestGame(11), "국부펀드형");
+    const summer = state.date;
+    const winter = state.windows.find((w) => w.kind === "winter")!;
+
+    // 큰 그림의 사람은 겨울 땜질을 조르지 않는다 (people.md §2)
+    state.date = winter.opensOn;
+    expect(windowOpenForTeam(state, state.userTeamId)?.kind, "겨울 창이 안 열렸다").toBe("winter");
+    tickBoardDemands(state, []);
+    expect(openBoardDemand(state)).toBeNull();
+    expect(state.boardDemands ?? []).toEqual([]);
+
+    state.date = summer;
+    tickBoardDemands(state, []);
+    const demand = openBoardDemand(state)!;
+    expect(demand.kind).toBe("sign-star");
+    expect(demand.windowId).not.toBe(winter.id);
+
+    // 창마다 최대 하나 — 며칠이 더 지나도 두 번째 요청이 서지 않는다
+    state.date = addDays(state.date, 5);
+    tickBoardDemands(state, []);
+    expect(state.boardDemands).toHaveLength(1);
+    expect(openBoardDemand(state)!.id).toBe(demand.id);
+  });
+
+  /**
+   * 임대료는 이적 예산에서 실제로 빠져나가는 현금이라 **두 요청이 같은 셈으로 잡는다**
+   * (career.md §5.2). 한쪽만 세면 같은 한 건이 요청마다 다른 무게를 갖는다.
+   */
+  it("임대 한 건이 스타 영입에도 순이익에도 같은 무게로 잡힌다", () => {
+    const showman = ownedBy(createTestGame(11), "흥행가형");
+    tickBoardDemands(showman, []);
+    const signStar = openBoardDemand(showman)!;
+    const fee = signStar.baseline!;
+    // 이적이 아니라 임대로 들어와도 기준액을 낸 영입이다
+    moved(showman, signStar.windowId, "in", fee, "t-loan-star", "loan");
+    showman.date = addDays(showman.date, 1);
+    tickBoardDemands(showman, []);
+    expect(signStar.status).toBe("met");
+
+    const investor = ownedBy(createTestGame(11), "투자자형");
+    tickBoardDemands(investor, []);
+    const netProfit = openBoardDemand(investor)!;
+    // 같은 임대료가 순지출로도 잡힌다 — 매각 수입보다 1원 앞서면 불이행이다
+    moved(investor, netProfit.windowId, "out", fee, "t-sale");
+    moved(investor, netProfit.windowId, "in", fee + 1, "t-loan-star", "loan");
+    investor.date = addDays(netProfit.deadline, 1);
+    tickBoardDemands(investor, []);
+    expect(netProfit.status).toBe("failed");
+  });
+
   it("산업가형 — 임금 동결의 허용 폭은 2%다: 이내면 이행, 넘으면 불이행", () => {
     for (const [bump, status] of [
       [1.01, "met"],
@@ -603,5 +718,168 @@ describe("보드 요청 — 요청 → 이행/불이행 → 평판", () => {
       tickBoardDemands(state, []);
       expect(demand.status, `주급 ×${bump}`).toBe(status);
     }
+  });
+});
+
+/**
+ * 감독이 보드에 거는 요청 — **위와 방향이 반대인 별개 상태다** (board-request.ts ·
+ * finance.md §9.6). 판정이 굴림이 아니라 한도라, 값이 도는 자리는 전부 경계다:
+ * 신뢰 계수의 바닥, 살림 계수의 계단, 한도와 부른 값이 갈리는 선, 공기가 차는 날.
+ */
+describe("보드 요청 (감독 → 보드) — 한도가 답을 정한다", () => {
+  /** 답이 나오는 판 — 잔고와 보드 평판을 원하는 자리에 세운다 */
+  function board(state: GameState, balance: number, reputation: number): GameState {
+    financeOf(state, state.userTeamId).balance = balance;
+    state.manager.reputation.board = reputation;
+    return state;
+  }
+
+  /** 답이 오는 날까지 시계를 민다 */
+  function untilAnswer(state: GameState, kind: BoardRequestKind) {
+    state.date = addDays(state.date, BOARD_REQUEST.RESPOND_DAYS[kind]);
+    tickBoardRequests(state, []);
+  }
+
+  it("신뢰 계수는 평판 30에서 0이고 80에서 1.0, 위로는 1.2에서 멈춘다", () => {
+    expect(boardTrustFactor(BOARD_REQUEST.TRUST_FLOOR)).toBe(0);
+    expect(boardTrustFactor(BOARD_REQUEST.TRUST_FLOOR - 10)).toBe(0);
+    expect(boardTrustFactor(80)).toBeCloseTo(1);
+    expect(boardTrustFactor(100)).toBe(BOARD_REQUEST.TRUST_MAX);
+  });
+
+  it("살림 계수는 급여 비중 경고선에서 반, 위험선에서 0으로 떨어진다", () => {
+    expect(boardThriftFactor(BOARD_REQUEST.WAGE_RATIO_CAUTION - 0.001)).toBe(1);
+    expect(boardThriftFactor(BOARD_REQUEST.WAGE_RATIO_CAUTION)).toBe(0.5);
+    expect(boardThriftFactor(BOARD_REQUEST.WAGE_RATIO_DANGER)).toBe(0);
+  });
+
+  it("답은 그 자리에서 나오지 않는다 — 종류가 정한 날에 도착해 예산에 얹힌다", () => {
+    const state = board(createTestGame(11), 100_000_000, 80);
+    const budgetBefore = financeOf(state, state.userTeamId).transferBudget;
+    // 잔고 £100M × 0.25 × 신뢰 1.0 × 살림 1.0
+    expect(boardRequestCeiling(state, "transfer-budget")).toBe(25_000_000);
+
+    expect(requestBoard(state, { kind: "transfer-budget", amount: 20_000_000 }).ok).toBe(true);
+    // 답이 오기 전날까지는 아무 일도 없다
+    state.date = addDays(state.date, BOARD_REQUEST.RESPOND_DAYS["transfer-budget"] - 1);
+    tickBoardRequests(state, []);
+    expect(openBoardRequest(state)?.status).toBe("pending");
+    expect(financeOf(state, state.userTeamId).transferBudget).toBe(budgetBefore);
+
+    state.date = addDays(state.date, 1);
+    tickBoardRequests(state, []);
+    const answered = (state.boardRequests ?? [])[0]!;
+    expect(answered.status).toBe("approved");
+    expect(answered.granted).toBe(20_000_000);
+    expect(financeOf(state, state.userTeamId).transferBudget).toBe(budgetBefore + 20_000_000);
+    // 답은 보드 평판을 옮기지 않는다 — 구단주 요청과 갈리는 자리다
+    expect(state.manager.reputation.board).toBe(80);
+  });
+
+  it("한도를 넘겨 부르면 한도만큼만 나온다 — 부분 승인은 granted < amount다", () => {
+    const state = board(createTestGame(11), 100_000_000, 80);
+    const budgetBefore = financeOf(state, state.userTeamId).transferBudget;
+    requestBoard(state, { kind: "transfer-budget", amount: 40_000_000 });
+    untilAnswer(state, "transfer-budget");
+
+    const answered = (state.boardRequests ?? [])[0]!;
+    expect(answered.status).toBe("approved");
+    expect(answered.granted).toBe(25_000_000);
+    expect(financeOf(state, state.userTeamId).transferBudget).toBe(budgetBefore + 25_000_000);
+  });
+
+  it("보드 평판이 바닥이면 한도가 0이라 거절이고, 동결이면 잔고가 있어도 거절이다", () => {
+    const poor = board(createTestGame(11), 100_000_000, BOARD_REQUEST.TRUST_FLOOR);
+    expect(boardRequestCeiling(poor, "transfer-budget")).toBe(0);
+    requestBoard(poor, { kind: "transfer-budget", amount: 1_000_000 });
+    untilAnswer(poor, "transfer-budget");
+    expect((poor.boardRequests ?? [])[0]!.status).toBe("rejected");
+
+    // 동결은 돈이 아니라 규정의 문제라 물어서 풀리지 않는다 (finance.md §9.2)
+    const frozen = board(createTestGame(11), 100_000_000, 100);
+    financeOf(frozen, frozen.userTeamId).budgetFrozen = true;
+    for (const kind of BOARD_REQUEST_KINDS) {
+      expect(boardRequestCeiling(frozen, kind), kind).toBe(0);
+    }
+  });
+
+  it("열린 요청은 하나뿐이고, 같은 안건은 쿨다운이 지나야 다시 걸린다", () => {
+    const state = board(createTestGame(11), 100_000_000, 80);
+    requestBoard(state, { kind: "transfer-budget", amount: 1_000_000 });
+    // 답을 기다리는 동안에는 종류가 달라도 걸 수 없다
+    expect(requestBoard(state, { kind: "wage-room", amount: 1000 }).ok).toBe(false);
+    untilAnswer(state, "transfer-budget");
+
+    // 종류가 다르면 곧바로 걸 수 있다
+    expect(requestBoard(state, { kind: "transfer-budget", amount: 1_000_000 }).ok).toBe(false);
+    expect(requestBoard(state, { kind: "wage-room", amount: 1000 }).ok).toBe(true);
+    untilAnswer(state, "wage-room");
+
+    const resolved = state.boardRequests!.find((r) => r.kind === "transfer-budget")!.resolvedOn!;
+    state.date = addDays(resolved, BOARD_REQUEST.COOLDOWN_DAYS - 1);
+    expect(requestBoard(state, { kind: "transfer-budget", amount: 1_000_000 }).ok).toBe(false);
+    state.date = addDays(resolved, BOARD_REQUEST.COOLDOWN_DAYS);
+    expect(requestBoard(state, { kind: "transfer-budget", amount: 1_000_000 }).ok).toBe(true);
+  });
+
+  it("주급 상향은 여력 위로 얹히고 시즌 끝에 만료된다 — 누계는 여력을 넘지 않는다", () => {
+    const state = board(createTestGame(11), 100_000_000, 80);
+    const ceiling = boardRequestCeiling(state, "wage-room");
+    expect(ceiling).toBeGreaterThan(0);
+    const roomBefore = userWageRoom(state);
+
+    requestBoard(state, { kind: "wage-room", amount: ceiling });
+    untilAnswer(state, "wage-room");
+    expect(wageLiftOf(state, state.userTeamId)).toBe(ceiling);
+    expect(userWageRoom(state)).toBe(roomBefore + ceiling);
+
+    // 이미 얹힌 몫이 여력에서 빠지므로 같은 시즌에 두 번째 한도는 0이다
+    expect(boardRequestCeiling(state, "wage-room")).toBe(0);
+
+    // 만료일이 지나면 스스로 사라진다 — 지우러 오는 tick이 없다
+    state.date = addDays(financeOf(state, state.userTeamId).wageLift!.until, 1);
+    expect(wageLiftOf(state, state.userTeamId)).toBe(0);
+  });
+
+  it("구장은 승인 즉시 공사비가 나가고 좌석은 공기가 찬 날에 선다", () => {
+    const state = board(createTestGame(11), 2_000_000_000, 80);
+    const teamId = state.userTeamId;
+    const before = clubProfileIn(state, teamId).capacity;
+    const seats = boardRequestCeiling(state, "stadium");
+    // 잔고가 넉넉하면 여력을 정하는 것은 지금 수용인원이다
+    expect(seats).toBe(Math.floor(before * BOARD_REQUEST.SEATS_OF_CAPACITY));
+
+    const balanceBefore = financeOf(state, teamId).balance;
+    requestBoard(state, { kind: "stadium", amount: seats });
+    untilAnswer(state, "stadium");
+    const built = state.boardRequests!.find((r) => r.kind === "stadium")!;
+    expect(built.status).toBe("approved");
+    expect(financeOf(state, teamId).balance).toBe(balanceBefore - seats * BOARD_REQUEST.SEAT_COST);
+    /**
+     * 공사비는 **자본 지출**이다 — 현금은 오늘 나가지만 손익은 자산이 내용연수에
+     * 나눠 문다 (finance.md §6.1-1). 착공 달 하나가 PSR을 통째로 먹지 않는다.
+     */
+    const spent = financeOf(state, teamId).ledger.filter((e) => categoryOf(e) === "capex");
+    expect(spent).toHaveLength(1);
+    const asset = financeOf(state, teamId).assets?.[0];
+    expect(asset?.cost).toBe(seats * BOARD_REQUEST.SEAT_COST);
+    expect(asset?.months).toBe(STADIUM_ASSET_MONTHS);
+    // 돈은 나갔지만 좌석은 아직 없다
+    expect(clubProfileIn(state, teamId).capacity).toBe(before);
+    // 공사 중에는 다시 걸 수 없다 — 여력이 수용인원에서 나오므로 복리로 커진다
+    state.date = addDays(built.resolvedOn!, BOARD_REQUEST.COOLDOWN_DAYS);
+    expect(requestBoard(state, { kind: "stadium", amount: 100 }).ok).toBe(false);
+
+    state.date = addDays(built.deliversOn!, -1);
+    tickBoardRequests(state, []);
+    expect(clubProfileIn(state, teamId).capacity).toBe(before);
+
+    state.date = built.deliversOn!;
+    tickBoardRequests(state, []);
+    expect(clubProfileIn(state, teamId).capacity).toBe(before + seats);
+    // 두 번 얹지 않는다
+    state.date = addDays(state.date, 1);
+    tickBoardRequests(state, []);
+    expect(clubProfileIn(state, teamId).capacity).toBe(before + seats);
   });
 });

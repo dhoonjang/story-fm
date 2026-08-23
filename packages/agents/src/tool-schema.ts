@@ -1,5 +1,5 @@
 /**
- * 도구 입력 스키마 — **Zod 하나에서 JSON 스키마를 파생한다** (prompts.md §5).
+ * 도구 입력 스키마 — **Zod 하나에서 JSON 스키마를 파생한다** (prompts.md §2).
  *
  * 모델이 보는 것과 코어가 검증하는 것이 손으로 맞춘 두 벌이면 언젠가 갈리고, 갈리는
  * 방향마다 값이 다르다. JSON이 느슨하면 모델은 통과할 줄 알고 보낸 입력을 반려당하고,
@@ -36,6 +36,15 @@ function described(node: JsonSchemaNode, schema: z.ZodTypeAny): JsonSchemaNode {
 
 function derive(schema: z.ZodTypeAny): JsonSchemaNode {
   if (schema instanceof z.ZodOptional) return described(derive(schema.unwrap()), schema);
+  /**
+   * `null`과 기본값은 **관용이지 선택지가 아니다.** `.nullish()`는 없는 것을 `null`로
+   * 적어 보내는 모델을 반려하지 않으려고 있고, `.default()`는 빠진 자리를 Zod가 채운다
+   * — 둘 다 모델이 알 필요가 없다. 알리려면 `type: ["string","null"]`을 내야 하는데
+   * 제공자마다 받는 스키마 부분집합이 달라, 그 한 줄이 도구 전체를 거절당하게 한다.
+   * 모델이 볼 것은 안쪽 갈래 하나이고, 빼도 된다는 것은 `required`가 말한다.
+   */
+  if (schema instanceof z.ZodNullable) return described(derive(schema.unwrap()), schema);
+  if (schema instanceof z.ZodDefault) return described(derive(schema.removeDefault()), schema);
   if (schema instanceof z.ZodString) return described(stringNode(schema), schema);
   if (schema instanceof z.ZodNumber) return described(numberNode(schema), schema);
   if (schema instanceof z.ZodBoolean) return described({ type: "boolean" }, schema);
@@ -85,9 +94,14 @@ function objectNode(schema: z.ZodObject<z.ZodRawShape>): JsonSchemaNode {
   const required: string[] = [];
   for (const [key, value] of Object.entries(schema.shape)) {
     properties[key] = derive(value);
-    if (!(value instanceof z.ZodOptional)) required.push(key);
+    if (!omittable(value)) required.push(key);
   }
   return { type: "object", properties, ...(required.length > 0 ? { required } : {}) };
+}
+
+/** 모델이 빼도 되는 자리 — 없으면 Zod가 통과시키거나(optional) 기본값으로 채운다 */
+function omittable(schema: z.ZodTypeAny): boolean {
+  return schema instanceof z.ZodOptional || schema instanceof z.ZodDefault;
 }
 
 /**
@@ -110,4 +124,18 @@ function literalNode(value: unknown): JsonSchemaNode {
     return { type: Number.isInteger(value) ? "integer" : "number", const: value };
   }
   throw new Error(`도구 스키마로 옮길 수 없는 리터럴입니다: ${String(value)}`);
+}
+
+/**
+ * 스키마를 못 지난 입력 — 모델이 **무엇을 고쳐야 하는지**까지 돌려준다.
+ *
+ * "형식이 맞지 않습니다" 한 줄로 답하면 모델은 같은 입력을 그대로 다시 내고 재시도가
+ * 같은 실패로 끝난다. 도구 하나가 실패해도 그 판정만 앵커로 남으므로(agents.md §4),
+ * 고칠 자리를 짚어 주는 것이 그 한 번의 재시도를 살리는 유일한 수단이다.
+ */
+export function inputError(error: z.ZodError): { ok: false; message: string } {
+  return {
+    ok: false,
+    message: `입력 오류 — ${error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(" / ")}`,
+  };
 }

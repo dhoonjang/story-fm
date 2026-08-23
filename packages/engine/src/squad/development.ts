@@ -1,7 +1,13 @@
-import type { AttributeAxis, AxisValues, GamePlayer } from "@story-fm/domain";
+import type {
+  AttributeAxis,
+  AxisValues,
+  GamePlayer,
+  ReserveTrainingPolicy,
+} from "@story-fm/domain";
 import { ATTRIBUTE_AXES, ageOf, isReserveMatch, RATING_MAX } from "@story-fm/domain";
-import { agingDelta, monthlyGrowthFactor } from "../world/attributes";
+import { ageGrowthFactor, agingDelta } from "../world/attributes";
 import { makeRng } from "../core/rng";
+import { reserveTrainingMultiplier } from "./training-plan";
 import { recomputeOverall, recordGrowth, squadLevelOf, type GameState } from "../core/state";
 
 /**
@@ -13,7 +19,7 @@ import { recomputeOverall, recordGrowth, squadLevelOf, type GameState } from "..
  *
  * 세 가지가 확률을 정한다:
  *   ① **축별 노화 곡선**(`agingDelta`) — 다리(pace·stamina·dribbling)가 먼저 죽고
- *      머리(vision·positioning·composure)는 서른 넘어서까지 자란다.
+ *      머리(vision·positioning·offTheBall·composure)는 서른 넘어서까지 자란다.
  *   ② **잠재력 여유** — 천장에 가까울수록 덜 자란다. 넘어선 축은 아예 안 자란다.
  *   ③ **난수** — 같은 나이·같은 여유라도 선수마다 갈린다. 시드 해시라 결정적이다.
  *
@@ -105,20 +111,20 @@ export function developsByCore(state: GameState, player: GamePlayer): boolean {
 
 /**
  * 성장 쪽 확률 (시즌 기대치 — 월 확률은 이 값을 열두 달로 나눈다).
- * 잠재력 여유가 클수록, 어릴수록 높다. 나이 배율은 결산 경로와 같은 표에서 온다
- * (`monthlyGrowthFactor` — player.md §6.3). 노화 곡선이 이미 꺾인 축(음수)은
+ * 잠재력 여유가 클수록, 어릴수록 높다. 나이 배율은 결산 경로와 같은 한 열에서 온다
+ * (`ageGrowthFactor` — player.md §6.3). 노화 곡선이 이미 꺾인 축(음수)은
  * 여기 들어오지 않는다.
  */
 export function growChance(room: number, age: number): number {
   if (room <= 0) return 0;
   const byRoom = Math.min(1, room / ROOM_FULL);
-  return Math.max(GROW_MIN, Math.min(GROW_MAX, byRoom * monthlyGrowthFactor(age)));
+  return Math.max(GROW_MIN, Math.min(GROW_MAX, byRoom * ageGrowthFactor(age)));
 }
 
 /**
  * 이번 달 이 선수가 실제로 움직이는 축 — 최대 `MAX_AXES_PER_MONTH`개.
  *
- * **축은 목록 순서가 아니라 시드가 고른다.** 15축이 저마다 제 난수 채널을 받고,
+ * **축은 목록 순서가 아니라 시드가 고른다.** 16축이 저마다 제 난수 채널을 받고,
  * 움직인 축 중 시드가 정한 순서로 둘까지 반영한다. 앞에서부터 굴리다 둘이 차면
  * 멈추는 방식은 `ATTRIBUTE_AXES` 앞쪽(pace·stamina)만 키우고 뒤쪽(leadership·
  * goalkeeping)을 구조적으로 굳힌다 — `axes`를 어떤 순서로 넘겨도 결과가 같아야 한다.
@@ -133,6 +139,8 @@ export function rollMonthlyAxes(
     potential: number;
     /** 감독의 육성 손잡이 — 2군 출전 × 집중 육성. 성장 쪽에만 곱한다 (기본 1) */
     boost?: number;
+    /** 2군 훈련 방침 — 축마다 다른 배율을 얹는다. 없으면 어느 축도 흔들리지 않는다 */
+    policy?: ReserveTrainingPolicy;
   },
   axes: readonly AttributeAxis[] = ATTRIBUTE_AXES,
 ): { axis: AttributeAxis; step: number }[] {
@@ -141,7 +149,10 @@ export function rollMonthlyAxes(
       const rng = makeRng(input.seed, `development:${input.date}:${input.playerId}:${axis}`);
       // 뽑히는 순서도 난수다 — 축 이름으로 세우면 편향이 자리만 옮긴다
       const priority = rng();
-      const step = rollAxis(axis, input.age, input.values[axis], input.potential, rng, input.boost);
+      // 배율이 1이면 곱하지 않는다 — 방침 없는 세이브가 부동소수로 흔들리지 않게
+      const aim = input.policy ? reserveTrainingMultiplier(input.policy, axis) : 1;
+      const boost = aim === 1 ? input.boost : (input.boost ?? 1) * aim;
+      const step = rollAxis(axis, input.age, input.values[axis], input.potential, rng, boost);
       return { axis, step, priority };
     })
     .filter((rolled) => rolled.step !== 0)
@@ -186,6 +197,7 @@ export function applyMonthlyDevelopment(state: GameState): string[] {
       values: player.attributes,
       potential: player.attributes.potential,
       boost,
+      ...(ours && state.reserveTraining ? { policy: state.reserveTraining } : {}),
     });
     if (steps.length === 0) continue;
 
@@ -194,7 +206,7 @@ export function applyMonthlyDevelopment(state: GameState): string[] {
         ATTRIBUTE_FLOOR,
         Math.min(RATING_MAX, player.attributes[axis] + step),
       );
-      if (ours) recordGrowth(state, player.id, null, "development", axis, step, "월간 성장");
+      if (ours) recordGrowth(state, player.id, null, "development", axis, step, "monthly");
     }
     recomputeOverall(player);
     if (ours) lines.push(`${player.name} (2군) ${player.attributes.overall}`);

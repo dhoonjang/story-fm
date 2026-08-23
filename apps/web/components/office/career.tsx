@@ -5,12 +5,14 @@ import {
   MANAGER_ATTRIBUTES,
   MANAGER_ATTRIBUTE_KO,
   achievementTitle,
+  awardTitle,
   formatMoney,
 } from "@story-fm/domain";
 import { IconTrophy } from "@/components/icons";
 
 type SeasonRow = OfficeViews["career"]["seasons"][number];
 type AchievementRow = OfficeViews["career"]["achievements"][number];
+type AwardRow = OfficeViews["career"]["awards"][number];
 
 /**
  * **업적 한 줄을 쓰는 자리** — 코어는 코드와 근거 수치만 넘긴다
@@ -23,6 +25,30 @@ function achievementDetailOf(a: AchievementRow): string {
   if (a.matches !== undefined) return `${a.matches}경기 무패`;
   if (a.position !== undefined && a.leagueName) return `${a.leagueName} ${a.position}위`;
   return "";
+}
+
+/**
+ * **시상 한 줄의 근거를 쓰는 자리** — 코어는 코드와 근거 수치만 넘긴다
+ * (docs/overview.md §1 철칙 4 · career.md §6). 어느 칸이 그 상의 근거인가는
+ * 상마다 다르다: 득점왕은 골, 도움왕은 도움, 올해의 선수는 평점, 영플레이어는
+ * 나이와 평점. 출전은 넷 모두의 바탕이라 늘 뒤에 붙는다.
+ */
+function awardDetailOf(a: AwardRow): string {
+  const rating = a.rating === undefined ? null : `평점 ${a.rating.toFixed(2)}`;
+  const grounds =
+    a.code === "top-scorer"
+      ? [`${a.goals}골`]
+      : a.code === "top-assister"
+        ? [`${a.assists}도움`]
+        : a.code === "young-player"
+          ? [a.age === undefined ? null : `${a.age}세`, rating]
+          : [rating];
+  return [...grounds, `${a.apps}경기`].filter((x): x is string => x !== null).join(" · ");
+}
+
+/** 전적 한 칸 — 코어는 셋을 세고, `20승 8무 10패`로 잇는 것은 화면이다 */
+function recordText({ wins, draws, losses }: SeasonRow["record"]): string {
+  return `${wins}승 ${draws}무 ${losses}패`;
 }
 
 type CareerView = OfficeViews["career"];
@@ -46,6 +72,56 @@ function dismissalLineOf(d: {
   return `${d.expectation} — 기대 ${d.target}위, 당시 ${d.position}위`;
 }
 
+type OfferRow = CareerView["offers"][number];
+
+/**
+ * **제안 한 장** — 무직에게 온 자리도, 지금 구단의 재계약도 같은 물건이다
+ * (career.md §5.1 · §5.4). 코어가 넘기는 것은 조건과 기한이고 문장은 여기서 쓴다.
+ *
+ * **읽는 값이다** — 수락도 흥정도 감독이 말로 한다.
+ */
+function OfferCard({ offer: o }: { offer: OfferRow }) {
+  return (
+    <div className="offer">
+      <div className="offer-head">
+        <b>{o.teamName}</b>
+        <span className="tier">{o.via === "renewal" ? "재계약" : `${o.tier}티어`}</span>
+        <span className="until">{o.expiresOn}까지</span>
+      </div>
+      <div className="offer-why">
+        기대 {o.expectation} ({o.target}위)
+        {o.position === null ? "" : ` · 현재 ${o.position}위`}
+      </div>
+      {o.salary !== null && (
+        <div className="offer-why">
+          연봉 {formatMoney(o.salary)} · {o.years ?? "-"}년 · 이적 예산 약속{" "}
+          {formatMoney(o.budgetPledge ?? 0)}
+          {o.counteredOn === null ? "" : " · 흥정 완료"}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * **재직 중에 서는 제안은 재계약 하나다** (career.md §5.4) — 보드가 만료 90일 전에
+ * 건 다음 임기다. 경질 카드가 서 있는 동안에는 이 자리가 무직 카드로 대체된다.
+ */
+function Renewal({ career }: { career: CareerView }) {
+  if (career.dismissal) return null;
+  const offers = career.offers.filter((o) => o.via === "renewal");
+  if (offers.length === 0) return null;
+  return (
+    <div className="mgr-outofwork">
+      <div className="offer-list" data-testid="renewal-offers">
+        {offers.map((o) => (
+          <OfferCard offer={o} key={o.id} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /**
  * **무직 — 경질 카드와 지금 열린 감독직 제안.**
  *
@@ -61,34 +137,20 @@ function OutOfWork({ career }: { career: CareerView }) {
       <div className="dismissed">
         <div className="dismissed-head">
           <b>{d.teamName}</b>
-          <span className="when">{d.on} 경질</span>
+          <span className="when">
+            {d.on} {d.kind === "expired" ? "계약 만료" : "경질"}
+          </span>
         </div>
         <div className="dismissed-why">{dismissalLineOf(d)}</div>
+        {d.severance !== null && (
+          <div className="dismissed-why">위약금 {formatMoney(d.severance)}</div>
+        )}
       </div>
       <div className="offer-list" data-testid="manager-offers">
         {career.offers.length === 0 ? (
           <div className="empty">들어온 감독직 제안이 없습니다</div>
         ) : (
-          career.offers.map((o) => (
-            <div className="offer" key={o.id}>
-              <div className="offer-head">
-                <b>{o.teamName}</b>
-                <span className="tier">{o.tier}티어</span>
-                <span className="until">{o.expiresOn}까지</span>
-              </div>
-              <div className="offer-why">
-                기대 {o.expectation} ({o.target}위)
-                {o.position === null ? "" : ` · 현재 ${o.position}위`}
-              </div>
-              {o.salary !== null && (
-                <div className="offer-why">
-                  연봉 {formatMoney(o.salary)} · {o.years ?? "-"}년 · 이적 예산 약속{" "}
-                  {formatMoney(o.budgetPledge ?? 0)}
-                  {o.counteredOn === null ? "" : " · 흥정 완료"}
-                </div>
-              )}
-            </div>
-          ))
+          career.offers.map((o) => <OfferCard offer={o} key={o.id} />)
         )}
       </div>
       {/**
@@ -378,10 +440,22 @@ export function CareerView({
               <div className="mgr-warn">
                 <div className="mgr-rep-title">계약</div>
                 <div className="mgr-contract">
-                  연봉 {formatMoney(career.contract.salary)} · {career.contract.until}까지
+                  연봉 {formatMoney(career.contract.salary)} · {career.contract.until}까지 (
+                  {career.contract.daysLeft}일)
+                  {career.contract.renewal === "declined" && (
+                    <b className="mgr-nonrenewal"> 재계약 없음</b>
+                  )}
                 </div>
               </div>
             )}
+            {/**
+             * 지갑 — **구단 잔고와 다른 돈이다** (career.md §5.4). 계약 옆에 서야
+             * 연봉과 위약금이 어디로 갔는지가 그 자리에서 읽힌다.
+             */}
+            <div className="mgr-warn">
+              <div className="mgr-rep-title">지갑</div>
+              <div className="mgr-contract">{formatMoney(career.wallet)}</div>
+            </div>
           </div>
         </div>
         <ManagerRadar
@@ -392,6 +466,7 @@ export function CareerView({
         />
       </div>
 
+      <Renewal career={career} />
       <OutOfWork career={career} />
 
       <div className="section-title">트로피 보관함</div>
@@ -424,6 +499,23 @@ export function CareerView({
         })}
       </div>
 
+      {/**
+       * 시상 — **감독의 상이 아니라 선수의 상이다** (career.md §6). 코어가 내려
+       * 주는 것은 코드와 근거 수치뿐이라 상의 이름도 근거 문장도 여기서 쓴다.
+       */}
+      <div className="section-title">시상</div>
+      <div className="trophy-list">
+        {career.awards.length === 0 && <div className="empty">받은 시상이 없습니다</div>}
+        {career.awards.map((a, i) => (
+          <div className="achv" key={i}>
+            <div>{awardTitle(a.code)}</div>
+            <div className="desc">
+              시즌 {a.season} · {a.leagueName} — {a.playerName} ({a.teamName}) · {awardDetailOf(a)}
+            </div>
+          </div>
+        ))}
+      </div>
+
       <div className="section-title">시즌 기록</div>
       {seasonRows.length === 0 ? (
         <div className="empty">첫 시즌 진행 중</div>
@@ -445,7 +537,7 @@ export function CareerView({
                   <td>{r.s.season}</td>
                   <td>{r.s.teamName}</td>
                   <td>{r.s.position}위</td>
-                  <td>{r.s.record}</td>
+                  <td>{recordText(r.s.record)}</td>
                   {/* 순위와 전적이 말하지 않는 것 — 같은 4위가 어느 구단에서는 성공이고
                       어느 구단에서는 실패다. 코어는 등급과 기대 순위만 넘기고 문장은
                       여기서 쓴다 (docs/overview.md §1 철칙 4) */}
@@ -456,7 +548,9 @@ export function CareerView({
                   <td>{r.d.season}</td>
                   <td>{r.d.teamName}</td>
                   <td>—</td>
-                  <td className="career-sacked">{r.d.on} 경질</td>
+                  <td className="career-sacked">
+                    {r.d.on} {r.d.kind === "expired" ? "계약 만료" : "경질"}
+                  </td>
                   <td className="career-verdict">{dismissalLineOf(r.d)}</td>
                 </tr>
               ),

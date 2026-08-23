@@ -9,6 +9,7 @@
  * 이 모듈은 `GameState` 타입과 팀 카탈로그만 본다. 체급을 읽는 자리가 재정·시즌·
  * 감독 시장에 흩어져 있어, 어느 쪽으로도 순환이 생기지 않는 자리에 둔다.
  */
+import type { BoardExpectationCode } from "@story-fm/domain";
 import type { GameState } from "./state";
 import { positionAt, safetyLine } from "./league-shape";
 import { teamCatalogById } from "../data/team-catalog";
@@ -45,19 +46,20 @@ const EXPECTATION_BAND = { 1: 0.1, 2: 0.3, 3: 0.6 } as const;
  * 20팀이면 2·6·12·17위이고 18팀이면 2·5·11·15위다. 상수로 적어 두면 18팀 리그에서
  * 17위가 "잔류 충족"이 된다 — 그 리그의 17위는 강등이다.
  *
- * 체급을 읽는 자리 옆에 둔다 — 시즌 롤오버의 재산정도 이 문구로 감독에게 알리므로,
+ * 체급을 읽는 자리 옆에 둔다 — 시즌 롤오버의 재산정도 이 기대를 감독에게 알리므로,
  * 시즌 모듈에 두면 `season.ts` ↔ `competition/club-tier-recompute.ts` 순환이 된다.
+ *
+ * ⚠️ **나오는 것은 코드와 목표 순위뿐이다** — 이름은 `boardExpectationText`가 만든다.
+ * 라벨을 여기서 내면 그 문장이 세이브의 커리어 표와 경질 카드에 그대로 굳는다
+ * (career.md §6, overview.md §1 철칙 4).
  */
 export function boardExpectationOfTier(
   tier: 1 | 2 | 3 | 4,
   leagueSize: number,
-): { target: number; label: string } {
-  if (tier === 4) {
-    const target = safetyLine(leagueSize);
-    return { target, label: `잔류(${target}위 이내)` };
-  }
+): { target: number; code: BoardExpectationCode } {
+  if (tier === 4) return { target: safetyLine(leagueSize), code: "survival" };
   const target = positionAt(leagueSize, EXPECTATION_BAND[tier]);
-  if (tier === 1) return { target, label: "우승 경쟁" };
-  if (tier === 2) return { target, label: `유럽 대항전권(${target}위 이내)` };
-  return { target, label: `중위권 안착(${target}위 이내)` };
+  if (tier === 1) return { target, code: "title" };
+  if (tier === 2) return { target, code: "europe" };
+  return { target, code: "mid" };
 }

@@ -1,4 +1,5 @@
-import type { MatchEvent, ShootoutKick, ShootoutOutcome, StrengthPacket } from "@story-fm/domain";
+import type { MatchEvent, ShootoutKick, ShootoutOutcome } from "@story-fm/domain";
+import { packetTagText, subCauseText } from "@story-fm/domain";
 
 /**
  * 매치 캐스터 — 경기 장면의 GM. 사건은 코어가 xg로 이미 확정하고
@@ -38,7 +39,6 @@ export const MATCH_CASTER_SYSTEM = `당신은 스토리 기반 풋볼 매니저�
 - @중계: 중계. 역할 태그는 중계뿐이다.
 - @이름: 사람의 말 — 수석코치도 카드의 이름으로, 선수는 한글 이름으로 부른다. 장부의 id는 이름 옆의 것을 쓴다.
 - @: 화자 없는 내레이션. *별표 하나*로 감싼 것이 행동·연출이다.
-완성된 중계만 쓴다 — 생각을 정리하는 과정, 버린 전개, 작업 방식, 내부 태그는 출력에 없다.
 
 <example>
 @중계: 왼쪽에서 올라온 크로스, 골키퍼가 주먹으로 걷어냅니다. 세컨드볼은 중원으로.
@@ -49,15 +49,6 @@ export const MATCH_CASTER_SYSTEM = `당신은 스토리 기반 풋볼 매니저�
 # 말
 한국어. 국내 축구 중계의 관용 표현을, 하이라이트 위주로 리듬감 있게.
 화자는 게임 내부의 수치를 입에 담지 않는다 — 능력치·전력 점수·소화율·확률. "pace 88" 대신 "리그 최고 수준의 스피드", "소화율 68%" 대신 "지시가 아직 덜 붙었습니다".`;
-
-/** 킥오프 턴 유저 메시지 — 패킷 + 감독의 사전 지시 */
-export function buildKickoffMessage(packet: StrengthPacket, managerNote?: string): string {
-  const note = managerNote ? `\n\n<pre_match>\n${managerNote}\n</pre_match>` : "";
-  return (
-    `아래 전력 분석 패킷을 근거로 경기를 시작하라. 킥오프부터 첫 정지점까지 진행한다.` +
-    `\n\n<packet>\n${JSON.stringify(packet, null, 2)}\n</packet>${note}`
-  );
-}
 
 /** 진행 턴 유저 메시지 — 장부 스냅샷 + 감독 발화 */
 export function buildContinueMessage(ledgerSummary: string, managerInput: string): string {
@@ -125,7 +116,12 @@ export function buildSegmentMessage(
   const lines = events.map((ev) => {
     const who = actorsNote(ev, nameOf);
     const team = ev.team ? `${sideName(ev.team)} ` : "";
-    const cause = ev.causes.length > 0 ? ` · 근거: ${ev.causes.join(" / ")}` : "";
+    /** 교체의 갈래는 `subCause`가, 골의 근거는 패킷 태그가 갖는다 (match.md §4) */
+    const reasons = [
+      ...(ev.subCause ? [subCauseText(ev.subCause)] : []),
+      ...ev.causes.map((tag) => packetTagText(tag)),
+    ];
+    const cause = reasons.length > 0 ? ` · 근거: ${reasons.join(" / ")}` : "";
     const detail = ev.detail ? ` · ${ev.detail}` : "";
     return `- ${ev.minute}′ ${team}${EVENT_KO[ev.type]}${who ? `: ${who}` : ""}${cause}${detail}`;
   });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import type { TurnTraceCall } from "@story-fm/llm";
+import type { TurnTraceCall, TurnUsage } from "@story-fm/llm";
 
 /**
  * 턴 원문 뷰어 — **개발 도구다.** 게임의 화자가 아니라 우리가 읽는 창이라
@@ -120,6 +120,26 @@ function requestChars(call: TurnTraceCall): number {
 }
 
 /**
+ * 이 호출의 캐시가 살아 있는가 — 읽은 토큰과 **입력 대비 비**를 함께 적는다.
+ *
+ * 한 턴은 에이전트 여럿이 도니(창 머리) 이 줄이 곧 에이전트별 히트율이고, 세션
+ * 누적 경고(models.md §4)가 세 번을 기다리는 동안 지금 이 턴의 프리픽스를 여기서
+ * 읽는다.
+ *
+ * **문턱 아래 입력은 비율 대신 그렇게 적는다** — 그 제공자의 최소 캐시 프리픽스보다
+ * 짧은 호출은 캐시가 애초에 안 걸린다. 0%로 적으면 깨진 프리픽스와 구분되지 않아,
+ * 늘 0인 자리 옆에서 진짜 0이 묻힌다.
+ */
+function cacheFact(usage: TurnUsage, minCacheable: number | undefined): string {
+  const input = usage.inputTokens;
+  if (minCacheable !== undefined && input < minCacheable) {
+    return `in ${num(input)}토큰 (캐시 문턱 ${num(minCacheable)} 미만)`;
+  }
+  const rate = input > 0 ? Math.round((usage.cacheReadTokens / input) * 100) : 0;
+  return `in ${num(input)}토큰 (캐시 읽기 ${num(usage.cacheReadTokens)} · ${rate}%)`;
+}
+
+/**
  * 어디까지가 보낸 것이고 어디부터가 받은 것인가.
  *
  * 블록을 한 줄로 죽 세우면 `tools` 다음의 `응답 텍스트`가 같은 모양으로 이어져,
@@ -171,9 +191,7 @@ function TraceCallView({
     `system ${request.system.length}블록`,
     `history ${request.history.length}개`,
     `tools ${request.tools.length}개`,
-    ...(usage
-      ? [`in ${num(usage.inputTokens)}토큰 (캐시 읽기 ${num(usage.cacheReadTokens)})`]
-      : []),
+    ...(usage ? [cacheFact(usage, call.minCacheableInput)] : []),
   ].join(" · ");
   const outFacts = response
     ? [

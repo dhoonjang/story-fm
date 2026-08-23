@@ -1,7 +1,11 @@
 import { z } from "zod";
+import type { PacketTag } from "./packet";
 
 export const MatchSideSchema = z.enum(["home", "away"]);
 export type MatchSide = z.infer<typeof MatchSideSchema>;
+
+/** 반대편 — 이득과 대가, 약점을 가진 쪽과 이로운 쪽을 뒤집는 자리가 하나여야 한다 */
+export const otherSide = (side: MatchSide): MatchSide => (side === "home" ? "away" : "home");
 
 /** 경기 이벤트 타입 — 코어(구간·간이 시뮬)가 만들고 코어 장부가 검증한다 (match.md §5) */
 export const MatchEventTypeSchema = z.enum([
@@ -49,14 +53,101 @@ export const TEAM_EVENT_TYPES: ReadonlySet<MatchEventType> = new Set([
  */
 export const MATCH_MINUTE_MAX = 130;
 
+/**
+ * 벤치가 교체를 낸 이유 — **코드다.** 중계가 인용하는 문장은 이 코드를 읽는 쪽이
+ * 만든다 (match.md §4).
+ */
+export const SubCauseSchema = z.enum(["injury", "chase", "hold", "fatigue"]);
+export type SubCause = z.infer<typeof SubCauseSchema>;
+
+/**
+ * 장부에 실리는 사실 태그의 Zod 판 — 모양은 `PacketTag`(packet.ts)와 같다.
+ *
+ * 패킷 자체는 세이브 스키마의 검사 밖이지만(진행 중인 경기 한 덩어리) 장부의
+ * 사건은 스키마를 지나므로 여기에 한 벌이 있어야 한다.
+ */
+export const PacketTagSchema = z.object({
+  source: z.enum([
+    "counter",
+    "gap",
+    "mismatch",
+    "zone-plan",
+    "directive",
+    "directive-dropped",
+    "exploit",
+    "exploit-dropped",
+    "tactical",
+    "legacy",
+  ]),
+  code: z.string().min(1),
+  favours: MatchSideSchema.nullable(),
+  /** 그 사실을 가진 쪽 — 미스매치만 싣는다. 없으면 이로운 편의 반대다 */
+  holder: MatchSideSchema.optional(),
+  sharp: z.boolean(),
+  playerIds: z.array(z.string()).default([]),
+  values: z.record(z.string(), z.number()).default({}),
+  flags: z.array(z.string()).default([]),
+  text: z.string().optional(),
+});
+
+/**
+ * 옛 세이브의 문장 한 줄을 태그로 — **판정에는 쓰이지 않는 자리다.**
+ *
+ * 진행 중이던 경기의 장부와 패킷은 `causes: string[]`·`keyPoints: string[]`을 들고
+ * 온다. 그 문장으로 다시 갈래를 가르면 이 구조가 뜻을 잃으므로, `code`는 통째로
+ * `"legacy"` 하나이고 문장은 `text`에만 남는다 (match.md §4).
+ */
+export function legacyTag(text: string): PacketTag {
+  return {
+    source: "legacy",
+    code: "legacy",
+    favours: null,
+    sharp: false,
+    playerIds: [],
+    values: {},
+    flags: [],
+    text,
+  };
+}
+
+/**
+ * 옛 장부의 원인 태그 — 문자열 배열이면 태그로 옮긴다.
+ *
+ * 진행 중이던 경기의 장부는 세이브 스키마의 검사 밖(passthrough)이라 옛 문장이
+ * 그대로 실려 온다. 판정은 이 폴백을 보지 않지만(`subCause`와 태그의 코드로만
+ * 갈린다) 문장을 만드는 렌더러가 태그를 기대하므로 읽는 자리에서 한 번 옮긴다.
+ */
+export function normalizeCauses(causes: (PacketTag | string)[]): PacketTag[] {
+  if (!causes.some((c) => typeof c === "string")) return causes as PacketTag[];
+  return causes.map((c) => (typeof c === "string" ? legacyTag(c) : c));
+}
+
+/** 문자열 한 줄로 적힌 옛 원인 태그를 읽을 때만 태그로 옮긴다 */
+const CauseSchema = z.preprocess(
+  (raw) => (typeof raw === "string" ? legacyTag(raw) : raw),
+  PacketTagSchema,
+);
+
 export const MatchEventSchema = z.object({
   minute: z.number().int().min(0).max(MATCH_MINUTE_MAX),
   type: MatchEventTypeSchema,
   team: MatchSideSchema.optional(),
   /** 선수 id — substitution은 [나가는 선수, 들어오는 선수] 순서 */
   actors: z.array(z.string()).default([]),
-  /** 원인 태그 — 전력 분석 패킷 항목을 인용해야 한다 (match.md §4) */
-  causes: z.array(z.string()).default([]),
+  /**
+   * 원인 태그 — 전력 분석 패킷 항목을 **그대로** 싣는다 (match.md §4).
+   *
+   * 감독의 전술 XP가 이 태그에 걸리므로 검증 없는 자유 문자열을 두지 않는다.
+   * 진행 중인 옛 세이브의 장부는 문장 배열을 들고 있어, 읽을 때 `source: "legacy"`
+   * 태그로 옮겨 본다.
+   */
+  causes: z.array(CauseSchema).default([]),
+  /**
+   * 교체의 **갈래** — 한 경기에 쓸 수 있는 승부수·굳히기 장수를 세고 부상 교체를
+   * 먼저 세우는 것이 이 코드다. 근거 문구로 세던 자리라, 문구를 고치면 벤치의
+   * 판단이 조용히 달라졌다 (match.md §4).
+   */
+  subCause: SubCauseSchema.optional(),
   detail: z.string().optional(),
   /**
    * **이 슛의 질** — 기대 득점 0~1. `shot`·`goal`에만 붙는다.

@@ -3,6 +3,7 @@ import type {
   Approach,
   ApproachPressure,
   BoardDemand,
+  BoardRequest,
   PressLeak,
   AxisValues,
   Booking,
@@ -34,12 +35,14 @@ import type {
   TransferListing,
   PlayerTraining,
   PositionGroup,
+  ReserveTrainingPolicy,
   RoleMemory,
   ScheduleEntry,
   Negotiation,
   PressConference,
   ScoutReport,
   ScoutReportCard,
+  SeasonAward,
   SeasonRecord,
   SeasonStat,
   ShootoutKick,
@@ -59,6 +62,8 @@ import {
   DEFAULT_FORMATION,
   FAMILIARITY_BASELINE,
   MANAGER_TERMS_BY_TIER,
+  REPUTATION_MAX,
+  REPUTATION_MIN,
   FORMATIONS,
   FIRST_TEAM_LIMIT,
   MATCHDAY_BENCH,
@@ -86,9 +91,11 @@ import {
   seasonYear,
   type SeasonCalendar,
 } from "../competition/calendar";
+import { diffDays } from "./dates";
 import { rankByName } from "./name-match";
 import { tierOfTeamIn } from "./club-tier";
 import { defaultXiIds, playerCatalog } from "../world/catalog";
+import { assertCatalogValid } from "../world/catalog-invariants";
 import { estimateSquadWages, wageSubjectOf } from "../world/wages";
 import { clubEconomyLevel } from "../data/league-economy";
 import { worldFigureManagerOf } from "../data/world-figures";
@@ -152,6 +159,14 @@ export interface SkillBriefItem {
   text: string;
   /** 그 값의 갈래·부연 — 한 톤 낮춰 **뒤에** 선다 (`패스·시야`, `적응도 62`) */
   note?: string;
+  /**
+   * 이 항목이 말하는 **증감** — 화면은 이 부호로 색을 준다 (`+2`는 이득, `−1`은 손해).
+   *
+   * 부호는 숫자로 온다. 화면이 `text`에서 `+`·`−`를 찾아 칠하면 포메이션(`4-2-3-1`)이
+   * 같은 자를 지나고, 코어가 문구를 바꾸는 날 색이 조용히 꺼진다. 증감을 말하지 않는
+   * 항목에는 달지 않는다 — 0은 "안 움직였다"는 사실이라 그것과 다르다.
+   */
+  delta?: number;
 }
 
 /**
@@ -332,12 +347,6 @@ export interface PendingMatch {
   matchId: string;
   packet: StrengthPacket;
   ledger: MatchLedgerState;
-  /**
-   * ⚠️ 폐기된 필드 — 구간 시뮬레이터(`advanceSegment`)가 사건을 그때그때 굴리므로
-   * 경기 전체를 미리 만들지 않는다. 옛 세이브 호환으로만 남긴다 (읽지 않는다).
-   */
-  script: MatchScriptSegment[] | null;
-  scriptCursor: number;
   /** 진행한 구간 수 — 난수 채널에 들어가 같은 경기가 재현된다 */
   segment?: number;
   /**
@@ -468,19 +477,6 @@ export interface PendingMatch {
     /** 어느 쪽으로 던진 판인가 — 경기당 한 번이라 이 값이 서면 다시 묻지 않는다 */
     intent: "chase" | "hold";
   };
-  /**
-   * **상대 벤치가 마지막으로 판단한 분.**
-   *
-   * 짧게 부른 구간(`maxMinutes`)이 판단 자리를 여는 간격을 여기서 잰다
-   * (`AI_BRIEF_GAP`). 구간 횟수로 세면 감독이 말을 걸수록 상대가 빨라지거나
-   * 얼어붙는다. 옛 세이브엔 없다 (optional).
-   */
-  aiDecidedAt?: number;
-}
-
-export interface MatchScriptSegment {
-  events: import("@story-fm/domain").MatchEvent[];
-  stop: "goal" | "half_time" | "full_time" | "incident";
 }
 
 export type GamePhase = "idle" | "matchday" | "match";
@@ -534,6 +530,15 @@ export interface GameState {
    * 구 세이브엔 없다 — 읽을 때 09:00으로 본다 (`clockOf`).
    */
   clock?: string;
+  /**
+   * **첫 줄 헤더를 연달아 못 읽은 평시 턴 수** — 읽히면 지워진다.
+   *
+   * 모델이 적은 시점이 시계를 움직이는 유일한 자유 텍스트 경로라(agents.md §2)
+   * 그 실패는 조용히 쌓인다. 세이브가 드는 이유는 "연달아"가 턴을 건너 세는
+   * 값이라서다 — 어디에서도 파생할 수 없다. 옛 세이브엔 없다
+   * (optional — SAVE_VERSION 유지).
+   */
+  sceneHeaderMisses?: number;
   calendar: SeasonCalendar;
   userTeamId: string;
   phase: GamePhase;
@@ -598,6 +603,13 @@ export interface GameState {
    * 승격·이적으로 떠나면 걷어낸다. 구 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   developmentFocus?: string[];
+  /**
+   * 2군 훈련 방침 — 감독이 고른 축 갈래(`set_reserve_training`). 우리 2군의 월간
+   * 성장에서 **어느 축이 뽑히는지**에 배율로 얹힌다
+   * (squad/training-plan.ts · development.ts — season.md §2 2군 리그).
+   * 없으면 `balanced`다 — 옛 세이브도 그대로 읽힌다 (optional — SAVE_VERSION 유지).
+   */
+  reserveTraining?: ReserveTrainingPolicy;
   issues: PlayerIssue[];
   /**
    * 정착 이벤트 — 면담·팀토크·주장 지명이 새 영입의 적응에 남긴 것.
@@ -742,6 +754,14 @@ export interface GameState {
    * 든다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   boardDemands?: BoardDemand[];
+  /**
+   * 감독이 보드에 건 요청 — 예산·주급 한도·구장 (finance.md §9.6). 구단주 요청과
+   * **방향이 반대인 별개 상태**다: 저쪽은 보드가 감독에게 걸고 평판이 오가며,
+   * 이쪽은 감독이 걸고 평판은 움직이지 않는다. 건 날과 답이 오는 날이 갈리고
+   * 구장은 완공일까지 더 갈리므로 세이브가 든다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  boardRequests?: BoardRequest[];
 
   // ── 감독 ──
   manager: Manager;
@@ -749,6 +769,14 @@ export interface GameState {
   seasonRecords: SeasonRecord[];
   trophies: Trophy[];
   achievements: Achievement[];
+  /**
+   * 리그 시상 — **세계 전체**의 상이다(모든 리그·모든 클럽). 감독의 기록이 아니라
+   * 리그가 주는 상이므로 여기 통째로 쌓이고, 커리어 표는 그중 감독이 그 시즌 맡고
+   * 있던 팀의 것만 골라 세운다 (season.md §6 · career.md §6).
+   * 코드와 근거 수치뿐이다 — 이름도 문장도 없다 (overview.md §1 철칙 4).
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  awards?: SeasonAward[];
 
   // ── 서사 ──
   /**
@@ -797,6 +825,33 @@ export interface GameState {
    * (transfer.md §5-2). 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   paymentSchedules?: PaymentSchedule[];
+}
+
+/**
+ * **전부 되거나 아무것도 안 된다** — 복제본 위에서 돌리고, 끝까지 성공했을 때만
+ * 원본에 옮겨 붙인다.
+ *
+ * 시즌 전환처럼 **되돌릴 수 없는 걸음을 여럿 밟은 끝에 던질 수 있는** 전이가 쓴다
+ * (→ docs/simulation/season.md §6). 예외가 그대로 나가면 세이브는 반만 넘어간 채
+ * 남고, 그 상태에는 회복 경로가 없다.
+ *
+ * 옮겨 붙이기는 `state`가 가리키는 **그 객체를 고친다** — 호출부가 쥔 참조가
+ * 그대로 새 값을 본다. 다만 그 안의 배열·객체는 통째로 갈리므로, 이 경계를 넘어
+ * 선수 하나를 붙들고 있던 참조는 낡은 것이 된다.
+ *
+ * 값은 전이 하나당 깊은 복제 하나다. 시즌 전환은 시즌에 한 번이고 그 자체가
+ * 전 클럽의 명단과 편성을 다시 짜는 걸음이라, 복제 한 번은 그 안에 묻힌다.
+ */
+export function inTransaction<T>(state: GameState, run: (draft: GameState) => T): T {
+  const draft = structuredClone(state);
+  const result = run(draft);
+  const target = state as unknown as Record<string, unknown>;
+  // 초안이 지운 필드는 원본에서도 지운다 — `Object.assign`은 덮기만 한다
+  for (const key of Object.keys(target)) {
+    if (!(key in draft)) delete target[key];
+  }
+  Object.assign(target, draft as unknown as Record<string, unknown>);
+  return result;
 }
 
 // ── 팀·선수 조회 ────────────────────────────────────────
@@ -862,9 +917,14 @@ export function clubProfileIn(state: GameState, teamId: string): ClubProfile {
  * `leagueOfTeamIn`과 갈리는 것은 승강이다 — 이쪽은 승강 **전**의 원 소속이라,
  * "이 구단이 원래 어느 리그의 클럽인가"를 묻는 자리(브랜드 보정)가 쓴다. 지금
  * 어디 있는가는 언제나 `leagueOfTeamIn`이다 (game-state.md §1).
+ *
+ * ⚠️ **세이브에도 카탈로그에도 없는 팀이면 던진다.** 폴백할 옳은 값이 없다 —
+ * 리그를 하나 지어내면 그 팀이 남의 리그 상금과 경제 수준을 받는다 (team.md §1).
  */
 export function catalogLeagueIn(state: GameState | undefined, teamId: string): string {
-  return state?.teams.find((t) => t.id === teamId)?.leagueId ?? leagueOfTeam(teamId);
+  const leagueId = state?.teams.find((t) => t.id === teamId)?.leagueId ?? leagueOfTeam(teamId);
+  if (leagueId === null) throw new Error(`세이브에도 카탈로그에도 없는 팀: ${teamId}`);
+  return leagueId;
 }
 
 /**
@@ -943,6 +1003,15 @@ export function userPlayers(state: GameState): GamePlayer[] {
  */
 export function managedTeamId(state: GameState): string | null {
   return state.dismissal ? null : state.userTeamId;
+}
+
+/**
+ * 평판을 눈금 안으로 자른다 — 경기·시즌·컵·경질이 저마다 다른 폭으로 더하고 빼도
+ * 나가는 값은 `ManagerReputationSchema`가 받는 0~100이라야 한다. **여기가 유일한
+ * 문이다** — 호출부가 각자 `Math.min(100, …)`을 적으면 스키마를 옮긴 날 한쪽만 남는다.
+ */
+export function clampReputation(value: number): number {
+  return Math.max(REPUTATION_MIN, Math.min(REPUTATION_MAX, value));
 }
 
 export function playerById(state: GameState, id: string): GamePlayer | null {
@@ -1103,6 +1172,19 @@ export function activeContract(state: GameState, playerId: string): Contract | n
   return state.contracts.find((c) => c.gamePlayerId === playerId && c.status === "active") ?? null;
 }
 
+/**
+ * 계약 잔여 연수 (소수, 만료 뒤는 0) — 몸값·설득·재계약이 같은 자를 읽는다.
+ *
+ * 이적가(`market.ts`)와 설득 판정(`persuasion.ts`)이 각자 적던 값이다. 그 둘은
+ * `market → persuasion` 한 방향으로만 이어져 있어 아래쪽이 위를 부를 수 없었고,
+ * 그래서 두 줄이 두 벌로 살았다 — 계약이 곧 상태라 자리는 여기다 (AGENTS.md §5).
+ */
+export function contractYearsLeft(state: GameState, playerId: string): number {
+  const contract = activeContract(state, playerId);
+  if (!contract) return 0;
+  return Math.max(0, diffDays(state.date, contract.until) / 365);
+}
+
 /** 팀 주급 총액 — 활성 계약의 합 (저장하지 않는 파생값) */
 /** 이번 주 주급 한 줄 — 선수 한 명이 이 구단에 지우는 부담 */
 export interface WeeklyWageLine {
@@ -1215,7 +1297,8 @@ export function recordGrowth(
   source: GrowthEntry["source"],
   target: string,
   delta: number,
-  note?: string,
+  /** 어느 경로로 올랐나 — 문장이 아니라 코드다 (records.ts `GrowthOrigin`) */
+  origin?: GrowthEntry["origin"],
   /** 실제로 그 일이 있었던 날 — 안 주면 오늘. 결산은 **지나간 훈련 날짜**를 준다 */
   on?: string,
 ): void {
@@ -1226,7 +1309,7 @@ export function recordGrowth(
     source,
     target,
     delta,
-    ...(note ? { note } : {}),
+    ...(origin ? { origin } : {}),
   });
   if (state.growthLog.length > GROWTH_LOG_LIMIT) {
     state.growthLog.splice(0, state.growthLog.length - GROWTH_LOG_LIMIT);
@@ -1241,8 +1324,14 @@ export function recordGrowth(
  */
 const NARRATIVE_LIMIT = 200;
 
-export function pushNarrative(state: GameState, text: string, salience = 2): void {
-  state.narrative.push({ date: state.date, text, salience });
+export function pushNarrative(
+  state: GameState,
+  text: string,
+  salience = 2,
+  /** 갈래 — 하루 한도를 세는 열쇠다. 접두 문장으로 가르지 않는다 (records.ts `NarrativeKind`) */
+  kind?: NarrativeNote["kind"],
+): void {
+  state.narrative.push({ date: state.date, text, salience, ...(kind ? { kind } : {}) });
   if (state.narrative.length > NARRATIVE_LIMIT) {
     state.narrative.splice(0, state.narrative.length - NARRATIVE_LIMIT);
   }
@@ -1390,7 +1479,7 @@ function instantiatePlayers(seed: number, only?: (teamId: string) => boolean): G
       ...(entry.height === undefined ? {} : { height: entry.height }),
       ...(entry.weight === undefined ? {} : { weight: entry.weight }),
       attributes: {
-        // 카탈로그의 15축을 그대로 복사 (2-레이어 분리 — 이후 변화는 GAME_PLAYER에만)
+        // 카탈로그의 16축을 그대로 복사 (2-레이어 분리 — 이후 변화는 GAME_PLAYER에만)
         ...(Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, entry[a]])) as AxisValues),
         overall: 50, // 아래 recomputeOverall이 주 포지션 가중치로 채운다
         potential: entry.potential,
@@ -2014,11 +2103,46 @@ function initialTactics(
         width: 3,
         passStyle: 4,
       };
+    /**
+     * 앞을 셋으로 세운 백3 — 무게를 앞에 싣고 높은 곳에서 뺏어 짧게 잇는다.
+     * 폭은 윙어 둘이 **모양으로** 만드므로 지시로 벌리지 않고 오히려 안으로
+     * 좁혀 연결한다. 올린 둘(멘탈·압박)만큼 내린 둘(폭·패스)이 있다.
+     */
+    case "3-4-3":
+      return {
+        formation,
+        mentality: 4,
+        defensiveLine: 3,
+        pressing: 4,
+        tempo: 3,
+        width: 2,
+        passStyle: 2,
+      };
+    /**
+     * 같은 백5지만 5-4-1과 갈리는 자리 — **라인을 내리지 않는다.** 원톱은 받아 줄
+     * 사람이 없어 내려서서 길게 차야 하지만, 투톱은 중간에서 막고 그대로 나갈 수
+     * 있다. 그래서 내리는 것은 무게 하나뿐이다.
+     *
+     * ⚠️ **템포·패스를 올리지 않는다.** "백5에 롱볼"로 읽고 싶어지지만 두 축은 리그
+     * 평균의 남은 여유가 한 칸의 절반쯤뿐이고, 열댓 구단이 서는 프리셋이 한 칸을
+     * 올리면 그 여유를 통째로 먹어 리그 전체가 같은 방향으로 기운다
+     * (`match-stamina.test.ts`가 잡는다).
+     */
+    case "5-3-2":
+      return {
+        formation,
+        mentality: 2,
+        defensiveLine: 3,
+        pressing: 3,
+        tempo: 3,
+        width: 3,
+        passStyle: 3,
+      };
   }
 }
 
 /**
- * 구단이 **어떤 모양으로 서야 가장 센가** — 5개 프리셋을 채워 보고 고른다.
+ * 구단이 **어떤 모양으로 서야 가장 센가** — 프리셋 전부를 채워 보고 고른다.
  *
  * 채점 풀은 **지정 선발 11인**이다(있으면). 모양은 결국 "이 열한 명을 어떻게
  * 세울까"의 답이라, 스쿼드 전체로 재면 4백 명단을 가진 팀이 5백으로 서는 답이
@@ -2192,6 +2316,9 @@ export function buildAssignments(
 export { MATCHDAY_BENCH };
 
 export function createGame(input: CreateGameInput): GameState {
+  // 세계를 세우기 전에 카탈로그가 성립하는지 먼저 묻는다 — 어긋난 카탈로그로 세운
+  // 세계는 실패가 몇 시즌 뒤 엉뚱한 자리에서 터진다 (team.md §1)
+  assertCatalogValid();
   const seed = input.seed ?? randInt(makeRng(Date.now() % 2 ** 31, "seed"), 1, 2 ** 30);
   if (!teamCatalog().some((t) => t.id === input.userTeamId)) {
     throw new Error(`알 수 없는 팀: ${input.userTeamId}`);
@@ -2366,6 +2493,7 @@ export function createGame(input: CreateGameInput): GameState {
     approachPressure: [],
     pressLeaks: [],
     boardDemands: [],
+    boardRequests: [],
 
     manager: {
       name: input.managerName,
@@ -2390,6 +2518,7 @@ export function createGame(input: CreateGameInput): GameState {
     seasonRecords: [],
     trophies: [],
     achievements: [],
+    awards: [],
 
     narrative: [],
     chat: [],
@@ -2426,23 +2555,55 @@ export function createGame(input: CreateGameInput): GameState {
 /** 매각·방출·임대 뒤 유지해야 하는 최소 인원 */
 export const MIN_SQUAD_AFTER_SALE = 18;
 
+/** 매각·방출·임대 뒤 남아야 하는 최소 골키퍼 수 */
+export const MIN_GK_AFTER_SALE = 2;
+
 /**
- * 이 선수가 빠지면 스쿼드가 무너지는가 — 무너지면 그 이유를 돌려준다.
+ * 스쿼드가 무너지는 갈래 — **코드와 수치**. 문장은 부르는 쪽이 만든다.
+ *
+ * 막히는 이유는 같아도 감독이 하려던 일은 매각·해지·임대 송출로 갈리고 동사가
+ * 다르다. 코어가 한 문장으로 못 박아 두면 부르는 쪽이 그 문장의 동사를 바꿔치기해
+ * 읽게 되고, 문구를 고치는 순간 그 자리가 깨진다 (overview.md §1 철칙 4).
+ */
+export type SquadShortfall = {
+  code: "squad-min" | "gk-min";
+  /** 그 선수가 빠진 뒤 남는 수 — 인원 또는 골키퍼 */
+  remaining: number;
+  /** 그 수가 견주는 하한 */
+  limit: number;
+};
+
+/**
+ * 스쿼드 하한 — **떠난 뒤에 남는 인원으로 잰다** (transfer.md §2).
+ *
+ * 감독의 매각·방출·임대 송출과 AI 시장이 **같은 상수·같은 부등호**를 쓰도록 판정을
+ * 여기 하나로 둔다. 같은 규칙을 두 자리에 적으면 한쪽만 고쳐져 "AI는 19명 아래로 못
+ * 파는데 감독은 18명까지 판다" 같은 어긋남이 소리 없이 생긴다.
+ *
+ * 남는 인원을 받는 것은 **부르는 쪽이 스쿼드를 어떻게 아는지가 다르기** 때문이다 —
+ * 감독 경로는 전 선수를 훑고(`squadShortfall`), AI 시장은 하루 색인을 넘긴다.
+ */
+export function squadFloorShortfall(remaining: readonly GamePlayer[]): SquadShortfall | null {
+  if (remaining.length < MIN_SQUAD_AFTER_SALE) {
+    return { code: "squad-min", remaining: remaining.length, limit: MIN_SQUAD_AFTER_SALE };
+  }
+  const keepers = remaining.filter((p) => groupOf(p) === "GK").length;
+  if (keepers < MIN_GK_AFTER_SALE) {
+    return { code: "gk-min", remaining: keepers, limit: MIN_GK_AFTER_SALE };
+  }
+  return null;
+}
+
+/**
+ * 이 선수가 빠지면 스쿼드가 무너지는가 — 무너지면 그 갈래를 돌려준다.
  * `negotiation`·`departures`가 함께 쓰므로 여기 둔다(둘이 서로를 import하면 순환).
  */
 export function squadShortfall(
   state: GameState,
   teamId: string,
   leaving: { id: string },
-): string | null {
-  const remaining = playersOf(state, teamId).filter((p) => p.id !== leaving.id);
-  if (remaining.length < MIN_SQUAD_AFTER_SALE) {
-    return `스쿼드가 ${MIN_SQUAD_AFTER_SALE}명 아래로 내려가 팔 수 없습니다`;
-  }
-  if (remaining.filter((p) => groupOf(p) === "GK").length < 2) {
-    return "골키퍼가 2명 아래로 내려가 팔 수 없습니다";
-  }
-  return null;
+): SquadShortfall | null {
+  return squadFloorShortfall(playersOf(state, teamId).filter((p) => p.id !== leaving.id));
 }
 
 /**

@@ -20,6 +20,7 @@ vi.mock("@story-fm/agents", async (importOriginal) => {
 });
 
 const { GmTurnFailure } = await import("@story-fm/agents");
+const { LlmCallError, LlmTimeoutError } = await import("@story-fm/llm");
 const { POST: createGame } = await import("../app/api/games/route");
 const { GET: getGame } = await import("../app/api/games/[id]/route");
 const { POST: postTurn } = await import("../app/api/games/[id]/turn/stream/route");
@@ -80,14 +81,16 @@ describe("LLM 응답 실패", () => {
   it("error 이벤트만 보내고 채팅에는 아무것도 추가하지 않는다 (유저 발화도)", async () => {
     const game = await newGame();
     const before = game.chat.length;
-    reject.mockRejectedValueOnce(new Error('529 {"type":"overloaded_error"}'));
+    reject.mockRejectedValueOnce(new LlmCallError("overloaded", '529 {"type":"overloaded_error"}'));
 
     const events = await turnEvents(game.id, "훈련 잡아줘");
     expect(events.some((e) => e.type === "done")).toBe(false);
     const failure = events.find((e) => e.type === "error");
     // 감독에게 보이는 문구는 픽션 밖 안내 — 화자 태그(@…)가 없다
     expect(failure?.error).not.toContain("@");
-    expect(failure?.detail).toContain("529"); // 원인은 detail로만 (툴팁·로그용)
+    // 문구를 고른 것은 `kind`다 — 원문에서 낱말을 찾지 않는다 (models.md §1-1)
+    expect(failure?.error).toBe("모델 서버가 혼잡합니다");
+    expect(failure?.detail).toContain("529"); // 원인은 detail로만 (개발 모드 툴팁·로그용)
 
     // 저장된 채팅이 그대로다 — 실패한 턴은 흔적을 남기지 않는다
     expect((await reloaded(game.id)).chat).toHaveLength(before);
@@ -135,9 +138,7 @@ describe("LLM 응답 실패", () => {
    */
   it("시한을 넘겨 실패한 턴 뒤에도 같은 세이브의 다음 턴이 돈다", async () => {
     const game = await newGame();
-    reject.mockRejectedValueOnce(
-      new Error("gm 에이전트가 180000ms 안에 응답하지 않았습니다 (timeout)"),
-    );
+    reject.mockRejectedValueOnce(new LlmTimeoutError("gm", 180_000));
 
     const failed = await turnEvents(game.id, "훈련 잡아줘");
     // 이미 있는 실패 경로를 탄다 — 무응답에 별도의 상태는 없다
@@ -187,6 +188,29 @@ describe("LLM 응답 실패", () => {
     }
   });
 
+  /**
+   * **프로덕션 응답에 내부 예외 원문이 실리지 않는다** (models.md §1-1).
+   * 원문에는 프롬프트 조각·모델 ID·경로가 섞여 나오고, 화면이 그것으로 하는 일은
+   * 툴팁 하나뿐이다. 분류는 `kind`가 이미 끝냈다.
+   */
+  it("프로덕션에서는 원인 문자열이 응답에 실리지 않는다", async () => {
+    const game = await newGame();
+    // vitest는 NODE_ENV를 "test"로 띄운다 — 개발 모드 판정(`traceEnabled`)이 그 값을 본다
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      reject.mockRejectedValueOnce(
+        new LlmCallError("rate_limit", "429 요청이 너무 많습니다 — key=sk-내부-원문"),
+      );
+      const events = await turnEvents(game.id, "훈련 잡아줘");
+      const failure = events.find((e) => e.type === "error");
+      expect(failure?.error).toBe("요청 한도를 넘었습니다");
+      expect(failure?.detail).toBeUndefined();
+      expect(JSON.stringify(events)).not.toContain("sk-내부-원문");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("성공한 턴은 평소처럼 유저·모델 턴을 남긴다", async () => {
     const game = await newGame();
     reject.mockResolvedValueOnce({ text: "@수석코치: 알겠습니다.", toolCalls: [] });
@@ -211,7 +235,7 @@ describe("기다리기를 멈춘 턴", () => {
     const call = async (res: Response) => {
       vi.stubGlobal("fetch", async () => res);
       try {
-        return await streamTurn("g", { message: "훈련 잡아줘", operator: false }, handlers);
+        return await streamTurn("g", { message: "훈련 잡아줘" }, handlers);
       } finally {
         vi.unstubAllGlobals();
       }

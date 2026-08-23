@@ -7,6 +7,7 @@ import {
   adminRemoveCatalogPlayer,
   isCatalogEdited,
 } from "@story-fm/engine";
+import { adminWrite } from "@/app/api/admin/admin-guard";
 
 const attr = z.number().int().min(1).max(99).optional();
 /**
@@ -14,7 +15,7 @@ const attr = z.number().int().min(1).max(99).optional();
  * 실리지 않으면 손대지 않고, `null`이면 실측을 지워 모델 추정으로 되돌린다.
  */
 const wage = z.number().int().min(0).max(2_000_000).nullable().optional();
-/** 능력치 15축 — 도메인 상수에서 스키마를 펼친다 (축이 늘면 여기도 자동으로) */
+/** 능력치 16축 — 도메인 상수에서 스키마를 펼친다 (축이 늘면 여기도 자동으로) */
 const axisFields = Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, attr]));
 const PatchSchema = z.object({
   nameKo: z.string().min(1).max(40).optional(),
@@ -43,7 +44,10 @@ const PatchSchema = z.object({
 });
 
 /** 카탈로그 선수 편집 */
-export async function PATCH(request: Request, context: { params: Promise<{ playerId: string }> }) {
+export const PATCH = adminWrite(async function (
+  request: Request,
+  context: { params: Promise<{ playerId: string }> },
+) {
   const { playerId } = await context.params;
   let raw: unknown;
   try {
@@ -68,10 +72,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ playe
     teams: adminCatalog(),
     edited: isCatalogEdited(),
   });
-}
+});
 
 /** 카탈로그에서 선수 삭제 */
-export async function DELETE(
+export const DELETE = adminWrite(async function (
   _request: Request,
   context: { params: Promise<{ playerId: string }> },
 ) {
@@ -84,4 +88,4 @@ export async function DELETE(
     teams: adminCatalog(),
     edited: isCatalogEdited(),
   });
-}
+});

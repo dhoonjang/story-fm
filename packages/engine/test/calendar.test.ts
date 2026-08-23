@@ -1,30 +1,46 @@
 import { describe, expect, it } from "vitest";
 import {
   addDays,
+  buildEuroEntrants,
   buildMatches,
   buildMatchweekDates,
   buildScheduleEntries,
   buildOfficeViews,
+  cupCatalog,
+  entrantsOf,
   buildSeasonCalendar,
+  buildSeasonFixtures,
   buildTransferWindows,
+  clashesToClear,
+  clearForCup,
   dayOfWeek,
   diffDays,
   cupBlankWeekend,
   domesticCupCatalog,
+  isReserveMatch,
+  isSuperCup,
   restHours,
   seasonDate,
   squadReturnOf,
   stageTarget,
   stageTieTarget,
   teamsOfLeague,
+  superCupChampion,
+  superCupMatch,
+  topLeagueOfCountry,
+  topLeagues,
   DOMESTIC_CUP_SIZE,
   FRIENDLY_ROUNDS,
+  HARD_MIN_REST_HOURS,
   MIN_REST_HOURS,
+  SUPER_CUP_CATALOG,
+  type SuperCupSource,
   advanceTime,
   allMatchesDone,
   domesticChampion,
   domesticStageMatches,
   finalWeekdays,
+  postponeMatch,
   type GameState,
 } from "@story-fm/engine";
 import { type MatchRecord } from "@story-fm/domain";
@@ -499,6 +515,99 @@ describe("메이저 컵 진입 라운드는 달력이 비운 주말에 앉는다
   });
 });
 
+/**
+ * **대회 규모를 키울 때 가장 먼저 깨지는 자리다.**
+ *
+ * 한 팀이 같은 날 두 경기에 서면 그 중 하나는 영영 소화되지 않고, 시즌 종료 판정이
+ * 그 경기를 기다리다 달력만 흐른다 — 게임 소프트락이다. 리그 페이즈 정원(UCL 36 ·
+ * UEL·UECL 24)과 슈퍼컵 두 수요일이 이 검사를 통과한 만큼이다
+ * ([competition.md](../../../docs/data/competition.md) §4·§4-1).
+ *
+ * 여기서 재는 것은 **시즌 시작에 이미 서 있는 편성**이다 — 친선·슈퍼컵·리그·대항전
+ * 리그 페이즈. 나중에 편성되는 녹아웃과 국내 컵 라운드는 예약된 날짜를 쓰고, 그것이
+ * 실제로 끝까지 가는지는 아래 "두 시즌을 이어 돌려도 컵이 끝난다"가 본다.
+ */
+describe("한 시즌 편성에 달력 충돌이 없다", () => {
+  /** 지난 시즌이 남긴 우승자 — 규모만 재는 자리라 카탈로그로 세운다 */
+  const superCups = (): SuperCupSource => {
+    const ranked = Object.fromEntries(
+      topLeagues().map((l) => [l.id, teamsOfLeague(l.id).map((t) => t.id)]),
+    );
+    return {
+      leagueTables: ranked,
+      // 컵 우승은 리그 우승과 갈라 둔다 — 더블이면 슈퍼컵이 한 경기 줄어 검사가 헐거워진다
+      domesticChampions: Object.fromEntries(
+        domesticCupCatalog().map((c) => [
+          c.id,
+          ranked[topLeagueOfCountry(c.country) ?? ""]?.[1] ?? "",
+        ]),
+      ),
+      // UCL 우승팀이 자기 리그 우승팀이기도 한 경우 — 한 클럽이 슈퍼컵 둘에 선다
+      euroChampions: { ucl: ranked.epl![0]!, uel: ranked.laliga![1]! },
+    };
+  };
+
+  for (const season of [1, 2, 3, 4]) {
+    const matches = buildSeasonFixtures(
+      season,
+      7,
+      buildEuroEntrants(season, 7),
+      undefined,
+      undefined,
+      undefined,
+      superCups(),
+      // 2군 경기는 1군과 다른 명단이라 같은 날에 서도 충돌이 아니다
+    ).filter((m) => !isReserveMatch(m));
+
+    const byTeam = new Map<string, MatchRecord[]>();
+    for (const m of matches) {
+      for (const teamId of [m.homeTeamId, m.awayTeamId]) {
+        const list = byTeam.get(teamId) ?? [];
+        list.push(m);
+        byTeam.set(teamId, list);
+      }
+    }
+    for (const list of byTeam.values()) {
+      list.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    }
+
+    it(`시즌 ${season} — 한 팀이 하루에 두 경기를 뛰지 않는다`, () => {
+      const clashes: string[] = [];
+      for (const [teamId, list] of byTeam) {
+        for (let i = 1; i < list.length; i++) {
+          if (list[i]!.date === list[i - 1]!.date) {
+            clashes.push(`${teamId} ${list[i]!.date}: ${list[i - 1]!.id} + ${list[i]!.id}`);
+          }
+        }
+      }
+      expect(clashes).toEqual([]);
+    });
+
+    it(`시즌 ${season} — 연속 두 경기 사이가 ${HARD_MIN_REST_HOURS}시간을 밑돌지 않는다`, () => {
+      const tight: string[] = [];
+      for (const [teamId, list] of byTeam) {
+        for (let i = 1; i < list.length; i++) {
+          const gap = restHours(list[i - 1]!, list[i]!);
+          if (gap < HARD_MIN_REST_HOURS) tight.push(`${teamId} ${list[i]!.id}: ${gap}h`);
+        }
+      }
+      expect(tight).toEqual([]);
+    });
+
+    it(`시즌 ${season} — 슈퍼컵 여섯이 개막 전 서로 다른 두 수요일에 선다`, () => {
+      const cups = matches.filter((m) => isSuperCup(m.competitionId));
+      expect(cups).toHaveLength(SUPER_CUP_CATALOG.length);
+      const opener = buildSeasonCalendar(season).start;
+      const dates = new Set(cups.map((m) => m.date));
+      expect(dates.size, [...dates].join(" ")).toBe(2);
+      for (const date of dates) {
+        expect(dayOfWeek(date), date).toBe(3);
+        expect(date < opener, `${date} — 개막 ${opener}`).toBe(true);
+      }
+    });
+  }
+});
+
 describe("두 시즌을 이어 돌려도 컵이 끝난다", () => {
   /**
    * 시즌 1만 보면 안 드러난다 — 2027년엔 쿠프 결승 5/22가 토요일이라 제자리에
@@ -551,5 +660,123 @@ describe("두 시즌을 이어 돌려도 컵이 끝난다", () => {
       expect(final, `${cup.id} 결승 없음`).toBeTruthy();
       expect(finalWeekdays(cup), `${cup.id} 결승 ${final!.date}`).toContain(dayOf(final!.date));
     }
+  });
+
+  /**
+   * 강등 클럽이 2부 몫에서 빠지므로(§4.1) 그 리그의 티켓 합이 풀보다 크면 참가 팀이
+   * 정원에 못 미친다 — 홀수가 되면 리그 페이즈가 아예 편성되지 않는다. 승강이 한 번
+   * 일어난 뒤에야 드러나는 자리라 시즌 2에서 본다.
+   */
+  it("승강 뒤에도 대항전이 정원을 채운다", () => {
+    for (const cup of cupCatalog()) {
+      expect(entrantsOf(state.euroEntrants, cup.id), cup.id).toHaveLength(cup.size);
+    }
+  });
+
+  /**
+   * 첫 시즌엔 지난 시즌이 없어 슈퍼컵도 없다 — 시즌 2의 프리시즌이 첫 자리다.
+   * 우승 팀까지 봐야 하는 이유: 무승부로 끝난 슈퍼컵의 승부를 아무도 가리지 않으면
+   * 그 대회는 우승자 없이 지나간다 (`advanceSuperCups`).
+   */
+  it("슈퍼컵은 시즌 2 프리시즌에 서고 전부 우승 팀을 낸다", () => {
+    for (const cup of SUPER_CUP_CATALOG) {
+      const match = superCupMatch(state, cup.id);
+      expect(match, `${cup.id} 경기 없음`).toBeTruthy();
+      expect(match!.date < state.calendar.start, `${cup.id} ${match!.date}`).toBe(true);
+      expect(superCupChampion(state, cup.id), `${cup.id} 우승 팀 없음`).toBeTruthy();
+    }
+  });
+});
+
+/**
+ * **컵이 리그를 밀어낼 때, 반쯤 밀다 마는 일은 없다** (season.md §3).
+ *
+ * 걸린 리그 경기를 하나라도 옮기지 못하면 컵은 어차피 그 날짜에 들어가지 못한다.
+ * 그런데 그때까지 옮긴 경기가 새 날짜에 남으면 달력만 흐트러진 최악의 상태가 된다 —
+ * 컵은 제 자리를 못 얻고, 리그 경기 하나는 아무 이유 없이 주중으로 가 있다.
+ * 화면에는 "연기됐다"는 말조차 서지 않으므로(일지는 성공했을 때만 쓴다) 아무도
+ * 알아채지 못한 채 그 시즌을 지낸다.
+ */
+describe("컵을 위한 비켜서기 — 하나라도 실패하면 전부 원위치", () => {
+  /** 연기된 경기가 앉는 요일 — 화·수 (`reschedule.ts`) */
+  const MIDWEEK = new Set([2, 3]);
+
+  it("옮길 자리를 못 찾는 경기가 하나라도 있으면 앞서 옮긴 경기도 되돌아온다", () => {
+    const state = createTestGame();
+    /** 컵이 앉으려는 자리 — 토요일 낮 */
+    const CUP_KICKOFF = "15:00";
+    const league = state.matches.filter((m) => m.season === 1 && m.competitionId === "epl");
+
+    /**
+     * 같은 날 두 경기가 걸리고 **감독 경기가 먼저 옮겨지는** 라운드를 찾는다.
+     * 라운드 번호를 못 박지 않는 이유는 컵·대항전 날짜가 시즌마다 달라 어느 주말이
+     * 이 모양이 되는지도 함께 움직이기 때문이다.
+     */
+    let picked: { date: string; teams: string[]; clashes: MatchRecord[] } | null = null;
+    for (const round of [...new Set(league.map((m) => m.round))].sort((a, b) => a - b)) {
+      const mine = league.find(
+        (m) =>
+          m.round === round &&
+          (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+      );
+      const other = league.find((m) => m.round === round && m !== mine && m.date === mine?.date);
+      if (!mine || !other) continue;
+      const teams = [state.userTeamId, other.homeTeamId];
+      const clashes = clashesToClear(state, teams, mine.date, CUP_KICKOFF);
+      if (clashes?.length === 2 && clashes[0] === mine) {
+        picked = { date: mine.date, teams, clashes };
+        break;
+      }
+    }
+    if (!picked) throw new Error("두 경기가 걸리는 주말을 찾지 못했습니다");
+    const [movable, stuck] = picked.clashes as [MatchRecord, MatchRecord];
+
+    // 두 번째 경기의 팀에게 남은 주중(화·수)을 전부 채워 옮길 자리를 없앤다
+    const cupId = domesticCupCatalog()[0]!.id;
+    for (let i = 3; i <= 95; i++) {
+      const date = addDays(stuck.date, i);
+      if (!MIDWEEK.has(dayOfWeek(date))) continue;
+      state.matches.push({
+        id: `blocker-${date}`,
+        season: 1,
+        competitionId: cupId,
+        round: 1,
+        date,
+        time: "19:45",
+        homeTeamId: stuck.homeTeamId,
+        awayTeamId: "blocker-opponent",
+        result: null,
+      });
+    }
+    // 막은 경기들은 컵 주말 바깥이라 걸리는 경기 목록은 그대로다
+    expect(clashesToClear(state, picked.teams, picked.date, CUP_KICKOFF)).toHaveLength(2);
+
+    // 앞의 것은 옮길 자리가 있고 뒤의 것은 없다 — 복제본에서 미리 못 박는다
+    const probe = structuredClone(state);
+    expect(
+      postponeMatch(
+        probe,
+        probe.matches.find((m) => m.id === movable.id)!,
+      ),
+    ).toBe(true);
+    expect(
+      postponeMatch(
+        probe,
+        probe.matches.find((m) => m.id === stuck.id)!,
+      ),
+    ).toBe(false);
+
+    const before = { date: movable.date, time: movable.time };
+    const entry = state.schedule.find((e) => e.type === "match" && e.refId === movable.id)!;
+    const entryBefore = { date: entry.date, time: entry.time };
+
+    const digest: string[] = [];
+    expect(clearForCup(state, picked.teams, picked.date, digest, CUP_KICKOFF)).toBe(false);
+
+    // 경기도, 감독 달력의 엔트리도 원래 자리에 있다 — 일지에도 아무 말이 남지 않는다
+    expect({ date: movable.date, time: movable.time }).toEqual(before);
+    expect({ date: entry.date, time: entry.time }).toEqual(entryBefore);
+    expect(stuck.date).toBe(picked.date);
+    expect(digest).toEqual([]);
   });
 });

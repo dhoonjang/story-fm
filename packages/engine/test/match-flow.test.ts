@@ -4,6 +4,7 @@ import {
   applyMatchEvents,
   assignmentsOf,
   buildOfficeViews,
+  buildRatingBrief,
   digestLines,
   firstTeamPlayers,
   isClubTeam,
@@ -12,6 +13,9 @@ import {
   loadGame,
   MATCH_PROFICIENCY_GAIN,
   MATCHDAY_BENCH,
+  tacticalXpFor,
+  TACTICAL_XP_CAP,
+  TACTICAL_XP_PER_GOAL,
   playersOf,
   proficiencyAt,
   refreshPacket,
@@ -238,7 +242,9 @@ describe("경기 흐름 (overview §4)", () => {
     const after = packetSide();
     expect(after.regional?.[0]?.note).toContain("하프스페이스");
     expect(
-      state.pendingMatch!.packet.keyPoints.some((point) => point.includes("하프스페이스")),
+      state.pendingMatch!.packet.keyPoints.some(
+        (tag) => tag.source === "zone-plan" && tag.text?.includes("하프스페이스"),
+      ),
     ).toBe(true);
     expect(
       zoneGrid(state.pendingMatch!.packet).find(
@@ -745,6 +751,122 @@ describe("경고 누적 퇴장의 장부 (match.md §5)", () => {
 });
 
 /**
+ * 출전 시간은 **그라운드를 떠난 시각**에서 나온다 — 교체로 나간 것과 퇴장당한 것이
+ * 같은 자격이다 (match.md §6). 퇴장을 세지 않으면 20′에 나간 선수도 90분으로 남아,
+ * 평점의 기준값과 LLM 채점의 입력이 "풀타임을 뛰고 퇴장까지 당한 선수"가 된다.
+ * 화면에는 그 숫자가 서지 않으므로 아무도 알아채지 못한다.
+ */
+describe("출전 시간의 끝 — 교체와 퇴장이 같은 자격이다", () => {
+  it("퇴장 분이 출전 시간을 끊고, 교체 투입자는 들어온 시각부터 센다", () => {
+    const state = atMatchday(42, { afterPreseason: true });
+    expect(startMatch(state).ok).toBe(true);
+    const side = userSide(state);
+    const mine = () =>
+      side === "home" ? state.pendingMatch!.ledger.home : state.pendingMatch!.ledger.away;
+    const [sentOff, goingOff, fullMatch] = mine().onPitch as [string, string, string];
+    const comingOn = mine().bench[0]!;
+
+    const apply = (...events: Parameters<typeof applyMatchEvents>[1]) => {
+      const res = applyMatchEvents(state, events);
+      expect(res.ok, res.message).toBe(true);
+    };
+    apply({ minute: 20, type: "red_card", team: side, actors: [sentOff], causes: [] });
+    apply({ minute: 45, type: "half_time", actors: [], causes: [] });
+    apply({
+      minute: 60,
+      type: "substitution",
+      team: side,
+      actors: [goingOff, comingOn],
+      causes: [],
+    });
+    // 들어온 선수가 그 뒤에 퇴장한다 — 두 끝이 함께 걸리는 자리다
+    apply({ minute: 75, type: "red_card", team: side, actors: [comingOn], causes: [] });
+
+    // 장부가 살아 있을 때만 만들 수 있다 — `finalizeMatch`보다 먼저다
+    const brief = buildRatingBrief(state)!;
+    const minutesOf = (id: string) => brief.players.find((p) => p.playerId === id)?.minutes;
+    expect(minutesOf(sentOff)).toBe(20);
+    expect(minutesOf(goingOff)).toBe(60);
+    expect(minutesOf(comingOn)).toBe(15); // 60′ 투입 → 75′ 퇴장
+    expect(minutesOf(fullMatch)).toBe(90);
+  });
+});
+
+/**
+ * **상대 벤치가 판을 갈아 까는 것은 경기당 한 번이다** (match.md §2). 정지점마다 다시
+ * 고르면 스코어가 아니라 **정지점 횟수**의 함수가 되고, 감독이 말만 거는 턴이 이어질수록
+ * 상대의 모양이 계속 흔들린다 — 판이 바뀌는 것은 화면에 보이지만 "몇 번째인지"는 보이지
+ * 않는다.
+ */
+describe("상대 벤치의 모양 변경 (match.md §2)", () => {
+  it("한 번 갈아 깐 판은 남은 정지점에서 다시 바뀌지 않는다", () => {
+    const state = atMatchday(42, { afterPreseason: true });
+    expect(startMatch(state).ok).toBe(true);
+    const run = () => {
+      const step = advanceSegment(state);
+      expect(step.ok, step.message).toBe(true);
+      return step.plan?.stop;
+    };
+
+    // 상대가 판을 갈아 깔 때까지 굴린다
+    let guard = 60;
+    while (state.pendingMatch?.aiShape === undefined && guard-- > 0) {
+      if (run() === "full_time") break;
+    }
+    const shape = state.pendingMatch!.aiShape;
+    expect(shape, "상대가 이 경기에서 한 번도 판을 갈아 깔지 않았다").toBeDefined();
+
+    /**
+     * 감독이 고를 리 없는 모양을 손으로 박아 둔다 — 상대는 크게 지고 있어서 남은
+     * 정지점마다 "던지는 모양"(`CHASE_SHAPES`)을 다시 고르려 한다. 관문이 없으면
+     * 이 값이 그 모양으로 덮인다.
+     */
+    const pending = state.pendingMatch!;
+    pending.aiShape = { formation: "5-4-1", intent: "hold" };
+    if (pending.aiTactics) pending.aiTactics = { ...pending.aiTactics, formation: "5-4-1" };
+    guard = 60;
+    while (state.phase === "match" && guard-- > 0) {
+      if (run() === "full_time") break;
+    }
+    expect(state.pendingMatch!.aiShape).toEqual({ formation: "5-4-1", intent: "hold" });
+  });
+
+  /**
+   * 구간이 정지 사건(골·하프타임·종료)과 **함께** 올리는 AI 교체는 그 사건 **앞에**
+   * 끼워지고, 분은 앞뒤 사건 사이로 잘린다(`insertBeforeStop`). 뒤에 붙으면 장부가
+   * 배치를 통째로 반려해 경기가 그 자리에서 멈추고, 분이 잘리지 않으면 "시간 역행"으로
+   * 같은 일이 일어난다.
+   */
+  it("정지 사건과 함께 올라온 AI 교체가 장부의 시각을 되감지 않는다", () => {
+    const state = atMatchday(42, { afterPreseason: true });
+    let aiSide: "home" | "away" = "home";
+    let events: readonly { minute: number; type: string; team?: string }[] = [];
+    // 장부는 `finalizeMatch`가 걷어 가므로 종료 직전에 읽는다 (`userSide`도 그때 선다)
+    playMockMatch(state, (s) => {
+      aiSide = userSide(s) === "home" ? "away" : "home";
+      events = s.pendingMatch!.ledger.events.map((e) => ({
+        minute: e.minute,
+        type: e.type,
+        ...(e.team ? { team: e.team } : {}),
+      }));
+    });
+
+    // 장부의 시각은 되감기지 않는다
+    for (let i = 1; i < events.length; i++) {
+      expect(events[i]!.minute, `#${i} ${events[i]!.type}`).toBeGreaterThanOrEqual(
+        events[i - 1]!.minute,
+      );
+    }
+    // 상대 벤치가 실제로 교체를 넣었고, 종료 사건이 장부의 마지막이다
+    const subs = events.filter((e) => e.type === "substitution" && e.team === aiSide);
+    expect(subs.length).toBeGreaterThan(0);
+    const last = events[events.length - 1]!;
+    expect(last.type).toBe("full_time");
+    for (const sub of subs) expect(sub.minute).toBeLessThanOrEqual(last.minute);
+  });
+});
+
+/**
  * **한 경기는 양 팀 장부에 같은 흔적을 남긴다** (match.md §6).
  *
  * 마감이 우리 명단만 돌던 때는 상대가 우리를 상대로 두 골을 넣어도 시즌 득점이
@@ -1123,5 +1245,19 @@ describe("교체 투입의 역할 (match.md §2)", () => {
     expect(JSON.stringify(withMemory.pendingMatch!.packet[opponentSide].lineup)).toBe(
       JSON.stringify(plain.pendingMatch!.packet[opponentSide].lineup),
     );
+  });
+});
+
+describe("전술 XP는 천장이 있다", () => {
+  it("태그 없는 경기는 0, 골 하나부터 골당 같은 폭으로 쌓인다", () => {
+    expect(tacticalXpFor(0)).toBe(0);
+    expect(tacticalXpFor(1)).toBe(TACTICAL_XP_PER_GOAL);
+    expect(tacticalXpFor(2)).toBe(TACTICAL_XP_PER_GOAL * 2);
+  });
+
+  /** 천장이 없으면 약체 상대 대승 한 판이 전술 축을 통째로 앞당긴다 */
+  it("천장을 넘어서면 더 넣어도 같다", () => {
+    expect(tacticalXpFor(3)).toBe(TACTICAL_XP_CAP);
+    expect(tacticalXpFor(9)).toBe(TACTICAL_XP_CAP);
   });
 });

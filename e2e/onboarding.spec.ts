@@ -1,10 +1,11 @@
 import { expect, test } from "@playwright/test";
 
 import { token } from "./palette";
+import { COLD_MS } from "./timeouts";
 
 test("새 게임 첫 메시지가 부임 장면과 수석코치 브리핑으로 표시된다", async ({ page }) => {
   await page.goto("/new");
-  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: COLD_MS });
   await page.getByTestId("league-epl").click();
   await expect(page.getByTestId("team-grid")).toBeVisible();
 
@@ -16,7 +17,7 @@ test("새 게임 첫 메시지가 부임 장면과 수석코치 브리핑으로 
   await page.getByTestId("start-game").click();
 
   const firstTurn = page.getByTestId("model-turn").first();
-  await expect(firstTurn).toBeVisible({ timeout: 30_000 });
+  await expect(firstTurn).toBeVisible({ timeout: COLD_MS });
   await expect(firstTurn).toContainText("온보딩테스트");
   // 화자 태그는 사람 이름이고 직책은 세이브가 안다 (docs/data/people.md §3)
   await expect(firstTurn.locator(".speaker-role").first()).toHaveText("수석코치");
@@ -41,7 +42,7 @@ test("부임은 리그 → 팀 → 감독 한 단계씩 서고, 되돌아갈 수
    * 고른 것은 다음 단계의 맥락으로 남는다 (season.md §1).
    */
   await page.goto("/new");
-  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: COLD_MS });
   // 리그를 고르기 전에는 팀도 감독도 화면에 없다 — 안내 문구로 때울 자리가 없다
   await expect(page.getByTestId("team-grid")).toHaveCount(0);
   await expect(page.getByTestId("manager-name")).toHaveCount(0);
@@ -82,17 +83,17 @@ test("같은 시각은 다시 적지 않는다 — 화자 이름은 턴마다 �
    * 이름이 빠진 턴은 누가 말하는지를 위쪽까지 거슬러 찾아야 한다.
    */
   await page.goto("/new");
-  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("league-ring")).toBeVisible({ timeout: COLD_MS });
   await page.getByTestId("league-epl").click();
   await page.getByTestId("team-arsenal").click();
   await page.getByTestId("manager-name").fill("접기테스트");
   await page.getByTestId("manager-background").fill("전술 분석가 출신");
   await page.getByTestId("start-game").click();
-  await expect(page.getByTestId("chat-scroll")).toContainText("접기테스트", { timeout: 30_000 });
+  await expect(page.getByTestId("chat-scroll")).toContainText("접기테스트", { timeout: COLD_MS });
 
   // 한 턴이 끝난 것은 **모델 턴이 하나 늘었다**로 안다 — 고정 대기는 빠른 날엔
   // 낭비고 느린 날엔 다음 발화를 아직 잠긴 입력칸에 밀어 넣는다.
-  // 기다림은 기본값(15초)에 맡긴다 — 턴 하나가 그보다 오래 걸리면 케이스 전체가
+  // 기다림은 기본값(`TURN_MS`)에 맡긴다 — 턴 하나가 그보다 오래 걸리면 케이스 전체가
   // 90초에 걸려 죽으므로, 여기서 늘려 잡으면 무엇이 멎었는지만 흐려진다
   const modelTurns = page.getByTestId("model-turn");
   const messages = ["팀 분위기는 좀 어때", "알겠어", "그대로 가자"];

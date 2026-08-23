@@ -14,8 +14,16 @@ import {
   squadReturnOf,
   onSummerBreak,
   userPlayers,
+  RESERVE_TRAINING_AIM,
+  reserveTrainingAxes,
+  reserveTrainingMultiplier,
 } from "@story-fm/engine";
-import { isReserveMatch } from "@story-fm/domain";
+import {
+  ATTRIBUTE_AXES,
+  RESERVE_TRAINING_POLICIES,
+  isReserveMatch,
+  type AttributeAxis,
+} from "@story-fm/domain";
 import { createTestGame, advanceAndPlay, playMockMatch } from "./helpers";
 
 /** 그 날짜의 예정 훈련 label 목록 (오전→오후) */
@@ -161,15 +169,15 @@ describe("기본 훈련 — 시즌 달력에 미리 깔려 있다", () => {
     expect(checked).toBeGreaterThan(0);
   });
 
-  it("보편 메뉴가 15축을 골고루 훑는다", () => {
+  it("보편 메뉴가 16축을 골고루 훑는다", () => {
     const state = createTestGame();
     const seen = new Map<string, number>();
     for (const s of state.trainingSessions) {
       for (const f of s.focus) seen.set(f, (seen.get(f) ?? 0) + 1);
     }
-    // 능력치 15축이 모두 훈련 대상이 된다 — 영영 안 자라는 축은 없다
+    // 능력치 16축이 모두 훈련 대상이 된다 — 영영 안 자라는 축은 없다
     const axes = [...seen.keys()].filter((k) => k !== "tactical" && k !== "recovery");
-    expect(axes).toHaveLength(15);
+    expect(axes).toHaveLength(16);
     const counts = axes.map((a) => seen.get(a)!);
     expect(Math.min(...counts)).toBeGreaterThan(5);
     // 완전 균등은 아니다 — 본훈련이 잡히는 날은 경기 일정이 정하고, 프리시즌은
@@ -485,6 +493,53 @@ describe("일정이 바뀌면 훈련도 따라 바뀐다", () => {
   }, 60_000);
 });
 
+describe("기본 훈련의 대조는 이름이 아니라 id로 한다", () => {
+  /**
+   * 메뉴의 한국어 이름을 고치는 것은 표시의 변경이지 일정의 변경이 아니다.
+   * 이름으로 대조하던 때는 문구 한 글자만 고쳐도 남은 시즌의 기본 훈련이 통째로
+   * 다시 깔렸다 (season.md §4).
+   */
+  it("메뉴 이름만 바꾸면 아무것도 다시 깔지 않는다", () => {
+    const state = createTestGame(3);
+    syncDefaultTraining(state);
+    const autos = state.trainingSessions.filter((t) => t.auto === true);
+    expect(autos.length, "기본 훈련이 깔려 있지 않다").toBeGreaterThan(0);
+    for (const session of autos) session.label = `${session.label} (문구 수정)`;
+    const ids = autos.map((t) => t.id).sort();
+
+    syncDefaultTraining(state);
+
+    expect(
+      state.trainingSessions
+        .filter((t) => t.auto === true)
+        .map((t) => t.id)
+        .sort(),
+      "이름을 고쳤다고 훈련이 다시 깔렸다",
+    ).toEqual(ids);
+    // 고친 이름이 그대로 남아 있다 = 그 세션이 지워지지 않았다
+    expect(state.trainingSessions.find((t) => t.id === ids[0])?.label).toContain("문구 수정");
+  });
+
+  it("옛 세이브의 세션은 id가 없어 이름으로 대조한다 — 열자마자 다시 깔리지 않는다", () => {
+    const state = createTestGame(3);
+    syncDefaultTraining(state);
+    const autos = state.trainingSessions.filter((t) => t.auto === true);
+    // 카드가 들어오기 전에 저장된 세이브 — 이름만 있고 `menuId`가 없다
+    for (const session of autos) delete session.menuId;
+    const ids = autos.map((t) => t.id).sort();
+
+    syncDefaultTraining(state);
+
+    expect(
+      state.trainingSessions
+        .filter((t) => t.auto === true)
+        .map((t) => t.id)
+        .sort(),
+      "옛 세이브의 기본 훈련이 통째로 다시 깔렸다",
+    ).toEqual(ids);
+  });
+});
+
 describe("경기일 훈련은 취소된다", () => {
   it("cancelTrainingOn은 그날 예정 훈련을 세션까지 지운다", () => {
     const state = createTestGame();
@@ -625,5 +680,56 @@ describe("여름 휴가", () => {
       setTraining(state, { sessions: [{ date, slot: "am", label: "전술", focus: ["tactical"] }] })
         .ok,
     ).toBe(true);
+  });
+});
+
+/**
+ * 2군 훈련 방침 — 배율은 **총량을 옮길 뿐 늘리지 않는다**(season.md §8 불변식).
+ * 화면에 드러나는 것은 방침 이름뿐이라, 못 박을 것은 눈에 안 보이는 공식이다.
+ */
+describe("2군 훈련 방침 배율", () => {
+  const FIELD_AXES: readonly AttributeAxis[] = ATTRIBUTE_AXES.filter((a) => a !== "goalkeeping");
+  const AIMING = RESERVE_TRAINING_POLICIES.filter((p) => p !== "balanced");
+
+  it("어느 방침에서나 필드 축 배율의 합이 필드 축 수와 같다", () => {
+    for (const policy of RESERVE_TRAINING_POLICIES) {
+      const sum = FIELD_AXES.reduce(
+        (acc, axis) => acc + reserveTrainingMultiplier(policy, axis),
+        0,
+      );
+      expect(sum).toBeCloseTo(FIELD_AXES.length, 10);
+    }
+  });
+
+  it("goalkeeping은 어느 방침에서도 눌리지 않는다", () => {
+    for (const policy of RESERVE_TRAINING_POLICIES) {
+      expect(reserveTrainingMultiplier(policy, "goalkeeping")).toBe(1);
+    }
+  });
+
+  it("겨냥한 축은 1보다 크고 나머지 필드 축은 1보다 작다", () => {
+    for (const policy of AIMING) {
+      const aimed = reserveTrainingAxes(policy);
+      expect(aimed.length).toBeGreaterThan(0);
+      for (const axis of aimed) {
+        expect(reserveTrainingMultiplier(policy, axis)).toBe(RESERVE_TRAINING_AIM);
+      }
+      for (const axis of FIELD_AXES.filter((a) => !aimed.includes(a))) {
+        expect(reserveTrainingMultiplier(policy, axis)).toBeLessThan(1);
+      }
+    }
+  });
+
+  it("축 묶음이 필드 축을 빠짐없이 한 번씩 덮는다", () => {
+    const covered = AIMING.flatMap((policy) => [...reserveTrainingAxes(policy)]);
+    expect(new Set(covered).size).toBe(covered.length);
+    expect([...covered].sort()).toEqual([...FIELD_AXES].sort());
+    expect(covered).not.toContain("goalkeeping");
+  });
+
+  it("balanced는 전 축이 1이다 — 기본값이자 해제", () => {
+    for (const axis of ATTRIBUTE_AXES) {
+      expect(reserveTrainingMultiplier("balanced", axis)).toBe(1);
+    }
   });
 });

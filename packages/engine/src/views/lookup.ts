@@ -14,6 +14,7 @@ import {
   footLabel,
   physiqueLabel,
   naturalPositionOf,
+  parseScorerEntry,
   roleFit,
   rolesFor,
   seasonRating,
@@ -289,7 +290,7 @@ function theirRow(state: GameState, p: GamePlayer): string {
   );
 }
 
-export function playerRow(state: GameState, p: GamePlayer): string {
+function playerRow(state: GameState, p: GamePlayer): string {
   return p.teamId === state.userTeamId ? ourRow(state, p) : theirRow(state, p);
 }
 
@@ -935,12 +936,10 @@ function scorerNote(state: GameState, m: MatchRecord): string {
   if (scorers.length === 0) return "";
   const minutes = m.result?.goalMinutes ?? [];
   const named = scorers.map((entry, i) => {
-    const [side, id] = entry.includes(":")
-      ? (entry.split(":", 2) as [string, string])
-      : ["", entry];
-    const team = side === "home" ? m.homeTeamId : side === "away" ? m.awayTeamId : null;
+    const goal = parseScorerEntry(entry);
+    const team = goal.side === "home" ? m.homeTeamId : goal.side === "away" ? m.awayTeamId : null;
     const at = minutes[i] !== undefined ? ` ${minutes[i]}′` : "";
-    return `${playerName(state, id ?? entry)}${at}${team ? `(${teamShortNameIn(state, team)})` : ""}`;
+    return `${playerName(state, goal.playerId)}${at}${team ? `(${teamShortNameIn(state, team)})` : ""}`;
   });
   return ` · 득점 ${named.join(", ")}`;
 }
@@ -1344,11 +1343,14 @@ export function careerView(state: GameState): LookupResult {
   const card = state.dismissal;
   const lines = card
     ? [
-        `[커리어] ${m.name} — 무직 (${card.on} ${teamNameIn(state, card.teamId)}에서 경질) · ${seasonLabel(state)}`,
+        `[커리어] ${m.name} — 무직 (${card.on} ${teamNameIn(state, card.teamId)}에서 ${
+          card.kind === "expired" ? "계약 만료" : "경질"
+        }) · ${seasonLabel(state)}`,
         `평판: 보드${m.reputation.board} 미디어${m.reputation.media} 선수단${m.reputation.squad}`,
         card.expectation && card.position
-          ? `경질 사유: 기대 ${card.expectation}(${card.target}위) · 당시 ${card.position}위`
-          : `경질 사유: ${card.reason ?? "기록 없음"}`,
+          ? `자리를 잃은 자리: 기대 ${card.expectation}(${card.target}위) · 당시 ${card.position}위`
+          : `자리를 잃은 자리: ${card.reason ?? "기록 없음"}`,
+        ...(card.severance ? [`위약금 ${formatMoney(card.severance)}`] : []),
         ...(openManagerOffers(state).length > 0
           ? [
               `받은 감독직 제안:`,
@@ -1379,8 +1381,24 @@ export function careerView(state: GameState): LookupResult {
     : [
         `[커리어] ${m.name} — ${teamNameIn(state, state.userTeamId)} 재임 · ${seasonLabel(state)}`,
         ...(m.contract
-          ? [`계약: 연봉 ${formatMoney(m.contract.salary)} · ${m.contract.until}까지`]
+          ? [
+              `계약: 연봉 ${formatMoney(m.contract.salary)} · ${m.contract.until}까지` +
+                ` (${diffDays(state.date, m.contract.until)}일)` +
+                // 비갱신 통보는 만료일이 곧 끝이라는 사실이다 (career.md §5.4)
+                (m.contract.renewalOffered === false ? ` · 보드는 재계약하지 않기로 했다` : ""),
+            ]
           : []),
+        `지갑: ${formatMoney(m.wallet ?? 0)}`,
+        // 재직 중에 서는 제안은 재계약 하나다 — 답할 자리라 여기 선다 (career.md §5.4)
+        ...openManagerOffers(state)
+          .filter((o) => o.via === "renewal")
+          .map(
+            (o) =>
+              `보드의 재계약 제안: ${o.id} · 연봉 ${formatMoney(o.salary ?? 0)}·${o.years ?? "-"}년` +
+              `·이적 예산 약속 ${formatMoney(o.budgetPledge ?? 0)}` +
+              (o.counteredOn ? ` · 흥정 완료` : "") +
+              ` · ${o.expiresOn}까지`,
+          ),
         `평판: 보드${m.reputation.board} 미디어${m.reputation.media} 선수단${m.reputation.squad}`,
         warnings > 0
           ? `보드 경고: ${warnings}/${USER_WARNINGS_BEFORE_SACK}회` +
@@ -1417,7 +1435,8 @@ export function careerView(state: GameState): LookupResult {
       atEnd: 0,
       on: d.on,
       text:
-        `  시즌 ${d.season} (${yearOf(d.season)}) ${teamNameIn(state, d.teamId)} — ${d.on} 경질` +
+        `  시즌 ${d.season} (${yearOf(d.season)}) ${teamNameIn(state, d.teamId)} — ${d.on} ` +
+        `${d.kind === "expired" ? "계약 만료" : "경질"}` +
         (d.expectation && d.position
           ? ` (기대 ${d.expectation} ${d.target}위 · 당시 ${d.position}위)`
           : ""),
@@ -1428,7 +1447,7 @@ export function careerView(state: GameState): LookupResult {
   } else {
     lines.push(
       `지난 시즌 기록 ${state.seasonRecords.length}시즌:` +
-        (sackings.length > 0 ? ` (경질 ${sackings.length}회)` : ""),
+        (sackings.length > 0 ? ` (자리를 잃은 것 ${sackings.length}회)` : ""),
     );
     for (const r of rows.slice(0, 10)) lines.push(r.text);
     if (rows.length > 10) lines.push(`  …그 외 ${rows.length - 10}줄`);
@@ -1436,9 +1455,13 @@ export function careerView(state: GameState): LookupResult {
 
   lines.push(
     state.trophies.length > 0
-      ? // TROPHY.competition은 id가 아니라 **표시 이름**으로 기록된다 (season.ts)
+      ? // TROPHY는 대회 id로 남는다 — 이름은 여기서 카탈로그가 만든다 (career.md §6)
         `트로피 ${state.trophies.length}개: ${state.trophies
-          .map((t) => `${t.competition} (시즌 ${t.season}, ${teamShortNameIn(state, t.teamId)})`)
+          .map(
+            (t) =>
+              `${t.competitionId ? competitionName(t.competitionId) : (t.competition ?? "")} ` +
+              `(시즌 ${t.season}, ${teamShortNameIn(state, t.teamId)})`,
+          )
           .join(" / ")}`
       : "트로피: 없음",
   );

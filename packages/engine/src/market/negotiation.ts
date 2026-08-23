@@ -3,8 +3,10 @@ import type {
   MarketCard,
   MarketDirection,
   MarketTerms,
+  MedicalConcern,
   Negotiation,
   NegotiationVerdict,
+  Transfer,
 } from "@story-fm/domain";
 import {
   MAX_PAYMENT_YEARS,
@@ -14,6 +16,7 @@ import {
   isPlayerDeal,
   marketDirectionKo,
   naturalPositionOf,
+  registrationBlockText,
 } from "@story-fm/domain";
 import {
   addDays,
@@ -29,6 +32,7 @@ import {
   recordFinance,
   settleDuePayments,
 } from "../club/finance";
+import { attachClauses, settleSellOn } from "./clauses";
 import {
   LOAN_FEE_RATE,
   askingPriceFor,
@@ -41,18 +45,18 @@ import {
   loanLockOf,
   marketValueOf,
   oddsText,
-  renewalExpectation,
   responseDelayDays,
-  severanceOf,
-  squadDepthOf,
   unilateralSeveranceOf,
   wageExpectationOf,
   type DealTerms,
 } from "./market";
+import { betterAtPosition, squadDepthOf } from "../squad/depth";
 import { clearDepartedState, isFreeAgent, loanPlayer, releasePlayer } from "./departures";
 import {
   describeMedical,
   isIncomingDeal,
+  medicalConcernText,
+  medicalNoteText,
   needsMedical,
   overrideMedical,
   receivingTeamOf,
@@ -63,12 +67,14 @@ import {
 import { isClubTeam } from "../data/team-catalog";
 import { arrivingSquadLevel, canRegisterFor } from "../squad/registration";
 import { assignSquadNumber } from "../squad/numbers";
-import { USER_WAGE_HEADROOM, wageRoomOf } from "../world/wages";
-import { marketBiasOf, transferWindowLabel, windowOpenForTeam } from "./market";
+import { userWageRoom } from "../club/board-request";
+import { marketBiasOf, squadShortfallText, transferWindowLabel, windowOpenForTeam } from "./market";
 import { evaluatePitch, latitudeOf } from "./persuasion";
+import { clampToBand, counterBoundsOf, outgoingCounterFloor } from "./counter-bounds";
 import { makeRng } from "../core/rng";
 import type { MarketSkillResult, SkillResult } from "../skills";
 import { grantManagerXP } from "../skills";
+import { item } from "../skills/brief";
 import { buildTransferPress, openPress } from "../club/press";
 import { pickAnyPlayer } from "../core/player-ref";
 import {
@@ -79,7 +85,6 @@ import {
   playersOf,
   pushNarrative,
   teamName,
-  weeklyWagesOf,
   type GameState,
   hasIssue,
 } from "../core/state";
@@ -91,8 +96,8 @@ import {
  * 수락/역제안/결렬 판정은 LLM이 하지만, 창이 닫혔는지·예산이 되는지·미리 답한 것은
  * 아닌지는 여기서 막는다 (docs/simulation/transfer.md §4).
  *
- * 1차 범위는 **영입(buy)** 이다. 매각(sell)·재계약(renew)은 같은 테이블에 얹히도록
- * `kind`에 자리를 뒀다 — 방향만 바뀐다.
+ * 여섯 방향이 같은 테이블에 얹힌다 — 영입·매각·임대(들이고 내보내고)·재계약·해지
+ * (`NegotiationKind`). 방향만 바뀌고 창·예산·중복 판정은 한 벌이다.
  */
 
 /**
@@ -112,7 +117,7 @@ const dealTerms = (t: MarketTerms): MarketTerms => ({
  * 조건 줄에 붙는 분할 표기 — **빠지는 자리가 곧 오독이다** (transfer.md §1·§5-2).
  * 방향과 같은 이유로 메시지·요약이 모두 이 한 함수를 지난다.
  */
-function splitLabel(paymentYears?: number): string {
+export function splitLabel(paymentYears?: number): string {
   const n = paymentYearsOf(paymentYears);
   return n === undefined ? "" : ` · ${n}년 분할`;
 }
@@ -132,12 +137,6 @@ function termsOfKind(kind: Negotiation["kind"], round: MarketTerms): MarketTerms
 
 /** 폭주 방지선 — 인내심 감쇠가 실질 제동이고 이건 상한일 뿐이다 */
 const MAX_ROUNDS = 8;
-/** 이 확률 아래로는 상대가 수락할 수 없다 — "그 값에 팔 구단은 없다" */
-const MIN_ACCEPT_PROBABILITY = 5;
-/** 역제안 상한 — 요구액의 이 배수를 넘게 부를 수 없다 */
-const COUNTER_CEILING = 1.15;
-/** 역제안 요구 주급 상한 — 기대치의 이 배수 (상대도 무리한 요구는 하지 않는다) */
-const COUNTER_WAGE_CEILING = 1.4;
 /** 협상 유효기간 — 창 마감이 더 이르면 그쪽이 먼저 온다 */
 const NEGOTIATION_DAYS = 14;
 /**
@@ -179,7 +178,7 @@ function directionField(kind: Negotiation["kind"]): { direction?: MarketDirectio
 }
 
 /** 갈래의 이름 — 안내 문장과 요약이 같은 말을 쓴다 (낱말은 도메인이 쥔다) */
-const KIND_KO: Record<Negotiation["kind"], string> = {
+export const KIND_KO: Record<Negotiation["kind"], string> = {
   buy: marketDirectionKo("in"),
   sell: marketDirectionKo("out"),
   loan: marketDirectionKo("in", true),
@@ -478,7 +477,7 @@ function answerTarget(
  * 협상의 상대 이름 — **매각이면 `player.teamId`가 아니다.**
  * 파는 국면에서 선수는 아직 우리 소속이라, 상대는 사려는 구단이다.
  */
-function counterpartOf(negotiation: Negotiation, player: GamePlayer): string {
+export function counterpartOf(negotiation: Negotiation, player: GamePlayer): string {
   // 재계약·해지의 상대는 구단이 아니라 선수 본인이다
   if (isPlayerDeal(negotiation.kind)) return player.name;
   const selling = negotiation.kind === "sell" || negotiation.kind === "loan_out";
@@ -639,20 +638,23 @@ export function respondOffer(
    * 논거가 쌓이면 그 경계가 내려간다 — 확률 3%짜리 딜도 선수가 고향으로
    * 돌아오기로 했다면 성사될 수 있다. 무게는 코어가 아니라 **선수를 연기하는
    * LLM이 정한다**; 코어는 거짓 논거로는 이 문이 안 열린다는 것만 지킨다.
+   *
+   * 범위는 검증과 클램프가 **한 벌을 나눠 읽는다**(`counterBoundsOf`) — 교섭 상대의
+   * 판정을 자르는 쪽이 자기 범위를 따로 적으면 여기가 거절할 값을 만들어 낸다
+   * (transfer.md §12-1).
    */
-  const room = latitudeOf(negotiation.pitched);
+  const bounds = counterBoundsOf(state, negotiation, offer);
   /**
    * **여유만큼 하한이 내려간다.** 논거 하나가 여는 폭(`LATITUDE_PER_CLAIM` 12%p)이
    * 하한(`MIN_ACCEPT_PROBABILITY` 5%)보다 커서 하나만 확인돼도 문은 끝까지 열리지만,
    * 감독에게 보이는 `+%p`가 실제로 걸리는 값이어야 그 숫자를 대조할 수 있다.
    */
-  const acceptFloor = Math.max(0, MIN_ACCEPT_PROBABILITY - room);
-  if (input.verdict === "accept" && odds.probability < acceptFloor) {
+  if (input.verdict === "accept" && odds.probability < bounds.acceptFloor) {
     return {
       ok: false,
       message:
         `그 조건에 응할 구단은 없습니다 (성사 확률 ${odds.probability}%` +
-        (room > 0 ? ` · 설득으로 열린 여유 ${room}%p` : "") +
+        (bounds.latitude > 0 ? ` · 설득으로 열린 여유 ${bounds.latitude}%p` : "") +
         `) — 역제안이나 결렬만 가능합니다`,
     };
   }
@@ -662,110 +664,62 @@ export function respondOffer(
   const renewing = negotiation.kind === "renew";
   const releasing = negotiation.kind === "release";
   const loaning = negotiation.kind === "loan";
+  const selling = negotiation.kind === "sell" || negotiation.kind === "loan_out";
+  const countering = input.verdict === "counter";
   /**
    * **상대도 분할을 되부를 수 있다** — 이적료·정산금이 나뉘는 갈래에서만이다.
    * 임대료는 한 시즌짜리 돈이라 나눌 기간이 없고 재계약엔 이적료가 없다
    * (transfer.md §5-2).
    */
-  const counterYears =
-    negotiation.kind === "buy" || negotiation.kind === "sell" || negotiation.kind === "release"
-      ? paymentYearsOf(input.paymentYears)
-      : undefined;
+  const counterYears = bounds.splittable ? paymentYearsOf(input.paymentYears) : undefined;
 
-  /**
-   * **해지의 역제안은 선수가 정산금을 올려 부르는 것**이고, 상한은 **일방 해지의
-   * 전액**이다. 그 위를 부를 수 없는 것은 합의가 깨져도 그가 받을 값이 전액이기
-   * 때문이다 — 더 부르는 것은 협상이 아니라 협상을 없애는 값이다 (transfer.md §11).
-   */
-  const releaseCeiling = releasing ? unilateralSeveranceOf(state, player.id) : 0;
-  const counterSeverance = releasing ? Math.round(input.fee ?? severanceOf(state, player.id)) : 0;
-  if (
-    releasing &&
-    input.verdict === "counter" &&
-    (counterSeverance <= offer.fee || counterSeverance > releaseCeiling)
-  ) {
-    return {
-      ok: false,
-      message:
-        `요구 정산금은 ${formatMoney(offer.fee)} 초과 ${formatMoney(releaseCeiling)} 이하여야 합니다 — ` +
-        "일방 해지의 전액 위로는 부를 수 없습니다",
-    };
-  }
-  /**
-   * **매각은 방향이 반대다.** 우리가 부른 값에 사는 쪽이 답하므로, 역제안은
-   * 올려 부르는 게 아니라 **깎아 부르는 것**이다. 영입 기준을 그대로 쓰면
-   * "우리 호가 이상"을 요구해 사는 구단이 스스로 값을 올리는 판정만 남는다.
-   */
-  const selling = negotiation.kind === "sell" || negotiation.kind === "loan_out";
-  if (selling && input.verdict === "counter") {
-    const floor = outgoingCounterFloor(state, negotiation.kind, player);
-    const bid = Math.round(input.fee ?? offer.fee);
-    if (bid >= offer.fee || bid < floor) {
+  /** 인자가 비면 **상대 자신의 기대치**가 선다 — 그것이 코어의 앵커다 */
+  const feeAsked = bounds.fee
+    ? Math.round(
+        input.fee ?? clampToBand(bounds.fee, bounds.fee.expectation) ?? bounds.fee.expectation,
+      )
+    : 0;
+  const wageAsked = bounds.wage
+    ? Math.round(
+        input.weeklyWage ??
+          clampToBand(bounds.wage, bounds.wage.expectation) ??
+          bounds.wage.expectation,
+      )
+    : 0;
+  const counterSeverance = releasing ? feeAsked : 0;
+  const counterFee = renewing || releasing ? 0 : feeAsked;
+  const counterWageDemand = renewing ? wageAsked : 0;
+  const counterWage = renewing || releasing ? 0 : wageAsked;
+
+  if (countering && bounds.fee && (feeAsked < bounds.fee.min || feeAsked > bounds.fee.max)) {
+    if (releasing) {
       return {
         ok: false,
-        message: `사는 쪽의 역제안은 ${formatMoney(floor)} 이상 ${formatMoney(offer.fee)} 미만이어야 합니다`,
+        message:
+          `요구 정산금은 ${formatMoney(offer.fee)} 초과 ${formatMoney(bounds.fee.max)} 이하여야 합니다 — ` +
+          "일방 해지의 전액 위로는 부를 수 없습니다",
       };
     }
-  }
-  const asking =
-    renewing || releasing || selling
-      ? 0
-      : loaning
-        ? Math.round(marketValueOf(state, player) * LOAN_FEE_RATE * 1.6)
-        : askingPriceFor(state, player);
-  const ceiling = Math.round(asking * COUNTER_CEILING);
-  const counterFee =
-    !renewing && !releasing && input.verdict === "counter" ? Math.round(input.fee ?? asking) : 0;
-  if (
-    !renewing &&
-    !releasing &&
-    !selling &&
-    input.verdict === "counter" &&
-    (counterFee < offer.fee || counterFee > ceiling)
-  ) {
+    if (selling) {
+      return {
+        ok: false,
+        message: `사는 쪽의 역제안은 ${formatMoney(bounds.fee.min)} 이상 ${formatMoney(offer.fee)} 미만이어야 합니다`,
+      };
+    }
     return {
       ok: false,
-      message: `역제안은 ${formatMoney(offer.fee)} 이상 ${formatMoney(ceiling)} 이하여야 합니다`,
+      message: `역제안은 ${formatMoney(offer.fee)} 이상 ${formatMoney(bounds.fee.max)} 이하여야 합니다`,
     };
   }
-  // 재계약의 역제안은 **주급**을 부른다 — 우리 제시액 이상, 기대치의 1.4배 이하
-  const wageCeiling = Math.round(renewalExpectation(state, player) * COUNTER_WAGE_CEILING);
-  const counterWageDemand = renewing
-    ? Math.round(input.weeklyWage ?? renewalExpectation(state, player))
-    : 0;
-  if (
-    renewing &&
-    input.verdict === "counter" &&
-    (counterWageDemand <= offer.weeklyWage || counterWageDemand > wageCeiling)
-  ) {
+  if (countering && bounds.wage && (wageAsked < bounds.wage.min || wageAsked > bounds.wage.max)) {
+    // 재계약의 역제안은 **주급**을 부른다 — 우리 제시액 이상, 기대치의 1.4배 이하.
+    // 데려오는 딜에도 같은 범위가 걸린다: 이적료에만 걸어 두면 상대가 이적료는
+    // 규칙대로 부르면서 주급을 열 배로 되불러, 코어가 막지 않는 값이 협상에 남는다.
     return {
       ok: false,
-      message: `요구 주급은 ${formatMoney(offer.weeklyWage)} 초과 ${formatMoney(wageCeiling)} 이하여야 합니다`,
-    };
-  }
-  /**
-   * **데려오는 딜의 역제안 주급에도 범위가 있다.** 이적료에만 걸어 두면 상대가
-   * 이적료는 규칙대로 부르면서 주급을 열 배로 되불러, 코어가 막지 않는 값이 그대로
-   * 협상에 남는다 — 재계약이 이미 막고 있던 자리다(위).
-   *
-   * 자는 같은 배수(`COUNTER_WAGE_CEILING`)이고 기대치만 갈래를 따른다: 희망 주급과
-   * **우리 제시액 중 큰 쪽**이라, 우리가 이미 기대 위를 부른 오퍼에도 상대가 부를 수
-   * 있는 값이 남는다. 매각·임대 송출은 주급을 사는 쪽이 정하므로 대상이 아니다.
-   */
-  const wageAnchor =
-    renewing || releasing ? 0 : Math.max(offer.weeklyWage, wageExpectationOf(state, player));
-  const counterWageCeiling = Math.round(wageAnchor * COUNTER_WAGE_CEILING);
-  const counterWage = renewing || releasing ? 0 : Math.round(input.weeklyWage ?? wageAnchor);
-  if (
-    !renewing &&
-    !releasing &&
-    !selling &&
-    input.verdict === "counter" &&
-    (counterWage < offer.weeklyWage || counterWage > counterWageCeiling)
-  ) {
-    return {
-      ok: false,
-      message: `역제안 주급은 ${formatMoney(offer.weeklyWage)} 이상 ${formatMoney(counterWageCeiling)} 이하여야 합니다`,
+      message: renewing
+        ? `요구 주급은 ${formatMoney(offer.weeklyWage)} 초과 ${formatMoney(bounds.wage.max)} 이하여야 합니다`
+        : `역제안 주급은 ${formatMoney(offer.weeklyWage)} 이상 ${formatMoney(bounds.wage.max)} 이하여야 합니다`,
     };
   }
 
@@ -907,29 +861,6 @@ export function respondOffer(
 // ③ AI 구단이 먼저 우리 선수를 노린다.
 // 예전엔 ③뿐이라 감독이 팔기로 마음먹어도 할 수 있는 일이 없었다.
 
-/** 사는 쪽이 깎아 부를 수 있는 하한 — 기대치의 이 비율 아래로는 못 부른다 */
-const SELL_COUNTER_FLOOR = 0.55;
-
-/**
- * 내보내는 딜에서 **사는 쪽이 깎아 부를 수 있는 하한** — 갈래의 눈금을 쓴다.
- *
- * 매각의 자는 시장가, 임대 송출의 자는 임대료(`LOAN_FEE_RATE`)다. 임대를 시장가로
- * 재면 하한이 임대료의 일곱 배가 되어 **사는 쪽이 부를 수 있는 값이 아예 없다** —
- * 역제안은 우리 호가 미만이어야 하는데 하한이 그 위에 있기 때문이다
- * (transfer.md §1).
- */
-function outgoingCounterFloor(
-  state: GameState,
-  kind: Negotiation["kind"],
-  player: GamePlayer,
-): number {
-  const expectation =
-    kind === "loan_out"
-      ? marketValueOf(state, player) * LOAN_FEE_RATE
-      : marketValueOf(state, player);
-  return Math.round(expectation * SELL_COUNTER_FLOOR);
-}
-
 /** 하루에 오퍼가 들어올 확률 (이적창 열린 날) */
 const INCOMING_OFFER_CHANCE = 0.08;
 /** 이적 리스트에 오른 선수에게 오퍼가 올 확률 — 등재는 시장에 알리는 행위다 */
@@ -970,7 +901,11 @@ export function setTransferList(
   if (!input.listed) {
     if (index < 0) return { ok: false, message: `${player.name}은(는) 이적 리스트에 없습니다` };
     state.transferList.splice(index, 1);
-    return { ok: true, message: `${player.name}을(를) 이적 리스트에서 뺐습니다` };
+    return {
+      ok: true,
+      message: `${player.name}을(를) 이적 리스트에서 뺐습니다`,
+      brief: { head: "이적 리스트", items: [item({ label: "해제", text: player.name })] },
+    };
   }
 
   const askingPrice = Math.max(0, Math.round(input.askingPrice ?? askingPriceFor(state, player)));
@@ -984,16 +919,33 @@ export function setTransferList(
   else state.transferList.push(listing);
 
   const market = marketValueOf(state, player);
+  /**
+   * 호가가 시장가의 어디에 섰나 — **모델에게 줄 줄과 말풍선의 갈래가 같은 자에서 갈린다.**
+   * 눈금을 두 곳에 적으면 문구를 다듬는 날 둘이 어긋난다.
+   */
   const stance =
-    askingPrice > market * 1.2
-      ? "시장가보다 비싸게 불렀습니다 — 관심이 더디 붙습니다"
-      : askingPrice < market * 0.85
-        ? "시장가보다 싸게 내놨습니다 — 금방 붙을 것입니다"
-        : "시장가 언저리입니다";
+    askingPrice > market * 1.2 ? "above" : askingPrice < market * 0.85 ? "below" : "at";
+  const STANCE_LINE: Record<typeof stance, string> = {
+    above: "시장가보다 비싸게 불렀습니다 — 관심이 더디 붙습니다",
+    below: "시장가보다 싸게 내놨습니다 — 금방 붙을 것입니다",
+    at: "시장가 언저리입니다",
+  };
+  const STANCE_NOTE: Record<typeof stance, string> = {
+    above: "시장가 위",
+    below: "시장가 아래",
+    at: "시장가 언저리",
+  };
   pushNarrative(state, `${player.name} 이적 리스트 등재 (${formatMoney(askingPrice)})`, 3);
   return {
     ok: true,
-    message: `${player.name}을(를) 이적 리스트에 올렸습니다 — 호가 ${formatMoney(askingPrice)}. ${stance}`,
+    message: `${player.name}을(를) 이적 리스트에 올렸습니다 — 호가 ${formatMoney(askingPrice)}. ${STANCE_LINE[stance]}`,
+    brief: {
+      head: "이적 리스트",
+      items: [
+        item({ label: "등재", text: player.name }),
+        item({ label: "호가", text: formatMoney(askingPrice), note: STANCE_NOTE[stance] }),
+      ],
+    },
   };
 }
 
@@ -1402,14 +1354,7 @@ function openRequestedOffer(
 /** 우리 스쿼드에서 그 자리를 더 잘 보는 선수 수 — 오퍼가 올 만한 선수 판별 */
 function betterAtPositionInSquad(state: GameState, player: { id: string }): number {
   const target = playerById(state, player.id);
-  if (!target) return 0;
-  const position = naturalPositionOf(target).position;
-  return playersOf(state, state.userTeamId).filter(
-    (p) =>
-      p.id !== target.id &&
-      naturalPositionOf(p).position === position &&
-      p.attributes.overall > target.attributes.overall,
-  ).length;
+  return target ? betterAtPosition(state, state.userTeamId, target) : 0;
 }
 
 /** 오퍼를 넣을 구단 — 그 자리가 우리보다 약하고 예산이 되는 곳 */
@@ -1484,6 +1429,8 @@ export function answerIncomingOffer(
     fee: offer.fee,
     weeklyWage: offer.weeklyWage,
     years: offer.contractYears,
+    // 분할 연수도 넘긴다 — 일시금으로 되부르면 예산 관문이 같은 분할 역제안을 다시 세운다
+    ...(offer.paymentYears === undefined ? {} : { paymentYears: offer.paymentYears }),
     // 갈래를 그대로 넘긴다 — 임대 송출을 매각으로 재면 임대료가 이적료 눈금에 걸린다
     kind: negotiation.kind,
     ...(negotiation.counterpartTeamId ? { counterpartTeamId: negotiation.counterpartTeamId } : {}),
@@ -1510,8 +1457,9 @@ export function answerIncomingOffer(
 
   if (input.verdict === "accept") {
     const shortfall = squadShortfall(state, state.userTeamId, player);
-    if (shortfall) return { ok: false, message: `우리 ${shortfall}` };
-    const renegotiated = offer.note?.startsWith("메디컬 소견") === true;
+    if (shortfall) return { ok: false, message: `우리 ${squadShortfallText(shortfall, "sell")}` };
+    // 메디컬을 보고 깎아 다시 부른 오퍼인가 — 소견 문구가 아니라 코드가 가른다
+    const renegotiated = offer.origin === "medical";
     const card = verdictCardOf({
       player,
       counterpart,
@@ -1560,7 +1508,11 @@ export function answerIncomingOffer(
       verdict: "counter",
       offer,
       odds: oddsText(odds),
-      counterTerms: dealTerms({ fee: demanded, weeklyWage: wage }),
+      counterTerms: dealTerms({
+        fee: demanded,
+        weeklyWage: wage,
+        paymentYears: terms.paymentYears,
+      }),
       dueOn: respondsOn,
       ...(input.note ? { note: input.note } : {}),
     }),
@@ -1793,6 +1745,30 @@ function executeLoanOut(
 ): SkillResult {
   const player = playerById(state, negotiation.gamePlayerId);
   if (!player) return { ok: false, message: "선수를 찾지 못했습니다" };
+  /**
+   * **빌리는 쪽도 임대료를 낼 수 있어야 한다** (transfer.md §2). 임대료는 이적
+   * 예산에서 같은 값이 빠지므로, 검사 없이 빼면 상대 예산이 음수가 된다 — 매각
+   * (`executeSale`)이 이미 지나는 문이다. 오퍼가 붙은 뒤 감독이 값을 올렸을 수도,
+   * 그사이 그 구단이 다른 영입에 예산을 썼을 수도 있다.
+   *
+   * 못 내면 **무산**(`expired`)이지 결렬(`rejected`)이 아니다 — 값을 낮춰 다시 붙는
+   * 길이 이번 창에 남아야 한다. 매각과 달리 분할로 되불러 오지 않는다: 임대료는 한
+   * 시즌짜리 돈이라 일시금뿐이다 (transfer.md §5-2).
+   *
+   * ⚠️ **선수를 옮기기 전에 본다.** `loanPlayer`가 지나간 뒤에 막으면 돈은 안 오가고
+   * 선수만 남의 팀에 가 있다.
+   */
+  const borrowerTeamId = negotiation.counterpartTeamId;
+  const borrowerFinance = state.finances.find((f) => f.teamId === borrowerTeamId);
+  if (agreed.fee > 0 && borrowerFinance && agreed.fee > borrowerFinance.transferBudget) {
+    negotiation.status = "expired";
+    return {
+      ok: false,
+      message:
+        `${teamName(borrowerTeamId ?? "")}가 임대료 ${formatMoney(agreed.fee)}를 마련하지 못했습니다 — ` +
+        `가용 ${formatMoney(borrowerFinance.transferBudget)}. 이 건은 무산됐습니다`,
+    };
+  }
   const contract = activeContract(state, player.id);
   const share = contract ? agreed.weeklyWage / Math.max(1, contract.weeklyWage) : 0.5;
   const res = loanPlayer(state, {
@@ -1824,7 +1800,17 @@ function executeLoanOut(
       amount: agreed.fee,
     });
   }
-  return { ok: true, message: `${res.message} · 임대료 ${formatMoney(agreed.fee)}` };
+  return {
+    ok: true,
+    message: `${res.message} · 임대료 ${formatMoney(agreed.fee)}`,
+    brief: {
+      head: res.brief?.head ?? "임대",
+      items: [
+        ...(res.brief?.items ?? []),
+        item({ label: "임대료", text: formatMoney(agreed.fee) }),
+      ],
+    },
+  };
 }
 
 /**
@@ -1895,7 +1881,6 @@ function executeLoanIn(
     date: state.date,
     type: "loan",
     fee: agreed.fee,
-    note: `임대 영입 (복귀 ${until} · 주급 분담 ${Math.round(wageShare * 100)}%)`,
   });
   player.teamId = state.userTeamId;
   player.squadNumber = undefined;
@@ -1915,7 +1900,18 @@ function executeLoanIn(
     message:
       `${player.name}을(를) ${teamName(from)}에서 임대로 데려왔습니다 — ${until}까지 · ` +
       `임대료 ${formatMoney(agreed.fee)} · 주급 ${Math.round(wageShare * 100)}% 부담` +
-      (slot.ok ? "" : ` ⚠ ${slot.reason} — 2군으로 들어왔습니다`),
+      (slot.ok ? "" : ` ⚠ ${registrationBlockText(slot.block)} — 2군으로 들어왔습니다`),
+    brief: {
+      head: "임대 영입",
+      items: [
+        item({ label: "영입", text: player.name, note: `${teamName(from)} · ${until}까지` }),
+        item({ label: "임대료", text: formatMoney(agreed.fee) }),
+        item({ label: "주급 부담", text: `${Math.round(wageShare * 100)}%` }),
+        ...(slot.ok
+          ? []
+          : [item({ label: "등록", text: "2군", note: registrationBlockText(slot.block) })]),
+      ],
+    },
   };
 }
 
@@ -1958,6 +1954,17 @@ function executeRenewal(
     message:
       `${player.name} 재계약 완료 — 주급 ${formatMoney(agreed.weeklyWage)}, ` +
       `${contractUntil(state.date, agreed.contractYears)}까지. 주급 총액이 늘어납니다`,
+    brief: {
+      head: "재계약",
+      items: [
+        item({ label: "선수", text: player.name }),
+        item({
+          label: "주급",
+          text: formatMoney(agreed.weeklyWage),
+          note: `${contractUntil(state.date, agreed.contractYears)}까지`,
+        }),
+      ],
+    },
   };
 }
 
@@ -2007,6 +2014,13 @@ function passMedicalGate(
         message:
           `${player.name} 이적에 합의했습니다 — ${where}은 ${medical.onDate}입니다. ` +
           `검진을 통과하면 그날 계약이 확정됩니다 (오늘 발표할 수 있는 것은 없습니다)`,
+        brief: {
+          head: "이적 합의",
+          items: [
+            item({ label: "선수", text: player.name }),
+            item({ label: where, text: medical.onDate }),
+          ],
+        },
       };
     }
     /**
@@ -2016,7 +2030,9 @@ function passMedicalGate(
      * 치른다 (transfer.md §5).
      */
     const outcome = resolveMedical(state, negotiation, player);
-    if (!outcome.passed) return medicalFlagResult(state, negotiation, player, outcome.note);
+    if (!outcome.passed && outcome.concern) {
+      return medicalFlagResult(state, negotiation, player, outcome.concern);
+    }
   }
 
   const medical = negotiation.medical;
@@ -2053,8 +2069,9 @@ function medicalFlagResult(
   state: GameState,
   negotiation: Negotiation,
   player: GamePlayer,
-  note: string,
+  concern: MedicalConcern,
 ): SkillResult {
+  const note = medicalConcernText(concern);
   if (isIncomingDeal(negotiation)) {
     pushNarrative(state, `${player.name} 메디컬 소견 — ${note}`, 4);
     return {
@@ -2062,9 +2079,13 @@ function medicalFlagResult(
       message:
         `${player.name} 메디컬에서 소견이 나왔습니다 — ${note}. ` +
         `그대로 데려오려면 accept_deal을 한 번 더, 물러서려면 withdraw_offer입니다`,
+      brief: {
+        head: "메디컬 소견",
+        items: [item({ label: player.name, text: note })],
+      },
     };
   }
-  const counter = openMedicalCounter(state, negotiation, player, note);
+  const counter = openMedicalCounter(state, negotiation, player);
   if (!counter) return { ok: false, message: "합의된 조건을 찾지 못했습니다" };
   return {
     ok: true,
@@ -2072,6 +2093,17 @@ function medicalFlagResult(
       `${teamName(receivingTeamOf(state, negotiation))}의 메디컬에서 ${player.name}에게 소견이 ` +
       `나왔습니다 — ${note}. ${formatMoney(counter.agreedFee)}에서 ${formatMoney(counter.cut)}로 깎아 다시 ` +
       `불렀습니다 — 답해야 합니다`,
+    brief: {
+      head: "메디컬 소견",
+      items: [
+        item({ label: player.name, text: note }),
+        item({
+          label: "되부른 값",
+          text: `${formatMoney(counter.agreedFee)} → ${formatMoney(counter.cut)}`,
+          delta: counter.cut - counter.agreedFee,
+        }),
+      ],
+    },
   };
 }
 
@@ -2086,7 +2118,6 @@ function openMedicalCounter(
   state: GameState,
   negotiation: Negotiation,
   player: GamePlayer,
-  note: string,
 ): { agreedFee: number; cut: number } | null {
   const agreed = [...negotiation.rounds].reverse().find((r) => r.verdict === "accept");
   if (!agreed) return null;
@@ -2102,7 +2133,8 @@ function openMedicalCounter(
     respondsOn: null,
     probability: agreed.probability,
     verdict: null,
-    note: `메디컬 소견 — ${note}`,
+    // 이 오퍼가 어디서 나왔나 — 소견 문장이 아니라 코드가 그것을 말한다
+    origin: "medical",
   });
   pushNarrative(
     state,
@@ -2164,12 +2196,7 @@ function affordabilityGate(
       message: `이적 예산이 부족합니다 — 필요 ${formatMoney(deal.fee)} / 가용 ${formatMoney(finance.transferBudget)}`,
     };
   }
-  const room = wageRoomOf(
-    state.userTeamId,
-    weeklyWagesOf(state, state.userTeamId),
-    USER_WAGE_HEADROOM,
-    state,
-  );
+  const room = userWageRoom(state);
   if (deal.weeklyWage > room) {
     return {
       ok: false,
@@ -2267,7 +2294,10 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
   // 무소속은 클럽이 아니라 클럽이 없는 상태다 — 지킬 스쿼드가 없다
   const sellerShort = isFreeAgent(player) ? null : squadShortfall(state, player.teamId, player);
   if (sellerShort) {
-    return { ok: false, message: `${teamName(player.teamId)}이(가) ${sellerShort}` };
+    return {
+      ok: false,
+      message: `${teamName(player.teamId)}이(가) ${squadShortfallText(sellerShort, "sell")}`,
+    };
   }
 
   // 돈과 원장의 상대는 **계약을 가진 구단**이다 — 지금 뛰는 팀과 갈라지는 자리가 임대다
@@ -2276,7 +2306,7 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
   const hostTeamId = player.teamId;
   // 원장 — TRANSFER row가 이력의 원본 (GamePlayer.teamId는 현재값일 뿐)
   const transferId = `tr-in-${player.id}-${state.date}`;
-  state.transfers.push({
+  const transfer: Transfer = {
     // 방향이 id에 든다 — 같은 날 사고판 선수는 `tr-<id>-<date>` 하나로 겹친다
     id: transferId,
     gamePlayerId: player.id,
@@ -2286,7 +2316,16 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
     date: state.date,
     type: agreed.fee > 0 ? "transfer" : "free",
     fee: agreed.fee,
-    note: `${teamName(fromTeamId)} → ${teamName(state.userTeamId)}`,
+  };
+  // 파는 쪽이 어린 선수를 내보내는 자리면 그 구단이 조항을 들고 간다 (transfer.md §5-3)
+  attachClauses(state, transfer, player);
+  state.transfers.push(transfer);
+  // 파는 구단이 무는 셀온은 이 이적으로 발동한다 — 우리 장부는 지나가지 않는다
+  settleSellOn(state, {
+    gamePlayerId: player.id,
+    sellerTeamId: fromTeamId,
+    resaleFee: agreed.fee,
+    resaleTransferId: transferId,
   });
 
   // 계약 — 기존 계약을 끝내고 새로 쓴다 (주급의 원본은 CONTRACT다)
@@ -2388,7 +2427,29 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
         ? ""
         : ` (${paymentYears}년 분할 — 첫 회분 ${formatMoney(dueNow)})`) +
       `, 주급 ${formatMoney(agreed.weeklyWage)} ${agreed.contractYears}년. 남은 이적 예산 ${formatMoney(ourFinance.transferBudget)}` +
-      (slot.ok ? "" : ` ⚠ ${slot.reason} — 2군으로 들어왔습니다`),
+      (slot.ok ? "" : ` ⚠ ${registrationBlockText(slot.block)} — 2군으로 들어왔습니다`),
+    brief: {
+      head: "영입 완료",
+      items: [
+        item({ label: "영입", text: player.name, note: teamName(fromTeamId) }),
+        item({
+          label: "이적료",
+          text: formatMoney(agreed.fee),
+          ...(paymentYears === undefined
+            ? {}
+            : { note: `${paymentYears}년 분할 · 첫 회분 ${formatMoney(dueNow)}` }),
+        }),
+        item({
+          label: "주급",
+          text: formatMoney(agreed.weeklyWage),
+          note: `${agreed.contractYears}년`,
+        }),
+        item({ label: "남은 이적 예산", text: formatMoney(ourFinance.transferBudget) }),
+        ...(slot.ok
+          ? []
+          : [item({ label: "등록", text: "2군", note: registrationBlockText(slot.block) })]),
+      ],
+    },
   };
 }
 
@@ -2430,7 +2491,7 @@ function executeSale(
     };
   }
   const shortfall = squadShortfall(state, state.userTeamId, player);
-  if (shortfall) return { ok: false, message: `우리 ${shortfall}` };
+  if (shortfall) return { ok: false, message: `우리 ${squadShortfallText(shortfall, "sell")}` };
   /**
    * **사는 쪽도 돈이 있어야 한다.** 오퍼가 붙을 때 `pickBuyer`가 본 것은 그때의
    * 시장가였고, 감독의 역제안은 그 위로 얼마든 부를 수 있다 — 그사이 그 구단이
@@ -2469,7 +2530,8 @@ function executeSale(
         paymentYears: split,
         respondsOn: null,
         probability: odds.probability,
-        verdict: "counter",
+        // 답을 기다리는 상대 오퍼다 — `incomingOffer`가 `verdict: null`로 집는다
+        verdict: null,
       });
       negotiation.status = "open";
       return {
@@ -2490,7 +2552,7 @@ function executeSale(
   }
 
   const transferId = `tr-out-${player.id}-${state.date}`;
-  state.transfers.push({
+  const transfer: Transfer = {
     id: transferId,
     gamePlayerId: player.id,
     windowId: window.id,
@@ -2499,7 +2561,19 @@ function executeSale(
     date: state.date,
     type: agreed.fee > 0 ? "transfer" : "free",
     fee: agreed.fee,
-    note: `${teamName(state.userTeamId)} → ${teamName(buyerTeamId)}`,
+  };
+  // 조항은 딜의 모양이 붙인다 — 파는 쪽이 우리든 AI든 같은 함수다 (transfer.md §5-3)
+  attachClauses(state, transfer, player);
+  state.transfers.push(transfer);
+  /**
+   * 우리가 데려올 때 걸린 셀온은 **이 매각으로 발동한다** — 원 소속 구단이 이익의
+   * 일부를 가져간다. 원장은 지급 일정 표의 한 문을 지나 양쪽에 대칭으로 선다.
+   */
+  const sellOnPaid = settleSellOn(state, {
+    gamePlayerId: player.id,
+    sellerTeamId: state.userTeamId,
+    resaleFee: agreed.fee,
+    resaleTransferId: transferId,
   });
 
   const previous = activeContract(state, player.id);
@@ -2578,7 +2652,24 @@ function executeSale(
         ? ""
         : ` (${paymentYears}년 분할 — 첫 회분 ${formatMoney(dueNow)})`) +
       "." +
+      (sellOnPaid > 0 ? ` 셀온 조항으로 ${formatMoney(sellOnPaid)}가 나갔습니다.` : "") +
       `${captainNote} 이적 예산 ${formatMoney(ourFinance?.transferBudget ?? 0)}`,
+    brief: {
+      head: "매각 완료",
+      items: [
+        item({ label: "매각", text: player.name, note: teamName(buyerTeamId) }),
+        item({
+          label: "이적료",
+          text: formatMoney(agreed.fee),
+          ...(paymentYears === undefined
+            ? {}
+            : { note: `${paymentYears}년 분할 · 첫 회분 ${formatMoney(dueNow)}` }),
+        }),
+        ...(sellOnPaid > 0 ? [item({ label: "셀온 지급", text: formatMoney(sellOnPaid) })] : []),
+        item({ label: "이적 예산", text: formatMoney(ourFinance?.transferBudget ?? 0) }),
+        ...(wasCaptain ? [item({ text: "주장 공석" })] : []),
+      ],
+    },
   };
 }
 
@@ -2648,7 +2739,9 @@ export function runMedicals(state: GameState, digest: string[]): void {
      * 돌아가 감독이 답할 차례가 된다. 유리몸을 비싸게 파는 일이 그래서 어려워진다.
      * 두 갈래의 문장은 `accept_deal`이 마감일에 쓰는 것과 같다.
      */
-    const flagged = medicalFlagResult(state, negotiation, player, outcome.note);
+    // 통과하지 않았으면 소견 카드가 반드시 붙는다 (`resolveMedical`)
+    if (!outcome.concern) continue;
+    const flagged = medicalFlagResult(state, negotiation, player, outcome.concern);
     if (flagged.ok) digest.push(`🩺 ${flagged.message}`);
   }
 }
@@ -2736,7 +2829,7 @@ export function pendingVerdicts(state: GameState): Array<{
         label:
           medical?.status === "flagged"
             ? isIncomingDeal(negotiation)
-              ? `${who} 메디컬 소견 — ${medical.note ?? "이상 소견"} · 강행하려면 accept_deal, 물러서려면 withdraw_offer`
+              ? `${who} 메디컬 소견 — ${medicalNoteText(medical)} · 강행하려면 accept_deal, 물러서려면 withdraw_offer`
               : // 상대 구단의 소견이라 우리가 강행할 것이 없다 — 깎인 값에 합의한 상태다
                 `${who} 상대 메디컬 소견을 반영한 값에 합의했습니다 — accept_deal로 확정하세요`
             : // 검진은 통과했는데 아직 합의 상태다 = 계약이 걸렸다 (예산·명단 등)
@@ -2899,6 +2992,24 @@ export function suggestTerms(state: GameState, playerId: string): DealTerms | nu
 export const AI_RENEWAL_WINDOW_DAYS = 240;
 /** 검토한 날 재계약이 성사될 확률의 기준 — 매일 굴린다 */
 const AI_RENEWAL_CHANCE = 0.02;
+/**
+ * 재계약을 서두르는 정도 — **자리 × 나이**가 하루 확률(`AI_RENEWAL_CHANCE`)에 곱해진다.
+ * 자리는 그 팀에서 자기 앞을 막는 선수 수로 잰다 (0명 = 주전).
+ */
+const RENEWAL_URGENCY_STARTER = 2.2;
+const RENEWAL_URGENCY_ROTATION = 1.2;
+const RENEWAL_URGENCY_FRINGE = 0.5;
+/** 나이가 곱하는 몫 — 베테랑은 굳이 잡지 않고, 어린 선수는 먼저 묶는다 */
+const RENEWAL_VETERAN_AGE = 33;
+const RENEWAL_VETERAN_URGENCY = 0.3;
+const RENEWAL_YOUNG_AGE = 24;
+const RENEWAL_YOUNG_URGENCY = 1.4;
+/** 새로 쓰는 계약의 연수 — `MIN` 이상 `MIN + SPAN` 미만의 정수 */
+const RENEWAL_YEARS_MIN = 2;
+const RENEWAL_YEARS_SPAN = 3;
+/** 재계약이 얹는 주급 배수 — `BASE` 이상 `BASE + SPAN` 미만 */
+const RENEWAL_WAGE_BASE = 1.05;
+const RENEWAL_WAGE_SPAN = 0.25;
 
 /**
  * **다른 구단도 계약을 관리한다.**
@@ -2922,10 +3033,21 @@ export function runAiRenewals(state: GameState, digest: string[]): void {
   const byId = new Map(state.players.map((p) => [p.id, p] as const));
   const depth = squadDepthOf(state);
 
-  for (const contract of state.contracts) {
-    if (contract.status !== "active") continue;
-    if (contract.teamId === state.userTeamId) continue;
-    if (contract.until > limit || contract.until <= state.date) continue;
+  /**
+   * 대상을 **먼저 걸러 두고** 돈다 — 재계약은 같은 배열에 새 계약을 `push`하므로,
+   * `state.contracts`를 직접 순회하면 이번 턴이 만든 계약까지 훑는다. 지금은 새
+   * 계약의 만료가 검토 창(240일) 밖이라 무해하지만, 순회 중 변이는 창이 넓어지는
+   * 날 조용히 이 순회를 자기가 만든 일로 채운다.
+   */
+  const due = state.contracts.filter(
+    (c) =>
+      c.status === "active" &&
+      c.teamId !== state.userTeamId &&
+      c.until <= limit &&
+      c.until > state.date,
+  );
+
+  for (const contract of due) {
     const player = byId.get(contract.gamePlayerId);
     if (!player || player.teamId !== contract.teamId) continue;
     if (player.loan) continue; // 임대 중엔 원소속이 따로 판단한다
@@ -2934,16 +3056,25 @@ export function runAiRenewals(state: GameState, digest: string[]): void {
     const blocked = depth.betterThan(contract.teamId, player);
     const age = ageOf(player.birthdate, state.date);
     const urgency =
-      (blocked === 0 ? 2.2 : blocked === 1 ? 1.2 : 0.5) * (age >= 33 ? 0.3 : age <= 24 ? 1.4 : 1);
+      (blocked === 0
+        ? RENEWAL_URGENCY_STARTER
+        : blocked === 1
+          ? RENEWAL_URGENCY_ROTATION
+          : RENEWAL_URGENCY_FRINGE) *
+      (age >= RENEWAL_VETERAN_AGE
+        ? RENEWAL_VETERAN_URGENCY
+        : age <= RENEWAL_YOUNG_AGE
+          ? RENEWAL_YOUNG_URGENCY
+          : 1);
     if (rng() > AI_RENEWAL_CHANCE * urgency) continue;
 
-    const years = 2 + Math.floor(rng() * 3);
+    const years = RENEWAL_YEARS_MIN + Math.floor(rng() * RENEWAL_YEARS_SPAN);
     contract.status = "ended";
     state.contracts.push({
       id: `c-renew-${player.id}-${state.date}`,
       gamePlayerId: player.id,
       teamId: contract.teamId,
-      weeklyWage: Math.round(contract.weeklyWage * (1.05 + rng() * 0.25)),
+      weeklyWage: Math.round(contract.weeklyWage * (RENEWAL_WAGE_BASE + rng() * RENEWAL_WAGE_SPAN)),
       since: state.date,
       until: contractUntil(state.date, years),
       status: "active",

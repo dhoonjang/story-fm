@@ -1,5 +1,12 @@
-import type { ScheduleEntry, Slot, TrainAttr, TrainingSession } from "@story-fm/domain";
-import { SLOT_TIME, isReserveMatch } from "@story-fm/domain";
+import type {
+  AttributeAxis,
+  ReserveTrainingPolicy,
+  ScheduleEntry,
+  Slot,
+  TrainAttr,
+  TrainingSession,
+} from "@story-fm/domain";
+import { ATTRIBUTE_AXES, SLOT_TIME, isReserveMatch } from "@story-fm/domain";
 import { addDays, dayOfWeek, diffDays, sortEntries, squadReturnOf } from "../competition/calendar";
 import type { GameState } from "../core/state";
 
@@ -24,35 +31,82 @@ import type { GameState } from "../core/state";
  *
  * **능력치를 겨냥한 focus는 본훈련에만 둔다.** 경기 전후 세션까지 축을 얹으면 특정
  * 축(킥·위치선정)만 매주 반복돼 성장이 그쪽으로 쏠린다. 본훈련은 메뉴를 순환시켜
- * 15축을 골고루 훑는다.
+ * 16축을 골고루 훑는다.
  *
  * 두 가지 불변식으로 감독의 지시를 지킨다:
  *   ① 이미 훈련이 있는 슬롯은 건드리지 않는다 (감독 지시가 이긴다)
  *   ② 배치는 **날짜만으로 결정**된다 — 몇 번을 다시 깔아도 같은 결과다
  */
 
-interface SessionPlan {
-  slot: Slot;
+/**
+ * 메뉴 항목 — **id가 이 항목의 정체다.** 한국어 이름은 감독이 읽는 표시일 뿐이라
+ * 문구를 고쳐도 대조(`syncDefaultTraining`)가 흔들리면 안 된다 (season.md §4).
+ */
+interface MenuItem {
+  menuId: string;
   label: string;
   focus: TrainAttr[];
 }
 
+interface SessionPlan extends MenuItem {
+  slot: Slot;
+}
+
 /**
- * 본훈련 메뉴 — 순환하며 15축을 모두 훑는다. 요일 고정이 아닌 이유는, 경기 전후를
+ * 본훈련 메뉴 — 순환하며 16축을 모두 훑는다. 요일 고정이 아닌 이유는, 경기 전후를
  * 걷어내고 나면 주에 두어 번밖에 남지 않아 요일로 묶으면 같은 축만 계속 훈련하게
- * 되기 때문이다. 9개(홀수)라 7일 주기와 어긋나며 돌아 요일 편중도 없다.
+ * 되기 때문이다. 10개라 7일 주기와 서로소여서 돌아 요일 편중도 없다.
+ *
+ * 넷은 한 축만 겨냥한다 — 10개가 모두 2축이면 네 축이 중복돼 그쪽만 빨리 자란다.
+ *
+ * **나열 순서에도 뜻이 있다.** 본훈련이 잡히는 날은 경기 일정이 정하므로 순환이
+ * 고르게 돌지 않고, 한 자리는 시즌 내내 손에 꼽게 걸린다. 거기에는 프리시즌 기초
+ * 체력기가 따로 채워 주는 체력 메뉴를 둔다 — 다른 축을 두면 그 축만 얇아진다
+ * (`training-plan.test.ts`가 축별 최소 횟수로 못 박는다).
  */
-const GENERAL_MENU: ReadonlyArray<{ label: string; focus: TrainAttr[] }> = [
-  { label: "체력 강화 — 인터벌 러닝·웨이트", focus: ["stamina", "strength"] },
-  { label: "볼 소유 — 론도·짧은 패스 연결", focus: ["passing", "vision"] },
-  { label: "마무리 훈련 — 박스 안 슈팅 반복", focus: ["finishing", "composure"] },
-  { label: "수비 조직 — 라인 간격·커버", focus: ["tackling", "positioning"] },
-  { label: "스피드·전환 — 역습 상황 반복", focus: ["pace", "dribbling"] },
-  { label: "세트피스·제공권 — 코너·프리킥", focus: ["kicking", "aerial"] },
-  // 아래 셋은 한 축만 겨냥한다 — 9개 메뉴 × 2축이면 세 축이 중복돼 그쪽만 빨리 자란다
-  { label: "압박 강도 — 전방 압박 트리거", focus: ["aggression"] },
-  { label: "GK 전담 — 슈팅 스톱·크로스 대응", focus: ["goalkeeping"] },
-  { label: "팀 빌딩 — 소통·리더십 세션", focus: ["leadership"] },
+const GENERAL_MENU: ReadonlyArray<MenuItem> = [
+  {
+    menuId: "general-possession",
+    label: "볼 소유 — 론도·짧은 패스 연결",
+    focus: ["passing", "vision"],
+  },
+  {
+    menuId: "general-finishing",
+    label: "마무리 훈련 — 박스 안 슈팅 반복",
+    focus: ["finishing", "composure"],
+  },
+  {
+    menuId: "general-defending",
+    label: "수비 조직 — 라인 간격·커버",
+    focus: ["tackling", "positioning"],
+  },
+  {
+    menuId: "general-transition",
+    label: "스피드·전환 — 역습 상황 반복",
+    focus: ["pace", "dribbling"],
+  },
+  {
+    menuId: "general-set-piece",
+    label: "세트피스·제공권 — 코너·프리킥",
+    focus: ["kicking", "aerial"],
+  },
+  { menuId: "general-pressing", label: "압박 강도 — 전방 압박 트리거", focus: ["aggression"] },
+  {
+    menuId: "general-conditioning",
+    label: "체력 강화 — 인터벌 러닝·웨이트",
+    focus: ["stamina", "strength"],
+  },
+  {
+    menuId: "general-goalkeeping",
+    label: "GK 전담 — 슈팅 스톱·크로스 대응",
+    focus: ["goalkeeping"],
+  },
+  { menuId: "general-team-building", label: "팀 빌딩 — 소통·리더십 세션", focus: ["leadership"] },
+  {
+    menuId: "general-off-the-ball",
+    label: "오프더볼 — 뒷공간 침투·마킹 이탈",
+    focus: ["offTheBall"],
+  },
 ];
 
 /**
@@ -62,12 +116,12 @@ const GENERAL_MENU: ReadonlyArray<{ label: string; focus: TrainAttr[] }> = [
  * 하나씩 고정 배치하므로(소집일이 늘 월요일) 첫날은 반드시 메디컬이다.
  * 강도를 올리지 않는 주라 이중 세션도 없다.
  */
-const RETURN_WEEK: ReadonlyArray<{ label: string; focus: TrainAttr[] }> = [
-  { label: "복귀 메디컬 — 신체 검사·체력 측정", focus: ["recovery"] },
-  { label: "가벼운 러닝 — 유산소 되찾기", focus: ["stamina"] },
-  { label: "볼 감각 회복 — 짧은 패스·터치", focus: ["passing"] },
-  { label: "근력 재개 — 저강도 웨이트", focus: ["strength"] },
-  { label: "체력 테스트 — 요요 인터벌", focus: ["stamina"] },
+const RETURN_WEEK: ReadonlyArray<MenuItem> = [
+  { menuId: "return-medical", label: "복귀 메디컬 — 신체 검사·체력 측정", focus: ["recovery"] },
+  { menuId: "return-running", label: "가벼운 러닝 — 유산소 되찾기", focus: ["stamina"] },
+  { menuId: "return-ball-feel", label: "볼 감각 회복 — 짧은 패스·터치", focus: ["passing"] },
+  { menuId: "return-strength", label: "근력 재개 — 저강도 웨이트", focus: ["strength"] },
+  { menuId: "return-fitness-test", label: "체력 테스트 — 요요 인터벌", focus: ["stamina"] },
 ];
 
 /**
@@ -77,11 +131,11 @@ const RETURN_WEEK: ReadonlyArray<{ label: string; focus: TrainAttr[] }> = [
  * (지구력·몸싸움·스피드·공중볼)에만 집중하는 건 그래서고, 이중 세션도 이 구간에만
  * 둔다 — 실제 캠프도 강도를 앞에 싣고 개막이 가까울수록 전술로 옮겨 간다.
  */
-const PRESEASON_BASE: ReadonlyArray<{ label: string; focus: TrainAttr[] }> = [
-  { label: "기초 체력 — 장거리 러닝·유산소", focus: ["stamina"] },
-  { label: "근력 서킷 — 웨이트룸", focus: ["strength"] },
-  { label: "스프린트·가속 — 반복 질주", focus: ["pace"] },
-  { label: "경합 훈련 — 몸싸움·제공권", focus: ["aerial"] },
+const PRESEASON_BASE: ReadonlyArray<MenuItem> = [
+  { menuId: "base-endurance", label: "기초 체력 — 장거리 러닝·유산소", focus: ["stamina"] },
+  { menuId: "base-strength", label: "근력 서킷 — 웨이트룸", focus: ["strength"] },
+  { menuId: "base-sprint", label: "스프린트·가속 — 반복 질주", focus: ["pace"] },
+  { menuId: "base-duel", label: "경합 훈련 — 몸싸움·제공권", focus: ["aerial"] },
 ];
 
 /** 복귀 주의 마지막 날 (소집일 = 월요일 기준 금요일) */
@@ -91,16 +145,19 @@ const BUILD_UP_DAYS = 18;
 
 const RECOVERY: SessionPlan = {
   slot: "am",
+  menuId: "recovery",
   label: "회복 세션 — 가벼운 러닝·마사지",
   focus: ["recovery"],
 };
 const TACTICAL_DRILL: SessionPlan = {
   slot: "am",
+  menuId: "tactical-drill",
   label: "전술 훈련 — 대형·압박 라인 점검",
   focus: ["tactical"],
 };
 const MATCH_PREP: SessionPlan = {
   slot: "am",
+  menuId: "match-prep",
   label: "경기 준비 — 세트피스·상대 분석",
   focus: ["tactical"],
 };
@@ -124,8 +181,8 @@ function menuOf(
   state: GameState,
   date: string,
   offset: number,
-  menu: ReadonlyArray<{ label: string; focus: TrainAttr[] }>,
-): { label: string; focus: TrainAttr[] } {
+  menu: ReadonlyArray<MenuItem>,
+): MenuItem {
   const day = diffDays(state.calendar.preseasonStart, date) + offset;
   const index = ((day % menu.length) + menu.length) % menu.length;
   return menu[index]!;
@@ -178,7 +235,7 @@ function makeSession(
 ): { session: TrainingSession; entry: ScheduleEntry } {
   const id = `ts-${date}-${plan.slot}`;
   return {
-    session: { id, label: plan.label, focus: [...plan.focus], auto: true },
+    session: { id, label: plan.label, menuId: plan.menuId, focus: [...plan.focus], auto: true },
     entry: {
       id: `se-${id}`,
       date,
@@ -290,6 +347,21 @@ export function cancelTrainingOn(state: GameState, date: string): void {
   );
 }
 
+/** 대조에 쓰는 세션의 정체 — id가 있으면 id가, 없으면(옛 세이브) 이름이 그 자리를 대신한다 */
+type MenuRef = { menuId?: string | undefined; label: string };
+
+/**
+ * 깔린 세션이 기대한 그 메뉴인가 — **`menuId`로 가른다.**
+ *
+ * 옛 세이브의 `auto` 세션엔 id가 없어(§6 "문장에서 카드로") 그때만 이름으로 떨어진다.
+ * 폴백이 없으면 세이브를 여는 순간 남은 시즌의 기본 훈련이 통째로 한 번 다시 깔린다 —
+ * 결과는 같아도 감독의 달력이 이유 없이 전부 새 줄이 된다 (season.md §4).
+ */
+function sameMenu(actual: MenuRef | undefined, want: MenuRef): boolean {
+  if (!actual) return false;
+  return actual.menuId === undefined ? actual.label === want.label : actual.menuId === want.menuId;
+}
+
 /**
  * 일정이 바뀌면 기본 훈련을 그에 맞춰 다시 깐다 — 매 tick에서 부른다.
  *
@@ -318,33 +390,80 @@ export function syncDefaultTraining(state: GameState): void {
 
   const sessionById = new Map(state.trainingSessions.map((s) => [s.id, s] as const));
   const blocked = new Set<string>(); // 감독 지시·완료된 세션 — 기본 배치가 못 들어가는 자리
-  const actual = new Map<string, string>(); // 자리 → 지금 깔린 기본 세션의 이름
+  const actual = new Map<string, MenuRef>(); // 자리 → 지금 깔린 기본 세션
   const mine: ScheduleEntry[] = [];
   for (const e of state.schedule) {
     if (e.type !== "training" || e.date < from || e.date > to) continue;
     const session = sessionById.get(e.refId);
     const key = `${e.date}|${e.time}`;
     if (session?.auto === true && e.status === "scheduled") {
-      actual.set(key, session.label);
+      actual.set(key, { menuId: session.menuId, label: session.label });
       mine.push(e);
     } else {
       blocked.add(key);
     }
   }
 
-  const expected = new Map<string, string>();
+  const expected = new Map<string, MenuRef>();
   for (const { date, plan } of planWindow(state, from, to)) {
     const key = `${date}|${SLOT_TIME[plan.slot]}`;
     if (blocked.has(key) || expected.has(key)) continue;
-    expected.set(key, plan.label);
+    expected.set(key, { menuId: plan.menuId, label: plan.label });
   }
 
   if (
     expected.size === actual.size &&
-    [...expected].every(([key, label]) => actual.get(key) === label)
+    [...expected].every(([key, want]) => sameMenu(actual.get(key), want))
   ) {
     return;
   }
   removeEntries(state, mine);
   installDefaultTraining(state, { to });
+}
+
+// ── 2군 훈련 방침 (season.md §2 "2군 훈련 방침") ─────────────────────
+
+/**
+ * 방침이 겨냥하는 축 — **능력치 카탈로그의 갈래를 그대로 쓴다**(player.md §2).
+ * `goalkeeping`은 어디에도 들지 않는다: 한 축뿐인 갈래라 겨냥 대상으로 두면 그
+ * 방침만 배율이 극단으로 튀고, 눌리게 두면 골키퍼 유망주가 감독이 고른 방침
+ * 때문에 굳는다. 방침이 닿는 자리는 필드 15축이다.
+ */
+const RESERVE_TRAINING_AXES: Record<ReserveTrainingPolicy, readonly AttributeAxis[]> = {
+  balanced: [],
+  physical: ["pace", "stamina", "strength", "aerial"],
+  technical: ["finishing", "dribbling", "passing", "kicking", "tackling"],
+  mental: ["vision", "positioning", "offTheBall", "composure", "aggression", "leadership"],
+};
+
+/** 방침이 닿지 않는 축 — 겨냥 대상도, 눌리는 대상도 아니다 */
+const UNTOUCHED_AXIS: AttributeAxis = "goalkeeping";
+
+/** 방침이 나누는 몫의 분모 — 축 목록에서 파생한다(축이 늘면 여기가 따라온다) */
+const FIELD_AXIS_COUNT = ATTRIBUTE_AXES.filter((axis) => axis !== UNTOUCHED_AXIS).length;
+
+/** 겨냥한 축의 성장 확률 배율 */
+export const RESERVE_TRAINING_AIM = 1.6;
+
+/** 이 방침이 겨냥하는 축 — 축 묶음을 읽는 유일한 문 */
+export function reserveTrainingAxes(policy: ReserveTrainingPolicy): readonly AttributeAxis[] {
+  return RESERVE_TRAINING_AXES[policy];
+}
+
+/**
+ * 방침이 이 축의 성장 확률에 곱하는 배율 — **총량을 옮길 뿐 늘리지 않는다.**
+ *
+ * 겨냥한 n축이 `RESERVE_TRAINING_AIM`만큼 오르면 나머지 필드 축이 그만큼 내려가
+ * 필드 15축의 배율 합은 어느 방침에서나 15다(season.md §8 불변식). 공짜 상향이면
+ * 고르는 일이 아니라 켜는 일이 된다.
+ */
+export function reserveTrainingMultiplier(
+  policy: ReserveTrainingPolicy,
+  axis: AttributeAxis,
+): number {
+  const aimed = reserveTrainingAxes(policy);
+  if (aimed.length === 0 || axis === UNTOUCHED_AXIS) return 1;
+  if (aimed.includes(axis)) return RESERVE_TRAINING_AIM;
+  const rest = FIELD_AXIS_COUNT - aimed.length;
+  return (FIELD_AXIS_COUNT - aimed.length * RESERVE_TRAINING_AIM) / rest;
 }

@@ -20,6 +20,7 @@ import { REAL_SQUADS, type RealPlayerSeed } from "../src/data/epl-players";
 import { INJURY_HISTORY } from "../src/data/injury-history";
 import { EU_SQUADS } from "../src/data/eu-squads";
 import { MARKET_LEAGUE_SQUADS } from "../src/data/market-leagues";
+import { potentialGapBand } from "../src/world/synthesis";
 
 /**
  * 시드 갱신 오조인 가드 — **(이름 + 생년월일) 조인이 동명이인을 받았는지**를
@@ -192,38 +193,6 @@ describe("자리-프로필 모순 — 조인이 다른 자리의 선수를 받�
 });
 
 /**
- * 나이별 `potential − OVR` 상한 — **`docs/data/player.md` §6.5 대역 표의 상한 행
- * 그대로다.** 어린 선수는 간격이 큰 게 정상이고 전성기 선수는 아니다. 곡선의 출처는
- * `026710e` 실측 이전 시드의 나이별 최대 간격이다: 그 시절 `potential`과 종합은 같은
- * 판단값에서 나왔으므로, 그 곡선이 시드를 쓴 사람이 쥐고 있던 밴드다. 거기에 **+3**이
- * 얹혀 있다 — 종합이 축 가중 평균이 되며 상위권이 그만큼 내려갔는데 `potential`은
- * 축의 눈금에 그대로 남아, 같은 시드의 간격이 통째로 벌어졌다 (player.md §4·§6.5).
- *
- * ⚠️ **나이를 뭉치지 않는다.** 20~22를 한 밴드로 묶으면 20세의 22가 22세의 14를 가려
- * 과대평가가 숨는다. 문서의 표와 한 칸씩 대조할 수 있어야 하므로 나이별로 적는다.
- */
-const POTENTIAL_GAP_MAX: Readonly<Record<number, number>> = {
-  16: 31,
-  17: 26,
-  18: 28,
-  19: 29,
-  20: 25,
-  21: 22,
-  22: 17,
-  23: 16,
-  24: 16,
-  25: 13,
-  26: 14,
-  27: 12,
-  28: 10,
-  29: 11,
-  30: 11,
-};
-/** 표 밖의 양 끝 — 시드에 만 15세 이하는 없고, 31세부터는 곡선이 평평하다 */
-const GAP_MAX_UNDER_16 = 31;
-const GAP_MAX_OVER_30 = 9;
-
-/**
  * 대역 상한에 얹는 여유. 임계 = `상한 + 3`.
  *
  * **여유가 없으면 이 탐지기는 서지 못한다.** 다른 셋과 달리 상한이 관측된 정상 띠의
@@ -235,9 +204,7 @@ const GAP_MAX_OVER_30 = 9;
  */
 const POTENTIAL_GAP_MARGIN = 3;
 
-const potentialGapLimit = (age: number): number =>
-  (age <= 15 ? GAP_MAX_UNDER_16 : (POTENTIAL_GAP_MAX[age] ?? GAP_MAX_OVER_30)) +
-  POTENTIAL_GAP_MARGIN;
+const potentialGapLimit = (age: number): number => potentialGapBand(age).max + POTENTIAL_GAP_MARGIN;
 
 /**
  * **잠재력 축은 단독으로 선다** — 5대 리그 전원을 본다.
@@ -458,26 +425,27 @@ describe("소속 불변식 — 한 선수 한 구단, 한 구단 안에서 번�
 /**
  * 부상 이력 조인 — **표의 키가 전부 시드에 닿는가.**
  *
- * `INJURY_HISTORY`는 `RealPlayerSeed.nameEn`으로 잇는다(`injury.ts`
- * `seedInjuryHistory`). 이름 표기가 바뀌거나 그 선수가 시드에서 빠지면 그 이력은
+ * `INJURY_HISTORY`는 `RealPlayerSeed.wikidataId`(QID)로 잇는다(`injury.ts`
+ * `seedInjuryHistory`). 그 선수가 시드에서 빠지거나 QID가 지워지면 그 이력은
  * **조용히 죽는다** — 부상 행도 초기 성향도 생기지 않고, 화면엔 아무 일도 안 난
  * 것처럼 보인다. 오타 하나로 리스 제임스가 철인이 되는 자리다.
  *
  * 반대 방향(시드에 있는데 이력이 없다)은 위반이 아니다 — 조사가 닿은 선수만
  * 적는 표다 (injury-history.ts 상단).
  */
-describe("부상 이력 조인 — 이력의 이름이 시드에 없다", () => {
+describe("부상 이력 조인 — 이력의 QID가 시드에 없다", () => {
   const ALL_SQUADS: Record<string, readonly RealPlayerSeed[]> = {
     ...REAL_SQUADS,
     ...EU_SQUADS,
     ...MARKET_LEAGUE_SQUADS,
   };
+  const ALL_SEEDS = Object.values(ALL_SQUADS).flat();
 
-  it("INJURY_HISTORY의 모든 키가 실선수 시드의 nameEn에 있다", () => {
+  it("INJURY_HISTORY의 모든 키가 실선수 시드의 wikidataId에 있다", () => {
     const seeded = new Set(
-      Object.values(ALL_SQUADS).flatMap((squad) => squad.map((s) => s.nameEn)),
+      ALL_SEEDS.flatMap((s) => (s.wikidataId === undefined ? [] : [s.wikidataId])),
     );
-    const orphans = Object.keys(INJURY_HISTORY).filter((name) => !seeded.has(name));
+    const orphans = Object.keys(INJURY_HISTORY).filter((qid) => !seeded.has(qid));
 
     expect(orphans).toEqual([]);
   });

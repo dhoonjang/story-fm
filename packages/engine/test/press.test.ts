@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  acceptManagerOffer,
   addDays,
   applyPressOutcome,
   buildMatchPress,
@@ -12,11 +13,12 @@ import {
   pendingPress,
   reportersOf,
   respondToMedia,
+  tierOfTeamIn,
   userPlayers,
   type GameState,
 } from "@story-fm/engine";
-import { PressConferenceSchema } from "@story-fm/domain";
-import type { GamePlayer, MatchRecord, PressConference } from "@story-fm/domain";
+import { PressConferenceSchema, pressFactText } from "@story-fm/domain";
+import type { GamePlayer, ManagerOffer, MatchRecord, PressConference } from "@story-fm/domain";
 import { createTestGame } from "./helpers";
 
 /**
@@ -87,9 +89,12 @@ describe("기자회견 — 자리 만들기", () => {
     const press = playAndOpen(state);
     expect(press.status).toBe("pending");
     expect(press.facts.length).toBeGreaterThan(0);
-    // 코어는 사실만 넘긴다 — 스코어는 실려 있고 물음표는 없다
+    // 코어는 사실만 넘긴다 — 스코어는 실려 있고, 세이브에 남는 것은 문장이 아니라 카드다
     expect(press.context).toMatch(/\d+-\d+/);
-    for (const f of press.facts) expect(f.text).not.toContain("?");
+    for (const f of press.facts) {
+      expect(f.text, "코어가 사실 문장을 저장했다").toBeUndefined();
+      expect(f.data, "사실 카드가 없다").toBeDefined();
+    }
   });
 
   it("이미 열린 회견이 있으면 새 회견이 앞의 것을 거절로 닫는다", () => {
@@ -103,6 +108,44 @@ describe("기자회견 — 자리 만들기", () => {
     // 무시가 공짜면 아무도 답하지 않는다
     expect(state.manager.reputation.media).toBeLessThan(beforeMedia);
     expect(pendingPress(state)?.id).toBe("press-second");
+  });
+
+  /**
+   * 이직은 방치가 아니다 (career.md §5.1). 그대로 두면 새 구단의 첫 회견이 앞
+   * 구단의 자리를 거절로 닫아 이유 없이 언론 평판이 깎인다.
+   */
+  it("부임하면 앞 구단의 회견이 대가 없이 만료된다", () => {
+    const state = createTestGame();
+    playAndOpen(state);
+    const stale = state.pressConferences![0]!;
+    const before = state.manager.reputation.media;
+
+    const league = leagueOfTeamIn(state, state.userTeamId);
+    const to = state.teams.find(
+      (t) => t.id !== state.userTeamId && leagueOfTeamIn(state, t.id) === league,
+    )!.id;
+    state.dismissal = { on: state.date, season: state.season, teamId: state.userTeamId };
+    const offer: ManagerOffer = {
+      id: "offer-move",
+      teamId: to,
+      madeOn: state.date,
+      expiresOn: addDays(state.date, 10),
+      tier: tierOfTeamIn(state, to),
+      target: 10,
+      expectation: "중위권",
+      status: "open",
+    };
+    state.managerOffers = [offer];
+    const accepted = acceptManagerOffer(state, offer.id);
+    expect(accepted.ok, accepted.message).toBe(true);
+
+    expect(stale.status).toBe("expired");
+    expect(pendingPress(state)).toBeNull();
+    expect(state.manager.reputation.media, "떠난 구단의 회견에 불참 대가를 물었다").toBe(before);
+
+    // 새 구단의 첫 회견도 앞 구단의 자리를 방치로 읽지 않는다
+    openPress(state, fakeConference({ id: "press-new-club" }));
+    expect(state.manager.reputation.media).toBe(before);
   });
 
   it("답을 기다리는 회견은 언제나 하나뿐이다", () => {
@@ -122,7 +165,7 @@ describe("기자회견 — 자리 만들기", () => {
     const state = createTestGame();
     const press = playAndOpen(state);
     const note = describePendingPress(state)!;
-    for (const f of press.facts) expect(note).toContain(f.text);
+    for (const f of press.facts) expect(note).toContain(pressFactText(f));
   });
 });
 
@@ -330,7 +373,7 @@ describe("기자회견 — 질문은 장부에서 나온다", () => {
     const press = playAndOpen(state);
     const named = press.facts.filter((f) => f.about !== null);
     expect(named.length).toBeGreaterThan(0);
-    expect(named[0]!.text).toContain(slump.name);
+    expect(named[0]!.data?.name).toBe(slump.name);
   });
 });
 
@@ -394,8 +437,8 @@ describe("기자회견 — 언론 유출은 다음 자리가 싣는다", () => {
     expect(leak, "유출이 회견에 실리지 않았다").toBeDefined();
     expect(leak!.about).toBe(player.id);
     expect(leak!.sharp).toBe(true);
-    expect(leak!.text).toContain(player.name);
-    expect(leak!.text).not.toContain("?");
+    expect(leak!.data?.name).toBe(player.name);
+    expect(leak!.data?.tags?.[0], "유출의 사유가 코드로 실리지 않았다").toBe("minutes");
     expect(conference.weight).toBeGreaterThanOrEqual(2);
     // 실어 간 유출은 남지 않는다 — 남으면 다음 회견이 같은 사실을 다시 묻는다
     expect(state.pressLeaks).toEqual([]);
@@ -447,7 +490,7 @@ describe("기자회견 — 전야", () => {
     expect(opened).toHaveLength(1);
     expect(opened[0]!.weight).toBe(1);
     expect(opened[0]!.status).toBe("pending");
-    for (const f of opened[0]!.facts) expect(f.text).not.toContain("?");
+    for (const f of opened[0]!.facts) expect(f.text).toBeUndefined();
     expect(opened[0]!.facts.some((f) => f.kind === "fixture")).toBe(true);
   });
 

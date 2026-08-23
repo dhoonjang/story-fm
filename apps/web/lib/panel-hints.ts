@@ -31,10 +31,12 @@ export const PANEL_OF: Record<string, PanelKey> = {
   set_player_tactic: "스쿼드",
   set_captain: "스쿼드",
   set_development_focus: "스쿼드",
+  set_reserve_training: "스쿼드",
   substitute: "스쿼드",
   set_transfer_list: "스쿼드",
   release_player: "스쿼드",
   recall_loan: "스쿼드",
+  exercise_buyback: "스쿼드",
   accept_deal: "스쿼드",
   apply_narrative_event: "스쿼드",
   // 대화형 — 바뀌는 것은 사기·심경이고 그건 명단이 보여준다
@@ -48,6 +50,9 @@ export const PANEL_OF: Record<string, PanelKey> = {
   // ── 재정 ──
   apply_finance_event: "재정",
   adjust_transfer_budget: "재정",
+  // 접수한 날엔 장부가 아직 그대로다 — 그래도 감독이 답을 확인하러 갈 화면은 여기다
+  request_board: "재정",
+  set_ticket_price: "재정",
   // ── 커리어 — 세계가 감독을 보는 눈 ──
   respond_to_media: "커리어",
   // 다가옴도 옮기는 것이 평판 3축이다 — 사기 변화는 스쿼드에도 서지만 자리는 하나다
@@ -97,6 +102,14 @@ export interface HintLine {
   text: string;
   /** 그 값의 갈래·부연 — 값 뒤에 한 톤 낮춰 선다 (`패스·시야`) */
   note?: string;
+  /**
+   * 이 줄이 말하는 **증감** — 화면은 이 부호로만 색을 준다 (`+2`는 이득, `−1`은 손해).
+   *
+   * 값에서 `+`·`−`를 찾아 칠하던 자리다. 포메이션(`4-2-3-1`)이 같은 자를 지나고,
+   * 코어가 문구를 바꾸는 날 색이 조용히 꺼졌다 — 부호는 코어가 숫자로 낸다.
+   * `0`은 "안 움직였다"는 사실이라 색이 없을 뿐 없는 것과 다르다.
+   */
+  delta?: number;
   /** 같은 스킬의 이어지는 항목 — 아이콘을 다시 세우지 않는다 */
   cont?: boolean;
 }
@@ -153,30 +166,29 @@ export function hintsOfCall(call: ToolCallRecord): PanelHint[] {
 /**
  * 기록 하나가 세우는 줄들 — **코어가 항목으로 냈으면 항목마다 한 줄.**
  *
- * `brief`가 없는 것은 옛 세이브의 기록이다. 그때는 요약 문자열의 첫 줄을 통째로
- * 세운다 — 코어가 쓴 문장을 화면이 정규식으로 되쪼개 갈래를 만들지 않는다.
+ * ⚠️ **`brief`가 없는 기록은 서지 않는다.** 요약 문자열(`summary`)은 모델에게
+ * 돌려주는 줄이지 화면의 항목이 아니라서, 화면이 그 줄을 갈라 세우면 코어가 쓴
+ * 문장의 첫 줄이 곧 UI가 된다. 말풍선을 갖는 스킬(`PANEL_OF`)은 모두 `brief`를
+ * 내므로 여기 걸리는 것은 그 규약보다 오래된 세이브의 기록뿐이고, 그 지시는
+ * 채팅의 칩으로 남아 있다 (→ docs/data/game-state.md §3.6).
  */
 function linesOfCall(call: ToolCallRecord): HintLine[] {
   const brief = call.brief;
-  if (brief) {
-    const head = brief.head.trim();
-    const items = brief.items.filter((i) => i.text.trim().length > 0);
-    // 바뀐 것을 코어가 못 적었으면 머리줄이 곧 그 줄이다 — 빈 줄을 세우지 않는다
-    if (items.length === 0) return head.length === 0 ? [] : [{ skill: call.name, text: head }];
-    return items.map((it, i) => ({
-      skill: call.name,
-      // 머리줄은 첫 항목에만 — 항목마다 되풀이하면 그게 글자 벽이다
-      ...(i === 0 && head.length > 0 ? { head } : {}),
-      ...(it.label ? { label: it.label } : {}),
-      text: it.text.trim(),
-      ...(it.note ? { note: it.note } : {}),
-      ...(i === 0 ? {} : { cont: true }),
-    }));
-  }
-  // 요약 첫 줄만 — 여러 줄짜리는 말풍선에 담기지 않는다
-  const summary = (call.summary.split("\n")[0] ?? call.summary).trim();
-  if (summary.length === 0) return [];
-  return [{ skill: call.name, text: summary }];
+  if (!brief) return [];
+  const head = brief.head.trim();
+  const items = brief.items.filter((i) => i.text.trim().length > 0);
+  // 바뀐 것을 코어가 못 적었으면 머리줄이 곧 그 줄이다 — 빈 줄을 세우지 않는다
+  if (items.length === 0) return head.length === 0 ? [] : [{ skill: call.name, text: head }];
+  return items.map((it, i) => ({
+    skill: call.name,
+    // 머리줄은 첫 항목에만 — 항목마다 되풀이하면 그게 글자 벽이다
+    ...(i === 0 && head.length > 0 ? { head } : {}),
+    ...(it.label ? { label: it.label } : {}),
+    text: it.text.trim(),
+    ...(it.note ? { note: it.note } : {}),
+    ...(it.delta === undefined ? {} : { delta: it.delta }),
+    ...(i === 0 ? {} : { cont: true }),
+  }));
 }
 
 /** 기록 하나의 지문 — 스킬 이름과 세운 줄들. 같은 지문은 두 번 세지 않는다 */

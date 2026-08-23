@@ -1,19 +1,26 @@
+import type { PositionGroup } from "@story-fm/domain";
 import { isTopLeague, leagueCatalog, leagueCatalogById, leagueName } from "../data/league-catalog";
 import { clubEconomyLevel } from "../data/league-economy";
 import { tierOfTeamIn } from "../core/club-tier";
 import { RELEGATION_SLOTS } from "../core/league-shape";
 import { makeRng } from "../core/rng";
+import { contractUntil, seasonYear } from "../core/dates";
 import { computeStandings } from "./season";
 import { startParachute, stopParachute } from "../club/finance";
+import { generatePromotionSigning } from "../world/generate";
+import { assignSquadNumber } from "../squad/numbers";
+import { estimateWeeklyWage, wageSubjectOf } from "../world/wages";
 import {
   catalogLeagueIn,
   clubProfileIn,
+  groupOf,
   playersOf,
   pushNarrative,
   teamNameIn,
   teamShortNameIn,
   type GameState,
 } from "../core/state";
+import { squadRating } from "../squad/depth";
 
 /**
  * 승강 — 1부 하위 세 팀과 그 나라 2부 상위 세 팀이 자리를 바꾼다.
@@ -37,7 +44,7 @@ import {
  * 2부 클럽보다 열다섯 점쯤 높아서, 어떤 난수를 얹어도 매년 그 셋이 그대로 올라온다.
  * 서열로 재면 눈금이 아니라 자리만 남아 4~5위도 올라올 수 있다.
  */
-export const PROMOTION_LUCK = 4;
+const PROMOTION_LUCK = 4;
 
 /**
  * 이 팀이 지금 속한 리그 — 세 층을 순서대로 본다.
@@ -108,19 +115,6 @@ export function hasRelegation(state: GameState, leagueId: string): boolean {
   return teamsOfLeagueIn(state, second).length >= RELEGATION_SLOTS;
 }
 
-/** 판에 서는 인원 — 스쿼드의 힘은 이만큼의 평균으로 잰다 */
-const STARTING_XI = 11;
-
-/** 스쿼드 상위 열한 명의 평균 OVR — 2부 클럽을 줄 세우는 잣대 */
-function squadRating(state: GameState, teamId: string): number {
-  const squad = playersOf(state, teamId);
-  if (squad.length === 0) return 0;
-  const top = [...squad]
-    .sort((a, b) => b.attributes.overall - a.attributes.overall)
-    .slice(0, STARTING_XI);
-  return top.reduce((s, p) => s + p.attributes.overall, 0) / top.length;
-}
-
 /** 이 리그가 이번 시즌 실제로 경기를 했는가 — 안 뛴 리그는 강등도 없다 */
 function played(state: GameState, leagueId: string): boolean {
   return state.matches.some(
@@ -164,8 +158,10 @@ export function applyPromotionRelegation(
   state: GameState,
   finalTables: Record<string, string[]>,
   digest: string[],
-): void {
+): string[] {
   const ourLeague = leagueOfTeamIn(state, state.userTeamId);
+  /** 올라간 팀 — 보강이 이 목록을 받는다 (`reinforcePromotedSquads`) */
+  const promoted: string[] = [];
   for (const [leagueId, table] of Object.entries(finalTables)) {
     if (!hasRelegation(state, leagueId)) continue;
     if (!played(state, leagueId)) continue;
@@ -183,6 +179,7 @@ export function applyPromotionRelegation(
       setLeague(state, teamId, leagueId);
       // 승격하면 1부 배분을 다시 받으므로 낙하산은 끝난다 (이중 수령 금지)
       stopParachute(state, teamId);
+      promoted.push(teamId);
     }
 
     if (leagueId !== ourLeague && second !== ourLeague) continue;
@@ -200,6 +197,128 @@ export function applyPromotionRelegation(
         `${teamNameIn(state, state.userTeamId)} 승격! 다음 시즌은 ${leagueName(leagueId)}다`,
       );
       pushNarrative(state, `${leagueName(leagueId)} 승격`, 5);
+    }
+  }
+  return promoted;
+}
+
+/**
+ * 승격 팀이 1부 첫 시즌을 시작하는 **자리별 목표 인원**.
+ *
+ * 등록 뎁스 쿼터(`core/state.ts`의 `ESSENTIAL_QUOTA` — team.md §5)에 공격수 하나를
+ * 얹은 표다. 인원만 세면 골키퍼 둘짜리 팀이 공격수를 다섯 받는다.
+ */
+const PROMOTED_QUOTA: Record<PositionGroup, number> = { GK: 3, DF: 8, MF: 8, FW: 6 };
+
+/**
+ * 승격 팀 명단의 하한 — **목표의 합이다**(25). 매치데이 정원(20)에 로테이션·부상
+ * 몫 다섯을 얹은 수이고, 등록 명단 상한도 25라 하한이 상한을 밀지 않는다.
+ * 같은 숫자를 두 곳에 적지 않으려고 표에서 낸다.
+ */
+const PROMOTED_SQUAD_FLOOR = Object.values(PROMOTED_QUOTA).reduce((sum, n) => sum + n, 0);
+
+/**
+ * 보강이 서는 분위 — 그 클럽 **주전 열한 명 평균에서 이만큼 아래**.
+ *
+ * 체급 상수(`TIER_BASE`)를 쓰면 갓 올라온 팀이 1부 눈금의 선수를 다섯 공짜로 받아
+ * 첫 시즌부터 중위권이 된다. 승격이 팀을 강하게 만드는 것이 아니라 **두껍게**
+ * 만들어야 하므로, 기준선은 그 팀 자신의 명단에서 파생한다 (team.md §5).
+ */
+const REINFORCEMENT_DROP = 4;
+
+/** 보강 계약 기간 — 유스 콜업과 같은 3년 */
+const REINFORCEMENT_YEARS = 3;
+
+/** 자리를 고르는 순서 — 부족분이 같으면 앞의 자리가 먼저다 (결정적) */
+const GROUP_ORDER: readonly PositionGroup[] = ["GK", "DF", "MF", "FW"];
+
+/** 지금 가장 모자란 자리 — 부족분이 가장 큰 포지션군 */
+function neediestGroup(have: Record<PositionGroup, number>): PositionGroup {
+  return GROUP_ORDER.reduce((best, group) =>
+    PROMOTED_QUOTA[group] - have[group] > PROMOTED_QUOTA[best] - have[best] ? group : best,
+  );
+}
+
+/**
+ * 승격 팀 명단 보강 — **승강과 체급 재산정 뒤, 새 일정을 짜기 전에** 한 번.
+ *
+ * 2부 클럽은 컵에만 나오므로 스무 명으로 만들어진다(team.md §4). 그대로 올라가면
+ * 매치데이 정원(20)과 명단이 같아 부상 하나에 벤치가 빈다. 그래서 하한까지 채운다
+ * — 40명대로 올라온 팀(강등됐다 돌아온 클럽)은 이미 하한 위라 한 명도 받지 않는다.
+ *
+ * 난수는 `(세이브 시드, promotion-signing:팀:시즌:번호)`에서만 나온다 — 같은
+ * 세이브를 다시 굴리면 같은 사람이 온다.
+ */
+export function reinforcePromotedSquads(
+  state: GameState,
+  promoted: readonly string[],
+  digest: string[],
+): void {
+  // id는 세계 전체에서 유일해야 한다 — 한 번 쥐고 팀을 돌며 등록한다
+  const takenIds = new Set(state.players.map((p) => p.id));
+  for (const teamId of promoted) {
+    const squad = playersOf(state, teamId);
+    /**
+     * **하한이 재는 것은 1군이다.** 2군은 매치데이 명단에 설 수 없으므로(team.md §5)
+     * 전체 인원으로 재면, 유스가 쌓인 2부 클럽이 1군 열다섯 명으로 올라가면서도
+     * "이미 하한 위"로 읽힌다.
+     */
+    const firstTeam = squad.filter((p) => p.squadLevel !== "reserve");
+    const short = PROMOTED_SQUAD_FLOOR - firstTeam.length;
+    if (short <= 0) continue;
+    const base = Math.round(squadRating(state, teamId)) - REINFORCEMENT_DROP;
+    const have: Record<PositionGroup, number> = { GK: 0, DF: 0, MF: 0, FW: 0 };
+    for (const player of firstTeam) have[groupOf(player)] += 1;
+    // 이름은 **팀 전체**에서 유일해야 한다 — 2군까지 쥐고 뽑는다 (people.md §2)
+    const takenNames = new Set(squad.map((p) => p.name));
+    for (let i = 0; i < short; i++) {
+      const group = neediestGroup(have);
+      have[group] += 1;
+      const signing = generatePromotionSigning(
+        state.seed,
+        teamId,
+        state.season,
+        i,
+        base,
+        group,
+        takenIds,
+        seasonYear(state.season),
+        takenNames,
+      );
+      state.players.push(signing);
+      assignSquadNumber(state.players, signing);
+      /**
+       * **창 밖 이동이다** — 이 자리는 새 시즌 이적창이 아직 세워지기 전이고
+       * (`buildTransferWindows`는 뒤에 온다), 자유계약이라 창에 걸리지 않는다.
+       * 유스 콜업이 `windowId: null`을 쓰는 것과 같은 자리다.
+       */
+      state.transfers.push({
+        id: `tr-promo-${signing.id}`,
+        gamePlayerId: signing.id,
+        windowId: null,
+        fromTeamId: null,
+        toTeamId: teamId,
+        date: state.date,
+        type: "free",
+        fee: 0,
+      });
+      state.contracts.push({
+        id: `c-${signing.id}`,
+        gamePlayerId: signing.id,
+        teamId,
+        weeklyWage: estimateWeeklyWage(
+          teamId,
+          wageSubjectOf(signing, state.date),
+          playersOf(state, teamId).map((p) => wageSubjectOf(p, state.date)),
+          state,
+        ),
+        since: state.date,
+        until: contractUntil(state.date, REINFORCEMENT_YEARS),
+        status: "active",
+      });
+    }
+    if (teamId === state.userTeamId) {
+      digest.push(`승격 보강: 자유계약으로 ${short}명을 더해 1군이 ${PROMOTED_SQUAD_FLOOR}명이다`);
     }
   }
 }

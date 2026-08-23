@@ -10,24 +10,46 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { GamePlayerSchema, TacticsSpecSchema, type MatchEvent } from "@story-fm/domain";
-import { naturalPositionOf } from "@story-fm/domain";
 import {
+  GamePlayerSchema,
+  TacticsSpecSchema,
+  type MatchEvent,
+  type StrengthPacket,
+} from "@story-fm/domain";
+import {
+  matchupText,
+  naturalPositionOf,
+  packetTagContext,
+  packetTagText,
+  subCauseText,
+} from "@story-fm/domain";
+import {
+  accumulateFatigue,
   applyEvents,
   buildStrengthPacket,
   createLedger,
   describeLedger,
+  makeRng,
+  mergeSubstitutions,
   planAiSubstitution,
   simulateSegment,
   type MatchLedgerState,
 } from "@story-fm/sim";
 import { agentConfig, createGameLLM, type TurnHistory, type TurnUsage } from "@story-fm/llm";
-import {
-  MATCH_CASTER_SYSTEM,
-  buildContinueMessage,
-  buildKickoffMessage,
-  buildSegmentMessage,
-} from "@story-fm/agents";
+import { MATCH_CASTER_SYSTEM, buildContinueMessage, buildSegmentMessage } from "@story-fm/agents";
+
+/**
+ * 킥오프 턴 유저 메시지 — 패킷 + 감독의 사전 지시. **이 프로토타입만 읽는다.**
+ * 웹은 패킷을 사람이 읽는 줄로 요약해 싣고(`buildLedgerNote`), JSON을 통째로 붓는
+ * 것은 한 사이클을 눈으로 훑는 여기뿐이다 (prompts.md §5).
+ */
+function buildKickoffMessage(packet: StrengthPacket, managerNote?: string): string {
+  const note = managerNote ? `\n\n[감독의 경기 전 지시]\n${managerNote}` : "";
+  return (
+    `아래 전력 분석 패킷을 근거로 경기를 시작하라. 킥오프부터 첫 정지점까지 진행한다.` +
+    `\n\n[전력 분석 패킷]\n${JSON.stringify(packet, null, 2)}${note}`
+  );
+}
 
 // ---- 인자 파싱 (프로토타입 수준) ----
 const argv = process.argv.slice(2);
@@ -91,11 +113,10 @@ const packet = buildStrengthPacket(toSideInput(fixture.home), toSideInput(fixtur
 
 console.log("═══ 전력 분석 패킷 ═══");
 console.log(`${packet.home.teamName}(홈) vs ${packet.away.teamName}`);
-for (const m of packet.matchups) console.log(`  · ${m.why}`);
-for (const k of packet.keyPoints) console.log(`  ★ ${k}`);
-console.log(
-  `  기대 득점 ${packet.guide.expectedGoals.home} : ${packet.guide.expectedGoals.away} · 업셋 확률 ${Math.round(packet.guide.upsetChance * 100)}%`,
-);
+const tagCtx = packetTagContext(packet);
+for (const m of packet.matchups) console.log(`  · ${matchupText(m)}`);
+for (const k of packet.keyPoints) console.log(`  ★ ${packetTagText(k, tagCtx)}`);
+console.log(`  기대 득점 ${packet.guide.expectedGoals.home} : ${packet.guide.expectedGoals.away}`);
 
 if (dry) {
   console.log("\n(--dry: LLM 호출 없이 종료)");
@@ -116,22 +137,6 @@ const squadOf = (side: z.infer<typeof SideSchema>, s: { onPitch: string[]; bench
   bench: s.bench.map((id) => byId.get(id)!).filter(Boolean),
 });
 const seed = Number(flag("seed") ?? 42);
-/** mulberry32 — 엔진의 `makeRng`와 같은 알고리즘 (CLI는 엔진에 의존하지 않는다) */
-function makeRng(base: number, channel: string): () => number {
-  let h = 2166136261;
-  for (let i = 0; i < channel.length; i++) {
-    h ^= channel.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  let a = (base ^ (h >>> 0)) >>> 0;
-  return () => {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 let segmentIndex = 0;
 const matchFatigue: Record<string, number> = {};
 /** 구간 시뮬의 연속 시계 — 장부의 정수 분이 잘라 버린 소수 자리를 다음 구간에 잇는다 */
@@ -154,14 +159,13 @@ function runSegment(): { note: string; stop: string } {
   });
   matchClock = plan.clock;
   const aiSubs = planAiSubstitution("away", squads.away, ledger, plan, rng);
-  const events: MatchEvent[] = [...aiSubs, ...plan.events];
+  // 끼우는 순서는 엔진과 한 벌이다 (sim/segment.ts) — 부상 교체만 사건 뒤에 선다
+  const events: MatchEvent[] = mergeSubstitutions(plan.events, aiSubs);
   const result = applyEvents(ledger, events);
   if (!result.ok) return { note: `[진행 실패] ${result.errors.join(" / ")}`, stop: plan.stop };
   ledger = result.state;
   segmentIndex += 1;
-  for (const [id, add] of Object.entries(plan.fatigue)) {
-    matchFatigue[id] = Math.min(100, (matchFatigue[id] ?? 0) + add);
-  }
+  accumulateFatigue(matchFatigue, plan.fatigue);
   return {
     note: buildSegmentMessage(events, plan.stop, nameOf, (side) =>
       side === "home" ? names.home : names.away,
@@ -215,7 +219,11 @@ console.log("\n이벤트 로그:");
 for (const e of ledger.events) {
   const team = e.team ? ` [${e.team}]` : "";
   const actors = e.actors.length > 0 ? ` ${e.actors.join(" → ")}` : "";
-  const causes = e.causes.length > 0 ? `  ⟵ ${e.causes.join(", ")}` : "";
+  const reasons = [
+    ...(e.subCause ? [subCauseText(e.subCause)] : []),
+    ...e.causes.map((t) => packetTagText(t, tagCtx)),
+  ];
+  const causes = reasons.length > 0 ? `  ⟵ ${reasons.join(", ")}` : "";
   console.log(`  ${String(e.minute).padStart(3)}′ ${e.type}${team}${actors}${causes}`);
 }
 console.log(

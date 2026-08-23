@@ -32,6 +32,6 @@ export function slotOverallOf(
   role: string | undefined,
 ): number | null {
   if (!code) return null;
-  // 스쿼드 행은 15축을 그대로 들고 있다 (`SquadViewRow = SquadViewRowMeta & AxisValues`)
+  // 스쿼드 행은 16축을 그대로 들고 있다 (`SquadViewRow = SquadViewRowMeta & AxisValues`)
   return observedFit(p, p.observation, code, role);
 }

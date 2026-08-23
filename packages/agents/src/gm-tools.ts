@@ -11,6 +11,7 @@ import {
   adjustTransferBudget,
   applyForManagerJob,
   answerOffer,
+  arrivedResponses,
   applyFinanceEvent,
   applyNarrativeEvent,
   applyTalkToPlayer,
@@ -40,7 +41,10 @@ import {
   playerCard,
   playerName,
   recallLoan,
+  exerciseBuyBack,
   releasePlayer,
+  requestBoard,
+  setTicketPrice,
   respondToApproach,
   respondToMedia,
   scheduleView,
@@ -49,6 +53,7 @@ import {
   sendOffer,
   setCaptain,
   setDevelopmentFocus,
+  setReserveTraining,
   setExploits,
   setLineup,
   setRegionalPlan,
@@ -72,10 +77,10 @@ import {
   type CardMark,
   type GameState,
   type GoalMark,
-  type SkillBrief,
 } from "@story-fm/engine";
 import {
   ATTRIBUTE_AXES,
+  BOARD_REQUEST_KINDS,
   DateString,
   DIRECTIVE_INTENSITIES,
   type MatchEvent,
@@ -84,14 +89,15 @@ import {
   PitchClaimSchema,
   PLAYER_DIRECTIVE_KINDS,
   PRESS_STANCES,
+  RESERVE_TRAINING_POLICIES,
 } from "@story-fm/domain";
 import type { GameToolSpec, ToolCallContext } from "@story-fm/llm";
 import { skillDescriptions } from "./skill-descriptions";
-import { toToolSchema } from "./tool-schema";
-import type { GmToolCall } from "./gm-types";
+import { inputError, toToolSchema } from "./tool-schema";
+import { recordCall, type GmToolCall, type SkillReturn } from "./gm-types";
 
 /**
- * 인자의 갈래 — **같은 종류는 같은 검증을 지난다** (prompts.md §5).
+ * 인자의 갈래 — **같은 종류는 같은 검증을 지난다** (prompts.md §2).
  *
  * 이름 자리는 감독이 부른 말이 그대로 실려 오고(agents.md §7), 금액은 한 벌의 상한을
  * 나눠 쓰며, 장부·피드에 영구히 남는 자유 문구는 전부 길이를 갖는다. 상한이 없던 자리는
@@ -103,6 +109,8 @@ const dateArg = DateString;
 const MONEY_MAX = 500_000_000;
 /** 주급의 상한 */
 const WAGE_MAX = 2_000_000;
+/** 표 한 장 값의 상한 — 이보다 비싸면 값이 아니라 오타다 (실제 폭은 코어가 자른다) */
+const TICKET_PRICE_MAX = 1_000;
 const money = (max: number) => z.number().int().min(0).max(max);
 /** 장부 한 줄에 남는 자유 문구 */
 const LEDGER_NOTE = 120;
@@ -184,14 +192,6 @@ const TRAINING_INPUT = z
   })
   .partial();
 
-/** 스키마를 못 지난 입력 — 모델이 무엇을 고쳐야 하는지까지 돌려준다 */
-function inputError(error: z.ZodError): { ok: false; message: string } {
-  return {
-    ok: false,
-    message: `입력 오류 — ${error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(" / ")}`,
-  };
-}
-
 /**
  * 지금까지 쓰인 본문 줄 수 — 스킬 칩이 설 자리.
  * ⚠️ 빈 줄은 세지 않는다 — 화면(`chat.tsx`)과 셈이 갈리면 칩이 한 줄씩 어긋난다.
@@ -200,15 +200,6 @@ function writtenLines(text: string): number {
   return text.split("\n").filter((line) => line.trim().length > 0).length;
 }
 
-/** 엔진 스킬이 돌려주는 것 — `SkillResult`와 같은 모양이되 도구 쪽에서 좁게 읽는다 */
-type SkillReturn = {
-  ok: boolean;
-  message: string;
-  brief?: SkillBrief;
-  payload?: unknown;
-  tone?: "good" | "bad";
-};
-
 /** 실모드 GM의 스킬 도구 바인딩 — 엔진 함수를 GameToolSpec으로 감싼다 */
 export function buildGmTools(
   state: GameState,
@@ -216,30 +207,13 @@ export function buildGmTools(
   options?: { deferNegotiationIds?: ReadonlySet<string> },
 ): GameToolSpec[] {
   const descriptions = skillDescriptions();
-  const record = (
-    name: string,
-    result: SkillReturn,
-    input?: unknown,
-    context?: ToolCallContext,
-  ) => {
-    // 구조화된 결과·톤은 있을 때만 싣는다 — 없으면 화면이 칩 + 요약으로 폴백한다
-    if (result.ok) {
-      calls.push({
-        name,
-        summary: result.message,
-        input,
-        // 항목 요약은 코어가 낸 그대로 실어 보낸다 — 여기서 문자열로 접으면 화면이 도로 쪼갠다
-        ...(result.brief === undefined ? {} : { brief: result.brief }),
-        ...(result.payload === undefined ? {} : { payload: result.payload }),
-        ...(result.tone === undefined ? {} : { tone: result.tone }),
-        // 이 스킬이 불린 자리 — 화면이 장면 중간에 칩을 세운다
-        ...(context ? { line: writtenLines(context.text) } : {}),
-      });
-    }
-    return result;
-  };
+  const record = (name: string, result: SkillReturn, input?: unknown, context?: ToolCallContext) =>
+    recordCall(calls, name, result, {
+      input,
+      ...(context ? { line: writtenLines(context.text) } : {}),
+    });
   /**
-   * **무직인 감독이 부를 수 있는 조작 도구는 하나뿐이다** (career.md §5.1).
+   * **무직인 감독이 부를 수 있는 조작 도구는 셋뿐이다** (career.md §5.1).
    *
    * 경질돼도 `userTeamId`는 옛 구단을 가리키므로(그 구단의 장부는 계속 돌아야
    * 한다) 막지 않으면 모델은 남의 구단의 라인업을 짜고 남의 선수를 팔 수 있다.
@@ -341,6 +315,16 @@ export function buildGmTools(
           .describe("집중 육성할 2군 유망주 — 지정 전체를 다시 적는다. 생략하면 해제"),
       }),
       (input) => setDevelopmentFocus(state, input),
+    ),
+    wrap(
+      "set_reserve_training",
+      descriptions.set_reserve_training,
+      z.object({
+        policy: z
+          .enum(RESERVE_TRAINING_POLICIES)
+          .describe("겨냥할 갈래 — physical 신체 · technical 기술 · mental 정신 · balanced 해제"),
+      }),
+      (input) => setReserveTraining(state, input),
     ),
     wrap(
       "set_tactics",
@@ -570,6 +554,36 @@ export function buildGmTools(
           .describe(`무슨 돈인가 — 한 줄로 (${LEDGER_NOTE}자까지)`),
       }),
       (input) => adjustTransferBudget(state, input),
+    ),
+    wrap(
+      "request_board",
+      descriptions.request_board,
+      z.object({
+        kind: z.enum(BOARD_REQUEST_KINDS),
+        /**
+         * 단위는 종류가 안다 — 예산·주급은 원, 구장은 좌석이다. 상한은 오타를
+         * 막는 자리이고 실제 판정은 코어의 한도가 한다 (finance.md §9.6).
+         */
+        amount: z
+          .number()
+          .int()
+          .min(1)
+          .max(MONEY_MAX)
+          .describe("이적 예산·주급 한도는 금액(원), 구장은 좌석 수"),
+      }),
+      (input) => requestBoard(state, input),
+    ),
+    wrap(
+      "set_ticket_price",
+      descriptions.set_ticket_price,
+      z.object({
+        /**
+         * 표 한 장의 값이다 — 상한은 오타를 막는 자리이고, 실제 폭은 코어가 기준가
+         * 대비로 잘라 준다 (finance.md §5.2).
+         */
+        price: z.number().int().min(1).max(TICKET_PRICE_MAX).describe("표 한 장의 값 (£)"),
+      }),
+      (input) => setTicketPrice(state, input),
     ),
 
     // ── 조회 (읽기 전용) — 컨텍스트에 없는 사실은 전부 여기로 ──
@@ -849,13 +863,27 @@ export function buildGmTools(
           ),
         note: z.string().min(1).max(200).optional(),
       }),
-      (input) =>
-        options?.deferNegotiationIds?.has(input.negotiationId)
-          ? {
-              ok: false,
-              message: "방금 도착한 오퍼는 감독에게 조건을 먼저 보고하고 다음 지시를 기다리세요",
-            }
-          : answerOffer(state, input),
+      (input) => {
+        if (options?.deferNegotiationIds?.has(input.negotiationId)) {
+          return {
+            ok: false,
+            message: "방금 도착한 오퍼는 감독에게 조건을 먼저 보고하고 다음 지시를 기다리세요",
+          };
+        }
+        /**
+         * **우리 오퍼에 대한 답은 감독이 판정하지 않는다** (agents.md §4-1).
+         * 그 자리는 장면보다 먼저 교섭 상대가 끝내 두므로 여기 남을 일이 없지만,
+         * 남는다면 그것은 그 호출이 협상을 건너뛰었다는 뜻이다 — GM이 대신 판정하면
+         * 갈라 둔 자리가 조용히 되돌아온다.
+         */
+        if (arrivedResponses(state).some((n) => n.id === input.negotiationId)) {
+          return {
+            ok: false,
+            message: "우리 오퍼에 대한 상대의 답은 이미 나왔습니다 — 감독이 판정할 자리가 아닙니다",
+          };
+        }
+        return answerOffer(state, input);
+      },
     ),
     wrap(
       "accept_deal",
@@ -912,6 +940,12 @@ export function buildGmTools(
     ),
     wrap("recall_loan", descriptions.recall_loan, z.object({ playerId: playerRef }), (input) =>
       recallLoan(state, input),
+    ),
+    wrap(
+      "exercise_buyback",
+      descriptions.exercise_buyback,
+      z.object({ playerId: playerRef }),
+      (input) => exerciseBuyBack(state, input),
     ),
 
     wrap(

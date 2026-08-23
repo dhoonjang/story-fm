@@ -13,8 +13,9 @@ import {
   type GameState,
 } from "@story-fm/engine";
 import { buildGmHistory } from "@story-fm/agents";
-// 최소 캐시 프리픽스 — 눈금의 주인은 계측이다. 여기 숫자를 다시 적으면 둘이 갈린다
-import { MIN_CACHEABLE_INPUT } from "@story-fm/llm";
+// 최소 캐시 프리픽스 — 눈금의 주인은 설정이다. 여기 숫자를 다시 적으면 둘이 갈린다.
+// 잔량을 다시 읽는 것은 `gm`이므로 문턱도 그 자리의 제공자에게 묻는다 (models.md §4)
+import { agentMinCacheableInput } from "@story-fm/llm";
 import { HISTORY_WINDOW } from "../../engine/harness/catalog";
 import { outOfBand, reportOf, type Readings } from "../../engine/harness/harness";
 
@@ -165,7 +166,8 @@ describe("평시 이력의 창", () => {
       "압축 뒤 이력 글자": keptChars,
       "창이 미끄러진 턴 비율": slid / TURNS,
       "렌더 배율": ratios.reduce((a, b) => a + b, 0) / Math.max(1, ratios.length),
-      "잔량의 최소 캐시 프리픽스 배수": HISTORY_CHAR_KEEP / CHARS_PER_TOKEN / MIN_CACHEABLE_INPUT,
+      "잔량의 최소 캐시 프리픽스 배수":
+        HISTORY_CHAR_KEEP / CHARS_PER_TOKEN / agentMinCacheableInput("gm"),
     };
 
     console.log(

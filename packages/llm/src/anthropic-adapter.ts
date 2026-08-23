@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { AnthropicAgentConfig } from "./config";
+import { resolveApiKey, type AnthropicAgentConfig, type ThinkingLevel } from "./config";
 import {
   isStoredLlmHistory,
   isTextHistoryMessage,
@@ -12,6 +12,13 @@ import {
   type TurnUsage,
   UNRUN_CALL,
 } from "./game-llm";
+import {
+  blockedTurnError,
+  isAbortError,
+  kindOfStatus,
+  withErrorKind,
+  type LlmErrorKind,
+} from "./llm-error";
 
 /** 한 턴 안에서 tool call 왕복 허용 횟수 — 조회 + 실행이 같이 도므로 여유를 둔다 */
 const MAX_TOOL_ITERATIONS = 8;
@@ -20,19 +27,37 @@ const MAX_TOOL_ITERATIONS = 8;
 const MAX_BREAKPOINTS = 4;
 
 /**
- * role:"system" 중간 메시지를 거부한 모델 — 한 번 400을 맞으면 이후 폴백으로 고정한다.
- * 지원 여부가 모델마다 달라서, 설정이 모델을 갈아탈 때를 대비한 안전장치다.
+ * 설정의 사고 눈금(models.md §1-2)을 Anthropic의 effort로 옮긴다 — **모델을 가정하는
+ * 자리는 이 표 하나뿐이다.**
+ *
+ * ⚠️ 끄는 값은 없다. 사고를 끌 수 있는지가 모델마다 갈려서(현행 레퍼런스 기준 Fable 5는
+ * `thinking: { type: "disabled" }`가 400, Opus 5는 그 설정에서 도구 호출을 `tool_use`
+ * 블록 대신 보이는 본문으로 흘린다) 끄는 쪽을 코드가 고르면 설정이 모델을 못 바꾼다.
+ * 얕게는 effort로 내린다 — Anthropic의 눈금이 `low`에서 시작해 `minimal`도 거기로 간다.
  */
-const midSystemUnsupported = new Set<string>();
+const EFFORT: Record<ThinkingLevel, "low" | "medium" | "high"> = {
+  minimal: "low",
+  low: "low",
+  medium: "medium",
+  high: "high",
+};
 
 const CACHE: Anthropic.CacheControlEphemeral = { type: "ephemeral" };
 
 /**
  * SDK 클라이언트는 프로세스에 하나다 — 에이전트마다 새로 만들면 연결 풀과 재시도
- * 설정이 호출 수만큼 따로 서고, 그 이득은 아무 데도 없다. 인증은 어느 쪽이든
- * 환경(API 키/프로필)에서 해석한다.
+ * 설정이 호출 수만큼 따로 서고, 그 이득은 아무 데도 없다.
+ *
+ * 재시도 횟수는 설정 파일에 값이 하나뿐이라(models.md §1-1) 누가 먼저 세우든 같은
+ * 값이 실린다.
  */
 let sharedClient: Anthropic | undefined;
+
+function newSharedClient(maxRetries: number): Anthropic {
+  // 키를 명시로 싣되, 없으면 SDK가 스스로 환경(프로필 포함)에서 찾게 둔다
+  const apiKey = resolveApiKey("anthropic");
+  return new Anthropic({ maxRetries, ...(apiKey ? { apiKey } : {}) });
+}
 
 /** Anthropic의 종료 사유를 중립 계약으로 옮긴다 (models.md §3-1) */
 function toStopReason(reason: Anthropic.StopReason | null): StopReason | null {
@@ -163,15 +188,33 @@ function addUsage(total: TurnUsage, raw: Anthropic.Usage): TurnUsage {
 }
 
 /**
- * role:"system" 중간 메시지를 거부한 400인가.
- * 관측된 두 형태를 모두 잡는다 —
- *   "messages.0: use the top-level 'system' parameter"
- *   "role 'system' is not supported on this model"
+ * SDK 오류를 종류로 (models.md §1-1) — **읽는 것은 코드값뿐이다.**
+ *
+ * `APIError.type`은 열거된 오류 종류(`overloaded_error` 등)라 상태 코드가 겹치는
+ * 자리를 가른다. 상태만으로 갈리는 나머지는 셋이 공유하는 표가 맡는다.
  */
-function isMidSystemRejection(err: unknown): boolean {
-  if (!(err instanceof Anthropic.APIError) || err.status !== 400) return false;
-  const message = err.message ?? "";
-  return /system/i.test(message) && /(role|messages\.\d+|not supported)/i.test(message);
+function classifyAnthropic(error: unknown): LlmErrorKind {
+  // 신호로 끊긴 호출 — 신호를 거는 곳은 시한 하나뿐이다 (⚠️ SDK 오류는 `name`을
+  // 세우지 않아 이름으로는 못 가른다)
+  if (error instanceof Anthropic.APIUserAbortError) return "timeout";
+  if (error instanceof Anthropic.APIConnectionTimeoutError) return "timeout";
+  if (isAbortError(error)) return "timeout";
+  if (error instanceof Anthropic.APIError) {
+    switch (error.type) {
+      case "overloaded_error":
+        return "overloaded";
+      case "rate_limit_error":
+        return "rate_limit";
+      case "authentication_error":
+      case "permission_error":
+        return "auth";
+      case "timeout_error":
+        return "timeout";
+      default:
+        return kindOfStatus(error.status);
+    }
+  }
+  return "unknown";
 }
 
 /**
@@ -180,7 +223,7 @@ function isMidSystemRejection(err: unknown): boolean {
  *
  * 캐시 배치 (실측 기준: 도구+시스템 프리픽스만 5천 토큰 규모):
  *   tools → system 블록들(각 브레이크포인트) → 이력(마지막에 증분 브레이크포인트)
- *   → 이번 턴 유저 발화 → 상태 스냅샷(role:"system")
+ *   → 이번 턴 유저 발화 → 상태 스냅샷(`operator_channel`이 참일 때 role:"system")
  * 앞의 세 구간은 캐시 read(0.1×), 뒤 두 구간만 정가로 읽힌다.
  *
  * 다른 제공자 어댑터도 GameLLM 계약(출력 문법·tool call·Zod 검증)은
@@ -194,11 +237,17 @@ export class AnthropicGameLLM implements GameLLM {
     private readonly config: AnthropicAgentConfig,
     client?: Anthropic,
   ) {
-    this.client = client ?? (sharedClient ??= new Anthropic());
+    this.client = client ?? (sharedClient ??= newSharedClient(config.maxRetries));
   }
 
-  async runTurn(req: TurnRequest): Promise<TurnResult> {
+  /** 이 문 하나를 지나 나가는 실패에는 모두 종류가 실린다 (models.md §1-1) */
+  runTurn(req: TurnRequest): Promise<TurnResult> {
+    return withErrorKind(classifyAnthropic, () => this.turn(req));
+  }
+
+  private async turn(req: TurnRequest): Promise<TurnResult> {
     const tools = req.tools ?? [];
+    const effort = this.config.thinkingLevel && EFFORT[this.config.thinkingLevel];
     const toolDefs: Anthropic.Tool[] = tools.map((t) => ({
       name: t.name,
       description: t.description,
@@ -218,16 +267,24 @@ export class AnthropicGameLLM implements GameLLM {
     }));
 
     const baseHistory = normalizeHistory(anthropicHistory(req.history, this.config));
-    /** 상태 스냅샷을 오퍼레이터 채널로 넣을지 (미지원 모델은 유저 메시지에 접어 넣는다) */
-    let useSystemNote = req.stateNote !== undefined && !midSystemUnsupported.has(this.config.model);
-    const buildMessages = (withNote: boolean): Anthropic.MessageParam[] => {
-      const user = withNote || !req.stateNote ? req.user : `${req.stateNote}\n\n${req.user}`;
-      const msgs: Anthropic.MessageParam[] = [...baseHistory, { role: "user", content: user }];
-      if (withNote && req.stateNote) msgs.push({ role: "system", content: req.stateNote });
-      return msgs;
-    };
-
-    let messages = buildMessages(useSystemNote);
+    /**
+     * 상태 스냅샷을 오퍼레이터 채널(`role:"system"`)로 넣을지 — **설정이 정한다**
+     * (models.md §3-3). 그 롤을 받는 모델인지 400을 맞아 가며 알아내지 않는다.
+     * 거짓이면 감독 발화 앞에 접어 넣고, 저장 이력에서는 어느 쪽이든 걷어낸다.
+     */
+    const useSystemNote = req.stateNote !== undefined && this.config.operatorChannel;
+    const messages: Anthropic.MessageParam[] = [
+      ...baseHistory,
+      {
+        role: "user",
+        content: useSystemNote || !req.stateNote ? req.user : `${req.stateNote}\n\n${req.user}`,
+      },
+      // 오퍼레이터 메시지는 유저 턴 **뒤** 마지막 자리다 — 앞에 오면 요청이 거부되고,
+      // 매 턴 바뀌는 것이 뒤에 서야 캐시 프리픽스가 산다 (models.md §3-3)
+      ...(useSystemNote && req.stateNote
+        ? [{ role: "system" as const, content: req.stateNote }]
+        : []),
+    ];
     const usage: TurnUsage = {
       inputTokens: 0,
       outputTokens: 0,
@@ -261,10 +318,9 @@ export class AnthropicGameLLM implements GameLLM {
       const params: Anthropic.MessageCreateParamsNonStreaming = {
         model: this.config.model,
         max_tokens: req.maxTokens ?? this.config.maxTokens,
-        // 사고(thinking)는 끈다 — 출력 상한을 본문이 온전히 쓰고 지연도 줄어든다.
-        // 대신 모델이 추론을 **보이는 응답에 흘릴 수** 있어
-        // 시스템 프롬프트가 "최종 답만" 규약을 함께 건다 (GM_SYSTEM).
-        thinking: { type: "disabled" },
+        // 사고는 **설정이 적었을 때만** 건다 — 적지 않으면 두 파라미터가 다 빠져
+        // 모델의 기본 사고가 그대로 돈다 (models.md §1-2)
+        ...(effort && { thinking: { type: "adaptive" as const }, output_config: { effort } }),
         system,
         ...(toolDefs.length > 0 ? { tools: toolDefs } : {}),
         ...(toolChoice ? { tool_choice: toolChoice } : {}),
@@ -277,29 +333,18 @@ export class AnthropicGameLLM implements GameLLM {
        * `calculateNonstreamingTimeout`). 설정 상한이 64,000이라 화면에 흘릴
        * 곳이 없는 호출(온보딩·결산)이 전부 그 자리에서 실패했다.
        * onText는 델타를 받을지만 가른다 — 최종 메시지는 어느 쪽이든 같다.
+       *
+       * 시한은 요청 옵션으로 간다 — 값은 요청 하나의 상한이고, 한 턴 전체는
+       * `withDeadline`이 마감한다. 신호를 안 넘기면 시한이 지나도 소켓이 산다.
+       * 재시도는 클라이언트의 `maxRetries`가 요청 하나 안에서 돈다 (models.md §1-1).
        */
-      let response: Anthropic.Message;
-      try {
-        // 시한은 요청 옵션으로 간다 — 값은 요청 하나의 상한이고, 한 턴 전체는
-        // `withDeadline`이 마감한다. 신호를 안 넘기면 시한이 지나도 소켓이 산다.
-        const stream = this.client.messages.stream(params, {
-          timeout: this.config.timeoutMs,
-          ...(req.signal ? { signal: req.signal } : {}),
-        });
-        const onText = req.onText;
-        if (onText) stream.on("text", (delta) => onText(delta));
-        response = await stream.finalMessage();
-      } catch (err) {
-        // 중간 시스템 메시지 미지원 모델 — 폴백으로 전환해 같은 반복을 재시도
-        if (iter === 0 && useSystemNote && isMidSystemRejection(err)) {
-          midSystemUnsupported.add(this.config.model);
-          useSystemNote = false;
-          messages = buildMessages(false);
-          iter--;
-          continue;
-        }
-        throw err;
-      }
+      const stream = this.client.messages.stream(params, {
+        timeout: this.config.timeoutMs,
+        ...(req.signal ? { signal: req.signal } : {}),
+      });
+      const onText = req.onText;
+      if (onText) stream.on("text", (delta) => onText(delta));
+      const response: Anthropic.Message = await stream.finalMessage();
 
       // 왕복 하나가 끝나는 자리에서 그 몫을 보고한다 — 다음 왕복에서 시한에
       // 걸려도 여기까지 쓴 토큰은 장부에 남는다 (models.md §4).
@@ -364,8 +409,12 @@ export class AnthropicGameLLM implements GameLLM {
 
     // 상태 스냅샷은 이력에 남기지 않는다 — 매 턴 새로 주입되므로 누적되면
     // 지난 날짜·지난 스코어가 이력에 쌓여 모델을 혼란시킨다.
+    // 막혀서 아무것도 못 받은 턴은 실패다 — 나온 것이 있으면 그대로 돌려준다
+    const blocked = blockedTurnError(stopReason, text, toolCallCount);
+    if (blocked) throw blocked;
+
     const history = messages.filter((m) => m.role !== "system");
-    // role:system 미지원 폴백에서도 휘발 상태를 세이브에 남기지 않는다.
+    // 접어 넣은 쪽에서도 휘발 상태를 세이브에 남기지 않는다 (models.md §3-3).
     const currentUser = history[baseHistory.length];
     if (!useSystemNote && currentUser?.role === "user" && typeof currentUser.content === "string") {
       history[baseHistory.length] = { role: "user", content: req.user };

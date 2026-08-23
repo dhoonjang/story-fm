@@ -28,9 +28,9 @@ import {
   isTopFlight,
   leagueOfTeam,
   migrateDomesticPrizeKeys,
+  payDomesticCupPrizes,
   playersOf,
   teamName,
-  reviewDomesticCups,
   reviewSeason,
   transitionSeason,
   userStillIn,
@@ -258,6 +258,19 @@ describe("한 시즌을 돌리면 컵이 끝까지 진행된다", () => {
     expectNoDoubleBooking(state);
   });
 
+  /**
+   * 컵 자리 탐색은 못 찾을수록 창을 넓혀 마지막엔 150일까지 뻗는다. 시즌 밖에 앉은
+   * 경기는 다음 시즌 전환이 `state.matches`를 갈아 끼우며 지우거나, 그 전에 날짜가
+   * 오면 새 시즌 달력에 선다 — 상한은 다음 프리시즌 전날이다 (season.md §3).
+   */
+  it("경기는 시즌 밖으로 밀리지 않는다 — 상한은 6월 30일", () => {
+    const lastDay = `${Number(state.calendar.preseasonStart.slice(0, 4)) + 1}-06-30`;
+    for (const m of state.matches) {
+      if (m.season !== state.season) continue;
+      expect(m.date <= lastDay, `${m.id} ${m.date}`).toBe(true);
+    }
+  });
+
   it("우리 팀 컵 경기는 감독의 달력(SCHEDULE_ENTRY)에 오른다", () => {
     const ourCupIds = new Set(domesticCupsOf(state.userTeamId).map((c) => c.id));
     const ourCupMatches = state.matches.filter(
@@ -335,7 +348,7 @@ describe("추첨 전에도 라운드 날짜는 달력에 있다 — 단, 확보�
       // 제목이 다 말하므로 부연은 붙이지 않는다
       expect(r.detail).toBeNull();
     }
-    expect(rounds.map((r) => r.title).sort()).toEqual(["FA컵 3라운드 예정", "리그컵 3라운드 예정"]);
+    expect(rounds.map((r) => r.title).sort()).toEqual(["FA컵 4라운드 예정", "리그컵 3라운드 예정"]);
   });
 
   it("대진이 확정되면 예정 자리는 사라지고, 이기기 전엔 다음 라운드가 열리지 않는다", () => {
@@ -446,20 +459,24 @@ describe("실제 대회 규정을 따른다", () => {
  * **1부는 1라운드에 나오지 않는다.**
  *
  * 실제 컵은 하부리그가 먼저 몇 달을 싸우고 1부는 한참 뒤에 들어온다. 우리는
- * 그 앞부분을 모델링하지 않으므로 **1부가 들어오는 라운드에서 대회를 시작한다** —
- * 아스날의 리그컵 첫 경기는 9월 말 3라운드이지 8월 1라운드가 아니다.
+ * 그 앞부분을 모델링하지 않으므로 **1부가 들어오는 라운드의 날짜에서 대회를
+ * 시작한다** — 아스날의 리그컵 첫 경기는 9월 말이지 8월이 아니다.
+ *
+ * **이름은 32클럽이 실제로 서는 라운드의 것**이다 (competition.md §3.1). 진입
+ * 라운드가 64팀인 FA컵·포칼만 한 칸 뒤의 이름이라, FA컵은 4라운드·포칼은
+ * 2라운드로 연다 — 진입 라운드 이름을 쓰면 FA컵에 5라운드가, 포칼에 16강이 없다.
  */
 describe("컵은 1부가 들어오는 라운드에서 시작한다", () => {
   const ENTRY = {
-    facup: { label: "3라운드", month: 1 },
+    facup: { label: "4라운드", month: 1 },
     eflcup: { label: "3라운드", month: 9 },
     copadelrey: { label: "32강", month: 1 },
     coppaitalia: { label: "1라운드", month: 8 },
-    dfbpokal: { label: "1라운드", month: 8 },
+    dfbpokal: { label: "2라운드", month: 8 },
     coupedefrance: { label: "32강", month: 1 },
   } as const;
 
-  it("첫 라운드 이름이 실제 진입 라운드다 — 리그컵·FA컵은 3라운드", () => {
+  it("첫 라운드 이름은 32클럽이 서는 라운드다 — FA컵 4라운드·포칼 2라운드", () => {
     for (const cup of domesticCupCatalog()) {
       const expected = ENTRY[cup.id as keyof typeof ENTRY];
       expect(competitionStageLabel(cup.id, "r32"), cup.id).toBe(expected.label);
@@ -852,7 +869,7 @@ describe("상금 멱등 키 — 표시 라벨이 아니라 안정 키다", () =>
 
   it("옛 라벨 키를 옮긴다 — 라벨을 고쳐도 같은 시즌 상금이 두 번 나가지 않는다", () => {
     const save = structuredClone(played);
-    reviewDomesticCups(save); // 우승·준우승 상금
+    payDomesticCupPrizes(save, []); // 우승·준우승 상금
 
     let downgraded = 0;
     for (const finance of save.finances) {
@@ -870,7 +887,7 @@ describe("상금 멱등 키 — 표시 라벨이 아니라 안정 키다", () =>
     const balances = save.finances.map((f) => f.balance);
     migrateDomesticPrizeKeys(save);
     migrateDomesticPrizeKeys(save); // 멱등
-    reviewDomesticCups(save);
+    payDomesticCupPrizes(save, []);
 
     expect(save.finances.map((f) => f.balance)).toEqual(balances);
     const legacyKeys = new Set(legacy.values());

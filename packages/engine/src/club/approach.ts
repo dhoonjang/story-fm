@@ -1,10 +1,10 @@
 import type {
   Approach,
   ApproachChannel,
+  ApproachContext,
   ApproachPressure,
   ApproachTopic,
   GamePlayer,
-  Persona,
   PlayerIssue,
   PressFact,
   PressStance,
@@ -15,6 +15,8 @@ import {
   APPROACH_CHANNEL_LABEL,
   APPROACH_LEAK_STEP,
   APPROACH_TOP_STEP,
+  approachContextText,
+  pressFactText,
 } from "@story-fm/domain";
 import type { GameState } from "../core/state";
 import { playerById, pushNarrative, seasonStatOf, squadLevelOf, userPlayers } from "../core/state";
@@ -23,11 +25,12 @@ import { boardExpectation, computeStandings } from "../competition/season";
 import { formLabel } from "../squad/form";
 import { issueReasonText } from "../squad/mood";
 import { recentOutcomes } from "../squad/slump";
-import { makeRng, pick } from "../core/rng";
-import { ownerOf, worldFigures } from "../world/persona";
+import { agentForPlayer, ownerOf } from "../world/persona";
+import { USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
 import { boardDemandFact } from "./board-demand";
 import { applyStanceOutcome, pendingPress, signed, stanceRow, STANCE_KO } from "./press";
 import type { SkillResult } from "../skills";
+import { deltaItems } from "../skills/brief";
 
 /**
  * 다가옴 — **세계가 회견 밖에서 먼저 말을 건다** (→ docs/data/people.md §8).
@@ -81,7 +84,7 @@ const STARTED_WINDOW = 7;
 const IGNORE_CARRY = 0.75;
 
 /** 열린 자리가 답을 기다리는 날 — 이 뒤엔 감독이 지나친 것으로 닫힌다 */
-export const APPROACH_PATIENCE_DAYS = 3;
+const APPROACH_PATIENCE_DAYS = 3;
 
 /** 같은 화자가 다시 오기까지 — 어제 감독실에 왔던 사람이 오늘 또 오지 않는다 */
 const SPEAKER_COOLDOWN_DAYS = 7;
@@ -91,7 +94,7 @@ const SPEAKER_COOLDOWN_DAYS = 7;
  * 회견(`PRESS_BAND` 4)보다 좁은 이유는 자리가 좁기 때문이다 — 마이크 앞에서 한 말이
  * 복도에서 한 말보다 멀리 간다.
  */
-export const APPROACH_BAND = 3;
+const APPROACH_BAND = 3;
 
 /**
  * 폭이 더는 넓어지지 않는 계단 — **위 계단이라고 사석의 말이 회견보다 멀리 가지는
@@ -260,7 +263,10 @@ interface Scene {
   channel: ApproachChannel;
   speakerId: string;
   about: string | null;
-  context: string;
+  /** 한 줄 배경의 **카드** — 문장은 `approachContextText`가 만든다 */
+  contextCard: ApproachContext;
+  /** 폼 라벨처럼 코어만 아는 이름 — 카드에 적지 않고 문장을 만들 때만 쓴다 */
+  formLabel?: string;
   facts: PressFact[];
 }
 
@@ -278,13 +284,13 @@ function playerFacts(
   sharp: boolean,
 ): PressFact[] {
   const days = issueDays(state, issue);
-  const head: PressFact = (() => {
+  const head: PressFact = ((): PressFact => {
     switch (topic) {
       case "minutes": {
         const apps = seasonStatOf(state, player.id)?.apps ?? 0;
         return {
           kind: "minutes",
-          text: `출전 기회 불만 ${days}일째 · 시즌 출전 ${apps}경기`,
+          data: { values: { days, apps } },
           about: player.id,
           sharp,
         };
@@ -294,7 +300,7 @@ function playerFacts(
         const down = since ? diffDays(since, state.date) : days;
         return {
           kind: "demoted",
-          text: `2군 ${down}일째 · 불만 ${days}일째`,
+          data: { values: { days: down, issueDays: days } },
           about: player.id,
           sharp,
         };
@@ -302,7 +308,10 @@ function playerFacts(
       default:
         return {
           kind: "unhappy",
-          text: `${issueReasonText(issue) ?? "사유 불명"} 불만 ${days}일째`,
+          data: {
+            values: { days },
+            tags: issue.reason ? ["grievance", issue.reason] : ["grievance"],
+          },
           about: player.id,
           sharp,
         };
@@ -310,20 +319,13 @@ function playerFacts(
   })();
   return [
     head,
-    { kind: "slump", text: `폼 ${formLabel(player.state.form)}`, about: player.id, sharp: false },
+    {
+      kind: "slump",
+      data: { tags: [formLabel(player.state.form)] },
+      about: player.id,
+      sharp: false,
+    },
   ];
-}
-
-/**
- * 이적 요청을 들고 올 에이전트 — **(시드, 선수)에서 결정적으로 뽑는다.** 같은 세이브의
- * 같은 선수는 언제나 같은 사람이 대리한다 (people.md §1 일관성).
- *
- * 명부에 에이전트가 한 사람도 없으면 `null`이다 — 코어는 화자를 지어내지 않는다.
- */
-function agentFor(state: GameState, playerId: string): Persona | null {
-  const agents = worldFigures(state).filter((f) => f.role === "agent");
-  if (agents.length === 0) return null;
-  return pick(makeRng(state.seed, `agent-of:${playerId}`), agents);
 }
 
 /** 그 압력 줄이 지금 세울 수 있는 자리 — 사람이 없거나 사실이 사라졌으면 `null` */
@@ -342,11 +344,14 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
      * 않는다. 자리를 여는 사실은 이적 요청 그 자체라 맨 앞에 sharp로 선다.
      */
     if (step === topStepOf(row.topic)) {
-      const agent = agentFor(state, player.id);
-      const reason = issueReasonText(issue) ?? "사유 불명";
+      const agent = agentForPlayer(state, player.id);
       const request: PressFact = {
         kind: "transfer-request",
-        text: `${player.name} 이적 요청 — ${reason} 불만 ${issueDays(state, issue)}일째`,
+        data: {
+          name: player.name,
+          values: { days: issueDays(state, issue) },
+          ...(issue.reason ? { tags: [issue.reason] } : {}),
+        },
         about: player.id,
         sharp: true,
       };
@@ -356,7 +361,10 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
         channel: agent ? "agent" : "player",
         speakerId: agent?.characterId ?? player.name,
         about: player.id,
-        context: `${player.name} 이적 요청 · ${reason}`,
+        contextCard: {
+          code: "transfer-request",
+          ...(issue.reason ? { reason: issue.reason } : {}),
+        },
         facts: [request, ...playerFacts(state, player, issue, row.topic, sharp)],
       };
     }
@@ -364,7 +372,11 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
       channel,
       speakerId: player.name,
       about: player.id,
-      context: `${player.name} · ${issueReasonText(issue) ?? "불만"}`,
+      contextCard: {
+        code: "grievance",
+        ...(issue.reason ? { reason: issue.reason } : {}),
+        value: issueDays(state, issue),
+      },
       facts: playerFacts(state, player, issue, row.topic, sharp),
     };
   }
@@ -376,13 +388,13 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
     // 주장이 없으면 라커룸을 대신할 사람도 없다 — 코어가 화자를 지어내지 않는다
     if (!captain || form === null) return null;
     const facts: PressFact[] = [
-      { kind: "morale", text: `1군 평균 폼 ${formLabel(form)}`, about: null, sharp },
+      { kind: "morale", data: { tags: [formLabel(form)] }, about: null, sharp },
     ];
     const recent = recentOutcomes(state, state.userTeamId, WINLESS_WINDOW);
     if (recent.length > 0 && recent.every((r) => r !== "win")) {
       facts.push({
         kind: "winless",
-        text: `최근 ${recent.length}경기 무승 (${recent.map((r) => (r === "draw" ? "무" : "패")).join("")})`,
+        data: { values: { matches: recent.length }, tags: [...recent] },
         about: null,
         sharp: true,
       });
@@ -390,13 +402,19 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
     // 옛 세이브의 유령 방어 — 떠난 선수의 불만을 주장이 세지 않는다 (people.md §5)
     const unhappy = state.issues.filter((i) => squad.some((p) => p.id === i.gamePlayerId)).length;
     if (unhappy > 0) {
-      facts.push({ kind: "unhappy", text: `라커룸 불만 ${unhappy}건`, about: null, sharp: false });
+      facts.push({
+        kind: "unhappy",
+        data: { values: { count: unhappy }, tags: ["count"] },
+        about: null,
+        sharp: false,
+      });
     }
     return {
       channel,
       speakerId: captain.name,
       about: null,
-      context: `라커룸 · 1군 평균 폼 ${formLabel(form)}`,
+      contextCard: { code: "dressing-room-form", value: form },
+      formLabel: formLabel(form),
       facts,
     };
   }
@@ -407,13 +425,13 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
   const facts: PressFact[] = [
     {
       kind: "standing",
-      text: `리그 ${place.position}위 · ${place.played}경기`,
+      data: { values: { rank: place.position, played: place.played }, tags: ["place"] },
       about: null,
       sharp,
     },
     {
       kind: "standing",
-      text: `보드 기대 ${expectation.target}위 (${expectation.label})`,
+      data: { values: { rank: expectation.target }, tags: ["board-target", expectation.code] },
       about: null,
       sharp: false,
     },
@@ -422,7 +440,7 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
   if (warnings > 0) {
     facts.push({
       kind: "standing",
-      text: `보드 경고 ${warnings}/3`,
+      data: { values: { count: warnings, limit: USER_WARNINGS_BEFORE_SACK }, tags: ["warnings"] },
       about: null,
       sharp: true,
     });
@@ -437,7 +455,7 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
     channel: "owner",
     speakerId: ownerOf(state).characterId,
     about: null,
-    context: `리그 ${place.position}위 · 기대 ${expectation.target}위`,
+    contextCard: { code: "standing", value: place.position, limit: expectation.target },
     facts,
   };
 }
@@ -461,14 +479,34 @@ export function tickApproaches(state: GameState, digest: string[]): boolean {
   return gaveUp ? false : openApproach(state, digest);
 }
 
+/**
+ * 자리의 배경 한 줄 — **카드에서 만든다** (people.md §8).
+ *
+ * 이름과 폼 라벨은 코어만 아는 것이라 여기서 채워 넘긴다. 옛 세이브는 카드 없이
+ * 문장만 들고 있어 그때만 그 문장으로 떨어진다 — **보여 주는 자리의 폴백이다**.
+ */
+function contextTextOf(
+  state: GameState,
+  a: { about: string | null; contextCard?: ApproachContext; context?: string },
+): string {
+  if (!a.contextCard) return a.context ?? "";
+  const subject = a.about === null ? undefined : (playerById(state, a.about)?.name ?? undefined);
+  const form = a.contextCard.code === "dressing-room-form" ? firstTeamForm(state) : null;
+  return approachContextText(a.contextCard, {
+    ...(subject ? { subject } : {}),
+    ...(form === null ? {} : { form: formLabel(form) }),
+  });
+}
+
 /** 사흘 동안 답이 없으면 감독이 지나친 것이다 — 거절과 같은 값을 치른다 */
 function expireApproach(state: GameState, digest: string[]): boolean {
   const open = pendingApproach(state);
   if (!open || diffDays(open.date, state.date) < APPROACH_PATIENCE_DAYS) return false;
   const effect = closeApproach(state, open, null);
   open.status = "declined";
-  digest.push(`${open.context} — 감독이 답하지 않았다${effectSuffix(effect)}`);
-  pushNarrative(state, `${open.context} (응답 없음)`, open.step >= 3 ? 4 : 3);
+  const line = contextTextOf(state, open);
+  digest.push(`${line} — 감독이 답하지 않았다${effectSuffix(effect)}`);
+  pushNarrative(state, `${line} (응답 없음)`, open.step >= 3 ? 4 : 3);
   return true;
 }
 
@@ -609,17 +647,21 @@ function openApproach(state: GameState, digest: string[]): boolean {
       topic: row.topic,
       speakerId: scene.speakerId,
       about: scene.about,
-      context: scene.context,
+      contextCard: scene.contextCard,
       facts: scene.facts,
       step,
       status: "pending",
     };
     row.openedOn = state.date;
     state.approaches = [...opened, approach].slice(-KEPT_APPROACHES);
+    const sceneLine = approachContextText(scene.contextCard, {
+      ...(scene.about === null ? {} : { subject: playerById(state, scene.about)?.name ?? "" }),
+      ...(scene.formLabel === undefined ? {} : { form: scene.formLabel }),
+    });
     digest.push(
-      `${scene.speakerId}(${APPROACH_CHANNEL_LABEL[scene.channel]})이(가) 감독을 찾아왔다 — ${scene.context}`,
+      `${scene.speakerId}(${APPROACH_CHANNEL_LABEL[scene.channel]})이(가) 감독을 찾아왔다 — ${sceneLine}`,
     );
-    pushNarrative(state, `${scene.speakerId} 면담 요청 (${scene.context})`, step >= 3 ? 4 : 3);
+    pushNarrative(state, `${scene.speakerId} 면담 요청 (${sceneLine})`, step >= 3 ? 4 : 3);
     /**
      * **자리가 열리는 순간 요청이 선다.** 감독의 답은 압력만 되돌릴 뿐 요청을 지우지
      * 못한다 — 답이 원인을 지우지 않는 규칙 그대로다 (people.md §8).
@@ -732,7 +774,7 @@ export function respondToApproach(
   const label = stance === null ? "돌려보냄" : STANCE_KO[stance];
   pushNarrative(
     state,
-    `${approach.speakerId} 면담 (${approach.context} · ${label})`,
+    `${approach.speakerId} 면담 (${contextTextOf(state, approach)} · ${label})`,
     approach.step >= 3 ? 4 : 3,
   );
   const net = effect.board + effect.squad + effect.team + effect.target;
@@ -740,6 +782,15 @@ export function respondToApproach(
     ok: true,
     tone: net >= 0 ? ("good" as const) : ("bad" as const),
     message: `${approach.speakerId} 응대(${label})${effectSuffix(effect)}`,
+    brief: {
+      head: `${approach.speakerId} 응대(${label})`,
+      items: deltaItems([
+        ["보드", effect.board],
+        ["선수단", effect.squad],
+        effect.targetName ? [`${effect.targetName} 사기`, effect.target] : null,
+        ["팀 사기", effect.team],
+      ]),
+    },
   };
 }
 
@@ -754,10 +805,12 @@ export function describePendingApproach(state: GameState): string | null {
   if (!a) return null;
   const waited = diffDays(a.date, state.date);
   return [
-    `찾아온 사람 (${a.id}) — ${a.speakerId}(${APPROACH_CHANNEL_LABEL[a.channel]}) · ${a.context}` +
+    `찾아온 사람 (${a.id}) — ${a.speakerId}(${APPROACH_CHANNEL_LABEL[a.channel]}) · ${contextTextOf(state, a)}` +
       ` · 계단 ${a.step}/${APPROACH_TOP_STEP[a.channel]}${a.step >= 3 ? " · 큰 자리다" : ""}` +
       (waited > 0 ? ` · ${waited}일째 기다린다` : ""),
     `  그가 아는 사실 (이 밖은 말하지 못한다):`,
-    ...a.facts.map((f) => `  · ${f.text}${f.about ? ` [${f.about}]` : ""}${f.sharp ? " ⚡" : ""}`),
+    ...a.facts.map(
+      (f) => `  · ${pressFactText(f)}${f.about ? ` [${f.about}]` : ""}${f.sharp ? " ⚡" : ""}`,
+    ),
   ].join("\n");
 }

@@ -146,6 +146,12 @@ export function characterEntry(
  * 다시 그릴 때 같은 인물지를 여기서 되찾는다. 깊이는 **그때의 것**을 쓴다 — 지금
  * 눈금으로 다시 접으면 3주 전 이력이 오늘의 지식으로 소급해 자세해진다.
  *
+ * ⚠️ **기억은 붙이지 않는다.** 여기 붙는 것은 세이브당 불변인 것뿐이어야 한다 —
+ * 압축이 더하는 기억을(§9-1) 지금 값으로 붙이면 압축 한 번에 지난 턴들의 바이트가
+ * 함께 달라져, 요약 블록만 무효가 되면 될 것이 이력 전체로 번진다
+ * (→ ../../../../docs/llm/agents.md §5). 기억은 카드가 실리는 그 턴 층에만 서고
+ * (`selectCharacters`), 늘어난 기억은 재주입이 나른다.
+ *
  * 이름이 세계에서 사라졌으면(방출된 선수) `null`이다 — 그 턴은 카드 없이 그려진다.
  */
 export function characterEntryOf(
@@ -155,7 +161,7 @@ export function characterEntryOf(
 ): CharacterEntry | null {
   const persona = personaOf(state, characterId);
   if (!persona) return null;
-  return withRelations(state, characterEntry(persona, depth, memoriesOf(state, characterId)));
+  return withRelations(state, characterEntry(persona, depth));
 }
 
 /**
@@ -174,10 +180,9 @@ function withRelations(state: GameState, entry: CharacterEntry): CharacterEntry 
 /**
  * 그 인물의 기억 — 압축이 남긴 것들 (people.md §9-1).
  *
- * ⚠️ 이력을 다시 그릴 때도 **지금의** 기억이 붙는다. 그래서 압축이 도는 턴에는 이력의
- * 카드도 함께 달라지지만, 요약 블록이 이력 앞에 서므로(agents.md §5-1) 그 턴은 어차피
- * 그 뒤가 통째로 무효다 — 캐시로는 공짜이고, 대신 한 인물의 기억이 두 자리에서 갈리지
- * 않는다.
+ * **이번 턴에 세우는 카드만 읽는다.** 이력을 다시 그리는 `characterEntryOf`는 여기
+ * 오지 않는다 — 지난 턴의 카드에 지금의 기억을 붙이면 압축이 지난 턴들의 바이트를
+ * 함께 바꾼다 (agents.md §5).
  */
 function memoriesOf(state: GameState, characterId: string): CharacterMemory[] {
   return (state.characterMemories ?? []).filter((m) => m.characterId === characterId);
@@ -255,15 +260,21 @@ export function selectCharacters(
   const message = input.message ?? "";
   const history = historyWindow(state);
   const pointed = pointedIds(state, input.pointed);
-  const standing = deepestInjected(input.injected ?? []);
+  const standing = standingOf(input.injected ?? []);
 
   const picked: Array<{ rank: number; candidate: Candidate }> = [];
   for (const candidate of candidatesOf(state)) {
     const rank = rankOf(candidate.persona, message, history, pointed);
     if (rank === null) continue;
     const shown = standing.get(candidate.persona.characterId);
-    // 창 안에 이미 서 있으면 다시 싣지 않는다. 눈금이 올라 더 자세한 판이 된 경우만 예외다
-    if (shown !== undefined && !isDeeperThan(candidate.depthOf(), shown)) continue;
+    // 창 안에 이미 서 있으면 다시 싣지 않는다. 눈금이 올랐거나 기억이 늘었을 때만 예외다
+    if (
+      shown !== undefined &&
+      !isDeeperThan(candidate.depthOf(), shown.depth) &&
+      !hasNewMemories(state, candidate.persona.characterId, shown.memories)
+    ) {
+      continue;
+    }
     picked.push({ rank, candidate });
   }
   // 자리가 먼저, **같은 자리에서는 우리 사람이 먼저** — 상한이 셋이라 이 순서가 곧
@@ -414,16 +425,49 @@ function pointedIds(
   return ids;
 }
 
-/** 창 안에 서 있는 카드 중 **가장 자세한 판** — 재주입은 그것보다 깊어야 한다 */
-function deepestInjected(injected: readonly CharacterInjection[]): Map<string, CharacterDepth> {
-  const deepest = new Map<string, CharacterDepth>();
+/** 창 안에 서 있는 카드가 **이미 보여 준 것** — 재주입은 이보다 깊거나 많아야 한다 */
+interface StandingCard {
+  /** 가장 자세한 판 */
+  depth: CharacterDepth;
+  /** 그때 실린 기억 줄 수 — 이 자리가 생기기 전의 기록에는 없다 */
+  memories?: number;
+}
+
+function standingOf(injected: readonly CharacterInjection[]): Map<string, StandingCard> {
+  const standing = new Map<string, StandingCard>();
   for (const record of injected) {
-    const shown = deepest.get(record.characterId);
-    if (shown === undefined || isDeeperThan(record.depth, shown)) {
-      deepest.set(record.characterId, record.depth);
-    }
+    const shown = standing.get(record.characterId);
+    const depth =
+      shown === undefined || isDeeperThan(record.depth, shown.depth) ? record.depth : shown.depth;
+    // 가장 많이 실린 판이 기준이다 — 재주입이 남긴 기록이 앞선 기록보다 뒤에 온다
+    const memories = maxOf(shown?.memories, record.memories);
+    standing.set(record.characterId, memories === undefined ? { depth } : { depth, memories });
   }
-  return deepest;
+  return standing;
+}
+
+/** 둘 다 없으면 없는 것 — 없는 자리는 0이 아니다 (아래 `hasNewMemories`) */
+function maxOf(a: number | undefined, b: number | undefined): number | undefined {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  return Math.max(a, b);
+}
+
+/**
+ * 창 안의 카드가 모르는 기억이 생겼는가 — 재주입의 세 번째 조건 (people.md §6).
+ *
+ * 기억은 카드가 실리는 그 턴 층에만 서므로(`characterEntryOf`), 카드가 창 안에 서
+ * 있는 동안 압축이 적은 기억은 다시 세우지 않으면 모델에 닿지 않는다.
+ *
+ * ⚠️ **기억 수가 없는 기록은 없는 것으로 둔다.** 0으로 읽으면 이 자리가 생기기 전의
+ * 세이브에서 카드가 한꺼번에 다시 선다.
+ *
+ * 보관 상한(`CHARACTER_MEMORY_KEEP`)에 닿은 인물은 새 기억이 와도 수가 늘지 않아
+ * 여기 걸리지 않는다 — 그 갱신은 카드가 창 밖으로 밀려나 다시 서는 자리(재주입의
+ * 첫 조건)가 받는다. 그러자고 텍스트를 세이브에 남기지는 않는다 (people.md §6).
+ */
+function hasNewMemories(state: GameState, characterId: string, shown: number | undefined): boolean {
+  return shown !== undefined && memoriesOf(state, characterId).length > shown;
 }
 
 /** 같은 순위 안의 순서 — 로케일에 기대지 않는 코드포인트 비교여야 어디서나 같다 */

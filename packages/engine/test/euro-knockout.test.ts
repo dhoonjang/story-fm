@@ -27,6 +27,7 @@ import {
   payLeaguePhasePrizes,
   migrateEuroPrizeKeys,
   euroCompetitionOf,
+  isEuroCup,
   entrantsOf,
   simSquadOf,
   playerById,
@@ -99,7 +100,7 @@ describe("녹아웃 정의", () => {
   it("단계 순서는 플레이오프 → 본선 → 결승이고 대진 수와 맞물린다", () => {
     expect(knockoutStages(cupCatalogById("ucl")!)).toEqual(["playoff", "r16", "qf", "sf", "final"]);
     expect(knockoutStages(cupCatalogById("uel")!)).toEqual(["playoff", "qf", "sf", "final"]);
-    expect(knockoutStages(cupCatalogById("uecl")!)).toEqual(["playoff", "sf", "final"]);
+    expect(knockoutStages(cupCatalogById("uecl")!)).toEqual(["playoff", "qf", "sf", "final"]);
   });
 
   it("녹아웃 경기일은 수요일이고 결승은 리그 최종전 뒤 토요일이다", () => {
@@ -427,8 +428,9 @@ describe("한 시즌 완주 (mock 경기)", () => {
     // (대항전 티켓을 지난 순위로 배정하려면 최종 순위를 따로 기록해야 한다)
     expect(state.matches.filter((m) => m.season === 1)).toHaveLength(0);
 
-    // 우리 팀이 우승했다면 트로피가, 아니면 최소한 리그 기록이 남는다
-    const cupTrophies = state.trophies.filter((t) => t.competition.startsWith("UEFA"));
+    // 우리 팀이 우승했다면 트로피가, 아니면 최소한 리그 기록이 남는다.
+    // 트로피는 **대회 id**로 남는다 — 이름을 고쳐도 같은 대회로 선다 (career.md §6)
+    const cupTrophies = state.trophies.filter((t) => isEuroCup(t.competitionId ?? null));
     const wonUcl = digest.some((d) => d.includes("🏆 UEFA 챔피언스리그 우승"));
     expect(cupTrophies.length).toBe(wonUcl ? 1 : 0);
     expect(state.seasonRecords).toHaveLength(1);

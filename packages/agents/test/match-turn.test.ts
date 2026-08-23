@@ -17,13 +17,15 @@ import {
   buildLedgerNote,
   buildSegmentMessage,
   GmTurnFailure,
+  MATCH_ADVANCED,
+  MatchIntentSchema,
   runGmTurn,
   stampMatchScene,
   stampMatchStream,
   type GmToolCall,
   type MatchIntent,
 } from "@story-fm/agents";
-import type { GameToolSpec } from "@story-fm/llm";
+import { LlmTimeoutError, type GameToolSpec } from "@story-fm/llm";
 import { ModelOutputError } from "../src/retry";
 
 /** 실모드 경기 턴이 부르는 모델 — 해석도 중계도 이 하나를 거친다 */
@@ -245,12 +247,12 @@ describe("경기 턴의 실패 — 어느 걸음이 흔들렸나", () => {
     runTurn.mockRejectedValueOnce(new ModelOutputError("중계가 출력 문법을 어겼습니다"));
     runTurn.mockResolvedValueOnce(casted("[12']\n@중계: 다시 이어갑니다."));
 
-    const turn = await runGmTurn(state, "계속", undefined, true);
+    const turn = await runGmTurn(state, "경기 진행", undefined, { kind: "advance_match" });
 
     expect(runTurn).toHaveBeenCalledTimes(2);
     expect(turn.text).toContain("다시 이어갑니다");
     // 구간은 해석 뒤 코어가 굴린 것 하나뿐 — 재시도가 판을 한 번 더 밀지 않는다
-    expect(turn.toolCalls.filter((c) => c.name === "advance_match")).toHaveLength(1);
+    expect(turn.toolCalls.filter((c) => c.name === MATCH_ADVANCED)).toHaveLength(1);
     expect(state.pendingMatch!.ledger.minute).toBeGreaterThan(0);
   });
 
@@ -262,12 +264,28 @@ describe("경기 턴의 실패 — 어느 걸음이 흔들렸나", () => {
   it("지시 해석이 실패하면 장면 대신 오류가 올라간다", async () => {
     const state = rolling();
     const minute = state.pendingMatch!.ledger.minute;
-    runTurn.mockRejectedValue(new Error("Connection error"));
+    // 도구를 부르지 않은 응답 — 두 번 불러도 의도가 비면 턴을 취소한다
+    runTurn.mockResolvedValue(casted("해석해 보겠습니다."));
 
-    await expect(runGmTurn(state, "압박 올려", undefined, false)).rejects.toBeInstanceOf(
-      GmTurnFailure,
-    );
-    // 해석에서 끊겼으므로 중계는 불리지 않았고, 판도 그대로다 — 연결 오류는 다시 부르지 않는다
+    await expect(runGmTurn(state, "압박 올려")).rejects.toBeInstanceOf(GmTurnFailure);
+    // 해석에서 끊겼으므로 중계는 불리지 않았고, 판도 그대로다
+    expect(runTurn).toHaveBeenCalledTimes(2);
+    expect(state.pendingMatch!.ledger.minute).toBe(minute);
+  });
+
+  /**
+   * **호출 실패는 안내로 둔갑하지 않는다** (models.md §1-1). 시한·혼잡·인증을
+   * "다시 말씀해 주세요"로 바꾸면 감독은 자기 말이 잘못된 줄 알고 같은 말을 다시
+   * 쳐서 같은 시한을 한 번 더 기다린다 — 화면은 종류를 보고 무슨 일인지 안내한다.
+   */
+  it("해석 호출이 시한을 넘기면 그 오류가 종류를 든 채 올라간다", async () => {
+    const state = rolling();
+    const minute = state.pendingMatch!.ledger.minute;
+    const thrown = new LlmTimeoutError("match-intent", 60_000);
+    runTurn.mockRejectedValue(thrown);
+
+    await expect(runGmTurn(state, "압박 올려")).rejects.toBe(thrown);
+    // 시한을 넘긴 호출은 다시 부르지 않는다 — 잠금 안의 대기가 두 배가 된다
     expect(runTurn).toHaveBeenCalledTimes(1);
     expect(state.pendingMatch!.ledger.minute).toBe(minute);
   });
@@ -433,5 +451,102 @@ describe("평시 GM 턴 — 상한을 도구로 채운 턴", () => {
     runTurn.mockResolvedValue(capped(""));
 
     await expect(runGmTurn(state, "오늘은 좀 쉬자")).rejects.toBeInstanceOf(GmTurnFailure);
+  });
+});
+
+/**
+ * 해석의 산출은 **이 객체 하나**이고 도구가 없다 (agents.md §3). 감독의 말이 판으로
+ * 옮겨지는 폭을 지키는 것이 이 스키마뿐이라, 상한이 풀리면 한 턴에 열 명과 대화하고
+ * 플랜을 다섯 개 건 판이 서는데 감독은 그런 말을 한 적이 없다.
+ */
+describe("경기 의도 스키마의 경계", () => {
+  const ids = (n: number) => Array.from({ length: n }, (_, i) => `p${i}`);
+  const parses = (intent: unknown) => MatchIntentSchema.safeParse(intent).success;
+
+  it("한 턴에 담기는 갈래마다 개수 상한이 있다", () => {
+    const talk = (n: number) =>
+      ids(n).map((playerId) => ({ playerId, outcome: "motivated", intensity: 2 }));
+    expect(parses({ advance: "none", talk: talk(4) })).toBe(true);
+    expect(parses({ advance: "none", talk: talk(5) })).toBe(false);
+
+    const plan = { band: "attack", lane: "left", intent: "overload", note: "왼쪽에 사람을 모은다" };
+    expect(parses({ advance: "none", plans: [plan, plan] })).toBe(true);
+    expect(parses({ advance: "none", plans: [plan, plan, plan] })).toBe(false);
+
+    const subs = (n: number) => ids(n).map((id) => ({ out: id, in: `${id}-in` }));
+    expect(parses({ advance: "none", substitutions: subs(5) })).toBe(true);
+    expect(parses({ advance: "none", substitutions: subs(6) })).toBe(false);
+
+    // 자리·역할·개인 지시는 그라운드에 선 열한 명까지다
+    const moves = (n: number) => ids(n).map((playerId) => ({ playerId }));
+    expect(parses({ advance: "none", playerTactics: moves(11) })).toBe(true);
+    expect(parses({ advance: "none", playerTactics: moves(12) })).toBe(false);
+
+    expect(parses({ advance: "none", exploits: ids(2) })).toBe(true);
+    expect(parses({ advance: "none", exploits: ids(3) })).toBe(false);
+
+    expect(parses({ advance: "none", shootoutOrder: ids(11) })).toBe(true);
+    expect(parses({ advance: "none", shootoutOrder: ids(12) })).toBe(false);
+  });
+
+  /**
+   * 숫자는 이 스키마에 없다 — 오는 것은 판정 라벨과 눈금뿐이고, 사기가 얼마나
+   * 움직이는지는 코어가 표와 리더십 계수로 정한다.
+   */
+  it("세기와 전술 축은 눈금 안의 값만 받는다 — 네 단계 세기도, 여섯 단계 축도 없다", () => {
+    const talk = (intensity: unknown) => ({
+      advance: "none",
+      talk: [{ playerId: "p", outcome: "angered", intensity }],
+    });
+    expect(parses(talk(1))).toBe(true);
+    expect(parses(talk(3))).toBe(true);
+    expect(parses(talk(0))).toBe(false);
+    expect(parses(talk(4))).toBe(false);
+    expect(parses(talk(2.5))).toBe(false);
+    // 없는 판정 라벨은 코어가 아니라 여기서 걸린다
+    expect(
+      parses({ advance: "none", talk: [{ playerId: "p", outcome: "기뻐함", intensity: 2 }] }),
+    ).toBe(false);
+
+    const teamTalk = (intensity: unknown) => ({
+      advance: "none",
+      teamTalk: { occasion: "half", outcome: "inspired", intensity },
+    });
+    expect(parses(teamTalk(3))).toBe(true);
+    expect(parses(teamTalk(4))).toBe(false);
+
+    // 말하지 않은 축은 지금 값을 그대로 둔다 — 여섯 축이 전부 선택이다
+    expect(parses({ advance: "none", tactics: {} })).toBe(true);
+    expect(parses({ advance: "none", tactics: { pressing: 5 } })).toBe(true);
+    expect(parses({ advance: "none", tactics: { pressing: 0 } })).toBe(false);
+    expect(parses({ advance: "none", tactics: { pressing: 6 } })).toBe(false);
+    expect(parses({ advance: "none", tactics: { pressing: 3.5 } })).toBe(false);
+  });
+
+  it("진행 의도는 빼놓을 수 없고, 감독에게 되돌아가는 말에는 길이가 물려 있다", () => {
+    // 시계를 미는가는 **언제나** 답해야 하는 자리다 — 빠지면 그 턴이 흘렀는지 아무도 모른다
+    expect(parses({})).toBe(false);
+    expect(parses({ advance: "segment" })).toBe(true);
+    expect(parses({ advance: "later" })).toBe(false);
+
+    const unresolved = (n: number) => ({ advance: "none", unresolved: "말".repeat(n) });
+    expect(parses(unresolved(200))).toBe(true);
+    expect(parses(unresolved(201))).toBe(false);
+    // 빈 줄은 되돌려 줄 말이 아니다 — 옮기지 못한 말이 없으면 자리를 비운다
+    expect(parses({ advance: "none", unresolved: "" })).toBe(false);
+
+    const note = (n: number) => ({
+      advance: "none",
+      playerTactics: [{ playerId: "p", instruction: { note: "말".repeat(n) } }],
+    });
+    expect(parses(note(160))).toBe(true);
+    expect(parses(note(161))).toBe(false);
+
+    const planNote = (n: number) => ({
+      advance: "none",
+      plans: [{ band: "midfield", lane: "center", intent: "press", note: "말".repeat(n) }],
+    });
+    expect(parses(planNote(120))).toBe(true);
+    expect(parses(planNote(121))).toBe(false);
   });
 });

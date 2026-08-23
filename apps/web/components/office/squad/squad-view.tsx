@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   MATCHDAY_BENCH,
+  TACTIC_AXES,
   adaptationOf,
   anchorOf,
   defaultRoleOf,
@@ -33,7 +34,7 @@ import { useBoardDrag } from "./board-drag";
 import { Margin, fitAt } from "./marks";
 import { PlayerDetail } from "./player-detail";
 import { SquadTable, type SortKey } from "./squad-table";
-import { TACTIC_AXES, TacticsPanel } from "./tactics-panel";
+import { TacticsPanel } from "./tactics-panel";
 import type { BoardSlot, Selection, SquadRow, TacticsView, Tier } from "./types";
 
 /**
@@ -169,7 +170,18 @@ export function SquadView({
       try {
         const res = await post(snapshot);
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error ?? "저장 실패");
+        if (!res.ok) {
+          /**
+           * 턴이 잠금을 쥐고 있다(`retry`) — 이 편집은 **대기열에 남는다.** 판은
+           * 그대로 두고 다음 자동 저장이 같은 배치를 다시 보낸다 (models.md §1-1).
+           */
+          if (data.retry === true) {
+            const busy = (data.error as string | undefined) ?? "저장 실패";
+            setSaveError(busy);
+            return { ok: false, error: busy, keep: true };
+          }
+          throw new Error(data.error ?? "저장 실패");
+        }
         savedRevRef.current = rev;
         onUpdate(data);
         return { ok: true };

@@ -1,41 +1,61 @@
 import { z } from "zod";
-import { runTurnLocked } from "@/lib/turn-runner";
+import { TurnOperationSchema } from "@story-fm/agents";
+import { llmErrorKind } from "@story-fm/llm";
+import { errorDetail, runTurnLocked, turnErrorMessage } from "@/lib/turn-runner";
 import { invalidGameId } from "@/app/api/games/game-id";
 
-const TurnSchema = z.object({
-  message: z.string().min(1).max(1000),
-  /** 화면 조작(시간 이동 손잡이) — 감독의 발화로 취급하지 않는다 */
-  operator: z.boolean().optional(),
-  /**
-   * 전술판에서 쌓인 조작 — 이번 턴에 **함께** 실린다.
-   * 감독의 말과 갈라서 오퍼레이터 턴으로 먼저 들어간다.
-   */
-  // 선발 11명의 자리와 역할을 한 번에 다시 짜면 최대 22개가 자연스럽게 생긴다.
-  orders: z
-    .array(
-      z.discriminatedUnion("kind", [
-        z.object({
-          kind: z.literal("position"),
-          playerId: z.string().min(1),
-          position: z.string(),
-          point: z.object({ x: z.number().min(0).max(100), y: z.number().min(0).max(100) }),
-        }),
-        z.object({ kind: z.literal("role"), playerId: z.string().min(1), role: z.string().min(1) }),
-        z.object({
-          kind: z.literal("substitution"),
-          out: z.string().min(1),
-          in: z.string().min(1),
-        }),
-        z.object({
-          kind: z.literal("tactic"),
-          axis: z.enum(["mentality", "defensiveLine", "pressing", "tempo", "width", "passStyle"]),
-          value: z.number().int().min(1).max(5),
-        }),
-      ]),
-    )
-    .max(64)
-    .optional(),
-});
+const TurnSchema = z
+  .object({
+    /**
+     * 감독이 친 말. **조작 턴에는 오지 않는다** — 손잡이가 무엇을 눌렀는지는
+     * `operation`이 들고, 모델이 읽을 문장은 서버가 거기서 만든다.
+     */
+    message: z.string().min(1).max(1000).optional(),
+    /**
+     * 화면 조작(시간 이동·경기 진행 손잡이) — 감독의 발화로 취급하지 않는다.
+     * **구조체다**: 문장을 되읽던 시절에는 UI 문구 한 글자가 곧 계약이었다
+     * (docs/llm/agents.md §2).
+     */
+    operation: TurnOperationSchema.optional(),
+    /**
+     * 전술판에서 쌓인 조작 — 이번 턴에 **함께** 실린다.
+     * 감독의 말과 갈라서 오퍼레이터 턴으로 먼저 들어간다.
+     */
+    // 선발 11명의 자리와 역할을 한 번에 다시 짜면 최대 22개가 자연스럽게 생긴다.
+    orders: z
+      .array(
+        z.discriminatedUnion("kind", [
+          z.object({
+            kind: z.literal("position"),
+            playerId: z.string().min(1),
+            position: z.string(),
+            point: z.object({ x: z.number().min(0).max(100), y: z.number().min(0).max(100) }),
+          }),
+          z.object({
+            kind: z.literal("role"),
+            playerId: z.string().min(1),
+            role: z.string().min(1),
+          }),
+          z.object({
+            kind: z.literal("substitution"),
+            out: z.string().min(1),
+            in: z.string().min(1),
+          }),
+          z.object({
+            kind: z.literal("tactic"),
+            axis: z.enum(["mentality", "defensiveLine", "pressing", "tempo", "width", "passStyle"]),
+            value: z.number().int().min(1).max(5),
+          }),
+        ]),
+      )
+      .max(64)
+      .optional(),
+  })
+  // 감독의 말이든 손잡이든 **이 턴이 무엇인지**는 하나가 말해야 한다
+  .refine((body) => body.message !== undefined || body.operation !== undefined, {
+    message: "메시지나 조작 중 하나는 필요합니다",
+    path: ["message"],
+  });
 
 /**
  * ⚠️ **서버리스 배포에서만 읽힌다** — `next start`로 띄운 프로세스는 이 값을 보지
@@ -69,7 +89,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
   const body = TurnSchema.safeParse(raw);
   if (!body.success) {
-    const messageIssue = body.error.issues.some((issue) => issue.path[0] === "message");
+    const messageIssue = body.error.issues.some(
+      (issue) => issue.path[0] === "message" || issue.path[0] === "operation",
+    );
     const detail = body.error.issues
       .map((issue) => `${issue.path.join(".") || "요청"}: ${issue.message}`)
       .join(" / ");
@@ -107,13 +129,25 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           id,
           body.data.message,
           (text) => send({ type: "delta", text }),
-          body.data.operator === true,
+          body.data.operation,
           body.data.orders,
         );
         if (outcome.ok) send({ type: "done", payload: outcome.payload });
-        else send({ type: "error", error: outcome.error, detail: outcome.detail });
+        // `detail`은 개발 모드에서만 실려 온다 (turn-runner의 `errorDetail`)
+        else
+          send({
+            type: "error",
+            error: outcome.error,
+            ...(outcome.detail ? { detail: outcome.detail } : {}),
+          });
       } catch (error) {
-        send({ type: "error", error: error instanceof Error ? error.message : String(error) });
+        // 내부 예외 원문은 화면으로 가지 않는다 — 종류가 고른 한 줄만 간다
+        console.error(`[turn] 스트림이 실패했습니다 (game=${id}):`, error);
+        send({
+          type: "error",
+          error: turnErrorMessage(llmErrorKind(error)),
+          ...errorDetail(error),
+        });
       } finally {
         clearInterval(heartbeat);
         try {

@@ -35,6 +35,10 @@ import {
   DELETE as leagueDelete,
 } from "../app/api/admin/catalog/league/[leagueId]/route";
 import { GET as cupGet, DELETE as cupReset } from "../app/api/admin/catalog/cup/route";
+import { adminWritesEnabled } from "../app/api/admin/admin-guard";
+import { GET as usageGet } from "../app/api/admin/usage/route";
+import { beginGameUsage, meterLlm, resetLlmUsage, type TurnResult } from "@story-fm/llm";
+import type { UsageResponse } from "../app/admin/types";
 import { PATCH as cupPatch } from "../app/api/admin/catalog/cup/[cupId]/route";
 import {
   boardExpectationOfTier,
@@ -43,9 +47,10 @@ import {
   FRIENDLY_ROUNDS,
   teamsOfLeague,
 } from "@story-fm/engine";
-import { FORMATION_LAYOUTS } from "@story-fm/domain";
+import { FORMATION_LAYOUTS, boardExpectationText } from "@story-fm/domain";
 import type { ChatTurn } from "@story-fm/engine";
 import { visibleChat } from "../lib/store";
+import { LOCK_WAIT_MS, withGameLock } from "../lib/turn-runner";
 import type { GamePayload, GameSlice } from "../lib/store";
 
 /** API 통합 테스트 — 라우트 핸들러를 직접 호출 (mock GM 모드) */
@@ -107,7 +112,10 @@ describe("API — 온보딩부터 경기까지", () => {
     // 보드 기대는 시즌 평가가 쓰는 문구 그대로 — 화면이 tier로 따로 만들지 않는다
     const teams = data.teams as Array<{ id: string; expectation: string }>;
     expect(teams.find((t) => t.id === "arsenal")?.expectation).toBe(
-      boardExpectationOfTier(catalogTierOf("arsenal"), teamsOfLeague("epl").length).label,
+      (() => {
+        const e = boardExpectationOfTier(catalogTierOf("arsenal"), teamsOfLeague("epl").length);
+        return boardExpectationText(e.code, e.target);
+      })(),
     );
 
     // 랜딩이 받는 것 — 카탈로그는 한 조각도 실리지 않는다
@@ -516,7 +524,7 @@ describe("API — 온보딩부터 경기까지", () => {
         nameEn: "New Guy",
         birthdate: "2007-03-01",
         position: "ST",
-        // 능력치 15축 전부 (API가 요구한다)
+        // 능력치 16축 전부 (API가 요구한다)
         pace: 82,
         stamina: 74,
         strength: 70,
@@ -528,6 +536,7 @@ describe("API — 온보딩부터 경기까지", () => {
         tackling: 35,
         vision: 60,
         positioning: 76,
+        offTheBall: 72,
         composure: 70,
         aggression: 58,
         leadership: 40,
@@ -837,6 +846,37 @@ describe("API — 팀·리그·컵 카탈로그 어드민", () => {
     // 편집이 실제로 걷혔다 — 시드가 무엇을 적어 뒀는지는 시드의 몫이다
     expect(reset.europe.find((c) => c.id === "ucl")!.short).not.toBe("챔스");
   });
+
+  /**
+   * 쓰기의 문 (game-state.md §2). 값의 갈래는 순수 함수로 보고, 라우트가 실제로 그
+   * 문을 지나는지는 PATCH 하나로 본다 — 닫히면 본문 없는 404이고 조회는 그대로다.
+   */
+  it("가드 — 닫힌 환경에서 쓰기는 404, 조회는 열려 있다", async () => {
+    expect(adminWritesEnabled({ NODE_ENV: "development" })).toBe(true);
+    expect(adminWritesEnabled({ NODE_ENV: "production" })).toBe(false);
+    // 명시된 값이 NODE_ENV보다 먼저다 — 양쪽 방향 모두
+    expect(adminWritesEnabled({ NODE_ENV: "production", ADMIN_ENABLED: "1" })).toBe(true);
+    expect(adminWritesEnabled({ NODE_ENV: "production", ADMIN_ENABLED: "true" })).toBe(true);
+    expect(adminWritesEnabled({ NODE_ENV: "development", ADMIN_ENABLED: "0" })).toBe(false);
+    // 빈 문자열은 값을 준 것이 아니다 — 셸이 비운 변수가 문을 열어서는 안 된다
+    expect(adminWritesEnabled({ NODE_ENV: "production", ADMIN_ENABLED: "" })).toBe(false);
+    expect(adminWritesEnabled({ NODE_ENV: "development", ADMIN_ENABLED: "" })).toBe(true);
+
+    const before = process.env.ADMIN_ENABLED;
+    process.env.ADMIN_ENABLED = "0";
+    try {
+      const blocked = await teamPatch(json({ name: "닫힌 문" }), tparams("arsenal"));
+      expect(blocked.status).toBe(404);
+      expect(await blocked.text()).toBe("");
+      expect(teamGet().status).toBe(200);
+      // 편집은 디스크에 닿지 않았다
+      const list = (await teamGet().json()) as TeamPayload;
+      expect(list.teams.find((t) => t.id === "arsenal")!.name).not.toBe("닫힌 문");
+    } finally {
+      if (before === undefined) delete process.env.ADMIN_ENABLED;
+      else process.env.ADMIN_ENABLED = before;
+    }
+  });
 });
 
 /**
@@ -871,5 +911,121 @@ describe("채팅 기록 필터", () => {
   it("거를 것이 없으면 턴을 그대로 둔다 — 화면이 쥔 것과 같은 객체다", () => {
     const kept = turn([{ name: "set_lineup", summary: "라인업 확정" }]);
     expect(visibleChat([kept])[0]).toBe(kept);
+  });
+});
+
+/**
+ * 게임 잠금 — **한 게임에 손 하나.** 턴 하나가 LLM 호출 여럿으로 분 단위를 쥐는 동안
+ * 뒤에 선 요청이 그만큼 매달리던 자리다. 이제 상한만큼만 기다리고 409로 물러난다
+ * (docs/llm/models.md §1-1).
+ */
+describe("게임 잠금 — 겹친 요청", () => {
+  it("잠금을 쥔 요청이 있으면 뒤에 온 저장·턴이 상한 뒤 409로 물러난다", async () => {
+    const created = await createGame(
+      json({ teamId: "everton", managerName: "잠금테스트", background: "분석가", seed: 71 }),
+    );
+    const game = (await created.json()) as GamePayload;
+    const squad = game.views.squad!;
+    // 지금 서 있는 판을 그대로 되보낸다 — 반려당하지 않는 가장 짧은 본문이다
+    const starting = squad.players
+      .filter((p) => p.role === "선발")
+      .map((p) => ({ playerId: p.id, position: p.assignedPosition! }));
+    const bench = squad.players.filter((p) => p.role === "벤치").map((p) => ({ playerId: p.id }));
+    expect(starting).toHaveLength(11);
+
+    // 끝나지 않는 턴 하나가 잠금을 쥔 상태 — 모델 호출이 늘어진 그 순간이다
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const held = withGameLock(game.id, LOCK_WAIT_MS.turn, () => gate);
+    await new Promise((r) => setTimeout(r, 30));
+
+    const [lineup, turnEvents] = await Promise.all([
+      postLineup(json({ starting, bench }), params(game.id)),
+      (async () => {
+        const res = await postTurn(json({ message: "겹친 턴" }), params(game.id));
+        return (await res.text())
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as { type: string; error?: string });
+      })(),
+    ]);
+
+    // 전술판 저장은 409 + `retry` — 그 편집은 화면의 대기열에 남아 다시 온다
+    expect(lineup.status).toBe(409);
+    const rejected = (await lineup.json()) as { error: string; retry?: boolean };
+    expect(rejected.retry).toBe(true);
+    expect(rejected.error).toContain("진행 중");
+    // 턴은 스트림이라 상태 코드가 아니라 실패 이벤트로 온다 — 저장된 것은 없다
+    const failure = turnEvents.find((e) => e.type === "error");
+    expect(failure?.error).toContain("진행 중");
+    expect(turnEvents.some((e) => e.type === "done")).toBe(false);
+
+    // 놓으면 같은 저장이 그대로 통한다 — 잠금은 시간이 아니라 홀더가 푼다
+    release();
+    await held;
+    const after = await postLineup(json({ starting, bench }), params(game.id));
+    expect(after.status).toBe(200);
+  });
+});
+
+/**
+ * 계측 라우트 — **판정이 라우트에 있고 화면은 읽기만 한다** (models.md §5-1).
+ *
+ * 여기서 재는 것은 히트율의 **문턱 하나**다. 문턱 아래 호출은 캐시가 애초에 걸리지
+ * 않아 0%가 「깨진 프리픽스」와 같은 모양이 되므로 비율 대신 null로 내려보내는데,
+ * 그 갈림은 **실모드로 실제 호출이 오갈 때만** 화면에 드러난다 — 뒤집혀도 조용하다.
+ */
+describe("계측 라우트 — 히트율의 문턱", () => {
+  /** 사용량만 돌려주는 가짜 호출 — 장부는 `meterLlm`을 지나야만 움직인다 */
+  function call(agent: "gm" | "match-rater", usage: TurnResult["usage"]) {
+    const llm = meterLlm(
+      {
+        async runTurn(): Promise<TurnResult> {
+          return {
+            text: "",
+            history: { version: 1, provider: "google", model: "x", messages: [] },
+            historyBase: 0,
+            usage,
+            toolCallCount: 0,
+            stopReason: null,
+          };
+        },
+      },
+      agent,
+    );
+    return llm.runTurn({ system: [], history: [], user: "" });
+  }
+
+  it("문턱 아래 입력은 비율 대신 null이고, 넘으면 비를 낸다", async () => {
+    resetLlmUsage();
+    beginGameUsage("usage-test");
+    // gm은 Google — 최소 캐시 프리픽스 4,096 토큰. 그 아래로 한 번 부른다
+    await call("gm", {
+      inputTokens: 1000,
+      outputTokens: 100,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    });
+    // match-rater도 Google이지만 이쪽은 문턱을 넘겨 부른다
+    await call("match-rater", {
+      inputTokens: 10_000,
+      outputTokens: 200,
+      cacheReadTokens: 4_000,
+      cacheWriteTokens: 0,
+    });
+
+    const body = (await (await usageGet()).json()) as UsageResponse;
+    expect(body.gameId).toBe("usage-test");
+    const gm = body.agents.find((a) => a.agent === "gm")!;
+    const rater = body.agents.find((a) => a.agent === "match-rater")!;
+    expect(gm.avgInput).toBe(1000);
+    expect(gm.cacheHitRate).toBeNull();
+    expect(rater.cacheHitRate).toBeCloseTo(0.4, 6);
+    // 부르지 않은 자리는 「캐시가 안 걸렸다」가 아니라 잰 것이 없다
+    expect(body.agents.find((a) => a.agent === "mood-rater")!.cacheHitRate).toBeNull();
+    expect(body.totals.billed).toBe(11_300);
+    resetLlmUsage();
   });
 });

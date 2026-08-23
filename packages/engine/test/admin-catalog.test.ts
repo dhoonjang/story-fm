@@ -20,8 +20,13 @@ import {
   boardExpectationOfTier,
   catalogPath,
   catalogTierOf,
+  checkDomesticCupInvariants,
   checkEuroCupInvariants,
   checkLeagueInvariants,
+  checkSeedInvariants,
+  EURO_MATCHDAYS,
+  assertCatalogValid,
+  saveLeagueCatalog,
   clubProfile,
   cupCatalog,
   cupCatalogPath,
@@ -373,6 +378,29 @@ describe("컵 편집", () => {
     expect(adminUpdateDomesticCup("facup", full).ok).toBe(true);
   });
 
+  /**
+   * 목표일은 **그 달에 실제로 있는 날**이어야 한다 — `[2, 30]`이 통과하면 그 날짜가
+   * 3월로 굴러가 라운드 순서가 뒤집힌다 (competition.md §7). 윤년은 넓게 봐서 2월
+   * 29일까지 받는다: 목표일은 해가 없는 `[월, 일]`이라 어느 시즌에 놓일지 모른다.
+   */
+  it("국내 컵 목표일은 그 달에 없는 날을 거절한다", () => {
+    const windows = (r16: readonly number[]) =>
+      ({
+        windows: { r32: [1, 10], r16, qf: [3, 21], sf: [4, 25], final: [5, 16] },
+      }) as unknown as AdminDomesticCupPatch;
+
+    expect(adminUpdateDomesticCup("facup", windows([2, 30])).ok).toBe(false);
+    expect(adminUpdateDomesticCup("facup", windows([4, 31])).ok).toBe(false);
+    expect(adminUpdateDomesticCup("facup", windows([12, 32])).ok).toBe(false);
+    expect(adminUpdateDomesticCup("facup", windows([2, 0])).ok).toBe(false);
+    // 윤년 2월 29일과 달의 마지막 날은 받는다
+    expect(adminUpdateDomesticCup("facup", windows([2, 29])).ok).toBe(true);
+    expect(adminUpdateDomesticCup("facup", windows([1, 31])).ok).toBe(true);
+    // 추첨일도 같은 검사를 지난다
+    const badDraw = { firstDraw: [11, 31] } as unknown as AdminDomesticCupPatch;
+    expect(adminUpdateDomesticCup("facup", badDraw).ok).toBe(false);
+  });
+
   it("컵 패치도 id를 옮기지 못한다", () => {
     const moved = { id: "ucl2" } as unknown as AdminCupPatch;
     expect(adminUpdateCup("ucl", moved).ok).toBe(false);
@@ -499,6 +527,63 @@ describe("불변식 (순수 함수)", () => {
   it("시드 대항전은 이 식을 만족한다 (UCL 8/16 · UEL 4/8 · UECL 2/4)", () => {
     expect(checkEuroCupInvariants(cupCatalog(), leagueCatalog())).toEqual([]);
   });
+
+  /**
+   * 리그 페이즈 한 라운드가 매치데이 하나를 쓴다(`euroMatchdayDates`). 넘치는 경기는
+   * 이미 쓴 날로 되돌아가 **한 팀이 같은 날 두 경기**를 뛴다 — 상대가 모자란 것과
+   * 달리 편성이 조용히 성립해 버린다 (competition.md §7).
+   */
+  it("팀당 리그 페이즈 경기는 대항전 매치데이 수를 넘지 못한다", () => {
+    const leagues = [league({ id: "epl" })];
+    const wide = {
+      id: "c",
+      name: "컵",
+      short: "C",
+      size: 24,
+      matchesPerTeam: EURO_MATCHDAYS.length,
+      slots: { epl: 24 },
+      directSlots: 2,
+      playoffSlots: 4,
+      prize: { participation: 0, win: 0, draw: 0, stage: {}, winner: 0 },
+    };
+    expect(checkEuroCupInvariants([wide], leagues)).toEqual([]);
+    expect(
+      checkEuroCupInvariants(
+        [{ ...wide, matchesPerTeam: EURO_MATCHDAYS.length + 2 }],
+        leagues,
+      ).join(),
+    ).toContain("매치데이");
+  });
+
+  /**
+   * 우승팀은 리그별 슬롯 하나에 담긴다(`domesticCupWinners`) — 같은 나라의 두 컵이
+   * 같은 티켓을 주면 뒤가 앞을 덮어써, 우승하고도 대항전에 못 나가는 클럽이 생긴다.
+   */
+  it("나라마다 유럽 티켓은 종류당 한 장이다", () => {
+    const cups = domesticCupCatalog();
+    const facup = cups.find((c) => c.id === "facup")!;
+    const eflcup = cups.find((c) => c.id === "eflcup")!;
+    expect(checkDomesticCupInvariants(cups)).toEqual([]);
+    expect(
+      checkDomesticCupInvariants([facup, { ...eflcup, europeanTicket: "uel" }]).join(),
+    ).toContain("한 장");
+  });
+
+  /**
+   * 시드끼리 맞물리는 표 — 실선수 스쿼드 · 지정 선발 · 더비 · 코치 · 구단주 ·
+   * 구단 프로필 · 세계 인물. 어긋나도 크래시가 아니라 **조용히 안 쓰인다**
+   * (아스날 구단주가 가명이 된다)라 여기 말고는 드러날 자리가 없다 (team.md §8).
+   */
+  it("시드 카탈로그가 시드 불변식을 통과한다", () => {
+    expect(checkSeedInvariants()).toEqual([]);
+  });
+
+  it("경기를 안 하는 리그가 실선수 시드를 주장하면 걸린다", () => {
+    const flipped = leagueCatalog().map((l) =>
+      l.id === "championship" ? { ...l, realSquads: true } : l,
+    );
+    expect(checkSeedInvariants(flipped).join()).toContain("실선수 시드를 갖지 않습니다");
+  });
 });
 
 /**
@@ -507,8 +592,26 @@ describe("불변식 (순수 함수)", () => {
  * 반대로 멀쩡한 파일을 거절하면 편집이 조용히 사라진다 — 양쪽을 함께 본다.
  */
 describe("오버라이드 파일 로드", () => {
+  /**
+   * **모양을 통과해도 성립하지 않을 수 있다.** 손으로 고친 오버라이드는 어드민의
+   * 저장 문을 지나지 않으므로, 세계를 세우는 자리가 한 번 더 묻고 던진다 —
+   * 폴백하지 않는다 (team.md §1). 조회는 막지 않는다: 깨진 카탈로그도 읽어야
+   * 어드민으로 고칠 수 있다.
+   */
+  it("불변식을 어긴 카탈로그는 로드 시 던진다", () => {
+    expect(() => assertCatalogValid()).not.toThrow();
+    saveLeagueCatalog(
+      leagueCatalog().map((l) => (l.id === "championship" ? { ...l, realSquads: true } : l)),
+    );
+    // 조회는 그대로 된다 — 고치려면 읽을 수 있어야 한다
+    expect(leagueCatalog().find((l) => l.id === "championship")!.realSquads).toBe(true);
+    expect(() => assertCatalogValid()).toThrow("카탈로그가 성립하지 않습니다");
+    expect(adminResetLeagueCatalog().ok).toBe(true);
+    expect(() => assertCatalogValid()).not.toThrow();
+  });
+
   it("모양이 어긋난 선수 카탈로그는 시드로 돌아간다", () => {
-    // 15축이 통째로 빠진 줄 — 그대로 카탈로그가 되면 전력을 재는 자리에서 터진다
+    // 16축이 통째로 빠진 줄 — 그대로 카탈로그가 되면 전력을 재는 자리에서 터진다
     writeFileSync(
       catalogPath(),
       JSON.stringify([

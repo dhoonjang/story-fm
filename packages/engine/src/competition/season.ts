@@ -1,19 +1,33 @@
-import type { Achievement, AchievementCode, GamePlayer, PositionGroup } from "@story-fm/domain";
+import type {
+  Achievement,
+  AchievementCode,
+  BoardExpectationCode,
+  GamePlayer,
+  PositionGroup,
+  SeasonAward,
+  SeasonAwardCode,
+} from "@story-fm/domain";
 import { isReserveMatch } from "@story-fm/domain";
 import {
   CONDITION_BASE,
   DEFAULT_FORMATION,
+  MATCHDAY_SQUAD,
+  YOUNG_PLAYER_MAX_AGE,
   achievementTitle,
   ageOf,
   anchorOf,
+  awardTitle,
+  boardExpectationText,
   naturalPositionOf,
   presetOf,
+  seasonRating,
 } from "@story-fm/domain";
 import {
   buildScheduleEntries,
   buildSeasonCalendar,
   buildTransferWindows,
   contractUntil,
+  seasonEndDate,
   seasonYear,
 } from "./calendar";
 import { toFreeAgency } from "../market/departures";
@@ -32,10 +46,16 @@ import {
   cupRunsThisSeason,
   domesticChampion,
   domesticCupWinners,
+  payDomesticCupPrizes,
   reviewDomesticCups,
 } from "./domestic-cup";
 import { hasPendingDraw } from "./draw-schedule";
-import { isCupOnlyLeague, isMarketOnlyLeague, leagueName } from "../data/league-catalog";
+import {
+  isCupOnlyLeague,
+  isMarketOnlyLeague,
+  isTopLeague,
+  leagueName,
+} from "../data/league-catalog";
 import { hasCups, scopedLeagues } from "../world/scope";
 import { euroChampion, euroStageMatches } from "./euro-knockout";
 import { payWinnerPrize } from "./euro-prize";
@@ -47,8 +67,10 @@ import {
 } from "../club/finance";
 import { buildEuroEntrants, entrantsOf, type LeagueTables } from "./europe";
 import { buildSeasonFixtures, isUserFixture } from "./fixtures";
+import type { SuperCupSource } from "./super-cup";
 import {
   applyPromotionRelegation,
+  reinforcePromotedSquads,
   clubEconomyLevelIn,
   leagueOfTeamIn,
   leagueSizeIn,
@@ -61,6 +83,7 @@ import { generateYouthPlayer } from "../world/generate";
 import { assignSquadNumber } from "../squad/numbers";
 import {
   buildAssignments,
+  clampReputation,
   groupOf,
   managedTeamId,
   playersOf,
@@ -68,6 +91,7 @@ import {
   tacticsOf,
   teamName,
   teamShortName,
+  inTransaction,
   FAMILIARITY_BASELINE,
   type GameState,
 } from "../core/state";
@@ -125,6 +149,7 @@ export function computeStandings(
       points: 0,
     });
   }
+  const counted: CountedMatch[] = [];
   for (const match of state.matches) {
     if (!match.result || match.season !== state.season) continue;
     if (match.competitionId !== competitionId) continue;
@@ -134,6 +159,13 @@ export function computeStandings(
     const away = rows.get(match.awayTeamId);
     if (!home || !away) continue;
     const { homeGoals, awayGoals } = match.result;
+    // 맞대결 표는 이 표에 실제로 반영된 경기만 본다 (아래 sortStandings)
+    counted.push({
+      homeTeamId: match.homeTeamId,
+      awayTeamId: match.awayTeamId,
+      homeGoals,
+      awayGoals,
+    });
     home.played++;
     away.played++;
     home.goalsFor += homeGoals;
@@ -157,9 +189,90 @@ export function computeStandings(
   }
   const list = [...rows.values()];
   for (const row of list) row.goalDiff = row.goalsFor - row.goalsAgainst;
-  return list.sort(
-    (a, b) => b.points - a.points || b.goalDiff - a.goalDiff || b.goalsFor - a.goalsFor,
-  );
+  return sortStandings(list, counted);
+}
+
+/** 순위표에 실제로 반영된 리그 경기 — 맞대결 표가 다시 도는 대상 */
+interface CountedMatch {
+  homeTeamId: string;
+  awayTeamId: string;
+  homeGoals: number;
+  awayGoals: number;
+}
+
+/** 승점 → 골득실 → 다득점. 여기까지 같은 팀들이 "완전 동률" 무리다. */
+function byMainKeys(a: StandingRow, b: StandingRow): number {
+  return b.points - a.points || b.goalDiff - a.goalDiff || b.goalsFor - a.goalsFor;
+}
+
+/** 마지막 못 — 팀이 세이브에 담긴 순서가 아니라 팀 자체에서 나오는 키 */
+function byTeamId(a: StandingRow, b: StandingRow): number {
+  return a.teamId < b.teamId ? -1 : a.teamId > b.teamId ? 1 : 0;
+}
+
+interface MiniRow {
+  points: number;
+  goalDiff: number;
+  goalsFor: number;
+}
+
+/** 무리 안 팀들끼리 치른 경기만으로 다시 만든 표 */
+function headToHead(
+  group: readonly StandingRow[],
+  matches: readonly CountedMatch[],
+): Map<string, MiniRow> {
+  const mini = new Map<string, MiniRow>();
+  for (const row of group) mini.set(row.teamId, { points: 0, goalDiff: 0, goalsFor: 0 });
+  for (const m of matches) {
+    const home = mini.get(m.homeTeamId);
+    const away = mini.get(m.awayTeamId);
+    if (!home || !away) continue;
+    home.goalsFor += m.homeGoals;
+    away.goalsFor += m.awayGoals;
+    home.goalDiff += m.homeGoals - m.awayGoals;
+    away.goalDiff += m.awayGoals - m.homeGoals;
+    if (m.homeGoals > m.awayGoals) home.points += 3;
+    else if (m.homeGoals < m.awayGoals) away.points += 3;
+    else {
+      home.points++;
+      away.points++;
+    }
+  }
+  return mini;
+}
+
+/**
+ * 순위 정렬 — 승점 → 골득실 → 다득점 → **맞대결** → 다승 → `teamId` 사전순
+ * (competition.md §2).
+ *
+ * ⚠️ **맞대결은 앞 세 키가 같은 무리 안에서 표를 다시 만들어 가른다.** 비교 함수
+ * 안에서 두 팀을 짝지어 붙이면 세 팀이 물고 물릴 때 추이성이 깨지고, `Array.sort`
+ * 결과가 다시 입력 순서를 탄다 — 이 함수가 없애려는 그 의존이다.
+ */
+function sortStandings(list: StandingRow[], matches: readonly CountedMatch[]): StandingRow[] {
+  const sorted = list.sort((a, b) => byMainKeys(a, b) || b.wins - a.wins || byTeamId(a, b));
+  for (let i = 0; i < sorted.length;) {
+    let j = i + 1;
+    while (j < sorted.length && byMainKeys(sorted[i]!, sorted[j]!) === 0) j++;
+    if (j - i > 1) {
+      const group = sorted.slice(i, j);
+      const mini = headToHead(group, matches);
+      group.sort((a, b) => {
+        const x = mini.get(a.teamId)!;
+        const y = mini.get(b.teamId)!;
+        return (
+          y.points - x.points ||
+          y.goalDiff - x.goalDiff ||
+          y.goalsFor - x.goalsFor ||
+          b.wins - a.wins ||
+          byTeamId(a, b)
+        );
+      });
+      sorted.splice(i, group.length, ...group);
+    }
+    i = j;
+  }
+  return sorted;
 }
 
 /**
@@ -228,11 +341,14 @@ export function seasonBudgetBaseOf(state: GameState, teamId: string): number {
   return Math.round((SEASON_BUDGET_TOPUP[tier] ?? 0) * clubEconomyLevelIn(state, teamId));
 }
 
-/** 이 세이브에서 그 구단이 지고 있는 기대 — 체급은 세이브가 갖는다 */
+/**
+ * 이 세이브에서 그 구단이 지고 있는 기대 — 체급은 세이브가 갖는다.
+ * **코드와 목표 순위뿐이다** — 이름은 `boardExpectationText`가 만든다 (career.md §6).
+ */
 export function boardExpectation(
   state: GameState,
   teamId: string,
-): { target: number; label: string } {
+): { target: number; code: BoardExpectationCode } {
   return boardExpectationOfTier(tierOfTeamIn(state, teamId), leagueSizeIn(state, teamId));
 }
 
@@ -261,7 +377,11 @@ function checkAchievements(state: GameState, position: number, row: StandingRow)
     add("invincible", { matches: row.played, leagueId });
   // 유럽 최상위 진출은 **그 리그의 UCL 티켓 안**이다 — 순위 하나로 자르면 티켓이 없는
   // 2부의 4위에도 붙는다 (티켓 수는 리그마다 다르다, europe.ts의 배정과 같은 표)
-  if (position <= euroSlotsOf(TOP_EURO_CUP_ID, leagueId)) add("ucl-spot", { position, leagueId });
+  // 2부의 UCL 티켓은 **순위표가 아니라 전력 서열**이 정한다 (europe.ts `rankedTeams`) —
+  // 리그전을 도는 리그에서만 "몇 위면 유럽"이 사실이다
+  if (isTopLeague(leagueId) && position <= euroSlotsOf(TOP_EURO_CUP_ID, leagueId)) {
+    add("ucl-spot", { position, leagueId });
+  }
 
   const topScorer = state.seasonStats
     .filter(
@@ -315,6 +435,257 @@ function achievementDetail(a: Achievement): string {
 }
 
 /**
+ * 그해 **리그전을 돈 리그** — 순위표 보관(`recordLeagueHistory`)과 시상이 같은
+ * 창에서 같은 집합을 본다 (season.md §6). 친선(대회 없음)도 컵도 2군 리그도
+ * 리그전이 아니다.
+ */
+function leaguesPlayedIn(state: GameState): string[] {
+  const leagueIds = new Set<string>();
+  for (const match of state.matches) {
+    if (match.season !== state.season || !match.result) continue;
+    if ((match.stage ?? "league") !== "league") continue;
+    const id = match.competitionId;
+    if (id === null || isCup(id) || isReserveMatch(match)) continue;
+    leagueIds.add(id);
+  }
+  return [...leagueIds].sort();
+}
+
+/**
+ * 평점 상의 출전 문턱 — 라운드 수를 이 수로 나눈 몫(올림)이다 (season.md §6).
+ * 평점은 평균이라 문턱이 없으면 두 경기 뛴 교체 자원이 주장을 이긴다.
+ * 영플레이어의 문턱이 절반인 것은 유망주가 원래 덜 뛰기 때문이다.
+ */
+const PLAYER_OF_SEASON_APPS_DIVISOR = 2;
+const YOUNG_PLAYER_APPS_DIVISOR = 4;
+
+/** 득점왕·도움왕이 서는 최소 기록 — 0골 득점왕은 상이 아니다 */
+const MIN_AWARD_TALLY = 1;
+
+/** 한 리그 안에서 합산된 한 선수의 시즌 기록 — 시상이 견주는 유일한 재료 */
+interface AwardTally {
+  gamePlayerId: string;
+  playerName: string;
+  /** 그 리그에서 가장 많이 뛴 팀 (동률이면 팀 id 사전순) */
+  teamId: string;
+  apps: number;
+  goals: number;
+  assists: number;
+  /** 시즌 평점 — 기록이 없으면 null (`seasonRating`과 같은 눈금) */
+  rating: number | null;
+  /** 시즌 종료일 기준 만 나이 */
+  age: number;
+}
+
+type TallyOrder = (a: AwardTally, b: AwardTally) => number;
+
+const byGoalsDesc: TallyOrder = (a, b) => b.goals - a.goals;
+const byAssistsDesc: TallyOrder = (a, b) => b.assists - a.assists;
+const byAppsAsc: TallyOrder = (a, b) => a.apps - b.apps;
+const byAppsDesc: TallyOrder = (a, b) => b.apps - a.apps;
+const byContributionDesc: TallyOrder = (a, b) => b.goals + b.assists - (a.goals + a.assists);
+/** 평점 칸 — 한쪽이라도 기록이 없으면 **이 칸에서는 갈리지 않는다** (season.md §6) */
+const byRatingDesc: TallyOrder = (a, b) =>
+  a.rating === null || b.rating === null ? 0 : b.rating - a.rating;
+/** 사슬의 마지막 칸 — 유일해야 한다. 명단 순서가 수상자를 정하면 안 된다 (§8 불변식) */
+const byIdAsc: TallyOrder = (a, b) => (a.gamePlayerId < b.gamePlayerId ? -1 : 1);
+
+/** 동점 사슬 — 앞 칸부터 자르고 마지막 칸(id)이 반드시 하나를 남긴다 */
+const TOP_SCORER_ORDER: TallyOrder[] = [
+  byGoalsDesc,
+  byAppsAsc,
+  byAssistsDesc,
+  byRatingDesc,
+  byIdAsc,
+];
+const TOP_ASSISTER_ORDER: TallyOrder[] = [
+  byAssistsDesc,
+  byAppsAsc,
+  byGoalsDesc,
+  byRatingDesc,
+  byIdAsc,
+];
+const RATING_ORDER: TallyOrder[] = [byRatingDesc, byAppsDesc, byContributionDesc, byIdAsc];
+
+/** 사슬로 1위 하나를 고른다 — 자격자가 없으면 그 상은 서지 않는다 */
+function pickWinner(candidates: AwardTally[], order: TallyOrder[]): AwardTally | null {
+  let best: AwardTally | null = null;
+  for (const tally of candidates) {
+    if (best === null) {
+      best = tally;
+      continue;
+    }
+    for (const compare of order) {
+      const diff = compare(tally, best);
+      if (diff === 0) continue;
+      if (diff < 0) best = tally;
+      break;
+    }
+  }
+  return best;
+}
+
+/** 한 리그의 시즌 기록을 선수별로 합산한다 — 시즌 중 이적하면 행이 팀별로 갈린다 */
+function talliesOfLeague(state: GameState, leagueId: string, endDate: string): AwardTally[] {
+  const players = new Map(state.players.map((p) => [p.id, p]));
+  const merged = new Map<string, AwardTally & { ratingSum: number | null }>();
+  /** 그 리그에서 팀마다 몇 경기 뛰었나 — 수상자의 팀을 고르는 근거 */
+  const appsByTeam = new Map<string, Map<string, number>>();
+
+  for (const stat of state.seasonStats) {
+    if (stat.season !== state.season) continue;
+    // 승강은 아직 적용되기 전이다 — 소속의 원본은 카탈로그가 아니라 세이브다 (§8 불변식)
+    if (leagueOfTeamIn(state, stat.teamId) !== leagueId) continue;
+    // 은퇴·이적으로 명단에서 빠진 선수는 이름을 채울 수 없다. 결산은 전환보다
+    // 앞이라 실제로는 다 있지만, 없으면 후보에서 뺀다 (빈 이름의 상은 사실이 아니다)
+    const player = players.get(stat.gamePlayerId);
+    if (!player) continue;
+
+    const prev = merged.get(stat.gamePlayerId);
+    const ratingSum =
+      stat.ratingSum === undefined
+        ? (prev?.ratingSum ?? null)
+        : (prev?.ratingSum ?? 0) + stat.ratingSum;
+    merged.set(stat.gamePlayerId, {
+      gamePlayerId: stat.gamePlayerId,
+      playerName: player.name,
+      teamId: stat.teamId,
+      apps: (prev?.apps ?? 0) + stat.apps,
+      goals: (prev?.goals ?? 0) + stat.goals,
+      assists: (prev?.assists ?? 0) + (stat.assists ?? 0),
+      ratingSum,
+      rating: null,
+      age: ageOf(player.birthdate, endDate),
+    });
+    const perTeam = appsByTeam.get(stat.gamePlayerId) ?? new Map<string, number>();
+    perTeam.set(stat.teamId, (perTeam.get(stat.teamId) ?? 0) + stat.apps);
+    appsByTeam.set(stat.gamePlayerId, perTeam);
+  }
+
+  return [...merged.values()].map((tally) => {
+    const teams = [...(appsByTeam.get(tally.gamePlayerId) ?? new Map<string, number>())];
+    const teamId =
+      teams.sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0]?.[0] ?? tally.teamId;
+    const { ratingSum, ...rest } = tally;
+    return {
+      ...rest,
+      teamId,
+      rating: seasonRating({ apps: tally.apps, ratingSum: ratingSum ?? undefined }),
+    };
+  });
+}
+
+/**
+ * 시즌 시상 — **결정적 순수 함수다.** `state`를 읽기만 하고, 같은 기록이면 같은
+ * 수상자가 나온다 (season.md §6, §8 불변식). 저장은 `gradeAwards`가 한다.
+ *
+ * ⚠️ **승강을 적용하기 전에** 불러야 한다 — `leagueOfTeamIn`이 옛 소속을 주는
+ * 동안이라야 방금 승격한 팀의 선수가 옛 리그의 상을 받지 않는다.
+ */
+export function seasonAwards(state: GameState): SeasonAward[] {
+  // 시즌 종료일 = 그 시즌 마지막 경기일. `state.date`로 대신하면 결산을 며칠 늦게
+  // 돌린 세이브에서 영플레이어의 나이가 달라진다
+  const endDate = seasonEndDate(state.matches.filter((m) => m.season === state.season));
+  if (endDate === null) return [];
+
+  const awards: SeasonAward[] = [];
+  for (const leagueId of leaguesPlayedIn(state)) {
+    const tallies = talliesOfLeague(state, leagueId, endDate);
+    const rounds = leagueRounds(teamsOfLeagueIn(state, leagueId).length);
+    const rated = tallies.filter((t) => t.rating !== null);
+
+    const add = (code: SeasonAwardCode, winner: AwardTally | null): void => {
+      if (!winner) return;
+      awards.push({
+        code,
+        season: state.season,
+        leagueId,
+        gamePlayerId: winner.gamePlayerId,
+        playerName: winner.playerName,
+        teamId: winner.teamId,
+        apps: winner.apps,
+        goals: winner.goals,
+        assists: winner.assists,
+        ...(winner.rating !== null ? { rating: winner.rating } : {}),
+        ...(code === "young-player" ? { age: winner.age } : {}),
+      });
+    };
+
+    add(
+      "top-scorer",
+      pickWinner(
+        tallies.filter((t) => t.goals >= MIN_AWARD_TALLY),
+        TOP_SCORER_ORDER,
+      ),
+    );
+    add(
+      "top-assister",
+      pickWinner(
+        tallies.filter((t) => t.assists >= MIN_AWARD_TALLY),
+        TOP_ASSISTER_ORDER,
+      ),
+    );
+    add(
+      "player-of-season",
+      pickWinner(
+        rated.filter((t) => t.apps >= Math.ceil(rounds / PLAYER_OF_SEASON_APPS_DIVISOR)),
+        RATING_ORDER,
+      ),
+    );
+    add(
+      "young-player",
+      pickWinner(
+        rated.filter(
+          (t) =>
+            t.age <= YOUNG_PLAYER_MAX_AGE &&
+            t.apps >= Math.ceil(rounds / YOUNG_PLAYER_APPS_DIVISOR),
+        ),
+        RATING_ORDER,
+      ),
+    );
+  }
+  return awards;
+}
+
+/**
+ * 시상 한 줄 — 코드가 주는 이름과 근거 수치로 **읽는 자리에서** 쓴다.
+ * 세이브에는 코드와 수치뿐이라 문구를 고치면 옛 시상도 새 문구로 읽힌다
+ * (`achievementLine`과 같은 규약 — season.md §6).
+ */
+export function awardLine(a: SeasonAward): string {
+  return `${awardTitle(a.code)}: ${a.playerName} (${teamName(a.teamId)}) — ${awardDetail(a)}`;
+}
+
+function awardDetail(a: SeasonAward): string {
+  const rating = a.rating === undefined ? "" : ` · 평점 ${a.rating.toFixed(2)}`;
+  if (a.code === "top-scorer") return `${a.apps}경기 ${a.goals}골`;
+  if (a.code === "top-assister") return `${a.apps}경기 ${a.assists}도움`;
+  if (a.code === "young-player") return `만 ${a.age}세 · ${a.apps}경기${rating}`;
+  return `${a.apps}경기${rating}`;
+}
+
+/**
+ * 시상을 매겨 세이브에 앉히고 **우리 리그의 것만** 다이제스트에 남긴다 —
+ * 다섯 리그 스무 줄은 감독의 화면이 아니다.
+ */
+function gradeAwards(state: GameState): string[] {
+  if (!state.awards) state.awards = [];
+  const awards = state.awards;
+  const ourLeague = leagueOfTeamIn(state, state.userTeamId);
+  const lines: string[] = [];
+  for (const a of seasonAwards(state)) {
+    // 재실행 방어 — 같은 시즌·같은 리그·같은 코드는 한 번만 선다
+    const dup = awards.some(
+      (x) => x.season === a.season && x.leagueId === a.leagueId && x.code === a.code,
+    );
+    if (dup) continue;
+    awards.push(a);
+    if (a.leagueId === ourLeague) lines.push(awardLine(a));
+  }
+  return lines;
+}
+
+/**
  * 대항전 우승·준우승이 감독 평판에 남기는 몫.
  *
  * ⚠️ **국내 컵(`domestic-cup.ts`)과 값이 다르다** — 유럽을 들어 올린 감독과
@@ -325,7 +696,26 @@ const EURO_TITLE_BOARD = 10;
 const EURO_RUNNER_UP_MEDIA = 4;
 
 /**
- * 대항전 결산 — 우승/준우승을 트로피·평판에 반영한다.
+ * 시즌 리뷰가 보드 평판에 남기는 폭 — 기대 순위를 지켰으면 +, 못 지켰으면 −로
+ * **같은 크기**가 선다 (career.md §5.1).
+ */
+const BOARD_SEASON_SWING = 8;
+
+/**
+ * 대항전 우승 **상금** — 구단이 받는 돈이라 감독의 커리어와 갈라져 있다.
+ * 무직으로 맞은 시즌 끝에도 옛 구단의 장부에는 앉아야 한다 (career.md §5.1).
+ */
+function payEuropeanWinnerPrizes(state: GameState, digest: string[]): void {
+  for (const cup of cupCatalog()) {
+    const champion = euroChampion(state, cup.id);
+    if (!champion) continue;
+    payWinnerPrize(state, cup.id, champion, digest);
+  }
+}
+
+/**
+ * 대항전 결산 — 우승/준우승을 트로피·평판에 반영한다. **상금은 여기 없다**
+ * (`payEuropeanWinnerPrizes`).
  *
  * 결승은 리그 최종전 다음 토요일이라 `allMatchesDone`이 그것까지 기다린다.
  * 시즌 리뷰가 우승을 확정하는 단일 지점이다 (매일 tick에서 중복 보고하지 않는다).
@@ -335,26 +725,22 @@ function reviewEuropeanCampaign(state: GameState): string[] {
   for (const cup of cupCatalog()) {
     const champion = euroChampion(state, cup.id);
     if (!champion) continue;
-    payWinnerPrize(state, cup.id, champion, digest);
     const finalMatch = euroStageMatches(state, cup.id, "final")[0];
     const ours =
       finalMatch !== undefined &&
       (finalMatch.homeTeamId === state.userTeamId || finalMatch.awayTeamId === state.userTeamId);
     if (champion === state.userTeamId) {
-      state.trophies.push({ season: state.season, competition: cup.name, teamId: champion });
-      state.manager.reputation.media = Math.min(
-        100,
+      state.trophies.push({ season: state.season, competitionId: cup.id, teamId: champion });
+      state.manager.reputation.media = clampReputation(
         state.manager.reputation.media + EURO_TITLE_MEDIA,
       );
-      state.manager.reputation.board = Math.min(
-        100,
+      state.manager.reputation.board = clampReputation(
         state.manager.reputation.board + EURO_TITLE_BOARD,
       );
       digest.push(`🏆 ${cup.name} 우승`);
       pushNarrative(state, `${cup.name} 우승`, 5);
     } else if (ours) {
-      state.manager.reputation.media = Math.min(
-        100,
+      state.manager.reputation.media = clampReputation(
         state.manager.reputation.media + EURO_RUNNER_UP_MEDIA,
       );
       digest.push(`${competitionShortName(cup.id)} 준우승 — 결승 상대 ${teamName(champion)}`);
@@ -369,6 +755,12 @@ function reviewEuropeanCampaign(state: GameState): string[] {
 /** 시즌 리뷰 — 보드 평가·트로피·업적을 감독 커리어에 적재 */
 export function reviewSeason(state: GameState): string[] {
   const digest: string[] = [];
+  /**
+   * **시상은 리그가 주는 상이지 감독의 것이 아니다** — 무직으로 맞은 시즌에도
+   * 선다(상금과 같은 결 — career.md §5.1). 그래서 아래 이른 return보다 앞이고,
+   * 승강을 적용하기 전인 이 자리라야 옛 소속으로 매겨진다 (season.md §8).
+   */
+  digest.push(...gradeAwards(state));
   const standings = computeStandings(state);
   const position = standings.findIndex((r) => r.teamId === state.userTeamId) + 1;
   const row = standings[position - 1];
@@ -378,10 +770,13 @@ export function reviewSeason(state: GameState): string[] {
    * **무직으로 맞은 시즌 끝은 커리어에 남지 않는다** (career.md §5.1).
    *
    * `SEASON_RECORD`·트로피·업적·보드 평판 ±8은 그 자리에 있던 감독의 것이라,
-   * 잘린 뒤 옛 팀이 든 컵이 감독의 것이 되면 안 된다. 구단이 치르는 것 — 리그
-   * 상금과 선수단 성과 보너스 — 은 감독과 무관하므로 그대로 결산된다.
+   * 잘린 뒤 옛 팀이 든 컵이 감독의 것이 되면 안 된다. **돈은 반대다** — 컵·대항전
+   * 상금도 리그 상금·성과 보너스와 똑같이 구단이 받는 것이라 그대로 결산한다.
+   * 시즌 키가 바뀌므로 여기서 건너뛰면 그 상금은 영영 장부에 앉지 않는다.
    */
   if (managedTeamId(state) === null) {
+    payEuropeanWinnerPrizes(state, digest);
+    payDomesticCupPrizes(state, digest);
     payLeaguePrizes(state, digest);
     paySeasonBonuses(state, position, digest);
     digest.push(`시즌 ${state.season} 종료 — 무직으로 맞았다. 이 시즌은 커리어에 남지 않는다`);
@@ -390,20 +785,21 @@ export function reviewSeason(state: GameState): string[] {
 
   const expectation = boardExpectation(state, state.userTeamId);
   const met = position <= expectation.target;
-  state.manager.reputation.board = Math.max(
-    0,
-    Math.min(100, state.manager.reputation.board + (met ? 8 : -8)),
+  state.manager.reputation.board = clampReputation(
+    state.manager.reputation.board + (met ? BOARD_SEASON_SWING : -BOARD_SEASON_SWING),
   );
 
   if (position === 1) {
     state.trophies.push({
       season: state.season,
-      competition: leagueName(leagueOfTeamIn(state, state.userTeamId)),
+      competitionId: leagueOfTeamIn(state, state.userTeamId),
       teamId: state.userTeamId,
     });
     digest.push(`🏆 ${leagueName(leagueOfTeamIn(state, state.userTeamId))} 우승`);
   }
+  payEuropeanWinnerPrizes(state, digest);
   digest.push(...reviewEuropeanCampaign(state));
+  payDomesticCupPrizes(state, digest);
   digest.push(...reviewDomesticCups(state));
   // 재정 — 리그 순위 상금(전 팀)과 선수단 성과 보너스
   payLeaguePrizes(state, digest);
@@ -423,14 +819,14 @@ export function reviewSeason(state: GameState): string[] {
       grade: met ? "met" : "missed",
       position,
       target: expectation.target,
-      expectation: expectation.label,
+      expectationCode: expectation.code,
     },
     leagueId: leagueOfTeamIn(state, state.userTeamId),
   });
 
   digest.push(
     `시즌 ${state.season} 종료 — 최종 ${position}위 (${row.wins}승 ${row.draws}무 ${row.losses}패, 득실 ${row.goalDiff > 0 ? "+" : ""}${row.goalDiff})`,
-    `보드 평가: 기대 ${expectation.label} · 최종 ${position}위 — ${met ? "달성" : "미달"}`,
+    `보드 평가: 기대 ${boardExpectationText(expectation.code, expectation.target)} · 최종 ${position}위 — ${met ? "달성" : "미달"}`,
   );
   for (const a of state.achievements.filter((x) => x.season === state.season)) {
     digest.push(`업적 달성: ${achievementLine(a)}`);
@@ -451,19 +847,10 @@ export function reviewSeason(state: GameState): string[] {
  * 96클럽이 영원히 중립(0.5)이 된다. 최근 세 시즌만 든다(그 밖은 아무도 안 읽는다).
  */
 export function recordLeagueHistory(state: GameState): void {
-  const leagueIds = new Set<string>();
-  for (const match of state.matches) {
-    if (match.season !== state.season || !match.result) continue;
-    if ((match.stage ?? "league") !== "league") continue;
-    const id = match.competitionId;
-    // 친선(대회 없음)도 컵도 2군 리그도 줄을 세우지 않는다 — 리그전만 순위표를 갖는다
-    if (id === null || isCup(id) || isReserveMatch(match)) continue;
-    leagueIds.add(id);
-  }
   const kept = (state.leagueHistory ?? []).filter(
     (table) => table.season !== state.season && table.season > state.season - RECENT_SEASONS,
   );
-  for (const leagueId of [...leagueIds].sort()) {
+  for (const leagueId of leaguesPlayedIn(state)) {
     kept.push({
       season: state.season,
       leagueId,
@@ -474,10 +861,35 @@ export function recordLeagueHistory(state: GameState): void {
 }
 
 /**
+ * 유스 콜업 난수를 세이브 시드에서 갈라 내는 오프셋 — 같은 `state.seed`를 쓰는
+ * 다른 생성기(세계를 세울 때의 2군 채우기 등)와 같은 선수를 뽑지 않게 한다.
+ */
+const YOUTH_INTAKE_SEED_OFFSET = 101;
+
+/**
  * 시즌 전환 — 쇠퇴·은퇴·유스 유입·계약 갱신·새 일정 (season.md §6).
  * 다음 시즌의 7월 1일(프리시즌 시작 = 여름 이적창 개장)로 이동한다.
+ *
+ * ⚠️ **세이브에 직접 쓰지 않는다** — 초안 위에서만 돈다. 원본에 옮겨 붙이는 경계는
+ * `transitionSeason`·`endSeason`이 긋는다 (전부 되거나 아무것도 안 된다).
  */
-export function transitionSeason(state: GameState): string[] {
+/**
+ * 대회별 우승 팀 — 우승자가 없는 대회는 목록에서 빠진다.
+ * 슈퍼컵 대진의 원본이라 "없다"가 곧 "그 슈퍼컵은 그해 서지 않는다"가 된다.
+ */
+function championsOf(
+  cups: readonly { id: string }[],
+  championOf: (cupId: string) => string | null,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const cup of cups) {
+    const champion = championOf(cup.id);
+    if (champion) out[cup.id] = champion;
+  }
+  return out;
+}
+
+function applyTransition(state: GameState): string[] {
   const digest: string[] = [];
   const rng = makeRng(state.seed, `transition:${state.season}`);
   /**
@@ -600,7 +1012,7 @@ export function transitionSeason(state: GameState): string[] {
           date: nextCalendar.preseasonStart,
           type: "retire",
           fee: 0,
-          note: "현역 은퇴",
+          reason: "retire",
         });
         const contract = state.contracts.find(
           (c) => c.gamePlayerId === id && c.status === "active",
@@ -634,7 +1046,7 @@ export function transitionSeason(state: GameState): string[] {
           continue;
         }
         leavers.push(player.id);
-        toFreeAgency(state, player, "계약 만료 — 자유계약", nextCalendar.preseasonStart);
+        toFreeAgency(state, player, "contract-expiry", nextCalendar.preseasonStart);
         digest.push(`계약 만료로 떠남: ${player.name} (무소속)`);
       }
       if (leavers.length > 0) {
@@ -657,7 +1069,7 @@ export function transitionSeason(state: GameState): string[] {
     const takenNames = new Set(squad.map((p) => p.name));
     for (let i = 0; i < totalIntake; i++) {
       const youth = generateYouthPlayer(
-        state.seed + 101,
+        state.seed + YOUTH_INTAKE_SEED_OFFSET,
         team.id,
         nextSeason,
         i,
@@ -681,7 +1093,7 @@ export function transitionSeason(state: GameState): string[] {
         date: nextCalendar.preseasonStart,
         type: "youth",
         fee: 0,
-        note: "아카데미 승격",
+        reason: "youth-callup",
       });
       state.contracts.push({
         id: `c-${youth.id}`,
@@ -702,13 +1114,13 @@ export function transitionSeason(state: GameState): string[] {
       digest.push(`유스 합류: 신인 ${totalIntake}명이 2군 개발 스쿼드에 합류했다`);
     }
 
-    // 은퇴로 1군이 너무 얇아졌을 때만 2군 상위 자원을 자동 승격한다.
-    // 그 외 승강은 감독의 결정으로 남긴다.
+    // 1군이 매치데이 명단(선발 11 + 벤치 9)을 못 채울 때만 2군 상위 자원을
+    // 자동 승격한다. 그 외 승강은 감독의 결정으로 남긴다.
     const firstCount = () => squad.filter((p) => p.squadLevel !== "reserve").length;
     for (const player of [...squad]
       .filter((p) => p.squadLevel === "reserve")
       .sort((a, b) => b.attributes.overall - a.attributes.overall)) {
-      if (firstCount() >= 20) break;
+      if (firstCount() >= MATCHDAY_SQUAD) break;
       player.squadLevel = "first";
     }
 
@@ -799,13 +1211,25 @@ export function transitionSeason(state: GameState): string[] {
     finalTables[league.id] = computeStandings(state, league.id).map((r) => r.teamId);
   }
   const cupWinners = domesticCupWinners(state);
+  /**
+   * 슈퍼컵 대진의 원본 — 티켓과 **같은 시점**에 읽어야 한다. 리그 최종 순위도 컵·
+   * 대항전 우승도 `state.season`으로 걸러 읽고, 그 뒤 `state.matches`가 새 시즌
+   * 것으로 통째로 교체된다 (competition.md §4-1).
+   */
+  const superCups: SuperCupSource | null = hasCups(state.world)
+    ? {
+        leagueTables: finalTables,
+        domesticChampions: championsOf(domesticCupCatalog(), (id) => domesticChampion(state, id)),
+        euroChampions: championsOf(cupCatalog(), (id) => euroChampion(state, id)),
+      }
+    : null;
   // 성적 축의 원본 — 승강이 소속을 옮기기 **전에** 그해 순위표를 남긴다 (team.md §2.1)
   recordLeagueHistory(state);
   /**
    * 승강 — 티켓과 **같은 최종 순위표**를 쓰고, 새 일정을 짜기 **전에** 자리를 바꾼다.
    * 순서가 뒤집히면 강등된 팀이 그 리그의 다음 시즌 일정에 그대로 남는다.
    */
-  applyPromotionRelegation(state, finalTables, digest);
+  const promoted = applyPromotionRelegation(state, finalTables, digest);
   /**
    * 체급 재산정 — 승강 **뒤**여야 한다. 승격·강등한 팀은 리그가 바뀌면서 다른 풀에
    * 들어가고, 그게 곧 완전 재산정이다 (team.md §2.1). 아래 이적 예산 보충도 새
@@ -817,10 +1241,22 @@ export function transitionSeason(state: GameState): string[] {
   state.calendar = nextCalendar;
   // 새 시즌은 7월 1일(프리시즌·여름 이적창 개장)에서 시작한다
   state.date = nextCalendar.preseasonStart;
+  /**
+   * **승격 팀 명단 채우기** — 승강·체급 재산정 뒤이고 새 일정을 짜기 전이다
+   * ([../data/team.md](../data/team.md) §5). 시즌·날짜를 넘긴 뒤에 서는 이유는
+   * 계약 시작일과 난수 채널이 **새 시즌**의 것이어야 하기 때문이다.
+   */
+  reinforcePromotedSquads(state, promoted, digest);
   const windows = buildTransferWindows(nextSeason);
   state.euroEntrants = hasCups(state.world)
-    ? buildEuroEntrants(nextSeason, state.seed, finalTables, cupWinners, (id) =>
-        tierOfTeamIn(state, id),
+    ? buildEuroEntrants(
+        nextSeason,
+        state.seed,
+        finalTables,
+        cupWinners,
+        (id) => tierOfTeamIn(state, id),
+        // 2부 몫을 뽑는 자리라 소속은 승강 뒤의 것이어야 한다 (europe.ts `LeagueMembers`)
+        (leagueId) => teamsOfLeagueIn(state, leagueId),
       )
     : [];
   /**
@@ -838,6 +1274,7 @@ export function transitionSeason(state: GameState): string[] {
       ...(isCupOnlyLeague(ourLeague) ? { extraLeagues: [ourLeague] } : {}),
     },
     state.userTeamId,
+    superCups,
   );
   state.windows = windows;
   state.matches = matches;
@@ -889,10 +1326,23 @@ export function transitionSeason(state: GameState): string[] {
  * 마지막 달을 뺀 성과로 결정된다 (finance.md §7.1).
  */
 export function endSeason(state: GameState): string[] {
-  const digest = reviewSeason(state);
-  closeSeasonBooks(state, digest);
-  digest.push(...transitionSeason(state));
-  return digest;
+  return inTransaction(state, (draft) => {
+    const digest = reviewSeason(draft);
+    closeSeasonBooks(draft, digest);
+    digest.push(...applyTransition(draft));
+    return digest;
+  });
+}
+
+/**
+ * 시즌 전환 하나만 — 세이브에 옮겨 붙이는 경계는 `endSeason`과 같다.
+ *
+ * ⚠️ 마지막 걸음인 편성(`buildEuroEntrants`·`buildSeasonFixtures`)은 던질 수 있는데,
+ * 그 자리는 계약 만료·은퇴·승강·`season++`가 전부 끝난 **뒤**다. 그래서 전이 전체가
+ * 복제본 위에서 돌고, 끝까지 성공했을 때만 세이브가 된다 (season.md §6).
+ */
+export function transitionSeason(state: GameState): string[] {
+  return inTransaction(state, applyTransition);
 }
 
 export type { GamePlayer };

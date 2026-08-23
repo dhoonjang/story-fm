@@ -265,7 +265,7 @@ describe("시장은 세이브의 리그 소속을 본다", () => {
 describe("리그 보정은 승강을 따라 움직인다", () => {
   // 세계를 한 번만 세운다 — 리그 소속(`leagueOf`) 말고는 아무것도 건드리지 않는다
   const state: GameState = createTestGame();
-  const home = leagueOfTeam(state.userTeamId);
+  const home = leagueOfTeam(state.userTeamId)!;
   const second = secondTierOf(home)!;
   /** 반올림(10만 단위)이 비율을 흐리지 않도록 스쿼드 최상위를 쓴다 */
   const player = [...playersOf(state, state.userTeamId)].sort(

@@ -10,8 +10,9 @@
  * (agents.md §4), 압축은 접지 않은 채 다음 기회를 기다린다(agents.md §5-1).
  */
 
-import { AGENT_NAMES, type AgentName, type LlmEnv } from "./config";
+import { AGENT_NAMES, agentMinCacheableInput, type AgentName, type LlmEnv } from "./config";
 import type { GameLLM, TurnRequest, TurnResult, TurnUsage } from "./game-llm";
+import { LlmCallError } from "./llm-error";
 
 /**
  * 상한을 넘겼을 때 건너뛰는 에이전트.
@@ -19,29 +20,16 @@ import type { GameLLM, TurnRequest, TurnResult, TurnUsage } from "./game-llm";
  * **건너뛴 자리에 잃는 것이 없는 곳만 끊는다.** 결산 셋은 실패를 삼키고 코어
  * 앵커가 그대로 남으며, 자주 도는 만큼 예산도 여기서 가장 빨리 샌다. 압축은
  * 실패하면 접지 않고 다음 기회에 다시 시도하는 계약이라(agents.md §5-1) 건너뛰어도
- * 이력이 사라지지 않는다.
+ * 이력이 사라지지 않는다. 교섭 상대도 같은 계약이다 — 건너뛰면 코어 앵커가 그대로
+ * 협상에 반영된다(agents.md §4-1).
  */
 const SKIPPABLE_AGENTS: ReadonlySet<AgentName> = new Set<AgentName>([
   "match-rater",
   "training-rater",
   "mood-rater",
+  "negotiator",
   "history-compactor",
 ]);
-
-/**
- * 캐시 히트율을 신호로 읽기 시작할 입력 크기 — 제공자의 **최소 캐시 프리픽스**가
- * 이 눈금이다. 이보다 짧은 입력은 캐시가 애초에 안 걸리므로 히트율 0이
- * "프리픽스가 깨졌다"는 뜻이 아니다 (짧은 결산 프롬프트가 그 부류다).
- *
- * 값은 제공자마다 다르다 — Gemini 3.x Flash가 4,096, Anthropic이 1,024다. 그중
- * **가장 큰 것**을 드는 이유는 이 문턱이 "히트율 0을 경고로 읽어도 되는가"를 가르기
- * 때문이다: 낮게 잡으면 캐시가 걸릴 수 없는 호출까지 경고가 올라오고, 매번 거짓인
- * 경고는 진짜 신호가 올라와도 읽히지 않는다.
- *
- * 밸런스 하네스도 이 눈금을 읽는다 — 압축의 잔량이 이보다 작으면 접은 직후 이력
- * 캐시가 아예 안 걸린다 (`packages/agents/harness/history-window.harness.ts`).
- */
-export const MIN_CACHEABLE_INPUT = 4096;
 
 /** 히트율 0을 신호로 읽기 전에 필요한 호출 수 — 첫 호출은 원래 쓰기만 한다 */
 const CACHE_ALERT_AFTER_CALLS = 3;
@@ -186,23 +174,35 @@ export function agentAllowed(agent: AgentName, verdict: BudgetVerdict): boolean 
 /**
  * 프리픽스가 조용히 깨진 것으로 보이는 에이전트 — 캐시가 걸릴 만한 크기를 여러 번
  * 보냈는데 히트율이 0인 곳이다.
+ *
+ * **문턱은 그 에이전트가 부르는 제공자의 최소 캐시 프리픽스다** (models.md §4).
+ * 셋 중 큰 값 하나로 재면 작은 쪽이 통째로 문턱 아래에 들어앉아, 프리픽스가 매 턴
+ * 깨져도 경고가 영영 올라오지 않는다 — Anthropic 결산 호출(1k~4k)이 그 자리다.
+ * `minInput`은 설정을 읽지 않는 테스트가 문턱을 직접 주기 위한 자리다.
  */
-export function cacheAlerts(ledger: UsageLedger): AgentName[] {
+export function cacheAlerts(
+  ledger: UsageLedger,
+  minInput: (agent: AgentName) => number = agentMinCacheableInput,
+): AgentName[] {
   return AGENT_NAMES.filter((agent) => {
     const entry = ledger.byAgent[agent];
     if (entry.calls < CACHE_ALERT_AFTER_CALLS) return false;
-    if (entry.usage.inputTokens / entry.calls < MIN_CACHEABLE_INPUT) return false;
+    if (entry.usage.inputTokens / entry.calls < minInput(agent)) return false;
     return entry.usage.cacheReadTokens === 0;
   });
 }
 
-/** 상한에 걸려 부르지 않았다 — 결산의 "실패하면 앵커" 경로로 떨어진다 */
-export class TokenBudgetExceededError extends Error {
+/**
+ * 상한에 걸려 부르지 않았다 — 종류 `budget` (models.md §1-1).
+ * 결산의 "실패하면 앵커" 경로로 떨어지고, 장면을 쓰는 호출이면 화면의 배너가 된다.
+ */
+export class TokenBudgetExceededError extends LlmCallError {
   constructor(
     readonly agent: AgentName,
     readonly verdict: BudgetVerdict,
   ) {
     super(
+      "budget",
       `토큰 예산 상한(${verdict.limit})을 넘겨 ${agent} 호출을 건너뜁니다 — 누적 ${verdict.used}`,
     );
     this.name = "TokenBudgetExceededError";
@@ -225,6 +225,17 @@ const warned = new Set<string>();
 /** 지금까지의 세션 누적 (스냅샷) */
 export function llmUsage(): UsageLedger {
   return sessionLedger;
+}
+
+/**
+ * 지금 장부가 담고 있는 게임 — 아무 게임도 열지 않았으면 null.
+ *
+ * 장부의 단위가 **게임 하나**라(§4) 계측을 세우는 자리는 그 수치가 어느 세이브의
+ * 것인지를 함께 말해야 한다. 그 답이 없으면 다른 게임을 열고 온 사람이 0을 「모델을
+ * 안 불렀다」로 읽는다.
+ */
+export function llmUsageGameId(): string | null {
+  return ledgerGameId;
 }
 
 /** 장부를 비운다 — 테스트의 시작점이자 게임을 갈아탈 때의 바닥 */

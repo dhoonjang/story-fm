@@ -1,3 +1,5 @@
+import { TACTIC_AXES, tacticAxisScaleText } from "@story-fm/domain";
+
 export type SkillGroup = "진행" | "전술·훈련" | "대화·서사" | "조회" | "경기" | "이적" | "재정";
 
 export interface SkillCatalogEntry {
@@ -13,7 +15,7 @@ export interface SkillCatalogEntry {
  *
  * 한 도구의 사용법은 여기에만 산다 — 언제 부르고, 인자를 어떻게 채우고, 결과를
  * 장면에 어떻게 옮기는가. `GM_SYSTEM`은 도구와 무관한 규칙만 갖는다
- * (docs/llm/prompts.md §4). 경기 중에는 이 설명이 실리지 않으므로 경기에서도 필요한
+ * (docs/llm/prompts.md §5). 경기 중에는 이 설명이 실리지 않으므로 경기에서도 필요한
  * 판정 근거는 `MATCH_INTENT_SYSTEM`이 따로 갖는다 — 그 겹침은 중복이 아니다.
  */
 export const SKILL_CATALOG = [
@@ -56,6 +58,16 @@ export const SKILL_CATALOG = [
       "지정 전체를 다시 적는 목록 교체다 — playerIds를 생략하면 해제. 2군만 지정할 수 있고, 승격하면 풀린다.",
   },
   {
+    name: "set_reserve_training",
+    label: "2군 훈련 방침",
+    group: "전술·훈련",
+    readOnly: false,
+    description:
+      "우리 2군이 어느 축을 겨냥해 자랄지 정한다 — physical(신체 4축) · technical(기술 5축) · mental(정신 6축) · balanced(해제). " +
+      "총량은 늘지 않는다 — 겨냥한 축이 빨라지는 만큼 나머지 필드 축이 느려진다. 골키핑은 어느 방침에도 닿지 않는다. " +
+      "팀 하나에 방침 하나이고, 1군과 타 팀에는 닿지 않는다.",
+  },
+  {
     name: "set_captain",
     label: "주장 지정",
     group: "전술·훈련",
@@ -71,8 +83,7 @@ export const SKILL_CATALOG = [
     readOnly: false,
     description:
       "팀 전술 6축을 변경한다. 축은 모두 1~5이며 3이 보통이다 — " +
-      "멘탈리티(1 수비적~5 공격적) · 수비 라인(1 낮게~5 높게) · 압박(1 최소~5 맹렬히) · " +
-      "템포(1 느리게~5 빠르게) · 폭(1 좁게~5 넓게) · 패스(1 짧게~5 길게). " +
+      `${TACTIC_AXES.map(tacticAxisScaleText).join(" · ")}. ` +
       "현재 값과 다른 축 중 감독이 변경을 명시한 축만 보내라. 언급하지 않은 축을 균형값이나 추천값으로 보정하지 않는다. 포메이션과 선수 배치는 이 도구로 바꾸지 않는다.",
   },
   {
@@ -184,6 +195,29 @@ export const SKILL_CATALOG = [
       "매출이 늘어난 일과 선수를 판 돈은 여기로 오지 않는다. 한도는 하루 누적이다.",
   },
   {
+    name: "request_board",
+    label: "보드에 요청",
+    group: "재정",
+    readOnly: false,
+    description:
+      "감독이 보드에 무엇을 달라고 건다 — 이적 예산 증액(transfer-budget) · 주급 한도 상향(wage-room) · 구장 증설(stadium). " +
+      "감독이 부른 값을 그대로 amount에 실어라(예산·주급은 금액, 구장은 좌석 수) — 액수를 말하지 않았으면 지어내지 말고 물어라. " +
+      "접수까지가 이 도구의 일이다: 답은 며칠 뒤 코어가 정해 승인·부분 승인·거절과 금액으로 스냅샷에 실린다. " +
+      "이 턴에는 요청을 올린 장면까지만 쓰고 보드의 답을 앞질러 쓰지 마라. 답이 온 날은 그 값 그대로 말하고, 왜 그렇게 답했는지는 잔고·급여 비중·보드 평판으로 옮겨라. " +
+      "답을 기다리는 요청이 있거나 같은 안건을 최근에 물었으면 반려된다.",
+  },
+  {
+    name: "set_ticket_price",
+    label: "티켓 가격",
+    group: "재정",
+    readOnly: false,
+    description:
+      "홈 경기 티켓 값을 감독이 매긴다 — price는 표 한 장의 금액(£)이다. " +
+      '지금 값·기준가·부를 수 있는 폭은 get_finance가 준다: 감독이 "10% 올려"라고 하면 그 값을 읽어 계산해 넣고, 폭 밖이면 잘려 들어가므로 실제로 선 값을 결과에서 읽어 말해라. ' +
+      "올리면 관중이 줄고 내리면 관중이 는다 — 기준가 근처가 수입이 가장 큰 자리라, 표가 모자라 늘 만석이던 구단만 올려서 더 번다. " +
+      "시즌권과 예매가 이미 나가 있어 30일에 한 번만 다시 매긴다.",
+  },
+  {
     name: "search_players",
     label: "선수 검색",
     group: "조회",
@@ -243,7 +277,8 @@ export const SKILL_CATALOG = [
     description:
       "경질돼 무직인 감독이 받은 감독직 제안을 수락한다 — 그날부로 그 구단의 감독이 된다. " +
       "offer에는 제안 id나 구단 이름을 적는다. 감독이 받겠다고 분명히 말했을 때만 부른다: 어느 자리를 고를지는 감독의 것이고, 제안은 기한이 지나면 사라진다. " +
-      "부임하면 앞 구단의 보드 경고는 지워지고 시즌 중이어도 그 자리에서 이어간다 — 순위표는 부임 전 경기까지 포함한 그 구단의 성적이다.",
+      "부임하면 앞 구단의 보드 경고는 지워지고 시즌 중이어도 그 자리에서 이어간다 — 순위표는 부임 전 경기까지 포함한 그 구단의 성적이다. " +
+      "재직 중에 이 도구로 받는 것은 보드의 재계약 제안 하나다 — 구단도 자리도 그대로고 계약만 새로 선다.",
   },
   {
     name: "counter_manager_offer",
@@ -253,7 +288,8 @@ export const SKILL_CATALOG = [
     description:
       "받은 감독직 제안에 조건을 되부른다 — 연봉(salary)이나 이적 예산 약속(transferBudget), 또는 둘 다. " +
       "보드는 평판이 문턱을 넘는 만큼만 물러서고 천장에서 멈춘다 — 제시액 아래로 내려 부를 수는 없다. " +
-      "흥정은 제안마다 한 번뿐이라 되부른 뒤에는 수락 여부만 남는다. 감독이 조건을 두고 분명히 요구했을 때만 부른다.",
+      "흥정은 제안마다 한 번뿐이라 되부른 뒤에는 수락 여부만 남는다. 감독이 조건을 두고 분명히 요구했을 때만 부른다. " +
+      "재직 중인 감독이 되부를 수 있는 것은 보드의 재계약 제안뿐이다.",
   },
   {
     name: "apply_manager_job",
@@ -311,7 +347,7 @@ export const SKILL_CATALOG = [
     group: "이적",
     readOnly: false,
     description:
-      "오퍼에 답한다 (accept·counter·reject) — 누가 답할 차례인지는 협상이 안다. 우리가 넣은 오퍼면 당신이 상대 구단·선수·에이전트가 되어 판정하고, 상대가 넣은 오퍼면 감독의 뜻대로 답한다. 답이 도착한 협상은 서사만 쓰지 말고 이 도구로 기록해야 다음 단계로 간다. deal_odds의 확률과 근거를 앵커로 삼고 note에 한 줄을 남긴다. 설득 논거가 붙은 협상은 확률만 보고 거절하지 마라 — 그 이야기가 이 선수에게 얼마나 큰지는 그 선수의 나이·처지·이력을 보고 당신이 판정한다. counter는 방향이 갈린다: 영입이면 더 부르고(우리 제시액 이상·요구액 +15% 이하), 매각이면 사는 쪽이 깎아 부르고(시장가 55% 이상·우리 호가 미만), 재계약이면 선수가 주급을 부른다(우리 제시액 초과·기대치 1.4배 이하), 해지면 선수가 정산금을 올려 부른다(우리 제시액 초과·일방 해지 전액 이하). paymentYears를 얹으면 같은 금액을 분할로 되부르는 것이다 — 총액 한도는 그대로 걸리고 분할은 그 위의 흥정이다.",
+      "상대가 넣은 오퍼에 감독의 뜻대로 답한다 (accept·counter·reject). 우리가 넣은 오퍼에 대한 상대의 답은 당신이 판정하지 않는다 — 그 자리는 이미 끝나 상태 스냅샷의 📨 줄에 있고, 당신은 그것을 장면으로 전한다. 감독이 답을 정한 협상은 서사만 쓰지 말고 이 도구로 기록해야 다음 단계로 간다. deal_odds의 확률과 근거를 앵커로 삼고 note에 한 줄을 남긴다. counter는 우리가 값을 올려 부르는 것이고(받은 값 초과), paymentYears를 얹으면 같은 금액을 분할로 되부르는 것이다 — 총액 한도는 그대로 걸리고 분할은 그 위의 흥정이다.",
   },
   {
     name: "accept_deal",
@@ -344,6 +380,14 @@ export const SKILL_CATALOG = [
     description:
       "우리 선수와의 계약을 일방 해지한다 (방출). 잔여 계약 주급 전액을 즉시 물고 원장에 남아 PSR에 잡힌다. " +
       "합의로 깎으려면 open_release가 먼저다. 감독의 확인을 받고 호출하라.",
+  },
+  {
+    name: "exercise_buyback",
+    label: "되사기 행사",
+    group: "이적",
+    readOnly: false,
+    description:
+      "우리가 판 선수에게 걸어 둔 되사기 조항을 행사해 정해진 값에 그 자리에서 데려온다. 협상도 메디컬도 없다 — 권리라 상대는 거부할 수 없다. 쓸 수 있는 권리가 있으면 턴 블록에 서므로, 없는 선수에게 부르지 마라. 이적창이 열려 있고 이적 예산이 조항 값을 덮을 때만 선다.",
   },
   {
     name: "recall_loan",
@@ -383,7 +427,7 @@ export const DEFAULT_SKILL_DESCRIPTIONS = Object.fromEntries(
   SKILL_CATALOG.map((skill) => [skill.name, skill.description]),
 ) as SkillDescriptions;
 
-/** 이번 LLM 턴에 실릴 도구 설명 — 코드가 유일한 원본이다 (prompts.md §5). */
+/** 이번 LLM 턴에 실릴 도구 설명 — 코드가 유일한 원본이다 (prompts.md §2). */
 export function skillDescriptions(): SkillDescriptions {
   return DEFAULT_SKILL_DESCRIPTIONS;
 }

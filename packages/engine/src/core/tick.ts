@@ -1,6 +1,5 @@
 import type { GamePlayer, MatchRecord, ScheduleEntry, TrainingSession } from "@story-fm/domain";
 import {
-  AI_MANAGER_RATING_FALLBACK,
   FAMILIARITY_BASELINE,
   clampCondition,
   isReserveMatch,
@@ -32,6 +31,7 @@ import { hasCups } from "../world/scope";
 import { driftFamiliarity, tickOtherClubs } from "../squad/other-clubs";
 import { applyResultMood } from "../squad/slump";
 import { advanceEuroKnockouts } from "../competition/euro-knockout";
+import { advanceSuperCups } from "../competition/super-cup";
 import { applyMonthlyDevelopment } from "../squad/development";
 import { returnDueLoans, signFreeAgents } from "../market/departures";
 import { clampForm, decayedForm, formDeltaFromMatch } from "../squad/form";
@@ -48,6 +48,7 @@ import {
 import { openEvePress, SQUAD_CORE_SIZE } from "../club/press";
 import { tickApproaches } from "../club/approach";
 import { tickBoardDemands } from "../club/board-demand";
+import { tickBoardRequests } from "../club/board-request";
 import { tickArcs } from "../world/arcs";
 import {
   TRAINING_INJURY_PER_SESSION,
@@ -69,9 +70,10 @@ import {
   runMedicals,
 } from "../market/negotiation";
 import { playedIn, quickSimulate, type SimSquad } from "../match/quick-sim";
+import { managerTacticsOf } from "../match/manager-tactics";
 import { recordCard } from "../match/discipline";
 import { runAiTransfers } from "../market/ai-market";
-import { reviewUserSeat, runManagerMarket } from "../market/manager-market";
+import { reviewManagerContract, reviewUserSeat, runManagerMarket } from "../market/manager-market";
 import { matchRating } from "../match/ratings";
 import { scoutReportLine } from "../views/views";
 import { pruneDeferredScouts } from "../squad/scouting";
@@ -530,6 +532,12 @@ function dailyTick(
    * 무직에게는 요청이 서지도 판정되지도 않는다 — 보드도 이제 남의 것이다.
    */
   if (managed !== null) tickBoardDemands(state, digest);
+  /**
+   * 감독이 보드에 건 요청 — 오늘 답이 도착했으면 판정하고 그 자리에서 반영한다
+   * (finance.md §9.6). 구단주 요청과 방향이 반대인 별개 상태라 눈금을 나누지
+   * 않는다. 무직에게는 답할 보드가 없다.
+   */
+  if (managed !== null) tickBoardRequests(state, digest);
   const approached = managed !== null && tickApproaches(state, digest);
 
   /**
@@ -670,14 +678,6 @@ function boardSlotOf(state: GameState, player: GamePlayer) {
     proficiency: proficiencyAt(player, position),
     familiarity: assignment?.familiarity ?? FAMILIARITY_BASELINE,
   };
-}
-
-/** 이 팀을 이끄는 사람의 전술 눈금 — 감독 팀이면 감독 본인, 아니면 AI 감독 */
-function managerTacticsOf(state: GameState, teamId: string): number {
-  return teamId === managedTeamId(state)
-    ? state.manager.attributes.tactics
-    : (state.teams.find((team) => team.id === teamId)?.aiManagerTacticsRating ??
-        AI_MANAGER_RATING_FALLBACK);
 }
 
 /**
@@ -1027,11 +1027,12 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
       });
     }
     /**
-     * 부상 — 심각도·기간은 **유저 경기와 같은 공식**(`openInjuryFor`)으로 굴린다.
+     * 부상 — 심각도·기간은 **유저 경기와 같은 공식**(`openInjuryFor`)으로, 난수도
+     * **같은 모양의 채널**(`injury:<경기 id>`)에서 굴린다 (match.md §7).
      * digest에는 올리지 않는다: 하루 열 경기의 부상을 전부 나열하면 브리핑이
      * 소음이 된다. 감독은 상대를 조회할 때(`get_squad`·`search_players`) 알게 된다.
      */
-    const injuryRng = makeRng(state.seed, `quick-injury:${match.id}`);
+    const injuryRng = makeRng(state.seed, `injury:${match.id}`);
     for (const tag of hurt) {
       const [side, playerId] = tag.split(":") as ["home" | "away", string];
       const player = onPitch[side].find((p) => p.id === playerId);
@@ -1230,12 +1231,26 @@ export function advanceTime(
     if (reviewUserSeat(state, digest)) {
       return { ok: true, digest, stopped: "blocked", trained };
     }
+    /**
+     * 감독의 계약 — 만료 판정과 보드의 재계약 통보 (career.md §5.4). 경질 뒤에
+     * 봐야 지운 계약을 다시 재지 않는다. 자리를 잃은 날은 경질과 같은 무게로
+     * 시계를 세우고, 통보가 선 날은 답할 자리가 생긴 날이라 주의로 멈춘다.
+     */
+    const contractDay = reviewManagerContract(state, digest);
+    if (contractDay === "expired") {
+      return { ok: true, digest, stopped: "blocked", trained };
+    }
+    if (contractDay === "notice") {
+      return { ok: true, digest, stopped: "attention", trained };
+    }
     simulateOtherMatches(state, digest);
     // 녹아웃 — 직전 단계가 끝났으면 다음 단계를 편성한다.
     // 대항전을 먼저 돌려야 예약된 대항전 날짜가 컵 날짜 선택에 반영된다.
     if (hasCups(state.world)) {
       advanceEuroKnockouts(state, digest);
       advanceDomesticCups(state, digest);
+      // 슈퍼컵은 한 경기라 편성할 다음 단계가 없다 — 끝난 경기의 승부만 가린다
+      advanceSuperCups(state, digest);
     }
     // 경기 일정이 바뀌었으면 기본 훈련을 다시 깐다 (감독 지시 세션은 그대로).
     // ⚠️ 예전엔 "경기 수가 늘었을 때"만 불렀는데, 컵 대진은 **경기일 몇 주 전에**

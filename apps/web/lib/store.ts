@@ -9,6 +9,8 @@ import {
   type OfficeViews,
   type ChatTurn,
 } from "@story-fm/engine";
+import { parseScorerEntry } from "@story-fm/domain";
+import { STALLED_CLOCK_TURNS } from "@story-fm/agents";
 
 /** 응답에 실을 장부 — 라우트가 **자기가 바꾼 것만** 고른다 */
 export type ViewKey = keyof OfficeViews;
@@ -58,6 +60,14 @@ export interface GamePayload {
    * 경기가 끝나면 그 구간의 중계·지시는 메인 채팅에서 **한 장으로 접힌다**.
    * 그 자리에 남는 카드가 무엇의 기록인지 말하려면 상대와 스코어가 필요하다.
    */
+  /**
+   * **시계가 멎은 채 이어진 턴 수** — 모델의 첫 줄 헤더를 연달아 못 읽었다
+   * (`STALLED_CLOCK_TURNS` 이상일 때만 실린다).
+   *
+   * 턴이 실패한 게 아니므로 오류 배너가 아니다. 화면이 사실 한 줄로 세워,
+   * 세계가 오늘에 머물러 있다는 것이 감독에게 보이게 한다 (agents.md §2).
+   */
+  clockStalled?: number;
   matchLogs: Record<
     string,
     {
@@ -138,9 +148,10 @@ function matchLogsOf(state: GameState): GamePayload["matchLogs"] {
     const ours = m.homeTeamId === state.userTeamId;
     const opponent = teamName(ours ? m.awayTeamId : m.homeTeamId);
     const nameOf = (pid: string) => playerById.get(pid)?.name ?? pid;
-    const goals = (m.result?.scorers ?? []).map((tag, i) => {
+    const goals = (m.result?.scorers ?? []).map((entry, i) => {
       const minute = m.result?.goalMinutes?.[i];
-      return `${minute !== undefined ? `${minute}′ ` : ""}${nameOf(tag.split(":")[1] ?? tag)}`;
+      // 득점자 항목의 형식은 도메인이 안다 — 여기서 `split`으로 갈라 읽지 않는다
+      return `${minute !== undefined ? `${minute}′ ` : ""}${nameOf(parseScorerEntry(entry).playerId)}`;
     });
     /** 평점은 **우리 팀 선수만** 남는다 — 장부가 온전한 경기의 파생값이다 */
     const best = Object.entries(m.result?.ratings ?? {})
@@ -188,6 +199,9 @@ export function toPayload(state: GameState, only?: readonly ViewKey[]): GamePayl
     views: buildOfficeViews(state),
     playerNames: namesForChat(state),
     speakerRoles: speakerRoles(state),
+    ...((state.sceneHeaderMisses ?? 0) >= STALLED_CLOCK_TURNS
+      ? { clockStalled: state.sceneHeaderMisses }
+      : {}),
     matchLogs: matchLogsOf(state),
   };
 }

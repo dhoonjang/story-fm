@@ -5,10 +5,17 @@ import type {
   PressAxis,
   PressConference,
   PressFact,
+  PlayerIssueReason,
   PressStance,
   PressTrigger,
 } from "@story-fm/domain";
-import { isNaturalAt, naturalPositionOf, PLAYER_ISSUE_REASONS, RATING_MAX } from "@story-fm/domain";
+import {
+  isNaturalAt,
+  naturalPositionOf,
+  PLAYER_ISSUE_REASONS,
+  pressFactText,
+  RATING_MAX,
+} from "@story-fm/domain";
 import type { GameState } from "../core/state";
 import { playerById, playersOf, pushNarrative, teamNameIn, userPlayers } from "../core/state";
 import { pickPlayerAmong } from "../core/player-ref";
@@ -17,13 +24,13 @@ import { formatMoney } from "./finance";
 import { makeRng, pick } from "../core/rng";
 import { clampForm, formLabel, moraleToForm } from "../squad/form";
 import { recentOutcomes } from "../squad/slump";
-import { issueReasonText } from "../squad/mood";
 import { isFriendly } from "../competition/friendly";
 import { boardExpectation, computeStandings } from "../competition/season";
 import { leagueOfTeamIn } from "../competition/promotion";
 import { derbyNameOf } from "../data/derbies";
 import { reportersOf } from "../world/persona";
 import type { SkillResult } from "../skills";
+import { deltaItems } from "../skills/brief";
 
 /**
  * 기자회견 — **코어는 자리를 만들고 한도를 정하고, 판정은 LLM이 한다.**
@@ -134,10 +141,9 @@ function outcomeOf(state: GameState, m: MatchRecord): "win" | "draw" | "loss" | 
   return us === them ? "draw" : us > them ? "win" : "loss";
 }
 
-/** 불만 사유를 사실어로 — 옛 세이브가 사유 문장을 들고 있어 그것이 폴백이다 */
-function issueTextOf(state: GameState, playerId: string): string {
-  const issue = state.issues.find((i) => i.gamePlayerId === playerId);
-  return (issue ? issueReasonText(issue) : null) ?? "사유 불명";
+/** 그 선수의 불만 사유 코드 — 옛 세이브는 문장만 들고 있어 그때는 없다 */
+function issueReasonOf(state: GameState, playerId: string): PlayerIssueReason | null {
+  return state.issues.find((i) => i.gamePlayerId === playerId)?.reason ?? null;
 }
 
 /**
@@ -182,7 +188,10 @@ export function buildMatchPress(state: GameState, matchId: string): PressConfere
   const outcome = outcomeOf(state, match);
   if (!outcome) return null;
   const home = match.homeTeamId === state.userTeamId;
-  const opponent = teamNameIn(state, home ? match.awayTeamId : match.homeTeamId);
+  const opponentId = home ? match.awayTeamId : match.homeTeamId;
+  const opponent = teamNameIn(state, opponentId);
+  const usGoals = home ? result.homeGoals : result.awayGoals;
+  const themGoals = home ? result.awayGoals : result.homeGoals;
   const score = `${result.homeGoals}-${result.awayGoals}`;
 
   /**
@@ -201,7 +210,12 @@ export function buildMatchPress(state: GameState, matchId: string): PressConfere
   const facts: PressFact[] = [
     {
       kind: "result",
-      text: `${opponent}전 ${score} ${outcome === "win" ? "승리" : outcome === "draw" ? "무승부" : "패배"} (${home ? "홈" : "원정"})`,
+      data: {
+        refId: opponentId,
+        name: opponent,
+        values: { for: usGoals, against: themGoals },
+        tags: ["match", outcome, home ? "home" : "away"],
+      },
       about: null,
       sharp: outcome === "loss" || (outcome === "draw" && winless),
     },
@@ -209,7 +223,7 @@ export function buildMatchPress(state: GameState, matchId: string): PressConfere
   if (winless) {
     facts.push({
       kind: "winless",
-      text: `최근 ${recent.length}경기 무승 (${recent.map((r) => (r === "draw" ? "무" : "패")).join("")})`,
+      data: { values: { matches: recent.length }, tags: [...recent] },
       about: null,
       sharp: true,
     });
@@ -217,11 +231,12 @@ export function buildMatchPress(state: GameState, matchId: string): PressConfere
   const target = questionablePlayer(state, state.seed + state.matches.length);
   if (target) {
     const slumping = target.state.form < SLUMPING_FORM;
+    const reason = issueReasonOf(state, target.id);
     facts.push({
       kind: slumping ? "slump" : "unhappy",
-      text: slumping
-        ? `${target.name} 폼 ${formLabel(target.state.form)}`
-        : `${target.name} 라커룸 불만 (${issueTextOf(state, target.id)})`,
+      data: slumping
+        ? { name: target.name, tags: [formLabel(target.state.form)] }
+        : { name: target.name, tags: reason ? ["named", reason] : ["named"] },
       about: target.id,
       sharp: true,
     });
@@ -287,13 +302,12 @@ export function buildTransferPress(
   if (betterThanInSquad(state, player) >= SQUAD_CORE_SIZE && input.fee < BIG_FEE) return null;
 
   const pos = naturalPositionOf(player).position;
-  const fee = input.fee > 0 ? ` · 이적료 ${formatMoney(input.fee)}` : " · 이적료 없음";
   const facts: PressFact[] =
     input.kind === "in"
       ? [
           {
             kind: "arrival",
-            text: `${player.name} 영입 확정 (${pos})${fee}`,
+            data: { name: player.name, values: { fee: input.fee }, tags: ["signed", pos] },
             about: player.id,
             sharp: false,
           },
@@ -303,7 +317,7 @@ export function buildTransferPress(
            */
           ...squeezedBy(state, player).map((p): PressFact => ({
             kind: "squeezed",
-            text: `${p.name}이(가) 같은 자리(${pos})를 봐 왔다`,
+            data: { name: p.name, tags: [pos] },
             about: p.id,
             sharp: true,
           })),
@@ -311,7 +325,7 @@ export function buildTransferPress(
       : [
           {
             kind: "departure",
-            text: `${player.name} 매각 확정 (${pos})${fee}`,
+            data: { name: player.name, values: { fee: input.fee }, tags: ["sold", pos] },
             about: player.id,
             sharp: true,
           },
@@ -355,8 +369,6 @@ export function buildDeparturePress(
   if (!input.wasCaptain && betterThanInSquad(state, player) >= SQUAD_CORE_SIZE) return null;
 
   const pos = naturalPositionOf(player).position;
-  const severance =
-    input.severance > 0 ? ` · 위약금 ${formatMoney(input.severance)}` : " · 위약금 없음";
   return {
     id: `press-release-${player.id}-${state.date}`,
     date: state.date,
@@ -366,7 +378,11 @@ export function buildDeparturePress(
     facts: [
       {
         kind: "departure",
-        text: `${player.name} 계약 해지 (${pos})${severance}`,
+        data: {
+          name: player.name,
+          values: { severance: input.severance },
+          tags: ["released", pos],
+        },
         about: player.id,
         sharp: true,
       },
@@ -379,13 +395,11 @@ export function buildDeparturePress(
 // ── 언론 유출 ──────────────────────────────────────────────────
 
 /**
- * 유출된 주제를 사실어로 — **라커룸 불만과 같은 말을 쓴다**(`issueReasonText`).
- * 같은 사실을 두 이름으로 부르면 어느 쪽이 진짜인지 코드가 매번 다시 정한다.
- * 유출은 선수 주제에서만 나므로(people.md §8) 팀 주제는 표에 없고, 없으면 폴백이다.
+ * 유출된 주제의 **사유 코드** — 라커룸 불만과 같은 표를 쓴다(`ISSUE_REASON_KO`).
+ * 유출은 선수 주제에서만 나므로(people.md §8) 팀 주제는 코드가 없고, 없으면 `null`이다.
  */
-function leakTopicText(topic: ApproachTopic): string {
-  const reason = PLAYER_ISSUE_REASONS.find((r) => r === topic) ?? null;
-  return issueReasonText({ reason }) ?? "사유 불명";
+function leakReasonOf(topic: ApproachTopic): PlayerIssueReason | null {
+  return PLAYER_ISSUE_REASONS.find((r) => r === topic) ?? null;
 }
 
 /**
@@ -403,9 +417,10 @@ function loadLeaks(state: GameState, conference: PressConference): void {
     const player = playerById(state, leak.playerId);
     // 떠난 선수의 유출은 조용히 버린다 — 우리 라커룸에 없는 사람의 불만은 물을 자리가 아니다
     if (!player || player.teamId !== state.userTeamId) continue;
+    const reason = leakReasonOf(leak.topic);
     conference.facts.push({
       kind: "leak",
-      text: `${player.name}의 ${leakTopicText(leak.topic)} 불만이 언론에 보도됐다`,
+      data: { name: player.name, ...(reason ? { tags: [reason] } : {}) },
       about: player.id,
       sharp: true,
     });
@@ -420,11 +435,6 @@ function loadLeaks(state: GameState, conference: PressConference): void {
 
 /** 전야에 실리는 최근 폼의 창 — 경기 뒤 회견의 무승 창과 같은 자 */
 const FORM_WINDOW = WINLESS_WINDOW;
-
-const OUTCOME_KO = { win: "승", draw: "무", loss: "패" } as const;
-
-/** 홈/원정 한 글자 — 대진 카드가 이것 없이는 반쪽이다 */
-const sideKo = (home: boolean) => (home ? "홈" : "원정");
 
 /** 이번 시즌 우리 리그 경기 — 개막이 언제였는지도, 순위도 여기서 센다 */
 function leagueMatchesOfSeason(state: GameState, leagueId: string): MatchRecord[] {
@@ -444,7 +454,12 @@ function placeFact(state: GameState, opponentId: string, opponent: string): Pres
   if (us < 0 || them < 0 || standings[us]!.played === 0) return null;
   return {
     kind: "standing",
-    text: `리그 ${us + 1}위 · ${opponent} ${them + 1}위`,
+    data: {
+      refId: opponentId,
+      name: opponent,
+      values: { rank: us + 1, opponentRank: them + 1 },
+      tags: ["versus"],
+    },
     about: null,
     sharp: false,
   };
@@ -462,7 +477,11 @@ function buildDerbyPress(
   const facts: PressFact[] = [
     {
       kind: "fixture",
-      text: `${input.derby} — ${input.opponent}전 (${sideKo(input.home)})`,
+      data: {
+        refId: input.opponentId,
+        name: input.opponent,
+        tags: ["derby", input.derby, input.home ? "home" : "away"],
+      },
       about: null,
       sharp: true,
     },
@@ -472,7 +491,7 @@ function buildDerbyPress(
   if (recent.length > 0) {
     facts.push({
       kind: "result",
-      text: `최근 ${recent.length}경기 ${recent.map((r) => OUTCOME_KO[r]).join("")}`,
+      data: { values: { matches: recent.length }, tags: ["recent", ...recent] },
       about: null,
       sharp: false,
     });
@@ -504,13 +523,13 @@ function buildOpeningPress(
   const facts: PressFact[] = [
     {
       kind: "fixture",
-      text: `개막전 ${input.opponent} (${sideKo(input.home)})`,
+      data: { name: input.opponent, tags: ["opening", input.home ? "home" : "away"] },
       about: null,
       sharp: false,
     },
     {
       kind: "standing",
-      text: `보드 기대 ${expectation.target}위 (${expectation.label})`,
+      data: { values: { rank: expectation.target }, tags: ["board-target", expectation.code] },
       about: null,
       sharp: false,
     },
@@ -519,7 +538,7 @@ function buildOpeningPress(
   if (signing) {
     facts.push({
       kind: "arrival",
-      text: `여름 최대 영입 ${signing.player.name} (${formatMoney(signing.fee)})`,
+      data: { name: signing.player.name, values: { fee: signing.fee }, tags: ["summer-top"] },
       about: signing.player.id,
       sharp: false,
     });
@@ -602,6 +621,18 @@ function isSeasonOpener(state: GameState, match: MatchRecord, leagueId: string):
 /** 답을 기다리는 회견 — 언제나 하나뿐이다 */
 export function pendingPress(state: GameState): PressConference | null {
   return (state.pressConferences ?? []).find((c) => c.status === "pending") ?? null;
+}
+
+/**
+ * 열린 회견을 **대가 없이** 닫는다 — 이직이 유일한 자리다 (career.md §5.1).
+ *
+ * `openPress`의 방치와 갈리는 지점: 감독이 답하지 않은 것이 아니라 **물을 구단이
+ * 없어진 것**이다. 그대로 두면 새 구단의 첫 회견이 앞 구단의 자리를 거절로 닫아
+ * 이유 없이 언론 평판이 깎인다.
+ */
+export function expirePendingPress(state: GameState): void {
+  const open = pendingPress(state);
+  if (open) open.status = "expired";
 }
 
 /**
@@ -784,6 +815,20 @@ export function respondToMedia(
     message:
       `기자회견 대응(${STANCE_KO[input.stance]})` +
       (parts.length > 0 ? ` — ${parts.join(" · ")}` : ""),
+    /**
+     * 축마다 한 줄이다 — `delta` 하나가 그 줄의 부호라, 여럿을 한 항목에 묶으면
+     * 화면이 다시 갈라야 한다. 감독이 무슨 말을 했는지는 장면의 것이다.
+     */
+    brief: {
+      head: `기자회견 대응(${STANCE_KO[input.stance]})`,
+      items: deltaItems([
+        ["보드", effect.board],
+        ["언론", effect.media],
+        ["선수단", effect.squad],
+        effect.targetName ? [`${effect.targetName} 사기`, effect.target] : null,
+        ["팀 사기", effect.team],
+      ]),
+    },
   };
 }
 
@@ -805,6 +850,14 @@ export function declinePress(state: GameState): SkillResult {
   return {
     ok: true,
     message: `기자회견에 응하지 않았습니다` + (parts.length > 0 ? ` — ${parts.join(" · ")}` : ""),
+    brief: {
+      head: "기자회견 거절",
+      items: deltaItems([
+        ["보드", effect.board],
+        ["언론", effect.media],
+        ["선수단", effect.squad],
+      ]),
+    },
   };
 }
 
@@ -827,6 +880,8 @@ export function describePendingPress(state: GameState): string | null {
   return [
     `기자회견 대기 (${c.id}) — ${c.context}${c.weight >= 3 ? " · 큰 자리다" : ""}`,
     `  기자가 아는 사실 (이 밖은 묻지 못한다):`,
-    ...c.facts.map((f) => `  · ${f.text}${f.about ? ` [${f.about}]` : ""}${f.sharp ? " ⚡" : ""}`),
+    ...c.facts.map(
+      (f) => `  · ${pressFactText(f)}${f.about ? ` [${f.about}]` : ""}${f.sharp ? " ⚡" : ""}`,
+    ),
   ].join("\n");
 }

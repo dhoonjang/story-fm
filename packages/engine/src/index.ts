@@ -11,6 +11,7 @@ export * from "./core/player-ref";
 export * from "./core/league-shape";
 export * from "./core/club-tier";
 export * from "./core/persistence";
+export * from "./core/save-lock";
 export * from "./core/tick";
 
 // data — 카탈로그·시드 (불변 초기치)
@@ -21,7 +22,9 @@ export * from "./data/owner-seeds";
 export * from "./data/league-catalog";
 export * from "./data/cup-catalog";
 export * from "./data/domestic-cup-catalog";
+export * from "./data/super-cup-catalog";
 export * from "./data/club-profile";
+export * from "./data/pseudonym";
 export * from "./data/league-economy";
 export * from "./data/catalog-source";
 export * from "./data/team-override";
@@ -59,6 +62,7 @@ export * from "./competition/extra-time";
 export * from "./competition/promotion";
 export * from "./competition/club-tier-recompute";
 export * from "./competition/domestic-cup";
+export * from "./competition/super-cup";
 export * from "./competition/draw-schedule";
 export * from "./competition/reschedule";
 
@@ -68,6 +72,7 @@ export * from "./match/quick-sim";
 export * from "./match/ratings";
 
 // squad — 선수단 상태(폼·심경·부상·정착)와 성장·훈련·스카우팅
+export * from "./squad/depth";
 export * from "./squad/form";
 export * from "./squad/slump";
 export * from "./squad/other-clubs";
@@ -85,6 +90,9 @@ export * from "./squad/numbers";
 // market — 이적 시장·협상·메디컬·감독 시장
 export * from "./market/market";
 export * from "./market/negotiation";
+export * from "./market/counter-bounds";
+export * from "./market/counterparty";
+export * from "./market/clauses";
 export * from "./market/ai-market";
 export * from "./market/medical";
 export * from "./market/departures";
@@ -96,6 +104,7 @@ export * from "./club/finance";
 export * from "./club/press";
 export * from "./club/approach";
 export * from "./club/board-demand";
+export * from "./club/board-request";
 
 // skills — 감독 지시(GM 도구)의 실행부
 export * from "./skills";

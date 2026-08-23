@@ -3,7 +3,9 @@ import {
   clampCondition,
   ATTRIBUTE_AXES,
   PlayerStateSchema,
+  RELEASE_NOTE,
   type GamePlayer,
+  type Transfer,
 } from "@story-fm/domain";
 import {
   HEAVY_DEFEAT_MARGIN,
@@ -43,6 +45,7 @@ import {
   dayOfWeek,
   seasonStatOf,
   setSquadLevel,
+  FREE_AGENT_TEAM,
 } from "@story-fm/engine";
 import { createMiniGame, createTestGame, advanceAndPlay, advanceDays } from "./helpers";
 
@@ -50,6 +53,52 @@ describe("체력 — 몸과 마음이 한 축이다", () => {
   it("0~100 안에 머문다", () => {
     expect(clampCondition(120)).toBe(100);
     expect(clampCondition(-5)).toBe(0);
+  });
+});
+
+describe("라커룸이 계약 해지를 알아보는 표식", () => {
+  /**
+   * 계약 만료도 해지도 원장에서 `type: "free"`라, 둘을 가르는 것은 `reason` 코드
+   * 하나다. 문장으로 가르던 자리라 문구를 고치면 라커룸이 감독의 결정을 못 알아봤다
+   * (→ docs/simulation/transfer.md §2 · game-state.md §6).
+   */
+  function departed(state: GameState, row: Partial<Transfer>): void {
+    const leaver = userPlayers(state)[1]!;
+    leaver.teamId = FREE_AGENT_TEAM;
+    state.transfers.push({
+      id: `tr-test-${state.transfers.length}`,
+      gamePlayerId: leaver.id,
+      windowId: null,
+      fromTeamId: state.userTeamId,
+      toTeamId: FREE_AGENT_TEAM,
+      date: state.date,
+      type: "free",
+      fee: 0,
+      ...row,
+    });
+  }
+
+  const sawDeparture = (state: GameState) =>
+    moodFactsOf(state, userPlayers(state)[0]!).some((f) => f.cause === "departure");
+
+  it("`reason` 코드로 갈린다 — 만료는 해지가 아니다", () => {
+    const released = createTestGame();
+    departed(released, { reason: "release-agreed" });
+    expect(sawDeparture(released), "해지가 라커룸에 닿지 않았다").toBe(true);
+
+    const expired = createTestGame();
+    departed(expired, { reason: "contract-expiry" });
+    expect(sawDeparture(expired), "계약 만료가 해지로 읽혔다").toBe(false);
+  });
+
+  it("옛 세이브는 문장으로 갈린다 — 여기만 남은 폴백이다", () => {
+    const legacy = createTestGame();
+    departed(legacy, { note: RELEASE_NOTE.unilateral });
+    expect(sawDeparture(legacy), "옛 세이브의 해지가 라커룸에서 사라졌다").toBe(true);
+
+    const unknown = createTestGame();
+    departed(unknown, { note: "계약 만료 — 자유계약" });
+    expect(sawDeparture(unknown), "코드도 표식도 없는 줄이 해지로 읽혔다").toBe(false);
   });
 });
 
@@ -267,12 +316,14 @@ describe("심경 결산 — 코어가 사실을 잡고 결만 맡긴다", () => 
     const player = withEvent(state);
     const brief = buildMoodBrief(state, state.date, state.date)!;
     expect(
-      applyMoodNotes(state, brief, [{ playerId: player.id, text: "동점골에 어깨가 올라갔다" }]),
+      applyMoodNotes(state, brief, [
+        { playerId: player.id, text: "동점골에 어깨가 올라갔다", acknowledgesIssue: false },
+      ]),
     ).toBe(1);
     expect(moodOf(state, player).note).toBe("동점골에 어깨가 올라갔다.");
   });
 
-  it("불만이 걸린 선수의 문장에 그 사실이 없으면 버린다", () => {
+  it("불만이 걸린 선수의 문장이 그 사실을 안지 않았다고 하면 버린다", () => {
     const state = createTestGame();
     const player = withEvent(state);
     state.issues.push({
@@ -282,16 +333,21 @@ describe("심경 결산 — 코어가 사실을 잡고 결만 맡긴다", () => 
       since: state.date,
     });
     const brief = buildMoodBrief(state, state.date, state.date)!;
-    expect(applyMoodNotes(state, brief, [{ playerId: player.id, text: "기분이 아주 좋다" }])).toBe(
-      0,
-    );
+    expect(
+      applyMoodNotes(state, brief, [
+        { playerId: player.id, text: "기분이 아주 좋다", acknowledgesIssue: false },
+      ]),
+    ).toBe(0);
     // 버려지면 사실 카드가 남는다 — 화면에 빈 자리가 생기지 않는다
     const read = moodOf(state, player);
     expect(read.note).toBeNull();
     expect(read.facts[0]?.cause).toBe("grievance");
     // 그 사실을 담으면 통과한다
     expect(
-      applyMoodNotes(state, brief, [{ playerId: player.id, text: "이겼지만 불만은 그대로다" }]),
+      applyMoodNotes(state, brief, [
+        // 문구가 아니라 **쓴 쪽이 낸 코드**가 통과를 가른다 — "불만"이라는 낱말은 없다
+        { playerId: player.id, text: "이겼지만 서운함은 그대로다", acknowledgesIssue: true },
+      ]),
     ).toBe(1);
   });
 
@@ -300,11 +356,21 @@ describe("심경 결산 — 코어가 사실을 잡고 결만 맡긴다", () => 
     const player = withEvent(state);
     const brief = buildMoodBrief(state, state.date, state.date)!;
     const other = userPlayers(state).find((p) => p.id !== player.id)!;
-    expect(applyMoodNotes(state, brief, [{ playerId: other.id, text: "좋다" }])).toBe(0);
-    expect(applyMoodNotes(state, brief, [{ playerId: player.id, text: "좋다. 아주 좋다." }])).toBe(
-      0,
-    );
-    expect(applyMoodNotes(state, brief, [{ playerId: player.id, text: "가".repeat(130) }])).toBe(0);
+    expect(
+      applyMoodNotes(state, brief, [
+        { playerId: other.id, text: "좋다", acknowledgesIssue: false },
+      ]),
+    ).toBe(0);
+    expect(
+      applyMoodNotes(state, brief, [
+        { playerId: player.id, text: "좋다. 아주 좋다.", acknowledgesIssue: false },
+      ]),
+    ).toBe(0);
+    expect(
+      applyMoodNotes(state, brief, [
+        { playerId: player.id, text: "가".repeat(130), acknowledgesIssue: false },
+      ]),
+    ).toBe(0);
   });
 
   it("길이는 저장할 문장으로 잰다 — 마침표가 붙어 넘치면 버리고 `!`는 그대로 종결이다", () => {
@@ -312,15 +378,27 @@ describe("심경 결산 — 코어가 사실을 잡고 결만 맡긴다", () => 
     const player = withEvent(state);
     const brief = buildMoodBrief(state, state.date, state.date)!;
     // 마침표를 붙이면 121자 — 세이브 스키마 상한을 넘으므로 버린다
-    expect(applyMoodNotes(state, brief, [{ playerId: player.id, text: "가".repeat(120) }])).toBe(0);
+    expect(
+      applyMoodNotes(state, brief, [
+        { playerId: player.id, text: "가".repeat(120), acknowledgesIssue: false },
+      ]),
+    ).toBe(0);
     expect(player.state.moodNote).toBeUndefined();
     // 119자는 마침표까지 정확히 120자 — 저장되고 스키마를 통과한다
-    expect(applyMoodNotes(state, brief, [{ playerId: player.id, text: "가".repeat(119) }])).toBe(1);
+    expect(
+      applyMoodNotes(state, brief, [
+        { playerId: player.id, text: "가".repeat(119), acknowledgesIssue: false },
+      ]),
+    ).toBe(1);
     expect(player.state.moodNote?.text).toHaveLength(120);
     expect(PlayerStateSchema.safeParse(player.state).success).toBe(true);
     // `!`로 끝나면 덧붙이지 않는다 — 120자가 그대로 남는다
     const shout = `${"가".repeat(119)}!`;
-    expect(applyMoodNotes(state, brief, [{ playerId: player.id, text: shout }])).toBe(1);
+    expect(
+      applyMoodNotes(state, brief, [
+        { playerId: player.id, text: shout, acknowledgesIssue: false },
+      ]),
+    ).toBe(1);
     expect(player.state.moodNote?.text).toBe(shout);
     expect(PlayerStateSchema.safeParse(player.state).success).toBe(true);
   });
@@ -329,7 +407,9 @@ describe("심경 결산 — 코어가 사실을 잡고 결만 맡긴다", () => 
     const state = createTestGame();
     const player = withEvent(state);
     const brief = buildMoodBrief(state, state.date, state.date)!;
-    applyMoodNotes(state, brief, [{ playerId: player.id, text: "승리에 들떠 있다" }]);
+    applyMoodNotes(state, brief, [
+      { playerId: player.id, text: "승리에 들떠 있다", acknowledgesIssue: false },
+    ]);
     expect(moodOf(state, player).note).toBe("승리에 들떠 있다.");
     state.injuries.push({
       id: "inj-override",
@@ -350,7 +430,9 @@ describe("심경 결산 — 코어가 사실을 잡고 결만 맡긴다", () => 
     const state = createTestGame();
     const player = withEvent(state);
     const brief = buildMoodBrief(state, state.date, state.date)!;
-    applyMoodNotes(state, brief, [{ playerId: player.id, text: "승리에 들떠 있다" }]);
+    applyMoodNotes(state, brief, [
+      { playerId: player.id, text: "승리에 들떠 있다", acknowledgesIssue: false },
+    ]);
     state.date = addDays(state.date, MOOD_NOTE_DAYS + 1);
     expect(moodOf(state, player).note).toBeNull();
   });
@@ -541,6 +623,25 @@ describe("연패·연승이 라커룸에 남는다", () => {
     played(state, "m-loss-again", 0, 0, 1);
     applyResultMood(state, state.userTeamId, -1, []);
     expect(state.issues.filter((i) => i.gamePlayerId === voice.id)).toHaveLength(1);
+  });
+
+  it("연패가 길어져도 이름은 하나다 — 5·6연패는 새 선수를 올리지 않는다", () => {
+    const state = createTestGame();
+    lowestVoice(state);
+    const before = state.issues.length;
+
+    losingRun(state, SLUMP_ISSUE_LOSSES);
+    applyResultMood(state, state.userTeamId, -1, []);
+    expect(state.issues).toHaveLength(before + 1); // 문턱을 넘는 경기가 이름을 붙인다
+
+    // 그 뒤의 패배는 폼만 깎는다 — 매 경기 부르면 붕괴 하나가 주력을 통째로 채운다
+    for (let deeper = 1; deeper <= 2; deeper++) {
+      played(state, `m-loss-deeper-${deeper}`, 0, 0, 1);
+      expect(applyResultMood(state, state.userTeamId, -1, [])).toContain(
+        `${SLUMP_ISSUE_LOSSES + deeper}연패`,
+      );
+      expect(state.issues).toHaveLength(before + 1);
+    }
   });
 
   it("남의 라커룸 불만은 장부에 남기지 않는다", () => {

@@ -154,10 +154,7 @@ function judgeDemand(state: GameState, demand: BoardDemand, digest: string[]): v
       }
       case "sign-star": {
         const landed = windowTransfers(state, demand.windowId).some(
-          (t) =>
-            t.toTeamId === state.userTeamId &&
-            t.type === "transfer" &&
-            t.fee >= (demand.baseline ?? 0),
+          (t) => t.toTeamId === state.userTeamId && t.fee >= (demand.baseline ?? 0),
         );
         return landed ? true : expired ? false : null;
       }
@@ -191,9 +188,17 @@ function judgeDemand(state: GameState, demand: BoardDemand, digest: string[]): v
   pushNarrative(state, line, verdict ? 3 : 4);
 }
 
-/** 이 창의 이동 — 판정의 유일한 장부다 */
+/**
+ * 이 창의 **값이 오간 이동** — 판정의 유일한 장부다.
+ *
+ * 이적과 임대를 가르지 않는다: 임대료도 이적 예산에서 빠져나가는 같은 돈이라
+ * 스타 영입에도 순이익에도 같은 셈으로 잡힌다 (career.md §5.2). 자유계약·유스·
+ * 은퇴는 오간 값이 없어 어느 셈도 움직이지 않는다.
+ */
 function windowTransfers(state: GameState, windowId: string) {
-  return state.transfers.filter((t) => t.windowId === windowId);
+  return state.transfers.filter(
+    (t) => t.windowId === windowId && (t.type === "transfer" || t.type === "loan"),
+  );
 }
 
 // ── 사실 카드 ──────────────────────────────────────────────────
@@ -222,9 +227,15 @@ function describeDemand(state: GameState, demand: BoardDemand): string {
 export function boardDemandFact(state: GameState): PressFact | null {
   const demand = openBoardDemand(state);
   if (!demand) return null;
+  const player = demand.playerId ? playerById(state, demand.playerId) : null;
   return {
     kind: "board-demand",
-    text: `보드 요청 — ${describeDemand(state, demand)} · 기한 ${demand.deadline}`,
+    data: {
+      tags: [demand.kind],
+      date: demand.deadline,
+      ...(player ? { name: player.name } : {}),
+      ...(demand.baseline === undefined ? {} : { values: { baseline: demand.baseline } }),
+    },
     about: demand.playerId ?? null,
     sharp: true,
   };

@@ -10,6 +10,7 @@ import {
   cacheHitRate,
   emptyLedger,
   emptyUsage,
+  llmErrorKind,
   llmUsage,
   meterLlm,
   parseTokenBudget,
@@ -166,6 +167,21 @@ describe("캐시 히트율 — 프리픽스가 살아 있는가", () => {
   it("첫 호출은 원래 쓰기만 한다 — 한 번으로 단정하지 않는다", () => {
     const ledger = recordUsage(emptyLedger(), "gm", usageOf({ inputTokens: 9000 }));
     expect(cacheAlerts(ledger)).toEqual([]);
+  });
+
+  /**
+   * 문턱은 그 에이전트가 부르는 **제공자**의 최소 캐시 프리픽스다 (models.md §4).
+   * 셋 중 큰 값 하나로 재면 Anthropic 결산 호출(1k~4k)이 통째로 문턱 아래에 들어앉아,
+   * 프리픽스가 매 턴 깨져도 경고가 영영 올라오지 않는다 — 그 구멍을 이 줄이 잡는다.
+   */
+  it("문턱이 낮은 제공자의 짧은 호출도 신호로 잡는다", () => {
+    let ledger = emptyLedger();
+    for (let i = 0; i < 3; i++) {
+      ledger = recordUsage(ledger, "mood-rater", usageOf({ inputTokens: 2000 }));
+    }
+    // 4,096 하나로 재면 안 보인다
+    expect(cacheAlerts(ledger, () => 4096)).toEqual([]);
+    expect(cacheAlerts(ledger, () => 1024)).toEqual(["mood-rater"]);
   });
 });
 
@@ -431,10 +447,24 @@ describe("모델 호출 시한", () => {
     }
   });
 
-  it("시한 문구는 화면이 '지연'으로 옮길 수 있어야 한다", () => {
+  /**
+   * 화면이 "응답이 지연돼…"를 고르는 근거는 **종류 하나**다 (models.md §1-1) —
+   * 예전에는 문구에 `timeout`이 남아 있어야 했고, 그 낱말이 곧 계약이었다.
+   */
+  it("시한 초과는 종류가 timeout이다 — 문구가 아니라", () => {
     const error = new LlmTimeoutError("match-caster", 1_000);
-    expect(error.message.toLowerCase()).toContain("timeout");
+    expect(llmErrorKind(error)).toBe("timeout");
     expect(error.agent).toBe("match-caster");
+  });
+
+  /** 예산 상한도 종류를 든다 — 결산이 삼켜도 장면 호출은 배너로 나간다 */
+  it("예산 상한은 종류가 budget이다", () => {
+    const error = new TokenBudgetExceededError("gm", {
+      limit: 100,
+      used: 200,
+      over: true,
+    } as never);
+    expect(llmErrorKind(error)).toBe("budget");
   });
 
   it("시한이 지나면 진행 중인 호출도 끊는다 — 소켓을 물고 있지 않는다", async () => {

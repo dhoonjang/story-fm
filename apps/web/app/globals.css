@@ -5,6 +5,8 @@
  * 않아 사이에 무엇이 끼든 결과가 같지만, `shared`가 뷰보다 앞에 서는 것은 지켜야
  * 한다 — 뷰가 공용 규칙을 덮는 쪽이지 그 반대가 아니다.
  */
+/* 화면 단계 토큰이 맨 앞이다 — 뒤의 모든 파일이 이 넷 중에서 고른다 */
+@import "./styles/breakpoints.css";
 @import "./styles/shell.css";
 @import "./styles/shared.css";
 @import "./styles/office/squad.css";

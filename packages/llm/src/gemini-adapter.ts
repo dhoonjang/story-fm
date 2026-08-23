@@ -1,4 +1,5 @@
 import {
+  ApiError,
   FinishReason,
   FunctionCallingConfigMode,
   GoogleGenAI,
@@ -9,7 +10,7 @@ import {
   type GenerateContentResponse,
   type Part,
 } from "@google/genai";
-import type { GoogleAgentConfig } from "./config";
+import { resolveApiKey, type GoogleAgentConfig } from "./config";
 import {
   isStoredLlmHistory,
   isTextHistoryMessage,
@@ -22,6 +23,14 @@ import {
   type TurnUsage,
   UNRUN_CALL,
 } from "./game-llm";
+import {
+  blockedTurnError,
+  isAbortError,
+  isRetryableStatus,
+  kindOfStatus,
+  withErrorKind,
+  type LlmErrorKind,
+} from "./llm-error";
 
 /** 한 턴 안에서 함수 호출 왕복 허용 횟수. */
 const MAX_TOOL_ITERATIONS = 8;
@@ -34,9 +43,46 @@ type GeminiClient = Pick<GoogleGenAI, "chats">;
  */
 let sharedClient: GoogleGenAI | undefined;
 
+/**
+ * ⚠️ **`httpOptions.retryOptions`를 주지 않는다** — 주면 SDK가 응답을 `ApiError`로
+ * 세우기 전에 재시도 래퍼가 가로채, 실패를 상태 없는 맨 `Error`나 이름이
+ * `AbortError`인 오류로 바꿔 던진다. 끝내 실패한 429는 `unknown`이 되고 401은 중단
+ * 신호로 읽혀 `timeout`이 된다. 재시도는 `sendWithRetry`가 맡는다 (models.md §1-1).
+ */
 function newSharedClient(): GoogleGenAI {
-  const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
+  // 키를 읽는 자리는 설정 하나다 — 여기서 따로 고르면 판정과 실제가 갈린다 (models.md §2)
+  const apiKey = resolveApiKey("google");
   return new GoogleGenAI(apiKey ? { apiKey } : {});
+}
+
+/** 재시도 사이에 두는 대기 — 지수로 늘리되 한 번의 대기가 시한을 통째로 먹지 않게 막는다 */
+const RETRY_BASE_MS = 500;
+const RETRY_MAX_MS = 8_000;
+
+/**
+ * 붐빔·한도·5xx로 돌아온 요청을 다시 부른다 — **Anthropic·OpenAI SDK가 클라이언트
+ * 안에서 하는 일을 같은 자리에서 한다** (models.md §1-1).
+ *
+ * ⚠️ **부르는 자리는 "아직 아무것도 소비하지 않은" 한 지점이어야 한다.**
+ * `sendMessageStream`이 돌려주는 프로미스는 HTTP 상태 검사가 끝난 뒤 풀리므로 여기서
+ * 실패한 요청은 chunk를 한 조각도 흘리지 않았다 — 다시 불러도 화면에 문장이 겹치지
+ * 않는다. 스트림을 **읽는 중**에 난 실패는 이 문을 지나지 않는다.
+ *
+ * chat 이력도 안전하다: SDK는 응답을 받은 뒤에야 `recordHistory`를 부르므로, 실패한
+ * 요청이 발화를 이력에 남겨 두고 가지 않는다.
+ */
+async function sendWithRetry<T>(maxRetries: number, send: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await send();
+    } catch (error) {
+      const retryable = error instanceof ApiError && isRetryableStatus(error.status);
+      if (!retryable || attempt >= maxRetries) throw error;
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.min(RETRY_BASE_MS * 2 ** attempt, RETRY_MAX_MS)),
+      );
+    }
+  }
 }
 
 /** 제공자가 내용을 막은 사유 — 텍스트 생성에서 올 수 있는 것만 센다 */
@@ -58,6 +104,16 @@ function toStopReason(reason: FinishReason | undefined): StopReason | null {
   if (reason === FinishReason.STOP) return "completed";
   if (reason === FinishReason.MAX_TOKENS) return "truncated";
   return BLOCKED.has(reason) ? "filtered" : "other";
+}
+
+/**
+ * SDK 오류를 종류로 (models.md §1-1) — Gemini의 `ApiError`가 드는 것은 HTTP 상태
+ * 하나뿐이라, 셋이 공유하는 표를 그대로 쓴다.
+ */
+function classifyGemini(error: unknown): LlmErrorKind {
+  if (isAbortError(error)) return "timeout";
+  if (error instanceof ApiError) return kindOfStatus(error.status);
+  return "unknown";
 }
 
 function isGeminiContent(value: unknown): value is Content {
@@ -162,7 +218,12 @@ export class GeminiGameLLM implements GameLLM {
     this.client = client ?? (sharedClient ??= newSharedClient());
   }
 
-  async runTurn(req: TurnRequest): Promise<TurnResult> {
+  /** 이 문 하나를 지나 나가는 실패에는 모두 종류가 실린다 (models.md §1-1) */
+  runTurn(req: TurnRequest): Promise<TurnResult> {
+    return withErrorKind(classifyGemini, () => this.turn(req));
+  }
+
+  private async turn(req: TurnRequest): Promise<TurnResult> {
     const tools = req.tools ?? [];
     const baseHistory = geminiHistory(req.history, this.config);
     const systemInstruction = (Array.isArray(req.system) ? req.system : [req.system])
@@ -273,7 +334,9 @@ export class GeminiGameLLM implements GameLLM {
           : {};
 
       if (req.onText) {
-        const stream = await chat.sendMessageStream({ message, ...perRequest });
+        const stream = await sendWithRetry(this.config.maxRetries, () =>
+          chat.sendMessageStream({ message, ...perRequest }),
+        );
         for await (const chunk of stream) {
           response = chunk;
           const delta = visibleText(chunk);
@@ -283,7 +346,9 @@ export class GeminiGameLLM implements GameLLM {
           }
         }
       } else {
-        response = await chat.sendMessage({ message, ...perRequest });
+        response = await sendWithRetry(this.config.maxRetries, () =>
+          chat.sendMessage({ message, ...perRequest }),
+        );
         responseText = visibleText(response);
       }
 
@@ -305,7 +370,10 @@ export class GeminiGameLLM implements GameLLM {
         .flatMap(functionCalls);
       // 함수 호출이 실린 턴은 Gemini가 STOP을 보고해도 도구 왕복이다 — 잘린 응답만
       // 예외로 남는다 (models.md §3-1)
-      const reported = toStopReason(response.candidates?.[0]?.finishReason);
+      // 발화 자체가 막힌 응답은 후보가 없다 — 사유는 `promptFeedback`에만 실린다
+      const reported = response.promptFeedback?.blockReason
+        ? "filtered"
+        : toStopReason(response.candidates?.[0]?.finishReason);
       stopReason =
         reported === "truncated" ? "truncated" : calls.length > 0 ? "tool_use" : reported;
       if (calls.length === 0) break;
@@ -350,6 +418,10 @@ export class GeminiGameLLM implements GameLLM {
       }
       message = results;
     }
+
+    // 막혀서 아무것도 못 받은 턴은 실패다 — 나온 것이 있으면 그대로 돌려준다
+    const blocked = blockedTurnError(stopReason, text, toolCallCount);
+    if (blocked) throw blocked;
 
     const savedHistory = chat.getHistory().map((content) => ({
       ...content,
