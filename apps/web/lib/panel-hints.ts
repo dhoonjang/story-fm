@@ -49,6 +49,8 @@ export const PANEL_OF: Record<string, PanelKey> = {
   // ── 재정 ──
   apply_finance_event: "재정",
   adjust_transfer_budget: "재정",
+  // 접수한 날엔 장부가 아직 그대로다 — 그래도 감독이 답을 확인하러 갈 화면은 여기다
+  request_board: "재정",
   // ── 커리어 — 세계가 감독을 보는 눈 ──
   respond_to_media: "커리어",
   // 다가옴도 옮기는 것이 평판 3축이다 — 사기 변화는 스쿼드에도 서지만 자리는 하나다

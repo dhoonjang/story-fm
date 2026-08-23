@@ -65,7 +65,7 @@
 
 ## 2. 스킬 표면 — 한 판단은 한 도구
 
-도구는 **39개**이고 **전부 평시 GM의 것**이다. 경기 중에는 도구 표면이 **0**이다 —
+도구는 **40개**이고 **전부 평시 GM의 것**이다. 경기 중에는 도구 표면이 **0**이다 —
 지시 해석이 JSON 하나를 내고 코어가 같은 스킬 함수를 부른다
 ([agents.md](./agents.md) §3). 같은 순간에 함께 정해지는 것들이
 갈려 있으면 GM이 하나를 빠뜨린다 — 라인업은 1·2군 이동까지 한 요청(`set_lineup`의
@@ -82,7 +82,7 @@
 | 대화·서사 | 5   | `team_talk` · `talk_to_player` · `respond_to_media` · `respond_to_approach` · `apply_narrative_event`                                                                                                                 |
 | 경기      | 1   | `substitute`                                                                                                                                                                                                          |
 | 이적      | 12  | `deal_odds` · `list_negotiations` · `send_offer` · `respond_offer` · `accept_deal` · `open_renewal` · `open_release` · `set_transfer_list` · `withdraw_offer` · `release_player` · `recall_loan` · `exercise_buyback` |
-| 재정      | 2   | `apply_finance_event` · `adjust_transfer_budget`                                                                                                                                                                      |
+| 재정      | 3   | `apply_finance_event` · `adjust_transfer_budget` · `request_board`                                                                                                                                                    |
 | 조회      | 7   | `search_players` · `get_squad` · `get_team` · `get_league` · `get_career` · `get_finance` · `scout_player`                                                                                                            |
 
 ### 계약은 넷으로 갈린다

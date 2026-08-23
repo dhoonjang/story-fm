@@ -4,23 +4,34 @@ import {
   APPROACH_THRESHOLD,
   approachThreshold,
   BOARD_DEMAND,
+  BOARD_REQUEST,
   boardDemandFact,
+  boardRequestCeiling,
+  boardThriftFactor,
+  boardTrustFactor,
+  clubProfileIn,
   DEMAND_OF_ARCHETYPE,
   financeOf,
   openBoardDemand,
   OWNER_ARCHETYPE_LABELS,
   pendingApproach,
+  openBoardRequest,
   playerById,
+  requestBoard,
   respondToApproach,
   speakerCues,
   tickApproaches,
   tickBoardDemands,
+  tickBoardRequests,
   userPlayers,
+  userWageRoom,
+  wageLiftOf,
   windowOpenForTeam,
   worldFigures,
   type GameState,
 } from "@story-fm/engine";
-import type { PlayerIssueReason, Transfer } from "@story-fm/domain";
+import type { BoardRequestKind, PlayerIssueReason, Transfer } from "@story-fm/domain";
+import { BOARD_REQUEST_KINDS } from "@story-fm/domain";
 import { createTestGame } from "./helpers";
 
 /**
@@ -705,5 +716,159 @@ describe("보드 요청 — 요청 → 이행/불이행 → 평판", () => {
       tickBoardDemands(state, []);
       expect(demand.status, `주급 ×${bump}`).toBe(status);
     }
+  });
+});
+
+/**
+ * 감독이 보드에 거는 요청 — **위와 방향이 반대인 별개 상태다** (board-request.ts ·
+ * finance.md §9.6). 판정이 굴림이 아니라 한도라, 값이 도는 자리는 전부 경계다:
+ * 신뢰 계수의 바닥, 살림 계수의 계단, 한도와 부른 값이 갈리는 선, 공기가 차는 날.
+ */
+describe("보드 요청 (감독 → 보드) — 한도가 답을 정한다", () => {
+  /** 답이 나오는 판 — 잔고와 보드 평판을 원하는 자리에 세운다 */
+  function board(state: GameState, balance: number, reputation: number): GameState {
+    financeOf(state, state.userTeamId).balance = balance;
+    state.manager.reputation.board = reputation;
+    return state;
+  }
+
+  /** 답이 오는 날까지 시계를 민다 */
+  function untilAnswer(state: GameState, kind: BoardRequestKind) {
+    state.date = addDays(state.date, BOARD_REQUEST.RESPOND_DAYS[kind]);
+    tickBoardRequests(state, []);
+  }
+
+  it("신뢰 계수는 평판 30에서 0이고 80에서 1.0, 위로는 1.2에서 멈춘다", () => {
+    expect(boardTrustFactor(BOARD_REQUEST.TRUST_FLOOR)).toBe(0);
+    expect(boardTrustFactor(BOARD_REQUEST.TRUST_FLOOR - 10)).toBe(0);
+    expect(boardTrustFactor(80)).toBeCloseTo(1);
+    expect(boardTrustFactor(100)).toBe(BOARD_REQUEST.TRUST_MAX);
+  });
+
+  it("살림 계수는 급여 비중 경고선에서 반, 위험선에서 0으로 떨어진다", () => {
+    expect(boardThriftFactor(BOARD_REQUEST.WAGE_RATIO_CAUTION - 0.001)).toBe(1);
+    expect(boardThriftFactor(BOARD_REQUEST.WAGE_RATIO_CAUTION)).toBe(0.5);
+    expect(boardThriftFactor(BOARD_REQUEST.WAGE_RATIO_DANGER)).toBe(0);
+  });
+
+  it("답은 그 자리에서 나오지 않는다 — 종류가 정한 날에 도착해 예산에 얹힌다", () => {
+    const state = board(createTestGame(11), 100_000_000, 80);
+    const budgetBefore = financeOf(state, state.userTeamId).transferBudget;
+    // 잔고 £100M × 0.25 × 신뢰 1.0 × 살림 1.0
+    expect(boardRequestCeiling(state, "transfer-budget")).toBe(25_000_000);
+
+    expect(requestBoard(state, { kind: "transfer-budget", amount: 20_000_000 }).ok).toBe(true);
+    // 답이 오기 전날까지는 아무 일도 없다
+    state.date = addDays(state.date, BOARD_REQUEST.RESPOND_DAYS["transfer-budget"] - 1);
+    tickBoardRequests(state, []);
+    expect(openBoardRequest(state)?.status).toBe("pending");
+    expect(financeOf(state, state.userTeamId).transferBudget).toBe(budgetBefore);
+
+    state.date = addDays(state.date, 1);
+    tickBoardRequests(state, []);
+    const answered = (state.boardRequests ?? [])[0]!;
+    expect(answered.status).toBe("approved");
+    expect(answered.granted).toBe(20_000_000);
+    expect(financeOf(state, state.userTeamId).transferBudget).toBe(budgetBefore + 20_000_000);
+    // 답은 보드 평판을 옮기지 않는다 — 구단주 요청과 갈리는 자리다
+    expect(state.manager.reputation.board).toBe(80);
+  });
+
+  it("한도를 넘겨 부르면 한도만큼만 나온다 — 부분 승인은 granted < amount다", () => {
+    const state = board(createTestGame(11), 100_000_000, 80);
+    const budgetBefore = financeOf(state, state.userTeamId).transferBudget;
+    requestBoard(state, { kind: "transfer-budget", amount: 40_000_000 });
+    untilAnswer(state, "transfer-budget");
+
+    const answered = (state.boardRequests ?? [])[0]!;
+    expect(answered.status).toBe("approved");
+    expect(answered.granted).toBe(25_000_000);
+    expect(financeOf(state, state.userTeamId).transferBudget).toBe(budgetBefore + 25_000_000);
+  });
+
+  it("보드 평판이 바닥이면 한도가 0이라 거절이고, 동결이면 잔고가 있어도 거절이다", () => {
+    const poor = board(createTestGame(11), 100_000_000, BOARD_REQUEST.TRUST_FLOOR);
+    expect(boardRequestCeiling(poor, "transfer-budget")).toBe(0);
+    requestBoard(poor, { kind: "transfer-budget", amount: 1_000_000 });
+    untilAnswer(poor, "transfer-budget");
+    expect((poor.boardRequests ?? [])[0]!.status).toBe("rejected");
+
+    // 동결은 돈이 아니라 규정의 문제라 물어서 풀리지 않는다 (finance.md §9.2)
+    const frozen = board(createTestGame(11), 100_000_000, 100);
+    financeOf(frozen, frozen.userTeamId).budgetFrozen = true;
+    for (const kind of BOARD_REQUEST_KINDS) {
+      expect(boardRequestCeiling(frozen, kind), kind).toBe(0);
+    }
+  });
+
+  it("열린 요청은 하나뿐이고, 같은 안건은 쿨다운이 지나야 다시 걸린다", () => {
+    const state = board(createTestGame(11), 100_000_000, 80);
+    requestBoard(state, { kind: "transfer-budget", amount: 1_000_000 });
+    // 답을 기다리는 동안에는 종류가 달라도 걸 수 없다
+    expect(requestBoard(state, { kind: "wage-room", amount: 1000 }).ok).toBe(false);
+    untilAnswer(state, "transfer-budget");
+
+    // 종류가 다르면 곧바로 걸 수 있다
+    expect(requestBoard(state, { kind: "transfer-budget", amount: 1_000_000 }).ok).toBe(false);
+    expect(requestBoard(state, { kind: "wage-room", amount: 1000 }).ok).toBe(true);
+    untilAnswer(state, "wage-room");
+
+    const resolved = state.boardRequests!.find((r) => r.kind === "transfer-budget")!.resolvedOn!;
+    state.date = addDays(resolved, BOARD_REQUEST.COOLDOWN_DAYS - 1);
+    expect(requestBoard(state, { kind: "transfer-budget", amount: 1_000_000 }).ok).toBe(false);
+    state.date = addDays(resolved, BOARD_REQUEST.COOLDOWN_DAYS);
+    expect(requestBoard(state, { kind: "transfer-budget", amount: 1_000_000 }).ok).toBe(true);
+  });
+
+  it("주급 상향은 여력 위로 얹히고 시즌 끝에 만료된다 — 누계는 여력을 넘지 않는다", () => {
+    const state = board(createTestGame(11), 100_000_000, 80);
+    const ceiling = boardRequestCeiling(state, "wage-room");
+    expect(ceiling).toBeGreaterThan(0);
+    const roomBefore = userWageRoom(state);
+
+    requestBoard(state, { kind: "wage-room", amount: ceiling });
+    untilAnswer(state, "wage-room");
+    expect(wageLiftOf(state, state.userTeamId)).toBe(ceiling);
+    expect(userWageRoom(state)).toBe(roomBefore + ceiling);
+
+    // 이미 얹힌 몫이 여력에서 빠지므로 같은 시즌에 두 번째 한도는 0이다
+    expect(boardRequestCeiling(state, "wage-room")).toBe(0);
+
+    // 만료일이 지나면 스스로 사라진다 — 지우러 오는 tick이 없다
+    state.date = addDays(financeOf(state, state.userTeamId).wageLift!.until, 1);
+    expect(wageLiftOf(state, state.userTeamId)).toBe(0);
+  });
+
+  it("구장은 승인 즉시 공사비가 나가고 좌석은 공기가 찬 날에 선다", () => {
+    const state = board(createTestGame(11), 2_000_000_000, 80);
+    const teamId = state.userTeamId;
+    const before = clubProfileIn(state, teamId).capacity;
+    const seats = boardRequestCeiling(state, "stadium");
+    // 잔고가 넉넉하면 여력을 정하는 것은 지금 수용인원이다
+    expect(seats).toBe(Math.floor(before * BOARD_REQUEST.SEATS_OF_CAPACITY));
+
+    const balanceBefore = financeOf(state, teamId).balance;
+    requestBoard(state, { kind: "stadium", amount: seats });
+    untilAnswer(state, "stadium");
+    const built = state.boardRequests!.find((r) => r.kind === "stadium")!;
+    expect(built.status).toBe("approved");
+    expect(financeOf(state, teamId).balance).toBe(balanceBefore - seats * BOARD_REQUEST.SEAT_COST);
+    // 돈은 나갔지만 좌석은 아직 없다
+    expect(clubProfileIn(state, teamId).capacity).toBe(before);
+    // 공사 중에는 다시 걸 수 없다 — 여력이 수용인원에서 나오므로 복리로 커진다
+    state.date = addDays(built.resolvedOn!, BOARD_REQUEST.COOLDOWN_DAYS);
+    expect(requestBoard(state, { kind: "stadium", amount: 100 }).ok).toBe(false);
+
+    state.date = addDays(built.deliversOn!, -1);
+    tickBoardRequests(state, []);
+    expect(clubProfileIn(state, teamId).capacity).toBe(before);
+
+    state.date = built.deliversOn!;
+    tickBoardRequests(state, []);
+    expect(clubProfileIn(state, teamId).capacity).toBe(before + seats);
+    // 두 번 얹지 않는다
+    state.date = addDays(state.date, 1);
+    tickBoardRequests(state, []);
+    expect(clubProfileIn(state, teamId).capacity).toBe(before + seats);
   });
 });

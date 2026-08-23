@@ -873,6 +873,15 @@ export const TeamFinanceSchema = z.object({
    */
   budgetAdjusted: z.object({ date: DateString, amount: z.number() }).optional(),
   /**
+   * **주급 한도 상향** — 보드가 `request_board`로 내준 몫 (finance.md §9.6).
+   *
+   * 임금 천장(§6.3) 위에 얹히고 **만료일을 스스로 든다** — 그 시즌 6월 30일이다.
+   * 지우러 오는 tick이 없어야 하고, 영구히 얹히면 매 시즌 요청 한 번으로 천장이
+   * 계단처럼 올라가 천장이 하는 일(폭주 방지)이 사라진다. 감독의 구단에만 걸린다.
+   * 옛 세이브엔 없다 (optional — 세이브 버전 유지).
+   */
+  wageLift: z.object({ amount: z.number().min(0), until: DateString }).optional(),
+  /**
    * **파라슈트 페이먼트** — 강등 클럽이 떠나온 리그에서 받는 낙하산.
    *
    * 강등 시즌 전환에서 세워지고 해마다 줄다가 사라진다. 승격하면 그 자리에서

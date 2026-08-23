@@ -625,6 +625,25 @@ describe("연패·연승이 라커룸에 남는다", () => {
     expect(state.issues.filter((i) => i.gamePlayerId === voice.id)).toHaveLength(1);
   });
 
+  it("연패가 길어져도 이름은 하나다 — 5·6연패는 새 선수를 올리지 않는다", () => {
+    const state = createTestGame();
+    lowestVoice(state);
+    const before = state.issues.length;
+
+    losingRun(state, SLUMP_ISSUE_LOSSES);
+    applyResultMood(state, state.userTeamId, -1, []);
+    expect(state.issues).toHaveLength(before + 1); // 문턱을 넘는 경기가 이름을 붙인다
+
+    // 그 뒤의 패배는 폼만 깎는다 — 매 경기 부르면 붕괴 하나가 주력을 통째로 채운다
+    for (let deeper = 1; deeper <= 2; deeper++) {
+      played(state, `m-loss-deeper-${deeper}`, 0, 0, 1);
+      expect(applyResultMood(state, state.userTeamId, -1, [])).toContain(
+        `${SLUMP_ISSUE_LOSSES + deeper}연패`,
+      );
+      expect(state.issues).toHaveLength(before + 1);
+    }
+  });
+
   it("남의 라커룸 불만은 장부에 남기지 않는다", () => {
     const state = createTestGame();
     const before = state.issues.length;
