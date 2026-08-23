@@ -625,7 +625,7 @@ export function buildGmTools(
           sortBy: z.enum(["rating", "age", "fatigue", "goals", "apps", "wage"]),
           limit: z.number().int().min(1).max(15),
           playerId: playerRef.describe(
-            "이 id를 주면 그 선수 **한 명의 상세 카드**를 돌려준다 (검색 조건 무시)",
+            "이 id를 주면 그 선수 한 명의 상세 카드를 돌려준다 (검색 조건 무시)",
           ),
         })
         .partial(),
@@ -748,7 +748,7 @@ export function buildGmTools(
           .min(1)
           .optional()
           .describe(
-            "sell·loan_out의 상대 구단 id — **그 협회의 이적창으로 판정한다.** 사우디·MLS는 우리보다 늦게 닫히므로 빠뜨리면 확률이 틀린다",
+            "sell·loan_out의 상대 구단 id — 그 협회의 이적창으로 판정한다. 사우디·MLS는 우리보다 늦게 닫히므로 빠뜨리면 확률이 틀린다",
           ),
         pitch: z
           .array(PitchClaimSchema)
@@ -836,7 +836,7 @@ export function buildGmTools(
           .max(MAX_PITCH_CLAIMS)
           .optional()
           .describe(
-            "감독이 실제로 든 설득 논거. 감독이 말하지 않은 논거를 지어내지 마라 — 코어가 사실 대조해 거짓이면 확률이 **떨어진다**",
+            "감독이 실제로 든 설득 논거. 감독이 말하지 않은 논거를 지어내지 마라 — 코어가 사실 대조해 거짓이면 확률이 떨어진다",
           ),
       }),
       (input) => {
