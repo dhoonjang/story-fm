@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { RefObject } from "react";
 import type { TurnOperation } from "@story-fm/agents";
 import { IconDay, IconMatch, IconPlay, IconSend, IconSkip, IconWeek } from "./icons";
@@ -72,14 +72,6 @@ export function Composer({
   const [skipOpen, setSkipOpen] = useState(false);
   /** 쓸 말이 있으면 보내기, 없으면 시간 손잡이 — 버튼 하나가 두 뜻을 갖는다 */
   const hasInput = input.trim().length > 0;
-
-  // 입력 textarea 높이 자동 조절 — 내용이 늘면 최대 높이까지 커지고 이후 스크롤
-  useEffect(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
-  }, [input, inputRef]);
 
   /**
    * 시간 이동 — **자주 하는 지시라 손이 아니라 눈에 둔다.**
