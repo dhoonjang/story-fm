@@ -164,10 +164,10 @@ describe("경기 턴 — 지시가 먼저, 구간은 그 다음", () => {
   it("장부 블록은 사건을 싣지 않는다 — 사건은 구간이 돌려준다", () => {
     const state = matchState();
     const { applied } = turn(state, GO);
-    expect(applied.segment).toContain("[이번 구간에 일어난 일");
+    expect(applied.segment).toContain("<segment>");
     // 상태 스냅샷은 구간이 굴러간 **뒤**의 장부이고, 사건 목록은 따로 실린다
-    expect(buildLedgerNote(state)).not.toContain("[이번 구간에 일어난 일");
-    expect(buildLedgerNote(state)).toContain("[경기 장부");
+    expect(buildLedgerNote(state)).not.toContain("<segment>");
+    expect(buildLedgerNote(state)).toContain("<ledger>");
   });
 });
 

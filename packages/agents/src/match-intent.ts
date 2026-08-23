@@ -26,6 +26,9 @@ import { toToolSchema } from "./tool-schema";
  */
 export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조화된 의도 하나로 옮기는 해석기다. 중계도 대사도 쓰지 않는다.
 
+# 입력
+<ledger>(명단·시각·교체 횟수) · <standing>(걸려 있는 전술과 개인 지시) · <targets>(공략 목록) 뒤에 감독의 말이 @감독: 으로 온다.
+
 # 무엇을 고르나
 감독이 명시한 것만 싣는다. 말하지 않은 축·자리·역할은 보내지 않는다. 프리셋을 적용하거나 전원을 재배치하지 않는다.
 
@@ -43,7 +46,7 @@ export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조
 - teamTalk.occasion — 킥오프 전 pre · 하프타임 half · 종료 후 post · 그 밖 daily.
 
 # 판을 바꾸는 것
-- substitutions — 교체. out/in은 명단의 id.
+- substitutions — 교체. out/in은 <ledger>의 id.
 - tactics — 6축(1~5) 중 감독이 말한 축만.
 - playerTactics — 한 선수의 자리·역할·개인 지시.
   - 자리는 move로만 옮긴다: lane(left·center·right) × band(defense=우리 진영, midfield, attack=상대 진영). 지정하지 않은 축은 그대로 둔다. 좌표를 지어내지 않는다.
@@ -52,7 +55,7 @@ export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조
   - instruction.intensity(${DIRECTIVE_INTENSITIES.join(" · ")}) — 감독이 세기를 말했을 때만. "붙어서 아예 지워버려"는 heavy, "따라가진 말고 견제만"은 light.
   - 다섯 갈래에 담기지 않는 말이면 지역 지시인지 보고 plans를 쓴다.
 - plans — 선수 한 명으로 환원되지 않는 지역 지시. band × lane × intent(overload·press·protect·transition)와 감독의 표현 한 줄.
-- exploits — 공략 목록에 있는 id만.
+- exploits — <targets>에 있는 id만.
 
 # unresolved
 어느 갈래에도 담기지 않은 말은 감독의 표현 그대로 unresolved에 남긴다.`;
@@ -105,7 +108,8 @@ export async function runMatchIntent(
             system: MATCH_INTENT_SYSTEM,
             history: [],
             // 명단·현재 6축·걸린 지시·공략 표적만 — 분류에 쓰이지 않는 판세는 빠진다
-            user: [buildLedgerNote(state), ``, `[감독]`, message].join("\n"),
+            // 분류기에는 감독의 이름이 없다 — 자리 태그 하나로 감독의 말을 세운다
+            user: [buildLedgerNote(state), ``, `@감독: ${message}`].join("\n"),
             tools: [makeReportTool((value) => (intent = value))],
             toolChoice: { name: REPORT_INTENT_TOOL },
           });

@@ -9,7 +9,7 @@ import { IconDay, IconMatch, IconPlay, IconSend, IconSkip, IconWeek } from "./ic
  *
  * 엔진을 직접 부르지 않고 채팅으로 도는 이유는 `game-screen.tsx`의 `send`에 적어
  * 두었다. 문장은 **감독의 말투가 아니라 조작의 이름**이다 — 이건 `operator`
- * 채널로 가고 모델에는 `[조작: 시간 진행 — 하루]`로 들어간다. "하루만 넘기자"
+ * 채널로 가고 모델에는 `<operator>시간 진행 — 하루</operator>`로 들어간다. "하루만 넘기자"
  * 같은 구어체로 두면 이력에 감독이 한 말처럼 남는다.
  *
  * 눈금을 셋으로 끊은 건 프리시즌 때문이다 — 7월엔 다음 경기가 몇 주 뒤라

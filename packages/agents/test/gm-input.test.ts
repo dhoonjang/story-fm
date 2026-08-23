@@ -775,7 +775,7 @@ describe("오퍼레이터 채널 — 감독의 말과 화면 조작은 갈린다
      */
     expect(operator.content).not.toContain(`@${state.manager.name}:`);
     expect(operator.content).not.toMatch(/^@/u);
-    expect(operator.content).toBe("[조작: 시간 진행 — 하루]");
+    expect(operator.content).toBe("<operator>시간 진행 — 하루</operator>");
   });
 });
 

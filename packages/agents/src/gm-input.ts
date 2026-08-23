@@ -66,13 +66,16 @@ const EXPIRING_ALERT_DAYS = 180;
  *
  * ⚠️ **카드는 데이터다 — 지시문을 싣지 않는다** (prompts.md §1·§8). 조회 포인터도
  * 실명 가드도 여기 없다: 규칙은 시스템 프롬프트가 한 번 갖고, 실명 인물의 사람됨은
- * 원형과 장부의 사실이 묶는다. 화자 태그는 머리글에 붙는다 — 태그와 이름이 갈리는
- * 동명이인에서 모델이 태그를 알 자리가 여기뿐이다.
+ * 원형과 장부의 사실이 묶는다. 화자 태그는 여는 태그의 속성이다 — 태그와 이름이
+ * 갈리는 동명이인에서 모델이 태그를 알 자리가 여기뿐이다.
+ *
+ * 블록은 영어 태그로 싼다 (prompts.md §1·§2) — 읽는 것(꺾쇠)과 쓰는 것(@ 줄)이 갈린다.
  */
 export function describePersona(entry: CharacterEntry): string {
   const label = personaRoleLabel(entry.role);
   return [
-    `[인물] ${entry.name} (@${entry.characterId}:) — ${label ? `${label} · ` : ""}${entry.archetype}`,
+    `<character name="${entry.name}" tag="@${entry.characterId}:"${label ? ` role="${label}"` : ""}>`,
+    `원형: ${entry.archetype}`,
     `성격: ${entry.traits.join(" · ")}`,
     ...(entry.motivation ? [`동기: ${entry.motivation}`] : []),
     ...(entry.speechStyle ? [`말투: ${entry.speechStyle.note}`] : []),
@@ -90,6 +93,7 @@ export function describePersona(entry: CharacterEntry): string {
     ...(entry.memories?.length
       ? [`있었던 일:`, ...entry.memories.map((m) => `  ${m.date} — ${m.text}`)]
       : []),
+    `</character>`,
   ].join("\n");
 }
 
@@ -103,7 +107,7 @@ export function describePersona(entry: CharacterEntry): string {
  */
 export function describeCharacters(entries: readonly CharacterEntry[]): string | null {
   if (entries.length === 0) return null;
-  return [`[이번 장면의 인물]`, ...entries.map(describePersona)].join("\n\n");
+  return [`<characters>`, ...entries.map(describePersona), `</characters>`].join("\n");
 }
 
 /**
@@ -127,10 +131,11 @@ export function describeCharacters(entries: readonly CharacterEntry[]): string |
 export function buildGmReference(state: GameState): string {
   const m = state.manager;
   return [
-    `[구단과 감독]`,
+    `<reference>`,
     `구단: ${teamName(state.userTeamId)}`,
     `감독: ${m.name} — 화자 태그 @${m.name}:`,
     `배경: ${m.background}`,
+    `</reference>`,
   ].join("\n");
 }
 
@@ -143,11 +148,8 @@ export function buildGmReference(state: GameState): string {
 export function buildGmDigest(state: GameState): string | null {
   const digest = state.historyDigest;
   if (!digest) return null;
-  return [
-    `[접힌 대화의 요약]`,
-    `이력 창 밖으로 밀려난 지난 대화를 ${digest.at}에 요약한 것이다. 아래 이력은 그 뒤부터다.`,
-    digest.text,
-  ].join("\n");
+  // 무엇의 요약인지는 시스템 프롬프트의 「입력」이 말한다 — 블록은 날짜와 본문뿐이다
+  return [`<summary at="${digest.at}">`, digest.text, `</summary>`].join("\n");
 }
 
 /** 유저의 자연어를 모델이 읽는 감독 화자 형식으로 감싼다. */
@@ -157,12 +159,12 @@ export function buildManagerMessage(state: GameState, message: string): string {
 
 /**
  * 화면 조작 — 감독의 발화가 아니다. **모델의 출력 문법 밖 봉투로 싣는다**
- * (`[조작: 시간 진행 — 하루]`). `@:`는 GM이 내레이션을 쓰는 채널이라 거기 담으면
+ * (`<operator>시간 진행 — 하루</operator>`). `@:`는 GM이 내레이션을 쓰는 채널이라 거기 담으면
  * 감독의 화면 조작이 모델 자신의 문법으로 이력에 서고, 인물이 그 손잡이를 아는
  * 것으로 읽힌다 (docs/llm/prompts.md §3).
  */
 export function buildOperatorMessage(message: string): string {
-  return `[조작: ${message}]`;
+  return `<operator>${message}</operator>`;
 }
 
 /**
@@ -172,13 +174,14 @@ export function buildOperatorMessage(message: string): string {
  */
 export function buildMatchReference(state: GameState): string {
   return [
-    `[구단과 감독]`,
+    `<reference>`,
     `구단: ${teamName(state.userTeamId)}`,
     `감독: ${state.manager.name} — 화자 태그 @${state.manager.name}:`,
+    `</reference>`,
     ``,
     // 벤치에서 감독 옆에 서 있는 사람이다 — 경기 중 조언도 같은 사람의 말투여야 한다.
     // 경기 내내 같은 한 사람이라 여기서는 캐릭터북을 거치지 않고 상주한다
-    describePersona(characterEntry(headCoachOf(state), "full")),
+    describeCharacters([characterEntry(headCoachOf(state), "full")]) ?? "",
     ``,
     buildMatchBrief(state),
   ].join("\n");
@@ -194,7 +197,7 @@ export function buildMatchBrief(state: GameState): string {
     .slice(-MATCH_BRIEF_TURNS)
     .map((t) => `- "${t.text}"`);
   if (said.length === 0) return "";
-  return [`[경기 전 감독이 한 말]`, ...said].join("\n");
+  return [`<pre_match>`, ...said, `</pre_match>`].join("\n");
 }
 
 const DOW_KO = ["일", "월", "화", "수", "목", "금", "토"];
@@ -300,7 +303,7 @@ function buildUnemployedNote(state: GameState, passed?: TimePassed | null): stri
   const card = state.dismissal;
   const offers = openManagerOffers(state);
   const lines = [
-    `[상태 스냅샷]`,
+    `<snapshot>`,
     `${state.date} (${DOW_KO[dayOfWeek(state.date)]}) ${formatClock(clockOf(state))} · 시즌 ${state.season} · ${describeWindowState(state)}`,
     // 팀의 도구가 막힌다는 말은 싣지 않는다 — 코어가 부르는 자리에서 막는다 (prompts.md §8)
     `감독 ${state.manager.name}은(는) 무직이다 — 맡은 팀이 없다.`,
@@ -338,7 +341,7 @@ function buildUnemployedNote(state: GameState, passed?: TimePassed | null): stri
   ].filter((x): x is string => x !== null);
   const recent = recentNarrativeLines(state);
   if (recent.length > 0) lines.push(`최근 사건: ${recent.join(" / ")}`);
-  return lines.join("\n");
+  return [...lines, `</snapshot>`].join("\n");
 }
 
 export function buildGmStateNote(
@@ -398,7 +401,7 @@ export function buildGmStateNote(
   ].filter((x): x is string => x !== null);
 
   const lines = [
-    `[상태 스냅샷]`,
+    `<snapshot>`,
     `${state.date} (${DOW_KO[dayOfWeek(state.date)]}) ${formatClock(clockOf(state))} · 시즌 ${state.season}${
       played > 0 && rank > 0 ? ` · 리그 ${rank}위` : ""
     } · ${describeWindowState(state)}`,
@@ -406,7 +409,7 @@ export function buildGmStateNote(
     `전술: ${tac.formation} · 멘탈${tac.mentality} 라인${tac.defensiveLine} 압박${tac.pressing} 템포${tac.tempo} 폭${tac.width} 패스${tac.passStyle} · 선발 평균 적응 ${Math.round(squadFamiliarity(state, state.userTeamId))}`,
     `재정: 잔고 ${formatMoney(finance.balance)} · 주급 ${formatMoney(weeklyWagesOf(state, state.userTeamId))}/주 · 이적예산 ${formatMoney(finance.transferBudget)}`,
     // 감독의 수치는 캐시 밖이다 — 평판은 경기마다 움직이고 능력도 자란다.
-    // 레퍼런스([구단과 감독])엔 이름·배경만 남는다
+    // 레퍼런스(<reference>)엔 이름·배경만 남는다
     `감독 ${state.manager.name}: 리더십${state.manager.attributes.leadership} 전술${state.manager.attributes.tactics} 훈련${state.manager.attributes.training} 협상${state.manager.attributes.negotiation} 분석${state.manager.attributes.analysis} · 평판 보드${state.manager.reputation.board} 미디어${state.manager.reputation.media} 선수단${state.manager.reputation.squad}`,
     // 부임 직후엔 선수단이 여름 휴가 중 — 소집일을 밝혀야 빈 훈련장을 지어내지 않는다
     state.date < squadReturnOf(state.calendar)
@@ -499,7 +502,7 @@ export function buildGmStateNote(
   if (arcs) lines.push(`이어지는 이야기:\n${arcs}`);
   const recent = recentNarrativeLines(state);
   if (recent.length > 0) lines.push(`최근 사건: ${recent.join(" / ")}`);
-  return lines.join("\n");
+  return [...lines, `</snapshot>`].join("\n");
 }
 
 /**
@@ -542,7 +545,7 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
   const packetLines = packet
     ? [
         ``,
-        `[현재 판세 — 구간마다 갱신]`,
+        `<packet>`,
         // 판세를 읽는 것은 모델의 일이다 — 코어는 이름·수치·상성 근거만 싣는다
         `${packet.home.teamName}(홈) vs ${packet.away.teamName} — 기대 득점 ${packet.guide.expectedGoals.home} : ${packet.guide.expectedGoals.away}`,
         packet.matchups.map((m) => m.why).join(" / "),
@@ -557,17 +560,20 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
             ? ` — ${packet.away.tactical.notes.join(" / ")}`
             : ""
         }`,
+        `</packet>`,
       ]
     : [];
   // 공략 후보 — 노릴 수 있는 지점은 이 목록이 전부다 (없는 지점은 코어가 반려)
   const targetLines =
     targets.length > 0
       ? [
-          `[공략 가능한 지점 — 동시에 ${MAX_EXPLOITS}곳까지]`,
+          // max — 동시에 노릴 수 있는 수. 읽는 법은 중계·해석 프롬프트의 「입력」이 갖는다
+          `<targets max="${MAX_EXPLOITS}">`,
           ...targets.map((t) => `  ${t.id} — ${t.label}`),
           pending.exploits && pending.exploits.length > 0
             ? `지금 노리는 중: ${pending.exploits.join(", ")}`
             : `지금 노리는 곳 없음`,
+          `</targets>`,
         ]
       : [];
   /**
@@ -580,7 +586,7 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
   );
   const standingLines = [
     ``,
-    `[지금 걸어 둔 것]`,
+    `<standing>`,
     `전술 ${ourTactics.formation} · 멘탈${ourTactics.mentality} 라인${ourTactics.defensiveLine} ` +
       `압박${ourTactics.pressing} 템포${ourTactics.tempo} 폭${ourTactics.width} 패스${ourTactics.passStyle}`,
     pending.regionalPlans && pending.regionalPlans.length > 0
@@ -599,8 +605,9 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
           )
           .join(", ")}`
       : `개인 지시·역할: 없음`,
+    `</standing>`,
   ];
-  // 사건은 싣지 않는다 — 코어가 이미 굴린 구간은 [이번 구간에 일어난 일]로 따로
+  // 사건은 싣지 않는다 — 코어가 이미 굴린 구간은 <segment>로 따로
   // 실린다. 이 블록은 그 구간이 끝난 자리의 장부다 (agents.md §3)
   /**
    * 교체 한도는 **국면이 정한다** — 연장은 6인/4회다 (match.md §5). 5/3으로 박아
@@ -609,13 +616,14 @@ export function buildLedgerNote(state: GameState, options: { withPacket?: boolea
    */
   const subLimits = subLimitsOf(ledger.phase);
   return [
-    `[경기 장부 — 매 턴 갱신]`,
+    `<ledger>`,
     `스코어 ${ledger.score.home}:${ledger.score.away} · ${ledger.minute}′ · ${ledger.phase}`,
     `홈 온필드: ${withNames(ledger.home.onPitch)}`,
     `홈 벤치: ${withNames(ledger.home.bench)} (교체 ${ledger.home.subsUsed}/${subLimits.maxSubs}, 기회 ${ledger.home.subWindows}/${subLimits.maxSubWindows})`,
     `어웨이 온필드: ${withNames(ledger.away.onPitch)}`,
     `어웨이 벤치: ${withNames(ledger.away.bench)} (교체 ${ledger.away.subsUsed}/${subLimits.maxSubs}, 기회 ${ledger.away.subWindows}/${subLimits.maxSubWindows})`,
     ledger.sentOff.length > 0 ? `퇴장: ${withNames(ledger.sentOff)}` : "",
+    `</ledger>`,
     ...standingLines,
     ...packetLines,
     ...targetLines,

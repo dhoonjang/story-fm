@@ -176,10 +176,9 @@ export function resolveLlmMode(): LlmMode {
  * 첫 장면 지시 — 누가 여는지만 정한다. ⚠️ 소재·구성 체크리스트를 덧붙이지 마라 —
  * 모델은 항목 수만큼 문단으로 갚아 모든 세이브의 첫 장면이 같은 골격이 된다.
  */
-const ONBOARDING_INSTRUCTION = [
-  `[오퍼레이터 지시 — 새 게임 첫 장면]`,
-  `오늘은 감독의 부임 첫날이다. 상태와 인물 카드를 읽고 수석코치의 말로 첫 장면을 열어라.`,
-].join("\n");
+const ONBOARDING_INSTRUCTION = buildOperatorMessage(
+  "새 게임 첫 장면 — 오늘은 감독의 부임 첫날이다. 상태와 인물 카드를 읽고 수석코치의 말로 첫 장면을 열어라.",
+);
 
 /** 첫 장면 검사 — 문법과 화자(수석코치 등장·감독 미발화)까지만 본다. 내용은 보지 않는다. */
 function isValidOnboardingText(state: GameState, text: string): boolean {
@@ -457,7 +456,7 @@ async function runRealGmTurn(
             : []),
           // 스킬이 돌려준 말 — 걸린 지시도, 걸리지 않은 지시도 중계의 근거가 된다
           ...(applied && applied.notes.length > 0
-            ? [``, `[감독의 지시에 코어가 답한 것]`, ...applied.notes.map((n) => `- ${n}`)]
+            ? [``, `<core_replies>`, ...applied.notes.map((n) => `- ${n}`), `</core_replies>`]
             : []),
         ].join("\n"),
         stateNote,

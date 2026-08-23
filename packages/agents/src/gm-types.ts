@@ -76,7 +76,7 @@ export class GmTurnFailure extends Error {
 export const TIME_PASSED = "시간 경과";
 
 /**
- * 시간 이동 손잡이가 보내는 조작 — `[조작: 시간 진행 — 일주일]` (`TIME_SKIPS`).
+ * 시간 이동 손잡이가 보내는 조작 — `<operator>시간 진행 — 일주일</operator>` (`TIME_SKIPS`).
  *
  * **이것만은 모델을 거치지 않는다.** 다른 시간 이동은 모델이 첫 줄 헤더에 시점을
  * 적고 코어가 따라가지만(`applyScenePoint`), 손잡이는 감독이 얼마를 넘길지 이미

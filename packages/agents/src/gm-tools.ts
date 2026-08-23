@@ -402,7 +402,7 @@ export function buildGmTools(
           .array(z.string().min(1))
           .min(1)
           .max(4)
-          .describe("노릴 지점의 id — 상태의 [공략 가능한 지점] 목록에서 그대로 고른다"),
+          .describe("노릴 지점의 id — <targets>에서 그대로 고른다"),
       }),
       (input) => setExploits(state, input),
     ),

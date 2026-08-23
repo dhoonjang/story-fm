@@ -10,12 +10,13 @@ import type { MatchEvent, ShootoutKick, ShootoutOutcome, StrengthPacket } from "
 export const MATCH_CASTER_SYSTEM = `당신은 스토리 기반 풋볼 매니저의 경기 중계자다. 코어가 굴린 경기를 중계하고 벤치의 대화를 연출한다. 경기의 결과를 바꿀 도구는 없다.
 
 # 입력
-- [구단과 감독] — 감독의 이름과, 벤치에 앉은 수석코치의 카드, [경기 전 감독이 한 말].
+꺾쇠 태그는 읽는 것이고, 당신이 쓰는 줄은 @로 시작한다.
+- <reference> — 구단과 감독의 이름. <characters> — 벤치에 앉은 수석코치의 카드. <pre_match> — 경기 전 감독이 한 말.
 - 이력 — 이 경기의 지난 중계 턴들.
-- [경기 장부] — 스코어·시각·국면·온필드와 벤치·교체 횟수. [지금 걸어 둔 것]은 우리 전술과 개인 지시, [현재 판세]는 기대 득점과 상성의 근거, [공략 가능한 지점]은 노릴 수 있는 곳. 장부가 유일한 진실이다 — 스코어는 계산하지 않고 읽는다.
+- <ledger> — 스코어·시각·국면·온필드와 벤치·교체 횟수. <standing> — 우리 전술과 개인 지시. <packet> — 기대 득점과 상성의 근거. <targets> — 노릴 수 있는 곳, max는 동시에 노릴 수 있는 수. 장부가 유일한 진실이다 — 스코어는 계산하지 않고 읽는다.
 - @감독이름: — 이번 턴 감독의 말.
-- [이번 구간에 일어난 일] — 코어가 확정한 사건 목록과 [구간 종료]의 이유. 이 블록이 오지 않은 턴이 킥오프 턴이다.
-- [감독의 지시에 코어가 답한 것] — 이번 턴의 지시가 판에 걸렸는지.
+- <segment> — 코어가 확정한 사건 목록. <stop> — 구간이 멈춘 이유. <segment>가 오지 않은 턴이 킥오프 턴이다.
+- <core_replies> — 이번 턴의 지시가 판에 걸렸는지.
 
 # 사건
 일어난 일은 이미 정해져 있다. 사건 목록을 빠뜨리지 않고, 더하지 않고 생생한 중계로 옮긴다. 사건 사이의 흐름·분위기·관중·벤치의 반응은 당신의 재량이고, 그 여백이 이야기다.
@@ -51,16 +52,16 @@ export const MATCH_CASTER_SYSTEM = `당신은 스토리 기반 풋볼 매니저�
 
 /** 킥오프 턴 유저 메시지 — 패킷 + 감독의 사전 지시 */
 export function buildKickoffMessage(packet: StrengthPacket, managerNote?: string): string {
-  const note = managerNote ? `\n\n[감독의 경기 전 지시]\n${managerNote}` : "";
+  const note = managerNote ? `\n\n<pre_match>\n${managerNote}\n</pre_match>` : "";
   return (
     `아래 전력 분석 패킷을 근거로 경기를 시작하라. 킥오프부터 첫 정지점까지 진행한다.` +
-    `\n\n[전력 분석 패킷]\n${JSON.stringify(packet, null, 2)}${note}`
+    `\n\n<packet>\n${JSON.stringify(packet, null, 2)}\n</packet>${note}`
   );
 }
 
 /** 진행 턴 유저 메시지 — 장부 스냅샷 + 감독 발화 */
 export function buildContinueMessage(ledgerSummary: string, managerInput: string): string {
-  return `${ledgerSummary}\n\n[감독]\n${managerInput}`;
+  return `${ledgerSummary}\n\n@감독: ${managerInput}`;
 }
 
 const EVENT_KO: Record<MatchEvent["type"], string> = {
@@ -129,10 +130,10 @@ export function buildSegmentMessage(
     return `- ${ev.minute}′ ${team}${EVENT_KO[ev.type]}${who ? `: ${who}` : ""}${cause}${detail}`;
   });
   return [
-    "[이번 구간에 일어난 일 — 이대로 중계하라]",
+    "<segment>",
     lines.length > 0 ? lines.join("\n") : "- (사건 없음)",
-    "",
-    `[구간 종료] ${STOP_KO[stop] ?? stop}`,
+    "</segment>",
+    `<stop>${STOP_KO[stop] ?? stop}</stop>`,
   ].join("\n");
 }
 
@@ -163,10 +164,10 @@ export function buildShootoutMessage(
     : ["- (이번 턴에 찬 발은 없다 — 감독이 키커 순서를 정할 자리다)", `- ${tallyLine}`];
   const stop = done ? "shootout_done" : kick ? "shootout_kick" : "shootout_start";
   return [
-    "[이번 구간에 일어난 일 — 이대로 중계하라]",
+    "<segment>",
     lines.join("\n"),
-    "",
-    `[구간 종료] ${STOP_KO[stop] ?? stop}`,
+    "</segment>",
+    `<stop>${STOP_KO[stop] ?? stop}</stop>`,
   ].join("\n");
 }
 
@@ -180,9 +181,9 @@ export function buildShootoutMessage(
  */
 export function buildNoSegmentMessage(minute: number): string {
   return [
-    "[이번 구간에 일어난 일 — 이대로 중계하라]",
+    "<segment>",
     `- (진행 없음 — 감독이 말만 건 턴이다. 공은 ${minute}′에 멈춰 있다)`,
-    "",
-    "[구간 종료] 시간이 흐르지 않았다",
+    "</segment>",
+    "<stop>시간이 흐르지 않았다</stop>",
   ].join("\n");
 }
