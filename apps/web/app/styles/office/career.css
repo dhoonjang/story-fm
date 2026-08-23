@@ -164,11 +164,15 @@
   flex: 0 0 auto;
   padding: 0;
 }
-/* 계약 — 평판·경고와 같은 단의 읽는 사실 한 줄 */
+/* 계약·지갑 — 평판·경고와 같은 단의 읽는 사실 한 줄 */
 .mgr-contract {
   color: var(--muted);
   font-size: var(--fs-sm);
   white-space: nowrap;
+}
+/* 비갱신 통보는 만료일이 곧 끝이라는 뜻이다 — 같은 줄에서 색으로 갈린다 */
+.mgr-nonrenewal {
+  color: var(--danger);
 }
 .trophy-list {
   display: flex;

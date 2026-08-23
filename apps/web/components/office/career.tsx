@@ -51,6 +51,56 @@ function dismissalLineOf(d: {
   return `${d.expectation} — 기대 ${d.target}위, 당시 ${d.position}위`;
 }
 
+type OfferRow = CareerView["offers"][number];
+
+/**
+ * **제안 한 장** — 무직에게 온 자리도, 지금 구단의 재계약도 같은 물건이다
+ * (career.md §5.1 · §5.4). 코어가 넘기는 것은 조건과 기한이고 문장은 여기서 쓴다.
+ *
+ * **읽는 값이다** — 수락도 흥정도 감독이 말로 한다.
+ */
+function OfferCard({ offer: o }: { offer: OfferRow }) {
+  return (
+    <div className="offer">
+      <div className="offer-head">
+        <b>{o.teamName}</b>
+        <span className="tier">{o.via === "renewal" ? "재계약" : `${o.tier}티어`}</span>
+        <span className="until">{o.expiresOn}까지</span>
+      </div>
+      <div className="offer-why">
+        기대 {o.expectation} ({o.target}위)
+        {o.position === null ? "" : ` · 현재 ${o.position}위`}
+      </div>
+      {o.salary !== null && (
+        <div className="offer-why">
+          연봉 {formatMoney(o.salary)} · {o.years ?? "-"}년 · 이적 예산 약속{" "}
+          {formatMoney(o.budgetPledge ?? 0)}
+          {o.counteredOn === null ? "" : " · 흥정 완료"}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * **재직 중에 서는 제안은 재계약 하나다** (career.md §5.4) — 보드가 만료 90일 전에
+ * 건 다음 임기다. 경질 카드가 서 있는 동안에는 이 자리가 무직 카드로 대체된다.
+ */
+function Renewal({ career }: { career: CareerView }) {
+  if (career.dismissal) return null;
+  const offers = career.offers.filter((o) => o.via === "renewal");
+  if (offers.length === 0) return null;
+  return (
+    <div className="mgr-outofwork">
+      <div className="offer-list" data-testid="renewal-offers">
+        {offers.map((o) => (
+          <OfferCard offer={o} key={o.id} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /**
  * **무직 — 경질 카드와 지금 열린 감독직 제안.**
  *
@@ -66,34 +116,20 @@ function OutOfWork({ career }: { career: CareerView }) {
       <div className="dismissed">
         <div className="dismissed-head">
           <b>{d.teamName}</b>
-          <span className="when">{d.on} 경질</span>
+          <span className="when">
+            {d.on} {d.kind === "expired" ? "계약 만료" : "경질"}
+          </span>
         </div>
         <div className="dismissed-why">{dismissalLineOf(d)}</div>
+        {d.severance !== null && (
+          <div className="dismissed-why">위약금 {formatMoney(d.severance)}</div>
+        )}
       </div>
       <div className="offer-list" data-testid="manager-offers">
         {career.offers.length === 0 ? (
           <div className="empty">들어온 감독직 제안이 없습니다</div>
         ) : (
-          career.offers.map((o) => (
-            <div className="offer" key={o.id}>
-              <div className="offer-head">
-                <b>{o.teamName}</b>
-                <span className="tier">{o.tier}티어</span>
-                <span className="until">{o.expiresOn}까지</span>
-              </div>
-              <div className="offer-why">
-                기대 {o.expectation} ({o.target}위)
-                {o.position === null ? "" : ` · 현재 ${o.position}위`}
-              </div>
-              {o.salary !== null && (
-                <div className="offer-why">
-                  연봉 {formatMoney(o.salary)} · {o.years ?? "-"}년 · 이적 예산 약속{" "}
-                  {formatMoney(o.budgetPledge ?? 0)}
-                  {o.counteredOn === null ? "" : " · 흥정 완료"}
-                </div>
-              )}
-            </div>
-          ))
+          career.offers.map((o) => <OfferCard offer={o} key={o.id} />)
         )}
       </div>
       {/**
@@ -383,10 +419,22 @@ export function CareerView({
               <div className="mgr-warn">
                 <div className="mgr-rep-title">계약</div>
                 <div className="mgr-contract">
-                  연봉 {formatMoney(career.contract.salary)} · {career.contract.until}까지
+                  연봉 {formatMoney(career.contract.salary)} · {career.contract.until}까지 (
+                  {career.contract.daysLeft}일)
+                  {career.contract.renewal === "declined" && (
+                    <b className="mgr-nonrenewal"> 재계약 없음</b>
+                  )}
                 </div>
               </div>
             )}
+            {/**
+             * 지갑 — **구단 잔고와 다른 돈이다** (career.md §5.4). 계약 옆에 서야
+             * 연봉과 위약금이 어디로 갔는지가 그 자리에서 읽힌다.
+             */}
+            <div className="mgr-warn">
+              <div className="mgr-rep-title">지갑</div>
+              <div className="mgr-contract">{formatMoney(career.wallet)}</div>
+            </div>
           </div>
         </div>
         <ManagerRadar
@@ -397,6 +445,7 @@ export function CareerView({
         />
       </div>
 
+      <Renewal career={career} />
       <OutOfWork career={career} />
 
       <div className="section-title">트로피 보관함</div>
@@ -461,7 +510,9 @@ export function CareerView({
                   <td>{r.d.season}</td>
                   <td>{r.d.teamName}</td>
                   <td>—</td>
-                  <td className="career-sacked">{r.d.on} 경질</td>
+                  <td className="career-sacked">
+                    {r.d.on} {r.d.kind === "expired" ? "계약 만료" : "경질"}
+                  </td>
                   <td className="career-verdict">{dismissalLineOf(r.d)}</td>
                 </tr>
               ),

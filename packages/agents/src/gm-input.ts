@@ -16,6 +16,7 @@ import {
   describePendingApproach,
   describePendingPress,
   describeWindowState,
+  diffDays,
   expiringContracts,
   financeOf,
   formatClock,
@@ -305,6 +306,36 @@ function timePassedLine(state: GameState, passed?: TimePassed | null): string | 
 }
 
 /**
+ * **감독 자신의 계약 한 줄** — 잔여·지갑, 그리고 보드가 만료 90일 전에 내린 판정
+ * (career.md §5.4).
+ *
+ * 재계약 제안은 10일 뒤 사라지는 답할 자리라 스냅샷에 서야 한다 — 화면에만 있으면
+ * 모델은 감독이 무엇을 두고 답하는지 모른 채 장면을 쓴다.
+ */
+function managerContractLine(state: GameState): string | null {
+  const contract = state.manager.contract;
+  if (!contract) return null;
+  const wallet = state.manager.wallet ?? 0;
+  const base =
+    `감독 계약: 연봉 ${formatMoney(contract.salary)} · ${contract.until}까지` +
+    ` (${diffDays(state.date, contract.until)}일) · 지갑 ${formatMoney(wallet)}`;
+  const renewal = openManagerOffers(state).find((o) => o.via === "renewal");
+  if (renewal) {
+    return (
+      `${base}\n보드의 재계약 제안 (accept_manager_offer로 수락한다 — 감독이 받겠다고 할 때만.` +
+      ` 수락 전 counter_manager_offer로 한 차례 조건을 되부를 수 있다):` +
+      ` ${renewal.id} · 연봉 ${formatMoney(renewal.salary ?? 0)}·${renewal.years ?? "-"}년` +
+      `·이적 예산 약속 ${formatMoney(renewal.budgetPledge ?? 0)}` +
+      `${renewal.counteredOn ? " · 흥정은 끝났다 — 수락 여부만 남았다" : ""} · ${renewal.expiresOn}까지`
+    );
+  }
+  if (contract.renewalOffered === false) {
+    return `${base} · 보드는 재계약하지 않기로 했다 — 만료일에 자리를 잃는다`;
+  }
+  return base;
+}
+
+/**
  * **무직의 스냅샷** — 맡은 팀이 없다 (career.md §5.1).
  *
  * 재직 중에 실리는 것(전술·재정·선수단·훈련·협상)은 전부 **옛 구단의 것**이라,
@@ -319,7 +350,7 @@ function buildUnemployedNote(state: GameState, passed?: TimePassed | null): stri
     `${state.date} (${DOW_KO[dayOfWeek(state.date)]}) ${formatClock(clockOf(state))} · 시즌 ${state.season} · ${describeWindowState(state)}`,
     `감독 ${state.manager.name}은(는) **무직이다** — 맡은 팀이 없다. 팀 전술·훈련·이적·경기에 관한 도구는 부를 수 없다.`,
     card
-      ? `경질: ${card.on} ${teamName(card.teamId)}${
+      ? `${card.kind === "expired" ? "계약 만료" : "경질"}: ${card.on} ${teamName(card.teamId)}${
           card.expectation && card.position
             ? ` — 기대 ${card.expectation}(${card.target}위)에 최종 ${card.position}위`
             : card.reason
@@ -424,6 +455,8 @@ export function buildGmStateNote(
     // 감독의 수치는 캐시 밖이다 — 평판은 경기마다 움직이고 능력도 자란다.
     // 레퍼런스(감독 프로필)엔 이름·배경만 남는다
     `감독 ${state.manager.name}: 리더십${state.manager.attributes.leadership} 전술${state.manager.attributes.tactics} 훈련${state.manager.attributes.training} 협상${state.manager.attributes.negotiation} 분석${state.manager.attributes.analysis} · 평판 보드${state.manager.reputation.board} 미디어${state.manager.reputation.media} 선수단${state.manager.reputation.squad}`,
+    // 감독 자신의 계약 — 재계약 제안은 **답할 자리**라 스냅샷에 서야 한다 (career.md §5.4)
+    managerContractLine(state),
     // 부임 직후엔 선수단이 여름 휴가 중 — 소집일을 밝혀야 빈 훈련장을 지어내지 않는다
     state.date < squadReturnOf(state.calendar)
       ? `선수단 여름 휴가 중 — ${squadReturnOf(state.calendar)} 소집 (그 전에는 훈련을 잡을 수 없다)`

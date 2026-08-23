@@ -1064,6 +1064,10 @@ export interface OfficeViews {
     dismissal: {
       on: string;
       season: number;
+      /** 경질인가 계약 만료인가 — 무직은 상태지 사유가 아니다 (career.md §5.4) */
+      kind: "sacked" | "expired";
+      /** 구단이 문 위약금 — 만료·옛 세이브엔 없다 (career.md §5.4) */
+      severance: number | null;
       teamName: string;
       tier: number | null;
       position: number | null;
@@ -1078,6 +1082,8 @@ export interface OfficeViews {
     dismissals: Array<{
       on: string;
       season: number;
+      /** 경질인가 계약 만료인가 — 옛 이력엔 없어 경질로 읽는다 (career.md §5.4) */
+      kind: "sacked" | "expired";
       teamName: string;
       position: number | null;
       target: number | null;
@@ -1089,6 +1095,8 @@ export interface OfficeViews {
      */
     offers: Array<{
       id: string;
+      /** 어떻게 선 제안인가 — 재계약(`renewal`)만 재직 중에 선다 (career.md §5.4) */
+      via: "vacancy" | "knock" | "renewal";
       teamName: string;
       tier: number;
       expiresOn: string;
@@ -1107,8 +1115,18 @@ export interface OfficeViews {
      * 지원은 채팅으로 한다(`apply_manager_job`) — 화면은 어느 문이 열려 있는지만 세운다.
      */
     vacancies: Array<{ teamName: string; tier: number; on: string; position: number | null }>;
-    /** 감독 계약 — 옛 세이브엔 없다 (career.md §5.1) */
-    contract: { salary: number; until: string } | null;
+    /**
+     * 감독 계약 — 옛 세이브엔 없다 (career.md §5.1 · §5.4). `renewal`은 보드가 만료
+     * 90일 전에 내린 판정이다: 재계약 제안이 섰거나(`offered`), 비갱신 통보(`declined`).
+     */
+    contract: {
+      salary: number;
+      until: string;
+      daysLeft: number;
+      renewal: "offered" | "declined" | null;
+    } | null;
+    /** 감독의 **개인 지갑** — 연봉과 위약금이 쌓인 돈, 구단 잔고와 다르다 (career.md §5.4) */
+    wallet: number;
     trophies: Array<{ competition: string; season: number; teamName: string }>;
     /**
      * 업적 — **코드와 근거 수치**다. 세이브가 문장을 갖지 않으므로(career.md §6)
@@ -2485,6 +2503,9 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         ? {
             on: state.dismissal.on,
             season: state.dismissal.season,
+            /** 경질인가 계약 만료인가 — 옛 카드엔 없어 경질로 읽는다 (career.md §5.4) */
+            kind: state.dismissal.kind ?? ("sacked" as const),
+            severance: state.dismissal.severance ?? null,
             teamName: teamNameIn(state, state.dismissal.teamId),
             tier: state.dismissal.tier ?? null,
             position: state.dismissal.position ?? null,
@@ -2496,6 +2517,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       dismissals: (state.dismissals ?? []).map((d) => ({
         on: d.on,
         season: d.season,
+        kind: d.kind ?? ("sacked" as const),
         teamName: teamNameIn(state, d.teamId),
         position: d.position ?? null,
         target: d.target ?? null,
@@ -2503,6 +2525,8 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       })),
       offers: openManagerOffers(state).map((o) => ({
         id: o.id,
+        /** 어떻게 선 제안인가 — 재계약(`renewal`)만 재직 중에 선다 (career.md §5.4) */
+        via: o.via ?? ("vacancy" as const),
         teamName: teamNameIn(state, o.teamId),
         tier: o.tier,
         expiresOn: o.expiresOn,
@@ -2523,9 +2547,25 @@ export function buildOfficeViews(state: GameState): OfficeViews {
             position: v.position ?? null,
           }))
         : [],
+      /**
+       * 계약 — **수치와 기간만** 내려간다 (career.md §5.4 · overview.md §1 철칙 4).
+       * `renewal`은 보드가 만료 90일 전에 내린 판정이고, 문장은 화면과 GM이 쓴다.
+       */
       contract: state.manager.contract
-        ? { salary: state.manager.contract.salary, until: state.manager.contract.until }
+        ? {
+            salary: state.manager.contract.salary,
+            until: state.manager.contract.until,
+            daysLeft: Math.max(0, diffDays(state.date, state.manager.contract.until)),
+            renewal:
+              state.manager.contract.renewalDecidedOn === undefined
+                ? null
+                : state.manager.contract.renewalOffered
+                  ? ("offered" as const)
+                  : ("declined" as const),
+          }
         : null,
+      /** 감독의 지갑 — 구단 잔고와 다른 돈이고 이직을 따라간다 (career.md §5.4) */
+      wallet: state.manager.wallet ?? 0,
       trophies: state.trophies.map((t) => ({
         competition: t.competitionId ? competitionName(t.competitionId) : (t.competition ?? ""),
         season: t.season,
