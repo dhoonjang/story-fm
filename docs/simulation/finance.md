@@ -150,6 +150,7 @@ GM 스킬 `apply_finance_event`가 서사에서 벌어진 매출·비용을 원�
       merchandising        머천다이징
       prize                대회 상금 (리그 순위 + 대항전)
       transfer_in          이적료 수입
+      manager_buyout       감독 사임 위약금 (감독이 무는 쪽)
 
 지출: player_wages         선수 주급
       staff_wages          코칭·사무 스태프 급여
@@ -1092,6 +1093,28 @@ AI는 `WAGE_HEADROOM`을 그대로 쓴다.
 **사실만 남는다.** 접수·승인·부분 승인·거절·완공은 digest와 서사에 종류·부른 값·나온
 값으로 적히고, 보드가 무슨 말로 그렇게 답했는지는 GM이 쓴다 (overview.md §1 철칙 4).
 
+### 9.7 감독의 사재 — 두 장부가 만나는 자리
+
+감독의 지갑은 구단 장부와 **다른 돈**이다 (career.md §5.4 · §7). 둘이 만나는 자리는
+네 갈래뿐이고, 전부 이름이 붙어 있다:
+
+| 방향      | 무엇                | 구단 쪽에 서는 것                                  |
+| --------- | ------------------- | -------------------------------------------------- |
+| 구단→감독 | 감독 연봉           | `staff_wages` 지출 (매월 1일)                      |
+| 구단→감독 | 경질 위약금         | `severance` 지출 (경질 당일)                       |
+| 감독→구단 | 이적 예산 사재 출연 | **원장에 서지 않는다** — `transferBudget`만 오른다 |
+| 감독→구단 | 사임 위약금         | `manager_buyout` 수입 (사임 당일)                  |
+
+- **사재 출연이 원장에 서지 않는 이유는 보드 증액과 같다**(§9.6) — 자본이지 매출이
+  아니다. 원장에 넣으면 PSR(§9.2)이 "돈을 부으면 규정이 풀린다"가 되고, 잔고까지
+  올리면 구단이 그 현금으로 주급을 무는 길이 열려 인건비 천장(§6.3)이 감독의 저축을
+  읽게 된다. 오르는 것은 `finance.transferBudget` 하나다.
+- **사임 위약금은 매출이다.** 구단이 무는 `severance`가 손익에 서는 것과 대칭이라,
+  감독이 무는 쪽도 그대로 손익에 선다. 급여 비중(§9.3)에는 어느 쪽도 들어가지 않는다 —
+  일회성이라 인건비 축을 흔들면 안 된다.
+- 시즌 상한과 금액 공식은 감독 쪽의 표가 갖는다 (career.md §5.4) — 재정은 그 값이
+  장부에 앉는 자리만 안다.
+
 ## 9-1. 강등 — 절벽과 낙하산
 
 강등은 이 게임에서 재정이 가장 크게 흔들리는 사건이다. 아래 표는 실측
@@ -1271,6 +1294,7 @@ mock 진행(경질 없이 `keepSeat`) · 시즌 1의 월간 보고서 합. **구
 | 8   | 재정 뷰(피드·보고서·PSR) · 일지 연동                               | `views/views.ts` · `apps/web/components/office/finance.tsx`                  |
 | 9   | GM 도구 `get_finance` · `apply_finance_event` · `set_ticket_price` | `agents/skill-descriptions.ts` · `agents/gm-tools.ts`                        |
 | 10  | 보드 요청 접수·판정·반영 (§9.6)                                    | `club/board-request.ts` (+ `packages/domain/src/board-request.ts`)           |
+| 10a | 감독 지갑 입출금·사재 지출 (§9.7)                                  | `club/manager-wallet.ts` (+ `packages/domain/src/manager.ts`)                |
 | 11  | 테스트                                                             | `packages/engine/test/finance.test.ts` · `test/cues.test.ts`                 |
 
 경로는 `packages/engine/src/` 기준이다.

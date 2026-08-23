@@ -10,7 +10,7 @@ import {
 
 const yamlWith = (agents: string): string => `version: 1\nagents:\n${agents}`;
 
-/** 에이전트 여덟이 같은 한 벌을 쓰는 최소 표 — 파일 머리(`max_retries`)를 재는 자리용 */
+/** 에이전트 아홉이 같은 한 벌을 쓰는 최소 표 — 파일 머리(`max_retries`)를 재는 자리용 */
 const AGENT_YAML = `  gm: &agent
     provider: google
     model: gemini-test
@@ -23,6 +23,7 @@ const AGENT_YAML = `  gm: &agent
   mood-rater: *agent
   negotiator: *agent
   history-compactor: *agent
+  onboarding-judge: *agent
 `;
 
 /** 온전한 한 벌 — 갈래마다 이 표에서 한 자리만 무너뜨려 무엇이 거부를 부르는지 가른다 */
@@ -99,6 +100,11 @@ describe("에이전트별 LLM 설정", () => {
     model: gemini-compactor
     max_tokens: 600
     timeout_ms: 6000
+  onboarding-judge:
+    provider: google
+    model: gemini-judge
+    max_tokens: 650
+    timeout_ms: 6500
 `),
     );
 
@@ -132,6 +138,7 @@ describe("에이전트별 LLM 설정", () => {
   mood-rater: *google
   negotiator: *google
   history-compactor: *google
+  onboarding-judge: *google
 `),
     );
     expect(config.agents.gm).toMatchObject({ thinkingLevel: "minimal" });
@@ -150,6 +157,7 @@ describe("에이전트별 LLM 설정", () => {
   mood-rater: *agent
   negotiator: *agent
   history-compactor: *agent
+  onboarding-judge: *agent
 `);
 
   /**

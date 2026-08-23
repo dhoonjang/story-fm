@@ -29,6 +29,8 @@ const SKIPPABLE_AGENTS: ReadonlySet<AgentName> = new Set<AgentName>([
   "mood-rater",
   "negotiator",
   "history-compactor",
+  // 온보딩 판정도 같은 계약이다 — 건너뛰면 앵커가 그대로 시작 지갑이 된다 (agents.md §4-2)
+  "onboarding-judge",
 ]);
 
 /** 히트율 0을 신호로 읽기 전에 필요한 호출 수 — 첫 호출은 원래 쓰기만 한다 */

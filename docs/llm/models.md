@@ -21,6 +21,7 @@ agents:
   mood-rater:    { provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000,  timeout_ms: 30000,  thinking_level: minimal }
   negotiator:    { provider: google, model: gemini-3.6-flash,      max_tokens: 8000,  timeout_ms: 45000,  thinking_level: low }
   history-compactor: { provider: google, model: gemini-3.6-flash,      max_tokens: 8000,  timeout_ms: 60000,  thinking_level: minimal }
+  onboarding-judge:  { provider: google, model: gemini-3.5-flash-lite, max_tokens: 4000,  timeout_ms: 30000,  thinking_level: minimal }
 ```
 
 | 에이전트            | 담당                          | 출력 상한 | 시한  |
@@ -33,6 +34,7 @@ agents:
 | `mood-rater`        | 심경 한 줄                    | 8,000     | 30초  |
 | `negotiator`        | 우리 오퍼에 대한 상대의 판정  | 8,000     | 45초  |
 | `history-compactor` | 밀려난 평시 이력 → 요약 한 벌 | 8,000     | 60초  |
+| `onboarding-judge`  | 새 게임의 배경 → 시작 지갑    | 4,000     | 30초  |
 
 - **해석이 싼 자리로 가는 이유는 그 일이 판단이 아니라 분류이기 때문**이다 — 무엇을
   하라는 말인지 고르는 것이고, 그것이 사실인지와 얼마나 먹히는지는 코어가 정한다.
@@ -475,7 +477,7 @@ description, parameters }`가 최상위에 펼쳐진다(Chat Completions의 `fun
 | ---------------------------- | --------------------------------------------------------------------------------------- |
 | 예산이 세는 것               | `inputTokens + outputTokens` (게임 누적)                                                |
 | 상한                         | `LLM_TOKEN_BUDGET` — 없거나 0 이하면 무제한                                             |
-| 상한 초과 시 끊기는 에이전트 | 결산 셋 + 압축 — GM·중계는 계속 돈다                                                    |
+| 상한 초과 시 끊기는 에이전트 | 결산 셋 + 교섭 + 압축 + 온보딩 판정 — GM·중계는 계속 돈다                               |
 | 캐시 히트율                  | `cacheReadTokens ÷ inputTokens`                                                         |
 | 히트율 경고 문턱             | 평균 입력이 **그 에이전트 제공자의 최소 캐시 프리픽스** 이상 × 3회 이상 호출 × 히트율 0 |
 | 장부의 키                    | **에이전트 이름** — 설정의 이름이 그대로 계측 키가 된다                                 |

@@ -256,7 +256,7 @@ row, 지난 일 = 그대로 이력.**
 
 | 엔티티                                             | 무엇                                                                                                     | 정의                |
 | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------- |
-| `manager` `Manager`                                | 이름·배경 · 능력치 5축 · 평판 3축 · 보드 경고                                                            | `domain/manager.ts` |
+| `manager` `Manager`                                | 이름·배경 · 능력치 5축 · 평판 3축 · 보드 경고 · 계약 · **지갑·지출 이력**                                | `domain/manager.ts` |
 | `managerXP`                                        | 축별 누적 경험치                                                                                         | `core/state.ts`     |
 | `seasonRecords` `SeasonRecord`                     | 시즌 성적 — 감독에 소속(팀을 옮겨도 남는다)                                                              | `domain/records.ts` |
 | `trophies` `Trophy` · `achievements` `Achievement` | 우승 · 업적                                                                                              | `domain/records.ts` |

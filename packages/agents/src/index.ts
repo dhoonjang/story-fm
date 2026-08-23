@@ -11,5 +11,6 @@ export * from "./training-rater";
 export * from "./gm-types";
 export * from "./mock-gm";
 export * from "./gm";
+export * from "./onboarding-judge";
 export * from "./skill-descriptions";
 export * from "./tool-schema";

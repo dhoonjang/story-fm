@@ -25,6 +25,7 @@ import {
   AXIS_GROUPS,
   AXIS_GROUP_KO,
   FINANCE_CATEGORY_KO,
+  MANAGER_SPEND_KIND_KO,
   TRAIN_ATTR_KO,
   ageOf,
   anchorOf,
@@ -56,6 +57,7 @@ import {
   wageRatioTone,
   type WageRatioTone,
 } from "../club/finance";
+import { transferFundRoom, walletOf } from "../club/manager-wallet";
 import {
   cupCatalog,
   competitionLabel,
@@ -1070,9 +1072,9 @@ export interface OfficeViews {
     dismissal: {
       on: string;
       season: number;
-      /** 경질인가 계약 만료인가 — 무직은 상태지 사유가 아니다 (career.md §5.4) */
-      kind: "sacked" | "expired";
-      /** 구단이 문 위약금 — 만료·옛 세이브엔 없다 (career.md §5.4) */
+      /** 경질·만료·사임 — 무직은 상태지 사유가 아니다 (career.md §5.4) */
+      kind: "sacked" | "expired" | "resigned";
+      /** 위약금 — 경질이면 구단이 문 돈, 사임이면 감독이 문 돈 (career.md §5.4) */
       severance: number | null;
       teamName: string;
       tier: number | null;
@@ -1088,8 +1090,8 @@ export interface OfficeViews {
     dismissals: Array<{
       on: string;
       season: number;
-      /** 경질인가 계약 만료인가 — 옛 이력엔 없어 경질로 읽는다 (career.md §5.4) */
-      kind: "sacked" | "expired";
+      /** 경질·만료·사임 — 옛 이력엔 없어 경질로 읽는다 (career.md §5.4) */
+      kind: "sacked" | "expired" | "resigned";
       teamName: string;
       position: number | null;
       target: number | null;
@@ -1133,6 +1135,14 @@ export interface OfficeViews {
     } | null;
     /** 감독의 **개인 지갑** — 연봉과 위약금이 쌓인 돈, 구단 잔고와 다르다 (career.md §5.4) */
     wallet: number;
+    /**
+     * 감독이 쓴 돈 — 최근 것이 먼저다 (career.md §5.4). 구단 원장이 아니라 **감독의
+     * 이력**이라 커리어 뷰가 지갑 옆에서 읽는다. 갈래의 이름은 코어가 준다
+     * (`MANAGER_SPEND_KIND_KO`) — 화면이 코드를 문장으로 옮기지 않는다.
+     */
+    spending: Array<{ on: string; kind: string; amount: number; playerName: string | null }>;
+    /** 이번 시즌 사재로 더 넣을 수 있는 이적 예산 — 0이면 문이 닫혔다 (career.md §5.4) */
+    transferFundRoom: number;
     trophies: Array<{ competition: string; season: number; teamName: string }>;
     /**
      * 업적 — **코드와 근거 수치**다. 세이브가 문장을 갖지 않으므로(career.md §6)
@@ -2595,7 +2605,15 @@ export function buildOfficeViews(state: GameState): OfficeViews {
           }
         : null,
       /** 감독의 지갑 — 구단 잔고와 다른 돈이고 이직을 따라간다 (career.md §5.4) */
-      wallet: state.manager.wallet ?? 0,
+      wallet: walletOf(state),
+      spending: [...(state.manager.spending ?? [])].reverse().map((s) => ({
+        on: s.on,
+        kind: MANAGER_SPEND_KIND_KO[s.kind],
+        amount: s.amount,
+        playerName:
+          s.kind === "player-bonus" && s.ref ? (playerById(state, s.ref)?.name ?? null) : null,
+      })),
+      transferFundRoom: transferFundRoom(state),
       trophies: state.trophies.map((t) => ({
         competition: t.competitionId ? competitionName(t.competitionId) : (t.competition ?? ""),
         season: t.season,
