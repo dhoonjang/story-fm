@@ -502,6 +502,37 @@ export function recordFinance(state: GameState, teamId: string, input: RecordFin
   });
 }
 
+/**
+ * **구단이 감독에게 낸 돈은 그 자리에서 감독의 지갑이 된다** — 같은 돈의 양면
+ * (career.md §5.4).
+ *
+ * ⚠️ 구단 잔고를 건드리지 않는다. 잔고를 깎는 것은 지출을 적은 `recordFinance`이고,
+ * 여기는 그 돈이 어디로 갔는지를 적을 뿐이다 — 둘을 겹치면 같은 지출이 두 번 나간다.
+ */
+function creditManagerWallet(state: GameState, amount: number): void {
+  const value = Math.max(0, Math.round(amount));
+  if (value === 0) return;
+  state.manager.wallet = (state.manager.wallet ?? 0) + value;
+}
+
+/**
+ * **경질 위약금** — 구단이 물고 감독의 지갑에 들어간다 (career.md §5.4).
+ *
+ * 금액을 정하는 것은 계약의 일이라 `market/manager-market.ts`의 `severanceOf`가
+ * 갖고, 여기는 그 값이 장부와 지갑에 앉는 자리다. 일회성 지출이라 카테고리가
+ * 따로다 — `staff_wages`에 얹으면 경질한 달의 구단이 임금 과다로 읽힌다
+ * (finance.md §9.3).
+ */
+export function payManagerSeverance(state: GameState, teamId: string, amount: number): void {
+  recordFinance(state, teamId, {
+    kind: "expense",
+    category: "severance",
+    label: "감독 위약금",
+    amount,
+  });
+  creditManagerWallet(state, amount);
+}
+
 /** 1회성 항목(상금 등)을 중복 지급하지 않고 지급한다 — 원장은 절단되므로 키로 관리 */
 export function payOnce(
   state: GameState,
@@ -1722,12 +1753,14 @@ function postMonthlyItems(state: GameState): void {
     // 감독 연봉 — 계약이 있는 것은 감독 팀뿐이다 (career.md §5.1, 경질은 계약을
     // 지운다). AI 벤치의 몫은 위 스태프 급여율에 이미 뭉쳐 있다
     if (team.id === state.userTeamId && state.manager.contract) {
+      const monthly = Math.round(state.manager.contract.salary / 12);
       recordFinance(state, team.id, {
         kind: "expense",
         category: "staff_wages",
         label: "감독 연봉",
-        amount: Math.round(state.manager.contract.salary / 12),
+        amount: monthly,
       });
+      creditManagerWallet(state, monthly);
     }
     recordFinance(state, team.id, {
       kind: "expense",

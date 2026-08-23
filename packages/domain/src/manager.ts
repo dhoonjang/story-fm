@@ -75,17 +75,26 @@ export type TeamTalkLog = z.infer<typeof TeamTalkLogSchema>;
 export type TeamTalkOccasion = keyof TeamTalkLog;
 
 /**
- * **감독 계약** — 연봉·체결일·만료일 (career.md §5.1).
+ * **감독 계약** — 연봉·체결일·만료일 (career.md §5.1 · §5.4).
  *
  * 새 게임은 부임 구단 등급의 기본 조건(`MANAGER_TERMS_BY_TIER`)으로 시작하고,
- * 부임은 제안의 조건으로 계약을 다시 세운다. 경질은 계약을 지운다 — 위약금은
- * 아직 없다 (career.md §8). 옛 세이브엔 없다 (optional — 세이브 버전 유지).
+ * 부임은 제안의 조건으로 계약을 다시 세운다. 만료일이 지나면 감독은 무직이 되고,
+ * 경질은 계약을 지우며 위약금을 남긴다 (career.md §5.4).
+ * 옛 세이브엔 없다 (optional — 세이브 버전 유지).
  */
 export const ManagerContractSchema = z.object({
   /** 연봉 (£/년) — 매월 1일 구단 지출에 1/12로 선다 (finance.md §6) */
   salary: z.number().int().min(0),
   signedOn: DateString,
   until: DateString,
+  /**
+   * 보드가 재계약 여부를 판정한 날 — **만료 90일 전에 한 번뿐이다** (career.md §5.4).
+   * 서 있으면 다시 판정하지 않는다: 매일 다시 보면 평판이 오르내릴 때마다 통보가
+   * 번복된다. 옛 세이브엔 없다.
+   */
+  renewalDecidedOn: DateString.optional(),
+  /** 그 판정이 재계약 제안으로 이어졌는가 — 아니면 비갱신 통보다 */
+  renewalOffered: z.boolean().optional(),
 });
 export type ManagerContract = z.infer<typeof ManagerContractSchema>;
 
@@ -127,6 +136,14 @@ export const ManagerSchema = z.object({
   teamTalkedOn: TeamTalkLogSchema.optional(),
   /** 감독 계약 — 옛 세이브엔 없다 (없으면 연봉 지출도 없다, 세이브 버전 유지) */
   contract: ManagerContractSchema.optional(),
+  /**
+   * **개인 지갑** (£) — 구단이 낸 연봉과 경질 위약금이 쌓이는 자리 (career.md §5.4).
+   *
+   * ⚠️ **구단 잔고와 다른 돈이다.** 지갑은 감독의 것이라 구단을 옮겨도 따라가고,
+   * 구단 장부는 `Finance.balance`가 따로 갖는다 — 섞으면 감독의 돈이 구단의 재정을
+   * 흔든다. 옛 세이브엔 없다 (없으면 0 — 세이브 버전 유지).
+   */
+  wallet: z.number().int().min(0).optional(),
 });
 export type Manager = z.infer<typeof ManagerSchema>;
 
@@ -142,6 +159,12 @@ export type Manager = z.infer<typeof ManagerSchema>;
 export const DismissalSchema = z.object({
   on: DateString,
   season: z.number().int(),
+  /**
+   * 자리를 잃은 갈래 — 경질(`sacked`)인가 계약 만료(`expired`)인가 (career.md §5.4).
+   * 무직은 **상태지 사유가 아니라서** 카드 하나가 둘을 다 든다. 옛 세이브엔 없다
+   * (없으면 경질 — 만료 판정이 생기기 전의 카드는 전부 경질이다).
+   */
+  kind: z.enum(["sacked", "expired"]).optional(),
   /** 어느 구단에서 잘렸나 */
   teamId: z.string().min(1),
   /** 그 구단의 등급 — 같은 순위가 어디서는 성공이고 어디서는 해고인 이유 */
@@ -156,6 +179,11 @@ export const DismissalSchema = z.object({
   expectation: z.string().min(1).optional(),
   /** 옛 세이브가 들고 있는 평가 문장 — 더는 쓰지 않는다 (카드의 폴백) */
   reason: z.string().optional(),
+  /**
+   * 구단이 문 위약금 (£) — 경질에만 붙는다 (career.md §5.4). 만료는 끝까지 간
+   * 계약이라 물 것이 없고, 계약이 없던 옛 세이브의 경질도 0이라 적지 않는다.
+   */
+  severance: z.number().int().min(0).optional(),
 });
 export type Dismissal = z.infer<typeof DismissalSchema>;
 
@@ -188,8 +216,11 @@ export const ManagerOfferSchema = z.object({
   salary: z.number().int().min(0).optional(),
   years: z.number().int().min(1).optional(),
   budgetPledge: z.number().int().min(0).optional(),
-  /** 어떻게 섰나 — 공석이 불렀나(`vacancy`), 감독이 두드렸나(`knock`) */
-  via: z.enum(["vacancy", "knock"]).optional(),
+  /**
+   * 어떻게 섰나 — 공석이 불렀나(`vacancy`), 감독이 두드렸나(`knock`), 지금 구단이
+   * 재계약을 걸었나(`renewal` — career.md §5.4). 재계약 제안만 **재직 중에** 선다.
+   */
+  via: z.enum(["vacancy", "knock", "renewal"]).optional(),
   /** 역제안이 오간 날 — 서 있으면 흥정은 끝났다 (한 차례뿐이다) */
   counteredOn: DateString.optional(),
   status: z.enum(["open", "accepted", "expired"]),

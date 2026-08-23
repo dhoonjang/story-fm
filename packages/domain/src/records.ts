@@ -787,6 +787,7 @@ export const FINANCE_EXPENSE_CATEGORIES = [
   "agent_fee",
   "transfer_out",
   "amortisation",
+  "severance",
   "capex",
   "depreciation",
 ] as const;
@@ -818,6 +819,8 @@ export const FINANCE_CATEGORY_KO: Record<FinanceCategory, string> = {
   transfer_out: "이적료 지출",
   /** 감독이 읽는 이름 — `이적료 지출`(한 번에 나간 현금)과 이름만으로 갈린다 */
   amortisation: "이적료 분할 비용",
+  /** 경질 위약금 — 급여가 아니라 일회성 지출이라 인건비 축과 갈린다 (career.md §5.4) */
+  severance: "감독 위약금",
   /** 자산을 산 현금 — 손익 밖이다. 선수 쪽의 `transfer_out`과 같은 자리 */
   capex: "구장·시설 투자",
   /** 그 자산을 내용연수에 나눠 무는 몫 — 선수 쪽의 `amortisation`과 같은 자리 */
