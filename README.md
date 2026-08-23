@@ -53,6 +53,9 @@ mock 모드로 실행되며, 실제 LLM을 사용하려면 [`config/llm.yml`](co
   pnpm --filter @story-fm/web start -p 3000
   ```
 
+  `NODE_ENV=production`이 되므로 `/admin`의 쓰기 라우트는 닫힙니다 —
+  열어야 하면 `ADMIN_ENABLED=1`을 함께 줍니다.
+
 ## 개발 명령
 
 ```bash
