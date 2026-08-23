@@ -596,21 +596,27 @@ export function buildGmStateNote(
         `전술: ${tac.formation} · 선발 평균 적응 ${Math.round(squadFamiliarity(state, state.userTeamId))}`,
         `재정: 잔고 ${formatMoney(finance.balance)} · 주급 ${formatMoney(weeklyWagesOf(state, state.userTeamId))}/주 · 이적예산 ${formatMoney(finance.transferBudget)}`,
         /**
-         * 선수단 — **인원과 주장뿐이다.** 마흔 명 남짓의 이름은 캐시가 걸리지 않는 이
-         * 층의 절반을 혼자 먹고, 그 값을 조회가 이미 낸다 (agents.md §5·§7).
+         * 선수단 — **이름 명단이다. 이름뿐이다.** "누가 우리 팀인가"는 매 장면의 전제라
+         * 입력에 없으면 GM이 없는 선수를 세우고, 명단은 영입·승격마다 바뀌어 캐시 층에
+         * 둘 수도 없다. 그래서 캐시가 걸리지 않는 이 층이 이름을 진다.
          *
-         * 주장은 남는다 — 팀 토크와 라커룸 장면이 그 한 사람을 두고 서고, 누구인지
-         * 모르면 GM이 아무나 세운다. 나머지 이름을 내보내는 자리는 `<cues>`와 조회다.
+         * 능력치·컨디션·계약·배치는 따라오지 않는다 — 그것까지 실으면 이 층의 절반을
+         * 먹고, 그 값은 조회가 이미 낸다 (agents.md §5·§7 · prompts.md §5-2).
          * ⚠️ 도구 이름을 적지 않는다 — 데이터 블록에는 사실만 (prompts.md §5-3).
          */
         (() => {
-          const count = (level: "first" | "reserve") =>
-            players.filter((p) => squadLevelOf(p) === level).length;
-          const reserve = count("reserve");
-          const captain = players.find((p) => p.isCaptain);
-          return (
-            `선수단 ${players.length}명 (1군 ${count("first")}${reserve > 0 ? ` · 2군 ${reserve}` : ""})` +
-            (captain ? ` · 주장 ${captain.name}` : "")
+          // 구분자는 쉼표가 아니라 가운뎃점이다 — 한국어 성명에 공백이 들어가서
+          // 쉼표로 이으면 어디서 한 사람이 끝나는지가 흐려진다
+          const named = (level: "first" | "reserve") =>
+            players
+              .filter((p) => squadLevelOf(p) === level)
+              .map((p) => `${p.name}${p.isCaptain ? "(주장)" : ""}`);
+          const first = named("first");
+          const reserve = named("reserve");
+          return lines(
+            `선수단 ${players.length}명`,
+            first.length > 0 ? `- 1군 ${first.length}: ${first.join(" · ")}` : null,
+            reserve.length > 0 ? `- 2군 ${reserve.length}: ${reserve.join(" · ")}` : null,
           );
         })(),
       ),
