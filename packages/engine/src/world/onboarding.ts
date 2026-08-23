@@ -174,6 +174,74 @@ export function careerTierOf(background: string): CareerTier {
   return found.tier;
 }
 
+// ── 시작 지갑 — 앵커는 코어가 박고 판정은 그 안에서 논다 (career.md §1) ────────
+
+/**
+ * **등급별 앵커 저축** (£) — 감독이 부임 전까지 벌어 둔 돈.
+ *
+ * 능력치와 달리 이 값은 **판정의 중심**이지 결론이 아니다. 배경 판정 에이전트가
+ * 이 앵커 ± `WALLET_JUDGE_BAND` 안에서 값을 고르고, 판정이 없으면 앵커 그대로
+ * 선다 (`onboarding-judge.ts` · docs/llm/agents.md §4-2).
+ *
+ * 눈금은 감독 연봉이다 — tier 1의 연봉이 £6M이므로 엘리트의 £5M은 "빅클럽 한 해치를
+ * 모아 뒀다"이고, 무경력의 £40k는 이적 예산에 보태 봐야 아무것도 아닌 돈이다.
+ */
+const WALLET_ANCHOR: Record<CareerTier, number> = {
+  none: 40_000,
+  minor: 250_000,
+  major: 1_200_000,
+  elite: 5_000_000,
+};
+
+/**
+ * **부임 구단이 올리는 지갑의 하한** — 능력치와 같은 구조이고 같은 이유다
+ * (`TEAM_FLOOR`). 빅클럽이 뽑은 감독은 어디선가 벌어 본 사람이고, 하한이라
+ * 챔스 우승자가 승격팀에 부임해도 깎이지 않는다.
+ */
+const WALLET_FLOOR: Record<1 | 2 | 3 | 4, number> = {
+  1: 1_200_000,
+  2: 500_000,
+  3: 250_000,
+  4: 40_000,
+};
+
+/** 판정이 앵커에서 벗어날 수 있는 폭 — ±40% (AGENTS.md §6.4) */
+export const WALLET_JUDGE_BAND = 0.4;
+
+/** 시작 지갑의 절대 상한 — 판정이 무엇을 읽든 tier 1의 한 시즌 이적 예산은 아니다 */
+export const START_MAX_WALLET = 10_000_000;
+
+/** 지갑이 떨어지는 단위 — £10,000. 판정이 £3,214,777을 불러도 눈금은 유지된다 */
+const WALLET_STEP = 10_000;
+
+/**
+ * 배경 → **시작 지갑 앵커**. 순수 함수라 같은 배경·같은 팀이면 언제나 같은 값이고,
+ * 판정이 실패했을 때 그대로 답이 되는 폴백이다 (career.md §1).
+ *
+ * @param teamId 부임할 구단 — 주면 구단의 격이 앵커의 하한을 올린다.
+ */
+export function startingWalletAnchor(background: string, teamId?: string): number {
+  const tier = teamId ? teamCatalogById(teamId)?.tier : undefined;
+  // ⚠️ 능력치의 `teamFloorOf`와 같은 규약 — 카탈로그에 **있는** 팀만 하한을 올린다
+  const floor = tier ? WALLET_FLOOR[tier] : WALLET_ANCHOR.none;
+  return Math.max(WALLET_ANCHOR[careerTierOf(background)], floor);
+}
+
+/**
+ * 판정값을 **앵커 ± 한도** 안으로 — 판정이 없으면 앵커가 그대로 답이다.
+ *
+ * ⚠️ **자르는 기준은 언제나 앵커다** (agents.md §4). 저장된 값에서 다시 재면 두
+ * 번째 판정이 앵커에서 두 배 벗어난다 — 여기는 한 번만 도는 자리지만 규약은 같다.
+ */
+export function clampStartingWallet(raw: number | undefined, anchor: number): number {
+  const stepped = (x: number) => Math.round(x / WALLET_STEP) * WALLET_STEP;
+  if (raw === undefined || !Number.isFinite(raw))
+    return Math.min(START_MAX_WALLET, stepped(anchor));
+  const low = anchor * (1 - WALLET_JUDGE_BAND);
+  const high = anchor * (1 + WALLET_JUDGE_BAND);
+  return Math.min(START_MAX_WALLET, Math.max(0, stepped(Math.min(high, Math.max(low, raw)))));
+}
+
 /**
  * 배경 → 시작 능력치.
  *

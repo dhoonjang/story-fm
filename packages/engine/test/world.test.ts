@@ -36,6 +36,10 @@ import {
   specialtyAxesOf,
   careerTierOf,
   teamFloorOf,
+  startingWalletAnchor,
+  clampStartingWallet,
+  WALLET_JUDGE_BAND,
+  START_MAX_WALLET,
   SPECIALTY_BUDGET,
   START_MIN_AXIS,
   START_MAX_AXIS,
@@ -707,6 +711,47 @@ describe("온보딩 — 배경 직접 입력 해석 (career.md §1)", () => {
 
     // 알 수 없는 팀·미지정은 보정 없음
     expect(interpretBackgroundHeuristic(bg, "없는팀")).toEqual(nobody);
+  });
+
+  it("시작 지갑 앵커는 등급이 올리고 구단이 하한을 건다 (career.md §1)", () => {
+    const nobody = "축구를 좋아하는 평범한 회사원입니다";
+    const legend = "챔피언스리그를 우승한 감독";
+
+    // 등급이 앵커를 올린다
+    expect(startingWalletAnchor(nobody)).toBeLessThan(startingWalletAnchor("K리그 선수 출신"));
+    expect(startingWalletAnchor("K리그 선수 출신")).toBeLessThan(
+      startingWalletAnchor("프리미어리그에서 뛰었던 수비수"),
+    );
+    expect(startingWalletAnchor("프리미어리그에서 뛰었던 수비수")).toBeLessThan(
+      startingWalletAnchor(legend),
+    );
+
+    // 구단은 가산이 아니라 하한이다 — 능력치와 같은 규약
+    expect(startingWalletAnchor(nobody)).toBeLessThan(startingWalletAnchor(nobody, "mancity"));
+    expect(startingWalletAnchor(legend, "ipswich")).toBe(startingWalletAnchor(legend, "mancity"));
+    // 카탈로그에 없는 팀은 하한을 올리지 않는다 (오타 난 이름이 빅클럽 부임이 되지 않게)
+    expect(startingWalletAnchor(nobody, "없는팀")).toBe(startingWalletAnchor(nobody));
+  });
+
+  it("판정값은 앵커 ± 한도 안으로 잘린다 — 없으면 앵커다 (career.md §1)", () => {
+    const anchor = startingWalletAnchor("챔피언스리그를 우승한 감독", "mancity");
+    const low = anchor * (1 - WALLET_JUDGE_BAND);
+    const high = anchor * (1 + WALLET_JUDGE_BAND);
+
+    // 판정이 없으면 앵커가 그대로 답이고, 같은 입력이면 언제나 같은 값이다
+    expect(clampStartingWallet(undefined, anchor)).toBe(clampStartingWallet(undefined, anchor));
+    expect(clampStartingWallet(undefined, anchor)).toBeGreaterThanOrEqual(low);
+
+    // 폭을 벗어난 판정은 양쪽에서 잘린다
+    expect(clampStartingWallet(0, anchor)).toBeGreaterThanOrEqual(Math.floor(low));
+    expect(clampStartingWallet(999_999_999, anchor)).toBeLessThanOrEqual(Math.ceil(high));
+    // 절대 상한 — 판정이 무엇을 읽든 시작부터 한 시즌 이적 예산은 아니다
+    expect(clampStartingWallet(999_999_999, 50_000_000)).toBe(START_MAX_WALLET);
+    // 눈금은 £10,000 단위로 떨어진다
+    expect(clampStartingWallet(3_214_777, anchor) % 10_000).toBe(0);
+    // 음수·NaN은 앵커로 떨어진다 (스키마가 막지만 코어가 마지막 관문이다)
+    expect(clampStartingWallet(Number.NaN, anchor)).toBe(clampStartingWallet(undefined, anchor));
+    expect(clampStartingWallet(-1, anchor)).toBeGreaterThanOrEqual(Math.floor(low));
   });
 
   it("축끼리 같은 낱말을 나눠 갖지 않는다 — 한 단어가 두 축을 올리면 예산이 샌다", () => {

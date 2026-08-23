@@ -24,6 +24,7 @@ import {
   FIRST_SEASON,
   SATURDAY,
 } from "../competition/calendar";
+import { creditManagerWallet } from "./manager-wallet";
 import { clubProfile } from "../data/club-profile";
 import { clubEconomyLevel, leagueEconomyLevel, leagueTicketSpread } from "../data/league-economy";
 import { isMarketOnlyLeague, isTopLeague, leagueCatalogById } from "../data/league-catalog";
@@ -500,19 +501,6 @@ export function recordFinance(state: GameState, teamId: string, input: RecordFin
     ...(noncash ? { accounting: "noncash" as const } : {}),
     ...(input.source ? { source: input.source } : {}),
   });
-}
-
-/**
- * **구단이 감독에게 낸 돈은 그 자리에서 감독의 지갑이 된다** — 같은 돈의 양면
- * (career.md §5.4).
- *
- * ⚠️ 구단 잔고를 건드리지 않는다. 잔고를 깎는 것은 지출을 적은 `recordFinance`이고,
- * 여기는 그 돈이 어디로 갔는지를 적을 뿐이다 — 둘을 겹치면 같은 지출이 두 번 나간다.
- */
-function creditManagerWallet(state: GameState, amount: number): void {
-  const value = Math.max(0, Math.round(amount));
-  if (value === 0) return;
-  state.manager.wallet = (state.manager.wallet ?? 0) + value;
 }
 
 /**
