@@ -3,6 +3,7 @@ import { ageOf } from "@story-fm/domain";
 import {
   activeContract,
   advanceTime,
+  awardLine,
   assignmentsOf,
   boardExpectation,
   buildAllLeagueMatches,
@@ -19,6 +20,7 @@ import {
   quickSimulate,
   recordLeagueHistory,
   reviewSeason,
+  seasonAwards,
   teamsOfLeagueIn,
   transitionSeason,
   userPlayers,
@@ -550,6 +552,14 @@ describe("풀 시즌 통합 — 리그 완주 후 커리어 기록·전환", () 
     expect(board.position).toBe(record.position);
     expect(board.grade).toBe(record.position <= board.target ? "met" : "missed");
     /**
+     * 시상은 **리그가 주는 상**이다 — 감독의 성적과 무관하게 그해 리그전을 돈
+     * 리그마다 서고, 승강을 적용하기 전의 소속으로 적힌다 (season.md §6).
+     */
+    const scorer = state.awards?.find((a) => a.season === 1 && a.code === "top-scorer");
+    expect(scorer?.leagueId).toBe("epl");
+    expect(scorer?.goals ?? 0).toBeGreaterThan(0);
+
+    /**
      * 우승했다면 트로피에 당시 팀이 남는다 — **대회는 id로** 적힌다 (career.md §6).
      * 표시 이름을 박으면 어드민이 대회 이름을 고친 뒤의 우승이 보관함에 다른 대회로
      * 서고, id가 없으니 되돌릴 길도 없다.
@@ -561,4 +571,154 @@ describe("풀 시즌 통합 — 리그 완주 후 커리어 기록·전환", () 
       expect(trophy?.teamId).toBe("arsenal");
     }
   }, 30_000);
+});
+
+/**
+ * 시상 판정이 읽는 조각만 든 세계 — `createTestGame()`은 여기 필요 없다.
+ * `seasonAwards`는 시즌 기록·명단·소속·그해 리그전만 보므로, 세계를 지으면
+ * 한 번에 1초를 내고 얻는 것이 없다 (AGENTS.md §5).
+ */
+describe("시즌 시상 (season.md §6)", () => {
+  const LEAGUE = "test-league";
+  /** 그 시즌 마지막 경기일 — 영플레이어의 나이를 세는 기준 */
+  const SEASON_END = "2027-05-30";
+  /** 8팀 리그 → 라운드 14 → 올해의 선수 문턱 7경기, 영플레이어 4경기 */
+  const TEAM_IDS = ["t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8"];
+
+  interface StatSeed {
+    id: string;
+    birthdate?: string;
+    teamId?: string;
+    apps: number;
+    goals?: number;
+    assists?: number;
+    ratingSum?: number;
+  }
+
+  function awardState(seeds: StatSeed[]): GameState {
+    const players = new Map<string, unknown>();
+    for (const seed of seeds) {
+      if (players.has(seed.id)) continue;
+      players.set(seed.id, {
+        id: seed.id,
+        name: `선수 ${seed.id}`,
+        birthdate: seed.birthdate ?? "2000-01-01",
+      });
+    }
+    return {
+      season: 1,
+      date: SEASON_END,
+      userTeamId: TEAM_IDS[0]!,
+      teams: TEAM_IDS.map((id) => ({ id })),
+      leagueOf: Object.fromEntries(TEAM_IDS.map((id) => [id, LEAGUE])),
+      players: [...players.values()],
+      seasonStats: seeds.map((seed) => ({
+        gamePlayerId: seed.id,
+        season: 1,
+        teamId: seed.teamId ?? TEAM_IDS[0]!,
+        apps: seed.apps,
+        goals: seed.goals ?? 0,
+        assists: seed.assists ?? 0,
+        ...(seed.ratingSum === undefined ? {} : { ratingSum: seed.ratingSum }),
+      })),
+      matches: [
+        {
+          id: "m1",
+          season: 1,
+          competitionId: LEAGUE,
+          round: 1,
+          date: SEASON_END,
+          homeTeamId: TEAM_IDS[0]!,
+          awayTeamId: TEAM_IDS[1]!,
+          result: { homeGoals: 1, awayGoals: 0, scorers: [] },
+        },
+      ],
+      achievements: [],
+      awards: [],
+    } as unknown as GameState;
+  }
+
+  const winnerOf = (state: GameState, code: string) =>
+    seasonAwards(state).find((a) => a.code === code);
+
+  it("같은 골이면 덜 뛴 쪽이 득점왕이다 — 사슬의 두 번째 칸은 출전 오름차순", () => {
+    const state = awardState([
+      { id: "p-many", apps: 30, goals: 20 },
+      { id: "p-few", apps: 22, goals: 20 },
+    ]);
+    expect(winnerOf(state, "top-scorer")?.gamePlayerId).toBe("p-few");
+  });
+
+  it("사슬의 모든 칸이 같으면 gamePlayerId 사전순이 가른다", () => {
+    const seeds: StatSeed[] = [
+      { id: "b-player", apps: 20, goals: 12, assists: 4, ratingSum: 140 },
+      { id: "a-player", apps: 20, goals: 12, assists: 4, ratingSum: 140 },
+    ];
+    expect(winnerOf(awardState(seeds), "top-scorer")?.gamePlayerId).toBe("a-player");
+    // 명단 순서가 수상자를 정하면 안 된다 (§8 불변식) — 뒤집어도 같은 답
+    expect(winnerOf(awardState([...seeds].reverse()), "top-scorer")?.gamePlayerId).toBe("a-player");
+  });
+
+  it("같은 입력을 두 번 부르면 같은 수상자다 — 난수도 명단 순서도 읽지 않는다", () => {
+    const seeds: StatSeed[] = [
+      { id: "p1", apps: 26, goals: 9, assists: 11, ratingSum: 190 },
+      { id: "p2", apps: 26, goals: 9, assists: 3, ratingSum: 195 },
+      { id: "p3", apps: 8, goals: 4, assists: 11, ratingSum: 62, birthdate: "2005-03-01" },
+    ];
+    const forward = seasonAwards(awardState(seeds));
+    const backward = seasonAwards(awardState([...seeds].reverse()));
+    expect(forward).toEqual(backward);
+    expect(forward.length).toBeGreaterThan(0);
+  });
+
+  it("출전 문턱 아래의 고평점은 올해의 선수가 되지 않는다 — 평점은 평균이다", () => {
+    const state = awardState([
+      { id: "p-sub", apps: 3, goals: 3, ratingSum: 25.5 }, // 평점 8.5, 문턱(7) 미만
+      { id: "p-captain", apps: 28, goals: 3, ratingSum: 196 }, // 평점 7.0
+    ]);
+    const winner = winnerOf(state, "player-of-season");
+    expect(winner?.gamePlayerId).toBe("p-captain");
+    expect(winner?.rating).toBe(7);
+  });
+
+  it("영플레이어의 나이는 시즌 종료일 기준 만 23세까지다", () => {
+    // 2027-05-30 기준 — 05-31생은 아직 생일 전이라 23세, 05-30생은 24세
+    const state = awardState([
+      { id: "p-24", apps: 20, ratingSum: 160, birthdate: "2003-05-30" }, // 평점 8.0
+      { id: "p-23", apps: 20, ratingSum: 150, birthdate: "2003-05-31" }, // 평점 7.5
+    ]);
+    const winner = winnerOf(state, "young-player");
+    expect(winner?.gamePlayerId).toBe("p-23");
+    expect(winner?.age).toBe(23);
+    // 평점 1위는 스물넷이라 영플레이어가 아니고, 올해의 선수는 그가 가져간다
+    expect(winnerOf(state, "player-of-season")?.gamePlayerId).toBe("p-24");
+  });
+
+  it("자격자가 없으면 그 상은 그해 서지 않는다 — 빈 수상자를 만들지 않는다", () => {
+    const state = awardState([{ id: "p-keeper", apps: 30, goals: 0, assists: 0 }]);
+    const codes = seasonAwards(state).map((a) => a.code);
+    expect(codes).not.toContain("top-scorer"); // 1골 이상이 없다
+    expect(codes).not.toContain("top-assister");
+    expect(codes).not.toContain("player-of-season"); // 평점 기록이 없다
+    expect(codes).not.toContain("young-player");
+  });
+
+  it("시즌 중 이적한 선수의 리그 안 기록은 합산되고, 팀은 가장 많이 뛴 쪽이다", () => {
+    const state = awardState([
+      { id: "p-moved", teamId: "t1", apps: 8, goals: 6 },
+      { id: "p-moved", teamId: "t2", apps: 14, goals: 9 },
+      { id: "p-stay", teamId: "t3", apps: 30, goals: 14 },
+    ]);
+    const winner = winnerOf(state, "top-scorer");
+    expect(winner?.gamePlayerId).toBe("p-moved");
+    expect(winner).toMatchObject({ apps: 22, goals: 15, teamId: "t2", leagueId: LEAGUE });
+  });
+
+  it("시상 한 줄은 코드가 아니라 읽는 자리에서 만들어진다", () => {
+    const state = awardState([{ id: "p1", apps: 30, goals: 25 }]);
+    const award = winnerOf(state, "top-scorer")!;
+    expect(awardLine(award)).toContain("득점왕");
+    expect(awardLine(award)).toContain("선수 p1");
+    expect(awardLine(award)).toContain("25골");
+  });
 });
