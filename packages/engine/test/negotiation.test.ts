@@ -7,6 +7,12 @@ import {
   advanceTime,
   answerIncomingOffer,
   arrivedResponses,
+  COUNTERPARTY_ACCEPT_AT,
+  COUNTERPARTY_COUNTER_AT,
+  clampCounterpartyRuling,
+  counterpartyAnchor,
+  settleCounterparty,
+  type CounterpartyAnchor,
   askingPriceFor,
   contractUntil,
   dealOdds,
@@ -65,6 +71,7 @@ import {
   sellOnRateForAge,
   type MarketCard,
   type Negotiation,
+  type NegotiationVerdict,
 } from "@story-fm/domain";
 import { completeDeal, createTestGame } from "./helpers";
 
@@ -2231,5 +2238,127 @@ describe("조건부 조항 — 딜의 모양이 붙이고, 되사기는 흥정�
     const blocked = exerciseBuyBack(state, { playerId: player.id });
     expect(blocked.ok).toBe(false);
     expect(playerById(state, player.id)!.teamId).not.toBe(state.userTeamId);
+  });
+});
+
+/**
+ * 교섭 상대 — **코어가 박는 앵커와 자르는 한도** (transfer.md §12-1).
+ *
+ * 판정을 내리는 것이 GM에서 별도 에이전트로 갈렸으므로, 여기서 고정하는 것은 그
+ * 에이전트가 **무엇을 할 수 없는가**다: 사다리를 두 칸 뛸 수 없고, 앵커에서 ±15%
+ * 밖의 값을 부를 수 없고, 아무 답도 못 내면 앵커가 그대로 반영된다.
+ */
+describe("협상 상대의 앵커와 한도", () => {
+  /** 답이 도착한 우리 오퍼 하나 */
+  function arrived(state: GameState): Negotiation {
+    const player = target(state);
+    const sent = sendOffer(state, offerFor(state, player.id));
+    expect(sent.ok, sent.message).toBe(true);
+    const negotiation = openNegotiationFor(state, player.id)!;
+    pendingOffer(negotiation)!.respondsOn = state.date;
+    return negotiation;
+  }
+
+  /** 클램프는 앵커 객체 하나만 보는 순수 함수라 손으로 세운다 */
+  const anchorOf = (over: Partial<CounterpartyAnchor> = {}): CounterpartyAnchor => ({
+    negotiationId: "n1",
+    probability: 34,
+    latitude: 0,
+    verdict: "counter",
+    allowed: ["reject", "counter", "accept"],
+    fee: 1000,
+    feeRoom: { min: 850, max: 1150 },
+    splittable: true,
+    bounds: {
+      acceptFloor: 5,
+      latitude: 0,
+      fee: { expectation: 1000, min: 500, max: 2000 },
+      wage: null,
+      splittable: true,
+    },
+    ...over,
+  });
+
+  it("앵커는 확률 사다리대로 서고, 허용 판정은 거기서 한 칸까지다", () => {
+    const state = createTestGame();
+    state.date = "2026-08-01";
+    const anchor = counterpartyAnchor(state, arrived(state))!;
+    const ladder: NegotiationVerdict[] = ["reject", "counter", "accept"];
+    const expected =
+      anchor.probability >= COUNTERPARTY_ACCEPT_AT - anchor.latitude
+        ? "accept"
+        : anchor.probability >= COUNTERPARTY_COUNTER_AT - anchor.latitude
+          ? "counter"
+          : "reject";
+    // 구간이 빈 갈래는 역제안 자체가 불가능해 한 칸 위/아래로 접힌다 (counterparty.ts)
+    if (anchor.allowed.includes(expected)) expect(anchor.verdict).toBe(expected);
+    const step = ladder.indexOf(anchor.verdict);
+    for (const v of anchor.allowed) {
+      expect(Math.abs(ladder.indexOf(v) - step)).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("허용 밖 판정은 앵커로 되돌아온다 — 서사가 장부를 뒤집지 못한다", () => {
+    const accepted = anchorOf({ verdict: "accept", allowed: ["counter", "accept"] });
+    expect(clampCounterpartyRuling(accepted, { verdict: "reject" }).verdict).toBe("accept");
+    const rejected = anchorOf({ verdict: "reject", allowed: ["reject", "counter"] });
+    expect(clampCounterpartyRuling(rejected, { verdict: "accept" }).verdict).toBe("reject");
+    // 한 칸 안이면 그대로 선다
+    expect(clampCounterpartyRuling(rejected, { verdict: "counter" }).verdict).toBe("counter");
+  });
+
+  it("금액은 앵커 ±15% 안으로 잘리고, 인자가 없으면 앵커가 선다", () => {
+    const anchor = anchorOf();
+    expect(clampCounterpartyRuling(anchor, { verdict: "counter", fee: 10 ** 9 }).fee).toBe(1150);
+    expect(clampCounterpartyRuling(anchor, { verdict: "counter", fee: 0 }).fee).toBe(850);
+    expect(clampCounterpartyRuling(anchor, { verdict: "counter", fee: 900 }).fee).toBe(900);
+    expect(clampCounterpartyRuling(anchor, { verdict: "counter" }).fee).toBe(1000);
+    // 되부르지 않는 판정에는 금액이 실리지 않는다
+    expect(clampCounterpartyRuling(anchor, { verdict: "reject", fee: 900 }).fee).toBeUndefined();
+  });
+
+  it("나눌 수 없는 갈래의 분할 연수는 버려진다", () => {
+    const anchor = anchorOf({ splittable: false });
+    expect(
+      clampCounterpartyRuling(anchor, { verdict: "counter", paymentYears: 3 }).paymentYears,
+    ).toBeUndefined();
+    expect(
+      clampCounterpartyRuling(anchorOf(), { verdict: "counter", paymentYears: 3 }).paymentYears,
+    ).toBe(3);
+  });
+
+  it("답이 없으면 앵커가 그대로 반영된다 — 클램프를 지난 값은 코어가 언제나 받는다", () => {
+    const state = createTestGame();
+    state.date = "2026-08-01";
+    const n = arrived(state);
+    const anchor = counterpartyAnchor(state, n)!;
+    // 판정 없이 반영 = 호출이 두 번 실패한 자리 (agents.md §4-1)
+    const settled = settleCounterparty(state, anchor);
+    expect(settled.result.ok, settled.result.message).toBe(true);
+    expect(settled.input.verdict).toBe(anchor.verdict);
+    // 답한 오퍼는 다시 답을 기다리지 않는다
+    expect(arrivedResponses(state).some((x) => x.id === n.id)).toBe(false);
+  });
+
+  it("재계약도 같은 문을 지난다 — 터무니없는 주급을 불러도 코어가 받는다", () => {
+    const state = createTestGame();
+    state.date = "2026-08-01";
+    const player = playersOf(state, state.userTeamId)[0]!;
+    const opened = openRenewal(state, {
+      playerId: player.id,
+      weeklyWage: Math.round(renewalExpectation(state, player) * 0.5),
+      years: 3,
+    });
+    expect(opened.ok, opened.message).toBe(true);
+    const n = openNegotiationFor(state, player.id)!;
+    pendingOffer(n)!.respondsOn = state.date;
+    const anchor = counterpartyAnchor(state, n)!;
+    const settled = settleCounterparty(state, anchor, {
+      verdict: "accept",
+      weeklyWage: 10 ** 9,
+      note: "말도 안 되는 값",
+    });
+    expect(settled.result.ok, settled.result.message).toBe(true);
+    expect(anchor.allowed).toContain(settled.input.verdict);
   });
 });

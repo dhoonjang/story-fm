@@ -19,6 +19,7 @@ agents:
   match-rater:   { provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000,  timeout_ms: 30000,  thinking_level: minimal }
   training-rater:{ provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000,  timeout_ms: 30000,  thinking_level: minimal }
   mood-rater:    { provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000,  timeout_ms: 30000,  thinking_level: minimal }
+  negotiator:    { provider: google, model: gemini-3.6-flash,      max_tokens: 8000,  timeout_ms: 45000,  thinking_level: low }
   history-compactor: { provider: google, model: gemini-3.6-flash,      max_tokens: 8000,  timeout_ms: 60000,  thinking_level: minimal }
 ```
 
@@ -30,6 +31,7 @@ agents:
 | `match-rater`       | 경기 평점 재채점              | 8,000     | 30초  |
 | `training-rater`    | 훈련 결산                     | 8,000     | 30초  |
 | `mood-rater`        | 심경 한 줄                    | 8,000     | 30초  |
+| `negotiator`        | 우리 오퍼에 대한 상대의 판정  | 8,000     | 45초  |
 | `history-compactor` | 밀려난 평시 이력 → 요약 한 벌 | 8,000     | 60초  |
 
 - **해석이 싼 자리로 가는 이유는 그 일이 판단이 아니라 분류이기 때문**이다 — 무엇을
@@ -42,6 +44,13 @@ agents:
   안에서만 움직여서 모델이 무뎌도 장부가 흔들리지 않는다 (agents.md §4).
 - **결산 셋을 따로 적는다** — 셋을 하나로 묶으면 그중 하나만 다른 모델로 보낼 수
   없다. 지금은 심경만 더 싼 곳으로 옮기는 것이 YAML 한 줄이다.
+- **교섭 상대만 사고 수준이 `low`다.** 출력은 판정 하나에 금액 둘이라 결산만큼 작지만,
+  읽는 것이 인물지·오퍼 이력·설득 논거라 결산의 싼 자리로 보내면 앵커를 그대로 되읊는다
+  (agents.md §4-1). 대신 평시 턴 앞에 서므로 시한은 감독을 기다리게 하지 않는 45초다 —
+  협상은 하루에 몇 건이지 90분에 스무 번이 아니다.
+- **교섭 상대도 Google로 간다.** 제공자를 하나 더 늘리면 키가 하나 더 필요해지고, 키가
+  없는 제공자로 간 자리는 조용히 mock으로 떨어진다(§2). 자리마다 제공자를 고를 수 있다는
+  것이 **자리마다 골라야 한다**는 뜻은 아니다.
 - **압축이 결산 셋의 싼 자리로 가지 않는 이유는 읽는 양**이다 — 접히는 구간 전부를
   한 번에 읽고 거기 새로 선 인물까지 판정한다(agents.md §5-1). 대신 이력이 상한을
   넘을 때만 도니 드물다.

@@ -30,9 +30,11 @@ import {
   BoardRequestSchema,
   PressConferenceSchema,
   PressLeakSchema,
+  ReserveTrainingPolicySchema,
   RoleMemorySchema,
   ScheduleEntrySchema,
   ScoutReportSchema,
+  SeasonAwardSchema,
   SeasonRecordSchema,
   SeasonStatSchema,
   SettlingEventSchema,
@@ -118,5 +120,7 @@ export const SaveSchema = z
     arcs: z.array(NarrativeArcSchema).optional(),
     paymentSchedules: z.array(PaymentScheduleSchema).optional(),
     developmentFocus: z.array(z.string()).optional(),
+    awards: z.array(SeasonAwardSchema).optional(),
+    reserveTraining: ReserveTrainingPolicySchema.optional(),
   })
   .passthrough();
