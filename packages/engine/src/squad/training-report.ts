@@ -6,6 +6,7 @@ import {
   applyFamiliarityGain,
   naturalPositionOf,
   positionGrowthTarget,
+  PROFICIENCY_MAX,
   RATING_MAX,
   storedProficiencyFor,
   tacticalUptake,
@@ -79,6 +80,11 @@ export const TACTIC_GAIN_MAX = 3;
  */
 export const ATTR_STEP_MIN = -1;
 export const ATTR_STEP_MAX = 1;
+/**
+ * 하락이 멈추는 능력치 — 스키마의 0이 아니라 1이다. 축 하나가 0이 되면 그 선수는
+ * 그 축을 **아예 갖지 않은** 것으로 읽혀 곱셈이 걸린 공식이 통째로 죽는다.
+ */
+export const ATTR_DECLINE_FLOOR = 1;
 
 /**
  * 한 판정에서 능력치가 움직일 수 있는 **인원** — 감독의 훈련 축이 정한다.
@@ -450,9 +456,9 @@ export function applyTrainingOutcomes(
         const before =
           slot?.proficiency ??
           storedProficiencyFor(player.positions, program.position, player.foot);
-        const after = Math.min(99, before + gain);
+        const after = Math.min(PROFICIENCY_MAX, before + gain);
         /**
-         * **실제로 넘어간 만큼만 장부에 적는다.** 99에 닿은 자리는 판정이 +2를
+         * **실제로 넘어간 만큼만 장부에 적는다.** 위끝에 닿은 자리는 판정이 +2를
          * 내도 아무것도 오르지 않는데, 그 구간마다 "적응 +2"가 성장 로그와
          * 요약에 남아 감독은 오르고 있다고 읽는다.
          */
@@ -570,8 +576,8 @@ export function applyAttributeStep(
 
   const attrs = player.attributes as unknown as Record<string, number>;
   const value = attrs[axis] ?? 0;
-  if (move > 0 && (value >= player.attributes.potential || value >= 99)) return null;
-  if (move < 0 && value <= 1) return null;
+  if (move > 0 && (value >= player.attributes.potential || value >= RATING_MAX)) return null;
+  if (move < 0 && value <= ATTR_DECLINE_FLOOR) return null;
 
   /**
    * 판정이 "한 칸"이라고 해도 그대로 오르지는 않는다 — 잠재력 여유·나이·현재

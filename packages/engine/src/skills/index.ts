@@ -25,6 +25,7 @@ import {
   type PlayerDirectiveKind,
   MATCHDAY_SQUAD,
   POSITION_CODES,
+  RATING_MAX,
   SCOUT_CONCURRENT_LIMIT,
   SCOUT_DAYS,
   SLOT_TIME,
@@ -500,9 +501,33 @@ const TALK_BASE: Record<TalkOutcome, number> = {
   angered: -6,
 };
 
+/** 강도의 중립점 — 2가 곧 1.0배라, 1은 절반으로 3은 1.5배로 울린다 */
+const TALK_INTENSITY_PIVOT = 2;
+/**
+ * 팀토크가 사기를 움직일 수 있는 폭 — **이벤트당 한도** (overview §7). 라커룸
+ * 전체에 한 번에 걸리므로 한 사람을 부르는 면담보다 좁다.
+ */
+const TEAM_TALK_MORALE_BOUND = 6;
+/** 면담이 한 선수의 사기를 움직일 수 있는 폭 — 대상이 하나라 팀토크보다 넓다 */
+const TALK_MORALE_BOUND = 8;
+/** 잘 풀린 팀토크가 강도 한 칸당 주는 리더십 XP */
+const TEAM_TALK_XP_PER_INTENSITY = 8;
+/** 잘 풀린 면담이 강도 한 칸당 주는 리더십 XP */
+const TALK_XP_PER_INTENSITY = 6;
+/** 어긋난 말에도 남는 리더십 XP — 실패도 겪은 것이다 */
+const TALK_XP_ON_FAILURE = 2;
+
+/** 리더십이 0일 때의 계수 — 말은 통하지 않아도 완전히 죽지는 않는다 */
+const LEADERSHIP_FACTOR_FLOOR = 0.7;
+/** 리더십이 눈금 끝까지 올랐을 때 더해지는 폭 — 바닥과 합쳐 0.7~1.3이다 */
+const LEADERSHIP_FACTOR_SPAN = 0.6;
+
 /** 리더십 계수 — 같은 말도 리더십이 자라면 더 크게 울린다 */
 function leadershipFactor(state: GameState): number {
-  return 0.7 + (state.manager.attributes.leadership / 99) * 0.6;
+  return (
+    LEADERSHIP_FACTOR_FLOOR +
+    (state.manager.attributes.leadership / RATING_MAX) * LEADERSHIP_FACTOR_SPAN
+  );
 }
 
 /** 팀토크를 꺼낸 자리 — 이미 했다는 말이 어느 자리를 가리키는지 밝힌다 */
@@ -543,8 +568,10 @@ export function applyTeamTalk(
   state.manager.teamTalkedOn = { ...talkedOn, [input.occasion]: state.date };
 
   const base = TEAM_TALK_BASE[input.outcome];
-  const delta = Math.round(base * (input.intensity / 2) * leadershipFactor(state));
-  const bounded = Math.max(-6, Math.min(6, delta)); // 이벤트당 한도 (overview §7)
+  const delta = Math.round(
+    base * (input.intensity / TALK_INTENSITY_PIVOT) * leadershipFactor(state),
+  );
+  const bounded = Math.max(-TEAM_TALK_MORALE_BOUND, Math.min(TEAM_TALK_MORALE_BOUND, delta));
   for (const p of userPlayers(state)) {
     p.state.form = clampForm(p.state.form + moraleToForm(bounded));
   }
@@ -562,8 +589,8 @@ export function applyTeamTalk(
       : 0;
   const xpMsg =
     base > 0
-      ? grantManagerXP(state, "leadership", 8 * input.intensity)
-      : grantManagerXP(state, "leadership", 2);
+      ? grantManagerXP(state, "leadership", TEAM_TALK_XP_PER_INTENSITY * input.intensity)
+      : grantManagerXP(state, "leadership", TALK_XP_ON_FAILURE);
   pushNarrative(state, `팀토크(${input.outcome}) — 사기 ${bounded >= 0 ? "+" : ""}${bounded}`, 2);
   return {
     ok: true,
@@ -620,8 +647,10 @@ export function applyTalkToPlayer(
   player.state.talkedOn = state.date;
 
   const base = TALK_BASE[input.outcome];
-  const delta = Math.round(base * (input.intensity / 2) * leadershipFactor(state));
-  const bounded = Math.max(-8, Math.min(8, delta));
+  const delta = Math.round(
+    base * (input.intensity / TALK_INTENSITY_PIVOT) * leadershipFactor(state),
+  );
+  const bounded = Math.max(-TALK_MORALE_BOUND, Math.min(TALK_MORALE_BOUND, delta));
   player.state.form = clampForm(player.state.form + moraleToForm(bounded));
 
   /**
@@ -656,8 +685,8 @@ export function applyTalkToPlayer(
 
   const xpMsg =
     base > 0
-      ? grantManagerXP(state, "leadership", 6 * input.intensity)
-      : grantManagerXP(state, "leadership", 2);
+      ? grantManagerXP(state, "leadership", TALK_XP_PER_INTENSITY * input.intensity)
+      : grantManagerXP(state, "leadership", TALK_XP_ON_FAILURE);
   pushNarrative(
     state,
     `${player.name} 면담(${input.outcome}) — 사기 ${bounded >= 0 ? "+" : ""}${bounded}`,
@@ -2201,14 +2230,26 @@ function addTrainingEntry(
  * 리더십이 반발의 크기를 정한다. 같은 통보라도 선수단이 믿는 감독이면 덜 흔들린다 —
  * 부임 첫 주에 휴가를 깨는 것과 3년 함께한 감독이 그러는 것은 다른 일이다.
  */
+/**
+ * 리더십 계수를 반발의 크기로 뒤집는 축 — 계수 1.0(리그 평균)이 저항 1.0이다.
+ * 믿는 감독일수록 계수가 크고, 그만큼 저항이 작아진다.
+ */
+const LEADERSHIP_RESISTANCE_PIVOT = 2;
+/** 하루를 당길 때마다 깎이는 체력 — 저항이 곱해진다 */
+const RECALL_DRAIN_PER_DAY = 1.2;
+/** 며칠을 당겨야 한 명이 등을 돌리는가 */
+const RECALL_DAYS_PER_UPSET = 3;
+/** 반발이 번질 수 있는 1군의 최대 비율 — 라커룸 전체가 등을 돌리지는 않는다 */
+const RECALL_UPSET_CAP_SHARE = 0.5;
+
 function recallSquadEarly(state: GameState, date: string): string {
   const was = squadReturnOf(state.calendar);
   const early = Math.max(1, diffDays(date, was));
   state.calendar.squadReturn = date;
 
   // 리더십이 높을수록 덜 흔들린다 (0.7~1.3의 역방향)
-  const resistance = 2 - leadershipFactor(state);
-  const drain = Math.round(early * 1.2 * resistance);
+  const resistance = LEADERSHIP_RESISTANCE_PIVOT - leadershipFactor(state);
+  const drain = Math.round(early * RECALL_DRAIN_PER_DAY * resistance);
   const players = userPlayers(state).filter((p) => squadLevelOf(p) === "first");
   for (const p of players) {
     p.state.condition = clampCondition(p.state.condition - drain);
@@ -2219,8 +2260,8 @@ function recallSquadEarly(state: GameState, date: string): string {
    * 대상은 시드가 아니라 **가장 지친 선수부터**다. 쉬어야 할 사람이 먼저 화낸다.
    */
   const upset = Math.min(
-    Math.floor(players.length / 2),
-    Math.max(0, Math.round((early / 3) * resistance)),
+    Math.floor(players.length * RECALL_UPSET_CAP_SHARE),
+    Math.max(0, Math.round((early / RECALL_DAYS_PER_UPSET) * resistance)),
   );
   const already = new Set(state.issues.map((i) => i.gamePlayerId));
   const angry = [...players]
@@ -2242,6 +2283,16 @@ function recallSquadEarly(state: GameState, date: string): string {
     (angry.length > 0 ? `, ${angry.length}명이 불만을 품었습니다` : ", 큰 반발은 없었습니다")
   );
 }
+
+/**
+ * "훈련 다 지워"가 미치는 앞날 — 끝 날짜를 주지 않은 비우기의 지평이다.
+ * 한 시즌보다 넉넉해 "전부"로 읽히면서도, 일정 전체를 훑지는 않는 폭.
+ */
+const CLEAR_TRAINING_HORIZON_DAYS = 400;
+/** 요일 반복을 펼치는 주 수 — 말하지 않으면 이만큼, 그 아래·위로는 자른다 */
+const REPEAT_WEEKS_DEFAULT = 6;
+const REPEAT_WEEKS_MIN = 1;
+const REPEAT_WEEKS_MAX = 20;
 
 export function setTraining(state: GameState, input: TrainingPlanInput): SkillResult {
   const applied: string[] = [];
@@ -2338,7 +2389,10 @@ export function setTraining(state: GameState, input: TrainingPlanInput): SkillRe
      * (`clear: true` = "당분간 훈련 없다"), 날짜를 콕 집는 쪽은 `to`를 준다.
      * 그대로 넘기면 하루만 지워져 "전부 비우기"가 조용히 하루짜리가 된다.
      */
-    const cleared = clearTraining(state, { ...opt, to: opt.to ?? addDays(state.date, 400) });
+    const cleared = clearTraining(state, {
+      ...opt,
+      to: opt.to ?? addDays(state.date, CLEAR_TRAINING_HORIZON_DAYS),
+    });
     if (!cleared.ok) return cleared;
     applied.push(cleared.message);
     items.push(...(cleared.brief?.items ?? []));
@@ -2370,7 +2424,10 @@ export function setTraining(state: GameState, input: TrainingPlanInput): SkillRe
   }
 
   // 3) 요일 반복 — 오늘부터 weeks주만큼 엔트리를 펼친다
-  const weeks = Math.max(1, Math.min(20, input.weeks ?? 6));
+  const weeks = Math.max(
+    REPEAT_WEEKS_MIN,
+    Math.min(REPEAT_WEEKS_MAX, input.weeks ?? REPEAT_WEEKS_DEFAULT),
+  );
   /** 요일 반복은 **하나로 묶는다** — 월·수·금이 항목 셋이 되면 그게 글자 벽이다 */
   let repeatPerWeek = 0;
   let repeatWeeks = 0;
@@ -2515,6 +2572,13 @@ export function clearTraining(state: GameState, input: ClearTrainingInput): Skil
 // ---- 창발 보조: 서사 이벤트 (GM 전용, 능력치 접근 불가 — overview §7) ----
 
 const MAX_NARRATIVE_EVENTS_PER_DAY = 3;
+/**
+ * 서사 이벤트 한 번이 컨디션을 움직일 수 있는 폭 — GM이 쓴 장면 하나가
+ * 경기 한 판(±10 안팎)을 덮어쓰지 않게 하는 문 (overview §7의 앵커±폭).
+ */
+const NARRATIVE_CONDITION_BOUND = 5;
+/** 모델이 말할 수 있는 폼 **단계**의 폭 — −1/0/+1 이며 코어가 폼 축으로 옮긴다 */
+const NARRATIVE_FORM_STEP_BOUND = 1;
 
 export function applyNarrativeEvent(
   state: GameState,
@@ -2535,14 +2599,20 @@ export function applyNarrativeEvent(
     };
   }
 
-  const condition = Math.max(-5, Math.min(5, Math.round(input.conditionDelta ?? 0)));
+  const condition = Math.max(
+    -NARRATIVE_CONDITION_BOUND,
+    Math.min(NARRATIVE_CONDITION_BOUND, Math.round(input.conditionDelta ?? 0)),
+  );
   /**
    * 서사 이벤트의 폼 변화 — 모델은 −1/0/+1의 **단계**로 말하고, 코어가 폼 축의
    * 폭으로 옮긴다. 폼은 −1~1이라 ±1을 그대로 더하면 한 장면이 선수를 곧바로
    * 절정·바닥에 꽂는다 (경기 한 판의 변화가 0.3 안팎이다).
    */
   const NARRATIVE_FORM_STEP = 0.12;
-  const formStep = Math.max(-1, Math.min(1, Math.round(input.formDelta ?? 0)));
+  const formStep = Math.max(
+    -NARRATIVE_FORM_STEP_BOUND,
+    Math.min(NARRATIVE_FORM_STEP_BOUND, Math.round(input.formDelta ?? 0)),
+  );
   const form = formStep * NARRATIVE_FORM_STEP;
   // 검증 먼저, 적용은 전원 유효할 때만 — 원자성 (장부 applyEvents와 동일 패턴)
   const resolved = input.playerIds.map((ref) => pickOurPlayer(state, ref));
