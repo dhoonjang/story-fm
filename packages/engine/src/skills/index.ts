@@ -1418,10 +1418,9 @@ export function movePlayerSlot(
 /**
  * 개인 훈련 — **팀 훈련 위에 한 선수만 겨냥해 얹는다.**
  *
- * 축(`axis`)은 훈련 결산(LLM)의 입력이 되고, 자리(`position`)는 코어가
- * 결정적으로 적응도를 올린다 — **실전보다 느리게**(경기 1회 = +1, 훈련
- * `POSITION_TRAINING_SESSIONS`일 = +1). "자리는 커리어가 만든다"를 지키되
- * 전향이라는 판단이 가능해진다.
+ * 축(`axis`)도 자리(`position`)도 훈련 결산(LLM)의 입력이고, 자리는 결산 한 번에
+ * `POSITION_TRAIN_MAX`까지만 오른다 — **실전보다 느리게**(경기 1회 = +1).
+ * "자리는 커리어가 만든다"를 지키되 전향이라는 판단이 가능해진다.
  */
 export function setPlayerTraining(
   state: GameState,
@@ -1456,7 +1455,6 @@ export function setPlayerTraining(
     ...(axis ? { axis } : {}),
     ...(position ? { position } : {}),
     since: state.date,
-    sessions: 0,
   };
   if (index >= 0) state.playerTraining[index] = program;
   else state.playerTraining.push(program);
@@ -1839,7 +1837,6 @@ function memoriesOf(
 function retuneFamiliarity(
   state: GameState,
   tactics: TeamTactics,
-  before: TacticsSpec,
   after: TacticsSpec,
   scale: number,
 ): void {
@@ -1849,7 +1846,6 @@ function retuneFamiliarity(
       distanceOf: (memory, next) => personalDistance(player, memory, next),
       retention: memoryRetention(player),
     });
-    void before;
     a.familiarity = clampFamiliarity(a.familiarity + (arrival - a.familiarity) * scale);
   }
 }
@@ -1912,7 +1908,7 @@ export function setTactics(state: GameState, spec: Partial<TacticsSpec>): SkillR
    * 그래도 0은 아니다 — 갑자기 바뀐 지시를 못 따라가는 선수는 늘 있고,
    * 좌표·역할 변경은 각 배치와 역할 적합도 경로에서 별도로 값을 치른다.
    */
-  retuneFamiliarity(state, tactics, before, parsed.data, inMatch ? IN_MATCH_FAMILIARITY_LOSS : 1);
+  retuneFamiliarity(state, tactics, parsed.data, inMatch ? IN_MATCH_FAMILIARITY_LOSS : 1);
 
   // 감독에게 보이는 건 팀 눈금이다 — 개인값의 평균(파생)
   const now = currentFamiliarity(tactics);
