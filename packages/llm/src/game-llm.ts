@@ -153,9 +153,12 @@ export interface TurnRequest {
   user: string;
   /**
    * 휘발성 상태 스냅샷 — 매 턴 바뀌는 날짜·일정·장부 같은 값.
-   * Anthropic은 가능하면 messages 끝의 오퍼레이터 채널(role:"system")로
-   * 주입하고, Gemini와 미지원 모델은 현재 user content 앞에 접어 넣는다.
-   * 어느 경우든 반환 이력에서는 제거한다.
+   *
+   * **유저 발화 뒤에 선다** (models.md §3-3). 오퍼레이터 롤이 있으면 유저 턴 뒤 그
+   * 롤의 메시지로(Anthropic `role:"system"` · OpenAI `role:"developer"`), 없으면
+   * (Gemini와 채널을 끈 자리) 유저 content 꼬리에 접어 넣는다. 어느 경우든 반환
+   * 이력에서는 제거해 그 자리가 `user`와 글자까지 같다 — 이력에 남지 않는 블록이
+   * 발화 앞에 서면 다음 턴의 캐시 프리픽스가 그 발화 앞에서 끊긴다.
    */
   stateNote?: string;
   tools?: GameToolSpec[];

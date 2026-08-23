@@ -1,6 +1,6 @@
 /**
- * GM 입력 빌더 — 레퍼런스(캐시층)·상태 스냅샷·경기 장부 노트·장면 헤더 파서·
- * 대화 이력 창. 입력은 변경 빈도 순 3층이다 (docs/llm/agents.md).
+ * GM 입력 빌더 — 구단·감독 블록(캐시층)·상태 스냅샷·경기 장부 노트·장면 헤더 파서·
+ * 이번 턴 메시지와 대화 이력 창. 입력은 변경 빈도 순 3층이다 (docs/llm/agents.md).
  */
 import {
   awardLine,
@@ -46,6 +46,7 @@ import {
   topNarrative,
   userPlayers,
   weeklyWagesOf,
+  type ChatTurn,
   type GameState,
   type ScenePoint,
 } from "@story-fm/engine";
@@ -128,11 +129,38 @@ export function describeCharacters(entries: readonly CharacterEntry[]): string |
 }
 
 /**
- * 레퍼런스 블록 — 캐시되는 시스템 블록. 세이브당 고정인 것만 — 구단, 감독의 이름과 배경.
+ * 맡은 구단 — 이름은 여는 태그의 속성이다 (`<character name>`과 같은 표기, prompts.md §5).
+ * 무직이면 서지 않는다 — 옛 구단을 세우면 모델은 아직 그 구단의 감독인 것처럼 쓴다
+ * (career.md §5.1). 경질·부임에 한 번 바뀌고 그 사이엔 바이트가 같다.
+ */
+export function describeClub(state: GameState): string | null {
+  const teamId = managedTeamId(state);
+  return teamId === null ? null : `<club name="${teamName(teamId)}" />`;
+}
+
+/**
+ * 감독 — 이름과 화자 태그는 속성, 배경은 본문. 세이브당 고정인 것만이다.
  *
  * **데이터만 싣는다** (prompts.md §5). 선수 이름이 스냅샷에 있다는 것, 선수 인자는
  * 이름으로 받는다는 것, 감독을 대신 연기하지 않는다는 것은 전부 시스템 프롬프트가
  * 한 번 갖는 규칙이라 여기 다시 적지 않는다 (prompts.md §5-3).
+ * ⚠️ 감독의 능력·평판은 여기 없다 — 경기마다 평판이 움직이고 능력도 자라므로
+ * 여기 있으면 경기 한 번에 이 블록과 그 뒤가 통째로 무효가 된다. 매 턴
+ * 층(`buildGmStateNote`)이 구간 어휘로 싣는다.
+ */
+export function describeManager(
+  manager: Pick<GameState["manager"], "name" | "background">,
+): string {
+  return [
+    `<manager name="${manager.name}" tag="@${manager.name}:">`,
+    `배경: ${manager.background}`,
+    `</manager>`,
+  ].join("\n");
+}
+
+/**
+ * 레퍼런스 층 — 캐시되는 시스템 블록. 구단과 감독, 세이브당 고정인 것만 (agents.md §5).
+ * 세 에이전트(평시 GM · 중계 · 교섭)가 같은 두 블록을 읽는다.
  *
  * ⚠️ **인물 카드는 여기 없다.** 코치·구단주·기자 다섯 장은 회견도 협상도 없는 턴에
  * 한 번도 쓰이지 않는데 매 턴 읽혔다. 그렇다고 조건부로 넣었다 뺐다 하면 더 나쁘다 —
@@ -141,19 +169,11 @@ export function describeCharacters(entries: readonly CharacterEntry[]): string |
  * ⚠️ 선수의 이름도 id도 여기 두지 않는다 — 명단은 영입·매각·2군 승격·주장 변경마다
  * 바뀌고, 한 줄이 달라지면 이 블록과 그 뒤의 이력이 통째로 무효가 된다. 이름은 매 턴
  * 층(`buildGmStateNote`)의 「선수단」 줄이 싣는다.
- * ⚠️ 감독의 능력·평판도 마찬가지다 — 경기마다 평판이 움직이고 능력도 자라므로
- * 여기 있으면 경기 한 번에 이 블록과 그 뒤가 통째로 무효가 된다. 능력과 평판은 매 턴
- * 층(`buildGmStateNote`)이 구간 어휘로 싣고 여기엔 이름과 배경만 남는다.
  */
 export function buildGmReference(state: GameState): string {
-  const m = state.manager;
-  return [
-    `<reference>`,
-    `구단: ${teamName(state.userTeamId)}`,
-    `감독: ${m.name} — 화자 태그 @${m.name}:`,
-    `배경: ${m.background}`,
-    `</reference>`,
-  ].join("\n");
+  return [describeClub(state), describeManager(state.manager)]
+    .filter((block): block is string => block !== null)
+    .join("\n\n");
 }
 
 /**
@@ -185,23 +205,21 @@ export function buildOperatorMessage(message: string): string {
 }
 
 /**
- * 경기 캐시 레퍼런스 — 경기 내내 변하지 않는 것만 담는다.
+ * 경기 캐시 레퍼런스 — 경기 내내 변하지 않는 것만 담는다. 구단·감독은 평시와 같은
+ * 두 블록이다.
  * ⚠️ 패킷은 매 구간 갱신되므로 여기 두면 캐시 프리픽스가 매 턴 깨진다 —
  * 휘발 채널(`buildLedgerNote`)로 내려간다.
  */
 export function buildMatchReference(state: GameState): string {
   return [
-    `<reference>`,
-    `구단: ${teamName(state.userTeamId)}`,
-    `감독: ${state.manager.name} — 화자 태그 @${state.manager.name}:`,
-    `</reference>`,
-    ``,
+    buildGmReference(state),
     // 벤치에서 감독 옆에 서 있는 사람이다 — 경기 중 조언도 같은 사람의 말투여야 한다.
     // 경기 내내 같은 한 사람이라 여기서는 캐릭터북을 거치지 않고 상주한다
-    describeCharacters([characterEntry(headCoachOf(state), "full")]) ?? "",
-    ``,
+    describeCharacters([characterEntry(headCoachOf(state), "full")]),
     buildMatchBrief(state),
-  ].join("\n");
+  ]
+    .filter((block): block is string => block !== null && block.length > 0)
+    .join("\n\n");
 }
 
 /**
@@ -1217,37 +1235,91 @@ function windowOf(state: GameState): { turns: GameState["chat"] } {
   return { turns: chat.slice(start, upto) };
 }
 
+/**
+ * 한 턴의 입력을 유저 메시지 하나로 — 인물 카드 → 화면 조작 → 감독 발화.
+ *
+ * 한 턴은 채팅에 여럿을 남기지만(조작이 먼저, 발화가 뒤 — `historyEnd`) 모델에는
+ * 메시지 하나로 간다. **보낼 때도 이력에서 다시 그릴 때도 이 함수다** —
+ * 이번 턴(`buildGmTurnMessage`)과 이력(`buildGmHistory`)이 다른 손으로 그리면 같은
+ * 자리가 글자부터 갈려 캐시 프리픽스가 지난 발화 앞에서 끊기는데, 화면에는 아무
+ * 증상이 없다 (agents.md §5 · prompts.md §5-1 원칙 12).
+ *
+ * 카드가 발화 앞이다 — 이력에 남는 것들 안의 순서라 캐시와 무관하고, 대본이 그렇듯
+ * 등장인물이 대사보다 먼저다. 이력에 남지 않는 스냅샷은 이 메시지 밖, 그 뒤에 어댑터가
+ * 붙인다 (models.md §3-3).
+ */
+export function renderTurnGroup(
+  state: GameState,
+  turns: ReadonlyArray<Pick<ChatTurn, "role" | "text">>,
+  cards: readonly CharacterEntry[],
+): string {
+  return [
+    describeCharacters(cards),
+    // 오퍼레이터 지시도 같은 유저 메시지 안이다 — 갈리는 건 **내용의 형식**이다.
+    // 감독 발화인지 조작인지를 본문이 밝힌다
+    ...turns.map((turn) =>
+      turn.role === "operator"
+        ? buildOperatorMessage(turn.text)
+        : buildManagerMessage(state, turn.text),
+    ),
+  ]
+    .filter((block): block is string => block !== null)
+    .join("\n\n");
+}
+
+/**
+ * 이번 턴의 유저 메시지 — 이력이 끝난 자리(`historyEnd`)부터 꼬리까지가 이번 턴에
+ * 밀어 넣은 입력이다. 카드는 아직 꼬리에 기록되기 전이라(`recordCharacterInjection`은
+ * 턴이 끝난 뒤다) 고른 것을 그대로 받는다.
+ *
+ * ⚠️ 꼬리가 비어 있으면 빈 메시지다 — 부르는 쪽(`turn-runner`)이 이번 턴의 조작과
+ * 발화를 채팅에 먼저 밀어 넣는 것이 이 함수의 전제이고, `historyEnd`·
+ * `recordCharacterInjection`도 같은 전제 위에 선다.
+ */
+export function buildGmTurnMessage(state: GameState, cards: readonly CharacterEntry[]): string {
+  const chat = relevantTurns(state);
+  return renderTurnGroup(state, chat.slice(historyEnd(chat)), cards);
+}
+
 export function buildGmHistory(
   state: GameState,
 ): Array<{ role: "user" | "assistant"; content: string }> {
-  return windowOf(state).turns.map((turn) => ({
-    // 오퍼레이터 지시도 user 역할로 간다(제공자 메시지는 user/assistant 교대다).
-    // 갈리는 건 **내용의 형식**이다 — 감독 발화인지 조작인지를 본문이 밝힌다.
-    role: turn.role === "model" ? ("assistant" as const) : ("user" as const),
-    content:
-      turn.role === "model"
-        ? turn.text
-        : // 그 턴에 실었던 카드를 같은 자리에 다시 붙인다 — 세이브에는 기록만 있고
+  return groupTurns(windowOf(state).turns).map((group) =>
+    group[0]?.role === "model"
+      ? { role: "assistant" as const, content: group.map((turn) => turn.text).join("\n\n") }
+      : {
+          role: "user" as const,
+          // 그 턴에 실었던 카드를 같은 자리에 다시 붙인다 — 세이브에는 기록만 있고
           // 문장은 매번 여기서 만들어진다 (people.md §6)
-          joinTurn(
-            describeCharacters(entriesOf(state, turn.characters)),
-            turn.role === "operator"
-              ? buildOperatorMessage(turn.text)
-              : buildManagerMessage(state, turn.text),
+          content: renderTurnGroup(
+            state,
+            group,
+            entriesOf(
+              state,
+              group.flatMap((turn) => turn.characters ?? []),
+            ),
           ),
-  }));
+        },
+  );
+}
+
+/**
+ * 연속된 비-모델 턴을 한 묶음으로 — 한 턴의 입력이 보낼 때 메시지 하나였으므로 이력에서도
+ * 하나다. 모델 턴은 저마다 한 묶음이다.
+ */
+function groupTurns(turns: readonly ChatTurn[]): ChatTurn[][] {
+  const groups: ChatTurn[][] = [];
+  for (const turn of turns) {
+    const last = groups[groups.length - 1];
+    if (last && turn.role !== "model" && last[0]?.role !== "model") last.push(turn);
+    else groups.push([turn]);
+  }
+  return groups;
 }
 
 /** 기록 → 인물지. 세계에서 사라진 이름은 조용히 빠진다 (방출된 선수) */
-function entriesOf(
-  state: GameState,
-  injected: readonly CharacterInjection[] | undefined,
-): CharacterEntry[] {
-  return (injected ?? [])
+function entriesOf(state: GameState, injected: readonly CharacterInjection[]): CharacterEntry[] {
+  return injected
     .map((record) => characterEntryOf(state, record.characterId, record.depth))
     .filter((entry): entry is CharacterEntry => entry !== null);
-}
-
-function joinTurn(cards: string | null, body: string): string {
-  return cards === null ? body : `${cards}\n\n${body}`;
 }

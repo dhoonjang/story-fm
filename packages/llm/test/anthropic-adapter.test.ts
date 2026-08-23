@@ -431,7 +431,7 @@ describe("입력 조립 — 캐시 계층과 상태 채널", () => {
    * 오퍼레이터 롤을 받는지는 **설정이 정한다** (models.md §3-3) — 400을 맞아 가며
    * 알아내지 않는다. 꺼 두면 첫 요청부터 접어 넣고, 요청은 한 번만 나간다.
    */
-  it("operator_channel이 꺼진 자리는 발화에 접어 넣고 요청을 한 번만 보낸다", async () => {
+  it("operator_channel이 꺼진 자리는 발화 뒤에 접어 넣고 요청을 한 번만 보낸다", async () => {
     const stub = makeStubClient([endTurn]);
     const llm = new AnthropicGameLLM({ ...testConfig, operatorChannel: false }, stub);
     const result = await llm.runTurn({
@@ -447,7 +447,9 @@ describe("입력 조립 — 캐시 계층과 상태 채널", () => {
     const messages = lastParams(stub).messages as Array<{ role: string; content: string }>;
     expect(messages).toHaveLength(1);
     expect(messages[0]?.role).toBe("user");
-    expect(messages[0]?.content).toBe("[상태] 스냅샷\n\n[감독]\n발화");
+    // 발화가 앞이다 — 저장 이력의 그 자리(발화만)가 보낸 메시지의 프리픽스여야
+    // 다음 턴의 캐시가 이 발화를 지나 이어진다 (models.md §3-3)
+    expect(messages[0]?.content).toBe("[감독]\n발화\n\n[상태] 스냅샷");
     // 접어 넣어도 휘발 상태는 세이브에 남지 않는다
     expect(storedMessages(result.history)[0]).toEqual({
       role: "user",

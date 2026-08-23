@@ -6,7 +6,6 @@ import {
   counterpartyAnchor,
   formatMoney,
   settleCounterparty,
-  teamName,
   type CounterpartyAnchor,
   type CounterpartyBrief,
   type CounterpartyRulingInput,
@@ -14,7 +13,7 @@ import {
   type MarketSkillResult,
 } from "@story-fm/engine";
 import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
-import { describeCharacters } from "./gm-input";
+import { buildGmReference, describeCharacters } from "./gm-input";
 import { retryOnce, requireToolCall, anchorStands } from "./retry";
 import { inputError, toToolSchema } from "./tool-schema";
 
@@ -35,9 +34,10 @@ export const NEGOTIATOR_SYSTEM = `당신은 협상 테이블 건너편에 앉은
 도착한 오퍼 하나에 답한다: 수락 · 역제안 · 결렬.
 
 ## 무엇을 보는가
-<negotiation>은 협상의 갈래와 양쪽, <player>는 선수의 사실, <dossier>는 오퍼 이력·값의 자·감독이
-든 설득 논거 중 사실로 확인된 것, <characters>는 이 자리에 앉은 사람들의 성격과 동기, <anchor>는
-코어가 잰 성사 확률과 그 근거·고를 수 있는 판정·부를 수 있는 구간이다.
+<club>과 <manager>는 테이블 건너편 — 감독과 그의 구단이다. <negotiation>은 협상의 갈래와 양쪽,
+<player>는 선수의 사실, <dossier>는 오퍼 이력·값의 자·감독이 든 설득 논거 중 사실로 확인된 것,
+<characters>는 이 자리에 앉은 사람들의 성격과 동기, <anchor>는 코어가 잰 성사 확률과 그 근거·고를
+수 있는 판정·부를 수 있는 구간이다.
 
 ## 규칙
 - 고를 수 있는 판정은 서류에 적힌 것뿐이다. 그 밖을 적으면 코어가 기준 판정으로
@@ -87,21 +87,6 @@ export const REPORT_VERDICT_TOOL = "report_verdict";
  * 협상마다 캐시 프리픽스가 깨진다 — 구간도 앵커도 이번 호출 층이 싣는다 (agents.md §5).
  */
 export const REPORT_VERDICT_INPUT = toToolSchema(RulingSchema);
-
-/**
- * 레퍼런스 층 — **세이브 안에서 변하지 않는 것만**이다.
- *
- * 상대도 선수도 협상마다 바뀌므로 여기 둘 수 없다. 남는 것은 우리가 누구인가뿐이고,
- * 그래서 이 블록은 한 세이브의 모든 협상 호출에서 바이트가 같다 (agents.md §4-1).
- */
-export function buildNegotiatorReference(state: GameState): string {
-  return [
-    `<reference>`,
-    `상대 구단: ${teamName(state.userTeamId)}`,
-    `그 구단의 감독: ${state.manager.name} — ${state.manager.background}`,
-    `</reference>`,
-  ].join("\n");
-}
 
 const moneyRange = (label: string, anchor: number, room: { min: number; max: number }): string =>
   `${label}: 기준 ${formatMoney(anchor)} — ${formatMoney(room.min)} ~ ${formatMoney(room.max)} 안에서만 부를 수 있다`;
@@ -197,7 +182,9 @@ export async function runNegotiator(
       requireToolCall(REPORT_VERDICT_TOOL, () => {
         client ??= createGameLLM(agentConfig("negotiator"));
         return client.runTurn({
-          system: [NEGOTIATOR_SYSTEM, buildNegotiatorReference(state)],
+          // 레퍼런스 층은 평시 GM과 같은 두 블록이다 — 상대도 선수도 협상마다 바뀌므로
+          // 세이브 안에서 변하지 않는 것은 감독과 그의 구단뿐이다 (agents.md §4-1)
+          system: [NEGOTIATOR_SYSTEM, buildGmReference(state)],
           history: [],
           user: buildNegotiatorPrompt(state, brief),
           tools: [

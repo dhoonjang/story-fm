@@ -7,7 +7,7 @@ version: 1
 max_retries: 2
 
 # operator_channel — 휘발 상태 스냅샷을 오퍼레이터 롤 메시지로 넣을지다. 에이전트마다
-# 적고, 생략하면 거짓(감독 발화 앞에 접어 넣는다). Google에는 그 롤이 없어 참을 적으면
+# 적고, 생략하면 거짓(감독 발화 뒤에 접어 넣는다 — 자리는 어느 쪽이든 발화 뒤다). Google에는 그 롤이 없어 참을 적으면
 # 시작할 때 거부된다 — Anthropic(`role:"system"`)·OpenAI(`role:"developer"`)로 옮기는
 # 자리에서, 그 모델이 그 롤을 받는지 확인한 뒤 켠다 (docs/llm/models.md §3-3).
 

@@ -316,7 +316,9 @@ export class GeminiGameLLM implements GameLLM {
     let text = "";
     let toolCallCount = 0;
     let stopReason: StopReason | null = null;
-    let message: string | Part[] = req.stateNote ? `${req.stateNote}\n\n${req.user}` : req.user;
+    // 스냅샷은 발화 **뒤**에 접는다 — 저장 이력에는 발화만 남으므로(아래) 앞에 접으면
+    // 보낸 메시지와 다음 턴 이력의 같은 자리가 첫 글자부터 갈린다 (models.md §3-3)
+    let message: string | Part[] = req.stateNote ? `${req.user}\n\n${req.stateNote}` : req.user;
     let danglingResults: Part[] | null = null;
 
     for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
@@ -428,7 +430,8 @@ export class GeminiGameLLM implements GameLLM {
       ...(content.parts ? { parts: content.parts.map((part) => ({ ...part })) } : {}),
     }));
 
-    // 상태 스냅샷은 현재 턴 안에서만 유효하다. 다음 턴 이력에는 감독 발화만 남긴다.
+    // 상태 스냅샷은 현재 턴 안에서만 유효하다. 다음 턴 이력에는 감독 발화만 남긴다 —
+    // 발화 뒤에 접었으므로 남는 것은 보낸 메시지의 프리픽스 그대로다
     if (req.stateNote) {
       savedHistory[baseHistory.length] = {
         role: "user",
