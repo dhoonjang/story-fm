@@ -21,6 +21,7 @@ agents:
   mood-rater:    { provider: google, model: gemini-3.5-flash-lite, max_tokens: 8000,  timeout_ms: 30000,  thinking_level: minimal }
   negotiator:    { provider: google, model: gemini-3.6-flash,      max_tokens: 8000,  timeout_ms: 45000,  thinking_level: low }
   history-compactor: { provider: google, model: gemini-3.6-flash,      max_tokens: 8000,  timeout_ms: 60000,  thinking_level: minimal }
+  onboarding-judge:  { provider: google, model: gemini-3.5-flash-lite, max_tokens: 4000,  timeout_ms: 30000,  thinking_level: minimal }
 ```
 
 | 에이전트            | 담당                          | 출력 상한 | 시한  |
@@ -33,6 +34,7 @@ agents:
 | `mood-rater`        | 심경 한 줄                    | 8,000     | 30초  |
 | `negotiator`        | 우리 오퍼에 대한 상대의 판정  | 8,000     | 45초  |
 | `history-compactor` | 밀려난 평시 이력 → 요약 한 벌 | 8,000     | 60초  |
+| `onboarding-judge`  | 새 게임의 배경 → 시작 지갑    | 4,000     | 30초  |
 
 - **해석이 싼 자리로 가는 이유는 그 일이 판단이 아니라 분류이기 때문**이다 — 무엇을
   하라는 말인지 고르는 것이고, 그것이 사실인지와 얼마나 먹히는지는 코어가 정한다.
