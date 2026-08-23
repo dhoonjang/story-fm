@@ -44,7 +44,12 @@ import {
   reviewDomesticCups,
 } from "./domestic-cup";
 import { hasPendingDraw } from "./draw-schedule";
-import { isCupOnlyLeague, isMarketOnlyLeague, leagueName } from "../data/league-catalog";
+import {
+  isCupOnlyLeague,
+  isMarketOnlyLeague,
+  isTopLeague,
+  leagueName,
+} from "../data/league-catalog";
 import { hasCups, scopedLeagues } from "../world/scope";
 import { euroChampion, euroStageMatches } from "./euro-knockout";
 import { payWinnerPrize } from "./euro-prize";
@@ -366,7 +371,11 @@ function checkAchievements(state: GameState, position: number, row: StandingRow)
     add("invincible", { matches: row.played, leagueId });
   // 유럽 최상위 진출은 **그 리그의 UCL 티켓 안**이다 — 순위 하나로 자르면 티켓이 없는
   // 2부의 4위에도 붙는다 (티켓 수는 리그마다 다르다, europe.ts의 배정과 같은 표)
-  if (position <= euroSlotsOf(TOP_EURO_CUP_ID, leagueId)) add("ucl-spot", { position, leagueId });
+  // 2부의 UCL 티켓은 **순위표가 아니라 전력 서열**이 정한다 (europe.ts `rankedTeams`) —
+  // 리그전을 도는 리그에서만 "몇 위면 유럽"이 사실이다
+  if (isTopLeague(leagueId) && position <= euroSlotsOf(TOP_EURO_CUP_ID, leagueId)) {
+    add("ucl-spot", { position, leagueId });
+  }
 
   const topScorer = state.seasonStats
     .filter(
@@ -986,8 +995,14 @@ function applyTransition(state: GameState): string[] {
   reinforcePromotedSquads(state, promoted, digest);
   const windows = buildTransferWindows(nextSeason);
   state.euroEntrants = hasCups(state.world)
-    ? buildEuroEntrants(nextSeason, state.seed, finalTables, cupWinners, (id) =>
-        tierOfTeamIn(state, id),
+    ? buildEuroEntrants(
+        nextSeason,
+        state.seed,
+        finalTables,
+        cupWinners,
+        (id) => tierOfTeamIn(state, id),
+        // 2부 몫을 뽑는 자리라 소속은 승강 뒤의 것이어야 한다 (europe.ts `LeagueMembers`)
+        (leagueId) => teamsOfLeagueIn(state, leagueId),
       )
     : [];
   /**

@@ -6,6 +6,8 @@ import {
   buildMatchweekDates,
   buildScheduleEntries,
   buildOfficeViews,
+  cupCatalog,
+  entrantsOf,
   buildSeasonCalendar,
   buildSeasonFixtures,
   buildTransferWindows,
@@ -657,6 +659,17 @@ describe("두 시즌을 이어 돌려도 컵이 끝난다", () => {
       const final = domesticStageMatches(state, cup.id, "final")[0];
       expect(final, `${cup.id} 결승 없음`).toBeTruthy();
       expect(finalWeekdays(cup), `${cup.id} 결승 ${final!.date}`).toContain(dayOf(final!.date));
+    }
+  });
+
+  /**
+   * 강등 클럽이 2부 몫에서 빠지므로(§4.1) 그 리그의 티켓 합이 풀보다 크면 참가 팀이
+   * 정원에 못 미친다 — 홀수가 되면 리그 페이즈가 아예 편성되지 않는다. 승강이 한 번
+   * 일어난 뒤에야 드러나는 자리라 시즌 2에서 본다.
+   */
+  it("승강 뒤에도 대항전이 정원을 채운다", () => {
+    for (const cup of cupCatalog()) {
+      expect(entrantsOf(state.euroEntrants, cup.id), cup.id).toHaveLength(cup.size);
     }
   });
 

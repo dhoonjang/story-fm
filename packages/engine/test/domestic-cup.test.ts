@@ -348,7 +348,7 @@ describe("추첨 전에도 라운드 날짜는 달력에 있다 — 단, 확보�
       // 제목이 다 말하므로 부연은 붙이지 않는다
       expect(r.detail).toBeNull();
     }
-    expect(rounds.map((r) => r.title).sort()).toEqual(["FA컵 3라운드 예정", "리그컵 3라운드 예정"]);
+    expect(rounds.map((r) => r.title).sort()).toEqual(["FA컵 4라운드 예정", "리그컵 3라운드 예정"]);
   });
 
   it("대진이 확정되면 예정 자리는 사라지고, 이기기 전엔 다음 라운드가 열리지 않는다", () => {

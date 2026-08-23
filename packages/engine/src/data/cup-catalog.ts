@@ -90,6 +90,8 @@ export const CUP_CATALOG_SEED: readonly CupCatalogEntry[] = [
       serieb: 2,
       bundesliga2: 2,
       ligue2: 2,
+      // ⚠️ 한 2부 리그의 세 대회 티켓 합은 **클럽 수 − 3** 이하여야 한다 —
+      // 지난 시즌 1부에서 뛴 강등 클럽 셋이 그해 풀에서 빠진다 (europe.ts `rankedTeams`)
     },
     directSlots: 8,
     playoffSlots: 16,
@@ -149,11 +151,11 @@ export const CUP_CATALOG_SEED: readonly CupCatalogEntry[] = [
       bundesliga: 2,
       ligue1: 2,
       // 모델 밖 유럽의 몫 — 가장 작은 대회라 2부가 절반을 넘는다 (합 14)
-      championship: 3,
-      segunda: 3,
+      championship: 2,
+      segunda: 2,
       serieb: 3,
-      bundesliga2: 3,
-      ligue2: 2,
+      bundesliga2: 4,
+      ligue2: 3,
     },
     directSlots: 4,
     playoffSlots: 8,
