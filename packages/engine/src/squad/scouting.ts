@@ -106,7 +106,7 @@ export const OBSERVATION_MARGIN: Record<Observability, Record<Knowledge, number>
  * 축이 아닌 합성값(`"overall"`)은 판단 계열을 포함하므로 **분석형**으로 다룬다 —
  * 종합 평가가 실행 계열보다 정확할 수는 없다.
  */
-export function marginFor(axis: string, knowledge: Knowledge): number {
+function marginFor(axis: string, knowledge: Knowledge): number {
   const layer = AXIS_OBSERVABILITY[axis as AttributeAxis] ?? "analytical";
   return OBSERVATION_MARGIN[layer][knowledge];
 }
@@ -132,13 +132,13 @@ export function observationMargin(
 }
 
 /** 실행 계열의 오차 — 안개 안내문이 "무엇까지 믿어도 되나"를 말할 때 쓴다 */
-export const KNOWLEDGE_MARGIN: Record<Knowledge, number> = OBSERVATION_MARGIN.observable;
+const KNOWLEDGE_MARGIN: Record<Knowledge, number> = OBSERVATION_MARGIN.observable;
 
 /** 안개를 씌워 노출하는 축 — 16축 전부 */
 export const SCOUT_ATTRS = ATTRIBUTE_AXES;
 export type ScoutAttr = AttributeAxis;
 
-export const ATTR_KO: Record<ScoutAttr, string> = AXIS_KO;
+const ATTR_KO: Record<ScoutAttr, string> = AXIS_KO;
 
 // ── 지식 수준 파생 ──────────────────────────────────────
 

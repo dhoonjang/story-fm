@@ -86,7 +86,7 @@ const STARTED_WINDOW = 7;
 const IGNORE_CARRY = 0.75;
 
 /** 열린 자리가 답을 기다리는 날 — 이 뒤엔 감독이 지나친 것으로 닫힌다 */
-export const APPROACH_PATIENCE_DAYS = 3;
+const APPROACH_PATIENCE_DAYS = 3;
 
 /** 같은 화자가 다시 오기까지 — 어제 감독실에 왔던 사람이 오늘 또 오지 않는다 */
 const SPEAKER_COOLDOWN_DAYS = 7;
@@ -96,7 +96,7 @@ const SPEAKER_COOLDOWN_DAYS = 7;
  * 회견(`PRESS_BAND` 4)보다 좁은 이유는 자리가 좁기 때문이다 — 마이크 앞에서 한 말이
  * 복도에서 한 말보다 멀리 간다.
  */
-export const APPROACH_BAND = 3;
+const APPROACH_BAND = 3;
 
 /**
  * 폭이 더는 넓어지지 않는 계단 — **위 계단이라고 사석의 말이 회견보다 멀리 가지는
