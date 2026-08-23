@@ -44,6 +44,24 @@ export const COUNTERPARTY_TERMS_BAND = 0.15;
 /** 판정의 사다리 — 상대는 앵커에서 **한 칸**까지 움직인다 */
 const LADDER: readonly NegotiationVerdict[] = ["reject", "counter", "accept"];
 
+/** 상대가 실제로 부를 수 있는 값의 구간 — 프롬프트에 적히는 것도 이 값이다 */
+export interface TermsRoom {
+  min: number;
+  max: number;
+}
+
+/**
+ * 앵커 ±한도를 코어의 합법 구간으로 자른 폭 — **한 함수다.**
+ *
+ * 모델에게 적어 주는 구간과 모델의 답을 자르는 구간이 갈리면, 감독은 규칙대로 부른
+ * 값이 조용히 다른 값으로 바뀌는 협상을 본다.
+ */
+export function roomOf(anchor: number, band: CounterBand): TermsRoom {
+  const low = Math.round(anchor * (1 - COUNTERPARTY_TERMS_BAND));
+  const high = Math.round(anchor * (1 + COUNTERPARTY_TERMS_BAND));
+  return { min: clampToBand(band, low) ?? anchor, max: clampToBand(band, high) ?? anchor };
+}
+
 export interface CounterpartyAnchor {
   negotiationId: string;
   /** 코어가 잰 성사 확률 */
@@ -56,8 +74,12 @@ export interface CounterpartyAnchor {
   allowed: readonly NegotiationVerdict[];
   /** 역제안일 때 상대가 부르는 금액 (이적료·임대료·정산금) */
   fee?: number;
+  /** 그 금액이 움직일 수 있는 폭 — 앵커 ±한도를 코어의 합법 구간으로 자른 것 */
+  feeRoom?: TermsRoom;
   /** 역제안일 때 상대가 부르는 주급 */
   weeklyWage?: number;
+  /** 그 주급이 움직일 수 있는 폭 */
+  wageRoom?: TermsRoom;
   /** 분할 연수를 되부를 수 있는 갈래인가 */
   splittable: boolean;
   bounds: CounterBounds;
@@ -141,20 +163,20 @@ export function counterpartyAnchor(
     latitude: bounds.latitude,
     verdict,
     allowed,
-    ...(fee === null ? {} : { fee }),
-    ...(wage === null ? {} : { weeklyWage: wage }),
+    ...(fee === null || !bounds.fee ? {} : { fee, feeRoom: roomOf(fee, bounds.fee) }),
+    ...(wage === null || !bounds.wage
+      ? {}
+      : { weeklyWage: wage, wageRoom: roomOf(wage, bounds.wage) }),
     splittable: bounds.splittable,
     bounds,
   };
 }
 
-/** 앵커 ±한도 안으로 — 그 위에 코어의 합법 구간이 다시 걸린다 */
+/** 앵커 ±한도 안으로 — 그 위에 코어의 합법 구간이 이미 걸려 있다 (`roomOf`) */
 function clampNear(anchor: number, asked: number | undefined, band: CounterBand): number {
   if (asked === undefined) return anchor;
-  const low = Math.round(anchor * (1 - COUNTERPARTY_TERMS_BAND));
-  const high = Math.round(anchor * (1 + COUNTERPARTY_TERMS_BAND));
-  const near = Math.min(high, Math.max(low, Math.round(asked)));
-  return clampToBand(band, near) ?? anchor;
+  const room = roomOf(anchor, band);
+  return Math.min(room.max, Math.max(room.min, Math.round(asked)));
 }
 
 /**
