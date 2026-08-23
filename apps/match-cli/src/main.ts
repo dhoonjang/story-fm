@@ -116,9 +116,7 @@ console.log(`${packet.home.teamName}(홈) vs ${packet.away.teamName}`);
 const tagCtx = packetTagContext(packet);
 for (const m of packet.matchups) console.log(`  · ${matchupText(m)}`);
 for (const k of packet.keyPoints) console.log(`  ★ ${packetTagText(k, tagCtx)}`);
-console.log(
-  `  기대 득점 ${packet.guide.expectedGoals.home} : ${packet.guide.expectedGoals.away} · 업셋 확률 ${Math.round(packet.guide.upsetChance * 100)}%`,
-);
+console.log(`  기대 득점 ${packet.guide.expectedGoals.home} : ${packet.guide.expectedGoals.away}`);
 
 if (dry) {
   console.log("\n(--dry: LLM 호출 없이 종료)");

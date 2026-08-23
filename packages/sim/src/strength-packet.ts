@@ -1143,20 +1143,6 @@ export function buildStrengthPacket(
     away: round2(sumProfiles("away", (profile) => profile.expectedGoals)),
   };
 
-  const overallGap =
-    Math.abs(
-      home.zones.attack +
-        home.zones.midfield +
-        home.zones.defense -
-        (away.zones.attack + away.zones.midfield + away.zones.defense),
-    ) / 3;
-  /**
-   * 전력 차 1당 업셋 확률이 깎이는 폭 — `edgeOf`와 같은 이유로 존 값의 눈금을 탄다.
-   * 폭이 ×0.81로 좁아진 만큼 계수를 되편다(0.01 → 0.0123).
-   */
-  const UPSET_PER_GAP = 0.0123;
-  const upsetChance = round2(Math.min(0.45, Math.max(0.05, 0.35 - overallGap * UPSET_PER_GAP)));
-
   /**
    * 키포인트 = **발동한 상성**(전술이 만난 결과) + 구멍(교체 신호) + 전술 미스매치.
    * 상성이 앞에 온다 — 감독이 지금 무엇을 바꿔야 하는지가 먼저다. 상성과 구멍은
@@ -1198,7 +1184,6 @@ export function buildStrengthPacket(
       chanceXg,
       shotProfiles,
       possession,
-      upsetChance,
       intensity: {
         home: matchIntensity(homeIn.tactics),
         away: matchIntensity(awayIn.tactics),

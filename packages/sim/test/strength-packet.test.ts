@@ -786,22 +786,6 @@ describe("상태 계수 (stateModifier)", () => {
   });
 });
 
-describe("업셋 확률 (upsetChance)", () => {
-  it("대등하면 0.35고, 전력이 벌어질수록 내려가되 0.05~0.45를 벗어나지 않는다", () => {
-    const even = buildStrengthPacket(makeSide("a", 75), makeSide("b", 75), { neutral: true });
-    expect(even.guide.upsetChance).toBe(0.35);
-
-    let previous = even.guide.upsetChance;
-    for (const away of [70, 60, 50, 40, 30]) {
-      const packet = buildStrengthPacket(makeSide("a", 90), makeSide("b", away), { neutral: true });
-      expect(packet.guide.upsetChance, `상대 ${away}`).toBeLessThanOrEqual(previous);
-      expect(packet.guide.upsetChance).toBeGreaterThanOrEqual(0.05);
-      expect(packet.guide.upsetChance).toBeLessThanOrEqual(0.45);
-      previous = packet.guide.upsetChance;
-    }
-  });
-});
-
 /**
  * **코어가 내는 코드에는 렌더러가 있어야 한다** (match.md §1).
  *
