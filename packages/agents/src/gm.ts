@@ -197,7 +197,8 @@ function isValidOnboardingText(state: GameState, text: string): boolean {
   return (
     lines.length >= 2 &&
     lines.length <= 12 &&
-    lines.every((line) => line.startsWith("@")) &&
+    // 장면은 `@`로 연다 — 그 뒤의 태그 없는 줄은 이어쓰기다 (prompts.md §1)
+    (lines[0] ?? "").startsWith("@") &&
     lines.some((line) => line.startsWith(coachTag)) &&
     // 감독은 유저의 몫이다 — GM이 대신 말하면 첫 턴부터 규약이 깨진다
     !lines.some((line) => line.startsWith(`@${state.manager.name}:`))

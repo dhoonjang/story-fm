@@ -878,10 +878,10 @@ export function describePendingPress(state: GameState): string | null {
   const c = pendingPress(state);
   if (!c) return null;
   return [
-    `기자회견 대기 (${c.id}) — ${c.context}${c.weight >= 3 ? " · 큰 자리다" : ""}`,
-    `  기자가 아는 사실 (이 밖은 묻지 못한다):`,
+    `${c.context}${c.weight >= 3 ? " · 큰 자리다" : ""}`,
+    `기자가 아는 사실 (이 밖은 묻지 못한다):`,
     ...c.facts.map(
-      (f) => `  · ${pressFactText(f)}${f.about ? ` [${f.about}]` : ""}${f.sharp ? " ⚡" : ""}`,
+      (f) => `- ${pressFactText(f)}${f.about ? ` [${f.about}]` : ""}${f.sharp ? " ⚡" : ""}`,
     ),
   ].join("\n");
 }

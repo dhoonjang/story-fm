@@ -805,12 +805,12 @@ export function describePendingApproach(state: GameState): string | null {
   if (!a) return null;
   const waited = diffDays(a.date, state.date);
   return [
-    `찾아온 사람 (${a.id}) — ${a.speakerId}(${APPROACH_CHANNEL_LABEL[a.channel]}) · ${contextTextOf(state, a)}` +
+    `${a.speakerId}(${APPROACH_CHANNEL_LABEL[a.channel]}) · ${contextTextOf(state, a)}` +
       ` · 계단 ${a.step}/${APPROACH_TOP_STEP[a.channel]}${a.step >= 3 ? " · 큰 자리다" : ""}` +
       (waited > 0 ? ` · ${waited}일째 기다린다` : ""),
-    `  그가 아는 사실 (이 밖은 말하지 못한다):`,
+    `그가 아는 사실 (이 밖은 말하지 못한다):`,
     ...a.facts.map(
-      (f) => `  · ${pressFactText(f)}${f.about ? ` [${f.about}]` : ""}${f.sharp ? " ⚡" : ""}`,
+      (f) => `- ${pressFactText(f)}${f.about ? ` [${f.about}]` : ""}${f.sharp ? " ⚡" : ""}`,
     ),
   ].join("\n");
 }
