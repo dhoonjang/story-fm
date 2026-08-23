@@ -45,9 +45,7 @@ import {
   loanLockOf,
   marketValueOf,
   oddsText,
-  renewalExpectation,
   responseDelayDays,
-  severanceOf,
   unilateralSeveranceOf,
   wageExpectationOf,
   type DealTerms,
@@ -72,6 +70,7 @@ import { assignSquadNumber } from "../squad/numbers";
 import { userWageRoom } from "../club/board-request";
 import { marketBiasOf, squadShortfallText, transferWindowLabel, windowOpenForTeam } from "./market";
 import { evaluatePitch, latitudeOf } from "./persuasion";
+import { clampToBand, counterBoundsOf, outgoingCounterFloor } from "./counter-bounds";
 import { makeRng } from "../core/rng";
 import type { MarketSkillResult, SkillResult } from "../skills";
 import { grantManagerXP } from "../skills";
@@ -138,12 +137,6 @@ function termsOfKind(kind: Negotiation["kind"], round: MarketTerms): MarketTerms
 
 /** 폭주 방지선 — 인내심 감쇠가 실질 제동이고 이건 상한일 뿐이다 */
 const MAX_ROUNDS = 8;
-/** 이 확률 아래로는 상대가 수락할 수 없다 — "그 값에 팔 구단은 없다" */
-const MIN_ACCEPT_PROBABILITY = 5;
-/** 역제안 상한 — 요구액의 이 배수를 넘게 부를 수 없다 */
-const COUNTER_CEILING = 1.15;
-/** 역제안 요구 주급 상한 — 기대치의 이 배수 (상대도 무리한 요구는 하지 않는다) */
-const COUNTER_WAGE_CEILING = 1.4;
 /** 협상 유효기간 — 창 마감이 더 이르면 그쪽이 먼저 온다 */
 const NEGOTIATION_DAYS = 14;
 /**
@@ -185,7 +178,7 @@ function directionField(kind: Negotiation["kind"]): { direction?: MarketDirectio
 }
 
 /** 갈래의 이름 — 안내 문장과 요약이 같은 말을 쓴다 (낱말은 도메인이 쥔다) */
-const KIND_KO: Record<Negotiation["kind"], string> = {
+export const KIND_KO: Record<Negotiation["kind"], string> = {
   buy: marketDirectionKo("in"),
   sell: marketDirectionKo("out"),
   loan: marketDirectionKo("in", true),
@@ -484,7 +477,7 @@ function answerTarget(
  * 협상의 상대 이름 — **매각이면 `player.teamId`가 아니다.**
  * 파는 국면에서 선수는 아직 우리 소속이라, 상대는 사려는 구단이다.
  */
-function counterpartOf(negotiation: Negotiation, player: GamePlayer): string {
+export function counterpartOf(negotiation: Negotiation, player: GamePlayer): string {
   // 재계약·해지의 상대는 구단이 아니라 선수 본인이다
   if (isPlayerDeal(negotiation.kind)) return player.name;
   const selling = negotiation.kind === "sell" || negotiation.kind === "loan_out";
@@ -645,20 +638,23 @@ export function respondOffer(
    * 논거가 쌓이면 그 경계가 내려간다 — 확률 3%짜리 딜도 선수가 고향으로
    * 돌아오기로 했다면 성사될 수 있다. 무게는 코어가 아니라 **선수를 연기하는
    * LLM이 정한다**; 코어는 거짓 논거로는 이 문이 안 열린다는 것만 지킨다.
+   *
+   * 범위는 검증과 클램프가 **한 벌을 나눠 읽는다**(`counterBoundsOf`) — 교섭 상대의
+   * 판정을 자르는 쪽이 자기 범위를 따로 적으면 여기가 거절할 값을 만들어 낸다
+   * (transfer.md §12-1).
    */
-  const room = latitudeOf(negotiation.pitched);
+  const bounds = counterBoundsOf(state, negotiation, offer);
   /**
    * **여유만큼 하한이 내려간다.** 논거 하나가 여는 폭(`LATITUDE_PER_CLAIM` 12%p)이
    * 하한(`MIN_ACCEPT_PROBABILITY` 5%)보다 커서 하나만 확인돼도 문은 끝까지 열리지만,
    * 감독에게 보이는 `+%p`가 실제로 걸리는 값이어야 그 숫자를 대조할 수 있다.
    */
-  const acceptFloor = Math.max(0, MIN_ACCEPT_PROBABILITY - room);
-  if (input.verdict === "accept" && odds.probability < acceptFloor) {
+  if (input.verdict === "accept" && odds.probability < bounds.acceptFloor) {
     return {
       ok: false,
       message:
         `그 조건에 응할 구단은 없습니다 (성사 확률 ${odds.probability}%` +
-        (room > 0 ? ` · 설득으로 열린 여유 ${room}%p` : "") +
+        (bounds.latitude > 0 ? ` · 설득으로 열린 여유 ${bounds.latitude}%p` : "") +
         `) — 역제안이나 결렬만 가능합니다`,
     };
   }
@@ -668,110 +664,62 @@ export function respondOffer(
   const renewing = negotiation.kind === "renew";
   const releasing = negotiation.kind === "release";
   const loaning = negotiation.kind === "loan";
+  const selling = negotiation.kind === "sell" || negotiation.kind === "loan_out";
+  const countering = input.verdict === "counter";
   /**
    * **상대도 분할을 되부를 수 있다** — 이적료·정산금이 나뉘는 갈래에서만이다.
    * 임대료는 한 시즌짜리 돈이라 나눌 기간이 없고 재계약엔 이적료가 없다
    * (transfer.md §5-2).
    */
-  const counterYears =
-    negotiation.kind === "buy" || negotiation.kind === "sell" || negotiation.kind === "release"
-      ? paymentYearsOf(input.paymentYears)
-      : undefined;
+  const counterYears = bounds.splittable ? paymentYearsOf(input.paymentYears) : undefined;
 
-  /**
-   * **해지의 역제안은 선수가 정산금을 올려 부르는 것**이고, 상한은 **일방 해지의
-   * 전액**이다. 그 위를 부를 수 없는 것은 합의가 깨져도 그가 받을 값이 전액이기
-   * 때문이다 — 더 부르는 것은 협상이 아니라 협상을 없애는 값이다 (transfer.md §11).
-   */
-  const releaseCeiling = releasing ? unilateralSeveranceOf(state, player.id) : 0;
-  const counterSeverance = releasing ? Math.round(input.fee ?? severanceOf(state, player.id)) : 0;
-  if (
-    releasing &&
-    input.verdict === "counter" &&
-    (counterSeverance <= offer.fee || counterSeverance > releaseCeiling)
-  ) {
-    return {
-      ok: false,
-      message:
-        `요구 정산금은 ${formatMoney(offer.fee)} 초과 ${formatMoney(releaseCeiling)} 이하여야 합니다 — ` +
-        "일방 해지의 전액 위로는 부를 수 없습니다",
-    };
-  }
-  /**
-   * **매각은 방향이 반대다.** 우리가 부른 값에 사는 쪽이 답하므로, 역제안은
-   * 올려 부르는 게 아니라 **깎아 부르는 것**이다. 영입 기준을 그대로 쓰면
-   * "우리 호가 이상"을 요구해 사는 구단이 스스로 값을 올리는 판정만 남는다.
-   */
-  const selling = negotiation.kind === "sell" || negotiation.kind === "loan_out";
-  if (selling && input.verdict === "counter") {
-    const floor = outgoingCounterFloor(state, negotiation.kind, player);
-    const bid = Math.round(input.fee ?? offer.fee);
-    if (bid >= offer.fee || bid < floor) {
+  /** 인자가 비면 **상대 자신의 기대치**가 선다 — 그것이 코어의 앵커다 */
+  const feeAsked = bounds.fee
+    ? Math.round(
+        input.fee ?? clampToBand(bounds.fee, bounds.fee.expectation) ?? bounds.fee.expectation,
+      )
+    : 0;
+  const wageAsked = bounds.wage
+    ? Math.round(
+        input.weeklyWage ??
+          clampToBand(bounds.wage, bounds.wage.expectation) ??
+          bounds.wage.expectation,
+      )
+    : 0;
+  const counterSeverance = releasing ? feeAsked : 0;
+  const counterFee = renewing || releasing ? 0 : feeAsked;
+  const counterWageDemand = renewing ? wageAsked : 0;
+  const counterWage = renewing || releasing ? 0 : wageAsked;
+
+  if (countering && bounds.fee && (feeAsked < bounds.fee.min || feeAsked > bounds.fee.max)) {
+    if (releasing) {
       return {
         ok: false,
-        message: `사는 쪽의 역제안은 ${formatMoney(floor)} 이상 ${formatMoney(offer.fee)} 미만이어야 합니다`,
+        message:
+          `요구 정산금은 ${formatMoney(offer.fee)} 초과 ${formatMoney(bounds.fee.max)} 이하여야 합니다 — ` +
+          "일방 해지의 전액 위로는 부를 수 없습니다",
       };
     }
-  }
-  const asking =
-    renewing || releasing || selling
-      ? 0
-      : loaning
-        ? Math.round(marketValueOf(state, player) * LOAN_FEE_RATE * 1.6)
-        : askingPriceFor(state, player);
-  const ceiling = Math.round(asking * COUNTER_CEILING);
-  const counterFee =
-    !renewing && !releasing && input.verdict === "counter" ? Math.round(input.fee ?? asking) : 0;
-  if (
-    !renewing &&
-    !releasing &&
-    !selling &&
-    input.verdict === "counter" &&
-    (counterFee < offer.fee || counterFee > ceiling)
-  ) {
+    if (selling) {
+      return {
+        ok: false,
+        message: `사는 쪽의 역제안은 ${formatMoney(bounds.fee.min)} 이상 ${formatMoney(offer.fee)} 미만이어야 합니다`,
+      };
+    }
     return {
       ok: false,
-      message: `역제안은 ${formatMoney(offer.fee)} 이상 ${formatMoney(ceiling)} 이하여야 합니다`,
+      message: `역제안은 ${formatMoney(offer.fee)} 이상 ${formatMoney(bounds.fee.max)} 이하여야 합니다`,
     };
   }
-  // 재계약의 역제안은 **주급**을 부른다 — 우리 제시액 이상, 기대치의 1.4배 이하
-  const wageCeiling = Math.round(renewalExpectation(state, player) * COUNTER_WAGE_CEILING);
-  const counterWageDemand = renewing
-    ? Math.round(input.weeklyWage ?? renewalExpectation(state, player))
-    : 0;
-  if (
-    renewing &&
-    input.verdict === "counter" &&
-    (counterWageDemand <= offer.weeklyWage || counterWageDemand > wageCeiling)
-  ) {
+  if (countering && bounds.wage && (wageAsked < bounds.wage.min || wageAsked > bounds.wage.max)) {
+    // 재계약의 역제안은 **주급**을 부른다 — 우리 제시액 이상, 기대치의 1.4배 이하.
+    // 데려오는 딜에도 같은 범위가 걸린다: 이적료에만 걸어 두면 상대가 이적료는
+    // 규칙대로 부르면서 주급을 열 배로 되불러, 코어가 막지 않는 값이 협상에 남는다.
     return {
       ok: false,
-      message: `요구 주급은 ${formatMoney(offer.weeklyWage)} 초과 ${formatMoney(wageCeiling)} 이하여야 합니다`,
-    };
-  }
-  /**
-   * **데려오는 딜의 역제안 주급에도 범위가 있다.** 이적료에만 걸어 두면 상대가
-   * 이적료는 규칙대로 부르면서 주급을 열 배로 되불러, 코어가 막지 않는 값이 그대로
-   * 협상에 남는다 — 재계약이 이미 막고 있던 자리다(위).
-   *
-   * 자는 같은 배수(`COUNTER_WAGE_CEILING`)이고 기대치만 갈래를 따른다: 희망 주급과
-   * **우리 제시액 중 큰 쪽**이라, 우리가 이미 기대 위를 부른 오퍼에도 상대가 부를 수
-   * 있는 값이 남는다. 매각·임대 송출은 주급을 사는 쪽이 정하므로 대상이 아니다.
-   */
-  const wageAnchor =
-    renewing || releasing ? 0 : Math.max(offer.weeklyWage, wageExpectationOf(state, player));
-  const counterWageCeiling = Math.round(wageAnchor * COUNTER_WAGE_CEILING);
-  const counterWage = renewing || releasing ? 0 : Math.round(input.weeklyWage ?? wageAnchor);
-  if (
-    !renewing &&
-    !releasing &&
-    !selling &&
-    input.verdict === "counter" &&
-    (counterWage < offer.weeklyWage || counterWage > counterWageCeiling)
-  ) {
-    return {
-      ok: false,
-      message: `역제안 주급은 ${formatMoney(offer.weeklyWage)} 이상 ${formatMoney(counterWageCeiling)} 이하여야 합니다`,
+      message: renewing
+        ? `요구 주급은 ${formatMoney(offer.weeklyWage)} 초과 ${formatMoney(bounds.wage.max)} 이하여야 합니다`
+        : `역제안 주급은 ${formatMoney(offer.weeklyWage)} 이상 ${formatMoney(bounds.wage.max)} 이하여야 합니다`,
     };
   }
 
@@ -912,29 +860,6 @@ export function respondOffer(
 // ② 감독이 **특정 구단에 직접 오퍼**를 넣는다 (영입의 거울상).
 // ③ AI 구단이 먼저 우리 선수를 노린다.
 // 예전엔 ③뿐이라 감독이 팔기로 마음먹어도 할 수 있는 일이 없었다.
-
-/** 사는 쪽이 깎아 부를 수 있는 하한 — 기대치의 이 비율 아래로는 못 부른다 */
-const SELL_COUNTER_FLOOR = 0.55;
-
-/**
- * 내보내는 딜에서 **사는 쪽이 깎아 부를 수 있는 하한** — 갈래의 눈금을 쓴다.
- *
- * 매각의 자는 시장가, 임대 송출의 자는 임대료(`LOAN_FEE_RATE`)다. 임대를 시장가로
- * 재면 하한이 임대료의 일곱 배가 되어 **사는 쪽이 부를 수 있는 값이 아예 없다** —
- * 역제안은 우리 호가 미만이어야 하는데 하한이 그 위에 있기 때문이다
- * (transfer.md §1).
- */
-function outgoingCounterFloor(
-  state: GameState,
-  kind: Negotiation["kind"],
-  player: GamePlayer,
-): number {
-  const expectation =
-    kind === "loan_out"
-      ? marketValueOf(state, player) * LOAN_FEE_RATE
-      : marketValueOf(state, player);
-  return Math.round(expectation * SELL_COUNTER_FLOOR);
-}
 
 /** 하루에 오퍼가 들어올 확률 (이적창 열린 날) */
 const INCOMING_OFFER_CHANCE = 0.08;
