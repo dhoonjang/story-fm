@@ -64,10 +64,18 @@ export function TacticsPanel({
               <div className="tactic-row" key={axis.key}>
                 <span className="tactic-label">{axis.label}</span>
                 {editing ? (
-                  <div className="tactic-steps" role="group" aria-label={axis.label}>
+                  /* 다섯 칸 중 **하나만** 서는 눈금이라 라디오 묶음이다. 선택은 색(`on`)
+                     으로만 서 있었는데, 색은 색약에게도 스크린리더에게도 닿지 않는다 —
+                     `aria-checked`가 같은 사실을 따로 말한다. 칸에 적힌 숫자는 눈금의
+                     위치일 뿐이라 이름은 낱말(`aria-label`) 쪽이 갖는다 */
+                  <div className="tactic-steps" role="radiogroup" aria-label={axis.label}>
                     {axis.words.map((label, i) => (
                       <button
                         key={label}
+                        type="button"
+                        role="radio"
+                        aria-checked={value === i + 1}
+                        aria-label={label}
                         className={`tactic-step${value === i + 1 ? " on" : ""}`}
                         onClick={() => onChange({ [axis.key]: i + 1 } as Partial<TacticsView>)}
                         title={label}

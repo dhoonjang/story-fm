@@ -348,8 +348,16 @@ function ZoneBars({ match }: { match: Match }) {
                 key={player.id}
                 style={{ left: `${at.left}%`, top: `${at.top}%` }}
                 title={`${player.squadNumber === null ? "임시 " : ""}${no}번 · ${player.name} (${player.position}) — 전력 ${player.effective}${player.gassed ? " · 다리가 멈췄다" : ""}`}
-                aria-label={`${no}번 ${player.name}, ${player.position}, 전력 ${player.effective}`}
-                tabIndex={0}
+                /**
+                 * **읽는 값이지 조작 대상이 아니다.** 눌러서 열리는 것이 없는데도
+                 * 탭 정지점이었던 탓에, 판 하나를 지나려면 스물두 번을 눌러야 했고
+                 * 멈춘 자리마다 포커스 링만 떴다. 탭 순서에서 빼고 `role="img"`로
+                 * 세워 이름은 `aria-label`이 갖는다 — 번호만 읽히면 누구인지 모른다.
+                 * 다리가 멈춘 것도 여기 싣는다: 판에서는 빨간 테두리뿐이라 색을
+                 * 못 보면 교체 신호가 통째로 사라진다.
+                 */
+                role="img"
+                aria-label={`${no}번 ${player.name}, ${player.position}, 전력 ${player.effective}${player.gassed ? ", 다리가 멈췄다" : ""}`}
               >
                 {no}
               </span>
