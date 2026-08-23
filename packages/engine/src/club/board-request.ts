@@ -360,7 +360,7 @@ export function describeBoardRequests(state: GameState): string | null {
   }
   const lift = wageLiftLine(state);
   if (lift) lines.push(`- ${lift}`);
-  return lines.length > 0 ? `보드 요청:\n${lines.join("\n")}` : null;
+  return lines.length > 0 ? lines.join("\n") : null;
 }
 
 // ── 주급 천장에 얹히는 몫 ──────────────────────────────────────

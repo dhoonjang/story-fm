@@ -15,7 +15,9 @@ import {
   describeNextFixture,
   describeBoardRequests,
   describePendingApproach,
+  pendingApproach,
   describePendingPress,
+  pendingPress,
   describeWindowState,
   expiringContracts,
   financeOf,
@@ -248,9 +250,9 @@ function matchDigest(state: GameState): string | null {
     .map(([pid, r]) => `${nameOf(pid)} ${r.toFixed(1)}`)
     .join(", ");
   return [
-    `직전 경기 (${played.date}): ${ours ? "홈" : "원정"} vs ${opponent} ${us}-${them} ${verdict}`,
-    scorers ? `  득점: ${scorers}` : null,
-    best ? `  최고 평점: ${best}` : null,
+    `${played.date} ${ours ? "홈" : "원정"} vs ${opponent} ${us}-${them} ${verdict}`,
+    scorers ? `- 득점: ${scorers}` : null,
+    best ? `- 최고 평점: ${best}` : null,
   ]
     .filter(Boolean)
     .join("\n");
@@ -293,15 +295,47 @@ function recentNarrativeLines(state: GameState): string[] {
   return topNarrative(state, RECENT_NARRATIVE).map((n) => `${n.date} ${n.text}`);
 }
 
-/** 시간이 흘렀다 — 손잡이로 넘긴 턴에만 붙는 꼬리. 재직·무직 스냅샷이 같이 쓴다 */
+/**
+ * 스냅샷 안의 한 덩어리 (prompts.md §5-1 · agents.md §6).
+ *
+ * 한 턴에 열댓 덩어리가 쌓이는 블록이라 레이블 줄로는 경계가 서지 않는다. 규칙은
+ * 둘이다 — **내용이 없으면 태그도 서지 않고**, 여는 태그가 이름을 대므로 **같은
+ * 말을 하는 레이블 줄을 안에 다시 적지 않는다**.
+ */
+function block(tag: string, body: string | null, attrs = ""): string | null {
+  if (body === null || body.trim().length === 0) return null;
+  return `<${tag}${attrs}>\n${body}\n</${tag}>`;
+}
+
+/** 여러 줄을 한 덩어리로 — null과 빈 줄은 걷는다 */
+function lines(...items: (string | null)[]): string {
+  return items.filter((x): x is string => x !== null && x !== "").join("\n");
+}
+
+/**
+ * 회견·찾아온 사람 — **id가 태그의 속성으로 선다.** 답할 자리라 모델이 그 id를
+ * 스킬 인자로 되돌려 주어야 하고, 여는 태그가 이름을 대므로 안쪽 첫 줄은 맥락부터
+ * 시작한다 (prompts.md §5-1).
+ */
+function pressBlock(state: GameState): string | null {
+  const open = pendingPress(state);
+  return open ? block("press", describePendingPress(state), ` id="${open.id}"`) : null;
+}
+
+function approachBlock(state: GameState): string | null {
+  const open = pendingApproach(state);
+  return open ? block("approach", describePendingApproach(state), ` id="${open.id}"`) : null;
+}
+
+/** 시간이 흘렀다 — 손잡이로 넘긴 턴에만 붙는 덩어리. 재직·무직 스냅샷이 같이 쓴다 */
 function timePassedLine(state: GameState, passed?: TimePassed | null): string | null {
   if (!passed || (passed.digest.length === 0 && passed.from === state.date)) return null;
-  return [
-    `시간이 흘렀다: ${passed.from} → ${state.date} (${passed.stopped}) — 장면은 ${state.date}에서 연다.`,
+  return lines(
+    `${passed.from} → ${state.date} (${passed.stopped}) — 장면은 ${state.date}에서 연다.`,
     passed.digest.length > 0
-      ? `그 사이 벌어진 일:\n${passed.digest.map((d) => `- ${d}`).join("\n")}`
+      ? passed.digest.map((d) => `- ${d}`).join("\n")
       : `그 사이 특별한 일은 없었다.`,
-  ].join("\n");
+  );
 }
 
 /**
@@ -343,46 +377,65 @@ function managerContractLine(state: GameState): string | null {
 function buildUnemployedNote(state: GameState, passed?: TimePassed | null): string {
   const card = state.dismissal;
   const offers = openManagerOffers(state);
-  const lines = [
-    `<snapshot>`,
-    `${state.date} (${DOW_KO[dayOfWeek(state.date)]}) ${formatClock(clockOf(state))} · 시즌 ${state.season} · ${describeWindowState(state)}`,
-    // 팀의 도구가 막힌다는 말은 싣지 않는다 — 코어가 부르는 자리에서 막는다 (prompts.md §5-3)
-    `감독 ${state.manager.name}은(는) 무직이다 — 맡은 팀이 없다.`,
-    card
-      ? `${card.kind === "expired" ? "계약 만료" : "경질"}: ${card.on} ${teamName(card.teamId)}${
-          card.expectation && card.position
-            ? ` — 기대 ${card.expectation}(${card.target}위)에 최종 ${card.position}위`
-            : card.reason
-              ? ` — ${card.reason}`
-              : ""
-        }`
-      : null,
-    `평판: 보드${state.manager.reputation.board} 미디어${state.manager.reputation.media} 선수단${state.manager.reputation.squad}`,
-    offers.length > 0
-      ? `받은 감독직 제안:\n${offers
-          .map(
-            (o) =>
-              `- ${o.id} · ${teamName(o.teamId)} (${o.tier}티어) · 기대 ${o.expectation}(${o.target}위)${
-                o.position ? ` · 현재 ${o.position}위` : ""
-              }${o.salary ? ` · 연봉 ${formatMoney(o.salary)}·${o.years ?? "-"}년·이적 예산 약속 ${formatMoney(o.budgetPledge ?? 0)}` : ""}${
-                o.counteredOn ? " · 흥정은 끝났다 — 수락 여부만 남았다" : ""
-              } · ${o.expiresOn}까지`,
-          )
-          .join("\n")}`
-      : `받은 감독직 제안 없음.`,
-    (state.managerVacancies ?? []).length > 0
-      ? `최근 공석 (경질 뒤 14일 안):\n${(state.managerVacancies ?? [])
-          .map(
-            (v) =>
-              `- ${teamName(v.teamId)}${v.position ? ` · 현재 ${v.position}위` : ""} · ${v.on} 공석`,
-          )
-          .join("\n")}`
-      : null,
-    timePassedLine(state, passed),
-  ].filter((x): x is string => x !== null);
+  const vacancies = state.managerVacancies ?? [];
   const recent = recentNarrativeLines(state);
-  if (recent.length > 0) lines.push(`최근 사건: ${recent.join(" / ")}`);
-  return [...lines, `</snapshot>`].join("\n");
+  return [
+    `<snapshot>`,
+    block(
+      "now",
+      lines(
+        `${state.date} (${DOW_KO[dayOfWeek(state.date)]}) ${formatClock(clockOf(state))} · 시즌 ${state.season} · ${describeWindowState(state)}`,
+        // 팀의 도구가 막힌다는 말은 싣지 않는다 — 코어가 부르는 자리에서 막는다 (prompts.md §5-3)
+        `감독 ${state.manager.name}은(는) 무직이다 — 맡은 팀이 없다.`,
+        card
+          ? `${card.kind === "expired" ? "계약 만료" : "경질"}: ${card.on} ${teamName(card.teamId)}${
+              card.expectation && card.position
+                ? ` — 기대 ${card.expectation}(${card.target}위)에 최종 ${card.position}위`
+                : card.reason
+                  ? ` — ${card.reason}`
+                  : ""
+            }`
+          : null,
+      ),
+    ),
+    block(
+      "manager",
+      `평판: 보드${state.manager.reputation.board} 미디어${state.manager.reputation.media} 선수단${state.manager.reputation.squad}`,
+    ),
+    // 제안이 없는 것도 무직에겐 사실이다 — 기다리는 중인지 고를 자리가 있는지가 갈린다
+    block(
+      "job_offers",
+      offers.length > 0
+        ? offers
+            .map(
+              (o) =>
+                `- ${o.id} · ${teamName(o.teamId)} (${o.tier}티어) · 기대 ${o.expectation}(${o.target}위)${
+                  o.position ? ` · 현재 ${o.position}위` : ""
+                }${o.salary ? ` · 연봉 ${formatMoney(o.salary)}·${o.years ?? "-"}년·이적 예산 약속 ${formatMoney(o.budgetPledge ?? 0)}` : ""}${
+                  o.counteredOn ? " · 흥정은 끝났다 — 수락 여부만 남았다" : ""
+                } · ${o.expiresOn}까지`,
+            )
+            .join("\n")
+        : `받은 제안 없음.`,
+    ),
+    block(
+      "vacancies",
+      vacancies.length > 0
+        ? lines(
+            `경질 뒤 14일 안:`,
+            ...vacancies.map(
+              (v) =>
+                `- ${teamName(v.teamId)}${v.position ? ` · 현재 ${v.position}위` : ""} · ${v.on} 공석`,
+            ),
+          )
+        : null,
+    ),
+    block("time_passed", timePassedLine(state, passed)),
+    block("recent", recent.length > 0 ? recent.map((r) => `- ${r}`).join("\n") : null),
+    `</snapshot>`,
+  ]
+    .filter((x): x is string => x !== null)
+    .join("\n");
 }
 
 /**
@@ -443,7 +496,7 @@ function offseasonFacts(state: GameState): string | null {
   if (!onSummerBreak(state.calendar, state.date)) return null;
   const facts = [...retirementFacts(state), ...awardFacts(state)];
   if (facts.length === 0) return null;
-  return `오프시즌 사실 (지난 시즌이 닫히며 남은 것 — 자리를 어떻게 열지, 누가 무슨 말을 하는지는 네가 정한다):\n${facts
+  return `지난 시즌이 닫히며 남은 것 — 자리를 어떻게 열지, 누가 무슨 말을 하는지는 네가 정한다:\n${facts
     .map((f) => `- ${f}`)
     .join("\n")}`;
 }
@@ -511,119 +564,121 @@ export function buildGmStateNote(
     })(),
   ].filter((x): x is string => x !== null);
 
-  const lines = [
-    `<snapshot>`,
-    `${state.date} (${DOW_KO[dayOfWeek(state.date)]}) ${formatClock(clockOf(state))} · 시즌 ${state.season}${
-      played > 0 && rank > 0 ? ` · 리그 ${rank}위` : ""
-    } · ${describeWindowState(state)}`,
-    describeNextFixture(state),
-    // 6축 슬라이더는 싣지 않는다 — 화자가 입에 담지 않는 수치이고 `get_squad`가
-    // 배치와 함께 낸다. 모양과 적응도는 코치의 말에 그대로 실린다
-    `전술: ${tac.formation} · 선발 평균 적응 ${Math.round(squadFamiliarity(state, state.userTeamId))}`,
-    `재정: 잔고 ${formatMoney(finance.balance)} · 주급 ${formatMoney(weeklyWagesOf(state, state.userTeamId))}/주 · 이적예산 ${formatMoney(finance.transferBudget)}`,
-    // 감독의 수치는 캐시 밖이다 — 평판은 경기마다 움직이고 능력도 자란다.
-    // 레퍼런스(감독 프로필)엔 이름·배경만 남는다
-    `감독 ${state.manager.name}: 리더십${state.manager.attributes.leadership} 전술${state.manager.attributes.tactics} 훈련${state.manager.attributes.training} 협상${state.manager.attributes.negotiation} 분석${state.manager.attributes.analysis} · 평판 보드${state.manager.reputation.board} 미디어${state.manager.reputation.media} 선수단${state.manager.reputation.squad}`,
-    // 감독 자신의 계약 — 재계약 제안은 **답할 자리**라 스냅샷에 서야 한다 (career.md §5.4)
-    managerContractLine(state),
-    // 부임 직후엔 선수단이 여름 휴가 중 — 소집일을 밝혀야 빈 훈련장을 지어내지 않는다
-    state.date < squadReturnOf(state.calendar)
-      ? `선수단 여름 휴가 중 — ${squadReturnOf(state.calendar)} 소집`
-      : trainingCount > 0
-        ? `예정 훈련 ${trainingCount}건: ${training.join(" / ")}${trainingCount > training.length ? " …" : ""}`
-        : `예정 훈련 없음 — 기본 훈련까지 비워진 상태다`,
-    alerts.length > 0 ? `주의: ${alerts.join(" · ")}` : `주의: 없음`,
-    /**
-     * 선수단 — **인원과 주장뿐이다.** 마흔 명 남짓의 이름은 캐시가 걸리지 않는 이
-     * 층의 절반을 혼자 먹고, 그 값을 조회가 이미 낸다 (agents.md §5·§7).
-     *
-     * 주장은 남는다 — 팀 토크와 라커룸 장면이 그 한 사람을 두고 서고, 누구인지
-     * 모르면 GM이 아무나 세운다. 나머지 이름을 내보내는 자리는 아래 「선수 근황」과
-     * 조회다. ⚠️ 도구 이름을 적지 않는다 — 데이터 블록에는 사실만 (prompts.md §5-3).
-     */
-    (() => {
-      const count = (level: "first" | "reserve") =>
-        players.filter((p) => squadLevelOf(p) === level).length;
-      const reserve = count("reserve");
-      const captain = players.find((p) => p.isCaptain);
-      return (
-        `선수단 ${players.length}명 (1군 ${count("first")}${reserve > 0 ? ` · 2군 ${reserve}` : ""})` +
-        (captain ? ` · 주장 ${captain.name}` : "")
-      );
-    })(),
-    // 선수 근황 — 위 이름들 중 **사실이 붙는** 셋이다.
-    // 코어는 사실만 낸다(speakerCues) — 누가 말할지, 무슨 말을 할지는 GM의 몫
-    (() => {
-      const cues = speakerCues(state);
-      return cues.length > 0
-        ? `선수 근황: ${cues.map((c) => `${c.name} ${c.fact}`).join(" · ")}`
-        : null;
-    })(),
-    matchDigest(state),
-    // 오프시즌 — 은퇴와 시상. 소집 전에만 서고, 없으면 한 줄도 쓰지 않는다
-    offseasonFacts(state),
-  ].filter((x): x is string => x !== null && x !== "");
-  // 그 사이 벌어진 일 — 손잡이로 시간을 넘긴 턴에만. 없으면 모델이 넘긴 구간의
-  // 일(부상·오퍼)을 모른 채 장면을 쓴다
-  const passedLine = timePassedLine(state, passed);
-  if (passedLine) lines.push(passedLine);
-  /**
-   * 도착한 스카우트 보고서 — **이번 턴에 화면 카드로 서는 그것들이다.**
-   *
-   * 카드는 모델이 장면을 쓴 뒤에 붙어 프롬프트에 가지 않는다. 그래서 값이 여기
-   * 없으면 모델은 카드 옆에서 금액을 지어내고, 한 화면이 두 말을 한다
-   * (agents.md §6). 줄은 카드와 같은 함수에서 나온다 — `scoutReportLine`.
-   */
-  if (arrivedReports.length > 0) {
-    lines.push(
-      `도착한 스카우트 보고서:\n${arrivedReports
-        .map((c) => `- ${scoutReportLine(state, c.playerId) ?? c.name}`)
-        .join("\n")}`,
-    );
-  }
-  /**
-   * 경기 뒤 들어온 소식 — 재정과 같은 라운드의 다른 경기·대진.
-   *
-   * 알림(대회 말풍선)에는 싣지 않는 갈래다(화면이 이미 갖고 있다). 그래도 모델은
-   * 알아야 한다 — 순위가 뒤집힌 걸 모른 채 다음 장면을 쓰면 세계가 감독의 경기
-   * 하나로 멈춘 것처럼 읽힌다. 읽기만 하고 비우지 않는다 (`takeNews`는 gm.ts).
-   */
-  const news = state.pendingNews ?? [];
-  if (news.length > 0) {
-    lines.push(`경기 뒤 들어온 소식:\n${news.map((n) => `- ${n}`).join("\n")}`);
-  }
-  // 채팅 턴 없는 화면 조작(전술판·명단·역할) — 이미 반영된 사실이라 모델은 반응만 한다
-  const edits = state.pendingEdits ?? [];
-  if (edits.length > 0) {
-    lines.push(`감독이 화면에서 바꾼 것:\n${edits.map((e) => `- ${e.text}`).join("\n")}`);
-  }
-  // 답을 기다리는 기자회견 — 이 줄이 없으면 모델은 회견이 열린 사실 자체를 모른다
-  const press = describePendingPress(state);
-  if (press) lines.push(press);
-  // 감독을 찾아온 사람 — 세계가 먼저 연 자리다 (people.md §8). 회견과 함께 서지 않는다
-  const approach = describePendingApproach(state);
-  if (approach) lines.push(approach);
-  /**
-   * 감독이 보드에 건 요청 — 답을 기다리는 것·공사 중인 구장·열려 있는 주급 상향
-   * (finance.md §9.6). 없으면 한 줄도 쓰지 않는다. 답이 도착한 날은 digest가 나른다.
-   */
-  const boardRequests = describeBoardRequests(state);
-  if (boardRequests) lines.push(boardRequests);
-  // 협상은 있을 때만 — 없으면 한 줄도 쓰지 않는다 (매 턴 정가로 읽히는 블록이다)
+  const cues = speakerCues(state);
+  const offseason = offseasonFacts(state);
   const negotiations = describeNegotiations(state);
-  if (!negotiations.startsWith("진행 중인 협상 없음")) {
-    lines.push(`협상:\n${negotiations}`);
-  }
-  // 쓸 수 있는 되사기 권리 — 이 줄이 없으면 모델은 그 자리가 있는 줄도 모른다
-  const buyBacks = describeBuyBackRights(state);
-  if (buyBacks) lines.push(`행사할 수 있는 되사기 조항:\n${buyBacks}`);
-  // 활성 서사 아크 — 닫힐 때까지 매 턴 실려 GM이 시즌을 가로지르는 흐름을 잃지 않는다
-  // (people.md §9). 개폐도 사실 줄도 코어의 것이다
-  const arcs = describeActiveArcs(state);
-  if (arcs) lines.push(`이어지는 이야기:\n${arcs}`);
   const recent = recentNarrativeLines(state);
-  if (recent.length > 0) lines.push(`최근 사건: ${recent.join(" / ")}`);
-  return [...lines, `</snapshot>`].join("\n");
+  const edits = state.pendingEdits ?? [];
+  const news = state.pendingNews ?? [];
+
+  return [
+    `<snapshot>`,
+    block(
+      "now",
+      lines(
+        `${state.date} (${DOW_KO[dayOfWeek(state.date)]}) ${formatClock(clockOf(state))} · 시즌 ${state.season}${
+          played > 0 && rank > 0 ? ` · 리그 ${rank}위` : ""
+        } · ${describeWindowState(state)}`,
+        describeNextFixture(state),
+        // 부임 직후엔 선수단이 여름 휴가 중 — 소집일을 밝혀야 빈 훈련장을 지어내지 않는다
+        state.date < squadReturnOf(state.calendar)
+          ? `선수단 여름 휴가 중 — ${squadReturnOf(state.calendar)} 소집`
+          : trainingCount > 0
+            ? `예정 훈련 ${trainingCount}건: ${training.join(" / ")}${trainingCount > training.length ? " …" : ""}`
+            : `예정 훈련 없음 — 기본 훈련까지 비워진 상태다`,
+      ),
+    ),
+    block(
+      "club",
+      lines(
+        // 6축 슬라이더는 싣지 않는다 — 화자가 입에 담지 않는 수치이고 `get_squad`가
+        // 배치와 함께 낸다. 모양과 적응도는 코치의 말에 그대로 실린다
+        `전술: ${tac.formation} · 선발 평균 적응 ${Math.round(squadFamiliarity(state, state.userTeamId))}`,
+        `재정: 잔고 ${formatMoney(finance.balance)} · 주급 ${formatMoney(weeklyWagesOf(state, state.userTeamId))}/주 · 이적예산 ${formatMoney(finance.transferBudget)}`,
+        /**
+         * 선수단 — **인원과 주장뿐이다.** 마흔 명 남짓의 이름은 캐시가 걸리지 않는 이
+         * 층의 절반을 혼자 먹고, 그 값을 조회가 이미 낸다 (agents.md §5·§7).
+         *
+         * 주장은 남는다 — 팀 토크와 라커룸 장면이 그 한 사람을 두고 서고, 누구인지
+         * 모르면 GM이 아무나 세운다. 나머지 이름을 내보내는 자리는 `<cues>`와 조회다.
+         * ⚠️ 도구 이름을 적지 않는다 — 데이터 블록에는 사실만 (prompts.md §5-3).
+         */
+        (() => {
+          const count = (level: "first" | "reserve") =>
+            players.filter((p) => squadLevelOf(p) === level).length;
+          const reserve = count("reserve");
+          const captain = players.find((p) => p.isCaptain);
+          return (
+            `선수단 ${players.length}명 (1군 ${count("first")}${reserve > 0 ? ` · 2군 ${reserve}` : ""})` +
+            (captain ? ` · 주장 ${captain.name}` : "")
+          );
+        })(),
+      ),
+    ),
+    block(
+      "manager",
+      lines(
+        // 감독의 수치는 캐시 밖이다 — 평판은 경기마다 움직이고 능력도 자란다.
+        // 레퍼런스(감독 프로필)엔 이름·배경만 남는다
+        `${state.manager.name}: 리더십${state.manager.attributes.leadership} 전술${state.manager.attributes.tactics} 훈련${state.manager.attributes.training} 협상${state.manager.attributes.negotiation} 분석${state.manager.attributes.analysis}`,
+        `평판: 보드${state.manager.reputation.board} 미디어${state.manager.reputation.media} 선수단${state.manager.reputation.squad}`,
+        // 감독 자신의 계약 — 재계약 제안은 **답할 자리**라 스냅샷에 서야 한다 (career.md §5.4)
+        managerContractLine(state),
+      ),
+    ),
+    // 한 줄에 하나 — 이어 붙이면 일곱 항목이 가운뎃점 사이에 묻힌다
+    block("alerts", alerts.join("\n")),
+    // 선수 근황 — 선수단 중 **사실이 붙는** 셋이다.
+    // 코어는 사실만 낸다(speakerCues) — 누가 말할지, 무슨 말을 할지는 GM의 몫
+    block("cues", cues.map((c) => `- ${c.name} ${c.fact}`).join("\n")),
+    block("last_match", matchDigest(state)),
+    // 오프시즌 — 은퇴와 시상. 소집 전에만 서고, 없으면 한 줄도 쓰지 않는다
+    block("offseason", offseason),
+    // 그 사이 벌어진 일 — 손잡이로 시간을 넘긴 턴에만. 없으면 모델이 넘긴 구간의
+    // 일(부상·오퍼)을 모른 채 장면을 쓴다
+    block("time_passed", timePassedLine(state, passed)),
+    /**
+     * 도착한 스카우트 보고서 — **이번 턴에 화면 카드로 서는 그것들이다.**
+     *
+     * 카드는 모델이 장면을 쓴 뒤에 붙어 프롬프트에 가지 않는다. 그래서 값이 여기
+     * 없으면 모델은 카드 옆에서 금액을 지어내고, 한 화면이 두 말을 한다
+     * (agents.md §6). 줄은 카드와 같은 함수에서 나온다 — `scoutReportLine`.
+     */
+    block(
+      "scout_reports",
+      arrivedReports.map((c) => `- ${scoutReportLine(state, c.playerId) ?? c.name}`).join("\n"),
+    ),
+    /**
+     * 경기 뒤 들어온 소식 — 재정과 같은 라운드의 다른 경기·대진.
+     *
+     * 알림(대회 말풍선)에는 싣지 않는 갈래다(화면이 이미 갖고 있다). 그래도 모델은
+     * 알아야 한다 — 순위가 뒤집힌 걸 모른 채 다음 장면을 쓰면 세계가 감독의 경기
+     * 하나로 멈춘 것처럼 읽힌다. 읽기만 하고 비우지 않는다 (`takeNews`는 gm.ts).
+     */
+    block("news", news.map((n) => `- ${n}`).join("\n")),
+    // 채팅 턴 없는 화면 조작(전술판·명단·역할) — 이미 반영된 사실이라 모델은 반응만 한다
+    block("edits", edits.map((e) => `- ${e.text}`).join("\n")),
+    // 답을 기다리는 기자회견 — 이 덩어리가 없으면 모델은 회견이 열린 사실 자체를 모른다
+    pressBlock(state),
+    // 감독을 찾아온 사람 — 세계가 먼저 연 자리다 (people.md §8). 회견과 함께 서지 않는다
+    approachBlock(state),
+    /**
+     * 감독이 보드에 건 요청 — 답을 기다리는 것·공사 중인 구장·열려 있는 주급 상향
+     * (finance.md §9.6). 답이 도착한 날은 `<time_passed>`가 나른다.
+     */
+    block("board", describeBoardRequests(state)),
+    // 협상은 있을 때만 — 매 턴 정가로 읽히는 블록이다
+    block("negotiations", negotiations.startsWith("진행 중인 협상 없음") ? null : negotiations),
+    // 쓸 수 있는 되사기 권리 — 이 덩어리가 없으면 모델은 그 자리가 있는 줄도 모른다
+    block("buybacks", describeBuyBackRights(state)),
+    // 활성 서사 아크 — 닫힐 때까지 매 턴 실려 GM이 시즌을 가로지르는 흐름을 잃지 않는다
+    // (people.md §9). 개폐도 사실 줄도 코어의 것이다
+    block("arcs", describeActiveArcs(state)),
+    block("recent", recent.map((r) => `- ${r}`).join("\n")),
+    `</snapshot>`,
+  ]
+    .filter((x): x is string => x !== null)
+    .join("\n");
 }
 
 /**

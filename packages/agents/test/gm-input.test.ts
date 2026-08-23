@@ -292,12 +292,12 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
   it("선수 근황을 한 줄로 싣는다 — 이름을 내보내는 자리가 부상·불만뿐이면 같은 선수만 말한다", () => {
     const state = game();
     for (const p of userPlayers(state)) p.state.form = 0;
-    expect(buildGmStateNote(state)).not.toContain("선수 근황");
+    expect(buildGmStateNote(state)).not.toContain("<cues>");
 
     const target = userPlayers(state).find((p) => p.squadLevel === "first")!;
     target.state.form = 0.9;
     const note = buildGmStateNote(state);
-    expect(note).toContain("선수 근황");
+    expect(note).toContain("<cues>");
     expect(note).toContain(target.name);
   });
 
@@ -320,11 +320,11 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
 
     const card = scoutReportCard(state, target.id)!;
     const note = buildGmStateNote(state, null, [card]);
-    expect(note).toContain("도착한 스카우트 보고서");
+    expect(note).toContain("<scout_reports>");
     expect(note).toContain(formatMoney(card.marketValue));
     expect(note).toContain(formatMoney(card.wageExpectation));
     // 실리지 않은 턴에는 한 줄도 쓰지 않는다 — 매 턴 정가로 읽히는 블록이다
-    expect(buildGmStateNote(state)).not.toContain("도착한 스카우트 보고서");
+    expect(buildGmStateNote(state)).not.toContain("<scout_reports>");
   });
 
   /**
@@ -352,18 +352,18 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
       },
     ];
     const note = buildGmStateNote(state);
-    expect(note).toContain("오프시즌 사실");
+    expect(note).toContain("<offseason>");
     expect(note).toContain(awardTitle("top-scorer"));
     expect(note).toContain(winner.name);
 
     // 소집일이 지나면 블록 자체가 사라진다 — 오프시즌의 자리는 오프시즌에 있다
     state.date = squadReturnOf(state.calendar);
-    expect(buildGmStateNote(state)).not.toContain("오프시즌 사실");
+    expect(buildGmStateNote(state)).not.toContain("<offseason>");
 
     // 이번 시즌의 상은 아직 없다 — 시즌을 한 칸 잘못 세면 여기서 걸린다
     state.date = state.calendar.preseasonStart;
     state.awards[0]!.season = state.season;
-    expect(buildGmStateNote(state)).not.toContain("오프시즌 사실");
+    expect(buildGmStateNote(state)).not.toContain("<offseason>");
   });
 
   it("날짜가 흐르면 내용이 바뀐다 (캐시 밖에 있어야 하는 이유)", () => {
@@ -1061,13 +1061,14 @@ describe("시간 이동 손잡이", () => {
       stopped: "요청한 만큼 진행했다",
       digest: ["훈련 중 부상: 손흥민 — 햄스트링, 약 12일 결장 예상"],
     });
-    expect(note).toContain("시간이 흘렀다: 2026-07-01");
+    expect(note).toContain("<time_passed>");
+    expect(note).toContain("2026-07-01 → ");
     expect(note).toContain("햄스트링");
   });
 
   it("손잡이를 누르지 않은 턴에는 그 블록이 없다", () => {
     const state = game();
-    expect(buildGmStateNote(state)).not.toContain("시간이 흘렀다");
+    expect(buildGmStateNote(state)).not.toContain("<time_passed>");
   });
 });
 
