@@ -204,6 +204,12 @@ export function FinanceView({ finance }: { finance: OfficeViews["finance"] }) {
             {finance.stadium.name} {finance.stadium.capacity.toLocaleString("en-US")}석
           </div>
         </div>
+        {/* 티켓은 £ 단위 그대로다 — `formatMoney`의 천/백만 눈금은 표 한 장을 £0k로 적는다 */}
+        <div className="fin-stat">
+          <div className="label">티켓 단가</div>
+          <div className="value">£{Math.round(finance.ticket.price)}</div>
+          <div className="sub">기준가 £{Math.round(finance.ticket.base)}</div>
+        </div>
       </div>
 
       <div className="section-title">재정 활동</div>

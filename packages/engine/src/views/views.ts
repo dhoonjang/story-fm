@@ -51,6 +51,7 @@ import {
   monthOf,
   psrStatus,
   seasonWageRatio,
+  ticketPriceOf,
   userReports,
   wageRatioTone,
   type WageRatioTone,
@@ -1030,6 +1031,11 @@ export interface OfficeViews {
      */
     boardExpectation: { target: number; label: string };
     stadium: { name: string; capacity: number };
+    /**
+     * **감독이 매긴 티켓 값과 기준가** (finance.md §5.2) — 기준가와 나란히 서야
+     * 지금 값이 비싼지 싼지 읽힌다. 기준가는 리그 평균가에 리그 폭이 걸린 값이다.
+     */
+    ticket: { price: number; base: number };
     /** 급여 비중 — **시즌 누계** (급여 ÷ 매출). 한 달만 보면 프리시즌에 튄다 */
     wageRatio: number;
     /** 시즌 누계 비중이 선 구간 — 경계는 `finance.ts` */
@@ -2479,6 +2485,10 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         return { target: be.target, label: boardExpectationText(be.code, be.target) };
       })(),
       stadium: { name: stadium.stadium, capacity: stadium.capacity },
+      ticket: (() => {
+        const { price, base } = ticketPriceOf(state, userTeamId);
+        return { price, base };
+      })(),
       // 시즌 누계 기준 — 한 달만 보면 프리시즌에 100%를 넘어 무의미하다
       wageRatio: seasonWageRatio(state),
       wageTone: wageRatioTone(seasonWageRatio(state)),
