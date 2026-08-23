@@ -2105,17 +2105,141 @@ textarea {
  * 그 이동이 폭 하나의 변화가 되어 그대로 미끄러진다.
  */
 .stage-split.panel-split {
+  /**
+   * **갈리는 자리는 값 하나다.** `--split`은 오른쪽 칸이 가져가는 몫이고, 두 칸
+   * 사이의 손잡이(`stage-split-handle.tsx`)가 끄는 대로 `--split-user`만 갱신한다.
+   * 반반을 전제하고 `50%`를 박아 두던 자리들 — 가라앉은 대화의 덮개, 전술판 서랍과
+   * 그 밑막이 — 도 모두 이 값을 되묻는다. 두 벌로 적으면 끄는 동안 어긋난다.
+   *
+   * 손잡이가 쓰는 것이 `--split`이 아니라 `--split-user`인 이유는 **되돌릴 수
+   * 있어야** 해서다: 인라인 스타일은 어떤 규칙보다 세서, 감독이 정한 비율을 좁은
+   * 화면에서 반반으로 돌리려면(아래 `--bp-md` 미만) 그 값이 한 겹 아래 있어야 한다.
+   */
+  --split: var(--split-user, 50%);
+  /**
+   * 양쪽 칸이 아무리 좁아져도 남기는 폭 — **트랙이 직접 지킨다.** 손잡이의
+   * 자바스크립트만 조이면 창을 줄였을 때 넓은 화면에서 정한 비율이 그대로 얹혀
+   * 한쪽이 눌린다. 무대가 이 값의 두 배도 안 되는 폭에서는 반반이 곧 최소다.
+   * (손잡이도 이 값을 읽어 같은 자리에서 멈춘다 — 숫자는 여기 한 번만 선다.)
+   */
+  --split-min: 400px;
   /* 두 트랙의 **꼴이 같아야** 폭이 보간된다 — 한쪽만 `0fr`로 적으면 이어지지
-     않고 툭 끊긴다 (minmax()와 단일 flex는 서로 다른 값으로 친다) */
-  grid-template-columns: minmax(0, 1fr) minmax(0, 0fr);
+     않고 툭 끊긴다 (minmax()와 단일 flex는 서로 다른 값으로 친다). `fr`가 아니라
+     백분율인 이유는 `--split`이 폭이면서 동시에 **자리**(덮개의 오른쪽 변, 서랍이
+     붙는 변)이기도 해서다 — `fr`로는 그 자리를 말할 수 없다 */
+  grid-template-columns: minmax(0, 100%) minmax(0, 0%);
   transition: grid-template-columns var(--panel-anim) var(--ease-panel);
+  /* 두 칸을 합친 폭의 상한 — 초광폭 화면에서 끝까지 벌어지면 채팅과 판 사이를
+     오가는 시선 이동만 커진다. 남는 폭은 양옆으로 갈라 가운데에 세운다 */
+  width: 100%;
+  max-width: 1520px;
+  margin-inline: auto;
 }
 .stage-split.panel-split.open {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns:
+    minmax(min(var(--split-min), 50%), calc(100% - var(--split)))
+    minmax(min(var(--split-min), 50%), var(--split));
 }
-/** 읽는 폭은 넓은 화면에서도 그대로 — 반쪽이 780을 넘으면 가운데로 모은다 */
+/**
+ * ⚠️ **두 칸의 자리는 적어 둔다.** 자동 배치는 자리를 못박은 것(손잡이)을 먼저
+ * 놓고 나머지를 순서대로 채우는데, 손잡이가 둘째 칸을 이미 쥐고 있으므로 오른쪽
+ * 칸이 **아래 줄로 밀린다** — 무대가 두 줄이 되어 채팅과 명단이 위아래로 갈렸다.
+ */
 .stage-split.panel-split > .chat-pane {
-  max-width: 780px;
+  grid-area: 1 / 1;
+}
+.stage-split.panel-split > .stage-right {
+  grid-area: 1 / 2;
+}
+/**
+ * 끌 수 없는 폭에서는 **반반으로 돌아간다.** 넓은 화면에서 정한 비율이 좁은
+ * 화면에 그대로 얹히면 한쪽이 손댈 수 없게 눌리는데, 거기엔 되돌릴 손잡이가 없다.
+ */
+@media (max-width: 1023px) {
+  .stage-split.panel-split {
+    --split: 50%;
+  }
+}
+/**
+ * ── 두 칸 사이의 손잡이 ─────────────────────────────────────
+ *
+ * **격자의 둘째 칸에 세운다.** 무대를 기준으로 `left`를 따로 계산해 두면 경계가
+ * 두 군데(트랙과 손잡이)에 적히고, 끄는 동안 그 둘이 어긋난다. 칸 안에서 왼쪽
+ * 변에 붙여 두면 자리는 격자가 정하므로 어긋날 데가 없다.
+ *
+ * ⚠️ `grid-row: 1`을 적어야 한다 — 셋째 자식이 자동 배치되면 무대 아래에 없던
+ * 줄이 하나 생기고 두 칸이 그만큼 짧아진다.
+ */
+.split-handle {
+  grid-row: 1;
+  grid-column: 2;
+  justify-self: start;
+  /* 손이 닿는 폭은 9px, 보이는 것은 그 가운데 한 자국이다 — 칸의 테두리에 겹친다 */
+  width: 9px;
+  margin-left: -5px;
+  /* 서랍(20)·밑막이(25)·그 위에 서는 것들(30)보다 위 — 판이 얹힌 동안에도 잡힌다 */
+  z-index: 35;
+  /* 두 칸이 나란히 설 때만 선다 — 아래 `--split-live`가 켠다 */
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: col-resize;
+  /* 끄는 동안 화면이 따라 스크롤되지 않게 */
+  touch-action: none;
+}
+/* 잡을 수 있다는 것은 **생김새가** 말한다 — 칸을 가르는 테두리와 다른 짧은 자국 */
+.split-handle::after {
+  content: "";
+  width: 3px;
+  height: 36px;
+  border-radius: 2px;
+  background: var(--dim);
+  transition: background 120ms ease-out;
+}
+.split-handle:hover::after,
+.split-handle:focus-visible::after {
+  background: var(--accent);
+}
+.split-handle:focus-visible {
+  outline: none;
+}
+/**
+ * ── 손잡이가 서는 폭 ───────────────────────────────────────
+ *
+ * 경계를 끌 수 있는 것은 **두 칸이 실제로 나란히 설 때**뿐이다. 그 아래에서는
+ * 장부가 채팅을 덮거나(1200px 미만) 반반이 이미 최소 폭이라 나눌 경계가 없다.
+ * 갈리는 폭은 서랍(`--drawer`)과 같은 이유로 둘이다 — 경기 판은 `--bp-md`부터
+ * 채팅 옆에 서고, 장부는 `--bp-lg`부터다.
+ */
+@media (min-width: 1024px) {
+  .stage-split.panel-split.with-board.open {
+    --split-live: 1;
+  }
+}
+@media (min-width: 1200px) {
+  .stage-split.panel-split.with-ledger.open {
+    --split-live: 1;
+  }
+}
+@container style(--split-live: 1) {
+  .split-handle {
+    display: flex;
+  }
+  /**
+   * 읽는 폭의 상한은 **감독이 끌었을 때만 열린다.** 1520 상한 아래에서 반반이면
+   * 채팅 칸이 760이라 780에 애초에 닿지 않는다 — 780을 그대로 두면 채팅 쪽으로
+   * 끌어도 글줄은 그대로고 여백만 넓어져, 끄는 일이 아무것도 하지 않은 것처럼
+   * 보인다. 그래서 끌 수 있는 폭에서만 1000까지 연다(한국어 15px에서 한 줄 60자쯤).
+   * 그 위는 열지 않는다 — 그때부터는 줄이 길어 눈이 다음 줄 머리를 놓친다.
+   */
+  .panel-split > .chat-pane {
+    max-width: 1000px;
+  }
+}
+.stage-split.panel-split > .chat-pane {
   /* 판이 얹히고 걷힐 때 대화가 가라앉았다 떠오른다 — 아래 `board-open`이 값을 준다 */
   transition: opacity var(--panel-anim) var(--ease-panel);
 }
@@ -2168,14 +2292,14 @@ textarea {
  *
  * 서랍 밖을 눌러 닫는 것은 오버레이의 몸에 밴 몸짓이라 안내 문구가 필요 없다.
  *
- * ⚠️ **채팅 칸만 덮는다**(`right: 50%`). 무대를 통째로 덮었더니 오른쪽 칸에서
+ * ⚠️ **채팅 칸만 덮는다**(오른쪽 변이 곧 `--split`). 무대를 통째로 덮었더니 오른쪽 칸에서
  * 명단 바깥에 선 것들(우리 팀·상대 팀 책갈피)까지 손이 닿지 않았다 — 그것들은
  * `.squad-head`가 아니라 그 위 탭 줄에 있어 위로 끌어올려지지 않는다.
  * 서랍(20)보다는 아래라, 손이 닿는 곳은 정확히 **가라앉은 채팅 띠**뿐이다.
  */
 .board-scrim {
   position: absolute;
-  inset: 0 50% 0 0;
+  inset: 0 var(--split) 0 0;
   z-index: 15;
   /* 서랍이 설 수 없는 폭에서는 없는 것과 같다 — 아래 컨테이너 질의가 켠다 */
   display: none;
@@ -2209,13 +2333,14 @@ textarea {
    *
    * 그래서 오른쪽 칸 **전체를 덮는 판 한 장**을 깐다. 이 겹(25) 위에 보여야 할
    * 것들만 올리면(30) 틈이 생길 수 없다. `.stage-right`가 정적이라 이 가짜 요소의
-   * 기준은 무대(`.stage-split`)이고, 그래서 `left: 50%`가 곧 오른쪽 칸이다
-   * (덕분에 칸의 `overflow: hidden`에도 잘리지 않는다 — 서랍과 같은 이유).
+   * 기준은 무대(`.stage-split`)이고, 그래서 왼쪽 변을 `100% - --split`에 두면 그것이
+   * 곧 오른쪽 칸이다 (덕분에 칸의 `overflow: hidden`에도 잘리지 않는다 — 서랍과
+   * 같은 이유). 경계가 끌리면 이 판도 함께 따라온다.
    */
   .board-open .stage-right::before {
     content: "";
     position: absolute;
-    inset: 0 0 0 50%;
+    inset: 0 0 0 calc(100% - var(--split));
     z-index: 25;
     background: var(--bg);
     /* 덮개가 아니라 바탕이다 — 명단은 그대로 손에 닿아야 한다 */
@@ -2235,15 +2360,17 @@ textarea {
   /**
    * **명단에 붙는 서랍** — 오버레이 사이드바다.
    *
-   * `right: 50%`가 명단 패널의 왼쪽 변이고 거기에 딱 붙는다. 위아래는 무대를
-   * 꽉 채운다 — 사이드바는 높이를 나누지 않는다. 폭은 채팅 칸(무대의 절반)의
-   * **8할**이라, 남는 2할에 가라앉은 대화가 계속 보인다: 판이 잠깐 그 위에
-   * 나와 있을 뿐이고 접으면 돌아갈 자리라는 것이 그 띠로 읽힌다.
+   * `--split`이 명단 패널의 왼쪽 변이고 거기에 딱 붙는다. 위아래는 무대를
+   * 꽉 채운다 — 사이드바는 높이를 나누지 않는다. 폭은 **채팅 칸의 8할**이라,
+   * 남는 2할에 가라앉은 대화가 계속 보인다: 판이 잠깐 그 위에 나와 있을 뿐이고
+   * 접으면 돌아갈 자리라는 것이 그 띠로 읽힌다. 경계를 끌면 붙는 변도 폭도 함께
+   * 움직인다 — 반반을 전제하고 `40%`로 적어 두면 채팅 쪽으로 끌 때 2할의 띠가
+   * 사라진다.
    */
   .board-open .squad-board-col {
     position: absolute;
-    inset: 0 50% 0 auto;
-    width: min(40%, 820px);
+    inset: 0 var(--split) 0 auto;
+    width: min(calc((100% - var(--split)) * 0.8), 820px);
     z-index: 20;
     padding: var(--sp-5);
     gap: 0;

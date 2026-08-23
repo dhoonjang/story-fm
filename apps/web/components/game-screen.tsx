@@ -18,6 +18,7 @@ import { Loading } from "./loading";
 import { SquadView, CalendarView, FinanceView, CompetitionsView, CareerView } from "./office";
 import { createLineupSaver, type LineupSaver } from "./lineup-saver";
 import { MatchClock, MatchHeadline, MatchOpponent, MatchOverview } from "./match-view";
+import { StageSplitHandle } from "./stage-split-handle";
 import {
   IconBoard,
   IconBroadcast,
@@ -1115,6 +1116,10 @@ export function GameScreen({ gameId }: { gameId: string }) {
               </div>
             )}
           </section>
+          {/* 두 칸의 경계 — 끄는 대로 무대의 `--split`이 바뀌고 거기 붙은 것들
+              (덮개·전술판 서랍)이 함께 따라온다. 나란히 설 수 없는 폭에서는 CSS가
+              걷어 낸다(`--split-live`) — 오른쪽 칸 **뒤에** 서야 그 위에 얹힌다 */}
+          <StageSplitHandle />
         </div>
       </main>
       {/* 턴 원문 — 개발 모드에서 턴을 길게 눌렀을 때만 선다 (models.md §5) */}
