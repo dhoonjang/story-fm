@@ -14,8 +14,16 @@ import {
   squadReturnOf,
   onSummerBreak,
   userPlayers,
+  RESERVE_TRAINING_AIM,
+  reserveTrainingAxes,
+  reserveTrainingMultiplier,
 } from "@story-fm/engine";
-import { isReserveMatch } from "@story-fm/domain";
+import {
+  ATTRIBUTE_AXES,
+  RESERVE_TRAINING_POLICIES,
+  isReserveMatch,
+  type AttributeAxis,
+} from "@story-fm/domain";
 import { createTestGame, advanceAndPlay, playMockMatch } from "./helpers";
 
 /** 그 날짜의 예정 훈련 label 목록 (오전→오후) */
@@ -672,5 +680,56 @@ describe("여름 휴가", () => {
       setTraining(state, { sessions: [{ date, slot: "am", label: "전술", focus: ["tactical"] }] })
         .ok,
     ).toBe(true);
+  });
+});
+
+/**
+ * 2군 훈련 방침 — 배율은 **총량을 옮길 뿐 늘리지 않는다**(season.md §8 불변식).
+ * 화면에 드러나는 것은 방침 이름뿐이라, 못 박을 것은 눈에 안 보이는 공식이다.
+ */
+describe("2군 훈련 방침 배율", () => {
+  const FIELD_AXES: readonly AttributeAxis[] = ATTRIBUTE_AXES.filter((a) => a !== "goalkeeping");
+  const AIMING = RESERVE_TRAINING_POLICIES.filter((p) => p !== "balanced");
+
+  it("어느 방침에서나 필드 축 배율의 합이 필드 축 수와 같다", () => {
+    for (const policy of RESERVE_TRAINING_POLICIES) {
+      const sum = FIELD_AXES.reduce(
+        (acc, axis) => acc + reserveTrainingMultiplier(policy, axis),
+        0,
+      );
+      expect(sum).toBeCloseTo(FIELD_AXES.length, 10);
+    }
+  });
+
+  it("goalkeeping은 어느 방침에서도 눌리지 않는다", () => {
+    for (const policy of RESERVE_TRAINING_POLICIES) {
+      expect(reserveTrainingMultiplier(policy, "goalkeeping")).toBe(1);
+    }
+  });
+
+  it("겨냥한 축은 1보다 크고 나머지 필드 축은 1보다 작다", () => {
+    for (const policy of AIMING) {
+      const aimed = reserveTrainingAxes(policy);
+      expect(aimed.length).toBeGreaterThan(0);
+      for (const axis of aimed) {
+        expect(reserveTrainingMultiplier(policy, axis)).toBe(RESERVE_TRAINING_AIM);
+      }
+      for (const axis of FIELD_AXES.filter((a) => !aimed.includes(a))) {
+        expect(reserveTrainingMultiplier(policy, axis)).toBeLessThan(1);
+      }
+    }
+  });
+
+  it("축 묶음이 필드 축을 빠짐없이 한 번씩 덮는다", () => {
+    const covered = AIMING.flatMap((policy) => [...reserveTrainingAxes(policy)]);
+    expect(new Set(covered).size).toBe(covered.length);
+    expect([...covered].sort()).toEqual([...FIELD_AXES].sort());
+    expect(covered).not.toContain("goalkeeping");
+  });
+
+  it("balanced는 전 축이 1이다 — 기본값이자 해제", () => {
+    for (const axis of ATTRIBUTE_AXES) {
+      expect(reserveTrainingMultiplier("balanced", axis)).toBe(1);
+    }
   });
 });

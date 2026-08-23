@@ -1,5 +1,12 @@
-import type { ScheduleEntry, Slot, TrainAttr, TrainingSession } from "@story-fm/domain";
-import { SLOT_TIME, isReserveMatch } from "@story-fm/domain";
+import type {
+  AttributeAxis,
+  ReserveTrainingPolicy,
+  ScheduleEntry,
+  Slot,
+  TrainAttr,
+  TrainingSession,
+} from "@story-fm/domain";
+import { ATTRIBUTE_AXES, SLOT_TIME, isReserveMatch } from "@story-fm/domain";
 import { addDays, dayOfWeek, diffDays, sortEntries, squadReturnOf } from "../competition/calendar";
 import type { GameState } from "../core/state";
 
@@ -412,4 +419,51 @@ export function syncDefaultTraining(state: GameState): void {
   }
   removeEntries(state, mine);
   installDefaultTraining(state, { to });
+}
+
+// ── 2군 훈련 방침 (season.md §2 "2군 훈련 방침") ─────────────────────
+
+/**
+ * 방침이 겨냥하는 축 — **능력치 카탈로그의 갈래를 그대로 쓴다**(player.md §2).
+ * `goalkeeping`은 어디에도 들지 않는다: 한 축뿐인 갈래라 겨냥 대상으로 두면 그
+ * 방침만 배율이 극단으로 튀고, 눌리게 두면 골키퍼 유망주가 감독이 고른 방침
+ * 때문에 굳는다. 방침이 닿는 자리는 필드 15축이다.
+ */
+const RESERVE_TRAINING_AXES: Record<ReserveTrainingPolicy, readonly AttributeAxis[]> = {
+  balanced: [],
+  physical: ["pace", "stamina", "strength", "aerial"],
+  technical: ["finishing", "dribbling", "passing", "kicking", "tackling"],
+  mental: ["vision", "positioning", "offTheBall", "composure", "aggression", "leadership"],
+};
+
+/** 방침이 닿지 않는 축 — 겨냥 대상도, 눌리는 대상도 아니다 */
+const UNTOUCHED_AXIS: AttributeAxis = "goalkeeping";
+
+/** 방침이 나누는 몫의 분모 — 축 목록에서 파생한다(축이 늘면 여기가 따라온다) */
+const FIELD_AXIS_COUNT = ATTRIBUTE_AXES.filter((axis) => axis !== UNTOUCHED_AXIS).length;
+
+/** 겨냥한 축의 성장 확률 배율 */
+export const RESERVE_TRAINING_AIM = 1.6;
+
+/** 이 방침이 겨냥하는 축 — 축 묶음을 읽는 유일한 문 */
+export function reserveTrainingAxes(policy: ReserveTrainingPolicy): readonly AttributeAxis[] {
+  return RESERVE_TRAINING_AXES[policy];
+}
+
+/**
+ * 방침이 이 축의 성장 확률에 곱하는 배율 — **총량을 옮길 뿐 늘리지 않는다.**
+ *
+ * 겨냥한 n축이 `RESERVE_TRAINING_AIM`만큼 오르면 나머지 필드 축이 그만큼 내려가
+ * 필드 15축의 배율 합은 어느 방침에서나 15다(season.md §8 불변식). 공짜 상향이면
+ * 고르는 일이 아니라 켜는 일이 된다.
+ */
+export function reserveTrainingMultiplier(
+  policy: ReserveTrainingPolicy,
+  axis: AttributeAxis,
+): number {
+  const aimed = reserveTrainingAxes(policy);
+  if (aimed.length === 0 || axis === UNTOUCHED_AXIS) return 1;
+  if (aimed.includes(axis)) return RESERVE_TRAINING_AIM;
+  const rest = FIELD_AXIS_COUNT - aimed.length;
+  return (FIELD_AXIS_COUNT - aimed.length * RESERVE_TRAINING_AIM) / rest;
 }

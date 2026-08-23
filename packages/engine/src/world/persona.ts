@@ -891,6 +891,25 @@ export function worldFigures(state: { userTeamId: string }): Persona[] {
   return WORLD_FIGURE_SEEDS.filter((f) => f.teamId !== state.userTeamId).map(worldFigurePersonaOf);
 }
 
+/**
+ * 이 선수를 대리하는 에이전트 — **(시드, 선수)에서 결정적으로 뽑는다.** 같은 세이브의
+ * 같은 선수는 언제나 같은 사람이 대리한다 (people.md §1 일관성).
+ *
+ * 이적 요청을 들고 오는 자리(`club/approach.ts`)와 협상 테이블 건너편
+ * (`market/counterparty.ts`)이 같은 사람을 봐야 하므로, 규칙은 둘 다 의존하는 여기
+ * 하나에 산다 (AGENTS.md §5).
+ *
+ * 명부에 에이전트가 한 사람도 없으면 `null`이다 — 코어는 화자를 지어내지 않는다.
+ */
+export function agentForPlayer(
+  state: { userTeamId: string; seed: number },
+  playerId: string,
+): Persona | null {
+  const agents = worldFigures(state).filter((f) => f.role === "agent");
+  if (agents.length === 0) return null;
+  return pick(makeRng(state.seed, `agent-of:${playerId}`), agents);
+}
+
 /** 명부에서 이 이름을 찾는다 — 이력을 다시 그릴 때의 입구 (`characterEntryOf`) */
 export function worldFigureByName(state: { userTeamId: string }, name: string): Persona | null {
   const seed = WORLD_FIGURE_SEEDS.find((f) => f.name === name && f.teamId !== state.userTeamId);

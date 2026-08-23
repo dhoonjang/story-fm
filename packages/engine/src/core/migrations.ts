@@ -45,6 +45,7 @@ const ARRAY_FIELDS = [
   "seasonRecords",
   "trophies",
   "achievements",
+  "awards",
   "narrative",
   "chat",
   "scoutReports",
