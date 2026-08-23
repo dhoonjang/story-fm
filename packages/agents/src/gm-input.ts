@@ -17,7 +17,6 @@ import {
   describePendingApproach,
   describePendingPress,
   describeWindowState,
-  diffDays,
   expiringContracts,
   financeOf,
   formatClock,
@@ -306,19 +305,18 @@ function timePassedLine(state: GameState, passed?: TimePassed | null): string | 
 }
 
 /**
- * **감독 자신의 계약 한 줄** — 잔여·지갑, 그리고 보드가 만료 90일 전에 내린 판정
- * (career.md §5.4).
+ * **감독 자신의 계약 한 줄** — 연봉과 만료일, 그리고 보드가 만료 90일 전에 내린
+ * 판정 (career.md §5.4).
  *
  * 재계약 제안은 10일 뒤 사라지는 답할 자리라 스냅샷에 서야 한다 — 화면에만 있으면
  * 모델은 감독이 무엇을 두고 답하는지 모른 채 장면을 쓴다.
+ *
+ * 잔여일은 만료일에서 나오는 파생값이라 싣지 않는다.
  */
 function managerContractLine(state: GameState): string | null {
   const contract = state.manager.contract;
   if (!contract) return null;
-  const wallet = state.manager.wallet ?? 0;
-  const base =
-    `감독 계약: 연봉 ${formatMoney(contract.salary)} · ${contract.until}까지` +
-    ` (${diffDays(state.date, contract.until)}일) · 지갑 ${formatMoney(wallet)}`;
+  const base = `감독 계약: 연봉 ${formatMoney(contract.salary)} · ${contract.until}까지`;
   const renewal = openManagerOffers(state).find((o) => o.via === "renewal");
   if (renewal) {
     return (
@@ -519,7 +517,9 @@ export function buildGmStateNote(
       played > 0 && rank > 0 ? ` · 리그 ${rank}위` : ""
     } · ${describeWindowState(state)}`,
     describeNextFixture(state),
-    `전술: ${tac.formation} · 멘탈${tac.mentality} 라인${tac.defensiveLine} 압박${tac.pressing} 템포${tac.tempo} 폭${tac.width} 패스${tac.passStyle} · 선발 평균 적응 ${Math.round(squadFamiliarity(state, state.userTeamId))}`,
+    // 6축 슬라이더는 싣지 않는다 — 화자가 입에 담지 않는 수치이고 `get_squad`가
+    // 배치와 함께 낸다. 모양과 적응도는 코치의 말에 그대로 실린다
+    `전술: ${tac.formation} · 선발 평균 적응 ${Math.round(squadFamiliarity(state, state.userTeamId))}`,
     `재정: 잔고 ${formatMoney(finance.balance)} · 주급 ${formatMoney(weeklyWagesOf(state, state.userTeamId))}/주 · 이적예산 ${formatMoney(finance.transferBudget)}`,
     // 감독의 수치는 캐시 밖이다 — 평판은 경기마다 움직이고 능력도 자란다.
     // 레퍼런스(감독 프로필)엔 이름·배경만 남는다
@@ -534,27 +534,22 @@ export function buildGmStateNote(
         : `예정 훈련 없음 — 기본 훈련까지 비워진 상태다`,
     alerts.length > 0 ? `주의: ${alerts.join(" · ")}` : `주의: 없음`,
     /**
-     * 선수단 — **명단이지 화자 명단이 아니다.** 누가 말하는지는 캐릭터북이 세운
-     * 카드가 정하고(people.md §6), 이 줄은 그 앞의 것을 한다: GM은 **모르는 선수를
-     * 조회할 수 없으므로** 세계에 누가 있는지가 먼저 있어야 한다.
+     * 선수단 — **인원과 주장뿐이다.** 마흔 명 남짓의 이름은 캐시가 걸리지 않는 이
+     * 층의 절반을 혼자 먹고, 그 값을 조회가 이미 낸다 (agents.md §5·§7).
      *
-     * 이름만 싣는다 — 배치·능력치·컨디션은 조회의 몫이고, 캐시 층이 아니라 여기인
-     * 이유는 명단이 영입·승격·주장 변경마다 바뀌기 때문이다 (agents.md §5).
+     * 주장은 남는다 — 팀 토크와 라커룸 장면이 그 한 사람을 두고 서고, 누구인지
+     * 모르면 GM이 아무나 세운다. 나머지 이름을 내보내는 자리는 아래 「선수 근황」과
+     * 조회다. ⚠️ 도구 이름을 적지 않는다 — 데이터 블록에는 사실만 (prompts.md §5-3).
      */
     (() => {
-      const named = (level: "first" | "reserve") =>
-        players
-          .filter((p) => squadLevelOf(p) === level)
-          .map((p) => `${p.name}${p.isCaptain ? "(주장)" : ""}`);
-      const first = named("first");
-      const reserve = named("reserve");
-      // 구분자는 쉼표가 아니라 가운뎃점이다 — 한국어 성명에 공백이 들어가서
-      // 쉼표로 이으면 어디서 한 사람이 끝나는지가 흐려진다
-      return [
-        `선수단(${players.length}명)`,
-        `  1군 ${first.length}: ${first.join(" · ")}`,
-        ...(reserve.length > 0 ? [`  2군 ${reserve.length}: ${reserve.join(" · ")}`] : []),
-      ].join("\n");
+      const count = (level: "first" | "reserve") =>
+        players.filter((p) => squadLevelOf(p) === level).length;
+      const reserve = count("reserve");
+      const captain = players.find((p) => p.isCaptain);
+      return (
+        `선수단 ${players.length}명 (1군 ${count("first")}${reserve > 0 ? ` · 2군 ${reserve}` : ""})` +
+        (captain ? ` · 주장 ${captain.name}` : "")
+      );
     })(),
     // 선수 근황 — 위 이름들 중 **사실이 붙는** 셋이다.
     // 코어는 사실만 낸다(speakerCues) — 누가 말할지, 무슨 말을 할지는 GM의 몫
