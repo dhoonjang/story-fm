@@ -136,8 +136,9 @@ describe("프롬프트 회귀", () => {
 
       const parsed = parseSceneHeader(text);
       if (parsed.header !== null) headers += 1;
-      // 문법 — 헤더를 뗀 나머지는 전부 `@`로 연다 (prompts.md §1)
-      if (textLines(parsed.body).every((line) => line.startsWith("@"))) grammatical += 1;
+      // 문법 — 헤더를 뗀 본문은 `@` 줄로 연다. 그 뒤의 태그 없는 줄은 직전 화자의
+      // 이어쓰기라 세지 않는다 (prompts.md §1)
+      if ((textLines(parsed.body)[0] ?? "").startsWith("@")) grammatical += 1;
     }
 
     const layers = fixed.length + reference.length + stateNote.length;
