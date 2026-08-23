@@ -703,8 +703,10 @@ WorldScope { leagues, teamsPerLeague, cups, markets }
 ## 9. 미해결
 
 - **구장은 수용인원 하나로만 표현된다** — `data/club-profile.ts`의 `ClubProfile`은
-  세이브 밖 시드 표이고 `club/finance.ts`는 `capacity`를 입장 수입에만 쓴다
-  (시설비는 체급 상수 `facilityCostOf`). 확장·이전 같은 구단 투자 결정이 없다.
+  세이브 밖 시드 표이고, 세이브에서 움직이는 것은 `state.teams[].capacity` 하나다.
+  감독이 그 값을 올리는 길은 보드에 거는 증설 요청뿐이고(finance.md §9.6), 늘어난
+  좌석은 입장 수입에만 닿는다 — **시설비는 여전히 체급 상수**(`facilityCostOf`)라
+  구장을 키워도 유지비가 따라 오르지 않고, 이전·신축이라는 결정도 없다.
 
 ## 코드 위치
 
