@@ -144,6 +144,11 @@ const MIN_ACCEPT_PROBABILITY = 5;
 const COUNTER_CEILING = 1.15;
 /** 역제안 요구 주급 상한 — 기대치의 이 배수 (상대도 무리한 요구는 하지 않는다) */
 const COUNTER_WAGE_CEILING = 1.4;
+/**
+ * 임대 협상의 호가 — 시장가 기준 임대료(`LOAN_FEE_RATE`)의 이 배수가 자다.
+ * 역제안 상한(`COUNTER_CEILING`)이 이 값 위에 다시 얹힌다.
+ */
+const LOAN_ASKING_LIFT = 1.6;
 /** 협상 유효기간 — 창 마감이 더 이르면 그쪽이 먼저 온다 */
 const NEGOTIATION_DAYS = 14;
 /**
@@ -717,7 +722,7 @@ export function respondOffer(
     renewing || releasing || selling
       ? 0
       : loaning
-        ? Math.round(marketValueOf(state, player) * LOAN_FEE_RATE * 1.6)
+        ? Math.round(marketValueOf(state, player) * LOAN_FEE_RATE * LOAN_ASKING_LIFT)
         : askingPriceFor(state, player);
   const ceiling = Math.round(asking * COUNTER_CEILING);
   const counterFee =
@@ -3067,6 +3072,24 @@ export function suggestTerms(state: GameState, playerId: string): DealTerms | nu
 export const AI_RENEWAL_WINDOW_DAYS = 240;
 /** 검토한 날 재계약이 성사될 확률의 기준 — 매일 굴린다 */
 const AI_RENEWAL_CHANCE = 0.02;
+/**
+ * 재계약을 서두르는 정도 — **자리 × 나이**가 하루 확률(`AI_RENEWAL_CHANCE`)에 곱해진다.
+ * 자리는 그 팀에서 자기 앞을 막는 선수 수로 잰다 (0명 = 주전).
+ */
+const RENEWAL_URGENCY_STARTER = 2.2;
+const RENEWAL_URGENCY_ROTATION = 1.2;
+const RENEWAL_URGENCY_FRINGE = 0.5;
+/** 나이가 곱하는 몫 — 베테랑은 굳이 잡지 않고, 어린 선수는 먼저 묶는다 */
+const RENEWAL_VETERAN_AGE = 33;
+const RENEWAL_VETERAN_URGENCY = 0.3;
+const RENEWAL_YOUNG_AGE = 24;
+const RENEWAL_YOUNG_URGENCY = 1.4;
+/** 새로 쓰는 계약의 연수 — `MIN` 이상 `MIN + SPAN` 미만의 정수 */
+const RENEWAL_YEARS_MIN = 2;
+const RENEWAL_YEARS_SPAN = 3;
+/** 재계약이 얹는 주급 배수 — `BASE` 이상 `BASE + SPAN` 미만 */
+const RENEWAL_WAGE_BASE = 1.05;
+const RENEWAL_WAGE_SPAN = 0.25;
 
 /**
  * **다른 구단도 계약을 관리한다.**
@@ -3113,16 +3136,25 @@ export function runAiRenewals(state: GameState, digest: string[]): void {
     const blocked = depth.betterThan(contract.teamId, player);
     const age = ageOf(player.birthdate, state.date);
     const urgency =
-      (blocked === 0 ? 2.2 : blocked === 1 ? 1.2 : 0.5) * (age >= 33 ? 0.3 : age <= 24 ? 1.4 : 1);
+      (blocked === 0
+        ? RENEWAL_URGENCY_STARTER
+        : blocked === 1
+          ? RENEWAL_URGENCY_ROTATION
+          : RENEWAL_URGENCY_FRINGE) *
+      (age >= RENEWAL_VETERAN_AGE
+        ? RENEWAL_VETERAN_URGENCY
+        : age <= RENEWAL_YOUNG_AGE
+          ? RENEWAL_YOUNG_URGENCY
+          : 1);
     if (rng() > AI_RENEWAL_CHANCE * urgency) continue;
 
-    const years = 2 + Math.floor(rng() * 3);
+    const years = RENEWAL_YEARS_MIN + Math.floor(rng() * RENEWAL_YEARS_SPAN);
     contract.status = "ended";
     state.contracts.push({
       id: `c-renew-${player.id}-${state.date}`,
       gamePlayerId: player.id,
       teamId: contract.teamId,
-      weeklyWage: Math.round(contract.weeklyWage * (1.05 + rng() * 0.25)),
+      weeklyWage: Math.round(contract.weeklyWage * (RENEWAL_WAGE_BASE + rng() * RENEWAL_WAGE_SPAN)),
       since: state.date,
       until: contractUntil(state.date, years),
       status: "active",

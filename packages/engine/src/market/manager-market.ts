@@ -18,6 +18,7 @@ import {
   type ManagerOffer,
 } from "@story-fm/domain";
 import {
+  clampReputation,
   financeOf,
   playersOf,
   pushNarrative,
@@ -121,6 +122,13 @@ export const KNOCK_SALARY_RATE = 0.85;
  */
 const TIER4_HEADROOM_ANCHOR = 25;
 
+/** 문턱에 턱걸이인 감독이 받는 최소 폭 */
+const COUNTER_HEADROOM_MIN = 0.05;
+/** 아무리 이름값이 커도 여기서 멈춘다 */
+const COUNTER_HEADROOM_MAX = 0.3;
+/** 문턱 위 평판 1점이 폭을 넓히는 자 — `MIN`에서 `MAX`까지 딱 50점이 걸린다 */
+const COUNTER_HEADROOM_SPAN = 200;
+
 /**
  * **흥정의 여유** — 보드가 제시 조건 위로 물러설 수 있는 비율 (career.md §5.1).
  *
@@ -130,11 +138,18 @@ const TIER4_HEADROOM_ANCHOR = 25;
  */
 export function counterHeadroom(reputation: number, tier: 1 | 2 | 3 | 4): number {
   const anchor = OFFER_REPUTATION_GATE[tier] ?? TIER4_HEADROOM_ANCHOR;
-  return Math.min(0.3, 0.05 + Math.max(0, reputation - anchor) / 200);
+  return Math.min(
+    COUNTER_HEADROOM_MAX,
+    COUNTER_HEADROOM_MIN + Math.max(0, reputation - anchor) / COUNTER_HEADROOM_SPAN,
+  );
 }
 
 /** 감독 팀의 경고 단계 — 이 횟수를 넘기면 경질된다 */
 export const USER_WARNINGS_BEFORE_SACK = 3;
+/** 같은 말을 매일 반복하지 않는 간격 — 경고는 한 달에 한 번까지다 */
+const WARNING_COOLDOWN_DAYS = 30;
+/** 경고 한 번이 깎는 보드 평판 — 경고가 마지막이 아니어도 압박은 남는다 */
+const WARNING_BOARD_HIT = 6;
 /**
  * 감독이 잘리는 순위 — **AI보다 훨씬 아래**다. 강등권에서도 아래 두 자리,
  * 곧 20팀 리그면 19·20위이고 18팀 리그면 17·18위다.
@@ -430,7 +445,9 @@ export function reviewUserSeat(state: GameState, digest: string[]): boolean {
   }
   if (standing.position < seat.danger) return false;
   // 경고는 **한 달에 한 번까지** — 매일 같은 말을 반복하지 않는다
-  if (manager.lastWarnedOn && diffDays(manager.lastWarnedOn, state.date) < 30) return false;
+  if (manager.lastWarnedOn && diffDays(manager.lastWarnedOn, state.date) < WARNING_COOLDOWN_DAYS) {
+    return false;
+  }
 
   const board = manager.reputation.board;
   // 경고 수는 마지막 단계에서 멈춘다 — 4/3은 화면이 그릴 수 없는 숫자다.
@@ -442,7 +459,7 @@ export function reviewUserSeat(state: GameState, digest: string[]): boolean {
   const expectation = boardExpectation(state, state.userTeamId);
   if (next < USER_WARNINGS_BEFORE_SACK || !sackable || board > USER_BOARD_FLOOR) {
     manager.boardWarnings = next;
-    manager.reputation.board = Math.max(0, board - 6);
+    manager.reputation.board = clampReputation(board - WARNING_BOARD_HIT);
     digest.push(
       `⚠️ 보드가 성적을 문제 삼았다 — 기대는 ${boardExpectationText(expectation.code, expectation.target)}인데 현재 ${standing.position}위다` +
         ` (경고 ${next}/${USER_WARNINGS_BEFORE_SACK})`,

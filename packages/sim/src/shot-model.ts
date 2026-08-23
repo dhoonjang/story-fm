@@ -9,6 +9,13 @@ export const FINISHING_LOGIT_WEIGHT = 0.55;
 /** 슈팅별 xG가 경로 평균 주변에 모이는 정도 — 작을수록 꼬리가 넓다. */
 export const SHOT_XG_CONCENTRATION = 16;
 
+/** 기회 질이 0일 때 골이 못 된 슛이 유효슈팅으로 남을 로그오즈. */
+const SAVED_LOGIT_BASE = -1.15;
+/** 기회 질이 그 로그오즈를 끌어올리는 세기 — 좋은 기회일수록 골문 안으로 간다. */
+const SAVED_LOGIT_XG_WEIGHT = 2.1;
+/** 골문을 벗어난 슛 중 수비 몸에 맞는 비율 — 나머지가 유효슈팅 실패다. */
+export const BLOCKED_SHARE = 0.38;
+
 /** 부동소수점 로그의 정의역만 지키는 수치 안전값 — 밸런스 상·하한이 아니다. */
 const PROBABILITY_EPSILON = Number.EPSILON;
 
@@ -76,6 +83,14 @@ export function samplePoisson(rng: () => number, lambda: number): number {
 
 export type ShotOutcome = "goal" | "saved" | "blocked" | "off_target";
 
+/**
+ * 골이 되지 못한 슛이 **유효슈팅(선방)으로 남을 확률**.
+ * 스코어에는 닿지 않는다 — 기록의 모양만 정한다.
+ */
+export function savedShare(xg: number): number {
+  return sigmoid(SAVED_LOGIT_BASE + SAVED_LOGIT_XG_WEIGHT * xg);
+}
+
 export interface SampledShot {
   xg: number;
   goalProbability: number;
@@ -94,12 +109,12 @@ export function sampleShot(
 
   // 비득점 결과의 분해는 스코어에 영향을 주지 않는다. 높은 질의 슛일수록
   // 골문 안으로 향해 선방으로 남는 비율만 부드럽게 높아진다.
-  const savedProbability = sigmoid(-1.15 + 2.1 * xg);
+  // 블록 판정은 선방이 아닐 때만 굴린다 — 난수 순서가 곧 경기의 재현성이다.
   const missRoll = rng();
-  if (missRoll < savedProbability) return { xg, goalProbability, outcome: "saved" };
+  if (missRoll < savedShare(xg)) return { xg, goalProbability, outcome: "saved" };
   return {
     xg,
     goalProbability,
-    outcome: rng() < 0.38 ? "blocked" : "off_target",
+    outcome: rng() < BLOCKED_SHARE ? "blocked" : "off_target",
   };
 }

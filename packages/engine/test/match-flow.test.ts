@@ -13,6 +13,9 @@ import {
   loadGame,
   MATCH_PROFICIENCY_GAIN,
   MATCHDAY_BENCH,
+  tacticalXpFor,
+  TACTICAL_XP_CAP,
+  TACTICAL_XP_PER_GOAL,
   playersOf,
   proficiencyAt,
   refreshPacket,
@@ -1242,5 +1245,19 @@ describe("교체 투입의 역할 (match.md §2)", () => {
     expect(JSON.stringify(withMemory.pendingMatch!.packet[opponentSide].lineup)).toBe(
       JSON.stringify(plain.pendingMatch!.packet[opponentSide].lineup),
     );
+  });
+});
+
+describe("전술 XP는 천장이 있다", () => {
+  it("태그 없는 경기는 0, 골 하나부터 골당 같은 폭으로 쌓인다", () => {
+    expect(tacticalXpFor(0)).toBe(0);
+    expect(tacticalXpFor(1)).toBe(TACTICAL_XP_PER_GOAL);
+    expect(tacticalXpFor(2)).toBe(TACTICAL_XP_PER_GOAL * 2);
+  });
+
+  /** 천장이 없으면 약체 상대 대승 한 판이 전술 축을 통째로 앞당긴다 */
+  it("천장을 넘어서면 더 넣어도 같다", () => {
+    expect(tacticalXpFor(3)).toBe(TACTICAL_XP_CAP);
+    expect(tacticalXpFor(9)).toBe(TACTICAL_XP_CAP);
   });
 });

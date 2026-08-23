@@ -60,6 +60,8 @@ import {
   DEFAULT_FORMATION,
   FAMILIARITY_BASELINE,
   MANAGER_TERMS_BY_TIER,
+  REPUTATION_MAX,
+  REPUTATION_MIN,
   FORMATIONS,
   FIRST_TEAM_LIMIT,
   MATCHDAY_BENCH,
@@ -984,6 +986,15 @@ export function userPlayers(state: GameState): GamePlayer[] {
  */
 export function managedTeamId(state: GameState): string | null {
   return state.dismissal ? null : state.userTeamId;
+}
+
+/**
+ * 평판을 눈금 안으로 자른다 — 경기·시즌·컵·경질이 저마다 다른 폭으로 더하고 빼도
+ * 나가는 값은 `ManagerReputationSchema`가 받는 0~100이라야 한다. **여기가 유일한
+ * 문이다** — 호출부가 각자 `Math.min(100, …)`을 적으면 스키마를 옮긴 날 한쪽만 남는다.
+ */
+export function clampReputation(value: number): number {
+  return Math.max(REPUTATION_MIN, Math.min(REPUTATION_MAX, value));
 }
 
 export function playerById(state: GameState, id: string): GamePlayer | null {

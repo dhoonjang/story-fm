@@ -1675,6 +1675,13 @@ export function bestOverall(axes: AxisValues, positions: readonly { position: st
   return best;
 }
 
+/**
+ * 심경 한 줄의 글자 상한 — 스키마가 문이고, 이 문을 넘긴 문장은 다음 로드에서
+ * 세이브 전체를 스키마 실패로 만든다. 제출을 자르는 쪽(`engine/squad/mood.ts`)이
+ * 같은 값을 다시 적으면 한쪽만 손봤을 때 세이브가 깨진다.
+ */
+export const MOOD_NOTE_MAX = 120;
+
 /** 빠르게 변하는 컨디션 — 부상은 별도 INJURY 테이블 (player.md §5) */
 export const PlayerStateSchema = z.object({
   /**
@@ -1720,7 +1727,7 @@ export const PlayerStateSchema = z.object({
    *
    * 옛 세이브엔 없다 — 없으면 앵커를 쓰고 버전을 올리지 않는다.
    */
-  moodNote: z.object({ text: z.string().min(1).max(120), on: DateString }).optional(),
+  moodNote: z.object({ text: z.string().min(1).max(MOOD_NOTE_MAX), on: DateString }).optional(),
   /**
    * **마지막으로 면담한 날** — 같은 선수의 면담을 하루 한 번으로 자르는 문
    * (career.md §2). 한 경기는 하루 안에서 끝나므로 이것이 곧 경기당 한 번이다.
