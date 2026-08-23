@@ -219,12 +219,7 @@ export function TeamModal({
         {mode === "create" && (
           <label className="admin-field grow">
             팀 id
-            <input
-              value={id}
-              onChange={(e) => setId(e.target.value)}
-              placeholder="예: new-fc"
-              data-testid="team-modal-id"
-            />
+            <input value={id} onChange={(e) => setId(e.target.value)} data-testid="team-modal-id" />
           </label>
         )}
         <label className="admin-field grow">
@@ -232,7 +227,6 @@ export function TeamModal({
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="예: 아스날"
             data-testid="team-modal-name"
           />
         </label>
@@ -241,7 +235,6 @@ export function TeamModal({
           <input
             value={shortName}
             onChange={(e) => setShortName(e.target.value)}
-            placeholder="ARS"
             data-testid="team-modal-short"
           />
         </label>
@@ -326,7 +319,6 @@ export function TeamModal({
             <input
               value={stadium}
               onChange={(e) => setStadium(e.target.value)}
-              placeholder="예: 에미레이츠 스타디움"
               data-testid="team-modal-stadium"
             />
           </label>
