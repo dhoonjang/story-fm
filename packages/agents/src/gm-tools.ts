@@ -44,6 +44,7 @@ import {
   exerciseBuyBack,
   releasePlayer,
   requestBoard,
+  setTicketPrice,
   respondToApproach,
   respondToMedia,
   scheduleView,
@@ -108,6 +109,8 @@ const dateArg = DateString;
 const MONEY_MAX = 500_000_000;
 /** 주급의 상한 */
 const WAGE_MAX = 2_000_000;
+/** 표 한 장 값의 상한 — 이보다 비싸면 값이 아니라 오타다 (실제 폭은 코어가 자른다) */
+const TICKET_PRICE_MAX = 1_000;
 const money = (max: number) => z.number().int().min(0).max(max);
 /** 장부 한 줄에 남는 자유 문구 */
 const LEDGER_NOTE = 120;
@@ -569,6 +572,18 @@ export function buildGmTools(
           .describe("이적 예산·주급 한도는 금액(원), 구장은 좌석 수"),
       }),
       (input) => requestBoard(state, input),
+    ),
+    wrap(
+      "set_ticket_price",
+      descriptions.set_ticket_price,
+      z.object({
+        /**
+         * 표 한 장의 값이다 — 상한은 오타를 막는 자리이고, 실제 폭은 코어가 기준가
+         * 대비로 잘라 준다 (finance.md §5.2).
+         */
+        price: z.number().int().min(1).max(TICKET_PRICE_MAX).describe("표 한 장의 값 (£)"),
+      }),
+      (input) => setTicketPrice(state, input),
     ),
 
     // ── 조회 (읽기 전용) — 컨텍스트에 없는 사실은 전부 여기로 ──

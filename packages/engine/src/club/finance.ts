@@ -25,17 +25,19 @@ import {
   SATURDAY,
 } from "../competition/calendar";
 import { clubProfile } from "../data/club-profile";
-import { clubEconomyLevel, leagueEconomyLevel } from "../data/league-economy";
+import { clubEconomyLevel, leagueEconomyLevel, leagueTicketSpread } from "../data/league-economy";
 import { isMarketOnlyLeague, isTopLeague, leagueCatalogById } from "../data/league-catalog";
 import { competitionShortName, isCup, isEuroCup } from "../data/cup-catalog";
 import { isFriendly } from "../competition/friendly";
 import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import { clubEconomyLevelIn, leagueOfTeamIn, leagueSizeIn } from "../competition/promotion";
 import { computeStandings } from "../competition/season";
+import { diffDays } from "../core/dates";
 import {
   catalogLeagueIn,
   clubProfileIn,
   financeOf,
+  managedTeamId,
   pushNarrative,
   teamShortNameIn,
   weeklyWageLinesOf,
@@ -149,12 +151,40 @@ const DEFAULT_MARKET_LEAGUE_BUDGET = 50_000_000;
 /** 매치데이 — 기본 점유율(전력 등급별)과 호스피탈리티 가산율 */
 const OCCUPANCY_BASE: Record<1 | 2 | 3 | 4, number> = { 1: 0.97, 2: 0.9, 3: 0.85, 4: 0.8 };
 const HOSPITALITY_RATE: Record<1 | 2 | 3 | 4, number> = { 1: 0.35, 2: 0.28, 3: 0.2, 4: 0.15 };
-/** 티켓 단가 보정 — 리그 평균가에 곱한다 */
+/**
+ * 티켓 단가 보정 — 리그 평균가에 곱한다. **이 표는 EPL에서 잰 폭이다** — 리그마다
+ * 얼마나 벌어지는가는 `leagueTicketSpread`가 1을 축으로 늘이고 줄인다 (§5.2).
+ */
 const TICKET_TIER_FACTOR: Record<1 | 2 | 3 | 4, number> = { 1: 1.3, 2: 1.1, 3: 0.95, 4: 0.8 };
 /** 리그 카탈로그에 평균 티켓가가 없을 때의 자 (£) */
 const DEFAULT_TICKET_PRICE = 30;
 /** 대항전 홈경기 단가 — 리그 경기보다 이만큼 비싸게 판다 */
 const EURO_TICKET_FACTOR = 1.15;
+
+/**
+ * **감독이 부를 수 있는 폭** — 기준가 대비 배율 (finance.md §5.2).
+ *
+ * 폭 밖의 값은 반려하지 않고 잘라서 받는다 — 감독이 부른 값이 틀린 것이 아니라
+ * 구단이 낼 수 있는 값이 여기까지인 것이고, 실제로 선 값은 사실 카드가 적는다.
+ */
+const TICKET_RATIO_MIN = 0.7;
+const TICKET_RATIO_MAX = 1.5;
+
+/**
+ * **관중 탄력** — 배율이 1에서 벗어난 만큼 관중이 이만큼 반대로 움직인다.
+ *
+ * 수입은 `배율 × 탄력 계수`에 비례하고 그 곱이 최대가 되는 지점은
+ * `(1 + 탄력) ÷ (2 × 탄력)` = **배율 1.06**이다. 즉 `avgTicketPrice`는 이미 시장이
+ * 찾아 놓은 값이고, 그 위에서 더 벌 수 있는 것은 **수요가 상한에 잘리고 있던 구단**
+ * 뿐이다 (`matchdayRevenue`의 clamp 순서). 0.5쯤으로 낮추면 최적점이 폭 끝으로 밀려
+ * "언제나 최대로 올린다"가 되고, 그러면 결정이 아니라 공짜 수입이 된다.
+ */
+const TICKET_ELASTICITY = 0.9;
+
+/**
+ * 값을 다시 매기기까지 — 시즌권과 예매가 이미 팔린 표를 하루아침에 다시 매기지 않는다.
+ */
+const TICKET_PRICE_COOLDOWN_DAYS = 30;
 
 // 점유율을 움직이는 것들 — 기본 점유율(`OCCUPANCY_BASE`) 위에 더해지고, 전부 더한
 // 뒤 `OCCUPANCY_FLOOR`~1로 잘린다 (finance.md §5.2).
@@ -568,6 +598,165 @@ export function isTelevised(match: MatchRecord): boolean {
 
 // ── 매치데이 ────────────────────────────────────────────
 
+/**
+ * 이 구단의 **기준 티켓 단가** (£) — 리그 평균가에 리그 폭이 걸린 tier 보정.
+ *
+ * 감독의 배율은 여기 들어가지 않는다: 기준가는 "이 구단의 표가 얼마짜리인가"의 자라
+ * 임금 천장(§6.3)과 서사 이벤트 한도가 같이 읽는데, 이번 시즌의 결정이 섞이면 값을
+ * 내린 감독의 급여 여력이 그 자리에서 함께 줄어든다.
+ */
+function ticketBasePriceOf(
+  state: GameState | undefined,
+  teamId: string,
+  leagueId: string | null,
+): number {
+  const factor = 1 + (TICKET_TIER_FACTOR[tierOf(state, teamId)] - 1) * leagueTicketSpread(leagueId);
+  return (leagueCatalogById(leagueId)?.avgTicketPrice ?? DEFAULT_TICKET_PRICE) * factor;
+}
+
+/** 감독이 세워 둔 배율 — 없거나 AI 구단이면 1(기준가)이다 */
+function ticketRatioOf(state: GameState, teamId: string): number {
+  if (teamId !== state.userTeamId) return 1;
+  const set = financeOf(state, teamId).ticketPrice;
+  if (!set) return 1;
+  return Math.min(TICKET_RATIO_MAX, Math.max(TICKET_RATIO_MIN, set.ratio));
+}
+
+export interface TicketPrice {
+  /** 리그 평균가 × 리그 폭이 걸린 tier 보정 — 감독의 배율을 타지 않는다 */
+  base: number;
+  /** 감독이 세워 둔 배율 (기본 1) */
+  ratio: number;
+  /** 지금 팔고 있는 값 */
+  price: number;
+  /** 부를 수 있는 폭 */
+  min: number;
+  max: number;
+}
+
+/**
+ * 이 구단의 티켓 값 한 덩이 — 사실 카드·조회·테스트가 같은 자를 읽는다.
+ * 리그 경기의 값이다: 대항전·친선 보정은 그 경기가 안다 (`matchdayRevenue`).
+ */
+export function ticketPriceOf(state: GameState, teamId: string): TicketPrice {
+  const base = ticketBasePriceOf(state, teamId, leagueOfTeamIn(state, teamId));
+  const ratio = ticketRatioOf(state, teamId);
+  return {
+    base,
+    ratio,
+    price: base * ratio,
+    min: base * TICKET_RATIO_MIN,
+    max: base * TICKET_RATIO_MAX,
+  };
+}
+
+/** 값을 올린 만큼 관중이 줄어드는 몫 — 기준가면 1이고 0 아래로는 가지 않는다 */
+function ticketDemandFactor(ratio: number): number {
+  return Math.max(0, 1 - (ratio - 1) * TICKET_ELASTICITY);
+}
+
+/**
+ * 감독의 가격 결정이 **매치데이 수입에 남기는 몫** — `배율 × 탄력 계수`.
+ *
+ * 관중 상한(만석)을 모르는 자리에서 쓴다. 실제 경기의 매치데이는 상한이 걸리므로
+ * 이 곱이 아니라 `matchdayRevenue`가 관중과 단가를 따로 계산한다.
+ */
+function ticketRevenueFactor(state: GameState, teamId: string): number {
+  const ratio = ticketRatioOf(state, teamId);
+  return ratio * ticketDemandFactor(ratio);
+}
+
+/** 티켓 단가는 £ 단위 그대로 읽는다 — `formatMoney`는 £45를 `£0k`로 적는다 */
+function ticketText(price: number): string {
+  return `£${Math.round(price)}`;
+}
+
+export interface SetTicketPriceInput {
+  /** 감독이 부른 값 (£) */
+  price: number;
+}
+
+/**
+ * `set_ticket_price` — 감독이 홈 경기 티켓 값을 매긴다 (finance.md §5.2).
+ *
+ * 부른 값을 **기준가 대비 배율로 접어** 든다: 승강으로 기준가가 바뀌어도 "우리는 조금
+ * 비싸게 판다"는 선택이 그대로 남는다. 폭 밖의 값은 반려하지 않고 잘라서 받고, 실제로
+ * 선 값은 사실 카드가 적는다 — 보드의 답과 달리 이건 감독의 권한이라 거절할 자가 없다.
+ */
+export function setTicketPrice(
+  state: GameState,
+  input: SetTicketPriceInput,
+): { ok: boolean; message: string; brief?: SkillBrief } {
+  if (managedTeamId(state) === null) {
+    return { ok: false, message: "무직입니다 — 값을 매길 구단이 없습니다" };
+  }
+  const teamId = state.userTeamId;
+  const finance = financeOf(state, teamId);
+  const { base, ratio: before } = ticketPriceOf(state, teamId);
+  if (base <= 0) {
+    return { ok: false, message: "이 리그에는 기준 티켓가가 없습니다" };
+  }
+  const asked = Math.round(input.price);
+  if (asked <= 0) return { ok: false, message: "티켓 가격이 0입니다" };
+
+  const last = finance.ticketPrice;
+  if (last) {
+    const left = TICKET_PRICE_COOLDOWN_DAYS - diffDays(last.setOn, state.date);
+    if (left > 0) {
+      return {
+        ok: false,
+        message:
+          `티켓 값은 ${last.setOn}에 ${ticketText(base * before)}으로 매겼습니다 — ` +
+          `시즌권과 예매가 이미 나가 ${left}일 뒤에 다시 매길 수 있습니다`,
+      };
+    }
+  }
+
+  const ratio = Math.min(TICKET_RATIO_MAX, Math.max(TICKET_RATIO_MIN, asked / base));
+  finance.ticketPrice = { ratio, setOn: state.date };
+
+  const price = base * ratio;
+  const capped = Math.abs(price - asked) >= 1;
+  const swing = Math.round((ratio - 1) * 100);
+  const crowd = Math.round((ticketDemandFactor(ratio) - 1) * 100);
+  const line =
+    `티켓 값 ${ticketText(base * before)} → ${ticketText(price)} ` +
+    `(기준가 ${ticketText(base)} 대비 ${swing >= 0 ? "+" : ""}${swing}%)`;
+  pushNarrative(state, line, 3);
+  return {
+    ok: true,
+    message:
+      line +
+      (capped ? ` — 부른 값 ${ticketText(asked)}은 이 구단이 부를 수 있는 폭 밖입니다` : "") +
+      `. 관중은 기준 대비 ${crowd >= 0 ? "+" : ""}${crowd}%로 움직입니다`,
+    brief: {
+      head: "티켓 가격",
+      items: [
+        item({ label: "단가", text: ticketText(price), delta: price - base * before }),
+        item({ label: "기준가", text: ticketText(base) }),
+        item({ label: "관중", text: `${crowd >= 0 ? "+" : ""}${crowd}%`, delta: crowd }),
+      ],
+    },
+  };
+}
+
+/**
+ * 티켓 한 줄 — `get_finance`가 싣는다. **기준가와 나란히 적는다**: 모델이 다음 값을
+ * 부르려면 지금 값이 어디에 서 있는지를 알아야 한다.
+ */
+export function ticketPriceLine(state: GameState): string {
+  const teamId = state.userTeamId;
+  const { base, ratio, price, min, max } = ticketPriceOf(state, teamId);
+  const swing = Math.round((ratio - 1) * 100);
+  const set = financeOf(state, teamId).ticketPrice;
+  const left = set ? TICKET_PRICE_COOLDOWN_DAYS - diffDays(set.setOn, state.date) : 0;
+  return (
+    `티켓 단가 ${ticketText(price)} (기준가 ${ticketText(base)}${swing === 0 ? "" : ` · ${swing > 0 ? "+" : ""}${swing}%`}) · ` +
+    `부를 수 있는 폭 ${ticketText(min)}~${ticketText(max)}` +
+    (left > 0 ? ` · 다시 매기기까지 ${left}일` : "")
+  );
+}
+
 export interface MatchdayRevenue {
   attendance: number;
   capacity: number;
@@ -631,17 +820,23 @@ export function matchdayRevenue(state: GameState, match: MatchRecord): MatchdayR
   const rng = makeRng(state.seed, `attendance:${match.id}`);
   occupancy += (rng() - 0.5) * OCCUPANCY_JITTER;
 
-  occupancy = Math.max(OCCUPANCY_FLOOR, Math.min(1, occupancy));
-  // 친선은 하한을 지난 뒤에 깎는다 — 프리시즌 관중을 만석 판정에 넣지 않는다
+  /**
+   * **하한은 성적이 만드는 몫에만 걸린다** (finance.md §5.2). 순위도 폼도 바닥이면
+   * 0.45는 오지만, 그 뒤에 곱하는 가격 탄력과 친선 배율은 하한 밖이다 — 표를 두 배
+   * 값에 팔면 관중이 0.45 아래로 내려가야 하고, 프리시즌 관중은 만석 판정에 넣지
+   * 않는다. 상한(만석)을 **탄력 뒤에** 두는 것이 가격 결정권의 요점이다: 수요가 1을
+   * 넘어 잘리고 있던 구단만 값을 올려도 관중을 잃지 않는다.
+   */
+  occupancy = Math.max(OCCUPANCY_FLOOR, occupancy);
+  const ratio = ticketRatioOf(state, teamId);
+  occupancy = Math.min(1, occupancy * ticketDemandFactor(ratio));
   const friendly = isFriendly(match);
   if (friendly) occupancy *= FRIENDLY_ATTENDANCE_FACTOR;
   const attendance = Math.round(capacity * occupancy);
 
-  const basePrice =
-    leagueCatalogById(leagueOfTeamIn(state, teamId))?.avgTicketPrice ?? DEFAULT_TICKET_PRICE;
   const price =
-    basePrice *
-    TICKET_TIER_FACTOR[tier] *
+    ticketBasePriceOf(state, teamId, leagueOfTeamIn(state, teamId)) *
+    ratio *
     (isEuroCup(match.competitionId) ? EURO_TICKET_FACTOR : 1) *
     (friendly ? FRIENDLY_TICKET_FACTOR : 1);
   const gate = attendance * price;
@@ -765,9 +960,9 @@ export function applyAiMatchFinance(state: GameState, match: MatchRecord): void 
 
     if (side === "home" && !match.neutral) {
       const { capacity } = profileOf(state, teamId);
+      // AI 구단은 언제나 기준가다 — 가격 결정권은 감독의 길이다 (finance.md §5.2)
       const price =
-        (leagueCatalogById(leagueOfTeamIn(state, teamId))?.avgTicketPrice ?? DEFAULT_TICKET_PRICE) *
-        TICKET_TIER_FACTOR[tier] *
+        ticketBasePriceOf(state, teamId, leagueOfTeamIn(state, teamId)) *
         (isEuroCup(match.competitionId) ? EURO_TICKET_FACTOR : 1) *
         (friendly ? FRIENDLY_TICKET_FACTOR : 1);
       const occupancy = OCCUPANCY_BASE[tier] * (friendly ? FRIENDLY_ATTENDANCE_FACTOR : 1);
@@ -1225,6 +1420,80 @@ export function amortisationOf(state: GameState, teamId: string): AmortisationLi
 }
 
 /**
+ * **구장 자산의 내용연수** (개월) — 10년 (finance.md §6.1-1).
+ *
+ * 실제 구장의 감가상각은 25~50년이지만 근거는 그쪽이 아니라 **회수 기간**이다:
+ * 좌석 하나가 `SEAT_COST`(£8k)에 서서 시즌당 그 십분의 일쯤을 벌어들이므로,
+ * 상각 기간을 회수 기간에 맞추면 증설은 갚는 동안 손익이 대략 0이고 다 갚은 뒤부터
+ * 이익이 된다 — 감독이 원장에서 읽을 수 있는 이야기가 그 자리에서 나온다.
+ */
+export const STADIUM_ASSET_MONTHS = 120;
+
+export interface CapitalAssetInput {
+  id: string;
+  label: string;
+  cost: number;
+  months: number;
+}
+
+/**
+ * **자본 자산을 산다** — 현금은 오늘 한 번(`capex`), 손익은 내용연수에 나눠(`depreciation`).
+ *
+ * 선수 이적료와 같은 두 축이다(§6.1). 다른 점은 취득원가와 기간을 파생할 이력이
+ * 없다는 것뿐이라, 그 둘을 `finance.assets`에 줄로 든다. 자산을 만드는 유일한 입구다.
+ */
+export function recordCapitalAsset(
+  state: GameState,
+  teamId: string,
+  input: CapitalAssetInput,
+): void {
+  const cost = Math.max(0, Math.round(input.cost));
+  if (cost <= 0 || input.months <= 0) return;
+  recordFinance(state, teamId, {
+    kind: "expense",
+    category: "capex",
+    label: input.label,
+    amount: cost,
+  });
+  const finance = financeOf(state, teamId);
+  (finance.assets ??= []).push({
+    id: input.id,
+    label: input.label,
+    cost,
+    since: state.date,
+    months: input.months,
+  });
+}
+
+export interface DepreciationLine {
+  label: string;
+  monthly: number;
+}
+
+/**
+ * 이번 달 자산 상각 — 내용연수가 남은 자산만.
+ *
+ * 선수 쪽과 같은 불변식을 진다: **턴 상각의 총합이 취득원가를 넘지 않는다.** 여기선
+ * 기간이 자산에 적혀 있으므로 지난 개월이 `months`에 닿으면 그냥 멈춘다.
+ */
+export function depreciationOf(state: GameState, teamId: string): DepreciationLine[] {
+  const assets = state.finances.find((f) => f.teamId === teamId)?.assets ?? [];
+  const lines: DepreciationLine[] = [];
+  for (const asset of assets) {
+    if (asset.months <= 0) continue;
+    /**
+     * **취득한 달의 다음 달부터 센다.** 착공일이 월초든 월말이든 정확히 `months`번
+     * 서야 상각 총합이 취득원가와 같다 — 취득한 달을 세면 보드의 답이 1일에 온
+     * 자산만 한 달치를 더 문다.
+     */
+    const elapsed = monthsBetween(monthOf(asset.since), monthOf(state.date));
+    if (elapsed < 1 || elapsed > asset.months) continue;
+    lines.push({ label: asset.label, monthly: asset.cost / asset.months });
+  }
+  return lines;
+}
+
+/**
  * 팀별 최근 성적 — 월초 정산이 96팀 × 전 경기를 훑지 않도록 한 번만 만든다.
  * @returns teamId → 최근 N경기 승률 (경기가 없으면 없음)
  */
@@ -1556,6 +1825,21 @@ function postMonthlyItems(state: GameState): void {
         accounting: "noncash",
       });
     }
+
+    /**
+     * 자산 상각 — 구장 증설처럼 현금이 한 번 나간 자산의 몫 (§6.1-1). 선수 상각과
+     * 카테고리를 가르는 이유는 이름이다: `이적료 분할 비용` 아래에 구장이 서면
+     * 감독이 원장에서 "이적료를 얼마나 나눠 물고 있나"를 읽을 수 없다.
+     */
+    for (const line of depreciationOf(state, team.id)) {
+      recordFinance(state, team.id, {
+        kind: "expense",
+        category: "depreciation",
+        label: line.label,
+        amount: line.monthly,
+        accounting: "noncash",
+      });
+    }
   }
 }
 
@@ -1581,16 +1865,20 @@ const UNPLAYED_HOME_MATCHES = 19;
 function typicalHomeGate(teamId: string, leagueId: string | null, state?: GameState): number {
   const tier = tierOf(state, teamId);
   const { capacity } = profileOf(state, teamId);
-  const price =
-    (leagueCatalogById(leagueId)?.avgTicketPrice ?? DEFAULT_TICKET_PRICE) *
-    TICKET_TIER_FACTOR[tier];
+  const price = ticketBasePriceOf(state, teamId, leagueId);
   return capacity * OCCUPANCY_BASE[tier] * price * (1 + HOSPITALITY_RATE[tier]);
 }
 
 function unplayedLeagueMatchdayMonthly(state: GameState, teamId: string): number {
   const league = leagueOfTeamIn(state, teamId);
   if (isTopLeague(league)) return 0;
-  return (typicalHomeGate(teamId, league, state) * UNPLAYED_HOME_MATCHES) / BROADCAST_MONTHS;
+  /**
+   * 감독의 가격 결정은 여기에도 닿는다 — 감독이 강등돼 이 리그에 있으면 홈 경기가
+   * 아예 없어, 이 대체 수입이 그 구단의 매치데이 전부다. 기준가(`typicalHomeGate`)에
+   * 배율과 탄력을 함께 곱한다.
+   */
+  const gate = typicalHomeGate(teamId, league, state) * ticketRevenueFactor(state, teamId);
+  return (gate * UNPLAYED_HOME_MATCHES) / BROADCAST_MONTHS;
 }
 
 /**
@@ -1762,9 +2050,17 @@ export function summarise(entries: LedgerEntry[]): {
   const amount = (list: FinanceReportLine[], category: FinanceCategory) =>
     list.find((l) => l.category === category)?.amount ?? 0;
 
-  // 현금은 상각을 빼고, 손익은 이적료 지출을 뺀다 (§6.1)
-  const cashNet = incomeTotal - (expenseTotal - amount(expense, "amortisation"));
-  const pnlNet = incomeTotal - (expenseTotal - amount(expense, "transfer_out"));
+  /**
+   * **현금은 상각 둘을 빼고, 손익은 산 값 둘을 뺀다** (§6.1 · §6.1-1).
+   *
+   * 선수(`transfer_out` ↔ `amortisation`)와 자산(`capex` ↔ `depreciation`)이 같은
+   * 모양의 짝이다 — 현금은 살 때 한 번 나가고, 손익은 쓰는 기간에 나눠 문다.
+   */
+  const cashNet =
+    incomeTotal -
+    (expenseTotal - amount(expense, "amortisation") - amount(expense, "depreciation"));
+  const pnlNet =
+    incomeTotal - (expenseTotal - amount(expense, "transfer_out") - amount(expense, "capex"));
   const revenue = incomeTotal - amount(income, "transfer_in");
   const wages = amount(expense, "player_wages") + amount(expense, "staff_wages");
 
@@ -2469,6 +2765,7 @@ export function financeLookup(state: GameState, month?: string): { ok: boolean; 
   lines.push(
     `잔고 ${money(finance.balance)} · 이적 예산 ${money(finance.transferBudget)}${finance.budgetFrozen ? " (동결)" : ""} · 주급 총액 ${money(weeklyWagesOf(state, state.userTeamId))}/주`,
   );
+  lines.push(ticketPriceLine(state));
   if (debt > 0) {
     lines.push(
       `부채 ${money(debt)} · 연 이자 ${money(debt * DEBT_INTEREST_ANNUAL)} · 동결선 ${money(debtLimitOf(state, state.userTeamId))}`,

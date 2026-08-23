@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import {
   buildPaymentInstallments,
   effectiveFeeOf,
@@ -30,6 +30,11 @@ import {
   PSR_LOSS_LIMIT,
   adjustTransferBudget,
   amortisationOf,
+  depreciationOf,
+  leagueTicketSpread,
+  recordCapitalAsset,
+  setTicketPrice,
+  ticketPriceOf,
   applyFinanceEvent,
   buildOfficeViews,
   weeklyWagesOf,
@@ -2052,5 +2057,152 @@ describe("조건부 조항 — 셀온 정산은 양쪽에 대칭으로 선다", 
     expect(categoryOf(paid)).toBe("transfer_out");
     expect(paid.label).toContain("셀온 정산금");
     expect(paid.amount).toBe(DUE);
+  });
+});
+
+/**
+ * 티켓 — **리그 폭**(카탈로그 층)과 **감독이 매기는 값**(finance.md §5.2).
+ * 화면에 드러나지 않는 곡선이라 여기서 고정한다.
+ */
+describe("티켓 — 리그 폭과 감독이 매기는 값", () => {
+  /** 96팀이 다 들어 있는 세계 하나면 리그 폭은 전부 읽힌다 — describe 하나가 나눠 쓴다 */
+  let world: GameState;
+  beforeAll(() => {
+    world = createTestGame();
+  });
+
+  /** 그 리그에서 제일 비싼 표 ÷ 제일 싼 표 — 리그 평균가를 타지 않는 순수한 폭 */
+  function spreadRatio(state: GameState, leagueId: string): number {
+    const bases = state.teams
+      .filter((t) => leagueOfTeam(t.id) === leagueId)
+      .map((t) => ticketPriceOf(state, t.id).base);
+    return Math.max(...bases) / Math.min(...bases);
+  }
+
+  it("리그 폭이 tier 보정을 1을 축으로 늘이고 줄인다", () => {
+    // EPL이 표를 잰 자리다 — 축이라 1이고, 표에 없는 리그도 1이라 아무 일이 없다
+    expect(leagueTicketSpread("epl")).toBe(1);
+    expect(leagueTicketSpread("nowhere-league")).toBe(1);
+    // 2부는 그 나라 1부의 폭을 쓴다 — 값을 매기는 문화는 리그가 아니라 나라의 것이다
+    expect(leagueTicketSpread("serieb")).toBe(leagueTicketSpread("seriea"));
+    expect(leagueTicketSpread("championship")).toBe(leagueTicketSpread("epl"));
+
+    // 폭이 넓은 리그는 위아래가 더 벌어지고, 좁은 리그는 붙는다
+    expect(spreadRatio(world, "seriea")).toBeGreaterThan(spreadRatio(world, "epl"));
+    expect(spreadRatio(world, "bundesliga")).toBeLessThan(spreadRatio(world, "epl"));
+  });
+
+  it("부른 값은 폭에서 잘려 들어가고 배율로 남는다", () => {
+    const state = createMiniGame();
+    const teamId = state.userTeamId;
+    const { base, max } = ticketPriceOf(state, teamId);
+
+    expect(setTicketPrice(state, { price: Math.round(base * 3) }).ok).toBe(true);
+    const dear = ticketPriceOf(state, teamId);
+    expect(dear.price).toBeCloseTo(max, 6);
+    expect(dear.ratio).toBeCloseTo(max / base, 6);
+
+    // 시즌권과 예매가 이미 나갔다 — 같은 안건은 쿨다운이 지나야 다시 매긴다
+    expect(setTicketPrice(state, { price: Math.round(base) }).ok).toBe(false);
+    financeOf(state, teamId).ticketPrice!.setOn = addDays(state.date, -30);
+    expect(setTicketPrice(state, { price: Math.round(base) }).ok).toBe(true);
+    expect(ticketPriceOf(state, teamId).ratio).toBeCloseTo(1, 2);
+  });
+
+  it("값을 올리면 관중이 줄고, 수입이 가장 큰 자리는 기준가 근처다", () => {
+    const state = createTestGame();
+    const teamId = state.userTeamId;
+    const match = state.matches.find((m) => m.homeTeamId === teamId && !m.neutral)!;
+    const at = (ratio: number) => {
+      financeOf(state, teamId).ticketPrice = { ratio, setOn: state.date };
+      return matchdayRevenue(state, match);
+    };
+
+    const par = at(1);
+    // 비싸게 팔면 관중이 줄고, 폭 끝에서는 수입까지 준다
+    const dear = at(1.5);
+    expect(dear.attendance).toBeLessThan(par.attendance);
+    expect(dear.income).toBeLessThan(par.income);
+    // 싸게 팔면 관중은 늘고 수입은 준다 — 관중을 사는 데 값을 치르는 것이다
+    const cheap = at(0.7);
+    expect(cheap.attendance).toBeGreaterThanOrEqual(par.attendance);
+    expect(cheap.income).toBeLessThan(par.income);
+
+    /**
+     * **`avgTicketPrice`는 이미 시장이 찾아 놓은 값이다** — 최적점이 폭 끝으로
+     * 밀리면 "언제나 최대로 올린다"가 되어 결정이 아니라 공짜 수입이 된다.
+     * `TICKET_ELASTICITY`를 낮추면 조용히 그렇게 되는 자리다.
+     */
+    const ratios = [0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5];
+    const best = ratios.reduce((a, b) => (at(b).income > at(a).income ? b : a));
+    expect(best).toBeGreaterThanOrEqual(0.9);
+    expect(best).toBeLessThanOrEqual(1.2);
+  });
+});
+
+/**
+ * 구장 투자 — **현금은 한 번, 손익은 내용연수에 나눠** (finance.md §6.1-1).
+ * 선수 이적료(§6.1)와 같은 모양의 두 축이다.
+ */
+describe("자본 자산 — capex와 상각", () => {
+  const DAY = "2026-08-01";
+  const line = (
+    kind: "income" | "expense",
+    category: FinanceCategory,
+    amount: number,
+    noncash = false,
+  ): LedgerEntry => ({
+    date: DAY,
+    kind,
+    category,
+    label: category,
+    amount,
+    ...(noncash ? { accounting: "noncash" as const } : {}),
+  });
+
+  it("capex는 현금에서만, 상각은 손익에서만 빠진다", () => {
+    const s = summarise([
+      line("income", "matchday", 10_000_000),
+      line("expense", "capex", 8_000_000),
+      line("expense", "depreciation", 66_667, true),
+    ]);
+    // 통장에서 나간 것은 공사비뿐이다
+    expect(s.cashNet).toBe(10_000_000 - 8_000_000);
+    // 장부에 선 것은 상각뿐이다 — 자산을 산 값은 손익이 아니다
+    expect(s.pnlNet).toBe(10_000_000 - 66_667);
+  });
+
+  it("상각 총합은 취득원가와 같고 내용연수가 지나면 멈춘다", () => {
+    const state = createMiniGame();
+    const teamId = state.userTeamId;
+    const MONTHS = 12;
+    const COST = 12_000_000;
+    const before = financeOf(state, teamId).balance;
+    recordCapitalAsset(state, teamId, {
+      id: "asset-test",
+      label: "구장 증설 (1,500석)",
+      cost: COST,
+      months: MONTHS,
+    });
+    // 현금은 그날 한 번 나간다
+    expect(financeOf(state, teamId).balance).toBe(before - COST);
+    const spent = financeOf(state, teamId).ledger.filter((e) => categoryOf(e) === "capex");
+    expect(spent).toHaveLength(1);
+    expect(spent[0]!.accounting).toBeUndefined(); // 현금이다
+
+    // 취득한 달의 다음 달부터 정확히 MONTHS번 선다
+    const [year, month] = monthOf(state.date).split("-").map(Number) as [number, number];
+    let posts = 0;
+    let total = 0;
+    for (let step = 0; step <= MONTHS + 2; step++) {
+      const m = month + step;
+      state.date = `${year + Math.floor((m - 1) / 12)}-${String(((m - 1) % 12) + 1).padStart(2, "0")}-01`;
+      for (const l of depreciationOf(state, teamId)) {
+        posts += 1;
+        total += l.monthly;
+      }
+    }
+    expect(posts).toBe(MONTHS);
+    expect(total).toBeCloseTo(COST, 6);
   });
 });
