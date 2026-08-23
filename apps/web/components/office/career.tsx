@@ -378,115 +378,118 @@ export function CareerView({
           <h3>{squad.manager.name} 감독</h3>
           <div className="bg">{squad.manager.background}</div>
           {/**
-           * 감독에게 **딸린 수치 묶음** 둘이 한 줄에 선다 — 세계가 그를 보는 눈(평판)과
-           * 자리에 남은 목숨(보드 경고). 둘 다 이름·배경보다 아래 단이고 서로는 같은 단이다.
+           * 감독에게 딸린 값은 **두 갈래**고 생김새가 그것을 가른다 — 견주는 눈금
+           * (평판·보드 경고)은 상자 하나에 함께 담고, 읽는 사실(계약·지갑)은 상자 없이
+           * 라벨과 값으로 선다. 둘 다 이름·배경보다 아래 단이다.
            */}
           <div className="mgr-meters">
-            {/**
-             * 평판 — 감독의 능력이 아니라 **세계가 그를 보는 눈**이라 오각형과 같은
-             * 무게로 그리지 않는다. 다만 셋을 견주는 값이라 막대가 읽기 편하다:
-             * **짧은 막대 셋을 한 줄로** 눕혀 눈금은 주되 자리는 덜 차지한다.
-             */}
-            <div className="mgr-rep">
-              <div className="mgr-rep-title">평판</div>
-              <div className="mgr-rep-items">
-                {(
-                  [
-                    ["보드", squad.manager.reputation.board],
-                    ["언론", squad.manager.reputation.media],
-                    ["선수단", squad.manager.reputation.squad],
-                  ] as const
-                ).map(([label, value]) => (
-                  <span className="rep-item" key={label}>
-                    <span className="rep-label">{label}</span>
-                    <span className="rep-bar">
-                      <i style={{ width: `${value}%` }} />
-                    </span>
-                    <b>{value}</b>
-                  </span>
-                ))}
-              </div>
-            </div>
-            {/**
-             * 보드 경고 — 평판과 **같은 무게로, 다른 물건으로** 그린다. 경질은 이
-             * 세이브가 끝나는 유일한 길이라 카운터가 화면에 없으면 끝이 예고 없이
-             * 온다. 평판은 0~100 사이를 오가는 눈금이지만 경고는 **세는 것**이라
-             * 막대가 아니라 칸이다 — 찬 칸이 받은 경고고, 마지막 칸이 차면 붉다.
-             */}
-            <div className="mgr-warn">
-              <div className="mgr-rep-title">보드 경고</div>
-              <div
-                className="mgr-warn-cells"
-                data-testid="board-warnings"
-                role="img"
-                aria-label={`보드 경고 ${squad.manager.boardWarnings}/${squad.manager.warningLimit}${
-                  squad.manager.lastWarnedOn ? ` · 마지막 ${squad.manager.lastWarnedOn}` : ""
-                }`}
-                title={
-                  squad.manager.lastWarnedOn
-                    ? `마지막 경고 ${squad.manager.lastWarnedOn}`
-                    : undefined
-                }
-              >
-                {Array.from({ length: squad.manager.warningLimit }, (_, i) => (
-                  <i
-                    key={i}
-                    className={
-                      i < squad.manager.boardWarnings
-                        ? i === squad.manager.warningLimit - 1
-                          ? "on last"
-                          : "on"
-                        : ""
-                    }
-                  />
-                ))}
-              </div>
-            </div>
-            {/**
-             * 계약 — 평판·경고와 같은 단의 세 번째 사실이다 (career.md §5.1).
-             * 옛 세이브엔 계약이 없어 그때는 칸 자체가 서지 않는다.
-             */}
-            {career.contract && (
-              <div className="mgr-warn">
-                <div className="mgr-rep-title">계약</div>
-                <div className="mgr-contract">
-                  연봉 {formatMoney(career.contract.salary)} · {career.contract.until}까지 (
-                  {career.contract.daysLeft}일)
-                  {career.contract.renewal === "declined" && (
-                    <b className="mgr-nonrenewal"> 재계약 없음</b>
-                  )}
-                </div>
-              </div>
-            )}
-            {/**
-             * 지갑 — **구단 잔고와 다른 돈이다** (career.md §5.4). 계약 옆에 서야
-             * 연봉과 위약금이 어디로 갔는지가 그 자리에서 읽힌다.
-             */}
-            <div className="mgr-warn">
-              <div className="mgr-rep-title">지갑</div>
-              <div className="mgr-contract">
-                {formatMoney(career.wallet)}
-                {career.transferFundRoom > 0 && (
-                  <span className="mgr-fund-room">
-                    사재 출연 여력 {formatMoney(career.transferFundRoom)}
-                  </span>
-                )}
-              </div>
-              {career.spending.length > 0 && (
-                <div className="mgr-spending">
-                  {career.spending.slice(0, SPENDING_SHOWN).map((s, i) => (
-                    <div className="mgr-spend" key={i}>
-                      <span className="when">{s.on}</span>
-                      <span>
-                        {s.kind}
-                        {s.playerName ? ` — ${s.playerName}` : ""}
+            <div className="mgr-gauges">
+              {/**
+               * 평판 — 감독의 능력이 아니라 **세계가 그를 보는 눈**이라 오각형과 같은
+               * 무게로 그리지 않는다. 다만 셋을 견주는 값이라 막대가 읽기 편하다:
+               * **짧은 막대 셋을 한 줄로** 눕혀 눈금은 주되 자리는 덜 차지한다.
+               */}
+              <div className="mgr-rep">
+                <div className="mgr-rep-title">평판</div>
+                <div className="mgr-rep-items">
+                  {(
+                    [
+                      ["보드", squad.manager.reputation.board],
+                      ["언론", squad.manager.reputation.media],
+                      ["선수단", squad.manager.reputation.squad],
+                    ] as const
+                  ).map(([label, value]) => (
+                    <span className="rep-item" key={label}>
+                      <span className="rep-label">{label}</span>
+                      <span className="rep-bar">
+                        <i style={{ width: `${value}%` }} />
                       </span>
-                      <b>−{formatMoney(s.amount)}</b>
-                    </div>
+                      <b>{value}</b>
+                    </span>
                   ))}
                 </div>
-              )}
+              </div>
+              {/**
+               * 보드 경고 — 평판과 **같은 무게로, 다른 물건으로** 그린다. 경질은 이
+               * 세이브가 끝나는 유일한 길이라 카운터가 화면에 없으면 끝이 예고 없이
+               * 온다. 평판은 0~100 사이를 오가는 눈금이지만 경고는 **세는 것**이라
+               * 막대가 아니라 칸이다 — 찬 칸이 받은 경고고, 마지막 칸이 차면 붉다.
+               */}
+              <div className="mgr-warn">
+                <div className="mgr-rep-title">보드 경고</div>
+                <div
+                  className="mgr-warn-cells"
+                  data-testid="board-warnings"
+                  role="img"
+                  aria-label={`보드 경고 ${squad.manager.boardWarnings}/${squad.manager.warningLimit}${
+                    squad.manager.lastWarnedOn ? ` · 마지막 ${squad.manager.lastWarnedOn}` : ""
+                  }`}
+                  title={
+                    squad.manager.lastWarnedOn
+                      ? `마지막 경고 ${squad.manager.lastWarnedOn}`
+                      : undefined
+                  }
+                >
+                  {Array.from({ length: squad.manager.warningLimit }, (_, i) => (
+                    <i
+                      key={i}
+                      className={
+                        i < squad.manager.boardWarnings
+                          ? i === squad.manager.warningLimit - 1
+                            ? "on last"
+                            : "on"
+                          : ""
+                      }
+                    />
+                  ))}
+                </div>
+              </div>
             </div>
+            {/**
+             * 계약·지갑 — 눈금이 아니라 **읽는 사실 한 줄씩**이라 상자를 쓰지 않는다.
+             * 둘이 나란히 서야 연봉과 위약금이 어디로 갔는지가 그 자리에서 읽히고
+             * (career.md §5.1 · §5.4), 옛 세이브엔 계약이 없어 그때는 줄이 하나다.
+             *
+             * 지갑은 **잔고만** 말한다 — 사재 출연 여력은 실제로 넣을 수 있는 최대가
+             * 아니라(`min(지갑, 여력)`) 잔고 옆에 세우면 못 쓰는 돈을 부른다. 여력이
+             * 서는 자리는 감독이 금액을 고르는 순간이다 (career.md §5.4).
+             */}
+            <dl className="mgr-facts">
+              {career.contract && (
+                <div className="mgr-fact">
+                  <dt>계약</dt>
+                  <dd>
+                    연봉 {formatMoney(career.contract.salary)} · {career.contract.until}까지 (
+                    {career.contract.daysLeft}일)
+                    {career.contract.renewal === "declined" && (
+                      <b className="mgr-nonrenewal"> 재계약 없음</b>
+                    )}
+                  </dd>
+                </div>
+              )}
+              <div className="mgr-fact">
+                <dt>지갑</dt>
+                <dd>{formatMoney(career.wallet)}</dd>
+              </div>
+            </dl>
+            {/**
+             * 지출 이력 — 지갑 **아래 자기 줄**이다. 지갑 칸 안에 품고 있었더니 그 칸만
+             * 높이가 튀고 나란히 선 칸들이 그 높이에 맞춰 빈 채로 늘어났다.
+             */}
+            {career.spending.length > 0 && (
+              <div className="mgr-spending">
+                {career.spending.slice(0, SPENDING_SHOWN).map((s, i) => (
+                  <div className="mgr-spend" key={i}>
+                    <span className="when">{s.on}</span>
+                    <span>
+                      {s.kind}
+                      {s.playerName ? ` — ${s.playerName}` : ""}
+                    </span>
+                    <b>−{formatMoney(s.amount)}</b>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
         <ManagerRadar
