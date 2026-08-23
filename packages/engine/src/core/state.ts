@@ -473,14 +473,6 @@ export interface PendingMatch {
     /** 어느 쪽으로 던진 판인가 — 경기당 한 번이라 이 값이 서면 다시 묻지 않는다 */
     intent: "chase" | "hold";
   };
-  /**
-   * **상대 벤치가 마지막으로 판단한 분.**
-   *
-   * 짧게 부른 구간(`maxMinutes`)이 판단 자리를 여는 간격을 여기서 잰다
-   * (`AI_BRIEF_GAP`). 구간 횟수로 세면 감독이 말을 걸수록 상대가 빨라지거나
-   * 얼어붙는다. 옛 세이브엔 없다 (optional).
-   */
-  aiDecidedAt?: number;
 }
 
 export type GamePhase = "idle" | "matchday" | "match";

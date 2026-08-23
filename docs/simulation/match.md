@@ -1097,7 +1097,6 @@ DF +1.4 · MF +1.1 · FW +0.9 · 도움 +0.6 · 무실점 GK +0.8/DF +0.5 · 실
 | `SUB_CHASE_MAX` · `SUB_HOLD_MAX`                 | 2 · 1                                           | 한 경기에 쓰는 승부수·굳히기 교체 장수                                      |
 | `AI_SHAPE_CHASE_MINUTE` · `AI_SHAPE_HOLD_MINUTE` | 65 · 80                                         | AI가 판의 모양을 공격형·5-4-1로 바꾸는 분 (경기당 한 번)                    |
 | `AI_SHAPE_FAMILIARITY_COST`                      | 25 × 0.25                                       | 그 모양 전환이 치르는 전술 적응도 (`FORMATION_CHANGE_COST` × 경기 중 계수)  |
-| `AI_BRIEF_GAP`                                   | 10                                              | 짧게 부른 구간이 AI 벤치의 판단 자리를 여는 최소 간격 (분)                  |
 
 ## 7. 타 팀 간이 시뮬 (`engine/match/quick-sim.ts`)
 
