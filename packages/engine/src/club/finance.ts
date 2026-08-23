@@ -584,11 +584,39 @@ function ticketBasePriceOf(
 }
 
 /** 감독이 세워 둔 배율 — 없거나 AI 구단이면 1(기준가)이다 */
-export function ticketRatioOf(state: GameState, teamId: string): number {
+function ticketRatioOf(state: GameState, teamId: string): number {
   if (teamId !== state.userTeamId) return 1;
   const set = financeOf(state, teamId).ticketPrice;
   if (!set) return 1;
   return Math.min(TICKET_RATIO_MAX, Math.max(TICKET_RATIO_MIN, set.ratio));
+}
+
+export interface TicketPrice {
+  /** 리그 평균가 × 리그 폭이 걸린 tier 보정 — 감독의 배율을 타지 않는다 */
+  base: number;
+  /** 감독이 세워 둔 배율 (기본 1) */
+  ratio: number;
+  /** 지금 팔고 있는 값 */
+  price: number;
+  /** 부를 수 있는 폭 */
+  min: number;
+  max: number;
+}
+
+/**
+ * 이 구단의 티켓 값 한 덩이 — 사실 카드·조회·테스트가 같은 자를 읽는다.
+ * 리그 경기의 값이다: 대항전·친선 보정은 그 경기가 안다 (`matchdayRevenue`).
+ */
+export function ticketPriceOf(state: GameState, teamId: string): TicketPrice {
+  const base = ticketBasePriceOf(state, teamId, leagueOfTeamIn(state, teamId));
+  const ratio = ticketRatioOf(state, teamId);
+  return {
+    base,
+    ratio,
+    price: base * ratio,
+    min: base * TICKET_RATIO_MIN,
+    max: base * TICKET_RATIO_MAX,
+  };
 }
 
 /** 값을 올린 만큼 관중이 줄어드는 몫 — 기준가면 1이고 0 아래로는 가지 않는다 */
@@ -633,7 +661,7 @@ export function setTicketPrice(
   }
   const teamId = state.userTeamId;
   const finance = financeOf(state, teamId);
-  const base = ticketBasePriceOf(state, teamId, leagueOfTeamIn(state, teamId));
+  const { base, ratio: before } = ticketPriceOf(state, teamId);
   if (base <= 0) {
     return { ok: false, message: "이 리그에는 기준 티켓가가 없습니다" };
   }
@@ -647,13 +675,12 @@ export function setTicketPrice(
       return {
         ok: false,
         message:
-          `티켓 값은 ${last.setOn}에 ${ticketText(base * ticketRatioOf(state, teamId))}으로 매겼습니다 — ` +
+          `티켓 값은 ${last.setOn}에 ${ticketText(base * before)}으로 매겼습니다 — ` +
           `시즌권과 예매가 이미 나가 ${left}일 뒤에 다시 매길 수 있습니다`,
       };
     }
   }
 
-  const before = ticketRatioOf(state, teamId);
   const ratio = Math.min(TICKET_RATIO_MAX, Math.max(TICKET_RATIO_MIN, asked / base));
   finance.ticketPrice = { ratio, setOn: state.date };
 
@@ -688,14 +715,13 @@ export function setTicketPrice(
  */
 export function ticketPriceLine(state: GameState): string {
   const teamId = state.userTeamId;
-  const base = ticketBasePriceOf(state, teamId, leagueOfTeamIn(state, teamId));
-  const ratio = ticketRatioOf(state, teamId);
+  const { base, ratio, price, min, max } = ticketPriceOf(state, teamId);
   const swing = Math.round((ratio - 1) * 100);
   const set = financeOf(state, teamId).ticketPrice;
   const left = set ? TICKET_PRICE_COOLDOWN_DAYS - diffDays(set.setOn, state.date) : 0;
   return (
-    `티켓 단가 ${ticketText(base * ratio)} (기준가 ${ticketText(base)}${swing === 0 ? "" : ` · ${swing > 0 ? "+" : ""}${swing}%`}) · ` +
-    `부를 수 있는 폭 ${ticketText(base * TICKET_RATIO_MIN)}~${ticketText(base * TICKET_RATIO_MAX)}` +
+    `티켓 단가 ${ticketText(price)} (기준가 ${ticketText(base)}${swing === 0 ? "" : ` · ${swing > 0 ? "+" : ""}${swing}%`}) · ` +
+    `부를 수 있는 폭 ${ticketText(min)}~${ticketText(max)}` +
     (left > 0 ? ` · 다시 매기기까지 ${left}일` : "")
   );
 }

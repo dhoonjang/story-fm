@@ -18,6 +18,12 @@ const WAGE_TONE_CLASS: Record<OfficeViews["finance"]["wageTone"], string> = {
   danger: "danger",
 };
 
+/**
+ * 통장을 건드리지 않는 줄 — 이적료 분할 비용과 자산 상각 둘이다. `장부` 꼬리표를
+ * 달아 현금 지출과 가른다 (finance.md §6.1 · §6.1-1).
+ */
+const NONCASH_CATEGORIES = new Set(["amortisation", "depreciation"]);
+
 type FinanceFeedRow = OfficeViews["finance"]["feed"][number];
 
 /**
@@ -129,7 +135,7 @@ function FinanceMonthCard({ month }: { month: FinanceMonth }) {
             <div className="fin-line" key={item.category}>
               <span>
                 {item.label}
-                {item.category === "amortisation" && <span className="fin-tag">장부</span>}
+                {NONCASH_CATEGORIES.has(item.category) && <span className="fin-tag">장부</span>}
               </span>
               <span>{formatMoney(item.amount)}</span>
             </div>

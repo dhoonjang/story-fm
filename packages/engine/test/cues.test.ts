@@ -29,6 +29,8 @@ import {
   windowOpenForTeam,
   worldFigures,
   type GameState,
+  categoryOf,
+  STADIUM_ASSET_MONTHS,
 } from "@story-fm/engine";
 import type { BoardRequestKind, PlayerIssueReason, Transfer } from "@story-fm/domain";
 import { BOARD_REQUEST_KINDS } from "@story-fm/domain";
@@ -853,6 +855,15 @@ describe("보드 요청 (감독 → 보드) — 한도가 답을 정한다", () 
     const built = state.boardRequests!.find((r) => r.kind === "stadium")!;
     expect(built.status).toBe("approved");
     expect(financeOf(state, teamId).balance).toBe(balanceBefore - seats * BOARD_REQUEST.SEAT_COST);
+    /**
+     * 공사비는 **자본 지출**이다 — 현금은 오늘 나가지만 손익은 자산이 내용연수에
+     * 나눠 문다 (finance.md §6.1-1). 착공 달 하나가 PSR을 통째로 먹지 않는다.
+     */
+    const spent = financeOf(state, teamId).ledger.filter((e) => categoryOf(e) === "capex");
+    expect(spent).toHaveLength(1);
+    const asset = financeOf(state, teamId).assets?.[0];
+    expect(asset?.cost).toBe(seats * BOARD_REQUEST.SEAT_COST);
+    expect(asset?.months).toBe(STADIUM_ASSET_MONTHS);
     // 돈은 나갔지만 좌석은 아직 없다
     expect(clubProfileIn(state, teamId).capacity).toBe(before);
     // 공사 중에는 다시 걸 수 없다 — 여력이 수용인원에서 나오므로 복리로 커진다
