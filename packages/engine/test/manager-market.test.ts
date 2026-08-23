@@ -26,6 +26,7 @@ import {
   generateReporters,
   isTopFlight,
   leagueOfTeamIn,
+  managerSeveranceOf,
   managerTrainingUptake,
   offerDrySpell,
   offerVacancy,
@@ -35,6 +36,9 @@ import {
   playerById,
   playersOf,
   respondOffer,
+  RENEWAL_BOARD_GATE,
+  RENEWAL_NOTICE_DAYS,
+  reviewManagerContract,
   reviewUserSeat,
   runManagerMarket,
   scoutPlayer,
@@ -466,6 +470,8 @@ describe("경질 뒤 — 무직으로 흐르고, 제안을 받고, 부임한다"
   }
   state.manager.reputation.board = 25;
   state.date = "2027-03-04";
+  // 위약금은 계약을 지우기 전에 정해진다 — 경질 뒤에는 읽을 수 없으므로 여기서 뜬다
+  const contractAtSack = { ...state.manager.contract! };
   const sackedToday = reviewUserSeat(state, []);
 
   /** 그 리그의 꼴찌 자리를 만들어 준다 — 공석이 될 구단은 여기서 나온다 */
@@ -512,6 +518,22 @@ describe("경질 뒤 — 무직으로 흐르고, 제안을 받고, 부임한다"
     const old = state.teams.find((t) => t.id === sackedFrom)!;
     expect(old.managerName).not.toBe(state.manager.name);
     expect(old.managerSince).toBe("2027-03-04");
+  });
+
+  /**
+   * 위약금이 **구단의 지출이고 지갑이 감독의 것**이라는 경계다 (career.md §5.4 · §7).
+   * 한쪽으로 몰면 감독의 돈이 구단 잔고를 흔들거나 옛 구단의 지출이 사라진다.
+   */
+  it("경질은 위약금을 남긴다 — 구단 원장에 서고 같은 금액이 지갑에 쌓인다", () => {
+    const expected = managerSeveranceOf(contractAtSack, "2027-03-04");
+    expect(expected, "잔여가 남은 계약인데 위약금이 0이다").toBeGreaterThan(0);
+    expect(state.dismissal!.severance, "경질 카드에 위약금이 없다").toBe(expected);
+    expect(state.manager.wallet, "구단이 낸 돈이 감독에게 닿지 않았다").toBe(expected);
+    expect(state.manager.contract, "경질이 계약을 남겼다").toBeUndefined();
+
+    const paid = financeOf(state, sackedFrom).ledger.filter((e) => e.category === "severance");
+    expect(paid, "위약금이 구단 원장에 서지 않았다").toHaveLength(1);
+    expect(paid[0]!.amount).toBe(expected);
   });
 
   /**
@@ -573,8 +595,12 @@ describe("경질 뒤 — 무직으로 흐르고, 제안을 받고, 부임한다"
       reason: "minutes",
       since: state.date,
     });
+    // 지갑은 감독의 것이다 — 구단에 묶인 것만 지워진다 (career.md §5.4 · §7)
+    const wallet = state.manager.wallet;
+    expect(wallet, "위약금이 지갑에 없다").toBeGreaterThan(0);
     const accepted = acceptManagerOffer(state, offer.id);
     expect(accepted.ok, accepted.message).toBe(true);
+    expect(state.manager.wallet, "이직이 감독의 지갑을 비웠다").toBe(wallet);
     expect(state.userTeamId).toBe(offer.teamId);
     expect(state.userTeamId, "옛 구단으로 돌아갔다").not.toBe(sackedFrom);
     expect(state.dismissal, "부임했는데 경질장이 남았다").toBeUndefined();
@@ -833,5 +859,118 @@ describe("감독 계약과 흥정 — 조건이 실리고 한 차례 되부른�
     expect(state.manager.contract?.until).toBe(contractUntil(state.date, offer.years!));
     expect(financeOf(state, offer.teamId).transferBudget).toBe(before + offer.budgetPledge!);
     expect(state.managerVacancies, "부임했는데 공석 명부가 남았다").toHaveLength(0);
+  });
+});
+
+/**
+ * **위약금은 잔여 계약의 함수다** (career.md §5.4) — 순수 함수라 세이브가 필요 없다.
+ * 경계 셋이 값을 한다: 끝까지 간 계약, 잔여 1년, 상한에 걸리는 긴 잔여.
+ */
+describe("경질 위약금 — 잔여에 비례하되 연봉 1년치에서 멈춘다", () => {
+  const contract = { salary: 6_000_000, signedOn: "2026-07-01", until: "2027-07-01" };
+
+  it("만료일에는 물 것이 없다", () => {
+    expect(managerSeveranceOf(contract, "2027-07-01")).toBe(0);
+    expect(managerSeveranceOf(contract, "2027-08-01"), "지난 계약이 음수로 돌아섰다").toBe(0);
+  });
+
+  it("잔여 1년이면 연봉의 절반이다", () => {
+    expect(managerSeveranceOf(contract, "2026-07-01")).toBe(3_000_000);
+  });
+
+  it("잔여가 길어도 연봉 1년치에서 멈춘다", () => {
+    // 잔여 3년 = £9M — 상한이 없으면 경질 하루가 이적 예산 한 시즌치를 삼킨다
+    expect(managerSeveranceOf({ ...contract, until: "2029-07-01" }, "2026-07-01")).toBe(6_000_000);
+  });
+});
+
+/**
+ * **만료 판정과 보드의 재계약 통보** (career.md §5.4).
+ *
+ * 조용히 어긋나는 자리 둘이다: 만료를 "그 날"로 재면 시즌 전환이 통째로 건너뛰는
+ * 06-30에 걸려 영영 오지 않고, 판정한 뒤에도 계약이 남아 있으면 다음 날 또 걸린다.
+ * 세이브 하나를 계약만 갈아 끼우며 잇는다 — 판정이 읽는 것은 오늘·만료일·보드 평판뿐이다.
+ */
+describe("감독 계약 — 만료는 하루를 건너뛰지 않고 두 번 걸리지도 않는다", () => {
+  const state = createTestGame(21);
+  const UNTIL = "2027-06-30";
+  const SALARY = 3_000_000;
+  const reset = (today: string, board = 50): void => {
+    state.date = today;
+    delete state.dismissal;
+    state.managerOffers = [];
+    state.manager.reputation.board = board;
+    state.manager.contract = { salary: SALARY, signedOn: "2026-07-01", until: UNTIL };
+  };
+
+  it("만료일 당일에는 아직 그 구단의 감독이다", () => {
+    reset(UNTIL);
+    // 그날의 판정은 보드의 통보지 만료가 아니다 — 계약은 그 날까지 유효하다
+    expect(reviewManagerContract(state, []), "만료일 당일에 자리가 없어졌다").not.toBe("expired");
+    expect(state.manager.contract, "만료일 당일에 계약이 사라졌다").toBeDefined();
+    expect(state.dismissal, "만료일 당일에 무직이 됐다").toBeUndefined();
+  });
+
+  it("그 날을 밟지 않고 지나쳐도 다음 tick에 정확히 한 번 만료된다", () => {
+    // 리그 최종전과 07-01 사이는 시즌 전환이 통째로 건너뛴다 — 06-30은 tick이 밟는 날이 아니다
+    reset(addDays(UNTIL, 5));
+    expect(reviewManagerContract(state, [])).toBe("expired");
+    expect(state.dismissal?.kind, "만료가 경질로 남았다").toBe("expired");
+    expect(state.dismissal?.severance, "끝까지 간 계약에 위약금을 물렸다").toBeUndefined();
+    expect(state.manager.contract, "만료 판정이 계약을 남겼다").toBeUndefined();
+
+    // 두 번째 tick — 지운 계약을 다시 재지 않는다
+    const dismissedOn = state.dismissal!.on;
+    state.date = addDays(state.date, 1);
+    expect(reviewManagerContract(state, [])).toBe(null);
+    expect(state.dismissal!.on, "만료가 두 번 걸렸다").toBe(dismissedOn);
+  });
+
+  it("문턱 하루 전에는 보드가 아직 아무 말도 하지 않는다", () => {
+    reset(addDays(UNTIL, -RENEWAL_NOTICE_DAYS - 1));
+    expect(reviewManagerContract(state, [])).toBe(null);
+    expect(state.manager.contract?.renewalDecidedOn).toBeUndefined();
+  });
+
+  it("만료 90일 전 — 평판이 문턱을 넘으면 재계약 제안이 서고, 판정은 한 번뿐이다", () => {
+    reset(addDays(UNTIL, -RENEWAL_NOTICE_DAYS), RENEWAL_BOARD_GATE);
+    expect(reviewManagerContract(state, [])).toBe("notice");
+    const offer = openManagerOffers(state)[0]!;
+    expect(offer.via).toBe("renewal");
+    expect(offer.teamId, "재계약인데 남의 구단이 불렀다").toBe(state.userTeamId);
+    expect(offer.salary, "현 연봉 아래로 부른 재계약").toBeGreaterThanOrEqual(SALARY);
+    expect(state.manager.contract?.renewalOffered).toBe(true);
+
+    state.date = addDays(state.date, 1);
+    expect(reviewManagerContract(state, []), "판정이 매일 다시 섰다").toBe(null);
+    expect(state.managerOffers).toHaveLength(1);
+  });
+
+  it("평판이 문턱 아래면 비갱신 통보다 — 제안은 서지 않는다", () => {
+    reset(addDays(UNTIL, -RENEWAL_NOTICE_DAYS), RENEWAL_BOARD_GATE - 1);
+    expect(reviewManagerContract(state, [])).toBe("notice");
+    expect(openManagerOffers(state), "문턱 아래인데 재계약 제안이 섰다").toHaveLength(0);
+    expect(state.manager.contract?.renewalOffered).toBe(false);
+  });
+
+  it("재계약을 수락하면 구단은 그대로고 계약만 다시 선다", () => {
+    reset(addDays(UNTIL, -RENEWAL_NOTICE_DAYS), 60);
+    state.manager.boardWarnings = 2;
+    reviewManagerContract(state, []);
+    const offer = openManagerOffers(state)[0]!;
+    const team = state.userTeamId;
+    const budget = financeOf(state, team).transferBudget;
+
+    const accepted = acceptManagerOffer(state, offer.id);
+    expect(accepted.ok, accepted.message).toBe(true);
+    expect(state.userTeamId, "재계약이 감독을 옮겼다").toBe(team);
+    expect(state.dismissal, "재계약이 감독을 무직으로 만들었다").toBeUndefined();
+    expect(state.manager.contract?.until).toBe(contractUntil(state.date, offer.years!));
+    expect(
+      state.manager.contract?.renewalDecidedOn,
+      "새 임기가 옛 판정을 지고 갔다",
+    ).toBeUndefined();
+    expect(state.manager.boardWarnings, "재계약이 앞선 경고를 지웠다").toBe(2);
+    expect(financeOf(state, team).transferBudget).toBe(budget + offer.budgetPledge!);
   });
 });
