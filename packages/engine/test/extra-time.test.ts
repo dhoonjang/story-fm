@@ -6,6 +6,7 @@ import {
   advanceShootout,
   assignmentsOf,
   awaitingShootout,
+  buildOfficeViews,
   domesticTieWinner,
   euroTieWinner,
   finalizeMatch,
@@ -503,11 +504,17 @@ describe("유저 경기의 연장 (competition.md §6)", () => {
    * 한 번만 굴리고 여러 검증이 나눠 쓴다 — 세계 생성이 이 파일 시간의 대부분이고,
    * 같은 경기를 여러 각도에서 보는 편이 검증도 촘촘하다.
    */
-  let collected: { state: GameState; runs: Played[] } | null = null;
-  function extraTimeWorld(): { state: GameState; runs: Played[] } {
+  let collected: {
+    state: GameState;
+    runs: Played[];
+    subsLimitAtExtra: { subs: number; windows: number } | null;
+  } | null = null;
+  function extraTimeWorld(): NonNullable<typeof collected> {
     if (collected) return collected;
     const state = createTestGame(23);
     const runs: Played[] = [];
+    // 연장 정지점의 뷰가 실은 교체 한도 — 한 번이면 충분하다 (국면이 정하는 값이다)
+    let subsLimitAtExtra: { subs: number; windows: number } | null = null;
     for (let pair = 500; pair < 560; pair++) {
       // 앞 시도의 소모를 지우고 시작한다 — 한 세계를 여러 경기가 나눠 쓴다
       for (const p of playersOf(state, "arsenal")) p.state.condition = 100;
@@ -523,6 +530,7 @@ describe("유저 경기의 연장 (competition.md §6)", () => {
         fatigueAtEnd = worn;
         if (stop !== "extra_time_start") return;
         fatigueAtExtra = worn;
+        subsLimitAtExtra ??= buildOfficeViews(state).match?.subs.limit ?? null;
         // **감독이 연장에서 교체한다** — 이 기능의 전부가 여기에 있다
         const side = userSide(state);
         const mine = side === "home" ? pending.ledger.home : pending.ledger.away;
@@ -546,7 +554,7 @@ describe("유저 경기의 연장 (competition.md §6)", () => {
     }
     // 이 아래 검증들이 아무것도 증명하지 못하는 상태를 그냥 지나치지 않는다
     expect(runs.length, "연장까지 가는 경기를 찾지 못했습니다").toBeGreaterThanOrEqual(3);
-    return (collected = { state, runs });
+    return (collected = { state, runs, subsLimitAtExtra });
   }
   const extraTimeRuns = () => extraTimeWorld().runs;
 
@@ -561,6 +569,10 @@ describe("유저 경기의 연장 (competition.md §6)", () => {
       // 그 30분에 감독이 손을 댈 수 있었다 — 코어가 조용히 굴리던 자리다
       expect(run.subInExtra, `pair ${run.pair}`).toBe(true);
     }
+  });
+
+  it("연장의 뷰는 교체 한도를 6인/4회로 싣는다 — 화면이 상수를 다시 적지 않는다", () => {
+    expect(extraTimeWorld().subsLimitAtExtra).toEqual({ subs: 6, windows: 4 });
   });
 
   it("연장 30분치 피로가 더 쌓인다 — 90분에서 멈추지 않는다", () => {
