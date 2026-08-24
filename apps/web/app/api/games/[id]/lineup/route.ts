@@ -5,6 +5,7 @@ import {
   lineupChangeNote,
   lineupSignature,
   loadGame,
+  managedTeamId,
   recordEdit,
   saveGame,
   setLineup,
@@ -94,6 +95,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     // 서버는 **사실만** 낸다 — 그 다음에 무엇을 하라는 말은 GM이 쓴다
     if (state.phase === "match") {
       return NextResponse.json({ error: "경기 중 — 전술판 잠금" }, { status: 409 });
+    }
+    // 무직 잠금 — userTeamId는 옛 구단을 가리키므로 막지 않으면 남의 선발을 짠다 (career.md §5.1)
+    if (managedTeamId(state) === null) {
+      return NextResponse.json({ error: "무직 — 전술판 잠금" }, { status: 409 });
     }
 
     // 저장 전 모습 — 무엇이 달라졌는지는 결과로만 말한다 (`lineupChangeNote`)
