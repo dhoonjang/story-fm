@@ -671,6 +671,42 @@ describe("이적료 — 현금과 장부 두 축", () => {
     ).toHaveLength(1);
   });
 
+  /**
+   * 임대는 계약이 보낸 구단에 남으니 털 잔존가가 없다. 규약상 임대 행은 fee 0으로
+   * 적히지만(transfer.md §2) 옛 세이브에는 임대료가 fee로 실린 임대 행이 남아 있어,
+   * 잔존가 훑기가 `type`을 가리지 않으면 임대 보낸 구단의 장부가를 매각처럼 턴다.
+   */
+  it("임대료를 낸 임대 영입 뒤 임대 보낸 구단의 잔존가가 털리지 않는다", () => {
+    const state = createTestGame(42, "arsenal");
+    const target = state.contracts.find(
+      (c) => c.teamId === state.userTeamId && c.status === "active",
+    )!;
+    expect(bookValueOf(state, state.userTeamId, target.gamePlayerId, state.date)).toBeGreaterThan(
+      0,
+    );
+
+    // 옛 세이브 형태의 임대 행 — 임대료가 fee에 실려 있다. 계약은 그대로 우리에게 남는다
+    const borrower = state.teams.find((t) => t.id !== state.userTeamId)!.id;
+    state.transfers.push({
+      id: "tr-loanout",
+      gamePlayerId: target.gamePlayerId,
+      windowId: null,
+      fromTeamId: state.userTeamId,
+      toTeamId: borrower,
+      date: state.date,
+      type: "loan",
+      fee: 5_000_000,
+    });
+    const player = state.players.find((p) => p.id === target.gamePlayerId)!;
+    player.teamId = borrower;
+    player.loan = { fromTeamId: state.userTeamId, until: "2027-06-30", wageShare: 1 };
+
+    runMonthlyFinance(state, []);
+    expect(
+      financeOf(state, state.userTeamId).ledger.filter((e) => e.label.startsWith("매각 잔존가")),
+    ).toHaveLength(0);
+  });
+
   it("영입한 선수는 이적 갈래로만 상각한다 — 두 번 잡히지 않는다", () => {
     const state = createTestGame(42, "arsenal");
     const target = state.players.find((p) => p.teamId !== state.userTeamId)!;

@@ -1774,7 +1774,10 @@ function postMonthlyItems(state: GameState): void {
      */
     const written = new Set(financeOf(state, team.id).prizesPaid ?? []);
     for (const transfer of state.transfers) {
-      if (transfer.fromTeamId !== team.id || transfer.fee <= 0) continue;
+      // 임대는 계약이 남아 있어 털 잔존가가 없다 — 규약상 임대 행은 fee 0이지만
+      // 옛 세이브에 fee>0 임대 행이 남아 있다 (finance.md §6.1)
+      if (transfer.fromTeamId !== team.id || transfer.fee <= 0 || transfer.type === "loan")
+        continue;
       // 이미 털어 낸 건은 잔존가를 계산하지도 않는다 — 계약 순회가 비싸다
       if (written.has(`sale-writeoff:${transfer.id}`)) continue;
       /**

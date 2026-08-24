@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { leagueCatalog, teamCatalog } from "@story-fm/engine";
+import { leagueCatalog, loadGame, saveGame, teamCatalog } from "@story-fm/engine";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -494,6 +494,33 @@ describe("API — 온보딩부터 경기까지", () => {
       .map((p) => ({ playerId: p.id, position: p.position }));
     const res = await postLineup(json({ starting: outfield, bench: [] }), params(game.id));
     expect(res.status).toBe(400);
+  });
+
+  it("라인업 편집 — 무직(경질)이면 409, 스쿼드 뷰도 잠긴다", async () => {
+    const created = await createGame(
+      json({ teamId: "brentford", managerName: "무직", background: "분석가", seed: 47 }),
+    );
+    const game = (await created.json()) as GamePayload;
+    const starting = game.views.squad.players
+      .filter((p) => p.role === "선발")
+      .map((p) => ({ playerId: p.id, position: p.assignedPosition ?? p.position }));
+
+    // 경질 카드를 세운다 — userTeamId는 옛 구단을 그대로 가리킨다 (career.md §5.1)
+    const state = loadGame(game.id)!;
+    state.dismissal = { on: state.date, season: state.season, teamId: state.userTeamId };
+    saveGame(state);
+
+    const res = await postLineup(json({ starting, bench: [] }), params(game.id));
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: string; retry?: boolean };
+    // retry가 아니다 — 화면 대기열이 같은 저장을 되보내면 안 된다
+    expect(body.retry).toBeUndefined();
+    expect(body.error).toContain("무직");
+
+    // 화면 읽기 전용의 근거 — 뷰의 editable이 함께 꺼진다
+    const after = await getGame(new Request("http://test.local"), params(game.id));
+    const payload = (await after.json()) as GamePayload;
+    expect(payload.views.squad.editable).toBe(false);
   });
 
   it("카탈로그 어드민 — 조회·추가·편집·삭제·리셋 (게임과 무관)", async () => {
