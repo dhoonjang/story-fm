@@ -25,6 +25,7 @@ import {
   lineupBody,
   resetRolesForMovedPlayers,
   roleAtSlot,
+  swappedLists,
   type BoardState,
 } from "@/lib/board-roles";
 import { IconBoard } from "@/components/icons";
@@ -462,36 +463,10 @@ export function SquadView({
     }
     if (!live || !selection) return;
     const aId = selection.kind === "slot" ? board.occupants[selection.index] : selection.id;
-    if (!aId || aId === rowId) return;
-    const [ta, tb] = [tierOf(aId), tierOf(rowId)];
-    if (ta === tb) return; // 같은 칸끼리는 바꿀 게 없다 (선발 자리 교환은 드래그)
-
-    const occupants = [...board.occupants];
-    const ia = occupants.indexOf(aId);
-    const ib = occupants.indexOf(rowId);
-    // 선발 자리는 상대에게 그대로 넘어간다
-    if (ia >= 0) occupants[ia] = rowId;
-    if (ib >= 0) occupants[ib] = aId;
-
-    const moveTo = (id: string, tier: Tier, list: string[]) =>
-      tier === "벤치" || tier === "2군"
-        ? [...list.filter((x) => x !== id), id]
-        : list.filter((x) => x !== id);
-    let bench = board.bench.filter((x) => x !== aId && x !== rowId);
-    let reserve = board.reserve.filter((x) => x !== aId && x !== rowId);
-    // 서로의 칸을 넘겨받는다 (a는 b가 있던 칸으로, b는 a가 있던 칸으로)
-    bench = moveTo(aId, tb, bench);
-    bench = moveTo(rowId, ta, bench);
-    reserve = moveTo(aId, tb === "2군" ? "2군" : "예비", reserve);
-    reserve = moveTo(rowId, ta === "2군" ? "2군" : "예비", reserve);
-
-    // 이 경로가 이슈의 재현 경로다 — 명단 화살표로 선발을 내리면 그 선수의 역할도 함께 내려간다
-    commit(
-      resetRolesForMovedPlayers(
-        { ...board, occupants, bench: bench.slice(0, MATCHDAY_BENCH), reserve },
-        byId,
-      ),
-    );
+    if (!aId) return;
+    const swapped = swappedLists(board, aId, rowId);
+    if (!swapped) return; // 같은 칸끼리는 바꿀 게 없다 (선발 자리 교환은 드래그)
+    commit(resetRolesForMovedPlayers({ ...board, ...swapped }, byId));
   }
 
   /**

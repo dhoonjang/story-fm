@@ -20,6 +20,7 @@ import {
   familiarityForRole,
   lineupBody,
   resetRolesForMovedPlayers,
+  swappedLists,
   type BoardState,
 } from "../lib/board-roles";
 
@@ -119,6 +120,60 @@ describe("판에서 내려간 선수의 역할은 함께 내려간다", () => {
     const server = boardOf(views);
     const next = resetRolesForMovedPlayers(server, rowsOf(views));
     expect(Object.keys(next.roles).sort()).toEqual([...server.occupants].sort());
+  });
+});
+
+describe("승격·강등 스왑은 2군행 선수를 벤치에 남기지 않는다 (#500)", () => {
+  // 스왑 산수는 목록 계산뿐이라 세계 하나를 나눠 쓴다
+  const views = buildOfficeViews(game(84));
+  const server = boardOf(views);
+  const r1 = server.reserve[0]!;
+
+  it("선발↔2군: 강등 선수는 벤치에도, 저장 본문의 bench에도 없다", () => {
+    const starter = server.occupants[0]!;
+    const next = swappedLists(server, starter, r1)!;
+    expect(next).not.toBeNull();
+    // 서로의 칸을 넘겨받는다
+    expect(next.occupants).toContain(r1);
+    expect(next.occupants).not.toContain(starter);
+    expect(next.reserve).toContain(starter);
+    expect(next.reserve).not.toContain(r1);
+    // 핵심 회귀 — 2군행 선수가 벤치 목록에 남으면 서버가 강등을 반려한다
+    expect(next.bench).not.toContain(starter);
+
+    const body = lineupBody({ ...server, ...next }, new Set(server.reserve), rowsOf(views));
+    expect(body.bench.map((b) => b.playerId)).not.toContain(starter);
+    expect(body.squadLevels).toContainEqual({ playerId: starter, level: "reserve" });
+    expect(body.squadLevels).toContainEqual({ playerId: r1, level: "first" });
+  });
+
+  it("벤치↔2군: 내려가는 선수는 벤치에서 빠지고, 올라온 선수가 그 벤치 칸을 받는다", () => {
+    const benched = server.bench[0]!;
+    const next = swappedLists(server, benched, r1)!;
+    expect(next.bench).toContain(r1);
+    expect(next.bench).not.toContain(benched);
+    expect(next.reserve).toContain(benched);
+    expect(next.reserve).not.toContain(r1);
+  });
+
+  it("예비↔2군: 둘 다 벤치와 무관하다 — 올라온 선수는 예비로 선다", () => {
+    const spare = views.squad.players.find(
+      (p) =>
+        p.squadLevel !== "reserve" &&
+        !server.occupants.includes(p.id) &&
+        !server.bench.includes(p.id),
+    )!;
+    const next = swappedLists(server, spare.id, r1)!;
+    expect(next.bench).not.toContain(spare.id);
+    expect(next.bench).not.toContain(r1);
+    expect(next.reserve).toContain(spare.id);
+    expect(next.reserve).not.toContain(r1);
+    expect(next.occupants).toEqual(server.occupants);
+  });
+
+  it("같은 칸끼리, 그리고 자기 자신과는 바꿀 게 없다", () => {
+    expect(swappedLists(server, server.occupants[0]!, server.occupants[1]!)).toBeNull();
+    expect(swappedLists(server, r1, r1)).toBeNull();
   });
 });
 
