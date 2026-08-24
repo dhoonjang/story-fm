@@ -261,9 +261,11 @@ export const ManagerSchema = z.object({
    */
   wallet: z.number().int().min(0).optional(),
   /**
-   * **감독이 쓴 돈의 이력** — 최근 `MANAGER_SPEND_KEPT`건 (career.md §5.4).
+   * **감독이 쓴 돈의 이력이자 시즌 상한의 장부** (career.md §5.4).
    *
-   * 시즌 상한을 세는 자리이기도 하다. 옛 세이브엔 없다 (없으면 빈 배열 —
+   * 이번 시즌 항목은 전부 남는다 — 시즌 문(사재 출연 상한 · 보너스 선수당 1회·시즌
+   * 3명)이 여기서 누계를 세므로, 절단(`MANAGER_WALLET.KEPT`)은 지난 시즌 항목에만
+   * 걸린다. 화면의 "최근 몇 건"은 뷰가 자른다. 옛 세이브엔 없다 (없으면 빈 배열 —
    * 세이브 버전 유지).
    */
   spending: z.array(ManagerSpendSchema).optional(),

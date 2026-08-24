@@ -57,7 +57,7 @@ import {
   wageRatioTone,
   type WageRatioTone,
 } from "../club/finance";
-import { walletOf } from "../club/manager-wallet";
+import { MANAGER_WALLET, walletOf } from "../club/manager-wallet";
 import {
   cupCatalog,
   competitionLabel,
@@ -2604,13 +2604,16 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         : null,
       /** 감독의 지갑 — 구단 잔고와 다른 돈이고 이직을 따라간다 (career.md §5.4) */
       wallet: walletOf(state),
-      spending: [...(state.manager.spending ?? [])].reverse().map((s) => ({
-        on: s.on,
-        kind: MANAGER_SPEND_KIND_KO[s.kind],
-        amount: s.amount,
-        playerName:
-          s.kind === "player-bonus" && s.ref ? (playerById(state, s.ref)?.name ?? null) : null,
-      })),
+      spending: [...(state.manager.spending ?? [])]
+        .reverse()
+        .slice(0, MANAGER_WALLET.KEPT)
+        .map((s) => ({
+          on: s.on,
+          kind: MANAGER_SPEND_KIND_KO[s.kind],
+          amount: s.amount,
+          playerName:
+            s.kind === "player-bonus" && s.ref ? (playerById(state, s.ref)?.name ?? null) : null,
+        })),
       trophies: state.trophies.map((t) => ({
         competition: t.competitionId ? competitionName(t.competitionId) : (t.competition ?? ""),
         season: t.season,
