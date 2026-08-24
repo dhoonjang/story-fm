@@ -248,14 +248,11 @@
 플레이 가능한 프로토타입. 온보딩 → 일상 지시 → 경기 → 시즌 전환 → 멀티시즌이
 엔드투엔드로 돈다. 주요 미구현(상세는 각 문서의 "미해결"):
 
-- 감독 계약의 만료·재계약·위약금 — 공석을 두드리고 조건을 되불러 부임하는 데까지다.
-  계약 종료일이 지나도 아무 일이 없고, 경질돼도 잔여 연봉을 무는 쪽이 없다
-  ([simulation/career.md](simulation/career.md))
 - 보드 요청은 이적창 단위 조건 하나뿐이다 — 특정 선수 기용 같은 경기 단위 요청도,
   영입 건별 승인도, 요청을 두고 흥정하는 자리도 없다
   ([simulation/career.md](simulation/career.md))
-- 조건부 이적 조항(바이백·셀온)과 협상 중의 이적 루머 — 회견은 확정된 영입·매각에만
-  열린다 ([simulation/transfer.md](simulation/transfer.md))
+- 협상 중의 이적 루머 — 회견은 확정된 영입·매각에만 열린다
+  ([simulation/transfer.md](simulation/transfer.md))
 - 관계 점수 — 인물 사이의 초기 관계는 원형이 채우지만 사건이 그것을 움직이지 않는다.
   서사 아크의 갈래도 장부 한 줄로 열리는 다섯까지다
   ([data/people.md](data/people.md) §10)
