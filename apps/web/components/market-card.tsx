@@ -162,16 +162,25 @@ export function MarketCardView({ card }: { card: MarketCard }) {
         )}
       </div>
 
-      {card.terms && (
-        <div className="mc-terms">
-          <em className="mc-side">제시</em>
-          <Terms terms={card.terms} loan={card.loan === true} />
-        </div>
-      )}
-      {card.counterTerms && (
-        <div className="mc-terms demand">
-          <em className="mc-side">{demandLabelOf(card, card.loan === true)}</em>
-          <Terms terms={card.counterTerms} loan={card.loan === true} />
+      {/* 두 줄이 한 그리드다 — 이름표 열이 가장 긴 이름표에 맞춰 늘어나 값이 같은 자리에서 시작한다 */}
+      {(card.terms || card.counterTerms) && (
+        <div className="mc-table">
+          {card.terms && (
+            <div className="mc-terms">
+              <em className="mc-side">제시</em>
+              <div className="mc-vals">
+                <Terms terms={card.terms} loan={card.loan === true} />
+              </div>
+            </div>
+          )}
+          {card.counterTerms && (
+            <div className="mc-terms demand">
+              <em className="mc-side">{demandLabelOf(card, card.loan === true)}</em>
+              <div className="mc-vals">
+                <Terms terms={card.counterTerms} loan={card.loan === true} />
+              </div>
+            </div>
+          )}
         </div>
       )}
 
