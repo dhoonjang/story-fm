@@ -11,6 +11,7 @@ import {
   knowledgeOf,
   marketValueOf,
   playersOf,
+  renewalExpectation,
   responseDelayDays,
   sameTermsRepeats,
   squadDepthOf,
@@ -313,6 +314,86 @@ describe("딜 확률", () => {
       dealOdds(state, { playerId: target.id, fee: 1, weeklyWage: 1, years: 4 }).blockers.join(),
     ).toContain("이적시장");
     window.opensOn = opensOn;
+  });
+});
+
+describe("선수 관문 — 버틸 이유와 나갈 이유", () => {
+  const state = createTestGame(42);
+  const year = Number(state.date.slice(0, 4));
+  const ours = playersOf(state, state.userTeamId);
+  const star = [...ours].sort((a, b) => b.attributes.overall - a.attributes.overall)[0]!;
+  const factorOf = (odds: ReturnType<typeof dealOdds>, label: string) =>
+    odds.factors.find((f) => f.label === label);
+  const renew = (player: GamePlayer, years = 3, wage = renewalExpectation(state, player)) =>
+    dealOdds(state, { kind: "renew", playerId: player.id, fee: 0, weeklyWage: wage, years });
+  const buy = (player: GamePlayer) =>
+    dealOdds(state, {
+      playerId: player.id,
+      fee: askingPriceFor(state, player),
+      weeklyWage: wageExpectationOf(state, player),
+      years: 4,
+    });
+
+  it("기대치를 맞춘 제안은 관문의 수와 무관하게 같은 곳에서 출발한다", () => {
+    const base = (odds: ReturnType<typeof dealOdds>) => factorOf(odds, "기준")?.delta;
+    const pair = base(buy(pick(state, 76)));
+    const solo = base(renew(star));
+    const release = base(
+      dealOdds(state, { kind: "release", playerId: star.id, fee: 0, weeklyWage: 0, years: 0 }),
+    );
+    expect(pair).toBe(solo);
+    expect(release).toBe(solo);
+    // 곱셈이 사라진 갈래가 더 높은 데서 출발하지 않는다 — 72%
+    expect(solo).toBeLessThan(75);
+  });
+
+  it("현 계약보다 깎아 부르면 항이 서고 확률이 내려간다", () => {
+    const contract = activeContract(state, star.id)!;
+    const original = contract.weeklyWage;
+    const offered = renewalExpectation(state, star);
+    try {
+      contract.weeklyWage = offered;
+      const level = renew(star, 3, offered);
+      expect(factorOf(level, "현 계약 대비")).toBeUndefined();
+      contract.weeklyWage = Math.round(offered * 1.5);
+      const cut = renew(star, 3, offered);
+      const factor = factorOf(cut, "현 계약 대비");
+      expect(factor?.delta).toBeLessThan(0);
+      expect(cut.probability).toBeLessThan(level.probability);
+    } finally {
+      contract.weeklyWage = original;
+    }
+  });
+
+  it("커리어 시계 — 노장은 남고 젊으면 옮긴다", () => {
+    const outsider = pick(state, 76);
+    const birthdates = [star.birthdate, outsider.birthdate] as const;
+    try {
+      star.birthdate = `${year - 33}-01-01`;
+      outsider.birthdate = `${year - 33}-01-01`;
+      const renewOld = renew(star, 2);
+      const buyOld = buy(outsider);
+      star.birthdate = `${year - 23}-01-01`;
+      outsider.birthdate = `${year - 23}-01-01`;
+      const renewYoung = renew(star, 2);
+      const buyYoung = buy(outsider);
+      expect(factorOf(renewOld, "커리어 시계")?.delta).toBeGreaterThan(0);
+      expect(factorOf(renewYoung, "커리어 시계")?.delta).toBeLessThan(0);
+      expect(factorOf(buyOld, "커리어 시계")?.delta).toBeLessThan(0);
+      expect(factorOf(buyYoung, "커리어 시계")?.delta).toBeGreaterThan(0);
+    } finally {
+      star.birthdate = birthdates[0];
+      outsider.birthdate = birthdates[1];
+    }
+  });
+
+  it("다른 구단의 관심이 재계약과 영입의 선수 관문에 함께 선다", () => {
+    // 최상급 선수는 곧바로 주전으로 쓸 구단이 많다 — 남을 이유도 옮길 이유도 약해진다
+    const top = state.players
+      .filter((p) => p.teamId !== state.userTeamId)
+      .sort((a, b) => b.attributes.overall - a.attributes.overall)[0]!;
+    expect(factorOf(renew(star), "다른 구단의 관심")?.delta).toBeLessThan(0);
+    expect(factorOf(buy(top), "다른 구단의 관심")?.delta).toBeLessThan(0);
   });
 });
 
