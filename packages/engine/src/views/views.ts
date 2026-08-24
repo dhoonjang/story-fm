@@ -77,7 +77,7 @@ import { drawParts, drawTitle } from "../competition/draw-schedule";
 import { euroCompetitionOf } from "../competition/europe";
 import { formAngle, formLabel, formTone } from "../squad/form";
 import { ratingTone, type RatingTone } from "../match/ratings";
-import { GAP_CONDITION, edgeOf, zoneGrid } from "@story-fm/sim";
+import { GAP_CONDITION, edgeOf, subLimitsOf, zoneGrid } from "@story-fm/sim";
 import { moodOf, type MoodRead } from "../squad/mood";
 import { isHomegrownFor, occupiesSquadList, squadRegistrationOf } from "../squad/registration";
 import {
@@ -947,7 +947,15 @@ export interface MatchView {
   xiRating: { home: number; away: number };
   /** 팀 합계 — 선수별 `tally`의 합. 표에 열을 더 세우지 않고 한 줄로 세운다 */
   totals: { home: MatchTally; away: MatchTally };
-  subs: { home: { used: number; windows: number }; away: { used: number; windows: number } };
+  /**
+   * 교체 사용량과 **국면의 한도** — 한도는 장부의 `subLimitsOf`가 정한다(연장 6인/4회).
+   * 화면이 5/3을 다시 적어 두면 연장에서 여섯 번째 카드가 없는 것처럼 읽힌다.
+   */
+  subs: {
+    home: { used: number; windows: number };
+    away: { used: number; windows: number };
+    limit: { subs: number; windows: number };
+  };
   sentOff: string[];
   /**
    * 승부차기 — 120분이 승부를 못 가른 경기에만 선다.
@@ -1596,6 +1604,8 @@ function buildMatchView(state: GameState): MatchView | null {
     away: rowsOf(packet.away.lineup, ledger.away.onPitch, match.awayTeamId),
   };
 
+  const subLimits = subLimitsOf(ledger.phase);
+
   const tacticsOfSide = (teamId: string, tactical: TacticalRead) => ({
     ...(teamId !== state.userTeamId && pending.aiTactics
       ? pending.aiTactics
@@ -1716,6 +1726,7 @@ function buildMatchView(state: GameState): MatchView | null {
     subs: {
       home: { used: ledger.home.subsUsed, windows: ledger.home.subWindows },
       away: { used: ledger.away.subsUsed, windows: ledger.away.subWindows },
+      limit: { subs: subLimits.maxSubs, windows: subLimits.maxSubWindows },
     },
     sentOff: ledger.sentOff.map((id) => playerName(state, id)),
     shootout: shootout

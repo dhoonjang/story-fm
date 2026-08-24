@@ -106,6 +106,12 @@ export function SquadView({
   const dismissed = game.views.career.dismissal !== null;
   /** 경기 중이지만 **판으로 지시할 수는 있다** */
   const advisory = !live && onOrder !== undefined;
+  /** 경기 중 우리 쪽 교체 사용량 — 한도는 국면이 정해 뷰가 싣는다 (match.md §8) */
+  const liveMatch = game.views.match;
+  const matchSubs =
+    liveMatch && !liveMatch.beforeKickoff
+      ? { ...liveMatch.subs[liveMatch.home.ours ? "home" : "away"], limit: liveMatch.subs.limit }
+      : null;
   /** 판을 만질 수 있는가 — 저장이든 지시든 */
   const usable = live || advisory;
 
@@ -738,6 +744,12 @@ export function SquadView({
           </span>
           {/* 1군·2군 인원은 오른쪽 명단 탭이 이미 세어 준다 — 여기선 매치데이 인원만 */}
           <span className="muted">매치데이 {xi.length + benchDesignated.length}인</span>
+          {matchSubs && (
+            <span className="muted">
+              교체 {matchSubs.used}/{matchSubs.limit.subs} · 기회 {matchSubs.windows}/
+              {matchSubs.limit.windows}
+            </span>
+          )}
           {advisoryPending && (
             <span className="reg-chip" data-testid="match-orders-pending">
               다음 진행에 반영

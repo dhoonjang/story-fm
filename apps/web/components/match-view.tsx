@@ -91,7 +91,8 @@ export function MatchOpponent({
             <b>{match.xiRating[them]}</b>
           </span>
           <span className="muted">
-            교체 {subs.used}/5 · 기회 {subs.windows}/3
+            교체 {subs.used}/{match.subs.limit.subs} · 기회 {subs.windows}/
+            {match.subs.limit.windows}
           </span>
           {onToggleBoard && (
             <button
