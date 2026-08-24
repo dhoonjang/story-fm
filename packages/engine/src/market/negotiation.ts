@@ -1880,7 +1880,9 @@ function executeLoanIn(
     toTeamId: state.userTeamId,
     date: state.date,
     type: "loan",
-    fee: agreed.fee,
+    // 임대 행은 fee 0이 규약이다 (transfer.md §2) — 임대료는 위의 recordFinance·
+    // 예산 이동이 정산했고, 여기 실으면 매각 잔존가 훑기가 임대를 매각으로 읽는다
+    fee: 0,
   });
   player.teamId = state.userTeamId;
   player.squadNumber = undefined;
