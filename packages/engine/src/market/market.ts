@@ -439,8 +439,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     }
     /**
      * **무소속엔 이적료를 받을 구단이 없다** (team.md §4). 막지 않으면 그 돈이
-     * 세계 밖으로 나간다 — 예전엔 무소속이 장부를 갖고 있어서 £5M이 아무도
-     * 쓰지 않는 잔고로 사라졌다.
+     * 세계 밖으로 나간다 — 아무도 쓰지 않는 잔고로 사라진다.
      */
     if (!isClubTeam(player.teamId) && terms.fee > 0) {
       blockers.push(`${player.name}은(는) 무소속이라 이적료가 붙지 않습니다`);
@@ -458,8 +457,8 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     }
     /**
      * **주급 여력** — 이적료를 낼 수 있어도 매주 나갈 돈이 없으면 못 데려온다.
-     * AI 시장이 지키는 것과 같은 자다(`wageRoomOf`) — 예전엔 이 관문이 AI에만
-     * 걸려 있어서 감독만 임금 총액을 무제한으로 불릴 수 있었다.
+     * AI 시장이 지키는 것과 같은 자다(`wageRoomOf`) — 이 관문이 감독에게도
+     * 걸려야 임금 총액이 구단 한도 안에 머문다.
      */
     const room = userWageRoom(state);
     if (terms.weeklyWage > room) {
@@ -1450,9 +1449,9 @@ const DEPARTURE_VERB: Record<DepartureAction, string> = {
 /**
  * 스쿼드 하한에 걸렸다는 한 줄 — **카드에서 만든다.**
  *
- * 코어가 내는 것은 `{ code, remaining, limit }`뿐이다. 예전엔 코어가 "팔 수
- * 없습니다"까지 적고 부르는 쪽이 그 문장의 동사를 `replace`로 바꿔치기했다 —
- * 문구를 고치는 순간 해지·임대의 안내가 매각의 말로 되돌아가던 자리다.
+ * 코어가 내는 것은 `{ code, remaining, limit }`뿐이다 — 코어가 완성 문장을
+ * 내고 부르는 쪽이 동사를 `replace`로 바꿔치기하면, 문구를 고치는 순간
+ * 해지·임대의 안내가 매각의 말로 되돌아간다.
  */
 export function squadShortfallText(short: SquadShortfall, action: DepartureAction): string {
   const subject = short.code === "squad-min" ? "스쿼드" : "골키퍼";
