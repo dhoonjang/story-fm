@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { MAX_PAYMENT_YEARS, type Negotiation } from "@story-fm/domain";
 import {
+  RENEWAL_YEARS_MAX,
   buildCounterpartyBrief,
   characterEntryOf,
   counterpartyAnchor,
@@ -31,7 +32,7 @@ export const NEGOTIATOR_SYSTEM = `당신은 협상 테이블 건너편에 앉은
 서류가 말한다. 당신은 감독의 편이 아니다 — 당신 쪽의 이익만 본다.
 
 ## 무엇을 하는가
-도착한 오퍼 하나에 답한다: 수락 · 역제안 · 결렬.
+도착한 오퍼 하나에 답한다: 수락 · 조정 · 결렬.
 
 ## 무엇을 보는가
 <club>과 <manager>는 테이블 건너편 — 감독과 그의 구단이다. <negotiation>은 협상의 갈래와 양쪽,
@@ -42,7 +43,7 @@ export const NEGOTIATOR_SYSTEM = `당신은 협상 테이블 건너편에 앉은
 ## 규칙
 - 고를 수 있는 판정은 서류에 적힌 것뿐이다. 그 밖을 적으면 코어가 기준 판정으로
   되돌린다.
-- 금액도 서류에 적힌 구간 안에서만 부른다. 밖을 부르면 구간 끝으로 잘린다.
+- 금액과 연수는 서류에 적힌 구간 안에서만 부른다. 밖을 부르면 구간 끝으로 잘린다.
 - 확률이 낮다고 기계적으로 결렬시키지 마라. 확인된 논거는 그 사람에게 얼마나 큰지
   당신이 판정한다 — 나이·처지·이력을 보고 정한다.
 - 확률이 높다고 덥석 받지도 마라. 당신 쪽이 급하지 않으면 한 번 더 불러도 된다.
@@ -60,13 +61,20 @@ const RulingSchema = z.object({
     .int()
     .min(0)
     .optional()
-    .describe("역제안에서 당신이 부르는 이적료·임대료·정산금. 서류의 구간 안에서"),
+    .describe("조정에서 당신이 부르는 이적료·임대료·정산금. 서류의 구간 안에서"),
   weeklyWage: z
     .number()
     .int()
     .min(0)
     .optional()
-    .describe("역제안에서 당신이 부르는 주급. 서류의 구간 안에서"),
+    .describe("조정에서 당신이 부르는 주급. 서류의 구간 안에서"),
+  contractYears: z
+    .number()
+    .int()
+    .min(1)
+    .max(RENEWAL_YEARS_MAX)
+    .optional()
+    .describe("재계약 조정에서 당신이 원하는 계약 연수. 서류의 구간 안에서"),
   paymentYears: z
     .number()
     .int()
@@ -93,7 +101,7 @@ const moneyRange = (label: string, anchor: number, room: { min: number; max: num
 
 const VERDICT_KO: Record<string, string> = {
   accept: "수락",
-  counter: "역제안",
+  counter: "조정",
   reject: "결렬",
 };
 
@@ -106,10 +114,15 @@ export function describeAnchor(anchor: CounterpartyAnchor): string {
     `기준 판정: ${VERDICT_KO[anchor.verdict]}`,
     `고를 수 있는 판정: ${anchor.allowed.map((v) => VERDICT_KO[v]).join(" · ")}`,
     ...(anchor.fee !== undefined && anchor.feeRoom
-      ? [moneyRange("역제안 금액", anchor.fee, anchor.feeRoom)]
+      ? [moneyRange("조정 금액", anchor.fee, anchor.feeRoom)]
       : []),
     ...(anchor.weeklyWage !== undefined && anchor.wageRoom
-      ? [moneyRange("역제안 주급", anchor.weeklyWage, anchor.wageRoom)]
+      ? [moneyRange("조정 주급", anchor.weeklyWage, anchor.wageRoom)]
+      : []),
+    ...(anchor.contractYears !== undefined && anchor.yearsRoom
+      ? [
+          `조정 연수: 기준 ${anchor.contractYears}년 — ${anchor.yearsRoom.min}~${anchor.yearsRoom.max}년 안에서만 부를 수 있다`,
+        ]
       : []),
     ...(anchor.splittable
       ? [`나눠 받겠다면 paymentYears로 연수를 적는다 (2~${MAX_PAYMENT_YEARS})`]
