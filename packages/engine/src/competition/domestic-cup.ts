@@ -388,8 +388,8 @@ function pickTieDate(
       ok: (d) => free(d) && restedHard(d, kickoffFor(d)),
       best: true,
     },
-    // ③ 그래도 없으면 창을 넓힌다 (예전엔 여기서 "직전 하루만 쉬면 된다"로 조건을
-    //    풀어 버려서 컵 다음날 리그가 섰다 — 창을 넓힐지언정 조건은 안 푼다)
+    // ③ 그래도 없으면 창을 넓힌다 — 창을 넓힐지언정 조건은 안 푼다.
+    //    "직전 하루만 쉬면 된다"로 풀면 컵 다음날 리그가 선다.
     { days: window, weekdays, ok: (d) => rested(d, kickoffFor(d)) },
     { days: window, weekdays, ok: (d) => free(d) && restedHard(d, kickoffFor(d)), best: true },
     // ④ **40시간 바닥은 창보다 앞선다.** 여기까지 왔다는 건 28일 안에 바닥을 지키는
