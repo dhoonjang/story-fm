@@ -28,7 +28,7 @@ const KIND_ICON = {
   scout: IconInsight,
 } as const;
 
-const VERDICT_KO = { accept: "수락", reject: "거절", counter: "역제안" } as const;
+const VERDICT_KO = { accept: "수락", reject: "거절", counter: "조정" } as const;
 
 /**
  * 카드 머리의 표식 — **무슨 국면인가에 앞서 어느 방향인가.**
@@ -102,7 +102,7 @@ function Terms({ terms, loan = false }: { terms: MarketTerms; loan?: boolean }) 
 export function MarketCardView({ card }: { card: MarketCard }) {
   const Icon = KIND_ICON[card.kind];
   /**
-   * 답의 결이 카드의 색을 정한다 — 수락은 강조색, 거절은 경고색, 역제안은 그 사이.
+   * 답의 결이 카드의 색을 정한다 — 수락은 강조색, 거절은 경고색, 조정은 그 사이.
    * 금액을 읽기 전에 잘 됐는지가 보여야 스크롤을 훑을 때 눈이 걸린다.
    */
   const tone =

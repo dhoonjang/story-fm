@@ -31,7 +31,7 @@ export const COUNTERPARTY_COUNTER_AT = 25;
 /**
  * 상대가 앵커 금액에서 움직일 수 있는 폭.
  *
- * 코어가 이미 역제안 상한으로 쓰는 폭(`COUNTER_CEILING` 1.15)과 같은 값이다 — 두
+ * 코어가 이미 조정 상한으로 쓰는 폭(`COUNTER_CEILING` 1.15)과 같은 값이다 — 두
  * 자리에 다른 폭을 두면 어느 쪽이 진짜 상한인지 알 수 없다.
  */
 export const COUNTERPARTY_TERMS_BAND = 0.15;
@@ -67,11 +67,11 @@ export interface CounterpartyAnchor {
   verdict: NegotiationVerdict;
   /** 모델이 고를 수 있는 판정 — 앵커에서 한 칸, 그리고 코어가 받을 수 있는 것만 */
   allowed: readonly NegotiationVerdict[];
-  /** 역제안일 때 상대가 부르는 금액 (이적료·임대료·정산금) */
+  /** 조정일 때 상대가 부르는 금액 (이적료·임대료·정산금) */
   fee?: number;
   /** 그 금액이 움직일 수 있는 폭 — 앵커 ±한도를 코어의 합법 구간으로 자른 것 */
   feeRoom?: TermsRoom;
-  /** 역제안일 때 상대가 부르는 주급 */
+  /** 조정일 때 상대가 부르는 주급 */
   weeklyWage?: number;
   /** 그 주급이 움직일 수 있는 폭 */
   wageRoom?: TermsRoom;
@@ -131,7 +131,7 @@ export function counterpartyAnchor(
   /**
    * **구간이 비면 흥정할 것이 없다.** 그 자리는 우리가 이미 상대가 부를 수 있는
    * 값 너머를 불렀다는 뜻이라(호가의 1.15배 위 · 정산금 전액 이상), 남는 답은
-   * 수락이다. 억지로 역제안을 세우면 코어가 그 값을 거절한다.
+   * 수락이다. 억지로 조정을 세우면 코어가 그 값을 거절한다.
    */
   const canCounter = axisOpen(bounds.fee) && axisOpen(bounds.wage);
 

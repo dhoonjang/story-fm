@@ -12,7 +12,7 @@ import { latitudeOf } from "./persuasion";
 import { playerById, type GameState } from "../core/state";
 
 /**
- * **역제안이 부를 수 있는 범위 — 한 벌이다** (docs/simulation/transfer.md §1·§12-1).
+ * **조정이 부를 수 있는 범위 — 한 벌이다** (docs/simulation/transfer.md §1·§12-1).
  *
  * 두 곳이 이 범위를 본다: 감독이 넣은 오퍼에 상대가 답할 때 코어가 거는 검증
  * (`respondOffer`)과, 교섭 상대의 판정을 자르는 클램프(`counterparty.ts`)다. 둘이
@@ -22,15 +22,15 @@ import { playerById, type GameState } from "../core/state";
 
 /** 이 확률 아래로는 상대가 수락할 수 없다 — "그 값에 팔 구단은 없다" */
 export const MIN_ACCEPT_PROBABILITY = 5;
-/** 역제안 상한 — 요구액의 이 배수를 넘게 부를 수 없다 */
+/** 조정 상한 — 요구액의 이 배수를 넘게 부를 수 없다 */
 export const COUNTER_CEILING = 1.15;
-/** 역제안 요구 주급 상한 — 기대치의 이 배수 (상대도 무리한 요구는 하지 않는다) */
+/** 조정 요구 주급 상한 — 기대치의 이 배수 (상대도 무리한 요구는 하지 않는다) */
 export const COUNTER_WAGE_CEILING = 1.4;
 /** 사는 쪽이 깎아 부를 수 있는 하한 — 기대치의 이 비율 아래로는 못 부른다 */
 export const SELL_COUNTER_FLOOR = 0.55;
 /**
  * 임대 협상의 호가 — 시장가 기준 임대료(`LOAN_FEE_RATE`)의 이 배수가 자다.
- * 역제안 상한(`COUNTER_CEILING`)이 이 값 위에 다시 얹힌다.
+ * 조정 상한(`COUNTER_CEILING`)이 이 값 위에 다시 얹힌다.
  */
 export const LOAN_ASKING_LIFT = 1.6;
 
@@ -38,7 +38,7 @@ export const LOAN_ASKING_LIFT = 1.6;
  * 한 축이 부를 수 있는 구간 — **정수 포함 구간**이다.
  *
  * `expectation`은 **상대 자신이 원하는 값**이고, 인자가 비었을 때 서는 기본값이자
- * 교섭 상대의 앵커다 (§12-1). 구간이 비면(`min > max`) 그 축으로는 역제안할 수 없다.
+ * 교섭 상대의 앵커다 (§12-1). 구간이 비면(`min > max`) 그 축으로는 조정할 수 없다.
  */
 export interface CounterBand {
   expectation: number;
@@ -75,7 +75,7 @@ export function clampToBand(band: CounterBand | null, value: number): number | n
  *
  * 매각의 자는 시장가, 임대 송출의 자는 임대료(`LOAN_FEE_RATE`)다. 임대를 시장가로
  * 재면 하한이 임대료의 일곱 배가 되어 **사는 쪽이 부를 수 있는 값이 아예 없다** —
- * 역제안은 우리 호가 미만이어야 하는데 하한이 그 위에 있기 때문이다
+ * 조정은 우리 호가 미만이어야 하는데 하한이 그 위에 있기 때문이다
  * (transfer.md §1).
  */
 export function outgoingExpectation(
@@ -123,7 +123,7 @@ export function counterBoundsOf(
   if (!player) return { ...base, fee: null, wage: null, splittable: false };
 
   /**
-   * **해지의 역제안은 선수가 정산금을 올려 부르는 것**이고, 상한은 **일방 해지의
+   * **해지의 조정은 선수가 정산금을 올려 부르는 것**이고, 상한은 **일방 해지의
    * 전액**이다. 그 위를 부를 수 없는 것은 합의가 깨져도 그가 받을 값이 전액이기
    * 때문이다 — 더 부르는 것은 협상이 아니라 협상을 없애는 값이다 (transfer.md §11).
    */
@@ -140,7 +140,7 @@ export function counterBoundsOf(
     };
   }
 
-  // 재계약의 역제안은 **주급**을 부른다 — 우리 제시액 초과, 기대치의 1.4배 이하
+  // 재계약의 조정은 **주급**을 부른다 — 우리 제시액 초과, 기대치의 1.4배 이하
   if (kind === "renew") {
     const expectation = renewalExpectation(state, player);
     return {
@@ -156,7 +156,7 @@ export function counterBoundsOf(
   }
 
   /**
-   * **매각은 방향이 반대다.** 우리가 부른 값에 사는 쪽이 답하므로, 역제안은
+   * **매각은 방향이 반대다.** 우리가 부른 값에 사는 쪽이 답하므로, 조정은
    * 올려 부르는 게 아니라 **깎아 부르는 것**이다. 주급은 사는 쪽이 정하므로
    * 이 테이블의 축이 아니다.
    */

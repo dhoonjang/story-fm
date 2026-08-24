@@ -11,7 +11,7 @@ import { DateString } from "./date-string";
  * | `leadership` 리더십 | 팀토크·면담 변화량 · 주장을 통한 전파 |
  * | `tactics` 전술 | 전술 소화율 — 지시가 전력 패킷에 닿는 강도 |
  * | `training` 훈련 | 훈련 결산의 성장 폭 — 같은 세션도 감독에 따라 남는 게 다르다 |
- * | `negotiation` 협상 | 이적·재계약 판정의 수락 문턱·역제안 폭 |
+ * | `negotiation` 협상 | 이적·재계약 판정의 수락 문턱·조정 폭 |
  * | `analysis` 분석 | 스카우트·상대 분석 리포트의 해상도(안개가 좁아지는 정도) |
  *
  * ⚠️ **평판(`ManagerReputation`)의 `media`와 다른 것이다.** 능력치는 감독이 가진
@@ -349,7 +349,7 @@ export const ManagerOfferSchema = z.object({
    * 재계약을 걸었나(`renewal` — career.md §5.4). 재계약 제안만 **재직 중에** 선다.
    */
   via: z.enum(["vacancy", "knock", "renewal"]).optional(),
-  /** 역제안이 오간 날 — 서 있으면 흥정은 끝났다 (한 차례뿐이다) */
+  /** 조정이 오간 날 — 서 있으면 흥정은 끝났다 (한 차례뿐이다) */
   counteredOn: DateString.optional(),
   status: z.enum(["open", "accepted", "expired"]),
 });

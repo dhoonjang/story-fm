@@ -145,7 +145,7 @@ describe("매각 제안 — 특정 구단에 직접 묻는다", () => {
     expect(card.dueOn).toBe(openNegotiationFor(state, target.id)!.rounds[0]!.respondsOn);
   });
 
-  it("사는 쪽의 역제안은 **깎아 부르는 것**이다 — 올려 부를 수 없다", () => {
+  it("사는 쪽의 조정은 **깎아 부르는 것**이다 — 올려 부를 수 없다", () => {
     const state = createTestGame(11);
     state.date = "2026-08-01";
     const target = sellable(state);
