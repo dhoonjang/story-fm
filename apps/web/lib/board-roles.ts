@@ -1,5 +1,6 @@
 import {
   FAMILIARITY_MAX,
+  MATCHDAY_BENCH,
   positionAtPoint,
   roleAtSlot as inheritedRoleAt,
   roleChangeCost,
@@ -112,6 +113,44 @@ export function lineupBody(
     // 채팅의 set_tactics가 맡는다. 여기서 함께 보내면 매 저장이 전술 변경으로 읽힌다.
     tactics: axes,
   };
+}
+
+type SwapLists = Pick<BoardState, "occupants" | "bench" | "reserve">;
+
+/**
+ * 명단 화살표의 맞바꿈 — 두 선수가 **서로의 칸을 그대로 넘겨받은** 뒤의 목록.
+ *
+ * 칸은 목록 소속의 파생이라 셋을 함께 내야 한다: 선발 자리는 상대에게 넘어가고,
+ * 벤치·2군 목록은 상대가 있던 칸의 것만 남는다. **2군으로 가는 선수는 벤치
+ * 지정도 함께 거둔다** — 서버 `setLineup`은 이번 배치에 든 선수의 강등을
+ * 반려하므로, 벤치에 남긴 채 `squadLevels`로 강등을 보내면 저장이 반드시
+ * 400이다 (`moveSquad` 버튼이 이미 하는 정리와 같다).
+ *
+ * 같은 칸끼리는 바꿀 게 없어 null이다 (선발 자리 교환은 드래그의 몫).
+ */
+export function swappedLists(b: SwapLists, aId: string, rowId: string): SwapLists | null {
+  const tierOf = (id: string) =>
+    b.occupants.includes(id)
+      ? "선발"
+      : b.reserve.includes(id)
+        ? "2군"
+        : b.bench.includes(id)
+          ? "벤치"
+          : "예비";
+  const [ta, tb] = [tierOf(aId), tierOf(rowId)];
+  if (aId === rowId || ta === tb) return null;
+
+  const occupants = b.occupants.map((id) => (id === aId ? rowId : id === rowId ? aId : id));
+  const into = (list: string[], id: string, member: boolean) =>
+    member ? [...list.filter((x) => x !== id), id] : list.filter((x) => x !== id);
+  let bench = b.bench.filter((x) => x !== aId && x !== rowId);
+  let reserve = b.reserve.filter((x) => x !== aId && x !== rowId);
+  // 서로의 칸을 넘겨받는다 (a는 b가 있던 칸으로, b는 a가 있던 칸으로)
+  bench = into(bench, aId, tb === "벤치");
+  bench = into(bench, rowId, ta === "벤치");
+  reserve = into(reserve, aId, tb === "2군");
+  reserve = into(reserve, rowId, ta === "2군");
+  return { occupants, bench: bench.slice(0, MATCHDAY_BENCH), reserve };
 }
 
 /**
