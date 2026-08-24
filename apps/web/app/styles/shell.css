@@ -3109,7 +3109,7 @@ textarea {
   color: var(--deal);
   line-height: 0;
 }
-/* 배지는 방향까지 실어 두 낱말이 된다(`임대 송출 조정`) — 중간에서 접히면 두 표식으로 읽힌다 */
+/* 배지는 방향까지 실어 두 낱말이 된다(`임대 송출 조정안`) — 중간에서 접히면 두 표식으로 읽힌다 */
 .mc-badge {
   font-size: var(--fs-3xs);
   font-weight: 700;
