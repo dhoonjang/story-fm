@@ -32,6 +32,7 @@ import {
   managerTrainingUptake,
   payPlayerBonus,
   resignPost,
+  seasonSpentOn,
   spendFromWallet,
   transferFundRoom,
   offerDrySpell,
@@ -1071,6 +1072,67 @@ describe("지갑을 쓴다 — 출구는 하나다", () => {
     });
     expect(again.unchanged, "같은 선수에게 두 번 나갔다").toBe(true);
     expect(state.manager.wallet).toBe(wallet);
+  });
+
+  /**
+   * "최근 20건"은 화면의 수이지 상한의 장부가 아니다 (career.md §5.4) — 절단이
+   * 이번 시즌 항목을 떨구면 시즌 상한과 3명 문이 건수를 넘는 순간 조용히 열린다.
+   */
+  it("이번 시즌 항목은 20건을 넘어도 장부에서 떨어지지 않는다 — 상한과 3명 문이 선다", () => {
+    const state = fixture();
+    state.manager.wallet = 1_000_000_000;
+
+    // 절단이 떨굴 수 있는 것은 지난 시즌 항목뿐이다
+    state.manager.spending = Array.from({ length: 5 }, (_, i) => ({
+      id: `old-${i}`,
+      on: "2024-01-01",
+      kind: "transfer-fund" as const,
+      amount: 10_000,
+      season: state.season - 1,
+    }));
+
+    // 보너스 세 명 — 문을 먼저 채우고, 그 뒤 사재 출연이 이력을 KEPT 너머로 민다
+    const contracted = userPlayers(state).filter((p) =>
+      state.contracts.some((c) => c.status === "active" && c.gamePlayerId === p.id),
+    );
+    const weeklyOf = (id: string) =>
+      state.contracts.find((c) => c.status === "active" && c.gamePlayerId === id)!.weeklyWage;
+    const bonusFor = (id: string) => Math.ceil(weeklyOf(id) * MANAGER_WALLET.BONUS_FULL_WEEKS);
+    for (const p of contracted.slice(0, MANAGER_WALLET.BONUS_PLAYERS_PER_SEASON)) {
+      const paid = payPlayerBonus(state, { playerId: p.id, amount: bonusFor(p.id) });
+      expect(paid.ok, "message" in paid ? paid.message : undefined).toBe(true);
+    }
+
+    const cap = transferFundRoom(state);
+    const chunk = MANAGER_WALLET.MIN_SPEND;
+    const rounds = MANAGER_WALLET.KEPT + 1;
+    expect(cap, "출연 상한이 스물한 번의 최소 지출보다 작다").toBeGreaterThan(chunk * rounds);
+    for (let i = 0; i < rounds; i += 1) {
+      const spent = spendFromWallet(state, { kind: "transfer-fund", amount: chunk });
+      expect(spent.ok).toBe(true);
+    }
+
+    // 이번 시즌 장부는 온전하고, 지난 시즌 항목만 떨어졌다
+    const spending = state.manager.spending ?? [];
+    expect(
+      spending.every((s) => s.season === state.season),
+      "지난 시즌 항목이 KEPT 안에 남아 이번 시즌 항목을 밀어냈다",
+    ).toBe(true);
+    expect(spending.length, "이번 시즌 항목이 절단에 떨어졌다").toBe(
+      rounds + MANAGER_WALLET.BONUS_PLAYERS_PER_SEASON,
+    );
+    expect(seasonSpentOn(state, "transfer-fund"), "상한 누계가 잘린 이력에서 셌다").toBe(
+      chunk * rounds,
+    );
+    expect(transferFundRoom(state)).toBe(cap - chunk * rounds);
+
+    // 건수가 넘은 뒤에도 보너스 문 둘은 그대로 선다
+    const fourth = contracted[MANAGER_WALLET.BONUS_PLAYERS_PER_SEASON]!;
+    const overflow = payPlayerBonus(state, { playerId: fourth.id, amount: bonusFor(fourth.id) });
+    expect(overflow.ok, "넷째 선수에게 보너스가 나갔다").toBe(false);
+    const first = contracted[0]!;
+    const repeat = payPlayerBonus(state, { playerId: first.id, amount: bonusFor(first.id) });
+    expect(repeat.unchanged, "같은 선수에게 두 번째 보너스가 나갔다").toBe(true);
   });
 
   /**

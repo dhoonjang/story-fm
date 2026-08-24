@@ -21,7 +21,11 @@ import type { SkillResult } from "../skills";
  * 위약금)는 원장을 이미 쥔 쪽(`market/manager-market.ts`)이 두 자리를 함께 적는다.
  */
 export const MANAGER_WALLET = {
-  /** 이력에 남기는 지출 건수 — 보드 요청·구단주 요청과 같은 규약 */
+  /**
+   * 화면이 보여주는 지출 건수 — 보드 요청·구단주 요청과 같은 규약. 배열의 절단은
+   * 지난 시즌 항목에만 걸린다 — 이번 시즌 항목은 시즌 상한의 장부라 건수와 무관하게
+   * 전부 남는다.
+   */
   KEPT: 20,
   /**
    * 감독이 **금액을 고르는** 갈래의 최소 단위 — 이 아래는 눈금이 아니라 소음이다.
@@ -108,7 +112,13 @@ export function spendFromWallet(
   };
   spending.push(entry);
   if (spending.length > MANAGER_WALLET.KEPT) {
-    state.manager.spending = spending.slice(-MANAGER_WALLET.KEPT);
+    // ⚠️ 이번 시즌 항목은 떨구지 않는다 — 시즌 문(`seasonSpentOn` ·
+    // `bonusPaidThisSeason`)이 이 배열에서 누계를 세므로, 여기서 잘리면 상한이
+    // 조용히 열린다. 화면의 "최근 KEPT건"은 뷰가 잘라 보낸다 (career.md §5.4).
+    const firstCurrent = spending.findIndex((s) => s.season === state.season);
+    const droppable = firstCurrent === -1 ? spending.length : firstCurrent;
+    const drop = Math.min(spending.length - MANAGER_WALLET.KEPT, droppable);
+    if (drop > 0) state.manager.spending = spending.slice(drop);
   }
   return { ok: true, spent: amount };
 }
