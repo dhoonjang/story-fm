@@ -1173,9 +1173,9 @@ export const DEFAULT_XI: Record<string, readonly string[]> = {
     "benjamin-sesko",
   ],
   // 백4는 프림퐁-자케-반다이크-케르케즈다 (Squawka·planetfootball 2026-27 예상 XI).
-  // 예전엔 오른쪽 풀백이 없어 **백4가 성립하지 않았고**, 그 자리를 왼쪽 풀백
-  // 치미카스가 적응도 62로 메웠다 — 프림퐁·브래들리가 있는데도 그랬던 건
-  // 지정 XI에 없어 1군 코어에서 밀렸기 때문이다. 최전방은 이사크 하나로 둔다.
+  // 지정 XI에 없는 선수는 1군 코어에서 밀린다 — 오른쪽 풀백을 빼면 **백4가
+  // 성립하지 않아** 왼쪽 풀백이 낮은 적응도로 그 자리를 메운다.
+  // 최전방은 이사크 하나로 둔다.
   liverpool: [
     "alisson-becker",
     "jeremie-frimpong",

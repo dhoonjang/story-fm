@@ -150,9 +150,9 @@ function sessionById(state: GameState, id: string): TrainingSession | null {
  *
  * ⚠️ **코어는 능력치도 전술 적응도도 올리지 않는다.**
  *
- * 예전엔 여기서 "이 축을 겨냥한 세션이 나이별 횟수(3~5회)만큼 쌓이면 +1"을 굴렸다.
- * 그러면 성장이 **달력을 넘긴 횟수**의 함수가 되어, 같은 메뉴를 반복하는 것이 가장
- * 효율적인 육성법이 된다. 무엇이 남았는지는 그 구간을 읽는 결산이 정한다
+ * 세션 횟수를 세어 여기서 올리면 성장이 **달력을 넘긴 횟수**의 함수가 되어,
+ * 같은 메뉴를 반복하는 것이 가장 효율적인 육성법이 된다. 무엇이 남았는지는 그
+ * 구간을 읽는 결산이 정한다
  * (`training-report.ts` — 능력치와 전술 적응도를 한 템플릿에서 함께 판정한다).
  *
  * 회복도 여기서 더하지 않는다 — **하루의 회복은 하루에 한 번**이라
@@ -284,9 +284,9 @@ function dailyTick(
     /**
      * 폼은 **매일** 평균으로 조금 끌린다 (form.ts).
      *
-     * 예전엔 월요일에 1칸씩 계단으로 내렸다. 주 2경기면 +2가 붙고 −1만 빠져
-     * 회귀가 늘 지고, 강팀은 시즌 내내 +3에 못박혔다. 매일 조금씩 빼면 연승이
-     * 멈추는 순간부터 식고, 오래 쉬면 무디어진다 — 폼에 시간 축이 생긴다.
+     * 주 1회 계단으로 내리면 주 2경기 팀은 +2가 붙고 −1만 빠져 회귀가 늘
+     * 지고, 강팀이 시즌 내내 +3에 못박힌다. 매일 조금씩 빼면 연승이 멈추는
+     * 순간부터 식고, 오래 쉬면 무디어진다 — 폼에 시간 축이 생긴다.
      */
     player.state.form = decayedForm(player.state.form);
     if (issuePlayers.has(player.id)) {
@@ -354,7 +354,6 @@ function dailyTick(
    *
    * 빈도도 대상도 **개인 성향**을 탄다: 유리몸이 많은 선수단은 실제로 더 자주
    * 쓰러지고, 그중 누가 걸리는지도 경기와 같은 저울(`injuryWeight`)로 정한다.
-   * 예전엔 균등 추첨이라 유리 몸도 철인도 훈련장에서는 똑같았다.
    */
   if (hardSessions > 0) {
     const candidates = players.filter((p) => !isInjured(state, p.id));
@@ -720,9 +719,8 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
   const squad = firstTeamPlayers(state, teamId);
   const byId = new Map(squad.map((p) => [p.id, p]));
   /**
-   * **정지 선수는 못 나온다** — 부상과 같다. 예전엔 부상만 걸렀는데, 간이 시뮬이
-   * 카드를 만들지 않던 시절엔 AI 선수에게 정지가 생기지 않아 티가 나지 않았다.
-   * 이제 리그 전체가 카드를 받으므로 이 문도 함께 닫아야 규칙이 하나가 된다.
+   * **정지 선수는 못 나온다** — 부상과 같다. 간이 시뮬도 리그 전체에 카드를
+   * 만들므로, 부상만 거르면 AI 팀이 정지 선수를 그대로 내보내 규칙이 갈라진다.
    */
   const available = (p: GamePlayer) => !isInjured(state, p.id) && !isSuspended(state, p.id);
   const startingAssignments = assignmentsOf(state, teamId, "starting");
@@ -1253,10 +1251,9 @@ export function advanceTime(
       advanceSuperCups(state, digest);
     }
     // 경기 일정이 바뀌었으면 기본 훈련을 다시 깐다 (감독 지시 세션은 그대로).
-    // ⚠️ 예전엔 "경기 수가 늘었을 때"만 불렀는데, 컵 대진은 **경기일 몇 주 전에**
-    // 편성되므로 그 순간엔 3주 창 밖이라 아무 일도 일어나지 않고, 날짜가 다가와도
-    // 다시 부를 계기가 없었다. 리그 경기 연기는 경기 수를 바꾸지도 않는다.
-    // 판정은 배치를 다시 계산해 비교하는 sync가 직접 한다
+    // ⚠️ "경기 수가 늘었을 때"로 게이트하면 안 된다 — 컵 대진은 **경기일 몇 주
+    // 전에** 편성되어 그 순간엔 3주 창 밖이고, 리그 경기 연기는 경기 수를 바꾸지도
+    // 않는다. 판정은 배치를 다시 계산해 비교하는 sync가 직접 한다
     // 무직이면 깔 훈련장이 없다 — 옛 구단의 마이크로사이클은 감독의 것이 아니다
     if (managedTeamId(state)) syncDefaultTraining(state);
 
