@@ -99,8 +99,10 @@ export function SquadView({
   const players = squad.players;
   const byId = useMemo(() => new Map(players.map((p) => [p.id, p])), [players]);
   const boardRef = useRef<HTMLDivElement>(null);
-  /** 직접 저장할 수 있는가 — 경기 중에는 아니다 */
+  /** 직접 저장할 수 있는가 — 경기 중과 무직에는 아니다 (뷰의 `editable`이 판정한다) */
   const live = squad.editable;
+  /** 무직 — 판은 옛 구단의 것이라 잠겨 있다 (career.md §5.1). 여기서는 문구만 가른다 */
+  const dismissed = game.views.career.dismissal !== null;
   /** 경기 중이지만 **판으로 지시할 수는 있다** */
   const advisory = !live && onOrder !== undefined;
   /** 판을 만질 수 있는가 — 저장이든 지시든 */
@@ -678,7 +680,9 @@ export function SquadView({
                   /* 잠긴 이유는 **사실로만** — 다음에 무엇을 하라는 말은 붙이지 않는다 */
                   title={
                     !live
-                      ? "경기 중 — 1·2군 이동 잠금"
+                      ? dismissed
+                        ? "무직 — 전술판 잠금"
+                        : "경기 중 — 1·2군 이동 잠금"
                       : onPitch.has(p.id)
                         ? "선발 배치 중 — 1·2군 이동 잠금"
                         : undefined
@@ -713,6 +717,7 @@ export function SquadView({
       benchKey,
       onPitchKey,
       live,
+      dismissed,
       saving,
       swapPair?.id,
       swapPair?.tier,
@@ -835,7 +840,8 @@ export function SquadView({
             {benchPlayers.length - benchDesignated.length}
           </span>
         </div>
-        {!live && !advisory && (
+        {/* 무직 잠금은 버튼이 아니다 — 돌아갈 경기가 없고, 판의 잠긴 모양이 이미 말한다 */}
+        {!live && !advisory && !dismissed && (
           <button className="ghost-btn" onClick={onGoToChat}>
             경기 중 — 채팅으로
           </button>

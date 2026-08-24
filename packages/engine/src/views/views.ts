@@ -2482,7 +2482,8 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       formation: tactics.spec.formation,
       tactics: { ...tactics.spec },
       familiarity: Math.round(squadFamiliarity(state, userTeamId)),
-      editable: state.phase !== "match",
+      // 경기 중과 무직에 꺼진다 — 무직의 판은 옛 구단의 것이라 읽기 전용이다 (career.md §5.1)
+      editable: state.phase !== "match" && !state.dismissal,
       firstTeamCount: players.filter((p) => p.squadLevel === "first").length,
       reserveCount: players.filter((p) => p.squadLevel === "reserve").length,
       registration: squadRegistrationOf(state, userTeamId),
