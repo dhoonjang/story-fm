@@ -43,6 +43,8 @@ import {
   recallLoan,
   releasePlayer,
   renewalExpectation,
+  renewalYearsExpectation,
+  RENEWAL_YEARS_MAX,
   respondOffer,
   responseDelayDays,
   resolveMedical,
@@ -985,6 +987,104 @@ describe("재계약 — 상대가 선수 본인이다", () => {
     const accepted = respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
     expect(accepted.ok, accepted.message).toBe(true);
     expect(negotiation.status).toBe("agreed");
+  });
+
+  /** 80% 주급 · 3년으로 재계약을 열고 답이 도착한 날까지 보낸다 */
+  function arrivedRenewal(state: GameState) {
+    const player = expiringPlayer(state);
+    const expectation = renewalExpectation(state, player);
+    const opened = openRenewal(state, {
+      playerId: player.id,
+      weeklyWage: Math.round(expectation * 0.8),
+      years: 3,
+    });
+    expect(opened.ok, opened.message).toBe(true);
+    const negotiation = state.negotiations.find((n) => n.kind === "renew")!;
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+    return { player, negotiation, demanded: Math.round(expectation * 1.15) };
+  }
+
+  it("선수가 연수를 함께 되부르면 그 연수로 다시 제안해 합의하고, 계약도 그 길이다", () => {
+    const state = createTestGame(42);
+    const { player, negotiation, demanded } = arrivedRenewal(state);
+    const countered = respondOffer(state, {
+      negotiationId: negotiation.id,
+      verdict: "counter",
+      weeklyWage: demanded,
+      contractYears: 4,
+    });
+    expect(countered.ok, countered.message).toBe(true);
+    expect(negotiation.rounds[negotiation.rounds.length - 1]!.contractYears).toBe(4);
+    const card = countered.payload as MarketCard & { counterTerms?: { years?: number } };
+    expect(card.counterTerms?.years).toBe(4);
+    expect(countered.message).toContain("4년");
+
+    expect(openRenewal(state, { playerId: player.id, weeklyWage: demanded, years: 4 }).ok).toBe(
+      true,
+    );
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+    const accepted = respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
+    expect(accepted.ok, accepted.message).toBe(true);
+    expect(negotiation.status).toBe("agreed");
+    expect(acceptDeal(state, negotiation.id).ok).toBe(true);
+    expect(activeContract(state, player.id)!.until).toBe(contractUntil(state.date, 4));
+  });
+
+  it("되부르는 연수는 1년 이상 상한 이하이고, 비우면 커리어 시계가 정한 연수가 선다", () => {
+    const state = createTestGame(42);
+    const { player, negotiation, demanded } = arrivedRenewal(state);
+    const base = {
+      negotiationId: negotiation.id,
+      verdict: "counter" as const,
+      weeklyWage: demanded,
+    };
+    expect(respondOffer(state, { ...base, contractYears: RENEWAL_YEARS_MAX + 1 }).ok).toBe(false);
+    expect(respondOffer(state, { ...base, contractYears: 0 }).ok).toBe(false);
+    // 거부된 판정은 오퍼를 답한 것으로 남기지 않는다
+    expect(pendingOffer(negotiation)).toBeDefined();
+
+    const countered = respondOffer(state, base);
+    expect(countered.ok, countered.message).toBe(true);
+    expect(negotiation.rounds[negotiation.rounds.length - 1]!.contractYears).toBe(
+      renewalYearsExpectation(state, player),
+    );
+  });
+
+  it("재계약의 앵커는 연수와 그 폭을 쥐고, 클램프가 판정의 연수를 그 폭으로 자른다", () => {
+    const state = createTestGame(42);
+    const { player, negotiation } = arrivedRenewal(state);
+    const anchor = counterpartyAnchor(state, negotiation)!;
+    const asked = renewalYearsExpectation(state, player);
+    expect(anchor.contractYears).toBe(asked);
+    expect(anchor.yearsRoom).toEqual({
+      min: Math.max(1, asked - 1),
+      max: Math.min(RENEWAL_YEARS_MAX, asked + 1),
+    });
+    const wide = clampCounterpartyRuling(anchor, { verdict: "counter", contractYears: 99 });
+    expect(wide.contractYears).toBe(anchor.yearsRoom!.max);
+    const narrow = clampCounterpartyRuling(anchor, { verdict: "counter", contractYears: 0 });
+    expect(narrow.contractYears).toBe(anchor.yearsRoom!.min);
+    // 비우면 앵커의 연수가 선다
+    expect(clampCounterpartyRuling(anchor, { verdict: "counter" }).contractYears).toBe(asked);
+  });
+
+  it("영입 협상의 앵커에는 연수 축이 없다 — 연수를 되불러도 판정에 실리지 않는다", () => {
+    const state = createTestGame();
+    state.date = "2026-08-01";
+    const player = target(state);
+    const sent = sendOffer(state, offerFor(state, player.id));
+    expect(sent.ok, sent.message).toBe(true);
+    const negotiation = openNegotiationFor(state, player.id)!;
+    pendingOffer(negotiation)!.respondsOn = state.date;
+    const anchor = counterpartyAnchor(state, negotiation)!;
+    expect(anchor.contractYears).toBeUndefined();
+    expect(anchor.yearsRoom).toBeUndefined();
+    expect(anchor.bounds.years).toBeNull();
+    const ruling = clampCounterpartyRuling(
+      { ...anchor, verdict: "counter", allowed: ["counter"] },
+      { verdict: "counter", contractYears: 4 },
+    );
+    expect(ruling.contractYears).toBeUndefined();
   });
 
   /**
@@ -2274,6 +2374,7 @@ describe("협상 상대의 앵커와 한도", () => {
       latitude: 0,
       fee: { expectation: 1000, min: 500, max: 2000 },
       wage: null,
+      years: null,
       splittable: true,
     },
     ...over,

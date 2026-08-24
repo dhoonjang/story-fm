@@ -582,6 +582,8 @@ export function answerOffer(
     verdict: NegotiationVerdict;
     fee?: number;
     weeklyWage?: number;
+    /** 재계약의 조정에서 선수가 되부르는 계약 연수 (transfer.md §1) */
+    contractYears?: number;
     /** 상대가 되부르는 분할 연수 — 조정에만 뜻이 있다 (transfer.md §5-2) */
     paymentYears?: number;
     note?: string;
@@ -604,6 +606,8 @@ export function respondOffer(
     verdict: NegotiationVerdict;
     fee?: number;
     weeklyWage?: number;
+    /** 재계약의 조정에서 선수가 부르는 계약 연수 — 다른 갈래는 무시된다 */
+    contractYears?: number;
     paymentYears?: number;
     note?: string;
   },
@@ -686,6 +690,14 @@ export function respondOffer(
           bounds.wage.expectation,
       )
     : 0;
+  /** 재계약의 두 번째 축 — 우리가 부른 연수와 무관하게 선수가 원하는 쪽으로 선다 */
+  const yearsAsked = bounds.years
+    ? Math.round(
+        input.contractYears ??
+          clampToBand(bounds.years, bounds.years.expectation) ??
+          bounds.years.expectation,
+      )
+    : offer.contractYears;
   const counterSeverance = releasing ? feeAsked : 0;
   const counterFee = renewing || releasing ? 0 : feeAsked;
   const counterWageDemand = renewing ? wageAsked : 0;
@@ -720,6 +732,16 @@ export function respondOffer(
       message: renewing
         ? `요구 주급은 ${formatMoney(offer.weeklyWage)} 초과 ${formatMoney(bounds.wage.max)} 이하여야 합니다`
         : `조정 주급은 ${formatMoney(offer.weeklyWage)} 이상 ${formatMoney(bounds.wage.max)} 이하여야 합니다`,
+    };
+  }
+  if (
+    countering &&
+    bounds.years &&
+    (yearsAsked < bounds.years.min || yearsAsked > bounds.years.max)
+  ) {
+    return {
+      ok: false,
+      message: `요구 연수는 ${bounds.years.min}년 이상 ${bounds.years.max}년 이하여야 합니다`,
     };
   }
 
@@ -813,7 +835,7 @@ export function respondOffer(
       by: "them",
       fee: 0,
       weeklyWage: counterWageDemand,
-      contractYears: offer.contractYears,
+      contractYears: yearsAsked,
       respondsOn: null,
       probability: odds.probability,
       verdict: "counter",
@@ -821,9 +843,11 @@ export function respondOffer(
     });
     return {
       ok: true,
-      payload: verdictCard({ counterTerms: dealTerms({ weeklyWage: counterWageDemand }) }),
+      payload: verdictCard({
+        counterTerms: dealTerms({ weeklyWage: counterWageDemand, years: yearsAsked }),
+      }),
       message:
-        `${player.name}은(는) 주급 ${formatMoney(counterWageDemand)}을 원합니다. ` +
+        `${player.name}은(는) 주급 ${formatMoney(counterWageDemand)} · ${yearsAsked}년 계약을 원합니다. ` +
         `그 조건으로 다시 제안하면 받아들일 것입니다`,
     };
   }
@@ -2895,9 +2919,14 @@ export function describeNegotiations(state: GameState): string {
       const split = splitLabel(last.paymentYears);
       if (last.by === "them") {
         // 내보내는 갈래는 상대가 **오퍼**를 낸 것이고, 데려오는 갈래는 **조정**이다
-        return n.kind === "sell" || n.kind === "loan_out"
-          ? `${n.id} ${who} ${direction} — 상대 오퍼 ${formatMoney(last.fee)}${split} 도착, 답이 필요합니다`
-          : `${n.id} ${who} ${direction} — 조정 ${moneyKo} ${formatMoney(last.fee)}${split} 도착`;
+        if (n.kind === "sell" || n.kind === "loan_out") {
+          return `${n.id} ${who} ${direction} — 상대 오퍼 ${formatMoney(last.fee)}${split} 도착, 답이 필요합니다`;
+        }
+        // 재계약의 조정은 이적료가 아니라 주급과 연수다
+        if (n.kind === "renew") {
+          return `${n.id} ${who} ${direction} — 조정 주급 ${formatMoney(last.weeklyWage)} · ${last.contractYears}년 도착`;
+        }
+        return `${n.id} ${who} ${direction} — 조정 ${moneyKo} ${formatMoney(last.fee)}${split} 도착`;
       }
       const waiting =
         last.respondsOn !== null && last.respondsOn > state.date

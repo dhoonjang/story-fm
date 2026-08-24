@@ -1,11 +1,18 @@
 import type { MarketSkillResult } from "../skills";
 import type { GamePlayer, Negotiation, NegotiationVerdict } from "@story-fm/domain";
 import { MAX_PAYMENT_YEARS, PITCH_CLAIM_KO, ageOf, naturalPositionOf } from "@story-fm/domain";
-import { askingPriceFor, dealOdds, marketValueOf, wageExpectationOf } from "./market";
+import {
+  askingPriceFor,
+  dealOdds,
+  marketValueOf,
+  renewalExpectation,
+  wageExpectationOf,
+} from "./market";
 import {
   bandOpen,
   clampToBand,
   counterBoundsOf,
+  renewalYearsExpectation,
   type CounterBand,
   type CounterBounds,
 } from "./counter-bounds";
@@ -35,6 +42,8 @@ export const COUNTERPARTY_COUNTER_AT = 25;
  * 자리에 다른 폭을 두면 어느 쪽이 진짜 상한인지 알 수 없다.
  */
 export const COUNTERPARTY_TERMS_BAND = 0.15;
+/** 재계약의 계약 연수가 앵커에서 움직일 수 있는 폭 — ±1년 */
+export const COUNTERPARTY_YEARS_BAND = 1;
 
 /** 판정의 사다리 — 상대는 앵커에서 **한 칸**까지 움직인다 */
 const LADDER: readonly NegotiationVerdict[] = ["reject", "counter", "accept"];
@@ -57,6 +66,14 @@ export function roomOf(anchor: number, band: CounterBand): TermsRoom {
   return { min: clampToBand(band, low) ?? anchor, max: clampToBand(band, high) ?? anchor };
 }
 
+/** 연수의 폭 — 금액의 비율 폭이 아니라 앵커 ±1년을 코어의 구간으로 자른 것 */
+export function yearsRoomOf(anchor: number, band: CounterBand): TermsRoom {
+  return {
+    min: clampToBand(band, anchor - COUNTERPARTY_YEARS_BAND) ?? anchor,
+    max: clampToBand(band, anchor + COUNTERPARTY_YEARS_BAND) ?? anchor,
+  };
+}
+
 export interface CounterpartyAnchor {
   negotiationId: string;
   /** 코어가 잰 성사 확률 */
@@ -75,6 +92,10 @@ export interface CounterpartyAnchor {
   weeklyWage?: number;
   /** 그 주급이 움직일 수 있는 폭 */
   wageRoom?: TermsRoom;
+  /** 조정일 때 선수가 부르는 계약 연수 — 재계약에서만 */
+  contractYears?: number;
+  /** 그 연수가 움직일 수 있는 폭 */
+  yearsRoom?: TermsRoom;
   /** 분할 연수를 되부를 수 있는 갈래인가 */
   splittable: boolean;
   bounds: CounterBounds;
@@ -85,6 +106,7 @@ export interface CounterpartyRulingInput {
   verdict: NegotiationVerdict;
   fee?: number;
   weeklyWage?: number;
+  contractYears?: number;
   paymentYears?: number;
   note?: string;
 }
@@ -95,6 +117,7 @@ export interface CounterpartyRuling {
   verdict: NegotiationVerdict;
   fee?: number;
   weeklyWage?: number;
+  contractYears?: number;
   paymentYears?: number;
   note?: string;
 }
@@ -133,7 +156,7 @@ export function counterpartyAnchor(
    * 값 너머를 불렀다는 뜻이라(호가의 1.15배 위 · 정산금 전액 이상), 남는 답은
    * 수락이다. 억지로 조정을 세우면 코어가 그 값을 거절한다.
    */
-  const canCounter = axisOpen(bounds.fee) && axisOpen(bounds.wage);
+  const canCounter = axisOpen(bounds.fee) && axisOpen(bounds.wage) && axisOpen(bounds.years);
 
   const ladder: NegotiationVerdict =
     probability >= COUNTERPARTY_ACCEPT_AT - bounds.latitude
@@ -152,6 +175,7 @@ export function counterpartyAnchor(
 
   const fee = bounds.fee ? clampToBand(bounds.fee, bounds.fee.expectation) : null;
   const wage = bounds.wage ? clampToBand(bounds.wage, bounds.wage.expectation) : null;
+  const years = bounds.years ? clampToBand(bounds.years, bounds.years.expectation) : null;
   return {
     negotiationId: negotiation.id,
     probability,
@@ -162,16 +186,23 @@ export function counterpartyAnchor(
     ...(wage === null || !bounds.wage
       ? {}
       : { weeklyWage: wage, wageRoom: roomOf(wage, bounds.wage) }),
+    ...(years === null || !bounds.years
+      ? {}
+      : { contractYears: years, yearsRoom: yearsRoomOf(years, bounds.years) }),
     splittable: bounds.splittable,
     bounds,
   };
 }
 
+/** 폭 안으로 — 폭은 이미 코어의 합법 구간으로 잘려 있다 (`roomOf` · `yearsRoomOf`) */
+function clampInto(room: TermsRoom, asked: number): number {
+  return Math.min(room.max, Math.max(room.min, Math.round(asked)));
+}
+
 /** 앵커 ±한도 안으로 — 그 위에 코어의 합법 구간이 이미 걸려 있다 (`roomOf`) */
 function clampNear(anchor: number, asked: number | undefined, band: CounterBand): number {
   if (asked === undefined) return anchor;
-  const room = roomOf(anchor, band);
-  return Math.min(room.max, Math.max(room.min, Math.round(asked)));
+  return clampInto(roomOf(anchor, band), asked);
 }
 
 /**
@@ -198,6 +229,10 @@ export function clampCounterpartyRuling(
     anchor.bounds.wage && anchor.weeklyWage !== undefined
       ? clampNear(anchor.weeklyWage, ruling?.weeklyWage, anchor.bounds.wage)
       : undefined;
+  const contractYears =
+    anchor.bounds.years && anchor.contractYears !== undefined && anchor.yearsRoom
+      ? clampInto(anchor.yearsRoom, ruling?.contractYears ?? anchor.contractYears)
+      : undefined;
   const years = ruling?.paymentYears;
   const paymentYears =
     anchor.splittable && years !== undefined && years >= 1 && years <= MAX_PAYMENT_YEARS
@@ -208,6 +243,7 @@ export function clampCounterpartyRuling(
     verdict,
     ...(fee === undefined ? {} : { fee }),
     ...(weeklyWage === undefined ? {} : { weeklyWage }),
+    ...(contractYears === undefined ? {} : { contractYears }),
     ...(paymentYears === undefined ? {} : { paymentYears }),
     ...(note ? { note } : {}),
   };
@@ -280,7 +316,10 @@ function dossierOf(state: GameState, negotiation: Negotiation, player: GamePlaye
     ),
     `[값의 자] 시장가 ${formatMoney(marketValueOf(state, player))} · 호가 ${formatMoney(
       askingPriceFor(state, player),
-    )} · 선수 주급 기대 ${formatMoney(wageExpectationOf(state, player))}`,
+    )} · 선수 주급 기대 ${formatMoney(wageExpectationOf(state, player))}` +
+      (negotiation.kind === "renew"
+        ? ` · 재계약 기대 주급 ${formatMoney(renewalExpectation(state, player))} · 기대 연수 ${renewalYearsExpectation(state, player)}년`
+        : ""),
     ...((negotiation.pitched?.length ?? 0) > 0
       ? [`[사실로 확인된 이야기] ${negotiation.pitched!.map((k) => PITCH_CLAIM_KO[k]).join(" · ")}`]
       : []),

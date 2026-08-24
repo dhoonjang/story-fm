@@ -1,5 +1,7 @@
 import type { GamePlayer, Negotiation } from "@story-fm/domain";
+import { ageOf } from "@story-fm/domain";
 import {
+  CAREER_AGE_MOVE,
   LOAN_FEE_RATE,
   askingPriceFor,
   marketValueOf,
@@ -33,6 +35,19 @@ export const SELL_COUNTER_FLOOR = 0.55;
  * 조정 상한(`COUNTER_CEILING`)이 이 값 위에 다시 얹힌다.
  */
 export const LOAN_ASKING_LIFT = 1.6;
+/** 재계약 조정에서 선수가 부르는 계약 연수 */
+export const RENEWAL_YEARS_ASK = 3;
+/** `CAREER_AGE_MOVE` 이하의 선수가 부르는 연수 — 커리어 시계가 길다 */
+export const RENEWAL_YEARS_ASK_YOUNG = 4;
+/** 재계약 조정이 부를 수 있는 연수의 상한 (하한은 1년) */
+export const RENEWAL_YEARS_MAX = 5;
+
+/** 재계약 조정에서 선수가 부르는 연수 — 커리어 시계가 정한다 (transfer.md §1) */
+export function renewalYearsExpectation(state: GameState, player: GamePlayer): number {
+  return ageOf(player.birthdate, state.date) <= CAREER_AGE_MOVE
+    ? RENEWAL_YEARS_ASK_YOUNG
+    : RENEWAL_YEARS_ASK;
+}
 
 /**
  * 한 축이 부를 수 있는 구간 — **정수 포함 구간**이다.
@@ -55,6 +70,8 @@ export interface CounterBounds {
   fee: CounterBand | null;
   /** 주급 — 상대가 주급을 정하지 않는 갈래(매각·임대 송출·해지)는 `null` */
   wage: CounterBand | null;
+  /** 재계약에서 되부르는 계약 연수 · 다른 갈래는 `null` */
+  years: CounterBand | null;
   /** 분할 연수를 되부를 수 있는 갈래인가 (transfer.md §5-2) */
   splittable: boolean;
 }
@@ -120,7 +137,7 @@ export function counterBoundsOf(
   const player = playerById(state, negotiation.gamePlayerId);
   const kind = negotiation.kind;
   const base = { acceptFloor, latitude };
-  if (!player) return { ...base, fee: null, wage: null, splittable: false };
+  if (!player) return { ...base, fee: null, wage: null, years: null, splittable: false };
 
   /**
    * **해지의 조정은 선수가 정산금을 올려 부르는 것**이고, 상한은 **일방 해지의
@@ -136,11 +153,13 @@ export function counterBoundsOf(
         max: Math.round(unilateralSeveranceOf(state, player.id)),
       },
       wage: null,
+      years: null,
       splittable: true,
     };
   }
 
-  // 재계약의 조정은 **주급**을 부른다 — 우리 제시액 초과, 기대치의 1.4배 이하
+  // 재계약의 조정은 **주급과 계약 연수**를 부른다 — 주급은 우리 제시액 초과,
+  // 기대치의 1.4배 이하 · 연수는 우리가 부른 값과 무관하게 1년 이상 상한 이하
   if (kind === "renew") {
     const expectation = renewalExpectation(state, player);
     return {
@@ -150,6 +169,11 @@ export function counterBoundsOf(
         expectation: Math.round(expectation),
         min: offer.weeklyWage + 1,
         max: Math.round(expectation * COUNTER_WAGE_CEILING),
+      },
+      years: {
+        expectation: renewalYearsExpectation(state, player),
+        min: 1,
+        max: RENEWAL_YEARS_MAX,
       },
       splittable: false,
     };
@@ -170,6 +194,7 @@ export function counterBoundsOf(
         max: offer.fee - 1,
       },
       wage: null,
+      years: null,
       splittable: kind === "sell",
     };
   }
@@ -194,6 +219,7 @@ export function counterBoundsOf(
       min: offer.weeklyWage,
       max: Math.round(wageAnchor * COUNTER_WAGE_CEILING),
     },
+    years: null,
     splittable: kind === "buy",
   };
 }
