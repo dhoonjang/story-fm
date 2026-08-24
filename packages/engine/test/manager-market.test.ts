@@ -980,6 +980,33 @@ describe("감독 계약 — 만료는 하루를 건너뛰지 않고 두 번 걸�
     expect(state.manager.boardWarnings, "재계약이 앞선 경고를 지웠다").toBe(2);
     expect(financeOf(state, team).transferBudget).toBe(budget + offer.budgetPledge!);
   });
+
+  /**
+   * **시계가 서는 날에도 세계의 하루는 끝난다** (career.md §5). 통보 판정이
+   * `simulateOtherMatches`보다 먼저 리턴하면 그날의 다른 구단 경기가 시뮬 자리를
+   * 영영 잃고, 안 치러진 컵 경기 하나가 시즌 종료를 영원히 막는다 — 세 시즌
+   * 재정 하네스가 밟은 함정이다.
+   */
+  it("통보의 날에도 다른 구단의 경기는 치러진다", () => {
+    const state = createTestGame(21);
+    const tomorrow = addDays(state.date, 1);
+    state.manager.reputation.board = 60;
+    state.manager.contract = {
+      salary: 3_000_000,
+      signedOn: state.date,
+      until: addDays(tomorrow, RENEWAL_NOTICE_DAYS),
+    };
+    // 내일로 옮겨 심은 남의 경기 — 통보와 같은 날 세계가 돌아야 결과가 적힌다
+    const probe = state.matches.find(
+      (m) => !m.result && m.homeTeamId !== state.userTeamId && m.awayTeamId !== state.userTeamId,
+    )!;
+    probe.date = tomorrow;
+
+    const advanced = advanceTime(state, { days: 1 });
+    expect(advanced.ok).toBe(true);
+    expect(advanced.stopped, "통보가 주의로 서지 않았다").toBe("attention");
+    expect(probe.result, "통보가 그날의 세계 경기를 지웠다").not.toBeNull();
+  });
 });
 
 /**

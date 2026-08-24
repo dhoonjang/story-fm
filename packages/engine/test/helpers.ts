@@ -1,5 +1,6 @@
 import {
   acceptDeal,
+  acceptManagerOffer,
   answerIncomingOffer,
   incomingOffer,
   advanceSegment,
@@ -131,10 +132,18 @@ export function playFullSeason(state: GameState, limit = 400): boolean {
 /**
  * 인내하는 보드 — 측정용. 경질은 시계를 멈추므로(state.dismissal) 재정·시즌
  * 분포를 재는 하네스는 자리를 지킨 채 한 시즌을 다 돌아야 한다.
+ *
+ * 계약 만료도 같은 무게다 (career.md §5.4): 만료 90일 전 보드의 재계약 제안에
+ * 답하지 않으면 무직이 되고, 유저 경기 없는 90일이 `stopped: "reached"`로
+ * `advanceAndPlay`를 세운다. 그래서 열린 재계약 제안은 그 자리에서 받는다.
  */
 export function keepSeat(state: GameState): void {
   state.manager.reputation.board = 60;
   state.manager.boardWarnings = 0;
+  const renewal = (state.managerOffers ?? []).find(
+    (o) => o.via === "renewal" && o.status === "open" && o.teamId === state.userTeamId,
+  );
+  if (renewal && !state.dismissal) acceptManagerOffer(state, renewal.id);
 }
 
 export function drillUserTactics(state: GameState, days = 1): void {
