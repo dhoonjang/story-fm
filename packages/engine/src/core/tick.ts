@@ -1225,22 +1225,16 @@ export function advanceTime(
     // 새 날은 하루의 시작으로 연다 — 장면의 시각은 날짜를 넘을 수 없다
     state.clock = DAY_START;
     const needsAttention = dailyTick(state, digest, trained);
-    // 감독의 자리 — 경고가 먼저 오고, 그래도 안 되면 여기서 시계가 멈춘다
-    if (reviewUserSeat(state, digest)) {
-      return { ok: true, digest, stopped: "blocked", trained };
-    }
     /**
-     * 감독의 계약 — 만료 판정과 보드의 재계약 통보 (career.md §5.4). 경질 뒤에
-     * 봐야 지운 계약을 다시 재지 않는다. 자리를 잃은 날은 경질과 같은 무게로
-     * 시계를 세우고, 통보가 선 날은 답할 자리가 생긴 날이라 주의로 멈춘다.
+     * 감독의 자리와 계약 (career.md §5·§5.4) — 판정은 여기서 하되 **시계는 세계의
+     * 하루가 끝난 뒤에 세운다.** 판정과 동시에 리턴하면 그날로 편성돼 있던 다른
+     * 구단의 경기가 시뮬 자리를 영영 잃고(`simulateOtherMatches`는 당일만 본다),
+     * 안 치러진 컵 경기 하나가 `allMatchesDone`을 영원히 막는다.
+     * 경질을 먼저 봐야 지운 계약을 다시 재지 않는다 — `reviewManagerContract`는
+     * `dismissal`이 서 있으면 스스로 물러난다.
      */
+    const seatLost = reviewUserSeat(state, digest);
     const contractDay = reviewManagerContract(state, digest);
-    if (contractDay === "expired") {
-      return { ok: true, digest, stopped: "blocked", trained };
-    }
-    if (contractDay === "notice") {
-      return { ok: true, digest, stopped: "attention", trained };
-    }
     simulateOtherMatches(state, digest);
     // 녹아웃 — 직전 단계가 끝났으면 다음 단계를 편성한다.
     // 대항전을 먼저 돌려야 예약된 대항전 날짜가 컵 날짜 선택에 반영된다.
@@ -1257,6 +1251,11 @@ export function advanceTime(
     // 무직이면 깔 훈련장이 없다 — 옛 구단의 마이크로사이클은 감독의 것이 아니다
     if (managedTeamId(state)) syncDefaultTraining(state);
 
+    // 자리를 잃은 날은 경질과 같은 무게로 시계가 멈춘다 — 세계의 하루는 이미 끝났다
+    if (seatLost || contractDay === "expired") {
+      return { ok: true, digest, stopped: "blocked", trained };
+    }
+
     const managed = managedTeamId(state);
     const userMatch = matchesOn(state.matches, state.date).find(
       (m) =>
@@ -1272,7 +1271,10 @@ export function advanceTime(
       return { ok: true, digest, stopped: "matchday", trained };
     }
 
-    if (needsAttention) return { ok: true, digest, stopped: "attention", trained };
+    // 통보가 선 날은 답할 자리가 생긴 날이다 — 경기일이 아니면 주의로 멈춘다
+    if (needsAttention || contractDay === "notice") {
+      return { ok: true, digest, stopped: "attention", trained };
+    }
     if (typeof until === "object" && d + 1 >= until.days) {
       return { ok: true, digest, stopped: "reached", trained };
     }
