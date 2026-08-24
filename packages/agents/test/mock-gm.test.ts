@@ -239,7 +239,7 @@ describe("mock GM — 이적 협상", () => {
     );
   });
 
-  it("받은 오퍼는 감독의 말에 따라 거절·역제안·수락된다", () => {
+  it("받은 오퍼는 감독의 말에 따라 거절·조정·수락된다", () => {
     const state = newGame();
     const digest: string[] = [];
     for (let i = 0; i < 60 && incomingOffers(state).length === 0; i++) {

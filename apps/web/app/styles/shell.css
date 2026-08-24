@@ -3109,7 +3109,7 @@ textarea {
   color: var(--deal);
   line-height: 0;
 }
-/* 배지는 방향까지 실어 두 낱말이 된다(`임대 송출 역제안`) — 중간에서 접히면 두 표식으로 읽힌다 */
+/* 배지는 방향까지 실어 두 낱말이 된다(`임대 송출 조정안`) — 중간에서 접히면 두 표식으로 읽힌다 */
 .mc-badge {
   font-size: var(--fs-3xs);
   font-weight: 700;
@@ -3156,13 +3156,23 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 /* 조건 두 벌 — 제시와 요구가 **같은 격자**에 서야 차이가 눈에 든다 */
+/* 제시·조정 두 줄은 한 그리드 — 이름표 열이 가장 긴 이름표(`주급·연수 조정`)에 맞춰 늘어난다 */
+.mc-table {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: baseline;
+  gap: 3px 10px;
+  margin-top: 5px;
+  font-size: var(--fs-xs);
+}
 .mc-terms {
+  display: contents;
+}
+.mc-vals {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 3px 14px;
-  margin-top: 5px;
-  font-size: var(--fs-xs);
 }
 .mc-terms span {
   display: inline-flex;
@@ -3178,10 +3188,9 @@ textarea {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-/* 갈래 이름(제시/요구)은 고정 폭 — 두 줄의 값이 같은 자리에서 시작한다 */
+/* 이름표는 접히지 않는다 — 열 폭은 그리드가 정한다 */
 .mc-side {
-  width: 2.4em;
-  flex-shrink: 0;
+  white-space: nowrap;
   color: var(--muted) !important;
 }
 .mc-terms.demand b {

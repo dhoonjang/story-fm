@@ -96,7 +96,7 @@ import type { CardMark, GoalMark } from "@story-fm/engine";
  * 아니라 "시나리오가 끝까지 도는가"를 보장하는 것이 목적이다.
  */
 
-/** mock 역제안 — 이적료는 받은 오퍼의 1.25배로 되부른다 (감독이 답하는 자리다) */
+/** mock 조정 — 이적료는 받은 오퍼의 1.25배로 되부른다 (감독이 답하는 자리다) */
 const MOCK_COUNTER_FEE_RATE = 1.25;
 /** mock 감독직 흥정 — 제시 조건의 1.2배를 되부른다 (천장은 코어가 자른다) */
 const MOCK_MANAGER_COUNTER_RATE = 1.2;
@@ -798,7 +798,7 @@ function computeMockGmTurn(
   }
 
   // ── 이적 협상 (mock) — 실모드는 LLM이 상대편이 되어 판정하지만 mock은 테스트
-  // 재현성을 위해 확률 구간으로 가른다 (수락 / 역제안 / 결렬)
+  // 재현성을 위해 확률 구간으로 가른다 (수락 / 조정 / 결렬)
   if (/협상|오퍼|이적|영입|매각|팔|사자|데려/u.test(msg)) {
     const incoming = incomingOffers(state)[0];
     // ① 받은 오퍼가 있으면 그것부터 — 감독의 뜻을 읽는다

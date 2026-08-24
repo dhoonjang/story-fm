@@ -301,6 +301,28 @@ export const YOUTH_DEVELOPMENT = defineHarness({
  * 남는다. 어느 쪽인지는 한 시즌을 굴려 봐야 보인다 — 코드를 읽어서는 알 수 없고,
  * 고정 기댓값이 있는 단위 테스트로도 잡히지 않는다.
  */
+export const NEGOTIATION = defineHarness({
+  id: "negotiation",
+  what: "재계약·해지·영입의 성사 확률 분포 — 기대치를 맞춘 제안이 자동 통과인가",
+  doc: "docs/simulation/transfer.md §3",
+  cost: "세계 하나 · 수 초",
+  // prettier-ignore
+  bands: [
+    { metric: "표본 · 재계약", role: "guard", min: 25, unit: "count", why: "우리 스쿼드 전원을 잰다 — 표본이 줄면 분포가 아니다" },
+    { metric: "재계약 기대치 · 중앙값", role: "measure", unit: "score", why: "기대 주급 100% · 3년 제안의 성사 확률" },
+    { metric: "재계약 기대치 · p90−p10", role: "guard", min: 20, unit: "score", why: "조건에 따라 실제로 갈리는가 — 폭이 없으면 축이 죽어 있다. 표본이 한 구단의 첫날(같은 대항전·불만 없음)이라 폭의 바닥은 낮게 둔다" },
+    { metric: "재계약 기대치 · 90% 이상 비율", role: "guard", max: 0.3, unit: "ratio", why: "기대치를 맞춘 제안이 자동 통과가 아니다" },
+    { metric: "재계약 기대치 · 앵커가 조정인 비율", role: "measure", unit: "ratio", why: "`COUNTERPARTY_COUNTER_AT`~`COUNTERPARTY_ACCEPT_AT` 구간 — 사다리의 가운데 칸에 서는 몫" },
+    { metric: "재계약 70% 주급 · 중앙값", role: "reference", max: 50, unit: "score", why: "기대치의 70%는 반 이상 실패해야 한다" },
+    { metric: "해지 기대치 · 중앙값", role: "measure", unit: "score", why: "기대 정산금 일시금 제안의 성사 확률" },
+    { metric: "해지 기대치 · p90−p10", role: "measure", unit: "score", why: "잔여 계약·나이·갈 곳이 해지를 실제로 가르는가" },
+    { metric: "표본 · 영입", role: "guard", min: 40, unit: "count", why: "타 구단 66~84 표본 — 표본이 줄면 분포가 아니다" },
+    { metric: "영입 기대치 · 중앙값", role: "measure", unit: "score", why: "호가·희망 주급을 그대로 맞춘 4년 오퍼의 성사 확률" },
+    { metric: "영입 기대치 · p90−p10", role: "guard", min: 20, unit: "score", why: "선수 관문이 구단 관문 뒤에 숨은 도장이 아니다" },
+    { metric: "영입 기대치 · 90% 이상 비율", role: "guard", max: 0.2, unit: "ratio", why: "호가를 맞췄다고 선수까지 자동으로 오지 않는다" },
+  ],
+});
+
 export const DEMOTION_GRIEVANCE = defineHarness({
   id: "demotion-grievance",
   what: "한 시즌 2군 강등이 낳는 불만 — 로테이션은 공짜고 방치는 값을 치르는가",
@@ -522,6 +544,7 @@ export const HARNESSES: readonly Harness[] = [
   AI_BENCH,
   AI_MARKET,
   MANAGER_MARKET,
+  NEGOTIATION,
   SQUAD_LONGEVITY,
   YOUTH_DEVELOPMENT,
   DEMOTION_GRIEVANCE,

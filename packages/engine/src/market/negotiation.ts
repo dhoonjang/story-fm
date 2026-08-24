@@ -93,7 +93,7 @@ import {
  * 이적 협상 — 오퍼를 넣고, 상대가 판정하고, 합의를 실행한다.
  *
  * 코어의 역할은 **가능한 것만 통과시키는 것**이다. 확률은 `market.ts`가 계산하고
- * 수락/역제안/결렬 판정은 LLM이 하지만, 창이 닫혔는지·예산이 되는지·미리 답한 것은
+ * 수락/조정/결렬 판정은 LLM이 하지만, 창이 닫혔는지·예산이 되는지·미리 답한 것은
  * 아닌지는 여기서 막는다 (docs/simulation/transfer.md §4).
  *
  * 여섯 방향이 같은 테이블에 얹힌다 — 영입·매각·임대(들이고 내보내고)·재계약·해지
@@ -140,7 +140,7 @@ const MAX_ROUNDS = 8;
 /** 협상 유효기간 — 창 마감이 더 이르면 그쪽이 먼저 온다 */
 const NEGOTIATION_DAYS = 14;
 /**
- * 분할 역제안이 뒤져 보는 연수 — **가장 짧은 것부터**다 (transfer.md §5-2).
+ * 분할 조정이 뒤져 보는 연수 — **가장 짧은 것부터**다 (transfer.md §5-2).
  * 사는 쪽은 낼 수 있는 한 빨리 끝내려 하지, 되도록 길게 끌려 하지 않는다.
  */
 const SPLIT_YEARS = Array.from({ length: MAX_PAYMENT_YEARS - 1 }, (_, i) => i + 2);
@@ -430,7 +430,7 @@ export function sendOffer(state: GameState, input: DealTerms): MarketSkillResult
  * 상대의 판정 — GM이 상대 구단·에이전트가 되어 호출한다.
  *
  * 판정 주체는 LLM이지만 코어가 **가능한 판정만** 받는다. 미리 답할 수 없고,
- * 확률이 바닥인데 수락할 수 없고, 역제안을 터무니없이 부를 수 없다.
+ * 확률이 바닥인데 수락할 수 없고, 조정을 터무니없이 부를 수 없다.
  */
 /**
  * 답할 오퍼를 집는다 — **두 방향이 같은 문을 지난다.**
@@ -490,7 +490,7 @@ export function counterpartOf(negotiation: Negotiation, player: GamePlayer): str
  * 답한 대상 오퍼의 조건이 `terms`(제시)이고 되부른 조건이 `counterTerms`(요구)다.
  * 우리가 낸 조건이 있어야 상대의 답이 판단거리가 된다 — 그 반대도 마찬가지다.
  *
- * **성사 가능성은 역제안에만 실린다**(`odds` — transfer.md §3). 끝난 판정에는
+ * **성사 가능성은 조정에만 실린다**(`odds` — transfer.md §3). 끝난 판정에는
  * 답할 것이 남지 않아 사전 확률이 판단의 입력이 아니고, 거절 카드에 선 높은
  * 확률은 판정과 모순처럼 읽힌다. 그래서 값을 아예 받지 않는다.
  */
@@ -501,7 +501,7 @@ function verdictCardOf(input: {
   kind: Negotiation["kind"];
   verdict: NegotiationVerdict;
   offer: Negotiation["rounds"][number];
-  /** 되부른 조건이 성사될 가능성 — 역제안일 때만 (`oddsText` 표기) */
+  /** 되부른 조건이 성사될 가능성 — 조정일 때만 (`oddsText` 표기) */
   odds?: string;
   loan?: boolean;
   note?: string;
@@ -530,10 +530,10 @@ function verdictCardOf(input: {
 }
 
 /**
- * **우리가 조건을 내고 답을 기다린다** — 오퍼든 역제안이든 두 걸음이 같다:
+ * **우리가 조건을 내고 답을 기다린다** — 오퍼든 조정이든 두 걸음이 같다:
  * 며칠 걸릴지 셈하고, 라운드를 쌓는다.
  *
- * 확률은 부르는 쪽이 이미 재어 두었으므로(`sendOffer`는 관문 검사에, 역제안은
+ * 확률은 부르는 쪽이 이미 재어 두었으므로(`sendOffer`는 관문 검사에, 조정은
  * 카드에 쓴다) 여기서 다시 굴리지 않는다 — 같은 값을 두 번 재면 설득 누적처럼
  * 중간에 바뀐 상태에서 다른 숫자가 나온다.
  */
@@ -582,7 +582,9 @@ export function answerOffer(
     verdict: NegotiationVerdict;
     fee?: number;
     weeklyWage?: number;
-    /** 상대가 되부르는 분할 연수 — 역제안에만 뜻이 있다 (transfer.md §5-2) */
+    /** 재계약의 조정에서 선수가 되부르는 계약 연수 (transfer.md §1) */
+    contractYears?: number;
+    /** 상대가 되부르는 분할 연수 — 조정에만 뜻이 있다 (transfer.md §5-2) */
     paymentYears?: number;
     note?: string;
   },
@@ -604,6 +606,8 @@ export function respondOffer(
     verdict: NegotiationVerdict;
     fee?: number;
     weeklyWage?: number;
+    /** 재계약의 조정에서 선수가 부르는 계약 연수 — 다른 갈래는 무시된다 */
+    contractYears?: number;
     paymentYears?: number;
     note?: string;
   },
@@ -655,11 +659,11 @@ export function respondOffer(
       message:
         `그 조건에 응할 구단은 없습니다 (성사 확률 ${odds.probability}%` +
         (bounds.latitude > 0 ? ` · 설득으로 열린 여유 ${bounds.latitude}%p` : "") +
-        `) — 역제안이나 결렬만 가능합니다`,
+        `) — 조정이나 결렬만 가능합니다`,
     };
   }
 
-  // 역제안 범위 검증을 **기록보다 먼저** 한다. 거부된 판정이 오퍼를 답한 것으로
+  // 조정 범위 검증을 **기록보다 먼저** 한다. 거부된 판정이 오퍼를 답한 것으로
   // 표시해 버리면 협상이 답할 수 없는 상태로 굳는다.
   const renewing = negotiation.kind === "renew";
   const releasing = negotiation.kind === "release";
@@ -686,6 +690,14 @@ export function respondOffer(
           bounds.wage.expectation,
       )
     : 0;
+  /** 재계약의 두 번째 축 — 우리가 부른 연수와 무관하게 선수가 원하는 쪽으로 선다 */
+  const yearsAsked = bounds.years
+    ? Math.round(
+        input.contractYears ??
+          clampToBand(bounds.years, bounds.years.expectation) ??
+          bounds.years.expectation,
+      )
+    : offer.contractYears;
   const counterSeverance = releasing ? feeAsked : 0;
   const counterFee = renewing || releasing ? 0 : feeAsked;
   const counterWageDemand = renewing ? wageAsked : 0;
@@ -703,23 +715,33 @@ export function respondOffer(
     if (selling) {
       return {
         ok: false,
-        message: `사는 쪽의 역제안은 ${formatMoney(bounds.fee.min)} 이상 ${formatMoney(offer.fee)} 미만이어야 합니다`,
+        message: `사는 쪽의 조정은 ${formatMoney(bounds.fee.min)} 이상 ${formatMoney(offer.fee)} 미만이어야 합니다`,
       };
     }
     return {
       ok: false,
-      message: `역제안은 ${formatMoney(offer.fee)} 이상 ${formatMoney(bounds.fee.max)} 이하여야 합니다`,
+      message: `조정은 ${formatMoney(offer.fee)} 이상 ${formatMoney(bounds.fee.max)} 이하여야 합니다`,
     };
   }
   if (countering && bounds.wage && (wageAsked < bounds.wage.min || wageAsked > bounds.wage.max)) {
-    // 재계약의 역제안은 **주급**을 부른다 — 우리 제시액 이상, 기대치의 1.4배 이하.
+    // 재계약의 조정은 **주급**을 부른다 — 우리 제시액 이상, 기대치의 1.4배 이하.
     // 데려오는 딜에도 같은 범위가 걸린다: 이적료에만 걸어 두면 상대가 이적료는
     // 규칙대로 부르면서 주급을 열 배로 되불러, 코어가 막지 않는 값이 협상에 남는다.
     return {
       ok: false,
       message: renewing
         ? `요구 주급은 ${formatMoney(offer.weeklyWage)} 초과 ${formatMoney(bounds.wage.max)} 이하여야 합니다`
-        : `역제안 주급은 ${formatMoney(offer.weeklyWage)} 이상 ${formatMoney(bounds.wage.max)} 이하여야 합니다`,
+        : `조정 주급은 ${formatMoney(offer.weeklyWage)} 이상 ${formatMoney(bounds.wage.max)} 이하여야 합니다`,
+    };
+  }
+  if (
+    countering &&
+    bounds.years &&
+    (yearsAsked < bounds.years.min || yearsAsked > bounds.years.max)
+  ) {
+    return {
+      ok: false,
+      message: `요구 연수는 ${bounds.years.min}년 이상 ${bounds.years.max}년 이하여야 합니다`,
     };
   }
 
@@ -734,7 +756,7 @@ export function respondOffer(
       kind: negotiation.kind,
       verdict: input.verdict,
       offer,
-      // 역제안만 답이 남는다 — 카드는 그때만 확률을 세운다 (`verdictCardOf`)
+      // 조정만 답이 남는다 — 카드는 그때만 확률을 세운다 (`verdictCardOf`)
       odds: oddsText(odds),
       loan: loaning,
       ...(input.note ? { note: input.note } : {}),
@@ -780,7 +802,7 @@ export function respondOffer(
     };
   }
 
-  // 역제안 — 상대가 부르는 값 (범위는 위에서 이미 검증했다)
+  // 조정 — 상대가 부르는 값 (범위는 위에서 이미 검증했다)
   if (releasing) {
     negotiation.rounds.push({
       date: state.date,
@@ -813,7 +835,7 @@ export function respondOffer(
       by: "them",
       fee: 0,
       weeklyWage: counterWageDemand,
-      contractYears: offer.contractYears,
+      contractYears: yearsAsked,
       respondsOn: null,
       probability: odds.probability,
       verdict: "counter",
@@ -821,9 +843,11 @@ export function respondOffer(
     });
     return {
       ok: true,
-      payload: verdictCard({ counterTerms: dealTerms({ weeklyWage: counterWageDemand }) }),
+      payload: verdictCard({
+        counterTerms: dealTerms({ weeklyWage: counterWageDemand, years: yearsAsked }),
+      }),
       message:
-        `${player.name}은(는) 주급 ${formatMoney(counterWageDemand)}을 원합니다. ` +
+        `${player.name}은(는) 주급 ${formatMoney(counterWageDemand)} · ${yearsAsked}년 계약을 원합니다. ` +
         `그 조건으로 다시 제안하면 받아들일 것입니다`,
     };
   }
@@ -849,7 +873,7 @@ export function respondOffer(
       }),
     }),
     message:
-      `${counterpart}의 역제안 — 이적료 ${formatMoney(counterFee)}${splitLabel(counterYears)} · 주급 ${formatMoney(counterWage)}. ` +
+      `${counterpart}의 조정 — 이적료 ${formatMoney(counterFee)}${splitLabel(counterYears)} · 주급 ${formatMoney(counterWage)}. ` +
       `받아들이려면 그 조건으로 오퍼를 다시 넣으세요`,
   };
 }
@@ -1390,7 +1414,7 @@ function pickBuyer(state: GameState, player: GamePlayer, rng: () => number): str
 }
 
 /**
- * 감독이 들어온 오퍼에 답한다 — 수락·거절·역제안(더 부르기).
+ * 감독이 들어온 오퍼에 답한다 — 수락·거절·조정(더 부르기).
  *
  * `answerOffer`의 **반대 방향 갈래**다. 관문·판정 카드·라운드 쌓기는 `respondOffer`와
  * 같은 헬퍼를 쓰고, 다른 것은 방향뿐이다: 답하는 사람이 감독이라 답할 날을 기다리지
@@ -1427,7 +1451,7 @@ export function answerIncomingOffer(
     fee: offer.fee,
     weeklyWage: offer.weeklyWage,
     years: offer.contractYears,
-    // 분할 연수도 넘긴다 — 일시금으로 되부르면 예산 관문이 같은 분할 역제안을 다시 세운다
+    // 분할 연수도 넘긴다 — 일시금으로 되부르면 예산 관문이 같은 분할 조정을 다시 세운다
     ...(offer.paymentYears === undefined ? {} : { paymentYears: offer.paymentYears }),
     // 갈래를 그대로 넘긴다 — 임대 송출을 매각으로 재면 임대료가 이적료 눈금에 걸린다
     kind: negotiation.kind,
@@ -1477,7 +1501,7 @@ export function answerIncomingOffer(
     };
   }
 
-  // 역제안 — 우리가 더 부른다. 상대 상한을 넘으면 확률이 떨어질 뿐 막지는 않는다.
+  // 조정 — 우리가 더 부른다. 상대 상한을 넘으면 확률이 떨어질 뿐 막지는 않는다.
   // 기본값도 갈래의 눈금을 쓴다 — 임대 송출에 시장가를 부르면 임대료의 열 배가 된다
   const expectation =
     negotiation.kind === "loan_out"
@@ -1487,7 +1511,7 @@ export function answerIncomingOffer(
   if (demanded <= offer.fee) {
     return {
       ok: false,
-      message: `역제안은 받은 오퍼(${formatMoney(offer.fee)})보다 높아야 합니다`,
+      message: `조정은 받은 오퍼(${formatMoney(offer.fee)})보다 높아야 합니다`,
     };
   }
   const wage = Math.round(input.weeklyWage ?? offer.weeklyWage);
@@ -2494,7 +2518,7 @@ function executeSale(
   if (shortfall) return { ok: false, message: `우리 ${squadShortfallText(shortfall, "sell")}` };
   /**
    * **사는 쪽도 돈이 있어야 한다.** 오퍼가 붙을 때 `pickBuyer`가 본 것은 그때의
-   * 시장가였고, 감독의 역제안은 그 위로 얼마든 부를 수 있다 — 그사이 그 구단이
+   * 시장가였고, 감독의 조정은 그 위로 얼마든 부를 수 있다 — 그사이 그 구단이
    * 다른 영입에 예산을 썼을 수도 있다. 검사 없이 빼면 상대 예산이 음수가 된다.
    *
    * 못 내면 협상이 **무산**된다(`expired`) — 결렬(`rejected`)로 적으면 이번 창에
@@ -2506,7 +2530,7 @@ function executeSale(
   if (agreed.fee > 0 && buyerFinance && dueNow > buyerFinance.transferBudget) {
     /**
      * **못 내면 분할로 되불러 온다** (transfer.md §5-2). 같은 총액을, 첫 회분이 그
-     * 구단 예산에 들어오는 **가장 짧은 연수**로 나눈 역제안이다 — 협상이 `open`으로
+     * 구단 예산에 들어오는 **가장 짧은 연수**로 나눈 조정이다 — 협상이 `open`으로
      * 돌아가고 감독이 답한다. 4년으로도 안 들어올 때만 무산(`expired`)이다.
      */
     const budget = buyerFinance.transferBudget;
@@ -2894,10 +2918,15 @@ export function describeNegotiations(state: GameState): string {
       // 분할은 방향과 같은 이유로 어느 줄에서든 함께 적는다 (transfer.md §1·§5-2)
       const split = splitLabel(last.paymentYears);
       if (last.by === "them") {
-        // 내보내는 갈래는 상대가 **오퍼**를 낸 것이고, 데려오는 갈래는 **역제안**이다
-        return n.kind === "sell" || n.kind === "loan_out"
-          ? `${n.id} ${who} ${direction} — 상대 오퍼 ${formatMoney(last.fee)}${split} 도착, 답이 필요합니다`
-          : `${n.id} ${who} ${direction} — 역제안 ${moneyKo} ${formatMoney(last.fee)}${split} 도착`;
+        // 내보내는 갈래는 상대가 **오퍼**를 낸 것이고, 데려오는 갈래는 **조정**이다
+        if (n.kind === "sell" || n.kind === "loan_out") {
+          return `${n.id} ${who} ${direction} — 상대 오퍼 ${formatMoney(last.fee)}${split} 도착, 답이 필요합니다`;
+        }
+        // 재계약의 조정은 이적료가 아니라 주급과 연수다
+        if (n.kind === "renew") {
+          return `${n.id} ${who} ${direction} — 조정 주급 ${formatMoney(last.weeklyWage)} · ${last.contractYears}년 도착`;
+        }
+        return `${n.id} ${who} ${direction} — 조정 ${moneyKo} ${formatMoney(last.fee)}${split} 도착`;
       }
       const waiting =
         last.respondsOn !== null && last.respondsOn > state.date

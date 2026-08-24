@@ -28,7 +28,7 @@ import {
 /**
  * 이적 시장 — 시장가·요구액·주급 기대치와 **딜 성공 확률**을 결정적으로 계산한다.
  *
- * 여기가 협상의 장부다. LLM은 이 숫자를 앵커로 상대편이 되어 판정하고(수락·역제안·
+ * 여기가 협상의 장부다. LLM은 이 숫자를 앵커로 상대편이 되어 판정하고(수락·조정·
  * 결렬), 코어는 그 판정이 가능한 것인지만 검증한다 (docs/simulation/transfer.md).
  *
  * 모든 함수는 순수 함수다 — 상태를 읽고 숫자를 낸다. 조회 도구가 그대로 쓴다.
@@ -59,8 +59,26 @@ export const PATIENCE_DECAY = 0.72;
 /** "같은 조건"의 기준 — 이적료·주급이 각각 이 비율 안이면 반복으로 본다 */
 export const SAME_TERMS_TOLERANCE = 0.03;
 
-/** σ(이 값) = 0.85 — "기대치를 정확히 맞췄을 때" 응할 확률 */
-const MEETS_ASKING_SCORE = 1.73;
+/**
+ * "기대치를 정확히 맞췄을 때"의 점수 — **관문의 수에 따라 갈라 쓴다** (transfer.md §3).
+ * 관문이 둘인 갈래(영입·매각·임대)는 σ(PAIR)² = 0.72, 하나인 갈래(재계약·해지)는
+ * σ(SOLO) = 0.72로, 곱이 있든 없든 같은 확률에서 출발한다.
+ */
+const MEETS_ASKING_SCORE_PAIR = 1.73;
+const MEETS_ASKING_SCORE_SOLO = 0.94;
+
+/** 관심이 많다고 보는 기준 — 곧바로 주전으로 쓸 구단이 이만큼이면 갈 곳이 있다 */
+export const SUITORS_MANY = 3;
+/** 이 나이부터는 다음 자리를 장담할 수 없어 지금 자리를 지키려 한다 */
+export const CAREER_AGE_HOLD = 32;
+/** 이 나이까지는 커리어가 길어 다음 무대를 본다 */
+export const CAREER_AGE_MOVE = 25;
+/** 현 계약보다 깎아 부를 때 — 깎이는 비율에 곱하는 점수와 그 바닥 */
+const PAY_CUT_SCORE_PER_UNIT = 3;
+const PAY_CUT_SCORE_FLOOR = -0.9;
+/** 현 계약보다 이만큼 오르면 그 자체가 남을·옮길 이유가 된다 */
+const RAISE_NOTABLE = 0.25;
+const RAISE_SCORE = 0.3;
 
 function sigmoid(x: number): number {
   return 1 / (1 + Math.exp(-x));
@@ -583,6 +601,44 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
     });
   }
 
+  // 상대 사정에 대응하는 선수 사정 — 갈 곳 · 나이 · 지금 계약 (transfer.md §3)
+  const suitors = suitorCountOf(state, player);
+  if (suitors >= SUITORS_MANY) {
+    contributions.push({
+      gate: "player",
+      score: -0.5,
+      label: "다른 구단의 관심",
+      why: `우리 말고도 그를 곧바로 주전으로 쓸 구단이 ${suitors}곳이다 — 급하지 않다`,
+    });
+  } else if (suitors === 0) {
+    contributions.push({
+      gate: "player",
+      score: 0.5,
+      label: "다른 구단의 관심",
+      why: "지금 그를 주전으로 쓸 구단은 우리뿐이다",
+    });
+  }
+
+  const age = ageOf(player.birthdate, state.date);
+  if (age >= CAREER_AGE_HOLD) {
+    contributions.push({
+      gate: "player",
+      score: -0.4,
+      label: "커리어 시계",
+      why: `${age}세 — 옮길 나이가 아니다`,
+    });
+  } else if (age <= CAREER_AGE_MOVE) {
+    contributions.push({
+      gate: "player",
+      score: 0.3,
+      label: "커리어 시계",
+      why: `${age}세 — 옮길 나이다`,
+    });
+  }
+
+  const wageStep = wageStepContribution(state, player, terms.weeklyWage, "buy");
+  if (wageStep) contributions.push({ gate: "player", ...wageStep });
+
   const blockedBy = betterAtPosition(state, state.userTeamId, player);
   if (blockedBy >= 2) {
     contributions.push({
@@ -628,7 +684,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
   const sumOf = (gate: "club" | "player", skip: ReadonlySet<number>) =>
     contributions.reduce(
       (acc, c, i) => acc + (c.gate === gate && !skip.has(i) ? c.score : 0),
-      MEETS_ASKING_SCORE,
+      MEETS_ASKING_SCORE_PAIR,
     );
   const NONE: ReadonlySet<number> = new Set();
   const chance = (skip: ReadonlySet<number> = NONE, withMultiplier = multiplier) =>
@@ -646,7 +702,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
   const factors: DealFactor[] = [
     {
       label: "기준",
-      delta: Math.round(sigmoid(MEETS_ASKING_SCORE) ** 2 * 100),
+      delta: Math.round(sigmoid(MEETS_ASKING_SCORE_PAIR) ** 2 * 100),
       why: "이적료·주급 기대치를 그대로 맞췄을 때",
     },
     // 각 항의 기여 = 그 항만 빼고 다시 계산한 값과의 차이 (한계 기여)
@@ -804,7 +860,7 @@ function loanOdds(
   const sumOf = (gate: "club" | "player", skip: ReadonlySet<number>) =>
     contributions.reduce(
       (acc, c, i) => acc + (c.gate === gate && !skip.has(i) ? c.score : 0),
-      MEETS_ASKING_SCORE,
+      MEETS_ASKING_SCORE_PAIR,
     );
   const NONE: ReadonlySet<number> = new Set();
   const chance = (skip: ReadonlySet<number> = NONE) =>
@@ -823,7 +879,7 @@ function loanOdds(
     factors: [
       {
         label: "기준",
-        delta: Math.round(sigmoid(MEETS_ASKING_SCORE) ** 2 * 100),
+        delta: Math.round(sigmoid(MEETS_ASKING_SCORE_PAIR) ** 2 * 100),
         why: "임대료를 맞추고 선수도 뛸 자리가 있을 때",
       },
       ...contributions.map((c, i) => ({
@@ -909,7 +965,7 @@ function sellOdds(
   const sumOf = (gate: "club" | "player", skip: ReadonlySet<number>) =>
     contributions.reduce(
       (acc, c, i) => acc + (c.gate === gate && !skip.has(i) ? c.score : 0),
-      MEETS_ASKING_SCORE,
+      MEETS_ASKING_SCORE_PAIR,
     );
   const NONE: ReadonlySet<number> = new Set();
   const chance = (skip: ReadonlySet<number> = NONE) =>
@@ -919,7 +975,7 @@ function sellOdds(
   const factors: DealFactor[] = [
     {
       label: "기준",
-      delta: Math.round(sigmoid(MEETS_ASKING_SCORE) ** 2 * 100),
+      delta: Math.round(sigmoid(MEETS_ASKING_SCORE_PAIR) ** 2 * 100),
       why: "상대 상한에 맞춰 부르고 선수도 떠날 뜻이 있을 때",
     },
     ...contributions.map((c, i) => ({
@@ -978,7 +1034,7 @@ export function severanceOf(state: GameState, playerId: string): number {
  * **일방 해지의 값 — 잔여 급여 전액.**
  *
  * 감독이 합의 없이 그 자리에서 끊을 때 무는 값이라 해지 협상의 바깥값(BATNA)이고,
- * 그래서 선수가 역제안으로 부를 수 있는 상한도 이 값이다: 합의가 깨져도 그가 받을
+ * 그래서 선수가 조정으로 부를 수 있는 상한도 이 값이다: 합의가 깨져도 그가 받을
  * 수 있는 가장 좋은 결말이 전액이므로 그 위는 협상이 아니라 협상을 없애는 값이다
  * (transfer.md §1·§11).
  */
@@ -986,18 +1042,12 @@ export function unilateralSeveranceOf(state: GameState, playerId: string): numbe
   return Math.round(remainingWagesOf(state, playerId));
 }
 
-/** 관심이 많다고 보는 기준 — 곧바로 주전으로 쓸 구단이 이만큼이면 갈 곳이 있다 */
-export const RELEASE_SUITORS_MANY = 3;
-/** 이 나이부터는 다음 자리를 장담할 수 없어 남은 계약을 지키려 한다 */
-export const RELEASE_AGE_HOLD = 32;
-/** 이 나이까지는 커리어가 길어 뛸 자리를 찾아 나서는 편이 낫다 */
-export const RELEASE_AGE_MOVE = 25;
-
 /**
- * 지금 그를 데려가면 **곧바로 주전으로 쓸** 구단 수 — 해지 판정에서 "다른 구단의
- * 관심"의 자다.
+ * 지금 그를 데려가면 **곧바로 주전으로 쓸** 구단 수 — 선수 관문(재계약·해지·영입)의
+ * "다른 구단의 관심" 축의 자다 (transfer.md §3).
  *
- * 갈 곳이 많은 선수는 정산금을 깎아서라도 나가고, 없는 선수는 남은 계약을 지킨다.
+ * 갈 곳이 많은 선수는 남을 이유가 약하고 정산금을 깎아서라도 나가며, 없는 선수는
+ * 지금 자리를 지킨다.
  * 세계 전체에 `betterAtPosition`을 물으므로 기량과 자리가 한 값으로 접힌다 —
  * 자리마다 색인을 다시 세우지 않도록 `squadDepthOf` 한 벌로 훑는다.
  *
@@ -1018,6 +1068,43 @@ function suitorCountOf(state: GameState, player: GamePlayer): number {
 }
 
 /**
+ * "현 계약 대비" 축 — 제시 주급이 **지금 받는 주급**에서 얼마나 움직이는가.
+ *
+ * 감봉은 깎이는 비율만큼 벌점이고(바닥 `PAY_CUT_SCORE_FLOOR`), `RAISE_NOTABLE` 이상
+ * 오르면 그 자체가 남을·옮길 이유다. 그 사이는 항이 서지 않는다. 계약이 없거나
+ * 주급이 0이면(무소속) 잴 기준이 없어 항이 서지 않는다.
+ */
+function wageStepContribution(
+  state: GameState,
+  player: GamePlayer,
+  offered: number,
+  kind: "renew" | "buy",
+): { score: number; label: "현 계약 대비"; why: string } | null {
+  const current = activeContract(state, player.id)?.weeklyWage ?? 0;
+  if (current <= 0) return null;
+  const raise = offered / current - 1;
+  const pct = Math.round(Math.abs(raise) * 100);
+  if (raise < 0) {
+    return {
+      score: Math.max(PAY_CUT_SCORE_FLOOR, raise * PAY_CUT_SCORE_PER_UNIT),
+      label: "현 계약 대비",
+      why:
+        kind === "renew"
+          ? `지금 받는 ${formatMoney(current)}보다 ${pct}% 적다 — 지금 계약을 지키는 편이 낫다`
+          : `지금 받는 ${formatMoney(current)}보다 ${pct}% 적다 — 깎이면서 옮길 이유가 없다`,
+    };
+  }
+  if (raise >= RAISE_NOTABLE) {
+    return {
+      score: RAISE_SCORE,
+      label: "현 계약 대비",
+      why: `지금 받는 ${formatMoney(current)}에서 ${pct}% 오른다`,
+    };
+  }
+  return null;
+}
+
+/**
  * 재계약 때 선수가 원하는 주급 — 이적 때보다 기준이 높다.
  *
  * 남아 달라는 쪽이 우리이므로 협상력이 선수에게 있다. 계약이 얼마 남지 않을수록
@@ -1035,9 +1122,10 @@ export function renewalExpectation(state: GameState, player: GamePlayer): number
 /**
  * 재계약 확률 — 관문이 하나다. **선수가 남을까.**
  *
- * 주급이 기준이고, 출전 기회·사기·팀의 위상(대항전)·감독 평판이 붙는다.
- * 이적료가 없으므로 흥정은 오직 주급과 연수로 한다. 노장에게 긴 계약을 주면
- * 반갑지만 구단엔 부담이고, 젊은 선수는 짧은 계약을 싫어한다.
+ * 주급이 기준선이고, 그 위에 남을 이유와 떠날 이유가 맞선다 — 다른 구단의 관심 ·
+ * 커리어 시계 · 현 계약 대비 · 출전 기회 · 사기 · 팀의 위상(대항전) · 감독 평판
+ * (transfer.md §3). 이적료가 없으므로 흥정은 오직 주급과 연수로 한다. 노장에게 긴
+ * 계약을 주면 반갑지만 구단엔 부담이고, 젊은 선수는 짧은 계약을 싫어한다.
  */
 function renewOdds(
   state: GameState,
@@ -1070,6 +1158,38 @@ function renewOdds(
       why: `${age}세에 ${terms.years}년은 짧다 — 더 긴 미래를 원한다`,
     });
   }
+
+  const suitors = suitorCountOf(state, player);
+  if (suitors >= SUITORS_MANY) {
+    contributions.push({
+      score: -0.6,
+      label: "다른 구단의 관심",
+      why: `그를 곧바로 주전으로 쓸 구단이 ${suitors}곳이다 — 남을 이유가 그만큼 약하다`,
+    });
+  } else if (suitors === 0) {
+    contributions.push({
+      score: 0.6,
+      label: "다른 구단의 관심",
+      why: "지금 그를 주전으로 쓸 구단이 없다 — 남는 것이 최선이다",
+    });
+  }
+
+  if (age >= CAREER_AGE_HOLD) {
+    contributions.push({
+      score: 0.5,
+      label: "커리어 시계",
+      why: `${age}세 — 다음 계약을 장담할 수 없어 지금 자리를 지키려 한다`,
+    });
+  } else if (age <= CAREER_AGE_MOVE) {
+    contributions.push({
+      score: -0.4,
+      label: "커리어 시계",
+      why: `${age}세 — 커리어가 길다, 다음 무대를 본다`,
+    });
+  }
+
+  const wageStep = wageStepContribution(state, player, terms.weeklyWage, "renew");
+  if (wageStep) contributions.push(wageStep);
 
   const blockedBy = betterAtPosition(state, state.userTeamId, player);
   if (blockedBy === 0) {
@@ -1124,13 +1244,13 @@ function renewOdds(
   }
 
   const sum = (skip?: number) =>
-    contributions.reduce((acc, c, i) => acc + (i === skip ? 0 : c.score), MEETS_ASKING_SCORE);
+    contributions.reduce((acc, c, i) => acc + (i === skip ? 0 : c.score), MEETS_ASKING_SCORE_SOLO);
   // 관문이 하나이므로 확률은 시그모이드 하나다 (곱하지 않는다)
   const raw = sigmoid(sum()) * 100;
   const factors: DealFactor[] = [
     {
       label: "기준",
-      delta: Math.round(sigmoid(MEETS_ASKING_SCORE) * 100),
+      delta: Math.round(sigmoid(MEETS_ASKING_SCORE_SOLO) * 100),
       why: "재계약 기대 주급을 그대로 맞췄을 때",
     },
     ...contributions.map((c, i) => ({
@@ -1193,22 +1313,22 @@ function releaseOdds(
   });
 
   const age = ageOf(player.birthdate, state.date);
-  if (age >= RELEASE_AGE_HOLD) {
+  if (age >= CAREER_AGE_HOLD) {
     contributions.push({
       score: -0.5,
-      label: "나이",
+      label: "커리어 시계",
       why: `${age}세 — 다음 자리를 장담할 수 없어 남은 계약을 지키려 한다`,
     });
-  } else if (age <= RELEASE_AGE_MOVE) {
+  } else if (age <= CAREER_AGE_MOVE) {
     contributions.push({
       score: 0.4,
-      label: "나이",
+      label: "커리어 시계",
       why: `${age}세 — 아직 커리어가 길다, 뛸 자리를 찾는 편이 낫다`,
     });
   }
 
   const suitors = suitorCountOf(state, player);
-  if (suitors >= RELEASE_SUITORS_MANY) {
+  if (suitors >= SUITORS_MANY) {
     contributions.push({
       score: 0.6,
       label: "다른 구단의 관심",
@@ -1256,13 +1376,13 @@ function releaseOdds(
   }
 
   const sum = (skip?: number) =>
-    contributions.reduce((acc, c, i) => acc + (i === skip ? 0 : c.score), MEETS_ASKING_SCORE);
+    contributions.reduce((acc, c, i) => acc + (i === skip ? 0 : c.score), MEETS_ASKING_SCORE_SOLO);
   // 관문이 하나이므로 확률은 시그모이드 하나다 (재계약과 같다)
   const raw = sigmoid(sum()) * 100;
   const factors: DealFactor[] = [
     {
       label: "기준",
-      delta: Math.round(sigmoid(MEETS_ASKING_SCORE) * 100),
+      delta: Math.round(sigmoid(MEETS_ASKING_SCORE_SOLO) * 100),
       why: "기대 정산금을 그대로 맞췄을 때",
     },
     ...contributions.map((c, i) => ({

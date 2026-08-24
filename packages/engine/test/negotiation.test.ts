@@ -43,6 +43,8 @@ import {
   recallLoan,
   releasePlayer,
   renewalExpectation,
+  renewalYearsExpectation,
+  RENEWAL_YEARS_MAX,
   respondOffer,
   responseDelayDays,
   resolveMedical,
@@ -79,7 +81,7 @@ import { completeDeal, createTestGame } from "./helpers";
  * 이적 협상 — 오퍼 → 상대 판정 → 합의 → 실행.
  *
  * 판정은 LLM이 하므로 여기서는 **코어가 무엇을 막는지**를 고정한다.
- * (미리 답하기·확률 바닥 수락·터무니없는 역제안·결렬 후 재오퍼·예산 초과)
+ * (미리 답하기·확률 바닥 수락·터무니없는 조정·결렬 후 재오퍼·예산 초과)
  */
 
 /** 협상 대상 — 우리 팀이 아니고 예산으로 살 수 있는 선수 */
@@ -269,7 +271,7 @@ describe("상대의 판정 — 코어가 가능한 것만 받는다", () => {
     const negotiation = openNegotiationFor(state, player.id)!;
     state.date = pendingOffer(negotiation)!.respondsOn!;
 
-    // 판정을 지나는 확률은 역제안 라운드에 남는다 — 그것이 감독이 들은 값이다
+    // 판정을 지나는 확률은 조정 라운드에 남는다 — 그것이 감독이 들은 값이다
     expect(respondOffer(state, { negotiationId: negotiation.id, verdict: "counter" }).ok).toBe(
       true,
     );
@@ -308,7 +310,7 @@ describe("상대의 판정 — 코어가 가능한 것만 받는다", () => {
     expect(openNegotiationFor(state, player.id)).toBeNull();
   });
 
-  it("역제안은 우리 제시액 이상, 요구액 +15% 이하여야 한다", () => {
+  it("조정은 우리 제시액 이상, 요구액 +15% 이하여야 한다", () => {
     const state = createTestGame(42);
     const player = target(state);
     const terms = offerFor(state, player.id, 0.8);
@@ -331,7 +333,7 @@ describe("상대의 판정 — 코어가 가능한 것만 받는다", () => {
     expect(absurd.ok).toBe(false);
 
     // 제시액이 호가를 웃도는 선수도 있다(제안 도우미는 성사되는 값을 부른다) —
-    // 그때 호가로 되부르면 **우리 제시액보다 낮은** 역제안이라 코어가 막는 게 맞다
+    // 그때 호가로 되부르면 **우리 제시액보다 낮은** 조정이라 코어가 막는 게 맞다
     const fine = respondOffer(state, {
       negotiationId: negotiation.id,
       verdict: "counter",
@@ -343,14 +345,14 @@ describe("상대의 판정 — 코어가 가능한 것만 받는다", () => {
     expect(last.by).toBe("them");
     expect(last.verdict).toBe("counter");
     expect(last.note).toBe("이 값이면 놓아준다");
-    expect(negotiation.status).toBe("open"); // 역제안은 협상을 계속 열어 둔다
+    expect(negotiation.status).toBe("open"); // 조정은 협상을 계속 열어 둔다
   });
 
   /**
    * 이적료에만 범위가 걸려 있던 자리 — 상대가 이적료는 규칙대로 부르면서 주급을
    * 열 배로 되불러도 코어가 통과시켰다. 재계약이 이미 막고 있던 것과 같은 자다.
    */
-  it("역제안 주급은 우리 제시액 이상, 기대치의 1.4배 이하여야 한다", () => {
+  it("조정 주급은 우리 제시액 이상, 기대치의 1.4배 이하여야 한다", () => {
     const state = createTestGame(42);
     const player = target(state);
     const terms = offerFor(state, player.id, 0.8);
@@ -367,7 +369,7 @@ describe("상대의 판정 — 코어가 가능한 것만 받는다", () => {
     });
     expect(absurd.ok).toBe(false);
 
-    // 우리가 부른 값보다 낮게 되부르는 것도 역제안이 아니다
+    // 우리가 부른 값보다 낮게 되부르는 것도 조정이 아니다
     const lower = respondOffer(state, {
       negotiationId: negotiation.id,
       verdict: "counter",
@@ -494,7 +496,7 @@ describe("합의 실행 — 장부가 움직인다", () => {
 /**
  * 분할 지급 — 미래의 돈이 표에 앉는다 (transfer.md §5-2).
  *
- * 여기서 재는 것은 **상태 전이**다: 못 내는 일시금이 무산 대신 분할 역제안으로
+ * 여기서 재는 것은 **상태 전이**다: 못 내는 일시금이 무산 대신 분할 조정으로
  * 넘어가는가, 그리고 확정이 일정 표를 세우고 오늘 첫 회분만 무는가.
  */
 describe("분할 지급 — 관문은 첫 회분을 잰다", () => {
@@ -511,7 +513,7 @@ describe("분할 지급 — 관문은 첫 회분을 잰다", () => {
 
   const SALE_FEE = 40_000_000;
 
-  it("사는 쪽이 일시금을 못 내면 같은 총액의 분할 역제안으로 되돌아온다", () => {
+  it("사는 쪽이 일시금을 못 내면 같은 총액의 분할 조정으로 되돌아온다", () => {
     const state = createTestGame(42);
     const { negotiation, buyerTeamId } = stagedSale(state, SALE_FEE);
     const playerId = negotiation.gamePlayerId;
@@ -542,7 +544,7 @@ describe("분할 지급 — 관문은 첫 회분을 잰다", () => {
     expect(second.negotiation.status).toBe("expired");
   });
 
-  it("분할 역제안을 감독이 받으면 그 연수로 계약이 선다", () => {
+  it("분할 조정을 감독이 받으면 그 연수로 계약이 선다", () => {
     const state = createTestGame(42);
     const { negotiation, buyerTeamId } = stagedSale(state, SALE_FEE);
     const playerId = negotiation.gamePlayerId;
@@ -575,7 +577,7 @@ describe("분할 지급 — 관문은 첫 회분을 잰다", () => {
     financeOf(state, buyerTeamId).transferBudget = budget;
     expect(acceptDeal(state, negotiation.id).ok).toBe(false);
 
-    // 일시금으로 되부르면 관문이 같은 분할 역제안을 다시 세운다 — 연수가 남아야 닫힌다
+    // 일시금으로 되부르면 관문이 같은 분할 조정을 다시 세운다 — 연수가 남아야 닫힌다
     const countered = answerIncomingOffer(state, {
       negotiationId: negotiation.id,
       verdict: "counter",
@@ -731,7 +733,7 @@ describe("매각 — 들어오는 오퍼", () => {
     expect(dealOdds(state, { ...base, fee: value }).fuzzy).toBe(false);
   });
 
-  it("거절·역제안·수락이 모두 가능하고, 역제안은 받은 값보다 높아야 한다", () => {
+  it("거절·조정·수락이 모두 가능하고, 조정은 받은 값보다 높아야 한다", () => {
     const state = createTestGame(42);
     const { negotiation } = waitForIncoming(state);
     const offer = incomingOffer(negotiation!)!;
@@ -749,7 +751,7 @@ describe("매각 — 들어오는 오퍼", () => {
       fee: Math.round(offer.fee * 1.3),
     });
     expect(countered.ok, countered.message).toBe(true);
-    // 역제안하면 사는 쪽이 답할 차례가 된다
+    // 조정하면 사는 쪽이 답할 차례가 된다
     expect(negotiation!.status).toBe("open");
     const ours = negotiation!.rounds[negotiation!.rounds.length - 1]!;
     expect(ours.by).toBe("us");
@@ -863,7 +865,7 @@ describe("매각 — 들어오는 오퍼", () => {
   });
 
   /** 되부를 때 주급도 함께 조정할 수 있다 — 예전엔 이 값이 조용히 버려졌다 */
-  it("역제안에 주급을 실으면 그 값이 라운드와 카드에 남는다", () => {
+  it("조정에 주급을 실으면 그 값이 라운드와 카드에 남는다", () => {
     const state = createTestGame(42);
     const { negotiation } = waitForIncoming(state);
     const offer = incomingOffer(negotiation!)!;
@@ -985,6 +987,104 @@ describe("재계약 — 상대가 선수 본인이다", () => {
     const accepted = respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
     expect(accepted.ok, accepted.message).toBe(true);
     expect(negotiation.status).toBe("agreed");
+  });
+
+  /** 80% 주급 · 3년으로 재계약을 열고 답이 도착한 날까지 보낸다 */
+  function arrivedRenewal(state: GameState) {
+    const player = expiringPlayer(state);
+    const expectation = renewalExpectation(state, player);
+    const opened = openRenewal(state, {
+      playerId: player.id,
+      weeklyWage: Math.round(expectation * 0.8),
+      years: 3,
+    });
+    expect(opened.ok, opened.message).toBe(true);
+    const negotiation = state.negotiations.find((n) => n.kind === "renew")!;
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+    return { player, negotiation, demanded: Math.round(expectation * 1.15) };
+  }
+
+  it("선수가 연수를 함께 되부르면 그 연수로 다시 제안해 합의하고, 계약도 그 길이다", () => {
+    const state = createTestGame(42);
+    const { player, negotiation, demanded } = arrivedRenewal(state);
+    const countered = respondOffer(state, {
+      negotiationId: negotiation.id,
+      verdict: "counter",
+      weeklyWage: demanded,
+      contractYears: 4,
+    });
+    expect(countered.ok, countered.message).toBe(true);
+    expect(negotiation.rounds[negotiation.rounds.length - 1]!.contractYears).toBe(4);
+    const card = countered.payload as MarketCard & { counterTerms?: { years?: number } };
+    expect(card.counterTerms?.years).toBe(4);
+    expect(countered.message).toContain("4년");
+
+    expect(openRenewal(state, { playerId: player.id, weeklyWage: demanded, years: 4 }).ok).toBe(
+      true,
+    );
+    state.date = pendingOffer(negotiation)!.respondsOn!;
+    const accepted = respondOffer(state, { negotiationId: negotiation.id, verdict: "accept" });
+    expect(accepted.ok, accepted.message).toBe(true);
+    expect(negotiation.status).toBe("agreed");
+    expect(acceptDeal(state, negotiation.id).ok).toBe(true);
+    expect(activeContract(state, player.id)!.until).toBe(contractUntil(state.date, 4));
+  });
+
+  it("되부르는 연수는 1년 이상 상한 이하이고, 비우면 커리어 시계가 정한 연수가 선다", () => {
+    const state = createTestGame(42);
+    const { player, negotiation, demanded } = arrivedRenewal(state);
+    const base = {
+      negotiationId: negotiation.id,
+      verdict: "counter" as const,
+      weeklyWage: demanded,
+    };
+    expect(respondOffer(state, { ...base, contractYears: RENEWAL_YEARS_MAX + 1 }).ok).toBe(false);
+    expect(respondOffer(state, { ...base, contractYears: 0 }).ok).toBe(false);
+    // 거부된 판정은 오퍼를 답한 것으로 남기지 않는다
+    expect(pendingOffer(negotiation)).toBeDefined();
+
+    const countered = respondOffer(state, base);
+    expect(countered.ok, countered.message).toBe(true);
+    expect(negotiation.rounds[negotiation.rounds.length - 1]!.contractYears).toBe(
+      renewalYearsExpectation(state, player),
+    );
+  });
+
+  it("재계약의 앵커는 연수와 그 폭을 쥐고, 클램프가 판정의 연수를 그 폭으로 자른다", () => {
+    const state = createTestGame(42);
+    const { player, negotiation } = arrivedRenewal(state);
+    const anchor = counterpartyAnchor(state, negotiation)!;
+    const asked = renewalYearsExpectation(state, player);
+    expect(anchor.contractYears).toBe(asked);
+    expect(anchor.yearsRoom).toEqual({
+      min: Math.max(1, asked - 1),
+      max: Math.min(RENEWAL_YEARS_MAX, asked + 1),
+    });
+    const wide = clampCounterpartyRuling(anchor, { verdict: "counter", contractYears: 99 });
+    expect(wide.contractYears).toBe(anchor.yearsRoom!.max);
+    const narrow = clampCounterpartyRuling(anchor, { verdict: "counter", contractYears: 0 });
+    expect(narrow.contractYears).toBe(anchor.yearsRoom!.min);
+    // 비우면 앵커의 연수가 선다
+    expect(clampCounterpartyRuling(anchor, { verdict: "counter" }).contractYears).toBe(asked);
+  });
+
+  it("영입 협상의 앵커에는 연수 축이 없다 — 연수를 되불러도 판정에 실리지 않는다", () => {
+    const state = createTestGame();
+    state.date = "2026-08-01";
+    const player = target(state);
+    const sent = sendOffer(state, offerFor(state, player.id));
+    expect(sent.ok, sent.message).toBe(true);
+    const negotiation = openNegotiationFor(state, player.id)!;
+    pendingOffer(negotiation)!.respondsOn = state.date;
+    const anchor = counterpartyAnchor(state, negotiation)!;
+    expect(anchor.contractYears).toBeUndefined();
+    expect(anchor.yearsRoom).toBeUndefined();
+    expect(anchor.bounds.years).toBeNull();
+    const ruling = clampCounterpartyRuling(
+      { ...anchor, verdict: "counter", allowed: ["counter"] },
+      { verdict: "counter", contractYears: 4 },
+    );
+    expect(ruling.contractYears).toBeUndefined();
   });
 
   /**
@@ -1493,20 +1593,20 @@ describe("카드의 성사 가능성", () => {
     const answered = respondOffer(state, {
       negotiationId: negotiation.id,
       verdict,
-      // 역제안은 우리 제시액 이상이어야 한다 — 같은 값을 되부르는 것이 가장 얌전하다
+      // 조정은 우리 제시액 이상이어야 한다 — 같은 값을 되부르는 것이 가장 얌전하다
       ...(verdict === "counter" ? { fee: terms.fee } : {}),
     });
     expect(answered.ok, `${verdict}: ${answered.message}`).toBe(true);
     return answered.payload as MarketCard;
   }
 
-  it("상대가 답을 끝낸 카드에는 확률이 없다 — 역제안에는 남는다", () => {
+  it("상대가 답을 끝낸 카드에는 확률이 없다 — 조정에는 남는다", () => {
     expect(answeredBy(createTestGame(42), "accept").odds).toBeUndefined();
     expect(answeredBy(createTestGame(42), "reject").odds).toBeUndefined();
     expect(answeredBy(createTestGame(42), "counter").odds).toBeTruthy();
   });
 
-  it("감독이 답을 끝낸 카드에도 확률이 없다 — 역제안에는 남는다", () => {
+  it("감독이 답을 끝낸 카드에도 확률이 없다 — 조정에는 남는다", () => {
     for (const verdict of ["accept", "reject", "counter"] as const) {
       const state = createTestGame(42);
       const { negotiation } = waitForIncoming(state);
@@ -1865,7 +1965,7 @@ describe("계약 해지 — 값을 흥정하고, 안 되면 전액을 문다", (
     expect(balanceBefore - financeOf(state, state.userTeamId).balance).toBe(full);
   });
 
-  it("역제안은 우리 제시액 초과 · 일방 해지 전액 이하여야 한다", () => {
+  it("조정은 우리 제시액 초과 · 일방 해지 전액 이하여야 한다", () => {
     const state = createTestGame(42);
     const player = spare(state);
     const anchor = severanceOf(state, player.id);
@@ -1882,7 +1982,7 @@ describe("계약 해지 — 값을 흥정하고, 안 되면 전액을 문다", (
         fee: full + 1,
       }).ok,
     ).toBe(false);
-    // 우리가 이미 부른 값 이하로 되부르는 것도 역제안이 아니다
+    // 우리가 이미 부른 값 이하로 되부르는 것도 조정이 아니다
     expect(
       respondOffer(state, { negotiationId: negotiation.id, verdict: "counter", fee: anchor }).ok,
     ).toBe(false);
@@ -2274,6 +2374,7 @@ describe("협상 상대의 앵커와 한도", () => {
       latitude: 0,
       fee: { expectation: 1000, min: 500, max: 2000 },
       wage: null,
+      years: null,
       splittable: true,
     },
     ...over,
@@ -2290,7 +2391,7 @@ describe("협상 상대의 앵커와 한도", () => {
         : anchor.probability >= COUNTERPARTY_COUNTER_AT - anchor.latitude
           ? "counter"
           : "reject";
-    // 구간이 빈 갈래는 역제안 자체가 불가능해 한 칸 위/아래로 접힌다 (counterparty.ts)
+    // 구간이 빈 갈래는 조정 자체가 불가능해 한 칸 위/아래로 접힌다 (counterparty.ts)
     if (anchor.allowed.includes(expected)) expect(anchor.verdict).toBe(expected);
     const step = ladder.indexOf(anchor.verdict);
     for (const v of anchor.allowed) {
