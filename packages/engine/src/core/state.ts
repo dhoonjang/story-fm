@@ -43,6 +43,7 @@ import type {
   ScoutReport,
   ScoutReportCard,
   SeasonAward,
+  Milestone,
   SeasonRecord,
   SeasonStat,
   ShootoutKick,
@@ -777,6 +778,16 @@ export interface GameState {
    * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   awards?: SeasonAward[];
+  /**
+   * 마일스톤 — 데뷔·첫 골·구단 통산 문턱·해트트릭 (match.md §6).
+   *
+   * **감독 팀 선수 것만 담는다** — `growthLog`와 같은 결이다(game-state.md §3.4).
+   * 읽는 곳이 회견·심경·서사·선수 상세 넷인데 전부 우리 선수의 자리라, 리그 전체를
+   * 적으면 시즌마다 수백 행이 들어와 우리 것이 그 안에 묻힌다. 기록 자체는 모든 팀에
+   * 쌓이므로 남의 선수 통산도 `careerOf`가 그대로 낸다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  milestones?: Milestone[];
 
   // ── 서사 ──
   /**
@@ -2525,6 +2536,7 @@ export function createGame(input: CreateGameInput): GameState {
     trophies: [],
     achievements: [],
     awards: [],
+    milestones: [],
 
     narrative: [],
     chat: [],

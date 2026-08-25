@@ -641,6 +641,84 @@ export function seasonRating(
   return Math.round((stat.ratingSum / stat.apps) * 100) / 100;
 }
 
+// ── 마일스톤 ──────────────────────────────────────────
+/**
+ * 그 경기가 세운 기록 — **코드와 수치뿐이다.** 문장은 읽는 쪽이 만든다
+ * (→ docs/simulation/match.md §6 · overview.md §1 철칙 4).
+ *
+ * ⚠️ **클럽 단위다.** 원장은 게임 시작 뒤의 출전만 알고 부임 전 커리어는 시드에
+ * 없으므로, 통산 문턱을 세우면 코어가 사실이 아닌 것을 사실로 낸다. 클럽 안의 수는
+ * 전부 원장 안에 있어 정직하다.
+ */
+export const MILESTONE_CODES = ["debut", "first-goal", "apps", "goals", "hat-trick"] as const;
+export type MilestoneCode = (typeof MILESTONE_CODES)[number];
+
+/**
+ * 문턱 — 리그·컵·유럽을 합쳐 한 시즌이 40~50경기라 50은 한 시즌 남짓, 100은 두세
+ * 시즌이다. 득점의 25는 최상급 공격수의 한 시즌치. 더 촘촘하면 회견이 매주
+ * 시상식이 되고, 더 성기면 3년을 함께한 주장에게 아무 일도 일어나지 않는다.
+ */
+export const MILESTONE_APP_STEPS = [50, 100, 200, 300, 400, 500] as const;
+export const MILESTONE_GOAL_STEPS = [25, 50, 100, 150, 200] as const;
+
+/** 한 경기에 몇 골부터 해트트릭인가 */
+export const HAT_TRICK_GOALS = 3;
+
+export const MilestoneSchema = z.object({
+  gamePlayerId: z.string().min(1),
+  /** 어느 셔츠로 세운 기록인가 — 문턱은 이 팀 안에서만 센다 */
+  teamId: z.string().min(1),
+  matchId: z.string().min(1),
+  season: z.number().int(),
+  date: DateString,
+  code: z.enum(MILESTONE_CODES),
+  /** 눈금 — 경기·골은 넘은 문턱, 해트트릭은 그 경기의 골 수, 데뷔·첫 골은 1 */
+  value: z.number().int().min(1),
+});
+export type Milestone = z.infer<typeof MilestoneSchema>;
+
+/**
+ * 드문 순서 — 한 경기가 여럿을 세우면 **회견에 오르는 것은 하나**이고 이 순서가
+ * 그것을 고른다 (people.md §4). 큰 수일수록 앞이므로 같은 코드 안에서는 값으로 갈린다.
+ */
+const MILESTONE_RARITY: Record<MilestoneCode, number> = {
+  goals: 4,
+  apps: 3,
+  "hat-trick": 2,
+  "first-goal": 1,
+  debut: 0,
+};
+
+/**
+ * 둘 중 어느 쪽이 더 드문가 — 음수면 `a`가 앞이다 (정렬 비교자).
+ * 코드와 값만 본다 — 장부에 적히기 전의 판정 결과도 같은 자로 세운다.
+ */
+export function compareMilestones(
+  a: Pick<Milestone, "code" | "value">,
+  b: Pick<Milestone, "code" | "value">,
+): number {
+  return MILESTONE_RARITY[b.code] - MILESTONE_RARITY[a.code] || b.value - a.value;
+}
+
+/**
+ * 마일스톤의 **라벨** — "데뷔전"·"100경기"까지가 코어의 말이고, 그것을 문장에
+ * 앉히는 것은 회견 카드(`pressFactText`)와 화면의 몫이다.
+ */
+export function milestoneTitle(code: MilestoneCode, value: number): string {
+  switch (code) {
+    case "debut":
+      return "데뷔전";
+    case "first-goal":
+      return "첫 골";
+    case "apps":
+      return `${value}경기`;
+    case "goals":
+      return `${value}골`;
+    case "hat-trick":
+      return value > HAT_TRICK_GOALS ? `한 경기 ${value}골` : "해트트릭";
+  }
+}
+
 // ── 스카우팅 ──────────────────────────────────────────
 /**
  * 스카우트 파견 (SCOUT_REPORT) — **선수 단위**. 완료되면 안개가 좁혀진다: 관측형은

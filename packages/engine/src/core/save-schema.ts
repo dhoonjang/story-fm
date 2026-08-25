@@ -34,6 +34,7 @@ import {
   RoleMemorySchema,
   ScheduleEntrySchema,
   ScoutReportSchema,
+  MilestoneSchema,
   SeasonAwardSchema,
   SeasonRecordSchema,
   SeasonStatSchema,
@@ -121,6 +122,7 @@ export const SaveSchema = z
     paymentSchedules: z.array(PaymentScheduleSchema).optional(),
     developmentFocus: z.array(z.string()).optional(),
     awards: z.array(SeasonAwardSchema).optional(),
+    milestones: z.array(MilestoneSchema).optional(),
     reserveTraining: ReserveTrainingPolicySchema.optional(),
   })
   .passthrough();
