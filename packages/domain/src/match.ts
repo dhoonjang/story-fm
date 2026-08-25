@@ -89,21 +89,41 @@ export type SubCause = z.infer<typeof SubCauseSchema>;
  * 패킷 자체는 세이브 스키마의 검사 밖이지만(진행 중인 경기 한 덩어리) 장부의
  * 사건은 스키마를 지나므로 여기에 한 벌이 있어야 한다.
  */
+/**
+ * 사실 태그의 갈래 — **목록은 한 벌이다.** Zod 판과 `PacketTag`(packet.ts)가 같은
+ * 배열을 읽는다: 두 벌로 두면 갈래를 하나 늘린 날 스키마만 옛 목록으로 남는다.
+ */
+export const PACKET_TAG_SOURCES = [
+  "counter",
+  "gap",
+  "mismatch",
+  "zone-plan",
+  "directive",
+  "directive-dropped",
+  "exploit",
+  "exploit-dropped",
+  "tactical",
+  /** 죽은 공에서 나온 골 — 키커와 마무리한 선수를 함께 싣는다 (match.md §1.4) */
+  "set-piece",
+  /**
+   * **AI 벤치가 판을 옮겼다** — `tactical_shift` 사건의 근거 (match.md §2).
+   *
+   * `code`가 갈래(`chase`·`hold`)고, `values`는 **옮긴 뒤의** 축 값이다. 방향은
+   * 갈래가 이미 말하므로 델타를 따로 싣지 않는다. 갈아 낀 모양은 `formation:` flag.
+   */
+  "ai-shift",
+  /**
+   * 전력에서 나오지 않는, **이 경기가 무슨 경기인가** — 더비가 첫 갈래다.
+   * 편이 없고(`favours: null`) 이름은 카탈로그의 것이라 `text`가 든다 (match.md §1).
+   */
+  "context",
+  /** 진행 중인 옛 세이브가 들고 있던 문장 — `text`만 갖는다 */
+  "legacy",
+] as const;
+export type PacketTagSource = (typeof PACKET_TAG_SOURCES)[number];
+
 export const PacketTagSchema = z.object({
-  source: z.enum([
-    "counter",
-    "gap",
-    "mismatch",
-    "zone-plan",
-    "directive",
-    "directive-dropped",
-    "exploit",
-    "exploit-dropped",
-    "tactical",
-    "set-piece",
-    "ai-shift",
-    "legacy",
-  ]),
+  source: z.enum(PACKET_TAG_SOURCES),
   code: z.string().min(1),
   favours: MatchSideSchema.nullable(),
   /** 그 사실을 가진 쪽 — 미스매치만 싣는다. 없으면 이로운 편의 반대다 */

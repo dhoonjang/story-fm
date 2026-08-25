@@ -409,11 +409,33 @@ function tacticalDeltas(
   return d;
 }
 
-/** 경기 강도 — 압박·템포가 만든다. 피로·파울·부상률을 함께 끌어올린다 */
-export function matchIntensity(spec: TacticsSpec): number {
-  return round2(
-    Math.max(0.8, Math.min(1.3, 1 + (spec.pressing - 3) * 0.07 + (spec.tempo - 3) * 0.04)),
+/**
+ * 더비 `heat` 한 계단이 경기 강도에 **곱하는** 몫 (match.md §1).
+ *
+ * 압박·템포의 clamp **밖**이다: 더비는 감독이 만드는 것이 아니라 대진이 갖고 있는
+ * 사실이라, 이미 압박 5로 선 팀에서도 한 계단 더 거칠어져야 한다. 실제 더비의 카드
+ * 프리미엄(리그 평균 대비 +20~30%)이 heat 3의 +18%가 서는 자리다.
+ */
+export const DERBY_INTENSITY_STEP = 0.06;
+
+/** 더비가 양 팀 강도에 함께 거는 배수 — 더비가 아니면 1 */
+export function derbyIntensityFactor(heat = 0): number {
+  return 1 + DERBY_INTENSITY_STEP * heat;
+}
+
+/**
+ * 경기 강도 — 압박·템포가 만들고 더비가 곱한다. 파울·카드·부상률을 함께 끌어올린다.
+ *
+ * ⚠️ **두 시뮬이 같은 문을 지나야 한다** (match.md §7). 구간 시뮬은 패킷의
+ * `guide.intensity`를 읽지만 간이 시뮬은 카드·부상을 뽑기 전에 이 함수를 직접
+ * 부르므로, 더비 배수를 한쪽에만 걸면 리그의 95%에서 더비가 카드에 닿지 않는다.
+ */
+export function matchIntensity(spec: TacticsSpec, derbyHeat = 0): number {
+  const tactical = Math.max(
+    0.8,
+    Math.min(1.3, 1 + (spec.pressing - 3) * 0.07 + (spec.tempo - 3) * 0.04),
   );
+  return round2(tactical * derbyIntensityFactor(derbyHeat));
 }
 
 /**
@@ -764,6 +786,11 @@ export interface PacketOptions {
    * 할 수 있는 일이 교체뿐인 게임이 된다 (60판 시뮬에서 실제로 그랬다).
    */
   inMatch?: boolean;
+  /**
+   * 이 대진이 더비인가 — **표가 정하는 사실**이라 엔진이 넘긴다 (team.md §3.2).
+   * `keyPoints` 첫 줄의 컨텍스트 태그와 양 팀 강도 배수가 여기서 선다.
+   */
+  derby?: { name: string; heat: number };
 }
 
 /** 경기 중 지시의 소화율 보정 — 남은 거리의 절반을 메운다 (0.82 → 0.91) */
@@ -783,6 +810,25 @@ const AWAY_SHOT_EXPOSURE = 0.96;
 
 const sigmoid = (z: number): number => 1 / (1 + Math.exp(-z));
 const logit = (p: number): number => Math.log(p / (1 - p));
+
+/**
+ * 더비의 사실 태그 — 이름은 카탈로그의 고유 명사라 `text`가 들고, 열기는 수치다.
+ * 문장은 언제나처럼 읽는 쪽의 렌더러 하나가 만든다 (`packetTagText`).
+ */
+function derbyTag(derby: { name: string; heat: number }): PacketTag {
+  return {
+    source: "context",
+    code: "derby",
+    // 어느 쪽에도 이롭지 않다 — 더비는 두 팀이 함께 지는 조건이다
+    favours: null,
+    // 대진은 감독의 눈과 무관한 공개 사실이다
+    sharp: true,
+    playerIds: [],
+    values: { heat: derby.heat },
+    flags: [],
+    text: derby.name,
+  };
+}
 
 /**
  * 지역 플랜이 공격 배분을 그 레인으로 끌어오는 세기 — 의도가 무게를 정한다.
@@ -1386,9 +1432,10 @@ export function buildStrengthPacket(
     home: sumOf(rawProfiles.home, (profile) => profile.expectedShots),
     away: sumOf(rawProfiles.away, (profile) => profile.expectedShots),
   };
+  const derbyHeat = options.derby?.heat ?? 0;
   const intensity = {
-    home: matchIntensity(homeIn.tactics),
-    away: matchIntensity(awayIn.tactics),
+    home: matchIntensity(homeIn.tactics, derbyHeat),
+    away: matchIntensity(awayIn.tactics, derbyHeat),
   };
   /**
    * 페널티는 **양 팀 몫의 합이 `PENALTY_PER_MATCH`가 되도록 정규화한다** — 그래야
@@ -1473,6 +1520,12 @@ export function buildStrengthPacket(
     text: plan.note,
   });
   const keyPoints: PacketTag[] = [
+    /**
+     * **컨텍스트가 첫 줄이다** — 전력에서 나오지 않았지만 판을 읽는 사람이 가장
+     * 먼저 알아야 하는 사실이다. 편이 없어(`favours: null`) 골의 원인 태그로
+     * 뽑히지 않는다 (match-engine `causesFor`).
+     */
+    ...(options.derby ? [derbyTag(options.derby)] : []),
     ...counters.notes,
     ...gapNotes(homeXI, "home"),
     ...gapNotes(awayXI, "away"),

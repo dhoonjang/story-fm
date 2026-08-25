@@ -386,6 +386,7 @@ occupancy  = min(수요 × 가격 탄력, 1.00)
 | 순위        | `(OCCUPANCY_RANK_PIVOT(11) − 현재순위) / OCCUPANCY_RANK_SPAN(10) × OCCUPANCY_RANK_SWING(0.04)`                          |
 | 최근 폼     | `OCCUPANCY_FORM_MATCHES`(5)경기 — `(승률 − OCCUPANCY_PAR_WIN_RATE(0.40)) × OCCUPANCY_FORM_SWING(0.05)` → −0.02 \~ +0.03 |
 | 상대 매력도 | `OCCUPANCY_BY_OPPONENT_TIER` — tier1 +0.04 · tier2 +0.02 · tier3 0 · tier4 −0.02                                        |
+| 더비        | `OCCUPANCY_DERBY_BONUS`(0.03) × `heat`(1\~3) — +0.03 \~ +0.09 ([team.md §3.2](../data/team.md))                         |
 | 대회        | `OCCUPANCY_CUP_BONUS` — 컵 경기(국내 컵·대항전) +0.02                                                                   |
 | 킥오프 슬롯 | `OCCUPANCY_WEEKNIGHT_PENALTY` — 월\~목요일 −0.03                                                                        |
 | 시드 해시   | `OCCUPANCY_JITTER`(0.04) — ±0.02 (결정적 미세 변동)                                                                     |
@@ -393,6 +394,11 @@ occupancy  = min(수요 × 가격 탄력, 1.00)
 
 유럽전은 단가에 `EURO_TICKET_FACTOR`(1.15)가 붙고, 카탈로그에 평균가가 없으면
 `DEFAULT_TICKET_PRICE`(£30)를 쓴다.
+
+**더비 항은 상대 매력도와 따로 선다.** 관중을 부르는 것이 상대의 체급이기만 하면
+리버풀-에버턴이 리버풀-본머스와 같은 자다 — 실제로 매진되는 것은 앞의 경기다.
+tier1 구단(base 0.97)은 어느 heat에서도 만석에 붙으므로 이 항이 실제로 보이는 것은
+중·하위 구단의 더비다.
 호스피탈리티율 = tier1 0.35 · 2 0.28 · 3 0.20 · 4 0.15.
 
 **하한은 성적이 만드는 몫에만 걸린다.** 순위·폼·상대가 아무리 나빠도 0.45는 오지만,
@@ -505,6 +511,8 @@ commercial   = base(commercialTier) × (1 + 조항)
 merchandising = base(commercialTier) × (1 + 최근 승률 보정)
 보정          = clamp((승률 − MERCH_PAR_WIN_RATE 0.40) × MERCH_FORM_SLOPE 0.25, ±MERCH_FORM_SWING 0.10)
                창은 MERCH_FORM_MATCHES(6)경기, 친선 제외
+승률          = Σ(경기 무게 × 승리) ÷ Σ(경기 무게)
+               무게는 1, 더비는 1 + MERCH_DERBY_WEIGHT(0.5) × heat
 ```
 
 | 브랜드 | 연 상업+굿즈 | 실제 어림 | 누가                      |
@@ -518,6 +526,11 @@ merchandising = base(commercialTier) × (1 + 최근 승률 보정)
 **실측 × 0.67** — 중계권이 이미 그 눈금에 있고(§5.1) 매치데이도 같은 배율에 선다(§5.2).
 
 상업:굿즈는 대략 3:1로 가른다 (실제 회계의 스폰서십 대 리테일 비).
+
+**굿즈 창에서 더비는 한 경기보다 무겁다** — heat 3이면 2.5경기다. 실제로 유니폼이
+팔리는 것은 라이벌을 이긴 주간이고, 진 주간에는 반대다. 창은 그대로 6경기라
+더비 하나가 다른 결과를 밀어내지는 않는다 — 무게만 바뀐다. 승률의 상한이 1이라
+보정은 여전히 ±0.10에서 멈춘다.
 
 조항은 **지난 시즌 성적에서 파생**한다 — 저장하지 않는다. 실제 스폰서 계약의
 성과 보너스 조항을 옮긴 것이고, "유럽 진출이 다음 시즌 살림을 바꾼다"는 루프가

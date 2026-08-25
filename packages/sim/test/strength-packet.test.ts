@@ -7,6 +7,7 @@ import {
   famFactor,
   instructionUptake,
   laneBiasOf,
+  derbyIntensityFactor,
   matchIntensity,
   PENALTY_PER_MATCH,
   profFactor,
@@ -749,6 +750,21 @@ describe("경기 강도 (matchIntensity)", () => {
     expect(matchIntensity(tactics({ pressing: 1, tempo: 1 })), "하한이 안 물렸다").toBe(0.8);
     // 상한은 방어선일 뿐 — 가장 격렬한 전술도 1.22에서 멈춘다
     expect(Math.max(...all)).toBe(1.22);
+  });
+
+  /**
+   * 더비 배수는 **전술의 clamp 밖에서 곱한다** — 안에 넣으면 이미 압박 5로 선 팀이
+   * 더비에서 아무 대가도 더 치르지 않는다 (match.md §1).
+   */
+  it("더비는 heat에 비례해 강도를 곱한다 — 전술 상한 위에서", () => {
+    expect(derbyIntensityFactor(0)).toBe(1);
+    expect(matchIntensity(tactics(), 0)).toBe(matchIntensity(tactics()));
+    expect(matchIntensity(tactics(), 1)).toBe(1.06);
+    expect(matchIntensity(tactics(), 3)).toBe(1.18);
+    // 가장 격렬한 전술 + 가장 뜨거운 더비 — 여기가 강도의 실제 위끝이다
+    expect(matchIntensity(tactics({ pressing: 5, tempo: 5 }), 3)).toBe(1.44);
+    // 하한도 함께 오른다: 더비는 소극적인 팀에도 걸린다
+    expect(matchIntensity(tactics({ pressing: 1, tempo: 1 }), 3)).toBe(0.94);
   });
 });
 

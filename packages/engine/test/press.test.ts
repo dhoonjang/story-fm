@@ -340,6 +340,38 @@ describe("기자회견 — 질문은 장부에서 나온다", () => {
     expect(buildMatchPress(state, upcoming!.id)).toBeNull();
   });
 
+  /**
+   * 전적의 경계 — **이번 경기는 세지 않는다.** 넣으면 첫 더비가 이미 1승 0패로
+   * 시작하고, 기자가 방금 본 경기를 전적으로 되묻는다 (people.md §4).
+   */
+  it("더비를 치르면 그 전까지의 전적이 카드로 선다 — 첫 더비는 0승 0무 0패", () => {
+    const state = createTestGame();
+    const derbies = state.matches
+      .filter(
+        (m) =>
+          m.competitionId !== null &&
+          ((m.homeTeamId === state.userTeamId && m.awayTeamId === "tottenham") ||
+            (m.awayTeamId === state.userTeamId && m.homeTeamId === "tottenham")),
+      )
+      .sort((a, b) => (a.date < b.date ? -1 : 1));
+    expect(derbies.length, "북런던 더비가 두 번 편성되지 않았다").toBeGreaterThanOrEqual(2);
+
+    settle(state, derbies[0]!, { us: 0, them: 2 });
+    const first = buildMatchPress(state, derbies[0]!.id)!;
+    const firstCard = first.facts.find((f) => f.data?.tags?.[0] === "derby");
+    expect(firstCard, "더비 카드가 서지 않았다").toBeDefined();
+    expect(firstCard!.data!.tags?.[1]).toBe("북런던 더비");
+    expect(firstCard!.data!.values).toMatchObject({ won: 0, drawn: 0, lost: 0 });
+    // 날 선 카드라 이기든 지든 무게 2다
+    expect(first.weight).toBe(2);
+
+    settle(state, derbies[1]!, { us: 3, them: 0 });
+    const second = buildMatchPress(state, derbies[1]!.id)!;
+    const secondCard = second.facts.find((f) => f.data?.tags?.[0] === "derby")!;
+    // 이번 경기(3-0 승)는 빠지고 첫 더비의 패배만 선다
+    expect(secondCard.data!.values).toMatchObject({ won: 0, drawn: 0, lost: 1 });
+  });
+
   it("친선을 치러도 회견은 열리지 않는다 — 프리시즌은 시즌 장부 밖이다", () => {
     const state = createTestGame();
     const friendly = nextUserMatch(state, "friendly");
