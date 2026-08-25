@@ -53,6 +53,7 @@ export const SKILL_LABEL: Record<string, string> = {
   respond_offer: "오퍼 판정",
   accept_deal: "계약 확정",
   set_transfer_list: "이적 리스트",
+  respond_transfer_request: "이적 요청 응답",
   withdraw_offer: "협상 철회",
   release_player: "계약 해지",
   recall_loan: "임대 복귀",

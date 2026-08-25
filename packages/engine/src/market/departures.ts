@@ -37,6 +37,7 @@ import {
   seasonStatOf,
   squadShortfall,
   teamName,
+  withdrawTransferRequest,
   type GameState,
 } from "../core/state";
 
@@ -97,7 +98,8 @@ export function clearDepartedState(state: GameState, player: GamePlayer, from: s
   state.issues = state.issues.filter((i) => i.gamePlayerId !== player.id);
   // 떠난 사람에게 한 약속은 지킬 자리가 없다 (people.md §5-2 — 불만과 같은 결)
   state.promises = (state.promises ?? []).filter((pr) => pr.gamePlayerId !== player.id);
-  player.state.transferRequestedOn = undefined;
+  // 요청 장부도 같은 문을 지난다 — 떠난 선수의 요청에 감독이 답할 자리가 없다
+  withdrawTransferRequest(state, player.id);
   forgetRoles(state, player.id);
   player.isCaptain = false;
   player.isViceCaptain = undefined;
