@@ -62,6 +62,7 @@ import { careerTotalsOf, settleMilestones } from "../squad/career";
 import { clampForm, formDeltaFromMatch } from "../squad/form";
 import { matchCaptainOf } from "../squad/hierarchy";
 import { applyResultMood } from "../squad/slump";
+import { derbyForMatch } from "../club/derby";
 import { managerTacticsOf } from "./manager-tactics";
 import { matchRating, type MatchRatingBrief, type PlayerMatchBrief } from "./ratings";
 import { grantManagerXP, IN_MATCH_FAMILIARITY_LOSS } from "../skills";
@@ -135,7 +136,7 @@ type Seat = Pick<TacticAssignment, "position"> &
   Partial<Pick<TacticAssignment, "point" | "roleId">>;
 
 /** 배치 + 선수 → 패킷 입력 슬롯. 온필드 id 목록으로 필터해 교체·퇴장을 반영한다 */
-function slotsFor(state: GameState, teamId: string, ids: string[]): LineupSlot[] {
+export function slotsFor(state: GameState, teamId: string, ids: string[]): LineupSlot[] {
   const assignments = new Map(assignmentsOf(state, teamId).map((a) => [a.playerId, a] as const));
   const squad = new Map(playersOf(state, teamId).map((p) => [p.id, p] as const));
   const worn = state.pendingMatch?.matchFatigue ?? {};
@@ -302,7 +303,7 @@ function reseatOnAiShape(state: GameState, teamId: string, slots: LineupSlot[]):
  * 경기 중에는 장부의 현재 온필드 명단으로 계산한다 (교체·퇴장 반영).
  */
 /** 그라운드에 선 선수의 개인 지시 — 교체로 나간 선수의 지시는 따라 나간다 */
-function directivesOnPitch(state: GameState, teamId: string, onPitch: readonly string[]) {
+export function directivesOnPitch(state: GameState, teamId: string, onPitch: readonly string[]) {
   return assignmentsOf(state, teamId)
     .filter((a) => a.directive && onPitch.includes(a.playerId))
     .map((a) => ({
@@ -388,10 +389,19 @@ function buildPacketFor(
       directives: directivesOnPitch(state, teamId, ledgerSide.onPitch),
     };
   };
+  /**
+   * 더비도 **경기가 갖고 있는 사실**이다 (중립 경기장과 같은 결) — 표가 정하고
+   * 패킷이 컨텍스트 태그와 강도 배수로 싣는다 (match.md §1 · team.md §3.2).
+   */
+  const derby = derbyForMatch(match);
   return buildStrengthPacket(
     build(match.homeTeamId, pending.ledger.home),
     build(match.awayTeamId, pending.ledger.away),
-    { neutral: match.neutral === true, inMatch },
+    {
+      neutral: match.neutral === true,
+      inMatch,
+      ...(derby ? { derby: { name: derby.name, heat: derby.heat } } : {}),
+    },
   );
 }
 
@@ -399,7 +409,7 @@ function buildPacketFor(
  * 킥오프 라인업 조립 — 배치(starting)에서 가용 선수를 뽑고, 부상·정지로 빈 자리는
  * 같은 그룹 우선으로 자동 대체한다. GK 자리는 반드시 GK 그룹으로 채운다.
  */
-function assembleUserLineup(state: GameState): {
+export function assembleUserLineup(state: GameState): {
   onPitch: string[];
   bench: string[];
   replaced: string[];
@@ -1983,12 +1993,13 @@ export function finalizeMatch(state: GameState): MatchDigest {
    * 같은 규칙이다. 경기 결과가 장부에 쓰인 **뒤**라야 이번 경기가 연속 기록에
    * 들어간다. 남의 라커룸 소식은 브리핑하지 않는다 — 감독은 조회로 안다.
    */
+  const derbyHeat = derbyForMatch(match)?.heat ?? 0;
   for (const which of ["home", "away"] as const) {
     const diff =
       which === "home"
         ? ledger.score.home - ledger.score.away
         : ledger.score.away - ledger.score.home;
-    const runNote = applyResultMood(state, teamIdOf[which], diff, lineupOf[which]);
+    const runNote = applyResultMood(state, teamIdOf[which], diff, lineupOf[which], derbyHeat);
     if (runNote && which === side) digest.push(runNote);
   }
 

@@ -20,6 +20,7 @@ import {
   boardExpectationText,
   naturalPositionOf,
   presetOf,
+  retiresAtSeasonEnd,
   seasonRating,
 } from "@story-fm/domain";
 import {
@@ -65,6 +66,7 @@ import {
   paySeasonBonuses,
   topUpTransferBudget,
 } from "../club/finance";
+import { derbyMatchesOf, derbyRecordFrom } from "../club/derby";
 import { buildEuroEntrants, entrantsOf, type LeagueTables } from "./europe";
 import { buildSeasonFixtures, isUserFixture } from "./fixtures";
 import type { SuperCupSource } from "./super-cup";
@@ -703,6 +705,17 @@ const EURO_RUNNER_UP_MEDIA = 4;
 const BOARD_SEASON_SWING = 8;
 
 /**
+ * 시즌 더비 **쓸이**가 보드 평판에 남기는 폭 — 전승 +, 전패 − (career.md §5.1).
+ *
+ * 순위를 지키고도 라이벌에게 두 번 진 감독과 두 번 이긴 감독이 같은 평가를 받으면,
+ * 팬이 가장 크게 반응하는 경기가 감독의 자리에는 닿지 않는다. `BOARD_SEASON_SWING`
+ * 보다 작게 두는 것은 시즌을 정하는 것이 여전히 순위이기 때문이다.
+ */
+const BOARD_DERBY_SWEEP = 3;
+/** 쓸이로 보는 최소 경기 수 — 한 경기만 치른 시즌은 쓸이가 아니다 */
+const DERBY_SWEEP_MATCHES = 2;
+
+/**
  * 대항전 우승 **상금** — 구단이 받는 돈이라 감독의 커리어와 갈라져 있다.
  * 무직으로 맞은 시즌 끝에도 옛 구단의 장부에는 앉아야 한다 (career.md §5.1).
  */
@@ -789,6 +802,34 @@ export function reviewSeason(state: GameState): string[] {
   state.manager.reputation.board = clampReputation(
     state.manager.reputation.board + (met ? BOARD_SEASON_SWING : -BOARD_SEASON_SWING),
   );
+
+  /**
+   * **더비 전적은 순위와 따로 남는다** (career.md §5.1). 전적 줄은 한 경기라도
+   * 치렀으면 서고, 평판은 쓸이(전승·전패)에만 움직인다 — 무승부가 섞이면 어느
+   * 쪽도 아니다.
+   */
+  const derbies = derbyMatchesOf(state);
+  if (derbies.length > 0) {
+    const record = derbyRecordFrom(state, derbies);
+    const swept = derbies.length >= DERBY_SWEEP_MATCHES;
+    const sweep =
+      swept && record.won === derbies.length
+        ? BOARD_DERBY_SWEEP
+        : swept && record.lost === derbies.length
+          ? -BOARD_DERBY_SWEEP
+          : 0;
+    if (sweep !== 0) {
+      state.manager.reputation.board = clampReputation(state.manager.reputation.board + sweep);
+    }
+    digest.push(
+      `더비 전적: ${derbies.length}경기 ${record.won}승 ${record.drawn}무 ${record.lost}패` +
+        (sweep > 0
+          ? ` — 전승, 보드 평판 +${BOARD_DERBY_SWEEP}`
+          : sweep < 0
+            ? ` — 전패, 보드 평판 −${BOARD_DERBY_SWEEP}`
+            : ""),
+    );
+  }
 
   if (position === 1) {
     state.trophies.push({
@@ -949,19 +990,6 @@ function applyTransition(state: GameState): string[] {
     else contractsByTeam.set(c.teamId, [c]);
   }
 
-  /**
-   * 서른셋을 넘겨 이 아래면 은퇴한다 — **종합의 눈금을 탄다.**
-   *
-   * 옛 72와 같은 인원 비율(상위 37%)에 서는 값이다 (player.md §4). 72를 그대로
-   * 두면 새 눈금에서 그 선이 전체의 63%를 덮어 서른서넛이 한 시즌에 통째로 은퇴한다.
-   */
-  const RETIRE_OVERALL = 68;
-
-  /** 종합과 무관하게 은퇴하는 나이 */
-  const RETIRE_AGE = 35;
-  /** 이 나이부터는 `RETIRE_OVERALL` 아래면 은퇴한다 */
-  const RETIRE_AGE_MARGINAL = 33;
-
   for (const team of state.teams) {
     /**
      * **무소속은 클럽이 아니다** — 은퇴만 태우고 유스 유입·배치·계약 갱신은
@@ -980,12 +1008,8 @@ function applyTransition(state: GameState): string[] {
        * 감독이 겪은 것 없이 숫자만 달라진다. 이제 **매달 조금씩** 움직인다
        * (`development.ts`). 시즌 전환이 하는 건 은퇴 판정과 명단 정리뿐이다.
        */
-      if (
-        age >= RETIRE_AGE ||
-        (age >= RETIRE_AGE_MARGINAL && player.attributes.overall < RETIRE_OVERALL)
-      ) {
-        retirees.push(player.id);
-      }
+      // 문턱은 도메인이 갖는다 — 베테랑 황혼 아크가 같은 자를 읽는다 (people.md §9)
+      if (retiresAtSeasonEnd(age, player.attributes.overall)) retirees.push(player.id);
       // 새 시즌 리셋
       player.state.form = 0;
       // 새 시즌 — 쉬고 돌아왔다

@@ -4,7 +4,9 @@
  */
 import {
   awardLine,
+  ABSENT_REASON_KO,
   boardExpectation,
+  buildOpponentReport,
   careerTotalsOf,
   characterEntry,
   characterEntryOf,
@@ -72,6 +74,7 @@ import {
   personaRoleLabel,
   PROMISE_KIND_KO,
   slotOfTime,
+  tacticsBrief,
   TRANSFER_REQUEST_REASON_KO,
   type CharacterEntry,
   type CharacterInjection,
@@ -367,6 +370,57 @@ function coachBlock(state: GameState, cues: readonly CoachCue[]): string | null 
     "coach",
     cues.map((c) => `- ${c.fact}`).join("\n"),
     ` name="${headCoachOf(state).name}"`,
+  );
+}
+
+/**
+ * 경기 전 상대 분석이 스냅샷에 서는 창 (일) — **전날과 당일뿐이다.**
+ *
+ * 감독이 라인업과 6축을 정하는 자리라 그날만 값이 있다. 사흘 전부터 매 턴 실으면
+ * 캐시 밖 층을 상대 명단이 통째로 먹는다 (→ docs/llm/agents.md §6).
+ */
+const OPPONENT_BRIEF_DAYS = 1;
+
+/**
+ * 경기 전날·당일의 상대 분석 — **코어의 리포트를 그대로 옮긴다**
+ * (→ docs/simulation/match.md §1.8). 지점의 수를 여기서 다시 자르지 않는다:
+ * 몇 개가 보이는지는 감독의 **분석**이 이미 정한 값이고, 블록이 또 자르면
+ * 손잡이가 둘이 된다.
+ *
+ * ⚠️ 데이터 블록이라 사실만 싣는다 — 지시문도 도구 이름도 없다 (prompts.md §5-3).
+ */
+function opponentBlock(state: GameState): string | null {
+  const report = buildOpponentReport(state, { withinDays: OPPONENT_BRIEF_DAYS });
+  if (!report) return null;
+  const venue = report.venue === "home" ? "홈" : report.venue === "away" ? "원정" : "중립";
+  const guessed = report.expectedXI.filter((p) => !p.carried).length;
+  return block(
+    "opponent",
+    lines(
+      `${report.date} ${report.time} ${report.label} · ${venue} vs ${report.opponent.name}` +
+        `${report.inDays === 0 ? " (오늘)" : " (내일)"}`,
+      `예상 XI: ${report.expectedXI.map((p) => `${p.name}(${p.position})`).join(" · ")}`,
+      report.basis === null
+        ? "예상의 근거: 상대의 직전 경기가 없다 — 배치에서 세운 추정이다"
+        : `예상의 근거: 상대의 직전 경기(${report.basis.date} ${report.basis.label}) 선발` +
+            `${guessed > 0 ? ` · ${guessed}명은 추정으로 메웠다` : ""}`,
+      report.absent.length === 0
+        ? "상대 결장: 없다"
+        : `상대 결장: ${report.absent
+            .map((a) => `${a.name} ${ABSENT_REASON_KO[a.reason]}(${a.note})`)
+            .join(" · ")}`,
+      `상대 전술: ${tacticsBrief(report.shape)}`,
+      report.notes.length === 0
+        ? "읽어 낸 지점: 없다"
+        : lines(
+            "읽어 낸 지점:",
+            ...report.notes.map(
+              (tag) =>
+                `- [${tag.favours === report.ourSide ? "우리" : tag.favours === null ? "중립" : "상대"}] ` +
+                packetTagText(tag, report.tagContext),
+            ),
+          ),
+    ),
   );
 }
 
@@ -757,6 +811,11 @@ export function buildGmStateNote(
      * 무직이면 코어가 빈손을 내므로 이 덩어리는 서지 않는다.
      */
     coachBlock(state, coach),
+    /**
+     * 경기 전날·당일의 상대 분석 — 감독이 라인업과 6축을 정하는 자리다.
+     * 조회 도구·다음 경기 카드와 **같은 리포트**를 읽는다 (match.md §1.8).
+     */
+    opponentBlock(state),
     block("last_match", matchDigest(state)),
     // 오프시즌 — 은퇴와 시상. 소집 전에만 서고, 없으면 한 줄도 쓰지 않는다
     block("offseason", offseason),

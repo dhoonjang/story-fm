@@ -1598,6 +1598,14 @@ export const ARC_KINDS = [
   "losing-run",
   /** 협상 2라운드 이상 — 한 방에 끝난 오퍼는 사가가 아니다 */
   "transfer-saga",
+  /** 21세 이하 · 시즌 1군 출전 5 · 시즌 평점이 기준선 위 — 셋이 함께 서야 열린다 */
+  "prospect-rise",
+  /** 33세 이상의 계약 마지막 해 — 재계약·은퇴·이적 중 하나로 닫힌다 */
+  "veteran-twilight",
+  /** 완장의 승계 — 주장의 나이·계약·결장과 부주장 공석을 겹쳐 읽는다. 주인은 팀 id */
+  "captain-succession",
+  /** 보드 경고 1회부터 — 감독 자신의 자리가 걸린 이야기. 주인은 팀 id */
+  "board-standoff",
 ] as const;
 export const ArcKindSchema = z.enum(ARC_KINDS);
 export type ArcKind = z.infer<typeof ArcKindSchema>;

@@ -13,6 +13,7 @@ import { spendFromWallet, walletOf } from "../club/manager-wallet";
 import {
   AI_MANAGER_RATING_FALLBACK,
   MANAGER_TERMS_BY_TIER,
+  USER_WARNINGS_BEFORE_SACK,
   boardExpectationText,
   clampCondition,
   formatMoney,
@@ -171,8 +172,11 @@ export function counterHeadroom(reputation: number, tier: 1 | 2 | 3 | 4): number
   );
 }
 
-/** 감독 팀의 경고 단계 — 이 횟수를 넘기면 경질된다 */
-export const USER_WARNINGS_BEFORE_SACK = 3;
+/**
+ * 경고 단계의 눈금은 **도메인이 갖는다** — 보드 대치 아크가 같은 자를 읽는다
+ * (people.md §9). 여기서 부르던 자리가 옮기지 않게 다시 내보낸다.
+ */
+export { USER_WARNINGS_BEFORE_SACK };
 /** 같은 말을 매일 반복하지 않는 간격 — 경고는 한 달에 한 번까지다 */
 const WARNING_COOLDOWN_DAYS = 30;
 /** 경고 한 번이 깎는 보드 평판 — 경고가 마지막이 아니어도 압박은 남는다 */

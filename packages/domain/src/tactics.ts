@@ -166,6 +166,19 @@ export function tacticAxisScaleText(axis: TacticAxis): string {
   return `${axis.label}(${TACTIC_SCALE_MIN} ${low}~${TACTIC_SCALE_MAX} ${high})`;
 }
 
+/**
+ * 한 팀의 판을 한 줄로 — `4-2-3-1 · 멘탈 균형 · 라인 낮게 · …` (짧은 이름 `brief`).
+ *
+ * 읽는 곳이 둘이라(경기 전 상대 분석의 조회 도구와 GM 스냅샷) 각자 이으면 같은
+ * 전술이 두 문장으로 읽힌다. 화면은 축을 칩으로 따로 세우므로 이 줄을 쓰지 않는다.
+ */
+export function tacticsBrief(spec: TacticsSpec): string {
+  return [
+    spec.formation,
+    ...TACTIC_AXES.map((axis) => `${axis.brief} ${tacticWord(axis.key, spec[axis.key])}`),
+  ].join(" · ");
+}
+
 /** 리서치 값이 없는 구단이 서는 모양 — 프리셋이어야 좌표를 꺼낼 수 있다 */
 export const DEFAULT_FORMATION: Formation = "4-3-3";
 

@@ -4,6 +4,7 @@ import {
   applyMatchEvents,
   assignmentsOf,
   buildOfficeViews,
+  buildOpponentReport,
   buildRatingBrief,
   digestLines,
   firstTeamPlayers,
@@ -1472,5 +1473,80 @@ describe("전술 XP는 천장이 있다", () => {
   it("천장을 넘어서면 더 넣어도 같다", () => {
     expect(tacticalXpFor(3)).toBe(TACTICAL_XP_CAP);
     expect(tacticalXpFor(9)).toBe(TACTICAL_XP_CAP);
+  });
+});
+
+/**
+ * 경기 전 상대 분석 (match.md §1.8) — **정답을 흘리지 않는가**와
+ * **경기 전에 읽은 지점이 킥오프에 그대로 있는가**, 둘뿐이다.
+ * 카드에 무엇이 서는가는 화면이 깨지는 순간 보이는 것이라 여기서 재지 않는다.
+ */
+describe("경기 전 상대 분석 (match.md §1.8)", () => {
+  it("예상 XI에 부상·정지 선수는 서지 않고 결장 명단으로 간다", () => {
+    const state = atMatchday();
+    const first = buildOpponentReport(state);
+    if (!first) throw new Error("상대 분석을 세우지 못했다");
+    expect(first.expectedXI).toHaveLength(11);
+
+    const [hurt, banned] = first.expectedXI;
+    if (!hurt || !banned) throw new Error("예상 XI가 모자란다");
+    state.injuries.push({
+      id: "inj-preview",
+      gamePlayerId: hurt.id,
+      bodyPart: "발목",
+      severity: "minor",
+      cause: "match",
+      occurredOn: state.date,
+      expectedReturn: "2026-12-31",
+      returnedOn: null,
+    });
+    state.suspensions.push({
+      id: "susp-preview",
+      gamePlayerId: banned.id,
+      cause: "red",
+      lengthMatches: 1,
+      served: 0,
+      status: "active",
+      issuedOn: state.date,
+    });
+
+    const after = buildOpponentReport(state);
+    if (!after) throw new Error("상대 분석을 세우지 못했다");
+    const ids = after.expectedXI.map((p) => p.id);
+    expect(ids).not.toContain(hurt.id);
+    expect(ids).not.toContain(banned.id);
+    // 빈자리는 메워진다 — 열 명으로 나오는 팀은 없다
+    expect(after.expectedXI).toHaveLength(11);
+    expect(after.absent.find((a) => a.id === hurt.id)?.reason).toBe("injury");
+    expect(after.absent.find((a) => a.id === banned.id)?.reason).toBe("suspension");
+  });
+
+  /**
+   * **경기 전에 노린 지점을 경기 중에 그대로 부를 수 있어야 한다** — 표적 id가
+   * `축:선수id`라(§1.6) 이 등식이 곧 그 뜻이다. 라인업이 갈리면 성립할 이유가
+   * 없으므로 XI가 같은지를 먼저 세운다.
+   */
+  it("라인업이 그대로면 리포트의 표적 id가 킥오프 패킷의 표적 id다", () => {
+    const state = atMatchday();
+    const report = buildOpponentReport(state);
+    if (!report) throw new Error("상대 분석을 세우지 못했다");
+
+    expect(startMatch(state).ok).toBe(true);
+    const pending = state.pendingMatch!;
+    const side = userSide(state);
+    const startingXI = pending.startingXI!;
+    const theirXI = side === "home" ? startingXI.away : startingXI.home;
+    // 전제 — 상대가 예상대로 나왔다 (로테이션이 없으면 매치데이 1은 늘 이 자리다)
+    expect([...theirXI].sort()).toEqual(report.expectedXI.map((p) => p.id).sort());
+
+    const idsOf = (targets: readonly { id: string }[]) => targets.map((t) => t.id).sort();
+    expect(idsOf(report.targets)).toEqual(idsOf(pending.packet.targets));
+  });
+
+  it("경기 중에는 다음 상대의 분석을 세우지 않는다", () => {
+    const state = atMatchday();
+    expect(startMatch(state).ok).toBe(true);
+    expect(buildOpponentReport(state)).toBeNull();
+    expect(buildOfficeViews(state).competitions.preview).toBeNull();
   });
 });
