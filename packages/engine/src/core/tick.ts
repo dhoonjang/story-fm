@@ -50,8 +50,9 @@ import {
 } from "../club/finance";
 // 핵심 자원의 경계는 회견이 쥔다 — 같은 자를 두 곳에 적으면 한쪽만 움직인다
 import { betterThanInSquad, openEvePress, SQUAD_CORE_SIZE } from "../club/press";
-import { archetypeTraitsOf } from "../world/player-persona";
 import { demotionPatienceDaysOf, listedPatienceDaysOf } from "../squad/demotion";
+// 출전 불만과 약속 판정은 **같은 자**를 쓴다 (people.md §5·§5-2)
+import { minutesShortfalls, shortfallText, tickPromises } from "../squad/promises";
 import { tickApproaches } from "../club/approach";
 import { tickBoardDemands } from "../club/board-demand";
 import { tickBoardRequests } from "../club/board-request";
@@ -106,7 +107,6 @@ import {
   pushNarrative,
   pushReportCards,
   reservePlayers,
-  seasonStatOf,
   squadLevelOf,
   tacticsOf,
   teamNameIn,
@@ -118,7 +118,7 @@ import {
   DAY_START,
   type GameState,
 } from "./state";
-import { makeRng, pickWeighted } from "./rng";
+import { makeRng } from "./rng";
 
 /**
  * advance_time — 캘린더 시계가 흐르는 유일한 경로 (season.md §5).
@@ -463,51 +463,38 @@ function dailyTick(
   settleDuePayments(state, digest);
 
   /**
-   * 벤치 불만을 낼 만한 자원인가 — **종합의 눈금을 탄다.**
-   * 옛 78과 같은 인원 비율(상위 17%)에 서는 값이다 (player.md §4).
+   * 출전 기회 불만 — **주사위가 없다. 지위가 잰다** (→ docs/data/people.md §5).
+   *
+   * 최근 `PROMISE_WINDOW_MATCHES`(8)경기 선발 비율이 그의 **계약 지위**가 부르는
+   * 비율에 못 미치면 그 자리에서 선다. 확률을 걷어 낸 이유는 강등·등재와 같다 —
+   * 방치의 대가는 규칙이 아니라 시간의 결과여야 하고(overview.md §1 철칙 4),
+   * 감독이 예측할 수 없는 불만은 손잡이가 아니라 소음이다.
+   *
+   * 대상도 문턱도 전부 `minutesShortfalls`가 쥔다 — **약속 이행 판정과 같은 자다**
+   * (`promiseKept`). 자를 둘 두면 "약속은 지켰는데 불만이 서는" 상태가 생긴다.
+   * 리그 개막 후에만 본다: 프리시즌엔 논할 경기가 없다.
    */
-  const BENCHED_GRIPE_OVERALL = 74;
-  /** 자격이 되는 주에 실제로 불만이 터질 확률 — 매주 나면 불만이 배경음이 된다 */
-  const BENCHED_GRIPE_CHANCE = 0.15;
-  // 벤치 불만 발생 — 월요일, 고평가 비선발 자원 (간이).
-  // 리그 개막 후에만 — 프리시즌엔 아직 "출전 기회"를 논할 경기가 없다 (v6)
-  if (
-    managed &&
-    dow === MONDAY &&
-    state.date >= state.calendar.start &&
-    rng() < BENCHED_GRIPE_CHANCE
-  ) {
-    const starters = new Set(assignmentsOf(state, managed, "starting").map((a) => a.playerId));
-    const benched = players.filter(
-      (p) =>
-        squadLevelOf(p) === "first" &&
-        !starters.has(p.id) &&
-        p.attributes.overall >= BENCHED_GRIPE_OVERALL &&
-        !issuePlayers.has(p.id),
-    );
-    if (benched.length > 0) {
-      /**
-       * **누가 그 한 자리에 서는가만 사람이 정한다** (people.md §5).
-       *
-       * 자격도 주에 한 번이라는 빈도도 그대로이고, 추첨 무게만 `patience`의 역수로
-       * 기운다 — 문턱을 사람마다 옮기면 한 주에 서는 불만의 수가 원형 추첨을 따라가
-       * 다가옴(§8)의 소음 상한이 함께 움직인다. 무게만 기울이면 라커룸의 총량은
-       * 그대로이고 먼저 문을 두드리는 사람이 달라진다.
-       */
-      const gripe = pickWeighted(
-        rng,
-        benched,
-        (p) => 1 / archetypeTraitsOf(state.seed, p).patience,
-      );
-      state.issues.push({
-        gamePlayerId: gripe.id,
-        kind: "unhappy",
-        reason: "minutes",
-        since: state.date,
-      });
-      const apps = seasonStatOf(state, gripe.id)?.apps ?? 0;
-      digest.push(`${gripe.name} 출전 기회 불만 — 시즌 출전 ${apps}경기, 비선발`);
-      pushNarrative(state, `${gripe.name} 출전 불만`, 3);
+  if (managed && dow === MONDAY && state.date >= state.calendar.start) {
+    const shortfalls = minutesShortfalls(state);
+    if (shortfalls.length > 0) {
+      for (const row of shortfalls) {
+        state.issues.push({
+          gamePlayerId: row.player.id,
+          kind: "unhappy",
+          reason: "minutes",
+          // 창 안에서 몇 번을 더 세웠어야 했는가 — 기간이 아니라 모자란 선발 수다
+          count: row.short,
+          since: state.date,
+        });
+      }
+      /** 여럿이 한날 문턱을 넘으면 전부 걸리되, 줄은 하나다 — 이름이 화면을 채우지 않게 */
+      const worst = Math.max(...shortfalls.map((row) => row.short));
+      const line =
+        shortfalls.length === 1
+          ? shortfallText(shortfalls[0]!)
+          : `출전 기회 불만 ${shortfalls.length}명 — 최대 선발 ${worst}회 부족`;
+      digest.push(line);
+      pushNarrative(state, line, 3);
     }
   }
 
@@ -616,6 +603,18 @@ function dailyTick(
       pushNarrative(state, line, 3);
     }
   }
+
+  /**
+   * 감독의 약속 — **기한이 된 것만 판정한다** (→ docs/data/people.md §5-2).
+   *
+   * 요일 문이 없다: 기한은 감독이 좁힐 수 있어 아무 날에나 떨어지고, 판정은 기한
+   * 하루뿐이라 그날을 지나치면 영영 판정되지 않는다. 이행 여부는 전부 다른 장부에서
+   * 나온다 — 출전 명단 · 이적 리스트 · 열린 협상 · 완장.
+   *
+   * ⚠️ **출전 불만 뒤에 선다** — 한 선수에게 불만 줄은 하나이므로, 같은 날 둘이
+   * 겹치면 먼저 선 `minutes`가 자리를 지킨다.
+   */
+  if (managed) tickPromises(state, digest);
 
   // 협상 — 기한 경과 처리 + 들어오는 오퍼 + 상대의 답 도착.
   // 무직이면 흥정할 구단이 없다 — 경질과 함께 진행 중이던 협상은 이미 사라졌다

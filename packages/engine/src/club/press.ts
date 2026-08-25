@@ -160,6 +160,16 @@ const SLUMP_CANDIDATES = 3;
 
 function questionablePlayer(state: GameState, seed: number): GamePlayer | null {
   const squad = userPlayers(state);
+  /**
+   * **어긴 약속이 가장 먼저다** (people.md §5·§5-2) — 부진도 다른 불만도 세계가
+   * 만든 일이지만, 어긴 약속은 **감독 자신이 세운 원인**이라 기자가 가장 먼저 묻는
+   * 자리다. 폼보다 앞에 두는 것은 그래서다: 부진은 물어볼 일이고 약속 파기는
+   * 해명을 요구할 일이다.
+   */
+  const promiseHolder = squad.find((p) =>
+    state.issues.some((i) => i.gamePlayerId === p.id && i.reason === "promise"),
+  );
+  if (promiseHolder) return promiseHolder;
   const slumping = squad
     .filter((p) => p.state.form < SLUMPING_FORM)
     .sort((a, b) => a.state.form - b.state.form)
@@ -231,8 +241,13 @@ export function buildMatchPress(state: GameState, matchId: string): PressConfere
   }
   const target = questionablePlayer(state, state.seed + state.matches.length);
   if (target) {
-    const slumping = target.state.form < SLUMPING_FORM;
     const reason = issueReasonOf(state, target.id);
+    /**
+     * ⚠️ **어긴 약속은 폼을 이긴다.** 약속 파기는 사기를 `PROMISE.brokenMorale`(−8)
+     * 깎으므로 그 선수의 폼은 대개 함께 내려가 있다 — 폼으로 카드를 고르면 그를
+     * 부른 이유가 지워지고 기자가 "폼이 떨어졌다"를 묻는다 (people.md §5-2).
+     */
+    const slumping = reason !== "promise" && target.state.form < SLUMPING_FORM;
     facts.push({
       kind: slumping ? "slump" : "unhappy",
       data: slumping

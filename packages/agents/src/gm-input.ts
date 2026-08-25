@@ -35,6 +35,7 @@ import {
   onSummerBreak,
   openInjury,
   openManagerOffers,
+  openPromises,
   pendingVerdicts,
   playerById,
   playerName,
@@ -60,6 +61,7 @@ import {
   boardExpectationLine,
   describeManagerSkills,
   describeReputation,
+  diffDays,
   familiarityLabel,
   formatMoney,
   matchupText,
@@ -67,6 +69,7 @@ import {
   packetTagContext,
   packetTagText,
   personaRoleLabel,
+  PROMISE_KIND_KO,
   slotOfTime,
   type CharacterEntry,
   type CharacterInjection,
@@ -79,6 +82,16 @@ const MATCH_BRIEF_TURNS = 3;
 const MATCH_DIGEST_DAYS = 3;
 /** 계약 만료 임박 경고 창 (일) */
 const EXPIRING_ALERT_DAYS = 180;
+
+/**
+ * 약속 기한 임박 경고 창 (일) — **계약보다 훨씬 짧다.**
+ *
+ * 계약 만료는 반년 전부터 손을 쓸 수 있는 일이지만 약속은 기한 그 주에 감독이
+ * 할 수 있는 일(선발로 세운다·리스트에 올린다·재계약을 연다·완장을 채운다)이
+ * 남아 있는 동안만 경고가 뜻을 갖는다. 한 달 전부터 매 턴 뜨면 그 줄은 배경음이
+ * 되고, 정작 기한 전날의 줄이 묻힌다 (→ docs/data/people.md §5-2).
+ */
+const PROMISE_ALERT_DAYS = 7;
 
 /**
  * 인물 카드 — 인물지를 모델이 읽는 형태로 (people.md §6).
@@ -312,6 +325,7 @@ export interface TimePassed {
 const TOP_RATED_SHOWN = 2;
 const TRAINING_SHOWN = 3;
 const EXPIRING_SHOWN = 3;
+const PROMISE_SHOWN = 3;
 const RECENT_NARRATIVE = 4;
 
 /**
@@ -595,6 +609,22 @@ export function buildGmStateNote(
             .slice(0, EXPIRING_SHOWN)
             .map((row) => `${row.player.name}~${row.contract.until}`)
             .join(", ")}${expiring.length > EXPIRING_SHOWN ? " …" : ""})`
+        : null;
+    })(),
+    /**
+     * 기한이 다가온 약속 — **감독이 아직 지킬 수 있는 동안만** 선다 (people.md §5-2).
+     * 판정은 기한 하루뿐이라, 이 줄이 없으면 감독이 자기가 한 말을 잊은 채 그날을
+     * 지나치고 사기 −8과 불만 하나를 받는다.
+     */
+    (() => {
+      const due = openPromises(state)
+        .filter((p) => diffDays(state.date, p.dueOn) <= PROMISE_ALERT_DAYS)
+        .sort((a, b) => (a.dueOn < b.dueOn ? -1 : a.dueOn > b.dueOn ? 1 : 0));
+      return due.length > 0
+        ? `약속 기한 임박 ${due.length} (${due
+            .slice(0, PROMISE_SHOWN)
+            .map((p) => `${playerName(state, p.gamePlayerId)} ${PROMISE_KIND_KO[p.kind]}~${p.dueOn}`)
+            .join(", ")}${due.length > PROMISE_SHOWN ? " …" : ""})`
         : null;
     })(),
   ].filter((x): x is string => x !== null);

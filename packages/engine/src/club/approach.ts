@@ -5,6 +5,7 @@ import type {
   ApproachPressure,
   ApproachTopic,
   GamePlayer,
+  ManagerPromise,
   Negotiation,
   PlayerIssue,
   PressFact,
@@ -49,8 +50,11 @@ import {
   stanceRow,
   STANCE_KO,
 } from "./press";
-import type { SkillResult } from "../skills";
+import type { PromiseInput, SkillResult } from "../skills";
+// 면담과 **같은 조각**을 쓴다 — 같은 말이 자리마다 다른 줄로 서지 않게 (people.md §5-2)
+import { promisePiece } from "../skills";
 import { deltaItems } from "../skills/brief";
+import { openPromise, squadStatusOf, startsInWindow } from "../squad/promises";
 
 /**
  * 다가옴 — **세계가 회견 밖에서 먼저 말을 건다** (→ docs/data/people.md §8).
@@ -432,6 +436,22 @@ function issueDays(state: GameState, issue: PlayerIssue): number {
   return diffDays(issue.since, state.date);
 }
 
+/**
+ * 그 선수의 **마지막으로 깨진 약속** — `promise` 불만을 세운 줄이다 (people.md §5-2).
+ *
+ * 판정이 끝난 약속은 장부에 이력으로 남으므로 뒤쪽 줄일수록 최근이다. 여러 줄이
+ * 깨져 있어도 불만은 하나라, 그 자리가 말하는 것도 하나다.
+ */
+function lastBrokenPromise(state: GameState, playerId: string): ManagerPromise | null {
+  const rows = (state.promises ?? []).filter(
+    (p) => p.gamePlayerId === playerId && p.status === "broken",
+  );
+  return rows.reduce<ManagerPromise | null>(
+    (latest, row) => (latest === null || row.dueOn >= latest.dueOn ? row : latest),
+    null,
+  );
+}
+
 /** 선수 채널의 사실 — 불만 한 조각과 지금의 폼. 그 밖은 이 사람이 말할 것이 아니다 */
 function playerFacts(
   state: GameState,
@@ -445,9 +465,18 @@ function playerFacts(
     switch (topic) {
       case "minutes": {
         const apps = seasonStatOf(state, player.id)?.apps ?? 0;
+        /**
+         * **그가 아는 것은 시즌 출전 수만이 아니다** (people.md §5·§5-2) — 자기가
+         * 어떤 자리로 왔는지(계약 지위)와 최근 창에서 몇 번 섰는지가 그 불만의
+         * 근거다. 이 셋이 없으면 백업의 침묵과 핵심의 불만이 같은 카드로 선다.
+         */
+        const read = startsInWindow(state, player);
         return {
           kind: "minutes",
-          data: { values: { days, apps } },
+          data: {
+            values: { days, apps, starts: read.starts, played: read.played },
+            tags: [squadStatusOf(state, player)],
+          },
           about: player.id,
           sharp,
         };
@@ -482,16 +511,26 @@ function playerFacts(
           sharp,
         };
       }
-      default:
+      default: {
+        /**
+         * 어긴 약속은 사유 코드만으로 서지 않는다 (people.md §5-2) — **무엇을**
+         * 약속했고 그것이 **며칠 전**이었나가 그 선수가 아는 사실이다. 장부에서
+         * 마지막으로 깨진 줄을 읽는다: 그 자리를 연 것이 그 줄이기 때문이다.
+         * 다른 사유의 카드에는 붙지 않는다.
+         */
+        const broken = topic === "promise" ? lastBrokenPromise(state, player.id) : null;
         return {
           kind: "unhappy",
           data: {
-            values: { days },
-            tags: issue.reason ? ["grievance", issue.reason] : ["grievance"],
+            values: { days, ...(broken ? { promised: diffDays(broken.madeOn, state.date) } : {}) },
+            tags: issue.reason
+              ? ["grievance", issue.reason, ...(broken ? [broken.kind] : [])]
+              : ["grievance"],
           },
           about: player.id,
           sharp,
         };
+      }
     }
   })();
   return [
@@ -1023,7 +1062,15 @@ function effectSuffix(effect: ApproachEffect): string {
  */
 export function respondToApproach(
   state: GameState,
-  input: { stance?: PressStance; decline?: boolean },
+  input: {
+    stance?: PressStance;
+    decline?: boolean;
+    /**
+     * 감독이 이 자리에서 한 약속 — **당사자에게만이다** (people.md §5-2).
+     * 주장·구단주가 온 자리에는 약속을 걸 사람이 없다.
+     */
+    promise?: PromiseInput;
+  },
 ): SkillResult {
   const approach = pendingApproach(state);
   if (!approach) return { ok: false, message: "지금 답할 자리가 없습니다" };
@@ -1038,6 +1085,21 @@ export function respondToApproach(
   const effect = closeApproach(state, approach, stance);
   approach.status = stance === null ? "declined" : "answered";
 
+  /**
+   * ── 약속은 **답을 닫은 뒤에** 장부에 선다 ── (people.md §5-2)
+   *
+   * 자리의 `about`이 그 선수인 곳에서만 열린다 — 대리로 온 에이전트의 자리도
+   * 당사자를 가리키므로 받지만, 주장(`about: null`)·구단주 자리에는 약속을 걸
+   * 사람이 없다. 갈래가 대상에 맞는지는 `openPromise`가 다시 본다.
+   */
+  const promised = input.promise
+    ? promisePiece(
+        approach.about
+          ? openPromise(state, approach.about, input.promise.kind, input.promise.days)
+          : { ok: false, message: "약속은 당사자에게만 할 수 있습니다" },
+      )
+    : null;
+
   const label = stance === null ? "돌려보냄" : STANCE_KO[stance];
   pushNarrative(
     state,
@@ -1048,15 +1110,18 @@ export function respondToApproach(
   return {
     ok: true,
     tone: net >= 0 ? ("good" as const) : ("bad" as const),
-    message: `${approach.speakerId} 응대(${label})${effectSuffix(effect)}`,
+    message: `${approach.speakerId} 응대(${label})${effectSuffix(effect)}${promised ? promised.text : ""}`,
     brief: {
       head: `${approach.speakerId} 응대(${label})`,
-      items: deltaItems([
-        ["보드", effect.board],
-        ["선수단", effect.squad],
-        effect.targetName ? [`${effect.targetName} 사기`, effect.target] : null,
-        ["팀 사기", effect.team],
-      ]),
+      items: [
+        ...deltaItems([
+          ["보드", effect.board],
+          ["선수단", effect.squad],
+          effect.targetName ? [`${effect.targetName} 사기`, effect.target] : null,
+          ["팀 사기", effect.team],
+        ]),
+        ...(promised ? [promised.item] : []),
+      ],
     },
   };
 }

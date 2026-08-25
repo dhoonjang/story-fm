@@ -1,4 +1,4 @@
-import { MANAGER_ATTRIBUTE_KO, registrationBlockText } from "@story-fm/domain";
+import { MANAGER_ATTRIBUTE_KO, PROMISE_KIND_KO, registrationBlockText } from "@story-fm/domain";
 import type {
   BoardPoint,
   GamePlayer,
@@ -6,6 +6,7 @@ import type {
   DrilledTactics,
   MarketCard,
   Player,
+  PromiseKind,
   ReserveTrainingPolicy,
   ScheduleEntry,
   Slot,
@@ -77,6 +78,8 @@ import {
   dropDeferredScout,
 } from "../squad/scouting";
 import { creditSettling, settlingAnchor, settlingOf } from "../squad/settling";
+// 면담에서 한 약속은 장부에 선다 (people.md §5-2 · career.md §2)
+import { openPromise, type PromiseOpened } from "../squad/promises";
 import { dressingRoomFactor, dressingRoomVoice, leaderGroupOf } from "../squad/hierarchy";
 import {
   groupOf,
@@ -732,6 +735,40 @@ export function applyTeamTalk(
   };
 }
 
+/** 감독이 그 자리에서 한 약속 — 갈래와, 감독이 좁힌 기한 */
+export interface PromiseInput {
+  kind: PromiseKind;
+  /** 기한(일) — 생략하면 갈래의 기본 기한 (`transfer`는 다음 창 마감) */
+  days?: number;
+}
+
+/** 장부에 선 약속 한 조각 — 감독이 읽는 줄과 말풍선 항목 */
+interface PromisePiece {
+  text: string;
+  item: SkillBriefItem;
+}
+
+/**
+ * 면담·응대가 연 약속을 **한 조각으로** 옮긴다 (people.md §5-2).
+ *
+ * ⚠️ **반려도 조각이 된다.** 감독은 자기가 한 말이 장부에 섰는지를 알아야 하고,
+ * 반려는 그 대화를 무르지 않는다 — 사기·정착·압력은 이미 셈이 끝난 뒤다.
+ * 두 자리가 같은 함수를 부르는 것은 같은 말이 자리마다 다른 줄로 서지 않게 하기
+ * 위해서다.
+ */
+export function promisePiece(opened: PromiseOpened): PromisePiece {
+  const promise = opened.promise;
+  if (opened.ok && promise) {
+    const label = PROMISE_KIND_KO[promise.kind];
+    return {
+      text: ` · ${label} 약속 (${promise.dueOn}까지)`,
+      item: item({ label: "약속", text: label, note: `${promise.dueOn}까지` }),
+    };
+  }
+  const why = opened.message ?? "약속을 세울 수 없습니다";
+  return { text: ` · 약속 반려 — ${why}`, item: item({ label: "약속", text: "반려", note: why }) };
+}
+
 export function applyTalkToPlayer(
   state: GameState,
   input: {
@@ -745,6 +782,11 @@ export function applyTalkToPlayer(
     settling?: number;
     /** 무게의 근거 한 줄 — 정착 원장에 남는다 */
     settlingNote?: string;
+    /**
+     * 감독이 이 면담에서 한 약속 — **장부에 선다** (career.md §2 · people.md §5-2).
+     * 반려돼도 면담 자체는 그대로 성립한다.
+     */
+    promise?: PromiseInput;
   },
 ): SkillResult {
   const pick = pickOurPlayer(state, input.playerId);
@@ -801,6 +843,17 @@ export function applyTalkToPlayer(
         });
   const settling = settlingCredit !== 0 ? settlingOf(state, player.id) : null;
 
+  /**
+   * ── 약속은 **판정이 끝난 뒤에** 장부에 선다 ── (career.md §2 · people.md §5-2)
+   *
+   * ⚠️ 순서가 뒤집히면 방금 연 약속이 면담의 불만 해소에 쓸려 나갈 여지가 생긴다.
+   * 지금 지우는 것은 `state.issues`뿐이라 실제로는 닿지 않지만, 그 안전이 지워지는
+   * 자리와 열리는 자리의 **간격**에 기대고 있으므로 순서를 명시적으로 둔다.
+   */
+  const promised = input.promise
+    ? promisePiece(openPromise(state, player.id, input.promise.kind, input.promise.days))
+    : null;
+
   const xpMsg =
     base > 0
       ? grantManagerXP(state, "leadership", TALK_XP_PER_INTENSITY * input.intensity)
@@ -817,6 +870,7 @@ export function applyTalkToPlayer(
       `${player.name} 사기 ${bounded >= 0 ? "+" : ""}${bounded}` +
       (hadIssue ? " · 불만 해소" : "") +
       (settling ? ` · 적응 ${Math.round(settling.progress * 100)}%` : "") +
+      (promised ? promised.text : "") +
       (xpMsg ? ` · ${xpMsg}` : ""),
     brief: {
       head: `${player.name} 면담`,
@@ -826,6 +880,7 @@ export function applyTalkToPlayer(
         ...(settling
           ? [item({ label: "적응", text: `${Math.round(settling.progress * 100)}%` })]
           : []),
+        ...(promised ? [promised.item] : []),
       ],
     },
   };

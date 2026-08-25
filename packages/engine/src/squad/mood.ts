@@ -6,6 +6,7 @@ import {
   milestonePhrase,
   MOOD_NOTE_MAX,
   PLAYER_ARCHETYPE_LABEL,
+  SQUAD_STATUS_KO,
 } from "@story-fm/domain";
 import type {
   GamePlayer,
@@ -14,6 +15,7 @@ import type {
   MilestoneCode,
   PlayerArchetypeKey,
   PlayerIssueReason,
+  SquadStatus,
 } from "@story-fm/domain";
 import { diffDays } from "../competition/calendar";
 import { milestonesOf } from "./career";
@@ -22,6 +24,8 @@ import { settlingOf } from "./settling";
 import { playerArchetypeOf } from "../world/player-persona";
 import { leaderRoleOf } from "./hierarchy";
 import { demotionPatienceDaysOf } from "./demotion";
+// 출전 불만이 어느 기대에 못 미친 것인가 — 약속 판정과 같은 자다 (people.md §5-2)
+import { squadStatusOf, startsInWindow } from "./promises";
 import {
   activeContract,
   activeSuspension,
@@ -97,6 +101,18 @@ export type MoodFact =
        * 잇는다. ⚠️ 문장이 아니라 코드다 — 라벨은 화면·GM이 붙인다.
        */
       archetype: PlayerArchetypeKey;
+      /**
+       * **`minutes` 불만에만 실린다** — 그 불만을 세운 계약 지위와, 그것을 재는
+       * 창의 실제 수치다 (people.md §5·§5-2). 이 셋이 없으면 "출전 기회 불만"이
+       * 어느 기대에 대해 모자란 것인지가 어디에도 서지 않아, 백업의 침묵과
+       * 핵심의 불만이 같은 줄로 읽힌다.
+       *
+       * ⚠️ 다른 사유는 채우지 않는다 — 약속 파기는 사유 코드만으로 충분하고,
+       * 없는 수치를 0으로 채우면 읽는 쪽이 그것을 사실로 읽는다.
+       */
+      status?: SquadStatus;
+      starts?: number;
+      played?: number;
     }
   /** 감독이 2군으로 내린 선수만 — 시드가 2군에 세워 둔 선수에겐 서지 않는다 */
   | {
@@ -246,6 +262,14 @@ function grievanceOf(
 ): Extract<MoodFact, { cause: "grievance" }> | null {
   const issue = state.issues.find((i) => i.gamePlayerId === player.id);
   if (!issue) return null;
+  /**
+   * 출전 불만만 지위와 창의 수치를 든다 — 그 불만을 세운 자가 그것이기 때문이다
+   * (people.md §5). 다른 사유는 자기 수치를 이미 `count`나 다른 카드가 든다.
+   */
+  const read =
+    issue.reason === "minutes"
+      ? { status: squadStatusOf(state, player), ...startsInWindow(state, player) }
+      : null;
   return {
     cause: "grievance",
     reason: issue.reason ?? null,
@@ -253,6 +277,7 @@ function grievanceOf(
     days: Math.max(0, diffDays(issue.since, state.date)),
     count: issue.count ?? null,
     archetype: playerArchetypeOf(state.seed, player),
+    ...(read ? { status: read.status, starts: read.starts, played: read.played } : {}),
   };
 }
 
@@ -481,7 +506,11 @@ function factLine(fact: MoodFact): string {
     case "grievance":
       return (
         `불만 ${issueReasonText(fact) ?? "사유 없음"} · ${fact.days}일째` +
-        ` · ${PLAYER_ARCHETYPE_LABEL[fact.archetype]}`
+        ` · ${PLAYER_ARCHETYPE_LABEL[fact.archetype]}` +
+        // 지위와 창의 수치는 있을 때만 — 출전 불만에만 실린다 (people.md §5)
+        (fact.status === undefined
+          ? ""
+          : ` · ${SQUAD_STATUS_KO[fact.status]} 지위 · 최근 ${fact.played ?? 0}경기 선발 ${fact.starts ?? 0}회`)
       );
     case "demotion":
       return (
