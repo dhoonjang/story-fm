@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import type { OfficeViews } from "@story-fm/engine";
 import { scheduleRowOf, type CalRowIcon, type CalScheduleRow } from "@/lib/calendar-detail";
+import { MatchReportPanel } from "./match-report";
+import { IconChevron } from "../icons";
 
 // ── 달력 (일정 축: 경기·훈련·이적창 + 일자 상세) ─────────────
 function isoOf(d: Date): string {
@@ -113,29 +115,56 @@ const VENUE_KO = { home: "홈", away: "원정", neutral: "중립" } as const;
  * 아이콘은 일지와 같은 체계, 대회 칩은 달력 칸의 경기 칩(`cal-fx-comp`)과 같은 색,
  * 승패는 달력 칸과 같은 세 가지 색이다. 한 패널이 세 가지 말을 하지 않도록.
  */
-function ScheduleRow({ row }: { row: CalScheduleRow }) {
+function ScheduleRow({ row, gameId }: { row: CalScheduleRow; gameId: string }) {
+  /**
+   * 리포트는 접혀 있다 — 한 날에 여러 줄이 서는데 열한 명짜리 표가 기본으로
+   * 펼쳐져 있으면 상세 패널이 그것 하나가 된다. 열 때 한 번 받아 오고
+   * (`MatchReportPanel`), 받은 것은 다시 요청하지 않는다.
+   */
+  const [open, setOpen] = useState(false);
   return (
-    <div
-      className={`cal-sched k-${row.icon}${row.pending ? " pending" : ""}${row.next ? " next" : ""}`}
-      data-testid={`cal-sched-${row.icon}`}
-    >
-      <span className="cal-sched-time">{row.time}</span>
-      <EventIcon kind={row.icon} />
-      <div className="cal-sched-body">
-        {row.competition && <span className="cal-sched-comp">{row.competition}</span>}
-        {row.stage && <span className="cal-sched-stage">{row.stage}</span>}
-        {row.venue && <span className={`cal-sched-venue ${row.venue}`}>{VENUE_KO[row.venue]}</span>}
-        <span className="cal-sched-name">{row.name}</span>
-        {row.tags.map((t) => (
-          <span className="cal-sched-tag" key={t}>
-            {t}
-          </span>
-        ))}
-        {row.result && (
-          <span className={`cal-detail-result${row.win ? ` r-${row.win}` : ""}`}>{row.result}</span>
-        )}
+    <div className="cal-sched-wrap">
+      <div
+        className={`cal-sched k-${row.icon}${row.pending ? " pending" : ""}${row.next ? " next" : ""}`}
+        data-testid={`cal-sched-${row.icon}`}
+      >
+        <span className="cal-sched-time">{row.time}</span>
+        <EventIcon kind={row.icon} />
+        <div className="cal-sched-body">
+          {row.competition && <span className="cal-sched-comp">{row.competition}</span>}
+          {row.stage && <span className="cal-sched-stage">{row.stage}</span>}
+          {row.venue && (
+            <span className={`cal-sched-venue ${row.venue}`}>{VENUE_KO[row.venue]}</span>
+          )}
+          <span className="cal-sched-name">{row.name}</span>
+          {row.tags.map((t) => (
+            <span className="cal-sched-tag" key={t}>
+              {t}
+            </span>
+          ))}
+          {row.result && (
+            <span className={`cal-detail-result${row.win ? ` r-${row.win}` : ""}`}>
+              {row.result}
+            </span>
+          )}
+        </div>
+        {row.note && <div className="cal-sched-note">{row.note}</div>}
       </div>
-      {row.note && <div className="cal-sched-note">{row.note}</div>}
+      {row.matchId !== null && (
+        <>
+          <button
+            className={`cal-report-btn${open ? " open" : ""}`}
+            type="button"
+            aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
+            data-testid={`cal-report-${row.matchId}`}
+          >
+            <span>경기 리포트</span>
+            <IconChevron size={12} />
+          </button>
+          {open && <MatchReportPanel gameId={gameId} matchId={row.matchId} />}
+        </>
+      )}
     </div>
   );
 }
@@ -167,7 +196,13 @@ function EventLine({ event }: { event: CalEvent }) {
   );
 }
 
-export function CalendarView({ calendar }: { calendar: OfficeViews["calendar"] }) {
+export function CalendarView({
+  calendar,
+  gameId,
+}: {
+  calendar: OfficeViews["calendar"];
+  gameId: string;
+}) {
   const [selected, setSelected] = useState<string | null>(null);
 
   // 날짜 → 일정 엔트리 목록 (한 날에 여러 개 가능: 훈련 오전/오후 + 경기)
@@ -244,7 +279,7 @@ export function CalendarView({ calendar }: { calendar: OfficeViews["calendar"] }
         <div className="cal-detail-block">
           <div className="cal-detail-title">일정</div>
           {detail.entries.map((e) => (
-            <ScheduleRow row={scheduleRowOf(e)} key={e.id} />
+            <ScheduleRow row={scheduleRowOf(e)} gameId={gameId} key={e.id} />
           ))}
         </div>
       )}

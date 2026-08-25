@@ -39,6 +39,7 @@ const match = entry({
   win: "W",
   isNext: true,
   match: {
+    matchId: "m-liv",
     competition: null,
     stage: "R4",
     opponent: "LIV",
