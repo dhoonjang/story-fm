@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { ageOf, isReserveMatch, PLAYER_ARCHETYPE_TRAITS } from "@story-fm/domain";
 import {
+  LOAN_BENCH_RUN_ALERT,
   leagueOfTeamIn,
   loanPlayer,
   onLoanFromUs,
   playerArchetypeOf,
-  recallLoan,
   reservePlayers,
   seasonStatOf,
   setDevelopmentFocus,
@@ -56,10 +56,10 @@ describe("한 시즌의 유스 육성", () => {
      * **임대 팔** — 집중 육성과 겹치지 않는 U21 몇을 같은 리그의 다른 클럽으로
      * 보낸다(수준 계수 1.0). 창은 프리시즌 첫날(7/1)에 이미 열려 있다.
      *
-     * 받는 쪽은 **1군이 가장 약한 클럽부터** 훑는다 — 감독이 할 법한 선택이고, 뛸
-     * 자리가 없는 곳으로 보내면 재는 것이 배율이 아니라 그 구단의 명단이 된다.
-     * 1군이 차 있어 그쪽 2군으로 들어가면(`arrivingSquadLevel`) 1군 경기를 아예 못
-     * 뛰므로 되불러 다음 구단을 본다.
+     * 받는 쪽은 **1군이 가장 약한 클럽부터, 한 구단에 한 명씩** 훑는다. 창
+     * (`LOAN_ROTATION_OVR_DROP`)이 약체일수록 넓으므로 이 순서가 곧 "뛸 수 있는
+     * 곳부터"이고, 한 명씩인 것은 감독이 할 법한 선택이기도 하다 — 다섯을 한 구단에
+     * 몰면 재는 것이 임대의 문이 아니라 그 구단 명단의 혼잡이 된다.
      */
     const ourLeague = leagueOfTeamIn(state, state.userTeamId);
     const meanOverall = (squad: readonly { attributes: { overall: number } }[]) =>
@@ -90,21 +90,18 @@ describe("한 시즌의 유스 육성", () => {
       .filter((_, index) => index % 2 === 0)
       .slice(0, LOAN_ARM_SIZE);
     const loanedIds: string[] = [];
+    let nextHost = 0;
     for (const player of loanCandidates) {
       const rejected: string[] = [];
-      for (const teamId of hosts) {
+      while (nextHost < hosts.length) {
+        const teamId = hosts[nextHost]!;
+        nextHost += 1;
         const sent = loanPlayer(state, { playerId: player.id, teamId });
-        if (!sent.ok) {
-          rejected.push(`${teamShortNameIn(state, teamId)}: ${sent.message}`);
-          continue;
-        }
-        // 그쪽 1군에 못 들면 1군 경기를 못 뛴다 — 이 팔이 재려는 것이 아니다
-        if (squadLevelOf(player) === "first") {
+        if (sent.ok) {
           loanedIds.push(player.id);
           break;
         }
-        rejected.push(`${teamShortNameIn(state, teamId)}: 1군이 차 그쪽 2군으로 들어갔다`);
-        recallLoan(state, { playerId: player.id });
+        rejected.push(`${teamShortNameIn(state, teamId)}: ${sent.message}`);
       }
       if (!loanedIds.includes(player.id)) {
         console.log(`임대 반려 — ${player.name}: ${rejected.slice(0, 3).join(" / ")}`);
@@ -158,17 +155,46 @@ describe("한 시즌의 유스 육성", () => {
       return player !== undefined && onLoanFromUs(state, player);
     });
     const loanGrowth = growthOf(stillOnLoan);
-    /** 임대처에서 실제로 뛴 경기 — 격차의 원인이 배율인지 출전인지 가른다 */
-    const loanApps = stillOnLoan.map((id) => {
+    /**
+     * 임대처에서 실제로 뛴 경기와, **그 구단 경기에서 가장 길게 연속으로 명단 밖이던
+     * 구간**. 앞 줄은 성장 배율에 곱할 분(分)이 있는가를 재고, 뒷줄은 리포트의
+     * `no-minutes`(`LOAN_BENCH_RUN_ALERT` 4)가 배경음인지 사건인지를 가른다
+     * (season.md §2 임대).
+     */
+    const hostMatchesOf = (teamId: string) =>
+      state.matches
+        .filter(
+          (m) =>
+            !isReserveMatch(m) &&
+            m.result !== null &&
+            (m.homeTeamId === teamId || m.awayTeamId === teamId),
+        )
+        .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    const loanApps: number[] = [];
+    const loanBenchRuns: number[] = [];
+    for (const id of stillOnLoan) {
       const player = state.players.find((p) => p.id === id)!;
-      return state.matches.filter(
-        (m) =>
-          !isReserveMatch(m) &&
-          m.result !== null &&
-          (m.homeTeamId === player.teamId || m.awayTeamId === player.teamId) &&
-          [...(m.result.homeLineup ?? []), ...(m.result.awayLineup ?? [])].includes(id),
-      ).length;
-    });
+      let apps = 0;
+      let run = 0;
+      let longest = 0;
+      for (const match of hostMatchesOf(player.teamId)) {
+        const lineup =
+          match.homeTeamId === player.teamId ? match.result?.homeLineup : match.result?.awayLineup;
+        if (lineup?.includes(id)) {
+          apps += 1;
+          run = 0;
+        } else {
+          run += 1;
+          longest = Math.max(longest, run);
+        }
+      }
+      loanApps.push(apps);
+      loanBenchRuns.push(longest);
+      console.log(
+        `임대 ${player.name}(${player.attributes.overall}) → ${teamShortNameIn(state, player.teamId)}: ` +
+          `${apps}경기 · 최장 미출전 ${longest}`,
+      );
+    }
 
     /**
      * **직업의식이 세계 규모에서 실제로 갈리는가** (people.md §6).
@@ -197,6 +223,9 @@ describe("한 시즌의 유스 육성", () => {
       "임대 표본": stillOnLoan.length,
       "임대 U21 성장": loanGrowth,
       "임대처 평균 출전": mean(loanApps),
+      "경보 전에 뛴 임대": stillOnLoan.length
+        ? loanBenchRuns.filter((run) => run < LOAN_BENCH_RUN_ALERT).length / stillOnLoan.length
+        : 0,
       "임대 격차": loanGrowth - baselineGrowth,
       "성실한 U21 표본": diligent.length,
       "게으른 U21 표본": lazy.length,

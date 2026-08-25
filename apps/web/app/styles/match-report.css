@@ -1,0 +1,432 @@
+/**
+ * ── 경기 리포트 — 끝난 경기 한 장 (match.md §8) ───────────────
+ *
+ * 한 컴포넌트가 **폭이 크게 다른 두 자리**에 선다: 달력 상세(달 카드 안, 340px
+ * 언저리)와 종료 카드(680px). 그래서 여기 있는 것은 전부 폭을 못 박지 않고
+ * 흐르며, 폭이 필요한 것은 선수 표 하나뿐이라 그것만 가로로 스크롤한다.
+ */
+.mr {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  font-size: var(--fs-sm);
+}
+
+/* 머리 — 대회·날짜 / 스코어 / 표식(연장·승부차기·MOTM) */
+.mr-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  text-align: center;
+}
+.mr-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.mr-label em {
+  font-style: normal;
+  color: var(--dim);
+}
+.mr-score {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: baseline;
+  gap: var(--sp-3);
+  width: 100%;
+}
+.mr-score b {
+  min-width: 0;
+  color: var(--muted);
+  font-weight: 600;
+}
+.mr-score b:first-of-type {
+  text-align: right;
+}
+.mr-score b:last-of-type {
+  text-align: left;
+}
+/* 우리 팀은 밝다 — 스코어 어느 쪽이 우리인지가 색 하나로 갈린다 */
+.mr-score b.ours {
+  color: var(--text);
+}
+.mr-score-num {
+  font-size: var(--fs-xl);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.mr-marks {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-2);
+}
+/* 최우수 선수 — 금색은 이 화면에서 하나뿐인 자리다 */
+.mr-motm {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 1px 8px;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  border-radius: var(--r-pill);
+  background: rgba(251, 191, 36, 0.08);
+  color: var(--gold);
+  font-size: var(--fs-2xs);
+}
+.mr-motm b {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 작은 꼬리표 — 연장·승부차기·세트피스 갈래가 같은 모양으로 선다 */
+.mr-tag {
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-xs);
+  color: var(--muted);
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+}
+
+.mr-section {
+  border-top: 1px solid var(--border-soft);
+  padding-top: var(--sp-3);
+}
+.mr-section h4 {
+  margin: 0 0 var(--sp-2);
+  color: var(--dim);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+/* 값이 없거나 아직 오지 않은 자리 — 빈 칸으로 두면 고장으로 읽힌다 */
+.mr-blank {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--sp-2) 0;
+  color: var(--dim);
+  font-size: var(--fs-xs);
+}
+.mr-skel {
+  height: 10px;
+  width: 100%;
+}
+.mr-skel.short {
+  width: 55%;
+}
+
+/* ── 팀 스탯 대조 ──────────────────────────────────────────
+   숫자 둘과 이름 하나가 한 줄, 그 아래 막대가 몫을 그린다. 막대가 없으면
+   두 숫자를 눈으로 나눠야 한다 — 18 대 3이 한눈에 읽히지 않는다 */
+.mr-stats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.mr-stat {
+  display: grid;
+  grid-template-columns: 3.5rem 1fr 3.5rem;
+  align-items: baseline;
+  gap: 2px var(--sp-2);
+}
+.mr-stat b {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.mr-stat b:first-of-type {
+  text-align: right;
+}
+.mr-stat b.ours {
+  color: var(--text);
+}
+.mr-stat-label {
+  text-align: center;
+  color: var(--dim);
+  font-size: var(--fs-2xs);
+}
+.mr-stat-bar {
+  grid-column: 1 / -1;
+  display: block;
+  height: 3px;
+  border-radius: var(--r-pill);
+  /* 오른쪽(원정)의 몫은 바탕이 그린다 — 두 막대를 겹치면 반올림 틈이 생긴다 */
+  background: var(--border);
+  overflow: hidden;
+}
+.mr-stat-bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent-2);
+  opacity: 0.75;
+}
+
+/* ── 타임라인 ─────────────────────────────────────────────
+   분 | 갈래 | 내용. 국면 표식은 줄이 아니라 칸막이라 가로선으로 눕는다 */
+.mr-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.mr-ev {
+  display: grid;
+  grid-template-columns: 2.4rem 2.6rem minmax(0, 1fr);
+  align-items: baseline;
+  gap: 2px var(--sp-2);
+  padding: 1px 0;
+  color: var(--muted);
+}
+.mr-ev-min {
+  text-align: right;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-xs);
+}
+.mr-ev-kind {
+  color: var(--dim);
+  font-size: var(--fs-2xs);
+}
+.mr-ev-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 6px;
+  min-width: 0;
+}
+.mr-ev-who {
+  color: inherit;
+}
+/* 우리 편 사건은 밝고, 상대 것은 잠긴다 — 색만으로 어느 편인지 갈린다 */
+.mr-ev.ours {
+  color: var(--text);
+}
+.mr-ev.ours .mr-ev-kind {
+  color: var(--muted);
+}
+.mr-ev.k-goal .mr-ev-kind {
+  color: var(--accent);
+  font-weight: 700;
+}
+.mr-ev.k-goal .mr-ev-who {
+  font-weight: 700;
+}
+.mr-ev.k-red_card .mr-ev-kind {
+  color: var(--danger);
+}
+.mr-ev.k-yellow_card .mr-ev-kind {
+  color: rgb(var(--pos-gk));
+}
+.mr-ev-assist,
+.mr-ev-why {
+  font-style: normal;
+  color: var(--dim);
+  font-size: var(--fs-2xs);
+}
+.mr-xg {
+  color: var(--accent-2);
+  font-size: var(--fs-2xs);
+  font-variant-numeric: tabular-nums;
+}
+/* 하프타임·연장 개시·종료 — 시간이 갈리는 자리 */
+.mr-break {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: var(--sp-1) 0;
+  color: var(--dim);
+  font-size: var(--fs-3xs);
+  letter-spacing: 0.08em;
+}
+.mr-break::before,
+.mr-break::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border-soft);
+}
+
+/* ── 승부차기 — 찬 순서 그대로 (경기 화면의 킥 줄과 같은 결) ── */
+.mr-kicks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.mr-kick i,
+.mr-kick em {
+  font-style: normal;
+  color: var(--dim);
+}
+.mr-kick i {
+  margin-right: 3px;
+}
+.mr-kick em {
+  margin-left: 3px;
+}
+.mr-kick.ours {
+  color: var(--text);
+}
+.mr-kick.o-scored em {
+  color: var(--accent);
+}
+.mr-kick.o-saved em,
+.mr-kick.o-missed em {
+  color: var(--danger);
+}
+
+/* ── 선수 기록 ────────────────────────────────────────────
+   열넷은 달 카드 폭에 들어가지 않는다 — 표만 가로로 흐르고 나머지는 접힌다 */
+.mr-table-wrap {
+  overflow-x: auto;
+  margin-bottom: var(--sp-2);
+}
+.mr-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-2xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.mr-table th,
+.mr-table td {
+  padding: 3px 5px;
+  text-align: right;
+}
+.mr-table thead th {
+  color: var(--dim);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+.mr-table tbody td {
+  color: var(--muted);
+  border-bottom: 1px solid var(--border-soft);
+}
+.mr-table .mr-num {
+  width: 1.8rem;
+  text-align: right;
+  color: var(--dim);
+}
+.mr-table .mr-who {
+  text-align: left;
+  color: var(--text);
+  white-space: nowrap;
+}
+.mr-table thead .mr-who {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.mr-table thead .mr-who .ours {
+  color: var(--text);
+}
+/* 교체 투입 — 이름 앞의 작은 삼각. "교체"라 적으면 이름이 한 칸 밀린다 */
+.mr-in {
+  margin-right: 3px;
+  color: var(--accent);
+  font-size: 7px;
+  vertical-align: middle;
+}
+.mr-zero {
+  color: var(--dim);
+  opacity: 0.5;
+}
+.mr-rating {
+  font-variant-numeric: tabular-nums;
+}
+.mr-rating.t-hot {
+  color: var(--accent);
+}
+.mr-rating.t-good {
+  color: var(--silver);
+}
+.mr-rating.t-flat {
+  color: var(--muted);
+}
+.mr-rating.t-cold {
+  color: var(--danger);
+}
+.mr-cards {
+  white-space: nowrap;
+}
+.mr-card {
+  display: inline-block;
+  width: 5px;
+  height: 8px;
+  border-radius: 1px;
+  vertical-align: middle;
+  margin-left: 2px;
+}
+.mr-card.y {
+  background: rgb(var(--pos-gk));
+}
+.mr-card.r {
+  background: var(--danger);
+}
+/* 최우수 선수의 줄 — 금색 왼쪽 띠 하나. 배경까지 칠하면 표가 두 색이 된다 */
+.mr-table tbody tr.motm .mr-num {
+  box-shadow: inset 2px 0 0 var(--gold-soft);
+}
+/**
+ * 평점 한 줄 근거 — 결산이 선수마다 써 두고도 아무도 못 읽던 줄이다.
+ * 기록 줄 **아래**에 통째로 눕는다: 이름 칸에 넣으면 표가 이름 열 하나로 늘어난다.
+ */
+.mr-table tbody tr.mr-note td {
+  padding: 0 5px 4px 2.6rem;
+  text-align: left;
+  white-space: normal;
+  color: var(--dim);
+  font-size: var(--fs-2xs);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+/* ── 달력 상세의 접이식 ──────────────────────────────────── */
+.cal-sched-wrap {
+  display: flex;
+  flex-direction: column;
+}
+/* 읽는 줄(일정)과 누르는 것(리포트)은 생김새로 갈린다 — 이쪽만 테두리를 갖는다 */
+.cal-report-btn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 3px 0 0 40px;
+  padding: 1px 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  color: var(--muted);
+  font-size: var(--fs-2xs);
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    color var(--ease),
+    border-color var(--ease);
+}
+.cal-report-btn:hover {
+  color: var(--text);
+  border-color: var(--muted);
+}
+.cal-report-btn svg {
+  transition: transform var(--ease);
+}
+.cal-report-btn.open svg {
+  transform: rotate(180deg);
+}
+/* 펼친 리포트 — 상세 패널 안에서 한 단 더 들어간 자리다 */
+.cal-sched-wrap .mr,
+.cal-sched-wrap .mr-blank {
+  margin: var(--sp-2) 0 var(--sp-3);
+  padding-left: var(--sp-2);
+  border-left: 2px solid var(--border);
+}
+
+/* 종료 카드 안 — 확인 버튼과 리포트가 붙지 않게 한 칸 (카드 폭은 shell.css) */
+.fulltime-card .mr {
+  padding-bottom: var(--sp-2);
+}

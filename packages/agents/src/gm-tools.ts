@@ -29,6 +29,7 @@ import {
   leagueView,
   LOAN_FEE_RATE,
   marketValueOf,
+  matchReport,
   NARRATIVE_EXPENSE_CATEGORIES,
   NARRATIVE_FINANCE_MAX_AMOUNT,
   NARRATIVE_FINANCE_MIN_AMOUNT,
@@ -761,6 +762,19 @@ export function buildGmTools(
               ...(rest.count === undefined ? {} : { limit: rest.count }),
             })
           : leagueView(state, { view, ...rest }),
+    ),
+    read(
+      "get_match_report",
+      descriptions.get_match_report,
+      z
+        .object({
+          matchId: z.string().min(1),
+          opponent: z.string().min(1),
+          competition: z.string().min(1),
+          date: dateArg,
+        })
+        .partial(),
+      (input) => matchReport(state, input),
     ),
     wrap("scout_player", descriptions.scout_player, z.object({ playerId: playerRef }), (input) =>
       scoutPlayer(state, input.playerId),

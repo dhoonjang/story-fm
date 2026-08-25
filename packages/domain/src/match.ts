@@ -323,6 +323,44 @@ export type MatchStatLine = z.infer<typeof MatchStatLineSchema>;
  * 연장 두 하프가 뒤에 붙어도 **옛 세이브는 그대로 읽힌다**: enum에 값을 더하는 것은
  * 이미 저장된 값의 유효성을 건드리지 않는다 (SAVE_VERSION 유지).
  */
+/** 정규 경기의 길이 — 출전 시간의 분모다 */
+export const FULL_TIME_MINUTES = 90;
+/** 연장까지 간 경기의 길이 */
+export const EXTRA_TIME_FULL_MINUTES = 120;
+
+/**
+ * 한 경기의 **출전 시간** — 사건 목록이 원본이다.
+ *
+ * 교체의 [나가는 선수, 들어오는 선수] 짝과 **퇴장**이 같은 자격으로 시간을 끊는다 —
+ * 퇴장을 세지 않으면 20′에 나간 선수도 90분으로 남는다.
+ *
+ * 규칙이 여기 한 벌만 있는 이유는 읽는 자리가 둘이기 때문이다: 진행 중인 장부를
+ * 읽는 평점 브리프(`match-flow.ts`)와 끝난 경기의 결과를 읽는 리포트·MOTM
+ * (`views.ts`). 두 벌로 두면 같은 선수의 출전 시간이 화면과 판정에서 갈린다.
+ */
+export function matchMinutesOf(
+  events: readonly MatchEvent[],
+  aet: boolean,
+): (playerId: string) => number {
+  const full = aet ? EXTRA_TIME_FULL_MINUTES : FULL_TIME_MINUTES;
+  const wentOff = new Map<string, number>();
+  const cameOn = new Map<string, number>();
+  for (const e of events) {
+    const [first, second] = e.actors;
+    if (e.type === "substitution") {
+      if (first) wentOff.set(first, Math.min(wentOff.get(first) ?? e.minute, e.minute));
+      if (second) cameOn.set(second, e.minute);
+    } else if (e.type === "red_card" && first) {
+      wentOff.set(first, Math.min(wentOff.get(first) ?? e.minute, e.minute));
+    }
+  }
+  return (playerId) => {
+    const from = Math.min(cameOn.get(playerId) ?? 0, full);
+    const to = Math.min(wentOff.get(playerId) ?? full, full);
+    return Math.max(0, to - from);
+  };
+}
+
 export const MatchPhaseSchema = z.enum([
   "first_half",
   "second_half",

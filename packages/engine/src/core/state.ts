@@ -73,6 +73,7 @@ import {
   ageOf,
   bestOverall,
   canRegister,
+  isReserveMatch,
   isUnder21,
   FORMATION_LAYOUTS,
   FORMATION_SLOTS,
@@ -1024,6 +1025,48 @@ export function userPlayers(state: GameState): GamePlayer[] {
  */
 export function onLoanFromUs(state: GameState, player: GamePlayer): boolean {
   return player.loan?.fromTeamId === state.userTeamId;
+}
+
+/**
+ * **빌려 온 임대인가** — 그 팀에게.
+ *
+ * `loan`이 붙어 있는 동안 `teamId`는 언제나 **빌린 구단**이다(→
+ * docs/simulation/transfer.md §2). 그래서 방향을 따로 묻지 않아도 되고, 이 사람은
+ * 자기 `teamId`의 스쿼드에서 임대 자원이다 — 빌린 구단이 그에게 치르는 값(라인업의
+ * 자리)을 `simSquadOf`가 여기서 읽는다 (→ docs/simulation/season.md §2 임대).
+ */
+export function isLoanedIn(player: Pick<GamePlayer, "loan">): boolean {
+  return player.loan !== undefined;
+}
+
+/**
+ * 그 구단의 **1군 경기**에서 연속 몇 번 명단 밖이었나 — 명단에 든 경기가 나오면
+ * 멈춘다.
+ *
+ * 두 자리가 같은 수를 읽는다: 감독에게 가는 임대 리포트(`loanReportOf`의
+ * `benchRun`)와 빌린 구단의 라인업(`simSquadOf`의 연속 미출전 상한). 갈라 두면
+ * 리포트가 "4경기 명단 밖"이라 적은 날 시뮬은 다른 수를 세게 된다.
+ *
+ * 2군 리그 경기는 세지 않는다: 그 대진은 감독 팀만 편성되므로(season.md §2) 상대
+ * 클럽 선수에게는 "1군에서 못 뛰었다"의 반증이 되지 못한다.
+ */
+export function benchRunOf(state: GameState, player: Pick<GamePlayer, "id" | "teamId">): number {
+  const played = state.matches
+    .filter(
+      (m) =>
+        m.result !== null &&
+        !isReserveMatch(m) &&
+        (m.homeTeamId === player.teamId || m.awayTeamId === player.teamId),
+    )
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  let run = 0;
+  for (const match of played) {
+    const lineup =
+      match.homeTeamId === player.teamId ? match.result?.homeLineup : match.result?.awayLineup;
+    if (lineup?.includes(player.id)) break;
+    run += 1;
+  }
+  return run;
 }
 
 /**

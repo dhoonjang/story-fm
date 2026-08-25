@@ -73,10 +73,10 @@ describe("스킬 설명 — 코드가 유일한 원본이다", () => {
       경기: 1,
       이적: 12,
       재정: 6,
-      조회: 7,
+      조회: 8,
     });
-    expect(SKILL_CATALOG.length).toBe(47);
-    expect(SKILL_CATALOG.filter((s) => s.readOnly).length).toBe(8);
+    expect(SKILL_CATALOG.length).toBe(48);
+    expect(SKILL_CATALOG.filter((s) => s.readOnly).length).toBe(9);
   });
 });
 

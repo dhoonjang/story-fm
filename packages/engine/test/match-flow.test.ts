@@ -120,6 +120,47 @@ describe("경기 흐름 (overview §4)", () => {
     expect(Math.max(...conditions) - Math.min(...conditions)).toBeGreaterThan(15);
   });
 
+  /**
+   * **종료 휘슬이 장부를 걷어 가지 않는다** (match.md §4).
+   *
+   * `pendingMatch`가 지워질 때 사건·선수별 기록도 함께 사라지던 자리다. 몇 줄만
+   * 골라 남기면 그 기준이 두 번째 원본이 되므로 **수가 같아야** 한다 — 세우는 것을
+   * 고르는 일은 읽는 쪽(리포트 뷰)의 몫이다.
+   */
+  it("마감은 장부의 사건을 자르지 않는다 — 저장된 사건 수가 원장 사건 수와 같다", () => {
+    const state = atMatchday(42, { afterPreseason: true });
+    const fixture = state.matches.find(
+      (m) =>
+        m.date === state.date &&
+        !m.result &&
+        (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+    );
+    if (!fixture) throw new Error("오늘 경기를 찾지 못했습니다");
+
+    // 결산 **직전**의 원장을 잡아 둔다 — 마감이 지나면 볼 수 없다
+    let ledgerEvents = -1;
+    let ledgerStatIds: string[] = [];
+    playMockMatch(state, (s) => {
+      const ledger = s.pendingMatch?.ledger;
+      if (!ledger) throw new Error("종료 시각에 장부가 없습니다");
+      ledgerEvents = ledger.events.length;
+      ledgerStatIds = Object.keys(ledger.stats ?? {}).sort();
+    });
+    // 국면 표식(하프타임·종료)만 해도 여럿이라 빈 장부로는 시험이 되지 않는다
+    expect(ledgerEvents).toBeGreaterThan(2);
+    expect(ledgerStatIds.length).toBeGreaterThanOrEqual(22);
+
+    const result = state.matches.find((m) => m.id === fixture.id)?.result;
+    if (!result) throw new Error("결과가 남지 않았습니다");
+    expect(result.events?.length).toBe(ledgerEvents);
+    expect(Object.keys(result.playerStats ?? {}).sort()).toEqual(ledgerStatIds);
+
+    // 점유도 함께 건너온다 — 두 몫의 합은 1이다
+    const possession = result.possession;
+    if (!possession) throw new Error("점유가 결과에 남지 않았습니다");
+    expect(possession.home + possession.away).toBeCloseTo(1, 6);
+  });
+
   it("경기 중 전술 변경은 패킷을 재계산한다", () => {
     const state = atMatchday();
     startMatch(state);

@@ -16,6 +16,7 @@ import { Composer } from "./composer";
 import { RailHints, useRailHints } from "./rail-hints";
 import { Loading } from "./loading";
 import { SquadView, CalendarView, FinanceView, CompetitionsView, CareerView } from "./office";
+import { MatchReportPanel } from "./office/match-report";
 import { createLineupSaver, type LineupSaver } from "./lineup-saver";
 import { MatchClock, MatchHeadline, MatchOpponent, MatchOverview } from "./match-view";
 import { StageSplitHandle } from "./stage-split-handle";
@@ -952,8 +953,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
        * 종료 화면 — **휘슬과 평시 사이의 한 걸음.**
        *
        * 곧장 오피스로 돌아가면 90분이 무엇으로 끝났는지 확인할 자리가 없다
-       * (중계는 이미 결과 카드로 접혀 있다). 스코어·득점·잘한 선수·다음 일정까지만
-       * 짧게 보여주고 닫는다 — 자세한 건 대회·달력이 갖는다.
+       * (중계는 이미 결과 카드로 접혀 있다). 달력 상세와 **같은 리포트 한 벌**을
+       * 세운다 — 둘이 각자 접으면 같은 경기가 두 가지로 보인다 (match.md §8).
        */}
       {finished !== null && game.matchLogs[finished] && (
         <div
@@ -968,31 +969,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
               <span className="fulltime-tag" id="fulltime-heading">
                 경기 종료
               </span>
-              <b className="fulltime-score">{game.matchLogs[finished].score}</b>
-              <span className="fulltime-title">{game.matchLogs[finished].title}</span>
             </header>
-            {game.matchLogs[finished].goals.length > 0 && (
-              <section className="fulltime-section">
-                <h3>득점 기록</h3>
-                <div className="fulltime-goals">
-                  {game.matchLogs[finished].goals.map((g, i) => (
-                    <span key={i}>{g}</span>
-                  ))}
-                </div>
-              </section>
-            )}
-            {game.matchLogs[finished].best.length > 0 && (
-              <section className="fulltime-section">
-                <h3>평점 상위</h3>
-                <div className="fulltime-best">
-                  {game.matchLogs[finished].best.map((b) => (
-                    <span key={b.name}>
-                      {b.name} <b>{b.rating.toFixed(1)}</b>
-                    </span>
-                  ))}
-                </div>
-              </section>
-            )}
+            <MatchReportPanel gameId={gameId} matchId={finished} />
             <button
               className="primary-btn"
               onClick={() => setFinished(null)}
@@ -1105,7 +1083,9 @@ export function GameScreen({ gameId }: { gameId: string }) {
                   className={`view-scroll ledger-body${wide ? " wide" : ""}${shownPanel === "스쿼드" ? " fill" : ""}`}
                 >
                   {shownPanel === "스쿼드" && squadView(() => setPanel(null))}
-                  {shownPanel === "달력" && <CalendarView calendar={game.views.calendar} />}
+                  {shownPanel === "달력" && (
+                    <CalendarView calendar={game.views.calendar} gameId={gameId} />
+                  )}
                   {shownPanel === "재정" && <FinanceView finance={game.views.finance} />}
                   {shownPanel === "대회" && competitionsView}
                   {shownPanel === "커리어" && (

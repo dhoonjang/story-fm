@@ -19,6 +19,7 @@ import {
   FORMATION_CHANGE_COST,
   clampCondition,
   compareMilestones,
+  matchMinutesOf,
   milestonePhrase,
   naturalPositionOf,
   normalizeCauses,
@@ -1295,30 +1296,11 @@ export function buildRatingBrief(state: GameState): MatchRatingBrief | null {
   const ours = ledger.events.filter((e) => e.team === side);
   const goals = ours.filter((e) => e.type === "goal");
   /**
-   * 그라운드를 떠난 시각 — 교체의 [나가는 선수, 들어오는 선수] 짝과 **퇴장**이 같은
-   * 자격으로 출전 시간을 끊는다 (match.md §6). 퇴장을 세지 않으면 20′에 나간 선수도
-   * 90분으로 남아, LLM 채점이 "풀타임을 뛰고 퇴장까지 당한 선수"를 읽는다.
+   * 출전 시간 — 규칙은 도메인이 갖는다 (`matchMinutesOf`). 끝난 경기의 리포트·MOTM이
+   * **같은 함수**를 결과의 사건 목록에 대고 부르므로, 같은 선수의 출전 시간이 평점
+   * 판정과 화면에서 갈리지 않는다 (match.md §6).
    */
-  const wentOff = new Map<string, number>();
-  const cameOn = new Map<string, number>();
-  for (const e of ours) {
-    const [first, second] = e.actors;
-    if (e.type === "substitution") {
-      if (first) wentOff.set(first, e.minute);
-      if (second) cameOn.set(second, e.minute);
-    } else if (e.type === "red_card" && first) {
-      wentOff.set(first, Math.min(wentOff.get(first) ?? e.minute, e.minute));
-    }
-  }
-  /** 이 경기의 길이 — 연장을 치렀으면 120분이다 (출전 시간이 평점의 기준값이다) */
-  const FULL_TIME = wentToExtraTime(ledger) ? 120 : 90;
-  const minutesOf = (id: string): number => {
-    const on = cameOn.get(id);
-    const off = wentOff.get(id);
-    const from = on ?? 0;
-    const to = off ?? FULL_TIME;
-    return Math.max(0, Math.min(FULL_TIME, to) - Math.min(from, FULL_TIME));
-  };
+  const minutesOf = matchMinutesOf(ours, wentToExtraTime(ledger));
 
   const played = new Set<string>(ledger[side].onPitch);
   for (const e of ours) {
@@ -1604,6 +1586,15 @@ export function finalizeMatch(state: GameState): MatchDigest {
       return sum + (line ? read(line) : 0);
     }, 0);
 
+  /**
+   * 점유 — 진행 중이던 옛 세이브의 패킷에는 없을 수 있다. 없으면 **적지 않는다**:
+   * 0.5를 지어 적으면 그 경기 하나만 "완벽히 팽팽했던 경기"로 장부에 남는다.
+   */
+  const share = pending.packet?.guide.possession as { home?: number; away?: number } | undefined;
+  const possession =
+    typeof share?.home === "number" && typeof share.away === "number"
+      ? { home: share.home, away: share.away }
+      : null;
   // 결과를 MATCH에 기록하고 일정 엔트리를 닫는다
   const goalEvents = ledger.events.filter((e) => e.type === "goal");
   match.result = {
@@ -1624,6 +1615,25 @@ export function finalizeMatch(state: GameState): MatchDigest {
     awayExpectedGoals: statSum(awayLineup, (line) => line.scoringExpectation),
     homeLineup,
     awayLineup,
+    /**
+     * **사건과 선수별 기록은 장부에서 결과로 건너온다** (match.md §4).
+     *
+     * 여기서 옮기지 않으면 `pendingMatch = null`과 함께 사라져, 끝난 경기에 남는
+     * 것은 스코어와 득점자뿐이다 — "그 경기 왜 졌지"를 되물을 자리가 없어지고
+     * 원인 태그가 달린 골도(전술 XP의 근거다) 다시 볼 수 없다.
+     *
+     * **자르지 않는다.** 몇 줄만 골라 남기면 그 기준이 두 번째 원본이 되고, 슛을
+     * 버리면 "슛 열여덟에 xG 2.3으로 진 경기"가 다시 사라진다. 세우는 것을 고르는
+     * 일은 읽는 쪽(`buildMatchReport`)의 몫이다.
+     */
+    events: [...ledger.events],
+    ...(ledger.stats ? { playerStats: { ...ledger.stats } } : {}),
+    /**
+     * 점유는 **패킷이 이미 계산해 둔 값**이다 — 경기 중 슈팅 노출과 체력 소모가
+     * 그 값으로 굴러갔으므로(§1.5) 결과에 적히는 것도 같은 값이어야 한다.
+     * 간이 시뮬도 자기 계산을 같은 칸에 적는다 (`core/tick.ts`).
+     */
+    ...(possession ? { possession } : {}),
     /**
      * 종료 휘슬에 서 있던 사람 — 명단은 뛴 사람 전부라 교체 아웃·퇴장이 섞여 있다.
      * 감독의 경기는 구간 시뮬이 연장까지 직접 가므로 여기서 쓰이지는 않지만,
