@@ -22,7 +22,7 @@ const ROLE_ORDER: Record<string, number> = { 선발: 0, 벤치: 1, 스쿼드: 2 
  * `SquadRow.role`은 서버가 아는 값이라 자동 저장이 돌아오기 전까지 예전 칸이다.
  * 그걸로 정렬하면 선수를 벤치로 내려도 명단에서는 한 박자 뒤에야 자리를 옮긴다.
  */
-const TIER_ORDER: Record<Tier, number> = { 선발: 0, 벤치: 1, 예비: 2, "2군": 3 };
+const TIER_ORDER: Record<Tier, number> = { 선발: 0, 벤치: 1, 예비: 2, "2군": 3, 임대: 4 };
 const GROUP_ORDER: Record<string, number> = { GK: 0, DF: 1, MF: 2, FW: 3 };
 
 /** 명단 표 — 열 머리를 눌러 정렬한다. 기본은 역할 → 포지션 라인 → OVR */
@@ -195,8 +195,17 @@ export function SquadTable({
                       if (!swapPair || p.id === swapPair.id) return null;
                       const rowTier = tierOf(p.id);
                       if (rowTier === swapPair.tier) return null;
+                      // 임대는 맞바꿀 수 있는 칸이 아니다 — 남의 훈련장에 있는 선수라
+                      // 판에도 층에도 들어오지 못한다 (서버도 반려한다)
+                      if (rowTier === "임대" || swapPair.tier === "임대") return null;
                       // 전술판(선발) 쪽으로 올라오면 ←, 내려가면 →
-                      const RANK: Record<Tier, number> = { 선발: 3, 벤치: 2, 예비: 1, "2군": 0 };
+                      const RANK: Record<Tier, number> = {
+                        선발: 3,
+                        벤치: 2,
+                        예비: 1,
+                        "2군": 0,
+                        임대: -1,
+                      };
                       const rowGoesUp = RANK[swapPair.tier] > RANK[rowTier];
                       return (
                         <button
@@ -250,6 +259,23 @@ export function SquadTable({
                     U21
                   </span>
                 )}
+                {/*
+                 * 임대는 **표식이 아니라 소속**이라 어디에 언제까지 가 있는지가
+                 * 그 자리에 선다 — 상세를 펼쳐야 보이면 탭을 연 뜻이 없다.
+                 * 연속 미출전은 툴팁의 사실로만 적는다("불러들이라"는 GM의 몫이다).
+                 */}
+                {p.loan !== null && (
+                  <span
+                    className="tag loan"
+                    title={
+                      `${p.loan.team} 임대 — ${p.loan.until} 복귀` +
+                      (p.loan.benchRun > 0 ? ` · 최근 ${p.loan.benchRun}경기 명단 밖` : "") +
+                      (p.loan.growth > 0 ? ` · 임대 이후 성장 +${p.loan.growth}` : "")
+                    }
+                  >
+                    {p.loan.team} ~{p.loan.until.slice(2)}
+                  </span>
+                )}
                 <StatusBadges p={p} />
               </td>
               {/* 지금 맡고 있는 자리를 그대로 보여준다 — 전술판에 RWB로 저장돼 있으면 RWB.
@@ -273,7 +299,12 @@ export function SquadTable({
                 className="hide-sm"
                 title={`${p.assignedPosition ?? p.position} 자리에서의 적응도`}
               >
-                {p.role === "스쿼드" ? "—" : <FitGauge value={p.adaptation} label="적응도" />}
+                {/* 임대 중에는 우리 전술을 익힐 자리가 없다 — 0이 아니라 빈 칸이다 */}
+                {p.loan !== null || p.role === "스쿼드" ? (
+                  "—"
+                ) : (
+                  <FitGauge value={p.adaptation} label="적응도" />
+                )}
               </td>
               <td>
                 <FormArrow p={p} />
@@ -286,7 +317,12 @@ export function SquadTable({
               {/* 골 대신 평점 — 골 수는 행을 펼치면 시즌 기록에 그대로 있다 */}
               <td
                 className="hide-sm"
-                title={`${p.seasonApps}경기 ${p.seasonGoals}골 ${p.seasonAssists}도움`}
+                /* 임대 행의 시즌 기록은 **빌린 구단의 장부**다 — 어디서 낸 숫자인지를
+                   함께 적지 않으면 우리 경기에서 낸 값으로 읽힌다 */
+                title={
+                  (p.loan !== null ? `${p.loan.team} · ` : "") +
+                  `${p.seasonApps}경기 ${p.seasonGoals}골 ${p.seasonAssists}도움`
+                }
               >
                 {typeof p.seasonRating === "number" ? p.seasonRating.toFixed(2) : "—"}
               </td>

@@ -1,5 +1,5 @@
-import type { GamePlayer, TransferReason } from "@story-fm/domain";
-import { ageOf, buildPaymentInstallments } from "@story-fm/domain";
+import type { GamePlayer, Injury, TransferReason } from "@story-fm/domain";
+import { ageOf, buildPaymentInstallments, isReserveMatch, seasonRating } from "@story-fm/domain";
 import { contractUntil, seasonYear, windowOpenOn } from "../competition/calendar";
 import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import { formatMoney, recordFinance, settleDuePayments } from "../club/finance";
@@ -26,9 +26,13 @@ import {
   activeContract,
   firstTeamPlayers,
   groupOf,
+  onLoanFromUs,
+  openInjury,
+  playerById,
   playersOf,
   pushNarrative,
   releaseFromTactics,
+  seasonStatOf,
   squadShortfall,
   teamName,
   type GameState,
@@ -405,7 +409,128 @@ export function returnDueLoans(state: GameState, digest: string[]): void {
 
 /** 우리가 임대 보낸 선수들 — 조회·서사용 */
 export function loanedOut(state: GameState): GamePlayer[] {
-  return state.players.filter((p) => p.loan?.fromTeamId === state.userTeamId);
+  return state.players.filter((p) => onLoanFromUs(state, p));
+}
+
+// ── 임대 리포트 — 남의 경기장에서 무슨 일이 있었나 ──────
+
+/**
+ * 리콜을 고민할 근거 — **코드다.** "출전 기회를 못 얻고 있습니다"라는 문장은 GM이
+ * 쓴다 (→ docs/overview.md §1 철칙 4).
+ */
+export type LoanConcern = "no-minutes" | "injury";
+
+/**
+ * 그 구단 최근 경기에서 이만큼 연속으로 명단 밖이면 사실로 짚는다.
+ *
+ * 넷은 한 달치 일정이다 — 둘이면 로테이션 한 번에 경보가 울리고, 여덟이면 리포트가
+ * 두 달 늦게 온다. 리콜 창(이적 창)이 열려 있는 동안 감독이 판단할 시간이 남는 폭이다.
+ */
+export const LOAN_BENCH_RUN_ALERT = 4;
+
+/** 임대 한 건의 결산 — 저장하지 않는다. 장부에서 파생한다 */
+export interface LoanReport {
+  playerId: string;
+  name: string;
+  /** 빌린 구단 */
+  teamId: string;
+  /** 복귀일 */
+  until: string;
+  /** 그 구단에서의 이번 시즌 1군 기록 (`SEASON_STAT`의 그 팀 행) */
+  apps: number;
+  goals: number;
+  assists: number;
+  /** 평균 평점 — 출전이 없으면 null (0.00과 "기록 없음"은 다르다) */
+  rating: number | null;
+  /** 그 구단 2군 리그 출전 — 1군 기록과 섞지 않는다 (season.md §2) */
+  reserveApps: number;
+  /** 그 구단 최근 경기의 **연속 미출전 수** — 명단에 든 경기가 나오면 멈춘다 */
+  benchRun: number;
+  /** 임대를 나간 뒤 오른 능력치 칸 수 (`growthLog`의 합) */
+  growth: number;
+  injury: Injury | null;
+  concerns: LoanConcern[];
+}
+
+/**
+ * 이 임대가 언제 시작됐나 — 원장의 임대 이적 줄에서 파생한다. 줄이 없는 옛 세이브는
+ * 시즌 시작으로 본다(성장 칸 수가 과하게 잡히는 쪽이지, 빠지는 쪽이 아니다).
+ */
+function loanStartOf(state: GameState, player: GamePlayer): string {
+  const rows = state.transfers.filter(
+    (t) => t.gamePlayerId === player.id && t.type === "loan" && t.toTeamId === player.teamId,
+  );
+  return rows.length > 0
+    ? rows.reduce((latest, t) => (t.date > latest ? t.date : latest), rows[0]!.date)
+    : state.calendar.preseasonStart;
+}
+
+/**
+ * 빌린 구단의 최근 경기에서 **연속 몇 번 명단 밖이었나** — 명단에 든 경기가 나오면
+ * 멈춘다. 2군 리그 경기는 세지 않는다: 그 대진은 감독 팀만 편성되므로 상대 클럽
+ * 선수에게는 "1군에서 못 뛰었다"의 반증이 되지 못한다 (season.md §2).
+ */
+function benchRunOf(state: GameState, player: GamePlayer): number {
+  const played = [...state.matches]
+    .filter(
+      (m) =>
+        m.result !== null &&
+        !isReserveMatch(m) &&
+        (m.homeTeamId === player.teamId || m.awayTeamId === player.teamId),
+    )
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  let run = 0;
+  for (const match of played) {
+    const lineup =
+      match.homeTeamId === player.teamId ? match.result?.homeLineup : match.result?.awayLineup;
+    if (lineup?.includes(player.id)) break;
+    run += 1;
+  }
+  return run;
+}
+
+/**
+ * 임대 한 건의 결산 — 우리가 임대 보낸 선수가 아니면 null.
+ *
+ * ⚠️ **사실만 낸다.** 출전·평점·연속 미출전·성장 칸 수와 근거 **코드**뿐이고,
+ * "불러들이시죠"는 이 자리의 것이 아니다.
+ */
+export function loanReportOf(state: GameState, playerId: string): LoanReport | null {
+  const player = playerById(state, playerId);
+  if (!player?.loan || !onLoanFromUs(state, player)) return null;
+  const stat = seasonStatOf(state, player.id);
+  const since = loanStartOf(state, player);
+  const growth = state.growthLog
+    .filter((g) => g.gamePlayerId === player.id && g.date >= since && g.delta > 0)
+    .reduce((sum, g) => sum + g.delta, 0);
+  const injury = openInjury(state, player.id);
+  const benchRun = benchRunOf(state, player);
+  return {
+    playerId: player.id,
+    name: player.name,
+    teamId: player.teamId,
+    until: player.loan.until,
+    apps: stat?.apps ?? 0,
+    goals: stat?.goals ?? 0,
+    assists: stat?.assists ?? 0,
+    rating: seasonRating(stat),
+    reserveApps: stat?.reserveApps ?? 0,
+    benchRun,
+    growth,
+    injury,
+    concerns: [
+      ...(benchRun >= LOAN_BENCH_RUN_ALERT ? (["no-minutes"] as const) : []),
+      ...(injury ? (["injury"] as const) : []),
+    ],
+  };
+}
+
+/** 우리가 내보낸 임대 전부의 결산 — 이름 순서가 아니라 id 순서다(결정적) */
+export function loanReports(state: GameState): LoanReport[] {
+  return loanedOut(state)
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((p) => loanReportOf(state, p.id))
+    .filter((r): r is LoanReport => r !== null);
 }
 
 // ── 무소속 시장 — 남의 팀이 데려간다 ────────────────────

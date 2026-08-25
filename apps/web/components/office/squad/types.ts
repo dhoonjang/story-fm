@@ -10,8 +10,13 @@ export type SquadRow = OfficeViews["squad"]["players"][number];
 export type TacticsView = OfficeViews["squad"]["tactics"];
 export type Selection = { kind: "slot"; index: number } | { kind: "bench"; id: string } | null;
 
-/** 선수가 지금 속한 칸 — 화살표 교체는 이 둘을 맞바꾸는 일이다 */
-export type Tier = "선발" | "벤치" | "예비" | "2군";
+/**
+ * 선수가 지금 속한 칸 — 화살표 교체는 이 둘을 맞바꾸는 일이다.
+ *
+ * **`임대`만은 맞바꿀 수 없는 칸이다** — 계약은 우리 것이라 명단에 서지만
+ * (transfer.md §2) 그 선수는 남의 훈련장에 있어 판에 올릴 수도, 층을 옮길 수도 없다.
+ */
+export type Tier = "선발" | "벤치" | "예비" | "2군" | "임대";
 
 /** 칸 → CSS 클래스 이름 (행의 **왼쪽 선 색**이 칸을 말한다 — 배지 열을 없앤 자리) */
 export const TIER_SLUG: Record<Tier, string> = {
@@ -19,4 +24,5 @@ export const TIER_SLUG: Record<Tier, string> = {
   벤치: "bench",
   예비: "squad",
   "2군": "reserve",
+  임대: "loan",
 };

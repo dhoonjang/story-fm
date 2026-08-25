@@ -281,7 +281,7 @@ export const SQUAD_LONGEVITY = defineHarness({
  */
 export const YOUTH_DEVELOPMENT = defineHarness({
   id: "youth-development",
-  what: "2군 경기 수 · 출전·집중 육성이 가르는 성장 격차",
+  what: "2군 경기 수 · 출전·집중 육성·임대가 가르는 성장 격차",
   doc: "docs/simulation/season.md §2",
   cost: "세계 하나 · 한 시즌 완주 · 수 분",
   // prettier-ignore
@@ -293,6 +293,10 @@ export const YOUTH_DEVELOPMENT = defineHarness({
     { metric: "무지정 우리 2군 U21 성장", role: "measure", unit: "score", why: "출전 배율만 받은 유망주 — 손잡이 하나의 몫을 가른다" },
     { metric: "타 팀 2군 U21 성장", role: "measure", unit: "score", why: "배율이 없는 기준선 — 코어 월간 성장 그대로" },
     { metric: "집중 육성 격차", role: "reference", min: 0, unit: "score", why: "집중 육성 − 타 팀 기준선. 음수면 손잡이가 아무것도 가르지 않은 것이다" },
+    { metric: "임대 표본", role: "guard", min: 2, unit: "count", why: "같은 리그로 보내 시즌 끝까지 임대로 남은 U21 — 표본이 줄면 아래 세 줄이 격차가 아니라 잡음이다" },
+    { metric: "임대 U21 성장", role: "measure", unit: "score", why: "임대처 1군 출전 × 수준 계수만 받은 유망주의 종합 상승 (season.md §2 임대)" },
+    { metric: "임대처 평균 출전", role: "measure", unit: "count", why: "그 구단 1군 경기를 실제로 몇 번 뛰었나 — **아래 줄의 천장이다.** 빌린 구단의 라인업은 저장 배치 + OVR 보충이라(`simSquadOf`) 갓 도착한 열예닐곱 살은 거의 서지 않는다. 출전 보장 조항이 서면 이 줄이 먼저 움직인다" },
+    { metric: "임대 격차", role: "reference", unit: "score", why: "임대 − 타 팀 기준선. 출전이 0이면 배율도 1이라 기준선과 같아지므로 **위 줄이 0 언저리인 동안은 이 줄도 0 언저리이고, 표본이 다섯이라 부호는 잡음으로 뒤집힌다.** 배율 자체가 사는지는 `growth-curve` 단위 테스트가 지킨다 — 여기서 재는 것은 세계가 그 배율에 닿을 기회를 주는가다" },
     { metric: "성실한 U21 표본", role: "guard", min: 20, unit: "count", why: "아래 줄의 분모 — 배율 없는 타 팀 2군 U21 중 `professionalism` ≥ 1.1. 표본이 줄면 격차가 아니라 잡음이다" },
     { metric: "게으른 U21 표본", role: "guard", min: 20, unit: "count", why: "같은 줄의 반대쪽 — `professionalism` ≤ 0.95" },
     { metric: "직업의식 격차", role: "reference", min: 0, unit: "score", why: "성실 − 게으름. 배율이 없는 표본이라 남는 차이는 원형뿐이다 — 0 이하면 계수가 세계에 닿지 않았다 (people.md §6)" },
