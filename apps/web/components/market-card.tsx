@@ -28,7 +28,37 @@ const KIND_ICON = {
   scout: IconInsight,
 } as const;
 
-const VERDICT_KO = { accept: "수락", reject: "거절", counter: "조정" } as const;
+/**
+ * 배지의 판정 낱말 — 방향 뒤에 붙어 한 낱말이 되므로 명사형이다. `조정`을 그대로
+ * 붙이면 `매각 조정`이 "매각을 손본다"는 행위로 읽힌다; 상대가 낸 것은 조정된 조건,
+ * 곧 조정안이다.
+ */
+const VERDICT_KO = { accept: "수락", reject: "거절", counter: "조정안" } as const;
+
+/** 조건의 축 — 상대 줄의 이름표가 고르는 순서이자 `Terms`가 세우는 순서다 */
+const AXIS_KO: ReadonlyArray<[keyof MarketTerms, string]> = [
+  ["fee", "이적료"],
+  ["severance", "정산금"],
+  ["paymentYears", "분할"],
+  ["weeklyWage", "주급"],
+  ["years", "연수"],
+];
+
+/**
+ * 상대 줄의 이름표 — **움직인 축의 이름**이다 (`이적료 조정` · `주급·연수 조정`).
+ *
+ * 배지는 방향을 싣고 이 줄은 무엇이 움직였는지를 싣는다. 우리 조건과 대조해 달라진
+ * 축만 고르므로 낱말이 숫자와 어긋나지 않는다; 대조할 우리 조건이 없으면 `조정`만 선다.
+ */
+function demandLabelOf(card: MarketCard, loan: boolean): string {
+  const ours = card.terms;
+  const theirs = card.counterTerms;
+  if (!ours || !theirs) return "조정";
+  const moved = AXIS_KO.filter(
+    ([key]) => theirs[key] !== undefined && theirs[key] !== ours[key],
+  ).map(([key, label]) => (key === "fee" && loan ? "임대료" : label));
+  return moved.length > 0 ? `${moved.join("·")} 조정` : "조정";
+}
 
 /**
  * 카드 머리의 표식 — **무슨 국면인가에 앞서 어느 방향인가.**
@@ -132,16 +162,25 @@ export function MarketCardView({ card }: { card: MarketCard }) {
         )}
       </div>
 
-      {card.terms && (
-        <div className="mc-terms">
-          <em className="mc-side">제시</em>
-          <Terms terms={card.terms} loan={card.loan === true} />
-        </div>
-      )}
-      {card.counterTerms && (
-        <div className="mc-terms demand">
-          <em className="mc-side">요구</em>
-          <Terms terms={card.counterTerms} loan={card.loan === true} />
+      {/* 두 줄이 한 그리드다 — 이름표 열이 가장 긴 이름표에 맞춰 늘어나 값이 같은 자리에서 시작한다 */}
+      {(card.terms || card.counterTerms) && (
+        <div className="mc-table">
+          {card.terms && (
+            <div className="mc-terms">
+              <em className="mc-side">제시</em>
+              <div className="mc-vals">
+                <Terms terms={card.terms} loan={card.loan === true} />
+              </div>
+            </div>
+          )}
+          {card.counterTerms && (
+            <div className="mc-terms demand">
+              <em className="mc-side">{demandLabelOf(card, card.loan === true)}</em>
+              <div className="mc-vals">
+                <Terms terms={card.counterTerms} loan={card.loan === true} />
+              </div>
+            </div>
+          )}
         </div>
       )}
 
