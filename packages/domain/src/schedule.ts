@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ATTRIBUTE_AXES, AXIS_KO } from "./player";
-import { ShootoutKickSchema, type MatchSide } from "./match";
+import { ShootoutKickSchema, ShotOriginSchema, type MatchSide } from "./match";
 import { DateString } from "./date-string";
 
 /**
@@ -73,6 +73,13 @@ export const MatchResultSchema = z.object({
    * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   goalMinutes: z.array(z.number().int().min(0)).optional(),
+  /**
+   * 골이 **어디서 나왔나** — `scorers`와 같은 순서·같은 길이 (match.md §1.4).
+   *
+   * 리그 전체의 세트피스 득점 비율이 이 칸 하나로 세어진다 — 감독의 경기든
+   * 간이 시뮬이든 같은 규약이다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  goalOrigins: z.array(ShotOriginSchema).optional(),
   /** 실제 슈팅 수 — 옛 경기에는 없다. */
   homeShots: z.number().int().min(0).optional(),
   awayShots: z.number().int().min(0).optional(),

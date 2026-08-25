@@ -77,6 +77,8 @@ export function applyMatchIntent(
   if (intent.exploits && intent.exploits.length > 0) {
     call("exploit_point", { targetIds: intent.exploits });
   }
+  // 죽은 공 키커 — 평시와 같은 스킬을 지난다 (match.md §2)
+  if (intent.setPieceTakers) call("set_set_piece_takers", intent.setPieceTakers);
   if (intent.teamTalk) call("team_talk", intent.teamTalk);
   for (const one of intent.talk ?? []) call("talk_to_player", one);
 

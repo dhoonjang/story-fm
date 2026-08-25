@@ -844,6 +844,10 @@ export interface MatchTally {
   xg: number;
   /** 실제 슈터의 결정력을 반영한 골 확률 합. */
   scoringExpectation: number;
+  /** 그 선수가 찬 코너 — 죽은 공을 누가 올리는지가 여기 남는다 (match.md §4) */
+  corners: number;
+  /** 그 선수가 범한 파울 */
+  fouls: number;
 }
 
 /** 경기 중 한 선수 — 지금 내는 전력과 남은 다리 */
@@ -905,6 +909,8 @@ function tallyTotal(players: readonly MatchPlayerView[]): MatchTally {
       progressive: acc.progressive + p.tally.progressive,
       xg: acc.xg + p.tally.xg,
       scoringExpectation: acc.scoringExpectation + p.tally.scoringExpectation,
+      corners: acc.corners + p.tally.corners,
+      fouls: acc.fouls + p.tally.fouls,
     }),
     {
       goals: 0,
@@ -917,6 +923,8 @@ function tallyTotal(players: readonly MatchPlayerView[]): MatchTally {
       progressive: 0,
       xg: 0,
       scoringExpectation: 0,
+      corners: 0,
+      fouls: 0,
     },
   );
 }
@@ -1550,21 +1558,25 @@ function buildMatchView(state: GameState): MatchView | null {
    * `ledger.events`이기 때문이다: 두 벌로 두면 조용히 갈린다.
    */
   const tallies = new Map<string, MatchTally>();
+  /** 아무것도 하지 않은 선수의 한 줄 — 빈 값을 세우는 자리가 하나여야 칸이 늘 때 갈리지 않는다 */
+  const emptyTally = (): MatchTally => ({
+    goals: 0,
+    assists: 0,
+    shots: 0,
+    saves: 0,
+    yellows: 0,
+    red: false,
+    passes: 0,
+    progressive: 0,
+    xg: 0,
+    scoringExpectation: 0,
+    corners: 0,
+    fouls: 0,
+  });
   const tallyOf = (id: string): MatchTally => {
     const found = tallies.get(id);
     if (found) return found;
-    const fresh: MatchTally = {
-      goals: 0,
-      assists: 0,
-      shots: 0,
-      saves: 0,
-      yellows: 0,
-      red: false,
-      passes: 0,
-      progressive: 0,
-      xg: 0,
-      scoringExpectation: 0,
-    };
+    const fresh = emptyTally();
     tallies.set(id, fresh);
     return fresh;
   };
@@ -1580,6 +1592,9 @@ function buildMatchView(state: GameState): MatchView | null {
     t.progressive = line.progressive;
     t.xg = line.xg;
     t.scoringExpectation = line.scoringExpectation ?? 0;
+    // 옛 세이브의 줄에는 없는 칸이다 (SAVE_VERSION 유지)
+    t.corners = line.corners ?? 0;
+    t.fouls = line.fouls ?? 0;
   }
   for (const event of ledger.events) {
     const [first, second] = event.actors;
@@ -1638,18 +1653,7 @@ function buildMatchView(state: GameState): MatchView | null {
       // 읽은 값으로 판정해도 참값과 갈리지 않는다 — 구간이 문턱을 넘지 않는다
       gassed: condition.value <= GAP_CONDITION,
       ours: teamId === state.userTeamId,
-      tally: tallies.get(entry.id) ?? {
-        goals: 0,
-        assists: 0,
-        shots: 0,
-        saves: 0,
-        yellows: 0,
-        red: false,
-        passes: 0,
-        progressive: 0,
-        xg: 0,
-        scoringExpectation: 0,
-      },
+      tally: tallies.get(entry.id) ?? emptyTally(),
     };
   };
   const rowsOf = (

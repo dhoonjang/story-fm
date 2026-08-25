@@ -37,6 +37,20 @@ export interface MatchLedgerState {
   stats?: Record<string, MatchStatLine>;
 }
 
+/** 빈 기록 한 줄 — 누적 기록의 출발점이 한 곳이어야 칸이 늘 때 갈리지 않는다 */
+export function emptyStatLine(): MatchStatLine {
+  return {
+    passes: 0,
+    progressive: 0,
+    shots: 0,
+    xg: 0,
+    scoringExpectation: 0,
+    saves: 0,
+    corners: 0,
+    fouls: 0,
+  };
+}
+
 /** 구간이 만든 증가분을 장부에 더한다 — 패스는 사건이 아니므로 이 경로로만 쌓인다 */
 export function addStats(
   state: MatchLedgerState,
@@ -44,14 +58,7 @@ export function addStats(
 ): MatchLedgerState {
   const stats = { ...(state.stats ?? {}) };
   for (const [id, line] of Object.entries(add)) {
-    const before = stats[id] ?? {
-      passes: 0,
-      progressive: 0,
-      shots: 0,
-      xg: 0,
-      scoringExpectation: 0,
-      saves: 0,
-    };
+    const before = stats[id] ?? emptyStatLine();
     stats[id] = {
       passes: before.passes + line.passes,
       progressive: before.progressive + line.progressive,
@@ -59,6 +66,9 @@ export function addStats(
       xg: round2(before.xg + line.xg),
       scoringExpectation: round2((before.scoringExpectation ?? 0) + line.scoringExpectation),
       saves: before.saves + line.saves,
+      // 옛 세이브의 줄에는 없는 칸이라 0으로 읽는다 (SAVE_VERSION 유지)
+      corners: (before.corners ?? 0) + line.corners,
+      fouls: (before.fouls ?? 0) + line.fouls,
     };
   }
   return { ...state, stats };

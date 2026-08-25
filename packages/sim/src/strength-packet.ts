@@ -9,6 +9,8 @@ import type {
   PlayerShotProfile,
   Player,
   PositionGroup,
+  SetPieceProfile,
+  SetPieceTakers,
   RegionalBand,
   RegionalInstruction,
   RegionalIntent,
@@ -40,7 +42,13 @@ import { buildKeyPoints, readKeyPoints } from "./key-points";
 import { stateModifier } from "./state-modifier";
 import { buildCounterContext, evaluateCounters, type CounterResult } from "./tactical-counters";
 import { GAP_PENALTY, GAP_THRESHOLD } from "./stamina";
-import { finishingGoalProbability, FINISHING_PIVOT, FINISHING_SCALE } from "./shot-model";
+import {
+  finishingGoalProbability,
+  FINISHING_PIVOT,
+  FINISHING_SCALE,
+  penaltyRate,
+  penaltySkill,
+} from "./shot-model";
 import {
   addCells,
   GRID_LANES,
@@ -106,6 +114,11 @@ export interface SideInput {
     intent: RegionalIntent;
     note: string;
   }>;
+  /**
+   * 감독이 지정한 죽은 공 키커 (`TeamTactics.setPieceTakers`) — 없거나 그 선수가
+   * 선발에 없으면 코어의 기본값이 선다 (match.md §1.4).
+   */
+  setPieceTakers?: SetPieceTakers;
 }
 
 /**
@@ -478,7 +491,7 @@ export const CREATION_SKILL_LOG_WEIGHT = 0.75;
  * 대등한 경로에서 슈팅 하나의 평균 기회 xG.
  * 실제 1부 리그의 슛당 xG는 0.11 언저리다(2.8골 ÷ 25슛).
  */
-export const BASE_SHOT_XG = 0.093;
+export const BASE_SHOT_XG = 0.0993;
 /** 최종 공격 지역 우위가 슈팅 질에 닿는 세기. */
 export const ROUTE_XG_LOGIT_WEIGHT = 0.7;
 /** 선수의 전진 위치가 슈팅 질에 닿는 세기. */
@@ -935,6 +948,215 @@ function buildPlayerShotProfiles(
     });
 }
 
+// ── 죽은 공 — 열린 플레이와 **같은 총량 안의** 별도 채널 (match.md §1.4) ────────
+
+/**
+ * 팀 기대 슈팅 중 **죽은 공**(코너·프리킥)에서 나오는 몫 — ⚠️ 밸런스 값.
+ *
+ * 실제 1부의 슈팅 출처 분해가 근거다(코너 ~2.2 · 프리킥 ~1.5 / 팀당 12.5회).
+ * ⚠️ **위에 더하는 값이 아니라 안에서 옮기는 값이다** — 팀 기대 슈팅은 실제 1부의
+ * 슈팅 총량에 맞춰 세운 눈금이고 그 총량에는 코너 헤더도 페널티도 이미 들어 있다.
+ */
+export const SET_PIECE_SHOT_SHARE = 0.31;
+/**
+ * 경기당 페널티 — 양 팀 합. ⚠️ 밸런스 값. 실제 1부가 0.2~0.3회다.
+ *
+ * 두 팀의 몫을 **합이 1이 되도록 정규화**하므로 리그 빈도가 정확히 이 값이다 —
+ * 거칠기는 그 한 경기 안에서 누가 내주는가만 기울인다.
+ */
+export const PENALTY_PER_MATCH = 0.25;
+/** 대등한 제공권·평범한 키커가 올린 죽은 공 슛 하나의 기회 xG — ⚠️ 밸런스 값 */
+export const CORNER_XG_BASE = 0.08;
+/** 키커의 킥력이 죽은 공 질에 닿는 세기 — 킥력 90은 65보다 1.35배 */
+export const SET_PIECE_KICK_XG_LOGIT_WEIGHT = 0.45;
+/** 박스 안 제공권 우열이 죽은 공 질에 닿는 세기 */
+export const SET_PIECE_AERIAL_XG_LOGIT_WEIGHT = 0.5;
+/** 죽은 공 슛 중 코너에서 나온 몫 — 나머지가 프리킥 */
+export const CORNER_SHOT_SHARE = 0.58;
+/** 프리킥 슛 중 키커가 **직접** 차는 몫 (직접 프리킥 — 도움이 없다) */
+export const DIRECT_FREE_KICK_SHARE = 0.2;
+/** 팀 기대 슈팅 하나가 데려오는 코너 — 실제 1부의 팀당 10.5개 */
+export const CORNERS_PER_SHOT = 0.84;
+/** 경기당 파울 — 양 팀 합. 실제 1부가 21~22회다 */
+export const FOULS_PER_MATCH = 21;
+
+/**
+ * 한 팀이 90분에 범할 파울 — 카드와 같은 모양으로 **자기 강도에 비례한다**
+ * (`teamCardRate`). 나누는 2는 손잡이가 양 팀 합이라는 사실이지 눈금이 아니다.
+ */
+export function teamFoulRate(intensity: number): number {
+  return (FOULS_PER_MATCH / 2) * intensity;
+}
+
+/**
+ * 수비 라인의 거칠기가 페널티 헌납 몫을 기울이는 눈금.
+ * ⚠️ **두 팀 사이의 비로만 뜻을 갖는다** — 정규화되므로 중립점은 결과에 닿지 않는다.
+ */
+const PENALTY_ROUGH_SCALE = 40;
+/** 죽은 공에 올라가는 사람 수 — 우리 제공권을 재는 창 */
+const SET_PIECE_TARGETS = 4;
+/** 박스를 지키는 사람 수 — 골키퍼를 포함한다(공중볼은 그의 영역이다) */
+const SET_PIECE_DEFENDERS = 5;
+/** 킥력·제공권을 로그오즈로 옮기는 기준점과 눈금 — 슈팅 질의 그것과 같은 축 */
+const SET_PIECE_SKILL_PIVOT = 65;
+const SET_PIECE_SKILL_SCALE = 34;
+
+/** 상위 n명의 평균 — 죽은 공은 열한 명이 아니라 박스에 선 몇 명이 정한다 */
+function topMean(values: number[], take: number): number {
+  if (values.length === 0) return SET_PIECE_SKILL_PIVOT;
+  const sorted = [...values].sort((a, b) => b - a).slice(0, Math.max(1, take));
+  return sorted.reduce((sum, v) => sum + v, 0) / sorted.length;
+}
+
+/**
+ * 죽은 공을 차는 사람 — **지정이 먼저, 없으면 그라운드 위 최고**.
+ *
+ * 지정한 선수가 선발에 없으면(교체·퇴장·로테이션) 그 자리는 곧바로 기본값으로
+ * 돌아간다. 지정 자체는 전술에 남는다 — 한 경기의 명단이 감독의 지시를 지우지 않는다.
+ */
+function resolveTakers(
+  slots: readonly LineupSlot[],
+  designated?: SetPieceTakers,
+): SetPieceProfile["takers"] {
+  const onPitch = new Map(slots.map((slot) => [slot.player.id, slot] as const));
+  const field = slots.filter((slot) => slotGroup(slot) !== "GK");
+  const best = (read: (p: Player) => number): string | null => {
+    if (field.length === 0) return null;
+    return field.reduce((a, b) => (read(b.player) > read(a.player) ? b : a)).player.id;
+  };
+  const pick = (id: string | undefined, read: (p: Player) => number): string | null =>
+    id !== undefined && onPitch.has(id) ? id : best(read);
+  const kicking = (p: Player) => p.attributes.kicking;
+  return {
+    corner: pick(designated?.corner, kicking),
+    freeKick: pick(designated?.freeKick, kicking),
+    penalty: pick(designated?.penalty, penaltySkill),
+  };
+}
+
+/** 죽은 공 채널이 팀 판독값에 더하는 몫 — 프로필과 함께 한 번에 낸다 */
+interface SetPieceBuild {
+  profile: SetPieceProfile;
+  /** 죽은 공 + 페널티가 팀 기회 xG에 더하는 몫 */
+  chanceXg: number;
+  /** 같은 몫의 결정력 반영 기대 득점 */
+  expectedGoals: number;
+  /** 열린 플레이에 남는 비율 — 선수×경로 프로필을 여기에 맞춰 깎는다 */
+  openShare: number;
+}
+
+/**
+ * 페널티를 내줄 상대적 무게 — **공격 몫 × 거칠기**.
+ *
+ * 박스 안으로 자주 들어가는 팀이 자주 얻고(공격 몫 = 그 팀의 기대 슈팅), 거칠게
+ * 수비하는 팀이 자주 내준다(`aggression − composure`의 XI 평균). 이 값은
+ * 정규화되어 쓰이므로 **절대 크기에 뜻이 없다** — 두 팀 사이의 비만 남는다.
+ */
+function penaltyWeight(attackShots: number, defenders: readonly LineupSlot[]): number {
+  if (defenders.length === 0) return attackShots;
+  const rough =
+    defenders.reduce(
+      (sum, slot) => sum + slot.player.attributes.aggression - slot.player.attributes.composure,
+      0,
+    ) / defenders.length;
+  return attackShots * Math.exp(rough / PENALTY_ROUGH_SCALE);
+}
+
+/**
+ * 팀 하나의 죽은 공 프로필 — 발생률은 팀 기대 슈팅에서 떼어 내고, 질은 **키커의
+ * 킥력과 박스 안 제공권**이 정한다 (match.md §1.4).
+ */
+function buildSetPiece(
+  slots: readonly LineupSlot[],
+  oppSlots: readonly LineupSlot[],
+  teamShots: number,
+  penalties: number,
+  intensity: number,
+  designated?: SetPieceTakers,
+): SetPieceBuild {
+  const takers = resolveTakers(slots, designated);
+  const byId = new Map(slots.map((slot) => [slot.player.id, slot.player] as const));
+  const field = slots.filter((slot) => slotGroup(slot) !== "GK");
+
+  const deadBall = Math.max(0, SET_PIECE_SHOT_SHARE * teamShots);
+  const usedPenalties = Math.max(0, Math.min(penalties, Math.max(0, teamShots - deadBall)));
+  const openShare =
+    teamShots > 0 ? Math.max(0, (teamShots - deadBall - usedPenalties) / teamShots) : 1;
+
+  /** 죽은 공에 올라가는 사람들 vs 박스를 지키는 사람들 — 골키퍼는 지키는 쪽에 든다 */
+  const ourAerial = topMean(
+    field.map((slot) => slot.player.attributes.aerial),
+    SET_PIECE_TARGETS,
+  );
+  const theirAerial = topMean(
+    oppSlots.map((slot) => slot.player.attributes.aerial),
+    SET_PIECE_DEFENDERS,
+  );
+  const kickingOf = (id: string | null) =>
+    (id !== null ? byId.get(id)?.attributes.kicking : undefined) ?? SET_PIECE_SKILL_PIVOT;
+  // 코너와 프리킥을 다른 사람이 차면 둘의 평균이 그 팀의 배급 수준이다
+  const delivery = (kickingOf(takers.corner) + kickingOf(takers.freeKick)) / 2;
+  const meanXg = sigmoid(
+    logit(CORNER_XG_BASE) +
+      SET_PIECE_KICK_XG_LOGIT_WEIGHT *
+        ((delivery - SET_PIECE_SKILL_PIVOT) / SET_PIECE_SKILL_SCALE) +
+      SET_PIECE_AERIAL_XG_LOGIT_WEIGHT * ((ourAerial - theirAerial) / SET_PIECE_SKILL_SCALE),
+  );
+
+  /**
+   * 죽은 공을 마무리하는 사람은 **공중볼 가중 추첨**이라(match-engine) 기대값도 같은
+   * 가중으로 읽는다. 직접 프리킥 몫만 키커의 결정력이 선다.
+   */
+  const aerialSum = field.reduce((sum, slot) => sum + slot.player.attributes.aerial, 0);
+  const targetFinishing =
+    aerialSum > 0
+      ? field.reduce(
+          (sum, slot) => sum + slot.player.attributes.aerial * slot.player.attributes.finishing,
+          0,
+        ) / aerialSum
+      : FINISHING_PIVOT;
+  const directShare = (1 - CORNER_SHOT_SHARE) * DIRECT_FREE_KICK_SHARE;
+  const takerFinishing =
+    (takers.freeKick !== null ? byId.get(takers.freeKick)?.attributes.finishing : undefined) ??
+    FINISHING_PIVOT;
+  const finishing = (1 - directShare) * targetFinishing + directShare * takerFinishing;
+
+  const keeper = oppSlots.find((slot) => slotGroup(slot) === "GK")?.player ?? null;
+  const kicker = takers.penalty !== null ? (byId.get(takers.penalty) ?? null) : null;
+  /** 페널티의 성공률이 곧 그 슛의 xG다 — 결정력을 한 번 더 얹지 않는다 (shot-model.ts) */
+  const penaltyXg = kicker ? penaltyRate(kicker, keeper) : 0;
+
+  return {
+    profile: {
+      expectedShots: round4(deadBall),
+      meanXg: round4(meanXg),
+      penalties: round4(usedPenalties),
+      corners: round4(CORNERS_PER_SHOT * teamShots),
+      fouls: round4(teamFoulRate(intensity)),
+      takers,
+    },
+    chanceXg: deadBall * meanXg + usedPenalties * penaltyXg,
+    expectedGoals:
+      deadBall * finishingGoalProbability(meanXg, finishing) + usedPenalties * penaltyXg,
+    openShare,
+  };
+}
+
+/** 선수×경로 프로필을 **열린 플레이 몫으로** 깎는다 — 배분은 그대로, 크기만 줄인다 */
+function scaleProfiles(profiles: PlayerShotProfile[], share: number): PlayerShotProfile[] {
+  if (share === 1) return profiles;
+  return profiles.map((profile) => ({
+    ...profile,
+    routes: profile.routes.map((route) => ({
+      ...route,
+      expectedShots: round4(route.expectedShots * share),
+    })),
+    expectedShots: round4(profile.expectedShots * share),
+    chanceXg: round4(profile.chanceXg * share),
+    expectedGoals: round4(profile.expectedGoals * share),
+  }));
+}
+
 /**
  * 전력 분석 패킷 생성 — 결정적 순수 함수. 같은 입력이면 항상 같은 패킷.
  *
@@ -1137,7 +1359,12 @@ export function buildStrengthPacket(
     ),
   };
   const neutral = options.neutral === true;
-  const shotProfiles = {
+  /**
+   * **선수×경로 프로필이 먼저다** — 그 합이 팀 기대 슈팅이고, 죽은 공 채널은 그
+   * 총량 **안에서** 몫을 가져간다 (match.md §1.4). 그래서 여기서 한 번 통째로
+   * 세우고, 죽은 공을 떼어 낸 뒤 남은 비율로 프로필을 다시 깎는다.
+   */
+  const rawProfiles = {
     home: buildPlayerShotProfiles(
       { home, away },
       "home",
@@ -1153,19 +1380,77 @@ export function buildStrengthPacket(
       neutral ? 1 : AWAY_SHOT_EXPOSURE,
     ),
   };
-  const sumProfiles = (side: MatchSide, read: (profile: PlayerShotProfile) => number) =>
-    shotProfiles[side].reduce((sum, profile) => sum + read(profile), 0);
+  const sumOf = (list: readonly PlayerShotProfile[], read: (p: PlayerShotProfile) => number) =>
+    list.reduce((sum, profile) => sum + read(profile), 0);
+  const teamShots = {
+    home: sumOf(rawProfiles.home, (profile) => profile.expectedShots),
+    away: sumOf(rawProfiles.away, (profile) => profile.expectedShots),
+  };
+  const intensity = {
+    home: matchIntensity(homeIn.tactics),
+    away: matchIntensity(awayIn.tactics),
+  };
+  /**
+   * 페널티는 **양 팀 몫의 합이 `PENALTY_PER_MATCH`가 되도록 정규화한다** — 그래야
+   * 리그 빈도를 손잡이 하나가 쥐고, 거칠기는 그 한 경기 안에서 누가 내주는가만
+   * 기울인다 (match.md §1.4).
+   */
+  const penaltyWeights = {
+    home: penaltyWeight(teamShots.home, awayXI),
+    away: penaltyWeight(teamShots.away, homeXI),
+  };
+  const weightSum = penaltyWeights.home + penaltyWeights.away;
+  const penaltiesOf = (side: MatchSide) =>
+    weightSum > 0 ? (PENALTY_PER_MATCH * penaltyWeights[side]) / weightSum : 0;
+  const setPieceBuilds = {
+    home: buildSetPiece(
+      homeXI,
+      awayXI,
+      teamShots.home,
+      penaltiesOf("home"),
+      intensity.home,
+      homeIn.setPieceTakers,
+    ),
+    away: buildSetPiece(
+      awayXI,
+      homeXI,
+      teamShots.away,
+      penaltiesOf("away"),
+      intensity.away,
+      awayIn.setPieceTakers,
+    ),
+  };
+  const setPieces = {
+    home: setPieceBuilds.home.profile,
+    away: setPieceBuilds.away.profile,
+  };
+  /** 프로필은 이제 **열린 플레이만** 싣는다 — 죽은 공과 페널티는 위에서 떼어 냈다 */
+  const shotProfiles = {
+    home: scaleProfiles(rawProfiles.home, setPieceBuilds.home.openShare),
+    away: scaleProfiles(rawProfiles.away, setPieceBuilds.away.openShare),
+  };
+  /** 세 채널의 합 — 예전과 같은 한 값이라 "실측 슈팅 = 패킷 기대 슈팅"이 그대로 산다 */
   const expectedShots = {
-    home: round2(sumProfiles("home", (profile) => profile.expectedShots)),
-    away: round2(sumProfiles("away", (profile) => profile.expectedShots)),
+    home: round2(teamShots.home),
+    away: round2(teamShots.away),
   };
   const chanceXg = {
-    home: round2(sumProfiles("home", (profile) => profile.chanceXg)),
-    away: round2(sumProfiles("away", (profile) => profile.chanceXg)),
+    home: round2(
+      sumOf(shotProfiles.home, (profile) => profile.chanceXg) + setPieceBuilds.home.chanceXg,
+    ),
+    away: round2(
+      sumOf(shotProfiles.away, (profile) => profile.chanceXg) + setPieceBuilds.away.chanceXg,
+    ),
   };
   const expectedGoals = {
-    home: round2(sumProfiles("home", (profile) => profile.expectedGoals)),
-    away: round2(sumProfiles("away", (profile) => profile.expectedGoals)),
+    home: round2(
+      sumOf(shotProfiles.home, (profile) => profile.expectedGoals) +
+        setPieceBuilds.home.expectedGoals,
+    ),
+    away: round2(
+      sumOf(shotProfiles.away, (profile) => profile.expectedGoals) +
+        setPieceBuilds.away.expectedGoals,
+    ),
   };
 
   /**
@@ -1208,11 +1493,9 @@ export function buildStrengthPacket(
       expectedShots,
       chanceXg,
       shotProfiles,
+      setPieces,
       possession,
-      intensity: {
-        home: matchIntensity(homeIn.tactics),
-        away: matchIntensity(awayIn.tactics),
-      },
+      intensity,
     },
   };
 }

@@ -60,6 +60,8 @@ export interface PacketTag {
     | "exploit"
     | "exploit-dropped"
     | "tactical"
+    /** 죽은 공에서 나온 골 — 키커와 마무리한 선수를 함께 싣는다 (match.md §1.4) */
+    | "set-piece"
     /** 진행 중인 옛 세이브가 들고 있던 문장 — `text`만 갖는다 */
     | "legacy";
   /** 축·상성·지시의 코드 — 판정과 집계의 열쇠 ("space_behind" · "backline-pace") */
@@ -181,6 +183,32 @@ export interface PlayerShotProfile {
   expectedGoals: number;
 }
 
+/**
+ * 팀의 **죽은 공 프로필** — 코너·프리킥·페널티 (match.md §1.4).
+ *
+ * ⚠️ 팀 기대 슈팅 **위에 더하는 것이 아니라 안에서 옮긴 몫**이다. 선수×경로
+ * 프로필(`shotProfiles`)은 이 몫을 뺀 **열린 플레이만** 싣고, 세 채널의 합이
+ * `guide.expectedShots`다 — 그래야 "실측 슈팅 = 패킷 기대 슈팅" 계약이 산다.
+ */
+export interface SetPieceProfile {
+  /** 90분 기대 죽은 공 슛 — 코너 + 프리킥 */
+  expectedShots: number;
+  /** 그 슛 하나의 평균 기회 xG — 키커의 킥력과 박스 안 제공권이 정한다 */
+  meanXg: number;
+  /** 90분 기대 페널티 — 그것도 슛 하나로 센다 */
+  penalties: number;
+  /** 90분 기대 코너 — 사건이 아니라 굴리지 않고 나누는 양이다 (§4) */
+  corners: number;
+  /** 90분 기대 파울 — 같은 자리 */
+  fouls: number;
+  /**
+   * 죽은 공을 차는 사람 — 감독의 지정(`TeamTactics.setPieceTakers`)이 있으면 그 사람,
+   * 없으면 그라운드 위 최고(코너·프리킥은 `kicking`, 페널티는 `penaltySkill`).
+   * 명단이 비면 null이다.
+   */
+  takers: { corner: string | null; freeKick: string | null; penalty: string | null };
+}
+
 export interface SidePacket {
   teamId: string;
   teamName: string;
@@ -266,8 +294,16 @@ export interface StrengthPacket {
     expectedShots?: { home: number; away: number };
     /** 결정력을 넣기 전 기회 xG의 합. */
     chanceXg?: { home: number; away: number };
-    /** 선수별·공격 경로별 슈팅 분포 — 구간/간이 시뮬의 공통 원본. */
+    /**
+     * 선수별·공격 경로별 슈팅 분포 — 구간/간이 시뮬의 공통 원본.
+     * **열린 플레이만** 싣는다: 죽은 공 몫은 아래 `setPieces`가 갖는다 (match.md §1.4).
+     */
     shotProfiles?: { home: PlayerShotProfile[]; away: PlayerShotProfile[] };
+    /**
+     * 팀 단위 죽은 공 프로필 — 두 시뮬의 공통 원본. 진행 중인 옛 세이브에는 없고,
+     * 없으면 그 경기의 남은 구간에 죽은 공 채널이 서지 않는다(열린 플레이만 굴린다).
+     */
+    setPieces?: { home: SetPieceProfile; away: SetPieceProfile };
     /**
      * 공을 쥐는 비율 (0.35~0.65) — **중원 우위가 정한다.**
      * 기대 득점에 실리고, 공 없는 팀의 체력 소모를 키운다.
@@ -277,6 +313,13 @@ export interface StrengthPacket {
     intensity: { home: number; away: number };
   };
 }
+
+/** 죽은 공의 갈래 이름 — 태그의 `code`가 곧 `ShotOrigin`이다 (match.md §1.4) */
+const SET_PIECE_KO: Record<string, string> = {
+  corner: "코너",
+  free_kick: "프리킥",
+  penalty: "페널티",
+};
 
 // ── 태그 → 문장 ───────────────────────────────────────
 /**
@@ -684,6 +727,21 @@ export function packetTagText(tag: PacketTag, ctx?: PacketTagContext): string {
     }
     case "tactical":
       return TACTICAL_KO[tag.code]?.(r) ?? tag.text ?? "";
+    case "set-piece": {
+      const head = SET_PIECE_KO[tag.code] ?? "죽은 공";
+      // 키커가 직접 찬 죽은 공(직접 프리킥·페널티)은 마무리가 곧 키커라 한 사람만 선다
+      const taker = r.who(0);
+      const finisher = r.who(1);
+      const kicking = tag.values.kicking;
+      const aerial = tag.values.aerial;
+      if (!finisher || finisher === taker) {
+        const skill = tag.sharp && kicking !== undefined ? ` (킥력 ${Math.round(kicking)})` : "";
+        return `${head} — ${taker}${skill}가 직접 마무리했다`;
+      }
+      const kick = tag.sharp && kicking !== undefined ? `(킥력 ${Math.round(kicking)})` : "";
+      const head_ = tag.sharp && aerial !== undefined ? `(공중볼 ${Math.round(aerial)})` : "";
+      return `${head} — ${taker}${kick}가 올리고 ${finisher}${head_}가 마무리했다`;
+    }
     case "directive": {
       const line = DIRECTIVE_KO[tag.code]?.(r.who(0), r.who(1));
       if (line === undefined) return tag.text ?? "";

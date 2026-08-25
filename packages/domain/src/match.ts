@@ -54,6 +54,21 @@ export const TEAM_EVENT_TYPES: ReadonlySet<MatchEventType> = new Set([
 export const MATCH_MINUTE_MAX = 130;
 
 /**
+ * **슛의 출처** — 열린 플레이 · 코너 · 프리킥 · 페널티 (match.md §1.4).
+ *
+ * 죽은 공은 열린 플레이와 **같은 총량 안의 별도 채널**이라, 무엇이 그 슛을 만들었는지가
+ * 슛마다 붙는다. 세트피스 득점 비율은 이 칸 하나로 세어진다.
+ */
+export const SHOT_ORIGINS = ["open", "corner", "free_kick", "penalty"] as const;
+export const ShotOriginSchema = z.enum(SHOT_ORIGINS);
+export type ShotOrigin = z.infer<typeof ShotOriginSchema>;
+
+/** 죽은 공에서 나온 슛인가 — 세트피스 몫을 세는 자리가 하나여야 한다 */
+export function isSetPieceOrigin(origin: ShotOrigin | undefined): boolean {
+  return origin !== undefined && origin !== "open";
+}
+
+/**
  * 벤치가 교체를 낸 이유 — **코드다.** 중계가 인용하는 문장은 이 코드를 읽는 쪽이
  * 만든다 (match.md §4).
  */
@@ -77,6 +92,7 @@ export const PacketTagSchema = z.object({
     "exploit",
     "exploit-dropped",
     "tactical",
+    "set-piece",
     "legacy",
   ]),
   code: z.string().min(1),
@@ -162,6 +178,15 @@ export const MatchEventSchema = z.object({
   goalProbability: z.number().min(0).max(1).optional(),
   /** 골도 독립 사건이 아니라 슈팅 결과다. */
   shotOutcome: z.enum(["goal", "saved", "blocked", "off_target"]).optional(),
+  /**
+   * **이 슛이 어디서 나왔나** — 열린 플레이인가 죽은 공인가 (match.md §1.4).
+   *
+   * 죽은 공을 사건으로 따로 적지 않는 이유는 §4의 원칙이다: 코너는 경기당
+   * 스물한 개고 그것을 한 줄씩 적으면 구간 이벤트 상한에 훨씬 자주 닿아 벤치
+   * 정지점과 교체 총량이 조용히 움직인다. 갈래는 **그 슛의 성질**이라 여기 산다.
+   * 옛 세이브엔 없다 — 없으면 `open`으로 읽는다 (optional).
+   */
+  shotOrigin: ShotOriginSchema.optional(),
 });
 export type MatchEvent = z.infer<typeof MatchEventSchema>;
 
@@ -273,6 +298,13 @@ export const MatchStatLineSchema = z.object({
   /** 실제 슈터의 결정력을 반영한 골 확률 합. 옛 세이브는 0으로 읽는다. */
   scoringExpectation: z.number().min(0).default(0),
   saves: z.number().int().min(0),
+  /**
+   * 그 선수가 **찬 코너** — 얻는 것은 팀이지만 차는 것은 한 사람이다.
+   * 사건이 아니라 굴리지 않고 나누는 양이다 (match.md §4). 옛 세이브는 0.
+   */
+  corners: z.number().int().min(0).default(0),
+  /** 그 선수가 **범한 파울** — 같은 자리. 옛 세이브는 0. */
+  fouls: z.number().int().min(0).default(0),
 });
 export type MatchStatLine = z.infer<typeof MatchStatLineSchema>;
 

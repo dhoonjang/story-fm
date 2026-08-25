@@ -42,6 +42,8 @@ const SKILL_ICON: Record<string, IconComponent> = {
   set_tactics: IconBoard,
   set_lineup: IconSquad,
   set_player_tactic: IconJersey,
+  // 키커 지정은 판의 약속이다 — 사람이 아니라 판 쪽 그림으로 읽힌다
+  set_set_piece_takers: IconBoard,
   set_captain: IconCaptain,
   // 1·2군 이동은 판이 아니라 사람이 오가는 일이다 — 라인업과 같은 그림을 쓰면 갈래가 겹친다
   set_squad_level: IconPerson,

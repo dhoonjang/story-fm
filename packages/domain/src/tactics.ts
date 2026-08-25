@@ -1464,6 +1464,27 @@ export function familiarityForSetup(
   return clampFamiliarity(best);
 }
 
+/**
+ * **죽은 공을 차는 사람** — 코너·프리킥·페널티 각각 (match.md §1.4).
+ *
+ * 셋을 따로 두는 이유는 실제 축구가 그렇게 나누기 때문이다: 코너를 올리는 발과
+ * 페널티를 넣는 배짱은 다른 능력이고(`kicking` vs `penaltySkill`) 한 사람이 셋을
+ * 다 맡는 팀도 있다. 비어 있는 자리는 코어의 기본값(그라운드 위 최고)이 채운다 —
+ * 지정하지 않은 감독이 손해 보지 않는다.
+ *
+ * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+ */
+export const SetPieceTakersSchema = z.object({
+  corner: z.string().min(1).optional(),
+  freeKick: z.string().min(1).optional(),
+  penalty: z.string().min(1).optional(),
+});
+export type SetPieceTakers = z.infer<typeof SetPieceTakersSchema>;
+
+/** 지정할 수 있는 죽은 공의 갈래 — 스킬·해석·화면이 나눠 쓰는 한 낱말 */
+export const SET_PIECE_ROLES = ["corner", "freeKick", "penalty"] as const;
+export type SetPieceRole = (typeof SET_PIECE_ROLES)[number];
+
 /** 팀의 현재 전술 + 배치 — GAME_TEAM당 1개 (프리셋 확장 여지) */
 export const TeamTacticsSchema = z.object({
   teamId: z.string().min(1),
@@ -1485,5 +1506,10 @@ export const TeamTacticsSchema = z.object({
    * 각자에게 승계할 출발점으로만 남는다.
    */
   drilled: z.array(DrilledTacticsSchema).optional(),
+  /**
+   * **죽은 공 키커** — 코너·프리킥·페널티. 옛 세이브엔 없다 (SAVE_VERSION 유지).
+   * 없거나 그 선수가 그라운드에 없으면 코어의 기본값이 선다 (match.md §1.4).
+   */
+  setPieceTakers: SetPieceTakersSchema.optional(),
 });
 export type TeamTactics = z.infer<typeof TeamTacticsSchema>;

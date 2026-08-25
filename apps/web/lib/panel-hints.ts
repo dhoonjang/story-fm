@@ -29,6 +29,8 @@ export const PANEL_OF: Record<string, PanelKey> = {
   set_squad_level: "스쿼드",
   set_tactics: "스쿼드",
   set_player_tactic: "스쿼드",
+  // 죽은 공 키커는 판의 사실이다 — 확인하러 갈 화면은 전술판이 선 스쿼드다
+  set_set_piece_takers: "스쿼드",
   set_captain: "스쿼드",
   set_development_focus: "스쿼드",
   set_reserve_training: "스쿼드",

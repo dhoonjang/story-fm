@@ -107,6 +107,20 @@ export const MatchIntentSchema = z.object({
   /** 노릴 표적의 id — 코어가 실재를 대조한다 (`exploits.ts`) */
   exploits: z.array(z.string().min(1)).max(2).optional(),
   /**
+   * **죽은 공 키커** — 감독이 말한 자리만. `null`은 지정 해제다 (match.md §1.4).
+   *
+   * "코너는 사카가 차"·"페널티는 네 거야"는 감독이 가장 흔하게 하는 지시 둘이고,
+   * 그 말이 어느 갈래에도 없으면 `unresolved`로 되돌아간다.
+   */
+  setPieceTakers: z
+    .object({
+      corner: playerId.nullable().optional(),
+      freeKick: playerId.nullable().optional(),
+      penalty: playerId.nullable().optional(),
+    })
+    .optional()
+    .describe("죽은 공 키커 — 감독이 말한 자리만"),
+  /**
    * 승부차기 키커 순서 — 감독이 이름을 든 사람만. 나머지는 코어의 기본 순서가 잇는다.
    *
    * 여기 오는 것은 **누구를 세웠나**까지다 — 들어갔는지 막혔는지는 코어가 굴린다
@@ -137,6 +151,7 @@ export function touchesPitch(intent: MatchIntent): boolean {
     (intent.plans?.length ?? 0) > 0 ||
     (intent.exploits?.length ?? 0) > 0 ||
     (intent.shootoutOrder?.length ?? 0) > 0 ||
+    intent.setPieceTakers !== undefined ||
     intent.tactics !== undefined ||
     intent.advance !== "none"
   );

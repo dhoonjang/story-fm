@@ -174,17 +174,27 @@ function renderSegment(state: GameState, events: MatchEvent[], stop: string): st
   return lines.join("\n");
 }
 
+/** 죽은 공에서 나온 슛인가 — 목 GM도 그 사실을 문장에 싣는다 (match.md §1.4) */
+const MOCK_ORIGIN_KO: Record<string, string> = {
+  corner: "코너에서 ",
+  free_kick: "프리킥에서 ",
+  penalty: "페널티킥 — ",
+};
+
 function renderEvent(state: GameState, ev: MatchEvent): string[] {
   const name = ev.actors[0] ? playerName(state, ev.actors[0]) : "";
+  const from = ev.shotOrigin ? (MOCK_ORIGIN_KO[ev.shotOrigin] ?? "") : "";
   switch (ev.type) {
     case "kickoff":
       return [`@중계: 킥오프! 경기가 시작됩니다.`];
     case "goal": {
       const cause = ev.causes[0] ? ` (${packetTagText(ev.causes[0])})` : "";
-      return [`@중계: *${ev.minute}′ — ${name}, 골입니다!* ${scoreLine(state)}${cause}`];
+      return [`@중계: *${ev.minute}′ — ${from}${name}, 골입니다!* ${scoreLine(state)}${cause}`];
     }
     case "shot":
-      return [`@중계: ${ev.minute}′ ${name}의 슛 — 아깝게 빗나갑니다.`];
+      return [`@중계: ${ev.minute}′ ${from}${name}의 슛 — 아깝게 빗나갑니다.`];
+    case "foul":
+      return [`@중계: ${ev.minute}′ ${name}의 반칙 — 주심이 점을 가리킵니다!`];
     case "chance":
       return [`@중계: ${ev.minute}′ ${name}에게 기회가 왔지만 마무리가 아쉽습니다.`];
     case "save":
