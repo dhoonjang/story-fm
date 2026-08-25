@@ -634,6 +634,13 @@ export interface CalendarEntryView {
    * 여기서 조각을 주면 UI가 `title`을 정규식으로 도려내지 않아도 된다.
    */
   match: {
+    /**
+     * 어느 경기인가 (`MATCH.id`) — 달력 행이 **경기 리포트를 열 열쇠**다 (match.md §8).
+     *
+     * 엔트리 id로 대신할 수 없다: 그러면 리포트를 부르는 자리가 종료 카드(경기 id)와
+     * 달력(엔트리 id) 둘로 갈리고, 한 라우트가 두 가지 id를 받게 된다.
+     */
+    matchId: string;
     /** 대회 약칭 — 리그는 null (기본값이라 칸에 적지 않는다) */
     competition: string | null;
     /** 단계 표기 — 리그는 라운드(`R7`), 컵은 `16강 1차전` */
@@ -2578,6 +2585,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
           win,
           isNext: next !== null && m.id === next.id,
           match: {
+            matchId: m.id,
             // 리그 경기는 이름을 생략한다(감독은 자기 리그를 안다). 컵과 친선은
             // 어느 경기인지가 곧 정보다
             competition: cup || isFriendly(m) ? competitionShortName(m.competitionId) : null,
