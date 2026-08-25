@@ -44,6 +44,29 @@ export function pick<T>(rng: () => number, items: readonly T[]): T {
   return item;
 }
 
+/**
+ * 가중 추첨 — `pick`과 같은 일(하나를 고른다)이되 확률이 균일하지 않다.
+ *
+ * 순수 함수다: 같은 난수열·같은 무게면 언제나 같은 것을 낸다. `rng()`를 **한 번**
+ * 뽑으므로 `pick`과 난수 소비량이 같다. 음수 무게는 0으로 보고, 무게 합이 0이면
+ * (전부 0이거나 음수) 균일 추첨으로 되돌아간다 — 표가 세계를 설명하되 가두지 않는다.
+ */
+export function pickWeighted<T>(
+  rng: () => number,
+  items: readonly T[],
+  weightOf: (item: T) => number,
+): T {
+  const weights = items.map((item) => Math.max(0, weightOf(item)));
+  const total = weights.reduce((sum, w) => sum + w, 0);
+  if (total <= 0) return pick(rng, items);
+  let cursor = rng() * total;
+  for (let i = 0; i < items.length; i++) {
+    cursor -= weights[i]!;
+    if (cursor < 0) return items[i]!;
+  }
+  return items[items.length - 1]!;
+}
+
 export function randInt(rng: () => number, min: number, max: number): number {
   return min + Math.floor(rng() * (max - min + 1));
 }

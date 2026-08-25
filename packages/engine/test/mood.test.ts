@@ -11,6 +11,7 @@ import {
   HEAVY_DEFEAT_MARGIN,
   HEAVY_DEFEAT_PENALTY,
   DEMOTION_PATIENCE_DAYS,
+  demotionPatienceDaysOf,
   MOOD_BATCH,
   MOOD_NOTE_DAYS,
   RUN_MAX,
@@ -31,6 +32,7 @@ import {
   moodAnchor,
   moodFactsOf,
   moodOf,
+  playerArchetypeOf,
   playersOf,
   runBonus,
   slumpPenalty,
@@ -185,6 +187,8 @@ describe("심경 사실 카드 — 코어는 사실만 낸다", () => {
       note: null,
       days: 14,
       count: 4,
+      // 계수가 읽힌 자리는 원형 코드로 남는다 (people.md §6)
+      archetype: playerArchetypeOf(state.seed, coded),
     });
     expect(moodFactsOf(state, legacy)[0]).toEqual({
       cause: "grievance",
@@ -192,6 +196,7 @@ describe("심경 사실 카드 — 코어는 사실만 낸다", () => {
       note: "옛 사유 문장",
       days: 0,
       count: null,
+      archetype: playerArchetypeOf(state.seed, legacy),
     });
     // 앵커는 사실 줄이다 — 평가어도 연출어도 없다
     expect(moodAnchor(moodFactsOf(state, coded))).toContain("불만 4연패 · 14일째");
@@ -811,7 +816,12 @@ describe("2군 강등 — 내린 결정이 사실로 남는다", () => {
     const state = createTestGame();
     const core = demoteCore(state);
     expect(core.state.demotedOn).toBe(state.date);
-    expect(moodFactsOf(state, core)[0]).toEqual({ cause: "demotion", days: 0 });
+    expect(moodFactsOf(state, core)[0]).toEqual({
+      cause: "demotion",
+      days: 0,
+      archetype: playerArchetypeOf(state.seed, core),
+      patienceDays: demotionPatienceDaysOf(state, core),
+    });
     expect(state.issues.some((i) => i.gamePlayerId === core.id)).toBe(false);
   });
 
@@ -835,21 +845,22 @@ describe("2군 강등 — 내린 결정이 사실로 남는다", () => {
    * 민다. 한 주를 통째로 밀면 20일째를 볼 수 없다(판정이 주에 한 번이라 27일째로
    * 건너뛴다).
    */
-  it("문턱 하루 전은 아직 불만이 아니다 — 20일째", () => {
+  it("문턱 하루 전은 아직 불만이 아니다", () => {
     const state = createTestGame();
     const core = demoteCore(state);
     advanceToDow(state, 0); // 일요일
-    core.state.demotedOn = addDays(state.date, -(DEMOTION_PATIENCE_DAYS - 2));
-    advanceDays(state, 1); // 월요일 판정 — 20일째
+    // 문턱은 그 사람의 것이다 — 21일이 아니라 `patience`를 곱한 날 (people.md §6)
+    core.state.demotedOn = addDays(state.date, -(demotionPatienceDaysOf(state, core) - 2));
+    advanceDays(state, 1); // 월요일 판정 — 문턱 하루 전
     expect(state.issues.some((i) => i.gamePlayerId === core.id)).toBe(false);
   });
 
-  it("21일을 그대로 두면 불만이 걸린다 — 사유 코드로, 수치 없이", () => {
+  it("문턱을 그대로 두면 불만이 걸린다 — 사유 코드로, 수치 없이", () => {
     const state = createTestGame();
     const core = demoteCore(state);
     advanceToDow(state, 0); // 일요일
-    core.state.demotedOn = addDays(state.date, -(DEMOTION_PATIENCE_DAYS - 1));
-    advanceDays(state, 1); // 월요일 판정 — 21일째
+    core.state.demotedOn = addDays(state.date, -(demotionPatienceDaysOf(state, core) - 1));
+    advanceDays(state, 1); // 월요일 판정 — 문턱 당일
     const issue = state.issues.find((i) => i.gamePlayerId === core.id);
     expect(issue?.reason).toBe("demotion");
     expect(issue?.kind).toBe("unhappy");
@@ -858,10 +869,56 @@ describe("2군 강등 — 내린 결정이 사실로 남는다", () => {
     expect(issue?.note).toBeUndefined();
   });
 
+  /**
+   * 이 표가 프롬프트에만 살면 GM이 "야심가형"으로 연기하는 선수와 장부의 사실이
+   * 어긋난다 — 대사는 자기 자리를 묻는데 불만은 베테랑과 같은 날 선다 (people.md §6).
+   */
+  it("인내가 다른 두 사람은 같은 날 같은 불만을 내지 않는다", () => {
+    const state = createTestGame();
+    // 핵심 자원끼리 견준다 — 방치 불만은 상위 `SQUAD_CORE_SIZE` 자원에만 걸린다
+    const core = [...userPlayers(state)]
+      .sort((a, b) => b.attributes.overall - a.attributes.overall)
+      .slice(0, 12)
+      .sort((a, b) => demotionPatienceDaysOf(state, a) - demotionPatienceDaysOf(state, b));
+    const [impatient, patient] = [core[0]!, core[core.length - 1]!];
+    const threshold = demotionPatienceDaysOf(state, impatient);
+    expect(threshold).toBeLessThan(demotionPatienceDaysOf(state, patient));
+
+    for (const p of [impatient, patient]) {
+      expect(setSquadLevel(state, { playerId: p.id, level: "reserve" }).ok).toBe(true);
+    }
+    advanceToDow(state, 0); // 일요일
+    // 같은 날 내려간 두 사람 — 짧은 쪽의 문턱 당일에 선다
+    for (const p of [impatient, patient]) p.state.demotedOn = addDays(state.date, -(threshold - 1));
+    advanceDays(state, 1); // 월요일 판정
+
+    expect(state.issues.some((i) => i.gamePlayerId === impatient.id)).toBe(true);
+    expect(state.issues.some((i) => i.gamePlayerId === patient.id)).toBe(false);
+    // 그 이유가 카드에 원형 코드로 남는다
+    expect(moodFactsOf(state, impatient)[0]).toMatchObject({
+      cause: "grievance",
+      reason: "demotion",
+      archetype: playerArchetypeOf(state.seed, impatient),
+    });
+    // 아직 안 걸린 쪽의 카드는 **그의 문턱**을 들고 있다 — 감독이 날짜를 셀 수 있다
+    expect(moodFactsOf(state, patient)[0]).toMatchObject({
+      cause: "demotion",
+      patienceDays: demotionPatienceDaysOf(state, patient),
+    });
+  });
+
+  /** 기준 일수는 그대로다 — 사람이 옮기는 것은 그 위의 배수뿐이다 */
+  it("문턱의 기준은 여전히 21일이다 — 배수 1인 원형이 그 자리에 선다", () => {
+    const state = createTestGame();
+    const days = userPlayers(state).map((p) => demotionPatienceDaysOf(state, p));
+    expect(Math.min(...days)).toBeLessThan(DEMOTION_PATIENCE_DAYS);
+    expect(Math.max(...days)).toBeGreaterThan(DEMOTION_PATIENCE_DAYS);
+  });
+
   it("승격이 그 불만을 푼다 — 내린 날도 함께 지워진다", () => {
     const state = createTestGame();
     const core = demoteCore(state);
-    core.state.demotedOn = addDays(state.date, -DEMOTION_PATIENCE_DAYS);
+    core.state.demotedOn = addDays(state.date, -demotionPatienceDaysOf(state, core));
     passAMonday(state);
     expect(state.issues.some((i) => i.gamePlayerId === core.id)).toBe(true);
 

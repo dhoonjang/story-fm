@@ -264,3 +264,109 @@ export const BROADCAST_SPEAKER = "중계";
 export function normalizeSpeaker(name: string): string {
   return name.replace(/\s+/gu, "");
 }
+
+// ── 선수 원형 — 라벨과 계수는 여기 한 표에 있다 ────────────────
+
+/**
+ * 선수 원형 10종의 코드 — **감독 앞에서 무엇을 먼저 말하는가**로 갈린다
+ * (people.md §6).
+ *
+ * 원형은 (시드, 선수 id)에서 결정적으로 파생하고 세이브에 저장되지 않는다. 코드가
+ * 도메인에 있는 이유는 **화면과 코어가 같은 표를 읽어야** 하기 때문이다 — 사실 카드는
+ * 코드를 싣고 문장은 화면·GM이 쓰므로, 코드 → 라벨을 두 곳에 적으면 갈린다
+ * (AGENTS.md §5 — 한 규칙 한 정의). 추첨의 무게와 말투·동기는 세계의 것이라
+ * `engine/world/player-persona.ts`에 남는다.
+ */
+export const PLAYER_ARCHETYPE_KEYS = [
+  "ambitious",
+  "team_first",
+  "quiet_craftsman",
+  "fierce_competitor",
+  "anxious_prospect",
+  "dressing_room_leader",
+  "professional",
+  "weighing_star",
+  "homegrown_heart",
+  "film_reader",
+] as const;
+export const PlayerArchetypeKeySchema = z.enum(PLAYER_ARCHETYPE_KEYS);
+export type PlayerArchetypeKey = z.infer<typeof PlayerArchetypeKeySchema>;
+
+/** 코드 → 사람이 읽는 이름. 인물 카드의 `원형:` 줄과 사실 카드가 같은 값을 쓴다 */
+export const PLAYER_ARCHETYPE_LABEL: Record<PlayerArchetypeKey, string> = {
+  ambitious: "야심가형",
+  team_first: "팀 우선 베테랑",
+  quiet_craftsman: "조용한 장인",
+  fierce_competitor: "승부욕 과열형",
+  anxious_prospect: "불안한 유망주",
+  dressing_room_leader: "라커룸 리더",
+  professional: "프로페셔널",
+  weighing_star: "저울질하는 스타",
+  homegrown_heart: "구단 애착형",
+  film_reader: "영상 분석형",
+};
+
+/**
+ * 원형이 **상태 전이에 거는 계수 넷** (people.md §6 · 요구사항 3).
+ *
+ * 페르소나는 시뮬 숫자에 직접 손대지 않는다 — 여기 있는 넷이 닿는 곳은 불만이 서는
+ * 날 · 정착 목표 · 성장 확률 · 선수 관문의 점수까지이고, **전력 패킷과 xG는 원형을
+ * 읽지 않는다.** 경기 결과가 사람됨을 읽기 시작하면 같은 스쿼드가 같은 전술로 다른
+ * 점수를 내고, 그 차이를 감독이 되짚을 자리가 없다.
+ *
+ * 히든 능력치가 아니다 — 선수에 새 축을 심는 대신 이미 있는 원형을 읽는다
+ * (player.md §1). 파생이므로 옛 세이브도 로드만으로 같은 계수를 얻는다.
+ */
+export interface PlayerArchetypeTraits {
+  /**
+   * 출전 인내 — 2군 방치 불만의 문턱 일수에 곱하고, 벤치 불만 추첨에는 **역수**로
+   * 걸린다. 크면 늦게 서고 덜 뽑힌다.
+   */
+  patience: number;
+  /**
+   * 구단 애착 — 선수 관문의 「다른 구단의 관심」·「선수의 마음」에 걸린다.
+   * **남을 이유는 곱하고 떠날 이유는 나눈다** (transfer.md §3).
+   */
+  loyalty: number;
+  /**
+   * 직업의식 — 월간 성장 확률과 결산 판정의 **상승** 흡수에 곱한다.
+   * ⚠️ 노화 하락에는 붙지 않는다 (player.md §6).
+   */
+  professionalism: number;
+  /** 정착 목표 배수 — 크면 새 라커룸에 녹아드는 데 더 걸린다 (player.md §9.3) */
+  settling: number;
+}
+
+/**
+ * 원형 → 계수. **밴드 숫자가 적히는 자리는 여기 하나다.**
+ *
+ * 네 열 모두 평균이 1 근처(1.05 · 1.04 · 1.06 · 0.98)다 — 계수는 세계의 눈금을
+ * 옮기는 것이 아니라 같은 눈금 위에서 사람을 가른다. 평균이 밀리면 원형을 붙인 값이
+ * 아니라 문턱을 통째로 조정한 값이 된다.
+ */
+// prettier-ignore
+export const PLAYER_ARCHETYPE_TRAITS: Record<PlayerArchetypeKey, PlayerArchetypeTraits> = {
+  ambitious:            { patience: 0.70, loyalty: 0.75, professionalism: 1.05, settling: 1.00 },
+  team_first:           { patience: 1.45, loyalty: 1.25, professionalism: 1.10, settling: 0.85 },
+  quiet_craftsman:      { patience: 1.15, loyalty: 1.10, professionalism: 1.25, settling: 1.15 },
+  fierce_competitor:    { patience: 0.75, loyalty: 0.95, professionalism: 0.90, settling: 1.05 },
+  anxious_prospect:     { patience: 1.20, loyalty: 1.10, professionalism: 0.95, settling: 1.25 },
+  dressing_room_leader: { patience: 1.25, loyalty: 1.20, professionalism: 1.05, settling: 0.80 },
+  professional:         { patience: 1.10, loyalty: 1.00, professionalism: 1.25, settling: 0.85 },
+  weighing_star:        { patience: 0.60, loyalty: 0.60, professionalism: 0.85, settling: 1.10 },
+  homegrown_heart:      { patience: 1.30, loyalty: 1.45, professionalism: 1.00, settling: 0.80 },
+  film_reader:          { patience: 1.00, loyalty: 1.00, professionalism: 1.15, settling: 0.95 },
+};
+
+/**
+ * 충성이 그 항의 점수를 기울인다 — **남을 이유는 곱하고 떠날 이유는 나눈다.**
+ *
+ * 축을 하나 늘리지 않는 이유: 「구단 애착」을 따로 세우면 갈 곳이 없는 선수에게도
+ * 애착 점수가 붙어 두 사실이 따로 논다. 애착은 **밖의 관심이 있을 때 비로소 값을
+ * 하는 것**이라 그 줄의 무게여야 한다 (transfer.md §3).
+ *
+ * @param means 그 항이 성사시키려는 쪽 — `stay`는 이 구단에 남는 쪽, `leave`는 나가는 쪽
+ */
+export function byLoyalty(score: number, loyalty: number, means: "stay" | "leave"): number {
+  return means === "stay" ? score * loyalty : score / loyalty;
+}

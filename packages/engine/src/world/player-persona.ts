@@ -2,12 +2,16 @@ import {
   ageOf,
   naturalPositionOf,
   weightSlotOf,
+  PLAYER_ARCHETYPE_LABEL,
+  PLAYER_ARCHETYPE_TRAITS,
   type GamePlayer,
   type Persona,
+  type PlayerArchetypeKey,
+  type PlayerArchetypeTraits,
   type WeightSlot,
 } from "@story-fm/domain";
 import { buildSeasonCalendar, FIRST_SEASON } from "../competition/calendar";
-import { makeRng, pick } from "../core/rng";
+import { makeRng, pickWeighted } from "../core/rng";
 import { personaKeywords } from "./persona";
 
 /**
@@ -22,8 +26,7 @@ import { personaKeywords } from "./persona";
  */
 
 interface PlayerArchetype {
-  key: string;
-  label: string;
+  key: PlayerArchetypeKey;
   traits: string[];
   motivation: string;
   speech: { note: string; samples: string[] };
@@ -57,7 +60,6 @@ const NEVER = 0;
 const PLAYER_ARCHETYPES: readonly PlayerArchetype[] = [
   {
     key: "ambitious",
-    label: "야심가형",
     traits: ["출전 시간에 민감", "자기 확신", "계산이 빠르다"],
     motivation: "더 큰 무대에서 뛸 자격이 있다는 걸 지금 증명하고 싶다.",
     speech: {
@@ -72,7 +74,6 @@ const PLAYER_ARCHETYPES: readonly PlayerArchetype[] = [
   },
   {
     key: "team_first",
-    label: "팀 우선 베테랑",
     traits: ["팀을 먼저 본다", "책임감", "요구 대신 제안"],
     motivation: "이 팀이 제대로 돌아가는 걸 보고 유니폼을 벗고 싶다.",
     speech: {
@@ -87,7 +88,6 @@ const PLAYER_ARCHETYPES: readonly PlayerArchetype[] = [
   },
   {
     key: "quiet_craftsman",
-    label: "조용한 장인",
     traits: ["과묵함", "훈련 벌레", "자기 기준이 높다"],
     motivation: "말이 아니라 훈련장에서 자기 값을 증명한다.",
     speech: {
@@ -98,7 +98,6 @@ const PLAYER_ARCHETYPES: readonly PlayerArchetype[] = [
   },
   {
     key: "fierce_competitor",
-    label: "승부욕 과열형",
     traits: ["지는 걸 못 견딘다", "감정이 앞선다", "몸을 사리지 않는다"],
     motivation: "오늘 진 것을 다음 경기에서 갚아야 잠이 온다.",
     speech: {
@@ -113,7 +112,6 @@ const PLAYER_ARCHETYPES: readonly PlayerArchetype[] = [
   },
   {
     key: "anxious_prospect",
-    label: "불안한 유망주",
     traits: ["눈치를 본다", "인정에 목마르다", "실수를 오래 곱씹는다"],
     motivation: "여기 남을 수 있는 선수인지 감독의 입으로 듣고 싶다.",
     speech: {
@@ -127,7 +125,6 @@ const PLAYER_ARCHETYPES: readonly PlayerArchetype[] = [
   },
   {
     key: "dressing_room_leader",
-    label: "라커룸 리더",
     traits: ["남의 이야기를 대신 가져온다", "무게가 있다", "선을 지킨다"],
     motivation: "라커룸이 갈라지지 않게 붙잡는 것이 자기 몫이라 여긴다.",
     speech: {
@@ -142,7 +139,6 @@ const PLAYER_ARCHETYPES: readonly PlayerArchetype[] = [
   },
   {
     key: "professional",
-    label: "프로페셔널",
     traits: ["군더더기가 없다", "규율", "감정을 드러내지 않는다"],
     motivation: "맡은 자리를 매주 같은 수준으로 해내는 것이 자기 직업이라 여긴다.",
     speech: {
@@ -156,7 +152,6 @@ const PLAYER_ARCHETYPES: readonly PlayerArchetype[] = [
   },
   {
     key: "weighing_star",
-    label: "저울질하는 스타",
     traits: ["자기 위상에 민감", "에이전트를 앞세운다", "무대를 즐긴다"],
     motivation: "자기 값을 알아주는 곳에서 뛰고 싶다 — 그게 여기라면 여기다.",
     speech: {
@@ -171,7 +166,6 @@ const PLAYER_ARCHETYPES: readonly PlayerArchetype[] = [
   },
   {
     key: "homegrown_heart",
-    label: "구단 애착형",
     traits: ["구단에서 자랐다", "팬 앞에서 힘을 낸다", "떠나는 이야기를 싫어한다"],
     motivation: "이 유니폼을 입고 뭔가 하나는 남기고 싶다.",
     speech: {
@@ -184,7 +178,6 @@ const PLAYER_ARCHETYPES: readonly PlayerArchetype[] = [
   },
   {
     key: "film_reader",
-    label: "영상 분석형",
     traits: ["장면을 기억한다", "질문이 구체적", "준비가 빠르다"],
     motivation: "왜 그 장면이 그렇게 됐는지 알고 나서야 다음 경기를 준비한다.",
     speech: {
@@ -199,7 +192,7 @@ const PLAYER_ARCHETYPES: readonly PlayerArchetype[] = [
 ];
 
 /** 원형 목록 — 테스트·어드민이 전수를 훑을 때 쓴다 */
-export const PLAYER_ARCHETYPE_LABELS = PLAYER_ARCHETYPES.map((a) => a.label);
+export const PLAYER_ARCHETYPE_LABELS = PLAYER_ARCHETYPES.map((a) => PLAYER_ARCHETYPE_LABEL[a.key]);
 
 type AgeBand = "youth" | "prime" | "veteran";
 
@@ -234,22 +227,6 @@ function archetypeWeight(archetype: PlayerArchetype, slot: WeightSlot, band: Age
 }
 
 /**
- * 가중 추첨 — `pick`과 같은 일(하나를 고른다)이되 확률이 균일하지 않다.
- * 순수 함수다: 같은 난수열·같은 무게면 언제나 같은 것을 낸다.
- */
-function pickWeighted<T>(rng: () => number, items: readonly T[], weightOf: (item: T) => number): T {
-  const weights = items.map((item) => Math.max(0, weightOf(item)));
-  const total = weights.reduce((sum, w) => sum + w, 0);
-  if (total <= 0) return pick(rng, items);
-  let cursor = rng() * total;
-  for (let i = 0; i < items.length; i++) {
-    cursor -= weights[i]!;
-    if (cursor < 0) return items[i]!;
-  }
-  return items[items.length - 1]!;
-}
-
-/**
  * 선수의 페르소나 — 저장하지 않고 (시드, 선수 id)에서 결정적으로 파생한다.
  *
  * 시드 채널에 **선수 id**를 넣는 이유: 이름은 동명이인이 있고 이적으로 팀이 바뀌어도
@@ -257,20 +234,46 @@ function pickWeighted<T>(rng: () => number, items: readonly T[], weightOf: (item
  * 그 출처를 들고 있지 않다.
  */
 export function generatePlayerPersona(seed: number, player: GamePlayer): Persona {
-  const rng = makeRng(seed, `persona:player:${player.id}`);
-  const slot = weightSlotOf(naturalPositionOf(player).position);
-  const band = ageBandOf(ageOf(player.birthdate, PERSONA_AGE_REF));
-  const archetype = pickWeighted(rng, PLAYER_ARCHETYPES, (a) => archetypeWeight(a, slot, band));
+  const archetype = archetypeOf(seed, player);
   return {
     // 화자 태그는 직책이 아니라 이름이다 — 코치와 같은 규약
     characterId: player.name,
     name: player.name,
     role: "player",
-    archetype: archetype.label,
+    archetype: PLAYER_ARCHETYPE_LABEL[archetype.key],
     traits: [...archetype.traits],
     motivation: archetype.motivation,
     speechStyle: { note: archetype.speech.note, samples: [...archetype.speech.samples] },
     keywords: personaKeywords({ name: player.name, role: "player" }),
     seed,
   };
+}
+
+/** 추첨 한 번 — 카드를 짓는 쪽과 계수를 읽는 쪽이 같은 뽑기를 지난다 */
+function archetypeOf(seed: number, player: GamePlayer): PlayerArchetype {
+  const rng = makeRng(seed, `persona:player:${player.id}`);
+  const slot = weightSlotOf(naturalPositionOf(player).position);
+  const band = ageBandOf(ageOf(player.birthdate, PERSONA_AGE_REF));
+  return pickWeighted(rng, PLAYER_ARCHETYPES, (a) => archetypeWeight(a, slot, band));
+}
+
+/**
+ * 이 선수의 원형 코드 — 카드를 짓지 않고 **뽑기만** 한다.
+ *
+ * 코어 판정(불만 문턱·선수 관문·성장·정착)이 매번 부르는 자리라 말투·예시 대사까지
+ * 짓는 `generatePlayerPersona`를 쓰지 않는다. 같은 난수 채널을 지나므로 둘은 언제나
+ * 같은 원형을 낸다.
+ */
+export function playerArchetypeOf(seed: number, player: GamePlayer): PlayerArchetypeKey {
+  return archetypeOf(seed, player).key;
+}
+
+/**
+ * 이 선수의 **상태 전이 계수** — 원형 표(도메인)의 한 행 (people.md §6).
+ *
+ * 저장하지 않는다: 원형이 (시드, 선수 id)의 결정적 파생이므로 계수도 파생이고,
+ * 옛 세이브는 로드만으로 같은 값을 얻는다.
+ */
+export function archetypeTraitsOf(seed: number, player: GamePlayer): PlayerArchetypeTraits {
+  return PLAYER_ARCHETYPE_TRAITS[playerArchetypeOf(seed, player)];
 }

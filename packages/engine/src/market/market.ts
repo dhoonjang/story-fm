@@ -1,5 +1,11 @@
 import type { GamePlayer, NegotiationKind, PitchClaim, PitchClaimKind } from "@story-fm/domain";
-import { MAX_PAYMENT_YEARS, ageOf, effectiveFeeOf, naturalPositionOf } from "@story-fm/domain";
+import {
+  MAX_PAYMENT_YEARS,
+  ageOf,
+  byLoyalty,
+  effectiveFeeOf,
+  naturalPositionOf,
+} from "@story-fm/domain";
 import { diffDays, windowOpenOn } from "../competition/calendar";
 import { claimLabel, evaluatePitch } from "./persuasion";
 import { isMarketOnlyLeague, leagueCatalogById } from "../data/league-catalog";
@@ -9,6 +15,7 @@ import { leagueOfTeamIn } from "../competition/promotion";
 import { euroCompetitionOf } from "../competition/europe";
 import { hashChannel } from "../core/rng";
 import { betterAtPosition, squadDepthOf } from "../squad/depth";
+import { archetypeTraitsOf } from "../world/player-persona";
 import { knowledgeOf, KNOWLEDGE_KO, type Knowledge } from "../squad/scouting";
 import { userWageRoom } from "../club/board-request";
 import { budgetFreezeLabel, formatMoney } from "../club/finance";
@@ -621,18 +628,23 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
   }
 
   // 상대 사정에 대응하는 선수 사정 — 갈 곳 · 나이 · 지금 계약 (transfer.md §3)
+  /**
+   * 밖의 관심이 얼마나 무겁게 실리는가는 **사람마다 다르다** (transfer.md §3).
+   * 영입에서 재는 애착은 **지금 구단**에 대한 것이라, 애착이 큰 선수일수록 오지 않는다.
+   */
+  const loyalty = archetypeTraitsOf(state.seed, player).loyalty;
   const suitors = suitorCountOf(state, player);
   if (suitors >= SUITORS_MANY) {
     contributions.push({
       gate: "player",
-      score: -0.5,
+      score: byLoyalty(-0.5, loyalty, "stay"),
       label: "다른 구단의 관심",
       why: `우리 말고도 그를 곧바로 주전으로 쓸 구단이 ${suitors}곳이다 — 급하지 않다`,
     });
   } else if (suitors === 0) {
     contributions.push({
       gate: "player",
-      score: 0.5,
+      score: byLoyalty(0.5, loyalty, "leave"),
       label: "다른 구단의 관심",
       why: "지금 그를 주전으로 쓸 구단은 우리뿐이다",
     });
@@ -951,7 +963,8 @@ function sellOdds(
   if (hasIssue(state, player.id)) {
     contributions.push({
       gate: "player",
-      score: 0.5,
+      // 같은 불만도 구단 애착형은 남는 쪽으로 접힌다 (transfer.md §3)
+      score: byLoyalty(0.5, archetypeTraitsOf(state.seed, player).loyalty, "leave"),
       label: "선수의 마음",
       why: `라커룸에 불만이 쌓여 있다 — 팀에 남을 마음이 옅다`,
     });
@@ -1172,16 +1185,18 @@ function renewOdds(
     });
   }
 
+  // 남을 이유는 곱하고 떠날 이유는 나눈다 (transfer.md §3 · people.md §6)
+  const loyalty = archetypeTraitsOf(state.seed, player).loyalty;
   const suitors = suitorCountOf(state, player);
   if (suitors >= SUITORS_MANY) {
     contributions.push({
-      score: -0.6,
+      score: byLoyalty(-0.6, loyalty, "leave"),
       label: "다른 구단의 관심",
       why: `그를 곧바로 주전으로 쓸 구단이 ${suitors}곳이다 — 남을 이유가 그만큼 약하다`,
     });
   } else if (suitors === 0) {
     contributions.push({
-      score: 0.6,
+      score: byLoyalty(0.6, loyalty, "stay"),
       label: "다른 구단의 관심",
       why: "지금 그를 주전으로 쓸 구단이 없다 — 남는 것이 최선이다",
     });
@@ -1220,13 +1235,13 @@ function renewOdds(
    */
   if (hasIssue(state, player.id)) {
     contributions.push({
-      score: -0.7,
+      score: byLoyalty(-0.7, loyalty, "leave"),
       label: "선수의 마음",
       why: `라커룸에 불만이 쌓여 있다 — 팀에 남을 마음이 옅다`,
     });
   } else if (player.state.form > -0.33) {
     contributions.push({
-      score: 0.4,
+      score: byLoyalty(0.4, loyalty, "stay"),
       label: "선수의 마음",
       why: `불만 없이 제 경기를 하고 있다 — 팀 분위기에 만족한다`,
     });
@@ -1340,16 +1355,18 @@ function releaseOdds(
     });
   }
 
+  // 해지는 나가는 쪽이 성사다 — 부호만 재계약과 반대이고 계수가 걸리는 결은 같다
+  const loyalty = archetypeTraitsOf(state.seed, player).loyalty;
   const suitors = suitorCountOf(state, player);
   if (suitors >= SUITORS_MANY) {
     contributions.push({
-      score: 0.6,
+      score: byLoyalty(0.6, loyalty, "leave"),
       label: "다른 구단의 관심",
       why: `그를 곧바로 주전으로 쓸 구단이 ${suitors}곳이다 — 나가도 갈 곳이 있다`,
     });
   } else if (suitors === 0) {
     contributions.push({
-      score: -0.6,
+      score: byLoyalty(-0.6, loyalty, "stay"),
       label: "다른 구단의 관심",
       why: "지금 그를 주전으로 쓸 구단이 없다 — 나가면 갈 곳이 없다",
     });
@@ -1373,7 +1390,7 @@ function releaseOdds(
 
   if (hasIssue(state, player.id)) {
     contributions.push({
-      score: 0.5,
+      score: byLoyalty(0.5, loyalty, "leave"),
       label: "선수의 마음",
       why: "라커룸에 불만이 쌓여 있다 — 정리하고 나가는 쪽으로 기운다",
     });
