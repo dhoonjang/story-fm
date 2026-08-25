@@ -5,6 +5,7 @@ import {
   otherSide,
   positionGroupOf,
   positionGroupOfPlayer,
+  tacticToggleValue,
 } from "@story-fm/domain";
 import type { LineupSlot } from "./strength-packet";
 
@@ -169,6 +170,15 @@ type Counter = (us: CounterContext, them: CounterContext) => CounterEffect[] | n
 const ramp = (value: number, from: number, to: number) =>
   Math.max(0, Math.min(1, (value - from) / (to - from)));
 
+/**
+ * 오프사이드 트랩은 **감독이 켰을 때만** 적응도를 탄다 (match.md §1.2).
+ * 켜고 손에 익으면 뒷공간 대가를 15% 덜 물고(0.85), 안 익으면 1.60까지 불어난다.
+ * 끄면 뒷공간을 발로만 덮는 값 하나로 고정 — 내린 적 없는 지시의 대가를 물지 않는다.
+ */
+const TRAP_DRILLED_FLOOR = 0.85;
+const TRAP_DRILLED_SPAN = 0.75;
+const TRAP_OFF = 1.15;
+
 const COUNTERS: Array<{ id: string; run: Counter }> = [
   /**
    * ① **뒷공간** — 하이라인의 고전적 대가.
@@ -176,7 +186,8 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
    * 라인을 올리면 경기가 압축되지만 최종 수비선 뒤가 열린다. 그 공간을 실제로
    * 쓰려면 상대에게 **속도**가 있어야 하고, 우리에겐 **쓸어 담을 골키퍼**가 있으면
    * 견딘다(알리송·에데르송이 하이라인을 지탱하는 방식). 그리고 오프사이드 트랩은
-   * 열한 명이 같이 올라가야 성립하므로 **전술 적응도**가 낮으면 무너진다.
+   * **감독이 켰을 때만** 이 대가를 갈라 놓는다 — 열한 명이 같이 올라가야 성립하므로
+   * 켜 두고 **전술 적응도**가 낮으면 무너지고, 손에 익으면 되레 대가를 깎는다.
    */
   {
     id: "space_behind",
@@ -189,7 +200,8 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
       const line = us.spec.defensiveLine - 3;
       const drilled =
         mean(us.slots.map((s) => s.familiarity ?? FAMILIARITY_BASELINE)) / FAMILIARITY_MAX;
-      const trap = 1 + (1 - drilled) * 0.5; // 손발이 안 맞으면 트랩이 무너진다
+      const ordered = tacticToggleValue(us.spec, "offsideTrap") !== null;
+      const trap = ordered ? TRAP_DRILLED_FLOOR + (1 - drilled) * TRAP_DRILLED_SPAN : TRAP_OFF;
       const size = -0.05 * severity * line * (1 - sweeper * 0.4) * trap;
       return [
         {
@@ -201,7 +213,8 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
             values: { fwPace: them.fwPace, cbPace: us.cbPace },
             flags: [
               ...(sweeper > 0.5 ? ["sweeper"] : []),
-              ...(trap > 1.2 ? ["trap-unfamiliar"] : []),
+              ...(ordered && trap > 1.2 ? ["trap-unfamiliar"] : []),
+              ...(ordered && trap < 1 ? ["trap-drilled"] : []),
             ],
           },
         },
@@ -215,11 +228,18 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
    * 압박은 상대가 **짧게 연결하려 할 때** 걸린다. 상대 후방의 빌드업 역량(패스·
    * 침착성)이 낮을수록 크게 걸리고, 로드리 같은 중원이 있으면 빠져나간다.
    * 걸리면 상대 중원이 마비되고 우리는 높은 곳에서 공을 얻는다.
+   *
+   * **뒤에서 짧게 푸는 것은 GK가 하는 일이라** 상대의 배급 지시가 패스 축을 덮는다
+   * (match.md §1.2).
    */
   {
     id: "press_trap",
     run: (us, them) => {
-      if (us.spec.pressing < 4 || them.spec.passStyle > 2) return null;
+      if (us.spec.pressing < 4) return null;
+      const keeper = tacticToggleValue(them.spec, "keeperDistribution");
+      // 넘겨 버리면 함정에 걸릴 일이 없고, GK가 짧게 풀면 패스 축이 길어도 걸린다
+      if (keeper === "long") return null;
+      if (keeper !== "short" && them.spec.passStyle > 2) return null;
       const weak = ramp(78 - (them.buildUp + them.pressResist) / 2, 0, 18);
       if (weak <= 0) return null;
       const power = (us.spec.pressing - 3) * weak;
@@ -270,11 +290,18 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
    *
    * 짧은 패스는 후방 자원의 발을 요구한다. 센터백·골키퍼의 패스와 침착성이
    * 부족한데 상대가 압박해 오면 **우리 골문 앞에서** 공을 잃는다.
+   *
+   * 뒤에서 푸는 것을 정하는 것은 GK 배급이라, 그 지시가 패스 축을 덮는다
+   * (match.md §1.2).
    */
   {
     id: "buildup_collapse",
     run: (us, them) => {
-      if (us.spec.passStyle > 2 || them.spec.pressing < 4) return null;
+      if (them.spec.pressing < 4) return null;
+      const keeper = tacticToggleValue(us.spec, "keeperDistribution");
+      // 넘겨 버리면 위험 지역에서 잃을 일이 없고, 짧게 풀면 패스 축이 길어도 잃는다
+      if (keeper === "long") return null;
+      if (keeper !== "short" && us.spec.passStyle > 2) return null;
       const shaky = ramp(74 - us.buildUp, 0, 16);
       if (shaky <= 0) return null;
       return [
@@ -421,13 +448,20 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
   /**
    * ⑩ **역습** — 내려서서 속도로 되받는다.
    *
-   * 상대가 나와 있고(하이라인 + 공격적), 우리는 낮게 서서 빠르게 전환하며,
-   * 전방에 속도가 있을 때 성립한다. 레스터 2016이 한 일이 정확히 이것이다.
+   * 상대가 나와 있고(하이라인 + 공격적), 전방에 속도가 있을 때 성립한다. 레스터
+   * 2016이 한 일이 정확히 이것이다.
+   *
+   * **감독이 역습을 지시하면 문이 열린다** — 낮게 서서 빠르게 전환하는 6축 조합을
+   * 갖추지 않아도 된다. 지시는 문을 열 뿐이고 폭은 그대로다 (match.md §1.2).
    */
   {
     id: "counter_attack",
     run: (us, them) => {
-      if (us.spec.mentality > 2 || us.spec.tempo < 4) return null;
+      const transition = tacticToggleValue(us.spec, "transition");
+      if (transition === "regroup") return null; // 자리부터 잡으라 했으면 역습은 없다
+      const ordered = transition === "counter";
+      // 지시는 문을 열 뿐 폭을 키우지 않는다 — 멘탈리티·템포를 갖추지 않아도 성립한다
+      if (!ordered && (us.spec.mentality > 2 || us.spec.tempo < 4)) return null;
       if (!isCommitted(them)) return null;
       const speed = ramp(us.fwPace, 70, 92);
       if (speed <= 0) return null;
@@ -438,7 +472,7 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
           side: us.side,
           attack: 0.07 * speed * room,
           kind: "gain",
-          note: { values: { fwPace: us.fwPace } },
+          note: { values: { fwPace: us.fwPace }, flags: ordered ? ["ordered"] : [] },
         },
       ];
     },
