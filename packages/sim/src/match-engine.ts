@@ -24,7 +24,12 @@ import {
   TACTIC_SCALE_MIN,
   TACTIC_SCALE_NEUTRAL,
 } from "@story-fm/domain";
-import { directiveDrain, type DirectiveInput } from "./directives";
+import {
+  directiveBookingScale,
+  directiveDrain,
+  takenDirectives,
+  type DirectiveInput,
+} from "./directives";
 import { emptyStatLine, subLimitsOf, type MatchLedgerState } from "./match-ledger";
 import { conditionDrain, drainVariance } from "./stamina";
 import { penaltyRate, penaltySkill, sampleShot, savedShare } from "./shot-model";
@@ -99,11 +104,12 @@ export interface SegmentInput {
   /** 양팀 전술 — 체력 소모가 지시에 따라 갈린다 (stamina.ts) */
   tactics: { home: TacticsSpec; away: TacticsSpec };
   /**
-   * 개인 지시 — **체력 소모가 지시를 탄다** (`directiveDrain`).
+   * 개인 지시 — **존 전력 밖에서 지시가 닿는 두 곳**이 여기서 계산된다.
    *
-   * 존 전력은 패킷이 이미 반영했지만(`applyDirectives`) 다리는 따로 계산된다:
-   * 상대 시작점을 전담 압박한 선수는 20% 더 마르고, 뒤에 남으라는 지시를 받은
-   * 풀백은 10% 덜 마른다. 안 주면 전원 배수 1이라 **아무것도 바뀌지 않는다.**
+   * 존 전력은 패킷이 이미 반영했지만(`applyDirectives`) 다리(`directiveDrain`)와
+   * 카드(`directiveBookingScale`)는 따로다: 상대 시작점을 전담 압박한 선수는 20% 더
+   * 마르고, 발을 빼라는 지시를 받은 선수는 카드·파울·곧장 퇴장이 절반이 된다.
+   * 안 주면 전원 배수 1이라 **아무것도 바뀌지 않는다.**
    */
   directives?: { home?: readonly DirectiveInput[]; away?: readonly DirectiveInput[] };
   /**
@@ -432,10 +438,18 @@ export const BOOKED_AGAIN_WEIGHT = 0.35;
 /**
  * 카드를 받을 상대 가중 — 적극성이 높고 태클이 약한 선수가 자주 받는다.
  * 간이 시뮬도 이 식을 함께 쓴다 (`engine/quick-sim.ts`).
+ *
+ * `directiveScale`은 개인 지시가 거는 배수다(`directiveBookingScale`) — `careful`을
+ * 받은 선수만 1이 아니다. **상대 가중이라 팀 카드 총량은 움직이지 않는다**: 한 명을
+ * 낮추면 같은 장수가 팀 동료에게 가고, 주는 것은 그 선수의 두 번째 경고다.
  */
-export function bookingWeight(player: Player, alreadyBooked: boolean): number {
+export function bookingWeight(player: Player, alreadyBooked: boolean, directiveScale = 1): number {
   const a = player.attributes;
-  return (a.aggression * 1.5 + (99 - a.tackling) * 0.5) * (alreadyBooked ? BOOKED_AGAIN_WEIGHT : 1);
+  return (
+    (a.aggression * 1.5 + (99 - a.tackling) * 0.5) *
+    (alreadyBooked ? BOOKED_AGAIN_WEIGHT : 1) *
+    directiveScale
+  );
 }
 
 /** 이번 카드를 받는 사람 — 온필드에서 `bookingWeight`로 뽑는다 */
@@ -444,9 +458,11 @@ function pickBooked(
   squad: SegmentSquad,
   gone?: ReadonlySet<string>,
   booked?: Readonly<Record<string, number>>,
+  /** 선수 id → 개인 지시가 거는 카드 배수. 없으면 전원 1 */
+  directiveScale?: ReadonlyMap<string, number>,
 ): Player | null {
   return weightedPick(rng, outfield(squad, gone), (p) =>
-    bookingWeight(p, (booked?.[p.id] ?? 0) > 0),
+    bookingWeight(p, (booked?.[p.id] ?? 0) > 0, directiveScale?.get(p.id) ?? 1),
   );
 }
 
@@ -595,13 +611,34 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
     directives,
   } = input;
   /**
+   * **실제로 걸린 지시만** — 판정은 `foldDirectives` 한 곳이다 (match.md §2).
+   * 넷째 지시는 존 전력에도 안 실리므로 다리와 카드에도 실리면 안 된다: 노트가
+   * "안 걸렸다"고 말한 지시가 판 밖에서 조용히 값을 하는 거짓 성공이 된다.
+   */
+  const onPitchOf = (side: MatchSide) => (id: string) =>
+    (side === "home" ? squads.home : squads.away).onPitch.some((p) => p.id === id);
+  const taken = (["home", "away"] as const).flatMap((side) =>
+    takenDirectives(
+      directives?.[side],
+      onPitchOf(side),
+      onPitchOf(side === "home" ? "away" : "home"),
+    ),
+  );
+  /**
    * 선수 id → 지시가 얹는 소모 배수. 지시를 안 받은 선수는 여기 없고 1로 읽힌다.
    */
   const drainOf = new Map<string, number>(
-    [...(directives?.home ?? []), ...(directives?.away ?? [])].map(
-      // 세기도 다리에 걸린다 — 세게 걸수록 얻는 것만 크는 것이 아니다
-      (d) => [d.by, directiveDrain(d.kind, d.intensity)] as const,
-    ),
+    // 세기도 다리에 걸린다 — 세게 걸수록 얻는 것만 크는 것이 아니다
+    taken.map((d) => [d.by, directiveDrain(d.kind, d.intensity)] as const),
+  );
+  /**
+   * 선수 id → 지시가 카드 가중에 거는 배수 (`careful`, match.md §2). 1인 지시는 담지
+   * 않아 다른 갈래를 받은 선수도 예전과 같은 수를 낸다.
+   */
+  const bookingScaleOf = new Map<string, number>(
+    taken
+      .map((d) => [d.by, directiveBookingScale(d.kind, d.intensity)] as const)
+      .filter(([, scale]) => scale !== 1),
   );
   const events: MatchEvent[] = [];
   const fatigue: Record<string, number> = {};
@@ -823,7 +860,8 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
       );
       if (corners > 0 && cornerTaker) lineOf(cornerTaker.id).corners += corners;
       const fouls = spreadCount(Math.round(sp.fouls * elapsedShare), players, (p) =>
-        bookingWeight(p, false),
+        // 발을 뺀 선수는 파울도 덜 한다 — 카드와 같은 가중이므로 여기서 함께 준다
+        bookingWeight(p, false, bookingScaleOf.get(p.id) ?? 1),
       );
       players.forEach((p, i) => {
         const n = fouls[i] ?? 0;
@@ -1008,7 +1046,7 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
        * **내준 반칙은 사람에게 붙는다** — 경기당 0.25줄이라 값이 싸고, 이것이
        * 없으면 "왜 줬나"가 장부에 없다. 뽑는 가중은 카드와 같다 (match.md §1.4).
        */
-      const fouler = pickBooked(rng, squadOf(against), gone, yellows[against]);
+      const fouler = pickBooked(rng, squadOf(against), gone, yellows[against], bookingScaleOf);
       // 파울의 **수**는 흐름과 함께 나누는 양이 갖는다(`spreadFlow`) — 여기서 한 장
       // 더 세면 팀 합계가 손잡이(`FOULS_PER_MATCH`) 위로 조용히 올라간다
       if (fouler) {
@@ -1040,10 +1078,15 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
     }
 
     if (kind === "card") {
-      const booked = pickBooked(rng, squad, gone, yellows[side]);
+      const booked = pickBooked(rng, squad, gone, yellows[side], bookingScaleOf);
       if (!booked) continue;
       const already = (yellows[side][booked.id] ?? 0) > 0;
-      const straightRed = rng() < STRAIGHT_RED_CHANCE;
+      /**
+       * **곧장 퇴장만 절대량이 준다.** 누가 카드를 받는지는 상대 가중이라 총량이
+       * 보존되지만, 이 굴림은 뽑힌 사람 하나의 확률이라 `careful`이 그대로 깎는다 —
+       * 발을 뺀 선수가 걷어차서 나가는 일은 실제로 줄어든다.
+       */
+      const straightRed = rng() < STRAIGHT_RED_CHANCE * (bookingScaleOf.get(booked.id) ?? 1);
       const card = (type: "yellow_card" | "red_card") => {
         events.push({ minute, type, team: side, actors: [booked.id], causes: [] });
       };

@@ -418,6 +418,7 @@ const DIRECTIVE_KO: Record<string, (by: string, target: string) => string> = {
   focus_play: (n) => `${n}에게 공격을 몰아준다, 다른 길이 줄어든다`,
   stay_back: (n) => `${n}은(는) 뒤에 남는다, 앞의 인원이 준다`,
   join_attack: (n) => `${n}이(가) 적극적으로 올라간다, 뒷공간을 내준다`,
+  careful: (n) => `${n}이(가) 발을 뺀다, 그 자리의 압박이 준다`,
 };
 
 /** 공략이 그라운드에서 무엇으로 보이는가 — 축 하나가 한 낱말이다 */
