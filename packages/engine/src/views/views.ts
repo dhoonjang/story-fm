@@ -3151,6 +3151,7 @@ const TIMELINE_TYPES: ReadonlySet<MatchEventType> = new Set([
   "red_card",
   "substitution",
   "injury",
+  "tactical_shift",
   "half_time",
   "extra_time_start",
   "extra_half_time",
