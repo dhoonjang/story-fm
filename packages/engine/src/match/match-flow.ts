@@ -58,6 +58,7 @@ import { careerTotalsOf, settleMilestones } from "../squad/career";
 import { clampForm, formDeltaFromMatch } from "../squad/form";
 import { matchCaptainOf } from "../squad/hierarchy";
 import { applyResultMood } from "../squad/slump";
+import { derbyOf } from "../data/derbies";
 import { managerTacticsOf } from "./manager-tactics";
 import { matchRating, type MatchRatingBrief, type PlayerMatchBrief } from "./ratings";
 import { grantManagerXP, IN_MATCH_FAMILIARITY_LOSS } from "../skills";
@@ -384,10 +385,19 @@ function buildPacketFor(
       directives: directivesOnPitch(state, teamId, ledgerSide.onPitch),
     };
   };
+  /**
+   * 더비도 **경기가 갖고 있는 사실**이다 (중립 경기장과 같은 결) — 표가 정하고
+   * 패킷이 컨텍스트 태그와 강도 배수로 싣는다 (match.md §1 · team.md §3.2).
+   */
+  const derby = derbyOf(match.homeTeamId, match.awayTeamId);
   return buildStrengthPacket(
     build(match.homeTeamId, pending.ledger.home),
     build(match.awayTeamId, pending.ledger.away),
-    { neutral: match.neutral === true, inMatch },
+    {
+      neutral: match.neutral === true,
+      inMatch,
+      ...(derby ? { derby: { name: derby.name, heat: derby.heat } } : {}),
+    },
   );
 }
 
@@ -1896,12 +1906,13 @@ export function finalizeMatch(state: GameState): MatchDigest {
    * 같은 규칙이다. 경기 결과가 장부에 쓰인 **뒤**라야 이번 경기가 연속 기록에
    * 들어간다. 남의 라커룸 소식은 브리핑하지 않는다 — 감독은 조회로 안다.
    */
+  const derbyHeat = derbyOf(match.homeTeamId, match.awayTeamId)?.heat ?? 0;
   for (const which of ["home", "away"] as const) {
     const diff =
       which === "home"
         ? ledger.score.home - ledger.score.away
         : ledger.score.away - ledger.score.home;
-    const runNote = applyResultMood(state, teamIdOf[which], diff, lineupOf[which]);
+    const runNote = applyResultMood(state, teamIdOf[which], diff, lineupOf[which], derbyHeat);
     if (runNote && which === side) digest.push(runNote);
   }
 

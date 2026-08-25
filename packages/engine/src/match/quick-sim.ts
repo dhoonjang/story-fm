@@ -142,14 +142,14 @@ export function quickStrengthFactor(ours: number, theirs: number): number {
 }
 
 /**
- * 이 팀이 경기에 싣는 강도 — 압박·템포에서 나온다(`matchIntensity`, 0.8~1.3).
+ * 이 팀이 경기에 싣는 강도 — 압박·템포가 만들고 더비가 곱한다(`matchIntensity`).
  *
  * 구간 시뮬은 패킷의 `guide.intensity`를 읽지만, 카드·부상은 슈팅과 달리 **경기
  * 전에 한 번** 뽑아 타임라인 위에 얹으므로 여기서는 패킷을 세우기 전에 같은
  * 함수를 직접 부른다. 패킷의 값도 이 함수가 낸 것이라 두 경로가 같은 수를 준다.
  */
-function intensityOf(squad: SimSquad): number {
-  return matchIntensity(squad.tactics ?? DEFAULT_TACTICS);
+function intensityOf(squad: SimSquad, derbyHeat = 0): number {
+  return matchIntensity(squad.tactics ?? DEFAULT_TACTICS, derbyHeat);
 }
 
 function outfield(players: readonly GamePlayer[]): GamePlayer[] {
@@ -203,8 +203,10 @@ function sampleCardMinutes(
   /** 경기당 기대치에서 이 구간이 차지하는 몫 — 90분은 1, 연장은 30/90 */
   share: number,
   minuteOf: () => number,
+  /** 더비면 1~3 — 강도 배수가 카드 기대치에 그대로 실린다 (match.md §7) */
+  derbyHeat = 0,
 ): number[] {
-  const count = samplePoisson(rng, teamCardRate(intensityOf(squad)) * share);
+  const count = samplePoisson(rng, teamCardRate(intensityOf(squad, derbyHeat)) * share);
   return Array.from({ length: count }, minuteOf).sort((a, b) => a - b);
 }
 
@@ -263,6 +265,8 @@ function rollInjury(
   into: string[],
   /** 경기당 기대치에서 이 구간이 차지하는 몫 — 90분은 1, 연장은 30/90 */
   share = 1,
+  /** 더비면 1~3 — 카드와 같은 강도 배수를 탄다 */
+  derbyHeat = 0,
 ): void {
   if (played.length === 0) return;
   const proneOf = (p: GamePlayer) => squad.proneness?.[p.id] ?? 1;
@@ -274,7 +278,7 @@ function rollInjury(
    * 팀당 기대치가 0.05~0.07이라 둘의 차이는 λ와 1 − e^(−λ), 3% 안쪽이다 — 대신
    * 여기서는 한 팀이 한 경기에 두 명을 잃지 않는다.
    */
-  if (rng() >= teamInjuryRate(intensityOf(squad), avgProneness) * share) return;
+  if (rng() >= teamInjuryRate(intensityOf(squad, derbyHeat), avgProneness) * share) return;
   const weights = played.map((p) => injuryWeight(p, 0, proneOf(p)));
   const total = weights.reduce((s, w) => s + w, 0);
   if (total <= 0) return;
@@ -434,6 +438,8 @@ interface TimelineInput {
   /** 구간이 끝나는 분의 슈팅 밀도 — 90분 본 경기는 하프별, 연장은 상수 */
   densityOf: (end: number) => number;
   neutral: boolean;
+  /** 이 대진이 더비인가 — 패킷의 강도 배수와 컨텍스트 태그가 여기서 선다 */
+  derby?: { name: string; heat: number };
   /** 경기 전에 뽑은 카드의 분 — 수신자는 워크가 그 분의 온필드에서 고른다 */
   cardMinutes: { home: readonly number[]; away: readonly number[] };
   /** 벤치 정책 가동 — 90분 본 경기만. 연장은 교체가 없다 (match.md §9) */
@@ -596,6 +602,7 @@ function runTimeline(input: TimelineInput): {
     if (next > t) {
       packet ??= buildStrengthPacket(sideInput("home"), sideInput("away"), {
         neutral: input.neutral,
+        ...(input.derby ? { derby: input.derby } : {}),
       });
       const density = input.densityOf(next);
       const rolled: QuickShot[] = [];
@@ -752,13 +759,18 @@ export interface ExtraTimeResult {
  * @param options.neutral 중립 경기장(결승) — 홈 어드밴티지를 주지 않는다
  * @param options.bookedIn90 90분에 경고를 받은 선수 — 연장의 경고가 이어져
  *   두 번째 경고 퇴장(경고 한 줄 + 퇴장 한 줄)이 성립한다
+ * @param options.derby 더비 표의 줄 — 연장도 같은 경기다 (§7)
  */
 export function simulateExtraTime(
   home: SimSquad,
   away: SimSquad,
   seed: number,
   channel: string,
-  options: { neutral?: boolean; bookedIn90?: readonly string[] } = {},
+  options: {
+    neutral?: boolean;
+    bookedIn90?: readonly string[];
+    derby?: { name: string; heat: number };
+  } = {},
 ): ExtraTimeResult {
   const rng = makeRng(seed, `et:${channel}`);
   const squads = { home, away };
@@ -767,9 +779,10 @@ export function simulateExtraTime(
   const etMinute = () =>
     EXTRA_TIME_FIRST_MINUTE +
     Math.min(EXTRA_TIME_MINUTES - 1, Math.floor(rng() * EXTRA_TIME_MINUTES));
+  const derbyHeat = options.derby?.heat ?? 0;
   const cardMinutes = {
-    home: sampleCardMinutes(rng, home, share, etMinute),
-    away: sampleCardMinutes(rng, away, share, etMinute),
+    home: sampleCardMinutes(rng, home, share, etMinute, derbyHeat),
+    away: sampleCardMinutes(rng, away, share, etMinute, derbyHeat),
   };
   const sampled = runTimeline({
     squads,
@@ -777,6 +790,7 @@ export function simulateExtraTime(
     to: EXTRA_TIME_FIRST_MINUTE - 1 + EXTRA_TIME_MINUTES,
     densityOf: () => EXTRA_TIME_DENSITY,
     neutral: options.neutral === true,
+    ...(options.derby ? { derby: options.derby } : {}),
     cardMinutes,
     bench: false,
     priorYellows: new Set(options.bookedIn90 ?? []),
@@ -813,6 +827,7 @@ export function simulateExtraTime(
       side,
       injuries,
       share,
+      derbyHeat,
     );
   }
   const sum = (side: "home" | "away", read: (shot: QuickShot) => number) =>
@@ -843,21 +858,24 @@ export function simulateExtraTime(
  * @param options.neutral 중립 경기장(결승) — 홈 어드밴티지를 주지 않는다. 경기가
  *   갖고 있는 사실(`MatchRecord.neutral`)이라 호출부가 그대로 넘긴다: 여기서
  *   `false`로 굳으면 명목상의 홈이 결승에서 공짜 우위를 얻는다.
+ * @param options.derby 더비 표의 줄 — 중립과 같은 결의 사실이다. 넘기지 않으면
+ *   리그의 95%에서 더비가 카드·부상·판세에 닿지 않는다 (match.md §7)
  */
 export function quickSimulate(
   home: SimSquad,
   away: SimSquad,
   seed: number,
   channel: string,
-  options: { neutral?: boolean } = {},
+  options: { neutral?: boolean; derby?: { name: string; heat: number } } = {},
 ): QuickResult {
   const rng = makeRng(seed, `quick:${channel}`);
   const squads = { home, away };
+  const derbyHeat = options.derby?.heat ?? 0;
 
   /** 카드의 수·분을 먼저 뽑고, 시간순 워크가 수신자·교체·슈팅을 차례로 확정한다. */
   const cardMinutes = {
-    home: sampleCardMinutes(rng, home, 1, () => sampleMinute(rng)),
-    away: sampleCardMinutes(rng, away, 1, () => sampleMinute(rng)),
+    home: sampleCardMinutes(rng, home, 1, () => sampleMinute(rng), derbyHeat),
+    away: sampleCardMinutes(rng, away, 1, () => sampleMinute(rng), derbyHeat),
   };
   const sampled = runTimeline({
     squads,
@@ -865,6 +883,7 @@ export function quickSimulate(
     to: LAST_MINUTE,
     densityOf: (end) => (end <= HALF_TIME ? FIRST_HALF_DENSITY : SECOND_HALF_DENSITY),
     neutral: options.neutral === true,
+    ...(options.derby ? { derby: options.derby } : {}),
     cardMinutes,
     bench: true,
     rng,
@@ -896,6 +915,8 @@ export function quickSimulate(
       injuryCandidates(playedIn(squad, side, subs), side, cards),
       side,
       injuries,
+      1,
+      derbyHeat,
     );
   }
   const sum = (side: "home" | "away", read: (shot: QuickShot) => number) =>

@@ -28,7 +28,8 @@ import { recentOutcomes } from "../squad/slump";
 import { isFriendly } from "../competition/friendly";
 import { boardExpectation, computeStandings } from "../competition/season";
 import { leagueOfTeamIn } from "../competition/promotion";
-import { derbyNameOf } from "../data/derbies";
+import { derbyNameOf, derbyOf } from "../data/derbies";
+import { derbyRecordOf } from "./derby";
 import { reportersOf } from "../world/persona";
 import type { SkillResult } from "../skills";
 import { deltaItems } from "../skills/brief";
@@ -221,6 +222,28 @@ export function buildMatchPress(state: GameState, matchId: string): PressConfere
       sharp: outcome === "loss" || (outcome === "draw" && winless),
     },
   ];
+  /**
+   * **더비는 끝난 뒤에도 자리를 남긴다** (people.md §4). 이기고도 묻는 것은 더비가
+   * 결과와 무관하게 팬과 구단의 자리이기 때문이고(전야 회견이 무게 2인 것과 같은
+   * 이유), 날 선 카드라 이 회견의 무게가 언제나 2가 된다.
+   *
+   * 전적은 **이번 경기를 빼고** 센다 — 넣으면 첫 더비가 이미 1승 0패로 시작한다.
+   */
+  const derby = derbyOf(state.userTeamId, opponentId);
+  if (derby) {
+    const record = derbyRecordOf(state, opponentId, matchId);
+    facts.push({
+      kind: "result",
+      data: {
+        refId: opponentId,
+        name: opponent,
+        values: { won: record.won, drawn: record.drawn, lost: record.lost, heat: derby.heat },
+        tags: ["derby", derby.name],
+      },
+      about: null,
+      sharp: true,
+    });
+  }
   if (winless) {
     facts.push({
       kind: "winless",
@@ -279,7 +302,8 @@ export function buildMatchPress(state: GameState, matchId: string): PressConfere
      * 두 번 묻는다. 국면은 그 자리의 온도(스코어·무승 계단)이지 그날의 사건 목록이 아니다.
      */
     context:
-      `${opponent}전 ${score} ${outcomeKo}` + (winless ? ` · 최근 ${recent.length}경기 무승` : ""),
+      `${derby ? `${derby.name} · ` : ""}${opponent}전 ${score} ${outcomeKo}` +
+      (winless ? ` · 최근 ${recent.length}경기 무승` : ""),
     facts,
     status: "pending",
     weight: weightOf(

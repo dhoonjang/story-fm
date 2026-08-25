@@ -34,6 +34,15 @@ export const RUN_PER_WIN = 0.03;
 /** 연승으로 얻을 수 있는 최대 폼 — 이득을 손해보다 작게 둔다 */
 export const RUN_MAX = 0.12;
 /**
+ * 더비 승패가 그 팀 스쿼드 **전원**의 폼에 남기는 폭 — `heat` 한 계단마다 (match.md §6).
+ *
+ * ⚠️ 연속 기록과 달리 **대칭이다.** 연승의 이득을 연패의 손해보다 작게 두는 것은
+ * 계단이 길어질수록 한쪽으로만 굴러가기 때문이지만, 더비는 한 경기 안에서 두
+ * 라커룸이 정확히 반대로 갈린다 — 한쪽이 얻는 것을 다른 쪽이 잃는다.
+ */
+export const DERBY_MOOD_STEP = 0.02;
+
+/**
  * 침체가 불만으로 번지는 연패 — 이 문턱을 **넘는 그 경기에서** 한 명이 등을 돌린다.
  * 한 연속에 한 명이고, 이어지는 5·6연패는 새 이름을 올리지 않는다 (people.md §5).
  */
@@ -106,6 +115,7 @@ export function runBonus(wins: number): number {
  *
  * @param margin 우리 득점 − 실점
  * @param played 그 경기에 뛴 선수 id — 대패의 대가는 그라운드에 있던 사람이 치른다
+ * @param derbyHeat 더비면 1\~3, 아니면 0 — 표가 정하는 사실이다 (team.md §3.2)
  * @returns 감독에게 알릴 만한 연속 기록이 있으면 그 사실 (없으면 null)
  */
 export function applyResultMood(
@@ -113,13 +123,21 @@ export function applyResultMood(
   teamId: string,
   margin: number,
   played: readonly string[],
+  derbyHeat = 0,
 ): string | null {
   const outcomes = recentOutcomes(state, teamId, Math.max(SLUMP_LOSSES, RUN_WINS) + STREAK_ROOM);
   const losses = streakOf(outcomes, "loss");
   const wins = streakOf(outcomes, "win");
   const squad = playersOf(state, teamId);
 
-  const shift = runBonus(wins) - slumpPenalty(losses);
+  /**
+   * 더비의 결과는 승점 3보다 무겁다 — 비기면 0이다. 연속 기록과 **같은 축(폼)**에
+   * 얹으므로 계단과 더비가 같은 눈금 하나로 라커룸을 움직인다.
+   */
+  const derbyShift =
+    derbyHeat > 0 && margin !== 0 ? Math.sign(margin) * DERBY_MOOD_STEP * derbyHeat : 0;
+
+  const shift = runBonus(wins) - slumpPenalty(losses) + derbyShift;
   if (shift !== 0) {
     for (const p of squad) p.state.form = clampForm(p.state.form + shift);
   }

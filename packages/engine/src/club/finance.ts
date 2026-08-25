@@ -26,6 +26,7 @@ import {
 } from "../competition/calendar";
 import { creditManagerWallet } from "./manager-wallet";
 import { clubProfile } from "../data/club-profile";
+import { derbyOf } from "../data/derbies";
 import { clubEconomyLevel, leagueEconomyLevel, leagueTicketSpread } from "../data/league-economy";
 import { isMarketOnlyLeague, isTopLeague, leagueCatalogById } from "../data/league-catalog";
 import { competitionShortName, isCup, isEuroCup } from "../data/cup-catalog";
@@ -134,6 +135,12 @@ const MERCH_FORM_MATCHES = 6;
 const MERCH_PAR_WIN_RATE = 0.4;
 const MERCH_FORM_SLOPE = 0.25;
 const MERCH_FORM_SWING = 0.1;
+/**
+ * 더비 한 경기가 그 창에서 갖는 **무게** — `1 + 이 값 × heat`(heat 3이면 2.5경기).
+ * 실제로 유니폼이 팔리는 것은 라이벌을 이긴 주간이고, 진 주간에는 반대다. 창의
+ * 길이는 그대로라 더비가 다른 결과를 밀어내지는 않는다 — 무게만 바뀐다.
+ */
+const MERCH_DERBY_WEIGHT = 0.5;
 
 /**
  * 스폰서 계약의 성과 조항 — 상업 정액에 더해지는 비율 (`commercialClause`).
@@ -205,6 +212,13 @@ const OCCUPANCY_BY_OPPONENT_TIER: Record<1 | 2 | 3 | 4, number> = {
   3: 0,
   4: -0.02,
 };
+/**
+ * 더비 가산 — `heat` 한 계단마다 (team.md §3.2). **상대 매력도와 따로 선다**:
+ * 상대의 체급만 보면 리버풀-에버턴이 리버풀-본머스와 같은 자인데, 실제로 매진되는
+ * 것은 앞의 경기다. tier1(base 0.97)은 어느 heat에서도 만석에 붙으므로 이 항이
+ * 실제로 보이는 곳은 중·하위 구단의 더비다.
+ */
+const OCCUPANCY_DERBY_BONUS = 0.03;
 /** 컵 경기 가산 */
 const OCCUPANCY_CUP_BONUS = 0.02;
 /** 평일(월~목) 저녁 킥오프가 깎는 몫 */
@@ -797,9 +811,11 @@ export function matchdayRevenue(state: GameState, match: MatchRecord): MatchdayR
     occupancy += (wins / recent.length - OCCUPANCY_PAR_WIN_RATE) * OCCUPANCY_FORM_SWING;
   }
 
-  // 상대 매력도 · 대회 · 슬롯
+  // 상대 매력도 · 더비 · 대회 · 슬롯
   const oppTier = tierOf(state, opponentId);
   occupancy += OCCUPANCY_BY_OPPONENT_TIER[oppTier];
+  const derby = derbyOf(teamId, opponentId);
+  if (derby) occupancy += OCCUPANCY_DERBY_BONUS * derby.heat;
   if (isCup(match.competitionId)) occupancy += OCCUPANCY_CUP_BONUS;
   const dow = dayOfWeek(match.date);
   if (dow === 1 || dow === 2 || dow === 3 || dow === 4) occupancy -= OCCUPANCY_WEEKNIGHT_PENALTY;
@@ -1481,16 +1497,21 @@ export function depreciationOf(state: GameState, teamId: string): DepreciationLi
 
 /**
  * 팀별 최근 성적 — 월초 정산이 96팀 × 전 경기를 훑지 않도록 한 번만 만든다.
- * @returns teamId → 최근 N경기 승률 (경기가 없으면 없음)
+ *
+ * **더비는 한 경기보다 무겁다** (`MERCH_DERBY_WEIGHT` · finance.md §5.3) — 창은
+ * 여전히 N경기이고 무게만 바뀐다.
+ *
+ * @returns teamId → 최근 N경기 가중 승률 (경기가 없으면 없음)
  */
 function recentWinRates(state: GameState, window: number): Map<string, number> {
-  const results = new Map<string, boolean[]>();
+  const results = new Map<string, { won: boolean; weight: number }[]>();
   for (const m of state.matches) {
     // 친선·2군 리그는 세지 않는다 — 머천다이징이 읽을 성적은 1군 대회뿐이다 (season.md §2)
     if (!m.result || isFriendly(m) || isReserveMatch(m)) continue;
+    const weight = 1 + MERCH_DERBY_WEIGHT * (derbyOf(m.homeTeamId, m.awayTeamId)?.heat ?? 0);
     const push = (teamId: string, won: boolean) => {
       const list = results.get(teamId) ?? [];
-      list.push(won);
+      list.push({ won, weight });
       if (list.length > window) list.shift();
       results.set(teamId, list);
     };
@@ -1499,7 +1520,10 @@ function recentWinRates(state: GameState, window: number): Map<string, number> {
   }
   const rates = new Map<string, number>();
   for (const [teamId, list] of results) {
-    if (list.length > 0) rates.set(teamId, list.filter(Boolean).length / list.length);
+    const total = list.reduce((sum, e) => sum + e.weight, 0);
+    if (total > 0) {
+      rates.set(teamId, list.reduce((sum, e) => sum + (e.won ? e.weight : 0), 0) / total);
+    }
   }
   return rates;
 }
