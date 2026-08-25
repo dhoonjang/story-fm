@@ -13,6 +13,7 @@ import type {
   ShootoutOutcome,
   SquadRegistration,
   TacticalRead,
+  TrainingReport,
   BoardExpectationCode,
 } from "@story-fm/domain";
 import {
@@ -29,6 +30,7 @@ import {
   FINANCE_CATEGORY_KO,
   MANAGER_SPEND_KIND_KO,
   TRAIN_ATTR_KO,
+  TRAINING_MARK_KO,
   ageOf,
   anchorOf,
   clampCondition,
@@ -1946,6 +1948,43 @@ function expectationTextOf(card: {
   return card.expectation ?? null;
 }
 
+/** 결산 카드의 머리줄 — 구간·세션 수와 건수 */
+function trainingReportSummary(report: TrainingReport): string {
+  const window = report.from === report.to ? report.to : `${report.from}~${report.to}`;
+  const grew = new Set(report.moved.map((m) => m.gamePlayerId)).size;
+  const tail = grew > 0 ? `${grew}명 성장` : "장부에 남은 변화 없음";
+  return `훈련 결산 ${window} · ${report.sessions}회 — ${tail}`;
+}
+
+/**
+ * 카드가 펼쳐지는 줄 — 한 선수당 하나. 움직인 눈금 · 갈래 · 근거 한 줄 순이다.
+ *
+ * 판정을 받은 선수 전원이 아니라 **무언가 남은 선수만** 선다 (카드가 이미 그렇게
+ * 걸러져 있다 — `applyTrainingOutcomes`).
+ */
+function trainingReportLines(state: GameState, report: TrainingReport): string[] {
+  const order: string[] = [];
+  const seen = new Set<string>();
+  for (const id of [
+    ...report.moved.map((m) => m.gamePlayerId),
+    ...report.marks.map((m) => m.gamePlayerId),
+  ]) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      order.push(id);
+    }
+  }
+  return order.map((id) => {
+    const parts = report.moved
+      .filter((m) => m.gamePlayerId === id)
+      .map((m) => `${growthLabel(m.target)} ${m.delta > 0 ? "+" : ""}${m.delta}`);
+    const mark = report.marks.find((m) => m.gamePlayerId === id);
+    if (mark?.code) parts.push(TRAINING_MARK_KO[mark.code]);
+    const head = `${playerName(state, id)} ${parts.join(" · ")}`.trim();
+    return mark && mark.note.length > 0 ? `${head} — ${mark.note}` : head;
+  });
+}
+
 /**
  * 기록 테이블 몫의 달력 일지 — 성장·부상·카드·이적·돈, 그리고 서사 표의 **소식**.
  *
@@ -1993,6 +2032,20 @@ export function pushRecordJournal(
       .map(([key, n]) => `${key} ${n}명`)
       .join(" · ");
     push(date, { kind: "growth", text: summary, details: day.lines });
+  }
+  /**
+   * 훈련 결산 카드 — **카드를 문장으로 옮긴다** (season.md §4).
+   *
+   * 성장 줄(위)은 "그날 장부의 어느 눈금이 움직였나"를 날짜에 세우고, 이 줄은
+   * "그 구간의 훈련이 무엇을 남겼나"를 **근거와 함께** 세운다. 성장 줄만으로는
+   * 감독이 왜 늘었는지 읽을 자리가 없다 — 판정의 근거 한 줄은 카드에만 있다.
+   */
+  for (const report of state.trainingReports ?? []) {
+    push(report.to, {
+      kind: "training",
+      text: trainingReportSummary(report),
+      details: trainingReportLines(state, report),
+    });
   }
   for (const inj of state.injuries) {
     if (!ourPlayers.has(inj.gamePlayerId)) continue;

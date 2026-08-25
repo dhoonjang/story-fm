@@ -603,6 +603,60 @@ export function growthLabel(target: string): string {
   return AXIS_KO[target as AttributeAxis] ?? target;
 }
 
+// ── 훈련 결산 카드 ────────────────────────────────────
+/**
+ * 훈련장에서 눈에 띈 갈래 — **문장이 아니라 코드다.**
+ *
+ * "두드러졌다"를 세이브에 문장으로 적으면 그 문구가 굳고, 화면과 프롬프트가
+ * 각자 그 문장을 다시 다듬는다. 갈래는 셋이면 족하다 — 올라온 사람, 안 한 사람,
+ * 지쳐서 흐트러진 사람.
+ */
+export const TRAINING_MARKS = ["standout", "slack", "tired"] as const;
+export const TrainingMarkSchema = z.enum(TRAINING_MARKS);
+export type TrainingMark = z.infer<typeof TrainingMarkSchema>;
+
+/** 갈래의 낱말 — 화면과 스냅샷이 같은 표를 읽는다 */
+export const TRAINING_MARK_KO: Record<TrainingMark, string> = {
+  standout: "두드러짐",
+  slack: "태만",
+  tired: "지침",
+};
+
+/**
+ * 한 구간의 훈련 결산이 남기는 **사실 카드 한 장**
+ * (→ docs/simulation/season.md §4).
+ *
+ * 판정의 산출이 요약 줄 배열이던 동안 근거 한 줄(`note`)은 호출 자리에서
+ * 사라졌고, 감독이 훈련장에 쓴 며칠은 달력의 「+1 3명」한 묶음으로만 남았다.
+ *
+ * ⚠️ **`moved`는 판정이 낸 값이 아니라 코어가 실제로 남긴 것이다** — 천장에 막혀
+ * 한 칸도 안 오른 `+2`는 카드에도 없다. 성장 로그에 적힌 그 줄이 곧 카드의 줄이다.
+ */
+export const TrainingReportSchema = z.object({
+  from: DateString,
+  to: DateString,
+  /** 이 구간에 소화된 훈련 세션 수 */
+  sessions: z.number().int().min(0),
+  moved: z.array(
+    z.object({
+      gamePlayerId: z.string().min(1),
+      /** "shooting", "pos:ST", "tactical" — 성장 로그와 같은 눈금 */
+      target: z.string().min(1),
+      delta: z.number().int(),
+    }),
+  ),
+  marks: z.array(
+    z.object({
+      gamePlayerId: z.string().min(1),
+      /** 판정이 갈래를 적지 않고 근거만 냈으면 null */
+      code: TrainingMarkSchema.nullable(),
+      /** 판정의 근거 한 줄 — 감독이 읽는다. 없으면 빈 문자열 */
+      note: z.string(),
+    }),
+  ),
+});
+export type TrainingReport = z.infer<typeof TrainingReportSchema>;
+
 // ── 시즌 기록 ─────────────────────────────────────────
 export const SeasonStatSchema = z.object({
   gamePlayerId: z.string().min(1),

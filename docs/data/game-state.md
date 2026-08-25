@@ -209,22 +209,23 @@
 전부 `gamePlayerId`로 선수를 참조한다. 공통 패턴: **현재 상태 = 아직 닫히지 않은
 row, 지난 일 = 그대로 이력.**
 
-| 엔티티                            | 무엇 · "현재"의 표현                                                                             | 정의                |
-| --------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------- |
-| `injuries` `Injury`               | 부위·심각도·원인 — `returnedOn === null`이 현재 부상                                             | `domain/records.ts` |
-| `bookings` `Booking`              | 경고·퇴장 (경기·분)                                                                              | `domain/records.ts` |
-| `suspensions` `Suspension`        | 정지 — `status === "active"`, 잔여는 `length − served`                                           | `domain/records.ts` |
-| `transfers` `Transfer`            | **팀 변경 원장** — 이적·임대·자유·유스·은퇴                                                      | `domain/records.ts` |
-| `growthLog` `GrowthEntry`         | 성장 한 칸 — 대상은 축·`pos:CODE`·`tactical`, 출처는 `origin` 코드. **감독 팀 선수만** (아래 ⚠️) | `domain/records.ts` |
-| `seasonStats` `SeasonStat`        | 시즌 × 팀 — 출전·득점·도움·`ratingSum`                                                           | `domain/records.ts` |
-| `issues` `PlayerIssue`            | 라커룸 불만 (`unhappy`)                                                                          | `domain/records.ts` |
-| `settlingEvents` `SettlingEvent`  | 면담·팀토크·주장 지명이 새 영입에게 남긴 크레딧                                                  | `domain/records.ts` |
-| `transferList` `TransferListing`  | 이적 리스트 등재 — 호가와 함께                                                                   | `domain/records.ts` |
-| `playerTraining` `PlayerTraining` | 개인 훈련 — 겨냥한 축(1·2군) · 배우는 자리(1군만)                                                | `domain/records.ts` |
-| `roleMemory` `RoleMemory`         | 역할 기억 — 선수 × 자리 → 마지막에 맡긴 역할                                                     | `domain/tactics.ts` |
-| `scoutReports` `ScoutReport`      | 스카우트 파견 — `completedOn === null`이 파견 중                                                 | `domain/records.ts` |
-| `deferredScouts` `DeferredScout`  | 동시 한도에 막혀 못 나간 파견 요청 — 다음 턴 입력에 사실로 남는다 ([player.md](player.md) §9.4)  | `domain/records.ts` |
-| `milestones` `Milestone`          | 마일스톤 — 데뷔·첫 골·구단 통산 문턱·해트트릭. **감독 팀 선수만** (아래 ⚠️)                      | `domain/records.ts` |
+| 엔티티                             | 무엇 · "현재"의 표현                                                                                          | 정의                |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------- |
+| `injuries` `Injury`                | 부위·심각도·원인 — `returnedOn === null`이 현재 부상                                                          | `domain/records.ts` |
+| `bookings` `Booking`               | 경고·퇴장 (경기·분)                                                                                           | `domain/records.ts` |
+| `suspensions` `Suspension`         | 정지 — `status === "active"`, 잔여는 `length − served`                                                        | `domain/records.ts` |
+| `transfers` `Transfer`             | **팀 변경 원장** — 이적·임대·자유·유스·은퇴                                                                   | `domain/records.ts` |
+| `growthLog` `GrowthEntry`          | 성장 한 칸 — 대상은 축·`pos:CODE`·`tactical`, 출처는 `origin` 코드. **감독 팀 선수만** (아래 ⚠️)              | `domain/records.ts` |
+| `trainingReports` `TrainingReport` | 훈련 결산 카드 — 한 구간(`from`~`to`)이 남긴 것: 세션 수 · `moved` · `marks`(갈래 코드와 근거 한 줄). 40장 링 | `domain/records.ts` |
+| `seasonStats` `SeasonStat`         | 시즌 × 팀 — 출전·득점·도움·`ratingSum`                                                                        | `domain/records.ts` |
+| `issues` `PlayerIssue`             | 라커룸 불만 (`unhappy`)                                                                                       | `domain/records.ts` |
+| `settlingEvents` `SettlingEvent`   | 면담·팀토크·주장 지명이 새 영입에게 남긴 크레딧                                                               | `domain/records.ts` |
+| `transferList` `TransferListing`   | 이적 리스트 등재 — 호가와 함께                                                                                | `domain/records.ts` |
+| `playerTraining` `PlayerTraining`  | 개인 훈련 — 겨냥한 축(1·2군) · 배우는 자리(1군만)                                                             | `domain/records.ts` |
+| `roleMemory` `RoleMemory`          | 역할 기억 — 선수 × 자리 → 마지막에 맡긴 역할                                                                  | `domain/tactics.ts` |
+| `scoutReports` `ScoutReport`       | 스카우트 파견 — `completedOn === null`이 파견 중                                                              | `domain/records.ts` |
+| `deferredScouts` `DeferredScout`   | 동시 한도에 막혀 못 나간 파견 요청 — 다음 턴 입력에 사실로 남는다 ([player.md](player.md) §9.4)               | `domain/records.ts` |
+| `milestones` `Milestone`           | 마일스톤 — 데뷔·첫 골·구단 통산 문턱·해트트릭. **감독 팀 선수만** (아래 ⚠️)                                   | `domain/records.ts` |
 
 ⚠️ **`growthLog`는 감독 팀 선수 것만 담는다.** 4,000행에서 오래된 쪽부터 잘리는
 로그인데, 코어 월간 성장(`developsByCore` — 우리 2군 + 모든 타 팀)을 전부 남기면
