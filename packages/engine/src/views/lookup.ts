@@ -17,6 +17,7 @@ import {
   describeReputation,
   familiarityLabel,
   footLabel,
+  milestoneTitle,
   physiqueLabel,
   naturalPositionOf,
   parseScorerEntry,
@@ -29,9 +30,10 @@ import {
 import { rankByName } from "../core/name-match";
 import { formatMoney } from "../club/finance";
 import { spendLine, transferFundRoom } from "../club/manager-wallet";
-import { outcomeFor, outcomeLabel } from "./views";
+import { outcomeFor, outcomeLabel, pushRecordJournal, type CalendarEventView } from "./views";
 import { addDays, dayOfWeek, diffDays, seasonYear, squadReturnOf } from "../competition/calendar";
 import { entrantsOf } from "../competition/europe";
+import { careerOf, type CareerTotals } from "../squad/career";
 import { formLabel } from "../squad/form";
 import { INJURY_SEVERITY_KO } from "../squad/injury";
 import { moodAnchor, moodOf } from "../squad/mood";
@@ -615,6 +617,88 @@ const TRANSFER_KO: Record<string, string> = {
 };
 
 /**
+ * 카드에 세울 **시즌 행·팀 행의 상한.**
+ *
+ * 스무 시즌을 뛴 선수의 행을 전부 쏟으면 카드가 벽이 되는데, 모델이 판단에 쓰는
+ * 것은 최근 몇 해다 — 계약이 보통 3~5년이라 다섯이면 "지금 이 선수가 어떤
+ * 선수인가"를 가르는 구간이 통째로 들어온다. 잘린 앞쪽은 **통산 합이 말한다**:
+ * 합은 전 시즌의 것이라, 적힌 행을 더해 통산이 안 나오면 그 차이가 곧 "더
+ * 있다"는 뜻이다.
+ */
+const CAREER_ROWS_SHOWN = 5;
+
+/**
+ * 마일스톤 상한 — 문턱(50·100경기)은 드물지만 해트트릭은 시즌마다 쌓인다.
+ * 고르기는 최근 것부터, 적기는 **오래된 것부터**다 (부상·이동 이력과 같은 결이고,
+ * 한 경기가 여럿을 세웠을 때의 드문 순서도 장부에 적힌 그대로 남는다).
+ */
+const MILESTONES_SHOWN = 4;
+
+/** 커리어 한 묶음의 수치 — 위 「시즌 기록」과 같은 낱말이라 여러 줄이 한 자로 읽힌다 */
+function careerStatText(t: CareerTotals): string {
+  return (
+    `${t.apps}경기 ${t.goals}골 ${t.assists}도움` +
+    (t.rating === null ? "" : ` · 평점 ${t.rating.toFixed(2)}`) +
+    (t.reserveApps > 0 ? ` (2군 ${t.reserveApps}경기 ${t.reserveGoals}골)` : "")
+  );
+}
+
+/**
+ * 통산 · 팀별 · 시즌별 · 마일스톤 — 전부 `careerOf` **하나에서** 나온다
+ * (player.md §10). 화면의 스쿼드 상세가 읽는 표와 같은 함수라, 감독이 채팅에서
+ * 듣는 "우리 팀에서 132경기"와 상세의 행이 갈리지 않는다.
+ *
+ * **기록은 안개 밖이다** — 흐리는 것은 능력치이지 장부가 아니라 타 팀 선수도
+ * 참값 그대로 낸다. 다만 원장은 게임 시작 뒤만 알아 **부임 전 커리어는 없다**:
+ * 없는 것은 지어내지 않고 줄을 세우지 않는다.
+ *
+ * 마일스톤은 **감독 팀 선수의 장부**다 (game-state.md §3.4) — 남의 팀 선수에게는
+ * 줄이 서지 않는 것이 정상이고, 그것이 "기록이 없다"는 뜻은 아니다.
+ */
+function careerLines(state: GameState, p: GamePlayer): string[] {
+  const lines: string[] = [];
+  const career = careerOf(state, p.id);
+  // 출전이 0인 행은 세우지 않는다 — 빈 자리를 만들어 두면 카드가 길어지기만 한다
+  const played = (t: CareerTotals) => t.apps > 0 || t.reserveApps > 0;
+  const seasons = career.seasons.filter(played);
+  /**
+   * 이번 시즌 이 팀 한 행뿐이면 위의 「시즌 기록」이 이미 같은 값을 말했다 —
+   * 같은 수를 두 낱말로 두 번 적으면 모델은 그것을 다른 사실 둘로 읽는다.
+   */
+  const only = seasons.length === 1 ? seasons[0]! : null;
+  const onlyCurrent = only !== null && only.season === state.season && only.teamId === p.teamId;
+  if (played(career.totals) && !onlyCurrent) {
+    lines.push(`통산: ${careerStatText(career.totals)}`);
+    // 팀이 하나면 통산이 곧 그 셔츠의 기록이라, 같은 줄을 한 번 더 적는 셈이다
+    const teams = career.teams.filter(played);
+    if (teams.length > 1) {
+      lines.push(
+        `팀별: ${teams
+          .slice(-CAREER_ROWS_SHOWN)
+          .map((t) => `${teamShortNameIn(state, t.teamId)}(${t.from}~${t.to}) ${careerStatText(t)}`)
+          .join(" / ")}`,
+      );
+    }
+    // 시즌 안에 팀을 옮겼으면 행도 팀별로 갈린다 — 합치면 어느 셔츠로 몇 경기를 뛰었는지가 사라진다
+    if (seasons.length > 1) {
+      lines.push(
+        `시즌별: ${seasons
+          .slice(-CAREER_ROWS_SHOWN)
+          .map((s) => `${s.season} ${teamShortNameIn(state, s.teamId)} ${careerStatText(s)}`)
+          .join(" / ")}`,
+      );
+    }
+  }
+  /** 클럽 단위의 사실이라 어느 셔츠로 세웠는지를 함께 적는다 (match.md §6) */
+  const milestones = (state.milestones ?? [])
+    .filter((m) => m.gamePlayerId === p.id)
+    .slice(-MILESTONES_SHOWN)
+    .map((m) => `${m.date} ${teamShortNameIn(state, m.teamId)} ${milestoneTitle(m.code, m.value)}`);
+  if (milestones.length > 0) lines.push(`마일스톤: ${milestones.join(" / ")}`);
+  return lines;
+}
+
+/**
  * 선수의 **이력** — 부상·징계·이동. 현재 상태만 보여주면 "유리몸인가",
  * "경고 몇 장이야(5장이면 자동 정지)" 같은 판단을 감독이 할 수 없다.
  * 부상·징계·이적은 공개 기록이라 타 팀 선수에게도 안개를 걸지 않는다.
@@ -758,6 +842,7 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
   lines.push(
     `시즌 기록: ${stat?.apps ?? 0}경기 ${stat?.goals ?? 0}골 ${stat?.assists ?? 0}도움` +
       (seasonRating(stat) === null ? "" : ` · 평점 ${seasonRating(stat)!.toFixed(2)}`),
+    ...careerLines(state, p),
     contract
       ? `계약: 주급 ${formatMoney(contract.weeklyWage)} · 만료 ${contract.until}`
       : "계약: 정보 없음",
@@ -1364,6 +1449,72 @@ export interface ScheduleViewInput {
 const SCHEDULE_LIMIT = 25;
 
 /**
+ * 일지 줄의 이름 — 화면은 도형으로 갈라 읽지만(`views.ts` `CalendarEventView`) 조회는
+ * 글자로 가른다. 갈래를 데이터로 주는 규약은 그대로다: 이름을 붙이는 자리가 여기 하나다.
+ */
+const JOURNAL_KIND_KO: Record<CalendarEventView["kind"], string> = {
+  match: "경기",
+  training: "훈련",
+  rest: "휴식",
+  growth: "성장",
+  injury: "부상",
+  return: "복귀",
+  yellow: "경고",
+  red: "퇴장",
+  transfer: "이적",
+  window: "이적창",
+  money: "돈",
+  news: "소식",
+};
+
+/**
+ * 한 번의 조회가 낼 일지 줄의 상한.
+ *
+ * 일정의 `limit`과 **묶지 않는다** — 석 달치 일정을 부르는 것과 석 달치 일지를 통째로
+ * 모델 컨텍스트에 붓는 것은 다른 값이다. 넘치면 뒤를 자르고 몇 건이 남았는지 말한다.
+ * 2주치 일지가 대개 이 아래라 "지난주에 무슨 일 있었나"는 잘리지 않는다.
+ */
+const JOURNAL_LIMIT = 40;
+
+/**
+ * 지나간 날의 일지 — 화면의 달력이 세우는 것과 **같은 표**다(`pushRecordJournal`).
+ *
+ * 일정 축(경기·훈련·이적창)은 위의 일정 줄이 이미 세우므로 여기 다시 서지 않는다.
+ * 남는 것은 기록 테이블과 서사 표 몫 — 성장·부상·카드·이적·돈·소식이고, 손잡이로
+ * 며칠을 넘긴 턴에 다이제스트로만 흘러간 사건이 여기 있다 (people.md §9).
+ */
+function pastJournalLines(state: GameState, from: string, to: string): string[] {
+  if (from >= state.date) return [];
+  const journal: Record<string, CalendarEventView[]> = {};
+  pushRecordJournal(state, journal);
+  const last = to < state.date ? to : state.date;
+  const dates = Object.keys(journal)
+    .filter((d) => d >= from && d <= last)
+    .sort();
+
+  const out: string[] = [];
+  let shown = 0;
+  let dropped = 0;
+  for (const date of dates) {
+    const events = journal[date] ?? [];
+    const room = JOURNAL_LIMIT - shown;
+    if (room <= 0) {
+      dropped += events.length;
+      continue;
+    }
+    out.push(`  ${dateLabel(date)}`);
+    for (const e of events.slice(0, room)) {
+      out.push(`    ${JOURNAL_KIND_KO[e.kind]} ${e.text}`);
+    }
+    shown += Math.min(events.length, room);
+    dropped += Math.max(0, events.length - room);
+  }
+  if (out.length === 0) return [];
+  if (dropped > 0) out.push(`  …그 외 ${dropped}건 — 범위를 좁혀라`);
+  return [`[일지] ${dateLabel(from)} ~ ${dateLabel(last)} — 그 사이 벌어진 일`, ...out];
+}
+
+/**
  * 감독의 달력 — 경기만 보는 `get_league`와 달리 **훈련·이적창까지** 한 축에 놓는다.
  * 일정 축이 `SCHEDULE_ENTRY` 하나로 정규화돼 있으니(v6) 조회도 한 곳에서 한다.
  *
@@ -1409,8 +1560,15 @@ export function scheduleView(state: GameState, input: ScheduleViewInput = {}): L
       `  ${dateLabel(from)} ~ ${dateLabel(addDays(squadReturn, -1))} 선수단 여름 휴가 — 훈련 없음 (소집 ${dateLabel(squadReturn)})`,
     );
   }
+  /**
+   * 지나간 날은 일정만으로 답이 되지 않는다 — 오퍼 답이 언제 왔고 계약 경고가 언제
+   * 섰는지는 일정 축이 아니라 일지에 있다. 앞날만 묻는 창(`from`이 오늘 이후)에는
+   * 일지가 없으므로 한 줄도 붙지 않는다.
+   */
+  const journal = pastJournalLines(state, from, to);
   if (shown.length === 0) {
     lines.push("이 기간에 등록된 일정이 없습니다");
+    lines.push(...journal);
     return { ok: true, message: lines.join("\n") };
   }
 
@@ -1458,6 +1616,7 @@ export function scheduleView(state: GameState, input: ScheduleViewInput = {}): L
   if (entries.length > shown.length) {
     lines.push(`  …그 외 ${entries.length - shown.length}건 — 범위를 좁히거나 limit을 올려라`);
   }
+  lines.push(...journal);
   return { ok: true, message: lines.join("\n") };
 }
 

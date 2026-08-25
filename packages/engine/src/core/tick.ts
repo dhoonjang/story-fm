@@ -523,6 +523,16 @@ function dailyTick(
       digest.push(
         `📨 ${teamNameIn(state, negotiation.counterpartTeamId ?? "")}에서 ${player.name} 오퍼(${formatMoney(offer.fee)})에 대한 답이 도착했습니다`,
       );
+      /**
+       * 다이제스트는 그 턴에만 서고 사라진다 — 되짚을 자리는 서사 표뿐이다.
+       * 무게 3은 **오늘 답해야 하는 일**의 눈금이다 (people.md §9 — `계약 만료
+       * 30일 남음` 4, `타 구단 이적` 2 사이). 표의 문장에는 이모지를 넣지 않는다.
+       */
+      pushNarrative(
+        state,
+        `${teamNameIn(state, negotiation.counterpartTeamId ?? "")} — ${player.name} 오퍼 답 도착 (${formatMoney(offer.fee)})`,
+        3,
+      );
     }
     warnExpiringContracts(state, digest);
   }
@@ -639,6 +649,9 @@ function standsToday(state: GameState, digest: string[]): boolean {
   if (due.length === 0) return false;
   for (const v of due) {
     digest.push(`⛔ ${v.label} — 오늘이 기한입니다. 넘기면 협상이 사라집니다`);
+    // 오퍼 답 도착과 같은 눈금 — 오늘 답해야 하는 일은 3이다 (people.md §9).
+    // `label`이 아니라 `subject`를 싣는다: 표에는 도구 이름이 아니라 사실만 선다
+    pushNarrative(state, `${v.subject} — 오늘이 협상 기한`, 3);
   }
   return true;
 }

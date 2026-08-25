@@ -4,6 +4,7 @@ import type {
   MatchEvent,
   MatchRecord,
   MatchSide,
+  MilestoneCode,
   RegionalBand,
   RegionalIntent,
   RegionalLane,
@@ -16,6 +17,8 @@ import {
   ageOf,
   FORMATION_CHANGE_COST,
   clampCondition,
+  compareMilestones,
+  milestonePhrase,
   naturalPositionOf,
   normalizeCauses,
   normalizePacket,
@@ -51,6 +54,7 @@ import {
 } from "@story-fm/sim";
 import { matchesOn } from "../competition/calendar";
 import { applyMatchFinance } from "../club/finance";
+import { careerTotalsOf, settleMilestones } from "../squad/career";
 import { clampForm, formDeltaFromMatch } from "../squad/form";
 import { applyResultMood } from "../squad/slump";
 import { managerTacticsOf } from "./manager-tactics";
@@ -1399,6 +1403,25 @@ export function tacticalXpFor(taggedGoals: number): number {
 /** 경기 한 줄의 서사 무게 (1~5 눈금, `pushNarrative`) — 승리만 한 칸 위다 */
 const MATCH_SALIENCE_WIN = 4;
 const MATCH_SALIENCE_OTHER = 3;
+/**
+ * 그 경기가 세운 기록의 무게 — **결과 줄 아래다.** 기록은 승점을 바꾸지 않는
+ * 곁가지 사실이라, 결과와 같은 눈금에 두면 이긴 날의 기억이 "누가 100경기를
+ * 채웠다"가 된다. 2면 반감기 한 번(7일)에 그날의 새 소식에 자리를 내주고,
+ * 그 뒤로는 장부(`state.milestones`)와 선수 상세가 그 사실을 든다.
+ */
+const MATCH_SALIENCE_MILESTONE = 2;
+
+/** 마감이 모으는 기록 한 조각 — 누가 무엇을 세웠는지, 그뿐이다 */
+interface MilestoneNote {
+  name: string;
+  code: MilestoneCode;
+  value: number;
+}
+
+/** 기록 한 조각을 한 마디로 — 말은 도메인이 갖는다 (`milestonePhrase`) */
+function milestoneNote(m: MilestoneNote): string {
+  return `${m.name} ${milestonePhrase(m.code, m.value)}`;
+}
 
 /** 경기 후 반영 — 사건은 창발, 반영은 공식 (match.md §6) */
 export function finalizeMatch(state: GameState): MatchDigest {
@@ -1410,6 +1433,11 @@ export function finalizeMatch(state: GameState): MatchDigest {
   const brief = buildRatingBrief(state);
   /** 우리 경기 사건만 — 이 갈래가 대회 말풍선의 항목이 된다 */
   const digest: string[] = [];
+  /**
+   * 이 경기가 세운 기록 — 마감이 양 팀을 도는 동안 모았다가 마지막에 한 줄로 낸다.
+   * (담기는 것은 감독 팀 선수 것뿐이다 — game-state.md §3.4 ⚠️)
+   */
+  const milestoneNotes: MilestoneNote[] = [];
   /** 재정·다른 경기는 화면(재정·대회)이 이미 갖고 있다 — 모델만 읽는다 */
   const financeLines: string[] = [];
   const otherLines: string[] = [];
@@ -1562,11 +1590,40 @@ export function finalizeMatch(state: GameState): MatchDigest {
           outcome: result,
         });
       if (!friendly) {
+        /**
+         * **문턱은 스탯을 얹기 전의 수로 센다** (match.md §6). 나중에 원장을 훑어
+         * 세면 "언제 넘었나"가 사라져 회견도 여운도 그 경기에 매달 수 없다.
+         *
+         * 적는 것은 **감독 팀 선수뿐이다** — 리그 전체를 적으면 시즌마다 수백 행이
+         * 들어와 우리 선수의 기록이 그 안에 묻히고 아무도 읽지 않는다
+         * (game-state.md §3.4 ⚠️). 친선은 바깥의 `!friendly`가 이미 막았다: 장부에
+         * 안 남는 경기가 문턱을 밀면 프리시즌만으로 100경기가 채워진다.
+         *
+         * ⚠️ **원장은 한 번만 훑는다.** `careerTotalsOf`가 `seasonStats` 전체를
+         * 지나므로 얹은 뒤의 수를 다시 물으면 마감 한 번이 스물두 명 × 두 번이
+         * 된다. 이번 경기 몫(출전 1 · 골 `scoredBy`)을 앞의 수에 더해 뒤의 수를
+         * 만든다 — 방금 우리가 얹을 그 값이다.
+         */
+        const before =
+          player.teamId === state.userTeamId ? careerTotalsOf(state, id, player.teamId) : null;
         const stat = ensureSeasonStat(state, id, player.teamId);
         stat.apps += 1;
         stat.goals += scoredBy;
         if (assists > 0) stat.assists = (stat.assists ?? 0) + assists;
         stat.ratingSum = (stat.ratingSum ?? 0) + rating;
+        if (before) {
+          const rows = settleMilestones(state, {
+            playerId: id,
+            teamId: player.teamId,
+            matchId: match.id,
+            before,
+            after: { apps: before.apps + 1, goals: before.goals + scoredBy },
+            goalsInMatch: scoredBy,
+          });
+          for (const row of rows) {
+            milestoneNotes.push({ name: player.name, code: row.code, value: row.value });
+          }
+        }
       }
       // 체력은 몸의 소모만 정산한다. 승패의 심리 효과는 formDeltaFromMatch가 맡는다.
       // 폼에 골을 따로 더하지 않는 이유도 같다 — 골은 이미 평점에 크게 들어가 있고,
@@ -1719,6 +1776,22 @@ export function finalizeMatch(state: GameState): MatchDigest {
     "match",
   );
   digest.push(`최종 스코어 ${scoreline} — ${outcomeKo}`, ...messages);
+  /**
+   * 이 경기가 세운 기록 — **말풍선도 서사 메모도 한 줄이다.**
+   *
+   * 선수마다 한 줄로 나누면 데뷔전 둘에 해트트릭이 겹친 날 서사 메모가 서너 줄이
+   * 된다. 하루 한도가 막아 주지도 않는다 — 한도는 `gm-event` 갈래에만 걸린다
+   * (records.ts `NarrativeKind`). 막는 것은 GM 스냅샷 쪽이라 더 나쁘다: 스냅샷은
+   * 무게×최신으로 상위 몇 건만 뽑으므로(`topNarrative`, people.md §9) 그 서너 줄이
+   * 그 주의 기억을 통째로 밀어낸다. **한 경기가 세운 기록은 한 사건이다** —
+   * 드문 것부터 이어 붙여 한 줄로 내고, 낱낱은 장부(`state.milestones`)에 그대로
+   * 남아 선수 상세·회견 카드·심경의 여운이 읽는다.
+   */
+  if (milestoneNotes.length > 0) {
+    const line = `기록: ${[...milestoneNotes].sort(compareMilestones).map(milestoneNote).join(" · ")}`;
+    pushNarrative(state, line, MATCH_SALIENCE_MILESTONE, "match");
+    digest.push(line);
+  }
   /**
    * 연패·대패·연승이 라커룸에 남기는 것 (slump.ts) — **양 팀 모두.** 리그 전체와
    * 같은 규칙이다. 경기 결과가 장부에 쓰인 **뒤**라야 이번 경기가 연속 기록에

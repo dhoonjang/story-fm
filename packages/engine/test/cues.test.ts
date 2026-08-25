@@ -10,6 +10,11 @@ import {
   boardThriftFactor,
   boardTrustFactor,
   clubProfileIn,
+  coachArchetypeKeyOf,
+  coachCues,
+  COACH_ARCHETYPE_LABELS,
+  COACH_EYE_KEYS,
+  assignmentsOf,
   DEMAND_OF_ARCHETYPE,
   financeOf,
   openBoardDemand,
@@ -881,5 +886,100 @@ describe("보드 요청 (감독 → 보드) — 한도가 답을 정한다", () 
     state.date = addDays(state.date, 1);
     tickBoardRequests(state, []);
     expect(clubProfileIn(state, teamId).capacity).toBe(before + seats);
+  });
+});
+
+/**
+ * 수석코치의 눈 — **원형이 같은 장부에서 무엇을 먼저 보는가** (coach-cues.ts).
+ *
+ * 이 표가 없으면 6원형은 말투에만 남는다 — 데이터 분석가형과 야전 조련사형이
+ * 같은 스냅샷을 읽고 같은 것을 말한다 (people.md §7-1).
+ */
+describe("수석코치의 눈", () => {
+  /** 이 세이브의 수석코치를 그 원형으로 갈아 끼운다 — 원형은 시드가 뽑으므로 */
+  const asCoach = (state: GameState, key: string) => {
+    const coach = (state.personas ?? []).find((p) => p.role === "head_coach");
+    coach!.archetype = COACH_ARCHETYPE_LABELS[key]!;
+    return state;
+  };
+
+  /** 다음 경기를 오늘로부터 `days` 뒤로 옮긴다 — 그 앞의 다른 대진은 뒤로 민다 */
+  const fixtureIn = (state: GameState, days: number) => {
+    const next = state.matches
+      .filter(
+        (m) =>
+          m.result === null &&
+          (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+      )
+      .sort((a, b) => (a.date < b.date ? -1 : 1))[0]!;
+    state.date = addDays(next.date, -days);
+    return next;
+  };
+
+  it("6원형 전부가 표에 있다 — 빠진 원형은 빈 카드가 된다", () => {
+    expect([...COACH_EYE_KEYS].sort()).toEqual(Object.keys(COACH_ARCHETYPE_LABELS).sort());
+    // 세이브에 남는 것은 라벨이다 — 라벨로 키를 되찾지 못하면 그 코치는 빈손이다
+    for (const [key, label] of Object.entries(COACH_ARCHETYPE_LABELS)) {
+      expect(coachArchetypeKeyOf({ archetype: label })).toBe(key);
+    }
+    expect(coachArchetypeKeyOf({ archetype: "사라진 원형" })).toBeNull();
+  });
+
+  it("조련사는 경기 3일 안일 때만 지친 선발을 짚는다 — 체력 60이 경계다", () => {
+    const state = asCoach(createTestGame(11), "drill_sergeant");
+    fixtureIn(state, 3);
+    const starters = assignmentsOf(state, state.userTeamId, "starting")
+      .map((a) => playerById(state, a.playerId))
+      .filter((p): p is NonNullable<typeof p> => p !== null);
+    for (const p of starters) p.state.condition = 90;
+    const worn = starters[0]!;
+
+    worn.state.condition = 61;
+    expect(coachCues(state).some((c) => c.code === "tired")).toBe(false);
+
+    worn.state.condition = 60;
+    const cue = coachCues(state).find((c) => c.code === "tired");
+    expect(cue?.fact).toContain(`${worn.name} 60`);
+    expect(cue?.playerIds).toContain(worn.id);
+
+    // 나흘 뒤 경기는 아직 회복이 걸리는 자리가 아니다
+    state.date = addDays(state.date, -1);
+    expect(coachCues(state).some((c) => c.code === "tired")).toBe(false);
+  });
+
+  it("원형이 다르면 다른 갈래의 사실이 선다 — 같은 세이브, 같은 날", () => {
+    const base = createTestGame(11);
+    fixtureIn(base, 2);
+    const codesOf = (key: string) =>
+      coachCues(asCoach(structuredClone(base), key)).map((c) => c.code);
+
+    const sergeant = codesOf("drill_sergeant");
+    const analyst = codesOf("analyst");
+    const tactician = codesOf("veteran_tactician");
+    expect(analyst.length).toBeGreaterThan(0);
+    expect(tactician.length).toBeGreaterThan(0);
+    for (const code of analyst) expect(sergeant).not.toContain(code);
+    for (const code of tactician) expect(analyst).not.toContain(code);
+    // 한 턴에 두 장까지 — 갈래가 셋인 원형도 자리는 둘이다
+    expect(analyst.length).toBeLessThanOrEqual(2);
+  });
+
+  it("자리보다 갈래가 많으면 날짜로 굴러 뒷 사실도 차례가 온다", () => {
+    const base = asCoach(createTestGame(11), "analyst");
+    fixtureIn(base, 5);
+    const one = (offset: number) => {
+      const day = structuredClone(base);
+      day.date = addDays(base.date, offset);
+      return coachCues(day, 1).map((c) => c.code);
+    };
+    const seen = new Set([...one(0), ...one(1)]);
+    // 한 장만 실리는 날에도 같은 사실이 이틀 연속 맨 앞에 서지 않는다
+    expect(seen.size).toBe(2);
+  });
+
+  it("무직이면 벤치에 앉을 사람이 없다 — 한 장도 서지 않는다", () => {
+    const state = asCoach(createTestGame(11), "club_loyalist");
+    state.dismissal = { on: state.date, season: state.season, teamId: state.userTeamId };
+    expect(coachCues(state)).toEqual([]);
   });
 });

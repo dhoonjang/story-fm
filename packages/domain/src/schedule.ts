@@ -254,6 +254,37 @@ export function isReserveMatch(match: Pick<MatchRecord, "competitionId">): boole
 }
 
 /**
+ * 기준 팀 시점의 승패 — 정규시간이 같으면 승부차기로 갈린다.
+ *
+ * 승부차기가 있으면 그것이 결론이다: 승부차기로 갈린 컵 경기를 "무"로 칠하면 안
+ * 된다 — 그 날 이 팀은 이겼거나 떨어졌다. 결과가 없거나 이 팀의 경기가 아니면
+ * `null`이고, 한글 라벨은 `outcomeLabel`이 붙인다(조회 응답·달력 일지·코치의 눈).
+ *
+ * (폼의 연속 기록은 승부차기를 보지 않는다 — `recentOutcomes`, engine/squad/slump.ts.)
+ */
+export function outcomeFor(match: MatchRecord, teamId: string): "W" | "D" | "L" | null {
+  const home = match.homeTeamId === teamId;
+  if (!match.result || (!home && match.awayTeamId !== teamId)) return null;
+  const { homeGoals, awayGoals, penalties } = match.result;
+  const mine = home ? homeGoals : awayGoals;
+  const theirs = home ? awayGoals : homeGoals;
+  if (mine !== theirs) return mine > theirs ? "W" : "L";
+  if (penalties) {
+    const myPens = home ? penalties.home : penalties.away;
+    const theirPens = home ? penalties.away : penalties.home;
+    if (myPens !== theirPens) return myPens > theirPens ? "W" : "L";
+  }
+  return "D";
+}
+
+const OUTCOME_KO = { W: "승", D: "무", L: "패" } as const;
+
+/** 승패의 한글 표기 — 판정은 `outcomeFor`가 하고 여기서는 라벨만 붙인다 */
+export function outcomeLabel(outcome: "W" | "D" | "L" | null): "승" | "무" | "패" {
+  return OUTCOME_KO[outcome ?? "D"];
+}
+
+/**
  * 훈련 효과 대상 — 능력치 16축 + 전술 적응도(tactical) + 회복(recovery).
  * GM(LLM)이 자연어 훈련을 이 focus 목록으로 해석하고, 코어가 효과를 준다.
  * (16축이므로 "측면 크로스 반복" → kicking·passing 처럼 해상도가 올라간다)

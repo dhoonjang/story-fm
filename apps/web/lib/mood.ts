@@ -1,4 +1,5 @@
-import { PLAYER_ARCHETYPE_LABEL } from "@story-fm/domain";
+import { milestonePhrase, PLAYER_ARCHETYPE_LABEL } from "@story-fm/domain";
+import type { MilestoneCode } from "@story-fm/domain";
 import type { MoodFact, MoodRead } from "@story-fm/engine";
 
 /**
@@ -15,11 +16,49 @@ function dayWord(days: number): string {
 }
 
 /**
+ * 그 경기가 세운 기록 한 마디 — 코어가 주는 것은 코드와 눈금뿐이라
+ * (`milestoneTitle`) 문장은 여기서 만든다. 넷이 서로 다르게 읽혀야 한다:
+ * 데뷔전은 실감이 없고, 첫 골은 오래 기다린 것이고, 문턱은 쌓아 온 것이고,
+ * 해트트릭은 그날 하루의 일이다.
+ */
+function milestoneSentence(day: string, m: { code: MilestoneCode; value: number }): string {
+  // 무엇을 세웠는지의 말은 코어가 갖는다 — 여기서 만드는 것은 그 뒤의 문장이다
+  const what = milestonePhrase(m.code, m.value);
+  switch (m.code) {
+    case "debut":
+      return `${day} 데뷔전을 치렀다`;
+    case "first-goal":
+      return `${day} 이 구단에서의 첫 골을 넣었다`;
+    case "apps":
+      return `${day} ${what}를 채웠다`;
+    case "goals":
+      return `${day} ${what}을 채웠다`;
+    case "hat-trick":
+      return `${day} ${what}을 기록했다`;
+  }
+}
+
+/** 기록 뒤에 붙는 한 마디 — 같은 데뷔전도 이긴 날과 진 날이 다르다 */
+const MILESTONE_OUTCOME_TAIL: Record<"win" | "draw" | "loss", string> = {
+  win: "이긴 날이라 더 오래 남는다",
+  draw: "팀은 비겼다",
+  loss: "팀이 진 날이라 마음껏 웃지 못한다",
+};
+
+/**
  * 경기의 여운 — **팀의 결과와 자기 경기가 따로 논다.**
  * 이긴 경기에서 부진한 선수와 진 경기에서 제 몫을 한 선수는 마음이 다르다.
  */
 function afterglowSentence(fact: Extract<MoodFact, { cause: "afterglow" }>): string {
   const day = dayWord(fact.days);
+  /**
+   * 기록이 있으면 **그것이 먼저다.** 데뷔전을 치른 열여덟에게 그날의 마음은 팀의
+   * 승패보다 자기 기록이고, 평점은 그 앞에서 할 말이 못 된다. 승패는 뒤에 한
+   * 마디로만 붙는다 (people.md §5 — 새 카드가 아니라 여운의 일부다).
+   */
+  if (fact.milestone) {
+    return `${milestoneSentence(day, fact.milestone)} — ${MILESTONE_OUTCOME_TAIL[fact.outcome]}`;
+  }
   // 평점이 없으면(기록이 안 남은 경기) 팀 결과만 말한다
   if (fact.rating === null) {
     return fact.outcome === "win"

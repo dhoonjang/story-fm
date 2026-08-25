@@ -5,9 +5,11 @@
 import {
   awardLine,
   boardExpectation,
+  careerTotalsOf,
   characterEntry,
   characterEntryOf,
   clockOf,
+  coachCues,
   describeActiveArcs,
   computeStandings,
   dayOfWeek,
@@ -48,6 +50,7 @@ import {
   userPlayers,
   weeklyWagesOf,
   type ChatTurn,
+  type CoachCue,
   type GameState,
   type ScenePoint,
 } from "@story-fm/engine";
@@ -336,6 +339,20 @@ function lines(...items: (string | null)[]): string {
 }
 
 /**
+ * 수석코치가 먼저 짚는 사실 — **이름이 태그의 속성으로 선다.** 안쪽 줄에 `이름:`을
+ * 적으면 모델의 발화 문법(`@이름:`)과 한 글자 차이라, 코어가 낸 사실 줄이 코치가
+ * 이미 한 말처럼 읽힌다 (prompts.md §5-1과 같은 이유로 회견·다가옴도 속성을 쓴다).
+ */
+function coachBlock(state: GameState, cues: readonly CoachCue[]): string | null {
+  if (cues.length === 0) return null;
+  return block(
+    "coach",
+    cues.map((c) => `- ${c.fact}`).join("\n"),
+    ` name="${headCoachOf(state).name}"`,
+  );
+}
+
+/**
  * 회견·찾아온 사람 — **id가 태그의 속성으로 선다.** 답할 자리라 모델이 그 id를
  * 스킬 인자로 되돌려 주어야 하고, 여는 태그가 이름을 대므로 안쪽 첫 줄은 맥락부터
  * 시작한다 (prompts.md §5-1).
@@ -476,13 +493,10 @@ function retirementFacts(state: GameState): string[] {
     .map((t) => {
       const player = playerById(state, t.gamePlayerId);
       if (!player) return null;
-      // 우리 팀에서의 기록 — 시즌 기록은 팀별로 갈려 있어 우리 팀 행만 합산한다
-      const ours = state.seasonStats.filter(
-        (s) => s.gamePlayerId === t.gamePlayerId && s.teamId === state.userTeamId,
-      );
-      const apps = ours.reduce((sum, s) => sum + s.apps, 0);
-      const goals = ours.reduce((sum, s) => sum + s.goals, 0);
-      return `은퇴: ${player.name} ${ageOf(player.birthdate, t.date)}세 · 우리 팀에서 ${apps}경기 ${goals}골`;
+      // 우리 팀에서의 기록 — 통산 접기는 한 곳이다(`careerTotalsOf`). 여기서 다시
+      // 합하면 화면·선수 카드가 내는 수와 은퇴 줄의 수가 언젠가 갈린다
+      const ours = careerTotalsOf(state, t.gamePlayerId, state.userTeamId);
+      return `은퇴: ${player.name} ${ageOf(player.birthdate, t.date)}세 · 우리 팀에서 ${ours.apps}경기 ${ours.goals}골`;
     })
     .filter((x): x is string => x !== null);
 }
@@ -585,6 +599,7 @@ export function buildGmStateNote(
   ].filter((x): x is string => x !== null);
 
   const cues = speakerCues(state);
+  const coach = coachCues(state);
   const offseason = offseasonFacts(state);
   const negotiations = describeNegotiations(state);
   const recent = recentNarrativeLines(state);
@@ -668,6 +683,13 @@ export function buildGmStateNote(
     // 선수 근황 — 선수단 중 **사실이 붙는** 셋이다.
     // 코어는 사실만 낸다(speakerCues) — 누가 말할지, 무슨 말을 할지는 GM의 몫
     block("cues", cues.map((c) => `- ${c.name} ${c.fact}`).join("\n")),
+    /**
+     * 수석코치가 먼저 짚는 사실 — **원형이 고른다** (people.md §7-1). 근황과 같은
+     * 결이되 고르는 눈이 다르다: 분석가는 상대의 표를, 조련사는 다리를 먼저 본다.
+     * 여기도 사실뿐이고(`coachCues`) 그 사실로 무슨 말을 할지는 GM이 쓴다.
+     * 무직이면 코어가 빈손을 내므로 이 덩어리는 서지 않는다.
+     */
+    coachBlock(state, coach),
     block("last_match", matchDigest(state)),
     // 오프시즌 — 은퇴와 시상. 소집 전에만 서고, 없으면 한 줄도 쓰지 않는다
     block("offseason", offseason),
