@@ -53,6 +53,7 @@ import type {
   TeamFinance,
   RegistrablePlayer,
   TeamTactics,
+  TrainingReport,
   TrainingSession,
   Transfer,
   TransferWindow,
@@ -597,6 +598,14 @@ export interface GameState {
   suspensions: Suspension[];
   transfers: Transfer[];
   growthLog: GrowthEntry[];
+  /**
+   * 훈련 결산 카드 — 한 구간의 훈련이 무엇을 남겼나 (season.md §4).
+   *
+   * 낱낱의 성장은 `growthLog`가 갖는다. 여기 남는 것은 **구간**의 것이다 —
+   * 세션 수, 그 구간에 움직인 것, 훈련장에서 눈에 띈 선수의 갈래와 근거 한 줄.
+   * 상한 있는 링(`TRAINING_REPORT_LIMIT`). 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  trainingReports?: TrainingReport[];
   seasonStats: SeasonStat[];
   /**
    * 집중 육성 명단 — 감독이 지정한 우리 2군 유망주(`set_development_focus`).
@@ -1325,6 +1334,30 @@ export function recordGrowth(
   if (state.growthLog.length > GROWTH_LOG_LIMIT) {
     state.growthLog.splice(0, state.growthLog.length - GROWTH_LOG_LIMIT);
   }
+}
+
+/**
+ * 훈련 결산 카드 보관 한도 — **40장.**
+ *
+ * 결산은 시즌에 백 번 넘게 돈다. 전부 들고 있으면 세이브가 읽히지 않는 카드로
+ * 불어나는데, 감독이 되짚어 읽는 것은 최근 몇 주고 **낱낱의 성장은 `growthLog`가
+ * 따로 영구히 갖는다** — 여기서 잘리는 것은 근거 한 줄과 갈래뿐이다.
+ */
+const TRAINING_REPORT_LIMIT = 40;
+
+/** 한 구간의 결산 카드를 장부에 남긴다 — 오래된 것부터 밀려난다 */
+export function recordTrainingReport(state: GameState, report: TrainingReport): void {
+  const ring = (state.trainingReports ??= []);
+  ring.push(report);
+  if (ring.length > TRAINING_REPORT_LIMIT) {
+    ring.splice(0, ring.length - TRAINING_REPORT_LIMIT);
+  }
+}
+
+/** 가장 최근의 결산 카드 — 없으면 null */
+export function latestTrainingReport(state: GameState): TrainingReport | null {
+  const ring = state.trainingReports ?? [];
+  return ring[ring.length - 1] ?? null;
 }
 
 /**
@@ -2495,6 +2528,7 @@ export function createGame(input: CreateGameInput): GameState {
     suspensions: [],
     transfers: [],
     growthLog: [],
+    trainingReports: [],
     seasonStats: [],
     issues: [],
     scoutReports: [],

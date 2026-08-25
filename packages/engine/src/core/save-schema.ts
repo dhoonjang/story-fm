@@ -42,6 +42,7 @@ import {
   SuspensionSchema,
   TeamFinanceSchema,
   TeamTacticsSchema,
+  TrainingReportSchema,
   TrainingSessionSchema,
   TransferListingSchema,
   TransferSchema,
@@ -123,6 +124,7 @@ export const SaveSchema = z
     developmentFocus: z.array(z.string()).optional(),
     awards: z.array(SeasonAwardSchema).optional(),
     milestones: z.array(MilestoneSchema).optional(),
+    trainingReports: z.array(TrainingReportSchema).optional(),
     reserveTraining: ReserveTrainingPolicySchema.optional(),
   })
   .passthrough();
