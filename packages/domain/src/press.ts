@@ -476,7 +476,8 @@ export function pressFactText(fact: PressFact): string {
     case "interest":
       return (
         `최근 ${v.days ?? 0}일 타 구단 오퍼 ${v.offers ?? 0}건` +
-        ` · 최고 ${formatMoney(v.fee ?? 0)}${name ? ` (${name})` : ""}`
+        ` · 최고 ${formatMoney(v.fee ?? 0)}${name ? ` (${name})` : ""}` +
+        ` · 시즌 출전 ${v.apps ?? 0}경기`
       );
   }
 }

@@ -507,6 +507,198 @@ describe("계단 4·5 — 언론 유출과 이적 요청", () => {
   });
 });
 
+/** 우리 스쿼드에서 가장 나은 선수 — 상위 14명 문을 확실히 지나는 대상 */
+function best(state: GameState) {
+  return [...userPlayers(state)].sort((a, b) => b.attributes.overall - a.attributes.overall)[0]!;
+}
+
+/**
+ * 스쿼드에 **서로 다른 종합**을 매겨 순위를 정확히 만든다 — 상위 14명 경계를 재려면
+ * 동점이 없어야 한다(`betterThanInSquad`는 자기보다 **높은** 선수만 센다).
+ */
+function rankedSquad(state: GameState) {
+  const squad = [...userPlayers(state)].sort((a, b) => b.attributes.overall - a.attributes.overall);
+  squad.forEach((p, i) => {
+    p.attributes.overall = 90 - i;
+  });
+  return squad;
+}
+
+/** 최근에 끝난 타 구단의 매각 오퍼 하나 — `interest`의 유일한 원인 */
+function closedOffer(
+  state: GameState,
+  playerId: string,
+  input: { fee: number; status: "rejected" | "expired"; daysAgo: number },
+) {
+  const on = addDays(state.date, -input.daysAgo);
+  state.negotiations.push({
+    id: `neg-in-${playerId}-${on}`,
+    gamePlayerId: playerId,
+    kind: "sell",
+    counterpartTeamId: state.teams.find((t) => t.id !== state.userTeamId)!.id,
+    windowId: null,
+    openedOn: on,
+    expiresOn: on,
+    status: input.status,
+    rounds: [
+      {
+        date: on,
+        by: "them",
+        fee: input.fee,
+        weeklyWage: 0,
+        contractYears: 4,
+        respondsOn: null,
+        probability: 50,
+        verdict: null,
+      },
+    ],
+  });
+}
+
+/**
+ * 에이전트 채널 — **계약과 관심은 협상 테이블 건너편에서 온다** (people.md §8).
+ *
+ * 사다리 꼭대기(계단 5)에서만 서던 대리인이 계단 1부터 서는 자리라, 「누가 오는가」와
+ * 「어디서 멈추는가」가 주제마다 갈리는지가 여기서 결정된다.
+ */
+describe("계약과 관심 — 에이전트가 계단 1부터 온다", () => {
+  it("계약 만료 불만은 대리인이 들고 온다 — 계단 1도 에이전트다", () => {
+    const state = quiet(createTestGame(11));
+    const target = best(state);
+    gripe(state, target.id, "contract");
+
+    // contract는 하루 5 — 19일이면 95로 임계 100에 못 미친다
+    pressDays(state, 19);
+    expect(pendingApproach(state)).toBeNull();
+
+    pressDays(state, 1);
+    const open = pendingApproach(state)!;
+    expect(open.step).toBe(1);
+    expect(open.channel).toBe("agent");
+    expect(worldFigures(state).some((f) => f.characterId === open.speakerId)).toBe(true);
+    expect(open.about).toBe(target.id);
+    expect(open.facts[0]?.kind).toBe("contract-demand");
+    expect(open.contextCard?.code).toBe("contract-demand");
+  });
+
+  it("재계약을 열면 압력이 식는다 — 불만은 그대로 남는다", () => {
+    const state = quiet(createTestGame(11));
+    const target = best(state);
+    gripe(state, target.id, "contract");
+    pressDays(state, 10); // 50
+
+    state.negotiations.push({
+      id: `neg-renew-${target.id}`,
+      gamePlayerId: target.id,
+      kind: "renew",
+      counterpartTeamId: null,
+      windowId: null,
+      openedOn: state.date,
+      expiresOn: addDays(state.date, 14),
+      status: "open",
+      rounds: [],
+    });
+
+    // 원인이 서지 않으니 하루 12씩 식는다
+    pressDays(state, 2);
+    expect(rowOf(state, target.id).value).toBe(26);
+    // 0에서 멈추고, 계단도 0인 줄은 장부에서 사라진다
+    pressDays(state, 3);
+    expect(state.approachPressure!.some((r) => r.subject === target.id)).toBe(false);
+    // 협상을 여는 것은 압력만 멈춘다 — 불만을 푸는 것은 성사뿐이다
+    expect(state.issues.some((i) => i.gamePlayerId === target.id)).toBe(true);
+  });
+
+  it("계약 만료도 같은 사다리를 탄다 — 계단 4는 유출이다", () => {
+    const state = quiet(createTestGame(11));
+    const target = best(state);
+    gripe(state, target.id, "contract");
+    climbTo(state, target.id, 3);
+
+    // contract는 하루 5 — 80일이면 400을 채운다
+    pressDays(state, 80);
+    expect(pendingApproach(state)).toBeNull();
+    expect(state.pressLeaks).toEqual([
+      { playerId: target.id, topic: "contract", date: state.date },
+    ]);
+  });
+
+  it("최근 창에서 끝난 오퍼가 대리인을 부른다 — 사유가 없어도 온다", () => {
+    const state = quiet(createTestGame(11));
+    const target = best(state);
+    closedOffer(state, target.id, { fee: 20_000_000, status: "expired", daysAgo: 0 });
+
+    // interest는 하루 8 — 12일이면 96으로 임계 100에 못 미친다
+    pressDays(state, 12);
+    expect(pendingApproach(state)).toBeNull();
+
+    pressDays(state, 1);
+    const open = pendingApproach(state)!;
+    expect(open.topic).toBe("interest");
+    expect(open.channel).toBe("agent");
+    expect(open.about).toBe(target.id);
+    expect(open.facts[0]?.kind).toBe("interest");
+    // 불만이 아니다 — 라커룸 장부에는 아무것도 남지 않는다
+    expect(state.issues).toEqual([]);
+  });
+
+  it("창이 지나면 식는다 — 답으로 지울 원인이 없다", () => {
+    const state = quiet(createTestGame(11));
+    const target = best(state);
+    closedOffer(state, target.id, { fee: 20_000_000, status: "expired", daysAgo: 0 });
+    pressDays(state, 13);
+    expect(respondToApproach(state, { stance: "defend" }).ok).toBe(true);
+
+    // 창(14일)이 지난 뒤로는 원인이 서지 않아 하루 12씩 식는다
+    pressDays(state, 10);
+    expect(rowOf(state, target.id).value).toBe(0);
+    expect(rowOf(state, target.id).step).toBe(1);
+  });
+
+  it("관심의 사다리는 3에서 멈춘다 — 유출도 요청도 서지 않는다", () => {
+    const state = quiet(createTestGame(11));
+    const target = best(state);
+    /**
+     * 창이 14일뿐이라 사다리를 굴려서는 3계단에 닿지 못한다 — 계단 3의 임계(400)를
+     * 코앞에 둔 줄을 세워 두고 하루만 민다.
+     */
+    state.approachPressure = [{ subject: target.id, topic: "interest", value: 399, step: 3 }];
+    closedOffer(state, target.id, { fee: 20_000_000, status: "expired", daysAgo: 0 });
+
+    pressDays(state, 1);
+    const open = pendingApproach(state);
+    expect(open?.topic).toBe("interest");
+    expect(open?.step).toBe(3);
+    expect(state.pressLeaks ?? []).toEqual([]);
+    expect(target.state.transferRequestedOn).toBeUndefined();
+  });
+
+  it("경계는 상위 14명이다 — 열넷째까지 서고 열다섯째는 서지 않는다", () => {
+    const state = quiet(createTestGame(11));
+    const squad = rankedSquad(state);
+    const core = squad[13]!; // 그보다 나은 선수 13명 — 안
+    const fringe = squad[14]!; // 14명 — 밖
+    closedOffer(state, core.id, { fee: 20_000_000, status: "rejected", daysAgo: 0 });
+    closedOffer(state, fringe.id, { fee: 20_000_000, status: "expired", daysAgo: 0 });
+
+    pressDays(state, 13);
+    expect(rowOf(state, core.id).topic).toBe("interest");
+    expect(state.approachPressure!.some((r) => r.subject === fringe.id)).toBe(false);
+  });
+
+  it("막힌 이적 불만이 선 선수에게는 서지 않는다 — 한 사건에 두 사람이 오지 않는다", () => {
+    const state = quiet(createTestGame(11));
+    const target = best(state);
+    closedOffer(state, target.id, { fee: 20_000_000, status: "rejected", daysAgo: 0 });
+    gripe(state, target.id, "blocked-move");
+
+    pressDays(state, 13);
+    const row = state.approachPressure!.find((r) => r.subject === target.id)!;
+    expect(row.topic).toBe("blocked-move");
+    expect(state.approachPressure?.some((r) => r.topic === "interest")).toBeFalsy();
+  });
+});
+
 /**
  * 보드 요청 — **구단주 원형이 이적창마다 거는 조건 하나** (board-demand.ts ·
  * career.md §5.2). 같은 파일에 두는 이유는 위와 같다: 세계가 감독에게 무엇을
