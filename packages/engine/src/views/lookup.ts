@@ -18,6 +18,7 @@ import {
   describeReputation,
   familiarityLabel,
   footLabel,
+  growthLabel,
   milestoneTitle,
   physiqueLabel,
   naturalPositionOf,
@@ -608,6 +609,22 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
 
 // ── 선수 상세 ───────────────────────────────────────────
 
+/**
+ * 그 날짜의 성장을 낸 훈련 결산의 **근거 한 줄** — 없으면 null.
+ *
+ * 카드는 구간(`from`~`to`)을 갖고 성장 로그는 그 구간 안의 훈련 날짜를 가리키므로,
+ * 그 날짜를 품은 카드에서 이 선수의 줄을 찾는다. 링에서 밀려난 옛 구간의 근거는
+ * 없다 — 그때는 눈금만 남는다 (docs/simulation/season.md §4).
+ */
+function trainingNoteFor(state: GameState, playerId: string, date: string): string | null {
+  for (const report of state.trainingReports ?? []) {
+    if (date < report.from || date > report.to) continue;
+    const note = report.marks.find((m) => m.gamePlayerId === playerId)?.note;
+    if (note !== undefined && note.length > 0) return note;
+  }
+  return null;
+}
+
 const CAUSE_KO: Record<string, string> = { match: "경기", training: "훈련", other: "기타" };
 const TRANSFER_KO: Record<string, string> = {
   transfer: "이적",
@@ -841,10 +858,21 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
             (assignment.instruction ? ` · 개인지시 "${assignment.instruction}"` : "")
         : "전술: 배치 없음 (예비 스쿼드)",
     );
+    /**
+     * 최근 성장 — **대상은 낱말로 싣는다.** `pos:CB`는 장부의 코드지 표기가
+     * 아닌데, 그대로 실으면 모델이 그 코드를 그대로 감독에게 옮긴다.
+     * 훈련 결산이 올린 줄에는 그 판정의 **근거 한 줄**이 함께 선다 — 근거가
+     * 닿는 조회 자리는 여기 하나다 (docs/simulation/season.md §4).
+     */
     const growth = state.growthLog
       .filter((g) => g.gamePlayerId === p.id)
       .slice(-5)
-      .map((g) => `${g.date} ${g.target} ${g.delta > 0 ? "+" : ""}${g.delta}`);
+      .map((g) => {
+        const head = `${g.date} ${growthLabel(g.target)} ${g.delta > 0 ? "+" : ""}${g.delta}`;
+        const why =
+          g.origin === "training-settlement" ? trainingNoteFor(state, p.id, g.date) : null;
+        return why ? `${head} (${why})` : head;
+      });
     if (growth.length > 0) lines.push(`최근 성장: ${growth.join(" / ")}`);
   } else {
     const { strengths, weaknesses } = strengthsAndWeaknesses(state, p);

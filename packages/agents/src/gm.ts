@@ -593,8 +593,14 @@ async function runRealGmTurn(
     });
     if (brief) pendingTraining.push(brief);
   }
-  // 훈련 결산 — 코어 앵커 위에 LLM이 맥락을 더한다 (실패해도 앵커가 남는다).
-  // 내부 판정이라 칩으로 세우지 않는다 — 결과는 달력의 훈련 기록이 갖는다
+  /**
+   * 훈련 결산 — 코어 앵커 위에 LLM이 맥락을 더한다 (실패해도 앵커가 남는다).
+   *
+   * 내부 판정이라 칩으로 세우지 않는다. 결과는 **장부의 결산 카드**가 갖는다
+   * (`state.trainingReports`) — 달력 일지가 그 카드를 문장으로 펼치고, 다음 턴의
+   * 스냅샷 `<coach>` 첫 줄이 구간과 이름을 싣는다
+   * (docs/simulation/season.md §4 · docs/llm/agents.md §6).
+   */
   for (const brief of pendingTraining) {
     await reportTraining(state, brief);
   }

@@ -2,6 +2,7 @@ import {
   ageOf,
   growthLabel,
   isReserveMatch,
+  TRAINING_MARK_KO,
   normalizeSpeaker,
   outcomeFor,
   outcomeLabel,
@@ -13,6 +14,7 @@ import {
   type MatchRecord,
   type TacticAxisKey,
   type TacticsSpec,
+  type TrainingReport,
 } from "@story-fm/domain";
 import { formLabel } from "./form";
 import { isSettling } from "./settling";
@@ -27,8 +29,10 @@ import { derbyNameOf } from "../data/derbies";
 import { coachArchetypeKeyOf, headCoachOf } from "../world/persona";
 import {
   assignmentsOf,
+  latestTrainingReport,
   managedTeamId,
   playerById,
+  playerName,
   playersOf,
   seasonStatOf,
   squadLevelOf,
@@ -81,6 +85,14 @@ const H2H_SHOWN = 3;
 const OPPONENT_RECENT = 5;
 /** 가장 벌어진 축 — 둘이면 갈래가 보이고 셋이면 표가 된다 */
 const AXES_SHOWN = 2;
+/**
+ * 결산 카드가 "방금 일"로 서는 창 (일).
+ *
+ * 카드는 손잡이를 돌린 턴 **뒤에** 서므로 감독이 그 자리에서 몇 마디 더 나누는
+ * 동안 남아 있어야 한다. 그 뒤로는 다음 결산이 대신 서고, 이 창을 넘긴 카드는
+ * 소식이 아니라 기록이다 — 달력이 갖는다.
+ */
+const TRAINING_REPORT_FRESH_DAYS = 3;
 
 /** 코치가 카드를 고르기 전에 한 번만 뽑아 두는 것 — 갈래마다 다시 훑지 않는다 */
 interface CoachSight {
@@ -479,6 +491,48 @@ const expectation: CoachEye = (state) => {
 };
 
 /**
+ * 지난 구간의 **훈련 결산** — 원형이 고르지 않는 한 장 (people.md §7-1).
+ *
+ * 훈련장은 갈래를 가릴 것 없이 이 코치가 여는 자리다. 여섯 눈 중 하나로 넣으면
+ * 원형 하나에게만 닿아, 분석가를 쓰는 감독은 자기 훈련의 결과를 영영 듣지 못한다.
+ * 그래서 눈의 표 밖에 서고 2장 상한도 지지 않는다.
+ *
+ * ⚠️ **싣는 것은 건수와 이름까지다.** 근거 한 줄과 낱낱의 수치는 달력 일지와
+ * `get_player`가 갖는다 — 스냅샷은 매 턴 정가로 읽히는 층이라, 스물몇 줄짜리
+ * 판정을 그대로 부으면 이 블록 하나가 그 층의 절반을 먹는다 (agents.md §6).
+ */
+function trainingReportCue(state: GameState): CoachCue | null {
+  const report = latestTrainingReport(state);
+  if (report === null) return null;
+  if (diffDays(report.to, state.date) > TRAINING_REPORT_FRESH_DAYS) return null;
+  const window = report.from === report.to ? report.to : `${report.from}~${report.to}`;
+  const head = `${window} 훈련 ${report.sessions}회 결산`;
+  const grew = [...new Set(report.moved.map((m) => m.gamePlayerId))];
+  const parts = [
+    grew.length > 0 ? `성장 ${counted(grew.map((id) => playerName(state, id)))}` : null,
+    ...markCounts(state, report),
+  ].filter((x): x is string => x !== null);
+  return {
+    code: "training-report",
+    // 아무것도 움직이지 않은 구간도 사실이다 — 그 자리를 비우면 지어낸다
+    fact: `${head} — ${parts.length > 0 ? parts.join(" · ") : "장부에 남은 변화 없음"}`,
+    playerIds: [...grew, ...report.marks.map((m) => m.gamePlayerId)],
+  };
+}
+
+/** 갈래별 인원과 이름 — 갈래 표의 순서를 따른다(날마다 순서가 흔들리지 않게) */
+function markCounts(state: GameState, report: TrainingReport): string[] {
+  const rows: string[] = [];
+  for (const code of Object.keys(TRAINING_MARK_KO) as Array<keyof typeof TRAINING_MARK_KO>) {
+    const names = report.marks
+      .filter((m) => m.code === code)
+      .map((m) => playerName(state, m.gamePlayerId));
+    if (names.length > 0) rows.push(`${TRAINING_MARK_KO[code]} ${counted(names)}`);
+  }
+  return rows;
+}
+
+/**
  * 원형 키 → 그 코치가 먼저 보는 것 (people.md §7-1의 표).
  *
  * ⚠️ **키는 `world/persona.ts`의 원형 키다.** 세이브에 남는 것은 라벨이므로
@@ -505,9 +559,15 @@ export const COACH_EYE_KEYS: readonly string[] = Object.keys(COACH_EYE);
  */
 export function coachCues(state: GameState, limit = 2): CoachCue[] {
   if (managedTeamId(state) === null) return [];
+  /**
+   * 훈련 결산은 **원형 앞에** 선다 — 눈이 없는 원형(표에서 되찾지 못한 라벨)에게도
+   * 이 한 장은 간다. 자리도 따로 갖는다: `limit`은 원형이 고르는 장수다.
+   */
+  const settlement = trainingReportCue(state);
+  const first = settlement ? [settlement] : [];
   const key = coachArchetypeKeyOf(headCoachOf(state));
   const eyes = key !== null ? COACH_EYE[key] : undefined;
-  if (!eyes) return [];
+  if (!eyes) return first;
 
   const next = nextMatchFor(state.matches, state.userTeamId, state.date);
   const sight: CoachSight = {
@@ -521,7 +581,7 @@ export function coachCues(state: GameState, limit = 2): CoachCue[] {
   };
 
   const cues = eyes.map((eye) => eye(state, sight)).filter((cue): cue is CoachCue => cue !== null);
-  if (cues.length === 0) return [];
+  if (cues.length === 0) return first;
 
   /**
    * **최근에 말한 이름이 걸린 사실은 뒤로 민다** — 근황과 같은 창(`recentSpeakers`)을
@@ -545,5 +605,5 @@ export function coachCues(state: GameState, limit = 2): CoachCue[] {
    */
   const day = rotationDay(state.date);
   const rotated = fresh.length > 0 ? fresh.map((_, i) => fresh[(i + day) % fresh.length]!) : fresh;
-  return [...rotated, ...spoken].slice(0, limit);
+  return [...first, ...[...rotated, ...spoken].slice(0, limit)];
 }

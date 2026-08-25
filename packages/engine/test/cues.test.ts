@@ -982,4 +982,51 @@ describe("수석코치의 눈", () => {
     state.dismissal = { on: state.date, season: state.season, teamId: state.userTeamId };
     expect(coachCues(state)).toEqual([]);
   });
+
+  /**
+   * 훈련 결산은 **원형이 고르지 않는다** — 훈련장은 어느 원형이든 이 코치가 여는
+   * 자리라, 눈 하나로 넣으면 그 원형을 쓰는 감독에게만 자기 훈련의 결과가 닿는다
+   * (people.md §7-1 · season.md §4).
+   */
+  it("훈련 결산은 원형 앞에 서고 2장 상한을 지지 않는다", () => {
+    const base = createTestGame(11);
+    fixtureIn(base, 2);
+    const someone = userPlayers(base)[0]!;
+    base.trainingReports = [
+      {
+        from: addDays(base.date, -6),
+        to: base.date,
+        sessions: 6,
+        moved: [{ gamePlayerId: someone.id, target: "tactical", delta: 1 }],
+        marks: [{ gamePlayerId: someone.id, code: "standout", note: "마지막까지 남았다" }],
+      },
+    ];
+    const cuesOf = (key: string) => coachCues(asCoach(structuredClone(base), key));
+
+    for (const key of COACH_EYE_KEYS) {
+      expect(cuesOf(key)[0]?.code, `${key}에게 결산이 첫 줄로 서지 않았다`).toBe("training-report");
+    }
+    // 원형의 두 장은 그대로다 — 결산이 자리를 뺏지 않는다 (갈래가 셋인 원형)
+    const analyst = cuesOf("analyst");
+    expect(analyst.filter((c) => c.code !== "training-report")).toHaveLength(2);
+    // 눈을 되찾지 못한 원형에게도 이 한 장은 간다
+    const orphan = coachCues(asCoach(structuredClone(base), "club_loyalist"));
+    expect(orphan[0]!.fact).toContain(`${someone.name}`);
+    expect(orphan[0]!.fact).toContain("두드러짐");
+
+    // 창(3일)을 넘긴 카드는 소식이 아니라 기록이다 — 달력이 갖는다
+    const stale = structuredClone(base);
+    stale.date = addDays(base.date, 4);
+    expect(coachCues(stale).some((c) => c.code === "training-report")).toBe(false);
+  });
+
+  it("아무것도 안 움직인 구간도 사실로 선다 — 빈자리는 지어낸다", () => {
+    const state = createTestGame(11);
+    state.trainingReports = [
+      { from: state.date, to: state.date, sessions: 2, moved: [], marks: [] },
+    ];
+    const cue = coachCues(state).find((c) => c.code === "training-report");
+    expect(cue?.fact).toContain("훈련 2회 결산");
+    expect(cue?.fact).toContain("장부에 남은 변화 없음");
+  });
 });
