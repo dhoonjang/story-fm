@@ -1,5 +1,5 @@
 import type { GamePlayer, Injury, TransferReason } from "@story-fm/domain";
-import { ageOf, buildPaymentInstallments, isReserveMatch, seasonRating } from "@story-fm/domain";
+import { ageOf, buildPaymentInstallments, seasonRating } from "@story-fm/domain";
 import { contractUntil, seasonYear, windowOpenOn } from "../competition/calendar";
 import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import { formatMoney, recordFinance, settleDuePayments } from "../club/finance";
@@ -18,13 +18,14 @@ import {
 import { estimateWeeklyWage, wageSubjectOf } from "../world/wages";
 import { makeRng } from "../core/rng";
 import { assignSquadNumber } from "../squad/numbers";
-import { arrivingSquadLevel } from "../squad/registration";
+import { admitOnLoan, arrivingSquadLevel } from "../squad/registration";
 import type { SkillResult } from "../skills";
 import { forgetRoles } from "../skills/role-memory";
 import { item, signed } from "../skills/brief";
 import { pickAnyPlayer } from "../core/player-ref";
 import {
   activeContract,
+  benchRunOf,
   firstTeamPlayers,
   groupOf,
   onLoanFromUs,
@@ -321,7 +322,13 @@ export function loanPlayer(
   player.teamId = destination.id;
   player.squadNumber = undefined;
   assignSquadNumber(state.players, player);
-  player.squadLevel = arrivingSquadLevel(state, player, destination.id);
+  /**
+   * **임대는 언제나 그쪽 1군이다** — 명단이 차 있으면 빌린 구단이 자리를 낸다
+   * (→ docs/simulation/season.md §2 임대). 2군에 들어가면 그쪽 2군 리그가 편성되지
+   * 않아 한 경기도 못 뛴다 — 나가면 뛰던 경기까지 잃는 임대는 임대가 아니다.
+   */
+  admitOnLoan(state, player, destination.id);
+  player.squadLevel = "first";
   player.loan = { fromTeamId: state.userTeamId, until, wageShare };
   state.transfers.push({
     id: `tr-loan-${player.id}-${state.date}`,
@@ -480,30 +487,6 @@ function loanStartOf(state: GameState, player: GamePlayer): string {
   return rows.length > 0
     ? rows.reduce((latest, t) => (t.date > latest ? t.date : latest), rows[0]!.date)
     : state.calendar.preseasonStart;
-}
-
-/**
- * 빌린 구단의 최근 경기에서 **연속 몇 번 명단 밖이었나** — 명단에 든 경기가 나오면
- * 멈춘다. 2군 리그 경기는 세지 않는다: 그 대진은 감독 팀만 편성되므로 상대 클럽
- * 선수에게는 "1군에서 못 뛰었다"의 반증이 되지 못한다 (season.md §2).
- */
-function benchRunOf(state: GameState, player: GamePlayer): number {
-  const played = [...state.matches]
-    .filter(
-      (m) =>
-        m.result !== null &&
-        !isReserveMatch(m) &&
-        (m.homeTeamId === player.teamId || m.awayTeamId === player.teamId),
-    )
-    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
-  let run = 0;
-  for (const match of played) {
-    const lineup =
-      match.homeTeamId === player.teamId ? match.result?.homeLineup : match.result?.awayLineup;
-    if (lineup?.includes(player.id)) break;
-    run += 1;
-  }
-  return run;
 }
 
 /**

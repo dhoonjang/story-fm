@@ -94,7 +94,7 @@ export const SKILL_CATALOG = [
     group: "전술·훈련",
     readOnly: false,
     description:
-      "한 선수의 자리·역할·개인 지시 중 감독이 명시한 항목만 바꾼다. 생략한 항목은 기존 값을 유지한다. 이미 그라운드에 있는 선수만 옮기며 벤치 선수를 넣으려면 substitute를 쓴다. 자리는 move로 옮긴다 — 특정 자리로 바꾸라는 지시에만 position에 코드를 적는다. instruction은 kind를 함께 보내야 판이 움직인다 — 다섯 갈래에 담기지 않는 말이면 지역을 겨냥한 지시인지 보고 set_match_plan을 쓴다. 자연어 포메이션 변경은 get_squad로 현재 배치를 본 뒤 목표 모양에 꼭 필요한 최소 선수만 이동한다. 프리셋을 적용하거나 전원을 자동 재배치하지 않는다.",
+      "한 선수의 자리·역할·개인 지시 중 감독이 명시한 항목만 바꾼다. 생략한 항목은 기존 값을 유지한다. 이미 그라운드에 있는 선수만 옮기며 벤치 선수를 넣으려면 substitute를 쓴다. 자리는 move로 옮긴다 — 특정 자리로 바꾸라는 지시에만 position에 코드를 적는다. instruction은 kind를 함께 보내야 판이 움직인다 — 갈래에 담기지 않는 말이면 지역을 겨냥한 지시인지 보고 set_match_plan을 쓴다. 자연어 포메이션 변경은 get_squad로 현재 배치를 본 뒤 목표 모양에 꼭 필요한 최소 선수만 이동한다. 프리셋을 적용하거나 전원을 자동 재배치하지 않는다.",
   },
   {
     name: "set_set_piece_takers",
@@ -299,6 +299,16 @@ export const SKILL_CATALOG = [
       '일정은 조건으로 찾는다 — team(기준 팀, 생략하면 우리 팀, "all"이면 대회 전체), opponent(상대 팀 — 맞대결만 보고 전적 요약이 붙는다), competition(epl·ucl·facup 등), when(past·upcoming·both), from·to(YYYY-MM-DD 범위), round, count. ' +
       "순위표에는 최근 5경기 폼이 함께 나온다. " +
       'view="calendar"는 감독의 달력 — 경기·훈련·이적창 개폐를 한 축에서 날짜순으로 본다. 기본은 오늘부터 14일이고 from·to·days로 범위를, type="training"으로 훈련만 볼 수 있다. 훈련 계획을 묻거나 새 훈련을 잡기 전에 이걸로 확인하라. from이 지난 날이면 그 사이 벌어진 일이 일지로 함께 온다.',
+  },
+  {
+    name: "get_match_report",
+    label: "경기 리포트",
+    group: "조회",
+    readOnly: true,
+    description:
+      "끝난 경기 하나를 통째로 읽는다 — 타임라인(골의 원인 태그 포함)·팀 스탯(점유·슛·xG·기대 득점·패스·코너·파울·카드)·선수별 기록·평점과 그 한 줄 근거·MOTM. " +
+      "감독이 지난 경기의 내용·패인·누가 잘했는지를 물으면 스코어만 들고 답하지 말고 이걸 부른다. " +
+      "경기는 opponent(상대 팀 이름·약칭)·competition(epl·ucl·facup 등)·date(YYYY-MM-DD)로 고르고, 아무것도 주지 않으면 가장 최근에 끝난 우리 경기다. matchId를 알면 그것만 준다.",
   },
   {
     name: "get_career",

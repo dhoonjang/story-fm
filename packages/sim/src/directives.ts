@@ -36,6 +36,7 @@ import {
  *    공략과 **한 예산을 나눠 쓰게** 막는다 — 지시는 그 상한을 우회하지 않는다.
  * 4. **선수의 역량을 탄다** — 그 지시를 소화할 능력이 없으면 **이득이 줄고 대가가
  *    커진다.** 지구력 없는 풀백에게 "계속 올라가"는 앞도 못 만들고 뒤만 연다.
+ *    (`careful`만 이득이 역량을 타지 않는다 — `directiveBookingScale`에 이유가 있다.)
  * 5. **발동하면 사실 태그로 드러난다** — 태그가 `tactical.notes`로 올라가 중계·감독
  *    화면이 인용할 문장이 된다. **걸리지 않은 지시도 마찬가지다**: 조용히 버리면
  *    그 노트를 인용하는 중계도 화면도 걸리지 않은 지시가 걸린 줄 안다.
@@ -81,7 +82,7 @@ export const DIRECTIVE_TUNING = {
    * **지시의 세기** — 종류가 접는 것은 *무엇을*이고 이 축이 남기는 것은 *얼마나*다.
    *
    * "붙어서 아예 지워버려"와 "따라가진 말고 견제만"은 같은 `man_mark`지만 같은
-   * 지시가 아니다. 정도까지 다섯 종에 접히면 **자연어 인터페이스의 폭이 결과에서
+   * 지시가 아니다. 정도까지 종류에 접히면 **자연어 인터페이스의 폭이 결과에서
    * 사라진다.**
    *
    * 셋이 함께 걸리는 것이 규칙이다: 세게 걸면 이득만 크는 것이 아니라 대가도
@@ -157,12 +158,19 @@ interface DirectiveSpec {
    * 무리한 지시는 더 지치게 — 압박을 전담시키면 그 선수만 먼저 다리가 멈춘다.
    */
   drain: number;
+  /**
+   * **카드 가중에 거는 배수** — 이득이 존 전력이 아니라 여기 있는 갈래의 자리다.
+   * 없으면 1(그대로). 세기를 태워 내보내는 것은 `directiveBookingScale`이고, 그 값을
+   * 읽는 곳은 `match-engine.ts`(누가 카드를 받는가 · 곧장 퇴장 · 파울 배분)다.
+   */
+  booking?: number;
 }
 
 /**
- * 지시별 이득·대가·소모. **다섯 종뿐이고 새로 늘리지 않는다** —
- * 종류는 감독이 말할 법한 것의 목록(`PLAYER_DIRECTIVE_KINDS`)이지 효과의 목록이
- * 아니다. 자연어의 다양함은 `instruction`이 받고, 장부는 이 다섯으로 접힌다.
+ * 지시별 이득·대가·소모. 종류는 감독이 말할 법한 것의 목록(`PLAYER_DIRECTIVE_KINDS`)
+ * 이지 효과의 목록이 아니다 — 자연어의 다양함은 `instruction`이 받고 장부는 여기로
+ * 접힌다. **접을 곳이 있는 말에 갈래를 파지 않는다**: 새 갈래는 판에서 움직이는 자리가
+ * 기존 것들과 다를 때만 선다.
  */
 const DIRECTIVE_EFFECTS: Record<PlayerDirectiveKind, DirectiveSpec> = {
   /**
@@ -237,7 +245,92 @@ const DIRECTIVE_EFFECTS: Record<PlayerDirectiveKind, DirectiveSpec> = {
     costMode: "lack",
     drain: 1.16,
   },
+  /**
+   * 태클 자제 — **이득이 존 전력이 아니라 카드에 있는 유일한 갈래**(`gain` 0).
+   * 발을 빼면 카드도 파울도 곧장 퇴장도 함께 준다(`booking`).
+   *
+   * 대가는 그가 선 칸의 전력이고 `"loss"`라 **잘 걷어차던 선수일수록 크다** — 태클과
+   * 적극성이 높은 선수를 물러서게 할수록 그 자리에서 사라지는 것이 많다. 소화력은
+   * 위치선정·침착성으로 잰다: 발을 빼고도 자리를 지키는 것이 이 지시를 해내는 일이다.
+   * 다리는 오히려 덜 마른다 — 발을 빼면 덜 뛴다.
+   */
+  careful: {
+    gain: 0,
+    cost: 0.035,
+    // 이득이 0이라 이 존에 실리는 것은 없다 — 대가만 `costZone`으로 간다
+    gainZone: "defense",
+    costZone: "own",
+    gainBy: ["positioning", "composure"],
+    costBy: ["tackling", "aggression"],
+    costMode: "loss",
+    booking: 0.5,
+    drain: 0.95,
+  },
 };
+
+/** 지시가 걸리지 못한 이유 — 노트의 코드가 그대로 이 낱말이다 */
+export type DirectiveDropCode = "off-pitch" | "gone-target" | "overflow";
+
+/** 감독이 내린 지시 하나의 판정 */
+export type DirectiveFoldEntry =
+  { d: DirectiveInput; taken: true } | { d: DirectiveInput; taken: false; code: DirectiveDropCode };
+
+/**
+ * 감독이 내린 목록 → **어느 지시가 걸리는가.** 판정이 여기 하나인 것이 계약이다:
+ * 존 전력(`applyDirectives`)과 판 밖에서 지시를 읽는 곳(다리·카드,
+ * `match-engine.ts`)이 서로 다른 셋을 보면 노트가 "안 걸렸다"고 말한 지시가 조용히
+ * 값을 한다 — `kind` 없는 지시를 성공으로 답하던 것과 같은 거짓 성공이다.
+ *
+ * **한 선수에게 하나까지, 팀 전체로 `MAX_EFFECTIVE`까지, 감독이 내린 순서대로.**
+ * 배치(`TacticAssignment.directive`)가 단수라 엔진은 한 선수에게 둘을 만들 수 없지만,
+ * 같은 지시를 세 번 적어 세 배로 먹이는 길을 열어 두지 않는다. **중복은 판정 없이
+ * 빠진다** — 감독이 한 번만 내린 지시를 두고 "둘째는 안 걸렸다"고 설명하면 있지도
+ * 않은 지시를 있었던 것으로 만든다.
+ *
+ * **셋을 세는 것은 실재를 확인한 뒤다.** 벤치에 앉은 선수의 지시, 교체로 사라진
+ * 표적을 향한 지시는 애초에 걸릴 수 없으므로 자리를 먹지 않는다 — 먹으면 감독이 내린
+ * 셋 중 하나가 이유 없이 사라지고, 노트는 그것을 "넷째라 안 걸렸다"고 엉뚱한 이유로
+ * 설명한다.
+ */
+export function foldDirectives(
+  directives: readonly DirectiveInput[] | undefined,
+  onPitch: (id: string) => boolean,
+  targetOnPitch: (id: string) => boolean,
+): DirectiveFoldEntry[] {
+  const out: DirectiveFoldEntry[] = [];
+  const seen = new Set<string>();
+  let effective = 0;
+  for (const d of directives ?? []) {
+    if (seen.has(d.by)) continue;
+    seen.add(d.by);
+    if (!onPitch(d.by)) {
+      out.push({ d, taken: false, code: "off-pitch" });
+      continue;
+    }
+    if (DIRECTIVE_EFFECTS[d.kind].duel && !(d.targetId && targetOnPitch(d.targetId))) {
+      out.push({ d, taken: false, code: "gone-target" });
+      continue;
+    }
+    if (effective >= DIRECTIVE_TUNING.MAX_EFFECTIVE) {
+      out.push({ d, taken: false, code: "overflow" });
+      continue;
+    }
+    effective += 1;
+    out.push({ d, taken: true });
+  }
+  return out;
+}
+
+/** 걸리는 지시만 — 판 밖에서 지시를 읽는 곳(다리·카드)이 쓰는 문 */
+export function takenDirectives(
+  directives: readonly DirectiveInput[] | undefined,
+  onPitch: (id: string) => boolean,
+  targetOnPitch: (id: string) => boolean,
+): DirectiveInput[] {
+  return foldDirectives(directives, onPitch, targetOnPitch)
+    .filter((e) => e.taken)
+    .map((e) => e.d);
+}
 
 /** 세기 배수 — 세기를 안 보낸 지시는 `normal`이라 예전과 같은 수를 낸다 */
 const intensityOf = (intensity?: DirectiveIntensity) =>
@@ -249,6 +342,30 @@ const intensityOf = (intensity?: DirectiveIntensity) =>
  */
 export function directiveDrain(kind?: PlayerDirectiveKind, intensity?: DirectiveIntensity): number {
   return kind ? DIRECTIVE_EFFECTS[kind].drain * intensityOf(intensity).drain : 1;
+}
+
+/**
+ * 이 지시가 **카드 가중에 거는 배수** — 지시가 없으면 1(중립)이다.
+ *
+ * `bookingWeight`의 마지막 인자로 들어가고, 곧장 퇴장 확률과 파울 배분도 같은 배수를
+ * 탄다 (`match-engine.ts`). 카드 받을 사람은 상대 가중으로 뽑으므로 한 명의 가중을
+ * 낮추면 **같은 장수가 팀 동료에게 간다** — 리그 카드 총량(`CARDS_PER_MATCH`)은
+ * 움직이지 않고 줄어드는 것은 그 선수의 두 번째 경고다.
+ *
+ * 세기는 **이득 배수**(`gain`)를 타고, 줄이는 폭이 그만큼 커진다. 배수 자체에 곱하면
+ * `heavy`가 0.5×1.4=0.7이 되어 세게 걸수록 **덜** 줄어드는 뒤집힘이 난다.
+ *
+ * **소화력은 타지 않는다.** 다른 갈래는 못 소화하면 이득이 줄지만 발을 빼는 것은
+ * 역량이 아니라 선택이라, 붙을 줄 모르는 선수도 태클을 안 들어가면 카드를 덜 받는다.
+ * 역량은 대가 쪽에서만 걸린다(`costMode: "loss"`).
+ */
+export function directiveBookingScale(
+  kind?: PlayerDirectiveKind,
+  intensity?: DirectiveIntensity,
+): number {
+  const booking = kind ? DIRECTIVE_EFFECTS[kind].booking : undefined;
+  if (booking === undefined) return 1;
+  return Math.max(0, 1 - (1 - booking) * intensityOf(intensity).gain);
 }
 
 const clamp = (lo: number, hi: number, v: number) => Math.max(lo, Math.min(hi, v));
@@ -387,57 +504,47 @@ export function applyDirectives(
   const byId = (slots: readonly LineupSlot[], id: string) => slots.find((s) => s.player.id === id);
 
   /**
-   * **한 선수에게 하나까지, 팀 전체로 셋까지.** 배치(`TacticAssignment.directive`)가
-   * 단수라 엔진은 한 선수에게 둘을 만들 수 없지만, 같은 지시를 세 번 적어 세 배로
-   * 먹이는 길을 열어 두지 않는다.
-   *
-   * 넘친 지시는 노트를 남기고, **중복만 조용히 넘긴다** — 감독이 한 번만 내린 지시를
-   * 두고 "둘째는 안 걸렸다"고 설명하면 있지도 않은 지시를 있었던 것으로 만든다.
-   *
-   * **셋을 세는 것은 실재를 확인한 뒤다.** 벤치에 앉은 선수의 지시, 교체로 사라진
-   * 표적을 향한 지시는 애초에 걸릴 수 없으므로 자리를 먹지 않는다 — 먹으면 감독이
-   * 내린 셋 중 하나가 이유 없이 사라지고, 노트는 그것을 "넷째라 안 걸렸다"고 엉뚱한
-   * 이유로 설명한다. 그래서 걸리는 지시와 그 자리에서 버려진 지시의 노트를 **감독이
-   * 내린 순서 그대로** 한 줄에 세워 두고 아래에서 편다.
+   * **걸리는 지시를 고르는 것은 `foldDirectives`다** — 판정은 그 한 곳이고 여기는
+   * 판정을 노트와 칸으로 옮긴다. 걸리는 지시와 그 자리에서 버려진 지시의 노트를
+   * **감독이 내린 순서 그대로** 한 줄에 세워 두고 아래에서 편다.
    */
-  const seen = new Set<string>();
-  /** 걸리는 지시와 그 자리에서 버려진 노트가 감독이 내린 순서대로 섞여 선다 */
   const steps: Array<
     { note: PacketTag } | { d: DirectiveInput; me: LineupSlot; target?: LineupSlot }
   > = [];
-  let effective = 0;
   /** 넘쳐서 못 걸린 지시의 노트 — 뒤에 붙여 노트가 감독이 내린 순서대로 읽히게 한다 */
   const overflow: PacketTag[] = [];
-  for (const d of directives) {
-    if (seen.has(d.by)) continue;
-    seen.add(d.by);
-    const me = byId(usXI, d.by);
-    if (!me) {
-      // 벤치에 앉은 선수에게 내린 지시는 효력이 없다
-      steps.push({ note: directiveTag("directive-dropped", "off-pitch", [d.by]) });
+  for (const entry of foldDirectives(
+    directives,
+    (id) => byId(usXI, id) !== undefined,
+    (id) => byId(themXI, id) !== undefined,
+  )) {
+    const d = entry.d;
+    if (!entry.taken) {
+      if (entry.code === "overflow") {
+        overflow.push(
+          directiveTag("directive-dropped", "overflow", [d.by], {
+            limit: DIRECTIVE_TUNING.MAX_EFFECTIVE,
+          }),
+        );
+      } else if (entry.code === "off-pitch") {
+        // 벤치에 앉은 선수에게 내린 지시는 효력이 없다
+        steps.push({ note: directiveTag("directive-dropped", "off-pitch", [d.by]) });
+      } else {
+        // 대상이 그라운드에 없다 — 지시가 성립하지 않는다 (교체로 나갔거나 없는 id)
+        steps.push({
+          note: directiveTag("directive-dropped", "gone-target", [
+            d.by,
+            ...(d.targetId ? [d.targetId] : []),
+          ]),
+        });
+      }
       continue;
     }
+    const me = byId(usXI, d.by);
+    // `foldDirectives`가 이미 확인했다 — 타입을 좁히는 자리다
+    if (!me) continue;
     const target =
       DIRECTIVE_EFFECTS[d.kind].duel && d.targetId ? byId(themXI, d.targetId) : undefined;
-    if (DIRECTIVE_EFFECTS[d.kind].duel && !target) {
-      // 대상이 그라운드에 없다 — 지시가 성립하지 않는다 (교체로 나갔거나 없는 id)
-      steps.push({
-        note: directiveTag("directive-dropped", "gone-target", [
-          d.by,
-          ...(d.targetId ? [d.targetId] : []),
-        ]),
-      });
-      continue;
-    }
-    if (effective >= DIRECTIVE_TUNING.MAX_EFFECTIVE) {
-      overflow.push(
-        directiveTag("directive-dropped", "overflow", [d.by], {
-          limit: DIRECTIVE_TUNING.MAX_EFFECTIVE,
-        }),
-      );
-      continue;
-    }
-    effective += 1;
     steps.push({ d, me, ...(target ? { target } : {}) });
   }
 

@@ -530,9 +530,10 @@ mock GM도 같은 앵커를 읽으므로, 두 모드가 확률을 다른 사다�
 
 ## 7. 조회 — 창이 아니라 검색
 
-능력치·배치·타 팀·순위·일정·과거는 컨텍스트에 넣지 않고 **읽기 전용 도구 여덟**으로
+능력치·배치·타 팀·순위·일정·과거는 컨텍스트에 넣지 않고 **읽기 전용 도구 아홉**으로
 온디맨드 제공한다: `search_players` · `get_squad` · `get_team` · `get_league` ·
-`get_career` · `get_finance` · `deal_odds` · `list_negotiations`.
+`get_match_report` · `get_career` · `get_finance` · `deal_odds` ·
+`list_negotiations`.
 
 상대·대회·라운드·날짜 범위·방향(지난/예정)으로 좁혀 "다음 맨유전", "토트넘과 지난
 맞대결"에 정확히 답하고, **무엇을 뒤졌는지** 헤더에 밝힌다. 팀·대회 이름은 약칭까지
@@ -569,7 +570,12 @@ mock GM도 같은 앵커를 읽으므로, 두 모드가 확률을 다른 사다�
 경계에서만 바꾼다 — 부분 문자열까지 치우면 `rodri`가 `rodrigo-muniz`를 반쪽만 바꾼다.
 **답할 도구가 없으면 모델은 지어내므로** 컨텍스트 밖 사실에는 각각 읽을 자리를 준다 —
 배치는 `get_squad`, 훈련 일정은 `get_league(view="calendar")`, 지난 시즌은 `get_career`,
-한 선수의 상세는 `search_players(playerId)`.
+한 선수의 상세는 `search_players(playerId)`, 끝난 경기 하나는 `get_match_report`.
+
+**끝난 경기는 리포트가 답한다** (`get_match_report`). 타임라인·팀 스탯(슛·xG·점유)·
+선수별 기록·평점과 그 한 줄 근거·MOTM이 한 번의 호출로 온다 — "지난 리버풀전 xG"에
+스코어만 들고 답하면 모델은 나머지를 지어낸다. 경기는 상대·대회·날짜로 고르고, 고르지
+않으면 가장 최근에 끝난 우리 경기다 (→ [../simulation/match.md](../simulation/match.md) §8).
 
 ⚠️ **사건에는 도구가 없다.** 감독이 묻지 않은 것을 모델이 조회할 이유는 없으므로, 그 턴에
 일어난 일은 **일어난 자리에서 사실을 싣는다** — 스카우트 보고서 도착이 §6의 도착 줄로

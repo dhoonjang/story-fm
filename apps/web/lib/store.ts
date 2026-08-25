@@ -9,7 +9,6 @@ import {
   type OfficeViews,
   type ChatTurn,
 } from "@story-fm/engine";
-import { parseScorerEntry } from "@story-fm/domain";
 import { STALLED_CLOCK_TURNS } from "@story-fm/agents";
 
 /** 응답에 실을 장부 — 라우트가 **자기가 바꾼 것만** 고른다 */
@@ -55,12 +54,6 @@ export interface GamePayload {
    */
   speakerRoles: Record<string, SpeakerRole>;
   /**
-   * 접힌 경기 기록의 머리글 — `matchId` → 한 줄 요약.
-   *
-   * 경기가 끝나면 그 구간의 중계·지시는 메인 채팅에서 **한 장으로 접힌다**.
-   * 그 자리에 남는 카드가 무엇의 기록인지 말하려면 상대와 스코어가 필요하다.
-   */
-  /**
    * **시계가 멎은 채 이어진 턴 수** — 모델의 첫 줄 헤더를 연달아 못 읽었다
    * (`STALLED_CLOCK_TURNS` 이상일 때만 실린다).
    *
@@ -68,18 +61,14 @@ export interface GamePayload {
    * 세계가 오늘에 머물러 있다는 것이 감독에게 보이게 한다 (agents.md §2).
    */
   clockStalled?: number;
-  matchLogs: Record<
-    string,
-    {
-      title: string;
-      score: string | null;
-      date: string;
-      /** 득점 — `분′ 이름` */
-      goals: string[];
-      /** 우리 팀 평점 상위 — 종료 화면이 쓴다 */
-      best: Array<{ name: string; rating: number }>;
-    }
-  >;
+  /**
+   * 접힌 경기 기록의 머리글 — `matchId` → 상대·스코어·날짜.
+   *
+   * 경기가 끝나면 그 구간의 중계·지시는 메인 채팅에서 **한 장으로 접힌다**. 그
+   * 자리에 남는 카드가 무엇의 기록인지 말하려면 그 셋이면 된다 — 그 안을 되돌아보는
+   * 것은 리포트가 갖는다 (match.md §8).
+   */
+  matchLogs: Record<string, { title: string; score: string | null; date: string }>;
 }
 
 /**
@@ -131,8 +120,9 @@ export function visibleChat(chat: readonly ChatTurn[]): ChatTurn[] {
 /**
  * 채팅에 접혀 있는 경기들의 머리글 — 이력에 등장한 `matchId`만 만든다.
  *
- * 선수와 경기는 **먼저 색인으로 세운다.** 이 함수는 매 턴 응답에 실리는데, 득점자
- * 한 명·평점 한 줄마다 5,700명 배열을 훑으면 접힌 경기가 쌓일수록 턴이 무거워진다.
+ * **머리글이 전부다.** 득점·평점 상위는 여기서 접지 않는다: 같은 경기를 두 벌로
+ * 접던 자리라, 이제 리포트 한 벌이 그 자리를 갖는다
+ * (`GET /api/games/[id]/match-report/[matchId]` · match.md §8).
  */
 function matchLogsOf(state: GameState): GamePayload["matchLogs"] {
   const ids = new Set(
@@ -141,30 +131,15 @@ function matchLogsOf(state: GameState): GamePayload["matchLogs"] {
   const logs: GamePayload["matchLogs"] = {};
   if (ids.size === 0) return logs;
   const matchById = new Map(state.matches.map((m) => [m.id, m] as const));
-  const playerById = new Map(state.players.map((p) => [p.id, p] as const));
   for (const id of ids) {
     const m = matchById.get(id);
     if (!m) continue;
     const ours = m.homeTeamId === state.userTeamId;
     const opponent = teamName(ours ? m.awayTeamId : m.homeTeamId);
-    const nameOf = (pid: string) => playerById.get(pid)?.name ?? pid;
-    const goals = (m.result?.scorers ?? []).map((entry, i) => {
-      const minute = m.result?.goalMinutes?.[i];
-      // 득점자 항목의 형식은 도메인이 안다 — 여기서 `split`으로 갈라 읽지 않는다
-      return `${minute !== undefined ? `${minute}′ ` : ""}${nameOf(parseScorerEntry(entry).playerId)}`;
-    });
-    /** 평점은 **우리 팀 선수만** 남는다 — 장부가 온전한 경기의 파생값이다 */
-    const best = Object.entries(m.result?.ratings ?? {})
-      .filter(([pid]) => playerById.get(pid)?.teamId === state.userTeamId)
-      .map(([pid, rating]) => ({ name: nameOf(pid), rating }))
-      .sort((a, b) => b.rating - a.rating)
-      .slice(0, 3);
     logs[id] = {
       title: `${ours ? "홈" : "원정"} · ${opponent}`,
       score: m.result ? `${m.result.homeGoals} : ${m.result.awayGoals}` : null,
       date: m.date,
-      goals,
-      best,
     };
   }
   return logs;
