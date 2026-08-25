@@ -11,6 +11,7 @@ import type {
 import { isReserveMatch, naturalPositionOf, packetTagContext } from "@story-fm/domain";
 import { buildStrengthPacket, type LineupSlot } from "@story-fm/sim";
 import { competitionLabel } from "../data/cup-catalog";
+import { derbyForMatch } from "../club/derby";
 import { DEFAULT_KICKOFF, diffDays, nextMatchFor } from "../competition/calendar";
 import {
   activeSuspension,
@@ -108,8 +109,16 @@ export interface OpponentReport {
   tagContext: PacketTagContext;
 }
 
-/** 리포트가 세우는 사실 — 나머지 갈래는 경기 중의 것이다 (match.md §1.8) */
-const REPORT_SOURCES: ReadonlySet<PacketTag["source"]> = new Set(["counter", "mismatch"]);
+/**
+ * 리포트가 세우는 사실 — 대진의 조건(더비)·상성·키포인트. 나머지 갈래는 경기
+ * 중의 것이다 (match.md §1.8): 구멍은 그라운드에서 보이는 사실이고, 공략과 지역
+ * 플랜은 킥오프 뒤에만 걸 수 있다.
+ */
+const REPORT_SOURCES: ReadonlySet<PacketTag["source"]> = new Set([
+  "context",
+  "counter",
+  "mismatch",
+]);
 
 /** 상대의 직전 1군 경기 — 그 경기가 이미 벌어졌다는 것이 투영의 유일한 근거다 */
 function lastPlayedBefore(
@@ -303,13 +312,22 @@ export function buildOpponentReport(
   };
 
   /**
+   * 더비는 **대진이 갖고 있는 사실**이라 킥오프 패킷과 같은 자리에서 온다
+   * (`derbyForMatch` — team.md §3.2). 경기 전 리포트가 그것을 빠뜨리면 감독은
+   * 킥오프에야 무슨 경기인지 안다.
+   *
    * `inMatch`는 서지 않는다 — 벤치에서 외치는 조정이 더 잘 먹히는 보정(§1.2)은
    * 그라운드 위의 것이다. 표적 목록은 이 값을 보지 않으므로 킥오프와 갈리지 않는다.
    */
+  const derby = derbyForMatch(match);
   const packet: StrengthPacket = buildStrengthPacket(
     userIsHome ? sideOf(match.homeTeamId, us, true) : sideOf(match.homeTeamId, theirSlots, false),
     userIsHome ? sideOf(match.awayTeamId, theirSlots, false) : sideOf(match.awayTeamId, us, true),
-    { neutral: match.neutral === true, inMatch: false },
+    {
+      neutral: match.neutral === true,
+      inMatch: false,
+      ...(derby ? { derby: { name: derby.name, heat: derby.heat } } : {}),
+    },
   );
 
   return {
