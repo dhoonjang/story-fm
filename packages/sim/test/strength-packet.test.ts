@@ -8,6 +8,7 @@ import {
   instructionUptake,
   laneBiasOf,
   matchIntensity,
+  PENALTY_PER_MATCH,
   profFactor,
   readKeyPoints,
   stateModifier,
@@ -41,18 +42,77 @@ describe("적응도 전력 팩터", () => {
 });
 
 describe("buildStrengthPacket", () => {
-  it("팀 총량을 먼저 나누지 않고 선수×경로 기대값의 합으로 만든다", () => {
+  /**
+   * **세 채널의 합이 팀 기대 슈팅이다** — 죽은 공은 열린 플레이 위에 얹히는 것이
+   * 아니라 그 안에서 몫을 가져간다 (match.md §1.4). 이 등식이 깨지면 "실측 슈팅 =
+   * 패킷 기대 슈팅" 계약이 함께 깨지고, 밸런스 손잡이가 서 있는 눈금이 움직인다.
+   */
+  it("팀 총량을 먼저 나누지 않고 선수×경로 기대값과 죽은 공의 합으로 만든다", () => {
     const packet = buildStrengthPacket(makeSide("a", 75), makeSide("b", 75), { neutral: true });
     for (const side of ["home", "away"] as const) {
       const profiles = packet.guide.shotProfiles![side];
-      const shots = profiles.reduce((sum, profile) => sum + profile.expectedShots, 0);
-      const xg = profiles.reduce((sum, profile) => sum + profile.chanceXg, 0);
-      const goals = profiles.reduce((sum, profile) => sum + profile.expectedGoals, 0);
-      expect(shots).toBeCloseTo(packet.guide.expectedShots![side], 1);
-      expect(xg).toBeCloseTo(packet.guide.chanceXg![side], 1);
-      expect(goals).toBeCloseTo(packet.guide.expectedGoals[side], 1);
+      const setPiece = packet.guide.setPieces![side];
+      const open = profiles.reduce((sum, profile) => sum + profile.expectedShots, 0);
+      expect(open + setPiece.expectedShots + setPiece.penalties).toBeCloseTo(
+        packet.guide.expectedShots![side],
+        1,
+      );
       expect(profiles.every((profile) => profile.routes.length === 3)).toBe(true);
+      // 열린 플레이만으로는 팀 판독값에 못 미친다 — 죽은 공이 그 차이를 메운다
+      expect(profiles.reduce((sum, p) => sum + p.chanceXg, 0)).toBeLessThan(
+        packet.guide.chanceXg![side],
+      );
+      expect(profiles.reduce((sum, p) => sum + p.expectedGoals, 0)).toBeLessThan(
+        packet.guide.expectedGoals[side],
+      );
     }
+    // 리그 페널티 빈도는 손잡이 하나가 쥔다 — 두 팀 몫의 합이 정확히 그 값이다
+    expect(
+      packet.guide.setPieces!.home.penalties + packet.guide.setPieces!.away.penalties,
+    ).toBeCloseTo(PENALTY_PER_MATCH, 6);
+  });
+
+  /**
+   * **지정은 전술에 남고, 명단은 그 경기의 사실이다** (match.md §1.4). 지정한 선수가
+   * 선발에 없을 때 조용히 그 자리가 비면 아무도 코너를 차지 않는 경기가 생긴다.
+   */
+  it("죽은 공 키커는 지정이 먼저고, 그라운드에 없으면 기본값으로 돌아간다", () => {
+    const base = makeSide("a", 75);
+    const wanted = base.starters[6]!.player.id;
+    const named = buildStrengthPacket(
+      { ...base, setPieceTakers: { corner: wanted, penalty: wanted } },
+      makeSide("b", 75),
+    );
+    expect(named.guide.setPieces!.home.takers.corner).toBe(wanted);
+    expect(named.guide.setPieces!.home.takers.penalty).toBe(wanted);
+    // 말하지 않은 자리는 코어의 기본값이다 — 킥력 최고
+    const fallback = buildStrengthPacket(makeSide("a", 75), makeSide("b", 75));
+    expect(named.guide.setPieces!.home.takers.freeKick).toBe(
+      fallback.guide.setPieces!.home.takers.freeKick,
+    );
+    // 그라운드에 없는 사람을 지목하면 그 경기에서만 기본값이 선다
+    const absent = buildStrengthPacket(
+      { ...base, setPieceTakers: { corner: "없는-사람" } },
+      makeSide("b", 75),
+    );
+    expect(absent.guide.setPieces!.home.takers.corner).toBe(
+      fallback.guide.setPieces!.home.takers.corner,
+    );
+  });
+
+  it("죽은 공의 질은 키커의 킥력과 박스 안 제공권이 정한다", () => {
+    const plain = buildStrengthPacket(makeSide("a", 75), makeSide("b", 75), { neutral: true });
+    const withKicker = makeSide("a", 75);
+    // 한 명만 킥력을 올려도 그가 키커가 되고 죽은 공의 질이 오른다
+    withKicker.starters[6]!.player.attributes.kicking = 95;
+    const better = buildStrengthPacket(withKicker, makeSide("b", 75), { neutral: true });
+    expect(better.guide.setPieces!.home.takers.corner).toBe(withKicker.starters[6]!.player.id);
+    expect(better.guide.setPieces!.home.meanXg).toBeGreaterThan(plain.guide.setPieces!.home.meanXg);
+    // 상대 박스가 높으면 같은 배급이 덜 값을 한다
+    const tallDefence = makeSide("b", 75);
+    for (const slot of tallDefence.starters) slot.player.attributes.aerial = 95;
+    const guarded = buildStrengthPacket(makeSide("a", 75), tallDefence, { neutral: true });
+    expect(guarded.guide.setPieces!.home.meanXg).toBeLessThan(plain.guide.setPieces!.home.meanXg);
   });
 
   it("결정력은 슈팅 접근에 작게 이롭고, 기회 xG 자체는 바꾸지 않는다", () => {

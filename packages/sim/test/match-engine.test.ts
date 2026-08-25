@@ -24,10 +24,12 @@ import {
   buildStrengthPacket,
   createLedger,
   injuryWeight,
+  penaltyRate,
   sampleShot,
   sampleShotXg,
   savedShare,
   simulateSegment,
+  spreadCount,
   teamCardRate,
   teamInjuryRate,
   type AiBenchShift,
@@ -39,6 +41,7 @@ import {
 import { DEFAULT_TACTICS, PHASE_END, matchupTag } from "@story-fm/domain";
 import type {
   GamePlayer,
+  MatchEvent,
   MatchSide,
   PacketTag,
   StrengthPacket,
@@ -1016,6 +1019,96 @@ describe("카드·부상·연장의 눈금", () => {
       EXTRA_TIME_SHOT_SHARE * PHASE_END.second_half,
     );
     expect(EXTRA_TIME_DENSITY).toBeLessThan(1);
+  });
+});
+
+/**
+ * **죽은 공은 열린 플레이와 같은 총량 안의 별도 채널이다** (match.md §1.4).
+ *
+ * 여기 있는 것은 전부 조용히 어긋나는 것들이다: 페널티의 성공률이 승부차기와
+ * 갈리는 것도, 나누는 정수가 반올림에 새는 것도 화면에는 아무 표시가 나지 않는다.
+ */
+describe("죽은 공 채널", () => {
+  /** 이 세계에서 죽은 공에서 나온 슛들 — 여러 시드를 모아야 페널티가 몇 발 잡힌다 */
+  function deadBallShots(seeds: number) {
+    const rows: Array<{ ledger: MatchLedgerState; event: MatchEvent; setup: Setup }> = [];
+    for (let seed = 1; seed <= seeds; seed++) {
+      const s = setup();
+      const { ledger } = playMatch(s, seed);
+      for (const event of ledger.events) {
+        if (event.shotOrigin && event.shotOrigin !== "open") rows.push({ ledger, event, setup: s });
+      }
+    }
+    return rows;
+  }
+
+  it("페널티의 골 확률은 승부차기와 같은 식이다 — 결정력을 두 번 세지 않는다", () => {
+    const penalties = deadBallShots(30).filter((r) => r.event.shotOrigin === "penalty");
+    expect(penalties.length).toBeGreaterThan(0);
+    for (const { ledger, event, setup: s } of penalties) {
+      const side = event.team as MatchSide;
+      const other: MatchSide = side === "home" ? "away" : "home";
+      const all = [...s.squads[side].onPitch, ...s.squads[side].bench];
+      const taker = all.find((p) => p.id === event.actors[0]);
+      const keeper = s.squads[other].onPitch.find((p) => p.positions[0]?.position === "GK");
+      expect(taker).toBeDefined();
+      // 골키퍼가 퇴장한 경기는 그 시각의 골문이 비어 있어 식의 입력이 달라진다
+      if (!keeper || ledger.sentOff.includes(keeper.id)) continue;
+      expect(event.xg).toBeCloseTo(penaltyRate(taker!, keeper), 10);
+      // 성공률이 곧 xG다 — 결정력 보정을 다시 얹지 않는다
+      expect(event.goalProbability).toBe(event.xg);
+      // 페널티는 수비 몸에 맞지 않는다
+      expect(event.shotOutcome).not.toBe("blocked");
+    }
+  });
+
+  it("죽은 공 골의 도움은 추첨이 아니라 그 공을 올린 키커다", () => {
+    const goals = deadBallShots(30).filter(
+      (r) => r.event.type === "goal" && r.event.shotOrigin !== "penalty",
+    );
+    expect(goals.length).toBeGreaterThan(0);
+    for (const { event, setup: s } of goals) {
+      const side = event.team as MatchSide;
+      const taker =
+        s.packet.guide.setPieces![side].takers[
+          event.shotOrigin === "corner" ? "corner" : "freeKick"
+        ];
+      const [scorer, assist] = event.actors;
+      // 직접 프리킥은 키커가 직접 차므로 도움이 없다 — 그 밖에는 언제나 키커가 도움이다
+      if (scorer === taker) expect(assist).toBeUndefined();
+      else expect(assist).toBe(taker);
+      // 근거 태그가 키커와 마무리를 함께 가리킨다 (설명 가능성)
+      const tag = event.causes[0];
+      expect(tag?.source).toBe("set-piece");
+      expect(tag?.code).toBe(event.shotOrigin);
+    }
+  });
+
+  it("페널티를 내준 반칙이 사람에게 붙는다 — 페널티 앞줄이 그 팀의 파울이다", () => {
+    const penalties = deadBallShots(30).filter((r) => r.event.shotOrigin === "penalty");
+    expect(penalties.length).toBeGreaterThan(0);
+    for (const { ledger, event } of penalties) {
+      const at = ledger.events.indexOf(event);
+      const before = ledger.events[at - 1];
+      if (before?.type !== "foul") continue;
+      // 내준 쪽의 사건이다 — 페널티를 얻은 팀이 반칙을 한 것으로 적히면 안 된다
+      expect(before.team).not.toBe(event.team);
+      expect(before.actors).toHaveLength(1);
+    }
+  });
+
+  it("최대잔여법은 합계를 정확히 나눈다 — 사람마다 반올림하면 팀 합계가 샌다", () => {
+    const weights = [3, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+    const counts = spreadCount(10, weights, (w) => w);
+    expect(counts.reduce((a, b) => a + b, 0)).toBe(10);
+    // 무게가 큰 쪽이 더 받는다
+    expect(counts[0]).toBeGreaterThan(counts[1]!);
+    // 사람마다 반올림하면 12명에게 10개를 나눌 때 합계가 어긋난다
+    expect(spreadCount(10, new Array(12).fill(1), () => 1).reduce((a, b) => a + b, 0)).toBe(10);
+    expect(spreadCount(0, weights, (w) => w)).toEqual(weights.map(() => 0));
+    expect(spreadCount(5, [], () => 1)).toEqual([]);
+    // 무게가 전부 0이면 나눌 근거가 없다 — 아무에게도 주지 않는다
+    expect(spreadCount(5, weights, () => 0).reduce((a, b) => a + b, 0)).toBe(0);
   });
 });
 
