@@ -27,12 +27,13 @@ import {
   setCaptain,
   setDevelopmentFocus,
   setLineup,
+  setPlayerTraining,
   setSquadLevel,
   setSquadLevels,
   userPlayers,
   userTactics,
 } from "../src";
-import { createTestGame, playMockMatch } from "./helpers";
+import { createMiniGame, createTestGame, playMockMatch } from "./helpers";
 import { assignSquadNumber, ensureSquadNumbers } from "@story-fm/engine";
 
 /** 열두 달 뒤에도 찾을 수 있어야 하는 첫 달의 표식 — 문장이 아니라 축이다 */
@@ -144,6 +145,40 @@ describe("1·2군 스쿼드", () => {
       state.growthLog.some((g) => g.source === "development" && firstIds.has(g.gamePlayerId)),
       "1군이 코어 월간 성장을 받았다",
     ).toBe(false);
+  });
+
+  /**
+   * 개인 훈련이 **2군에서 어디에 닿는가** — 결산이 없는 층이라 월간 성장의 축
+   * 겨냥이 유일한 경로다 (season.md §2). 스킬은 성공으로 답하는데 성장은
+   * `playerTraining`을 읽지 않던 자리라, 화면에는 아무것도 드러나지 않는다.
+   */
+  it("2군에 건 개인 훈련 축이 월간 성장에 닿는다", () => {
+    const aimed = "finishing";
+    // 축소 세계로 잰다 — 전체 세계는 4,000명분을 마흔여덟 달 굴린다
+    const growthOn = (aim: boolean): number => {
+      const state = createMiniGame();
+      const ours = reservePlayers(state, state.userTeamId);
+      if (aim) {
+        for (const p of ours) {
+          expect(setPlayerTraining(state, { playerId: p.id, axis: aimed }).ok).toBe(true);
+        }
+      }
+      const ids = new Set(ours.map((p) => p.id));
+      for (let month = 0; month < 48; month++) {
+        const year = 2026 + Math.floor((6 + month) / 12);
+        const mm = String(((6 + month) % 12) + 1).padStart(2, "0");
+        state.date = `${year}-${mm}-01`;
+        applyMonthlyDevelopment(state);
+      }
+      return state.growthLog.filter(
+        (g) => g.source === "development" && g.target === aimed && ids.has(g.gamePlayerId),
+      ).length;
+    };
+
+    const without = growthOn(false);
+    const withAim = growthOn(true);
+    expect(without, "겨냥 없이도 오르지 않으면 잴 것이 없다").toBeGreaterThan(0);
+    expect(withAim, `${without} → ${withAim}`).toBeGreaterThan(without);
   });
 
   it("월간 성장 로그는 감독 팀만 남긴다 — 한 시즌을 굴려도 첫 달 훈련 행이 살아 있다", () => {

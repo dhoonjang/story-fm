@@ -840,6 +840,9 @@ export type TransferListing = z.infer<typeof TransferListingSchema>;
  * 전향시키자" 같은 판단이 표현되지 않았다. 축(`axis`)도 자리(`position`)도 훈련
  * 결산의 입력이고, 자리는 결산 한 번에 `POSITION_TRAIN_MAX`까지만 오른다 —
  * 실전보다 느리게.
+ *
+ * **2군에는 축만 걸린다** — 결산이 없는 층이라 축은 월간 성장의 겨냥으로 넘어가고
+ * 자리는 갈 문이 없다 (→ docs/simulation/season.md §2).
  */
 export const PlayerTrainingSchema = z.object({
   gamePlayerId: z.string().min(1),

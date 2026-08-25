@@ -208,6 +208,14 @@ export function footLabel(foot: Foot | undefined): string {
   return `왼발 ${foot.left} · 오른발 ${foot.right}`;
 }
 
+/** 주발 — `footLabel`이 가르는 그 세 갈래. 데이터가 없으면 부를 이름이 없다(null) */
+export type StrongFoot = "left" | "right" | "both";
+export function strongFootOf(foot: Foot | undefined): StrongFoot | null {
+  if (!foot) return null;
+  if (isTwoFooted(foot)) return "both";
+  return foot.left > foot.right ? "left" : "right";
+}
+
 /**
  * 두 발 차이 1당 보정 폭. 차이가 클수록 좌우가 갈린다 —
  * 5/4는 ±1, 5/3·5/2는 ±2, 5/1은 ±3. 양발(5/5)은 0이다.
@@ -268,6 +276,19 @@ export const ATTRIBUTE_AXES = [
   "goalkeeping",
 ] as const;
 export type AttributeAxis = (typeof ATTRIBUTE_AXES)[number];
+
+/**
+ * 이 이름이 16축 중 하나인가 — 세이브·판정·스킬 입력이 들고 온 문자열을 좁히는
+ * 유일한 문. 축 이름은 저장에 `string`으로 남으므로(`PlayerTraining.axis`) 읽는
+ * 쪽마다 좁히면 한쪽만 조여진다.
+ */
+export function attributeAxisOf(value: string | null | undefined): AttributeAxis | null {
+  return value !== null &&
+    value !== undefined &&
+    (ATTRIBUTE_AXES as readonly string[]).includes(value)
+    ? (value as AttributeAxis)
+    : null;
+}
 
 export const AXIS_KO: Record<AttributeAxis, string> = {
   pace: "스피드",

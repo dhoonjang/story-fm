@@ -622,7 +622,35 @@ export function buildGmTools(
           maxAge: z.number().int().min(15).max(45),
           squadLevel: z.enum(["first", "reserve"]),
           availableOnly: z.boolean(),
-          sortBy: z.enum(["rating", "age", "fatigue", "goals", "apps", "wage"]),
+          contractEndsWithinDays: z
+            .number()
+            .int()
+            .min(0)
+            .describe("계약이 이 일수 안에 끝나는 선수 — 무계약은 0일이라 언제나 걸린다"),
+          maxValue: z.number().min(0).describe("시장가 상한 (£)"),
+          maxWage: z.number().min(0).describe("주급 상한 (£/주)"),
+          listed: z.boolean().describe("우리가 이적 리스트에 올린 선수인가"),
+          homegrown: z
+            .boolean()
+            .describe("우리 협회 기준 홈그로운인가 — 등록 명단 8명 규칙의 자격"),
+          minPotential: z.number().int().min(1).max(99).describe("잠재력 추정 구간의 하한"),
+          knowledge: z
+            .enum(["own", "adapting", "scouted", "seen", "rumoured"])
+            .describe("최소 지식 수준 — scouted면 스카우팅을 마쳤거나 그보다 잘 아는 선수만"),
+          foot: z.enum(["left", "right", "both"]).describe("주발"),
+          sortBy: z.enum([
+            "rating",
+            "age",
+            "fatigue",
+            "goals",
+            "apps",
+            "wage",
+            "value",
+            "contract",
+            "assists",
+            "seasonRating",
+            "potential",
+          ]),
           limit: z.number().int().min(1).max(15),
           playerId: playerRef.describe(
             "이 id를 주면 그 선수 한 명의 상세 카드를 돌려준다 (검색 조건 무시)",
