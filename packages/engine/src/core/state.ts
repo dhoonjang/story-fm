@@ -1295,6 +1295,10 @@ export function openTransferRequests(state: GameState): TransferRequest[] {
  * 아무것도 하지 않고 `false`를 돌려준다: 사유가 셋이라 두 자리에서 같은 날 같은
  * 선수를 세울 수 있는데, 그러면 감독의 답 하나가 다른 줄을 남긴다.
  *
+ * ⚠️ **서 있는지는 `transferRequestOf`가 판정한다** — 장부만 보면 옛 세이브
+ * (`transferRequestedOn`만 있는 상태)에서 이미 선 요청 위에 오늘 날짜의 새 줄이
+ * 서고 다이제스트가 한 번 더 나간다.
+ *
  * `PlayerState.transferRequestedOn`도 함께 적는다 — 시장·압력 눈금이 그 필드를
  * 읽고, 옛 세이브와 새 세이브가 같은 값을 들어야 한다.
  */
@@ -1303,11 +1307,10 @@ export function standTransferRequest(
   playerId: string,
   reason: TransferRequestReason,
 ): boolean {
-  const rows = (state.transferRequests ??= []);
-  if (rows.some((r) => r.gamePlayerId === playerId)) return false;
+  if (transferRequestOf(state, playerId) !== null) return false;
   const player = playerById(state, playerId);
   if (!player) return false;
-  rows.push({ gamePlayerId: playerId, since: state.date, reason });
+  (state.transferRequests ??= []).push({ gamePlayerId: playerId, since: state.date, reason });
   player.state.transferRequestedOn = state.date;
   return true;
 }

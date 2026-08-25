@@ -19,7 +19,7 @@ import {
 import type { GameState } from "../core/state";
 import { playerById, playersOf, pushNarrative, teamNameIn, userPlayers } from "../core/state";
 import { pickPlayerAmong } from "../core/player-ref";
-import { addDays } from "../core/dates";
+import { addDays, diffDays } from "../core/dates";
 import { formatMoney } from "./finance";
 import { makeRng, pick } from "../core/rng";
 import { clampForm, formLabel, moraleToForm } from "../squad/form";
@@ -478,6 +478,40 @@ function loadLeaks(state: GameState, conference: PressConference): void {
   if (loaded) conference.weight = Math.max(conference.weight, 2);
 }
 
+// ── 이적 요청 ──────────────────────────────────────────────────
+
+/**
+ * 선수가 나가겠다고 말했다 — **유출과 같은 문을 지난다** (people.md §4 ·
+ * transfer.md §1-1). 요청이 선 날과 감독이 답한 날, 다음에 열리는 회견이 그 사실을
+ * sharp로 싣고 그 자리의 무게는 최소 2가 된다.
+ *
+ * ⚠️ **요청 장부는 유출과 달리 소비되지 않는다.** 실어 간 자리(`pressedOn`)만
+ * 적어 같은 사실을 두 번 묻지 않게 하고, 줄 자체는 원인이 사라질 때까지 남는다 —
+ * 감독이 답하면 그 칸이 비워져 답한 사실이 다음 회견에 다시 실린다.
+ */
+function loadTransferRequests(state: GameState, conference: PressConference): void {
+  let loaded = false;
+  for (const request of state.transferRequests ?? []) {
+    if (request.pressedOn !== undefined) continue;
+    const player = playerById(state, request.gamePlayerId);
+    // 떠난 선수의 요청은 조용히 건너뛴다 — 우리 라커룸에 없는 사람에게 물을 자리가 아니다
+    if (!player || player.teamId !== state.userTeamId) continue;
+    conference.facts.push({
+      kind: "transfer-request",
+      data: {
+        name: player.name,
+        values: { days: diffDays(request.since, state.date) },
+        tags: [request.reason, ...(request.answer ? [request.answer] : [])],
+      },
+      about: player.id,
+      sharp: true,
+    });
+    request.pressedOn = state.date;
+    loaded = true;
+  }
+  if (loaded) conference.weight = Math.max(conference.weight, 2);
+}
+
 // ── 전야 회견 ──────────────────────────────────────────────────
 
 /** 전야에 실리는 최근 폼의 창 — 경기 뒤 회견의 무승 창과 같은 자 */
@@ -699,6 +733,7 @@ export function openPress(state: GameState, conference: PressConference, digest?
     pushNarrative(state, `기자회견 불참 (${stale.context})`, 2);
   }
   loadLeaks(state, conference);
+  loadTransferRequests(state, conference);
   state.pressConferences.push(conference);
   // 지나간 회견은 서사에 남지 상태로 쌓일 이유가 없다
   if (state.pressConferences.length > KEPT_CONFERENCES) {
