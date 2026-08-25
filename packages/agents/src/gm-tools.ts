@@ -91,6 +91,7 @@ import {
   BOARD_REQUEST_KINDS,
   DateString,
   DIRECTIVE_INTENSITIES,
+  KEEPER_DISTRIBUTIONS,
   type MatchEvent,
   MAX_PAYMENT_YEARS,
   MAX_PITCH_CLAIMS,
@@ -100,6 +101,8 @@ import {
   PROMISE_KINDS,
   RESERVE_TRAINING_POLICIES,
   SQUAD_STATUSES,
+  TACKLING_LEVELS,
+  TRANSITION_MODES,
 } from "@story-fm/domain";
 import type { GameToolSpec, ToolCallContext } from "@story-fm/llm";
 
@@ -387,6 +390,17 @@ export function buildGmTools(
           tempo: z.number().int().min(1).max(5),
           width: z.number().int().min(1).max(5),
           passStyle: z.number().int().min(1).max(5),
+          // 축이 아니라 갈래 넷 — 눈금이 없고, 지시하지 않은 것이 중립이다 (match.md §1.2)
+          transition: z
+            .enum(TRANSITION_MODES)
+            .nullable()
+            .describe("전환 — counter 역습 · regroup 재정비 · null 지시 해제"),
+          offsideTrap: z.boolean().describe("오프사이드 트랩을 거는가"),
+          tackling: z.enum(TACKLING_LEVELS).describe("태클 강도 — soft · normal(중립) · hard"),
+          keeperDistribution: z
+            .enum(KEEPER_DISTRIBUTIONS)
+            .nullable()
+            .describe("골키퍼 배급 — short 짧게 · long 길게 · null 지시 해제"),
         })
         .partial(),
       (input) => setTactics(state, input),
