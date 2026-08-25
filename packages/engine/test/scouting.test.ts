@@ -5,6 +5,8 @@ import {
   diffDays,
   knowledgeNote,
   knowledgeOf,
+  loanPlayer,
+  potentialMargin,
   scoutingSummary,
   observationOf,
   observedOverall,
@@ -61,6 +63,60 @@ describe("지식 수준 파생", () => {
     const band = potentialBand(state, mine);
     expect(band).not.toBeNull();
     expect(band!.margin).toBeGreaterThanOrEqual(POTENTIAL_FLOOR);
+  });
+
+  /**
+   * 임대 — **소속이 아니라 계약이 눈금을 정한다** (player.md §9).
+   * 우리 계약의 유망주가 나가는 순간 능력치에 오차가 붙으면, 돌아온 날 감독이
+   * "누가 얼마나 자랐는가"를 잃는다.
+   */
+  it("임대 보낸 우리 선수는 남의 셔츠를 입어도 own — 능력치는 그대로 정확하다", () => {
+    const state = createTestGame(11);
+    const target = userPlayers(state)
+      .slice()
+      .sort((a, b) => a.attributes.overall - b.attributes.overall)
+      .find((p) => p.positions[0]?.position !== "GK")!;
+    const res = loanPlayer(state, { playerId: target.id, teamId: "chelsea" });
+    expect(res.ok, res.message).toBe(true);
+
+    const after = playerById(state, target.id)!;
+    expect(after.teamId).toBe("chelsea");
+    expect(knowledgeOf(state, after.id)).toBe("own");
+    for (const attr of scoutedAttributes(state, after)) {
+      expect(attr.exact).not.toBeNull();
+    }
+  });
+
+  it("빌린 구단의 출전은 잠재력 폭을 좁히지 않는다 — 매일 보는 것과 리포트는 다른 표본이다", () => {
+    const state = createTestGame(11);
+    const target = userPlayers(state)
+      .slice()
+      .sort((a, b) => a.attributes.overall - b.attributes.overall)
+      .find((p) => p.positions[0]?.position !== "GK")!;
+    const before = potentialMargin(state, target.id);
+    expect(loanPlayer(state, { playerId: target.id, teamId: "chelsea" }).ok).toBe(true);
+
+    // 그 셔츠로 한 시즌을 다 뛰어도 우리가 재는 폭은 그대로다
+    state.seasonStats.push({
+      gamePlayerId: target.id,
+      season: state.season,
+      teamId: "chelsea",
+      apps: 38,
+      goals: 0,
+    });
+    expect(knowledgeOf(state, target.id)).toBe("own");
+    expect(potentialMargin(state, target.id)).toBe(before);
+  });
+
+  it("남의 팀끼리의 임대는 걸리지 않는다 — 문이 읽는 것은 임대의 방향이다", () => {
+    const state = createTestGame(11);
+    const other = anyOpponent(state);
+    const elsewhere = state.teams.find(
+      (t) => t.id !== state.userTeamId && t.id !== other.teamId,
+    )!.id;
+    other.loan = { fromTeamId: other.teamId, until: `${state.season + 1}-06-30`, wageShare: 0.5 };
+    other.teamId = elsewhere;
+    expect(knowledgeOf(state, other.id)).toBe("rumoured");
   });
 
   it("만난 적 없는 타 팀 선수는 rumoured — 숫자를 감추고 잠재력도 미지", () => {
