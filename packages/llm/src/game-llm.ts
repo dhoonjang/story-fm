@@ -130,7 +130,11 @@ export interface TurnUsage {
   outputTokens: number;
   /** 제공자가 캐시에서 읽었다고 보고한 입력 토큰. */
   cacheReadTokens: number;
-  /** 명시적 캐시 생성 토큰. implicit cache만 있는 제공자는 0이다. */
+  /**
+   * 이번 호출이 캐시에 **새로 쓴** 입력 토큰 — 보고하지 않는 제공자는 0이다.
+   * ⚠️ 과금을 여기서 읽지 않는다: 생성분을 따로 청구하는 제공자와 입력에 포함해
+   * 청구하는 제공자가 갈린다 (models.md §4).
+   */
   cacheWriteTokens: number;
 }
 
@@ -149,9 +153,12 @@ export interface TurnRequest {
   user: string;
   /**
    * 휘발성 상태 스냅샷 — 매 턴 바뀌는 날짜·일정·장부 같은 값.
-   * Anthropic은 가능하면 messages 끝의 오퍼레이터 채널(role:"system")로
-   * 주입하고, Gemini와 미지원 모델은 현재 user content 앞에 접어 넣는다.
-   * 어느 경우든 반환 이력에서는 제거한다.
+   *
+   * **유저 발화 뒤에 선다** (models.md §3-3). 오퍼레이터 롤이 있으면 유저 턴 뒤 그
+   * 롤의 메시지로(Anthropic `role:"system"` · OpenAI `role:"developer"`), 없으면
+   * (Gemini와 채널을 끈 자리) 유저 content 꼬리에 접어 넣는다. 어느 경우든 반환
+   * 이력에서는 제거해 그 자리가 `user`와 글자까지 같다 — 이력에 남지 않는 블록이
+   * 발화 앞에 서면 다음 턴의 캐시 프리픽스가 그 발화 앞에서 끊긴다.
    */
   stateNote?: string;
   tools?: GameToolSpec[];
@@ -192,7 +199,7 @@ export interface TurnRequest {
  *
  * ⚠️ 값에 제공자의 낱말을 쓰지 않는다. 원문을 그대로 흘리면 잘림 검사가 제공자
  * 하나에만 맞는다: Anthropic의 `max_tokens`를 신호로 삼으면 Gemini는 `MAX_TOKENS`를
- * 소문자로 바꾼 값이 우연히 같아 돌고 OpenAI(`length`)에서는 아무 말 없이 꺼진다.
+ * 소문자로 바꾼 값이 우연히 같아 돌고 OpenAI(`max_output_tokens`)에서는 아무 말 없이 꺼진다.
  * 이름이 우연히 겹치는 것은 계약이 아니다.
  */
 export const STOP_REASONS = ["completed", "truncated", "tool_use", "filtered", "other"] as const;

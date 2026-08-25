@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   MATCHDAY_BENCH,
+  TACTIC_AXES,
   adaptationOf,
   anchorOf,
   defaultRoleOf,
@@ -24,6 +25,7 @@ import {
   lineupBody,
   resetRolesForMovedPlayers,
   roleAtSlot,
+  swappedLists,
   type BoardState,
 } from "@/lib/board-roles";
 import { IconBoard } from "@/components/icons";
@@ -33,7 +35,7 @@ import { useBoardDrag } from "./board-drag";
 import { Margin, fitAt } from "./marks";
 import { PlayerDetail } from "./player-detail";
 import { SquadTable, type SortKey } from "./squad-table";
-import { TACTIC_AXES, TacticsPanel } from "./tactics-panel";
+import { TacticsPanel } from "./tactics-panel";
 import type { BoardSlot, Selection, SquadRow, TacticsView, Tier } from "./types";
 
 /**
@@ -98,10 +100,18 @@ export function SquadView({
   const players = squad.players;
   const byId = useMemo(() => new Map(players.map((p) => [p.id, p])), [players]);
   const boardRef = useRef<HTMLDivElement>(null);
-  /** 직접 저장할 수 있는가 — 경기 중에는 아니다 */
+  /** 직접 저장할 수 있는가 — 경기 중과 무직에는 아니다 (뷰의 `editable`이 판정한다) */
   const live = squad.editable;
+  /** 무직 — 판은 옛 구단의 것이라 잠겨 있다 (career.md §5.1). 여기서는 문구만 가른다 */
+  const dismissed = game.views.career.dismissal !== null;
   /** 경기 중이지만 **판으로 지시할 수는 있다** */
   const advisory = !live && onOrder !== undefined;
+  /** 경기 중 우리 쪽 교체 사용량 — 한도는 국면이 정해 뷰가 싣는다 (match.md §8) */
+  const liveMatch = game.views.match;
+  const matchSubs =
+    liveMatch && !liveMatch.beforeKickoff
+      ? { ...liveMatch.subs[liveMatch.home.ours ? "home" : "away"], limit: liveMatch.subs.limit }
+      : null;
   /** 판을 만질 수 있는가 — 저장이든 지시든 */
   const usable = live || advisory;
 
@@ -169,7 +179,18 @@ export function SquadView({
       try {
         const res = await post(snapshot);
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error ?? "저장 실패");
+        if (!res.ok) {
+          /**
+           * 턴이 잠금을 쥐고 있다(`retry`) — 이 편집은 **대기열에 남는다.** 판은
+           * 그대로 두고 다음 자동 저장이 같은 배치를 다시 보낸다 (models.md §1-1).
+           */
+          if (data.retry === true) {
+            const busy = (data.error as string | undefined) ?? "저장 실패";
+            setSaveError(busy);
+            return { ok: false, error: busy, keep: true };
+          }
+          throw new Error(data.error ?? "저장 실패");
+        }
         savedRevRef.current = rev;
         onUpdate(data);
         return { ok: true };
@@ -448,36 +469,10 @@ export function SquadView({
     }
     if (!live || !selection) return;
     const aId = selection.kind === "slot" ? board.occupants[selection.index] : selection.id;
-    if (!aId || aId === rowId) return;
-    const [ta, tb] = [tierOf(aId), tierOf(rowId)];
-    if (ta === tb) return; // 같은 칸끼리는 바꿀 게 없다 (선발 자리 교환은 드래그)
-
-    const occupants = [...board.occupants];
-    const ia = occupants.indexOf(aId);
-    const ib = occupants.indexOf(rowId);
-    // 선발 자리는 상대에게 그대로 넘어간다
-    if (ia >= 0) occupants[ia] = rowId;
-    if (ib >= 0) occupants[ib] = aId;
-
-    const moveTo = (id: string, tier: Tier, list: string[]) =>
-      tier === "벤치" || tier === "2군"
-        ? [...list.filter((x) => x !== id), id]
-        : list.filter((x) => x !== id);
-    let bench = board.bench.filter((x) => x !== aId && x !== rowId);
-    let reserve = board.reserve.filter((x) => x !== aId && x !== rowId);
-    // 서로의 칸을 넘겨받는다 (a는 b가 있던 칸으로, b는 a가 있던 칸으로)
-    bench = moveTo(aId, tb, bench);
-    bench = moveTo(rowId, ta, bench);
-    reserve = moveTo(aId, tb === "2군" ? "2군" : "예비", reserve);
-    reserve = moveTo(rowId, ta === "2군" ? "2군" : "예비", reserve);
-
-    // 이 경로가 이슈의 재현 경로다 — 명단 화살표로 선발을 내리면 그 선수의 역할도 함께 내려간다
-    commit(
-      resetRolesForMovedPlayers(
-        { ...board, occupants, bench: bench.slice(0, MATCHDAY_BENCH), reserve },
-        byId,
-      ),
-    );
+    if (!aId) return;
+    const swapped = swappedLists(board, aId, rowId);
+    if (!swapped) return; // 같은 칸끼리는 바꿀 게 없다 (선발 자리 교환은 드래그)
+    commit(resetRolesForMovedPlayers({ ...board, ...swapped }, byId));
   }
 
   /**
@@ -666,7 +661,9 @@ export function SquadView({
                   /* 잠긴 이유는 **사실로만** — 다음에 무엇을 하라는 말은 붙이지 않는다 */
                   title={
                     !live
-                      ? "경기 중 — 1·2군 이동 잠금"
+                      ? dismissed
+                        ? "무직 — 전술판 잠금"
+                        : "경기 중 — 1·2군 이동 잠금"
                       : onPitch.has(p.id)
                         ? "선발 배치 중 — 1·2군 이동 잠금"
                         : undefined
@@ -701,6 +698,7 @@ export function SquadView({
       benchKey,
       onPitchKey,
       live,
+      dismissed,
       saving,
       swapPair?.id,
       swapPair?.tier,
@@ -746,6 +744,12 @@ export function SquadView({
           </span>
           {/* 1군·2군 인원은 오른쪽 명단 탭이 이미 세어 준다 — 여기선 매치데이 인원만 */}
           <span className="muted">매치데이 {xi.length + benchDesignated.length}인</span>
+          {matchSubs && (
+            <span className="muted">
+              교체 {matchSubs.used}/{matchSubs.limit.subs} · 기회 {matchSubs.windows}/
+              {matchSubs.limit.windows}
+            </span>
+          )}
           {advisoryPending && (
             <span className="reg-chip" data-testid="match-orders-pending">
               다음 진행에 반영
@@ -823,7 +827,8 @@ export function SquadView({
             {benchPlayers.length - benchDesignated.length}
           </span>
         </div>
-        {!live && !advisory && (
+        {/* 무직 잠금은 버튼이 아니다 — 돌아갈 경기가 없고, 판의 잠긴 모양이 이미 말한다 */}
+        {!live && !advisory && !dismissed && (
           <button className="ghost-btn" onClick={onGoToChat}>
             경기 중 — 채팅으로
           </button>

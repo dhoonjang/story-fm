@@ -35,6 +35,36 @@ const LEAGUE_ECONOMY_LEVEL: Record<string, number> = {
 const SECOND_DIVISION_OF_TOP = 0.15;
 
 /**
+ * **리그 안의 티켓 폭 (EPL = 1)** — 같은 리그 안에서 큰 구단과 작은 구단의 값 차가
+ * 얼마나 벌어지는가 (finance.md §5.2).
+ *
+ * 매치데이의 tier 보정(`TICKET_TIER_FACTOR` — 1.30 / 1.10 / 0.95 / 0.80)은 EPL에서
+ * 잰 값이다. 그대로 전 리그에 쓰면 **폭이 더 넓은 리그의 최저가 구단이 실제보다
+ * 비싸다.** 이 수는 그 표를 1을 축으로 늘이고 줄인다:
+ *
+ *   실효 보정 = 1 + (TICKET_TIER_FACTOR[tier] − 1) × 폭
+ *
+ * 1을 축으로 삼으므로 **리그 평균은 거의 그대로**이고 안쪽의 격차만 움직인다 — 리그의
+ * 값 수준은 `avgTicketPrice`(league-catalog)가 이미 갖고 있고, 이 축은 그 안의 분포다.
+ *
+ * ⚠️ 리그 경제 수준(`LEAGUE_ECONOMY_LEVEL`)과 **다른 축이다.** 분데스리가는 경제
+ * 수준이 세리에 A와 같은데도 폭은 절반이다 — 입석과 시즌권 보조가 리그 전체의 값을
+ * 눌러 붙이기 때문이고, 그건 살림의 크기가 아니라 값을 매기는 문화다.
+ */
+const LEAGUE_TICKET_SPREAD: Record<string, number> = {
+  epl: 1,
+  seriea: 1.35,
+  ligue1: 1.35,
+  laliga: 1.3,
+  mls: 0.9,
+  bundesliga: 0.75,
+  saudi: 0.7,
+};
+
+/** 표에 없는 리그 — EPL의 폭 그대로라 아무 일도 일어나지 않는다 */
+const DEFAULT_TICKET_SPREAD = 1;
+
+/**
  * 세계적 브랜드는 자국 리그 사정을 덜 탄다 — 레알·바이에른·PSG가 EPL 구단과
  * 비슷한 살림을 사는 이유다. 리그 배율을 브랜드에 따라 1 쪽으로 끌어올린다.
  */
@@ -94,4 +124,21 @@ export function clubEconomyLevel(
   const league = leagueId ?? team?.leagueId;
   const level = league === undefined ? UNKNOWN_LEAGUE_LEVEL : leagueEconomyLevel(league);
   return level + (1 - level) * BRAND_GLOBAL_LIFT[brand];
+}
+
+/**
+ * 이 리그의 티켓 폭 — **2부는 그 나라 1부의 것을 쓴다.**
+ *
+ * 값을 매기는 문화는 리그가 아니라 나라의 것이다: 분데스리가 2부의 값 분포는 세리에 B
+ * 보다 분데스리가에 가깝다. 2부에만 따로 표를 두면 같은 사실을 두 곳에 적게 된다.
+ */
+export function leagueTicketSpread(leagueId: string | null): number {
+  if (leagueId === null) return DEFAULT_TICKET_SPREAD;
+  const listed = LEAGUE_TICKET_SPREAD[leagueId];
+  if (listed !== undefined) return listed;
+  if (!isTopLeague(leagueId)) {
+    const top = topLeagueOfCountry(leagueId);
+    if (top !== null) return LEAGUE_TICKET_SPREAD[top] ?? DEFAULT_TICKET_SPREAD;
+  }
+  return DEFAULT_TICKET_SPREAD;
 }

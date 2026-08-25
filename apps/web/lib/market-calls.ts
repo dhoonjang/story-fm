@@ -14,8 +14,8 @@ const MARKET_CARD_KINDS: ReadonlySet<MarketCardKind> = new Set([
  *
  * 코어가 이미 타입으로 보장한다(`MarketSkillResult`: 성공이면 카드가 반드시 있다).
  * 여기 검사는 그 계약이 깨졌을 때 **조용히 지나가지 않게** 하는 것이지, 다른 길로
- * 흘려보내기 위한 것이 아니다 — 예전엔 이 자리가 `null`을 돌려주면 칩으로
- * 폴백해서, 매각 오퍼가 카드를 못 받는 버그를 아무도 모르고 몇 달을 지났다.
+ * 흘려보내기 위한 것이 아니다 — `null`에 칩으로 폴백하면 카드가 깨진 버그가
+ * 소리 없이 지나간다.
  */
 function isMarketCard(payload: unknown): payload is MarketCard {
   if (typeof payload !== "object" || payload === null) return false;

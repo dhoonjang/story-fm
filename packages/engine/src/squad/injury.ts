@@ -1,4 +1,6 @@
 import type { GamePlayer, InjurySeverity } from "@story-fm/domain";
+// 성향의 바닥·천장은 세이브 스키마와 같은 상수를 읽는다 (player.md §5.3)
+import { INJURY_PRONENESS_MAX, INJURY_PRONENESS_MIN } from "@story-fm/domain";
 import { INJURY_PER_MATCH } from "@story-fm/sim";
 import { addDays, diffDays } from "../competition/calendar";
 import { playerCatalog } from "../world/catalog";
@@ -12,9 +14,9 @@ import { openInjury, playerById, type GameState } from "../core/state";
  *
  * 장부의 공통 패턴을 따른다: `returnedOn === null`이 현재 부상이고, 날짜가 박히면
  * 그대로 이력이 된다. 부상은 **팀을 가리지 않는다** — 유저 경기의 상대도,
- * 간이 시뮬로 도는 타 팀 경기도 같은 표에 쌓인다. 예전엔 입구가 유저 팀에만 있어
- * 상대는 시즌 내내 최정예로 나왔고, 그래서 `simSquadOf`의 "부상으로 빈 자리를
- * 메운다"는 분기가 한 번도 실행되지 않았다.
+ * 간이 시뮬로 도는 타 팀 경기도 같은 표에 쌓인다 — 입구가 유저 팀에만 있으면
+ * 상대는 시즌 내내 최정예로 나오고, `simSquadOf`의 "부상으로 빈 자리를 메운다"는
+ * 분기가 한 번도 실행되지 않는다.
  */
 
 const INJURY_PARTS = ["햄스트링", "발목", "무릎", "종아리", "허벅지", "어깨", "허리"];
@@ -65,7 +67,6 @@ export function openInjuryFor(
     occurredOn: state.date,
     expectedReturn: addDays(state.date, days),
     returnedOn: null,
-    note: cause === "training" ? "훈련 중 부상" : "경기 중 부상",
   });
   // 다친 사실은 그 선수에게 남는다 — 다음 부상이 조금 더 가까워진다
   raiseProneness(player, severity);
@@ -107,10 +108,6 @@ export function resolveInjuries(state: GameState, digest: string[]): void {
  * 쉰 선수가 재활하는 동안 성향이 회복돼, 돌아온 날 멀쩡한 몸이 된다.
  */
 export const PRONENESS_BASE = 1;
-/** 하한 — 아무리 튼튼해도 부상이 사라지지는 않는다 */
-const PRONENESS_MIN = 0.55;
-/** 상한 — 유리몸이라도 동료의 2.2배까지 */
-const PRONENESS_MAX = 2.2;
 
 /**
  * 심각도별 결장 일수 [최소, 최대] — 굴림과 **되읽는 쪽(`severityOfDays`)이 같은 표를
@@ -171,7 +168,7 @@ export function trainingExposure(hardSessions: number, squadSize: number): numbe
 }
 
 function clampProneness(value: number): number {
-  return Math.max(PRONENESS_MIN, Math.min(PRONENESS_MAX, value));
+  return Math.max(INJURY_PRONENESS_MIN, Math.min(INJURY_PRONENESS_MAX, value));
 }
 
 /** 지금 값 — 옛 세이브엔 필드가 없다 */
@@ -238,7 +235,7 @@ const PRONENESS_ANCHORS: ReadonlyArray<readonly [days: number, value: number]> =
   [40, 1.0],
   [120, 1.45],
   [250, 1.9],
-  [400, PRONENESS_MAX],
+  [400, INJURY_PRONENESS_MAX],
 ];
 
 export function pronenessFromDaysOut(days: number): number {
@@ -289,13 +286,21 @@ function unionDays(spans: ReadonlyArray<readonly [string, string]>): number {
  * **복귀일이 부임일보다 뒤면 아직 안 나은 것**이라 열린 행(`returnedOn: null`)으로
  * 들어간다. 감독은 그 선수를 다친 채로 넘겨받고, tick이 복귀일에 닫는다.
  * 표에 없는 선수는 손대지 않는다 — 성향은 1.0(평균)에 남는다.
+ *
+ * 조인 키는 **위키데이터 QID**다. 이름은 시드에 동명이인이 있어 한 사람의 이력을
+ * 남의 몸에 붙인다. QID가 없는 카탈로그 엔트리(합성·아카데미)는 이력이 없는 것으로
+ * 지나간다.
  */
 export function seedInjuryHistory(state: GameState): void {
-  const nameById = new Map(playerCatalog().map((e) => [e.id, e.nameEn]));
+  const qidById = new Map(
+    playerCatalog().flatMap((e) =>
+      e.wikidataId === undefined ? [] : [[e.id, e.wikidataId] as const],
+    ),
+  );
   const windowStart = addDays(state.date, -SEED_WINDOW_DAYS);
   for (const player of state.players) {
-    const nameEn = player.catalogId === null ? undefined : nameById.get(player.catalogId);
-    const history = nameEn === undefined ? undefined : INJURY_HISTORY[nameEn];
+    const wikidataId = player.catalogId === null ? undefined : qidById.get(player.catalogId);
+    const history = wikidataId === undefined ? undefined : INJURY_HISTORY[wikidataId];
     if (!history) continue;
     const spans: Array<readonly [string, string]> = [];
     for (const row of history) {
@@ -308,12 +313,12 @@ export function seedInjuryHistory(state: GameState): void {
         gamePlayerId: player.id,
         bodyPart: row.part,
         severity: severityOfDays(days),
-        // 어디서 다쳤는지까지는 출처가 말하지 않는다 — 지어내지 않는다
-        cause: "other",
+        // 경기도 훈련도 아닌 제3의 출처 — 감독이 오기 전의 몸이다 (player.md §5.3).
+        // 어디서 다쳤는지까지는 출처가 말하지 않으므로 지어내지 않는다
+        cause: "pre_appointment",
         occurredOn: row.from,
         expectedReturn: row.until,
         returnedOn: stillOut ? null : row.until,
-        note: "부임 전 이력",
       });
       // 창과 겹치는 부분만 센다 — 창을 걸친 장기 부상은 걸친 만큼만
       const from = row.from > windowStart ? row.from : windowStart;

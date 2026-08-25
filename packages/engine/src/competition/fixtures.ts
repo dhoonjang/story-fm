@@ -8,6 +8,8 @@ import {
 import { leagueOfTeam } from "../data/team-catalog";
 import { buildAllEuroMatches, type EuroEntry } from "./europe";
 import { buildFriendlyMatches } from "./friendly";
+import { buildSuperCupMatches, type SuperCupSource } from "./super-cup";
+import { buildReserveFixtures, isReserveMatch } from "./reserve";
 import type { WorldScope } from "../world/scope";
 
 /**
@@ -22,6 +24,10 @@ import type { WorldScope } from "../world/scope";
  * 참여하지 않는다. 다만 **감독의 상대는 유저 팀을 알아야** 정해진다
  * (`buildFriendlyMatches` 점층 곡선) — `userTeamId`가 없으면 곡선 없이 전력이
  * 붙은 팀끼리만 묶인다.
+ *
+ * 슈퍼컵도 개막 전 수요일 둘을 쓰므로 같은 이유로 해소 밖이다. 대진은 **지난
+ * 시즌의 사실**이라 여기서 만들 수 없고 인자로 받는다(`superCups`) — 첫 시즌은
+ * 널이고, 그러면 한 경기도 서지 않는다 (competition.md §4-1).
  */
 export function buildSeasonFixtures(
   season: number,
@@ -30,12 +36,15 @@ export function buildSeasonFixtures(
   world?: WorldScope,
   membership?: LeagueMembership,
   userTeamId?: string,
+  superCups: SuperCupSource | null = null,
 ): MatchRecord[] {
   const league = buildAllLeagueMatches(season, seed, world, membership);
   const euro = buildAllEuroMatches(season, seed, entrants);
   relaxEuroAdjacency(league, euro);
   const friendly = buildFriendlyMatches(season, seed, world, membership, userTeamId);
-  return [...friendly, ...league, ...euro];
+  // 2군 리그는 월요일 낮이라 리그·대항전과 휴식 충돌이 없다 — 해소에 참여하지 않는다
+  const reserve = buildReserveFixtures(season, seed, world, membership, userTeamId);
+  return [...friendly, ...buildSuperCupMatches(season, superCups), ...league, ...euro, ...reserve];
 }
 
 /**
@@ -50,6 +59,8 @@ export function isUserFixture(
   /** 감독이 지금 있는 리그 — 강등되면 카탈로그와 갈린다 (`leagueOfTeamIn`) */
   leagueId = leagueOfTeam(userTeamId),
 ): boolean {
+  // 2군 경기는 감독 달력에 오르지 않는다 — 올리면 기본 훈련이 "다음 경기"로 읽는다
+  if (isReserveMatch(match)) return false;
   return (
     match.competitionId === leagueId ||
     match.homeTeamId === userTeamId ||

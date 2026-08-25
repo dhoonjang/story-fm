@@ -1,4 +1,10 @@
-import { ageOf, normalizedLogCurve, FIRST_TEAM_LIMIT, type GamePlayer } from "@story-fm/domain";
+import {
+  ageOf,
+  normalizedLogCurve,
+  FIRST_TEAM_LIMIT,
+  type GamePlayer,
+  type Transfer,
+} from "@story-fm/domain";
 import {
   addDays,
   contractUntil,
@@ -14,11 +20,12 @@ import { marketBiasOf, marketValueOf, windowOpenForTeam } from "./market";
 import { makeRng } from "../core/rng";
 import {
   activeContract,
+  firstTeamPlayers,
   groupOf,
   isInjured,
   pushNarrative,
+  squadFloorShortfall,
   squadLevelOf,
-  teamNameIn,
   teamShortNameIn,
   weeklyWagesOf,
   type GameState,
@@ -26,16 +33,12 @@ import {
 import { WAGE_HEADROOM, clubWageBudget, estimateWeeklyWage, wageSubjectOf } from "../world/wages";
 import { assignSquadNumber } from "../squad/numbers";
 import { clearDepartedState } from "./departures";
+import { attachClauses, runBuyBacks, settleSellOn } from "./clauses";
 
 /**
  * 남의 팀끼리의 이적 시장 — **세계가 감독 없이도 돈다.**
  *
- * 예전엔 이적이 감독을 통해서만 일어났다. 한 시즌을 다 돌려도 AI↔AI 이적은
- * **0건**이었다 — 창이 열리고 닫히는 동안 리그의 스쿼드는 한 명도 움직이지 않고,
- * 신문에 날 만한 일이 우리 구단 안에서만 벌어졌다. 라이벌은 여름 내내 아무도
- * 사지 않는 구단이었다.
- *
- * 여기서 하는 일은 **거래 자체**다. 협상 과정(오퍼·역제안·설득)은 감독의 것이고,
+ * 여기서 하는 일은 **거래 자체**다. 협상 과정(오퍼·조정·설득)은 감독의 것이고,
  * AI끼리는 결과만 남긴다 — 매 딜을 협상으로 굴리면 하루에 수백 번의 판정이
  * 필요한데 그 과정을 볼 사람이 없다.
  *
@@ -53,8 +56,6 @@ const ATTEMPTS_PER_DAY = 62;
 const LOAN_SHARE = 0.42;
 /** 마감이 든 주에는 시도가 배로 늘고 날짜도 뒤로 쏠린다 (실제 데드라인 데이) */
 const DEADLINE_RUSH = 2.2;
-/** 팔 수 있는 최소 스쿼드 — 이 아래로 내려가는 매각은 성립하지 않는다 */
-const MIN_SQUAD = 18;
 /**
  * 파는 쪽이 지켜야 할 **1군 인원** — 매치데이 명단(선발 11 + 벤치 9)이 바닥이다.
  * 전체 인원만 보면 2군을 잔뜩 안은 구단이 1군을 17명까지 팔아넘긴다.
@@ -153,6 +154,15 @@ function pick<T>(rng: () => number, items: readonly T[]): T | null {
 }
 
 /**
+ * 이 선수를 내보내면 스쿼드 하한이 무너지는가 — **감독과 같은 문**이다
+ * (`squadFloorShortfall` · transfer.md §2). 인원도 골키퍼 둘도 그 함수가 본다.
+ * 여기서는 하루 색인이 든 스쿼드를 넘긴다 — 전 선수를 다시 훑으면 tick이 두 배다.
+ */
+function squadFloorHolds(squad: readonly GamePlayer[], leaving: GamePlayer): boolean {
+  return squadFloorShortfall(squad.filter((p) => p.id !== leaving.id)) === null;
+}
+
+/**
  * 이 선수를 팔 수 있나 — 스쿼드가 무너지지 않고, 임대 중이 아니고, 계약이 있다.
  * 부상 중인 선수는 팔지 않는다 (실제로도 메디컬을 통과하지 못한다).
  */
@@ -166,12 +176,10 @@ function sellable(
   if (isInjured(state, player.id)) return false;
   if (!activeContract(state, player.id)) return false;
   const squad = squads.of(player.teamId);
-  if (squad.length <= MIN_SQUAD) return false;
+  if (!squadFloorHolds(squad, player)) return false;
   const firstTeam =
     squads.firstTeam(player.teamId).length - (ledger.departures.get(player.teamId) ?? 0);
   if (firstTeam <= MIN_FIRST_TEAM) return false;
-  // 골키퍼 둘은 남아야 한다 (`squadShortfall`과 같은 규칙 — 색인으로 빠르게)
-  if (squad.filter((p) => p.id !== player.id && groupOf(p) === "GK").length < 2) return false;
   return true;
 }
 
@@ -219,12 +227,13 @@ function moveClub(
   squads: Squads,
   player: GamePlayer,
   toTeamId: string,
-  input: { fee: number; type: "transfer" | "free"; rng: () => number },
+  input: { fee: number; type: "transfer" | "free"; rng: () => number; digest?: string[] },
 ): void {
   const fromTeamId = player.teamId;
   const windowId = windowOpenForTeam(state, toTeamId)?.id ?? null;
-  state.transfers.push({
-    id: `tr-ai-${player.id}-${state.date}`,
+  const transferId = `tr-ai-${player.id}-${state.date}`;
+  const transfer: Transfer = {
+    id: transferId,
     gamePlayerId: player.id,
     windowId,
     fromTeamId,
@@ -232,7 +241,17 @@ function moveClub(
     date: state.date,
     type: input.type,
     fee: input.fee,
-    note: `${teamNameIn(state, fromTeamId)} → ${teamNameIn(state, toTeamId)}`,
+  };
+  // 조항은 유저의 딜과 같은 함수가 붙인다 — 한쪽만 붙이면 규칙이 갈라진다 (§5-3)
+  attachClauses(state, transfer, player);
+  state.transfers.push(transfer);
+  // 파는 구단이 무는 셀온은 이 이적으로 발동한다
+  settleSellOn(state, {
+    gamePlayerId: player.id,
+    sellerTeamId: fromTeamId,
+    resaleFee: input.fee,
+    resaleTransferId: transferId,
+    digest: input.digest,
   });
 
   const previous = activeContract(state, player.id);
@@ -431,6 +450,12 @@ function planTransfer(
  * 뛴다. 그래서 보내는 쪽은 수준이 위여야 하고, 받는 쪽은 그 자리가 얇아야 한다.
  */
 const LOAN_MAX_AGE = 23;
+/** 보내는 쪽의 주전선 — 스쿼드 전력 순위가 이 안이면 자리가 있다는 뜻이라 내보내지 않는다 */
+const LOAN_STARTER_RANK = 12;
+/** 받는 쪽이 내려서 있어야 할 스쿼드 수준 차 — 같거나 위인 팀으로는 보내지 않는다 */
+const LOAN_HOST_LEVEL_GAP = 2;
+/** 받는 쪽 포지션군의 포화선 — 이만큼 있으면 그 자리는 얇지 않다 */
+const LOAN_HOST_GROUP_CROWD = 7;
 
 /**
  * 주급 분담 — **받는 쪽의 형편이 정한다.**
@@ -469,20 +494,23 @@ function planLoan(
   if (isInjured(state, target.id)) return null;
   if (!activeContract(state, target.id)) return null;
   if (ageOf(target.birthdate, state.date) > LOAN_MAX_AGE) return null;
-  if (squad.length <= MIN_SQUAD) return null;
+  // 내보내는 문은 매각과 같다 — 임대도 스쿼드를 하한 아래로 깎을 수 없다
+  if (!squadFloorHolds(squad, target)) return null;
   if (plannedFirstTeam(squads, fromId, ledger) <= MIN_FIRST_TEAM) return null;
-  // 그 팀에서 주전이면 내보내지 않는다 — 상위 12명 안이면 자리가 있다는 뜻이다
+  // 그 팀에서 주전이면 내보내지 않는다 (`LOAN_STARTER_RANK`)
   const rank = squad
     .map((p) => p.attributes.overall)
     .sort((a, b) => b - a)
     .indexOf(target.attributes.overall);
-  if (rank >= 0 && rank < 12) return null;
+  if (rank >= 0 && rank < LOAN_STARTER_RANK) return null;
   // 받는 쪽은 한 단계 아래여야 하고, 그 자리가 얇아야 한다
   const host = squads.of(toId);
   if (host.length >= MAX_SQUAD) return null;
   if (plannedFirstTeam(squads, toId, ledger) >= MAX_FIRST_TEAM) return null;
-  if (squadLevel(host) > squadLevel(squad) - 2) return null;
-  if (host.filter((p) => groupOf(p) === groupOf(target)).length >= 7) return null;
+  if (squadLevel(host) > squadLevel(squad) - LOAN_HOST_LEVEL_GAP) return null;
+  if (host.filter((p) => groupOf(p) === groupOf(target)).length >= LOAN_HOST_GROUP_CROWD) {
+    return null;
+  }
   // 받는 쪽이 분담할 주급도 형편 안이어야 한다
   const share = (activeContract(state, target.id)?.weeklyWage ?? 0) * loanWageShare(state, toId);
   if (weeklyWagesOf(state, toId) + share > clubWageBudget(toId, undefined, state) * WAGE_HEADROOM)
@@ -499,7 +527,12 @@ function planLoan(
  * 한 주 전에 정해진 일이라 그사이 사정이 바뀌었을 수 있다: 다치거나, 이미
  * 옮겼거나, 돈이 없어졌으면 조용히 무산된다 (실제 시장의 결렬이다).
  */
-function settle(state: GameState, deal: AiDeal, rng: () => number): GamePlayer | null {
+function settle(
+  state: GameState,
+  deal: AiDeal,
+  rng: () => number,
+  digest: string[],
+): GamePlayer | null {
   const player = state.players.find((p) => p.id === deal.gamePlayerId);
   if (!player || player.teamId === deal.toTeamId) return null;
   if (isInjured(state, player.id)) return null;
@@ -521,6 +554,8 @@ function settle(state: GameState, deal: AiDeal, rng: () => number): GamePlayer |
 
   if (deal.kind === "loan") {
     if (player.loan) return null;
+    // 계획과 실행 사이가 한 주다 — 그사이 얇아진 스쿼드는 여기서 걸린다 (§6)
+    if (!squadFloorHolds(squads.of(player.teamId), player)) return null;
     if (squads.firstTeam(player.teamId).length <= MIN_FIRST_TEAM) return null;
     const fromId = player.teamId;
     state.transfers.push({
@@ -533,7 +568,6 @@ function settle(state: GameState, deal: AiDeal, rng: () => number): GamePlayer |
       date: state.date,
       type: "loan",
       fee: 0,
-      note: `${teamNameIn(state, fromId)} → ${teamNameIn(state, deal.toTeamId)} 임대`,
     });
     clearDepartedState(state, player, fromId);
     player.teamId = deal.toTeamId;
@@ -560,6 +594,8 @@ function settle(state: GameState, deal: AiDeal, rng: () => number): GamePlayer |
     fee: deal.fee,
     type: deal.fee > 0 ? "transfer" : "free",
     rng,
+    // 우리가 걸어 둔 셀온이 서면 그날 일지에 오른다 — 우리 돈이 오가는 자리다
+    digest,
   });
   return player;
 }
@@ -647,7 +683,7 @@ export function runAiTransfers(state: GameState, digest: string[]): void {
   const due = queue.filter((d) => d.date <= state.date);
   const settled: { player: GamePlayer; deal: AiDeal }[] = [];
   for (const deal of due) {
-    const player = settle(state, deal, rng);
+    const player = settle(state, deal, rng, digest);
     if (player) settled.push({ player, deal });
   }
   state.aiDeals = queue.filter((d) => d.date > state.date);
@@ -663,6 +699,20 @@ export function runAiTransfers(state: GameState, digest: string[]): void {
     state.aiDeals = [...state.aiDeals, ...planned.deals];
     state.aiPlannedThrough = planned.through;
   }
+
+  /**
+   * ③ 되사기 조항 — **계획을 타지 않는다.** 권리라 흥정도 협상도 없고, 창이
+   * 열려 있고 값이 오른 날 그 자리에서 선다 (transfer.md §5-3).
+   */
+  runBuyBacks(state, digest, (teamId, fee) => {
+    const finance = state.finances.find((f) => f.teamId === teamId);
+    if (!finance || finance.budgetFrozen) return false;
+    if (fee > finance.transferBudget) return false;
+    const floor = isTopFlightIn(state, teamId) ? CASH_FLOOR_TOP : CASH_FLOOR_OTHER;
+    // 일반 영입과 같은 자 — 에이전트 수수료가 같은 날 함께 빠진다
+    if (finance.balance - fee * (1 + AGENT_FEE_RATE) < floor) return false;
+    return firstTeamPlayers(state, teamId).length < MAX_FIRST_TEAM;
+  });
 
   /** 감독의 리그에서 벌어진 큰 건만 — 그것도 하루 두 줄까지 */
   const ourLeague = leagueOfTeamIn(state, state.userTeamId);

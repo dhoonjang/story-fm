@@ -17,6 +17,7 @@ import {
   diffDays,
   domesticChampion,
   domesticCupEntrants,
+  domesticCupField,
   domesticCupWinners,
   domesticCupsOf,
   domesticStageLabel,
@@ -27,15 +28,16 @@ import {
   isTopFlight,
   leagueOfTeam,
   migrateDomesticPrizeKeys,
+  payDomesticCupPrizes,
   playersOf,
   teamName,
-  reviewDomesticCups,
   reviewSeason,
   transitionSeason,
   userStillIn,
   type GameState,
 } from "@story-fm/engine";
 import type { MatchRecord, MatchStage } from "@story-fm/domain";
+import { isReserveMatch } from "@story-fm/domain";
 import { createTestGame, keepSeat, playMockMatch } from "./helpers";
 
 /**
@@ -151,6 +153,9 @@ function expectNoDoubleBooking(state: GameState): void {
   const seen = new Map<string, string>();
   for (const m of state.matches) {
     if (m.season !== state.season) continue;
+    // 2군 경기는 다른 스쿼드의 경기다 — 1군 경기와 같은 날이어도 tick이 간이 시뮬로
+    // 그날 소화하므로(우리 경기 컷오프·finalizeMatch 재호출) 영원히 남지 않는다
+    if (isReserveMatch(m)) continue;
     for (const teamId of [m.homeTeamId, m.awayTeamId]) {
       const key = `${teamId}@${m.date}`;
       expect(seen.get(key), `${key}: ${seen.get(key)} ↔ ${m.id}`).toBeUndefined();
@@ -171,6 +176,8 @@ function minRestHours(state: GameState): { hours: number; where: string } {
   const byTeam = new Map<string, MatchRecord[]>();
   for (const m of state.matches) {
     if (m.season !== state.season) continue;
+    // 2군 경기는 다른 열한 명의 경기다 — 1군 휴식 눈금에 들어가지 않는다 (season.md §2)
+    if (isReserveMatch(m)) continue;
     for (const teamId of [m.homeTeamId, m.awayTeamId]) {
       const list = byTeam.get(teamId);
       if (list) list.push(m);
@@ -251,6 +258,19 @@ describe("한 시즌을 돌리면 컵이 끝까지 진행된다", () => {
     expectNoDoubleBooking(state);
   });
 
+  /**
+   * 컵 자리 탐색은 못 찾을수록 창을 넓혀 마지막엔 150일까지 뻗는다. 시즌 밖에 앉은
+   * 경기는 다음 시즌 전환이 `state.matches`를 갈아 끼우며 지우거나, 그 전에 날짜가
+   * 오면 새 시즌 달력에 선다 — 상한은 다음 프리시즌 전날이다 (season.md §3).
+   */
+  it("경기는 시즌 밖으로 밀리지 않는다 — 상한은 6월 30일", () => {
+    const lastDay = `${Number(state.calendar.preseasonStart.slice(0, 4)) + 1}-06-30`;
+    for (const m of state.matches) {
+      if (m.season !== state.season) continue;
+      expect(m.date <= lastDay, `${m.id} ${m.date}`).toBe(true);
+    }
+  });
+
   it("우리 팀 컵 경기는 감독의 달력(SCHEDULE_ENTRY)에 오른다", () => {
     const ourCupIds = new Set(domesticCupsOf(state.userTeamId).map((c) => c.id));
     const ourCupMatches = state.matches.filter(
@@ -328,7 +348,7 @@ describe("추첨 전에도 라운드 날짜는 달력에 있다 — 단, 확보�
       // 제목이 다 말하므로 부연은 붙이지 않는다
       expect(r.detail).toBeNull();
     }
-    expect(rounds.map((r) => r.title).sort()).toEqual(["FA컵 3라운드 예정", "리그컵 3라운드 예정"]);
+    expect(rounds.map((r) => r.title).sort()).toEqual(["FA컵 4라운드 예정", "리그컵 3라운드 예정"]);
   });
 
   it("대진이 확정되면 예정 자리는 사라지고, 이기기 전엔 다음 라운드가 열리지 않는다", () => {
@@ -439,20 +459,24 @@ describe("실제 대회 규정을 따른다", () => {
  * **1부는 1라운드에 나오지 않는다.**
  *
  * 실제 컵은 하부리그가 먼저 몇 달을 싸우고 1부는 한참 뒤에 들어온다. 우리는
- * 그 앞부분을 모델링하지 않으므로 **1부가 들어오는 라운드에서 대회를 시작한다** —
- * 아스날의 리그컵 첫 경기는 9월 말 3라운드이지 8월 1라운드가 아니다.
+ * 그 앞부분을 모델링하지 않으므로 **1부가 들어오는 라운드의 날짜에서 대회를
+ * 시작한다** — 아스날의 리그컵 첫 경기는 9월 말이지 8월이 아니다.
+ *
+ * **이름은 32클럽이 실제로 서는 라운드의 것**이다 (competition.md §3.1). 진입
+ * 라운드가 64팀인 FA컵·포칼만 한 칸 뒤의 이름이라, FA컵은 4라운드·포칼은
+ * 2라운드로 연다 — 진입 라운드 이름을 쓰면 FA컵에 5라운드가, 포칼에 16강이 없다.
  */
 describe("컵은 1부가 들어오는 라운드에서 시작한다", () => {
   const ENTRY = {
-    facup: { label: "3라운드", month: 1 },
+    facup: { label: "4라운드", month: 1 },
     eflcup: { label: "3라운드", month: 9 },
     copadelrey: { label: "32강", month: 1 },
     coppaitalia: { label: "1라운드", month: 8 },
-    dfbpokal: { label: "1라운드", month: 8 },
+    dfbpokal: { label: "2라운드", month: 8 },
     coupedefrance: { label: "32강", month: 1 },
   } as const;
 
-  it("첫 라운드 이름이 실제 진입 라운드다 — 리그컵·FA컵은 3라운드", () => {
+  it("첫 라운드 이름은 32클럽이 서는 라운드다 — FA컵 4라운드·포칼 2라운드", () => {
     for (const cup of domesticCupCatalog()) {
       const expected = ENTRY[cup.id as keyof typeof ENTRY];
       expect(competitionStageLabel(cup.id, "r32"), cup.id).toBe(expected.label);
@@ -485,12 +509,56 @@ describe("컵은 1부가 들어오는 라운드에서 시작한다", () => {
     expect(ours.every((m) => m.date >= first.date)).toBe(true);
   }, 30_000);
 
-  it("모든 1부 클럽이 같은 라운드에서 시작한다 — 부전승도 예선도 없다", () => {
+  it("첫 라운드가 부전승 없이 꽉 찬다 — 시드 진입 대회만 정원이 절반이다", () => {
     const state = seasonOf(7);
     for (const cup of domesticCupCatalog()) {
       const opening = domesticStageMatches(state, cup.id, "r32");
       const teams = new Set(opening.flatMap((m) => [m.homeTeamId, m.awayTeamId]));
-      expect(teams.size, `${cup.id} 첫 라운드 참가`).toBe(DOMESTIC_CUP_SIZE);
+      // 시드가 진입 라운드 정원에서 자리를 갖는 만큼 첫 라운드가 준다 (§3.2-1의 산수)
+      const expected = cup.seedEntry
+        ? 2 *
+          (DOMESTIC_CUP_SIZE / 2 ** DOMESTIC_STAGES.indexOf(cup.seedEntry.stage) -
+            cup.seedEntry.count)
+        : DOMESTIC_CUP_SIZE;
+      expect(teams.size, `${cup.id} 첫 라운드 참가`).toBe(expected);
+    }
+  }, 30_000);
+
+  /**
+   * **불변식 — 시드는 자기 진입 라운드 전에 대진표에 등장하지 않는다** (#351).
+   *
+   * 코파 이탈리아 시드 8팀은 실제로 16강(ottavi)부터 나온다. 명단 32는 시드 8 ·
+   * 1라운드 16 · 앞 라운드 탈락 8로 갈리고, 16강의 여덟 대진은 전부 시드 대
+   * 1라운드 승자다 (competition.md §3.2-1).
+   */
+  it("코파 이탈리아 시드 8팀은 16강부터다 — 진입 라운드 전엔 대진표에 없다", () => {
+    const state = seasonOf(7);
+    const coppa = domesticCupCatalog().find((c) => c.id === "coppaitalia")!;
+    const field = domesticCupField(state, coppa);
+    expect(field.seeds).toHaveLength(8);
+    expect(field.opening).toHaveLength(16);
+    expect(field.eliminated).toHaveLength(8);
+    const roster = [...field.seeds, ...field.opening, ...field.eliminated];
+    expect(new Set(roster).size).toBe(DOMESTIC_CUP_SIZE);
+    // 시드는 전원 1부(전력 서열 상위 8), 탈락 처리는 전원 2부다
+    for (const id of field.seeds) expect(isTopFlight(id), id).toBe(true);
+    for (const id of field.eliminated) expect(isTopFlight(id), id).toBe(false);
+
+    const opening = new Set(
+      domesticStageMatches(state, coppa.id, "r32").flatMap((m) => [m.homeTeamId, m.awayTeamId]),
+    );
+    for (const id of field.seeds)
+      expect(opening.has(id), `시드 ${id}가 1라운드에 있다`).toBe(false);
+    for (const id of field.eliminated) {
+      expect(opening.has(id), `탈락 처리된 ${id}가 1라운드에 있다`).toBe(false);
+    }
+    // 16강 = 시드 8 + 1라운드 승자 8 — 대진마다 시드가 정확히 하나다
+    const r16 = domesticStageMatches(state, coppa.id, "r16").filter((m) => m.round === 1);
+    expect(r16).toHaveLength(8);
+    for (const m of r16) {
+      const seeded = [m.homeTeamId, m.awayTeamId].filter((id) => field.seeds.includes(id));
+      expect(seeded, `${m.id} 시드 수`).toHaveLength(1);
+      expect(opening.has(seeded[0] === m.homeTeamId ? m.awayTeamId : m.homeTeamId)).toBe(true);
     }
   }, 30_000);
 });
@@ -801,7 +869,7 @@ describe("상금 멱등 키 — 표시 라벨이 아니라 안정 키다", () =>
 
   it("옛 라벨 키를 옮긴다 — 라벨을 고쳐도 같은 시즌 상금이 두 번 나가지 않는다", () => {
     const save = structuredClone(played);
-    reviewDomesticCups(save); // 우승·준우승 상금
+    payDomesticCupPrizes(save, []); // 우승·준우승 상금
 
     let downgraded = 0;
     for (const finance of save.finances) {
@@ -819,7 +887,7 @@ describe("상금 멱등 키 — 표시 라벨이 아니라 안정 키다", () =>
     const balances = save.finances.map((f) => f.balance);
     migrateDomesticPrizeKeys(save);
     migrateDomesticPrizeKeys(save); // 멱등
-    reviewDomesticCups(save);
+    payDomesticCupPrizes(save, []);
 
     expect(save.finances.map((f) => f.balance)).toEqual(balances);
     const legacyKeys = new Set(legacy.values());

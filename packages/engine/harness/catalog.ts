@@ -11,6 +11,7 @@ import { defineHarness, type Harness } from "./harness";
 const MATCH = "docs/simulation/match.md §7";
 const FINANCE = "docs/simulation/finance.md §10";
 const HISTORY = "docs/llm/agents.md §5-1";
+const PROMPTS = "docs/llm/prompts.md §7";
 
 export const WORLD_SEASON = defineHarness({
   id: "world-season",
@@ -133,7 +134,7 @@ export const INJURY_RATE = defineHarness({
     { metric: "카드 기대 대비 배율 (구간)", role: "guard", min: 1, max: 1.1, why: "같은 기대치 · 같은 두 줄 규칙 — 두 시뮬이 같은 자리에 서야 한다" },
     { metric: "카드 — 간이/구간", role: "guard", min: 0.96, max: 1.04, unit: "ratio", why: "**두 시뮬이 한 눈금에 서는가 — 가장 날카로운 지표.** 강도를 한쪽만 곱하면 여기가 1/강도로 벌어진다 — 압박 5 팀에서 15%다. 표본이 팔당 45,000장이라 잡음은 1% 아래다" },
     { metric: "유리몸 팀 배율", role: "guard", min: 1.3, why: "선발 전원 성향 2.2일 때 건강한 팀 대비 — 성향이 빈도에 닿는지" },
-    { metric: "유리몸 한 명의 부상 점유율", role: "guard", min: 0.11, unit: "ratio", why: "뛴 선수(선발 11 + 교체 최대 4) 중 한 명이면 균등은 7~9%" },
+    { metric: "유리몸 한 명의 부상 점유율", role: "guard", min: 0.08, unit: "ratio", why: "뛴 선수(선발 11 + 교체 최대 5) 중 한 명이면 균등은 6~7% — 성향 2.2가 그 위로 띄운다" },
   ],
 });
 
@@ -212,7 +213,7 @@ export const AI_BENCH = defineHarness({
   cost: "시드당 수십 초 × 2시드",
   // prettier-ignore
   bands: [
-    { metric: "AI 교체/경기", role: "reference", min: 3.5, max: 5, unit: "count", why: "실제 1부는 5인 교체제에서 4.3 — 지금은 그 밑이다(match.md §9). 한도(5)는 장부가 막는다" },
+    { metric: "AI 교체/경기", role: "guard", min: 3.5, max: 5, unit: "count", why: "실제 1부는 5인 교체제에서 4.3 — 정지점을 창으로 세는 정책(SUB_WINDOW_MAX·SUB_CHANCE·SUB_FATIGUE)이 그 부근에 세운다. 한도(5)는 장부가 막는다" },
     { metric: "승부수 교체/경기", role: "measure", unit: "count", why: "스코어를 읽은 갈래가 실제로 얼마나 쓰이는가" },
     { metric: "굳히기 교체/경기", role: "measure", unit: "count", why: "리드를 지키는 갈래 — 승부수보다 드물어야 정상이다" },
     { metric: "체력 교체/경기", role: "measure", unit: "count", why: "예전부터 있던 갈래 — 스코어 갈래가 이걸 밀어내지 않았는지" },
@@ -220,7 +221,7 @@ export const AI_BENCH = defineHarness({
     { metric: "끝까지 뒤진 경기에서 승부수를 던진 비율", role: "guard", min: 0.5, unit: "ratio", why: "0이면 이 기능이 죽은 것이다 — 벤치가 스코어를 읽는가의 단일 지표" },
     { metric: "끝까지 앞선 경기에서 굳힌 비율", role: "measure", unit: "ratio", why: "굳히기는 75′이고 교체 카드를 먼저 쓴 팀은 못 쓴다" },
     { metric: "AI 교체의 60′ 이후 비율", role: "reference", min: 0.5, max: 0.95, unit: "ratio", why: "실제 교체는 후반에 몰린다 — 전부 후반이면 하프타임 갈래가 죽은 것이다" },
-    { metric: "AI 교체 중앙 분", role: "measure", unit: "score", why: "실제 1부는 60분대 — 우리는 체력 문턱(SUB_FATIGUE)이 늦어 그보다 뒤다" },
+    { metric: "AI 교체 중앙 분", role: "measure", unit: "score", why: "실제 1부는 60분대 — 우리는 정지점(골·조용한 25분)이 후반에 몰려 그보다 뒤다" },
     { metric: "판의 모양을 바꾼 경기 비율", role: "measure", unit: "ratio", why: "경기당 한 번 — 스코어가 벌어진 경기에서만 선다" },
     { metric: "잰 경기 수", role: "measure", unit: "count", why: "표본이 있는가" },
   ],
@@ -272,6 +273,27 @@ export const SQUAD_LONGEVITY = defineHarness({
 });
 
 /**
+ * 유스 육성 — **2군 리그가 돌고, 감독의 선택이 유망주의 성장 속도를 가르는가**
+ * (`docs/simulation/season.md` §2 2군 리그).
+ */
+export const YOUTH_DEVELOPMENT = defineHarness({
+  id: "youth-development",
+  what: "2군 경기 수 · 출전·집중 육성이 가르는 성장 격차",
+  doc: "docs/simulation/season.md §2",
+  cost: "세계 하나 · 한 시즌 완주 · 수 분",
+  // prettier-ignore
+  bands: [
+    { metric: "2군 경기 수", role: "guard", min: 15, max: 23, unit: "count", why: "리그 상대 싱글 라운드로빈(20팀이면 19경기)이 실제로 편성돼 돈다" },
+    { metric: "결과 없는 2군 경기", role: "guard", max: 0, unit: "count", why: "시즌 종료 판정은 2군 리그를 기다리지 않는다 — 일정이 늦으면 조용히 안 치러진 채 남는다" },
+    { metric: "2군 평균 출전", role: "guard", min: 5, unit: "count", why: "출전이 쌓여야 '2군 선수의 시즌 기록에 경기가 쌓인다'가 성립한다" },
+    { metric: "집중 육성 시즌 성장", role: "measure", unit: "score", why: "집중 육성 + 2군 출전을 다 받은 유망주의 종합 상승" },
+    { metric: "무지정 우리 2군 U21 성장", role: "measure", unit: "score", why: "출전 배율만 받은 유망주 — 손잡이 하나의 몫을 가른다" },
+    { metric: "타 팀 2군 U21 성장", role: "measure", unit: "score", why: "배율이 없는 기준선 — 코어 월간 성장 그대로" },
+    { metric: "집중 육성 격차", role: "reference", min: 0, unit: "score", why: "집중 육성 − 타 팀 기준선. 음수면 손잡이가 아무것도 가르지 않은 것이다" },
+  ],
+});
+
+/**
  * 2군 강등이 낳는 불만 — **문턱이 로테이션과 방치를 가르는가** (`docs/data/people.md` §5).
  *
  * 상수 하나(21일)가 두 가지 플레이를 동시에 정한다: 짧으면 선수를 잠깐 내렸다
@@ -279,6 +301,28 @@ export const SQUAD_LONGEVITY = defineHarness({
  * 남는다. 어느 쪽인지는 한 시즌을 굴려 봐야 보인다 — 코드를 읽어서는 알 수 없고,
  * 고정 기댓값이 있는 단위 테스트로도 잡히지 않는다.
  */
+export const NEGOTIATION = defineHarness({
+  id: "negotiation",
+  what: "재계약·해지·영입의 성사 확률 분포 — 기대치를 맞춘 제안이 자동 통과인가",
+  doc: "docs/simulation/transfer.md §3",
+  cost: "세계 하나 · 수 초",
+  // prettier-ignore
+  bands: [
+    { metric: "표본 · 재계약", role: "guard", min: 25, unit: "count", why: "우리 스쿼드 전원을 잰다 — 표본이 줄면 분포가 아니다" },
+    { metric: "재계약 기대치 · 중앙값", role: "measure", unit: "score", why: "기대 주급 100% · 3년 제안의 성사 확률" },
+    { metric: "재계약 기대치 · p90−p10", role: "guard", min: 20, unit: "score", why: "조건에 따라 실제로 갈리는가 — 폭이 없으면 축이 죽어 있다. 표본이 한 구단의 첫날(같은 대항전·불만 없음)이라 폭의 바닥은 낮게 둔다" },
+    { metric: "재계약 기대치 · 90% 이상 비율", role: "guard", max: 0.3, unit: "ratio", why: "기대치를 맞춘 제안이 자동 통과가 아니다" },
+    { metric: "재계약 기대치 · 앵커가 조정인 비율", role: "measure", unit: "ratio", why: "`COUNTERPARTY_COUNTER_AT`~`COUNTERPARTY_ACCEPT_AT` 구간 — 사다리의 가운데 칸에 서는 몫" },
+    { metric: "재계약 70% 주급 · 중앙값", role: "reference", max: 50, unit: "score", why: "기대치의 70%는 반 이상 실패해야 한다" },
+    { metric: "해지 기대치 · 중앙값", role: "measure", unit: "score", why: "기대 정산금 일시금 제안의 성사 확률" },
+    { metric: "해지 기대치 · p90−p10", role: "measure", unit: "score", why: "잔여 계약·나이·갈 곳이 해지를 실제로 가르는가" },
+    { metric: "표본 · 영입", role: "guard", min: 40, unit: "count", why: "타 구단 66~84 표본 — 표본이 줄면 분포가 아니다" },
+    { metric: "영입 기대치 · 중앙값", role: "measure", unit: "score", why: "호가·희망 주급을 그대로 맞춘 4년 오퍼의 성사 확률" },
+    { metric: "영입 기대치 · p90−p10", role: "guard", min: 20, unit: "score", why: "선수 관문이 구단 관문 뒤에 숨은 도장이 아니다" },
+    { metric: "영입 기대치 · 90% 이상 비율", role: "guard", max: 0.2, unit: "ratio", why: "호가를 맞췄다고 선수까지 자동으로 오지 않는다" },
+  ],
+});
+
 export const DEMOTION_GRIEVANCE = defineHarness({
   id: "demotion-grievance",
   what: "한 시즌 2군 강등이 낳는 불만 — 로테이션은 공짜고 방치는 값을 치르는가",
@@ -315,11 +359,13 @@ export const APPROACH_RATE = defineHarness({
     { metric: "선수 채널", role: "measure", unit: "count", why: "자기 일로 온 사람 — 불만 수를 따라간다" },
     { metric: "주장 채널", role: "measure", unit: "count", why: "라커룸이 식은 구간이 있었는가" },
     { metric: "구단주 채널", role: "measure", unit: "count", why: "순위가 기대 아래에 머문 구간 — 보드 요청" },
+    { metric: "언론 유출(계단 4)", role: "guard", max: 8, unit: "count", why: "방치만 하는 감독의 상한. 자리가 아니라 사건이라 답할 곳이 없고 값은 다음 회견이 치른다 — 그보다 잦으면 회견이 유출 카드로만 채워진다" },
+    { metric: "이적 요청(계단 5)", role: "guard", max: 5, unit: "count", why: "사다리 끝까지 방치된 불만의 수. 한 시즌 스쿼드의 한 줌을 넘으면 방치의 대가가 아니라 스쿼드 붕괴다" },
     { metric: "하루 두 건이 열린 날", role: "guard", max: 0, unit: "count", why: "하루 한 건의 문 (people.md §8)" },
     { metric: "동시에 열린 자리", role: "guard", max: 0, unit: "count", why: "열려 있는 다가옴은 하나뿐" },
     { metric: "같은 화자 7일 내 재개", role: "guard", max: 0, unit: "count", why: "같은 화자 쿨다운" },
     { metric: "갓 열린 회견과 겹친 자리", role: "guard", max: 0, unit: "count", why: "한 번에 답을 요구하는 자리는 하나다 — 사흘 지난 회견은 세지 않는다" },
-    { metric: "가장 높이 오른 계단", role: "measure", unit: "count", why: "방치만 하는 감독이 사다리 끝까지 가는가 — 3이어야 한다" },
+    { metric: "가장 높이 오른 계단", role: "measure", unit: "count", why: "방치만 하는 감독이 사다리 끝까지 가는가 — 선수 주제는 5, 주장·구단주는 3이 꼭대기다" },
     { metric: "첫 자리까지 걸린 날", role: "measure", unit: "count", why: "임계 100을 채우는 데 걸린 실제 날 수" },
   ],
 });
@@ -380,6 +426,60 @@ export const OVERALL_SCALE = defineHarness({
   ],
 });
 
+/**
+ * 자체 산정 모델(`world/synthesis.ts`)이 낸 분포와 **지금 시드 분포의 간격**.
+ *
+ * 밴드가 절대값이 아니라 차에 걸리는 이유는 시드가 갱신되기 때문이다 — "합성 평균이
+ * 72~74"는 시드가 움직이는 순간 낡지만 "합성과 시드의 차가 ±2"는 그대로 묻는다.
+ * 폭은 실제로 재서 정했다: 종합 눈금은 ±1점 안에 앉으므로 ±2가 어긋남의 신호이고,
+ * 자리·나이처럼 표본이 얇거나 표집이 흔들리는 값은 그보다 넓다.
+ */
+export const ATTRIBUTE_MODEL = defineHarness({
+  id: "attribute-model",
+  what: "자체 산정 모델이 낸 분포와 지금 시드 분포의 간격 — 체급·낙차·자리·나이·잠재력",
+  doc: "docs/data/player.md §13",
+  cost: "세계를 세우지 않는다 — 시드 2,800명을 재고 같은 수를 합성한다, 수 초",
+  // prettier-ignore
+  bands: [
+    { metric: "팀 수", role: "measure", unit: "count", why: "시드를 가진 클럽 — 합성 쪽도 같은 구성이다" },
+    { metric: "선수 수", role: "measure", unit: "count", why: "같은 스쿼드 크기로 세우므로 두 쪽이 같다" },
+    { metric: "종합 평균 차", role: "guard", min: -2, max: 2, why: "세계의 눈금 그 자체 — 여기가 벌어지면 시장가·주급·등급 색이 통째로 따라 움직인다" },
+    { metric: "종합 p10 차", role: "reference", min: -3, max: 3, why: "아카데미 쪽 꼬리. 낙차 표의 끝 구간이 정한다" },
+    { metric: "종합 p50 차", role: "guard", min: -2, max: 2, why: "평균과 함께 봐야 한쪽이 꼬리로 끌린 것인지 알 수 있다" },
+    { metric: "종합 p90 차", role: "reference", min: -3, max: 3, why: "주전 상위. 꼭대기와 낙차의 앞 구간이 정한다" },
+    { metric: "체급1 종합 p50 차", role: "reference", min: -3, max: 3, why: "체급이 스쿼드 전체를 옮기는지 — 넷을 함께 본다" },
+    { metric: "체급2 종합 p50 차", role: "reference", min: -3, max: 3, why: "" },
+    { metric: "체급3 종합 p50 차", role: "reference", min: -3, max: 3, why: "" },
+    { metric: "체급4 종합 p50 차", role: "reference", min: -3, max: 3, why: "" },
+    { metric: "체급1 꼭대기 평균 차", role: "reference", min: -2, max: 2, why: "`SQUAD_APEX`가 실제로 그 값을 내는가 — 모델의 ①이 서는 자리" },
+    { metric: "체급2 꼭대기 평균 차", role: "reference", min: -2, max: 2, why: "" },
+    { metric: "체급3 꼭대기 평균 차", role: "reference", min: -2, max: 2, why: "" },
+    { metric: "체급4 꼭대기 평균 차", role: "reference", min: -2, max: 2, why: "표본이 22팀뿐이라 위 셋보다 흔들린다" },
+    { metric: "낙차 순번0~4 차", role: "reference", min: -1.5, max: 1.5, why: "주전 구간 — 여기가 벌어지면 선발 XI의 폭이 달라진다" },
+    { metric: "낙차 순번5~10 차", role: "reference", min: -1.5, max: 1.5, why: "로테이션 구간" },
+    { metric: "낙차 순번11~17 차", role: "reference", min: -1.5, max: 1.5, why: "" },
+    { metric: "낙차 순번18~24 차", role: "reference", min: -2, max: 2, why: "" },
+    { metric: "낙차 순번25+ 차", role: "reference", min: -3, max: 3, why: "아카데미 구간 — 표 끝 너머를 기울기로 잇는 자리라 가장 넓다" },
+    { metric: "자리 GK 평균 차", role: "reference", min: -3, max: 3, why: "자리별 평균 — 한 자리만 어긋나면 그 자리 선수만 다른 세계에 산다" },
+    { metric: "자리 CB 평균 차", role: "reference", min: -3, max: 3, why: "" },
+    { metric: "자리 FB 평균 차", role: "reference", min: -3, max: 3, why: "" },
+    { metric: "자리 DM 평균 차", role: "reference", min: -3, max: 3, why: "" },
+    { metric: "자리 CM 평균 차", role: "reference", min: -3, max: 3, why: "" },
+    { metric: "자리 AM 평균 차", role: "reference", min: -3, max: 3, why: "" },
+    { metric: "자리 W 평균 차", role: "reference", min: -3, max: 3, why: "" },
+    { metric: "자리 CF 평균 차", role: "reference", min: -3, max: 3, why: "표본 83명 — 위보다 흔들린다" },
+    { metric: "자리 ST 평균 차", role: "reference", min: -3, max: 3, why: "" },
+    { metric: "나이 평균 차", role: "reference", min: -1.5, max: 1.5, why: "나이는 종합이 아니라 잠재력 여유와 침착성·리더십을 정한다 (player.md §13.2)" },
+    { metric: "나이 p10 차", role: "reference", min: -2, max: 2, why: "어린 쪽 꼬리 — 유스 유입과 이어지는 자리" },
+    { metric: "나이 p90 차", role: "reference", min: -2, max: 2, why: "늙은 쪽 꼬리 — 재계약·은퇴가 읽는 자리" },
+    { metric: "잠재력 여유 평균 차", role: "reference", min: -2, max: 2, why: "여유가 곧 성장 여지다 — 벌어지면 세계가 통째로 자라거나 멎는다" },
+    { metric: "잠재력 여유 p90 차", role: "reference", min: -4, max: 4, why: "유망주 쪽 꼬리. 99 천장에 잘리는 자리라 평균보다 넓다" },
+    { metric: "잠재력 대역 상한 초과 비율", role: "guard", max: 0, unit: "ratio", why: "player.md §6.5 나이별 상한 — 넘긴 선수는 영영 닿지 않는 천장을 갖는다" },
+    { metric: "되맞춤 평균 반복", role: "measure", why: "상한은 `RETARGET_MAX_PASSES` — 평균이 거기 붙으면 되먹임이 수렴하지 않는 것이다" },
+    { metric: "되맞춤 목표 미달 비율", role: "guard", max: 0.02, unit: "ratio", why: "목표에서 벗어난 몫 — 이 값이 크면 ①②가 정한 눈금을 모델이 안 지키는 것이다" },
+  ],
+});
+
 export const HISTORY_WINDOW = defineHarness({
   id: "history-window",
   what: "평시 이력의 창 — 상한·잔량이 몇 턴인가 · 창이 미끄러지는 빈도 · 압축 뒤 잔량",
@@ -397,7 +497,39 @@ export const HISTORY_WINDOW = defineHarness({
   ],
 });
 
-/** `pnpm balance --list`가 읽는 목록 — 새 하네스를 여기 넣지 않으면 목록에 서지 않는다 */
+export const PROMPT_REGRESSION = defineHarness({
+  id: "prompt-regression",
+  what: "프롬프트 층의 글자·프리픽스 안정성 · 모의 세션의 장면 문법과 스킬 적중률",
+  doc: PROMPTS,
+  cost: "세계 둘 + 모의 GM 세션 — 수 초",
+  // prettier-ignore
+  bands: [
+    { metric: "고정층 글자", role: "guard", max: 30500, unit: "count", why: "매 턴 캐시 프리픽스로 나가는 하한 — 프롬프트는 지우는 방향으로 고친다 (prompts.md §5). 여백은 거의 없다: 문구가 늘면 잡히고, 도구가 늘어 넘겼으면 그때만 다시 자른다" },
+    { metric: "시스템 프롬프트 글자", role: "reference", min: 1500, max: 3000, unit: "count", why: "도구와 무관하게 매 턴 서는 규칙만 — 도구 사용법이 새어 들어오면 늘어난다" },
+    { metric: "도구 스펙 글자", role: "measure", unit: "count", why: "설명 + Zod에서 파생된 JSON 스키마 — 고정층의 대부분이다" },
+    { metric: "도구 설명 총 글자", role: "measure", unit: "count", why: "상한은 skill-descriptions.test.ts가 쥔다 — 여기서는 그 안 어디쯤인지만 읽는다" },
+    { metric: "가장 긴 도구 설명 글자", role: "measure", unit: "count", why: "한 도구가 설명 예산을 혼자 먹고 있는가" },
+    { metric: "레퍼런스층 글자", role: "reference", max: 600, unit: "count", why: "구단 이름과 감독 프로필뿐이다(<club>·<manager>) — 선수 이름·수치가 들어오면 캐시가 그것과 함께 깨진다" },
+    { metric: "매 턴 층 글자", role: "reference", max: 3000, unit: "count", why: "캐시가 걸리지 않는 유일한 층 — 매 턴 정가로 나간다" },
+    { metric: "고정층 비중", role: "measure", unit: "ratio", why: "고정 ÷ (고정 + 레퍼런스 + 매 턴) — 캐시가 덮는 몫" },
+    { metric: "고정층 프리픽스 안정성", role: "guard", min: 1, max: 1, unit: "ratio", why: "다른 세계 둘에서 바이트까지 같아야 한다 — 날짜·id가 한 글자 섞이면 매 턴 뒤가 전부 정가로 읽힌다 (models.md §4)" },
+    { metric: "레퍼런스층 프리픽스 안정성", role: "guard", min: 1, max: 1, unit: "ratio", why: "같은 세이브라면 날짜가 흘러도 같아야 한다 — 여기가 바뀌면 이 층과 그 뒤 이력이 통째로 무효가 된다" },
+    { metric: "장면 문법 준수율", role: "guard", min: 1, unit: "ratio", why: "시점 헤더 한 줄 + `@` 줄로 여는 본문 — 그 뒤의 태그 없는 줄은 이어쓰기다 (prompts.md §1)" },
+    { metric: "위생이 걷어낸 줄 비율", role: "guard", max: 0, unit: "ratio", why: "모의 장면은 이미 문법 안이다 — 위생이 무엇이든 걷었다면 문법이나 위생 한쪽이 움직인 것이다" },
+    { metric: "시점 헤더 파싱 성공률", role: "guard", min: 1, unit: "ratio", why: "헤더를 못 읽으면 그 턴의 시계가 멎는다 (prompts.md §1)" },
+    { metric: "평균 장면 글자", role: "measure", unit: "count", why: "모의 GM의 장면 길이 — 실모드의 400~800 예산과는 다른 눈금이다" },
+    { metric: "스킬 적중률", role: "guard", min: 1, unit: "ratio", why: "코퍼스가 겨냥한 스킬을 실제로 불렀는가 — 떨어지면 스킬 표면이나 모의 GM이 갈린 것이다 (agents.md §8)" },
+    { metric: "불린 스킬 가짓수", role: "measure", unit: "count", why: "코퍼스가 훑는 표면의 폭" },
+  ],
+});
+
+/**
+ * `pnpm balance --list`가 읽는 목록.
+ *
+ * **`*.harness.ts`와 일대일이다** — 여기 없는 하네스는 돌면서도 리포트의 「몇 개가
+ * 보고했다」 분모에서 빠지고, 여기만 있는 서술자는 목록에 서면서 돌지 않는다. 둘 다
+ * 조용해서 오래 사니 `harness-catalog.test.ts`가 그 짝을 못 박는다.
+ */
 export const HARNESSES: readonly Harness[] = [
   WORLD_SEASON,
   AI_ROTATION,
@@ -409,11 +541,16 @@ export const HARNESSES: readonly Harness[] = [
   FINANCE_SECOND_TIER,
   FINANCE_MULTI_SEASON,
   AI_FITNESS,
+  AI_BENCH,
   AI_MARKET,
   MANAGER_MARKET,
+  NEGOTIATION,
   SQUAD_LONGEVITY,
+  YOUTH_DEVELOPMENT,
   DEMOTION_GRIEVANCE,
   APPROACH_RATE,
   OVERALL_SCALE,
+  ATTRIBUTE_MODEL,
   HISTORY_WINDOW,
+  PROMPT_REGRESSION,
 ];

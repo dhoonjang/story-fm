@@ -1,4 +1,4 @@
-import { ageOf, isReleaseNote } from "@story-fm/domain";
+import { ageOf, isRelease, issueReasonKo, MOOD_NOTE_MAX } from "@story-fm/domain";
 import type { GamePlayer, MatchRecord, PlayerIssueReason } from "@story-fm/domain";
 import { diffDays } from "../competition/calendar";
 import { formLabel, RATING_BASELINE, type FormLabel } from "./form";
@@ -23,9 +23,9 @@ import {
  *
  * ⚠️ **몸은 몸의 카드로, 마음은 마음의 카드로 낸다.**
  *
- * 예전엔 `condition` 하나에서 감정까지 읽었다. 그런데 그 축은 경기가 한 판에
- * 30~50을 가져가는 **몸의 예산**이라, 경기 다음 날은 누구나 바닥이다 — 이긴 다음
- * 날에도 선수단 전원이 침울한 것으로 보였고, 승리가 얹는 +4는 그 낙폭에 묻혔다.
+ * `condition`에서 감정을 읽으면 안 된다 — 그 축은 경기가 한 판에 30~50을
+ * 가져가는 **몸의 예산**이라 경기 다음 날은 누구나 바닥이고, 이긴 다음 날에도
+ * 선수단 전원이 침울하게 보인다(승리가 얹는 +4는 그 낙폭에 묻힌다).
  * 지친 것과 풀이 죽은 것은 다른 사실이다.
  *
  * 그래서 마음의 근거는 마음 쪽에서 읽는다 — **직전 경기의 결과와 그 선수의
@@ -209,7 +209,8 @@ function demotionDaysOf(state: GameState, player: GamePlayer): number | null {
 /**
  * 최근 우리 구단에서 **계약이 해지된** 선수 — 원장에서 파생한다.
  *
- * 계약 만료도 해지도 `type: "free"`라 갈리는 것은 `RELEASE_NOTE` 표식뿐이다.
+ * 계약 만료도 해지도 `type: "free"`라 갈리는 것은 `reason` 코드뿐이다 — 옛 세이브만
+ * 문장으로 떨어진다(`isRelease`, game-state.md §6의 유일한 판정 예외).
  * 원장은 날짜 순이므로 뒤에서부터 훑고 창을 벗어나면 멈춘다 — 원장이 아무리 커도
  * 보는 줄은 몇 줄이다.
  */
@@ -221,7 +222,7 @@ function recentDeparture(state: GameState): MoodFact | null {
     if (days < 0) continue;
     if (days > DEPARTURE_ECHO_DAYS) break;
     if (transfer.fromTeamId !== state.userTeamId) continue;
-    if (!isReleaseNote(transfer.note)) continue;
+    if (!isRelease(transfer)) continue;
     const name = playerById(state, transfer.gamePlayerId)?.name;
     if (name === undefined) continue;
     return { cause: "departure", name, days };
@@ -384,18 +385,7 @@ export function issueReasonText(issue: {
   note?: string | null;
   count?: number | null;
 }): string | null {
-  switch (issue.reason) {
-    case "minutes":
-      return "출전 기회";
-    case "losing-run":
-      return issue.count == null ? "연패" : `${issue.count}연패`;
-    case "early-return":
-      return "휴가 반납 소집";
-    case "demotion":
-      return "2군 강등";
-    default:
-      return issue.note ?? null;
-  }
+  return issueReasonKo(issue.reason, issue.count) ?? issue.note ?? null;
 }
 
 /** 며칠 전 경기인가 — 날짜를 셈으로만 옮긴다 */
@@ -561,27 +551,43 @@ export function buildMoodBrief(state: GameState, from: string, to: string): Mood
 }
 
 /**
- * 저장할 문장의 상한 — `GamePlayerSchema`의 `moodNote.text`가 `max(120)`이라,
- * 이 문을 넘긴 문장은 다음 로드에서 세이브 전체를 스키마 실패로 만든다.
+ * 저장할 문장의 상한 — 정의는 스키마를 가진 `packages/domain`에 있다. 여기서
+ * 다시 적으면 한쪽만 손봤을 때 세이브가 스키마 실패로 깨진다.
  */
-const MOOD_NOTE_MAX = 120;
+export { MOOD_NOTE_MAX };
 
 /** 이미 끝난 문장 — `?`·`!`도 종결이라 마침표를 덧붙이지 않는다 */
 const SENTENCE_END = /[.!?]$/u;
 
 /**
+ * 결산이 제출하는 한 줄 — **문장과 그 문장에 대한 사실 하나.**
+ *
+ * `acknowledgesIssue`는 문장을 쓴 쪽만 답할 수 있는 것이다. 코어가 `"불만"`이라는
+ * 낱말이 들어 있는지 세던 자리라, 같은 뜻의 다른 말("서운하다", "받아들이지
+ * 못한다")은 전부 버려지고 낱말만 박아 넣은 문장은 통과했다 — 문구를 판정에 쓰면
+ * 언제나 그렇게 갈린다 (overview.md §1 철칙 4).
+ */
+export interface MoodNoteSubmission {
+  playerId: string;
+  text: string;
+  /** 이 문장이 그 선수에게 걸린 불만을 안고 있는가 — 쓴 쪽이 말한다 */
+  acknowledgesIssue: boolean;
+}
+
+/**
  * 결산 결과를 장부에 적는다 — **사실은 코어가 잡고 결만 받는다.**
  *
  * 버려지는 문장은 사실 카드를 남긴다(빈 자리가 되지 않는다). 거르는 조건은 셋이다:
- * ① 대상이 아닌 선수 ② 한 문장이 아니거나 너무 긴 문장 ③ **불만이 걸린 선수인데
- * 그 사실이 문장에 없는 것** — 감독이 손을 써야 하는 일이 결에 묻히면 안 된다.
+ * ① 대상이 아닌 선수 ② 한 문장이 아니거나 너무 긴 문장 — **저장할 문장의 형태
+ * 검사다** ③ **불만이 걸린 선수인데 그 사실을 안지 않은 문장** — 감독이 손을 써야
+ * 하는 일이 결에 묻히면 안 된다.
  *
  * @returns 실제로 반영된 수
  */
 export function applyMoodNotes(
   state: GameState,
   brief: MoodBrief,
-  notes: Array<{ playerId: string; text: string }>,
+  notes: MoodNoteSubmission[],
 ): number {
   const byId = new Map(brief.targets.map((t) => [t.playerId, t] as const));
   let applied = 0;
@@ -595,7 +601,7 @@ export function applyMoodNotes(
     // 재는 것은 **저장할 문장**이다 — 마침표를 붙인 뒤 재지 않으면 121자가 세이브로 나간다
     const sentence = SENTENCE_END.test(text) ? text : `${text}.`;
     if (sentence.length > MOOD_NOTE_MAX) continue;
-    if (target.hasIssue && !text.includes("불만")) continue;
+    if (target.hasIssue && !note.acknowledgesIssue) continue;
     const player = playerById(state, note.playerId);
     if (!player) continue;
     player.state.moodNote = { text: sentence, on: state.date };

@@ -1,5 +1,22 @@
 version: 1
 
+# max_retries — 요청 **하나**를 다시 부르는 횟수다(최초 호출은 세지 않는다). 에이전트
+# 밖에 있는 이유: SDK 클라이언트가 제공자마다 프로세스에 하나라 자리별로 다른 값을
+# 들 곳이 없다. 적지 않으면 SDK 기본값이 Anthropic 2 · OpenAI 2 · Google 0으로 갈려,
+# 같은 설정이 제공자마다 다르게 돈다 (docs/llm/models.md §1-1).
+max_retries: 2
+
+# operator_channel — 휘발 상태 스냅샷을 오퍼레이터 롤 메시지로 넣을지다. 에이전트마다
+# 적고, 생략하면 거짓(감독 발화 뒤에 접어 넣는다 — 자리는 어느 쪽이든 발화 뒤다). Google에는 그 롤이 없어 참을 적으면
+# 시작할 때 거부된다 — Anthropic(`role:"system"`)·OpenAI(`role:"developer"`)로 옮기는
+# 자리에서, 그 모델이 그 롤을 받는지 확인한 뒤 켠다 (docs/llm/models.md §3-3).
+
+# thinking_level — 제공자 중립 눈금(minimal·low·medium·high)이다. 어댑터 셋이 각자의
+# 파라미터로 옮긴다: Anthropic은 `thinking: adaptive` + `output_config.effort`,
+# Google은 `thinkingConfig.thinkingLevel`, OpenAI는 Responses의 `reasoning.effort`.
+# **적지 않으면 Anthropic·OpenAI는 그 파라미터를 아예 싣지 않는다** — 사고를 모르는
+# 모델도 400 없이 돈다. Google만 생략 시 minimal이다 (docs/llm/models.md §1-2).
+
 agents:
   gm:
     provider: google
@@ -43,6 +60,27 @@ agents:
     provider: google
     model: gemini-3.5-flash-lite
     max_tokens: 8000
+    timeout_ms: 30000
+    thinking_level: minimal
+
+  # 우리가 넣은 오퍼에 **상대가 되어** 답한다 (docs/llm/agents.md §4-1). 결산 셋과 같은
+  # 앵커 ± 한도 계약이지만 싼 자리로 보내지 않는다 — 읽는 것이 인물지·오퍼 이력·설득
+  # 논거라, 무딘 모델은 앵커를 그대로 되읊어 별도 호출이 값을 못 한다. 출력은 판정
+  # 하나에 금액 둘이라 작고, 평시 턴 앞에 서므로 시한은 감독을 기다리게 하지 않는다.
+  negotiator:
+    provider: google
+    model: gemini-3.6-flash
+    max_tokens: 8000
+    timeout_ms: 45000
+    thinking_level: low
+
+  # 새 게임의 배경 한 문단을 읽고 시작 지갑 하나를 판정한다 (docs/llm/agents.md §4-2).
+  # 결산 셋과 같은 앵커 ± 한도 계약이고 게임당 한 번뿐이다 — 읽는 것이 500자 배경과
+  # 앵커 둘뿐이라 싼 자리로 보낸다. 실패하면 앵커가 그대로 답이므로 시한도 짧다.
+  onboarding-judge:
+    provider: google
+    model: gemini-3.5-flash-lite
+    max_tokens: 4000
     timeout_ms: 30000
     thinking_level: minimal
 

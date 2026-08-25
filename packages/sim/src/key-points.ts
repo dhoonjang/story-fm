@@ -1,5 +1,11 @@
-import type { MatchSide, MatchupZone, Player, PositionGroup } from "@story-fm/domain";
-import { RATING_MAX, anchorOf, positionGroupOf, positionGroupOfPlayer } from "@story-fm/domain";
+import type { MatchSide, MatchupZone, PacketTag, Player, PositionGroup } from "@story-fm/domain";
+import {
+  RATING_MAX,
+  anchorOf,
+  otherSide,
+  positionGroupOf,
+  positionGroupOfPlayer,
+} from "@story-fm/domain";
 import type { LineupSlot } from "./strength-packet";
 import { laneOfX, type GridLane } from "./zone-grid";
 
@@ -51,12 +57,22 @@ export interface KeyPoint {
   id: string;
   /** 이 지점을 **가진 쪽** — 공략하는 쪽이 아니다 */
   side: MatchSide;
+  /**
+   * 이 지점이 **이로운 쪽** — `side`와 갈리는 것은 강점 축이다.
+   *
+   * 느린 센터백은 가진 쪽이 잃지만 창조자는 가진 쪽이 얻는다. 한쪽으로만 접으면
+   * 우리 에이스가 상대에게 이로운 사실로 실린다 (`AXIS_FAVOURS_HOLDER`).
+   */
+  favours: MatchSide;
   /** 공략이 닿는 존 */
   zone: MatchupZone;
-  /** 정밀한 문장 — 이름과 수치까지 */
-  text: string;
-  /** 흐린 문장 — 방향만. 전술 능력이 낮으면 이쪽이 보인다 */
-  vague: string;
+  /**
+   * 이름이 서는 선수 — **순서가 뜻을 갖는다.** 어긋난 짝(뒷공간·1대1·제공권·몸싸움)은
+   * [파고드는 쪽, 뚫리는 쪽]이고, 한 사람의 축은 그 한 명뿐이며 팀 단위 축은 비어 있다.
+   */
+  playerIds: string[];
+  /** 그 짝을 만든 수치 — 문장이 유일한 보관처였던 값들 */
+  values: Record<string, number>;
   /** 벌어진 정도 — 클수록 먼저 보인다 */
   weight: number;
   /**
@@ -120,8 +136,11 @@ const AXIS_THRESHOLD = {
   keeper: 73,
   /** 강점 — 골키퍼 passing */
   "keeper-distribution": 77,
-  /** 약점 — 백라인 평균 positioning */
-  "backline-shape": 70,
+  /**
+   * 약점 — 백라인 평균 positioning. 축이 수비 위치선정만 남으면서 백라인 평균이
+   * 2.8 올라, 같은 빈도로 잡히도록 문턱도 그만큼 옮겼다 (player.md §13.5)
+   */
+  "backline-shape": 73,
   /** 약점 — 백라인 최고 leadership */
   "backline-leader": 50,
   /** 격차 — 최전방 strength vs 수비 strength */
@@ -134,6 +153,36 @@ const AXIS_THRESHOLD = {
   discipline: 22,
 } as const;
 
+/** 축 id — `AXIS_THRESHOLD`가 목록의 원본이다 */
+type AxisId = keyof typeof AXIS_THRESHOLD;
+
+/**
+ * 그 축이 **가진 쪽에게 이로운가** — 태그의 `favours`는 여기서 나온다.
+ *
+ * `side`는 그 지점을 가진 쪽이고(공략은 언제나 상대 쪽 지점을 노린다), 이로운 쪽은
+ * **축마다 갈린다.** 느린 센터백을 가진 쪽은 잃고 창조자를 가진 쪽은 얻는다.
+ *
+ * `AXIS_THRESHOLD`의 세 종류(격차·약점·강점)와 겹치지 않으므로 식으로 되짚을 수
+ * 없다 — `discipline`은 능력치에서 문턱을 빼는 **강점 꼴**이지만 거친 선수를 가진
+ * 쪽이 대가를 치른다. 축을 더하면 여기에도 한 줄이 있어야 한다(타입이 막는다).
+ */
+const AXIS_FAVOURS_HOLDER: Record<AxisId, boolean> = {
+  "backline-pace": false,
+  "wing-duel": false,
+  aerial: false,
+  "press-resistance": false,
+  creator: true,
+  finisher: true,
+  keeper: false,
+  "keeper-distribution": true,
+  "backline-shape": false,
+  "backline-leader": false,
+  physical: false,
+  stamina: false,
+  "set-piece": true,
+  discipline: false,
+};
+
 /**
  * 백라인에 조율자가 없다고 부를 리더십 상한 — 최고 리더십이 이보다 높으면 부를
  * 사람이 있다고 본다. `AXIS_THRESHOLD["backline-leader"]` 보다 낮아, 지점이
@@ -141,10 +190,14 @@ const AXIS_THRESHOLD = {
  */
 const BACKLINE_LEADER_GATE = 45;
 
-/** 한쪽 팀이 상대에게 갖는 우위·약점 — 두 방향으로 각각 부른다 */
-type RawPoint = Omit<KeyPoint, "side"> & { side: "us" | "them" };
+/** 한 방향 안에서의 편 — `buildKeyPoints`가 절대 좌표(home/away)로 옮긴다 */
+type RelSide = "us" | "them";
+const otherRel = (s: RelSide): RelSide => (s === "us" ? "them" : "us");
 
-function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: string): RawPoint[] {
+/** 한쪽 팀이 상대에게 갖는 우위·약점 — 두 방향으로 각각 부른다 */
+type RawPoint = Omit<KeyPoint, "side" | "favours"> & { side: RelSide; favours: RelSide };
+
+function sidePoints(atk: LineupSlot[], def: LineupSlot[]): RawPoint[] {
   const out: RawPoint[] = [];
   /**
    * `who`는 **그 지점을 가진 선수의 슬롯**이다 — `side`가 `us`면 `atk` 쪽,
@@ -152,22 +205,25 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
    * 넘기면 공략이 반대편 레인에 걸린다.
    */
   const push = (
-    axis: string,
+    axis: AxisId,
     who: LineupSlot | undefined,
-    side: RawPoint["side"],
+    side: RelSide,
     zone: KeyPoint["zone"],
     weight: number,
-    text: string,
-    vague: string,
+    values: Record<string, number>,
+    /** 이름이 서는 선수들 — 안 주면 `who` 한 명이다 */
+    named?: LineupSlot[],
   ) => {
     if (weight > 0)
       out.push({
         id: `${axis}:${who?.player.id ?? "team"}`,
         side,
+        // 이로운 편은 축이 정한다 — 가진 쪽이 얻는 축과 잃는 축이 섞여 있다
+        favours: AXIS_FAVOURS_HOLDER[axis] ? side : otherRel(side),
         zone,
         weight,
-        text,
-        vague,
+        values,
+        playerIds: (named ?? (who ? [who] : [])).map((s) => s.player.id),
         // 표적이 팀 전체면 레인이 없다 — 그때 공략은 세 칸에 고르게 실린다
         lane: who ? laneOfSlot(who) : undefined,
       });
@@ -184,8 +240,8 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       "them",
       "attack",
       gap - AXIS_THRESHOLD["backline-pace"],
-      `${us} 뒷공간 공략: ${fast.player.name}(pace ${fast.player.attributes.pace}) vs ${slowCB.player.name}(pace ${slowCB.player.attributes.pace})`,
-      `${them} 최종 수비가 발이 느리다 — 뒷공간이 열린다`,
+      { pace: fast.player.attributes.pace, defencePace: slowCB.player.attributes.pace },
+      [fast, slowCB],
     );
   }
 
@@ -200,8 +256,11 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       "them",
       "attack",
       gap - AXIS_THRESHOLD["wing-duel"],
-      `${us} 1대1 우위: ${dribbler.player.name}(드리블 ${dribbler.player.attributes.dribbling}) vs ${weakTackler.player.name}(태클 ${weakTackler.player.attributes.tackling})`,
-      `${us}는 측면에서 사람을 벗겨낼 수 있다`,
+      {
+        dribbling: dribbler.player.attributes.dribbling,
+        tackling: weakTackler.player.attributes.tackling,
+      },
+      [dribbler, weakTackler],
     );
   }
 
@@ -216,8 +275,8 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       "them",
       "attack",
       gap - AXIS_THRESHOLD.aerial,
-      `${us} 제공권 우위: ${tall.player.name}(공중볼 ${tall.player.attributes.aerial}) vs ${weakAir.player.name}(${weakAir.player.attributes.aerial})`,
-      `${us}가 공중에서 앞선다 — 크로스와 세트피스가 통한다`,
+      { aerial: tall.player.attributes.aerial, defenceAerial: weakAir.player.attributes.aerial },
+      [tall, weakAir],
     );
   }
 
@@ -231,8 +290,10 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       "them",
       "midfield",
       AXIS_THRESHOLD["press-resistance"] - value,
-      `${them} 빌드업 약점: ${shaky.player.name}(침착 ${shaky.player.attributes.composure} · 패스 ${shaky.player.attributes.passing}) — 압박하면 흔들린다`,
-      `${them} 중원은 압박에 약하다`,
+      {
+        composure: shaky.player.attributes.composure,
+        passing: shaky.player.attributes.passing,
+      },
     );
   }
 
@@ -245,8 +306,7 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       "us",
       "midfield",
       creator.player.attributes.vision - AXIS_THRESHOLD.creator,
-      `${us} 창조의 축: ${creator.player.name}(시야 ${creator.player.attributes.vision}) — 이 선수를 지우면 공격이 멎는다`,
-      `${us}의 공격은 중원 한 명에게서 시작된다`,
+      { vision: creator.player.attributes.vision },
     );
   }
 
@@ -259,31 +319,23 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       "us",
       "attack",
       finisher.player.attributes.finishing - AXIS_THRESHOLD.finisher,
-      `${us} 결정력: ${finisher.player.name}(결정력 ${finisher.player.attributes.finishing}) — 한 번의 기회로 끝낸다`,
-      `${us} 최전방은 기회를 놓치지 않는다`,
+      { finishing: finisher.player.attributes.finishing },
     );
   }
 
   // ── 골문 — 선방과 배급 ──
   const gk = top(def, "GK", (p) => p.attributes.goalkeeping);
   if (gk) {
-    push(
-      "keeper",
-      gk,
-      "them",
-      "attack",
-      AXIS_THRESHOLD.keeper - gk.player.attributes.goalkeeping,
-      `${them} 골문 불안: ${gk.player.name}(골키핑 ${gk.player.attributes.goalkeeping})`,
-      `${them} 골키퍼가 미덥지 않다`,
-    );
+    push("keeper", gk, "them", "attack", AXIS_THRESHOLD.keeper - gk.player.attributes.goalkeeping, {
+      goalkeeping: gk.player.attributes.goalkeeping,
+    });
     push(
       "keeper-distribution",
       gk,
       "them",
       "defense",
       gk.player.attributes.passing - AXIS_THRESHOLD["keeper-distribution"],
-      `${them} 골키퍼 배급: ${gk.player.name}(패스 ${gk.player.attributes.passing}) — 뒤에서부터 풀어 나온다`,
-      `${them}는 골키퍼부터 빌드업한다`,
+      { passing: gk.player.attributes.passing },
     );
   }
 
@@ -291,15 +343,9 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
   const line = avg(def, "DF", (p) => p.attributes.positioning);
   const leader = top(def, "DF", (p) => p.attributes.leadership);
   if (line > 0) {
-    push(
-      "backline-shape",
-      undefined,
-      "them",
-      "attack",
-      AXIS_THRESHOLD["backline-shape"] - line,
-      `${them} 수비 조직: 백라인 평균 위치선정 ${Math.round(line)} — 라인이 자주 어긋난다`,
-      `${them} 수비는 짜임새가 헐겁다`,
-    );
+    push("backline-shape", undefined, "them", "attack", AXIS_THRESHOLD["backline-shape"] - line, {
+      positioning: line,
+    });
     if (leader && leader.player.attributes.leadership <= BACKLINE_LEADER_GATE) {
       push(
         "backline-leader",
@@ -307,8 +353,7 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
         "them",
         "attack",
         AXIS_THRESHOLD["backline-leader"] - leader.player.attributes.leadership,
-        `${them} 백라인에 조율자가 없다 (최고 리더십 ${leader.player.attributes.leadership})`,
-        `${them} 수비는 서로를 부르지 않는다`,
+        { leadership: leader.player.attributes.leadership },
       );
     }
   }
@@ -324,23 +369,20 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       "them",
       "attack",
       gap - AXIS_THRESHOLD.physical,
-      `${us} 몸싸움 우위: ${strong.player.name}(힘 ${strong.player.attributes.strength}) vs ${light.player.name}(${light.player.attributes.strength})`,
-      `${us} 최전방이 등지고 버틴다`,
+      {
+        strength: strong.player.attributes.strength,
+        defenceStrength: light.player.attributes.strength,
+      },
+      [strong, light],
     );
   }
 
   // ── 활동량 — 90분을 버티나 ──
   const engine = avg(atk, "MF", (p) => p.attributes.stamina);
   if (engine > 0) {
-    push(
-      "stamina",
-      undefined,
-      "us",
-      "midfield",
-      AXIS_THRESHOLD.stamina - engine,
-      `${us} 중원 활동량 부족: 평균 체력 ${Math.round(engine)} — 후반에 밀린다`,
-      `${us} 중원은 후반에 다리가 무거워진다`,
-    );
+    push("stamina", undefined, "us", "midfield", AXIS_THRESHOLD.stamina - engine, {
+      stamina: engine,
+    });
   }
 
   // ── 세트피스 키커 — 죽은 공에서 나오는 득점 ──
@@ -354,8 +396,7 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       "us",
       "attack",
       kicker.player.attributes.kicking - AXIS_THRESHOLD["set-piece"],
-      `${us} 세트피스 키커: ${kicker.player.name}(킥 ${kicker.player.attributes.kicking})`,
-      `${us}는 죽은 공이 위협적이다`,
+      { kicking: kicker.player.attributes.kicking },
     );
   }
 
@@ -375,38 +416,30 @@ function sidePoints(atk: LineupSlot[], def: LineupSlot[], us: string, them: stri
       rough.player.attributes.aggression -
         rough.player.attributes.composure -
         AXIS_THRESHOLD.discipline,
-      `${them} 카드 위험: ${rough.player.name}(적극성 ${rough.player.attributes.aggression} · 침착 ${rough.player.attributes.composure})`,
-      `${them}에 발끈하는 선수가 있다`,
+      {
+        aggression: rough.player.attributes.aggression,
+        composure: rough.player.attributes.composure,
+      },
     );
   }
 
   return out;
 }
 
-/**
- * 두 팀의 키포인트 — 양방향으로 뽑고 큰 것부터 세운다.
- *
- * `manager`를 주지 않으면 전부 정밀하게 돌려준다(테스트·AI 팀 경기).
- */
-export function buildKeyPoints(
-  homeXI: LineupSlot[],
-  awayXI: LineupSlot[],
-  homeName: string,
-  awayName: string,
-): KeyPoint[] {
+/** 두 팀의 키포인트 — 양방향으로 뽑고 큰 것부터 세운다. */
+export function buildKeyPoints(homeXI: LineupSlot[], awayXI: LineupSlot[]): KeyPoint[] {
   /**
    * `sidePoints`의 `us`/`them`은 **그 방향 안에서만** 뜻이 있다 — 합치면서
    * 절대 좌표(home/away)로 옮긴다. 이걸 빠뜨리면 공략이 반대편에 걸린다
    * (실제로 우리가 노렸는데 상대 xG가 올랐다).
    */
-  const absolute = (points: RawPoint[], usSide: MatchSide): KeyPoint[] =>
-    points.map((p) => ({
-      ...p,
-      side: p.side === "us" ? usSide : usSide === "home" ? "away" : "home",
-    }));
+  const absolute = (points: RawPoint[], usSide: MatchSide): KeyPoint[] => {
+    const abs = (rel: RelSide): MatchSide => (rel === "us" ? usSide : otherSide(usSide));
+    return points.map((p) => ({ ...p, side: abs(p.side), favours: abs(p.favours) }));
+  };
   return [
-    ...absolute(sidePoints(homeXI, awayXI, homeName, awayName), "home"),
-    ...absolute(sidePoints(awayXI, homeXI, awayName, homeName), "away"),
+    ...absolute(sidePoints(homeXI, awayXI), "home"),
+    ...absolute(sidePoints(awayXI, homeXI), "away"),
   ].sort((a, b) => b.weight - a.weight);
 }
 
@@ -422,13 +455,6 @@ function keyPointCount(analysis: number): number {
     KEY_POINT_COUNT_MIN,
     Math.min(KEY_POINT_COUNT_MAX, Math.round(KEY_POINT_COUNT_MIN + (analysis / RATING_MAX) * span)),
   );
-}
-
-/** 감독의 눈에 실제로 잡힌 지점 — 문장과 **누가 이 약점을 가졌나** */
-export interface ShownPoint {
-  text: string;
-  /** 이 약점을 가진 쪽 — 이로운 쪽은 그 반대다 */
-  side: MatchSide;
 }
 
 /**
@@ -447,11 +473,35 @@ const GAP_CLARITY_FULL = 60;
 /** 이 위면 이름과 수치가, 아래면 방향만 보인다 */
 const SHARP_CLARITY = 0.55;
 
-export function readKeyPoints(points: KeyPoint[], analysis: number, tactics: number): ShownPoint[] {
-  const sharp = (tactics / RATING_MAX) * TACTICS_CLARITY_MAX;
+/**
+ * 키포인트 → 사실 태그. **두 편을 따로 싣는다** — `favours`는 이로운 편이고
+ * `holder`는 그 지점을 가진 쪽(문장의 주어)이다. 한 칸으로 접으면 강점 축에서
+ * 골의 원인과 화면의 색이 정반대가 된다 (match.md §1).
+ */
+export function keyPointTag(point: KeyPoint, sharp: boolean): PacketTag {
+  return {
+    source: "mismatch",
+    code: point.id.split(":")[0] ?? point.id,
+    favours: point.favours,
+    holder: point.side,
+    sharp,
+    playerIds: point.playerIds,
+    values: point.values,
+    flags: [],
+  };
+}
+
+/**
+ * 감독의 눈에 실제로 잡힌 지점 — **`sharp`가 안개다.**
+ *
+ * 문턱을 넘으면 태그가 이름과 수치를 드러내도 된다고 말하고, 못 넘으면 방향만
+ * 남는다. 어느 문장을 낼지 고르는 일은 렌더러(`packetTagText`)가 한다.
+ */
+export function readKeyPoints(points: KeyPoint[], analysis: number, tactics: number): PacketTag[] {
+  const eye = (tactics / RATING_MAX) * TACTICS_CLARITY_MAX;
   return points.slice(0, keyPointCount(analysis)).map((p) => {
     // 벌어진 폭이 큰 짝은 낮은 전술 능력으로도 또렷이 보인다
-    const clarity = sharp + Math.min(GAP_CLARITY_MAX, p.weight / GAP_CLARITY_FULL);
-    return { text: clarity >= SHARP_CLARITY ? p.text : p.vague, side: p.side };
+    const clarity = eye + Math.min(GAP_CLARITY_MAX, p.weight / GAP_CLARITY_FULL);
+    return keyPointTag(p, clarity >= SHARP_CLARITY);
   });
 }

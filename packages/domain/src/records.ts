@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { DateString } from "./date-string";
+import { MATCH_MINUTE_MAX } from "./match";
+import { AXIS_KO, type AttributeAxis } from "./player";
 import { PitchClaimKindSchema, PitchClaimSchema } from "./persuasion";
 
 /**
@@ -11,7 +13,13 @@ import { PitchClaimKindSchema, PitchClaimSchema } from "./persuasion";
 // ── 부상 ──────────────────────────────────────────────
 export const InjurySeveritySchema = z.enum(["minor", "moderate", "major"]);
 export type InjurySeverity = z.infer<typeof InjurySeveritySchema>;
-export const InjuryCauseSchema = z.enum(["match", "training", "other"]);
+/**
+ * 부상이 어디서 왔나 — **문장이 아니라 코드다** (player.md §5.3).
+ *
+ * `pre_appointment`는 감독이 오기 전의 이력이다. 시드가 심는 줄이라 경기도 훈련도
+ * 아닌 제3의 출처이고, 코드가 없던 동안은 `note`에 그 뜻이 문장으로만 있었다.
+ */
+export const InjuryCauseSchema = z.enum(["match", "training", "other", "pre_appointment"]);
 
 export const InjurySchema = z.object({
   id: z.string().min(1),
@@ -24,6 +32,7 @@ export const InjurySchema = z.object({
   expectedReturn: DateString,
   /** null = 현재 부상 중. 기록되면 이력 (선수당 미복귀 최대 1건) */
   returnedOn: DateString.nullable(),
+  /** 옛 세이브가 들고 있는 출처 문장 — 더는 쓰지 않는다 (`cause`의 폴백) */
   note: z.string().optional(),
 });
 export type Injury = z.infer<typeof InjurySchema>;
@@ -35,7 +44,7 @@ export const BookingSchema = z.object({
   matchId: z.string().min(1),
   season: z.number().int(),
   card: z.enum(["yellow", "red"]),
-  minute: z.number().int().min(0).max(130),
+  minute: z.number().int().min(0).max(MATCH_MINUTE_MAX),
 });
 export type Booking = z.infer<typeof BookingSchema>;
 
@@ -96,6 +105,157 @@ export type TransferWindow = z.infer<typeof TransferWindowSchema>;
 export const TransferTypeSchema = z.enum(["transfer", "loan", "free", "youth", "retire"]);
 
 /**
+ * 이 이동이 **왜** 일어났나 — `type`이 못 가르는 갈래를 가르는 코드.
+ *
+ * 계약 만료도 계약 해지도 은퇴도 `type: "free"`나 `"retire"`로 같은 줄에 서지만
+ * 라커룸이 받는 사실은 다르다: 하나는 계약이 끝난 것이고 하나는 **감독이 내보낸
+ * 것**이다(people.md §5). 그 갈래를 원장의 문장으로 가르면 문구를 고치는 순간
+ * 심경이 계약 해지를 못 알아본다 — 그래서 코드로 적는다
+ * (→ docs/simulation/transfer.md §2).
+ */
+export const TransferReasonSchema = z.enum([
+  /** 흥정을 거친 상호 합의 해지 */
+  "release-agreed",
+  /** 전액을 물고 그 자리에서 끊은 일방 해지 */
+  "release-unilateral",
+  /** 계약이 그냥 끝났다 */
+  "contract-expiry",
+  "retire",
+  "youth-callup",
+]);
+export type TransferReason = z.infer<typeof TransferReasonSchema>;
+
+/**
+ * YYYY-MM-DD에 해를 더한다 — 2월 29일만 2월 28일로 접는다.
+ * 지급 기일이 윤년마다 하루 흔들리면 일정이 결정적이지 않다.
+ */
+function addYearsTo(date: string, years: number): string {
+  const [y, md] = [Number(date.slice(0, 4)), date.slice(5)];
+  return `${y + years}-${md === "02-29" ? "02-28" : md}`;
+}
+
+// ── 조건부 조항 ────────────────────────────────────────
+/**
+ * 조항이 붙는 나이의 위 끝 — 어릴수록 파는 쪽이 놓아준 미래가 크다는 것이 조항의
+ * 존재 이유라, 자를 나이로 잡는다 (transfer.md §5-3).
+ */
+export const CLAUSE_MAX_AGE = 23;
+
+/** 셀온 비율의 밴드 — 실제 이적의 셀온이 앉는 자리다. 그 위는 이적료의 다른 이름이 된다 */
+export const SELL_ON_MIN_RATE = 0.1;
+export const SELL_ON_MAX_RATE = 0.25;
+
+/** 최대 비율이 서는 나이 — 이 아래로는 더 오르지 않는다 */
+export const SELL_ON_PEAK_AGE = 17;
+
+/** 되사기가 함께 붙는 나이의 위 끝 — 셀온보다 좁다 */
+export const BUYBACK_MAX_AGE = 21;
+
+/**
+ * 되사기 값의 배수 — "확실히 컸을 때만 되산다"의 눈금이다.
+ * `BUYBACK_EXERCISE_MARGIN`과 곱해져 실제 문턱(시장가 ÷ 이적료)이 되므로 둘은
+ * 함께 움직인다. 2배로 두면 문턱이 2.5배가 되어 조항이 걸려도 거의 발동하지
+ * 않는다 — 칸만 남는 손잡이다 (transfer.md §5-3).
+ */
+export const BUYBACK_MARKUP = 1.5;
+
+/** 되사기 창 — 두 여름과 한 겨울. 짧으면 자라기 전에 닫히고, 길면 값이 떨어져 나간다 */
+export const BUYBACK_WINDOW_YEARS = 2;
+
+/**
+ * AI가 되사기를 행사하는 문턱 — 시장가가 조항 값의 이 배수 이상일 때만 되산다.
+ * 1.0으로 재면 에이전트 수수료(10%)와 주급 상승만큼 손해를 보면서 되사고, 문턱이
+ * 없으면 창마다 무의미하게 스쿼드를 뒤집는다 (transfer.md §5-3).
+ */
+export const BUYBACK_EXERCISE_MARGIN = 1.25;
+
+/**
+ * 셀온 조항 — 재판매 **이익**의 일부가 판 구단(`Transfer.fromTeamId`)으로 돌아온다.
+ * 무는 쪽은 `toTeamId`이고, 살아 있는지는 그 선수의 계약이 아직 거기 있는가로
+ * 읽는다 — 죽음을 따로 적지 않는다 (transfer.md §5-3).
+ */
+export const SellOnClauseSchema = z.object({
+  /** 이익에 곱하는 비율 — 0.15 = 15% */
+  rate: z.number().min(0).max(1),
+  /** 정산된 날 — null이면 아직 발동하지 않았다 */
+  settledOn: DateString.nullable(),
+  /** 정산된 금액 — 발동 전엔 없다 */
+  settledAmount: z.number().min(0).optional(),
+});
+export type SellOnClause = z.infer<typeof SellOnClauseSchema>;
+
+/**
+ * 되사기 조항 — 판 구단이 정해진 값에 되살 수 있는 **권리**다. 흥정이 아니라
+ * 파는 쪽에 거부권이 없다 (transfer.md §5-3).
+ */
+export const BuyBackClauseSchema = z.object({
+  /** 되사는 값 — 원 이적료에 배수를 곱한 값이다 */
+  fee: z.number().min(0),
+  /** 행사 창의 마지막 날 — 이날까지 행사할 수 있다 */
+  until: DateString,
+  /** 행사한 날 — null이면 아직 */
+  exercisedOn: DateString.nullable(),
+});
+export type BuyBackClause = z.infer<typeof BuyBackClauseSchema>;
+
+/** 한 이적에 걸린 조항들 — 둘 다 없으면 조항 자체를 적지 않는다 */
+export const TransferClausesSchema = z.object({
+  sellOn: SellOnClauseSchema.optional(),
+  buyBack: BuyBackClauseSchema.optional(),
+});
+export type TransferClauses = z.infer<typeof TransferClausesSchema>;
+
+/**
+ * 나이가 정하는 셀온 비율 — 23세 `SELL_ON_MIN_RATE`에서 17세 이하
+ * `SELL_ON_MAX_RATE`까지 선형이고 1%로 반올림한다 (transfer.md §5-3).
+ */
+export function sellOnRateForAge(age: number): number {
+  const span = CLAUSE_MAX_AGE - SELL_ON_PEAK_AGE;
+  const t = Math.max(0, Math.min(1, (CLAUSE_MAX_AGE - age) / span));
+  return Math.round((SELL_ON_MIN_RATE + (SELL_ON_MAX_RATE - SELL_ON_MIN_RATE) * t) * 100) / 100;
+}
+
+/**
+ * 이 이적에 붙는 조항 — **딜의 모양이 정한다** (transfer.md §5-3). 유저가 팔든
+ * AI끼리 팔든 같은 함수를 지나므로 우리 구단만 다른 규칙으로 살 수 없다.
+ *
+ * 되산 이적은 여기를 지나지 않는다 — 되사기를 당한 구단이 원 소속 구단에게 셀온을
+ * 걸게 되는데, 그 구단은 이 선수를 키운 적이 없다.
+ */
+export function clausesForSale(input: {
+  age: number;
+  fee: number;
+  date: string;
+}): TransferClauses | undefined {
+  if (input.fee <= 0 || input.age > CLAUSE_MAX_AGE) return undefined;
+  const clauses: TransferClauses = {
+    sellOn: { rate: sellOnRateForAge(input.age), settledOn: null },
+  };
+  if (input.age <= BUYBACK_MAX_AGE) {
+    clauses.buyBack = {
+      fee: Math.round(input.fee * BUYBACK_MARKUP),
+      until: addYearsTo(input.date, BUYBACK_WINDOW_YEARS),
+      exercisedOn: null,
+    };
+  }
+  return clauses;
+}
+
+/**
+ * 셀온 정산 금액 — **이익에만 붙는다.** 총액에 붙이면 손해 보고 판 구단이 돈을
+ * 더 무는데, 그것은 조항이 막으려던 일의 반대다 (transfer.md §5-3).
+ */
+export function sellOnAmountOf(input: {
+  originalFee: number;
+  resaleFee: number;
+  rate: number;
+}): number {
+  const profit = input.resaleFee - input.originalFee;
+  if (profit <= 0) return 0;
+  return Math.round(profit * input.rate);
+}
+
+/**
  * 팀 변경 원장 — 이적·임대·자유계약·유스 콜업·은퇴까지 모든 이동이 row로 남는다.
  * GamePlayer.teamId는 "현재값"일 뿐이고 이력의 원본은 여기다.
  */
@@ -112,9 +272,98 @@ export const TransferSchema = z.object({
   type: TransferTypeSchema,
   /** 이적료 — 양 팀 원장(LEDGER_ENTRY)과 동시 기록 */
   fee: z.number().min(0),
+  /** `type`이 못 가르는 갈래 — 없으면 그냥 이동이다. 옛 세이브엔 없다(optional) */
+  reason: TransferReasonSchema.optional(),
+  /** 옛 세이브가 들고 있는 사유 문장 — 더는 쓰지 않는다 (`reason`의 폴백) */
   note: z.string().optional(),
+  /** 이 이적에 걸린 조건부 조항 — 없으면 조항 없는 평범한 이적이다 (§5-3) */
+  clauses: TransferClausesSchema.optional(),
 });
 export type Transfer = z.infer<typeof TransferSchema>;
+
+// ── 지급 일정 ─────────────────────────────────────────
+/**
+ * 분할 지급의 연수 상한 — 실제 이적의 분할이 2~4년이고, 그 위는 흥정의 폭이
+ * 아니라 관문(예산·잔고) 회피의 폭이다 (transfer.md §5-2).
+ */
+export const MAX_PAYMENT_YEARS = 4;
+
+/**
+ * 늦게 오는 회분을 판정이 깎아 보는 비율 — 1년 늦을 때마다 곱한다.
+ * 분할이 공짜 신용이 되지 않게 하는 손잡이다 (`effectiveFeeOf`).
+ */
+export const INSTALLMENT_DISCOUNT = 0.9;
+
+/** 지급 일정의 한 회분 — `paidOn=null`이 미지급 (기록 테이블 공통 패턴) */
+export const PaymentInstallmentSchema = z.object({
+  dueOn: DateString,
+  amount: z.number().min(0),
+  /** null = 아직 안 냈다 — 지급되면 낸 날이 적힌다 */
+  paidOn: DateString.nullable(),
+});
+export type PaymentInstallment = z.infer<typeof PaymentInstallmentSchema>;
+
+/**
+ * 지급 일정 표 (PAYMENT_SCHEDULE) — **미래의 지급을 담는 자리** (transfer.md §5-2).
+ *
+ * 받는 쪽을 표가 직접 갖는 것은 해지 때문이다: 해지의 원장 row는 무소속행이라
+ * `toTeamId`로는 받는 쪽을 되짚을 수 없다. 회분의 합은 합의 총액과 같아야 한다 —
+ * 이적은 `TRANSFER.fee`, 해지는 합의 정산금.
+ */
+export const PaymentScheduleSchema = z.object({
+  id: z.string().min(1),
+  /** 근거 원장 — TRANSFER row */
+  transferId: z.string().min(1),
+  gamePlayerId: z.string().min(1),
+  /** 내는 구단 */
+  payerTeamId: z.string().min(1),
+  /** 받는 구단 — 해지 정산은 받는 쪽이 선수 본인이라 null */
+  payeeTeamId: z.string().min(1).nullable(),
+  /**
+   * 무엇의 분할인가 — 원장 카테고리·라벨이 여기서 갈린다.
+   * `sell_on`은 조항 정산(§5-3)이라 회분이 언제나 하나지만, 대칭으로 서기 위해
+   * 이적료와 같은 문을 지난다. 옛 세이브는 이 값을 들고 있지 않다.
+   */
+  kind: z.enum(["transfer", "severance", "sell_on"]),
+  installments: z.array(PaymentInstallmentSchema),
+});
+export type PaymentSchedule = z.infer<typeof PaymentScheduleSchema>;
+
+/**
+ * 지급 일정의 회분 목록 — 총액을 등분해 첫 회분은 `firstDueOn`, 이후 해마다.
+ * 각 회분은 `floor(총액/n)`이고 **마지막 회분이 잔차를 진다** — 합은 언제나
+ * 총액과 같다 (transfer.md §11).
+ */
+export function buildPaymentInstallments(
+  total: number,
+  years: number,
+  firstDueOn: string,
+): PaymentInstallment[] {
+  const n = Math.max(1, Math.min(MAX_PAYMENT_YEARS, Math.floor(years)));
+  const per = Math.floor(total / n);
+  return Array.from({ length: n }, (_, k) => ({
+    dueOn: addYearsTo(firstDueOn, k),
+    amount: k === n - 1 ? total - per * (n - 1) : per,
+    paidOn: null,
+  }));
+}
+
+/**
+ * 분할 오퍼의 **유효 이적료** — 회분마다 해마다 `INSTALLMENT_DISCOUNT`를 곱한
+ * 현재가치다. 파는 쪽은 늦게 오는 돈을 깎아 보므로 딜 판정(`dealOdds`)은 이
+ * 값으로 잰다 — 같은 확률을 원하면 분할은 총액을 올려 불러야 한다 (transfer.md §5-2).
+ */
+export function effectiveFeeOf(fee: number, paymentYears?: number): number {
+  const n = Math.max(1, Math.min(MAX_PAYMENT_YEARS, Math.floor(paymentYears ?? 1)));
+  if (n <= 1) return fee;
+  let sum = 0;
+  let weight = 1;
+  for (let k = 0; k < n; k += 1) {
+    sum += (fee / n) * weight;
+    weight *= INSTALLMENT_DISCOUNT;
+  }
+  return Math.round(sum);
+}
 
 /**
  * 계약 해지를 원장에서 알아보는 표식 — `TRANSFER.note`에 이대로 적힌다.
@@ -131,9 +380,18 @@ export const RELEASE_NOTE = {
   unilateral: "계약 해지 (일방)",
 } as const;
 
-/** 이 원장 줄이 계약 해지인가 — 두 갈래를 한 자리에서 가른다 */
-export function isReleaseNote(note: string | undefined): boolean {
-  return note === RELEASE_NOTE.agreed || note === RELEASE_NOTE.unilateral;
+/**
+ * 이 원장 줄이 계약 해지인가 — 두 갈래를 한 자리에서 가른다.
+ *
+ * ⚠️ **여기만 옛 문장으로 떨어진다.** 라커룸이 계약 해지를 알아보는 표식은 이것
+ * 하나뿐이라 옛 세이브에서도 갈려야 한다. 새 줄은 `reason`을 적으므로 문장 대조는
+ * `reason`이 없는 줄에만 걸린다 (→ docs/data/game-state.md §6).
+ */
+export function isRelease(transfer: { reason?: TransferReason; note?: string }): boolean {
+  if (transfer.reason !== undefined) {
+    return transfer.reason === "release-agreed" || transfer.reason === "release-unilateral";
+  }
+  return transfer.note === RELEASE_NOTE.agreed || transfer.note === RELEASE_NOTE.unilateral;
 }
 
 // ── 협상 (진행 중 흥정 — 완료된 이동은 TRANSFER) ────────
@@ -190,12 +448,23 @@ export const NegotiationRoundSchema = z.object({
   probability: z.number().min(0).max(100),
   /** 상대의 판정 (them 라운드) */
   verdict: NegotiationVerdictSchema.nullable(),
+  /**
+   * 이 오퍼가 **어디서 나왔나** — 지금은 메디컬 소견을 보고 깎아 다시 부른 재호가
+   * 하나뿐이다. 상대가 적어 둔 메모의 첫머리를 읽어 가르던 자리라, 소견 문구를
+   * 고치면 판정이 뒤집혔다. 옛 세이브엔 없다(optional).
+   */
+  origin: z.enum(["medical"]).optional(),
   note: z.string().optional(),
   /**
    * 이 오퍼에 실린 설득 논거 — **감독이 실제로 한 말**이 note에 남는다.
    * 판정하는 LLM이 읽어야 하므로 라운드에 붙인다 (구 세이브엔 없어 optional).
    */
   pitch: z.array(PitchClaimSchema).optional(),
+  /**
+   * 분할 지급 연수 — 없거나 1이면 일시금. 확정되면 지급 일정 표가 된다
+   * (transfer.md §5-2 · 구 세이브엔 없어 optional).
+   */
+  paymentYears: z.number().int().min(1).max(MAX_PAYMENT_YEARS).optional(),
 });
 /**
  * 메디컬 — **합의와 계약 사이에 놓인 하루.**
@@ -207,11 +476,34 @@ export const NegotiationRoundSchema = z.object({
  * `flagged`는 불합격이 아니라 **소견**이다 — 데려가는 쪽이 알고도 갈지 정한다.
  * 판정은 `injuryProneness`·현재 부상·나이에서 결정적으로 나온다 (medical.ts).
  */
+/**
+ * 메디컬 소견 — **원인 코드 + 부위 + 기간.** 문장은 브리핑과 화면이 만든다
+ * (→ docs/simulation/transfer.md §5).
+ */
+export const MedicalConcernSchema = z.object({
+  code: z.enum([
+    /** 아직 낫지 않은 부상 — `days`가 복귀까지 남은 날 */
+    "open-injury",
+    /** 같은 자리에 남은 예전 부상의 흔적 */
+    "past-injury",
+    /** 나이에 비해 누적 피로가 크다 — `value`가 나이 */
+    "age-load",
+    /** 근육 밸런스 — 짚을 다른 사실이 없을 때 */
+    "muscle-balance",
+  ]),
+  bodyPart: z.string().min(1).optional(),
+  days: z.number().int().min(0).optional(),
+  value: z.number().optional(),
+});
+export type MedicalConcern = z.infer<typeof MedicalConcernSchema>;
+
 export const MedicalSchema = z.object({
   /** 검진일 — 합의 다음 날 이후 */
   onDate: DateString,
   status: z.enum(["scheduled", "passed", "flagged"]),
-  /** 소견 — 사람이 읽는 한 줄 ("오른쪽 무릎 연골에 마모 소견") */
+  /** 소견 카드 — `flagged`일 때만. 옛 세이브엔 없다(optional) */
+  concern: MedicalConcernSchema.optional(),
+  /** 옛 세이브가 들고 있는 소견 문장 — 더는 쓰지 않는다 (`concern`의 폴백) */
   note: z.string().optional(),
   /** 감독이 소견을 알고도 밀어붙였는가 — 원장에 남는다 */
   overridden: z.boolean().optional(),
@@ -246,23 +538,70 @@ export type Negotiation = z.infer<typeof NegotiationSchema>;
 /**
  * 성장의 출처. `development`는 **코어의 월간 성장·쇠퇴** — 감독 팀 1군 밖의 선수
  * (우리 2군 · 모든 타 팀)가 나이·잠재력·난수로 조금씩 움직이는 몫이다.
- * `reserve`는 옛 2군 개발 프로그램의 출처로, 이전 세이브의 로그에만 남아 있다.
+ *
+ * ⚠️ 갈래를 빼는 변경은 **마이그레이션과 한 PR**이다. 이 스키마는 로드가 통과해야
+ * 하는 문이라(`core/save-schema.ts`), 뺀 값을 든 옛 세이브는 그 자리에서 막힌다 —
+ * 폐기된 `reserve`가 `migrateGrowthSources`를 갖는 이유다.
  */
-export const GrowthSourceSchema = z.enum(["training", "match", "reserve", "development"]);
+export const GrowthSourceSchema = z.enum(["training", "match", "development"]);
 
-/** 성장 대상 — 능력치 6축+GK, 포지션 적응도(pos:CODE), 전술 적응도(tactical) */
+/**
+ * 그 한 칸이 **어느 경로로** 올랐나 — `source`보다 한 단 세분한 코드.
+ *
+ * 같은 `training`이라도 팀 훈련 결산과 전향 프로그램은 다른 일이다. 문장으로
+ * 적어 두면(`"훈련 결산"`) 그 문구가 세이브에 굳고 아무도 읽지 않는 줄이 된다.
+ */
+export const GrowthOriginSchema = z.enum([
+  /** 팀 훈련 결산 (training-report.ts) */
+  "training-settlement",
+  /** 전향 프로그램 — 새 자리를 익히는 개인 훈련 */
+  "position-conversion",
+  /** 코어의 월간 성장·쇠퇴 (development.ts) */
+  "monthly",
+  /** 경기에서 그 자리를 뛴 몫 (포지션 적응도) */
+  "match-minutes",
+  /** 경기 평점 결산 (ratings.ts) */
+  "match-settlement",
+]);
+export type GrowthOrigin = z.infer<typeof GrowthOriginSchema>;
+
+/** 성장 대상 — 능력치 16축, 포지션 적응도(pos:CODE), 전술 적응도(tactical) */
 export const GrowthEntrySchema = z.object({
   gamePlayerId: z.string().min(1),
-  /** 출처 일정 (SCHEDULE_ENTRY) — 훈련 세션 또는 경기 */
+  /** 출처 일정 (SCHEDULE_ENTRY) — 훈련 세션 또는 경기. 코어 월간 성장은 없다(null) */
   entryId: z.string().min(1).nullable(),
   date: DateString,
   source: GrowthSourceSchema,
   /** "shooting", "pos:ST", "tactical" 등 */
   target: z.string().min(1),
   delta: z.number().int(),
+  /** 어느 경로로 올랐나 — 옛 세이브엔 없다(optional) */
+  origin: GrowthOriginSchema.optional(),
+  /** 옛 세이브가 들고 있는 출처 문장 — 더는 쓰지 않는다 (`origin`의 폴백) */
   note: z.string().optional(),
 });
 export type GrowthEntry = z.infer<typeof GrowthEntrySchema>;
+
+/** 포지션 적응도 대상의 접두 — 적는 쪽과 읽는 쪽이 같은 상수를 쓴다 */
+export const GROWTH_POSITION_PREFIX = "pos:";
+
+export function positionGrowthTarget(position: string): string {
+  return `${GROWTH_POSITION_PREFIX}${position}`;
+}
+
+/**
+ * 성장 한 줄이 무엇에 대한 것인가 — **낱말은 여기 하나다.**
+ *
+ * 달력 일지와 훈련 결과줄이 각자 이 분기를 적던 동안 한쪽에 `pos:` 갈래가 빠져 있어
+ * 전향 훈련의 결과줄이 `pos:CB +1`로 섰다. 코드는 코드고 낱말은 낱말이다.
+ */
+export function growthLabel(target: string): string {
+  if (target.startsWith(GROWTH_POSITION_PREFIX)) {
+    return `${target.slice(GROWTH_POSITION_PREFIX.length)} 적응도`;
+  }
+  if (target === "tactical") return "전술 적응도";
+  return AXIS_KO[target as AttributeAxis] ?? target;
+}
 
 // ── 시즌 기록 ─────────────────────────────────────────
 export const SeasonStatSchema = z.object({
@@ -279,6 +618,15 @@ export const SeasonStatSchema = z.object({
    * 평균을 저장하면 경기마다 재계산해야 하고 반올림 오차가 누적된다.
    */
   ratingSum: z.number().min(0).optional(),
+  /**
+   * 2군 리그 기록 — 1군 기록(`apps` 등)과 섞이지 않는다. 섞으면 화면의 "출전 N"이
+   * 1·2군 혼합값이 된다 (simulation/season.md §2 2군 리그).
+   * 구 세이브엔 없어 optional (SAVE_VERSION 유지).
+   */
+  reserveApps: z.number().int().min(0).optional(),
+  reserveGoals: z.number().int().min(0).optional(),
+  reserveAssists: z.number().int().min(0).optional(),
+  reserveRatingSum: z.number().min(0).optional(),
 });
 export type SeasonStat = z.infer<typeof SeasonStatSchema>;
 
@@ -295,9 +643,10 @@ export function seasonRating(
 
 // ── 스카우팅 ──────────────────────────────────────────
 /**
- * 스카우트 파견 (SCOUT_REPORT) — **선수 단위**. 완료되면 그 선수의 능력치 안개가
- * 걷힌다(정확 공개). 단 잠재력은 끝까지 알 수 없다 — 성장 여력은 스카우트도
- * 단정하지 못한다는 규약. 지식 수준 파생은 engine/squad/scouting.ts 참고.
+ * 스카우트 파견 (SCOUT_REPORT) — **선수 단위**. 완료되면 안개가 좁혀진다: 관측형은
+ * ±1, 분석형은 ±3이 남는다(정답 공개가 아니다). 잠재력은 끝까지 폭으로만 안다 —
+ * 성장 여력은 스카우트도 단정하지 못한다는 규약. 지식 수준 파생은
+ * engine/squad/scouting.ts 참고.
  */
 export const ScoutReportSchema = z.object({
   id: z.string().min(1),
@@ -397,18 +746,17 @@ export type TransferListing = z.infer<typeof TransferListingSchema>;
  * 개인 훈련 프로그램 — **팀 훈련 위에 한 선수만 겨냥해 얹는 것.**
  *
  * `set_training`은 팀 전체 메뉴라 "이 선수의 결정력을 손보자", "풀백을 센터백으로
- * 전향시키자" 같은 판단이 표현되지 않았다. 축(`axis`)은 훈련 결산(LLM)의 입력이
- * 되고, 자리(`position`)는 **코어가 결정적으로** 적응도를 올린다 — 실전보다 느리게.
+ * 전향시키자" 같은 판단이 표현되지 않았다. 축(`axis`)도 자리(`position`)도 훈련
+ * 결산의 입력이고, 자리는 결산 한 번에 `POSITION_TRAIN_MAX`까지만 오른다 —
+ * 실전보다 느리게.
  */
 export const PlayerTrainingSchema = z.object({
   gamePlayerId: z.string().min(1),
   /** 겨냥한 능력치 축 — 훈련 결산에 실린다 */
   axis: z.string().min(1).optional(),
-  /** 배우는 자리 — 적응도가 훈련일마다 조금씩 오른다 */
+  /** 배우는 자리 — 훈련 결산이 적응도를 조금씩 올린다 */
   position: z.string().min(1).optional(),
   since: DateString,
-  /** 자리 훈련이 쌓은 훈련일 수 — 일정 수마다 적응도 +1 */
-  sessions: z.number().int().min(0).optional(),
 });
 export type PlayerTraining = z.infer<typeof PlayerTrainingSchema>;
 
@@ -427,6 +775,7 @@ export const FINANCE_INCOME_CATEGORIES = [
   "merchandising",
   "prize",
   "transfer_in",
+  "manager_buyout",
 ] as const;
 
 export const FINANCE_EXPENSE_CATEGORIES = [
@@ -439,6 +788,9 @@ export const FINANCE_EXPENSE_CATEGORIES = [
   "agent_fee",
   "transfer_out",
   "amortisation",
+  "severance",
+  "capex",
+  "depreciation",
 ] as const;
 
 export const FinanceCategorySchema = z.enum([
@@ -458,6 +810,8 @@ export const FINANCE_CATEGORY_KO: Record<FinanceCategory, string> = {
   merchandising: "머천다이징",
   prize: "대회 상금",
   transfer_in: "이적료 수입",
+  /** 감독이 계약을 물고 나간 돈 — 구단이 무는 `severance`의 반대편 (career.md §5.4) */
+  manager_buyout: "감독 사임 위약금",
   player_wages: "선수 주급",
   staff_wages: "스태프 급여",
   bonus: "성적 보너스",
@@ -468,6 +822,12 @@ export const FINANCE_CATEGORY_KO: Record<FinanceCategory, string> = {
   transfer_out: "이적료 지출",
   /** 감독이 읽는 이름 — `이적료 지출`(한 번에 나간 현금)과 이름만으로 갈린다 */
   amortisation: "이적료 분할 비용",
+  /** 경질 위약금 — 급여가 아니라 일회성 지출이라 인건비 축과 갈린다 (career.md §5.4) */
+  severance: "감독 위약금",
+  /** 자산을 산 현금 — 손익 밖이다. 선수 쪽의 `transfer_out`과 같은 자리 */
+  capex: "구장·시설 투자",
+  /** 그 자산을 내용연수에 나눠 무는 몫 — 선수 쪽의 `amortisation`과 같은 자리 */
+  depreciation: "자산 상각",
   other: "기타",
 };
 
@@ -526,6 +886,15 @@ export const TeamFinanceSchema = z.object({
    */
   budgetAdjusted: z.object({ date: DateString, amount: z.number() }).optional(),
   /**
+   * **주급 한도 상향** — 보드가 `request_board`로 내준 몫 (finance.md §9.6).
+   *
+   * 임금 천장(§6.3) 위에 얹히고 **만료일을 스스로 든다** — 그 시즌 6월 30일이다.
+   * 지우러 오는 tick이 없어야 하고, 영구히 얹히면 매 시즌 요청 한 번으로 천장이
+   * 계단처럼 올라가 천장이 하는 일(폭주 방지)이 사라진다. 감독의 구단에만 걸린다.
+   * 옛 세이브엔 없다 (optional — 세이브 버전 유지).
+   */
+  wageLift: z.object({ amount: z.number().min(0), until: DateString }).optional(),
+  /**
    * **파라슈트 페이먼트** — 강등 클럽이 떠나온 리그에서 받는 낙하산.
    *
    * 강등 시즌 전환에서 세워지고 해마다 줄다가 사라진다. 승격하면 그 자리에서
@@ -541,6 +910,37 @@ export const TeamFinanceSchema = z.object({
       /** 받는 햇수 — 보통 3년, 승격 1시즌 만의 재강등이면 2년 */
       years: z.number().int().positive(),
     })
+    .optional(),
+  /**
+   * **감독이 정한 티켓 가격** — 기준가 대비 배율 (finance.md §5.2).
+   *
+   * 금액이 아니라 배율인 이유는 승강이다: 기준가는 리그가 정하므로(`avgTicketPrice`)
+   * 강등하면 £45가 그 리그의 두 배 값이 된다. 배율로 들면 감독의 선택("우리는 조금
+   * 비싸게 판다")이 리그를 건너도 그대로 남는다. 감독의 구단에만 선다.
+   * 옛 세이브엔 없다 (optional — 세이브 버전 유지).
+   */
+  ticketPrice: z.object({ ratio: z.number().positive(), setOn: DateString }).optional(),
+  /**
+   * **자본 자산** — 현금은 한 번 나가고 손익은 내용연수에 나눠 무는 것 (finance.md §6.1-1).
+   *
+   * 선수의 취득원가·상각 기간은 계약 이력에서 파생하지만(§6.1) 구장에는 파생할 이력이
+   * 없다. 그래서 이 축만 줄을 갖는다 — 취득원가와 기간이 곧 자산의 정체다.
+   * 옛 세이브엔 없다 (optional — 세이브 버전 유지).
+   */
+  assets: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        /** 원장 라벨에 그대로 실린다 */
+        label: z.string().min(1),
+        /** 취득원가 — 상각의 총합은 이 값을 넘지 않는다 */
+        cost: z.number().min(0),
+        /** 상각 시작 — 착공일 */
+        since: DateString,
+        /** 내용연수 (개월) */
+        months: z.number().int().positive(),
+      }),
+    )
     .optional(),
 });
 export type TeamFinance = z.infer<typeof TeamFinanceSchema>;
@@ -569,6 +969,33 @@ export const FinanceHighlightSchema = z.object({
   /** 항상 양수 — 방향은 kind가 정한다 */
   amount: z.number().min(0),
 });
+/**
+ * 월간 보고서의 노트 — **코드 + 값 + 한도**. 조언도 판정도 담지 않는다.
+ *
+ * 문장을 적어 두면 그 문구가 세이브에 굳어, 화면 문구 하나를 고쳐도 지난 달의
+ * 보고서는 옛 말로 남는다. 동결 여부 같은 판정은 노트가 아니라 `budgetFrozen`이
+ * 갖는다 (→ docs/simulation/finance.md §4.3 · §9).
+ */
+export const FinanceNoteSchema = z.object({
+  code: z.enum([
+    "wage-ratio-danger",
+    "wage-ratio-caution",
+    "cash-deficit-transfer",
+    "cash-deficit-operating",
+    "psr-breach",
+    "psr-headroom-low",
+    "debt-over-limit",
+    "debt-under-limit",
+  ]),
+  /** 그 코드가 가리키는 값 — 비중이면 0~1, 금액이면 그 금액 */
+  value: z.number().optional(),
+  /** 그 값이 견주는 한도 */
+  limit: z.number().optional(),
+  /** 코드마다 하나씩 더 필요한 수치 (부채의 연 이자 등) */
+  extra: z.number().optional(),
+});
+export type FinanceNote = z.infer<typeof FinanceNoteSchema>;
+
 /**
  * 월간 재정 보고서 (FINANCE_REPORT) — 매월 1일에 지난달을 마감해 만든다.
  * 상세 원장은 3개월 롤링으로 잘리지만 이 요약은 영구 보존되고, `openingBalance`
@@ -600,8 +1027,13 @@ export const FinanceReportSchema = z.object({
   }),
   /** 3시즌 누적 손익과 여유 — 보유 시즌이 적으면 있는 만큼 */
   psr: z.object({ rolling3Season: z.number(), headroom: z.number() }).nullable(),
-  /** 코어가 결정적으로 붙이는 판단 재료 — GM은 이걸 서술만 한다 */
-  notes: z.array(z.string()),
+  /**
+   * 코어가 결정적으로 붙이는 판단 재료 — GM은 이걸 서술만 한다.
+   * 카드라 조언도 판정도 담지 않는다 (→ docs/simulation/finance.md §4.3).
+   */
+  noteCards: z.array(FinanceNoteSchema).optional(),
+  /** 옛 세이브가 들고 있는 노트 문장 — 더는 쓰지 않는다 (`noteCards`의 폴백) */
+  notes: z.array(z.string()).optional(),
   /** 그달의 큰 비정기 항목 — 절단 전에 옮겨 적는다. 옛 세이브엔 없다 (optional) */
   highlights: z.array(FinanceHighlightSchema).optional(),
 });
@@ -623,6 +1055,31 @@ export const LeagueFinalTableSchema = z.object({
 export type LeagueFinalTable = z.infer<typeof LeagueFinalTableSchema>;
 
 // ── 감독 커리어 (정규화) ──────────────────────────────
+/**
+ * 보드가 건 기대의 **갈래** — 이름이 아니다 (career.md §6).
+ *
+ * 라벨(`"유럽 대항전권(6위 이내)"`)을 박아 두면 순위 숫자가 `target`과 이중으로
+ * 굳고, 체급 표를 손볼 때 옛 세이브만 옛 문구로 남는다. 문장은 화면이 코드와
+ * `target`으로 만든다.
+ */
+export const BoardExpectationCodeSchema = z.enum(["title", "europe", "mid", "survival"]);
+export type BoardExpectationCode = z.infer<typeof BoardExpectationCodeSchema>;
+
+/** 코드 → 기대의 이름. 순위는 `target`이 갖는다 — 문구를 고쳐도 옛 세이브가 함께 고쳐진다 */
+export function boardExpectationText(code: BoardExpectationCode, target?: number): string {
+  const scope = target === undefined ? "" : `(${target}위 이내)`;
+  switch (code) {
+    case "title":
+      return "우승 경쟁";
+    case "europe":
+      return `유럽 대항전권${scope}`;
+    case "mid":
+      return `중위권 안착${scope}`;
+    case "survival":
+      return `잔류${scope}`;
+  }
+}
+
 export const SeasonRecordSchema = z.object({
   season: z.number().int(),
   /** 재임 팀 — 감독이 팀을 옮겨도 기록이 유지된다 */
@@ -644,8 +1101,10 @@ export const SeasonRecordSchema = z.object({
       grade: z.enum(["met", "missed"]),
       position: z.number().int().min(1),
       target: z.number().int().min(1),
-      /** 그 시즌 기대의 이름 — `boardExpectationOfTier`의 label */
-      expectation: z.string().min(1),
+      /** 그 시즌 기대의 갈래 — 옛 세이브엔 없다(optional) */
+      expectationCode: BoardExpectationCodeSchema.optional(),
+      /** 옛 세이브가 들고 있는 기대의 이름 — 새 줄은 적지 않는다 (`expectationCode`의 폴백) */
+      expectation: z.string().min(1).optional(),
     })
     .optional(),
   /** 옛 세이브가 들고 있는 평가 문장 — 더는 쓰지 않는다 (`board`의 폴백) */
@@ -659,9 +1118,19 @@ export const SeasonRecordSchema = z.object({
 });
 export type SeasonRecord = z.infer<typeof SeasonRecordSchema>;
 
+/**
+ * 트로피 — **대회 id로 남긴다** (career.md §6).
+ *
+ * 대회 이름은 카탈로그가 갖고 어드민이 고칠 수 있다. 표시 이름을 박아 두면 이름을
+ * 고친 뒤의 우승과 그 전의 우승이 보관함에 다른 대회로 서고, id가 없으니 되돌릴
+ * 길도 없다. 업적(`Achievement`)이 이미 id로 남는 것과 같은 규약이다.
+ */
 export const TrophySchema = z.object({
   season: z.number().int(),
-  competition: z.string().min(1),
+  /** 대회 id — 리그 우승이면 리그 id. 옛 세이브엔 없다(optional) */
+  competitionId: z.string().min(1).optional(),
+  /** 옛 세이브가 들고 있는 표시 이름 — 새 줄은 적지 않는다 (`competitionId`의 폴백) */
+  competition: z.string().min(1).optional(),
   teamId: z.string().min(1),
 });
 export type Trophy = z.infer<typeof TrophySchema>;
@@ -729,14 +1198,191 @@ export const AchievementSchema = z.object({
 });
 export type Achievement = z.infer<typeof AchievementSchema>;
 
+// ── 시상 ──────────────────────────────────────────────
+/**
+ * 리그 시상 코드 — **세이브에 남는 것은 이 코드와 근거 수치뿐이다**
+ * (overview.md §1 철칙 4 · `AchievementCode`와 같은 규약).
+ *
+ * 표시명("올해의 선수")도 평가 문장("빛나는 시즌이었다")도 적지 않는다. 이름은
+ * `awardTitle`이 코드에서 만들고, 문장은 GM(장면)과 화면(커리어 표)이 쓴다.
+ * 선정과 동점 처리 규칙은 simulation/season.md §6이 원본이다.
+ */
+export const SEASON_AWARD_CODES = [
+  /** 그 리그 소속 선수의 시즌 최다 득점 */
+  "top-scorer",
+  /** 최다 도움 */
+  "top-assister",
+  /** 출전 문턱을 넘은 선수 중 시즌 평점 1위 */
+  "player-of-season",
+  /** 같은 눈금, 시즌 종료일 기준 `YOUNG_PLAYER_MAX_AGE`세 이하 */
+  "young-player",
+] as const;
+export type SeasonAwardCode = (typeof SEASON_AWARD_CODES)[number];
+
+/** 영플레이어의 나이 상한 — 시즌 종료일 기준 만 나이 */
+export const YOUNG_PLAYER_MAX_AGE = 23;
+
+/** 코드 → 상의 이름. 코드가 그 자리에서 읽히게 하는 유일한 표 */
+const SEASON_AWARD_TITLES: Record<string, string> = {
+  "top-scorer": "득점왕",
+  "top-assister": "도움왕",
+  "player-of-season": "올해의 선수",
+  "young-player": "영플레이어",
+};
+
+export function awardTitle(code: string): string {
+  return SEASON_AWARD_TITLES[code] ?? code;
+}
+
+/**
+ * 시상 한 건 — 코드 + **그 상이 선 근거 수치**.
+ *
+ * 수상자 **이름**을 함께 적는 것은 그것이 사실이라서다 — 은퇴하면
+ * `state.players`에서 사라져 id로는 더 못 찾는다 (`Achievement.playerName`과 같은 이유).
+ */
+export const SeasonAwardSchema = z.object({
+  code: z.string().min(1),
+  season: z.number().int(),
+  /** 어느 리그의 상인가 — 그해 그 선수가 뛴 리그 */
+  leagueId: z.string().min(1),
+  gamePlayerId: z.string().min(1),
+  /** 그때의 이름 */
+  playerName: z.string().min(1),
+  /** 그 리그에서 가장 많이 뛴 팀 */
+  teamId: z.string().min(1),
+  /** 근거 수치 — 어느 칸을 채우는가는 코드가 정한다 */
+  apps: z.number().int().nonnegative(),
+  goals: z.number().int().nonnegative(),
+  assists: z.number().int().nonnegative(),
+  /** 시즌 평점 — 출전이 없으면 없다 (`seasonRating`과 같은 눈금) */
+  rating: z.number().optional(),
+  /** `young-player`가 센 나이 — 시즌 종료일 기준 */
+  age: z.number().int().positive().optional(),
+});
+export type SeasonAward = z.infer<typeof SeasonAwardSchema>;
+
+// ── 2군 훈련 방침 ─────────────────────────────────────
+/**
+ * 2군 훈련 방침 — **어느 축으로 자라는지**를 정하는 코드 (season.md §2).
+ *
+ * 결산 없는 2군에서 축을 겨냥할 자리는 월간 성장의 축 선택뿐이라, 방침은 거기에
+ * 얹힌다. 코드만 상태에 남고(`GAME_STATE.reserveTraining`), 어느 축이 그 갈래에
+ * 드는지와 배율은 `engine/squad/training-plan.ts`가 한 자리에서 갖는다.
+ *
+ * `balanced`가 기본값이자 해제다 — 옛 세이브는 값이 없으므로 그것으로 읽힌다.
+ */
+export const RESERVE_TRAINING_POLICIES = ["balanced", "physical", "technical", "mental"] as const;
+export const ReserveTrainingPolicySchema = z.enum(RESERVE_TRAINING_POLICIES);
+export type ReserveTrainingPolicy = z.infer<typeof ReserveTrainingPolicySchema>;
+
+/** 코드 → 방침의 이름 — 화면과 프롬프트가 코드를 읽는 유일한 표 */
+const RESERVE_TRAINING_TITLES: Record<ReserveTrainingPolicy, string> = {
+  balanced: "균형",
+  physical: "신체",
+  technical: "기술",
+  mental: "정신",
+};
+
+export function reserveTrainingTitle(policy: ReserveTrainingPolicy): string {
+  return RESERVE_TRAINING_TITLES[policy];
+}
+
 // ── 서사 ──────────────────────────────────────────────
+/**
+ * 서사 줄의 갈래 — **하루 한도를 세는 열쇠.**
+ *
+ * GM이 부른 서사 이벤트만 하루 상한이 걸리는데, 그것을 문장 접두사(`[서사]`)로
+ * 가르면 접두사를 고치는 순간 상한이 사라진다 (overview.md §1 철칙 4).
+ */
+export const NarrativeKindSchema = z.enum([
+  /** 경기 결과 */
+  "match",
+  /** 시즌 결산·우승·순위 */
+  "season",
+  /** 이적·계약 */
+  "transfer",
+  /** GM의 `apply_narrative_event` — 하루 한도가 걸리는 유일한 갈래 */
+  "gm-event",
+  /** 그 밖의 스킬 결과·tick 사건 */
+  "other",
+]);
+export type NarrativeKind = z.infer<typeof NarrativeKindSchema>;
+
 /** GM 프롬프트에 주입되는 서사 기억 (일지는 기록 테이블에서 파생) */
 export const NarrativeNoteSchema = z.object({
   date: DateString,
   text: z.string().min(1),
   salience: z.number().int().min(1).max(5),
+  /** 갈래 — 옛 세이브엔 없다(optional). 없으면 갈래를 모르는 줄이다 */
+  kind: NarrativeKindSchema.optional(),
 });
 export type NarrativeNote = z.infer<typeof NarrativeNoteSchema>;
+
+/**
+ * 서사 아크의 갈래 — **장부 한 줄이 열고 닫을 수 있는 것만** 갈래가 된다
+ * (people.md §9). 개폐 규칙은 `engine/world/arcs.ts`가 전부 갖는다.
+ */
+export const ARC_KINDS = [
+  /** 예상 결장 30일 이상의 부상 → 재활 → 복귀 */
+  "injury-comeback",
+  /** 곪는 불만 — `PlayerIssue`가 7일을 넘기면 이야기가 된다 */
+  "grievance",
+  /** 리그 3연승부터 */
+  "winning-run",
+  /** 리그 3연패부터 */
+  "losing-run",
+  /** 협상 2라운드 이상 — 한 방에 끝난 오퍼는 사가가 아니다 */
+  "transfer-saga",
+] as const;
+export const ArcKindSchema = z.enum(ARC_KINDS);
+export type ArcKind = z.infer<typeof ArcKindSchema>;
+
+/** 아크의 단계 — 한 방향으로만 움직인다 (people.md §9) */
+export const ARC_STAGES = ["open", "rising", "climax", "resolved"] as const;
+export const ArcStageSchema = z.enum(ARC_STAGES);
+export type ArcStage = z.infer<typeof ArcStageSchema>;
+
+/** 단계가 앞으로만 가는가를 비교하는 서열 — 되감기면 GM이 지난 턴과 다른 흐름을 읽는다 */
+export const ARC_STAGE_RANK: Record<ArcStage, number> = {
+  open: 0,
+  rising: 1,
+  climax: 2,
+  resolved: 3,
+};
+
+/** 단계 이름 — 스냅샷·화면이 같은 말을 쓴다 */
+export const ARC_STAGE_KO: Record<ArcStage, string> = {
+  open: "발단",
+  rising: "고조",
+  climax: "절정",
+  resolved: "해소",
+};
+
+/** 압축 에이전트가 제안하는 제목의 길이 상한 — 넘으면 통째로 버려진다 */
+export const ARC_TITLE_MAX = 30;
+
+/**
+ * 서사 아크 — **기억을 이야기로 엮는 골격** (people.md §9).
+ *
+ * 개폐는 코어가 장부의 사실(부상·불만·경기·협상)에서 결정적으로 판정하고, 모델이
+ * 하는 것은 이름 짓기뿐이다. 아크는 데이터일 뿐 강제 이벤트가 아니다 — 코어 상태를
+ * 바꾸지 않고, GM이 시즌을 가로지르는 흐름을 읽는 재료로만 선다.
+ */
+export const NarrativeArcSchema = z.object({
+  id: z.string().min(1),
+  kind: ArcKindSchema,
+  /** 아크의 주인 — 선수 아크는 `GAME_PLAYER.id`, 연속 기록 아크는 팀 id */
+  subjectId: z.string().min(1),
+  stage: ArcStageSchema,
+  openedOn: DateString,
+  /** 단계가 마지막으로 움직인 날 */
+  updatedOn: DateString,
+  /** null = 아직 활성 */
+  resolvedOn: DateString.nullable(),
+  /** 압축 에이전트가 제안하고 코어가 검증한 이름 — 없으면 코어 사실 줄이 대신 선다 */
+  title: z.string().min(1).max(ARC_TITLE_MAX).optional(),
+});
+export type NarrativeArc = z.infer<typeof NarrativeArcSchema>;
 
 // ── 이력 압축 ─────────────────────────────────────────
 /**

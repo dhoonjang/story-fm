@@ -10,20 +10,32 @@ import type {
   ScheduleType,
   ShootoutOutcome,
   SquadRegistration,
+  TacticalRead,
+  BoardExpectationCode,
+} from "@story-fm/domain";
+import {
+  boardExpectationText,
+  isReserveMatch,
+  normalizePacket,
+  packetTagContext,
+  packetTagText,
 } from "@story-fm/domain";
 import {
   ATTRIBUTE_AXES,
   AXIS_GROUPS,
   AXIS_GROUP_KO,
-  AXIS_KO,
   FINANCE_CATEGORY_KO,
+  MANAGER_SPEND_KIND_KO,
   TRAIN_ATTR_KO,
   ageOf,
   anchorOf,
   clampCondition,
   conditionLabel,
   defaultRoleOf,
+  growthLabel,
   naturalPositionOf,
+  pairOfMatchId,
+  parseScorerEntry,
   rolesFor,
   seasonRating,
   separateBoardPoints,
@@ -34,14 +46,18 @@ import { DEFAULT_KICKOFF, diffDays, nextMatchFor, seasonEndDate } from "../compe
 import {
   categoryOf,
   currentMonthSummary,
+  financeNoteTexts,
   formatMoney,
   isJournalMoney,
   monthOf,
   psrStatus,
   seasonWageRatio,
+  ticketPriceOf,
+  userReports,
   wageRatioTone,
   type WageRatioTone,
 } from "../club/finance";
+import { MANAGER_WALLET, walletOf } from "../club/manager-wallet";
 import {
   cupCatalog,
   competitionLabel,
@@ -56,12 +72,12 @@ import {
 } from "../data/cup-catalog";
 import { isFriendly } from "../competition/friendly";
 import { DOMESTIC_STAGES, domesticCupById } from "../data/domestic-cup-catalog";
-import { domesticCupsOf } from "../competition/domestic-cup";
+import { domesticCupsOf, userStillIn } from "../competition/domestic-cup";
 import { drawParts, drawTitle } from "../competition/draw-schedule";
 import { euroCompetitionOf } from "../competition/europe";
 import { formAngle, formLabel, formTone } from "../squad/form";
 import { ratingTone, type RatingTone } from "../match/ratings";
-import { GAP_CONDITION, edgeOf, zoneGrid } from "@story-fm/sim";
+import { GAP_CONDITION, edgeOf, subLimitsOf, zoneGrid } from "@story-fm/sim";
 import { moodOf, type MoodRead } from "../squad/mood";
 import { isHomegrownFor, occupiesSquadList, squadRegistrationOf } from "../squad/registration";
 import {
@@ -89,6 +105,7 @@ import { INJURY_SEVERITY_KO } from "../squad/injury";
 import { boardExpectation, computeStandings, type StandingRow } from "../competition/season";
 import { hasRelegation, leagueOfTeamIn } from "../competition/promotion";
 import { RELEGATION_SLOTS } from "../core/league-shape";
+import { tierOfTeamIn } from "../core/club-tier";
 import { isCupOnlyLeague, leagueName } from "../data/league-catalog";
 import {
   activeContract,
@@ -135,8 +152,7 @@ function growthSummary(state: GameState, date: string, entryId?: string): string
   if (rows.length === 0) return null;
   const counts = new Map<string, number>();
   for (const g of rows) {
-    const label = g.target === "tactical" ? "전술" : (AXIS_KO[g.target as never] ?? g.target);
-    const key = `${label} ${g.delta > 0 ? "+" : ""}${g.delta}`;
+    const key = `${growthLabel(g.target)} ${g.delta > 0 ? "+" : ""}${g.delta}`;
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   return [...counts]
@@ -313,7 +329,7 @@ export interface RecentRatingView {
   tone: RatingTone;
 }
 
-/** 스쿼드 행 = 메타 + 15축 (오피스 뷰는 우리 선수라 숫자를 그대로 준다) */
+/** 스쿼드 행 = 메타 + 16축 (오피스 뷰는 우리 선수라 숫자를 그대로 준다) */
 export type SquadViewRow = SquadViewRowMeta & AxisValues;
 interface SquadViewRowMeta {
   id: string;
@@ -369,7 +385,7 @@ interface SquadViewRowMeta {
    * 잠재력 **추정 구간** — 참값은 노출하지 않는다. 우리 선수도 단정할 수 없고
    * (출전이 쌓이면 좁아진다), 근거가 없으면 null이다 (scouting.ts §잠재력).
    */
-  potential: { low: number; high: number; margin: number } | null;
+  potential: { low: number; high: number; margin: number; confidence: string } | null;
   squadLevel: "first" | "reserve";
   form: number;
   /** 폼의 말 — "절정"·"상승세"·"평소"·"침체"·"바닥" (form.ts와 같은 경계) */
@@ -595,6 +611,29 @@ export interface NextMatchView {
   venue: "home" | "away" | "neutral";
   /** 오늘로부터 며칠 뒤인가 — 0이면 오늘이다 */
   inDays: number;
+}
+
+/**
+ * 최근 결과 한 줄 — **사실만** (competition.md §7).
+ *
+ * `"EPL R7 TOT 2-1 ARS (승부차기 4-3)"`처럼 붙여 내면 화면은 승패 색을 칠하려고 그
+ * 문자열을 도로 가르고, 승부차기 괄호 규칙이 코어의 템플릿 문자열 안에 숨는다.
+ * 조각으로 내려가면 화면이 스코어를 굵게, 우리 편을 진하게, 승패를 색으로 세운다.
+ */
+export interface RecentResultView {
+  /** 어느 경기인가 — `EPL R7` · `FA컵 8강` · `친선` */
+  label: string;
+  /** 홈 팀 약칭 — 우리 편이 어느 쪽인지는 `venue`가 말한다 */
+  home: string;
+  away: string;
+  homeGoals: number;
+  awayGoals: number;
+  /** 승부차기로 갈린 경기만 — 스코어를 바꾸지 않고 옆에 선다 (competition.md §6) */
+  penalties: { home: number; away: number } | null;
+  /** 우리가 어느 쪽이었나 — 중립 결승도 있다 */
+  venue: "home" | "away" | "neutral";
+  /** 우리 시점의 결과 */
+  outcome: "W" | "D" | "L";
 }
 
 /**
@@ -908,7 +947,15 @@ export interface MatchView {
   xiRating: { home: number; away: number };
   /** 팀 합계 — 선수별 `tally`의 합. 표에 열을 더 세우지 않고 한 줄로 세운다 */
   totals: { home: MatchTally; away: MatchTally };
-  subs: { home: { used: number; windows: number }; away: { used: number; windows: number } };
+  /**
+   * 교체 사용량과 **국면의 한도** — 한도는 장부의 `subLimitsOf`가 정한다(연장 6인/4회).
+   * 화면이 5/3을 다시 적어 두면 연장에서 여섯 번째 카드가 없는 것처럼 읽힌다.
+   */
+  subs: {
+    home: { used: number; windows: number };
+    away: { used: number; windows: number };
+    limit: { subs: number; windows: number };
+  };
   sentOff: string[];
   /**
    * 승부차기 — 120분이 승부를 못 가른 경기에만 선다.
@@ -994,6 +1041,11 @@ export interface OfficeViews {
      */
     boardExpectation: { target: number; label: string };
     stadium: { name: string; capacity: number };
+    /**
+     * **감독이 매긴 티켓 값과 기준가** (finance.md §5.2) — 기준가와 나란히 서야
+     * 지금 값이 비싼지 싼지 읽힌다. 기준가는 리그 평균가에 리그 폭이 걸린 값이다.
+     */
+    ticket: { price: number; base: number };
     /** 급여 비중 — **시즌 누계** (급여 ÷ 매출). 한 달만 보면 프리시즌에 튄다 */
     wageRatio: number;
     /** 시즌 누계 비중이 선 구간 — 경계는 `finance.ts` */
@@ -1014,7 +1066,8 @@ export interface OfficeViews {
      * 언제 누구인가지 그 대회의 다음 라운드가 아니다.
      */
     nextMatch: NextMatchView | null;
-    recentResults: string[];
+    /** 최근 다섯 경기 — **사실만**. 문장은 화면이 잇는다 (competition.md §7) */
+    recentResults: RecentResultView[];
     /** 탭 순서: 우리 리그 → 우리 대항전 */
     list: CompetitionView[];
   };
@@ -1027,6 +1080,10 @@ export interface OfficeViews {
     dismissal: {
       on: string;
       season: number;
+      /** 경질·만료·사임 — 무직은 상태지 사유가 아니다 (career.md §5.4) */
+      kind: "sacked" | "expired" | "resigned";
+      /** 위약금 — 경질이면 구단이 문 돈, 사임이면 감독이 문 돈 (career.md §5.4) */
+      severance: number | null;
       teamName: string;
       tier: number | null;
       position: number | null;
@@ -1035,18 +1092,63 @@ export interface OfficeViews {
       reason: string | null;
     } | null;
     /**
+     * **경질 이력** — 부임이 카드를 옮겨 남긴 지난 경질들 (career.md §6).
+     * 잘린 시즌은 `SEASON_RECORD`가 없으므로 시즌 표가 이 줄로 그 해를 채운다.
+     */
+    dismissals: Array<{
+      on: string;
+      season: number;
+      /** 경질·만료·사임 — 옛 이력엔 없어 경질로 읽는다 (career.md §5.4) */
+      kind: "sacked" | "expired" | "resigned";
+      teamName: string;
+      position: number | null;
+      target: number | null;
+      expectation: string | null;
+    }>;
+    /**
      * **지금 답할 수 있는 감독직 제안** — 만료가 가까운 것이 앞이다.
      * 수락은 채팅으로 한다(`accept_manager_offer`) — 화면은 무엇이 걸려 있는지만 세운다.
      */
     offers: Array<{
       id: string;
+      /** 어떻게 선 제안인가 — 재계약(`renewal`)만 재직 중에 선다 (career.md §5.4) */
+      via: "vacancy" | "knock" | "renewal";
       teamName: string;
       tier: number;
       expiresOn: string;
       position: number | null;
       target: number;
       expectation: string;
+      /** 제시 조건 — 옛 세이브의 제안엔 없다 (career.md §5.1) */
+      salary: number | null;
+      years: number | null;
+      budgetPledge: number | null;
+      /** 서 있으면 흥정은 끝났다 — 한 차례뿐이다 */
+      counteredOn: string | null;
     }>;
+    /**
+     * **공석 명부** — 무직 감독이 먼저 지원할 수 있는 자리 (career.md §5.1).
+     * 지원은 채팅으로 한다(`apply_manager_job`) — 화면은 어느 문이 열려 있는지만 세운다.
+     */
+    vacancies: Array<{ teamName: string; tier: number; on: string; position: number | null }>;
+    /**
+     * 감독 계약 — 옛 세이브엔 없다 (career.md §5.1 · §5.4). `renewal`은 보드가 만료
+     * 90일 전에 내린 판정이다: 재계약 제안이 섰거나(`offered`), 비갱신 통보(`declined`).
+     */
+    contract: {
+      salary: number;
+      until: string;
+      daysLeft: number;
+      renewal: "offered" | "declined" | null;
+    } | null;
+    /** 감독의 **개인 지갑** — 연봉과 위약금이 쌓인 돈, 구단 잔고와 다르다 (career.md §5.4) */
+    wallet: number;
+    /**
+     * 감독이 쓴 돈 — 최근 것이 먼저다 (career.md §5.4). 구단 원장이 아니라 **감독의
+     * 이력**이라 커리어 뷰가 지갑 옆에서 읽는다. 갈래의 이름은 코어가 준다
+     * (`MANAGER_SPEND_KIND_KO`) — 화면이 코드를 문장으로 옮기지 않는다.
+     */
+    spending: Array<{ on: string; kind: string; amount: number; playerName: string | null }>;
     trophies: Array<{ competition: string; season: number; teamName: string }>;
     /**
      * 업적 — **코드와 근거 수치**다. 세이브가 문장을 갖지 않으므로(career.md §6)
@@ -1063,11 +1165,32 @@ export interface OfficeViews {
       goals?: number;
       matches?: number;
     }>;
+    /**
+     * 시상 — 업적과 같은 규약이다: **코드와 근거 수치**만 내려가고 상의 이름은
+     * 화면이 코드로 만든다(`awardTitle` — career.md §6). 세계 전체에 쌓이는 상
+     * 중에서 **감독이 그 시즌 맡고 있던 팀의 것**만 선다 — 남의 리그 득점왕은
+     * 감독의 이력이 아니다. id를 표시명으로 푸는 것까지가 여기 몫이다.
+     */
+    awards: Array<{
+      code: string;
+      season: number;
+      playerName: string;
+      teamName: string;
+      leagueName: string;
+      apps: number;
+      goals: number;
+      assists: number;
+      /** 출전이 없으면 없다 (`seasonRating`) */
+      rating?: number;
+      /** `young-player`가 센 나이 — 시즌 종료일 기준 */
+      age?: number;
+    }>;
     seasons: Array<{
       season: number;
       teamName: string;
       position: number;
-      record: string;
+      /** 그 시즌의 전적 — `"20승 8무 10패"`는 화면이 잇는다 (career.md §6) */
+      record: { wins: number; draws: number; losses: number };
       /**
        * 그 시즌에 대한 **보드 평가 카드** — 등급과 근거 수치 (career.md §6).
        * 순위와 전적이 말하지 않는 것이 여기 있다: 같은 4위가 어느 구단에서는
@@ -1109,7 +1232,7 @@ function buildBracket(state: GameState, competitionId: string): BracketStageView
     if (matches.length === 0) continue;
     const byPair = new Map<string, typeof matches>();
     for (const m of matches) {
-      const pair = /-p(\d+)-/.exec(m.id)?.[1] ?? "0";
+      const pair = pairOfMatchId(m.id);
       const legs = byPair.get(pair);
       if (legs) legs.push(m);
       else byPair.set(pair, [m]);
@@ -1348,8 +1471,10 @@ function buildMatchView(state: GameState): MatchView | null {
   const pending = state.pendingMatch;
   if (!pending || state.phase !== "match") return null;
   const match = state.matches.find((m) => m.id === pending.matchId);
-  const packet = pending.packet;
+  /** 진행 중이던 옛 세이브의 패킷은 문장 배열을 들고 온다 — 여기서 한 번 태그로 옮긴다 */
+  const packet = pending.packet ? normalizePacket(pending.packet) : null;
   if (!match || !packet) return null;
+  const tagCtx = packetTagContext(packet);
 
   const ledger = pending.ledger;
   const worn = pending.matchFatigue ?? {};
@@ -1479,12 +1604,14 @@ function buildMatchView(state: GameState): MatchView | null {
     away: rowsOf(packet.away.lineup, ledger.away.onPitch, match.awayTeamId),
   };
 
-  const tacticsOfSide = (teamId: string, tactical: { uptake: number; notes: string[] }) => ({
+  const subLimits = subLimitsOf(ledger.phase);
+
+  const tacticsOfSide = (teamId: string, tactical: TacticalRead) => ({
     ...(teamId !== state.userTeamId && pending.aiTactics
       ? pending.aiTactics
       : tacticsOf(state, teamId).spec),
     uptake: tactical.uptake,
-    notes: tactical.notes,
+    notes: tactical.notes.map((tag) => packetTagText(tag, tagCtx)),
   });
 
   return {
@@ -1574,14 +1701,17 @@ function buildMatchView(state: GameState): MatchView | null {
      * 유불리는 **우리 편 기준**으로 접어서 넘긴다 — 화면이 홈/원정 중 어느 쪽이
      * 우리인지 다시 따지지 않아도 되게. 편을 모르는 옛 세이브는 `null`이다.
      */
-    keyPoints: packet.keyPoints.map((text, i) => {
-      const favours = packet.keyPointSides?.[i];
+    keyPoints: packet.keyPoints.map((tag) => {
       const ourSide = match.homeTeamId === state.userTeamId ? "home" : "away";
-      return { text, ours: favours === undefined ? null : favours === ourSide };
+      return {
+        text: packetTagText(tag, tagCtx),
+        ours: tag.favours === null ? null : tag.favours === ourSide,
+      };
     }),
     exploiting: (pending.exploits ?? [])
-      .map((id) => packet.targets.find((t) => t.id === id)?.label)
-      .filter((x): x is string => x !== undefined),
+      .map((id) => packet.targets.find((t) => t.id === id))
+      .filter((t): t is NonNullable<typeof t> => t !== undefined)
+      .map((t) => packetTagText(t.tag, tagCtx)),
     tactics: {
       home: tacticsOfSide(match.homeTeamId, packet.home.tactical),
       away: tacticsOfSide(match.awayTeamId, packet.away.tactical),
@@ -1596,6 +1726,7 @@ function buildMatchView(state: GameState): MatchView | null {
     subs: {
       home: { used: ledger.home.subsUsed, windows: ledger.home.subWindows },
       away: { used: ledger.away.subsUsed, windows: ledger.away.subWindows },
+      limit: { subs: subLimits.maxSubs, windows: subLimits.maxSubWindows },
     },
     sentOff: ledger.sentOff.map((id) => playerName(state, id)),
     shootout: shootout
@@ -1710,6 +1841,14 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
     state.pendingMatch?.matchId ?? null,
   );
   const bracket = cup ? buildBracket(state, competitionId) : [];
+  const progress = cupProgressOf(bracket);
+  // 시드는 진입 라운드 전까지 대진에 없어도 탈락이 아니다 — 아직 안 뽑힌 것으로 읽는다
+  const cupProgress =
+    progress.outcome === "out" &&
+    domesticCupById(competitionId) !== null &&
+    userStillIn(state, competitionId)
+      ? { stage: null, outcome: "undrawn" as const }
+      : progress;
   return {
     id: competitionId,
     name: competitionName(competitionId),
@@ -1721,10 +1860,23 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
     nextMatch: nextOurs ? nextMatchView(state, nextOurs, roundLabelOf(nextOurs)) : null,
     rounds,
     bracket,
-    cupProgress: cupProgressOf(bracket),
+    cupProgress,
     // 통과 경계선은 리그 페이즈가 있는 대항전에만 있다 (국내 컵은 순위표가 없다)
     europe: isEuroCup(competitionId) ? buildEuropeView(state, competitionId) : null,
   };
+}
+
+/**
+ * 보드 기대의 이름 — **코드가 원본이고 옛 세이브의 라벨은 폴백이다** (career.md §6).
+ * 코드도 라벨도 없는 카드는 기대를 모르는 카드라 `null`이다.
+ */
+function expectationTextOf(card: {
+  expectationCode?: BoardExpectationCode;
+  expectation?: string;
+  target?: number;
+}): string | null {
+  if (card.expectationCode) return boardExpectationText(card.expectationCode, card.target);
+  return card.expectation ?? null;
 }
 
 export function buildOfficeViews(state: GameState): OfficeViews {
@@ -1911,7 +2063,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
             : null,
         assignedPoint: liveSlot?.entry.point ?? pointOf.get(p.id) ?? null,
         // 저장은 소수지만 화면은 눈금이다 — 87.4와 87.7을 감독이 구분할 일은 없다
-        familiarity: Math.round(assignment?.familiarity ?? 60),
+        familiarity: Math.round(assignment?.familiarity ?? FAMILIARITY_BASELINE),
         familiarityIfSlotted: Math.round(assignment?.familiarity ?? ifSlotted(p.id)),
         positionFit: proficiencyAt(p, assignedSlot ?? natural.position),
         adaptation: adaptationOf(
@@ -2065,15 +2217,17 @@ export function buildOfficeViews(state: GameState): OfficeViews {
            */
           const assistIds = m.result.assists ?? [];
           const minutes = m.result.goalMinutes ?? [];
-          const scorers = (m.result.scorers ?? []).map((s, i) => {
-            const [sSide, id] = s.includes(":") ? (s.split(":", 2) as [string, string]) : ["", s];
-            const name = playerName(state, id ?? s);
-            const rawAssist = assistIds[i] ?? "";
-            const assistId = rawAssist.includes(":") ? rawAssist.split(":", 2)[1] : rawAssist;
-            const withAssist = assistId ? `${name} (${playerName(state, assistId)})` : name;
+          const scorers = (m.result.scorers ?? []).map((entry, i) => {
+            const goal = parseScorerEntry(entry);
+            const name = playerName(state, goal.playerId);
+            const assist = parseScorerEntry(assistIds[i] ?? "");
+            const withAssist = assist.playerId
+              ? `${name} (${playerName(state, assist.playerId)})`
+              : name;
             // 분이 붙으면 스코어가 이야기가 된다 — 87분 동점골과 5분 선제골은 다르다
             const at = minutes[i] !== undefined ? `${withAssist} ${minutes[i]}′` : withAssist;
-            return sSide === mySide || sSide === "" ? at : `${at} (상대)`;
+            // 편이 붙지 않은 옛 칸은 기준 팀의 골로 읽는다
+            return goal.side === null || goal.side === mySide ? at : `${at} (상대)`;
           });
           detail = scorers.length > 0 ? `득점: ${scorers.join(", ")}` : null;
         }
@@ -2157,11 +2311,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
   const growthByDate = new Map<string, { counts: Map<string, number>; lines: string[] }>();
   for (const g of state.growthLog) {
     if (!ourPlayers.has(g.gamePlayerId)) continue;
-    const label = g.target.startsWith("pos:")
-      ? `${g.target.slice(4)} 적응도`
-      : g.target === "tactical"
-        ? "전술 적응도"
-        : (AXIS_KO[g.target as never] ?? g.target);
+    const label = growthLabel(g.target);
     const sign = g.delta > 0 ? "+" : "";
     const day = growthByDate.get(g.date) ?? {
       counts: new Map<string, number>(),
@@ -2243,8 +2393,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
     if (!isJournalMoney(e, finance.balance)) continue;
     push(e.date, { kind: "money", text: moneyText(e) });
   }
-  for (const r of state.financeReports) {
-    if (r.teamId !== userTeamId) continue;
+  for (const r of userReports(state)) {
     // highlights는 마감 때 이미 걸러진 것이라 문턱을 다시 재지 않는다
     for (const h of r.highlights ?? []) {
       if (h.date > state.date) continue;
@@ -2258,8 +2407,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
     label: FINANCE_CATEGORY_KO[l.category as keyof typeof FINANCE_CATEGORY_KO] ?? l.category,
     amount: l.amount,
   });
-  const reports: FinanceMonthView[] = [...state.financeReports]
-    .filter((r) => r.teamId === userTeamId)
+  const reports: FinanceMonthView[] = [...userReports(state)]
     .sort((a, b) => (a.month < b.month ? 1 : -1))
     .map((r) => ({
       month: r.month,
@@ -2272,7 +2420,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       pnlNet: r.pnlNet,
       wageRatio: r.wageRatio,
       wageTone: wageRatioTone(r.wageRatio),
-      notes: r.notes,
+      notes: financeNoteTexts(r),
     }));
   const now = currentMonthSummary(state);
   const current: FinanceMonthView = {
@@ -2293,13 +2441,34 @@ export function buildOfficeViews(state: GameState): OfficeViews {
   const stadium = clubProfileIn(state, userTeamId);
 
   const recentResults = state.matches
-    .filter((m) => m.result && (m.homeTeamId === userTeamId || m.awayTeamId === userTeamId))
+    // 2군 경기는 1군의 최근 결과가 아니다 — 다이제스트와 선수 기록으로만 보인다
+    .filter(
+      (m) =>
+        m.result &&
+        !isReserveMatch(m) &&
+        (m.homeTeamId === userTeamId || m.awayTeamId === userTeamId),
+    )
     .sort((a, b) => (a.date < b.date ? -1 : 1))
     .slice(-5)
-    .map(
-      (m) =>
-        `${fixtureLabel(m.competitionId, m.stage ?? "league", m.round)} ${teamShortNameIn(state, m.homeTeamId)} ${m.result?.homeGoals}-${m.result?.awayGoals} ${teamShortNameIn(state, m.awayTeamId)}${m.result?.penalties ? ` (승부차기 ${m.result.penalties.home}-${m.result.penalties.away})` : ""}`,
-    );
+    .map((m): RecentResultView | null => {
+      const result = m.result;
+      const outcome = outcomeFor(m, userTeamId);
+      // 위 필터가 결과 있는 우리 경기만 남긴다 — 타입을 좁히는 자리다
+      if (!result || !outcome) return null;
+      return {
+        label: fixtureLabel(m.competitionId, m.stage ?? "league", m.round),
+        home: teamShortNameIn(state, m.homeTeamId),
+        away: teamShortNameIn(state, m.awayTeamId),
+        homeGoals: result.homeGoals,
+        awayGoals: result.awayGoals,
+        penalties: result.penalties
+          ? { home: result.penalties.home, away: result.penalties.away }
+          : null,
+        venue: m.neutral ? "neutral" : m.homeTeamId === userTeamId ? "home" : "away",
+        outcome,
+      };
+    })
+    .filter((r): r is RecentResultView => r !== null);
 
   return {
     match: buildMatchView(state),
@@ -2324,7 +2493,8 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       formation: tactics.spec.formation,
       tactics: { ...tactics.spec },
       familiarity: Math.round(squadFamiliarity(state, userTeamId)),
-      editable: state.phase !== "match",
+      // 경기 중과 무직에 꺼진다 — 무직의 판은 옛 구단의 것이라 읽기 전용이다 (career.md §5.1)
+      editable: state.phase !== "match" && !state.dismissal,
       firstTeamCount: players.filter((p) => p.squadLevel === "first").length,
       reserveCount: players.filter((p) => p.squadLevel === "reserve").length,
       registration: squadRegistrationOf(state, userTeamId),
@@ -2348,12 +2518,19 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       weeklyWages: weeklyWagesOf(state, userTeamId),
       transferBudget: finance.transferBudget,
       budgetFrozen: finance.budgetFrozen === true,
-      boardExpectation: boardExpectation(state, userTeamId),
+      boardExpectation: (() => {
+        const be = boardExpectation(state, userTeamId);
+        return { target: be.target, label: boardExpectationText(be.code, be.target) };
+      })(),
       stadium: { name: stadium.stadium, capacity: stadium.capacity },
+      ticket: (() => {
+        const { price, base } = ticketPriceOf(state, userTeamId);
+        return { price, base };
+      })(),
       // 시즌 누계 기준 — 한 달만 보면 프리시즌에 100%를 넘어 무의미하다
       wageRatio: seasonWageRatio(state),
       wageTone: wageRatioTone(seasonWageRatio(state)),
-      psr: state.financeReports.length > 0 ? psrStatus(state) : null,
+      psr: reports.length > 0 ? psrStatus(state) : null,
       current,
       reports,
       feed,
@@ -2376,25 +2553,81 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         ? {
             on: state.dismissal.on,
             season: state.dismissal.season,
+            /** 경질인가 계약 만료인가 — 옛 카드엔 없어 경질로 읽는다 (career.md §5.4) */
+            kind: state.dismissal.kind ?? ("sacked" as const),
+            severance: state.dismissal.severance ?? null,
             teamName: teamNameIn(state, state.dismissal.teamId),
             tier: state.dismissal.tier ?? null,
             position: state.dismissal.position ?? null,
             target: state.dismissal.target ?? null,
-            expectation: state.dismissal.expectation ?? null,
+            expectation: expectationTextOf(state.dismissal),
             reason: state.dismissal.reason ?? null,
           }
         : null,
+      dismissals: (state.dismissals ?? []).map((d) => ({
+        on: d.on,
+        season: d.season,
+        kind: d.kind ?? ("sacked" as const),
+        teamName: teamNameIn(state, d.teamId),
+        position: d.position ?? null,
+        target: d.target ?? null,
+        expectation: expectationTextOf(d),
+      })),
       offers: openManagerOffers(state).map((o) => ({
         id: o.id,
+        /** 어떻게 선 제안인가 — 재계약(`renewal`)만 재직 중에 선다 (career.md §5.4) */
+        via: o.via ?? ("vacancy" as const),
         teamName: teamNameIn(state, o.teamId),
         tier: o.tier,
         expiresOn: o.expiresOn,
         position: o.position ?? null,
         target: o.target,
-        expectation: o.expectation,
+        expectation: expectationTextOf(o) ?? "",
+        salary: o.salary ?? null,
+        years: o.years ?? null,
+        budgetPledge: o.budgetPledge ?? null,
+        counteredOn: o.counteredOn ?? null,
       })),
+      // 무직일 때만 문이다 — 재직 중의 명부는 어차피 비어 있다 (career.md §5.1)
+      vacancies: state.dismissal
+        ? (state.managerVacancies ?? []).map((v) => ({
+            teamName: teamNameIn(state, v.teamId),
+            tier: tierOfTeamIn(state, v.teamId),
+            on: v.on,
+            position: v.position ?? null,
+          }))
+        : [],
+      /**
+       * 계약 — **수치와 기간만** 내려간다 (career.md §5.4 · overview.md §1 철칙 4).
+       * `renewal`은 보드가 만료 90일 전에 내린 판정이고, 문장은 화면과 GM이 쓴다.
+       */
+      contract: state.manager.contract
+        ? {
+            salary: state.manager.contract.salary,
+            until: state.manager.contract.until,
+            daysLeft: Math.max(0, diffDays(state.date, state.manager.contract.until)),
+            renewal:
+              state.manager.contract.renewalDecidedOn === undefined
+                ? null
+                : state.manager.contract.renewalOffered
+                  ? ("offered" as const)
+                  : ("declined" as const),
+          }
+        : null,
+      /** 감독의 지갑 — 구단 잔고와 다른 돈이고 이직을 따라간다 (career.md §5.4) */
+      wallet: walletOf(state),
+      spending: [...(state.manager.spending ?? [])]
+        .reverse()
+        .slice(0, MANAGER_WALLET.KEPT)
+        .map((s) => ({
+          on: s.on,
+          kind: MANAGER_SPEND_KIND_KO[s.kind],
+          amount: s.amount,
+          playerName:
+            s.kind === "player-bonus" && s.ref ? (playerById(state, s.ref)?.name ?? null) : null,
+        })),
       trophies: state.trophies.map((t) => ({
-        competition: t.competition,
+        competition: t.competitionId ? competitionName(t.competitionId) : (t.competition ?? ""),
         season: t.season,
         teamName: teamNameIn(state, t.teamId),
       })),
@@ -2408,13 +2641,34 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         goals: a.goals,
         matches: a.matches,
       })),
+      // 감독이 그 시즌 그 팀에 있었는가 — 시즌 기록이 그 답을 갖고 있다 (career.md §6)
+      awards: (state.awards ?? [])
+        .filter((a) =>
+          state.seasonRecords.some((r) => r.season === a.season && r.teamId === a.teamId),
+        )
+        .map((a) => ({
+          code: a.code,
+          season: a.season,
+          playerName: a.playerName,
+          teamName: teamNameIn(state, a.teamId),
+          leagueName: leagueName(a.leagueId),
+          apps: a.apps,
+          goals: a.goals,
+          assists: a.assists,
+          rating: a.rating,
+          age: a.age,
+        })),
       seasons: state.seasonRecords.map((s) => ({
         season: s.season,
         teamName: teamNameIn(state, s.teamId),
         position: s.position,
-        record: `${s.wins}승 ${s.draws}무 ${s.losses}패`,
+        record: { wins: s.wins, draws: s.draws, losses: s.losses },
         board: s.board
-          ? { grade: s.board.grade, target: s.board.target, expectation: s.board.expectation }
+          ? {
+              grade: s.board.grade,
+              target: s.board.target,
+              expectation: expectationTextOf(s.board) ?? "",
+            }
           : null,
         boardVerdict: s.boardVerdict ?? null,
       })),
@@ -2429,7 +2683,7 @@ export { assignmentsOf };
 /**
  * 스카우트가 가져온 **보고서 한 장**을 조립한다 — 안개는 `observedRating`이 이미 씌운다.
  *
- * **한 번 읽고 넘어갈 정보가 아니다** — 능력치 15축·주발·잠재력 구간·몸값이
+ * **한 번 읽고 넘어갈 정보가 아니다** — 능력치 16축·주발·잠재력 구간·몸값이
  * 한자리에 있어야 "지금 지를까, 더 볼까"가 판단된다. 그래서 카드다.
  */
 export function scoutReportCard(state: GameState, playerId: string): ScoutReportCard | null {

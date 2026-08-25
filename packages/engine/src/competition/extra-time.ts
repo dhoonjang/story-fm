@@ -2,11 +2,15 @@ import type { GamePlayer, MatchRecord } from "@story-fm/domain";
 import { clampCondition, naturalPositionOf } from "@story-fm/domain";
 import { conditionDrain, drainVariance } from "@story-fm/sim";
 import { EXTRA_TIME_MINUTES, simulateExtraTime } from "../match/quick-sim";
+import { recordCard } from "../match/discipline";
+import { openInjuryFor } from "../squad/injury";
+import { makeRng } from "../core/rng";
 import { simSquadFor } from "../core/tick";
 import {
   assignmentsOf,
   ensureSeasonStat,
   firstTeamPlayers,
+  isInjured,
   playerById,
   pushNarrative,
   tacticsOf,
@@ -224,7 +228,16 @@ export function resolveExtraTime(state: GameState, decider: MatchRecord, channel
     simSquadFor(state, decider.awayTeamId, xi.away),
     state.seed,
     channel,
-    { neutral: decider.neutral === true },
+    {
+      neutral: decider.neutral === true,
+      /**
+       * 90분의 경고가 연장으로 이어진다 — 이 목록이 없으면 90분에 경고를 받은
+       * 선수의 연장 경고가 첫 장으로 세어져 두 번째 경고 퇴장이 성립하지 않는다.
+       */
+      bookedIn90: state.bookings
+        .filter((b) => b.matchId === decider.id && b.card === "yellow")
+        .map((b) => b.gamePlayerId),
+    },
   );
 
   result.aet = true;
@@ -254,7 +267,45 @@ export function resolveExtraTime(state: GameState, decider: MatchRecord, channel
     }
   }
 
-  // 30분치 피로 — 자리·전술·지구력은 90분과 같은 함수가 정한다
+  /**
+   * 연장의 카드 → BOOKING·SUSPENSION — **90분과 같은 문**(`discipline.ts`).
+   * 같은 경기 id로 적히므로 90분의 경고와 이어져, 두 번째 경고 퇴장이 정지
+   * 한 건으로 남는다. 연장은 녹아웃뿐이라 친선 예외가 없다.
+   */
+  const sentOffInEt = new Map<string, number>();
+  for (const card of extra.cards) {
+    recordCard(state, {
+      playerId: card.playerId,
+      matchId: decider.id,
+      card: card.card,
+      minute: card.minute,
+    });
+    if (card.card === "red") sentOffInEt.set(card.playerId, card.minute);
+  }
+  /**
+   * 연장 퇴장자는 승부차기를 차지 못한다 — 종료 시점 온필드(`homeOnPitch`)가
+   * 승부차기 명단의 원본이므로(§7) 여기서 빼야 퇴장당한 발이 페널티를 차지 않는다.
+   * 그 칸이 없는 옛 세이브에서는 연장을 뛴 명단(xi)이 곧 종료 시점 온필드다.
+   */
+  if (sentOffInEt.size > 0) {
+    result.homeOnPitch = (result.homeOnPitch ?? xi.home.map((p) => p.id)).filter(
+      (id) => !sentOffInEt.has(id),
+    );
+    result.awayOnPitch = (result.awayOnPitch ?? xi.away.map((p) => p.id)).filter(
+      (id) => !sentOffInEt.has(id),
+    );
+  }
+
+  // 연장의 부상 — 심각도·기간은 90분과 같은 공식(`openInjuryFor`)으로 굴린다
+  const injuryRng = makeRng(state.seed, `et-injury:${decider.id}`);
+  for (const tag of extra.injuries) {
+    const [side, playerId] = tag.split(":") as ["home" | "away", string];
+    const player = xi[side].find((p) => p.id === playerId);
+    if (!player || isInjured(state, player.id)) continue;
+    openInjuryFor(state, player, "match", injuryRng);
+  }
+
+  // 30분치 피로 — 자리·전술·지구력은 90분과 같은 함수가 정한다. 퇴장자는 그 분까지만
   for (const side of ["home", "away"] as const) {
     const teamId = side === "home" ? decider.homeTeamId : decider.awayTeamId;
     const spec = tacticsOf(state, teamId).spec;
@@ -262,8 +313,10 @@ export function resolveExtraTime(state: GameState, decider: MatchRecord, channel
     for (const player of xi[side]) {
       const position = slotOf.get(player.id) ?? naturalPositionOf(player).position;
       const today = drainVariance(`${state.seed}:${decider.id}:${player.id}`);
+      const off = sentOffInEt.get(player.id);
+      const minutes = off === undefined ? EXTRA_TIME_MINUTES : Math.max(0, off - 90);
       player.state.condition = clampCondition(
-        player.state.condition - conditionDrain(player, position, spec, EXTRA_TIME_MINUTES, today),
+        player.state.condition - conditionDrain(player, position, spec, minutes, today),
       );
     }
   }

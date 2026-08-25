@@ -1,4 +1,5 @@
 import type { MatchRecord, MatchStage } from "@story-fm/domain";
+import { isReserveMatch } from "@story-fm/domain";
 import {
   MIN_REST_HOURS,
   HARD_MIN_REST_HOURS,
@@ -29,12 +30,19 @@ import { clubsOfCountry, leagueOfTeam } from "../data/team-catalog";
 import { tierOfTeamIn } from "../core/club-tier";
 import { isTopFlightIn } from "./promotion";
 import { reservedEuroDatesFor } from "./euro-knockout";
-import { formatMoney, payOnce } from "../club/finance";
+import { migratePrizeKeys, payPrize, prizeKey, prizeLabel, type PrizeKind } from "./prize";
+import { registerUserEntries, reportOurTie, stageMatchesOf, tieLegsOf } from "./knockout";
 import { clearForCup } from "./reschedule";
-import { makeRng } from "../core/rng";
+import { shuffled } from "../core/rng";
 import { needsShootout, pairOf, resolveExtraTime, settledTieWinner } from "./extra-time";
 import { resolveShootout } from "./shootout";
-import { pushNarrative, teamName, teamShortName, type GameState } from "../core/state";
+import {
+  clampReputation,
+  pushNarrative,
+  teamName,
+  teamShortName,
+  type GameState,
+} from "../core/state";
 
 /**
  * 국내 컵 — FA컵·리그컵·코파 델 레이·코파 이탈리아·DFB-포칼·쿠프 드 프랑스.
@@ -72,6 +80,19 @@ const FINAL_SEARCH_DAYS = 42;
 const FINAL_NEAR_DAYS = 14;
 /** 최후 방어의 창 — 겹치지 않는 날은 이 안에 반드시 있다 (한 팀의 연간 경기는 60여 회) */
 const LAST_RESORT_DAYS = 150;
+
+/**
+ * **탐색은 시즌 밖으로 나가지 않는다** — 그 시즌의 마지막 날 = 다음 프리시즌 개시
+ * 전날(6월 30일).
+ *
+ * 창은 자리를 못 찾을수록 넓어지고, 마지막 단 150일은 5월 결승에서 10월까지 뻗는다.
+ * 거기 앉은 경기는 시즌 전환이 `state.matches`를 통째로 갈아 끼우는 순간 사라지고,
+ * 전환 전에 날짜가 오면 지난 시즌의 컵 경기가 새 시즌 달력에 선다
+ * (→ docs/simulation/season.md §3).
+ */
+function seasonLastDay(season: number): string {
+  return seasonDate(season, [6, 30]);
+}
 
 /**
  * 리그를 비켜세워서라도 지키는 목표 구간 — 목표일부터 이만큼.
@@ -118,17 +139,13 @@ function tieId(cupId: string, season: number, stage: MatchStage, pair: number, l
 }
 
 /** 이 컵 이 단계의 경기 — 대진 번호, 그다음 차수 순 */
-export function domesticStageMatches(
-  state: GameState,
-  cupId: string,
-  stage: MatchStage,
-): MatchRecord[] {
-  return state.matches
-    .filter((m) => m.season === state.season && m.competitionId === cupId && m.stage === stage)
-    .sort((a, b) => pairOf(a) - pairOf(b) || a.round - b.round);
-}
+export { stageMatchesOf as domesticStageMatches } from "./knockout";
 
-/** 이 컵의 참가 클럽 — 그 나라 1부 + 2부 전체 (카탈로그가 32팀으로 맞춰져 있다) */
+/**
+ * 이 컵의 참가 **명단** — 그 나라 1부 + 2부 전체 (카탈로그가 32팀으로 맞춰져 있다).
+ * 시드 진입 라운드가 있는 대회는 이 중 누가 실제로 뛰는지를 `domesticCupField`가
+ * 가른다 — 32라는 수는 대회 성립의 불변식이라 여기서 줄이지 않는다.
+ */
 export function domesticCupEntrants(cupId: string): string[] {
   const cup = domesticCupById(cupId);
   if (!cup) return [];
@@ -212,10 +229,19 @@ export function finalWeekdays(cup: DomesticCupEntry): number[] {
 export function userStillIn(state: GameState, cupId: string): boolean {
   let latest: MatchStage | null = null;
   for (const stage of DOMESTIC_STAGES) {
-    if (domesticStageMatches(state, cupId, stage).length > 0) latest = stage;
+    if (stageMatchesOf(state, cupId, stage).length > 0) latest = stage;
   }
   if (latest === null) return true; // 아직 시작 전 — 전 클럽이 나간다
-  const matches = domesticStageMatches(state, cupId, latest);
+  // 시드는 진입 라운드 전까지 대진에 없어도 살아 있다 (§3.2-1)
+  const cup = domesticCupById(cupId);
+  if (
+    cup?.seedEntry &&
+    DOMESTIC_STAGES.indexOf(latest) < DOMESTIC_STAGES.indexOf(cup.seedEntry.stage) &&
+    domesticCupField(state, cup).seeds.includes(state.userTeamId)
+  ) {
+    return true;
+  }
+  const matches = stageMatchesOf(state, cupId, latest);
   const ours = matches.find(
     (m) => m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId,
   );
@@ -260,6 +286,8 @@ function pickTieDate(
     const played: Array<{ date: string; time?: string }> = [];
     for (const m of state.matches) {
       if (m.season !== state.season) continue;
+      // 2군 경기는 1군 일정의 제약이 아니다 — 뛰는 스쿼드가 다르다 (season.md §2)
+      if (isReserveMatch(m)) continue;
       if (m.homeTeamId === home || m.awayTeamId === home) played.push(m);
       else if (m.homeTeamId === away || m.awayTeamId === away) played.push(m);
     }
@@ -360,8 +388,8 @@ function pickTieDate(
       ok: (d) => free(d) && restedHard(d, kickoffFor(d)),
       best: true,
     },
-    // ③ 그래도 없으면 창을 넓힌다 (예전엔 여기서 "직전 하루만 쉬면 된다"로 조건을
-    //    풀어 버려서 컵 다음날 리그가 섰다 — 창을 넓힐지언정 조건은 안 푼다)
+    // ③ 그래도 없으면 창을 넓힌다 — 창을 넓힐지언정 조건은 안 푼다.
+    //    "직전 하루만 쉬면 된다"로 풀면 컵 다음날 리그가 선다.
     { days: window, weekdays, ok: (d) => rested(d, kickoffFor(d)) },
     { days: window, weekdays, ok: (d) => free(d) && restedHard(d, kickoffFor(d)), best: true },
     // ④ **40시간 바닥은 창보다 앞선다.** 여기까지 왔다는 건 28일 안에 바닥을 지키는
@@ -387,11 +415,14 @@ function pickTieDate(
   // ② 그래도 걸리면 뒤로 밀어 자리를 찾는다.
   // (목표일이 이미 지난 세이브는 내일부터 — 과거 날짜 경기는 tick이 소화하지 못한다)
   const start = target;
+  const lastDay = seasonLastDay(state.season);
   for (const pass of passes) {
     let picked: string | null = null;
     let pickedScore: ReturnType<typeof scoreAt> | null = null;
     for (let i = 0; i <= pass.days; i++) {
       const date = addDays(start, i);
+      // 시즌 밖으로는 밀지 않는다 — 잘려서 아무 자리도 안 남으면 목표일에 그대로 앉는다
+      if (date > lastDay) break;
       if (pass.weekdays && !pass.weekdays.has(dayOfWeek(date))) continue;
       if (!pass.ok(date)) continue;
       if (!pass.best) return { date, time: kickoffFor(date) };
@@ -433,26 +464,6 @@ const CUP_MIDWEEK_KICKOFF = "19:45";
 /** 주말은 오후, 주중은 야간 — 실제 컵 라운드의 킥오프 */
 function kickoffFor(date: string): string {
   return isWeekend(date) ? DEFAULT_KICKOFF : CUP_MIDWEEK_KICKOFF;
-}
-
-/** 감독의 달력에 우리 팀 컵 경기를 올린다 (남의 컵 경기는 장부에만 남는다) */
-function registerUserEntries(state: GameState, matches: MatchRecord[]): void {
-  const ours = matches.filter(
-    (m) => m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId,
-  );
-  if (ours.length === 0) return;
-  for (const m of ours) {
-    state.schedule.push({
-      id: `se-${m.id}`,
-      date: m.date,
-      time: m.time ?? CUP_MIDWEEK_KICKOFF,
-      type: "match",
-      refId: m.id,
-      teamId: state.userTeamId,
-      status: "scheduled",
-    });
-  }
-  state.schedule = sortEntries(state.schedule);
 }
 
 /**
@@ -524,23 +535,6 @@ function createTie(
   return legs;
 }
 
-/** 한 컵 한 시즌 안에서 상금을 가르는 축 — 라벨과 달리 표시에 쓰이지 않는다 */
-type PrizeKind = `stage:${MatchStage}` | "winner" | "runner-up";
-
-/**
- * 멱등 키 — `category + ref + 무엇 + season` (finance.md §4.1).
- *
- * 라벨은 언제든 고쳐 쓰는 문장이라 키로 쓸 수 없다. 컵 약칭이나 단계 이름 한
- * 글자를 고치는 순간 이미 지급한 상금이 새 키를 얻어 한 번 더 나간다.
- */
-function prizeKey(cupId: string, kind: PrizeKind, season: number): string {
-  return `prize:competition:${cupId}:${kind}:S${season}`;
-}
-
-function prizeLabel(cup: DomesticCupEntry, season: number, what: string): string {
-  return `${cup.short} ${what} 상금 (S${season})`;
-}
-
 /**
  * 옛 세이브 호환 — 표시 라벨을 그대로 멱등 키로 쓰던 시절의 `prizesPaid`를 안정
  * 키로 옮긴다. 옮기지 않으면 로드가 곧바로 부르는 `advanceDomesticCups`의 라운드
@@ -563,14 +557,7 @@ export function migrateDomesticPrizeKeys(state: GameState): void {
       }
     }
   }
-  for (const finance of state.finances) {
-    const keys = finance.prizesPaid;
-    if (!keys) continue;
-    for (let i = 0; i < keys.length; i++) {
-      const next = moved.get(keys[i]!);
-      if (next) keys[i] = next;
-    }
-  }
+  migratePrizeKeys(state, moved);
 }
 
 /** 라운드 진출 상금 — 그 단계에 오른 모든 팀에게 (중복 지급은 원장 키가 막는다) */
@@ -583,57 +570,116 @@ function payRoundPrize(
 ): void {
   const amount = cup.prize.round[stage] ?? 0;
   if (amount <= 0) return;
-  const label = prizeLabel(cup, state.season, `${domesticStageLabel(cup, stage)} 진출`);
+  const what = `${domesticStageLabel(cup, stage)} 진출`;
   for (const teamId of new Set(teams)) {
-    const paid = payOnce(state, teamId, prizeKey(cup.id, `stage:${stage}`, state.season), {
-      kind: "income",
-      category: "prize",
-      label,
-      amount,
-      ref: { type: "competition", id: cup.id },
-    });
-    if (paid && teamId === state.userTeamId) {
-      digest.push(`💰 ${label} ${formatMoney(amount)} 입금`);
-    }
+    payPrize(state, { cup, teamId, kind: `stage:${stage}`, what, amount }, digest);
   }
 }
 
 /** 결정적 셔플 — 같은 (seed, channel)이면 항상 같은 추첨 */
-function shuffled<T>(items: readonly T[], seed: number, channel: string): T[] {
-  const rng = makeRng(seed, channel);
-  const out = [...items];
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [out[i], out[j]] = [out[j]!, out[i]!];
+/**
+ * 브래킷 시딩 순서 — `order[대진] = 그 대진에 앉는 서열`. 8대진이면
+ * [0,7,3,4,1,6,2,5] (1·8·4·5·2·7·3·6) — 상위 둘이 결승 전에 만나지 않는 표준 배치다.
+ */
+function bracketSeedOrder(pairCount: number): number[] {
+  let order = [0];
+  while (order.length < pairCount) {
+    const size = order.length * 2;
+    order = order.flatMap((s) => [s, size - 1 - s]);
   }
-  return out;
+  return order;
+}
+
+/** 시드 진입 라운드의 정원 — 32강이 32, 16강이 16 … 단계 index가 반씩 줄인다 */
+function stageTeamCount(stage: MatchStage): number {
+  return DOMESTIC_CUP_SIZE >> DOMESTIC_STAGES.indexOf(stage);
+}
+
+export interface DomesticCupField {
+  /** 진입 라운드부터 합류하는 시드 — 전력 서열 상위 `seedEntry.count` */
+  seeds: string[];
+  /** 첫 라운드를 실제로 뛰는 클럽 */
+  opening: string[];
+  /** 모델 밖 앞 라운드에서 탈락 처리된 클럽 — 경기도 상금도 없다 */
+  eliminated: string[];
 }
 
 /**
- * 대진표 확정형(코파 이탈리아)의 1라운드 자리 배치 — 시드 8팀을 브래킷에 흩는다.
+ * 참가 명단 32를 시드·첫 라운드·앞 라운드 탈락으로 가른다 (competition.md §3.2-1).
  *
- * 실제 코파 이탈리아는 직전 시즌 상위 8팀을 시드로 두고 대진표를 미리 확정한다
- * (인테르·로마·피오렌티나·나폴리가 한쪽, 볼로냐·라치오·유베·아탈란타가 반대쪽).
- * 16대진 토너먼트에서 시드가 8강 전에 만나지 않으려면 이 자리들에 앉혀야 한다.
+ * 시드가 `count`자리를 진입 라운드에서 갖으므로 첫 라운드는
+ * `2 × (진입 라운드 정원 − count)`팀이고, 명단에서 정확히 `count`팀이 남아
+ * 앞 라운드 탈락으로 처리된다. 1부 비시드는 전원 직행(실제 세리에 A 9~20위가
+ * primo turno를 뛴다), 남는 자리는 2부의 시드 셔플 추첨이다.
+ *
+ * **감독 구단은 추첨에서 밀려나지 않는다** — 앞 라운드 추상화는 배경 클럽의
+ * 것이고, 감독의 컵은 경기로 치른다.
  */
-const SEED_SLOTS = [0, 15, 8, 7, 4, 11, 12, 3];
+export function domesticCupField(state: GameState, cup: DomesticCupEntry): DomesticCupField {
+  const entrants = domesticCupEntrants(cup.id);
+  const entry = cup.seedEntry;
+  if (!entry) return { seeds: [], opening: entrants, eliminated: [] };
+  const byStrength = [...entrants].sort((a, b) => rankOf(state, a) - rankOf(state, b));
+  const seeds = byStrength.slice(0, entry.count);
+  const rest = byStrength.slice(entry.count);
+  const openingSize = 2 * (stageTeamCount(entry.stage) - entry.count);
+  const direct = new Set(rest.filter((id) => isTopFlightIn(state, id)).slice(0, openingSize));
+  const pool = rest.filter((id) => !direct.has(id));
+  const slots = openingSize - direct.size;
+  const drawn = shuffled(pool, state.seed, `cupprelim:${cup.id}:${state.season}`).slice(0, slots);
+  if (slots > 0 && pool.includes(state.userTeamId) && !drawn.includes(state.userTeamId)) {
+    drawn[drawn.length - 1] = state.userTeamId;
+  }
+  const survives = new Set(drawn);
+  const opening = rest.filter((id) => direct.has(id) || survives.has(id));
+  return { seeds, opening, eliminated: rest.filter((id) => !direct.has(id) && !survives.has(id)) };
+}
 
+/**
+ * 대진표 확정형(코파 이탈리아)의 첫 라운드 자리 배치 — 강한 절반을 브래킷 시딩
+ * 순서로 흩는다. 실제 tabellone도 서열대로 자리를 미리 배정해 상위끼리 늦게
+ * 만난다. 각 대진의 앞자리가 강한 쪽이고, 약한 절반은 시드 셔플로 상대를 정한다.
+ */
 function seededBracket(state: GameState, cup: DomesticCupEntry, teams: string[]): string[] {
   const byStrength = [...teams].sort((a, b) => rankOf(state, a) - rankOf(state, b));
-  const seeds = byStrength.slice(0, SEED_SLOTS.length);
-  const rest = shuffled(
-    byStrength.slice(SEED_SLOTS.length),
+  const pairCount = Math.floor(teams.length / 2);
+  const strong = byStrength.slice(0, pairCount);
+  const weak = shuffled(
+    byStrength.slice(pairCount),
     state.seed,
     `cupbracket:${cup.id}:${state.season}`,
   );
-  // 시드는 각자의 대진에서 홈(앞자리), 나머지는 남은 자리를 차례로 채운다
-  const order: Array<string | null> = new Array(teams.length).fill(null);
-  seeds.forEach((id, i) => {
-    order[SEED_SLOTS[i]! * 2] = id;
+  const order: string[] = [];
+  bracketSeedOrder(pairCount).forEach((rank, tie) => {
+    order[tie * 2] = strong[rank]!;
+    order[tie * 2 + 1] = weak[tie]!;
+  });
+  return order;
+}
+
+/**
+ * 시드 진입 라운드의 대진 — 시드가 브래킷 시딩 순서로 흩어져 직전 라운드 승자와
+ * 만난다 (competition.md §3.2-1). 라운드별 추첨 대회라면 어차피 뒤에서 셔플되므로
+ * 합치기만 한다. 진입 라운드가 아니면 승자 목록 그대로다.
+ */
+function withSeedEntrants(
+  state: GameState,
+  cup: DomesticCupEntry,
+  stage: MatchStage,
+  winners: string[],
+): string[] {
+  const entry = cup.seedEntry;
+  if (!entry || entry.stage !== stage) return winners;
+  const seeds = domesticCupField(state, cup).seeds;
+  if (cup.drawStyle !== "fixed-bracket") return [...seeds, ...winners];
+  const pairCount = (seeds.length + winners.length) / 2;
+  const order: Array<string | null> = new Array(pairCount * 2).fill(null);
+  bracketSeedOrder(pairCount).forEach((rank, tie) => {
+    if (rank < seeds.length) order[tie * 2] = seeds[rank]!;
   });
   let next = 0;
   for (let slot = 0; slot < order.length; slot++) {
-    if (order[slot] === null) order[slot] = rest[next++]!;
+    if (order[slot] === null) order[slot] = winners[next++]!;
   }
   return order as string[];
 }
@@ -681,7 +727,7 @@ function createStage(
   }
   if (created.length === 0) return;
 
-  registerUserEntries(state, created);
+  registerUserEntries(state, created, CUP_MIDWEEK_KICKOFF);
   payRoundPrize(state, cup, stage, teams, digest);
   scheduleNextDraw(state, cup, stage, created, digest);
 
@@ -700,13 +746,13 @@ function createStage(
 }
 
 /** 이 대진의 모든 차전 — 차수 순 */
-function tieLegsOf(
+function domesticTieLegs(
   state: GameState,
   cupId: string,
   stage: MatchStage,
   pair: number,
 ): MatchRecord[] {
-  return domesticStageMatches(state, cupId, stage).filter((m) => pairOf(m) === pair);
+  return tieLegsOf(stageMatchesOf(state, cupId, stage), pair);
 }
 
 /**
@@ -722,7 +768,7 @@ export function domesticTieWinner(
   stage: MatchStage,
   pair: number,
 ): string | null {
-  return settledTieWinner(tieLegsOf(state, cupId, stage, pair));
+  return settledTieWinner(domesticTieLegs(state, cupId, stage, pair));
 }
 
 /**
@@ -738,7 +784,7 @@ export function resolveDomesticTie(
   stage: MatchStage,
   pair: number,
 ): string | null {
-  const legs = tieLegsOf(state, cupId, stage, pair);
+  const legs = domesticTieLegs(state, cupId, stage, pair);
   if (legs.length === 0 || legs.some((m) => !m.result)) return null;
 
   const decider = legs[legs.length - 1]!;
@@ -755,27 +801,29 @@ export function domesticChampion(state: GameState, cupId: string): string | null
 /** 결승에서 진 팀 — 준우승 상금·서사용 */
 export function domesticRunnerUp(state: GameState, cupId: string): string | null {
   const champion = domesticChampion(state, cupId);
-  const decider = domesticStageMatches(state, cupId, "final")[0];
+  const decider = stageMatchesOf(state, cupId, "final")[0];
   if (!champion || !decider) return null;
   return decider.homeTeamId === champion ? decider.awayTeamId : decider.homeTeamId;
 }
 
 /** 우리 팀이 뛴 단계의 결과 보고 — 다음 단계 편성과 같은 시점에 한 번만 */
-function reportOurTie(
+function reportDomesticTie(
   state: GameState,
   cup: DomesticCupEntry,
   stage: MatchStage,
   winners: string[],
   digest: string[],
 ): void {
-  const played = domesticStageMatches(state, cup.id, stage).some(
-    (m) => m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId,
+  reportOurTie(
+    state,
+    {
+      matches: stageMatchesOf(state, cup.id, stage),
+      short: cup.short,
+      label: domesticStageLabel(cup, stage),
+      winners,
+    },
+    digest,
   );
-  if (!played) return;
-  const label = domesticStageLabel(cup, stage);
-  const advanced = winners.includes(state.userTeamId);
-  digest.push(advanced ? `${cup.short} ${label} 통과` : `${cup.short} ${label} 탈락`);
-  pushNarrative(state, `${cup.short} ${label} ${advanced ? "통과" : "탈락"}`, 4);
 }
 
 /**
@@ -830,7 +878,7 @@ export function cupRunsThisSeason(state: GameState, cup: DomesticCupEntry): bool
   if (entrants.length !== DOMESTIC_CUP_SIZE) return false;
   if (entrants.some((id) => !state.teams.some((t) => t.id === id))) return false;
   // 이미 1라운드가 편성됐으면 시작한 대회다 — 문턱은 더 볼 필요가 없다
-  if (domesticStageMatches(state, cup.id, DOMESTIC_STAGES[0]!).length > 0) return true;
+  if (stageMatchesOf(state, cup.id, DOMESTIC_STAGES[0]!).length > 0) return true;
   return state.date <= addDays(seasonDate(state.season, cup.firstDraw), LATE_ADOPTION_GRACE_DAYS);
 }
 
@@ -849,10 +897,11 @@ export function advanceDomesticCups(state: GameState, digest: string[]): void {
 
     for (let i = 0; i < DOMESTIC_STAGES.length; i++) {
       const stage = DOMESTIC_STAGES[i]!;
-      const existing = domesticStageMatches(state, cup.id, stage);
+      const existing = stageMatchesOf(state, cup.id, stage);
       if (existing.length === 0) {
         if (i === 0) {
-          // 1라운드 — 실제 대회의 추첨일에 그 나라 전 클럽으로 뽑는다
+          // 1라운드 — 실제 대회의 추첨일에 뽑는다. 명단은 전 클럽이지만 실제로
+          // 뛰는 필드는 시드·앞 라운드 탈락을 가른 뒤의 것이다 (§3.2-1)
           const entrants = domesticCupEntrants(cup.id);
           scheduleDraw(
             state,
@@ -862,13 +911,19 @@ export function advanceDomesticCups(state: GameState, digest: string[]): void {
             entrants.includes(state.userTeamId),
           );
           if (!drawIsDue(state, cup.id, stage)) break;
-          createStage(state, cup, stage, entrants, digest);
+          createStage(state, cup, stage, domesticCupField(state, cup).opening, digest);
         } else {
           if (!previousWinners || previousWinners.length < 2) break;
           // 추첨일은 직전 라운드를 편성할 때 이미 잡혀 있다 (없으면 추첨 없는 단계)
           if (drawEntryOf(state, cup.id, stage) && !drawIsDue(state, cup.id, stage)) break;
-          reportOurTie(state, cup, DOMESTIC_STAGES[i - 1]!, previousWinners, digest);
-          createStage(state, cup, stage, previousWinners, digest);
+          reportDomesticTie(state, cup, DOMESTIC_STAGES[i - 1]!, previousWinners, digest);
+          createStage(
+            state,
+            cup,
+            stage,
+            withSeedEntrants(state, cup, stage, previousWinners),
+            digest,
+          );
         }
         completeDraw(state, cup.id, stage);
         break; // 한 번에 한 단계만 — 다음 단계는 이 단계가 끝난 뒤
@@ -902,12 +957,20 @@ export function advanceDomesticCups(state: GameState, digest: string[]): void {
  * 이겨야** 다음 자리가 생긴다. 진행 중인 대진은 확보가 아니다 — 질 수도 있다.
  */
 function securedStage(state: GameState, cup: DomesticCupEntry): MatchStage | null {
-  const next = DOMESTIC_STAGES.find((s) => domesticStageMatches(state, cup.id, s).length === 0);
+  const next = DOMESTIC_STAGES.find((s) => stageMatchesOf(state, cup.id, s).length === 0);
   if (!next) return null; // 결승까지 다 추첨됐다
+  // 시드의 첫 자리는 규정이 확보해 둔 진입 라운드다 — 그 전 라운드는 시드의 것이 아니다
+  if (
+    cup.seedEntry &&
+    DOMESTIC_STAGES.indexOf(next) <= DOMESTIC_STAGES.indexOf(cup.seedEntry.stage) &&
+    domesticCupField(state, cup).seeds.includes(state.userTeamId)
+  ) {
+    return cup.seedEntry.stage;
+  }
   const prevIdx = DOMESTIC_STAGES.indexOf(next) - 1;
   if (prevIdx < 0) return next; // 1라운드 — 전 클럽 참가
   const prev = DOMESTIC_STAGES[prevIdx]!;
-  const ours = domesticStageMatches(state, cup.id, prev).find(
+  const ours = stageMatchesOf(state, cup.id, prev).find(
     (m) => m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId,
   );
   if (!ours) return null; // 직전 라운드에 우리가 없다 = 이미 떨어졌다
@@ -971,7 +1034,28 @@ const CUP_TITLE_BOARD = 6;
 const CUP_RUNNER_UP_MEDIA = 3;
 
 /**
- * 시즌 리뷰의 국내 컵 결산 — 우승 트로피·상금·평판.
+ * 국내 컵 우승·준우승 **상금** — 구단이 받는 돈이라 감독의 커리어와 갈라져 있다.
+ *
+ * 트로피·평판을 적는 `reviewDomesticCups`와 따로 부르는 이유는 **무직으로 맞은 시즌
+ * 끝**이다: 그 시즌은 감독에게 남지 않지만 옛 구단의 장부는 계속 돌아야 하고, 시즌 키가
+ * 바뀌므로 여기서 안 주면 영영 못 준다 (career.md §5.1).
+ */
+export function payDomesticCupPrizes(state: GameState, digest: string[]): void {
+  for (const cup of domesticCupCatalog()) {
+    const champion = domesticChampion(state, cup.id);
+    if (!champion) continue;
+    const runnerUp = domesticRunnerUp(state, cup.id);
+
+    const payTo = (teamId: string, kind: PrizeKind, what: string, amount: number) =>
+      payPrize(state, { cup, teamId, kind, what, amount }, digest);
+    payTo(champion, "winner", "우승", cup.prize.winner);
+    if (runnerUp) payTo(runnerUp, "runner-up", "준우승", cup.prize.runnerUp);
+  }
+}
+
+/**
+ * 시즌 리뷰의 국내 컵 결산 — 우승 트로피·평판. **상금은 여기 없다**
+ * (`payDomesticCupPrizes`).
  * 결승이 리그 최종전보다 앞설 수 있지만, 우승 확정은 시즌 리뷰 한 곳에서만 한다
  * (매일 tick에서 중복 보고하지 않기 위해서다).
  */
@@ -983,37 +1067,18 @@ export function reviewDomesticCups(state: GameState): string[] {
     const runnerUp = domesticRunnerUp(state, cup.id);
     const ours = champion === state.userTeamId || runnerUp === state.userTeamId;
 
-    const payTo = (teamId: string, kind: PrizeKind, what: string, amount: number) => {
-      const label = prizeLabel(cup, state.season, what);
-      const paid = payOnce(state, teamId, prizeKey(cup.id, kind, state.season), {
-        kind: "income",
-        category: "prize",
-        label,
-        amount,
-        ref: { type: "competition", id: cup.id },
-      });
-      if (paid && teamId === state.userTeamId) {
-        digest.push(`💰 ${label} ${formatMoney(amount)} 입금`);
-      }
-    };
-    payTo(champion, "winner", "우승", cup.prize.winner);
-    if (runnerUp) payTo(runnerUp, "runner-up", "준우승", cup.prize.runnerUp);
-
     if (champion === state.userTeamId) {
-      state.trophies.push({ season: state.season, competition: cup.name, teamId: champion });
-      state.manager.reputation.media = Math.min(
-        100,
+      state.trophies.push({ season: state.season, competitionId: cup.id, teamId: champion });
+      state.manager.reputation.media = clampReputation(
         state.manager.reputation.media + CUP_TITLE_MEDIA,
       );
-      state.manager.reputation.board = Math.min(
-        100,
+      state.manager.reputation.board = clampReputation(
         state.manager.reputation.board + CUP_TITLE_BOARD,
       );
       digest.push(`🏆 ${cup.name} 우승`);
       pushNarrative(state, `${cup.name} 우승`, 5);
     } else if (ours) {
-      state.manager.reputation.media = Math.min(
-        100,
+      state.manager.reputation.media = clampReputation(
         state.manager.reputation.media + CUP_RUNNER_UP_MEDIA,
       );
       digest.push(`${cup.short} 준우승 — 결승 상대 ${teamName(champion)}`);

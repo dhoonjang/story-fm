@@ -1,6 +1,7 @@
 import type { MatchRecord, MatchStage, ScheduleEntry, TransferWindow } from "@story-fm/domain";
+import { isReserveMatch } from "@story-fm/domain";
 import { scopedLeagues, scopedTeams, scopedTeamsOfLeague, type WorldScope } from "../world/scope";
-import { makeRng } from "../core/rng";
+import { shuffled } from "../core/rng";
 import { isEuroWeek } from "./europe";
 
 /**
@@ -18,9 +19,8 @@ export interface SeasonCalendar {
   /**
    * **선수단 소집일** — 이날부터 훈련이 가능하다. 그 전은 여름 휴가다.
    *
-   * 예전엔 이 날짜가 `training-plan.ts`의 계산 함수 안에만 있어서 기본 훈련
-   * 배치만 알았다. 감독의 훈련 지시(`setTraining`)는 휴가 기간을 몰라 7월 1일에
-   * "월·수·금 훈련"을 등록하면 아무도 없는 훈련장에 세션이 깔렸다.
+   * 기본 훈련 배치와 감독의 훈련 지시(`setTraining`)가 모두 이 날짜를 읽어야
+   * 한다 — 휴가 기간을 모르면 아무도 없는 훈련장에 세션이 깔린다.
    * 옛 세이브엔 없다 — 읽을 때 계산으로 채운다(`squadReturnOf`).
    */
   squadReturn?: string;
@@ -438,6 +438,13 @@ function finalSunday(year: number): string {
 }
 
 /**
+ * 리그 골격의 라운드 수 — 20팀 더블 라운드로빈이다. 팀이 적은 리그(18팀 34라운드,
+ * 2부 12·14팀 22·26라운드)는 이 골격에서 덜어내 앉으므로(`anchorsFor`),
+ * 여기가 달력이 세우는 라운드의 최대치이기도 하다.
+ */
+const LEAGUE_ROUNDS = 38;
+
+/**
  * 38라운드의 기준 날짜 — 실제 EPL 캘린더 골격을 재현한다.
  * 주말 라운드(휴식기 제외) + 박싱데이 + 성탄 연전 + 부족분 주중 라운드 + 최종 라운드.
  *
@@ -482,7 +489,7 @@ function buildAnchors(season: number): Anchor[] {
    */
   for (const gapFirst of [true, false]) {
     for (const w of MIDWEEK_WINDOWS) {
-      if (anchors.length >= 37) break;
+      if (anchors.length >= LEAGUE_ROUNDS - 1) break;
       const pad = (n: number) => String(n).padStart(2, "0");
       const at = (md: [number, number]) =>
         `${md[0] >= 8 ? year : year + 1}-${pad(md[0])}-${pad(md[1])}`;
@@ -497,9 +504,10 @@ function buildAnchors(season: number): Anchor[] {
   }
 
   anchors.sort((a, b) => (a.date < b.date ? -1 : 1));
-  const weeks: Anchor[] = [...anchors.slice(0, 37), { date: last, kind: "final" }];
-  if (weeks.length !== 38) {
-    throw new Error(`시즌 ${season}: 라운드 날짜가 ${weeks.length}개 (38 필요)`);
+  // 최종 라운드는 날짜가 고정이라 따로 세운다 — 앵커는 그 앞의 한 라운드까지다
+  const weeks: Anchor[] = [...anchors.slice(0, LEAGUE_ROUNDS - 1), { date: last, kind: "final" }];
+  if (weeks.length !== LEAGUE_ROUNDS) {
+    throw new Error(`시즌 ${season}: 라운드 날짜가 ${weeks.length}개 (${LEAGUE_ROUNDS} 필요)`);
   }
   return weeks;
 }
@@ -620,17 +628,6 @@ export function firstHalfPairs(teamIds: string[]): Array<Array<[string, string]>
     rounds.push(pairs);
   }
   return rounds;
-}
-
-/** 시드 기반 결정적 셔플 — 시즌·라운드마다 다른 배치를 만들되 재현 가능하게 */
-function shuffled<T>(items: readonly T[], seed: number, channel: string): T[] {
-  const rng = makeRng(seed, channel);
-  const out = [...items];
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [out[i], out[j]] = [out[j]!, out[i]!];
-  }
-  return out;
 }
 
 /**
@@ -884,6 +881,8 @@ export function nextMatchFor(
   for (const m of matches) {
     if (m.result || m.date < date || m.id === skipId) continue;
     if (m.homeTeamId !== teamId && m.awayTeamId !== teamId) continue;
+    // 2군 경기는 1군의 "다음 경기"가 아니다 — 훈련 리듬도 회견도 여기 걸리면 안 된다
+    if (isReserveMatch(m)) continue;
     if (best === null || m.date < best.date) best = m;
   }
   return best;

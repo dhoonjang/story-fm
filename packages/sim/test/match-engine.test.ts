@@ -3,27 +3,48 @@ import {
   AI_SHIFT_BOUND,
   AI_SHAPE_CHASE_MINUTE,
   AI_SHAPE_HOLD_MINUTE,
-  AI_SUB_CAUSE,
   EXTRA_TIME_SUBS,
   SUB_CHASE_MAX,
   SUB_CHASE_MINUTE,
   SUB_CHASE_MINUTE_TWO,
   SUB_HOLD_MINUTE,
+  SUB_WINDOW_MAX,
   LEDGER_LIMITS,
+  BOOKED_AGAIN_WEIGHT,
+  CARDS_PER_MATCH,
+  EXTRA_TIME_DENSITY,
+  EXTRA_TIME_MINUTES,
+  EXTRA_TIME_SHOT_SHARE,
+  INJURY_PER_MATCH,
+  BLOCKED_SHARE,
+  FINISHING_PIVOT,
   advanceClock,
   applyEvents,
+  bookingWeight,
   buildStrengthPacket,
   createLedger,
+  injuryWeight,
+  sampleShot,
+  sampleShotXg,
+  savedShare,
   simulateSegment,
+  teamCardRate,
+  teamInjuryRate,
   type AiBenchShift,
   type MatchLedgerState,
   type SegmentPlan,
   planAiTacticalShift,
   planAiSubstitution,
 } from "@story-fm/sim";
-import { DEFAULT_TACTICS } from "@story-fm/domain";
-import type { GamePlayer, StrengthPacket, TacticsSpec } from "@story-fm/domain";
-import { makeLedgerSide, makeSide, makeSquad } from "./helpers";
+import { DEFAULT_TACTICS, PHASE_END, matchupTag } from "@story-fm/domain";
+import type {
+  GamePlayer,
+  MatchSide,
+  PacketTag,
+  StrengthPacket,
+  TacticsSpec,
+} from "@story-fm/domain";
+import { makeLedgerSide, makePlayer, makeSide, makeSquad } from "./helpers";
 
 /** mulberry32 — 엔진 `makeRng`와 같은 알고리즘 (sim은 엔진에 의존하지 않는다) */
 function rngOf(seed: number): () => number {
@@ -251,28 +272,84 @@ describe("구간 시뮬레이터 — 결과는 코어가 정한다", () => {
     }
   });
 
-  it("골의 원인 태그는 패킷에서 인용한 문장뿐이다 — 지어낸 문장은 붙지 않는다", () => {
+  it("골의 원인 태그는 패킷에서 인용한 태그뿐이다 — 지어낸 태그는 붙지 않는다", () => {
     const s = setup(88, 62);
     const { ledger } = playMatch(s, 5);
     /**
-     * 코어가 인용할 수 있는 문장의 전부 — 여기 없는 문자열이 붙으면 그게 곧
-     * 검증되지 않은 태그다. **비어 있는 것은 정상이다**: 패킷이 그 편에 줄 근거를
-     * 하나도 갖지 않은 경기가 있고, 폴백 문장을 세우면 모든 골이 "전술이 근거로
+     * 코어가 인용할 수 있는 태그의 전부 — 여기 없는 태그가 붙으면 그게 곧
+     * 검증되지 않은 근거다. **비어 있는 것은 정상이다**: 패킷이 그 편에 줄 근거를
+     * 하나도 갖지 않은 경기가 있고, 폴백 태그를 세우면 모든 골이 "전술이 근거로
      * 붙은 골"이 되어 감독의 전술 XP 조건이 조건이 아니게 된다 (career.md §3).
      */
-    const quotable = new Set([
-      ...s.packet.matchups.map((m) => m.why),
+    const quotable = [
+      ...s.packet.matchups.map((m) => matchupTag(m)),
       ...s.packet.keyPoints,
       ...s.packet.home.tactical.notes,
       ...s.packet.away.tactical.notes,
-    ]);
+    ];
     const goals = ledger.events.filter((e) => e.type === "goal");
     expect(goals.length).toBeGreaterThan(0);
     for (const goal of goals) {
-      for (const cause of goal.causes) expect(quotable).toContain(cause);
+      for (const cause of goal.causes) expect(quotable).toContainEqual(cause);
       expect(goal.shotOutcome).toBe("goal");
       expect(goal.xg).toBeGreaterThan(0);
       expect(goal.goalProbability).toBeGreaterThan(0);
+    }
+  });
+
+  /**
+   * **없으면 비운다** — 폴백 태그를 세우면 모든 골에 근거가 붙어 "전술이 근거로 붙은
+   * 골"이라는 전술 XP의 조건이 조건이 아니게 된다 (career.md §3). 패킷이 그 편에 줄
+   * 근거를 하나도 갖지 않은 경기는 실제로 있다.
+   */
+  it("패킷에 인용할 근거가 없으면 골의 원인은 빈 배열이다", () => {
+    const s = setup(88, 62);
+    const bare: StrengthPacket = {
+      ...s.packet,
+      matchups: [],
+      keyPoints: [],
+      home: { ...s.packet.home, tactical: { ...s.packet.home.tactical, notes: [] } },
+      away: { ...s.packet.away, tactical: { ...s.packet.away.tactical, notes: [] } },
+    };
+    const { ledger } = playMatch({ ...s, packet: bare }, 5);
+    const goals = ledger.events.filter((e) => e.type === "goal");
+    expect(goals.length).toBeGreaterThan(0);
+    for (const goal of goals) expect(goal.causes).toEqual([]);
+  });
+
+  /**
+   * 근거는 **한 갈래에서 하나만** 실린다. 앞선 갈래가 있으면 뒤는 보지 않으므로,
+   * 키포인트가 선 편의 골에 전술 노트가 따라붙지 않는다.
+   */
+  it("키포인트가 있으면 전술 노트는 쓰이지 않는다 — 갈래 순서대로 하나만", () => {
+    const s = setup(88, 62);
+    const tag = (source: PacketTag["source"], side: MatchSide): PacketTag => ({
+      source,
+      code: `${source}-${side}`,
+      favours: side,
+      sharp: true,
+      playerIds: [],
+      values: {},
+      flags: [],
+    });
+    const keyed: StrengthPacket = {
+      ...s.packet,
+      matchups: [],
+      keyPoints: [tag("mismatch", "home"), tag("mismatch", "away")],
+      home: {
+        ...s.packet.home,
+        tactical: { ...s.packet.home.tactical, notes: [tag("tactical", "home")] },
+      },
+      away: {
+        ...s.packet.away,
+        tactical: { ...s.packet.away.tactical, notes: [tag("tactical", "away")] },
+      },
+    };
+    const { ledger } = playMatch({ ...s, packet: keyed }, 5);
+    const goals = ledger.events.filter((e) => e.type === "goal");
+    expect(goals.length).toBeGreaterThan(0);
+    for (const goal of goals) {
+      expect(goal.causes).toEqual([tag("mismatch", goal.team!)]);
     }
   });
 
@@ -597,7 +674,8 @@ describe("AI 교체 판단", () => {
       type: "substitution",
       team: "home",
       actors: ["out", "in"],
-      causes: [AI_SUB_CAUSE.chase],
+      causes: [],
+      subCause: "chase",
     }));
   const groupOfId = (squad: ReturnType<typeof squadOf>, id: string | undefined) =>
     [...squad.onPitch, ...squad.bench].find((p) => p.id === id)?.positions[0]?.position ?? "";
@@ -616,18 +694,18 @@ describe("AI 교체 판단", () => {
     const squad = squadOf(75);
     const worn: Record<string, number> = {};
     for (const p of squad.onPitch) worn[p.id] = 50; // 90분 가까이 뛴 상태
-    const sub = planAiSubstitution("home", squad, ledger(70), plan(70), () => 0, worn);
-    expect(sub?.type).toBe("substitution");
+    const subs = planAiSubstitution("home", squad, ledger(70), plan(70), () => 0, worn);
+    expect(subs[0]?.type).toBe("substitution");
   });
 
   it("싱싱한 팀은 바꾸지 않는다", () => {
-    expect(planAiSubstitution("home", squadOf(75), ledger(70), plan(70), () => 0, {})).toBeNull();
+    expect(planAiSubstitution("home", squadOf(75), ledger(70), plan(70), () => 0, {})).toEqual([]);
   });
 
   it("부상은 시각·확률·문턱을 건너뛰고 무조건 교체한다", () => {
     const squad = squadOf(75);
     const hurt = squad.onPitch[5]!;
-    const sub = planAiSubstitution(
+    const subs = planAiSubstitution(
       "home",
       squad,
       ledger(20),
@@ -635,7 +713,8 @@ describe("AI 교체 판단", () => {
       () => 0.99, // 확률 판정을 통과할 수 없는 값
       {},
     );
-    expect(sub?.actors[0]).toBe(hurt.id);
+    expect(subs).toHaveLength(1);
+    expect(subs[0]?.actors[0]).toBe(hurt.id);
   });
 
   it("다친 필드 선수를 예비 골키퍼로 메우지 않는다", () => {
@@ -645,14 +724,14 @@ describe("AI 교체 판단", () => {
     const squad = { onPitch: full.onPitch, bench: full.bench.filter((p) => p.id.endsWith("-gk")) };
     expect(
       planAiSubstitution("home", squad, ledger(20), hurtPlan(20, hurt.id), () => 0.99, {}),
-    ).toBeNull();
+    ).toEqual([]);
   });
 
   it("골키퍼가 쓰러졌는데 벤치에 키퍼가 없으면 필드 선수가 장갑을 낀다", () => {
     const full = squadOf(75);
     const hurt = full.onPitch[0]!; // GK
     const bench = full.bench.filter((p) => !p.id.endsWith("-gk"));
-    const sub = planAiSubstitution(
+    const subs = planAiSubstitution(
       "home",
       { onPitch: full.onPitch, bench },
       ledger(20),
@@ -660,9 +739,9 @@ describe("AI 교체 판단", () => {
       () => 0.99,
       {},
     );
-    // null이면 다친 골키퍼가 90분까지 그대로 선다
-    expect(sub?.actors[0]).toBe(hurt.id);
-    expect(bench.map((p) => p.id)).toContain(sub?.actors[1]);
+    // 빈 배열이면 다친 골키퍼가 90분까지 그대로 선다
+    expect(subs[0]?.actors[0]).toBe(hurt.id);
+    expect(bench.map((p) => p.id)).toContain(subs[0]?.actors[1]);
   });
 
   it("교체 한도는 장부와 같다 (5명·3회)", () => {
@@ -677,7 +756,7 @@ describe("AI 교체 판단", () => {
       () => 0,
       worn,
     );
-    expect(full).toBeNull();
+    expect(full).toEqual([]);
   });
 
   it("연장에서는 한 장이 더 있다 — 장부와 같은 함수를 본다", () => {
@@ -695,7 +774,7 @@ describe("AI 교체 판단", () => {
     // 90분의 한도(5)를 다 쓴 팀도 연장에서는 한 번 더 움직일 수 있다
     expect(
       planAiSubstitution("home", squad, inExtra(LEDGER_LIMITS.maxSubs), plan(100), () => 0, worn),
-    ).not.toBeNull();
+    ).not.toEqual([]);
     expect(
       planAiSubstitution(
         "home",
@@ -705,7 +784,7 @@ describe("AI 교체 판단", () => {
         () => 0,
         worn,
       ),
-    ).toBeNull();
+    ).toEqual([]);
   });
 
   it("연장 개시도 벤치가 판을 다시 짜는 자리다 — 문턱이 하프타임과 같다", () => {
@@ -721,7 +800,7 @@ describe("AI 교체 판단", () => {
       () => 0.99, // 확률 판정은 통과하지 못하는 값 — 정지점 자체가 자격이어야 한다
       worn,
     );
-    expect(breakStop?.type).toBe("substitution");
+    expect(breakStop[0]?.type).toBe("substitution");
   });
 
   /**
@@ -740,38 +819,36 @@ describe("AI 교체 판단", () => {
     );
 
   it("한 골 차로 뒤지면 SUB_CHASE_MINUTE부터 던진다 — 한 분 전에는 아무도 안 바꾼다", () => {
-    expect(chaseAt(SUB_CHASE_MINUTE - 1, { home: 0, away: 1 })).toBeNull();
-    expect(chaseAt(SUB_CHASE_MINUTE, { home: 0, away: 1 })?.causes).toEqual([AI_SUB_CAUSE.chase]);
+    expect(chaseAt(SUB_CHASE_MINUTE - 1, { home: 0, away: 1 })).toEqual([]);
+    expect(chaseAt(SUB_CHASE_MINUTE, { home: 0, away: 1 })[0]?.subCause).toBe("chase");
   });
 
   it("두 골 차로 뒤지면 그만큼 이르다", () => {
-    expect(chaseAt(SUB_CHASE_MINUTE_TWO, { home: 0, away: 1 })).toBeNull();
-    expect(chaseAt(SUB_CHASE_MINUTE_TWO, { home: 0, away: 2 })?.causes).toEqual([
-      AI_SUB_CAUSE.chase,
-    ]);
+    expect(chaseAt(SUB_CHASE_MINUTE_TWO, { home: 0, away: 1 })).toEqual([]);
+    expect(chaseAt(SUB_CHASE_MINUTE_TWO, { home: 0, away: 2 })[0]?.subCause).toBe("chase");
   });
 
   it("승부수는 수비를 빼고 공격 자원을 넣는다", () => {
     const squad = squadOf(75);
-    const sub = chaseAt(SUB_CHASE_MINUTE, { home: 0, away: 1 });
+    const sub = chaseAt(SUB_CHASE_MINUTE, { home: 0, away: 1 })[0];
     expect(groupOfId(squad, sub?.actors[0])).toMatch(/B$/); // RB·LB·RCB·LCB
     expect(groupOfId(squad, sub?.actors[1])).toBe("ST");
   });
 
   it("승부수는 경기당 SUB_CHASE_MAX장이다", () => {
-    expect(chaseAt(80, { home: 0, away: 1 }, SUB_CHASE_MAX - 1)).not.toBeNull();
-    expect(chaseAt(80, { home: 0, away: 1 }, SUB_CHASE_MAX)).toBeNull();
+    expect(chaseAt(80, { home: 0, away: 1 }, SUB_CHASE_MAX - 1)).not.toEqual([]);
+    expect(chaseAt(80, { home: 0, away: 1 }, SUB_CHASE_MAX)).toEqual([]);
   });
 
   it("비기고 있으면 스코어 갈래가 열리지 않는다", () => {
-    expect(chaseAt(80, { home: 1, away: 1 })).toBeNull();
+    expect(chaseAt(80, { home: 1, away: 1 })).toEqual([]);
   });
 
   it("앞서면 SUB_HOLD_MINUTE부터 공격을 빼고 수비를 넣는다", () => {
     const squad = squadOf(75);
-    expect(chaseAt(SUB_HOLD_MINUTE - 1, { home: 1, away: 0 })).toBeNull();
-    const sub = chaseAt(SUB_HOLD_MINUTE, { home: 1, away: 0 });
-    expect(sub?.causes).toEqual([AI_SUB_CAUSE.hold]);
+    expect(chaseAt(SUB_HOLD_MINUTE - 1, { home: 1, away: 0 })).toEqual([]);
+    const sub = chaseAt(SUB_HOLD_MINUTE, { home: 1, away: 0 })[0];
+    expect(sub?.subCause).toBe("hold");
     expect(groupOfId(squad, sub?.actors[0])).toBe("ST");
     expect(groupOfId(squad, sub?.actors[1])).toBe("CB");
   });
@@ -793,15 +870,15 @@ describe("AI 교체 판단", () => {
       plan(SUB_CHASE_MINUTE),
       () => 0,
       {},
-    );
+    )[0];
     expect(groupOfId(full, sub?.actors[0])).toMatch(/M$/); // RM·LM·RCM·LCM
-    expect(sub?.causes).toEqual([AI_SUB_CAUSE.chase]);
+    expect(sub?.subCause).toBe("chase");
   });
 
   it("부상이 먼저다 — 뒤지고 있어도 다친 선수부터 뺀다", () => {
     const squad = squadOf(75);
     const hurt = squad.onPitch[5]!;
-    const sub = planAiSubstitution(
+    const subs = planAiSubstitution(
       "home",
       squad,
       ledger(80, 0, { home: 0, away: 2 }),
@@ -809,7 +886,178 @@ describe("AI 교체 판단", () => {
       () => 0,
       {},
     );
-    expect(sub?.actors[0]).toBe(hurt.id);
-    expect(sub?.causes).toEqual([AI_SUB_CAUSE.injury]);
+    expect(subs).toHaveLength(1);
+    expect(subs[0]?.actors[0]).toBe(hurt.id);
+    expect(subs[0]?.subCause).toBe("injury");
+  });
+
+  /**
+   * **한 정지점은 교체 창 하나다** (match.md §2) — 실제 벤치처럼 한 번 일어설 때
+   * 여러 장을 쓴다. 정지점마다 한 장이던 시절 AI 교체 총량이 실제(4.3/경기)의
+   * 절반에 못 미쳤다.
+   */
+  it("한 정지점에서 승부수와 체력 교체가 한 창에 선다 — 상한은 SUB_WINDOW_MAX", () => {
+    const squad = squadOf(75);
+    const worn: Record<string, number> = {};
+    for (const p of squad.onPitch) worn[p.id] = 80; // 전원이 문턱 위
+    const subs = planAiSubstitution(
+      "home",
+      squad,
+      ledger(70, 0, { home: 0, away: 1 }),
+      plan(70),
+      () => 0,
+      worn,
+    );
+    expect(subs.length).toBe(SUB_WINDOW_MAX);
+    expect(subs[0]?.subCause).toBe("chase");
+    expect(subs[1]?.subCause).toBe("fatigue");
+    // 한 창 안에서 같은 선수가 두 번 나가거나 두 번 들어오지 않는다
+    const outs = subs.map((s) => s.actors[0]);
+    const ins = subs.map((s) => s.actors[1]);
+    expect(new Set(outs).size).toBe(subs.length);
+    expect(new Set(ins).size).toBe(subs.length);
+  });
+
+  it("창이 소진돼도 휴식 정지점에서는 움직인다 — 장부와 같은 규칙", () => {
+    const squad = squadOf(75);
+    const worn: Record<string, number> = {};
+    for (const p of squad.onPitch) worn[p.id] = 80;
+    const spentWindows = (minute: number, stop?: string) =>
+      planAiSubstitution(
+        "home",
+        squad,
+        {
+          minute,
+          phase: "second_half",
+          score: { home: 0, away: 0 },
+          events: [],
+          home: { subsUsed: 3, subWindows: LEDGER_LIMITS.maxSubWindows },
+          away: { subsUsed: 0, subWindows: 0 },
+        } as never,
+        stop ? plan(minute, { stop }) : plan(minute),
+        () => 0,
+        worn,
+      );
+    expect(spentWindows(70)).toEqual([]);
+    expect(spentWindows(45, "half_time").length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * 사건의 눈금 — **구간 시뮬과 간이 시뮬이 함께 쓰는 손잡이들**이다
+ * (`engine/quick-sim.ts`가 같은 함수·같은 상수를 import한다). 한쪽에서 나누는 수나
+ * 곱하는 자리를 다시 적으면 "우리 경기만 카드를 받는다"가 조용히 시작된다.
+ */
+describe("카드·부상·연장의 눈금", () => {
+  it("경기당 손잡이를 두 팀으로 나눈다 — 강도 1의 양 팀 합이 손잡이 그대로다", () => {
+    expect(teamCardRate(1) * 2).toBeCloseTo(CARDS_PER_MATCH);
+    expect(teamInjuryRate(1) * 2).toBeCloseTo(INJURY_PER_MATCH);
+    // 강도에 정비례한다 — 거칠게 밀어붙이면 자기가 받는다
+    expect(teamCardRate(1.3)).toBeCloseTo(teamCardRate(1) * 1.3);
+    expect(teamCardRate(0.8)).toBeCloseTo(teamCardRate(1) * 0.8);
+    expect(teamCardRate(0)).toBe(0);
+    // 부상 빈도는 성향 평균까지 탄다 — 유리몸을 열한 명 세우면 실제로 더 자주 쓰러진다
+    expect(teamInjuryRate(1, 2)).toBeCloseTo(teamInjuryRate(1) * 2);
+    expect(teamInjuryRate(1.2, 1.5)).toBeCloseTo(teamInjuryRate(1) * 1.2 * 1.5);
+  });
+
+  it("카드 가중은 적극성에서 오르고 태클에서 내린다 — 경고를 안은 선수는 그만큼 덜 받는다", () => {
+    const rough = makePlayer("rough", "home", "CB", "DF", 70, { aggression: 80, tackling: 59 });
+    // 적극성 × 1.5 + (99 − 태클) × 0.5
+    expect(bookingWeight(rough, false)).toBeCloseTo(80 * 1.5 + (99 - 59) * 0.5);
+    expect(bookingWeight(rough, true)).toBeCloseTo(
+      bookingWeight(rough, false) * BOOKED_AGAIN_WEIGHT,
+    );
+
+    const calm = makePlayer("calm", "home", "CB", "DF", 70, { aggression: 40, tackling: 59 });
+    const clean = makePlayer("clean", "home", "CB", "DF", 70, { aggression: 80, tackling: 90 });
+    expect(bookingWeight(calm, false)).toBeLessThan(bookingWeight(rough, false));
+    expect(bookingWeight(clean, false)).toBeLessThan(bookingWeight(rough, false));
+  });
+
+  it("부상 가중은 지침·몸싸움·성향을 탄다 — 쌓인 피로와 떨어진 컨디션이 같은 눈금이다", () => {
+    const p = makePlayer("p", "home", "CB", "DF", 70, { strength: 60 }, { condition: 75 });
+    // 40 + (100 − 컨디션 + 누적 피로) × 0.8 + (99 − 몸싸움) × 0.3
+    expect(injuryWeight(p)).toBeCloseTo(40 + 25 * 0.8 + (99 - 60) * 0.3);
+    // 경기 중 쌓인 피로 25는 저장된 컨디션 25칸과 같은 자리로 들어간다
+    const drained = makePlayer(
+      "drained",
+      "home",
+      "CB",
+      "DF",
+      70,
+      { strength: 60 },
+      { condition: 50 },
+    );
+    expect(injuryWeight(p, 25)).toBeCloseTo(injuryWeight(drained));
+    // 성향은 배수다 — 굴림 횟수가 아니라 누가 걸리는지만 가른다
+    expect(injuryWeight(p, 0, 1.5)).toBeCloseTo(injuryWeight(p) * 1.5);
+    const sturdy = makePlayer(
+      "sturdy",
+      "home",
+      "CB",
+      "DF",
+      70,
+      { strength: 90 },
+      { condition: 75 },
+    );
+    expect(injuryWeight(sturdy)).toBeLessThan(injuryWeight(p));
+  });
+
+  /**
+   * 간이 시뮬의 연장이 이 값을 그대로 import한다 — 같은 0.84를 두 식으로 내면
+   * 분모를 고친 날 감독의 연장과 세계의 연장이 조용히 갈린다.
+   */
+  it("연장의 분당 밀도는 30분 총량이 90분의 EXTRA_TIME_SHOT_SHARE배가 되는 값이다", () => {
+    expect(EXTRA_TIME_MINUTES).toBe(30);
+    expect(EXTRA_TIME_DENSITY).toBeCloseTo(0.84);
+    // 30분 × 밀도 = 90분 × 0.28 — 시간 비율(1/3)보다 낮게 잡은 자리다
+    expect(EXTRA_TIME_DENSITY * EXTRA_TIME_MINUTES).toBeCloseTo(
+      EXTRA_TIME_SHOT_SHARE * PHASE_END.second_half,
+    );
+    expect(EXTRA_TIME_DENSITY).toBeLessThan(1);
+  });
+});
+
+/**
+ * 비득점 분해는 **스코어에 닿지 않는다** — 유효슈팅·블록·유효슈팅 실패의 비율만
+ * 정한다. 그래서 경기 결과 테스트로는 절대 잡히지 않고, 여기서만 잡힌다.
+ */
+describe("골이 되지 못한 슛의 분해", () => {
+  it("기회가 좋을수록 선방으로 남는다 — 곡선의 양 끝이 두 계수를 고정한다", () => {
+    expect(savedShare(0)).toBeCloseTo(0.2405, 4);
+    expect(savedShare(1)).toBeCloseTo(0.7211, 4);
+    // 단조 증가 — 좋은 기회일수록 골문 안으로 간다
+    expect(savedShare(0.25)).toBeGreaterThan(savedShare(0));
+    expect(savedShare(0.75)).toBeGreaterThan(savedShare(0.25));
+  });
+
+  /**
+   * xG 표집이 난수를 몇 번 먹는지는 표집 방식이 정하므로 세어서 맞춘다 — 그 뒤의
+   * 세 굴림이 골 여부 · 선방 여부 · 블록 여부다.
+   */
+  const shotWithRolls = (meanXg: number, tail: number[]) => {
+    let used = 0;
+    const xg = sampleShotXg(() => {
+      used += 1;
+      return 0.5;
+    }, meanXg);
+    const values = [...Array<number>(used).fill(0.5), ...tail];
+    let i = 0;
+    const shot = sampleShot(() => values[i++] ?? 0.5, { meanXg }, FINISHING_PIVOT);
+    expect(shot.xg).toBeCloseTo(xg);
+    return shot;
+  };
+
+  it("선방 문턱 바로 아래는 선방, 위는 블록 문턱이 다시 가른다", () => {
+    const saved = savedShare(0.5);
+    // 결정력이 기준점이면 골 확률이 곧 xG다 — 0.9는 그 위라 골이 아니다
+    expect(shotWithRolls(0.5, [0.9, saved - 1e-6]).outcome).toBe("saved");
+    // 블록 문턱은 0.38 — 굴림을 그 양옆에 두어 값 자체를 잡는다
+    expect(BLOCKED_SHARE).toBeCloseTo(0.38, 4);
+    expect(shotWithRolls(0.5, [0.9, saved + 1e-6, 0.3799]).outcome).toBe("blocked");
+    expect(shotWithRolls(0.5, [0.9, saved + 1e-6, 0.3801]).outcome).toBe("off_target");
+    // 문턱 아래로 굴리면 골이고, 그때는 분해 자체가 없다
+    expect(shotWithRolls(0.5, [0.49]).outcome).toBe("goal");
   });
 });

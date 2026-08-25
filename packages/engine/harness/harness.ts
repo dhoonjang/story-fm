@@ -7,6 +7,8 @@
  * (→ `docs/simulation/balance-harness.md`).
  */
 
+import { appendFileSync } from "node:fs";
+
 /** 표기 단위 — 값의 뜻이 아니라 사람이 읽는 모양만 정한다 */
 /** `wage`는 주급 — £k 눈금이라 £M로 찍으면 해상도가 사라진다 */
 export type Unit = "money" | "wage" | "ratio" | "count" | "score";
@@ -125,6 +127,45 @@ function pad(text: string, width: number): string {
   return text + " ".repeat(Math.max(0, width - widthOf(text)));
 }
 
+/**
+ * 측정값을 파일로도 남길 자리 — 주간 워크플로가 `pnpm balance --report`로 준다
+ * (→ `docs/simulation/balance-harness.md` §5).
+ *
+ * 비어 있으면 아무것도 쓰지 않는다. 손으로 돌리는 자리는 표만 읽으면 되고, 파일을
+ * 남기는 것은 그 표를 사람 없이 판정해야 하는 자리 하나뿐이다.
+ */
+const REPORT_ENV = "BALANCE_REPORT";
+
+/** 리포트 한 줄 — 하네스 하나의 측정값 전부. **밴드도 함께 실린다**(서술자가 원본) */
+export interface ReadingLine {
+  readonly id: string;
+  readonly what: string;
+  readonly doc: string;
+  readonly label: string;
+  readonly bands: ReadonlyArray<Band & { value: number | null; outside: boolean }>;
+}
+
+/**
+ * 표를 세우는 그 자리에서 파일에도 한 줄 붙인다 — **하네스 본체는 아무것도 하지
+ * 않는다.** 리포트를 위해 하네스마다 호출을 하나 더 적게 하면 새로 쓰는 하네스가
+ * 그 줄을 빠뜨리고, 빠진 하네스는 리포트에서 「돌지 않았다」로 읽힌다.
+ *
+ * 워커 프로세스가 여럿이라 이어쓰기다 — 줄 하나가 짧아 섞이지 않는다.
+ */
+function appendReport(harness: Harness, rows: readonly Verdict[], label: string): void {
+  const file = process.env[REPORT_ENV];
+  if (file === undefined || file.length === 0) return;
+  const line: ReadingLine = {
+    id: harness.id,
+    what: harness.what,
+    doc: harness.doc,
+    label,
+    // NaN은 JSON에서 null이 된다 — 읽는 쪽이 그대로 「측정값 없음」으로 읽는다
+    bands: rows.map((row) => ({ ...row.band, value: row.value, outside: row.outside })),
+  };
+  appendFileSync(file, `${JSON.stringify(line)}\n`);
+}
+
 /** 돌린 뒤의 표 — 지표 · 측정 · 구간 · 판정 */
 export function reportOf<H extends Harness>(
   harness: H,
@@ -132,6 +173,7 @@ export function reportOf<H extends Harness>(
   label: string,
 ): string {
   const rows = verdictsOf(harness, readings);
+  appendReport(harness, rows, label);
   const width = Math.max(...rows.map((r) => widthOf(r.band.metric)));
   const lines = rows.map((row) => {
     const mark = MARK[row.band.role][row.outside ? 1 : 0];

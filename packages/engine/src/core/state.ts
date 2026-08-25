@@ -2,6 +2,9 @@ import type {
   Achievement,
   Approach,
   ApproachPressure,
+  BoardDemand,
+  BoardRequest,
+  PressLeak,
   AxisValues,
   Booking,
   CharacterInjection,
@@ -20,21 +23,26 @@ import type {
   Manager,
   ManagerAttributes,
   ManagerOffer,
+  ManagerVacancy,
   MatchRecord,
   MatchSide,
+  NarrativeArc,
   NarrativeNote,
+  PaymentSchedule,
   Persona,
   PlayerIssue,
   SettlingEvent,
   TransferListing,
   PlayerTraining,
   PositionGroup,
+  ReserveTrainingPolicy,
   RoleMemory,
   ScheduleEntry,
   Negotiation,
   PressConference,
   ScoutReport,
   ScoutReportCard,
+  SeasonAward,
   SeasonRecord,
   SeasonStat,
   ShootoutKick,
@@ -53,6 +61,9 @@ import {
   ATTRIBUTE_AXES,
   DEFAULT_FORMATION,
   FAMILIARITY_BASELINE,
+  MANAGER_TERMS_BY_TIER,
+  REPUTATION_MAX,
+  REPUTATION_MIN,
   FORMATIONS,
   FIRST_TEAM_LIMIT,
   MATCHDAY_BENCH,
@@ -80,8 +91,11 @@ import {
   seasonYear,
   type SeasonCalendar,
 } from "../competition/calendar";
+import { diffDays } from "./dates";
 import { rankByName } from "./name-match";
+import { tierOfTeamIn } from "./club-tier";
 import { defaultXiIds, playerCatalog } from "../world/catalog";
+import { assertCatalogValid } from "../world/catalog-invariants";
 import { estimateSquadWages, wageSubjectOf } from "../world/wages";
 import { clubEconomyLevel } from "../data/league-economy";
 import { worldFigureManagerOf } from "../data/world-figures";
@@ -112,7 +126,13 @@ import { advanceDomesticCups } from "../competition/domestic-cup";
 import { buildEuroEntrants, type EuroEntry } from "../competition/europe";
 import { buildSeasonFixtures, isUserFixture } from "../competition/fixtures";
 import { seedInjuryHistory } from "../squad/injury";
-import { generateHeadCoach, generateOwner, generateReporters } from "../world/persona";
+import {
+  generateHeadCoach,
+  generateOwner,
+  generateReporters,
+  occupiedPersonNames,
+  seededVirtualManagerName,
+} from "../world/persona";
 import { makeRng, randInt } from "./rng";
 // domestic-cup과 같은 이유로 안전하다 — training-plan은 state를 **타입으로만** 읽는다
 import { installDefaultTraining } from "../squad/training-plan";
@@ -139,6 +159,14 @@ export interface SkillBriefItem {
   text: string;
   /** 그 값의 갈래·부연 — 한 톤 낮춰 **뒤에** 선다 (`패스·시야`, `적응도 62`) */
   note?: string;
+  /**
+   * 이 항목이 말하는 **증감** — 화면은 이 부호로 색을 준다 (`+2`는 이득, `−1`은 손해).
+   *
+   * 부호는 숫자로 온다. 화면이 `text`에서 `+`·`−`를 찾아 칠하면 포메이션(`4-2-3-1`)이
+   * 같은 자를 지나고, 코어가 문구를 바꾸는 날 색이 조용히 꺼진다. 증감을 말하지 않는
+   * 항목에는 달지 않는다 — 0은 "안 움직였다"는 사실이라 그것과 다르다.
+   */
+  delta?: number;
 }
 
 /**
@@ -239,9 +267,9 @@ export interface ChatTurn {
   /**
    * 이 턴에 도착한 **스카우팅 보고서** — 채팅이 카드로 편다.
    *
-   * 스카우트 완료는 스킬 호출이 아니라 tick의 사건이라, 예전엔 다이제스트 한 줄에
-   * 묻혀 화면에 아예 뜨지 않았다. 며칠을 기다려 얻은 정보인데 보러 가려면 선수
-   * 검색을 다시 해야 했다.
+   * 스카우트 완료는 스킬 호출이 아니라 tick의 사건이라, 다이제스트 한 줄로만
+   * 남기면 화면에 뜨지 않는다 — 며칠을 기다려 얻은 정보를 보러 선수 검색을
+   * 다시 해야 한다.
    */
   reports?: ScoutReportCard[];
   /**
@@ -319,12 +347,6 @@ export interface PendingMatch {
   matchId: string;
   packet: StrengthPacket;
   ledger: MatchLedgerState;
-  /**
-   * ⚠️ 폐기된 필드 — 구간 시뮬레이터(`advanceSegment`)가 사건을 그때그때 굴리므로
-   * 경기 전체를 미리 만들지 않는다. 옛 세이브 호환으로만 남긴다 (읽지 않는다).
-   */
-  script: MatchScriptSegment[] | null;
-  scriptCursor: number;
   /** 진행한 구간 수 — 난수 채널에 들어가 같은 경기가 재현된다 */
   segment?: number;
   /**
@@ -455,19 +477,6 @@ export interface PendingMatch {
     /** 어느 쪽으로 던진 판인가 — 경기당 한 번이라 이 값이 서면 다시 묻지 않는다 */
     intent: "chase" | "hold";
   };
-  /**
-   * **상대 벤치가 마지막으로 판단한 분.**
-   *
-   * 짧게 부른 구간(`maxMinutes`)이 판단 자리를 여는 간격을 여기서 잰다
-   * (`AI_BRIEF_GAP`). 구간 횟수로 세면 감독이 말을 걸수록 상대가 빨라지거나
-   * 얼어붙는다. 옛 세이브엔 없다 (optional).
-   */
-  aiDecidedAt?: number;
-}
-
-export interface MatchScriptSegment {
-  events: import("@story-fm/domain").MatchEvent[];
-  stop: "goal" | "half_time" | "full_time" | "incident";
 }
 
 export type GamePhase = "idle" | "matchday" | "match";
@@ -521,6 +530,15 @@ export interface GameState {
    * 구 세이브엔 없다 — 읽을 때 09:00으로 본다 (`clockOf`).
    */
   clock?: string;
+  /**
+   * **첫 줄 헤더를 연달아 못 읽은 평시 턴 수** — 읽히면 지워진다.
+   *
+   * 모델이 적은 시점이 시계를 움직이는 유일한 자유 텍스트 경로라(agents.md §2)
+   * 그 실패는 조용히 쌓인다. 세이브가 드는 이유는 "연달아"가 턴을 건너 세는
+   * 값이라서다 — 어디에서도 파생할 수 없다. 옛 세이브엔 없다
+   * (optional — SAVE_VERSION 유지).
+   */
+  sceneHeaderMisses?: number;
   calendar: SeasonCalendar;
   userTeamId: string;
   phase: GamePhase;
@@ -579,6 +597,19 @@ export interface GameState {
   transfers: Transfer[];
   growthLog: GrowthEntry[];
   seasonStats: SeasonStat[];
+  /**
+   * 집중 육성 명단 — 감독이 지정한 우리 2군 유망주(`set_development_focus`).
+   * 월간 성장 확률에 배율이 붙는다 (squad/development.ts — season.md §2 2군 리그).
+   * 승격·이적으로 떠나면 걷어낸다. 구 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  developmentFocus?: string[];
+  /**
+   * 2군 훈련 방침 — 감독이 고른 축 갈래(`set_reserve_training`). 우리 2군의 월간
+   * 성장에서 **어느 축이 뽑히는지**에 배율로 얹힌다
+   * (squad/training-plan.ts · development.ts — season.md §2 2군 리그).
+   * 없으면 `balanced`다 — 옛 세이브도 그대로 읽힌다 (optional — SAVE_VERSION 유지).
+   */
+  reserveTraining?: ReserveTrainingPolicy;
   issues: PlayerIssue[];
   /**
    * 정착 이벤트 — 면담·팀토크·주장 지명이 새 영입의 적응에 남긴 것.
@@ -619,11 +650,23 @@ export interface GameState {
    */
   dismissal?: Dismissal;
   /**
+   * **경질 이력** — 부임이 `dismissal` 카드를 지울 때 여기로 옮겨 남는다 (career.md §6).
+   * 잘린 시즌은 `SEASON_RECORD`가 없으므로 커리어 표가 그 해의 경질 줄을 여기서
+   * 읽는다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  dismissals?: Dismissal[];
+  /**
    * **감독직 제안** — 공석이 된 구단이 무직 감독을 부른 기록 (career.md §5.1).
-   * 만료·수락한 것도 남는다 — 부르지 않은 구단이 다시 부르지 않게 하는 근거다.
-   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * 만료·수락한 것도 남는다 — 같은 무직 기간에 같은 구단이 다시 부르지 않게 하는
+   * 근거다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   managerOffers?: ManagerOffer[];
+  /**
+   * **공석 명부** — AI 구단이 감독을 자른 자리, 무직인 동안만 쌓인다
+   * (career.md §5.1). 무직 감독이 먼저 지원하는(`apply_manager_job`) 문이고,
+   * 14일 뒤 지워진다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  managerVacancies?: ManagerVacancy[];
   /**
    * **아직 GM이 읽지 않은 화면 조작** — 전술판·명단·역할을 직접 만진 것.
    *
@@ -699,6 +742,26 @@ export interface GameState {
    * 없다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   approachPressure?: ApproachPressure[];
+  /**
+   * 언론 유출 — 사다리 계단 4의 사건 (people.md §8). **다음 회견이 실어 갈 때까지만**
+   * 남는다: `openPress`가 소비해 사실 카드로 옮긴다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  pressLeaks?: PressLeak[];
+  /**
+   * 보드 요청 — 구단주 원형이 이적창마다 거는 조건 (career.md §5.2). 발행 시점과
+   * 판정 시점이 갈리고 발행 순간의 기준값(주급 총액·기준 이적료)을 들므로 세이브가
+   * 든다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  boardDemands?: BoardDemand[];
+  /**
+   * 감독이 보드에 건 요청 — 예산·주급 한도·구장 (finance.md §9.6). 구단주 요청과
+   * **방향이 반대인 별개 상태**다: 저쪽은 보드가 감독에게 걸고 평판이 오가며,
+   * 이쪽은 감독이 걸고 평판은 움직이지 않는다. 건 날과 답이 오는 날이 갈리고
+   * 구장은 완공일까지 더 갈리므로 세이브가 든다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  boardRequests?: BoardRequest[];
 
   // ── 감독 ──
   manager: Manager;
@@ -706,6 +769,14 @@ export interface GameState {
   seasonRecords: SeasonRecord[];
   trophies: Trophy[];
   achievements: Achievement[];
+  /**
+   * 리그 시상 — **세계 전체**의 상이다(모든 리그·모든 클럽). 감독의 기록이 아니라
+   * 리그가 주는 상이므로 여기 통째로 쌓이고, 커리어 표는 그중 감독이 그 시즌 맡고
+   * 있던 팀의 것만 골라 세운다 (season.md §6 · career.md §6).
+   * 코드와 근거 수치뿐이다 — 이름도 문장도 없다 (overview.md §1 철칙 4).
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  awards?: SeasonAward[];
 
   // ── 서사 ──
   /**
@@ -743,6 +814,44 @@ export interface GameState {
    * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   characterMemories?: CharacterMemory[];
+  /**
+   * 서사 아크 — 기억을 이야기로 엮는 골격 (people.md §9). 개폐는 장부에서
+   * 결정적으로 판정한다(`world/arcs.ts`). 옛 세이브엔 없다
+   * (optional — SAVE_VERSION 유지).
+   */
+  arcs?: NarrativeArc[];
+  /**
+   * 지급 일정 표 — 분할로 합의된 이적료·해지 정산금의 미래 회분
+   * (transfer.md §5-2). 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  paymentSchedules?: PaymentSchedule[];
+}
+
+/**
+ * **전부 되거나 아무것도 안 된다** — 복제본 위에서 돌리고, 끝까지 성공했을 때만
+ * 원본에 옮겨 붙인다.
+ *
+ * 시즌 전환처럼 **되돌릴 수 없는 걸음을 여럿 밟은 끝에 던질 수 있는** 전이가 쓴다
+ * (→ docs/simulation/season.md §6). 예외가 그대로 나가면 세이브는 반만 넘어간 채
+ * 남고, 그 상태에는 회복 경로가 없다.
+ *
+ * 옮겨 붙이기는 `state`가 가리키는 **그 객체를 고친다** — 호출부가 쥔 참조가
+ * 그대로 새 값을 본다. 다만 그 안의 배열·객체는 통째로 갈리므로, 이 경계를 넘어
+ * 선수 하나를 붙들고 있던 참조는 낡은 것이 된다.
+ *
+ * 값은 전이 하나당 깊은 복제 하나다. 시즌 전환은 시즌에 한 번이고 그 자체가
+ * 전 클럽의 명단과 편성을 다시 짜는 걸음이라, 복제 한 번은 그 안에 묻힌다.
+ */
+export function inTransaction<T>(state: GameState, run: (draft: GameState) => T): T {
+  const draft = structuredClone(state);
+  const result = run(draft);
+  const target = state as unknown as Record<string, unknown>;
+  // 초안이 지운 필드는 원본에서도 지운다 — `Object.assign`은 덮기만 한다
+  for (const key of Object.keys(target)) {
+    if (!(key in draft)) delete target[key];
+  }
+  Object.assign(target, draft as unknown as Record<string, unknown>);
+  return result;
 }
 
 // ── 팀·선수 조회 ────────────────────────────────────────
@@ -808,9 +917,14 @@ export function clubProfileIn(state: GameState, teamId: string): ClubProfile {
  * `leagueOfTeamIn`과 갈리는 것은 승강이다 — 이쪽은 승강 **전**의 원 소속이라,
  * "이 구단이 원래 어느 리그의 클럽인가"를 묻는 자리(브랜드 보정)가 쓴다. 지금
  * 어디 있는가는 언제나 `leagueOfTeamIn`이다 (game-state.md §1).
+ *
+ * ⚠️ **세이브에도 카탈로그에도 없는 팀이면 던진다.** 폴백할 옳은 값이 없다 —
+ * 리그를 하나 지어내면 그 팀이 남의 리그 상금과 경제 수준을 받는다 (team.md §1).
  */
 export function catalogLeagueIn(state: GameState | undefined, teamId: string): string {
-  return state?.teams.find((t) => t.id === teamId)?.leagueId ?? leagueOfTeam(teamId);
+  const leagueId = state?.teams.find((t) => t.id === teamId)?.leagueId ?? leagueOfTeam(teamId);
+  if (leagueId === null) throw new Error(`세이브에도 카탈로그에도 없는 팀: ${teamId}`);
+  return leagueId;
 }
 
 /**
@@ -889,6 +1003,15 @@ export function userPlayers(state: GameState): GamePlayer[] {
  */
 export function managedTeamId(state: GameState): string | null {
   return state.dismissal ? null : state.userTeamId;
+}
+
+/**
+ * 평판을 눈금 안으로 자른다 — 경기·시즌·컵·경질이 저마다 다른 폭으로 더하고 빼도
+ * 나가는 값은 `ManagerReputationSchema`가 받는 0~100이라야 한다. **여기가 유일한
+ * 문이다** — 호출부가 각자 `Math.min(100, …)`을 적으면 스키마를 옮긴 날 한쪽만 남는다.
+ */
+export function clampReputation(value: number): number {
+  return Math.max(REPUTATION_MIN, Math.min(REPUTATION_MAX, value));
 }
 
 export function playerById(state: GameState, id: string): GamePlayer | null {
@@ -1049,6 +1172,19 @@ export function activeContract(state: GameState, playerId: string): Contract | n
   return state.contracts.find((c) => c.gamePlayerId === playerId && c.status === "active") ?? null;
 }
 
+/**
+ * 계약 잔여 연수 (소수, 만료 뒤는 0) — 몸값·설득·재계약이 같은 자를 읽는다.
+ *
+ * 이적가(`market.ts`)와 설득 판정(`persuasion.ts`)이 각자 적던 값이다. 그 둘은
+ * `market → persuasion` 한 방향으로만 이어져 있어 아래쪽이 위를 부를 수 없었고,
+ * 그래서 두 줄이 두 벌로 살았다 — 계약이 곧 상태라 자리는 여기다 (AGENTS.md §5).
+ */
+export function contractYearsLeft(state: GameState, playerId: string): number {
+  const contract = activeContract(state, playerId);
+  if (!contract) return 0;
+  return Math.max(0, diffDays(state.date, contract.until) / 365);
+}
+
 /** 팀 주급 총액 — 활성 계약의 합 (저장하지 않는 파생값) */
 /** 이번 주 주급 한 줄 — 선수 한 명이 이 구단에 지우는 부담 */
 export interface WeeklyWageLine {
@@ -1161,7 +1297,8 @@ export function recordGrowth(
   source: GrowthEntry["source"],
   target: string,
   delta: number,
-  note?: string,
+  /** 어느 경로로 올랐나 — 문장이 아니라 코드다 (records.ts `GrowthOrigin`) */
+  origin?: GrowthEntry["origin"],
   /** 실제로 그 일이 있었던 날 — 안 주면 오늘. 결산은 **지나간 훈련 날짜**를 준다 */
   on?: string,
 ): void {
@@ -1172,7 +1309,7 @@ export function recordGrowth(
     source,
     target,
     delta,
-    ...(note ? { note } : {}),
+    ...(origin ? { origin } : {}),
   });
   if (state.growthLog.length > GROWTH_LOG_LIMIT) {
     state.growthLog.splice(0, state.growthLog.length - GROWTH_LOG_LIMIT);
@@ -1187,11 +1324,49 @@ export function recordGrowth(
  */
 const NARRATIVE_LIMIT = 200;
 
-export function pushNarrative(state: GameState, text: string, salience = 2): void {
-  state.narrative.push({ date: state.date, text, salience });
+export function pushNarrative(
+  state: GameState,
+  text: string,
+  salience = 2,
+  /** 갈래 — 하루 한도를 세는 열쇠다. 접두 문장으로 가르지 않는다 (records.ts `NarrativeKind`) */
+  kind?: NarrativeNote["kind"],
+): void {
+  state.narrative.push({ date: state.date, text, salience, ...(kind ? { kind } : {}) });
   if (state.narrative.length > NARRATIVE_LIMIT) {
     state.narrative.splice(0, state.narrative.length - NARRATIVE_LIMIT);
   }
+}
+
+/**
+ * 무게의 반감기 — 이 일수가 지날 때마다 사건의 무게가 절반이 된다.
+ *
+ * salience 5는 반감기를 네 번 지나야 오늘의 1 아래로 내려간다 — 지난주의 경질
+ * 임박이 어제의 스카우트 한 줄에 밀리지 않는 눈금이다 (people.md §9).
+ */
+const NARRATIVE_HALF_LIFE_DAYS = 7;
+
+/**
+ * 스냅샷에 실을 서사 기억 — **salience×recency 가중 상위 `limit`건** (people.md §9).
+ *
+ * 최신순이 아니다: `slice(-4)`는 무게 5의 사건을 나흘 만에 밀어냈다. 가중치가
+ * 같으면 최신이 이기고, 뽑힌 뒤에는 시간순으로 선다 — GM이 읽는 것은 순위가 아니라
+ * 흐름이다. 결정적이다 — 같은 날 같은 세이브면 같은 목록.
+ */
+export function topNarrative(state: GameState, limit: number): NarrativeNote[] {
+  const day = (d: string) => new Date(`${d}T00:00:00Z`).getTime() / 86400000;
+  const today = day(state.date);
+  return state.narrative
+    .map((note, index) => ({
+      note,
+      index,
+      weight:
+        note.salience *
+        Math.pow(0.5, Math.max(0, today - day(note.date)) / NARRATIVE_HALF_LIFE_DAYS),
+    }))
+    .sort((a, b) => b.weight - a.weight || b.index - a.index)
+    .slice(0, limit)
+    .sort((a, b) => a.index - b.index)
+    .map((x) => x.note);
 }
 
 /** id를 이룰 수 있는 문자 — 앞뒤에 이것이 붙어 있으면 그 id가 아니라 더 긴 id의 일부다 */
@@ -1224,6 +1399,11 @@ export interface CreateGameInput {
   managerName: string;
   background: string;
   attributes: ManagerAttributes;
+  /**
+   * 시작 지갑 (£) — 배경 판정이 앵커 ± 한도 안에서 정한 값 (career.md §1).
+   * 생략하면 0이다: 판정도 앵커도 없이 세우는 문맥(테스트·절차 생성)의 몫이다.
+   */
+  wallet?: number;
   /** 세계의 범위 — 없으면 카탈로그 전체 (`world/scope.ts`) */
   world?: WorldScope;
 }
@@ -1304,7 +1484,7 @@ function instantiatePlayers(seed: number, only?: (teamId: string) => boolean): G
       ...(entry.height === undefined ? {} : { height: entry.height }),
       ...(entry.weight === undefined ? {} : { weight: entry.weight }),
       attributes: {
-        // 카탈로그의 15축을 그대로 복사 (2-레이어 분리 — 이후 변화는 GAME_PLAYER에만)
+        // 카탈로그의 16축을 그대로 복사 (2-레이어 분리 — 이후 변화는 GAME_PLAYER에만)
         ...(Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, entry[a]])) as AxisValues),
         overall: 50, // 아래 recomputeOverall이 주 포지션 가중치로 채운다
         potential: entry.potential,
@@ -1379,19 +1559,30 @@ function seededManagerName(
 }
 
 /**
- * 로드 보정 — 명부의 감독을 이름 없는 벤치에 채운다 (people.md §2-1).
+ * 이름 없는 벤치를 전부 채운다 — 명부의 감독이 먼저, 나머지는 가상 이름이다
+ * (people.md §2). 세계 생성과 로드 보정이 같은 길을 지난다.
  *
- * 명부가 생기기 전 세이브의 AI 구단은 감독 이름이 아예 없다(경질이 한 번 돌기
- * 전까지). `ensurePersonas`와 같은 결의 보정이라 **세이브 버전을 올리지 않는다** —
- * 없던 필드를 채우는 것이고, 명부가 결정적이라 채워도 그 세이브의 사람은 같다.
+ * 옛 세이브의 AI 구단은 감독 이름이 없을 수 있다(명부 밖 구단은 경질이 한 번 돌기
+ * 전까지 없었다). `ensurePersonas`와 같은 결의 보정이라 **세이브 버전을 올리지
+ * 않는다** — 없던 필드를 채우는 것이고, 가상 이름이 (시드, 팀) 채널로 결정적이라
+ * 채워도 그 세이브의 사람은 같다.
  *
  * ⚠️ **이미 이름이 있으면 건드리지 않는다.** 그 벤치는 감독 시장이 한 번 다녀간
- * 자리이고, 덮으면 경질된 사람이 로드할 때마다 되살아난다.
+ * 자리일 수 있고, 덮으면 경질된 사람이 로드할 때마다 되살아난다.
+ *
+ * ⚠️ **유저 팀 벤치는 채우지 않는다** — 그 자리는 유저의 것이다. 로드 순서상
+ * `ensurePersonas` 뒤에 돌아야 우리 구단 인물의 이름을 피해서 뽑는다
+ * (`persistence.ts`).
  */
 export function ensureSeededManagers(state: GameState): void {
+  const taken = occupiedPersonNames(state);
   for (const team of state.teams) {
     if (team.managerName !== undefined || !isClubTeam(team.id)) continue;
-    Object.assign(team, seededManagerName(team.id, state));
+    if (team.id === state.userTeamId) continue;
+    const name =
+      worldFigureManagerOf(team.id)?.name ?? seededVirtualManagerName(state.seed, team.id, taken);
+    team.managerName = name;
+    taken.add(name);
   }
 }
 
@@ -1917,11 +2108,46 @@ function initialTactics(
         width: 3,
         passStyle: 4,
       };
+    /**
+     * 앞을 셋으로 세운 백3 — 무게를 앞에 싣고 높은 곳에서 뺏어 짧게 잇는다.
+     * 폭은 윙어 둘이 **모양으로** 만드므로 지시로 벌리지 않고 오히려 안으로
+     * 좁혀 연결한다. 올린 둘(멘탈·압박)만큼 내린 둘(폭·패스)이 있다.
+     */
+    case "3-4-3":
+      return {
+        formation,
+        mentality: 4,
+        defensiveLine: 3,
+        pressing: 4,
+        tempo: 3,
+        width: 2,
+        passStyle: 2,
+      };
+    /**
+     * 같은 백5지만 5-4-1과 갈리는 자리 — **라인을 내리지 않는다.** 원톱은 받아 줄
+     * 사람이 없어 내려서서 길게 차야 하지만, 투톱은 중간에서 막고 그대로 나갈 수
+     * 있다. 그래서 내리는 것은 무게 하나뿐이다.
+     *
+     * ⚠️ **템포·패스를 올리지 않는다.** "백5에 롱볼"로 읽고 싶어지지만 두 축은 리그
+     * 평균의 남은 여유가 한 칸의 절반쯤뿐이고, 열댓 구단이 서는 프리셋이 한 칸을
+     * 올리면 그 여유를 통째로 먹어 리그 전체가 같은 방향으로 기운다
+     * (`match-stamina.test.ts`가 잡는다).
+     */
+    case "5-3-2":
+      return {
+        formation,
+        mentality: 2,
+        defensiveLine: 3,
+        pressing: 3,
+        tempo: 3,
+        width: 3,
+        passStyle: 3,
+      };
   }
 }
 
 /**
- * 구단이 **어떤 모양으로 서야 가장 센가** — 5개 프리셋을 채워 보고 고른다.
+ * 구단이 **어떤 모양으로 서야 가장 센가** — 프리셋 전부를 채워 보고 고른다.
  *
  * 채점 풀은 **지정 선발 11인**이다(있으면). 모양은 결국 "이 열한 명을 어떻게
  * 세울까"의 답이라, 스쿼드 전체로 재면 4백 명단을 가진 팀이 5백으로 서는 답이
@@ -2095,6 +2321,9 @@ export function buildAssignments(
 export { MATCHDAY_BENCH };
 
 export function createGame(input: CreateGameInput): GameState {
+  // 세계를 세우기 전에 카탈로그가 성립하는지 먼저 묻는다 — 어긋난 카탈로그로 세운
+  // 세계는 실패가 몇 시즌 뒤 엉뚱한 자리에서 터진다 (team.md §1)
+  assertCatalogValid();
   const seed = input.seed ?? randInt(makeRng(Date.now() % 2 ** 31, "seed"), 1, 2 ** 30);
   if (!teamCatalog().some((t) => t.id === input.userTeamId)) {
     throw new Error(`알 수 없는 팀: ${input.userTeamId}`);
@@ -2267,12 +2496,16 @@ export function createGame(input: CreateGameInput): GameState {
     pressConferences: [],
     approaches: [],
     approachPressure: [],
+    pressLeaks: [],
+    boardDemands: [],
+    boardRequests: [],
 
     manager: {
       name: input.managerName,
       background: input.background,
       attributes: input.attributes,
       reputation: { board: 50, media: 50, squad: 50 },
+      ...(input.wallet !== undefined && input.wallet > 0 ? { wallet: input.wallet } : {}),
     },
     managerXP: { leadership: 0, tactics: 0, training: 0, negotiation: 0, analysis: 0 },
     // 부임하면 사람이 먼저 기다린다 — 수석코치는 시드로 결정되므로
@@ -2291,11 +2524,25 @@ export function createGame(input: CreateGameInput): GameState {
     seasonRecords: [],
     trophies: [],
     achievements: [],
+    awards: [],
 
     narrative: [],
     chat: [],
   };
 
+  // 명부 밖 벤치의 가상 감독 — 페르소나 다섯이 선 뒤에 채워야 그 이름들을 피해서
+  // 뽑는다. 로드 보정과 같은 채널이라 새 게임과 옛 세이브가 같은 사람을 만난다
+  ensureSeededManagers(state);
+  // 감독도 계약으로 서 있다 (career.md §5.1) — 부임 구단 등급의 기본 조건.
+  // 체급은 세이브가 가지므로 state가 선 뒤에야 읽을 수 있다
+  {
+    const terms = MANAGER_TERMS_BY_TIER[tierOfTeamIn(state, input.userTeamId)];
+    state.manager.contract = {
+      salary: terms.salary,
+      signedOn: state.date,
+      until: contractUntil(state.date, terms.years),
+    };
+  }
   // 국내 컵 1라운드 추첨일을 미리 달력에 올린다 — tick을 기다리면 부임 첫날의
   // 달력이 비어 보인다 ("리그컵 추첨이 7월 말"이라는 사실은 시작부터 알 수 있다)
   if (hasCups(world)) advanceDomesticCups(state, []);
@@ -2314,23 +2561,55 @@ export function createGame(input: CreateGameInput): GameState {
 /** 매각·방출·임대 뒤 유지해야 하는 최소 인원 */
 export const MIN_SQUAD_AFTER_SALE = 18;
 
+/** 매각·방출·임대 뒤 남아야 하는 최소 골키퍼 수 */
+export const MIN_GK_AFTER_SALE = 2;
+
 /**
- * 이 선수가 빠지면 스쿼드가 무너지는가 — 무너지면 그 이유를 돌려준다.
+ * 스쿼드가 무너지는 갈래 — **코드와 수치**. 문장은 부르는 쪽이 만든다.
+ *
+ * 막히는 이유는 같아도 감독이 하려던 일은 매각·해지·임대 송출로 갈리고 동사가
+ * 다르다. 코어가 한 문장으로 못 박아 두면 부르는 쪽이 그 문장의 동사를 바꿔치기해
+ * 읽게 되고, 문구를 고치는 순간 그 자리가 깨진다 (overview.md §1 철칙 4).
+ */
+export type SquadShortfall = {
+  code: "squad-min" | "gk-min";
+  /** 그 선수가 빠진 뒤 남는 수 — 인원 또는 골키퍼 */
+  remaining: number;
+  /** 그 수가 견주는 하한 */
+  limit: number;
+};
+
+/**
+ * 스쿼드 하한 — **떠난 뒤에 남는 인원으로 잰다** (transfer.md §2).
+ *
+ * 감독의 매각·방출·임대 송출과 AI 시장이 **같은 상수·같은 부등호**를 쓰도록 판정을
+ * 여기 하나로 둔다. 같은 규칙을 두 자리에 적으면 한쪽만 고쳐져 "AI는 19명 아래로 못
+ * 파는데 감독은 18명까지 판다" 같은 어긋남이 소리 없이 생긴다.
+ *
+ * 남는 인원을 받는 것은 **부르는 쪽이 스쿼드를 어떻게 아는지가 다르기** 때문이다 —
+ * 감독 경로는 전 선수를 훑고(`squadShortfall`), AI 시장은 하루 색인을 넘긴다.
+ */
+export function squadFloorShortfall(remaining: readonly GamePlayer[]): SquadShortfall | null {
+  if (remaining.length < MIN_SQUAD_AFTER_SALE) {
+    return { code: "squad-min", remaining: remaining.length, limit: MIN_SQUAD_AFTER_SALE };
+  }
+  const keepers = remaining.filter((p) => groupOf(p) === "GK").length;
+  if (keepers < MIN_GK_AFTER_SALE) {
+    return { code: "gk-min", remaining: keepers, limit: MIN_GK_AFTER_SALE };
+  }
+  return null;
+}
+
+/**
+ * 이 선수가 빠지면 스쿼드가 무너지는가 — 무너지면 그 갈래를 돌려준다.
  * `negotiation`·`departures`가 함께 쓰므로 여기 둔다(둘이 서로를 import하면 순환).
  */
 export function squadShortfall(
   state: GameState,
   teamId: string,
   leaving: { id: string },
-): string | null {
-  const remaining = playersOf(state, teamId).filter((p) => p.id !== leaving.id);
-  if (remaining.length < MIN_SQUAD_AFTER_SALE) {
-    return `스쿼드가 ${MIN_SQUAD_AFTER_SALE}명 아래로 내려가 팔 수 없습니다`;
-  }
-  if (remaining.filter((p) => groupOf(p) === "GK").length < 2) {
-    return "골키퍼가 2명 아래로 내려가 팔 수 없습니다";
-  }
-  return null;
+): SquadShortfall | null {
+  return squadFloorShortfall(playersOf(state, teamId).filter((p) => p.id !== leaving.id));
 }
 
 /**

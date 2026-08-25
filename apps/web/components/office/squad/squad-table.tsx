@@ -244,8 +244,8 @@ export function SquadTable({
               <td className="hide-sm">{p.age}</td>
               {/**
                * OVR은 **지금 맡은 자리·역할에서 내는 전력**이다 — 경기에서 실제로
-               * 쓰이는 값이 그것이기 때문이다. 예전엔 주 포지션 기준값만 보여줘서,
-               * 자리를 옮기거나 역할을 바꿔도 명단의 숫자가 꿈쩍하지 않았다.
+               * 쓰이는 값이 그것이기 때문이다. 주 포지션 기준값으로 두면 자리를
+               * 옮기거나 역할을 바꿔도 명단의 숫자가 꿈쩍하지 않는다.
                * 값도 문구도 **전술판 칩과 같다**(`slotOverallOf`) — 같은 선수의
                * OVR이 왼쪽과 오른쪽에서 다르면 규칙이 없어 보인다.
                */}
@@ -253,8 +253,8 @@ export function SquadTable({
                 {p.slotOverall ?? p.overall}
                 <Margin observation={p.observation} />
               </td>
-              {/* 적응 — **하나의 값**이다. 예전엔 툴팁으로 "자리 적응 N · 전술 적응 N"을
-                  분해해 보여줬는데, 그러면 감독은 결국 두 축을 머리로 합쳐야 한다 */}
+              {/* 적응 — **하나의 값**이다. "자리 적응 N · 전술 적응 N"으로
+                  분해해 보여주면 감독이 결국 두 축을 머리로 합쳐야 한다 */}
               <td
                 className="hide-sm"
                 title={`${p.assignedPosition ?? p.position} 자리에서의 적응도`}

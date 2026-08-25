@@ -98,14 +98,14 @@ describe("등록 가부", () => {
     const full = squadOf(17, 8);
     const res = canRegister(full, player("vet", { homegrown: true }), SEASON);
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.reason).toContain("등록 명단이 찼습니다");
+    if (!res.ok) expect(res.block).toEqual({ code: "list-full", listed: 25, limit: 25 });
   });
 
   it("비홈그로운 상한에 걸리면 남은 자리는 홈그로운만 채운다", () => {
     const squad = squadOf(NON_HOMEGROWN_MAX, 5); // 22명 · 비홈그로운 17
     const blocked = canRegister(squad, player("foreign"), SEASON);
     expect(blocked.ok).toBe(false);
-    if (!blocked.ok) expect(blocked.reason).toContain("홈그로운이 모자랍니다");
+    if (!blocked.ok) expect(blocked.block.code).toBe("homegrown-short");
     // 같은 자리에 홈그로운은 들어간다
     expect(canRegister(squad, player("local", { homegrown: true }), SEASON).ok).toBe(true);
   });

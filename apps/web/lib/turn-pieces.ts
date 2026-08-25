@@ -187,3 +187,76 @@ export function splitStaging(line: string): StagingPart[] {
   }
   return parts;
 }
+
+/**
+ * 한 화자의 연속 발화 — 파싱된 줄을 말한 사람 단위로 묶은 것.
+ * `speaker === ""`이면 화자 없는 내레이션이다.
+ */
+export interface Utterance {
+  speaker: string;
+  lines: string[];
+}
+
+/** `@화자:` 한 줄을 화자와 내용으로 가른다 — 태그가 없으면 `speaker`는 `null`이다 */
+function parseLine(line: string): { speaker: string | null; content: string } {
+  const match = line.match(/^@([^:]*):\s?(.*)$/u);
+  if (!match) return { speaker: null, content: line };
+  return { speaker: match[1] ?? "", content: match[2] ?? "" };
+}
+
+/**
+ * @화자 문법을 화자 단위로 묶는다 (docs/llm/prompts.md §1).
+ *
+ * 줄마다 이름을 다시 적으면 **대사보다 이름이 먼저 눈에 들어온다.** 대본이 그렇듯
+ * 이어 말하는 동안은 이름을 한 번만 적고 대사를 아래로 잇는다 — 그래야 대사의
+ * 시작점이 한 줄로 맞아 눈이 흐르고, 누가 말하는지도 계속 분명하다.
+ *
+ * **태그 없이 여는 줄은 직전 화자가 이어 말하는 것이다** — 문법이 되풀이된 태그를
+ * 지웠으므로(§1 이어쓰기) 화면이 그 화자를 이어 준다. 장면이 서기 전의 태그 없는
+ * 줄은 코어의 위생이 이미 걷어냈고, 그래도 남은 것(중계·스트리밍 도중)은 이을
+ * 화자가 없으니 지금까지처럼 내레이션으로 선다.
+ *
+ * 명시적 `@:` 내레이션 줄은 저마다 독립된 지문이라 서로 잇지 않는다 — 이어지는
+ * 것은 태그 없는 줄뿐이다.
+ *
+ * @param carried 조각 경계를 넘어온 직전 화자 (`""`면 없음)
+ */
+export function groupUtterances(lines: readonly string[], carried = ""): Utterance[] {
+  const groups: Utterance[] = [];
+  let speaker = carried;
+  for (const line of lines) {
+    const parsed = parseLine(line);
+    const last = groups[groups.length - 1];
+    if (parsed.speaker === null) {
+      // 이어쓰기 — 직전 화자의 묶음에 붙고, 조각이 이어쓰기로 열리면 그 화자로 연다
+      if (last) last.lines.push(parsed.content);
+      else groups.push({ speaker, lines: [parsed.content] });
+      continue;
+    }
+    speaker = parsed.speaker;
+    // 화자가 있는 줄만 잇는다 — 내레이션은 저마다 독립된 장면 지문이다
+    if (last && speaker !== "" && last.speaker === speaker) last.lines.push(parsed.content);
+    else groups.push({ speaker, lines: [parsed.content] });
+  }
+  return groups;
+}
+
+/**
+ * 턴의 조각마다 말 묶음을 만든다 — **화자는 조각 경계를 넘어 이어진다.**
+ *
+ * 골 카드가 한 화자의 발화 한복판을 끊으면 그 뒤 조각은 태그 없는 줄로 열린다.
+ * 조각마다 따로 묶으면 그 줄이 화자를 잃고 내레이션으로 서므로, 직전 조각의
+ * 마지막 화자를 넘겨 준다. 표시 조각(`mark`)은 화자를 바꾸지 않고 지나간다.
+ *
+ * 조각 목록과 길이가 같은 배열을 돌려준다 — 표시 조각 자리는 빈 배열이다.
+ */
+export function groupPieces(pieces: readonly TurnPiece[]): Utterance[][] {
+  let carried = "";
+  return pieces.map((piece) => {
+    if (piece.mark) return [];
+    const groups = groupUtterances(piece.lines, carried);
+    const last = groups[groups.length - 1];
+    if (last) carried = last.speaker;
+    return groups;
+  });
+}

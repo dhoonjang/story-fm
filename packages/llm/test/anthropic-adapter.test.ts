@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import AnthropicSdk from "@anthropic-ai/sdk";
 import type Anthropic from "@anthropic-ai/sdk";
-import { AnthropicGameLLM } from "@story-fm/llm";
-import type { GameToolSpec, StopReason } from "@story-fm/llm";
+import { AnthropicGameLLM, llmErrorKind } from "@story-fm/llm";
+import type { GameToolSpec, LlmErrorKind, StopReason } from "@story-fm/llm";
 
 /** 모킹된 API 응답 시퀀스로 어댑터의 tool 재시도 루프를 검증한다 (LLM 호출 없음) */
 
@@ -95,19 +95,41 @@ const testConfig = {
   model: "test-model",
   maxTokens: 1024,
   timeoutMs: 30_000,
+  maxRetries: 2,
+  operatorChannel: true,
 };
 
 describe("AnthropicGameLLM 요청 파라미터", () => {
-  it("사고를 끄고 출력 상한을 티어 값으로 보낸다", async () => {
+  /**
+   * 설정이 사고를 적지 않으면 **그 파라미터가 요청에 없다** (models.md §1-2).
+   * 값을 박아 두면 모델을 바꾸는 순간 400이 난다 — 사고를 끌 수 있는지가 모델마다
+   * 다르기 때문이다.
+   */
+  it("사고를 적지 않으면 사고 파라미터를 싣지 않는다", async () => {
     const stub = makeStubClient([endTurn]);
     const llm = new AnthropicGameLLM(testConfig, stub);
     await llm.runTurn({ system: "sys", history: [], user: "안녕" });
 
     const params = lastParams(stub);
-    // 사고는 끈다 — 상한(max_tokens)은 사고와 본문을 함께 덮으므로,
-    // 켜 두면 본문이 예산을 잃고 문장 한복판에서 잘린다
-    expect(params.thinking).toEqual({ type: "disabled" });
+    expect(params.thinking).toBeUndefined();
+    expect(params.output_config).toBeUndefined();
     expect(params.max_tokens).toBe(testConfig.maxTokens);
+  });
+
+  /** Anthropic의 눈금은 `low`에서 시작한다 — `minimal`도 거기로 간다 */
+  it.each([
+    ["minimal", "low"],
+    ["low", "low"],
+    ["medium", "medium"],
+    ["high", "high"],
+  ] as const)("사고 수준 %s를 adaptive + effort %s로 옮긴다", async (level, effort) => {
+    const stub = makeStubClient([endTurn]);
+    const llm = new AnthropicGameLLM({ ...testConfig, thinkingLevel: level }, stub);
+    await llm.runTurn({ system: "sys", history: [], user: "안녕" });
+
+    const params = lastParams(stub);
+    expect(params.thinking).toEqual({ type: "adaptive" });
+    expect(params.output_config).toEqual({ effort });
   });
 
   it("설정의 시한과 중단 신호를 요청 옵션으로 넘긴다 — SDK 기본값에 기대지 않는다", async () => {
@@ -405,34 +427,13 @@ describe("입력 조립 — 캐시 계층과 상태 채널", () => {
     expect(hasCacheMarker(storedMessages(result.history)[0]!.content)).toBe(false);
   });
 
-  it("role:system을 거부하는 모델은 유저 메시지에 접어 넣고 재시도한다", async () => {
-    const stub = makeStubClient([
-      // 실제 400 형태 — 에러 본문이 메시지에 그대로 실린다
-      new AnthropicSdk.APIError(
-        400,
-        {
-          type: "error",
-          error: {
-            type: "invalid_request_error",
-            message: "messages.1: use the top-level 'system' parameter",
-          },
-        },
-        undefined,
-        undefined,
-      ),
-      endTurn,
-    ]);
-
-    const llm = new AnthropicGameLLM(
-      {
-        agent: "gm",
-        provider: "anthropic",
-        model: "legacy-model",
-        maxTokens: 512,
-        timeoutMs: 30_000,
-      },
-      stub,
-    );
+  /**
+   * 오퍼레이터 롤을 받는지는 **설정이 정한다** (models.md §3-3) — 400을 맞아 가며
+   * 알아내지 않는다. 꺼 두면 첫 요청부터 접어 넣고, 요청은 한 번만 나간다.
+   */
+  it("operator_channel이 꺼진 자리는 발화 뒤에 접어 넣고 요청을 한 번만 보낸다", async () => {
+    const stub = makeStubClient([endTurn]);
+    const llm = new AnthropicGameLLM({ ...testConfig, operatorChannel: false }, stub);
     const result = await llm.runTurn({
       system: "sys",
       history: [],
@@ -442,11 +443,14 @@ describe("입력 조립 — 캐시 계층과 상태 채널", () => {
 
     expect(
       (stub.messages as unknown as { stream: { mock: { calls: unknown[][] } } }).stream.mock.calls,
-    ).toHaveLength(2);
+    ).toHaveLength(1);
     const messages = lastParams(stub).messages as Array<{ role: string; content: string }>;
     expect(messages).toHaveLength(1);
     expect(messages[0]?.role).toBe("user");
-    expect(messages[0]?.content).toBe("[상태] 스냅샷\n\n[감독]\n발화");
+    // 발화가 앞이다 — 저장 이력의 그 자리(발화만)가 보낸 메시지의 프리픽스여야
+    // 다음 턴의 캐시가 이 발화를 지나 이어진다 (models.md §3-3)
+    expect(messages[0]?.content).toBe("[감독]\n발화\n\n[상태] 스냅샷");
+    // 접어 넣어도 휘발 상태는 세이브에 남지 않는다
     expect(storedMessages(result.history)[0]).toEqual({
       role: "user",
       content: "[감독]\n발화",
@@ -477,5 +481,64 @@ describe("AnthropicGameLLM 종료 사유", () => {
       user: "안녕",
     });
     expect(result.stopReason).toBe(neutral);
+  });
+});
+
+/**
+ * **분류는 코드값이 한다 — 문장이 아니라** (models.md §1-1). 제공자가 오류 메시지
+ * 문안을 손봐도 화면이 고르는 문구는 그대로여야 한다.
+ */
+describe("AnthropicGameLLM 오류 종류", () => {
+  /** SDK가 실제로 만드는 그대로 — 상태·본문에서 오류 클래스를 세운다 */
+  const apiError = (status: number, type: string) =>
+    AnthropicSdk.APIError.generate(
+      status,
+      { type: "error", error: { type, message: "문안은 언제든 바뀐다" } },
+      undefined,
+      new Headers(),
+    );
+
+  const cases: Array<[string, Error, LlmErrorKind]> = [
+    ["529 혼잡", apiError(529, "overloaded_error"), "overloaded"],
+    ["429 한도", apiError(429, "rate_limit_error"), "rate_limit"],
+    ["401 인증", apiError(401, "authentication_error"), "auth"],
+    ["403 권한", apiError(403, "permission_error"), "auth"],
+    ["400 잘못된 요청", apiError(400, "invalid_request_error"), "unknown"],
+    ["중단 신호", new AnthropicSdk.APIUserAbortError(), "timeout"],
+    ["연결 시한", new AnthropicSdk.APIConnectionTimeoutError(), "timeout"],
+  ];
+
+  it.each(cases)("%s는 %s로 옮긴다", async (_label, thrown, kind) => {
+    const stub = makeStubClient([thrown]);
+    const llm = new AnthropicGameLLM(testConfig, stub);
+    const error = await llm
+      .runTurn({ system: "sys", history: [], user: "안녕" })
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(llmErrorKind(error)).toBe(kind);
+  });
+
+  /**
+   * 막혔는데 **아무것도 못 받은** 턴만 실패다. 한 글자라도 나온 뒤에 막힌 턴은
+   * 그 산출이 이미 화면에 흘렀으므로 없던 일로 만들 수 없다 (agents.md §8).
+   */
+  it("막혀서 아무것도 못 받은 턴은 filtered로 실패한다", async () => {
+    const stub = makeStubClient([{ stop_reason: "refusal", content: [] }]);
+    const error = await new AnthropicGameLLM(testConfig, stub)
+      .runTurn({ system: "sys", history: [], user: "안녕" })
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(llmErrorKind(error)).toBe("filtered");
+  });
+
+  it("문장이 나온 뒤 막힌 턴은 그 산출을 그대로 돌려준다", async () => {
+    const stub = makeStubClient([{ ...endTurn, stop_reason: "refusal" }]);
+    const result = await new AnthropicGameLLM(testConfig, stub).runTurn({
+      system: "sys",
+      history: [],
+      user: "안녕",
+    });
+    expect(result.stopReason).toBe("filtered");
+    expect(result.text).toContain("알겠습니다");
   });
 });

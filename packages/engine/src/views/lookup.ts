@@ -5,14 +5,18 @@ import type {
   SeasonRecord,
   SeasonStat,
 } from "@story-fm/domain";
+import { isReserveMatch } from "@story-fm/domain";
 import {
   YELLOWS_PER_SUSPENSION,
   ageOf,
   anchorOf,
   conditionLabel,
+  describeReputation,
+  familiarityLabel,
   footLabel,
   physiqueLabel,
   naturalPositionOf,
+  parseScorerEntry,
   roleFit,
   rolesFor,
   seasonRating,
@@ -20,6 +24,7 @@ import {
 } from "@story-fm/domain";
 import { rankByName } from "../core/name-match";
 import { formatMoney } from "../club/finance";
+import { spendLine, transferFundRoom } from "../club/manager-wallet";
 import { outcomeFor, outcomeLabel } from "./views";
 import { addDays, dayOfWeek, diffDays, seasonYear, squadReturnOf } from "../competition/calendar";
 import { entrantsOf } from "../competition/europe";
@@ -72,6 +77,7 @@ import {
   familiarityOf,
   groupOf,
   isAvailable,
+  managedTeamId,
   openInjury,
   playerById,
   playerName,
@@ -230,7 +236,9 @@ function ourRow(state: GameState, p: GamePlayer): string {
   const suspension = activeSuspension(state, p.id);
   const role =
     squadLevelOf(p) === "reserve"
-      ? "[2군]"
+      ? (state.developmentFocus?.includes(p.id) ?? false)
+        ? "[2군·집중 육성]"
+        : "[2군]"
       : assignment
         ? `[${assignment.role === "starting" ? "선발" : "벤치"}:${assignment.position}]`
         : "[1군]";
@@ -250,14 +258,26 @@ function ourRow(state: GameState, p: GamePlayer): string {
   );
 }
 
-/** 시즌 기록 축약 — 출전/득점/도움, 평점은 출전이 있을 때만 */
+/** 시즌 기록 축약 — 출전/득점/도움, 평점은 출전이 있을 때만. 2군 리그 기록은 따로 */
 function statLine(
-  stat: { apps: number; goals: number; assists?: number; ratingSum?: number } | null,
+  stat: {
+    apps: number;
+    goals: number;
+    assists?: number;
+    ratingSum?: number;
+    reserveApps?: number;
+    reserveGoals?: number;
+  } | null,
 ): string {
   const rating = seasonRating(stat);
+  const reserve =
+    (stat?.reserveApps ?? 0) > 0
+      ? ` · 2군 출전${stat?.reserveApps}/득점${stat?.reserveGoals ?? 0}`
+      : "";
   return (
     `출전${stat?.apps ?? 0}/득점${stat?.goals ?? 0}/도움${stat?.assists ?? 0}` +
-    (rating === null ? "" : `/평점${rating.toFixed(2)}`)
+    (rating === null ? "" : `/평점${rating.toFixed(2)}`) +
+    reserve
   );
 }
 
@@ -274,7 +294,7 @@ function theirRow(state: GameState, p: GamePlayer): string {
   );
 }
 
-export function playerRow(state: GameState, p: GamePlayer): string {
+function playerRow(state: GameState, p: GamePlayer): string {
   return p.teamId === state.userTeamId ? ourRow(state, p) : theirRow(state, p);
 }
 
@@ -722,7 +742,7 @@ export function squadView(state: GameState, input: SquadViewInput = {}): LookupR
   const lines = [
     `[스쿼드] ${teamNameIn(state, teamId)} — ${spec.formation} · 멘탈${spec.mentality} 라인${spec.defensiveLine} ` +
       `압박${spec.pressing} 템포${spec.tempo} 폭${spec.width} 패스${spec.passStyle} · ` +
-      `선발 평균 적응 ${Math.round(squadFamiliarity(state, teamId))}`,
+      `선발 평균 적응 ${familiarityLabel(squadFamiliarity(state, teamId))}`,
     `1군 ${firstCount}명 (선발 ${tactics.assignments.filter((a) => a.role === "starting").length} · ` +
       `벤치 ${tactics.assignments.filter((a) => a.role === "bench").length}) · ` +
       `2군 ${squad.length - firstCount}명 · 조회 대상: ${
@@ -784,8 +804,11 @@ export function teamProfile(state: GameState, team: string): LookupResult {
       ? squad.reduce((s, p) => s + ageOf(p.birthdate, state.date), 0) / squad.length
       : 0;
 
-  // 날짜순 정렬 — state.matches는 리그 뒤에 대항전이 붙은 순서라 그대로 자르면 섞인다
-  const byDate = [...state.matches].sort((a, b) => (a.date < b.date ? -1 : 1));
+  // 날짜순 정렬 — state.matches는 리그 뒤에 대항전이 붙은 순서라 그대로 자르면 섞인다.
+  // 2군 경기는 팀 프로필의 최근 결과·전적·다음 맞대결 어디에도 서지 않는다
+  const byDate = [...state.matches]
+    .filter((m) => !isReserveMatch(m))
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
   const recent = byDate
     .filter((m) => m.result && (m.homeTeamId === teamId || m.awayTeamId === teamId))
     .slice(-5)
@@ -917,12 +940,10 @@ function scorerNote(state: GameState, m: MatchRecord): string {
   if (scorers.length === 0) return "";
   const minutes = m.result?.goalMinutes ?? [];
   const named = scorers.map((entry, i) => {
-    const [side, id] = entry.includes(":")
-      ? (entry.split(":", 2) as [string, string])
-      : ["", entry];
-    const team = side === "home" ? m.homeTeamId : side === "away" ? m.awayTeamId : null;
+    const goal = parseScorerEntry(entry);
+    const team = goal.side === "home" ? m.homeTeamId : goal.side === "away" ? m.awayTeamId : null;
     const at = minutes[i] !== undefined ? ` ${minutes[i]}′` : "";
-    return `${playerName(state, id ?? entry)}${at}${team ? `(${teamShortNameIn(state, team)})` : ""}`;
+    return `${playerName(state, goal.playerId)}${at}${team ? `(${teamShortNameIn(state, team)})` : ""}`;
   });
   return ` · 득점 ${named.join(", ")}`;
 }
@@ -1100,6 +1121,8 @@ function fixturesView(state: GameState, input: LeagueViewInput): LookupResult {
 
   const pool = state.matches
     .filter((m) => {
+      // 2군 경기는 일정 조회에 서지 않는다 — 달력과 같은 답이어야 한다 (season.md §2)
+      if (isReserveMatch(m)) return false;
       if (teamId && m.homeTeamId !== teamId && m.awayTeamId !== teamId) return false;
       if (opponentId && m.homeTeamId !== opponentId && m.awayTeamId !== opponentId) return false;
       if (competitionId && m.competitionId !== competitionId) return false;
@@ -1324,11 +1347,14 @@ export function careerView(state: GameState): LookupResult {
   const card = state.dismissal;
   const lines = card
     ? [
-        `[커리어] ${m.name} — 무직 (${card.on} ${teamNameIn(state, card.teamId)}에서 경질) · ${seasonLabel(state)}`,
-        `평판: 보드${m.reputation.board} 미디어${m.reputation.media} 선수단${m.reputation.squad}`,
+        `[커리어] ${m.name} — 무직 (${card.on} ${teamNameIn(state, card.teamId)}에서 ${
+          card.kind === "expired" ? "계약 만료" : "경질"
+        }) · ${seasonLabel(state)}`,
+        `평판: ${describeReputation(m.reputation)}`,
         card.expectation && card.position
-          ? `경질 사유: 기대 ${card.expectation}(${card.target}위) · 당시 ${card.position}위`
-          : `경질 사유: ${card.reason ?? "기록 없음"}`,
+          ? `자리를 잃은 자리: 기대 ${card.expectation}(${card.target}위) · 당시 ${card.position}위`
+          : `자리를 잃은 자리: ${card.reason ?? "기록 없음"}`,
+        ...(card.severance ? [`위약금 ${formatMoney(card.severance)}`] : []),
         ...(openManagerOffers(state).length > 0
           ? [
               `받은 감독직 제안:`,
@@ -1336,14 +1362,57 @@ export function careerView(state: GameState): LookupResult {
                 (o) =>
                   `  ${o.id} · ${teamNameIn(state, o.teamId)} (${o.tier}티어) · 기대 ${o.expectation}(${o.target}위)` +
                   (o.position ? ` · 현재 ${o.position}위` : "") +
+                  (o.salary
+                    ? ` · 연봉 ${formatMoney(o.salary)}·${o.years ?? "-"}년·이적 예산 약속 ${formatMoney(o.budgetPledge ?? 0)}`
+                    : "") +
+                  (o.counteredOn ? ` · 흥정 완료` : "") +
                   ` · ${o.expiresOn}까지`,
               ),
             ]
           : [`받은 감독직 제안: 없음`]),
+        ...((state.managerVacancies ?? []).length > 0
+          ? [
+              `최근 공석 (지원할 수 있는 자리):`,
+              ...(state.managerVacancies ?? []).map(
+                (v) =>
+                  `  ${teamNameIn(state, v.teamId)} (${tierOfTeamIn(state, v.teamId)}티어)` +
+                  (v.position ? ` · 현재 ${v.position}위` : "") +
+                  ` · ${v.on} 공석`,
+              ),
+            ]
+          : []),
       ]
     : [
         `[커리어] ${m.name} — ${teamNameIn(state, state.userTeamId)} 재임 · ${seasonLabel(state)}`,
-        `평판: 보드${m.reputation.board} 미디어${m.reputation.media} 선수단${m.reputation.squad}`,
+        ...(m.contract
+          ? [
+              `계약: 연봉 ${formatMoney(m.contract.salary)} · ${m.contract.until}까지` +
+                ` (${diffDays(state.date, m.contract.until)}일)` +
+                // 비갱신 통보는 만료일이 곧 끝이라는 사실이다 (career.md §5.4)
+                (m.contract.renewalOffered === false ? ` · 보드는 재계약하지 않기로 했다` : ""),
+            ]
+          : []),
+        `지갑: ${formatMoney(m.wallet ?? 0)}` +
+          // 지갑은 눈금이 아니라 쓸 수 있는 돈이다 — 남은 문이 그 자리에 함께 선다 (career.md §5.4)
+          (managedTeamId(state) === null
+            ? ""
+            : ` · 이번 시즌 사재 출연 여력 ${formatMoney(transferFundRoom(state))}`),
+        ...((m.spending ?? []).length > 0
+          ? [
+              `최근 사재 지출: ${[...(m.spending ?? [])].reverse().slice(0, 5).map(spendLine).join(" / ")}`,
+            ]
+          : []),
+        // 재직 중에 서는 제안은 재계약 하나다 — 답할 자리라 여기 선다 (career.md §5.4)
+        ...openManagerOffers(state)
+          .filter((o) => o.via === "renewal")
+          .map(
+            (o) =>
+              `보드의 재계약 제안: ${o.id} · 연봉 ${formatMoney(o.salary ?? 0)}·${o.years ?? "-"}년` +
+              `·이적 예산 약속 ${formatMoney(o.budgetPledge ?? 0)}` +
+              (o.counteredOn ? ` · 흥정 완료` : "") +
+              ` · ${o.expiresOn}까지`,
+          ),
+        `평판: ${describeReputation(m.reputation)}`,
         warnings > 0
           ? `보드 경고: ${warnings}/${USER_WARNINGS_BEFORE_SACK}회` +
             (m.lastWarnedOn ? ` (마지막 ${m.lastWarnedOn})` : "") +
@@ -1354,27 +1423,58 @@ export function careerView(state: GameState): LookupResult {
           : `이번 시즌 진행: 아직 리그 경기 없음`,
       ];
 
-  const records = [...state.seasonRecords].sort((a, b) => b.season - a.season);
-  if (records.length === 0) {
+  const yearOf = (season: number) => {
+    const year = seasonYear(season);
+    return `${year}-${String((year + 1) % 100).padStart(2, "0")}`;
+  };
+  /**
+   * 시즌 기록과 경질 이력을 한 표로 잇는다 (career.md §6) — 잘린 시즌은
+   * `SEASON_RECORD`가 없으므로 경질 줄이 그 해를 채운다. 최신 시즌이 앞이고,
+   * 같은 시즌 안에서는 시즌 결산(시즌 끝)이 경질(시즌 중)보다 앞이다.
+   */
+  const sackings = state.dismissals ?? [];
+  const rows = [
+    ...state.seasonRecords.map((r) => ({
+      season: r.season,
+      atEnd: 1,
+      on: "",
+      text:
+        `  시즌 ${r.season} (${yearOf(r.season)}) ${teamNameIn(state, r.teamId)} ` +
+        `${r.position}위 · ${r.wins}승 ${r.draws}무 ${r.losses}패 · 득 ${r.goalsFor} 실 ${r.goalsAgainst}` +
+        boardLine(r),
+    })),
+    ...sackings.map((d) => ({
+      season: d.season,
+      atEnd: 0,
+      on: d.on,
+      text:
+        `  시즌 ${d.season} (${yearOf(d.season)}) ${teamNameIn(state, d.teamId)} — ${d.on} ` +
+        `${d.kind === "expired" ? "계약 만료" : "경질"}` +
+        (d.expectation && d.position
+          ? ` (기대 ${d.expectation} ${d.target}위 · 당시 ${d.position}위)`
+          : ""),
+    })),
+  ].sort((a, b) => b.season - a.season || b.atEnd - a.atEnd || b.on.localeCompare(a.on));
+  if (rows.length === 0) {
     lines.push("지난 시즌 기록: 없음 (첫 시즌이다)");
   } else {
-    lines.push(`지난 시즌 기록 ${records.length}시즌:`);
-    for (const r of records.slice(0, 10)) {
-      const year = seasonYear(r.season);
-      lines.push(
-        `  시즌 ${r.season} (${year}-${String((year + 1) % 100).padStart(2, "0")}) ${teamNameIn(state, r.teamId)} ` +
-          `${r.position}위 · ${r.wins}승 ${r.draws}무 ${r.losses}패 · 득 ${r.goalsFor} 실 ${r.goalsAgainst}` +
-          boardLine(r),
-      );
-    }
-    if (records.length > 10) lines.push(`  …그 외 ${records.length - 10}시즌`);
+    lines.push(
+      `지난 시즌 기록 ${state.seasonRecords.length}시즌:` +
+        (sackings.length > 0 ? ` (자리를 잃은 것 ${sackings.length}회)` : ""),
+    );
+    for (const r of rows.slice(0, 10)) lines.push(r.text);
+    if (rows.length > 10) lines.push(`  …그 외 ${rows.length - 10}줄`);
   }
 
   lines.push(
     state.trophies.length > 0
-      ? // TROPHY.competition은 id가 아니라 **표시 이름**으로 기록된다 (season.ts)
+      ? // TROPHY는 대회 id로 남는다 — 이름은 여기서 카탈로그가 만든다 (career.md §6)
         `트로피 ${state.trophies.length}개: ${state.trophies
-          .map((t) => `${t.competition} (시즌 ${t.season}, ${teamShortNameIn(state, t.teamId)})`)
+          .map(
+            (t) =>
+              `${t.competitionId ? competitionName(t.competitionId) : (t.competition ?? "")} ` +
+              `(시즌 ${t.season}, ${teamShortNameIn(state, t.teamId)})`,
+          )
           .join(" / ")}`
       : "트로피: 없음",
   );

@@ -2,7 +2,13 @@
 
 import { Fragment } from "react";
 import type { OfficeViews } from "@story-fm/engine";
-import { anchorOf, positionGroupOf, separateBoardPoints } from "@story-fm/domain";
+import {
+  TACTIC_AXES,
+  anchorOf,
+  positionGroupOf,
+  separateBoardPoints,
+  tacticWord,
+} from "@story-fm/domain";
 import { pitchPointOf, spreadMarkers, type PitchPoint } from "@/lib/pitch-layout";
 import { IconBoard } from "@/components/icons";
 import { ConditionBar } from "@/components/condition-bar";
@@ -85,7 +91,8 @@ export function MatchOpponent({
             <b>{match.xiRating[them]}</b>
           </span>
           <span className="muted">
-            교체 {subs.used}/5 · 기회 {subs.windows}/3
+            교체 {subs.used}/{match.subs.limit.subs} · 기회 {subs.windows}/
+            {match.subs.limit.windows}
           </span>
           {onToggleBoard && (
             <button
@@ -342,8 +349,16 @@ function ZoneBars({ match }: { match: Match }) {
                 key={player.id}
                 style={{ left: `${at.left}%`, top: `${at.top}%` }}
                 title={`${player.squadNumber === null ? "임시 " : ""}${no}번 · ${player.name} (${player.position}) — 전력 ${player.effective}${player.gassed ? " · 다리가 멈췄다" : ""}`}
-                aria-label={`${no}번 ${player.name}, ${player.position}, 전력 ${player.effective}`}
-                tabIndex={0}
+                /**
+                 * **읽는 값이지 조작 대상이 아니다.** 눌러서 열리는 것이 없는데도
+                 * 탭 정지점이었던 탓에, 판 하나를 지나려면 스물두 번을 눌러야 했고
+                 * 멈춘 자리마다 포커스 링만 떴다. 탭 순서에서 빼고 `role="img"`로
+                 * 세워 이름은 `aria-label`이 갖는다 — 번호만 읽히면 누구인지 모른다.
+                 * 다리가 멈춘 것도 여기 싣는다: 판에서는 빨간 테두리뿐이라 색을
+                 * 못 보면 교체 신호가 통째로 사라진다.
+                 */
+                role="img"
+                aria-label={`${no}번 ${player.name}, ${player.position}, 전력 ${player.effective}${player.gassed ? ", 다리가 멈췄다" : ""}`}
               >
                 {no}
               </span>
@@ -415,15 +430,6 @@ function Orders({ exploiting, notes }: { exploiting: string[]; notes: string[] }
   );
 }
 
-const AXES = [
-  { key: "mentality", label: "멘탈리티", low: "수비적", high: "공격적" },
-  { key: "defensiveLine", label: "수비 라인", low: "낮게", high: "높게" },
-  { key: "pressing", label: "압박", low: "최소", high: "맹렬" },
-  { key: "tempo", label: "템포", low: "느리게", high: "빠르게" },
-  { key: "width", label: "폭", low: "좁게", high: "넓게" },
-  { key: "passStyle", label: "패스", low: "짧게", high: "길게" },
-] as const;
-
 /**
  * 상대 전술 6축 — **읽기 전용.**
  *
@@ -444,13 +450,13 @@ function SideTactics({ tactics }: { tactics: Match["tactics"]["home"] }) {
           <i>{tactics.formation}</i> · 소화 {Math.round(tactics.uptake * 100)}%
         </span>
       </div>
-      {AXES.map((axis) => {
+      {TACTIC_AXES.map((axis) => {
         const v = tactics[axis.key];
         return (
           <div className="mv-tac-row one" key={axis.key}>
             <span className="mv-tac-axis">{axis.label}</span>
             <Dots value={v} align="left" title={`${axis.label} ${v}`} />
-            <span className="mv-tac-word">{v >= 4 ? axis.high : v <= 2 ? axis.low : "보통"}</span>
+            <span className="mv-tac-word">{tacticWord(axis.key, v)}</span>
           </div>
         );
       })}

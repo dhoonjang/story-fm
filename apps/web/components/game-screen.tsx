@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { GamePayload, GameSlice } from "@/lib/store";
 import { mergeSlice } from "@/lib/game-slice";
 import type { ChatTurn } from "@story-fm/engine";
+import type { TurnOperation } from "@story-fm/agents";
 import { ChatTurnView, turnStamp } from "./chat";
 import { chatForActiveMatch } from "@/lib/match-chat";
 import { buildTraceIndex } from "@/lib/turn-trace-index";
@@ -17,6 +18,7 @@ import { Loading } from "./loading";
 import { SquadView, CalendarView, FinanceView, CompetitionsView, CareerView } from "./office";
 import { createLineupSaver, type LineupSaver } from "./lineup-saver";
 import { MatchClock, MatchHeadline, MatchOpponent, MatchOverview } from "./match-view";
+import { StageSplitHandle } from "./stage-split-handle";
 import {
   IconBoard,
   IconBroadcast,
@@ -39,8 +41,8 @@ import {
  * 경기가 시작되면 그 무대가 둘로 갈려 **판세와 중계가 나란히** 보인다 — 감독은
  * 왼쪽에서 읽고 오른쪽에 지시한다. 탭을 오가며 상황을 기억할 필요가 없다.
  *
- * 장부 뷰(스쿼드·달력·재정·대회·커리어)는 **오른쪽 위 아이콘 줄**에서 연다.
- * 예전에는 채팅과 같은 줄에 나란히 서 있어서, 화면의 주인이 무엇인지가 흐렸다.
+ * 장부 뷰(스쿼드·달력·재정·대회·커리어)는 **오른쪽 위 아이콘 줄**에서 연다 —
+ * 채팅과 같은 줄에 나란히 세우면 화면의 주인이 무엇인지가 흐려진다.
  */
 const PANELS = [
   { key: "스쿼드", Icon: IconSquad },
@@ -56,6 +58,13 @@ type Panel = (typeof PANELS)[number]["key"];
  * 접히는 동안은 내용을 그려 두고(빈 칸이 접히면 화면이 툭 꺼진다) 이만큼 뒤에 지운다.
  */
 const PANEL_ANIM_MS = 260;
+
+/**
+ * 턴이 끝난 뒤 서버 상태를 다시 받아 오는 시도 횟수 — 한 번은 `settled=1`의 상한
+ * (30초)만큼 기다리므로 셋이면 1분 30초다. 그보다 오래 도는 턴은 감독이 다음 조작을
+ * 할 때 어차피 새 상태를 받는다 (docs/llm/models.md §1-1).
+ */
+const RESYNC_TRIES = 3;
 
 /**
  * 경기 중 탭 — **화면이 통째로 바뀐다.**
@@ -300,9 +309,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
   /**
    * 대화는 늘 바닥에 붙어 있다.
    *
-   * 예전엔 `panel === null`일 때만 굴렸다 — 장부를 열면 채팅이 화면에서 사라졌기
-   * 때문이다. 이제는 넓은 화면에서 **채팅이 장부 옆에 남으므로** 조건을 걸면 그
-   * 동안 도착한 턴이 스크롤 밖에 쌓인다. 채팅이 접힌 화면에서는 높이가 0이라
+   * 넓은 화면에서는 **채팅이 장부 옆에 남으므로** `panel === null` 조건을 걸면
+   * 그 동안 도착한 턴이 스크롤 밖에 쌓인다. 채팅이 접힌 화면에서는 높이가 0이라
    * 이 호출이 아무 일도 하지 않고, `panel`이 의존성에 있어 닫는 순간 다시 붙는다.
    */
   useEffect(() => {
@@ -329,9 +337,9 @@ export function GameScreen({ gameId }: { gameId: string }) {
    * 세계는 아무 말도 하지 않는다 — 이 게임에서 시간 진행은 서사의 입구다.
    */
   const send = useCallback(
-    async (text?: string, operator = false) => {
-      const message = (text ?? input).trim();
-      if (!message || busy || !game) return;
+    async (text?: string, operation?: TurnOperation) => {
+      const message = operation ? "" : (text ?? input).trim();
+      if ((!message && !operation) || busy || !game) return;
       const seq = ++turnSeqRef.current;
       setBusy(true);
       setError(null);
@@ -360,7 +368,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
       // 여러 번 만진 기록이 과거 배열에 남아 있어도 마지막 선택 하나만 보낸다.
       const orders = mergeMatchOrders([], ordersRef.current);
       ordersRef.current = [];
-      if (text === undefined) setInput("");
+      if (!operation && text === undefined) setInput("");
       streamAccRef.current = "";
       revealedRef.current = 0;
       pendingPayloadRef.current = null;
@@ -369,12 +377,12 @@ export function GameScreen({ gameId }: { gameId: string }) {
        * 낙관적 표시 — 유저 턴 먼저. 턴이 실패하면 이 항목을 정확히 되돌린다
        * (서버도 실패한 턴은 저장하지 않는다 — lib/turn-runner.ts).
        *
-       * `operator`면 아무것도 띄우지 않는다: 감독이 친 말이 아니라 손잡이를 누른
+       * 조작이면 아무것도 띄우지 않는다: 감독이 친 말이 아니라 손잡이를 누른
        * 것이라, 화면에는 진행 결과만 나타나야 한다. 기다리는 동안은 `busy`가
        * 띄우는 점 세 개(`.thinking`)가 이미 말해 준다.
        */
       const activeMatchId = liveMatch?.matchId;
-      const optimistic = operator
+      const optimistic = operation
         ? null
         : {
             role: "user" as const,
@@ -396,7 +404,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
       const fail = (failure: TurnStreamFailure) => {
         if (failure.settled) {
           if (orders.length > 0) ordersRef.current = mergeMatchOrders(orders, ordersRef.current);
-          if (text === undefined) setInput((cur) => (cur.trim() ? cur : message));
+          if (!operation && text === undefined) setInput((cur) => (cur.trim() ? cur : message));
         }
         if (optimistic) {
           setGame((g) => (g ? { ...g, chat: g.chat.filter((t) => t !== optimistic) } : g));
@@ -413,14 +421,26 @@ export function GameScreen({ gameId }: { gameId: string }) {
        * 어긋난다. 기다리는 동안 감독은 막히지 않는다(다음 턴도 같은 잠금에 줄을 선다).
        */
       const resync = async () => {
-        try {
-          const res = await fetch(`/api/games/${gameId}?settled=1`);
-          const data = (await res.json()) as GamePayload | { error: string };
+        /**
+         * 잠금을 기다리는 데는 상한이 있어(models.md §1-1) 아직 도는 턴은 409로
+         * 돌아온다. **몇 번은 다시 묻는다** — 한 번에 그만두면 긴 턴이 커밋한 결과를
+         * 화면이 영영 못 받고, 무한히 물으면 상한을 둔 뜻이 없어진다.
+         */
+        for (let tries = 0; tries < RESYNC_TRIES; tries++) {
           // 그 사이 새 턴이 앉았다면 이 응답은 이미 지난 상태다
-          if ("error" in data || turnSeqRef.current !== seq) return;
-          setGame(data);
-        } catch {
-          // 재조회마저 닿지 않으면 화면은 그대로 둔다 — 배너가 이미 서 있다
+          if (turnSeqRef.current !== seq) return;
+          try {
+            const res = await fetch(`/api/games/${gameId}?settled=1`);
+            const data = (await res.json()) as GamePayload | { error: string; retry?: boolean };
+            if (!("error" in data)) {
+              if (turnSeqRef.current === seq) setGame(data);
+              return;
+            }
+            if (data.retry !== true) return;
+          } catch {
+            // 재조회마저 닿지 않으면 화면은 그대로 둔다 — 배너가 이미 서 있다
+            return;
+          }
         }
       };
 
@@ -490,7 +510,7 @@ export function GameScreen({ gameId }: { gameId: string }) {
        */
       const failure = await streamTurn(
         gameId,
-        { message, operator, orders },
+        { ...(operation ? { operation } : { message }), orders },
         {
           onDelta: (text) => {
             streamAccRef.current += text;
@@ -747,10 +767,24 @@ export function GameScreen({ gameId }: { gameId: string }) {
           </div>
         </div>
       )}
+      {/**
+       * 시계가 멎었다 — **오류가 아니라 사실이다.** 모델의 첫 줄 헤더가 연달아
+       * 읽히지 않으면 세계는 오늘에 머무는데, 그건 화면 어디에도 보이지 않고
+       * 서버 로그에만 쌓였다 (docs/llm/agents.md §2). 무엇을 하라고 이르지는
+       * 않는다 — 시간을 넘기는 손잡이는 바로 아래에 이미 서 있다.
+       */}
+      {game.clockStalled !== undefined && (
+        <div className="turn-notice" data-testid="clock-stalled" role="status">
+          <span>
+            ⏸ 시계가 {game.clockStalled}턴째 {game.date} {game.timeOfDay}에 멈춰 있습니다
+          </span>
+        </div>
+      )}
       <Composer
         input={input}
         onInput={setInput}
         onSend={send}
+        onOperate={(operation) => void send(undefined, operation)}
         busy={busy}
         inMatch={inMatch}
         canSkip={canSkip}
@@ -870,10 +904,10 @@ export function GameScreen({ gameId }: { gameId: string }) {
       {/**
        * 입장 확인 — **경기의 문.**
        *
-       * `start_match`는 판을 세울 뿐이고 공은 감독이 들어갈 때 구른다. 예전엔
-       * 경기일 내내 입력창 위에 "경기 시작" 버튼이 상주했는데, 그러면 그날의
-       * 대화가 무슨 이야기로 흐르든 화면은 늘 같은 손잡이 하나를 들이밀었다.
-       * 지금은 GM이 문을 열었을 때만 이 창이 서고, 이것이 유일한 출구다 —
+       * `start_match`는 판을 세울 뿐이고 공은 감독이 들어갈 때 구른다. 상주
+       * 버튼을 두면 그날의 대화가 무슨 이야기로 흐르든 화면이 늘 같은 손잡이
+       * 하나를 들이민다.
+       * GM이 문을 열었을 때만 이 창이 서고, 이것이 유일한 출구다 —
        * 닫는 손잡이를 두면 되돌아간 자리에서 다시 열 방법이 없다.
        */}
       {pendingMatch?.beforeKickoff === true && (
@@ -905,7 +939,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
               className="primary-btn"
               autoFocus
               disabled={busy}
-              onClick={() => void send("경기장 입장", true)}
+              /* 경기의 문도 손잡이다 — 킥오프 턴인지는 장부가 안다(`beforeKickoff`) */
+              onClick={() => void send(undefined, { kind: "advance_match" })}
               data-testid="kickoff-enter"
             >
               경기장 입장
@@ -974,9 +1009,9 @@ export function GameScreen({ gameId }: { gameId: string }) {
          * ── 무대는 **하나의 갈림**이다 ──────────────────────────
          *
          * 왼쪽은 언제나 채팅, 오른쪽은 그때 필요한 것(경기 판 / 장부)이고, 닫혀
-         * 있을 땐 폭이 0이다. 예전에는 경기 무대와 장부 무대가 서로 다른 마크업이라
-         * 킥오프·탭 조작마다 채팅이 통째로 다시 그려지며 **툭** 튀었다 — 격자 트랙이
-         * 없다 생겼다 하면 폭을 이어서 애니메이션할 수도 없다.
+         * 있을 땐 폭이 0이다. 경기 무대와 장부 무대의 마크업이 갈리면 킥오프·탭
+         * 조작마다 채팅이 통째로 다시 그려지며 **툭** 튀고, 격자 트랙이 없다
+         * 생겼다 하면 폭을 이어서 애니메이션할 수도 없다.
          *
          * 오른쪽에 무엇이 들었는지는 `with-board`/`with-ledger`가 CSS에 알린다:
          * 경기 판은 좁은 화면에서도 채팅 **옆에 서고**, 장부만 채팅을 **덮는다**.
@@ -1054,8 +1089,8 @@ export function GameScreen({ gameId }: { gameId: string }) {
               /**
                * 장부 뷰 — **채팅을 대신하지 않고 나눠 쓴다.**
                *
-               * 예전에는 패널이 무대를 통째로 덮었다. 그러면 명단을 확인하려고 연 순간
-               * 대화가 사라지고, 감독은 "방금 코치가 뭐라고 했더라"를 확인하러 다시
+               * 패널이 무대를 통째로 덮으면 명단을 확인하려고 연 순간 대화가
+               * 사라지고, 감독은 "방금 코치가 뭐라고 했더라"를 확인하러 다시
                * 채팅을 열어야 한다. 폭만 있으면 둘 다 서 있는 게 맞다.
                */
               <div
@@ -1080,6 +1115,10 @@ export function GameScreen({ gameId }: { gameId: string }) {
               </div>
             )}
           </section>
+          {/* 두 칸의 경계 — 끄는 대로 무대의 `--split`이 바뀌고 거기 붙은 것들
+              (덮개·전술판 서랍)이 함께 따라온다. 나란히 설 수 없는 폭에서는 CSS가
+              걷어 낸다(`--split-live`) — 오른쪽 칸 **뒤에** 서야 그 위에 얹힌다 */}
+          <StageSplitHandle />
         </div>
       </main>
       {/* 턴 원문 — 개발 모드에서 턴을 길게 눌렀을 때만 선다 (models.md §5) */}

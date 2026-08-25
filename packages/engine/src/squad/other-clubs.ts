@@ -1,4 +1,4 @@
-import { applyFamiliarityGain, clampCondition } from "@story-fm/domain";
+import { applyFamiliarityGain, clampCondition, isReserveMatch } from "@story-fm/domain";
 import { dailyRecovery, type RecoveryKind } from "@story-fm/sim";
 import { managedTeamId, type GameState } from "../core/state";
 import { addDays } from "../core/dates";
@@ -34,7 +34,8 @@ export const FAMILIARITY_DRIFT_CAP = 80;
 function recoveryKindOf(state: GameState, teamId: string): RecoveryKind {
   const playedOn = (offset: number): boolean =>
     matchesOn(state.matches, addDays(state.date, offset)).some(
-      (m) => m.homeTeamId === teamId || m.awayTeamId === teamId,
+      // 2군 경기는 1군 몸에 닿지 않는다 — 회복 눈금도 그대로다 (season.md §2)
+      (m) => !isReserveMatch(m) && (m.homeTeamId === teamId || m.awayTeamId === teamId),
     );
   // 감독 팀은 경기 당일 훈련을 취소하고 idle 회복을 받는다. 간이 시뮬 팀도 같다.
   if (playedOn(0)) return "idle";

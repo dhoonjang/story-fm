@@ -6,6 +6,7 @@ import {
   advanceShootout,
   assignmentsOf,
   awaitingShootout,
+  buildOfficeViews,
   domesticTieWinner,
   euroTieWinner,
   finalizeMatch,
@@ -39,11 +40,17 @@ import {
 import type {
   GamePlayer,
   MatchRecord,
+  MatchSide,
   MatchStage,
   PlayerAttributes,
   ShootoutKick,
 } from "@story-fm/domain";
-import { SHOOTOUT_ROUNDS, shootoutSettled, shootoutTally } from "@story-fm/domain";
+import {
+  SHOOTOUT_ROUNDS,
+  nextShootoutKick,
+  shootoutSettled,
+  shootoutTally,
+} from "@story-fm/domain";
 import { groupOf } from "@story-fm/engine";
 import { createTestGame, simSquad } from "./helpers";
 
@@ -159,6 +166,74 @@ describe("연장 시뮬 (30분)", () => {
     const b = simulateExtraTime(home, away, 7, "same");
     expect(a).toEqual(b);
   });
+
+  /**
+   * **AI 팀도 연장에서 경고를 받는다** (match.md §7) — 예전엔 연장이 골만 내서
+   * 녹아웃 연장을 치른 AI 팀의 다음 라운드 정지가 감독에게만 걸렸다.
+   */
+  it("연장에도 카드가 나온다 — 분은 91~120, 두 번째 경고는 경고+퇴장 두 줄", () => {
+    const state = world();
+    const home = simSquad(state, "mancity");
+    const away = simSquad(state, "arsenal");
+    let cards = 0;
+    for (let i = 0; i < 200; i++) {
+      const r = simulateExtraTime(home, away, 500 + i, `etc:${i}`);
+      cards += r.cards.length;
+      for (const card of r.cards) {
+        expect(card.minute).toBeGreaterThanOrEqual(91);
+        expect(card.minute).toBeLessThanOrEqual(90 + EXTRA_TIME_MINUTES);
+      }
+      for (const red of r.cards.filter((c) => c.card === "red")) {
+        const yellows = r.cards.filter(
+          (c) => c.playerId === red.playerId && c.card === "yellow",
+        ).length;
+        // 다이렉트면 0장, 연장 안의 두 번째 경고면 2장
+        expect([0, 2]).toContain(yellows);
+        // 퇴장한 선수는 그 뒤로 골을 넣지 않는다
+        const after = r.scorers.filter(
+          (tag, at) => tag.endsWith(`:${red.playerId}`) && r.goalMinutes[at]! > red.minute,
+        );
+        expect(after).toHaveLength(0);
+      }
+    }
+    // 분당 발생률이 90분 그대로면 연장 200번에 카드 수백 장이 선다
+    expect(cards).toBeGreaterThan(100);
+  });
+
+  it("90분의 경고가 연장으로 이어진다 — 이어받은 경고의 카드는 경고 한 장 + 퇴장이다", () => {
+    const state = world();
+    const home = simSquad(state, "mancity");
+    const away = simSquad(state, "arsenal");
+    const everyone = [...home.starters, ...away.starters].map((p) => p.id);
+    let reds = 0;
+    for (let i = 0; i < 60; i++) {
+      const r = simulateExtraTime(home, away, 800 + i, `etb:${i}`, { bookedIn90: everyone });
+      // 전원이 경고를 안고 들어왔다 — 연장의 첫 카드부터 두 번째 경고 퇴장이다
+      for (const card of r.cards.filter((c) => c.card === "yellow")) {
+        expect(r.cards.some((c) => c.playerId === card.playerId && c.card === "red")).toBe(true);
+      }
+      reds += r.cards.filter((c) => c.card === "red").length;
+    }
+    expect(reds).toBeGreaterThan(0);
+  });
+
+  it("연장에서도 다친다 — 후보는 연장을 뛴 명단이다", () => {
+    const state = world();
+    const home = simSquad(state, "mancity");
+    const away = simSquad(state, "arsenal");
+    const played = new Set([
+      ...home.starters.map((p) => `home:${p.id}`),
+      ...away.starters.map((p) => `away:${p.id}`),
+    ]);
+    let hurt = 0;
+    for (let i = 0; i < 400; i++) {
+      const r = simulateExtraTime(home, away, 1300 + i, `eti:${i}`);
+      hurt += r.injuries.length;
+      for (const tag of r.injuries) expect(played.has(tag)).toBe(true);
+    }
+    // 팀당 경기 몫 0.05~0.07의 30/90 — 400번의 연장이면 부상이 실제로 나온다
+    expect(hurt).toBeGreaterThan(0);
+  });
 });
 
 describe("녹아웃 무승부 — 연장을 먼저 치르고 그래도 비기면 승부차기", () => {
@@ -182,6 +257,32 @@ describe("녹아웃 무승부 — 연장을 먼저 치르고 그래도 비기면
     expect(total).toBeGreaterThanOrEqual(2); // 정규시간 1-1은 그대로 남는다
     const extraMinutes = decider.result!.goalMinutes!.filter((m) => m > 90);
     expect(extraMinutes.length).toBe(total - 2);
+  });
+
+  it("연장의 카드는 BOOKING으로 남고 퇴장자는 승부차기 명단에서 빠진다", () => {
+    const state = world();
+    let sawCard = false;
+    let sawRed = false;
+    // 대진 번호가 다르면 다른 연장이다 — 카드·퇴장이 나오는 대진을 찾는다
+    for (let pair = 40; pair < 90 && !(sawCard && sawRed); pair++) {
+      const legs = stageTie(state, "facup", "r32", pair, [
+        { home: "fulham", away: "everton", homeGoals: 1, awayGoals: 1 },
+      ]);
+      const decider = legs[0]!;
+      resolveDomesticTie(state, "facup", "r32", pair);
+      const booked = state.bookings.filter((b) => b.matchId === decider.id && b.minute > 90);
+      if (booked.length > 0) sawCard = true;
+      for (const red of booked.filter((b) => b.card === "red")) {
+        sawRed = true;
+        // 퇴장자는 종료 시점 온필드에서 빠진다 — 승부차기 명단의 원본이다
+        expect(decider.result!.homeOnPitch).not.toContain(red.gamePlayerId);
+        expect(decider.result!.awayOnPitch).not.toContain(red.gamePlayerId);
+        // 정지도 같은 문(discipline)을 지났다
+        expect(state.suspensions.some((s) => s.gamePlayerId === red.gamePlayerId)).toBe(true);
+      }
+    }
+    expect(sawCard).toBe(true);
+    expect(sawRed).toBe(true);
   });
 
   it("연장에서도 갈리지 않으면 승부차기가 승자를 정한다", () => {
@@ -403,11 +504,17 @@ describe("유저 경기의 연장 (competition.md §6)", () => {
    * 한 번만 굴리고 여러 검증이 나눠 쓴다 — 세계 생성이 이 파일 시간의 대부분이고,
    * 같은 경기를 여러 각도에서 보는 편이 검증도 촘촘하다.
    */
-  let collected: { state: GameState; runs: Played[] } | null = null;
-  function extraTimeWorld(): { state: GameState; runs: Played[] } {
+  let collected: {
+    state: GameState;
+    runs: Played[];
+    subsLimitAtExtra: { subs: number; windows: number } | null;
+  } | null = null;
+  function extraTimeWorld(): NonNullable<typeof collected> {
     if (collected) return collected;
     const state = createTestGame(23);
     const runs: Played[] = [];
+    // 연장 정지점의 뷰가 실은 교체 한도 — 한 번이면 충분하다 (국면이 정하는 값이다)
+    let subsLimitAtExtra: { subs: number; windows: number } | null = null;
     for (let pair = 500; pair < 560; pair++) {
       // 앞 시도의 소모를 지우고 시작한다 — 한 세계를 여러 경기가 나눠 쓴다
       for (const p of playersOf(state, "arsenal")) p.state.condition = 100;
@@ -423,6 +530,7 @@ describe("유저 경기의 연장 (competition.md §6)", () => {
         fatigueAtEnd = worn;
         if (stop !== "extra_time_start") return;
         fatigueAtExtra = worn;
+        subsLimitAtExtra ??= buildOfficeViews(state).match?.subs.limit ?? null;
         // **감독이 연장에서 교체한다** — 이 기능의 전부가 여기에 있다
         const side = userSide(state);
         const mine = side === "home" ? pending.ledger.home : pending.ledger.away;
@@ -446,7 +554,7 @@ describe("유저 경기의 연장 (competition.md §6)", () => {
     }
     // 이 아래 검증들이 아무것도 증명하지 못하는 상태를 그냥 지나치지 않는다
     expect(runs.length, "연장까지 가는 경기를 찾지 못했습니다").toBeGreaterThanOrEqual(3);
-    return (collected = { state, runs });
+    return (collected = { state, runs, subsLimitAtExtra });
   }
   const extraTimeRuns = () => extraTimeWorld().runs;
 
@@ -461,6 +569,10 @@ describe("유저 경기의 연장 (competition.md §6)", () => {
       // 그 30분에 감독이 손을 댈 수 있었다 — 코어가 조용히 굴리던 자리다
       expect(run.subInExtra, `pair ${run.pair}`).toBe(true);
     }
+  });
+
+  it("연장의 뷰는 교체 한도를 6인/4회로 싣는다 — 화면이 상수를 다시 적지 않는다", () => {
+    expect(extraTimeWorld().subsLimitAtExtra).toEqual({ subs: 6, windows: 4 });
   });
 
   it("연장 30분치 피로가 더 쌓인다 — 90분에서 멈추지 않는다", () => {
@@ -953,6 +1065,22 @@ describe("승부차기 (competition.md §6)", () => {
     expect(suddenDeath).toBeGreaterThan(0);
   });
 
+  it("갈리지 않은 승부차기는 장부에 적지 않는다 — 동점 합계는 승자를 못 낸다", () => {
+    /**
+     * 찰 사람이 아무도 없는 명단에서만 루프가 갈리지 않은 채 멈춘다. 그때 0–0을
+     * 적으면 그것이 멱등의 문지기가 되어 다시 굴러가지 않고, 동점 합계는
+     * `settledTieWinner`가 null로 읽어 그 대진이 영영 안 끝난다 (competition.md §7).
+     */
+    const state = world();
+    const [decider] = stageTie(state, "facup", "r32", 890, [
+      { home: "ghost-home", away: "ghost-away", homeGoals: 0, awayGoals: 0 },
+    ]);
+    const tally = resolveShootout(state, decider!);
+    expect(tally).toEqual({ home: 0, away: 0 });
+    expect(decider!.result!.penalties).toBeUndefined();
+    expect(domesticTieWinner(state, "facup", "r32", 890)).toBeNull();
+  });
+
   it("한 발씩 굴린 감독의 경로와 한 번에 굴린 경로가 같은 킥 목록을 낸다", () => {
     // 두 경로가 갈리면 감독의 중계와 장부가 어긋난다 — 난수 채널에 킥 인덱스가
     // 들어가는 이유가 이것이다
@@ -1070,5 +1198,78 @@ describe("대진 합계", () => {
     ]);
     const agg = tieAggregate(legs, legs[1]!);
     expect(agg).toEqual({ home: 2, away: 2 }); // arsenal 2 : mancity 2
+  });
+});
+
+/**
+ * 차는 자리 하나 (`nextShootoutKick`) — 세계 없이 목록만 본다.
+ *
+ * 위 describe는 굴린 표본으로 규칙을 확인하고, 여기서는 **표본이 잘 안 만드는
+ * 경계**를 손으로 세운다: 서든데스의 라운드 번호와, 먼저 찬 쪽이 넣은 그 순간에도
+ * 상대가 차야 한다는 것. 남은 킥으로만 재면 여기서 상대가 차 보지도 못하고 진다.
+ */
+describe("다음에 차는 사람이 선 자리", () => {
+  const kick = (team: MatchSide, round: number, scored: boolean): ShootoutKick => ({
+    round,
+    team,
+    taker: `${team}-${round}`,
+    outcome: scored ? "scored" : "missed",
+    probability: 0.7,
+  });
+
+  /** 양 팀이 나란히 실패하는 목록 — 갈리지 않으므로 계속 이어진다 */
+  const allMissed = (count: number, first: MatchSide): ShootoutKick[] =>
+    Array.from({ length: count }, (_, i) =>
+      kick(i % 2 === 0 ? first : first === "home" ? "away" : "home", Math.floor(i / 2) + 1, false),
+    );
+
+  it("먼저 차는 쪽부터 번갈아 가고, 라운드는 두 발마다 오른다 — 서든데스에도 이어진다", () => {
+    for (const first of ["home", "away"] as const) {
+      const other: MatchSide = first === "home" ? "away" : "home";
+      for (let taken = 0; taken <= SHOOTOUT_ROUNDS * 2 + 3; taken++) {
+        expect(nextShootoutKick(allMissed(taken, first), first), `${first} ${taken}발`).toEqual({
+          round: Math.floor(taken / 2) + 1,
+          team: taken % 2 === 0 ? first : other,
+        });
+      }
+      // 정규 열 발 뒤는 6라운드 — 서든데스에 상한이 없다
+      expect(nextShootoutKick(allMissed(SHOOTOUT_ROUNDS * 2, first), first)!.round).toBe(
+        SHOOTOUT_ROUNDS + 1,
+      );
+    }
+  });
+
+  it("서든데스는 먼저 찬 쪽이 넣어도 상대가 찬다 — 갈린 뒤에야 null이다", () => {
+    // 5-5로 정규 라운드를 마쳤다
+    const level: ShootoutKick[] = Array.from({ length: SHOOTOUT_ROUNDS * 2 }, (_, i) =>
+      kick(i % 2 === 0 ? "home" : "away", Math.floor(i / 2) + 1, true),
+    );
+    expect(shootoutSettled(level)).toBe(false);
+    expect(shootoutTally(level)).toEqual({ home: 5, away: 5 });
+
+    const homeScored = [...level, kick("home", SHOOTOUT_ROUNDS + 1, true)];
+    expect(nextShootoutKick(homeScored, "home")).toEqual({
+      round: SHOOTOUT_ROUNDS + 1,
+      team: "away",
+    });
+    // 그 라운드가 통째로 끝나야 판정한다
+    expect(
+      nextShootoutKick([...homeScored, kick("away", SHOOTOUT_ROUNDS + 1, false)], "home"),
+    ).toBeNull();
+    expect(
+      nextShootoutKick([...homeScored, kick("away", SHOOTOUT_ROUNDS + 1, true)], "home"),
+    ).toEqual({ round: SHOOTOUT_ROUNDS + 2, team: "home" });
+  });
+
+  it("뒤집을 수 없으면 남은 킥이 있어도 끝이다 — 조기 확정", () => {
+    // 홈 3득점 · 원정 3실패 — 원정이 남은 두 발을 다 넣어도 못 따라잡는다
+    const kicks: ShootoutKick[] = [];
+    for (let round = 1; round <= 3; round++) {
+      kicks.push(kick("home", round, true));
+      kicks.push(kick("away", round, false));
+    }
+    expect(nextShootoutKick(kicks, "home")).toBeNull();
+    // 한 발 전에는 아직 살아 있다 — 3-0이 되기 전이라 원정에게 세 발이 남아 있다
+    expect(nextShootoutKick(kicks.slice(0, 4), "home")).toEqual({ round: 3, team: "home" });
   });
 });

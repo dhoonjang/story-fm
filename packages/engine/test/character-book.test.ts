@@ -69,6 +69,41 @@ describe("캐릭터북 — 이번 턴에 실을 인물지", () => {
     expect(names(state, message)).toContain(target.name);
   });
 
+  /**
+   * 기억은 카드가 실리는 그 턴 층에만 선다 (people.md §6) — 창 안에 카드가 서 있는
+   * 동안 압축이 적은 기억은 다시 세우지 않으면 모델에 닿지 않는다.
+   */
+  it("창 안에 서 있어도 기억이 늘면 다시 주입된다", () => {
+    const state = structuredClone(base);
+    const coach = headCoachOf(state);
+    const message = `${coach.characterId} 잠깐 보자`;
+    const first = selectCharacters(state, { message });
+    expect(first.map((e) => e.characterId)).toContain(coach.characterId);
+    const standing = first.map((e) => ({
+      characterId: e.characterId,
+      depth: e.depth,
+      memories: e.memories?.length ?? 0,
+    }));
+    expect(selectCharacters(state, { message, injected: standing })).toEqual([]);
+
+    state.characterMemories = [
+      {
+        characterId: coach.characterId,
+        date: state.date,
+        text: "주장 교체를 놓고 부딪혔다",
+        salience: 3,
+      },
+    ];
+    const again = selectCharacters(state, { message, injected: standing });
+    expect(again.map((e) => e.characterId)).toEqual([coach.characterId]);
+    expect(again[0]?.memories).toHaveLength(1);
+
+    // 기억 수가 없는 옛 기록은 재주입을 부르지 않는다 — 0으로 읽으면 그 세이브의
+    // 카드가 한꺼번에 다시 선다
+    const old = standing.map(({ characterId, depth }) => ({ characterId, depth }));
+    expect(selectCharacters(state, { message, injected: old })).toEqual([]);
+  });
+
   it("훑는 창은 직전 모델 턴 하나다", () => {
     const state = structuredClone(base);
     const target = squad[2]!;

@@ -27,7 +27,7 @@ type IconKind = CalEvent["kind"] | CalRowIcon;
 /**
  * 일지 아이콘 — **도형으로 그린다.**
  *
- * 예전엔 이모지(🏋️ 📈 🩹…)를 문자열 앞에 붙였다. 플랫폼마다 모양·너비·색이 달라
+ * 이모지는 플랫폼마다 모양·너비·색이 달라
  * 줄이 흔들리고, 흑백 UI 위에서 혼자 알록달록해 시선을 뺏는다. 같은 굵기의 선으로
  * 그리면 글자와 함께 읽히고, 색은 뜻이 있을 때만(경고·퇴장·부상) 쓴다.
  */
@@ -292,8 +292,8 @@ export function CalendarView({ calendar }: { calendar: OfficeViews["calendar"] }
                   const isToday = cell.iso === calendar.today;
                   // 훈련과 휴식은 뜻이 반대라 점을 나눈다 — 같은 노랑이면 감독이
                   // 비워 둔 주를 달력에서 훑을 수 없다.
-                  // **소화한 훈련도 그대로 남긴다** — 예전엔 scheduled만 그려서 지난
-                  // 훈련이 달력에서 통째로 사라졌다. 훈련한 주와 쉰 주를 되돌아볼 수
+                  // **소화한 훈련도 그대로 남긴다** — scheduled만 그리면 지난
+                  // 훈련이 달력에서 통째로 사라진다. 훈련한 주와 쉰 주를 되돌아볼 수
                   // 없으면 달력이 계획표일 뿐 기록이 아니게 된다.
                   const sessions = trainingOf(cell.iso);
                   const trainings = sessions.filter((e) => !e.rest);

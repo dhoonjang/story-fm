@@ -1,12 +1,15 @@
-import type { GamePlayer } from "@story-fm/domain";
-import { ageOf, RELEASE_NOTE } from "@story-fm/domain";
+import type { GamePlayer, TransferReason } from "@story-fm/domain";
+import { ageOf, buildPaymentInstallments } from "@story-fm/domain";
 import { contractUntil, seasonYear, windowOpenOn } from "../competition/calendar";
 import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
-import { formatMoney, recordFinance } from "../club/finance";
+import { formatMoney, recordFinance, settleDuePayments } from "../club/finance";
 import { buildDeparturePress, openPress } from "../club/press";
 import { clampForm, moraleToForm } from "../squad/form";
 import {
+  firstInstallmentOf,
   loanLockOf,
+  paymentYearsOf,
+  squadShortfallText,
   transferWindowLabel,
   unilateralSeveranceOf,
   windowOpenForTeam,
@@ -17,6 +20,7 @@ import { assignSquadNumber } from "../squad/numbers";
 import { arrivingSquadLevel } from "../squad/registration";
 import type { SkillResult } from "../skills";
 import { forgetRoles } from "../skills/role-memory";
+import { item, signed } from "../skills/brief";
 import { pickAnyPlayer } from "../core/player-ref";
 import {
   activeContract,
@@ -74,6 +78,7 @@ export function clearDepartedState(state: GameState, player: GamePlayer, from: s
   state.transferList = state.transferList.filter((l) => l.gamePlayerId !== player.id);
   state.playerTraining = state.playerTraining.filter((t) => t.gamePlayerId !== player.id);
   state.issues = state.issues.filter((i) => i.gamePlayerId !== player.id);
+  player.state.transferRequestedOn = undefined;
   forgetRoles(state, player.id);
   player.isCaptain = false;
 }
@@ -85,9 +90,9 @@ export function clearDepartedState(state: GameState, player: GamePlayer, from: s
 export function toFreeAgency(
   state: GameState,
   player: GamePlayer,
-  note: string,
+  reason: TransferReason,
   on = state.date,
-): void {
+): string {
   const contract = activeContract(state, player.id);
   if (contract) contract.status = "ended";
   const from = player.teamId;
@@ -96,8 +101,10 @@ export function toFreeAgency(
   player.squadNumber = undefined;
   player.squadLevel = "first";
   player.loan = undefined;
+  // 해지 정산의 지급 일정이 이 row를 근거(`transferId`)로 삼는다 (transfer.md §5-2)
+  const id = `tr-free-${player.id}-${on}`;
   state.transfers.push({
-    id: `tr-free-${player.id}-${on}`,
+    id,
     gamePlayerId: player.id,
     windowId: null,
     fromTeamId: from,
@@ -105,8 +112,9 @@ export function toFreeAgency(
     date: on,
     type: "free",
     fee: 0,
-    note,
+    reason,
   });
+  return id;
 }
 
 /**
@@ -124,7 +132,7 @@ export function toFreeAgency(
  */
 export function releasePlayer(
   state: GameState,
-  input: { playerId: string; severance?: number },
+  input: { playerId: string; severance?: number; paymentYears?: number },
 ): SkillResult {
   const pick = pickAnyPlayer(state, input.playerId);
   if (!pick.ok) return { ok: false, message: pick.message };
@@ -137,32 +145,52 @@ export function releasePlayer(
     return { ok: false, message: `${player.name}은(는) 우리 선수가 아닙니다` };
   }
   const short = squadShortfall(state, state.userTeamId, player);
-  if (short) return { ok: false, message: `우리 ${short.replace("팔 수", "해지할 수")}` };
+  if (short) return { ok: false, message: `우리 ${squadShortfallText(short, "release")}` };
 
   const agreed = input.severance !== undefined;
   const severance = Math.max(
     0,
     Math.round(input.severance ?? unilateralSeveranceOf(state, player.id)),
   );
+  /**
+   * **일방 해지는 분할을 타지 않는다** — 전액 일시금이 협상의 바깥값(BATNA)이고,
+   * 그 값이 누그러지면 합의 해지에 응할 이유가 함께 사라진다 (transfer.md §11).
+   */
+  const paymentYears = agreed ? paymentYearsOf(input.paymentYears) : undefined;
+  const dueNow = firstInstallmentOf(severance, paymentYears);
   const finance = state.finances.find((f) => f.teamId === state.userTeamId);
-  if (finance && severance > finance.balance) {
+  if (finance && dueNow > finance.balance) {
     return {
       ok: false,
-      message: `${agreed ? "정산금" : "위약금"} ${formatMoney(severance)}을 감당할 잔고가 없습니다`,
+      message: `${agreed ? "정산금" : "위약금"} ${formatMoney(dueNow)}을 감당할 잔고가 없습니다`,
     };
   }
 
-  if (severance > 0) {
-    recordFinance(state, state.userTeamId, {
-      kind: "expense",
-      category: "player_wages",
-      label: `계약 해지 ${agreed ? "정산금" : "위약금"} — ${player.name}`,
-      amount: severance,
-      ref: { type: "player", id: player.id },
-    });
-  }
   const wasCaptain = player.isCaptain;
-  toFreeAgency(state, player, agreed ? RELEASE_NOTE.agreed : RELEASE_NOTE.unilateral);
+  const transferId = toFreeAgency(state, player, agreed ? "release-agreed" : "release-unilateral");
+  if (severance > 0) {
+    if (paymentYears !== undefined) {
+      // 받는 쪽이 선수 본인이라 표가 payee를 갖지 않는다 — 원장은 우리 지출만 적는다
+      (state.paymentSchedules ??= []).push({
+        id: `pay-${transferId}`,
+        transferId,
+        gamePlayerId: player.id,
+        payerTeamId: state.userTeamId,
+        payeeTeamId: null,
+        kind: "severance",
+        installments: buildPaymentInstallments(severance, paymentYears, state.date),
+      });
+      settleDuePayments(state);
+    } else {
+      recordFinance(state, state.userTeamId, {
+        kind: "expense",
+        category: "player_wages",
+        label: `계약 해지 ${agreed ? "정산금" : "위약금"} — ${player.name}`,
+        amount: severance,
+        ref: { type: "player", id: player.id },
+      });
+    }
+  }
 
   /**
    * **회견이 열릴 만한 자원이었는지가 사기의 문이기도 하다** — 회견을 여는 조건과
@@ -181,8 +209,34 @@ export function releasePlayer(
   pushNarrative(state, `${player.name} 계약 해지`, wasCaptain ? 5 : 4);
   return {
     ok: true,
+    brief: {
+      head: "계약 해지",
+      items: [
+        item({ label: "해지", text: player.name, note: "무소속" }),
+        item({
+          label: agreed ? "정산금" : "위약금",
+          text: formatMoney(severance),
+          ...(paymentYears === undefined
+            ? {}
+            : { note: `${paymentYears}년 분할 · 첫 회분 ${formatMoney(dueNow)}` }),
+        }),
+        ...(wasCaptain ? [item({ text: "주장 공석" })] : []),
+        ...(press
+          ? [
+              item({
+                label: "1군 사기",
+                text: signed(DEPARTURE_SQUAD_MORALE),
+                delta: DEPARTURE_SQUAD_MORALE,
+              }),
+            ]
+          : []),
+      ],
+    },
     message:
-      `${player.name}과(와) 계약을 해지했습니다 — ${agreed ? "정산금" : "위약금 전액"} ${formatMoney(severance)}.` +
+      `${player.name}과(와) 계약을 해지했습니다 — ${agreed ? "정산금" : "위약금 전액"} ${formatMoney(severance)}` +
+      (paymentYears === undefined
+        ? "."
+        : ` (${paymentYears}년 분할 — 첫 회분 ${formatMoney(dueNow)}).`) +
       " 무소속이 됐습니다 — 다른 구단이 데려갈 수 있습니다." +
       (wasCaptain ? " 주장이 떠났습니다 — 새 주장을 지명하세요." : "") +
       (press ? ` 기자회견이 열렸습니다. 남은 1군 사기 ${DEPARTURE_SQUAD_MORALE}.` : ""),
@@ -228,7 +282,7 @@ export function loanPlayer(
     };
   }
   const short = squadShortfall(state, state.userTeamId, player);
-  if (short) return { ok: false, message: `우리 ${short.replace("팔 수", "보낼 수")}` };
+  if (short) return { ok: false, message: `우리 ${squadShortfallText(short, "loan-out")}` };
   const contract = activeContract(state, player.id);
   if (!contract) return { ok: false, message: `${player.name}은(는) 계약이 없습니다` };
 
@@ -257,7 +311,6 @@ export function loanPlayer(
     date: state.date,
     type: "loan",
     fee: 0,
-    note: `임대 (복귀 ${until} · 주급 분담 ${Math.round(wageShare * 100)}%)`,
   });
 
   pushNarrative(state, `${player.name} ${teamName(destination.id)} 임대 (복귀 ${until})`, 3);
@@ -266,6 +319,17 @@ export function loanPlayer(
     message:
       `${player.name}을(를) ${teamName(destination.id)}에 임대 보냈습니다 — ${until} 복귀 · ` +
       `주급 ${Math.round(wageShare * 100)}%를 그쪽이 부담합니다`,
+    brief: {
+      head: "임대",
+      items: [
+        item({
+          label: "임대",
+          text: player.name,
+          note: `${teamName(destination.id)} · ${until} 복귀`,
+        }),
+        item({ label: "그쪽 주급 부담", text: `${Math.round(wageShare * 100)}%` }),
+      ],
+    },
   };
 }
 
@@ -285,13 +349,25 @@ export function recallLoan(state: GameState, input: { playerId: string }): Skill
   return {
     ok: true,
     message: `${player.name}을(를) ${teamName(from)}에서 불러들였습니다 — 2군으로 복귀했습니다`,
+    brief: {
+      head: "임대 복귀",
+      items: [item({ label: "복귀", text: player.name, note: `${teamName(from)} · 2군` })],
+    },
   };
 }
 
-/** 임대 복귀 — 원소속으로 되돌린다. 자리는 감독이 정한다(2군으로 들어온다) */
+/**
+ * 임대 복귀 — 원소속으로 되돌린다. 자리는 감독이 정한다(2군으로 들어온다).
+ *
+ * **빌린 구단의 배치는 비운다** — 복귀도 그 구단에서 보면 나가는 문이라, 안 비우면
+ * 떠난 선수의 id가 그 팀 라인업에 남는다 (transfer.md §2). 다만 `clearDepartedState`
+ * 전체를 지나지는 않는다: 이적 리스트·개인 훈련·역할 기억은 **소유 구단**의 값이라
+ * 우리가 내보낸 선수가 돌아오는 자리에서 지우면 우리 기억을 우리가 잃는다.
+ */
 function returnFromLoan(state: GameState, player: GamePlayer): void {
   const loan = player.loan;
   if (!loan) return;
+  releaseFromTactics(state, player.teamId, player.id);
   const window = windowOpenOn(state.windows, state.date);
   state.transfers.push({
     id: `tr-loanback-${player.id}-${state.date}`,
@@ -302,7 +378,6 @@ function returnFromLoan(state: GameState, player: GamePlayer): void {
     date: state.date,
     type: "loan",
     fee: 0,
-    note: "임대 복귀",
   });
   player.teamId = loan.fromTeamId;
   player.squadNumber = undefined;
@@ -348,6 +423,29 @@ const THIN_GROUP = 5;
 const FREE_AGENT_PAR_RATING = 67;
 /** 구단과 선수의 수준이 맞다고 보는 폭 — 같은 이유로 눈금을 탄다 (8 → 7) */
 const SUITOR_LEVEL_BAND = 7;
+/**
+ * 그 포지션군이 포화라고 보는 인원 — 이만큼 있으면 데려가지 않고, 이 아래로
+ * 모자란 만큼 뽑기에 이름을 더 넣는다. **두 자리가 같은 수를 읽어야 한다** —
+ * 문턱과 가중치가 갈리면 아무도 뽑히지 않는 구간이 생긴다.
+ */
+const SUITOR_GROUP_CROWD = THIN_GROUP + 3;
+/** 팀 수준을 재는 표본 — 전력 상위 이만큼의 평균이 그 구단의 눈금이다 */
+const SUITOR_LEVEL_SAMPLE = 15;
+/** 나이가 이름값에 곱하는 몫 — 나이가 많을수록 팀을 더디게 찾는다 */
+const FREE_AGENT_OLD_AGE = 34;
+const FREE_AGENT_OLD_APPEAL = 0.35;
+const FREE_AGENT_VETERAN_AGE = 31;
+const FREE_AGENT_VETERAN_APPEAL = 0.7;
+/**
+ * 무소속을 더 받지 않는 **전체 인원**(1군·2군·유스 합) — 이만큼 데리고 있는 구단은
+ * 공짜라도 한 명을 더 얹지 않는다.
+ *
+ * ⚠️ 스쿼드 상한이 아니다. 규정의 등록 상한(`SQUAD_LIST_LIMIT`)도, 1군 운영 상한
+ * (`FIRST_TEAM_LIMIT`)도, AI 시장의 전체 최후 상한(`MAX_SQUAD` = 52)도 아니고
+ * 그보다 이른 자리다 — 그 상한까지 무소속으로 채우면 감독이 시장에 나가기 전에
+ * 세계의 남는 선수가 전부 소화된다.
+ */
+const FREE_AGENT_SUITOR_SQUAD_CAP = 40;
 
 /**
  * 무소속 선수를 다른 구단이 데려간다 — tick이 **이적창이 열린 날** 부른다.
@@ -371,7 +469,11 @@ export function signFreeAgents(state: GameState, digest: string[]): void {
     // 이름값이 클수록 빨리, 나이가 많을수록 더디게 (기준 등급은 종합 눈금을 탄다)
     const appeal =
       (player.attributes.overall / FREE_AGENT_PAR_RATING) *
-      (age >= 34 ? 0.35 : age >= 31 ? 0.7 : 1);
+      (age >= FREE_AGENT_OLD_AGE
+        ? FREE_AGENT_OLD_APPEAL
+        : age >= FREE_AGENT_VETERAN_AGE
+          ? FREE_AGENT_VETERAN_APPEAL
+          : 1);
     if (rng() > FREE_AGENT_SIGN_CHANCE * appeal) continue;
 
     const suitor = pickSuitor(state, player, rng);
@@ -392,24 +494,24 @@ function pickSuitor(state: GameState, player: GamePlayer, rng: () => number): st
     if (team.id === FREE_AGENT_TEAM) continue;
     if (leagueOfTeam(team.id) === "free") continue;
     const squad = playersOf(state, team.id);
-    if (squad.length === 0 || squad.length >= 40) continue;
+    if (squad.length === 0 || squad.length >= FREE_AGENT_SUITOR_SQUAD_CAP) continue;
 
     // 자리가 얇은가
     const atGroup = squad.filter((p) => groupOf(p) === group).length;
-    if (atGroup >= THIN_GROUP + 3) continue;
+    if (atGroup >= SUITOR_GROUP_CROWD) continue;
 
-    // 수준이 비슷한가 — 팀 상위 15명 평균과 견준다
+    // 수준이 비슷한가 — 팀 상위 몇 명의 평균과 견준다 (`SUITOR_LEVEL_SAMPLE`)
     const level =
       squad
         .map((p) => p.attributes.overall)
         .sort((a, b) => b - a)
-        .slice(0, 15)
-        .reduce((sum, v) => sum + v, 0) / Math.min(15, squad.length);
+        .slice(0, SUITOR_LEVEL_SAMPLE)
+        .reduce((sum, v) => sum + v, 0) / Math.min(SUITOR_LEVEL_SAMPLE, squad.length);
     const gap = Math.abs(level - player.attributes.overall);
     if (gap > SUITOR_LEVEL_BAND) continue;
 
     // 급할수록 여러 번 이름을 넣는다 (결정적 rng 하나로 뽑기 위해)
-    const weight = Math.max(1, THIN_GROUP + 3 - atGroup);
+    const weight = Math.max(1, SUITOR_GROUP_CROWD - atGroup);
     for (let i = 0; i < weight; i++) candidates.push(team.id);
   }
   if (candidates.length === 0) return null;
@@ -440,7 +542,6 @@ function signWithClub(
     date: state.date,
     type: "free",
     fee: 0,
-    note: "자유계약",
   });
   // 남은 활성 계약을 끝내고 쓴다 — 안 끝내면 한 선수의 주급이 두 구단에서 세어진다
   const previous = activeContract(state, player.id);

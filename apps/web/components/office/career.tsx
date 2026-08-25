@@ -1,11 +1,18 @@
 "use client";
 
 import type { OfficeViews } from "@story-fm/engine";
-import { MANAGER_ATTRIBUTES, MANAGER_ATTRIBUTE_KO, achievementTitle } from "@story-fm/domain";
+import {
+  MANAGER_ATTRIBUTES,
+  MANAGER_ATTRIBUTE_KO,
+  achievementTitle,
+  awardTitle,
+  formatMoney,
+} from "@story-fm/domain";
 import { IconTrophy } from "@/components/icons";
 
 type SeasonRow = OfficeViews["career"]["seasons"][number];
 type AchievementRow = OfficeViews["career"]["achievements"][number];
+type AwardRow = OfficeViews["career"]["awards"][number];
 
 /**
  * **업적 한 줄을 쓰는 자리** — 코어는 코드와 근거 수치만 넘긴다
@@ -20,6 +27,30 @@ function achievementDetailOf(a: AchievementRow): string {
   return "";
 }
 
+/**
+ * **시상 한 줄의 근거를 쓰는 자리** — 코어는 코드와 근거 수치만 넘긴다
+ * (docs/overview.md §1 철칙 4 · career.md §6). 어느 칸이 그 상의 근거인가는
+ * 상마다 다르다: 득점왕은 골, 도움왕은 도움, 올해의 선수는 평점, 영플레이어는
+ * 나이와 평점. 출전은 넷 모두의 바탕이라 늘 뒤에 붙는다.
+ */
+function awardDetailOf(a: AwardRow): string {
+  const rating = a.rating === undefined ? null : `평점 ${a.rating.toFixed(2)}`;
+  const grounds =
+    a.code === "top-scorer"
+      ? [`${a.goals}골`]
+      : a.code === "top-assister"
+        ? [`${a.assists}도움`]
+        : a.code === "young-player"
+          ? [a.age === undefined ? null : `${a.age}세`, rating]
+          : [rating];
+  return [...grounds, `${a.apps}경기`].filter((x): x is string => x !== null).join(" · ");
+}
+
+/** 전적 한 칸 — 코어는 셋을 세고, `20승 8무 10패`로 잇는 것은 화면이다 */
+function recordText({ wins, draws, losses }: SeasonRow["record"]): string {
+  return `${wins}승 ${draws}무 ${losses}패`;
+}
+
 type CareerView = OfficeViews["career"];
 
 /**
@@ -28,11 +59,67 @@ type CareerView = OfficeViews["career"];
  *
  * 같은 17위도 우승을 노리라는 구단에서와 잔류가 기대인 구단에서 다른 사건이라,
  * 순위 혼자로는 왜 잘렸는지가 읽히지 않는다. 옛 세이브는 카드 대신 평가 문장을
- * 들고 있어 그것이 폴백이고, 둘 다 없으면 지어내지 않는다.
+ * 들고 있어 그것이 폴백이고, 둘 다 없으면 지어내지 않는다. 무직 카드와 시즌
+ * 표의 경질 이력 줄(career.md §6)이 같은 문장을 쓴다.
  */
-function dismissalLineOf(d: NonNullable<CareerView["dismissal"]>): string {
+function dismissalLineOf(d: {
+  position: number | null;
+  target: number | null;
+  expectation: string | null;
+  reason?: string | null;
+}): string {
   if (d.position === null || d.target === null || d.expectation === null) return d.reason ?? "";
-  return `${d.expectation} — 기대 ${d.target}위, 최종 ${d.position}위`;
+  return `${d.expectation} — 기대 ${d.target}위, 당시 ${d.position}위`;
+}
+
+type OfferRow = CareerView["offers"][number];
+
+/**
+ * **제안 한 장** — 무직에게 온 자리도, 지금 구단의 재계약도 같은 물건이다
+ * (career.md §5.1 · §5.4). 코어가 넘기는 것은 조건과 기한이고 문장은 여기서 쓴다.
+ *
+ * **읽는 값이다** — 수락도 흥정도 감독이 말로 한다.
+ */
+function OfferCard({ offer: o }: { offer: OfferRow }) {
+  return (
+    <div className="offer">
+      <div className="offer-head">
+        <b>{o.teamName}</b>
+        <span className="tier">{o.via === "renewal" ? "재계약" : `${o.tier}티어`}</span>
+        <span className="until">{o.expiresOn}까지</span>
+      </div>
+      <div className="offer-why">
+        기대 {o.expectation} ({o.target}위)
+        {o.position === null ? "" : ` · 현재 ${o.position}위`}
+      </div>
+      {o.salary !== null && (
+        <div className="offer-why">
+          연봉 {formatMoney(o.salary)} · {o.years ?? "-"}년 · 이적 예산 약속{" "}
+          {formatMoney(o.budgetPledge ?? 0)}
+          {o.counteredOn === null ? "" : " · 흥정 완료"}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * **재직 중에 서는 제안은 재계약 하나다** (career.md §5.4) — 보드가 만료 90일 전에
+ * 건 다음 임기다. 경질 카드가 서 있는 동안에는 이 자리가 무직 카드로 대체된다.
+ */
+function Renewal({ career }: { career: CareerView }) {
+  if (career.dismissal) return null;
+  const offers = career.offers.filter((o) => o.via === "renewal");
+  if (offers.length === 0) return null;
+  return (
+    <div className="mgr-outofwork">
+      <div className="offer-list" data-testid="renewal-offers">
+        {offers.map((o) => (
+          <OfferCard offer={o} key={o.id} />
+        ))}
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -42,6 +129,12 @@ function dismissalLineOf(d: NonNullable<CareerView["dismissal"]>): string {
  * 화면이 "왜 맡은 팀이 없는가"와 "무엇이 걸려 있는가"를 한자리에서 말해야 한다.
  * 제안은 **읽는 값이다** — 수락은 감독이 말로 한다.
  */
+/** 지갑 아래에 세우는 지출 줄 수 — 그 위는 커리어 표가 아니라 가계부가 된다 */
+const SPENDING_SHOWN = 3;
+
+/** 자리를 잃은 갈래의 이름 — 코드가 사실이고 문장은 화면이 만든다 (career.md §5.4) */
+const LEAVE_KO = { expired: "계약 만료", resigned: "사임", sacked: "경질" } as const;
+
 function OutOfWork({ career }: { career: CareerView }) {
   const d = career.dismissal;
   if (!d) return null;
@@ -50,29 +143,45 @@ function OutOfWork({ career }: { career: CareerView }) {
       <div className="dismissed">
         <div className="dismissed-head">
           <b>{d.teamName}</b>
-          <span className="when">{d.on} 경질</span>
+          <span className="when">
+            {d.on} {LEAVE_KO[d.kind]}
+          </span>
         </div>
         <div className="dismissed-why">{dismissalLineOf(d)}</div>
+        {d.severance !== null && (
+          <div className="dismissed-why">
+            위약금 {formatMoney(d.severance)}
+            {/* 누가 물었는지는 갈래가 안다 — 사임만 감독이 지갑에서 문다 (career.md §5.4) */}
+            {d.kind === "resigned" ? " (감독 부담)" : ""}
+          </div>
+        )}
       </div>
       <div className="offer-list" data-testid="manager-offers">
         {career.offers.length === 0 ? (
           <div className="empty">들어온 감독직 제안이 없습니다</div>
         ) : (
-          career.offers.map((o) => (
-            <div className="offer" key={o.id}>
-              <div className="offer-head">
-                <b>{o.teamName}</b>
-                <span className="tier">{o.tier}티어</span>
-                <span className="until">{o.expiresOn}까지</span>
-              </div>
-              <div className="offer-why">
-                기대 {o.expectation} ({o.target}위)
-                {o.position === null ? "" : ` · 현재 ${o.position}위`}
-              </div>
-            </div>
-          ))
+          career.offers.map((o) => <OfferCard offer={o} key={o.id} />)
         )}
       </div>
+      {/**
+       * 공석 명부 — **제안이 아니라 문이다** (career.md §5.1). 제안 카드의 강조
+       * 테두리를 물려받으면 답을 기다리는 것처럼 읽히므로 가라앉은 테두리로 가른다.
+       * 지원은 감독이 말로 한다 — 화면은 어느 문이 열려 있는지만 세운다.
+       */}
+      {career.vacancies.length > 0 && (
+        <div className="offer-list" data-testid="manager-vacancies">
+          {career.vacancies.map((v, i) => (
+            <div className="offer vacant" key={i}>
+              <div className="offer-head">
+                <b>{v.teamName}</b>
+                <span className="tier">{v.tier}티어</span>
+                <span className="until">{v.on} 공석</span>
+              </div>
+              {v.position !== null && <div className="offer-why">현재 {v.position}위</div>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -227,6 +336,8 @@ function ManagerRadar({
 }
 
 // ── 커리어 ──────────────────────────────────────────────
+type DismissalRow = CareerView["dismissals"][number];
+
 export function CareerView({
   squad,
   career,
@@ -234,6 +345,23 @@ export function CareerView({
   squad: OfficeViews["squad"];
   career: OfficeViews["career"];
 }) {
+  /**
+   * 시즌 기록과 경질 이력이 **한 표에 선다** (career.md §6) — 잘린 시즌은 시즌
+   * 기록이 없으므로 경질 줄이 그 해를 채운다. 같은 시즌 안에서는 경질(시즌 중)이
+   * 시즌 결산(시즌 끝)보다 앞이라, 결산 줄에는 끝의 날짜를 세워 정렬한다.
+   */
+  const seasonRows: Array<
+    | { kind: "season"; season: number; at: string; s: SeasonRow }
+    | { kind: "dismissal"; season: number; at: string; d: DismissalRow }
+  > = [
+    ...career.seasons.map((s) => ({ kind: "season" as const, season: s.season, at: "9999", s })),
+    ...career.dismissals.map((d) => ({
+      kind: "dismissal" as const,
+      season: d.season,
+      at: d.on,
+      d,
+    })),
+  ].sort((a, b) => a.season - b.season || a.at.localeCompare(b.at));
   return (
     <div data-testid="view-career">
       {/**
@@ -250,70 +378,118 @@ export function CareerView({
           <h3>{squad.manager.name} 감독</h3>
           <div className="bg">{squad.manager.background}</div>
           {/**
-           * 감독에게 **딸린 수치 묶음** 둘이 한 줄에 선다 — 세계가 그를 보는 눈(평판)과
-           * 자리에 남은 목숨(보드 경고). 둘 다 이름·배경보다 아래 단이고 서로는 같은 단이다.
+           * 감독에게 딸린 값은 **두 갈래**고 생김새가 그것을 가른다 — 견주는 눈금
+           * (평판·보드 경고)은 상자 하나에 함께 담고, 읽는 사실(계약·지갑)은 상자 없이
+           * 라벨과 값으로 선다. 둘 다 이름·배경보다 아래 단이다.
            */}
           <div className="mgr-meters">
-            {/**
-             * 평판 — 감독의 능력이 아니라 **세계가 그를 보는 눈**이라 오각형과 같은
-             * 무게로 그리지 않는다. 다만 셋을 견주는 값이라 막대가 읽기 편하다:
-             * **짧은 막대 셋을 한 줄로** 눕혀 눈금은 주되 자리는 덜 차지한다.
-             */}
-            <div className="mgr-rep">
-              <div className="mgr-rep-title">평판</div>
-              <div className="mgr-rep-items">
-                {(
-                  [
-                    ["보드", squad.manager.reputation.board],
-                    ["언론", squad.manager.reputation.media],
-                    ["선수단", squad.manager.reputation.squad],
-                  ] as const
-                ).map(([label, value]) => (
-                  <span className="rep-item" key={label}>
-                    <span className="rep-label">{label}</span>
-                    <span className="rep-bar">
-                      <i style={{ width: `${value}%` }} />
+            <div className="mgr-gauges">
+              {/**
+               * 평판 — 감독의 능력이 아니라 **세계가 그를 보는 눈**이라 오각형과 같은
+               * 무게로 그리지 않는다. 다만 셋을 견주는 값이라 막대가 읽기 편하다:
+               * **짧은 막대 셋을 한 줄로** 눕혀 눈금은 주되 자리는 덜 차지한다.
+               */}
+              <div className="mgr-rep">
+                <div className="mgr-rep-title">평판</div>
+                <div className="mgr-rep-items">
+                  {(
+                    [
+                      ["보드", squad.manager.reputation.board],
+                      ["언론", squad.manager.reputation.media],
+                      ["선수단", squad.manager.reputation.squad],
+                    ] as const
+                  ).map(([label, value]) => (
+                    <span className="rep-item" key={label}>
+                      <span className="rep-label">{label}</span>
+                      <span className="rep-bar">
+                        <i style={{ width: `${value}%` }} />
+                      </span>
+                      <b>{value}</b>
                     </span>
-                    <b>{value}</b>
-                  </span>
-                ))}
+                  ))}
+                </div>
+              </div>
+              {/**
+               * 보드 경고 — 평판과 **같은 무게로, 다른 물건으로** 그린다. 경질은 이
+               * 세이브가 끝나는 유일한 길이라 카운터가 화면에 없으면 끝이 예고 없이
+               * 온다. 평판은 0~100 사이를 오가는 눈금이지만 경고는 **세는 것**이라
+               * 막대가 아니라 칸이다 — 찬 칸이 받은 경고고, 마지막 칸이 차면 붉다.
+               */}
+              <div className="mgr-warn">
+                <div className="mgr-rep-title">보드 경고</div>
+                <div
+                  className="mgr-warn-cells"
+                  data-testid="board-warnings"
+                  role="img"
+                  aria-label={`보드 경고 ${squad.manager.boardWarnings}/${squad.manager.warningLimit}${
+                    squad.manager.lastWarnedOn ? ` · 마지막 ${squad.manager.lastWarnedOn}` : ""
+                  }`}
+                  title={
+                    squad.manager.lastWarnedOn
+                      ? `마지막 경고 ${squad.manager.lastWarnedOn}`
+                      : undefined
+                  }
+                >
+                  {Array.from({ length: squad.manager.warningLimit }, (_, i) => (
+                    <i
+                      key={i}
+                      className={
+                        i < squad.manager.boardWarnings
+                          ? i === squad.manager.warningLimit - 1
+                            ? "on last"
+                            : "on"
+                          : ""
+                      }
+                    />
+                  ))}
+                </div>
               </div>
             </div>
             {/**
-             * 보드 경고 — 평판과 **같은 무게로, 다른 물건으로** 그린다. 경질은 이
-             * 세이브가 끝나는 유일한 길이라 카운터가 화면에 없으면 끝이 예고 없이
-             * 온다. 평판은 0~100 사이를 오가는 눈금이지만 경고는 **세는 것**이라
-             * 막대가 아니라 칸이다 — 찬 칸이 받은 경고고, 마지막 칸이 차면 붉다.
+             * 계약·지갑 — 눈금이 아니라 **읽는 사실 한 줄씩**이라 상자를 쓰지 않는다.
+             * 둘이 나란히 서야 연봉과 위약금이 어디로 갔는지가 그 자리에서 읽히고
+             * (career.md §5.1 · §5.4), 옛 세이브엔 계약이 없어 그때는 줄이 하나다.
+             *
+             * 지갑은 **잔고만** 말한다 — 사재 출연 여력은 실제로 넣을 수 있는 최대가
+             * 아니라(`min(지갑, 여력)`) 잔고 옆에 세우면 못 쓰는 돈을 부른다. 여력이
+             * 서는 자리는 감독이 금액을 고르는 순간이다 (career.md §5.4).
              */}
-            <div className="mgr-warn">
-              <div className="mgr-rep-title">보드 경고</div>
-              <div
-                className="mgr-warn-cells"
-                data-testid="board-warnings"
-                role="img"
-                aria-label={`보드 경고 ${squad.manager.boardWarnings}/${squad.manager.warningLimit}${
-                  squad.manager.lastWarnedOn ? ` · 마지막 ${squad.manager.lastWarnedOn}` : ""
-                }`}
-                title={
-                  squad.manager.lastWarnedOn
-                    ? `마지막 경고 ${squad.manager.lastWarnedOn}`
-                    : undefined
-                }
-              >
-                {Array.from({ length: squad.manager.warningLimit }, (_, i) => (
-                  <i
-                    key={i}
-                    className={
-                      i < squad.manager.boardWarnings
-                        ? i === squad.manager.warningLimit - 1
-                          ? "on last"
-                          : "on"
-                        : ""
-                    }
-                  />
+            <dl className="mgr-facts">
+              {career.contract && (
+                <div className="mgr-fact">
+                  <dt>계약</dt>
+                  <dd>
+                    연봉 {formatMoney(career.contract.salary)} · {career.contract.until}까지 (
+                    {career.contract.daysLeft}일)
+                    {career.contract.renewal === "declined" && (
+                      <b className="mgr-nonrenewal"> 재계약 없음</b>
+                    )}
+                  </dd>
+                </div>
+              )}
+              <div className="mgr-fact">
+                <dt>지갑</dt>
+                <dd>{formatMoney(career.wallet)}</dd>
+              </div>
+            </dl>
+            {/**
+             * 지출 이력 — 지갑 **아래 자기 줄**이다. 지갑 칸 안에 품고 있었더니 그 칸만
+             * 높이가 튀고 나란히 선 칸들이 그 높이에 맞춰 빈 채로 늘어났다.
+             */}
+            {career.spending.length > 0 && (
+              <div className="mgr-spending">
+                {career.spending.slice(0, SPENDING_SHOWN).map((s, i) => (
+                  <div className="mgr-spend" key={i}>
+                    <span className="when">{s.on}</span>
+                    <span>
+                      {s.kind}
+                      {s.playerName ? ` — ${s.playerName}` : ""}
+                    </span>
+                    <b>−{formatMoney(s.amount)}</b>
+                  </div>
                 ))}
               </div>
-            </div>
+            )}
           </div>
         </div>
         <ManagerRadar
@@ -324,6 +500,7 @@ export function CareerView({
         />
       </div>
 
+      <Renewal career={career} />
       <OutOfWork career={career} />
 
       <div className="section-title">트로피 보관함</div>
@@ -356,8 +533,25 @@ export function CareerView({
         })}
       </div>
 
+      {/**
+       * 시상 — **감독의 상이 아니라 선수의 상이다** (career.md §6). 코어가 내려
+       * 주는 것은 코드와 근거 수치뿐이라 상의 이름도 근거 문장도 여기서 쓴다.
+       */}
+      <div className="section-title">시상</div>
+      <div className="trophy-list">
+        {career.awards.length === 0 && <div className="empty">받은 시상이 없습니다</div>}
+        {career.awards.map((a, i) => (
+          <div className="achv" key={i}>
+            <div>{awardTitle(a.code)}</div>
+            <div className="desc">
+              시즌 {a.season} · {a.leagueName} — {a.playerName} ({a.teamName}) · {awardDetailOf(a)}
+            </div>
+          </div>
+        ))}
+      </div>
+
       <div className="section-title">시즌 기록</div>
-      {career.seasons.length === 0 ? (
+      {seasonRows.length === 0 ? (
         <div className="empty">첫 시즌 진행 중</div>
       ) : (
         <table>
@@ -371,18 +565,30 @@ export function CareerView({
             </tr>
           </thead>
           <tbody>
-            {career.seasons.map((s) => (
-              <tr key={s.season}>
-                <td>{s.season}</td>
-                <td>{s.teamName}</td>
-                <td>{s.position}위</td>
-                <td>{s.record}</td>
-                {/* 순위와 전적이 말하지 않는 것 — 같은 4위가 어느 구단에서는 성공이고
-                    어느 구단에서는 실패다. 코어는 등급과 기대 순위만 넘기고 문장은
-                    여기서 쓴다 (docs/overview.md §1 철칙 4) */}
-                <td className="career-verdict">{boardVerdictOf(s)}</td>
-              </tr>
-            ))}
+            {seasonRows.map((r) =>
+              r.kind === "season" ? (
+                <tr key={`season-${r.s.season}`}>
+                  <td>{r.s.season}</td>
+                  <td>{r.s.teamName}</td>
+                  <td>{r.s.position}위</td>
+                  <td>{recordText(r.s.record)}</td>
+                  {/* 순위와 전적이 말하지 않는 것 — 같은 4위가 어느 구단에서는 성공이고
+                      어느 구단에서는 실패다. 코어는 등급과 기대 순위만 넘기고 문장은
+                      여기서 쓴다 (docs/overview.md §1 철칙 4) */}
+                  <td className="career-verdict">{boardVerdictOf(r.s)}</td>
+                </tr>
+              ) : (
+                <tr key={`dismissal-${r.d.on}`} data-testid="career-dismissal">
+                  <td>{r.d.season}</td>
+                  <td>{r.d.teamName}</td>
+                  <td>—</td>
+                  <td className="career-sacked">
+                    {r.d.on} {LEAVE_KO[r.d.kind]}
+                  </td>
+                  <td className="career-verdict">{dismissalLineOf(r.d)}</td>
+                </tr>
+              ),
+            )}
           </tbody>
         </table>
       )}

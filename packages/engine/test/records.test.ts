@@ -9,6 +9,7 @@ import {
   userPlayers,
   weeklyWagesOf,
 } from "@story-fm/engine";
+import { BookingSchema, MATCH_MINUTE_MAX } from "@story-fm/domain";
 import { advanceToMatchday, createTestGame, playMockMatch, playPreseason } from "./helpers";
 
 /**
@@ -55,6 +56,18 @@ describe("계약 (주급의 원본)", () => {
 });
 
 describe("징계 — BOOKING + SUSPENSION", () => {
+  /**
+   * 카드의 분은 **장부가 받아들이는 마지막 분**까지다 — 연장 끝(120′)에 추가시간
+   * 여유를 더한 값(`MATCH_MINUTE_MAX`). 리터럴로 적혀 있던 자리라 상한이 갈리면
+   * 이벤트는 반려되는데 카드만 통과한다.
+   */
+  it("카드의 분은 MATCH_MINUTE_MAX까지만 받는다", () => {
+    const card = { gamePlayerId: "p1", matchId: "m1", season: 1, card: "yellow" as const };
+    expect(BookingSchema.safeParse({ ...card, minute: MATCH_MINUTE_MAX }).success).toBe(true);
+    expect(BookingSchema.safeParse({ ...card, minute: MATCH_MINUTE_MAX + 1 }).success).toBe(false);
+    expect(BookingSchema.safeParse({ ...card, minute: -1 }).success).toBe(false);
+  });
+
   it("시즌 경고 수는 저장되지 않고 BOOKING에서 파생된다", () => {
     const state = createTestGame();
     const player = userPlayers(state)[4]!;

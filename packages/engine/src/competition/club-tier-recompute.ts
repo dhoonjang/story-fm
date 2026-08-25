@@ -6,11 +6,13 @@
  * 1부에서 영원히 tier 4로 남아 보드가 잔류만 요구하고, 강등된 빅클럽이 2부에서
  * tier 1로 남아 우승 경쟁을 요구받는다.
  */
-import { playersOf, savedClubProfile, teamNameIn, type GameState } from "../core/state";
+import { boardExpectationText } from "@story-fm/domain";
+import { savedClubProfile, teamNameIn, type GameState } from "../core/state";
 import { boardExpectationOfTier, tierOfTeamIn } from "../core/club-tier";
 import { isCupOnlyLeague, isTopLeague } from "../data/league-catalog";
 import { clubProfiles, type ClubProfile } from "../data/club-profile";
 import { leagueOfTeamIn, leagueSizeIn } from "./promotion";
+import { squadRating } from "../squad/depth";
 
 // ── 눈금 ──────────────────────────────────────────────
 // 밸런스를 만지려면 이 블록만 읽으면 된다.
@@ -79,14 +81,6 @@ function percentileIn(values: readonly number[], value: number): number {
     else if (v === value) equal += 1;
   }
   return (below + equal / 2) / values.length;
-}
-
-/** 스쿼드 상위 열한 명의 평균 OVR — 전력 축의 자 */
-function squadRating(state: GameState, teamId: string): number {
-  const squad = playersOf(state, teamId);
-  if (squad.length === 0) return 0;
-  const top = [...squad].sort((a, b) => b.attributes.overall - a.attributes.overall).slice(0, 11);
-  return top.reduce((sum, p) => sum + p.attributes.overall, 0) / top.length;
 }
 
 /**
@@ -181,9 +175,9 @@ export function recomputeClubTiers(state: GameState): string[] {
 
   const after = tierOfTeamIn(state, state.userTeamId);
   if (after === before) return [];
+  const expectation = boardExpectationOfTier(after, leagueSizeIn(state, state.userTeamId));
+  const name = boardExpectationText(expectation.code, expectation.target);
   return [
-    `${teamNameIn(state, state.userTeamId)} 구단 체급 ${before} → ${after} — 보드 기대는 "${
-      boardExpectationOfTier(after, leagueSizeIn(state, state.userTeamId)).label
-    }"가 됐다`,
+    `${teamNameIn(state, state.userTeamId)} 구단 체급 ${before} → ${after} — 보드 기대는 "${name}"가 됐다`,
   ];
 }

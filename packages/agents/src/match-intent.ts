@@ -3,7 +3,7 @@ import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@st
 import { DIRECTIVE_INTENSITIES, PLAYER_DIRECTIVE_KINDS } from "@story-fm/domain";
 import { buildLedgerNote } from "./gm-input";
 import { MatchIntentSchema, type MatchIntent } from "./match-intent-schema";
-import { retryOnce, requireToolCall } from "./retry";
+import { ModelOutputError, retryOnce, requireToolCall } from "./retry";
 import { toToolSchema } from "./tool-schema";
 
 /**
@@ -24,17 +24,20 @@ import { toToolSchema } from "./tool-schema";
  * 중에는 도구 표면이 0이라 `SKILL_CATALOG`의 설명이 실리지 않는다. 없으면 같은 판정이
  * 평시와 경기에서 다른 근거로 내려진다 (docs/llm/prompts.md §5).
  */
-export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조화된 의도로 옮기는 해석기다. 중계도 대사도 쓰지 않고 report_intent 하나로만 답한다.
+export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조화된 의도 하나로 옮기는 해석기다. 중계도 대사도 쓰지 않는다.
+
+# 입력
+<ledger>(명단·시각·교체 횟수) · <standing>(걸려 있는 전술과 개인 지시) · <targets>(공략 목록) 뒤에 감독의 말이 @감독: 으로 온다.
 
 # 무엇을 고르나
-감독이 **명시한 것만** 싣는다. 말하지 않은 축·자리·역할은 보내지 않는다. 프리셋을 적용하거나 전원을 재배치하지 않는다.
+감독이 명시한 것만 싣는다. 말하지 않은 축·자리·역할은 보내지 않는다. 프리셋을 적용하거나 전원을 재배치하지 않는다.
 
 # advance — 시계를 미는가
 - 감독이 진행하라고 했을 때만 "segment"다. "계속", "봅시다", "돌려", 교체·전술을 지시하며 이어서 보자는 말이 그것이다.
 - 선수나 코치를 부르기만 했거나 말만 건 턴은 "none"이다.
 
 # 대화 (talk · teamTalk)
-감독이 **그 사람에게 건넨 말**이 있을 때만 싣고, 그 말이 어떻게 닿았는지를 **라벨**로 고른다.
+감독이 그 사람에게 건넨 말이 있을 때만 싣고, 그 말이 어떻게 닿았는지를 라벨로 고른다.
 - 이름을 부르기만 한 말("브루노 일루와봐", "잠깐 와봐")은 부름이지 면담이 아니다 — talk을 비운다.
 - outcome은 감독 발화의 (a) 맥락 적합성 (b) 설득 근거 (c) 대상 수용성으로 판정한다.
 - talk.outcome — reassured(다독임) · motivated(자극) · neutral · disappointed(실망을 드러냄) · angered(질책)
@@ -43,7 +46,7 @@ export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조
 - teamTalk.occasion — 킥오프 전 pre · 하프타임 half · 종료 후 post · 그 밖 daily.
 
 # 판을 바꾸는 것
-- substitutions — 교체. out/in은 명단의 id.
+- substitutions — 교체. out/in은 <ledger>의 id.
 - tactics — 6축(1~5) 중 감독이 말한 축만.
 - playerTactics — 한 선수의 자리·역할·개인 지시.
   - 자리는 move로만 옮긴다: lane(left·center·right) × band(defense=우리 진영, midfield, attack=상대 진영). 지정하지 않은 축은 그대로 둔다. 좌표를 지어내지 않는다.
@@ -52,7 +55,7 @@ export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조
   - instruction.intensity(${DIRECTIVE_INTENSITIES.join(" · ")}) — 감독이 세기를 말했을 때만. "붙어서 아예 지워버려"는 heavy, "따라가진 말고 견제만"은 light.
   - 다섯 갈래에 담기지 않는 말이면 지역 지시인지 보고 plans를 쓴다.
 - plans — 선수 한 명으로 환원되지 않는 지역 지시. band × lane × intent(overload·press·protect·transition)와 감독의 표현 한 줄.
-- exploits — 공략 목록에 있는 id만.
+- exploits — <targets>에 있는 id만.
 
 # unresolved
 어느 갈래에도 담기지 않은 말은 감독의 표현 그대로 unresolved에 남긴다.`;
@@ -105,7 +108,8 @@ export async function runMatchIntent(
             system: MATCH_INTENT_SYSTEM,
             history: [],
             // 명단·현재 6축·걸린 지시·공략 표적만 — 분류에 쓰이지 않는 판세는 빠진다
-            user: [buildLedgerNote(state), ``, `[감독]`, message].join("\n"),
+            // 분류기에는 감독의 이름이 없다 — 자리 태그 하나로 감독의 말을 세운다
+            user: [buildLedgerNote(state), ``, `@감독: ${message}`].join("\n"),
             tools: [makeReportTool((value) => (intent = value))],
             toolChoice: { name: REPORT_INTENT_TOOL },
           });
@@ -113,6 +117,16 @@ export async function runMatchIntent(
       () => intent !== null,
     );
   } catch (error) {
+    /**
+     * **쓸 수 없는 산출만 삼킨다** (agents.md §8). 시한·예산·인증·혼잡·차단은 그대로
+     * 올라가 화면이 무슨 일인지 안내한다 — 그것을 "다시 말씀해 주세요"로 바꾸면
+     * 감독은 자기 말이 잘못된 줄 알고 같은 말을 다시 쳐서 같은 시한을 한 번 더
+     * 기다린다.
+     *
+     * 단, **의도가 이미 나왔으면 이 걸음은 끝났다** — 그 뒤에 깨진 요청은 위 규칙대로
+     * 실패가 아니다.
+     */
+    if (intent === null && !(error instanceof ModelOutputError)) throw error;
     // 삼키는 것이 아니라 판정을 아래로 미룬다 — 무슨 일이 있었는지는 남아야 한다
     console.warn("[match:intent] 해석 호출이 실패했습니다:", error);
   }

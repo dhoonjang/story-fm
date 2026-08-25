@@ -1,6 +1,20 @@
-import { FinishReason, type Content, type GenerateContentResponse, type Part } from "@google/genai";
+import {
+  ApiError,
+  BlockedReason,
+  FinishReason,
+  type Content,
+  type GenerateContentResponse,
+  type Part,
+} from "@google/genai";
 import { describe, expect, it, vi } from "vitest";
-import { GeminiGameLLM, type GameToolSpec, type StopReason } from "@story-fm/llm";
+import {
+  GeminiGameLLM,
+  kindOfStatus,
+  llmErrorKind,
+  type GameToolSpec,
+  type LlmErrorKind,
+  type StopReason,
+} from "@story-fm/llm";
 
 const testConfig = {
   agent: "match-caster" as const,
@@ -8,6 +22,9 @@ const testConfig = {
   model: "gemini-test",
   maxTokens: 1024,
   timeoutMs: 30_000,
+  maxRetries: 2,
+  // Google에는 오퍼레이터 롤이 없다 — 설정도 참을 못 든다 (models.md §3-3)
+  operatorChannel: false,
   thinkingLevel: "medium" as const,
 };
 
@@ -234,6 +251,9 @@ describe("GeminiGameLLM", () => {
       provider: "google",
       model: "gemini-test",
     });
+    // 스냅샷은 발화 **뒤**에 접혀 나간다 — 저장 이력의 그 자리(발화만)가 보낸 메시지의
+    // 프리픽스 그대로라야 다음 턴의 캐시가 이 발화를 지나 이어진다 (models.md §3-3)
+    expect(stub.sent[0]?.parts?.[0]?.text).toBe("@김감독: 계속 진행해.\n\n[경기 장부] 17분 0:0");
     const saved = result.history.messages as Content[];
     expect(saved[0]).toEqual({
       role: "user",
@@ -416,5 +436,127 @@ describe("GeminiGameLLM 종료 사유", () => {
       user: "@김감독: 계속.",
     });
     expect(result.stopReason).toBe(neutral);
+  });
+});
+
+/**
+ * **분류는 코드값이 한다 — 문장이 아니라** (models.md §1-1). Gemini의 `ApiError`가
+ * 드는 것은 HTTP 상태 하나뿐이라 어댑터 셋이 나눠 쓰는 표를 그대로 쓴다.
+ */
+describe("GeminiGameLLM 오류 종류", () => {
+  const cases: Array<[number, LlmErrorKind]> = [
+    [503, "overloaded"],
+    [429, "rate_limit"],
+    [401, "auth"],
+    [403, "auth"],
+    [504, "timeout"],
+    [400, "unknown"],
+  ];
+
+  /** 첫 요청에서 그대로 거절하는 chat — 이력도 응답도 없다 */
+  const rejecting = (thrown: Error) => ({
+    chats: {
+      create: () => ({
+        sendMessage: () => Promise.reject(thrown),
+        sendMessageStream: vi.fn(),
+        getHistory: () => [] as Content[],
+      }),
+    },
+  });
+
+  it.each(cases)("%s는 %s로 옮긴다", async (status, kind) => {
+    const client = rejecting(new ApiError({ status, message: "문안은 언제든 바뀐다" }));
+    // 재는 것은 분류다 — 재시도가 돌면 같은 실패를 세 번 기다린다
+    const error = await new GeminiGameLLM({ ...testConfig, maxRetries: 0 }, client as never)
+      .runTurn({ system: "sys", history: [], user: "@김감독: 계속." })
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(llmErrorKind(error)).toBe(kind);
+  });
+
+  /**
+   * 발화 자체가 막힌 응답에는 **후보가 없다** — 사유는 `promptFeedback`에만 실린다.
+   * 종료 사유만 읽으면 이 실패가 "모델이 아무 말도 안 했다"로 조용히 지나간다.
+   */
+  it("발화가 막힌 응답은 filtered로 실패한다", async () => {
+    const stub = makeStubClient([
+      { promptFeedback: { blockReason: BlockedReason.SAFETY }, usageMetadata } as never,
+    ]);
+    const error = await new GeminiGameLLM(testConfig, stub.client as never)
+      .runTurn({ system: "sys", history: [], user: "@김감독: 계속." })
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(llmErrorKind(error)).toBe("filtered");
+  });
+});
+
+/**
+ * 재시도는 **어댑터가 손으로 돈다** — `@google/genai`의 `httpOptions.retryOptions`를
+ * 켜면 SDK가 `ApiError`를 세우기 전에 재시도 래퍼가 실패를 가로채, 429가 `unknown`이
+ * 되고 401이 `timeout`으로 읽힌다 (models.md §1-1). 그래서 "몇 번 다시 부르는가"와
+ * "끝내 실패한 것이 무슨 종류인가"를 둘 다 여기서 지킨다.
+ */
+describe("GeminiGameLLM 재시도", () => {
+  /** n번째 호출까지 `thrown`을 던지고 그 뒤로는 응답하는 chat — 호출 수를 센다 */
+  function flakyClient(thrown: Error, failures: number) {
+    const sendMessage = vi.fn(async () => {
+      if (sendMessage.mock.calls.length <= failures) throw thrown;
+      return response({ role: "model", parts: [{ text: "@수석코치: 네." }] });
+    });
+    return {
+      sendMessage,
+      client: {
+        chats: {
+          create: () => ({ sendMessage, sendMessageStream: vi.fn(), getHistory: () => [] }),
+        },
+      },
+    };
+  }
+
+  const turn = (llm: GeminiGameLLM) =>
+    llm.runTurn({ system: "sys", history: [], user: "@김감독: 계속." });
+
+  /** 대기가 실제로 흐르지 않게 — 재는 것은 횟수이지 시계가 아니다 */
+  async function settle<T>(run: () => Promise<T>): Promise<T | unknown> {
+    vi.useFakeTimers();
+    try {
+      const promise = run().catch((error: unknown) => error);
+      await vi.runAllTimersAsync();
+      return await promise;
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  it("붐빔·한도·5xx는 max_retries만큼 다시 부른다 — 최초 호출은 세지 않는다", async () => {
+    for (const status of [429, 503, 500, 408]) {
+      const stub = flakyClient(new ApiError({ status, message: "일시적" }), 99);
+      const error = await settle(() =>
+        turn(new GeminiGameLLM({ ...testConfig, maxRetries: 2 }, stub.client as never)),
+      );
+      expect(stub.sendMessage, String(status)).toHaveBeenCalledTimes(3);
+      // ⚠️ 끝내 실패해도 종류는 그대로다 — SDK 재시도를 켰다면 여기서 무너진다
+      expect(llmErrorKind(error), String(status)).toBe(kindOfStatus(status));
+    }
+  });
+
+  it("다시 불러 소용없는 실패는 한 번으로 끝난다", async () => {
+    for (const status of [400, 401, 403, 404]) {
+      const stub = flakyClient(new ApiError({ status, message: "그대로다" }), 99);
+      const error = await settle(() =>
+        turn(new GeminiGameLLM({ ...testConfig, maxRetries: 2 }, stub.client as never)),
+      );
+      expect(stub.sendMessage, String(status)).toHaveBeenCalledTimes(1);
+      expect(llmErrorKind(error), String(status)).toBe(kindOfStatus(status));
+    }
+  });
+
+  it("상한 안에서 풀린 요청은 그대로 성공한다", async () => {
+    const stub = flakyClient(new ApiError({ status: 503, message: "붐빔" }), 2);
+    const result = await settle(() =>
+      turn(new GeminiGameLLM({ ...testConfig, maxRetries: 2 }, stub.client as never)),
+    );
+    expect(stub.sendMessage).toHaveBeenCalledTimes(3);
+    expect((result as { text: string }).text).toBe("@수석코치: 네.");
   });
 });

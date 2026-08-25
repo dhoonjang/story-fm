@@ -1,4 +1,4 @@
-import type { GamePlayer, Medical, Negotiation } from "@story-fm/domain";
+import type { GamePlayer, Medical, MedicalConcern, Negotiation } from "@story-fm/domain";
 import { ageOf, isPlayerDeal } from "@story-fm/domain";
 import { addDays, diffDays } from "../competition/calendar";
 import { windowOpenForTeam } from "./market";
@@ -9,9 +9,7 @@ import { openInjury, playerById, teamNameIn, pushNarrative, type GameState } fro
 /**
  * 메디컬 — **합의와 계약 사이의 하루.**
  *
- * 예전엔 `accept_deal` 하나가 합의를 그 자리에서 이적으로 바꿨다. 그래서 오퍼가
- * 도착한 날 도장을 찍고 기자회견까지 여는 장면이 나왔다 — 이적이 서류 한 장으로
- * 읽혔다. 이제 확정은 **검진 결과가 나온 날**에만 일어난다.
+ * `accept_deal`은 합의만 만든다 — 확정은 **검진 결과가 나온 날**에만 일어난다.
  *
  * 코어가 정하는 것은 둘뿐이다: 검진일과 **소견이 붙는가**. 소견이 붙었을 때
  * 무엇을 할지는 감독이 정하고(강행·철회·값 재협상), 소견의 무게를 말로 옮기는
@@ -110,33 +108,60 @@ export function flagChance(state: GameState, player: GamePlayer): number {
 }
 
 /**
- * 소견 문구 — **그 선수의 이력에서 나온다.**
+ * 소견 카드 — **그 선수의 이력에서 나온다.**
  *
  * 검진이 지어낸 부위를 말하면 감독이 대조할 수 있는 것이 없어 소견이 난수로
  * 읽힌다. 마지막으로 다친 자리가 있으면 그 자리를, 없으면 지금 아픈 곳을 짚는다.
+ *
+ * 카드는 **코드와 수치**뿐이다 — 문장은 `medicalConcernText`가 만든다. 소견을
+ * 세이브에 문장으로 적어 두면 문구를 고친 뒤에도 지난 딜의 소견은 옛 말로 남고,
+ * 무엇보다 재호가를 그 문장의 첫머리로 가르던 자리가 함께 깨진다
+ * (→ docs/simulation/transfer.md §5).
  */
-function concernOf(state: GameState, player: GamePlayer): string {
+function concernOf(state: GameState, player: GamePlayer): MedicalConcern {
   const open = openInjury(state, player.id);
   if (open) {
     const left = Math.max(0, diffDays(state.date, open.expectedReturn));
-    return `${open.bodyPart} 부상이 아직 낫지 않았습니다 — 복귀까지 약 ${left}일`;
+    return { code: "open-injury", bodyPart: open.bodyPart, days: left };
   }
   const past = state.injuries
     .filter((i) => i.gamePlayerId === player.id && i.returnedOn !== null)
     .sort((a, b) => (a.occurredOn < b.occurredOn ? 1 : -1))[0];
-  if (past) {
-    return `${past.bodyPart}에 예전 부상의 흔적이 남아 있습니다 — 같은 자리가 다시 갈 수 있습니다`;
-  }
+  if (past) return { code: "past-injury", bodyPart: past.bodyPart };
   const age = ageOf(player.birthdate, state.date);
-  if (age >= 30) return `누적 피로가 나이에 비해 큽니다 — 연간 소화 경기 수를 관리해야 합니다`;
-  return `근육 밸런스가 고르지 않습니다 — 초반 몇 주는 관리가 필요합니다`;
+  if (age >= 30) return { code: "age-load", value: age };
+  return { code: "muscle-balance" };
+}
+
+/** 소견 한 줄 — 브리핑·화면·GM이 같은 함수를 부른다 (카드 → 문장) */
+export function medicalConcernText(concern: MedicalConcern): string {
+  switch (concern.code) {
+    case "open-injury":
+      return `${concern.bodyPart ?? "부상 부위"} 부상이 아직 낫지 않았습니다 — 복귀까지 약 ${concern.days ?? 0}일`;
+    case "past-injury":
+      return `${concern.bodyPart ?? "같은 자리"}에 예전 부상의 흔적이 남아 있습니다 — 같은 자리가 다시 갈 수 있습니다`;
+    case "age-load":
+      return "누적 피로가 나이에 비해 큽니다 — 연간 소화 경기 수를 관리해야 합니다";
+    case "muscle-balance":
+      return "근육 밸런스가 고르지 않습니다 — 초반 몇 주는 관리가 필요합니다";
+  }
+}
+
+/**
+ * 검진 소견의 한 줄 — **카드가 먼저, 옛 문장은 폴백이다.**
+ * 보여 주는 자리에만 쓴다(game-state.md §6): 갈래를 가르는 자리는 `origin`이 판정한다.
+ */
+export function medicalNoteText(medical: Medical): string {
+  if (medical.concern) return medicalConcernText(medical.concern);
+  return medical.note ?? "이상 소견";
 }
 
 export interface MedicalOutcome {
   negotiation: Negotiation;
   player: GamePlayer;
   passed: boolean;
-  note: string;
+  /** 소견 카드 — 통과했으면 없다 */
+  concern: MedicalConcern | null;
 }
 
 /**
@@ -174,7 +199,7 @@ export function resolveMedical(
   const flagged = rng() < flagChance(state, player);
   if (flagged) {
     medical.status = "flagged";
-    medical.note = concernOf(state, player);
+    medical.concern = concernOf(state, player);
     /**
      * **소견은 판단거리라서 판단할 시간이 있어야 한다.**
      *
@@ -196,7 +221,7 @@ export function resolveMedical(
     negotiation,
     player,
     passed: !flagged,
-    note: flagged ? (medical.note ?? "") : "이상 없음",
+    concern: flagged ? (medical.concern ?? null) : null,
   };
 }
 
@@ -213,7 +238,7 @@ export function overrideMedical(state: GameState, negotiation: Negotiation): voi
   raiseProneness(player, OVERRIDE_SEVERITY);
   pushNarrative(
     state,
-    `${player.name} 메디컬 소견을 안고 영입 강행 — ${medical.note ?? "소견"}`,
+    `${player.name} 메디컬 소견을 안고 영입 강행 — ${medicalNoteText(medical)}`,
     4,
   );
 }
@@ -229,5 +254,5 @@ export function describeMedical(state: GameState, negotiation: Negotiation): str
     : `${teamNameIn(state, receivingTeamOf(state, negotiation))} 메디컬`;
   if (medical.status === "scheduled") return `${who} ${where} ${medical.onDate} 예정`;
   if (medical.status === "passed") return `${who} ${where} 통과`;
-  return `${who} ${where} 소견 — ${medical.note ?? "이상 소견"}`;
+  return `${who} ${where} 소견 — ${medicalNoteText(medical)}`;
 }

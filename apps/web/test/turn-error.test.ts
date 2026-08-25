@@ -7,9 +7,9 @@ import type { GamePayload } from "../lib/store";
 /**
  * LLM API 실패 처리 — **게임 밖의 사건은 채팅에 남지 않는다.**
  *
- * 예전에는 실패하면 수석코치가 "처리하지 못했습니다 (…오류 문자열…)"라고
- * 사과하는 모델 턴을 저장했다. 세계의 화자가 API 오류를 아는 셈이라 픽션의
- * 경계가 무너졌고, 되돌릴 수 없는 쓰레기 턴이 세이브에 쌓였다.
+ * 실패를 수석코치가 "처리하지 못했습니다 (…오류 문자열…)"라고 사과하는 모델
+ * 턴으로 저장하면, 세계의 화자가 API 오류를 아는 셈이라 픽션의 경계가 무너지고
+ * 되돌릴 수 없는 쓰레기 턴이 세이브에 쌓인다.
  */
 
 const reject = vi.fn();
@@ -20,6 +20,7 @@ vi.mock("@story-fm/agents", async (importOriginal) => {
 });
 
 const { GmTurnFailure } = await import("@story-fm/agents");
+const { LlmCallError, LlmTimeoutError } = await import("@story-fm/llm");
 const { POST: createGame } = await import("../app/api/games/route");
 const { GET: getGame } = await import("../app/api/games/[id]/route");
 const { POST: postTurn } = await import("../app/api/games/[id]/turn/stream/route");
@@ -80,14 +81,16 @@ describe("LLM 응답 실패", () => {
   it("error 이벤트만 보내고 채팅에는 아무것도 추가하지 않는다 (유저 발화도)", async () => {
     const game = await newGame();
     const before = game.chat.length;
-    reject.mockRejectedValueOnce(new Error('529 {"type":"overloaded_error"}'));
+    reject.mockRejectedValueOnce(new LlmCallError("overloaded", '529 {"type":"overloaded_error"}'));
 
     const events = await turnEvents(game.id, "훈련 잡아줘");
     expect(events.some((e) => e.type === "done")).toBe(false);
     const failure = events.find((e) => e.type === "error");
     // 감독에게 보이는 문구는 픽션 밖 안내 — 화자 태그(@…)가 없다
     expect(failure?.error).not.toContain("@");
-    expect(failure?.detail).toContain("529"); // 원인은 detail로만 (툴팁·로그용)
+    // 문구를 고른 것은 `kind`다 — 원문에서 낱말을 찾지 않는다 (models.md §1-1)
+    expect(failure?.error).toBe("모델 서버가 혼잡합니다");
+    expect(failure?.detail).toContain("529"); // 원인은 detail로만 (개발 모드 툴팁·로그용)
 
     // 저장된 채팅이 그대로다 — 실패한 턴은 흔적을 남기지 않는다
     expect((await reloaded(game.id)).chat).toHaveLength(before);
@@ -95,8 +98,8 @@ describe("LLM 응답 실패", () => {
 
   /**
    * 턴을 끝내지 못한 실패는 **배너 한 줄**이다 (agents.md §8) — 지시 해석이 두 번
-   * 실패한 경기 턴이 그 자리다. 예전에는 그 안내가 정상 `text`로 돌아와 화자도 시점
-   * 헤더도 없는 줄이 장면들 사이에 저장됐다.
+   * 실패한 경기 턴이 그 자리다. 그 안내가 정상 `text`로 돌아오면 화자도 시점
+   * 헤더도 없는 줄이 장면들 사이에 저장된다.
    */
   it("턴 실패가 들고 온 안내는 그대로 배너가 되고 채팅에는 남지 않는다", async () => {
     const game = await newGame();
@@ -130,14 +133,13 @@ describe("LLM 응답 실패", () => {
 
   /**
    * 무응답이 실패로 끝난 **뒤**가 이 테스트의 요점이다 — 게임 뮤텍스가 풀려야
-   * 그 세이브가 다시 지시를 받는다. 예전에는 끝나지 않는 호출 하나가 다음 턴도
-   * 전술판 저장도 같은 사슬에 묶어 서버를 다시 띄우기 전까지 아무것도 못 받았다.
+   * 그 세이브가 다시 지시를 받는다. 뮤텍스가 안 풀리면 끝나지 않는 호출 하나가
+   * 다음 턴도 전술판 저장도 같은 사슬에 묶어 서버를 다시 띄우기 전까지 아무것도
+   * 못 받는다.
    */
   it("시한을 넘겨 실패한 턴 뒤에도 같은 세이브의 다음 턴이 돈다", async () => {
     const game = await newGame();
-    reject.mockRejectedValueOnce(
-      new Error("gm 에이전트가 180000ms 안에 응답하지 않았습니다 (timeout)"),
-    );
+    reject.mockRejectedValueOnce(new LlmTimeoutError("gm", 180_000));
 
     const failed = await turnEvents(game.id, "훈련 잡아줘");
     // 이미 있는 실패 경로를 탄다 — 무응답에 별도의 상태는 없다
@@ -187,6 +189,29 @@ describe("LLM 응답 실패", () => {
     }
   });
 
+  /**
+   * **프로덕션 응답에 내부 예외 원문이 실리지 않는다** (models.md §1-1).
+   * 원문에는 프롬프트 조각·모델 ID·경로가 섞여 나오고, 화면이 그것으로 하는 일은
+   * 툴팁 하나뿐이다. 분류는 `kind`가 이미 끝냈다.
+   */
+  it("프로덕션에서는 원인 문자열이 응답에 실리지 않는다", async () => {
+    const game = await newGame();
+    // vitest는 NODE_ENV를 "test"로 띄운다 — 개발 모드 판정(`traceEnabled`)이 그 값을 본다
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      reject.mockRejectedValueOnce(
+        new LlmCallError("rate_limit", "429 요청이 너무 많습니다 — key=sk-내부-원문"),
+      );
+      const events = await turnEvents(game.id, "훈련 잡아줘");
+      const failure = events.find((e) => e.type === "error");
+      expect(failure?.error).toBe("요청 한도를 넘었습니다");
+      expect(failure?.detail).toBeUndefined();
+      expect(JSON.stringify(events)).not.toContain("sk-내부-원문");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("성공한 턴은 평소처럼 유저·모델 턴을 남긴다", async () => {
     const game = await newGame();
     reject.mockResolvedValueOnce({ text: "@수석코치: 알겠습니다.", toolCalls: [] });
@@ -211,7 +236,7 @@ describe("기다리기를 멈춘 턴", () => {
     const call = async (res: Response) => {
       vi.stubGlobal("fetch", async () => res);
       try {
-        return await streamTurn("g", { message: "훈련 잡아줘", operator: false }, handlers);
+        return await streamTurn("g", { message: "훈련 잡아줘" }, handlers);
       } finally {
         vi.unstubAllGlobals();
       }

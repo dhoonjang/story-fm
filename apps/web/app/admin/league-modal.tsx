@@ -211,7 +211,6 @@ export function LeagueModal({
             <input
               value={id}
               onChange={(e) => setId(e.target.value)}
-              placeholder="예: eredivisie"
               data-testid="league-modal-id"
             />
           </label>
@@ -221,7 +220,6 @@ export function LeagueModal({
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="예: 프리미어리그"
             data-testid="league-modal-name"
           />
         </label>
@@ -230,7 +228,6 @@ export function LeagueModal({
           <input
             value={country}
             onChange={(e) => setCountry(e.target.value)}
-            placeholder="예: 잉글랜드"
             data-testid="league-modal-country"
           />
         </label>

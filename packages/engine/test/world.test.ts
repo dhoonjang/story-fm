@@ -9,6 +9,7 @@ import {
   TeamTacticsSchema,
   clusterOf,
   isMirrorPair,
+  isReserveMatch,
   naturalPositionOf,
   positionGroupOfPlayer,
   sameCluster,
@@ -35,6 +36,10 @@ import {
   specialtyAxesOf,
   careerTierOf,
   teamFloorOf,
+  startingWalletAnchor,
+  clampStartingWallet,
+  WALLET_JUDGE_BAND,
+  START_MAX_WALLET,
   SPECIALTY_BUDGET,
   START_MIN_AXIS,
   START_MAX_AXIS,
@@ -57,6 +62,10 @@ import {
   MINI_WORLD,
   MINI_WORLD_TWO_LEAGUES,
   scopedTeams,
+  countryOfTeam,
+  pseudonymClubs,
+  pseudonymSquad,
+  type PlayerNameInput,
 } from "@story-fm/engine";
 import { createTestGame, userFixtureCount, createMiniGame, playFullSeason } from "./helpers";
 
@@ -550,7 +559,7 @@ describe("게임 생성 (7월 1일 프리시즌 시작)", () => {
      * 다만 이 게임에서 벌어진 일은 아직 하나도 없다.
      */
     expect(state.injuries.length).toBeGreaterThan(0);
-    expect(state.injuries.every((i) => i.note === "부임 전 이력")).toBe(true);
+    expect(state.injuries.every((i) => i.cause === "pre_appointment")).toBe(true);
     expect(state.bookings).toHaveLength(0);
     expect(state.suspensions).toHaveLength(0);
     expect(state.growthLog).toHaveLength(0);
@@ -704,6 +713,108 @@ describe("온보딩 — 배경 직접 입력 해석 (career.md §1)", () => {
     expect(interpretBackgroundHeuristic(bg, "없는팀")).toEqual(nobody);
   });
 
+  it("부정 구문 안의 낱말은 등급도 특화 가산도 올리지 않는다", () => {
+    // `감독`이 minor를 찍고 리더십 +6까지 얹던 자리 — 경력을 부정하는 문장이 능력치를 올렸다
+    expect(careerTierOf("감독 경험이 전혀 없는 사람이다")).toBe("none");
+    expect(specialtyAxesOf("감독 경험이 전혀 없는 사람이다")).toEqual([]);
+    expect(careerTierOf("선수 생활을 해본 적이 없다")).toBe("none");
+    expect(careerTierOf("축구에는 문외한이다")).toBe("none");
+    expect(careerTierOf("무경력자입니다")).toBe("none");
+
+    // 지우는 단위는 문장이 아니라 **절**이다 — 부정은 자기 절만 뒤집는다
+    expect(careerTierOf("선수로 뛰었고 우승은 없다")).toBe("minor");
+    expect(specialtyAxesOf("전술은 공부했지만 분석은 해본 적 없다")).toEqual(["tactics"]);
+
+    // `없이`는 부정 표지가 아니다 — 부정하는 것이 경력이 아니라 부상이다
+    expect(careerTierOf("부상 없이 10년을 뛴 프리미어리그 수비수")).toBe("major");
+  });
+
+  it("배경이 이력을 명시적으로 부정하면 구단 하한이 물러난다", () => {
+    // 하한은 "이 구단이 뽑았으니 이력이 있을 것"이라는 추론이고, 배경이 그 반례다
+    const denied = "감독 경험이 전혀 없는 사람이다";
+    expect(interpretBackgroundHeuristic(denied, "arsenal")).toEqual(
+      interpretBackgroundHeuristic(denied),
+    );
+
+    // 부정한 적이 없으면 구단의 선택은 여전히 정보다 (위 테스트가 지키는 하한)
+    const silent = "축구를 좋아하는 평범한 회사원입니다";
+    expect(interpretBackgroundHeuristic(silent, "arsenal").leadership).toBe(teamFloorOf("arsenal"));
+  });
+
+  it("낙하산은 `none` 아래 칸이고 구단 하한을 뚫는다", () => {
+    const parachute = "낙하산 인사다. 축구 경력은 전혀 없다.";
+    expect(careerTierOf(parachute)).toBe("parachute");
+    expect(careerTierOf("구단주 아들이다")).toBe("parachute");
+    expect(careerTierOf("오너 일가의 조카고 축구는 문외한이다")).toBe("parachute");
+
+    // 다른 등급 신호가 하나라도 있으면 그쪽이다 — 낙하산은 바닥이지 딱지가 아니다
+    expect(careerTierOf("인맥으로 들어온 스포츠 기자 출신이다")).toBe("minor");
+
+    // tier 1 구단에 부임해도 무경력(34)은커녕 그 아래로 선다
+    const atBigClub = interpretBackgroundHeuristic(parachute, "arsenal");
+    expect(sum(atBigClub)).toBeLessThan(sum(interpretBackgroundHeuristic("축구 팬입니다")));
+    expect(atBigClub).toEqual(interpretBackgroundHeuristic(parachute));
+
+    // 사다리의 바닥 — 시작 범위(20~80)의 아래 끝이 배경으로 닿는 눈금이 된다
+    const floor = Math.min(...MANAGER_ATTRIBUTES.map((axis) => atBigClub[axis]));
+    expect(floor).toBeGreaterThanOrEqual(START_MIN_AXIS);
+    expect(floor - START_MIN_AXIS).toBeLessThanOrEqual(10);
+  });
+
+  it("지갑은 낙하산과 함께 내려가지 않는다 (career.md §1)", () => {
+    const parachute = "낙하산 인사다. 축구 경력은 전혀 없다.";
+    // 앵커는 `none`과 같고 — 구단주 아들은 무경력이지 무일푼이 아니다
+    expect(startingWalletAnchor(parachute)).toBe(startingWalletAnchor("축구 팬입니다"));
+    // 구단 하한도 능력치와 달리 물러나지 않는다: 돈은 있는데 실력이 없다
+    expect(startingWalletAnchor(parachute, "arsenal")).toBe(
+      startingWalletAnchor("축구 팬입니다", "arsenal"),
+    );
+    expect(startingWalletAnchor(parachute, "arsenal")).toBeGreaterThan(
+      startingWalletAnchor(parachute),
+    );
+  });
+
+  it("시작 지갑 앵커는 등급이 올리고 구단이 하한을 건다 (career.md §1)", () => {
+    const nobody = "축구를 좋아하는 평범한 회사원입니다";
+    const legend = "챔피언스리그를 우승한 감독";
+
+    // 등급이 앵커를 올린다
+    expect(startingWalletAnchor(nobody)).toBeLessThan(startingWalletAnchor("K리그 선수 출신"));
+    expect(startingWalletAnchor("K리그 선수 출신")).toBeLessThan(
+      startingWalletAnchor("프리미어리그에서 뛰었던 수비수"),
+    );
+    expect(startingWalletAnchor("프리미어리그에서 뛰었던 수비수")).toBeLessThan(
+      startingWalletAnchor(legend),
+    );
+
+    // 구단은 가산이 아니라 하한이다 — 능력치와 같은 규약
+    expect(startingWalletAnchor(nobody)).toBeLessThan(startingWalletAnchor(nobody, "mancity"));
+    expect(startingWalletAnchor(legend, "ipswich")).toBe(startingWalletAnchor(legend, "mancity"));
+    // 카탈로그에 없는 팀은 하한을 올리지 않는다 (오타 난 이름이 빅클럽 부임이 되지 않게)
+    expect(startingWalletAnchor(nobody, "없는팀")).toBe(startingWalletAnchor(nobody));
+  });
+
+  it("판정값은 앵커 ± 한도 안으로 잘린다 — 없으면 앵커다 (career.md §1)", () => {
+    const anchor = startingWalletAnchor("챔피언스리그를 우승한 감독", "mancity");
+    const low = anchor * (1 - WALLET_JUDGE_BAND);
+    const high = anchor * (1 + WALLET_JUDGE_BAND);
+
+    // 판정이 없으면 앵커가 그대로 답이고, 같은 입력이면 언제나 같은 값이다
+    expect(clampStartingWallet(undefined, anchor)).toBe(clampStartingWallet(undefined, anchor));
+    expect(clampStartingWallet(undefined, anchor)).toBeGreaterThanOrEqual(low);
+
+    // 폭을 벗어난 판정은 양쪽에서 잘린다
+    expect(clampStartingWallet(0, anchor)).toBeGreaterThanOrEqual(Math.floor(low));
+    expect(clampStartingWallet(999_999_999, anchor)).toBeLessThanOrEqual(Math.ceil(high));
+    // 절대 상한 — 판정이 무엇을 읽든 시작부터 한 시즌 이적 예산은 아니다
+    expect(clampStartingWallet(999_999_999, 50_000_000)).toBe(START_MAX_WALLET);
+    // 눈금은 £10,000 단위로 떨어진다
+    expect(clampStartingWallet(3_214_777, anchor) % 10_000).toBe(0);
+    // 음수·NaN은 앵커로 떨어진다 (스키마가 막지만 코어가 마지막 관문이다)
+    expect(clampStartingWallet(Number.NaN, anchor)).toBe(clampStartingWallet(undefined, anchor));
+    expect(clampStartingWallet(-1, anchor)).toBeGreaterThanOrEqual(Math.floor(low));
+  });
+
   it("축끼리 같은 낱말을 나눠 갖지 않는다 — 한 단어가 두 축을 올리면 예산이 샌다", () => {
     /**
      * `분석`이 전술과 분석 양쪽 패턴에 걸려 있던 때, "데이터 분석가" 한 마디가
@@ -753,15 +864,17 @@ describe("축소 세계 — 같은 규칙의 작은 세계", () => {
   it("컵이 없는 세계 — 대항전 참가도 컵 경기도 없다", () => {
     const state = createMiniGame();
     expect(state.euroEntrants).toHaveLength(0);
-    // 리그 경기 아니면 친선(대회 없음)뿐이다 — 컵은 한 경기도 없다
-    expect(state.matches.every((m) => m.competitionId === "epl" || isFriendly(m))).toBe(true);
+    // 리그·친선·2군 리그뿐이다 — 컵은 한 경기도 없다
+    expect(
+      state.matches.every((m) => m.competitionId === "epl" || isFriendly(m) || isReserveMatch(m)),
+    ).toBe(true);
   });
 
   it("리그전은 그대로 더블 라운드로빈이다", () => {
     const state = createMiniGame();
     const n = MINI_WORLD.teamsPerLeague;
-    // 프리시즌 친선은 리그전이 아니다 — 라운드로빈은 리그 경기만 센다
-    const league = state.matches.filter((m) => !isFriendly(m));
+    // 프리시즌 친선·2군 리그는 리그전이 아니다 — 라운드로빈은 리그 경기만 센다
+    const league = state.matches.filter((m) => !isFriendly(m) && !isReserveMatch(m));
     expect(league).toHaveLength(n * (n - 1));
     // 팀마다 홈·원정이 같은 수만큼
     for (const team of state.teams.filter((t) => t.id !== "freeagents")) {
@@ -782,9 +895,9 @@ describe("축소 세계 — 같은 규칙의 작은 세계", () => {
     // 시즌 전환 — 새 일정이 깔린다
     advanceTime(state, { days: 1 });
     expect(state.season).toBe(2);
-    expect(state.matches.filter((m) => m.season === 2 && !isFriendly(m))).toHaveLength(
-      MINI_WORLD.teamsPerLeague * (MINI_WORLD.teamsPerLeague - 1),
-    );
+    expect(
+      state.matches.filter((m) => m.season === 2 && !isFriendly(m) && !isReserveMatch(m)),
+    ).toHaveLength(MINI_WORLD.teamsPerLeague * (MINI_WORLD.teamsPerLeague - 1));
   });
 
   it("두 리그 세계도 각자 리그전을 돈다", () => {
@@ -798,7 +911,7 @@ describe("축소 세계 — 같은 규칙의 작은 세계", () => {
       world: MINI_WORLD_TWO_LEAGUES,
     });
     const leagues = new Set(
-      state.matches.filter((m) => !isFriendly(m)).map((m) => m.competitionId),
+      state.matches.filter((m) => !isFriendly(m) && !isReserveMatch(m)).map((m) => m.competitionId),
     );
     expect([...leagues].sort()).toEqual(["epl", "laliga"]);
   });
@@ -820,5 +933,46 @@ describe("축소 세계 — 같은 규칙의 작은 세계", () => {
   it("전체 세계는 그대로다 — 범위를 주지 않으면 카탈로그 전부", () => {
     expect(scopedTeams().length).toBeGreaterThan(150);
     expect(scopedTeams(MINI_WORLD)).toHaveLength(MINI_WORLD.teamsPerLeague + 1);
+  });
+});
+
+/**
+ * 가명 매핑 — 라이선스 부채의 가명화 갈래 (sources.md §7.3).
+ *
+ * 여기서 지키는 것은 둘뿐이다: **결정성**과 **유일성**. 어떤 이름이 나오는가는
+ * 풀을 고치면 바뀌는 값이라 잡아 둘 것이 아니고, 이 둘이 깨지면 파이프라인을 두 번
+ * 돌린 diff가 시드 변경분이 아니게 되거나(결정성) 한 클럽에 동명이인이 서서 화자
+ * 판별이 무너진다(유일성 — people.md §2).
+ */
+describe("가명 매핑 (sources.md §7.3)", () => {
+  const clubs = SQUAD_TEAMS.map((t) => ({ id: t.id, country: countryOfTeam(t.id) }));
+  const named = pseudonymClubs(clubs);
+
+  const squad: PlayerNameInput[] = Array.from({ length: 45 }, (_, i) => ({
+    nameEn: `Seed Player ${i}`,
+    birthdate: `199${i % 10}-0${(i % 9) + 1}-15`,
+    wikidataId: `Q${1000 + i}`,
+  }));
+
+  it("같은 입력은 같은 가명 — 나열 순서는 결과를 움직이지 않는다", () => {
+    const again = pseudonymClubs([...clubs].reverse());
+    for (const club of clubs) expect(again.get(club.id)).toEqual(named.get(club.id));
+
+    const first = pseudonymSquad("잉글랜드", squad);
+    const reversed = pseudonymSquad("잉글랜드", [...squad].reverse());
+    expect([...reversed].reverse()).toEqual(first);
+  });
+
+  it("클럽 이름·약어·구장은 전 클럽에서 유일하다", () => {
+    // shortName은 리그를 넘나드는 표시라 겹치면 두 클럽이 같은 얼굴로 선다
+    expect(new Set([...named.values()].map((c) => c.shortName)).size).toBe(named.size);
+    expect(new Set([...named.values()].map((c) => c.name)).size).toBe(named.size);
+    expect(new Set([...named.values()].map((c) => c.stadium)).size).toBe(named.size);
+  });
+
+  it("한 클럽 안에 동명이인이 서지 않는다", () => {
+    const names = pseudonymSquad("이탈리아", squad);
+    expect(new Set(names.map((n) => n.nameKo)).size).toBe(squad.length);
+    expect(new Set(names.map((n) => n.nameEn)).size).toBe(squad.length);
   });
 });

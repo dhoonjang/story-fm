@@ -1,4 +1,4 @@
-import { MANAGER_ATTRIBUTE_KO } from "@story-fm/domain";
+import { MANAGER_ATTRIBUTE_KO, registrationBlockText } from "@story-fm/domain";
 import type {
   BoardPoint,
   GamePlayer,
@@ -6,6 +6,7 @@ import type {
   DrilledTactics,
   MarketCard,
   Player,
+  ReserveTrainingPolicy,
   ScheduleEntry,
   Slot,
   TacticAssignment,
@@ -25,6 +26,8 @@ import {
   type PlayerDirectiveKind,
   MATCHDAY_SQUAD,
   POSITION_CODES,
+  RATING_MAX,
+  reserveTrainingTitle,
   SCOUT_CONCURRENT_LIMIT,
   SCOUT_DAYS,
   SLOT_TIME,
@@ -52,8 +55,11 @@ import {
 import { DIRECTIVE_TUNING } from "@story-fm/sim";
 import { settleRoleCost, shelveFamiliarity, unshelveFamiliarity } from "./familiarity-memory";
 import { recallRole, rememberRole } from "./role-memory";
+import { diffLineup, type LineupSide, type LineupSlotRef } from "./lineup-diff";
 import { addDays, diffDays, sortEntries, squadReturnOf } from "../competition/calendar";
 import { clampForm, moraleToForm } from "../squad/form";
+import { DEVELOPMENT_FOCUS_LIMIT, pruneDevelopmentFocus } from "../squad/development";
+import { reserveTrainingAxes } from "../squad/training-plan";
 import {
   canRegisterAllFor,
   canRegisterFor,
@@ -88,6 +94,7 @@ import {
   type SkillBriefItem,
 } from "../core/state";
 import { pickAnyPlayer, pickOurPlayer } from "../core/player-ref";
+import { briefNames, deltaItems, item, signed } from "./brief";
 
 /**
  * 스킬 = 상태 변경의 유일한 통로 (overview §2.2·§5).
@@ -103,8 +110,11 @@ export interface SkillResult {
    * **화면이 항목으로 세우는 요약** (`SkillBrief`) — 말풍선과 칩이 이걸 읽는다.
    *
    * 손댄 것을 다 이어 붙인 `message`를 화면이 되쪼개면 한 줄이 글자 벽이 된다.
-   * 여러 가지를 한 번에 바꾸는 스킬(라인업·훈련·개인 전술)은 반드시 채운다.
-   * 비우면 화면은 `message` 첫 줄을 그대로 세운다 — 한 가지만 바꾸는 스킬은 그걸로 족하다.
+   *
+   * ⚠️ **말풍선을 갖는 스킬(`PANEL_OF`)은 모두 채운다** — 비우면 그 호출은 말풍선에
+   * 서지 않는다. `message`는 모델에게 돌려주는 줄이지 화면의 항목이 아니라서,
+   * 화면이 그 줄을 갈라 세우면 코어가 쓴 문장의 첫 줄이 곧 UI가 된다
+   * (→ docs/data/game-state.md §3.6).
    */
   brief?: SkillBrief;
   /**
@@ -128,9 +138,9 @@ export interface SkillResult {
  * **시장 스킬의 반환 계약** — 성공했으면 카드가 반드시 있다.
  *
  * 협상·스카우트는 갈 장부가 없어서 채팅 카드가 유일한 자리다(`CARD_SKILLS`).
- * 예전엔 `payload`가 optional이라 빠뜨려도 컴파일이 통과했고, 화면이 조용히
- * 칩으로 폴백해 **금액·확률·기한이 줄글에 접힌 채** 아무도 모르고 지나갔다
- * (매각 오퍼가 실제로 그랬다). 이제 성공 경로에 카드가 없으면 타입이 막는다.
+ * `payload`를 optional로 풀면 빠뜨려도 컴파일이 통과하고, 화면이 조용히 칩으로
+ * 폴백해 **금액·확률·기한이 줄글에 접힌 채** 지나간다 — 성공 경로에 카드가
+ * 없으면 타입이 막아야 한다.
  *
  * 실패(`ok: false`)에는 카드가 없다 — 반려 메시지가 곧 결과다.
  */
@@ -177,7 +187,9 @@ export function setSquadLevel(
   }
   if (input.level === "first") {
     const allowed = canRegisterFor(state, player, state.userTeamId);
-    if (!allowed.ok) return { ok: false, message: `${player.name}: ${allowed.reason}` };
+    if (!allowed.ok) {
+      return { ok: false, message: `${player.name}: ${registrationBlockText(allowed.block)}` };
+    }
     return { ok: true, message: applySquadLevel(state, player, "first") };
   }
 
@@ -204,6 +216,10 @@ function applySquadLevel(state: GameState, player: GamePlayer, level: "first" | 
      * 불만(`minutes` 등)은 남는다. 원인이 사라진 것은 강등뿐이다.
      */
     player.state.demotedOn = undefined;
+    // 집중 육성은 2군의 것이다 — 올라온 선수는 결산 판정(LLM)이 움직인다 (season.md §2)
+    if (state.developmentFocus?.includes(player.id)) {
+      state.developmentFocus = state.developmentFocus.filter((id) => id !== player.id);
+    }
     const freed = state.issues.some((i) => i.gamePlayerId === player.id && i.reason === "demotion");
     if (freed) {
       state.issues = state.issues.filter(
@@ -296,7 +312,10 @@ export function setSquadLevels(
     const leaving = new Set(demoting.map((p) => p.id));
     const allowed = canRegisterAllFor(state, promoting, state.userTeamId, leaving);
     if (!allowed.ok) {
-      return { ok: false, message: `${playerName(state, allowed.playerId)}: ${allowed.reason}` };
+      return {
+        ok: false,
+        message: `${playerName(state, allowed.playerId)}: ${registrationBlockText(allowed.block)}`,
+      };
     }
   }
   /** 하한도 이번에 오르내리는 인원을 다 셈한 뒤의 1군 수로 잰다 */
@@ -346,6 +365,122 @@ function matchdaySquadFloor(): string {
   return `1군은 매치데이 명단(선발 ${starters} + 벤치 ${MATCHDAY_BENCH})을 채울 ${MATCHDAY_SQUAD}명 이상이어야 합니다`;
 }
 
+/**
+ * 집중 육성 — 감독이 코치진의 눈을 둘 2군 유망주를 지정한다 (season.md §2 2군 리그).
+ *
+ * **목록 교체다** — 부를 때마다 지정 전체를 다시 적고, 목록을 생략하면 해제다. 더하기·
+ * 빼기를 따로 받으면 감독이 지금 명단을 모른 채 상한에 걸린다. 우리 2군만 지정할
+ * 수 있고, 승격하면 풀린다(`applySquadLevel`) — 1군은 결산 판정(LLM)의 몫이라
+ * 코어 배율이 닿을 자리가 없다.
+ */
+export function setDevelopmentFocus(
+  state: GameState,
+  input: { playerIds?: string[] },
+): SkillResult {
+  const players: GamePlayer[] = [];
+  for (const id of input.playerIds ?? []) {
+    const pick = pickOurPlayer(state, id);
+    if (!pick.ok) return pick;
+    const player = pick.player;
+    if (squadLevelOf(player) !== "reserve") {
+      return {
+        ok: false,
+        message: `${player.name}은(는) 1군입니다 — 집중 육성은 2군 유망주에게 겁니다`,
+      };
+    }
+    if (!players.some((p) => p.id === player.id)) players.push(player);
+  }
+  if (players.length > DEVELOPMENT_FOCUS_LIMIT) {
+    return {
+      ok: false,
+      message: `집중 육성은 ${DEVELOPMENT_FOCUS_LIMIT}명까지입니다 — 코치진의 눈은 거기까지 닿습니다`,
+    };
+  }
+
+  const before = pruneDevelopmentFocus(state);
+  const after = players.map((p) => p.id);
+  if (before.length === after.length && before.every((id) => after.includes(id))) {
+    return {
+      ok: true,
+      unchanged: true,
+      message:
+        players.length === 0
+          ? "집중 육성 지정이 없습니다"
+          : `이미 그 명단입니다 — ${briefNames(players.map((p) => p.name))}`,
+    };
+  }
+  state.developmentFocus = after;
+  if (players.length === 0) {
+    return {
+      ok: true,
+      message: "집중 육성 지정을 해제했습니다",
+      brief: { head: "집중 육성", items: [item({ text: "해제" })] },
+    };
+  }
+  pushNarrative(state, `집중 육성 지정 — ${players.map((p) => p.name).join(", ")}`, 1);
+  return {
+    ok: true,
+    message: `집중 육성: ${players.map((p) => p.name).join(", ")} — 2군 경기 출전이 성장을 끌어올립니다`,
+    brief: {
+      head: "집중 육성",
+      items: [item({ label: "지정", text: briefNames(players.map((p) => p.name)) })],
+    },
+  };
+}
+
+/**
+ * 2군 훈련 방침 — 코치진이 어느 축을 겨냥해 유망주를 기르는가 (season.md §2).
+ *
+ * **총량을 옮길 뿐 늘리지 않는다** — 겨냥한 축이 빨라지는 만큼 나머지 필드 축이
+ * 느려진다. 그래서 메시지는 얻는 것과 함께 포기하는 것도 말한다: 무엇을
+ * 포기했는지가 이 손잡이의 값이다. `balanced`가 기본값이자 해제고, 상태에 남는
+ * 것은 코드 하나라 옛 세이브도 그대로 읽힌다.
+ */
+export function setReserveTraining(
+  state: GameState,
+  input: { policy: ReserveTrainingPolicy },
+): SkillResult {
+  const { policy } = input;
+  const title = reserveTrainingTitle(policy);
+  const current = state.reserveTraining ?? "balanced";
+  if (current === policy) {
+    return {
+      ok: true,
+      unchanged: true,
+      message:
+        policy === "balanced"
+          ? "2군 훈련 방침이 없습니다 — 어느 축도 겨냥하지 않습니다"
+          : `이미 ${title} 방침입니다`,
+    };
+  }
+
+  state.reserveTraining = policy;
+  if (policy === "balanced") {
+    pushNarrative(state, "2군 훈련 방침 해제 — 겨냥하는 축 없음", 1);
+    return {
+      ok: true,
+      message: "2군 훈련 방침을 해제했습니다 — 유망주는 다시 고르게 자랍니다",
+      brief: { head: "2군 훈련 방침", items: [item({ text: "해제" })] },
+    };
+  }
+
+  const aimed = reserveTrainingAxes(policy)
+    .map((axis) => AXIS_KO[axis])
+    .join("·");
+  pushNarrative(state, `2군 훈련 방침 — ${title}`, 1);
+  return {
+    ok: true,
+    message: `2군 훈련 방침을 ${title}으로 잡았습니다 — ${aimed}이(가) 빨리 자라는 대신 나머지 필드 축은 그만큼 느려집니다`,
+    brief: {
+      head: "2군 훈련 방침",
+      items: [
+        item({ label: "겨냥", text: title }),
+        item({ label: "축", text: aimed, note: "나머지 필드 축은 느려집니다" }),
+      ],
+    },
+  };
+}
+
 // 체력 클램프는 도메인이 단일 소스 (clampCondition)
 // 폼 클램프는 form.ts가 단일 소스 — 소수를 살려야 매일 회귀가 반영된다
 // 적응도 클램프도 도메인이 단일 소스 (clampFamiliarity) — 기억을 적는 자리와
@@ -365,15 +500,23 @@ export function grantManagerXP(
   amount: number,
 ): string | null {
   state.managerXP[axis] += amount;
-  if (
+  // 한 번에 여러 칸치가 들어오면 그 한 번에 다 오른다 — 나눠 받은 것과 같아야 한다
+  let grown = false;
+  while (
     state.managerXP[axis] >= MANAGER_XP_PER_LEVEL &&
     state.manager.attributes[axis] < MANAGER_ATTR_CAP
   ) {
     state.managerXP[axis] -= MANAGER_XP_PER_LEVEL;
     state.manager.attributes[axis] += 1;
-    return `감독 성장 — ${MANAGER_ATTRIBUTE_KO[axis]} ${state.manager.attributes[axis]}`;
+    grown = true;
   }
-  return null;
+  // 상한에 닿은 축은 더 갈 칸이 없다 — 장부가 무한히 커지지 않게 한 칸 직전에서 멈춘다
+  if (state.manager.attributes[axis] >= MANAGER_ATTR_CAP) {
+    state.managerXP[axis] = Math.min(state.managerXP[axis], MANAGER_XP_PER_LEVEL - 1);
+  }
+  return grown
+    ? `감독 성장 — ${MANAGER_ATTRIBUTE_KO[axis]} ${state.manager.attributes[axis]}`
+    : null;
 }
 
 // ---- 판정형: team_talk / talk_to_player ----
@@ -414,9 +557,33 @@ const TALK_BASE: Record<TalkOutcome, number> = {
   angered: -6,
 };
 
+/** 강도의 중립점 — 2가 곧 1.0배라, 1은 절반으로 3은 1.5배로 울린다 */
+const TALK_INTENSITY_PIVOT = 2;
+/**
+ * 팀토크가 사기를 움직일 수 있는 폭 — **이벤트당 한도** (overview §7). 라커룸
+ * 전체에 한 번에 걸리므로 한 사람을 부르는 면담보다 좁다.
+ */
+const TEAM_TALK_MORALE_BOUND = 6;
+/** 면담이 한 선수의 사기를 움직일 수 있는 폭 — 대상이 하나라 팀토크보다 넓다 */
+const TALK_MORALE_BOUND = 8;
+/** 잘 풀린 팀토크가 강도 한 칸당 주는 리더십 XP */
+const TEAM_TALK_XP_PER_INTENSITY = 8;
+/** 잘 풀린 면담이 강도 한 칸당 주는 리더십 XP */
+const TALK_XP_PER_INTENSITY = 6;
+/** 어긋난 말에도 남는 리더십 XP — 실패도 겪은 것이다 */
+const TALK_XP_ON_FAILURE = 2;
+
+/** 리더십이 0일 때의 계수 — 말은 통하지 않아도 완전히 죽지는 않는다 */
+const LEADERSHIP_FACTOR_FLOOR = 0.7;
+/** 리더십이 눈금 끝까지 올랐을 때 더해지는 폭 — 바닥과 합쳐 0.7~1.3이다 */
+const LEADERSHIP_FACTOR_SPAN = 0.6;
+
 /** 리더십 계수 — 같은 말도 리더십이 자라면 더 크게 울린다 */
 function leadershipFactor(state: GameState): number {
-  return 0.7 + (state.manager.attributes.leadership / 99) * 0.6;
+  return (
+    LEADERSHIP_FACTOR_FLOOR +
+    (state.manager.attributes.leadership / RATING_MAX) * LEADERSHIP_FACTOR_SPAN
+  );
 }
 
 /** 팀토크를 꺼낸 자리 — 이미 했다는 말이 어느 자리를 가리키는지 밝힌다 */
@@ -457,8 +624,10 @@ export function applyTeamTalk(
   state.manager.teamTalkedOn = { ...talkedOn, [input.occasion]: state.date };
 
   const base = TEAM_TALK_BASE[input.outcome];
-  const delta = Math.round(base * (input.intensity / 2) * leadershipFactor(state));
-  const bounded = Math.max(-6, Math.min(6, delta)); // 이벤트당 한도 (overview §7)
+  const delta = Math.round(
+    base * (input.intensity / TALK_INTENSITY_PIVOT) * leadershipFactor(state),
+  );
+  const bounded = Math.max(-TEAM_TALK_MORALE_BOUND, Math.min(TEAM_TALK_MORALE_BOUND, delta));
   for (const p of userPlayers(state)) {
     p.state.form = clampForm(p.state.form + moraleToForm(bounded));
   }
@@ -476,8 +645,8 @@ export function applyTeamTalk(
       : 0;
   const xpMsg =
     base > 0
-      ? grantManagerXP(state, "leadership", 8 * input.intensity)
-      : grantManagerXP(state, "leadership", 2);
+      ? grantManagerXP(state, "leadership", TEAM_TALK_XP_PER_INTENSITY * input.intensity)
+      : grantManagerXP(state, "leadership", TALK_XP_ON_FAILURE);
   pushNarrative(state, `팀토크(${input.outcome}) — 사기 ${bounded >= 0 ? "+" : ""}${bounded}`, 2);
   return {
     ok: true,
@@ -487,6 +656,17 @@ export function applyTeamTalk(
       `팀 전체 사기 ${bounded >= 0 ? "+" : ""}${bounded}` +
       (settled > 0 ? ` · 적응 중인 ${settled}명이 한 걸음 가까워졌습니다` : "") +
       (xpMsg ? ` · ${xpMsg}` : ""),
+    /**
+     * 사기 변화는 **항목 하나**다 — 부호는 `delta`가 나르고 화면이 색을 준다.
+     * 감독이 무슨 말을 어떻게 했는지는 장면의 것이지 알림의 것이 아니다.
+     */
+    brief: {
+      head: `${OCCASION_KO[input.occasion]} 팀토크`,
+      items: [
+        item({ label: "팀 사기", text: signed(bounded), delta: bounded }),
+        ...(settled > 0 ? [item({ label: "적응", text: `${settled}명` })] : []),
+      ],
+    },
   };
 }
 
@@ -523,8 +703,10 @@ export function applyTalkToPlayer(
   player.state.talkedOn = state.date;
 
   const base = TALK_BASE[input.outcome];
-  const delta = Math.round(base * (input.intensity / 2) * leadershipFactor(state));
-  const bounded = Math.max(-8, Math.min(8, delta));
+  const delta = Math.round(
+    base * (input.intensity / TALK_INTENSITY_PIVOT) * leadershipFactor(state),
+  );
+  const bounded = Math.max(-TALK_MORALE_BOUND, Math.min(TALK_MORALE_BOUND, delta));
   player.state.form = clampForm(player.state.form + moraleToForm(bounded));
 
   /**
@@ -559,8 +741,8 @@ export function applyTalkToPlayer(
 
   const xpMsg =
     base > 0
-      ? grantManagerXP(state, "leadership", 6 * input.intensity)
-      : grantManagerXP(state, "leadership", 2);
+      ? grantManagerXP(state, "leadership", TALK_XP_PER_INTENSITY * input.intensity)
+      : grantManagerXP(state, "leadership", TALK_XP_ON_FAILURE);
   pushNarrative(
     state,
     `${player.name} 면담(${input.outcome}) — 사기 ${bounded >= 0 ? "+" : ""}${bounded}`,
@@ -574,6 +756,16 @@ export function applyTalkToPlayer(
       (hadIssue ? " · 불만 해소" : "") +
       (settling ? ` · 적응 ${Math.round(settling.progress * 100)}%` : "") +
       (xpMsg ? ` · ${xpMsg}` : ""),
+    brief: {
+      head: `${player.name} 면담`,
+      items: [
+        item({ label: "사기", text: signed(bounded), delta: bounded }),
+        ...(hadIssue ? [item({ text: "불만 해소" })] : []),
+        ...(settling
+          ? [item({ label: "적응", text: `${Math.round(settling.progress * 100)}%` })]
+          : []),
+      ],
+    },
   };
 }
 
@@ -635,31 +827,6 @@ const nameList = (names: readonly string[]): string =>
   (names.length > NAMES_SHOWN ? ` 외 ${names.length - NAMES_SHOWN}명` : "");
 
 /**
- * 말풍선 항목에 적는 이름 — **둘에서 접는다.**
- *
- * `message`는 모델이 읽으므로 셋까지 적지만(`nameList`) 항목 하나는 말풍선 한
- * 줄이라 더 좁다. 누가 더 있는지는 스쿼드 화면이 갖고 있다.
- */
-const BRIEF_NAMES_SHOWN = 2;
-
-const briefNames = (names: readonly string[]): string =>
-  names.slice(0, BRIEF_NAMES_SHOWN).join(", ") +
-  (names.length > BRIEF_NAMES_SHOWN ? ` 외 ${names.length - BRIEF_NAMES_SHOWN}명` : "");
-
-/** 부호를 붙인 수 — 항목의 증감 표기 (`+2` · `−2`) */
-const signed = (n: number): string => (n < 0 ? `−${Math.abs(n)}` : `+${n}`);
-
-/**
- * 말풍선 항목 하나 — **앞의 이름(`label`) · 값(`text`) · 뒤의 갈래(`note`).**
- * 빈 조각은 달지 않는다 (없는 키와 빈 문자열이 화면에서 달리 그려지지 않게).
- */
-const item = (parts: { label?: string; text: string; note?: string }): SkillBriefItem => ({
-  ...(parts.label ? { label: parts.label } : {}),
-  text: parts.text,
-  ...(parts.note ? { note: parts.note } : {}),
-});
-
-/**
  * 배치가 **실제로 바꾼 것** — 포메이션 · 들고 나감 · 자리 이동.
  *
  * "라인업을 확정했습니다"는 감독이 이미 아는 것만 말한다. 무엇이 달라졌는지는
@@ -674,40 +841,48 @@ function lineupChanges(
   next: readonly TacticAssignment[],
 ): { notes: string[]; items: SkillBriefItem[] } {
   const nameOf = (id: string) => playerName(state, id);
-  const was = [...prev.values()].filter((a) => a.role === "starting");
-  const now = next.filter((a) => a.role === "starting");
   const pointOf = (a: TacticAssignment) => a.point ?? anchorOf(a.position);
-  // 앞선 배치가 없다면(첫 편성) 견줄 것이 없다 — 지금의 모양만 말한다
-  if (was.length === 0) {
-    const shape = shapeOf(now.map(pointOf));
+  const sideOf = (list: readonly TacticAssignment[]): LineupSide => {
+    const starting = list.filter((a) => a.role === "starting");
     return {
-      notes: [`선발 ${now.length}명 편성 · ${shape}`],
-      items: [item({ label: "선발 편성", text: shape })],
+      shape: shapeOf(starting.map(pointOf)),
+      starting: starting.map((a) => ({ playerId: a.playerId, position: a.position })),
+      squad: list.map((a) => a.playerId),
+    };
+  };
+  const diff = diffLineup(sideOf([...prev.values()]), sideOf(next));
+
+  // 앞선 배치가 없다면(첫 편성) 견줄 것이 없다 — 지금의 모양만 말한다
+  if (diff.firstSetup) {
+    return {
+      notes: [`선발 ${diff.added.length}명 편성 · ${diff.shapeAfter}`],
+      items: [item({ label: "선발 편성", text: diff.shapeAfter })],
     };
   }
 
   const notes: string[] = [];
   const items: SkillBriefItem[] = [];
-  const shapeBefore = shapeOf(was.map(pointOf));
-  const shapeAfter = shapeOf(now.map(pointOf));
-  if (shapeBefore !== shapeAfter) {
-    notes.push(`포메이션 ${shapeBefore} → ${shapeAfter}`);
-    items.push(item({ label: "포메이션", text: `${shapeBefore} → ${shapeAfter}` }));
+  if (diff.shapeChanged) {
+    const move = `${diff.shapeBefore} → ${diff.shapeAfter}`;
+    notes.push(`포메이션 ${move}`);
+    items.push(item({ label: "포메이션", text: move }));
   }
 
-  const startedBefore = new Set(was.map((a) => a.playerId));
-  const startsNow = new Set(now.map((a) => a.playerId));
-  const added = now.filter((a) => !startedBefore.has(a.playerId));
-  const gone = was.filter((a) => !startsNow.has(a.playerId));
-  if (added.length > 0) {
-    notes.push(`선발 투입 ${nameList(added.map((a) => `${nameOf(a.playerId)} ${a.position}`))}`);
+  if (diff.added.length > 0) {
+    notes.push(
+      `선발 투입 ${nameList(
+        diff.added.map((s) =>
+          s.position ? `${nameOf(s.playerId)} ${s.position}` : nameOf(s.playerId),
+        ),
+      )}`,
+    );
     // 항목에는 포지션 코드를 붙이지 않는다 — 누가 어디에 섰는지는 전술판이 그림으로 갖고 있다
     items.push(
-      item({ label: "선발 투입", text: briefNames(added.map((a) => nameOf(a.playerId))) }),
+      item({ label: "선발 투입", text: briefNames(diff.added.map((s) => nameOf(s.playerId))) }),
     );
   }
-  if (gone.length > 0) {
-    const names = gone.map((a) => nameOf(a.playerId));
+  if (diff.gone.length > 0) {
+    const names = diff.gone.map((s) => nameOf(s.playerId));
     notes.push(`선발 제외 ${nameList(names)}`);
     items.push(item({ label: "선발 제외", text: briefNames(names) }));
   }
@@ -716,28 +891,18 @@ function lineupChanges(
    * 남아 있는 선수의 **자리 이동** — 감독이 판에서 가장 자주 하는 조정이고,
    * 인원이 그대로라 다른 항목에는 아무 흔적도 남지 않는다.
    */
-  const moved = now.filter((a) => {
-    const old = prev.get(a.playerId);
-    return old?.role === "starting" && old.position !== a.position;
-  });
-  if (moved.length > 0) {
-    const moves = moved.map(
-      (a) => `${nameOf(a.playerId)} ${prev.get(a.playerId)!.position} → ${a.position}`,
-    );
+  if (diff.moved.length > 0) {
+    const moves = diff.moved.map((m) => `${nameOf(m.playerId)} ${m.from} → ${m.to}`);
     notes.push(`자리 이동 ${nameList(moves)}`);
     // 한 명이면 어디서 어디로까지 한 줄에 든다. 여럿이면 이름만 — 자리는 판이 보여준다
     const one = moves[0]!;
-    const many = briefNames(moved.map((a) => nameOf(a.playerId)));
-    items.push(item({ label: "자리 이동", text: moved.length === 1 ? one : many }));
+    const many = briefNames(diff.moved.map((m) => nameOf(m.playerId)));
+    items.push(item({ label: "자리 이동", text: diff.moved.length === 1 ? one : many }));
   }
 
   if (notes.length > 0) return { notes, items };
   // 선발이 그대로면 남은 차이는 명단 쪽뿐이다 — 누가 오갔는지까지는 적지 않는다
-  const squadBefore = new Set(prev.keys());
-  const squadNow = new Set(next.map((a) => a.playerId));
-  const sameSquad =
-    squadBefore.size === squadNow.size && [...squadNow].every((id) => squadBefore.has(id));
-  const line = sameSquad ? "바뀐 것 없음" : "벤치 명단 조정";
+  const line = diff.squadChanged ? "벤치 명단 조정" : "바뀐 것 없음";
   return { notes: [line], items: [item({ text: line })] };
 }
 
@@ -904,11 +1069,18 @@ export function setLineup(
   /**
    * 승격 가능 여부는 **누적으로** 잰다 — 한 명씩 따로 재면 남은 한 자리에 둘이 함께
    * 들어간다고 답한다. 실제로 올리는 것은 검증이 다 끝난 뒤다.
+   *
+   * 이번에 내리는 선수가 비우는 자리도 함께 셈한다(`demotingIds`) — `set_squad_level`이
+   * 쓰는 셈과 같은 것이다(→ docs/data/team.md §6). 여기만 빼면 명단이 찬 팀의 "하나
+   * 내리고 하나 올려"가 전술판에서만 반려된다.
    */
   if (promoting.length > 0) {
-    const allowed = canRegisterAllFor(state, promoting, state.userTeamId);
+    const allowed = canRegisterAllFor(state, promoting, state.userTeamId, demotingIds);
     if (!allowed.ok) {
-      return { ok: false, message: `${playerName(state, allowed.playerId)}: ${allowed.reason}` };
+      return {
+        ok: false,
+        message: `${playerName(state, allowed.playerId)}: ${registrationBlockText(allowed.block)}`,
+      };
     }
   }
   /**
@@ -938,11 +1110,15 @@ export function setLineup(
   // 여기서부터는 실패하지 않는다 — 실패할 수 있는 것은 위에서 전부 걸렀다.
   const levelNotes: string[] = [];
   const levelMoved: Record<"first" | "reserve", string[]> = { first: [], reserve: [] };
-  // 승격 먼저 — 2군 선수를 선발에 넣으려면 올라와 있어야 한다
+  /**
+   * 승격 먼저 — 2군 선수를 선발에 넣으려면 올라와 있어야 한다.
+   *
+   * **재는 걸음과 옮기는 걸음을 갈라 둔다**(`applySquadLevel` — team.md §5). 옮기는
+   * 순간마다 `setSquadLevel`로 혼자 다시 재면, 강등이 배치 뒤에 오는 이 순서에서는
+   * 올릴 때 명단이 아직 차 있다 — 위에서 통과시킨 교대가 적용 중에 걸린다.
+   */
   for (const player of promoting) {
-    const res = setSquadLevel(state, { playerId: player.id, level: "first" });
-    if (!res.ok) return res; // 검증이 놓친 것 — 배치는 아직 손대지 않았다
-    levelNotes.push(res.message);
+    levelNotes.push(applySquadLevel(state, player, "first"));
     levelMoved.first.push(player.name);
   }
 
@@ -1043,11 +1219,10 @@ export function setLineup(
   // 모양 이름은 실제 좌표에서 읽는다 — 프리셋 다섯 밖의 숫자도 그대로 담긴다
   tactics.spec.formation = shapeOf(startPoints);
 
-  // 강등은 배치 뒤에 — 배치에서 빠진 뒤라야 2군으로 내려도 라인업이 안 깨진다
+  // 강등은 배치 뒤에 — 배치에서 빠진 뒤라야 2군으로 내려도 라인업이 안 깨진다.
+  // 여기도 다시 재지 않는다: 하한은 오르내리는 인원을 다 셈한 뒤의 수로 위에서 쟀다
   for (const player of demoting) {
-    const res = setSquadLevel(state, { playerId: player.id, level: "reserve" });
-    if (!res.ok) return res; // 검증이 놓친 것 — 위에서 인원과 배치를 이미 쟀다
-    levelNotes.push(res.message);
+    levelNotes.push(applySquadLevel(state, player, "reserve"));
     levelMoved.reserve.push(player.name);
   }
   const items = [...changes.items];
@@ -1106,21 +1281,29 @@ export function lineupChangeNote(
   state: GameState,
   before: { starting: readonly string[]; shape: string; signature: string },
 ): string | null {
-  const tactics = userTactics(state);
-  const now = tactics.assignments.filter((a) => a.role === "starting").map((a) => a.playerId);
   const nameOf = (id: string) => playerById(state, id)?.name ?? id;
+  const diff = diffLineup(
+    {
+      shape: before.shape,
+      starting: before.starting.map((playerId) => ({ playerId })),
+      signature: before.signature,
+    },
+    {
+      shape: shapeOfTactics(state),
+      starting: userTactics(state)
+        .assignments.filter((a) => a.role === "starting")
+        .map((a) => ({ playerId: a.playerId, position: a.position })),
+      signature: lineupSignature(state),
+    },
+  );
+
   const parts: string[] = [];
-
-  const shape = shapeOfTactics(state);
-  if (shape !== before.shape) parts.push(`포메이션 ${before.shape} → ${shape}`);
-
-  const gone = before.starting.filter((id) => !now.includes(id));
-  const added = now.filter((id) => !before.starting.includes(id));
-  if (added.length > 0 || gone.length > 0) {
-    parts.push(
-      `선발 교체 — 들어옴: ${added.map(nameOf).join(", ") || "없음"} / 빠짐: ${gone.map(nameOf).join(", ") || "없음"}`,
-    );
-  } else if (parts.length === 0 && lineupSignature(state) !== before.signature) {
+  if (diff.shapeChanged) parts.push(`포메이션 ${diff.shapeBefore} → ${diff.shapeAfter}`);
+  const names = (slots: readonly LineupSlotRef[]) =>
+    slots.map((s) => nameOf(s.playerId)).join(", ") || "없음";
+  if (diff.added.length > 0 || diff.gone.length > 0) {
+    parts.push(`선발 교체 — 들어옴: ${names(diff.added)} / 빠짐: ${names(diff.gone)}`);
+  } else if (parts.length === 0 && diff.pointsChanged === true) {
     // 인원도 모양도 그대로인데 지문이 다르다 — 자리를 미세 조정했다는 뜻
     parts.push("전술판에서 자리를 조정했다");
   }
@@ -1320,10 +1503,9 @@ export function movePlayerSlot(
 /**
  * 개인 훈련 — **팀 훈련 위에 한 선수만 겨냥해 얹는다.**
  *
- * 축(`axis`)은 훈련 결산(LLM)의 입력이 되고, 자리(`position`)는 코어가
- * 결정적으로 적응도를 올린다 — **실전보다 느리게**(경기 1회 = +1, 훈련
- * `POSITION_TRAINING_SESSIONS`일 = +1). "자리는 커리어가 만든다"를 지키되
- * 전향이라는 판단이 가능해진다.
+ * 축(`axis`)도 자리(`position`)도 훈련 결산(LLM)의 입력이고, 자리는 결산 한 번에
+ * `POSITION_TRAIN_MAX`까지만 오른다 — **실전보다 느리게**(경기 1회 = +1).
+ * "자리는 커리어가 만든다"를 지키되 전향이라는 판단이 가능해진다.
  */
 export function setPlayerTraining(
   state: GameState,
@@ -1337,7 +1519,11 @@ export function setPlayerTraining(
   if (input.clear || (!input.axis && !input.position)) {
     if (index < 0) return { ok: false, message: `${player.name}에게 걸린 개인 훈련이 없습니다` };
     state.playerTraining.splice(index, 1);
-    return { ok: true, message: `${player.name}의 개인 훈련을 거뒀습니다` };
+    return {
+      ok: true,
+      message: `${player.name}의 개인 훈련을 거뒀습니다`,
+      brief: { head: `${player.name} 개인 훈련`, items: [item({ text: "거둠" })] },
+    };
   }
 
   const axis = input.axis?.trim();
@@ -1354,18 +1540,27 @@ export function setPlayerTraining(
     ...(axis ? { axis } : {}),
     ...(position ? { position } : {}),
     since: state.date,
-    sessions: 0,
   };
   if (index >= 0) state.playerTraining[index] = program;
   else state.playerTraining.push(program);
 
   const parts: string[] = [];
-  if (axis) parts.push(AXIS_KO[axis as (typeof ATTRIBUTE_AXES)[number]]);
+  const items: SkillBriefItem[] = [];
+  if (axis) {
+    const ko = AXIS_KO[axis as (typeof ATTRIBUTE_AXES)[number]];
+    parts.push(ko);
+    items.push(item({ label: "능력치", text: ko }));
+  }
   if (position) {
     const fit = player.positions.find((p) => p.position === position)?.proficiency ?? 0;
     parts.push(`${position} 전향 (지금 적응도 ${fit})`);
+    items.push(item({ label: "전향", text: position, note: `적응도 ${fit}` }));
   }
-  return { ok: true, message: `${player.name} 개인 훈련 — ${parts.join(" · ")}` };
+  return {
+    ok: true,
+    message: `${player.name} 개인 훈련 — ${parts.join(" · ")}`,
+    brief: { head: `${player.name} 개인 훈련`, items },
+  };
 }
 
 /**
@@ -1407,7 +1602,9 @@ export function setPlayerRole(
   }
   const from = assignment.roleId ?? defaultRoleOf(assignment.position);
   if (from === def.id) {
-    return { ok: true, message: `${player.name}은 이미 ${def.ko}입니다` };
+    // 바뀐 것이 없다는 사실은 **반환값이** 말한다 (→ docs/data/player.md §3.1) —
+    // 표식이 없으면 `setPlayerTactic`이 이 걸음을 "바꿨다"로 세어 뒤따르는 반려를 접는다
+    return { ok: true, unchanged: true, message: `${player.name}은 이미 ${def.ko}입니다` };
   }
 
   /**
@@ -1477,7 +1674,7 @@ export function setPlayerPosition(
     // 원값**이다: 보정을 적어 두면 조회가 다시 얹는다 (player.md §8)
     player.positions.push({
       position: code,
-      proficiency: storedProficiencyFor(player.positions, code, player.foot),
+      proficiency: storedProficiencyFor(player.positions, code),
       isNatural: true,
     });
   }
@@ -1515,6 +1712,15 @@ export function setCaptain(state: GameState, playerId: string): SkillResult {
     message:
       `${player.name}을(를) 주장으로 지명했습니다` +
       (settling ? ` · 적응 ${Math.round(settling.progress * 100)}%` : ""),
+    brief: {
+      head: "주장 지정",
+      items: [
+        item({ label: "주장", text: player.name }),
+        ...(settling
+          ? [item({ label: "적응", text: `${Math.round(settling.progress * 100)}%` })]
+          : []),
+      ],
+    },
   };
 }
 
@@ -1539,9 +1745,9 @@ function currentFamiliarity(tactics: TeamTactics): number {
 /**
  * 하루가 지나면 지금 숙련도를 기억에 적어 둔다.
  *
- * ⚠️ **시간만으로는 적응도가 오르지 않는다.** 예전엔 매일 +1씩 붙였는데(상한 80),
- * 그러면 아무것도 안 해도 전술이 몸에 붙는다 — 훈련장에서 시간을 쓰는 선택과
- * 달력을 넘기는 선택이 같아진다. 이제 적응도는 **훈련과 실전에서만** 온다.
+ * ⚠️ **시간만으로는 적응도가 오르지 않는다.** 날마다 그냥 올리면 아무것도 안
+ * 해도 전술이 몸에 붙는다 — 훈련장에서 시간을 쓰는 선택과 달력을 넘기는 선택이
+ * 같아진다. 적응도는 **훈련과 실전에서만** 온다.
  *
  * 기억 갱신은 남는다 — 나중에 다른 전술을 거쳐 되돌아와도 쌓아 둔 값을 되찾는
  * 통로가 이것이다.
@@ -1708,15 +1914,12 @@ function memoriesOf(
 /**
  * 전술이 바뀌면 **각자 자기 기억에서 새 수준을 찾는다.**
  *
- * 예전엔 팀 평균의 변화량을 개인에게 배분했다(정규화·재분배). 기억이 팀 값
- * 하나였기 때문인데, 그 구조가 "적응도는 남들보다 맞나"라는 상대 평가를 강요했다.
- * 이제 각자 자기 기억을 가지므로 **개인의 도착 수준을 직접** 구한다 — 팀 적응도는
+ * 각자 자기 기억을 가지므로 **개인의 도착 수준을 직접** 구한다 — 팀 적응도는
  * 그 값들의 평균(파생)이고, 왕복은 기억이 닫는다.
  */
 function retuneFamiliarity(
   state: GameState,
   tactics: TeamTactics,
-  before: TacticsSpec,
   after: TacticsSpec,
   scale: number,
 ): void {
@@ -1726,7 +1929,6 @@ function retuneFamiliarity(
       distanceOf: (memory, next) => personalDistance(player, memory, next),
       retention: memoryRetention(player),
     });
-    void before;
     a.familiarity = clampFamiliarity(a.familiarity + (arrival - a.familiarity) * scale);
   }
 }
@@ -1751,7 +1953,7 @@ export function setTactics(state: GameState, spec: Partial<TacticsSpec>): SkillR
   const unchanged = tacticsSignature(before) === tacticsSignature(parsed.data);
   if (unchanged) {
     tactics.spec = parsed.data;
-    return { ok: true, message: `전술 유지 — ${parsed.data.formation}` };
+    return { ok: true, unchanged: true, message: `전술 유지 — ${parsed.data.formation}` };
   }
 
   const wasAt = currentFamiliarity(tactics);
@@ -1789,7 +1991,7 @@ export function setTactics(state: GameState, spec: Partial<TacticsSpec>): SkillR
    * 그래도 0은 아니다 — 갑자기 바뀐 지시를 못 따라가는 선수는 늘 있고,
    * 좌표·역할 변경은 각 배치와 역할 적합도 경로에서 별도로 값을 치른다.
    */
-  retuneFamiliarity(state, tactics, before, parsed.data, inMatch ? IN_MATCH_FAMILIARITY_LOSS : 1);
+  retuneFamiliarity(state, tactics, parsed.data, inMatch ? IN_MATCH_FAMILIARITY_LOSS : 1);
 
   // 감독에게 보이는 건 팀 눈금이다 — 개인값의 평균(파생)
   const now = currentFamiliarity(tactics);
@@ -1803,6 +2005,23 @@ export function setTactics(state: GameState, spec: Partial<TacticsSpec>): SkillR
   return {
     ok: true,
     message: `전술 변경 — ${parsed.data.formation}, 멘탈리티 ${parsed.data.mentality}${note}`,
+    brief: {
+      head: "전술 변경",
+      items: [
+        item({ label: "포메이션", text: parsed.data.formation }),
+        item({ label: "멘탈리티", text: `${parsed.data.mentality}` }),
+        /**
+         * 적응도는 **도달한 값이 값이고 움직인 폭이 부호다** — `delta`가 0이어도
+         * 싣는다. "그대로다"는 이 항목이 말하는 사실이지 증감을 말하지 않는 것이 아니다.
+         */
+        item({
+          label: "전술 적응도",
+          text: `${now}`,
+          note: delta < 0 ? "재적응 필요" : delta > 0 ? "익혀 둔 전술" : "그대로",
+          delta,
+        }),
+      ],
+    },
   };
 }
 
@@ -1864,9 +2083,9 @@ export function setPlayerInstruction(
      * **`kind` 없는 지시는 판에 닿지 않는다** — 그러면 그렇다고 말해야 한다.
      *
      * 시뮬로 가는 것은 `directive.kind`뿐이고(`match-flow.ts`의 `directivesOnPitch`)
-     * `instruction`은 화면과 스냅샷에만 남는다. 예전엔 이 갈래도 그냥 성공으로
-     * 답해서, GM이 "지시가 먹혔다"로 서사를 쓰고 판은 아무것도 안 하는 **거짓
-     * 성공**이 됐다. 감독이 원인을 알 수 없는 종류의 어긋남이다.
+     * `instruction`은 화면과 스냅샷에만 남는다. 이 갈래를 그냥 성공으로 답하면
+     * GM이 "지시가 먹혔다"로 서사를 쓰고 판은 아무것도 안 하는 **거짓 성공**이
+     * 된다 — 감독이 원인을 알 수 없는 종류의 어긋남이다.
      */
     return {
       ok: true,
@@ -2061,14 +2280,26 @@ function addTrainingEntry(
  * 리더십이 반발의 크기를 정한다. 같은 통보라도 선수단이 믿는 감독이면 덜 흔들린다 —
  * 부임 첫 주에 휴가를 깨는 것과 3년 함께한 감독이 그러는 것은 다른 일이다.
  */
+/**
+ * 리더십 계수를 반발의 크기로 뒤집는 축 — 계수 1.0(리그 평균)이 저항 1.0이다.
+ * 믿는 감독일수록 계수가 크고, 그만큼 저항이 작아진다.
+ */
+const LEADERSHIP_RESISTANCE_PIVOT = 2;
+/** 하루를 당길 때마다 깎이는 체력 — 저항이 곱해진다 */
+const RECALL_DRAIN_PER_DAY = 1.2;
+/** 며칠을 당겨야 한 명이 등을 돌리는가 */
+const RECALL_DAYS_PER_UPSET = 3;
+/** 반발이 번질 수 있는 1군의 최대 비율 — 라커룸 전체가 등을 돌리지는 않는다 */
+const RECALL_UPSET_CAP_SHARE = 0.5;
+
 function recallSquadEarly(state: GameState, date: string): string {
   const was = squadReturnOf(state.calendar);
   const early = Math.max(1, diffDays(date, was));
   state.calendar.squadReturn = date;
 
   // 리더십이 높을수록 덜 흔들린다 (0.7~1.3의 역방향)
-  const resistance = 2 - leadershipFactor(state);
-  const drain = Math.round(early * 1.2 * resistance);
+  const resistance = LEADERSHIP_RESISTANCE_PIVOT - leadershipFactor(state);
+  const drain = Math.round(early * RECALL_DRAIN_PER_DAY * resistance);
   const players = userPlayers(state).filter((p) => squadLevelOf(p) === "first");
   for (const p of players) {
     p.state.condition = clampCondition(p.state.condition - drain);
@@ -2079,8 +2310,8 @@ function recallSquadEarly(state: GameState, date: string): string {
    * 대상은 시드가 아니라 **가장 지친 선수부터**다. 쉬어야 할 사람이 먼저 화낸다.
    */
   const upset = Math.min(
-    Math.floor(players.length / 2),
-    Math.max(0, Math.round((early / 3) * resistance)),
+    Math.floor(players.length * RECALL_UPSET_CAP_SHARE),
+    Math.max(0, Math.round((early / RECALL_DAYS_PER_UPSET) * resistance)),
   );
   const already = new Set(state.issues.map((i) => i.gamePlayerId));
   const angry = [...players]
@@ -2103,6 +2334,16 @@ function recallSquadEarly(state: GameState, date: string): string {
   );
 }
 
+/**
+ * "훈련 다 지워"가 미치는 앞날 — 끝 날짜를 주지 않은 비우기의 지평이다.
+ * 한 시즌보다 넉넉해 "전부"로 읽히면서도, 일정 전체를 훑지는 않는 폭.
+ */
+const CLEAR_TRAINING_HORIZON_DAYS = 400;
+/** 요일 반복을 펼치는 주 수 — 말하지 않으면 이만큼, 그 아래·위로는 자른다 */
+const REPEAT_WEEKS_DEFAULT = 6;
+const REPEAT_WEEKS_MIN = 1;
+const REPEAT_WEEKS_MAX = 20;
+
 export function setTraining(state: GameState, input: TrainingPlanInput): SkillResult {
   const applied: string[] = [];
   /**
@@ -2111,36 +2352,23 @@ export function setTraining(state: GameState, input: TrainingPlanInput): SkillRe
    * `message`에 남아 GM이 장면으로 푼다.
    */
   const items: SkillBriefItem[] = [];
+  const sessions = input.sessions ?? [];
+  const repeats = input.repeatWeekly ?? [];
+
+  // ── 검증 ───────────────────────────────────────────────
+  // 여기서는 아무것도 바꾸지 않는다. 하나라도 걸리면 상태는 부른 그대로다
+  // (→ docs/simulation/season.md §4). 조기 소집은 체력을 깎고 불만을 남기고 소집일을
+  // 옮기는 **되돌릴 수 없는** 걸음이라, 그 뒤에서 세션 하나가 걸리면 "반려했습니다"를
+  // 읽은 감독의 선수단이 이미 지쳐 있었다.
 
   /**
-   * 1) 비우기 먼저 — "월요일 훈련 다 지우고 새로" 같은 지시를 한 번에 처리.
-   *
-   * **`clearTraining`과 같은 규칙을 쓴다** — 예전엔 도구가 둘로 갈려 있어서
-   * "쉬게 하자"와 "훈련 빼줘"가 서로 다른 코드로 처리됐고, 한쪽만 휴식 세션을
-   * 남겼다(그래서 다음 tick이 기본 훈련을 도로 깔았다).
-   */
-  if (input.clear) {
-    const opt = input.clear === true ? {} : input.clear;
-    /**
-     * 범위의 기본값이 다르다 — 여기 `clear`는 **그 뒤 전부**를 비우는 뜻이고
-     * (`clear: true` = "당분간 훈련 없다"), 날짜를 콕 집는 쪽은 `to`를 준다.
-     * 그대로 넘기면 하루만 지워져 "전부 비우기"가 조용히 하루짜리가 된다.
-     */
-    const cleared = clearTraining(state, { ...opt, to: opt.to ?? addDays(state.date, 400) });
-    if (!cleared.ok) return cleared;
-    applied.push(cleared.message);
-    items.push(...(cleared.brief?.items ?? []));
-  }
-
-  /**
-   * **지난 날짜에는 훈련을 잡지 못한다 — 소집을 건드리기 전에 거른다.**
+   * **지난 날짜에는 훈련을 잡지 못한다.**
    *
    * 그 자리의 tick은 이미 지나갔으므로 엔트리가 영영 `scheduled`로 남아 달력에
    * "예정"으로 서고, 같은 날짜가 조기 소집으로 흘러가면 대가(`recallSquadEarly`)가
-   * 오늘까지의 날수만큼 부풀려 매겨진다. 그래서 검증이 승격보다 먼저다 — 뒤에서
-   * 걸러도 소집일은 이미 옮겨져 있다.
+   * 오늘까지의 날수만큼 부풀려 매겨진다.
    */
-  for (const s of input.sessions ?? []) {
+  for (const s of sessions) {
     if (!DATE_RE.test(s.date)) return { ok: false, message: `날짜 형식이 잘못됨: ${s.date}` };
     if (s.date < state.date) {
       return {
@@ -2148,6 +2376,17 @@ export function setTraining(state: GameState, input: TrainingPlanInput): SkillRe
         message: `${s.date}은 이미 지난 날입니다 — 훈련은 오늘(${state.date})부터 잡을 수 있습니다`,
       };
     }
+    if (!s.label?.trim()) return { ok: false, message: "훈련 설명(label)이 필요합니다" };
+    const err = validFocus(s.focus);
+    if (err) return { ok: false, message: err };
+  }
+  for (const r of repeats) {
+    if (!Number.isInteger(r.dow) || r.dow < 0 || r.dow > 6) {
+      return { ok: false, message: `요일이 잘못됨: ${r.dow} (0~6)` };
+    }
+    if (!r.label?.trim()) return { ok: false, message: "훈련 설명(label)이 필요합니다" };
+    const err = validFocus(r.focus);
+    if (err) return { ok: false, message: err };
   }
 
   /**
@@ -2159,28 +2398,18 @@ export function setTraining(state: GameState, input: TrainingPlanInput): SkillRe
    * 일이고, 대가는 선수단의 반발이다 — 코어는 가능하게 하고 값을 물린다
    * (이적 설득과 같은 태도: 확률이 낮다고 길을 막지 않는다).
    *
-   * 그래서 `recallSquad` 없이는 거부하고, 있으면 소집일 자체를 앞당긴다.
+   * 그래서 `recallSquad` 없이는 거부하고, 있으면 소집일 자체를 앞당긴다. 여기서는
+   * **앞당겼다고 치면 언제인가**만 구한다 — 옮기는 것은 아래 적용 단계다.
    */
   const squadReturn = squadReturnOf(state.calendar);
-  const wanted = [
-    ...(input.sessions ?? []).map((x) => x.date),
-    ...((input.repeatWeekly ?? []).length > 0 ? [state.date] : []),
-  ];
-  const earliest = wanted.sort()[0];
-
-  if (input.recallSquad && earliest !== undefined && earliest < squadReturn) {
-    const recall = recallSquadEarly(state, earliest);
-    applied.push(recall);
-  }
-  const effectiveReturn = squadReturnOf(state.calendar);
-
-  // 2) 특정 날짜 세션
-  const dated: Array<{ date: string; slot: Slot }> = [];
-  const datedFocus = new Set<TrainAttr>();
-  for (const s of input.sessions ?? []) {
-    if (!s.label?.trim()) return { ok: false, message: "훈련 설명(label)이 필요합니다" };
-    const err = validFocus(s.focus);
-    if (err) return { ok: false, message: err };
+  const wanted = [...sessions.map((x) => x.date), ...(repeats.length > 0 ? [state.date] : [])];
+  const earliest = [...wanted].sort()[0];
+  const recallTo =
+    input.recallSquad === true && earliest !== undefined && earliest < squadReturn
+      ? earliest
+      : undefined;
+  const effectiveReturn = recallTo ?? squadReturn;
+  for (const s of sessions) {
     if (s.date < effectiveReturn) {
       return {
         ok: false,
@@ -2189,6 +2418,42 @@ export function setTraining(state: GameState, input: TrainingPlanInput): SkillRe
           `감독이 휴가를 접고 조기 소집하겠다고 했다면 recallSquad를 함께 보내세요 (선수단이 반발합니다).`,
       };
     }
+  }
+
+  // ── 적용 ───────────────────────────────────────────────
+
+  /**
+   * 1) 비우기 먼저 — "월요일 훈련 다 지우고 새로" 같은 지시를 한 번에 처리.
+   *
+   * **`clearTraining`과 같은 규칙을 쓴다** — 두 경로가 갈리면 "쉬게 하자"와
+   * "훈련 빼줘"가 서로 다르게 처리되고, 휴식 세션을 남기지 않은 쪽은 다음 tick이
+   * 기본 훈련을 도로 깐다.
+   *
+   * 적용의 **첫 걸음**이라 여기 반려는 아직 아무것도 바꾸지 않았다 — `clearTraining`
+   * 자신도 검증을 다 끝낸 뒤에 지운다.
+   */
+  if (input.clear) {
+    const opt = input.clear === true ? {} : input.clear;
+    /**
+     * 범위의 기본값이 다르다 — 여기 `clear`는 **그 뒤 전부**를 비우는 뜻이고
+     * (`clear: true` = "당분간 훈련 없다"), 날짜를 콕 집는 쪽은 `to`를 준다.
+     * 그대로 넘기면 하루만 지워져 "전부 비우기"가 조용히 하루짜리가 된다.
+     */
+    const cleared = clearTraining(state, {
+      ...opt,
+      to: opt.to ?? addDays(state.date, CLEAR_TRAINING_HORIZON_DAYS),
+    });
+    if (!cleared.ok) return cleared;
+    applied.push(cleared.message);
+    items.push(...(cleared.brief?.items ?? []));
+  }
+
+  if (recallTo !== undefined) applied.push(recallSquadEarly(state, recallTo));
+
+  // 2) 특정 날짜 세션
+  const dated: Array<{ date: string; slot: Slot }> = [];
+  const datedFocus = new Set<TrainAttr>();
+  for (const s of sessions) {
     addTrainingEntry(state, s.date, s.slot, s.label.trim(), s.focus);
     applied.push(`${s.date} ${slotKo(s.slot)}=${s.label}${focusKo(s.focus)}`);
     dated.push({ date: s.date, slot: s.slot });
@@ -2209,18 +2474,15 @@ export function setTraining(state: GameState, input: TrainingPlanInput): SkillRe
   }
 
   // 3) 요일 반복 — 오늘부터 weeks주만큼 엔트리를 펼친다
-  const weeks = Math.max(1, Math.min(20, input.weeks ?? 6));
+  const weeks = Math.max(
+    REPEAT_WEEKS_MIN,
+    Math.min(REPEAT_WEEKS_MAX, input.weeks ?? REPEAT_WEEKS_DEFAULT),
+  );
   /** 요일 반복은 **하나로 묶는다** — 월·수·금이 항목 셋이 되면 그게 글자 벽이다 */
   let repeatPerWeek = 0;
   let repeatWeeks = 0;
   const repeatFocus = new Set<TrainAttr>();
-  for (const r of input.repeatWeekly ?? []) {
-    if (!Number.isInteger(r.dow) || r.dow < 0 || r.dow > 6) {
-      return { ok: false, message: `요일이 잘못됨: ${r.dow} (0~6)` };
-    }
-    if (!r.label?.trim()) return { ok: false, message: "훈련 설명(label)이 필요합니다" };
-    const err = validFocus(r.focus);
-    if (err) return { ok: false, message: err };
+  for (const r of repeats) {
     let made = 0;
     let skipped = 0;
     // 휴가 중이면 소집일부터 센다 — "3주간 반복"은 훈련할 수 있는 3주를 뜻한다
@@ -2359,15 +2621,26 @@ export function clearTraining(state: GameState, input: ClearTrainingInput): Skil
 
 // ---- 창발 보조: 서사 이벤트 (GM 전용, 능력치 접근 불가 — overview §7) ----
 
-const NARRATIVE_EVENT_MARKER = "[서사]";
 const MAX_NARRATIVE_EVENTS_PER_DAY = 3;
+/**
+ * 서사 이벤트 한 번이 컨디션을 움직일 수 있는 폭 — GM이 쓴 장면 하나가
+ * 경기 한 판(±10 안팎)을 덮어쓰지 않게 하는 문 (overview §7의 앵커±폭).
+ */
+const NARRATIVE_CONDITION_BOUND = 5;
+/** 모델이 말할 수 있는 폼 **단계**의 폭 — −1/0/+1 이며 코어가 폼 축으로 옮긴다 */
+const NARRATIVE_FORM_STEP_BOUND = 1;
 
 export function applyNarrativeEvent(
   state: GameState,
   input: { playerIds: string[]; conditionDelta?: number; formDelta?: number; note: string },
 ): SkillResult {
+  /**
+   * 하루 한도는 **갈래로 센다.** 접두 문장(`"[서사]"`)으로 가르면 그 문구를 고치는
+   * 순간 한도가 사라진다 (records.ts `NarrativeKind`, overview.md §1 철칙 4).
+   * 갈래가 없는 옛 세이브의 줄은 세지 않는다 — 한도는 그날 쌓인 줄만 본다.
+   */
   const todayCount = state.narrative.filter(
-    (n) => n.date === state.date && n.text.startsWith(NARRATIVE_EVENT_MARKER),
+    (n) => n.date === state.date && n.kind === "gm-event",
   ).length;
   if (todayCount >= MAX_NARRATIVE_EVENTS_PER_DAY) {
     return {
@@ -2376,14 +2649,20 @@ export function applyNarrativeEvent(
     };
   }
 
-  const condition = Math.max(-5, Math.min(5, Math.round(input.conditionDelta ?? 0)));
+  const condition = Math.max(
+    -NARRATIVE_CONDITION_BOUND,
+    Math.min(NARRATIVE_CONDITION_BOUND, Math.round(input.conditionDelta ?? 0)),
+  );
   /**
    * 서사 이벤트의 폼 변화 — 모델은 −1/0/+1의 **단계**로 말하고, 코어가 폼 축의
    * 폭으로 옮긴다. 폼은 −1~1이라 ±1을 그대로 더하면 한 장면이 선수를 곧바로
    * 절정·바닥에 꽂는다 (경기 한 판의 변화가 0.3 안팎이다).
    */
   const NARRATIVE_FORM_STEP = 0.12;
-  const formStep = Math.max(-1, Math.min(1, Math.round(input.formDelta ?? 0)));
+  const formStep = Math.max(
+    -NARRATIVE_FORM_STEP_BOUND,
+    Math.min(NARRATIVE_FORM_STEP_BOUND, Math.round(input.formDelta ?? 0)),
+  );
   const form = formStep * NARRATIVE_FORM_STEP;
   // 검증 먼저, 적용은 전원 유효할 때만 — 원자성 (장부 applyEvents와 동일 패턴)
   const resolved = input.playerIds.map((ref) => pickOurPlayer(state, ref));
@@ -2399,21 +2678,32 @@ export function applyNarrativeEvent(
     player.state.form = clampForm(player.state.form + form);
     touched.push(player.name);
   }
-  pushNarrative(state, `${NARRATIVE_EVENT_MARKER} ${input.note}`, 3);
+  pushNarrative(state, input.note, 3, "gm-event");
   /**
    * 항목은 **대상과 수치까지만.** `note`는 LLM이 쓴 자유 문장이라 상한이 없고,
    * 이미 서사 로그와 장면에 남아 있다 — 알림이 그것을 다시 옮겨 적을 자리가 아니다.
    * 폼은 모델이 말한 단계(−1/0/+1)로 적는다 — 화면에 0.12는 뜻이 없다.
+   *
+   * 축은 **한 줄에 하나씩** 선다 — 항목 하나가 한 줄이고 `delta` 하나가 그 줄의
+   * 부호라, 컨디션과 폼을 한 `note`에 묶으면 부호가 둘인 줄이 된다.
    */
-  const deltas = [
-    ...(condition !== 0 ? [`컨디션 ${signed(condition)}`] : []),
-    ...(formStep !== 0 ? [`폼 ${signed(formStep)}`] : []),
-  ];
-  const moved = deltas.length > 0 ? deltas.join(" · ") : "수치 변화 없음";
+  const moved = deltaItems([
+    ["컨디션", condition],
+    ["폼", formStep],
+  ]);
   return {
     ok: true,
     message: `서사 이벤트 반영(${touched.join(", ")}) — ${input.note}`,
-    brief: { head: "서사 이벤트", items: [item({ text: briefNames(touched), note: moved })] },
+    brief: {
+      head: "서사 이벤트",
+      items: [
+        item({
+          text: briefNames(touched),
+          ...(moved.length === 0 ? { note: "수치 변화 없음" } : {}),
+        }),
+        ...moved,
+      ],
+    },
   };
 }
 

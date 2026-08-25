@@ -38,8 +38,17 @@ describe("한 시즌의 다가옴", () => {
     const openedOn = new Map<string, number>();
     let concurrent = 0;
     let withPress = 0;
+    /**
+     * 유출은 **사건**이라 시즌 끝의 상태로는 셀 수 없다 — 다음 회견이 실어 가면
+     * `pressLeaks`에서 지워지고, 요청까지 간 선수는 시장이 데려가며 압력 줄도 함께
+     * 사라진다. 매일 훑어 모으는 수밖에 없다.
+     */
+    const leaks = new Set<string>();
 
     function sample(): void {
+      for (const leak of state.pressLeaks ?? []) {
+        leaks.add(`${leak.playerId}:${leak.topic}:${leak.date}`);
+      }
       const open = pendingApproach(state);
       if (!open) return;
       if (!seen.has(open.id)) {
@@ -95,6 +104,8 @@ describe("한 시즌의 다가옴", () => {
       "선수 채널": byChannel("player"),
       "주장 채널": byChannel("captain"),
       "구단주 채널": byChannel("owner"),
+      "언론 유출(계단 4)": leaks.size,
+      "이적 요청(계단 5)": byChannel("agent"),
       "하루 두 건이 열린 날": [...openedOn.values()].filter((n) => n > 1).length,
       "동시에 열린 자리": concurrent,
       "같은 화자 7일 내 재개": cooldownBreaks,

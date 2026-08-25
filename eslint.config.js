@@ -74,6 +74,13 @@ export default tseslint.config(
               message:
                 "화면은 엔진을 타입으로만 가져온다 — 값 import는 node:fs를 브라우저 번들에 끌어와 next build를 죽인다. 화면과 코어가 함께 쓰는 순수 규칙은 packages/domain에 두고 엔진이 re-export한다 (AGENTS.md 5장). 서버에서만 도는 모듈이면 eslint.config.js의 예외 목록에 그 파일을 올려라.",
             },
+            {
+              // agents는 엔진을 값으로 부른다 — 화면이 값으로 가져오면 같은 일이 벌어진다
+              name: "@story-fm/agents",
+              allowTypeImports: true,
+              message:
+                "화면은 agents를 타입으로만 가져온다 — 값 import는 엔진을(그리고 node:fs를) 브라우저 번들에 끌어온다. 화면과 서버가 함께 쓰는 순수 값(`TurnOperation` 등)은 packages/domain에 두고 agents가 re-export한다 (AGENTS.md 5장).",
+            },
           ],
           patterns: [
             {

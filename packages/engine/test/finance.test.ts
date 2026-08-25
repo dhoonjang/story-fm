@@ -1,7 +1,16 @@
-import { describe, expect, it } from "vitest";
-import { FINANCE_CATEGORY_KO, type FinanceCategory, type LedgerEntry } from "@story-fm/domain";
+import { beforeAll, describe, expect, it } from "vitest";
+import {
+  buildPaymentInstallments,
+  effectiveFeeOf,
+  FINANCE_CATEGORY_KO,
+  MAX_PAYMENT_YEARS,
+  type FinanceCategory,
+  type LedgerEntry,
+  type PaymentSchedule,
+} from "@story-fm/domain";
 import type { GameState } from "@story-fm/engine";
 import {
+  addDays,
   annualRevenueEstimate,
   bookValueOf,
   debtLimitOf,
@@ -21,6 +30,11 @@ import {
   PSR_LOSS_LIMIT,
   adjustTransferBudget,
   amortisationOf,
+  depreciationOf,
+  leagueTicketSpread,
+  recordCapitalAsset,
+  setTicketPrice,
+  ticketPriceOf,
   applyFinanceEvent,
   buildOfficeViews,
   weeklyWagesOf,
@@ -37,6 +51,8 @@ import {
   monthOf,
   psrStatus,
   recordFinance,
+  settleDuePayments,
+  settleSellOn,
   summarise,
   topUpTransferBudget,
   transitionSeason,
@@ -243,6 +259,29 @@ describe("매치데이", () => {
     expect(gate!.ref?.type).toBe("match");
     expect(ledger.some((e) => categoryOf(e) === "matchday_opex")).toBe(true);
   });
+
+  /**
+   * 리그전을 굴리지 않는 리그는 홈 경기가 없어 매치데이가 0이다 — 그 몫을 월 정산이
+   * 같은 공식으로 되돌린다 (finance.md §9.5). **굴리는 리그에는 붙지 않는다**:
+   * 그쪽 매치데이는 경기가 만든다. 둘 다 붙으면 1부가 입장 수입을 두 번 번다.
+   *
+   * 아무 경기도 치르지 않은 t=0에서 재므로 매치데이 항목의 출처는 이 보정 하나뿐이다.
+   */
+  it("리그 홈경기 보정은 리그전을 굴리지 않는 리그에만 붙는다", () => {
+    const matchdayIncome = (state: GameState) =>
+      financeOf(state, state.userTeamId)
+        .ledger.filter((e) => e.kind === "income" && categoryOf(e) === "matchday")
+        .reduce((sum, e) => sum + e.amount, 0);
+
+    const top = createTestGame();
+    ensureMonthlyPosted(top);
+    expect(matchdayIncome(top)).toBe(0);
+
+    const second = createTestGame();
+    (second.leagueOf ??= {})[second.userTeamId] = "championship";
+    ensureMonthlyPosted(second);
+    expect(matchdayIncome(second)).toBeGreaterThan(0);
+  });
 });
 
 /**
@@ -302,6 +341,43 @@ describe("월간 보고서", () => {
     expect(state.financeReports.some((r) => r.month === "2026-07")).toBe(true); // 요약은 영구
   });
 
+  /**
+   * 절단 기준월은 **월 번호를 빼서** 만든다 — 1·2월이면 그 뺄셈이 0 이하로 내려가
+   * 지난해로 넘어가는 갈래를 탄다(`12 + cutoffMonth`). 그 갈래가 틀리면 겨울에
+   * 원장이 통째로 날아가거나 한 해치가 그대로 쌓이는데, 보고서는 남으므로 화면의
+   * 숫자는 어디도 달라지지 않는다.
+   */
+  it("원장 절단의 창은 해를 넘어서도 석 달이다", () => {
+    /** 원장을 손으로 깔고 그 달 1일의 월초 정산만 돌린다 — 반년을 흘려보내지 않는다 */
+    const monthsAfterPrune = (today: string, months: string[]): string[] => {
+      const state = createMiniGame();
+      state.date = today;
+      const finance = financeOf(state, state.userTeamId);
+      finance.ledger = months.map((m) => ({
+        id: `led-${m}`,
+        date: `${m}-05`,
+        kind: "expense" as const,
+        label: "테스트 지출",
+        amount: 1_000,
+      }));
+      runMonthlyFinance(state, []);
+      return [...new Set(finance.ledger.map((e) => monthOf(e.date)))].sort();
+    };
+
+    // 1월 — 창의 앞끝이 **지난해 11월**이다
+    expect(monthsAfterPrune("2027-01-01", ["2026-09", "2026-10", "2026-11", "2026-12"])).toEqual([
+      "2026-11",
+      "2026-12",
+      "2027-01",
+    ]);
+    // 2월 — 뺄셈이 정확히 0인 자리 (12월이 앞끝)
+    expect(monthsAfterPrune("2027-02-01", ["2026-10", "2026-11", "2026-12", "2027-01"])).toEqual([
+      "2026-12",
+      "2027-01",
+      "2027-02",
+    ]);
+  });
+
   it("석 달이 지나 원장이 잘려도 큰 건의 날짜는 달력 일지에 남는다", () => {
     const state = createMiniGame();
     const bigDate = state.date;
@@ -344,13 +420,14 @@ describe("월간 보고서", () => {
     expect(s.expense.find((l) => l.category === "other")?.amount).toBe(1_000_000);
   });
 
-  it("급여 비중과 판단 재료(notes)가 붙는다", () => {
+  it("급여 비중과 판단 재료가 붙는다 — 노트는 문장이 아니라 카드다", () => {
     const state = createMiniGame();
     advanceUntil(state, "2026-10-03");
     const report = state.financeReports.find((r) => r.month === "2026-09")!;
     expect(report.wageRatio).toBeGreaterThan(0);
     expect(report.wageRatio).toBeLessThan(2);
-    expect(Array.isArray(report.notes)).toBe(true);
+    expect(Array.isArray(report.noteCards)).toBe(true);
+    expect(report.notes, "코어가 노트 문장을 저장했다").toBeUndefined();
     expect(report.psr).not.toBeNull();
   });
 });
@@ -594,6 +671,42 @@ describe("이적료 — 현금과 장부 두 축", () => {
     ).toHaveLength(1);
   });
 
+  /**
+   * 임대는 계약이 보낸 구단에 남으니 털 잔존가가 없다. 규약상 임대 행은 fee 0으로
+   * 적히지만(transfer.md §2) 옛 세이브에는 임대료가 fee로 실린 임대 행이 남아 있어,
+   * 잔존가 훑기가 `type`을 가리지 않으면 임대 보낸 구단의 장부가를 매각처럼 턴다.
+   */
+  it("임대료를 낸 임대 영입 뒤 임대 보낸 구단의 잔존가가 털리지 않는다", () => {
+    const state = createTestGame(42, "arsenal");
+    const target = state.contracts.find(
+      (c) => c.teamId === state.userTeamId && c.status === "active",
+    )!;
+    expect(bookValueOf(state, state.userTeamId, target.gamePlayerId, state.date)).toBeGreaterThan(
+      0,
+    );
+
+    // 옛 세이브 형태의 임대 행 — 임대료가 fee에 실려 있다. 계약은 그대로 우리에게 남는다
+    const borrower = state.teams.find((t) => t.id !== state.userTeamId)!.id;
+    state.transfers.push({
+      id: "tr-loanout",
+      gamePlayerId: target.gamePlayerId,
+      windowId: null,
+      fromTeamId: state.userTeamId,
+      toTeamId: borrower,
+      date: state.date,
+      type: "loan",
+      fee: 5_000_000,
+    });
+    const player = state.players.find((p) => p.id === target.gamePlayerId)!;
+    player.teamId = borrower;
+    player.loan = { fromTeamId: state.userTeamId, until: "2027-06-30", wageShare: 1 };
+
+    runMonthlyFinance(state, []);
+    expect(
+      financeOf(state, state.userTeamId).ledger.filter((e) => e.label.startsWith("매각 잔존가")),
+    ).toHaveLength(0);
+  });
+
   it("영입한 선수는 이적 갈래로만 상각한다 — 두 번 잡히지 않는다", () => {
     const state = createTestGame(42, "arsenal");
     const target = state.players.find((p) => p.teamId !== state.userTeamId)!;
@@ -696,6 +809,58 @@ describe("이적료 — 현금과 장부 두 축", () => {
   });
 
   /**
+   * **되사 온 선수는 새 취득이다** (§6.1). 사슬을 통째로 읽으면 취득원가가 첫 이적료에
+   * 묶여 두 번째 이적료가 장부에 아예 안 선다 — 게다가 매각 때 털어 낸 잔존가가 복귀와
+   * 함께 되살아나 다시 상각된다(£48M 취득에서 £78M이 나간다).
+   */
+  it("팔았다가 되사 오면 두 번째 이적료가 취득원가가 된다", () => {
+    const state = createTestGame(42, "arsenal");
+    const target = state.players.find((p) => p.teamId !== state.userTeamId)!;
+    state.contracts = state.contracts.filter((c) => c.gamePlayerId !== target.id);
+    const move = (id: string, date: string, fee: number, out: boolean) =>
+      state.transfers.push({
+        id,
+        gamePlayerId: target.id,
+        windowId: null,
+        fromTeamId: out ? state.userTeamId : "everton",
+        toTeamId: out ? "everton" : state.userTeamId,
+        date,
+        type: "transfer",
+        fee,
+      });
+    const sign = (id: string, since: string, until: string, status: "active" | "ended") =>
+      state.contracts.push({
+        id,
+        gamePlayerId: target.id,
+        teamId: state.userTeamId,
+        weeklyWage: 100_000,
+        since,
+        until,
+        status,
+      });
+
+    // £48M · 48개월(2026-07~2030-06) → 12개월 뒤 매각 → 2028-01 £21M · 54개월로 복귀
+    move("tr-in-1", "2026-07-01", 48_000_000, false);
+    sign("c-1", "2026-07-01", "2030-06-30", "ended");
+    move("tr-out", "2027-07-01", 50_000_000, true);
+    move("tr-in-2", "2028-01-01", 21_000_000, false);
+    sign("c-2", "2028-01-01", "2032-06-30", "active");
+    target.teamId = state.userTeamId;
+    state.date = "2028-01-01";
+
+    // 매각 잔존가는 여전히 매각 당시 취득의 값이다 — 48M − 12개월 × 1M
+    expect(bookValueOf(state, state.userTeamId, target.id, "2027-07-01")).toBe(36_000_000);
+    // 복귀 뒤는 새 취득 — 21M을 54개월에 편다 (옛 취득의 잔존가 30M이 아니다)
+    const line = amortisationOf(state, state.userTeamId).find((l) => l.playerId === target.id);
+    expect(Math.round(line!.monthly)).toBe(Math.round(21_000_000 / 54));
+    expect(bookValueOf(state, state.userTeamId, target.id, "2028-01-01")).toBe(21_000_000);
+
+    // 무상으로 돌아왔으면 장부가 없다 — 옛 이적료가 되살아나지 않는다
+    state.transfers = state.transfers.filter((t) => t.id !== "tr-in-2");
+    expect(bookValueOf(state, state.userTeamId, target.id, "2028-01-01")).toBe(0);
+  });
+
+  /**
    * **불변식: 한 취득에서 털어 내는 상각의 총합은 취득원가와 같다** (§6.1).
    *
    * 잔존가를 첫 계약의 직선으로만 읽으면 재계약이 두 번 겹치는 순간 양쪽으로 깨진다 —
@@ -795,12 +960,12 @@ describe("성적이 돈이 되는 자리", () => {
     });
     const cup = clause("2026-11", () => {
       state.euroEntrants = [];
-      state.trophies = [{ season: state.season - 1, competition: "FA컵", teamId: us }];
+      state.trophies = [{ season: state.season - 1, competitionId: "facup", teamId: us }];
     });
     const two = clause("2026-12", () => {
       state.trophies = [
-        { season: state.season - 1, competition: "FA컵", teamId: us },
-        { season: state.season - 1, competition: "프리미어리그", teamId: us },
+        { season: state.season - 1, competitionId: "facup", teamId: us },
+        { season: state.season - 1, competitionId: "epl", teamId: us },
       ];
     });
 
@@ -885,6 +1050,96 @@ describe("PSR", () => {
     expect(finance.transferBudget).toBe(budget); // 보충 없음
   });
 
+  /**
+   * 이직해도 앞 구단의 보고서는 세이브에 남는다 (career.md §5.1) — 읽는 자리가
+   * 거르지 않으면 새 구단의 PSR과 성과 보너스가 남의 장부로 계산된다.
+   */
+  it("앞 구단의 보고서는 새 구단의 PSR·성과 보너스에 섞이지 않는다", () => {
+    const state = createTestGame();
+    const previous = state.teams.find((t) => t.id !== state.userTeamId)!.id;
+    const report = (teamId: string, pnl: number) => ({
+      id: `fr-${teamId}`,
+      teamId,
+      month: "2026-08",
+      season: 1,
+      openingBalance: 0,
+      closingBalance: 0,
+      income: [],
+      expense: [],
+      incomeTotal: 0,
+      expenseTotal: Math.max(0, -pnl),
+      cashNet: 0,
+      pnlNet: pnl,
+      wageRatio: 0.9,
+      seasonToDate: { income: 0, expense: 0, cashNet: 0, pnlNet: 0 },
+      psr: null,
+      notes: [],
+    });
+    // 앞 구단에서 한도를 통째로 날린 시즌 — 새 구단의 여유는 그대로여야 한다
+    state.financeReports.push(report(previous, -(PSR_LOSS_LIMIT + 20_000_000)));
+    expect(psrStatus(state).rolling3Season).toBe(0);
+    expect(psrStatus(state).headroom).toBe(PSR_LOSS_LIMIT);
+
+    const finance = financeOf(state, state.userTeamId);
+    finance.transferBudget = 0; // 이월을 빼고 이번 보충만 본다
+    topUpTransferBudget(state, state.userTeamId, 45_000_000, []);
+    expect(finance.budgetFrozen, "앞 구단의 적자로 새 구단 예산이 얼었다").toBe(false);
+    const withoutOld = finance.transferBudget;
+
+    // 새 구단의 흑자는 반영되지만 앞 구단의 흑자는 아니다
+    state.season = 2;
+    state.financeReports.push(report(previous, 40_000_000));
+    finance.transferBudget = 0;
+    topUpTransferBudget(state, state.userTeamId, 45_000_000, []);
+    expect(finance.transferBudget, "앞 구단의 흑자가 성과 보너스로 왔다").toBe(withoutOld);
+
+    // 월간 조회도 남의 달을 발행된 것으로 세지 않는다
+    expect(financeLookup(state, "2026-08").message).toContain("보고서가 없습니다");
+  });
+
+  /**
+   * PSR의 창은 **지금 시즌을 포함한 3시즌**이다 (`season-2 … season`). 창이 한 칸
+   * 어긋나면 이미 시효가 지난 적자가 계속 감독을 묶거나, 반대로 갓 낸 적자가 세어지지
+   * 않는다 — 어느 쪽도 보고서 숫자로는 드러나지 않고 동결 여부로만 나타난다.
+   */
+  it("PSR 3시즌 창은 지금 시즌부터 뒤로 셋이다", () => {
+    const state = createTestGame();
+    const report = (season: number, pnl: number) => ({
+      id: `fr-psr-${season}`,
+      teamId: state.userTeamId,
+      month: `${2025 + season}-05`,
+      season,
+      openingBalance: 0,
+      closingBalance: 0,
+      income: [],
+      expense: [],
+      incomeTotal: 0,
+      expenseTotal: -pnl,
+      cashNet: pnl,
+      pnlNet: pnl,
+      wageRatio: 0.6,
+      seasonToDate: { income: 0, expense: 0, cashNet: 0, pnlNet: 0 },
+      psr: null,
+      notes: [],
+    });
+    state.financeReports.push(
+      report(1, -50_000_000),
+      report(2, -40_000_000),
+      report(3, -30_000_000),
+      report(4, -20_000_000),
+    );
+
+    state.season = 3;
+    expect(psrStatus(state).rolling3Season).toBe(-120_000_000); // 시즌 1·2·3
+    expect(psrStatus(state).headroom).toBe(PSR_LOSS_LIMIT - 120_000_000);
+
+    // 시즌이 하나 가면 앞의 한 시즌이 창 밖으로 빠지고, 아직 오지 않은 시즌은 안 센다
+    state.season = 4;
+    expect(psrStatus(state).rolling3Season).toBe(-90_000_000); // 시즌 2·3·4
+    state.season = 5;
+    expect(psrStatus(state).rolling3Season).toBe(-50_000_000); // 시즌 3·4 (5는 보고서가 없다)
+  });
+
   it("여유가 있으면 지난 시즌 손익이 예산에 반영된다", () => {
     const state = createTestGame();
     state.season = 2;
@@ -931,6 +1186,32 @@ describe("PSR", () => {
 
     // 이월 45M + base 45M (지난 시즌 보고서가 없어 성과는 0)
     expect(finance.transferBudget).toBe(90_000_000);
+  });
+
+  /**
+   * 예산은 **음수로 내려갈 수 있다** — 분할 이적료의 회차는 잔액을 보지 않고 빠진다
+   * (`settleDuePayments`). 그 상태로 시즌이 바뀌면 이월 상한(`Math.min`)이 음수를
+   * 자르지 못하므로 빚이 그대로 넘어와 새 시즌 base를 깎고, 회수 문구도 서지 않는다
+   * (잘려 나간 몫이 0이다). 다만 바닥은 0이라 다음 시즌으로 또 넘어가지는 않는다.
+   */
+  it("음수 예산은 그대로 이월돼 새 시즌 base를 깎고, 바닥은 0이다", () => {
+    const state = createTestGame();
+    state.season = 2;
+    const finance = financeOf(state, state.userTeamId);
+
+    finance.transferBudget = -20_000_000; // 분할 회차가 잔액을 넘어 빠진 뒤
+    const digest: string[] = [];
+    topUpTransferBudget(state, state.userTeamId, 45_000_000, digest);
+    expect(finance.transferBudget).toBe(25_000_000); // base 45M − 빚 20M
+    expect(
+      digest.some((d) => d.includes("거둬들였다")),
+      "잘린 이월분이 없다",
+    ).toBe(false);
+
+    // base보다 큰 빚은 0에서 멈춘다 — 음수가 다음 시즌까지 따라가지는 않는다
+    finance.transferBudget = -80_000_000;
+    topUpTransferBudget(state, state.userTeamId, 45_000_000, []);
+    expect(finance.transferBudget).toBe(0);
   });
 
   /**
@@ -989,10 +1270,12 @@ describe("PSR", () => {
       label: "시즌 마지막 달의 큰 수입",
       amount: 300_000_000,
     });
-    const finance = financeOf(state, state.userTeamId);
-    finance.transferBudget = 0; // 이월을 빼고 이번 보충만 본다
+    financeOf(state, state.userTeamId).transferBudget = 0; // 이월을 빼고 이번 보충만 본다
 
     const digest = endSeason(state);
+    // 시즌 종료는 복제본 위에서 돌고 성공했을 때만 옮겨 붙는다 (season.md §6) —
+    // 넘기기 전에 쥔 장부 객체는 낡은 것이므로 다시 읽는다
+    const finance = financeOf(state, state.userTeamId);
 
     const june = state.financeReports.find(
       (r) => r.month === "2027-06" && r.teamId === state.userTeamId,
@@ -1484,5 +1767,478 @@ describe("재정이 도는 범위", () => {
      * 이제 장부 자체가 없다 — 월초 정산이 그 자리를 만들어 내지도 않는다.
      */
     expect(hasLedger(), "월초 정산이 무소속 장부를 만들었다").toBe(false);
+  });
+});
+
+describe("지급 일정 — 분할은 표를 타고 나간다", () => {
+  /** 회분의 합·기일만 보는 순수 검증에 쓰는 기준일 */
+  const FIRST_DUE = "2026-08-15";
+
+  it("회분의 합은 언제나 총액과 같다 — 잔차는 마지막 회분이 진다", () => {
+    for (const [total, years] of [
+      [60_000_001, 3],
+      [48_000_000, 4],
+      [7, 4],
+      [0, 2],
+    ] as const) {
+      const parts = buildPaymentInstallments(total, years, FIRST_DUE);
+      expect(parts.reduce((sum, p) => sum + p.amount, 0)).toBe(total);
+    }
+    const odd = buildPaymentInstallments(60_000_001, 3, FIRST_DUE);
+    expect(odd.map((p) => p.amount)).toEqual([20_000_000, 20_000_000, 20_000_001]);
+    expect(odd.map((p) => p.dueOn)).toEqual(["2026-08-15", "2027-08-15", "2028-08-15"]);
+    expect(odd.every((p) => p.paidOn === null)).toBe(true);
+  });
+
+  it("연수는 1..MAX_PAYMENT_YEARS로 접힌다", () => {
+    expect(buildPaymentInstallments(40_000_000, 9, FIRST_DUE)).toHaveLength(MAX_PAYMENT_YEARS);
+    expect(buildPaymentInstallments(40_000_000, 1, FIRST_DUE)).toHaveLength(1);
+    expect(buildPaymentInstallments(40_000_000, 0, FIRST_DUE)).toHaveLength(1);
+    // 상한까지 접혀도 합은 총액이다
+    expect(
+      buildPaymentInstallments(40_000_001, 9, FIRST_DUE).reduce((s, p) => s + p.amount, 0),
+    ).toBe(40_000_001);
+  });
+
+  it("유효 이적료는 일시금이면 그대로, 분할이 길수록 단조 감소한다", () => {
+    const fee = 50_000_000;
+    expect(effectiveFeeOf(fee, 1)).toBe(fee);
+    expect(effectiveFeeOf(fee)).toBe(fee);
+    const byYears = [1, 2, 3, 4].map((y) => effectiveFeeOf(fee, y));
+    for (let i = 1; i < byYears.length; i += 1) {
+      expect(byYears[i]).toBeLessThan(byYears[i - 1]!);
+    }
+    // 깎여도 총액 밑의 양수다 — 분할이 공짜 신용도, 몰수도 아니다
+    expect(byYears[3]).toBeGreaterThan(0);
+  });
+
+  /** 잔액·이적 예산 두 축을 한 번에 뜬다 */
+  function books(state: GameState, teamId: string): { balance: number; budget: number } {
+    const f = financeOf(state, teamId);
+    return { balance: f.balance, budget: f.transferBudget };
+  }
+
+  /** 지급 일정 하나를 state에 직접 꽂는다 — 협상 흐름은 negotiation.test.ts가 검증한다 */
+  function pushSchedule(
+    state: GameState,
+    kind: PaymentSchedule["kind"],
+    total: number,
+    years: number,
+    payeeTeamId: string | null,
+  ): PaymentSchedule {
+    const player = state.players.find((p) => p.teamId !== state.userTeamId)!;
+    const schedule: PaymentSchedule = {
+      id: `ps-${kind}`,
+      transferId: `tr-${kind}`,
+      gamePlayerId: player.id,
+      payerTeamId: state.userTeamId,
+      payeeTeamId,
+      kind,
+      installments: buildPaymentInstallments(total, years, state.date),
+    };
+    state.paymentSchedules = [...(state.paymentSchedules ?? []), schedule];
+    return schedule;
+  }
+
+  /** 유저 팀이 아닌 아무 구단 — 받는 쪽 */
+  function otherClub(state: GameState): string {
+    return state.finances.find((f) => f.teamId !== state.userTeamId && isClubTeam(f.teamId))!
+      .teamId;
+  }
+
+  const TOTAL = 60_000_001;
+
+  it("일정이 전부 지급되면 잔액·이적 예산 변화가 일시금 한 번과 같다", () => {
+    const split = createMiniGame();
+    const lump = createMiniGame();
+    const payee = otherClub(split);
+    expect(otherClub(lump)).toBe(payee);
+
+    const beforeSplit = { payer: books(split, split.userTeamId), payee: books(split, payee) };
+    const beforeLump = { payer: books(lump, lump.userTeamId), payee: books(lump, payee) };
+
+    const schedule = pushSchedule(split, "transfer", TOTAL, 4, payee);
+    pushSchedule(lump, "transfer", TOTAL, 1, payee);
+
+    // 마지막 기일까지 흘려보내면 네 회분이 모두 미지급이 아니게 된다
+    split.date = schedule.installments[schedule.installments.length - 1]!.dueOn;
+    settleDuePayments(split);
+    settleDuePayments(lump);
+
+    expect(schedule.installments.every((i) => i.paidOn === split.date)).toBe(true);
+    for (const teamId of [split.userTeamId, payee] as const) {
+      const side = teamId === payee ? "payee" : "payer";
+      const splitDelta = {
+        balance: books(split, teamId).balance - beforeSplit[side].balance,
+        budget: books(split, teamId).budget - beforeSplit[side].budget,
+      };
+      const lumpDelta = {
+        balance: books(lump, teamId).balance - beforeLump[side].balance,
+        budget: books(lump, teamId).budget - beforeLump[side].budget,
+      };
+      expect(splitDelta).toEqual(lumpDelta);
+    }
+    // 방향까지 고정한다 — 내는 쪽은 총액만큼 줄고 받는 쪽은 그만큼 는다
+    expect(books(split, split.userTeamId).balance).toBe(beforeSplit.payer.balance - TOTAL);
+    expect(books(split, split.userTeamId).budget).toBe(beforeSplit.payer.budget - TOTAL);
+    expect(books(split, payee).balance).toBe(beforeSplit.payee.balance + TOTAL);
+    expect(books(split, payee).budget).toBe(beforeSplit.payee.budget + TOTAL);
+  });
+
+  it("지급일이 안 된 회분은 건드리지 않는다", () => {
+    const state = createMiniGame();
+    const payee = otherClub(state);
+    const before = books(state, state.userTeamId);
+    const schedule = pushSchedule(state, "transfer", TOTAL, 4, payee);
+
+    settleDuePayments(state); // 첫 회분의 기일 = 오늘
+    expect(schedule.installments[0]!.paidOn).toBe(state.date);
+    expect(schedule.installments.slice(1).every((i) => i.paidOn === null)).toBe(true);
+    expect(books(state, state.userTeamId).balance).toBe(
+      before.balance - schedule.installments[0]!.amount,
+    );
+
+    // 하루 뒤에도 두 번째 기일은 1년 뒤다
+    state.date = addDays(state.date, 1);
+    settleDuePayments(state);
+    expect(schedule.installments[1]!.paidOn).toBe(null);
+  });
+
+  it("같은 날 두 번 불러도 두 번 내지 않는다", () => {
+    const state = createMiniGame();
+    const payee = otherClub(state);
+    pushSchedule(state, "transfer", TOTAL, 4, payee);
+
+    settleDuePayments(state);
+    const after = books(state, state.userTeamId);
+    const entries = financeOf(state, state.userTeamId).ledger.length;
+
+    settleDuePayments(state);
+    expect(books(state, state.userTeamId)).toEqual(after);
+    expect(financeOf(state, state.userTeamId).ledger.length).toBe(entries);
+  });
+
+  it("해지 정산금은 인건비로 나가고 이적 예산을 움직이지 않는다", () => {
+    const state = createMiniGame();
+    const before = books(state, state.userTeamId);
+    const severance = 3_000_000;
+    pushSchedule(state, "severance", severance, 2, null);
+
+    settleDuePayments(state);
+    const f = financeOf(state, state.userTeamId);
+    const paid = f.ledger[f.ledger.length - 1]!;
+    expect(categoryOf(paid)).toBe("player_wages");
+    expect(paid.kind).toBe("expense");
+    expect(paid.amount).toBe(Math.floor(severance / 2));
+    expect(f.balance).toBe(before.balance - Math.floor(severance / 2));
+    expect(f.transferBudget).toBe(before.budget); // 이적 예산은 그대로
+  });
+});
+
+describe("조건부 조항 — 셀온 정산은 양쪽에 대칭으로 선다", () => {
+  /** 잔액·이적 예산 두 축을 한 번에 뜬다 */
+  function books(state: GameState, teamId: string) {
+    const f = financeOf(state, teamId);
+    return { balance: f.balance, budget: f.transferBudget };
+  }
+
+  /** 두 AI 구단 — 원 소속(조항을 쥔 쪽)과 지금 소속(무는 쪽) */
+  function twoClubs(state: GameState): [string, string] {
+    const ids = state.finances
+      .map((f) => f.teamId)
+      .filter(
+        (id) => id !== state.userTeamId && isClubTeam(id) && !isMarketOnlyLeague(leagueOfTeam(id)),
+      );
+    return [ids[0]!, ids[1]!];
+  }
+
+  /**
+   * 셀온이 걸린 원장 한 줄을 직접 꽂는다 — 협상을 다 굴리지 않고 **정산만** 본다.
+   * @returns 선수 id
+   */
+  function sellOnSold(
+    state: GameState,
+    from: string,
+    to: string,
+    input: { fee: number; rate: number },
+  ): string {
+    const player = state.players.find((p) => p.teamId === to)!;
+    state.transfers.push({
+      id: `tr-seed-${player.id}`,
+      gamePlayerId: player.id,
+      windowId: null,
+      fromTeamId: from,
+      toTeamId: to,
+      date: "2026-07-05",
+      type: "transfer",
+      fee: input.fee,
+      clauses: { sellOn: { rate: input.rate, settledOn: null } },
+    });
+    return player.id;
+  }
+
+  const ORIGINAL = 10_000_000;
+  const RESALE = 30_000_000;
+  const RATE = 0.2;
+  /** 이익 £20M의 20% */
+  const DUE = 4_000_000;
+
+  it("이익의 비율이 무는 쪽에서 나가 받는 쪽으로 그대로 들어간다", () => {
+    const state = createMiniGame();
+    const [holder, owing] = twoClubs(state);
+    const playerId = sellOnSold(state, holder, owing, { fee: ORIGINAL, rate: RATE });
+    const before = { holder: books(state, holder), owing: books(state, owing) };
+
+    const paid = settleSellOn(state, {
+      gamePlayerId: playerId,
+      sellerTeamId: owing,
+      resaleFee: RESALE,
+      resaleTransferId: "tr-resale-1",
+    });
+
+    expect(paid).toBe(DUE);
+    // **대칭** — 나간 만큼 들어오고, 이적 예산도 같은 크기로 오간다
+    expect(books(state, owing).balance).toBe(before.owing.balance - DUE);
+    expect(books(state, owing).budget).toBe(before.owing.budget - DUE);
+    expect(books(state, holder).balance).toBe(before.holder.balance + DUE);
+    expect(books(state, holder).budget).toBe(before.holder.budget + DUE);
+    // 세계의 돈은 늘지도 줄지도 않는다
+    const delta =
+      books(state, owing).balance -
+      before.owing.balance +
+      (books(state, holder).balance - before.holder.balance);
+    expect(delta).toBe(0);
+
+    const schedule = state.paymentSchedules!.find((s) => s.kind === "sell_on")!;
+    expect(schedule.installments).toHaveLength(1);
+    expect(schedule.installments[0]!.paidOn).toBe(state.date);
+  });
+
+  it("한 번 정산되면 다시 발동하지 않는다", () => {
+    const state = createMiniGame();
+    const [holder, owing] = twoClubs(state);
+    const playerId = sellOnSold(state, holder, owing, { fee: ORIGINAL, rate: RATE });
+
+    expect(
+      settleSellOn(state, {
+        gamePlayerId: playerId,
+        sellerTeamId: owing,
+        resaleFee: RESALE,
+        resaleTransferId: "tr-resale-1",
+      }),
+    ).toBe(DUE);
+    const after = books(state, owing);
+    expect(
+      settleSellOn(state, {
+        gamePlayerId: playerId,
+        sellerTeamId: owing,
+        resaleFee: RESALE,
+        resaleTransferId: "tr-resale-2",
+      }),
+    ).toBe(0);
+    expect(books(state, owing)).toEqual(after);
+  });
+
+  it("손해 보고 팔면 한 푼도 나가지 않는다 — 조항은 그래도 소진된다", () => {
+    const state = createMiniGame();
+    const [holder, owing] = twoClubs(state);
+    const playerId = sellOnSold(state, holder, owing, { fee: ORIGINAL, rate: RATE });
+    const before = books(state, owing);
+
+    expect(
+      settleSellOn(state, {
+        gamePlayerId: playerId,
+        sellerTeamId: owing,
+        resaleFee: ORIGINAL - 1,
+        resaleTransferId: "tr-resale-1",
+      }),
+    ).toBe(0);
+    expect(books(state, owing)).toEqual(before);
+    const clause = state.transfers.find((t) => t.clauses?.sellOn)!.clauses!.sellOn!;
+    expect(clause.settledOn).toBe(state.date);
+    expect(clause.settledAmount).toBe(0);
+  });
+
+  it("무는 쪽이 아닌 구단이 팔면 발동하지 않는다", () => {
+    const state = createMiniGame();
+    const [holder, owing] = twoClubs(state);
+    const playerId = sellOnSold(state, holder, owing, { fee: ORIGINAL, rate: RATE });
+    expect(
+      settleSellOn(state, {
+        gamePlayerId: playerId,
+        // 조항을 쥔 구단이 파는 것으로는 서지 않는다 — 무는 쪽은 toTeamId다
+        sellerTeamId: holder,
+        resaleFee: RESALE,
+        resaleTransferId: "tr-resale-1",
+      }),
+    ).toBe(0);
+  });
+
+  it("유저가 무는 셀온은 원장에 셀온 정산금으로 적힌다", () => {
+    const state = createMiniGame();
+    const [holder] = twoClubs(state);
+    const playerId = sellOnSold(state, holder, state.userTeamId, {
+      fee: ORIGINAL,
+      rate: RATE,
+    });
+
+    settleSellOn(state, {
+      gamePlayerId: playerId,
+      sellerTeamId: state.userTeamId,
+      resaleFee: RESALE,
+      resaleTransferId: "tr-resale-1",
+    });
+    const f = financeOf(state, state.userTeamId);
+    const paid = f.ledger[f.ledger.length - 1]!;
+    expect(categoryOf(paid)).toBe("transfer_out");
+    expect(paid.label).toContain("셀온 정산금");
+    expect(paid.amount).toBe(DUE);
+  });
+});
+
+/**
+ * 티켓 — **리그 폭**(카탈로그 층)과 **감독이 매기는 값**(finance.md §5.2).
+ * 화면에 드러나지 않는 곡선이라 여기서 고정한다.
+ */
+describe("티켓 — 리그 폭과 감독이 매기는 값", () => {
+  /** 96팀이 다 들어 있는 세계 하나면 리그 폭은 전부 읽힌다 — describe 하나가 나눠 쓴다 */
+  let world: GameState;
+  beforeAll(() => {
+    world = createTestGame();
+  });
+
+  /** 그 리그에서 제일 비싼 표 ÷ 제일 싼 표 — 리그 평균가를 타지 않는 순수한 폭 */
+  function spreadRatio(state: GameState, leagueId: string): number {
+    const bases = state.teams
+      .filter((t) => leagueOfTeam(t.id) === leagueId)
+      .map((t) => ticketPriceOf(state, t.id).base);
+    return Math.max(...bases) / Math.min(...bases);
+  }
+
+  it("리그 폭이 tier 보정을 1을 축으로 늘이고 줄인다", () => {
+    // EPL이 표를 잰 자리다 — 축이라 1이고, 표에 없는 리그도 1이라 아무 일이 없다
+    expect(leagueTicketSpread("epl")).toBe(1);
+    expect(leagueTicketSpread("nowhere-league")).toBe(1);
+    // 2부는 그 나라 1부의 폭을 쓴다 — 값을 매기는 문화는 리그가 아니라 나라의 것이다
+    expect(leagueTicketSpread("serieb")).toBe(leagueTicketSpread("seriea"));
+    expect(leagueTicketSpread("championship")).toBe(leagueTicketSpread("epl"));
+
+    // 폭이 넓은 리그는 위아래가 더 벌어지고, 좁은 리그는 붙는다
+    expect(spreadRatio(world, "seriea")).toBeGreaterThan(spreadRatio(world, "epl"));
+    expect(spreadRatio(world, "bundesliga")).toBeLessThan(spreadRatio(world, "epl"));
+  });
+
+  it("부른 값은 폭에서 잘려 들어가고 배율로 남는다", () => {
+    const state = createMiniGame();
+    const teamId = state.userTeamId;
+    const { base, max } = ticketPriceOf(state, teamId);
+
+    expect(setTicketPrice(state, { price: Math.round(base * 3) }).ok).toBe(true);
+    const dear = ticketPriceOf(state, teamId);
+    expect(dear.price).toBeCloseTo(max, 6);
+    expect(dear.ratio).toBeCloseTo(max / base, 6);
+
+    // 시즌권과 예매가 이미 나갔다 — 같은 안건은 쿨다운이 지나야 다시 매긴다
+    expect(setTicketPrice(state, { price: Math.round(base) }).ok).toBe(false);
+    financeOf(state, teamId).ticketPrice!.setOn = addDays(state.date, -30);
+    expect(setTicketPrice(state, { price: Math.round(base) }).ok).toBe(true);
+    expect(ticketPriceOf(state, teamId).ratio).toBeCloseTo(1, 2);
+  });
+
+  it("값을 올리면 관중이 줄고, 수입이 가장 큰 자리는 기준가 근처다", () => {
+    const state = createTestGame();
+    const teamId = state.userTeamId;
+    const match = state.matches.find((m) => m.homeTeamId === teamId && !m.neutral)!;
+    const at = (ratio: number) => {
+      financeOf(state, teamId).ticketPrice = { ratio, setOn: state.date };
+      return matchdayRevenue(state, match);
+    };
+
+    const par = at(1);
+    // 비싸게 팔면 관중이 줄고, 폭 끝에서는 수입까지 준다
+    const dear = at(1.5);
+    expect(dear.attendance).toBeLessThan(par.attendance);
+    expect(dear.income).toBeLessThan(par.income);
+    // 싸게 팔면 관중은 늘고 수입은 준다 — 관중을 사는 데 값을 치르는 것이다
+    const cheap = at(0.7);
+    expect(cheap.attendance).toBeGreaterThanOrEqual(par.attendance);
+    expect(cheap.income).toBeLessThan(par.income);
+
+    /**
+     * **`avgTicketPrice`는 이미 시장이 찾아 놓은 값이다** — 최적점이 폭 끝으로
+     * 밀리면 "언제나 최대로 올린다"가 되어 결정이 아니라 공짜 수입이 된다.
+     * `TICKET_ELASTICITY`를 낮추면 조용히 그렇게 되는 자리다.
+     */
+    const ratios = [0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5];
+    const best = ratios.reduce((a, b) => (at(b).income > at(a).income ? b : a));
+    expect(best).toBeGreaterThanOrEqual(0.9);
+    expect(best).toBeLessThanOrEqual(1.2);
+  });
+});
+
+/**
+ * 구장 투자 — **현금은 한 번, 손익은 내용연수에 나눠** (finance.md §6.1-1).
+ * 선수 이적료(§6.1)와 같은 모양의 두 축이다.
+ */
+describe("자본 자산 — capex와 상각", () => {
+  const DAY = "2026-08-01";
+  const line = (
+    kind: "income" | "expense",
+    category: FinanceCategory,
+    amount: number,
+    noncash = false,
+  ): LedgerEntry => ({
+    date: DAY,
+    kind,
+    category,
+    label: category,
+    amount,
+    ...(noncash ? { accounting: "noncash" as const } : {}),
+  });
+
+  it("capex는 현금에서만, 상각은 손익에서만 빠진다", () => {
+    const s = summarise([
+      line("income", "matchday", 10_000_000),
+      line("expense", "capex", 8_000_000),
+      line("expense", "depreciation", 66_667, true),
+    ]);
+    // 통장에서 나간 것은 공사비뿐이다
+    expect(s.cashNet).toBe(10_000_000 - 8_000_000);
+    // 장부에 선 것은 상각뿐이다 — 자산을 산 값은 손익이 아니다
+    expect(s.pnlNet).toBe(10_000_000 - 66_667);
+  });
+
+  it("상각 총합은 취득원가와 같고 내용연수가 지나면 멈춘다", () => {
+    const state = createMiniGame();
+    const teamId = state.userTeamId;
+    const MONTHS = 12;
+    const COST = 12_000_000;
+    const before = financeOf(state, teamId).balance;
+    recordCapitalAsset(state, teamId, {
+      id: "asset-test",
+      label: "구장 증설 (1,500석)",
+      cost: COST,
+      months: MONTHS,
+    });
+    // 현금은 그날 한 번 나간다
+    expect(financeOf(state, teamId).balance).toBe(before - COST);
+    const spent = financeOf(state, teamId).ledger.filter((e) => categoryOf(e) === "capex");
+    expect(spent).toHaveLength(1);
+    expect(spent[0]!.accounting).toBeUndefined(); // 현금이다
+
+    // 취득한 달의 다음 달부터 정확히 MONTHS번 선다
+    const [year, month] = monthOf(state.date).split("-").map(Number) as [number, number];
+    let posts = 0;
+    let total = 0;
+    for (let step = 0; step <= MONTHS + 2; step++) {
+      const m = month + step;
+      state.date = `${year + Math.floor((m - 1) / 12)}-${String(((m - 1) % 12) + 1).padStart(2, "0")}-01`;
+      for (const l of depreciationOf(state, teamId)) {
+        posts += 1;
+        total += l.monthly;
+      }
+    }
+    expect(posts).toBe(MONTHS);
+    expect(total).toBeCloseTo(COST, 6);
   });
 });

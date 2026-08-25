@@ -27,7 +27,7 @@ export function marketDirectionKo(direction: MarketDirection, loan = false): str
 export type MarketCardKind =
   /** 우리가 넣은 오퍼 — 답을 기다린다 */
   | "offer"
-  /** 상대의 답 — 수락·거절·역제안 */
+  /** 상대의 답 — 수락·거절·조정 */
   | "verdict"
   /** 재계약 제안 */
   | "renewal"
@@ -48,6 +48,8 @@ export interface MarketTerms {
    * 화면이 `이적료`라 이름 붙여, 나가는 선수에게 우리가 이적료를 낸 것으로 읽힌다.
    */
   severance?: number;
+  /** 분할 지급 연수 — 2 이상일 때만 싣는다 (일시금은 조건이 아니다 · transfer.md §5-2) */
+  paymentYears?: number;
 }
 
 export interface MarketCard {
@@ -58,14 +60,14 @@ export interface MarketCard {
   counterpart: string;
   /** 우리가 낸 조건 */
   terms?: MarketTerms;
-  /** 상대가 부르는 조건 — 역제안일 때만 */
+  /** 상대가 부르는 조건 — 조정일 때만 */
   counterTerms?: MarketTerms;
   verdict?: "accept" | "reject" | "counter";
   /**
    * 성사 가능성 — 이미 **읽을 수 있는 표기**다(`34%` 또는 `반반이다`).
    * 안개가 남은 선수는 퍼센트를 단정하지 않으므로(scouting) 코어가 그 판단까지 해서 보낸다.
    *
-   * **답이 남은 카드에만 싣는다** — 오퍼·역제안·재계약. 끝난 판정(수락·거절)에서
+   * **답이 남은 카드에만 싣는다** — 오퍼·조정·재계약. 끝난 판정(수락·거절)에서
    * 사전 확률은 다음 판단의 입력이 아니다 (transfer.md §3).
    */
   odds?: string;

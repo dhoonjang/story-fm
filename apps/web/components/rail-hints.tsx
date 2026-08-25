@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ChatTurn, ToolCallRecord } from "@story-fm/engine";
 import { hintsOfCall, panelHintsOf } from "@/lib/panel-hints";
 import type { HintLine, PanelHint, PanelKey } from "@/lib/panel-hints";
@@ -51,6 +51,7 @@ const SKILL_ICON: Record<string, IconComponent> = {
   // 해지 제안도 사람이 오가는 일이다 — 일방 해지(release_player)와 같은 그림으로 한 갈래로 읽힌다
   open_release: IconPerson,
   recall_loan: IconPerson,
+  exercise_buyback: IconPerson,
   // 계약 확정은 재정 장부에도 서므로 사람 쪽으로 — 그 칸의 머리 아이콘이 이미 돈이다
   accept_deal: IconPerson,
   apply_narrative_event: IconInsight,
@@ -62,22 +63,15 @@ const SKILL_ICON: Record<string, IconComponent> = {
 };
 
 /**
- * 오르내린 수치에 색을 준다 — `+20`은 이득, `−1`은 손해.
+ * 오르내림의 색 — **부호는 코어가 숫자로 낸다** (`SkillBriefItem.delta`).
  *
- * ASCII 하이픈은 잡지 않는다: 포메이션(`4-2-3-1`)과 구분되지 않는다.
- * 코어가 쓰는 감소 부호는 유니코드 −(U+2212)다.
+ * 값 문자열에서 `+`·`−`를 찾아 칠하던 자리다. 포메이션(`4-2-3-1`)이 같은 자를
+ * 지나고, 코어가 문구를 바꾸는 날 색이 조용히 꺼졌다. `0`은 "안 움직였다"는
+ * 사실이라 이득도 손해도 아니다 — 색이 붙지 않는다.
  */
-const DELTA = /([+−]\d[\d,.]*)/g;
-
-function withDelta(text: string) {
-  return text.split(DELTA).map((part, i) => {
-    if (!/^[+−]\d/.test(part)) return <Fragment key={i}>{part}</Fragment>;
-    return (
-      <b key={i} className={part.startsWith("+") ? "up" : "down"}>
-        {part}
-      </b>
-    );
-  });
+function Delta({ delta, text }: { delta: number | undefined; text: string }) {
+  if (delta === undefined || delta === 0) return <>{text}</>;
+  return <b className={delta > 0 ? "up" : "down"}>{text}</b>;
 }
 
 /**
@@ -87,9 +81,8 @@ function withDelta(text: string) {
  * 두 번 나오고 무엇이 값인지 안 읽힌다. 코어가 자리를 나눠 주므로(`SkillBriefItem`)
  * 화면은 자리마다 톤만 정하면 된다.
  *
- * 코어가 쓴 문자열은 다시 가르지 않는다 — 역할도 코어가 판과 같은 약칭(`CF`)으로 내고,
- * `note`도 원자 하나다. `withDelta`만 남는데 그건 뜻을 만드는 것이 아니라 ±수치에
- * 색을 주는 강조 표시다.
+ * **코어가 쓴 문자열은 다시 가르지 않는다** — 역할도 코어가 판과 같은 약칭(`CF`)으로
+ * 내고, `note`도 원자 하나이며, ±의 색은 `delta`가 나른다.
  */
 function HintRow({ line }: { line: HintLine }) {
   const Icon = SKILL_ICON[line.skill];
@@ -100,8 +93,10 @@ function HintRow({ line }: { line: HintLine }) {
       <span className="rail-hint-what">
         {line.head !== undefined && <b className="rail-hint-lead">{line.head}</b>}
         {line.label !== undefined && <em className="rail-hint-label">{line.label}</em>}
-        <span className="rail-hint-value">{withDelta(line.text)}</span>
-        {line.note !== undefined && <em className="rail-hint-aside">{withDelta(line.note)}</em>}
+        <span className="rail-hint-value">
+          <Delta delta={line.delta} text={line.text} />
+        </span>
+        {line.note !== undefined && <em className="rail-hint-aside">{line.note}</em>}
       </span>
     </span>
   );

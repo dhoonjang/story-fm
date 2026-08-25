@@ -7,6 +7,8 @@ import type { OfficeViews } from "@story-fm/engine";
 type Competition = OfficeViews["competitions"]["list"][number];
 /** 다음 경기 조각 — 팀 단위와 대회 단위가 같은 모양이라 카드도 하나다 */
 type NextMatch = NonNullable<OfficeViews["competitions"]["nextMatch"]>;
+/** 최근 결과 한 경기 — 코어가 조각으로 내고 문장은 이 화면이 잇는다 */
+type RecentResult = OfficeViews["competitions"]["recentResults"][number];
 
 const venueLabel = (venue: NextMatch["venue"]) =>
   venue === "home" ? "홈" : venue === "away" ? "원정" : "중립";
@@ -186,6 +188,34 @@ function NextFixture({ next }: { next: NextMatch }) {
   );
 }
 
+/**
+ * 최근 결과 한 줄 — 뷰가 주는 조각(대회·양 팀·스코어·승부차기·우리 편·승패)을
+ * 화면이 잇는다. 스코어는 가운데 한 칸에 세워 줄끼리 세로로 맞고, 우리 편 이름만
+ * 진하며, 이겼는지는 **색**이 말한다. 승부차기는 스코어를 바꾸지 않고 한 톤 낮춰
+ * 옆에 선다 (docs/data/competition.md §6).
+ *
+ * 중립 경기는 뷰가 우리가 어느 쪽이었는지 말하지 않으므로 어느 이름도 진해지지
+ * 않는다 — 스코어로 짐작해 진하게 만들면 그게 곧 화면이 장부를 되쪼는 짓이다.
+ */
+function RecentResultLine({ r }: { r: RecentResult }) {
+  const side = (which: "home" | "away") => (r.venue === which ? "recent-us" : undefined);
+  return (
+    <div className={`recent-line recent-${r.outcome}`}>
+      <i className="recent-label">{r.label}</i>
+      <span className={`recent-team recent-home ${side("home") ?? ""}`}>{r.home}</span>
+      <b className="recent-score">
+        {r.homeGoals}-{r.awayGoals}
+      </b>
+      <span className={`recent-team recent-away ${side("away") ?? ""}`}>{r.away}</span>
+      {/* 승부차기가 없어도 **칸은 낸다** — 줄이 격자를 나눠 쓰는 구조라 한 줄이
+          네 칸만 채우면 다음 줄이 한 칸씩 밀려 스코어가 어긋난다 */}
+      <i className="recent-pens">
+        {r.penalties ? `승부차기 ${r.penalties.home}-${r.penalties.away}` : ""}
+      </i>
+    </div>
+  );
+}
+
 export function CompetitionsView({
   competitions,
   inMatch = false,
@@ -270,11 +300,13 @@ export function CompetitionsView({
           {competitions.recentResults.length > 0 && (
             <>
               <div className="section-title">최근 결과</div>
-              {competitions.recentResults.map((r, i) => (
-                <div className="recent-line" key={i}>
-                  {r}
-                </div>
-              ))}
+              {/* 다섯 줄이 **한 격자**를 나눠 쓴다 — 줄마다 격자를 세우면 이름 길이에
+                  따라 스코어 칸이 줄마다 어긋난다 */}
+              <div className="recent-list">
+                {competitions.recentResults.map((r, i) => (
+                  <RecentResultLine r={r} key={i} />
+                ))}
+              </div>
             </>
           )}
         </>

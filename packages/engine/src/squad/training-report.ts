@@ -1,10 +1,12 @@
-import type { AttributeAxis, TrainAttr } from "@story-fm/domain";
+import type { AttributeAxis, GamePlayer, GrowthOrigin, TrainAttr } from "@story-fm/domain";
 import {
   ATTRIBUTE_AXES,
   AXIS_KO,
   ageOf,
   applyFamiliarityGain,
   naturalPositionOf,
+  positionGrowthTarget,
+  PROFICIENCY_MAX,
   RATING_MAX,
   storedProficiencyFor,
   tacticalUptake,
@@ -78,6 +80,11 @@ export const TACTIC_GAIN_MAX = 3;
  */
 export const ATTR_STEP_MIN = -1;
 export const ATTR_STEP_MAX = 1;
+/**
+ * 하락이 멈추는 능력치 — 스키마의 0이 아니라 1이다. 축 하나가 0이 되면 그 선수는
+ * 그 축을 **아예 갖지 않은** 것으로 읽혀 곱셈이 걸린 공식이 통째로 죽는다.
+ */
+export const ATTR_DECLINE_FLOOR = 1;
 
 /**
  * 한 판정에서 능력치가 움직일 수 있는 **인원** — 감독의 훈련 축이 정한다.
@@ -429,7 +436,7 @@ export function applyTrainingOutcomes(
             "training",
             "tactical",
             moved,
-            "훈련 결산",
+            "training-settlement",
             session.date,
           );
           lines.push(`${player.name} 전술 ${moved > 0 ? "+" : ""}${moved}`);
@@ -447,11 +454,10 @@ export function applyTrainingOutcomes(
         // 처음 배우는 자리는 **주발을 벗긴 원값**에서 출발한다 — 저장에 보정을
         // 남기면 조회가 다시 얹는다 (player.md §8)
         const before =
-          slot?.proficiency ??
-          storedProficiencyFor(player.positions, program.position, player.foot);
-        const after = Math.min(99, before + gain);
+          slot?.proficiency ?? storedProficiencyFor(player.positions, program.position);
+        const after = Math.min(PROFICIENCY_MAX, before + gain);
         /**
-         * **실제로 넘어간 만큼만 장부에 적는다.** 99에 닿은 자리는 판정이 +2를
+         * **실제로 넘어간 만큼만 장부에 적는다.** 위끝에 닿은 자리는 판정이 +2를
          * 내도 아무것도 오르지 않는데, 그 구간마다 "적응 +2"가 성장 로그와
          * 요약에 남아 감독은 오르고 있다고 읽는다.
          */
@@ -469,9 +475,9 @@ export function applyTrainingOutcomes(
             player.id,
             session.entryId,
             "training",
-            `pos:${program.position}`,
+            positionGrowthTarget(program.position),
             gained,
-            "전향 훈련",
+            "position-conversion",
             session.date,
           );
           lines.push(`${player.name} ${program.position} 적응 +${gained}`);
@@ -498,7 +504,7 @@ export function applyTrainingOutcomes(
       cap: attrCap,
       factor: uptake,
       source: "training",
-      note: "훈련 결산",
+      origin: "training-settlement",
       entryId: session.entryId,
       on: session.date,
     });
@@ -534,13 +540,7 @@ export function applyTrainingOutcomes(
  */
 export function applyAttributeStep(
   state: GameState,
-  player: {
-    id: string;
-    name: string;
-    birthdate?: string;
-    attributes: Record<string, number> & { potential: number };
-    growthCarry?: Record<string, number>;
-  },
+  player: GamePlayer,
   axis: AttributeAxis | null,
   step: number | null | undefined,
   opts: {
@@ -553,7 +553,8 @@ export function applyAttributeStep(
      */
     factor?: number;
     source: "training" | "match";
-    note: string;
+    /** 어느 경로로 올랐나 — 문장이 아니라 코드다 (records.ts `GrowthOrigin`) */
+    origin: GrowthOrigin;
     /** 출처 일정·날짜 — 결산은 지나간 훈련 날짜를 가리킨다 */
     entryId?: string;
     on?: string;
@@ -566,10 +567,9 @@ export function applyAttributeStep(
   const move = Math.max(ATTR_STEP_MIN, Math.min(ATTR_STEP_MAX, raw));
   if (move === 0) return null;
 
-  const attrs = player.attributes as unknown as Record<string, number>;
-  const value = attrs[axis] ?? 0;
-  if (move > 0 && (value >= player.attributes.potential || value >= 99)) return null;
-  if (move < 0 && value <= 1) return null;
+  const value = player.attributes[axis] ?? 0;
+  if (move > 0 && (value >= player.attributes.potential || value >= RATING_MAX)) return null;
+  if (move < 0 && value <= ATTR_DECLINE_FLOOR) return null;
 
   /**
    * 판정이 "한 칸"이라고 해도 그대로 오르지는 않는다 — 잠재력 여유·나이·현재
@@ -596,8 +596,8 @@ export function applyAttributeStep(
   const applied = Math.sign(whole);
   player.growthCarry = { ...(player.growthCarry ?? {}), [axis]: carry - applied };
 
-  attrs[axis] = value + applied;
-  recomputeOverall(player as never);
+  player.attributes[axis] = value + applied;
+  recomputeOverall(player);
   recordGrowth(
     state,
     player.id,
@@ -605,10 +605,10 @@ export function applyAttributeStep(
     opts.source,
     axis,
     applied,
-    opts.note,
+    opts.origin,
     opts.on,
   );
-  return { axis, step: applied, value: attrs[axis]! };
+  return { axis, step: applied, value: player.attributes[axis] };
 }
 
 /** 판정값을 −1~3으로 접는다 — 값이 없거나 숫자가 아니면 0 */

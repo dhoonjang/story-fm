@@ -1,4 +1,5 @@
 import type { AttributeAxis, DeferredScout, GamePlayer, ScoutReport } from "@story-fm/domain";
+import { isReserveMatch } from "@story-fm/domain";
 import {
   ATTRIBUTE_AXES,
   AXIS_KO,
@@ -79,11 +80,12 @@ export const AXIS_OBSERVABILITY: Record<AttributeAxis, Observability> = {
   aggression: "observable",
   // GK는 매 경기 슛을 받으니 표본이 빨리 쌓인다
   goalkeeping: "observable",
-  // 분석형 — 결정력은 경기당 유효 슈팅이 2~3회뿐이고, 위치선정·시야는 화면 밖에서
+  // 분석형 — 결정력은 경기당 유효 슈팅이 2~3회뿐이고, 위치선정·침투·시야는 화면 밖에서
   // 일어나며, 침착성·리더십은 큰 경기와 라커룸에서만 확인된다
   finishing: "analytical",
   vision: "analytical",
   positioning: "analytical",
+  offTheBall: "analytical",
   composure: "analytical",
   leadership: "analytical",
 };
@@ -104,7 +106,7 @@ export const OBSERVATION_MARGIN: Record<Observability, Record<Knowledge, number>
  * 축이 아닌 합성값(`"overall"`)은 판단 계열을 포함하므로 **분석형**으로 다룬다 —
  * 종합 평가가 실행 계열보다 정확할 수는 없다.
  */
-export function marginFor(axis: string, knowledge: Knowledge): number {
+function marginFor(axis: string, knowledge: Knowledge): number {
   const layer = AXIS_OBSERVABILITY[axis as AttributeAxis] ?? "analytical";
   return OBSERVATION_MARGIN[layer][knowledge];
 }
@@ -130,13 +132,13 @@ export function observationMargin(
 }
 
 /** 실행 계열의 오차 — 안개 안내문이 "무엇까지 믿어도 되나"를 말할 때 쓴다 */
-export const KNOWLEDGE_MARGIN: Record<Knowledge, number> = OBSERVATION_MARGIN.observable;
+const KNOWLEDGE_MARGIN: Record<Knowledge, number> = OBSERVATION_MARGIN.observable;
 
-/** 안개를 씌워 노출하는 축 — 15축 전부 */
+/** 안개를 씌워 노출하는 축 — 16축 전부 */
 export const SCOUT_ATTRS = ATTRIBUTE_AXES;
 export type ScoutAttr = AttributeAxis;
 
-export const ATTR_KO: Record<ScoutAttr, string> = AXIS_KO;
+const ATTR_KO: Record<ScoutAttr, string> = AXIS_KO;
 
 // ── 지식 수준 파생 ──────────────────────────────────────
 
@@ -164,6 +166,8 @@ export function hasSeenPlay(state: GameState, playerId: string): boolean {
   if (!player) return false;
   for (const match of state.matches) {
     if (!match.result) continue;
+    // 2군 경기는 감독이 보지 않는다 — 결과는 출전·성장에만 닿는다 (season.md §2)
+    if (isReserveMatch(match)) continue;
     const userIsHome = match.homeTeamId === state.userTeamId;
     const userIsAway = match.awayTeamId === state.userTeamId;
     if (!userIsHome && !userIsAway) continue; // 우리가 없던 경기는 못 봤다
@@ -213,15 +217,15 @@ export function observedRating(
 /**
  * **감독이 이 선수를 얼마나 정확히 아는가** — 화면과 서버가 같은 계산을 하기 위한 묶음.
  *
- * 예전엔 서버가 `overall`·자리별 전력을 **값마다 따로** 관측값으로 바꿔 내려보냈다.
- * 그러면 클라이언트가 자리를 옮겨 볼 때 같은 규칙을 재현할 수 없어(참값이 없으니)
- * "서버 값에 차이만 얹는" 보정이 필요했고, 그 보정이 화면마다 달라 같은 선수의
- * OVR이 명단과 전술판에서 갈렸다.
+ * 서버가 `overall`·자리별 전력을 값마다 따로 관측값으로 바꿔 내려보내면,
+ * 클라이언트가 자리를 옮겨 볼 때 같은 규칙을 재현할 수 없어(참값이 없으니)
+ * "서버 값에 차이만 얹는" 보정이 필요해지고, 그 보정이 화면마다 달라 같은
+ * 선수의 OVR이 명단과 전술판에서 갈린다.
  *
- * 이제 안개는 **축에만** 씌우고(`AxisValues`가 이미 관측값이다) 합성값은 그
+ * 그래서 안개는 **축에만** 씌우고(`AxisValues`가 이미 관측값이다) 합성값은 그
  * 축에서 파생시킨다 — 그러면 어느 자리로 옮겨 계산해도 서로 어긋날 수 없다.
  * `overallOffset`은 그 파생값에 얹는 **하나의** 오프셋이다: 축 평균만으로는
- * 오차가 상쇄돼(15축이 각자 흩어진다) 평판만 아는 선수의 종합이 실제보다
+ * 오차가 상쇄돼(16축이 각자 흩어진다) 평판만 아는 선수의 종합이 실제보다
  * 정확해진다. 자리마다 같은 값이 얹히므로 **자리끼리의 비교는 흔들리지 않는다.**
  */
 export interface Observation {
@@ -268,7 +272,7 @@ export interface ScoutedAttribute {
   label: string;
 }
 
-/** 능력치 15축을 지식 수준 × 축별 관측 가능성에 맞춰 노출 */
+/** 능력치 16축을 지식 수준 × 축별 관측 가능성에 맞춰 노출 */
 export function scoutedAttributes(state: GameState, player: GamePlayer): ScoutedAttribute[] {
   const knowledge = knowledgeOf(state, player.id);
   return SCOUT_ATTRS.map((key) => {
@@ -301,16 +305,17 @@ export function overallView(state: GameState, player: GamePlayer): string {
 /** 추정 폭이 이 안이면 그 말로 부른다 — 넘으면 "대강 짐작"이다 */
 const CONFIDENCE_MARGIN = { 거의확실: 3, 대체로신뢰: 6 } as const;
 
+/** 추정 폭을 부르는 말 — 구간을 내는 자리는 모두 이 함수를 지난다 */
+export function potentialConfidence(margin: number): string {
+  if (margin <= CONFIDENCE_MARGIN.거의확실) return "거의 확실";
+  if (margin <= CONFIDENCE_MARGIN.대체로신뢰) return "대체로 신뢰";
+  return "대강 짐작";
+}
+
 export function potentialView(state: GameState, player: GamePlayer): string {
   const band = potentialBand(state, player);
   if (!band) return "미지 (성장 여력을 짐작할 근거가 없다)";
-  const confidence =
-    band.margin <= CONFIDENCE_MARGIN.거의확실
-      ? "거의 확실"
-      : band.margin <= CONFIDENCE_MARGIN.대체로신뢰
-        ? "대체로 신뢰"
-        : "대강 짐작";
-  return `${band.low}~${band.high} (${confidence} · ±${band.margin})`;
+  return `${band.low}~${band.high} (${band.confidence} · ±${band.margin})`;
 }
 
 /** 한 줄 요약이 꼽는 강점·약점 축의 수 */
@@ -332,7 +337,13 @@ function potentialNote(state: GameState, playerId: string, knowledge: Knowledge)
   return margin === null ? "잠재력은 짐작할 근거가 없다" : `잠재력은 구간으로만 안다(±${margin})`;
 }
 
-/** 안개 상태 안내문 — GM이 확신의 정도를 말로 표현할 근거 */
+/**
+ * 안개 상태 **카드** — 눈금·오차폭·잠재력 마진·파견 예정일까지의 사실만 싣는다.
+ *
+ * ⚠️ **지시문은 여기 서지 않는다.** 눈금이 낮을 때 어떻게 말할지는 그 선수에 대한
+ * 사실이 아니라 모델에게 내리는 지시라 GM 시스템 프롬프트가 한 줄로 갖는다
+ * (player.md §10, llm/prompts.md §5).
+ */
 export function knowledgeNote(state: GameState, playerId: string): string {
   const knowledge = knowledgeOf(state, playerId);
   const margin = KNOWLEDGE_MARGIN[knowledge];
@@ -358,10 +369,7 @@ export function knowledgeNote(state: GameState, playerId: string): string {
     );
   }
   const source = knowledge === "seen" ? "직접 상대해 봤다" : "리그 평판·소문 수준";
-  return (
-    `${source} — 평가에 오차가 있다(실행 ±${margin} · 판단 ±${analytical}). ` +
-    `${potential} · 단정하지 말고 인상으로 말하라${pending}`
-  );
+  return `${source} — 평가에 오차가 있다(실행 ±${margin} · 판단 ±${analytical}). ${potential}${pending}`;
 }
 
 /** 강점·약점 지목 — seen 이상에서만 의미가 있다 (관측값 기준) */
@@ -523,6 +531,12 @@ export interface PotentialBand {
   high: number;
   /** 추정 반폭 — 좁을수록 확신이 크다 */
   margin: number;
+  /**
+   * 그 폭을 부르는 말 — `거의 확실` · `대체로 신뢰` · `대강 짐작` (player.md §9.1).
+   * 구간과 **함께** 낸다: 경계는 코어의 것이고, 읽는 쪽이 폭을 다시 재면 표를 고치는
+   * 날 한쪽만 따라간다.
+   */
+  confidence: string;
 }
 
 /**
@@ -552,6 +566,7 @@ export function potentialBand(state: GameState, player: GamePlayer): PotentialBa
     low: Math.max(floor, center - margin),
     high: Math.min(99, Math.max(truth, center + margin)),
     margin,
+    confidence: potentialConfidence(margin),
   };
 }
 

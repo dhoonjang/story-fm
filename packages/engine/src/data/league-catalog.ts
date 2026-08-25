@@ -4,7 +4,7 @@
  *
  * 각 리그는 자체 일정·순위표를 갖는다. `MATCH.competitionId`가 이 id를 가리키고,
  * 순위는 `computeStandings(state, leagueId)`로 리그별로 따로 계산한다.
- * 유럽 대항전은 여기에 kind:"cup" 대회로 추가될 예정이다 (다음 마일스톤).
+ * 유럽 대항전은 여기가 아니라 컵 카탈로그(`cup-catalog.ts`)가 갖는다.
  *
  * **2부 리그는 리그전을 돌지 않는다.** 국내 컵(FA컵·DFB-포칼 등)의 참가 팀을
  * 대기 위해서만 존재한다 — 자체 일정·순위표·승강은 없다 (`kind: "cup-only"`).
@@ -50,6 +50,11 @@ export interface LeagueCatalogEntry {
   /**
    * 실선수 시드를 갖는 리그인가 — false면 선수를 절차 생성한다.
    * 하이브리드 전략: 5대 리그는 실선수, 그 밖은 합성 (sources.md §7).
+   *
+   * ⚠️ **세기는 `kind`가 정한다** (team.md §4). `playable`은 **전체 시드**라
+   * 클럽마다 11명 이상에 골키퍼 하나를 갖고, `market-only`는 **부분 시드**라
+   * "데려올 만한 이름" 몇만 있으면 된다 — 경기를 안 하는 클럽의 나머지 자리는
+   * 절차 생성이 채운다. `cup-only`·`free`는 이 값이 false여야 한다.
    */
   realSquads: boolean;
   /**
@@ -289,21 +294,21 @@ export function marketLeagues(): readonly LeagueCatalogEntry[] {
 }
 
 export function isTopLeague(id: string | null): boolean {
-  // 널은 대회에 속하지 않는 경기(친선)다 — 리그일 리 없다
+  // 널은 대회에 속하지 않는 경기(친선)이거나 카탈로그가 모르는 팀이다 — 리그일 리 없다
   return id !== null && byId().get(id)?.kind === "playable";
 }
 
 /** 국내 컵 채우기용 2부 — 전력 기준선에 감점이 붙는다 (`strengthBase`) */
-export function isCupOnlyLeague(id: string): boolean {
-  return byId().get(id)?.kind === "cup-only";
+export function isCupOnlyLeague(id: string | null): boolean {
+  return leagueCatalogById(id)?.kind === "cup-only";
 }
 
 /**
  * 경기를 하지 않고 **이적 시장에만** 존재하는 리그 (사우디·MLS).
  * 일정·순위표·컵 어디에도 안 나오지만 선수 검색과 협상에는 그대로 잡힌다.
  */
-export function isMarketOnlyLeague(id: string): boolean {
-  return byId().get(id)?.kind === "market-only";
+export function isMarketOnlyLeague(id: string | null): boolean {
+  return leagueCatalogById(id)?.kind === "market-only";
 }
 
 /** 같은 나라의 1부 리그 — 2부 클럽을 국내 컵으로 묶을 때 쓴다 */
@@ -311,8 +316,9 @@ export function topLeagueOfCountry(country: string): string | null {
   return topLeagues().find((l) => l.country === country)?.id ?? null;
 }
 
-export function leagueCatalogById(id: string): LeagueCatalogEntry | null {
-  return byId().get(id) ?? null;
+/** 리그 정의 — 모르는 id(카탈로그에 없는 팀의 리그도 그렇다)면 `null` */
+export function leagueCatalogById(id: string | null): LeagueCatalogEntry | null {
+  return id === null ? null : (byId().get(id) ?? null);
 }
 
 export function leagueName(id: string): string {

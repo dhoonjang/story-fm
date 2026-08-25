@@ -562,18 +562,21 @@ const PERSONA_NAME_POOLS: Record<string, PersonaNamePool> = {
   },
 };
 
-/** 나라 → 절차 생성 선수 이름 풀. 풀이 없는 나라는 잉글랜드로 떨어진다 */
-export function syntheticNamePoolOf(country: string | undefined): SyntheticNamePool {
+/**
+ * 나라 → 절차 생성 선수 이름 풀. 풀이 없는 나라는 잉글랜드로 떨어진다.
+ * 나라를 모르는 것(`null`)도 같은 자리다 — 이름은 무엇으로든 지어야 한다.
+ */
+export function syntheticNamePoolOf(country: string | null | undefined): SyntheticNamePool {
   return (
-    (country !== undefined ? PLAYER_NAME_POOLS[country] : undefined) ??
+    (country != null ? PLAYER_NAME_POOLS[country] : undefined) ??
     PLAYER_NAME_POOLS[FALLBACK_NAME_COUNTRY]!
   );
 }
 
-/** 나라 → 가상 인물 이름 풀. 풀이 없는 나라는 잉글랜드로 떨어진다 */
-export function personaNamePoolOf(country: string | undefined): PersonaNamePool {
+/** 나라 → 가상 인물 이름 풀. 풀이 없거나 모르는 나라는 잉글랜드로 떨어진다 */
+export function personaNamePoolOf(country: string | null | undefined): PersonaNamePool {
   return (
-    (country !== undefined ? PERSONA_NAME_POOLS[country] : undefined) ??
+    (country != null ? PERSONA_NAME_POOLS[country] : undefined) ??
     PERSONA_NAME_POOLS[FALLBACK_NAME_COUNTRY]!
   );
 }

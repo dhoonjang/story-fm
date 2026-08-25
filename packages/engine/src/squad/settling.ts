@@ -5,7 +5,7 @@ import type {
   TrainingSession,
   Transfer,
 } from "@story-fm/domain";
-import { ageOf } from "@story-fm/domain";
+import { ageOf, isReserveMatch } from "@story-fm/domain";
 import { diffDays } from "../competition/calendar";
 import { countryOfTeam } from "../data/team-catalog";
 import { playerById, playersOf, teamNameIn, type GameState } from "../core/state";
@@ -16,11 +16,11 @@ import { playerById, playersOf, teamNameIn, type GameState } from "../core/state
  * (전술·포지션 적응도(`adaptationOf` — domain)와 다른 축이다. 그건 "이 자리와
  * 이 전술을 아는가"이고, 여기는 "이 클럽 사람이 됐는가"다.)
  *
- * 예전엔 영입 후 42일 고정이었다. 그래서 매 경기 선발로 뛴 선수와 벤치에서 여섯
- * 주를 보낸 선수가 같은 날 적응을 마쳤다 — 감독이 무엇을 하든 결과가 같으면
+ * 영입 후 고정 일수로 재면 안 된다 — 매 경기 선발로 뛴 선수와 벤치에서 여섯
+ * 주를 보낸 선수가 같은 날 적응을 마친다. 감독이 무엇을 하든 결과가 같으면
  * 그건 규칙이 아니라 타이머다.
  *
- * 지금은 진행도가 **감독이 하는 일**로 쌓인다: 경기에 내보내면 크게, 훈련에
+ * 진행도는 **감독이 하는 일**로 쌓인다: 경기에 내보내면 크게, 훈련에
  * 세우면 조금씩, 아무 데도 안 쓰면 그저 함께 지낸 나날만큼. 필요한 양은
  * **그 이적이 얼마나 큰 변화였는지**가 정한다 — 나라를 건넜는가, 라커룸에
  * 말이 통하는 사람이 있는가, 처음 겪는 무대인가.
@@ -80,10 +80,22 @@ export const EVENT_BAND: Record<SettlingEvent["kind"], number> = {
   captain: 5,
 };
 
-/** 난이도 배수 한 줄 — 감독에게 왜 오래 걸리는지 그대로 보인다 */
+/**
+ * 난이도 배수 한 줄 — **코드와 수치다** (player.md §9.3).
+ *
+ * 저장되지 않는 파생값이지만, 연출어(`"스페인에서 건너왔다"`)를 여기서 지으면 화면과
+ * 선수 카드가 그 문장을 그대로 실어 나르고 문구를 고치려면 엔진을 고쳐야 한다.
+ * 문장은 `settlingFactorText`가 만든다 (overview.md §1 철칙 4).
+ */
 export interface SettlingFactor {
-  label: string;
+  code: "abroad" | "compatriot" | "young" | "veteran";
   multiplier: number;
+  /** `abroad` — 건너온 나라 */
+  from?: string;
+  /** `compatriot` — 라커룸에 있는 같은 협회 출신 */
+  playerId?: string;
+  /** `young`·`veteran` — 그때의 나이 */
+  age?: number;
 }
 
 export interface Settling {
@@ -176,6 +188,8 @@ function matchesSince(state: GameState, playerId: string, since: string): number
   let count = 0;
   for (const match of state.matches) {
     if (!match.result || match.date < since) continue;
+    // 정착은 1군 무대의 것이다 — 2군 경기로는 새 팀에 녹아들었다고 말하지 않는다
+    if (isReserveMatch(match)) continue;
     const lineup =
       match.homeTeamId === state.userTeamId
         ? match.result.homeLineup
@@ -231,18 +245,37 @@ function loadFactors(state: GameState, player: GamePlayer, from: string | null):
     const before = countryOfTeam(from);
     const here = countryOfTeam(state.userTeamId);
     if (before && here && before !== here) {
-      factors.push({ label: `${before}에서 건너왔다`, multiplier: 1.3 });
+      factors.push({ code: "abroad", multiplier: 1.3, from: before });
     }
   }
 
   const mate = compatriotIn(state, player);
-  if (mate) factors.push({ label: `라커룸에 ${mate.name}이(가) 있다`, multiplier: 0.85 });
+  if (mate) factors.push({ code: "compatriot", multiplier: 0.85, playerId: mate.id });
 
   const age = ageOf(player.birthdate, state.date);
-  if (age <= 21) factors.push({ label: `${age}세 — 처음 겪는 무대다`, multiplier: 1.2 });
-  else if (age >= 30) factors.push({ label: `${age}세 — 여러 팀을 겪어 봤다`, multiplier: 0.9 });
+  if (age <= 21) factors.push({ code: "young", multiplier: 1.2, age });
+  else if (age >= 30) factors.push({ code: "veteran", multiplier: 0.9, age });
 
   return factors;
+}
+
+/**
+ * 배수 한 줄의 **문장** — 코드와 수치를 읽어 여기서만 짓는다.
+ * 이름을 잃은 선수(이미 떠났다)는 그 줄을 내지 않는다.
+ */
+export function settlingFactorText(state: GameState, factor: SettlingFactor): string | null {
+  switch (factor.code) {
+    case "abroad":
+      return factor.from ? `${factor.from}에서 건너왔다` : null;
+    case "compatriot": {
+      const mate = factor.playerId ? playerById(state, factor.playerId) : null;
+      return mate ? `라커룸에 ${mate.name}이(가) 있다` : null;
+    }
+    case "young":
+      return factor.age === undefined ? null : `${factor.age}세 — 처음 겪는 무대다`;
+    case "veteran":
+      return factor.age === undefined ? null : `${factor.age}세 — 여러 팀을 겪어 봤다`;
+  }
 }
 
 /**
@@ -378,7 +411,10 @@ export function settlingNote(state: GameState, playerId: string): string | null 
     (t) => t.gamePlayerId === playerId && t.date === a.joinedOn && t.fromTeamId !== null,
   );
   const origin = from?.fromTeamId ? `${teamNameIn(state, from.fromTeamId)}에서 온 뒤 ` : "";
-  const load = a.factors.map((f) => f.label).join(" · ");
+  const load = a.factors
+    .map((f) => settlingFactorText(state, f))
+    .filter((t): t is string => t !== null)
+    .join(" · ");
   return (
     `적응 ${Math.round(a.progress * 100)}% — ${origin}${done.length > 0 ? done.join(" · ") : "아직 경기도 훈련도 없다"}` +
     (load ? ` (${load})` : "")

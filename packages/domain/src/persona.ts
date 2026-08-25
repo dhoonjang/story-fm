@@ -89,7 +89,8 @@ export const PersonaSchema = z.object({
   outlet: z.string().min(1).optional(),
   /**
    * 실존 인물인가 — 이름만 실제이고 성격·대사는 게임이 지어낸 것이다.
-   * 서사 가드가 이 표식을 보고 **부정적 실명 서사를 막는다** (sources.md §7).
+   * 실명 부채의 장부(sources.md §7)가 이 표식으로 센다. **프롬프트에는 실리지 않는다**
+   * (docs/llm/prompts.md §5-3) — 사람됨은 원형이, 부정적 전개는 장부의 사실이 묶는다.
    * 가상 인물엔 없다(옵셔널).
    */
   real: z.boolean().optional(),
@@ -150,7 +151,8 @@ export function isDeeperThan(b: CharacterDepth, a: CharacterDepth): boolean {
 }
 
 /**
- * 주입 기록 — **어느 턴에 누구를, 어느 깊이로 실었는가** (people.md §6).
+ * 주입 기록 — **어느 턴에 누구를, 어느 깊이로, 기억 몇 줄과 함께 실었는가**
+ * (people.md §6).
  *
  * ⚠️ 카드 텍스트는 세이브에 넣지 않는다. 이력은 매 턴 `state.chat`에서 다시
  * 렌더링되므로, 남길 것은 이 기록뿐이고 카드는 그 턴을 렌더링할 때 다시 붙는다.
@@ -159,6 +161,12 @@ export function isDeeperThan(b: CharacterDepth, a: CharacterDepth): boolean {
 export const CharacterInjectionSchema = z.object({
   characterId: z.string().min(1),
   depth: CharacterDepthSchema,
+  /**
+   * 그때 카드에 실린 기억 줄 수 — 기억은 이력의 카드에 서지 않으므로(§6), 늘어난
+   * 것을 재주입으로 나르려면 그때의 수가 있어야 한다. **없으면 재주입하지 않는다** —
+   * 이 자리가 생기기 전의 기록을 0으로 읽으면 옛 세이브의 카드가 한꺼번에 다시 선다.
+   */
+  memories: z.number().int().min(0).optional(),
 });
 export type CharacterInjection = z.infer<typeof CharacterInjectionSchema>;
 
@@ -169,6 +177,22 @@ export type CharacterInjection = z.infer<typeof CharacterInjectionSchema>;
  * ⚠️ **변하는 값은 여기 없다** — 폼·컨디션·부상·심경·계약·관측 능력치는 주입한 카드가
  * 이력에 굳는 순간 낡은 사실이 된다. 그것들은 발화 직전의 조회가 낸다 (people.md §6).
  */
+/**
+ * 페르소나 사이의 관계 초기값 — 원형 조합에서 결정적으로 나온다 (people.md §6).
+ *
+ * 세이브에 저장하지 않는다: 원형이 세이브당 불변이므로 관계도 파생이다. 중립은
+ * 만들지 않는다 — 카드에 서는 것은 결이 통하거나 부딪히는 사이뿐이다. 사건이
+ * 관계를 움직이는 점수는 아직 없다 (§10) — 이 값은 첫인상이다.
+ */
+export interface PersonaRelation {
+  characterId: string;
+  name: string;
+  stance: "aligned" | "tense";
+  /** 내가 먼저 보는 것 · 상대가 먼저 보는 것 — 문장은 프롬프트가 쓴다 */
+  ours: string;
+  theirs: string;
+}
+
 export interface CharacterEntry {
   characterId: string;
   name: string;
@@ -188,6 +212,11 @@ export interface CharacterEntry {
    * 압축 한 곳뿐이라 카드가 이력에 굳어도 뒤늦게 낡지 않는다.
    */
   memories?: CharacterMemory[];
+  /**
+   * 다른 페르소나와의 관계 초기값 — 원형에서 파생하므로 세이브당 불변이라 카드에
+   * 실려도 낡지 않는다. `full` 깊이에만 있다 — 사이의 결은 매일 보는 사람이나 안다.
+   */
+  relations?: PersonaRelation[];
 }
 
 /** 태그를 이름으로 옮기기 전 세이브를 알아보는 표식이기도 하다 */
@@ -207,7 +236,7 @@ export const CAPTAIN_ROLE_LABEL = "주장";
  * 자기 문제로 오는 것과 라커룸을 대신해 오는 것은 다른 자리다. 채널은 그 자리를
  * 가리키고, 효과가 어느 축에 닿는지도 여기서 갈린다.
  */
-export const APPROACH_CHANNELS = ["player", "captain", "owner"] as const;
+export const APPROACH_CHANNELS = ["player", "captain", "owner", "agent"] as const;
 export const ApproachChannelSchema = z.enum(APPROACH_CHANNELS);
 export type ApproachChannel = z.infer<typeof ApproachChannelSchema>;
 
@@ -219,6 +248,7 @@ export const APPROACH_CHANNEL_LABEL: Record<ApproachChannel, string> = {
   player: PERSONA_ROLE_LABEL.player!,
   captain: CAPTAIN_ROLE_LABEL,
   owner: PERSONA_ROLE_LABEL.owner!,
+  agent: PERSONA_ROLE_LABEL.agent!,
 };
 
 /** 중계 — 무대 밖의 목소리. 이름이 곧 자리다 */

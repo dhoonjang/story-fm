@@ -8,6 +8,7 @@ import {
   positionDistance,
   positionProficiency,
   proficiencyReadiness,
+  storedProficiencyFor,
 } from "../src/index";
 
 /**
@@ -160,6 +161,28 @@ describe("positionProficiency", () => {
     expect(clusterOf("LB")).toContain("LWB");
     expect(clusterOf("RM")).toContain("RW");
     expect(clusterOf("LM")).toContain("LW");
+  });
+});
+
+describe("storedProficiencyFor", () => {
+  /**
+   * 저장은 **원값**이라 주발이 들어갈 자리가 없다 (player.md §8). 조회값에서
+   * 보정을 되빼던 때는 조회가 이미 천장 99에서 잘려, 98짜리 자리가 99 − 3 = 96으로
+   * 적혔다 — 천장 부근에서만 저장값이 조용히 깎이는 결함이었다.
+   */
+  it("천장·바닥에서 깎이지 않는다 — 클램프는 원값에 한 번만 건다", () => {
+    for (const raw of [96, 97, 98, 99]) {
+      const stored = [{ position: "CB", proficiency: raw }];
+      expect(storedProficiencyFor(stored, "LCB"), `CB ${raw} → LCB`).toBe(raw);
+      expect(storedProficiencyFor(stored, "RCB"), `CB ${raw} → RCB`).toBe(raw);
+    }
+    // 바닥도 같은 결 — 0에서 잘린 값을 되빼면 없던 숙련이 생긴다
+    expect(storedProficiencyFor([{ position: "CB", proficiency: 1 }], "RCB")).toBe(1);
+  });
+
+  it("조회는 그대로 천장에서 잘린다 — 저장만 원값이다", () => {
+    const stored = [{ position: "CB", proficiency: 98 }];
+    expect(positionProficiency(stored, "LCB", { left: 5, right: 1 })).toBe(99);
   });
 });
 

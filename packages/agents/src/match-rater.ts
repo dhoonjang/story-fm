@@ -15,7 +15,9 @@ import {
 } from "@story-fm/engine";
 import { ATTRIBUTE_AXES } from "@story-fm/domain";
 import { agentConfig, createGameLLM, type GameLLM, type GameToolSpec } from "@story-fm/llm";
+import { agingDeclineLine } from "./aging-line";
 import { retryOnce, requireToolCall, anchorStands } from "./retry";
+import { inputError, toToolSchema } from "./tool-schema";
 
 /**
  * 경기 후 평점 — 코어가 장부 사실로 앵커를 박고, LLM이 사건 목록을 읽어
@@ -24,31 +26,30 @@ import { retryOnce, requireToolCall, anchorStands } from "./retry";
  */
 export const MATCH_RATER_SYSTEM = `당신은 방금 끝난 축구 경기를 채점하는 분석가다.
 
-출전한 선수마다 **평점(${RATING_MIN}~${RATING_MAX})**과 **한 줄 근거**를 매기고,
-그 경기가 남긴 **전술 적응도 변화**와 **능력치 성장**을 함께 적는다.
+출전한 선수마다 평점(${RATING_MIN}~${RATING_MAX})과 한 줄 근거를 매기고,
+그 경기가 남긴 전술 적응도 변화와 능력치 성장을 함께 적는다.
 
 ## 무엇을 보는가
 - 기록(골·도움·슛·선방·카드)은 이미 기준 평점에 반영돼 있다. 당신이 더할 것은
-  **기록에 안 남는 것**이다 — 경기 사건 목록에서 읽히는 지배력, 위기 관리,
+  기록에 안 남는 것이다 — 경기 사건 목록에서 읽히는 지배력, 위기 관리,
   실점 장면에서의 책임, 교체 투입 후의 영향, 짧게 뛰고도 흐름을 바꾼 순간.
 - 출전 시간을 감안한다. 15분 뛴 교체 선수를 90분 뛴 선수와 같은 잣대로 재지 않는다.
 - 자리를 감안한다. 수비수의 무실점과 공격수의 무득점은 같은 무게가 아니다.
 - 팀 결과에 휩쓸리지 않는다.
 
 ## 전술 적응도 (drill)
-이 경기를 통해 선수의 전술 적응도가 얼마나 올랐는지를 **${MATCH_FAMILIARITY_MIN}~${MATCH_FAMILIARITY_MAX}**로 적는다.
+이 경기를 통해 선수의 전술 적응도가 얼마나 올랐는지를 ${MATCH_FAMILIARITY_MIN}~${MATCH_FAMILIARITY_MAX}로 적는다.
 출전 시간과 경기 사건을 참고해라. 빠뜨린 선수는 변화가 없는 것으로 본다.
 
 ## 능력치 (attribute / attributeStep)
-이 경기로 한 축이 움직인 선수를 적는다. **0~${MATCH_ATTR_CAP}명**, 각 한 축 **+${ATTR_STEP_MAX} 또는 −${-ATTR_STEP_MIN}**.
-서른을 넘긴 선수는 내려가는 쪽이 자연스럽다 — 특히 스피드·체력·드리블.
+이 경기로 한 축이 움직인 선수를 적는다. 0~${MATCH_ATTR_CAP}명, 각 한 축 +${ATTR_STEP_MAX} 또는 −${-ATTR_STEP_MIN}.
+${agingDeclineLine()}
 
 ## 규칙
-- **기준 평점에서 ±${RATING_BAND}를 넘지 않는다.** 사건 목록에 실제로 나온 것만 이유로 삼는다.
-- 명단에 있는 선수 **전원**을 매긴다.
+- 기준 평점에서 ±${RATING_BAND}를 넘지 않는다. 사건 목록에 실제로 나온 것만 이유로 삼는다.
+- 명단에 있는 선수 전원을 매긴다.
 - 근거는 한 문장, 40자 안팎. "무난했다" 같은 빈 말 대신 그 경기의 사실을 적는다.
-- 선수 id는 그대로 돌려준다. 이름으로 쓰지 않는다.
-- 반드시 rate_players 도구로만 답한다. 그 밖의 텍스트는 쓰지 않는다.`;
+- 선수 id는 그대로 돌려준다. 이름으로 쓰지 않는다.`;
 
 /**
  * 스키마가 받아들이는 폭 — 코어 밴드(`RATING_MIN`~`RATING_MAX`,
@@ -66,16 +67,39 @@ const MAX_RATED_PLAYERS = 30;
 const NOTE_MAX = 200;
 
 const RatingEntrySchema = z.object({
-  playerId: z.string().min(1),
-  rating: z.number().min(0).max(ACCEPTED_RATING_MAX),
-  drill: z.number().min(-ACCEPTED_DRILL_BOUND).max(ACCEPTED_DRILL_BOUND).optional(),
-  attribute: z.enum(ATTRIBUTE_AXES).nullish(),
-  attributeStep: z.number().min(ATTR_STEP_MIN).max(ATTR_STEP_MAX).nullish(),
-  note: z.string().max(NOTE_MAX).optional(),
+  playerId: z.string().min(1).describe("채점 대상 목록의 id 그대로"),
+  rating: z
+    .number()
+    .min(0)
+    .max(ACCEPTED_RATING_MAX)
+    .describe(`${RATING_MIN}~${RATING_MAX}, 소수 첫째 자리. 기준 평점 ±${RATING_BAND} 안`),
+  drill: z
+    .number()
+    .min(-ACCEPTED_DRILL_BOUND)
+    .max(ACCEPTED_DRILL_BOUND)
+    .optional()
+    .describe(`전술 적응도 변화 — ${MATCH_FAMILIARITY_MIN}~${MATCH_FAMILIARITY_MAX}`),
+  attribute: z
+    .enum(ATTRIBUTE_AXES)
+    .nullish()
+    .describe(`움직일 능력치 축 (${MATCH_ATTR_CAP}명까지)`),
+  attributeStep: z
+    .number()
+    .min(ATTR_STEP_MIN)
+    .max(ATTR_STEP_MAX)
+    .nullish()
+    .describe(`그 축의 방향 — ${ATTR_STEP_MAX} 또는 ${ATTR_STEP_MIN}`),
+  note: z.string().max(NOTE_MAX).optional().describe("한 문장 근거 (40자 안팎)"),
 });
 const RateInputSchema = z.object({
   ratings: z.array(RatingEntrySchema).min(1).max(MAX_RATED_PLAYERS),
 });
+
+/** 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 (agents.md §3) */
+export const RATE_PLAYERS_TOOL = "rate_players";
+
+/** 모델이 보는 입력 — 위 Zod 한 벌에서 파생한다 (prompts.md §2) */
+export const RATE_PLAYERS_INPUT = toToolSchema(RateInputSchema);
 
 /** 브리프를 프롬프트 본문으로 — 표 한 장 + 사건 목록 */
 export function buildRatingPrompt(brief: MatchRatingBrief): string {
@@ -109,9 +133,6 @@ export function buildRatingPrompt(brief: MatchRatingBrief): string {
   ].join("\n");
 }
 
-/** 이 호출의 산출은 이 도구 하나뿐이다 — 요청에 강제로 실린다 (agents.md §3) */
-const RATE_PLAYERS_TOOL = "rate_players";
-
 function makeRateTool(
   state: GameState,
   matchId: string,
@@ -121,46 +142,10 @@ function makeRateTool(
     name: RATE_PLAYERS_TOOL,
     description:
       "출전한 선수 전원의 경기 평점과 한 줄 근거를 **한 번에** 제출한다. 기준 평점에서 크게 벗어난 값은 코어가 잘라 낸다. 두 번째 제출은 반영되지 않는다.",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        ratings: {
-          type: "array",
-          minItems: 1,
-          items: {
-            type: "object",
-            properties: {
-              playerId: { type: "string", description: "채점 대상 목록의 id 그대로" },
-              rating: {
-                type: "number",
-                description: `${RATING_MIN}~${RATING_MAX}, 소수 첫째 자리. 기준 평점 ±${RATING_BAND} 안`,
-              },
-              drill: {
-                type: "number",
-                description: `전술 적응도 변화 — ${MATCH_FAMILIARITY_MIN}~${MATCH_FAMILIARITY_MAX}`,
-              },
-              attribute: {
-                type: "string",
-                enum: [...ATTRIBUTE_AXES],
-                description: `움직일 능력치 축 (${MATCH_ATTR_CAP}명까지)`,
-              },
-              attributeStep: { type: "number", description: "그 축의 방향 — 1 또는 -1" },
-              note: { type: "string", description: "한 문장 근거 (40자 안팎)" },
-            },
-            required: ["playerId", "rating"],
-          },
-        },
-      },
-      required: ["ratings"],
-    },
+    inputSchema: RATE_PLAYERS_INPUT,
     handle(input: unknown) {
       const parsed = RateInputSchema.safeParse(input);
-      if (!parsed.success) {
-        const issues = parsed.error.issues
-          .map((i) => `${i.path.join(".")}: ${i.message}`)
-          .join(" / ");
-        return { ok: false, message: `평점 형식 오류 — ${issues}` };
-      }
+      if (!parsed.success) return inputError(parsed.error);
       // 평점·전술 적응도·능력치는 한 표식 아래 한 번만 — 코어가 두 번째 호출을 막는다
       const { applied, skipped, already } = settleMatchRating(state, matchId, parsed.data.ratings);
       if (already) {

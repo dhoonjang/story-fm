@@ -1,4 +1,5 @@
 import type { GamePlayer } from "@story-fm/domain";
+import { isReserveMatch } from "@story-fm/domain";
 import type { GameState } from "../core/state";
 import { playerById, playersOf } from "../core/state";
 import { isFriendly } from "../competition/friendly";
@@ -32,7 +33,10 @@ export const RUN_WINS = 3;
 export const RUN_PER_WIN = 0.03;
 /** 연승으로 얻을 수 있는 최대 폼 — 이득을 손해보다 작게 둔다 */
 export const RUN_MAX = 0.12;
-/** 침체가 불만으로 번지는 연패 — 이 지점부터 한 명이 등을 돌린다 */
+/**
+ * 침체가 불만으로 번지는 연패 — 이 문턱을 **넘는 그 경기에서** 한 명이 등을 돌린다.
+ * 한 연속에 한 명이고, 이어지는 5·6연패는 새 이름을 올리지 않는다 (people.md §5).
+ */
 export const SLUMP_ISSUE_LOSSES = 4;
 
 /**
@@ -61,6 +65,8 @@ export function recentOutcomes(state: GameState, teamId: string, limit: number):
         m.result &&
         m.season === state.season &&
         !isFriendly(m) &&
+        // 2군 리그는 1군의 연속 기록이 아니다 — 섞이면 2군 2패 + 리그 1패가 3연패가 된다
+        !isReserveMatch(m) &&
         (m.homeTeamId === teamId || m.awayTeamId === teamId),
     )
     .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
@@ -128,7 +134,9 @@ export function applyResultMood(
     }
   }
 
-  if (losses >= SLUMP_ISSUE_LOSSES) markSlumpIssue(state, teamId, squad, losses);
+  // `>=`가 아니라 `===`다 — 문턱을 넘는 경기 하나가 이름을 붙이고, 그 뒤의 패배는
+  // 폼만 깎는다. 매 경기 부르면 한 번의 붕괴가 주력을 통째로 불만으로 채운다.
+  if (losses === SLUMP_ISSUE_LOSSES) markSlumpIssue(state, teamId, squad, losses);
 
   if (losses >= SLUMP_LOSSES) return `${losses}연패`;
   if (wins >= RUN_WINS) return `${wins}연승`;
@@ -142,7 +150,7 @@ export function applyResultMood(
 const SLUMP_VOICE_OVERALL = 72;
 
 /**
- * 길어진 침체는 한 사람에게 이름을 붙인다 — 폼이 가장 낮은 주력 자원.
+ * 길어진 침체는 **한 사람에게** 이름을 붙인다 — 폼이 가장 낮은 주력 자원.
  * 무작위가 아닌 이유: 감독이 "왜 하필 이 선수인가"를 납득할 수 있어야 한다.
  */
 function markSlumpIssue(

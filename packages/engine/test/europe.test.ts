@@ -182,7 +182,7 @@ describe("대항전 리그 페이즈 편성", () => {
       for (const cup of cupCatalog()) {
         const mine = all.filter((m) => m.competitionId === cup.id);
         const same = mine.filter((m) => leagueOfTeam(m.homeTeamId) === leagueOfTeam(m.awayTeamId));
-        // 축소된 규모(UCL 24팀 중 5팀이 잉글랜드)에선 0이 항상 가능하지 않아
+        // 우리 규모(한 나라에서 최대 여덟 팀)에선 0이 항상 가능하지 않아
         // 무거운 벌점으로 누른다 — 실측 최악이 대회당 1건이라 상한을 2로 잡는다
         expect(same.length, `seed ${seed} ${cup.id}`).toBeLessThanOrEqual(2);
         const perTeam = new Map<string, number>();

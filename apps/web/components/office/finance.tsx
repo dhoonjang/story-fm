@@ -18,6 +18,12 @@ const WAGE_TONE_CLASS: Record<OfficeViews["finance"]["wageTone"], string> = {
   danger: "danger",
 };
 
+/**
+ * 통장을 건드리지 않는 줄 — 이적료 분할 비용과 자산 상각 둘이다. `장부` 꼬리표를
+ * 달아 현금 지출과 가른다 (finance.md §6.1 · §6.1-1).
+ */
+const NONCASH_CATEGORIES = new Set(["amortisation", "depreciation"]);
+
 type FinanceFeedRow = OfficeViews["finance"]["feed"][number];
 
 /**
@@ -129,7 +135,7 @@ function FinanceMonthCard({ month }: { month: FinanceMonth }) {
             <div className="fin-line" key={item.category}>
               <span>
                 {item.label}
-                {item.category === "amortisation" && <span className="fin-tag">장부</span>}
+                {NONCASH_CATEGORIES.has(item.category) && <span className="fin-tag">장부</span>}
               </span>
               <span>{formatMoney(item.amount)}</span>
             </div>
@@ -197,6 +203,12 @@ export function FinanceView({ finance }: { finance: OfficeViews["finance"] }) {
           <div className="value words">
             {finance.stadium.name} {finance.stadium.capacity.toLocaleString("en-US")}석
           </div>
+        </div>
+        {/* 티켓은 £ 단위 그대로다 — `formatMoney`의 천/백만 눈금은 표 한 장을 £0k로 적는다 */}
+        <div className="fin-stat">
+          <div className="label">티켓 단가</div>
+          <div className="value">£{Math.round(finance.ticket.price)}</div>
+          <div className="sub">기준가 £{Math.round(finance.ticket.base)}</div>
         </div>
       </div>
 

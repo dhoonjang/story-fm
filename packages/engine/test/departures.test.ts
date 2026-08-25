@@ -2,17 +2,21 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_LOAN_WAGE_SHARE,
   DEPARTURE_SQUAD_MORALE,
+  MIN_SQUAD_AFTER_SALE,
   SEVERANCE_RATE,
   SEVERANCE_WEEKS_CAP,
   activeContract,
   addDays,
+  groupOf,
   loanPlayer,
   loanedOut,
   moraleToForm,
   playersOf,
   recallLoan,
   releasePlayer,
+  returnDueLoans,
   severanceOf,
+  squadFloorShortfall,
   unilateralSeveranceOf,
   userPlayers,
   userTactics,
@@ -129,8 +133,9 @@ describe("방출의 여파 — 회견과 남은 선수단", () => {
     const press = state.pressConferences?.find((c) => c.status === "pending");
     expect(press?.facts[0]?.kind).toBe("departure");
     expect(press?.facts[0]?.about).toBe(target.id);
-    // 카드는 장부 한 줄이다 — 물음표도 평가어도 없다
-    expect(press?.facts[0]?.text).not.toContain("?");
+    // 카드는 장부 한 줄이다 — 문장이 아니라 코드와 수치다
+    expect(press?.facts[0]?.text, "코어가 사실 문장을 저장했다").toBeUndefined();
+    expect(press?.facts[0]?.data?.tags?.[0]).toBe("released");
 
     const after = formsById(state);
     expect(after.has(target.id)).toBe(false);
@@ -149,6 +154,37 @@ describe("방출의 여파 — 회견과 남은 선수단", () => {
     const after = formsById(state);
     expect(after.has(target.id)).toBe(false);
     for (const [id, form] of after) expect(form).toBeCloseTo(before.get(id)!, 10);
+  });
+});
+
+/**
+ * **스쿼드 하한은 떠난 뒤에 남는 인원으로 잰다** (transfer.md §2).
+ *
+ * 감독의 매각·방출·임대 송출과 AI 시장이 같은 상수·같은 부등호를 쓰도록 판정이
+ * 한 함수다. 여기서 고정하는 것은 그 함수의 양 끝 — 인원 하나 차이와 골키퍼 둘.
+ */
+describe("스쿼드 하한 — 남는 인원으로 잰다", () => {
+  const state = createTestGame(11);
+  const squad = userPlayers(state);
+  const keepers = squad.filter((p) => groupOf(p) === "GK");
+  const others = squad.filter((p) => groupOf(p) !== "GK");
+
+  const remaining = (gk: number, field: number) => [
+    ...keepers.slice(0, gk),
+    ...others.slice(0, field),
+  ];
+
+  it(`${MIN_SQUAD_AFTER_SALE}명이 남으면 되고 하나 모자라면 막힌다`, () => {
+    expect(squadFloorShortfall(remaining(2, MIN_SQUAD_AFTER_SALE - 2))).toBeNull();
+    expect(squadFloorShortfall(remaining(2, MIN_SQUAD_AFTER_SALE - 3))).toEqual({
+      code: "squad-min",
+      remaining: MIN_SQUAD_AFTER_SALE - 1,
+      limit: MIN_SQUAD_AFTER_SALE,
+    });
+  });
+
+  it("골키퍼가 하나뿐이면 인원이 넉넉해도 막힌다", () => {
+    expect(squadFloorShortfall(remaining(1, MIN_SQUAD_AFTER_SALE + 5))?.code).toBe("gk-min");
   });
 });
 
@@ -183,6 +219,36 @@ describe("임대 — 전력을 내주고 성장을 산다", () => {
     expect(weeklyWagesOf(state, state.userTeamId)).toBeCloseTo(before - wage * 0.5, 0);
   });
 
+  /**
+   * 분담 비율은 **0~1 사이**로 잘린다. 눈금 밖의 값이 그대로 들어가면 주급이 없던
+   * 돈을 만든다: 음수면 선수를 내보내고도 우리 부담이 **늘고**(−0.5는 계약의 1.5배),
+   * 1을 넘으면 우리 몫이 음수가 돼 명세에서 통째로 사라지는데 빌린 구단은 계약보다
+   * 많이 문다. 잔고만 보면 아무 표시도 나지 않는 어긋남이라 경계를 못 박는다.
+   */
+  it("주급 분담 비율은 0~1로 잘린다", () => {
+    const state = createTestGame(11);
+
+    const none = spare(state);
+    const before = weeklyWagesOf(state, state.userTeamId);
+    const chelseaAtStart = weeklyWagesOf(state, "chelsea");
+    expect(loanPlayer(state, { playerId: none.id, teamId: "chelsea", wageShare: -0.5 }).ok).toBe(
+      true,
+    );
+    expect(state.players.find((p) => p.id === none.id)!.loan!.wageShare).toBe(0);
+    // 0으로 잘렸으니 주급은 한 푼도 넘어가지 않는다 — 우리가 전액을 문다
+    expect(weeklyWagesOf(state, state.userTeamId)).toBeCloseTo(before, 0);
+    expect(weeklyWagesOf(state, "chelsea")).toBeCloseTo(chelseaAtStart, 0);
+
+    const all = spare(state);
+    const allWage = activeContract(state, all.id)!.weeklyWage;
+    const chelseaBefore = weeklyWagesOf(state, "chelsea");
+    expect(loanPlayer(state, { playerId: all.id, teamId: "chelsea", wageShare: 4 }).ok).toBe(true);
+    expect(state.players.find((p) => p.id === all.id)!.loan!.wageShare).toBe(1);
+    // 1로 잘렸으니 빌린 구단이 무는 것은 계약 주급 **그대로**다 (그 배수가 아니다)
+    expect(weeklyWagesOf(state, "chelsea")).toBeCloseTo(chelseaBefore + allWage, 0);
+    expect(weeklyWagesOf(state, state.userTeamId)).toBeCloseTo(before - allWage, 0);
+  });
+
   it("계약보다 길게 보낼 수 없다", () => {
     const state = createTestGame(11);
     const target = spare(state);
@@ -210,6 +276,50 @@ describe("임대 — 전력을 내주고 성장을 산다", () => {
     ).toHaveLength(1);
     expect(after.squadLevel).toBe("reserve");
     expect(after.loan).toBeUndefined();
+  });
+
+  /**
+   * 복귀일의 경계는 **당일**이다 (`until > state.date`면 아직 남는다). 하루가
+   * 어긋나면 6월 30일 복귀가 7월 1일 시즌 전환 뒤로 밀려, 전환이 스쿼드를 셀 때
+   * 그 선수가 남의 팀에 있다 — 아무도 화면에서 알아채지 못하는 종류의 어긋남이다.
+   */
+  it("복귀는 복귀일 당일에 일어난다 — 하루 전에는 아직 남의 팀 선수다", () => {
+    const state = createTestGame(11);
+    const target = spare(state);
+    const until = addDays(state.date, 3);
+    expect(loanPlayer(state, { playerId: target.id, teamId: "chelsea", until }).ok).toBe(true);
+
+    // 복귀일 하루 전 — 아직 그쪽 선수다
+    state.date = addDays(until, -1);
+    returnDueLoans(state, []);
+    expect(state.players.find((p) => p.id === target.id)!.teamId).toBe("chelsea");
+
+    // 복귀일 당일 — 돌아온다 (2군으로, 감독의 일지에 한 줄)
+    state.date = until;
+    const digest: string[] = [];
+    returnDueLoans(state, digest);
+    const after = state.players.find((p) => p.id === target.id)!;
+    expect(after.teamId).toBe(state.userTeamId);
+    expect(after.squadLevel).toBe("reserve");
+    expect(after.loan).toBeUndefined();
+    expect(digest.some((d) => d.includes(target.name))).toBe(true);
+  });
+
+  /**
+   * **복귀도 나가는 문이다** (transfer.md §2). 빌린 구단의 배치에 떠난 선수가 남으면
+   * 그 팀은 없는 선수를 세우고 뛴다 — AI 배치는 시즌 전환에만 다시 서므로 그 상태로
+   * 한 시즌을 지낸다.
+   */
+  it("복귀하면 빌린 구단의 배치에서 빠진다", () => {
+    const state = createTestGame(11);
+    const target = spare(state);
+    loanPlayer(state, { playerId: target.id, teamId: "chelsea" });
+    // 빌린 구단이 그를 선발에 세운 모양 — 배치는 소속의 것이지 계약의 것이 아니다
+    const host = state.tactics.find((t) => t.teamId === "chelsea")!;
+    host.assignments[0]!.playerId = target.id;
+
+    expect(recallLoan(state, { playerId: target.id }).ok).toBe(true);
+    expect(host.assignments.some((a) => a.playerId === target.id)).toBe(false);
   });
 
   it("임대 중인 선수는 방출할 수 없다 — 먼저 불러들여야 한다", () => {

@@ -11,10 +11,17 @@ import {
   teamsOfLeague,
   topLeagues,
 } from "@story-fm/engine";
-import { runOnboardingTurn } from "@story-fm/agents";
-import { beginGameUsage, bindTurnTrace, traceTurn } from "@story-fm/llm";
+import { boardExpectationText } from "@story-fm/domain";
+import { judgeStartingWallet, runOnboardingTurn } from "@story-fm/agents";
+import { beginGameUsage, bindTurnTrace, llmErrorKind, traceTurn } from "@story-fm/llm";
 import { toPayload } from "@/lib/store";
-import { turnErrorMessage } from "@/lib/turn-runner";
+import { errorDetail, turnErrorMessage } from "@/lib/turn-runner";
+
+/** 보드 기대의 이름 — 코드와 목표 순위에서 만든다 (career.md §6) */
+const expectationLabel = (e: {
+  code: Parameters<typeof boardExpectationText>[0];
+  target: number;
+}) => boardExpectationText(e.code, e.target);
 
 const CreateSchema = z.object({
   teamId: z.string().min(1),
@@ -58,7 +65,9 @@ export function GET(request: Request) {
       .filter((t) => ids.has(t.leagueId))
       .map((t) => ({
         ...t,
-        expectation: boardExpectationOfTier(catalogTierOf(t.id), sizeOf.get(t.leagueId) ?? 0).label,
+        expectation: expectationLabel(
+          boardExpectationOfTier(catalogTierOf(t.id), sizeOf.get(t.leagueId) ?? 0),
+        ),
       })),
   });
 }
@@ -93,13 +102,24 @@ export async function POST(request: Request) {
     attributes: interpretBackgroundHeuristic(background, teamId),
   });
 
+  // 토큰 예산의 단위는 게임이다 — 새 게임의 장부는 첫 호출부터 센다 (models.md §4)
+  beginGameUsage(state.id);
+
+  /**
+   * **시작 지갑은 판정이 정한다** — 앵커 ± 한도 (career.md §1 · agents.md §4-2).
+   *
+   * 첫 장면과 달리 실패해도 게임은 선다: 폭이 닫힌 값 하나 때문에 감독이 처음부터
+   * 다시 시작할 이유가 없다. `judgeStartingWallet`이 실패를 삼키고 앵커를 돌려주므로
+   * 여기 try가 없다.
+   */
+  const wallet = await judgeStartingWallet(background, teamId);
+  if (wallet > 0) state.manager.wallet = wallet;
+
   /**
    * 첫 장면은 폴백 없이 모델이 쓴다 (`runOnboardingTurn`이 한 번 재시도한다).
    * 실패하면 **게임을 만들지 않는다** — 규칙 장면으로 열어 두면 유저는 그것이
    * 이 게임의 첫 장면인 줄 알고, 다시 시작할 기회를 잃는다.
    */
-  // 토큰 예산의 단위는 게임이다 — 새 게임의 장부는 첫 장면부터 센다 (models.md §4)
-  beginGameUsage(state.id);
   // 첫 장면의 원문도 그 model 턴에 묶인다 — 묶는 것은 `traceTurn` 범위 안에서만 된다
   const opened = await traceTurn(async () => {
     try {
@@ -113,14 +133,13 @@ export async function POST(request: Request) {
       bindTurnTrace(state.id, state.chat.length - 1);
       return { ok: true as const };
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
       console.error("[games] 첫 장면 생성 실패 — 게임을 만들지 않는다:", error);
-      return { ok: false as const, detail };
+      return { ok: false as const, error };
     }
   });
   if (!opened.ok) {
     return NextResponse.json(
-      { error: turnErrorMessage(opened.detail), detail: opened.detail },
+      { error: turnErrorMessage(llmErrorKind(opened.error)), ...errorDetail(opened.error) },
       { status: 502 },
     );
   }

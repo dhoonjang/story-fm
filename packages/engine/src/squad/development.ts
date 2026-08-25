@@ -1,7 +1,13 @@
-import type { AttributeAxis, AxisValues, GamePlayer } from "@story-fm/domain";
-import { ATTRIBUTE_AXES, ageOf, RATING_MAX } from "@story-fm/domain";
-import { agingDelta, monthlyGrowthFactor } from "../world/attributes";
+import type {
+  AttributeAxis,
+  AxisValues,
+  GamePlayer,
+  ReserveTrainingPolicy,
+} from "@story-fm/domain";
+import { ATTRIBUTE_AXES, ageOf, isReserveMatch, RATING_MAX } from "@story-fm/domain";
+import { ageGrowthFactor, agingDelta } from "../world/attributes";
 import { makeRng } from "../core/rng";
+import { reserveTrainingMultiplier } from "./training-plan";
 import { recomputeOverall, recordGrowth, squadLevelOf, type GameState } from "../core/state";
 
 /**
@@ -13,14 +19,14 @@ import { recomputeOverall, recordGrowth, squadLevelOf, type GameState } from "..
  *
  * 세 가지가 확률을 정한다:
  *   ① **축별 노화 곡선**(`agingDelta`) — 다리(pace·stamina·dribbling)가 먼저 죽고
- *      머리(vision·positioning·composure)는 서른 넘어서까지 자란다.
+ *      머리(vision·positioning·offTheBall·composure)는 서른 넘어서까지 자란다.
  *   ② **잠재력 여유** — 천장에 가까울수록 덜 자란다. 넘어선 축은 아예 안 자란다.
  *   ③ **난수** — 같은 나이·같은 여유라도 선수마다 갈린다. 시드 해시라 결정적이다.
  *
- * 예전엔 이 몫을 **시즌 전환에 한 번** 몰아서 적용했다(`agingDelta`를 그대로 더했다).
- * 그러면 5월 마지막 날과 7월 첫날 사이에 스물아홉 살 윙어의 스피드가 두세 칸 꺼져
- * 있다 — 감독이 겪은 것 없이 숫자만 달라진다. 매달 조금씩 움직이면 시즌 중에
- * "요즘 발이 예전 같지 않다"가 관찰 가능한 사건이 된다.
+ * 이 몫을 시즌 전환에 한 번 몰아서 적용하면 5월 마지막 날과 7월 첫날 사이에
+ * 스물아홉 살 윙어의 스피드가 두세 칸 꺼져 있다 — 감독이 겪은 것 없이 숫자만
+ * 달라진다. 매달 조금씩 움직여야 시즌 중에 "요즘 발이 예전 같지 않다"가 관찰
+ * 가능한 사건이 된다.
  */
 
 /** 시즌 기대 변화량을 월 확률로 환산하는 나눗수 — 12개월에 나눠 담는다 */
@@ -39,6 +45,64 @@ const DECLINING_AXIS_GROWTH = 0.6;
 const GROW_MIN = 0.02;
 const GROW_MAX = 0.35;
 
+// ── 감독의 육성 손잡이 (season.md §2 2군 리그) ──────────────────────
+// 배율은 **성장 쪽에만** 붙는다 — 노화 하락은 출전과 무관하다. 상한을 다 곱해도
+// (1.6 × 1.5 = 2.4 → 시즌 기대 0.84칸) 1군 결산 경로보다 느리다 — 2군은 자라는
+// 곳이고, 뛰는 곳은 1군이다.
+
+/** 지난달 2군 출전 한 경기가 성장 확률에 얹는 배율 증분 */
+export const RESERVE_APP_BOOST = 0.3;
+/** 출전 배율 상한 — 격주 일정(월 2경기)을 다 뛰면 찬다 */
+export const RESERVE_APP_BOOST_MAX = 1.6;
+/** 집중 육성 배율 — `set_development_focus`가 지정한 유망주 */
+export const FOCUS_BOOST = 1.5;
+/** 집중 육성 인원 상한 — 코치진의 눈이 닿는 수 */
+export const DEVELOPMENT_FOCUS_LIMIT = 3;
+
+/** 지난달 2군 출전 수 → 성장 확률 배율 */
+export function reserveAppsBoost(apps: number): number {
+  return Math.min(RESERVE_APP_BOOST_MAX, 1 + RESERVE_APP_BOOST * apps);
+}
+
+/**
+ * 집중 육성 명단 — **우리 2군만 남긴다.** 승격·이적으로 떠난 선수는 여기서
+ * 걷어낸다: 1군은 결산 판정(LLM)의 몫이라 코어 배율이 닿을 자리가 없고, 남의
+ * 선수는 우리 코치진의 것이 아니다. 스킬(`setDevelopmentFocus`)과 월간 성장이
+ * 같은 문을 지나므로 어느 쪽이 먼저 와도 명단은 같다.
+ */
+export function pruneDevelopmentFocus(state: GameState): string[] {
+  const focus = (state.developmentFocus ?? []).filter((id) => {
+    const player = state.players.find((p) => p.id === id);
+    return (
+      player !== undefined &&
+      player.teamId === state.userTeamId &&
+      squadLevelOf(player) === "reserve"
+    );
+  });
+  state.developmentFocus = focus;
+  return focus;
+}
+
+/**
+ * 지난 한 달 2군 리그 출전 수 — **장부의 라인업에서 센다**(별도 저장이 없다).
+ * 창은 [지난달 1일, 오늘) — 월간 성장이 매월 1일에 돌기 때문이다. 시즌 전환이
+ * 장부를 통째로 갈아도(7월 1일) 빈 창이 될 뿐 깨지지 않는다.
+ */
+export function reserveAppsByPlayer(state: GameState): Map<string, number> {
+  const [year, month] = state.date.split("-").map(Number) as [number, number];
+  const from =
+    month === 1 ? `${year - 1}-12-01` : `${year}-${String(month - 1).padStart(2, "0")}-01`;
+  const counts = new Map<string, number>();
+  for (const match of state.matches) {
+    if (!isReserveMatch(match) || !match.result) continue;
+    if (match.date < from || match.date >= state.date) continue;
+    for (const id of [...(match.result.homeLineup ?? []), ...(match.result.awayLineup ?? [])]) {
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
 /** 이 선수가 코어 로직으로 자라는가 — 감독 팀 1군만 결산 판정을 받는다 */
 export function developsByCore(state: GameState, player: GamePlayer): boolean {
   if (player.teamId !== state.userTeamId) return true;
@@ -47,20 +111,20 @@ export function developsByCore(state: GameState, player: GamePlayer): boolean {
 
 /**
  * 성장 쪽 확률 (시즌 기대치 — 월 확률은 이 값을 열두 달로 나눈다).
- * 잠재력 여유가 클수록, 어릴수록 높다. 나이 배율은 결산 경로와 같은 표에서 온다
- * (`monthlyGrowthFactor` — player.md §6.3). 노화 곡선이 이미 꺾인 축(음수)은
+ * 잠재력 여유가 클수록, 어릴수록 높다. 나이 배율은 결산 경로와 같은 한 열에서 온다
+ * (`ageGrowthFactor` — player.md §6.3). 노화 곡선이 이미 꺾인 축(음수)은
  * 여기 들어오지 않는다.
  */
 export function growChance(room: number, age: number): number {
   if (room <= 0) return 0;
   const byRoom = Math.min(1, room / ROOM_FULL);
-  return Math.max(GROW_MIN, Math.min(GROW_MAX, byRoom * monthlyGrowthFactor(age)));
+  return Math.max(GROW_MIN, Math.min(GROW_MAX, byRoom * ageGrowthFactor(age)));
 }
 
 /**
  * 이번 달 이 선수가 실제로 움직이는 축 — 최대 `MAX_AXES_PER_MONTH`개.
  *
- * **축은 목록 순서가 아니라 시드가 고른다.** 15축이 저마다 제 난수 채널을 받고,
+ * **축은 목록 순서가 아니라 시드가 고른다.** 16축이 저마다 제 난수 채널을 받고,
  * 움직인 축 중 시드가 정한 순서로 둘까지 반영한다. 앞에서부터 굴리다 둘이 차면
  * 멈추는 방식은 `ATTRIBUTE_AXES` 앞쪽(pace·stamina)만 키우고 뒤쪽(leadership·
  * goalkeeping)을 구조적으로 굳힌다 — `axes`를 어떤 순서로 넘겨도 결과가 같아야 한다.
@@ -73,6 +137,10 @@ export function rollMonthlyAxes(
     age: number;
     values: AxisValues;
     potential: number;
+    /** 감독의 육성 손잡이 — 2군 출전 × 집중 육성. 성장 쪽에만 곱한다 (기본 1) */
+    boost?: number;
+    /** 2군 훈련 방침 — 축마다 다른 배율을 얹는다. 없으면 어느 축도 흔들리지 않는다 */
+    policy?: ReserveTrainingPolicy;
   },
   axes: readonly AttributeAxis[] = ATTRIBUTE_AXES,
 ): { axis: AttributeAxis; step: number }[] {
@@ -81,7 +149,10 @@ export function rollMonthlyAxes(
       const rng = makeRng(input.seed, `development:${input.date}:${input.playerId}:${axis}`);
       // 뽑히는 순서도 난수다 — 축 이름으로 세우면 편향이 자리만 옮긴다
       const priority = rng();
-      const step = rollAxis(axis, input.age, input.values[axis], input.potential, rng);
+      // 배율이 1이면 곱하지 않는다 — 방침 없는 세이브가 부동소수로 흔들리지 않게
+      const aim = input.policy ? reserveTrainingMultiplier(input.policy, axis) : 1;
+      const boost = aim === 1 ? input.boost : (input.boost ?? 1) * aim;
+      const step = rollAxis(axis, input.age, input.values[axis], input.potential, rng, boost);
       return { axis, step, priority };
     })
     .filter((rolled) => rolled.step !== 0)
@@ -109,8 +180,15 @@ export function applyMonthlyDevelopment(state: GameState): string[] {
   const targets = state.players
     .filter((p) => developsByCore(state, p))
     .sort((a, b) => a.id.localeCompare(b.id));
+  // 감독의 육성 손잡이 — 우리 2군에만 붙는다. 타 팀은 배율 없이 지금 그대로다
+  const focus = new Set(pruneDevelopmentFocus(state));
+  const reserveApps = reserveAppsByPlayer(state);
 
   for (const player of targets) {
+    const ours = player.teamId === state.userTeamId;
+    const boost = ours
+      ? reserveAppsBoost(reserveApps.get(player.id) ?? 0) * (focus.has(player.id) ? FOCUS_BOOST : 1)
+      : 1;
     const steps = rollMonthlyAxes({
       seed: state.seed,
       date: state.date,
@@ -118,17 +196,17 @@ export function applyMonthlyDevelopment(state: GameState): string[] {
       age: ageOf(player.birthdate, state.date),
       values: player.attributes,
       potential: player.attributes.potential,
+      boost,
+      ...(ours && state.reserveTraining ? { policy: state.reserveTraining } : {}),
     });
     if (steps.length === 0) continue;
-
-    const ours = player.teamId === state.userTeamId;
 
     for (const { axis, step } of steps) {
       player.attributes[axis] = Math.max(
         ATTRIBUTE_FLOOR,
         Math.min(RATING_MAX, player.attributes[axis] + step),
       );
-      if (ours) recordGrowth(state, player.id, null, "development", axis, step, "월간 성장");
+      if (ours) recordGrowth(state, player.id, null, "development", axis, step, "monthly");
     }
     recomputeOverall(player);
     if (ours) lines.push(`${player.name} (2군) ${player.attributes.overall}`);
@@ -143,6 +221,8 @@ export function rollAxis(
   value: number,
   potential: number,
   rng: () => number,
+  /** 육성 배율 — 성장 확률에만 곱한다. 노화 하락은 출전과 무관하다 */
+  boost = 1,
 ): number {
   const bias = agingDelta(axis, age);
 
@@ -155,6 +235,6 @@ export function rollAxis(
   // 자라는 축 — 잠재력이 천장이다. 노화 곡선이 미는 축은 조금 더 잘 자란다
   const room = potential - value;
   if (room <= 0) return 0;
-  const chance = growChance(room, age) * (bias > 0 ? 1 : DECLINING_AXIS_GROWTH);
+  const chance = growChance(room, age) * (bias > 0 ? 1 : DECLINING_AXIS_GROWTH) * boost;
   return rng() < chance / MONTHS_PER_SEASON ? 1 : 0;
 }

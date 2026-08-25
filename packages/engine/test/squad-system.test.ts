@@ -23,7 +23,9 @@ import {
   applyMonthlyDevelopment,
   developsByCore,
   recordGrowth,
+  seasonYear,
   setCaptain,
+  setDevelopmentFocus,
   setLineup,
   setSquadLevel,
   setSquadLevels,
@@ -33,8 +35,8 @@ import {
 import { createTestGame, playMockMatch } from "./helpers";
 import { assignSquadNumber, ensureSquadNumbers } from "@story-fm/engine";
 
-/** 열두 달 뒤에도 찾을 수 있어야 하는 첫 달의 표식 */
-const FIRST_MONTH_NOTE = "부임 첫 달 훈련";
+/** 열두 달 뒤에도 찾을 수 있어야 하는 첫 달의 표식 — 문장이 아니라 축이다 */
+const FIRST_MONTH_AXIS = "passing";
 
 describe("1·2군 스쿼드", () => {
   it("새 게임의 1군은 **등록 규칙을 지킨 채** 짜인다 (25 + U21)", () => {
@@ -149,7 +151,7 @@ describe("1·2군 스쿼드", () => {
     // 부임 첫 달의 훈련 기록 한 줄. 열두 달 뒤에도 이 줄이 로그 안에 있어야 한다
     const ours = new Set(userPlayers(state).map((p) => p.id));
     const first = userPlayers(state)[0]!;
-    recordGrowth(state, first.id, null, "training", "passing", 1, FIRST_MONTH_NOTE);
+    recordGrowth(state, first.id, null, "training", FIRST_MONTH_AXIS, 1, "training-settlement");
 
     // 능력치는 매달 굴러도 로그는 우리 팀 몫만 쌓인다 — tick을 태우지 않고
     // 성장 함수만 열두 번 부른다(시즌 완주는 분 단위고 여기서 볼 것도 아니다)
@@ -165,7 +167,9 @@ describe("1·2군 스쿼드", () => {
     );
     expect(strangers, "타 팀 성장이 로그에 남았다").toHaveLength(0);
     expect(
-      state.growthLog.some((g) => g.note === FIRST_MONTH_NOTE),
+      state.growthLog.some(
+        (g) => g.origin === "training-settlement" && g.target === FIRST_MONTH_AXIS,
+      ),
       "첫 달 훈련 행이 월간 성장에 밀려났다",
     ).toBe(true);
   });
@@ -490,5 +494,38 @@ describe("등번호 배정 (squad/numbers.ts)", () => {
     ensureSquadNumbers(squad);
     expect(numbersOf(squad)).toEqual([1, 13]);
     expect(naturalPositionOf(squad[0]!).position).toBe("GK");
+  });
+});
+
+describe("집중 육성 (set_development_focus)", () => {
+  it("우리 2군만, 상한 3, 목록 교체이고 생략하면 해제다", () => {
+    const state = createTestGame();
+    const [a, b, c, d] = reservePlayers(state, state.userTeamId);
+    expect(setDevelopmentFocus(state, { playerIds: [a!.id, b!.id, c!.id, d!.id] }).ok).toBe(false); // 상한 3
+    expect(setDevelopmentFocus(state, { playerIds: [a!.id, b!.id] }).ok).toBe(true);
+    expect(state.developmentFocus).toEqual([a!.id, b!.id]);
+    // 목록 교체 — 더하기가 아니다
+    expect(setDevelopmentFocus(state, { playerIds: [c!.id] }).ok).toBe(true);
+    expect(state.developmentFocus).toEqual([c!.id]);
+    // 1군은 지정할 수 없다
+    const firstTeamer = firstTeamPlayers(state, state.userTeamId)[0]!;
+    expect(setDevelopmentFocus(state, { playerIds: [firstTeamer.id] }).ok).toBe(false);
+    // 목록을 생략하면 해제 — 도구 스키마도 빈 배열 대신 생략을 받는다
+    expect(setDevelopmentFocus(state, {}).ok).toBe(true);
+    expect(state.developmentFocus).toEqual([]);
+  });
+
+  it("승격하면 지정이 풀린다 — 1군은 결산 판정의 몫이다", () => {
+    const state = createTestGame();
+    // U21은 명단을 차지하지 않아 승격이 언제나 가능하다
+    const prospect = reservePlayers(state, state.userTeamId).find((p) =>
+      isUnder21(p.birthdate, seasonYear(state.season)),
+    )!;
+    expect(setDevelopmentFocus(state, { playerIds: [prospect.id] }).ok).toBe(true);
+    const promoted = setSquadLevels(state, {
+      moves: [{ playerId: prospect.id, level: "first" }],
+    });
+    expect(promoted.ok).toBe(true);
+    expect(state.developmentFocus).toEqual([]);
   });
 });

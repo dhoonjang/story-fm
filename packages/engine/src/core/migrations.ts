@@ -1,4 +1,14 @@
-import { clampCondition, migratePassStyle, migrateSignature, mirrorBaseOf } from "@story-fm/domain";
+import {
+  clampCondition,
+  migratePassStyle,
+  migrateSignature,
+  mirrorBaseOf,
+  naturalPositionOf,
+  splitPositioning,
+  weightSlotOf,
+} from "@story-fm/domain";
+import type { GamePlayer } from "@story-fm/domain";
+import { keeperOffTheBall } from "../world/attributes";
 
 /**
  * 옛 세이브를 지금 모양으로 옮기는 함수들 — **로드의 두 번째 걸음**
@@ -35,6 +45,7 @@ const ARRAY_FIELDS = [
   "seasonRecords",
   "trophies",
   "achievements",
+  "awards",
   "narrative",
   "chat",
   "scoutReports",
@@ -45,6 +56,7 @@ const ARRAY_FIELDS = [
   "pressConferences",
   "approaches",
   "approachPressure",
+  "pressLeaks",
   "aiDeals",
   "leagueHistory",
   // 재정 보고서는 다음 달 1일부터 쌓인다. 옛 원장 엔트리는 category가 없어
@@ -77,6 +89,53 @@ export function migrateManagerAxes(save: ManagerAxesSave): void {
   };
   move(save.manager?.attributes, 50);
   move(save.managerXP, 0);
+}
+
+interface PositioningSplitSave {
+  players: Array<Pick<GamePlayer, "positions"> & { attributes: Record<string, unknown> }>;
+}
+
+/**
+ * `positioning` 한 축 → 위치선정 · 침투 (player.md §13.5).
+ *
+ * 세이브가 든 옛 `positioning`이 곧 파생의 **밑값**이라, 시드 파생과 **같은 함수**로
+ * 그 자리에서 두 축을 세운다 — 옮긴 선수와 새로 만든 선수가 같은 눈금에 선다.
+ * 자리 가중치도 같은 공격 지분으로 갈리므로 두 축의 가중합은 갈리기 전과 같다.
+ *
+ * 세이브 버전은 올리지 않는다: **`offTheBall`의 부재가 곧 마커**다
+ * (→ [docs/data/game-state.md](../../../../docs/data/game-state.md) §6). 채워진
+ * 세이브는 두 번째 로드에서 이 함수를 지나가지 않으므로 값이 두 번 기울지 않는다.
+ */
+export function splitPositioningAxis(save: PositioningSplitSave): void {
+  for (const player of save.players) {
+    const attrs = player.attributes;
+    if (typeof attrs.offTheBall === "number") continue;
+    const base = attrs.positioning;
+    const tackling = attrs.tackling;
+    const finishing = attrs.finishing;
+    if (typeof base !== "number" || typeof tackling !== "number" || typeof finishing !== "number") {
+      continue;
+    }
+    // 자리 없는 선수는 스키마가 뒤에서 막는다 — 여기서 넘어지면 손상이 코드 탓이 된다
+    const slot =
+      player.positions.length > 0 ? weightSlotOf(naturalPositionOf(player).position) : "CM";
+    /**
+     * 골키퍼는 기울임 식 밖이다 — 그 위치선정은 골문 커맨드라 태클·결정력에서 오지
+     * 않는다. 세이브의 값을 그대로 두고 침투만 골키핑에서 세운다 (player.md §13.5).
+     */
+    if (slot === "GK" && typeof attrs.goalkeeping === "number") {
+      attrs.offTheBall = clampAxis(keeperOffTheBall(attrs.goalkeeping));
+      continue;
+    }
+    const split = splitPositioning(slot, base, tackling, finishing);
+    attrs.positioning = clampAxis(split.positioning);
+    attrs.offTheBall = clampAxis(split.offTheBall);
+  }
+}
+
+/** 축의 눈금 — 1~99 정수 (`RatingSchema`가 로드에서 다시 본다) */
+function clampAxis(value: number): number {
+  return Math.max(1, Math.min(99, Math.round(value)));
 }
 
 interface SquadLevelSave {
@@ -192,6 +251,28 @@ export function migrateConditions(save: ConditionSave): void {
     );
     delete legacy.morale;
     delete legacy.fatigue;
+  }
+}
+
+interface GrowthSourceSave {
+  growthLog: Array<{ source: string }>;
+}
+
+/**
+ * 폐기된 성장 출처 `reserve`를 지금 있는 갈래로 옮긴다.
+ *
+ * 옛 2군 개발 프로그램이 적던 값이고, 그 프로그램이 사라진 뒤로는 아무도 쓰지도
+ * 읽지도 않는다. **스키마에서 갈래를 빼면 그 값을 든 세이브는 parse에서 막히므로**
+ * (`GrowthSourceSchema`는 로드가 통과해야 하는 문이다 — `save-schema.ts`) 옮기는
+ * 자리가 여기여야 한다.
+ *
+ * 가는 곳이 `development`인 이유: 2군 선수가 굴러서 오른 몫이라는 뜻이 그쪽과 같고,
+ * 갈래를 따로 거르는 유일한 자리(훈련 결산 요약의 `source === "training"`)에 걸리지
+ * 않아 옮겨도 화면이 달라지지 않는다. 옮기고 나면 `reserve`가 남지 않아 멱등이다.
+ */
+export function migrateGrowthSources(save: GrowthSourceSave): void {
+  for (const entry of save.growthLog) {
+    if (entry.source === "reserve") entry.source = "development";
   }
 }
 

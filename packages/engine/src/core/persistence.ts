@@ -8,7 +8,7 @@ import {
   writeFileSync,
   existsSync,
 } from "node:fs";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { advanceDomesticCups, migrateDomesticPrizeKeys } from "../competition/domestic-cup";
@@ -18,13 +18,16 @@ import {
   fillEmptyTables,
   migrateConditions,
   migrateFormScale,
+  migrateGrowthSources,
   migrateManagerAxes,
   migrateMatchStats,
   migrateMirrorProficiency,
   migratePassStyles,
   migrateSquadLevels,
+  splitPositioningAxis,
 } from "./migrations";
 import { SaveSchema } from "./save-schema";
+import { saveLockPath } from "./save-lock";
 import type { GamePhase, GameState } from "./state";
 import { ensurePersonas } from "../world/persona";
 import { ensureSquadNumbers } from "../squad/numbers";
@@ -141,11 +144,41 @@ function readShard(dir: string, id: string, hash: string): unknown {
   return JSON.parse(copy);
 }
 
-/** tmp에 완전히 쓴 뒤 rename — 쓰다 죽어도 반쪽 파일이 이름을 갖지 않는다 */
+/** 한 프로세스 안에서 tmp를 몇 번째 짓는가 — pid가 같은 두 쓰기를 가른다 */
+let tmpSerial = 0;
+
+/**
+ * tmp 파일 이름 — `pid + 일련번호 + 난수`를 달아 **같은 디렉터리에 동시에 쓰는 다른
+ * 쓰기와 겹치지 않게** 한다.
+ *
+ * 이름이 `<본이름>.tmp`로 고정이면 두 쓰기가 한 tmp를 나눠 갖는다: 한쪽이 쓴 바이트를
+ * 다른 쪽이 제 이름으로 rename해 내용이 뒤바뀐 파일이 서고, 늦은 쪽은 이미 사라진 tmp를
+ * 찾다 넘어진다. 게임 락(`save-lock.ts`)은 **한 게임**의 쓰기만 줄 세우므로, 같은
+ * 디렉터리에서 서로 다른 게임이 동시에 저장되는 길은 그대로 열려 있다.
+ *
+ * ⚠️ 이 꼬리는 **파일 이름에만** 산다 — 세이브 내용에도 시뮬 시드에도 섞이지 않으므로
+ * 코어의 결정론과 무관하다.
+ */
+function tmpPath(file: string): string {
+  const tail = `${process.pid.toString(36)}-${(tmpSerial++).toString(36)}-${randomBytes(3).toString("hex")}`;
+  return `${file}.${tail}.tmp`;
+}
+
+/**
+ * tmp에 완전히 쓴 뒤 rename — 쓰다 죽어도 반쪽 파일이 이름을 갖지 않는다.
+ *
+ * 실패한 tmp는 그 자리에서 거둔다 — 이름이 매번 달라 다음 저장이 같은 이름을 덮어쓰며
+ * 치워 주지 않는다.
+ */
 function writeAtomic(file: string, contents: string): void {
-  const tmp = `${file}.tmp`;
-  writeFileSync(tmp, contents, "utf8");
-  renameSync(tmp, file);
+  const tmp = tmpPath(file);
+  try {
+    writeFileSync(tmp, contents, "utf8");
+    renameSync(tmp, file);
+  } catch (error) {
+    rmSync(tmp, { force: true });
+    throw error;
+  }
 }
 
 function paths(id: string) {
@@ -153,7 +186,6 @@ function paths(id: string) {
   return {
     dir,
     main: path.join(dir, `${id}.json`),
-    tmp: path.join(dir, `${id}.json.tmp`),
     bak: path.join(dir, `${id}.json.bak`),
     /** 목록 화면이 읽는 요약 — 세이브 본문을 파싱하지 않기 위한 사이드카 */
     meta: path.join(dir, `${id}.meta.json`),
@@ -161,7 +193,7 @@ function paths(id: string) {
 }
 
 export function saveGame(state: GameState): void {
-  const { dir, main, tmp, bak } = paths(state.id);
+  const { dir, main, bak } = paths(state.id);
   mkdirSync(dir, { recursive: true });
   const body: Record<string, unknown> = { ...state, saveVersion: SAVE_VERSION };
   /**
@@ -178,22 +210,41 @@ export function saveGame(state: GameState): void {
     delete body[table];
   }
   body.shards = shards;
-  // 2. 본체를 tmp에 완전히 기록 (여기서 죽으면 본 파일은 이전 상태 그대로)
-  writeFileSync(tmp, JSON.stringify(body), "utf8");
-  // 3. 직전 세이브를 백업으로 **밀어낸다** — 복사가 아니라 rename이라 옮길 바이트가 없다
-  if (existsSync(main)) {
-    try {
-      renameSync(main, bak);
-    } catch {
-      /* 백업 실패는 치명적이지 않음 — 계속 진행 */
+  const tmp = tmpPath(main);
+  try {
+    // 2. 본체를 tmp에 완전히 기록 (여기서 죽으면 본 파일은 이전 상태 그대로)
+    writeFileSync(tmp, JSON.stringify(body), "utf8");
+    // 3. 직전 세이브를 백업으로 **밀어낸다** — 복사가 아니라 rename이라 옮길 바이트가 없다
+    if (existsSync(main)) {
+      try {
+        renameSync(main, bak);
+      } catch {
+        /* 백업 실패는 치명적이지 않음 — 계속 진행 */
+      }
     }
+    // 4. 원자적 교체 — **여기까지가 저장이다**
+    renameSync(tmp, main);
+  } catch (error) {
+    rmSync(tmp, { force: true });
+    throw error;
   }
-  // 4. 원자적 교체
-  renameSync(tmp, main);
-  // 5. 목록용 요약 — 없거나 깨져도 목록이 본문에서 다시 만든다
-  writeSummary(state.id, { readable: true, ...summaryOf(state) });
-  // 6. 본체도 `.bak`도 가리키지 않는 조각을 거둔다
-  pruneShards(state.id, shards);
+  /**
+   * 5·6. 본체가 걸린 뒤의 뒷정리 — **넘어져도 저장의 실패가 아니다.**
+   *
+   * 요약 사이드카는 없으면 목록이 본문에서 다시 만들고, 못 거둔 조각은 다음 저장이
+   * 다시 거둔다. 여기서 던진 예외를 그대로 올려보내면 이미 디스크에 남은 턴에
+   * 라우트가 500을 돌려주고 화면은 "저장 실패"를 읽는다 — 잃은 것이 없는데
+   * 감독은 방금 한 일을 잃었다고 믿는다.
+   *
+   * 삼키되 조용히 넘기지는 않는다: 사이드카가 영영 안 써지거나 조각이 계속 쌓이는
+   * 것을 알아차릴 수 있는 자리는 이 로그뿐이다.
+   */
+  try {
+    writeSummary(state.id, { readable: true, ...summaryOf(state) });
+    pruneShards(state.id, shards);
+  } catch (error) {
+    console.warn(`[save] ${state.id}: 저장은 끝났으나 뒷정리가 넘어졌습니다:`, error);
+  }
 }
 
 /** 본체가 가리키는 조각 해시 — 읽을 수 없으면 null(그때는 아무것도 지우지 않는다) */
@@ -223,15 +274,12 @@ function pruneShards(id: string, live: ShardMap): void {
   if (keep === null) return; // `.bak`을 못 읽으면 무엇이 살아 있는지 모른다 — 건드리지 않는다
   for (const hash of Object.values(live)) keep.add(hash);
   const prefix = `${id}.shard-`;
-  try {
-    for (const name of readdirSync(dir)) {
-      if (!name.startsWith(prefix)) continue;
-      const hash = SHARD_FILE.exec(name)?.[1];
-      if (hash === undefined || keep.has(hash)) continue;
-      rmSync(path.join(dir, name), { force: true });
-    }
-  } catch {
-    /* 청소 실패는 치명적이지 않음 — 다음 저장이 다시 거둔다 */
+  // 넘어져도 다음 저장이 다시 거둔다 — 삼키는 자리는 부르는 쪽 하나뿐이다 (`saveGame` 5·6)
+  for (const name of readdirSync(dir)) {
+    if (!name.startsWith(prefix)) continue;
+    const hash = SHARD_FILE.exec(name)?.[1];
+    if (hash === undefined || keep.has(hash)) continue;
+    rmSync(path.join(dir, name), { force: true });
   }
 }
 
@@ -319,17 +367,23 @@ const REQUIRED_TABLES = [
 function migrate(save: Record<string, unknown>, state: GameState): void {
   fillEmptyTables(save);
   migrateManagerAxes(save);
+  // 위치선정 한 축 → 위치선정·침투. `offTheBall`의 부재가 마커라 한 번만 돈다
+  // (player.md §13.5) — 아래 종합 재계산이 갈린 두 축을 읽는다
+  splitPositioningAxis(state);
   migrateSquadLevels(state);
   migratePassStyles(state);
   migrateFormScale(state);
   migrateConditions(state);
   migrateMatchStats(state);
+  // 폐기된 성장 출처(`reserve`)를 옮긴다 — 스키마에서 그 갈래를 뺐으므로 parse보다
+  // 앞이어야 한다. 남아 있으면 멀쩡한 세이브가 `schema`로 막힌다 (migrations.ts).
+  migrateGrowthSources(state);
   // 좌우 미러 자리에 얹혀 있던 주발 보정을 벗긴다 — 저장은 원값, 주발은 조회 때
   // (player.md §8). 마커가 없는 세이브에서만 한 번: 다시 돌면 경기·훈련이 그
   // 자리에 쌓은 적응도를 같이 민다.
   migrateMirrorProficiency(state);
   /**
-   * **종합은 저장된 값이 아니라 15축의 파생 캐시다** — 로드할 때 다시 계산한다.
+   * **종합은 저장된 값이 아니라 16축의 파생 캐시다** — 로드할 때 다시 계산한다.
    *
    * 세이브에 든 `overall`은 저장된 그 순간의 공식으로 찍힌 값이라, 공식이
    * 움직이면 옛 눈금을 그대로 들고 들어온다 (player.md §4). 그러면 한 세이브
@@ -694,8 +748,9 @@ function writeSummary(id: string, entry: GameListEntry): void {
       };
   try {
     writeFileSync(meta, JSON.stringify({ ...body, source: fingerprint(main) }), "utf8");
-  } catch {
-    /* 캐시 실패는 치명적이지 않음 */
+  } catch (error) {
+    // 캐시 실패는 치명적이지 않다 — 목록이 본문에서 다시 만든다. 다만 조용히 넘기지 않는다
+    console.warn(`[save] ${id}: 목록 요약 사이드카를 쓰지 못했습니다:`, error);
   }
 }
 
@@ -739,7 +794,8 @@ export function deleteGame(id: string): boolean {
   if (isCatalogId(id)) return false;
   const { dir, main, bak, meta } = paths(id);
   if (!existsSync(main) && !existsSync(bak)) return false;
-  for (const f of [main, bak, meta]) if (existsSync(f)) rmSync(f);
+  // 락 파일도 함께 — 지켜야 할 세이브가 없어지면 그 락은 아무 뜻도 없다 (save-lock.ts)
+  for (const f of [main, bak, meta, saveLockPath(id)]) if (existsSync(f)) rmSync(f);
   // 조각도 함께 — 본체가 사라지면 아무도 가리키지 않는다
   const prefix = `${id}.shard-`;
   try {

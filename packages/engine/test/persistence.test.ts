@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -10,8 +11,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { hostname } from "node:os";
+import { GrowthSourceSchema } from "@story-fm/domain";
 import {
   teamCatalog,
+  acquireSaveLock,
+  saveLockPath,
   dataDir,
   deleteGame,
   isTopFlight,
@@ -27,12 +33,15 @@ import {
 import {
   migrateConditions,
   migrateFormScale,
+  migrateGrowthSources,
   migrateMatchStats,
   migrateMirrorProficiency,
   migratePassStyles,
   migrateSquadLevels,
+  splitPositioningAxis,
   stripStoredFootAdjust,
 } from "../src/core/migrations";
+import { SLOT_ATTACK_SHARE } from "@story-fm/domain";
 import { createTestGame } from "./helpers";
 
 /**
@@ -437,6 +446,61 @@ describe("세이브 내구성 — 업데이트·크래시에도 게임이 살아
     expect(loadGame(state.id)).toBeNull();
     expect(deleteGame(state.id)).toBe(false); // 없는 게임
   });
+
+  /**
+   * tmp 이름이 `<본이름>.tmp`로 고정이면 같은 `.data/`에 동시에 쓰는 두 쓰기가 한 tmp를
+   * 나눠 갖는다 — 한쪽이 쓴 바이트를 다른 쪽이 제 이름으로 rename해 내용이 뒤바뀐 파일이
+   * 서고, 늦은 쪽은 이미 사라진 tmp를 찾다 넘어진다. 게임 락은 한 프로세스 안의 한
+   * 게임까지만 지킨다 (dev 서버 둘, 서버와 CLI, e2e와 손 저장이 한 디렉터리를 볼 때).
+   */
+  it("같은 디렉터리의 다른 쓰기가 쥔 tmp를 저장이 밟지 않는다", () => {
+    const state = createTestGame();
+    saveGame(state);
+    const [shard] = shardPaths(state.id, shardMap(state.id).players!);
+    rmSync(shard); // 이 벌은 다음 저장이 **같은 이름으로** 다시 쓴다
+
+    // 다른 쓰기가 쓰다 만 tmp — 옛 이름 규칙이면 저장이 이 자리를 그대로 겹쳐 쓴다
+    const inflight = [path.join(dataDir(), `${state.id}.json.tmp`), `${shard}.tmp`];
+    for (const file of inflight) writeFileSync(file, "남이 쥔 바이트", "utf8");
+
+    saveGame(state);
+
+    for (const file of inflight)
+      expect(readFileSync(file, "utf8"), `${path.basename(file)}: 남의 tmp를 밟았다`).toBe(
+        "남이 쥔 바이트",
+      );
+    expect(readFileSync(shard, "utf8"), "제 조각을 제자리에 놓지 못했다").toBe(
+      readFileSync(`${shard}.bak`, "utf8"),
+    );
+    expect(loadGame(state.id)!.players).toHaveLength(state.players.length);
+    // 제가 지은 tmp는 rename으로 사라진다 — 남은 것은 심어 둔 둘뿐이다
+    expect(
+      readdirSync(dataDir()).filter((f) => f.startsWith(`${state.id}.`) && f.endsWith(".tmp")),
+    ).toHaveLength(inflight.length);
+
+    for (const file of inflight) rmSync(file);
+  });
+
+  /**
+   * 본체 rename이 끝난 순간 그 턴은 디스크에 남았다. 그 뒤의 요약 사이드카·조각 청소가
+   * 던진 예외를 올려보내면 이미 저장된 턴에 라우트가 500을 돌려주고 화면은 "저장 실패"를
+   * 읽는다 — 잃은 것이 없는데 감독은 방금 한 일을 잃었다고 믿는다.
+   */
+  it("본체를 건 뒤 뒷정리가 넘어져도 저장은 실패가 아니다 — 로그만 남는다", () => {
+    const state = createTestGame();
+    saveGame(state);
+    // 청소가 지우려 드는 자리에 디렉터리를 놓는다 — `rmSync`는 디렉터리를 만나면 던진다
+    const trap = path.join(dataDir(), `${state.id}.shard-deadbeef.json`);
+    mkdirSync(trap);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    state.players[0]!.state.condition = 47;
+    expect(() => saveGame(state)).not.toThrow();
+
+    expect(warn, "삼키기만 하고 로그를 남기지 않았다").toHaveBeenCalled();
+    expect(loadGame(state.id)!.players[0]!.state.condition).toBe(47);
+    rmSync(trap, { recursive: true });
+  });
 });
 
 /**
@@ -716,6 +780,48 @@ describe("옛 세이브를 지금 모양으로", () => {
     expect(save.players.every((player) => player.squadLevel === "reserve")).toBe(true);
   });
 
+  it("위치선정 한 축이 위치선정·침투로 갈리고, 되섞으면 옛 값이다", () => {
+    /**
+     * 세이브가 든 옛 `positioning`이 곧 파생의 밑값이라, 자리의 공격 지분으로
+     * 되섞으면 그 값이 그대로 나와야 한다 (player.md §13.5). 어긋나면 세이브를
+     * 여는 것만으로 그 선수의 전력이 움직인다.
+     */
+    const player = (position: string, attrs: Record<string, number>) => ({
+      positions: [{ position, proficiency: 90, isNatural: true }],
+      attributes: attrs,
+    });
+    const save = {
+      players: [
+        // 수비 쪽으로 기운 센터백 — 위치선정이 오르고 침투가 내려간다
+        player("CB", { positioning: 70, tackling: 80, finishing: 30 }),
+        // 공격 쪽으로 기운 9번 — 반대로 갈린다
+        player("ST", { positioning: 72, tackling: 35, finishing: 82 }),
+        // 골키퍼는 기울임 식 밖 — 위치선정은 골문 커맨드라 그대로 두고 침투만 세운다
+        player("GK", { positioning: 90, tackling: 28, finishing: 65, goalkeeping: 87 }),
+        // 이미 갈린 세이브는 다시 기울지 않는다
+        player("CB", { positioning: 64, offTheBall: 41, tackling: 80, finishing: 30 }),
+      ],
+    };
+    splitPositioningAxis(save);
+    const [cb, st, gk, done] = save.players.map((p) => p.attributes);
+    expect(cb!.positioning).toBeGreaterThan(70);
+    expect(cb!.offTheBall).toBeLessThan(70);
+    expect(st!.positioning).toBeLessThan(72);
+    expect(st!.offTheBall).toBeGreaterThan(72);
+    // 지분으로 되섞으면 옛 값 — 반올림 한 칸 안
+    const blend = (attrs: Record<string, number>, share: number) =>
+      attrs.positioning! * (1 - share) + attrs.offTheBall! * share;
+    expect(blend(cb!, SLOT_ATTACK_SHARE.CB)).toBeCloseTo(70, 0);
+    expect(blend(st!, SLOT_ATTACK_SHARE.ST)).toBeCloseTo(72, 0);
+    // 골키퍼는 태클 28·결정력 65라 기울이면 침투가 천장까지 밀린다 — 그 식 밖이다
+    expect(gk!.positioning).toBe(90);
+    expect(gk!.offTheBall).toBeLessThan(50);
+    // 멱등 — `offTheBall`의 부재가 마커다 (SAVE_VERSION을 올리지 않는 근거)
+    expect(done).toEqual({ positioning: 64, offTheBall: 41, tackling: 80, finishing: 30 });
+    splitPositioningAxis(save);
+    expect(save.players[0]!.attributes.positioning).toBe(cb!.positioning);
+  });
+
   it("패스 스타일 세 갈래가 1~5 눈금으로 옮겨지고 전술 지문까지 따라온다", () => {
     const save = {
       tactics: [
@@ -735,6 +841,20 @@ describe("옛 세이브를 지금 모양으로", () => {
       undefined,
       "4-3-3|3|2|4|3|3|5",
     ]);
+  });
+
+  it("폐기된 성장 출처 reserve가 development로 옮겨진다 — 두 번 돌려도 같다", () => {
+    // 스키마에서 갈래를 뺐으므로 남아 있으면 멀쩡한 세이브가 parse에서 막힌다
+    const save = {
+      growthLog: [{ source: "reserve" }, { source: "training" }, { source: "development" }],
+    };
+    migrateGrowthSources(save);
+    expect(save.growthLog.map((g) => g.source)).toEqual(["development", "training", "development"]);
+    migrateGrowthSources(save);
+    expect(save.growthLog.map((g) => g.source)).toEqual(["development", "training", "development"]);
+    // 옮긴 뒤의 값은 지금 스키마를 통과한다 — 그것이 이 마이그레이션의 존재 이유다
+    for (const g of save.growthLog)
+      expect(GrowthSourceSchema.safeParse(g.source).success).toBe(true);
   });
 
   it("경기 도중 저장된 옛 세이브의 빈 기대 득점 칸이 0으로 선다", () => {
@@ -876,5 +996,103 @@ describe("목록과 로드 — 어디서 멈췄는지 가른다", () => {
       raw.clock = "18:30"; // 스키마에 없는 축 (하루 안의 시각)
     });
     expect(loadGame(kept)?.clock).toBe("18:30");
+  });
+});
+
+/**
+ * 세이브 파일 락 — **프로세스 경계를 넘는 잠금.** 프로세스 안 뮤텍스(apps/web)는
+ * `next start` 인스턴스가 둘이면 서로를 모른다. 여기서 재는 것은 그 파일 하나가
+ * 누구를 막고 누구를 회수하느냐다 (docs/llm/models.md §1-1).
+ */
+describe("세이브 파일 락 — 프로세스 경계", () => {
+  /** 남이 쥔 것처럼 락 파일을 세운다 — 이 프로세스가 만들지 않은 락이다 */
+  function foreignLock(id: string, record: Record<string, unknown>): string {
+    const file = saveLockPath(id);
+    writeFileSync(file, JSON.stringify(record), "utf8");
+    return file;
+  }
+
+  /** 확실히 죽은 pid — 끝날 때까지 기다렸다 거둔 자식의 번호다 */
+  function deadPid(): number {
+    const child = spawnSync(process.execPath, ["-e", ""]);
+    if (typeof child.pid !== "number") throw new Error("자식 프로세스를 띄우지 못했다");
+    return child.pid;
+  }
+
+  it("살아 있는 다른 프로세스가 쥐고 있으면 상한만큼 기다렸다 물러난다", async () => {
+    const id = "lock-live";
+    // 이 테스트 프로세스의 pid — 살아 있는 홀더의 가장 확실한 표본이다
+    const file = foreignLock(id, {
+      pid: process.pid,
+      host: hostname(),
+      at: new Date().toISOString(),
+      token: "남의-것",
+    });
+
+    const started = Date.now();
+    expect(await acquireSaveLock(id, 60)).toBeNull();
+    expect(Date.now() - started).toBeGreaterThanOrEqual(50);
+    // 빼앗지 않는다 — 파일도 그 안의 토큰도 그대로다
+    expect(JSON.parse(readFileSync(file, "utf8")).token).toBe("남의-것");
+    rmSync(file, { force: true });
+  });
+
+  it("홀더가 죽었으면 곧바로 회수한다 — 나이를 기다리지 않는다", async () => {
+    const id = "lock-dead";
+    foreignLock(id, {
+      pid: deadPid(),
+      host: hostname(),
+      at: new Date().toISOString(), // 방금 세운 락이어도 홀더가 없으면 회수 대상이다
+      token: "죽은-것",
+    });
+
+    const lock = await acquireSaveLock(id, 0);
+    expect(lock).not.toBeNull();
+    expect(JSON.parse(readFileSync(saveLockPath(id), "utf8")).pid).toBe(process.pid);
+    lock!.release();
+    expect(existsSync(saveLockPath(id))).toBe(false);
+  });
+
+  it("회수당한 뒤에 놓아도 남의 락을 지우지 않는다", async () => {
+    const id = "lock-token";
+    const lock = await acquireSaveLock(id, 0);
+    expect(lock).not.toBeNull();
+    // 그 사이 누가 이 락을 늙었다고 보고 회수한 뒤 제 락을 세웠다
+    foreignLock(id, {
+      pid: process.pid,
+      host: hostname(),
+      at: new Date().toISOString(),
+      token: "뒤에-온-것",
+    });
+    lock!.release();
+    expect(JSON.parse(readFileSync(saveLockPath(id), "utf8")).token).toBe("뒤에-온-것");
+    rmSync(saveLockPath(id), { force: true });
+  });
+
+  it("한 게임의 락은 하나뿐이고, 놓으면 다음이 가져간다", async () => {
+    const id = "lock-one";
+    const first = await acquireSaveLock(id, 0);
+    expect(first).not.toBeNull();
+    expect(await acquireSaveLock(id, 0)).toBeNull();
+    first!.release();
+    const second = await acquireSaveLock(id, 0);
+    expect(second).not.toBeNull();
+    second!.release();
+  });
+
+  it("게임을 지우면 락 파일도 함께 사라진다", async () => {
+    const game = createTestGame(91);
+    saveGame(game);
+    const lock = await acquireSaveLock(game.id, 0);
+    lock!.release();
+    // 놓은 락은 이미 없다 — 크래시로 남은 락을 흉내 내 다시 세운다
+    foreignLock(game.id, {
+      pid: deadPid(),
+      host: hostname(),
+      at: new Date().toISOString(),
+      token: "남은-것",
+    });
+    expect(deleteGame(game.id)).toBe(true);
+    expect(existsSync(saveLockPath(game.id))).toBe(false);
   });
 });

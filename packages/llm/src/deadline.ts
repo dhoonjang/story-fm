@@ -5,28 +5,28 @@
  * 제공자 SDK의 기본값에 맡기면 셋이 서로 다른 값을 쓰고 어디에도 적혀 있지 않아,
  * 같은 설정으로 도는 어댑터 셋이 서로 다른 계약을 지킨다.
  *
- * 시한이 없으면 게임이 멎는다: 한 게임의 턴·전술판 저장·스쿼드 편집은 프로세스 안
- * 뮤텍스 하나를 나눠 쓰는데(`withGameLock`) 그 뮤텍스에는 시한이 없다. 끝나지 않는
- * 호출 하나가 그 세이브의 모든 후속 요청을 영영 붙든다. 잠금에 시한을 거는 것은
- * 답이 아니다 — 두 요청이 같은 세이브를 동시에 쓰는 길이 열린다.
+ * 시한이 없으면 게임이 멎는다: 한 게임의 턴·전술판 저장·스쿼드 편집은 잠금 하나를
+ * 나눠 쓴다(`withGameLock`). 끝나지 않는 호출 하나가 그 잠금을 놓지 않으면 뒤에 선
+ * 요청은 전부 409로 물러난다. 잠금을 시간으로 푸는 것은 답이 아니다 — 두 요청이 같은
+ * 세이브를 동시에 쓰는 길이 열린다. 잠금이 풀리는 근거는 여기, 호출의 시한뿐이다.
  */
 
 import type { AgentName } from "./config";
 import type { GameLLM, TurnRequest, TurnResult } from "./game-llm";
+import { LlmCallError } from "./llm-error";
 
 /**
- * 시한을 넘긴 호출.
+ * 시한을 넘긴 호출 — 종류 `timeout` (models.md §1-1).
  *
- * ⚠️ 문구에 `timeout`이 남아 있어야 한다 — 화면 문구를 고르는
- * `turnErrorMessage`(apps/web)가 이 낱말로 "응답이 지연돼 턴을 취소했습니다"를
- * 고른다. 새 실패 상태를 만들지 않고 이미 있는 실패 경로로 들어간다.
+ * 새 실패 상태를 만들지 않고 이미 있는 실패 경로로 들어간다. 화면이 고르는 문구는
+ * 이 문장이 아니라 `kind`가 정하므로, 메시지는 로그가 읽기 좋게만 쓰면 된다.
  */
-export class LlmTimeoutError extends Error {
+export class LlmTimeoutError extends LlmCallError {
   constructor(
     readonly agent: AgentName,
     readonly timeoutMs: number,
   ) {
-    super(`${agent} 에이전트가 ${timeoutMs}ms 안에 응답하지 않았습니다 (timeout)`);
+    super("timeout", `${agent} 에이전트가 ${timeoutMs}ms 안에 응답하지 않았습니다`);
     this.name = "LlmTimeoutError";
   }
 }

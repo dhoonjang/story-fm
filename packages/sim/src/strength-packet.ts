@@ -5,10 +5,12 @@ import type {
   MatchSide,
   Matchup,
   MatchupZone,
+  PacketTag,
   PlayerShotProfile,
   Player,
   PositionGroup,
   RegionalBand,
+  RegionalInstruction,
   RegionalIntent,
   RegionalLane,
   SidePacket,
@@ -23,9 +25,11 @@ import {
   anchorOf,
   FAMILIARITY_BASELINE,
   FAMILIARITY_MAX,
+  otherSide,
   positionGroupOf,
   positionGroupOfPlayer,
   proficiencyReadiness,
+  RATING_MAX,
   roleFit,
   roleWeights,
   tacticalSensitivityOf,
@@ -105,7 +109,7 @@ export interface SideInput {
 }
 
 /**
- * 존 기여 점수 — **맡은 자리의 가중치**로 계산한 15축 가중합 × 상태 보정.
+ * 존 기여 점수 — **맡은 자리의 가중치**로 계산한 16축 가중합 × 상태 보정.
  * 포지션군별 하드코딩 공식이 아니라 POSITION_WEIGHTS(도메인) 하나에서 나온다
  * (player.md §2 — overall·roleFit·존 점수의 단일 소스).
  */
@@ -159,7 +163,7 @@ export function famFactor(familiarity: number, position: string): number {
 /**
  * 이 선수가 **지금 이 자리에서** 내는 전력 — 패킷이 노출하는 개인 유효 능력치.
  *
- *   roleFit(15축 × 자리 가중치) × 상태(폼·사기·피로) × 포지션 적응도 × 전술 적응도
+ *   roleFit(16축 × 자리 가중치) × 상태(폼·사기·피로) × 포지션 적응도 × 전술 적응도
  *
  * 존 전력은 이 값들의 평균일 뿐이라, 감독이 "누가 지금 안 돌아가는가"를 물으면
  * 여기서 답이 나온다. 중계 LLM도 같은 숫자를 본다.
@@ -205,10 +209,22 @@ export function isGassed(slot: LineupSlot): boolean {
   return totalFatigue(slot) >= GAP_THRESHOLD;
 }
 
+/** 전술 능력 0인 감독의 소화율 — 지시가 팀에 스미는 바닥 */
+const TACTICAL_FIT_FLOOR = 0.92;
+/** 전술 능력이 그 위에 얹는 폭 — 바닥+폭이 곧 만점 감독의 소화율이다 */
+const TACTICAL_FIT_SPAN = 0.16;
+
 /** 전술 소화율 — 같은 지시도 감독에 따라 팀에 스며드는 정도가 다르다 (0.92~1.08) */
 export function tacticalFit(managerTactics: number): number {
-  return round2(0.92 + (managerTactics / 99) * 0.16);
+  return round2(TACTICAL_FIT_FLOOR + (managerTactics / RATING_MAX) * TACTICAL_FIT_SPAN);
 }
+
+/** 아무것도 갖추지 못한 감독의 지시 적용률 — 말이 통하는 바닥 */
+const UPTAKE_FLOOR = 0.45;
+/** 감독 전술 능력이 얹는 폭 */
+const UPTAKE_TACTICS_SPAN = 0.35;
+/** 선발 평균 전술 적응도가 얹는 폭 — 세 값의 합이 1.0(완전 소화)이어야 한다 */
+const UPTAKE_FAMILIARITY_SPAN = 0.2;
 
 /**
  * 지시 적용률 — **감독의 말이 그라운드에 스미는 정도** (0.45~1.0).
@@ -227,7 +243,11 @@ export function instructionUptake(
   squadFamiliarity = FAMILIARITY_MAX,
 ): number {
   const fam = Math.max(0, Math.min(1, squadFamiliarity / FAMILIARITY_MAX));
-  return round2(0.45 + 0.35 * (managerTactics / 99) + 0.2 * fam);
+  return round2(
+    UPTAKE_FLOOR +
+      UPTAKE_TACTICS_SPAN * (managerTactics / RATING_MAX) +
+      UPTAKE_FAMILIARITY_SPAN * fam,
+  );
 }
 
 /** 팀 구성이 그 지시에 맞는가 — 1.0이 평균, 크면 그 지시로 얻는 게 많다 */
@@ -241,7 +261,7 @@ interface ZoneDelta {
   attack: number;
   midfield: number;
   defense: number;
-  notes: string[];
+  notes: PacketTag[];
 }
 
 /**
@@ -260,6 +280,20 @@ function tacticalDeltas(
   opponentPace: number,
 ): ZoneDelta {
   const d: ZoneDelta = { attack: 0, midfield: 0, defense: 0, notes: [] };
+  /**
+   * 축 하나가 남기는 사실 태그 — 코드는 축 이름, 눈금(`step`)과 팀 성향이 값이다.
+   * 편은 없다: 이 노트는 그 팀의 `tactical.notes`에 실려 자리로 이미 편을 갖는다.
+   */
+  const note = (code: string, values: Record<string, number>) =>
+    d.notes.push({
+      source: "tactical",
+      code,
+      favours: null,
+      sharp: true,
+      playerIds: [],
+      values,
+      flags: [],
+    });
   const gain = (v: number) => v * uptake;
   /**
    * **대가도 절반은 소화율을 탄다.**
@@ -273,16 +307,13 @@ function tacticalDeltas(
    * 어설프게 따라가다 무너지는 몫이 있어 0으로 두지는 않는다.
    */
   const cost = (v: number) => v * (0.5 + 0.5 * uptake);
-  const note = (text: string) => d.notes.push(text);
 
   // ① 멘탈리티 — 무게를 앞으로 옮긴다. 뒤가 얇아지는 게 대가다
   const m = spec.mentality - 3;
   if (m !== 0) {
     d.attack += gain(0.035 * m);
     d.defense -= cost(0.035 * m);
-    note(
-      m > 0 ? `공격적 멘탈리티: 앞선 가중, 후방 노출` : `수비적 멘탈리티: 뒤를 두껍게, 공격 포기`,
-    );
+    note("mentality", { step: m });
   }
 
   // ② 압박 — 중원을 지배하지만 몸이 상한다(강도는 guide.intensity로 따로 나간다)
@@ -304,11 +335,7 @@ function tacticalDeltas(
      */
     d.defense += gain(0.01 * pr);
     d.defense -= cost(0.015 * pr); // 한 번 뚫리면 뒤가 통째로 빈다
-    note(
-      pr > 0
-        ? `강한 압박: 중원 주도권(체력 ${stamina >= 1 ? "충분" : "부족"}), 빌드업을 앞에서 끊되 뒷공간 위험`
-        : `압박 완화: 중원을 내주고 자리를 지킨다`,
-    );
+    note("pressing", { step: pr, stamina });
   }
 
   // ③ 수비 라인 — 올리면 경기를 압축하지만 뒷공간이 열린다. 상대가 빠를수록 비싸다
@@ -326,11 +353,7 @@ function tacticalDeltas(
      */
     d.attack += gain(0.012 * dl);
     d.defense -= cost(0.03 * dl) * (dl > 0 ? paceRisk : 1);
-    note(
-      dl > 0
-        ? `높은 수비 라인: 압축 이득, 상대 스피드에 뒷공간 노출(위험 ×${paceRisk.toFixed(2)})`
-        : `내려선 수비 라인: 뒷공간을 지우고 전진을 포기`,
-    );
+    note("defensive-line", { step: dl, paceRisk });
   }
 
   // ④ 템포 — 빠르면 기회가 늘지만 실책도 늘어난다. 침착한 팀이 덜 흘린다
@@ -339,11 +362,7 @@ function tacticalDeltas(
     const composure = squadTrait(slots, (p) => p.attributes.composure);
     d.attack += gain(0.025 * tp);
     d.defense -= cost(0.02 * tp) / Math.max(0.7, composure);
-    note(
-      tp > 0
-        ? `빠른 템포: 기회 증가, 침착성(${composure >= 1 ? "양호" : "불안"})만큼 실책 위험`
-        : `느린 템포: 안정적으로 돌리되 기회가 준다`,
-    );
+    note("tempo", { step: tp, composure });
   }
 
   // ⑤ 공격 폭 — 측면 자원이 좋아야 넓게 쓰는 이득이 크다. 중앙은 얇아진다
@@ -352,11 +371,7 @@ function tacticalDeltas(
     const wide = squadTrait(slots, (p) => (p.attributes.pace + p.attributes.kicking) / 2);
     d.attack += gain(0.02 * w * wide);
     d.midfield -= cost(0.02 * w);
-    note(
-      w > 0
-        ? `측면 확장: 폭을 쓰는 이득(측면 자원 ${wide >= 1 ? "우수" : "평범"}), 중앙 밀집 약화`
-        : `중앙 집중: 중원을 두껍게, 폭을 포기`,
-    );
+    note("width", { step: w, wide });
   }
 
   // ⑥ 패스 스타일 — 롱볼은 제공권이 있어야 이득이고, 짧은 패스는 점유로 돌아온다
@@ -365,7 +380,7 @@ function tacticalDeltas(
     const aerial = squadTrait(slots, (p) => p.attributes.aerial);
     d.attack += gain(0.02 * ps * aerial);
     d.midfield -= cost(0.03 * ps);
-    note(`롱볼 지향: 제공권 ${aerial >= 1 ? "우위" : "열세"}, 중원 점유 포기`);
+    note("pass-style", { step: ps, aerial });
   } else if (ps < 0) {
     const passing = squadTrait(slots, (p) => (p.attributes.passing + p.attributes.vision) / 2);
     d.midfield += gain(0.02 * -ps * passing);
@@ -375,7 +390,7 @@ function tacticalDeltas(
      * 그 자리에 선다.
      */
     d.attack -= cost(0.02 * -ps);
-    note(`짧은 패스: 점유로 중원 장악 (연결 ${passing >= 1 ? "안정" : "불안"}), 전진은 느리다`);
+    note("pass-style", { step: ps, passing });
   }
 
   return d;
@@ -641,28 +656,32 @@ function buildZones(
 }
 
 /**
- * 구멍 난 자리를 문장으로 — 감독이 교체할 자리를 알아야 한다.
+ * 구멍 난 자리 — 감독이 교체할 자리를 알아야 한다.
  *
- * **숫자는 적지 않는다.** 다리가 멈춘 건 스탠드에서도 보이지만 상대가 정확히
+ * **숫자는 싣지 않는다.** 다리가 멈춘 건 스탠드에서도 보이지만 상대가 정확히
  * 얼마나 남았는지는 아무도 모른다 — 그 값은 안개를 지나 막대로만 간다
  * (engine/squad/scouting.ts §체력). 여기 소진 수치를 적어 두면 화면 한쪽에서 흐린
  * 값이 다른 쪽에서 또렷하게 새어 나온다.
  */
-function gapNotes(slots: LineupSlot[], teamName: string, side: MatchSide): KeyNote[] {
+function gapNotes(slots: LineupSlot[], side: MatchSide): PacketTag[] {
   return slots.filter(isGassed).map((s) => ({
-    text: `${teamName} ${s.position}에 구멍: ${s.player.name}의 다리가 멈췄다 — 교체하지 않으면 그 자리가 계속 열린다`,
+    source: "gap" as const,
+    code: "gassed",
     // 구멍은 그 팀의 것이다 — 이로운 쪽은 반대편
-    favours: other(side),
+    favours: otherSide(side),
+    sharp: false,
+    playerIds: [s.player.id],
+    values: {},
+    flags: [],
   }));
 }
 
-/** 키포인트 한 줄과 **그것이 이롭게 작용하는 쪽** */
-interface KeyNote {
-  text: string;
-  favours: MatchSide;
-}
-
-const other = (side: MatchSide): MatchSide => (side === "home" ? "away" : "home");
+/** 이 전력비부터 "압도적" — 위 셋은 서로 넘어설 수 없다 (big > clear > even) */
+const EDGE_BIG_RATIO = 1.15;
+/** 이 전력비부터 "뚜렷한 우위" */
+const EDGE_CLEAR_RATIO = 1.07;
+/** 이 아래는 편을 가르지 않는다 — 여기서만 "팽팽하다"가 나온다 */
+const EDGE_EVEN_RATIO = 1.035;
 
 /**
  * 우열 라벨 — 문턱이 좁으면 지시 한 칸이 "팽팽하다"를 "뚜렷한 우위"로 뒤집는다.
@@ -679,27 +698,10 @@ const other = (side: MatchSide): MatchSide => (side === "home" ? "away" : "home"
  */
 export function edgeOf(ratio: number): { edge: EdgeSide; size: EdgeSize } {
   const abs = ratio >= 1 ? ratio : 1 / ratio;
-  const size: EdgeSize = abs >= 1.15 ? "big" : abs >= 1.07 ? "clear" : "slight";
-  const edge: EdgeSide = abs < 1.035 ? "even" : ratio > 1 ? "home" : "away";
+  const size: EdgeSize =
+    abs >= EDGE_BIG_RATIO ? "big" : abs >= EDGE_CLEAR_RATIO ? "clear" : "slight";
+  const edge: EdgeSide = abs < EDGE_EVEN_RATIO ? "even" : ratio > 1 ? "home" : "away";
   return { edge, size };
-}
-
-const SIZE_KO: Record<EdgeSize, string> = {
-  slight: "근소한",
-  clear: "뚜렷한",
-  big: "압도적인",
-};
-
-function matchupLine(zone: MatchupZone, edge: EdgeSide, size: EdgeSize, h: string, a: string) {
-  const zoneKo =
-    zone === "attack"
-      ? "홈 공격 vs 어웨이 수비"
-      : zone === "defense"
-        ? "어웨이 공격 vs 홈 수비"
-        : "중원";
-  if (edge === "even") return `${zoneKo}: 팽팽하다 (${h} vs ${a})`;
-  const side = edge === "home" ? "홈" : "어웨이";
-  return `${zoneKo}: ${side}의 ${SIZE_KO[size]} 우위 (${h} vs ${a})`;
 }
 
 function round2(x: number): number {
@@ -872,8 +874,13 @@ function buildPlayerShotProfiles(
       const roleShotWeight = roleWeights(slot.position, slot.roleId).finishing;
       const creation = creationEffectiveOf(slot);
       const attrs = slot.player.attributes;
+      /**
+       * **기회의 질은 어디에 서느냐가 아니라 어디로 가느냐가 정한다** — 뒷공간으로
+       * 들어가고 마크를 벗는 일이라 수비 위치선정이 아니라 침투다
+       * (player.md §13.5 · match.md §1.4).
+       */
       const chanceSkill =
-        attrs.positioning * 0.4 + attrs.dribbling * 0.25 + attrs.pace * 0.2 + attrs.aerial * 0.15;
+        attrs.offTheBall * 0.4 + attrs.dribbling * 0.25 + attrs.pace * 0.2 + attrs.aerial * 0.15;
       const rawRouteWeights = GRID_LANES.map((route) => ({
         route,
         weight: (1 / (1 + Math.abs(point.x - LANE_X[route]) / ROUTE_REACH)) * (1 + focus(route)),
@@ -986,22 +993,8 @@ export function buildStrengthPacket(
    * 개인 지시 — **양쪽 판을 함께 건드린다.** 마크는 내 본업을 덜게 하는 동시에
    * 상대의 그 자리를 지우므로, 한쪽 델타만으로는 표현할 수 없다.
    */
-  const homeDirect = applyDirectives(
-    homeIn.directives,
-    homeXI,
-    awayXI,
-    homeUptake,
-    homeIn.bench,
-    awayIn.bench,
-  );
-  const awayDirect = applyDirectives(
-    awayIn.directives,
-    awayXI,
-    homeXI,
-    awayUptake,
-    awayIn.bench,
-    homeIn.bench,
-  );
+  const homeDirect = applyDirectives(homeIn.directives, homeXI, awayXI, homeUptake);
+  const awayDirect = applyDirectives(awayIn.directives, awayXI, homeXI, awayUptake);
   addCells(homeCells, homeDirect.us);
   addCells(homeCells, awayDirect.them);
   addCells(awayCells, awayDirect.us);
@@ -1013,7 +1006,7 @@ export function buildStrengthPacket(
    * 키포인트 — **한 번만 계산해 두 곳이 나눠 쓴다.** 화면에 서는 문장과 공략의
    * 표적 목록이 갈리면, 감독이 못 본 지점을 노리거나 본 지점을 못 노리게 된다.
    */
-  const rawPoints = buildKeyPoints(homeXI, awayXI, homeIn.teamName, awayIn.teamName);
+  const rawPoints = buildKeyPoints(homeXI, awayXI);
   const shownPoints = readKeyPoints(rawPoints, ourAnalysis, ourTactics);
 
   /**
@@ -1028,10 +1021,7 @@ export function buildStrengthPacket(
    * AI 벤치도 `liveTargets`에서 고른다. 우리 감독이 어둡다고 상대까지 눈이 멀면
    * 우리 약점이 드러나는 유일한 경로가 닫힌다.
    */
-  const { live: liveTargets, seen: targets } = exploitTargets(
-    rawPoints,
-    shownPoints.map((p) => p.text),
-  );
+  const { live: liveTargets, seen: targets } = exploitTargets(rawPoints, shownPoints);
   /**
    * 한쪽 벤치의 공략. AI 벤치의 눈은 **분석 축**이지만(match.md §1.6) AI 감독은
    * 등급이 하나뿐이라(`Team.aiManagerTacticsRating`) 그 하나가 두 축을 겸한다.
@@ -1073,8 +1063,8 @@ export function buildStrengthPacket(
    * 조건이 맞은 상성만 발동하고, 발동한 것은 문장으로 키포인트에 오른다.
    */
   const counters: CounterResult = evaluateCounters(
-    buildCounterContext("home", homeIn.teamName, homeXI, homeIn.tactics, homeUptake),
-    buildCounterContext("away", awayIn.teamName, awayXI, awayIn.tactics, awayUptake),
+    buildCounterContext("home", homeXI, homeIn.tactics, homeUptake),
+    buildCounterContext("away", awayXI, awayIn.tactics, awayUptake),
   );
 
   const readOf = (uptake: number, delta: ZoneDelta): TacticalRead => ({
@@ -1132,12 +1122,7 @@ export function buildStrengthPacket(
     // 홈 관점 ratio: >1 이면 홈 우위. defense 존은 (홈 수비 av) / (어웨이 공격 hv)
     const homePerspective = zone === "defense" ? av / hv : hv / av;
     const { edge, size } = edgeOf(homePerspective);
-    return {
-      zone,
-      edge,
-      size,
-      why: matchupLine(zone, edge, size, String(round2(hv)), String(round2(av))),
-    };
+    return { zone, edge, size, homeValue: round2(hv), awayValue: round2(av) };
   });
 
   /** 점유 — 중원 우위가 선수별 공격 노출과 체력 소모에 함께 들어간다. */
@@ -1183,54 +1168,40 @@ export function buildStrengthPacket(
     away: round2(sumProfiles("away", (profile) => profile.expectedGoals)),
   };
 
-  const overallGap =
-    Math.abs(
-      home.zones.attack +
-        home.zones.midfield +
-        home.zones.defense -
-        (away.zones.attack + away.zones.midfield + away.zones.defense),
-    ) / 3;
-  /**
-   * 전력 차 1당 업셋 확률이 깎이는 폭 — `edgeOf`와 같은 이유로 존 값의 눈금을 탄다.
-   * 폭이 ×0.81로 좁아진 만큼 계수를 되편다(0.01 → 0.0123).
-   */
-  const UPSET_PER_GAP = 0.0123;
-  const upsetChance = round2(Math.min(0.45, Math.max(0.05, 0.35 - overallGap * UPSET_PER_GAP)));
-
   /**
    * 키포인트 = **발동한 상성**(전술이 만난 결과) + 구멍(교체 신호) + 전술 미스매치.
    * 상성이 앞에 온다 — 감독이 지금 무엇을 바꿔야 하는지가 먼저다. 상성과 구멍은
    * **눈에 보이는 사실**이라 그대로 서고, 미스매치는 감독이 분석해서 찾아내는
    * 것이라 그의 눈만큼만 보인다 (`readKeyPoints`).
    *
-   * 문장과 편은 **여기 한 곳에서** 갈라진다 — 따로 모으면 순서가 어긋난다.
+   * 실리는 것은 태그뿐이고 문장은 읽는 쪽이 만든다 — 편은 태그의 `favours`가 갖는다.
    */
-  const keyNotes: KeyNote[] = [
-    ...counters.notes.map((n) => ({ text: n.text, favours: n.favours })),
-    ...gapNotes(homeXI, home.teamName, "home"),
-    ...gapNotes(awayXI, away.teamName, "away"),
-    // 미스매치의 `side`는 그 약점을 **가진** 쪽이다 (key-points.ts)
-    ...shownPoints.map((p) => ({ text: p.text, favours: other(p.side) })),
-    ...(home.regional ?? []).map((plan) => ({
-      text: `${home.teamName} 지역 플랜: ${plan.note}`,
-      favours: "home" as const,
-    })),
-    ...(away.regional ?? []).map((plan) => ({
-      text: `${away.teamName} 지역 플랜: ${plan.note}`,
-      favours: "away" as const,
-    })),
+  const planTag = (side: MatchSide, plan: RegionalInstruction): PacketTag => ({
+    source: "zone-plan",
+    code: `${plan.band}:${plan.lane}:${plan.intent}`,
+    favours: side,
+    sharp: true,
+    playerIds: [],
+    values: {},
+    flags: [],
+    // 모델이 쓴 자유 문장 — 구조로 옮길 수 없는 유일한 칸이다
+    text: plan.note,
+  });
+  const keyPoints: PacketTag[] = [
+    ...counters.notes,
+    ...gapNotes(homeXI, "home"),
+    ...gapNotes(awayXI, "away"),
+    // 미스매치 태그의 `favours`는 이미 **이로운 편**이다 (key-points.ts)
+    ...shownPoints,
+    ...(home.regional ?? []).map((plan) => planTag("home", plan)),
+    ...(away.regional ?? []).map((plan) => planTag("away", plan)),
   ];
 
   return {
     home,
     away,
     matchups,
-    keyPoints: keyNotes.map((n) => n.text),
-    /**
-     * 같은 줄이 **누구에게 이로운가** — 화면이 우리 편 기준으로 색을 고른다.
-     * 문장에서 되짚으면("…강요당한다"가 누구 얘기인지) 틀리기 쉬워 코어가 실어 보낸다.
-     */
-    keyPointSides: keyNotes.map((n) => n.favours),
+    keyPoints,
     targets,
     guide: {
       expectedGoals,
@@ -1238,7 +1209,6 @@ export function buildStrengthPacket(
       chanceXg,
       shotProfiles,
       possession,
-      upsetChance,
       intensity: {
         home: matchIntensity(homeIn.tactics),
         away: matchIntensity(awayIn.tactics),

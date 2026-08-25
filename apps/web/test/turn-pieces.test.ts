@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { CardMark, ChatTurn, GoalMark, ToolCallRecord } from "@story-fm/engine";
-import { minuteOf, splitStaging, weaveTurn } from "../lib/turn-pieces";
+import {
+  groupPieces,
+  groupUtterances,
+  minuteOf,
+  splitStaging,
+  weaveTurn,
+} from "../lib/turn-pieces";
 import { mergeSlice } from "../lib/game-slice";
 import { chatForActiveMatch } from "../lib/match-chat";
 import { buildTraceIndex } from "../lib/turn-trace-index";
@@ -389,5 +395,89 @@ describe("buildTraceIndex", () => {
     const chat = [orphan, pending, modelTurn("하나뿐인 응답")];
     expect(buildTraceIndex(chat).get(orphan)).toBeUndefined();
     expect(buildTraceIndex(chat).get(pending)).toBe(2);
+  });
+});
+
+/**
+ * 이어쓰기 — **태그 없이 여는 줄은 직전 화자가 이어 말하는 것이다**
+ * (docs/llm/prompts.md §1). 문법이 되풀이된 태그를 지웠으므로 화면이 이어 준다.
+ */
+describe("groupUtterances", () => {
+  /** 읽기 쉬운 꼴로 — `화자|줄1/줄2` */
+  const shown = (groups: ReturnType<typeof groupUtterances>) =>
+    groups.map((g) => `${g.speaker}|${g.lines.join("/")}`);
+
+  it("태그 없는 줄은 직전 화자에 이어진다", () => {
+    expect(shown(groupUtterances(["@손흥민: 준비됐습니다.", "믿어 주십시오."]))).toEqual([
+      "손흥민|준비됐습니다./믿어 주십시오.",
+    ]);
+  });
+
+  it("태그를 다시 적어도 같은 화자면 한 묶음 — 이어쓰기와 결과가 같다", () => {
+    const tagged = groupUtterances(["@손흥민: 준비됐습니다.", "@손흥민: 믿어 주십시오."]);
+    expect(shown(tagged)).toEqual(
+      shown(groupUtterances(["@손흥민: 준비됐습니다.", "믿어 주십시오."])),
+    );
+  });
+
+  it("다른 화자의 태그는 묶음을 끊는다", () => {
+    expect(
+      shown(groupUtterances(["@손흥민: 준비됐습니다.", "믿어 주십시오.", "@감독: 알겠다."])),
+    ).toEqual(["손흥민|준비됐습니다./믿어 주십시오.", "감독|알겠다."]);
+  });
+
+  it("명시적 @: 내레이션은 저마다 독립된 지문이고, 그 뒤 태그 없는 줄만 이어진다", () => {
+    expect(
+      shown(groupUtterances(["@: *문이 열린다*", "@: *정적이 흐른다*", "*아무도 말이 없다*"])),
+    ).toEqual(["|*문이 열린다*", "|*정적이 흐른다*/*아무도 말이 없다*"]);
+  });
+
+  it("첫 @ 줄 앞의 태그 없는 줄은 이을 화자가 없어 내레이션으로 선다", () => {
+    expect(shown(groupUtterances(["명단을 확인하겠습니다.", "@손흥민: 준비됐습니다."]))).toEqual([
+      "|명단을 확인하겠습니다.",
+      "손흥민|준비됐습니다.",
+    ]);
+  });
+
+  it("넘겨받은 화자가 있으면 이어쓰기로 여는 조각도 그 화자로 선다", () => {
+    expect(shown(groupUtterances(["믿어 주십시오."], "손흥민"))).toEqual(["손흥민|믿어 주십시오."]);
+  });
+});
+
+/**
+ * **화자는 조각 경계를 넘는다** — 골 카드가 한 화자의 발화 한복판을 끊으면
+ * 그 뒤 조각은 태그 없는 줄로 열린다. 조각마다 따로 묶으면 화자를 잃는다.
+ */
+describe("groupPieces", () => {
+  const shown = (pieces: ReturnType<typeof weaveTurn>) =>
+    groupPieces(pieces).map((groups) => groups.map((g) => `${g.speaker}|${g.lines.join("/")}`));
+
+  it("골 카드가 끊은 뒤에도 이어쓰기 줄은 같은 화자가 말한다", () => {
+    const pieces = weaveTurn(["@중계: 23′ 손흥민이 밀어 넣습니다!", "믿기지 않는 마무리입니다."], {
+      goals: [goal(23, "손흥민")],
+    });
+    expect(shown(pieces)).toEqual([
+      ["중계|23′ 손흥민이 밀어 넣습니다!"],
+      [],
+      ["중계|믿기지 않는 마무리입니다."],
+    ]);
+  });
+
+  it("표시가 여럿 껴도 화자는 마지막 태그를 따라간다", () => {
+    const pieces = weaveTurn(
+      [
+        "@중계: 23′ 골입니다!",
+        "@손흥민: *포효한다*",
+        "이 골은 팬들께 바칩니다.",
+        "@중계: 44′ 경고입니다.",
+      ],
+      { goals: [goal(23, "손흥민")], cards: [booking(44, "파비우")] },
+    );
+    expect(shown(pieces)).toEqual([
+      ["중계|23′ 골입니다!"],
+      [],
+      ["손흥민|*포효한다*/이 골은 팬들께 바칩니다.", "중계|44′ 경고입니다."],
+      [],
+    ]);
   });
 });

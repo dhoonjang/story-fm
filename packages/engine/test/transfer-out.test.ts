@@ -7,6 +7,7 @@ import {
   generateIncomingOffers,
   incomingOffers,
   listingOf,
+  marketValueOf,
   offerPlayerOut,
   openNegotiationFor,
   playersOf,
@@ -28,6 +29,19 @@ import { completeDeal, createTestGame } from "./helpers";
 
 const sellable = (state: GameState) =>
   userPlayers(state).sort((a, b) => b.attributes.overall - a.attributes.overall)[3]!;
+
+/**
+ * **시장이 실제로 닿는 자원.** `pickBuyer`는 사는 쪽 예산을 호가가 아니라
+ * **시장가**와 견주므로, 최상위 자원은 호가를 1£M로 내려도 후보 구단이 0이 된다 —
+ * 오퍼가 붙는가를 묻는 시험에서 그건 주제가 아니다. 순번으로 집으면 종합이 한 칸만
+ * 움직여도 대상이 바뀌므로(동점이 흔하다) **조건으로 집는다.**
+ */
+const affordable = (state: GameState) => {
+  const ceiling = Math.max(...state.finances.map((f) => f.transferBudget));
+  return userPlayers(state)
+    .filter((p) => marketValueOf(state, p) <= ceiling)
+    .sort((a, b) => b.attributes.overall - a.attributes.overall)[0]!;
+};
 
 describe("이적 리스트 — 값을 부르며 내놓는다", () => {
   it("등재하면 호가와 함께 남는다 — 생략하면 코어 요구가", () => {
@@ -62,7 +76,7 @@ describe("이적 리스트 — 값을 부르며 내놓는다", () => {
 
   it("등재하면 값을 보고 오퍼가 붙는다", () => {
     const state = createTestGame(11);
-    const target = sellable(state);
+    const target = affordable(state);
     setTransferList(state, { playerId: target.id, listed: true, askingPrice: 1_000_000 });
     const digest: string[] = [];
     for (let i = 0; i < 40 && incomingOffers(state).length === 0; i++) {
@@ -131,7 +145,7 @@ describe("매각 제안 — 특정 구단에 직접 묻는다", () => {
     expect(card.dueOn).toBe(openNegotiationFor(state, target.id)!.rounds[0]!.respondsOn);
   });
 
-  it("사는 쪽의 역제안은 **깎아 부르는 것**이다 — 올려 부를 수 없다", () => {
+  it("사는 쪽의 조정은 **깎아 부르는 것**이다 — 올려 부를 수 없다", () => {
     const state = createTestGame(11);
     state.date = "2026-08-01";
     const target = sellable(state);

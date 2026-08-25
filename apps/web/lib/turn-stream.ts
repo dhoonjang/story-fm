@@ -1,3 +1,4 @@
+import type { TurnOperation } from "@story-fm/agents";
 import type { GamePayload } from "@/lib/store";
 import type { MatchBoardOrder } from "@/lib/match-orders";
 
@@ -18,11 +19,15 @@ type TurnStreamEvent = {
   detail?: string;
 };
 
-/** 턴 하나가 실어 보내는 것 — 감독의 말과, 전술판에서 쌓인 지시 */
+/** 턴 하나가 실어 보내는 것 — 감독의 말이나 손잡이, 그리고 전술판에서 쌓인 지시 */
 export type TurnStreamBody = {
-  message: string;
-  /** 감독이 친 말이 아니라 손잡이를 누른 것인가 */
-  operator: boolean;
+  /** 감독이 친 말 — 손잡이를 누른 턴에는 없다 */
+  message?: string;
+  /**
+   * 감독이 친 말이 아니라 손잡이를 누른 것 — **구조체로 보낸다.**
+   * 모델이 읽을 `<operator>…</operator>` 문장은 서버가 여기서 만든다 (docs/llm/agents.md §2).
+   */
+  operation?: TurnOperation;
   orders?: readonly MatchBoardOrder[];
 };
 
@@ -91,8 +96,8 @@ export async function streamTurn(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        message: body.message,
-        operator: body.operator,
+        ...(body.message !== undefined ? { message: body.message } : {}),
+        ...(body.operation !== undefined ? { operation: body.operation } : {}),
         ...(body.orders && body.orders.length > 0 ? { orders: body.orders } : {}),
       }),
       signal: abort.signal,

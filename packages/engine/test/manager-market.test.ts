@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  OFFER_DRY_SPELL_DAYS,
   TRAINING_ATTR_CAP,
   TRAINING_ATTR_CAP_MIN,
   TRAINING_XP_PER_SESSION,
@@ -8,6 +9,11 @@ import {
   acceptManagerOffer,
   addDays,
   advanceTime,
+  applyForManagerJob,
+  contractUntil,
+  counterHeadroom,
+  counterManagerOffer,
+  KNOCK_SALARY_RATE,
   applyTrainingOutcomes,
   askingPriceFor,
   assignmentsOf,
@@ -15,15 +21,31 @@ import {
   cancelTrainingOn,
   computeStandings,
   financeOf,
+  fundTransferBudget,
+  generateHeadCoach,
+  generateOwner,
+  generateReporters,
   isTopFlight,
   leagueOfTeamIn,
+  MANAGER_WALLET,
+  managerSeveranceOf,
   managerTrainingUptake,
+  payPlayerBonus,
+  resignPost,
+  seasonSpentOn,
+  spendFromWallet,
+  transferFundRoom,
+  offerDrySpell,
+  offerVacancy,
   openManagerOffers,
   openNegotiationFor,
   pendingOffer,
   playerById,
   playersOf,
   respondOffer,
+  RENEWAL_BOARD_GATE,
+  RENEWAL_NOTICE_DAYS,
+  reviewManagerContract,
   reviewUserSeat,
   runManagerMarket,
   scoutPlayer,
@@ -37,7 +59,13 @@ import {
   type GameState,
   type TrainingBrief,
 } from "@story-fm/engine";
-import { MANAGER_ATTRIBUTES, SCOUT_DAYS, type ManagerAttributes } from "@story-fm/domain";
+import {
+  MANAGER_ATTRIBUTES,
+  MANAGER_TERMS_BY_TIER,
+  SCOUT_DAYS,
+  type ManagerAttributes,
+  type ManagerOffer,
+} from "@story-fm/domain";
 import { afterSquadReturn, completeDeal, createTestGame } from "./helpers";
 
 /**
@@ -449,6 +477,8 @@ describe("경질 뒤 — 무직으로 흐르고, 제안을 받고, 부임한다"
   }
   state.manager.reputation.board = 25;
   state.date = "2027-03-04";
+  // 위약금은 계약을 지우기 전에 정해진다 — 경질 뒤에는 읽을 수 없으므로 여기서 뜬다
+  const contractAtSack = { ...state.manager.contract! };
   const sackedToday = reviewUserSeat(state, []);
 
   /** 그 리그의 꼴찌 자리를 만들어 준다 — 공석이 될 구단은 여기서 나온다 */
@@ -487,13 +517,30 @@ describe("경질 뒤 — 무직으로 흐르고, 제안을 받고, 부임한다"
     expect(card.tier).toBe(tierOfTeamIn(state, sackedFrom));
     expect(card.position).toBeGreaterThan(0);
     expect(card.target).toBeGreaterThan(0);
-    expect(card.expectation, "기대의 이름이 없다").toBeTruthy();
+    expect(card.expectationCode, "기대의 갈래가 없다").toBeTruthy();
+    expect(card.expectation, "장부에 기대의 이름을 적었다").toBeUndefined();
     expect(card.reason, "장부에 문장을 적었다").toBeUndefined();
 
     // 감독이 없는 구단은 세계에 없다 — 옛 구단은 그날로 후임을 세웠다
     const old = state.teams.find((t) => t.id === sackedFrom)!;
     expect(old.managerName).not.toBe(state.manager.name);
     expect(old.managerSince).toBe("2027-03-04");
+  });
+
+  /**
+   * 위약금이 **구단의 지출이고 지갑이 감독의 것**이라는 경계다 (career.md §5.4 · §7).
+   * 한쪽으로 몰면 감독의 돈이 구단 잔고를 흔들거나 옛 구단의 지출이 사라진다.
+   */
+  it("경질은 위약금을 남긴다 — 구단 원장에 서고 같은 금액이 지갑에 쌓인다", () => {
+    const expected = managerSeveranceOf(contractAtSack, "2027-03-04");
+    expect(expected, "잔여가 남은 계약인데 위약금이 0이다").toBeGreaterThan(0);
+    expect(state.dismissal!.severance, "경질 카드에 위약금이 없다").toBe(expected);
+    expect(state.manager.wallet, "구단이 낸 돈이 감독에게 닿지 않았다").toBe(expected);
+    expect(state.manager.contract, "경질이 계약을 남겼다").toBeUndefined();
+
+    const paid = financeOf(state, sackedFrom).ledger.filter((e) => e.category === "severance");
+    expect(paid, "위약금이 구단 원장에 서지 않았다").toHaveLength(1);
+    expect(paid[0]!.amount).toBe(expected);
   });
 
   /**
@@ -555,8 +602,12 @@ describe("경질 뒤 — 무직으로 흐르고, 제안을 받고, 부임한다"
       reason: "minutes",
       since: state.date,
     });
+    // 지갑은 감독의 것이다 — 구단에 묶인 것만 지워진다 (career.md §5.4 · §7)
+    const wallet = state.manager.wallet;
+    expect(wallet, "위약금이 지갑에 없다").toBeGreaterThan(0);
     const accepted = acceptManagerOffer(state, offer.id);
     expect(accepted.ok, accepted.message).toBe(true);
+    expect(state.manager.wallet, "이직이 감독의 지갑을 비웠다").toBe(wallet);
     expect(state.userTeamId).toBe(offer.teamId);
     expect(state.userTeamId, "옛 구단으로 돌아갔다").not.toBe(sackedFrom);
     expect(state.dismissal, "부임했는데 경질장이 남았다").toBeUndefined();
@@ -571,5 +622,577 @@ describe("경질 뒤 — 무직으로 흐르고, 제안을 받고, 부임한다"
     expect(reviewUserSeat(state, [])).toBe(false);
     // 같은 제안을 두 번 받을 수는 없다
     expect(acceptManagerOffer(state, offer.id).ok).toBe(false);
+  });
+
+  /**
+   * `userTeamId`만 갈리고 `personas`가 남던 자리다 — 부임 첫 장면에 옛 구단의
+   * 수석코치가 새 구단 집무실에 서 있었다 (career.md §5.1 전이 5).
+   */
+  it("부임하면 벤치의 사람도 갈린다 — 수석코치·구단주가 새 구단 시드의 인물이다", () => {
+    const coach = state.personas!.find((p) => p.role === "head_coach")!;
+    const owner = state.personas!.find((p) => p.role === "owner")!;
+    expect(coach.characterId).toBe(generateHeadCoach(state.seed, state.userTeamId).characterId);
+    expect(owner.characterId).toBe(generateOwner(state.seed, state.userTeamId).characterId);
+    expect(coach.characterId, "옛 구단의 수석코치가 따라왔다").not.toBe(
+      generateHeadCoach(state.seed, sackedFrom).characterId,
+    );
+    expect(owner.characterId, "옛 구단의 구단주가 따라왔다").not.toBe(
+      generateOwner(state.seed, sackedFrom).characterId,
+    );
+
+    // 리그를 건넌 이직이다 — 기자단도 새 리그의 사람들로 갈렸다
+    expect(leagueOfTeamIn(state, sackedFrom)).not.toBe(leagueOfTeamIn(state, state.userTeamId));
+    const reporters = state.personas!.filter((p) => p.role === "reporter");
+    expect(reporters.map((r) => r.characterId)).toEqual(
+      generateReporters(state.seed, state.userTeamId).map((r) => r.characterId),
+    );
+    expect(
+      reporters.map((r) => r.characterId),
+      "리그를 건넜는데 옛 리그 기자단이 따라왔다",
+    ).not.toEqual(generateReporters(state.seed, sackedFrom).map((r) => r.characterId));
+  });
+
+  /**
+   * `delete state.dismissal`이 사건까지 지우던 자리다 — 잘린 시즌은 `SEASON_RECORD`가
+   * 없으므로, 이력이 남지 않으면 커리어 표에서 그 해가 통째로 빈다 (career.md §6).
+   */
+  it("재부임해도 경질은 지워지지 않는다 — 커리어 이력으로 남는다", () => {
+    expect(state.dismissal).toBeUndefined();
+    const history = state.dismissals ?? [];
+    expect(history).toHaveLength(1);
+    const past = history[0]!;
+    expect(past.teamId).toBe(sackedFrom);
+    expect(past.on).toBe("2027-03-04");
+    // 카드의 사실이 그대로 옮겨 왔다 — 화면이 "왜 잘렸는가"를 쓸 재료다
+    expect(past.expectationCode, "기대의 갈래가 이력에서 사라졌다").toBeTruthy();
+    expect(past.position).toBeGreaterThan(0);
+  });
+
+  /**
+   * 제안 기록은 세이브 전체에 쌓인다 — 부름 제한을 전체로 걸면 경질이 되풀이될수록
+   * 부를 수 있는 구단 풀 자체가 준다 (career.md §5.1). 제한은 한 무직 기간 안이다.
+   */
+  it("두 번째 무직에서는 지난 기간에 불렀던 구단이 다시 부를 수 있다", () => {
+    const previouslyCalled = state.userTeamId; // 첫 무직 기간에 제안을 냈고 부임까지 한 구단
+    expect(
+      (state.managerOffers ?? []).some((o) => o.teamId === previouslyCalled),
+      "지난 기간의 제안 기록이 없다 — 이 테스트가 재는 것이 없다",
+    ).toBe(true);
+
+    // 두 번째 경질 — 판정 경로는 위에서 쟀으니 카드를 직접 세운다
+    state.date = addDays(state.date, 200);
+    state.dismissal = { on: state.date, season: state.season, teamId: previouslyCalled };
+    // 안전판 자리까지 무직으로 흘렀다 — 문턱을 넘는 자리는 확률을 건너뛰고 반드시 부른다
+    state.date = addDays(state.date, OFFER_DRY_SPELL_DAYS);
+
+    const called = offerVacancy(state, previouslyCalled, 18, []);
+    expect(called, "지난 무직 기간의 제안 기록이 구단 풀을 줄였다").toBe(true);
+    const offer = openManagerOffers(state)[0]!;
+    expect(offer.teamId).toBe(previouslyCalled);
+    expect(offer.madeOn).toBe(state.date);
+  });
+
+  /** 기자단은 구단이 아니라 리그를 따라다닌다 — 같은 리그 이직에는 갈 이유가 없다 */
+  it("같은 리그 이직에서는 기자단이 그대로다 — 수석코치·구단주만 갈린다", () => {
+    const league = leagueOfTeamIn(state, state.userTeamId);
+    const target = state.teams.find(
+      (t) => t.id !== state.userTeamId && leagueOfTeamIn(state, t.id) === league,
+    )!;
+    const before = state.personas!.filter((p) => p.role === "reporter").map((r) => r.characterId);
+    expect(before, "기자단 없이 재는 것이 없다").toHaveLength(3);
+
+    // 앞 테스트가 두 번째 무직 카드를 세워 뒀다 — 같은 리그의 다른 자리가 부른다
+    const offer: ManagerOffer = {
+      id: "offer-same-league",
+      teamId: target.id,
+      madeOn: state.date,
+      expiresOn: addDays(state.date, 10),
+      tier: tierOfTeamIn(state, target.id),
+      target: 10,
+      expectationCode: "mid",
+      status: "open",
+    };
+    state.managerOffers = [...(state.managerOffers ?? []), offer];
+    const accepted = acceptManagerOffer(state, offer.id);
+    expect(accepted.ok, accepted.message).toBe(true);
+
+    const coach = state.personas!.find((p) => p.role === "head_coach")!;
+    const owner = state.personas!.find((p) => p.role === "owner")!;
+    expect(coach.characterId).toBe(generateHeadCoach(state.seed, target.id).characterId);
+    expect(owner.characterId).toBe(generateOwner(state.seed, target.id).characterId);
+    const after = state.personas!.filter((p) => p.role === "reporter").map((r) => r.characterId);
+    expect(after, "같은 리그로 옮겼는데 기자단이 갈렸다").toEqual(before);
+  });
+});
+
+/**
+ * 무직 안전판 — **마지막 제안에서 다시 선다** (career.md §5.1).
+ *
+ * 기준이 "제안이 하나도 없었다"이면 첫 제안(10일 만료)을 놓친 뒤로는 안전판이
+ * 없다 — 확률 문(20%)에 계속 지는 꼬리에서 세이브가 무직으로 굳는다.
+ */
+describe("무직 안전판은 마지막 제안에서 다시 선다", () => {
+  const dismissal = { on: "2027-03-04" };
+  const offerFrom = (teamId: string, madeOn: string): ManagerOffer => ({
+    id: `mgr-offer-${teamId}-${madeOn}`,
+    teamId,
+    madeOn,
+    expiresOn: addDays(madeOn, 10),
+    tier: 3,
+    target: 12,
+    expectationCode: "mid",
+    status: "expired",
+  });
+
+  it("제안이 없었으면 경질일로부터 120일 — 그 전날은 아니다", () => {
+    const eve = addDays(dismissal.on, OFFER_DRY_SPELL_DAYS - 1);
+    const day = addDays(dismissal.on, OFFER_DRY_SPELL_DAYS);
+    expect(offerDrySpell([], dismissal, eve)).toBe(false);
+    expect(offerDrySpell([], dismissal, day)).toBe(true);
+    expect(offerDrySpell(undefined, dismissal, day)).toBe(true);
+  });
+
+  it("첫 제안을 놓쳐도 꺼지지 않는다 — 마지막 제안으로부터 다시 잰다", () => {
+    const madeOn = addDays(dismissal.on, 30);
+    const missed = [offerFrom("fulham", madeOn)];
+    // 경질일로부터는 120일이 지났지만 마지막 제안으로부터는 아직이다
+    expect(offerDrySpell(missed, dismissal, addDays(dismissal.on, OFFER_DRY_SPELL_DAYS))).toBe(
+      false,
+    );
+    // 마지막 제안으로부터 120일 — 안전판이 다시 선다
+    expect(offerDrySpell(missed, dismissal, addDays(madeOn, OFFER_DRY_SPELL_DAYS))).toBe(true);
+  });
+
+  it("지난 무직 기간의 제안은 기준을 밀지 않는다", () => {
+    const past = [offerFrom("fulham", "2026-11-01")];
+    expect(offerDrySpell(past, dismissal, addDays(dismissal.on, OFFER_DRY_SPELL_DAYS))).toBe(true);
+  });
+});
+
+/**
+ * 감독 계약과 흥정 — **조건이 실리고 한 차례 되부른다** (career.md §5.1).
+ *
+ * 경계가 조용히 무너지는 자리들이다: 흥정 천장이 뚫리면 조정이 공짜 인상이 되고,
+ * 노크의 평판 문턱이 새면 경질 직후의 감독이 빅클럽 벤치로 걸어 들어간다.
+ */
+describe("감독 계약과 흥정 — 조건이 실리고 한 차례 되부른다", () => {
+  const state = createTestGame(11);
+
+  it("새 게임은 부임 구단 등급의 기본 계약으로 시작한다", () => {
+    const terms = MANAGER_TERMS_BY_TIER[tierOfTeamIn(state, state.userTeamId)];
+    expect(state.manager.contract?.salary).toBe(terms.salary);
+    expect(state.manager.contract?.until).toBe(contractUntil(state.date, terms.years));
+  });
+
+  it("흥정의 여유는 문턱 턱걸이 5%에서 상한 30%까지다", () => {
+    expect(counterHeadroom(55, 2)).toBeCloseTo(0.05); // tier 2 문턱 55에 턱걸이
+    expect(counterHeadroom(90, 3)).toBeCloseTo(0.3); // 문턱 40 + 50 — 정확히 상한
+    expect(counterHeadroom(100, 4)).toBeCloseTo(0.3); // tier 4는 기준점 25 — 상한에서 잘린다
+  });
+
+  it("조정은 천장 아래면 그대로, 넘으면 천장에서 멈춘다 — 그리고 한 차례뿐이다", () => {
+    // 경질 판정 경로는 위 describe가 쟀다 — 카드만 세워 무직으로 만든다
+    state.dismissal = { on: state.date, season: state.season, teamId: state.userTeamId };
+    delete state.manager.contract;
+    state.manager.reputation.board = 55;
+    state.manager.reputation.media = 55; // 평판 55 — tier 2 문턱 턱걸이, 여유 5%
+    const team = state.teams.find(
+      (t) => t.id !== state.userTeamId && tierOfTeamIn(state, t.id) === 2,
+    )!;
+    state.managerOffers = [
+      {
+        id: "offer-terms-test",
+        teamId: team.id,
+        madeOn: state.date,
+        expiresOn: addDays(state.date, 10),
+        tier: 2,
+        target: 6,
+        expectationCode: "europe",
+        salary: 3_000_000,
+        years: 3,
+        budgetPledge: 15_000_000,
+        via: "vacancy",
+        status: "open",
+      },
+    ];
+
+    const first = counterManagerOffer(state, "offer-terms-test", {
+      salary: 3_100_000,
+      transferBudget: 20_000_000,
+    });
+    expect(first.ok, first.message).toBe(true);
+    const offer = state.managerOffers[0]!;
+    expect(offer.salary, "천장(3.15M) 아래의 요구가 깎였다").toBe(3_100_000);
+    expect(offer.budgetPledge, "천장을 넘는 요구가 그대로 통했다").toBe(15_750_000);
+    expect(offer.counteredOn).toBe(state.date);
+
+    const second = counterManagerOffer(state, "offer-terms-test", { salary: 3_150_000 });
+    expect(second.ok, "흥정이 두 차례 열렸다").toBe(false);
+  });
+
+  it("노크 — 평판 문턱 아래면 거절, 넘으면 깎인 연봉의 제안이 선다", () => {
+    state.managerOffers = []; // 답할 자리를 비운다
+    const vacancyTeam = state.teams.find(
+      (t) => t.id !== state.userTeamId && tierOfTeamIn(state, t.id) === 3,
+    )!;
+    state.managerVacancies = [{ teamId: vacancyTeam.id, on: state.date, position: 12 }];
+
+    state.manager.reputation.board = 25;
+    state.manager.reputation.media = 50; // 37.5 — tier 3 문턱 40 아래
+    const refused = applyForManagerJob(state, vacancyTeam.id);
+    expect(refused.ok).toBe(true);
+    expect(refused.tone).toBe("bad");
+    expect(openManagerOffers(state), "문턱 아래인데 제안이 섰다").toHaveLength(0);
+
+    state.manager.reputation.board = 30; // 40 — 문턱에 턱걸이
+    const applied = applyForManagerJob(state, vacancyTeam.id);
+    expect(applied.ok, applied.message).toBe(true);
+    const offer = openManagerOffers(state)[0]!;
+    expect(offer.teamId).toBe(vacancyTeam.id);
+    expect(offer.via).toBe("knock");
+    expect(offer.salary, "지원한 쪽인데 연봉이 깎이지 않았다").toBe(
+      Math.round(MANAGER_TERMS_BY_TIER[3].salary * KNOCK_SALARY_RATE),
+    );
+    // 열린 제안이 있는 동안에는 어느 공석도 두드릴 수 없다
+    expect(applyForManagerJob(state, vacancyTeam.id).ok).toBe(false);
+  });
+
+  it("수락하면 제안의 조건이 계약이 되고, 예산 약속은 그날 이행된다", () => {
+    const offer = openManagerOffers(state)[0]!;
+    const before = financeOf(state, offer.teamId).transferBudget;
+    const accepted = acceptManagerOffer(state, offer.id);
+    expect(accepted.ok, accepted.message).toBe(true);
+    expect(state.manager.contract?.salary).toBe(offer.salary);
+    expect(state.manager.contract?.until).toBe(contractUntil(state.date, offer.years!));
+    expect(financeOf(state, offer.teamId).transferBudget).toBe(before + offer.budgetPledge!);
+    expect(state.managerVacancies, "부임했는데 공석 명부가 남았다").toHaveLength(0);
+  });
+});
+
+/**
+ * **위약금은 잔여 계약의 함수다** (career.md §5.4) — 순수 함수라 세이브가 필요 없다.
+ * 경계 셋이 값을 한다: 끝까지 간 계약, 잔여 1년, 상한에 걸리는 긴 잔여.
+ */
+describe("경질 위약금 — 잔여에 비례하되 연봉 1년치에서 멈춘다", () => {
+  const contract = { salary: 6_000_000, signedOn: "2026-07-01", until: "2027-07-01" };
+
+  it("만료일에는 물 것이 없다", () => {
+    expect(managerSeveranceOf(contract, "2027-07-01")).toBe(0);
+    expect(managerSeveranceOf(contract, "2027-08-01"), "지난 계약이 음수로 돌아섰다").toBe(0);
+  });
+
+  it("잔여 1년이면 연봉의 절반이다", () => {
+    expect(managerSeveranceOf(contract, "2026-07-01")).toBe(3_000_000);
+  });
+
+  it("잔여가 길어도 연봉 1년치에서 멈춘다", () => {
+    // 잔여 3년 = £9M — 상한이 없으면 경질 하루가 이적 예산 한 시즌치를 삼킨다
+    expect(managerSeveranceOf({ ...contract, until: "2029-07-01" }, "2026-07-01")).toBe(6_000_000);
+  });
+});
+
+/**
+ * **만료 판정과 보드의 재계약 통보** (career.md §5.4).
+ *
+ * 조용히 어긋나는 자리 둘이다: 만료를 "그 날"로 재면 시즌 전환이 통째로 건너뛰는
+ * 06-30에 걸려 영영 오지 않고, 판정한 뒤에도 계약이 남아 있으면 다음 날 또 걸린다.
+ * 세이브 하나를 계약만 갈아 끼우며 잇는다 — 판정이 읽는 것은 오늘·만료일·보드 평판뿐이다.
+ */
+describe("감독 계약 — 만료는 하루를 건너뛰지 않고 두 번 걸리지도 않는다", () => {
+  const state = createTestGame(21);
+  const UNTIL = "2027-06-30";
+  const SALARY = 3_000_000;
+  const reset = (today: string, board = 50): void => {
+    state.date = today;
+    delete state.dismissal;
+    state.managerOffers = [];
+    state.manager.reputation.board = board;
+    state.manager.contract = { salary: SALARY, signedOn: "2026-07-01", until: UNTIL };
+  };
+
+  it("만료일 당일에는 아직 그 구단의 감독이다", () => {
+    reset(UNTIL);
+    // 그날의 판정은 보드의 통보지 만료가 아니다 — 계약은 그 날까지 유효하다
+    expect(reviewManagerContract(state, []), "만료일 당일에 자리가 없어졌다").not.toBe("expired");
+    expect(state.manager.contract, "만료일 당일에 계약이 사라졌다").toBeDefined();
+    expect(state.dismissal, "만료일 당일에 무직이 됐다").toBeUndefined();
+  });
+
+  it("그 날을 밟지 않고 지나쳐도 다음 tick에 정확히 한 번 만료된다", () => {
+    // 리그 최종전과 07-01 사이는 시즌 전환이 통째로 건너뛴다 — 06-30은 tick이 밟는 날이 아니다
+    reset(addDays(UNTIL, 5));
+    expect(reviewManagerContract(state, [])).toBe("expired");
+    expect(state.dismissal?.kind, "만료가 경질로 남았다").toBe("expired");
+    expect(state.dismissal?.severance, "끝까지 간 계약에 위약금을 물렸다").toBeUndefined();
+    expect(state.manager.contract, "만료 판정이 계약을 남겼다").toBeUndefined();
+
+    // 두 번째 tick — 지운 계약을 다시 재지 않는다
+    const dismissedOn = state.dismissal!.on;
+    state.date = addDays(state.date, 1);
+    expect(reviewManagerContract(state, [])).toBe(null);
+    expect(state.dismissal!.on, "만료가 두 번 걸렸다").toBe(dismissedOn);
+  });
+
+  it("문턱 하루 전에는 보드가 아직 아무 말도 하지 않는다", () => {
+    reset(addDays(UNTIL, -RENEWAL_NOTICE_DAYS - 1));
+    expect(reviewManagerContract(state, [])).toBe(null);
+    expect(state.manager.contract?.renewalDecidedOn).toBeUndefined();
+  });
+
+  it("만료 90일 전 — 평판이 문턱을 넘으면 재계약 제안이 서고, 판정은 한 번뿐이다", () => {
+    reset(addDays(UNTIL, -RENEWAL_NOTICE_DAYS), RENEWAL_BOARD_GATE);
+    expect(reviewManagerContract(state, [])).toBe("notice");
+    const offer = openManagerOffers(state)[0]!;
+    expect(offer.via).toBe("renewal");
+    expect(offer.teamId, "재계약인데 남의 구단이 불렀다").toBe(state.userTeamId);
+    expect(offer.salary, "현 연봉 아래로 부른 재계약").toBeGreaterThanOrEqual(SALARY);
+    expect(state.manager.contract?.renewalOffered).toBe(true);
+
+    state.date = addDays(state.date, 1);
+    expect(reviewManagerContract(state, []), "판정이 매일 다시 섰다").toBe(null);
+    expect(state.managerOffers).toHaveLength(1);
+  });
+
+  it("평판이 문턱 아래면 비갱신 통보다 — 제안은 서지 않는다", () => {
+    reset(addDays(UNTIL, -RENEWAL_NOTICE_DAYS), RENEWAL_BOARD_GATE - 1);
+    expect(reviewManagerContract(state, [])).toBe("notice");
+    expect(openManagerOffers(state), "문턱 아래인데 재계약 제안이 섰다").toHaveLength(0);
+    expect(state.manager.contract?.renewalOffered).toBe(false);
+  });
+
+  it("재계약을 수락하면 구단은 그대로고 계약만 다시 선다", () => {
+    reset(addDays(UNTIL, -RENEWAL_NOTICE_DAYS), 60);
+    state.manager.boardWarnings = 2;
+    reviewManagerContract(state, []);
+    const offer = openManagerOffers(state)[0]!;
+    const team = state.userTeamId;
+    const budget = financeOf(state, team).transferBudget;
+
+    const accepted = acceptManagerOffer(state, offer.id);
+    expect(accepted.ok, accepted.message).toBe(true);
+    expect(state.userTeamId, "재계약이 감독을 옮겼다").toBe(team);
+    expect(state.dismissal, "재계약이 감독을 무직으로 만들었다").toBeUndefined();
+    expect(state.manager.contract?.until).toBe(contractUntil(state.date, offer.years!));
+    expect(
+      state.manager.contract?.renewalDecidedOn,
+      "새 임기가 옛 판정을 지고 갔다",
+    ).toBeUndefined();
+    expect(state.manager.boardWarnings, "재계약이 앞선 경고를 지웠다").toBe(2);
+    expect(financeOf(state, team).transferBudget).toBe(budget + offer.budgetPledge!);
+  });
+
+  /**
+   * **시계가 서는 날에도 세계의 하루는 끝난다** (career.md §5). 통보 판정이
+   * `simulateOtherMatches`보다 먼저 리턴하면 그날의 다른 구단 경기가 시뮬 자리를
+   * 영영 잃고, 안 치러진 컵 경기 하나가 시즌 종료를 영원히 막는다 — 세 시즌
+   * 재정 하네스가 밟은 함정이다.
+   */
+  it("통보의 날에도 다른 구단의 경기는 치러진다", () => {
+    const state = createTestGame(21);
+    const tomorrow = addDays(state.date, 1);
+    state.manager.reputation.board = 60;
+    state.manager.contract = {
+      salary: 3_000_000,
+      signedOn: state.date,
+      until: addDays(tomorrow, RENEWAL_NOTICE_DAYS),
+    };
+    // 내일로 옮겨 심은 남의 경기 — 통보와 같은 날 세계가 돌아야 결과가 적힌다
+    const probe = state.matches.find(
+      (m) => !m.result && m.homeTeamId !== state.userTeamId && m.awayTeamId !== state.userTeamId,
+    )!;
+    probe.date = tomorrow;
+
+    const advanced = advanceTime(state, { days: 1 });
+    expect(advanced.ok).toBe(true);
+    expect(advanced.stopped, "통보가 주의로 서지 않았다").toBe("attention");
+    expect(probe.result, "통보가 그날의 세계 경기를 지웠다").not.toBeNull();
+  });
+});
+
+/**
+ * **지갑에서 나가는 길** — 갈래가 몇이든 출구는 하나이고 모자라면 한 푼도 나가지
+ * 않는다 (career.md §5.4 · §7). 조용히 새는 자리라 문마다 경계를 잰다.
+ */
+describe("지갑을 쓴다 — 출구는 하나다", () => {
+  const fixture = () => {
+    const state = createTestGame(7);
+    state.manager.wallet = 5_000_000;
+    return state;
+  };
+
+  it("잔고가 모자라면 한 푼도 나가지 않는다", () => {
+    const state = fixture();
+    const spent = spendFromWallet(state, { kind: "transfer-fund", amount: 5_000_001 });
+    expect(spent.ok, "지갑보다 큰 지출이 나갔다").toBe(false);
+    expect(state.manager.wallet, "실패한 지출이 지갑을 깎았다").toBe(5_000_000);
+    expect(state.manager.spending ?? [], "실패한 지출이 이력에 남았다").toHaveLength(0);
+
+    // 딱 맞는 금액은 통과하고 지갑이 0이 된다 — 경계는 초과에만 선다
+    const exact = spendFromWallet(state, { kind: "transfer-fund", amount: 5_000_000 });
+    expect(exact.ok, "지갑과 같은 금액이 막혔다").toBe(true);
+    expect(state.manager.wallet).toBe(0);
+    expect(state.manager.spending).toHaveLength(1);
+  });
+
+  it("사재 출연은 이적 예산만 올린다 — 원장에도 잔고에도 서지 않는다", () => {
+    const state = fixture();
+    const team = state.userTeamId;
+    const finance = financeOf(state, team);
+    const budget = finance.transferBudget;
+    const balance = finance.balance;
+    const ledger = finance.ledger.length;
+
+    const result = fundTransferBudget(state, { amount: 1_000_000 });
+    expect(result.ok, result.message).toBe(true);
+    expect(finance.transferBudget, "사재가 이적 예산에 닿지 않았다").toBe(budget + 1_000_000);
+    // 자본이지 매출이 아니다 — 원장에 서면 PSR이 "돈을 부으면 규정이 풀린다"가 된다
+    expect(finance.balance, "감독의 돈이 구단 잔고를 흔들었다").toBe(balance);
+    expect(finance.ledger, "사재가 구단 원장에 섰다").toHaveLength(ledger);
+    expect(state.manager.wallet).toBe(4_000_000);
+  });
+
+  it("사재 출연에는 시즌 상한이 있다 — 넘겨 부르면 남은 몫까지만 나간다", () => {
+    const state = fixture();
+    state.manager.wallet = 100_000_000;
+    const room = transferFundRoom(state);
+    expect(room, "출연 여력이 0이다").toBeGreaterThan(0);
+
+    const first = fundTransferBudget(state, { amount: room + 50_000_000 });
+    expect(first.ok, first.message).toBe(true);
+    expect(transferFundRoom(state), "상한을 넘겨 부른 값이 그대로 나갔다").toBe(0);
+    expect(state.manager.wallet).toBe(100_000_000 - room);
+
+    // 문이 닫힌 뒤로는 지갑이 남아 있어도 나가지 않는다
+    const second = fundTransferBudget(state, { amount: 1_000_000 });
+    expect(second.ok, "시즌 상한을 다 쓰고도 더 나갔다").toBe(false);
+    expect(state.manager.wallet).toBe(100_000_000 - room);
+  });
+
+  it("사재 보너스는 주급으로 재고 선수당 시즌 한 번이다", () => {
+    const state = fixture();
+    const player = userPlayers(state)[0]!;
+    const weekly = state.contracts.find(
+      (c) => c.status === "active" && c.gamePlayerId === player.id,
+    )!.weeklyWage;
+    const form = player.state.form;
+
+    // 4주치 미만은 눈금이 서지 않는다
+    const thin = payPlayerBonus(state, {
+      playerId: player.id,
+      amount: Math.floor(weekly * (MANAGER_WALLET.BONUS_MIN_WEEKS - 1)),
+    });
+    expect(thin.ok, "4주치 미만이 눈금으로 섰다").toBe(false);
+    expect(player.state.form, "반려된 보너스가 사기를 올렸다").toBe(form);
+
+    const paid = payPlayerBonus(state, {
+      playerId: player.id,
+      amount: Math.ceil(weekly * MANAGER_WALLET.BONUS_FULL_WEEKS),
+    });
+    expect(paid.ok, paid.message).toBe(true);
+    expect(player.state.form, "보너스가 사기를 올리지 않았다").toBeGreaterThan(form);
+
+    // 같은 선수에게 두 번은 없다 — 돈이 유한한 것만으로는 남용이 막히지 않는다
+    const wallet = state.manager.wallet;
+    const again = payPlayerBonus(state, {
+      playerId: player.id,
+      amount: Math.ceil(weekly * MANAGER_WALLET.BONUS_FULL_WEEKS),
+    });
+    expect(again.unchanged, "같은 선수에게 두 번 나갔다").toBe(true);
+    expect(state.manager.wallet).toBe(wallet);
+  });
+
+  /**
+   * "최근 20건"은 화면의 수이지 상한의 장부가 아니다 (career.md §5.4) — 절단이
+   * 이번 시즌 항목을 떨구면 시즌 상한과 3명 문이 건수를 넘는 순간 조용히 열린다.
+   */
+  it("이번 시즌 항목은 20건을 넘어도 장부에서 떨어지지 않는다 — 상한과 3명 문이 선다", () => {
+    const state = fixture();
+    state.manager.wallet = 1_000_000_000;
+
+    // 절단이 떨굴 수 있는 것은 지난 시즌 항목뿐이다
+    state.manager.spending = Array.from({ length: 5 }, (_, i) => ({
+      id: `old-${i}`,
+      on: "2024-01-01",
+      kind: "transfer-fund" as const,
+      amount: 10_000,
+      season: state.season - 1,
+    }));
+
+    // 보너스 세 명 — 문을 먼저 채우고, 그 뒤 사재 출연이 이력을 KEPT 너머로 민다
+    const contracted = userPlayers(state).filter((p) =>
+      state.contracts.some((c) => c.status === "active" && c.gamePlayerId === p.id),
+    );
+    const weeklyOf = (id: string) =>
+      state.contracts.find((c) => c.status === "active" && c.gamePlayerId === id)!.weeklyWage;
+    const bonusFor = (id: string) => Math.ceil(weeklyOf(id) * MANAGER_WALLET.BONUS_FULL_WEEKS);
+    for (const p of contracted.slice(0, MANAGER_WALLET.BONUS_PLAYERS_PER_SEASON)) {
+      const paid = payPlayerBonus(state, { playerId: p.id, amount: bonusFor(p.id) });
+      expect(paid.ok, "message" in paid ? paid.message : undefined).toBe(true);
+    }
+
+    const cap = transferFundRoom(state);
+    const chunk = MANAGER_WALLET.MIN_SPEND;
+    const rounds = MANAGER_WALLET.KEPT + 1;
+    expect(cap, "출연 상한이 스물한 번의 최소 지출보다 작다").toBeGreaterThan(chunk * rounds);
+    for (let i = 0; i < rounds; i += 1) {
+      const spent = spendFromWallet(state, { kind: "transfer-fund", amount: chunk });
+      expect(spent.ok).toBe(true);
+    }
+
+    // 이번 시즌 장부는 온전하고, 지난 시즌 항목만 떨어졌다
+    const spending = state.manager.spending ?? [];
+    expect(
+      spending.every((s) => s.season === state.season),
+      "지난 시즌 항목이 KEPT 안에 남아 이번 시즌 항목을 밀어냈다",
+    ).toBe(true);
+    expect(spending.length, "이번 시즌 항목이 절단에 떨어졌다").toBe(
+      rounds + MANAGER_WALLET.BONUS_PLAYERS_PER_SEASON,
+    );
+    expect(seasonSpentOn(state, "transfer-fund"), "상한 누계가 잘린 이력에서 셌다").toBe(
+      chunk * rounds,
+    );
+    expect(transferFundRoom(state)).toBe(cap - chunk * rounds);
+
+    // 건수가 넘은 뒤에도 보너스 문 둘은 그대로 선다
+    const fourth = contracted[MANAGER_WALLET.BONUS_PLAYERS_PER_SEASON]!;
+    const overflow = payPlayerBonus(state, { playerId: fourth.id, amount: bonusFor(fourth.id) });
+    expect(overflow.ok, "넷째 선수에게 보너스가 나갔다").toBe(false);
+    const first = contracted[0]!;
+    const repeat = payPlayerBonus(state, { playerId: first.id, amount: bonusFor(first.id) });
+    expect(repeat.unchanged, "같은 선수에게 두 번째 보너스가 나갔다").toBe(true);
+  });
+
+  /**
+   * 경질의 거울상이다 (career.md §5.4) — 같은 식으로 잰 위약금이 반대 방향으로
+   * 흐르고, 그다음은 경질·만료와 한 길이다.
+   */
+  it("사임은 감독이 위약금을 물고 나간다 — 물지 못하면 계약이 깨지지 않는다", () => {
+    const state = fixture();
+    const team = state.userTeamId;
+    const contract = state.manager.contract!;
+    const buyout = managerSeveranceOf(contract, state.date);
+    expect(buyout, "잔여가 남은 계약인데 위약금이 0이다").toBeGreaterThan(0);
+
+    // 지갑이 모자라면 못 나간다
+    state.manager.wallet = buyout - 1;
+    const broke = resignPost(state);
+    expect(broke.ok, "물지 못하는 계약이 깨졌다").toBe(false);
+    expect(state.dismissal, "실패한 사임이 감독을 무직으로 만들었다").toBeUndefined();
+    expect(state.manager.contract, "실패한 사임이 계약을 지웠다").toBeDefined();
+
+    state.manager.wallet = buyout;
+    const left = resignPost(state);
+    expect(left.ok, left.message).toBe(true);
+    expect(state.manager.wallet, "감독이 위약금을 물지 않았다").toBe(0);
+    expect(state.dismissal?.kind).toBe("resigned");
+    expect(state.dismissal?.severance).toBe(buyout);
+    expect(state.manager.contract, "사임이 계약을 남겼다").toBeUndefined();
+
+    // 그 돈은 옛 구단의 수입이다 — 구단이 무는 `severance`의 반대편
+    const got = financeOf(state, team).ledger.filter((e) => e.category === "manager_buyout");
+    expect(got, "위약금이 옛 구단 원장에 서지 않았다").toHaveLength(1);
+    expect(got[0]!.amount).toBe(buyout);
+    // 무직의 길은 갈래를 가리지 않는다 — 옛 구단은 그날로 후임을 세웠다
+    expect(state.teams.find((t) => t.id === team)!.managerName).not.toBe(state.manager.name);
   });
 });

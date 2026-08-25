@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { YELLOWS_PER_SUSPENSION, positionGroupOfPlayer } from "@story-fm/domain";
+import { PHASE_END, YELLOWS_PER_SUSPENSION, positionGroupOfPlayer } from "@story-fm/domain";
 import {
   advanceTime,
   allMatchesDone,
@@ -12,9 +12,11 @@ import {
   quickStrengthFactor,
   seasonYellowsOf,
   simSquadOf,
+  simulateExtraTime,
   type GameState,
   type WorldScope,
 } from "@story-fm/engine";
+import { LEDGER_LIMITS } from "@story-fm/sim";
 import { recordCard } from "../src/match/discipline";
 import { createTestGame, keepSeat, playMockMatch } from "./helpers";
 
@@ -91,7 +93,7 @@ describe("골의 분", () => {
       expect(r.awayShots).toBeGreaterThanOrEqual(r.awayGoals);
       for (const m of r.goalMinutes) {
         expect(m).toBeGreaterThanOrEqual(1);
-        expect(m).toBeLessThanOrEqual(94);
+        expect(m).toBeLessThanOrEqual(PHASE_END.second_half);
       }
       const activeIds = (side: "home" | "away", minute: number) => {
         // 분 단위 기록에는 같은 분 안의 선후가 없다. 같은 분 교체는 나간 선수와
@@ -128,6 +130,31 @@ describe("골의 분", () => {
     }
   });
 
+  it("정규는 90′에서 끊기고 연장은 91′부터다 — 이어 붙여도 역행하지 않는다", () => {
+    // 정규가 추가시간까지 뽑히면 93′ 골 뒤에 연장 91′ 골이 붙어 `goalMinutes`가
+    // 역행한다 — 두 시뮬이 같은 시계 위에 서야 한다 (match.md §7)
+    const state = createTestGame(5);
+    const squads = { home: simSquadOf(state, "mancity"), away: simSquadOf(state, "hull") };
+    for (let i = 0; i < 40; i++) {
+      const regular = quickSimulate(squads.home, squads.away, 1200 + i, `aet:${i}`);
+      const extra = simulateExtraTime(squads.home, squads.away, 1200 + i, `aet:${i}`);
+      const minutes = [
+        ...regular.goalMinutes,
+        ...regular.cards.map((card) => card.minute),
+        ...regular.subs.map((sub) => sub.minute),
+      ];
+      for (const minute of minutes) expect(minute).toBeLessThanOrEqual(PHASE_END.second_half);
+      const etMinutes = [...extra.goalMinutes, ...extra.cards.map((card) => card.minute)];
+      for (const minute of etMinutes) {
+        expect(minute).toBeGreaterThan(PHASE_END.second_half);
+        expect(minute).toBeLessThanOrEqual(PHASE_END.extra_second);
+      }
+      // 장부가 실제로 잇는 순서 — `appendGoals`가 하는 concat 그대로
+      const joined = [...regular.goalMinutes, ...extra.goalMinutes];
+      expect(joined).toEqual([...joined].sort((a, b) => a - b));
+    }
+  });
+
   it("시즌을 돌리면 모든 경기의 골에 분이 붙는다", () => {
     const state = seasonOf(7);
     const scoring = state.matches.filter(
@@ -137,6 +164,41 @@ describe("골의 분", () => {
     for (const m of scoring) {
       expect(m.result!.goalMinutes, m.id).toHaveLength(m.result!.scorers.length);
     }
+  });
+});
+
+describe("부상", () => {
+  it("퇴장자는 추첨 후보에서 빠진다 — 그라운드를 떠난 발은 다치지 않는다", () => {
+    const state = createTestGame(5);
+    /**
+     * 경기당 부상 기대치가 팀당 0.05라 그냥 굴리면 퇴장과 겹치는 표본이 안 모인다.
+     * 성향은 **누가 걸리는지를 안 바꾸고 빈도만 올리는** 손잡이(`teamInjuryRate`)라,
+     * 끝까지 올려 매 경기 한 명씩 다치게 하고 그 한 명이 누구인지만 본다.
+     */
+    const alwaysHurt = (squad: ReturnType<typeof simSquadOf>) => ({
+      ...squad,
+      proneness: Object.fromEntries(
+        [...squad.starters, ...(squad.bench ?? [])].map((p) => [p.id, 100] as const),
+      ),
+    });
+    const squads = {
+      home: alwaysHurt(simSquadOf(state, "mancity")),
+      away: alwaysHurt(simSquadOf(state, "hull")),
+    };
+    let reds = 0;
+    let hurt = 0;
+    for (let i = 0; i < 300; i++) {
+      const r = quickSimulate(squads.home, squads.away, 5000 + i, `red-injury:${i}`);
+      const sentOff = new Set(
+        r.cards.filter((c) => c.card === "red").map((c) => `${c.side}:${c.playerId}`),
+      );
+      reds += sentOff.size;
+      hurt += r.injuries.length;
+      for (const tag of r.injuries) expect(sentOff.has(tag), `${i}: ${tag}`).toBe(false);
+    }
+    // 표본이 실제로 퇴장과 부상을 함께 담았을 때만 위 검증이 뜻을 갖는다
+    expect(reds).toBeGreaterThan(10);
+    expect(hurt).toBeGreaterThan(500);
   });
 });
 
@@ -409,7 +471,7 @@ describe("같은 날 경기는 킥오프 순서대로 굴러간다", () => {
 });
 
 describe("교체", () => {
-  it("양 팀이 모두 교체한다 — 한도는 팀마다 따로다", () => {
+  it("양 팀이 모두 교체한다 — 한도는 장부와 같다 (5인/3창, 하프타임 미소모)", () => {
     const state = createTestGame(3);
     const home = simSquadOf(state, "mancity");
     const away = simSquadOf(state, "hull");
@@ -417,10 +479,15 @@ describe("교체", () => {
     let awaySubs = 0;
     for (let i = 0; i < 60; i++) {
       const r = quickSimulate(home, away, 6000 + i, `sub:${i}`);
+      for (const side of ["home", "away"] as const) {
+        const mine = r.subs.filter((s) => s.side === side);
+        expect(mine.length).toBeLessThanOrEqual(LEDGER_LIMITS.maxSubs);
+        // 창(같은 분의 연속 교체 = 한 창)도 장부의 한도를 넘지 않는다 — 하프타임(45′)은 미소모
+        const windows = new Set(mine.filter((s) => s.minute !== 45).map((s) => s.minute)).size;
+        expect(windows).toBeLessThanOrEqual(LEDGER_LIMITS.maxSubWindows);
+      }
       homeSubs += r.subs.filter((s) => s.side === "home").length;
       awaySubs += r.subs.filter((s) => s.side === "away").length;
-      expect(r.subs.filter((s) => s.side === "home").length).toBeLessThanOrEqual(4);
-      expect(r.subs.filter((s) => s.side === "away").length).toBeLessThanOrEqual(4);
       // 같은 선수가 나갔다 들어오지 않는다
       const out = r.subs.map((s) => s.out);
       expect(new Set(out).size).toBe(out.length);

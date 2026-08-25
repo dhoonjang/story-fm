@@ -30,7 +30,7 @@ import { isClubTeam, teamCatalog, teamCatalogById } from "../data/team-catalog";
  */
 
 const clamp99 = (x: number) => Math.max(1, Math.min(99, Math.round(x)));
-/** 어드민이 직접 편집하는 수치 필드 — 15축 + 잠재력 */
+/** 어드민이 직접 편집하는 수치 필드 — 16축 + 잠재력 */
 const NUMERIC_ATTRS = [...ATTRIBUTE_AXES, "potential"] as const;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -52,7 +52,7 @@ interface CatalogPlayerInputMeta {
   /** 실제 주급 (£/주). 비우면 OVR 공식으로 어림한다 */
   weeklyWage?: number;
 }
-/** 15축을 평면 필드로 받는다 (어드민 폼과 1:1) */
+/** 16축을 평면 필드로 받는다 (어드민 폼과 1:1) */
 export type CatalogPlayerInput = CatalogPlayerInputMeta & AxisValues;
 
 /**

@@ -1,8 +1,8 @@
-import type { GamePlayer, ScheduleEntry, TrainingSession } from "@story-fm/domain";
+import type { GamePlayer, MatchRecord, ScheduleEntry, TrainingSession } from "@story-fm/domain";
 import {
-  AI_MANAGER_RATING_FALLBACK,
   FAMILIARITY_BASELINE,
   clampCondition,
+  isReserveMatch,
   naturalPositionOf,
   positionGroupOfPlayer,
   slotOfTime,
@@ -31,6 +31,7 @@ import { hasCups } from "../world/scope";
 import { driftFamiliarity, tickOtherClubs } from "../squad/other-clubs";
 import { applyResultMood } from "../squad/slump";
 import { advanceEuroKnockouts } from "../competition/euro-knockout";
+import { advanceSuperCups } from "../competition/super-cup";
 import { applyMonthlyDevelopment } from "../squad/development";
 import { returnDueLoans, signFreeAgents } from "../market/departures";
 import { clampForm, decayedForm, formDeltaFromMatch } from "../squad/form";
@@ -41,10 +42,14 @@ import {
   formatMoney,
   payWeeklyWages,
   runMonthlyFinance,
+  settleDuePayments,
 } from "../club/finance";
 // 핵심 자원의 경계는 회견이 쥔다 — 같은 자를 두 곳에 적으면 한쪽만 움직인다
-import { SQUAD_CORE_SIZE } from "../club/press";
+import { openEvePress, SQUAD_CORE_SIZE } from "../club/press";
 import { tickApproaches } from "../club/approach";
+import { tickBoardDemands } from "../club/board-demand";
+import { tickBoardRequests } from "../club/board-request";
+import { tickArcs } from "../world/arcs";
 import {
   TRAINING_INJURY_PER_SESSION,
   easeProneness,
@@ -65,9 +70,10 @@ import {
   runMedicals,
 } from "../market/negotiation";
 import { playedIn, quickSimulate, type SimSquad } from "../match/quick-sim";
+import { managerTacticsOf } from "../match/manager-tactics";
 import { recordCard } from "../match/discipline";
 import { runAiTransfers } from "../market/ai-market";
-import { reviewUserSeat, runManagerMarket } from "../market/manager-market";
+import { reviewManagerContract, reviewUserSeat, runManagerMarket } from "../market/manager-market";
 import { matchRating } from "../match/ratings";
 import { scoutReportLine } from "../views/views";
 import { pruneDeferredScouts } from "../squad/scouting";
@@ -89,6 +95,7 @@ import {
   proficiencyAt,
   pushNarrative,
   pushReportCards,
+  reservePlayers,
   seasonStatOf,
   squadLevelOf,
   tacticsOf,
@@ -143,9 +150,9 @@ function sessionById(state: GameState, id: string): TrainingSession | null {
  *
  * ⚠️ **코어는 능력치도 전술 적응도도 올리지 않는다.**
  *
- * 예전엔 여기서 "이 축을 겨냥한 세션이 나이별 횟수(3~5회)만큼 쌓이면 +1"을 굴렸다.
- * 그러면 성장이 **달력을 넘긴 횟수**의 함수가 되어, 같은 메뉴를 반복하는 것이 가장
- * 효율적인 육성법이 된다. 무엇이 남았는지는 그 구간을 읽는 결산이 정한다
+ * 세션 횟수를 세어 여기서 올리면 성장이 **달력을 넘긴 횟수**의 함수가 되어,
+ * 같은 메뉴를 반복하는 것이 가장 효율적인 육성법이 된다. 무엇이 남았는지는 그
+ * 구간을 읽는 결산이 정한다
  * (`training-report.ts` — 능력치와 전술 적응도를 한 템플릿에서 함께 판정한다).
  *
  * 회복도 여기서 더하지 않는다 — **하루의 회복은 하루에 한 번**이라
@@ -234,7 +241,11 @@ function dailyTick(
   if (
     managed === null ||
     matchesOn(state.matches, state.date).some(
-      (m) => !m.result && (m.homeTeamId === managed || m.awayTeamId === managed),
+      (m) =>
+        !m.result &&
+        // 2군 경기일에도 1군 훈련은 그대로 선다 — 뛰는 스쿼드가 다르다
+        !isReserveMatch(m) &&
+        (m.homeTeamId === managed || m.awayTeamId === managed),
     )
   ) {
     cancelTrainingOn(state, state.date);
@@ -273,9 +284,9 @@ function dailyTick(
     /**
      * 폼은 **매일** 평균으로 조금 끌린다 (form.ts).
      *
-     * 예전엔 월요일에 1칸씩 계단으로 내렸다. 주 2경기면 +2가 붙고 −1만 빠져
-     * 회귀가 늘 지고, 강팀은 시즌 내내 +3에 못박혔다. 매일 조금씩 빼면 연승이
-     * 멈추는 순간부터 식고, 오래 쉬면 무디어진다 — 폼에 시간 축이 생긴다.
+     * 주 1회 계단으로 내리면 주 2경기 팀은 +2가 붙고 −1만 빠져 회귀가 늘
+     * 지고, 강팀이 시즌 내내 +3에 못박힌다. 매일 조금씩 빼면 연승이 멈추는
+     * 순간부터 식고, 오래 쉬면 무디어진다 — 폼에 시간 축이 생긴다.
      */
     player.state.form = decayedForm(player.state.form);
     if (issuePlayers.has(player.id)) {
@@ -343,7 +354,6 @@ function dailyTick(
    *
    * 빈도도 대상도 **개인 성향**을 탄다: 유리몸이 많은 선수단은 실제로 더 자주
    * 쓰러지고, 그중 누가 걸리는지도 경기와 같은 저울(`injuryWeight`)로 정한다.
-   * 예전엔 균등 추첨이라 유리 몸도 철인도 훈련장에서는 똑같았다.
    */
   if (hardSessions > 0) {
     const candidates = players.filter((p) => !isInjured(state, p.id));
@@ -388,6 +398,10 @@ function dailyTick(
 
   // 주급 (월요일) — 활성 계약 합에서 파생, 구단 전체에 적용 (무소속 제외 — finance.ts)
   if (dow === MONDAY) payWeeklyWages(state);
+
+  // 분할 이적료·해지 정산금의 기일이 된 회분 (finance.md §6.4).
+  // 기일은 요일을 모르므로 매일 본다 — 주급·월초 정산과 달리 조건이 없다
+  settleDuePayments(state, digest);
 
   /**
    * 벤치 불만을 낼 만한 자원인가 — **종합의 눈금을 탄다.**
@@ -499,12 +513,37 @@ function dailyTick(
   }
 
   /**
+   * 전야 회견 — 내일이 개막이거나 더비면 오늘 자리가 선다 (people.md §4).
+   * **다가옴보다 먼저** 부른다: 갓 열린 회견이 그날의 다가옴을 막는 문이 서려면
+   * 자리가 이미 있어야 한다.
+   */
+  if (managed) openEvePress(state, digest);
+
+  /**
    * 세계가 먼저 말을 건다 — 압력이 임계를 넘으면 코어가 자리를 연다 (people.md §8).
    * **불만·순위·폼이 다 움직인 뒤**에 재야 오늘의 사실로 압력이 쌓인다.
    *
    * 무직에게는 찾아올 사람이 없다 — 선수단도 보드도 이제 남의 것이다 (career.md §5.1).
    */
+  /**
+   * 보드 요청 — 구단주 원형이 이적창마다 거는 조건 (career.md §5.2). 다가옴보다
+   * 먼저 판정해야 구단주가 오는 자리의 사실 카드가 오늘의 요청 상태를 싣는다.
+   * 무직에게는 요청이 서지도 판정되지도 않는다 — 보드도 이제 남의 것이다.
+   */
+  if (managed !== null) tickBoardDemands(state, digest);
+  /**
+   * 감독이 보드에 건 요청 — 오늘 답이 도착했으면 판정하고 그 자리에서 반영한다
+   * (finance.md §9.6). 구단주 요청과 방향이 반대인 별개 상태라 눈금을 나누지
+   * 않는다. 무직에게는 답할 보드가 없다.
+   */
+  if (managed !== null) tickBoardRequests(state, digest);
   const approached = managed !== null && tickApproaches(state, digest);
+
+  /**
+   * 서사 아크 — **오늘의 사실이 이야기를 열고·올리고·닫는다** (people.md §9).
+   * 불만·부상·연속 기록·협상이 다 움직인 뒤라야 오늘의 장부로 판정한다.
+   */
+  tickArcs(state, digest);
 
   // 이적창 개장·폐장 안내
   for (const entry of todays) {
@@ -640,14 +679,6 @@ function boardSlotOf(state: GameState, player: GamePlayer) {
   };
 }
 
-/** 이 팀을 이끄는 사람의 전술 눈금 — 감독 팀이면 감독 본인, 아니면 AI 감독 */
-function managerTacticsOf(state: GameState, teamId: string): number {
-  return teamId === managedTeamId(state)
-    ? state.manager.attributes.tactics
-    : (state.teams.find((team) => team.id === teamId)?.aiManagerTacticsRating ??
-        AI_MANAGER_RATING_FALLBACK);
-}
-
 /**
  * **이 선수들로 세우는 간이 시뮬 입력** — 명단이 이미 정해진 자리(연장)가 쓴다.
  *
@@ -669,6 +700,11 @@ export function simSquadFor(
     ),
     tactics: tacticsOf(state, teamId).spec,
     managerTactics: managerTacticsOf(state, teamId),
+    // 연장의 부상 추첨도 성향을 탄다 — 90분(simSquadOf)과 같은 눈금 (match.md §7)
+    proneness: pronenessOf(
+      state,
+      players.map((p) => p.id),
+    ),
   };
 }
 
@@ -683,9 +719,8 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
   const squad = firstTeamPlayers(state, teamId);
   const byId = new Map(squad.map((p) => [p.id, p]));
   /**
-   * **정지 선수는 못 나온다** — 부상과 같다. 예전엔 부상만 걸렀는데, 간이 시뮬이
-   * 카드를 만들지 않던 시절엔 AI 선수에게 정지가 생기지 않아 티가 나지 않았다.
-   * 이제 리그 전체가 카드를 받으므로 이 문도 함께 닫아야 규칙이 하나가 된다.
+   * **정지 선수는 못 나온다** — 부상과 같다. 간이 시뮬도 리그 전체에 카드를
+   * 만들므로, 부상만 거르면 AI 팀이 정지 선수를 그대로 내보내 규칙이 갈라진다.
    */
   const available = (p: GamePlayer) => !isInjured(state, p.id) && !isSuspended(state, p.id);
   const startingAssignments = assignmentsOf(state, teamId, "starting");
@@ -716,7 +751,7 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
   /**
    * **쉬게 한 선수는 그 경기에서 아예 빠진다** — 벤치에도 없고, 뒤 슬롯의 대체
    * 자원도 아니다. 벤치가 OVR 순이라 방금 지쳐서 뺀 에이스가 맨 위에 서면,
-   * 투입 후보를 포지션군과 OVR로만 고르는 `planSubs`가 그를 46분에 되돌린다 —
+   * 투입 후보를 포지션군과 OVR로만 고르는 벤치 정책(`planBenchSubs`)이 그를 되돌린다 —
    * 로테이션이 선발 명단에서만 일어나고 출전 시간에서는 일어나지 않는 것이다.
    * 거르는 자리는 여기 하나다 (match.md §7).
    */
@@ -819,14 +854,20 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
   // 무직이면 옛 구단 경기도 여기서 굴러간다 — 감독이 들어갈 경기가 없다 (career.md §5.1)
   const managed = managedTeamId(state);
   const ours = matchesOn(state.matches, state.date).find(
-    (m) => !m.result && (m.homeTeamId === managed || m.awayTeamId === managed),
+    (m) =>
+      !m.result && !isReserveMatch(m) && (m.homeTeamId === managed || m.awayTeamId === managed),
   );
   const cutoff = ours ? (ours.time ?? DEFAULT_KICKOFF) : null;
   const played: string[] = [];
   for (const match of matchesOn(state.matches, state.date)) {
     if (match.result) continue;
-    if (match.homeTeamId === managed || match.awayTeamId === managed) continue;
     if (cutoff !== null && (match.time ?? DEFAULT_KICKOFF) >= cutoff) continue;
+    // 2군 리그는 감독 팀 경기라도 조용히 돈다 — 결과는 출전·성장에만 닿는다
+    if (isReserveMatch(match)) {
+      simulateReserveMatch(state, match, digest);
+      continue;
+    }
+    if (match.homeTeamId === managed || match.awayTeamId === managed) continue;
     const squads = {
       home: simSquadOf(state, match.homeTeamId),
       away: simSquadOf(state, match.awayTeamId),
@@ -984,11 +1025,12 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
       });
     }
     /**
-     * 부상 — 심각도·기간은 **유저 경기와 같은 공식**(`openInjuryFor`)으로 굴린다.
+     * 부상 — 심각도·기간은 **유저 경기와 같은 공식**(`openInjuryFor`)으로, 난수도
+     * **같은 모양의 채널**(`injury:<경기 id>`)에서 굴린다 (match.md §7).
      * digest에는 올리지 않는다: 하루 열 경기의 부상을 전부 나열하면 브리핑이
      * 소음이 된다. 감독은 상대를 조회할 때(`get_squad`·`search_players`) 알게 된다.
      */
-    const injuryRng = makeRng(state.seed, `quick-injury:${match.id}`);
+    const injuryRng = makeRng(state.seed, `injury:${match.id}`);
     for (const tag of hurt) {
       const [side, playerId] = tag.split(":") as ["home" | "away", string];
       const player = onPitch[side].find((p) => p.id === playerId);
@@ -1012,6 +1054,115 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
     );
   }
   if (played.length > 0) digest.push(`라운드 결과: ${played.join(", ")}`);
+}
+
+/**
+ * 2군 경기의 XI — 가용한 2군에서 종합 순으로 뽑고, 열한 명이 안 되면 **가장 어린**
+ * 가용 1군으로 채운다. 상대가 2부 클럽이면 2군이 없다(전원 1군 — team.md §5).
+ */
+function reserveXI(state: GameState, teamId: string): GamePlayer[] {
+  const available = (p: GamePlayer) => !isInjured(state, p.id) && !isSuspended(state, p.id);
+  const xi = reservePlayers(state, teamId)
+    .filter(available)
+    .sort((a, b) => b.attributes.overall - a.attributes.overall)
+    .slice(0, 11);
+  if (xi.length < 11) {
+    const used = new Set(xi.map((p) => p.id));
+    const youth = firstTeamPlayers(state, teamId)
+      .filter((p) => !used.has(p.id) && available(p))
+      .sort((a, b) => (a.birthdate < b.birthdate ? 1 : -1));
+    for (const p of youth) {
+      if (xi.length >= 11) break;
+      xi.push(p);
+    }
+  }
+  return xi;
+}
+
+/**
+ * 2군 리그 경기 간이 시뮬 — **결과는 출전과 성장에만 닿는다** (season.md §2 2군 리그).
+ *
+ * 정산은 `SEASON_STAT`의 2군 전용 열(`reserveApps` 등)뿐이다. 폼·체력·부상·카드·
+ * 정지·라커룸·재정에 손대지 않는 것은 빠뜨린 게 아니라 설계다 — 2군 경기가 1군
+ * 몸 상태에 닿기 시작하면 콜업 직후 선수의 상태를 감독이 설명할 수 없게 되는데,
+ * 감독에게는 그 일정을 조정할 손잡이가 없다. 영향은 성장 확률 한 축으로 모인다
+ * (`applyMonthlyDevelopment`가 지난달 출전을 센다).
+ *
+ * 벤치 없이 열한 명으로 90분을 굴린다(`simSquadFor`) — 교체가 없으니 출전자가 곧
+ * 선발이고, 라인업이 그대로 출전 기록의 원본이다.
+ */
+export function simulateReserveMatch(state: GameState, match: MatchRecord, digest: string[]): void {
+  const squads = {
+    home: simSquadFor(state, match.homeTeamId, reserveXI(state, match.homeTeamId)),
+    away: simSquadFor(state, match.awayTeamId, reserveXI(state, match.awayTeamId)),
+  };
+  const result = quickSimulate(
+    squads.home,
+    squads.away,
+    state.seed,
+    `${state.season}:${match.competitionId}:${match.stage ?? "league"}:${match.round}:${match.homeTeamId}-${match.awayTeamId}`,
+  );
+  // 벤치가 없어 교체가 없고, 카드·부상·점유율은 정산하지 않는다 — 결과만 남긴다
+  match.result = {
+    homeGoals: result.homeGoals,
+    awayGoals: result.awayGoals,
+    scorers: result.scorers,
+    assists: result.assists,
+    goalMinutes: result.goalMinutes,
+    homeShots: result.homeShots,
+    awayShots: result.awayShots,
+    homeXg: result.homeXg,
+    awayXg: result.awayXg,
+    homeExpectedGoals: result.homeExpectedGoals,
+    awayExpectedGoals: result.awayExpectedGoals,
+    homeLineup: squads.home.starters.map((p) => p.id),
+    awayLineup: squads.away.starters.map((p) => p.id),
+    homeOnPitch: squads.home.starters.map((p) => p.id),
+    awayOnPitch: squads.away.starters.map((p) => p.id),
+  };
+  for (const side of ["home", "away"] as const) {
+    const teamId = side === "home" ? match.homeTeamId : match.awayTeamId;
+    const scored = result.scorers
+      .filter((s) => s.startsWith(`${side}:`))
+      .map((s) => s.slice(side.length + 1));
+    const assisted = result.assists
+      .filter((s) => s.startsWith(`${side}:`))
+      .map((s) => s.slice(side.length + 1));
+    const goalsFor = side === "home" ? result.homeGoals : result.awayGoals;
+    const conceded = side === "home" ? result.awayGoals : result.homeGoals;
+    const outcome = goalsFor > conceded ? "win" : goalsFor === conceded ? "draw" : "loss";
+    for (const p of squads[side].starters) {
+      const goals = scored.filter((id) => id === p.id).length;
+      const assists = assisted.filter((id) => id === p.id).length;
+      const rating = matchRating({
+        group: positionGroupOfPlayer(p),
+        goals,
+        assists,
+        yellows: 0,
+        reds: 0,
+        conceded,
+        outcome,
+      });
+      const stat = ensureSeasonStat(state, p.id, teamId);
+      stat.reserveApps = (stat.reserveApps ?? 0) + 1;
+      if (goals > 0) stat.reserveGoals = (stat.reserveGoals ?? 0) + goals;
+      if (assists > 0) stat.reserveAssists = (stat.reserveAssists ?? 0) + assists;
+      stat.reserveRatingSum = (stat.reserveRatingSum ?? 0) + rating;
+    }
+  }
+  // 감독 팀 경기만 한 줄 — 2군 리그는 감독 팀만 편성되지만, 문은 명시적으로 지킨다
+  if (match.homeTeamId === state.userTeamId || match.awayTeamId === state.userTeamId) {
+    const ourGoals = state.userTeamId === match.homeTeamId ? result.homeGoals : result.awayGoals;
+    const scorers = result.scorers
+      .filter((s) => s.startsWith(state.userTeamId === match.homeTeamId ? "home:" : "away:"))
+      .map((s) => playerById(state, s.slice(s.indexOf(":") + 1))?.name)
+      .filter((name): name is string => name !== undefined);
+    digest.push(
+      `2군 리그 ${match.round}R — ${teamShortNameIn(state, match.homeTeamId)} ${result.homeGoals}-${result.awayGoals} ${teamShortNameIn(state, match.awayTeamId)}${
+        ourGoals > 0 && scorers.length > 0 ? ` (득점: ${scorers.join(", ")})` : ""
+      }`,
+    );
+  }
 }
 
 /**
@@ -1074,28 +1225,42 @@ export function advanceTime(
     // 새 날은 하루의 시작으로 연다 — 장면의 시각은 날짜를 넘을 수 없다
     state.clock = DAY_START;
     const needsAttention = dailyTick(state, digest, trained);
-    // 감독의 자리 — 경고가 먼저 오고, 그래도 안 되면 여기서 시계가 멈춘다
-    if (reviewUserSeat(state, digest)) {
-      return { ok: true, digest, stopped: "blocked", trained };
-    }
+    /**
+     * 감독의 자리와 계약 (career.md §5·§5.4) — 판정은 여기서 하되 **시계는 세계의
+     * 하루가 끝난 뒤에 세운다.** 판정과 동시에 리턴하면 그날로 편성돼 있던 다른
+     * 구단의 경기가 시뮬 자리를 영영 잃고(`simulateOtherMatches`는 당일만 본다),
+     * 안 치러진 컵 경기 하나가 `allMatchesDone`을 영원히 막는다.
+     * 경질을 먼저 봐야 지운 계약을 다시 재지 않는다 — `reviewManagerContract`는
+     * `dismissal`이 서 있으면 스스로 물러난다.
+     */
+    const seatLost = reviewUserSeat(state, digest);
+    const contractDay = reviewManagerContract(state, digest);
     simulateOtherMatches(state, digest);
     // 녹아웃 — 직전 단계가 끝났으면 다음 단계를 편성한다.
     // 대항전을 먼저 돌려야 예약된 대항전 날짜가 컵 날짜 선택에 반영된다.
     if (hasCups(state.world)) {
       advanceEuroKnockouts(state, digest);
       advanceDomesticCups(state, digest);
+      // 슈퍼컵은 한 경기라 편성할 다음 단계가 없다 — 끝난 경기의 승부만 가린다
+      advanceSuperCups(state, digest);
     }
     // 경기 일정이 바뀌었으면 기본 훈련을 다시 깐다 (감독 지시 세션은 그대로).
-    // ⚠️ 예전엔 "경기 수가 늘었을 때"만 불렀는데, 컵 대진은 **경기일 몇 주 전에**
-    // 편성되므로 그 순간엔 3주 창 밖이라 아무 일도 일어나지 않고, 날짜가 다가와도
-    // 다시 부를 계기가 없었다. 리그 경기 연기는 경기 수를 바꾸지도 않는다.
-    // 판정은 배치를 다시 계산해 비교하는 sync가 직접 한다
+    // ⚠️ "경기 수가 늘었을 때"로 게이트하면 안 된다 — 컵 대진은 **경기일 몇 주
+    // 전에** 편성되어 그 순간엔 3주 창 밖이고, 리그 경기 연기는 경기 수를 바꾸지도
+    // 않는다. 판정은 배치를 다시 계산해 비교하는 sync가 직접 한다
     // 무직이면 깔 훈련장이 없다 — 옛 구단의 마이크로사이클은 감독의 것이 아니다
     if (managedTeamId(state)) syncDefaultTraining(state);
 
+    // 자리를 잃은 날은 경질과 같은 무게로 시계가 멈춘다 — 세계의 하루는 이미 끝났다
+    if (seatLost || contractDay === "expired") {
+      return { ok: true, digest, stopped: "blocked", trained };
+    }
+
     const managed = managedTeamId(state);
     const userMatch = matchesOn(state.matches, state.date).find(
-      (m) => !m.result && (m.homeTeamId === managed || m.awayTeamId === managed),
+      (m) =>
+        // 2군 경기는 시계를 세우지 않는다 — 간이 시뮬이 이미 소화했다 (season.md §2)
+        !m.result && !isReserveMatch(m) && (m.homeTeamId === managed || m.awayTeamId === managed),
     );
     if (userMatch) {
       state.phase = "matchday";
@@ -1106,7 +1271,10 @@ export function advanceTime(
       return { ok: true, digest, stopped: "matchday", trained };
     }
 
-    if (needsAttention) return { ok: true, digest, stopped: "attention", trained };
+    // 통보가 선 날은 답할 자리가 생긴 날이다 — 경기일이 아니면 주의로 멈춘다
+    if (needsAttention || contractDay === "notice") {
+      return { ok: true, digest, stopped: "attention", trained };
+    }
     if (typeof until === "object" && d + 1 >= until.days) {
       return { ok: true, digest, stopped: "reached", trained };
     }

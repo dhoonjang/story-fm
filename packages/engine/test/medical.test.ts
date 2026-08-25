@@ -253,7 +253,7 @@ describe("소견이 붙으면 데려가는 쪽이 결정한다", () => {
   it("소견은 계약을 막고 감독을 기다린다", () => {
     const { state, player, negotiation } = flaggedDeal();
     expect(negotiation.status).toBe("agreed");
-    expect(negotiation.medical!.note).toBeTruthy();
+    expect(negotiation.medical!.concern, "소견이 카드로 남지 않았다").toBeDefined();
     expect(negotiation.medical!.overridden).toBeUndefined();
     expect(playerById(state, player.id)!.teamId).not.toBe(state.userTeamId);
     expect(pendingVerdicts(state).some((v) => v.negotiation.id === negotiation.id)).toBe(true);
@@ -378,10 +378,54 @@ describe("우리가 파는 쪽이면 상대가 값을 깎는다", () => {
     expect(cut!.fee).toBeLessThan(fee);
     expect(digest.join(" ")).toContain("깎아 다시");
 
+    // **재호가는 소견 문장이 아니라 `origin` 코드로 갈린다** (transfer.md §5).
+    // 문구로 가르던 자리라, 소견 한 줄을 고치면 이 수락이 평범한 매각으로 읽혔다.
+    expect(cut!.origin, "재호가가 코드로 표시되지 않았다").toBe("medical");
+    expect(cut!.note, "코어가 소견 문장을 오퍼에 저장했다").toBeUndefined();
+
     const accepted = answerIncomingOffer(state, {
       negotiationId: negotiation.id,
       verdict: "accept",
     });
     expect(accepted.ok, accepted.message).toBe(true);
+    expect(accepted.message).toContain("메디컬 재협상안");
+  });
+
+  it("메디컬을 지나지 않은 오퍼는 재호가로 읽히지 않는다", () => {
+    const state = createTestGame(42);
+    const player = state.players.find((p) => p.teamId === state.userTeamId)!;
+    const buyer = state.teams.find((t) => t.id !== state.userTeamId)!;
+    state.date = "2026-08-01";
+    state.negotiations.push({
+      id: `neg-plain-${player.id}-test`,
+      gamePlayerId: player.id,
+      kind: "sell",
+      counterpartTeamId: buyer.id,
+      windowId: null,
+      openedOn: state.date,
+      expiresOn: addDays(state.date, 14),
+      status: "open",
+      rounds: [
+        {
+          date: state.date,
+          by: "them",
+          fee: 20_000_000,
+          weeklyWage: 100_000,
+          contractYears: 4,
+          respondsOn: null,
+          probability: 60,
+          verdict: null,
+          // 옛 세이브의 소견 문장이 그대로 붙어 있어도 판정은 코드만 본다
+          note: "메디컬 소견 — 햄스트링",
+        },
+      ],
+    });
+    const negotiation = state.negotiations[state.negotiations.length - 1]!;
+    const accepted = answerIncomingOffer(state, {
+      negotiationId: negotiation.id,
+      verdict: "accept",
+    });
+    expect(accepted.ok, accepted.message).toBe(true);
+    expect(accepted.message, "문장이 판정을 뒤집었다").not.toContain("메디컬 재협상안");
   });
 });

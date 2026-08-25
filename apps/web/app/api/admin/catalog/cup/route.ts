@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { adminCupCatalog, adminResetCupCatalog, isCupCatalogEdited } from "@story-fm/engine";
+import { adminWrite } from "@/app/api/admin/admin-guard";
 
 /**
  * 컵 카탈로그 어드민 — 유럽 대항전과 국내 컵을 한 표에서 편집한다.
@@ -12,7 +13,7 @@ export function GET() {
 }
 
 /** 컵 카탈로그를 시드 기본값으로 되돌린다 (유럽·국내 함께) */
-export async function DELETE() {
+export const DELETE = adminWrite(async function () {
   const res = adminResetCupCatalog();
   const { europe, domestic } = adminCupCatalog();
   return NextResponse.json({
@@ -22,4 +23,4 @@ export async function DELETE() {
     domestic,
     edited: isCupCatalogEdited(),
   });
-}
+});
