@@ -290,6 +290,9 @@ export const YOUTH_DEVELOPMENT = defineHarness({
     { metric: "무지정 우리 2군 U21 성장", role: "measure", unit: "score", why: "출전 배율만 받은 유망주 — 손잡이 하나의 몫을 가른다" },
     { metric: "타 팀 2군 U21 성장", role: "measure", unit: "score", why: "배율이 없는 기준선 — 코어 월간 성장 그대로" },
     { metric: "집중 육성 격차", role: "reference", min: 0, unit: "score", why: "집중 육성 − 타 팀 기준선. 음수면 손잡이가 아무것도 가르지 않은 것이다" },
+    { metric: "성실한 U21 표본", role: "guard", min: 20, unit: "count", why: "아래 줄의 분모 — 배율 없는 타 팀 2군 U21 중 `professionalism` ≥ 1.1. 표본이 줄면 격차가 아니라 잡음이다" },
+    { metric: "게으른 U21 표본", role: "guard", min: 20, unit: "count", why: "같은 줄의 반대쪽 — `professionalism` ≤ 0.95" },
+    { metric: "직업의식 격차", role: "reference", min: 0, unit: "score", why: "성실 − 게으름. 배율이 없는 표본이라 남는 차이는 원형뿐이다 — 0 이하면 계수가 세계에 닿지 않았다 (people.md §6)" },
   ],
 });
 
@@ -300,6 +303,9 @@ export const YOUTH_DEVELOPMENT = defineHarness({
  * 올리는 로테이션이 곧 반란이 되고, 길면 강등이 지금처럼 **비용 0인 손잡이**로
  * 남는다. 어느 쪽인지는 한 시즌을 굴려 봐야 보인다 — 코드를 읽어서는 알 수 없고,
  * 고정 기댓값이 있는 단위 테스트로도 잡히지 않는다.
+ *
+ * 문턱에 원형의 `patience`가 곱해진 뒤로(people.md §6) 날짜 자체는 사람마다 다르다 —
+ * 그래서 밴드는 날짜가 아니라 **제 문턱을 넘고 밀린 날**을 쥔다.
  */
 export const NEGOTIATION = defineHarness({
   id: "negotiation",
@@ -335,7 +341,9 @@ export const DEMOTION_GRIEVANCE = defineHarness({
     { metric: "로테이션 자원에 걸린 불만", role: "guard", max: 0, unit: "count", why: "열흘 안에 되돌리는 감독은 대가를 치르지 않는다 — 여기가 1이면 로테이션이 곧 반란이다" },
     { metric: "방치한 핵심 자원", role: "guard", min: 3, max: 3, unit: "count", why: "아래 줄의 분모 — 스쿼드 하한에 걸려 덜 내려갔으면 밴드가 공허하다" },
     { metric: "방치 끝에 불만이 걸린 수", role: "guard", min: 3, max: 3, unit: "count", why: "한 시즌을 그대로 두고도 조용하면 강등은 여전히 비용 0인 손잡이다" },
-    { metric: "첫 방치 불만까지 걸린 날", role: "guard", min: 21, max: 27, unit: "count", why: "문턱 21일 + 판정이 주에 한 번이라 최대 엿새가 밀린다" },
+    { metric: "첫 방치 불만까지 걸린 날", role: "measure", unit: "count", why: "가장 먼저 문을 두드린 사람이 며칠을 참았나 — 문턱이 사람마다 다르므로(people.md §6) 밴드는 아래 두 줄이 쥔다" },
+    { metric: "방치 자원의 문턱 폭", role: "reference", min: 1, unit: "count", why: "방치한 셋의 문턱 최대−최소. 0이면 셋이 같은 원형이거나 계수가 닿지 않은 것이다" },
+    { metric: "제 문턱을 넘고 밀린 날", role: "guard", min: 0, max: 6, unit: "count", why: "**그 사람의** 문턱을 넘은 뒤 실제로 걸리기까지. 판정이 주에 한 번이라 최대 엿새이고, 음수면 문턱을 안 지키고 걸린 것이다" },
     { metric: "시즌 강등발 불만 건수", role: "measure", unit: "count", why: "감독 하나가 한 시즌에 몇 번 이 자리를 만나는가" },
   ],
 });
