@@ -623,7 +623,9 @@ export function buildGmStateNote(
       return due.length > 0
         ? `약속 기한 임박 ${due.length} (${due
             .slice(0, PROMISE_SHOWN)
-            .map((p) => `${playerName(state, p.gamePlayerId)} ${PROMISE_KIND_KO[p.kind]}~${p.dueOn}`)
+            .map(
+              (p) => `${playerName(state, p.gamePlayerId)} ${PROMISE_KIND_KO[p.kind]}~${p.dueOn}`,
+            )
             .join(", ")}${due.length > PROMISE_SHOWN ? " …" : ""})`
         : null;
     })(),

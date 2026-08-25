@@ -85,10 +85,19 @@ const PROSPECT_AGE = 21;
  * 불만을 만들어 내지 않는다 — 자기 자리에 맞는 지위를 받으므로 기대와 실제가
  * 처음부터 맞는다.
  */
-export function derivedSquadStatus(state: GameState, player: GamePlayer): SquadStatus {
-  const blocked = betterAtPosition(state, player.teamId, player);
+export function derivedSquadStatus(
+  state: GameState,
+  player: GamePlayer,
+  /**
+   * 어느 스쿼드의 서열로 재는가 — 기본은 그의 소속이다. **영입은 우리 스쿼드로
+   * 잰다**: 파는 구단에서의 자리는 우리가 제시하는 지위와 견줄 값이 아니다
+   * (transfer.md §3).
+   */
+  teamId: string = player.teamId,
+): SquadStatus {
+  const blocked = betterAtPosition(state, teamId, player);
   if (blocked === 0) {
-    const squad = playersOf(state, player.teamId);
+    const squad = playersOf(state, teamId);
     const better = squad.filter(
       (p) => p.id !== player.id && p.attributes.overall > player.attributes.overall,
     ).length;
