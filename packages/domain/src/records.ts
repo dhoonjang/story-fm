@@ -1080,6 +1080,17 @@ export function boardExpectationText(code: BoardExpectationCode, target?: number
   }
 }
 
+/**
+ * GM이 읽는 **기대 한 줄** — 이름과 목표 순위를 함께 낸다 (career.md §5).
+ *
+ * `boardExpectationText`와 갈리는 것은 우승 경쟁 하나다. 화면의 라벨은 1위 말고 달 자리가
+ * 없어 tier 1에서 순위를 떼지만, 경고가 지워지는 문턱은 그래도 `target`이다 — 숫자가
+ * 빠지면 모델은 3위가 이미 문턱 밖이라는 것을 모른 채 장면을 쓴다.
+ */
+export function boardExpectationLine(code: BoardExpectationCode, target: number): string {
+  return `보드 기대: ${boardExpectationText(code)} (${target}위 이내)`;
+}
+
 export const SeasonRecordSchema = z.object({
   season: z.number().int(),
   /** 재임 팀 — 감독이 팀을 옮겨도 기록이 유지된다 */
