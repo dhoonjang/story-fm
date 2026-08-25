@@ -8,10 +8,12 @@ import type {
   MilestoneCode,
   PacketPlayer,
   Foot,
+  PromiseKind,
   ScheduleType,
   SeasonStat,
   ShootoutOutcome,
   SquadRegistration,
+  SquadStatus,
   TacticalRead,
   TrainingReport,
   BoardExpectationCode,
@@ -87,6 +89,7 @@ import { leaderGroupOf } from "../squad/hierarchy";
 import { ratingTone, type RatingTone } from "../match/ratings";
 import { GAP_CONDITION, edgeOf, subLimitsOf, zoneGrid } from "@story-fm/sim";
 import { moodOf, type MoodRead } from "../squad/mood";
+import { openPromises, squadStatusOf } from "../squad/promises";
 import { isHomegrownFor, occupiesSquadList, squadRegistrationOf } from "../squad/registration";
 import {
   observationOf,
@@ -603,6 +606,17 @@ interface SquadViewRowMeta {
   /** 주급 (£/주) */
   weeklyWage: number;
   contractUntil: string | null;
+  /**
+   * **어떤 자리로 왔는가** — 계약에 적힌 지위, 없으면 지금 서열에서 파생
+   * (`squadStatusOf` → docs/data/people.md §5-2). 그 지위가 부르는 선발 비율이
+   * 출전 불만과 약속 이행을 함께 재므로, 화면과 GM이 **같은 값**을 읽어야 한다.
+   */
+  squadStatus: SquadStatus;
+  /**
+   * 아직 기한 전인 **감독의 약속** — 갈래와 기한뿐이다 (people.md §5-2).
+   * 무슨 말로 약속했는지는 장면의 것이라 여기 오지 않는다.
+   */
+  promises: Array<{ kind: PromiseKind; dueOn: string }>;
   /** 현재 부상 (없으면 null) */
   injury: { bodyPart: string; severity: string; expectedReturn: string } | null;
   /** 출장 정지 잔여 경기 (0이면 정지 아님) */
@@ -2477,6 +2491,8 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         hasIssue: issues.has(p.id),
         weeklyWage: contract?.weeklyWage ?? 0,
         contractUntil: contract?.until ?? null,
+        squadStatus: squadStatusOf(state, p),
+        promises: openPromises(state, p.id).map((pr) => ({ kind: pr.kind, dueOn: pr.dueOn })),
         injury: injury
           ? {
               bodyPart: injury.bodyPart,

@@ -7,7 +7,7 @@ import type {
   SeasonStat,
   StrongFoot,
 } from "@story-fm/domain";
-import { isReserveMatch } from "@story-fm/domain";
+import { isReserveMatch, PROMISE_KIND_KO, SQUAD_STATUS_KO } from "@story-fm/domain";
 import {
   YELLOWS_PER_SUSPENSION,
   ageOf,
@@ -41,6 +41,7 @@ import { leaderGroupOf } from "../squad/hierarchy";
 import { formLabel } from "../squad/form";
 import { INJURY_SEVERITY_KO } from "../squad/injury";
 import { issueReasonText, moodAnchor, moodOf } from "../squad/mood";
+import { openPromises, squadStatusOf } from "../squad/promises";
 import {
   isHomegrownFor,
   occupiesSquadList,
@@ -961,13 +962,32 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
     lines.push(`인상: 강점 ${strengths.join("·")} / 약점 ${weaknesses.join("·")}`);
   }
 
+  /**
+   * 계약 줄이 **장부를 함께 든다** — 지위와 열린 약속 (people.md §5-2).
+   *
+   * 지위는 우리 계약의 칸이라 남의 선수에게는 적지 않는다 — 안개 밖에서 지어낸
+   * 사실이 된다. 약속도 마찬가지로 우리가 한 말만 장부에 선다.
+   * ⚠️ 문장이 아니라 사실이다: 갈래와 기한, 그뿐이다.
+   */
+  const ledger =
+    knowledge === "own"
+      ? [
+          `${SQUAD_STATUS_KO[squadStatusOf(state, p)]} 지위`,
+          ...openPromises(state, p.id).map(
+            (promise) => `${PROMISE_KIND_KO[promise.kind]} 약속 ${promise.dueOn}까지`,
+          ),
+        ]
+      : [];
   lines.push(
     `시즌 기록: ${stat?.apps ?? 0}경기 ${stat?.goals ?? 0}골 ${stat?.assists ?? 0}도움` +
       (seasonRating(stat) === null ? "" : ` · 평점 ${seasonRating(stat)!.toFixed(2)}`),
     ...careerLines(state, p),
-    contract
-      ? `계약: 주급 ${formatMoney(contract.weeklyWage)} · 만료 ${contract.until}`
-      : "계약: 정보 없음",
+    [
+      contract
+        ? `계약: 주급 ${formatMoney(contract.weeklyWage)} · 만료 ${contract.until}`
+        : "계약: 정보 없음",
+      ...ledger,
+    ].join(" · "),
   );
   if (injury) {
     lines.push(
