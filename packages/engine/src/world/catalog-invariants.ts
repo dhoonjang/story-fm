@@ -17,6 +17,7 @@ import {
   type DomesticCupEntry,
 } from "../data/domestic-cup-catalog";
 import { catalogSource } from "../data/catalog-source";
+import { playerCatalog } from "./catalog";
 import { SQUAD_SEEDS } from "../data/squad-seeds";
 import { DERBIES } from "../data/derbies";
 import { HEAD_COACH_NAMES } from "../data/coach-seeds";
@@ -24,6 +25,7 @@ import { OWNER_NAMES } from "../data/owner-seeds";
 import { CLUB_PROFILES_SEED } from "../data/club-profile";
 import { WORLD_FIGURE_SEEDS } from "../data/world-figures";
 import { EURO_MATCHDAYS } from "../competition/europe";
+import { isAssociation, type PlayerCatalogEntry } from "@story-fm/domain";
 import { slugifyName } from "./player-id";
 
 /**
@@ -349,6 +351,48 @@ export function checkSeedInvariants(
   return problems;
 }
 
+/** 위반을 몇 줄까지 이름으로 적을 것인가 — 5,300명이 통째로 어긋나면 메시지가 로그를 덮는다 */
+const NAMED_VIOLATIONS = 5;
+
+/**
+ * **모든 선수에게 국적이 선다** — 등록 규정도 대표팀도 빈칸을 다룰 자리가 없다.
+ *
+ * 시드가 조사한 값이든 클럽 협회에서 온 파생이든(`deriveNationality`) 결과는 같아야
+ * 한다: 한 명이라도 비면 그 위에 서는 규칙이 "국적 없는 선수"라는 갈래를 따로
+ * 들어야 하고, 그 갈래는 아무도 유지하지 않는다. 아는 협회 코드인지도 함께 본다 —
+ * 표에 없는 코드는 비어 있는 것과 똑같이 아무 규정도 읽지 못한다.
+ */
+export function checkPlayerNationality(
+  entries: readonly Pick<PlayerCatalogEntry, "id" | "nationality" | "secondNationality">[],
+): string[] {
+  const missing = entries.filter((e) => e.nationality === undefined);
+  const unknown = entries.filter(
+    (e) =>
+      (e.nationality !== undefined && !isAssociation(e.nationality)) ||
+      (e.secondNationality !== undefined && !isAssociation(e.secondNationality)),
+  );
+  const problems: string[] = [];
+  if (missing.length > 0) {
+    problems.push(
+      `국적이 없는 선수 ${missing.length}명 — ${missing
+        .slice(0, NAMED_VIOLATIONS)
+        .map((e) => e.id)
+        .join(", ")}`,
+    );
+  }
+  if (unknown.length > 0) {
+    problems.push(
+      `협회 표에 없는 국적 코드 ${unknown.length}건 — ${unknown
+        .slice(0, NAMED_VIOLATIONS)
+        .map(
+          (e) => `${e.id}(${e.nationality}${e.secondNationality ? `·${e.secondNationality}` : ""})`,
+        )
+        .join(", ")}`,
+    );
+  }
+  return problems;
+}
+
 /** 네 층을 한 번에 — 팀·리그가 함께 바뀌는 편집(팀 이동·리그 삭제)의 관문 */
 export function checkCatalogInvariants(input: CatalogCandidate): string[] {
   return [
@@ -412,11 +456,13 @@ export function assertCatalogValid(): void {
 }
 
 /** 편집 세대마다 한 번만 센다 — 새 게임마다 169팀을 다시 훑지 않는다 */
-const catalogProblems = catalogSource(() =>
-  checkCatalogInvariants({
+const catalogProblems = catalogSource(() => [
+  ...checkCatalogInvariants({
     leagues: leagueCatalog(),
     teams: teamCatalog(),
     euroCups: cupCatalog(),
     domesticCups: domesticCupCatalog(),
   }),
-);
+  // 선수 표는 후보로 들어오지 않는다 — 어드민이 저장한 뒤의 카탈로그를 그대로 본다
+  ...checkPlayerNationality(playerCatalog()),
+]);

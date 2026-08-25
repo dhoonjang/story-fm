@@ -22,6 +22,7 @@ import {
   migrateManagerAxes,
   migrateMatchStats,
   migrateMirrorProficiency,
+  migrateNationalities,
   migratePassStyles,
   migrateSquadLevels,
   splitPositioningAxis,
@@ -31,7 +32,7 @@ import { saveLockPath } from "./save-lock";
 import type { GamePhase, GameState } from "./state";
 import { ensurePersonas } from "../world/persona";
 import { ensureSquadNumbers } from "../squad/numbers";
-import { playerCatalog } from "../world/catalog";
+import { deriveNationality, playerCatalog } from "../world/catalog";
 import { addMissingClubs, ensureSeededManagers, recomputeOverall, teamNameIn } from "./state";
 
 export { dataDir };
@@ -382,6 +383,13 @@ function migrate(save: Record<string, unknown>, state: GameState): void {
   // (player.md §8). 마커가 없는 세이브에서만 한 번: 다시 돌면 경기·훈련이 그
   // 자리에 쌓은 적응도를 같이 민다.
   migrateMirrorProficiency(state);
+  // 국적 — 카탈로그가 아는 선수는 시드가 조사한 값, 나머지는 그 클럽 협회 (migrations.ts)
+  const catalogById = new Map(playerCatalog().map((e) => [e.id, e]));
+  migrateNationalities(state, (p) => {
+    const entry = p.catalogId === null ? undefined : catalogById.get(p.catalogId);
+    if (entry?.nationality !== undefined) return entry;
+    return { nationality: deriveNationality(p.teamId, undefined) };
+  });
   /**
    * **종합은 저장된 값이 아니라 16축의 파생 캐시다** — 로드할 때 다시 계산한다.
    *
