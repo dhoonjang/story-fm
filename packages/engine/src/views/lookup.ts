@@ -2051,6 +2051,7 @@ const REPORT_EVENT_KO: Record<MatchEventType, string> = {
   red_card: "퇴장",
   substitution: "교체",
   injury: "부상",
+  tactical_shift: "전술 전환",
   half_time: "하프타임",
   extra_time_start: "연장 개시",
   extra_half_time: "연장 전반 종료",

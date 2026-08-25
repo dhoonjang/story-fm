@@ -6,6 +6,7 @@ import type {
   LedgerEntry,
   MatchEventType,
   MatchRecord,
+  MatchSide,
   MilestoneCode,
   PacketPlayer,
   Foot,
@@ -309,6 +310,13 @@ function foldFinanceFeed(ledger: readonly LedgerEntry[]): FinanceFeedRow[] {
       ...(refType ? { unit: refType === "player" ? ("명" as const) : ("건" as const) } : {}),
     };
   });
+}
+
+/** 경기 화면의 전술 카드가 6축 위에 더 싣는 것 — 소화율·노트·전환 표식 */
+interface MatchTacticsExtra {
+  uptake: number;
+  notes: string[];
+  shift: { minute: number; note: string } | null;
 }
 
 /** 팀 전술 (TACTICS) — 스쿼드 탭에서 보고 편집한다 */
@@ -1078,10 +1086,13 @@ export interface MatchView {
    * 감독이 지시한 것이 판에 반영되고 있다는 유일한 증거다.
    */
   exploiting: string[];
-  /** 양팀 전술 6축 + 소화율 */
+  /**
+   * 양팀 전술 6축 + 소화율. `shift`는 그 팀 벤치가 **이 경기에서 마지막으로 판을
+   * 옮긴 정지점** — 장부의 `tactical_shift` 사건에서 파생한다 (match.md §4·§8).
+   */
   tactics: {
-    home: TacticsView & { uptake: number; notes: string[] };
-    away: TacticsView & { uptake: number; notes: string[] };
+    home: TacticsView & MatchTacticsExtra;
+    away: TacticsView & MatchTacticsExtra;
   };
   onPitch: { home: MatchPlayerView[]; away: MatchPlayerView[] };
   bench: { home: MatchPlayerView[]; away: MatchPlayerView[] };
@@ -1722,12 +1733,27 @@ function buildMatchView(state: GameState): MatchView | null {
 
   const subLimits = subLimitsOf(ledger.phase);
 
+  /**
+   * **판을 옮긴 정지점의 표식** — 장부의 마지막 `tactical_shift`에서 파생한다
+   * (match.md §4·§8). 화면이 따로 기억하는 상태가 아니라 사건이 원본이므로, 표식과
+   * 중계가 같은 한 줄에서 나온다. 표식이 없으면 감독은 정지점마다 여섯 축의 점
+   * 눈금을 외워 견줘야 상대의 승부수를 안다.
+   */
+  const shiftOfSide = (side: MatchSide) => {
+    const found = [...ledger.events]
+      .reverse()
+      .find((e) => e.type === "tactical_shift" && e.team === side);
+    const tag = found ? normalizeCauses(found.causes)[0] : undefined;
+    return found && tag ? { minute: found.minute, note: packetTagText(tag, tagCtx) } : null;
+  };
+
   const tacticsOfSide = (teamId: string, tactical: TacticalRead) => ({
     ...(teamId !== state.userTeamId && pending.aiTactics
       ? pending.aiTactics
       : tacticsOf(state, teamId).spec),
     uptake: tactical.uptake,
     notes: tactical.notes.map((tag) => packetTagText(tag, tagCtx)),
+    shift: shiftOfSide(teamId === match.homeTeamId ? "home" : "away"),
   });
 
   return {
@@ -3125,6 +3151,7 @@ const TIMELINE_TYPES: ReadonlySet<MatchEventType> = new Set([
   "red_card",
   "substitution",
   "injury",
+  "tactical_shift",
   "half_time",
   "extra_time_start",
   "extra_half_time",

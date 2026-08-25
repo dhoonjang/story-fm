@@ -97,6 +97,7 @@ const EVENT_KO: Partial<Record<EventRow["type"], string>> = {
   red_card: "퇴장",
   substitution: "교체",
   injury: "부상",
+  tactical_shift: "전술 전환",
 };
 
 /** 킥 하나의 결말 — 막은 사람도 사건이라 이름을 남긴다 (경기 화면과 같은 말) */

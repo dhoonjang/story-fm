@@ -63,6 +63,8 @@ const EVENT_KO: Record<MatchEvent["type"], string> = {
   red_card: "퇴장",
   substitution: "교체",
   injury: "부상",
+  /** 벤치가 판을 옮겼다 — 팀 이름은 줄 머리가 이미 붙인다 (match.md §2) */
+  tactical_shift: "전술 전환",
   half_time: "하프타임",
   extra_time_start: "연장 돌입",
   extra_half_time: "연장 하프타임",
