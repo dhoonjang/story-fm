@@ -387,6 +387,7 @@ export const ISSUE_REASON_KO: Record<PlayerIssueReason, string> = {
   "blocked-move": "막힌 이적",
   contract: "계약 만료",
   "out-of-position": "자리 밖 기용",
+  promise: "어긴 약속",
 };
 
 /** 사유 이름 — 수치를 앞에 다는 것은 연패와 자리 밖 기용뿐이다. 코드가 없으면 `null` */

@@ -1084,6 +1084,9 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
       ...scoreline,
       homeLineup: onPitch.home.map((p) => p.id),
       awayLineup: onPitch.away.map((p) => p.id),
+      // 선발은 교체 전의 명단이다 — 지위가 부르는 출전을 재는 자다 (people.md §5-2)
+      homeStarters: squads.home.starters.map((p) => p.id),
+      awayStarters: squads.away.starters.map((p) => p.id),
       homeOnPitch: finished("home"),
       awayOnPitch: finished("away"),
     };
@@ -1293,6 +1296,9 @@ export function simulateReserveMatch(state: GameState, match: MatchRecord, diges
     awayExpectedGoals: result.awayExpectedGoals,
     homeLineup: squads.home.starters.map((p) => p.id),
     awayLineup: squads.away.starters.map((p) => p.id),
+    // 벤치가 없는 시뮬이라 뛴 사람이 곧 선발이다 — 그래도 칸은 따로 적는다
+    homeStarters: squads.home.starters.map((p) => p.id),
+    awayStarters: squads.away.starters.map((p) => p.id),
     homeOnPitch: squads.home.starters.map((p) => p.id),
     awayOnPitch: squads.away.starters.map((p) => p.id),
   };

@@ -170,3 +170,65 @@ export function registrationBlockText(block: RegistrationBlock): string {
       return `홈그로운이 모자랍니다 (${block.homegrown}/${block.limit}) — 남은 자리는 홈그로운만 채울 수 있습니다`;
   }
 }
+
+// ── 계약 지위 — 어떤 자리로 왔는가 ────────────────────
+
+/**
+ * 스쿼드 지위 — **계약에 적히는 약속**이다 (→ docs/data/people.md §5-2).
+ *
+ * 배열 순서가 곧 서열이라 `squadStatusRank`가 인덱스를 그대로 쓴다. 순서를 바꾸면
+ * 흥정의 지위 항(transfer.md §3)과 되부르기의 상한이 함께 뒤집힌다.
+ */
+export const SQUAD_STATUSES = ["prospect", "backup", "rotation", "starter", "key"] as const;
+export type SquadStatus = (typeof SQUAD_STATUSES)[number];
+
+/** 서열 — 큰 쪽이 위다. 한 칸 차이가 흥정의 한 칸이다 */
+export function squadStatusRank(status: SquadStatus): number {
+  return SQUAD_STATUSES.indexOf(status);
+}
+
+/** 지위의 이름 — 화면·카드·프롬프트가 같은 말을 쓴다 */
+export const SQUAD_STATUS_KO: Record<SquadStatus, string> = {
+  key: "핵심",
+  starter: "주전",
+  rotation: "로테이션",
+  backup: "백업",
+  prospect: "유망주",
+};
+
+/**
+ * 그 지위가 부르는 **선발 비율** — 이 표가 약속의 눈금이다.
+ *
+ * ⚠️ **백업·유망주가 0인 것은 눈금이 아니라 규약이다.** 그 자리로 온 선수에게는
+ * 벤치가 곧 약속의 이행이라 출전 불만이 서지 않는다 — 이 줄이 없으면 백업 영입이
+ * 곧 반란이 되어 스쿼드를 채우는 일 자체가 손해가 된다 (people.md §5-2).
+ *
+ * 8경기 창에서 정수 경계에 떨어지도록 고른 값이다: 핵심 6 · 주전 4 · 로테이션 2.
+ */
+export const SQUAD_STATUS_STARTS: Record<SquadStatus, number> = {
+  key: 0.7,
+  starter: 0.5,
+  rotation: 0.25,
+  backup: 0,
+  prospect: 0,
+};
+
+/**
+ * 그 지위가 부르는 만큼 세웠는가 — **약속 이행 판정과 출전 불만이 쓰는 하나의 자**
+ * (people.md §5·§5-2). 자를 둘 두면 "약속은 지켰는데 불만이 서는" 상태가 생긴다.
+ *
+ * @param startShare 창 안에서 그가 설 수 있었던 경기 중 실제 선발 비율 (0~1)
+ */
+export function promiseKept(startShare: number, status: SquadStatus): boolean {
+  return startShare >= SQUAD_STATUS_STARTS[status];
+}
+
+/**
+ * 그 지위에 모자란 **선발 수** — 창 안에서 몇 번을 더 세웠어야 했나.
+ * 이행했으면 0이다. `PlayerIssue.count`가 이 값을 든다.
+ */
+export function startShortfall(starts: number, played: number, status: SquadStatus): number {
+  if (played <= 0) return 0;
+  const need = Math.ceil(SQUAD_STATUS_STARTS[status] * played);
+  return Math.max(0, need - starts);
+}

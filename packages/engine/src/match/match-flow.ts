@@ -605,6 +605,15 @@ export function startMatch(state: GameState): FlowResult {
       userIsHome ? userSideLedger : aiSideLedger,
       userIsHome ? aiSideLedger : userSideLedger,
     ),
+    /**
+     * **첫 휘슬에 선 열한 명** — 장부의 `onPitch`는 교체를 따라 움직이므로 여기서
+     * 한 번 뜬다. 경기가 끝나면 그대로 결과의 `homeStarters`가 되어 계약 지위가
+     * 부르는 출전을 재는 자가 된다 (people.md §5-2).
+     */
+    startingXI: {
+      home: [...(userIsHome ? userSideLedger : aiSideLedger).onPitch],
+      away: [...(userIsHome ? aiSideLedger : userSideLedger).onPitch],
+    },
     segment: 0,
     matchFatigue: {},
     casterHistory: [],
@@ -1560,6 +1569,10 @@ export function finalizeMatch(state: GameState): MatchDigest {
     awayExpectedGoals: statSum(awayLineup, (line) => line.scoringExpectation),
     homeLineup,
     awayLineup,
+    // 선발은 킥오프에 떴다 — 뛴 사람 전부와 갈리는 자리다 (people.md §5-2)
+    ...(pending.startingXI
+      ? { homeStarters: pending.startingXI.home, awayStarters: pending.startingXI.away }
+      : {}),
     /**
      * 종료 휘슬에 서 있던 사람 — 명단은 뛴 사람 전부라 교체 아웃·퇴장이 섞여 있다.
      * 감독의 경기는 구간 시뮬이 연장까지 직접 가므로 여기서 쓰이지는 않지만,

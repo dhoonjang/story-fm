@@ -90,6 +90,11 @@ const DAILY_GAIN: Record<ApproachTopic, number> = {
   "blocked-move": 9,
   contract: 5,
   "out-of-position": 6,
+  /**
+   * 어긴 약속 — `blocked-move`와 같은 눈금이다 (people.md §8). 둘 다 **감독의 한 번의
+   * 결정**이 세운 불만이라 기다렸다 잊히는 일이 아니고, 그래서 가장 빠른 축에 선다.
+   */
+  promise: 9,
   interest: 8,
   morale: 8,
   results: 4,
@@ -171,6 +176,7 @@ const CHANNEL_OF: Record<ApproachTopic, ApproachChannel> = {
   listed: "player",
   "blocked-move": "player",
   "out-of-position": "player",
+  promise: "player",
   contract: "agent",
   interest: "agent",
   morale: "captain",
@@ -805,17 +811,19 @@ function driftPressure(state: GameState): void {
  * 순서가 하나 있어야** 하기 때문이다.
  */
 const APPROACH_TOPIC_ORDER: Record<ApproachTopic, number> = {
-  minutes: 0,
-  demotion: 1,
-  "out-of-position": 2,
-  "losing-run": 3,
-  "early-return": 4,
-  "blocked-move": 5,
-  listed: 6,
-  contract: 7,
-  interest: 8,
-  morale: 9,
-  results: 10,
+  /** 감독 자신이 세운 원인이 맨 앞이다 — 어긴 약속은 그가 답할 것이 가장 분명하다 */
+  promise: 0,
+  minutes: 1,
+  demotion: 2,
+  "out-of-position": 3,
+  "losing-run": 4,
+  "early-return": 5,
+  "blocked-move": 6,
+  listed: 7,
+  contract: 8,
+  interest: 9,
+  morale: 10,
+  results: 11,
 };
 
 /**

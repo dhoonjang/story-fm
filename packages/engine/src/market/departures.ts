@@ -94,6 +94,8 @@ export function clearDepartedState(state: GameState, player: GamePlayer, from: s
   state.transferList = state.transferList.filter((l) => l.gamePlayerId !== player.id);
   state.playerTraining = state.playerTraining.filter((t) => t.gamePlayerId !== player.id);
   state.issues = state.issues.filter((i) => i.gamePlayerId !== player.id);
+  // 떠난 사람에게 한 약속은 지킬 자리가 없다 (people.md §5-2 — 불만과 같은 결)
+  state.promises = (state.promises ?? []).filter((pr) => pr.gamePlayerId !== player.id);
   player.state.transferRequestedOn = undefined;
   forgetRoles(state, player.id);
   player.isCaptain = false;

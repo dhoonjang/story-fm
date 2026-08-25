@@ -97,6 +97,18 @@ export const MatchResultSchema = z.object({
   homeLineup: z.array(z.string()).optional(),
   awayLineup: z.array(z.string()).optional(),
   /**
+   * **첫 휘슬에 선 열한 명** — 위 명단은 교체 투입·퇴장까지 담은 「뛴 사람 전부」라
+   * 선발을 가려낼 수 없고, 순서로도 못 가른다(`extra-time.ts`).
+   *
+   * 계약 지위가 부르는 출전을 재는 자가 이 칸이다 — 「주전으로 데려와 놓고 여덟
+   * 경기에 두 번 세웠다」가 장부에서 갈리는 자리다
+   * (→ docs/data/people.md §5-2). 옛 세이브엔 없어 optional이고, 없으면 읽는 쪽이
+   * `homeLineup`으로 떨어진다 — 뛴 사람 전부는 선발의 상위 집합이라 옛 세이브가
+   * 없던 불만을 만들어 내지 않는다.
+   */
+  homeStarters: z.array(z.string()).optional(),
+  awayStarters: z.array(z.string()).optional(),
+  /**
    * **종료 시각에 그라운드에 서 있던 선수** — 연장과 승부차기를 뛰는 사람들이다.
    *
    * 위 명단은 "뛴 사람 전부"라 교체로 나간 선수도 퇴장당한 선수도 들어 있다.

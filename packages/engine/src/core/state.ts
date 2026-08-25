@@ -31,6 +31,7 @@ import type {
   PaymentSchedule,
   Persona,
   PlayerIssue,
+  ManagerPromise,
   SettlingEvent,
   TransferListing,
   PlayerTraining,
@@ -351,6 +352,13 @@ export interface PendingMatch {
   matchId: string;
   packet: StrengthPacket;
   ledger: MatchLedgerState;
+  /**
+   * **첫 휘슬에 선 열한 명** (양 팀) — 장부의 `onPitch`는 교체를 따라 움직이므로
+   * 킥오프에 한 번 뜬다. 경기가 끝나면 결과의 `homeStarters`로 옮겨져 계약 지위가
+   * 부르는 출전을 재는 자가 된다 (→ docs/data/people.md §5-2).
+   * 옛 세이브엔 없다 (optional — 없으면 결과에 선발이 적히지 않는다).
+   */
+  startingXI?: { home: string[]; away: string[] };
   /** 진행한 구간 수 — 난수 채널에 들어가 같은 경기가 재현된다 */
   segment?: number;
   /**
@@ -623,6 +631,15 @@ export interface GameState {
    */
   reserveTraining?: ReserveTrainingPolicy;
   issues: PlayerIssue[];
+  /**
+   * **감독이 한 약속** — 갈래·기한·상태뿐이다 (→ docs/data/people.md §5-2).
+   *
+   * 무슨 말로 약속했는지는 장면의 것이고, 이행 판정은 전부 다른 장부에서 나온다
+   * (출전 명단 · 이적 리스트 · 열린 협상 · 완장). 여기 남는 것은 **감독이 그것을
+   * 약속했다는 사실과 기한**뿐이라, 파생할 원본이 없는 유일한 값이다.
+   * 옛 세이브엔 없다 (로드 시 빈 배열 — 세이브 버전을 올리지 않는다).
+   */
+  promises: ManagerPromise[];
   /**
    * 정착 이벤트 — 면담·팀토크·주장 지명이 새 영입의 적응에 남긴 것.
    * 나중에 추가된 테이블이라 옛 세이브엔 없다(로드 시 빈 배열).
@@ -2577,6 +2594,7 @@ export function createGame(input: CreateGameInput): GameState {
     trainingReports: [],
     seasonStats: [],
     issues: [],
+    promises: [],
     scoutReports: [],
     settlingEvents: [],
     transferList: [],

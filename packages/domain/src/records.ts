@@ -3,6 +3,7 @@ import { DateString } from "./date-string";
 import { MATCH_MINUTE_MAX } from "./match";
 import { AXIS_KO, type AttributeAxis } from "./player";
 import { PitchClaimKindSchema, PitchClaimSchema } from "./persuasion";
+import { SQUAD_STATUSES } from "./squad-rules";
 
 /**
  * 기록 테이블 (v6) — 선수·팀·일정에 딸린 이력.
@@ -76,6 +77,14 @@ export const ContractSchema = z.object({
   until: DateString,
   /** active = 선수당 정확히 1건 */
   status: z.enum(["active", "ended"]),
+  /**
+   * **어떤 자리로 왔는가** — 계약에 적히는 약속이다 (→ docs/data/people.md §5-2).
+   *
+   * 출전 불만도 약속 이행도 이 칸을 읽는다: 백업으로 온 선수와 주전으로 온 선수를
+   * 같은 자로 재면 스쿼드를 채우는 일 자체가 반란의 씨앗이 된다. 옛 계약엔 없어
+   * optional이고, 없으면 **지금 서열에서 파생한다**(`squadStatusOf` — SAVE_VERSION 유지).
+   */
+  squadStatus: z.enum(SQUAD_STATUSES).optional(),
   /**
    * 이 계약에 대해 이미 낸 만료 경고 중 **가장 낮은 문턱**(일). 없으면 아직 안 냈다.
    * 문턱을 하루로 재면 tick이 지나지 않은 날의 경고는 영영 오지 않으므로,
@@ -465,6 +474,13 @@ export const NegotiationRoundSchema = z.object({
    * (transfer.md §5-2 · 구 세이브엔 없어 optional).
    */
   paymentYears: z.number().int().min(1).max(MAX_PAYMENT_YEARS).optional(),
+  /**
+   * 이 오퍼가 제시하는 **스쿼드 지위** — 합의되는 순간 새 계약에 적힌다
+   * (transfer.md §1 · people.md §5-2). 라운드는 그것을 **나를 뿐이다**: 성사되지
+   * 않은 협상이 남긴 지위가 계약에 적히면 어기지도 않은 약속이 라커룸에 선다.
+   * 구 세이브엔 없어 optional.
+   */
+  squadStatus: z.enum(SQUAD_STATUSES).optional(),
 });
 /**
  * 메디컬 — **합의와 계약 사이에 놓인 하루.**
@@ -848,6 +864,8 @@ export const PLAYER_ISSUE_REASONS = [
   "contract",
   /** 주 포지션 묶음 밖 선발이 이어진다 — 연속 경기는 `PlayerState.outOfPositionRun` */
   "out-of-position",
+  /** 감독이 한 약속의 기한이 지났는데 장부가 이행을 못 찾았다 — 약속은 `state.promises` */
+  "promise",
 ] as const;
 export type PlayerIssueReason = (typeof PLAYER_ISSUE_REASONS)[number];
 
@@ -855,13 +873,49 @@ export const PlayerIssueSchema = z.object({
   gamePlayerId: z.string().min(1),
   kind: z.enum(["unhappy"]),
   reason: z.enum(PLAYER_ISSUE_REASONS).optional(),
-  /** 사유에 딸린 수치 — `losing-run`이면 연패 수, `out-of-position`이면 연속 경기 수 */
+  /**
+   * 사유에 딸린 수치 — `losing-run`이면 연패 수, `out-of-position`이면 연속 경기 수,
+   * `minutes`면 그 지위에 **모자란 선발 수**다 (people.md §5).
+   */
   count: z.number().int().min(1).optional(),
   /** 옛 세이브가 들고 있는 사유 문장 — 더는 쓰지 않는다 (`reason`의 폴백) */
   note: z.string().optional(),
   since: DateString,
 });
 export type PlayerIssue = z.infer<typeof PlayerIssueSchema>;
+
+// ── 약속 — 감독의 말이 장부에 서는 자리 ───────────────
+/**
+ * 감독이 한 약속의 **갈래** (→ docs/data/people.md §5-2).
+ *
+ * 무슨 말로 약속했는지는 장면의 것이다. 코어가 드는 것은 갈래·기한·상태뿐이고,
+ * 이행 판정도 전부 장부에서 나온다 — 어느 자리에서도 문장을 읽지 않는다.
+ */
+export const PROMISE_KINDS = ["minutes", "transfer", "renewal", "captain"] as const;
+export type PromiseKind = (typeof PROMISE_KINDS)[number];
+
+export const PROMISE_KIND_KO: Record<PromiseKind, string> = {
+  minutes: "출전",
+  transfer: "이적 허용",
+  renewal: "재계약",
+  captain: "주장",
+};
+
+/**
+ * 약속 한 줄 — **`Promise`가 아니라 `ManagerPromise`다.** 전역 `Promise`를 가리는
+ * 타입 이름은 이 패키지를 import 하는 모든 파일에서 비동기 코드의 뜻을 바꾼다.
+ */
+export const ManagerPromiseSchema = z.object({
+  id: z.string().min(1),
+  gamePlayerId: z.string().min(1),
+  kind: z.enum(PROMISE_KINDS),
+  madeOn: DateString,
+  /** 이 날 장부가 판정한다 — 하루뿐이다 */
+  dueOn: DateString,
+  /** `open` = 아직 기한 전. 판정이 끝나면 이력으로 남는다 */
+  status: z.enum(["open", "kept", "broken"]),
+});
+export type ManagerPromise = z.infer<typeof ManagerPromiseSchema>;
 
 /**
  * 정착 이벤트 — **감독이 새 영입에게 한 일**의 원장 (settling.ts).
