@@ -303,6 +303,47 @@ ClubProfile { stadium, capacity, commercialTier: 1|2|3|4 }
 - ⚠️ **실물과 닮게 조율하지 않는다.** "아스널은 빨강이니까"로 색을 손보는 순간
   §7.1의 미탑재가 깨진다. 색은 id가 정하고, 그 결과가 실물과 다른 것이 정상이다.
 
+### 3.2 더비 표 (`data/derbies.ts`) — 어느 대진이 라이벌인가
+
+```ts
+Derby { name, teams: [teamId, teamId], heat: 1 | 2 | 3 }
+```
+
+구단 프로필과 같은 **불변 초기치**다 — 세이브에 들어가지 않고, 표를 비우면 라이벌
+축이 통째로 사라질 뿐 다른 것은 그대로다.
+
+⚠️ **코드가 연고를 추론하지 않는다.** 도시·리그·거리로 짐작하면 같은 도시의 아무
+두 팀이 더비가 되고(밀라노의 세 번째 팀), 도시가 다른 진짜 더비(데어 클라시커·
+노스웨스트)는 빠진다 — 더비는 지리가 아니라 **역사**라서 표 말고는 원본이 없다.
+
+**`heat`는 연고를 얼마나 나눠 쓰는가다** — 명성이 아니다. 같은 도시의 두 팬은 같은
+직장과 같은 식탁에 앉으므로, 그 경기가 판을 가장 크게 흔든다.
+
+| `heat` | 무엇                                    | 누가                                                                        |
+| ------ | --------------------------------------- | --------------------------------------------------------------------------- |
+| 3      | 한 도시(한 지역)를 반으로 가른다        | 맨체스터 · 머지사이드 · 북런던 · 마드리드 · 세비야 · 밀라노 · 로마 · 레비어 |
+| 2      | 도시는 달라도 서로를 최대 라이벌로 본다 | 노스웨스트 · 엘 클라시코 · 데르비 디탈리아 · 데어 클라시커 · 르 클라시크    |
+| 1      | 이웃 사이의 자존심                      | 바스크 더비 — 두 팬이 함께 입장하는, 가장 우호적인 더비다                   |
+
+`heat`가 닿는 자리는 다섯이고, 전부 **그 값에 비례**한다:
+
+| 어디                          | 무엇                                                           | 문서                                                            |
+| ----------------------------- | -------------------------------------------------------------- | --------------------------------------------------------------- |
+| 경기 패킷 (`keyPoints` 첫 줄) | `source:"context" code:"derby"` 사실 태그 — 중계·화면이 읽는다 | [match §1](../simulation/match.md#1-전력-분석-패킷-코어-결정적) |
+| 경기 강도                     | `1 + DERBY_INTENSITY_STEP(0.06) × heat` — 양 팀 카드·부상·파울 | [match §1](../simulation/match.md)                              |
+| 결과의 라커룸                 | 승리 `+DERBY_MOOD_STEP(0.02) × heat` · 패배 그만큼 −           | [match §6](../simulation/match.md)                              |
+| 홈 관중                       | `OCCUPANCY_DERBY_BONUS(0.03) × heat`                           | [finance §5.2](../simulation/finance.md)                        |
+| 머천다이징 창                 | 더비 한 경기가 `1 + MERCH_DERBY_WEIGHT(0.5) × heat`경기로 센다 | [finance §5.3](../simulation/finance.md)                        |
+
+⚠️ **친선과 2군은 라이벌 축을 타지 않는다.** 대진이 같아도 프리시즌 친선의 승패가
+스쿼드 전원의 폼을 흔들면 몸을 만드는 5주가 라커룸을 정하고, 2군 경기는 결과가
+출전과 성장에만 닿는 경기다 ([season.md §2](../simulation/season.md)). 위 다섯
+자리가 전부 **한 문**(`derbyForMatch`)을 지나므로 이 규칙이 한 곳에만 적힌다.
+
+더비 전야·경기 뒤 회견과 시즌 리뷰의 더비 전적은
+[people §4](people.md#4-기자회견--세계가-먼저-말을-거는-유일한-자리) ·
+[career §5.1](../simulation/career.md).
+
 ## 4. 팀의 종류
 
 `LeagueCatalogEntry.kind`가 그 리그의 클럽이 게임에서 **하는 일**을 정한다.
@@ -716,6 +757,8 @@ WorldScope { leagues, teamsPerLeague, cups, markets }
 | 팀 카탈로그 · 체급 · 지정 선발             | `packages/engine/src/data/team-catalog.ts`                           |
 | 리그 카탈로그 (`kind` · 계수 · 중계권)     | `packages/engine/src/data/league-catalog.ts`                         |
 | 구단 프로필 (구장 · 브랜드)                | `packages/engine/src/data/club-profile.ts`                           |
+| 더비 표 (`heat` · `derbyOf`)               | `packages/engine/src/data/derbies.ts`                                |
+| 더비의 문 · 더비 전적 (`derbyForMatch`)    | `packages/engine/src/club/derby.ts`                                  |
 | 카탈로그 오버라이드 (읽기·쓰기·캐시)       | `packages/engine/src/data/catalog-source.ts` · `team-override.ts`    |
 | 팀 어드민 (조회 · 편집 · 추가 · 삭제)      | `packages/engine/src/world/admin-team.ts`                            |
 | 카탈로그 불변식 (순수) · 로드 시 검사      | `packages/engine/src/world/catalog-invariants.ts`                    |

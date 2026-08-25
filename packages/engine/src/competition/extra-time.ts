@@ -3,6 +3,7 @@ import { clampCondition, naturalPositionOf } from "@story-fm/domain";
 import { conditionDrain, drainVariance } from "@story-fm/sim";
 import { EXTRA_TIME_MINUTES, simulateExtraTime } from "../match/quick-sim";
 import { recordCard } from "../match/discipline";
+import { derbyForMatch } from "../club/derby";
 import { openInjuryFor } from "../squad/injury";
 import { makeRng } from "../core/rng";
 import { simSquadFor } from "../core/tick";
@@ -230,6 +231,7 @@ export function resolveExtraTime(state: GameState, decider: MatchRecord, channel
    * 선수 목록만 넘기면 패킷이 자연 포지션·기본 전술·적응도 60·감독 65로 서서
    * 연장에서만 약팀이 살아나거나 죽는다 (match.md §7).
    */
+  const extraDerby = derbyForMatch(decider);
   const extra = simulateExtraTime(
     simSquadFor(state, decider.homeTeamId, xi.home),
     simSquadFor(state, decider.awayTeamId, xi.away),
@@ -237,6 +239,8 @@ export function resolveExtraTime(state: GameState, decider: MatchRecord, channel
     channel,
     {
       neutral: decider.neutral === true,
+      // 연장도 같은 경기다 — 더비의 강도가 90분에서만 걸리면 장부가 두 말을 한다
+      ...(extraDerby ? { derby: { name: extraDerby.name, heat: extraDerby.heat } } : {}),
       /**
        * 90분의 경고가 연장으로 이어진다 — 이 목록이 없으면 90분에 경고를 받은
        * 선수의 연장 경고가 첫 장으로 세어져 두 번째 경고 퇴장이 성립하지 않는다.

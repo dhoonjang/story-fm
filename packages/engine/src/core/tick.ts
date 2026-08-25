@@ -30,6 +30,7 @@ import { advanceDomesticCups } from "../competition/domestic-cup";
 import { hasCups } from "../world/scope";
 import { driftFamiliarity, tickOtherClubs } from "../squad/other-clubs";
 import { applyResultMood } from "../squad/slump";
+import { derbyForMatch } from "../club/derby";
 import { advanceEuroKnockouts } from "../competition/euro-knockout";
 import { advanceSuperCups } from "../competition/super-cup";
 import { applyMonthlyDevelopment } from "../squad/development";
@@ -1157,14 +1158,19 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
       home: simSquadOf(state, match.homeTeamId),
       away: simSquadOf(state, match.awayTeamId),
     };
+    const derby = derbyForMatch(match);
     const result = quickSimulate(
       squads.home,
       squads.away,
       state.seed,
       `${state.season}:${match.competitionId ?? "friendly"}:${match.stage ?? "league"}:${match.round}:${match.homeTeamId}-${match.awayTeamId}`,
-      // 중립 경기장은 **경기가 갖고 있는 사실**이다 — 안 넘기면 결승의 명목상
-      // 홈이 홈 어드밴티지를 그대로 받는다 (match.md §7)
-      { neutral: match.neutral === true },
+      // 중립 경기장과 더비는 **경기가 갖고 있는 사실**이다 — 안 넘기면 결승의
+      // 명목상 홈이 홈 어드밴티지를 그대로 받고, 리그의 더비는 카드·부상·판세에
+      // 닿지 않는다 (match.md §7)
+      {
+        neutral: match.neutral === true,
+        ...(derby ? { derby: { name: derby.name, heat: derby.heat } } : {}),
+      },
     );
     // 부상·카드·교체는 각자의 표가 갖는다 — 경기 결과에 섞어 넣지 않는다
     const { injuries: hurt, cards, subs, possession, ...scoreline } = result;
@@ -1254,6 +1260,7 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
         teamId,
         goalsFor - conceded,
         onPitch[side].map((p) => p.id),
+        derby?.heat ?? 0,
       );
     }
     /**
@@ -1390,6 +1397,7 @@ export function simulateReserveMatch(state: GameState, match: MatchRecord, diges
     home: simSquadFor(state, match.homeTeamId, reserveXI(state, match.homeTeamId)),
     away: simSquadFor(state, match.awayTeamId, reserveXI(state, match.awayTeamId)),
   };
+  // 2군 경기는 라이벌 축을 타지 않는다 — 결과가 출전과 성장에만 닿는 경기다
   const result = quickSimulate(
     squads.home,
     squads.away,

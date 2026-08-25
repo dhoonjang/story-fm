@@ -25,12 +25,12 @@ StrengthPacket {
   zones,                 // { attack, midfield, defense } × 양팀
   matchups,              // 존별 우열 + 양팀 존 수치
   tactical,              // 지시 적용률(uptake) + 이득·대가 태그
-  keyPoints,             // 전술 미스매치 (sim/key-points.ts, 14축)
+  keyPoints,             // 전술 미스매치 (sim/key-points.ts, 14축) + 컨텍스트 태그
   guide: {
     shotProfiles,        // 선수×경로의 기대 슈팅·평균 xG — 두 시뮬의 공통 원본
     expectedShots, chanceXg, expectedGoals, // 위 프로필을 팀 단위로 합친 판독값
     possession,          // 중원 우위가 만든 점유 — 두 시뮬과 패스 배분의 원본 (§1.5)
-    intensity,           // 0.80~1.22 — 피로·파울·부상률을 함께 움직인다
+    intensity,           // 0.80~1.44 — 파울·카드·부상률을 함께 움직인다 (더비가 곱한다)
   },
 }
 ```
@@ -43,7 +43,7 @@ StrengthPacket {
 
 ```ts
 PacketTag {
-  source,      // counter | gap | mismatch | zone-plan | directive | exploit | tactical
+  source,      // counter | gap | mismatch | zone-plan | directive | exploit | tactical | context
   code,        // 축·상성·지시의 코드 — 판정과 집계의 열쇠 ("space_behind", "backline-pace")
   favours,     // 이로운 편 (home | away | null) — 약점을 **가진** 쪽이 아니다
   holder?,     // 그 사실을 **가진** 쪽 — 미스매치 문장의 주어. 없으면 이로운 편의 반대다
@@ -63,6 +63,31 @@ PacketTag {
 골문처럼 가진 쪽이 잃는 축은 이로운 편이 반대지만, 창조자·마무리·골키퍼 배급·세트피스
 키커는 **가진 쪽이 곧 이로운 쪽**이다. 한쪽으로만 접으면 우리 에이스가 상대에게
 이로운 사실로 실린다 (`key-points.ts`의 `AXIS_FAVOURS_HOLDER`).
+
+#### 컨텍스트 태그 — 이 경기가 무슨 경기인가 (`source: "context"`)
+
+전력에서 나오지 않는 사실도 판세의 일부다. **더비**가 첫 갈래다: 대진이 더비 표
+([team.md §3.2](../data/team.md))에 있으면 `keyPoints`의 **첫 줄**에 태그가 선다.
+
+```ts
+{ source: "context", code: "derby", favours: null, sharp: true,
+  values: { heat: 1|2|3 }, text: "머지사이드 더비" }
+```
+
+- **편이 없다** (`favours: null`). 더비는 어느 쪽에도 이롭지 않으므로 골의 원인
+  태그로 뽑히지 않고(`causesFor`는 편이 있는 태그만 본다), 화면에서도 중립 색이다.
+- **이름은 표의 것이라 `text`가 든다** — 코드가 짓는 문장이 아니라 카탈로그의 고유
+  명사다. 한 줄로 세우는 것은 언제나처럼 렌더러 하나(`packetTagText`)이고, 그래서
+  중계·화면·CLI가 같은 말을 한다. **프롬프트는 손대지 않는다** — 캐스터는 이미
+  `keyPoints`를 통째로 읽는다.
+- **강도가 함께 오른다.** 양 팀의 `guide.intensity`에 `1 + DERBY_INTENSITY_STEP ×
+heat`가 곱해진다 — 압박·템포의 clamp(0.80\~1.22) **뒤**다. 더비는 전술이 만드는
+  것이 아니라 경기가 갖고 있는 사실이라, 이미 압박 5로 선 팀에서도 한 계단 더
+  거칠어져야 한다. 카드·파울·부상이 함께 오른다 (§6의 손잡이 표).
+
+`heat`가 닿는 나머지 자리(관중·굿즈·라커룸·보드)는 [team.md §3.2](../data/team.md)
+가 한 표로 모아 둔다. **친선과 2군은 그중 어느 것도 타지 않는다** — 다섯 자리가
+전부 `derbyForMatch` 한 문을 지난다.
 
 ### 1.1 전력은 개인에서 시작한다
 
@@ -1177,6 +1202,7 @@ MatchEvent { minute, type, team, actors[], causes, xg, goalProbability, shotOutc
 | 카드 → BOOKING·SUSPENSION (`match/discipline.ts`)     | ○    | ○    |
 | 출장 정지 소화 (`serveSuspensions`)                   | ○    | ○    |
 | 연패·연승의 라커룸 (`squad/slump.ts`)                 | ○    | ○    |
+| 더비 결과의 라커룸 (아래)                             | ○    | ○    |
 | 포지션 적응도 (아래)                                  | ○    | ○    |
 | 사건·선수별 기록·점유 (`MATCH.result` · §4)           | ○    | ○    |
 | 경기별 평점 (`MATCH.result.ratings`) · 결산 판정(LLM) | ○    | ✗    |
@@ -1187,6 +1213,21 @@ MatchEvent { minute, type, team, actors[], causes, xg, goalProbability, shotOutc
 간이 시뮬도 남기지 않고 시즌 합계만 쌓는다(§7) — 상대의 평점도 같은 눈금으로
 `ratingSum`에만 들어간다. 남의 팀 카드·정지·부상 일수는 브리핑하지 않는다(하루 열
 경기의 카드를 나열하면 소음이다) — 조회 도구가 알려 준다.
+
+### 더비의 결과는 승점 3보다 무겁다
+
+연패·연승의 라커룸을 세우는 그 자리에서(`applyResultMood`) 더비 한 줄이 더 걸린다.
+승리면 그 팀 스쿼드 전원의 폼이 `+DERBY_MOOD_STEP(0.02) × heat`, 패배면 같은 폭으로
+내려간다. 무승부는 0이다.
+
+**연속 기록과 달리 폭이 대칭이다.** 연승의 이득을 연패의 손해보다 작게 두는 것은
+계단이 길어질수록 한쪽으로만 굴러가기 때문이지만, 더비는 **한 경기 안에서 두
+라커룸이 정확히 반대로 갈린다** — 한쪽이 얻는 것을 다른 쪽이 잃는다. 리그 전체가
+같은 규칙을 쓰므로(§7의 간이 시뮬도 같은 함수를 지난다) 감독 팀만 더비를 다르게
+겪지 않는다.
+
+heat 3의 더비 패배는 −0.06이다. 대패 페널티(−0.08, 그날 뛴 선수만)와 같은 자리에
+서는 폭이고, 스쿼드 **전원**에 걸린다는 점이 다르다.
 
 ### 마일스톤 — 스탯을 적은 그 자리가 문턱을 센다
 
@@ -1343,7 +1384,9 @@ DF +1.4 · MF +1.1 · FW +0.9 · 도움 +0.6 · 무실점 GK +0.8/DF +0.5 · 실
 | `QUICK_FIRST_HALF_SHARE`                                              | 0.46                                            | 간이 시뮬 사건이 전반에 실리는 몫 — 밀도와 카드 분 눈금이 여기서 선다 (§7)                                                          |
 | `CARDS_PER_MATCH`                                                     | 3.4                                             | 경기당 기대 카드 — 양팀 합, 두 시뮬 공통 (`teamCardRate`)                                                                           |
 | `INJURY_PER_MATCH`                                                    | 0.1                                             | 경기당 기대 부상 — 양팀 합, 두 시뮬 공통 (`teamInjuryRate`)                                                                         |
-| `matchIntensity`                                                      | 0.80\~1.22                                      | 압박·템포가 카드·부상·피로에 함께 거는 배수 — 두 시뮬 공통                                                                          |
+| `matchIntensity`                                                      | 0.80\~1.22                                      | 압박·템포가 카드·부상·파울에 함께 거는 배수 — 두 시뮬 공통                                                                          |
+| `DERBY_INTENSITY_STEP`                                                | 0.06                                            | 더비 `heat` 한 계단이 그 배수에 **곱하는** 몫 — 1.06 / 1.12 / 1.18, clamp 밖이다 (§1)                                               |
+| `DERBY_MOOD_STEP`                                                     | 0.02                                            | 더비 승패가 그 팀 스쿼드 전원의 폼에 남기는 폭 × `heat` (§6)                                                                        |
 | `STRAIGHT_RED_CHANCE`                                                 | 0.03                                            | 경고 없이 곧장 퇴장이 될 확률                                                                                                       |
 | `BOOKED_AGAIN_WEIGHT`                                                 | 0.35                                            | 이미 경고를 받은 선수가 다시 뽑힐 가중치 배수                                                                                       |
 | `DIRECTIVE_EFFECTS.careful.booking`                                   | 0.5                                             | `careful` 지시가 그 선수의 카드 가중·곧장 퇴장 확률에 거는 배수 (세기의 이득 배수를 탄다 — `light` 0.7 · `heavy` 0.3)               |
@@ -1406,6 +1449,10 @@ DF +1.4 · MF +1.1 · FW +0.9 · 도움 +0.6 · 무실점 GK +0.8/DF +0.5 · 실
 - **중립 경기장은 결승의 사실이다** — 경기(`MatchRecord.neutral`)가 갖고 있는 값이
   그대로 간이 시뮬로 들어가 홈 노출(1.06·0.96)을 1로 만든다. 넘기지 않으면 명목상의
   홈이 결승에서 공짜 우위를 얻는다.
+- **더비도 경기가 갖고 있는 사실이다** — 대진이 더비 표에 있으면 그 `heat`가
+  중립 여부와 같은 길로 간이 시뮬에 들어간다. 카드·부상을 뽑기 전에 부르는
+  `matchIntensity`와 패킷의 `guide.intensity`가 **같은 배수**를 받아야 한다 —
+  한쪽만 곱하면 리그의 95%에서 더비가 슈팅 분포만 바꾸고 카드는 평소대로 나온다.
 - **부상은 실제로 뛴 선수 전원에게 걸린다** — 뛰고 안 다쳤을 때의 성향 하강
   (`easeProneness`)은 선발 + 투입된 교체가 대상이다. 유저 경기가 쓰는 것과 같은
   목록이라 로테이션 자원의 부상 성향이 리그 전체에서 한 눈금으로 움직인다.
@@ -1725,4 +1772,5 @@ m은 장부의 `subLimitsOf(ledger.phase)`를 뷰가 `subs.limit`으로 실어 �
 | 경기 리포트 뷰·MOTM              | `packages/engine/src/views/views.ts` (`buildMatchReport`·`motmOf`)         |
 | 연장 판정·타 팀 연장·승부차기    | `packages/engine/src/competition/extra-time.ts` · `shootout.ts`            |
 | 간이 시뮬·평점·징계              | `packages/engine/src/match/quick-sim.ts` · `ratings.ts` · `discipline.ts`  |
+| 더비 표 · 더비의 문              | `packages/engine/src/data/derbies.ts` · `club/derby.ts` (`derbyForMatch`)  |
 | 경기 화면                        | `apps/web/components/match-view.tsx`                                       |

@@ -51,7 +51,7 @@ export type PressTrigger = z.infer<typeof PressTriggerSchema>;
 
 /** 무엇에 대한 사실인가 — 기자가 그걸 어떻게 묻는지는 기자의 몫이다 */
 export const PressFactKindSchema = z.enum([
-  /** 방금 치른 경기의 결과 */
+  /** 방금 치른 경기의 결과 · 최근 폼 · 더비 전적 (`tags[0]`이 가른다) */
   "result",
   /** 최근 무승 */
   "winless",
@@ -433,6 +433,10 @@ export function pressFactText(fact: PressFact): string {
   const reason = issueReasonKo((tags[1] ?? null) as PlayerIssueReason | null) ?? "사유 불명";
   switch (fact.kind) {
     case "result":
+      // 더비 전적 — 이번 경기는 세지 않았다 (people.md §4). 첫 더비면 0승 0무 0패다
+      if (sub === "derby") {
+        return `${tags[1] ?? "더비"} — 그 전까지 ${v.won ?? 0}승 ${v.drawn ?? 0}무 ${v.lost ?? 0}패`;
+      }
       return sub === "recent"
         ? `최근 ${v.matches ?? 0}경기 ${tags
             .slice(1)
