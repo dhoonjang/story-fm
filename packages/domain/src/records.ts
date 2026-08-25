@@ -719,6 +719,19 @@ export function milestoneTitle(code: MilestoneCode, value: number): string {
   }
 }
 
+/**
+ * 라벨에 **어느 범위의 수인가**를 붙인 말 — "구단 통산 100경기".
+ *
+ * 문턱은 클럽 안의 수인데(match.md §6) "100경기"만 적으면 읽는 쪽이 통산으로 읽고,
+ * 원장에 없는 부임 전 커리어를 이야기에 지어 넣는다. 이 말을 회견 카드·경기 말풍선·
+ * 서사 메모·심경의 사실 줄이 함께 쓴다 — **네 곳이 각자 접두를 붙이면** 어느 하나를
+ * 고친 날 나머지 셋이 다른 말을 한다.
+ */
+export function milestonePhrase(code: MilestoneCode, value: number): string {
+  const title = milestoneTitle(code, value);
+  return code === "apps" || code === "goals" ? `구단 통산 ${title}` : title;
+}
+
 // ── 스카우팅 ──────────────────────────────────────────
 /**
  * 스카우트 파견 (SCOUT_REPORT) — **선수 단위**. 완료되면 안개가 좁혀진다: 관측형은

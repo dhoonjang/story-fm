@@ -23,6 +23,7 @@ import { addDays } from "../core/dates";
 import { formatMoney } from "./finance";
 import { makeRng, pick } from "../core/rng";
 import { clampForm, formLabel, moraleToForm } from "../squad/form";
+import { matchMilestones } from "../squad/career";
 import { recentOutcomes } from "../squad/slump";
 import { isFriendly } from "../competition/friendly";
 import { boardExpectation, computeStandings } from "../competition/season";
@@ -242,6 +243,29 @@ export function buildMatchPress(state: GameState, matchId: string): PressConfere
     });
   }
 
+  /**
+   * **마일스톤은 그 경기의 회견에만 실린다** (people.md §4). 이 함수는 마감이
+   * 정산을 끝낸 **뒤**에 불리므로(`finalizeMatch`) 그 경기의 기록이 이미 장부에 있다.
+   *
+   * 한 경기에 여럿이 서면 **드문 것 하나만** 오른다 — 셋을 다 실으면 그 회견이
+   * 시상식이 된다. 목록은 이미 드문 순으로 온다(`compareMilestones`)므로 첫 줄이
+   * 그 하나다. 나머지는 선수 상세와 서사 메모에 그대로 있다.
+   *
+   * 선수가 명부에서 잡히지 않으면 카드를 세우지 않는다 — 이름 자리에 id를 흘리면
+   * 기자가 그것을 사람 이름으로 읽는다.
+   */
+  const milestone = matchMilestones(state, matchId)[0];
+  const achiever = milestone ? playerById(state, milestone.gamePlayerId) : null;
+  if (milestone && achiever) {
+    facts.push({
+      kind: "milestone",
+      data: { name: achiever.name, values: { value: milestone.value }, tags: [milestone.code] },
+      about: achiever.id,
+      /** 날 선 자리가 아니다 — 기자가 캐물을 일이 아니라 물어봐 줄 일이다 (people.md §4) */
+      sharp: false,
+    });
+  }
+
   const trigger: PressTrigger = winless ? "pressure" : "match";
   const outcomeKo = outcome === "win" ? "승리" : outcome === "draw" ? "무승부" : "패배";
   return {
@@ -249,6 +273,11 @@ export function buildMatchPress(state: GameState, matchId: string): PressConfere
     date: state.date,
     trigger,
     reporterId: reporterFor(state, trigger),
+    /**
+     * 자리의 국면 한 줄 — **기록은 여기 오지 않는다.** 사실 카드가 이름과 눈금을
+     * 이미 들고 있어(`milestone`), 같은 사실을 국면에도 적으면 기자가 한 회견에서
+     * 두 번 묻는다. 국면은 그 자리의 온도(스코어·무승 계단)이지 그날의 사건 목록이 아니다.
+     */
     context:
       `${opponent}전 ${score} ${outcomeKo}` + (winless ? ` · 최근 ${recent.length}경기 무승` : ""),
     facts,

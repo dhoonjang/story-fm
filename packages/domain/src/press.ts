@@ -5,7 +5,7 @@ import { formatMoney } from "./money";
 import { ApproachChannelSchema, type ApproachChannel } from "./persona";
 import {
   boardExpectationText,
-  milestoneTitle,
+  milestonePhrase,
   PLAYER_ISSUE_REASONS,
   type BoardExpectationCode,
   type MilestoneCode,
@@ -435,17 +435,8 @@ export function pressFactText(fact: PressFact): string {
     case "board-demand":
       return `보드 요청 — ${demandText(sub, name, v.baseline)}${d.date ? ` · 기한 ${d.date}` : ""}`;
     case "milestone":
-      return milestoneLine((sub ?? "apps") as MilestoneCode, name, v.value ?? 1);
+      return `${name} ${milestonePhrase((sub ?? "apps") as MilestoneCode, v.value ?? 1)}`;
   }
-}
-
-/**
- * 마일스톤 한 줄 — 문턱은 **클럽 안의 수**라 그 말을 함께 세운다 (match.md §6).
- * "100경기"만 적으면 기자가 통산으로 읽고 없는 커리어를 질문에 지어 넣는다.
- */
-function milestoneLine(code: MilestoneCode, name: string, value: number): string {
-  const title = milestoneTitle(code, value);
-  return code === "apps" || code === "goals" ? `${name} 구단 통산 ${title}` : `${name} ${title}`;
 }
 
 function outcomeWord(tag: string | undefined): string {
