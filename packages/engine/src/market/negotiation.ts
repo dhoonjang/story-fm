@@ -7,17 +7,21 @@ import type {
   Negotiation,
   NegotiationVerdict,
   PlayerIssueReason,
+  SquadStatus,
   Transfer,
 } from "@story-fm/domain";
 import {
   MAX_PAYMENT_YEARS,
   PITCH_CLAIM_KO,
+  SQUAD_STATUS_KO,
   ageOf,
   buildPaymentInstallments,
   isPlayerDeal,
   marketDirectionKo,
   naturalPositionOf,
   registrationBlockText,
+  squadStatusRank,
+  statusAtRank,
 } from "@story-fm/domain";
 import {
   addDays,
@@ -74,7 +78,8 @@ import { assignSquadNumber } from "../squad/numbers";
 import { userWageRoom } from "../club/board-request";
 import { marketBiasOf, squadShortfallText, transferWindowLabel, windowOpenForTeam } from "./market";
 import { evaluatePitch, latitudeOf } from "./persuasion";
-import { clampToBand, counterBoundsOf, outgoingCounterFloor } from "./counter-bounds";
+import { bandOpen, clampToBand, counterBoundsOf, outgoingCounterFloor } from "./counter-bounds";
+import { derivedSquadStatus } from "../squad/promises";
 import { makeRng } from "../core/rng";
 import type { MarketSkillResult, SkillResult } from "../skills";
 import { grantManagerXP } from "../skills";
@@ -124,6 +129,14 @@ const dealTerms = (t: MarketTerms): MarketTerms => ({
 export function splitLabel(paymentYears?: number): string {
   const n = paymentYearsOf(paymentYears);
   return n === undefined ? "" : ` · ${n}년 분할`;
+}
+
+/**
+ * 조건 줄에 붙는 지위 표기 — 분할과 같은 이유로 한 함수다. 제시가 없으면 빈 문자열:
+ * **말하지 않은 것은 약속이 아니라** 조건 줄에도 서지 않는다 (people.md §5-2).
+ */
+export function statusLabel(status?: SquadStatus): string {
+  return status === undefined ? "" : ` · ${SQUAD_STATUS_KO[status]} 지위`;
 }
 
 /**
@@ -306,12 +319,15 @@ export function sendOffer(state: GameState, input: DealTerms): MarketSkillResult
   // 감독이 부른 이름이 실려 오므로 여기서 id로 굳힌다 — 아래는 협상 id와
   // `gamePlayerId`를 이 값으로 짓는다
   // 임대료는 한 시즌짜리 돈이라 나눌 기간이 없다 (transfer.md §5-2)
-  const { paymentYears: requested, ...rest } = input;
+  const { paymentYears: requested, squadStatus: proposed, ...rest } = input;
   const paymentYears = input.kind === "loan" ? undefined : paymentYearsOf(requested);
+  // 빌려 온 선수의 계약은 남의 것이라 임대에는 적을 지위가 없다 (transfer.md §2)
+  const squadStatus = input.kind === "loan" ? undefined : proposed;
   const terms: DealTerms = {
     ...rest,
     playerId: player.id,
     ...(paymentYears === undefined ? {} : { paymentYears }),
+    ...(squadStatus === undefined ? {} : { squadStatus }),
   };
 
   // 임대 영입도 같은 테이블을 쓴다 — 방향만 다르다
@@ -401,7 +417,8 @@ export function sendOffer(state: GameState, input: DealTerms): MarketSkillResult
       ? `${teamName(player.teamId)}에 ${player.name} 임대를 요청 — 임대료 ${formatMoney(terms.fee)} · ` +
         `우리가 낼 주급 ${formatMoney(terms.weeklyWage)}.`
       : `${teamName(player.teamId)}의 ${player.name}에게 오퍼 — 이적료 ${formatMoney(terms.fee)}` +
-        `${splitLabel(paymentYears)} · 주급 ${formatMoney(terms.weeklyWage)} · ${terms.years}년.`;
+        `${splitLabel(paymentYears)} · 주급 ${formatMoney(terms.weeklyWage)} · ${terms.years}년` +
+        `${statusLabel(squadStatus)}.`;
   const card: MarketCard = {
     kind: "offer",
     playerId: player.id,
@@ -417,6 +434,8 @@ export function sendOffer(state: GameState, input: DealTerms): MarketSkillResult
     dueOn: respondsOn,
     ...directionField(kind),
     ...(terms.kind === "loan" ? { loan: true } : {}),
+    // 카드에 지위 칸이 따로 없다 — 조건과 함께 읽히도록 한 줄로 싣는다
+    ...(squadStatus === undefined ? {} : { note: `${SQUAD_STATUS_KO[squadStatus]} 지위 제시` }),
     ...(verdicts.length > 0
       ? {
           pitch: verdicts.map((v) => ({ label: PITCH_CLAIM_KO[v.kind], verified: v.verified })),
@@ -559,6 +578,8 @@ function pushOurRound(
     contractYears: terms.years,
     // 일시금은 라운드에 남기지 않는다 — 없는 값이 조건으로 굳는다
     ...(paymentYears === undefined ? {} : { paymentYears }),
+    // 지위는 **나르기만 한다** — 계약에 적히는 것은 합의되는 순간이다 (transfer.md §11)
+    ...(terms.squadStatus === undefined ? {} : { squadStatus: terms.squadStatus }),
     respondsOn,
     probability,
     verdict: null,
@@ -612,6 +633,8 @@ export function respondOffer(
     weeklyWage?: number;
     /** 재계약의 조정에서 선수가 부르는 계약 연수 — 다른 갈래는 무시된다 */
     contractYears?: number;
+    /** 재계약·영입의 조정에서 선수가 부르는 계약 지위 — 다른 갈래는 무시된다 */
+    squadStatus?: SquadStatus;
     paymentYears?: number;
     note?: string;
   },
@@ -702,6 +725,16 @@ export function respondOffer(
           bounds.years.expectation,
       )
     : offer.contractYears;
+  /**
+   * **지위도 되부를 수 있는 축이다** (transfer.md §1). 인자가 비면 상대 자신의
+   * 기대치 — 지금 실제로 서는 자리에서 한 칸 위 — 가 선다. 구간이 닫힌 판은
+   * 감독이 이미 그 한 칸을 얹은 자리라, 지위로는 더 부를 것이 없다.
+   */
+  const statusBand = bounds.status;
+  const statusAsked =
+    countering && bandOpen(statusBand)
+      ? (input.squadStatus ?? statusAtRank(statusBand.expectation))
+      : undefined;
   const counterSeverance = releasing ? feeAsked : 0;
   const counterFee = renewing || releasing ? 0 : feeAsked;
   const counterWageDemand = renewing ? wageAsked : 0;
@@ -746,6 +779,25 @@ export function respondOffer(
     return {
       ok: false,
       message: `요구 연수는 ${bounds.years.min}년 이상 ${bounds.years.max}년 이하여야 합니다`,
+    };
+  }
+  // 구간이 닫힌 판은 감독이 이미 그 한 칸을 얹은 자리다 — 지위로 더 부를 것이 없다
+  if (countering && input.squadStatus !== undefined && !bandOpen(statusBand)) {
+    return {
+      ok: false,
+      message: `${player.name}의 지위는 더 부를 수 없습니다 — 이미 그가 부를 수 있는 자리를 제시했습니다`,
+    };
+  }
+  if (
+    statusAsked !== undefined &&
+    bandOpen(statusBand) &&
+    (squadStatusRank(statusAsked) < statusBand.min || squadStatusRank(statusAsked) > statusBand.max)
+  ) {
+    return {
+      ok: false,
+      message:
+        `요구 지위는 ${SQUAD_STATUS_KO[statusAtRank(statusBand.min)]} 이상 ` +
+        `${SQUAD_STATUS_KO[statusAtRank(statusBand.max)]} 이하여야 합니다`,
     };
   }
 
@@ -844,6 +896,7 @@ export function respondOffer(
       probability: odds.probability,
       verdict: "counter",
       note: input.note,
+      ...(statusAsked === undefined ? {} : { squadStatus: statusAsked }),
     });
     return {
       ok: true,
@@ -851,8 +904,8 @@ export function respondOffer(
         counterTerms: dealTerms({ weeklyWage: counterWageDemand, years: yearsAsked }),
       }),
       message:
-        `${player.name}은(는) 주급 ${formatMoney(counterWageDemand)} · ${yearsAsked}년 계약을 원합니다. ` +
-        `그 조건으로 다시 제안하면 받아들일 것입니다`,
+        `${player.name}은(는) 주급 ${formatMoney(counterWageDemand)} · ${yearsAsked}년 계약` +
+        `${statusLabel(statusAsked)}을(를) 원합니다. 그 조건으로 다시 제안하면 받아들일 것입니다`,
     };
   }
   negotiation.rounds.push({
@@ -866,6 +919,7 @@ export function respondOffer(
     verdict: "counter",
     note: input.note,
     ...(counterYears === undefined ? {} : { paymentYears: counterYears }),
+    ...(statusAsked === undefined ? {} : { squadStatus: statusAsked }),
   });
   return {
     ok: true,
@@ -877,8 +931,8 @@ export function respondOffer(
       }),
     }),
     message:
-      `${counterpart}의 조정 — 이적료 ${formatMoney(counterFee)}${splitLabel(counterYears)} · 주급 ${formatMoney(counterWage)}. ` +
-      `받아들이려면 그 조건으로 오퍼를 다시 넣으세요`,
+      `${counterpart}의 조정 — 이적료 ${formatMoney(counterFee)}${splitLabel(counterYears)} · 주급 ${formatMoney(counterWage)}` +
+      `${statusLabel(statusAsked)}. 받아들이려면 그 조건으로 오퍼를 다시 넣으세요`,
   };
 }
 
@@ -1626,7 +1680,13 @@ export function expiringContracts(state: GameState, withinDays = 180) {
  */
 export function openRenewal(
   state: GameState,
-  input: { playerId: string; weeklyWage: number; years: number },
+  input: {
+    playerId: string;
+    weeklyWage: number;
+    years: number;
+    /** 감독이 제시하는 계약 지위 — 합의되면 새 계약에 적힌다 (people.md §5-2) */
+    squadStatus?: SquadStatus;
+  },
 ): MarketSkillResult {
   const pick = pickAnyPlayer(state, input.playerId);
   if (!pick.ok) return { ok: false, message: pick.message };
@@ -1640,6 +1700,7 @@ export function openRenewal(
     weeklyWage: input.weeklyWage,
     years: input.years,
     kind: "renew",
+    ...(input.squadStatus === undefined ? {} : { squadStatus: input.squadStatus }),
   };
   const odds = dealOdds(state, terms);
   if (odds.blockers.length > 0) {
@@ -1682,6 +1743,10 @@ export function openRenewal(
     repeats: negotiation.rounds.filter((r) => r.by === "us").length,
   });
   const until = activeContract(state, player.id)?.until;
+  const cardNote = [
+    ...(until ? [`현 계약 ${until} 만료`] : []),
+    ...(input.squadStatus === undefined ? [] : [`${SQUAD_STATUS_KO[input.squadStatus]} 지위 제시`]),
+  ].join(" · ");
   const card: MarketCard = {
     kind: "renewal",
     playerId: player.id,
@@ -1691,13 +1756,14 @@ export function openRenewal(
     terms: dealTerms({ weeklyWage: input.weeklyWage, years: input.years }),
     odds: oddsText(odds),
     dueOn: respondsOn,
-    ...(until ? { note: `현 계약 ${until} 만료` } : {}),
+    ...(cardNote ? { note: cardNote } : {}),
   };
   return {
     ok: true,
     payload: card,
     message:
       `${player.name}에게 재계약 제안 — 주급 ${formatMoney(input.weeklyWage)} · ${input.years}년` +
+      `${statusLabel(input.squadStatus)}` +
       `${until ? ` (현 계약 ${until} 만료)` : ""}. 성사 가능성 ${oddsText(odds)}. ${describeWait(waitDays)}`,
   };
 }
@@ -1999,6 +2065,30 @@ function executeLoanIn(
   };
 }
 
+/**
+ * 합의된 **계약 지위** — 이 값이 새 계약에 적힌다 (people.md §5-2 · transfer.md §11).
+ *
+ * 세 자리를 차례로 본다.
+ * ① 합의된 라운드에 실린 지위 — **감독이 명시한 것이 이긴다.**
+ * ② 사실로 확인된 설득 논거 `starting_role` — 코어가 "그 자리에 그보다 나은 선수가
+ *    없다"를 확인해 준 「주전 보장」은 성사되는 순간 `starter` 지위로 접힌다.
+ *    확인되지 않은 논거는 여기까지 오지 않는다(`negotiation.pitched`에 안 쌓인다) —
+ *    선수가 믿지 않은 말이 계약에 적힐 이유가 없다.
+ * ③ 그 밖은 파생값이다. **지위가 없는 계약을 새로 만들지 않는다** (transfer.md §1).
+ *
+ * 재는 자리는 언제나 우리 스쿼드다 — 영입 대상은 이 시점에 아직 파는 구단 소속이다.
+ */
+function agreedSquadStatus(
+  state: GameState,
+  negotiation: Negotiation,
+  agreed: Negotiation["rounds"][number],
+  player: GamePlayer,
+): SquadStatus {
+  if (agreed.squadStatus) return agreed.squadStatus;
+  if (negotiation.pitched?.includes("starting_role")) return "starter";
+  return derivedSquadStatus(state, player, state.userTeamId);
+}
+
 function executeRenewal(
   state: GameState,
   negotiation: Negotiation,
@@ -2018,6 +2108,7 @@ function executeRenewal(
   }
   const previous = activeContract(state, player.id);
   if (previous) previous.status = "ended";
+  const squadStatus = agreedSquadStatus(state, negotiation, agreed, player);
   state.contracts.push({
     id: `c-${player.id}-renew-${state.date}`,
     gamePlayerId: player.id,
@@ -2026,6 +2117,7 @@ function executeRenewal(
     since: state.date,
     until: contractUntil(state.date, agreed.contractYears),
     status: "active",
+    squadStatus,
   });
   negotiation.status = "completed";
   /**
@@ -2043,7 +2135,8 @@ function executeRenewal(
     ok: true,
     message:
       `${player.name} 재계약 완료 — 주급 ${formatMoney(agreed.weeklyWage)}, ` +
-      `${contractUntil(state.date, agreed.contractYears)}까지. 주급 총액이 늘어납니다` +
+      `${contractUntil(state.date, agreed.contractYears)}까지${statusLabel(squadStatus)}. ` +
+      "주급 총액이 늘어납니다" +
       (freed ? " · 계약 불만이 풀렸습니다" : ""),
     brief: {
       head: "재계약",
@@ -2054,6 +2147,8 @@ function executeRenewal(
           text: formatMoney(agreed.weeklyWage),
           note: `${contractUntil(state.date, agreed.contractYears)}까지`,
         }),
+        // 지위는 약속이라 요약에 선다 — 어겼을 때 라커룸이 세는 것이 이 줄이다
+        item({ label: "계약 지위", text: SQUAD_STATUS_KO[squadStatus] }),
       ],
     },
   };
@@ -2422,6 +2517,7 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
   // 계약 — 기존 계약을 끝내고 새로 쓴다 (주급의 원본은 CONTRACT다)
   const previous = activeContract(state, player.id);
   if (previous) previous.status = "ended";
+  const squadStatus = agreedSquadStatus(state, negotiation, agreed, player);
   state.contracts.push({
     id: `c-${player.id}-${state.date}`,
     gamePlayerId: player.id,
@@ -2430,6 +2526,7 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
     since: state.date,
     until: contractUntil(state.date, agreed.contractYears),
     status: "active",
+    squadStatus,
   });
 
   // 재정 — 우리 지출·상대 수입. 예산에서도 빠진다.
@@ -2518,7 +2615,8 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
       (paymentYears === undefined
         ? ""
         : ` (${paymentYears}년 분할 — 첫 회분 ${formatMoney(dueNow)})`) +
-      `, 주급 ${formatMoney(agreed.weeklyWage)} ${agreed.contractYears}년. 남은 이적 예산 ${formatMoney(ourFinance.transferBudget)}` +
+      `, 주급 ${formatMoney(agreed.weeklyWage)} ${agreed.contractYears}년${statusLabel(squadStatus)}. ` +
+      `남은 이적 예산 ${formatMoney(ourFinance.transferBudget)}` +
       (slot.ok ? "" : ` ⚠ ${registrationBlockText(slot.block)} — 2군으로 들어왔습니다`),
     brief: {
       head: "영입 완료",
@@ -2536,6 +2634,7 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
           text: formatMoney(agreed.weeklyWage),
           note: `${agreed.contractYears}년`,
         }),
+        item({ label: "계약 지위", text: SQUAD_STATUS_KO[squadStatus] }),
         item({ label: "남은 이적 예산", text: formatMoney(ourFinance.transferBudget) }),
         ...(slot.ok
           ? []
@@ -3191,6 +3290,13 @@ export function runAiRenewals(state: GameState, digest: string[]): void {
       since: state.date,
       until: contractUntil(state.date, years),
       status: "active",
+      /**
+       * **지위 칸은 비워 둔다** (transfer.md §1) — 남의 구단의 재계약은 감독이 아무
+       * 자리도 약속한 적 없는 계약이라, 적어 두면 그때의 서열이 굳어 약속인 척한다.
+       * 살아나는 자리는 감독이 그 구단으로 이직한 다음 날이다: 몇 시즌 전 서열로
+       * 굳은 지위가 그날부터 출전 불만을 낸다. 읽는 쪽이 그때그때 파생하면
+       * (`squadStatusOf`) 언제나 지금의 서열이다.
+       */
     });
 
     /**

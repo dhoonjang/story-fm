@@ -11,6 +11,7 @@ import type {
   ShootoutKick,
   StrengthPacket,
   TacticAssignment,
+  TacticsSpec,
 } from "@story-fm/domain";
 import { isReserveMatch } from "@story-fm/domain";
 import {
@@ -18,6 +19,7 @@ import {
   FORMATION_CHANGE_COST,
   clampCondition,
   compareMilestones,
+  matchMinutesOf,
   milestonePhrase,
   naturalPositionOf,
   normalizeCauses,
@@ -43,12 +45,14 @@ import {
   buildStrengthPacket,
   createLedger,
   GAP_THRESHOLD,
+  insertBeforeStop,
   mergeSubstitutions,
   planAiSubstitution,
   planAiTacticalShift,
   simulateSegment,
   subLimitsOf,
   type LineupSlot,
+  type MatchLedgerState,
   type SegmentPlan,
   type SegmentStop,
 } from "@story-fm/sim";
@@ -615,6 +619,15 @@ export function startMatch(state: GameState): FlowResult {
       userIsHome ? userSideLedger : aiSideLedger,
       userIsHome ? aiSideLedger : userSideLedger,
     ),
+    /**
+     * **첫 휘슬에 선 열한 명** — 장부의 `onPitch`는 교체를 따라 움직이므로 여기서
+     * 한 번 뜬다. 경기가 끝나면 그대로 결과의 `homeStarters`가 되어 계약 지위가
+     * 부르는 출전을 재는 자가 된다 (people.md §5-2).
+     */
+    startingXI: {
+      home: [...(userIsHome ? userSideLedger : aiSideLedger).onPitch],
+      away: [...(userIsHome ? aiSideLedger : userSideLedger).onPitch],
+    },
     segment: 0,
     matchFatigue: {},
     casterHistory: [],
@@ -672,6 +685,90 @@ export function markEntered(state: GameState): void {
  */
 const CHASE_SHAPES: readonly Formation[] = ["4-3-3", "3-5-2"];
 const HOLD_SHAPES: readonly Formation[] = ["5-4-1"];
+
+/**
+ * **상대 벤치도 판단한다** — 스코어와 남은 시간을 보고 무게를 옮긴다 (match.md §2).
+ *
+ * 옮긴 값은 `pendingMatch`에만 남아 그 경기에서만 쓰인다(저장된 팀 전술은 불변).
+ * 그리고 **옮겼다는 사실은 사건으로 남는다** — 상태만 바꾸면 중계는 사건 목록에 없는
+ * 것을 쓸 수 없어 "상대가 던졌다"를 말할 수 없고, 감독은 팀 탭의 점 눈금을 정지점마다
+ * 외워 견줘야 그 승부수를 안다.
+ *
+ * @returns 실제로 옮겨졌을 때만 `tactical_shift` 한 줄 — 아니면 null
+ */
+function planAiShift(
+  state: GameState,
+  pending: PendingMatch,
+  ctx: {
+    aiSide: MatchSide;
+    /** 상대의 킥오프 전술 — 축 이동의 상한이 여기서 선다 */
+    aiKickoff: TacticsSpec;
+    /** 이 구간이 끝난 판 — 방금 들어간 골까지 반영된 장부다 */
+    ledger: MatchLedgerState;
+    plan: SegmentPlan;
+  },
+): MatchEvent | null {
+  const { aiSide, aiKickoff, ledger, plan } = ctx;
+  /**
+   * **종료 휘슬에는 판단하지 않는다.** 끝난 경기의 벤치 판단은 판에 닿지 않으므로
+   * 그 한 줄은 정보가 아니라 소음이다 (연장으로 가는 경기의 90분은 `full_time`이
+   * 아니라 `extra_time_start`이라 여기서 걸리지 않는다).
+   */
+  if (plan.stop === "full_time") return null;
+  const aiNow = pending.aiTactics ?? aiKickoff;
+  // 라커룸에서 판을 다시 짜는 자리 — 하프타임과 연장의 두 휴식이 같다
+  const shift = planAiTacticalShift(
+    aiSide,
+    aiNow,
+    aiKickoff,
+    ledger,
+    isBreak(plan.stop),
+    pending.aiShape !== undefined,
+  );
+  if (!shift) return null;
+  /**
+   * **모양은 여기서 고른다** — 구간 시뮬은 의도만 낸다. 후보 프리셋 중 지금
+   * 그라운드에 선 열한 명이 가장 잘 서는 것 하나이고, 그게 지금 모양과 같으면
+   * 아무 일도 일어나지 않는다 (`bestShapeFor`).
+   */
+  let reshaped: Formation | null = null;
+  if (shift.shape && !pending.aiShape) {
+    const onPitch = ledger[aiSide].onPitch
+      .map((id) => playerById(state, id))
+      .filter((p): p is GamePlayer => p !== null);
+    const candidates = shift.shape === "chase" ? CHASE_SHAPES : HOLD_SHAPES;
+    const picked = onPitch.length > 0 ? bestShapeFor(onPitch, candidates) : null;
+    if (picked && picked !== aiNow.formation) {
+      pending.aiShape = { formation: picked, intent: shift.shape };
+      reshaped = picked;
+    }
+  }
+  /**
+   * AI의 런타임 전술도 사람과 같은 스키마를 지난다. 모양 이름은 **갈아 깐 판에서**
+   * 온다 — 실제 좌표를 옮기지 않은 채 이름만 바꾸면 판은 그대로인데 장부의 모양만
+   * 달라져 화면과 갈라진다 (`reseatOnAiShape`가 그 좌표를 세운다).
+   */
+  const guarded = TacticsSpecSchema.safeParse({
+    ...aiNow,
+    ...shift.axes,
+    formation: pending.aiShape?.formation ?? aiNow.formation,
+  });
+  pending.aiTactics = guarded.success ? guarded.data : aiNow;
+  /**
+   * **전환이 실제로 일어났을 때만 사건이 선다.** 판단이 났어도 축이 상한에 걸려
+   * 그대로고 모양도 이미 갈아 낀 뒤라면 판 위에서 달라진 것이 없다 — 그 한 줄은
+   * 중계가 인용할 사실이 아니라 매 정지점의 잡음이 된다.
+   */
+  if (!shift.axes && !reshaped) return null;
+  return {
+    minute: plan.minute,
+    type: "tactical_shift",
+    team: aiSide,
+    // 선수의 사건이 아니라 팀의 판단이다 (match.md §4)
+    actors: [],
+    causes: [{ ...shift.note, flags: reshaped ? [`formation:${reshaped}`] : [] }],
+  };
+}
 
 /**
  * 다음 정지점까지 코어가 굴린다 — **경기 결과가 정해지는 단일 지점**.
@@ -783,7 +880,26 @@ export function advanceSegment(state: GameState): {
     pending.matchFatigue ?? {},
   );
   // 끼우는 순서의 규칙은 sim이 쥔다 — match-cli도 같은 것을 부른다 (segment.ts)
-  const events = mergeSubstitutions(plan.events, aiSubs);
+  const segmentEvents = mergeSubstitutions(plan.events, aiSubs);
+
+  /**
+   * **벤치의 판단은 이 구간이 끝난 판을 본다** — 방금 들어간 골 다음의 스코어다.
+   * 그래서 장부에 적기 전에 한 번 굴려 보고(`applyEvents`는 순수 함수다) 그 판으로
+   * 전환을 정한 뒤, 전환 사건을 끼워 **한 번에** 적는다. 적고 나서 끼우면 그 줄이
+   * 정지 사건 뒤에 서고, 하프타임에 붙은 감독의 교체가 창을 문다 (match.md §5).
+   */
+  const rolled = segmentEvents.length > 0 ? applyEvents(pending.ledger, segmentEvents) : null;
+  if (rolled && !rolled.ok) {
+    return { ok: false, plan: null, message: rolled.errors.join("\n") };
+  }
+  const afterSegment = rolled?.state ?? pending.ledger;
+  const shiftEvent = planAiShift(state, pending, {
+    aiSide,
+    aiKickoff,
+    ledger: afterSegment,
+    plan,
+  });
+  const events = shiftEvent ? insertBeforeStop(segmentEvents, shiftEvent) : segmentEvents;
 
   let message = `사건 없이 ${plan.minute}′까지 흘렀습니다`;
   if (events.length > 0) {
@@ -796,48 +912,6 @@ export function advanceSegment(state: GameState): {
   pending.segment = segment + 1;
   // 다음 구간이 이어받을 연속 시계 — 장부의 정수 분이 잘라 버린 소수 자리를 여기 남긴다
   pending.segmentClock = plan.clock;
-  /**
-   * **상대 벤치도 판단한다** — 스코어와 남은 시간을 보고 무게를 옮긴다.
-   * 이 값은 pendingMatch에만 남아 그 경기에서만 쓰인다 (저장된 팀 전술은 불변).
-   */
-  const aiNow = pending.aiTactics ?? aiKickoff;
-  // 라커룸에서 판을 다시 짜는 자리 — 하프타임과 연장의 두 휴식이 같다
-  const shift = planAiTacticalShift(
-    aiSide,
-    aiNow,
-    aiKickoff,
-    pending.ledger,
-    isBreak(plan.stop),
-    pending.aiShape !== undefined,
-  );
-  if (shift) {
-    /**
-     * **모양은 여기서 고른다** — 구간 시뮬은 의도만 낸다. 후보 프리셋 중 지금
-     * 그라운드에 선 열한 명이 가장 잘 서는 것 하나이고, 그게 지금 모양과 같으면
-     * 아무 일도 일어나지 않는다 (`bestShapeFor`).
-     */
-    if (shift.shape && !pending.aiShape) {
-      const onPitch = pending.ledger[aiSide].onPitch
-        .map((id) => playerById(state, id))
-        .filter((p): p is GamePlayer => p !== null);
-      const candidates = shift.shape === "chase" ? CHASE_SHAPES : HOLD_SHAPES;
-      const picked = onPitch.length > 0 ? bestShapeFor(onPitch, candidates) : null;
-      if (picked && picked !== aiNow.formation) {
-        pending.aiShape = { formation: picked, intent: shift.shape };
-      }
-    }
-    /**
-     * AI의 런타임 전술도 사람과 같은 스키마를 지난다. 모양 이름은 **갈아 깐 판에서**
-     * 온다 — 실제 좌표를 옮기지 않은 채 이름만 바꾸면 판은 그대로인데 장부의 모양만
-     * 달라져 화면과 갈라진다 (`reseatOnAiShape`가 그 좌표를 세운다).
-     */
-    const guarded = TacticsSpecSchema.safeParse({
-      ...aiNow,
-      ...shift.axes,
-      formation: pending.aiShape?.formation ?? aiNow.formation,
-    });
-    pending.aiTactics = guarded.success ? guarded.data : aiNow;
-  }
   accumulateFatigue((pending.matchFatigue ??= {}), plan.fatigue);
   // 피로가 쌓였으니 다음 구간의 전력이 달라진다 (교체·전술 변경과 같은 경로)
   refreshPacket(state);
@@ -1241,30 +1315,11 @@ export function buildRatingBrief(state: GameState): MatchRatingBrief | null {
   const ours = ledger.events.filter((e) => e.team === side);
   const goals = ours.filter((e) => e.type === "goal");
   /**
-   * 그라운드를 떠난 시각 — 교체의 [나가는 선수, 들어오는 선수] 짝과 **퇴장**이 같은
-   * 자격으로 출전 시간을 끊는다 (match.md §6). 퇴장을 세지 않으면 20′에 나간 선수도
-   * 90분으로 남아, LLM 채점이 "풀타임을 뛰고 퇴장까지 당한 선수"를 읽는다.
+   * 출전 시간 — 규칙은 도메인이 갖는다 (`matchMinutesOf`). 끝난 경기의 리포트·MOTM이
+   * **같은 함수**를 결과의 사건 목록에 대고 부르므로, 같은 선수의 출전 시간이 평점
+   * 판정과 화면에서 갈리지 않는다 (match.md §6).
    */
-  const wentOff = new Map<string, number>();
-  const cameOn = new Map<string, number>();
-  for (const e of ours) {
-    const [first, second] = e.actors;
-    if (e.type === "substitution") {
-      if (first) wentOff.set(first, e.minute);
-      if (second) cameOn.set(second, e.minute);
-    } else if (e.type === "red_card" && first) {
-      wentOff.set(first, Math.min(wentOff.get(first) ?? e.minute, e.minute));
-    }
-  }
-  /** 이 경기의 길이 — 연장을 치렀으면 120분이다 (출전 시간이 평점의 기준값이다) */
-  const FULL_TIME = wentToExtraTime(ledger) ? 120 : 90;
-  const minutesOf = (id: string): number => {
-    const on = cameOn.get(id);
-    const off = wentOff.get(id);
-    const from = on ?? 0;
-    const to = off ?? FULL_TIME;
-    return Math.max(0, Math.min(FULL_TIME, to) - Math.min(from, FULL_TIME));
-  };
+  const minutesOf = matchMinutesOf(ours, wentToExtraTime(ledger));
 
   const played = new Set<string>(ledger[side].onPitch);
   for (const e of ours) {
@@ -1550,6 +1605,15 @@ export function finalizeMatch(state: GameState): MatchDigest {
       return sum + (line ? read(line) : 0);
     }, 0);
 
+  /**
+   * 점유 — 진행 중이던 옛 세이브의 패킷에는 없을 수 있다. 없으면 **적지 않는다**:
+   * 0.5를 지어 적으면 그 경기 하나만 "완벽히 팽팽했던 경기"로 장부에 남는다.
+   */
+  const share = pending.packet?.guide.possession as { home?: number; away?: number } | undefined;
+  const possession =
+    typeof share?.home === "number" && typeof share.away === "number"
+      ? { home: share.home, away: share.away }
+      : null;
   // 결과를 MATCH에 기록하고 일정 엔트리를 닫는다
   const goalEvents = ledger.events.filter((e) => e.type === "goal");
   match.result = {
@@ -1570,6 +1634,29 @@ export function finalizeMatch(state: GameState): MatchDigest {
     awayExpectedGoals: statSum(awayLineup, (line) => line.scoringExpectation),
     homeLineup,
     awayLineup,
+    // 선발은 킥오프에 떴다 — 뛴 사람 전부와 갈리는 자리다 (people.md §5-2)
+    ...(pending.startingXI
+      ? { homeStarters: pending.startingXI.home, awayStarters: pending.startingXI.away }
+      : {}),
+    /**
+     * **사건과 선수별 기록은 장부에서 결과로 건너온다** (match.md §4).
+     *
+     * 여기서 옮기지 않으면 `pendingMatch = null`과 함께 사라져, 끝난 경기에 남는
+     * 것은 스코어와 득점자뿐이다 — "그 경기 왜 졌지"를 되물을 자리가 없어지고
+     * 원인 태그가 달린 골도(전술 XP의 근거다) 다시 볼 수 없다.
+     *
+     * **자르지 않는다.** 몇 줄만 골라 남기면 그 기준이 두 번째 원본이 되고, 슛을
+     * 버리면 "슛 열여덟에 xG 2.3으로 진 경기"가 다시 사라진다. 세우는 것을 고르는
+     * 일은 읽는 쪽(`buildMatchReport`)의 몫이다.
+     */
+    events: [...ledger.events],
+    ...(ledger.stats ? { playerStats: { ...ledger.stats } } : {}),
+    /**
+     * 점유는 **패킷이 이미 계산해 둔 값**이다 — 경기 중 슈팅 노출과 체력 소모가
+     * 그 값으로 굴러갔으므로(§1.5) 결과에 적히는 것도 같은 값이어야 한다.
+     * 간이 시뮬도 자기 계산을 같은 칸에 적는다 (`core/tick.ts`).
+     */
+    ...(possession ? { possession } : {}),
     /**
      * 종료 휘슬에 서 있던 사람 — 명단은 뛴 사람 전부라 교체 아웃·퇴장이 섞여 있다.
      * 감독의 경기는 구간 시뮬이 연장까지 직접 가므로 여기서 쓰이지는 않지만,

@@ -164,7 +164,8 @@ export interface SegmentInput {
 export const MAX_SEGMENT_MINUTES = 25;
 /**
  * 한 구간에 담을 이벤트 상한 — 장부의 배치 한도(`LEDGER_LIMITS.maxEventsPerBatch` 20)
- * 아래로 둔다. 정지 이벤트와 AI 교체가 뒤에 붙을 자리를 남겨야 한다.
+ * 아래로 둔다. 정지 이벤트와 AI 교체(한 창 `SUB_WINDOW_MAX`장), 전술 전환 한 줄이
+ * 뒤에 붙을 자리를 남겨야 한다 — 15 + 3 + 1 = 19.
  * 기대 득점이 큰 경기(3점대)는 25분에 슛·선방이 스무 개를 넘길 수 있다.
  */
 const MAX_SEGMENT_EVENTS = 15;
@@ -1469,7 +1470,7 @@ function settleShift(
   wanted: Partial<Record<AiShiftAxis, number>>,
   current: TacticsSpec,
   kickoff: TacticsSpec,
-): Partial<TacticsSpec> | null {
+): Partial<Record<AiShiftAxis, number>> | null {
   const shift: Partial<Record<AiShiftAxis, number>> = {};
   for (const axis of AI_SHIFT_AXES) {
     const want = wanted[axis];
@@ -1510,6 +1511,13 @@ export interface AiBenchShift {
   axes?: Partial<TacticsSpec>;
   /** 판의 모양을 어느 쪽으로 — 프리셋 고르기는 호출부의 몫 */
   shape?: AiShapeIntent;
+  /**
+   * 이 판단의 **사실 태그** — `tactical_shift` 사건의 근거가 된다 (match.md §2·§4).
+   *
+   * 모양 **이름**은 여기 없다: 프리셋을 고르는 것은 스쿼드를 아는 호출부이므로
+   * `formation:` flag도 거기서 얹는다. 여기 실리는 것은 갈래와 옮긴 뒤의 축 값뿐이다.
+   */
+  note: PacketTag;
 }
 
 /**
@@ -1548,12 +1556,28 @@ export function planAiTacticalShift(
     !shapeMoved && minute >= from ? shape : undefined;
 
   const settled = (
+    /** 이 판단의 갈래 — 태그의 코드이자 축이 움직인 방향이다 */
+    intent: AiShapeIntent,
     wanted: Partial<Record<AiShiftAxis, number>>,
     shape: AiShapeIntent | undefined,
   ): AiBenchShift | null => {
     const axes = settleShift(wanted, current, kickoff);
     if (!axes && !shape) return null;
-    return { ...(axes ? { axes } : {}), ...(shape ? { shape } : {}) };
+    return {
+      ...(axes ? { axes } : {}),
+      ...(shape ? { shape } : {}),
+      note: {
+        source: "ai-shift",
+        code: intent,
+        // 전환은 어느 편에 이로운 사실이 아니다 — 사건의 `team`이 누구인지를 말한다
+        favours: null,
+        // 전술은 안개를 지나지 않는다 — 90분 동안 눈앞에 보이는 사실이다 (§8)
+        sharp: true,
+        playerIds: [],
+        values: { ...axes },
+        flags: [],
+      },
+    };
   };
 
   if (diff < 0) {
@@ -1568,11 +1592,12 @@ export function planAiTacticalShift(
     if (halftime) {
       push.pressing = current.pressing + 1;
     }
-    return settled(push, shaped("chase", AI_SHAPE_CHASE_MINUTE));
+    return settled("chase", push, shaped("chase", AI_SHAPE_CHASE_MINUTE));
   }
   if (diff > 0 && urgent) {
     // 이기고 있고 시간이 얼마 없다 — 내려서서 지킨다
     return settled(
+      "hold",
       {
         mentality: current.mentality - 1,
         defensiveLine: current.defensiveLine - 1,

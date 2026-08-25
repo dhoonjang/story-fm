@@ -12,7 +12,13 @@
 
 import { legacyTag, otherSide, type MatchSide, type PacketTagSource, type SubCause } from "./match";
 import { AXIS_KO } from "./player";
-import { DIRECTIVE_INTENSITY_KO, PLAYER_DIRECTIVE_KO, type BoardPoint } from "./tactics";
+import {
+  DIRECTIVE_INTENSITY_KO,
+  PLAYER_DIRECTIVE_KO,
+  TACTIC_AXES,
+  tacticWord,
+  type BoardPoint,
+} from "./tactics";
 
 export interface ZoneStrength {
   attack: number;
@@ -429,6 +435,15 @@ const EXPLOIT_KO: Record<string, string> = {
   stamina: "속도를 올려 체력을 갉는다",
 };
 
+/**
+ * 벤치가 판을 옮긴 **갈래** — 축이 어느 쪽으로 갔는지는 이 낱말이 이미 말한다
+ * (`chase`는 전부 위로, `hold`는 전부 아래로 — match.md §2).
+ */
+const AI_SHIFT_KO: Record<string, string> = {
+  chase: "벤치가 판을 앞으로 밀었다",
+  hold: "벤치가 내려서서 잠갔다",
+};
+
 /** `축:값` 꼴 flag의 값 — 세기·축처럼 낱말 하나가 실리는 자리 */
 function flagValue(tag: PacketTag, key: string): string | undefined {
   const at = tag.flags.find((f) => f.startsWith(`${key}:`));
@@ -762,6 +777,16 @@ export function packetTagText(tag: PacketTag, ctx?: PacketTagContext): string {
       const intensity = flagValue(tag, "intensity");
       const ko = intensity === undefined ? undefined : DIRECTIVE_INTENSITY_KO_BY_CODE[intensity];
       return `${line} — ${read}${ko ? ` (${ko})` : ""}`;
+    }
+    case "ai-shift": {
+      const head = AI_SHIFT_KO[tag.code] ?? "벤치가 판을 다시 깔았다";
+      // 옮긴 축만 낱말로 — 눈금 숫자는 화면의 점이 이미 그린다
+      const moved = TACTIC_AXES.filter((axis) => tag.values[axis.key] !== undefined).map(
+        (axis) => `${axis.brief} ${tacticWord(axis.key, tag.values[axis.key]!)}`,
+      );
+      const shape = flagValue(tag, "formation");
+      const parts = [...moved, ...(shape ? [`${shape} 모양으로 갈아 꼈다`] : [])];
+      return parts.length > 0 ? `${head} — ${parts.join(" · ")}` : head;
     }
     case "directive-dropped":
       return DROPPED_KO[tag.code]?.(r) ?? tag.text ?? "";

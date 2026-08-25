@@ -2375,6 +2375,7 @@ describe("협상 상대의 앵커와 한도", () => {
       fee: { expectation: 1000, min: 500, max: 2000 },
       wage: null,
       years: null,
+      status: null,
       splittable: true,
     },
     ...over,

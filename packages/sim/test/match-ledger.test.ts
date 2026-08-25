@@ -281,6 +281,21 @@ describe("경기 장부 검증 (match.md §5)", () => {
     expect(passed(r).home.subWindows).toBe(0);
   });
 
+  /**
+   * **전술 전환은 경기가 재개됐다는 표시가 아니다** (match.md §5). 전환은 교체 뒤
+   * 정지 사건 앞에 서므로, 그 줄을 "교체가 아닌 사건"으로 세면 함께 올라온 AI의
+   * 하프타임 교체가 창을 문다 — 창이 소진된 뒤로는 그 교체 자체가 반려된다.
+   */
+  it("교체와 정지 사건 사이의 전술 전환은 창을 열지 않는다", () => {
+    const bench = Array.from({ length: 8 }, (_, i) => `b${i}`);
+    const r = applyEvents(createLedger({ onPitch: home.onPitch, bench }, away), [
+      ev({ minute: 45, type: "substitution", team: "home", actors: ["hm-df1", "b0"] }),
+      ev({ minute: 45, type: "tactical_shift", team: "away" }),
+      ev({ minute: 45, type: "half_time" }),
+    ]);
+    expect(passed(r).home.subWindows).toBe(0);
+  });
+
   it("킥오프는 한 경기에 한 번만 기록된다", () => {
     const first = passed(
       applyEvents(createLedger(home, away), [ev({ minute: 0, type: "kickoff" })]),

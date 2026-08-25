@@ -43,11 +43,13 @@ import {
   playPreseason,
 } from "./helpers";
 import {
+  normalizeCauses,
   positionGroupOf,
   positionGroupOfPlayer,
   tacticsSignature,
   weightSlotOf,
 } from "@story-fm/domain";
+import type { MatchEvent, PacketTag } from "@story-fm/domain";
 import { zoneGrid } from "@story-fm/sim";
 
 /**
@@ -116,6 +118,47 @@ describe("경기 흐름 (overview §4)", () => {
     ).toBeLessThan(95);
     // 자리마다 갈린다 (골키퍼는 덜, 중원·측면은 많이) — 하나로 뭉개지지 않는다
     expect(Math.max(...conditions) - Math.min(...conditions)).toBeGreaterThan(15);
+  });
+
+  /**
+   * **종료 휘슬이 장부를 걷어 가지 않는다** (match.md §4).
+   *
+   * `pendingMatch`가 지워질 때 사건·선수별 기록도 함께 사라지던 자리다. 몇 줄만
+   * 골라 남기면 그 기준이 두 번째 원본이 되므로 **수가 같아야** 한다 — 세우는 것을
+   * 고르는 일은 읽는 쪽(리포트 뷰)의 몫이다.
+   */
+  it("마감은 장부의 사건을 자르지 않는다 — 저장된 사건 수가 원장 사건 수와 같다", () => {
+    const state = atMatchday(42, { afterPreseason: true });
+    const fixture = state.matches.find(
+      (m) =>
+        m.date === state.date &&
+        !m.result &&
+        (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+    );
+    if (!fixture) throw new Error("오늘 경기를 찾지 못했습니다");
+
+    // 결산 **직전**의 원장을 잡아 둔다 — 마감이 지나면 볼 수 없다
+    let ledgerEvents = -1;
+    let ledgerStatIds: string[] = [];
+    playMockMatch(state, (s) => {
+      const ledger = s.pendingMatch?.ledger;
+      if (!ledger) throw new Error("종료 시각에 장부가 없습니다");
+      ledgerEvents = ledger.events.length;
+      ledgerStatIds = Object.keys(ledger.stats ?? {}).sort();
+    });
+    // 국면 표식(하프타임·종료)만 해도 여럿이라 빈 장부로는 시험이 되지 않는다
+    expect(ledgerEvents).toBeGreaterThan(2);
+    expect(ledgerStatIds.length).toBeGreaterThanOrEqual(22);
+
+    const result = state.matches.find((m) => m.id === fixture.id)?.result;
+    if (!result) throw new Error("결과가 남지 않았습니다");
+    expect(result.events?.length).toBe(ledgerEvents);
+    expect(Object.keys(result.playerStats ?? {}).sort()).toEqual(ledgerStatIds);
+
+    // 점유도 함께 건너온다 — 두 몫의 합은 1이다
+    const possession = result.possession;
+    if (!possession) throw new Error("점유가 결과에 남지 않았습니다");
+    expect(possession.home + possession.away).toBeCloseTo(1, 6);
   });
 
   it("경기 중 전술 변경은 패킷을 재계산한다", () => {
@@ -923,6 +966,49 @@ describe("상대 벤치의 모양 변경 (match.md §2)", () => {
     const last = events[events.length - 1]!;
     expect(last.type).toBe("full_time");
     for (const sub of subs) expect(sub.minute).toBeLessThanOrEqual(last.minute);
+  });
+
+  /**
+   * **판을 갈아 낀 줄은 한 경기에 하나다** (match.md §2·§4). 모양 전환은 경기당 한
+   * 번인데 사건이 정지점마다 서면 중계는 상대가 판을 계속 갈아엎는 것으로 읽고, 화면의
+   * 전환 표식은 마지막 정지점만 가리킨다 — 어느 쪽도 장부가 아는 사실이 아니다.
+   * 축만 옮긴 줄은 여러 번 설 수 있다: 상한(`AI_SHIFT_BOUND`)에 닿을 때까지가 판단이다.
+   */
+  it("모양을 갈아 낀 전환 사건은 한 경기에 한 줄뿐이다", () => {
+    const state = atMatchday(42, { afterPreseason: true });
+    expect(startMatch(state).ok).toBe(true);
+    const aiSide = userSide(state) === "home" ? "away" : "home";
+    // 장부는 `finalizeMatch`가 걷어 가므로 종료 사건까지만 굴리고 그 자리에서 읽는다
+    let guard = 60;
+    while (state.phase === "match" && guard-- > 0) {
+      const step = advanceSegment(state);
+      expect(step.ok, step.message).toBe(true);
+      if (step.plan?.stop === "full_time") break;
+    }
+    const pending = state.pendingMatch!;
+    const shifts = pending.ledger.events.filter((e) => e.type === "tactical_shift");
+    const tagOf = (e: MatchEvent): PacketTag | undefined => normalizeCauses(e.causes)[0];
+
+    expect(shifts.length, "상대 벤치가 이 경기에서 한 번도 판을 옮기지 않았다").toBeGreaterThan(0);
+    for (const shift of shifts) {
+      // 전환은 상대 벤치의 것뿐이다 — 감독의 전술 변경은 스킬이지 사건이 아니다
+      expect(shift.team).toBe(aiSide);
+      // 근거 태그 하나가 갈래를 싣는다 — 문장은 읽는 쪽이 만든다
+      expect(tagOf(shift)?.source).toBe("ai-shift");
+      expect(["chase", "hold"]).toContain(tagOf(shift)?.code);
+    }
+    /**
+     * 모양을 갈아 낀 줄은 **상태와 같은 수**여야 한다 — `aiShape`가 섰으면 한 줄,
+     * 안 섰으면 없다. 사건이 상태보다 많으면 중계는 상대가 판을 계속 갈아엎는 것으로
+     * 읽고, 적으면 감독이 본 판의 모양이 어디서 왔는지 장부가 답하지 못한다.
+     */
+    const reshaped = shifts.filter((e) =>
+      (tagOf(e)?.flags ?? []).some((f) => f.startsWith("formation:")),
+    );
+    // 이 시드의 상대는 실제로 판을 갈아 낀다 — 아니면 아래 불변식이 0을 세고 만다
+    expect(pending.aiShape, "상대가 이 경기에서 한 번도 판을 갈아 깔지 않았다").toBeDefined();
+    expect(reshaped).toHaveLength(1);
+    expect(tagOf(reshaped[0]!)?.flags).toContain(`formation:${pending.aiShape!.formation}`);
   });
 });
 

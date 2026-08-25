@@ -1,10 +1,18 @@
-import type { GamePlayer, NegotiationKind, PitchClaim, PitchClaimKind } from "@story-fm/domain";
+import type {
+  GamePlayer,
+  NegotiationKind,
+  PitchClaim,
+  PitchClaimKind,
+  SquadStatus,
+} from "@story-fm/domain";
 import {
   MAX_PAYMENT_YEARS,
+  SQUAD_STATUS_KO,
   ageOf,
   byLoyalty,
   effectiveFeeOf,
   naturalPositionOf,
+  squadStatusRank,
 } from "@story-fm/domain";
 import { diffDays, windowOpenOn } from "../competition/calendar";
 import { claimLabel, evaluatePitch } from "./persuasion";
@@ -15,6 +23,7 @@ import { leagueOfTeamIn } from "../competition/promotion";
 import { euroCompetitionOf } from "../competition/europe";
 import { hashChannel } from "../core/rng";
 import { betterAtPosition, squadDepthOf } from "../squad/depth";
+import { derivedSquadStatus } from "../squad/promises";
 import { archetypeTraitsOf } from "../world/player-persona";
 import { knowledgeOf, KNOWLEDGE_KO, type Knowledge } from "../squad/scouting";
 import { userWageRoom } from "../club/board-request";
@@ -86,6 +95,24 @@ const PAY_CUT_SCORE_FLOOR = -0.9;
 /** 현 계약보다 이만큼 오르면 그 자체가 남을·옮길 이유가 된다 */
 const RAISE_NOTABLE = 0.25;
 const RAISE_SCORE = 0.3;
+/**
+ * **지위 한 칸의 무게** — 제시 지위가 실제 자리에서 한 칸 위면 +, 한 칸 아래면 −다.
+ * ⚠️ 밸런스 값 (transfer.md §3 「계약 지위」).
+ *
+ * 두 자와 맞춰 골랐다. 하나는 같은 관문의 「출전 기회」(영입 +0.35/−0.45 · 재계약
+ * +0.5/−0.6)다 — 자리를 뭐라고 부르는가가 그 자리가 실제로 비었는가와 비슷한
+ * 무게여야 둘 중 하나만 손잡이가 되지 않는다. 다른 하나는 주급 항이다: 관문의
+ * 주급 항이 `(비율−1) × 6`이므로 두 칸(`SQUAD_STATUS_STEP_CAP`)이 기대 주급의
+ * 15%와 같은 크기가 된다. **「로테이션이지만 두 배」와 「주전 보장」이 같은 판에
+ * 서는 값**이 여기다.
+ */
+export const SQUAD_STATUS_SCORE_PER_STEP = 0.45;
+/**
+ * 지위 차이를 세는 폭 — 이 칸을 넘으면 더 세지 않는다.
+ * 백업에게 핵심을 약속하는 것이 주전을 약속하는 것보다 두 배 잘 통하면, 흥정이
+ * 아니라 사다리 꼭대기를 부르는 한 수만 남는다.
+ */
+const SQUAD_STATUS_STEP_CAP = 2;
 
 function sigmoid(x: number): number {
   return 1 / (1 + Math.exp(-x));
@@ -337,6 +364,12 @@ export interface DealTerms {
    * 확률은 유효가(`effectiveFeeOf`)로 재고 관문은 첫 회분만 본다.
    */
   paymentYears?: number;
+  /**
+   * 감독이 제시하는 **스쿼드 지위** — 합의되면 계약에 적히는 약속이다
+   * (people.md §5-2). 없으면 선수 관문의 지위 항이 서지 않는다: 말하지 않은 것은
+   * 약속이 아니다.
+   */
+  squadStatus?: SquadStatus;
 }
 
 /**
@@ -713,6 +746,9 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
       why: "곧바로 주전으로 뛸 자리가 있다",
     });
   }
+
+  const offeredStatus = squadStatusContribution(state, player, terms.squadStatus, state.userTeamId);
+  if (offeredStatus) contributions.push({ gate: "player", ...offeredStatus });
 
   const reputation = (state.manager.reputation.media + state.manager.reputation.board) / 2;
   if (Math.abs(reputation - 50) >= 10) {
@@ -1158,6 +1194,40 @@ function wageStepContribution(
 }
 
 /**
+ * "계약 지위" 축 — **제시한 자리와 실제 자리의 거리**다 (transfer.md §3).
+ *
+ * 「출전 기회」는 사실을 잰다(그 자리가 지금 막혀 있는가). 여기는 **약속**을 잰다 —
+ * 감독이 그 자리를 뭐라고 부르며 제시했는가. 둘을 한 축으로 묶으면 "백업이지만
+ * 주전으로 쓰겠다"와 "백업이고 백업으로 쓰겠다"가 같은 값이 되어, 주급 말고는
+ * 흥정의 손잡이가 없던 자리가 그대로 남는다.
+ *
+ * ⚠️ **제시가 없으면 항이 서지 않는다** — 말하지 않은 것은 약속이 아니다. 제시가
+ * 실제 자리와 같을 때도 서지 않는다: 이 축이 재는 것은 거리이고, 거리가 없다.
+ *
+ * @param teamId 실제 자리를 재는 스쿼드 — 영입도 재계약도 **우리 팀**이다.
+ *   영입 대상은 아직 파는 구단 소속이라, 그쪽에서의 서열로 재면 우리가 약속한
+ *   자리와 대조되는 것이 남의 라커룸이 된다.
+ */
+function squadStatusContribution(
+  state: GameState,
+  player: GamePlayer,
+  offered: SquadStatus | undefined,
+  teamId: string,
+): { score: number; label: "계약 지위"; why: string } | null {
+  if (offered === undefined) return null;
+  const actual = derivedSquadStatus(state, player, teamId);
+  const gap = squadStatusRank(offered) - squadStatusRank(actual);
+  const steps = Math.max(-SQUAD_STATUS_STEP_CAP, Math.min(SQUAD_STATUS_STEP_CAP, gap));
+  if (steps === 0) return null;
+  return {
+    score: steps * SQUAD_STATUS_SCORE_PER_STEP,
+    label: "계약 지위",
+    // 지위 이름 뒤에 조사를 붙이지 않는다 — 「유망주으로」가 나오는 자리다
+    why: `${SQUAD_STATUS_KO[offered]} 지위로 제시했다 — 우리 스쿼드에서 그 자리는 ${SQUAD_STATUS_KO[actual]}이다`,
+  };
+}
+
+/**
  * 재계약 때 선수가 원하는 주급 — 이적 때보다 기준이 높다.
  *
  * 남아 달라는 쪽이 우리이므로 협상력이 선수에게 있다. 계약이 얼마 남지 않을수록
@@ -1256,6 +1326,9 @@ function renewOdds(
       why: `같은 자리에 더 나은 선수가 ${blockedBy}명 있다 — 출전을 걱정한다`,
     });
   }
+
+  const offeredStatus = squadStatusContribution(state, player, terms.squadStatus, state.userTeamId);
+  if (offeredStatus) contributions.push(offeredStatus);
   /**
    * 재계약도 마찬가지다 — **불만과 경기력**이 마음을 말한다.
    * 체력을 쓰던 때는 경기 다음 날 재계약 확률이 통째로 내려앉았다.

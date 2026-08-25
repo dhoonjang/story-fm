@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { MAX_PAYMENT_YEARS, type Negotiation } from "@story-fm/domain";
+import {
+  MAX_PAYMENT_YEARS,
+  SQUAD_STATUSES,
+  SQUAD_STATUS_KO,
+  statusAtRank,
+  type Negotiation,
+} from "@story-fm/domain";
 import {
   RENEWAL_YEARS_MAX,
   buildCounterpartyBrief,
@@ -75,6 +81,10 @@ const RulingSchema = z.object({
     .max(RENEWAL_YEARS_MAX)
     .optional()
     .describe("재계약 조정에서 당신이 원하는 계약 연수. 서류의 구간 안에서"),
+  squadStatus: z
+    .enum(SQUAD_STATUSES)
+    .optional()
+    .describe("재계약·영입 조정에서 당신이 원하는 계약 지위. 서류의 구간 안에서"),
   paymentYears: z
     .number()
     .int()
@@ -122,6 +132,13 @@ export function describeAnchor(anchor: CounterpartyAnchor): string {
     ...(anchor.contractYears !== undefined && anchor.yearsRoom
       ? [
           `조정 연수: 기준 ${anchor.contractYears}년 — ${anchor.yearsRoom.min}~${anchor.yearsRoom.max}년 안에서만 부를 수 있다`,
+        ]
+      : []),
+    ...(anchor.squadStatus !== undefined && anchor.statusRoom
+      ? [
+          `조정 지위: 기준 ${SQUAD_STATUS_KO[anchor.squadStatus]} — ` +
+            `${SQUAD_STATUS_KO[statusAtRank(anchor.statusRoom.min)]}~` +
+            `${SQUAD_STATUS_KO[statusAtRank(anchor.statusRoom.max)]} 안에서만 부를 수 있다`,
         ]
       : []),
     ...(anchor.splittable

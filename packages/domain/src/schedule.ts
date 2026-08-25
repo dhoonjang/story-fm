@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { ATTRIBUTE_AXES, AXIS_KO } from "./player";
-import { ShootoutKickSchema, ShotOriginSchema, type MatchSide } from "./match";
+import {
+  MatchEventSchema,
+  MatchStatLineSchema,
+  ShootoutKickSchema,
+  ShotOriginSchema,
+  type MatchSide,
+} from "./match";
 import { DateString } from "./date-string";
 
 /**
@@ -97,6 +103,18 @@ export const MatchResultSchema = z.object({
   homeLineup: z.array(z.string()).optional(),
   awayLineup: z.array(z.string()).optional(),
   /**
+   * **첫 휘슬에 선 열한 명** — 위 명단은 교체 투입·퇴장까지 담은 「뛴 사람 전부」라
+   * 선발을 가려낼 수 없고, 순서로도 못 가른다(`extra-time.ts`).
+   *
+   * 계약 지위가 부르는 출전을 재는 자가 이 칸이다 — 「주전으로 데려와 놓고 여덟
+   * 경기에 두 번 세웠다」가 장부에서 갈리는 자리다
+   * (→ docs/data/people.md §5-2). 옛 세이브엔 없어 optional이고, 없으면 읽는 쪽이
+   * `homeLineup`으로 떨어진다 — 뛴 사람 전부는 선발의 상위 집합이라 옛 세이브가
+   * 없던 불만을 만들어 내지 않는다.
+   */
+  homeStarters: z.array(z.string()).optional(),
+  awayStarters: z.array(z.string()).optional(),
+  /**
    * **종료 시각에 그라운드에 서 있던 선수** — 연장과 승부차기를 뛰는 사람들이다.
    *
    * 위 명단은 "뛴 사람 전부"라 교체로 나간 선수도 퇴장당한 선수도 들어 있다.
@@ -140,6 +158,36 @@ export const MatchResultSchema = z.object({
   ratings: z.record(z.string(), z.number()).optional(),
   /** 평점 한 줄 근거 (선수 id → 문장). LLM이 매긴 경우에만 — 숫자만 남기지 않는다 */
   ratingNotes: z.record(z.string(), z.string()).optional(),
+  /**
+   * **사건 타임라인** — 장부(`ledger.events`)를 자르지 않고 그대로 (match.md §4).
+   *
+   * 종료 휘슬에 `pendingMatch`가 지워지면서 함께 사라지던 것이다. 몇 줄만 골라
+   * 남기면 그 기준이 두 번째 원본이 되므로 **전부** 옮긴다 — 저장된 사건 수는 원장
+   * 사건 수와 같다. 세우는 것을 고르는 일은 읽는 쪽(리포트 뷰)의 몫이다.
+   *
+   * **감독의 경기에만** 남는다: 간이 시뮬에는 장부가 없다. 한 시즌 60경기가
+   * ≈600KB이고 시즌 롤오버가 `matches`를 갈아 끼우므로 쌓이지 않는다
+   * (→ docs/data/game-state.md §3.3). 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  events: z.array(MatchEventSchema).optional(),
+  /**
+   * **선수별 누적 기록** — 장부의 `stats` 그대로, **양 팀**이다.
+   *
+   * 슛·패스·전진 패스·코너·파울·xG는 90분 동안 화면에 이미 서 있던 공개 사실이라
+   * 상대 것을 지울 이유가 없다. 골·도움·카드는 여기 없다 — 사건 목록이 원본이다.
+   * 사건과 같은 자리에서 함께 남는다 (감독의 경기만, optional).
+   */
+  playerStats: z.record(z.string(), MatchStatLineSchema).optional(),
+  /**
+   * **점유** — 두 몫의 합은 1. 감독의 경기는 패킷의 `guide.possession`,
+   * 타 팀 경기는 간이 시뮬이 구간마다 가중해 낸 값이다 (match.md §7).
+   *
+   * 사건·선수별 기록과 달리 **모든 경기**에 남는다 — 간이 시뮬은 이미 계산해 두고
+   * 버리고 있었다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  possession: z
+    .object({ home: z.number().min(0).max(1), away: z.number().min(0).max(1) })
+    .optional(),
   /**
    * **이 경기의 결산 판정이 이미 반영됐다** — 평점·전술 적응도·능력치 셋 다.
    * 표식이 서 있으면 `ratings`는 더 이상 코어 앵커가 아니므로, 두 번째 호출은
