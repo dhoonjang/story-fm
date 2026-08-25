@@ -2125,13 +2125,23 @@ function memoFit(preferred?: ReadonlySet<string>): (p: GamePlayer, slot: string)
  * 그래서 각 스타일은 **올린 축만큼 내린 축을 갖는다** — 점유는 라인과 폭을 올리는
  * 대신 템포와 패스 길이를 내리고, 역습·롱볼은 라인과 압박을 내린다. 프리셋을
  * 고칠 때는 리그 평균을 다시 재라(`docs/simulation/match.md` §1.2).
+ *
+ * ⚠️ **갈래 넷(`TACTIC_TOGGLES`)도 같은 규칙을 탄다.** 갈래는 중립이 "아무 데도 서지
+ * 않은 것"이라 평균이 아니라 **리그 합**으로 잰다. 그리고 그 합은 **스타일별 팀 수로
+ * 가중해야** 한다 — `TACTICAL_STYLE_SEED`의 96팀은 스타일마다 수가 다르므로(high-press
+ * 26 · possession 24 · direct 15 · transition 13 · low-block 10 · balanced 8) 여섯을
+ * 같은 무게로 놓고 맞춘 표는 실제 리그에서 기운다. 지금 표의 96팀 가중 합은
+ * 공격 +0.29% · 중원 +0.11% · 수비 −0.02% · 강도 +1.0%다. **빈칸은 필드를 쓰지 않는다**
+ * — 프리셋은 자기 스타일이 실제로 말하는 갈래에만 선다. 갈래를 더하거나 옮길 때는 그
+ * 가중 합을 다시 재라(`docs/data/team.md` §6).
  */
 function initialTactics(
   teamId: string,
   formation: Formation,
 ): import("@story-fm/domain").TacticsSpec {
   switch (tacticalStyleOf(teamId)) {
-    // 라인을 올려 압축하되 천천히 넓게 짧은 패스로 돌린다
+    // 라인을 올려 압축하되 천천히 넓게 짧은 패스로 돌린다 — 공을 잃으면 자리부터
+    // 잡고, 올린 라인은 트랩으로 지키며, 뒤에서 짧게 풀어 나간다
     case "possession":
       return {
         formation,
@@ -2141,8 +2151,15 @@ function initialTactics(
         tempo: 2,
         width: 4,
         passStyle: 2,
+        transition: "regroup",
+        offsideTrap: true,
+        tackling: "soft",
+        keeperDistribution: "short",
       };
-    // 앞으로 무게를 싣고 라인을 올려 빠르게 — 대신 좁게 압축한다
+    // 앞으로 무게를 싣고 라인을 올려 빠르게 — 대신 좁게 압축한다. 높은 곳에서 뺏어
+    // 곧장 나가고, 올린 라인을 트랩으로 지키며, 거칠게 문다.
+    // ⚠️ GK 배급은 비운다 — 압박으로 이미 공을 상대 진영에서 얻는다. 배급까지 짧게
+    // 묶으면 "앞에서 시작한다"는 **같은 사실을 두 번 싣는다**.
     case "high-press":
       return {
         formation,
@@ -2152,8 +2169,13 @@ function initialTactics(
         tempo: 4,
         width: 2,
         passStyle: 3,
+        transition: "counter",
+        offsideTrap: true,
+        tackling: "hard",
       };
-    // 내려서서 기다리다 빠르고 넓게 나간다
+    // 내려서서 기다리다 빠르고 넓게 나간다 — 뺏으면 곧장 앞으로, GK도 넘겨서 그
+    // 출발을 앞당긴다. 트랩은 라인 2 앞에 걸 자리가 없고, 태클은 기다리는 쪽이라
+    // 어느 끝에도 서지 않는다
     case "transition":
       return {
         formation,
@@ -2163,8 +2185,13 @@ function initialTactics(
         tempo: 4,
         width: 4,
         passStyle: 4,
+        transition: "counter",
+        keeperDistribution: "long",
       };
-    // 내려서서 길게 찬다 — 폭보다 타깃이 먼저다
+    // 내려서서 길게 찬다 — 폭보다 타깃이 먼저다. 라인 2로 내려서서 자리부터 잡으므로
+    // 전환은 `regroup`이다.
+    // ⚠️ GK 배급은 비운다 — 롱볼은 이미 `passStyle` 5가 말하고 있어 배급까지 길게 두면
+    // **같은 사실을 두 번 싣는다**(team.md §6). 태클도 어느 끝에도 서지 않는다.
     case "direct":
       return {
         formation,
@@ -2174,8 +2201,11 @@ function initialTactics(
         tempo: 4,
         width: 3,
         passStyle: 5,
+        transition: "regroup",
       };
-    // 전부 내린다
+    // 전부 내린다 — 뺏어도 자리부터 잡고(`counter`가 아니다: 역습으로 사는 팀은
+    // `transition` 프리셋이 맡는다), 낮은 블록 앞에서 거칠게 물고, GK는 넘겨 버린다.
+    // 라인이 낮아 트랩은 걸 자리가 없다
     case "low-block":
       return {
         formation,
@@ -2185,6 +2215,9 @@ function initialTactics(
         tempo: 2,
         width: 2,
         passStyle: 4,
+        transition: "regroup",
+        tackling: "hard",
+        keeperDistribution: "long",
       };
     case "balanced":
       break;

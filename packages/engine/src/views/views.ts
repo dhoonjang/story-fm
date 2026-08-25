@@ -18,6 +18,9 @@ import type {
   SquadRegistration,
   SquadStatus,
   TacticalRead,
+  TransitionMode,
+  TacklingLevel,
+  KeeperDistribution,
   TrainingReport,
   BoardExpectationCode,
 } from "@story-fm/domain";
@@ -335,6 +338,15 @@ export interface TacticsView {
   width: number;
   /** 1(짧게) ~ 5(길게) */
   passStyle: number;
+  /**
+   * ── 갈래 넷 — 눈금이 아니라 둘 중 하나다 (→ docs/simulation/match.md §1.2).
+   * **옛 세이브이거나 감독이 그 갈래에 서지 않았으면 없다** — 중립인지는 화면이
+   * 다시 재지 않고 `tacticToggleValue`가 답한다.
+   */
+  transition?: TransitionMode | null;
+  offsideTrap?: boolean;
+  tackling?: TacklingLevel;
+  keeperDistribution?: KeeperDistribution | null;
 }
 
 export interface SquadPositionView {
