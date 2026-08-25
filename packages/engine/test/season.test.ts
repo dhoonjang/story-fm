@@ -12,7 +12,7 @@ import {
   cupCatalogById,
   domesticCupById,
   financeOf,
-  groupOf,
+  leaderGroupOf,
   isFriendly,
   leagueOfTeamIn,
   MINI_WORLD,
@@ -320,15 +320,35 @@ describe("시즌 전환 (season.md §6)", () => {
     expect(state).toEqual(before);
   });
 
-  it("주장이 은퇴하면 새 주장이 지명된다", () => {
+  it("주장이 은퇴하면 부주장이 완장을 잇는다 — 서열 최상위보다 먼저다", () => {
     const state = createTestGame(5);
     const captain = userPlayers(state).find((p) => p.isCaptain)!;
+    /**
+     * 서열 2위를 부주장으로 — 1위가 아닌 사람이 완장을 이어야 "부주장이 먼저"가
+     * 증명된다. 리더 그룹 안에서 고르는 것은 그래야 시즌을 넘겨도 남아 있어서다
+     * (명단 끝의 선수는 롤오버의 계약 만료로 사라질 수 있다).
+     */
+    const vice = userPlayers(state).find(
+      (p) => p.id === leaderGroupOf(state, state.userTeamId)[1]?.playerId,
+    )!;
+    vice.isViceCaptain = true;
     captain.birthdate = "1988-01-01"; // 강제 은퇴
     transitionSeason(state);
     const captains = userPlayers(state).filter((p) => p.isCaptain);
     expect(captains).toHaveLength(1);
-    expect(captains[0]?.id).not.toBe(captain.id);
-    expect(groupOf(captains[0]!)).not.toBe("GK");
+    expect(captains[0]?.id).toBe(vice.id);
+    // 올라간 자리는 비운다 — 한 사람이 완장 둘을 차지 않는다
+    expect(captains[0]?.isViceCaptain).not.toBe(true);
+  });
+
+  it("부주장이 없으면 서열 최상위가 완장을 받는다", () => {
+    const state = createTestGame(5);
+    const captain = userPlayers(state).find((p) => p.isCaptain)!;
+    captain.birthdate = "1988-01-01"; // 강제 은퇴
+    transitionSeason(state);
+    const next = userPlayers(state).find((p) => p.isCaptain)!;
+    expect(next.id).not.toBe(captain.id);
+    expect(leaderGroupOf(state, state.userTeamId)[0]?.playerId).toBe(next.id);
   });
 });
 

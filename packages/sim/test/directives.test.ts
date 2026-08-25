@@ -3,9 +3,11 @@ import {
   DIRECTIVE_TUNING,
   TACTIC_SWING,
   applyDirectives,
+  bookingWeight,
   buildStrengthPacket,
   conditionDrain,
   createLedger,
+  directiveBookingScale,
   directiveDrain,
   simulateSegment,
   zoneMeanOf,
@@ -13,7 +15,12 @@ import {
   type LaneCells,
   type SideInput,
 } from "@story-fm/sim";
-import { DEFAULT_TACTICS, type PlayerAttributes } from "@story-fm/domain";
+import {
+  DEFAULT_TACTICS,
+  PLAYER_DIRECTIVE_KINDS,
+  type PlayerAttributes,
+  type PlayerDirectiveKind,
+} from "@story-fm/domain";
 import { makeLedgerSide, makeSide, makeSquad } from "./helpers";
 
 /**
@@ -59,6 +66,20 @@ const MARKER = "us-mf2"; // RCM
 const FULLBACK = "us-df1"; // RB
 const THEIR_MID = "them-mf3"; // LCM
 const ZONES = ["attack", "midfield", "defense"] as const;
+
+/**
+ * **갈래마다 한 벌씩** — `Record`라 새 갈래를 열면 여기가 먼저 걸린다.
+ * 아래 세 케이스가 이 표를 함께 읽으므로, 서술에만 남는 갈래가 생길 수 없다.
+ */
+const ONE_OF_EACH: Record<PlayerDirectiveKind, DirectiveInput> = {
+  man_mark: { by: MARKER, kind: "man_mark", targetId: THEIR_MID },
+  press_target: { by: MARKER, kind: "press_target", targetId: THEIR_MID },
+  focus_play: { by: MARKER, kind: "focus_play" },
+  stay_back: { by: FULLBACK, kind: "stay_back" },
+  join_attack: { by: FULLBACK, kind: "join_attack" },
+  careful: { by: FULLBACK, kind: "careful" },
+};
+const EVERY_KIND = PLAYER_DIRECTIVE_KINDS.map((k) => [k, ONE_OF_EACH[k]] as const);
 
 /** 두 패킷 사이에서 한 존이 움직인 비율 */
 const shift = (after: number, before: number) => after / before - 1;
@@ -283,16 +304,9 @@ describe("개인 지시 — 판에 닿지 못한 지시는 조용하지 않다",
 describe("개인 지시 — 이득과 대가", () => {
   const base = () => buildStrengthPacket(us(), them());
 
-  it("다섯 종 전부가 수치를 움직인다 — 서술에만 남는 지시가 없다", () => {
-    const cases: Array<[string, DirectiveInput]> = [
-      ["man_mark", { by: MARKER, kind: "man_mark", targetId: THEIR_MID }],
-      ["press_target", { by: MARKER, kind: "press_target", targetId: THEIR_MID }],
-      ["focus_play", { by: MARKER, kind: "focus_play" }],
-      ["stay_back", { by: FULLBACK, kind: "stay_back" }],
-      ["join_attack", { by: FULLBACK, kind: "join_attack" }],
-    ];
+  it("갈래 전부가 수치를 움직인다 — 서술에만 남는 지시가 없다", () => {
     const before = base();
-    for (const [label, d] of cases) {
+    for (const [label, d] of EVERY_KIND) {
       const after = buildStrengthPacket(us([d]), them());
       const moved = ZONES.some(
         (z) =>
@@ -306,16 +320,9 @@ describe("개인 지시 — 이득과 대가", () => {
     }
   });
 
-  it("공짜 지시는 없다 — 다섯 종 모두 우리 쪽 어딘가가 깎인다", () => {
-    const cases: Array<[string, DirectiveInput]> = [
-      ["man_mark", { by: MARKER, kind: "man_mark", targetId: THEIR_MID }],
-      ["press_target", { by: MARKER, kind: "press_target", targetId: THEIR_MID }],
-      ["focus_play", { by: MARKER, kind: "focus_play" }],
-      ["stay_back", { by: FULLBACK, kind: "stay_back" }],
-      ["join_attack", { by: FULLBACK, kind: "join_attack" }],
-    ];
+  it("공짜 지시는 없다 — 갈래마다 우리 쪽 어딘가가 깎인다", () => {
     const before = base();
-    for (const [label, d] of cases) {
+    for (const [label, d] of EVERY_KIND) {
       const after = buildStrengthPacket(us([d]), them());
       const paid = ZONES.some((z) => after.home.zones[z] < before.home.zones[z]);
       expect(paid, `${label}이 대가 없이 이득만 냈다`).toBe(true);
@@ -451,14 +458,7 @@ describe("개인 지시 — 효과는 작다", () => {
 
   it("지시 하나가 어떤 존도 이득 상한보다 크게 움직이지 못한다", () => {
     const before = buildStrengthPacket(us(), them());
-    const cases: DirectiveInput[] = [
-      { by: MARKER, kind: "man_mark", targetId: THEIR_MID },
-      { by: MARKER, kind: "press_target", targetId: THEIR_MID },
-      { by: MARKER, kind: "focus_play" },
-      { by: FULLBACK, kind: "stay_back" },
-      { by: FULLBACK, kind: "join_attack" },
-    ];
-    for (const d of cases) {
+    for (const [, d] of EVERY_KIND) {
       const after = buildStrengthPacket(us([d]), them());
       for (const z of ZONES) {
         expect(
@@ -489,6 +489,93 @@ describe("개인 지시 — 효과는 작다", () => {
     const four = buildStrengthPacket(us([...ALL, { by: "us-df4", kind: "stay_back" }]), them());
     expect(four.home.zones).toEqual(three.home.zones);
     expect(DIRECTIVE_TUNING.MAX_EFFECTIVE).toBe(3);
+  });
+});
+
+describe("개인 지시 — 카드 위험을 낮추는 갈래", () => {
+  const { INTENSITY } = DIRECTIVE_TUNING;
+  /** `careful`의 기본 배수 — 표(`DIRECTIVE_EFFECTS.careful.booking`)가 원본이다 */
+  const BASE = directiveBookingScale("careful");
+
+  it("지시가 없거나 다른 갈래면 배수가 1이다 — 옛 호출이 예전 수를 그대로 낸다", () => {
+    expect(directiveBookingScale()).toBe(1);
+    for (const kind of PLAYER_DIRECTIVE_KINDS) {
+      if (kind === "careful") continue;
+      expect(directiveBookingScale(kind), `${kind}가 카드를 움직였다`).toBe(1);
+    }
+  });
+
+  it("세기는 줄이는 폭에 걸린다 — 세게 걸수록 덜 받고, 배수 자체에 곱하지 않는다", () => {
+    const at = (i?: Parameters<typeof directiveBookingScale>[1]) =>
+      directiveBookingScale("careful", i);
+    expect(at()).toBe(BASE);
+    expect(at("normal")).toBe(BASE);
+    // 1 − (1 − 배수) × 세기의 이득 배수 — 배수에 곱하면 heavy가 0.7로 **덜** 준다
+    expect(at("light")).toBeCloseTo(1 - (1 - BASE) * INTENSITY.light.gain, 9);
+    expect(at("heavy")).toBeCloseTo(1 - (1 - BASE) * INTENSITY.heavy.gain, 9);
+    expect(at("heavy")).toBeLessThan(at("normal"));
+    expect(at("normal")).toBeLessThan(at("light"));
+    expect(at("heavy")).toBeGreaterThan(0);
+  });
+
+  it("카드 가중에 곱으로 걸린다 — 셋째 인자를 안 주면 예전 식 그대로다", () => {
+    const p = makeSquad("x", 78).starters[3]!;
+    expect(bookingWeight(p, false, 1)).toBe(bookingWeight(p, false));
+    expect(bookingWeight(p, false, BASE)).toBeCloseTo(bookingWeight(p, false) * BASE, 9);
+    // 두 번째 경고 가중과 **함께** 걸린다 — 경고를 안은 선수를 더 낮추는 것이 이 지시다
+    expect(bookingWeight(p, true, BASE)).toBeLessThan(bookingWeight(p, true));
+  });
+
+  it("구간 시뮬에서 카드가 지시받은 선수를 피해 간다 — 팀 총량은 그 자리에 남는다", () => {
+    const home = makeSquad("home", 78);
+    const away = makeSquad("away", 78);
+    const packet = buildStrengthPacket(makeSide("home", 78), makeSide("away", 78));
+    const WHO = "home-df1";
+    /**
+     * 한 구간의 홈 카드가 0.28장이라 시드를 많이 돌려야 갈래가 보인다 — 2,000이면
+     * 그가 받는 카드가 49장이라 절반으로 준 것이 잡음과 갈린다 (구간 6천 개 0.2초).
+     */
+    const SEEDS = Array.from({ length: 2000 }, (_, i) => i + 1);
+    const tally = (directives?: { home: DirectiveInput[] }) => {
+      let his = 0;
+      let team = 0;
+      for (const seed of SEEDS) {
+        const plan = simulateSegment({
+          packet,
+          ledger: createLedger(makeLedgerSide(home), makeLedgerSide(away)),
+          squads: {
+            home: { onPitch: home.starters, bench: home.bench },
+            away: { onPitch: away.starters, bench: away.bench },
+          },
+          tactics: { home: DEFAULT_TACTICS, away: DEFAULT_TACTICS },
+          ...(directives ? { directives } : {}),
+          rng: rngOf(seed),
+        });
+        for (const e of plan.events) {
+          if (e.type !== "yellow_card" && e.type !== "red_card") continue;
+          if (e.team !== "home") continue;
+          team += 1;
+          if (e.actors.includes(WHO)) his += 1;
+        }
+      }
+      return { his, team };
+    };
+
+    const plain = tally();
+    const careful = tally({ home: [{ by: WHO, kind: "careful" }] });
+    const heavy = tally({ home: [{ by: WHO, kind: "careful", intensity: "heavy" }] });
+    // 가중이 절반이니 그가 뽑히는 횟수도 그쯤으로 준다 (49 → 28 → 18)
+    expect(careful.his).toBeLessThan(plain.his * 0.75);
+    expect(heavy.his).toBeLessThan(careful.his);
+    /**
+     * **총량은 상대 가중이 지킨다** — 그가 안 받은 카드는 팀 동료에게 간다. 이것이
+     * 리그 카드 총량(`CARDS_PER_MATCH`)이 한쪽만 지시해도 움직이지 않는 이유이고,
+     * AI 벤치가 같은 지시를 자동으로 걸 필요가 없는 이유다 (match.md §2).
+     * 딱 맞지는 않는다: 두 번째 경고가 누구에게 가느냐가 퇴장을, 퇴장이 구간의 끝을
+     * 옮긴다.
+     */
+    for (const r of [careful, heavy])
+      expect(Math.abs(r.team - plain.team)).toBeLessThan(plain.team * 0.05);
   });
 });
 
@@ -545,5 +632,20 @@ describe("개인 지시 — 체력도 지시를 탄다", () => {
     expect(pressed.fatigue["home-mf2"]!).toBeGreaterThan(plain.fatigue["home-mf2"]!);
     // 지시를 안 받은 동료는 그대로다
     expect(pressed.fatigue["home-mf3"]).toBeCloseTo(plain.fatigue["home-mf3"]!, 9);
+
+    /**
+     * **넷째 지시는 판 밖에서도 조용하다.** 존에 안 실린 지시가 다리나 카드에서만
+     * 값을 하면 노트가 "안 걸렸다"고 말한 지시가 승부를 움직인다 — 판정은
+     * `foldDirectives` 한 곳이어야 한다.
+     */
+    const fourth = seg({
+      home: [
+        { by: "home-df1", kind: "stay_back" },
+        { by: "home-df2", kind: "stay_back" },
+        { by: "home-df3", kind: "stay_back" },
+        { by: "home-mf2", kind: "press_target", targetId: "away-mf3" },
+      ],
+    });
+    expect(fourth.fatigue["home-mf2"]).toBeCloseTo(plain.fatigue["home-mf2"]!, 9);
   });
 });

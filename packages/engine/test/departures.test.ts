@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_LOAN_WAGE_SHARE,
-  DEPARTURE_SQUAD_MORALE,
+  departureSquadMorale,
   MIN_SQUAD_AFTER_SALE,
   SEVERANCE_RATE,
   SEVERANCE_WEEKS_CAP,
@@ -127,6 +127,8 @@ describe("방출의 여파 — 회견과 남은 선수단", () => {
     const state = createTestGame(11);
     const target = core(state);
     const before = formsById(state);
+    // 리더 배수는 완장을 벗기기 전에만 읽을 수 있다 (people.md §5-1)
+    const expected = departureSquadMorale(state, target);
 
     expect(releasePlayer(state, { playerId: target.id }).ok).toBe(true);
 
@@ -139,7 +141,7 @@ describe("방출의 여파 — 회견과 남은 선수단", () => {
 
     const after = formsById(state);
     expect(after.has(target.id)).toBe(false);
-    const drop = moraleToForm(DEPARTURE_SQUAD_MORALE);
+    const drop = moraleToForm(expected);
     for (const [id, form] of after) expect(form).toBeCloseTo(before.get(id)! + drop, 10);
   });
 

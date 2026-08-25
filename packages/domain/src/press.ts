@@ -2,7 +2,12 @@ import { z } from "zod";
 import { DateString } from "./date-string";
 import { BOARD_DEMAND_LABEL, type BoardDemandKind } from "./board-demand";
 import { formatMoney } from "./money";
-import { ApproachChannelSchema, type ApproachChannel } from "./persona";
+import {
+  ApproachChannelSchema,
+  LEADER_ROLE_LABEL,
+  LeaderRoleSchema,
+  type ApproachChannel,
+} from "./persona";
 import {
   boardExpectationText,
   milestonePhrase,
@@ -297,6 +302,11 @@ export const ApproachContextSchema = z.object({
   value: z.number().optional(),
   /** 그 값이 견주는 자리 — 보드가 건 순위 */
   limit: z.number().optional(),
+  /**
+   * 이 자리를 연 사람이 라커룸에서 선 자리 — 같은 불만이라도 주장이 들고 온 것과
+   * 후보 선수가 들고 온 것은 다른 자리다 (people.md §5-1). 옛 세이브엔 없다.
+   */
+  leader: LeaderRoleSchema.optional(),
 });
 export type ApproachContext = z.infer<typeof ApproachContextSchema>;
 
@@ -448,7 +458,9 @@ export function pressFactText(fact: PressFact): string {
     case "demoted":
       return `2군 ${v.days ?? 0}일째 · 불만 ${v.issueDays ?? 0}일째`;
     case "morale":
-      return `1군 평균 폼 ${sub ?? ""}`;
+      // 리더 그룹의 폼은 있을 때만 — 라커룸이 통째로 식은 것과 리더들만 처진 것은
+      // 감독이 손댈 자리가 다르다 (people.md §5-1)
+      return `1군 평균 폼 ${sub ?? ""}` + (tags[1] ? ` · 리더 그룹 ${tags[1]}` : "");
     case "standing":
       if (sub === "board-target") {
         return `보드 기대 ${v.rank ?? 0}위 (${boardExpectationText((tags[1] ?? "mid") as BoardExpectationCode)})`;
@@ -513,11 +525,13 @@ export function approachContextText(
 ): string {
   const who = labels.subject ?? "";
   const reason = issueReasonKo(context.reason ?? null) ?? "불만";
+  /** 라커룸에서 선 자리 — 리더가 아닌 선수에겐 붙지 않는다 (people.md §5-1) */
+  const seat = context.leader ? ` · ${LEADER_ROLE_LABEL[context.leader]}` : "";
   switch (context.code) {
     case "transfer-request":
-      return `${who} 이적 요청 · ${reason}`;
+      return `${who} 이적 요청 · ${reason}${seat}`;
     case "grievance":
-      return `${who} · ${reason}`;
+      return `${who} · ${reason}${seat}`;
     case "dressing-room-form":
       return `라커룸 · 1군 평균 폼 ${labels.form ?? ""}`.trimEnd();
     case "standing":

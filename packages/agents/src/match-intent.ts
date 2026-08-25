@@ -53,7 +53,7 @@ export const MATCH_INTENT_SYSTEM = `당신은 경기 중 감독의 말을 구조
   - instruction.note는 감독의 말 그대로.
   - instruction.kind가 있어야 판이 움직인다: ${PLAYER_DIRECTIVE_KINDS.join(" · ")}. man_mark·press_target은 targetId가 필요하다.
   - instruction.intensity(${DIRECTIVE_INTENSITIES.join(" · ")}) — 감독이 세기를 말했을 때만. "붙어서 아예 지워버려"는 heavy, "따라가진 말고 견제만"은 light.
-  - 다섯 갈래에 담기지 않는 말이면 지역 지시인지 보고 plans를 쓴다.
+  - 갈래에 담기지 않는 말이면 지역 지시인지 보고 plans를 쓴다.
 - plans — 선수 한 명으로 환원되지 않는 지역 지시. band × lane × intent(overload·press·protect·transition)와 감독의 표현 한 줄.
 - exploits — <targets>에 있는 id만.
 - setPieceTakers — 죽은 공 키커. corner·freeKick·penalty 중 감독이 말한 자리만 싣고, 지정을 풀라는 말이면 그 자리에 null을 넣는다.

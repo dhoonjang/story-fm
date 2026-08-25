@@ -166,14 +166,14 @@ describe("카탈로그 — 실제 세계에서", () => {
 
   it("스킬도 이름으로 선수를 집는다 — 상태를 바꾸는 자리까지", () => {
     const mine = userPlayers(state).find((p) => p.name.includes(" "))!;
-    const res = setCaptain(state, mine.name.replace(/\s/g, ""));
+    const res = setCaptain(state, { playerId: mine.name.replace(/\s/g, "") });
     expect(res.ok, res.message).toBe(true);
     expect(state.players.find((p) => p.isCaptain)?.id).toBe(mine.id);
   });
 
   it("스킬은 남의 팀 선수를 우리 선수로 만들지 않는다", () => {
     const stranger = playersOf(state, "chelsea")[0]!;
-    const res = setCaptain(state, stranger.name);
+    const res = setCaptain(state, { playerId: stranger.name });
     expect(res.ok).toBe(false);
     expect(res.message).toContain("우리 팀 선수가 아닙니다");
   });

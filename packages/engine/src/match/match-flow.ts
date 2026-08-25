@@ -56,6 +56,7 @@ import { matchesOn } from "../competition/calendar";
 import { applyMatchFinance } from "../club/finance";
 import { careerTotalsOf, settleMilestones } from "../squad/career";
 import { clampForm, formDeltaFromMatch } from "../squad/form";
+import { matchCaptainOf } from "../squad/hierarchy";
 import { applyResultMood } from "../squad/slump";
 import { managerTacticsOf } from "./manager-tactics";
 import { matchRating, type MatchRatingBrief, type PlayerMatchBrief } from "./ratings";
@@ -614,16 +615,30 @@ export function startMatch(state: GameState): FlowResult {
   state.pendingMatch = { ...opening, packet };
   state.phase = "match";
   const note = lineup.replaced.length > 0 ? ` (자동 대체: ${lineup.replaced.join(", ")})` : "";
+  /**
+   * **그 경기의 완장** (people.md §5-1) — 주장이 명단에 없으면 부주장이, 둘 다
+   * 없으면 명단 안 서열 최상위가 찬다. 승계가 일어났을 때만 알린다: 감독이 세운
+   * 주장이 그대로 섰다면 알릴 것이 없고, 그렇지 않은 날은 하프타임의 라커룸 계수를
+   * 그 사람이 정한다.
+   */
+  const squadIds = new Set([...lineup.onPitch, ...lineup.bench]);
+  const wornBy = matchCaptainOf(state, state.userTeamId, squadIds);
+  const captain = userPlayers(state).find((p) => p.isCaptain);
+  const inherited =
+    wornBy !== null && wornBy !== captain?.id ? (playerById(state, wornBy)?.name ?? null) : null;
+  if (inherited) pushNarrative(state, `${inherited}이(가) 완장을 찼다`, 2);
   return {
     ok: true,
     message: `킥오프 준비 완료${note}`,
     brief: {
       head: "킥오프 준비",
       // 감독이 짠 대로 섰으면 알릴 것은 머리줄뿐이다 — 대체가 있었을 때만 항목이 선다
-      items:
-        lineup.replaced.length > 0
+      items: [
+        ...(lineup.replaced.length > 0
           ? [item({ label: "자동 대체", text: briefNames(lineup.replaced) })]
-          : [],
+          : []),
+        ...(inherited ? [item({ label: "완장", text: inherited, note: "주장 결장" })] : []),
+      ],
     },
   };
 }
@@ -725,7 +740,7 @@ export function advanceSegment(state: GameState): {
         ...squads.away.bench,
       ].map((p) => p.id),
     ),
-    // 개인 지시 — 체력 배율도 지시를 탄다 (무리한 지시는 더 지치게)
+    // 개인 지시 — 존 전력 밖에서 다리(무리한 지시는 더 지치게)와 카드(`careful`)가 탄다
     directives: {
       home: directivesOnPitch(state, match.homeTeamId, pending.ledger.home.onPitch),
       away: directivesOnPitch(state, match.awayTeamId, pending.ledger.away.onPitch),

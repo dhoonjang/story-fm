@@ -977,7 +977,7 @@ export function SquadView({
                     code={code}
                     squadNumber={p?.squadNumber}
                     roleTag={roleTag}
-                    captain={p?.isCaptain}
+                    captain={p?.isCaptain ? "captain" : p?.isViceCaptain ? "vice" : null}
                     name={p?.name ?? null}
                     /* 칩은 "그 자리에 선 선수"라 주 포지션 값이 아니라 자리 값이 맞다.
                          자리가 안 맞으면 이 숫자가 이미 낮다 — 옆에 "포지션 적응도"를

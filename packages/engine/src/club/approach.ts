@@ -34,6 +34,7 @@ import { diffDays } from "../competition/calendar";
 import { boardExpectation, computeStandings } from "../competition/season";
 import { formLabel } from "../squad/form";
 import { issueReasonText } from "../squad/mood";
+import { leaderGroupOf, leaderRoleOf, leaderWeightOf } from "../squad/hierarchy";
 import { recentOutcomes } from "../squad/slump";
 import { agentForPlayer, ownerOf } from "../world/persona";
 import { USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
@@ -290,10 +291,20 @@ function causesToday(state: GameState): Cause[] {
      */
     if (topic === "contract" && renewalOpenFor(state, issue.gamePlayerId)) continue;
     const relieved = topic === "minutes" && startedRecently(state, issue.gamePlayerId);
+    /**
+     * **리더의 불만은 더 빨리 쌓인다** (people.md §5-1) — 주장의 출전 기회 불만은
+     * 15일이 아니라 8일 만에 감독실 문을 두드린다.
+     *
+     * ⚠️ **식는 쪽에는 걸리지 않는다.** 리더를 선발로 세우는 것이 다른 선수를
+     * 세우는 것보다 더 큰 해명일 이유는 없다 — 배수를 양쪽에 걸면 리더의 불만은
+     * 빨리 쌓이는 만큼 빨리 풀려 결국 아무것도 달라지지 않는다.
+     */
+    const owner = playerById(state, issue.gamePlayerId);
+    const weight = owner ? leaderWeightOf(state, owner) : 1;
     causes.push({
       subject: issue.gamePlayerId,
       topic,
-      delta: relieved ? -STARTED_RELIEF : DAILY_GAIN[topic],
+      delta: relieved ? -STARTED_RELIEF : DAILY_GAIN[topic] * weight,
     });
   }
 
@@ -499,6 +510,8 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
       (i) => i.gamePlayerId === row.subject && i.reason === row.topic,
     );
     if (!player || player.teamId !== state.userTeamId || !issue) return null;
+    /** 라커룸에서 선 자리 — 같은 불만이라도 주장이 들고 온 것은 다른 자리다 */
+    const seat = leaderRoleOf(state, player);
     /**
      * 꼭대기 계단 — **에이전트가 대리로 온다.** 선수가 같은 말을 네 번 하러 오지
      * 않는다. 자리를 여는 사실은 이적 요청 그 자체라 맨 앞에 sharp로 선다.
@@ -524,6 +537,7 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
         contextCard: {
           code: "transfer-request",
           ...(issue.reason ? { reason: issue.reason } : {}),
+          ...(seat ? { leader: seat } : {}),
         },
         facts: [request, ...playerFacts(state, player, issue, row.topic, sharp)],
       };
@@ -555,6 +569,7 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
       contextCard: {
         code: "grievance",
         ...(issue.reason ? { reason: issue.reason } : {}),
+        ...(seat ? { leader: seat } : {}),
         value: issueDays(state, issue),
       },
       facts: playerFacts(state, player, issue, row.topic, sharp),
@@ -607,8 +622,27 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
     const form = firstTeamForm(state);
     // 주장이 없으면 라커룸을 대신할 사람도 없다 — 코어가 화자를 지어내지 않는다
     if (!captain || form === null) return null;
+    /**
+     * **폼이 둘 실린다** — 1군 평균과 리더 그룹 평균 (people.md §5-1). 라커룸이
+     * 통째로 식은 것과 리더들만 처진 것은 감독이 손댈 자리가 다르다.
+     */
+    const leaders = leaderGroupOf(state, state.userTeamId);
+    const leaderForm =
+      leaders.length === 0
+        ? null
+        : leaders.reduce(
+            (sum, row) => sum + (squad.find((p) => p.id === row.playerId)?.state.form ?? 0),
+            0,
+          ) / leaders.length;
     const facts: PressFact[] = [
-      { kind: "morale", data: { tags: [formLabel(form)] }, about: null, sharp },
+      {
+        kind: "morale",
+        data: {
+          tags: leaderForm === null ? [formLabel(form)] : [formLabel(form), formLabel(leaderForm)],
+        },
+        about: null,
+        sharp,
+      },
     ];
     const recent = recentOutcomes(state, state.userTeamId, WINLESS_WINDOW);
     if (recent.length > 0 && recent.every((r) => r !== "win")) {

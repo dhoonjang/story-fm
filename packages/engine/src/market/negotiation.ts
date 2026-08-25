@@ -2489,6 +2489,7 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
   player.squadNumber = undefined;
   assignSquadNumber(state.players, player);
   player.isCaptain = false;
+  player.isViceCaptain = undefined;
   /**
    * 등록 명단에 자리가 없으면 **2군으로 들어온다.** 실제로도 명단이 찬 채로
    * 영입한 선수는 다음 명단 제출까지 못 뛴다 — 계약은 성립하고 등록만 안 되는
