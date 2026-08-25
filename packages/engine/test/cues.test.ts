@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   addDays,
   APPROACH_THRESHOLD,
+  marketValueOf,
   approachThreshold,
   BOARD_DEMAND,
   BOARD_REQUEST,
@@ -524,13 +525,17 @@ function rankedSquad(state: GameState) {
   return squad;
 }
 
-/** 최근에 끝난 타 구단의 매각 오퍼 하나 — `interest`의 유일한 원인 */
+/**
+ * 최근에 끝난 타 구단의 매각 오퍼 하나 — `interest`의 유일한 원인.
+ * `feeRatio`는 **시장가 대비**다 — `MARKET_NEAR_LOW` 이상이라야 값이 붙은 오퍼다.
+ */
 function closedOffer(
   state: GameState,
   playerId: string,
-  input: { fee: number; status: "rejected" | "expired"; daysAgo: number },
+  input: { feeRatio: number; status: "rejected" | "expired"; daysAgo: number },
 ) {
   const on = addDays(state.date, -input.daysAgo);
+  const fee = Math.round(marketValueOf(state, playerById(state, playerId)!) * input.feeRatio);
   state.negotiations.push({
     id: `neg-in-${playerId}-${on}`,
     gamePlayerId: playerId,
@@ -544,7 +549,7 @@ function closedOffer(
       {
         date: on,
         by: "them",
-        fee: input.fee,
+        fee,
         weeklyWage: 0,
         contractYears: 4,
         respondsOn: null,
@@ -626,7 +631,7 @@ describe("계약과 관심 — 에이전트가 계단 1부터 온다", () => {
   it("최근 창에서 끝난 오퍼가 대리인을 부른다 — 사유가 없어도 온다", () => {
     const state = quiet(createTestGame(11));
     const target = best(state);
-    closedOffer(state, target.id, { fee: 20_000_000, status: "expired", daysAgo: 0 });
+    closedOffer(state, target.id, { feeRatio: 1, status: "expired", daysAgo: 0 });
 
     // interest는 하루 8 — 12일이면 96으로 임계 100에 못 미친다
     pressDays(state, 12);
@@ -645,7 +650,7 @@ describe("계약과 관심 — 에이전트가 계단 1부터 온다", () => {
   it("창이 지나면 식는다 — 답으로 지울 원인이 없다", () => {
     const state = quiet(createTestGame(11));
     const target = best(state);
-    closedOffer(state, target.id, { fee: 20_000_000, status: "expired", daysAgo: 0 });
+    closedOffer(state, target.id, { feeRatio: 1, status: "expired", daysAgo: 0 });
     pressDays(state, 13);
     expect(respondToApproach(state, { stance: "defend" }).ok).toBe(true);
 
@@ -663,7 +668,7 @@ describe("계약과 관심 — 에이전트가 계단 1부터 온다", () => {
      * 코앞에 둔 줄을 세워 두고 하루만 민다.
      */
     state.approachPressure = [{ subject: target.id, topic: "interest", value: 399, step: 3 }];
-    closedOffer(state, target.id, { fee: 20_000_000, status: "expired", daysAgo: 0 });
+    closedOffer(state, target.id, { feeRatio: 1, status: "expired", daysAgo: 0 });
 
     pressDays(state, 1);
     const open = pendingApproach(state);
@@ -673,13 +678,22 @@ describe("계약과 관심 — 에이전트가 계단 1부터 온다", () => {
     expect(target.state.transferRequestedOn).toBeUndefined();
   });
 
+  it("헐값 오퍼가 흘러간 것은 세지 않는다 — 값의 자는 막힌 이적과 같다 (`isSeriousOffer`)", () => {
+    const state = quiet(createTestGame(11));
+    const target = best(state);
+    closedOffer(state, target.id, { feeRatio: 0.5, status: "expired", daysAgo: 0 });
+
+    pressDays(state, 13);
+    expect(state.approachPressure!.some((r) => r.topic === "interest")).toBe(false);
+  });
+
   it("경계는 상위 14명이다 — 열넷째까지 서고 열다섯째는 서지 않는다", () => {
     const state = quiet(createTestGame(11));
     const squad = rankedSquad(state);
     const core = squad[13]!; // 그보다 나은 선수 13명 — 안
     const fringe = squad[14]!; // 14명 — 밖
-    closedOffer(state, core.id, { fee: 20_000_000, status: "rejected", daysAgo: 0 });
-    closedOffer(state, fringe.id, { fee: 20_000_000, status: "expired", daysAgo: 0 });
+    closedOffer(state, core.id, { feeRatio: 1, status: "rejected", daysAgo: 0 });
+    closedOffer(state, fringe.id, { feeRatio: 1, status: "expired", daysAgo: 0 });
 
     pressDays(state, 13);
     expect(rowOf(state, core.id).topic).toBe("interest");
@@ -689,7 +703,7 @@ describe("계약과 관심 — 에이전트가 계단 1부터 온다", () => {
   it("막힌 이적 불만이 선 선수에게는 서지 않는다 — 한 사건에 두 사람이 오지 않는다", () => {
     const state = quiet(createTestGame(11));
     const target = best(state);
-    closedOffer(state, target.id, { fee: 20_000_000, status: "rejected", daysAgo: 0 });
+    closedOffer(state, target.id, { feeRatio: 1, status: "rejected", daysAgo: 0 });
     gripe(state, target.id, "blocked-move");
 
     pressDays(state, 13);

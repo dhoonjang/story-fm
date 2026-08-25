@@ -37,7 +37,7 @@ import { issueReasonText } from "../squad/mood";
 import { recentOutcomes } from "../squad/slump";
 import { agentForPlayer, ownerOf } from "../world/persona";
 import { USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
-import { renewalExpectation } from "../market/market";
+import { isSeriousOffer, renewalExpectation } from "../market/market";
 import { boardDemandFact } from "./board-demand";
 import {
   applyStanceOutcome,
@@ -329,6 +329,11 @@ function closedOn(negotiation: Negotiation): string {
   return negotiation.rounds[negotiation.rounds.length - 1]?.date ?? negotiation.openedOn;
 }
 
+/** 그 협상에 오른 가장 큰 값 — 관심의 크기는 부른 값으로 잰다 */
+function topFeeOf(negotiation: Negotiation): number {
+  return Math.max(0, ...negotiation.rounds.map((r) => r.fee));
+}
+
 /**
  * 최근 창에서 끝난 매각 오퍼 — **선수별로 한 번에 묶는다.**
  *
@@ -358,8 +363,9 @@ interface Interest {
 /**
  * 최근 `INTEREST_WINDOW_DAYS` 안에 거절·만료로 끝난 **우리 선수를 향한 매각 오퍼**.
  *
- * 대상은 우리 스쿼드 상위 `SQUAD_CORE_SIZE`명뿐이다 — 백업에게 온 오퍼 하나까지
- * 에이전트가 찾아오면 이적창마다 감독실 문이 열린다.
+ * 대상은 우리 스쿼드 상위 `SQUAD_CORE_SIZE`명뿐이고, **값이 붙은 오퍼만** 센다
+ * (`isSeriousOffer` — `blocked-move`와 같은 자다). 헐값이 흘러간 것은 에이전트가
+ * 감독을 찾아올 일이 아니고, 그것까지 세면 이적창마다 감독실 문이 열린다.
  *
  * ⚠️ **막힌 이적 불만이 선 선수에게는 서지 않는다** — 같은 사건을 선수 자신이
  * 이미 들고 왔다. 한 일로 두 사람이 오면 사다리가 둘로 갈린다.
@@ -369,15 +375,17 @@ function interestOf(
   player: GamePlayer,
   index: Map<string, Negotiation[]> = recentSellOffers(state),
 ): Interest | null {
-  const recent = index.get(player.id);
-  if (!recent || recent.length === 0) return null;
+  const closed = index.get(player.id);
+  if (!closed || closed.length === 0) return null;
   if (betterThanInSquad(state, player) >= SQUAD_CORE_SIZE) return null;
   if (state.issues.some((i) => i.gamePlayerId === player.id && i.reason === "blocked-move")) {
     return null;
   }
+  const recent = closed.filter((n) => isSeriousOffer(state, player, topFeeOf(n)));
+  if (recent.length === 0) return null;
   const top = recent.reduce<{ fee: number; teamId: string | null }>(
     (best, n) => {
-      const fee = Math.max(0, ...n.rounds.map((r) => r.fee));
+      const fee = topFeeOf(n);
       return fee > best.fee ? { fee, teamId: n.counterpartTeamId } : best;
     },
     { fee: 0, teamId: null },

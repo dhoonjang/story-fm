@@ -374,7 +374,7 @@ export const APPROACH_RATE = defineHarness({
     { metric: "계약 만료(contract)", role: "measure", unit: "count", why: "재계약을 한 번도 열지 않은 감독에게 에이전트가 몇 번 오는가" },
     { metric: "타 구단 관심(interest)", role: "measure", unit: "count", why: "오퍼를 그냥 흘려보낸 뒤 대리인이 오는 빈도 — 창 14일 안에 임계를 넘어야 선다" },
     { metric: "언론 유출(계단 4)", role: "guard", max: 8, unit: "count", why: "방치만 하는 감독의 상한. 자리가 아니라 사건이라 답할 곳이 없고 값은 다음 회견이 치른다 — 그보다 잦으면 회견이 유출 카드로만 채워진다" },
-    { metric: "이적 요청(계단 5)", role: "guard", max: 5, unit: "count", why: "사다리 끝까지 방치된 불만의 수. 한 시즌 스쿼드의 한 줌을 넘으면 방치의 대가가 아니라 스쿼드 붕괴다" },
+    { metric: "이적 요청(계단 5)", role: "guard", max: 7, unit: "count", why: "사다리 끝까지 방치된 불만의 수. 한 시즌 스쿼드의 한 줌을 넘으면 방치의 대가가 아니라 스쿼드 붕괴다 — 사유가 넷에서 여덟이 되며(people.md §5) 끝까지 갈 수 있는 갈래도 두 배가 됐고, 43명 스쿼드에서 일곱은 여전히 한 줌이다" },
     { metric: "하루 두 건이 열린 날", role: "guard", max: 0, unit: "count", why: "하루 한 건의 문 (people.md §8)" },
     { metric: "동시에 열린 자리", role: "guard", max: 0, unit: "count", why: "열려 있는 다가옴은 하나뿐" },
     { metric: "같은 화자 7일 내 재개", role: "guard", max: 0, unit: "count", why: "같은 화자 쿨다운" },
