@@ -207,6 +207,19 @@ export function PlayerDetail({
             </b>
           </span>
         )}
+        {/* 임대 — **그 구단의 사실만** 적는다. 아래 시즌 기록도 그 구단 장부라
+            어디서 낸 숫자인지가 이 줄 옆에 서 있어야 읽힌다. 무엇을 하라는 말은
+            여기 붙지 않는다 (근거 코드가 뜻하는 사실만 옮긴다) */}
+        {p.loan !== null && (
+          <span title={`${p.loan.team} 임대 — ${p.loan.until} 복귀`}>
+            임대{" "}
+            <b>
+              {p.loan.team} ~{p.loan.until}
+            </b>
+            {p.loan.benchRun > 0 && ` · 최근 ${p.loan.benchRun}경기 명단 밖`}
+            {p.loan.growth > 0 && ` · 임대 이후 성장 +${p.loan.growth}`}
+          </span>
+        )}
         {/* **없는 기록은 적지 않는다.** 개막 전에는 스물일곱 명 전원이 "0경기 ·
             평점 — · 최근 기록 없음"이라, 빈 값을 자리 잡아 두면 줄이 그만큼 길어지고
             그 폭이 표의 열 계산에 얹혀 행을 펼칠 때마다 명단이 흔들렸다 */}

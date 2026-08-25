@@ -130,6 +130,7 @@ import {
   playerById,
   proficiencyAt,
   adaptationOf,
+  ourPlayers,
   FAMILIARITY_BASELINE,
   tacticsOf,
   clubProfileIn,
@@ -138,6 +139,7 @@ import {
   weeklyWagesOf,
   type GameState,
 } from "../core/state";
+import { loanReports } from "../market/departures";
 
 /**
  * 그날 훈련이 남긴 것 — **집계 한 줄**.
@@ -453,6 +455,31 @@ interface SquadViewRowMeta {
    */
   potential: { low: number; high: number; margin: number; confidence: string } | null;
   squadLevel: "first" | "reserve";
+  /**
+   * **우리가 임대 보낸 선수인가** — 아니면 null (`market/departures.ts`의 리포트).
+   *
+   * 계약이 우리 것이라 명단에 서지만 `squadLevel`은 **빌린 구단의 값**이고 우리
+   * 전술판에는 자리가 없다. 그래서 층(1군·2군)으로 가르는 자리는 전부 이 칸을
+   * 먼저 봐야 한다 — 안 그러면 임대 선수가 엉뚱한 탭에 서고 승격·강등 diff에 실린다.
+   *
+   * `team`은 **약칭**이다 — 화면은 카탈로그를 못 읽는다 (`CareerSeasonView.team`과
+   * 같은 이유).
+   */
+  loan: {
+    teamId: string;
+    team: string;
+    /** 복귀일 */
+    until: string;
+    /** 그 구단에서의 이번 시즌 1군 기록 */
+    apps: number;
+    goals: number;
+    /** 평균 평점 — 출전이 없으면 null (0.00과 "기록 없음"은 다르다) */
+    rating: number | null;
+    /** 그 구단 최근 경기의 연속 미출전 수 */
+    benchRun: number;
+    /** 임대 이후 오른 능력치 칸 수 */
+    growth: number;
+  } | null;
   form: number;
   /** 폼의 말 — "절정"·"상승세"·"평소"·"침체"·"바닥" (form.ts와 같은 경계) */
   formLabel: string;
@@ -2009,7 +2036,9 @@ export function pushRecordJournal(
   const push = (date: string, event: CalendarEventView) => {
     (events[date] ??= []).push(event);
   };
-  const ourPlayers = new Set(playersOf(state, state.userTeamId).map((p) => p.id));
+  // 일지는 **우리 스쿼드**의 일이다 — 임대 나가 있는 동안 남의 경기장에서 난 일은
+  // 달력이 아니라 매월 리포트로 온다 (transfer.md §2)
+  const ourPlayerIds = new Set(playersOf(state, state.userTeamId).map((p) => p.id));
   const userTeamId = state.userTeamId;
   // 카드는 경기 id만 갖는다 — 날짜는 그 경기가 안다
   const matchById = new Map(state.matches.map((m) => [m.id, m] as const));
@@ -2020,7 +2049,7 @@ export function pushRecordJournal(
    */
   const growthByDate = new Map<string, { counts: Map<string, number>; lines: string[] }>();
   for (const g of state.growthLog) {
-    if (!ourPlayers.has(g.gamePlayerId)) continue;
+    if (!ourPlayerIds.has(g.gamePlayerId)) continue;
     const label = growthLabel(g.target);
     const sign = g.delta > 0 ? "+" : "";
     const day = growthByDate.get(g.date) ?? {
@@ -2056,7 +2085,7 @@ export function pushRecordJournal(
     });
   }
   for (const inj of state.injuries) {
-    if (!ourPlayers.has(inj.gamePlayerId)) continue;
+    if (!ourPlayerIds.has(inj.gamePlayerId)) continue;
     push(inj.occurredOn, {
       kind: "injury",
       text: `${playerName(state, inj.gamePlayerId)} ${inj.bodyPart} 부상 — 복귀 예상 ${inj.expectedReturn}`,
@@ -2069,7 +2098,7 @@ export function pushRecordJournal(
     }
   }
   for (const b of state.bookings) {
-    if (!ourPlayers.has(b.gamePlayerId)) continue;
+    if (!ourPlayerIds.has(b.gamePlayerId)) continue;
     const m = matchById.get(b.matchId);
     if (m) {
       push(m.date, {
@@ -2162,7 +2191,13 @@ function careerTotalsView(t: CareerTotals): CareerTotalsView {
 
 export function buildOfficeViews(state: GameState): OfficeViews {
   const userTeamId = state.userTeamId;
-  const squad = playersOf(state, userTeamId);
+  /**
+   * 명단 표는 **우리 계약**을 센다 — 임대 보낸 선수도 우리 선수다 (transfer.md §2).
+   * 넓히는 것은 이 표 하나뿐이다: 재정·등록 명단·전술은 **부릴 수 있는 인원**을
+   * 세는 자리라 소속(`playersOf`) 그대로다.
+   */
+  const squad = ourPlayers(state);
+  const loanById = new Map(loanReports(state).map((r) => [r.playerId, r] as const));
   const tactics = tacticsOf(state, userTeamId);
   const assignments = new Map(tactics.assignments.map((a) => [a.playerId, a] as const));
   /**
@@ -2358,6 +2393,21 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         settling: settlingPercent(state, p.id),
         transferListed: listingOf(state, p.id)?.askingPrice ?? null,
         squadLevel: squadLevelOf(p),
+        loan: (() => {
+          const report = loanById.get(p.id);
+          return report
+            ? {
+                teamId: report.teamId,
+                team: teamShortNameIn(state, report.teamId),
+                until: report.until,
+                apps: report.apps,
+                goals: report.goals,
+                rating: report.rating,
+                benchRun: report.benchRun,
+                growth: report.growth,
+              }
+            : null;
+        })(),
         form: Math.round(p.state.form * 100) / 100,
         formLabel: formLabel(p.state.form),
         formAngle: formAngle(p.state.form),
@@ -2751,8 +2801,10 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       familiarity: Math.round(squadFamiliarity(state, userTeamId)),
       // 경기 중과 무직에 꺼진다 — 무직의 판은 옛 구단의 것이라 읽기 전용이다 (career.md §5.1)
       editable: state.phase !== "match" && !state.dismissal,
-      firstTeamCount: players.filter((p) => p.squadLevel === "first").length,
-      reserveCount: players.filter((p) => p.squadLevel === "reserve").length,
+      // 인원은 **부릴 수 있는 사람**을 센다 — 임대 나간 선수가 달고 있는 층은
+      // 빌린 구단의 값이라 우리 1군·2군 수에 들면 안 된다
+      firstTeamCount: players.filter((p) => p.loan === null && p.squadLevel === "first").length,
+      reserveCount: players.filter((p) => p.loan === null && p.squadLevel === "reserve").length,
       registration: squadRegistrationOf(state, userTeamId),
     },
     calendar: {

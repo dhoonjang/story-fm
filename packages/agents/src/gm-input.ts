@@ -29,6 +29,7 @@ import {
   historyStart,
   isSuspended,
   leagueOfTeamIn,
+  loanedOut,
   managedTeamId,
   MAX_EXPLOITS,
   onSummerBreak,
@@ -651,10 +652,21 @@ export function buildGmStateNote(
               );
           const first = named("first");
           const reserve = named("reserve");
+          /**
+           * 임대 보낸 선수는 **합계에 들지 않고 따로 선다.** 1군 + 2군이 곧 오늘
+           * 부릴 수 있는 인원이라, 합계에 넣으면 GM이 남의 경기장에 있는 사람을
+           * 오늘의 선택지로 센다. 계약은 우리 것이므로 명단에서 지우지도 않는다
+           * (transfer.md §2 · season.md §2 임대).
+           *
+           * ⚠️ 여기도 **이름뿐이다** — 어느 구단에 가 있는지도, 그 구단에서의
+           * 기록도 싣지 않는다. 그건 코치 카드와 조회의 몫이다.
+           */
+          const loaned = loanedOut(state).map((p) => p.name);
           return lines(
             `선수단 ${players.length}명`,
             first.length > 0 ? `- 1군 ${first.length}: ${first.join(" · ")}` : null,
             reserve.length > 0 ? `- 2군 ${reserve.length}: ${reserve.join(" · ")}` : null,
+            loaned.length > 0 ? `- 임대 ${loaned.length}: ${loaned.join(" · ")}` : null,
           );
         })(),
       ),

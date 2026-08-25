@@ -1050,6 +1050,43 @@ describe("수석코치의 눈", () => {
     expect(coachCues(stale).some((c) => c.code === "training-report")).toBe(false);
   });
 
+  /**
+   * 임대 리포트도 **원형이 고르지 않는다** — 리콜은 이적 창 안에서만 되는 결정이라,
+   * 유스형이 아닌 코치를 쓰는 감독이 근거 없이 복귀일을 맞으면 안 된다
+   * (season.md §2 임대).
+   */
+  it("임대 리포트는 이달 1일에 서고 사흘 뒤 사라진다 — 임대가 없으면 서지 않는다", () => {
+    const base = createTestGame(11);
+    base.date = `${base.date.slice(0, 7)}-01`;
+    // 임대가 하나도 없으면 자리를 채우려고 사실을 만들지 않는다
+    expect(coachCues(base).some((c) => c.code === "loan-report")).toBe(false);
+
+    const target =
+      userPlayers(base).find((p) => p.squadLevel === "reserve") ?? userPlayers(base)[0]!;
+    target.teamId = "chelsea";
+    target.loan = {
+      fromTeamId: base.userTeamId,
+      until: addDays(base.date, 180),
+      wageShare: 0.5,
+    };
+
+    // 유망주를 보지 않는 원형에게도 이 한 장은 간다 — 원형의 자리를 쓰지 않는다
+    const elsewhere = coachCues(asCoach(structuredClone(base), "club_loyalist"));
+    const cue = elsewhere.find((c) => c.code === "loan-report");
+    expect(cue?.fact).toContain(target.name);
+    expect(cue?.playerIds).toContain(target.id);
+
+    // 창 안이면 선다 — 사흘째까지
+    const on = (offset: number) => {
+      const day = structuredClone(base);
+      day.date = addDays(base.date, offset);
+      return coachCues(day).some((c) => c.code === "loan-report");
+    };
+    expect(on(3)).toBe(true);
+    // 나흘째는 소식이 아니라 기록이다 — 다음 달 1일이 새로 세운다
+    expect(on(4)).toBe(false);
+  });
+
   it("아무것도 안 움직인 구간도 사실로 선다 — 빈자리는 지어낸다", () => {
     const state = createTestGame(11);
     state.trainingReports = [
