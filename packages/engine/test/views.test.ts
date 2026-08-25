@@ -7,6 +7,8 @@ import {
   type BracketStageView,
   financeOf,
   humanizePlayerIds,
+  motmOf,
+  type MatchReportPlayerView,
   setTraining,
   startMatch,
   userPlayers,
@@ -673,6 +675,93 @@ describe("경기 화면 뷰", () => {
     advanceToMatchday(state);
     playMockMatch(state);
     expect(buildOfficeViews(state).match).toBeNull();
+  });
+});
+
+/**
+ * **최우수 선수는 평점에서 파생한다** (match.md §8 · game-state.md §5 파생).
+ *
+ * 저장하지 않는 값이라 규칙이 어긋나도 장부는 조용하다 — 동점이 갈리는 순서가
+ * 바뀌면 같은 경기의 MOTM만 다른 사람이 되고, 마지막 칸(선수 id)이 빠지면 같은
+ * 화면을 두 번 열 때 답이 번갈아 나온다.
+ */
+describe("경기 리포트 — 최우수 선수 (motmOf)", () => {
+  /** 리포트 한 줄 — 동점 규칙이 읽는 칸만 채우고 나머지는 0이다 */
+  function row(over: Partial<MatchReportPlayerView> & { id: string }): MatchReportPlayerView {
+    return {
+      // `id`는 `over`가 갖는다 — 이름은 그 id를 그대로 쓴다
+      name: over.id,
+      side: "home",
+      ours: true,
+      squadNumber: null,
+      minutes: 90,
+      started: true,
+      goals: 0,
+      assists: 0,
+      shots: 0,
+      xg: 0,
+      saves: 0,
+      passes: 0,
+      progressive: 0,
+      corners: 0,
+      fouls: 0,
+      yellows: 0,
+      red: false,
+      rating: 7,
+      tone: null,
+      note: null,
+      ...over,
+    };
+  }
+
+  it("평점이 가장 높은 선수가 뽑힌다", () => {
+    const motm = motmOf([
+      row({ id: "a", rating: 7.4, goals: 2 }),
+      row({ id: "b", rating: 8.1 }),
+      row({ id: "c", rating: 6.9 }),
+    ]);
+    expect(motm?.id).toBe("b");
+  });
+
+  // 아래 네 케이스는 **뒤 칸을 반대로 놓는다** — 앞 칸이 실제로 먼저 읽히는지 본다
+  it("평점이 같으면 골이 갈린다", () => {
+    const motm = motmOf([
+      row({ id: "a", goals: 0, assists: 2, minutes: 90 }),
+      row({ id: "b", goals: 1, assists: 0, minutes: 20 }),
+    ]);
+    expect(motm?.id).toBe("b");
+  });
+
+  it("평점·골이 같으면 도움이 갈린다", () => {
+    const motm = motmOf([
+      row({ id: "a", goals: 1, assists: 0, minutes: 90 }),
+      row({ id: "b", goals: 1, assists: 1, minutes: 20 }),
+    ]);
+    expect(motm?.id).toBe("b");
+  });
+
+  it("평점·골·도움이 같으면 오래 뛴 쪽이다", () => {
+    const motm = motmOf([row({ id: "zulu", minutes: 90 }), row({ id: "alpha", minutes: 62 })]);
+    expect(motm?.id).toBe("zulu");
+  });
+
+  it("네 칸이 모두 같으면 선수 id로 갈린다 — 목록 순서가 답을 바꾸지 않는다", () => {
+    const players = [row({ id: "zulu" }), row({ id: "alpha" })];
+    expect(motmOf(players)?.id).toBe("alpha");
+    expect(motmOf([...players].reverse())?.id).toBe("alpha");
+  });
+
+  it("평점이 없는 선수는 후보가 아니다 — 상대 팀·타 팀 경기 (match.md §6)", () => {
+    const motm = motmOf([
+      row({ id: "opponent", side: "away", ours: false, rating: null, goals: 3, assists: 2 }),
+      row({ id: "ours", rating: 6.2 }),
+    ]);
+    expect(motm?.id).toBe("ours");
+  });
+
+  it("후보가 없으면 null이다", () => {
+    expect(motmOf([])).toBeNull();
+    expect(motmOf([row({ id: "a", rating: null }), row({ id: "b", rating: null })])).toBeNull();
   });
 });
 
