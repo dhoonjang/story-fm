@@ -1,21 +1,32 @@
 import { describe, expect, it } from "vitest";
 import {
   AXIS_AGING,
+  FOCUS_BOOST,
+  LOAN_APP_BOOST,
+  LOAN_APP_BOOST_MAX,
+  RESERVE_APP_BOOST,
+  RESERVE_APP_BOOST_MAX,
   ageGrowthFactor,
   agingDelta,
+  applyMonthlyDevelopment,
   attributeDeclineScale,
   attributeGainScale,
   growChance,
+  loanAppsBoost,
+  loanAppsByPlayer,
+  loanLevelFactor,
   reserveAppsBoost,
   reserveAppsByPlayer,
   rollAxis,
   rollMonthlyAxes,
   type AgingCurve,
+  type GameState,
 } from "@story-fm/engine";
 import {
   ATTRIBUTE_AXES,
   type AttributeAxis,
   type AxisValues,
+  type GamePlayer,
   type MatchRecord,
 } from "@story-fm/domain";
 
@@ -439,5 +450,216 @@ describe("2군 출전·집중 육성 배율 (season.md §2 2군 리그)", () => 
     const counts = reserveAppsByPlayer(state);
     expect(counts.get("p1")).toBe(2);
     expect(counts.get("p2")).toBe(2);
+  });
+});
+
+/**
+ * 임대 — **2군과 1군 사이의 길** (season.md §2 임대).
+ *
+ * 계약이 우리 것이므로 성장 경로도 우리 쪽이다. 여기서 지키는 것은 눈금 하나다:
+ * 임대가 우리 2군에 앉혀 두는 것보다 못한 선택이 되면 그 길은 게임에서 사라진다.
+ */
+describe("임대 성장 (season.md §2 임대)", () => {
+  /** 월간 성장이 읽는 것만 갖춘 세이브 — 세계 하나를 짓지 않는다 */
+  function loanFixture(options: {
+    date: string;
+    /** 우리가 임대 보낸 선수인가 — false면 그냥 타 팀 선수다 */
+    onLoan: boolean;
+    /** 지난달 그 구단 1군 경기 수 */
+    apps: number;
+  }): GameState {
+    const values = Object.fromEntries(ATTRIBUTE_AXES.map((axis) => [axis, 45])) as AxisValues;
+    const player = {
+      id: "y1",
+      catalogId: null,
+      teamId: "leeds",
+      squadLevel: "first",
+      name: "유망주",
+      birthdate: "2007-03-01",
+      positions: [{ position: "CM", proficiency: 20 }],
+      attributes: { ...values, overall: 45, potential: 80 },
+      state: { condition: 100, fatigue: 0, morale: 60, form: 0 },
+      isCaptain: false,
+      ...(options.onLoan
+        ? { loan: { fromTeamId: "arsenal", until: "2027-06-30", wageShare: 0.5 } }
+        : {}),
+    } as unknown as GamePlayer;
+    const match = (id: string, date: string, competitionId: string | null) =>
+      ({
+        id,
+        season: 1,
+        competitionId,
+        round: 1,
+        date,
+        homeTeamId: "leeds",
+        awayTeamId: "chelsea",
+        result: {
+          homeGoals: 1,
+          awayGoals: 0,
+          scorers: [],
+          homeLineup: ["y1"],
+          awayLineup: [],
+        },
+      }) as unknown as MatchRecord;
+    return {
+      seed: 42,
+      date: options.date,
+      userTeamId: "arsenal",
+      teams: [
+        { id: "arsenal", shortName: "아스날" },
+        { id: "leeds", shortName: "리즈" },
+      ],
+      leagueOf: { arsenal: "epl", leeds: "epl" },
+      players: [player],
+      matches: Array.from({ length: options.apps }, (_, i) =>
+        match(`m${i}`, lastMonthDay(options.date, i), "epl"),
+      ),
+      growthLog: [],
+      developmentFocus: ["y1"],
+      playerTraining: [],
+      transfers: [],
+    } as unknown as GameState;
+  }
+
+  /** 지난달의 며칠째 — 창([지난달 1일, 오늘)) 안에 확실히 드는 날짜 */
+  function lastMonthDay(today: string, index: number): string {
+    const [year, month] = today.split("-").map(Number) as [number, number];
+    const prev = month === 1 ? { y: year - 1, m: 12 } : { y: year, m: month - 1 };
+    return `${prev.y}-${String(prev.m).padStart(2, "0")}-${String(index + 2).padStart(2, "0")}`;
+  }
+
+  it("출전 배율 — 0경기는 1, 경기당 +0.3×계수, 상한 2.4", () => {
+    expect(loanAppsBoost(0, 1)).toBe(1);
+    expect(loanAppsBoost(1, 1)).toBeCloseTo(1.3);
+    expect(loanAppsBoost(4, 1)).toBeCloseTo(2.2);
+    expect(loanAppsBoost(9, 1)).toBeCloseTo(LOAN_APP_BOOST_MAX);
+    // 수준 계수는 경기 수에 곱해진다 — 2부에서 네 경기는 1부 네 경기보다 덜 얹힌다
+    expect(loanAppsBoost(4, 0.85)).toBeCloseTo(2.02);
+  });
+
+  it("눈금이 2군과 같은 자 위에 있다 — 증분은 같고 꼭대기만 다르다", () => {
+    expect(LOAN_APP_BOOST).toBe(RESERVE_APP_BOOST);
+    // 임대 상한 = 우리 2군의 출전 만근 × 집중 육성
+    expect(LOAN_APP_BOOST_MAX).toBeCloseTo(RESERVE_APP_BOOST_MAX * FOCUS_BOOST);
+    // 같은 리그에서 매주 뛰면 2군 만근보다 낫고, 한 경기도 못 뛰면 못하다
+    expect(loanAppsBoost(4, 1)).toBeGreaterThanOrEqual(reserveAppsBoost(2));
+    expect(loanAppsBoost(0, 1)).toBeLessThan(reserveAppsBoost(2));
+  });
+
+  it("임대처 수준 계수 — 리그 한 칸 ±0.05, 2부 ×0.85, 0.6~1.25에서 잘린다", () => {
+    const at = (ourLeague: string, theirLeague: string) =>
+      loanLevelFactor(
+        {
+          userTeamId: "us",
+          leagueOf: { us: ourLeague, them: theirLeague },
+        } as unknown as GameState,
+        "them",
+      );
+    expect(at("epl", "epl")).toBeCloseTo(1);
+    // epl(1) → laliga(2): 한 칸 아래
+    expect(at("epl", "laliga")).toBeCloseTo(0.95);
+    // laliga(2) → epl(1): 한 칸 위
+    expect(at("laliga", "epl")).toBeCloseTo(1.05);
+    // 같은 나라 2부는 리그 계수가 같다 — 2부 판정만 걸린다
+    expect(at("epl", "championship")).toBeCloseTo(0.85);
+    // 카탈로그 밖 리그는 우리 리그와 같다고 보되 2부 판정은 받는다 — 지어내지 않는다
+    expect(at("epl", "nowhere")).toBeCloseTo(0.85);
+    expect(at("mls", "epl")).toBeCloseTo(1.25);
+    expect(at("epl", "saudi")).toBeCloseTo(0.6);
+  });
+
+  it("임대 출전은 그 구단 1군 경기만 센다 — 2군 경기도 창 밖도 아니다", () => {
+    const state = loanFixture({ date: "2026-03-01", onLoan: true, apps: 0 });
+    const match = (id: string, date: string, competitionId: string | null, who: string) =>
+      ({
+        id,
+        season: 1,
+        competitionId,
+        round: 1,
+        date,
+        homeTeamId: "leeds",
+        awayTeamId: "chelsea",
+        result: {
+          homeGoals: 1,
+          awayGoals: 0,
+          scorers: [],
+          homeLineup: [who],
+          awayLineup: [],
+        },
+      }) as unknown as MatchRecord;
+    state.matches = [
+      match("in-1", "2026-02-03", "epl", "y1"),
+      match("in-2", "2026-02-17", null, "y1"), // 친선도 그 구단 1군 경기다
+      // 2군 리그엔 상대 클럽의 2군 선수도 선다 — 거르지 않으면 우리 2군 경기로 자란다
+      match("reserve", "2026-02-10", "reserve:epl", "y1"),
+      match("too-old", "2026-01-31", "epl", "y1"),
+      match("today", "2026-03-01", "epl", "y1"),
+      match("stranger", "2026-02-05", "epl", "someone-else"),
+    ];
+    const counts = loanAppsByPlayer(state);
+    expect(counts.get("y1")).toBe(2);
+    // 임대 보낸 우리 선수만 센다 — 세계 전체의 라인업을 담지 않는다
+    expect(counts.has("someone-else")).toBe(false);
+  });
+
+  /**
+   * 이 이슈의 핵심 — 임대가 **남의 팀에 두는 것보다 낫다.** 같은 시드·같은 선수라
+   * 축마다 뽑는 난수가 같고, 갈리는 것은 배율 하나뿐이다.
+   */
+  it("매주 뛴 임대 선수가 타 팀 기준선보다 더 자란다 — 로그도 우리 것으로 남는다", () => {
+    const sumOf = (state: GameState) =>
+      ATTRIBUTE_AXES.reduce((total, axis) => total + state.players[0]!.attributes[axis], 0);
+    const play = (state: GameState): string[] => {
+      const lines: string[] = [];
+      for (let month = 0; month < 12; month++) {
+        state.date = `2026-${String(month + 1).padStart(2, "0")}-01`;
+        lines.push(...applyMonthlyDevelopment(state));
+      }
+      return lines;
+    };
+
+    const loaned = loanFixture({ date: "2026-01-01", onLoan: true, apps: 4 });
+    const stranger = loanFixture({ date: "2026-01-01", onLoan: false, apps: 4 });
+    const before = sumOf(loaned);
+    const lines = play(loaned);
+    play(stranger);
+
+    // 기준선도 자란다 — 갈리는 것은 배율 하나뿐이다
+    expect(sumOf(stranger)).toBeGreaterThan(before);
+    expect(sumOf(loaned)).toBeGreaterThan(sumOf(stranger));
+    // 계약이 우리 것이라 로그가 남는다 — 타 팀은 한 줄도 안 남는다
+    expect(loaned.growthLog.length).toBeGreaterThan(0);
+    expect(stranger.growthLog).toHaveLength(0);
+    // 요약은 어느 구단에서 자랐는지를 말한다
+    expect(lines.every((line) => line.includes("(임대·리즈)"))).toBe(true);
+    // 감독의 손잡이는 닿지 않는다 — 집중 육성 명단에서 걷힌다
+    expect(loaned.developmentFocus).toEqual([]);
+  });
+
+  it("복귀 뒤에는 아무것도 남지 않는다 — 다음 달부터 2군 경로 그대로다", () => {
+    const state = loanFixture({ date: "2026-01-01", onLoan: true, apps: 4 });
+    const run = (from: number, to: number): string[] => {
+      const lines: string[] = [];
+      for (let month = from; month < to; month++) {
+        state.date = `2026-${String(month + 1).padStart(2, "0")}-01`;
+        lines.push(...applyMonthlyDevelopment(state));
+      }
+      return lines;
+    };
+
+    const onLoan = run(0, 6);
+    expect(onLoan.length).toBeGreaterThan(0);
+    expect(onLoan.every((line) => line.includes("(임대·리즈)"))).toBe(true);
+
+    // 복귀 — `loan`이 지워지고 `teamId`가 우리로 돌아온다 (market/departures.ts).
+    // 임대를 위해 따로 저장한 상태가 없으므로 되돌릴 것도 없다
+    const player = state.players[0]!;
+    delete player.loan;
+    player.teamId = "arsenal";
+    player.squadLevel = "reserve";
+
+    const back = run(6, 12);
+    expect(back.length).toBeGreaterThan(0);
+    expect(back.every((line) => line.includes("(2군)"))).toBe(true);
   });
 });
