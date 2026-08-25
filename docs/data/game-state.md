@@ -219,7 +219,7 @@ row, 지난 일 = 그대로 이력.**
 | `issues` `PlayerIssue`            | 라커룸 불만 (`unhappy`)                                                                          | `domain/records.ts` |
 | `settlingEvents` `SettlingEvent`  | 면담·팀토크·주장 지명이 새 영입에게 남긴 크레딧                                                  | `domain/records.ts` |
 | `transferList` `TransferListing`  | 이적 리스트 등재 — 호가와 함께                                                                   | `domain/records.ts` |
-| `playerTraining` `PlayerTraining` | 개인 훈련 — 겨냥한 축·배우는 자리                                                                | `domain/records.ts` |
+| `playerTraining` `PlayerTraining` | 개인 훈련 — 겨냥한 축(1·2군) · 배우는 자리(1군만)                                                | `domain/records.ts` |
 | `roleMemory` `RoleMemory`         | 역할 기억 — 선수 × 자리 → 마지막에 맡긴 역할                                                     | `domain/tactics.ts` |
 | `scoutReports` `ScoutReport`      | 스카우트 파견 — `completedOn === null`이 파견 중                                                 | `domain/records.ts` |
 | `deferredScouts` `DeferredScout`  | 동시 한도에 막혀 못 나간 파견 요청 — 다음 턴 입력에 사실로 남는다 ([player.md](player.md) §9.4)  | `domain/records.ts` |

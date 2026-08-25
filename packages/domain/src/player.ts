@@ -277,6 +277,19 @@ export const ATTRIBUTE_AXES = [
 ] as const;
 export type AttributeAxis = (typeof ATTRIBUTE_AXES)[number];
 
+/**
+ * 이 이름이 16축 중 하나인가 — 세이브·판정·스킬 입력이 들고 온 문자열을 좁히는
+ * 유일한 문. 축 이름은 저장에 `string`으로 남으므로(`PlayerTraining.axis`) 읽는
+ * 쪽마다 좁히면 한쪽만 조여진다.
+ */
+export function attributeAxisOf(value: string | null | undefined): AttributeAxis | null {
+  return value !== null &&
+    value !== undefined &&
+    (ATTRIBUTE_AXES as readonly string[]).includes(value)
+    ? (value as AttributeAxis)
+    : null;
+}
+
 export const AXIS_KO: Record<AttributeAxis, string> = {
   pace: "스피드",
   // "체력"은 사기·피로를 합친 표시 수치(conditionOf)가 쓴다 — 축은 지구력으로 부른다

@@ -15,6 +15,8 @@ import {
   onSummerBreak,
   userPlayers,
   RESERVE_TRAINING_AIM,
+  PERSONAL_TRAINING_AIM,
+  monthlyGrowthMultiplier,
   reserveTrainingAxes,
   reserveTrainingMultiplier,
 } from "@story-fm/engine";
@@ -23,6 +25,7 @@ import {
   RESERVE_TRAINING_POLICIES,
   isReserveMatch,
   type AttributeAxis,
+  type ReserveTrainingPolicy,
 } from "@story-fm/domain";
 import { createTestGame, advanceAndPlay, playMockMatch } from "./helpers";
 
@@ -730,6 +733,70 @@ describe("2군 훈련 방침 배율", () => {
   it("balanced는 전 축이 1이다 — 기본값이자 해제", () => {
     for (const axis of ATTRIBUTE_AXES) {
       expect(reserveTrainingMultiplier("balanced", axis)).toBe(1);
+    }
+  });
+});
+
+/**
+ * 개인 훈련 축이 방침 위에 얹히는 자리 — 두 손잡이가 같은 축을 두고 겹친다
+ * (season.md §2). 규약은 방침의 것과 같다: **총량을 옮길 뿐 늘리지 않는다.**
+ */
+describe("개인 훈련 축 배율 — 방침과 합성", () => {
+  const FIELD_AXES: readonly AttributeAxis[] = ATTRIBUTE_AXES.filter((a) => a !== "goalkeeping");
+  const fieldSum = (policy: ReserveTrainingPolicy, personal: AttributeAxis) =>
+    FIELD_AXES.reduce((acc, axis) => acc + monthlyGrowthMultiplier(axis, { policy, personal }), 0);
+
+  it("개인 축이 필드 축이면 어느 방침과 합성해도 필드 15축 배율 합이 15다", () => {
+    for (const policy of RESERVE_TRAINING_POLICIES) {
+      for (const personal of FIELD_AXES) {
+        expect(fieldSum(policy, personal), `${policy} × ${personal}`).toBeCloseTo(
+          FIELD_AXES.length,
+          10,
+        );
+        // 겨냥이 필드 안에 있으면 goalkeeping은 눌리지도 오르지도 않는다
+        expect(monthlyGrowthMultiplier("goalkeeping", { policy, personal })).toBe(1);
+      }
+    }
+  });
+
+  it("개인 축이 goalkeeping이면 필드에서 걷어 16축 합이 16이다", () => {
+    for (const policy of RESERVE_TRAINING_POLICIES) {
+      const total = ATTRIBUTE_AXES.reduce(
+        (acc, axis) => acc + monthlyGrowthMultiplier(axis, { policy, personal: "goalkeeping" }),
+        0,
+      );
+      expect(total, policy).toBeCloseTo(ATTRIBUTE_AXES.length, 10);
+      expect(monthlyGrowthMultiplier("goalkeeping", { policy, personal: "goalkeeping" })).toBe(
+        PERSONAL_TRAINING_AIM,
+      );
+    }
+  });
+
+  it("겨냥한 축은 방침 배율의 AIM배이고 나머지 필드 축은 눌린다", () => {
+    const personal: AttributeAxis = "finishing";
+    expect(monthlyGrowthMultiplier(personal, { personal })).toBe(PERSONAL_TRAINING_AIM);
+    expect(monthlyGrowthMultiplier(personal, { policy: "technical", personal })).toBeCloseTo(
+      RESERVE_TRAINING_AIM * PERSONAL_TRAINING_AIM,
+      10,
+    );
+    for (const axis of FIELD_AXES.filter((a) => a !== personal)) {
+      expect(monthlyGrowthMultiplier(axis, { personal }), axis).toBeLessThan(1);
+      // 방침이 정한 순서는 유지된다 — 개인 훈련은 나머지를 비례로 걷을 뿐이다
+      const pressed = monthlyGrowthMultiplier(axis, { policy: "technical", personal });
+      expect(pressed).toBeLessThan(reserveTrainingMultiplier("technical", axis));
+    }
+  });
+
+  it("개인 훈련이 없으면 방침만의 배율 그대로다", () => {
+    for (const policy of RESERVE_TRAINING_POLICIES) {
+      for (const axis of ATTRIBUTE_AXES) {
+        expect(monthlyGrowthMultiplier(axis, { policy })).toBe(
+          reserveTrainingMultiplier(policy, axis),
+        );
+        expect(monthlyGrowthMultiplier(axis, { policy, personal: null })).toBe(
+          reserveTrainingMultiplier(policy, axis),
+        );
+      }
     }
   });
 });

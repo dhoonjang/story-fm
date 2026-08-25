@@ -302,6 +302,67 @@ describe("월간 축 선택", () => {
   });
 });
 
+/**
+ * 개인 훈련 축이 **월간 성장에 닿는가** — 결산이 없는 2군에서 축을 겨냥할 자리는
+ * 여기 하나뿐이다 (season.md §2). 배율 공식 자체는 `training-plan.test.ts`가 지킨다.
+ */
+describe("개인 훈련 축이 월간 성장의 축 선택에 닿는다", () => {
+  const axisValues = (value: number): AxisValues =>
+    Object.fromEntries(ATTRIBUTE_AXES.map((a) => [a, value])) as AxisValues;
+
+  /** 시드를 훑어 축마다 오른 횟수를 센다 — 열아홉에 여유 49면 전 축이 자랄 수 있다 */
+  const picks = (personal?: AttributeAxis): Map<AttributeAxis, number> => {
+    const counts = new Map<AttributeAxis, number>(ATTRIBUTE_AXES.map((a) => [a, 0]));
+    for (let seed = 1; seed <= 3000; seed++) {
+      const steps = rollMonthlyAxes({
+        seed,
+        date: "2027-03-01",
+        playerId: "gp-42",
+        age: 19,
+        values: axisValues(50),
+        potential: 99,
+        ...(personal ? { personal } : {}),
+      });
+      for (const { axis, step } of steps) {
+        if (step > 0) counts.set(axis, (counts.get(axis) ?? 0) + 1);
+      }
+    }
+    return counts;
+  };
+
+  const base = picks();
+  const aimed = picks("finishing");
+  const keeper = picks("goalkeeping");
+
+  it("겨냥한 축이 더 자주 오른다", () => {
+    const before = base.get("finishing") ?? 0;
+    const after = aimed.get("finishing") ?? 0;
+    expect(before, "겨냥 없이도 오르지 않으면 잴 것이 없다").toBeGreaterThan(0);
+    expect(after / before, `${before} → ${after}`).toBeGreaterThan(1.5);
+  });
+
+  it("겨냥한 만큼 나머지 필드 축이 눌린다 — 공짜 상향이 아니다", () => {
+    const rest = (counts: Map<AttributeAxis, number>) =>
+      ATTRIBUTE_AXES.filter((a) => a !== "finishing" && a !== "goalkeeping").reduce(
+        (acc, a) => acc + (counts.get(a) ?? 0),
+        0,
+      );
+    expect(rest(aimed), `${rest(base)} → ${rest(aimed)}`).toBeLessThan(rest(base));
+    // 개인 축이 필드 안에 있으면 goalkeeping은 건드리지 않는다
+    expect(aimed.get("goalkeeping")).toBe(base.get("goalkeeping"));
+  });
+
+  it("goalkeeping을 겨냥하면 필드에서 걷는다 — 골키퍼 유망주도 축을 고른다", () => {
+    expect(keeper.get("goalkeeping") ?? 0).toBeGreaterThan(base.get("goalkeeping") ?? 0);
+    const field = (counts: Map<AttributeAxis, number>) =>
+      ATTRIBUTE_AXES.filter((a) => a !== "goalkeeping").reduce(
+        (acc, a) => acc + (counts.get(a) ?? 0),
+        0,
+      );
+    expect(field(keeper), `${field(base)} → ${field(keeper)}`).toBeLessThan(field(base));
+  });
+});
+
 describe("2군 출전·집중 육성 배율 (season.md §2 2군 리그)", () => {
   it("출전 배율 — 0경기는 1, 경기당 +0.3, 상한 1.6", () => {
     expect(reserveAppsBoost(0)).toBe(1);
