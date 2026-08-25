@@ -70,9 +70,10 @@ export function derbyMatchesOf(state: GameState, opponentId?: string): MatchReco
 export function derbyRecordFrom(state: GameState, matches: readonly MatchRecord[]): DerbyRecord {
   const record: DerbyRecord = { won: 0, drawn: 0, lost: 0 };
   for (const m of matches) {
+    if (!m.result) continue;
     const home = m.homeTeamId === state.userTeamId;
-    const ours = home ? m.result!.homeGoals : m.result!.awayGoals;
-    const theirs = home ? m.result!.awayGoals : m.result!.homeGoals;
+    const ours = home ? m.result.homeGoals : m.result.awayGoals;
+    const theirs = home ? m.result.awayGoals : m.result.homeGoals;
     if (ours > theirs) record.won++;
     else if (ours === theirs) record.drawn++;
     else record.lost++;
