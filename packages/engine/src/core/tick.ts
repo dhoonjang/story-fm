@@ -50,6 +50,8 @@ import {
 } from "../club/finance";
 // 핵심 자원의 경계는 회견이 쥔다 — 같은 자를 두 곳에 적으면 한쪽만 움직인다
 import { openEvePress, SQUAD_CORE_SIZE } from "../club/press";
+import { archetypeTraitsOf } from "../world/player-persona";
+import { demotionPatienceDaysOf } from "../squad/demotion";
 import { tickApproaches } from "../club/approach";
 import { tickBoardDemands } from "../club/board-demand";
 import { tickBoardRequests } from "../club/board-request";
@@ -112,7 +114,7 @@ import {
   DAY_START,
   type GameState,
 } from "./state";
-import { makeRng, pick } from "./rng";
+import { makeRng, pickWeighted } from "./rng";
 
 /**
  * advance_time — 캘린더 시계가 흐르는 유일한 경로 (season.md §5).
@@ -212,14 +214,6 @@ function resolveScouting(state: GameState, digest: string[]): void {
  * 하루 뒤에 처리해도 결과가 같다. 그것들은 digest로 쌓여 **그 구간이 끝난 뒤 한
  * 번에** 보고된다. 멈춰야 하는 것은 오늘이 지나면 기회 자체가 없어지는 일뿐이다.
  */
-/**
- * **2군에 내려둔 채 방치할 수 있는 기간** — 이 날수를 그대로 두면 불만이 걸린다
- * (→ docs/data/people.md §5).
- *
- * 짧으면 로테이션이 곧 반란이 되고 길면 강등이 지금처럼 **비용 0인 손잡이**로 남는다.
- * 2주 강등은 대가 없이 되돌릴 수 있고 한 달을 두면 값을 치른다는 폭이다.
- */
-export const DEMOTION_PATIENCE_DAYS = 21;
 
 function dailyTick(
   state: GameState,
@@ -435,7 +429,19 @@ function dailyTick(
         !issuePlayers.has(p.id),
     );
     if (benched.length > 0) {
-      const gripe = pick(rng, benched);
+      /**
+       * **누가 그 한 자리에 서는가만 사람이 정한다** (people.md §5).
+       *
+       * 자격도 주에 한 번이라는 빈도도 그대로이고, 추첨 무게만 `patience`의 역수로
+       * 기운다 — 문턱을 사람마다 옮기면 한 주에 서는 불만의 수가 원형 추첨을 따라가
+       * 다가옴(§8)의 소음 상한이 함께 움직인다. 무게만 기울이면 라커룸의 총량은
+       * 그대로이고 먼저 문을 두드리는 사람이 달라진다.
+       */
+      const gripe = pickWeighted(
+        rng,
+        benched,
+        (p) => 1 / archetypeTraitsOf(state.seed, p).patience,
+      );
       state.issues.push({
         gamePlayerId: gripe.id,
         kind: "unhappy",
@@ -459,7 +465,8 @@ function dailyTick(
     const neglected = players.filter((p) => {
       if (squadLevelOf(p) !== "reserve") return false;
       const since = p.state.demotedOn;
-      if (!since || diffDays(since, state.date) < DEMOTION_PATIENCE_DAYS) return false;
+      // 문턱은 사람마다 다르다 — 방치의 대가는 시간의 결과이되 그 시간은 그의 것이다
+      if (!since || diffDays(since, state.date) < demotionPatienceDaysOf(state, p)) return false;
       if (state.issues.some((i) => i.gamePlayerId === p.id)) return false;
       const better = players.filter(
         (o) => o.id !== p.id && o.attributes.overall > p.attributes.overall,
