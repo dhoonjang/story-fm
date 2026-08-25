@@ -910,7 +910,7 @@ export function respondOffer(
       }),
       message:
         `${player.name}은(는) 주급 ${formatMoney(counterWageDemand)} · ${yearsAsked}년 계약` +
-        `${statusLabel(statusAsked)}을 원합니다. 그 조건으로 다시 제안하면 받아들일 것입니다`,
+        `${statusLabel(statusAsked)}을(를) 원합니다. 그 조건으로 다시 제안하면 받아들일 것입니다`,
     };
   }
   negotiation.rounds.push({

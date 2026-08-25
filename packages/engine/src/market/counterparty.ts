@@ -276,10 +276,7 @@ export function clampCounterpartyRuling(
   const squadStatus =
     anchor.squadStatus !== undefined && anchor.statusRoom
       ? statusAtRank(
-          clampInto(
-            anchor.statusRoom,
-            squadStatusRank(ruling?.squadStatus ?? anchor.squadStatus),
-          ),
+          clampInto(anchor.statusRoom, squadStatusRank(ruling?.squadStatus ?? anchor.squadStatus)),
         )
       : undefined;
   const years = ruling?.paymentYears;

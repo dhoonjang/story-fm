@@ -572,7 +572,8 @@ describe("계약 지위가 관문에 선다", () => {
     const rank = squadStatusRank(actual);
     const up = SQUAD_STATUSES[Math.min(rank + 1, SQUAD_STATUSES.length - 1)]!;
     const down = SQUAD_STATUSES[Math.max(rank - 1, 0)]!;
-    if (up !== actual) expect(factorOf(renewAs(blocked, up), "계약 지위")!.delta).toBeGreaterThan(0);
+    if (up !== actual)
+      expect(factorOf(renewAs(blocked, up), "계약 지위")!.delta).toBeGreaterThan(0);
     if (down !== actual) {
       expect(factorOf(renewAs(blocked, down), "계약 지위")!.delta).toBeLessThan(0);
     }
