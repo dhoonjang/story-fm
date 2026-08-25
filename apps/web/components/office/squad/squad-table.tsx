@@ -225,6 +225,20 @@ export function SquadTable({
                   {p.isCaptain ? "Ⓒ " : ""}
                   {p.name}
                 </span>
+                {/* 국적 — **표식이 아니라 사실**이라 알약이 아니다. 등록 표식(HG·U21)과
+                    같은 모양으로 두면 "이 선수가 무엇에 해당한다"로 읽힌다 */}
+                {p.nationality !== null && (
+                  <span
+                    className="nat"
+                    title={
+                      p.secondNationality === null
+                        ? p.nationality
+                        : `${p.nationality} · ${p.secondNationality}`
+                    }
+                  >
+                    {p.nationality}
+                  </span>
+                )}
                 {/* 등록 명단을 읽는 두 표식 — 홈그로운은 8명 조건을 채우고, U21은 명단 밖이다 */}
                 {p.homegrown && (
                   <span className="tag hg" title="홈그로운 — 등록 명단의 8명 조건을 채운다">

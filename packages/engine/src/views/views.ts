@@ -423,6 +423,13 @@ interface SquadViewRowMeta {
   slotOverall: number | null;
   /** 이 팀 기준 홈그로운인가 — 등록 명단의 8명 조건을 채우는 선수 */
   homegrown: boolean;
+  /**
+   * 국적 — 협회 코드 (`domain/nationality.ts`). 홈그로운과 다른 축이다: 홈그로운은
+   * 어디서 자랐는가이고 이것은 누구인가라, 같은 줄에 나란히 선다.
+   */
+  nationality: string | null;
+  /** 둘째 국적 — 없으면 null */
+  secondNationality: string | null;
   /** 두 발 숙련도 (각 1~5) — 좌우 분화 자리의 적응도를 가른다 */
   foot: Foot;
   /** 키(cm) · 체중(kg) — 묘사용 (전력 계산에는 안 들어간다) */
@@ -2268,6 +2275,8 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         ...observed,
         potential: potentialBand(state, p),
         homegrown: isHomegrownFor(p, userTeamId),
+        nationality: p.nationality ?? null,
+        secondNationality: p.secondNationality ?? null,
         foot: p.foot ?? { left: 3, right: 3 },
         height: p.height ?? null,
         weight: p.weight ?? null,

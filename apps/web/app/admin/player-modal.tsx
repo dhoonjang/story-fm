@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import {
+  ASSOCIATIONS,
   AXIS_GROUPS,
   AXIS_GROUP_KO,
   AXIS_KO,
@@ -40,6 +41,11 @@ const MAX_WAGE = 2_000_000;
 
 type Mode = "create" | "edit";
 
+/** 협회 셀렉트의 줄 — 코드 순으로 세운다 (표기순은 한글 정렬이라 코드와 어긋난다) */
+const ASSOCIATION_OPTIONS: [string, string][] = Object.entries(ASSOCIATIONS)
+  .map(([code, a]): [string, string] => [code, a.ko])
+  .sort((x, y) => x[0].localeCompare(y[0]));
+
 export function PlayerModal({
   mode,
   player,
@@ -74,6 +80,8 @@ export function PlayerModal({
       number
     >,
   );
+  const [nationality, setNationality] = useState(player?.nationality ?? "");
+  const [secondNationality, setSecondNationality] = useState(player?.secondNationality ?? "");
   const [potential, setPotential] = useState(player?.potential ?? 70);
   // 빈 칸이 곧 "실측 없음"이다 — 0으로 출발하면 두 뜻이 한 값에 겹친다
   const [wage, setWage] = useState<number | "">(player?.weeklyWage ?? "");
@@ -148,6 +156,8 @@ export function PlayerModal({
                 nameEn: nameEn.trim() || undefined,
                 birthdate,
                 position: mainPosition,
+                ...(nationality === "" ? {} : { nationality }),
+                ...(secondNationality === "" ? {} : { secondNationality }),
                 ...numbers,
                 ...(weeklyWage === null ? {} : { weeklyWage }),
               }),
@@ -161,6 +171,11 @@ export function PlayerModal({
                 nameKo: nameKo.trim(),
                 nameEn: nameEn.trim() || undefined,
                 birthdate,
+                // 빈 칸은 "지운다"가 아니라 "손대지 않는다"다 — 첫째 국적은 비울 수
+                // 없는 값이라(카탈로그가 클럽 협회로 채운다) 빈 채로 실어 보내지 않는다.
+                // 둘째는 빈 문자열이 곧 지우기다 (world/admin.ts)
+                ...(nationality === "" ? {} : { nationality }),
+                secondNationality,
                 positions: positions.map((p) => ({
                   position: p.position,
                   proficiency: clampAttr(p.proficiency),
@@ -263,6 +278,36 @@ export function PlayerModal({
             onChange={(e) => setBirthdate(e.target.value)}
             data-testid="player-modal-birthdate"
           />
+        </label>
+        <label className="admin-field">
+          국적
+          <select
+            value={nationality}
+            onChange={(e) => setNationality(e.target.value)}
+            data-testid="player-modal-nationality"
+          >
+            <option value="">— 클럽 협회로 —</option>
+            {ASSOCIATION_OPTIONS.map(([code, ko]) => (
+              <option key={code} value={code}>
+                {code} · {ko}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="admin-field">
+          둘째 국적
+          <select
+            value={secondNationality}
+            onChange={(e) => setSecondNationality(e.target.value)}
+            data-testid="player-modal-second-nationality"
+          >
+            <option value="">— 없음 —</option>
+            {ASSOCIATION_OPTIONS.map(([code, ko]) => (
+              <option key={code} value={code}>
+                {code} · {ko}
+              </option>
+            ))}
+          </select>
         </label>
         <label className="admin-field">
           소속 팀

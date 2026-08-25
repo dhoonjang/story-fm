@@ -12,6 +12,7 @@ import {
   YELLOWS_PER_SUSPENSION,
   ageOf,
   anchorOf,
+  associationName,
   boardExpectationLine,
   conditionLabel,
   describeReputation,
@@ -787,6 +788,17 @@ const candidateLine = (players: readonly GamePlayer[]): string =>
 
 const CANDIDATES_SHOWN = 6;
 
+/**
+ * 국적 한 칸 — 코드와 표기를 함께 낸다. 코드만 실으면 모델이 `KVX`를 읽고 말을
+ * 지어내고, 표기만 실으면 규정을 논하는 자리에서 무엇으로 걸러야 할지가 사라진다.
+ * 조사가 닿지 않은 선수는 없다고 적는다 — 지어내지 않는다.
+ */
+function nationalityText(p: Pick<GamePlayer, "nationality" | "secondNationality">): string {
+  if (p.nationality === undefined) return "국적 정보 없음";
+  const one = (code: string): string => `${associationName(code)}(${code})`;
+  return `국적 ${one(p.nationality)}${p.secondNationality === undefined ? "" : ` · 둘째 국적 ${one(p.secondNationality)}`}`;
+}
+
 export function playerCard(state: GameState, playerId: string): LookupResult {
   // id가 정확하지 않으면 이름으로 푼다 — 모델은 감독이 부른 이름을 그대로 넣는다
   const { player: p, candidates } = resolvePlayerRef(state.players, playerId);
@@ -806,7 +818,7 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
   const suspension = activeSuspension(state, p.id);
   const lines: string[] = [
     `[선수 카드] ${p.name} — ${teamNameIn(state, p.teamId)} · ${ageOf(p.birthdate, state.date)}세 · ` +
-      `주포지션 ${naturalPositionOf(p).position} (${groupOf(p)}) · id ${p.id}`,
+      `${nationalityText(p)} · 주포지션 ${naturalPositionOf(p).position} (${groupOf(p)}) · id ${p.id}`,
     knowledgeNote(state, p.id),
     `능력치: ${attributeLine(state, p)}`,
     `종합: ${overallView(state, p)} · 잠재력: ${potentialView(state, p)}`,
