@@ -34,6 +34,8 @@ import type {
   ManagerPromise,
   SettlingEvent,
   TransferListing,
+  TransferRequest,
+  TransferRequestReason,
   PlayerTraining,
   PositionGroup,
   ReserveTrainingPolicy,
@@ -651,6 +653,17 @@ export interface GameState {
    * (`generateIncomingOffers`). 옛 세이브엔 없다(로드 시 빈 배열).
    */
   transferList: TransferListing[];
+  /**
+   * **이적 요청** — 선수가 나가겠다고 말한 사실과 감독의 답
+   * (→ docs/simulation/transfer.md §1-1).
+   *
+   * 사유가 셋이라(사다리 · 막힌 이적 · 더 큰 무대) `PlayerState.transferRequestedOn`
+   * 하나로는 「왜」도 「감독이 답했는가」도 적을 자리가 없다. 그 필드는 파생의
+   * 폴백으로 남는다 — 장부가 비어 있는 옛 세이브에서 `transferRequestOf`가 그
+   * 날짜에서 `grievance` 한 줄을 만든다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   */
+  transferRequests?: TransferRequest[];
   /** 개인 훈련 프로그램 — 팀 훈련 위에 한 선수만 겨냥해 얹는다 */
   playerTraining: PlayerTraining[];
   /**
@@ -1256,6 +1269,56 @@ export function openInjury(state: GameState, playerId: string): Injury | null {
  */
 export function hasIssue(state: GameState, playerId: string): boolean {
   return state.issues.some((i) => i.gamePlayerId === playerId);
+}
+
+/**
+ * **이 선수의 이적 요청** — 장부가 원본이고 `transferRequestedOn`이 폴백이다
+ * (→ docs/simulation/transfer.md §1-1).
+ *
+ * 옛 세이브는 날짜만 들고 있으므로 사유를 `grievance`로 읽는다: 그때는 요청이 서는
+ * 자리가 다가옴 사다리의 꼭대기뿐이었다.
+ */
+export function transferRequestOf(state: GameState, playerId: string): TransferRequest | null {
+  const row = (state.transferRequests ?? []).find((r) => r.gamePlayerId === playerId);
+  if (row) return row;
+  const since = playerById(state, playerId)?.state.transferRequestedOn;
+  return since === undefined ? null : { gamePlayerId: playerId, since, reason: "grievance" };
+}
+
+/** 아직 감독이 답하지 않은 요청들 — 책상 위에 놓인 것 */
+export function openTransferRequests(state: GameState): TransferRequest[] {
+  return (state.transferRequests ?? []).filter((r) => r.answeredOn === undefined);
+}
+
+/**
+ * 요청을 세운다 — **한 선수에게 한 줄뿐이다** (transfer.md §11). 이미 서 있으면
+ * 아무것도 하지 않고 `false`를 돌려준다: 사유가 셋이라 두 자리에서 같은 날 같은
+ * 선수를 세울 수 있는데, 그러면 감독의 답 하나가 다른 줄을 남긴다.
+ *
+ * `PlayerState.transferRequestedOn`도 함께 적는다 — 시장·압력 눈금이 그 필드를
+ * 읽고, 옛 세이브와 새 세이브가 같은 값을 들어야 한다.
+ */
+export function standTransferRequest(
+  state: GameState,
+  playerId: string,
+  reason: TransferRequestReason,
+): boolean {
+  const rows = (state.transferRequests ??= []);
+  if (rows.some((r) => r.gamePlayerId === playerId)) return false;
+  const player = playerById(state, playerId);
+  if (!player) return false;
+  rows.push({ gamePlayerId: playerId, since: state.date, reason });
+  player.state.transferRequestedOn = state.date;
+  return true;
+}
+
+/** 요청을 걷는다 — 원인이 사라졌거나 그 선수가 팀을 떠났을 때 */
+export function withdrawTransferRequest(state: GameState, playerId: string): void {
+  state.transferRequests = (state.transferRequests ?? []).filter(
+    (r) => r.gamePlayerId !== playerId,
+  );
+  const player = playerById(state, playerId);
+  if (player) player.state.transferRequestedOn = undefined;
 }
 
 export function isInjured(state: GameState, playerId: string): boolean {
@@ -2641,6 +2704,7 @@ export function createGame(input: CreateGameInput): GameState {
     scoutReports: [],
     settlingEvents: [],
     transferList: [],
+    transferRequests: [],
     playerTraining: [],
     roleMemory: [],
     aiDeals: [],
