@@ -252,10 +252,11 @@ export const SKILL_CATALOG = [
     group: "조회",
     readOnly: true,
     description:
-      '포지션·이름·나이·가용 상태 등으로 선수를 찾는다. team="mine"은 우리 팀, 팀 id·이름은 특정 팀. ' +
+      '포지션·이름·나이·가용 상태에 계약 잔여·값·주급·리스트·홈그로운·잠재력·주발까지 걸어 찾는다. team="mine"은 우리 팀, 팀 id·이름은 특정 팀. ' +
       "team을 생략하면 풀이 5대 리그 1·2부 전체이므로, 우리 리그 안에서 비교할 때는 competition(epl 등)으로 좁힌다. " +
-      'squadLevel="reserve"로 2군 유망주만 볼 수 있고, sortBy는 rating·age·fatigue·goals·apps·wage. ' +
-      "우리 선수는 정확한 정보, 타 팀 선수는 지식 수준에 따른 평가를 반환한다. " +
+      'squadLevel="reserve"는 2군 유망주. 조건은 도구가 걸어라 — limit만큼 훑어 고르지 마라. ' +
+      "sortBy는 age·fatigue·contract만 낮은 쪽이 앞이다. " +
+      "우리 선수는 정확한 정보, 타 팀 선수는 지식 수준에 따른 평가와 값·계약 만료일을 준다. " +
       "playerId를 주면 능력치·컨디션·계약·배치에 부상 이력과 이번 시즌 경고 누적·이동 이력까지 붙은 상세 카드가 나온다 — 감독이 특정 선수를 두고 물으면 그 선수를 논하기 전에 먼저 호출한다.",
   },
   {
