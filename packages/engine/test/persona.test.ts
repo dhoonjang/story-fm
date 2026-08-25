@@ -1,8 +1,14 @@
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   PersonaSchema,
   HEAD_COACH_ROLE_LABEL,
   normalizeSpeaker,
+  byLoyalty,
+  PLAYER_ARCHETYPE_KEYS,
+  PLAYER_ARCHETYPE_LABEL,
+  PLAYER_ARCHETYPE_TRAITS,
   type GamePlayer,
 } from "@story-fm/domain";
 import {
@@ -31,7 +37,12 @@ import {
 } from "../src/world/persona";
 import { ensureSeededManagers } from "../src/core/state";
 import { worldFigureManagerOf } from "../src/data/world-figures";
-import { generatePlayerPersona, PLAYER_ARCHETYPE_LABELS } from "../src/world/player-persona";
+import {
+  archetypeTraitsOf,
+  generatePlayerPersona,
+  playerArchetypeOf,
+  PLAYER_ARCHETYPE_LABELS,
+} from "../src/world/player-persona";
 import { personaRelations } from "../src/world/relations";
 import { selectCharacters } from "../src/world/character-book";
 import type { GameState } from "../src/core/state";
@@ -521,6 +532,77 @@ describe("선수 페르소나 — 파생되는 카드", () => {
     // 나이가 라벨과 어긋나는 자리는 아예 서지 않는다
     expect(countOf(veteranCentreBack, "불안한 유망주")).toBe(0);
     expect(countOf(youngStriker, "불안한 유망주")).toBeGreaterThan(0);
+  });
+
+  /**
+   * 카드를 짓는 쪽과 계수를 읽는 쪽이 **한 뽑기**를 지난다 — 갈리면 GM이 연기하는
+   * 사람과 장부가 그에게 붙이는 사실이 어긋난다 (people.md §6).
+   */
+  it("코드와 라벨과 계수가 한 행이다 — 카드를 짓지 않고 뽑기만 해도 같은 사람이다", () => {
+    for (const player of samples) {
+      for (let seed = 1; seed <= 40; seed++) {
+        const key = playerArchetypeOf(seed, player);
+        expect(PLAYER_ARCHETYPE_LABEL[key]).toBe(generatePlayerPersona(seed, player).archetype);
+        expect(archetypeTraitsOf(seed, player)).toBe(PLAYER_ARCHETYPE_TRAITS[key]);
+      }
+    }
+    // 표에 빠진 행이 있으면 그 원형만 계수 없이 산다
+    expect(Object.keys(PLAYER_ARCHETYPE_TRAITS).sort()).toEqual([...PLAYER_ARCHETYPE_KEYS].sort());
+    expect(Object.values(PLAYER_ARCHETYPE_LABEL).sort()).toEqual(
+      [...PLAYER_ARCHETYPE_LABELS].sort(),
+    );
+  });
+
+  /**
+   * **남을 이유는 곱하고 떠날 이유는 나눈다** (transfer.md §3).
+   *
+   * 축을 하나 늘리지 않고 기존 두 축을 기울이는 규칙이라, 부호를 헷갈리면 애착형이
+   * 먼저 팀을 뜨는 정반대 세계가 조용히 선다.
+   */
+  it("충성은 남을 이유를 키우고 떠날 이유를 줄인다", () => {
+    const [loyal, restless] = [1.45, 0.6];
+    // 남을 이유 — 애착이 크면 더 크게, 작으면 더 작게
+    expect(byLoyalty(0.6, loyal, "stay")).toBeGreaterThan(0.6);
+    expect(byLoyalty(0.6, restless, "stay")).toBeLessThan(0.6);
+    // 떠날 이유 — 부호는 그대로이고 크기만 줄거나 는다
+    expect(byLoyalty(-0.7, loyal, "leave")).toBeGreaterThan(-0.7);
+    expect(byLoyalty(-0.7, loyal, "leave")).toBeLessThan(0);
+    expect(byLoyalty(0.5, restless, "leave")).toBeGreaterThan(0.5);
+    // 애착이 평범하면 아무것도 움직이지 않는다
+    for (const means of ["stay", "leave"] as const) expect(byLoyalty(0.4, 1, means)).toBe(0.4);
+    // 표의 어느 행도 부호를 뒤집지 않는다
+    for (const key of PLAYER_ARCHETYPE_KEYS) {
+      const { loyalty } = PLAYER_ARCHETYPE_TRAITS[key];
+      expect(loyalty, key).toBeGreaterThan(0);
+      for (const means of ["stay", "leave"] as const) {
+        expect(Math.sign(byLoyalty(-0.6, loyalty, means)), `${key}/${means}`).toBe(-1);
+        expect(Math.sign(byLoyalty(0.6, loyalty, means)), `${key}/${means}`).toBe(1);
+      }
+    }
+  });
+
+  /**
+   * **전력 패킷과 xG는 원형을 읽지 않는다** (people.md 요구사항 3).
+   *
+   * 런타임으로는 증명할 수 없는 부재다 — 원형이 선수 id의 파생이라 원형만 바꿔 같은
+   * 경기를 두 번 돌릴 수 없다. 그래서 경계를 **읽는 자리가 없다**로 잰다: 이 폴더들이
+   * 원형을 이름으로도 부르지 않으면 경기 결과는 사람됨을 모른다.
+   */
+  it("경기 코어는 원형을 이름으로도 부르지 않는다", () => {
+    const roots = ["../../sim/src", "../src/match"];
+    const banned = /archetype|ARCHETYPE|player-persona/u;
+    const offenders: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) walk(path);
+        else if (entry.name.endsWith(".ts") && banned.test(readFileSync(path, "utf8"))) {
+          offenders.push(path);
+        }
+      }
+    };
+    for (const root of roots) walk(join(__dirname, root));
+    expect(offenders).toEqual([]);
   });
 });
 

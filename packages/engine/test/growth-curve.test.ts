@@ -185,6 +185,30 @@ describe("나이 배율 — 월간·결산이 한 열을 읽는다", () => {
     expect(growChance(1, 40)).toBeGreaterThan(0);
     expect(growChance(50, 18)).toBeLessThanOrEqual(0.35);
   });
+
+  /**
+   * **직업의식은 자라는 나이에서도 갈라야 한다** (people.md §6).
+   *
+   * `GROW_MAX`가 여유 6 이상인 U21을 전부 0.35에 붙여 놓으므로, 계수를 대역 **안**에
+   * 곱하면 정작 자라는 나이에서만 아무것도 하지 않는다 — 이 자리가 그 회귀를 잡는다.
+   * 그래서 사람됨은 감독의 배율과 같은 자리, 대역 밖에서 곱한다.
+   */
+  it("직업의식은 유망주에게도 갈린다 — 상한이 계수를 삼키지 않는다", () => {
+    const [lazy, diligent] = [0.85, 1.25];
+    /** 난수를 고정값으로 훑어 **확률의 폭**을 센다 — 통과하는 눈금 수가 곧 확률이다 */
+    const ROLLS = Array.from({ length: 2000 }, (_, i) => i / 20_000);
+    const stepsAt = (age: number, value: number, professionalism: number) =>
+      ROLLS.filter((r) => rollAxis("pace", age, value, 80, () => r, 1, professionalism) !== 0)
+        .length;
+
+    // 18세 · 여유 20 — 대역 상한(0.35)에 붙어 있는 전형적인 유망주. 여기서도 갈린다
+    expect(stepsAt(18, 60, diligent)).toBeGreaterThan(stepsAt(18, 60, 1));
+    expect(stepsAt(18, 60, lazy)).toBeLessThan(stepsAt(18, 60, 1));
+    // 여유가 없으면 아무리 성실해도 안 자란다 — 천장은 사람됨 위에 있다
+    expect(rollAxis("pace", 18, 80, 80, () => 0, 1, diligent)).toBe(0);
+    // 노화 하락에는 붙지 않는다 — 성실한 선수가 천천히 늙지는 않는다
+    expect(stepsAt(34, 70, diligent)).toBe(stepsAt(34, 70, lazy));
+  });
 });
 
 /**

@@ -1,4 +1,4 @@
-import { milestonePhrase } from "@story-fm/domain";
+import { milestonePhrase, PLAYER_ARCHETYPE_LABEL } from "@story-fm/domain";
 import type { MilestoneCode } from "@story-fm/domain";
 import type { MoodFact, MoodRead } from "@story-fm/engine";
 
@@ -120,9 +120,18 @@ function sentenceOf(fact: MoodFact): string {
     case "suspension":
       return `출장 정지 ${fact.matchesLeft}경기가 남아 몸이 근질거린다`;
     case "grievance":
-      return `${grievanceSubject(fact)}에 불만이 쌓여 있다`;
-    case "demotion":
-      return fact.days === 0 ? "오늘 2군으로 내려갔다" : `2군에 내려간 지 ${fact.days}일째다`;
+      // 누구의 불만인가를 함께 말한다 — 같은 사유라도 사람이 다르면 감독이 할 일이 다르다
+      return `${grievanceSubject(fact)}에 불만이 쌓여 있다 (${PLAYER_ARCHETYPE_LABEL[fact.archetype]})`;
+    case "demotion": {
+      /**
+       * 문턱은 사람마다 다르고 추첨이 없다 — 그래서 **감독이 날짜를 셀 수 있다**
+       * (people.md §5). 남은 날을 약속하는 것이 아니라 그의 한계를 적는 것이다.
+       */
+      const who = `${PLAYER_ARCHETYPE_LABEL[fact.archetype]} — ${fact.patienceDays}일까지 참는다`;
+      return fact.days === 0
+        ? `오늘 2군으로 내려갔다 (${who})`
+        : `2군에 내려간 지 ${fact.days}일째다 (${who})`;
+    }
     case "settling":
       // 남은 날짜를 말하지 않는다 — 얼마나 걸릴지는 감독이 앞으로 뭘 하느냐에 달렸다
       return fact.matches === 0
