@@ -578,7 +578,8 @@ mock GM도 같은 앵커를 읽으므로, 두 모드가 확률을 다른 사다�
 경계에서만 바꾼다 — 부분 문자열까지 치우면 `rodri`가 `rodrigo-muniz`를 반쪽만 바꾼다.
 **답할 도구가 없으면 모델은 지어내므로** 컨텍스트 밖 사실에는 각각 읽을 자리를 준다 —
 배치는 `get_squad`, 훈련 일정은 `get_league(view="calendar")`, 지난 시즌은 `get_career`,
-한 선수의 상세는 `search_players(playerId)`, 끝난 경기 하나는 `get_match_report`.
+한 선수의 상세는 `search_players(playerId)`, 끝난 경기 하나는 `get_match_report`,
+다음 상대는 `get_opponent_report`.
 
 **끝난 경기는 리포트가 답한다** (`get_match_report`). 타임라인·팀 스탯(슛·xG·점유)·
 선수별 기록·평점과 그 한 줄 근거·MOTM이 한 번의 호출로 온다 — "지난 리버풀전 xG"에
