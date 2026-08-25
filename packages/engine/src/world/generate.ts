@@ -3,7 +3,13 @@ import { bestOverall } from "@story-fm/domain";
 import { claimSyntheticName, syntheticNamePoolOf } from "../data/names";
 import { countryOfTeam, TIER_BASE } from "../data/team-catalog";
 import { deriveAxes } from "./attributes";
-import { deriveHomegrownCountry, derivePositions, physiqueOf, syntheticFoot } from "./catalog";
+import {
+  deriveHomegrownCountry,
+  deriveNationality,
+  derivePositions,
+  physiqueOf,
+  syntheticFoot,
+} from "./catalog";
 import { claimPlayerId, slugifyName } from "./player-id";
 import { makeRng, pick, randInt } from "../core/rng";
 import { seasonYear } from "../core/dates";
@@ -138,6 +144,7 @@ export function generateYouthPlayer(
     takenNames,
   );
   const attrs = syntheticAxes(rng, group, base);
+  const nationality = deriveNationality(teamId, undefined);
 
   const age = randInt(rng, YOUTH_AGE.min, YOUTH_AGE.max);
   const month = randInt(rng, 1, 12);
@@ -165,6 +172,8 @@ export function generateYouthPlayer(
     name: nameKo,
     birthdate,
     positions,
+    // 이름을 리그 국적 풀에서 받았으니 국적도 그 자리에서 받는다 (catalog.ts)
+    ...(nationality === undefined ? {} : { nationality }),
     // 적응도 파생과 **같은 키**로 주발을 뽑는다 — 같은 선수는 언제나 같은 발이다
     foot: syntheticFoot(`${nameEn}-${slugifyName(teamId)}-${season}-${index}`, position),
     ...physiqueOf(`${nameEn}-${slugifyName(teamId)}-${season}-${index}`, position, axes),
@@ -229,6 +238,7 @@ export function generatePromotionSigning(
   const overall = bestOverall(axes, positions);
   // 홈그로운은 세계와 같은 비율로 굴린다 — 등록 명단의 홈그로운 셈이 갈리지 않게
   const homegrownCountry = deriveHomegrownCountry({ nameEn, birthdate }, teamId, undefined);
+  const nationality = deriveNationality(teamId, undefined);
 
   return {
     id: claimPlayerId(nameEn, birthdate, taken),
@@ -247,6 +257,7 @@ export function generatePromotionSigning(
       potential: clamp99(overall + randInt(rng, SIGNING_UPSIDE.min, SIGNING_UPSIDE.max)),
     },
     ...(homegrownCountry === undefined ? {} : { homegrownCountry }),
+    ...(nationality === undefined ? {} : { nationality }),
     state: { form: 0, condition: randInt(rng, JOINING_CONDITION.min, JOINING_CONDITION.max) },
     isCaptain: false,
   };

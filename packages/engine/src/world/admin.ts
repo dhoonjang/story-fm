@@ -3,11 +3,13 @@ import {
   ATTRIBUTE_AXES,
   ageOf,
   bestOverall,
+  isAssociation,
   naturalPositionOf,
   positionGroupOf,
 } from "@story-fm/domain";
 import {
   CATALOG_AGE_REF,
+  deriveNationality,
   derivePositions,
   playerCatalog,
   resetCatalog,
@@ -46,6 +48,13 @@ interface CatalogPlayerInputMeta {
   /** 로마자 — id 슬러그·파생값의 기준 */
   nameEn?: string;
   birthdate: string;
+  /**
+   * 국적 — 협회 코드 (`domain/nationality.ts`). 비우면 그 클럽 협회로 선다.
+   * `secondNationality`는 빈 문자열이 "지운다"는 뜻이다 — 복수 국적이 아니게 됐다는
+   * 편집과 "손대지 않는다"가 갈려야 한다.
+   */
+  nationality?: string;
+  secondNationality?: string;
   /** 주 포지션 */
   position: string;
   potential: number;
@@ -153,6 +162,17 @@ function applyPatch(
       return { ok: false, message: "출생년월일 형식(YYYY-MM-DD)이 올바르지 않습니다" };
     }
     entry.birthdate = patch.birthdate;
+  }
+  if (patch.nationality !== undefined) {
+    const code = patch.nationality.trim().toUpperCase();
+    if (!isAssociation(code)) return { ok: false, message: `알 수 없는 협회 코드: ${code}` };
+    entry.nationality = code;
+  }
+  if (patch.secondNationality !== undefined) {
+    const code = patch.secondNationality.trim().toUpperCase();
+    if (code === "") delete entry.secondNationality;
+    else if (!isAssociation(code)) return { ok: false, message: `알 수 없는 협회 코드: ${code}` };
+    else entry.secondNationality = code;
   }
   if (patch.nameKo !== undefined) {
     if (patch.nameKo.trim().length === 0) return { ok: false, message: "이름이 필요합니다" };
@@ -275,6 +295,16 @@ export function adminAddCatalogPlayer(teamId: string, input: CatalogPlayerInput)
   // 시드 선수와 같은 공식으로 파생한다 — 같은 자리 묶음(CB↔RCB/LCB)까지 채워진다
   const positions = derivePositions(nameEn, code);
   const overall = bestOverall(attrs, positions);
+  const nationality = deriveNationality(
+    teamId,
+    input.nationality?.trim().toUpperCase() || undefined,
+  );
+  const secondNationality = input.secondNationality?.trim().toUpperCase() || undefined;
+  for (const code of [nationality, secondNationality]) {
+    if (code !== undefined && !isAssociation(code)) {
+      return { ok: false, message: `알 수 없는 협회 코드: ${code}` };
+    }
+  }
   const entry: PlayerCatalogEntry = {
     id,
     teamId,
@@ -283,6 +313,9 @@ export function adminAddCatalogPlayer(teamId: string, input: CatalogPlayerInput)
     birthdate: input.birthdate,
     positions,
     ...attrs,
+    // 비운 국적은 그 클럽 협회로 — 시드 없는 선수와 같은 규칙이다 (catalog.ts)
+    ...(nationality === undefined ? {} : { nationality }),
+    ...(secondNationality === undefined ? {} : { secondNationality }),
     potential: Math.max(clamp99(input.potential), overall),
     ...(input.weeklyWage === undefined
       ? {}

@@ -36,6 +36,7 @@ import {
   migrateGrowthSources,
   migrateMatchStats,
   migrateMirrorProficiency,
+  migrateNationalities,
   migratePassStyles,
   migrateSquadLevels,
   splitPositioningAxis,
@@ -691,6 +692,35 @@ describe("옛 세이브를 지금 모양으로", () => {
     // 합쳐진 뒤의 두 축은 남지 않는다 — 두 벌로 두면 갈린다
     expect(save.players[0]!.state).toEqual({ condition: 72 });
     expect(save.players[3]!.state.morale).toBe(90);
+  });
+
+  it("국적이 없던 세이브가 카탈로그·클럽 협회로 채워지고, 이미 있는 값은 그대로다", () => {
+    const save = {
+      players: [
+        { catalogId: "arsenal-david-raya", teamId: "arsenal" },
+        { catalogId: null, teamId: "arsenal" },
+        { catalogId: null, teamId: "arsenal", nationality: "KOR" },
+      ] as Array<{
+        catalogId: string | null;
+        teamId: string;
+        nationality?: string;
+        secondNationality?: string;
+      }>,
+    };
+    // 카탈로그가 아는 선수는 조사된 값, 모르는 선수는 그 클럽 협회
+    migrateNationalities(save, (p) =>
+      p.catalogId === null
+        ? { nationality: "ENG" }
+        : { nationality: "ESP", secondNationality: "FRA" },
+    );
+    expect(save.players.map((p) => p.nationality)).toEqual(["ESP", "ENG", "KOR"]);
+    expect(save.players[0]!.secondNationality).toBe("FRA");
+    // 이미 국적이 있던 선수에게는 둘째 국적도 얹지 않는다 (손대지 않는다)
+    expect(save.players[2]!.secondNationality).toBeUndefined();
+
+    // 멱등 — 다시 돌아도 값이 두 번 움직이지 않는다
+    migrateNationalities(save, () => ({ nationality: "BRA" }));
+    expect(save.players.map((p) => p.nationality)).toEqual(["ESP", "ENG", "KOR"]);
   });
 
   it("미러 자리에 얹혀 있던 주발 보정을 벗긴다 — 두 번 돌려도 한 번만 움직인다", () => {

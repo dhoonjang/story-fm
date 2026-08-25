@@ -3,6 +3,7 @@ import type { PlayerCatalogEntry, PlayerPosition, PositionGroup } from "@story-f
 import {
   PlayerCatalogEntrySchema,
   ageOf,
+  associationOfCountry,
   bestOverall,
   clusterOf,
   isMirrorPair,
@@ -301,11 +302,27 @@ export function deriveHomegrownCountry(
   return hashOf(key) % 100 < HOMEGROWN_RATE[division] ? country : undefined;
 }
 
+/**
+ * 국적 — **시드가 답을 갖고 있으면 그것, 없으면 그 클럽의 협회다.**
+ *
+ * 홈그로운과 달리 비율로 굴리지 않는다. 절차 생성 선수의 이름이 이미 리그 국적의
+ * 풀에서 나오므로(`data/names.ts`), 국적만 따로 굴리면 잉글랜드 이름을 단 세네갈
+ * 사람이 스물몇 명씩 선다 — 이름과 국적은 한 사실의 두 얼굴이라 같은 자리에서 나와야
+ * 한다. 조사가 닿지 않은 실선수(위키 문서가 없는 아카데미 자원)도 같은 규칙으로
+ * 그 클럽 협회에 선다 — **지어낸 국적보다 낡은 파생이 낫고, 빈칸은 규정이 못 읽는다.**
+ *
+ * ⚠️ 이것은 실측이 아니라 부채다 (sources.md §4.1 · §7). 시드가 채워지면 물러난다.
+ */
+export function deriveNationality(teamId: string, seeded: string | undefined): string | undefined {
+  return seeded ?? associationOfCountry(countryOfTeam(teamId));
+}
+
 /** 아직 id가 없는 카탈로그 엔트리 — id는 전 구단을 다 만든 뒤 한 번에 배정한다 */
 type CatalogDraft = Omit<PlayerCatalogEntry, "id">;
 
 function entryFromSeed(teamId: string, s: RealPlayerSeed): CatalogDraft {
   const homegrownCountry = deriveHomegrownCountry(s, teamId, s.homegrown);
+  const nationality = deriveNationality(teamId, s.nationality);
   // 시드는 6축 + GK — 16축은 여기서 파생한다 (attributes.ts, 부채는 §8 2단계)
   const axes = deriveAxes(s.nameEn, s.position, s, ageOf(s.birthdate, CATALOG_AGE_REF));
   const positions = derivePositions(s.nameEn, s.position);
@@ -330,6 +347,8 @@ function entryFromSeed(teamId: string, s: RealPlayerSeed): CatalogDraft {
     // 여기서 접어 두면 게임·어드민·조회가 같은 값을 본다.
     potential: Math.max(clamp99(s.potential), bestOverall(axes, positions)),
     ...(homegrownCountry === undefined ? {} : { homegrownCountry }),
+    ...(nationality === undefined ? {} : { nationality }),
+    ...(s.secondNationality === undefined ? {} : { secondNationality: s.secondNationality }),
     ...(s.weeklyWage === undefined ? {} : { weeklyWage: s.weeklyWage }),
   };
 }
@@ -541,6 +560,7 @@ function fallbackEntries(
    * 그 이름들도 미리 쥐고 시작한다 (`topUpEntries`).
    */
   const takenNames = options.takenNames ?? new Set<string>();
+  const nationality = deriveNationality(teamId, undefined);
   return template.map((position, i) => {
     const rng = makeRng(hashOf(`${teamId}:${i}`), `catalog:${teamId}:${i}`);
     const group = positionGroupOf(position) ?? "MF";
@@ -619,6 +639,8 @@ function fallbackEntries(
       // 아카데미는 잠재력 폭이 크다 — 유스 발굴의 재미가 여기서 나온다
       potential: clamp99(base + (academy ? randInt(rng, 8, 28) : randInt(rng, 2, 14))),
       ...(homegrownCountry === undefined ? {} : { homegrownCountry }),
+      // 이름이 리그 국적의 풀에서 나왔으니 국적도 같은 자리에서 나온다
+      ...(nationality === undefined ? {} : { nationality }),
     } satisfies CatalogDraft;
   });
 }
@@ -752,7 +774,7 @@ export function playerCatalog(): PlayerCatalogEntry[] {
     }
   }
   entries ??= buildFromSeed();
-  cache = { key, entries: backfillHomegrown(entries) };
+  cache = { key, entries: backfillNationality(backfillHomegrown(entries)) };
   return cache.entries;
 }
 
@@ -767,6 +789,22 @@ function backfillHomegrown(entries: PlayerCatalogEntry[]): PlayerCatalogEntry[] 
   return entries.map((e) => {
     const country = deriveHomegrownCountry(e, e.teamId, undefined);
     return country === undefined ? e : { ...e, homegrownCountry: country };
+  });
+}
+
+/**
+ * 국적 보정 — 저장된 카탈로그(어드민 편집본·구 파일)에 국적이 없는 줄을 채운다.
+ *
+ * 홈그로운 보정과 달리 **줄마다 묻는다.** 홈그로운은 "필드 자체가 없는 옛 파일"만
+ * 상대하면 되지만, 국적은 어드민이 새로 만든 선수도 비운 채 저장될 수 있어서
+ * 한 줄이라도 있으면 넘어가는 규칙으로는 그 줄이 영영 빈다 — 그리고 빈 국적은
+ * 등록 규정·대표팀이 읽지 못하는 값이다. 파일은 건드리지 않는다.
+ */
+function backfillNationality(entries: PlayerCatalogEntry[]): PlayerCatalogEntry[] {
+  return entries.map((e) => {
+    if (e.nationality !== undefined) return e;
+    const nationality = deriveNationality(e.teamId, undefined);
+    return nationality === undefined ? e : { ...e, nationality };
   });
 }
 
