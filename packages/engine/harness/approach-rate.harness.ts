@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addDays, advanceTime, diffDays, pendingApproach, pendingPress } from "@story-fm/engine";
-import type { Approach } from "@story-fm/domain";
+import type { Approach, TransferRequestReason } from "@story-fm/domain";
 import { createMiniGame, keepSeat, playMockMatch } from "../test/helpers";
 import { APPROACH_RATE } from "./catalog";
 import { outOfBand, reportOf, type Readings } from "./harness";
@@ -52,10 +52,18 @@ describe("한 시즌의 다가옴", () => {
      * 사라진다. 매일 훑어 모으는 수밖에 없다.
      */
     const leaks = new Set<string>();
+    /**
+     * 요청도 같은 이유로 매일 모은다 — 불만이 풀리거나 창이 닫히면 걷히고
+     * (transfer.md §1-1), 요청까지 간 선수는 시장이 데려가며 줄도 함께 사라진다.
+     */
+    const requests = new Set<string>();
 
     function sample(): void {
       for (const leak of state.pressLeaks ?? []) {
         leaks.add(`${leak.playerId}:${leak.topic}:${leak.date}`);
+      }
+      for (const request of state.transferRequests ?? []) {
+        requests.add(`${request.gamePlayerId}:${request.reason}:${request.since}`);
       }
       const open = pendingApproach(state);
       if (!open) return;
@@ -109,6 +117,10 @@ describe("한 시즌의 다가옴", () => {
 
     const byTopic = (topic: Approach["topic"]) => opened.filter((a) => a.topic === topic).length;
 
+    /** 키가 `선수:사유:날짜`라 가운데 칸이 사유다 — 사유 코드에는 `:`가 없다 */
+    const byReason = (reason: TransferRequestReason) =>
+      [...requests].filter((key) => key.split(":")[1] === reason).length;
+
     const readings: Readings<typeof APPROACH_RATE> = {
       "시즌 다가옴 건수": opened.length,
       "선수 채널": byChannel("player"),
@@ -121,6 +133,10 @@ describe("한 시즌의 다가옴", () => {
       "타 구단 관심(interest)": byTopic("interest"),
       "언론 유출(계단 4)": leaks.size,
       "이적 요청(계단 5)": opened.filter((a) => a.step === TRANSFER_REQUEST_STEP).length,
+      "이적 요청(장부)": requests.size,
+      "요청 사유 grievance": byReason("grievance"),
+      "요청 사유 blocked-move": byReason("blocked-move"),
+      "요청 사유 bigger-club": byReason("bigger-club"),
       "하루 두 건이 열린 날": [...openedOn.values()].filter((n) => n > 1).length,
       "동시에 열린 자리": concurrent,
       "같은 화자 7일 내 재개": cooldownBreaks,

@@ -11,7 +11,7 @@ import type {
   PressFact,
   PressStance,
 } from "@story-fm/domain";
-import { isReserveMatch } from "@story-fm/domain";
+import { ageOf, isReserveMatch } from "@story-fm/domain";
 import {
   APPROACH_AXES,
   APPROACH_CHANNEL_LABEL,
@@ -28,9 +28,13 @@ import {
   pushNarrative,
   seasonStatOf,
   squadLevelOf,
+  standTransferRequest,
   teamNameIn,
+  transferRequestOf,
   userPlayers,
+  withdrawTransferRequest,
 } from "../core/state";
+import { makeRng } from "../core/rng";
 import { diffDays } from "../competition/calendar";
 import { boardExpectation, computeStandings } from "../competition/season";
 import { formLabel } from "../squad/form";
@@ -39,7 +43,16 @@ import { leaderGroupOf, leaderRoleOf, leaderWeightOf } from "../squad/hierarchy"
 import { recentOutcomes } from "../squad/slump";
 import { agentForPlayer, ownerOf } from "../world/persona";
 import { USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
-import { isSeriousOffer, renewalExpectation } from "../market/market";
+import {
+  CAREER_AGE_MOVE,
+  isSeriousOffer,
+  loanLockOf,
+  renewalExpectation,
+  SUITORS_MANY,
+  suitorsOf,
+  windowOpenForTeam,
+} from "../market/market";
+import { squadDepthOf, squadRating, type SquadDepth } from "../squad/depth";
 import { boardDemandFact } from "./board-demand";
 import {
   applyStanceOutcome,
@@ -284,7 +297,7 @@ function causesToday(state: GameState): Cause[] {
    */
   const requested = new Set(
     userPlayers(state)
-      .filter((p) => p.state.transferRequestedOn !== undefined)
+      .filter((p) => transferRequestOf(state, p.id) !== null)
       .map((p) => p.id),
   );
 
@@ -769,6 +782,12 @@ function sceneFor(state: GameState, row: ApproachPressure, step: number): Scene 
  */
 export function tickApproaches(state: GameState, digest: string[]): boolean {
   withdrawRequests(state, digest);
+  /**
+   * 시장이 세우는 요청은 **자리를 열지 않으므로** 아래의 문(하루 한 건 · 동시 하나)을
+   * 다투지 않는다. 압력보다 먼저 서는 것은 그래야 오늘의 압력이 「요청이 선 선수는
+   * 쌓지 않는다」를 함께 읽기 때문이다 (people.md §8).
+   */
+  standBiggerClubRequests(state, digest);
   const gaveUp = expireApproach(state, digest);
   driftPressure(state);
   /**
@@ -810,17 +829,106 @@ function expireApproach(state: GameState, digest: string[]): boolean {
 }
 
 /**
- * **불만이 전부 풀리면 요청이 걷힌다** — 면담·승격·선발이 원인을 지운 자리다
- * (people.md §8). 감독의 스탠스는 이 필드를 건드리지 못하고, 팀을 떠난 선수의 요청은
- * `clearDepartedState`가 다른 상태와 함께 지운다.
+ * **요청을 걷는 것은 원인이다** — 감독의 답도 스탠스도 걷지 못한다
+ * (transfer.md §1-1 · people.md §8). 길이 둘 여기 있다:
+ *
+ *   - 불만이 받치는 요청(`grievance`·`blocked-move`) — 그 불만이 전부 풀리면.
+ *     면담·승격·선발이 원인을 지운 자리다.
+ *   - 불만이 없는 요청(`bigger-club`) — 창이 닫히면. 나갈 문이 없는 동안의 요청은
+ *     감독이 답할 수도 시장이 받을 수도 없는 말이다.
+ *
+ * 셋째 길인 「팀을 떠나면」은 `clearDepartedState`가 다른 상태와 함께 지운다.
  */
 function withdrawRequests(state: GameState, digest: string[]): void {
+  const windowOpen = windowOpenForTeam(state, state.userTeamId) !== null;
   for (const player of userPlayers(state)) {
-    if (player.state.transferRequestedOn === undefined) continue;
-    if (state.issues.some((i) => i.gamePlayerId === player.id)) continue;
-    player.state.transferRequestedOn = undefined;
-    digest.push(`${player.name} 이적 요청 철회 — 불만이 남아 있지 않다`);
+    const request = transferRequestOf(state, player.id);
+    if (!request) continue;
+    const why =
+      request.reason === "bigger-club"
+        ? windowOpen
+          ? null
+          : "이적창이 닫혔다"
+        : state.issues.some((i) => i.gamePlayerId === player.id)
+          ? null
+          : "불만이 남아 있지 않다";
+    if (why === null) continue;
+    withdrawTransferRequest(state, player.id);
+    digest.push(`${player.name} 이적 요청 철회 — ${why}`);
     pushNarrative(state, `${player.name} 이적 요청 철회`, 4);
+  }
+}
+
+/**
+ * 「더 큰 무대」 요청이 서는 하루 확률 — 조건이 갖춰진 선수 **하나당**이다.
+ * 창이 열린 날에만 굴린다: 나갈 문이 닫혀 있는 동안 요청은 감독이 답할 수도
+ * 시장이 받을 수도 없는 말이다.
+ *
+ * ⚠️ **눈금은 후보 수로 잡는다.** 전체 세계의 중위권 구단은 조건을 갖춘 선수가 한
+ * 창에 열둘에서 스물이고 창은 한 시즌 90여 일이라, 확률 하나가 곧 「후보 × 90」번
+ * 굴러간다 — 1%대면 한 시즌에 열대여섯 명이 나가겠다고 말한다. 0.15%가 중위권
+ * 기준 한 시즌 두어 건이다 (transfer.md §1-1 · `pnpm balance approach-rate`).
+ */
+const BIGGER_CLUB_CHANCE = 0.0015;
+
+/**
+ * **주전이 행복하게 뛰다가도 나가겠다고 말한다** — 불만이 아니라 시장이 세우는
+ * 요청이다 (transfer.md §1-1).
+ *
+ * 자리(`Approach`)를 열지 않는다. 다가옴의 주제는 불만 사유라 불만이 없는 선수의
+ * 요청은 오를 계단이 없다 — 감독에게는 다이제스트 한 줄과 다음 회견의 사실 카드가
+ * 알린다.
+ *
+ * **하루 한 건이다.** 여러 후보가 굴러도 그날 서는 요청은 하나 — 창이 열린 첫날
+ * 스쿼드의 절반이 동시에 나가겠다고 말하는 일은 사건이 아니라 버그로 읽힌다.
+ */
+function standBiggerClubRequests(state: GameState, digest: string[]): void {
+  if (windowOpenForTeam(state, state.userTeamId) === null) return;
+  const listed = new Set(state.transferList.map((l) => l.gamePlayerId));
+  const candidates = userPlayers(state)
+    .filter(
+      (p) =>
+        squadLevelOf(p) === "first" &&
+        loanLockOf(p) === null &&
+        transferRequestOf(state, p.id) === null &&
+        // 감독이 이미 팔겠다고 말한 선수는 요청할 것이 없다
+        !listed.has(p.id) &&
+        ageOf(p.birthdate, state.date) <= CAREER_AGE_MOVE,
+    )
+    .sort((a, b) => (a.id < b.id ? -1 : 1));
+  if (candidates.length === 0) return;
+
+  const rng = makeRng(state.seed, `bigger-club:${state.date}`);
+  /**
+   * 세계를 훑는 색인은 **주사위가 선 뒤에** 세운다 — 하루 확률이 1.2%라 대부분의
+   * 날은 아무도 넘지 못하는데, 그 날마다 5,000명짜리 색인을 세우면 시즌 하나가
+   * 색인 값이 된다. 세운 뒤에는 그날 안에서 다시 세우지 않는다.
+   */
+  let depth: SquadDepth | null = null;
+  const ratings = new Map<string, number>();
+  const ratingOf = (teamId: string): number => {
+    const cached = ratings.get(teamId);
+    if (cached !== undefined) return cached;
+    const value = squadRating(state, teamId);
+    ratings.set(teamId, value);
+    return value;
+  };
+
+  for (const player of candidates) {
+    if (rng() >= BIGGER_CLUB_CHANCE) continue;
+    depth ??= squadDepthOf(state);
+    const suitors = suitorsOf(state, player, depth);
+    if (suitors.length < SUITORS_MANY) continue;
+    // 갈 곳이 많은 것만으로는 이유가 되지 않는다 — 그중 하나는 우리보다 커야 한다
+    const ours = ratingOf(state.userTeamId);
+    if (!suitors.some((id) => ratingOf(id) > ours)) continue;
+    if (!standTransferRequest(state, player.id, "bigger-club")) continue;
+    const agent = agentForPlayer(state, player.id);
+    digest.push(
+      `${player.name} 이적 요청 — 더 큰 무대를 원한다${agent ? ` (${agent.name} 전달)` : ""}`,
+    );
+    pushNarrative(state, `${player.name} 이적 요청 (더 큰 무대)`, 4);
+    return;
   }
 }
 
@@ -974,8 +1082,7 @@ function openApproach(state: GameState, digest: string[]): boolean {
      */
     if (isIssueTopic(row.topic) && step === topStepOf(row.topic)) {
       const player = scene.about === null ? null : playerById(state, scene.about);
-      if (player && player.state.transferRequestedOn === undefined) {
-        player.state.transferRequestedOn = state.date;
+      if (player && standTransferRequest(state, player.id, "grievance")) {
         digest.push(`${player.name} 이적 요청 — 에이전트가 구단에 전달했다`);
         pushNarrative(state, `${player.name} 이적 요청`, 4);
       }

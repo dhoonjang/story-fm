@@ -41,7 +41,9 @@ import {
   digestLines,
   finalizeMatch,
   openRenewal,
+  openTransferRequests,
   renewalExpectation,
+  respondTransferRequest,
   incomingOffer,
   incomingOffers,
   pendingOffer,
@@ -78,6 +80,7 @@ import {
   packetTagContext,
   packetTagText,
   pressFactText,
+  TRANSFER_REQUEST_REASON_KO,
 } from "@story-fm/domain";
 import type { ShootoutOutcome } from "@story-fm/domain";
 import {
@@ -808,6 +811,26 @@ function computeMockGmTurn(
       text: result.ok
         ? `@: *${who.name}의 에이전트와 마주 앉는다*\n${coach(state)} ${result.message}`
         : `${coach(state)} ${result.message}`,
+      toolCalls: calls,
+    };
+  }
+
+  /**
+   * 이적 요청에 답한다 — **이적 분기보다 먼저 본다.** 요청을 말하는 문장에는
+   * 「이적」이 들어 있어 뒤에 두면 협상 분기가 먼저 삼킨다.
+   *
+   * 기본은 거부다 — mock은 세계를 최소로 움직인다.
+   */
+  const request = openTransferRequests(state)[0];
+  if (request && /이적 요청|요청.*(수락|받아들|거부|거절)|안 판다|못 판다|보낸다/u.test(msg)) {
+    const input = {
+      playerId: request.gamePlayerId,
+      answer: /수락|받아들|보낸다|보내겠/u.test(msg) ? ("accept" as const) : ("refuse" as const),
+    } as const;
+    const result = respondTransferRequest(state, input);
+    recordCall(calls, "respond_transfer_request", result, { input, line: 2 });
+    return {
+      text: `@: *책상 위에 놓인 요청서 한 장*\n@${playerName(state, request.gamePlayerId)}: ${TRANSFER_REQUEST_REASON_KO[request.reason]} 때문입니다. 보내 주십시오.\n${coach(state)} ${result.message}`,
       toolCalls: calls,
     };
   }
