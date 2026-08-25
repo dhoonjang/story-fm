@@ -450,6 +450,15 @@ function SideTactics({ tactics }: { tactics: Match["tactics"]["home"] }) {
           <i>{tactics.formation}</i> · 소화 {Math.round(tactics.uptake * 100)}%
         </span>
       </div>
+      {/* 상대 벤치가 판을 옮긴 정지점의 표식 — 없으면 감독은 여섯 축의 점 눈금을
+          정지점마다 외워 견줘야 승부수를 안다. 분과 문장 모두 장부의 사건에서
+          파생한 값이다 (match.md §4·§8) */}
+      {tactics.shift && (
+        <div className="mv-tac-shift" data-testid="opp-tactic-shift">
+          <b>{tactics.shift.minute}′ 전환</b>
+          <span>{tactics.shift.note}</span>
+        </div>
+      )}
       {TACTIC_AXES.map((axis) => {
         const v = tactics[axis.key];
         return (

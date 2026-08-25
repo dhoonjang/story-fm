@@ -474,6 +474,30 @@
   color: var(--muted);
   font-weight: 500;
 }
+/**
+ * 상대가 판을 옮긴 정지점의 표식 — 6축 눈금 **위**에 선다.
+ * 지금 값(점)을 읽기 전에 "방금 바뀌었다"를 먼저 알아야 그 눈금이 뜻을 갖는다.
+ */
+.mv-tac-shift {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  background: rgb(250 204 21 / 0.1);
+  border: 1px solid rgb(250 204 21 / 0.3);
+  font-size: var(--fs-xs);
+}
+.mv-tac-shift b {
+  color: #facc15;
+  white-space: nowrap;
+}
+.mv-tac-shift span {
+  color: var(--muted);
+  line-height: 1.5;
+}
 .mv-tac-axis {
   text-align: center;
   color: var(--muted);

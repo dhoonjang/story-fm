@@ -207,6 +207,11 @@ function renderEvent(state: GameState, ev: MatchEvent): string[] {
       return [
         `@: *교체 보드가 올라간다 — ${playerName(state, ev.actors[0] ?? "")} OUT, ${playerName(state, ev.actors[1] ?? "")} IN*`,
       ];
+    // 상대 벤치가 판을 옮겼다 — 문장은 근거 태그의 렌더러가 만든다 (match.md §2)
+    case "tactical_shift":
+      return ev.causes[0]
+        ? [`@중계: ${ev.minute}′ 상대 벤치가 움직입니다 — ${packetTagText(ev.causes[0])}.`]
+        : [];
     default:
       return [];
   }

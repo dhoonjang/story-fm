@@ -11,6 +11,7 @@ import type {
   ShootoutKick,
   StrengthPacket,
   TacticAssignment,
+  TacticsSpec,
 } from "@story-fm/domain";
 import { isReserveMatch } from "@story-fm/domain";
 import {
@@ -43,12 +44,14 @@ import {
   buildStrengthPacket,
   createLedger,
   GAP_THRESHOLD,
+  insertBeforeStop,
   mergeSubstitutions,
   planAiSubstitution,
   planAiTacticalShift,
   simulateSegment,
   subLimitsOf,
   type LineupSlot,
+  type MatchLedgerState,
   type SegmentPlan,
   type SegmentStop,
 } from "@story-fm/sim";
@@ -664,6 +667,90 @@ const CHASE_SHAPES: readonly Formation[] = ["4-3-3", "3-5-2"];
 const HOLD_SHAPES: readonly Formation[] = ["5-4-1"];
 
 /**
+ * **상대 벤치도 판단한다** — 스코어와 남은 시간을 보고 무게를 옮긴다 (match.md §2).
+ *
+ * 옮긴 값은 `pendingMatch`에만 남아 그 경기에서만 쓰인다(저장된 팀 전술은 불변).
+ * 그리고 **옮겼다는 사실은 사건으로 남는다** — 상태만 바꾸면 중계는 사건 목록에 없는
+ * 것을 쓸 수 없어 "상대가 던졌다"를 말할 수 없고, 감독은 팀 탭의 점 눈금을 정지점마다
+ * 외워 견줘야 그 승부수를 안다.
+ *
+ * @returns 실제로 옮겨졌을 때만 `tactical_shift` 한 줄 — 아니면 null
+ */
+function planAiShift(
+  state: GameState,
+  pending: PendingMatch,
+  ctx: {
+    aiSide: MatchSide;
+    /** 상대의 킥오프 전술 — 축 이동의 상한이 여기서 선다 */
+    aiKickoff: TacticsSpec;
+    /** 이 구간이 끝난 판 — 방금 들어간 골까지 반영된 장부다 */
+    ledger: MatchLedgerState;
+    plan: SegmentPlan;
+  },
+): MatchEvent | null {
+  const { aiSide, aiKickoff, ledger, plan } = ctx;
+  /**
+   * **종료 휘슬에는 판단하지 않는다.** 끝난 경기의 벤치 판단은 판에 닿지 않으므로
+   * 그 한 줄은 정보가 아니라 소음이다 (연장으로 가는 경기의 90분은 `full_time`이
+   * 아니라 `extra_time_start`이라 여기서 걸리지 않는다).
+   */
+  if (plan.stop === "full_time") return null;
+  const aiNow = pending.aiTactics ?? aiKickoff;
+  // 라커룸에서 판을 다시 짜는 자리 — 하프타임과 연장의 두 휴식이 같다
+  const shift = planAiTacticalShift(
+    aiSide,
+    aiNow,
+    aiKickoff,
+    ledger,
+    isBreak(plan.stop),
+    pending.aiShape !== undefined,
+  );
+  if (!shift) return null;
+  /**
+   * **모양은 여기서 고른다** — 구간 시뮬은 의도만 낸다. 후보 프리셋 중 지금
+   * 그라운드에 선 열한 명이 가장 잘 서는 것 하나이고, 그게 지금 모양과 같으면
+   * 아무 일도 일어나지 않는다 (`bestShapeFor`).
+   */
+  let reshaped: Formation | null = null;
+  if (shift.shape && !pending.aiShape) {
+    const onPitch = ledger[aiSide].onPitch
+      .map((id) => playerById(state, id))
+      .filter((p): p is GamePlayer => p !== null);
+    const candidates = shift.shape === "chase" ? CHASE_SHAPES : HOLD_SHAPES;
+    const picked = onPitch.length > 0 ? bestShapeFor(onPitch, candidates) : null;
+    if (picked && picked !== aiNow.formation) {
+      pending.aiShape = { formation: picked, intent: shift.shape };
+      reshaped = picked;
+    }
+  }
+  /**
+   * AI의 런타임 전술도 사람과 같은 스키마를 지난다. 모양 이름은 **갈아 깐 판에서**
+   * 온다 — 실제 좌표를 옮기지 않은 채 이름만 바꾸면 판은 그대로인데 장부의 모양만
+   * 달라져 화면과 갈라진다 (`reseatOnAiShape`가 그 좌표를 세운다).
+   */
+  const guarded = TacticsSpecSchema.safeParse({
+    ...aiNow,
+    ...shift.axes,
+    formation: pending.aiShape?.formation ?? aiNow.formation,
+  });
+  pending.aiTactics = guarded.success ? guarded.data : aiNow;
+  /**
+   * **전환이 실제로 일어났을 때만 사건이 선다.** 판단이 났어도 축이 상한에 걸려
+   * 그대로고 모양도 이미 갈아 낀 뒤라면 판 위에서 달라진 것이 없다 — 그 한 줄은
+   * 중계가 인용할 사실이 아니라 매 정지점의 잡음이 된다.
+   */
+  if (!shift.axes && !reshaped) return null;
+  return {
+    minute: plan.minute,
+    type: "tactical_shift",
+    team: aiSide,
+    // 선수의 사건이 아니라 팀의 판단이다 (match.md §4)
+    actors: [],
+    causes: [{ ...shift.note, flags: reshaped ? [`formation:${reshaped}`] : [] }],
+  };
+}
+
+/**
  * 다음 정지점까지 코어가 굴린다 — **경기 결과가 정해지는 단일 지점**.
  *
  * mock과 실모드가 같은 함수를 쓴다. 차이는 사건을 누가 *이야기하는가*뿐이다
@@ -773,7 +860,26 @@ export function advanceSegment(state: GameState): {
     pending.matchFatigue ?? {},
   );
   // 끼우는 순서의 규칙은 sim이 쥔다 — match-cli도 같은 것을 부른다 (segment.ts)
-  const events = mergeSubstitutions(plan.events, aiSubs);
+  const segmentEvents = mergeSubstitutions(plan.events, aiSubs);
+
+  /**
+   * **벤치의 판단은 이 구간이 끝난 판을 본다** — 방금 들어간 골 다음의 스코어다.
+   * 그래서 장부에 적기 전에 한 번 굴려 보고(`applyEvents`는 순수 함수다) 그 판으로
+   * 전환을 정한 뒤, 전환 사건을 끼워 **한 번에** 적는다. 적고 나서 끼우면 그 줄이
+   * 정지 사건 뒤에 서고, 하프타임에 붙은 감독의 교체가 창을 문다 (match.md §5).
+   */
+  const rolled = segmentEvents.length > 0 ? applyEvents(pending.ledger, segmentEvents) : null;
+  if (rolled && !rolled.ok) {
+    return { ok: false, plan: null, message: rolled.errors.join("\n") };
+  }
+  const afterSegment = rolled?.state ?? pending.ledger;
+  const shiftEvent = planAiShift(state, pending, {
+    aiSide,
+    aiKickoff,
+    ledger: afterSegment,
+    plan,
+  });
+  const events = shiftEvent ? insertBeforeStop(segmentEvents, shiftEvent) : segmentEvents;
 
   let message = `사건 없이 ${plan.minute}′까지 흘렀습니다`;
   if (events.length > 0) {
@@ -786,48 +892,6 @@ export function advanceSegment(state: GameState): {
   pending.segment = segment + 1;
   // 다음 구간이 이어받을 연속 시계 — 장부의 정수 분이 잘라 버린 소수 자리를 여기 남긴다
   pending.segmentClock = plan.clock;
-  /**
-   * **상대 벤치도 판단한다** — 스코어와 남은 시간을 보고 무게를 옮긴다.
-   * 이 값은 pendingMatch에만 남아 그 경기에서만 쓰인다 (저장된 팀 전술은 불변).
-   */
-  const aiNow = pending.aiTactics ?? aiKickoff;
-  // 라커룸에서 판을 다시 짜는 자리 — 하프타임과 연장의 두 휴식이 같다
-  const shift = planAiTacticalShift(
-    aiSide,
-    aiNow,
-    aiKickoff,
-    pending.ledger,
-    isBreak(plan.stop),
-    pending.aiShape !== undefined,
-  );
-  if (shift) {
-    /**
-     * **모양은 여기서 고른다** — 구간 시뮬은 의도만 낸다. 후보 프리셋 중 지금
-     * 그라운드에 선 열한 명이 가장 잘 서는 것 하나이고, 그게 지금 모양과 같으면
-     * 아무 일도 일어나지 않는다 (`bestShapeFor`).
-     */
-    if (shift.shape && !pending.aiShape) {
-      const onPitch = pending.ledger[aiSide].onPitch
-        .map((id) => playerById(state, id))
-        .filter((p): p is GamePlayer => p !== null);
-      const candidates = shift.shape === "chase" ? CHASE_SHAPES : HOLD_SHAPES;
-      const picked = onPitch.length > 0 ? bestShapeFor(onPitch, candidates) : null;
-      if (picked && picked !== aiNow.formation) {
-        pending.aiShape = { formation: picked, intent: shift.shape };
-      }
-    }
-    /**
-     * AI의 런타임 전술도 사람과 같은 스키마를 지난다. 모양 이름은 **갈아 깐 판에서**
-     * 온다 — 실제 좌표를 옮기지 않은 채 이름만 바꾸면 판은 그대로인데 장부의 모양만
-     * 달라져 화면과 갈라진다 (`reseatOnAiShape`가 그 좌표를 세운다).
-     */
-    const guarded = TacticsSpecSchema.safeParse({
-      ...aiNow,
-      ...shift.axes,
-      formation: pending.aiShape?.formation ?? aiNow.formation,
-    });
-    pending.aiTactics = guarded.success ? guarded.data : aiNow;
-  }
   accumulateFatigue((pending.matchFatigue ??= {}), plan.fatigue);
   // 피로가 쌓였으니 다음 구간의 전력이 달라진다 (교체·전술 변경과 같은 경로)
   refreshPacket(state);

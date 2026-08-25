@@ -19,6 +19,13 @@ export const MatchEventTypeSchema = z.enum([
   "red_card",
   "substitution",
   "injury",
+  /**
+   * **벤치가 판을 옮겼다** — AI 팀의 6축 이동·모양 전환 (match.md §2·§4).
+   *
+   * 선수의 사건이 아니라 팀의 판단이라 `actors`는 비어 있다. 근거 태그
+   * (`source: "ai-shift"`) 하나가 갈래와 옮긴 뒤의 축 값, 갈아 낀 모양을 싣는다.
+   */
+  "tactical_shift",
   "half_time",
   /**
    * **연장 개시** — 정규 90분이 끝났는데 승부가 남았다.
@@ -45,6 +52,7 @@ export const TEAM_EVENT_TYPES: ReadonlySet<MatchEventType> = new Set([
   "red_card",
   "substitution",
   "injury",
+  "tactical_shift",
 ]);
 
 /**
@@ -93,6 +101,7 @@ export const PacketTagSchema = z.object({
     "exploit-dropped",
     "tactical",
     "set-piece",
+    "ai-shift",
     "legacy",
   ]),
   code: z.string().min(1),

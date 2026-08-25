@@ -43,11 +43,13 @@ import {
   playPreseason,
 } from "./helpers";
 import {
+  normalizeCauses,
   positionGroupOf,
   positionGroupOfPlayer,
   tacticsSignature,
   weightSlotOf,
 } from "@story-fm/domain";
+import type { MatchEvent, PacketTag } from "@story-fm/domain";
 import { zoneGrid } from "@story-fm/sim";
 
 /**
@@ -923,6 +925,49 @@ describe("상대 벤치의 모양 변경 (match.md §2)", () => {
     const last = events[events.length - 1]!;
     expect(last.type).toBe("full_time");
     for (const sub of subs) expect(sub.minute).toBeLessThanOrEqual(last.minute);
+  });
+
+  /**
+   * **판을 갈아 낀 줄은 한 경기에 하나다** (match.md §2·§4). 모양 전환은 경기당 한
+   * 번인데 사건이 정지점마다 서면 중계는 상대가 판을 계속 갈아엎는 것으로 읽고, 화면의
+   * 전환 표식은 마지막 정지점만 가리킨다 — 어느 쪽도 장부가 아는 사실이 아니다.
+   * 축만 옮긴 줄은 여러 번 설 수 있다: 상한(`AI_SHIFT_BOUND`)에 닿을 때까지가 판단이다.
+   */
+  it("모양을 갈아 낀 전환 사건은 한 경기에 한 줄뿐이다", () => {
+    const state = atMatchday(42, { afterPreseason: true });
+    expect(startMatch(state).ok).toBe(true);
+    const aiSide = userSide(state) === "home" ? "away" : "home";
+    // 장부는 `finalizeMatch`가 걷어 가므로 종료 사건까지만 굴리고 그 자리에서 읽는다
+    let guard = 60;
+    while (state.phase === "match" && guard-- > 0) {
+      const step = advanceSegment(state);
+      expect(step.ok, step.message).toBe(true);
+      if (step.plan?.stop === "full_time") break;
+    }
+    const pending = state.pendingMatch!;
+    const shifts = pending.ledger.events.filter((e) => e.type === "tactical_shift");
+    const tagOf = (e: MatchEvent): PacketTag | undefined => normalizeCauses(e.causes)[0];
+
+    expect(shifts.length, "상대 벤치가 이 경기에서 한 번도 판을 옮기지 않았다").toBeGreaterThan(0);
+    for (const shift of shifts) {
+      // 전환은 상대 벤치의 것뿐이다 — 감독의 전술 변경은 스킬이지 사건이 아니다
+      expect(shift.team).toBe(aiSide);
+      // 근거 태그 하나가 갈래를 싣는다 — 문장은 읽는 쪽이 만든다
+      expect(tagOf(shift)?.source).toBe("ai-shift");
+      expect(["chase", "hold"]).toContain(tagOf(shift)?.code);
+    }
+    /**
+     * 모양을 갈아 낀 줄은 **상태와 같은 수**여야 한다 — `aiShape`가 섰으면 한 줄,
+     * 안 섰으면 없다. 사건이 상태보다 많으면 중계는 상대가 판을 계속 갈아엎는 것으로
+     * 읽고, 적으면 감독이 본 판의 모양이 어디서 왔는지 장부가 답하지 못한다.
+     */
+    const reshaped = shifts.filter((e) =>
+      (tagOf(e)?.flags ?? []).some((f) => f.startsWith("formation:")),
+    );
+    // 이 시드의 상대는 실제로 판을 갈아 낀다 — 아니면 아래 불변식이 0을 세고 만다
+    expect(pending.aiShape, "상대가 이 경기에서 한 번도 판을 갈아 깔지 않았다").toBeDefined();
+    expect(reshaped).toHaveLength(1);
+    expect(tagOf(reshaped[0]!)?.flags).toContain(`formation:${pending.aiShape!.formation}`);
   });
 });
 
