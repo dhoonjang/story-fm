@@ -251,8 +251,6 @@
 - 보드 요청은 이적창 단위 조건 하나뿐이다 — 특정 선수 기용 같은 경기 단위 요청도,
   영입 건별 승인도, 요청을 두고 흥정하는 자리도 없다
   ([simulation/career.md](simulation/career.md))
-- 협상 중의 이적 루머 — 회견은 확정된 영입·매각에만 열린다
-  ([simulation/transfer.md](simulation/transfer.md))
 - 관계 점수 — 인물 사이의 초기 관계는 원형이 채우지만 사건이 그것을 움직이지 않는다.
   서사 아크의 갈래도 장부 한 줄로 열리는 다섯까지다
   ([data/people.md](data/people.md) §10)
