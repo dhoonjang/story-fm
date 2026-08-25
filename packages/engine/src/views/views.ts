@@ -34,6 +34,8 @@ import {
   defaultRoleOf,
   growthLabel,
   naturalPositionOf,
+  outcomeFor,
+  outcomeLabel,
   pairOfMatchId,
   parseScorerEntry,
   rolesFor,
@@ -1371,36 +1373,11 @@ function scoreOf(match: MatchRecord): string | null {
 }
 
 /**
- * 이 팀의 승패 — **승패를 판정하는 유일한 자리다.**
- *
- * 승부차기가 있으면 그것이 결론이다: 승부차기로 갈린 컵 경기를 "무"로 칠하면 안
- * 된다 — 그 날 이 팀은 이겼거나 떨어졌다. 결과가 없거나 이 팀의 경기가 아니면
- * `null`이고, 한글 라벨은 `outcomeLabel`이 붙인다(조회 응답·달력 일지).
- *
- * (폼의 연속 기록은 승부차기를 보지 않는다 — `recentOutcomes`, slump.ts.)
+ * 이 팀의 승패와 그 한글 표기는 **도메인의 것**이다 — 경기 기록 하나만 보면 답이
+ * 나오는 규칙이라 화면·조회·코치의 눈이 같은 판정을 쓴다 (AGENTS.md §5 「한 규칙,
+ * 한 정의」). 여기서 다시 내보내므로 코어 쪽 호출자는 자리를 옮기지 않는다.
  */
-export function outcomeFor(match: MatchRecord, teamId: string): "W" | "D" | "L" | null {
-  const home = match.homeTeamId === teamId;
-  if (!match.result || (!home && match.awayTeamId !== teamId)) return null;
-  const { homeGoals, awayGoals, penalties } = match.result;
-  const mine = home ? homeGoals : awayGoals;
-  const theirs = home ? awayGoals : homeGoals;
-  if (mine !== theirs) return mine > theirs ? "W" : "L";
-  if (penalties) {
-    const myPens = home ? penalties.home : penalties.away;
-    const theirPens = home ? penalties.away : penalties.home;
-    if (myPens !== theirPens) return myPens > theirPens ? "W" : "L";
-  }
-  return "D";
-}
-
-const OUTCOME_KO = { W: "승", D: "무", L: "패" } as const;
-
-/** 승패의 한글 표기 — 판정은 `outcomeFor`가 하고 여기서는 라벨만 붙인다 */
-export function outcomeLabel(outcome: "W" | "D" | "L" | null): "승" | "무" | "패" {
-  return OUTCOME_KO[outcome ?? "D"];
-}
-
+export { outcomeFor, outcomeLabel };
 /**
  * 최근 경기 평점 — 폼의 시간 축.
  *
