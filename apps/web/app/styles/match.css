@@ -651,3 +651,135 @@
   background: rgba(74, 222, 128, 0.16);
   color: var(--accent);
 }
+
+/**
+ * 경기 전 상대 분석 — 다음 경기 카드 아래에 접혀 있다 (docs/simulation/match.md §8).
+ *
+ * 접힌 줄은 카드가 아니라 **손잡이**다 — 달력의 리포트 버튼(`cal-report-btn`)과 같은
+ * 알약 모양이라, 이 화면에서 눌러서 펼치는 것들이 한 생김새를 쓴다.
+ */
+.mp-wrap {
+  display: flex;
+  flex-direction: column;
+}
+.mp-btn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 2px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  color: var(--muted);
+  font-size: var(--fs-2xs);
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    color var(--ease),
+    border-color var(--ease);
+}
+.mp-btn:hover {
+  color: var(--text);
+  border-color: var(--muted);
+}
+.mp-btn svg {
+  transition: transform var(--ease);
+}
+.mp-btn.open svg {
+  transform: rotate(180deg);
+}
+/* 접힌 줄에도 서는 수 — 펼칠 이유가 카드 밖에 있으면 감독은 펼치지 않는다 */
+.mp-chip {
+  font-style: normal;
+  padding: 0 6px;
+  border-radius: var(--r-xs);
+  background: var(--panel-2);
+  color: var(--muted);
+}
+.mp-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+  padding: 10px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.mp-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mp-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--muted);
+}
+/* 근거는 제목 옆에 한 톤 낮춰 — 예상이 무엇에서 나왔는지가 값의 일부다 */
+.mp-basis {
+  font-style: normal;
+  font-weight: 400;
+  font-size: var(--fs-2xs);
+  color: var(--muted);
+}
+.mp-xi,
+.mp-out,
+.mp-axes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+.mp-p,
+.mp-axis {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--r-xs);
+  background: var(--panel-2);
+  font-size: var(--fs-xs);
+}
+.mp-p i,
+.mp-axis i {
+  font-style: normal;
+  font-size: var(--fs-2xs);
+  color: var(--muted);
+}
+/**
+ * 직전 경기 선발에서 이어지지 못해 코어가 메운 자리 — **점선이 추정을 말한다.**
+ * 관측과 추정을 같은 생김새로 세우면 예상 XI 전체가 확정으로 읽힌다.
+ */
+.mp-p.guessed {
+  background: transparent;
+  border: 1px dashed var(--border);
+}
+.mp-p.out-injury b,
+.mp-p.out-suspension b {
+  color: var(--danger);
+}
+.mp-points {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+/* 지점 한 줄 — 판세 화면의 키포인트와 같은 색 규칙이다 (우리 파랑 · 상대 빨강) */
+.mp-point {
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  padding: 5px 10px;
+  border-radius: var(--r-sm);
+  background: var(--panel-2);
+  border-left: 3px solid var(--border);
+}
+.mp-point.ours {
+  border-left-color: var(--accent-2);
+}
+.mp-point.theirs {
+  border-left-color: var(--danger);
+}
