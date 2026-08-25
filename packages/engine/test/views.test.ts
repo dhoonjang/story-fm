@@ -15,6 +15,7 @@ import {
   addDays,
   diffDays,
   playerById,
+  pushNarrative,
   type GameState,
 } from "@story-fm/engine";
 import { edgeOf } from "@story-fm/sim";
@@ -194,6 +195,39 @@ describe("오피스 뷰 — 달력 (일정 축)", () => {
         e.label,
       ).toBe(false);
     }
+  });
+
+  /**
+   * 소식 — 시간을 넘긴 턴의 사건은 다이제스트로만 흘러가고 화면에 서지 않는다.
+   * 원본은 서사 표 하나이므로 일지가 그 표를 날짜에 세운다 (people.md §9).
+   */
+  it("서사 표가 날짜별 소식 줄로 파생된다 — 무게순·갈래·중복·상한", () => {
+    const state = createTestGame(13);
+    const day = state.date;
+    state.narrative.push(
+      // 갈래를 모르는 옛 세이브의 줄 — other로 본다
+      { date: day, text: "옛 세이브의 줄", salience: 1 },
+      { date: day, text: "리버풀에서 오퍼 답 도착", salience: 3 },
+      // 같은 날 같은 문장은 한 번만 선다
+      { date: day, text: "리버풀에서 오퍼 답 도착", salience: 2 },
+      { date: day, text: "구단주 요청 — 8강 진출", salience: 5, kind: "other" },
+      // 경기 줄은 일정 축이 이미 세운다 — 소식으로 두 번 서지 않는다
+      { date: day, text: "프리미어리그 R1 vs 리버풀 2:1 승리", salience: 4, kind: "match" },
+    );
+
+    const news = (buildOfficeViews(state).calendar.events[day] ?? []).filter(
+      (l) => l.kind === "news",
+    );
+    expect(news.map((l) => l.text)).toEqual([
+      "구단주 요청 — 8강 진출",
+      "리버풀에서 오퍼 답 도착",
+      "옛 세이브의 줄",
+    ]);
+
+    // 일지가 되찾는 창은 서사 표의 상한(200)까지다 — 밀려난 줄은 일지에도 없다
+    for (let i = 0; i < 210; i++) pushNarrative(state, `채움 ${i}`, 1);
+    const after = buildOfficeViews(state).calendar.events[day] ?? [];
+    expect(after.some((l) => l.text === "구단주 요청 — 8강 진출")).toBe(false);
   });
 });
 

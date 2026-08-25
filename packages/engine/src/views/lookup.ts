@@ -30,7 +30,7 @@ import {
 import { rankByName } from "../core/name-match";
 import { formatMoney } from "../club/finance";
 import { spendLine, transferFundRoom } from "../club/manager-wallet";
-import { outcomeFor, outcomeLabel } from "./views";
+import { outcomeFor, outcomeLabel, pushRecordJournal, type CalendarEventView } from "./views";
 import { addDays, dayOfWeek, diffDays, seasonYear, squadReturnOf } from "../competition/calendar";
 import { entrantsOf } from "../competition/europe";
 import { careerOf, type CareerTotals } from "../squad/career";
@@ -1449,6 +1449,72 @@ export interface ScheduleViewInput {
 const SCHEDULE_LIMIT = 25;
 
 /**
+ * 일지 줄의 이름 — 화면은 도형으로 갈라 읽지만(`views.ts` `CalendarEventView`) 조회는
+ * 글자로 가른다. 갈래를 데이터로 주는 규약은 그대로다: 이름을 붙이는 자리가 여기 하나다.
+ */
+const JOURNAL_KIND_KO: Record<CalendarEventView["kind"], string> = {
+  match: "경기",
+  training: "훈련",
+  rest: "휴식",
+  growth: "성장",
+  injury: "부상",
+  return: "복귀",
+  yellow: "경고",
+  red: "퇴장",
+  transfer: "이적",
+  window: "이적창",
+  money: "돈",
+  news: "소식",
+};
+
+/**
+ * 한 번의 조회가 낼 일지 줄의 상한.
+ *
+ * 일정의 `limit`과 **묶지 않는다** — 석 달치 일정을 부르는 것과 석 달치 일지를 통째로
+ * 모델 컨텍스트에 붓는 것은 다른 값이다. 넘치면 뒤를 자르고 몇 건이 남았는지 말한다.
+ * 2주치 일지가 대개 이 아래라 "지난주에 무슨 일 있었나"는 잘리지 않는다.
+ */
+const JOURNAL_LIMIT = 40;
+
+/**
+ * 지나간 날의 일지 — 화면의 달력이 세우는 것과 **같은 표**다(`pushRecordJournal`).
+ *
+ * 일정 축(경기·훈련·이적창)은 위의 일정 줄이 이미 세우므로 여기 다시 서지 않는다.
+ * 남는 것은 기록 테이블과 서사 표 몫 — 성장·부상·카드·이적·돈·소식이고, 손잡이로
+ * 며칠을 넘긴 턴에 다이제스트로만 흘러간 사건이 여기 있다 (people.md §9).
+ */
+function pastJournalLines(state: GameState, from: string, to: string): string[] {
+  if (from >= state.date) return [];
+  const journal: Record<string, CalendarEventView[]> = {};
+  pushRecordJournal(state, journal);
+  const last = to < state.date ? to : state.date;
+  const dates = Object.keys(journal)
+    .filter((d) => d >= from && d <= last)
+    .sort();
+
+  const out: string[] = [];
+  let shown = 0;
+  let dropped = 0;
+  for (const date of dates) {
+    const events = journal[date] ?? [];
+    const room = JOURNAL_LIMIT - shown;
+    if (room <= 0) {
+      dropped += events.length;
+      continue;
+    }
+    out.push(`  ${dateLabel(date)}`);
+    for (const e of events.slice(0, room)) {
+      out.push(`    ${JOURNAL_KIND_KO[e.kind]} ${e.text}`);
+    }
+    shown += Math.min(events.length, room);
+    dropped += Math.max(0, events.length - room);
+  }
+  if (out.length === 0) return [];
+  if (dropped > 0) out.push(`  …그 외 ${dropped}건 — 범위를 좁혀라`);
+  return [`[일지] ${dateLabel(from)} ~ ${dateLabel(last)} — 그 사이 벌어진 일`, ...out];
+}
+
+/**
  * 감독의 달력 — 경기만 보는 `get_league`와 달리 **훈련·이적창까지** 한 축에 놓는다.
  * 일정 축이 `SCHEDULE_ENTRY` 하나로 정규화돼 있으니(v6) 조회도 한 곳에서 한다.
  *
@@ -1494,8 +1560,15 @@ export function scheduleView(state: GameState, input: ScheduleViewInput = {}): L
       `  ${dateLabel(from)} ~ ${dateLabel(addDays(squadReturn, -1))} 선수단 여름 휴가 — 훈련 없음 (소집 ${dateLabel(squadReturn)})`,
     );
   }
+  /**
+   * 지나간 날은 일정만으로 답이 되지 않는다 — 오퍼 답이 언제 왔고 계약 경고가 언제
+   * 섰는지는 일정 축이 아니라 일지에 있다. 앞날만 묻는 창(`from`이 오늘 이후)에는
+   * 일지가 없으므로 한 줄도 붙지 않는다.
+   */
+  const journal = pastJournalLines(state, from, to);
   if (shown.length === 0) {
     lines.push("이 기간에 등록된 일정이 없습니다");
+    lines.push(...journal);
     return { ok: true, message: lines.join("\n") };
   }
 
@@ -1543,6 +1616,7 @@ export function scheduleView(state: GameState, input: ScheduleViewInput = {}): L
   if (entries.length > shown.length) {
     lines.push(`  …그 외 ${entries.length - shown.length}건 — 범위를 좁히거나 limit을 올려라`);
   }
+  lines.push(...journal);
   return { ok: true, message: lines.join("\n") };
 }
 

@@ -2800,6 +2800,15 @@ export function expireNegotiations(state: GameState, digest: string[]): void {
         `🩺 ${player?.name ?? negotiation.gamePlayerId} 건은 메디컬 소견을 안은 채 이적창이 ` +
           `닫혔습니다 — 이 건은 무산됐습니다`,
       );
+      /**
+       * 되돌릴 수 없이 잃은 것은 무게 4다 — 창이 닫혔으니 다시 부를 수 없다
+       * (people.md §9의 `보드 요청 거절`과 같은 눈금). 표에는 이모지를 넣지 않는다.
+       */
+      pushNarrative(
+        state,
+        `${player?.name ?? negotiation.gamePlayerId} 메디컬 소견을 안은 채 창이 닫혀 무산`,
+        4,
+      );
       continue;
     }
     // 기한 하루 전 — 결정하지 못한 채 사라지는 일이 없게 한 번 더 세운다
@@ -2813,6 +2822,8 @@ export function expireNegotiations(state: GameState, digest: string[]): void {
     negotiation.status = "expired";
     const player = playerById(state, negotiation.gamePlayerId);
     digest.push(`${player?.name ?? negotiation.gamePlayerId} 협상이 기한을 넘겨 무효가 됐습니다`);
+    // 기한은 다시 열 수 있는 문이라 3 — 창이 닫힌 위의 건(4)보다 한 눈금 가볍다
+    pushNarrative(state, `${player?.name ?? negotiation.gamePlayerId} 협상 기한 초과로 무효`, 3);
   }
 }
 
@@ -2829,11 +2840,17 @@ export function pendingVerdicts(state: GameState): Array<{
   /** 무엇을 해야 하는가 */
   action: "respond_offer" | "accept_deal";
   label: string;
+  /**
+   * 누구의 어느 방향인가 — **사실만.** `label`은 부를 도구 이름을 안고 있어
+   * 주의 줄 밖으로 못 나간다; 서사 표·스냅샷에 서는 것은 이쪽이다.
+   */
+  subject: string;
 }> {
   const out: Array<{
     negotiation: Negotiation;
     action: "respond_offer" | "accept_deal";
     label: string;
+    subject: string;
   }> = [];
   for (const negotiation of state.negotiations) {
     const player = playerById(state, negotiation.gamePlayerId);
@@ -2850,6 +2867,7 @@ export function pendingVerdicts(state: GameState): Array<{
       out.push({
         negotiation,
         action: "accept_deal",
+        subject: who,
         label:
           medical?.status === "flagged"
             ? isIncomingDeal(negotiation)
@@ -2871,6 +2889,7 @@ export function pendingVerdicts(state: GameState): Array<{
       out.push({
         negotiation,
         action: "respond_offer",
+        subject: who,
         label: `${who} 상대 오퍼 도착 — respond_offer로 답해야 합니다`,
       });
       continue;
@@ -2880,6 +2899,7 @@ export function pendingVerdicts(state: GameState): Array<{
       out.push({
         negotiation,
         action: "respond_offer",
+        subject: who,
         label: `${who} 우리 오퍼에 답이 왔습니다 — respond_offer로 판정해야 합니다`,
       });
     }
