@@ -1009,9 +1009,10 @@ export function simulateSegment(input: SegmentInput): SegmentPlan {
        * 없으면 "왜 줬나"가 장부에 없다. 뽑는 가중은 카드와 같다 (match.md §1.4).
        */
       const fouler = pickBooked(rng, squadOf(against), gone, yellows[against]);
+      // 파울의 **수**는 흐름과 함께 나누는 양이 갖는다(`spreadFlow`) — 여기서 한 장
+      // 더 세면 팀 합계가 손잡이(`FOULS_PER_MATCH`) 위로 조용히 올라간다
       if (fouler) {
         events.push({ minute, type: "foul", team: against, actors: [fouler.id], causes: [] });
-        lineOf(fouler.id).fouls += 1;
       }
       /** 성공률이 곧 이 슛의 xG다 — 승부차기와 같은 식이다 (`penaltyRate`) */
       const rate = penaltyRate(taker, keeper);
