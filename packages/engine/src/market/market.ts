@@ -173,9 +173,36 @@ export function marketValueOf(state: GameState, player: GamePlayer): number {
  */
 const WAGE_BASE_RATING = 38.5;
 
-/** 등급 → 기대 주급 (£/주) — 이적·재계약이 같은 곡선을 읽는다 */
-function wageByRating(overall: number): number {
+/**
+ * 등급 → 기대 주급 (£/주) — 이적·재계약이 같은 곡선을 읽는다.
+ *
+ * "주급 서열대로 받고 있는가"를 묻는 자리(`core/tick.ts`의 계약 만료 문턱)도 이
+ * 곡선을 읽는다 — 서열을 다른 자로 재면 화면이 "밀려 있다"고 적어 놓고 불만은
+ * 반년 뒤에 선다.
+ */
+export function wageByRating(overall: number): number {
   return Math.pow(Math.max(WAGE_BASE_RATING, overall) / WAGE_BASE_RATING, 4.2) * 6_000;
+}
+
+/**
+ * **시장가 언저리**의 두 끝 — 호가가 어디에 섰는지도(`set_transfer_list`), 들어온
+ * 오퍼가 값이 붙은 것인지도(`blocked-move`·`interest`) 같은 자로 잰다
+ * (→ docs/simulation/transfer.md §1 · docs/data/people.md §5).
+ *
+ * 자를 두 곳에 적으면 화면은 "시장가 언저리"라고 적어 놓고 라커룸은 헐값으로 읽는다.
+ */
+export const MARKET_NEAR_LOW = 0.85;
+export const MARKET_NEAR_HIGH = 1.2;
+
+/**
+ * **값이 붙은 오퍼인가** — 시장가 언저리의 아래 끝 이상.
+ *
+ * 시장가 자체를 문턱으로 쓸 수 없다: AI의 첫 호가는 흥정의 여지를 남기려고 시장가의
+ * 75~100%로 들어온다(`generateIncomingOffers`). 그 자를 쓰면 값이 붙은 오퍼를 막은
+ * 일이 라커룸에 영영 닿지 않는다.
+ */
+export function isSeriousOffer(state: GameState, player: GamePlayer, fee: number): boolean {
+  return fee >= marketValueOf(state, player) * MARKET_NEAR_LOW;
 }
 
 /** 이 선수가 원하는 주급 (£/주) — 현 주급과 시장가에서 파생 */

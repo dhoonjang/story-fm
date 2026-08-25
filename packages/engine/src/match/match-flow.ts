@@ -1326,6 +1326,49 @@ function seatOf(state: GameState, player: GamePlayer): string {
 }
 
 /**
+ * **주 포지션 묶음 밖 선발이 이만큼 이어지면 불만이 선다** (→ docs/data/people.md §5).
+ *
+ * 날이 아니라 경기로 세는 이유는 그것이 선수가 실제로 겪는 단위여서다 — 2주에 한
+ * 경기를 뛰는 선수와 사흘에 한 경기를 뛰는 선수에게 같은 날짜를 걸면 뒤쪽만 화를 낸다.
+ */
+export const OUT_OF_POSITION_RUN = 4;
+
+/**
+ * 자리 밖 기용을 한 경기 센다 — **묶음으로 잰다**(`positionGroupOf`): CB에서 FB로
+ * 옮긴 것과 CB에서 ST로 올린 것은 다른 일이다 (people.md §5).
+ *
+ * 이 눈금이 재는 것은 **그가 선발로 선 최근 경기들**이다. 벤치에 앉힌 경기가 사이에
+ * 끼어도 연속은 이어진다 — 로테이션 한 번이 값을 지우면 감독이 눈금을 껐다 켰다 할
+ * 수 있고, 그 선수가 실제로 겪는 것(내가 선발로 설 때마다 딴 자리다)과도 다르다.
+ *
+ * @param started 이 경기에 선발로 섰는가 — 아니면 **세지도 지우지도 않는다**
+ * @returns 이 경기에서 불만이 **새로 걸렸으면** true
+ */
+function trackOutOfPosition(state: GameState, player: GamePlayer, started: boolean): boolean {
+  if (!started) return false;
+  const seatGroup = positionGroupOf(seatOf(state, player));
+  // 묶음을 모르는 자리는 다르다고 보지 않는다 — 셀 수 없는 것을 방치로 적지 않는다
+  if (seatGroup === null || seatGroup === positionGroupOfPlayer(player)) {
+    // 0을 적지 않는다 — optional 필드라 비워 두면 세이브에 나가지 않는다
+    player.state.outOfPositionRun = undefined;
+    return false;
+  }
+  const run = (player.state.outOfPositionRun ?? 0) + 1;
+  player.state.outOfPositionRun = run;
+  // **문턱에 닿는 그 경기에서만** — `>=`로 걸면 5·6경기째마다 새 줄이 선다
+  if (run !== OUT_OF_POSITION_RUN) return false;
+  if (state.issues.some((i) => i.gamePlayerId === player.id)) return false;
+  state.issues.push({
+    gamePlayerId: player.id,
+    kind: "unhappy",
+    reason: "out-of-position",
+    count: run,
+    since: state.date,
+  });
+  return true;
+}
+
+/**
  * 실전 경험 — 그 자리의 적응도가 `MATCH_PROFICIENCY_GAIN`만큼 오른다.
  *
  * 목록에 없던 자리는 폴백값(`proficiencyAt` — player.md §8)이 시작점이 되어 함께
@@ -1544,6 +1587,16 @@ export function finalizeMatch(state: GameState): MatchDigest {
   const anchorOfPlayer = new Map((brief?.players ?? []).map((p) => [p.playerId, p.anchor]));
 
   /**
+   * 이 경기에 **선발로 선 우리 선수** — 브리프가 상태를 바꾸기 전의 배치를 이미 읽었다.
+   * 자리 밖 기용(people.md §5)이 이 집합을 지난다.
+   */
+  const ourStarters = new Set(
+    (brief?.players ?? []).filter((p) => p.started).map((p) => p.playerId),
+  );
+  /** 이 경기에서 자리 밖 기용 문턱에 닿은 선수 — 마감이 끝난 뒤 한 줄로 낸다 */
+  const misplaced: string[] = [];
+
+  /**
    * **친선은 장부에 남지 않는다** (season.md §2의 닿는다/닿지 않는다 표).
    * 몸에 남는 것(체력·폼·부상·적응도)은 그대로 정산하고, 시즌 기록·징계처럼
    * 대회에 매달린 것만 건너뛴다.
@@ -1645,6 +1698,16 @@ export function finalizeMatch(state: GameState): MatchDigest {
        * 출전 시간은 그 판정의 기준값으로만 넘어간다.
        */
       gainMatchProficiency(state, player, seatOf(state, player), entry?.id ?? null);
+      /**
+       * 자리 밖 기용 — **우리 선수에게만.** 남의 벤치가 누구를 어디에 세우는지는
+       * 우리 라커룸의 일이 아니다.
+       */
+      if (
+        player.teamId === state.userTeamId &&
+        trackOutOfPosition(state, player, ourStarters.has(player.id))
+      ) {
+        misplaced.push(player.name);
+      }
     }
 
     /**
@@ -1692,6 +1755,18 @@ export function finalizeMatch(state: GameState): MatchDigest {
   };
   settleSide("home");
   settleSide("away");
+
+  /**
+   * 자리 밖 기용 불만 — 여럿이 한 경기에 문턱에 닿아도 **줄은 하나다**.
+   * 이름이 화면을 채우면 스코어가 그 아래로 밀린다.
+   */
+  if (misplaced.length > 0) {
+    const line =
+      (misplaced.length === 1 ? misplaced[0]! : `${misplaced.length}명`) +
+      ` 자리 밖 기용 불만 — 주 포지션 밖 선발 ${OUT_OF_POSITION_RUN}경기째`;
+    digest.push(line);
+    pushNarrative(state, line, 3);
+  }
 
   // 경기 평점 — 기준선은 여기서 결정적으로 박고, 경기 후 LLM이 이 위에서 다듬는다.
   // **brief를 반드시 같은 함수로 만든다** — 앵커가 두 곳에서 따로 계산되면
