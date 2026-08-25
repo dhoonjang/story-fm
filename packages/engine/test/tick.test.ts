@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ageOf } from "@story-fm/domain";
-import type { GamePlayer } from "@story-fm/domain";
+import type { GamePlayer, PositionGroup } from "@story-fm/domain";
 import type { GameState } from "@story-fm/engine";
 import {
   addDays,
@@ -14,6 +14,11 @@ import {
   seasonYear,
   assignmentsOf,
   financeOf,
+  groupOf,
+  simSquadOf,
+  LOAN_REST_LIMIT,
+  LOAN_ROTATION_OVR_DROP,
+  ROTATION_FATIGUE,
   openInjury,
   pendingApproach,
   pendingVerdicts,
@@ -561,5 +566,154 @@ describe("계약 만료 예고 — 문턱마다 한 번 (season.md §5)", () => 
       "90",
       String(diffDays(lastTicked, expiresOn)),
     ]);
+  });
+});
+
+/**
+ * 빌린 구단이 임대 자원에게 치르는 값 — `simSquadOf`의 문 둘
+ * (→ docs/simulation/season.md §2 임대).
+ *
+ * 재는 것은 **경계**다: 주전이 멀쩡할 때 서지 않고, 연속 미출전이 상한에 닿으면
+ * 서고, 기량 창 밖이면 상한에 닿아도 서지 않는다. 화면이 드러내는 값이 아니라
+ * AI 전 구단의 선발을 정하는 규칙이라 조용히 어긋난다.
+ */
+describe("임대 자원이 서는 자리 (season.md §2 임대)", () => {
+  /** 감독 팀이 아닌 클럽 하나 — AI 라인업은 이쪽에서만 짜인다 */
+  function hostOf(state: GameState): string {
+    return state.teams.find((t) => t.id !== state.userTeamId)!.id;
+  }
+
+  /**
+   * 그 구단 1군에 임대로 들어온 선수 하나를 만든다 — 다른 클럽의 2군에서 데려와
+   * 종합만 원하는 값으로 맞춘다. 포지션군은 원본 선수의 것을 그대로 쓴다.
+   */
+  function lendInto(
+    state: GameState,
+    hostId: string,
+    pick: (p: GamePlayer) => boolean,
+    overall: number,
+  ): GamePlayer {
+    const lender = state.teams.find((t) => t.id !== hostId && t.id !== state.userTeamId)!.id;
+    const player = playersOf(state, lender).find(pick)!;
+    player.teamId = hostId;
+    player.squadLevel = "first";
+    player.attributes.overall = overall;
+    player.state.condition = 100;
+    player.loan = { fromTeamId: lender, until: "2027-06-30", wageShare: 0.5 };
+    return player;
+  }
+
+  /** 그 구단이 치른 경기 `count`개를 장부에 얹는다 — 명단에는 아무도 넣지 않는다 */
+  function pastMatches(state: GameState, hostId: string, count: number): void {
+    for (let i = 0; i < count; i++) {
+      state.matches.push({
+        id: `past-${hostId}-${i}`,
+        season: state.season,
+        competitionId: "test-league",
+        round: i + 1,
+        date: addDays("2026-08-01", i),
+        homeTeamId: hostId,
+        awayTeamId: state.userTeamId,
+        result: { homeGoals: 0, awayGoals: 0, scorers: [], homeLineup: [], awayLineup: [] },
+      });
+    }
+  }
+
+  /** 그 포지션군에서 가장 약한 선발 */
+  function weakestStarter(state: GameState, hostId: string, group: PositionGroup): GamePlayer {
+    return assignmentsOf(state, hostId, "starting")
+      .map((a) => playersOf(state, hostId).find((p) => p.id === a.playerId)!)
+      .filter((p) => groupOf(p) === group)
+      .sort((a, b) => a.attributes.overall - b.attributes.overall)[0]!;
+  }
+
+  it("주전이 멀쩡하고 앉은 경기가 상한 아래면 임대 자원은 서지 않는다", () => {
+    const state = createMiniGame(42);
+    const host = hostOf(state);
+    const seat = weakestStarter(state, host, "MF");
+    const loanee = lendInto(state, host, (p) => groupOf(p) === "MF", seat.attributes.overall);
+    pastMatches(state, host, LOAN_REST_LIMIT - 1);
+
+    expect(simSquadOf(state, host).starters.map((p) => p.id)).not.toContain(loanee.id);
+  });
+
+  it("연속 미출전이 상한에 닿으면 같은 포지션군의 가장 약한 선발과 자리를 바꾼다", () => {
+    const state = createMiniGame(42);
+    const host = hostOf(state);
+    const seat = weakestStarter(state, host, "MF");
+    const loanee = lendInto(state, host, (p) => groupOf(p) === "MF", seat.attributes.overall);
+    pastMatches(state, host, LOAN_REST_LIMIT);
+
+    const squad = simSquadOf(state, host);
+    const ids = squad.starters.map((p) => p.id);
+    expect(ids).toContain(loanee.id);
+    expect(ids).not.toContain(seat.id);
+    expect(squad.starters).toHaveLength(11);
+    // 자리는 판의 것이다 — 좌표는 그대로고 숙련도만 들어온 선수의 것으로 다시 선다
+    const slot = (squad.slots ?? []).find((s) => s.player.id === loanee.id)!;
+    expect(slot.position).toBe(
+      assignmentsOf(state, host, "starting")[ids.indexOf(loanee.id)]!.position,
+    );
+  });
+
+  it("기량 창 밖이면 상한에 닿아도 서지 않는다 — 임대처 선택이 판단인 자리", () => {
+    const state = createMiniGame(42);
+    const host = hostOf(state);
+    const seat = weakestStarter(state, host, "MF");
+    const loanee = lendInto(
+      state,
+      host,
+      (p) => groupOf(p) === "MF",
+      seat.attributes.overall - LOAN_ROTATION_OVR_DROP - 1,
+    );
+    pastMatches(state, host, LOAN_REST_LIMIT + 5);
+
+    expect(simSquadOf(state, host).starters.map((p) => p.id)).not.toContain(loanee.id);
+    // 창의 경계 — 딱 그만큼 낮으면 선다
+    loanee.attributes.overall = seat.attributes.overall - LOAN_ROTATION_OVR_DROP;
+    expect(simSquadOf(state, host).starters.map((p) => p.id)).toContain(loanee.id);
+  });
+
+  it("임대 자원끼리는 자리를 뺏지 않는다 — 자리가 하나뿐이면 하나만 선다", () => {
+    const state = createMiniGame(42);
+    const host = hostOf(state);
+    // 골문은 선발 자리가 하나뿐이라, 서로의 자리를 뺏는지가 여기서만 드러난다
+    const seat = weakestStarter(state, host, "GK");
+    const first = lendInto(state, host, (p) => groupOf(p) === "GK", seat.attributes.overall);
+    const second = lendInto(
+      state,
+      host,
+      (p) => p.id !== first.id && groupOf(p) === "GK",
+      seat.attributes.overall,
+    );
+    pastMatches(state, host, LOAN_REST_LIMIT);
+
+    const ids = simSquadOf(state, host).starters.map((p) => p.id);
+    // 앞사람이 자리를 얻은 뒤 뒷사람이 그 자리를 다시 가져가지는 않는다
+    expect(ids.filter((id) => id === first.id || id === second.id)).toHaveLength(1);
+    expect(ids).not.toContain(seat.id);
+  });
+
+  it("로테이션 자리는 기량이 더 나은 스쿼드 자원보다 임대 자원이 먼저 받는다", () => {
+    const state = createMiniGame(42);
+    const host = hostOf(state);
+    const tired = weakestStarter(state, host, "MF");
+    tired.state.condition = 100 - ROTATION_FATIGUE - 5;
+    // 임대 자원은 그 자리를 놓고 겨루는 스쿼드 자원보다 약하다 — 그래도 먼저 선다
+    const loanee = lendInto(state, host, (p) => groupOf(p) === "MF", tired.attributes.overall - 5);
+    const rival = playersOf(state, host).find(
+      (p) =>
+        p.id !== loanee.id &&
+        groupOf(p) === "MF" &&
+        !assignmentsOf(state, host, "starting").some((a) => a.playerId === p.id),
+    )!;
+    rival.attributes.overall = tired.attributes.overall;
+    rival.state.condition = 100;
+    // 앉은 경기는 상한 아래다 — 서는 문은 로테이션 하나뿐이다
+    pastMatches(state, host, LOAN_REST_LIMIT - 1);
+
+    const ids = simSquadOf(state, host).starters.map((p) => p.id);
+    expect(ids).toContain(loanee.id);
+    expect(ids).not.toContain(rival.id);
   });
 });

@@ -95,9 +95,11 @@ import {
   activeSuspension,
   assignmentFor,
   assignmentsOf,
+  benchRunOf,
   ensureSeasonStat,
   firstTeamPlayers,
   isInjured,
+  isLoanedIn,
   isSuspended,
   managedTeamId,
   MATCHDAY_BENCH,
@@ -839,6 +841,34 @@ export const ROTATION_FRESHER = 15;
 export const EXHAUSTED_CONDITION = 35;
 
 /**
+ * **임대 자원이 자리를 얻는 기량 여유** — 로테이션 문턱(`ROTATION_OVR_DROP` 7)보다
+ * 넓다 (→ docs/simulation/season.md §2 임대).
+ *
+ * 로테이션이 묻는 것은 "더 나은 선택이 있는가"이고 임대가 묻는 것은 "쓰겠다고 하고
+ * 데려왔는가"다. 임대는 **출전을 사는 거래**라 빌린 구단이 주급을 나눠 내는 대가로
+ * 그를 세운다 — 7이면 아카데미 유망주는 어떤 자리도 받지 못한다(1부 최약체의 선발
+ * 커트가 71인데 유망주의 종합은 60대 중반이다).
+ *
+ * ⚠️ **넓히면 임대처를 고르는 일이 판단이 아니게 된다.** 창이 사라지면 어디로
+ * 보내도 뛰므로 감독이 "뛸 수 있는 곳"을 찾을 이유가 없어진다. 10은 같은 1부
+ * 안에서 약체와 강호를 가르는 폭이다(선발 커트 71 대 80).
+ */
+export const LOAN_ROTATION_OVR_DROP = 10;
+/**
+ * **빌린 구단이 임대 자원을 연속으로 앉혀 두는 상한** — 그 구단 1군 경기 기준.
+ *
+ * 상한에 닿으면 그는 같은 포지션군에서 가장 약한 선발과 자리를 바꾼다(`LOAN_ROTATION_OVR_DROP`
+ * 창 안일 때만). 셋은 한 달치가 채 안 되는 일정이라, 리포트가 `no-minutes`를 켜는
+ * 문턱(`LOAN_BENCH_RUN_ALERT` 4)보다 **한 칸 앞**이다 — 뛸 자리가 있는 임대는
+ * 근거가 켜지기 전에 뛰고, 그래도 켜졌다면 그건 배경음이 아니라 사건이다(부상·
+ * 정지이거나 그 구단에 그가 설 자리가 없다).
+ *
+ * 지금은 모든 임대가 같은 상한을 진다. 계약에 출전 보장 조항이 서면 상한이 계약마다
+ * 갈리고, 집행하는 자리는 여기 하나다.
+ */
+export const LOAN_REST_LIMIT = 3;
+
+/**
  * 전술판이 이 선수에게 준 자리 — 좌표·역할은 판의 것, 숙련도는 사람의 것.
  * 배치가 없으면 자연 포지션에 기준선 적응도로 선다.
  */
@@ -883,12 +913,79 @@ export function simSquadFor(
   };
 }
 
+/** 전술판이 한 자리에 세운 값 — `boardSlotOf`가 내고 로테이션이 갈아 끼운다 */
+type SlotSetup = ReturnType<typeof boardSlotOf>;
+
+/** 이 선수가 로테이션 자리를 받는 기량 여유 — 임대 자원은 창이 넓다 (season.md §2 임대) */
+function rotationDropFor(player: GamePlayer): number {
+  return isLoanedIn(player) ? LOAN_ROTATION_OVR_DROP : ROTATION_OVR_DROP;
+}
+
+/**
+ * **임대 자원이 먼저 선다** — 자리가 열리면 그 자리는 빌린 구단이 그를 데려온
+ * 자리다 (season.md §2 임대). 같은 조건의 스쿼드 자원과 나란히 서면 임대가 이기고,
+ * 그다음은 원래의 잣대(기량·체력)가 가른다.
+ */
+function loanFirstThen(
+  then: (a: GamePlayer, b: GamePlayer) => number,
+): (a: GamePlayer, b: GamePlayer) => number {
+  return (a, b) => (isLoanedIn(b) ? 1 : 0) - (isLoanedIn(a) ? 1 : 0) || then(a, b);
+}
+
+/**
+ * **연속 미출전 상한** — 그 구단 1군 경기 `LOAN_REST_LIMIT`회 연속 명단 밖이던 임대
+ * 자원을 선발에 세운다 (season.md §2 임대).
+ *
+ * 자리는 **같은 포지션군에서 가장 약한 선발**의 것이고, 그와의 기량 차가
+ * `LOAN_ROTATION_OVR_DROP` 창 안일 때만 바꾼다 — 창 밖으로 보낸 유망주는 한 경기도
+ * 못 뛰고, 그 사실이 `no-minutes`로 감독에게 온다(그래서 임대처 선택이 판단이 된다).
+ *
+ * 자리 자체는 판의 것이다: 좌표·역할은 그대로 두고 숙련도·적응도만 들어온 선수의
+ * 것으로 다시 선다 — 로테이션과 같은 규약이다.
+ */
+function seatOverdueLoanees(
+  state: GameState,
+  squad: readonly GamePlayer[],
+  starters: GamePlayer[],
+  slotSetups: SlotSetup[],
+  available: (player: GamePlayer) => boolean,
+): void {
+  // 대부분의 구단에 임대 자원이 없다 — 장부를 훑기 전에 여기서 끝난다
+  const loanees = squad.filter((p) => isLoanedIn(p) && available(p));
+  if (loanees.length === 0) return;
+  const seated = new Set(starters.map((p) => p.id));
+  for (const loanee of loanees) {
+    if (seated.has(loanee.id)) continue;
+    if (benchRunOf(state, loanee) < LOAN_REST_LIMIT) continue;
+    let index = -1;
+    for (let i = 0; i < starters.length; i++) {
+      const seat = starters[i]!;
+      // 임대 자원끼리는 자리를 뺏지 않는다 — 그쪽에도 같은 빚이 있다 (`admitOnLoan`과 같은 규약)
+      if (isLoanedIn(seat)) continue;
+      if (groupOf(seat) !== groupOf(loanee)) continue;
+      if (loanee.attributes.overall < seat.attributes.overall - LOAN_ROTATION_OVR_DROP) continue;
+      if (index < 0 || seat.attributes.overall < starters[index]!.attributes.overall) index = i;
+    }
+    if (index < 0) continue;
+    const setup = slotSetups[index]!;
+    slotSetups[index] = {
+      ...setup,
+      proficiency: proficiencyAt(loanee, setup.position),
+      familiarity: assignmentFor(state, loanee.id)?.familiarity ?? FAMILIARITY_BASELINE,
+    };
+    seated.delete(starters[index]!.id);
+    starters[index] = loanee;
+    seated.add(loanee.id);
+  }
+}
+
 /**
  * 간이 시뮬 입력 조립 — 전술 배치에서 가용 선발을 뽑는다.
  *
- * 부상·정지로 빈 자리를 메우고, **지친 선발은 로테이션**한다. 대항전에 나가는
- * 팀은 주중 경기가 늘어 이 부담을 실제로 지고, 그 대가는 약해진 라인업이다
- * (유저 팀은 감독이 직접 라인업을 짜므로 이 함수를 쓰지 않는다).
+ * 부상·정지로 빈 자리를 메우고, **임대 자원에게 진 빚을 갚고**(season.md §2 임대),
+ * **지친 선발은 로테이션**한다. 대항전에 나가는 팀은 주중 경기가 늘어 이 부담을
+ * 실제로 지고, 그 대가는 약해진 라인업이다 (유저 팀은 감독이 직접 라인업을 짜므로
+ * 이 함수를 쓰지 않는다 — 우리가 빌려 온 선수를 세울지는 라인업 화면의 결정이다).
  */
 export function simSquadOf(state: GameState, teamId: string): SimSquad {
   const squad = firstTeamPlayers(state, teamId);
@@ -921,6 +1018,17 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
     }
   }
 
+  /**
+   * **앉혀만 두지는 못한다** — 임대는 출전을 사는 거래다 (season.md §2 임대).
+   *
+   * 그 구단 1군 경기 `LOAN_REST_LIMIT`회 연속 명단 밖이던 임대 자원은 같은
+   * 포지션군에서 **가장 약한 선발**과 자리를 바꾼다. 로테이션보다 먼저 서는 이유는
+   * 이 문이 피로를 묻지 않기 때문이다: 주 1경기 리듬의 팀은 로테이션 문턱에 아무도
+   * 닿지 않아, 로테이션에만 얹으면 대항전 없는 구단으로 나간 유망주가 한 시즌을
+   * 통째로 앉아 있게 된다.
+   */
+  seatOverdueLoanees(state, squad, starters, slotSetups, available);
+
   // 로테이션 — 지친 선발을 같은 포지션군의 신선한 자원으로 바꾼다
   const used = new Set(starters.map((p) => p.id));
   /**
@@ -942,10 +1050,10 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
           // 대체 자원으로 그라운드에 선다** (실제로 그랬다: 정지 중인 선수가 선발)
           available(p) &&
           groupOf(p) === groupOf(tired) &&
-          p.attributes.overall >= tired.attributes.overall - ROTATION_OVR_DROP &&
+          p.attributes.overall >= tired.attributes.overall - rotationDropFor(p) &&
           p.state.condition >= tired.state.condition + ROTATION_FRESHER,
       )
-      .sort((a, b) => b.attributes.overall - a.attributes.overall)[0];
+      .sort(loanFirstThen((a, b) => b.attributes.overall - a.attributes.overall))[0];
     /**
      * 조건에 맞는 자원이 없어도 **다리가 멎었으면 뺀다** — 같은 포지션군에서
      * 가장 신선한 사람으로. 이 갈래가 없으면 대체 불가한 스타는 0까지 간다.
@@ -960,7 +1068,7 @@ export function simSquadOf(state: GameState, teamId: string): SimSquad {
                 groupOf(p) === groupOf(tired) &&
                 p.state.condition > tired.state.condition + 10,
             )
-            .sort((a, b) => b.state.condition - a.state.condition)[0]
+            .sort(loanFirstThen((a, b) => b.state.condition - a.state.condition))[0]
         : undefined;
     const picked = replacement ?? fallback;
     if (!picked) continue;
