@@ -10,7 +10,7 @@
  * 하나(`packetTagText`)가 만든다** — 화면·중계·CLI·테스트가 같은 함수를 부른다.
  */
 
-import { legacyTag, otherSide, type MatchSide, type SubCause } from "./match";
+import { legacyTag, otherSide, type MatchSide, type PacketTagSource, type SubCause } from "./match";
 import { AXIS_KO } from "./player";
 import {
   DIRECTIVE_INTENSITY_KO,
@@ -55,28 +55,8 @@ export interface Matchup {
  * 문장으로 옮기는 것은 그것을 읽는 쪽(화면·중계·CLI)이 같은 렌더러 하나로 한다.
  */
 export interface PacketTag {
-  /** 어느 갈래에서 나왔나 */
-  source:
-    | "counter"
-    | "gap"
-    | "mismatch"
-    | "zone-plan"
-    | "directive"
-    | "directive-dropped"
-    | "exploit"
-    | "exploit-dropped"
-    | "tactical"
-    /** 죽은 공에서 나온 골 — 키커와 마무리한 선수를 함께 싣는다 (match.md §1.4) */
-    | "set-piece"
-    /**
-     * **AI 벤치가 판을 옮겼다** — `tactical_shift` 사건의 근거 (match.md §2).
-     *
-     * `code`가 갈래(`chase`·`hold`)고, `values`는 **옮긴 뒤의** 축 값이다. 방향은
-     * 갈래가 이미 말하므로 델타를 따로 싣지 않는다. 갈아 낀 모양은 `formation:` flag.
-     */
-    | "ai-shift"
-    /** 진행 중인 옛 세이브가 들고 있던 문장 — `text`만 갖는다 */
-    | "legacy";
+  /** 어느 갈래에서 나왔나 — 목록은 `PACKET_TAG_SOURCES`(match.ts) 한 벌이다 */
+  source: PacketTagSource;
   /** 축·상성·지시의 코드 — 판정과 집계의 열쇠 ("space_behind" · "backline-pace") */
   code: string;
   /** 이 사실이 **이로운 편** — 약점을 가진 쪽이 아니다. 편이 없는 사실이면 null */
@@ -100,7 +80,10 @@ export interface PacketTag {
   values: Record<string, number>;
   /** 문장 안에 숨어 있던 조건부 축 — "sweeper" · "trap-unfamiliar" */
   flags: string[];
-  /** 구조로 못 옮기는 자유 문장 — 지역 플랜의 모델 원문, 옛 세이브의 줄 */
+  /**
+   * 구조로 못 옮기는 자유 문장 — 지역 플랜의 모델 원문, 옛 세이브의 줄, 그리고
+   * 카탈로그가 가진 고유 명사(컨텍스트 태그의 더비 이름).
+   */
   text?: string;
 }
 
@@ -672,6 +655,23 @@ const TACTICAL_KO: Record<string, (r: Render) => string> = {
 };
 
 /**
+ * 이 경기가 무슨 경기인가 (`source: "context"`) — 전력이 아니라 **대진이 가진 사실**.
+ * 편이 없으므로 주어를 세우지 않는다.
+ */
+export const DERBY_HEAT_KO: Record<number, string> = {
+  1: "이웃 사이의 자존심이 걸린 경기",
+  2: "오랜 앙숙이 만나는 경기",
+  3: "도시를 반으로 가르는 경기",
+};
+
+const CONTEXT_KO: Record<string, (tag: PacketTag) => string> = {
+  derby: (tag) => {
+    const heat = DERBY_HEAT_KO[Math.round(tag.values.heat ?? 1)] ?? DERBY_HEAT_KO[1]!;
+    return `${tag.text ?? "더비"} — ${heat}`;
+  },
+};
+
+/**
  * **판에 닿지 못한 지시·공략** — 조용히 버리면 거짓 성공이 된다.
  * 꼴은 하나다: `무엇이 안 걸렸는가 — 왜`. 한 줄만 읽어도 다시 내릴지가 정해져야 한다.
  */
@@ -724,6 +724,8 @@ export function packetTagText(tag: PacketTag, ctx?: PacketTagContext): string {
   switch (tag.source) {
     case "legacy":
       return tag.text ?? "";
+    case "context":
+      return CONTEXT_KO[tag.code]?.(tag) ?? tag.text ?? "";
     case "zone-plan":
       return `${tag.favours ? nameOf(tag.favours) : ""} 지역 플랜: ${tag.text ?? ""}`.trim();
     case "gap": {

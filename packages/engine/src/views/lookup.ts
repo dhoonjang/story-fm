@@ -11,6 +11,7 @@ import type {
   StrongFoot,
 } from "@story-fm/domain";
 import {
+  DERBY_HEAT_KO,
   isReserveMatch,
   packetTagText,
   PROMISE_KIND_KO,
@@ -41,6 +42,8 @@ import {
 } from "@story-fm/domain";
 import { rankByName } from "../core/name-match";
 import { formatMoney } from "../club/finance";
+import { derbyRecordOf } from "../club/derby";
+import { derbyOf } from "../data/derbies";
 import { spendLine, transferFundRoom } from "../club/manager-wallet";
 import {
   buildMatchReport,
@@ -1317,6 +1320,19 @@ export function teamProfile(state: GameState, team: string): LookupResult {
     recent.length > 0 ? `최근 5경기: ${recent.join(" / ")}` : "최근 경기 없음",
   ];
   if (teamId !== state.userTeamId) {
+    /**
+     * **더비면 그 사실이 전적보다 먼저 선다** (team.md §3.2). 바로 아래의 맞대결
+     * 전적과 수가 다른 것은 이쪽이 친선·2군을 세지 않기 때문이다 — 더비는 대회
+     * 경기의 것이다.
+     */
+    const derby = derbyOf(state.userTeamId, teamId);
+    if (derby) {
+      const record = derbyRecordOf(state, teamId);
+      lines.push(
+        `더비: ${derby.name} — ${DERBY_HEAT_KO[derby.heat] ?? ""} · ` +
+          `더비 전적 ${record.won}승 ${record.drawn}무 ${record.lost}패`,
+      );
+    }
     lines.push(
       `우리와의 전적 (이번 시즌): ${w}승 ${d}무 ${l}패` +
         (h2h.length > 0
