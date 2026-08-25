@@ -17,6 +17,7 @@ import {
   describeReputation,
   familiarityLabel,
   footLabel,
+  milestoneTitle,
   physiqueLabel,
   naturalPositionOf,
   parseScorerEntry,
@@ -32,6 +33,7 @@ import { spendLine, transferFundRoom } from "../club/manager-wallet";
 import { outcomeFor, outcomeLabel } from "./views";
 import { addDays, dayOfWeek, diffDays, seasonYear, squadReturnOf } from "../competition/calendar";
 import { entrantsOf } from "../competition/europe";
+import { careerOf, type CareerTotals } from "../squad/career";
 import { formLabel } from "../squad/form";
 import { INJURY_SEVERITY_KO } from "../squad/injury";
 import { moodAnchor, moodOf } from "../squad/mood";
@@ -615,6 +617,88 @@ const TRANSFER_KO: Record<string, string> = {
 };
 
 /**
+ * 카드에 세울 **시즌 행·팀 행의 상한.**
+ *
+ * 스무 시즌을 뛴 선수의 행을 전부 쏟으면 카드가 벽이 되는데, 모델이 판단에 쓰는
+ * 것은 최근 몇 해다 — 계약이 보통 3~5년이라 다섯이면 "지금 이 선수가 어떤
+ * 선수인가"를 가르는 구간이 통째로 들어온다. 잘린 앞쪽은 **통산 합이 말한다**:
+ * 합은 전 시즌의 것이라, 적힌 행을 더해 통산이 안 나오면 그 차이가 곧 "더
+ * 있다"는 뜻이다.
+ */
+const CAREER_ROWS_SHOWN = 5;
+
+/**
+ * 마일스톤 상한 — 문턱(50·100경기)은 드물지만 해트트릭은 시즌마다 쌓인다.
+ * 고르기는 최근 것부터, 적기는 **오래된 것부터**다 (부상·이동 이력과 같은 결이고,
+ * 한 경기가 여럿을 세웠을 때의 드문 순서도 장부에 적힌 그대로 남는다).
+ */
+const MILESTONES_SHOWN = 4;
+
+/** 커리어 한 묶음의 수치 — 위 「시즌 기록」과 같은 낱말이라 여러 줄이 한 자로 읽힌다 */
+function careerStatText(t: CareerTotals): string {
+  return (
+    `${t.apps}경기 ${t.goals}골 ${t.assists}도움` +
+    (t.rating === null ? "" : ` · 평점 ${t.rating.toFixed(2)}`) +
+    (t.reserveApps > 0 ? ` (2군 ${t.reserveApps}경기 ${t.reserveGoals}골)` : "")
+  );
+}
+
+/**
+ * 통산 · 팀별 · 시즌별 · 마일스톤 — 전부 `careerOf` **하나에서** 나온다
+ * (player.md §10). 화면의 스쿼드 상세가 읽는 표와 같은 함수라, 감독이 채팅에서
+ * 듣는 "우리 팀에서 132경기"와 상세의 행이 갈리지 않는다.
+ *
+ * **기록은 안개 밖이다** — 흐리는 것은 능력치이지 장부가 아니라 타 팀 선수도
+ * 참값 그대로 낸다. 다만 원장은 게임 시작 뒤만 알아 **부임 전 커리어는 없다**:
+ * 없는 것은 지어내지 않고 줄을 세우지 않는다.
+ *
+ * 마일스톤은 **감독 팀 선수의 장부**다 (game-state.md §3.4) — 남의 팀 선수에게는
+ * 줄이 서지 않는 것이 정상이고, 그것이 "기록이 없다"는 뜻은 아니다.
+ */
+function careerLines(state: GameState, p: GamePlayer): string[] {
+  const lines: string[] = [];
+  const career = careerOf(state, p.id);
+  // 출전이 0인 행은 세우지 않는다 — 빈 자리를 만들어 두면 카드가 길어지기만 한다
+  const played = (t: CareerTotals) => t.apps > 0 || t.reserveApps > 0;
+  const seasons = career.seasons.filter(played);
+  /**
+   * 이번 시즌 이 팀 한 행뿐이면 위의 「시즌 기록」이 이미 같은 값을 말했다 —
+   * 같은 수를 두 낱말로 두 번 적으면 모델은 그것을 다른 사실 둘로 읽는다.
+   */
+  const only = seasons.length === 1 ? seasons[0]! : null;
+  const onlyCurrent = only !== null && only.season === state.season && only.teamId === p.teamId;
+  if (played(career.totals) && !onlyCurrent) {
+    lines.push(`통산: ${careerStatText(career.totals)}`);
+    // 팀이 하나면 통산이 곧 그 셔츠의 기록이라, 같은 줄을 한 번 더 적는 셈이다
+    const teams = career.teams.filter(played);
+    if (teams.length > 1) {
+      lines.push(
+        `팀별: ${teams
+          .slice(-CAREER_ROWS_SHOWN)
+          .map((t) => `${teamShortNameIn(state, t.teamId)}(${t.from}~${t.to}) ${careerStatText(t)}`)
+          .join(" / ")}`,
+      );
+    }
+    // 시즌 안에 팀을 옮겼으면 행도 팀별로 갈린다 — 합치면 어느 셔츠로 몇 경기를 뛰었는지가 사라진다
+    if (seasons.length > 1) {
+      lines.push(
+        `시즌별: ${seasons
+          .slice(-CAREER_ROWS_SHOWN)
+          .map((s) => `${s.season} ${teamShortNameIn(state, s.teamId)} ${careerStatText(s)}`)
+          .join(" / ")}`,
+      );
+    }
+  }
+  /** 클럽 단위의 사실이라 어느 셔츠로 세웠는지를 함께 적는다 (match.md §6) */
+  const milestones = (state.milestones ?? [])
+    .filter((m) => m.gamePlayerId === p.id)
+    .slice(-MILESTONES_SHOWN)
+    .map((m) => `${m.date} ${teamShortNameIn(state, m.teamId)} ${milestoneTitle(m.code, m.value)}`);
+  if (milestones.length > 0) lines.push(`마일스톤: ${milestones.join(" / ")}`);
+  return lines;
+}
+
+/**
  * 선수의 **이력** — 부상·징계·이동. 현재 상태만 보여주면 "유리몸인가",
  * "경고 몇 장이야(5장이면 자동 정지)" 같은 판단을 감독이 할 수 없다.
  * 부상·징계·이적은 공개 기록이라 타 팀 선수에게도 안개를 걸지 않는다.
@@ -758,6 +842,7 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
   lines.push(
     `시즌 기록: ${stat?.apps ?? 0}경기 ${stat?.goals ?? 0}골 ${stat?.assists ?? 0}도움` +
       (seasonRating(stat) === null ? "" : ` · 평점 ${seasonRating(stat)!.toFixed(2)}`),
+    ...careerLines(state, p),
     contract
       ? `계약: 주급 ${formatMoney(contract.weeklyWage)} · 만료 ${contract.until}`
       : "계약: 정보 없음",

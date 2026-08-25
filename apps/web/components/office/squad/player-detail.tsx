@@ -7,6 +7,7 @@ import {
   defaultRoleOf,
   footLabel,
   isNaturalAt,
+  milestoneTitle,
   physiqueLabel,
   rolesFor,
 } from "@story-fm/domain";
@@ -64,6 +65,16 @@ function FootMarks({ foot }: { foot: SquadRow["foot"] }) {
       <b className={`foot-num w${foot.right}`}>{foot.right}</b>
     </span>
   );
+}
+
+/**
+ * 2군 리그 기록 — 1군 숫자 **옆에 곁들인다.** 더해서 한 칸에 적으면 표의 "출전
+ * 38"이 1·2군 혼합값이 되고(season.md §2), 열을 따로 세우면 대부분의 행이 빈
+ * 열 둘이 표를 넓힌다. 있을 때만 나타나므로 없는 선수의 표는 그대로 좁다.
+ */
+function ReserveMark({ value }: { value: number }) {
+  if (value <= 0) return null;
+  return <i title={`2군 리그 ${value}`}>+{value}</i>;
 }
 
 /**
@@ -142,6 +153,15 @@ export function PlayerDetail({
    * 하나만 보고 나머지 주 포지션을 "소화 가능"으로 밀어내기 쉽다.
    */
   const preferred = (code: string) => isNaturalAt(p, code);
+  /**
+   * 커리어 표를 세울까 — **시즌 행이 하나뿐이고 그게 이번 시즌이면 세우지 않는다.**
+   * 위 요약 줄의 "시즌 N경기"가 이미 같은 수를 말했고(`seasonApps`는 이번 시즌 이
+   * 팀의 것이다), 같은 값을 표로 한 번 더 그리면 상세가 요약의 복사본이 된다.
+   * 뛴 적이 없으면(개막 전·갓 온 유스) 행 자체가 없어 표도 없다 — 빈 표를 자리
+   * 잡아 두면 줄이 길어지고 그 폭이 명단의 열 계산에 얹힌다.
+   */
+  const careerRows = p.career.seasons;
+  const showCareer = careerRows.length > 1 || (careerRows.length === 1 && p.seasonApps === 0);
   return (
     <div className="player-detail" data-testid="player-detail">
       {/* 지금 심경 한 줄 — 아래 숫자들이 왜 그런지 */}
@@ -318,6 +338,82 @@ export function PlayerDetail({
           ))}
         </div>
       </div>
+
+      {/* 커리어 — 시즌 × 팀의 표와 그 옆의 마일스톤. **머리글 줄이 아니라 제
+          블록이다**: 요약 줄은 한 줄로 훑는 자리라 격자가 낄 자리가 없다.
+          기록이 없으면 아무것도 세우지 않는다 (위 `showCareer` 주석) */}
+      {(showCareer || p.milestones.length > 0) && (
+        <div className="pd-career">
+          {showCareer && (
+            <table className="pd-career-table">
+              <thead>
+                <tr>
+                  <th>시즌</th>
+                  <th>팀</th>
+                  <th>출전</th>
+                  <th>골</th>
+                  <th>도움</th>
+                  <th>평점</th>
+                </tr>
+              </thead>
+              <tbody>
+                {/* 시즌 안에 팀을 옮겼으면 **행도 팀별로 갈린다** — 합치면 어느
+                    셔츠로 몇 경기를 뛰었는지가 사라진다 (player.md §10) */}
+                {careerRows.map((row) => (
+                  <tr key={`${row.season}-${row.teamId}`}>
+                    <td>{row.season}</td>
+                    <td>{row.team}</td>
+                    <td>
+                      {row.apps}
+                      <ReserveMark value={row.reserveApps} />
+                    </td>
+                    <td>
+                      {row.goals}
+                      <ReserveMark value={row.reserveGoals} />
+                    </td>
+                    <td>{row.assists}</td>
+                    <td>{row.rating === null ? "—" : row.rating.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              {/* 통산은 표의 **마지막 줄**이다 — 같은 열을 쓰므로 시즌 행과 세로로
+                  바로 견줘진다 (따로 떼어 놓으면 무엇의 합인지가 멀어진다) */}
+              <tfoot>
+                <tr>
+                  <th colSpan={2}>통산</th>
+                  <td>
+                    {p.career.totals.apps}
+                    <ReserveMark value={p.career.totals.reserveApps} />
+                  </td>
+                  <td>
+                    {p.career.totals.goals}
+                    <ReserveMark value={p.career.totals.reserveGoals} />
+                  </td>
+                  <td>{p.career.totals.assists}</td>
+                  <td>
+                    {p.career.totals.rating === null ? "—" : p.career.totals.rating.toFixed(2)}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          )}
+          {/* 마일스톤 — 코어가 내는 것은 코드와 수치뿐이고 라벨은 domain이 만든다
+              (`milestoneTitle`). 남의 팀 선수에겐 장부가 없지만 명단은 우리 선수뿐이다 */}
+          {p.milestones.length > 0 && (
+            <div className="pd-milestones">
+              <span className="pd-axis-group-name">마일스톤</span>
+              <ul>
+                {p.milestones.map((m) => (
+                  <li key={`${m.date}-${m.code}-${m.value}`}>
+                    <b>{milestoneTitle(m.code, m.value)}</b>
+                    <i>{m.date}</i>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
 
       {p.instruction && <p className="pd-foot">개인 지시 “{p.instruction}”</p>}
     </div>

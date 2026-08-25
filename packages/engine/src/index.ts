@@ -86,6 +86,7 @@ export * from "./squad/scouting";
 export * from "./squad/training-plan";
 export * from "./squad/training-report";
 export * from "./squad/numbers";
+export * from "./squad/career";
 
 // market — 이적 시장·협상·메디컬·감독 시장
 export * from "./market/market";
