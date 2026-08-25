@@ -21,6 +21,7 @@ import {
   squadLevelOf,
   type GameState,
 } from "../core/state";
+import { SQUAD_CORE_SIZE } from "../club/press";
 import { clampForm, moraleToForm } from "./form";
 import { betterAtPosition } from "./depth";
 
@@ -95,16 +96,26 @@ export function derivedSquadStatus(
    */
   teamId: string = player.teamId,
 ): SquadStatus {
+  const better = playersOf(state, teamId).filter(
+    (p) => p.id !== player.id && p.attributes.overall > player.attributes.overall,
+  ).length;
+  const young = ageOf(player.birthdate, state.date) <= PROSPECT_AGE;
+  /**
+   * **스쿼드의 핵심 밖이면 자리 깊이를 보지 않는다** — 등재·계약 불만이 쓰는 것과
+   * 같은 자다(`SQUAD_CORE_SIZE` — people.md §5).
+   *
+   * 자리 깊이만 보면 서른 명짜리 1군이 열두어 자리로 나뉘어 **자리마다 둘째까지**
+   * 로테이션이 되고, 여덟 경기에 여든여덟 자리뿐인 판에 감당할 수 없는 기대가
+   * 스물여섯 개 선다. 백업 정리가 조용한 이유와 같은 이유로 여기서 끊는다.
+   *
+   * ⚠️ **계약에 적힌 지위에는 걸리지 않는다** — 서열 밖의 선수에게 감독이 자리를
+   * 약속했다면 그것은 약속이지 파생이 아니다 (people.md §5-2).
+   */
+  if (better >= SQUAD_CORE_SIZE) return young ? "prospect" : "backup";
   const blocked = betterAtPosition(state, teamId, player);
-  if (blocked === 0) {
-    const squad = playersOf(state, teamId);
-    const better = squad.filter(
-      (p) => p.id !== player.id && p.attributes.overall > player.attributes.overall,
-    ).length;
-    return better < KEY_SQUAD_RANK ? "key" : "starter";
-  }
+  if (blocked === 0) return better < KEY_SQUAD_RANK ? "key" : "starter";
   if (blocked === 1) return "rotation";
-  return ageOf(player.birthdate, state.date) <= PROSPECT_AGE ? "prospect" : "backup";
+  return young ? "prospect" : "backup";
 }
 
 /** 그가 **어떤 자리로 있는가** — 계약에 적힌 지위, 없으면 파생 */
