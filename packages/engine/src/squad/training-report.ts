@@ -1,6 +1,13 @@
-import type { AttributeAxis, GamePlayer, GrowthOrigin, TrainAttr } from "@story-fm/domain";
+import type {
+  AttributeAxis,
+  GamePlayer,
+  GrowthOrigin,
+  TrainAttr,
+  TrainingMark,
+  TrainingReport,
+} from "@story-fm/domain";
 import {
-  AXIS_KO,
+  TRAINING_MARKS,
   attributeAxisOf,
   ageOf,
   applyFamiliarityGain,
@@ -20,6 +27,7 @@ import {
   playerById,
   recomputeOverall,
   recordGrowth,
+  recordTrainingReport,
   seasonStatOf,
   squadLevelOf,
   teamNameIn,
@@ -211,6 +219,14 @@ export interface TrainingOutcome {
   /** 한 줄 근거 — 감독이 읽는다 */
   note: string;
   /**
+   * 훈련장에서 눈에 띈 갈래 — `standout`·`slack`·`tired` (없으면 null).
+   *
+   * 수치가 하나도 안 움직인 구간에도 훈련장의 일은 있다. 갈래가 없으면 "태만"도
+   * "지쳐서 흐트러짐"도 사실로 남지 않아, 감독은 판정이 실패한 구간과 아무 일도
+   * 없던 구간을 구분할 수 없다.
+   */
+  mark?: TrainingMark | null;
+  /**
    * 이 변화가 나온 **훈련 날짜** — 목록의 세션 중 하나.
    *
    * 없거나 그 구간 밖이면 마지막 세션 날짜로 떨어진다. 이게 없으면 일주일치 훈련
@@ -361,19 +377,23 @@ export function trainingSettled(state: GameState, brief: TrainingBrief): boolean
  * 모델이 무엇을 돌려주든 이 함수를 통과한 것만 게임 상태가 된다 (AGENTS.md 6-7).
  * 밴드 밖의 값, 훈련하지 않은 축, 잠재력을 넘는 성장, 팀 총량 초과는 조용히 잘린다.
  *
- * @returns 감독에게 보여줄 요약 줄
+ * @returns 이 구간이 장부에 남긴 **결산 카드 한 장** (이미 반영된 구간이면 null).
+ *          카드는 `state.trainingReports`에 그대로 실린다 — 요약 줄을 돌려주던
+ *          자리인데, 그 줄을 읽는 곳이 없어 근거 한 줄이 호출 자리에서 사라졌다
+ *          (docs/simulation/season.md §4).
  */
 export function applyTrainingOutcomes(
   state: GameState,
   brief: TrainingBrief,
   outcomes: readonly TrainingOutcome[],
-): string[] {
+): TrainingReport | null {
   /**
    * **한 결산은 장부를 한 번만 움직인다** — 도구 루프는 같은 결산을 여러 번
    * 제출할 수 있고, 그때마다 반영하면 적응도·능력치가 호출 횟수만큼 쌓여
-   * "코어 앵커 ± 한도"가 뚫린다 (docs/llm/agents.md §4).
+   * "코어 앵커 ± 한도"가 뚫린다 (docs/llm/agents.md §4). 카드도 같은 문을
+   * 지난다 — 한 구간에 한 장이다.
    */
-  if (trainingSettled(state, brief)) return [];
+  if (trainingSettled(state, brief)) return null;
   /**
    * 판정이 가리킨 훈련 날짜 → 그 세션 (없으면 마지막 세션).
    * 하루에 두 세션이면 **먼저 있던 쪽**(오전)에 붙인다 — 판정은 날짜까지만 답한다.
@@ -388,7 +408,13 @@ export function applyTrainingOutcomes(
   // 팀 세션의 축 — 개인 훈련 축은 걸어 둔 선수에게만 얹는다 (`allowedAxesFor`)
   const teamAxes = teamAxesOf(brief.sessions);
   const subjects = new Map(brief.subjects.map((s) => [s.playerId, s] as const));
-  const lines: string[] = [];
+  /**
+   * 카드에 실릴 것 — **장부가 실제로 움직인 것만.** 판정이 낸 값이 아니라
+   * `recordGrowth`가 남긴 줄과 같은 눈금이라, 천장에 막혀 한 칸도 안 오른 `+2`는
+   * 여기에도 없다.
+   */
+  const moved: TrainingReport["moved"] = [];
+  const marks: TrainingReport["marks"] = [];
   let attrSpent = 0;
   // 감독의 훈련 축 — 흡수율과 인원 상한을 함께 정한다 (docs/simulation/career.md §2)
   const training = state.manager.attributes.training;
@@ -431,19 +457,19 @@ export function applyTrainingOutcomes(
         );
         // 장부·요약은 **눈금이 실제로 넘어갔을 때만** 남긴다 (성장 로그는 정수다).
         // 87.4 → 87.7은 감독의 화면에서 아무 일도 아니므로 일지에도 없다
-        const moved = Math.round(assignment.familiarity) - Math.round(before);
-        if (moved !== 0) {
+        const notches = Math.round(assignment.familiarity) - Math.round(before);
+        if (notches !== 0) {
           recordGrowth(
             state,
             player.id,
             session.entryId,
             "training",
             "tactical",
-            moved,
+            notches,
             "training-settlement",
             session.date,
           );
-          lines.push(`${player.name} 전술 ${moved > 0 ? "+" : ""}${moved}`);
+          moved.push({ gamePlayerId: player.id, target: "tactical", delta: notches });
         }
       }
     }
@@ -484,7 +510,11 @@ export function applyTrainingOutcomes(
             "position-conversion",
             session.date,
           );
-          lines.push(`${player.name} ${program.position} 적응 +${gained}`);
+          moved.push({
+            gamePlayerId: player.id,
+            target: positionGrowthTarget(program.position),
+            delta: gained,
+          });
         }
         // 새 자리가 본업을 넘어서면 전향이 끝난 것이다 (장부 정리는 코어 몫)
         const natural = naturalPositionOf(player);
@@ -496,13 +526,12 @@ export function applyTrainingOutcomes(
         ) {
           setPlayerPosition(state, { playerId: player.id, position: learned.position });
           state.playerTraining = state.playerTraining.filter((t) => t.gamePlayerId !== player.id);
-          lines.push(`${player.name} 전향 완료 — 이제 ${learned.position}가 본업이다`);
         }
       }
     }
 
     // ③ 능력치 — 그 구간에 훈련한 축 + 이 선수에게 걸린 개인 훈련 축 (공용 규칙)
-    const moved = applyAttributeStep(state, player, outcome.attribute, outcome.attributeStep, {
+    const stepped = applyAttributeStep(state, player, outcome.attribute, outcome.attributeStep, {
       allowed: allowedAxesFor(teamAxes, attributeAxisOf(program?.axis)),
       spent: attrSpent,
       cap: attrCap,
@@ -512,12 +541,23 @@ export function applyTrainingOutcomes(
       entryId: session.entryId,
       on: session.date,
     });
-    if (moved) {
+    if (stepped) {
       attrSpent += 1;
-      const sign = moved.step > 0 ? "+" : "−";
-      lines.push(
-        `${player.name} ${AXIS_KO[moved.axis]} ${sign}1 → ${moved.value} — ${oneLine(outcome.note)}`,
-      );
+      moved.push({ gamePlayerId: player.id, target: stepped.axis, delta: stepped.step });
+    }
+
+    /**
+     * 훈련장의 갈래와 근거 한 줄 — **아무 일도 없던 줄은 적지 않는다.**
+     *
+     * 판정자는 대상 전원에게 한 줄씩 답하므로(프롬프트가 그렇게 요구한다) 그대로
+     * 받으면 카드 한 장이 스물몇 줄의 "변화 없음"이 된다. 갈래를 적었거나 장부가
+     * 실제로 움직인 선수만 남긴다 — 여백은 사실이 아니다.
+     */
+    const code = markOf(outcome.mark);
+    const note = oneLine(outcome.note);
+    const touched = moved.some((m) => m.gamePlayerId === player.id);
+    if (code !== null || (touched && note.length > 0)) {
+      marks.push({ gamePlayerId: player.id, code, note });
     }
   }
 
@@ -527,7 +567,51 @@ export function applyTrainingOutcomes(
     const entry = state.schedule.find((e) => e.id === session.entryId);
     if (entry) entry.settled = true;
   }
-  return lines;
+  /**
+   * **아무것도 움직이지 않은 구간에도 카드는 선다.** "장부가 움직이지 않았다"가
+   * 사실이고, 카드가 없으면 다음 턴의 GM은 훈련장에서 무슨 일이 있었는지 지어낸다
+   * (docs/simulation/season.md §4).
+   */
+  return cardFor(state, brief, moved, marks);
+}
+
+/**
+ * 판정이 한 번도 닿지 않은 구간의 카드 — **빈 결산.**
+ *
+ * mock 모드거나 모델이 두 번 다 실패한 구간이다. "장부가 움직이지 않았다"는 것이
+ * 사실이고, 카드가 없으면 다음 턴의 GM은 훈련장에서 무슨 일이 있었는지 지어낸다
+ * (docs/simulation/season.md §4).
+ *
+ * ⚠️ **반영 표식(`settled`)은 세우지 않는다** — 장부는 정말로 움직이지 않았다.
+ * 실패한 판정을 "반영됨"으로 적으면 표식이 카드와 다른 말을 한다.
+ */
+export function recordEmptyTrainingReport(state: GameState, brief: TrainingBrief): TrainingReport {
+  return cardFor(state, brief, [], []);
+}
+
+/** 카드 한 장을 지어 장부에 얹는다 — 구간의 꼴은 여기 한 곳에서 정해진다 */
+function cardFor(
+  state: GameState,
+  brief: TrainingBrief,
+  moved: TrainingReport["moved"],
+  marks: TrainingReport["marks"],
+): TrainingReport {
+  const report: TrainingReport = {
+    from: brief.from,
+    to: brief.to,
+    sessions: brief.sessions.length,
+    moved,
+    marks,
+  };
+  recordTrainingReport(state, report);
+  return report;
+}
+
+/** 판정이 적은 갈래 — 표에 없는 코드는 받지 않는다 */
+function markOf(value: unknown): TrainingMark | null {
+  return typeof value === "string" && (TRAINING_MARKS as readonly string[]).includes(value)
+    ? (value as TrainingMark)
+    : null;
 }
 
 /**
