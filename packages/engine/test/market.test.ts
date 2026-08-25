@@ -16,7 +16,9 @@ import {
   sameTermsRepeats,
   squadDepthOf,
   wageExpectationOf,
+  derivedSquadStatus,
 } from "@story-fm/engine";
+import { SQUAD_STATUSES, squadStatusRank } from "@story-fm/domain";
 import { createTestGame } from "./helpers";
 
 /**
@@ -517,5 +519,62 @@ describe("응답 지연 — 상황에서 나온다", () => {
     const rushed = responseDelayDays(state, terms, 45);
     expect(rushed).toBeLessThanOrEqual(Math.max(1, Math.floor(normal / 2)) + 1);
     expect(rushed).toBeGreaterThanOrEqual(0);
+  });
+});
+
+/**
+ * 계약 지위 — **약속이 흥정의 손잡이가 되는 자리** (transfer.md §3 · people.md §5-2).
+ * 「출전 기회」가 사실(그 자리가 막혀 있는가)을 재고, 이 축이 약속(뭐라고 부르며
+ * 제시했는가)을 잰다.
+ */
+describe("계약 지위가 관문에 선다", () => {
+  const state = createTestGame(42);
+  const ours = playersOf(state, state.userTeamId);
+  const factorOf = (odds: ReturnType<typeof dealOdds>, label: string) =>
+    odds.factors.find((f) => f.label === label);
+  const renewAs = (player: GamePlayer, squadStatus?: (typeof SQUAD_STATUSES)[number]) =>
+    dealOdds(state, {
+      kind: "renew",
+      playerId: player.id,
+      fee: 0,
+      weeklyWage: renewalExpectation(state, player),
+      years: 3,
+      ...(squadStatus ? { squadStatus } : {}),
+    });
+
+  /** 지위가 실제 자리와 갈릴 여지가 가장 큰 자원 — 자리가 막힌 선수다 */
+  const blocked = [...ours].sort(
+    (a, b) =>
+      betterAtPosition(state, state.userTeamId, b) - betterAtPosition(state, state.userTeamId, a),
+  )[0]!;
+
+  it("한 칸 올려 부를수록 확률이 오른다 — 단조롭다", () => {
+    const odds = SQUAD_STATUSES.map((status) => renewAs(blocked, status).probability);
+    for (let i = 1; i < odds.length; i += 1) {
+      expect(odds[i]!, `${SQUAD_STATUSES[i]} < ${SQUAD_STATUSES[i - 1]}`).toBeGreaterThanOrEqual(
+        odds[i - 1]!,
+      );
+    }
+    // 사다리의 양끝은 실제로 갈라져야 한다 — 전부 같으면 축이 죽은 것이다
+    expect(odds[odds.length - 1]!).toBeGreaterThan(odds[0]!);
+  });
+
+  it("말하지 않은 것은 약속이 아니다 — 제시가 없으면 축이 서지 않는다", () => {
+    expect(factorOf(renewAs(blocked), "계약 지위")).toBeUndefined();
+    // 실제 자리를 그대로 부른 것도 거리가 0이라 서지 않는다
+    const actual = derivedSquadStatus(state, blocked, state.userTeamId);
+    expect(factorOf(renewAs(blocked, actual), "계약 지위")).toBeUndefined();
+    expect(renewAs(blocked, actual).probability).toBe(renewAs(blocked).probability);
+  });
+
+  it("올려 부르면 +, 낮춰 부르면 − — 부호가 자리를 따른다", () => {
+    const actual = derivedSquadStatus(state, blocked, state.userTeamId);
+    const rank = squadStatusRank(actual);
+    const up = SQUAD_STATUSES[Math.min(rank + 1, SQUAD_STATUSES.length - 1)]!;
+    const down = SQUAD_STATUSES[Math.max(rank - 1, 0)]!;
+    if (up !== actual) expect(factorOf(renewAs(blocked, up), "계약 지위")!.delta).toBeGreaterThan(0);
+    if (down !== actual) {
+      expect(factorOf(renewAs(blocked, down), "계약 지위")!.delta).toBeLessThan(0);
+    }
   });
 });
