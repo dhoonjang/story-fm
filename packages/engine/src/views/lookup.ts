@@ -19,6 +19,7 @@ import {
   familiarityLabel,
   footLabel,
   growthLabel,
+  LEADER_ROLE_LABEL,
   milestoneTitle,
   physiqueLabel,
   naturalPositionOf,
@@ -36,6 +37,7 @@ import { outcomeFor, outcomeLabel, pushRecordJournal, type CalendarEventView } f
 import { addDays, dayOfWeek, diffDays, seasonYear, squadReturnOf } from "../competition/calendar";
 import { entrantsOf } from "../competition/europe";
 import { careerOf, type CareerTotals } from "../squad/career";
+import { leaderGroupOf } from "../squad/hierarchy";
 import { formLabel } from "../squad/form";
 import { INJURY_SEVERITY_KO } from "../squad/injury";
 import { issueReasonText, moodAnchor, moodOf } from "../squad/mood";
@@ -242,6 +244,11 @@ const competitionHint = () =>
     .map((c) => c.id)
     .join("·")})`;
 
+/** 이름 뒤의 완장 — 서열은 조회가 아니라 `get_squad`의 리더 줄이 말한다 */
+function armband(p: GamePlayer): string {
+  return p.isCaptain ? " (주장)" : p.isViceCaptain === true ? " (부주장)" : "";
+}
+
 /**
  * 우리 팀 선수 한 줄 — 정확 수치 (오피스 뷰가 이미 보여주는 정보).
  *
@@ -291,7 +298,7 @@ function ourRow(state: GameState, p: GamePlayer): string {
     `OVR${p.attributes.overall} 폼 ${formLabel(p.state.form)} ` +
     `체력${p.state.condition} ${adaptation}` +
     `${formatMoney(contract?.weeklyWage ?? 0)}${contractLabel(contract)} ` +
-    `${role} ${statLine(stat)}${benched}${status}${issue}${p.isCaptain ? " (주장)" : ""}` +
+    `${role} ${statLine(stat)}${benched}${status}${issue}${armband(p)}` +
     // 홈그로운은 **우리 협회** 기준이다 — 임대 나간 선수를 빌린 구단 기준으로 재면
     // 같은 선수의 자격이 나가 있는 동안만 뒤집힌다 (searchPlayers의 필터와 같은 자)
     `${isHomegrownFor(p, state.userTeamId) ? " [홈그로운]" : ""}${occupiesSquadList(state, p) ? "" : " [U21·명단 밖]"}`
@@ -1026,7 +1033,7 @@ function assignedRow(
     grievance ? (reason ? `불만(${reason})` : "불만") : null,
   ].filter((x): x is string => x !== null);
   return (
-    `  ${position.padEnd(4)} ${p.name}${p.isCaptain ? "(주장)" : ""} (${p.id}) ${ageOf(p.birthdate, state.date)}세 · ` +
+    `  ${position.padEnd(4)} ${p.name}${armband(p)} (${p.id}) ${ageOf(p.birthdate, state.date)}세 · ` +
     `${roleLabel(position, roleId)} · OVR${p.attributes.overall} 자리적합${roleFit(p.attributes, position, roleId)} 포지션적응${proficiencyAt(p, position)} ` +
     `전술적응${familiarity} · 폼 ${formLabel(p.state.form)} 체력${p.state.condition}` +
     ` · ${statLine(stat)}` +
@@ -1124,6 +1131,21 @@ export function squadView(state: GameState, input: SquadViewInput = {}): LookupR
       }`,
     // 등록 명단 — 영입·승격 판단의 전제라 스쿼드를 볼 때 항상 함께 읽힌다
     registrationLine(squadRegistrationOf(state, teamId)),
+    /**
+     * 라커룸 서열 — **화면과 같은 파생을 읽는다** (people.md §5-1). 완장이 어디
+     * 있는지와 누가 그 옆에 서는지가 팀토크의 폭과 불만의 속도를 정하므로,
+     * 스쿼드를 볼 때 함께 읽혀야 하는 줄이다.
+     */
+    `라커룸 서열: ${
+      leaderGroupOf(state, teamId)
+        .map(
+          (row) =>
+            `${playerName(state, row.playerId)}${
+              row.role === "group" ? "" : `(${LEADER_ROLE_LABEL[row.role]})`
+            } 리더십${row.leadership}`,
+        )
+        .join(" · ") || "없음"
+    }`,
   ];
 
   const buckets: ReadonlyArray<["starting" | "bench" | "unassigned", string]> = [

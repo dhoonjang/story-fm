@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  leaderGroupOf,
   addDays,
   APPROACH_THRESHOLD,
   marketValueOf,
@@ -54,6 +55,18 @@ const firsts = (state: GameState, n: number) =>
   userPlayers(state)
     .filter((p) => p.squadLevel === "first")
     .slice(0, n);
+
+/**
+ * 리더 그룹 밖의 1군 — **압력의 눈금을 재는 자리는 리더 배수가 걸리지 않아야 한다**
+ * (people.md §5-1). 명단 앞쪽은 서열도 앞쪽이라, 그대로 쓰면 사다리 테스트가 재는
+ * 것이 계단이 아니라 배수가 된다.
+ */
+const plains = (state: GameState, n: number) => {
+  const leaders = new Set(leaderGroupOf(state, state.userTeamId).map((r) => r.playerId));
+  return userPlayers(state)
+    .filter((p) => p.squadLevel === "first" && !leaders.has(p.id))
+    .slice(0, n);
+};
 
 /** 근황이 하나도 없는 판 — 폼을 전부 평소로 눕힌다 */
 function quiet(state: GameState) {
@@ -247,7 +260,7 @@ function pressDays(state: GameState, days: number): string[] {
 describe("압력이 임계를 넘어야 자리가 열린다", () => {
   it("임계 직전까지는 아무도 오지 않는다 — 넘은 날 온다", () => {
     const state = quiet(createTestGame(11));
-    const target = firsts(state, 1)[0]!;
+    const target = plains(state, 1)[0]!;
     gripe(state, target.id);
 
     // minutes는 하루 7 — 14일이면 98로 임계 100에 못 미친다
@@ -261,9 +274,26 @@ describe("압력이 임계를 넘어야 자리가 열린다", () => {
     expect(open?.step).toBe(1);
   });
 
+  /**
+   * 리더 배수 — 주장의 불만은 15일이 아니라 8일 만에 문을 두드린다
+   * (people.md §5-1 · §8). 배수가 죽으면 완장이 다시 서사에서만 뜻을 갖는다.
+   */
+  it("리더의 불만은 더 빨리 임계에 닿는다 — 주장은 배수 2.0", () => {
+    const state = quiet(createTestGame(11));
+    const captain = userPlayers(state).find((p) => p.isCaptain)!;
+    gripe(state, captain.id);
+    // 하루 7 × 2.0 = 14 — 7일이면 98로 아직 임계 아래다
+    pressDays(state, 7);
+    expect(pendingApproach(state)).toBeNull();
+    pressDays(state, 1);
+    expect(pendingApproach(state)?.about).toBe(captain.id);
+    // 자리를 연 배경 카드가 그 사람의 완장을 함께 든다
+    expect(pendingApproach(state)?.contextCard?.leader).toBe("captain");
+  });
+
   it("열려 있는 동안에는 다음 자리가 열리지 않는다", () => {
     const state = quiet(createTestGame(11));
-    const [a, b] = firsts(state, 2);
+    const [a, b] = plains(state, 2);
     gripe(state, a!.id);
     gripe(state, b!.id);
     pressDays(state, 15);
@@ -279,7 +309,7 @@ describe("압력이 임계를 넘어야 자리가 열린다", () => {
 describe("답한 것과 답하지 않은 것의 차이는 남는 압력이다", () => {
   it("답하면 압력이 0으로, 계단이 하나 오른다 — 다음 임계는 두 배다", () => {
     const state = quiet(createTestGame(11));
-    const target = firsts(state, 1)[0]!;
+    const target = plains(state, 1)[0]!;
     gripe(state, target.id);
     pressDays(state, 15);
 
@@ -298,7 +328,7 @@ describe("답한 것과 답하지 않은 것의 차이는 남는 압력이다", 
 
   it("돌려보내면 직전 임계의 75%가 남는다 — 무시가 다음 계단을 앞당긴다", () => {
     const state = quiet(createTestGame(11));
-    const target = firsts(state, 1)[0]!;
+    const target = plains(state, 1)[0]!;
     gripe(state, target.id);
     pressDays(state, 15);
 
@@ -310,7 +340,7 @@ describe("답한 것과 답하지 않은 것의 차이는 남는 압력이다", 
 
   it("답이 원인을 지우지는 않는다 — 불만은 그대로 남는다", () => {
     const state = quiet(createTestGame(11));
-    const target = firsts(state, 1)[0]!;
+    const target = plains(state, 1)[0]!;
     gripe(state, target.id);
     pressDays(state, 15);
     respondToApproach(state, { stance: "own" });
@@ -321,7 +351,7 @@ describe("답한 것과 답하지 않은 것의 차이는 남는 압력이다", 
 describe("원인이 사라지면 식는다", () => {
   it("불만이 풀리면 압력이 빠지고, 계단은 남는다", () => {
     const state = quiet(createTestGame(11));
-    const target = firsts(state, 1)[0]!;
+    const target = plains(state, 1)[0]!;
     gripe(state, target.id);
     pressDays(state, 15);
     respondToApproach(state, { stance: "defend" });
@@ -338,7 +368,7 @@ describe("원인이 사라지면 식는다", () => {
 describe("찾아온 사람은 근황 줄에 다시 서지 않는다", () => {
   it("같은 선수를 두 자리가 함께 밀지 않는다", () => {
     const state = quiet(createTestGame(11));
-    const target = firsts(state, 1)[0]!;
+    const target = plains(state, 1)[0]!;
     target.state.form = -0.8; // 근황이 붙는 폼
     gripe(state, target.id);
     pressDays(state, 15);
@@ -373,7 +403,7 @@ describe("자리는 그 자리에 있던 사람에게만 닿는다", () => {
 
   it("갓 열린 회견이 있으면 아무도 오지 않는다 — 감독이 지나친 회견은 자리를 다투지 않는다", () => {
     const state = quiet(createTestGame(11));
-    const target = firsts(state, 1)[0]!;
+    const target = plains(state, 1)[0]!;
     gripe(state, target.id);
     pressDays(state, 14); // 압력 98 — 임계 한 칸 앞
 
@@ -438,7 +468,7 @@ function climbTo(state: GameState, subject: string, step: number): void {
 describe("계단 4·5 — 언론 유출과 이적 요청", () => {
   it("계단 3을 지나 임계 400을 채우면 자리가 아니라 유출이 선다", () => {
     const state = quiet(createTestGame(11));
-    const target = firsts(state, 1)[0]!;
+    const target = plains(state, 1)[0]!;
     gripe(state, target.id);
     climbTo(state, target.id, 3);
 
@@ -457,7 +487,7 @@ describe("계단 4·5 — 언론 유출과 이적 요청", () => {
 
   it("유출 뒤 임계 500을 채우면 에이전트가 이적 요청을 들고 온다", () => {
     const state = quiet(createTestGame(11));
-    const target = firsts(state, 1)[0]!;
+    const target = plains(state, 1)[0]!;
     gripe(state, target.id);
     climbTo(state, target.id, 3);
     pressDays(state, 58); // 유출 — 300이 남는다
@@ -475,7 +505,7 @@ describe("계단 4·5 — 언론 유출과 이적 요청", () => {
 
   it("요청이 서 있는 동안 압력은 더 쌓이지 않고, 불만이 풀리면 걷힌다", () => {
     const state = quiet(createTestGame(11));
-    const target = firsts(state, 1)[0]!;
+    const target = plains(state, 1)[0]!;
     gripe(state, target.id);
     climbTo(state, target.id, 3);
     pressDays(state, 58);

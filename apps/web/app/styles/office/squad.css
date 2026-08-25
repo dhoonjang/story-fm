@@ -1250,6 +1250,18 @@
   font-weight: 400;
   color: var(--gold);
 }
+/* 완장·서열 표식 — 이름 앞의 원문자 하나 (주장 Ⓒ · 부주장 Ⓥ · 리더 Ⓛ).
+   셋이 같은 크기·같은 자리에 서야 한 계열로 읽힌다. 완장은 금색이고 리더 그룹은
+   눈금이라 옅다 — 감독이 채운 자리와 코어가 낸 자리를 색이 가른다 */
+.armband {
+  margin-right: 0.2em;
+  color: var(--gold);
+  font-size: 0.82em;
+  font-style: normal;
+}
+.armband[title^="라커룸 리더"] {
+  color: var(--muted);
+}
 .shirt-no {
   display: inline-block;
   min-width: 1.35em;

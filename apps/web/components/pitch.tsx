@@ -107,7 +107,12 @@ type PitchChipProps = {
   code: string | null;
   squadNumber?: number | null;
   roleTag?: PitchRoleTag | null;
-  captain?: boolean;
+  /**
+   * 완장 — 주장·부주장이 같은 자리에 같은 크기로 선다 (people.md §5-1).
+   * 리더 그룹은 칩에 세우지 않는다: 열한 자리 중 다섯에 표식이 서면 그것은
+   * 표식이 아니라 배경이 된다. 서열은 명단 표가 낸다.
+   */
+  captain?: "captain" | "vice" | null;
   /** 이름 — 칩에 그대로 선다(안 들어가면 접힌다). 빈 자리는 `null` */
   name: string | null;
   /** 이 자리에서 내는 전력 */
@@ -162,7 +167,11 @@ export function PitchChip({
         )}
       </span>
       <span className="slot-name">
-        {captain && <b className="slot-cap">Ⓒ</b>}
+        {captain && (
+          <b className="slot-cap" title={captain === "captain" ? "주장" : "부주장"}>
+            {captain === "captain" ? "Ⓒ" : "Ⓥ"}
+          </b>
+        )}
         {name || "—"}
       </span>
       <span className="slot-meta">
