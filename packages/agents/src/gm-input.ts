@@ -4,6 +4,7 @@
  */
 import {
   awardLine,
+  boardExpectation,
   characterEntry,
   characterEntryOf,
   clockOf,
@@ -52,6 +53,7 @@ import {
 } from "@story-fm/engine";
 import {
   ageOf,
+  boardExpectationLine,
   describeManagerSkills,
   describeReputation,
   familiarityLabel,
@@ -646,6 +648,17 @@ export function buildGmStateNote(
         // 레퍼런스(감독 프로필)엔 이름·배경만 남는다
         `${state.manager.name}: ${describeManagerSkills(state.manager.attributes)}`,
         `평판: ${describeReputation(state.manager.reputation)}`,
+        /**
+         * 보드가 이번 시즌 이 구단에 건 기대 (career.md §5). 시즌에 한 번 바뀌는 값이지만
+         * 캐시 층에 두면 롤오버 한 번에 레퍼런스와 그 뒤 이력이 통째로 무효가 된다.
+         *
+         * 경고 수(`boardWarnings`)는 따라오지 않는다 — 압박을 세는 눈금은 `get_career`의
+         * 몫이고, 여기 필요한 것은 그 눈금이 무엇을 재는지다.
+         */
+        (() => {
+          const be = boardExpectation(state, state.userTeamId);
+          return boardExpectationLine(be.code, be.target);
+        })(),
         // 감독 자신의 계약 — 재계약 제안은 **답할 자리**라 스냅샷에 서야 한다 (career.md §5.4)
         managerContractLine(state),
       ),

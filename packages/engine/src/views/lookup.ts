@@ -10,6 +10,7 @@ import {
   YELLOWS_PER_SUSPENSION,
   ageOf,
   anchorOf,
+  boardExpectationLine,
   conditionLabel,
   describeReputation,
   familiarityLabel,
@@ -56,7 +57,7 @@ import { drawParts, drawTitle } from "../competition/draw-schedule";
 import { isClubTeam, teamCatalog } from "../data/team-catalog";
 import { leagueOfTeamIn, teamsOfLeagueIn } from "../competition/promotion";
 import { tierOfTeamIn } from "../core/club-tier";
-import { achievementLine, computeStandings } from "../competition/season";
+import { achievementLine, boardExpectation, computeStandings } from "../competition/season";
 import { openManagerOffers, USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
 import {
   attributeLine,
@@ -1384,6 +1385,11 @@ export function careerView(state: GameState): LookupResult {
       ]
     : [
         `[커리어] ${m.name} — ${teamNameIn(state, state.userTeamId)} 재임 · ${seasonLabel(state)}`,
+        // 경고 수와 진행 순위가 겨루는 상대다 — 기대를 모르면 아래 두 줄은 숫자일 뿐이다
+        (() => {
+          const e = boardExpectation(state, state.userTeamId);
+          return boardExpectationLine(e.code, e.target);
+        })(),
         ...(m.contract
           ? [
               `계약: 연봉 ${formatMoney(m.contract.salary)} · ${m.contract.until}까지` +
