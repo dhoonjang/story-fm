@@ -1795,6 +1795,20 @@ export const PlayerStateSchema = z.object({
    * 옛 세이브엔 없다 — 없으면 요청한 적 없는 것으로 읽고 버전을 올리지 않는다.
    */
   transferRequestedOn: DateString.optional(),
+  /**
+   * **주 포지션 묶음 밖 선발이 이어진 경기 수** — 자리 밖 기용 불만의 유일한 원본
+   * (people.md §5).
+   *
+   * 원장은 누가 뛰었는지(`homeLineup`)만 알고 **어느 자리에 섰는지**는 모른다. 경기가
+   * 끝나면 그 배치는 사라지므로 연속을 파생할 표가 없다 — 강등의 `demotedOn`과 같은
+   * 이유로 저장한다.
+   *
+   * 제자리에 서거나 선발에서 빠지면 0으로 돌아간다. 날이 아니라 경기로 세는 이유는
+   * 그것이 선수가 실제로 겪는 단위여서다.
+   *
+   * 옛 세이브엔 없다 — 없으면 0으로 읽고 버전을 올리지 않는다.
+   */
+  outOfPositionRun: z.number().int().min(0).optional(),
 });
 export type PlayerState = z.infer<typeof PlayerStateSchema>;
 

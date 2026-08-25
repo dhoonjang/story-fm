@@ -378,8 +378,11 @@ export function buildTransferPress(
  * 우리 스쿼드에서 그보다 나은 선수가 몇인가 — **명단 순위가 아니라 스쿼드 대비다.**
  * 나간 선수는 이미 우리 명단에 없으므로 "상위 14명 안"으로 물으면 떠난 순간
  * 아무도 핵심이 아니다 (people.md §4).
+ *
+ * 회견이 열릴 자격(§4)과 라커룸 불만이 걸릴 자격(§5 — 등재·계약)이 **같은 자를
+ * 쓴다.** 둘이 갈리면 회견은 열리는데 불만은 안 서는 선수가 생긴다.
  */
-function betterThanInSquad(state: GameState, player: GamePlayer): number {
+export function betterThanInSquad(state: GameState, player: GamePlayer): number {
   return playersOf(state, state.userTeamId).filter(
     (p) => p.id !== player.id && p.attributes.overall > player.attributes.overall,
   ).length;

@@ -840,6 +840,14 @@ export const PLAYER_ISSUE_REASONS = [
   "early-return",
   /** 2군에 내려간 채 방치된 기간 — 기간은 `PlayerState.demotedOn`이 갖는다 */
   "demotion",
+  /** 이적 리스트에 올린 채 방치된 기간 — 기간은 `TransferListing.listedOn`이 갖는다 */
+  "listed",
+  /** 시장가 이상 오퍼를 감독이 거절했다 — 날이 아니라 한 번의 결정이 세운다 */
+  "blocked-move",
+  /** 만료가 다가오는데 열린 재계약이 없다 — 남은 일수는 `Contract.until`이 갖는다 */
+  "contract",
+  /** 주 포지션 묶음 밖 선발이 이어진다 — 연속 경기는 `PlayerState.outOfPositionRun` */
+  "out-of-position",
 ] as const;
 export type PlayerIssueReason = (typeof PLAYER_ISSUE_REASONS)[number];
 
@@ -847,7 +855,7 @@ export const PlayerIssueSchema = z.object({
   gamePlayerId: z.string().min(1),
   kind: z.enum(["unhappy"]),
   reason: z.enum(PLAYER_ISSUE_REASONS).optional(),
-  /** 사유에 딸린 수치 — `losing-run`이면 연패 수. 그 밖엔 없다 */
+  /** 사유에 딸린 수치 — `losing-run`이면 연패 수, `out-of-position`이면 연속 경기 수 */
   count: z.number().int().min(1).optional(),
   /** 옛 세이브가 들고 있는 사유 문장 — 더는 쓰지 않는다 (`reason`의 폴백) */
   note: z.string().optional(),

@@ -173,8 +173,14 @@ export function marketValueOf(state: GameState, player: GamePlayer): number {
  */
 const WAGE_BASE_RATING = 38.5;
 
-/** 등급 → 기대 주급 (£/주) — 이적·재계약이 같은 곡선을 읽는다 */
-function wageByRating(overall: number): number {
+/**
+ * 등급 → 기대 주급 (£/주) — 이적·재계약이 같은 곡선을 읽는다.
+ *
+ * "주급 서열대로 받고 있는가"를 묻는 자리(`core/tick.ts`의 계약 만료 문턱)도 이
+ * 곡선을 읽는다 — 서열을 다른 자로 재면 화면이 "밀려 있다"고 적어 놓고 불만은
+ * 반년 뒤에 선다.
+ */
+export function wageByRating(overall: number): number {
   return Math.pow(Math.max(WAGE_BASE_RATING, overall) / WAGE_BASE_RATING, 4.2) * 6_000;
 }
 
