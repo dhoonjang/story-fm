@@ -416,10 +416,17 @@ export function moodFactsOf(
      * 두 달째 90분을 못 뛴 선수가 있다 — 그 사실을 말하는 카드가 여기다.
      * "굳음"은 언제나 내고(감독이 손을 써야 하는 자리다), "무딤"은 달리 할 말이
      * 없을 때만 낸다 — 시즌 중 스쿼드 절반이 그 등급이라 늘 내면 소음이 된다.
+     *
+     * ⚠️ **개막 전에는 내지 않는다** — `no-minutes`와 같은 이유이자 같은 문이다.
+     * 시즌이 열릴 때 선수단 전원이 프리시즌 값에서 출발하므로(player.md §5.4),
+     * 7월의 라커룸은 스물다섯 명이 통째로 "몸이 굳었다"가 된다. 남들과 다를 때만
+     * 그 선수의 사실이다.
      */
-    const band = sharpnessBand(sharpnessOf(player.state));
-    if (band === "blunt") facts.push({ cause: "sharpness", band });
-    else if (band === "rusty" && facts.length === 0) facts.push({ cause: "sharpness", band });
+    if (state.date >= state.calendar.start) {
+      const band = sharpnessBand(sharpnessOf(player.state));
+      if (band === "blunt") facts.push({ cause: "sharpness", band });
+      else if (band === "rusty" && facts.length === 0) facts.push({ cause: "sharpness", band });
+    }
 
     /**
      * ── 몸 ── **문턱을 넘었다는 사실만 낸다.**
@@ -661,8 +668,13 @@ export function buildMoodBrief(state: GameState, from: string, to: string): Mood
     /**
      * 굳은 몸은 그 자체로 할 말이 있는 사실이다 — 장기 부상에서 막 돌아왔거나
      * 몇 주째 명단 밖이라는 뜻이고, 둘 다 선수가 먼저 꺼낼 이야기다 (player.md §5.4).
+     * **개막 전에는 세지 않는다** — 위 `moodFactsOf`와 같은 문이다: 7월엔 선수단
+     * 전원이 프리시즌 값이라 이 무게가 라커룸 전체를 결산 대상으로 만든다.
      */
-    if (sharpnessBand(sharpnessOf(player.state)) === "blunt") {
+    if (
+      state.date >= state.calendar.start &&
+      sharpnessBand(sharpnessOf(player.state)) === "blunt"
+    ) {
       facts.push("경기 감각 굳음");
       weight += 2;
     }
