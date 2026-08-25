@@ -627,6 +627,8 @@ function statLine(t: MatchPlayer["tally"]): string {
     t.xg > 0 ? `xG ${t.xg.toFixed(2)}` : null,
     t.scoringExpectation > 0 ? `기대득점 ${t.scoringExpectation.toFixed(2)}` : null,
     t.saves > 0 ? `선방 ${t.saves}` : null,
+    t.corners > 0 ? `코너 ${t.corners}` : null,
+    t.fouls > 0 ? `파울 ${t.fouls}` : null,
     `패스 ${t.passes}`,
     `전진 ${t.progressive}`,
   ]
@@ -663,6 +665,12 @@ function TeamTotals({ totals }: { totals: MatchTotals }) {
       </span>
       <span>
         선방 <b>{totals.saves}</b>
+      </span>
+      <span title="죽은 공에서 나온 기회 — 코너는 지정한 키커가 찬다">
+        코너 <b>{totals.corners}</b>
+      </span>
+      <span>
+        파울 <b>{totals.fouls}</b>
       </span>
     </div>
   );
