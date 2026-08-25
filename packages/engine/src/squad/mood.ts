@@ -1,8 +1,21 @@
-import { ageOf, isRelease, issueReasonKo, MOOD_NOTE_MAX } from "@story-fm/domain";
-import type { GamePlayer, MatchRecord, PlayerIssueReason } from "@story-fm/domain";
+import {
+  ageOf,
+  isRelease,
+  issueReasonKo,
+  MOOD_NOTE_MAX,
+  PLAYER_ARCHETYPE_LABEL,
+} from "@story-fm/domain";
+import type {
+  GamePlayer,
+  MatchRecord,
+  PlayerArchetypeKey,
+  PlayerIssueReason,
+} from "@story-fm/domain";
 import { diffDays } from "../competition/calendar";
 import { formLabel, RATING_BASELINE, type FormLabel } from "./form";
 import { settlingOf } from "./settling";
+import { playerArchetypeOf } from "../world/player-persona";
+import { demotionPatienceDaysOf } from "./demotion";
 import {
   activeContract,
   activeSuspension,
@@ -72,9 +85,21 @@ export type MoodFact =
       note: string | null;
       days: number;
       count: number | null;
+      /**
+       * 이 불만이 **그 사람의 것**임을 남긴다 — 계수가 읽힌 자리의 코드다
+       * (people.md §6). 인물 카드의 `원형:` 줄과 같은 표의 같은 행이라 모델이 둘을
+       * 잇는다. ⚠️ 문장이 아니라 코드다 — 라벨은 화면·GM이 붙인다.
+       */
+      archetype: PlayerArchetypeKey;
     }
   /** 감독이 2군으로 내린 선수만 — 시드가 2군에 세워 둔 선수에겐 서지 않는다 */
-  | { cause: "demotion"; days: number }
+  | {
+      cause: "demotion";
+      days: number;
+      archetype: PlayerArchetypeKey;
+      /** **그 사람의 문턱** — 이 날을 넘기면 불만이 선다 (`demotionPatienceDaysOf`) */
+      patienceDays: number;
+    }
   | { cause: "settling"; percent: number; matches: number }
   | {
       cause: "afterglow";
@@ -181,8 +206,8 @@ function afterglow(last: LastMatch): MoodFact {
 }
 
 /** 라커룸 불만의 사유 코드 — 옛 세이브는 문장을 들고 있어 그것이 폴백이다 */
-function grievanceOf(state: GameState, playerId: string): MoodFact | null {
-  const issue = state.issues.find((i) => i.gamePlayerId === playerId);
+function grievanceOf(state: GameState, player: GamePlayer): MoodFact | null {
+  const issue = state.issues.find((i) => i.gamePlayerId === player.id);
   if (!issue) return null;
   return {
     cause: "grievance",
@@ -190,6 +215,7 @@ function grievanceOf(state: GameState, playerId: string): MoodFact | null {
     note: issue.note ?? null,
     days: Math.max(0, diffDays(issue.since, state.date)),
     count: issue.count ?? null,
+    archetype: playerArchetypeOf(state.seed, player),
   };
 }
 
@@ -245,7 +271,7 @@ export function moodFactsOf(
 
   const injury = openInjury(state, player.id);
   const suspension = activeSuspension(state, player.id);
-  const grievance = grievanceOf(state, player.id);
+  const grievance = grievanceOf(state, player);
   const assignment = assignmentFor(state, player.id);
   const stat = seasonStatOf(state, player.id);
   const contract = activeContract(state, player.id);
@@ -276,7 +302,12 @@ export function moodFactsOf(
       facts.push(grievance);
     } else if (demotionDays !== null) {
       // 출전 기회(`no-minutes`)보다 앞에 선다 — 강등이 곧 못 뛰는 이유다
-      facts.push({ cause: "demotion", days: demotionDays });
+      facts.push({
+        cause: "demotion",
+        days: demotionDays,
+        archetype: playerArchetypeOf(state.seed, player),
+        patienceDays: demotionPatienceDaysOf(state, player),
+      });
     } else if (settling && !settling.done) {
       // 남은 날짜를 내지 않는다 — 얼마나 걸릴지는 감독이 앞으로 뭘 하느냐에 달렸다
       facts.push({
@@ -404,9 +435,15 @@ function factLine(fact: MoodFact): string {
     case "suspension":
       return `출장 정지 ${fact.matchesLeft}경기`;
     case "grievance":
-      return `불만 ${issueReasonText(fact) ?? "사유 없음"} · ${fact.days}일째`;
+      return (
+        `불만 ${issueReasonText(fact) ?? "사유 없음"} · ${fact.days}일째` +
+        ` · ${PLAYER_ARCHETYPE_LABEL[fact.archetype]}`
+      );
     case "demotion":
-      return `2군 ${fact.days}일째`;
+      return (
+        `2군 ${fact.days}일째 (문턱 ${fact.patienceDays}일)` +
+        ` · ${PLAYER_ARCHETYPE_LABEL[fact.archetype]}`
+      );
     case "settling":
       return `새 팀 정착 ${fact.percent}% · 출전 ${fact.matches}경기`;
     case "afterglow":
