@@ -83,6 +83,7 @@ import { drawParts, drawTitle } from "../competition/draw-schedule";
 import { euroCompetitionOf } from "../competition/europe";
 import { foldCareer, type CareerTotals } from "../squad/career";
 import { formAngle, formLabel, formTone } from "../squad/form";
+import { leaderGroupOf } from "../squad/hierarchy";
 import { ratingTone, type RatingTone } from "../match/ratings";
 import { GAP_CONDITION, edgeOf, subLimitsOf, zoneGrid } from "@story-fm/sim";
 import { moodOf, type MoodRead } from "../squad/mood";
@@ -542,6 +543,13 @@ interface SquadViewRowMeta {
   adaptation: number;
   instruction: string | null;
   isCaptain: boolean;
+  isViceCaptain: boolean;
+  /**
+   * 라커룸 서열 — 리더 그룹 안의 순위(1부터), 그룹 밖이면 `null`
+   * (→ docs/data/people.md §5-1). 화면과 조회 도구가 **같은 값**을 읽어야 해서
+   * 여기 하나에서만 파생한다.
+   */
+  leaderRank: number | null;
   seasonGoals: number;
   seasonApps: number;
   seasonAssists: number;
@@ -2218,6 +2226,15 @@ export function buildOfficeViews(state: GameState): OfficeViews {
    * 스쿼드 선수로 좁혀 담는다 — 원장에는 리그 전체의 행이 있고 여기서 쓰는 것은
    * 우리 명단뿐이다.
    */
+  /**
+   * 라커룸 서열 — **한 번만 파생한다** (people.md §5-1). 행마다 부르면 마흔 몇 명이
+   * 각자 원장을 훑는다.
+   */
+  const leaderRank = new Map<string, number>();
+  leaderGroupOf(state, state.userTeamId).forEach((row, index) => {
+    leaderRank.set(row.playerId, index + 1);
+  });
+
   const squadIds = new Set(squad.map((p) => p.id));
   const statsOfPlayer = new Map<string, SeasonStat[]>();
   for (const stat of state.seasonStats) {
@@ -2399,6 +2416,8 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         ),
         instruction: assignment?.instruction ?? null,
         isCaptain: p.isCaptain,
+        isViceCaptain: p.isViceCaptain === true,
+        leaderRank: leaderRank.get(p.id) ?? null,
         seasonGoals: stat?.goals ?? 0,
         seasonApps: stat?.apps ?? 0,
         seasonAssists: stat?.assists ?? 0,

@@ -978,7 +978,7 @@ function computeMockGmTurn(
   if (/주장/u.test(msg)) {
     const target = detectPlayer(state, msg);
     if (target) {
-      const result = setCaptain(state, target.id);
+      const result = setCaptain(state, { playerId: target.id });
       recordCall(calls, "set_captain", result, { input: { playerId: target.id } });
       return { text: `${coach(state)} ${result.message}`, toolCalls: calls };
     }

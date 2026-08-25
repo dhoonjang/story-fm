@@ -70,6 +70,7 @@ import {
   FIRST_TEAM_LIMIT,
   MATCHDAY_BENCH,
   MATCHDAY_SQUAD,
+  ageOf,
   bestOverall,
   canRegister,
   isUnder21,
@@ -81,6 +82,7 @@ import {
   positionProficiency,
   weightSlotOf,
   roleFit,
+  standingScore,
 } from "@story-fm/domain";
 import { profFactor, type MatchLedgerState } from "@story-fm/sim";
 import type { AiDeal } from "../market/ai-market";
@@ -2440,11 +2442,24 @@ export function createGame(input: CreateGameInput): GameState {
       };
     });
 
-  // 주장 — 유저 팀은 선발 중 최고 OVR 필드 플레이어
+  /**
+   * 주장 — **서열 최상위** (people.md §5-1). 개막 전에는 출전도 재적도 0이라
+   * 리더십과 나이가 그 자리를 정한다. OVR로 세우던 자리였는데, 그러면 리더십 20인
+   * 최고 선수가 완장을 차고 감독이 첫 팀토크부터 가장 나쁜 라커룸 계수를 받는다.
+   * 골키퍼를 거르지 않는다 — 누가 라커룸을 이끄는가는 포지션이 아니라 리더십이 답한다.
+   */
   const userSquad = players.filter((p) => p.teamId === input.userTeamId);
   const captain = [...userSquad]
-    .filter((p) => groupOf(p) !== "GK")
-    .sort((a, b) => b.attributes.overall - a.attributes.overall)[0];
+    .map((p) => ({
+      player: p,
+      standing: standingScore({
+        leadership: p.attributes.leadership,
+        age: ageOf(p.birthdate, calendar.preseasonStart),
+        apps: 0,
+        seasons: 0,
+      }),
+    }))
+    .sort((a, b) => b.standing - a.standing || (a.player.id < b.player.id ? -1 : 1))[0]?.player;
   if (captain) captain.isCaptain = true;
 
   // 재정 + 계약(주급의 원본) — 무소속은 장부를 갖지 않는다 (team.md §4)

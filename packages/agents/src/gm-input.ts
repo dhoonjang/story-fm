@@ -645,7 +645,10 @@ export function buildGmStateNote(
           const named = (level: "first" | "reserve") =>
             players
               .filter((p) => squadLevelOf(p) === level)
-              .map((p) => `${p.name}${p.isCaptain ? "(주장)" : ""}`);
+              .map(
+                (p) =>
+                  `${p.name}${p.isCaptain ? "(주장)" : p.isViceCaptain === true ? "(부주장)" : ""}`,
+              );
           const first = named("first");
           const reserve = named("reserve");
           return lines(

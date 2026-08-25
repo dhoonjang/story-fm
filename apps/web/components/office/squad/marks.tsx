@@ -69,6 +69,30 @@ export function ovrTitle(p: SquadRow): string | undefined {
 }
 
 /**
+ * 완장과 서열 — **한 글자로, 같은 모양의 세 자리** (docs/data/people.md §5-1).
+ *
+ * 주장만 표식을 달던 자리다. 서열이 팀토크의 폭과 불만의 속도를 정하는데 화면에
+ * 완장 하나만 서면, 감독은 그 판정이 어디서 나왔는지를 볼 자리가 없다.
+ * 셋을 같은 글꼴·같은 크기의 원문자로 두어 **한 계열로 읽히게** 한다 — 서로 다른
+ * 모양을 주면 세 표식이 각자 다른 뜻의 배지로 보인다.
+ */
+export function Armband({ row }: { row: SquadRow }) {
+  const seat = row.isCaptain
+    ? { mark: "Ⓒ", label: "주장" }
+    : row.isViceCaptain
+      ? { mark: "Ⓥ", label: "부주장" }
+      : row.leaderRank !== null
+        ? { mark: "Ⓛ", label: "라커룸 리더" }
+        : null;
+  if (!seat) return null;
+  return (
+    <i className="armband" title={`${seat.label} · 라커룸 서열 ${row.leaderRank ?? "-"}위`}>
+      {seat.mark}
+    </i>
+  );
+}
+
+/**
  * 적응도 게이지 — **숫자가 아니라 채워진 원**.
  *
  * 적응도는 정확한 값을 읽을 일이 거의 없다. 감독이 알고 싶은 건 "이 자리를 아는

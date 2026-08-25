@@ -5,6 +5,7 @@ import { isClubTeam, leagueOfTeam } from "../data/team-catalog";
 import { formatMoney, recordFinance, settleDuePayments } from "../club/finance";
 import { buildDeparturePress, openPress } from "../club/press";
 import { clampForm, moraleToForm } from "../squad/form";
+import { leaderWeightOf } from "../squad/hierarchy";
 import {
   firstInstallmentOf,
   loanLockOf,
@@ -48,9 +49,20 @@ import {
 
 /**
  * 핵심 자원이 떠났을 때 남은 1군이 잃는 사기 — 폼으로는 닷새치 회귀에 해당한다.
- * 흔적이지 처벌이 아니다 (transfer.md §2).
+ * 흔적이지 처벌이 아니다 (transfer.md §2). **리더 배수가 곱해진 값이 실제 폭이다.**
  */
 export const DEPARTURE_SQUAD_MORALE = -3;
+
+/**
+ * 그 사람이 나갔을 때 라커룸이 잃는 사기 — 주장 −6 · 부주장 −5 · 리더 그룹 −4 ·
+ * 나머지 −3 (people.md §5-1). 라커룸을 이끌던 사람이 나가는 것과 백업이 나가는
+ * 것이 같은 값이면, 누구를 정리할지가 장부에서 갈리지 않는다.
+ *
+ * ⚠️ **선수가 무소속이 되기 전에 읽어야 한다** — 완장은 떠나는 문에서 벗겨진다.
+ */
+export function departureSquadMorale(state: GameState, player: GamePlayer): number {
+  return -Math.round(-DEPARTURE_SQUAD_MORALE * leaderWeightOf(state, player));
+}
 
 /** 무소속 — 클럽이 아니라 클럽이 없는 상태 (team-catalog `freeagents`) */
 export const FREE_AGENT_TEAM = "freeagents";
@@ -81,6 +93,7 @@ export function clearDepartedState(state: GameState, player: GamePlayer, from: s
   player.state.transferRequestedOn = undefined;
   forgetRoles(state, player.id);
   player.isCaptain = false;
+  player.isViceCaptain = undefined;
 }
 
 /**
@@ -167,6 +180,8 @@ export function releasePlayer(
   }
 
   const wasCaptain = player.isCaptain;
+  // 완장을 벗기기 전에 읽는다 — 떠나는 문이 곧 그 사람의 자리를 지운다
+  const squadMorale = departureSquadMorale(state, player);
   const transferId = toFreeAgency(state, player, agreed ? "release-agreed" : "release-unilateral");
   if (severance > 0) {
     if (paymentYears !== undefined) {
@@ -202,7 +217,7 @@ export function releasePlayer(
     openPress(state, press);
     // 남은 1군만 — 떠난 당사자는 이미 무소속이라 자연히 빠진다
     for (const mate of firstTeamPlayers(state, state.userTeamId)) {
-      mate.state.form = clampForm(mate.state.form + moraleToForm(DEPARTURE_SQUAD_MORALE));
+      mate.state.form = clampForm(mate.state.form + moraleToForm(squadMorale));
     }
   }
 
@@ -225,8 +240,8 @@ export function releasePlayer(
           ? [
               item({
                 label: "1군 사기",
-                text: signed(DEPARTURE_SQUAD_MORALE),
-                delta: DEPARTURE_SQUAD_MORALE,
+                text: signed(squadMorale),
+                delta: squadMorale,
               }),
             ]
           : []),
@@ -239,7 +254,7 @@ export function releasePlayer(
         : ` (${paymentYears}년 분할 — 첫 회분 ${formatMoney(dueNow)}).`) +
       " 무소속이 됐습니다 — 다른 구단이 데려갈 수 있습니다." +
       (wasCaptain ? " 주장이 떠났습니다 — 새 주장을 지명하세요." : "") +
-      (press ? ` 기자회견이 열렸습니다. 남은 1군 사기 ${DEPARTURE_SQUAD_MORALE}.` : ""),
+      (press ? ` 기자회견이 열렸습니다. 남은 1군 사기 ${squadMorale}.` : ""),
   };
 }
 

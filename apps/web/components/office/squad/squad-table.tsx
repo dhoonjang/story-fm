@@ -3,7 +3,7 @@
 import { Fragment, useMemo } from "react";
 import { ConditionBar } from "@/components/condition-bar";
 import { moodSentence } from "@/lib/mood";
-import { FitGauge, FormArrow, Margin, StatusBadges, ovrTitle } from "./marks";
+import { Armband, FitGauge, FormArrow, Margin, StatusBadges, ovrTitle } from "./marks";
 import { TIER_SLUG, type SquadRow, type Tier } from "./types";
 
 /**
@@ -222,7 +222,7 @@ export function SquadTable({
                       {p.squadNumber}
                     </i>
                   )}
-                  {p.isCaptain ? "Ⓒ " : ""}
+                  <Armband row={p} />
                   {p.name}
                 </span>
                 {/* 국적 — **표식이 아니라 사실**이라 알약이 아니다. 등록 표식(HG·U21)과

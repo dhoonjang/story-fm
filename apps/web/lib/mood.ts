@@ -153,8 +153,13 @@ function sentenceOf(fact: MoodFact): string {
       return `${dayWord(fact.days)} ${fact.name} 계약 해지 소식에 라커룸이 뒤숭숭하다`;
     case "contract-ending":
       return "계약이 반년 안에 끝난다";
-    case "captain":
-      return "주장으로 라커룸을 이끈다";
+    case "leader":
+      // 완장 둘과 리더 그룹 — 서열은 감독이 채운 완장과 코어가 낸 순위 둘 다에서 온다
+      return fact.role === "captain"
+        ? "주장으로 라커룸을 이끈다"
+        : fact.role === "vice"
+          ? "부주장으로 주장 옆에 선다"
+          : "라커룸에서 목소리가 서는 축이다";
     case "young":
       return "아직 어리고 배울 게 많다";
     case "steady":

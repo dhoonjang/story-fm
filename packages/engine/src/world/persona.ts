@@ -1,5 +1,6 @@
 import {
   CAPTAIN_ROLE_LABEL,
+  LEADER_ROLE_LABEL,
   CharacterMemorySchema,
   HEAD_COACH_ROLE_LABEL,
   normalizeSpeaker,
@@ -596,6 +597,7 @@ interface SpeakerSource {
     name: string;
     teamId: string;
     isCaptain?: boolean;
+    isViceCaptain?: boolean;
     /** 이름난 현역 판정용 — 없으면(축약 픽스처) 이름난 현역으로 서지 않는다 */
     attributes?: { overall: number };
   }>;
@@ -688,11 +690,17 @@ function collectSpeakers(state: SpeakerSource): Map<string, SpeakerRole | null> 
     });
   }
 
-  // 우리 선수단 — 주장만 직책을 글자로 얻고, 나머지는 아이콘으로만 선다
+  /**
+   * 우리 선수단 — **완장만 직책을 글자로 얻고**, 나머지는 아이콘으로만 선다.
+   * 부주장도 같은 아이콘을 쓴다: 그림이 가리키는 것은 완장이고, 둘 중 어느
+   * 자리인지는 글자가 말한다 (people.md §5-1).
+   */
   const squad = (state.players ?? []).filter((p) => p.teamId === state.userTeamId);
   for (const player of squad) {
     if (player.isCaptain === true) put(player.name, { kind: "captain", label: CAPTAIN_ROLE_LABEL });
-    else put(player.name, { kind: "player" });
+    else if (player.isViceCaptain === true) {
+      put(player.name, { kind: "captain", label: LEADER_ROLE_LABEL.vice });
+    } else put(player.name, { kind: "player" });
   }
 
   // 협상 테이블의 상대 선수 — 남의 팀이지만 지금 대화에 앉아 있다.
