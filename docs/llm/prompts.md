@@ -107,7 +107,7 @@
 | 경기      | 1   | `substitute`                                                                                                                                                                                                             |
 | 이적      | 12  | `deal_odds` · `list_negotiations` · `send_offer` · `respond_offer` · `accept_deal` · `open_renewal` · `open_release` · `set_transfer_list` · `withdraw_offer` · `release_player` · `recall_loan` · `exercise_buyback`    |
 | 재정      | 6   | `apply_finance_event` · `adjust_transfer_budget` · `request_board` · `set_ticket_price` · `fund_transfer_budget` · `pay_player_bonus`                                                                                    |
-| 조회      | 7   | `search_players` · `get_squad` · `get_team` · `get_league` · `get_career` · `get_finance` · `scout_player`                                                                                                               |
+| 조회      | 8   | `search_players` · `get_squad` · `get_team` · `get_league` · `get_match_report` · `get_career` · `get_finance` · `scout_player`                                                                                          |
 
 ### 계약은 넷으로 갈린다
 
