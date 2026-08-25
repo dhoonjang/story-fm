@@ -30,6 +30,7 @@ import {
   LOAN_FEE_RATE,
   marketValueOf,
   matchReport,
+  opponentReport,
   NARRATIVE_EXPENSE_CATEGORIES,
   NARRATIVE_FINANCE_MAX_AMOUNT,
   NARRATIVE_FINANCE_MIN_AMOUNT,
@@ -815,6 +816,19 @@ export function buildGmTools(
         })
         .partial(),
       (input) => matchReport(state, input),
+    ),
+    read(
+      "get_opponent_report",
+      descriptions.get_opponent_report,
+      z
+        .object({
+          matchId: z.string().min(1),
+          opponent: z.string().min(1),
+          competition: z.string().min(1),
+          date: dateArg,
+        })
+        .partial(),
+      (input) => opponentReport(state, input),
     ),
     wrap("scout_player", descriptions.scout_player, z.object({ playerId: playerRef }), (input) =>
       scoutPlayer(state, input.playerId),
