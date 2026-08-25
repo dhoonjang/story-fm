@@ -1608,6 +1608,11 @@
 .squad-table tbody tr.t-reserve td:first-child {
   border-left-color: rgba(148, 163, 184, 0.18);
 }
+/* 임대 — 우리 계약이지만 **여기 없는 사람**이라 판의 색(선발·벤치)과 다른 계열이다.
+   승격·강등으로 오갈 수 있는 2군의 회색과도 갈려야 한다: 이 행에는 손잡이가 없다 */
+.squad-table tbody tr.t-loan td:first-child {
+  border-left-color: rgba(251, 191, 36, 0.45);
+}
 /* 이름 칸 — 교체 화살표 자리와 상태 배지를 함께 안는다 */
 /**
  * 이름 칸 — **td에 `display: flex`를 주지 않는다.** 주면 표가 셀을 익명 래퍼로
