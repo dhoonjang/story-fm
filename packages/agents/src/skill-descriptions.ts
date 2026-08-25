@@ -416,6 +416,17 @@ export const SKILL_CATALOG = [
       "우리 선수를 이적 리스트에 올리거나 뺀다 — 감독이 '이 선수는 팔겠다'고 할 때 여기로 온다. askingPrice(호가)를 생략하면 코어의 요구가를 쓴다. 등재하면 그 선수를 노리는 오퍼가 들어오기 시작하고, 비싸게 부를수록 더디 붙는다.",
   },
   {
+    name: "respond_transfer_request",
+    label: "이적 요청 응답",
+    group: "이적",
+    readOnly: false,
+    description:
+      "선수가 낸 이적 요청에 답한다 — 요청이 서 있는 선수에게만 부른다. 감독이 먼저 팔기로 한 것은 set_transfer_list다. " +
+      "accept는 그 선수를 이적 리스트에 올리는 것이고 값을 포기하는 결정이다 — askingPrice를 높이 불러도 코어가 요청 할인선까지 끌어내린다. " +
+      "refuse는 요청을 걷지 못한다 — 불만은 남고, 라커룸과 보드가 그 자리에서 움직이며, 거부한 사실은 다음 회견에 실린다. " +
+      "감독이 답을 정하지 않았으면 부르지 말고 먼저 물어라. note에 감독이 밝힌 한 줄을 남긴다.",
+  },
+  {
     name: "withdraw_offer",
     label: "협상 철회",
     group: "이적",

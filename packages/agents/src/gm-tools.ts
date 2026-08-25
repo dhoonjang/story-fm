@@ -53,6 +53,7 @@ import {
   setTicketPrice,
   respondToApproach,
   respondToMedia,
+  respondTransferRequest,
   scheduleView,
   scoutPlayer,
   searchPlayers,
@@ -1055,6 +1056,21 @@ export function buildGmTools(
         note: z.string().min(1).max(160).optional().describe("감독이 밝힌 매각 사유 한 줄"),
       }),
       (input) => setTransferList(state, input),
+    ),
+    wrap(
+      "respond_transfer_request",
+      descriptions.respond_transfer_request,
+      z.object({
+        playerId: playerRef,
+        answer: z
+          .enum(["accept", "refuse"])
+          .describe("accept=요청을 받아들여 이적 리스트에 올린다, refuse=붙잡는다"),
+        askingPrice: money(MONEY_MAX)
+          .optional()
+          .describe("수락할 때의 호가 — 생략하면 코어가 정한다. 요청 할인선 위로는 서지 못한다"),
+        note: z.string().min(1).max(160).optional().describe("감독이 밝힌 한 줄"),
+      }),
+      (input) => respondTransferRequest(state, input),
     ),
     wrap(
       "release_player",
