@@ -1018,15 +1018,16 @@ describe("감독 경기 마감의 대칭 (match.md §6)", () => {
     standAt99(theirScorer, oppTeamId);
 
     /** 양쪽에 세 골씩, 전반 안에 — 해트트릭도 같은 자리에서 갈린다 */
+    const goal = (minute: number, team: "home" | "away", scorer: string) => ({
+      minute,
+      type: "goal" as const,
+      team,
+      actors: [scorer],
+      causes: [],
+    });
     const goals = [10, 20, 30].flatMap((minute) => [
-      { minute, type: "goal" as const, team: mySide, actors: [ours], causes: [] },
-      {
-        minute: minute + 2,
-        type: "goal" as const,
-        team: oppSide,
-        actors: [theirScorer],
-        causes: [],
-      },
+      goal(minute, mySide, ours),
+      goal(minute + 2, oppSide, theirScorer),
     ]);
     expect(applyMatchEvents(state, goals).ok).toBe(true);
 
