@@ -939,6 +939,12 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
       awayLineup: onPitch.away.map((p) => p.id),
       homeOnPitch: finished("home"),
       awayOnPitch: finished("away"),
+      /**
+       * 점유는 **결과에 남는다** — 간이 시뮬이 구간마다 가중해 이미 내놓은 값이고
+       * (바로 아래 체력 정산이 그 값을 읽는다) 여기서 버리면 우리 경기에만 있는
+       * 칸이 된다. 사건·선수별 기록과 달리 장부 없이도 나오는 값이다 (match.md §4).
+       */
+      possession,
     };
     // 출전·득점·도움·평점 — AI 팀도 시즌 스탯을 쌓아야 득점왕·평점 비교가 성립한다.
     // 경기별 평점은 남기지 않는다(장부가 없다) — 시즌 합계만 누적한다
@@ -1130,7 +1136,7 @@ export function simulateReserveMatch(state: GameState, match: MatchRecord, diges
     state.seed,
     `${state.season}:${match.competitionId}:${match.stage ?? "league"}:${match.round}:${match.homeTeamId}-${match.awayTeamId}`,
   );
-  // 벤치가 없어 교체가 없고, 카드·부상·점유율은 정산하지 않는다 — 결과만 남긴다
+  // 벤치가 없어 교체가 없고, 카드·부상은 정산하지 않는다 — 결과만 남긴다
   match.result = {
     homeGoals: result.homeGoals,
     awayGoals: result.awayGoals,
@@ -1148,6 +1154,7 @@ export function simulateReserveMatch(state: GameState, match: MatchRecord, diges
     awayLineup: squads.away.starters.map((p) => p.id),
     homeOnPitch: squads.home.starters.map((p) => p.id),
     awayOnPitch: squads.away.starters.map((p) => p.id),
+    possession: result.possession,
   };
   for (const side of ["home", "away"] as const) {
     const teamId = side === "home" ? match.homeTeamId : match.awayTeamId;
