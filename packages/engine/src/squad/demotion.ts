@@ -12,16 +12,34 @@ import { archetypeTraitsOf } from "../world/player-persona";
 export const DEMOTION_PATIENCE_DAYS = 21;
 
 /**
+ * **이적 리스트에 올린 채 둘 수 있는 기간** — 강등보다 짧다 (→ docs/data/people.md §5).
+ *
+ * 등재는 감독이 값을 부르며 시장에 내놓은 **공개된 결정**이라, 2군행처럼 되돌릴
+ * 여지를 두고 지켜볼 일이 아니다.
+ */
+export const LISTED_PATIENCE_DAYS = 14;
+
+/**
  * **그 사람의 문턱** — 기준 일수에 원형의 `patience`를 곱한다 (people.md §6).
  *
- * 저울질하는 스타는 13일에 문을 두드리고 팀 우선 베테랑은 30일을 참는다. 같은 21일이
- * 모두에게 같은 날이면 GM이 "야심가형"으로 연기하는 선수와 장부의 사실이 어긋난다 —
- * 대사는 자기 자리를 묻는데 불만은 베테랑과 같은 날 선다.
+ * 저울질하는 스타는 21일 기준에서 13일에 문을 두드리고 팀 우선 베테랑은 30일을
+ * 참는다. 같은 날이 모두에게 같은 날이면 GM이 "야심가형"으로 연기하는 선수와 장부의
+ * 사실이 어긋난다 — 대사는 자기 자리를 묻는데 불만은 베테랑과 같은 날 선다.
  *
  * 불만을 **거는** 자리(`core/tick.ts`)와 아직 안 걸린 선수의 사실 카드를 **읽는**
  * 자리(`squad/mood.ts`)가 같은 함수를 지난다 — 갈리면 화면이 "2군 21일째"라고 적어
  * 놓고 불만은 서지 않는다.
  */
+function patienceDaysOf(state: GameState, player: GamePlayer, baseDays: number): number {
+  return Math.round(baseDays * archetypeTraitsOf(state.seed, player).patience);
+}
+
+/** 2군 방치의 문턱 — 이 날을 넘기면 불만이 선다 */
 export function demotionPatienceDaysOf(state: GameState, player: GamePlayer): number {
-  return Math.round(DEMOTION_PATIENCE_DAYS * archetypeTraitsOf(state.seed, player).patience);
+  return patienceDaysOf(state, player, DEMOTION_PATIENCE_DAYS);
+}
+
+/** 이적 리스트 등재의 문턱 — 이 날을 넘기면 불만이 선다 */
+export function listedPatienceDaysOf(state: GameState, player: GamePlayer): number {
+  return patienceDaysOf(state, player, LISTED_PATIENCE_DAYS);
 }

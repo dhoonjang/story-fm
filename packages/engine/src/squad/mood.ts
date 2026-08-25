@@ -240,7 +240,10 @@ function afterglow(state: GameState, playerId: string, last: LastMatch): MoodFac
 }
 
 /** 라커룸 불만의 사유 코드 — 옛 세이브는 문장을 들고 있어 그것이 폴백이다 */
-function grievanceOf(state: GameState, player: GamePlayer): MoodFact | null {
+function grievanceOf(
+  state: GameState,
+  player: GamePlayer,
+): Extract<MoodFact, { cause: "grievance" }> | null {
   const issue = state.issues.find((i) => i.gamePlayerId === player.id);
   if (!issue) return null;
   return {
@@ -397,7 +400,11 @@ export function moodFactsOf(
     const departure = recentDeparture(state);
     if (departure) facts.push(departure);
   }
-  if (!injury && contract) {
+  /**
+   * ⚠️ **`contract` 불만이 걸린 선수에겐 서지 않는다** (people.md §5) — 같은 사실을
+   * 불만 카드가 이미 말하고 있어, 두 장 한도 안에서 폼이나 몸을 밀어낼 뿐이다.
+   */
+  if (!injury && contract && grievance?.reason !== "contract") {
     const left = diffDays(state.date, contract.until);
     if (left >= 0 && left <= CONTRACT_ENDING_DAYS) {
       facts.push({ cause: "contract-ending", daysLeft: left });

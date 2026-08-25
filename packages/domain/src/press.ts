@@ -78,6 +78,10 @@ export const PressFactKindSchema = z.enum([
   "transfer-request",
   /** 열린 보드 요청 — 구단주가 이 창에 건 조건 (career.md §5.2) */
   "board-demand",
+  /** 계약 만료가 다가온다 — 남은 일수와 요구 주급 (다가옴 · people.md §8) */
+  "contract-demand",
+  /** 타 구단의 관심 — 최근 창에서 거절·만료된 오퍼 (다가옴 · people.md §8) */
+  "interest",
   /** 방금 끝난 경기가 세운 기록 — 데뷔·첫 골·구단 통산 문턱·해트트릭 (match.md §6) */
   "milestone",
 ]);
@@ -205,6 +209,12 @@ export type PressStance = (typeof PRESS_STANCES)[number];
  */
 export const APPROACH_TOPICS = [
   ...PLAYER_ISSUE_REASONS,
+  /**
+   * 타 구단이 우리 핵심 선수를 원했고 그 오퍼가 거절·만료됐다 — 에이전트가 온다.
+   * **사유 코드가 아니다**: 불만이 걸리지 않고 원장의 사실만 서므로, 창이 지나면
+   * 답 없이도 식는다 (people.md §8).
+   */
+  "interest",
   /** 라커룸이 식었다 — 주장이 대신 온다 */
   "morale",
   /** 성적이 보드 기대 아래다 — 구단주가 온다 (보드 요청, career.md §5) */
@@ -214,8 +224,8 @@ export const ApproachTopicSchema = z.enum(APPROACH_TOPICS);
 export type ApproachTopic = z.infer<typeof ApproachTopicSchema>;
 
 /**
- * 사다리의 절대 상한 — 스키마가 막는 값. 꼭대기는 채널마다 다르다
- * (`APPROACH_TOP_STEP`): 선수의 사다리만 언론 유출(4)·이적 요청(5)으로 이어진다.
+ * 사다리의 절대 상한 — 스키마가 막는 값. 꼭대기는 주제마다 다르다
+ * (`approachTopStep`): 불만 사유인 주제만 언론 유출(4)·이적 요청(5)으로 이어진다.
  */
 export const APPROACH_MAX_STEP = 5;
 
@@ -223,16 +233,27 @@ export const APPROACH_MAX_STEP = 5;
 export const APPROACH_LEAK_STEP = 4;
 
 /**
- * 채널별 사다리 꼭대기 (people.md §8). 주장·구단주가 3에 멈추는 것은 보드 경고가
- * 3/3에 서는 것과 같은 규약이고, 선수 주제는 에이전트 대리 방문(5)까지 오른다 —
- * `agent`는 선수 주제의 꼭대기 계단이 서는 채널이라 같은 값이다.
+ * 불만 사유 그대로인 주제인가 — **위 두 계단이 서는 자격이다.**
+ *
+ * 유출(4)도 이적 요청(5)도 「방치된 불만」이 있어야 서는 사건이라, 불만이 없는
+ * 주제(`interest`·`morale`·`results`)는 거기까지 오를 것이 없다 (people.md §8).
  */
-export const APPROACH_TOP_STEP: Record<ApproachChannel, number> = {
-  player: APPROACH_MAX_STEP,
-  agent: APPROACH_MAX_STEP,
-  captain: 3,
-  owner: 3,
-};
+export function isIssueTopic(topic: ApproachTopic): topic is PlayerIssueReason {
+  return (PLAYER_ISSUE_REASONS as readonly string[]).includes(topic);
+}
+
+/** 불만 사유가 아닌 주제가 멈추는 계단 — 보드 경고가 3/3에 서는 것과 같은 규약 */
+export const APPROACH_PLAIN_TOP_STEP = 3;
+
+/**
+ * 이 주제의 사다리 꼭대기 — **채널이 아니라 주제가 정한다** (people.md §8).
+ *
+ * 채널로 재던 자리다. 계약 이야기를 에이전트가 들고 오는 순간 `agent` 채널이
+ * 꼭대기 5를 뜻하기도 하고 3을 뜻하기도 해서, 한 값이 두 가지를 가리켰다.
+ */
+export function approachTopStep(topic: ApproachTopic): number {
+  return isIssueTopic(topic) ? APPROACH_MAX_STEP : APPROACH_PLAIN_TOP_STEP;
+}
 
 /**
  * 압력 눈금 — **감독이 무엇을 하지 않았는지의 누적.**
@@ -270,10 +291,14 @@ export const ApproachContextSchema = z.object({
     "dressing-room-form",
     /** 리그에서 서 있는 자리와 보드가 건 자리 */
     "standing",
+    /** 계약 만료가 다가온다 — `value`가 남은 일수 */
+    "contract-demand",
+    /** 타 구단의 관심 — `value`가 최근 창의 오퍼 건수 */
+    "interest",
   ]),
   /** 불만의 사유 코드 (`PLAYER_ISSUE_REASONS`) — 있는 갈래에만 */
   reason: z.enum(PLAYER_ISSUE_REASONS).optional(),
-  /** 그 코드가 가리키는 값 — 기간(일)·평균 폼·현재 순위 */
+  /** 그 코드가 가리키는 값 — 기간(일)·평균 폼·현재 순위·오퍼 건수 */
   value: z.number().optional(),
   /** 그 값이 견주는 자리 — 보드가 건 순위 */
   limit: z.number().optional(),
@@ -358,15 +383,22 @@ export const ISSUE_REASON_KO: Record<PlayerIssueReason, string> = {
   "losing-run": "연패",
   "early-return": "휴가 반납 소집",
   demotion: "2군 강등",
+  listed: "이적 리스트 등재",
+  "blocked-move": "막힌 이적",
+  contract: "계약 만료",
+  "out-of-position": "자리 밖 기용",
 };
 
-/** 사유 이름 — 연패만 수치를 앞에 단다. 코드가 없으면 `null` */
+/** 사유 이름 — 수치를 앞에 다는 것은 연패와 자리 밖 기용뿐이다. 코드가 없으면 `null` */
 export function issueReasonKo(
   reason: PlayerIssueReason | null | undefined,
   count?: number | null,
 ): string | null {
   if (!reason) return null;
-  if (reason === "losing-run") return count == null ? ISSUE_REASON_KO[reason] : `${count}연패`;
+  if (count != null) {
+    if (reason === "losing-run") return `${count}연패`;
+    if (reason === "out-of-position") return `${count}경기 자리 밖`;
+  }
   return ISSUE_REASON_KO[reason];
 }
 
@@ -448,6 +480,17 @@ export function pressFactText(fact: PressFact): string {
       return `보드 요청 — ${demandText(sub, name, v.baseline)}${d.date ? ` · 기한 ${d.date}` : ""}`;
     case "milestone":
       return `${name} ${milestonePhrase((sub ?? "apps") as MilestoneCode, v.value ?? 1)}`;
+    case "contract-demand":
+      return (
+        `계약 만료 ${v.days ?? 0}일 · 현 주급 ${formatMoney(v.wage ?? 0)}/주` +
+        ` · 요구 ${formatMoney(v.asking ?? 0)}/주`
+      );
+    case "interest":
+      return (
+        `최근 ${v.days ?? 0}일 타 구단 오퍼 ${v.offers ?? 0}건` +
+        ` · 최고 ${formatMoney(v.fee ?? 0)}${name ? ` (${name})` : ""}` +
+        ` · 시즌 출전 ${v.apps ?? 0}경기`
+      );
   }
 }
 
@@ -493,5 +536,9 @@ export function approachContextText(
       return `라커룸 · 1군 평균 폼 ${labels.form ?? ""}`.trimEnd();
     case "standing":
       return `리그 ${context.value ?? 0}위 · 기대 ${context.limit ?? 0}위`;
+    case "contract-demand":
+      return `${who} 계약 만료 D-${context.value ?? 0}`;
+    case "interest":
+      return `${who} 타 구단 오퍼 ${context.value ?? 0}건`;
   }
 }

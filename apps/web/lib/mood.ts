@@ -93,6 +93,14 @@ function grievanceSubject(fact: Extract<MoodFact, { cause: "grievance" }>): stri
       return "휴가를 반납한 소집";
     case "demotion":
       return "2군 강등";
+    case "listed":
+      return "이적 리스트에 오른 것";
+    case "blocked-move":
+      return "감독이 막은 이적";
+    case "contract":
+      return "재계약 이야기가 없는 것";
+    case "out-of-position":
+      return fact.count === null ? "자리 밖 기용" : `${fact.count}경기 이어진 자리 밖 기용`;
     default:
       return fact.note ?? "팀 상황";
   }
