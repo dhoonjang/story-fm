@@ -1,5 +1,5 @@
-import type { GamePlayer, Negotiation } from "@story-fm/domain";
-import { ageOf } from "@story-fm/domain";
+import type { GamePlayer, Negotiation, SquadStatus } from "@story-fm/domain";
+import { SQUAD_STATUSES, ageOf, squadStatusRank } from "@story-fm/domain";
 import {
   CAREER_AGE_MOVE,
   LOAN_FEE_RATE,
@@ -11,6 +11,7 @@ import {
   wageExpectationOf,
 } from "./market";
 import { latitudeOf } from "./persuasion";
+import { derivedSquadStatus } from "../squad/promises";
 import { playerById, type GameState } from "../core/state";
 
 /**
@@ -42,6 +43,32 @@ export const RENEWAL_YEARS_ASK_YOUNG = 4;
 /** 재계약 조정이 부를 수 있는 연수의 상한 (하한은 1년) */
 export const RENEWAL_YEARS_MAX = 5;
 
+/**
+ * 서열을 다시 지위로 — **지위 밴드의 양끝이 정수라서 필요한 되돌림**이다.
+ * `CounterBand`는 숫자 구간 한 벌이고(연수와 같은 결), 지위는 그 위에 얹힌 사다리다.
+ * 구간 밖의 정수는 사다리의 양끝으로 접는다.
+ */
+export function statusAtRank(rank: number): SquadStatus {
+  const index = Math.max(0, Math.min(SQUAD_STATUSES.length - 1, Math.round(rank)));
+  return SQUAD_STATUSES[index]!;
+}
+
+/**
+ * 선수가 되부를 수 있는 지위의 구간 — **지금 실제로 서는 자리에서 한 칸 위까지**다
+ * (transfer.md §1). 백업 자리의 선수가 핵심을 부르지는 않는다.
+ *
+ * 하한은 **우리가 이미 제시한 지위의 한 칸 위**다: 이미 부른 자리를 다시 요구하는
+ * 것은 조정이 아니다. 그래서 감독이 한 칸 위를 먼저 얹으면 이 축은 그대로 닫힌다
+ * (`min > max`) — 지위로 더 흥정할 것이 남지 않는다.
+ */
+function statusBandOf(state: GameState, player: GamePlayer, offered?: SquadStatus): CounterBand {
+  // 영입 대상은 아직 남의 팀에 있다 — 재는 자리는 언제나 우리 스쿼드다
+  const here = squadStatusRank(derivedSquadStatus(state, player, state.userTeamId));
+  const ceiling = Math.min(here + 1, SQUAD_STATUSES.length - 1);
+  const asked = offered === undefined ? here : squadStatusRank(offered);
+  return { expectation: ceiling, min: asked + 1, max: ceiling };
+}
+
 /** 재계약 조정에서 선수가 부르는 연수 — 커리어 시계가 정한다 (transfer.md §1) */
 export function renewalYearsExpectation(state: GameState, player: GamePlayer): number {
   return ageOf(player.birthdate, state.date) <= CAREER_AGE_MOVE
@@ -72,6 +99,11 @@ export interface CounterBounds {
   wage: CounterBand | null;
   /** 재계약에서 되부르는 계약 연수 · 다른 갈래는 `null` */
   years: CounterBand | null;
+  /**
+   * 되부르는 **계약 지위** — 서열(`squadStatusRank`)의 구간이다. 재계약·영입에서만
+   * 열리고, 그 둘에서도 감독이 이미 한 칸 위를 부른 판에서는 비어 있다.
+   */
+  status: CounterBand | null;
   /** 분할 연수를 되부를 수 있는 갈래인가 (transfer.md §5-2) */
   splittable: boolean;
 }
@@ -130,14 +162,16 @@ function incomingAsking(state: GameState, kind: Negotiation["kind"], player: Gam
 export function counterBoundsOf(
   state: GameState,
   negotiation: Negotiation,
-  offer: { fee: number; weeklyWage: number },
+  offer: { fee: number; weeklyWage: number; squadStatus?: SquadStatus },
 ): CounterBounds {
   const latitude = latitudeOf(negotiation.pitched);
   const acceptFloor = Math.max(0, MIN_ACCEPT_PROBABILITY - latitude);
   const player = playerById(state, negotiation.gamePlayerId);
   const kind = negotiation.kind;
   const base = { acceptFloor, latitude };
-  if (!player) return { ...base, fee: null, wage: null, years: null, splittable: false };
+  if (!player) {
+    return { ...base, fee: null, wage: null, years: null, status: null, splittable: false };
+  }
 
   /**
    * **해지의 조정은 선수가 정산금을 올려 부르는 것**이고, 상한은 **일방 해지의
@@ -154,6 +188,7 @@ export function counterBoundsOf(
       },
       wage: null,
       years: null,
+      status: null,
       splittable: true,
     };
   }
@@ -175,6 +210,7 @@ export function counterBoundsOf(
         min: 1,
         max: RENEWAL_YEARS_MAX,
       },
+      status: statusBandOf(state, player, offer.squadStatus),
       splittable: false,
     };
   }
@@ -195,6 +231,7 @@ export function counterBoundsOf(
       },
       wage: null,
       years: null,
+      status: null,
       splittable: kind === "sell",
     };
   }
@@ -220,6 +257,8 @@ export function counterBoundsOf(
       max: Math.round(wageAnchor * COUNTER_WAGE_CEILING),
     },
     years: null,
+    // 임대 영입에는 지위가 없다 — 빌려 온 선수의 계약은 남의 것이다 (transfer.md §2)
+    status: kind === "buy" ? statusBandOf(state, player, offer.squadStatus) : null,
     splittable: kind === "buy",
   };
 }
