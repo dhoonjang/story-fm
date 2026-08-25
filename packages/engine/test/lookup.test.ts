@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   activeContract,
+  addDays,
   advanceTime,
   careerView,
   assignmentsOf,
   ensureSeasonStat,
   leagueView,
+  marketValueOf,
+  observedMarketValue,
   playerById,
   playerCard,
   playersOf,
@@ -49,7 +52,9 @@ function leaksTrueRatings(
     .replace(/\d+세/g, "")
     .replace(/출전\d+/g, "")
     .replace(/득점\d+/g, "")
-    .replace(/~\d{4}-\d{2}-\d{2}/g, "");
+    .replace(/~\d{4}-\d{2}-\d{2}/g, "")
+    .replace(/계약 \d{4}-\d{2}-\d{2}/g, "")
+    .replace(/£[\d.]+[kM]/g, "");
   const keys = ["pace", "finishing", "passing", "dribbling", "tackling", "strength"] as const;
   return keys.some((k) => new RegExp(`\\b${attrs[k]}\\b`).test(scrubbed));
 }
@@ -159,6 +164,94 @@ describe("search_players", () => {
     expect(shown("wage")).toEqual(byLedger((p) => activeContract(state, p.id)?.weeklyWage ?? 0));
     expect(shown("goals")).toEqual(byLedger((p) => seasonStatOf(state, p.id)?.goals ?? 0));
     expect(shown("apps")).toEqual(byLedger((p) => seasonStatOf(state, p.id)?.apps ?? 0));
+  });
+
+  /**
+   * 잔여 일수를 세는 자가 필터와 정렬에서 갈리면 "1년 남은 선수"의 답이 조용히
+   * 하루씩 어긋난다. 경계는 **정확히 N일까지 걸린다**이고, 무계약은 0일이다.
+   */
+  it("계약 잔여 필터는 정확히 N일까지 걸고, 무계약은 잔여 0일이다", () => {
+    const state = createTestGame(21);
+    const ours = playersOf(state, state.userTeamId);
+    // 경계에 선 셋만 남기고 나머지는 지평 밖으로 민다
+    ours.forEach((p) => {
+      const c = activeContract(state, p.id);
+      if (c) c.until = addDays(state.date, 400);
+    });
+    const [onDay, dayAfter, free] = [ours[0]!, ours[1]!, ours[2]!];
+    activeContract(state, onDay.id)!.until = addDays(state.date, 100);
+    activeContract(state, dayAfter.id)!.until = addDays(state.date, 101);
+    activeContract(state, free.id)!.status = "ended";
+
+    const shown = rowIds(
+      searchPlayers(state, { team: "mine", contractEndsWithinDays: 100, limit: 15 }).message,
+      ours,
+    );
+    expect(shown).toContain(onDay.id);
+    expect(shown).not.toContain(dayAfter.id);
+    expect(shown).toContain(free.id);
+    // 세우는 자도 같다 — 잔여가 짧은 쪽이 앞이고, 무계약이 맨 앞이다
+    const order = rowIds(
+      searchPlayers(state, { team: "mine", sortBy: "contract", limit: 15 }).message,
+      ours,
+    );
+    expect(order[0]).toBe(free.id);
+    expect(order.indexOf(onDay.id)).toBeLessThan(order.indexOf(dayAfter.id));
+  });
+
+  /**
+   * 값도 노출이다 (player.md §10) — 참값으로 세우거나 거르면 행을 흐린 것이
+   * 무의미해진다. 세우는 자·거르는 자·`deal_odds`가 부르는 값이 한 벌이어야 한다.
+   */
+  it("값은 참값이 아니라 흐린 시장가로 세우고 거른다", () => {
+    const state = createTestGame(21);
+    const pool = playersOf(state, "chelsea");
+    const top = (key: (p: (typeof pool)[number]) => number): string[] =>
+      [...pool]
+        .sort((a, b) => key(b) - key(a))
+        .slice(0, 15)
+        .map((p) => p.id);
+    const shown = rowIds(
+      searchPlayers(state, { team: "chelsea", sortBy: "value", limit: 15 }).message,
+      pool,
+    );
+    expect(shown).toEqual(top((p) => observedMarketValue(state, p)));
+    expect(shown).not.toEqual(top((p) => marketValueOf(state, p)));
+
+    // 참값은 선 위인데 흐린 값이 선 아래인 선수 — 거르는 자가 무엇인지 여기서 갈린다
+    const under = pool.find((p) => observedMarketValue(state, p) < marketValueOf(state, p))!;
+    const line = observedMarketValue(state, under);
+    const inside = searchPlayers(state, { team: "chelsea", maxValue: line, limit: 15 });
+    expect(rowIds(inside.message, pool)).toContain(under.id);
+    const outside = searchPlayers(state, { team: "chelsea", maxValue: line - 1, limit: 15 });
+    expect(rowIds(outside.message, pool)).not.toContain(under.id);
+    // 행도 같은 값을 찍는다 — 계약 만료일과 함께
+    expect(inside.message).toContain(`계약 ${activeContract(state, under.id)!.until}`);
+  });
+
+  /**
+   * 홈그로운은 **등록하는 쪽의 협회**가 정한다 (team.md §5) — 선수의 현 소속이
+   * 아니라. 나라가 같으면 1부든 2부든 같은 협회다.
+   */
+  it("홈그로운은 우리 협회 기준이다 — 소속 리그가 아니라", () => {
+    const state = createTestGame(21); // 아스날 — 잉글랜드
+    const abroad = playersOf(state, "realmadrid");
+    const [english, spanish] = [abroad[0]!, abroad[1]!];
+    english.homegrownCountry = "잉글랜드";
+    spanish.homegrownCountry = "스페인";
+    const shown = rowIds(
+      searchPlayers(state, { team: "realmadrid", homegrown: true, limit: 15 }).message,
+      abroad,
+    );
+    // 스페인 클럽 소속이어도 잉글랜드에서 자랐으면 우리에겐 홈그로운이다
+    expect(shown).toContain(english.id);
+    expect(shown).not.toContain(spanish.id);
+
+    // 같은 나라 다른 리그(잉글랜드 2부)도 같은 협회다
+    const second = playersOf(state, "leicester");
+    second.forEach((p) => (p.homegrownCountry = "잉글랜드"));
+    const inSecond = searchPlayers(state, { team: "leicester", homegrown: true, limit: 15 });
+    expect(rowIds(inSecond.message, second)).toHaveLength(Math.min(15, second.length));
   });
 
   it("팀 이름 표기가 흔들려도 해석하고, 없는 팀만 반려한다", () => {

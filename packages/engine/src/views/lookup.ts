@@ -1,9 +1,11 @@
 import type {
+  Contract,
   GamePlayer,
   MatchRecord,
   ScheduleEntry,
   SeasonRecord,
   SeasonStat,
+  StrongFoot,
 } from "@story-fm/domain";
 import { isReserveMatch } from "@story-fm/domain";
 import {
@@ -22,6 +24,7 @@ import {
   rolesFor,
   seasonRating,
   slotOfTime,
+  strongFootOf,
 } from "@story-fm/domain";
 import { rankByName } from "../core/name-match";
 import { formatMoney } from "../club/finance";
@@ -59,13 +62,16 @@ import { leagueOfTeamIn, teamsOfLeagueIn } from "../competition/promotion";
 import { tierOfTeamIn } from "../core/club-tier";
 import { achievementLine, boardExpectation, computeStandings } from "../competition/season";
 import { openManagerOffers, USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
+import { observedMarketValue } from "../market/market";
 import {
   attributeLine,
+  KNOWLEDGE_RANK,
   knowledgeNote,
   knowledgeOf,
   observationOf,
   observedOverall,
   overallView,
+  potentialBand,
   potentialView,
   readCondition,
   strengthsAndWeaknesses,
@@ -253,7 +259,8 @@ function ourRow(state: GameState, p: GamePlayer): string {
     `${p.id} ${p.name} ${ageOf(p.birthdate, state.date)}세 ${naturalPositionOf(p).position} ` +
     `${physiqueLabel(p.height, p.weight)}(${footLabel(p.foot)}) ` +
     `OVR${p.attributes.overall} 폼 ${formLabel(p.state.form)} ` +
-    `체력${p.state.condition} 적응${familiarityOf(state, p.id)} ${formatMoney(contract?.weeklyWage ?? 0)} ` +
+    `체력${p.state.condition} 적응${familiarityOf(state, p.id)} ` +
+    `${formatMoney(contract?.weeklyWage ?? 0)}${contractLabel(contract)} ` +
     `${role} ${statLine(stat)}${status}${issue}${p.isCaptain ? " (주장)" : ""}` +
     `${isHomegrownFor(p, p.teamId) ? " [홈그로운]" : ""}${occupiesSquadList(state, p) ? "" : " [U21·명단 밖]"}`
   );
@@ -282,15 +289,29 @@ function statLine(
   );
 }
 
-/** 타 팀 선수 한 줄 — 안개 적용, 숫자 없음 */
+/**
+ * 계약 만료 꼬리 — `~YYYY-MM-DD`, 계약이 없으면 빈 문자열. **안개를 걸지 않는다**:
+ * 계약 만료일은 부상·징계·이적과 같은 공개 기록 계열이다 (player.md §10).
+ */
+function contractLabel(contract: Contract | null): string {
+  return contract ? `~${contract.until}` : "";
+}
+
+/**
+ * 타 팀 선수 한 줄 — 능력치는 안개, **값과 계약은 시장의 공개 정보**다.
+ * 시장가는 `deal_odds`가 부르는 것과 같은 흐린 값이고, 계약 만료일은 흐리지 않는다.
+ */
 function theirRow(state: GameState, p: GamePlayer): string {
   const stat = seasonStatOf(state, p.id);
   const knowledge = knowledgeOf(state, p.id);
   const source = knowledge === "scouted" ? "스카우팅" : knowledge === "seen" ? "직접 관전" : "평판";
   const injury = openInjury(state, p.id);
+  const contract = activeContract(state, p.id);
   return (
     `${p.id} ${p.name} ${ageOf(p.birthdate, state.date)}세 ${naturalPositionOf(p).position} ` +
     `${teamShortNameIn(state, p.teamId)} · ${overallView(state, p)} (${source}) · ` +
+    `값 ${formatMoney(observedMarketValue(state, p))} · ` +
+    `계약 ${contract ? contract.until : "없음(자유계약)"} · ` +
     `${statLine(stat)}${injury ? ` · 부상 중(~${injury.expectedReturn})` : ""}`
   );
 }
@@ -315,11 +336,34 @@ function sortCondition(state: GameState, p: GamePlayer): number {
 }
 
 /**
- * 풀 하나의 정렬 키 — **선수당 한 번만** 뽑는다.
- *
- * 원장에서 읽는 키(득점·출전·주급)는 원장을 한 번 훑어 색인으로 세운다. `find`가
+ * 활성 계약 색인 — **원장을 한 번만 훑는다.** `activeContract`는 선수 하나에 원장
+ * 전체를 훑으므로 5,700명에 그대로 부르면 그 선형 탐색이 5,700번 돈다. `find`가
  * 첫 줄을 고르므로 색인도 **먼저 만난 줄을 남긴다** — 같은 선수에 줄이 둘이어도
  * 고르는 값이 달라지지 않는다.
+ */
+function contractIndexOf(state: GameState): Map<string, Contract> {
+  const index = new Map<string, Contract>();
+  for (const c of state.contracts) {
+    if (c.status !== "active") continue;
+    if (!index.has(c.gamePlayerId)) index.set(c.gamePlayerId, c);
+  }
+  return index;
+}
+
+/**
+ * 계약 잔여 일수 — **계약이 없으면 0일이다.** 자유계약 선수는 "이미 끝난 계약"이라
+ * 잔여가 가장 짧은 쪽이고, 거르는 자와 세우는 자가 같은 규칙을 읽는다.
+ */
+function daysLeftOn(state: GameState, contract: Contract | undefined): number {
+  return contract ? Math.max(0, diffDays(state.date, contract.until)) : 0;
+}
+
+/**
+ * 풀 하나의 정렬 키 — **선수당 한 번만** 뽑는다.
+ *
+ * 원장에서 읽는 키(득점·출전·주급·계약)는 원장을 한 번 훑어 색인으로 세우고,
+ * 안개에서 파생하는 키(평점·체력·값·잠재력)는 지식 수준을 다시 세지 않도록
+ * 풀당 한 번 뽑아 둔다.
  */
 function sortKeyOf(
   state: GameState,
@@ -327,23 +371,16 @@ function sortKeyOf(
   sortBy: NonNullable<SearchPlayersInput["sortBy"]>,
 ): (p: GamePlayer) => number {
   if (sortBy === "age") return () => 0;
-  if (sortBy === "rating" || sortBy === "fatigue") {
+  if (sortBy === "rating" || sortBy === "fatigue" || sortBy === "value" || sortBy === "potential") {
     // 안개 키는 지식 수준 파생이라 비싸다 — 풀당 한 번만 뽑고 비교는 그 값으로 한다
-    const fogged = new Map(
-      pool.map(
-        (p) =>
-          [p.id, sortBy === "rating" ? sortRating(state, p) : sortCondition(state, p)] as const,
-      ),
-    );
+    const fogged = new Map(pool.map((p) => [p.id, foggedKeyOf(state, p, sortBy)] as const));
     return (p) => fogged.get(p.id) ?? 0;
   }
-  if (sortBy === "wage") {
-    const wage = new Map<string, number>();
-    for (const c of state.contracts) {
-      if (c.status !== "active") continue;
-      if (!wage.has(c.gamePlayerId)) wage.set(c.gamePlayerId, c.weeklyWage);
-    }
-    return (p) => wage.get(p.id) ?? 0;
+  if (sortBy === "wage" || sortBy === "contract") {
+    const contracts = contractIndexOf(state);
+    return sortBy === "wage"
+      ? (p) => contracts.get(p.id)?.weeklyWage ?? 0
+      : (p) => daysLeftOn(state, contracts.get(p.id));
   }
   // 스탯은 시즌·팀까지 같아야 그 선수의 줄이다 — 시즌 중 이적하면 팀별로 갈린다
   const stat = new Map<string, SeasonStat>();
@@ -353,7 +390,36 @@ function sortKeyOf(
     if (!stat.has(k)) stat.set(k, s);
   }
   const of = (p: GamePlayer) => stat.get(`${p.id}\u0000${p.teamId}`);
-  return sortBy === "goals" ? (p) => of(p)?.goals ?? 0 : (p) => of(p)?.apps ?? 0;
+  switch (sortBy) {
+    case "goals":
+      return (p) => of(p)?.goals ?? 0;
+    case "assists":
+      return (p) => of(p)?.assists ?? 0;
+    // 출전이 없으면 평점이 없다 — 0으로 두어 뛴 선수 뒤에 선다
+    case "seasonRating":
+      return (p) => seasonRating(of(p)) ?? 0;
+    default:
+      return (p) => of(p)?.apps ?? 0;
+  }
+}
+
+/** 안개에서 파생하는 정렬 키 — 넷 다 그 행이 찍는 값과 같은 관측값이다 */
+function foggedKeyOf(
+  state: GameState,
+  p: GamePlayer,
+  sortBy: "rating" | "fatigue" | "value" | "potential",
+): number {
+  switch (sortBy) {
+    case "rating":
+      return sortRating(state, p);
+    case "fatigue":
+      return sortCondition(state, p);
+    case "value":
+      return observedMarketValue(state, p);
+    // 구간이 없으면 성장 여력을 짐작할 근거가 없다 — 0으로 두어 맨 뒤에 선다
+    default:
+      return potentialBand(state, p)?.low ?? 0;
+  }
 }
 
 // ── 검색 ────────────────────────────────────────────────
@@ -376,7 +442,37 @@ export interface SearchPlayersInput {
   squadLevel?: "first" | "reserve";
   /** 부상·정지 제외 */
   availableOnly?: boolean;
-  sortBy?: "rating" | "age" | "fatigue" | "goals" | "apps" | "wage";
+  /**
+   * 계약이 이 일수 안에 끝나는 선수 — "1년 남은 선수를 싸게"(transfer.md §6)의 축.
+   * 무계약(자유계약)은 잔여 0일이라 언제나 걸린다.
+   */
+  contractEndsWithinDays?: number;
+  /** 관측 시장가 상한 (£) — 참값이 아니라 흐린 값으로 거른다 (player.md §10) */
+  maxValue?: number;
+  /** 주급 상한 (£/주) — 계약서의 값 그대로, 흐리지 않는다 */
+  maxWage?: number;
+  /** 이적 리스트 등재 여부 — 리스트는 우리가 세운 것뿐이다 (AI 구단은 세우지 않는다) */
+  listed?: boolean;
+  /** 우리 협회 기준 홈그로운 — 등록 명단 8명 규칙(team.md §5)의 그 자격 */
+  homegrown?: boolean;
+  /** 관측 잠재력 구간의 **하한**이 이 값 이상. 구간이 없는 선수는 통과하지 못한다 */
+  minPotential?: number;
+  /** 최소 지식 수준 — `"scouted"`면 스카우팅을 마쳤거나 그보다 잘 아는 선수만 */
+  knowledge?: Knowledge;
+  /** 주발 — 행이 찍는 그 세 갈래 (`footLabel`과 같은 자) */
+  foot?: StrongFoot;
+  sortBy?:
+    | "rating"
+    | "age"
+    | "fatigue"
+    | "goals"
+    | "apps"
+    | "wage"
+    | "value"
+    | "contract"
+    | "assists"
+    | "seasonRating"
+    | "potential";
   limit?: number;
 }
 
@@ -408,6 +504,18 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
   }
 
   const position = input.position?.toUpperCase();
+  // 원장·목록을 읽는 조건은 색인을 한 번 세워 둔다 — 선수마다 훑으면 5,700번이다
+  const contracts =
+    input.contractEndsWithinDays !== undefined || input.maxWage !== undefined
+      ? contractIndexOf(state)
+      : null;
+  const listed =
+    input.listed === undefined ? null : new Set(state.transferList.map((l) => l.gamePlayerId));
+
+  /**
+   * **싼 조건이 앞에 선다.** 안개에서 파생하는 셋(지식 수준·잠재력 구간·관측
+   * 시장가)은 선수마다 기록을 훑으므로, 앞의 조건이 좁혀 준 만큼만 계산한다.
+   */
   const narrowed = (teamId ? playersOf(state, teamId) : state.players).filter((p) => {
     if (inCompetition && !inCompetition.has(p.teamId)) return false;
     if (input.squadLevel && squadLevelOf(p) !== input.squadLevel) return false;
@@ -415,7 +523,36 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
     const age = ageOf(p.birthdate, state.date);
     if (input.minAge !== undefined && age < input.minAge) return false;
     if (input.maxAge !== undefined && age > input.maxAge) return false;
+    if (input.foot !== undefined && strongFootOf(p.foot) !== input.foot) return false;
+    // 홈그로운은 **우리 협회** 기준이다 — 지금 소속이 아니라 우리가 등록할 때의 자격
+    if (input.homegrown !== undefined && isHomegrownFor(p, state.userTeamId) !== input.homegrown) {
+      return false;
+    }
+    if (listed && listed.has(p.id) !== input.listed) return false;
     if (input.availableOnly && !isAvailable(state, p.id)) return false;
+    if (contracts) {
+      const contract = contracts.get(p.id);
+      if (
+        input.contractEndsWithinDays !== undefined &&
+        daysLeftOn(state, contract) > input.contractEndsWithinDays
+      ) {
+        return false;
+      }
+      if (input.maxWage !== undefined && (contract?.weeklyWage ?? 0) > input.maxWage) return false;
+    }
+    if (
+      input.knowledge !== undefined &&
+      KNOWLEDGE_RANK[knowledgeOf(state, p.id)] < KNOWLEDGE_RANK[input.knowledge]
+    ) {
+      return false;
+    }
+    if (input.minPotential !== undefined) {
+      // 짐작할 근거가 없는 선수를 통과시키면 모르는 것을 "넘는다"고 답하게 된다
+      const band = potentialBand(state, p);
+      if (band === null || band.low < input.minPotential) return false;
+    }
+    if (input.maxValue !== undefined && observedMarketValue(state, p) > input.maxValue)
+      return false;
     return true;
   });
   // 이름은 마지막에 — 다른 조건으로 좁힌 만큼만 자모까지 내려가면 된다
@@ -435,7 +572,8 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
       case "age":
         return ageOf(a.birthdate, state.date) - ageOf(b.birthdate, state.date);
       case "fatigue":
-        // 지친 순 — 체력이 낮은 쪽이 앞
+      case "contract":
+        // 지친 순·계약이 먼저 끝나는 순 — 낮은 쪽이 앞
         return key(a) - key(b);
       default:
         return key(b) - key(a);
