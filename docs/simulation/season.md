@@ -614,6 +614,9 @@ tick은 없다 (§5).
      `squad/development.ts`이고([player.md](../data/player.md) §6.3), 전환이 나이로
      보는 것은 은퇴 판정뿐이다. 시즌 경계에 몰면 5월 마지막 날과 7월 첫날 사이에
      감독이 겪은 것 없이 숫자만 달라진다.
+   - **은퇴 문턱(나이·종합)은 도메인이 갖는다** (`retiresAtSeasonEnd` —
+     `packages/domain/src/player.ts`). 전환만의 규칙이 아니라 베테랑 황혼 아크가
+     절정을 판정할 때도 같은 자를 읽기 때문이다 ([../data/people.md](../data/people.md) §9).
    - **끝난 계약을 정리하되 장부가 읽는 이력은 남긴다** — 상각의 취득원가는
      그 팀에서의 첫 계약에서 파생하므로, 아직 활성 계약이 있는 선수의 끝난 계약은
      지우지 않는다 ([finance.md](./finance.md) §6.1).

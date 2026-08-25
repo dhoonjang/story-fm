@@ -68,6 +68,7 @@ export * from "./competition/reschedule";
 
 // match — 경기 진행·간이 시뮬·평점·징계
 export * from "./match/match-flow";
+export * from "./match/preview";
 export * from "./match/quick-sim";
 export * from "./match/ratings";
 

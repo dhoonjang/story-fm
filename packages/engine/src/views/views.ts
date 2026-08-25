@@ -97,6 +97,7 @@ import { foldCareer, type CareerTotals } from "../squad/career";
 import { formAngle, formLabel, formTone } from "../squad/form";
 import { leaderGroupOf } from "../squad/hierarchy";
 import { ratingTone, type RatingTone } from "../match/ratings";
+import { buildOpponentReport } from "../match/preview";
 import { GAP_CONDITION, edgeOf, subLimitsOf, zoneGrid } from "@story-fm/sim";
 import { moodOf, type MoodRead } from "../squad/mood";
 import { openPromises, squadStatusOf } from "../squad/promises";
@@ -775,6 +776,12 @@ export interface CompetitionRoundView {
  * 며칠에 걸리는 지금(match.md §3), "사흘 뒤"인지 "엿새 뒤"인지가 곧 로테이션 판단이다.
  */
 export interface NextMatchView {
+  /**
+   * 어느 경기인가 (`MATCH.id`) — 카드가 **그 경기의 상대 분석**을 집을 열쇠다
+   * (match.md §1.8). 대회 탭이 세우는 경기와 팀의 다음 경기가 갈릴 수 있으므로
+   * 이름·날짜로 맞춰 보게 두면 같은 날 두 경기가 있는 주에 엉뚱한 판이 붙는다.
+   */
+  matchId: string;
   date: string;
   /** 킥오프 시각 `20:00` */
   time: string;
@@ -785,6 +792,42 @@ export interface NextMatchView {
   venue: "home" | "away" | "neutral";
   /** 오늘로부터 며칠 뒤인가 — 0이면 오늘이다 */
   inDays: number;
+}
+
+/**
+ * 경기 전 상대 분석 — **다음 경기 카드에 접혀 붙는다** (match.md §1.8 · §8).
+ *
+ * 조립은 코어 한 곳(`buildOpponentReport`)이고 여기서 하는 일은 문장으로 옮기는
+ * 것뿐이다: 태그는 `packetTagText`가, 6축의 낱말은 화면이 `TACTIC_AXES`로 만든다.
+ * 조회 도구(`get_opponent_report`)와 GM 입력의 브리핑도 같은 리포트를 읽는다 —
+ * 셋이 각자 세우면 같은 상대가 세 가지로 읽힌다.
+ */
+export interface MatchPreviewView {
+  matchId: string;
+  /**
+   * 상대 예상 XI — **직전 경기 선발에서 투영**한 것이라 예상이다 (match.md §1.8).
+   * `carried`가 `false`인 줄은 코어가 메운 자리다.
+   */
+  expectedXI: {
+    id: string;
+    name: string;
+    position: string;
+    squadNumber: number | null;
+    carried: boolean;
+  }[];
+  /** 투영의 근거가 된 상대의 직전 경기 — 없으면 개막전이다 */
+  basis: { date: string; label: string } | null;
+  /** 직전 경기 선발에서 이어지지 못해 코어가 메운 인원 — 예상의 흐릿한 정도다 */
+  guessed: number;
+  /** 부상·정지로 못 나오는 상대 선수 */
+  absent: { name: string; position: string; reason: "injury" | "suspension"; note: string }[];
+  /** 상대가 세워 둔 모양과 6축 — 전술판과 같은 조각이라 화면이 같은 낱말을 쓴다 */
+  shape: TacticsView;
+  /**
+   * 상성·키포인트 — `ours`는 **우리 편에 이로운 줄인가**다.
+   * 판세 화면의 `keyPoints`와 같은 계약이라 화면이 같은 색 규칙을 쓴다.
+   */
+  keyPoints: { text: string; ours: boolean | null }[];
 }
 
 /**
@@ -1251,6 +1294,12 @@ export interface OfficeViews {
      * 언제 누구인가지 그 대회의 다음 라운드가 아니다.
      */
     nextMatch: NextMatchView | null;
+    /**
+     * 그 경기의 **상대 분석** — 위 `nextMatch`와 같은 경기다 (match.md §1.8).
+     * 경기 중에는 `null`이다: 90분 안에 다음 상대를 분석하는 자리는 없고, 지금
+     * 판은 판세 탭이 이미 들고 있다.
+     */
+    preview: MatchPreviewView | null;
     /** 최근 다섯 경기 — **사실만**. 문장은 화면이 잇는다 (competition.md §7) */
     recentResults: RecentResultView[];
     /** 탭 순서: 우리 리그 → 우리 대항전 */
@@ -1925,9 +1974,41 @@ function buildMatchView(state: GameState): MatchView | null {
  * 갈리는 것은 **무엇을 골랐는가**와 표기(`label`)뿐이라, 같은 경기를 두 자리에서
  * 다르게 적을 길이 없다.
  */
+/**
+ * 경기 전 상대 분석 한 장 — 코어의 리포트를 화면 조각으로 옮긴다 (match.md §1.8).
+ * 태그를 문장으로 바꾸는 자리는 여기 하나다(`packetTagText`) — 판세 화면의
+ * 키포인트와 같은 렌더러이므로 같은 지점이 두 화면에서 두 문장이 되지 않는다.
+ */
+function matchPreviewView(state: GameState, matchId: string): MatchPreviewView | null {
+  const report = buildOpponentReport(state, { matchId });
+  if (!report) return null;
+  return {
+    matchId: report.matchId,
+    expectedXI: report.expectedXI.map((p) => ({ ...p })),
+    basis: report.basis ? { date: report.basis.date, label: report.basis.label } : null,
+    /**
+     * 근거가 없으면 **열한 명이 다 추정이라** 세는 뜻이 없다 — 그때 0이다.
+     * 표시는 관측과 추정이 섞였을 때만 값을 하고, 화면은 이 수로 그것을 가른다.
+     */
+    guessed: report.basis === null ? 0 : report.expectedXI.filter((p) => !p.carried).length,
+    absent: report.absent.map((a) => ({
+      name: a.name,
+      position: a.position,
+      reason: a.reason,
+      note: a.note,
+    })),
+    shape: { ...report.shape },
+    keyPoints: report.notes.map((tag) => ({
+      text: packetTagText(tag, report.tagContext),
+      ours: tag.favours === null ? null : tag.favours === report.ourSide,
+    })),
+  };
+}
+
 function nextMatchView(state: GameState, m: MatchRecord, label: string): NextMatchView {
   const userTeamId = state.userTeamId;
   return {
+    matchId: m.id,
     date: m.date,
     time: m.time ?? DEFAULT_KICKOFF,
     label,
@@ -2926,6 +3007,8 @@ export function buildOfficeViews(state: GameState): OfficeViews {
             competitionLabel(next.competitionId, next.stage ?? "league", next.round),
           )
         : null,
+      // 같은 경기의 상대 분석 — 코어가 경기 중에는 빈손을 낸다 (`buildOpponentReport`)
+      preview: next ? matchPreviewView(state, next.id) : null,
       recentResults,
       list: competitionList,
     },
