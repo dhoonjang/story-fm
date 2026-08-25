@@ -363,3 +363,38 @@ export function migrateMirrorProficiency(save: MirrorProficiencySave): void {
   for (const player of save.players) stripStoredFootAdjust(player.positions);
   save.mirrorProficiencyStripped = true;
 }
+
+interface NationalitySave {
+  players: Array<{
+    catalogId: string | null;
+    teamId: string;
+    nationality?: string;
+    secondNationality?: string;
+  }>;
+}
+
+/**
+ * 국적 보정 — 국적보다 먼저 저장된 세이브의 선수에게 국적을 세운다.
+ *
+ * 빈칸으로 둘 수 없는 축이다: 등록 규정도 대표팀도 "국적이 없는 선수"를 다룰 자리가
+ * 없어서, 하나라도 비면 그 규칙이 통째로 서지 못한다. 그래서 **결정적으로 채운다**
+ * (game-state.md §6 — 생성이 결정적이면 로드 때 조용히 채운다).
+ *
+ * 값의 출처는 부르는 쪽이 정한다 — 카탈로그에 그 선수가 있으면 시드가 조사한 국적,
+ * 없으면 그 클럽 협회다. 이미 값이 있으면 손대지 않으므로 멱등이다.
+ */
+export function migrateNationalities(
+  save: NationalitySave,
+  lookup: (player: { catalogId: string | null; teamId: string }) => {
+    nationality?: string;
+    secondNationality?: string;
+  },
+): void {
+  for (const player of save.players) {
+    if (player.nationality !== undefined) continue;
+    const found = lookup(player);
+    if (found.nationality === undefined) continue;
+    player.nationality = found.nationality;
+    if (found.secondNationality !== undefined) player.secondNationality = found.secondNationality;
+  }
+}

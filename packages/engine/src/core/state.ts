@@ -1491,6 +1491,10 @@ function instantiatePlayers(seed: number, only?: (teamId: string) => boolean): G
       birthdate: entry.birthdate,
       positions: entry.positions.map((p) => ({ ...p })),
       ...(entry.homegrownCountry === undefined ? {} : { homegrownCountry: entry.homegrownCountry }),
+      ...(entry.nationality === undefined ? {} : { nationality: entry.nationality }),
+      ...(entry.secondNationality === undefined
+        ? {}
+        : { secondNationality: entry.secondNationality }),
       ...(entry.foot === undefined ? {} : { foot: entry.foot }),
       ...(entry.height === undefined ? {} : { height: entry.height }),
       ...(entry.weight === undefined ? {} : { weight: entry.weight }),

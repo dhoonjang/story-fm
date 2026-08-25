@@ -6,11 +6,14 @@ import {
   FORMATION_SLOTS,
   positionGroupOf,
   positionGroupOfPlayer,
+  isAssociation,
   type PositionGroup,
 } from "@story-fm/domain";
 import {
   CATALOG_AGE_REF,
+  checkPlayerNationality,
   deriveAxes,
+  deriveNationality,
   derivePositions,
   teamCatalog,
   isClubTeam,
@@ -514,5 +517,50 @@ describe("실선수 로스터 깊이 (30인+, 유망주 포함)", () => {
     }
     const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
     expect(mean(avgByTier[1]!)).toBeGreaterThan(mean(avgByTier[4]!));
+  });
+});
+
+/**
+ * 국적 — **한 명도 빠지지 않는다** (data/sources.md §4.1 · domain/nationality.ts).
+ *
+ * 이 축은 비어 있는 것을 허용할 수 없다: 등록 규정도 대표팀도 "국적을 모르는 선수"
+ * 갈래를 따로 들 수 없어서, 하나가 비면 그 위의 규칙이 통째로 서지 못한다. 그래서
+ * 시드가 답하지 않는 선수는 클럽 협회로 파생하고, 그 파생이 실제로 전원을 덮는지를
+ * 여기서 센다.
+ */
+describe("국적 — 시드와 파생이 전원을 덮는다", () => {
+  const seeds: RealPlayerSeed[] = [
+    ...Object.values(REAL_SQUADS).flat(),
+    ...Object.values(EU_SQUADS).flat(),
+    ...Object.values(MARKET_LEAGUE_SQUADS).flat(),
+  ];
+
+  it("시드에 적힌 국적 코드는 전부 협회 표에 있다", () => {
+    const bad = seeds.filter(
+      (s) =>
+        (s.nationality !== undefined && !isAssociation(s.nationality)) ||
+        (s.secondNationality !== undefined && !isAssociation(s.secondNationality)),
+    );
+    expect(bad.map((s) => `${s.nameEn}(${s.nationality}·${s.secondNationality})`)).toEqual([]);
+    // 둘째 국적은 첫째와 달라야 한다 — 같은 값이 두 칸에 있으면 EU 판정이 한 사실을 두 번 센다
+    expect(
+      seeds
+        .filter((s) => s.secondNationality !== undefined && s.nationality === s.secondNationality)
+        .map((s) => s.nameEn),
+    ).toEqual([]);
+  });
+
+  it("카탈로그의 모든 선수에게 국적이 서고, 아는 협회 코드다", () => {
+    expect(checkPlayerNationality(playerCatalog())).toEqual([]);
+  });
+
+  it("시드가 답하지 않으면 그 클럽 협회로 서고, 몇 번을 물어도 같은 값이다", () => {
+    expect(deriveNationality("arsenal", undefined)).toBe("ENG");
+    expect(deriveNationality("arsenal", undefined)).toBe("ENG");
+    expect(deriveNationality("realmadrid", undefined)).toBe("ESP");
+    // 시드에 값이 있으면 파생은 물러난다
+    expect(deriveNationality("arsenal", "BRA")).toBe("BRA");
+    // 카탈로그가 모르는 팀에는 협회가 없다
+    expect(deriveNationality("no-such-team", undefined)).toBeUndefined();
   });
 });
