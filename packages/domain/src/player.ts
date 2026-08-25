@@ -10,6 +10,15 @@ export const RATING_MAX = 99;
 /** 체력 눈금의 위끝 — 0~100, 높을수록 좋다 */
 export const CONDITION_MAX = 100;
 
+/**
+ * **경기 감각 눈금의 위끝 — 그리고 기준점이다** (player.md §5.4).
+ *
+ * 전력 계수는 여기서 0이고 아래로만 깎이므로, 값이 없는 선수(옛 세이브)를 이 값으로
+ * 읽으면 셈이 한 칸도 달라지지 않는다. "보존한다"가 스키마가 열린다는 뜻이 아니라
+ * **숫자가 그대로다**라는 뜻이 되는 자리다.
+ */
+export const SHARPNESS_MAX = 100;
+
 /** 0~99 능력치 스케일 — 선수·감독 공통 (player.md §1) */
 export const RatingSchema = z.number().int().min(0).max(RATING_MAX);
 
@@ -1809,8 +1818,35 @@ export const PlayerStateSchema = z.object({
    * 옛 세이브엔 없다 — 없으면 0으로 읽고 버전을 올리지 않는다.
    */
   outOfPositionRun: z.number().int().min(0).optional(),
+  /**
+   * **경기 감각 0~100** — 지금 이 선수가 90분의 리듬 안에 있는가 (player.md §5.4).
+   *
+   * 체력과 다른 축이다. 몸의 준비 상태는 하루 쉬면 돌아오지만 경기 감각은 그렇지
+   * 않다 — 두 달을 재활실에서 보낸 선수는 다리가 다 나은 날에도 리듬을 잃은 채로
+   * 돌아온다. **출전 분이 올리고 결장이 깎으며**, 시즌 전환이 낮은 값으로 리셋해
+   * 프리시즌이 그것을 채운다.
+   *
+   * ⚠️ **정수가 아니다.** 하루치 감쇠는 평형 근처에서 0.2 남짓이라, 정수로 반올림해
+   * 저장하면 그 구간에서 값이 통째로 멈춘다 — 폼과 같은 이유로 실수로 둔다.
+   *
+   * 옛 세이브엔 없다 — 없으면 `SHARPNESS_MAX`(기준점)로 읽고 버전을 올리지 않는다.
+   */
+  sharpness: z.number().min(0).max(SHARPNESS_MAX).optional(),
 });
 export type PlayerState = z.infer<typeof PlayerStateSchema>;
+
+/**
+ * 저장된 경기 감각을 읽는 **유일한 문** — 없으면 기준점이다.
+ * 읽는 자리가 저마다 `?? 100`을 적으면 기본값이 코드베이스에 흩어진다.
+ */
+export function sharpnessOf(state: Pick<PlayerState, "sharpness">): number {
+  return state.sharpness ?? SHARPNESS_MAX;
+}
+
+/** 경기 감각을 0~100 안으로 — 모든 변화가 이 문을 지난다 */
+export function clampSharpness(value: number): number {
+  return Math.max(0, Math.min(SHARPNESS_MAX, value));
+}
 
 /** 체력을 0~100 안으로 — 모든 변화가 이 문을 지난다 */
 export function clampCondition(value: number): number {
@@ -1855,6 +1891,45 @@ const CONDITION_BAND_KO: Record<ConditionBand, string> = {
 /** 체력 구간 라벨 — 숫자만 보면 "70이 좋은 건가?"가 된다 */
 export function conditionLabel(condition: number): string {
   return CONDITION_BAND_KO[conditionBand(condition)];
+}
+
+/**
+ * 경기 감각 구간 — **화면·조회·심경이 같은 경계를 쓴다** (player.md §5.4).
+ *
+ * 이 축은 숫자로 내보내지 않고 등급으로만 선다. 감독이 관측할 수 있는 것은 출전
+ * 기록과 부상이지 "감각 73"이 아니고, 등급이면 그 두 사실에서 읽어 낼 수 있다.
+ */
+export type SharpnessBand = "sharp" | "rising" | "rusty" | "blunt";
+
+/** 각 구간이 시작되는 값 — 이 아래는 다음(더 무딘) 구간이다 */
+export const SHARPNESS_BAND_FLOOR = {
+  sharp: 80,
+  rising: 60,
+  rusty: 40,
+} as const;
+
+export function sharpnessBand(sharpness: number): SharpnessBand {
+  if (sharpness >= SHARPNESS_BAND_FLOOR.sharp) return "sharp";
+  if (sharpness >= SHARPNESS_BAND_FLOOR.rising) return "rising";
+  if (sharpness >= SHARPNESS_BAND_FLOOR.rusty) return "rusty";
+  return "blunt";
+}
+
+const SHARPNESS_BAND_KO: Record<SharpnessBand, string> = {
+  sharp: "실전",
+  rising: "올라옴",
+  rusty: "무딤",
+  blunt: "굳음",
+};
+
+/** 등급의 말 — 등급을 이미 손에 쥔 자리(심경 카드)가 부른다 */
+export function sharpnessBandLabel(band: SharpnessBand): string {
+  return SHARPNESS_BAND_KO[band];
+}
+
+/** 경기 감각 등급 라벨 — 명단·조회·심경이 같은 낱말을 쓴다 */
+export function sharpnessLabel(sharpness: number): string {
+  return sharpnessBandLabel(sharpnessBand(sharpness));
 }
 
 /** 가능 포지션 + 포지션 적응도 — 선수당 여러 개, isNatural은 **하나 이상** */

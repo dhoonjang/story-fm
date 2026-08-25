@@ -23,6 +23,7 @@ export type SortKey =
   | "adaptation"
   | "form"
   | "condition"
+  | "sharpness"
   | "rating";
 const ROLE_ORDER: Record<string, number> = { 선발: 0, 벤치: 1, 스쿼드: 2 };
 /**
@@ -91,6 +92,8 @@ export function SquadTable({
           return p.form;
         case "condition":
           return p.condition.value;
+        case "sharpness":
+          return p.sharpness;
         case "rating":
           // 기록 없는 선수는 정렬 맨 아래로 — 0.00과 "아직 없음"은 다르다
           return p.seasonRating ?? -1;
@@ -148,6 +151,13 @@ export function SquadTable({
           {th("adaptation", "적응", "hide-sm", "지금 맡은 자리에서 이 전술을 얼마나 소화하는가")}
           {th("form", "폼")}
           {th("condition", "체력")}
+          {/* 체력과 다른 축이다 — 잘 쉬어도 오래 못 뛰면 무뎌진다 (player.md §5.4) */}
+          {th(
+            "sharpness",
+            "감각",
+            "hide-sm",
+            "경기 감각 — 출전 분이 올리고 결장이 깎는다. 체력과 다른 축이다",
+          )}
           {th("rating", "평점", "hide-sm")}
         </tr>
       </thead>
@@ -171,7 +181,7 @@ export function SquadTable({
                  가리키는 셀렉터에 머리까지 걸려 첫 선수 대신 머리가 잡힌다.
                  첫 칸에는 긋지 않는다 — 표 머리 바로 아래에 선이 하나 더 서는 꼴이다 */
                 <tr className="tier-head" data-tier={TIER_SLUG[tierOf(p.id)]} aria-hidden>
-                  <td colSpan={9} />
+                  <td colSpan={10} />
                 </tr>
               )}
             <tr
@@ -347,6 +357,10 @@ export function SquadTable({
               <td title={moodSentence(p.mood)}>
                 <ConditionBar c={p.condition} />
               </td>
+              {/* 숫자가 아니라 등급이다 — 감독이 읽는 사실은 "최근에 뛰었나"이지 73이 아니다 */}
+              <td className="hide-sm">
+                <span className={`sharpness ${p.sharpnessBand}`}>{p.sharpnessLabel}</span>
+              </td>
               {/* 골 대신 평점 — 골 수는 행을 펼치면 시즌 기록에 그대로 있다 */}
               <td
                 className="hide-sm"
@@ -367,7 +381,7 @@ export function SquadTable({
                 className={`detail-row row-tier t-${tierOf ? TIER_SLUG[tierOf(p.id)] : "squad"}`}
                 data-testid={`squad-detail-${p.id}`}
               >
-                <td colSpan={9}>{renderDetail(p)}</td>
+                <td colSpan={10}>{renderDetail(p)}</td>
               </tr>
             )}
           </Fragment>

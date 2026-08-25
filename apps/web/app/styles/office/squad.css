@@ -1643,3 +1643,27 @@
 .squad-table td:first-child {
   width: 34%;
 }
+
+/**
+ * 경기 감각 — **체력 옆의 한 낱말**. 숫자를 세우지 않는 이유는 감독이 읽는 사실이
+ * "최근에 뛰었나"이지 73이 아니기 때문이다 (player.md §5.4).
+ *
+ * 색은 체력 막대와 같은 방향으로 읽힌다: 좋은 쪽이 초록, 굳은 쪽이 붉다.
+ * 가운데 두 등급은 색을 쓰지 않는다 — 스쿼드의 절반이 늘 그 자리라, 칠하면
+ * 표 전체가 색으로 덮여 정작 손을 써야 하는 "굳음"이 묻힌다.
+ */
+.squad-table .sharpness {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.squad-table .sharpness.sharp {
+  color: var(--accent);
+}
+.squad-table .sharpness.rising {
+  color: var(--text);
+}
+.squad-table .sharpness.blunt {
+  color: var(--danger);
+}

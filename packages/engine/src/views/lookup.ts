@@ -18,6 +18,8 @@ import {
   associationName,
   boardExpectationLine,
   conditionLabel,
+  sharpnessLabel,
+  sharpnessOf,
   describeReputation,
   familiarityLabel,
   footLabel,
@@ -917,7 +919,8 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
 
   if (knowledge === "own") {
     lines.push(
-      `컨디션: 폼 ${formLabel(p.state.form)} · 체력 ${p.state.condition} (${conditionLabel(p.state.condition)})`,
+      `컨디션: 폼 ${formLabel(p.state.form)} · 체력 ${p.state.condition} (${conditionLabel(p.state.condition)})` +
+        ` · 경기 감각 ${sharpnessLabel(sharpnessOf(p.state))}`,
       `심경: ${moodLine(state, p)}`,
       `소화 포지션: ${p.positions
         .map((x) => `${x.position}${x.isNatural ? "*" : ""}${x.proficiency}`)
@@ -1069,7 +1072,7 @@ function assignedRow(
   return (
     `  ${position.padEnd(4)} ${p.name}${armband(p)} (${p.id}) ${ageOf(p.birthdate, state.date)}세 · ` +
     `${roleLabel(position, roleId)} · OVR${p.attributes.overall} 자리적합${roleFit(p.attributes, position, roleId)} 포지션적응${proficiencyAt(p, position)} ` +
-    `전술적응${familiarity} · 폼 ${formLabel(p.state.form)} 체력${p.state.condition}` +
+    `전술적응${familiarity} · 폼 ${formLabel(p.state.form)} 체력${p.state.condition} 감각 ${sharpnessLabel(sharpnessOf(p.state))}` +
     ` · ${statLine(stat)}` +
     (flags.length > 0 ? ` · ⚠${flags.join(" · ")}` : "")
   );
