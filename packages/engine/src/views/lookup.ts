@@ -38,7 +38,7 @@ import { entrantsOf } from "../competition/europe";
 import { careerOf, type CareerTotals } from "../squad/career";
 import { formLabel } from "../squad/form";
 import { INJURY_SEVERITY_KO } from "../squad/injury";
-import { moodAnchor, moodOf } from "../squad/mood";
+import { issueReasonText, moodAnchor, moodOf } from "../squad/mood";
 import {
   isHomegrownFor,
   occupiesSquadList,
@@ -258,7 +258,11 @@ function ourRow(state: GameState, p: GamePlayer): string {
     : suspension
       ? ` 정지(${suspension.lengthMatches - suspension.served}경기)`
       : "";
-  const issue = state.issues.some((i) => i.gamePlayerId === p.id) ? " ⚠불만" : "";
+  // 무엇에 대한 불만인지까지 낸다 — 사유가 여덟이라 "불만" 한 마디로는 할 일이 안 보인다
+  const grievance = state.issues.find((i) => i.gamePlayerId === p.id);
+  const reason = grievance ? issueReasonText(grievance) : null;
+  // 사유 없는 옛 불만은 사유 없이 낸다
+  const issue = grievance ? (reason ? ` ⚠불만(${reason})` : " ⚠불만") : "";
   return (
     `${p.id} ${p.name} ${ageOf(p.birthdate, state.date)}세 ${naturalPositionOf(p).position} ` +
     `${physiqueLabel(p.height, p.weight)}(${footLabel(p.foot)}) ` +
@@ -936,11 +940,14 @@ function assignedRow(
   const injury = openInjury(state, p.id);
   const suspension = activeSuspension(state, p.id);
   const stat = seasonStatOf(state, p.id);
+  const grievance = state.issues.find((i) => i.gamePlayerId === p.id);
+  const reason = grievance ? issueReasonText(grievance) : null;
   const flags = [
     injury ? `부상(${injury.bodyPart}, ~${injury.expectedReturn})` : null,
     suspension ? `정지 ${suspension.lengthMatches - suspension.served}경기` : null,
     yellows >= YELLOWS_PER_SUSPENSION - 1 ? `경고 ${yellows}장(정지 임박)` : null,
-    state.issues.some((i) => i.gamePlayerId === p.id) ? "불만" : null,
+    // 사유 없는 옛 불만은 사유 없이 낸다
+    grievance ? (reason ? `불만(${reason})` : "불만") : null,
   ].filter((x): x is string => x !== null);
   return (
     `  ${position.padEnd(4)} ${p.name}${p.isCaptain ? "(주장)" : ""} (${p.id}) ${ageOf(p.birthdate, state.date)}세 · ` +
