@@ -1014,6 +1014,33 @@ export function userPlayers(state: GameState): GamePlayer[] {
 }
 
 /**
+ * 우리가 **임대 보낸** 선수인가 — 계약은 우리 것이고 `teamId`만 남의 것이다
+ * (→ docs/simulation/transfer.md §2).
+ *
+ * ⚠️ 빌려 **온** 임대는 우리 `teamId`를 달아도 이게 아니다. 두 방향이 같은 칸
+ * (`loan`)에 앉으므로 방향을 읽지 않으면 우리에게 온 임대가 함께 걸린다.
+ */
+export function onLoanFromUs(state: GameState, player: GamePlayer): boolean {
+  return player.loan?.fromTeamId === state.userTeamId;
+}
+
+/**
+ * **감독이 자기 선수로 세는 사람** — 우리 스쿼드에 있거나 우리가 임대 보냈다.
+ *
+ * 안개(지식 눈금) · 월간 성장 · 조회 도구 · 명단 화면이 전부 이 문을 지난다. 한
+ * 자리만 소속(`teamId`)으로 가르면 나머지와 어긋난다 — 능력치는 정확한데 검색에는
+ * 안 나오거나, 화면에는 서는데 자라지 않는다.
+ */
+export function isOurPlayer(state: GameState, player: GamePlayer): boolean {
+  return player.teamId === state.userTeamId || onLoanFromUs(state, player);
+}
+
+/** 그 사람들 전부 — 우리 스쿼드 + 우리가 임대 보낸 선수 */
+export function ourPlayers(state: GameState): GamePlayer[] {
+  return state.players.filter((p) => isOurPlayer(state, p));
+}
+
+/**
  * **감독이 지금 맡고 있는 팀** — 경질돼 무직이면 없다 (career.md §5.1).
  *
  * `userTeamId`는 경질된 뒤에도 옛 구단을 가리킨다. 그 구단의 선수단과 장부는
