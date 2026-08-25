@@ -740,7 +740,7 @@ export function advanceSegment(state: GameState): {
         ...squads.away.bench,
       ].map((p) => p.id),
     ),
-    // 개인 지시 — 체력 배율도 지시를 탄다 (무리한 지시는 더 지치게)
+    // 개인 지시 — 존 전력 밖에서 다리(무리한 지시는 더 지치게)와 카드(`careful`)가 탄다
     directives: {
       home: directivesOnPitch(state, match.homeTeamId, pending.ledger.home.onPitch),
       away: directivesOnPitch(state, match.awayTeamId, pending.ledger.away.onPitch),
