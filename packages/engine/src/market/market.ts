@@ -380,6 +380,25 @@ function fuzz(seed: number, key: string, value: number, margin: number): number 
 }
 
 /**
+ * 금액에 걸리는 흐림 — **폭이 그 금액에 비례한다**(눈금 1%p당 0.4%). 확률과 달리
+ * 금액은 자릿수가 제각각이라, ±20으로 흔들면 £200M은 하나도 흐려지지 않고
+ * £500k는 통째로 뒤집힌다.
+ */
+function fuzzMoney(state: GameState, key: string, value: number, margin: number): number {
+  return Math.max(0, Math.round(fuzz(state.seed, key, value, margin * value * 0.004)));
+}
+
+/**
+ * **관측 시장가** — 지식 수준만큼 흐린 값. `dealOdds`가 내는 `marketValue`와 같은
+ * 값이다: 선수 검색이 값으로 거르고 줄 세운 결과와 확률 조회가 부르는 숫자가
+ * 갈리면, 어느 한쪽이 안개를 뚫는다 (docs/data/player.md §10).
+ */
+export function observedMarketValue(state: GameState, player: GamePlayer): number {
+  const margin = ODDS_MARGIN[knowledgeOf(state, player.id)];
+  return fuzzMoney(state, `mv:${player.id}`, marketValueOf(state, player), margin);
+}
+
+/**
  * 딜 성공 확률 — 두 관문의 곱.
  *
  * `p_club`(파는 구단이 응할 확률) × `p_player`(선수가 응할 확률) × 창 마감 압박.
@@ -737,14 +756,8 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
   return {
     latitude: pitch?.latitude ?? 0,
     probability: shown,
-    marketValue: Math.max(
-      0,
-      Math.round(fuzz(state.seed, `mv:${player.id}`, marketValue, margin * marketValue * 0.004)),
-    ),
-    askingPrice: Math.max(
-      0,
-      Math.round(fuzz(state.seed, `ap:${player.id}`, askingPrice, margin * askingPrice * 0.004)),
-    ),
+    marketValue: fuzzMoney(state, `mv:${player.id}`, marketValue, margin),
+    askingPrice: fuzzMoney(state, `ap:${player.id}`, askingPrice, margin),
     wageExpectation,
     knowledge,
     fuzzy: margin > 0,

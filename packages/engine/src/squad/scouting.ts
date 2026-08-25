@@ -61,6 +61,19 @@ export const KNOWLEDGE_KO: Record<Knowledge, string> = {
 };
 
 /**
+ * 눈금의 순서 — **얼마나 아는가**로 줄을 세운다. `OBSERVATION_MARGIN`이 좁아지는
+ * 순서 그대로다(`adapting`은 스카우트 폭에서 시작해 적응만큼 더 걷힌다).
+ * "스카우팅을 마친 선수만"처럼 **최소 수준**을 묻는 자리가 이 자를 읽는다.
+ */
+export const KNOWLEDGE_RANK: Record<Knowledge, number> = {
+  rumoured: 0,
+  seen: 1,
+  scouted: 2,
+  adapting: 3,
+  own: 4,
+};
+
+/**
  * 축의 **관측 가능성** — 히든 레이어의 대체물 (player.md §9).
  * 경계선은 *실행 vs 판단*이다: 몸과 발로 하는 건 경기에서 드러나고,
  * 머리와 마음으로 하는 건 표본이 필요하다.

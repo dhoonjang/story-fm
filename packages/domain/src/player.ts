@@ -208,6 +208,14 @@ export function footLabel(foot: Foot | undefined): string {
   return `왼발 ${foot.left} · 오른발 ${foot.right}`;
 }
 
+/** 주발 — `footLabel`이 가르는 그 세 갈래. 데이터가 없으면 부를 이름이 없다(null) */
+export type StrongFoot = "left" | "right" | "both";
+export function strongFootOf(foot: Foot | undefined): StrongFoot | null {
+  if (!foot) return null;
+  if (isTwoFooted(foot)) return "both";
+  return foot.left > foot.right ? "left" : "right";
+}
+
 /**
  * 두 발 차이 1당 보정 폭. 차이가 클수록 좌우가 갈린다 —
  * 5/4는 ±1, 5/3·5/2는 ±2, 5/1은 ±3. 양발(5/5)은 0이다.
