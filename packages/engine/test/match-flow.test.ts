@@ -16,6 +16,7 @@ import {
   tacticalXpFor,
   TACTICAL_XP_CAP,
   TACTICAL_XP_PER_GOAL,
+  playerById,
   playersOf,
   proficiencyAt,
   refreshPacket,
@@ -978,6 +979,72 @@ describe("감독 경기 마감의 대칭 (match.md §6)", () => {
 
     // 남의 팀 정지·무드는 브리핑하지 않는다 — 조회 도구가 알려 준다
     expect(digest.ours.some((d) => d.includes(sentOffName))).toBe(false);
+  });
+
+  /**
+   * 마일스톤은 **문턱을 넘는 그 경기의 것**이고 **감독 팀 선수의 것**이다
+   * (match.md §6 · game-state.md §3.4). 둘 다 조용히 어긋나는 종류라 고정한다 —
+   * 상대 쪽에도 행이 쌓이면 시즌마다 수백 행이 우리 기록을 묻고, 문턱을 나중에
+   * 훑어 세면 "언제 넘었나"가 사라진다.
+   */
+  it("문턱을 넘는 경기에만, 그리고 우리 선수에게만 마일스톤이 선다", () => {
+    const state = atMatchday(42, { afterPreseason: true });
+    expect(startMatch(state).ok).toBe(true);
+    const mySide = userSide(state);
+    const oppSide = mySide === "home" ? "away" : "home";
+    const mine = state.pendingMatch!.ledger[mySide].onPitch;
+    const theirs = state.pendingMatch!.ledger[oppSide].onPitch;
+    const matchId = state.pendingMatch!.matchId;
+    const [ours, theirScorer] = [mine[10]!, theirs[10]!];
+    const oppTeamId = playerById(state, theirScorer)!.teamId;
+
+    /**
+     * 두 선수를 각자 팀에서 99경기에 세운다 — 지난 시즌 행을 하나 얹는다.
+     * 이 경기 하나로 정확히 100이 되므로 경계가 이 경기에 걸린다.
+     */
+    const standAt99 = (playerId: string, teamId: string) => {
+      const already = state.seasonStats
+        .filter((x) => x.gamePlayerId === playerId && x.teamId === teamId)
+        .reduce((sum, x) => sum + x.apps, 0);
+      state.seasonStats.push({
+        gamePlayerId: playerId,
+        season: state.season - 1,
+        teamId,
+        apps: 99 - already,
+        goals: 0,
+      });
+    };
+    standAt99(ours, state.userTeamId);
+    standAt99(theirScorer, oppTeamId);
+
+    /** 양쪽에 세 골씩, 전반 안에 — 해트트릭도 같은 자리에서 갈린다 */
+    const goals = [10, 20, 30].flatMap((minute) => [
+      { minute, type: "goal" as const, team: mySide, actors: [ours], causes: [] },
+      {
+        minute: minute + 2,
+        type: "goal" as const,
+        team: oppSide,
+        actors: [theirScorer],
+        causes: [],
+      },
+    ]);
+    expect(applyMatchEvents(state, goals).ok).toBe(true);
+
+    const digest = closeMatch(state);
+
+    const rows = state.milestones ?? [];
+    const mineRows = rows.filter((m) => m.gamePlayerId === ours && m.matchId === matchId);
+    // 100번째 경기이자 그 구단에서의 첫 골이다 — 데뷔는 서지 않는다(이미 99경기다)
+    expect(mineRows.map((m) => `${m.code}:${m.value}`).sort()).toEqual([
+      "apps:100",
+      "first-goal:1",
+      "hat-trick:3",
+    ]);
+    expect(mineRows.every((m) => m.teamId === state.userTeamId)).toBe(true);
+    // 상대는 같은 경기에서 같은 문턱을 넘었지만 장부에는 남지 않는다
+    expect(rows.filter((m) => m.gamePlayerId === theirScorer)).toHaveLength(0);
+    // 그 경기의 말풍선이 한 줄로 그것을 말한다 — 선수마다 나누지 않는다
+    expect(digest.ours.filter((d) => d.startsWith("기록: "))).toHaveLength(1);
   });
 
   /**
