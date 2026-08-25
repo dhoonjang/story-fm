@@ -59,6 +59,18 @@ export function openBoardDemand(state: GameState): BoardDemand | null {
 }
 
 /**
+ * **마지막으로 판정이 끝난 요청** — 이행이든 불이행이든. 요청은 창 순서대로 쌓이므로
+ * 뒤에서 첫 번째가 가장 최근의 판정이다.
+ *
+ * 보드 대치 아크가 절정을 가를 때 이것을 읽는다 (people.md §9). 지난 요청 전부에서
+ * 불이행을 찾으면 세 시즌 전의 한 번이 대치를 영원히 절정에 묶어 둔다.
+ */
+export function lastJudgedDemand(state: GameState): BoardDemand | null {
+  const judged = (state.boardDemands ?? []).filter((d) => d.status !== "open");
+  return judged[judged.length - 1] ?? null;
+}
+
+/**
  * 하루치 보드 요청 — tick이 매일 부른다 (감독이 있는 날만).
  *
  * 순서가 뜻을 갖는다: **판정이 발행보다 먼저다** — 창이 닫혀 기한이 지난 요청을
