@@ -77,6 +77,7 @@ import {
   dropDeferredScout,
 } from "../squad/scouting";
 import { creditSettling, settlingAnchor, settlingOf } from "../squad/settling";
+import { dressingRoomFactor, dressingRoomVoice, leaderGroupOf } from "../squad/hierarchy";
 import {
   groupOf,
   isInjured,
@@ -266,7 +267,9 @@ function applySquadLevel(state: GameState, player: GamePlayer, level: "first" | 
   const dropped = tactics.assignments.find((a) => a.playerId === player.id);
   if (dropped) shelveFamiliarity(tactics, dropped, state.date);
   tactics.assignments = tactics.assignments.filter((a) => a.playerId !== player.id);
+  // 2군에는 완장이 없다 — 라커룸 서열의 후보도 1군뿐이다 (people.md §5-1)
   if (player.isCaptain) player.isCaptain = false;
+  if (player.isViceCaptain === true) player.isViceCaptain = undefined;
   pushNarrative(state, `${player.name} 2군 이동`, 2);
   /**
    * **배치에서 빠지는 것까지 결과로 말한다** (→ docs/data/team.md §6). 2군은 배치를
@@ -607,6 +610,22 @@ function leadershipFactor(state: GameState): number {
   );
 }
 
+/**
+ * **그 말이 울리는 방** — 팀토크의 계수는 둘이다 (career.md §2 · people.md §5-1).
+ * 감독의 리더십이 말을 하는 사람이라면 이쪽은 라커룸이고, 완장과 리더 그룹의
+ * 리더십이 정한다.
+ *
+ * 경기 중에는 **그 경기의 명단**이 방이다 — 주장이 결장한 경기의 하프타임은
+ * 부주장의 리더십이 계수를 정한다.
+ */
+function matchSquadIds(state: GameState): ReadonlySet<string> | undefined {
+  const pending = state.pendingMatch;
+  if (!pending) return undefined;
+  const side =
+    pending.packet.home.teamId === state.userTeamId ? pending.ledger.home : pending.ledger.away;
+  return new Set([...side.onPitch, ...side.bench]);
+}
+
 /** 팀토크를 꺼낸 자리 — 이미 했다는 말이 어느 자리를 가리키는지 밝힌다 */
 const OCCASION_KO: Record<TeamTalkOccasion, string> = {
   pre: "경기 전",
@@ -645,8 +664,16 @@ export function applyTeamTalk(
   state.manager.teamTalkedOn = { ...talkedOn, [input.occasion]: state.date };
 
   const base = TEAM_TALK_BASE[input.outcome];
+  const present = matchSquadIds(state);
+  const room = dressingRoomFactor(state, state.userTeamId, present);
+  const voice = dressingRoomVoice(state, state.userTeamId, present);
+  // 그 방에 선 완장 — 주장이 없는 자리에서는 부주장이 그 이름이다
+  const wearing = userPlayers(state).filter((p) => present === undefined || present.has(p.id));
+  const captainName = (
+    wearing.find((p) => p.isCaptain) ?? wearing.find((p) => p.isViceCaptain === true)
+  )?.name;
   const delta = Math.round(
-    base * (input.intensity / TALK_INTENSITY_PIVOT) * leadershipFactor(state),
+    base * (input.intensity / TALK_INTENSITY_PIVOT) * leadershipFactor(state) * room,
   );
   const bounded = Math.max(-TEAM_TALK_MORALE_BOUND, Math.min(TEAM_TALK_MORALE_BOUND, delta));
   for (const p of userPlayers(state)) {
@@ -685,6 +712,20 @@ export function applyTeamTalk(
       head: `${OCCASION_KO[input.occasion]} 팀토크`,
       items: [
         item({ label: "팀 사기", text: signed(bounded), delta: bounded }),
+        /**
+         * **폭이 왜 그만큼이었는지가 그 자리에 남는다** — 라커룸 계수는 감독이
+         * 완장을 어디에 채웠는지의 결과라, 숫자만 돌려주면 주장 지명이 다시
+         * 서사에서만 뜻을 갖는 값이 된다 (people.md §5-1).
+         */
+        ...(voice === null
+          ? []
+          : [
+              item({
+                label: "라커룸",
+                text: `×${room.toFixed(2)}`,
+                note: `${captainName ?? "완장 공석"} · 리더십 ${Math.round(voice)}`,
+              }),
+            ]),
         ...(settled > 0 ? [item({ label: "적응", text: `${settled}명` })] : []),
       ],
     },
@@ -1778,39 +1819,90 @@ export function setSetPieceTakers(
 /** 완장을 **처음** 채운 날의 체력 — 라커룸 한가운데 서는 일이다 (career.md §2) */
 const CAPTAIN_FIRST_LIFT = 4;
 
-export function setCaptain(state: GameState, playerId: string): SkillResult {
-  const pick = pickOurPlayer(state, playerId);
-  if (!pick.ok) return pick;
-  const player = pick.player;
-  // 팀당 1명 — 기존 주장 해제
-  for (const p of userPlayers(state)) p.isCaptain = false;
-  player.isCaptain = true;
-  /**
-   * **체력 보너스는 선수당 첫 지명에만** (career.md §2). 완장은 몇 번이고 오가지만
-   * 처음 채워지는 순간의 무게는 한 번뿐이다 — 문이 없으면 두 선수를 번갈아 지명하는
-   * 것만으로 둘 다 체력이 100이 된다.
-   */
-  if (player.state.captainedOn === undefined) {
-    player.state.captainedOn = state.date;
-    player.state.condition = clampCondition(player.state.condition + CAPTAIN_FIRST_LIFT);
+/** 완장을 채운 사람의 근거 한 줄 — 리더십과 재적이 결과 항목에 그대로 선다 */
+function armbandNote(state: GameState, player: GamePlayer): string {
+  const row = leaderGroupOf(state, player.teamId).find((r) => r.playerId === player.id);
+  const tenure = row && row.seasons > 0 ? ` · ${row.seasons}시즌 ${row.apps}경기` : "";
+  return `리더십 ${player.attributes.leadership}${tenure}`;
+}
+
+/**
+ * **완장은 둘이다** — 주장과 부주장 (→ docs/data/people.md §5-1).
+ *
+ * 서열은 저장하지 않고 파생하지만 이 둘만은 저장한다: 장부 어디에서도 파생되지 않는
+ * **감독의 결정**이기 때문이다. 한 요청이 둘 다 옮길 수 있고, 말한 자리만 바뀐다 —
+ * `vice: null`은 부주장 지정을 푼다.
+ */
+export function setCaptain(
+  state: GameState,
+  input: { playerId?: string | null; vice?: string | null },
+): SkillResult {
+  const items: SkillBriefItem[] = [];
+  const notes: string[] = [];
+
+  if (input.playerId !== undefined && input.playerId !== null) {
+    const pick = pickOurPlayer(state, input.playerId);
+    if (!pick.ok) return pick;
+    const player = pick.player;
+    // 팀당 1명 — 기존 주장 해제. 부주장이 완장을 올려 받으면 그 자리는 빈다
+    for (const p of userPlayers(state)) p.isCaptain = false;
+    player.isCaptain = true;
+    if (player.isViceCaptain === true) player.isViceCaptain = undefined;
+    /**
+     * **체력 보너스는 선수당 첫 지명에만** (career.md §2). 완장은 몇 번이고 오가지만
+     * 처음 채워지는 순간의 무게는 한 번뿐이다 — 문이 없으면 두 선수를 번갈아 지명하는
+     * 것만으로 둘 다 체력이 100이 된다.
+     */
+    if (player.state.captainedOn === undefined) {
+      player.state.captainedOn = state.date;
+      player.state.condition = clampCondition(player.state.condition + CAPTAIN_FIRST_LIFT);
+    }
+    // 새 영입에게 완장을 채우는 건 라커룸 한가운데 세우는 일이다 (settling.ts)
+    const settled = creditSettling(state, player.id, "captain") > 0;
+    const settling = settled ? settlingOf(state, player.id) : null;
+    notes.push(`${player.name}을(를) 주장으로 지명했습니다`);
+    items.push(item({ label: "주장", text: player.name, note: armbandNote(state, player) }));
+    if (settling) {
+      const percent = Math.round(settling.progress * 100);
+      notes.push(`적응 ${percent}%`);
+      items.push(item({ label: "적응", text: `${percent}%` }));
+    }
   }
-  // 새 영입에게 완장을 채우는 건 라커룸 한가운데 세우는 일이다 (settling.ts)
-  const settled = creditSettling(state, player.id, "captain") > 0;
-  const settling = settled ? settlingOf(state, player.id) : null;
+
+  if (input.vice !== undefined) {
+    if (input.vice === null) {
+      const before = userPlayers(state).find((p) => p.isViceCaptain === true);
+      if (before) {
+        before.isViceCaptain = undefined;
+        notes.push("부주장 지정을 해제했습니다");
+        items.push(item({ label: "부주장", text: "지정 해제" }));
+      }
+    } else {
+      const pick = pickOurPlayer(state, input.vice);
+      if (!pick.ok) return pick;
+      const vice = pick.player;
+      if (vice.isCaptain) {
+        return {
+          ok: false,
+          message: `${vice.name}은(는) 이미 주장입니다 — 완장은 한 사람에 하나입니다`,
+        };
+      }
+      for (const p of userPlayers(state)) p.isViceCaptain = undefined;
+      vice.isViceCaptain = true;
+      /**
+       * **부주장에는 체력도 정착 크레딧도 붙지 않는다** (career.md §2) — 완장 둘에
+       * 같은 값을 매기면 감독이 두 번 받으려고 두 자리를 채운다.
+       */
+      notes.push(`${vice.name}을(를) 부주장으로 지명했습니다`);
+      items.push(item({ label: "부주장", text: vice.name, note: armbandNote(state, vice) }));
+    }
+  }
+
+  if (items.length === 0) return { ok: true, message: "바뀐 완장이 없습니다", unchanged: true };
   return {
     ok: true,
-    message:
-      `${player.name}을(를) 주장으로 지명했습니다` +
-      (settling ? ` · 적응 ${Math.round(settling.progress * 100)}%` : ""),
-    brief: {
-      head: "주장 지정",
-      items: [
-        item({ label: "주장", text: player.name }),
-        ...(settling
-          ? [item({ label: "적응", text: `${Math.round(settling.progress * 100)}%` })]
-          : []),
-      ],
-    },
+    message: notes.join(" · "),
+    brief: { head: "완장", items },
   };
 }
 

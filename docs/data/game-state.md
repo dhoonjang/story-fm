@@ -171,7 +171,7 @@
 | 엔티티                           | 무엇                                                                                               | 정의                |
 | -------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------- |
 | `teams` `GameTeam`               | AI 전술 역량치 · 현 감독 이름/부임일 + 카탈로그에서 복사한 정체성(이름·약칭·소속·체급·구장·브랜드) | `domain/team.ts`    |
-| `players` `GamePlayer`           | 16축·상태·포지션 목록·주장·임대·성장 캐리 + 국적(협회 코드)·홈그로운 협회                          | `domain/player.ts`  |
+| `players` `GamePlayer`           | 16축·상태·포지션 목록·주장·부주장·임대·성장 캐리 + 국적(협회 코드)·홈그로운 협회                   | `domain/player.ts`  |
 | ↳ `PlayerAttributes`             | 16축 + `overall`(파생 캐시) + `potential`                                                          | `domain/player.ts`  |
 | ↳ `PlayerState`                  | 폼(−1\~1) · 체력(0\~100) · 부상 성향 · 심경 한 줄                                                  | `domain/player.ts`  |
 | ↳ `PlayerPosition`               | 가능 포지션 + 적응도 + `isNatural`(하나 이상)                                                      | `domain/player.ts`  |

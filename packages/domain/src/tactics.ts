@@ -978,9 +978,13 @@ export type AssignmentRole = z.infer<typeof AssignmentRoleSchema>;
  * 팀 전체의 성향이라면 이쪽은 **특정 상대·특정 선수를 겨눈 지시**다.
  *
  * 이득·대가·체력 소모의 계수는 전부 `packages/sim/src/directives.ts`의
- * `DIRECTIVE_TUNING` 한 표에 있다. **종류를 늘리지 않는다** — 이 목록은 감독이
- * 말할 법한 것의 목록이지 효과의 목록이 아니라서, 자연어의 다양함은 `instruction`이
- * 받고 장부는 이 다섯으로 접힌다.
+ * `DIRECTIVE_TUNING` 한 표에 있다.
+ *
+ * **자연어를 옮길 그릇이 부족할 때만 늘린다.** 이 목록은 감독이 말할 법한 것의
+ * 목록이지 효과의 목록이 아니라서, 표현의 다양함은 `instruction`이 받고 장부는 여기로
+ * 접힌다 — 같은 뜻의 말에 갈래를 하나 더 파는 것은 접는 일을 그만두는 것이다.
+ * 갈래가 서는 것은 **접을 곳이 아예 없을 때**뿐이고, 그때는 그 갈래가 판에서 움직이는
+ * 자리가 다른 넷과 달라야 한다 (`careful`은 존 전력이 아니라 카드 가중을 움직인다).
  */
 export const PLAYER_DIRECTIVE_KINDS = [
   /** 상대 한 명을 전담 마크 — 그를 지우는 대신 본업을 덜 한다 */
@@ -993,6 +997,8 @@ export const PLAYER_DIRECTIVE_KINDS = [
   "stay_back",
   /** 적극적으로 공격 가담 */
   "join_attack",
+  /** 발을 뺀다 — 카드 위험을 낮추는 대신 그 자리의 수비가 얇아진다 */
+  "careful",
 ] as const;
 export const PlayerDirectiveKindSchema = z.enum(PLAYER_DIRECTIVE_KINDS);
 export type PlayerDirectiveKind = z.infer<typeof PlayerDirectiveKindSchema>;
@@ -1003,13 +1009,14 @@ export const PLAYER_DIRECTIVE_KO: Record<PlayerDirectiveKind, string> = {
   focus_play: "공격 집중",
   stay_back: "수비 위치 유지",
   join_attack: "공격 가담",
+  careful: "태클 자제",
 };
 
 /**
  * 지시의 **세기** — 종류가 접는 것은 *무엇을*이고, 이 축이 남기는 것은 *얼마나*다.
  *
  * "붙어서 아예 지워버려"와 "따라가진 말고 견제만"은 같은 `man_mark`지만 같은 지시가
- * 아니다. 종류가 다섯으로 접히는 것은 설계지만(자연어의 다양함은 `instruction`이
+ * 아니다. 종류가 몇으로 접히는 것은 설계지만(자연어의 다양함은 `instruction`이
  * 받는다) 정도까지 접히면 언어가 인터페이스인 게임에서 **감독이 고른 세기가 결과에
  * 남지 않는다.** 이득·대가·체력 소모가 함께 이 배수를 탄다 — 세게 걸수록 얻는 것만
  * 크는 것이 아니다 (`packages/sim/src/directives.ts`의 `DIRECTIVE_TUNING`).

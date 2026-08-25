@@ -7,6 +7,7 @@ import {
   type BracketStageView,
   financeOf,
   humanizePlayerIds,
+  loanPlayer,
   motmOf,
   type MatchReportPlayerView,
   setTraining,
@@ -95,6 +96,41 @@ describe("오피스 뷰 — 스쿼드", () => {
     });
     const row = buildOfficeViews(state).squad.players.find((p) => p.id === player.id)!;
     expect(row.available).toBe(false);
+  });
+});
+
+/**
+ * **임대 보낸 선수는 명단에 선다** — 계약이 우리 것이라 표가 소속이 아니라 계약을
+ * 읽는다 (transfer.md §2). 다만 부릴 수 있는 인원은 아니라, 인원을 세는 자리에
+ * 섞이면 감독이 없는 선수로 판을 짠다.
+ */
+describe("오피스 뷰 — 임대 보낸 선수", () => {
+  const state = createTestGame();
+  const target = userPlayers(state)
+    .filter((p) => p.squadLevel === "reserve" && p.positions[0]?.position !== "GK")
+    .sort((a, b) => a.attributes.overall - b.attributes.overall)[0]!;
+  const loaned = loanPlayer(state, { playerId: target.id, teamId: "chelsea" });
+  const views = buildOfficeViews(state);
+
+  it("명단에 임대 행이 서고 loan 칸이 채워진다", () => {
+    expect(loaned.ok, loaned.message).toBe(true);
+    const row = views.squad.players.find((p) => p.id === target.id);
+    expect(row).toBeDefined();
+    expect(row!.loan).not.toBeNull();
+    expect(row!.loan!.teamId).toBe("chelsea");
+    // 약칭이다 — 화면은 카탈로그를 못 읽는다
+    expect(row!.loan!.team).not.toBe("chelsea");
+    expect(row!.loan!.until).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("선발·벤치와 1·2군 인원에는 섞이지 않는다", () => {
+    const row = views.squad.players.find((p) => p.id === target.id)!;
+    expect(row.role).toBe("스쿼드");
+    expect(views.squad.players.filter((p) => p.role === "선발")).toHaveLength(11);
+    // 층으로 센 둘의 합이 임대 하나만큼 명단보다 적다
+    expect(views.squad.firstTeamCount + views.squad.reserveCount).toBe(
+      views.squad.players.length - 1,
+    );
   });
 });
 

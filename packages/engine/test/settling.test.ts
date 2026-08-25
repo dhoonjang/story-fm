@@ -343,11 +343,11 @@ describe("감독의 말도 정착을 움직인다 (SETTLING_EVENT)", () => {
     const state = createTestGame(11);
     const target = opponentsOf(state)[0]!;
     sign(state, target.id);
-    setCaptain(state, target.id);
+    setCaptain(state, { playerId: target.id });
     const once = settlingOf(state, target.id)!.eventCredit;
     expect(once).toBeGreaterThan(0);
-    setCaptain(state, playersOf(state, state.userTeamId)[0]!.id);
-    setCaptain(state, target.id);
+    setCaptain(state, { playerId: playersOf(state, state.userTeamId)[0]!.id });
+    setCaptain(state, { playerId: target.id });
     expect(settlingOf(state, target.id)!.eventCredit).toBe(once);
   });
 

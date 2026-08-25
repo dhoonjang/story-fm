@@ -1795,6 +1795,20 @@ export const PlayerStateSchema = z.object({
    * 옛 세이브엔 없다 — 없으면 요청한 적 없는 것으로 읽고 버전을 올리지 않는다.
    */
   transferRequestedOn: DateString.optional(),
+  /**
+   * **주 포지션 묶음 밖 선발이 이어진 경기 수** — 자리 밖 기용 불만의 유일한 원본
+   * (people.md §5).
+   *
+   * 원장은 누가 뛰었는지(`homeLineup`)만 알고 **어느 자리에 섰는지**는 모른다. 경기가
+   * 끝나면 그 배치는 사라지므로 연속을 파생할 표가 없다 — 강등의 `demotedOn`과 같은
+   * 이유로 저장한다.
+   *
+   * 제자리에 서거나 선발에서 빠지면 0으로 돌아간다. 날이 아니라 경기로 세는 이유는
+   * 그것이 선수가 실제로 겪는 단위여서다.
+   *
+   * 옛 세이브엔 없다 — 없으면 0으로 읽고 버전을 올리지 않는다.
+   */
+  outOfPositionRun: z.number().int().min(0).optional(),
 });
 export type PlayerState = z.infer<typeof PlayerStateSchema>;
 
@@ -1903,6 +1917,17 @@ export const GamePlayerSchema = z.object({
   state: PlayerStateSchema,
   /** 주장 — 팀당 최대 1명 (검증 레이어 보장) */
   isCaptain: z.boolean(),
+  /**
+   * 부주장 — 팀당 최대 1명. **완장은 둘이고 주장은 그중 하나다**
+   * (→ docs/data/people.md §5-1): 주장이 명단에 없는 경기의 완장을 잇고, 주장이
+   * 비면 승계 1순위이며, 리더 배수도 주장 다음으로 무겁다.
+   *
+   * 서열(리더 그룹)은 저장하지 않고 파생하는데 이 값만 저장하는 것은 **감독의
+   * 결정**이라서다 — 장부 어디에서도 파생되지 않는 유일한 라커룸 사실이다.
+   *
+   * 옛 세이브엔 없다 — 없으면 부주장이 없는 것으로 읽고 버전을 올리지 않는다.
+   */
+  isViceCaptain: z.boolean().optional(),
   /**
    * 임대 중이면 원소속과 복귀일 — `teamId`는 **지금 뛰는 팀**이라 임대를 나가면
    * 그쪽으로 바뀐다. 되돌릴 근거가 여기 있어야 복귀가 파생된다.
@@ -2062,6 +2087,55 @@ export function ageOf(birthdate: string, onDate: string): number {
   const m = d.getUTCMonth() - b.getUTCMonth();
   if (m < 0 || (m === 0 && d.getUTCDate() < b.getUTCDate())) age -= 1;
   return age;
+}
+
+// ── 라커룸 서열 점수 (people.md §5-1) ───────────────
+
+/**
+ * 서열 점수의 네 항이 나눠 갖는 지분 — **합이 1**이라 점수가 축과 같은 눈금(0~99)에
+ * 선다. 리더십이 절반을 넘게 가지고, 나머지 셋은 "라커룸이 그를 얼마나 오래 봤는가"라
+ * 같은 리더십이면 오래 있은 쪽이 앞선다.
+ */
+const STANDING_LEADERSHIP_SHARE = 0.55;
+const STANDING_AGE_SHARE = 0.15;
+const STANDING_APPS_SHARE = 0.2;
+const STANDING_TENURE_SHARE = 0.1;
+
+/** 나이가 라커룸의 무게가 되기 시작하는 나이와, 더는 늘지 않는 나이 */
+const STANDING_AGE_FLOOR = 21;
+const STANDING_AGE_CEIL = 30;
+
+/** 그 셔츠로 이만큼 뛰면 출전 항이 만점 — 100경기면 어느 라커룸에서도 고참이다 */
+const STANDING_APPS_CEIL = 100;
+
+/** 재적 항이 만점에 닿는 시즌 수 */
+const STANDING_TENURE_CEIL = 4;
+
+/** 0~1로 자른 뒤 축의 눈금으로 — 네 항이 같은 자를 쓴다 */
+function standingTerm(value: number, ceil: number): number {
+  return Math.max(0, Math.min(1, value / ceil)) * RATING_MAX;
+}
+
+/**
+ * 라커룸 서열 점수 (0~99) — **세계를 보지 않는 순수 규칙이라 도메인이 갖는다.**
+ * 새 게임의 첫 주장(`createGame`)과 매 순간의 리더 그룹(`engine/squad/hierarchy.ts`)이
+ * 같은 자를 써야 개막 전과 개막 후의 서열이 다른 뜻이 되지 않는다.
+ */
+export function standingScore(input: {
+  leadership: number;
+  age: number;
+  /** 그 셔츠의 통산 1군 출전 */
+  apps: number;
+  /** 그 셔츠로 기록이 남은 시즌 수 */
+  seasons: number;
+}): number {
+  return (
+    STANDING_LEADERSHIP_SHARE * input.leadership +
+    STANDING_AGE_SHARE *
+      standingTerm(input.age - STANDING_AGE_FLOOR, STANDING_AGE_CEIL - STANDING_AGE_FLOOR) +
+    STANDING_APPS_SHARE * standingTerm(input.apps, STANDING_APPS_CEIL) +
+    STANDING_TENURE_SHARE * standingTerm(input.seasons, STANDING_TENURE_CEIL)
+  );
 }
 
 // ── 스카우팅 보고서 — 채팅이 카드로 그리는 구조체 ──────

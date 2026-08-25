@@ -6,6 +6,7 @@ import type {
   MedicalConcern,
   Negotiation,
   NegotiationVerdict,
+  PlayerIssueReason,
   Transfer,
 } from "@story-fm/domain";
 import {
@@ -43,6 +44,9 @@ import {
   describeOdds,
   describeWait,
   loanLockOf,
+  isSeriousOffer,
+  MARKET_NEAR_HIGH,
+  MARKET_NEAR_LOW,
   marketValueOf,
   oddsText,
   responseDelayDays,
@@ -895,6 +899,16 @@ const REQUESTED_OFFER_CHANCE = 0.25;
 /** 사는 쪽이 시장가에서 깎고 들어오는 폭 — 급한 쪽이 파는 쪽인 걸 안다 */
 const REQUESTED_DISCOUNT = 0.3;
 
+/**
+ * 한 **사유의** 불만만 지운다 — 원인이 사라진 것만 푼다 (→ docs/data/people.md §5).
+ * 다른 사유의 불만은 그대로 남는다. 지운 것이 있으면 `true`.
+ */
+function clearIssueReason(state: GameState, playerId: string, reason: PlayerIssueReason): boolean {
+  const before = state.issues.length;
+  state.issues = state.issues.filter((i) => !(i.gamePlayerId === playerId && i.reason === reason));
+  return state.issues.length !== before;
+}
+
 /** 이 선수가 이적 리스트에 올라 있는가 */
 export function listingOf(state: GameState, playerId: string) {
   return state.transferList.find((l) => l.gamePlayerId === playerId) ?? null;
@@ -924,9 +938,17 @@ export function setTransferList(
   if (!input.listed) {
     if (index < 0) return { ok: false, message: `${player.name}은(는) 이적 리스트에 없습니다` };
     state.transferList.splice(index, 1);
+    /**
+     * **내리는 것이 원인을 지운다** (→ docs/data/people.md §5) — 불만을 세운 것이
+     * 등재 그 자체라 리스트에서 빠지면 함께 풀린다. 팔려 나가는 길은 여기를 지나지
+     * 않고 `clearDepartedState`가 그 선수의 불만을 통째로 지운다.
+     */
+    const freed = clearIssueReason(state, player.id, "listed");
     return {
       ok: true,
-      message: `${player.name}을(를) 이적 리스트에서 뺐습니다`,
+      message:
+        `${player.name}을(를) 이적 리스트에서 뺐습니다` +
+        (freed ? " · 등재 불만이 풀렸습니다" : ""),
       brief: { head: "이적 리스트", items: [item({ label: "해제", text: player.name })] },
     };
   }
@@ -947,7 +969,11 @@ export function setTransferList(
    * 눈금을 두 곳에 적으면 문구를 다듬는 날 둘이 어긋난다.
    */
   const stance =
-    askingPrice > market * 1.2 ? "above" : askingPrice < market * 0.85 ? "below" : "at";
+    askingPrice > market * MARKET_NEAR_HIGH
+      ? "above"
+      : askingPrice < market * MARKET_NEAR_LOW
+        ? "below"
+        : "at";
   const STANCE_LINE: Record<typeof stance, string> = {
     above: "시장가보다 비싸게 불렀습니다 — 관심이 더디 붙습니다",
     below: "시장가보다 싸게 내놨습니다 — 금방 붙을 것입니다",
@@ -1414,6 +1440,37 @@ function pickBuyer(state: GameState, player: GamePlayer, rng: () => number): str
 }
 
 /**
+ * 감독이 막은 이적 — **값이 붙은 자리를 막았을 때만 라커룸에 남는다**
+ * (→ docs/data/people.md §5). 여덟 사유 가운데 이것만 문턱이 날짜가 아니라
+ * **한 번의 결정**이다.
+ *
+ * ⚠️ **거절을 막지 않는다.** 감독의 결정은 그대로 통과하고 대가만 남는다.
+ *
+ * 세 자리에서 걸러진다 — 임대 오퍼는 나가는 것이 아니라 다녀오는 것이라 세지 않고,
+ * 헐값 오퍼(`isSeriousOffer`)를 물리는 것은 선수도 아는 옳은 결정이라 세지 않으며,
+ * 이미 불만이 있는 선수에게 사유를 하나 더 얹지 않는다 — 라커룸은 사람으로 센다.
+ */
+function resentBlockedMove(
+  state: GameState,
+  negotiation: Negotiation,
+  offer: Negotiation["rounds"][number],
+  player: GamePlayer,
+  counterpart: string,
+): boolean {
+  if (negotiation.kind !== "sell") return false;
+  if (!isSeriousOffer(state, player, offer.fee)) return false;
+  if (hasIssue(state, player.id)) return false;
+  state.issues.push({
+    gamePlayerId: player.id,
+    kind: "unhappy",
+    reason: "blocked-move",
+    since: state.date,
+  });
+  pushNarrative(state, `${player.name} 이적 거절 — ${counterpart} ${formatMoney(offer.fee)}`, 3);
+  return true;
+}
+
+/**
  * 감독이 들어온 오퍼에 답한다 — 수락·거절·조정(더 부르기).
  *
  * `answerOffer`의 **반대 방향 갈래**다. 관문·판정 카드·라운드 쌓기는 `respondOffer`와
@@ -1470,10 +1527,13 @@ export function answerIncomingOffer(
     });
     offer.verdict = "reject";
     negotiation.status = "rejected";
+    const resented = resentBlockedMove(state, negotiation, offer, player, counterpart);
     return {
       ok: true,
       payload: card,
-      message: `${counterpart}의 ${player.name} 오퍼를 거절했습니다`,
+      message:
+        `${counterpart}의 ${player.name} 오퍼를 거절했습니다` +
+        (resented ? ` · 값이 붙은 오퍼였습니다 — ${player.name}이(가) 알고 불만이 남습니다` : ""),
     };
   }
 
@@ -1968,6 +2028,12 @@ function executeRenewal(
     status: "active",
   });
   negotiation.status = "completed";
+  /**
+   * **이 불만을 푸는 것은 성사 하나뿐이다** (→ docs/data/people.md §5·§8). 협상을
+   * 여는 것(`openRenewal`)은 압력을 멈출 뿐이라 불만은 그대로 있고, 계약이 실제로
+   * 갈아 끼워진 이 자리에서만 풀린다.
+   */
+  const freed = clearIssueReason(state, player.id, "contract");
   pushNarrative(
     state,
     `${player.name} 재계약 — 주급 ${formatMoney(agreed.weeklyWage)} ${agreed.contractYears}년`,
@@ -1977,7 +2043,8 @@ function executeRenewal(
     ok: true,
     message:
       `${player.name} 재계약 완료 — 주급 ${formatMoney(agreed.weeklyWage)}, ` +
-      `${contractUntil(state.date, agreed.contractYears)}까지. 주급 총액이 늘어납니다`,
+      `${contractUntil(state.date, agreed.contractYears)}까지. 주급 총액이 늘어납니다` +
+      (freed ? " · 계약 불만이 풀렸습니다" : ""),
     brief: {
       head: "재계약",
       items: [
@@ -2422,6 +2489,7 @@ function settleDeal(state: GameState, negotiation: Negotiation): SkillResult {
   player.squadNumber = undefined;
   assignSquadNumber(state.players, player);
   player.isCaptain = false;
+  player.isViceCaptain = undefined;
   /**
    * 등록 명단에 자리가 없으면 **2군으로 들어온다.** 실제로도 명단이 찬 채로
    * 영입한 선수는 다음 명단 제출까지 못 뛴다 — 계약은 성립하고 등록만 안 되는

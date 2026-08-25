@@ -2,14 +2,24 @@ import type {
   AttributeAxis,
   AxisValues,
   GamePlayer,
+  MatchRecord,
   ReserveTrainingPolicy,
 } from "@story-fm/domain";
 import { ATTRIBUTE_AXES, ageOf, isReserveMatch, RATING_MAX } from "@story-fm/domain";
 import { ageGrowthFactor, agingDelta } from "../world/attributes";
 import { archetypeTraitsOf } from "../world/player-persona";
 import { makeRng } from "../core/rng";
+import { isTopLeague, leagueCatalogById } from "../data/league-catalog";
+import { leagueOfTeamIn } from "../competition/promotion";
 import { monthlyGrowthMultiplier, personalTrainingAxis } from "./training-plan";
-import { recomputeOverall, recordGrowth, squadLevelOf, type GameState } from "../core/state";
+import {
+  onLoanFromUs,
+  recomputeOverall,
+  recordGrowth,
+  squadLevelOf,
+  teamShortNameIn,
+  type GameState,
+} from "../core/state";
 
 /**
  * 월간 성장·쇠퇴 — **결산 판정을 받지 않는 선수 전부**의 능력치를 조금씩 움직인다.
@@ -89,26 +99,105 @@ export function pruneDevelopmentFocus(state: GameState): string[] {
 }
 
 /**
- * 지난 한 달 2군 리그 출전 수 — **장부의 라인업에서 센다**(별도 저장이 없다).
- * 창은 [지난달 1일, 오늘) — 월간 성장이 매월 1일에 돌기 때문이다. 시즌 전환이
+ * 지난달 1일 — 출전을 세는 창의 시작. 월간 성장이 매월 1일에 돌기 때문에 창은
+ * [이 날, 오늘)이고, 2군 출전과 임대 출전이 **같은 창을 읽는다**. 시즌 전환이
  * 장부를 통째로 갈아도(7월 1일) 빈 창이 될 뿐 깨지지 않는다.
  */
-export function reserveAppsByPlayer(state: GameState): Map<string, number> {
-  const [year, month] = state.date.split("-").map(Number) as [number, number];
-  const from =
-    month === 1 ? `${year - 1}-12-01` : `${year}-${String(month - 1).padStart(2, "0")}-01`;
-  const counts = new Map<string, number>();
-  for (const match of state.matches) {
-    if (!isReserveMatch(match) || !match.result) continue;
-    if (match.date < from || match.date >= state.date) continue;
-    for (const id of [...(match.result.homeLineup ?? []), ...(match.result.awayLineup ?? [])]) {
-      counts.set(id, (counts.get(id) ?? 0) + 1);
-    }
-  }
-  return counts;
+function lastMonthStart(date: string): string {
+  const [year, month] = date.split("-").map(Number) as [number, number];
+  return month === 1 ? `${year - 1}-12-01` : `${year}-${String(month - 1).padStart(2, "0")}-01`;
 }
 
-/** 이 선수가 코어 로직으로 자라는가 — 감독 팀 1군만 결산 판정을 받는다 */
+/**
+ * 지난달 창 안의 출전 수 — **장부의 라인업에서 센다**(별도 저장이 없다).
+ * 어느 경기를 세는지(`counts`)와 누구를 세는지(`keep`)만 부르는 쪽이 정한다.
+ */
+function appsInLastMonth(
+  state: GameState,
+  counts: (match: MatchRecord) => boolean,
+  keep?: (playerId: string) => boolean,
+): Map<string, number> {
+  const from = lastMonthStart(state.date);
+  const tally = new Map<string, number>();
+  for (const match of state.matches) {
+    if (!match.result) continue;
+    if (match.date < from || match.date >= state.date) continue;
+    if (!counts(match)) continue;
+    for (const id of [...(match.result.homeLineup ?? []), ...(match.result.awayLineup ?? [])]) {
+      if (keep && !keep(id)) continue;
+      tally.set(id, (tally.get(id) ?? 0) + 1);
+    }
+  }
+  return tally;
+}
+
+/** 지난 한 달 2군 리그 출전 수 */
+export function reserveAppsByPlayer(state: GameState): Map<string, number> {
+  return appsInLastMonth(state, isReserveMatch);
+}
+
+/**
+ * 우리가 임대 보낸 선수의 지난 한 달 **그 구단 1군 출전 수** (season.md §2 임대).
+ *
+ * ⚠️ **2군 경기는 세지 않는다.** 2군 리그는 감독 팀만 편성되지만 상대 클럽의 2군
+ * 선수가 그 명단에 서므로, 거르지 않으면 임대 보낸 선수가 우리 2군 리그에서 뛴
+ * 경기로 자란다.
+ */
+export function loanAppsByPlayer(state: GameState): Map<string, number> {
+  const loaned = new Set(state.players.filter((p) => onLoanFromUs(state, p)).map((p) => p.id));
+  if (loaned.size === 0) return new Map();
+  return appsInLastMonth(
+    state,
+    (match) => !isReserveMatch(match),
+    (id) => loaned.has(id),
+  );
+}
+
+// ── 임대 배율 (season.md §2 임대 — 2군과 1군 사이의 길) ──────────────
+// 눈금은 2군과 **같은 자** 위에 있다: 출전 한 경기가 `RESERVE_APP_BOOST`와 같은
+// 값이고 상한만 다르다. 2군은 격주 일정이라 월 2경기가 만근이고 1군 일정은 월
+// 4~5경기라, 같은 리그에서 매주 뛰면 우리 2군의 출전×집중 육성 꼭대기(2.4)에 닿는다.
+
+/** 지난달 임대처 1군 출전 한 경기가 성장 확률에 얹는 배율 증분 */
+export const LOAN_APP_BOOST = 0.3;
+/** 임대 출전 배율 상한 — 우리 2군의 출전 만근 × 집중 육성과 같은 꼭대기 */
+export const LOAN_APP_BOOST_MAX = 2.4;
+/** 리그 계수(UEFA 어림 순위) 한 칸이 임대처 수준 계수에 얹는 몫 */
+export const LOAN_LEAGUE_STEP = 0.05;
+/** 2부 임대의 배율 — 리그전을 돌지 않는 컵 전용 리그 (`isTopLeague`가 false) */
+export const LOAN_SECOND_TIER = 0.85;
+/** 임대처 수준 계수의 구간 */
+export const LOAN_LEVEL_MIN = 0.6;
+export const LOAN_LEVEL_MAX = 1.25;
+
+/**
+ * 임대처 수준 계수 — **어디서 뛰었는가**. 리그 계수(1이 가장 강하다)의 차이 한
+ * 칸이 ±`LOAN_LEAGUE_STEP`이고, 2부면 ×`LOAN_SECOND_TIER`다.
+ *
+ * ⚠️ **돈(`leagueEconomyLevel`)을 쓰지 않는다** — 그 축은 살림의 크기지 경기의
+ * 수준이 아니다. 카탈로그가 계수를 모르는 리그는 우리 리그와 같다고 보되 2부
+ * 판정만 적용한다 — 지어내지 않는다.
+ */
+export function loanLevelFactor(state: GameState, teamId: string): number {
+  const theirLeague = leagueOfTeamIn(state, teamId);
+  const ours = leagueCatalogById(leagueOfTeamIn(state, state.userTeamId))?.coefficient;
+  const theirs = leagueCatalogById(theirLeague)?.coefficient;
+  const steps = ours === undefined || theirs === undefined ? 0 : ours - theirs;
+  const tier = isTopLeague(theirLeague) ? 1 : LOAN_SECOND_TIER;
+  return Math.max(LOAN_LEVEL_MIN, Math.min(LOAN_LEVEL_MAX, (1 + LOAN_LEAGUE_STEP * steps) * tier));
+}
+
+/** 지난달 임대처 출전 수 × 임대처 수준 → 성장 확률 배율 */
+export function loanAppsBoost(apps: number, levelFactor: number): number {
+  return Math.min(LOAN_APP_BOOST_MAX, 1 + LOAN_APP_BOOST * apps * levelFactor);
+}
+
+/**
+ * 이 선수가 코어 로직으로 자라는가 — 감독 팀 1군만 결산 판정을 받는다.
+ *
+ * **우리가 임대 보낸 선수도 이 문을 지난다** — `teamId`가 빌린 구단이라 첫 줄에서
+ * true다. 배율과 성장 로그는 `applyMonthlyDevelopment`가 따로 가른다.
+ */
 export function developsByCore(state: GameState, player: GamePlayer): boolean {
   if (player.teamId !== state.userTeamId) return true;
   return squadLevelOf(player) === "reserve";
@@ -196,13 +285,17 @@ export function rollMonthlyAxes(
  * 난수 채널이 (시드, 날짜, 선수, 축)이라 **같은 세이브는 같은 달에 같은 결과**이고,
  * 선수 목록 순서에도 의존하지 않는다.
  *
- * ⚠️ **능력치는 대상 전원이 움직이지만 `growthLog`에는 감독 팀만 남긴다.** 리그
+ * ⚠️ **능력치는 대상 전원이 움직이지만 `growthLog`에는 우리 선수만 남긴다.** 리그
  * 전체를 적으면 매월 ≈2,000행이 들어와 4,000행 상한이 두 달 만에 감독의 훈련·경기
  * 기록을 밀어낸다. 로그를 읽는 곳(성장 일지 · 선수 카드 "최근 성장" · 달력 요약)은
  * 전부 우리 선수만 거르므로 타 팀 행은 아무도 읽지 않는다
  * (→ docs/data/game-state.md §3.4).
  *
- * @returns 감독에게 알릴 우리 팀(2군) 변화 요약
+ * 갈래는 셋이다 — **우리 2군 · 우리가 임대 보낸 선수 · 타 팀** (season.md §2 임대).
+ * 임대는 그 구단 1군 출전 × 임대처 수준으로 자라고 감독의 손잡이(집중 육성 · 2군
+ * 방침 · 개인 훈련)는 닿지 않지만, 계약이 우리 것이므로 로그와 요약에는 선다.
+ *
+ * @returns 감독에게 알릴 우리 선수(2군 · 임대) 변화 요약
  */
 export function applyMonthlyDevelopment(state: GameState): string[] {
   const lines: string[] = [];
@@ -212,13 +305,17 @@ export function applyMonthlyDevelopment(state: GameState): string[] {
   // 감독의 육성 손잡이 — 우리 2군에만 붙는다. 타 팀은 배율 없이 지금 그대로다
   const focus = new Set(pruneDevelopmentFocus(state));
   const reserveApps = reserveAppsByPlayer(state);
+  const loanApps = loanAppsByPlayer(state);
 
   for (const player of targets) {
     const ours = player.teamId === state.userTeamId;
+    const loaned = !ours && onLoanFromUs(state, player);
     const boost = ours
       ? reserveAppsBoost(reserveApps.get(player.id) ?? 0) * (focus.has(player.id) ? FOCUS_BOOST : 1)
-      : 1;
-    // 개인 훈련은 우리 선수에게만 걸린다 — 2군에서는 이 축이 월간 성장의 겨냥이다
+      : loaned
+        ? loanAppsBoost(loanApps.get(player.id) ?? 0, loanLevelFactor(state, player.teamId))
+        : 1;
+    // 개인 훈련은 우리 2군에만 걸린다 — 임대처 훈련장은 그쪽 코치진의 것이다
     const personal = ours ? personalTrainingAxis(state, player.id) : null;
     const steps = rollMonthlyAxes({
       seed: state.seed,
@@ -228,7 +325,7 @@ export function applyMonthlyDevelopment(state: GameState): string[] {
       values: player.attributes,
       potential: player.attributes.potential,
       boost,
-      // 사람됨은 소속을 가리지 않는다 — 타 팀 선수도 같은 표를 읽는다
+      // 사람됨은 소속을 가리지 않는다 — 타 팀 선수도 임대 나간 선수도 같은 표를 읽는다
       professionalism: archetypeTraitsOf(state.seed, player).professionalism,
       ...(ours && state.reserveTraining ? { policy: state.reserveTraining } : {}),
       ...(personal ? { personal } : {}),
@@ -240,10 +337,17 @@ export function applyMonthlyDevelopment(state: GameState): string[] {
         ATTRIBUTE_FLOOR,
         Math.min(RATING_MAX, player.attributes[axis] + step),
       );
-      if (ours) recordGrowth(state, player.id, null, "development", axis, step, "monthly");
+      if (ours || loaned) {
+        recordGrowth(state, player.id, null, "development", axis, step, "monthly");
+      }
     }
     recomputeOverall(player);
     if (ours) lines.push(`${player.name} (2군) ${player.attributes.overall}`);
+    else if (loaned) {
+      lines.push(
+        `${player.name} (임대·${teamShortNameIn(state, player.teamId)}) ${player.attributes.overall}`,
+      );
+    }
   }
   return lines;
 }

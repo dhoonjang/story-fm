@@ -70,6 +70,7 @@ import {
   FIRST_TEAM_LIMIT,
   MATCHDAY_BENCH,
   MATCHDAY_SQUAD,
+  ageOf,
   bestOverall,
   canRegister,
   isUnder21,
@@ -81,6 +82,7 @@ import {
   positionProficiency,
   weightSlotOf,
   roleFit,
+  standingScore,
 } from "@story-fm/domain";
 import { profFactor, type MatchLedgerState } from "@story-fm/sim";
 import type { AiDeal } from "../market/ai-market";
@@ -1011,6 +1013,33 @@ export function reservePlayers(state: GameState, teamId: string): GamePlayer[] {
 
 export function userPlayers(state: GameState): GamePlayer[] {
   return playersOf(state, state.userTeamId);
+}
+
+/**
+ * 우리가 **임대 보낸** 선수인가 — 계약은 우리 것이고 `teamId`만 남의 것이다
+ * (→ docs/simulation/transfer.md §2).
+ *
+ * ⚠️ 빌려 **온** 임대는 우리 `teamId`를 달아도 이게 아니다. 두 방향이 같은 칸
+ * (`loan`)에 앉으므로 방향을 읽지 않으면 우리에게 온 임대가 함께 걸린다.
+ */
+export function onLoanFromUs(state: GameState, player: GamePlayer): boolean {
+  return player.loan?.fromTeamId === state.userTeamId;
+}
+
+/**
+ * **감독이 자기 선수로 세는 사람** — 우리 스쿼드에 있거나 우리가 임대 보냈다.
+ *
+ * 안개(지식 눈금) · 월간 성장 · 조회 도구 · 명단 화면이 전부 이 문을 지난다. 한
+ * 자리만 소속(`teamId`)으로 가르면 나머지와 어긋난다 — 능력치는 정확한데 검색에는
+ * 안 나오거나, 화면에는 서는데 자라지 않는다.
+ */
+export function isOurPlayer(state: GameState, player: GamePlayer): boolean {
+  return player.teamId === state.userTeamId || onLoanFromUs(state, player);
+}
+
+/** 그 사람들 전부 — 우리 스쿼드 + 우리가 임대 보낸 선수 */
+export function ourPlayers(state: GameState): GamePlayer[] {
+  return state.players.filter((p) => isOurPlayer(state, p));
 }
 
 /**
@@ -2440,11 +2469,24 @@ export function createGame(input: CreateGameInput): GameState {
       };
     });
 
-  // 주장 — 유저 팀은 선발 중 최고 OVR 필드 플레이어
+  /**
+   * 주장 — **서열 최상위** (people.md §5-1). 개막 전에는 출전도 재적도 0이라
+   * 리더십과 나이가 그 자리를 정한다. OVR로 세우던 자리였는데, 그러면 리더십 20인
+   * 최고 선수가 완장을 차고 감독이 첫 팀토크부터 가장 나쁜 라커룸 계수를 받는다.
+   * 골키퍼를 거르지 않는다 — 누가 라커룸을 이끄는가는 포지션이 아니라 리더십이 답한다.
+   */
   const userSquad = players.filter((p) => p.teamId === input.userTeamId);
   const captain = [...userSquad]
-    .filter((p) => groupOf(p) !== "GK")
-    .sort((a, b) => b.attributes.overall - a.attributes.overall)[0];
+    .map((p) => ({
+      player: p,
+      standing: standingScore({
+        leadership: p.attributes.leadership,
+        age: ageOf(p.birthdate, calendar.preseasonStart),
+        apps: 0,
+        seasons: 0,
+      }),
+    }))
+    .sort((a, b) => b.standing - a.standing || (a.player.id < b.player.id ? -1 : 1))[0]?.player;
   if (captain) captain.isCaptain = true;
 
   // 재정 + 계약(주급의 원본) — 무소속은 장부를 갖지 않는다 (team.md §4)

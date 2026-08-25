@@ -306,8 +306,14 @@ export function buildGmTools(
       }),
       (input) => setSquadLevels(state, input),
     ),
-    wrap("set_captain", descriptions.set_captain, z.object({ playerId: playerRef }), (input) =>
-      setCaptain(state, input.playerId),
+    wrap(
+      "set_captain",
+      descriptions.set_captain,
+      z.object({
+        playerId: playerRef.optional().describe("주장으로 세울 선수 — 생략하면 주장은 그대로"),
+        vice: playerRef.nullable().optional().describe("부주장으로 세울 선수 — null이면 지정 해제"),
+      }),
+      (input) => setCaptain(state, input),
     ),
     wrap(
       "set_development_focus",

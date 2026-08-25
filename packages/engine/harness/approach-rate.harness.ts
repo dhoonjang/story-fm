@@ -24,6 +24,14 @@ const SPEAKER_COOLDOWN_DAYS = 7;
 /** 회견이 자리를 다투는 기간 — `approach.ts`의 문과 같은 값 */
 const PRESS_FRESH_DAYS = 3;
 
+/**
+ * 이적 요청이 서는 계단 — `APPROACH_MAX_STEP`과 같은 값.
+ *
+ * ⚠️ **채널로 세지 않는다.** 에이전트는 계약 만료·타 구단 관심도 들고 오므로
+ * `channel === "agent"`는 이제 요청보다 넓다 (people.md §8).
+ */
+const TRANSFER_REQUEST_STEP = 5;
+
 /** 시즌 하나를 못 끝내면 측정이 아니다 */
 const ADVANCE_LIMIT = 480;
 
@@ -99,13 +107,18 @@ describe("한 시즌의 다가옴", () => {
       lastSeen.set(approach.speakerId, approach.date);
     }
 
+    const byTopic = (topic: Approach["topic"]) => opened.filter((a) => a.topic === topic).length;
+
     const readings: Readings<typeof APPROACH_RATE> = {
       "시즌 다가옴 건수": opened.length,
       "선수 채널": byChannel("player"),
+      "에이전트 채널": byChannel("agent"),
       "주장 채널": byChannel("captain"),
       "구단주 채널": byChannel("owner"),
+      "계약 만료(contract)": byTopic("contract"),
+      "타 구단 관심(interest)": byTopic("interest"),
       "언론 유출(계단 4)": leaks.size,
-      "이적 요청(계단 5)": byChannel("agent"),
+      "이적 요청(계단 5)": opened.filter((a) => a.step === TRANSFER_REQUEST_STEP).length,
       "하루 두 건이 열린 날": [...openedOn.values()].filter((n) => n > 1).length,
       "동시에 열린 자리": concurrent,
       "같은 화자 7일 내 재개": cooldownBreaks,
