@@ -287,7 +287,7 @@ export const SKILL_CATALOG = [
       '국내 컵은 순위표가 없는 녹아웃이라 view="standings"가 대진표를 돌려준다. ' +
       '일정은 조건으로 찾는다 — team(기준 팀, 생략하면 우리 팀, "all"이면 대회 전체), opponent(상대 팀 — 주면 그 팀과의 맞대결만 보고 전적 요약이 붙는다), competition(epl·ucl·facup 등), when(past·upcoming·both), from·to(YYYY-MM-DD 범위), round, count. ' +
       "순위표에는 최근 5경기 폼이 함께 나온다. " +
-      'view="calendar"는 감독의 달력 — 경기·훈련·이적창 개폐를 한 축에서 날짜순으로 본다. 기본은 오늘부터 14일이고 from·to·days로 범위를, type="training"으로 훈련만 볼 수 있다. 훈련 계획을 묻거나 새 훈련을 잡기 전에 이걸로 확인하라.',
+      'view="calendar"는 감독의 달력 — 경기·훈련·이적창 개폐를 한 축에서 날짜순으로 본다. 기본은 오늘부터 14일이고 from·to·days로 범위를, type="training"으로 훈련만 볼 수 있다. 훈련 계획을 묻거나 새 훈련을 잡기 전에 이걸로 확인하라. from이 오늘보다 앞이면 그 범위의 **일지**가 일정 뒤에 함께 온다 — 부상·이적·성장·돈, 그리고 시간이 넘어가며 벌어진 소식(오퍼 답 도착·협상 만료·계약 경고·타 구단 이적·보드 답신)이다. "지난주에 무슨 일 있었나"는 이걸로 답한다.',
   },
   {
     name: "get_career",

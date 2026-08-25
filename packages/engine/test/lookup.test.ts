@@ -503,6 +503,24 @@ describe("scheduleView — 감독의 달력", () => {
     for (const line of training.message.split("\n").slice(1)) expect(line).toContain("훈련");
   });
 
+  /**
+   * 지나간 창은 일정만으로 답이 되지 않는다 — 손잡이로 며칠을 넘긴 사이 벌어진 일은
+   * 다이제스트로만 흘러가고, 되짚을 원본은 서사 표뿐이다 (people.md §9).
+   */
+  it("지나간 범위를 물으면 그 사이 벌어진 일을 일지로 함께 낸다", () => {
+    const state = createTestGame(21);
+    const start = state.date;
+    state.narrative.push({ date: start, text: "리버풀에서 오퍼 답 도착", salience: 3 });
+    advanceTime(state, { days: 5 });
+
+    const past = scheduleView(state, { from: start, to: state.date });
+    expect(past.message).toContain("[일지]");
+    expect(past.message).toContain("소식 리버풀에서 오퍼 답 도착");
+
+    // 앞날만 묻는 창에는 일지가 붙지 않는다 — 아직 벌어진 일이 없다
+    expect(scheduleView(state, { days: 14 }).message).not.toContain("[일지]");
+  });
+
   it("우리 팀 경기만 달력에 올린다 (리그 타 팀 경기는 get_league의 몫)", () => {
     const state = createTestGame(21);
     const res = scheduleView(state, {
