@@ -12,6 +12,7 @@ import {
   groupOf,
   loadGame,
   MATCH_PROFICIENCY_GAIN,
+  OUT_OF_POSITION_RUN,
   MATCHDAY_BENCH,
   tacticalXpFor,
   TACTICAL_XP_CAP,
@@ -41,7 +42,12 @@ import {
   playMockMatch,
   playPreseason,
 } from "./helpers";
-import { tacticsSignature, weightSlotOf } from "@story-fm/domain";
+import {
+  positionGroupOf,
+  positionGroupOfPlayer,
+  tacticsSignature,
+  weightSlotOf,
+} from "@story-fm/domain";
 import { zoneGrid } from "@story-fm/sim";
 
 /**
@@ -550,6 +556,59 @@ describe("회귀: 장기 시즌 안정성", () => {
  * 경기 중 조정은 그 경기에서 끝난다 — 하프타임에 올린 라인이 다음 주 훈련까지
  * 따라가면, 감독은 자기가 바꾼 적 없는 전술로 다음 경기에 들어간다.
  */
+/**
+ * 자리 밖 기용 — **선발로 센다** (→ docs/data/people.md §5). 원장은 누가 뛰었는지만
+ * 알고 어느 자리에 섰는지는 모르므로, 연속을 세는 눈금은 `PlayerState`가 든다.
+ */
+describe("자리 밖 기용의 눈금 (people.md §5)", () => {
+  it("주 포지션 묶음 밖 선발이 이어지면 네 경기째에 불만이 선다", () => {
+    const state = atMatchday(5);
+    const starters = assignmentsOf(state, state.userTeamId, "starting");
+    const back = starters.find((a) => positionGroupOf(a.position) === "DF")!;
+    const front = starters.find((a) => positionGroupOf(a.position) === "FW")!;
+    // 자리를 맞바꾼다 — 판의 모양은 그대로이고 두 사람만 묶음 밖에 선다
+    const backSlot = back.position;
+    back.position = front.position;
+    front.position = backSlot;
+
+    const misplaced = playerById(state, back.playerId)!;
+    expect(positionGroupOfPlayer(misplaced)).not.toBe(positionGroupOf(back.position));
+    const inPlace = starters.find((a) => {
+      const p = playerById(state, a.playerId);
+      return (
+        a !== back && a !== front && p && positionGroupOfPlayer(p) === positionGroupOf(a.position)
+      );
+    })!;
+
+    // 문턱 직전까지 이미 서 있던 선수 — 이 경기가 네 번째다
+    misplaced.state.outOfPositionRun = OUT_OF_POSITION_RUN - 1;
+    playMockMatch(state);
+
+    expect(misplaced.state.outOfPositionRun).toBe(OUT_OF_POSITION_RUN);
+    expect(
+      state.issues.some((i) => i.gamePlayerId === misplaced.id && i.reason === "out-of-position"),
+    ).toBe(true);
+    // 제자리에 선 선수에게는 눈금이 서지 않는다
+    expect(playerById(state, inPlace.playerId)!.state.outOfPositionRun).toBeUndefined();
+  });
+
+  it("제자리에 선발로 서면 눈금이 지워진다", () => {
+    const state = atMatchday(5);
+    const starters = assignmentsOf(state, state.userTeamId, "starting");
+    const inPlace = starters.find((a) => {
+      const p = playerById(state, a.playerId);
+      return p && positionGroupOfPlayer(p) === positionGroupOf(a.position);
+    })!;
+    const player = playerById(state, inPlace.playerId)!;
+    player.state.outOfPositionRun = OUT_OF_POSITION_RUN - 1;
+
+    playMockMatch(state);
+
+    expect(player.state.outOfPositionRun).toBeUndefined();
+    expect(state.issues.some((i) => i.reason === "out-of-position")).toBe(false);
+  });
+});
+
 describe("경기 후 전술 복원", () => {
   it("경기 중 바꾼 전술·개인 지시가 킥오프 전으로 돌아온다", () => {
     const state = atMatchday(5);
