@@ -1882,6 +1882,18 @@ export const GamePlayerSchema = z.object({
    * 구 세이브엔 없어 optional (SAVE_VERSION 유지).
    */
   homegrownCountry: z.string().optional(),
+  /**
+   * **국적 — 그 선수가 대표하는 협회** (FIFA 3자 코드 · `nationality.ts`).
+   * 홈그로운과 다른 축이다: 홈그로운은 어디서 자랐는가이고 이것은 누구인가라,
+   * 비EU 쿼터·대표팀 소집·워크퍼밋이 전부 이 값에 걸린다.
+   * 구 세이브엔 없어 optional — 로드 보정이 카탈로그·리그 협회에서 채운다.
+   */
+  nationality: z.string().optional(),
+  /**
+   * 둘째 국적 — **하나만 담는다.** 등록 자격을 가르는 것은 "EU 여권이 있는가"이지
+   * 여권의 개수가 아니라서, 셋째 칸은 판정에 아무것도 더하지 않는다.
+   */
+  secondNationality: z.string().optional(),
   /** 주발 — 구 세이브엔 없어 optional (없으면 양발로 다뤄 보정 0) */
   foot: FootSchema.optional(),
   /** 키(cm) · 체중(kg) — 묘사용. 구 세이브엔 없어 optional */
@@ -1952,6 +1964,10 @@ export interface PlayerCatalogMeta {
   potential: number;
   /** 홈그로운 자격 협회 (나라) — 없으면 어느 리그에서도 홈그로운이 아니다 */
   homegrownCountry?: string;
+  /** 국적 — 대표하는 협회의 FIFA 3자 코드 (`nationality.ts`) */
+  nationality?: string;
+  /** 둘째 국적 — 하나만 담는다 (EU 자격을 가르는 자리다) */
+  secondNationality?: string;
   /** 주발 */
   foot?: Foot;
   /** 키(cm) · 체중(kg) */
@@ -1988,6 +2004,8 @@ export const PlayerCatalogEntrySchema = z.object({
   positions: z.array(PlayerPositionSchema).min(1),
   potential: RatingSchema,
   homegrownCountry: z.string().min(1).optional(),
+  nationality: z.string().min(1).optional(),
+  secondNationality: z.string().min(1).optional(),
   foot: FootSchema.optional(),
   height: HeightSchema.optional(),
   weight: WeightSchema.optional(),
