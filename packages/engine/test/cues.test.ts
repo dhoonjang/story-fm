@@ -700,16 +700,18 @@ describe("계약과 관심 — 에이전트가 계단 1부터 온다", () => {
     expect(state.approachPressure!.some((r) => r.subject === fringe.id)).toBe(false);
   });
 
-  it("막힌 이적 불만이 선 선수에게는 서지 않는다 — 한 사건에 두 사람이 오지 않는다", () => {
+  it("막힌 이적 불만과 함께 선다 — 한 사건의 두 얼굴이고 화자가 다르다", () => {
     const state = quiet(createTestGame(11));
     const target = best(state);
     closedOffer(state, target.id, { feeRatio: 1, status: "rejected", daysAgo: 0 });
     gripe(state, target.id, "blocked-move");
 
     pressDays(state, 13);
-    const row = state.approachPressure!.find((r) => r.subject === target.id)!;
-    expect(row.topic).toBe("blocked-move");
-    expect(state.approachPressure?.some((r) => r.topic === "interest")).toBeFalsy();
+    const rows = state.approachPressure!.filter((r) => r.subject === target.id);
+    expect(rows.map((r) => r.topic).sort()).toEqual(["blocked-move", "interest"]);
+    // 그래도 열린 자리는 하나다 — 먼저 임계를 넘은 쪽(하루 9)이 선다
+    expect((state.approaches ?? []).filter((a) => a.status === "pending")).toHaveLength(1);
+    expect(pendingApproach(state)?.topic).toBe("blocked-move");
   });
 });
 

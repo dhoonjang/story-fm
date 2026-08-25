@@ -367,8 +367,10 @@ interface Interest {
  * (`isSeriousOffer` — `blocked-move`와 같은 자다). 헐값이 흘러간 것은 에이전트가
  * 감독을 찾아올 일이 아니고, 그것까지 세면 이적창마다 감독실 문이 열린다.
  *
- * ⚠️ **막힌 이적 불만이 선 선수에게는 서지 않는다** — 같은 사건을 선수 자신이
- * 이미 들고 왔다. 한 일로 두 사람이 오면 사다리가 둘로 갈린다.
+ * ⚠️ **`blocked-move` 불만과 함께 설 수 있다.** 감독이 값이 붙은 오퍼를 물리면 둘 다
+ * 참이다 — 선수는 자기 이적이 막힌 것을 말하고 에이전트는 구단들이 물어본 것을
+ * 말한다. 다른 사실이고 다른 화자다. 한쪽을 죽이면 감독이 실제로 오퍼를 거절한
+ * 시즌에만 열리는 자리가 통째로 사라진다.
  */
 function interestOf(
   state: GameState,
@@ -378,9 +380,6 @@ function interestOf(
   const closed = index.get(player.id);
   if (!closed || closed.length === 0) return null;
   if (betterThanInSquad(state, player) >= SQUAD_CORE_SIZE) return null;
-  if (state.issues.some((i) => i.gamePlayerId === player.id && i.reason === "blocked-move")) {
-    return null;
-  }
   const recent = closed.filter((n) => isSeriousOffer(state, player, topFeeOf(n)));
   if (recent.length === 0) return null;
   const top = recent.reduce<{ fee: number; teamId: string | null }>(
