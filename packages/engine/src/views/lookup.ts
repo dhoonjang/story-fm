@@ -10,7 +10,13 @@ import type {
   ShotOrigin,
   StrongFoot,
 } from "@story-fm/domain";
-import { isReserveMatch, PROMISE_KIND_KO, SQUAD_STATUS_KO } from "@story-fm/domain";
+import {
+  isReserveMatch,
+  packetTagText,
+  PROMISE_KIND_KO,
+  SQUAD_STATUS_KO,
+  tacticsBrief,
+} from "@story-fm/domain";
 import {
   YELLOWS_PER_SUSPENSION,
   ageOf,
@@ -52,6 +58,7 @@ import { careerOf, type CareerTotals } from "../squad/career";
 import { leaderGroupOf } from "../squad/hierarchy";
 import { formLabel } from "../squad/form";
 import { INJURY_SEVERITY_KO } from "../squad/injury";
+import { ABSENT_REASON_KO, buildOpponentReport } from "../match/preview";
 import { issueReasonText, moodAnchor, moodOf } from "../squad/mood";
 import { openPromises, squadStatusOf } from "../squad/promises";
 import {
@@ -2356,5 +2363,158 @@ export function matchReport(state: GameState, input: MatchReportInput = {}): Loo
   if (report.motm) {
     lines.push(`MOTM: ${report.motm.name} 평점 ${report.motm.rating.toFixed(1)}`);
   }
+  return { ok: true, message: lines.join("\n") };
+}
+
+export interface OpponentReportInput {
+  /** 경기 id — 주면 나머지 조건은 보지 않는다 */
+  matchId?: string;
+  /** 상대 팀 이름·약칭 */
+  opponent?: string;
+  /** 대회 이름·약칭·id */
+  competition?: string;
+  /** 그날 치를 경기 — YYYY-MM-DD */
+  date?: string;
+}
+
+/** 아직 치르지 않은 우리 경기 — 가까운 것부터. 2군 경기는 서지 않는다 */
+function upcomingOurMatches(state: GameState): MatchRecord[] {
+  return state.matches
+    .filter(
+      (m) =>
+        !m.result &&
+        !isReserveMatch(m) &&
+        m.date >= state.date &&
+        (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+    )
+    .sort((a, b) =>
+      a.date === b.date ? (a.time ?? "").localeCompare(b.time ?? "") : a.date < b.date ? -1 : 1,
+    );
+}
+
+/** 못 찾았을 때 돌려주는 후보 — 조용히 빈 결과를 주면 모델이 지어낸다 (파일 머리 규약) */
+function previewCandidates(state: GameState): string[] {
+  const upcoming = upcomingOurMatches(state).slice(0, DEFAULT_LIMIT);
+  if (upcoming.length === 0) return ["  남은 우리 경기가 없다"];
+  return upcoming.map(
+    (m) =>
+      `  ${m.id} · ${dateLabel(m.date)} ${competitionTag(m)} ` +
+      `vs ${teamShortNameIn(state, m.homeTeamId === state.userTeamId ? m.awayTeamId : m.homeTeamId)}`,
+  );
+}
+
+function pickUpcomingMatch(state: GameState, input: OpponentReportInput): PickedMatch {
+  if (input.matchId) {
+    const m = state.matches.find((x) => x.id === input.matchId);
+    if (!m) return { ok: false, message: `${input.matchId} 경기를 찾지 못했습니다` };
+    if (m.result) return { ok: false, message: `${input.matchId}는 이미 끝난 경기입니다` };
+    return { ok: true, matchId: m.id };
+  }
+  let list = upcomingOurMatches(state);
+  const filters: string[] = [];
+  if (input.opponent) {
+    const resolved = resolveTeam(state, input.opponent);
+    if (!resolved.ok) return { ok: false, message: resolved.message };
+    list = list.filter((m) => m.homeTeamId === resolved.teamId || m.awayTeamId === resolved.teamId);
+    filters.push(teamNameIn(state, resolved.teamId));
+  }
+  if (input.competition) {
+    const id = resolveCompetitionId(input.competition);
+    if (id === null) return { ok: false, message: `${input.competition} 대회를 찾지 못했습니다` };
+    list = list.filter((m) => m.competitionId === id);
+    filters.push(competitionName(id));
+  }
+  if (input.date) {
+    list = list.filter((m) => m.date === input.date);
+    filters.push(input.date);
+  }
+  const picked = list[0];
+  if (!picked) {
+    return {
+      ok: false,
+      message: [
+        filters.length > 0
+          ? `${filters.join(" · ")} 조건에 맞는 예정 경기를 찾지 못했습니다`
+          : "예정된 우리 경기가 없습니다",
+        "예정 경기:",
+        ...previewCandidates(state),
+      ].join("\n"),
+    };
+  }
+  return { ok: true, matchId: picked.id };
+}
+
+/**
+ * 경기 전 상대 분석 (`get_opponent_report`) — 예정된 우리 경기 하나
+ * (→ docs/simulation/match.md §1.8).
+ *
+ * **예상 XI에 능력치는 서지 않는다.** 이름과 자리뿐이고, 그 열한 명을 대조해 나온
+ * 수치는 이미 감독의 눈(`readKeyPoints`)을 지나 아래 지점 줄에 있다. 여기에 OVR을
+ * 얹으면 안개를 지나지 않은 값이 명단표로 새어 나온다 (player.md §10).
+ */
+export function opponentReport(state: GameState, input: OpponentReportInput = {}): LookupResult {
+  const picked = pickUpcomingMatch(state, input);
+  if (!picked.ok) return picked;
+  const report = buildOpponentReport(state, { matchId: picked.matchId });
+  if (!report) {
+    return {
+      ok: false,
+      message:
+        state.pendingMatch !== null
+          ? "경기 중에는 다음 상대의 분석을 세우지 않습니다 — 지금 판은 판세 화면이 들고 있습니다"
+          : `${picked.matchId} 경기의 상대 분석을 세우지 못했습니다 (배치·전술을 읽지 못했습니다)`,
+    };
+  }
+
+  const venue = VENUE_KO[report.venue];
+  const when = report.inDays === 0 ? "오늘" : `D-${report.inDays}`;
+  const lines: string[] = [
+    `[상대 분석] ${dateLabel(report.date)} ${report.time} (${when}) ` +
+      `${report.label} · ${venue} vs ${report.opponent.name}`,
+  ];
+
+  /**
+   * 근거가 없으면 **열한 명이 다 추정이다** — 그때 이름마다 `?`를 붙이는 것은
+   * 머리줄이 이미 한 말의 되풀이다. 표시는 관측과 추정이 섞였을 때만 뜻을 갖는다.
+   */
+  const guessed = report.basis === null ? 0 : report.expectedXI.filter((p) => !p.carried).length;
+  const basis =
+    report.basis === null
+      ? "직전 경기가 없다 — 배치에서 세운 추정이다"
+      : `직전 ${dateLabel(report.basis.date)} ${report.basis.label} 선발에서 투영` +
+        (guessed > 0 ? ` · ?는 추정으로 메운 ${guessed}자리` : "");
+  lines.push(
+    `예상 XI (${basis}):`,
+    "  " +
+      report.expectedXI
+        .map((p) => `${p.name}(${p.position})${guessed > 0 && !p.carried ? "?" : ""}`)
+        .join(" · "),
+  );
+
+  lines.push(
+    report.absent.length === 0
+      ? "결장: 없다"
+      : "결장: " +
+          report.absent
+            .map((a) => `${a.name}(${a.position}) ${ABSENT_REASON_KO[a.reason]}(${a.note})`)
+            .join(" · "),
+  );
+
+  lines.push(`상대 전술: ${tacticsBrief(report.shape)}`);
+
+  if (report.notes.length === 0) {
+    lines.push("읽어 낸 지점: 없다 — 두 판이 맞물리는 곳이 보이지 않는다");
+  } else {
+    lines.push("읽어 낸 지점:");
+    lines.push(
+      ...report.notes.map((tag) => {
+        const side =
+          tag.favours === null ? "  · " : tag.favours === report.ourSide ? "  + " : "  - ";
+        return side + packetTagText(tag, report.tagContext);
+      }),
+    );
+  }
+
+  lines.push("※ 예상 XI는 직전 경기 선발에서 투영한 것이다 — 상대가 로테이션을 돌리면 갈린다");
   return { ok: true, message: lines.join("\n") };
 }
