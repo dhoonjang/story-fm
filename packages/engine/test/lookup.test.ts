@@ -14,6 +14,7 @@ import {
   playersOf,
   scheduleView,
   scoutPlayer,
+  loanPlayer,
   searchPlayers,
   seasonStatOf,
   setTraining,
@@ -533,6 +534,61 @@ describe("get_squad", () => {
     expect(header).toContain("선발 평균 적응");
     expect(header).not.toMatch(/선발 평균 적응 \d/);
     expect(rest.find((l) => l.startsWith("  "))).toMatch(/전술적응\d+/);
+  });
+});
+
+/**
+ * **임대 보낸 선수는 세계에서 사라지지 않는다** (transfer.md §2) — 계약이 우리
+ * 것이라 조회가 소속이 아니라 계약을 읽는다. 세계는 한 번만 세우고(임대 한 건을
+ * 태워 둔다) 갈라지는 자리 넷을 함께 본다.
+ */
+describe("조회 — 임대 보낸 우리 선수", () => {
+  const state = createTestGame(21);
+  // 2군의 여벌 하나를 보낸다 — 선발을 보내면 전술판이 함께 흔들려 다른 것을 재게 된다
+  const target = userPlayers(state)
+    .filter((p) => p.squadLevel === "reserve" && p.positions[0]?.position !== "GK")
+    .sort((a, b) => a.attributes.overall - b.attributes.overall)[0]!;
+  const loaned = loanPlayer(state, { playerId: target.id, teamId: "chelsea" });
+
+  it("보낸 뒤에도 우리 팀 조회에 선다 — 대상 줄이 그 사실을 말한다", () => {
+    expect(loaned.ok, loaned.message).toBe(true);
+    const res = searchPlayers(state, { team: "mine", name: target.name });
+    expect(res.message).toContain(target.id);
+    // 역할 칸이 소속을 말한다 — `[1군]`으로 서면 부릴 수 있는 인원으로 읽힌다
+    expect(res.message).toMatch(/\[임대:\S+ ~\d{4}-\d{2}-\d{2}\]/);
+    expect(res.message).toContain("임대 1명 포함");
+  });
+
+  it("빌린 구단을 물으면 그 구단 명단에도 선다 — 거기 실제로 있다", () => {
+    const res = searchPlayers(state, { team: "chelsea", name: target.name });
+    expect(res.message).toContain(target.id);
+  });
+
+  it("1군·2군으로 좁히면 빠진다 — 그 층은 빌린 구단의 값이다", () => {
+    for (const level of ["first", "reserve"] as const) {
+      expect(searchPlayers(state, { team: "mine", squadLevel: level }).message).not.toContain(
+        target.id,
+      );
+    }
+  });
+
+  it("get_squad level=loaned는 임대만, 배치 버킷에는 서지 않는다", () => {
+    const res = squadView(state, { level: "loaned" });
+    const rows = res.message.split("\n").filter((l) => l.startsWith("  "));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toContain(target.id);
+    expect(res.message).toContain("── 임대 1명 ──");
+    // 층 조회에는 섞이지 않는다 — 선발·벤치·예비는 전술판의 칸이다
+    for (const level of ["first", "reserve"] as const) {
+      expect(squadView(state, { level }).message).not.toContain(target.id);
+    }
+  });
+
+  it("선수 카드의 전술 칸이 임대를 말한다 — 예비 스쿼드가 아니다", () => {
+    const card = playerCard(state, target.id);
+    expect(card.message).toContain("전술: 임대 중");
+    expect(card.message).not.toContain("배치 없음");
+    expect(card.message).toContain("임대 리포트:");
   });
 });
 

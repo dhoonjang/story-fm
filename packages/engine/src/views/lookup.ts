@@ -88,8 +88,11 @@ import {
   familiarityOf,
   groupOf,
   isAvailable,
+  isOurPlayer,
   managedTeamId,
+  onLoanFromUs,
   openInjury,
+  ourPlayers,
   playerById,
   playerName,
   playersOf,
@@ -103,6 +106,7 @@ import {
   teamShortNameIn,
   type GameState,
 } from "../core/state";
+import { loanReportOf, loanedOut, type LoanReport } from "../market/departures";
 
 /**
  * 읽기 전용 조회 (lookup) — GM이 온디맨드로 부르는 조회 도구의 엔진 구현.
@@ -238,21 +242,39 @@ const competitionHint = () =>
     .map((c) => c.id)
     .join("·")})`;
 
-/** 우리 팀 선수 한 줄 — 정확 수치 (오피스 뷰가 이미 보여주는 정보) */
+/**
+ * 우리 팀 선수 한 줄 — 정확 수치 (오피스 뷰가 이미 보여주는 정보).
+ *
+ * **임대 보낸 선수도 여기 선다** — 계약이 우리 것이라 지식 눈금이 `own`이다
+ * (transfer.md §2). 다만 두 칸의 뜻이 갈린다:
+ * - 역할 칸은 우리 배치가 아니라 **어디에 가 있는가**다. 임대 중에는 우리 전술판에
+ *   그 선수의 자리가 없으므로(`assignmentFor`는 송출과 함께 지워졌다) `[1군]`으로
+ *   서면 부릴 수 있는 인원으로 읽힌다.
+ * - **전술 적응도는 빼고 그 구단의 연속 미출전을 적는다.** 우리 전술을 얼마나
+ *   익혔는가는 남의 훈련장에 가 있는 동안 재는 값이 아니고, 그 자리에서 감독이
+ *   알아야 하는 사실은 "뛰고 있는가"다 (`no-minutes`의 근거 수치).
+ *
+ * 시즌 기록(`statLine`)은 `seasonStatOf`가 **지금 소속의 행**을 읽으므로 빌린
+ * 구단의 기록이 그대로 선다 — 갈아 끼울 것이 없다.
+ */
 function ourRow(state: GameState, p: GamePlayer): string {
+  const loan = onLoanFromUs(state, p) ? loanReportOf(state, p.id) : null;
   const assignment = assignmentFor(state, p.id);
   const contract = activeContract(state, p.id);
   const stat = seasonStatOf(state, p.id);
   const injury = openInjury(state, p.id);
   const suspension = activeSuspension(state, p.id);
-  const role =
-    squadLevelOf(p) === "reserve"
+  const role = loan
+    ? `[임대:${teamShortNameIn(state, loan.teamId)} ~${loan.until}]`
+    : squadLevelOf(p) === "reserve"
       ? (state.developmentFocus?.includes(p.id) ?? false)
         ? "[2군·집중 육성]"
         : "[2군]"
       : assignment
         ? `[${assignment.role === "starting" ? "선발" : "벤치"}:${assignment.position}]`
         : "[1군]";
+  const adaptation = loan ? "" : `적응${familiarityOf(state, p.id)} `;
+  const benched = loan && loan.benchRun > 0 ? ` · 최근 ${loan.benchRun}경기 명단 밖` : "";
   const status = injury
     ? ` 부상(${injury.bodyPart}, ~${injury.expectedReturn})`
     : suspension
@@ -267,10 +289,12 @@ function ourRow(state: GameState, p: GamePlayer): string {
     `${p.id} ${p.name} ${ageOf(p.birthdate, state.date)}세 ${naturalPositionOf(p).position} ` +
     `${physiqueLabel(p.height, p.weight)}(${footLabel(p.foot)}) ` +
     `OVR${p.attributes.overall} 폼 ${formLabel(p.state.form)} ` +
-    `체력${p.state.condition} 적응${familiarityOf(state, p.id)} ` +
+    `체력${p.state.condition} ${adaptation}` +
     `${formatMoney(contract?.weeklyWage ?? 0)}${contractLabel(contract)} ` +
-    `${role} ${statLine(stat)}${status}${issue}${p.isCaptain ? " (주장)" : ""}` +
-    `${isHomegrownFor(p, p.teamId) ? " [홈그로운]" : ""}${occupiesSquadList(state, p) ? "" : " [U21·명단 밖]"}`
+    `${role} ${statLine(stat)}${benched}${status}${issue}${p.isCaptain ? " (주장)" : ""}` +
+    // 홈그로운은 **우리 협회** 기준이다 — 임대 나간 선수를 빌린 구단 기준으로 재면
+    // 같은 선수의 자격이 나가 있는 동안만 뒤집힌다 (searchPlayers의 필터와 같은 자)
+    `${isHomegrownFor(p, state.userTeamId) ? " [홈그로운]" : ""}${occupiesSquadList(state, p) ? "" : " [U21·명단 밖]"}`
   );
 }
 
@@ -324,8 +348,9 @@ function theirRow(state: GameState, p: GamePlayer): string {
   );
 }
 
+/** 우리 행인가 남의 행인가 — **소속이 아니라 계약이 가른다** (transfer.md §2) */
 function playerRow(state: GameState, p: GamePlayer): string {
-  return p.teamId === state.userTeamId ? ourRow(state, p) : theirRow(state, p);
+  return isOurPlayer(state, p) ? ourRow(state, p) : theirRow(state, p);
 }
 
 /**
@@ -336,9 +361,12 @@ function sortRating(state: GameState, p: GamePlayer): number {
   return observedOverall(p.attributes.overall, observationOf(state, p.id));
 }
 
-/** 체력은 지식 5단계가 아니라 §9.2의 채널 — 우리 선수는 아침에 쟀고, 타 팀은 읽는다 */
+/**
+ * 체력은 지식 5단계가 아니라 §9.2의 채널 — 경기 밖 **우리 선수**는 참값이고 타 팀은
+ * 읽은 값이다. 임대 나간 선수도 우리 계약이라 참값이다(`ourRow`가 찍는 값과 같은 자다).
+ */
 function sortCondition(state: GameState, p: GamePlayer): number {
-  return p.teamId === state.userTeamId
+  return isOurPlayer(state, p)
     ? p.state.condition
     : readCondition(state, p.id, p.state.condition).value;
 }
@@ -524,9 +552,24 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
    * **싼 조건이 앞에 선다.** 안개에서 파생하는 셋(지식 수준·잠재력 구간·관측
    * 시장가)은 선수마다 기록을 훑으므로, 앞의 조건이 좁혀 준 만큼만 계산한다.
    */
-  const narrowed = (teamId ? playersOf(state, teamId) : state.players).filter((p) => {
+  /**
+   * 우리 팀을 물으면 풀은 **우리 계약**이다 — 임대 보낸 선수도 들어온다
+   * (transfer.md §2). 남의 팀 풀은 그대로 소속(`playersOf`)이다: 그 구단이 빌려 간
+   * 우리 선수는 그 구단 명단에 **실제로 있으므로** 거기서 빠지면 안 된다.
+   */
+  const ourPool = teamId !== null && teamId === state.userTeamId;
+  const pool0 = teamId ? (ourPool ? ourPlayers(state) : playersOf(state, teamId)) : state.players;
+  const narrowed = pool0.filter((p) => {
     if (inCompetition && !inCompetition.has(p.teamId)) return false;
-    if (input.squadLevel && squadLevelOf(p) !== input.squadLevel) return false;
+    /**
+     * 1군·2군은 **우리 명단의 층**을 묻는 조건이다. 임대 나간 선수가 달고 있는 층은
+     * 빌린 구단의 것이라 우리 기준으로는 뜻이 없어, 우리 풀을 층으로 좁힐 때는 빠진다.
+     * 남의 팀을 그 조건으로 물으면 답은 그 구단의 층이라 그대로 선다.
+     */
+    if (input.squadLevel) {
+      if (ourPool && onLoanFromUs(state, p)) return false;
+      if (squadLevelOf(p) !== input.squadLevel) return false;
+    }
     if (position && !p.positions.some((x) => x.position === position)) return false;
     const age = ageOf(p.birthdate, state.date);
     if (input.minAge !== undefined && age < input.minAge) return false;
@@ -589,9 +632,14 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
   });
 
   // 무엇을 뒤졌는지 밝힌다 — 풀을 모르면 "리그 득점왕"이라는 답이 조용히 어긋난다
+  // 무엇을 뒤졌는지에는 **임대까지 포함했다는 사실**도 든다 — 우리 팀을 물었는데
+  // 남의 셔츠를 입은 이름이 서는 이유가 대상 줄에 없으면 그 줄이 곧 오독이 된다
+  const loanedInPool = ourPool && !input.squadLevel ? loanedOut(state).length : 0;
   const scope =
     [
-      teamId ? teamNameIn(state, teamId) : null,
+      teamId
+        ? `${teamNameIn(state, teamId)}${loanedInPool > 0 ? ` (임대 ${loanedInPool}명 포함)` : ""}`
+        : null,
       competitionId ? competitionName(competitionId) : null,
       input.squadLevel ? (input.squadLevel === "first" ? "1군" : "2군") : null,
     ]
@@ -854,14 +902,37 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
         .join(" / ")}`,
     );
     const assignment = assignmentFor(state, p.id);
+    /**
+     * **임대 나간 선수에게 "배치 없음 (예비 스쿼드)"는 거짓이다** — 우리 전술판에
+     * 자리가 없는 것이 아니라 남의 훈련장에 가 있다. 그 사실이 전술 칸을 대신하고,
+     * 아래 리포트 한 줄이 그 구단에서 무슨 일이 있었는지를 잇는다 (transfer.md §2).
+     */
+    const loan = onLoanFromUs(state, p) ? loanReportOf(state, p.id) : null;
     lines.push(
-      assignment
-        ? `전술: ${assignment.role === "starting" ? "선발" : "벤치"} ${assignment.position}` +
+      loan
+        ? `전술: 임대 중 — ${teamNameIn(state, loan.teamId)} · ${loan.until} 복귀`
+        : assignment
+          ? `전술: ${assignment.role === "starting" ? "선발" : "벤치"} ${assignment.position}` +
             ` (${roleLabel(assignment.position, assignment.roleId)})` +
             ` · 전술적응 ${assignment.familiarity}` +
             (assignment.instruction ? ` · 개인지시 "${assignment.instruction}"` : "")
-        : "전술: 배치 없음 (예비 스쿼드)",
+          : "전술: 배치 없음 (예비 스쿼드)",
     );
+    if (loan) {
+      /**
+       * 임대 리포트 — **사실만.** `no-minutes`·`injury`는 리콜을 고민할 근거 코드이고
+       * (`LoanConcern`), 여기 적히는 것은 그 코드가 뜻하는 수치다. 부상은 카드가
+       * 이미 제 줄로 세우므로 여기서 두 번 적지 않는다.
+       */
+      const report = [
+        `${teamShortNameIn(state, loan.teamId)} 출전${loan.apps}/득점${loan.goals}/도움${loan.assists}` +
+          (loan.rating === null ? "" : `/평점${loan.rating.toFixed(2)}`),
+        loan.reserveApps > 0 ? `2군 출전${loan.reserveApps}` : null,
+        loan.benchRun > 0 ? `최근 ${loan.benchRun}경기 명단 밖` : null,
+        `임대 이후 성장 +${loan.growth}`,
+      ].filter((x): x is string => x !== null);
+      lines.push(`임대 리포트: ${report.join(" · ")}`);
+    }
     /**
      * 최근 성장 — **대상은 낱말로 싣는다.** `pos:CB`는 장부의 코드지 표기가
      * 아닌데, 그대로 실으면 모델이 그 코드를 그대로 감독에게 옮긴다.
@@ -906,8 +977,13 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
 // ── 스쿼드·배치 (우리 팀 전용) ──────────────────────────
 
 export interface SquadViewInput {
-  /** 1군 / 2군 / 전체 — 기본 1군 (2군 18명까지 매번 읽을 이유가 없다) */
-  level?: "first" | "reserve" | "all";
+  /**
+   * 1군 / 2군 / 임대 / 전체 — 기본 1군 (2군 18명까지 매번 읽을 이유가 없다).
+   *
+   * `loaned`는 우리가 **임대 보낸** 선수들이다. 계약이 우리 것이라 명단에 서지만
+   * (transfer.md §2) 전술 배치의 대상이 아니라 층이 아니라 제 구획을 갖는다.
+   */
+  level?: "first" | "reserve" | "all" | "loaned";
   /** 배치 역할로 좁히기 — starting(선발 11) / bench / unassigned(예비) */
   role?: "starting" | "bench" | "unassigned";
 }
@@ -968,16 +1044,43 @@ function assignedRow(
  * 타 팀 스쿼드는 여기서 볼 수 없다 — 상대 라인업을 미리 아는 것은 안개 위반이다
  * (상대 전력은 `get_team`의 스카우팅 리포트로).
  */
+/**
+ * 임대 한 줄 — **그 구단의 장부다.** 우리 전술판의 자리·적응도가 없는 대신 어디에
+ * 가 있고 언제 돌아오며 거기서 뛰고 있는지가 선다. 리콜의 근거는 코드가 아니라
+ * **그 코드가 뜻하는 사실**로 적는다: "불러들이는 편이 좋겠습니다"는 GM의 몫이다
+ * (overview.md §1 철칙 4).
+ */
+function loanRow(state: GameState, p: GamePlayer, report: LoanReport): string {
+  const injury = report.injury;
+  const facts = [
+    `${teamShortNameIn(state, report.teamId)} · ~${report.until} 복귀`,
+    `OVR${p.attributes.overall}`,
+    statLine(seasonStatOf(state, p.id)),
+    report.benchRun > 0 ? `최근 ${report.benchRun}경기 명단 밖` : null,
+    report.growth > 0 ? `임대 이후 성장 +${report.growth}` : null,
+    injury ? `⚠부상(${injury.bodyPart}, ~${injury.expectedReturn})` : null,
+  ].filter((x): x is string => x !== null);
+  return (
+    `  ${naturalPositionOf(p).position.padEnd(4)} ${p.name} (${p.id}) ` +
+    `${ageOf(p.birthdate, state.date)}세 · ${facts.join(" · ")}`
+  );
+}
+
 export function squadView(state: GameState, input: SquadViewInput = {}): LookupResult {
   const teamId = state.userTeamId;
   const tactics = tacticsOf(state, teamId);
   const squad = playersOf(state, teamId);
+  // 임대 나간 선수는 전술 배치의 대상이 아니라 위 배치 버킷과 섞지 않는다
+  const loaned = loanedOut(state);
   const level = input.level ?? "first";
   const assignments = new Map(tactics.assignments.map((a) => [a.playerId, a]));
 
-  const inLevel = squad.filter((p) =>
-    level === "all" ? true : squadLevelOf(p) === (level === "reserve" ? "reserve" : "first"),
-  );
+  const inLevel =
+    level === "loaned"
+      ? []
+      : squad.filter((p) =>
+          level === "all" ? true : squadLevelOf(p) === (level === "reserve" ? "reserve" : "first"),
+        );
   const bucketOf = (p: GamePlayer): "starting" | "bench" | "unassigned" =>
     assignments.get(p.id)?.role ?? "unassigned";
   const sortRow = (a: GamePlayer, b: GamePlayer) => {
@@ -1016,8 +1119,8 @@ export function squadView(state: GameState, input: SquadViewInput = {}): LookupR
       `선발 평균 적응 ${familiarityLabel(squadFamiliarity(state, teamId))}`,
     `1군 ${firstCount}명 (선발 ${tactics.assignments.filter((a) => a.role === "starting").length} · ` +
       `벤치 ${tactics.assignments.filter((a) => a.role === "bench").length}) · ` +
-      `2군 ${squad.length - firstCount}명 · 조회 대상: ${
-        level === "all" ? "전체" : level === "reserve" ? "2군" : "1군"
+      `2군 ${squad.length - firstCount}명 · 임대 ${loaned.length}명 · 조회 대상: ${
+        level === "all" ? "전체" : level === "reserve" ? "2군" : level === "loaned" ? "임대" : "1군"
       }`,
     // 등록 명단 — 영입·승격 판단의 전제라 스쿼드를 볼 때 항상 함께 읽힌다
     registrationLine(squadRegistrationOf(state, teamId)),
@@ -1035,6 +1138,20 @@ export function squadView(state: GameState, input: SquadViewInput = {}): LookupR
     if (rows.length === 0) continue;
     shown += rows.length;
     lines.push(`── ${label} ${rows.length}명 ──`, ...rows);
+  }
+  /**
+   * 임대는 **자기 구획**이다 — 선발·벤치·예비는 전술판의 칸이고, 임대는 그 판에
+   * 올릴 수 없는 사람들이라 같은 목록에 섞으면 부릴 수 있는 인원으로 읽힌다.
+   * `role`로 좁힌 조회는 배치를 묻는 것이라 임대가 서지 않는다.
+   */
+  if ((level === "all" || level === "loaned") && !input.role && loaned.length > 0) {
+    const rows = loaned
+      .map((p) => ({ p, report: loanReportOf(state, p.id) }))
+      .filter((x): x is { p: GamePlayer; report: LoanReport } => x.report !== null)
+      .sort((a, b) => a.p.id.localeCompare(b.p.id))
+      .map(({ p, report }) => loanRow(state, p, report));
+    shown += rows.length;
+    lines.push(`── 임대 ${rows.length}명 ──`, ...rows);
   }
   if (shown === 0) {
     lines.push("조건에 맞는 선수가 없습니다 (level·role을 확인하라)");

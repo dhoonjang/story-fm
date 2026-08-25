@@ -33,7 +33,7 @@ import { applyResultMood } from "../squad/slump";
 import { advanceEuroKnockouts } from "../competition/euro-knockout";
 import { advanceSuperCups } from "../competition/super-cup";
 import { applyMonthlyDevelopment } from "../squad/development";
-import { returnDueLoans, signFreeAgents } from "../market/departures";
+import { loanReports, returnDueLoans, signFreeAgents, type LoanReport } from "../market/departures";
 import { clampForm, decayedForm, formDeltaFromMatch } from "../squad/form";
 import {
   TRAINING_XP_PER_SESSION,
@@ -448,8 +448,11 @@ function dailyTick(
      */
     const grown = applyMonthlyDevelopment(state);
     if (grown.length > 0) {
-      digest.push(`2군 성장: ${grown.slice(0, 5).join(", ")}`);
+      // 우리 2군과 **임대 보낸 선수**가 한 줄에 선다 — 성장 경로가 하나이므로 (season.md §2)
+      digest.push(`월간 성장: ${grown.slice(0, 5).join(", ")}`);
     }
+    // 임대 리포트 — 남의 경기장 장부에서 파생한다. 한 건에 한 줄 (season.md §2 임대)
+    for (const report of loanReports(state)) digest.push(loanDigestLine(state, report));
   } else if (state.date === addDays(state.calendar.preseasonStart, 1)) ensureMonthlyPosted(state);
 
   // 주급 (월요일) — 활성 계약 합에서 파생, 구단 전체에 적용 (무소속 제외 — finance.ts)
@@ -712,6 +715,32 @@ function dailyTick(
    * 시간이 그 위를 지나가면 남는 것은 평판이 깎였다는 다이제스트 한 줄뿐이다.
    */
   return approached || offered || (managed !== null && standsToday(state, digest));
+}
+
+/**
+ * 임대 한 건의 월초 다이제스트 줄 — **사실만 선다** (overview.md §1 철칙 4).
+ *
+ * 구단·출전·평점·연속 미출전·부상·성장 칸 수까지다. "불러들이시죠"는 이 자리의
+ * 것이 아니다 — 근거 코드가 뜻하는 **사실**을 짚고, 그 사실로 무슨 말을 할지는
+ * GM이 쓴다.
+ */
+function loanDigestLine(state: GameState, report: LoanReport): string {
+  const record =
+    report.apps > 0
+      ? `${report.apps}경기 ${report.goals}골 ${report.assists}도움${
+          report.rating !== null ? ` 평점 ${report.rating.toFixed(1)}` : ""
+        }`
+      : "1군 출전 없음";
+  const parts = [
+    report.reserveApps > 0 ? `2군 ${report.reserveApps}경기` : null,
+    report.growth > 0 ? `능력치 +${report.growth}` : null,
+    // 근거 코드는 코드가 아니라 그것이 **뜻하는 사실**로 적는다 (departures.ts `LoanConcern`)
+    report.concerns.includes("no-minutes") ? `최근 ${report.benchRun}경기 명단 밖` : null,
+    report.injury ? `부상 ${report.injury.bodyPart}~${report.injury.expectedReturn}` : null,
+  ].filter((x): x is string => x !== null);
+  return `임대 리포트 · ${report.name} (${teamNameIn(state, report.teamId)}) ${record}${
+    parts.length > 0 ? ` · ${parts.join(" · ")}` : ""
+  } · 복귀 ${report.until}`;
 }
 
 /** 계약 만료 예고 문턱 — 내림차순, 날 단위 (season.md §5) */
