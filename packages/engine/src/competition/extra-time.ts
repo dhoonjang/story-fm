@@ -1,4 +1,4 @@
-import type { GamePlayer, MatchRecord } from "@story-fm/domain";
+import type { GamePlayer, MatchRecord, ShotOrigin } from "@story-fm/domain";
 import { clampCondition, naturalPositionOf } from "@story-fm/domain";
 import { conditionDrain, drainVariance } from "@story-fm/sim";
 import { EXTRA_TIME_MINUTES, simulateExtraTime } from "../match/quick-sim";
@@ -188,14 +188,21 @@ export function finishingXi(
 /** 골 목록에 연장 골을 이어 붙인다 — 세 배열의 길이는 언제나 같다 */
 function appendGoals(
   result: NonNullable<MatchRecord["result"]>,
-  added: { scorers: string[]; assists: string[]; goalMinutes: number[] },
+  added: {
+    scorers: string[];
+    assists: string[];
+    goalMinutes: number[];
+    goalOrigins: ShotOrigin[];
+  },
 ): void {
   const count = result.scorers.length;
   const assists = result.assists ?? new Array<string>(count).fill("");
   const minutes = result.goalMinutes ?? new Array<number>(count).fill(0);
+  const origins = result.goalOrigins ?? new Array<ShotOrigin>(count).fill("open");
   result.scorers = [...result.scorers, ...added.scorers];
   result.assists = [...assists, ...added.assists];
   result.goalMinutes = [...minutes, ...added.goalMinutes];
+  result.goalOrigins = [...origins, ...added.goalOrigins];
 }
 
 /**

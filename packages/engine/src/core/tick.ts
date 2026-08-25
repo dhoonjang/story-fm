@@ -1130,6 +1130,7 @@ export function simulateReserveMatch(state: GameState, match: MatchRecord, diges
     scorers: result.scorers,
     assists: result.assists,
     goalMinutes: result.goalMinutes,
+    goalOrigins: result.goalOrigins,
     homeShots: result.homeShots,
     awayShots: result.awayShots,
     homeXg: result.homeXg,

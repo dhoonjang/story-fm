@@ -362,6 +362,13 @@ function buildPacketFor(
           : tacticsOf(state, teamId).spec,
       managerTactics: managerTacticsOf(state, teamId),
       /**
+       * 죽은 공 키커 — **양 팀이 같은 문을 지난다**(§7). 지정이 없거나 그 선수가
+       * 그라운드에 없으면 패킷이 기본값(킥력·`penaltySkill` 최고)을 세운다.
+       */
+      ...(tacticsOf(state, teamId).setPieceTakers
+        ? { setPieceTakers: tacticsOf(state, teamId).setPieceTakers }
+        : {}),
+      /**
        * 감독의 **분석 능력** — 키포인트를 몇 개나 발견하는가 (key-points.ts).
        * 우리 팀에만 준다: 이 패킷은 감독이 보는 화면이고, 상대 벤치의 눈은 여기 없다.
        */
@@ -1485,6 +1492,8 @@ export function finalizeMatch(state: GameState): MatchDigest {
     assists: goalEvents.map((e) => (e.actors[1] ? `${e.team}:${e.actors[1]}` : "")),
     // 분도 같은 순서로 — 장부에 이미 있는 사실이라 버릴 이유가 없다
     goalMinutes: goalEvents.map((e) => e.minute),
+    // 어디서 나온 골인가 — 갈래를 잃은 옛 장부의 줄은 열린 플레이로 읽는다
+    goalOrigins: goalEvents.map((e) => e.shotOrigin ?? "open"),
     homeShots: statSum(homeLineup, (line) => line.shots),
     awayShots: statSum(awayLineup, (line) => line.shots),
     homeXg: statSum(homeLineup, (line) => line.xg),
