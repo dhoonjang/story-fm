@@ -184,6 +184,27 @@ export function wageByRating(overall: number): number {
   return Math.pow(Math.max(WAGE_BASE_RATING, overall) / WAGE_BASE_RATING, 4.2) * 6_000;
 }
 
+/**
+ * **시장가 언저리**의 두 끝 — 호가가 어디에 섰는지도(`set_transfer_list`), 들어온
+ * 오퍼가 값이 붙은 것인지도(`blocked-move`·`interest`) 같은 자로 잰다
+ * (→ docs/simulation/transfer.md §1 · docs/data/people.md §5).
+ *
+ * 자를 두 곳에 적으면 화면은 "시장가 언저리"라고 적어 놓고 라커룸은 헐값으로 읽는다.
+ */
+export const MARKET_NEAR_LOW = 0.85;
+export const MARKET_NEAR_HIGH = 1.2;
+
+/**
+ * **값이 붙은 오퍼인가** — 시장가 언저리의 아래 끝 이상.
+ *
+ * 시장가 자체를 문턱으로 쓸 수 없다: AI의 첫 호가는 흥정의 여지를 남기려고 시장가의
+ * 75~100%로 들어온다(`generateIncomingOffers`). 그 자를 쓰면 값이 붙은 오퍼를 막은
+ * 일이 라커룸에 영영 닿지 않는다.
+ */
+export function isSeriousOffer(state: GameState, player: GamePlayer, fee: number): boolean {
+  return fee >= marketValueOf(state, player) * MARKET_NEAR_LOW;
+}
+
 /** 이 선수가 원하는 주급 (£/주) — 현 주급과 시장가에서 파생 */
 export function wageExpectationOf(state: GameState, player: GamePlayer): number {
   const current = activeContract(state, player.id)?.weeklyWage ?? 0;
