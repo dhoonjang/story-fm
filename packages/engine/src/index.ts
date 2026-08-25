@@ -82,6 +82,7 @@ export * from "./squad/settling";
 export * from "./squad/injury";
 export * from "./squad/development";
 export * from "./squad/registration";
+export * from "./squad/demotion";
 export * from "./squad/scouting";
 export * from "./squad/training-plan";
 export * from "./squad/training-report";
