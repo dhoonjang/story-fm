@@ -7,6 +7,7 @@ import {
   ageOf,
   naturalPositionOf,
   squadStatusRank,
+  statusAtRank,
 } from "@story-fm/domain";
 import {
   askingPriceFor,
@@ -20,7 +21,6 @@ import {
   clampToBand,
   counterBoundsOf,
   renewalYearsExpectation,
-  statusAtRank,
   type CounterBand,
   type CounterBounds,
 } from "./counter-bounds";

@@ -3,11 +3,11 @@ import {
   MAX_PAYMENT_YEARS,
   SQUAD_STATUSES,
   SQUAD_STATUS_KO,
+  statusAtRank,
   type Negotiation,
 } from "@story-fm/domain";
 import {
   RENEWAL_YEARS_MAX,
-  statusAtRank,
   buildCounterpartyBrief,
   characterEntryOf,
   counterpartyAnchor,

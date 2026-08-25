@@ -155,6 +155,21 @@ function startedIn(
   return list.includes(playerId);
 }
 
+/**
+ * 우리 공식 경기를 **최근 순으로** — 창을 여러 번 재는 호출이 원장을 한 번만 훑게
+ * 하는 색인이다.
+ *
+ * `minutesShortfalls`는 월요일마다 1군 전원에게 창을 묻는다. 호출마다 원장을
+ * 훑으면 멀티시즌 세이브의 한 주가 「선수 수 × 전체 경기 수」가 된다 — 스쿼드 깊이
+ * 색인(`squadDepthOf`)이 있는 이유와 같은 자리다. **읽기 전용 파생**이라 원장이
+ * 그대로인 동안만 유효하다: 한 번의 순회 안에서 세우고 버린다.
+ */
+export function matchWindowOf(state: GameState): (typeof state.matches)[number][] {
+  return state.matches
+    .filter((m) => countsForMinutes(state, m) && m.date <= state.date)
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+}
+
 export interface StartRead {
   /** 그가 설 수 있었던 경기 수 — 부상으로 빠져 있던 날은 빠진다 */
   played: number;
@@ -173,13 +188,16 @@ export interface StartRead {
 export function startsInWindow(
   state: GameState,
   player: GamePlayer,
-  window: { from?: string; matches?: number } = {},
+  window: {
+    from?: string;
+    matches?: number;
+    /** 미리 세운 최근 순 경기 색인 (`matchWindowOf`) — 없으면 그 자리에서 세운다 */
+    pool?: readonly (typeof state.matches)[number][];
+  } = {},
 ): StartRead {
   const limit = window.matches ?? PROMISE_WINDOW_MATCHES;
-  const ours = state.matches
-    .filter((m) => countsForMinutes(state, m))
-    .filter((m) => m.date <= state.date && (window.from === undefined || m.date >= window.from))
-    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+  const ours = (window.pool ?? matchWindowOf(state))
+    .filter((m) => window.from === undefined || m.date >= window.from)
     .slice(0, limit);
   let played = 0;
   let starts = 0;
@@ -385,6 +403,8 @@ export interface MinutesShortfall {
  */
 export function minutesShortfalls(state: GameState): MinutesShortfall[] {
   const rows: MinutesShortfall[] = [];
+  // 원장은 한 번만 훑는다 — 아래 루프가 1군 전원에게 같은 창을 묻는다
+  const pool = matchWindowOf(state);
   for (const player of playersOf(state, state.userTeamId)) {
     if (squadLevelOf(player) !== "first") continue;
     if (player.loan) continue;
@@ -392,7 +412,7 @@ export function minutesShortfalls(state: GameState): MinutesShortfall[] {
     if (openInjury(state, player.id) || isSuspended(state, player.id)) continue;
     if (state.issues.some((i) => i.gamePlayerId === player.id)) continue;
     const status = squadStatusOf(state, player);
-    const read = startsInWindow(state, player);
+    const read = startsInWindow(state, player, { pool });
     // 창이 차기 전에는 비율이 표본이 아니다
     if (read.played < PROMISE_WINDOW_MATCHES) continue;
     if (promiseKept(read.share, status)) continue;

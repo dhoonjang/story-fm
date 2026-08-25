@@ -187,6 +187,16 @@ export function squadStatusRank(status: SquadStatus): number {
   return SQUAD_STATUSES.indexOf(status);
 }
 
+/**
+ * 서열을 다시 지위로 — `squadStatusRank`의 **역이라 같은 자리에 산다.**
+ * 되부르기가 지위를 정수 사다리로 다루므로(transfer.md §1) 구간 밖의 정수는
+ * 사다리의 양끝으로 접는다.
+ */
+export function statusAtRank(rank: number): SquadStatus {
+  const index = Math.max(0, Math.min(SQUAD_STATUSES.length - 1, Math.round(rank)));
+  return SQUAD_STATUSES[index]!;
+}
+
 /** 지위의 이름 — 화면·카드·프롬프트가 같은 말을 쓴다 */
 export const SQUAD_STATUS_KO: Record<SquadStatus, string> = {
   key: "핵심",

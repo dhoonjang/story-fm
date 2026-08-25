@@ -44,16 +44,6 @@ export const RENEWAL_YEARS_ASK_YOUNG = 4;
 export const RENEWAL_YEARS_MAX = 5;
 
 /**
- * 서열을 다시 지위로 — **지위 밴드의 양끝이 정수라서 필요한 되돌림**이다.
- * `CounterBand`는 숫자 구간 한 벌이고(연수와 같은 결), 지위는 그 위에 얹힌 사다리다.
- * 구간 밖의 정수는 사다리의 양끝으로 접는다.
- */
-export function statusAtRank(rank: number): SquadStatus {
-  const index = Math.max(0, Math.min(SQUAD_STATUSES.length - 1, Math.round(rank)));
-  return SQUAD_STATUSES[index]!;
-}
-
-/**
  * 선수가 되부를 수 있는 지위의 구간 — **지금 실제로 서는 자리에서 한 칸 위까지**다
  * (transfer.md §1). 백업 자리의 선수가 핵심을 부르지는 않는다.
  *

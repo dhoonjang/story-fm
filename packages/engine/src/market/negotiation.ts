@@ -21,6 +21,7 @@ import {
   naturalPositionOf,
   registrationBlockText,
   squadStatusRank,
+  statusAtRank,
 } from "@story-fm/domain";
 import {
   addDays,
@@ -77,13 +78,7 @@ import { assignSquadNumber } from "../squad/numbers";
 import { userWageRoom } from "../club/board-request";
 import { marketBiasOf, squadShortfallText, transferWindowLabel, windowOpenForTeam } from "./market";
 import { evaluatePitch, latitudeOf } from "./persuasion";
-import {
-  bandOpen,
-  clampToBand,
-  counterBoundsOf,
-  outgoingCounterFloor,
-  statusAtRank,
-} from "./counter-bounds";
+import { bandOpen, clampToBand, counterBoundsOf, outgoingCounterFloor } from "./counter-bounds";
 import { derivedSquadStatus } from "../squad/promises";
 import { makeRng } from "../core/rng";
 import type { MarketSkillResult, SkillResult } from "../skills";
@@ -3295,8 +3290,13 @@ export function runAiRenewals(state: GameState, digest: string[]): void {
       since: state.date,
       until: contractUntil(state.date, years),
       status: "active",
-      // 그 구단에서의 자리다 — 남의 라커룸을 우리 서열로 재지 않는다
-      squadStatus: derivedSquadStatus(state, player, contract.teamId),
+      /**
+       * **지위 칸은 비워 둔다** (transfer.md §1) — 남의 구단의 재계약은 감독이 아무
+       * 자리도 약속한 적 없는 계약이라, 적어 두면 그때의 서열이 굳어 약속인 척한다.
+       * 살아나는 자리는 감독이 그 구단으로 이직한 다음 날이다: 몇 시즌 전 서열로
+       * 굳은 지위가 그날부터 출전 불만을 낸다. 읽는 쪽이 그때그때 파생하면
+       * (`squadStatusOf`) 언제나 지금의 서열이다.
+       */
     });
 
     /**
