@@ -35,7 +35,11 @@ import { advanceSuperCups } from "../competition/super-cup";
 import { applyMonthlyDevelopment } from "../squad/development";
 import { returnDueLoans, signFreeAgents } from "../market/departures";
 import { clampForm, decayedForm, formDeltaFromMatch } from "../squad/form";
-import { TRAINING_XP_PER_SESSION, type TrainedSession } from "../squad/training-report";
+import {
+  TRAINING_XP_PER_SESSION,
+  trainsWithFirstTeam,
+  type TrainedSession,
+} from "../squad/training-report";
 import {
   applyAiMatchFinance,
   ensureMonthlyPosted,
@@ -354,9 +358,13 @@ function dailyTick(
    *
    * 빈도도 대상도 **개인 성향**을 탄다: 유리몸이 많은 선수단은 실제로 더 자주
    * 쓰러지고, 그중 누가 걸리는지도 경기와 같은 저울(`injuryWeight`)로 정한다.
+   *
+   * ⚠️ **대상은 결산과 같은 문을 지난다**(`trainsWithFirstTeam` — season.md §8
+   * 불변식). 갈라 두면 훈련장에 서지도 않은 2군이 훈련 중에 다치고, 다치지 않고
+   * 소화한 몫(`easeProneness`)도 함께 받는다.
    */
   if (hardSessions > 0) {
-    const candidates = players.filter((p) => !isInjured(state, p.id));
+    const candidates = players.filter((p) => trainsWithFirstTeam(state, p));
     if (candidates.length > 0) {
       const avgProneness =
         candidates.reduce((s, p) => s + pronenessValue(p), 0) / candidates.length;

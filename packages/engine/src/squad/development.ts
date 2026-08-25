@@ -7,7 +7,7 @@ import type {
 import { ATTRIBUTE_AXES, ageOf, isReserveMatch, RATING_MAX } from "@story-fm/domain";
 import { ageGrowthFactor, agingDelta } from "../world/attributes";
 import { makeRng } from "../core/rng";
-import { reserveTrainingMultiplier } from "./training-plan";
+import { monthlyGrowthMultiplier, personalTrainingAxis } from "./training-plan";
 import { recomputeOverall, recordGrowth, squadLevelOf, type GameState } from "../core/state";
 
 /**
@@ -48,7 +48,8 @@ const GROW_MAX = 0.35;
 // ── 감독의 육성 손잡이 (season.md §2 2군 리그) ──────────────────────
 // 배율은 **성장 쪽에만** 붙는다 — 노화 하락은 출전과 무관하다. 상한을 다 곱해도
 // (1.6 × 1.5 = 2.4 → 시즌 기대 0.84칸) 1군 결산 경로보다 느리다 — 2군은 자라는
-// 곳이고, 뛰는 곳은 1군이다.
+// 곳이고, 뛰는 곳은 1군이다. 축을 겨냥하는 손잡이(방침 · 개인 훈련)는 얼마나 빨리가
+// 아니라 어느 쪽으로를 정하므로 총량 이동이고, 원본은 `training-plan.ts`다.
 
 /** 지난달 2군 출전 한 경기가 성장 확률에 얹는 배율 증분 */
 export const RESERVE_APP_BOOST = 0.3;
@@ -141,6 +142,8 @@ export function rollMonthlyAxes(
     boost?: number;
     /** 2군 훈련 방침 — 축마다 다른 배율을 얹는다. 없으면 어느 축도 흔들리지 않는다 */
     policy?: ReserveTrainingPolicy;
+    /** 이 선수에게 걸린 개인 훈련의 축 — 방침 위에 한 축을 더 겨냥한다 (season.md §2) */
+    personal?: AttributeAxis;
   },
   axes: readonly AttributeAxis[] = ATTRIBUTE_AXES,
 ): { axis: AttributeAxis; step: number }[] {
@@ -149,8 +152,11 @@ export function rollMonthlyAxes(
       const rng = makeRng(input.seed, `development:${input.date}:${input.playerId}:${axis}`);
       // 뽑히는 순서도 난수다 — 축 이름으로 세우면 편향이 자리만 옮긴다
       const priority = rng();
-      // 배율이 1이면 곱하지 않는다 — 방침 없는 세이브가 부동소수로 흔들리지 않게
-      const aim = input.policy ? reserveTrainingMultiplier(input.policy, axis) : 1;
+      // 배율이 1이면 곱하지 않는다 — 겨냥 없는 세이브가 부동소수로 흔들리지 않게
+      const aim =
+        input.policy || input.personal
+          ? monthlyGrowthMultiplier(axis, { policy: input.policy, personal: input.personal })
+          : 1;
       const boost = aim === 1 ? input.boost : (input.boost ?? 1) * aim;
       const step = rollAxis(axis, input.age, input.values[axis], input.potential, rng, boost);
       return { axis, step, priority };
@@ -189,6 +195,8 @@ export function applyMonthlyDevelopment(state: GameState): string[] {
     const boost = ours
       ? reserveAppsBoost(reserveApps.get(player.id) ?? 0) * (focus.has(player.id) ? FOCUS_BOOST : 1)
       : 1;
+    // 개인 훈련은 우리 선수에게만 걸린다 — 2군에서는 이 축이 월간 성장의 겨냥이다
+    const personal = ours ? personalTrainingAxis(state, player.id) : null;
     const steps = rollMonthlyAxes({
       seed: state.seed,
       date: state.date,
@@ -198,6 +206,7 @@ export function applyMonthlyDevelopment(state: GameState): string[] {
       potential: player.attributes.potential,
       boost,
       ...(ours && state.reserveTraining ? { policy: state.reserveTraining } : {}),
+      ...(personal ? { personal } : {}),
     });
     if (steps.length === 0) continue;
 
