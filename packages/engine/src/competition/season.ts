@@ -81,6 +81,7 @@ import { boardExpectationOfTier, tierOfTeamIn } from "../core/club-tier";
 import { leagueRounds, safetyLine } from "../core/league-shape";
 import { generateYouthPlayer } from "../world/generate";
 import { assignSquadNumber } from "../squad/numbers";
+import { successorCaptainOf } from "../squad/hierarchy";
 import {
   buildAssignments,
   clampReputation,
@@ -1191,15 +1192,23 @@ function applyTransition(state: GameState): string[] {
     );
   }
 
-  // 주장 유지 — 은퇴했으면 새로 지명
+  /**
+   * 주장 유지 — 은퇴·이적으로 비었으면 **서열이 승계한다** (people.md §5-1):
+   * 부주장이 먼저이고, 없으면 리더 그룹의 최상위다. 골키퍼를 거르지 않는다 —
+   * 누가 라커룸을 이끄는가는 포지션이 아니라 리더십이 답한다.
+   */
   const userSquad = playersOf(state, state.userTeamId);
   if (!userSquad.some((p) => p.isCaptain)) {
-    const next = [...userSquad]
-      .filter((p) => groupOf(p) !== "GK")
-      .sort((a, b) => b.attributes.overall - a.attributes.overall)[0];
+    const successorId = successorCaptainOf(state, state.userTeamId);
+    const next = userSquad.find((p) => p.id === successorId);
     if (next) {
+      const wasVice = next.isViceCaptain === true;
       next.isCaptain = true;
-      digest.push(`새 주장: ${next.name} (${naturalPositionOf(next).position})`);
+      next.isViceCaptain = undefined;
+      digest.push(
+        `새 주장: ${next.name} (${naturalPositionOf(next).position})` +
+          (wasVice ? " — 부주장이 완장을 이었다" : ""),
+      );
     }
   }
 

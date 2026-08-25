@@ -229,6 +229,20 @@ export const HEAD_COACH_ROLE_LABEL = PERSONA_ROLE_LABEL.head_coach!;
 export const CAPTAIN_ROLE_LABEL = "주장";
 
 /**
+ * 라커룸에서 선 자리 — 감독이 채우는 완장 둘과 파생되는 리더 그룹
+ * (→ docs/data/people.md §5-1). 사실 카드·화면·조회 도구가 **같은 문자열**을 읽는다.
+ */
+export const LEADER_ROLES = ["captain", "vice", "group"] as const;
+export type LeaderRole = (typeof LEADER_ROLES)[number];
+export const LeaderRoleSchema = z.enum(LEADER_ROLES);
+
+export const LEADER_ROLE_LABEL: Record<LeaderRole, string> = {
+  captain: CAPTAIN_ROLE_LABEL,
+  vice: "부주장",
+  group: "라커룸 리더",
+};
+
+/**
  * 다가옴의 채널 — **누가 감독에게 먼저 오는가** (people.md §8).
  *
  * 페르소나의 `role`을 그대로 쓰지 않는 이유는 주장 때문이다: 주장은 자리가 뜻을 갖되

@@ -2,12 +2,14 @@ import {
   ageOf,
   isRelease,
   issueReasonKo,
+  LEADER_ROLE_LABEL,
   milestonePhrase,
   MOOD_NOTE_MAX,
   PLAYER_ARCHETYPE_LABEL,
 } from "@story-fm/domain";
 import type {
   GamePlayer,
+  LeaderRole,
   MatchRecord,
   MilestoneCode,
   PlayerArchetypeKey,
@@ -18,6 +20,7 @@ import { milestonesOf } from "./career";
 import { formLabel, RATING_BASELINE, type FormLabel } from "./form";
 import { settlingOf } from "./settling";
 import { playerArchetypeOf } from "../world/player-persona";
+import { leaderRoleOf } from "./hierarchy";
 import { demotionPatienceDaysOf } from "./demotion";
 import {
   activeContract,
@@ -124,7 +127,11 @@ export type MoodFact =
   /** 최근 우리 구단에서 계약이 해지된 선수 — 남은 선수단 전원이 같은 카드를 든다 */
   | { cause: "departure"; name: string; days: number }
   | { cause: "contract-ending"; daysLeft: number }
-  | { cause: "captain" }
+  /**
+   * 라커룸에서 선 자리 — 완장 둘과 리더 그룹 (people.md §5-1). 주장만 세우면 서열이
+   * 감독에게 보이지 않고, 리더의 불만이 왜 더 빨리 쌓이는지도 어디에도 서지 않는다.
+   */
+  | { cause: "leader"; role: LeaderRole }
   | { cause: "young"; age: number }
   | { cause: "steady" };
 
@@ -403,7 +410,10 @@ export function moodFactsOf(
       facts.push({ cause: "contract-ending", daysLeft: left });
     }
   }
-  if (player.isCaptain && facts.length < MOOD_FACT_LIMIT) facts.push({ cause: "captain" });
+  if (facts.length < MOOD_FACT_LIMIT) {
+    const seat = leaderRoleOf(state, player);
+    if (seat) facts.push({ cause: "leader", role: seat });
+  }
   const age = ageOf(player.birthdate, state.date);
   if (!injury && !suspension && age <= YOUNG_AGE && facts.length < MOOD_FACT_LIMIT) {
     facts.push({ cause: "young", age });
@@ -501,8 +511,8 @@ function factLine(fact: MoodFact): string {
       return `${fact.name} 계약 해지 · ${dayWord(fact.days)}`;
     case "contract-ending":
       return `계약 만료 ${fact.daysLeft}일`;
-    case "captain":
-      return "주장";
+    case "leader":
+      return LEADER_ROLE_LABEL[fact.role];
     case "young":
       return `${fact.age}세`;
     case "steady":
@@ -600,7 +610,8 @@ export function buildMoodBrief(state: GameState, from: string, to: string): Mood
     if (facts.length === 0) continue;
 
     facts.push(`체력 ${Math.round(condition)}`);
-    if (player.isCaptain) facts.push("주장");
+    const seat = leaderRoleOf(state, player);
+    if (seat) facts.push(LEADER_ROLE_LABEL[seat]);
     targets.push({
       playerId: player.id,
       name: player.name,

@@ -272,7 +272,7 @@ describe("1·2군 이동 — 한 요청이 여럿을 옮긴다", () => {
     const state = createTestGame();
     const starter = userTactics(state).assignments.find((a) => a.role === "starting")!;
     const player = userPlayers(state).find((p) => p.id === starter.playerId)!;
-    expect(setCaptain(state, player.id).ok).toBe(true);
+    expect(setCaptain(state, { playerId: player.id }).ok).toBe(true);
 
     const res = setSquadLevels(state, { moves: [{ playerId: player.id, level: "reserve" }] });
 
