@@ -3,7 +3,7 @@ import { clampCondition, naturalPositionOf } from "@story-fm/domain";
 import { conditionDrain, drainVariance } from "@story-fm/sim";
 import { EXTRA_TIME_MINUTES, simulateExtraTime } from "../match/quick-sim";
 import { recordCard } from "../match/discipline";
-import { derbyOf } from "../data/derbies";
+import { derbyForMatch } from "../club/derby";
 import { openInjuryFor } from "../squad/injury";
 import { makeRng } from "../core/rng";
 import { simSquadFor } from "../core/tick";
@@ -231,7 +231,7 @@ export function resolveExtraTime(state: GameState, decider: MatchRecord, channel
    * 선수 목록만 넘기면 패킷이 자연 포지션·기본 전술·적응도 60·감독 65로 서서
    * 연장에서만 약팀이 살아나거나 죽는다 (match.md §7).
    */
-  const extraDerby = derbyOf(decider.homeTeamId, decider.awayTeamId);
+  const extraDerby = derbyForMatch(decider);
   const extra = simulateExtraTime(
     simSquadFor(state, decider.homeTeamId, xi.home),
     simSquadFor(state, decider.awayTeamId, xi.away),

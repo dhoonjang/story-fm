@@ -335,6 +335,11 @@ Derby { name, teams: [teamId, teamId], heat: 1 | 2 | 3 }
 | 홈 관중                       | `OCCUPANCY_DERBY_BONUS(0.03) × heat`                           | [finance §5.2](../simulation/finance.md)                        |
 | 머천다이징 창                 | 더비 한 경기가 `1 + MERCH_DERBY_WEIGHT(0.5) × heat`경기로 센다 | [finance §5.3](../simulation/finance.md)                        |
 
+⚠️ **친선과 2군은 라이벌 축을 타지 않는다.** 대진이 같아도 프리시즌 친선의 승패가
+스쿼드 전원의 폼을 흔들면 몸을 만드는 5주가 라커룸을 정하고, 2군 경기는 결과가
+출전과 성장에만 닿는 경기다 ([season.md §2](../simulation/season.md)). 위 다섯
+자리가 전부 **한 문**(`derbyForMatch`)을 지나므로 이 규칙이 한 곳에만 적힌다.
+
 더비 전야·경기 뒤 회견과 시즌 리뷰의 더비 전적은
 [people §4](people.md#4-기자회견--세계가-먼저-말을-거는-유일한-자리) ·
 [career §5.1](../simulation/career.md).
@@ -753,6 +758,7 @@ WorldScope { leagues, teamsPerLeague, cups, markets }
 | 리그 카탈로그 (`kind` · 계수 · 중계권)     | `packages/engine/src/data/league-catalog.ts`                         |
 | 구단 프로필 (구장 · 브랜드)                | `packages/engine/src/data/club-profile.ts`                           |
 | 더비 표 (`heat` · `derbyOf`)               | `packages/engine/src/data/derbies.ts`                                |
+| 더비의 문 · 더비 전적 (`derbyForMatch`)    | `packages/engine/src/club/derby.ts`                                  |
 | 카탈로그 오버라이드 (읽기·쓰기·캐시)       | `packages/engine/src/data/catalog-source.ts` · `team-override.ts`    |
 | 팀 어드민 (조회 · 편집 · 추가 · 삭제)      | `packages/engine/src/world/admin-team.ts`                            |
 | 카탈로그 불변식 (순수) · 로드 시 검사      | `packages/engine/src/world/catalog-invariants.ts`                    |

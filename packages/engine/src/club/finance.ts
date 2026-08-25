@@ -26,7 +26,7 @@ import {
 } from "../competition/calendar";
 import { creditManagerWallet } from "./manager-wallet";
 import { clubProfile } from "../data/club-profile";
-import { derbyOf } from "../data/derbies";
+import { derbyForMatch } from "./derby";
 import { clubEconomyLevel, leagueEconomyLevel, leagueTicketSpread } from "../data/league-economy";
 import { isMarketOnlyLeague, isTopLeague, leagueCatalogById } from "../data/league-catalog";
 import { competitionShortName, isCup, isEuroCup } from "../data/cup-catalog";
@@ -814,7 +814,7 @@ export function matchdayRevenue(state: GameState, match: MatchRecord): MatchdayR
   // 상대 매력도 · 더비 · 대회 · 슬롯
   const oppTier = tierOf(state, opponentId);
   occupancy += OCCUPANCY_BY_OPPONENT_TIER[oppTier];
-  const derby = derbyOf(teamId, opponentId);
+  const derby = derbyForMatch(match);
   if (derby) occupancy += OCCUPANCY_DERBY_BONUS * derby.heat;
   if (isCup(match.competitionId)) occupancy += OCCUPANCY_CUP_BONUS;
   const dow = dayOfWeek(match.date);
@@ -1508,7 +1508,7 @@ function recentWinRates(state: GameState, window: number): Map<string, number> {
   for (const m of state.matches) {
     // 친선·2군 리그는 세지 않는다 — 머천다이징이 읽을 성적은 1군 대회뿐이다 (season.md §2)
     if (!m.result || isFriendly(m) || isReserveMatch(m)) continue;
-    const weight = 1 + MERCH_DERBY_WEIGHT * (derbyOf(m.homeTeamId, m.awayTeamId)?.heat ?? 0);
+    const weight = 1 + MERCH_DERBY_WEIGHT * (derbyForMatch(m)?.heat ?? 0);
     const push = (teamId: string, won: boolean) => {
       const list = results.get(teamId) ?? [];
       list.push({ won, weight });

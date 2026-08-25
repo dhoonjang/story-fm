@@ -30,7 +30,7 @@ import { advanceDomesticCups } from "../competition/domestic-cup";
 import { hasCups } from "../world/scope";
 import { driftFamiliarity, tickOtherClubs } from "../squad/other-clubs";
 import { applyResultMood } from "../squad/slump";
-import { derbyOf } from "../data/derbies";
+import { derbyForMatch } from "../club/derby";
 import { advanceEuroKnockouts } from "../competition/euro-knockout";
 import { advanceSuperCups } from "../competition/super-cup";
 import { applyMonthlyDevelopment } from "../squad/development";
@@ -1156,7 +1156,7 @@ export function simulateOtherMatches(state: GameState, digest: string[]): void {
       home: simSquadOf(state, match.homeTeamId),
       away: simSquadOf(state, match.awayTeamId),
     };
-    const derby = derbyOf(match.homeTeamId, match.awayTeamId);
+    const derby = derbyForMatch(match);
     const result = quickSimulate(
       squads.home,
       squads.away,

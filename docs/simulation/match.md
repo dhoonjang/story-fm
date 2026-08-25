@@ -86,7 +86,8 @@ heat`가 곱해진다 — 압박·템포의 clamp(0.80\~1.22) **뒤**다. 더비
   거칠어져야 한다. 카드·파울·부상이 함께 오른다 (§6의 손잡이 표).
 
 `heat`가 닿는 나머지 자리(관중·굿즈·라커룸·보드)는 [team.md §3.2](../data/team.md)
-가 한 표로 모아 둔다.
+가 한 표로 모아 둔다. **친선과 2군은 그중 어느 것도 타지 않는다** — 다섯 자리가
+전부 `derbyForMatch` 한 문을 지난다.
 
 ### 1.1 전력은 개인에서 시작한다
 
@@ -1670,5 +1671,5 @@ m은 장부의 `subLimitsOf(ledger.phase)`를 뷰가 `subs.limit`으로 실어 �
 | 경기 흐름·정지점·마감            | `packages/engine/src/match/match-flow.ts`                                  |
 | 연장 판정·타 팀 연장·승부차기    | `packages/engine/src/competition/extra-time.ts` · `shootout.ts`            |
 | 간이 시뮬·평점·징계              | `packages/engine/src/match/quick-sim.ts` · `ratings.ts` · `discipline.ts`  |
-| 더비 표 (`heat`·`derbyOf`)       | `packages/engine/src/data/derbies.ts`                                      |
+| 더비 표 · 더비의 문              | `packages/engine/src/data/derbies.ts` · `club/derby.ts` (`derbyForMatch`)  |
 | 경기 화면                        | `apps/web/components/match-view.tsx`                                       |

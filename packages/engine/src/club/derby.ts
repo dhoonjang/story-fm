@@ -10,7 +10,7 @@
 import { isReserveMatch, type MatchRecord } from "@story-fm/domain";
 import type { GameState } from "../core/state";
 import { isFriendly } from "../competition/friendly";
-import { derbyOf } from "../data/derbies";
+import { derbyOf, type Derby } from "../data/derbies";
 
 /**
  * 전적이 거슬러 올라가는 시즌 수 — **상한이지 약속이 아니다.**
@@ -26,7 +26,20 @@ export interface DerbyRecord {
   lost: number;
 }
 
-/** 전적에 세는 경기인가 — 친선도 2군도 더비가 아니다 (season.md §2) */
+/**
+ * 이 경기의 더비 — **라이벌 축이 걸리는 자리가 전부 이 문 하나를 지난다**
+ * (강도·사기·관중·전적).
+ *
+ * ⚠️ 친선과 2군은 더비가 아니다. 대진은 같아도 프리시즌 친선의 승패가 스쿼드
+ * 전원의 폼을 흔들면 몸을 만드는 5주가 라커룸을 정하고, 2군 경기는 결과가 출전과
+ * 성장에만 닿는 경기다 (season.md §2).
+ */
+export function derbyForMatch(match: MatchRecord): Derby | null {
+  if (isFriendly(match) || isReserveMatch(match)) return null;
+  return derbyOf(match.homeTeamId, match.awayTeamId);
+}
+
+/** 전적에 세는 경기인가 */
 function counts(state: GameState, m: MatchRecord): boolean {
   return (
     m.result !== null &&
@@ -45,8 +58,8 @@ export function derbyMatchesOf(state: GameState, opponentId?: string): MatchReco
   return state.matches
     .filter((m) => {
       if (!counts(state, m)) return false;
-      const them = m.homeTeamId === us ? m.awayTeamId : m.homeTeamId;
       if (m.homeTeamId !== us && m.awayTeamId !== us) return false;
+      const them = m.homeTeamId === us ? m.awayTeamId : m.homeTeamId;
       if (opponentId !== undefined && them !== opponentId) return false;
       return derbyOf(us, them) !== null;
     })
