@@ -1,6 +1,7 @@
-import { ageOf, isRelease, issueReasonKo, MOOD_NOTE_MAX } from "@story-fm/domain";
-import type { GamePlayer, MatchRecord, PlayerIssueReason } from "@story-fm/domain";
+import { ageOf, isRelease, issueReasonKo, milestonePhrase, MOOD_NOTE_MAX } from "@story-fm/domain";
+import type { GamePlayer, MatchRecord, MilestoneCode, PlayerIssueReason } from "@story-fm/domain";
 import { diffDays } from "../competition/calendar";
+import { milestonesOf } from "./career";
 import { formLabel, RATING_BASELINE, type FormLabel } from "./form";
 import { settlingOf } from "./settling";
 import {
@@ -83,6 +84,12 @@ export type MoodFact =
       rating: number | null;
       /** 그 경기에서 **자기 몫**을 했는가 — 팀 결과와 따로 논다 */
       own: "good" | "par" | "poor";
+      /**
+       * 그 경기가 세운 기록 — **새 카드가 아니라 여운의 일부다** (people.md §5).
+       * 데뷔전도 100경기도 별개의 마음이 아니라 그 경기의 여운이라, 카드를 하나 더
+       * 세우면 두 장 한도(`MOOD_FACT_LIMIT`) 안에서 불만이나 폼을 밀어낸다.
+       */
+      milestone?: { code: MilestoneCode; value: number };
     }
   | { cause: "no-minutes"; place: "bench" | "out" }
   | { cause: "form"; label: FormLabel }
@@ -102,6 +109,11 @@ export interface MoodRead {
 }
 
 interface LastMatch {
+  /**
+   * 어느 경기인가 — **그 경기가 세운 기록을 찾는 열쇠다.** 여기에 실어 나르므로
+   * 여운 문장과 기록이 같은 경기를 가리키는 것이 코드에서 보인다 (people.md §5).
+   */
+  matchId: string;
   outcome: "win" | "draw" | "loss";
   /** 그 경기에서 받은 평점 (없으면 기록이 안 남은 경기) */
   rating: number | null;
@@ -157,6 +169,7 @@ function lastMatchOf(state: GameState, playerId: string, index?: LastMatchIndex)
   const ours = home ? match.result.homeGoals : match.result.awayGoals;
   const theirs = home ? match.result.awayGoals : match.result.homeGoals;
   return {
+    matchId: match.id,
     outcome: ours > theirs ? "win" : ours === theirs ? "draw" : "loss",
     rating: match.result.ratings?.[playerId] ?? null,
     days: diffDays(match.date, state.date),
@@ -167,8 +180,12 @@ function lastMatchOf(state: GameState, playerId: string, index?: LastMatchIndex)
  * 경기의 여운 — **팀의 결과와 자기 경기가 따로 논다.**
  * 이긴 경기에서 부진한 선수와 진 경기에서 제 몫을 한 선수는 마음이 다르다.
  * 평점이 없으면 팀 결과만 사실이므로 자기 몫은 중립(`par`)이다.
+ *
+ * 그 경기가 기록을 세웠으면 여운 카드가 **그 코드를 함께 든다** — 여럿이면 가장
+ * 드문 것 하나만이다(목록이 이미 드문 순이다). 여운은 `AFTERGLOW_DAYS`(3) 안에서만
+ * 서므로 기록도 사흘이고, 그 뒤에 남는 것은 장부와 선수 상세다 (people.md §5).
  */
-function afterglow(last: LastMatch): MoodFact {
+function afterglow(state: GameState, playerId: string, last: LastMatch): MoodFact {
   const own =
     last.rating === null
       ? "par"
@@ -177,7 +194,15 @@ function afterglow(last: LastMatch): MoodFact {
         : last.rating <= RATING_BASELINE - AFTERGLOW_RATING_BAND
           ? "poor"
           : "par";
-  return { cause: "afterglow", days: last.days, outcome: last.outcome, rating: last.rating, own };
+  const milestone = milestonesOf(state, playerId, last.matchId)[0];
+  return {
+    cause: "afterglow",
+    days: last.days,
+    outcome: last.outcome,
+    rating: last.rating,
+    own,
+    ...(milestone ? { milestone: { code: milestone.code, value: milestone.value } } : {}),
+  };
 }
 
 /** 라커룸 불만의 사유 코드 — 옛 세이브는 문장을 들고 있어 그것이 폴백이다 */
@@ -285,7 +310,7 @@ export function moodFactsOf(
         matches: settling.matches,
       });
     } else if (fresh && last) {
-      facts.push(afterglow(last));
+      facts.push(afterglow(state, player.id, last));
     }
 
     /**
@@ -412,7 +437,11 @@ function factLine(fact: MoodFact): string {
     case "afterglow":
       return (
         `${dayWord(fact.days)} ${OUTCOME_WORD[fact.outcome]}` +
-        (fact.rating === null ? "" : ` · 평점 ${fact.rating.toFixed(1)}`)
+        (fact.rating === null ? "" : ` · 평점 ${fact.rating.toFixed(1)}`) +
+        // 평가어는 없다 — 눈금과 라벨뿐이다 (말은 도메인의 `milestonePhrase`)
+        (fact.milestone === undefined
+          ? ""
+          : ` · ${milestonePhrase(fact.milestone.code, fact.milestone.value)}`)
       );
     case "no-minutes":
       return `출전 0 · ${fact.place === "bench" ? "벤치" : "명단 밖"}`;

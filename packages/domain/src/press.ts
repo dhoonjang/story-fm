@@ -5,8 +5,10 @@ import { formatMoney } from "./money";
 import { ApproachChannelSchema, type ApproachChannel } from "./persona";
 import {
   boardExpectationText,
+  milestonePhrase,
   PLAYER_ISSUE_REASONS,
   type BoardExpectationCode,
+  type MilestoneCode,
   type PlayerIssueReason,
 } from "./records";
 
@@ -71,6 +73,8 @@ export const PressFactKindSchema = z.enum([
   "transfer-request",
   /** 열린 보드 요청 — 구단주가 이 창에 건 조건 (career.md §5.2) */
   "board-demand",
+  /** 방금 끝난 경기가 세운 기록 — 데뷔·첫 골·구단 통산 문턱·해트트릭 (match.md §6) */
+  "milestone",
 ]);
 /**
  * 회견의 재료 — **사실 한 줄.** 질문이 아니다.
@@ -430,6 +434,8 @@ export function pressFactText(fact: PressFact): string {
       return `${name} 이적 요청 — ${reasonOf(tags[0])} 불만 ${v.days ?? 0}일째`;
     case "board-demand":
       return `보드 요청 — ${demandText(sub, name, v.baseline)}${d.date ? ` · 기한 ${d.date}` : ""}`;
+    case "milestone":
+      return `${name} ${milestonePhrase((sub ?? "apps") as MilestoneCode, v.value ?? 1)}`;
   }
 }
 

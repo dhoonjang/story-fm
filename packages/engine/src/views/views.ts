@@ -5,9 +5,11 @@ import type {
   EdgeSize,
   LedgerEntry,
   MatchRecord,
+  MilestoneCode,
   PacketPlayer,
   Foot,
   ScheduleType,
+  SeasonStat,
   ShootoutOutcome,
   SquadRegistration,
   TacticalRead,
@@ -75,6 +77,7 @@ import { DOMESTIC_STAGES, domesticCupById } from "../data/domestic-cup-catalog";
 import { domesticCupsOf, userStillIn } from "../competition/domestic-cup";
 import { drawParts, drawTitle } from "../competition/draw-schedule";
 import { euroCompetitionOf } from "../competition/europe";
+import { foldCareer, type CareerTotals } from "../squad/career";
 import { formAngle, formLabel, formTone } from "../squad/form";
 import { ratingTone, type RatingTone } from "../match/ratings";
 import { GAP_CONDITION, edgeOf, subLimitsOf, zoneGrid } from "@story-fm/sim";
@@ -329,6 +332,57 @@ export interface RecentRatingView {
   tone: RatingTone;
 }
 
+/**
+ * 커리어 한 묶음 — 시즌 행과 통산 행이 **같은 모양**이다. 표의 마지막 줄이
+ * 위의 행들과 같은 열을 쓰므로, 화면이 통산만 따로 그리지 않아도 된다.
+ *
+ * 저장하지 않는다 — `SEASON_STAT` 전 행을 `foldCareer`로 접은 값이다
+ * (→ docs/data/game-state.md §5). 평점은 **합계가 아니라 평균**을 싣는다:
+ * 화면이 나눗셈을 다시 하면 코어와 다른 자리에서 반올림한다.
+ */
+export interface CareerTotalsView {
+  apps: number;
+  goals: number;
+  assists: number;
+  /** 평균 평점 — 출전이 없으면 null (0.00과 "기록 없음"은 다르다) */
+  rating: number | null;
+  /**
+   * 2군 리그 — 1군과 **섞지 않는다** (season.md §2). 섞으면 표의 "출전 38"이
+   * 1·2군 혼합값이 되고, 마일스톤이 세는 수와도 갈린다.
+   */
+  reserveApps: number;
+  reserveGoals: number;
+}
+
+/** 시즌 한 줄 — 시즌 안에 팀을 옮겼으면 **행도 팀별로 갈린다** (player.md §10) */
+export interface CareerSeasonView extends CareerTotalsView {
+  season: number;
+  teamId: string;
+  /** 팀 약칭 — 화면은 카탈로그를 못 읽는다 (엔진을 타입으로만 import한다) */
+  team: string;
+}
+
+/**
+ * 상세에 세울 마일스톤 수 — 표 옆의 **곁줄**이라 한 줄을 크게 넘기면 그 자체가
+ * 또 하나의 목록이 된다. 문턱(50·100경기)은 드물지만 해트트릭은 시즌마다 쌓인다.
+ */
+const SQUAD_MILESTONES_SHOWN = 6;
+
+/**
+ * 그 선수가 세운 기록 한 건 — **코드와 수치뿐이다.** 문장은 화면이
+ * `milestoneTitle`로 만든다 (match.md §6 · overview.md §1 철칙 4).
+ *
+ * `season`은 싣지 않는다 — `date`가 이미 그것을 말하고, 화면이 세우는 것은
+ * 날짜 옆의 라벨 한 줄이다.
+ */
+export interface MilestoneView {
+  code: MilestoneCode;
+  value: number;
+  date: string;
+  /** 어느 셔츠로 세웠나 — 문턱은 클럽 안에서만 센다 */
+  teamId: string;
+}
+
 /** 스쿼드 행 = 메타 + 16축 (오피스 뷰는 우리 선수라 숫자를 그대로 준다) */
 export type SquadViewRow = SquadViewRowMeta & AxisValues;
 interface SquadViewRowMeta {
@@ -482,6 +536,23 @@ interface SquadViewRowMeta {
   seasonAssists: number;
   /** 시즌 평균 평점 — 출전이 없으면 null (0.0과 "기록 없음"은 다르다) */
   seasonRating: number | null;
+  /**
+   * **시즌별과 통산** — 위 `season*` 넷은 "이번 시즌 이 팀" 한 행이라, 3년 함께한
+   * 주장이 우리 팀에서 몇 경기를 뛰었는지가 화면 어디에도 없었다.
+   *
+   * 시즌 행은 **자르지 않는다** — 카드(GM)는 상한을 두지만 상세는 스크롤이 되는
+   * 자리고, 표는 전체 이력이 서라고 있는 물건이다. 출전이 0인 행은 애초에 빼므로
+   * 개막 전에는 빈 배열이고, 화면은 그때 표를 세우지 않는다.
+   *
+   * 시즌 오름차순, 같은 시즌 안에서는 팀 id 순 (`careerOf`와 같은 순서).
+   */
+  career: { seasons: CareerSeasonView[]; totals: CareerTotalsView };
+  /**
+   * 마일스톤 — **최근 것 몇 건**만 (`SQUAD_MILESTONES_SHOWN`). 장부는 감독 팀
+   * 선수만 담으므로 스쿼드 행에는 늘 온전히 있다 (game-state.md §3.4).
+   * 오래된 것부터 적는다 — 표의 시즌 행과 같은 방향이다.
+   */
+  milestones: MilestoneView[];
   hasIssue: boolean;
   /** 주급 (£/주) */
   weeklyWage: number;
@@ -2025,6 +2096,21 @@ export function pushRecordJournal(
   }
 }
 
+/**
+ * 접힌 합계에서 **표가 쓰는 것만** — 평점은 합계가 아니라 평균을 싣는다.
+ * `ratingSum`을 보내고 화면이 나누면 코어와 다른 자리에서 반올림한다.
+ */
+function careerTotalsView(t: CareerTotals): CareerTotalsView {
+  return {
+    apps: t.apps,
+    goals: t.goals,
+    assists: t.assists,
+    rating: t.rating,
+    reserveApps: t.reserveApps,
+    reserveGoals: t.reserveGoals,
+  };
+}
+
 export function buildOfficeViews(state: GameState): OfficeViews {
   const userTeamId = state.userTeamId;
   const squad = playersOf(state, userTeamId);
@@ -2079,6 +2165,57 @@ export function buildOfficeViews(state: GameState): OfficeViews {
     byPosition[memory.position] = memory.roleId;
     roleMemoryOf.set(memory.gamePlayerId, byPosition);
   }
+
+  /**
+   * 커리어 · 마일스톤 — **원장을 한 번씩만 훑는다.**
+   *
+   * 선수마다 `careerOf`를 부르면 마흔 몇 명 × 원장 전체 훑기가 된다 — 비교자
+   * 안의 `seasonStatOf`가 그랬던 것과 같은 함정을(위 정렬 주석) 행 만들기에서
+   * 다시 밟는 셈이다. 선수 → 행으로 한 번에 갈라 두고 접는 것은 `foldCareer`에
+   * 맡긴다: 카드(GM)와 **같은 함수**라 채팅에서 듣는 합과 표의 합이 갈리지 않는다.
+   *
+   * 스쿼드 선수로 좁혀 담는다 — 원장에는 리그 전체의 행이 있고 여기서 쓰는 것은
+   * 우리 명단뿐이다.
+   */
+  const squadIds = new Set(squad.map((p) => p.id));
+  const statsOfPlayer = new Map<string, SeasonStat[]>();
+  for (const stat of state.seasonStats) {
+    if (!squadIds.has(stat.gamePlayerId)) continue;
+    const rows = statsOfPlayer.get(stat.gamePlayerId);
+    if (rows) rows.push(stat);
+    else statsOfPlayer.set(stat.gamePlayerId, [stat]);
+  }
+  const milestonesOfPlayer = new Map<string, MilestoneView[]>();
+  for (const milestone of state.milestones ?? []) {
+    if (!squadIds.has(milestone.gamePlayerId)) continue;
+    const rows = milestonesOfPlayer.get(milestone.gamePlayerId) ?? [];
+    rows.push({
+      code: milestone.code,
+      value: milestone.value,
+      date: milestone.date,
+      teamId: milestone.teamId,
+    });
+    milestonesOfPlayer.set(milestone.gamePlayerId, rows);
+  }
+  /**
+   * 시즌 행 + 통산 — **출전이 0인 시즌은 행을 세우지 않는다.** 원장은 명단에 든
+   * 것만으로도 행을 갖고 있어, 걸러 내지 않으면 한 경기도 못 뛴 시즌이 표에
+   * 0으로 늘어선다. 통산은 그래도 **전 행**을 접는다 (더해 봐야 같은 값이다).
+   */
+  const careerViewOf = (playerId: string): SquadViewRow["career"] => {
+    const rows = statsOfPlayer.get(playerId) ?? [];
+    const seasons = [...rows]
+      .sort((a, b) => a.season - b.season || a.teamId.localeCompare(b.teamId))
+      .map((stat) => ({ stat, totals: careerTotalsView(foldCareer([stat])) }))
+      .filter(({ totals }) => totals.apps > 0 || totals.reserveApps > 0)
+      .map(({ stat, totals }) => ({
+        season: stat.season,
+        teamId: stat.teamId,
+        team: teamShortNameIn(state, stat.teamId),
+        ...totals,
+      }));
+    return { seasons, totals: careerTotalsView(foldCareer(rows)) };
+  };
 
   // 선발의 전술판 좌표 — 좌표 없는 배치(구 세이브·채팅 지시)는 코드 기본 좌표로 그리는데,
   // 같은 코드가 둘이면 정확히 같은 점이 되므로 겹침을 풀어 준다. 저장하면 이 좌표가
@@ -2223,6 +2360,8 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         seasonApps: stat?.apps ?? 0,
         seasonAssists: stat?.assists ?? 0,
         seasonRating: seasonRating(stat),
+        career: careerViewOf(p.id),
+        milestones: (milestonesOfPlayer.get(p.id) ?? []).slice(-SQUAD_MILESTONES_SHOWN),
         hasIssue: issues.has(p.id),
         weeklyWage: contract?.weeklyWage ?? 0,
         contractUntil: contract?.until ?? null,

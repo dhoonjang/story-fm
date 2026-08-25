@@ -5,6 +5,7 @@
 import {
   awardLine,
   boardExpectation,
+  careerTotalsOf,
   characterEntry,
   characterEntryOf,
   clockOf,
@@ -476,13 +477,10 @@ function retirementFacts(state: GameState): string[] {
     .map((t) => {
       const player = playerById(state, t.gamePlayerId);
       if (!player) return null;
-      // 우리 팀에서의 기록 — 시즌 기록은 팀별로 갈려 있어 우리 팀 행만 합산한다
-      const ours = state.seasonStats.filter(
-        (s) => s.gamePlayerId === t.gamePlayerId && s.teamId === state.userTeamId,
-      );
-      const apps = ours.reduce((sum, s) => sum + s.apps, 0);
-      const goals = ours.reduce((sum, s) => sum + s.goals, 0);
-      return `은퇴: ${player.name} ${ageOf(player.birthdate, t.date)}세 · 우리 팀에서 ${apps}경기 ${goals}골`;
+      // 우리 팀에서의 기록 — 통산 접기는 한 곳이다(`careerTotalsOf`). 여기서 다시
+      // 합하면 화면·선수 카드가 내는 수와 은퇴 줄의 수가 언젠가 갈린다
+      const ours = careerTotalsOf(state, t.gamePlayerId, state.userTeamId);
+      return `은퇴: ${player.name} ${ageOf(player.birthdate, t.date)}세 · 우리 팀에서 ${ours.apps}경기 ${ours.goals}골`;
     })
     .filter((x): x is string => x !== null);
 }
