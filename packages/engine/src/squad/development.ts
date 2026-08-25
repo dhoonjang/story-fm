@@ -6,6 +6,7 @@ import type {
 } from "@story-fm/domain";
 import { ATTRIBUTE_AXES, ageOf, isReserveMatch, RATING_MAX } from "@story-fm/domain";
 import { ageGrowthFactor, agingDelta } from "../world/attributes";
+import { archetypeTraitsOf } from "../world/player-persona";
 import { makeRng } from "../core/rng";
 import { monthlyGrowthMultiplier, personalTrainingAxis } from "./training-plan";
 import { recomputeOverall, recordGrowth, squadLevelOf, type GameState } from "../core/state";
@@ -46,10 +47,13 @@ const GROW_MIN = 0.02;
 const GROW_MAX = 0.35;
 
 // ── 감독의 육성 손잡이 (season.md §2 2군 리그) ──────────────────────
-// 배율은 **성장 쪽에만** 붙는다 — 노화 하락은 출전과 무관하다. 상한을 다 곱해도
-// (1.6 × 1.5 = 2.4 → 시즌 기대 0.84칸) 1군 결산 경로보다 느리다 — 2군은 자라는
-// 곳이고, 뛰는 곳은 1군이다. 축을 겨냥하는 손잡이(방침 · 개인 훈련)는 얼마나 빨리가
-// 아니라 어느 쪽으로를 정하므로 총량 이동이고, 원본은 `training-plan.ts`다.
+// 배율은 **성장 쪽에만** 붙는다 — 노화 하락은 출전과 무관하다. 감독이 다 걸어도
+// 1.6 × 1.5 = 2.4이고, 그 위에 사람됨(원형 `professionalism` 0.85~1.25 —
+// people.md §6)이 한 항으로 더 붙어 꼭대기가 3.0(시즌 기대 1.05칸/축)이 된다.
+// 그 자리에 서려면 셋이 다 맞아야 한다: 격주 2군 일정을 만근하고, 집중 육성 셋
+// 안에 들고, 표 꼭대기의 직업의식을 타고났을 것. 축을 겨냥하는 손잡이(방침 ·
+// 개인 훈련)는 얼마나 빨리가 아니라 어느 쪽으로를 정하므로 총량 이동이고,
+// 원본은 `training-plan.ts`다.
 
 /** 지난달 2군 출전 한 경기가 성장 확률에 얹는 배율 증분 */
 export const RESERVE_APP_BOOST = 0.3;
@@ -115,6 +119,11 @@ export function developsByCore(state: GameState, player: GamePlayer): boolean {
  * 잠재력 여유가 클수록, 어릴수록 높다. 나이 배율은 결산 경로와 같은 한 열에서 온다
  * (`ageGrowthFactor` — player.md §6.3). 노화 곡선이 이미 꺾인 축(음수)은
  * 여기 들어오지 않는다.
+ *
+ * ⚠️ **사람됨은 여기 곱하지 않는다.** `GROW_MAX`가 여유 6 이상인 U21을 이미 전부
+ * 0.35에 붙여 놓아서, 대역 안에서 곱한 계수는 **유망주에게만 통째로 먹힌다** —
+ * 원형이 성장을 가른다는 말이 정작 자라는 나이에서만 거짓이 된다. 직업의식은
+ * 감독의 손잡이와 같은 자리, 즉 대역 **밖**에서 곱한다 (`rollAxis`).
  */
 export function growChance(room: number, age: number): number {
   if (room <= 0) return 0;
@@ -140,6 +149,12 @@ export function rollMonthlyAxes(
     potential: number;
     /** 감독의 육성 손잡이 — 2군 출전 × 집중 육성. 성장 쪽에만 곱한다 (기본 1) */
     boost?: number;
+    /**
+     * 사람됨 — 원형의 `professionalism` (기본 1). 감독의 손잡이와 같은 자리에서
+     * 곱하되 **항은 따로 둔다**: 하나는 감독이 고른 것이고 하나는 타고난 것이라,
+     * 한 값으로 접으면 육성 배율을 조율할 때 사람됨까지 함께 움직인다 (people.md §6).
+     */
+    professionalism?: number;
     /** 2군 훈련 방침 — 축마다 다른 배율을 얹는다. 없으면 어느 축도 흔들리지 않는다 */
     policy?: ReserveTrainingPolicy;
     /** 이 선수에게 걸린 개인 훈련의 축 — 방침 위에 한 축을 더 겨냥한다 (season.md §2) */
@@ -158,7 +173,15 @@ export function rollMonthlyAxes(
           ? monthlyGrowthMultiplier(axis, { policy: input.policy, personal: input.personal })
           : 1;
       const boost = aim === 1 ? input.boost : (input.boost ?? 1) * aim;
-      const step = rollAxis(axis, input.age, input.values[axis], input.potential, rng, boost);
+      const step = rollAxis(
+        axis,
+        input.age,
+        input.values[axis],
+        input.potential,
+        rng,
+        boost,
+        input.professionalism,
+      );
       return { axis, step, priority };
     })
     .filter((rolled) => rolled.step !== 0)
@@ -205,6 +228,8 @@ export function applyMonthlyDevelopment(state: GameState): string[] {
       values: player.attributes,
       potential: player.attributes.potential,
       boost,
+      // 사람됨은 소속을 가리지 않는다 — 타 팀 선수도 같은 표를 읽는다
+      professionalism: archetypeTraitsOf(state.seed, player).professionalism,
       ...(ours && state.reserveTraining ? { policy: state.reserveTraining } : {}),
       ...(personal ? { personal } : {}),
     });
@@ -232,6 +257,8 @@ export function rollAxis(
   rng: () => number,
   /** 육성 배율 — 성장 확률에만 곱한다. 노화 하락은 출전과 무관하다 */
   boost = 1,
+  /** 직업의식 — 감독의 배율과 같은 자리. 노화 하락에는 붙지 않는다 (people.md §6) */
+  professionalism = 1,
 ): number {
   const bias = agingDelta(axis, age);
 
@@ -244,6 +271,7 @@ export function rollAxis(
   // 자라는 축 — 잠재력이 천장이다. 노화 곡선이 미는 축은 조금 더 잘 자란다
   const room = potential - value;
   if (room <= 0) return 0;
-  const chance = growChance(room, age) * (bias > 0 ? 1 : DECLINING_AXIS_GROWTH) * boost;
+  const chance =
+    growChance(room, age) * (bias > 0 ? 1 : DECLINING_AXIS_GROWTH) * boost * professionalism;
   return rng() < chance / MONTHS_PER_SEASON ? 1 : 0;
 }

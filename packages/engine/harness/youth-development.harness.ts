@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { ageOf, isReserveMatch } from "@story-fm/domain";
+import { ageOf, isReserveMatch, PLAYER_ARCHETYPE_TRAITS } from "@story-fm/domain";
 import {
+  playerArchetypeOf,
   reservePlayers,
   seasonStatOf,
   setDevelopmentFocus,
@@ -79,6 +80,23 @@ describe("한 시즌의 유스 육성", () => {
 
     const focusGrowth = growthOf(focusIds);
     const baselineGrowth = growthOf(baselineU21);
+
+    /**
+     * **직업의식이 세계 규모에서 실제로 갈리는가** (people.md §6).
+     *
+     * 집중 육성 표본은 셋뿐이라 원형 추첨의 잡음이 계수를 덮는다 — 배율 없는 타 팀
+     * 2군 U21 전체를 성실/게으름으로 갈라야 계수의 몫만 남는다.
+     */
+    const professionalismOf = (id: string) => {
+      const player = state.players.find((p) => p.id === id);
+      return player === undefined
+        ? null
+        : PLAYER_ARCHETYPE_TRAITS[playerArchetypeOf(state.seed, player)].professionalism;
+    };
+    const DILIGENT_AT = 1.1;
+    const LAZY_AT = 0.95;
+    const diligent = baselineU21.filter((id) => (professionalismOf(id) ?? 0) >= DILIGENT_AT);
+    const lazy = baselineU21.filter((id) => (professionalismOf(id) ?? 1) <= LAZY_AT);
     const readings: Readings<typeof YOUTH_DEVELOPMENT> = {
       "2군 경기 수": reserveMatches.length,
       "결과 없는 2군 경기": unplayed,
@@ -87,6 +105,9 @@ describe("한 시즌의 유스 육성", () => {
       "무지정 우리 2군 U21 성장": growthOf(ourReserveU21),
       "타 팀 2군 U21 성장": baselineGrowth,
       "집중 육성 격차": focusGrowth - baselineGrowth,
+      "성실한 U21 표본": diligent.length,
+      "게으른 U21 표본": lazy.length,
+      "직업의식 격차": growthOf(diligent) - growthOf(lazy),
     };
     console.log(reportOf(YOUTH_DEVELOPMENT, readings, `시드 42 · ${state.date}`));
     expect(outOfBand(YOUTH_DEVELOPMENT, readings)).toEqual([]);

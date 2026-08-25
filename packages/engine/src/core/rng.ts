@@ -5,4 +5,12 @@
  * 같은 알고리즘을 베껴 적게 된다. 엔진 쪽 호출자가 움직이지 않도록 여기서 재수출만
  * 한다 (AGENTS.md §5).
  */
-export { hashChannel, makeRng, pick, randInt, shuffleInPlace, shuffled } from "@story-fm/sim";
+export {
+  hashChannel,
+  makeRng,
+  pick,
+  pickWeighted,
+  randInt,
+  shuffleInPlace,
+  shuffled,
+} from "@story-fm/sim";
