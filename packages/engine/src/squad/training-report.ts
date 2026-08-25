@@ -1,7 +1,7 @@
 import type { AttributeAxis, GamePlayer, GrowthOrigin, TrainAttr } from "@story-fm/domain";
 import {
-  ATTRIBUTE_AXES,
   AXIS_KO,
+  attributeAxisOf,
   ageOf,
   applyFamiliarityGain,
   naturalPositionOf,
@@ -224,18 +224,12 @@ const CHAT_KEEP = 12;
 /** 그중 한 줄이 브리프에 실리는 길이 — 긴 지시는 앞머리만 있어도 무엇인지 읽힌다 */
 const CHAT_LINE_MAX = 400;
 
-/** 능력치 축인가 — 개인 훈련의 `axis`는 자유 문자열로 저장된다 */
-function attributeAxis(value: string | undefined | null): AttributeAxis | null {
-  if (!value) return null;
-  return (ATTRIBUTE_AXES as readonly string[]).includes(value) ? (value as AttributeAxis) : null;
-}
-
 /** 팀 세션이 겨냥한 능력치 축 (tactical·recovery는 능력치가 아니다) */
 function teamAxesOf(sessions: readonly TrainedSession[]): Set<AttributeAxis> {
   const set = new Set<AttributeAxis>();
   for (const s of sessions) {
     for (const f of s.focus) {
-      const axis = attributeAxis(f);
+      const axis = attributeAxisOf(f);
       if (axis) set.add(axis);
     }
   }
@@ -257,6 +251,22 @@ function allowedAxesFor(
   return personal ? new Set([...teamAxes, personal]) : teamAxes;
 }
 
+/**
+ * **그 구간 훈련장에 선 선수인가** — 결산도 훈련 부상도 이 문 하나를 지난다
+ * (→ docs/simulation/season.md §4·§8 불변식).
+ *
+ * 1군만 훈련장에 선다 — 2군은 코어 월간 성장으로 자란다(season.md §2). 재활 중이거나
+ * 출장 정지인 선수는 팀과 함께 보내지 않았다(player.md §6.1). 두 문이 갈리면 훈련
+ * 부상만 맞고 결산은 받지 못하는 선수가 생긴다.
+ */
+export function trainsWithFirstTeam(state: GameState, player: GamePlayer): boolean {
+  return (
+    player.teamId === state.userTeamId &&
+    squadLevelOf(player) === "first" &&
+    isAvailable(state, player.id)
+  );
+}
+
 /** 결산 브리프를 짓는다 — 없으면 null (훈련이 없었던 구간) */
 export function buildTrainingBrief(
   state: GameState,
@@ -270,17 +280,11 @@ export function buildTrainingBrief(
   const subjects: TrainingSubject[] = [];
   const axes = teamAxesOf(sessions);
   for (const player of state.players) {
-    if (player.teamId !== state.userTeamId || squadLevelOf(player) !== "first") continue;
-    /**
-     * **못 뛰는 선수는 훈련도 함께하지 않았다** — 재활 중이거나 출장 정지인 선수를
-     * 실으면 판정이 그 구간의 전술 적응도·능력치를 그대로 얹는다. 심경 결산도
-     * 같은 선을 긋는다 (docs/data/player.md §6.1).
-     */
-    if (!isAvailable(state, player.id)) continue;
+    if (!trainsWithFirstTeam(state, player)) continue;
     const assignment = assignments.get(player.id);
     const program = state.playerTraining.find((t) => t.gamePlayerId === player.id);
     // 개인 훈련 축은 팀 세션에 없어도 그 선수의 허용 축이다 — 판정자에게도 알린다
-    const personal = attributeAxis(program?.axis);
+    const personal = attributeAxisOf(program?.axis);
     if (personal) axes.add(personal);
     subjects.push({
       program: program
@@ -499,7 +503,7 @@ export function applyTrainingOutcomes(
 
     // ③ 능력치 — 그 구간에 훈련한 축 + 이 선수에게 걸린 개인 훈련 축 (공용 규칙)
     const moved = applyAttributeStep(state, player, outcome.attribute, outcome.attributeStep, {
-      allowed: allowedAxesFor(teamAxes, attributeAxis(program?.axis)),
+      allowed: allowedAxesFor(teamAxes, attributeAxisOf(program?.axis)),
       spent: attrSpent,
       cap: attrCap,
       factor: uptake,

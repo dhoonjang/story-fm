@@ -17,6 +17,7 @@ import type {
 } from "@story-fm/domain";
 import {
   ATTRIBUTE_AXES,
+  attributeAxisOf,
   AXIS_KO,
   clampCondition,
   tacticalUptake as uptakeOf,
@@ -207,6 +208,23 @@ export function setSquadLevel(
  * 먼저 올리면 명단이 차 있고, 먼저 내리면 하한을 뚫는다. 그래서 잰 뒤에 옮기는 이
  * 두 걸음을 갈라 둔다.
  */
+/**
+ * **자리 훈련은 1군의 것이다** (→ docs/simulation/season.md §2). 자리를 올리는 문은
+ * 훈련 결산 하나뿐인데 2군은 결산을 받지 않으므로, 내려간 선수의 자리 프로그램은
+ * 여기서 거둔다 — 남겨 두면 감독이 걸어 둔 전향이 조용히 멈춘 채 서 있다.
+ * 겨냥한 축은 남는다: 월간 성장이 그 축을 이어 받는다.
+ *
+ * @returns 감독에게 덧붙일 한 조각 (거둘 것이 없으면 빈 문자열)
+ */
+function dropPositionTraining(state: GameState, player: GamePlayer): string {
+  const program = state.playerTraining.find((t) => t.gamePlayerId === player.id);
+  if (!program?.position) return "";
+  const position = program.position;
+  if (program.axis) delete program.position;
+  else state.playerTraining = state.playerTraining.filter((t) => t.gamePlayerId !== player.id);
+  return ` · ${position} 전향 훈련은 거뒀습니다 (2군엔 훈련 결산이 없습니다)`;
+}
+
 function applySquadLevel(state: GameState, player: GamePlayer, level: "first" | "reserve"): string {
   if (level === "first") {
     player.squadLevel = "first";
@@ -259,7 +277,7 @@ function applySquadLevel(state: GameState, player: GamePlayer, level: "first" | 
       : dropped?.role === "bench"
         ? " — 매치데이 벤치에서 함께 빠집니다"
         : "";
-  return `${player.name}을(를) 2군으로 이동했습니다${note}`;
+  return `${player.name}을(를) 2군으로 이동했습니다${note}${dropPositionTraining(state, player)}`;
 }
 
 /**
@@ -1506,6 +1524,10 @@ export function movePlayerSlot(
  * 축(`axis`)도 자리(`position`)도 훈련 결산(LLM)의 입력이고, 자리는 결산 한 번에
  * `POSITION_TRAIN_MAX`까지만 오른다 — **실전보다 느리게**(경기 1회 = +1).
  * "자리는 커리어가 만든다"를 지키되 전향이라는 판단이 가능해진다.
+ *
+ * ⚠️ **층마다 닿는 것이 다르다** (season.md §2). 2군은 결산을 받지 않으므로 축은
+ * 월간 성장의 겨냥으로 넘어가고, **자리는 갈 곳이 없어 반려한다** — 걸어 두고
+ * 기다리게 하는 것이 거짓 성공이다.
  */
 export function setPlayerTraining(
   state: GameState,
@@ -1526,13 +1548,20 @@ export function setPlayerTraining(
     };
   }
 
-  const axis = input.axis?.trim();
-  if (axis && !ATTRIBUTE_AXES.includes(axis as (typeof ATTRIBUTE_AXES)[number])) {
-    return { ok: false, message: `알 수 없는 능력치 축: ${axis}` };
+  const axis = attributeAxisOf(input.axis?.trim());
+  if (input.axis?.trim() && !axis) {
+    return { ok: false, message: `알 수 없는 능력치 축: ${input.axis.trim()}` };
   }
   const position = input.position?.toUpperCase();
   if (position && !positionGroupOf(position)) {
     return { ok: false, message: `알 수 없는 포지션: ${input.position}` };
+  }
+  // 반려는 요청 전체에 걸린다 — 자리만 떼고 축만 걸면 감독이 시킨 적 없는 훈련이 선다
+  if (position && squadLevelOf(player) === "reserve") {
+    return {
+      ok: false,
+      message: `${player.name}은(는) 2군이라 자리를 배울 수 없습니다 — 자리는 훈련 결산이 올리고 2군은 결산을 받지 않습니다. 1군으로 올린 뒤에 거세요`,
+    };
   }
 
   const program = {
@@ -1547,7 +1576,7 @@ export function setPlayerTraining(
   const parts: string[] = [];
   const items: SkillBriefItem[] = [];
   if (axis) {
-    const ko = AXIS_KO[axis as (typeof ATTRIBUTE_AXES)[number]];
+    const ko = AXIS_KO[axis];
     parts.push(ko);
     items.push(item({ label: "능력치", text: ko }));
   }
@@ -1556,9 +1585,11 @@ export function setPlayerTraining(
     parts.push(`${position} 전향 (지금 적응도 ${fit})`);
     items.push(item({ label: "전향", text: position, note: `적응도 ${fit}` }));
   }
+  // 어디에 닿는지까지 답한다 — 층에 따라 경로가 갈린다 (season.md §2)
+  const where = squadLevelOf(player) === "reserve" ? " (2군 — 월간 성장의 축 배율)" : "";
   return {
     ok: true,
-    message: `${player.name} 개인 훈련 — ${parts.join(" · ")}`,
+    message: `${player.name} 개인 훈련 — ${parts.join(" · ")}${where}`,
     brief: { head: `${player.name} 개인 훈련`, items },
   };
 }

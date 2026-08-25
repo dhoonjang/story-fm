@@ -119,7 +119,7 @@ and pushing `HEAD:<branch>` is a fast-forward from where this one was cut.
 ## 4. Fill the free slots — at most four worktrees
 
 **Four in flight is the cap.** A "worktree" here is one issue being worked by one
-`resolve` session; the *lanes* `resolve` §4 splits are teammates **inside** one
+`resolve` session; the _lanes_ `resolve` §4 splits are teammates **inside** one
 worktree, and this cap does not count those.
 
 Fill every free slot in this tick, but **launch them one at a time** — pick,

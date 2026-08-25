@@ -14,7 +14,10 @@ import {
   buildTrainingBrief,
   playerById,
   playersOf,
+  reservePlayers,
   setPlayerTraining,
+  trainsWithFirstTeam,
+  userPlayers,
   setTraining,
   userTactics,
   type GameState,
@@ -456,6 +459,27 @@ describe("대상은 그 구간을 팀과 함께 보낸 선수다", () => {
     expect(ids.has(hurt), "재활 중인 선수가 판정 대상에 있다").toBe(false);
     expect(ids.has(banned), "출장 정지 선수가 판정 대상에 있다").toBe(false);
     expect(ids.size, "대상이 통째로 비었다").toBeGreaterThan(0);
+    expect(trainsWithFirstTeam(state, playerById(state, hurt)!)).toBe(false);
+    expect(trainsWithFirstTeam(state, playerById(state, banned)!)).toBe(false);
+  });
+
+  /**
+   * 훈련장에 선 집합은 **문 하나**다(`trainsWithFirstTeam` — season.md §8 불변식).
+   * 결산 브리프도 tick의 훈련 부상 후보도 여기를 지난다: 갈라 두면 2군이 훈련
+   * 중에만 다치고 결산은 받지 못한다.
+   */
+  it("2군은 훈련장에 서지 않는다 — 결산도 부상 후보도 같은 문이다", () => {
+    const state = afterSquadReturn(createTestGame(7));
+    const reserve = reservePlayers(state, state.userTeamId)[0]!;
+    expect(trainsWithFirstTeam(state, reserve), "2군이 훈련장에 서 있다").toBe(false);
+
+    const brief = trainOneDay(state, ["stamina"], "러닝")!;
+    const ids = [...new Set(brief.subjects.map((s) => s.playerId))].sort();
+    const gate = userPlayers(state)
+      .filter((p) => trainsWithFirstTeam(state, p))
+      .map((p) => p.id)
+      .sort();
+    expect(ids, "결산 대상과 훈련장에 선 집합이 갈렸다").toEqual(gate);
   });
 });
 
