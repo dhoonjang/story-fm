@@ -63,6 +63,7 @@ import {
   setPlayerTactic,
   setPlayerTraining,
   setSquadLevels,
+  setSetPieceTakers,
   setTactics,
   setTraining,
   setTransferList,
@@ -380,6 +381,16 @@ export function buildGmTools(
           .optional(),
       }),
       (input) => setPlayerTactic(state, input),
+    ),
+    wrap(
+      "set_set_piece_takers",
+      descriptions.set_set_piece_takers,
+      z.object({
+        corner: playerRef.nullable().optional().describe("코너 키커 — null이면 지정 해제"),
+        freeKick: playerRef.nullable().optional().describe("프리킥 키커 — null이면 지정 해제"),
+        penalty: playerRef.nullable().optional().describe("페널티 키커 — null이면 지정 해제"),
+      }),
+      (input) => setSetPieceTakers(state, input),
     ),
     wrap(
       "exploit_point",

@@ -11,6 +11,8 @@ import type {
   Slot,
   TacticAssignment,
   TacticsSpec,
+  SetPieceRole,
+  SetPieceTakers,
   TeamTactics,
   TeamTalkOccasion,
   TrainAttr,
@@ -28,6 +30,7 @@ import {
   MATCHDAY_SQUAD,
   POSITION_CODES,
   RATING_MAX,
+  SET_PIECE_ROLES,
   reserveTrainingTitle,
   SCOUT_CONCURRENT_LIMIT,
   SCOUT_DAYS,
@@ -1713,6 +1716,62 @@ export function setPlayerPosition(
   return {
     ok: true,
     message: `${player.name} 주 포지션 → ${code} (OVR ${player.attributes.overall})`,
+  };
+}
+
+/** 죽은 공 자리의 이름 — 감독에게 되돌아가는 말이 여기 한 벌 산다 */
+const SET_PIECE_ROLE_KO: Record<SetPieceRole, string> = {
+  corner: "코너",
+  freeKick: "프리킥",
+  penalty: "페널티",
+};
+
+/**
+ * **죽은 공 키커 지정** — "코너는 사카가 차", "페널티는 네 거야" (match.md §1.4).
+ *
+ * 셋 중 말한 자리만 바뀐다. `null`을 주면 지정이 풀려 코어의 기본값(그라운드 위
+ * 킥력 최고 · `penaltySkill` 최고)으로 돌아간다 — 감독이 손을 떼는 길이 있어야
+ * 한 번 지정한 사람이 팔린 뒤에도 그 이름이 남지 않는다.
+ *
+ * 평시와 경기 중이 같은 스킬을 지난다. 지정은 팀 전술에 남으므로 그라운드에 없는
+ * 선수를 지목해도 반려하지 않는다 — 다음 경기의 선발일 수 있다. 그 경기에서만
+ * 기본값이 설 뿐이다.
+ */
+export function setSetPieceTakers(
+  state: GameState,
+  input: Partial<Record<SetPieceRole, string | null>>,
+): SkillResult {
+  const tactics = userTactics(state);
+  const next: SetPieceTakers = { ...(tactics.setPieceTakers ?? {}) };
+  const notes: string[] = [];
+  const items: SkillBriefItem[] = [];
+  let changed = false;
+  for (const role of SET_PIECE_ROLES) {
+    const ref = input[role];
+    if (ref === undefined) continue;
+    if (ref === null) {
+      if (next[role] === undefined) continue;
+      delete next[role];
+      changed = true;
+      notes.push(`${SET_PIECE_ROLE_KO[role]} 키커 지정 해제`);
+      items.push(item({ label: SET_PIECE_ROLE_KO[role], text: "지정 해제" }));
+      continue;
+    }
+    const pick = pickOurPlayer(state, ref);
+    if (!pick.ok) return pick;
+    next[role] = pick.player.id;
+    changed = true;
+    notes.push(`${SET_PIECE_ROLE_KO[role]} — ${pick.player.name}`);
+    items.push(item({ label: SET_PIECE_ROLE_KO[role], text: pick.player.name }));
+  }
+  if (!changed) {
+    return { ok: true, message: "바뀐 키커가 없습니다", unchanged: true };
+  }
+  tactics.setPieceTakers = next;
+  return {
+    ok: true,
+    message: `죽은 공 키커 — ${notes.join(" · ")}`,
+    brief: { head: "세트피스 키커", items },
   };
 }
 
