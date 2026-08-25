@@ -10,11 +10,13 @@ import type {
   MilestoneCode,
   PacketPlayer,
   Foot,
+  PromiseKind,
   ScheduleType,
   SeasonStat,
   ShootoutOutcome,
   ShotOrigin,
   SquadRegistration,
+  SquadStatus,
   TacticalRead,
   TrainingReport,
   BoardExpectationCode,
@@ -93,6 +95,7 @@ import { leaderGroupOf } from "../squad/hierarchy";
 import { ratingTone, type RatingTone } from "../match/ratings";
 import { GAP_CONDITION, edgeOf, subLimitsOf, zoneGrid } from "@story-fm/sim";
 import { moodOf, type MoodRead } from "../squad/mood";
+import { openPromises, squadStatusOf } from "../squad/promises";
 import { isHomegrownFor, occupiesSquadList, squadRegistrationOf } from "../squad/registration";
 import {
   observationOf,
@@ -616,6 +619,17 @@ interface SquadViewRowMeta {
   /** 주급 (£/주) */
   weeklyWage: number;
   contractUntil: string | null;
+  /**
+   * **어떤 자리로 왔는가** — 계약에 적힌 지위, 없으면 지금 서열에서 파생
+   * (`squadStatusOf` → docs/data/people.md §5-2). 그 지위가 부르는 선발 비율이
+   * 출전 불만과 약속 이행을 함께 재므로, 화면과 GM이 **같은 값**을 읽어야 한다.
+   */
+  squadStatus: SquadStatus;
+  /**
+   * 아직 기한 전인 **감독의 약속** — 갈래와 기한뿐이다 (people.md §5-2).
+   * 무슨 말로 약속했는지는 장면의 것이라 여기 오지 않는다.
+   */
+  promises: Array<{ kind: PromiseKind; dueOn: string }>;
   /** 현재 부상 (없으면 null) */
   injury: { bodyPart: string; severity: string; expectedReturn: string } | null;
   /** 출장 정지 잔여 경기 (0이면 정지 아님) */
@@ -2515,6 +2529,8 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         hasIssue: issues.has(p.id),
         weeklyWage: contract?.weeklyWage ?? 0,
         contractUntil: contract?.until ?? null,
+        squadStatus: squadStatusOf(state, p),
+        promises: openPromises(state, p.id).map((pr) => ({ kind: pr.kind, dueOn: pr.dueOn })),
         injury: injury
           ? {
               bodyPart: injury.bodyPart,
@@ -3353,6 +3369,14 @@ export function buildMatchReport(state: GameState, matchId: string): MatchReport
   const events = result.events ?? [];
   const stats = result.playerStats ?? {};
   const lineups = { home: result.homeLineup ?? [], away: result.awayLineup ?? [] } as const;
+  /**
+   * **선발은 장부가 든다** — 킥오프에 뜬 명단이다 (`homeStarters` — people.md §5-2).
+   * 사건 목록에서 「교체로 들어오지 않은 사람」으로 되짚는 것은 사건이 온전한 경기에만
+   * 참이라, 사건을 남기지 않는 간이 시뮬의 경기는 벤치까지 선발로 읽힌다. 지위 대비
+   * 출전을 재는 자와 리포트가 **같은 값**을 읽어야 감독이 본 선발과 라커룸이 센 선발이
+   * 갈리지 않는다. 옛 장부에는 칸이 없어 그때만 사건으로 되짚는다.
+   */
+  const starters = { home: result.homeStarters, away: result.awayStarters } as const;
   const teamIdOf = { home: match.homeTeamId, away: match.awayTeamId } as const;
   const sideOfPlayer = new Map<string, "home" | "away">();
   for (const side of ["home", "away"] as const) {
@@ -3392,7 +3416,7 @@ export function buildMatchReport(state: GameState, matchId: string): MatchReport
         ours: teamIdOf[side] === state.userTeamId,
         squadNumber: p?.squadNumber ?? null,
         minutes: minutesOf(id),
-        started: !cameOn.has(id),
+        started: starters[side]?.includes(id) ?? !cameOn.has(id),
         goals: countOf(id, "goal"),
         assists: countOf(id, "goal", 1),
         shots: line?.shots ?? 0,

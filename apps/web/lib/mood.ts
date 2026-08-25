@@ -1,4 +1,4 @@
-import { milestonePhrase, PLAYER_ARCHETYPE_LABEL } from "@story-fm/domain";
+import { milestonePhrase, PLAYER_ARCHETYPE_LABEL, SQUAD_STATUS_KO } from "@story-fm/domain";
 import type { MilestoneCode } from "@story-fm/domain";
 import type { MoodFact, MoodRead } from "@story-fm/engine";
 
@@ -101,9 +101,27 @@ function grievanceSubject(fact: Extract<MoodFact, { cause: "grievance" }>): stri
       return "재계약 이야기가 없는 것";
     case "out-of-position":
       return fact.count === null ? "자리 밖 기용" : `${fact.count}경기 이어진 자리 밖 기용`;
+    case "promise":
+      // 감독 자신이 세운 원인이라 출전 부족과 다른 말이 된다 (people.md §5·§5-2).
+      // 어느 갈래의 약속이었는지는 카드가 들지 않는다 — 장부의 일이다
+      return "감독이 지키지 않은 약속";
     default:
       return fact.note ?? "팀 상황";
   }
+}
+
+/**
+ * 출전 불만은 **지위가 잰다** (people.md §5·§5-2) — "출전 기회에 불만"만 적으면
+ * 백업의 침묵과 핵심의 불만이 한 줄로 읽힌다. 코어가 그 불만을 세운 지위와 창의
+ * 수치를 함께 실어 줄 때만 그것으로 쓴다 (다른 사유·옛 카드에는 없다).
+ */
+function minutesSentence(fact: Extract<MoodFact, { cause: "grievance" }>): string | null {
+  const { status, starts, played } = fact;
+  if (status === undefined || starts === undefined || played === undefined) return null;
+  const seat = SQUAD_STATUS_KO[status];
+  return starts === 0
+    ? `${seat}인데 최근 ${played}경기에서 한 번도 선발로 서지 못했다`
+    : `${seat}인데 최근 ${played}경기 중 ${starts}경기만 선발이다`;
 }
 
 /**
@@ -127,9 +145,14 @@ function sentenceOf(fact: MoodFact): string {
         : `${fact.bodyPart} 부상에서 막 복귀했다`;
     case "suspension":
       return `출장 정지 ${fact.matchesLeft}경기가 남아 몸이 근질거린다`;
-    case "grievance":
+    case "grievance": {
       // 누구의 불만인가를 함께 말한다 — 같은 사유라도 사람이 다르면 감독이 할 일이 다르다
-      return `${grievanceSubject(fact)}에 불만이 쌓여 있다 (${PLAYER_ARCHETYPE_LABEL[fact.archetype]})`;
+      const who = PLAYER_ARCHETYPE_LABEL[fact.archetype];
+      const minutes = fact.reason === "minutes" ? minutesSentence(fact) : null;
+      return minutes
+        ? `${minutes} (${who})`
+        : `${grievanceSubject(fact)}에 불만이 쌓여 있다 (${who})`;
+    }
     case "demotion": {
       /**
        * 문턱은 사람마다 다르고 추첨이 없다 — 그래서 **감독이 날짜를 셀 수 있다**

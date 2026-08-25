@@ -12,10 +12,13 @@ import {
   boardExpectationText,
   milestonePhrase,
   PLAYER_ISSUE_REASONS,
+  PROMISE_KIND_KO,
   type BoardExpectationCode,
   type MilestoneCode,
   type PlayerIssueReason,
+  type PromiseKind,
 } from "./records";
+import { SQUAD_STATUS_KO, type SquadStatus } from "./squad-rules";
 
 /**
  * 기자회견 (PRESS_CONFERENCE) — 세계가 감독에게 **대답을 요구하는 자리**.
@@ -387,6 +390,7 @@ export const ISSUE_REASON_KO: Record<PlayerIssueReason, string> = {
   "blocked-move": "막힌 이적",
   contract: "계약 만료",
   "out-of-position": "자리 밖 기용",
+  promise: "어긴 약속",
 };
 
 /** 사유 이름 — 수치를 앞에 다는 것은 연패와 자리 밖 기용뿐이다. 코드가 없으면 `null` */
@@ -441,7 +445,20 @@ export function pressFactText(fact: PressFact): string {
       return name ? `${name} 폼 ${sub ?? ""}` : `폼 ${sub ?? ""}`;
     case "unhappy":
       if (sub === "count") return `라커룸 불만 ${v.count ?? 0}건`;
-      if (sub === "grievance") return `${reason} 불만 ${v.days ?? 0}일째`;
+      if (sub === "grievance") {
+        /**
+         * 어긴 약속은 **감독 자신이 세운 원인**이라, 사유 이름만으로는 그 자리가
+         * 서지 않는다 (people.md §5-2) — 무엇을 약속했고 그것이 며칠 전이었나까지가
+         * 그 선수가 아는 사실이다. `tags[2]`가 갈래 코드, `promised`가 약속한 날부터
+         * 오늘까지의 일수다. 다른 사유의 카드에는 둘 다 없다.
+         */
+        const kind = tags[2] as PromiseKind | undefined;
+        return (
+          `${reason} 불만 ${v.days ?? 0}일째` +
+          (kind ? ` · ${PROMISE_KIND_KO[kind] ?? kind} 약속` : "") +
+          (v.promised === undefined ? "" : ` · ${v.promised}일 전의 약속`)
+        );
+      }
       return `${name} 라커룸 불만 (${reason})`;
     case "arrival":
       return sub === "summer-top"
@@ -454,7 +471,17 @@ export function pressFactText(fact: PressFact): string {
     case "squeezed":
       return `${name}이(가) 같은 자리(${sub ?? ""})를 봐 왔다`;
     case "minutes":
-      return `출전 기회 불만 ${v.days ?? 0}일째 · 시즌 출전 ${v.apps ?? 0}경기`;
+      /**
+       * 지위와 창의 수치는 **있을 때만** 선다 (people.md §5·§5-2). 이것이 없으면
+       * "출전 기회 불만"이 어느 기대에 대해 모자란 것인지가 서지 않아, 백업의
+       * 침묵과 핵심의 불만을 읽는 쪽이 가르지 못한다. 옛 세이브의 카드에는
+       * 없으므로 그때는 앞의 두 조각만 남는다.
+       */
+      return (
+        `출전 기회 불만 ${v.days ?? 0}일째 · 시즌 출전 ${v.apps ?? 0}경기` +
+        (sub ? ` · ${SQUAD_STATUS_KO[sub as SquadStatus] ?? sub} 지위` : "") +
+        (v.played === undefined ? "" : ` · 최근 ${v.played}경기 선발 ${v.starts ?? 0}회`)
+      );
     case "demoted":
       return `2군 ${v.days ?? 0}일째 · 불만 ${v.issueDays ?? 0}일째`;
     case "morale":

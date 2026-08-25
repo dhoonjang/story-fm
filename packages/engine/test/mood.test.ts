@@ -48,6 +48,16 @@ import {
   seasonStatOf,
   setSquadLevel,
   FREE_AGENT_TEAM,
+  PROMISE,
+  PROMISE_WINDOW_MATCHES,
+  activeContract,
+  betterAtPosition,
+  derivedSquadStatus,
+  minutesShortfalls,
+  openPromise,
+  openPromises,
+  squadStatusOf,
+  tickPromises,
 } from "@story-fm/engine";
 import { createMiniGame, createTestGame, advanceAndPlay, advanceDays } from "./helpers";
 
@@ -939,5 +949,146 @@ describe("2군 강등 — 내린 결정이 사실로 남는다", () => {
     });
     expect(setSquadLevel(state, { playerId: core.id, level: "first" }).ok).toBe(true);
     expect(state.issues.filter((i) => i.gamePlayerId === core.id)).toHaveLength(1);
+  });
+});
+
+describe("약속 — 감독의 말이 장부에 선다", () => {
+  /**
+   * 지난 경기 여덟 판을 장부에 세운다 — 선발 명단만 다르다. 시즌을 굴리지 않는 이유는
+   * 재는 것이 **경기가 아니라 창의 셈**이어서다 (people.md §5-2).
+   */
+  function recordPastMatches(state: GameState, startersOf: (index: number) => string[]): void {
+    for (let i = 0; i < PROMISE_WINDOW_MATCHES; i += 1) {
+      const starters = startersOf(i);
+      state.matches.push({
+        id: `m-promise-test-${i}`,
+        season: state.season,
+        competitionId: "epl",
+        round: i + 1,
+        date: addDays(state.date, -(PROMISE_WINDOW_MATCHES - i) * 7),
+        homeTeamId: state.userTeamId,
+        awayTeamId: "chelsea",
+        result: {
+          homeGoals: 1,
+          awayGoals: 0,
+          scorers: [],
+          homeStarters: starters,
+          homeLineup: starters,
+        },
+      });
+    }
+  }
+
+  /** 부상 이력이 없는 우리 1군 — 창의 분모가 온전한 선수만 고른다 */
+  function healthy(state: GameState): GamePlayer[] {
+    return userPlayers(state).filter(
+      (p) => p.squadLevel === "first" && !state.injuries.some((i) => i.gamePlayerId === p.id),
+    );
+  }
+
+  it("백업은 여덟 경기를 앉아도 조용하고, 주전은 정해진 날에 낸다 — 주사위가 없다", () => {
+    const state = createTestGame();
+    state.issues = [];
+    const [starter, backup] = healthy(state);
+    expect(starter && backup).toBeTruthy();
+    activeContract(state, starter!.id)!.squadStatus = "starter";
+    activeContract(state, backup!.id)!.squadStatus = "backup";
+    // 주전으로 데려온 선수를 여덟 경기 중 둘만 세웠다
+    recordPastMatches(state, (i) => (i < 2 ? [starter!.id] : []));
+
+    const rows = minutesShortfalls(state);
+    const named = new Map(rows.map((r) => [r.player.id, r]));
+    expect(named.has(backup!.id), "백업 지위의 벤치 선수가 불만을 냈다").toBe(false);
+    const hit = named.get(starter!.id);
+    expect(hit, "주전 지위로 2/8을 선 선수가 조용하다").toBeDefined();
+    // 주전은 여덟 중 넷을 부른다 — 둘을 세웠으니 둘이 모자란다
+    expect(hit?.short).toBe(2);
+    expect(hit?.starts).toBe(2);
+    expect(hit?.played).toBe(PROMISE_WINDOW_MATCHES);
+    // 두 번 물어도 같은 답이다 — 난수가 없다
+    expect(minutesShortfalls(state).map((r) => r.player.id)).toEqual(rows.map((r) => r.player.id));
+  });
+
+  it("창이 차기 전에는 서지 않는다 — 비율이 표본이 아니다", () => {
+    const state = createTestGame();
+    state.issues = [];
+    const player = healthy(state)[0]!;
+    activeContract(state, player.id)!.squadStatus = "key";
+    state.matches.push({
+      id: "m-promise-short",
+      season: state.season,
+      competitionId: "epl",
+      round: 1,
+      date: addDays(state.date, -7),
+      homeTeamId: state.userTeamId,
+      awayTeamId: "chelsea",
+      result: { homeGoals: 0, awayGoals: 0, scorers: [], homeStarters: [], homeLineup: [] },
+    });
+    expect(minutesShortfalls(state)).toEqual([]);
+  });
+
+  it("지위를 적지 않은 옛 계약은 지금 서열에서 파생하고 새 불만을 세우지 않는다", () => {
+    const state = createTestGame();
+    state.issues = [];
+    // 자기 자리에 더 나은 선수가 여럿인 자원 — 파생이면 백업·유망주다
+    const deep = healthy(state)
+      .map((p) => ({ p, blocked: betterAtPosition(state, state.userTeamId, p) }))
+      .sort((a, b) => b.blocked - a.blocked)[0]!.p;
+    const contract = activeContract(state, deep.id)!;
+    expect(contract.squadStatus, "옛 계약에 지위가 적혀 있다").toBeUndefined();
+    expect(squadStatusOf(state, deep)).toBe(derivedSquadStatus(state, deep));
+    expect(["backup", "prospect"]).toContain(squadStatusOf(state, deep));
+    recordPastMatches(state, () => []);
+    expect(minutesShortfalls(state).some((r) => r.player.id === deep.id)).toBe(false);
+  });
+
+  it("열림 → 기한 → 어김 → 사다리", () => {
+    const state = createTestGame();
+    state.issues = [];
+    const target = healthy(state).find((p) => !p.isCaptain)!;
+    const before = state.manager.reputation.squad;
+
+    const opened = openPromise(state, target.id, "captain");
+    expect(opened.ok).toBe(true);
+    expect(openPromises(state, target.id)).toHaveLength(1);
+    // 같은 선수·같은 갈래는 하나다 — 기한이 밀리면 약속이 다시 공짜가 된다
+    expect(openPromise(state, target.id, "captain").ok).toBe(false);
+
+    state.date = opened.promise!.dueOn;
+    const digest: string[] = [];
+    tickPromises(state, digest);
+
+    expect(state.promises.find((p) => p.id === opened.promise!.id)?.status).toBe("broken");
+    expect(state.issues.find((i) => i.gamePlayerId === target.id)?.reason).toBe("promise");
+    expect(state.manager.reputation.squad).toBe(before + PROMISE.brokenSquad);
+    expect(digest.some((line) => line.includes(target.name))).toBe(true);
+  });
+
+  it("지킨 약속은 불만을 세우지 않고 평판을 올린다", () => {
+    const state = createTestGame();
+    state.issues = [];
+    const target = userPlayers(state).find((p) => !p.isCaptain)!;
+    const before = state.manager.reputation.squad;
+    const opened = openPromise(state, target.id, "captain");
+    for (const p of userPlayers(state)) p.isCaptain = p.id === target.id;
+
+    state.date = opened.promise!.dueOn;
+    tickPromises(state, []);
+
+    expect(state.promises.find((p) => p.id === opened.promise!.id)?.status).toBe("kept");
+    expect(state.issues.some((i) => i.gamePlayerId === target.id)).toBe(false);
+    expect(state.manager.reputation.squad).toBe(before + PROMISE.keptSquad);
+  });
+
+  it("지킬 것이 없는 약속은 장부에 서지 않는다", () => {
+    const state = createTestGame();
+    const captain = userPlayers(state).find((p) => p.isCaptain) ?? userPlayers(state)[0]!;
+    captain.isCaptain = true;
+    expect(openPromise(state, captain.id, "captain").ok).toBe(false);
+    // 이적 리스트에 이미 오른 선수에게 이적 허용을 약속할 것이 없다
+    const listed = userPlayers(state)[3]!;
+    state.transferList.push({ gamePlayerId: listed.id, askingPrice: 1, listedOn: state.date });
+    expect(openPromise(state, listed.id, "transfer").ok).toBe(false);
+    expect(openPromises(state)).toHaveLength(0);
   });
 });

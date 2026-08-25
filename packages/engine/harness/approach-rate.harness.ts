@@ -115,6 +115,8 @@ describe("한 시즌의 다가옴", () => {
       "에이전트 채널": byChannel("agent"),
       "주장 채널": byChannel("captain"),
       "구단주 채널": byChannel("owner"),
+      "출전 기회(minutes)": byTopic("minutes"),
+      "어긴 약속(promise)": byTopic("promise"),
       "계약 만료(contract)": byTopic("contract"),
       "타 구단 관심(interest)": byTopic("interest"),
       "언론 유출(계단 4)": leaks.size,

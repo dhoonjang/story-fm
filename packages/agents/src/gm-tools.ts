@@ -38,6 +38,8 @@ import {
   openNegotiationFor,
   openRelease,
   openRenewal,
+  PROMISE_DAYS_MAX,
+  PROMISE_DAYS_MIN,
   pickAnyPlayer,
   playerCard,
   playerName,
@@ -94,9 +96,12 @@ import {
   PitchClaimSchema,
   PLAYER_DIRECTIVE_KINDS,
   PRESS_STANCES,
+  PROMISE_KINDS,
   RESERVE_TRAINING_POLICIES,
+  SQUAD_STATUSES,
 } from "@story-fm/domain";
 import type { GameToolSpec, ToolCallContext } from "@story-fm/llm";
+
 import { skillDescriptions } from "./skill-descriptions";
 import { inputError, toToolSchema } from "./tool-schema";
 import { recordCall, type GmToolCall, type SkillReturn } from "./gm-types";
@@ -131,6 +136,39 @@ const settlingArg = (kind: "talk" | "team_talk") =>
       "새로 영입해 아직 적응 중인 선수에게 이 말이 남긴 무게. 생략하면 코어가 outcome·강도로 정한다. " +
         "적응을 겨냥한 이야기(자리·역할 약속, 라커룸 소개, 사는 문제)면 크게, 지나가는 말이면 작게.",
     );
+
+/**
+ * 감독이 그 자리에서 한 **약속** — 면담과 다가옴의 응대가 같은 인자를 쓴다
+ * (→ docs/data/people.md §5-2). 갈래·기한만 받는다: 무슨 말로 약속했는지는
+ * 장면의 것이고 코어는 그것을 들지 않는다. 대상에 맞지 않는 약속은 코어가 반려한다.
+ */
+const promiseArg = z
+  .object({
+    kind: z
+      .enum(PROMISE_KINDS)
+      .describe(
+        "minutes=선발로 쓰겠다 · transfer=내보내 주겠다 · renewal=재계약을 열겠다 · captain=주장을 맡기겠다",
+      ),
+    days: z
+      .number()
+      .int()
+      .min(PROMISE_DAYS_MIN)
+      .max(PROMISE_DAYS_MAX)
+      .optional()
+      .describe("감독이 못 박은 기한(일). 생략하면 갈래의 기본 기한"),
+  })
+  .optional()
+  .describe(
+    "감독이 실제로 한 약속만. 감독이 말하지 않은 약속을 지어내지 마라 — 기한이 되면 코어가 장부로 판정한다",
+  );
+
+/** 계약에 적히는 **스쿼드 지위** — 오퍼·재계약 제안이 함께 싣는다 (transfer.md §1) */
+const squadStatusArg = z
+  .enum(SQUAD_STATUSES)
+  .optional()
+  .describe(
+    "key=핵심 · starter=주전 · rotation=로테이션 · backup=백업 · prospect=유망주. 감독이 자리를 약속했을 때만 싣는다",
+  );
 
 // 훈련 세션 스키마 (set_training) — 자유 label + focus 대상
 const TRAIN_FOCUS = [...ATTRIBUTE_AXES, "tactical", "recovery"] as const;
@@ -488,6 +526,7 @@ export function buildGmTools(
           .max(160)
           .optional()
           .describe("settling을 그렇게 매긴 근거 한 줄"),
+        promise: promiseArg,
       }),
       (input) => applyTalkToPlayer(state, input),
     ),
@@ -521,6 +560,7 @@ export function buildGmTools(
       z.object({
         stance: z.enum(PRESS_STANCES).optional(),
         decline: z.boolean().optional().describe("감독이 자리를 주지 않고 돌려보냈으면 true"),
+        promise: promiseArg,
       }),
       (input) => respondToApproach(state, input),
     ),
@@ -897,6 +937,7 @@ export function buildGmTools(
           .describe(
             "감독이 실제로 든 설득 논거. 감독이 말하지 않은 논거를 지어내지 마라 — 코어가 사실 대조해 거짓이면 확률이 떨어진다",
           ),
+        squadStatus: squadStatusArg,
       }),
       (input) => {
         // 내보내는 방향(매각·임대)은 입구가 다르다 — 우리가 값을 부르고 상대가 판정한다
@@ -922,6 +963,7 @@ export function buildGmTools(
           ...(input.kind === "loan" ? { kind: "loan" as const } : {}),
           ...(input.paymentYears === undefined ? {} : { paymentYears: input.paymentYears }),
           ...(input.pitch ? { pitch: input.pitch } : {}),
+          ...(input.squadStatus === undefined ? {} : { squadStatus: input.squadStatus }),
         });
       },
     ),
@@ -979,6 +1021,7 @@ export function buildGmTools(
         playerId: playerRef,
         weeklyWage: money(WAGE_MAX),
         years: z.number().int().min(1).max(6),
+        squadStatus: squadStatusArg,
       }),
       (input) => openRenewal(state, input),
     ),
