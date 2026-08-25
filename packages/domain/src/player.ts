@@ -2089,6 +2089,29 @@ export function ageOf(birthdate: string, onDate: string): number {
   return age;
 }
 
+/**
+ * 서른셋을 넘겨 이 아래면 은퇴한다 — **종합의 눈금을 탄다** (season.md §6).
+ *
+ * 옛 72와 같은 인원 비율(상위 37%)에 서는 값이다 (player.md §4). 72를 그대로 두면
+ * 새 눈금에서 그 선이 전체의 63%를 덮어 서른서넛이 한 시즌에 통째로 은퇴한다.
+ */
+export const RETIRE_OVERALL = 68;
+/** 종합과 무관하게 은퇴하는 나이 */
+export const RETIRE_AGE = 35;
+/** 이 나이부터는 `RETIRE_OVERALL` 아래면 은퇴한다 */
+export const RETIRE_AGE_MARGINAL = 33;
+
+/**
+ * 이 나이·종합이면 시즌이 끝날 때 은퇴한다 — 세계를 보지 않는 순수 규칙.
+ *
+ * 시즌 전환(`transitionSeason`)만의 자가 아니다: 베테랑 황혼 아크의 절정도 같은 자를
+ * 읽는다(people.md §9). 두 벌로 두면 한쪽만 튜닝한 날 이야기와 판정이 갈린다
+ * (AGENTS.md §5 "한 규칙, 한 정의").
+ */
+export function retiresAtSeasonEnd(age: number, overall: number): boolean {
+  return age >= RETIRE_AGE || (age >= RETIRE_AGE_MARGINAL && overall < RETIRE_OVERALL);
+}
+
 // ── 라커룸 서열 점수 (people.md §5-1) ───────────────
 
 /**
