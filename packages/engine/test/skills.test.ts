@@ -1663,9 +1663,11 @@ describe("자리 이동 — 교체 없이 선발 안에서만", () => {
 });
 
 describe("개인 훈련 — 팀 훈련 위에 한 선수만", () => {
-  /** 주전이 아닌 선수 — 개인 프로그램을 걸 대상 */
+  /** 주전이 아닌 1군 — 개인 프로그램을 걸 대상 (자리까지 걸 수 있는 층) */
   const spare = (state: GameState) =>
-    userPlayers(state).sort((a, b) => a.attributes.overall - b.attributes.overall)[0]!;
+    userPlayers(state)
+      .filter((p) => squadLevelOf(p) === "first")
+      .sort((a, b) => a.attributes.overall - b.attributes.overall)[0]!;
 
   it("축과 자리를 걸고 거둘 수 있다", () => {
     const state = createTestGame();
@@ -1687,6 +1689,51 @@ describe("개인 훈련 — 팀 훈련 위에 한 선수만", () => {
     const target = spare(state);
     expect(setPlayerTraining(state, { playerId: target.id, axis: "wizardry" }).ok).toBe(false);
     expect(setPlayerTraining(state, { playerId: target.id, position: "XX" }).ok).toBe(false);
+  });
+
+  /**
+   * 2군에는 축만 걸린다 — 자리를 올리는 문은 훈련 결산 하나뿐이고 2군은 결산을
+   * 받지 않는다 (season.md §2). 성공으로 답해 놓고 아무 데도 닿지 않는 것이 버그였다.
+   */
+  it("2군에는 자리를 걸 수 없고, 축은 걸린다", () => {
+    const state = createTestGame();
+    const reserve = reservePlayers(state, state.userTeamId)[0]!;
+
+    const rejected = setPlayerTraining(state, { playerId: reserve.id, position: "CB" });
+    expect(rejected.ok).toBe(false);
+    expect(state.playerTraining).toHaveLength(0);
+
+    // 반려는 요청 전체에 걸린다 — 축만 남기고 걸지 않는다
+    expect(
+      setPlayerTraining(state, { playerId: reserve.id, axis: "finishing", position: "CB" }).ok,
+    ).toBe(false);
+    expect(state.playerTraining).toHaveLength(0);
+
+    expect(setPlayerTraining(state, { playerId: reserve.id, axis: "finishing" }).ok).toBe(true);
+    expect(state.playerTraining[0]!.axis).toBe("finishing");
+  });
+
+  it("강등하면 자리 프로그램만 거둬지고 겨냥한 축은 남는다", () => {
+    const state = createTestGame();
+    const target = spare(state);
+    expect(
+      setPlayerTraining(state, { playerId: target.id, axis: "passing", position: "CB" }).ok,
+    ).toBe(true);
+
+    const moved = setSquadLevel(state, { playerId: target.id, level: "reserve" });
+    expect(moved.ok, moved.message).toBe(true);
+    expect(moved.message).toContain("전향 훈련은 거뒀습니다");
+    expect(state.playerTraining[0]!.position).toBeUndefined();
+    // 축은 월간 성장이 이어 받는다
+    expect(state.playerTraining[0]!.axis).toBe("passing");
+  });
+
+  it("자리만 걸린 선수를 강등하면 프로그램 자체가 걷힌다", () => {
+    const state = createTestGame();
+    const target = spare(state);
+    expect(setPlayerTraining(state, { playerId: target.id, position: "CB" }).ok).toBe(true);
+    expect(setSquadLevel(state, { playerId: target.id, level: "reserve" }).ok).toBe(true);
+    expect(state.playerTraining).toHaveLength(0);
   });
 });
 
