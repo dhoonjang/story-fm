@@ -21,6 +21,7 @@ export const SKILL_LABEL: Record<string, string> = {
   set_reserve_training: "2군 훈련 방침",
   set_tactics: "팀 전술 변경",
   set_player_tactic: "선수 전술",
+  set_set_piece_takers: "세트피스 키커",
   set_training: "훈련 지정",
   exploit_point: "약점 공략",
   set_match_plan: "지역 전술",
