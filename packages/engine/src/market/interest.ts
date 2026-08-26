@@ -297,7 +297,9 @@ export function tickCompetingBids(
   for (const player of ourTargets(state)) {
     // 밖에 난 관심만 — `watching`은 그 구단이 아직 아무 말도 하지 않은 것이다
     const rivals = interestsOn(state, player.id).filter((i) => i.stage !== "watching");
-    const rival = rivals[0];
+    // 아직 부르지 않은 구단이 먼저 부른다 — 새 이름이 붙는 것이 같은 구단의 재호가보다 큰 사실이다
+    const stood = competingBidsOn(state, player.id);
+    const rival = rivals.find((r) => !stood.some((b) => b.teamId === r.teamId)) ?? rivals[0];
     if (!rival) continue;
     if (rng() >= agentProfileOf(state, player.id).competingBidRate) continue;
     if (suitorsOf(state, player, depthOf()).length < SUITORS_MANY) continue;
