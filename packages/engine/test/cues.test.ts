@@ -12,6 +12,9 @@ import {
   boardThriftFactor,
   boardTrustFactor,
   clubProfileIn,
+  consumeEarmark,
+  earmarkedFor,
+  signingBudgetOf,
   coachArchetypeKeyOf,
   coachCues,
   COACH_ARCHETYPE_LABELS,
@@ -1124,6 +1127,138 @@ describe("보드 요청 (감독 → 보드) — 한도가 답을 정한다", () 
     state.date = addDays(state.date, 1);
     tickBoardRequests(state, []);
     expect(clubProfileIn(state, teamId).capacity).toBe(before + seats);
+  });
+
+  /** 구단주의 원형이 되걸기의 결을 정한다 — 페르소나는 세이브의 데이터다 */
+  function ownedBy(state: GameState, archetype: string): GameState {
+    state.personas!.find((p) => p.role === "owner")!.archetype = archetype;
+    return state;
+  }
+
+  /** 우리가 판 한 건 — `raise` 조건이 읽는 유일한 장부다 */
+  function sold(state: GameState, fee: number) {
+    state.transfers.push({
+      id: `tr-out-${fee}`,
+      gamePlayerId: "gp-sold",
+      windowId: null,
+      fromTeamId: state.userTeamId,
+      toTeamId: "chelsea",
+      date: state.date,
+      type: "transfer",
+      fee,
+    });
+  }
+
+  it("되거는 원형은 부분 승인 대신 조건을 걸고, 장부가 채워진 날 부른 값 그대로 승인이다", () => {
+    const state = ownedBy(board(createTestGame(11), 100_000_000, 80), "투자자형");
+    const before = financeOf(state, state.userTeamId).transferBudget;
+    // 한도 £25M < 부른 £40M — 되거는 원형이라 절반을 내주는 대신 조건이 선다
+    requestBoard(state, { kind: "transfer-budget", amount: 40_000_000 });
+    untilAnswer(state, "transfer-budget");
+
+    const asked = openBoardRequest(state)!;
+    expect(asked.status).toBe("conditional");
+    expect(asked.condition).toEqual({
+      kind: "raise",
+      // 모자란 만큼이다 — 굴리지 않는다
+      amount: 15_000_000,
+      since: state.date,
+      until: addDays(state.date, BOARD_REQUEST.CONDITION_DAYS),
+    });
+    // 답이 끝나지 않은 요청이라 `resolvedOn`이 서지 않고 다음 안건도 막는다
+    expect(asked.resolvedOn).toBeUndefined();
+    expect(requestBoard(state, { kind: "wage-room", amount: 1000 }).ok).toBe(false);
+    expect(financeOf(state, state.userTeamId).transferBudget).toBe(before);
+
+    sold(state, 15_000_000);
+    state.date = addDays(state.date, 1);
+    tickBoardRequests(state, []);
+
+    const answered = state.boardRequests!.find((r) => r.kind === "transfer-budget")!;
+    expect(answered.status).toBe("approved");
+    // 되건 것은 약속이라 한도를 다시 재지 않는다 — 부른 값 그대로다
+    expect(answered.granted).toBe(40_000_000);
+    expect(answered.resolvedOn).toBe(state.date);
+    expect(financeOf(state, state.userTeamId).transferBudget).toBe(before + 40_000_000);
+  });
+
+  it("조건을 기한까지 못 채우면 거절이다 — 부분 승인으로 되돌아가지 않는다", () => {
+    const state = ownedBy(board(createTestGame(11), 100_000_000, 80), "투자자형");
+    const before = financeOf(state, state.userTeamId).transferBudget;
+    requestBoard(state, { kind: "transfer-budget", amount: 40_000_000 });
+    untilAnswer(state, "transfer-budget");
+    const until = openBoardRequest(state)!.condition!.until;
+
+    // 기한 당일까지는 아직 살아 있다
+    state.date = until;
+    tickBoardRequests(state, []);
+    expect(openBoardRequest(state)?.status).toBe("conditional");
+
+    state.date = addDays(until, 1);
+    tickBoardRequests(state, []);
+    const answered = state.boardRequests!.find((r) => r.kind === "transfer-budget")!;
+    expect(answered.status).toBe("rejected");
+    expect(answered.granted).toBe(0);
+    expect(answered.resolvedOn).toBe(state.date);
+    expect(financeOf(state, state.userTeamId).transferBudget).toBe(before);
+  });
+
+  it("되걸지 않는 원형은 지금대로 부분 승인이다", () => {
+    const state = ownedBy(board(createTestGame(11), 100_000_000, 80), "국부펀드형");
+    requestBoard(state, { kind: "transfer-budget", amount: 40_000_000 });
+    untilAnswer(state, "transfer-budget");
+    const answered = state.boardRequests![0]!;
+    expect(answered.status).toBe("approved");
+    expect(answered.granted).toBe(25_000_000);
+  });
+
+  it("건별 영입 승인분은 그 선수 밖으로 새지 않는다 — 확정도 만료도 예산을 늘리지 않는다", () => {
+    const state = board(createTestGame(11), 100_000_000, 80);
+    const teamId = state.userTeamId;
+    const before = financeOf(state, teamId).transferBudget;
+    const outside = state.players.filter((p) => p.teamId !== teamId);
+    const target = outside[0]!;
+    const other = outside[1]!;
+
+    // 잔고 £100M × 0.40 — 총액 증액(0.25)보다 큰 자리다
+    expect(boardRequestCeiling(state, "signing")).toBe(40_000_000);
+    expect(requestBoard(state, { kind: "signing", amount: 30_000_000 }).ok).toBe(false);
+    expect(
+      requestBoard(state, { kind: "signing", amount: 30_000_000, playerId: target.id }).ok,
+    ).toBe(true);
+    untilAnswer(state, "signing");
+
+    const answered = state.boardRequests![0]!;
+    expect(answered.status).toBe("approved");
+    expect(answered.granted).toBe(30_000_000);
+    // 이적 예산에는 한 푼도 얹히지 않는다 — 승인은 이름 하나에 대한 것이다
+    expect(financeOf(state, teamId).transferBudget).toBe(before);
+    expect(signingBudgetOf(state, target.id)).toBe(before + 30_000_000);
+    expect(signingBudgetOf(state, other.id)).toBe(before);
+    // 걸려 있는 몫만큼 다음 건별 승인의 여력이 준다
+    expect(boardRequestCeiling(state, "signing")).toBe(10_000_000);
+
+    // 기한이 지나면 사라진다 — 예산으로 흘러들지 않는다
+    state.date = addDays(state.date, BOARD_REQUEST.EARMARK_DAYS + 1);
+    tickBoardRequests(state, []);
+    expect(earmarkedFor(state, target.id)).toBe(0);
+    expect(financeOf(state, teamId).transferBudget).toBe(before);
+
+    /**
+     * 확정되는 날 — **오늘 나갈 만큼만** 예산으로 옮겨 앉고 줄은 통째로 사라진다.
+     * 남은 몫이 예산에 남으면 다음 영입이 그 돈을 쓴다 (finance.md §9.6).
+     */
+    financeOf(state, teamId).earmarked = [
+      {
+        requestId: answered.id,
+        gamePlayerId: target.id,
+        amount: 30_000_000,
+        until: addDays(state.date, 10),
+      },
+    ];
+    expect(consumeEarmark(state, target.id, 12_000_000)).toBe(12_000_000);
+    expect(financeOf(state, teamId).transferBudget).toBe(before + 12_000_000);
+    expect(earmarkedFor(state, target.id)).toBe(0);
   });
 });
 
