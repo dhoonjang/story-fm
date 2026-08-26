@@ -16,11 +16,11 @@ import { openSymbolicNumbers, type NumberLineage } from "./numbers";
 import { mentoringReadOf } from "./mentoring";
 import { diffDays } from "../competition/calendar";
 import { daysUntilReturn, internationalBreaksOf, openCallUp } from "../competition/international";
-import { pendingApproach } from "../club/approach";
 import { playerArchetypeOf } from "../world/player-persona";
 import {
   announcedInterestsOn,
   openInjury,
+  pendingApproach,
   playersOf,
   squadLevelOf,
   teamNameIn,

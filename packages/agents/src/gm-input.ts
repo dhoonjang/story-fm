@@ -81,6 +81,7 @@ import {
   ageOf,
   associationName,
   boardExpectationLine,
+  boardExpectationText,
   capsOf,
   internationalGoalsOf,
   naturalPositionOf,
@@ -109,6 +110,7 @@ import {
   type GamePlayer,
   type CharacterEntry,
   type CharacterInjection,
+  type ManagerOffer,
   type MissionReportCard,
   type PersonaRelation,
   type ScoutReportCard,
@@ -553,6 +555,16 @@ function managerContractLine(state: GameState): string | null {
  * 그대로 실으면 모델은 아직 그 구단의 감독인 것처럼 장면을 쓴다. 무직에게 필요한
  * 것은 셋뿐이다 — 왜 무직인가, 무엇이 걸려 있는가, 그 사이 무슨 일이 있었는가.
  */
+/**
+ * 제안에 걸린 기대 한 줄 — **코드가 원본이고 문장은 폴백이다** (career.md §5.1).
+ * 새 제안은 갈래 코드만 적으므로, 옛 세이브의 문장을 먼저 읽으면 새 제안이 빈칸으로 선다.
+ */
+function offerExpectation(offer: ManagerOffer): string {
+  return offer.expectationCode
+    ? boardExpectationText(offer.expectationCode, offer.target)
+    : `${offer.expectation ?? "-"}(${offer.target}위)`;
+}
+
 function buildUnemployedNote(state: GameState, passed?: TimePassed | null): string {
   const card = state.dismissal;
   const offers = openManagerOffers(state);
@@ -578,6 +590,12 @@ function buildUnemployedNote(state: GameState, passed?: TimePassed | null): stri
       ),
     ),
     block("manager", `평판: ${describeReputation(state.manager.reputation)}`),
+    /**
+     * **마주 앉은 자리** — 무직에게 열릴 수 있는 다가옴은 감독직 면접 하나다
+     * (career.md §5.1). 제안 목록보다 앞인 것은 답할 자리가 먼저이기 때문이다:
+     * 이 자리가 열려 있는 동안에는 새 제안도 새 지원도 서지 않는다.
+     */
+    approachBlock(state),
     // 제안이 없는 것도 무직에겐 사실이다 — 기다리는 중인지 고를 자리가 있는지가 갈린다
     block(
       "job_offers",
@@ -585,7 +603,7 @@ function buildUnemployedNote(state: GameState, passed?: TimePassed | null): stri
         ? offers
             .map(
               (o) =>
-                `- ${o.id} · ${teamName(o.teamId)} (${o.tier}티어) · 기대 ${o.expectation}(${o.target}위)${
+                `- ${o.id} · ${teamName(o.teamId)} (${o.tier}티어) · 기대 ${offerExpectation(o)}${
                   o.position ? ` · 현재 ${o.position}위` : ""
                 }${o.salary ? ` · 연봉 ${formatMoney(o.salary)}·${o.years ?? "-"}년·이적 예산 약속 ${formatMoney(o.budgetPledge ?? 0)}` : ""}${
                   o.counteredOn ? " · 흥정은 끝났다 — 수락 여부만 남았다" : ""

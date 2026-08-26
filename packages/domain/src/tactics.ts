@@ -72,16 +72,20 @@ const Scale5 = z.number().int().min(TACTIC_SCALE_MIN).max(TACTIC_SCALE_MAX);
 /**
  * 전환 국면의 갈래 — **공을 뺏은 뒤 무엇을 하나.**
  * 곧장 앞으로(`counter`)냐 자리부터(`regroup`)냐는 1~5 사이 어딘가가 아니라 둘 중 하나다.
+ *
+ * ⚠️ **`none`은 중립이고 목록의 끝에 선다** — 걸린 지시를 푸는 값이다. `null`은 도구
+ * 스키마에서 지워지는 관용이라(docs/llm/prompts.md §2) 열거에 중립이 없으면 제공자가
+ * 강제하는 나머지 값 중 하나가 대신 걸린다.
  */
-export const TRANSITION_MODES = ["counter", "regroup"] as const;
+export const TRANSITION_MODES = ["counter", "regroup", "none"] as const;
 export type TransitionMode = (typeof TRANSITION_MODES)[number];
 
 /** 태클 강도 — `normal`이 중립이라 델타가 0인 자리다 */
 export const TACKLING_LEVELS = ["soft", "normal", "hard"] as const;
 export type TacklingLevel = (typeof TACKLING_LEVELS)[number];
 
-/** 골키퍼 배급 — 뒤에서 풀어 나가나(`short`) 넘겨 버리나(`long`) */
-export const KEEPER_DISTRIBUTIONS = ["short", "long"] as const;
+/** 골키퍼 배급 — 뒤에서 풀어 나가나(`short`) 넘겨 버리나(`long`) · `none`은 중립이다 */
+export const KEEPER_DISTRIBUTIONS = ["short", "long", "none"] as const;
 export type KeeperDistribution = (typeof KEEPER_DISTRIBUTIONS)[number];
 
 /** 전술 본체 (TACTICS) — 개인 지시는 배치(TacticAssignment)로 이동 */
@@ -102,7 +106,11 @@ export const TacticsSpecSchema = z.object({
    *
    * 여섯 축은 늘리지 않는다(대칭·프리셋 리그 평균 3·`TACTIC_SWING` 예산이 전부 다시
    * 서야 한다). 넷 모두 optional이고 **없으면 중립**이라 옛 세이브는 셈이 한 칸도
-   * 달라지지 않는다 — SAVE_VERSION 유지. `null`은 감독이 지시를 푼 자리다.
+   * 달라지지 않는다 — SAVE_VERSION 유지.
+   *
+   * 감독이 지시를 푸는 값은 갈래마다 따로 있다(`none`·`false`·`normal` —
+   * `TACTIC_TOGGLES.neutralValue`). `.nullable()`은 **관용**이라 남는다 — `null`이
+   * 적힌 옛 세이브와, 없음을 `null`로 적는 모델을 함께 받는다.
    */
   transition: z.enum(TRANSITION_MODES).nullable().optional(),
   offsideTrap: z.boolean().optional(),
@@ -190,9 +198,13 @@ export interface TacticToggle {
   words: Readonly<Record<string, string>>;
   /**
    * 중립으로 읽는 값 — 이 값이면 **지시하지 않은 것과 같다**(델타 0, 지문에 안 붙는다).
-   * 값이 없는 옛 세이브도 여기로 접힌다.
+   * 값이 없는 옛 세이브도, `null`이 적힌 옛 세이브도 여기로 접힌다.
+   *
+   * ⚠️ **스키마가 실제로 받는 토큰이어야 한다.** 감독이 걸린 갈래를 푸는 길이 이 값
+   * 하나뿐이라, 열거에 없는 값을 여기 적으면 낱말표는 「지시 없음」을 가르치는데
+   * 모델은 그것을 낼 수 없다 (docs/llm/prompts.md §2).
    */
-  neutralValue: string | null;
+  neutralValue: string;
   /** 중립일 때의 낱말 */
   neutralWord: string;
 }
@@ -209,7 +221,7 @@ export const TACTIC_TOGGLES: readonly TacticToggle[] = [
     label: "전환",
     brief: "전환",
     words: { counter: "역습", regroup: "재정비" },
-    neutralValue: null,
+    neutralValue: "none",
     neutralWord: "지시 없음",
   },
   {
@@ -233,7 +245,7 @@ export const TACTIC_TOGGLES: readonly TacticToggle[] = [
     label: "GK 배급",
     brief: "배급",
     words: { short: "짧게", long: "길게" },
-    neutralValue: null,
+    neutralValue: "none",
     neutralWord: "지시 없음",
   },
 ];
@@ -253,8 +265,8 @@ export function tacticToggleOf(key: TacticToggleKey): TacticToggle {
  * 지금 이 갈래에 서 있는 값 — **중립이면 `null`**.
  *
  * 델타·지문·거리·화면이 전부 이 함수 하나로 "감독이 이 갈래를 지시했나"를 묻는다.
- * 각자 `=== undefined || === null || === false || === "normal"`을 적으면 어느 하나가
- * 빠지는 날 같은 전술이 두 지문을 갖는다.
+ * 각자 `=== undefined || === null || === "none" || === false || === "normal"`을 적으면
+ * 어느 하나가 빠지는 날 같은 전술이 두 지문을 갖는다.
  */
 export function tacticToggleValue(spec: TacticsSpec, key: TacticToggleKey): string | null {
   const raw = spec[key];
@@ -301,7 +313,7 @@ export function tacticAxisScaleText(axis: TacticAxis): string {
 export function tacticToggleChoiceText(toggle: TacticToggle): string {
   const choices = [
     ...Object.entries(toggle.words).map(([value, word]) => `${value} ${word}`),
-    `${toggle.neutralValue ?? "null"} ${toggle.neutralWord}`,
+    `${toggle.neutralValue} ${toggle.neutralWord}`,
   ];
   return `${toggle.label}(${choices.join(" · ")})`;
 }

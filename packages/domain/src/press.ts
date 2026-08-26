@@ -147,6 +147,12 @@ export const PressFactKindSchema = z.enum([
    */
   "manager-contract",
   /**
+   * **감독이 사재를 구단에 넣었다** — 시즌 누적이 문턱을 넘은 자리 (career.md §5.4).
+   * `tags[0]`이 등급 코드, `values`가 시즌 누계(`amount`)·구단 예산 약속 대비
+   * 백분율(`percent`)·사재 보너스를 받은 인원(`players`)이다.
+   */
+  "manager-fund",
+  /**
    * **벤치가 비었다** — 전임이 어떻게 물러났나(부임 회견), 또는 라이벌 구단의 경질.
    * `tags[0]`이 그 둘을 가른다.
    */
@@ -170,6 +176,27 @@ export const PressFactKindSchema = z.enum([
   "demands-kept",
   /** 새 시즌 이적 예산 — 구단주가 자리에서 밝히는 숫자다 */
   "budget",
+  /**
+   * **벤치가 왜 비었나** — 감독직 면접이 짚는 공석의 사유 (career.md §5.1).
+   * `values.days`가 공석이 된 지 흐른 날, `values.position`이 전임이 물러난 그날
+   * 그 구단의 리그 순위다. 순위표가 없는 구단이면 날 수만 남는다.
+   */
+  "vacancy",
+  /**
+   * **재정의 등급** — 숫자가 아니라 구간이다 (career.md §5.1). 면접에 앉은 감독은
+   * 아직 그 구단의 사람이 아니라 장부를 열어 보지 못한다. `tags[0]`이 무엇의
+   * 등급인가(`wage-share` · `transfer-budget`), `tags[1]`이 그 등급 코드다.
+   */
+  "finance-grade",
+  /**
+   * **상대 감독의 말** — 이번 대진의 반대편 벤치가 마이크 앞에서 무슨 결로 말했나
+   * (people.md §4). `tags[0]`이 결 코드(`RIVAL_VOICES`), `name`이 그 감독이자
+   * 캐릭터북의 `characterId`, `refId`가 상대 구단이다.
+   *
+   * 카드가 드는 것은 **이름과 결 하나뿐이다** — 대사를 코어에 박으면 그 사람이
+   * 시즌 내내 같은 말을 한다 (overview.md §1 철칙 4).
+   */
+  "rival-quote",
 ]);
 /**
  * 회견의 재료 — **사실 한 줄.** 질문이 아니다.
@@ -311,6 +338,13 @@ export const APPROACH_TOPICS = [
    * 타지 않는다 (people.md §8).
    */
   "season-review",
+  /**
+   * **감독이 공석을 두드렸고 문턱을 넘었다** — 그 구단의 구단주가 마주 앉는다
+   * (career.md §5.1 「노크 → 면접 → 제안」). 다가옴에서 **세계가 아니라 감독이 여는
+   * 유일한 자리**라 압력도 계단도 타지 않고, 화자도 우리 구단주가 아니라 마주 앉은
+   * 쪽의 사람이다 — 그래서 이 주제만 `Approach.teamId`를 든다.
+   */
+  "interview",
 ] as const;
 export const ApproachTopicSchema = z.enum(APPROACH_TOPICS);
 export type ApproachTopic = z.infer<typeof ApproachTopicSchema>;
@@ -323,6 +357,14 @@ export const APPROACH_MAX_STEP = 5;
 
 /** 언론 유출이 서는 계단 — 자리가 아니라 사건이다 (people.md §8) */
 export const APPROACH_LEAK_STEP = 4;
+
+/**
+ * 열린 자리가 답을 기다리는 날 — 이 뒤엔 감독이 지나친 것으로 닫힌다 (people.md §8).
+ *
+ * 압력이 여는 자리(`club/approach.ts`)와 감독이 두드려 여는 면접(`market/manager-market.ts`)이
+ * 같은 값을 읽는다 — 자리마다 인내가 다를 이유가 없고, 두 벌을 두면 한쪽만 조율된다.
+ */
+export const APPROACH_PATIENCE_DAYS = 3;
 
 /**
  * 불만 사유 그대로인 주제인가 — **위 두 계단이 서는 자격이다.**
@@ -398,6 +440,11 @@ export const ApproachContextSchema = z.object({
      * (career.md §5). 시즌 번호는 사실 카드가 든다.
      */
     "season-review",
+    /**
+     * 감독직 면접 — `value`가 그 구단의 지금 순위(순위표가 없으면 없다), `limit`이
+     * 보드가 그 자리에 건 기대 순위다 (career.md §5.1). 구단 이름은 읽는 쪽이 붙인다.
+     */
+    "interview",
   ]),
   /** 불만의 사유 코드 (`PLAYER_ISSUE_REASONS`) — 있는 갈래에만 */
   reason: z.enum(PLAYER_ISSUE_REASONS).optional(),
@@ -428,6 +475,14 @@ export const ApproachSchema = z.object({
   speakerId: z.string().min(1),
   /** 이 자리가 걸린 선수 — 팀·구단에 대한 자리면 없다 */
   about: z.string().nullable(),
+  /**
+   * **우리 구단이 아닌 자리** — 감독직 면접의 그 구단 (`GameTeam.id`, career.md §5.1).
+   *
+   * 다른 주제에는 없다(optional): 나머지는 전부 감독이 맡은 구단 안의 일이라 자리를
+   * 가리킬 것이 없고, 면접만 **아직 남의 구단**에서 열린다 — 화자도 그 구단의
+   * 구단주라 이 칸이 없으면 캐릭터북이 우리 구단주를 되찾는다.
+   */
+  teamId: z.string().min(1).optional(),
   /** 한 줄 배경의 카드 — 옛 세이브엔 없다(optional) */
   contextCard: ApproachContextSchema.optional(),
   /** 옛 세이브가 들고 있는 배경 문장 — 새 자리는 적지 않는다 (`contextCard`의 폴백) */
@@ -474,8 +529,32 @@ export const PressSackingSchema = z.object({
 });
 export type PressSacking = z.infer<typeof PressSackingSchema>;
 
-/** 스탠스가 옮기는 축 — 평판 3축과 사기 둘 (`club/press.ts`의 표가 채운다) */
-export type PressAxis = "board" | "media" | "squad" | "target" | "team";
+/**
+ * 상대 감독이 마이크 앞에서 내는 **결** — 원형이 정하고(people.md §2 표) 카드의
+ * `tags[0]`에 실린다. 문장이 아니라 코드다: 인용은 그 사람의 말투로 GM이 쓴다.
+ */
+export const RIVAL_VOICES = ["provoke", "respect", "analysis", "patience", "defensive"] as const;
+export type RivalVoice = (typeof RIVAL_VOICES)[number];
+
+/**
+ * 그 결의 **한국어 이름** — 카드 한 줄이 되는 자리가 여기 하나다 (people.md §4).
+ * 평가어도 물음표도 없다: 그가 무엇을 말했는가라는 사실이다.
+ */
+export const RIVAL_VOICE_KO: Record<RivalVoice, string> = {
+  provoke: "우리를 찌르는 말을 했다",
+  respect: "우리를 높이는 말을 했다",
+  analysis: "경기를 뜯어 말했다",
+  patience: "자기 팀의 긴 시야를 말했다",
+  defensive: "지키는 축구를 말했다",
+};
+
+/**
+ * 스탠스가 옮기는 축 — 평판 3축과 사기 셋 (`club/press.ts`의 표가 채운다).
+ *
+ * `rival`만 **우리 밖**이다: 상대 감독을 겨눈 답이 그 라커룸에 닿는 자리이고,
+ * 그 자리에서만 산다 (people.md §4).
+ */
+export type PressAxis = "board" | "media" | "squad" | "target" | "team" | "rival";
 
 /**
  * 채널이 닿는 축 — **그 자리에 있던 사람에게만 닿는다** (people.md §8).
@@ -533,6 +612,22 @@ export function issueReasonKo(
 
 const OUTCOME_KO: Record<string, string> = { win: "승", draw: "무", loss: "패" };
 const SIDE_KO: Record<string, string> = { home: "홈", away: "원정" };
+
+/**
+ * 재정 등급의 **이름** — 면접이 숫자 대신 내놓는 것 (career.md §5.1).
+ *
+ * 급여 비중의 셋은 재정 보고서의 구간(`wageRatioTone`)과 같은 코드이고, 이적 예산의
+ * 셋은 그 리그 안에서 선 자리다. 표를 여기 두는 것은 카드가 문장을 만드는 자리가
+ * 하나여야 하기 때문이다 — 화면과 GM과 테스트가 같은 줄을 읽는다.
+ */
+const FINANCE_GRADE_KO: Record<string, string> = {
+  ok: "여유",
+  caution: "주의 구간",
+  danger: "위험 구간",
+  rich: "리그 위쪽",
+  mid: "리그 가운데",
+  tight: "리그 아래쪽",
+};
 
 /**
  * 돌아온 몸 — `CallUpReturnState`의 한국어 이름 (competition.md §5-1). 장부가 드는
@@ -797,6 +892,17 @@ export function pressFactText(fact: PressFact): string {
             ? " · 보드가 재계약하지 않기로 했다"
             : " · 보드는 아직 말이 없다")
       );
+    case "manager-fund":
+      /**
+       * 등급은 `tags[0]`이 들지만 줄에는 서지 않는다 — 백분율이 이미 그 사실이고,
+       * 등급은 평판과 회견 창이 읽는 코드다 (career.md §5.4). 보너스 인원은 **있을
+       * 때만**: 예산에만 부은 감독의 줄에 "보너스 0명"을 적으면 라커룸이 그 돈을
+       * 아는 것처럼 읽힌다.
+       */
+      return (
+        `사재 출연 ${formatMoney(v.amount ?? 0)} — 구단 이적 예산 약속의 ${v.percent ?? 0}%` +
+        (v.players ? ` · 사재 보너스 ${v.players}명` : "")
+      );
     case "sacking":
       /**
        * 전임의 줄에는 **그 구단에 걸려 있던 기대**가 함께 선다 — 몇 위에서 잘렸는가는
@@ -818,6 +924,24 @@ export function pressFactText(fact: PressFact): string {
       return (
         `1군 핵심 ${name}${sub ? ` (${sub})` : ""} · 만 ${v.age ?? 0}세` +
         (v.contractDays === undefined ? "" : ` · 계약 만료 D-${v.contractDays}`)
+      );
+    case "rival-quote":
+      // 이름과 결 하나 — 카드가 아는 것이 그 둘뿐이다 (people.md §4)
+      return `상대 감독 ${name} — ${RIVAL_VOICE_KO[(sub ?? "") as RivalVoice] ?? "마이크 앞에 섰다"}`;
+    case "vacancy":
+      /**
+       * 전임의 순위는 **있을 때만** 선다 (career.md §5.1) — 순위표가 없는 구단(컵만
+       * 치르는 자리, 시즌 첫날)에 0위를 적으면 읽는 쪽이 그것을 사실로 옮겨 적는다.
+       */
+      return (
+        `공석 ${v.days ?? 0}일째` +
+        (v.position === undefined ? "" : ` — 전임 퇴장 당시 리그 ${v.position}위`)
+      );
+    case "finance-grade":
+      // 무엇의 등급인가는 `tags[0]`, 그 등급은 `tags[1]`이다 — 숫자는 나가지 않는다
+      return (
+        `${sub === "transfer-budget" ? "이적 예산" : "급여 비중"} — ` +
+        `${FINANCE_GRADE_KO[tags[1] ?? ""] ?? tags[1] ?? ""}`
       );
   }
 }
@@ -887,5 +1011,12 @@ export function approachContextText(
         : `구단주 요청 · 매각 ${formatMoney(context.value ?? 0)}`;
     case "season-review":
       return `시즌 결산 · 최종 ${context.value ?? 0}위 · 기대 ${context.limit ?? 0}위`;
+    case "interview":
+      // 자리의 주인은 사람이 아니라 **구단**이다 — 그 이름을 아는 것은 코어뿐이다
+      return (
+        `${who ? `${who} ` : ""}감독직 면접` +
+        (context.value === undefined ? "" : ` · 현재 ${context.value}위`) +
+        ` · 기대 ${context.limit ?? 0}위`
+      );
   }
 }

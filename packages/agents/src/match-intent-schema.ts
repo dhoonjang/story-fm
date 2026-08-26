@@ -53,7 +53,9 @@ const SubstitutionSchema = z.object({ out: playerId, in: playerId });
 
 /**
  * 전술 6축과 갈래 넷 — 감독이 말한 것만. 말하지 않은 축·갈래는 지금 값을 그대로 둔다.
- * 갈래에는 눈금이 없고 `null`은 지시 해제다 (match.md §1.2).
+ * 갈래에는 눈금이 없고, **지시 해제는 중립 토큰**(`none`·`false`·`normal`)이다
+ * (match.md §1.2). `.nullable()`은 없음을 `null`로 적는 모델을 받는 관용이라 모델에게
+ * 보이지 않는다 (prompts.md §2).
  */
 const axis = z.number().int().min(1).max(5);
 const TacticsSchema = z

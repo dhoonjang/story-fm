@@ -10,6 +10,7 @@ import {
   type Negotiation,
   type Persona,
   type PersonaRole,
+  type RivalVoice,
   type SpeechStyle,
 } from "@story-fm/domain";
 import { realCoachNameOf } from "../data/coach-seeds";
@@ -444,9 +445,19 @@ export function coachArchetypeKeyOf(persona: Pick<Persona, "archetype">): string
  * 감독의 **맞수**다. 말은 회견장과 중계, 경기 전후의 악수에서 들린다 — 존대는
  * 하되 동료 감독의 거리다.
  */
-const MANAGER_ARCHETYPES: readonly CoachArchetype[] = [
+interface ManagerArchetype extends CoachArchetype {
+  /**
+   * **마이크 앞의 결과 그 말이 설 확률** (people.md §2 표). 결 코드는 회견 카드의
+   * `tags[0]`이 되고, 확률은 우리 경기의 자리 하나에 그가 입을 열 확률이다
+   * (더비면 `RIVAL_VOICE_DERBY_BONUS`가 더해진다 — `club/press.ts`).
+   */
+  voice: { code: RivalVoice; chance: number };
+}
+
+const MANAGER_ARCHETYPES: readonly ManagerArchetype[] = [
   {
     key: "structure_architect",
+    voice: { code: "analysis", chance: 0.3 },
     label: "구조 설계자형",
     traits: ["이론가", "완벽주의", "내용 우선", "자기 확신"],
     motivation: "결과보다 먼저, 경기가 자기 그림대로 굴러가는 것을 보고 싶다.",
@@ -460,6 +471,7 @@ const MANAGER_ARCHETYPES: readonly CoachArchetype[] = [
   },
   {
     key: "winner",
+    voice: { code: "provoke", chance: 0.45 },
     label: "승부사형",
     traits: ["결과 지상주의", "도발을 즐긴다", "승부처를 읽는다"],
     motivation: "말은 남지 않는다 — 이긴 기록만 남는다.",
@@ -473,6 +485,7 @@ const MANAGER_ARCHETYPES: readonly CoachArchetype[] = [
   },
   {
     key: "pragmatist",
+    voice: { code: "respect", chance: 0.35 },
     label: "실용주의형",
     traits: ["상대 분석 우선", "유연함", "계산된 겸손"],
     motivation: "가진 패로 이길 수 있는 판을 만든다.",
@@ -486,6 +499,7 @@ const MANAGER_ARCHETYPES: readonly CoachArchetype[] = [
   },
   {
     key: "firebrand",
+    voice: { code: "provoke", chance: 0.4 },
     label: "열혈 지휘관형",
     traits: ["감정이 크다", "선수를 끌어안는다", "터치라인의 소란"],
     motivation: "선수들이 자기를 위해 뛰게 만든다 — 전술은 그다음이다.",
@@ -499,6 +513,7 @@ const MANAGER_ARCHETYPES: readonly CoachArchetype[] = [
   },
   {
     key: "youth_believer",
+    voice: { code: "patience", chance: 0.25 },
     label: "육성 신봉형",
     traits: ["장기 시야", "어린 선수 신뢰", "인내"],
     motivation: "3년 뒤에 완성될 팀을 지금부터 만든다.",
@@ -512,6 +527,7 @@ const MANAGER_ARCHETYPES: readonly CoachArchetype[] = [
   },
   {
     key: "bolt_realist",
+    voice: { code: "defensive", chance: 0.2 },
     label: "빗장 현실주의형",
     traits: ["수비 조직 신봉", "냉정한 계산", "낭만 없음"],
     motivation: "가진 것보다 많이 내주지 않는 팀으로 살아남는다.",
@@ -527,6 +543,64 @@ const MANAGER_ARCHETYPES: readonly CoachArchetype[] = [
 
 /** 원형 목록 — 테스트·어드민이 전수를 훑을 때 쓴다 */
 export const MANAGER_ARCHETYPE_LABELS = MANAGER_ARCHETYPES.map((a) => a.label);
+
+/**
+ * **명부 감독의 원형 라벨을 위 여섯 중 하나로 되짚는 표** (people.md §2).
+ *
+ * 명부(`data/world-figures.ts`)는 원형을 추첨하지 않고 사람마다 직접 적으므로, 그
+ * 라벨 중에는 수석코치 쪽 이름을 쓰는 것이 있다. 결 코드를 명부 줄마다 또 적으면
+ * 같은 규칙이 두 표에 살고 한쪽만 고쳐진 채 오래 산다 — 되짚는 자리를 여기 하나로
+ * 둔다. 감독 원형 여섯은 자기 라벨로 자기를 가리킨다.
+ *
+ * 표에 없는 라벨은 **말하지 않는다** (`coachArchetypeKeyOf`와 같은 규약).
+ */
+const MANAGER_ARCHETYPE_OF_LABEL: Readonly<Record<string, string>> = {
+  ...Object.fromEntries(MANAGER_ARCHETYPES.map((a) => [a.label, a.key])),
+  // 몸과 강도를 먼저 보는 사람의 마이크다
+  "야전 조련사형": "firebrand",
+  // 사람을 먼저 보면 상대도 높여 말한다
+  인간관계형: "pragmatist",
+  // 과거 사례와의 비교는 분석의 언어다
+  "노장 전술가형": "structure_architect",
+  // 구단의 역사를 말하는 사람은 긴 시야다
+  "구단 토박이형": "youth_believer",
+  "유스 육성형": "youth_believer",
+  "데이터 분석가형": "structure_architect",
+};
+
+/** 상대 벤치의 목소리 — 누가 앉아 있고, 무슨 결로, 얼마나 자주 말하는가 */
+export interface RivalVoiceCard {
+  /** 그 감독 — 이름이 곧 `characterId`다 (people.md §1) */
+  name: string;
+  code: RivalVoice;
+  /** 그 자리 하나에 입을 열 확률 — 더비 가산은 부르는 쪽이 얹는다 */
+  chance: number;
+}
+
+/**
+ * 그 벤치의 사람이 마이크 앞에서 내는 결 — **명부든 가상이든 같은 문을 지난다**
+ * (people.md §2·§4).
+ *
+ * 이름이 없는 벤치(감독 자신의 구단, 옛 세이브의 빈 벤치)와 표가 되짚지 못하는
+ * 원형은 `null`이다 — 없는 사람의 말을 지어내는 것보다 아무도 말하지 않는 편이 낫다.
+ */
+export function rivalVoiceOf(
+  state: {
+    seed: number;
+    userTeamId: string;
+    teams: readonly { id: string; managerName?: string }[];
+  },
+  teamId: string,
+): RivalVoiceCard | null {
+  if (teamId === state.userTeamId) return null;
+  const name = state.teams.find((t) => t.id === teamId)?.managerName;
+  if (name === undefined || name === "") return null;
+  const persona =
+    worldFigureByName(state, name) ?? generateVirtualManager(state.seed, teamId, name);
+  const key = MANAGER_ARCHETYPE_OF_LABEL[persona.archetype];
+  const archetype = MANAGER_ARCHETYPES.find((a) => a.key === key);
+  return archetype ? { name, code: archetype.voice.code, chance: archetype.voice.chance } : null;
+}
 
 /**
  * 가상 감독을 만든다 — **저장하지 않고 (시드, 팀, 이름)에서 파생한다** (people.md §2).

@@ -8,11 +8,11 @@ import type {
   PersonaRelation,
 } from "@story-fm/domain";
 import { isDeeperThan } from "@story-fm/domain";
-import type { GameState } from "../core/state";
-import { pendingApproach } from "../club/approach";
+import { pendingApproach, type GameState } from "../core/state";
 import { pendingPress } from "../club/press";
 import { knowledgeOf, type Knowledge } from "../squad/scouting";
 import {
+  generateOwner,
   generateVirtualManager,
   headCoachOf,
   isFamousPlayer,
@@ -218,8 +218,15 @@ function memoriesOf(state: GameState, characterId: string): CharacterMemory[] {
 function personaOf(state: GameState, characterId: string): Persona | null {
   const saved = (state.personas ?? []).find((p) => p.characterId === characterId);
   if (saved) return saved;
-  for (const persona of [headCoachOf(state), ownerOf(state), ...reportersOf(state)]) {
-    if (persona.characterId === characterId) return persona;
+  // 순서는 `candidatesOf`가 후보를 모으는 순서 그대로다 — 면접 중인 구단주는 우리
+  // 구단주 바로 뒤다 (career.md §5.1)
+  for (const persona of [
+    headCoachOf(state),
+    ownerOf(state),
+    interviewOwnerOf(state),
+    ...reportersOf(state),
+  ]) {
+    if (persona?.characterId === characterId) return persona;
   }
   const player = state.players.find((p) => p.name === characterId);
   if (player) return generatePlayerPersona(state.seed, player);
@@ -234,6 +241,17 @@ function personaOf(state: GameState, characterId: string): Persona | null {
     return generateVirtualManager(state.seed, bench.id, bench.managerName);
   }
   return null;
+}
+
+/**
+ * **마주 앉은 남의 구단주** — 감독직 면접이 열려 있는 동안만 있는 사람이다
+ * (career.md §5.1). `ownerOf`는 우리 구단의 구단주를 돌려주므로, 이 겹이 없으면
+ * 면접의 화자가 지목돼도 되찾을 카드가 없다.
+ */
+function interviewOwnerOf(state: GameState): Persona | null {
+  const open = pendingApproach(state);
+  if (open?.topic !== "interview" || open.teamId === undefined) return null;
+  return generateOwner(state.seed, open.teamId);
 }
 
 export interface CharacterBookInput {
@@ -362,6 +380,12 @@ function candidatesOf(state: GameState): Candidate[] {
   // 옛 세이브라 비어 있으면 이 함수들이 시드로 그 자리에서 만든다
   add(headCoachOf(state), NEAR_OURS, always("full"));
   add(ownerOf(state), NEAR_OURS, always("full"));
+  /**
+   * 면접 자리의 구단주 — 남의 구단 사람이지만 **오늘 감독의 맞은편에 앉아 있다**
+   * (career.md §5.1). 그날의 가장 가까운 사람이라 우리 사람과 같은 겹에 선다.
+   */
+  const interviewer = interviewOwnerOf(state);
+  if (interviewer) add(interviewer, NEAR_OURS, always("full"));
   for (const reporter of reportersOf(state)) add(reporter, NEAR_OURS, always("full"));
   for (const persona of state.personas ?? []) {
     if (persona.role !== "player") add(persona, NEAR_OURS, always("full"));
@@ -450,8 +474,19 @@ function pointedIds(
   byCaller: readonly string[] | undefined,
 ): ReadonlySet<string> {
   const ids = new Set<string>(byCaller ?? []);
-  const reporterId = pendingPress(state)?.reporterId;
+  const conference = pendingPress(state);
+  const reporterId = conference?.reporterId;
   if (reporterId !== undefined) ids.add(reporterId);
+  /**
+   * **회견 카드에 오른 상대 감독** — 기자와 같은 자리다 (people.md §4). 그 사람의
+   * 말을 인용하라고 카드가 요구해 놓고 인물지를 싣지 않으면, GM이 그 이름으로
+   * 즉흥의 말투를 지어낸다 — 캐릭터북이 풀었던 그 문제다.
+   */
+  for (const fact of conference?.facts ?? []) {
+    if (fact.kind !== "rival-quote") continue;
+    const name = fact.data?.name;
+    if (name !== undefined) ids.add(name);
+  }
   // 감독실 문 앞에 서 있는 사람 — 감독이 이름을 부르기를 기다리지 않는다 (people.md §8)
   const speakerId = pendingApproach(state)?.speakerId;
   if (speakerId !== undefined) ids.add(speakerId);
