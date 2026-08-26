@@ -314,6 +314,7 @@ describe("결산 스키마의 수용 폭", () => {
         name: "선수",
         age: 24,
         position: "CM",
+        mentor: null,
         familiarity: 60,
         condition: 80,
         form: 0,

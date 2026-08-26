@@ -199,8 +199,13 @@ type AgeBand = "youth" | "prime" | "veteran";
 
 /** 아직 자리를 잡는 중 — 조급함과 불안이 여기 몰린다 */
 const YOUTH_AGE_MAX = 21;
-/** 커리어의 뒤쪽 — 멘토와 팀 우선이 여기 몰린다 */
-const VETERAN_AGE_MIN = 30;
+/**
+ * 커리어의 뒤쪽 — 멘토와 팀 우선이 여기 몰린다.
+ *
+ * **멘토링의 자격도 이 선을 읽는다** (`squad/mentoring.ts` — people.md §5-3).
+ * 두 곳이 다른 숫자를 들면 「노장」이 자리마다 다른 나이가 된다.
+ */
+export const VETERAN_AGE_MIN = 30;
 
 function ageBandOf(age: number): AgeBand {
   if (age <= YOUTH_AGE_MAX) return "youth";

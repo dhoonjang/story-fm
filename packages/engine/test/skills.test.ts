@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { GamePlayer } from "@story-fm/domain";
 import {
   bestOverall,
   DEFAULT_TACTICS,
@@ -35,6 +36,13 @@ import {
   isHomegrownFor,
   reservePlayers,
   setSquadLevels,
+  setMentor,
+  mentorPairOf,
+  menteePairsOf,
+  MENTEES_PER_MENTOR,
+  MENTEE_AGE_MAX,
+  MENTOR_AGE_MIN,
+  MENTOR_LEADERSHIP_MIN,
   squadLevelOf,
   startingIdsOf,
   takeEdits,
@@ -1898,5 +1906,118 @@ describe("전술판이 바꾼 것", () => {
       signature: lineupSignature(state),
     };
     expect(lineupChangeNote(state, before)).toBeNull();
+  });
+});
+
+describe("멘토링 — 감독이 고참에게 유망주를 맡긴다 (people.md §5-3)", () => {
+  /** 나이를 못 박은 생일 — 시즌 시작이 7월이라 1월 1일생은 그 해에 이미 그 나이다 */
+  const bornAt = (state: GameState, age: number) => `${Number(state.date.slice(0, 4)) - age}-01-01`;
+
+  /**
+   * 자격을 못 박아 둔다 — 시드의 나이와 리더십은 세계가 바뀌면 함께 움직인다.
+   * 경계를 재는 케이스가 그 값에 기대면 세계를 손볼 때마다 이유 없이 붉어진다.
+   */
+  function makeMentor(state: GameState, player: GamePlayer, leadership = 70): GamePlayer {
+    player.squadLevel = "first";
+    player.birthdate = bornAt(state, MENTOR_AGE_MIN + 2);
+    player.attributes.leadership = leadership;
+    return player;
+  }
+  function makeMentee(state: GameState, player: GamePlayer, age = 19): GamePlayer {
+    player.birthdate = bornAt(state, age);
+    return player;
+  }
+
+  it("자격 밖은 반려된다 — 2군 멘토 · 어린 멘토 · 리더십 미달 · 다 큰 멘티", () => {
+    const state = createTestGame();
+    const [first, second] = userPlayers(state).filter((p) => squadLevelOf(p) === "first");
+    const mentor = makeMentor(state, first!);
+    const mentee = makeMentee(state, second!);
+    const ask = () => setMentor(state, { mentorId: mentor.id, menteeIds: [mentee.id] });
+
+    mentor.squadLevel = "reserve";
+    expect(ask().ok).toBe(false);
+    mentor.squadLevel = "first";
+
+    mentor.birthdate = bornAt(state, MENTOR_AGE_MIN - 1);
+    expect(ask().ok).toBe(false);
+    mentor.birthdate = bornAt(state, MENTOR_AGE_MIN);
+
+    mentor.attributes.leadership = MENTOR_LEADERSHIP_MIN - 1;
+    expect(ask().ok).toBe(false);
+    mentor.attributes.leadership = MENTOR_LEADERSHIP_MIN;
+
+    mentee.birthdate = bornAt(state, MENTEE_AGE_MAX + 1);
+    expect(ask().ok).toBe(false);
+    mentee.birthdate = bornAt(state, MENTEE_AGE_MAX);
+
+    // 넷을 다 통과한 뒤에야 사이가 선다 — 반려가 장부를 건드리지 않았다는 사실도 여기 선다
+    expect(ask().ok).toBe(true);
+    expect(mentorPairOf(state, mentee.id)?.mentorId).toBe(mentor.id);
+    expect(state.mentoring).toHaveLength(1);
+  });
+
+  it("한 멘토의 인원에는 상한이 있다", () => {
+    const state = createTestGame();
+    const ours = userPlayers(state).filter((p) => squadLevelOf(p) === "first");
+    const mentor = makeMentor(state, ours[0]!);
+    const kids = ours.slice(1, MENTEES_PER_MENTOR + 2).map((p) => makeMentee(state, p));
+
+    const over = setMentor(state, { mentorId: mentor.id, menteeIds: kids.map((p) => p.id) });
+    expect(over.ok).toBe(false);
+    expect(state.mentoring ?? []).toHaveLength(0);
+
+    const fits = kids.slice(0, MENTEES_PER_MENTOR);
+    expect(setMentor(state, { mentorId: mentor.id, menteeIds: fits.map((p) => p.id) }).ok).toBe(
+      true,
+    );
+    expect(menteePairsOf(state, mentor.id)).toHaveLength(MENTEES_PER_MENTOR);
+  });
+
+  it("목록을 다시 적으면 빠진 짝은 지워지지 않고 manager로 닫힌다", () => {
+    const state = createTestGame();
+    const ours = userPlayers(state).filter((p) => squadLevelOf(p) === "first");
+    const mentor = makeMentor(state, ours[0]!);
+    const other = makeMentor(state, ours[1]!);
+    const dropped = makeMentee(state, ours[2]!);
+    const kept = makeMentee(state, ours[3]!, 20);
+
+    expect(setMentor(state, { mentorId: mentor.id, menteeIds: [dropped.id, kept.id] }).ok).toBe(
+      true,
+    );
+
+    // 한 선수는 한 멘토 — 남의 아이를 데려가려면 그쪽 목록을 먼저 다시 적어야 한다
+    expect(setMentor(state, { mentorId: other.id, menteeIds: [kept.id] }).ok).toBe(false);
+
+    expect(setMentor(state, { mentorId: mentor.id, menteeIds: [kept.id] }).ok).toBe(true);
+    const closed = (state.mentoring ?? []).find((m) => m.menteeId === dropped.id);
+    expect(closed?.endedBy).toBe("manager");
+    expect(closed?.until).toBe(state.date);
+    expect(menteePairsOf(state, mentor.id).map((m) => m.menteeId)).toEqual([kept.id]);
+    // 닫힌 줄은 창(MENTORING_ECHO_DAYS) 안에서 그대로 남는다
+    expect(state.mentoring).toHaveLength(2);
+
+    // 목록을 비우면 그 멘토의 사이가 다 닫힌다
+    expect(setMentor(state, { mentorId: mentor.id }).ok).toBe(true);
+    expect(menteePairsOf(state, mentor.id)).toHaveLength(0);
+    expect(mentorPairOf(state, kept.id)).toBeNull();
+  });
+
+  it("멘토가 2군으로 내려가면 squad로 닫힌다 — 멘티가 내려가는 것은 닫지 않는다", () => {
+    const state = createTestGame();
+    const ours = userPlayers(state).filter((p) => squadLevelOf(p) === "first");
+    const mentor = makeMentor(state, ours[0]!);
+    const mentee = makeMentee(state, ours[1]!);
+    expect(setMentor(state, { mentorId: mentor.id, menteeIds: [mentee.id] }).ok).toBe(true);
+
+    // 멘티는 두 층 어디에도 선다 (배율이 닿는 경로만 다르다)
+    expect(setSquadLevel(state, { playerId: mentee.id, level: "reserve" }).ok).toBe(true);
+    expect(mentorPairOf(state, mentee.id)?.mentorId).toBe(mentor.id);
+
+    // 2군에는 완장이 없듯 멘토도 없다
+    expect(setSquadLevel(state, { playerId: mentor.id, level: "reserve" }).ok).toBe(true);
+    const row = (state.mentoring ?? []).find((m) => m.menteeId === mentee.id);
+    expect(row?.endedBy).toBe("squad");
+    expect(menteePairsOf(state, mentor.id)).toHaveLength(0);
   });
 });
