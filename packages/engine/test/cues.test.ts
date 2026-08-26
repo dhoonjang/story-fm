@@ -27,13 +27,16 @@ import {
   COACH_ARCHETYPE_LABELS,
   COACH_EYE_KEYS,
   assignmentsOf,
+  counterDemand,
   DEMAND_OF_ARCHETYPE,
+  OWNER_SLACK,
   financeOf,
   openBoardDemand,
   OWNER_ARCHETYPE_LABELS,
   pendingApproach,
   openBoardRequest,
   playerById,
+  PROMISE_WINDOW_MATCHES,
   requestBoard,
   respondToApproach,
   speakerCues,
@@ -52,6 +55,7 @@ import {
 import type {
   BoardExpectationCode,
   BoardRequestKind,
+  GamePlayer,
   PlayerIssueReason,
   Transfer,
 } from "@story-fm/domain";
@@ -1175,6 +1179,186 @@ describe("보드 요청 — 요청 → 이행/불이행 → 평판", () => {
       tickBoardDemands(state, []);
       expect(openBoardDemand(state)!.kind).toBe("raise-funds");
       expect(askingPriceFor(state, target)).toBeLessThan(before);
+    });
+  });
+
+  /**
+   * 시즌 갈래 — **창이 닫힌 동안 구단주가 거는 경기 단위 요청** (career.md §5.2).
+   * 판정 원본이 장부의 라인업이라 값이 도는 자리가 전부 경계다: 목표 직전과 목표,
+   * 설 자리가 없었던 창, 그리고 시즌마다 하나라는 자리 규약.
+   */
+  describe("시즌 갈래 — 창 밖에서 「그 선수를 세워라」", () => {
+    /** 창이 닫힌 첫날로 시계를 옮긴다 — 시즌 갈래가 서는 자리다 */
+    function afterWindow(state: GameState): GameState {
+      state.date = addDays(state.windows.find((w) => w.kind === "summer")!.closesOn, 1);
+      return state;
+    }
+
+    /** 우리 공식 경기 한 판 — 선발 명단만 다르다 */
+    function played(state: GameState, id: string, date: string, starters: string[]): void {
+      state.matches.push({
+        id,
+        season: state.season,
+        competitionId: "epl",
+        round: 1,
+        date,
+        homeTeamId: state.userTeamId,
+        awayTeamId: "chelsea",
+        result: {
+          homeGoals: 1,
+          awayGoals: 0,
+          scorers: [],
+          homeStarters: starters,
+          homeLineup: starters,
+        },
+      });
+    }
+
+    /** 1군 종합 최고를 여덟 판 내리 벤치에 둔다 — 흥행가형이 이름을 부르는 자리다 */
+    function benchedStar(state: GameState): GamePlayer {
+      const healthy = userPlayers(state)
+        .filter(
+          (p) => p.squadLevel === "first" && !state.injuries.some((i) => i.gamePlayerId === p.id),
+        )
+        .sort((a, b) => b.attributes.overall - a.attributes.overall || (a.id < b.id ? -1 : 1));
+      const eleven = healthy.slice(1, 12).map((p) => p.id);
+      for (let i = 0; i < PROMISE_WINDOW_MATCHES; i += 1) {
+        played(
+          state,
+          `m-bench-${i}`,
+          addDays(state.date, -(PROMISE_WINDOW_MATCHES - i) * 7),
+          eleven,
+        );
+      }
+      return healthy[0]!;
+    }
+
+    /** 요청이 선 뒤 한 판 — `start`면 지목된 선수가 선발이다 */
+    function nextMatch(state: GameState, id: string, star: string, start: boolean): void {
+      state.date = addDays(state.date, 5);
+      played(state, id, state.date, start ? [star] : ["gp-someone-else"]);
+      tickBoardDemands(state, []);
+    }
+
+    it("안 뛰던 사람을 지목하고, 선발이 목표에 닿는 순간 이행이다 — 한 번 모자라면 열려 있다", () => {
+      const state = ownedBy(afterWindow(createTestGame(11)), "흥행가형");
+      const star = benchedStar(state);
+      tickBoardDemands(state, []);
+
+      const demand = openBoardDemand(state)!;
+      expect(demand.kind).toBe("field-player");
+      expect(demand.playerId).toBe(star.id);
+      expect(demand.target).toBe(BOARD_DEMAND.FIELD_STARTS);
+      expect(demand.deadline).toBe(addDays(demand.issuedOn, BOARD_DEMAND.FIELD_DAYS));
+
+      for (let i = 0; i < BOARD_DEMAND.FIELD_STARTS - 1; i += 1) {
+        nextMatch(state, `m-start-${i}`, star.id, true);
+      }
+      expect(demand.status, "목표보다 한 번 모자란다").toBe("open");
+
+      const before = state.manager.reputation.board;
+      nextMatch(state, "m-start-last", star.id, true);
+      expect(demand.status).toBe("met");
+      expect(state.manager.reputation.board).toBe(before + BOARD_DEMAND.MET_BOARD);
+    });
+
+    it("다섯 경기를 다 쓰고도 못 채운 채 기한이 지나면 불이행 −6", () => {
+      const state = ownedBy(afterWindow(createTestGame(11)), "흥행가형");
+      const star = benchedStar(state);
+      tickBoardDemands(state, []);
+      const demand = openBoardDemand(state)!;
+
+      for (let i = 0; i < BOARD_DEMAND.FIELD_MATCHES; i += 1) {
+        nextMatch(state, `m-late-${i}`, star.id, i < BOARD_DEMAND.FIELD_STARTS - 1);
+      }
+      expect(demand.status).toBe("open");
+
+      const before = state.manager.reputation.board;
+      state.date = addDays(demand.deadline, 1);
+      tickBoardDemands(state, []);
+      expect(demand.status).toBe("failed");
+      expect(state.manager.reputation.board).toBe(before + BOARD_DEMAND.FAILED_BOARD);
+    });
+
+    /**
+     * 부상으로 세울 자리가 없었던 것은 감독의 결정이 아니다 — 출전 약속의 판정과
+     * 같은 규약이다 (people.md §5-2). 분모는 그가 설 수 있었던 경기다.
+     */
+    it("부상으로 설 수 있었던 경기가 셋에 못 미치면 기한이 지나도 이행이다", () => {
+      const state = ownedBy(afterWindow(createTestGame(11)), "흥행가형");
+      const star = benchedStar(state);
+      tickBoardDemands(state, []);
+      const demand = openBoardDemand(state)!;
+
+      state.injuries.push({
+        id: "inj-field-player",
+        gamePlayerId: star.id,
+        bodyPart: "햄스트링",
+        severity: "major",
+        cause: "match",
+        occurredOn: demand.issuedOn,
+        expectedReturn: addDays(demand.deadline, 30),
+        returnedOn: null,
+      });
+      for (let i = 0; i < BOARD_DEMAND.FIELD_MATCHES; i += 1) {
+        nextMatch(state, `m-hurt-${i}`, star.id, false);
+      }
+
+      const before = state.manager.reputation.board;
+      state.date = addDays(demand.deadline, 1);
+      tickBoardDemands(state, []);
+      expect(demand.status).toBe("met");
+      expect(state.manager.reputation.board).toBe(before + BOARD_DEMAND.MET_BOARD);
+    });
+
+    it("열린 요청은 언제나 하나다 — 시즌 갈래는 시즌마다 하나이고 창이 열리면 창 갈래가 선다", () => {
+      const state = ownedBy(afterWindow(createTestGame(11)), "흥행가형");
+      const star = benchedStar(state);
+      tickBoardDemands(state, []);
+      const first = openBoardDemand(state)!;
+      expect(first.kind).toBe("field-player");
+
+      // 판정으로 닫혀도 같은 시즌에는 다시 서지 않는다
+      for (let i = 0; i < BOARD_DEMAND.FIELD_STARTS; i += 1) {
+        nextMatch(state, `m-again-${i}`, star.id, true);
+      }
+      expect(first.status).toBe("met");
+      state.date = addDays(state.date, 10);
+      tickBoardDemands(state, []);
+      expect(openBoardDemand(state)).toBeNull();
+      expect(state.boardDemands).toHaveLength(1);
+
+      // 겨울 창이 열리면 그 자리는 창 갈래의 것이다
+      state.date = state.windows.find((w) => w.kind === "winter")!.opensOn;
+      tickBoardDemands(state, []);
+      expect(openBoardDemand(state)!.kind).toBe("sign-star");
+      expect(state.boardDemands).toHaveLength(2);
+    });
+
+    it("흥정은 한 차례다 — 원형의 여유가 폭을 정하고 두 번째는 거절된다", () => {
+      const state = ownedBy(afterWindow(createTestGame(11)), "흥행가형");
+      benchedStar(state);
+      tickBoardDemands(state, []);
+      const demand = openBoardDemand(state)!;
+      const deadline = demand.deadline;
+
+      // 60일을 물어도 흥행가형이 내주는 것은 상한 × 여유다
+      expect(counterDemand(state, { extendDays: 60 }).ok).toBe(true);
+      const granted = Math.round(BOARD_DEMAND.COUNTER_EXTEND_DAYS * OWNER_SLACK["흥행가형"]!);
+      expect(demand.deadline).toBe(addDays(deadline, granted));
+      expect(demand.counteredOn).toBe(state.date);
+
+      expect(counterDemand(state, { relax: true }).ok).toBe(false);
+      expect(demand.target).toBe(BOARD_DEMAND.FIELD_STARTS);
+    });
+
+    it("낮출 숫자가 없는 요청에는 흥정이 닿지 않는다 — 차례도 쓰지 않는다", () => {
+      const state = ownedBy(createTestGame(11), "투자자형");
+      tickBoardDemands(state, []);
+      const demand = openBoardDemand(state)!;
+      expect(demand.kind).toBe("net-profit");
+      expect(counterDemand(state, { relax: true }).ok).toBe(false);
+      expect(demand.counteredOn).toBeUndefined();
     });
   });
 

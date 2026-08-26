@@ -449,6 +449,8 @@ export const APPROACH_RATE = defineHarness({
     { metric: "에이전트 채널", role: "measure", unit: "count", why: "대리인이 온 자리 — 계약 만료·타 구단 관심·이적 요청" },
     { metric: "주장 채널", role: "measure", unit: "count", why: "라커룸이 식은 구간이 있었는가" },
     { metric: "구단주 채널", role: "measure", unit: "count", why: "순위가 기대 아래에 머문 구간 — 보드 요청" },
+    { metric: "보드 요청(발행)", role: "guard", max: 4, unit: "count", why: "**구단주가 한 시즌에 거는 조건의 상한**이다 (career.md §5.2). 창마다 하나(여름·겨울)와 시즌마다 하나가 서고 프리시즌 꼬리가 다음 여름 창을 스치므로 넷까지다 — 그보다 잦으면 자리 열쇠(`windowId`)가 새서 같은 창이나 같은 시즌에 두 번 선 것이다" },
+    { metric: "보드 요청 시즌 갈래", role: "guard", max: 1, unit: "count", why: "**시즌마다 하나**다 — 창 밖의 기용 요청(`field-player`)은 다섯 경기짜리라 판정되는 대로 다시 서면 구단주가 매달 라인업을 지시하는 사람이 된다. 0도 정상이다: 덜 쓰이는 후보가 없으면 요청이 서지 않는다" },
     { metric: "시즌 리뷰 자리", role: "guard", min: 1, max: 1, unit: "count", why: "**시즌당 정확히 한 번**이다 (career.md §5). 압력이 아니라 달력이 여는 자리라 눈금 문제가 아니다 — 0이면 창(7일)이나 소음의 문에 막혀 한 시즌에 한 번뿐인 보드 장면이 통째로 사라진 것이고, 2 이상이면 시즌당 한 번의 문이 샌 것이다" },
     { metric: "출전 기회(minutes)", role: "measure", unit: "count", why: "지위 대비 출전으로 결정적으로 서는 불만이 몇 번 감독실 문을 두드리는가 (people.md §5) — 주사위를 걷은 뒤 이 줄이 위 합계를 밀어 올리는지가 재는 것이다" },
     { metric: "어긴 약속(promise)", role: "measure", unit: "count", why: "아무 약속도 하지 않는 감독에게는 0이어야 한다 — 0이 아니면 약속을 하지 않은 자리에서 장부가 약속을 세운 것이다" },

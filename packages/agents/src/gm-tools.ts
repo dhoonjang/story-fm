@@ -143,6 +143,12 @@ const LEDGER_NOTE = 120;
 /** 시즌 번호의 상한 — 한 세이브가 이보다 오래 가지 않는다. 오타를 막는 자리다 */
 const SEASON_MAX = 200;
 
+/**
+ * 감독이 구단주에게 물을 수 있는 기한 연장의 상한 — **오타를 막는 자리다.**
+ * 실제로 내주는 날 수는 원형의 여유가 정한다 (career.md §5.2 「흥정」).
+ */
+const COUNTER_DAYS_MAX = 120;
+
 /** 정착 무게 인자 — 코어가 앵커 ±EVENT_BAND로 자른다 (settling.ts) */
 const settlingArg = (kind: "talk" | "team_talk") =>
   z
@@ -651,6 +657,19 @@ export function buildGmTools(
         stance: z.enum(PRESS_STANCES).optional(),
         decline: z.boolean().optional().describe("감독이 자리를 주지 않고 돌려보냈으면 true"),
         promise: promiseArg,
+        counter: z
+          .object({
+            extendDays: z
+              .number()
+              .int()
+              .min(1)
+              .max(COUNTER_DAYS_MAX)
+              .optional()
+              .describe("기한을 며칠 늘려 달라고 했나"),
+            relax: z.boolean().optional().describe("조건을 낮춰 달라고 했으면 true"),
+          })
+          .optional()
+          .describe("구단주 자리에서 감독이 선 요청의 조건을 되물었으면 — 한 차례뿐이다"),
       }),
       (input) => respondToApproach(state, input),
     ),
