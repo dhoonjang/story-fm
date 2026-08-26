@@ -37,6 +37,19 @@
 - `isCup`(유럽 + 국내) · `isEuroCup`(대항전 고유) · `isDomesticCup`이 판단의 문이고,
   대회 표시명은 `competitionName` 하나가 리그·컵 구분 없이 답한다.
 
+### 징계 규정 — 대회마다 다르고, 표는 따로 산다 (`data/discipline-catalog.ts`)
+
+카탈로그 항목에 필드로 달려 있지 않다. **경고 눈금은 대회의 것이지만 퇴장 정지의
+범위는 협회의 것**이라(잉글랜드의 퇴장은 리그·FA컵·카라바오컵에 다 걸린다) 한
+나라의 대회들이 한 값을 나눠 가져야 하고, 항목마다 복사해 두면 어드민 편집 한 번이
+규정이 묶어 둔 것을 갈라놓는다. 그래서 더비 표(`derbies.ts`)와 같은 자리 — 대회 id로
+여는 별도의 표다.
+
+`disciplineOf(competitionId)`가 그 대회의 규정을, `disciplineJurisdictionOf`가 관할
+(`eng`·`esp`·`ita`·`ger`·`fra`·`uefa`)을 답한다. 대회가 아닌 경기(친선·2군)는 널이라
+카드가 쌓이지도 정지가 소화되지도 않는다. 리그별 눈금과 그 근거는
+[../simulation/match.md](../simulation/match.md) §6 징계.
+
 ### 친선은 대회가 아니다
 
 프리시즌 친선(`competitionId: null` — `isFriendly`)은 **이 표에 없다.** 대회 id를
