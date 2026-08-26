@@ -1096,6 +1096,47 @@ export function seasonRating(
   return Math.round((stat.ratingSum / stat.apps) * 100) / 100;
 }
 
+// ── 리그 리더보드 ──────────────────────────────────────
+
+/**
+ * 개인 순위의 축 — 시즌 기록표(`SeasonStat`)에서 바로 나오는 다섯이다
+ * (→ docs/data/competition.md §2 「개인 순위」).
+ *
+ * 표를 만드는 곳(engine/competition/leaderboard.ts)과 그것을 세우는 곳(대회 화면·
+ * `get_league`)이 같은 열쇠를 써야 열이 하나 늘 때 한 자리만 고치면 된다.
+ */
+export const LEADERBOARD_KEYS = ["goals", "assists", "rating", "cleanSheets", "cards"] as const;
+export type LeaderboardKey = (typeof LEADERBOARD_KEYS)[number];
+
+/**
+ * 축의 이름 — **코드에서 만든다.** 세이브에도 뷰에도 코드만 남고 표시명은 읽는
+ * 자리에서 붙는다 (`awardTitle`과 같은 규약 — overview.md §1 철칙 4).
+ */
+const LEADERBOARD_TITLE: Record<LeaderboardKey, string> = {
+  goals: "득점",
+  assists: "도움",
+  rating: "평점",
+  cleanSheets: "클린시트",
+  cards: "징계",
+};
+
+export function leaderboardTitle(key: LeaderboardKey): string {
+  return LEADERBOARD_TITLE[key];
+}
+
+/**
+ * 퇴장 한 장이 경고 몇 장 몫인가 — 잉글랜드 협회의 징계 점수와 같은 눈금이다.
+ *
+ * 장수만 세면 퇴장이 경고와 같은 무게로 서고, 경고만 세면 퇴장 한 번이 표에서
+ * 사라진다.
+ */
+export const RED_CARD_POINTS = 3;
+
+/** 징계 점수 — 경고 1점 · 퇴장 `RED_CARD_POINTS`점 (competition.md §2) */
+export function disciplinePoints(stat: Pick<SeasonStat, "yellows" | "reds">): number {
+  return (stat.yellows ?? 0) + (stat.reds ?? 0) * RED_CARD_POINTS;
+}
+
 // ── 마일스톤 ──────────────────────────────────────────
 /**
  * 그 경기가 세운 기록 — **코드와 수치뿐이다.** 문장은 읽는 쪽이 만든다
