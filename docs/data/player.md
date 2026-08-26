@@ -459,6 +459,40 @@ LAM/RAM · LF/RF · LST/RST.
   `INJURY_PER_MATCH`가 정하고, 그 안에서 체력·몸싸움·성향이 대상을 고른다
   (→ [../simulation/match.md](../simulation/match.md) §7).
 
+**부상 위험 등급 `injuryRiskOf` — 감독이 미리 읽는 저울** (`packages/sim/src/match-engine.ts`).
+
+새로 재는 값이 아니다. **경기가 누가 다칠지 고를 때 쓰는 그 저울**(`injuryWeight`)을
+그대로 읽어 낱말로 옮긴 것이다 — 두 벌을 두면 화면이 "위험 낮음"이라고 적은 선수가
+코어의 굴림에서는 맨 앞에 선다.
+
+```
+저울 = (40 + (100 − 체력) × 0.8 + (99 − 몸싸움) × 0.3) × 성향
+```
+
+| 등급       | 라벨 | 저울   | 리그 분위 |
+| ---------- | ---- | ------ | --------- |
+| `low`      | 낮음 | < 62   | 하위 85%  |
+| `elevated` | 보통 | 62\~87 | 상위 15%  |
+| `high`     | 높음 | ≥ 88   | 상위 5%   |
+
+- **경계는 리그 분포의 분위다** — 한 시즌(296일) 동안 전 구단 1군의 하루치 저울
+  123만 표본을 재서 85%(62.6)와 95%(87.5)를 정수로 끊었다. 절대선이 아니라 **"이
+  리그에서 남들보다 위태로운가"**라, 세계가 통째로 지치면 등급도 함께 움직인다.
+  `pnpm balance injury-rate`가 등급별 **실제** 부상률을 재서 그 순서가 서 있는지
+  본다(→ [../simulation/balance-harness.md](../simulation/balance-harness.md)).
+- 저울의 세 항이 그대로 **원인 코드** 셋이다 — `fatigue`(피로) · `proneness`(부상
+  이력) · `strength`(몸싸움). 완전한 몸의 저울(40)에서 **들어 올린 몫**을 항마다
+  갈라, 그 몫이 전체 들림의 **4분의 1 이상**인 항만 이름을 대고 큰 순으로 선다.
+  셋을 다 짚으면 아무것도 짚지 않은 것과 같다.
+- **`low`에는 원인이 없다** — 짚을 것이 없어서 낮음이다.
+- 원인이 하나 이상인 것은 산술이 보장한다 — 세 몫의 합이 곧 들림이라, 등급이 오른
+  선수에게는 4분의 1을 넘는 항이 반드시 있다.
+- **성향은 등급으로만 나간다** (§10). 우리 선수의 참값은 감독의 것이지만 `1.8`이라는
+  배수는 감독이 읽을 눈금이 없는 수다 — 화면·조회·GM 어디에도 숫자로 서지 않는다.
+- 서는 자리는 다섯이다 — 명단 「위험」 열 · 심경 카드 `risk`([people.md](people.md) §5) ·
+  선수 카드 한 줄 · 스냅샷 `<alerts>`의 「부상 위험 높음」 줄과 야전 조련사형
+  수석코치의 `injury-risk` 눈([people.md](people.md) §7-1) · 라인업 확정 브리프.
+
 **부임 전 이력이 출발점을 정한다** (`seedInjuryHistory` · `data/injury-history.ts`).
 창은 부임 직전 **2시즌(730일)**이고, 창과 겹치는 결장 구간의 **합집합** 일수를 옮긴다 —
 동시에 안고 있던 두 부상을 그냥 더하면 결장이 두 배로 잡힌다.
@@ -1195,6 +1229,12 @@ N(x, s) = ln(1 + s×clamp(x, 0, 1)) / ln(1 + s)
   - **계약 만료일·주급·이적 리스트 등재는 흐리지 않는다** — 부상·징계·이적과 같은
     공개 기록 계열이다(`historyLines`). 그래서 타 팀 행도 계약 만료일을 그대로 싣고,
     `contractEndsWithinDays`·`maxWage`·`listed`는 참값으로 거른다.
+- **부상 성향은 우리 선수에게도 숫자로 나가지 않는다** — 위험 등급 셋으로만 선다
+  (§5.3). 참값을 감추는 것이 아니라 **읽을 눈금이 없어서다**: 「성향 1.8」은 리그
+  평균이 1.0이라는 사실을 함께 쥔 사람에게만 뜻이 있고, 감독은 그 분포를 볼 자리가
+  없다. 등급은 그 분포를 이미 접어 넣은 값이라 혼자서도 읽힌다. 남의 선수에게는
+  등급조차 서지 않는다 — 이력(부상 몇 회·누적 결장)은 공개 기록이라 그대로 나가고,
+  그것을 지금 몸과 합쳐 읽는 것은 우리 의료진의 일이다.
 - **안내문은 실제로 주는 것과 같은 말을 한다** — 구간을 주면서 "알 수 없다"고 하면
   (`knowledgeNote`) 모델이 손에 든 정보를 버린다.
 - ⚠️ **카드는 사실만 싣는다 — 지시문은 프롬프트가 갖는다.** "단정하지 말고 인상으로
@@ -1401,6 +1441,7 @@ offTheBall  = base − tilt × (1 − a)
 | 경기 감각 곡선 (`sharpnessAfterMinutes`·`sharpnessAfterDay`·`SHARPNESS_TARGET`) — §5.4                                          | `packages/sim/src/stamina.ts`                                                           |
 | 경기 감각 등급 (`sharpnessOf`·`sharpnessBand`·`sharpnessLabel`)                                                                 | `packages/domain/src/player.ts`                                                         |
 | 부상 (`openInjuryFor`·`INJURY_SEVERITY_KO`·성향 `RISE`/`FALL_PER_APPEARANCE`)                                                   | `packages/engine/src/squad/injury.ts`                                                   |
+| 부상 저울과 위험 등급 (`injuryWeight`·`injuryRiskOf`·`INJURY_RISK_FLOOR`) — §5.3                                                | `packages/sim/src/match-engine.ts` (낱말은 `packages/domain/src/records.ts`)            |
 | 안개의 크기·잠재력·경기 중 체력 (`observationMargin`·`readCondition`)                                                           | `packages/engine/src/squad/scouting.ts`                                                 |
 | 안개를 얹는 규칙·등급표 (`observedFit`·`observedOverall`·`RATING_TIERS`) — 화면도 같이 부른다                                   | `packages/domain/src/player.ts` (엔진이 재수출)                                         |
 | 파견 한도·대기 (`scoutPlayer`·`deferScout`·`scoutingSummary`)                                                                   | `packages/engine/src/skills/index.ts` · `packages/engine/src/squad/scouting.ts`         |
