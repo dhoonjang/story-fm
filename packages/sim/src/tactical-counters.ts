@@ -179,6 +179,15 @@ const TRAP_DRILLED_FLOOR = 0.85;
 const TRAP_DRILLED_SPAN = 0.75;
 const TRAP_OFF = 1.15;
 
+/**
+ * **지시만으로 연 역습의 폭** — 6축이 받쳐 줄 때의 몫.
+ *
+ * 감독이 "역습으로 가자"라고 하면 문은 열린다. 그런데 멘탈리티 4로 앞에 나가 있고
+ * 템포가 느린 팀은 뺏어도 **되받을 거리가 없다** — 레스터 2016이 한 일은 내려서
+ * 있었기 때문에 성립했다. 이 계수가 없으면 말 한마디가 그 구조와 같은 값을 받는다.
+ */
+const COUNTER_ORDER_ONLY = 0.6;
+
 const COUNTERS: Array<{ id: string; run: Counter }> = [
   /**
    * ① **뒷공간** — 하이라인의 고전적 대가.
@@ -452,7 +461,8 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
    * 2016이 한 일이 정확히 이것이다.
    *
    * **감독이 역습을 지시하면 문이 열린다** — 낮게 서서 빠르게 전환하는 6축 조합을
-   * 갖추지 않아도 된다. 지시는 문을 열 뿐이고 폭은 그대로다 (match.md §1.2).
+   * 갖추지 않아도 된다. 다만 그 구조가 없으면 되받을 거리가 짧아 **폭이 좁다**
+   * (`COUNTER_ORDER_ONLY` — match.md §1.2).
    */
   {
     id: "counter_attack",
@@ -460,8 +470,10 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
       const transition = tacticToggleValue(us.spec, "transition");
       if (transition === "regroup") return null; // 자리부터 잡으라 했으면 역습은 없다
       const ordered = transition === "counter";
-      // 지시는 문을 열 뿐 폭을 키우지 않는다 — 멘탈리티·템포를 갖추지 않아도 성립한다
-      if (!ordered && (us.spec.mentality > 2 || us.spec.tempo < 4)) return null;
+      /** 내려서서 빠르게 — 역습이 실제로 서는 6축 구조 */
+      const shaped = us.spec.mentality <= 2 && us.spec.tempo >= 4;
+      // 지시는 구조 없이도 문을 연다. 그 대신 폭이 좁다
+      if (!ordered && !shaped) return null;
       if (!isCommitted(them)) return null;
       const speed = ramp(us.fwPace, 70, 92);
       if (speed <= 0) return null;
@@ -470,7 +482,7 @@ const COUNTERS: Array<{ id: string; run: Counter }> = [
         {
           id: "counter_attack",
           side: us.side,
-          attack: 0.07 * speed * room,
+          attack: 0.07 * speed * room * (shaped ? 1 : COUNTER_ORDER_ONLY),
           kind: "gain",
           note: { values: { fwPace: us.fwPace }, flags: ordered ? ["ordered"] : [] },
         },
