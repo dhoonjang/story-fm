@@ -940,13 +940,6 @@ function computeMockGmTurn(
       toolCalls: calls,
     };
   }
-  if (press) {
-    return {
-      text: `@: *회견장 문 앞*\n${coach(state)} 기자단이 기다리고 있습니다 — ${press.context}.\n${reporter(state, press)} ${mockQuestion(press)}`,
-      toolCalls: calls,
-    };
-  }
-
   /**
    * 찾아온 사람 — 열려 있으면 답하거나 돌려보낸다 (approach.ts).
    *
@@ -1035,6 +1028,19 @@ function computeMockGmTurn(
   if (wantsAdvance && !isQuestion) {
     const days = /하루|내일/u.test(msg) ? 1 : /일주일|한 ?주/u.test(msg) ? 7 : null;
     return mockAdvance(state, calls, days);
+  }
+
+  /**
+   * 열린 회견은 **아무 지시도 걸리지 않은 턴에만** 감독을 부른다 — 다가옴과 같은
+   * 규약이다. 열려 있다는 이유만으로 모든 턴을 가로채면 다른 지시가 막히는데,
+   * 회견은 경기 뒤에만 열리는 자리가 아니다: 부임 첫날부터 하나가 서 있다
+   * (people.md §4). 답하지 않은 회견은 다음 회견이 올 때 거절로 닫힌다.
+   */
+  if (press) {
+    return {
+      text: `@: *회견장 문 앞*\n${coach(state)} 기자단이 기다리고 있습니다 — ${press.context}.\n${reporter(state, press)} ${mockQuestion(press)}`,
+      toolCalls: calls,
+    };
   }
 
   // 기본 응답 — 조회/대화

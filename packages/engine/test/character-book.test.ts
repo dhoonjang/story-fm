@@ -41,6 +41,12 @@ describe("캐릭터북 — 이번 턴에 실을 인물지", () => {
 
   beforeAll(() => {
     base = createTestGame();
+    /**
+     * 새 게임은 **부임 회견 하나를 열고 시작한다** (people.md §4) — 열린 회견의
+     * 기자는 언제나 카드가 서는 후보라(§6), 그대로 두면 이 파일의 모든 케이스가
+     * 그 기자 한 사람을 함께 세운다. 이 파일이 재는 것은 회견이 아니다.
+     */
+    base.pressConferences = [];
     squad = base.players.filter((p) => p.teamId === base.userTeamId);
   });
 

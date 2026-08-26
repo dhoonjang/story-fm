@@ -88,6 +88,13 @@ function build(): GameState {
 }
 
 const BASE = build();
+/**
+ * 새 게임은 **부임 회견 하나를 열고 시작한다** (people.md §4). 회견 블록은 사실
+ * 카드에 선수 id를 함께 싣는 자리라(감독의 지목이 그 id로 간다), 그대로 두면
+ * "스냅샷에 id가 없다"를 재는 케이스가 회견 블록의 id를 잡는다 — 이 파일이 재는
+ * 것은 선수단 명단이지 회견이 아니다.
+ */
+BASE.pressConferences = [];
 const game = (): GameState => structuredClone(BASE);
 
 describe("레퍼런스 층 — <club>·<manager> (캐시되는 시스템 블록)", () => {

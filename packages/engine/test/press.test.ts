@@ -18,7 +18,13 @@ import {
   type GameState,
 } from "@story-fm/engine";
 import { PressConferenceSchema, pressFactText } from "@story-fm/domain";
-import type { GamePlayer, ManagerOffer, MatchRecord, PressConference } from "@story-fm/domain";
+import type {
+  GamePlayer,
+  ManagerOffer,
+  MatchRecord,
+  MatchStage,
+  PressConference,
+} from "@story-fm/domain";
 import { createTestGame } from "./helpers";
 
 /**
@@ -70,6 +76,61 @@ function playAndOpen(
   return press!;
 }
 
+/**
+ * 새 게임은 **부임 회견 하나를 열고 시작한다** (people.md §4). 이 파일의 케이스는
+ * 대부분 "이 사건이 자리를 여는가"를 묻는 것이라, 부임 회견을 그대로 두면 그것을
+ * 새 자리로 읽는다 — 부임의 자리는 아래 `describe`가 따로 잰다.
+ */
+function newGame(): GameState {
+  const state = createTestGame();
+  state.pressConferences = [];
+  return state;
+}
+
+/** 같은 리그의 다른 구단으로 옮기는 제안 하나 — 경질 카드까지 세운다 */
+function moveTo(state: GameState): ManagerOffer {
+  const league = leagueOfTeamIn(state, state.userTeamId);
+  const to = state.teams.find(
+    (t) => t.id !== state.userTeamId && leagueOfTeamIn(state, t.id) === league,
+  )!.id;
+  state.dismissal = { on: state.date, season: state.season, teamId: state.userTeamId };
+  const offer: ManagerOffer = {
+    id: "offer-move",
+    teamId: to,
+    madeOn: state.date,
+    expiresOn: addDays(state.date, 10),
+    tier: tierOfTeamIn(state, to),
+    target: 10,
+    expectation: "중위권",
+    expectationCode: "mid",
+    position: 14,
+    status: "open",
+  };
+  state.managerOffers = [offer];
+  return offer;
+}
+
+/**
+ * 손으로 세운 컵 대진 하나 — 장부에 끝난 경기로 넣는다. 새 게임의 달력에는 아직
+ * 컵 경기가 없어(추첨일만 서 있다) 무게 규칙을 잴 대진을 직접 만든다.
+ */
+function cupTie(state: GameState, stage: MatchStage): MatchRecord {
+  const other = state.teams.find((t) => t.id !== state.userTeamId)!.id;
+  const match: MatchRecord = {
+    id: `m-cup-${stage}`,
+    season: state.season,
+    competitionId: "facup",
+    stage,
+    round: 1,
+    date: state.date,
+    homeTeamId: state.userTeamId,
+    awayTeamId: other,
+    result: { homeGoals: 2, awayGoals: 1, scorers: [] },
+  };
+  state.matches.push(match);
+  return match;
+}
+
 function fakeConference(over: Partial<PressConference> = {}): PressConference {
   return {
     id: "press-fake",
@@ -85,7 +146,7 @@ function fakeConference(over: Partial<PressConference> = {}): PressConference {
 
 describe("기자회견 — 자리 만들기", () => {
   it("경기를 치르면 결과와 무관하게 회견이 열린다", () => {
-    const state = createTestGame();
+    const state = newGame();
     const press = playAndOpen(state);
     expect(press.status).toBe("pending");
     expect(press.facts.length).toBeGreaterThan(0);
@@ -98,7 +159,7 @@ describe("기자회견 — 자리 만들기", () => {
   });
 
   it("이미 열린 회견이 있으면 새 회견이 앞의 것을 거절로 닫는다", () => {
-    const state = createTestGame();
+    const state = newGame();
     playAndOpen(state);
     const first = state.pressConferences![0]!;
     const beforeMedia = state.manager.reputation.media;
@@ -114,42 +175,31 @@ describe("기자회견 — 자리 만들기", () => {
    * 이직은 방치가 아니다 (career.md §5.1). 그대로 두면 새 구단의 첫 회견이 앞
    * 구단의 자리를 거절로 닫아 이유 없이 언론 평판이 깎인다.
    */
-  it("부임하면 앞 구단의 회견이 대가 없이 만료된다", () => {
-    const state = createTestGame();
+  it("부임하면 앞 구단의 회견이 대가 없이 만료되고 그 자리에 부임 회견이 선다", () => {
+    const state = newGame();
     playAndOpen(state);
-    const stale = state.pressConferences![0]!;
+    const stale = pendingPress(state)!;
     const before = state.manager.reputation.media;
 
-    const league = leagueOfTeamIn(state, state.userTeamId);
-    const to = state.teams.find(
-      (t) => t.id !== state.userTeamId && leagueOfTeamIn(state, t.id) === league,
-    )!.id;
-    state.dismissal = { on: state.date, season: state.season, teamId: state.userTeamId };
-    const offer: ManagerOffer = {
-      id: "offer-move",
-      teamId: to,
-      madeOn: state.date,
-      expiresOn: addDays(state.date, 10),
-      tier: tierOfTeamIn(state, to),
-      target: 10,
-      expectation: "중위권",
-      status: "open",
-    };
-    state.managerOffers = [offer];
+    const offer = moveTo(state);
     const accepted = acceptManagerOffer(state, offer.id);
     expect(accepted.ok, accepted.message).toBe(true);
 
     expect(stale.status).toBe("expired");
-    expect(pendingPress(state)).toBeNull();
     expect(state.manager.reputation.media, "떠난 구단의 회견에 불참 대가를 물었다").toBe(before);
 
-    // 새 구단의 첫 회견도 앞 구단의 자리를 방치로 읽지 않는다
-    openPress(state, fakeConference({ id: "press-new-club" }));
+    /**
+     * 부임 회견이 그 자리에 선다 — 만료가 **먼저**라 이 자리가 앞 구단의 회견을
+     * 거절로 읽지 않는다 (career.md §5.1). 순서가 뒤집히면 이직 하나로 평판이 깎인다.
+     */
+    const opened = pendingPress(state)!;
+    expect(opened.trigger).toBe("appointment");
+    expect(opened.weight).toBe(2);
     expect(state.manager.reputation.media).toBe(before);
   });
 
   it("답을 기다리는 회견은 언제나 하나뿐이다", () => {
-    const state = createTestGame();
+    const state = newGame();
     playAndOpen(state);
     openPress(state, fakeConference({ id: "a" }));
     openPress(state, fakeConference({ id: "b" }));
@@ -157,12 +207,12 @@ describe("기자회견 — 자리 만들기", () => {
   });
 
   it("회견이 없으면 스냅샷에 한 줄도 쓰지 않는다", () => {
-    const state = createTestGame();
+    const state = newGame();
     expect(describePendingPress(state)).toBeNull();
   });
 
   it("스냅샷에는 코어가 넘긴 사실이 그대로 실린다", () => {
-    const state = createTestGame();
+    const state = newGame();
     const press = playAndOpen(state);
     const note = describePendingPress(state)!;
     for (const f of press.facts) expect(note).toContain(pressFactText(f));
@@ -171,14 +221,14 @@ describe("기자회견 — 자리 만들기", () => {
 
 describe("기자회견 — 한도와 대가", () => {
   it("공짜인 스탠스가 없다 — 감싸면 언론을, 자르면 라커룸을 잃는다", () => {
-    const defend = createTestGame();
+    const defend = newGame();
     playAndOpen(defend);
     const before = { ...defend.manager.reputation };
     respondToMedia(defend, { stance: "defend" });
     expect(defend.manager.reputation.squad).toBeGreaterThan(before.squad);
     expect(defend.manager.reputation.media).toBeLessThan(before.media);
 
-    const criticise = createTestGame();
+    const criticise = newGame();
     playAndOpen(criticise);
     const before2 = { ...criticise.manager.reputation };
     respondToMedia(criticise, { stance: "criticise" });
@@ -187,7 +237,7 @@ describe("기자회견 — 한도와 대가", () => {
   });
 
   it("지목된 선수는 팀 전체보다 크게 움직인다", () => {
-    const state = createTestGame();
+    const state = newGame();
     const target = userPlayers(state)[0]!;
     target.state.form = 0;
     const others = userPlayers(state).filter((p) => p.id !== target.id);
@@ -207,8 +257,8 @@ describe("기자회견 — 한도와 대가", () => {
   });
 
   it("한도는 weight에 비례한다 — 같은 스탠스도 큰 자리에서 더 크게 남는다", () => {
-    const small = createTestGame();
-    const big = createTestGame();
+    const small = newGame();
+    const big = newGame();
     const light = fakeConference({ weight: 1 });
     const heavy = fakeConference({ weight: 3 });
     openPress(small, light);
@@ -219,7 +269,7 @@ describe("기자회견 — 한도와 대가", () => {
   });
 
   it("평판은 0~100을 넘지 않는다", () => {
-    const state = createTestGame();
+    const state = newGame();
     state.manager.reputation.media = 99;
     const conference = fakeConference({ weight: 3 });
     openPress(state, conference);
@@ -230,7 +280,7 @@ describe("기자회견 — 한도와 대가", () => {
 
 describe("기자회견 — 답과 거절", () => {
   it("답하면 회견이 닫히고 두 번 답할 수 없다", () => {
-    const state = createTestGame();
+    const state = newGame();
     playAndOpen(state);
     expect(respondToMedia(state, { stance: "own" }).ok).toBe(true);
     expect(pendingPress(state)).toBeNull();
@@ -238,7 +288,7 @@ describe("기자회견 — 답과 거절", () => {
   });
 
   it("거절도 하나의 답이다 — 언론을 잃는다", () => {
-    const state = createTestGame();
+    const state = newGame();
     playAndOpen(state);
     const before = state.manager.reputation.media;
     const result = declinePress(state);
@@ -248,7 +298,7 @@ describe("기자회견 — 답과 거절", () => {
   });
 
   it("열린 회견이 없으면 답할 수 없다", () => {
-    const state = createTestGame();
+    const state = newGame();
     expect(respondToMedia(state, { stance: "defend" }).ok).toBe(false);
     expect(declinePress(state).ok).toBe(false);
   });
@@ -268,7 +318,7 @@ describe("기자회견 — 지목은 사실 카드 안에서만", () => {
   }
 
   it("카드 밖 선수를 겨누면 반려된다 — 회견도 사기도 그대로다", () => {
-    const state = createTestGame();
+    const state = newGame();
     const [onCard, offCard] = [userPlayers(state)[0]!, userPlayers(state)[1]!];
     openWithNamedFact(state, onCard);
 
@@ -282,7 +332,7 @@ describe("기자회견 — 지목은 사실 카드 안에서만", () => {
   });
 
   it("카드 안 선수는 이름으로 불러도 닿는다", () => {
-    const state = createTestGame();
+    const state = newGame();
     const onCard = userPlayers(state)[0]!;
     openWithNamedFact(state, onCard);
 
@@ -294,7 +344,7 @@ describe("기자회견 — 지목은 사실 카드 안에서만", () => {
   });
 
   it("이름이 갈리면 고르지 않고 반려한다", () => {
-    const state = createTestGame();
+    const state = newGame();
     const [a, b] = [userPlayers(state)[0]!, userPlayers(state)[1]!];
     a.name = "마르틴 산체스";
     b.name = "마르틴 로페스";
@@ -318,14 +368,14 @@ describe("기자회견 — 지목은 사실 카드 안에서만", () => {
   });
 
   it("이름 걸린 사실이 없는 회견에서는 아무도 겨눌 수 없다", () => {
-    const state = createTestGame();
+    const state = newGame();
     const someone = userPlayers(state)[0]!;
     openPress(state, fakeConference());
     expect(respondToMedia(state, { stance: "own", targetPlayerId: someone.id }).ok).toBe(false);
   });
 
   it("겨눈 선수가 없으면 카드의 첫 이름이 그대로 대상이다", () => {
-    const state = createTestGame();
+    const state = newGame();
     const onCard = userPlayers(state)[0]!;
     openWithNamedFact(state, onCard);
     expect(respondToMedia(state, { stance: "defend" }).message).toContain(onCard.name);
@@ -334,7 +384,7 @@ describe("기자회견 — 지목은 사실 카드 안에서만", () => {
 
 describe("기자회견 — 질문은 장부에서 나온다", () => {
   it("치르지 않은 경기로는 회견을 만들 수 없다", () => {
-    const state = createTestGame();
+    const state = newGame();
     const upcoming = state.matches.find((m) => m.result === null);
     expect(upcoming).toBeDefined();
     expect(buildMatchPress(state, upcoming!.id)).toBeNull();
@@ -345,7 +395,7 @@ describe("기자회견 — 질문은 장부에서 나온다", () => {
    * 시작하고, 기자가 방금 본 경기를 전적으로 되묻는다 (people.md §4).
    */
   it("더비를 치르면 그 전까지의 전적이 카드로 선다 — 첫 더비는 0승 0무 0패", () => {
-    const state = createTestGame();
+    const state = newGame();
     const derbies = state.matches
       .filter(
         (m) =>
@@ -373,14 +423,14 @@ describe("기자회견 — 질문은 장부에서 나온다", () => {
   });
 
   it("친선을 치러도 회견은 열리지 않는다 — 프리시즌은 시즌 장부 밖이다", () => {
-    const state = createTestGame();
+    const state = newGame();
     const friendly = nextUserMatch(state, "friendly");
     settle(state, friendly, { us: 0, them: 3 });
     expect(buildMatchPress(state, friendly.id)).toBeNull();
   });
 
   it("친선의 무승은 무승 계단을 올리지 않는다", () => {
-    const state = createTestGame();
+    const state = newGame();
     for (let i = 0; i < 3; i++) settle(state, nextUserMatch(state, "friendly"), { us: 0, them: 1 });
     const press = playAndOpen(state, { us: 1, them: 1 });
     expect(press.trigger).toBe("match");
@@ -388,7 +438,7 @@ describe("기자회견 — 질문은 장부에서 나온다", () => {
   });
 
   it("막는 자리는 친선 하나다 — 대회 3경기 무승은 압박 회견을 연다", () => {
-    const state = createTestGame();
+    const state = newGame();
     for (let i = 0; i < 2; i++) {
       settle(state, nextUserMatch(state, "competitive"), { us: 0, them: 1 });
     }
@@ -398,7 +448,7 @@ describe("기자회견 — 질문은 장부에서 나온다", () => {
   });
 
   it("폼이 바닥인 선수가 있으면 기자가 이름을 부른다", () => {
-    const state = createTestGame();
+    const state = newGame();
     for (const p of userPlayers(state)) p.state.form = 0;
     const slump = userPlayers(state)[3]!;
     slump.state.form = -0.9;
@@ -416,7 +466,7 @@ describe("기자회견 — 누가 묻는가", () => {
   }
 
   it("자리의 성격이 기자를 정한다 — 경기 뒤는 전국지, 이적은 타블로이드", () => {
-    const state = createTestGame();
+    const state = newGame();
     // 순서는 REPORTER_ARCHETYPES 그대로: 0 지역지 · 1 전국지 · 2 타블로이드
     const [, national, tabloid] = reportersOf(state);
 
@@ -440,7 +490,7 @@ describe("기자회견 — 누가 묻는가", () => {
   });
 
   it("구단의 내일을 묻는 자리는 지역지가 연다", () => {
-    const state = createTestGame();
+    const state = newGame();
     for (let i = 0; i < 2; i++) {
       settle(state, nextUserMatch(state, "competitive"), { us: 0, them: 1 });
     }
@@ -458,7 +508,7 @@ describe("기자회견 — 누가 묻는가", () => {
 
 describe("기자회견 — 언론 유출은 다음 자리가 싣는다", () => {
   it("유출은 다음 회견에 sharp 카드로 실리고 자리를 키운다", () => {
-    const state = createTestGame();
+    const state = newGame();
     const player = userPlayers(state)[0]!;
     state.pressLeaks = [{ playerId: player.id, topic: "minutes", date: state.date }];
 
@@ -477,7 +527,7 @@ describe("기자회견 — 언론 유출은 다음 자리가 싣는다", () => {
   });
 
   it("떠난 선수의 유출은 실리지 않고 조용히 버려진다", () => {
-    const state = createTestGame();
+    const state = newGame();
     const gone = userPlayers(state)[0]!;
     gone.teamId = "chelsea";
     state.pressLeaks = [{ playerId: gone.id, topic: "demotion", date: state.date }];
@@ -511,7 +561,7 @@ describe("기자회견 — 전야", () => {
   }
 
   it("첫 리그 경기 전날에 개막 회견이 열린다 — 같은 날 두 번 불러도 하나다", () => {
-    const state = createTestGame();
+    const state = newGame();
     const opener = leagueMatches(state)[0]!;
     eveOf(state, opener);
 
@@ -527,7 +577,7 @@ describe("기자회견 — 전야", () => {
   });
 
   it("더비 전야는 더비 회견이다 — 개막이 아니어도 열린다", () => {
-    const state = createTestGame();
+    const state = newGame();
     const derby = leagueMatches(state).find(
       (m) => m.homeTeamId === "tottenham" || m.awayTeamId === "tottenham",
     );
@@ -543,7 +593,7 @@ describe("기자회견 — 전야", () => {
   });
 
   it("친선 전날에는 아무 자리도 서지 않는다", () => {
-    const state = createTestGame();
+    const state = newGame();
     eveOf(state, nextUserMatch(state, "friendly"));
     openEvePress(state);
     expect(pendingPress(state)).toBeNull();
@@ -555,7 +605,7 @@ describe("기자회견 — 전야", () => {
    * 나지 않는다.
    */
   it("마지막 홈 리그 경기 전야에만 작별 회견이 선다", () => {
-    const state = createTestGame();
+    const state = newGame();
     const home = leagueMatches(state).filter((m) => m.homeTeamId === state.userTeamId);
     const last = home[home.length - 1]!;
     const leaving = userPlayers(state)[0]!;
@@ -578,10 +628,179 @@ describe("기자회견 — 전야", () => {
   });
 
   it("예고가 선 선수가 없으면 마지막 홈경기에도 자리가 없다", () => {
-    const state = createTestGame();
+    const state = newGame();
     const home = leagueMatches(state).filter((m) => m.homeTeamId === state.userTeamId);
     eveOf(state, home[home.length - 1]!);
     openEvePress(state);
     expect(pendingPress(state)).toBeNull();
+  });
+});
+
+describe("기자회견 — 부임과 시즌의 마디", () => {
+  /** 우리 리그 경기 — 날짜 순 */
+  function leagueOf(state: GameState): MatchRecord[] {
+    const league = leagueOfTeamIn(state, state.userTeamId);
+    return state.matches
+      .filter(
+        (m) =>
+          m.competitionId === league &&
+          (m.homeTeamId === state.userTeamId || m.awayTeamId === state.userTeamId),
+      )
+      .sort((a, b) => (a.date < b.date ? -1 : 1));
+  }
+
+  /** 지나간 시즌 한 줄 — 통산을 원하는 자리에 세우는 데만 쓴다 */
+  function pastSeason(state: GameState, wins: number, draws: number, losses: number): void {
+    state.seasonRecords.push({
+      season: state.season - 1,
+      teamId: state.userTeamId,
+      position: 4,
+      wins,
+      draws,
+      losses,
+      goalsFor: 0,
+      goalsAgainst: 0,
+    });
+  }
+
+  it("새 게임은 부임 회견을 열고 시작한다 — 보드 기대와 선수단의 중심이 사실로 선다", () => {
+    const state = createTestGame();
+    const press = pendingPress(state)!;
+    expect(press.trigger).toBe("appointment");
+    expect(press.weight).toBe(2);
+    // 사실 카드만 남는다 — 문장은 기자가 쓴다
+    for (const f of press.facts) expect(f.text).toBeUndefined();
+    expect(press.facts.some((f) => f.data?.tags?.[0] === "board-target")).toBe(true);
+    const key = press.facts.find((f) => f.kind === "key-player")!;
+    expect(key.about, "감독이 이름을 부를 수 있는 자리가 없다").not.toBeNull();
+    // 한 경기도 안 치른 구단에는 순위가 없다 — 알파벳 순을 사실로 세우지 않는다
+    expect(press.facts.some((f) => f.kind === "standing" && f.data?.tags?.length === 0)).toBe(
+      false,
+    );
+    // 전임이 없는 구단에는 전임의 카드도 없다
+    expect(press.facts.some((f) => f.kind === "sacking")).toBe(false);
+  });
+
+  it("이직한 부임 회견에는 전임이 물러난 자리가 선다", () => {
+    const state = newGame();
+    const offer = moveTo(state);
+    expect(acceptManagerOffer(state, offer.id).ok).toBe(true);
+
+    const fact = pendingPress(state)!.facts.find((f) => f.kind === "sacking")!;
+    expect(fact.data?.tags?.[0]).toBe("predecessor");
+    expect(fact.data?.values?.position).toBe(14);
+    expect(fact.data?.values?.target).toBe(10);
+  });
+
+  /**
+   * 눈금의 경계는 화면에 표시가 나지 않는다 — 99에서 서면 100이 지나가 버리고,
+   * 100에서 두 번 서면 그 시즌 내내 같은 사실을 묻는다.
+   */
+  it("감독 통산 100경기째의 회견에만 마일스톤이 선다 — 99경기째에는 서지 않는다", () => {
+    const before = newGame();
+    pastSeason(before, 30, 30, 38); // 98경기
+    const first = leagueOf(before)[0]!;
+    settle(before, first, { us: 1, them: 0 });
+    expect(
+      buildMatchPress(before, first.id)!.facts.some((f) => f.kind === "manager-milestone"),
+      "99경기째에 100경기 카드가 섰다",
+    ).toBe(false);
+
+    const state = newGame();
+    pastSeason(state, 30, 31, 38); // 99경기
+    const match = leagueOf(state)[0]!;
+    settle(state, match, { us: 0, them: 1 });
+    const fact = buildMatchPress(state, match.id)!.facts.find(
+      (f) => f.kind === "manager-milestone",
+    )!;
+    expect(fact.data?.tags?.[0]).toBe("matches");
+    expect(fact.data?.values?.value).toBe(100);
+    // 캐물을 일이 아니라 물어봐 줄 일이다
+    expect(fact.sharp).toBe(false);
+  });
+
+  it("한 경기가 두 눈금을 넘으면 드문 쪽 — 승이 선다", () => {
+    const state = newGame();
+    pastSeason(state, 49, 30, 20); // 99경기 49승
+    const match = leagueOf(state)[0]!;
+    settle(state, match, { us: 2, them: 0 });
+    const fact = buildMatchPress(state, match.id)!.facts.find(
+      (f) => f.kind === "manager-milestone",
+    )!;
+    expect(fact.data?.tags?.[0]).toBe("wins");
+    expect(fact.data?.values?.value).toBe(50);
+  });
+
+  it("통산은 리그 경기로 센다 — 컵 경기는 눈금을 넘기지 않는다", () => {
+    const state = newGame();
+    pastSeason(state, 30, 31, 38); // 99경기
+    const cup = cupTie(state, "final");
+    expect(buildMatchPress(state, cup.id)!.facts.some((f) => f.kind === "manager-milestone")).toBe(
+      false,
+    );
+  });
+
+  it("결승 뒤 회견의 무게는 3이다 — 리그 평일 경기와 같은 자리가 아니다", () => {
+    const state = newGame();
+    expect(buildMatchPress(state, cupTie(state, "final").id)!.weight).toBe(3);
+
+    const semi = newGame();
+    // 녹아웃은 최소 2 — 날 선 사실이 없어도 컵의 하루는 주중 리그전이 아니다
+    expect(buildMatchPress(semi, cupTie(semi, "sf").id)!.weight).toBe(2);
+  });
+
+  it("시즌 최종전 뒤에는 그 시즌을 묻는 자리로 갈린다", () => {
+    const state = newGame();
+    const league = leagueOf(state);
+    const last = league[league.length - 1]!;
+    settle(state, last, { us: 1, them: 1 });
+
+    const press = buildMatchPress(state, last.id)!;
+    expect(press.trigger).toBe("season-end");
+    expect(press.weight).toBe(3);
+    expect(press.context).toContain("시즌 최종전");
+    expect(press.facts.some((f) => f.data?.tags?.[0] === "board-target")).toBe(true);
+
+    // 최종전이 아닌 경기는 그대로 경기 뒤 회견이다
+    const plain = newGame();
+    const first = leagueOf(plain)[0]!;
+    settle(plain, first, { us: 1, them: 1 });
+    expect(buildMatchPress(plain, first.id)!.trigger).toBe("match");
+  });
+
+  it("계약 만료 90일 안의 회견에는 감독 자신의 거취가 선다", () => {
+    const state = newGame();
+    state.manager.contract = {
+      salary: 1_000_000,
+      signedOn: addDays(state.date, -300),
+      until: addDays(state.date, 60),
+      renewalDecidedOn: state.date,
+      renewalOffered: false,
+    };
+    const press = playAndOpen(state);
+    const fact = press.facts.find((f) => f.kind === "manager-contract")!;
+    expect(fact.data?.values?.days).toBe(60);
+    expect(fact.data?.tags?.[0]).toBe("no-renewal");
+    expect(fact.sharp).toBe(true);
+    expect(press.weight).toBeGreaterThanOrEqual(2);
+
+    // 창 밖에서는 서지 않는다 — 만료가 멀면 물을 일이 아니다
+    const far = newGame();
+    far.manager.contract = {
+      salary: 1_000_000,
+      signedOn: far.date,
+      until: addDays(far.date, 91),
+    };
+    expect(playAndOpen(far).facts.some((f) => f.kind === "manager-contract")).toBe(false);
+  });
+
+  it("라이벌 경질은 다음 회견 하나가 싣고 대기열을 비운다", () => {
+    const state = newGame();
+    state.pressSackings = [{ teamId: "tottenham", date: addDays(state.date, -2), position: 17 }];
+    const press = playAndOpen(state);
+    const fact = press.facts.find((f) => f.kind === "sacking")!;
+    expect(fact.data?.tags?.[0]).toBe("rival");
+    expect(fact.data?.values?.days).toBe(2);
+    expect(state.pressSackings, "대기열이 비지 않았다").toHaveLength(0);
   });
 });

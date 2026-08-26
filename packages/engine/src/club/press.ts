@@ -1,7 +1,10 @@
 import type {
   ApproachTopic,
+  BoardExpectationCode,
   GamePlayer,
+  ManagerContract,
   MatchRecord,
+  MatchStage,
   PressAxis,
   PressConference,
   PressFact,
@@ -18,15 +21,24 @@ import {
   PLAYER_ISSUE_REASONS,
   pressFactText,
   RATING_MAX,
+  RENEWAL_NOTICE_DAYS,
 } from "@story-fm/domain";
 import type { GameState } from "../core/state";
-import { playerById, playersOf, pushNarrative, teamNameIn, userPlayers } from "../core/state";
+import {
+  activeContract,
+  playerById,
+  playersOf,
+  pushNarrative,
+  teamNameIn,
+  userPlayers,
+} from "../core/state";
 import { pickPlayerAmong } from "../core/player-ref";
 import { addDays, diffDays } from "../core/dates";
 import { formatMoney } from "./finance";
 import { makeRng, pick } from "../core/rng";
 import { clampForm, formLabel, moraleToForm } from "../squad/form";
 import { careerTotalsOf, matchMilestones } from "../squad/career";
+import { managerCareerTotals } from "../competition/records";
 import { numberLineageOf } from "../squad/numbers";
 import { recentOutcomes } from "../squad/slump";
 import { isFriendly } from "../competition/friendly";
@@ -106,12 +118,26 @@ function leadershipFactor(state: GameState): number {
   );
 }
 
-/** 이 자리가 얼마나 큰가 — 한도가 여기에 비례한다 */
-function weightOf(trigger: PressTrigger, sharp: boolean): 1 | 2 | 3 {
-  if (trigger === "pressure") return 3;
-  if (trigger === "transfer") return 2;
+/**
+ * 녹아웃 단계 — **경기 뒤 회견의 무게가 대회를 읽는 자리** (people.md §4).
+ * 리그 페이즈만 도는 대항전 경기는 `stage`가 없어 평소 규칙 그대로다.
+ */
+const KNOCKOUT_STAGES: readonly MatchStage[] = ["playoff", "r32", "r16", "qf", "sf", "final"];
+
+/**
+ * 이 자리가 얼마나 큰가 — 한도가 여기에 비례한다.
+ *
+ * 결승을 3으로 두는 것은 시즌에서 가장 큰 하루가 리그 평일 경기와 같은 무게로
+ * 지나가지 않게 하려는 것이고, 시즌 최종전이 3인 것도 같은 이유다 — 그 자리에서
+ * 묻는 것은 그 경기가 아니라 그 시즌이다.
+ */
+function weightOf(trigger: PressTrigger, sharp: boolean, stage?: MatchStage): 1 | 2 | 3 {
+  if (trigger === "pressure" || trigger === "season-end") return 3;
+  if (stage === "final") return 3;
+  if (trigger === "transfer" || trigger === "appointment") return 2;
   // 작별은 결과와 무관하게 구단의 자리다 — 더비 전야가 무게 2인 것과 같은 이유
   if (trigger === "farewell") return 2;
+  if (stage !== undefined && KNOCKOUT_STAGES.includes(stage)) return 2;
   return sharp ? 2 : 1;
 }
 
@@ -134,6 +160,9 @@ const REPORTER_AT: Record<PressTrigger, number> = {
   derby: 0,
   // 한 사람의 마지막 홈경기는 구단과 팬의 자리다 — 전술도 뒷이야기도 아니다
   farewell: 0,
+  // 부임도 시즌 최종전도 구단의 내일을 묻는 자리다 — 팬을 대신하는 지역지의 몫
+  appointment: 0,
+  "season-end": 0,
 };
 
 /** 그 자리를 여는 기자의 `characterId` — 기자단이 짧으면 첫 기자가, 없으면 아무도 묻지 않는다 */
@@ -319,7 +348,22 @@ export function buildMatchPress(state: GameState, matchId: string): PressConfere
    */
   facts.push(...retirementFacts(state), ...farewellResultFacts(state, match));
 
-  const trigger: PressTrigger = winless ? "pressure" : "match";
+  /** 감독 자신의 통산이 넘은 문턱 — 그 경기의 회견에만 실린다 (career.md §6) */
+  const managerHit = managerMilestoneFact(state, match, outcome);
+  if (managerHit) facts.push(managerHit);
+
+  /**
+   * **시즌 최종전이면 그 시즌을 묻는 자리로 갈린다** (people.md §4). 결과도
+   * 마일스톤도 평소처럼 서고, 그 위에 지금 선 자리와 보드가 건 자리가 얹힌다.
+   *
+   * ⚠️ 순위는 **그날의 순위표**다 — 같은 라운드의 남은 경기가 아직 안 치러졌을 수
+   * 있어, 최종 확정은 시즌 리뷰의 것이다 (career.md §6). 감독이 보는 표와 기자가
+   * 아는 표가 같아야 하므로 여기서 미리 확정하지 않는다.
+   */
+  const seasonFinale = isSeasonFinale(state, match);
+  if (seasonFinale) facts.push(...seasonEndFacts(state));
+
+  const trigger: PressTrigger = seasonFinale ? "season-end" : winless ? "pressure" : "match";
   const outcomeKo = outcome === "win" ? "승리" : outcome === "draw" ? "무승부" : "패배";
   return {
     id: `press-${matchId}`,
@@ -332,15 +376,109 @@ export function buildMatchPress(state: GameState, matchId: string): PressConfere
      * 두 번 묻는다. 국면은 그 자리의 온도(스코어·무승 계단)이지 그날의 사건 목록이 아니다.
      */
     context:
-      `${derby ? `${derby.name} · ` : ""}${opponent}전 ${score} ${outcomeKo}` +
+      `${seasonFinale ? "시즌 최종전 · " : ""}${derby ? `${derby.name} · ` : ""}` +
+      `${opponent}전 ${score} ${outcomeKo}` +
       (winless ? ` · 최근 ${recent.length}경기 무승` : ""),
     facts,
     status: "pending",
     weight: weightOf(
       trigger,
       facts.some((f) => f.sharp),
+      match.stage,
     ),
   };
+}
+
+// ── 감독의 통산 (career.md §6) ─────────────────────────
+
+/**
+ * 감독 통산의 눈금 — **경기와 승.** 밸런스를 손볼 자리가 이 표 하나다.
+ *
+ * 선수의 출전·득점 눈금(`MILESTONE_APP_STEPS`)과 값이 겹치지만 표를 나눠 두는 것은
+ * 세는 것이 다르기 때문이다 — 한 표로 묶으면 감독의 300승을 손보려다 선수의 골
+ * 문턱이 함께 움직인다.
+ */
+const MANAGER_MILESTONES: Record<"matches" | "wins", readonly number[]> = {
+  matches: [50, 100, 200, 300, 400, 500],
+  wins: [25, 50, 100, 150, 200, 300],
+};
+
+/** 그 사이에 넘은 눈금 — 없으면 null. 한 경기가 두 칸을 넘을 수는 없다 */
+function crossedStep(steps: readonly number[], before: number, after: number): number | null {
+  return steps.find((step) => before < step && after >= step) ?? null;
+}
+
+/**
+ * 이 경기가 감독의 통산에서 넘은 문턱 — **하나만.** 경기 눈금과 승 눈금이 한 경기에
+ * 함께 걸리면(100경기째의 50승) 승 쪽이 선다: 드문 쪽이 그 회견의 사실이다.
+ *
+ * 통산은 리그 경기로 세므로(career.md §6) 컵·대항전 뒤에는 넘을 문턱이 없다.
+ * 날 선 자리가 아니다 — 선수 마일스톤과 같다: 캐물을 일이 아니라 물어봐 줄 일이다.
+ */
+function managerMilestoneFact(
+  state: GameState,
+  match: MatchRecord,
+  outcome: "win" | "draw" | "loss",
+): PressFact | null {
+  if (match.competitionId !== leagueOfTeamIn(state, state.userTeamId)) return null;
+  // 이 함수는 마감이 결과를 적은 **뒤**에 불린다 — 통산은 이미 이 경기를 세고 있다
+  const after = managerCareerTotals(state);
+  const wins =
+    outcome === "win" ? crossedStep(MANAGER_MILESTONES.wins, after.wins - 1, after.wins) : null;
+  const step =
+    wins !== null
+      ? { code: "wins", value: wins }
+      : (() => {
+          const hit = crossedStep(MANAGER_MILESTONES.matches, after.matches - 1, after.matches);
+          return hit === null ? null : { code: "matches", value: hit };
+        })();
+  if (!step) return null;
+  return {
+    kind: "manager-milestone",
+    data: { values: { value: step.value }, tags: [step.code] },
+    about: null,
+    sharp: false,
+  };
+}
+
+// ── 시즌 최종전 (people.md §4) ─────────────────────────
+
+/** 그 시즌 우리 **마지막 리그 경기**인가 — 달력이 시즌 초부터 아는 사실이다 */
+function isSeasonFinale(state: GameState, match: MatchRecord): boolean {
+  const leagueId = leagueOfTeamIn(state, state.userTeamId);
+  if (match.competitionId !== leagueId) return false;
+  const last = leagueMatchesOfSeason(state, leagueId).reduce<string | null>(
+    (max, m) => (max === null || m.date > max ? m.date : max),
+    null,
+  );
+  return last !== null && match.date === last;
+}
+
+/**
+ * 시즌 최종전의 사실 — **지금 선 자리와 보드가 건 자리.** 기대에 못 미치면 날 선
+ * 자리가 된다: 그 시즌을 묻는 자리에서 감독이 답해야 할 것이 그것이다.
+ */
+function seasonEndFacts(state: GameState): PressFact[] {
+  const expectation = boardExpectation(state, state.userTeamId);
+  const standings = computeStandings(state);
+  const index = standings.findIndex((row) => row.ours);
+  const row = standings[index];
+  const facts: PressFact[] = [];
+  if (row) {
+    facts.push({
+      kind: "standing",
+      data: { values: { rank: index + 1, played: row.played }, tags: [] },
+      about: null,
+      sharp: index + 1 > expectation.target,
+    });
+  }
+  facts.push({
+    kind: "standing",
+    data: { values: { rank: expectation.target }, tags: ["board-target", expectation.code] },
+    about: null,
+    sharp: false,
+  });
+  return facts;
 }
 
 /**
@@ -501,6 +639,205 @@ export function buildDeparturePress(
     status: "pending",
     weight: 2,
   };
+}
+
+// ── 부임 회견 (career.md §5.1) ─────────────────────────
+
+/**
+ * 부임 회견 — **부임한 날의 자리.** 새 게임의 첫날(`createGame`)과 이직·부임
+ * (`acceptManagerOffer`)이 같은 문을 지난다 (people.md §4).
+ *
+ * 앞 구단의 열린 회견은 부임이 이미 `expired`로 닫은 뒤라(career.md §5.1) 이 자리가
+ * 그것을 거절로 읽지 않는다 — 순서가 뒤집히면 이직 하나로 언론 평판이 깎인다.
+ *
+ * ⚠️ **이적 예산의 숫자는 이 자리에 서지 않는다.** 회견에서 밝힌 금액은 약속이 되고,
+ * 예산은 감독이 답할 사실이 아니라 감독이 쓰는 값이다 — 계약과 함께 온 약속만
+ * 계약 카드에 붙는다.
+ *
+ * @param predecessor 전임이 물러난 자리 — 제안이 들고 온 사실이다. 없으면 카드도 없다.
+ */
+export function buildAppointmentPress(
+  state: GameState,
+  predecessor?: { position?: number; target: number; expectationCode: BoardExpectationCode },
+): PressConference {
+  const facts: PressFact[] = [];
+  if (predecessor) {
+    facts.push({
+      kind: "sacking",
+      data: {
+        refId: state.userTeamId,
+        name: teamNameIn(state, state.userTeamId),
+        values: {
+          target: predecessor.target,
+          ...(predecessor.position === undefined ? {} : { position: predecessor.position }),
+        },
+        tags: ["predecessor", predecessor.expectationCode],
+      },
+      about: null,
+      sharp: false,
+    });
+  }
+  const expectation = boardExpectation(state, state.userTeamId);
+  facts.push({
+    kind: "standing",
+    data: { values: { rank: expectation.target }, tags: ["board-target", expectation.code] },
+    about: null,
+    sharp: false,
+  });
+  /**
+   * 지금 선 자리는 **시즌 중 부임일 때만**이다 — 한 경기도 안 치른 구단의 "1위"는
+   * 사실이 아니라 알파벳 순이다.
+   */
+  const standings = computeStandings(state);
+  const index = standings.findIndex((row) => row.ours);
+  const row = standings[index];
+  if (row && row.played > 0) {
+    facts.push({
+      kind: "standing",
+      data: { values: { rank: index + 1, played: row.played }, tags: [] },
+      about: null,
+      sharp: index + 1 > expectation.target,
+    });
+  }
+  const key = keyPlayerFact(state);
+  if (key) facts.push(key);
+  const contract = state.manager.contract;
+  if (contract) {
+    facts.push({
+      kind: "manager-contract",
+      data: {
+        values: {
+          years: Math.max(
+            1,
+            Math.round(diffDays(contract.signedOn, contract.until) / DAYS_PER_YEAR),
+          ),
+          salary: contract.salary,
+        },
+        tags: ["signed"],
+      },
+      about: null,
+      sharp: false,
+    });
+  }
+  return {
+    id: `press-appointment-${state.userTeamId}-${state.date}`,
+    date: state.date,
+    trigger: "appointment",
+    reporterId: reporterFor(state, "appointment"),
+    context: `${teamNameIn(state, state.userTeamId)} 부임`,
+    facts,
+    status: "pending",
+    weight: weightOf("appointment", false),
+  };
+}
+
+/** 계약 연수를 되짚는 자 — 체결일과 만료일 사이의 해 (`contractUntil`의 역) */
+const DAYS_PER_YEAR = 365;
+
+/**
+ * 부임 회견을 연다 — **하루에 한 번.** 같은 날을 다시 지나도 자리가 둘이 되지 않는다.
+ */
+export function openAppointmentPress(
+  state: GameState,
+  predecessor?: { position?: number; target: number; expectationCode: BoardExpectationCode },
+  digest?: string[],
+): void {
+  const conference = buildAppointmentPress(state, predecessor);
+  if ((state.pressConferences ?? []).some((c) => c.id === conference.id)) return;
+  openPress(state, conference, digest);
+}
+
+/**
+ * 이 선수단의 중심 — **1군 최고 종합 자원.** 감독이 부임 회견에서 이름을 부를 수 있는
+ * 유일한 자리라 `about`이 걸린다 (people.md §4).
+ *
+ * 드는 사실은 자리·나이·계약 만료일이다 — 부임 전 커리어는 장부에 없으므로
+ * (`careerTotalsOf`) 통산 출전은 새 게임의 첫날에 0경기로 선다. 없는 것은 묻지 않는다.
+ */
+function keyPlayerFact(state: GameState): PressFact | null {
+  const best = userPlayers(state)
+    .filter((p) => p.squadLevel === "first")
+    .reduce<GamePlayer | null>(
+      (top, p) => (top === null || p.attributes.overall > top.attributes.overall ? p : top),
+      null,
+    );
+  if (!best) return null;
+  const contract = activeContract(state, best.id);
+  return {
+    kind: "key-player",
+    data: {
+      name: best.name,
+      tags: [naturalPositionOf(best).position],
+      values: {
+        age: ageOf(best.birthdate, state.date),
+        ...(contract ? { contractDays: Math.max(0, diffDays(state.date, contract.until)) } : {}),
+      },
+    },
+    about: best.id,
+    sharp: false,
+  };
+}
+
+// ── 감독 자신의 거취 (career.md §5.4) ──────────────────
+
+/**
+ * 만료 90일 안이면 **어느 회견이든** 감독의 거취가 선다 (people.md §4).
+ *
+ * ⚠️ 유출과 달리 **소비되지 않는다.** 원인이 계약 그 자체라 만료일까지 사라지지
+ * 않고, 보드의 판정이 갈리면 다음 회견이 새 코드로 다시 묻는다.
+ */
+function loadManagerContract(state: GameState, conference: PressConference): void {
+  // 부임 회견은 새로 선 계약을 이미 들고 있다 — 같은 사실을 두 줄로 묻지 않는다
+  if (conference.trigger === "appointment") return;
+  const contract = state.manager.contract;
+  if (!contract || state.dismissal) return;
+  const days = diffDays(state.date, contract.until);
+  if (days < 0 || days > RENEWAL_NOTICE_DAYS) return;
+  conference.facts.push({
+    kind: "manager-contract",
+    data: { values: { days }, tags: [renewalCode(contract)] },
+    about: null,
+    sharp: true,
+  });
+  conference.weight = Math.max(conference.weight, 2);
+}
+
+/** 보드의 판정 코드 — 판정 전인가, 재계약 제안인가, 비갱신 통보인가 (career.md §5.4) */
+function renewalCode(contract: ManagerContract): string {
+  if (contract.renewalDecidedOn === undefined) return "undecided";
+  return contract.renewalOffered ? "renewal" : "no-renewal";
+}
+
+// ── 라이벌의 경질 (people.md §4) ───────────────────────
+
+/**
+ * 라이벌 구단이 감독을 잘랐다 — **유출과 같은 문을 지난다.** 다음에 열리는 회견이
+ * 싣고 대기열을 비운다. 자리를 따로 열지 않는 이유도 같다: 회견은 이미 경기마다 열린다.
+ *
+ * 날 선 자리가 아니다 — 남의 집 벤치는 감독을 몰아세우는 사실이 아니라 기자가
+ * 곁들여 묻는 사실이다.
+ */
+function loadSackings(state: GameState, conference: PressConference): void {
+  const rows = state.pressSackings ?? [];
+  if (rows.length === 0) return;
+  for (const row of rows) {
+    conference.facts.push({
+      kind: "sacking",
+      data: {
+        refId: row.teamId,
+        name: teamNameIn(state, row.teamId),
+        values: {
+          days: diffDays(row.date, state.date),
+          ...(row.position === undefined ? {} : { position: row.position }),
+        },
+        tags: ["rival"],
+      },
+      about: null,
+      sharp: false,
+    });
+  }
+  // 실렸든 아니든 이 자리를 지나면 없다 — 다음 회견이 같은 사실을 다시 묻지 않는다
+  state.pressSackings = [];
 }
 
 // ── 언론 유출 ──────────────────────────────────────────────────
@@ -976,6 +1313,23 @@ export function pendingPress(state: GameState): PressConference | null {
 }
 
 /**
+ * 답을 기다리던 회견을 **거절로** 닫는다 — 시즌 전환이 유일한 자리다 (people.md §4).
+ *
+ * `expirePendingPress`와 갈리는 지점: 그 자리는 물을 구단이 없어진 것이라 대가가
+ * 없지만, 시즌이 넘어가는 것은 감독이 답하지 않은 것이다. 그대로 두면 다음 시즌
+ * 개막 전야 회견이 지난 시즌의 자리를 방치로 읽어, 새 시즌 첫날에 지난 시즌의
+ * 대가가 청구된다.
+ */
+export function declinePendingPress(state: GameState, digest?: string[]): void {
+  const open = pendingPress(state);
+  if (!open) return;
+  applyPressOutcome(state, open, null);
+  open.status = "declined";
+  digest?.push(`${open.context} 회견에 감독이 나타나지 않았다 — 언론 평판 하락`);
+  pushNarrative(state, `기자회견 불참 (${open.context})`, 2);
+}
+
+/**
  * 열린 회견을 **대가 없이** 닫는다 — 이직이 유일한 자리다 (career.md §5.1).
  *
  * `openPress`의 방치와 갈리는 지점: 감독이 답하지 않은 것이 아니라 **물을 구단이
@@ -996,16 +1350,12 @@ export function expirePendingPress(state: GameState): void {
  */
 export function openPress(state: GameState, conference: PressConference, digest?: string[]): void {
   state.pressConferences ??= [];
-  const stale = pendingPress(state);
-  if (stale) {
-    applyPressOutcome(state, stale, null);
-    stale.status = "declined";
-    digest?.push(`${stale.context} 회견에 감독이 나타나지 않았다 — 언론 평판 하락`);
-    pushNarrative(state, `기자회견 불참 (${stale.context})`, 2);
-  }
+  declinePendingPress(state, digest);
   loadLeaks(state, conference);
   loadTransferRequests(state, conference);
   loadRumours(state, conference);
+  loadSackings(state, conference);
+  loadManagerContract(state, conference);
   state.pressConferences.push(conference);
   // 지나간 회견은 서사에 남지 상태로 쌓일 이유가 없다
   if (state.pressConferences.length > KEPT_CONFERENCES) {

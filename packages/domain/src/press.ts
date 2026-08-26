@@ -52,6 +52,17 @@ export const PressTriggerSchema = z.enum([
   "derby",
   /** 마지막 홈경기 전야 — 은퇴 예고가 선 선수가 있을 때 (season.md §6) */
   "farewell",
+  /**
+   * **부임한 날** — 새 게임의 첫날과 이직·부임이 같은 문을 지난다 (career.md §5.1).
+   * 앞 구단의 열린 회견은 부임이 이미 만료로 닫은 뒤라, 이 자리가 그것을 거절로
+   * 읽지 않는다.
+   */
+  "appointment",
+  /**
+   * **그 시즌 우리 마지막 리그 경기 뒤** — 경기 뒤 회견이 갈린 것이다 (people.md §4).
+   * 결과도 마일스톤도 평소처럼 서고, 그 위에 최종 순위와 보드 기대가 얹힌다.
+   */
+  "season-end",
 ]);
 export type PressTrigger = z.infer<typeof PressTriggerSchema>;
 
@@ -114,6 +125,26 @@ export const PressFactKindSchema = z.enum([
    * `about`이 받은 선수, `name`이 앞서 달던 사람, `since`가 몇 시즌 만인가다.
    */
   "number-inherited",
+  /**
+   * **감독 통산의 문턱** — 경기·승이 눈금을 넘은 그 경기의 회견에 선다
+   * (career.md §6). `tags[0]`이 `matches`인지 `wins`인지, `values.value`가 그 눈금이다.
+   */
+  "manager-milestone",
+  /**
+   * **감독 자신의 거취** — 계약 만료 90일 안의 회견마다 선다 (career.md §5.4).
+   * `tags[0]`이 보드의 판정 코드, `values.days`가 만료까지 남은 일수다.
+   */
+  "manager-contract",
+  /**
+   * **벤치가 비었다** — 전임이 어떻게 물러났나(부임 회견), 또는 라이벌 구단의 경질.
+   * `tags[0]`이 그 둘을 가른다.
+   */
+  "sacking",
+  /**
+   * **이 선수단의 중심** — 부임 회견이 짚는 1군 최고 자원 (people.md §4).
+   * 감독이 처음 이름을 부를 수 있는 자리라 `about`이 걸린다.
+   */
+  "key-player",
 ]);
 /**
  * 회견의 재료 — **사실 한 줄.** 질문이 아니다.
@@ -388,6 +419,25 @@ export const PressLeakSchema = z.object({
 });
 export type PressLeak = z.infer<typeof PressLeakSchema>;
 
+/**
+ * 라이벌 구단의 경질 — **유출과 같은 결의 대기열이다** (people.md §4). 더비 표의
+ * 상대가 감독을 자르면 여기 서고, **다음에 열리는 회견 하나가** 싣고 비운다.
+ *
+ * 자리를 따로 열지 않는 이유도 유출과 같다 — 회견은 이미 경기마다 열린다.
+ * 순위를 카드가 아니라 여기 적어 두는 것은 후임이 앉는 순간 그 구단의 자리가
+ * 달라지기 때문이다: 그날의 사실은 그날 적어야 한다.
+ * 옛 세이브엔 없다 (빈 배열 로드 — 세이브 버전 유지).
+ */
+export const PressSackingSchema = z.object({
+  /** 잘린 구단 (`GameTeam.id`) */
+  teamId: z.string().min(1),
+  /** 그날 */
+  date: DateString,
+  /** 그날 그 구단의 리그 순위 — 순위표가 없는 구단이면 없다 */
+  position: z.number().int().min(1).optional(),
+});
+export type PressSacking = z.infer<typeof PressSackingSchema>;
+
 /** 스탠스가 옮기는 축 — 평판 3축과 사기 둘 (`club/press.ts`의 표가 채운다) */
 export type PressAxis = "board" | "media" | "squad" | "target" | "team";
 
@@ -605,6 +655,51 @@ export function pressFactText(fact: PressFact): string {
       return `${v.number ?? 0}번 공석` + lineageTail(name, v.seasons, v.since);
     case "number-inherited":
       return `${v.number ?? 0}번을 물려받았다` + lineageTail(name, v.seasons, v.since);
+    case "manager-milestone":
+      // 눈금이 무엇을 세는가는 `tags[0]`이다 — 경기와 승은 같은 통산의 두 눈금이다
+      return `감독 통산 ${v.value ?? 0}${sub === "wins" ? "승" : "경기"}`;
+    case "manager-contract":
+      /**
+       * 부임의 줄은 **새로 선 계약**이고, 나머지는 **끝을 향해 남은 날**이다
+       * (career.md §5.4). 보드의 판정은 만료 90일 전에 한 번뿐이라, 그 판정 전과
+       * 후가 같은 카드에서 코드로만 갈린다.
+       */
+      if (sub === "signed") {
+        return (
+          `감독 계약 ${v.years ?? 0}년 · 연봉 ${formatMoney(v.salary ?? 0)}` +
+          (v.pledge ? ` · 이적 예산 약속 ${formatMoney(v.pledge)}` : "")
+        );
+      }
+      return (
+        `감독 계약 만료 D-${v.days ?? 0}` +
+        (sub === "renewal"
+          ? " · 보드가 재계약을 제안했다"
+          : sub === "no-renewal"
+            ? " · 보드가 재계약하지 않기로 했다"
+            : " · 보드는 아직 말이 없다")
+      );
+    case "sacking":
+      /**
+       * 전임의 줄에는 **그 구단에 걸려 있던 기대**가 함께 선다 — 몇 위에서 잘렸는가는
+       * 그 구단이 몇 위를 바랐는가를 모르면 읽히지 않는다. 라이벌의 줄은 남의 집
+       * 일이라 순위와 며칠 전인가로 족하다.
+       */
+      if (sub === "predecessor") {
+        return (
+          `전임 감독 퇴장` +
+          (v.position === undefined ? "" : ` — 그때 리그 ${v.position}위`) +
+          ` · 기대 ${boardExpectationText((tags[1] ?? "mid") as BoardExpectationCode, v.target)}`
+        );
+      }
+      return (
+        `${name || "라이벌"} 감독 경질 · ${v.days ?? 0}일 전` +
+        (v.position === undefined ? "" : ` · 그때 리그 ${v.position}위`)
+      );
+    case "key-player":
+      return (
+        `1군 핵심 ${name}${sub ? ` (${sub})` : ""} · 만 ${v.age ?? 0}세` +
+        (v.contractDays === undefined ? "" : ` · 계약 만료 D-${v.contractDays}`)
+      );
   }
 }
 
