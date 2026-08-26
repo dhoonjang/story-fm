@@ -298,11 +298,15 @@ row, 지난 일 = 그대로 이력.**
 | `approaches` `Approach`               | 다가옴 — 압력이 임계를 넘어 코어가 연 자리 (people.md §8)     | `domain/press.ts`      |
 | `approachPressure` `ApproachPressure` | 압력 눈금 — 주제별 누적과 계단. 파생할 수 없는 유일한 값      | `domain/press.ts`      |
 | `pressLeaks` `PressLeak`              | 언론 유출 — 다음 회견이 실어 갈 때까지만 남는다 (§8 계단 4)   | `domain/press.ts`      |
+| `youthCandidates` `YouthCandidate`    | 여름의 유스 후보 — 소집일까지 감독의 답을 기다린다            | `domain/records.ts`    |
 | `aiDeals` `AiDeal`                    | 이번 주에 정해진, 날짜가 흩어진 AI 이적                       | `market/ai-market.ts`  |
 
 이것들이 세이브에 남는 이유는 같다 — **두 시점 사이에 걸쳐 있어** 파생으로 되돌릴
 수 없다. 협상은 며칠에 걸쳐 오퍼가 오가고, 회견과 다가옴은 열린 뒤 감독이 다음 날
-답할 수 있고, AI 이적은 주 단위로 계획해 날짜별로 실행한다. 압력 눈금
+답할 수 있고, AI 이적은 주 단위로 계획해 날짜별로 실행하며, 유스 후보는 전환이 세워
+소집일에 정리된다. **유스 후보만은 아직 세계에 없는 사람을 담는다** — 계약 전이라
+`state.players`에 넣을 수 없고, 다시 뽑으면 감독이 어제 본 아이가 아니게 된다
+([../simulation/season.md](../simulation/season.md) §6). 압력 눈금
 (`approachPressure`)만 결이 다르다 — 그것은 **감독이 무엇을 하지 않았는지의 누적**이라
 애초에 원본이 장부에 없다 (people.md §8).
 

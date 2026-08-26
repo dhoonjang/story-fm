@@ -172,6 +172,11 @@ UCL 우승팀과 UEL 우승팀이) 중립 구장에서 한 번 붙는다
 자라는 배경 시뮬이 된다 — 프로스펙트 아크(아카데미에서 키운 아이가 1군에 서는
 이야기)는 비전의 축이다.
 
+그 아크의 **첫 장면은 여름의 인테이크**다 — 후보가 서고 감독이 첫 프로 계약을 쓴다
+(§6 「유스 인테이크」). 여기 2군에서 누구에게 자리를 줬는가가 **한 해 뒤 그 인테이크의
+수와 질로 돌아온다**(아카데미 활용도) — 2군 리그는 자라는 곳이면서 다음 세대가 설
+자리를 재는 자이기도 하다.
+
 - **감독 팀의 2군만 편성한다.** 친선과 같은 원칙이다(§2) — 감독이 관측하지 않는
   대진에 일정을 줄 이유가 없다. 타 팀 2군 선수는 코어 월간 성장으로 자라므로
   경기가 없어도 아무것도 잃지 않는다.
@@ -616,7 +621,7 @@ tick은 없다 (§5).
    다음 시즌 7월 1일로 건너뛰므로 이걸 여기서 하지 않으면 상금이 앉은 달이 8월에야
    마감되고, 그 사이에 예산·PSR이 마지막 달을 빼고 결정된다
    ([finance.md](./finance.md) §7.1이 원본).
-3. **시즌 전환**(`transitionSeason`) — 은퇴 판정·유스 콜업·계약 만료(자유이적)·
+3. **시즌 전환**(`transitionSeason`) — 은퇴 집행·유스 인테이크·계약 만료(자유이적)·
    배치 재구성·유럽 티켓 배정·새 시즌 편성·이적 예산 보충.
    - ⚠️ **성장·쇠퇴는 여기서 굴리지 않는다** — 능력치를 매달 조금씩 움직이는 것은
      `squad/development.ts`이고([player.md](../data/player.md) §6.3), 전환이 나이로
@@ -634,6 +639,9 @@ tick은 없다 (§5).
      그를 자동 갱신하지 않는다 — 빈자리는 그 구단의 유스 유입이 그대로 메운다.
    - **유스 콜업의 난수는 `state.seed + YOUTH_INTAKE_SEED_OFFSET`(101)로 갈라낸다** —
      같은 시드를 쓰는 다른 생성기와 같은 선수를 뽑지 않게 하는 오프셋이다.
+   - **우리 팀의 유스는 전환이 계약시키지 않는다 — 후보로 세운다.** 첫 프로 계약은
+     감독이 소집일까지 쓰는 결정이고, 답이 없으면 코어가 그날 옛 규칙대로 채운다.
+     아래 「유스 인테이크」 절이 원본이다. AI 구단은 여기서 그대로 결정된다.
    - **1군이 `MATCHDAY_SQUAD`(20 = 선발 11 + 벤치 9)를 못 채우면** 2군 상위 자원이
      자동 승격된다. 그 외의 승강은 감독의 결정으로 남긴다 — 문턱을 따로 적지 않고
      도메인의 매치데이 명단을 그대로 읽는 이유는, 값을 한 번 더 적으면 같은 규칙의
@@ -807,14 +815,96 @@ id·이름·생일·주 포지션·마지막 팀·날짜·시즌·사유. 통산
 그만두고, 그 이름을 읽는 자리는 전부 우리 사람의 자리다. **은퇴 자체는 소속과 무관하게
 일어난다** — 원장의 `TRANSFER.type = "retire"` 줄은 모든 팀에 남는다.
 
+### 유스 인테이크 — 후보가 서고, 첫 프로 계약은 감독이 쓴다 (`competition/season.ts`)
+
+**아카데미에서 온 아이가 어디서 왔는지 감독은 몰랐다.** 전환이 신인을 그 자리에서
+계약까지 시켜 다이제스트 한 줄("유스 합류: 신인 3명")로 지나갔고, 그래서 스쿼드
+크기의 결정권 일부가 코어에 있었다 — 정리(방출)만 감독의 몫이었다. 프로스펙트
+아크(§2)의 첫 장면이 없는 자리다.
+
+인테이크는 **날짜가 둘인 사건**이다.
+
+| 날                    | 무엇                                                                        |
+| --------------------- | --------------------------------------------------------------------------- |
+| 프리시즌 첫날 (7/1)   | 전환이 **후보를 세운다**(`state.youthCandidates`) — 계약은 아직 서지 않는다 |
+| 선수단 소집일 (§2 §4) | 마감 — 미결 후보를 코어가 **기본 규칙대로** 정리한다                        |
+
+- **후보가 서는 곳은 감독 팀뿐이다.** AI 구단은 전환이 그 자리에서 옛 규칙대로
+  결정한다 — 남의 아카데미의 고민을 읽는 자리가 없고, 세계 전체가 후보 줄을 들면
+  세이브가 여름마다 수천 줄 불어난다.
+- **마감은 소집일을 따라간다** — 감독이 휴가를 접고 조기 소집하면(`recallSquadEarly`)
+  기한도 함께 당겨진다. 훈련장이 열리는 날이 곧 신인이 명단에 서는 날이다. 그날의
+  tick이 지나가면(`state.date >= 마감`) 코어가 정리하므로, 날짜를 건너뛰어도 후보가
+  여름을 넘겨 남지 않는다.
+- **답하지 않으면 코어가 채운다** — 방치는 시간의 결과다
+  ([../overview.md](../overview.md) §1). 채우는 수는 옛 규칙 그대로
+  `max(1, 은퇴 + 계약 만료, 포지션군 부족)`이고, **후보 목록의 앞에서부터** 가져간다:
+  포지션군이 비는 자리가 앞에 서 있으므로 방치해도 골문이 마르지 않는다.
+
+#### 후보의 수와 질 — 체급과 아카데미 활용도 (`youthIntakeOf`)
+
+**체급 말고는 아무것도 인테이크를 움직이지 않던 자리다.** 이제 감독이 2군을 무엇으로
+채웠는가가 함께 걸린다.
+
+```
+아카데미 활용도 = 지난 시즌 우리 2군 리그 출전 중 만 21세 이하가 차지한 몫 (0~1)
+후보 수         = min(YOUTH_CANDIDATE_CAP,
+                      기본 서명 수 + YOUTH_POOL_BY_TIER[체급] + round(활용도 × YOUTH_POOL_ACADEMY))
+잠재력 여지     = YOUTH_UPSIDE.min ~ YOUTH_UPSIDE.max + round(활용도 × YOUTH_ACADEMY_UPSIDE)
+```
+
+- **활용도가 재는 것은 자리다** — 2군을 늙은 백업으로 채우면 아카데미에 자리가 없고,
+  그해 인테이크가 얇고 낮아진다. 2군 리그는 코어가 알아서 굴리므로(§2) 감독이 여기에
+  쓰는 손잡이는 1·2군 이동과 임대뿐이고, 그 결정이 한 해 뒤 이 줄로 돌아온다.
+- **표본이 얕으면 재지 않는다** — 우리 2군 출전 총합이 `ACADEMY_USE_MIN_APPS` 아래면
+  (첫 시즌 · 옛 세이브 · 강등으로 2군 일정이 짧았던 해) 중립값
+  `ACADEMY_USE_NEUTRAL`로 읽는다. 잴 것이 없는 해를 0으로 굳히면 첫 인테이크가 이유
+  없이 마른다.
+- **기준선(`TIER_BASE[체급] − 24`)은 그대로 체급의 것이다** — 활용도가 움직이는 것은
+  **여지**뿐이다. 유스의 매력은 지금 실력이 아니라 성장 여지이고
+  ([../data/player.md](../data/player.md) §6.3), 지금 실력까지 움직이면 아카데미가
+  이적 시장을 대신한다.
+- ⚠️ **AI 구단의 인테이크는 그대로다.** 2군 리그가 감독 팀만 편성되므로 활용도를 잴
+  장부가 없고, 없는 값을 체급으로 흉내 내면 세계 전체의 잠재력이 여름마다 올라가
+  리그 체급의 드리프트를 재는 자(`squad-longevity`)가 함께 흔들린다.
+
+#### 감독의 결정 — `sign_youth`
+
+**한 번의 확정이다.** 고른 이름이 계약(3년 · `estimateWeeklyWage`)을 받고 **나머지
+후보는 사라진다** — 목록을 고쳐 가며 여러 번 부르는 자리가 아니다. 이름을 하나도 주지
+않으면 전원 돌려보낸다: 스쿼드 크기의 결정권이 감독에게 있다는 것이 이 손잡이의 값이다.
+
+- ⚠️ **소프트락 방지는 감독의 결정 밖이다.** 감독이 고른 뒤에도 포지션군이 최소 인원
+  아래면 코어가 남은 후보에서 그 자리를 채우고, 무엇을 왜 채웠는지 답에 적는다.
+  골문은 대체할 자리가 없다 — 감독이 골키퍼를 한 명도 남기지 않는 선택은 결정이
+  아니라 사고다.
+- 마감이 지난 뒤에는 부를 수 없다 — 그때 후보 줄은 이미 없다.
+
+#### 사실 카드 — 코어는 사실만 낸다
+
+후보 줄은 **이름 · 나이 · 주 포지션 · 관측 종합 · 잠재력 구간 · 제안 주급**이다. 물음표도
+평가어도 없는 장부 줄이고([../data/people.md](../data/people.md) §4), 인테이크 데이를
+어떤 자리로 열지, 누구를 아깝다고 말할지는 GM이 정한다.
+
+⚠️ **후보에게는 안개가 낀다 — `adapting` 눈금이다**
+([../data/player.md](../data/player.md) §9). 계약서에 사인하기 전이라 훈련장에서 본
+것이 전부이고, 그래서 종합은 분석 계열 폭(±3)으로, 잠재력은 ±`POTENTIAL_MARGIN.adapting`
+구간으로만 선다. 참값은 언제나 그 구간 안에 있다 — 안개는 흐릴 뿐 거짓말하지 않는다.
+데려와 뛰게 해야 좁아지는 것도 우리 선수와 같다.
+
+후보 줄이 서는 곳은 셋이다 — GM 스냅샷의 오프시즌 블록(아래) · 스쿼드 화면 · `get_squad`.
+셋 다 소집일이 지나면 사라진다.
+
 ### 오프시즌 — 은퇴와 시상이 장면으로 가는 길
 
 전환이 남기는 은퇴는 원장 한 줄이고(`TRANSFER.type = "retire"`, `toTeamId = null`),
 시상은 방금 매긴 사실 카드다. 둘 다 **문장이 아니다.**
 
 `buildGmStateNote`가 **선수단 소집 전**(§4 여름 휴가 구간)에만 오프시즌 블록을
-세운다 — 우리 팀 은퇴 줄과, 방금 끝난 시즌의 시상 중 우리 리그의 것. 소집일이 지나면
-블록은 사라진다: 오프시즌의 자리는 오프시즌에 있다.
+세운다 — 우리 팀 은퇴 줄과, 방금 끝난 시즌의 시상 중 우리 리그의 것, 그리고 **아직
+답하지 않은 유스 후보**. 소집일이 지나면 블록은 사라진다: 오프시즌의 자리는 오프시즌에
+있다. 후보 줄이 사라지는 날과 블록이 사라지는 날이 같은 것은 우연이 아니다 — 둘 다
+소집일이 경계다.
 
 은퇴 줄은 **명부**(`state.retired`)에서 나온다. 원장 줄(`TRANSFER`)만으로는 세울 수
 없다 — 그 사람은 이미 `state.players`에 없어 이름도 나이도 id로 되찾지 못한다.
@@ -932,20 +1022,21 @@ id·이름·생일·주 포지션·마지막 팀·날짜·시즌·사유. 통산
 
 ## 코드 위치
 
-| 무엇                                | 어디                                                                                                 |
-| ----------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| 시즌 달력·리그 편성                 | `packages/engine/src/competition/calendar.ts` · `fixtures.ts`                                        |
-| 2군 리그 편성·간이 시뮬             | `packages/engine/src/competition/reserve.ts`                                                         |
-| 국내 컵 · 연장·승부차기 · 리그 연기 | `competition/domestic-cup.ts` · `extra-time.ts` · `shootout.ts` · `reschedule.ts`                    |
-| 유럽 대항전                         | `competition/europe.ts` · `euro-knockout.ts` · `euro-prize.ts`                                       |
-| 추첨 일정                           | `competition/draw-schedule.ts`                                                                       |
-| 시즌 리뷰·전환·승강                 | `competition/season.ts` · `competition/promotion.ts`                                                 |
-| 시상 선정·동점 처리                 | `competition/season.ts` (`seasonAwards`)                                                             |
-| 은퇴 판정·예고·명부                 | `competition/season.ts` (`retirementVerdict`·`declareRetirements`·`withdrawRetirement`)              |
-| 마지막 홈경기 회견                  | `packages/engine/src/club/press.ts` (`farewell`)                                                     |
-| 오프시즌 사실 블록(은퇴·시상)       | `packages/agents/src/gm-input.ts`                                                                    |
-| 2군 훈련 방침                       | `domain/records.ts` (코드) · `squad/training-plan.ts` (축 묶음·배율) · `squad/development.ts` (적용) |
-| tick·시간 진행                      | `packages/engine/src/core/tick.ts` · `core/dates.ts`                                                 |
-| 훈련 계획·결산                      | `packages/engine/src/squad/training-plan.ts` · `training-report.ts`                                  |
-| 온보딩                              | `packages/engine/src/world/onboarding.ts`                                                            |
-| 온보딩 화면(리그→팀→감독 단계)      | `apps/web/app/new/page.tsx`                                                                          |
+| 무엇                                | 어디                                                                                                                   |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 시즌 달력·리그 편성                 | `packages/engine/src/competition/calendar.ts` · `fixtures.ts`                                                          |
+| 2군 리그 편성·간이 시뮬             | `packages/engine/src/competition/reserve.ts`                                                                           |
+| 국내 컵 · 연장·승부차기 · 리그 연기 | `competition/domestic-cup.ts` · `extra-time.ts` · `shootout.ts` · `reschedule.ts`                                      |
+| 유럽 대항전                         | `competition/europe.ts` · `euro-knockout.ts` · `euro-prize.ts`                                                         |
+| 추첨 일정                           | `competition/draw-schedule.ts`                                                                                         |
+| 시즌 리뷰·전환·승강                 | `competition/season.ts` · `competition/promotion.ts`                                                                   |
+| 시상 선정·동점 처리                 | `competition/season.ts` (`seasonAwards`)                                                                               |
+| 은퇴 판정·예고·명부                 | `competition/season.ts` (`retirementVerdict`·`declareRetirements`·`withdrawRetirement`)                                |
+| 유스 인테이크 — 후보·결정·기본값    | `competition/season.ts` (`youthIntakeOf`·`standYouthCandidates`·`settleYouthIntake`) · `skills/index.ts` (`signYouth`) |
+| 마지막 홈경기 회견                  | `packages/engine/src/club/press.ts` (`farewell`)                                                                       |
+| 오프시즌 사실 블록(은퇴·시상·유스)  | `packages/agents/src/gm-input.ts`                                                                                      |
+| 2군 훈련 방침                       | `domain/records.ts` (코드) · `squad/training-plan.ts` (축 묶음·배율) · `squad/development.ts` (적용)                   |
+| tick·시간 진행                      | `packages/engine/src/core/tick.ts` · `core/dates.ts`                                                                   |
+| 훈련 계획·결산                      | `packages/engine/src/squad/training-plan.ts` · `training-report.ts`                                                    |
+| 온보딩                              | `packages/engine/src/world/onboarding.ts`                                                                              |
+| 온보딩 화면(리그→팀→감독 단계)      | `apps/web/app/new/page.tsx`                                                                                            |
