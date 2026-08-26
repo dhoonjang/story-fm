@@ -130,10 +130,12 @@ export function describePersona(entry: CharacterEntry): string {
     ...(entry.motivation ? [`동기: ${entry.motivation}`] : []),
     ...(entry.speechStyle ? [`말투: ${entry.speechStyle.note}`] : []),
     ...(entry.speechStyle?.samples ?? []).map((s) => `  예) ${s}`),
-    // 관계 초기값 — 원형에서 파생한 첫인상이다 (people.md §6). 그 뒤의 일은 기억이 갖는다
-    ...(entry.relations ?? []).map(
-      (r) =>
-        `관계: ${r.name} — ${r.stance === "aligned" ? "결이 맞는다" : "결이 부딪힌다"} (먼저 보는 것: 나 ${r.ours} · 상대 ${r.theirs})`,
+    // 관계 — 원형에서 파생한 첫인상(people.md §6)과 감독이 세운 사이(§5-3). 그 뒤의 일은 기억이 갖는다
+    ...(entry.relations ?? []).map((r) =>
+      // 감독이 붙여 준 사이에는 원형 축이 없다 — 그 자리에 섰다는 사실 하나가 근거다
+      r.bond
+        ? `관계: ${r.name} — 감독이 붙여 준 사이 (내가 ${r.bond === "mentor" ? "멘토" : "멘티"})`
+        : `관계: ${r.name} — ${r.stance === "aligned" ? "결이 맞는다" : "결이 부딪힌다"} (먼저 보는 것: 나 ${r.ours} · 상대 ${r.theirs})`,
     ),
     // 감독이 아는 만큼만 그린다 — 소문으로만 아는 사람에게 속내를 주면 만난 적 없는
     // 사람의 목소리가 난다. 사실로 적는다: 카드의 지시문은 모델이 그 문장대로 쓴다

@@ -4,7 +4,7 @@ import {
   PLAYER_ARCHETYPE_LABEL,
   SQUAD_STATUS_KO,
 } from "@story-fm/domain";
-import type { MilestoneCode } from "@story-fm/domain";
+import type { MentoringEnd, MilestoneCode } from "@story-fm/domain";
 import type { MoodFact, MoodRead } from "@story-fm/engine";
 
 /**
@@ -141,6 +141,42 @@ const FORM_SENTENCE: Record<Extract<MoodFact, { cause: "form" }>["label"], strin
   바닥: "경기력이 바닥이라 스스로도 어쩔 줄 모른다",
 };
 
+/**
+ * 사이가 끝난 마음 — **사유가 무엇을 말할지 정한다** (people.md §5-3).
+ * 감독이 푼 것과 그 사람이 팀을 떠난 것은 라커룸에서 같은 말이 아니고, 멘토가
+ * 잃은 것과 멘티가 잃은 것도 같지 않다.
+ */
+const MENTORING_END_SENTENCE: Record<MentoringEnd, Record<"mentor" | "mentee", string>> = {
+  manager: {
+    mentor: "감독이 짝을 풀어 이제 그를 맡지 않는다",
+    mentee: "감독이 짝을 풀어 기댈 선배가 없어졌다",
+  },
+  departure: {
+    mentor: "챙기던 아이가 팀을 떠났다",
+    mentee: "따르던 선배가 팀을 떠나 빈자리가 크다",
+  },
+  squad: {
+    mentor: "2군으로 내려가면서 챙기던 아이와 아침이 갈렸다",
+    mentee: "따르던 선배가 2군으로 내려가 아침이 갈렸다",
+  },
+  age: {
+    mentor: "데리고 다니던 아이가 다 커서 손을 뗐다",
+    mentee: "이제 배울 만큼 배웠다 — 혼자 서는 자리다",
+  },
+};
+
+/** 감독이 붙여 준 사이 — 선 자리와 끝났는지가 넷으로 갈린다 (people.md §5-3) */
+function mentoringSentence(fact: Extract<MoodFact, { cause: "mentoring" }>): string {
+  if (fact.ended !== undefined) {
+    return `${dayWord(fact.days)} ${fact.name}과(와)의 사이가 끝났다 — ${MENTORING_END_SENTENCE[fact.ended][fact.side]}`;
+  }
+  if (fact.side === "mentee") return `${fact.name}에게 붙어 배우는 중이다 (${fact.days}일째)`;
+  // 몇을 데리고 있는지는 하나를 넘을 때만 — 한 명이면 이름이 이미 그 수다
+  return fact.count !== undefined && fact.count > 1
+    ? `${fact.name}을(를) 비롯해 ${fact.count}명을 뒤에서 챙기고 있다`
+    : `${fact.name}을(를) 뒤에서 챙기고 있다 (${fact.days}일째)`;
+}
+
 /** 카드 한 장 → 한 마디 */
 function sentenceOf(fact: MoodFact): string {
   switch (fact.cause) {
@@ -233,6 +269,8 @@ function sentenceOf(fact: MoodFact): string {
         ? `${fact.number}번을 새로 달았다`
         : `${fact.after.name}이(가) ${fact.after.seasons}시즌 달던 ${fact.number}번을 ` +
             `${fact.after.since}시즌 만에 물려받았다`;
+    case "mentoring":
+      return mentoringSentence(fact);
     case "young":
       return "아직 어리고 배울 게 많다";
     case "steady":

@@ -1,5 +1,6 @@
 import type { Persona, PersonaRelation } from "@story-fm/domain";
-import type { GameState } from "../core/state";
+import { playerById, playersOf, type GameState } from "../core/state";
+import { activeMentorings } from "../squad/mentoring";
 import { headCoachOf, ownerOf, reportersOf } from "./persona";
 
 /**
@@ -117,6 +118,35 @@ export function personaRelations(state: GameState, characterId: string): Persona
     const stance = stanceOf(ours, theirs);
     if (stance === undefined) continue;
     relations.push({ characterId: other.characterId, name: other.name, stance, ours, theirs });
+  }
+  return relations;
+}
+
+/**
+ * **감독이 세운 사이** — 서 있는 멘토링만 (people.md §5-3).
+ *
+ * `personaRelations`와 갈라져 있는 것은 근거가 다르기 때문이다. 저쪽은 원형 축에서
+ * 뽑힌 첫인상이고 이쪽은 **감독이 그렇게 정했다**는 사실 하나라, `ours`·`theirs`가
+ * 서지 않는다 — 선수에게는 결을 뽑을 원형 표가 없고 멘토링은 그 표를 필요로 하지도
+ * 않는다. 선수에게 관계가 서는 첫 자리다.
+ *
+ * `characterId`는 선수의 경우 **이름**이므로(`personaFrom`) 우리 선수단에서 이름으로
+ * 찾는다. 순서는 장부 순이라 세이브를 다시 열어도 같다.
+ *
+ * ⚠️ **날짜도 수치도 싣지 않는다** — 카드는 이력에 굳으므로(§6) 변하는 값이 들어가면
+ * 3주 전 카드가 오늘의 사실인 척한다. 며칠째인가는 사실 카드가 매 턴 새로 낸다.
+ */
+export function mentoringRelations(state: GameState, characterId: string): PersonaRelation[] {
+  const self = playersOf(state, state.userTeamId).find((p) => p.name === characterId);
+  if (!self) return [];
+
+  const relations: PersonaRelation[] = [];
+  for (const pair of activeMentorings(state)) {
+    const bond = pair.mentorId === self.id ? "mentor" : pair.menteeId === self.id ? "mentee" : null;
+    if (bond === null) continue;
+    const other = playerById(state, bond === "mentor" ? pair.menteeId : pair.mentorId);
+    if (!other) continue;
+    relations.push({ characterId: other.name, name: other.name, stance: "aligned", bond });
   }
   return relations;
 }
