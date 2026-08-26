@@ -635,8 +635,22 @@ function fuzzMoney(state: GameState, key: string, value: number, margin: number)
  * 갈리면, 어느 한쪽이 안개를 뚫는다 (docs/data/player.md §10).
  */
 export function observedMarketValue(state: GameState, player: GamePlayer): number {
-  const margin = ODDS_MARGIN[knowledgeOf(state, player.id)];
-  return fuzzMoney(state, `mv:${player.id}`, marketValueOf(state, player), margin);
+  return observedMarketValueAt(state, player, knowledgeOf(state, player.id));
+}
+
+/**
+ * **지식 수준을 지정한** 관측 시장가 — 스카우트 임무가 「다녀온 뒤의 눈금」으로
+ * 예산 조건을 거를 때 쓴다 (player.md §9.4).
+ *
+ * 고를 때와 보일 때의 눈금이 갈리면 「£10M 이하로 찾아 와」의 답에 £20M짜리가 서고,
+ * 감독은 임무가 조건을 무시했다고 읽는다.
+ */
+export function observedMarketValueAt(
+  state: GameState,
+  player: GamePlayer,
+  knowledge: Knowledge,
+): number {
+  return fuzzMoney(state, `mv:${player.id}`, marketValueOf(state, player), ODDS_MARGIN[knowledge]);
 }
 
 /**
