@@ -771,9 +771,9 @@ export interface GameState {
    */
   managerOffers?: ManagerOffer[];
   /**
-   * **공석 명부** — AI 구단이 감독을 자른 자리, 무직인 동안만 쌓인다
-   * (career.md §5.1). 무직 감독이 먼저 지원하는(`apply_manager_job`) 문이고,
-   * 14일 뒤 지워진다. 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
+   * **공석 명부** — AI 구단이 감독을 자른 자리 (career.md §5.1). 감독이 먼저
+   * 지원하는(`apply_manager_job`) 문이고, 재직 중에도 쌓이며 14일 뒤 지워진다.
+   * 옛 세이브엔 없다 (optional — SAVE_VERSION 유지).
    */
   managerVacancies?: ManagerVacancy[];
   /**

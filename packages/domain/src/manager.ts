@@ -399,8 +399,9 @@ export type ManagerOffer = z.infer<typeof ManagerOfferSchema>;
 /**
  * **공석 명부의 한 줄** — AI 구단이 감독을 자른 자리 (career.md §5.1).
  *
- * 무직인 동안만 쌓이고 14일 뒤 지워진다. 무직 감독이 먼저 지원(`apply_manager_job`)
- * 할 수 있는 문이다. 옛 세이브엔 없다 (optional — 세이브 버전 유지).
+ * 재직 중에도 쌓이고 14일 뒤 지워진다. 감독이 먼저 지원(`apply_manager_job`)할 수
+ * 있는 문이고, 재직 중에 두드리면 보드 평판이 깎인다. 옛 세이브엔 없다 (optional —
+ * 세이브 버전 유지).
  */
 export const ManagerVacancySchema = z.object({
   teamId: z.string().min(1),
