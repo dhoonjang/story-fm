@@ -7,6 +7,7 @@ import type {
 } from "@story-fm/domain";
 import {
   MAX_PAYMENT_YEARS,
+  PRECONTRACT_DAYS,
   SQUAD_STATUS_KO,
   SYMBOLIC_NUMBERS,
   ageOf,
@@ -17,7 +18,7 @@ import {
   squadStatusRank,
   type NumberWish,
 } from "@story-fm/domain";
-import { diffDays, windowOpenOn } from "../competition/calendar";
+import { buildSeasonCalendar, diffDays, windowOpenOn } from "../competition/calendar";
 import { claimLabel, evaluatePitch } from "./persuasion";
 import { isMarketOnlyLeague, leagueCatalogById } from "../data/league-catalog";
 import { leagueEconomyLevel } from "../data/league-economy";
@@ -39,6 +40,7 @@ import {
   financeOf,
   interestsOn,
   openFinanceDemand,
+  pendingContractOf,
   playerById,
   squadShortfall,
   teamName,
@@ -593,6 +595,77 @@ export function observedMarketValue(state: GameState, player: GamePlayer): numbe
  * 여기에 **인내심 감쇠**(같은 조건 반복)가 곱해진다. `factors`가 그 분해다 —
  * 확률만 주면 LLM이 "왜"를 지어내므로 근거를 함께 준다.
  */
+// ── 사전 계약 — 반년 앞의 시장 (transfer.md §1-4) ────────
+
+/**
+ * 그 선수가 **사전 계약 창 안에 있는가** — 남은 일수, 아니면 null
+ * (→ docs/simulation/transfer.md §1-4).
+ *
+ * 창을 여는 것은 이적창이 아니라 **계약의 만료일**이다. 계약은 어느 문으로 들어왔든
+ * 6월 30일에 끝나므로(§5-1) 이 창은 12월 말에 열려 만료일에 닫힌다.
+ *
+ * **활성 계약이 있어야 한다** — 이미 끝난 계약은 무소속 영입(§6)이지 예약이 아니고,
+ * 만료 당일(잔여 0일)은 아직 남의 선수이므로 창 안이다.
+ */
+export function precontractDaysLeft(state: GameState, playerId: string): number | null {
+  const contract = activeContract(state, playerId);
+  if (!contract) return null;
+  const days = diffDays(state.date, contract.until);
+  if (days < 0 || days > PRECONTRACT_DAYS) return null;
+  return days;
+}
+
+/**
+ * **이 조건이 사전 계약인가** (§1-4) — 감독이 고르는 갈래가 아니라 조건이 정하는
+ * 성격이다. 셋이 함께 서야 한다: 남의 **클럽** 선수 · 창 안 · 이적료 0.
+ *
+ * 갈래가 영입(`buy`)이 아니면 서지 않는다 — 임대·매각·재계약에는 예약할 것이 없다.
+ */
+export function isPrecontractTerms(state: GameState, terms: DealTerms): boolean {
+  if (terms.kind !== undefined && terms.kind !== "buy") return false;
+  if (terms.fee > 0) return false;
+  const player = playerById(state, terms.playerId);
+  if (!player) return false;
+  return isPrecontractTarget(state, player);
+}
+
+/** 그 선수가 사전 계약의 대상이 될 수 있는가 — 남의 클럽 소속이고 창 안이다 */
+export function isPrecontractTarget(state: GameState, player: GamePlayer): boolean {
+  if (player.teamId === state.userTeamId) return false;
+  if (!isClubTeam(player.teamId)) return false;
+  return precontractDaysLeft(state, player.id) !== null;
+}
+
+/**
+ * 사전 계약의 **발효일** — 다음 시즌의 프리시즌 시작일(7월 1일)이다 (§1-4·§5-1).
+ *
+ * 모든 계약이 6월 30일에 끝나므로 이 날과 옛 계약의 만료일 사이에는 틈도 겹침도
+ * 없다. 연수를 세는 기준도 계약일이 아니라 이 날이다.
+ */
+export function precontractStartOf(state: GameState): string {
+  return buildSeasonCalendar(state.season + 1).preseasonStart;
+}
+
+/**
+ * 예약을 막는 사실 — 있으면 그 문장, 없으면 null (§1-4).
+ *
+ * 확률로 재는 것이 아니라 **가능한가**를 재는 자리라 `dealOdds`의 blocker와
+ * `runAiPrecontracts`의 후보 거르기가 같은 함수를 읽는다: 두 벌이 되면 감독에게는
+ * 막힌 자리를 AI는 통과한다.
+ */
+export function precontractBlockerOf(state: GameState, player: GamePlayer): string | null {
+  const pending = pendingContractOf(state, player.id);
+  if (pending) {
+    return pending.teamId === state.userTeamId
+      ? `${player.name}과는 이미 사전 계약을 맺었습니다`
+      : `${player.name}은(는) 이미 ${teamName(pending.teamId)}와 사전 계약을 맺었습니다`;
+  }
+  if (player.state.retiringAfterSeason) {
+    return `${player.name}은(는) 이번 시즌 뒤 은퇴를 예고했습니다`;
+  }
+  return null;
+}
+
 export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
   const player = playerById(state, terms.playerId);
   const knowledge = player ? knowledgeOf(state, terms.playerId) : "rumoured";
