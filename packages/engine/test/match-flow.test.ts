@@ -646,7 +646,7 @@ describe("회귀: 장기 시즌 안정성", () => {
       position: a.position,
     }));
     expect(setLineup(state, { starting: lineup }).ok).toBe(true);
-  }, 90_000);
+  });
 
   it("대량 은퇴 시즌에도 유스 id가 충돌하지 않는다", () => {
     const state = createTestGame(7);

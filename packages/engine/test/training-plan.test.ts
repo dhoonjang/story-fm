@@ -388,6 +388,9 @@ describe("훈련 비우기 — 쉬는 날은 상태로 남는다", () => {
  * 셋 다 "컵 대진이 붙은 뒤의 달력"을 봐야 해서 시즌을 겨울까지 밀어야 하는데,
  * 예전엔 각자 제 세이브를 굴려 같은 아홉 달을 세 번 지났다. 보는 시점은 다르지만
  * 지나는 길은 하나다 — 한 번 굴리면서 각자의 시점에 위반을 모아 둔다.
+ *
+ * 270일을 하루씩 도는 값은 먼저 부른 케이스가 다 문다(분 단위다). 그래도 상한을
+ * 따로 걸지 않는다 — 재는 것은 마이크로사이클이지 속도가 아니다 (vitest.config.ts).
  */
 interface SeasonSweep {
   /** 리그컵 1라운드 — 경기 **전날**에 본 마이크로사이클 */
@@ -449,7 +452,7 @@ describe("일정이 바뀌면 훈련도 따라 바뀐다", () => {
     const { eflcup } = seasonSweep();
     expect(eflcup.date, "리그컵 1라운드 대진을 찾지 못했다").not.toBe("");
     expect(eflcup.violations).toEqual([]);
-  }, 120_000);
+  });
 
   it("한참 뒤에 잡힌 대진도 추첨된 그날 바로 반영된다", () => {
     // FA컵 1라운드는 12월 초에 추첨돼 1월에 열린다 — 3주 창으로는 못 잡는 간격이다
@@ -457,13 +460,13 @@ describe("일정이 바뀌면 훈련도 따라 바뀐다", () => {
     expect(facup.date, "FA컵 1라운드 대진을 찾지 못했다").not.toBe("");
     expect(facup.gap, "추첨과 경기가 3주 안이면 이 테스트가 무의미하다").toBeGreaterThan(21);
     expect(facup.violations).toEqual([]);
-  }, 120_000);
+  });
 
   it("시즌 어느 시점에 멈춰도 남은 경기 전부가 사이클을 지킨다", () => {
     const { sweep } = seasonSweep();
     expect(sweep.violations).toEqual([]);
     expect(sweep.checked, "검사한 경기가 없다").toBeGreaterThan(50);
-  }, 120_000);
+  });
 
   it("경기가 연기되면 옮겨 간 날에 사이클이 새로 선다", () => {
     const state = createTestGame(7);
@@ -493,7 +496,7 @@ describe("일정이 바뀌면 훈련도 따라 바뀐다", () => {
     expect(trainingOn(state, emptied), `${emptied}: 경기가 빠졌으면 훈련이 돌아온다`).not.toEqual(
       [],
     );
-  }, 60_000);
+  });
 });
 
 describe("기본 훈련의 대조는 이름이 아니라 id로 한다", () => {
