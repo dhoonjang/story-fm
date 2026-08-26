@@ -34,6 +34,7 @@ import {
   PressLeakSchema,
   ReserveTrainingPolicySchema,
   RetiredPlayerSchema,
+  YouthCandidateSchema,
   RoleMemorySchema,
   ScheduleEntrySchema,
   ScoutReportSchema,
@@ -139,6 +140,7 @@ export const SaveSchema = z
     awards: z.array(SeasonAwardSchema).optional(),
     milestones: z.array(MilestoneSchema).optional(),
     retired: z.array(RetiredPlayerSchema).optional(),
+    youthCandidates: z.array(YouthCandidateSchema).optional(),
     trainingReports: z.array(TrainingReportSchema).optional(),
     reserveTraining: ReserveTrainingPolicySchema.optional(),
   })

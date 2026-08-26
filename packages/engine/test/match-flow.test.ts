@@ -24,6 +24,7 @@ import {
   refreshPacket,
   saveGame,
   setLineup,
+  settleYouthIntake,
   setRegionalPlan,
   setPlayerInstruction,
   setPlayerTactic,
@@ -622,7 +623,15 @@ describe("회귀: 장기 시즌 안정성", () => {
      * 백예순이든 같은 코드를 지난다 (전체 세계로는 이 한 케이스가 12초를 썼다).
      */
     const state = createMiniGame(42);
-    for (let s = 0; s < 17; s++) transitionSeason(state);
+    for (let s = 0; s < 17; s++) {
+      transitionSeason(state);
+      /**
+       * **인테이크 정리를 함께 굴린다** — 전환은 우리 팀에 후보를 세울 뿐이고 계약은
+       * 소집일이 쓴다 (season.md §6). 빼면 감독 팀만 열일곱 여름 동안 아무도 받지
+       * 못해, 재는 것이 골키퍼의 수지가 아니라 그 한 구단의 고갈이 된다.
+       */
+      settleYouthIntake(state, []);
+    }
     expect(userPlayers(state).length).toBeGreaterThan(0);
     for (const team of state.teams) {
       if (!isClubTeam(team.id)) continue; // 무소속은 클럽이 아니다
@@ -646,7 +655,9 @@ describe("회귀: 장기 시즌 안정성", () => {
       if (p) p.birthdate = "1990-01-01"; // 동시 은퇴 유도
     }
     transitionSeason(state);
+    settleYouthIntake(state, []);
     transitionSeason(state);
+    settleYouthIntake(state, []);
     for (const team of state.teams) {
       const ids = state.players.filter((p) => p.teamId === team.id).map((p) => p.id);
       expect(ids.filter((id, i) => ids.indexOf(id) !== i)).toHaveLength(0);

@@ -21,6 +21,7 @@ export const SKILL_LABEL: Record<string, string> = {
   set_development_focus: "집중 육성",
   set_mentor: "멘토링",
   set_reserve_training: "2군 훈련 방침",
+  sign_youth: "유스 첫 계약",
   set_tactics: "팀 전술 변경",
   set_player_tactic: "선수 전술",
   set_set_piece_takers: "세트피스 키커",

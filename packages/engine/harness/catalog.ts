@@ -314,6 +314,9 @@ export const SQUAD_LONGEVITY = defineHarness({
     { metric: "리그 1군 상위 15 잠재력 — 시작", role: "measure", unit: "score", why: "체급의 천장 — 종합과 함께 읽어야 드리프트의 원인이 갈린다" },
     { metric: "리그 1군 상위 15 잠재력 — 15시즌 뒤", role: "measure", unit: "score", why: "같은 자로 잰 도착선" },
     { metric: "시즌당 잠재력 드리프트", role: "measure", unit: "score", why: "천장 자체가 움직였는가 — 종합만 내려가면 성장이 못 닿은 것이고, 함께 내려가면 여름마다 세계가 건네는 사람이 얇아진 것이다" },
+    { metric: "후보가 서지 않은 여름", role: "guard", max: 0, unit: "count", why: "인테이크는 후보가 서야 사건이다 (season.md §6) — 한 여름이라도 비면 그해 감독에게는 고를 것이 없고, 코어가 채우는 기본값마저 서지 않는다" },
+    { metric: "우리 인테이크 후보 — 여름 평균", role: "measure", unit: "count", why: "감독 앞에 선 후보 수 — 코어가 채울 수 위에 체급·아카데미 활용도가 얹은 여지" },
+    { metric: "우리 인테이크 계약 — 여름 평균", role: "measure", unit: "count", why: "그중 실제로 계약한 수. 이 하네스는 답하지 않는 감독이라 곧 **기본값**이고, 위 줄과의 차가 감독이 고를 수 있었던 폭이다" },
   ],
 });
 
@@ -349,6 +352,10 @@ export const YOUTH_DEVELOPMENT = defineHarness({
     { metric: "성실한 U21 표본", role: "guard", min: 20, unit: "count", why: "아래 줄의 분모 — 배율 없는 타 팀 2군 U21 중 `professionalism` ≥ 1.1. 표본이 줄면 격차가 아니라 잡음이다" },
     { metric: "게으른 U21 표본", role: "guard", min: 20, unit: "count", why: "같은 줄의 반대쪽 — `professionalism` ≤ 0.95" },
     { metric: "직업의식 격차", role: "reference", min: 0, unit: "score", why: "성실 − 게으름. 배율이 없는 표본이라 남는 차이는 원형뿐이다 — 0 이하면 계수가 세계에 닿지 않았다 (people.md §6)" },
+    { metric: "아카데미 활용도", role: "guard", min: 0.3, max: 1, unit: "ratio", why: "그 시즌 우리 2군 출전 중 21세 이하의 몫 (season.md §6) — 다음 여름 인테이크의 수와 여지가 여기서 나온다. 하한은 '2군이 유망주의 자리로 돌아가고 있다'를 가르는 자리다: 그 아래면 2군이 늙은 백업의 대기실이라는 뜻이고, 그러면 아래 두 줄이 재는 것이 감독의 선택이 아니라 그 사실 하나가 된다" },
+    { metric: "다음 여름 유스 후보", role: "guard", min: 3, unit: "count", why: "감독 앞에 선 후보 수 — 고를 것이 한둘이면 인테이크는 결정이 아니라 통보다" },
+    { metric: "유스 후보 잠재력 여지 — 평균", role: "reference", min: 10, max: 32, unit: "score", why: "후보의 `potential − overall` 평균. 아래끝은 `YOUTH_UPSIDE.min`(10)이고 위끝은 활용도가 만점일 때의 상단(26+6)이라, 밴드를 벗어나면 여지의 공식이나 활용도 항이 어긋난 것이다" },
+    { metric: "유스 후보 잠재력 여지 — 최대", role: "measure", unit: "score", why: "그해 인테이크에 진짜 물건이 섞였는가 — 유스의 매력은 지금 실력이 아니라 이 꼬리다" },
   ],
 });
 

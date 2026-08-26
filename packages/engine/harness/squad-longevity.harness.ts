@@ -11,6 +11,7 @@ import {
   isClubTeam,
   leagueOfTeamIn,
   playersOf,
+  settleYouthIntake,
   transitionSeason,
 } from "@story-fm/engine";
 import type { GameState } from "@story-fm/engine";
@@ -62,6 +63,10 @@ describe("15시즌을 전환한 뒤의 스쿼드", () => {
   it("시드 42", () => {
     const state = createTestGame(42);
     const before = leagueTopMean(state);
+    /** 여름마다 우리 앞에 선 후보와 그중 실제로 계약한 수 — 인테이크가 마르지 않는가 */
+    const candidatesPerSummer: number[] = [];
+    const signedPerSummer: number[] = [];
+    let summersWithoutCandidates = 0;
     for (let s = 0; s < SEASONS; s++) {
       /**
        * **자라고 늙는 열두 달을 함께 굴린다** — 전환만 되풀이하면 능력치가 한 칸도
@@ -80,6 +85,17 @@ describe("15시즌을 전환한 뒤의 스쿼드", () => {
        */
       declareRetirements(state, []);
       transitionSeason(state);
+      /**
+       * **인테이크 정리도 함께 굴린다** — 전환은 우리 팀에 후보를 세울 뿐이고 계약은
+       * 소집일이 쓴다 (season.md §6). 빼면 감독 팀만 열다섯 여름 동안 신인을 한 명도
+       * 받지 못해, 재는 것이 세계의 수지가 아니라 그 한 구단의 고갈이 된다.
+       */
+      const stood = (state.youthCandidates ?? []).length;
+      if (stood === 0) summersWithoutCandidates += 1;
+      candidatesPerSummer.push(stood);
+      const sizeBefore = playersOf(state, state.userTeamId).length;
+      settleYouthIntake(state, []);
+      signedPerSummer.push(playersOf(state, state.userTeamId).length - sizeBefore);
     }
     const after = leagueTopMean(state);
 
@@ -126,6 +142,9 @@ describe("15시즌을 전환한 뒤의 스쿼드", () => {
       "리그 1군 상위 15 잠재력 — 시작": before.potential,
       "리그 1군 상위 15 잠재력 — 15시즌 뒤": after.potential,
       "시즌당 잠재력 드리프트": (after.potential - before.potential) / SEASONS,
+      "후보가 서지 않은 여름": summersWithoutCandidates,
+      "우리 인테이크 후보 — 여름 평균": mean(candidatesPerSummer),
+      "우리 인테이크 계약 — 여름 평균": mean(signedPerSummer),
     };
     console.log(reportOf(SQUAD_LONGEVITY, readings, `시드 42 · ${SEASONS}시즌 · ${state.date}`));
     expect(outOfBand(SQUAD_LONGEVITY, readings)).toEqual([]);

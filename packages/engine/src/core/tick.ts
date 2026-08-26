@@ -102,6 +102,8 @@ import { grantManagerXP, settleTactics } from "../skills";
 import {
   allMatchesDone,
   declareRetirements,
+  settleYouthIntake,
+  youthIntakeDeadline,
   endSeason,
   retirementDeclarationDate,
 } from "../competition/season";
@@ -484,6 +486,17 @@ function dailyTick(
    * 뛰지는 않는다. 우리 팀 이름만 다이제스트에 선다.
    */
   if (state.date === retirementDeclarationDate(state.season)) declareRetirements(state, digest);
+
+  /**
+   * **유스 인테이크의 마감 — 선수단 소집일** (season.md §6).
+   *
+   * 날짜가 같은지가 아니라 **지났는지**를 묻는다: 조기 소집이 소집일 자체를 앞당기므로
+   * (`recallSquadEarly`) 그 하루를 놓치면 후보가 여름을 넘겨 남는다. 답하지 않은 감독의
+   * 몫은 코어가 옛 규칙대로 채운다 — 방치는 시간의 결과다.
+   */
+  if ((state.youthCandidates ?? []).length > 0 && state.date >= youthIntakeDeadline(state)) {
+    settleYouthIntake(state, digest);
+  }
 
   // 월초 정산 — 지난달 마감(재정 보고서) + 이번 달 정액 항목 (finance.ts).
   // 게임/시즌이 시작하는 7월 1일엔 tick이 돌지 않으므로 첫 tick에서 보정한다

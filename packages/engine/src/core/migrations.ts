@@ -67,6 +67,8 @@ const ARRAY_FIELDS = [
   "milestones",
   // 은퇴 명부 — 옛 세이브엔 없다 (season.md §6)
   "retired",
+  // 여름의 유스 후보 — 옛 세이브엔 없다 (season.md §6)
+  "youthCandidates",
   "trainingReports",
   // 약속 장부 — 옛 세이브엔 없다 (people.md §5-2)
   "promises",

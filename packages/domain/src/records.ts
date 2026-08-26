@@ -3,6 +3,7 @@ import { DateString } from "./date-string";
 import { MATCH_MINUTE_MAX } from "./match";
 import {
   AXIS_KO,
+  GamePlayerSchema,
   RetirementReasonSchema,
   SQUAD_NUMBER_MAX,
   type AttributeAxis,
@@ -415,6 +416,41 @@ export const RetiredPlayerSchema = z.object({
   reason: RetirementReasonSchema,
 });
 export type RetiredPlayer = z.infer<typeof RetiredPlayerSchema>;
+
+// ── 유스 인테이크 ─────────────────────────────────────
+/**
+ * **여름의 유스 후보** — 아직 계약하지 않은 아카데미 자원 한 줄 (season.md §6).
+ *
+ * 다른 기록 테이블과 결이 하나 다르다: **아직 세계에 없는 사람을 담는다.** 계약 전이라
+ * `state.players`에 넣을 수 없고(주급·명단·경기가 전부 따라붙는다), 그렇다고 뽑기만
+ * 남기고 필요할 때 다시 뽑으면 감독이 어제 본 아이가 오늘 다른 아이가 된다 — 그 사이에
+ * id·이름의 선점 집합이 움직이기 때문이다. 그래서 사람을 통째로 들고 있다가, 계약이
+ * 서는 자리에서 그대로 `state.players`로 옮긴다.
+ *
+ * ⚠️ **감독 팀의 후보만 담는다** — AI 구단은 전환이 그 자리에서 결정한다.
+ * 옛 세이브엔 없다 (빈 배열 — SAVE_VERSION 유지).
+ */
+export const YouthCandidateSchema = z.object({
+  /** 계약하면 그대로 명단에 서는 사람 — 후보 줄이 곧 그 선수다 */
+  player: GamePlayerSchema,
+  teamId: z.string().min(1),
+  /** 후보가 선 날 — 프리시즌 첫날(전환일) */
+  on: DateString,
+  /** 감독의 답을 기다리는 마지막 날 — 선수단 소집일 (`squadReturnOf`) */
+  deadline: DateString,
+  /**
+   * 첫 프로 계약의 조건 — **카드가 보이는 값과 계약이 서는 값이 같아야 한다.**
+   * 계약 시점에 다시 계산하면 그 사이 주급 총액이 움직인 만큼 감독이 본 숫자와 갈린다.
+   */
+  weeklyWage: z.number().min(0),
+  years: z.number().int().min(1),
+  /**
+   * 감독이 답하지 않으면 코어가 데려가는 자리인가 (season.md §6 「답하지 않으면」).
+   * 포지션군이 비는 자리가 앞에 서므로, 방치해도 골문이 마르지 않는다.
+   */
+  autoSign: z.boolean(),
+});
+export type YouthCandidate = z.infer<typeof YouthCandidateSchema>;
 
 // ── 지급 일정 ─────────────────────────────────────────
 /**
