@@ -8,6 +8,7 @@ import {
   buildTransferPress,
   declinePress,
   describePendingPress,
+  internationalBreaksOf,
   leagueOfTeamIn,
   fundTransferBudget,
   MANAGER_WALLET,
@@ -699,6 +700,93 @@ describe("기자회견 — 언론 유출은 다음 자리가 싣는다", () => {
     expect(conference.weight).toBe(1);
     // 버린 것도 비운다 — 우리 라커룸 밖의 불만이 장부에 눌러앉지 않는다
     expect(state.pressLeaks).toEqual([]);
+  });
+});
+
+/**
+ * **한 회견에 대표팀 카드는 하나다** (people.md §4 — 마일스톤과 같은 규약).
+ *
+ * 네 갈래를 다 실으면 그 자리가 소집 명단 낭독이 되는데, 화면에는 줄이 하나 더
+ * 늘어난 것으로만 보인다. 드문 순서(데뷔 > 낙마 > 복귀 > 소집)도 여기가 아니면
+ * 드러날 자리가 없다.
+ */
+describe("기자회견 — 대표팀 소집은 한 장만 선다", () => {
+  /** 그 시즌 첫 휴식기의 소집일로 판을 옮긴다 — 카드가 서는 창이 그날부터다 */
+  function atCallUpDay(state: GameState) {
+    const window = internationalBreaksOf(state.season)[0]!;
+    state.date = window.from;
+    return window;
+  }
+
+  it("데뷔가 소집을 이긴다 — 카드는 하나다", () => {
+    const state = newGame();
+    const window = atCallUpDay(state);
+    const [veteran, rookie] = userPlayers(state).slice(0, 2);
+    veteran!.state.caps = 62;
+    rookie!.state.caps = 0;
+    state.callUps = [
+      {
+        gamePlayerId: veteran!.id,
+        country: "ENG",
+        breakKey: window.key,
+        apps: 0,
+        goals: 0,
+        returnedOn: null,
+      },
+      {
+        gamePlayerId: rookie!.id,
+        country: "ENG",
+        breakKey: window.key,
+        apps: 0,
+        goals: 0,
+        returnedOn: null,
+        debut: true,
+      },
+    ];
+
+    const conference = fakeConference({ weight: 1 });
+    openPress(state, conference);
+
+    const cards = conference.facts.filter((f) => f.kind === "call-up");
+    expect(cards).toHaveLength(1);
+    expect(cards[0]!.data?.tags?.[0]).toBe("debut");
+    expect(cards[0]!.about).toBe(rookie!.id);
+  });
+
+  it("데뷔가 없으면 낙마가 선다 — 날 선 자리라 무게가 오른다", () => {
+    const state = newGame();
+    const window = atCallUpDay(state);
+    const previous = internationalBreaksOf(state.season - 1).at(-1)!;
+    const [dropped, kept] = userPlayers(state).slice(0, 2);
+    state.callUps = [
+      {
+        gamePlayerId: dropped!.id,
+        country: "ENG",
+        breakKey: previous.key,
+        apps: 2,
+        goals: 0,
+        returnedOn: previous.to,
+        returnState: "fit",
+      },
+      {
+        gamePlayerId: kept!.id,
+        country: "ENG",
+        breakKey: window.key,
+        apps: 0,
+        goals: 0,
+        returnedOn: null,
+      },
+    ];
+
+    const conference = fakeConference({ weight: 1 });
+    openPress(state, conference);
+
+    const cards = conference.facts.filter((f) => f.kind === "call-up");
+    expect(cards).toHaveLength(1);
+    expect(cards[0]!.data?.tags?.[0]).toBe("dropped");
+    expect(cards[0]!.about).toBe(dropped!.id);
+    expect(cards[0]!.sharp).toBe(true);
+    expect(conference.weight).toBeGreaterThanOrEqual(2);
   });
 });
 

@@ -260,6 +260,10 @@
 - 오프시즌 연출 — 은퇴는 1월 예고·마지막 홈경기·명부로 서지만 시상식의 자리가 없고,
   은퇴한 사람이 코치로 돌아오는 길도 없다(스태프가 실체가 없다)
   ([simulation/season.md](simulation/season.md) §6)
+- 대표팀 — A매치 휴식기의 소집·출전·복귀는 서지만(`competition/international.ts`)
+  **경기는 굴리지 않는다**: 예선 조 편성도 순위표도 대표팀 감독이라는 인물도 없고,
+  대표팀 활약이 몸값·라커룸 위계에 닿지도 않는다
+  ([data/competition.md](data/competition.md) §5-1·§8)
 - 자체 능력치 산정 — 실선수의 축은 전부 시드에서 파생하고, 실명·능력치의 라이선스
   부채가 그대로 남아 있다 ([data/sources.md](data/sources.md) §7)
 

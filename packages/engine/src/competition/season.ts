@@ -98,6 +98,7 @@ import {
   leagueSizeIn,
   teamsOfLeagueIn,
 } from "./promotion";
+import { applySummerTournament } from "./international";
 import { recomputeClubTiers } from "./club-tier-recompute";
 import { recordBreaksOf, type ClubRecordCode, type RecordBreak } from "./records";
 import { boardExpectationOfTier, tierOfTeamIn } from "../core/club-tier";
@@ -2008,6 +2009,16 @@ function applyTransition(state: GameState): string[] {
     windows,
     state.userTeamId,
   );
+  /**
+   * **여름 메이저 대회** — 짝수 해마다 하나 (→ [../data/competition.md](../data/competition.md) §5-1).
+   *
+   * 경기는 굴리지 않으므로 대회가 남기는 것은 「누가 늦게 오나」 하나다. 기본 훈련
+   * 배치보다 **먼저** 서야 한다: 늦게 오는 선수는 소집일부터 그 날짜까지 훈련장에
+   * 없고, 그 사실을 훈련·친선이 함께 읽는다.
+   * 소집 명단은 **전환이 끝난 스쿼드**로 세운다 — 은퇴·이적·승강이 다 지나간 뒤라야
+   * 그 선수가 실제로 새 시즌에 서는 사람이다.
+   */
+  applySummerTournament(state, nextSeason, squadReturnOf(nextCalendar), digest);
   state.trainingSessions = [];
   // 새 시즌 프리시즌도 기본 훈련으로 시작한다 — 감독의 지시는 시즌과 함께 지워진다
   installDefaultTraining(state);
