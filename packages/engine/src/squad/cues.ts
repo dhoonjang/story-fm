@@ -14,11 +14,11 @@ import { openSymbolicNumbers, type NumberLineage } from "./numbers";
 // 심경(mood)과 같은 문을 지난다 — 두 벌이면 같은 사이가 자리마다 다른 말로 선다
 import { mentoringReadOf } from "./mentoring";
 import { diffDays } from "../competition/calendar";
-import { pendingApproach } from "../club/approach";
 import { playerArchetypeOf } from "../world/player-persona";
 import {
   announcedInterestsOn,
   openInjury,
+  pendingApproach,
   playersOf,
   squadLevelOf,
   teamNameIn,

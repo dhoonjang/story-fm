@@ -18,6 +18,7 @@ import {
   APPROACH_AXES,
   APPROACH_CHANNEL_LABEL,
   APPROACH_LEAK_STEP,
+  APPROACH_PATIENCE_DAYS,
   approachContextText,
   approachTopStep,
   isIssueTopic,
@@ -29,8 +30,10 @@ import {
   financeOf,
   managedTeamId,
   openFinanceDemand,
+  pendingApproach,
   pendingContractOf,
   playerById,
+  pushApproach,
   pushNarrative,
   seasonStatOf,
   squadLevelOf,
@@ -49,7 +52,7 @@ import { leaderGroupOf, leaderRoleOf, leaderWeightOf } from "../squad/hierarchy"
 import { recentOutcomes } from "../squad/slump";
 import { agentForPlayer, ownerOf } from "../world/persona";
 import { relationPressureWeight } from "../world/relations";
-import { USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
+import { settleInterview, USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
 import {
   biggerSuitorsOf,
   CAREER_AGE_MOVE,
@@ -139,6 +142,12 @@ const DAILY_GAIN: Record<ApproachTopic, number> = {
    * 자라지도 않는다.
    */
   "season-review": 0,
+  /**
+   * **감독이 두드려 여는 자리다** (career.md §5.1) — `applyForManagerJob`이 문턱을
+   * 넘은 그 자리에서 직접 연다. 시즌 리뷰와 같은 이유로 0이고, 그쪽보다 한 겹 더
+   * 멀다: 무직인 동안에는 `tickApproaches` 자체가 돌지 않는다.
+   */
+  interview: 0,
 };
 
 /** 원인이 사라진 뒤 하루에 식는 양 — 쌓는 것보다 빠르다. 풀린 일은 곧 지나간 일이다 */
@@ -157,9 +166,6 @@ const STARTED_WINDOW = 7;
 /** 답하지 않은 자리가 남기는 압력 — 직전 임계의 몫. 무시가 다음 계단을 앞당긴다 */
 const IGNORE_CARRY = 0.75;
 
-/** 열린 자리가 답을 기다리는 날 — 이 뒤엔 감독이 지나친 것으로 닫힌다 */
-const APPROACH_PATIENCE_DAYS = 3;
-
 /** 같은 화자가 다시 오기까지 — 어제 감독실에 왔던 사람이 오늘 또 오지 않는다 */
 const SPEAKER_COOLDOWN_DAYS = 7;
 
@@ -175,9 +181,6 @@ const APPROACH_BAND = 3;
  * 않는다** (people.md §8). 선수 사다리가 5까지 오르는 것은 무게이지 파급이 아니다.
  */
 const BAND_STEP_CAP = 3;
-
-/** 상태에 남기는 지난 다가옴 수 — 그 뒤는 서사에만 남는다 (회견과 같은 규약) */
-const KEPT_APPROACHES = 20;
 
 /**
  * 시즌 리뷰 면담이 설 수 있는 창 — **프리시즌 시작일부터 이 날 수 안의 첫 하루**
@@ -237,6 +240,8 @@ const CHANNEL_OF: Record<ApproachTopic, ApproachChannel> = {
   morale: "captain",
   results: "owner",
   "season-review": "owner",
+  // 마주 앉은 것은 **그 구단의** 구단주다 — 자리는 `Approach.teamId`가 가리킨다
+  interview: "owner",
 };
 
 /** 이 주제의 압력이 사람에게 걸리는가 — 선수·에이전트 채널의 `subject`는 선수 id다 */
@@ -278,11 +283,6 @@ function rowOf(state: GameState, subject: string, topic: ApproachTopic): Approac
   const row: ApproachPressure = { subject, topic, value: 0, step: 0 };
   rows.push(row);
   return row;
-}
-
-/** 답을 기다리는 다가옴 — 언제나 하나뿐이다 */
-export function pendingApproach(state: GameState): Approach | null {
-  return (state.approaches ?? []).find((a) => a.status === "pending") ?? null;
 }
 
 // ── 오늘의 원인 ────────────────────────────────────────────────
@@ -910,10 +910,24 @@ export function tickApproaches(state: GameState, digest: string[]): boolean {
  */
 function contextTextOf(
   state: GameState,
-  a: { about: string | null; contextCard?: ApproachContext; context?: string },
+  a: {
+    about: string | null;
+    teamId?: string;
+    contextCard?: ApproachContext;
+    context?: string;
+  },
 ): string {
   if (!a.contextCard) return a.context ?? "";
-  const subject = a.about === null ? undefined : (playerById(state, a.about)?.name ?? undefined);
+  /**
+   * 자리의 주인 — 대개는 선수지만 **면접에서는 구단**이다 (career.md §5.1). 어느
+   * 쪽이든 이름은 코어만 아는 것이라 여기서 채운다.
+   */
+  const subject =
+    a.teamId !== undefined
+      ? teamNameIn(state, a.teamId)
+      : a.about === null
+        ? undefined
+        : (playerById(state, a.about)?.name ?? undefined);
   const form = a.contextCard.code === "dressing-room-form" ? firstTeamForm(state) : null;
   return approachContextText(a.contextCard, {
     ...(subject ? { subject } : {}),
@@ -1099,6 +1113,8 @@ const APPROACH_TOPIC_ORDER: Record<ApproachTopic, number> = {
   results: 13,
   // 압력 줄이 없어 이 표를 지나지 않는다 — 자리는 `openSeasonReview`가 직접 연다
   "season-review": 14,
+  // 같은 이유로 이 표 밖이다 — 자리는 `applyForManagerJob`이 직접 연다 (career.md §5.1)
+  interview: 15,
 };
 
 /**
@@ -1195,7 +1211,7 @@ function openApproach(state: GameState, digest: string[]): boolean {
       status: "pending",
     };
     row.openedOn = state.date;
-    state.approaches = [...opened, approach].slice(-KEPT_APPROACHES);
+    pushApproach(state, approach);
     const sceneLine = approachContextText(scene.contextCard, {
       ...(scene.about === null ? {} : { subject: playerById(state, scene.about)?.name ?? "" }),
       ...(scene.formLabel === undefined ? {} : { form: scene.formLabel }),
@@ -1393,7 +1409,7 @@ function openSeasonReview(state: GameState, digest: string[]): boolean {
     step: SEASON_REVIEW_STEP,
     status: "pending",
   };
-  state.approaches = [...opened, approach].slice(-KEPT_APPROACHES);
+  pushApproach(state, approach);
   const line = approachContextText(contextCard);
   digest.push(
     `${owner.characterId}(${APPROACH_CHANNEL_LABEL.owner})이(가) 감독을 찾아왔다 — ${line}`,
@@ -1414,6 +1430,16 @@ interface ApproachEffect {
   team: number;
 }
 
+/** 아무것도 옮기지 않은 자리 — 면접이 여기로 떨어진다 (career.md §5.1) */
+const NO_EFFECT: ApproachEffect = {
+  board: 0,
+  media: 0,
+  squad: 0,
+  target: 0,
+  targetName: null,
+  team: 0,
+};
+
 /**
  * 자리를 닫고 값을 치른다 — `stance`가 `null`이면 답하지 않은 것이다.
  *
@@ -1426,6 +1452,15 @@ function closeApproach(
   approach: Approach,
   stance: PressStance | null,
 ): ApproachEffect {
+  /**
+   * **면접은 아무 축도 옮기지 않는다** (career.md §5.1) — 감독은 아직 그 구단의
+   * 사람이 아니라 옮길 보드 평판이 없고, 오늘 처음 만난 사람과의 사이도 이 자리에서
+   * 서지 않는다. 이 답이 남기는 것은 제안이거나 닫힌 문이다.
+   *
+   * ⚠️ 스탠스 표를 태우고 폭을 0으로 두지 않는다 — 우리 구단주의 축이 걸린 표라,
+   * 폭 하나가 잘못 서면 남의 집 면접이 우리 보드 평판을 옮긴다.
+   */
+  if (approach.topic === "interview") return NO_EFFECT;
   const counterpart = relationCounterpartOf(state, approach);
   const effect = applyStanceOutcome(state, {
     row: stance === null ? IGNORED : stanceRow(stance),
@@ -1527,6 +1562,13 @@ export function respondToApproach(
   approach.status = stance === null ? "declined" : "answered";
 
   /**
+   * **면접은 평판이 아니라 제안으로 답한다** (career.md §5.1) — 스탠스를 코어 표가
+   * 읽어 조건을 세우거나 문을 닫는다. 여기서 끝나는 것은 이 자리가 라커룸에도
+   * 보드에도 닿지 않기 때문이다: 약속을 걸 선수도, 되돌릴 압력 줄도 없다.
+   */
+  if (approach.topic === "interview") return settleInterview(state, approach, stance);
+
+  /**
    * ── 약속은 **답을 닫은 뒤에** 장부에 선다 ── (people.md §5-2)
    *
    * **채널이 가른다** — 선수 본인의 자리와 대리로 온 에이전트의 자리에서만 열린다.
@@ -1586,11 +1628,11 @@ export function describePendingApproach(state: GameState): string | null {
   if (!a) return null;
   const waited = diffDays(a.date, state.date);
   /**
-   * **사다리를 타지 않는 자리에는 계단을 싣지 않는다** (career.md §5) — 시즌 리뷰의
-   * 2는 폭을 정하는 고정값이라, 「2/3」이라 쓰면 모델은 오르지 않을 칸을 읽는다.
+   * **사다리를 타지 않는 자리에는 계단을 싣지 않는다** (career.md §5·§5.1) — 시즌
+   * 리뷰의 2도 면접의 3도 오를 칸이 아니라, 「2/3」이라 쓰면 모델은 없는 사다리를 읽는다.
    */
   const ladder =
-    a.topic === "season-review"
+    a.topic === "season-review" || a.topic === "interview"
       ? ""
       : ` · 계단 ${a.step}/${topStepOf(a.topic)}${a.step >= 3 ? " · 큰 자리다" : ""}`;
   return [
