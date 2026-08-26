@@ -15,11 +15,13 @@ import type {
 } from "@story-fm/domain";
 import { isReserveMatch } from "@story-fm/domain";
 import {
+  addToSeasonStat,
   ageOf,
   FORMATION_CHANGE_COST,
   clampCondition,
   clampSharpness,
   compareMilestones,
+  keptCleanSheet,
   matchMinutesOf,
   milestonePhrase,
   naturalPositionOf,
@@ -1761,6 +1763,9 @@ export function finalizeMatch(state: GameState): MatchDigest {
       if (!player) continue;
       const scoredBy = goals.filter((e) => e.actors[0] === id).length;
       const assists = goals.filter((e) => e.actors[1] === id).length;
+      /** 이 경기가 그 선수에게 남긴 것 — 슛·xG·선방의 원본은 장부의 선수별 기록이다 (§4) */
+      const line = ledger.stats?.[id];
+      const minutes = minutesOf(id);
       const rating =
         anchorOfPlayer.get(id) ??
         matchRating({
@@ -1789,11 +1794,27 @@ export function finalizeMatch(state: GameState): MatchDigest {
          */
         const before =
           player.teamId === state.userTeamId ? careerTotalsOf(state, id, player.teamId) : null;
-        const stat = ensureSeasonStat(state, id, player.teamId);
-        stat.apps += 1;
-        stat.goals += scoredBy;
-        if (assists > 0) stat.assists = (stat.assists ?? 0) + assists;
-        stat.ratingSum = (stat.ratingSum ?? 0) + rating;
+        /**
+         * 얹는 문은 **간이 시뮬과 같은 하나다**(`addToSeasonStat` — match.md §6).
+         * 카드는 여기서 세지 않는다: `recordCard`가 지나는 문에서 함께 적힌다.
+         */
+        addToSeasonStat(ensureSeasonStat(state, id, player.teamId), {
+          apps: 1,
+          goals: scoredBy,
+          assists,
+          ratingSum: rating,
+          minutes,
+          shots: line?.shots ?? 0,
+          xg: line?.xg ?? 0,
+          saves: line?.saves ?? 0,
+          cleanSheets: keptCleanSheet({
+            group: positionGroupOfPlayer(player),
+            conceded,
+            minutes,
+          })
+            ? 1
+            : 0,
+        });
         if (before) {
           const rows = settleMilestones(state, {
             playerId: id,
@@ -1818,7 +1839,7 @@ export function finalizeMatch(state: GameState): MatchDigest {
        * 몸에 남는 것은 대회가 아닌 경기도 남긴다.
        */
       player.state.sharpness = clampSharpness(
-        sharpnessAfterMinutes(sharpnessOf(player.state), minutesOf(id)),
+        sharpnessAfterMinutes(sharpnessOf(player.state), minutes),
       );
       player.state.form = clampForm(player.state.form + formDeltaFromMatch(player, rating, result));
       /**
