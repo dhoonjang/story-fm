@@ -1,13 +1,20 @@
 import type { GamePlayer } from "@story-fm/domain";
-import { isReserveMatch, normalizeSpeaker, TRANSFER_REQUEST_REASON_KO } from "@story-fm/domain";
+import {
+  INTEREST_STAGE_KO,
+  isReserveMatch,
+  normalizeSpeaker,
+  TRANSFER_REQUEST_REASON_KO,
+} from "@story-fm/domain";
 import { formLabel } from "./form";
 import { isSettling } from "./settling";
 import { diffDays } from "../competition/calendar";
 import { pendingApproach } from "../club/approach";
 import {
+  announcedInterestsOn,
   openInjury,
   playersOf,
   squadLevelOf,
+  teamNameIn,
   transferRequestOf,
   type GameState,
 } from "../core/state";
@@ -130,6 +137,16 @@ function factOf(state: GameState, player: GamePlayer, benched: number): string |
   if (request && request.answer !== "accept") {
     const reason = TRANSFER_REQUEST_REASON_KO[request.reason];
     return `이적 요청 (${reason}) — ${request.answer === "refuse" ? "감독이 거부했다" : "아직 답하지 않았다"}`;
+  }
+  /**
+   * **밖에서 묻는 것은 나가겠다고 말한 것보다는 뒤고 나머지보다는 앞이다**
+   * (transfer.md §1-2 · people.md §7). `watching`은 서지 않는다 — 아직 아무 말도
+   * 오지 않은 것이라 라커룸에 들릴 사실이 없다. 맨 앞 줄(사다리 위 칸)만 쓴다:
+   * 두 구단을 다 적으면 근황 한 조각이 시장 브리핑이 된다.
+   */
+  const interest = announcedInterestsOn(state, player.id)[0];
+  if (interest) {
+    return `${teamNameIn(state, interest.teamId)} 관심 — ${INTEREST_STAGE_KO[interest.stage]}`;
   }
   if (isSettling(state, player.id)) return "새 영입, 아직 적응 중";
   const form = player.state.form;

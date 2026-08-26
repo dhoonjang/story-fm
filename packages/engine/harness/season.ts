@@ -11,8 +11,14 @@ export function playSeason(
   state: GameState,
   /** 유저 경기의 결산 직전을 보는 자리 — 경기 중에만 있는 것을 재는 하네스가 쓴다 */
   onFullTime?: (state: GameState) => void,
+  /**
+   * 하루가 끝난 자리 — **오늘만 살아 있는 장부**를 재는 하네스가 쓴다.
+   * 관심(`state.interests`)처럼 오퍼가 되면 걷히는 줄은 시즌 끝에 세면 0이라,
+   * 지나가는 동안 세지 않으면 셀 방법이 없다 (transfer.md §1-2).
+   */
+  onDay?: (state: GameState) => void,
 ): void {
-  playWhile(state, () => !allMatchesDone(state), onFullTime);
+  playWhile(state, () => !allMatchesDone(state), onFullTime, onDay);
 }
 
 /**
@@ -31,12 +37,14 @@ function playWhile(
   state: GameState,
   keepGoing: () => boolean,
   onFullTime?: (state: GameState) => void,
+  onDay?: (state: GameState) => void,
 ): void {
   let guard = 420;
   while (guard-- > 0 && keepGoing()) {
     const before = state.date;
     const advanced = advanceTime(state, { days: 1 });
     if (state.phase === "matchday") playMockMatch(state, onFullTime);
+    onDay?.(state);
     if (state.date === before && advanced.stopped !== "matchday") break;
   }
 }

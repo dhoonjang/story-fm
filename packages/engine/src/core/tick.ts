@@ -85,6 +85,7 @@ import {
 } from "../market/negotiation";
 // 서열대로 받고 있는가를 묻는 곡선 — 재계약·이적이 읽는 것과 같은 자다
 import { wageByRating } from "../market/market";
+import { tickInterests } from "../market/interest";
 import { playedIn, quickSimulate, type SimSquad } from "../match/quick-sim";
 import { managerTacticsOf } from "../match/manager-tactics";
 import { recordCard } from "../match/discipline";
@@ -677,6 +678,11 @@ function dailyTick(
   // 무직이면 그 자리 중 하나가 감독의 것이 될 수도 있다 (career.md §5.1)
   const offered = runManagerMarket(state, digest);
   if (managed) {
+    /**
+     * 관심 — **오퍼보다 먼저 부른다** (transfer.md §1-2). 오퍼는 `bidding`까지 오른
+     * 관심에서만 나오므로, 사다리가 먼저 서야 그날의 오퍼가 그 줄을 읽을 수 있다.
+     */
+    tickInterests(state, digest);
     generateIncomingOffers(state, digest);
     for (const negotiation of arrivedResponses(state)) {
       const player = playerById(state, negotiation.gamePlayerId);

@@ -27,6 +27,7 @@ import {
   buildMoodBrief,
   dealOdds,
   generateIncomingOffers,
+  tickInterests,
   lastMatchIndexOf,
   marketValueOf,
   moodAnchor,
@@ -256,18 +257,24 @@ describe("지친 것과 마음이 뜬 것은 다르다", () => {
     expect(after).toBeGreaterThan(before);
   });
 
-  it("지쳤다는 이유만으로 오퍼가 몰리지 않는다", () => {
+  it("지쳤다는 이유만으로 시장이 몰리지 않는다", () => {
     const state = createTestGame();
-    state.date = "2026-08-20";
+    state.date = "2026-07-05";
     const player = tired(state);
     const digest: string[] = [];
+    // tick과 같은 순서 — 「누가 눈에 띄는가」는 이제 관심이 고른다 (transfer.md §1-2)
     for (let i = 0; i < 60; i++) {
-      state.date = `2026-08-${String((i % 28) + 1).padStart(2, "0")}`;
+      state.date = addDays(state.date, 1);
+      tickInterests(state, digest);
       generateIncomingOffers(state, digest);
     }
     // 지친 선수가 유독 자주 지목되지는 않는다 — 불만이 없으면 값과 자리로만 걸린다
     const targeted = state.negotiations.filter((n) => n.gamePlayerId === player.id).length;
     expect(targeted).toBeLessThanOrEqual(1);
+    expect(
+      (state.interests ?? []).filter((i) => i.gamePlayerId === player.id).length,
+      "체력은 관심의 자가 아니다",
+    ).toBeLessThanOrEqual(1);
   });
 });
 

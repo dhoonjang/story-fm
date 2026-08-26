@@ -1031,6 +1031,56 @@ export const TransferRequestSchema = z.object({
 export type TransferRequest = z.infer<typeof TransferRequestSchema>;
 
 /**
+ * **관심의 단계** — 오퍼 앞에 서는 사다리 세 칸
+ * (→ docs/simulation/transfer.md §1-2).
+ *
+ * 보는 것에는 창이 필요 없지만 묻는 것과 부르는 것에는 필요하다 — `watching`은
+ * 아무 날에나 서고, 위 두 칸은 그 구단 협회의 창이 열린 동안에만 오른다.
+ */
+export const INTEREST_STAGES = ["watching", "enquired", "bidding"] as const;
+export type InterestStage = (typeof INTEREST_STAGES)[number];
+
+export const INTEREST_STAGE_KO: Record<InterestStage, string> = {
+  watching: "주시",
+  enquired: "문의",
+  bidding: "입찰 임박",
+};
+
+/** 사다리에서 이 칸이 몇 번째인가 — 견주는 자리가 여럿이라 눈금을 한 벌로 둔다 */
+export function interestStageRank(stage: InterestStage): number {
+  return INTEREST_STAGES.indexOf(stage);
+}
+
+/**
+ * **타 구단의 관심 한 줄** — 오퍼가 오기 전에 세계가 내는 소리
+ * (→ docs/simulation/transfer.md §1-2).
+ *
+ * 코어가 드는 것은 구단·선수·날짜·단계뿐이다. "레알이 그를 보고 있다"는 문장은
+ * GM과 기자의 것이고, 이 줄은 그 문장이 딛는 사실이다.
+ *
+ * **한 구단 × 한 선수에 한 줄이다** — 두 줄이 서면 회견도 근황도 같은 사실을 두 번
+ * 말하고, 딜 확률의 「다른 구단의 관심」 항이 한 구단을 둘로 센다
+ * (→ docs/simulation/transfer.md §11).
+ */
+export const InterestSchema = z.object({
+  /** 보고 있는 구단 (`TEAM.id`) */
+  teamId: z.string().min(1),
+  gamePlayerId: z.string().min(1),
+  /** 이 관심이 처음 선 날 */
+  since: DateString,
+  stage: z.enum(INTEREST_STAGES),
+  /** 마지막으로 칸이 움직인 날 — 여기서 다음 칸까지의 최소 체류와 노화를 센다 */
+  lastMovedOn: DateString,
+  /**
+   * 회견이 이 관심을 실어 간 날 — 같은 사실을 두 번 묻지 않게 하는 자다
+   * (`transferRequests`와 같은 규약). **칸이 오르면 비워진다** — 「보고 있다」와
+   * 「값을 부를 참이다」는 다른 사실이라 회견이 둘 다 싣는다.
+   */
+  pressedOn: DateString.optional(),
+});
+export type Interest = z.infer<typeof InterestSchema>;
+
+/**
  * 개인 훈련 프로그램 — **팀 훈련 위에 한 선수만 겨냥해 얹는 것.**
  *
  * `set_training`은 팀 전체 메뉴라 "이 선수의 결정력을 손보자", "풀백을 센터백으로
