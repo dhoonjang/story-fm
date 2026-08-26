@@ -39,11 +39,7 @@ export function leagueTableOf(
  * 그 시즌 그 대회의 우승 팀 — **리그는 순위표의 1위, 녹아웃은 트로피**다
  * (game-state.md §3.3). 우승자를 따로 적지 않는 이유는 표가 이미 답하기 때문이다.
  */
-export function championOf(
-  state: GameState,
-  season: number,
-  competitionId: string,
-): string | null {
+export function championOf(state: GameState, season: number, competitionId: string): string | null {
   const table = leagueTableOf(state, season, competitionId);
   if (table) return table[0]?.teamId ?? null;
   return (
@@ -255,12 +251,8 @@ export interface SeasonMark {
  * 승점·득점을 모르는 이관 행은 그 축의 비교에서 빠지고(순위만 견준다), 카탈로그의
  * `honours`는 우승 횟수일 뿐 시즌 성적이 아니라 여기 들어오지 않는다.
  */
-export function recordBreaksOf(
-  state: GameState,
-  teamId: string,
-  mark: SeasonMark,
-): RecordBreak[] {
-  const past = { ...clubRecordsOf(state, teamId) };
+export function recordBreaksOf(state: GameState, teamId: string, mark: SeasonMark): RecordBreak[] {
+  const past = clubRecordsOf(state, teamId);
   const breaks: RecordBreak[] = [];
   const at = { season: mark.season, leagueId: mark.leagueId };
   if (past.bestPoints && mark.points > past.bestPoints.value) {
