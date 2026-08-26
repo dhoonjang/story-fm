@@ -236,6 +236,17 @@ export function PlayerDetail({
                 평점 <b>{p.seasonRating.toFixed(2)}</b>
               </span>
             )}
+            {/* 대회별 — 위 「시즌」은 대회 합이라 "리그에서 몇 골"을 말하지 못한다
+                (docs/data/game-state.md §3.4). 대회가 하나뿐이면 코어가 빈 배열을
+                주므로 같은 수가 두 줄로 서지 않는다 */}
+            {p.seasonByCompetition.map((c) => (
+              <span key={c.competitionId}>
+                {c.name}{" "}
+                <b>
+                  {c.apps}경기 {c.goals}골
+                </b>
+              </span>
+            ))}
             {/* 폼의 시간 축 — 최근 경기가 오른쪽 */}
             {p.recentRatings.length > 0 && (
               <span className="pd-trend">

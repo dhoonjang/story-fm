@@ -6,6 +6,7 @@ import {
   careerView,
   assignmentsOf,
   ensureSeasonStat,
+  leagueOfTeamIn,
   historyView,
   leagueView,
   marketValueOf,
@@ -152,7 +153,7 @@ describe("search_players", () => {
     ours.forEach((p, i) => {
       const contract = activeContract(state, p.id);
       if (contract) contract.weeklyWage = 10_000 + i * 137;
-      const stat = ensureSeasonStat(state, p.id, p.teamId);
+      const stat = ensureSeasonStat(state, p.id, p.teamId, leagueOfTeamIn(state, p.teamId));
       stat.goals = (i * 5) % 23;
       stat.apps = 40 - i;
     });
@@ -631,7 +632,7 @@ describe("get_career", () => {
       {
         code: "top-scorer",
         season: state.season,
-        leagueId: "epl",
+        competitionId: "epl",
         gamePlayerId: ours.id,
         playerName: ours.name,
         teamId: state.userTeamId,
@@ -642,7 +643,7 @@ describe("get_career", () => {
       {
         code: "top-scorer",
         season: state.season,
-        leagueId: "laliga",
+        competitionId: "laliga",
         gamePlayerId: "realmadrid-9",
         playerName: "남의 리그 득점왕",
         teamId: "realmadrid",

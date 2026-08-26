@@ -130,7 +130,12 @@ describe("한 시즌을 돈 뒤의 체력·출전 분포", () => {
     const ourLoad = topLoad(state, state.userTeamId, XI);
     const theirLoad = mean([...RIVALS, "newcastle"].map((t) => topLoad(state, t, XI)));
     const apps = playersOf(state, "mancity")
-      .map((p) => state.seasonStats.find((s) => s.gamePlayerId === p.id)?.apps ?? 0)
+      // 행은 대회별로 갈려 있다 — 한 행만 집으면 리그 출전이 컵 한 경기로 읽힌다
+      .map((p) =>
+        state.seasonStats
+          .filter((s) => s.gamePlayerId === p.id)
+          .reduce((sum, s) => sum + s.apps, 0),
+      )
       .filter((n) => n > 0);
 
     const readings: Readings<typeof AI_FITNESS> = {

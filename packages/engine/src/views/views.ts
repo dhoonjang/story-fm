@@ -71,7 +71,9 @@ import {
   outcomeFor,
   outcomeLabel,
   pairOfMatchId,
+  competitionRowsOf,
   parseScorerEntry,
+  pickMotm,
   rolesFor,
   seasonRating,
   separateBoardPoints,
@@ -128,7 +130,7 @@ import { DOMESTIC_STAGES, domesticCupById } from "../data/domestic-cup-catalog";
 import { domesticCupsOf, userStillIn } from "../competition/domestic-cup";
 import { drawParts, drawTitle } from "../competition/draw-schedule";
 import { euroCompetitionOf } from "../competition/europe";
-import { foldCareer, type CareerTotals } from "../squad/career";
+import { careerSeasonRowsOf, foldCareer, type CareerTotals } from "../squad/career";
 import { formAngle, formLabel, formTone } from "../squad/form";
 import { leaderGroupOf } from "../squad/hierarchy";
 import { ratingTone, type RatingTone } from "../match/ratings";
@@ -783,6 +785,22 @@ interface SquadViewRowMeta {
   seasonGoals: number;
   seasonApps: number;
   seasonAssists: number;
+  /**
+   * 이번 시즌 **대회별** 1군 기록 — 위 세 칸은 대회 합이라 "리그 12경기 3골"을
+   * 말할 자리가 없었다 (→ docs/data/game-state.md §3.4). 많이 뛴 대회부터 서고,
+   * 대회가 하나뿐이면 합계가 이미 같은 수를 말했으므로 빈 배열이다.
+   *
+   * 대회 이름은 여기서 푼다 — 화면은 카탈로그를 읽지 못한다(`CareerSeasonView.team`과
+   * 같은 이유). **옛 세이브의 축 없는 행은 어느 대회인지 모르므로 서지 않는다.**
+   */
+  seasonByCompetition: Array<{
+    competitionId: string;
+    /** 약칭 — 한 줄에 서너 대회가 나란히 선다 */
+    name: string;
+    apps: number;
+    goals: number;
+    assists: number;
+  }>;
   /** 시즌 평균 평점 — 출전이 없으면 null (0.0과 "기록 없음"은 다르다) */
   seasonRating: number | null;
   /**
@@ -1133,7 +1151,10 @@ export interface CompetitionSeasonView {
   ourPosition: number | null;
   /** 그 시즌 최종 순위표 — 리그전을 돈 대회만. 컵은 빈 배열이다 */
   table: SeasonTableRowView[];
-  /** 그 시즌 이 리그의 시상 — 리그의 상뿐이라 컵은 빈 배열이다 (season.md §6) */
+  /**
+   * 그 시즌 **이 대회의** 시상 (season.md §6) — 리그는 넷, 컵·대항전은 득점왕과
+   * 결승 MOM 둘. 옛 세이브의 컵에는 상이 없어 빈 배열이다.
+   */
   awards: CompetitionAwardView[];
 }
 
@@ -1158,9 +1179,9 @@ export interface CompetitionView {
   /**
    * 개인 순위와 팀 열 — 순위표가 없는 국내 컵은 null.
    *
-   * ⚠️ **개인 순위는 리그에만 선다** — 시즌 기록표가 대회별로 갈려 있지 않아
-   * 대항전 득점왕은 세울 수 없다 (competition.md §2). 팀 열은 경기 결과에서
-   * 나오므로 대항전 리그 페이즈에도 선다.
+   * ⚠️ **개인 순위는 리그에만 선다** — 기록은 대회별로 갈리지만 평점 축의 출전
+   * 문턱이 순위표에서 나오고 컵에는 순위표가 없다 (season.md §9). 팀 열은 경기
+   * 결과에서 나오므로 대항전 리그 페이즈에도 선다.
    */
   leaders: CompetitionLeadersView | null;
   /** 순위 구역 — 챔스·유로파 진출권(리그) 또는 본선 직행·플레이오프(대항전) */
@@ -2490,9 +2511,9 @@ function competitionSeasonsOf(state: GameState, competitionId: string): Competit
       runnerUp: runnerUp === null ? null : seasonTeamView(state, runnerUp),
       ourPosition: ourRow < 0 ? null : ourRow + 1,
       table,
-      // 시상은 리그의 상뿐이라(season.md §6) 컵 id로는 한 건도 걸리지 않는다
+      // 대회마다 상이 선다 — 컵 탭에는 그 컵의 득점왕과 결승 MOM이 걸린다 (season.md §6)
       awards: awards
-        .filter((a) => a.season === season && a.leagueId === competitionId)
+        .filter((a) => a.season === season && a.competitionId === competitionId)
         .map((a) => ({
           code: a.code,
           playerName: a.playerName,
@@ -3047,14 +3068,15 @@ export function buildOfficeViews(state: GameState): OfficeViews {
    */
   const careerViewOf = (playerId: string): SquadViewRow["career"] => {
     const rows = statsOfPlayer.get(playerId) ?? [];
-    const seasons = [...rows]
-      .sort((a, b) => a.season - b.season || a.teamId.localeCompare(b.teamId))
-      .map((stat) => ({ stat, totals: careerTotalsView(foldCareer([stat])) }))
+    // 시즌 × 팀 하나가 한 줄이다 — 대회별로 갈린 행을 접는 것은 커리어 표와 **같은
+    // 함수**의 몫이다(`careerSeasonRowsOf`), 안 그러면 컵을 뛴 시즌이 두 줄로 선다
+    const seasons = careerSeasonRowsOf(rows)
+      .map((row) => ({ row, totals: careerTotalsView(row) }))
       .filter(({ totals }) => totals.apps > 0 || totals.reserveApps > 0)
-      .map(({ stat, totals }) => ({
-        season: stat.season,
-        teamId: stat.teamId,
-        team: teamShortNameIn(state, stat.teamId),
+      .map(({ row, totals }) => ({
+        season: row.season,
+        teamId: row.teamId,
+        team: teamShortNameIn(state, row.teamId),
         ...totals,
       }));
     return { seasons, totals: careerTotalsView(foldCareer(rows)) };
@@ -3082,6 +3104,22 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       const suspension = activeSuspensionFor(state, p.id, nextCompetition);
       const contract = activeContract(state, p.id);
       const stat = seasonStatOf(state, p.id);
+      /**
+       * 대회별 줄 — **위에서 갈라 둔 행에서 고른다.** `seasonStatsByCompetitionOf`를
+       * 부르면 마흔 몇 명이 각자 원장을 한 번 더 훑는다(위 커리어 주석과 같은 함정).
+       * 무엇이 서고 무엇이 빠지는가는 선수 카드와 **같은 함수**가 갖는다.
+       */
+      const byCompetition = competitionRowsOf(
+        (statsOfPlayer.get(p.id) ?? []).filter(
+          (s) => s.season === state.season && s.teamId === p.teamId,
+        ),
+      ).map((row) => ({
+        competitionId: row.competitionId,
+        name: competitionShortName(row.competitionId),
+        apps: row.apps,
+        goals: row.goals,
+        assists: row.assists ?? 0,
+      }));
       const natural = naturalPositionOf(p);
       /**
        * **안개는 축에만 씌운다.** 종합·자리 전력은 그 관측된 축에서 파생시킨다
@@ -3235,6 +3273,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
         leaderRank: leaderRank.get(p.id) ?? null,
         seasonGoals: stat?.goals ?? 0,
         seasonApps: stat?.apps ?? 0,
+        seasonByCompetition: byCompetition.length < 2 ? [] : byCompetition,
         seasonAssists: stat?.assists ?? 0,
         seasonRating: seasonRating(stat),
         seasonMinutes: stat?.minutes ?? 0,
@@ -3769,7 +3808,7 @@ export function buildOfficeViews(state: GameState): OfficeViews {
           season: a.season,
           playerName: a.playerName,
           teamName: teamNameIn(state, a.teamId),
-          leagueName: leagueName(a.leagueId),
+          leagueName: competitionName(a.competitionId),
           apps: a.apps,
           goals: a.goals,
           assists: a.assists,
@@ -4129,28 +4168,12 @@ export interface MatchReportView {
  * 판정이 그 위에서 다듬는다(match.md §6). 저장하면 다듬어진 뒤에도 MOTM만 옛
  * 값으로 남는다.
  *
- * 동점은 **골 → 도움 → 출전 시간 → 선수 id** 순으로 갈린다. 마지막 칸은 뜻이
- * 아니라 결정성을 위한 것이다 — 세 칸까지 같은 두 선수가 화면을 열 때마다 번갈아
- * 뽑히면 그건 판정이 아니다.
+ * 동점 사슬은 **도메인이 갖는다**(`compareMotm`) — 대회의 결승 MOM 시상이 같은
+ * 사슬을 쓰기 때문이다 (season.md §6). 두 벌로 두면 같은 결승의 최우수 선수가
+ * 화면과 시상에서 다른 사람이 된다.
  */
 export function motmOf(players: readonly MatchReportPlayerView[]): MatchReportPlayerView | null {
-  let best: MatchReportPlayerView | null = null;
-  for (const p of players) {
-    if (p.rating === null) continue;
-    if (!best || compareMotm(p, best) < 0) best = p;
-  }
-  return best;
-}
-
-/** 앞선 쪽이 음수 — `motmOf`의 동점 규칙 하나 */
-function compareMotm(a: MatchReportPlayerView, b: MatchReportPlayerView): number {
-  return (
-    (b.rating ?? 0) - (a.rating ?? 0) ||
-    b.goals - a.goals ||
-    b.assists - a.assists ||
-    b.minutes - a.minutes ||
-    a.id.localeCompare(b.id)
-  );
+  return pickMotm(players);
 }
 
 /** 사건이 없는 옛 경기·간이 시뮬의 타임라인 — 결과에 남은 득점 줄만 세운다 */

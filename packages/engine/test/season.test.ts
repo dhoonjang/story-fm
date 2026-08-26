@@ -49,6 +49,7 @@ import {
   retirementVerdict,
   reviewSeason,
   seasonAwards,
+  seasonStatOf,
   standClubVision,
   teamsOfLeagueIn,
   tierOfTeamIn,
@@ -1014,8 +1015,10 @@ describe("풀 시즌 통합 — 리그 완주 후 커리어 기록·전환", () 
      * 시상은 **리그가 주는 상**이다 — 감독의 성적과 무관하게 그해 리그전을 돈
      * 리그마다 서고, 승강을 적용하기 전의 소속으로 적힌다 (season.md §6).
      */
-    const scorer = state.awards?.find((a) => a.season === 1 && a.code === "top-scorer");
-    expect(scorer?.leagueId).toBe("epl");
+    const scorer = state.awards?.find(
+      (a) => a.season === 1 && a.code === "top-scorer" && a.competitionId === "epl",
+    );
+    expect(scorer).toBeDefined();
     expect(scorer?.goals ?? 0).toBeGreaterThan(0);
 
     /**
@@ -1044,17 +1047,22 @@ describe("시즌 시상 (season.md §6)", () => {
   /** 8팀 리그 → 라운드 14 → 올해의 선수 문턱 7경기, 영플레이어 4경기 */
   const TEAM_IDS = ["t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8"];
 
+  /** 이 세계의 컵 하나 — 결승 한 경기로 우승자가 갈린다 */
+  const CUP = "test-cup";
+
   interface StatSeed {
     id: string;
     birthdate?: string;
     teamId?: string;
+    /** 어느 대회의 행인가 — 생략하면 **대회 축이 없는 옛 세이브의 행**이다 */
+    competitionId?: string;
     apps: number;
     goals?: number;
     assists?: number;
     ratingSum?: number;
   }
 
-  function awardState(seeds: StatSeed[]): GameState {
+  function awardState(seeds: StatSeed[], extraMatches: unknown[] = []): GameState {
     const players = new Map<string, unknown>();
     for (const seed of seeds) {
       if (players.has(seed.id)) continue;
@@ -1062,6 +1070,7 @@ describe("시즌 시상 (season.md §6)", () => {
         id: seed.id,
         name: `선수 ${seed.id}`,
         birthdate: seed.birthdate ?? "2000-01-01",
+        teamId: seed.teamId ?? TEAM_IDS[0]!,
       });
     }
     return {
@@ -1075,6 +1084,7 @@ describe("시즌 시상 (season.md §6)", () => {
         gamePlayerId: seed.id,
         season: 1,
         teamId: seed.teamId ?? TEAM_IDS[0]!,
+        ...(seed.competitionId === undefined ? {} : { competitionId: seed.competitionId }),
         apps: seed.apps,
         goals: seed.goals ?? 0,
         assists: seed.assists ?? 0,
@@ -1091,10 +1101,26 @@ describe("시즌 시상 (season.md §6)", () => {
           awayTeamId: TEAM_IDS[1]!,
           result: { homeGoals: 1, awayGoals: 0, scorers: [] },
         },
+        ...extraMatches,
       ],
       achievements: [],
       awards: [],
     } as unknown as GameState;
+  }
+
+  /** 그 컵의 결승 한 경기 — 평점이 있어야 결승 MOM이 선다 */
+  function cupFinal(ratings: Record<string, number>, scorers: string[] = []): unknown {
+    return {
+      id: "m-final",
+      season: 1,
+      competitionId: CUP,
+      stage: "final",
+      round: 1,
+      date: SEASON_END,
+      homeTeamId: TEAM_IDS[0]!,
+      awayTeamId: TEAM_IDS[1]!,
+      result: { homeGoals: 1, awayGoals: 0, scorers, assists: [], ratings },
+    };
   }
 
   const winnerOf = (state: GameState, code: string) =>
@@ -1170,7 +1196,7 @@ describe("시즌 시상 (season.md §6)", () => {
     ]);
     const winner = winnerOf(state, "top-scorer");
     expect(winner?.gamePlayerId).toBe("p-moved");
-    expect(winner).toMatchObject({ apps: 22, goals: 15, teamId: "t2", leagueId: LEAGUE });
+    expect(winner).toMatchObject({ apps: 22, goals: 15, teamId: "t2", competitionId: LEAGUE });
   });
 
   it("시상 한 줄은 코드가 아니라 읽는 자리에서 만들어진다", () => {
@@ -1179,6 +1205,88 @@ describe("시즌 시상 (season.md §6)", () => {
     expect(awardLine(award)).toContain("득점왕");
     expect(awardLine(award)).toContain("선수 p1");
     expect(awardLine(award)).toContain("25골");
+  });
+
+  /**
+   * 이 이슈의 경계 — **컵 골은 리그 득점왕을 정하지 않는다** (season.md §6).
+   * 대회 축이 없던 때는 FA컵에서 여섯 골 넣은 로테이션 자원이 리그 득점왕이 됐다.
+   */
+  describe("대회 축 (§6)", () => {
+    const CUP_STATE = () =>
+      awardState(
+        [
+          { id: "p-league", competitionId: LEAGUE, apps: 30, goals: 10, ratingSum: 210 },
+          // 시즌 합계는 14골로 더 많지만 리그는 8골이다
+          { id: "p-cup", competitionId: LEAGUE, apps: 20, goals: 8, ratingSum: 140 },
+          { id: "p-cup", competitionId: CUP, apps: 6, goals: 6, assists: 2, ratingSum: 48 },
+        ],
+        [cupFinal({ "p-cup": 8.4, "p-league": 7.9 }, ["home:p-cup"])],
+      );
+
+    it("리그 득점왕은 리그 골만 센다 — 컵에서 넣은 골은 그 표에 서지 않는다", () => {
+      const league = seasonAwards(CUP_STATE()).find(
+        (a) => a.code === "top-scorer" && a.competitionId === LEAGUE,
+      );
+      expect(league?.gamePlayerId).toBe("p-league");
+      expect(league?.goals).toBe(10);
+    });
+
+    it("컵 득점왕이 따로 서고 그 대회의 수만 든다", () => {
+      const cup = seasonAwards(CUP_STATE()).find(
+        (a) => a.code === "top-scorer" && a.competitionId === CUP,
+      );
+      expect(cup?.gamePlayerId).toBe("p-cup");
+      expect(cup?.goals).toBe(6);
+    });
+
+    it("결승 MOM은 결승 한 경기의 평점에서 나온다 — 근거의 출전은 언제나 1이다", () => {
+      const motm = seasonAwards(CUP_STATE()).find((a) => a.code === "final-motm");
+      expect(motm).toMatchObject({ competitionId: CUP, gamePlayerId: "p-cup", apps: 1, goals: 1 });
+      expect(motm?.rating).toBe(8.4);
+    });
+
+    it("평점의 상은 컵에 서지 않는다 — 여섯 경기의 평균은 시즌의 상이 아니다", () => {
+      const codes = seasonAwards(CUP_STATE())
+        .filter((a) => a.competitionId === CUP)
+        .map((a) => a.code);
+      expect(codes.sort()).toEqual(["final-motm", "top-scorer"]);
+    });
+
+    /**
+     * 세이브 호환 — 옛 행은 `competitionId`가 없고 그 한 행이 **그 시즌 전 대회의
+     * 합계**다. 대회를 묻는 쪽은 그것을 그 팀이 속한 리그의 행으로 읽고(옛 규칙
+     * 그대로), 컵의 상은 그런 행을 한 줄도 세지 않는다 (game-state.md §3.4).
+     */
+    it("옛 세이브의 축 없는 행은 리그의 것으로 읽히고 컵의 상은 서지 않는다", () => {
+      const state = awardState(
+        [{ id: "p-old", apps: 30, goals: 18, ratingSum: 210 }],
+        [cupFinal({})],
+      );
+      const awards = seasonAwards(state);
+      expect(awards.find((a) => a.code === "top-scorer" && a.competitionId === LEAGUE)?.goals).toBe(
+        18,
+      );
+      expect(awards.some((a) => a.competitionId === CUP)).toBe(false);
+    });
+
+    /**
+     * 합계는 **저장하지 않고 더한다** (game-state.md §5 파생) — 옛 행과 새 대회 행이
+     * 한 세이브에 섞여 있어도 시즌 합계는 그 전부의 합이다. 이 불변식이 깨지면
+     * 선수 카드의 "출전 N"이 옛 세이브를 이어 연 시즌에만 조용히 줄어든다.
+     */
+    it("시즌 합계는 옛 행과 대회 행을 함께 더한 값이다", () => {
+      const state = awardState([
+        { id: "p-mix", apps: 7, goals: 4 }, // 축 없는 옛 행
+        { id: "p-mix", competitionId: LEAGUE, apps: 10, goals: 5 },
+        { id: "p-mix", competitionId: CUP, apps: 3, goals: 2, assists: 1 },
+      ]);
+      expect(seasonStatOf(state, "p-mix")).toMatchObject({ apps: 20, goals: 11, assists: 1 });
+      // 대회 하나를 물으면 그 행 하나다 — 옛 행이 대신 걸리지 않는다
+      expect(seasonStatOf(state, "p-mix", { competition: CUP })).toMatchObject({
+        apps: 3,
+        goals: 2,
+      });
+    });
   });
 });
 

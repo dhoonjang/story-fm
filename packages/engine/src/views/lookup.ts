@@ -56,6 +56,7 @@ import {
   roleFit,
   rolesFor,
   seasonRating,
+  sumSeasonStats,
   slotOfTime,
   strongFootOf,
   visionItemText,
@@ -185,6 +186,7 @@ import {
   proficiencyAt,
   resolvePlayerRef,
   seasonStatOf,
+  seasonStatsByCompetitionOf,
   squadFamiliarity,
   squadLevelOf,
   tacticsOf,
@@ -386,6 +388,26 @@ function ourRow(state: GameState, p: GamePlayer): string {
   );
 }
 
+/**
+ * 이번 시즌 **대회별** 한 줄 — `리그 12경기 3골 · FA컵 2경기 1골`.
+ *
+ * 위의 「시즌 기록」이 대회 합이라 "리그에서 몇 골"을 말할 자리가 없었다
+ * (→ docs/simulation/season.md §6). 많이 뛴 대회부터 서고, 대회가 하나뿐이면
+ * 합계 줄이 이미 같은 수를 말했으므로 세우지 않는다. **옛 세이브의 축 없는 행은
+ * 어느 대회인지 모르므로 이 줄이 통째로 서지 않는다** (game-state.md §3.4).
+ */
+function competitionStatLine(state: GameState, playerId: string): string | null {
+  const rows = seasonStatsByCompetitionOf(state, playerId);
+  if (rows.length < 2) return null;
+  return rows
+    .map(
+      (r) =>
+        `${competitionShortName(r.competitionId)} ${r.apps}경기 ${r.goals}골` +
+        ((r.assists ?? 0) > 0 ? ` ${r.assists}도움` : ""),
+    )
+    .join(" · ");
+}
+
 /** 시즌 기록 축약 — 출전/득점/도움, 평점은 출전이 있을 때만. 2군 리그 기록은 따로 */
 function statLine(
   stat: {
@@ -498,6 +520,8 @@ function sortKeyOf(
   state: GameState,
   pool: readonly GamePlayer[],
   sortBy: NonNullable<SearchPlayersInput["sortBy"]>,
+  /** 대회로 좁혔으면 **그 대회의 기록**으로 줄을 세운다 (season.md §6) */
+  competitionId: string | null,
 ): (p: GamePlayer) => number {
   if (sortBy === "age") return () => 0;
   if (sortBy === "rating" || sortBy === "fatigue" || sortBy === "value" || sortBy === "potential") {
@@ -511,12 +535,31 @@ function sortKeyOf(
       ? (p) => contracts.get(p.id)?.weeklyWage ?? 0
       : (p) => daysLeftOn(state, contracts.get(p.id));
   }
-  // 스탯은 시즌·팀까지 같아야 그 선수의 줄이다 — 시즌 중 이적하면 팀별로 갈린다
-  const stat = new Map<string, SeasonStat>();
+  /**
+   * 스탯은 시즌·팀까지 같아야 그 선수의 줄이다 — 시즌 중 이적하면 팀별로 갈린다.
+   *
+   * **대회로 좁힌 물음은 그 대회의 행으로 답한다** ("우리 리그 최다 득점"). 안 좁혔으면
+   * 대회 행을 모두 접은 시즌 합계다 — 화면의 "출전 N"과 같은 수여야 한다
+   * (`sumSeasonStats` — game-state.md §3.4). 옛 세이브의 축 없는 행은 리그를 물었을
+   * 때만 걸린다: `talliesOf`가 시상에서 쓰는 그 규약 그대로다.
+   */
+  const rows = new Map<string, SeasonStat[]>();
   for (const s of state.seasonStats) {
     if (s.season !== state.season) continue;
+    if (competitionId !== null) {
+      const legacy =
+        s.competitionId === undefined && leagueOfTeamIn(state, s.teamId) === competitionId;
+      if (s.competitionId !== competitionId && !legacy) continue;
+    }
     const k = `${s.gamePlayerId}\u0000${s.teamId}`;
-    if (!stat.has(k)) stat.set(k, s);
+    const found = rows.get(k);
+    if (found) found.push(s);
+    else rows.set(k, [s]);
+  }
+  const stat = new Map<string, SeasonStat>();
+  for (const [k, group] of rows) {
+    const folded = sumSeasonStats(group);
+    if (folded) stat.set(k, folded);
   }
   const of = (p: GamePlayer) => stat.get(`${p.id}\u0000${p.teamId}`);
   switch (sortBy) {
@@ -712,7 +755,7 @@ export function searchPlayers(state: GameState, input: SearchPlayersInput): Look
    * 5,700명을 세우면 그 선형 탐색이 n·log n번 돈다(주급 정렬 실측 2.7초).
    * 키를 선수당 한 번만 뽑아 두면 비교는 숫자 대 숫자가 된다 — 순서는 그대로다.
    */
-  const key = sortKeyOf(state, pool, sortBy);
+  const key = sortKeyOf(state, pool, sortBy, competitionId);
   const sorted = [...pool].sort((a, b) => {
     switch (sortBy) {
       case "age":
@@ -1209,10 +1252,12 @@ export function playerCard(state: GameState, playerId: string): LookupResult {
     stat?.reds ? `퇴장 ${stat.reds}` : null,
   ].filter((x): x is string => x !== null);
   const international = internationalLine(state, p);
+  const byCompetition = competitionStatLine(state, p.id);
   lines.push(
     `시즌 기록: ${stat?.apps ?? 0}경기 ${stat?.goals ?? 0}골 ${stat?.assists ?? 0}도움` +
       (seasonRating(stat) === null ? "" : ` · 평점 ${seasonRating(stat)!.toFixed(2)}`) +
       (seasonMore.length > 0 ? ` · ${seasonMore.join(" · ")}` : ""),
+    ...(byCompetition === null ? [] : [`대회별: ${byCompetition}`]),
     ...careerLines(state, p),
     ...(international === null ? [] : [international]),
     [
@@ -2006,8 +2051,9 @@ function leaderValueLine(key: LeaderboardKey, row: LeaderRow): string {
 /**
  * 리그 개인 순위 + 팀 열 — 시즌 끝의 시상을 시즌 중에 미리 읽는 자리다.
  *
- * ⚠️ **개인 순위는 리그에만 선다** — 시즌 기록표가 대회별로 갈려 있지 않아
- * 대항전 득점왕은 세울 수 없다 (competition.md §2). 없는 것은 없다고 답한다.
+ * ⚠️ **개인 순위는 리그에만 선다** — 기록은 대회별로 갈리지만 평점 축의 출전 문턱이
+ * 순위표에서 나오고(`ratingFloorOf`) 컵에는 순위표가 없다 (season.md §9). 대회의
+ * 개인상은 시즌 끝에 선다. 없는 것은 없다고 답한다.
  */
 function leadersView(state: GameState, input: LeagueViewInput): LookupResult {
   const past = pastSeasonOf(state, input);
@@ -2029,9 +2075,9 @@ function leadersView(state: GameState, input: LeagueViewInput): LookupResult {
 
   const limit = input.count ?? LEADERBOARD_LIMIT;
   const lines: string[] = [];
-  // 대항전은 개인 순위를 세우지 않는다 — 시즌 기록표가 대회별로 갈려 있지 않다
+  // 대항전은 개인 순위를 세우지 않는다 — 출전 문턱을 세울 순위표가 없다 (season.md §9)
   if (isCup(competitionId)) {
-    lines.push("· 개인 순위 — 대항전은 시즌 기록이 대회별로 갈리지 않아 세우지 않습니다");
+    lines.push("· 개인 순위 — 대항전은 출전 문턱을 세울 순위표가 없어 세우지 않습니다");
   } else {
     const boards = input.key
       ? [{ key: input.key, rows: leaderboardOf(state, competitionId, input.key, limit) }]
@@ -2994,9 +3040,8 @@ function playerHistoryView(state: GameState, person: HistoryPerson): LookupResul
   if (awards.length > 0) {
     lines.push(
       `받은 상 ${awards.length}건:`,
-      ...awards.map(
-        (a) => `  시즌 ${a.season} ${competitionShortName(a.leagueId)} ${awardLine(a)}`,
-      ),
+      // 대회 이름은 `awardLine`이 이미 앞에 세운다 (season.md §6)
+      ...awards.map((a) => `  시즌 ${a.season} ${awardLine(a)}`),
     );
   }
   return { ok: true, message: lines.join("\n") };

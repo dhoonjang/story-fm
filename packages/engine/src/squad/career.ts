@@ -102,6 +102,29 @@ function statsOf(state: GameState, playerId: string): SeasonStat[] {
 }
 
 /**
+ * 원장 행을 **커리어 표의 시즌 줄로** 접는다 — 시즌 × 팀 하나가 한 줄이다.
+ *
+ * ⚠️ **행은 대회별로 갈려 있다** (→ docs/data/game-state.md §3.4). 행 하나를 줄
+ * 하나로 세우면 리그·컵·대항전을 뛴 선수의 커리어 표에 같은 시즌 같은 셔츠가 세 번
+ * 늘어선다. 커리어 표가 답하는 물음은 "그 시즌 그 셔츠로 몇 경기"이지 "어느
+ * 대회에서 몇 경기"가 아니다 — 대회별 줄은 선수 카드가 따로 낸다.
+ *
+ * GM 카드(`careerOf`)와 스쿼드 상세(views `careerViewOf`)가 이 한 함수를 지난다.
+ */
+export function careerSeasonRowsOf(rows: readonly SeasonStat[]): CareerSeasonRow[] {
+  const grouped = new Map<string, SeasonStat[]>();
+  for (const s of rows) {
+    const key = `${s.season}\u0000${s.teamId}`;
+    const found = grouped.get(key);
+    if (found) found.push(s);
+    else grouped.set(key, [s]);
+  }
+  return [...grouped.values()]
+    .map((group) => ({ season: group[0]!.season, teamId: group[0]!.teamId, ...foldCareer(group) }))
+    .sort((a, b) => a.season - b.season || a.teamId.localeCompare(b.teamId));
+}
+
+/**
  * 통산 합계 — `teamId`를 주면 **그 셔츠의 것만.**
  *
  * 마일스톤 판정(클럽 단위)과 은퇴 줄이 이것을 부르고, 역사·기록(#528)도 같은
@@ -118,11 +141,7 @@ export function careerTotalsOf(state: GameState, playerId: string, teamId?: stri
 /** 시즌별 · 팀별 · 통산 — 선수 카드와 스쿼드 상세가 같은 표를 읽는다 */
 export function careerOf(state: GameState, playerId: string): CareerRead {
   const rows = statsOf(state, playerId);
-  const seasons: CareerSeasonRow[] = rows.map((s) => ({
-    season: s.season,
-    teamId: s.teamId,
-    ...foldCareer([s]),
-  }));
+  const seasons = careerSeasonRowsOf(rows);
 
   const byTeam = new Map<string, SeasonStat[]>();
   for (const s of rows) byTeam.set(s.teamId, [...(byTeam.get(s.teamId) ?? []), s]);

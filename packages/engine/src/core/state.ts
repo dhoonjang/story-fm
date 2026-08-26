@@ -60,6 +60,7 @@ import type {
   SeasonAward,
   Milestone,
   SeasonRecord,
+  CompetitionSeasonStat,
   SeasonStat,
   ShootoutKick,
   StrengthPacket,
@@ -91,6 +92,7 @@ import {
   opensOwnerSeat,
   interestStageRank,
   canRegister,
+  competitionRowsOf,
   isReserveMatch,
   isUnder21,
   FORMATION_LAYOUTS,
@@ -102,6 +104,7 @@ import {
   weightSlotOf,
   roleFit,
   standingScore,
+  sumSeasonStats,
 } from "@story-fm/domain";
 import { profFactor, SHARPNESS_PRESEASON, type MatchLedgerState } from "@story-fm/sim";
 import type { AiDeal } from "../market/ai-market";
@@ -1832,22 +1835,61 @@ export function expirePendingApproach(state: GameState): void {
   if (open) open.status = "expired";
 }
 
+/**
+ * 그 선수의 **지금 소속** 시즌 기록 — 대회를 묻지 않으면 대회 행을 모두 접은 합계다
+ * (→ docs/data/game-state.md §3.4 · §5 파생). 합계는 저장하지 않는다.
+ *
+ * ⚠️ **접어 낸 행은 읽기 전용이다** (`sumSeasonStats`) — 얹는 자리는 언제나
+ * `ensureSeasonStat` 하나이므로, 여기서 받은 행에 값을 쓰면 다음 파생에서 사라진다.
+ *
+ * `competition`을 주면 그 대회의 행 하나다. 옛 세이브의 축 없는 행은 그 물음에는
+ * 걸리지 않고 합계에만 든다 — 대회를 대신 골라 주면 컵 골이 리그 행으로 새어 든다.
+ */
 export function seasonStatOf(
   state: GameState,
   playerId: string,
-  season = state.season,
+  opts: { season?: number; competition?: string } = {},
 ): SeasonStat | null {
   const p = playerById(state, playerId);
   if (!p) return null;
-  return (
-    state.seasonStats.find(
+  const season = opts.season ?? state.season;
+  const rows: SeasonStat[] = [];
+  for (const s of state.seasonStats) {
+    if (s.gamePlayerId !== playerId || s.season !== season || s.teamId !== p.teamId) continue;
+    if (opts.competition !== undefined) {
+      if (s.competitionId === opts.competition) return s;
+      continue;
+    }
+    rows.push(s);
+  }
+  return opts.competition === undefined ? sumSeasonStats(rows) : null;
+}
+
+/**
+ * 그 선수의 이번 시즌 **대회별 1군 기록** — 지금 소속의 행만.
+ * 무엇이 서고 무엇이 빠지는가는 `competitionRowsOf`가 갖는다 (game-state.md §3.4).
+ */
+export function seasonStatsByCompetitionOf(
+  state: GameState,
+  playerId: string,
+  season = state.season,
+): CompetitionSeasonStat[] {
+  const p = playerById(state, playerId);
+  if (!p) return [];
+  return competitionRowsOf(
+    state.seasonStats.filter(
       (s) => s.gamePlayerId === playerId && s.season === season && s.teamId === p.teamId,
-    ) ?? null
+    ),
   );
 }
 
 /**
- * 시즌·팀 단위 스탯 확보 (없으면 생성) — 시즌 중 이적하면 팀별로 분리된다.
+ * 시즌·팀·**대회** 단위 스탯 확보 (없으면 생성) — 시즌 중 이적하면 팀별로도 갈린다.
+ *
+ * `competitionId`가 열쇠의 넷째다 (game-state.md §3.4): 리그 경기는 리그 행에, 컵
+ * 경기는 컵 행에 쌓인다. 대회가 없는 경기(친선)는 애초에 이 문을 지나지 않으므로
+ * 인자가 널을 받지 않는다 — 널을 허용하면 새 기록이 옛 세이브의 「축 없는 합계 행」에
+ * 섞여 들어 그 행이 무엇의 합인지가 사라진다.
  *
  * `player`를 넘기면 그 자리에서 등번호를 읽는다. 부르는 자리는 대부분 이미 그 선수를
  * 손에 들고 있고, 여기서 다시 명부를 훑으면 **경기마다 선수 수만큼** 4,000명 배열을
@@ -1857,13 +1899,25 @@ export function ensureSeasonStat(
   state: GameState,
   playerId: string,
   teamId: string,
+  competitionId: string,
   player?: Pick<GamePlayer, "squadNumber" | "name">,
 ): SeasonStat {
   let stat = state.seasonStats.find(
-    (s) => s.gamePlayerId === playerId && s.season === state.season && s.teamId === teamId,
+    (s) =>
+      s.gamePlayerId === playerId &&
+      s.season === state.season &&
+      s.teamId === teamId &&
+      s.competitionId === competitionId,
   );
   if (!stat) {
-    stat = { gamePlayerId: playerId, season: state.season, teamId, apps: 0, goals: 0 };
+    stat = {
+      gamePlayerId: playerId,
+      season: state.season,
+      teamId,
+      competitionId,
+      apps: 0,
+      goals: 0,
+    };
     state.seasonStats.push(stat);
   }
   /**

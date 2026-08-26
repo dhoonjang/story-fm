@@ -327,6 +327,27 @@ export function migrateGrowthSources(save: GrowthSourceSave): void {
   }
 }
 
+/** 옛 시상 한 줄 — 이 마이그레이션이 읽는 두 칸만 */
+interface AwardCompetitionSave {
+  awards?: Array<{ leagueId?: string; competitionId?: string }>;
+}
+
+/**
+ * 시상의 `leagueId` → `competitionId` — **컵·대항전에도 상이 서면서 칸이 넓어졌다**
+ * (→ docs/simulation/season.md §6).
+ *
+ * 스키마가 `competitionId`를 요구하므로 **parse보다 앞이어야 한다**: 남아 있으면
+ * 멀쩡한 옛 세이브가 `schema`로 막힌다 (`migrateGrowthSources`와 같은 이유).
+ * 옮기고 나면 `leagueId`가 없어 두 번 돌지 않는다 — 값이 마커다.
+ */
+export function migrateAwardCompetition(save: AwardCompetitionSave): void {
+  for (const award of save.awards ?? []) {
+    if (award.competitionId !== undefined || award.leagueId === undefined) continue;
+    award.competitionId = award.leagueId;
+    delete award.leagueId;
+  }
+}
+
 interface MatchStatsSave {
   pendingMatch?: {
     ledger?: { stats?: Record<string, { scoringExpectation?: number }> };

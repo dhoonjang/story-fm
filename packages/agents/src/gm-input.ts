@@ -4,6 +4,7 @@
  */
 import {
   awardLine,
+  awardReachesManager,
   ABSENT_REASON_KO,
   boardExpectation,
   buildOpponentReport,
@@ -39,7 +40,6 @@ import {
   isInjured,
   activeSuspension,
   suspensionScopeName,
-  leagueOfTeamIn,
   loanedOut,
   managedTeamId,
   MAX_EXPLOITS,
@@ -685,16 +685,17 @@ function youthCandidateFacts(state: GameState): string[] {
 }
 
 /**
- * 방금 끝난 시즌의 시상 중 **우리 리그**의 것 — 우리 선수든 남의 선수든 함께
- * 싣고, 어느 쪽인가는 팀 이름이 말한다.
+ * 방금 끝난 시즌의 시상 중 **감독에게 가는 것** — 우리 리그의 상과 컵·대항전의 상
+ * 전부다(`awardReachesManager` — season.md §6). 우리 선수든 남의 선수든 함께 싣고,
+ * 어느 쪽인가는 팀 이름이 말한다.
  *
- * 줄은 코어가 이미 갖고 있는 것을 쓴다(`awardLine` — 시즌 리뷰의 다이제스트가 쓰는
- * 그 줄이다). 여기서 다시 쓰면 같은 상이 다이제스트와 스냅샷에 다른 문장으로 선다.
+ * 거르는 문도 줄도 코어가 이미 갖고 있는 것을 쓴다(`awardReachesManager`·
+ * `awardLine` — 시즌 리뷰의 다이제스트가 쓰는 그 문과 그 줄이다). 여기서 다시
+ * 쓰면 같은 상이 다이제스트와 스냅샷에서 다른 문장으로, 또는 한쪽에만 선다.
  */
 function awardFacts(state: GameState): string[] {
-  const ourLeague = leagueOfTeamIn(state, state.userTeamId);
   return (state.awards ?? [])
-    .filter((a) => a.season === state.season - 1 && a.leagueId === ourLeague)
+    .filter((a) => a.season === state.season - 1 && awardReachesManager(state, a))
     .map((a) => awardLine(a));
 }
 

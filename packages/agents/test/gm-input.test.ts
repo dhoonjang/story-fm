@@ -482,7 +482,7 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
       {
         code: "top-scorer",
         season: state.season - 1,
-        leagueId: leagueOfTeamIn(state, state.userTeamId),
+        competitionId: leagueOfTeamIn(state, state.userTeamId),
         gamePlayerId: winner.id,
         playerName: winner.name,
         teamId: "chelsea",
@@ -502,7 +502,7 @@ describe("상태 스냅샷 (매 턴 갱신되는 휘발성 블록)", () => {
 
     // 이번 시즌의 상은 아직 없다 — 시즌을 한 칸 잘못 세면 여기서 걸린다
     state.date = state.calendar.preseasonStart;
-    state.awards[0]!.season = state.season;
+    state.awards![0]!.season = state.season;
     expect(buildGmStateNote(state)).not.toContain("<offseason>");
   });
 
