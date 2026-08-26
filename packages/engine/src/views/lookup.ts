@@ -14,10 +14,12 @@ import type {
   ShotOrigin,
   StrongFoot,
   Trophy,
+  VisionReading,
   YouthCandidate,
 } from "@story-fm/domain";
 import {
   DERBY_HEAT_KO,
+  VISION_CODE_KO,
   injuryRiskText,
   isReserveMatch,
   MatchStageSchema,
@@ -32,6 +34,7 @@ import {
   anchorOf,
   associationName,
   boardExpectationLine,
+  boardExpectationText,
   conditionLabel,
   sharpnessLabel,
   sharpnessOf,
@@ -49,6 +52,7 @@ import {
   seasonRating,
   slotOfTime,
   strongFootOf,
+  visionItemText,
 } from "@story-fm/domain";
 import { rankByName } from "../core/name-match";
 import { formatMoney } from "../club/finance";
@@ -110,6 +114,7 @@ import {
   ourYouthCandidates,
   youthIntakeDeadline,
 } from "../competition/season";
+import { visionOf, visionReadings, visionSpanOf, visionYearOf } from "../club/vision";
 import {
   clubHonoursLine,
   clubRecordsOf,
@@ -901,13 +906,37 @@ function moodLine(state: GameState, player: GamePlayer): string {
 }
 
 /**
+ * 시즌 표에 딸리는 **비전 조각** — 이름과 달성률뿐이다 (career.md §5).
+ *
+ * 시즌 행은 짧아야 한다: `visionItemText`를 그대로 붙이면 목표와 가중치까지 따라와
+ * 열다섯 시즌짜리 커리어가 통째로 부푼다. 목표와 가중치는 재임 머리글의 비전 줄과
+ * 커리어 화면이 이미 갖고 있다. **이 조각을 만드는 자리는 여기 하나다.**
+ */
+function visionRates(items: readonly VisionReading[]): string {
+  return items.map((i) => `${VISION_CODE_KO[i.code]} ${Math.round(i.progress * 100)}%`).join("·");
+}
+
+/**
  * 그 시즌의 보드 평가 — 등급과 근거 수치. 옛 세이브는 평가 문장을 들고 있어
  * 그것이 폴백이다 (career.md §6).
+ *
+ * ⚠️ **기대는 코드가 원본이고 라벨은 옛 세이브의 폴백이다** (§6) — 코드를 두고
+ * `expectation`만 읽으면 새 세이브에서는 `undefined`가 문장에 찍힌다.
  */
 function boardLine(record: SeasonRecord): string {
-  if (record.board) {
-    const met = record.board.grade === "met";
-    return ` — 보드 기대 ${record.board.target}위(${record.board.expectation}) · ${met ? "달성" : "미달"}`;
+  const board = record.board;
+  if (board) {
+    const met = board.grade === "met";
+    // 순위는 바로 앞 `{target}위`가 이미 말한다 — 라벨에까지 달면 "6위(…6위 이내)"다
+    const label = board.expectationCode
+      ? boardExpectationText(board.expectationCode)
+      : board.expectation;
+    // 항목별 진행도 — 평판 폭을 만든 가중합이 무엇으로 이뤄졌는지가 여기 남는다 (§5)
+    const rates = visionRates(board.items ?? []);
+    return (
+      ` — 보드 기대 ${board.target}위${label ? `(${label})` : ""} · ${met ? "달성" : "미달"}` +
+      (rates ? ` · 비전 ${rates}` : "")
+    );
   }
   return record.boardVerdict ? ` — 보드: "${record.boardVerdict}"` : "";
 }
@@ -2354,6 +2383,21 @@ export function careerView(state: GameState): LookupResult {
         (() => {
           const e = boardExpectation(state, state.userTeamId);
           return boardExpectationLine(e.code, e.target);
+        })(),
+        /**
+         * **구단주가 건 다년 계획** (career.md §5) — 위 기대가 감독의 자리를 재는
+         * 그 시즌의 자라면 이쪽은 구단이 몇 년에 걸쳐 가려는 자리다. 진행도는
+         * 오늘의 장부에서 매긴 값이라 시즌 중에도 읽힌다.
+         */
+        (() => {
+          const vision = visionOf(state);
+          // 0경기 순위는 팀 id 정렬일 뿐이다 — 아직 자리가 없으면 코어에 0을 넘긴다
+          const seat = { position: row && row.played > 0 ? rank : 0, leagueSize: table.length };
+          const items = visionReadings(state, seat).map(visionItemText);
+          return (
+            `구단 비전: ${visionYearOf(vision, state.season)}년차/${visionSpanOf(vision)}년 계획` +
+            ` · ${items.join(" / ")}`
+          );
         })(),
         ...(m.contract
           ? [

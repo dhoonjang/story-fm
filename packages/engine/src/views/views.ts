@@ -23,13 +23,17 @@ import type {
   KeeperDistribution,
   TrainingReport,
   BoardExpectationCode,
+  VisionCode,
+  VisionReading,
 } from "@story-fm/domain";
 import {
   BOARD_CONDITION_LABEL,
   BOARD_REQUEST_LABEL,
+  VISION_CODE_KO,
   boardConditionAmountText,
   boardExpectationText,
   boardRequestAmountText,
+  visionTargetText,
   isReserveMatch,
   matchMinutesOf,
   normalizeCauses,
@@ -172,12 +176,35 @@ import {
   FAMILIARITY_BASELINE,
   tacticsOf,
   clubProfileIn,
+  managedTeamId,
   teamNameIn,
   teamShortNameIn,
   weeklyWagesOf,
   type GameState,
 } from "../core/state";
 import { loanReports } from "../market/departures";
+import { visionOf, visionReadings, visionSpanOf, visionYearOf } from "../club/vision";
+
+/**
+ * 비전 항목 한 칸 — **코드가 이름과 목표 문장을 정한다** (career.md §5).
+ *
+ * 코어가 코드를 문장으로 옮기는 자리는 도메인의 `VISION_CODE_KO`·`visionTargetText`
+ * 하나다. 달성률은 0~1 그대로 내려가고 %는 화면이 만든다.
+ */
+export interface VisionItemView {
+  code: VisionCode;
+  label: string;
+  target: string;
+  progress: number;
+}
+
+const visionItemViews = (items: readonly VisionReading[]): VisionItemView[] =>
+  items.map((item) => ({
+    code: item.code,
+    label: VISION_CODE_KO[item.code],
+    target: visionTargetText(item),
+    progress: item.progress,
+  }));
 
 /**
  * 그날 훈련이 남긴 것 — **집계 한 줄**.
@@ -1500,7 +1527,16 @@ export interface OfficeViews {
      * 지난 시즌의 **평가**가 아니다: 그 둘을 한 칸에 겹쳐 두면 첫 시즌의 감독이
      * 아무도 매기지 않은 평가를 읽는다.
      */
-    boardExpectation: { target: number; label: string };
+    boardExpectation: {
+      target: number;
+      label: string;
+      /**
+       * 지금 서 있는 **다년 계획** — 구단주 원형이 건 것이다 (career.md §5).
+       * 시즌의 기대가 감독의 자리를 재는 자라면 이쪽은 구단이 몇 년에 걸쳐 가려는
+       * 자리라, 한 칸에 나란히 선다. 무직이면 걸린 계획이 없다 — `null`.
+       */
+      vision: { year: number; span: number; items: VisionItemView[] } | null;
+    };
     stadium: { name: string; capacity: number };
     /**
      * **감독이 매긴 티켓 값과 기준가** (finance.md §5.2) — 기준가와 나란히 서야
@@ -1663,7 +1699,16 @@ export interface OfficeViews {
        * 순위와 전적이 말하지 않는 것이 여기 있다: 같은 4위가 어느 구단에서는
        * 성공이고 어느 구단에서는 실패인 이유가 `target`에 남는다. 문장은 화면이 쓴다.
        */
-      board: { grade: "met" | "missed"; target: number; expectation: string } | null;
+      board: {
+        grade: "met" | "missed";
+        target: number;
+        expectation: string;
+        /**
+         * 그 시즌 **클럽 비전의 항목별 진행도** (career.md §5) — 순위 한 칸이
+         * 말하지 못하는 것이 여기 있다. 비전이 서기 전의 시즌은 빈 배열이다.
+         */
+        items: VisionItemView[];
+      } | null;
       /** 옛 세이브가 들고 있는 평가 문장 — `board`가 없을 때만 선다 */
       boardVerdict: string | null;
     }>;
@@ -3386,7 +3431,28 @@ export function buildOfficeViews(state: GameState): OfficeViews {
       board: boardView(state),
       boardExpectation: (() => {
         const be = boardExpectation(state, userTeamId);
-        return { target: be.target, label: boardExpectationText(be.code, be.target) };
+        const label = boardExpectationText(be.code, be.target);
+        // 무직이면 걸린 계획이 없다 — 옛 구단의 것은 감독의 것이 아니다 (career.md §5.1)
+        if (managedTeamId(state) === null) return { target: be.target, label, vision: null };
+        const table = computeStandings(state, leagueOfTeamIn(state, userTeamId));
+        const seat = table.findIndex((r) => r.teamId === userTeamId) + 1;
+        // 0경기 순위는 팀 id 정렬일 뿐이다 — 아직 자리가 없으면 코어에 0을 넘긴다
+        const played = table[seat - 1]?.played ?? 0;
+        const vision = visionOf(state);
+        return {
+          target: be.target,
+          label,
+          vision: {
+            year: visionYearOf(vision, state.season),
+            span: visionSpanOf(vision),
+            items: visionItemViews(
+              visionReadings(state, {
+                position: played > 0 ? seat : 0,
+                leagueSize: table.length,
+              }),
+            ),
+          },
+        };
       })(),
       stadium: { name: stadium.stadium, capacity: stadium.capacity },
       ticket: (() => {
@@ -3538,6 +3604,8 @@ export function buildOfficeViews(state: GameState): OfficeViews {
               grade: s.board.grade,
               target: s.board.target,
               expectation: expectationTextOf(s.board) ?? "",
+              // 비전이 서기 전의 시즌엔 없다 (career.md §6 — optional)
+              items: visionItemViews(s.board.items ?? []),
             }
           : null,
         boardVerdict: s.boardVerdict ?? null,

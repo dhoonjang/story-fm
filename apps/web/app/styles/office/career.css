@@ -274,6 +274,35 @@
   color: var(--danger);
   font-size: var(--fs-sm);
 }
+/**
+ * 클럽 비전 항목 — 보드 평가 아래 딸린 **읽는 값**이다 (career.md §5).
+ * 테두리도 배경도 주지 않는다: 만질 것이 아니라 근거이고, 평가 문장에
+ * 매달린 것으로 읽혀야 한다.
+ */
+.vision-items {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.vision-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--fs-xs);
+}
+.vision-item .name {
+  color: var(--text);
+}
+.vision-item .target {
+  color: var(--muted);
+}
+/* 달성률은 항목마다 자리가 같아야 세로로 비교된다 — 오른쪽 끝에 세우고 폭을 고정한다 */
+.vision-item .rate {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
 
 /**
  * 무직 — **경질 카드와 열린 제안.** 커리어 화면 맨 위에 선다.
