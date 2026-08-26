@@ -20,9 +20,10 @@ import { isMarketOnlyLeague, leagueCatalogById } from "../data/league-catalog";
 import { leagueEconomyLevel } from "../data/league-economy";
 import { isClubTeam, leagueOfTeam, teamCatalogById } from "../data/team-catalog";
 import { leagueOfTeamIn } from "../competition/promotion";
+import { tierOfTeamIn } from "../core/club-tier";
 import { euroCompetitionOf } from "../competition/europe";
 import { hashChannel } from "../core/rng";
-import { betterAtPosition, squadDepthOf, type SquadDepth } from "../squad/depth";
+import { betterAtPosition, squadDepthOf, squadRatingsOf, type SquadDepth } from "../squad/depth";
 import { derivedSquadStatus } from "../squad/promises";
 import { archetypeTraitsOf } from "../world/player-persona";
 import { knowledgeOf, KNOWLEDGE_KO, type Knowledge } from "../squad/scouting";
@@ -89,7 +90,7 @@ export const SUITORS_MANY = 3;
 
 /**
  * 장부에 선 경쟁 관심이 영입 확률에서 깎는 값 — **잠재의 자보다 무겁다**
- * (`suitorCountOf`의 −0.5). 「그를 쓸 수 있는 구단이 셋」은 언제나 참인 사실이지만
+ * (`suitorsOf`의 −0.5). 「그를 쓸 수 있는 구단이 셋」은 언제나 참인 사실이지만
  * 「그 구단이 지금 움직이고 있다」는 오늘의 사실이라, 선수가 우리 답을 기다릴 이유가
  * 그만큼 준다 (→ docs/simulation/transfer.md §1-2).
  */
@@ -101,6 +102,64 @@ export const RIVAL_BIDDING_SCORE = 0.2;
 export const CAREER_AGE_HOLD = 32;
 /** 이 나이까지는 커리어가 길어 다음 무대를 본다 */
 export const CAREER_AGE_MOVE = 25;
+// ── 무대 — 구단 하나를 한 숫자로 (→ docs/simulation/transfer.md §1-3) ────
+//
+// ⚠️ 밸런스 값. 「누가 우리 선수에게 오퍼를 내는가」와 「선수가 그 구단에 가고
+// 싶은가」가 이 눈금 하나에서 나온다. 재는 자리는 `pnpm balance incoming-offers`다.
+
+/** 스쿼드 등급(`squadRating`) 몇 점이 무대 한 칸인가 — 1부 중위권과 우승 후보의 폭 */
+const STAGE_RATING_SPAN = 6;
+/**
+ * 리그 경제 수준이 **두 배** 벌어질 때 실리는 칸 — 곱으로 갈리는 축이라 로그로 잰다.
+ * 차로 재면 EPL(1)과 라리가(0.62)의 0.38이 라리가와 챔피언십(0.15)의 0.47과 비슷해져,
+ * 동급 리그 사이가 승강만큼 벌어진다.
+ */
+const STAGE_LEAGUE_STEP = 0.35;
+/** 경제 수준의 하한 — 몸값이 쓰는 `LEAGUE_ECONOMY_FLOOR`와 같은 이유(로그가 −∞로 간다) */
+const STAGE_ECONOMY_FLOOR = 0.05;
+/** 대항전이 싣는 칸 — 나가는 것과 어디에 나가는가는 다른 사실이다 */
+const STAGE_EURO_STEP: Record<string, number> = { ucl: 0.5, uel: 0.25, uecl: 0.12 };
+/** 체급 한 단계 — tier 3을 축으로 위아래. 구장·브랜드가 스쿼드 등급 밖에서 사는 자리다 */
+const STAGE_TIER_STEP = 0.35;
+/** 체급 축의 기준 — 카탈로그에 없는 클럽이 떨어지는 자리이기도 하다 */
+const STAGE_TIER_PIVOT = 3;
+/**
+ * 무대 차의 상한. 후보 무게가 **지수**라(`suitorWeightOf`) 상한이 없으면 챔피언십과
+ * 맨시티의 차 하나가 후보 전체를 한 구단으로 만든다.
+ */
+const STAGE_GAP_CAP = 2.5;
+/** 이보다 작은 차는 근거 목록에 항을 세우지 않는다 — 0짜리 줄은 「왜」가 아니다 */
+const STAGE_NOTABLE = 0.15;
+/** 이 나이부터 시장 전용 리그의 `veteranAppetite`가 무대 차에 얹힌다 */
+export const VETERAN_AGE = 30;
+/** 그 폭 — 사우디(2.2)가 서른셋에게 +0.72칸이다 */
+const STAGE_VETERAN_STEP = 0.6;
+/**
+ * 후보 무게 `exp(무대 차 × 끌림)`의 지수 — **주전은 위 무대가, 잉여는 아래가 붙는다.**
+ * 잉여 쪽이 작은 것은 벤치를 벗어나는 이적이 위로도 아래로도 갈 수 있어서다.
+ */
+const STAGE_PULL_STARTER = 0.8;
+const STAGE_PULL_SURPLUS = -0.5;
+/** 무대 차 한 칸이 매각·임대 송출의 **선수 관문**에 싣는 점수 */
+const STAGE_SCORE_PER_STEP = 0.55;
+/** 갈 곳 가운데 우리보다 큰 무대가 하나라도 있으면 「다른 구단의 관심」 축에 더 실린다 */
+const BIGGER_STAGE_SCORE = 0.25;
+
+/** 창 마감일을 **포함한** 마지막 이레 — 이 안이 마감 주다 */
+export const DEADLINE_DAYS = 7;
+/**
+ * 마감 주의 배수 — **AI↔AI 시장의 시도 수와 우리에게 오는 오퍼의 하루 확률이 같은
+ * 값을 탄다** (`ai-market.ts`가 여기서 읽는다). 실제 데드라인 데이의 쏠림이다.
+ */
+export const DEADLINE_RUSH = 2.2;
+/**
+ * 마감 주에 **부르는 값과 사는 쪽 상한이 함께** 오르는 폭.
+ *
+ * ⚠️ 값만 올리면 안 된다 — 오퍼가 사는 쪽 상한(`BUYER_CEILING_MULTIPLE`) 위로 나가
+ * 성사 확률이 도리어 무너진다: 상대가 제 발로 낸 오퍼인데 「너무 비싸다」로 읽힌다.
+ */
+export const DEADLINE_PREMIUM = 1.35;
+
 /** 현 계약보다 깎아 부를 때 — 깎이는 비율에 곱하는 점수와 그 바닥 */
 const PAY_CUT_SCORE_PER_UNIT = 3;
 const PAY_CUT_SCORE_FLOOR = -0.9;
@@ -708,7 +767,7 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
   /**
    * **장부에 선 관심이 먼저 말한다** (→ docs/simulation/transfer.md §1-2).
    *
-   * `suitorCountOf`는 「그를 주전으로 쓸 수 있는 구단 수」라 잠재의 자다 — 아무도
+   * `suitorsOf`는 「그를 주전으로 쓸 수 있는 구단」이라 잠재의 자다 — 아무도
    * 움직이지 않아도 언제나 같은 값이다. 우리가 협상을 연 뒤 실제로 붙은 경쟁
    * 구단은 그것과 다른 사실이라, 그 줄이 있으면 그 줄이 이 항을 쓴다. 「지금
    * 지르지 않으면 뺏긴다」가 성립하는 자리가 여기다.
@@ -717,7 +776,8 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
    * 두 줄 서고, 감독이 읽는 확률 근거가 같은 말을 두 번 한다.
    */
   const rivals = interestsOn(state, player.id);
-  const suitors = suitorCountOf(state, player);
+  const suitorIds = suitorsOf(state, player);
+  const suitors = suitorIds.length;
   if (rivals.length > 0) {
     const bidding = rivals.filter((i) => i.stage === "bidding").length;
     contributions.push({
@@ -731,11 +791,15 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
         (bidding > 0 ? " — 값을 부를 참이다" : " — 우리만 보고 있는 것이 아니다"),
     });
   } else if (suitors >= SUITORS_MANY) {
+    // 그중 우리보다 큰 무대가 있으면 더 급하지 않다 — 셈에는 없던 크기다 (§1-3)
+    const bigger = biggerSuitorsOf(state, suitorIds).length;
     contributions.push({
       gate: "player",
-      score: byLoyalty(-0.5, loyalty, "stay"),
+      score: byLoyalty(-0.5 - (bigger > 0 ? BIGGER_STAGE_SCORE : 0), loyalty, "stay"),
       label: "다른 구단의 관심",
-      why: `우리 말고도 그를 곧바로 주전으로 쓸 구단이 ${suitors}곳이다 — 급하지 않다`,
+      why:
+        `우리 말고도 그를 곧바로 주전으로 쓸 구단이 ${suitors}곳이다 — 급하지 않다` +
+        (bigger > 0 ? ` (그중 ${bigger}곳은 우리보다 큰 무대다)` : ""),
     });
   } else if (suitors === 0) {
     contributions.push({
@@ -1023,7 +1087,17 @@ function sellOdds(
   knowledge: Knowledge,
 ): DealOdds {
   const marketValue = marketValueOf(state, player);
-  const buyerCeiling = Math.round(marketValue * BUYER_CEILING_MULTIPLE);
+  const buyerTeamId = terms.counterpartTeamId;
+  /**
+   * **마감 주에는 사는 쪽 상한이 오른다** (transfer.md §1-3) — 오퍼가 부르는 값이
+   * 타는 것과 같은 수(`DEADLINE_PREMIUM`)다. 값만 올리고 상한을 두면 상대가 제
+   * 발로 낸 오퍼가 「너무 비싸다」로 읽힌다.
+   */
+  const buyerCeiling = Math.round(
+    marketValue *
+      BUYER_CEILING_MULTIPLE *
+      (buyerTeamId === undefined ? 1 : deadlinePremiumOf(state, buyerTeamId)),
+  );
   const wageExpectation = wageExpectationOf(state, player);
   const contributions: Array<{
     gate: "club" | "player";
@@ -1076,6 +1150,14 @@ function sellOdds(
       label: "계약 잔여",
       why: "계약이 1년도 남지 않아 붙잡을 명분이 약하다",
     });
+  }
+  /**
+   * **무대** — 사는 구단이 우리보다 큰가 (transfer.md §1-3). 상대를 모르는 조회
+   * (`counterpartTeamId` 없이 부르는 자리)에서는 서지 않는다: 잴 구단이 없다.
+   */
+  const stage = buyerTeamId === undefined ? null : stageContribution(state, buyerTeamId, player);
+  if (stage) {
+    contributions.push({ gate: "player", score: stage.score, label: "무대", why: stage.why });
   }
   const negotiation = state.manager.attributes.negotiation;
   if (Math.abs(negotiation - 50) >= 5) {
@@ -1168,6 +1250,142 @@ export function unilateralSeveranceOf(state: GameState, playerId: string): numbe
 }
 
 /**
+ * **무대의 자** — 구단 하나를 한 숫자로 (→ docs/simulation/transfer.md §1-3).
+ *
+ * 스쿼드 등급·리그 경제 수준·대항전·체급 넷을 더한다. 넷이 다 필요하다: 등급만으로는
+ * 구장과 브랜드가 사라지고(뉴캐슬 = 브라이턴), 체급만으로는 리그가 사라진다
+ * (챔피언십 강호 = EPL 하위). 대항전은 시즌마다 움직이는 유일한 축이라, 유럽에 나가는
+ * 해와 못 나가는 해가 같은 구단을 다른 무대로 만든다.
+ *
+ * **읽기 전용 파생이다** — `squadDepthOf`와 같은 결로, 세운 뒤 선수가 옮겨 가면 낡는다.
+ * 한 번의 순회 안에서 세우고 버린다.
+ */
+export interface StageScale {
+  /** 이 구단의 무대 값 — 견주는 것은 `gapTo`다 */
+  stageOf(teamId: string): number;
+  /** 우리 무대와의 차 — 양수면 우리보다 큰 무대. `STAGE_GAP_CAP`에서 멈춘다 */
+  gapTo(teamId: string): number;
+}
+
+export function stageScaleOf(state: GameState): StageScale {
+  const ratings = squadRatingsOf(state);
+  const cache = new Map<string, number>();
+  const stageOf = (teamId: string): number => {
+    const seen = cache.get(teamId);
+    if (seen !== undefined) return seen;
+    const economy = Math.max(
+      STAGE_ECONOMY_FLOOR,
+      leagueEconomyLevel(leagueOfTeamIn(state, teamId)),
+    );
+    const cup = euroCompetitionOf(state.euroEntrants, teamId);
+    const value =
+      (ratings.get(teamId) ?? 0) / STAGE_RATING_SPAN +
+      Math.log2(economy) * STAGE_LEAGUE_STEP +
+      (cup === null ? 0 : (STAGE_EURO_STEP[cup] ?? 0)) +
+      (STAGE_TIER_PIVOT - tierOfTeamIn(state, teamId)) * STAGE_TIER_STEP;
+    cache.set(teamId, value);
+    return value;
+  };
+  return {
+    stageOf,
+    gapTo: (teamId) => {
+      const gap = stageOf(teamId) - stageOf(state.userTeamId);
+      return Math.max(-STAGE_GAP_CAP, Math.min(STAGE_GAP_CAP, gap));
+    },
+  };
+}
+
+/**
+ * **이 선수 눈에 이 구단이 얼마나 큰 무대인가** — 구단의 무대 차에 노장 선호가 얹힌다.
+ * 사우디가 스쿼드 등급으로는 위가 아닌데도 서른셋에게는 큰 무대인 자리가 여기다.
+ */
+export function stageGapFor(
+  state: GameState,
+  teamId: string,
+  player: GamePlayer,
+  scale: StageScale = stageScaleOf(state),
+): number {
+  const gap = scale.gapTo(teamId);
+  if (ageOf(player.birthdate, state.date) < VETERAN_AGE) return gap;
+  const appetite = marketBiasOf(state, teamId).veteranAppetite;
+  return appetite <= 1 ? gap : gap + (appetite - 1) * STAGE_VETERAN_STEP;
+}
+
+/**
+ * 매각·임대 송출의 **선수 관문**에 서는 「무대」 항 — 「레알이면 간다, 브렌트포드면
+ * 안 간다」가 성립하는 자리다 (transfer.md §1-3).
+ *
+ * 차가 `STAGE_NOTABLE`보다 작으면 `null` — 근거 목록에 0짜리 줄을 세우지 않는다.
+ * **구단 관문은 이 항을 읽지 않는다**: 무대는 선수가 가고 싶은가의 자이고, 사는
+ * 구단이 그 값을 낼 수 있는가는 예산과 상한의 일이다.
+ */
+export function stageContribution(
+  state: GameState,
+  buyerTeamId: string,
+  player: GamePlayer,
+  scale?: StageScale,
+): { score: number; why: string } | null {
+  const gap = stageGapFor(state, buyerTeamId, player, scale);
+  if (Math.abs(gap) < STAGE_NOTABLE) return null;
+  return {
+    score: gap * STAGE_SCORE_PER_STEP,
+    why:
+      gap > 0
+        ? `${teamName(buyerTeamId)}는 우리보다 큰 무대다 — 그 자체가 갈 이유다`
+        : `${teamName(buyerTeamId)}는 우리보다 작은 무대다 — 내려갈 이유가 없다`,
+  };
+}
+
+/**
+ * 이 구단이 이 선수에게 값을 부를 **무게** — `exp(무대 차 × 끌림)`.
+ *
+ * 지수인 것은 무대 차가 더하기로 쌓인 값이라 곱으로 돌려놓아야 「두 칸 위」가
+ * 「한 칸 위」의 제곱이 되기 때문이다(로그오즈와 같은 꼴 — 차가 0이면 무게 1).
+ *
+ * **뽑는 자리는 둘인데 자는 하나다** — 관심이 설 때(`standOnOurs`)와 관심 없이
+ * 오퍼가 붙을 때(`pickBuyer`). 두 벌이 되면 「빅클럽이 노린다」가 갈래마다 달라진다.
+ *
+ * @param blockedHere 우리 스쿼드에서 그 자리에 그보다 나은 선수 수 — 0이면 주전이다
+ */
+export function suitorWeightOf(
+  state: GameState,
+  teamId: string,
+  player: GamePlayer,
+  scale: StageScale,
+  blockedHere: number,
+): number {
+  const pull = blockedHere === 0 ? STAGE_PULL_STARTER : STAGE_PULL_SURPLUS;
+  return Math.exp(stageGapFor(state, teamId, player, scale) * pull);
+}
+
+// ── 마감 주 — 마지막 이레가 다르다 (transfer.md §1-3) ────
+
+/** 그 날이 그 창의 마감 주인가 — 마감일을 **포함한** 마지막 이레 */
+export function isDeadlineWeek(date: string, closesOn: string): boolean {
+  const left = diffDays(date, closesOn);
+  return left >= 0 && left < DEADLINE_DAYS;
+}
+
+/**
+ * 그 구단 협회의 창이 지금 마감 주인가 — **창은 사는 쪽 것이다** (§3).
+ * 우리 창이 닫힌 9월의 사우디 마감도 사우디 창으로 잰다.
+ */
+export function inDeadlineWeek(state: GameState, teamId: string, date = state.date): boolean {
+  const window = windowOpenForTeam(state, teamId, date);
+  return window !== null && isDeadlineWeek(date, window.closesOn);
+}
+
+/** 마감 주면 오퍼가 붙을 하루 확률에 곱해지는 값 */
+export function deadlineRushOf(state: GameState, teamId: string, date = state.date): number {
+  return inDeadlineWeek(state, teamId, date) ? DEADLINE_RUSH : 1;
+}
+
+/** 마감 주면 **부르는 값과 사는 쪽 상한에 함께** 곱해지는 값 */
+export function deadlinePremiumOf(state: GameState, teamId: string, date = state.date): number {
+  return inDeadlineWeek(state, teamId, date) ? DEADLINE_PREMIUM : 1;
+}
+
+/**
  * 지금 그를 데려가면 **곧바로 주전으로 쓸** 구단 수 — 선수 관문(재계약·해지·영입)의
  * "다른 구단의 관심" 축의 자다 (transfer.md §3).
  *
@@ -1199,8 +1417,20 @@ export function suitorsOf(
   return suitors;
 }
 
-function suitorCountOf(state: GameState, player: GamePlayer): number {
-  return suitorsOf(state, player).length;
+/**
+ * 갈 곳 가운데 **우리보다 큰 무대** — 「더 큰 무대」를 묻는 자리가 이 자 하나를 쓴다
+ * (→ docs/simulation/transfer.md §1-3).
+ *
+ * 「갈 곳이 여섯이다」와 「그중 셋이 우리보다 큰 무대다」는 다른 사실이다. 앞은
+ * `suitorsOf`가 세고, 크기를 묻는 것은 여기다 — 이적 요청의 `bigger-club` 사유
+ * (`club/approach.ts`)와 선수 관문의 「다른 구단의 관심」 축이 함께 부른다.
+ */
+export function biggerSuitorsOf(
+  state: GameState,
+  suitors: readonly string[],
+  scale: StageScale = stageScaleOf(state),
+): string[] {
+  return suitors.filter((id) => scale.gapTo(id) > 0);
 }
 
 /**
@@ -1331,12 +1561,16 @@ function renewOdds(
 
   // 남을 이유는 곱하고 떠날 이유는 나눈다 (transfer.md §3 · people.md §6)
   const loyalty = archetypeTraitsOf(state.seed, player).loyalty;
-  const suitors = suitorCountOf(state, player);
+  const suitorIds = suitorsOf(state, player);
+  const suitors = suitorIds.length;
   if (suitors >= SUITORS_MANY) {
+    const bigger = biggerSuitorsOf(state, suitorIds).length;
     contributions.push({
-      score: byLoyalty(-0.6, loyalty, "leave"),
+      score: byLoyalty(-0.6 - (bigger > 0 ? BIGGER_STAGE_SCORE : 0), loyalty, "leave"),
       label: "다른 구단의 관심",
-      why: `그를 곧바로 주전으로 쓸 구단이 ${suitors}곳이다 — 남을 이유가 그만큼 약하다`,
+      why:
+        `그를 곧바로 주전으로 쓸 구단이 ${suitors}곳이다 — 남을 이유가 그만큼 약하다` +
+        (bigger > 0 ? ` (그중 ${bigger}곳은 우리보다 큰 무대다)` : ""),
     });
   } else if (suitors === 0) {
     contributions.push({
@@ -1504,12 +1738,16 @@ function releaseOdds(
 
   // 해지는 나가는 쪽이 성사다 — 부호만 재계약과 반대이고 계수가 걸리는 결은 같다
   const loyalty = archetypeTraitsOf(state.seed, player).loyalty;
-  const suitors = suitorCountOf(state, player);
+  const suitorIds = suitorsOf(state, player);
+  const suitors = suitorIds.length;
   if (suitors >= SUITORS_MANY) {
+    const bigger = biggerSuitorsOf(state, suitorIds).length;
     contributions.push({
-      score: byLoyalty(0.6, loyalty, "leave"),
+      score: byLoyalty(0.6 + (bigger > 0 ? BIGGER_STAGE_SCORE : 0), loyalty, "leave"),
       label: "다른 구단의 관심",
-      why: `그를 곧바로 주전으로 쓸 구단이 ${suitors}곳이다 — 나가도 갈 곳이 있다`,
+      why:
+        `그를 곧바로 주전으로 쓸 구단이 ${suitors}곳이다 — 나가도 갈 곳이 있다` +
+        (bigger > 0 ? ` (그중 ${bigger}곳은 우리보다 큰 무대다)` : ""),
     });
   } else if (suitors === 0) {
     contributions.push({

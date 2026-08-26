@@ -44,15 +44,18 @@ import { recentOutcomes } from "../squad/slump";
 import { agentForPlayer, ownerOf } from "../world/persona";
 import { USER_WARNINGS_BEFORE_SACK } from "../market/manager-market";
 import {
+  biggerSuitorsOf,
   CAREER_AGE_MOVE,
   isSeriousOffer,
   loanLockOf,
   renewalExpectation,
+  stageScaleOf,
   SUITORS_MANY,
   suitorsOf,
   windowOpenForTeam,
+  type StageScale,
 } from "../market/market";
-import { squadDepthOf, squadRating, type SquadDepth } from "../squad/depth";
+import { squadDepthOf, type SquadDepth } from "../squad/depth";
 import { boardDemandFact } from "./board-demand";
 import {
   applyStanceOutcome,
@@ -905,23 +908,17 @@ function standBiggerClubRequests(state: GameState, digest: string[]): void {
    * 색인 값이 된다. 세운 뒤에는 그날 안에서 다시 세우지 않는다.
    */
   let depth: SquadDepth | null = null;
-  const ratings = new Map<string, number>();
-  const ratingOf = (teamId: string): number => {
-    const cached = ratings.get(teamId);
-    if (cached !== undefined) return cached;
-    const value = squadRating(state, teamId);
-    ratings.set(teamId, value);
-    return value;
-  };
+  let scale: StageScale | null = null;
 
   for (const player of candidates) {
     if (rng() >= BIGGER_CLUB_CHANCE) continue;
     depth ??= squadDepthOf(state);
+    scale ??= stageScaleOf(state);
     const suitors = suitorsOf(state, player, depth);
     if (suitors.length < SUITORS_MANY) continue;
-    // 갈 곳이 많은 것만으로는 이유가 되지 않는다 — 그중 하나는 우리보다 커야 한다
-    const ours = ratingOf(state.userTeamId);
-    if (!suitors.some((id) => ratingOf(id) > ours)) continue;
+    // 갈 곳이 많은 것만으로는 이유가 되지 않는다 — 그중 하나는 우리보다 큰 무대여야
+    // 한다. 「우리보다 크다」의 자는 하나다 (`biggerSuitorsOf` — transfer.md §1-3)
+    if (biggerSuitorsOf(state, suitors, scale).length === 0) continue;
     if (!standTransferRequest(state, player.id, "bigger-club")) continue;
     const agent = agentForPlayer(state, player.id);
     digest.push(
