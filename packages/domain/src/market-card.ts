@@ -54,9 +54,18 @@ export interface MarketTerms {
 
 export interface MarketCard {
   kind: MarketCardKind;
+  /**
+   * 이 카드가 가리키는 것 — 대개 선수 id다. **스카우트 임무만 임무 id를 든다**:
+   * 조건으로 나가는 파견에는 선수가 없다 (`scout_mission` — docs/data/player.md §9.4).
+   * 카드를 그리는 쪽은 이 값을 열쇠로만 쓰고 선수로 되풀지 않는다.
+   */
   playerId: string;
+  /** 누구인가 — 임무 카드에서는 **무엇을 찾는가**(조건 한 줄)가 그 자리에 선다 */
   playerName: string;
-  /** 거래 상대 구단 — 데려오는 거래면 선수의 지금 소속, 내보내는 거래면 사려는 구단 */
+  /**
+   * 거래 상대 구단 — 데려오는 거래면 선수의 지금 소속, 내보내는 거래면 사려는 구단.
+   * 임무 카드에서는 **뒤지는 곳**(대회)이다.
+   */
   counterpart: string;
   /** 우리가 낸 조건 */
   terms?: MarketTerms;
