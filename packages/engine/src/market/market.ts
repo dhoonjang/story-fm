@@ -26,7 +26,7 @@ import { betterAtPosition, squadDepthOf, type SquadDepth } from "../squad/depth"
 import { derivedSquadStatus } from "../squad/promises";
 import { archetypeTraitsOf } from "../world/player-persona";
 import { knowledgeOf, KNOWLEDGE_KO, type Knowledge } from "../squad/scouting";
-import { userWageRoom } from "../club/board-request";
+import { signingBudgetOf, userWageRoom } from "../club/board-request";
 import { budgetFreezeLabel, formatMoney } from "../club/finance";
 import {
   activeContract,
@@ -567,9 +567,18 @@ export function dealOdds(state: GameState, terms: DealTerms): DealOdds {
         `보드가 이적 예산을 동결했습니다${budgetFreezeLabel(state, state.userTeamId)} — 먼저 매각해야 합니다`,
       );
     }
+    /**
+     * **보드가 그 선수 앞으로 승인한 몫은 예산 위에 얹혀 있다** (finance.md §9.6).
+     * 확정 관문(`negotiation.ts`의 `affordabilityGate`)이 보는 자와 같아야 한다 —
+     * 갈리면 "가능하다"고 말한 오퍼가 도장 앞에서 막힌다 (transfer.md §11).
+     *
+     * 임대는 그 자를 쓰지 않는다: 보드가 승인한 것은 영입이지 임대가 아니다.
+     */
+    const signingBudget =
+      terms.kind === "loan" ? ourFinance.transferBudget : signingBudgetOf(state, player.id);
     // 분할이면 이번 창에 나갈 것은 첫 회분뿐이다 (transfer.md §5-2)
-    if (firstInstallmentOf(terms.fee, terms.paymentYears) > ourFinance.transferBudget) {
-      blockers.push(`이적 예산을 넘습니다 — 가용 ${formatMoney(ourFinance.transferBudget)}`);
+    if (firstInstallmentOf(terms.fee, terms.paymentYears) > signingBudget) {
+      blockers.push(`이적 예산을 넘습니다 — 가용 ${formatMoney(signingBudget)}`);
     }
     /**
      * **주급 여력** — 이적료를 낼 수 있어도 매주 나갈 돈이 없으면 못 데려온다.

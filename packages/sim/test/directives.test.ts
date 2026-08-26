@@ -352,7 +352,15 @@ describe("개인 지시 — 이득과 대가", () => {
       them(),
     );
     expect(after.home.zones.attack).toBeLessThan(before.home.zones.attack);
-    expect(after.guide.expectedGoals.home).toBeLessThanOrEqual(before.guide.expectedGoals.home);
+    /**
+     * **재는 자리는 존을 읽는 채널이다** — 열린 플레이 xg. 팀 기대 득점에는 죽은 공이
+     * 섞여 있는데(match.md §1.4) 그 채널은 존이 아니라 제공권·킥력을 읽으므로, 마크가
+     * 점유를 끌어와 슈팅 총량이 늘면 대가와 무관하게 함께 오른다 — 그건 이 지시가
+     * 공짜라는 뜻이 아니라 코너를 더 얻었다는 뜻이다.
+     */
+    const openGoals = (packet: typeof before) =>
+      (packet.guide.shotProfiles?.home ?? []).reduce((sum, p) => sum + p.expectedGoals, 0);
+    expect(openGoals(after)).toBeLessThanOrEqual(openGoals(before));
   });
 
   it("수비 위치 유지는 뒤를 두껍게 하고 앞의 인원을 던다", () => {

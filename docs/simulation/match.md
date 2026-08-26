@@ -107,18 +107,19 @@ zones = XI 가중 평균(ZONE_CONTRIBUTION) × 존 기준선(ZONE_BASELINE)
 연속적으로 배분한다. 양 팀 모두 같은 경로를 쓴다.
 
 **XI 가중 평균은 평점의 지수를 한 번 지난다** (`abilityCurve` — `ABILITY_LOG_SLOPE`
-0.017 · `ABILITY_PIVOT` 72). 축구 득점의 표준 통계 모델(Maher 1982 · Dixon–Coles 1997)은
+0.019 · `ABILITY_PIVOT` 72). 축구 득점의 표준 통계 모델(Maher 1982 · Dixon–Coles 1997)은
 `log λ`가 공격·수비 **평점의 차**에 선형이다 — 전력은 평점의 지수이고, 같은 5점 차는
-60 대 65에서도 80 대 85에서도 같은 승률 차다(Elo와 같은 꼴). 존의 가중 평균을 그대로
-비율로 맞세우면(거듭제곱을 포함해) 같은 점 차가 위에서는 작게 아래에서는 크게 세어져
-우승 후보가 중위권에 발목을 잡히고 강등권만 짓눌린다 — 우승 승점이 70점대에 주저앉고
-(실제 1부 84~93) 시즌 xG 비도 1.4:1에 멎는다(실제 2.5:1). ⚠️ **기울기 자체는 승점 곡선의
-손잡이가 아니다** — 이 꼴이 고치는 것은 같은 점 차를 리그의 위와 아래에서 다르게 세던
-일이고, 곡선을 세워도 남는 폭은 §9가 적은 대로 다른 자리에 있다. 그래서 세 존의 가중 평균 x를
-`exp(0.017 × (x − 72))`에 올린다: 두 팀의 전력 비는 `exp(0.017 × 평점 차)`이고 축의 위치와
-무관하다. 전술·상성·공략·개인 지시는 이 곡선 **뒤에** 곱해지므로 지시 한 칸이 존을
-움직이는 폭은 그대로다 — 벌어지는 것은 능력의 격차뿐이고, 존 안의 폼·체력·적응도·
-관중이 옮긴 몫은 같은 지수를 탄다. 축은 절대값(화면의 존 숫자)에만 닿는다.
+60 대 65에서도 80 대 85에서도 같은 승률 차다(Elo와 같은 꼴). 그런데 종합의 눈금은 위가
+눌려 있어 81과 76이 비율로는 1.07뿐이고, 그 비를 그대로 맞세우면 격차가 xG 1.25:1로만
+번역돼 우승 승점이 70점대에 주저앉는다(실제 1부 84\~93). 그래서 세 존의 가중 평균 x를
+`exp(0.019 × (x − 72))`에 올린다: 두 팀의 전력 비는 `exp(0.019 × 평점 차)`이고 축의 위치와
+무관하다.
+
+⚠️ **곡선은 능력 항에만 건다.** 전술·상성·공략·개인 지시는 존이 완성되는 자리에서
+**곱**으로 얹히므로(`tacticShift`) 이 곡선 밖에 남는다 — 그 폭은 §1.2·§1.3이 이미 자기
+눈금(2.5\~15%)으로 정해 둔 값이라, 함께 부풀리면 지시 한 칸이 능력 차만큼 무거워지고
+개인 지시가 공짜 이득을 낸다. 같은 이유로 **점유는 곡선을 태우지 않은 중원을 읽는다**
+(§1.5) — 곡선은 능력 차를 득점으로 옮기는 눈금이고 점유는 그보다 훨씬 평평하다.
 
 **세 존은 한 눈금 위에 선다 — 매치업 비율의 기준선은 1이다** (`ZONE_BASELINE`
 공격 0.957 · 중원 1 · 수비 1.045). 같은 전력이 맞설 때 `우리 공격 / 상대 수비`가
@@ -336,9 +337,9 @@ ln λᵢᵣ = ln PLAYER_SHOT_BASE
 경기 상황을 다루는 꼴 그대로라 골마다 같은 배가 곱해진다: 앞선 팀은
 `e^(−LEAD_SHOT_LOG_RATE(0.10) × 골 차)`(한 골 0.90 · 두 골 0.82 · 세 골 0.74), 뒤진 팀은
 `e^(TRAIL_SHOT_LOG_RATE(0.05) × 골 차)`(1.05 · 1.11 · 1.16). 실측(xG의 경기 상황 분해)이
-한 골 앞서면 0.85~~0.9, 두 골이면 0.7~~0.75, 뒤지면 1.1~~1.2인 계단을 이 지수가 그대로
+한 골 앞서면 0.85\~0.9, 두 골이면 0.7\~0.75, 뒤지면 1.1\~1.2인 계단을 이 지수가 그대로
 지난다. 전력차만으로 굴리면 3-0 뒤에도 앞선 팀이 같은 밀도로 문 앞에 서서 5-0·6-0이
-실제(팀 4골+ 5~~6%)보다 잦다. 두 시뮬이 같은 문을 지난다 — 구간 시뮬은 구간마다 패킷을
+실제(팀 4골+ 5\~6%)보다 잦다. 두 시뮬이 같은 문을 지난다 — 구간 시뮬은 구간마다 패킷을
 다시 세우고(`match-flow.ts`가 장부의 스코어를 넘긴다), 간이 시뮬은 골 정지점마다 다시
 세운다(§7).
 
@@ -520,6 +521,7 @@ logit(죽은 공 xG) = logit(CORNER_XG_BASE)
 
 ```
 점유(우리) = 우리 중원 / (우리 중원 + 상대 중원)        범위 [0.35, 0.65]
+           ⚠️ 중원은 **능력 곡선을 태우지 않은** 값이다 (§1.1)
 ```
 
 | 어디에    | 어떻게                                                                                                                            |
@@ -1551,95 +1553,95 @@ DF +1.4 · MF +1.1 · FW +0.9 · 도움 +0.6 · 무실점 GK +0.8/DF +0.5 · 실
 
 ### 밸런스 손잡이 한눈에
 
-| 상수                                                                  | 값                                              | 무엇을 정하나                                                                                                                                |
-| --------------------------------------------------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ABILITY_LOG_SLOPE` · `ABILITY_PIVOT`                                 | 0.017 · 72                                      | 세 존의 XI 가중 평균을 평점의 지수로 옮기는 기울기와 축 (§1.1) — 전력 비 = e^(기울기 × 평점 차), 전술·공략은 이 뒤에 곱해진다                |
-| `PLAYER_SHOT_BASE`                                                    | 1.08                                            | 평균 위치의 선수에게서 시작하는 기대 슈팅                                                                                                    |
-| `BASE_SHOT_XG`                                                        | 0.087                                           | 대등한 경로에서 시작하는 **열린 플레이** 슈팅 질 — 죽은 공이 별도 채널로 나가며 다시 잰 값 (§1.4). 여섯 시드 실측 리그 득점 2.86 · 슈팅 24.7 |
-| `SHOT_DEPTH_LOG_WEIGHT`                                               | 2.3                                             | 실제 전술판의 전진 위치가 슈팅량에 닿는 세기                                                                                                 |
-| `SHOT_DEPTH_XG_LOGIT_WEIGHT`                                          | 0.65                                            | 같은 전진 위치가 슈팅 **질**에 닿는 세기                                                                                                     |
-| `ROLE_SHOT_LOG_WEIGHT`                                                | 0.45                                            | 역할의 결정력 요구가 슈팅 책임으로 번역되는 세기                                                                                             |
-| `POSSESSION_SHOT_LOG_WEIGHT`                                          | 0.32                                            | 점유가 선수별 슈팅 로그오즈에 실리는 세기 (§1.5)                                                                                             |
-| `CREATION_SKILL_LOG_WEIGHT`                                           | 0.75                                            | 선수의 기회 생성 전력이 슈팅량에 닿는 세기                                                                                                   |
-| `FINISHING_ACCESS_LOG_WEIGHT`                                         | 0.10                                            | 결정력이 슈팅 접근에 주는 작은 효과                                                                                                          |
-| `FINISHING_PIVOT` · `FINISHING_SCALE`                                 | 75 · 34                                         | 기회 xG를 그대로 실현하는 슈팅 가중 리그 기준점과 그 주변의 대칭 눈금                                                                        |
-| `FINISHING_LOGIT_WEIGHT`                                              | 0.55                                            | 같은 xG를 실제 골로 바꾸는 결정력 효과                                                                                                       |
-| `CHANCE_SKILL_XG_LOGIT_WEIGHT`                                        | 0.45                                            | 침투·돌파·스피드·공중볼이 슈팅 질에 닿는 세기                                                                                                |
-| `ROUTE_SHOT_LOG_WEIGHT`                                               | 0.75                                            | 경로 우위가 슈팅량에 닿는 세기                                                                                                               |
-| `ROUTE_XG_LOGIT_WEIGHT`                                               | 0.7                                             | 최종 공격 지역 우위가 슈팅 질에 닿는 세기                                                                                                    |
-| `HOME_SHOT_EXPOSURE` · `AWAY_SHOT_EXPOSURE`                           | 1.06 · 0.96                                     | 홈·원정이 슈팅량에 곱하는 노출 — 중립 경기는 둘 다 1. 홈 이점은 이 한 줄이 전부다 (§1.4)                                                     |
-| `LEAD_SHOT_LOG_RATE` · `TRAIL_SHOT_LOG_RATE`                          | 0.10 · 0.05                                     | 골 차 하나가 앞선 팀·뒤진 팀의 슈팅 로그오즈에 더하는 몫 (§1.4) — 대량 득점의 꼬리를 잡는다                                                  |
-| `ROUTE_SHOT_SATURATION`                                               | 0.75                                            | 이득 쪽 경로 우위가 **슈팅량**에서 포화하는 폭 (tanh) — 넓다(승부의 기울기)                                                                  |
-| `ROUTE_XG_SATURATION`                                                 | 0.45                                            | 같은 우위가 **슈팅 질**에서 포화하는 폭 — 좁다(총 득점 상한)                                                                                 |
-| `ROUTE_SHOT_DEFICIT`                                                  | 1.3                                             | 밀리는 쪽의 슈팅량이 더 크게 깎이는 배수                                                                                                     |
-| `SHORTHANDED_PENALTY`                                                 | 0.12                                            | 빠진 인원 한 명이 세 줄에 함께 내는 손해 (최대 3명)                                                                                          |
-| `SHOT_XG_CONCENTRATION`                                               | 16                                              | 슈팅별 xG 분포의 퍼짐                                                                                                                        |
-| `SET_PIECE_SHOT_SHARE`                                                | 0.31                                            | 팀 기대 슈팅 중 **죽은 공**(코너·프리킥) 몫 — 위에 더하지 않고 안에서 옮긴다 (§1.4)                                                          |
-| `PENALTY_PER_MATCH`                                                   | 0.25                                            | 경기당 페널티 — 양 팀 합. 실제 1부가 0.2\~0.3회다. 정규화하므로 리그 빈도가 정확히 이 값이다                                                 |
-| `CORNER_XG_BASE`                                                      | 0.08                                            | 대등한 제공권·평범한 키커가 올린 죽은 공 슛 하나의 기회 xG                                                                                   |
-| `SET_PIECE_KICK_XG_LOGIT_WEIGHT`                                      | 0.45                                            | 키커의 킥력이 죽은 공 질에 닿는 세기 — 킥력 90은 65보다 1.35배                                                                               |
-| `SET_PIECE_AERIAL_XG_LOGIT_WEIGHT`                                    | 0.5                                             | 박스 안 제공권 우열이 죽은 공 질에 닿는 세기                                                                                                 |
-| `CORNER_SHOT_SHARE`                                                   | 0.58                                            | 죽은 공 슛 중 코너에서 나온 몫 — 나머지가 프리킥                                                                                             |
-| `DIRECT_FREE_KICK_SHARE`                                              | 0.2                                             | 프리킥 슛 중 키커가 직접 차는 몫 (직접 프리킥 — 도움이 없다)                                                                                 |
-| `CORNERS_PER_SHOT`                                                    | 0.84                                            | 팀 기대 슈팅 하나가 데려오는 코너 — 실제 1부의 팀당 10.5개                                                                                   |
-| `FOULS_PER_MATCH`                                                     | 21                                              | 경기당 파울 — 양 팀 합, 강도를 곱한다 (`teamFoulRate`)                                                                                       |
-| `PENALTY_ROUGH_SCALE`                                                 | 40                                              | 수비 라인의 거칠기가 페널티 헌납 몫을 기울이는 눈금 — **두 팀 사이의 비로만** 뜻을 갖는다                                                    |
-| `PENALTY_FLOOR` · `PENALTY_CEILING` · `PENALTY_BASE` · `PENALTY_EDGE` | 0.62 · 0.80 · 0.71 · 0.0035                     | 페널티 성공률의 대역과 기량 차의 세기 — 경기 중 페널티와 승부차기가 **같은 식**이다 (`penaltyRate`)                                          |
-| `TACTIC_SWING`                                                        | 0.18                                            | 한 존이 전술로 움직일 수 있는 폭 (tanh 포화)                                                                                                 |
-| `REGIONAL_INTENT_WEIGHT`                                              | 0.10\~0.18                                      | 지역 플랜이 그 칸을 두껍게 하는 폭 (의도별)                                                                                                  |
-| `PLAN_ROUTE_FOCUS`                                                    | 0\~3                                            | 지역 플랜이 공격 배분을 그 레인으로 끄는 세기 (보호는 0)                                                                                     |
-| `LANE_FOCUS`                                                          | 0.75                                            | 개인 지시·공략이 겨냥한 칸으로 몰리는 폭 (나머지 두 칸 0.25배)                                                                               |
-| `LANE_BIAS_CAP`                                                       | 0.3                                             | 한 칸이 줄 안에서 기울 수 있는 최대 몫                                                                                                       |
-| `GAIN_CAP`                                                            | 0.08                                            | 지시 하나가 존에 얹는 이득의 상한 — 세기 배수를 탄다                                                                                         |
-| `DIRECTIVE_TUNING.INTENSITY`                                          | 이득 0.6\~1.4 · 대가 0.75\~1.35 · 체력 0.9\~1.2 | 지시 세기(`light`·`normal`·`heavy`)가 세 곳에 함께 거는 배수                                                                                 |
-| `EXPLOIT_GAIN_FLOOR`                                                  | 0.026                                           | 문턱을 겨우 넘은 공략의 이득                                                                                                                 |
-| `EXPLOIT_GAIN_SPAN`                                                   | 0.045                                           | 벌어진 폭이 이득에 더하는 최대치 (tanh)                                                                                                      |
-| `EXPLOIT_WEIGHT_SCALE`                                                | 18                                              | 그 폭의 눈금 — AI 1순위 표적 weight 중앙값(실측)                                                                                             |
-| `AUTO_EXPLOIT_TWO`                                                    | 78                                              | AI 벤치가 두 곳을 동시에 노리는 분석 등급                                                                                                    |
-| `AUTO_EXPLOIT_ONE`                                                    | 58                                              | 한 곳을 노리는 분석 등급 — 그 아래는 판을 못 읽는다                                                                                          |
-| `FULL_MATCH_DRAIN`                                                    | 42                                              | 풀타임 스트라이커의 기준 활동량 — 경기 하나의 대가                                                                                           |
-| `CONDITION_DECAY_SCALE`                                               | 37.2                                            | 활동량을 남은 체력으로 바꾸는 감쇠 눈금                                                                                                      |
-| `GAP_THRESHOLD`                                                       | 78                                              | 그 자리가 열리는 피로 문턱 (= 체력 22)                                                                                                       |
-| `CHASE_DRAIN`                                                         | 0.8                                             | 공 없는 팀이 더 뛰는 폭 (양 끝 ±12%)                                                                                                         |
-| `QUICK_FIRST_HALF_SHARE`                                              | 0.46                                            | 간이 시뮬 사건이 전반에 실리는 몫 — 밀도와 카드 분 눈금이 여기서 선다 (§7)                                                                   |
-| `CARDS_PER_MATCH`                                                     | 4.0                                             | 경기당 기대 카드 — 양팀 합, 두 시뮬 공통 (`teamCardRate`). 실제 1부는 2023년 판정 지침 뒤 경고 4.1~4.2장                                     |
-| `INJURY_PER_MATCH`                                                    | 0.1                                             | 경기당 기대 부상 — 양팀 합, 두 시뮬 공통 (`teamInjuryRate`)                                                                                  |
-| `matchIntensity`                                                      | 0.70\~1.30                                      | 압박·템포·태클 강도가 카드·부상·파울에 함께 거는 배수 — 두 시뮬 공통. 세 항의 합이 clamp와 같아 잘리는 구간이 없다                           |
-| `TACKLING_INTENSITY_STEP`                                             | 0.08                                            | 태클 강도 한 갈래(`hard`·`soft`)가 그 배수에 더하는 몫 (§1.2)                                                                                |
-| `TRANSITION_SWING` · `TACKLING_SWING` · `TRAP_SWING` · `KEEPER_SWING` | 0.03 · 0.03 · 0.025 · 0.025                     | 갈래 넷이 존 하나를 움직이는 폭 — 축 한 칸·상성 이득과 같은 자리 (§1.2)                                                                      |
-| `TRAP_DRILLED_FLOOR` · `TRAP_DRILLED_SPAN` · `TRAP_OFF`               | 0.85 · 0.75 · 1.15                              | 오프사이드 트랩이 `space_behind` 대가에 거는 배수 — 지시 × 적응도, 끄면 고정 (§1.3)                                                          |
-| `COUNTER_ORDER_ONLY`                                                  | 0.6                                             | 6축 구조 없이 **지시로만** 선 역습(`counter_attack`)의 폭 (§1.3)                                                                             |
-| `DERBY_INTENSITY_STEP`                                                | 0.06                                            | 더비 `heat` 한 계단이 그 배수에 **곱하는** 몫 — 1.06 / 1.12 / 1.18, clamp 밖이다 (§1)                                                        |
-| `DERBY_MOOD_STEP`                                                     | 0.02                                            | 더비 승패가 그 팀 스쿼드 전원의 폼에 남기는 폭 × `heat` (§6)                                                                                 |
-| `STRAIGHT_RED_CHANCE`                                                 | 0.02                                            | 경고 없이 곧장 퇴장이 될 확률 — 실제 1부 퇴장은 시즌 45~60장이고 그 절반이 다이렉트다                                                        |
-| `BOOKED_AGAIN_WEIGHT`                                                 | 0.22                                            | 이미 경고를 받은 선수가 다시 뽑힐 가중치 배수 — 나머지 절반(두 번째 경고)이 여기서 선다                                                      |
-| `DIRECTIVE_EFFECTS.careful.booking`                                   | 0.5                                             | `careful` 지시가 그 선수의 카드 가중·곧장 퇴장 확률에 거는 배수 (세기의 이득 배수를 탄다 — `light` 0.7 · `heavy` 0.3)                        |
-| `MAX_SEGMENT_EVENTS`                                                  | 15                                              | 한 구간이 담는 이벤트 상한 (§2·§5)                                                                                                           |
-| `EXTRA_TIME_SHOT_SHARE`                                               | 0.28                                            | 연장 30분의 기대 슈팅 (90분 대비) — 두 시뮬 공통                                                                                             |
-| `EXTRA_TIME_DENSITY`                                                  | 0.84                                            | 그 몫의 **분당** 배수 — 위 값과 `PHASE_END`에서 한 번만 유도한다                                                                             |
-| `MATCH_PROFICIENCY_GAIN`                                              | 1                                               | 그 자리에서 한 경기를 뛴 값 — 주전 38경기면 +38                                                                                              |
-| `AI_SHIFT_BOUND`                                                      | 2                                               | AI의 경기 중 6축이 킥오프 값에서 벌어질 수 있는 최대 눈금                                                                                    |
-| `SUB_CHASE_MINUTE` · `SUB_CHASE_MINUTE_TWO`                           | 60 · 50                                         | 뒤지는 AI가 공격 자원을 넣기 시작하는 분 (한 골 차 · 두 골 이상)                                                                             |
-| `SUB_HOLD_MINUTE`                                                     | 75                                              | 앞선 AI가 수비를 보강하기 시작하는 분                                                                                                        |
-| `SUB_CHASE_MAX` · `SUB_HOLD_MAX`                                      | 2 · 1                                           | 한 경기에 쓰는 승부수·굳히기 교체 장수                                                                                                       |
-| `AI_SHAPE_CHASE_MINUTE` · `AI_SHAPE_HOLD_MINUTE`                      | 65 · 80                                         | AI가 판의 모양을 공격형·5-4-1로 바꾸는 분 (경기당 한 번)                                                                                     |
-| `AI_SHAPE_FAMILIARITY_COST`                                           | 25 × 0.25                                       | 그 모양 전환이 치르는 전술 적응도 (`FORMATION_CHANGE_COST` × 경기 중 계수)                                                                   |
-| `AI_SHIFT_EARLIEST_MINUTE` · `AI_SHIFT_URGENT_MINUTE`                 | 55 · 72                                         | AI 벤치가 6축을 다시 보기 시작하는 분 · 같은 스코어에도 판단이 과감해지는 분 (하프타임은 앞의 문턱을 지나지 않는다)                          |
-| `SAVED_LOGIT_BASE` · `SAVED_LOGIT_XG_WEIGHT`                          | −1.15 · 2.1                                     | 골이 되지 못한 슛이 **유효슈팅(선방)** 으로 남을 로그오즈의 절편과 xG 세기 — 스코어에 닿지 않고 기록의 모양만 정한다 (`savedShare`)          |
-| `BLOCKED_SHARE`                                                       | 0.38                                            | 골문 밖으로 간 슛 중 블록으로 남는 몫 — 나머지가 유효슈팅 실패다                                                                             |
-| `TACTICAL_FIT_FLOOR` · `TACTICAL_FIT_SPAN`                            | 0.92 · 0.16                                     | 감독 전술 능력이 존 전력 전체에 거는 배수의 바닥과 폭 (§1.2 `tacticalFit`)                                                                   |
-| `UPTAKE_FLOOR` · `UPTAKE_TACTICS_SPAN` · `UPTAKE_FAMILIARITY_SPAN`    | 0.45 · 0.35 · 0.2                               | 지시 적용률의 세 항 — 셋의 합이 1.0(완전 소화)이다 (§1.2 `instructionUptake`)                                                                |
-| `EDGE_BIG_RATIO` · `EDGE_CLEAR_RATIO` · `EDGE_EVEN_RATIO`             | 1.15 · 1.07 · 1.035                             | 전력비가 "압도/뚜렷/근소"와 "팽팽"으로 갈리는 문턱 — GM의 문장과 판세 화면의 격자 색이 **같은** 함수를 탄다 (`edgeOf`)                       |
-| `PASSES_PER_MINUTE` · `PROGRESSIVE_SHARE`                             | 5.6 · 0.28                                      | 팀 분당 패스와 그중 전진 패스의 기본 비율                                                                                                    |
-| `TEMPO_PASS_STEP`                                                     | 0.09                                            | 템포 한 칸이 팀 총 패스를 흔드는 폭 — 눈금 중앙(3)이 1.0이다                                                                                 |
-| `PASS_ROLE_WEIGHT`                                                    | MF 1.35 · DF 1.1 · FW 0.8 · GK 0.45             | 역할별 볼 터치 비중                                                                                                                          |
-| `PASS_SKILL_FLOOR` · `PASS_SKILL_SPAN`                                | 0.6 · 0.8                                       | 패스 배분에서 기량과 무관한 몫과 패스·시야가 얹는 폭                                                                                         |
-| `PASS_STYLE_FLOOR` · `PASS_STYLE_STEP`                                | 0.65 · 0.18                                     | `passStyle`이 전진 패스 비율에 주는 바닥과 한 칸당 폭                                                                                        |
-| `DARING_BASE` · `DARING_PIVOT` · `DARING_SPAN`                        | 0.7 · 45 · 67                                   | 시야·킥·침착이 섞인 `drive`를 전진 성향으로 옮기는 곡선 (축 비중은 §1)                                                                       |
-| `DARING_MIN` · `DARING_MAX`                                           | 0.65 · 1.4                                      | 그 성향의 하한과 상한 — 극단값 하나가 전진 패스를 지우거나 뒤덮지 않는다                                                                     |
-| `MATCH_REPUTATION_SWING`                                              | 2                                               | 경기 하나가 보드·선수단 평판에 남기는 폭 — 친선은 지나간다 (`career.md` §4)                                                                  |
-| `WIN_LEADERSHIP_XP`                                                   | 10                                              | 승리 하나가 주는 리더십 XP (`career.md` §3)                                                                                                  |
-| `TACTICAL_XP_PER_GOAL` · `TACTICAL_XP_CAP`                            | 12 · 30                                         | 원인 태그가 붙은 골 하나의 전술 XP와 **한 경기의 위끝** — 골 셋이면 이미 천장이다 (`tacticalXpFor`)                                          |
+| 상수                                                                  | 값                                              | 무엇을 정하나                                                                                                                       |
+| --------------------------------------------------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `ABILITY_LOG_SLOPE` · `ABILITY_PIVOT`                                 | 0.019 · 72                                      | 존의 **능력 항**을 평점의 지수로 옮기는 기울기와 축 (§1.1) — 전력 비 = e^(기울기 × 평점 차). 전술·지시는 곡선 밖에서 곱해진다       |
+| `PLAYER_SHOT_BASE`                                                    | 1.08                                            | 평균 위치의 선수에게서 시작하는 기대 슈팅                                                                                           |
+| `BASE_SHOT_XG`                                                        | 0.0905                                          | 대등한 경로에서 시작하는 **열린 플레이** 슈팅 질 — 죽은 공이 별도 채널로 나가며 다시 잰 값 (§1.4)                                   |
+| `SHOT_DEPTH_LOG_WEIGHT`                                               | 2.3                                             | 실제 전술판의 전진 위치가 슈팅량에 닿는 세기                                                                                        |
+| `SHOT_DEPTH_XG_LOGIT_WEIGHT`                                          | 0.65                                            | 같은 전진 위치가 슈팅 **질**에 닿는 세기                                                                                            |
+| `ROLE_SHOT_LOG_WEIGHT`                                                | 0.45                                            | 역할의 결정력 요구가 슈팅 책임으로 번역되는 세기                                                                                    |
+| `POSSESSION_SHOT_LOG_WEIGHT`                                          | 0.32                                            | 점유가 선수별 슈팅 로그오즈에 실리는 세기 (§1.5)                                                                                    |
+| `CREATION_SKILL_LOG_WEIGHT`                                           | 0.75                                            | 선수의 기회 생성 전력이 슈팅량에 닿는 세기                                                                                          |
+| `FINISHING_ACCESS_LOG_WEIGHT`                                         | 0.10                                            | 결정력이 슈팅 접근에 주는 작은 효과                                                                                                 |
+| `FINISHING_PIVOT` · `FINISHING_SCALE`                                 | 75 · 34                                         | 기회 xG를 그대로 실현하는 슈팅 가중 리그 기준점과 그 주변의 대칭 눈금                                                               |
+| `FINISHING_LOGIT_WEIGHT`                                              | 0.55                                            | 같은 xG를 실제 골로 바꾸는 결정력 효과                                                                                              |
+| `CHANCE_SKILL_XG_LOGIT_WEIGHT`                                        | 0.45                                            | 침투·돌파·스피드·공중볼이 슈팅 질에 닿는 세기                                                                                       |
+| `ROUTE_SHOT_LOG_WEIGHT`                                               | 0.75                                            | 경로 우위가 슈팅량에 닿는 세기                                                                                                      |
+| `ROUTE_XG_LOGIT_WEIGHT`                                               | 0.7                                             | 최종 공격 지역 우위가 슈팅 질에 닿는 세기                                                                                           |
+| `HOME_SHOT_EXPOSURE` · `AWAY_SHOT_EXPOSURE`                           | 1.06 · 0.96                                     | 홈·원정이 슈팅량에 곱하는 노출 — 중립 경기는 둘 다 1                                                                                |
+| `LEAD_SHOT_LOG_RATE` · `TRAIL_SHOT_LOG_RATE`                          | 0.10 · 0.05                                     | 골 차 하나가 앞선 팀·뒤진 팀의 슈팅 로그오즈에 더하는 몫 (§1.4) — 대량 득점의 꼬리를 잡는다                                         |
+| `ROUTE_SHOT_SATURATION`                                               | 0.75                                            | 이득 쪽 경로 우위가 **슈팅량**에서 포화하는 폭 (tanh) — 넓다(승부의 기울기)                                                         |
+| `ROUTE_XG_SATURATION`                                                 | 0.45                                            | 같은 우위가 **슈팅 질**에서 포화하는 폭 — 좁다(총 득점 상한)                                                                        |
+| `ROUTE_SHOT_DEFICIT`                                                  | 1.3                                             | 밀리는 쪽의 슈팅량이 더 크게 깎이는 배수                                                                                            |
+| `SHORTHANDED_PENALTY`                                                 | 0.12                                            | 빠진 인원 한 명이 세 줄에 함께 내는 손해 (최대 3명)                                                                                 |
+| `SHOT_XG_CONCENTRATION`                                               | 16                                              | 슈팅별 xG 분포의 퍼짐                                                                                                               |
+| `SET_PIECE_SHOT_SHARE`                                                | 0.31                                            | 팀 기대 슈팅 중 **죽은 공**(코너·프리킥) 몫 — 위에 더하지 않고 안에서 옮긴다 (§1.4)                                                 |
+| `PENALTY_PER_MATCH`                                                   | 0.25                                            | 경기당 페널티 — 양 팀 합. 실제 1부가 0.2\~0.3회다. 정규화하므로 리그 빈도가 정확히 이 값이다                                        |
+| `CORNER_XG_BASE`                                                      | 0.08                                            | 대등한 제공권·평범한 키커가 올린 죽은 공 슛 하나의 기회 xG                                                                          |
+| `SET_PIECE_KICK_XG_LOGIT_WEIGHT`                                      | 0.45                                            | 키커의 킥력이 죽은 공 질에 닿는 세기 — 킥력 90은 65보다 1.35배                                                                      |
+| `SET_PIECE_AERIAL_XG_LOGIT_WEIGHT`                                    | 0.5                                             | 박스 안 제공권 우열이 죽은 공 질에 닿는 세기                                                                                        |
+| `CORNER_SHOT_SHARE`                                                   | 0.58                                            | 죽은 공 슛 중 코너에서 나온 몫 — 나머지가 프리킥                                                                                    |
+| `DIRECT_FREE_KICK_SHARE`                                              | 0.2                                             | 프리킥 슛 중 키커가 직접 차는 몫 (직접 프리킥 — 도움이 없다)                                                                        |
+| `CORNERS_PER_SHOT`                                                    | 0.84                                            | 팀 기대 슈팅 하나가 데려오는 코너 — 실제 1부의 팀당 10.5개                                                                          |
+| `FOULS_PER_MATCH`                                                     | 21                                              | 경기당 파울 — 양 팀 합, 강도를 곱한다 (`teamFoulRate`)                                                                              |
+| `PENALTY_ROUGH_SCALE`                                                 | 40                                              | 수비 라인의 거칠기가 페널티 헌납 몫을 기울이는 눈금 — **두 팀 사이의 비로만** 뜻을 갖는다                                           |
+| `PENALTY_FLOOR` · `PENALTY_CEILING` · `PENALTY_BASE` · `PENALTY_EDGE` | 0.62 · 0.80 · 0.71 · 0.0035                     | 페널티 성공률의 대역과 기량 차의 세기 — 경기 중 페널티와 승부차기가 **같은 식**이다 (`penaltyRate`)                                 |
+| `TACTIC_SWING`                                                        | 0.18                                            | 한 존이 전술로 움직일 수 있는 폭 (tanh 포화)                                                                                        |
+| `REGIONAL_INTENT_WEIGHT`                                              | 0.10\~0.18                                      | 지역 플랜이 그 칸을 두껍게 하는 폭 (의도별)                                                                                         |
+| `PLAN_ROUTE_FOCUS`                                                    | 0\~3                                            | 지역 플랜이 공격 배분을 그 레인으로 끄는 세기 (보호는 0)                                                                            |
+| `LANE_FOCUS`                                                          | 0.75                                            | 개인 지시·공략이 겨냥한 칸으로 몰리는 폭 (나머지 두 칸 0.25배)                                                                      |
+| `LANE_BIAS_CAP`                                                       | 0.3                                             | 한 칸이 줄 안에서 기울 수 있는 최대 몫                                                                                              |
+| `GAIN_CAP`                                                            | 0.08                                            | 지시 하나가 존에 얹는 이득의 상한 — 세기 배수를 탄다                                                                                |
+| `DIRECTIVE_TUNING.INTENSITY`                                          | 이득 0.6\~1.4 · 대가 0.75\~1.35 · 체력 0.9\~1.2 | 지시 세기(`light`·`normal`·`heavy`)가 세 곳에 함께 거는 배수                                                                        |
+| `EXPLOIT_GAIN_FLOOR`                                                  | 0.026                                           | 문턱을 겨우 넘은 공략의 이득                                                                                                        |
+| `EXPLOIT_GAIN_SPAN`                                                   | 0.045                                           | 벌어진 폭이 이득에 더하는 최대치 (tanh)                                                                                             |
+| `EXPLOIT_WEIGHT_SCALE`                                                | 18                                              | 그 폭의 눈금 — AI 1순위 표적 weight 중앙값(실측)                                                                                    |
+| `AUTO_EXPLOIT_TWO`                                                    | 78                                              | AI 벤치가 두 곳을 동시에 노리는 분석 등급                                                                                           |
+| `AUTO_EXPLOIT_ONE`                                                    | 58                                              | 한 곳을 노리는 분석 등급 — 그 아래는 판을 못 읽는다                                                                                 |
+| `FULL_MATCH_DRAIN`                                                    | 42                                              | 풀타임 스트라이커의 기준 활동량 — 경기 하나의 대가                                                                                  |
+| `CONDITION_DECAY_SCALE`                                               | 37.2                                            | 활동량을 남은 체력으로 바꾸는 감쇠 눈금                                                                                             |
+| `GAP_THRESHOLD`                                                       | 78                                              | 그 자리가 열리는 피로 문턱 (= 체력 22)                                                                                              |
+| `CHASE_DRAIN`                                                         | 0.8                                             | 공 없는 팀이 더 뛰는 폭 (양 끝 ±12%)                                                                                                |
+| `QUICK_FIRST_HALF_SHARE`                                              | 0.46                                            | 간이 시뮬 사건이 전반에 실리는 몫 — 밀도와 카드 분 눈금이 여기서 선다 (§7)                                                          |
+| `CARDS_PER_MATCH`                                                     | 4.0                                             | 경기당 기대 카드 — 양팀 합, 두 시뮬 공통 (`teamCardRate`). 실제 1부는 2023년 판정 지침 뒤 경고 4.1~4.2장                            |
+| `INJURY_PER_MATCH`                                                    | 0.1                                             | 경기당 기대 부상 — 양팀 합, 두 시뮬 공통 (`teamInjuryRate`)                                                                         |
+| `matchIntensity`                                                      | 0.70\~1.30                                      | 압박·템포·태클 강도가 카드·부상·파울에 함께 거는 배수 — 두 시뮬 공통. 세 항의 합이 clamp와 같아 잘리는 구간이 없다                  |
+| `TACKLING_INTENSITY_STEP`                                             | 0.08                                            | 태클 강도 한 갈래(`hard`·`soft`)가 그 배수에 더하는 몫 (§1.2)                                                                       |
+| `TRANSITION_SWING` · `TACKLING_SWING` · `TRAP_SWING` · `KEEPER_SWING` | 0.03 · 0.03 · 0.025 · 0.025                     | 갈래 넷이 존 하나를 움직이는 폭 — 축 한 칸·상성 이득과 같은 자리 (§1.2)                                                             |
+| `TRAP_DRILLED_FLOOR` · `TRAP_DRILLED_SPAN` · `TRAP_OFF`               | 0.85 · 0.75 · 1.15                              | 오프사이드 트랩이 `space_behind` 대가에 거는 배수 — 지시 × 적응도, 끄면 고정 (§1.3)                                                 |
+| `COUNTER_ORDER_ONLY`                                                  | 0.6                                             | 6축 구조 없이 **지시로만** 선 역습(`counter_attack`)의 폭 (§1.3)                                                                    |
+| `DERBY_INTENSITY_STEP`                                                | 0.06                                            | 더비 `heat` 한 계단이 그 배수에 **곱하는** 몫 — 1.06 / 1.12 / 1.18, clamp 밖이다 (§1)                                               |
+| `DERBY_MOOD_STEP`                                                     | 0.02                                            | 더비 승패가 그 팀 스쿼드 전원의 폼에 남기는 폭 × `heat` (§6)                                                                        |
+| `STRAIGHT_RED_CHANCE`                                                 | 0.02                                            | 경고 없이 곧장 퇴장이 될 확률 — 실제 1부 퇴장은 시즌 45~60장이고 그 절반이 다이렉트다                                               |
+| `BOOKED_AGAIN_WEIGHT`                                                 | 0.22                                            | 이미 경고를 받은 선수가 다시 뽑힐 가중치 배수 — 나머지 절반(두 번째 경고)이 여기서 선다                                             |
+| `DIRECTIVE_EFFECTS.careful.booking`                                   | 0.5                                             | `careful` 지시가 그 선수의 카드 가중·곧장 퇴장 확률에 거는 배수 (세기의 이득 배수를 탄다 — `light` 0.7 · `heavy` 0.3)               |
+| `MAX_SEGMENT_EVENTS`                                                  | 15                                              | 한 구간이 담는 이벤트 상한 (§2·§5)                                                                                                  |
+| `EXTRA_TIME_SHOT_SHARE`                                               | 0.28                                            | 연장 30분의 기대 슈팅 (90분 대비) — 두 시뮬 공통                                                                                    |
+| `EXTRA_TIME_DENSITY`                                                  | 0.84                                            | 그 몫의 **분당** 배수 — 위 값과 `PHASE_END`에서 한 번만 유도한다                                                                    |
+| `MATCH_PROFICIENCY_GAIN`                                              | 1                                               | 그 자리에서 한 경기를 뛴 값 — 주전 38경기면 +38                                                                                     |
+| `AI_SHIFT_BOUND`                                                      | 2                                               | AI의 경기 중 6축이 킥오프 값에서 벌어질 수 있는 최대 눈금                                                                           |
+| `SUB_CHASE_MINUTE` · `SUB_CHASE_MINUTE_TWO`                           | 60 · 50                                         | 뒤지는 AI가 공격 자원을 넣기 시작하는 분 (한 골 차 · 두 골 이상)                                                                    |
+| `SUB_HOLD_MINUTE`                                                     | 75                                              | 앞선 AI가 수비를 보강하기 시작하는 분                                                                                               |
+| `SUB_CHASE_MAX` · `SUB_HOLD_MAX`                                      | 2 · 1                                           | 한 경기에 쓰는 승부수·굳히기 교체 장수                                                                                              |
+| `AI_SHAPE_CHASE_MINUTE` · `AI_SHAPE_HOLD_MINUTE`                      | 65 · 80                                         | AI가 판의 모양을 공격형·5-4-1로 바꾸는 분 (경기당 한 번)                                                                            |
+| `AI_SHAPE_FAMILIARITY_COST`                                           | 25 × 0.25                                       | 그 모양 전환이 치르는 전술 적응도 (`FORMATION_CHANGE_COST` × 경기 중 계수)                                                          |
+| `AI_SHIFT_EARLIEST_MINUTE` · `AI_SHIFT_URGENT_MINUTE`                 | 55 · 72                                         | AI 벤치가 6축을 다시 보기 시작하는 분 · 같은 스코어에도 판단이 과감해지는 분 (하프타임은 앞의 문턱을 지나지 않는다)                 |
+| `SAVED_LOGIT_BASE` · `SAVED_LOGIT_XG_WEIGHT`                          | −1.15 · 2.1                                     | 골이 되지 못한 슛이 **유효슈팅(선방)** 으로 남을 로그오즈의 절편과 xG 세기 — 스코어에 닿지 않고 기록의 모양만 정한다 (`savedShare`) |
+| `BLOCKED_SHARE`                                                       | 0.38                                            | 골문 밖으로 간 슛 중 블록으로 남는 몫 — 나머지가 유효슈팅 실패다                                                                    |
+| `TACTICAL_FIT_FLOOR` · `TACTICAL_FIT_SPAN`                            | 0.92 · 0.16                                     | 감독 전술 능력이 존 전력 전체에 거는 배수의 바닥과 폭 (§1.2 `tacticalFit`)                                                          |
+| `UPTAKE_FLOOR` · `UPTAKE_TACTICS_SPAN` · `UPTAKE_FAMILIARITY_SPAN`    | 0.45 · 0.35 · 0.2                               | 지시 적용률의 세 항 — 셋의 합이 1.0(완전 소화)이다 (§1.2 `instructionUptake`)                                                       |
+| `EDGE_BIG_RATIO` · `EDGE_CLEAR_RATIO` · `EDGE_EVEN_RATIO`             | 1.15 · 1.07 · 1.035                             | 전력비가 "압도/뚜렷/근소"와 "팽팽"으로 갈리는 문턱 — GM의 문장과 판세 화면의 격자 색이 **같은** 함수를 탄다 (`edgeOf`)              |
+| `PASSES_PER_MINUTE` · `PROGRESSIVE_SHARE`                             | 5.6 · 0.28                                      | 팀 분당 패스와 그중 전진 패스의 기본 비율                                                                                           |
+| `TEMPO_PASS_STEP`                                                     | 0.09                                            | 템포 한 칸이 팀 총 패스를 흔드는 폭 — 눈금 중앙(3)이 1.0이다                                                                        |
+| `PASS_ROLE_WEIGHT`                                                    | MF 1.35 · DF 1.1 · FW 0.8 · GK 0.45             | 역할별 볼 터치 비중                                                                                                                 |
+| `PASS_SKILL_FLOOR` · `PASS_SKILL_SPAN`                                | 0.6 · 0.8                                       | 패스 배분에서 기량과 무관한 몫과 패스·시야가 얹는 폭                                                                                |
+| `PASS_STYLE_FLOOR` · `PASS_STYLE_STEP`                                | 0.65 · 0.18                                     | `passStyle`이 전진 패스 비율에 주는 바닥과 한 칸당 폭                                                                               |
+| `DARING_BASE` · `DARING_PIVOT` · `DARING_SPAN`                        | 0.7 · 45 · 67                                   | 시야·킥·침착이 섞인 `drive`를 전진 성향으로 옮기는 곡선 (축 비중은 §1)                                                              |
+| `DARING_MIN` · `DARING_MAX`                                           | 0.65 · 1.4                                      | 그 성향의 하한과 상한 — 극단값 하나가 전진 패스를 지우거나 뒤덮지 않는다                                                            |
+| `MATCH_REPUTATION_SWING`                                              | 2                                               | 경기 하나가 보드·선수단 평판에 남기는 폭 — 친선은 지나간다 (`career.md` §4)                                                         |
+| `WIN_LEADERSHIP_XP`                                                   | 10                                              | 승리 하나가 주는 리더십 XP (`career.md` §3)                                                                                         |
+| `TACTICAL_XP_PER_GOAL` · `TACTICAL_XP_CAP`                            | 12 · 30                                         | 원인 태그가 붙은 골 하나의 전술 XP와 **한 경기의 위끝** — 골 셋이면 이미 천장이다 (`tacticalXpFor`)                                 |
 
 ## 7. 타 팀 간이 시뮬 (`engine/match/quick-sim.ts`)
 

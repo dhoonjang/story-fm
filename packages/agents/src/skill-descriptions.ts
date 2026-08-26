@@ -1,4 +1,9 @@
-import { TACTIC_AXES, tacticAxisScaleText } from "@story-fm/domain";
+import {
+  TACTIC_AXES,
+  TACTIC_TOGGLES,
+  tacticAxisScaleText,
+  tacticToggleChoiceText,
+} from "@story-fm/domain";
 
 export type SkillGroup = "진행" | "전술·훈련" | "대화·서사" | "조회" | "경기" | "이적" | "재정";
 
@@ -84,9 +89,11 @@ export const SKILL_CATALOG = [
     group: "전술·훈련",
     readOnly: false,
     description:
-      "팀 전술 6축을 변경한다. 축은 모두 1~5이며 3이 보통이다 — " +
+      "팀 전술 6축과 갈래 넷을 변경한다. 축은 모두 1~5이며 3이 보통이다 — " +
       `${TACTIC_AXES.map(tacticAxisScaleText).join(" · ")}. ` +
-      "현재 값과 다른 축 중 감독이 변경을 명시한 축만 보내라. 언급하지 않은 축을 균형값이나 추천값으로 보정하지 않는다. 포메이션과 선수 배치는 이 도구로 바꾸지 않는다.",
+      "갈래는 눈금이 없다 — " +
+      `${TACTIC_TOGGLES.map(tacticToggleChoiceText).join(" · ")}. ` +
+      "현재 값과 다른 것 중 감독이 변경을 명시한 축·갈래만 보내라. 언급하지 않은 축을 균형값이나 추천값으로 보정하지 않는다. 포메이션과 선수 배치는 이 도구로 바꾸지 않는다.",
   },
   {
     name: "set_player_tactic",
@@ -210,11 +217,13 @@ export const SKILL_CATALOG = [
     group: "재정",
     readOnly: false,
     description:
-      "감독이 보드에 무엇을 달라고 건다 — 이적 예산 증액(transfer-budget) · 주급 한도 상향(wage-room) · 구장 증설(stadium). " +
-      "감독이 부른 값을 그대로 amount에 실어라(예산·주급은 금액, 구장은 좌석 수) — 액수를 말하지 않았으면 지어내지 말고 물어라. " +
-      "접수까지가 이 도구의 일이다: 답은 며칠 뒤 코어가 정해 승인·부분 승인·거절과 금액으로 스냅샷에 실린다. " +
+      "감독이 보드에 무엇을 달라고 건다 — 이적 예산 증액(transfer-budget) · 영입 승인(signing) · 주급 한도 상향(wage-room) · 구장 증설(stadium). " +
+      "감독이 부른 값을 그대로 amount에 실어라(예산·주급·이적료는 금액, 구장은 좌석 수) — 액수를 말하지 않았으면 지어내지 말고 물어라. " +
+      "signing은 예산 위의 선수 하나를 두고 묻는 종류다: 그 선수를 playerId에 함께 실어라(이름 그대로 된다). 승인분은 그 선수 영입에만 쓰인다. " +
+      "접수까지가 이 도구의 일이다: 답은 며칠 뒤 코어가 정해 승인·부분 승인·조건부 승인·거절과 금액으로 스냅샷에 실린다. " +
       "이 턴에는 요청을 올린 장면까지만 쓰고 보드의 답을 앞질러 쓰지 마라. 답이 온 날은 그 값 그대로 말하고, 왜 그렇게 답했는지는 잔고·급여 비중·보드 평판으로 옮겨라. " +
-      "답을 기다리는 요청이 있거나 같은 안건을 최근에 물었으면 반려된다.",
+      "조건부 승인이면 조건과 기한이 스냅샷에 선다 — 충족도 만료도 코어가 판정하므로 그 결과 역시 앞질러 쓰지 마라. " +
+      "답을 기다리거나 조건이 걸린 요청이 있거나 같은 안건을 최근에 물었으면 반려된다.",
   },
   {
     name: "fund_transfer_budget",

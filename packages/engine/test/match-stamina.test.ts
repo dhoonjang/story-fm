@@ -142,10 +142,16 @@ describe("경기 체력 — 소모", () => {
     expect(swapped.ok, swapped.message).toBe(true);
 
     guard = 60;
+    /**
+     * **끝까지 그라운드에 서 있던 사람** — 종료 시점의 온필드다. 부상 교체·퇴장으로
+     * 먼저 나간 선수는 그만큼 덜 닳으므로 "90분을 뛴 누구보다도"의 비교 대상이 아니다.
+     */
+    let onPitchAtEnd: readonly string[] = ledger().onPitch;
     while (state.phase === "match" && guard-- > 0) {
       const step = advanceSegment(state);
       expect(step.ok, step.message).toBe(true);
       if (step.plan?.stop === "full_time") {
+        onPitchAtEnd = ledger().onPitch;
         finalizeMatch(state);
         break;
       }
@@ -154,7 +160,7 @@ describe("경기 체력 — 소모", () => {
 
     // 45분만 뛴 선수는 90분을 뛴 누구보다도 덜 닳았다
     const played90 = starters
-      .filter((x) => x.position !== "GK" && x.id !== goingOff.id)
+      .filter((x) => x.position !== "GK" && x.id !== goingOff.id && onPitchAtEnd.includes(x.id))
       .map((x) => playerById(state, x.id)!.state.condition);
     expect(played90.length).toBeGreaterThan(5);
     // 90분을 채운 **누구보다도** 남아 있다 — 상수로 뭉개면 여기가 뒤집힌다

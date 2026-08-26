@@ -25,6 +25,55 @@ const WAGE_TONE_CLASS: Record<OfficeViews["finance"]["wageTone"], string> = {
 const NONCASH_CATEGORIES = new Set(["amortisation", "depreciation"]);
 
 type FinanceFeedRow = OfficeViews["finance"]["feed"][number];
+type FinanceBoard = OfficeViews["finance"]["board"];
+
+/** 열린 요청이 선 자리 — 코어가 갈래를 내고 화면이 말을 고른다 */
+const BOARD_STATUS_TEXT: Record<NonNullable<FinanceBoard["request"]>["status"], string> = {
+  pending: "답 대기",
+  conditional: "조건부",
+};
+
+/**
+ * 보드에 걸려 있는 것 — 답이 끝나지 않은 요청과 이름 앞에 걸린 영입 승인분.
+ *
+ * 걸린 것이 없으면 아무것도 세우지 않는다 — 빈 칸이 늘 서 있으면 걸린 날의 한 줄이
+ * 눈에 띄지 않는다.
+ */
+function BoardBlock({ board }: { board: FinanceBoard }) {
+  const { request, earmarked } = board;
+  if (!request && earmarked.length === 0) return null;
+  return (
+    <div className="fin-board" data-testid="fin-board">
+      <div className="fin-board-title">보드 요청</div>
+      {request && (
+        <div className="fin-board-line">
+          <div className="head">
+            <span className="what">
+              {request.label}
+              {request.playerName && ` · ${request.playerName}`}
+            </span>
+            <span className="amt">{request.amount}</span>
+            <span className="fin-tag">{BOARD_STATUS_TEXT[request.status]}</span>
+          </div>
+          <div className="sub">
+            {request.condition
+              ? `${request.condition.label} ${request.condition.amount} · ${request.condition.until}까지`
+              : `${request.askedOn} 접수 · ${request.respondOn} 답`}
+          </div>
+        </div>
+      )}
+      {earmarked.map((row, i) => (
+        <div className="fin-board-line" key={`${row.playerName}-${row.until}-${i}`}>
+          <div className="head">
+            <span className="what">영입 승인분 · {row.playerName}</span>
+            <span className="amt">{formatMoney(row.amount)}</span>
+          </div>
+          <div className="sub">{row.until}까지</div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /**
  * 접힌 줄이 라벨 자리에 세우는 말.
@@ -168,6 +217,9 @@ export function FinanceView({ finance }: { finance: OfficeViews["finance"] }) {
           </div>
         </div>
       </div>
+
+      {/* 이적 예산 바로 아래 — 보드에 걸린 값은 그 예산이 어디까지 늘지의 이야기다 */}
+      <BoardBlock board={finance.board} />
 
       {/* 배경 없는 지표 줄 — 읽는 값이지 누르는 자리가 아니다 (PSR은 첫 시즌엔 없다) */}
       <div className="fin-stats">

@@ -75,13 +75,12 @@ export const AXIS_GROWTH_PER_SEASON = 2.6;
 
 // ── 감독의 육성 손잡이 (season.md §2 2군 리그) ──────────────────────
 // 배율은 **성장 쪽에만** 붙는다 — 노화 하락은 출전과 무관하다. 감독이 다 걸어도
-// 1.3 × 1.25 ≈ 1.63이고, 그 위에 사람됨(원형 `professionalism` 0.85~1.25 —
+// 1.3 × 1.25 ≈ 1.6이고, 그 위에 사람됨(원형 `professionalism` 0.85~1.25 —
 // people.md §6)이 한 항으로 더 붙어 꼭대기가 2.0이 된다. 그 자리에 서려면 셋이 다
 // 맞아야 한다: 격주 2군 일정을 만근하고, 집중 육성 셋 안에 들고, 표 꼭대기의
-// 직업의식을 타고났을 것. 그래도 결산 판정을 부지런히 받는 1군 유망주와 같은
-// 자릿수다 — 2군은 자라는 곳이고, 뛰는 곳은 1군이다. 축을 겨냥하는 손잡이(방침 ·
-// 개인 훈련)는 얼마나 빨리가 아니라 어느 쪽으로를 정하므로 총량 이동이고,
-// 원본은 `training-plan.ts`다.
+// 직업의식을 타고났을 것 — 열여덟이면 시즌 기대가 축당 여섯 칸으로, 실제 원더키드가
+// 한 해에 자라는 폭이다. 축을 겨냥하는 손잡이(방침 · 개인 훈련)는 얼마나 빨리가
+// 아니라 어느 쪽으로를 정하므로 총량 이동이고, 원본은 `training-plan.ts`다.
 
 /** 지난달 2군 출전 한 경기가 성장 확률에 얹는 배율 증분 */
 export const RESERVE_APP_BOOST = 0.15;
@@ -175,9 +174,8 @@ export function loanAppsByPlayer(state: GameState): Map<string, number> {
 // 눈금은 2군과 **같은 자** 위에 있다: 출전 한 경기가 `RESERVE_APP_BOOST`와 같은
 // 값이고 상한만 다르다. 2군은 격주 일정이라 월 2경기가 만근이고 1군 일정은 월
 // 4~5경기라, 같은 리그에서 매주 뛰면 우리 2군의 출전×집중 육성 꼭대기에 닿는다.
-// ⚠️ 두 상수는 2군 쪽을 따라간다 — 2군의 눈금만 옮기면 임대가 더 빠른 길이 된다.
 
-/** 지난달 임대처 1군 출전 한 경기가 성장 확률에 얹는 배율 증분 (= `RESERVE_APP_BOOST`) */
+/** 지난달 임대처 1군 출전 한 경기가 성장 확률에 얹는 배율 증분 */
 export const LOAN_APP_BOOST = RESERVE_APP_BOOST;
 /** 임대 출전 배율 상한 — 우리 2군의 출전 만근 × 집중 육성과 같은 꼭대기 */
 export const LOAN_APP_BOOST_MAX = RESERVE_APP_BOOST_MAX * FOCUS_BOOST;
@@ -228,9 +226,9 @@ export function developsByCore(state: GameState, player: GamePlayer): boolean {
  * 붙고 어릴수록 높다. 나이 배율은 결산 경로와 같은 한 열에서 온다(`ageGrowthFactor` —
  * player.md §6.3). 노화 곡선이 이미 꺾인 축(음수)은 여기 들어오지 않는다.
  *
- * ⚠️ **사람됨은 여기 곱하지 않는다.** 직업의식은 감독의 손잡이와 같은 자리, 즉
- * 여유·나이가 정한 대역 **밖**에서 곱한다 (`rollAxis`) — 그래야 원형이 자라는
- * 나이에서도 안 자라는 나이에서도 같은 비로 가른다.
+ * ⚠️ **사람됨은 여기 곱하지 않는다** — 감독의 손잡이(출전·집중 육성)와 같은 자리,
+ * 곧 `rollAxis`에서 곱한다. 여유와 나이가 정하는 것은 그 선수가 자랄 수 있는 폭이고,
+ * 직업의식은 그 폭을 얼마나 쓰는가다.
  */
 export function growChance(room: number, age: number): number {
   if (room <= 0) return 0;

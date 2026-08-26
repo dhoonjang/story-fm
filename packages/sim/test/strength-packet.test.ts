@@ -752,9 +752,9 @@ describe("전력차와 총 기대 득점", () => {
     return { total: home + away, ratio: home / away };
   };
 
-  it("대등한 경기의 총 기대 득점은 3.2 언저리다", () => {
+  it("대등한 경기의 총 기대 득점은 3.3 언저리다", () => {
     expect(sumOf(75, 75).total).toBeGreaterThan(3);
-    expect(sumOf(75, 75).total).toBeLessThan(3.5);
+    expect(sumOf(75, 75).total).toBeLessThan(3.6);
   });
 
   /**
@@ -780,7 +780,7 @@ describe("전력차와 총 기대 득점", () => {
     // 리그 안 최대 격차
     expect(sumOf(81, 69).total).toBeLessThan(4.2);
     // 국내 컵의 1부 대 2부
-    expect(sumOf(84, 67).total).toBeLessThan(4.8);
+    expect(sumOf(84, 67).total).toBeLessThan(4.9);
     // 존재하지 않는 격차 — 그래도 선형 언저리를 넘지 않는다
     expect(sumOf(90, 60).total).toBeLessThan(7);
   });
@@ -834,17 +834,11 @@ describe("경기 상황 노출", () => {
     const xgOf = (packet: typeof level) => packet.guide.chanceXg!;
     expect(shotsOf(ahead).home).toBeCloseTo(shotsOf(level).home * gameStateExposure("home", 2), 1);
     expect(shotsOf(ahead).away).toBeCloseTo(shotsOf(level).away * gameStateExposure("away", 2), 1);
-    /**
-     * 슈팅 하나의 질은 스코어를 모른다 — 노출은 슈팅**량**에만 곱해진다.
-     * 소수 둘째 자리까지만 보는 이유: 페널티는 경기당 총량(`PENALTY_PER_MATCH`)으로
-     * 정규화되어 슈팅 수에 비례하지 않으므로, 내려선 팀은 줄어든 슛 위에 같은 수의
-     * 페널티를 얹어 평균 질이 0.5%쯤 올라간다. 그것은 옳은 동작이다 — 내려섰다고
-     * 상대가 박스에서 덜 넘어뜨리지는 않는다.
-     */
+    // 슈팅 하나의 질은 스코어를 모른다
     const meanXg = (packet: typeof level, side: "home" | "away") =>
       xgOf(packet)[side] / shotsOf(packet)[side];
-    expect(meanXg(ahead, "home")).toBeCloseTo(meanXg(level, "home"), 2);
-    expect(meanXg(ahead, "away")).toBeCloseTo(meanXg(level, "away"), 2);
+    expect(meanXg(ahead, "home")).toBeCloseTo(meanXg(level, "home"), 3);
+    expect(meanXg(ahead, "away")).toBeCloseTo(meanXg(level, "away"), 3);
   });
 });
 

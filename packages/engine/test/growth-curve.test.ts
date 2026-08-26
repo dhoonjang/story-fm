@@ -245,18 +245,23 @@ describe("나이 배율 — 월간·결산이 한 열을 읽는다", () => {
   /**
    * **직업의식은 자라는 나이에서도 갈라야 한다** (people.md §6).
    *
-   * 여유·나이가 정하는 `growChance` 대역 **안**에 곱하면 나이마다 다른 비로 먹힌다 —
-   * 사람됨은 감독의 배율과 같은 자리, 대역 밖에서 곱한다. 이 자리가 그 회귀를 잡는다.
+   * `GROW_MAX`가 여유 6 이상인 U21을 전부 0.35에 붙여 놓으므로, 계수를 대역 **안**에
+   * 곱하면 정작 자라는 나이에서만 아무것도 하지 않는다 — 이 자리가 그 회귀를 잡는다.
+   * 그래서 사람됨은 감독의 배율과 같은 자리, 대역 밖에서 곱한다.
    */
   it("직업의식은 유망주에게도 갈린다 — 상한이 계수를 삼키지 않는다", () => {
     const [lazy, diligent] = [0.85, 1.25];
-    /** 난수를 고정값으로 훑어 **확률의 폭**을 센다 — 통과하는 눈금 수가 곧 확률이다 */
+    /**
+     * 난수를 고정값으로 훑어 **확률의 폭**을 센다 — 통과하는 눈금 수가 곧 확률이다.
+     * 격자는 [0, 1)을 통째로 덮어야 한다: 좁게 깔면 월 확률이 그 위로 올라간 순간
+     * 세 팔이 전부 만점을 받아 계수가 보이지 않는다.
+     */
     const ROLLS = Array.from({ length: 2000 }, (_, i) => i / 2000);
     const stepsAt = (age: number, value: number, professionalism: number) =>
       ROLLS.filter((r) => rollAxis("pace", age, value, 80, () => r, 1, professionalism) !== 0)
         .length;
 
-    // 18세 · 여유 20 — 대역 위끝에 붙어 있는 전형적인 유망주. 여기서도 갈린다
+    // 18세 · 여유 20 — 대역 상한(0.35)에 붙어 있는 전형적인 유망주. 여기서도 갈린다
     expect(stepsAt(18, 60, diligent)).toBeGreaterThan(stepsAt(18, 60, 1));
     expect(stepsAt(18, 60, lazy)).toBeLessThan(stepsAt(18, 60, 1));
     // 여유가 없으면 아무리 성실해도 안 자란다 — 천장은 사람됨 위에 있다
@@ -587,7 +592,7 @@ describe("임대 성장 (season.md §2 임대)", () => {
     return `${prev.y}-${String(prev.m).padStart(2, "0")}-${String(index + 2).padStart(2, "0")}`;
   }
 
-  it("출전 배율 — 0경기는 1, 경기당 +LOAN_APP_BOOST×계수, 상한에서 멈춘다", () => {
+  it("출전 배율 — 0경기는 1, 경기당 한 눈금×계수, 상한에서 멎는다", () => {
     expect(loanAppsBoost(0, 1)).toBe(1);
     expect(loanAppsBoost(1, 1)).toBeCloseTo(1 + LOAN_APP_BOOST);
     expect(loanAppsBoost(4, 1)).toBeCloseTo(1 + LOAN_APP_BOOST * 4);
