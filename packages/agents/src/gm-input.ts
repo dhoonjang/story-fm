@@ -38,6 +38,7 @@ import {
   loanedOut,
   managedTeamId,
   MAX_EXPLOITS,
+  missionReportLine,
   onSummerBreak,
   openInjury,
   openManagerOffers,
@@ -96,6 +97,7 @@ import {
   visionItemText,
   type CharacterEntry,
   type CharacterInjection,
+  type MissionReportCard,
   type ScoutReportCard,
 } from "@story-fm/domain";
 
@@ -707,6 +709,8 @@ export function buildGmStateNote(
   passed?: TimePassed | null,
   /** 이번 턴에 카드로 서는 보고서 — 카드가 프롬프트에 못 가므로 값은 여기로 온다 */
   arrivedReports: readonly ScoutReportCard[] = [],
+  /** 같은 자리의 임무 보고 — 지목과 한 블록을 나눠 쓴다 */
+  arrivedMissions: readonly MissionReportCard[] = [],
   /**
    * 장면보다 먼저 교섭 상대가 낸 답 (agents.md §4-1) — GM은 판정하지 않고 **전한다**.
    * 판정이 이미 끝났으므로 아래 `pendingVerdicts`에는 그 협상이 서지 않는다.
@@ -981,10 +985,17 @@ export function buildGmStateNote(
      * 카드는 모델이 장면을 쓴 뒤에 붙어 프롬프트에 가지 않는다. 그래서 값이 여기
      * 없으면 모델은 카드 옆에서 금액을 지어내고, 한 화면이 두 말을 한다
      * (agents.md §6). 줄은 카드와 같은 함수에서 나온다 — `scoutReportLine`.
+     *
+     * **임무 보고도 여기 선다** — 지목의 줄 다음에 후보 다섯이 잇는다
+     * (`missionReportLine`). 이 블록이 답하는 물음은 「이번 턴에 카드로 서는 것의
+     * 값」이고 두 갈래가 같은 물음이다.
      */
     block(
       "scout_reports",
-      arrivedReports.map((c) => `- ${scoutReportLine(state, c.playerId) ?? c.name}`).join("\n"),
+      [
+        ...arrivedReports.map((c) => `- ${scoutReportLine(state, c.playerId) ?? c.name}`),
+        ...arrivedMissions.map((m) => `- ${missionReportLine(state, m.missionId) ?? m.brief}`),
+      ].join("\n"),
     ),
     /**
      * 경기 뒤 들어온 소식 — 재정과 같은 라운드의 다른 경기·대진.
