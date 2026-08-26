@@ -15,6 +15,7 @@ import type {
 import {
   MAX_PAYMENT_YEARS,
   PITCH_CLAIM_KO,
+  PRECONTRACT_DAYS,
   SQUAD_STATUS_KO,
   ageOf,
   buildPaymentInstallments,
@@ -59,7 +60,6 @@ import {
   numberWishHere,
   oddsText,
   precontractBlockerOf,
-  precontractDaysLeft,
   precontractStartOf,
   renewalExpectation,
   responseDelayDays,
@@ -3911,17 +3911,36 @@ const PRECONTRACT_WAGE_SPAN = 0.3;
  */
 export function runAiPrecontracts(state: GameState, digest: string[]): void {
   /**
+   * **창부터 연다** — 원장을 한 번 훑어 만료가 창 안인 우리 계약만 집는다. 선수마다
+   * `precontractDaysLeft`를 물으면 그 안의 `activeContract`가 선수 수 × 계약 수를
+   * 훑어 하루가 수십만 번 비교가 된다(`runAiRenewals`가 색인을 쓰는 것과 같은 이유).
+   *
+   * 한 해의 절반은 창 안에 든 계약이 하나도 없으므로 이 한 번의 순회에서 끝난다.
+   */
+  const inWindow = new Set<string>();
+  for (const c of state.contracts) {
+    if (c.status !== "active" || c.teamId !== state.userTeamId) continue;
+    const days = diffDays(state.date, c.until);
+    if (days >= 0 && days <= PRECONTRACT_DAYS) inWindow.add(c.gamePlayerId);
+  }
+  if (inWindow.size === 0) return;
+
+  /**
    * 대상을 **먼저 걸러 두고** 돈다 — 아래가 같은 원장에 `pending`을 `push`하므로,
    * 거르는 자(`precontractBlockerOf`)가 순회 중에 자기가 세운 줄을 읽게 된다.
+   *
+   * 자리는 색인으로 센다(`depth`) — 후보마다 `betterAtPosition`을 물으면 그때마다
+   * 전 선수를 다시 훑는다.
    */
+  const depth = squadDepthOf(state);
   const due = playersOf(state, state.userTeamId).filter(
     (player) =>
+      inWindow.has(player.id) &&
       // 임대 중인 선수의 계약은 어느 경로로도 움직이지 않는다 (§2)
       !player.loan &&
-      precontractDaysLeft(state, player.id) !== null &&
       precontractBlockerOf(state, player) === null &&
       // 그 자리의 주전만 — 백업을 반년 전에 예약하는 구단은 없다
-      betterAtPosition(state, state.userTeamId, player) === 0 &&
+      depth.betterThan(state.userTeamId, player) === 0 &&
       !state.negotiations.some(
         (n) => n.gamePlayerId === player.id && n.kind === "renew" && n.status === "open",
       ),
@@ -3929,8 +3948,7 @@ export function runAiPrecontracts(state: GameState, digest: string[]): void {
   if (due.length === 0) return;
 
   const rng = makeRng(state.seed, `ai-precontract:${state.date}`);
-  // 읽기 전용 파생 둘 — 후보가 선 뒤에 한 번만 세운다 (`suitorsOf`·`suitorWeightOf`)
-  const depth = squadDepthOf(state);
+  // 무대는 세계 전체를 한 번 훑는 읽기 전용 파생이라 후보가 선 뒤에 세운다
   const scale = stageScaleOf(state);
   const since = precontractStartOf(state);
 
