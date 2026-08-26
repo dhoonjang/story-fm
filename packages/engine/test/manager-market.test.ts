@@ -22,6 +22,8 @@ import {
   computeStandings,
   financeOf,
   fundTransferBudget,
+  fundingFactOf,
+  fundingPressFactOf,
   generateHeadCoach,
   generateOwner,
   generateReporters,
@@ -1194,5 +1196,112 @@ describe("지갑을 쓴다 — 출구는 하나다", () => {
     expect(got[0]!.amount).toBe(buyout);
     // 무직의 길은 갈래를 가리지 않는다 — 옛 구단은 그날로 후임을 세웠다
     expect(state.teams.find((t) => t.id === team)!.managerName).not.toBe(state.manager.name);
+  });
+});
+
+/**
+ * 사재가 세계에 닿는 자리 (career.md §5.4) — **문턱 하나에 자리 셋**이다. 카드도
+ * 평판도 전부 지출 이력에서 파생하므로, 여기서 재는 것은 그 파생의 경계다.
+ */
+describe("사재는 문턱을 넘어야 세계에 보인다", () => {
+  const ownedBy = (state: GameState, archetype: string): GameState => {
+    state.personas!.find((p) => p.role === "owner")!.archetype = archetype;
+    state.manager.reputation.board = 50;
+    state.manager.reputation.squad = 50;
+    return state;
+  };
+  const pledgeOf = (state: GameState) =>
+    MANAGER_TERMS_BY_TIER[tierOfTeamIn(state, state.userTeamId)].budgetPledge;
+
+  it("문턱 바로 아래는 세계에 없고, 넘는 지출 하나가 카드와 보드를 함께 세운다", () => {
+    const state = ownedBy(createTestGame(7), "투자자형");
+    const pledge = pledgeOf(state);
+    const gate = pledge * MANAGER_WALLET.FUND_GRADE_STEPS.notable;
+    state.manager.wallet = pledge;
+
+    const below = fundTransferBudget(state, { amount: gate - MANAGER_WALLET.MIN_SPEND });
+    expect(below.ok, "message" in below ? below.message : undefined).toBe(true);
+    expect(fundingFactOf(state), "문턱 아래의 사재가 카드로 섰다").toBeNull();
+    expect(state.manager.reputation.board, "문턱 아래의 사재가 보드를 움직였다").toBe(50);
+
+    // 경계는 「넘어섰는가」가 아니라 「닿았는가」다 — 딱 문턱이면 선다
+    const cross = fundTransferBudget(state, { amount: MANAGER_WALLET.MIN_SPEND });
+    expect(cross.ok, "message" in cross ? cross.message : undefined).toBe(true);
+    expect(fundingFactOf(state)?.data?.tags?.[0]).toBe("notable");
+    expect(fundingFactOf(state)?.data?.values?.percent).toBe(
+      Math.round(MANAGER_WALLET.FUND_GRADE_STEPS.notable * 100),
+    );
+    expect(state.manager.reputation.board, "문턱을 넘었는데 보드가 그대로다").toBe(
+      50 + MANAGER_WALLET.FUND_BOARD_SWING,
+    );
+
+    // 등급이 더 올라도 보드는 다시 사지 않는다 — 시즌 1회
+    const again = fundTransferBudget(state, {
+      amount: pledge * MANAGER_WALLET.FUND_GRADE_STEPS.major,
+    });
+    expect(again.ok, "message" in again ? again.message : undefined).toBe(true);
+    expect(fundingFactOf(state)?.data?.tags?.[0], "누계가 늘었는데 등급이 그대로다").toBe("major");
+    expect(state.manager.reputation.board, "같은 시즌에 보드가 두 번 움직였다").toBe(
+      50 + MANAGER_WALLET.FUND_BOARD_SWING,
+    );
+
+    // 회견의 창은 등급이 오른 날부터 이레다 — 구단주의 자리에는 창이 없다
+    expect(fundingPressFactOf(state), "등급이 오른 날의 회견이 사재를 빠뜨렸다").not.toBeNull();
+    state.date = addDays(state.date, MANAGER_WALLET.FUND_PRESS_DAYS + 1);
+    expect(fundingPressFactOf(state), "창이 지난 사실이 회견에 남았다").toBeNull();
+    expect(fundingFactOf(state), "창이 지났다고 구단주까지 잊었다").not.toBeNull();
+  });
+
+  it("보드가 어느 쪽으로 움직이는지는 구단주 원형이 정한다", () => {
+    const signs: Array<[string, number]> = [
+      ["투자자형", 1],
+      ["지역 유지형", -1],
+      ["축구광형", 0],
+    ];
+    for (const [archetype, sign] of signs) {
+      const state = ownedBy(createTestGame(7), archetype);
+      const pledge = pledgeOf(state);
+      state.manager.wallet = pledge;
+      const paid = fundTransferBudget(state, {
+        amount: pledge * MANAGER_WALLET.FUND_GRADE_STEPS.notable,
+      });
+      expect(paid.ok, "message" in paid ? paid.message : undefined).toBe(true);
+      expect(state.manager.reputation.board - 50, `${archetype}의 부호가 표와 다르다`).toBe(
+        sign * MANAGER_WALLET.FUND_BOARD_SWING,
+      );
+    }
+  });
+
+  /**
+   * 라커룸이 아는 것은 이적 예산에 들어간 돈이 아니라 자기 주머니에 꽂힌 돈이다 —
+   * 문턱이 아니라 보너스 건수가 눈금이고, 시즌 폭에서 멈춘다.
+   */
+  it("선수단 평판은 사재 보너스 한 건마다 오르고 시즌 폭에서 멈춘다", () => {
+    // 부호가 0인 원형 — 라커룸 축만 남는다
+    const state = ownedBy(createTestGame(7), "축구광형");
+    state.manager.wallet = 1_000_000_000;
+    const contracted = userPlayers(state).filter((p) =>
+      state.contracts.some((c) => c.status === "active" && c.gamePlayerId === p.id),
+    );
+    const bonusFor = (id: string) =>
+      Math.ceil(
+        state.contracts.find((c) => c.status === "active" && c.gamePlayerId === id)!.weeklyWage *
+          MANAGER_WALLET.BONUS_FULL_WEEKS,
+      );
+
+    let seen = 50;
+    for (const player of contracted.slice(0, MANAGER_WALLET.BONUS_PLAYERS_PER_SEASON)) {
+      const paid = payPlayerBonus(state, { playerId: player.id, amount: bonusFor(player.id) });
+      expect(paid.ok, "message" in paid ? paid.message : undefined).toBe(true);
+      expect(state.manager.reputation.squad, "보너스가 라커룸에 닿지 않았다").toBeGreaterThan(seen);
+      seen = state.manager.reputation.squad;
+    }
+    expect(state.manager.reputation.squad - 50, "시즌 폭 밖으로 올랐다").toBe(
+      MANAGER_WALLET.FUND_SQUAD_LIFT,
+    );
+    expect(state.manager.reputation.board, "부호 0인 원형에서 보드가 움직였다").toBe(50);
+    // 카드는 보너스만으로도 선다 — 인원이 함께 실린다
+    const fact = fundingFactOf(state);
+    expect(fact?.data?.values?.players).toBe(MANAGER_WALLET.BONUS_PLAYERS_PER_SEASON);
   });
 });
