@@ -1,7 +1,7 @@
 import type { GamePlayer, Interest } from "@story-fm/domain";
 import { INTEREST_STAGE_KO } from "@story-fm/domain";
 import { diffDays } from "../competition/calendar";
-import { makeRng } from "../core/rng";
+import { makeRng, pickWeighted } from "../core/rng";
 import { squadDepthOf, betterAtPosition, type SquadDepth } from "../squad/depth";
 import {
   clearInterests,
@@ -15,7 +15,16 @@ import {
   teamNameIn,
   type GameState,
 } from "../core/state";
-import { loanLockOf, marketValueOf, suitorsOf, windowOpenForTeam, SUITORS_MANY } from "./market";
+import {
+  deadlineRushOf,
+  loanLockOf,
+  marketValueOf,
+  stageScaleOf,
+  suitorWeightOf,
+  suitorsOf,
+  windowOpenForTeam,
+  SUITORS_MANY,
+} from "./market";
 
 /**
  * **관심 — 오퍼 앞에 서는 사다리** (→ docs/simulation/transfer.md §1-2).
@@ -127,7 +136,9 @@ function climbInterests(state: GameState, digest: string[]): void {
     if (row.stage === "bidding") continue;
     if (diffDays(row.lastMovedOn, state.date) < INTEREST_STEP_DAYS) continue;
     if (windowOpenForTeam(state, row.teamId) === null) continue;
-    if (rng() >= INTEREST_STEP_CHANCE) continue;
+    // **마감 주에는 사다리가 빨리 오른다** — 창이 닫히기 전에 묻던 구단이 값을 부른다
+    // (transfer.md §1-3). 재는 창은 그 줄의 주인 것이다
+    if (rng() >= INTEREST_STEP_CHANCE * deadlineRushOf(state, row.teamId)) continue;
     const player = playerById(state, row.gamePlayerId);
     if (!player) continue;
     row.stage = row.stage === "watching" ? "enquired" : "bidding";
@@ -188,7 +199,16 @@ function standOnOurs(state: GameState, rng: () => number, depthOf: () => SquadDe
     (id) => affords(state, id, value) && interestOf(state, id, chosen.id) === undefined,
   );
   if (options.length === 0) return;
-  const teamId = options[Math.floor(rng() * options.length)]!;
+  /**
+   * **주인은 무대로 뽑힌다** — 균등이 아니다 (`suitorWeightOf` — transfer.md §1-3).
+   * 관심에서 나오는 오퍼는 구단을 다시 고르지 않으므로(`generateIncomingOffers`),
+   * 「누가 우리 선수를 노리는가」가 실질적으로 정해지는 자리가 여기다.
+   */
+  const scale = stageScaleOf(state);
+  const blockedHere = betterAtPosition(state, state.userTeamId, chosen);
+  const teamId = pickWeighted(rng, options, (id) =>
+    suitorWeightOf(state, id, chosen, scale, blockedHere),
+  );
   (state.interests ??= []).push({
     teamId,
     gamePlayerId: chosen.id,
