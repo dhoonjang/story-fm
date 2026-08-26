@@ -129,7 +129,7 @@ import { foldCareer, type CareerTotals } from "../squad/career";
 import { formAngle, formLabel, formTone } from "../squad/form";
 import { leaderGroupOf } from "../squad/hierarchy";
 import { ratingTone, type RatingTone } from "../match/ratings";
-import { buildOpponentReport } from "../match/preview";
+import { buildOpponentReport, type AbsentReason } from "../match/preview";
 import { GAP_CONDITION, edgeOf, subLimitsOf, zoneGrid, type InjuryRisk } from "@story-fm/sim";
 import { moodOf, type MoodRead } from "../squad/mood";
 import { openPromises, squadStatusOf } from "../squad/promises";
@@ -975,8 +975,8 @@ export interface MatchPreviewView {
   basis: { date: string; label: string } | null;
   /** 직전 경기 선발에서 이어지지 못해 코어가 메운 인원 — 예상의 흐릿한 정도다 */
   guessed: number;
-  /** 부상·정지로 못 나오는 상대 선수 */
-  absent: { name: string; position: string; reason: "injury" | "suspension"; note: string }[];
+  /** 부상·정지·대표팀 소집으로 못 나오는 상대 선수 (`AbsentReason` — `match/preview.ts`) */
+  absent: { name: string; position: string; reason: AbsentReason; note: string }[];
   /** 상대가 세워 둔 모양과 6축 — 전술판과 같은 조각이라 화면이 같은 낱말을 쓴다 */
   shape: TacticsView;
   /**

@@ -280,14 +280,19 @@ export function SquadTable({
                   {p.name}
                 </span>
                 {/* 국적 — **표식이 아니라 사실**이라 알약이 아니다. 등록 표식(HG·U21)과
-                    같은 모양으로 두면 "이 선수가 무엇에 해당한다"로 읽힌다 */}
+                    같은 모양으로 두면 "이 선수가 무엇에 해당한다"로 읽힌다.
+                    통산 A매치는 같은 사실의 뒷면이라 툴팁에 함께 선다 — 줄에 수를
+                    하나 더 세우면 국적 코드가 무슨 수의 라벨처럼 읽힌다 */}
                 {p.nationality !== null && (
                   <span
                     className="nat"
                     title={
-                      p.secondNationality === null
+                      (p.secondNationality === null
                         ? p.nationality
-                        : `${p.nationality} · ${p.secondNationality}`
+                        : `${p.nationality} · ${p.secondNationality}`) +
+                      (p.caps > 0
+                        ? ` — A매치 ${p.caps}경기${p.internationalGoals > 0 ? ` ${p.internationalGoals}골` : ""}`
+                        : "")
                     }
                   >
                     {p.nationality}
@@ -309,6 +314,24 @@ export function SquadTable({
                  * 그 자리에 선다 — 상세를 펼쳐야 보이면 탭을 연 뜻이 없다.
                  * 연속 미출전은 툴팁의 사실로만 적는다("불러들이라"는 GM의 몫이다).
                  */}
+                {/*
+                 * 대표팀 소집·여름 대회 — 임대와 같은 결이다: **표식이 아니라 지금
+                 * 어디에 있는가**. 다만 열흘 뒤 돌아오므로 소속이 아니라 부재다.
+                 * 나라와 복귀일이 그 자리에 서고, 그 창의 출전·골은 툴팁의 사실로만
+                 * 적는다("돌아오면 쉬게 하라"는 GM의 몫이다).
+                 */}
+                {p.away !== null && (
+                  <span
+                    className="tag intl"
+                    title={
+                      `${p.away.countryName ?? p.away.country ?? "대표팀"} ` +
+                      `${p.away.reason === "call-up" ? "소집" : "여름 대회"} — ${p.away.returnsOn} 복귀` +
+                      (p.away.apps === null ? "" : ` · ${p.away.apps}경기 ${p.away.goals ?? 0}골`)
+                    }
+                  >
+                    {p.away.country ?? "대표팀"}
+                  </span>
+                )}
                 {p.loan !== null && (
                   <span
                     className="tag loan"
