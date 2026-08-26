@@ -3,6 +3,8 @@ import type {
   AchievementCode,
   BoardExpectationCode,
   GamePlayer,
+  MatchRecord,
+  Outcome,
   PositionGroup,
   RetiredPlayer,
   RetirementReason,
@@ -33,7 +35,6 @@ import {
   naturalPositionOf,
   presetOf,
   retiresAtSeasonEnd,
-  seasonRating,
   visionItemText,
   visionScore,
   visionTargetText,
@@ -101,6 +102,16 @@ import {
 import { applySummerTournament } from "./international";
 import { recomputeClubTiers } from "./club-tier-recompute";
 import { recordBreaksOf, type ClubRecordCode, type RecordBreak } from "./records";
+import {
+  MIN_LEADER_TALLY,
+  RATING_APPS_DIVISOR,
+  RATING_ORDER,
+  TOP_ASSISTER_ORDER,
+  TOP_SCORER_ORDER,
+  pickWinner,
+  talliesOfLeague,
+  type LeagueTally,
+} from "./leaderboard";
 import { boardExpectationOfTier, tierOfTeamIn } from "../core/club-tier";
 import { leagueRounds, safetyLine } from "../core/league-shape";
 import { generateYouthPlayer } from "../world/generate";
@@ -143,6 +154,62 @@ export interface StandingRow {
   goalsAgainst: number;
   goalDiff: number;
   points: number;
+  /**
+   * 홈/원정 소계 — 합계와 **같은 칸 구성**이고 ⚠️ **홈 + 원정 = 합계**다
+   * (competition.md §2 · §7 불변식). 저장하지 않는다: 같은 루프의 파생이다.
+   */
+  home: StandingSplit;
+  away: StandingSplit;
+  /**
+   * 최근 5경기 — **오래된 것부터.** 이 표가 센 경기와 같은 집합이라(그 시즌 그 대회의
+   * 리그전) 녹아웃은 들어오지 않는다. 승점만 보면 무너지는 팀과 오르는 팀이 같다.
+   */
+  form: Outcome[];
+}
+
+/** 순위표의 한 칸 묶음 — 합계·홈·원정이 같은 모양이라 화면이 열을 하나로 그린다 */
+export interface StandingSplit {
+  played: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  goalsFor: number;
+  goalsAgainst: number;
+  points: number;
+}
+
+function emptySplit(): StandingSplit {
+  return { played: 0, wins: 0, draws: 0, losses: 0, goalsFor: 0, goalsAgainst: 0, points: 0 };
+}
+
+/** 순위표에 붙는 폼의 길이 — 다섯이면 흐름이 보이고 열이 표를 밀어내지 않는다 */
+const FORM_MATCHES = 5;
+
+/** 한 팀이 이 표 안에서 치른 경기 한 줄 — 폼은 **날짜순**이라 따로 모아 세운다 */
+interface FormEntry {
+  date: string;
+  time: string;
+  outcome: Outcome;
+}
+
+/**
+ * 이 경기가 **순위표가 세는 경기**인가 — 그 시즌 그 대회의 리그전뿐이다.
+ *
+ * 녹아웃은 표에 들어가지 않으므로 폼에도 팀 열에도 들어가지 않는다
+ * (competition.md §2). 표와 팀 열이 다른 집합을 세면 순위표의 실점과 팀 열의 실점이
+ * 조용히 갈리므로, 세는 자리가 여럿이어도 **거르는 규칙은 여기 하나다.**
+ */
+export function countsInStandings(
+  match: MatchRecord,
+  season: number,
+  competitionId: string,
+): boolean {
+  return (
+    match.result !== null &&
+    match.season === season &&
+    match.competitionId === competitionId &&
+    (match.stage ?? "league") === "league"
+  );
 }
 
 /**
@@ -175,18 +242,25 @@ export function computeStandings(
       goalsAgainst: 0,
       goalDiff: 0,
       points: 0,
+      home: emptySplit(),
+      away: emptySplit(),
+      form: [],
     });
   }
   const counted: CountedMatch[] = [];
+  const recent = new Map<string, FormEntry[]>();
+  const noteForm = (teamId: string, entry: FormEntry): void => {
+    const list = recent.get(teamId) ?? [];
+    list.push(entry);
+    recent.set(teamId, list);
+  };
   for (const match of state.matches) {
-    if (!match.result || match.season !== state.season) continue;
-    if (match.competitionId !== competitionId) continue;
-    // 녹아웃은 순위표에 들어가지 않는다 — 리그 페이즈만 줄을 세운다
-    if ((match.stage ?? "league") !== "league") continue;
-    const home = rows.get(match.homeTeamId);
-    const away = rows.get(match.awayTeamId);
-    if (!home || !away) continue;
-    const { homeGoals, awayGoals } = match.result;
+    if (!countsInStandings(match, state.season, competitionId)) continue;
+    const homeRow = rows.get(match.homeTeamId);
+    const awayRow = rows.get(match.awayTeamId);
+    const result = match.result;
+    if (!homeRow || !awayRow || !result) continue;
+    const { homeGoals, awayGoals } = result;
     // 맞대결 표는 이 표에 실제로 반영된 경기만 본다 (아래 sortStandings)
     counted.push({
       homeTeamId: match.homeTeamId,
@@ -194,30 +268,69 @@ export function computeStandings(
       homeGoals,
       awayGoals,
     });
-    home.played++;
-    away.played++;
-    home.goalsFor += homeGoals;
-    home.goalsAgainst += awayGoals;
-    away.goalsFor += awayGoals;
-    away.goalsAgainst += homeGoals;
-    if (homeGoals > awayGoals) {
-      home.wins++;
-      away.losses++;
-      home.points += 3;
-    } else if (homeGoals < awayGoals) {
-      away.wins++;
-      home.losses++;
-      away.points += 3;
-    } else {
-      home.draws++;
-      away.draws++;
-      home.points++;
-      away.points++;
+    // 합계와 소계는 **한 자리에서** 얹는다 — 두 자리로 나누면 홈+원정=합계가 깨진다
+    const sides = [
+      { row: homeRow, split: homeRow.home, scored: homeGoals, conceded: awayGoals },
+      { row: awayRow, split: awayRow.away, scored: awayGoals, conceded: homeGoals },
+    ];
+    for (const { row, split, scored, conceded } of sides) {
+      const outcome: Outcome = scored > conceded ? "W" : scored < conceded ? "L" : "D";
+      const points = outcome === "W" ? WIN_POINTS : outcome === "D" ? DRAW_POINTS : 0;
+      for (const box of [row, split]) {
+        box.played++;
+        box.goalsFor += scored;
+        box.goalsAgainst += conceded;
+        box.points += points;
+        if (outcome === "W") box.wins++;
+        else if (outcome === "L") box.losses++;
+        else box.draws++;
+      }
+      noteForm(row.teamId, { date: match.date, time: match.time ?? "", outcome });
     }
   }
   const list = [...rows.values()];
-  for (const row of list) row.goalDiff = row.goalsFor - row.goalsAgainst;
+  for (const row of list) {
+    row.goalDiff = row.goalsFor - row.goalsAgainst;
+    // 경기 배열은 날짜순이 아니다(연기·추첨으로 뒤에 붙는다) — 폼은 달력이 정한다
+    row.form = (recent.get(row.teamId) ?? [])
+      .sort((a, b) => (a.date === b.date ? a.time.localeCompare(b.time) : a.date < b.date ? -1 : 1))
+      .slice(-FORM_MATCHES)
+      .map((e) => e.outcome);
+  }
   return sortStandings(list, counted);
+}
+
+/** 승점 — 승 3 · 무 1 (competition.md §2) */
+const WIN_POINTS = 3;
+const DRAW_POINTS = 1;
+
+/** 어느 표를 보는가 — 합계·홈·원정 (competition.md §2 「순위표 한 행이 아는 것」) */
+export type StandingSplitKey = "all" | "home" | "away";
+
+/**
+ * 홈 표·원정 표 — **같은 행을 그 소계로 다시 세운다.** 행은 그대로이고 순서만 다르다.
+ *
+ * ⚠️ **맞대결 칸이 없다.** 한 팀에게 홈인 경기는 상대에게 원정이라 "그들끼리의 홈
+ * 표"라는 것이 없다 — 합계표의 맞대결 규칙을 여기 끌어오면 홈 경기 한 짝만으로
+ * 순위가 갈린다.
+ */
+export function standingsBySplit(
+  rows: readonly StandingRow[],
+  split: StandingSplitKey,
+): StandingRow[] {
+  if (split === "all") return [...rows];
+  const diff = (s: StandingSplit): number => s.goalsFor - s.goalsAgainst;
+  return [...rows].sort((a, b) => {
+    const x = a[split];
+    const y = b[split];
+    return (
+      y.points - x.points ||
+      diff(y) - diff(x) ||
+      y.goalsFor - x.goalsFor ||
+      y.wins - x.wins ||
+      byTeamId(a, b)
+    );
+  });
 }
 
 /** 순위표에 실제로 반영된 리그 경기 — 맞대결 표가 다시 도는 대상 */
@@ -480,128 +593,10 @@ function leaguesPlayedIn(state: GameState): string[] {
 }
 
 /**
- * 평점 상의 출전 문턱 — 라운드 수를 이 수로 나눈 몫(올림)이다 (season.md §6).
- * 평점은 평균이라 문턱이 없으면 두 경기 뛴 교체 자원이 주장을 이긴다.
- * 영플레이어의 문턱이 절반인 것은 유망주가 원래 덜 뛰기 때문이다.
+ * 영플레이어의 출전 문턱을 만드는 나눗수 — 올해의 선수의 절반이다(유망주는 원래 덜
+ * 뛴다). 올해의 선수 쪽은 시즌 중 리더보드와 같은 자를 쓴다(`RATING_APPS_DIVISOR`).
  */
-const PLAYER_OF_SEASON_APPS_DIVISOR = 2;
 const YOUNG_PLAYER_APPS_DIVISOR = 4;
-
-/** 득점왕·도움왕이 서는 최소 기록 — 0골 득점왕은 상이 아니다 */
-const MIN_AWARD_TALLY = 1;
-
-/** 한 리그 안에서 합산된 한 선수의 시즌 기록 — 시상이 견주는 유일한 재료 */
-interface AwardTally {
-  gamePlayerId: string;
-  playerName: string;
-  /** 그 리그에서 가장 많이 뛴 팀 (동률이면 팀 id 사전순) */
-  teamId: string;
-  apps: number;
-  goals: number;
-  assists: number;
-  /** 시즌 평점 — 기록이 없으면 null (`seasonRating`과 같은 눈금) */
-  rating: number | null;
-  /** 시즌 종료일 기준 만 나이 */
-  age: number;
-}
-
-type TallyOrder = (a: AwardTally, b: AwardTally) => number;
-
-const byGoalsDesc: TallyOrder = (a, b) => b.goals - a.goals;
-const byAssistsDesc: TallyOrder = (a, b) => b.assists - a.assists;
-const byAppsAsc: TallyOrder = (a, b) => a.apps - b.apps;
-const byAppsDesc: TallyOrder = (a, b) => b.apps - a.apps;
-const byContributionDesc: TallyOrder = (a, b) => b.goals + b.assists - (a.goals + a.assists);
-/** 평점 칸 — 한쪽이라도 기록이 없으면 **이 칸에서는 갈리지 않는다** (season.md §6) */
-const byRatingDesc: TallyOrder = (a, b) =>
-  a.rating === null || b.rating === null ? 0 : b.rating - a.rating;
-/** 사슬의 마지막 칸 — 유일해야 한다. 명단 순서가 수상자를 정하면 안 된다 (§8 불변식) */
-const byIdAsc: TallyOrder = (a, b) => (a.gamePlayerId < b.gamePlayerId ? -1 : 1);
-
-/** 동점 사슬 — 앞 칸부터 자르고 마지막 칸(id)이 반드시 하나를 남긴다 */
-const TOP_SCORER_ORDER: TallyOrder[] = [
-  byGoalsDesc,
-  byAppsAsc,
-  byAssistsDesc,
-  byRatingDesc,
-  byIdAsc,
-];
-const TOP_ASSISTER_ORDER: TallyOrder[] = [
-  byAssistsDesc,
-  byAppsAsc,
-  byGoalsDesc,
-  byRatingDesc,
-  byIdAsc,
-];
-const RATING_ORDER: TallyOrder[] = [byRatingDesc, byAppsDesc, byContributionDesc, byIdAsc];
-
-/** 사슬로 1위 하나를 고른다 — 자격자가 없으면 그 상은 서지 않는다 */
-function pickWinner(candidates: AwardTally[], order: TallyOrder[]): AwardTally | null {
-  let best: AwardTally | null = null;
-  for (const tally of candidates) {
-    if (best === null) {
-      best = tally;
-      continue;
-    }
-    for (const compare of order) {
-      const diff = compare(tally, best);
-      if (diff === 0) continue;
-      if (diff < 0) best = tally;
-      break;
-    }
-  }
-  return best;
-}
-
-/** 한 리그의 시즌 기록을 선수별로 합산한다 — 시즌 중 이적하면 행이 팀별로 갈린다 */
-function talliesOfLeague(state: GameState, leagueId: string, endDate: string): AwardTally[] {
-  const players = new Map(state.players.map((p) => [p.id, p]));
-  const merged = new Map<string, AwardTally & { ratingSum: number | null }>();
-  /** 그 리그에서 팀마다 몇 경기 뛰었나 — 수상자의 팀을 고르는 근거 */
-  const appsByTeam = new Map<string, Map<string, number>>();
-
-  for (const stat of state.seasonStats) {
-    if (stat.season !== state.season) continue;
-    // 승강은 아직 적용되기 전이다 — 소속의 원본은 카탈로그가 아니라 세이브다 (§8 불변식)
-    if (leagueOfTeamIn(state, stat.teamId) !== leagueId) continue;
-    // 은퇴·이적으로 명단에서 빠진 선수는 이름을 채울 수 없다. 결산은 전환보다
-    // 앞이라 실제로는 다 있지만, 없으면 후보에서 뺀다 (빈 이름의 상은 사실이 아니다)
-    const player = players.get(stat.gamePlayerId);
-    if (!player) continue;
-
-    const prev = merged.get(stat.gamePlayerId);
-    const ratingSum =
-      stat.ratingSum === undefined
-        ? (prev?.ratingSum ?? null)
-        : (prev?.ratingSum ?? 0) + stat.ratingSum;
-    merged.set(stat.gamePlayerId, {
-      gamePlayerId: stat.gamePlayerId,
-      playerName: player.name,
-      teamId: stat.teamId,
-      apps: (prev?.apps ?? 0) + stat.apps,
-      goals: (prev?.goals ?? 0) + stat.goals,
-      assists: (prev?.assists ?? 0) + (stat.assists ?? 0),
-      ratingSum,
-      rating: null,
-      age: ageOf(player.birthdate, endDate),
-    });
-    const perTeam = appsByTeam.get(stat.gamePlayerId) ?? new Map<string, number>();
-    perTeam.set(stat.teamId, (perTeam.get(stat.teamId) ?? 0) + stat.apps);
-    appsByTeam.set(stat.gamePlayerId, perTeam);
-  }
-
-  return [...merged.values()].map((tally) => {
-    const teams = [...(appsByTeam.get(tally.gamePlayerId) ?? new Map<string, number>())];
-    const teamId =
-      teams.sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0]?.[0] ?? tally.teamId;
-    const { ratingSum, ...rest } = tally;
-    return {
-      ...rest,
-      teamId,
-      rating: seasonRating({ apps: tally.apps, ratingSum: ratingSum ?? undefined }),
-    };
-  });
-}
 
 /**
  * 시즌 시상 — **결정적 순수 함수다.** `state`를 읽기만 하고, 같은 기록이면 같은
@@ -622,7 +617,7 @@ export function seasonAwards(state: GameState): SeasonAward[] {
     const rounds = leagueRounds(teamsOfLeagueIn(state, leagueId).length);
     const rated = tallies.filter((t) => t.rating !== null);
 
-    const add = (code: SeasonAwardCode, winner: AwardTally | null): void => {
+    const add = (code: SeasonAwardCode, winner: LeagueTally | null): void => {
       if (!winner) return;
       awards.push({
         code,
@@ -642,21 +637,21 @@ export function seasonAwards(state: GameState): SeasonAward[] {
     add(
       "top-scorer",
       pickWinner(
-        tallies.filter((t) => t.goals >= MIN_AWARD_TALLY),
+        tallies.filter((t) => t.goals >= MIN_LEADER_TALLY),
         TOP_SCORER_ORDER,
       ),
     );
     add(
       "top-assister",
       pickWinner(
-        tallies.filter((t) => t.assists >= MIN_AWARD_TALLY),
+        tallies.filter((t) => t.assists >= MIN_LEADER_TALLY),
         TOP_ASSISTER_ORDER,
       ),
     );
     add(
       "player-of-season",
       pickWinner(
-        rated.filter((t) => t.apps >= Math.ceil(rounds / PLAYER_OF_SEASON_APPS_DIVISOR)),
+        rated.filter((t) => t.apps >= Math.ceil(rounds / RATING_APPS_DIVISOR)),
         RATING_ORDER,
       ),
     );

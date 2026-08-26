@@ -171,9 +171,16 @@ import {
   boardExpectation,
   computeStandings,
   ourYouthCandidates,
+  standingsBySplit,
   youthIntakeDeadline,
   type StandingRow,
 } from "../competition/season";
+import {
+  leaderboardsOf,
+  teamStatsOf,
+  type LeaderBoard,
+  type TeamStatRow,
+} from "../competition/leaderboard";
 import { hasRelegation, leagueOfTeamIn } from "../competition/promotion";
 import { RELEGATION_SLOTS } from "../core/league-shape";
 import { tierOfTeamIn } from "../core/club-tier";
@@ -1141,6 +1148,21 @@ export interface CompetitionView {
   kind: "league" | "cup";
   /** 순위표 — 국내 컵은 순수 녹아웃이라 **빈 배열**이다 (표 대신 브래킷을 본다) */
   standings: StandingRow[];
+  /**
+   * 홈 소계·원정 소계로 다시 세운 표 — **같은 행이고 순서만 다르다**
+   * (competition.md §2). 화면은 셋 중 하나를 고를 뿐 순서를 만들지 않는다
+   * (overview.md §5) — 정렬 규칙이 화면에 서면 순위표가 두 곳에서 정의된다.
+   */
+  homeTable: StandingRow[];
+  awayTable: StandingRow[];
+  /**
+   * 개인 순위와 팀 열 — 순위표가 없는 국내 컵은 null.
+   *
+   * ⚠️ **개인 순위는 리그에만 선다** — 시즌 기록표가 대회별로 갈려 있지 않아
+   * 대항전 득점왕은 세울 수 없다 (competition.md §2). 팀 열은 경기 결과에서
+   * 나오므로 대항전 리그 페이즈에도 선다.
+   */
+  leaders: CompetitionLeadersView | null;
   /** 순위 구역 — 챔스·유로파 진출권(리그) 또는 본선 직행·플레이오프(대항전) */
   zones: StandingZone[];
   /** 우리 순위 (0 = 순위표에 없음) */
@@ -1168,6 +1190,14 @@ export interface CompetitionView {
    * 것이 하나도 없는 해는 줄을 세우지 않는다.
    */
   pastSeasons: CompetitionSeasonView[];
+}
+
+/** 대회 화면의 개인 순위·팀 열 (competition.md §2 「개인 순위」) */
+export interface CompetitionLeadersView {
+  /** 축별 상위 열 — 줄이 하나도 없는 축은 빠진다. 대항전은 빈 배열 */
+  players: LeaderBoard[];
+  /** 팀 열 — 순위표와 같은 순서다 */
+  teams: TeamStatRow[];
 }
 
 /**
@@ -2546,6 +2576,14 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
   if (current) current.current = true;
 
   const standings = computeStandings(state, competitionId);
+  // 개인 순위는 리그의 것이다 — 대항전은 팀 열만 선다 (competition.md §2)
+  const leaders: CompetitionLeadersView | null =
+    standings.length === 0
+      ? null
+      : {
+          players: cup ? [] : leaderboardsOf(state, competitionId),
+          teams: teamStatsOf(state, competitionId),
+        };
   /**
    * 이 대회의 다음 우리 경기 — **팀 단위와 같은 함수로 고른다.**
    *
@@ -2573,6 +2611,9 @@ function buildCompetitionView(state: GameState, competitionId: string): Competit
     short: competitionShortName(competitionId),
     kind: cup ? "cup" : "league",
     standings,
+    homeTable: standingsBySplit(standings, "home"),
+    awayTable: standingsBySplit(standings, "away"),
+    leaders,
     zones: buildStandingZones(state, competitionId, standings.length),
     userPosition: standings.findIndex((r) => r.teamId === state.userTeamId) + 1,
     nextMatch: nextOurs ? nextMatchView(state, nextOurs, roundLabelOf(nextOurs)) : null,

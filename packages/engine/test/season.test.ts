@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { ageOf, type ManagerOffer } from "@story-fm/domain";
+import {
+  ageOf,
+  disciplinePoints,
+  outcomeFor,
+  RED_CARD_POINTS,
+  type ManagerOffer,
+  type SeasonStat,
+} from "@story-fm/domain";
 import {
   acceptManagerOffer,
   activeContract,
@@ -13,6 +20,10 @@ import {
   generateOwner,
   isClubTeam,
   computeStandings,
+  leaderboardOf,
+  RATING_APPS_DIVISOR,
+  standingsBySplit,
+  teamStatsOf,
   cupCatalogById,
   domesticCupById,
   financeOf,
@@ -152,6 +163,143 @@ describe("순위표", () => {
     for (const m of friendlies) m.result = { homeGoals: 5, awayGoals: 0, scorers: [] };
     const standings = computeStandings(state);
     expect(standings.every((r) => r.played === 0 && r.points === 0)).toBe(true);
+    // 폼이 세는 경기는 표가 센 경기와 같다 — 친선 5-0이 "승"으로 남으면 안 된다
+    expect(standings.every((r) => r.form.length === 0)).toBe(true);
+  });
+
+  describe("홈/원정 소계·폼 (competition.md §2)", () => {
+    // 한 세이브를 나눠 쓴다 — createTestGame()은 세계를 통째로 세우므로 케이스마다 부르지 않는다
+    const state = createTestGame();
+    const league = leagueOfTeamIn(state, state.userTeamId);
+    const fixtures = state.matches.filter(
+      (m) => m.competitionId === league && m.season === state.season,
+    );
+    const [a, b] = teamsOfLeagueIn(state, league);
+    // 전 경기 0-0 → a는 홈에서만 이기고 b는 원정에서만 이긴다(겹치는 한 경기는 b의 것)
+    for (const m of fixtures) m.result = { homeGoals: 0, awayGoals: 0, scorers: [] };
+    for (const m of fixtures.filter((m) => m.homeTeamId === a)) {
+      m.result = { homeGoals: 1, awayGoals: 0, scorers: [] };
+    }
+    for (const m of fixtures.filter((m) => m.awayTeamId === b)) {
+      m.result = { homeGoals: 0, awayGoals: 1, scorers: [] };
+    }
+    const table = computeStandings(state, league);
+
+    it("홈 + 원정 = 합계 — 일곱 칸 모두", () => {
+      expect(table.length).toBeGreaterThan(0);
+      for (const r of table) {
+        expect(
+          [
+            r.home.played + r.away.played,
+            r.home.wins + r.away.wins,
+            r.home.draws + r.away.draws,
+            r.home.losses + r.away.losses,
+            r.home.goalsFor + r.away.goalsFor,
+            r.home.goalsAgainst + r.away.goalsAgainst,
+            r.home.points + r.away.points,
+          ],
+          `${r.name}의 소계가 합계와 갈렸다`,
+        ).toEqual([r.played, r.wins, r.draws, r.losses, r.goalsFor, r.goalsAgainst, r.points]);
+      }
+    });
+
+    it("홈 표와 원정 표는 같은 행을 그 소계로 다시 세운다", () => {
+      const home = standingsBySplit(table, "home");
+      const away = standingsBySplit(table, "away");
+      // 행은 그대로다 — 순서만 다르다
+      expect([...home.map((r) => r.teamId)].sort()).toEqual([...table.map((r) => r.teamId)].sort());
+      const at = (rows: typeof table, teamId: string) => rows.findIndex((r) => r.teamId === teamId);
+      expect(at(home, a!), "홈에서만 이긴 팀이 홈 표 위에 없다").toBeLessThan(at(home, b!));
+      expect(at(away, b!), "원정에서만 이긴 팀이 원정 표 위에 없다").toBeLessThan(at(away, a!));
+    });
+
+    it("폼은 그 표가 센 경기를 날짜순으로 다섯까지 든다", () => {
+      const row = table.find((r) => r.teamId === a)!;
+      const played = fixtures
+        .filter((m) => m.homeTeamId === a || m.awayTeamId === a)
+        .sort((x, y) => (x.date < y.date ? -1 : 1));
+      expect(played.length).toBeGreaterThan(5);
+      expect(row.form.length, "다섯을 넘겼다").toBe(5);
+      expect(row.form).toEqual(played.slice(-5).map((m) => outcomeFor(m, a!)));
+    });
+  });
+});
+
+describe("리그 리더보드 (competition.md §2 「개인 순위」)", () => {
+  // 한 세이브를 나눠 쓰고, 케이스마다 시즌 기록표만 다시 깐다
+  const state = createTestGame();
+  const league = leagueOfTeamIn(state, state.userTeamId);
+  const squad = playersOf(state, state.userTeamId);
+  const [one, two] = squad;
+  // 리그 4라운드까지 치른 표 — 평점 문턱은 ⌈4/2⌉ = 2경기다
+  const PLAYED = 4;
+  for (const m of state.matches.filter(
+    (m) => m.competitionId === league && m.season === state.season && m.round <= PLAYED,
+  )) {
+    m.result = { homeGoals: 1, awayGoals: 1, scorers: [] };
+  }
+  const RATING_FLOOR = Math.ceil(PLAYED / RATING_APPS_DIVISOR);
+
+  function record(rows: ReadonlyArray<Partial<SeasonStat> & { gamePlayerId: string }>): void {
+    state.seasonStats.length = 0;
+    for (const row of rows) {
+      state.seasonStats.push({
+        season: state.season,
+        teamId: state.userTeamId,
+        apps: 0,
+        goals: 0,
+        ...row,
+      });
+    }
+  }
+
+  it("평점 표는 그 팀이 치른 리그전의 절반을 뛴 선수부터 세운다", () => {
+    expect(computeStandings(state, league)[0]?.played).toBe(PLAYED);
+    record([
+      { gamePlayerId: one!.id, apps: RATING_FLOOR, ratingSum: 8 * RATING_FLOOR },
+      // 문턱 바로 아래 — 평점이 더 높아도 서지 않는다(평점은 평균이다)
+      { gamePlayerId: two!.id, apps: RATING_FLOOR - 1, ratingSum: 9.5 * (RATING_FLOOR - 1) },
+    ]);
+    const under = leaderboardOf(state, league, "rating").map((r) => r.gamePlayerId);
+    expect(under).toContain(one!.id);
+    expect(under).not.toContain(two!.id);
+
+    // 문턱에 닿는 순간 선다 — 경계는 이상(≥)이다
+    record([
+      { gamePlayerId: one!.id, apps: RATING_FLOOR, ratingSum: 8 * RATING_FLOOR },
+      { gamePlayerId: two!.id, apps: RATING_FLOOR, ratingSum: 9.5 * RATING_FLOOR },
+    ]);
+    expect(leaderboardOf(state, league, "rating")[0]?.gamePlayerId).toBe(two!.id);
+  });
+
+  it("징계 점수는 퇴장 한 장을 경고 세 장으로 센다", () => {
+    expect(disciplinePoints({ yellows: RED_CARD_POINTS })).toBe(disciplinePoints({ reds: 1 }));
+    record([
+      { gamePlayerId: one!.id, apps: 4, yellows: 2 },
+      { gamePlayerId: two!.id, apps: 4, reds: 1 },
+    ]);
+    const board = leaderboardOf(state, league, "cards");
+    expect(board[0]?.gamePlayerId, "퇴장 한 장이 경고 두 장 아래 섰다").toBe(two!.id);
+    expect(board[0]?.value).toBe(RED_CARD_POINTS);
+  });
+
+  it("0인 축에는 아무도 서지 않는다 — 0골 득점 1위는 순위가 아니다", () => {
+    record([{ gamePlayerId: one!.id, apps: 4, goals: 0, assists: 0 }]);
+    expect(leaderboardOf(state, league, "goals")).toEqual([]);
+    expect(leaderboardOf(state, league, "assists")).toEqual([]);
+  });
+
+  it("팀 열은 순위표와 같은 경기를 세고 같은 순서로 선다", () => {
+    const table = computeStandings(state, league);
+    const teams = teamStatsOf(state, league);
+    expect(teams.map((t) => t.teamId)).toEqual(table.map((r) => r.teamId));
+    for (const [i, t] of teams.entries()) {
+      expect([t.played, t.goalsFor, t.goalsAgainst]).toEqual([
+        table[i]!.played,
+        table[i]!.goalsFor,
+        table[i]!.goalsAgainst,
+      ]);
+    }
   });
 });
 
