@@ -7,6 +7,7 @@ import {
   buildGmTools,
   parseSceneHeader,
   runMockGmTurn,
+  sanitizeCasterText,
   sanitizeSceneText,
 } from "@story-fm/agents";
 import {
@@ -97,8 +98,46 @@ function textLines(text: string): string[] {
   return text.split("\n").filter((line) => line.trim().length > 0);
 }
 
+/** 한 경기가 낼 수 있는 중계 턴의 상한 — 넘으면 구간이 굴러가지 않는 것이다 */
+const MATCH_TURN_CAP = 80;
+
+interface CasterArm {
+  turns: number;
+  rawLines: number;
+  keptLines: number;
+  headers: number;
+}
+
+/**
+ * 중계 팔 — **평시와 눈금이 다르다.** 중계는 구간마다 시각 헤더를 새로 찍는 것이
+ * 정상이라 평시 위생을 걸 수 없고(prompts.md §1), 코어가 거는 것은 꺾쇠 규칙
+ * 하나뿐이다. 여기서 읽는 것은 그 체가 **모의 중계에서 아무것도 걷지 않는가**와,
+ * 걷고 난 뒤에도 **첫 줄의 시각 헤더가 그대로인가**다.
+ */
+function casterArm(seed: number): CasterArm {
+  const state = build(seed, "이감독", BACKGROUND);
+  // 경기일까지 — 추첨·기한 같은 것들이 중간에 시계를 세운다
+  for (let guard = 0; guard < 40 && state.phase !== "matchday"; guard += 1) {
+    advanceTime(state, "next_match");
+  }
+  runMockGmTurn(state, "경기 시작하자");
+  const arm: CasterArm = { turns: 0, rawLines: 0, keptLines: 0, headers: 0 };
+  for (let t = 0; t < MATCH_TURN_CAP && state.phase === "match"; t += 1) {
+    const text = runMockGmTurn(state, "경기 진행", undefined, { kind: "advance_match" }).text ?? "";
+    if (text.length === 0) continue;
+    arm.turns += 1;
+    arm.rawLines += textLines(text).length;
+    arm.keptLines += textLines(sanitizeCasterText(text)).length;
+    // 위생 전후로 첫 줄 헤더가 같은가 — 구간마다 새로 찍는 시각 줄은 소음이 아니다
+    if (parseSceneHeader(text).header === parseSceneHeader(sanitizeCasterText(text)).header) {
+      arm.headers += 1;
+    }
+  }
+  return arm;
+}
+
 describe("프롬프트 회귀", () => {
-  it("층의 글자·프리픽스 안정성 · 모의 세션의 문법과 스킬 적중률", () => {
+  it("층의 글자·프리픽스 안정성 · 모의 세션의 문법과 스킬 적중률 · 중계 위생", () => {
     const state = build(7, "김감독", BACKGROUND);
     const other = build(21, "박감독", OTHER_BACKGROUND);
 
@@ -141,6 +180,7 @@ describe("프롬프트 회귀", () => {
       if ((textLines(parsed.body)[0] ?? "").startsWith("@")) grammatical += 1;
     }
 
+    const caster = casterArm(11);
     const layers = fixed.length + reference.length + stateNote.length;
     const readings: Readings<typeof PROMPT_REGRESSION> = {
       "고정층 글자": fixed.length,
@@ -155,6 +195,10 @@ describe("프롬프트 회귀", () => {
       "레퍼런스층 프리픽스 안정성": identical(reference, buildGmReference(later)),
       "장면 문법 준수율": grammatical / corpus.length,
       "위생이 걷어낸 줄 비율": (rawLines - keptLines) / Math.max(1, rawLines),
+      "중계 턴": caster.turns,
+      "중계 위생이 걷어낸 줄 비율":
+        (caster.rawLines - caster.keptLines) / Math.max(1, caster.rawLines),
+      "중계 시각 헤더 보존율": caster.headers / Math.max(1, caster.turns),
       "시점 헤더 파싱 성공률": headers / corpus.length,
       "평균 장면 글자": sceneChars / corpus.length,
       "스킬 적중률": hits / corpus.length,
@@ -165,7 +209,7 @@ describe("프롬프트 회귀", () => {
       reportOf(
         PROMPT_REGRESSION,
         readings,
-        `도구 ${SKILL_CATALOG.length}개 · 발화 ${corpus.length}건 · 층 합계 ${layers.toLocaleString()}자`,
+        `도구 ${SKILL_CATALOG.length}개 · 발화 ${corpus.length}건 · 중계 ${caster.turns}턴 · 층 합계 ${layers.toLocaleString()}자`,
       ),
     );
     expect(outOfBand(PROMPT_REGRESSION, readings)).toEqual([]);

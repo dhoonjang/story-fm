@@ -32,8 +32,10 @@ import { describeManagerSkills, describeReputation } from "@story-fm/domain";
 import {
   MATCH_ADVANCED,
   TIME_PASSED,
+  filterCasterStream,
   filterSceneStream,
   lastScenePoint,
+  sanitizeCasterText,
   sanitizeSceneText,
   noteSceneHeader,
   operationLabel,
@@ -1623,6 +1625,82 @@ describe("filterSceneStream — 화면에도 같은 위생", () => {
     // 첫 조각만 줄 앞머리 판정에 쓰이고, 그 뒤는 조각 단위로 그대로 나간다
     expect(out.join("")).toBe("@손흥민: 감독님.");
     expect(out.length).toBe(3);
+  });
+});
+
+/**
+ * 꺾쇠 블록 — **코어가 읽으라고 넣어 준 입력 구조**다(`<targets>`·`<ledger>`).
+ * 모델이 그것을 되받아 쓰면 프롬프트 내부 배선이 감독이 읽는 자리에 그대로 섰다.
+ * 평시와 중계가 **같은 규칙 하나**를 읽는다 (prompts.md §1).
+ */
+describe("꺾쇠 블록 — 평시와 중계가 같은 규칙을 읽는다", () => {
+  const BLOCK = [
+    '<targets max="2">',
+    "1. 공간 노리기 (공격진 침투)",
+    "2. 라인 올리기 (압박 강화)",
+    "</targets>",
+  ];
+
+  it("중계 위생은 블록을 걷고 구간 헤더와 이어쓰기는 남긴다", () => {
+    const raw = [
+      "[43']",
+      ...BLOCK,
+      "@중계: 브루노가 중거리 슛을 때립니다!",
+      "골키퍼가 쳐냅니다.",
+      "[45']",
+      "@중계: 전반 종료 휘슬.",
+    ].join("\n");
+
+    expect(sanitizeCasterText(raw)).toBe(
+      [
+        "[43']",
+        "@중계: 브루노가 중거리 슛을 때립니다!",
+        "골키퍼가 쳐냅니다.",
+        "[45']",
+        "@중계: 전반 종료 휘슬.",
+      ].join("\n"),
+    );
+  });
+
+  it("평시 위생도 같은 블록을 걷는다", () => {
+    const raw = ["[2026-07-01 AM 9:45]", ...BLOCK, "@스티브 홀랜드: 첫 주는 체력입니다."].join(
+      "\n",
+    );
+
+    expect(sanitizeSceneText(raw)).toBe(
+      ["[2026-07-01 AM 9:45]", "@스티브 홀랜드: 첫 주는 체력입니다."].join("\n"),
+    );
+  });
+
+  /** 짝 없는 꺾쇠 하나가 그 뒤의 장면을 통째로 삼키면 빈 턴이 된다 */
+  it("닫히지 않은 블록은 장면이 다시 서는 줄에서 끝난다", () => {
+    const raw = ["[12']", "<생각>", "어디를 노릴지 고른다", "@중계: 다시 이어갑니다."].join("\n");
+    expect(sanitizeCasterText(raw)).toBe(["[12']", "@중계: 다시 이어갑니다."].join("\n"));
+  });
+
+  it("한 줄로 여닫은 블록도, 짝 없는 닫는 태그도 걷는다 — 대사 안의 꺾쇠는 그대로", () => {
+    const raw = ["[12']", "<stop>구간 종료</stop>", "</ledger>", "@중계: 3 < 4 랬죠."].join("\n");
+    expect(sanitizeCasterText(raw)).toBe(["[12']", "@중계: 3 < 4 랬죠."].join("\n"));
+  });
+
+  it("스트리밍에도 같은 규칙 — 블록은 화면에 잠깐도 뜨지 않는다", () => {
+    const out: string[] = [];
+    const feed = filterCasterStream((d) => out.push(d));
+    for (const d of [
+      "[43']\n<targ",
+      'ets max="2">\n1. 공간 ',
+      "노리기\n</targets>\n@중계: ",
+      "슛!",
+    ])
+      feed(d);
+    expect(out.join("")).toBe("[43']\n@중계: 슛!");
+  });
+
+  it("스트리밍의 한 줄 블록도 저장과 같은 곳에서 끝난다", () => {
+    const out: string[] = [];
+    const feed = filterCasterStream((d) => out.push(d));
+    for (const d of ["<stop>구간 ", "종료</stop>\n@중계: ", "이어갑니다."]) feed(d);
+    expect(out.join("")).toBe("@중계: 이어갑니다.");
   });
 });
 

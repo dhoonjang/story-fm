@@ -57,10 +57,12 @@ import {
   buildLedgerNote,
   buildMatchReference,
   buildOperatorMessage,
+  filterCasterStream,
   filterSceneStream,
   lastScenePoint,
   parseSceneHeader,
   renderTurnGroup,
+  sanitizeCasterText,
   sanitizeSceneText,
   stampMatchScene,
   stampMatchStream,
@@ -516,15 +518,16 @@ async function runRealGmTurn(
   const matchMinute = inMatch ? (state.pendingMatch?.ledger.minute ?? null) : null;
   /**
    * 경기의 첫 줄은 코어가 쓴다 — 모델이 적은 시각은 화면에 닿기 전에 걷힌다.
-   * 평시는 대신 위생이 걸린다 — 걸러질 줄이 화면에 잠깐 떴다 사라지면 그것대로
-   * 눈에 띄므로 저장과 화면에 같은 것이 선다 (agents.md §2).
+   * 위생은 두 국면에 다 걸린다 — 걸러질 줄이 화면에 잠깐 떴다 사라지면 그것대로
+   * 눈에 띄므로 저장과 화면에 같은 것이 선다 (agents.md §2). 중계가 읽는 것은
+   * 꺾쇠 규칙 하나뿐이고, 코어의 시각 줄은 그 체를 지나 화면에 선다.
    */
   const streamText = !trackText
     ? undefined
     : inMatch
       ? matchMinute !== null
-        ? stampMatchStream(matchMinute, trackText)
-        : trackText
+        ? stampMatchStream(matchMinute, filterCasterStream(trackText))
+        : filterCasterStream(trackText)
       : filterSceneStream(trackText);
   const result = await retryOnce(
     inMatch ? "gm:match" : "gm:turn",
@@ -557,9 +560,10 @@ async function runRealGmTurn(
     inMatch ? () => streamed : () => streamed || calls.some((c) => c.name !== TIME_PASSED),
   );
 
-  // 도구 앞에 흘린 작업 서술과 값이 같은 반복 헤더를 걷어낸다 — 중계에는 걸지 않는다
-  // (구간마다 헤더를 새로 찍는 것이 정상이다 — prompts.md §1)
-  const sceneText = inMatch ? result.text : sanitizeSceneText(result.text);
+  // 도구 앞에 흘린 작업 서술과 값이 같은 반복 헤더를 걷어낸다 — 중계에는 헤더 규칙을
+  // 걸지 않는다(구간마다 헤더를 새로 찍는 것이 정상이다 — prompts.md §1). 남는 것은
+  // 두 국면이 함께 읽는 꺾쇠 규칙 하나다
+  const sceneText = inMatch ? sanitizeCasterText(result.text) : sanitizeSceneText(result.text);
   // 첫 줄 헤더가 본문과 갈린다 — 저장할 때 되붙일 것이고, 경기 턴은 분을 여기서 읽는다
   const scene = parseSceneHeader(sceneText);
   /**

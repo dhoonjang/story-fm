@@ -1517,6 +1517,10 @@ interface SceneScan {
   lastHeader: string | null;
   /** 첫 `@` 줄이 지나갔다 — 그 뒤의 태그 없는 줄은 이어쓰기다 */
   sceneOpen: boolean;
+  /** 열려 있는 꺾쇠 블록의 이름 — 그 안의 줄은 어느 국면에서도 장면이 아니다 */
+  block: string | null;
+  /** 헤더·작업 로그 규칙까지 거는가 — 중계는 꺾쇠 규칙 하나만 읽는다 */
+  scenes: boolean;
 }
 
 /** 헤더 값 비교용 — 안쪽 공백의 차이는 같은 시각이다 */
@@ -1525,8 +1529,49 @@ function headerKey(line: string): string {
 }
 
 /**
- * 장면에 설 수 있는 줄인가 — 시점 헤더(**직전 것과 값이 다른 것**), `@`로 시작하는
- * 화자·내레이션, 빈 줄(문단 간격), 그리고 **장면이 선 뒤의 이어쓰기 줄**(prompts.md §1).
+ * 줄 앞머리의 여는 태그 이름 — `<targets max="2">` · `<ledger>` (`</…>`·`<…/>`는 아니다).
+ *
+ * ⚠️ 이름은 **글자로 열린다**(`\p{L}`) — 코어의 블록은 영어지만 모델이 지어내는
+ * 태그는 한글일 수 있고(`<생각>`), 숫자로 여는 것은 태그가 아니라 부등호다(`3 < 4`).
+ */
+const OPENS_TAG_RE = /^<([\p{L}_][\p{L}\p{N}_-]*)(?:\s[^<>]*)?>/u;
+/** 줄 하나로 끝난 꺾쇠 — 짝 없는 닫는 태그이거나 스스로 닫은 태그 */
+const LONE_TAG_RE = /^<\/[\p{L}_][\p{L}\p{N}_-]*\s*>$|^<[\p{L}_][\p{L}\p{N}_-]*(?:\s[^<>]*?)?\/>$/u;
+
+/** 이 줄이 그 이름의 블록을 닫는가 — 한 줄로 여닫은 블록도 여기서 걸린다 */
+function closesTag(trimmed: string, name: string): boolean {
+  return new RegExp(`</${name}\\s*>`, "u").test(trimmed);
+}
+
+/** 장면이 다시 서는 줄인가 — 화자(`@`)이거나 시점 헤더(`[`)다 */
+function opensScene(trimmed: string): boolean {
+  return trimmed.startsWith("@") || trimmed.startsWith("[");
+}
+
+/**
+ * 꺾쇠로 여닫는 블록은 **읽는 것**이고 장면이 아니다 (prompts.md §1).
+ *
+ * `<targets>`·`<ledger>`는 코어가 읽으라고 넣어 준 입력 구조인데, 모델이 그것을
+ * 되받아 쓰면 프롬프트 내부 구조가 감독이 읽는 자리에 그대로 선다. 평시도 중계도
+ * 이 한 규칙을 함께 읽는다.
+ *
+ * 판정은 **줄 단위**다 — `@`로 연 줄 안의 꺾쇠는 대사의 일부라 손대지 않는다.
+ */
+function opensTagBlock(trimmed: string): string | null {
+  const opened = OPENS_TAG_RE.exec(trimmed);
+  // 한 줄에서 여닫았으면 블록을 열지 않는다 — 그 줄 하나만 걷힌다
+  return opened && !closesTag(trimmed, opened[1] ?? "") ? (opened[1] ?? "") : null;
+}
+
+/** 줄 전체가 꺾쇠 하나인가 — 열든 닫든 스스로 닫든, 장면에는 설 수 없다 */
+function isTagLine(trimmed: string): boolean {
+  return trimmed.startsWith("<") && (OPENS_TAG_RE.test(trimmed) || LONE_TAG_RE.test(trimmed));
+}
+
+/**
+ * 장면에 설 수 있는 줄인가 — 꺾쇠 블록 밖이면서, 시점 헤더(**직전 것과 값이 다른 것**),
+ * `@`로 시작하는 화자·내레이션, 빈 줄(문단 간격), 그리고 **장면이 선 뒤의 이어쓰기
+ * 줄**(prompts.md §1). 중계(`scenes: false`)는 꺾쇠 규칙까지만 읽는다.
  *
  * ⚠️ 이어쓰기가 되는 것은 첫 `@` 줄 **뒤**부터다 — 그 앞의 태그 없는 줄은 도구
  * 앞에 흘린 작업 로그라, 살리면 "…확인하겠습니다"가 코치의 대사로 붙는다.
@@ -1538,6 +1583,11 @@ function headerKey(line: string): string {
  */
 function keepsSceneLine(line: string, scan: SceneScan): boolean {
   const trimmed = line.trim();
+  // 닫히지 않은 블록은 장면이 다시 서는 줄에서 끝난다 — 짝 없는 꺾쇠 하나가
+  // 그 뒤의 장면을 통째로 삼키지 않게 (prompts.md §1)
+  if (scan.block !== null && !opensScene(trimmed)) return false;
+  if (isTagLine(trimmed)) return false;
+  if (!scan.scenes) return true;
   if (trimmed.length === 0) return true;
   if (trimmed.startsWith("@")) return true;
   if (trimmed.startsWith("[")) return headerKey(trimmed) !== scan.lastHeader;
@@ -1547,8 +1597,47 @@ function keepsSceneLine(line: string, scan: SceneScan): boolean {
 /** 판정을 마친 줄이 다음 판정에 남기는 것 */
 function afterSceneLine(line: string, scan: SceneScan): void {
   const trimmed = line.trim();
+  if (scan.block !== null) {
+    if (opensScene(trimmed)) scan.block = null;
+    else {
+      if (closesTag(trimmed, scan.block)) scan.block = null;
+      // 블록 안에서는 헤더도 이어쓰기도 나지 않는다
+      return;
+    }
+  } else if (trimmed.startsWith("<")) {
+    scan.block = opensTagBlock(trimmed);
+    if (isTagLine(trimmed)) return;
+  }
   if (trimmed.startsWith("[")) scan.lastHeader = headerKey(trimmed);
   if (trimmed.startsWith("@")) scan.sceneOpen = true;
+}
+
+/** 걷어낸 자리에 남은 빈 줄이 겹치지 않게 (문단 간격은 하나면 족하다) */
+function joinScene(kept: readonly string[]): string {
+  return kept
+    .join("\n")
+    .replace(/\n{3,}/gu, "\n\n")
+    .trim();
+}
+
+function sieve(text: string, scenes: boolean): string {
+  const lines = text.split("\n");
+  const scan: SceneScan = {
+    lastHeader: null,
+    sceneOpen: false,
+    block: null,
+    // ⚠️ **`@` 줄이 하나도 없으면 장면 규칙은 걸지 않는다** — 규약을 통째로 어긴
+    // 응답까지 지우면 빈 턴이 되어 무슨 일이 있었는지조차 사라진다. 꺾쇠 블록은
+    // 그런 응답에서도 걷는다 — 그것은 장면 규약이 아니라 프롬프트 내부 구조다
+    scenes: scenes && lines.some((line) => line.trim().startsWith("@")),
+  };
+  const kept: string[] = [];
+  for (const line of lines) {
+    const keeps = keepsSceneLine(line, scan);
+    afterSceneLine(line, scan);
+    if (keeps) kept.push(line);
+  }
+  return joinScene(kept);
 }
 
 /**
@@ -1561,78 +1650,87 @@ function afterSceneLine(line: string, scan: SceneScan): void {
  *
  * **시각이 달라진 헤더는 남는다** — 그것은 소음이 아니라 장면 전환이고, 화면이
  * 그 자리에서 시각 표시로 세운다(`cutStamps`).
- *
- * ⚠️ **@ 줄이 하나도 없으면 손대지 않는다** — 규약을 통째로 어긴 응답까지
- * 지우면 빈 턴이 되어 무슨 일이 있었는지조차 사라진다.
  */
 export function sanitizeSceneText(text: string): string {
-  const lines = text.split("\n");
-  if (!lines.some((line) => line.trim().startsWith("@"))) return text;
-  const scan: SceneScan = { lastHeader: null, sceneOpen: false };
-  const kept: string[] = [];
-  for (const line of lines) {
-    if (!keepsSceneLine(line, scan)) continue;
-    afterSceneLine(line, scan);
-    kept.push(line);
-  }
-  // 걷어낸 자리에 남은 빈 줄이 겹치지 않게 (문단 간격은 하나면 족하다)
-  return kept
-    .join("\n")
-    .replace(/\n{3,}/gu, "\n\n")
-    .trim();
+  return sieve(text, true);
+}
+
+/**
+ * 중계 위생 — **꺾쇠 블록만 걷는다** (prompts.md §1).
+ *
+ * 평시 규칙을 그대로 갖다 붙일 수 없다: 구간마다 헤더를 새로 찍는 것이 중계에서는
+ * 정상이고, 이어쓰기의 경계도 다르다. 남는 것은 두 국면이 함께 읽는 좁은 규칙
+ * 하나 — 모델이 `<targets>`를 되받아 써도 화면에도 저장에도 서지 않는다.
+ */
+export function sanitizeCasterText(text: string): string {
+  return sieve(text, false);
 }
 
 /**
  * 스트리밍에도 같은 위생을 건다 — 걸러진 줄이 화면에 잠깐 떴다 사라지면
- * 그것대로 눈에 띈다. 줄의 **첫 글자**와 여기까지 지나온 것(`SceneScan`)만 보면
+ * 그것대로 눈에 띈다. 줄의 **앞머리**와 여기까지 지나온 것(`SceneScan`)만 보면
  * 판정되므로, 지연되는 것은 줄 앞머리뿐이고 그다음 델타는 그대로 흘러간다.
  *
- * ⚠️ **헤더만은 값을 봐야 판정된다** — 같은 시각이면 소음, 달라졌으면 전환이다.
- * 그래서 `[`로 여는 줄은 닫는 대괄호(또는 줄 끝)까지 기다린다. 32자 안의 줄이라
- * 지연은 눈에 띄지 않고, 화면도 닫히지 않은 `[` 줄은 어차피 한 프레임 미룬다.
+ * ⚠️ **헤더는 값을, 꺾쇠는 닫는 부등호를 봐야 판정된다** — 같은 시각이면 소음,
+ * 달라졌으면 전환이고, `<`로 연 줄은 태그인지 대사인지가 `>`에서 갈린다. 그래서 그
+ * 두 줄만 닫는 글자(또는 줄 끝)까지 기다린다. 32자 안의 줄이라 지연은 눈에 띄지 않는다.
+ *
+ * ⚠️ **상태(`afterSceneLine`)는 줄이 끝난 뒤 줄 전체로 민다** — 앞머리로 밀면 한 줄에서
+ * 여닫은 블록(`<b>강조</b>`)이 스트리밍에서만 열린 채 남아, 화면과 저장이 갈린다.
  */
-export function filterSceneStream(emit: (delta: string) => void): (delta: string) => void {
-  let pending = ""; // 아직 판정하지 못한 줄 앞머리 (공백뿐이거나 헤더가 안 닫힌 상태)
+function filterStream(emit: (delta: string) => void, scenes: boolean): (delta: string) => void {
+  let line = ""; // 이 줄에 지금까지 온 것 전부 — 판정과 무관하게 쌓는다
+  let sent = 0; // 그중 이미 내보낸 글자 수
   let keeping: boolean | null = null; // 이 줄을 내보내는가 — null이면 판정 전
-  const scan: SceneScan = { lastHeader: null, sceneOpen: false };
+  const scan: SceneScan = { lastHeader: null, sceneOpen: false, block: null, scenes };
 
-  const startLine = () => {
-    pending = "";
-    keeping = null;
+  /** 앞머리만으로 판정할 수 있는가 — 못 하면 닫는 글자를 기다린다 */
+  const ready = (): boolean => {
+    const head = line.trimStart();
+    if (head.startsWith("<") && !head.includes(">")) return false;
+    if (scan.scenes && head.startsWith("[") && !head.includes("]")) return false;
+    return true;
   };
-  /** 미뤄 둔 줄을 지금 있는 것만으로 판정한다 — 헤더가 닫혔거나 줄이 끝났을 때 */
-  const decide = () => {
-    if (keeping !== null || pending.trim().length === 0) return;
-    keeping = keepsSceneLine(pending, scan);
-    afterSceneLine(pending, scan);
-    if (keeping) emit(pending);
-    pending = "";
-  };
-  const feedLine = (chunk: string) => {
-    if (keeping === false) return;
-    if (keeping === true) {
-      emit(chunk);
-      return;
+  /** 판정이 났으면 아직 안 나간 만큼을 흘려보낸다 */
+  const pump = (): void => {
+    if (keeping === null && line.trim().length > 0 && ready()) keeping = keepsSceneLine(line, scan);
+    if (keeping === true && sent < line.length) {
+      emit(line.slice(sent));
+      sent = line.length;
     }
-    pending += chunk;
-    // 헤더는 값이 다 와야 소음인지 전환인지 갈린다 — 닫는 대괄호까지 보류
-    if (pending.trim().startsWith("[") && !pending.includes("]")) return;
-    decide();
+  };
+  const endLine = (): void => {
+    // 닫히지 않은 채 줄이 끝난 헤더·꺾쇠도 여기서 판정된다
+    if (keeping === null && line.trim().length > 0) keeping = keepsSceneLine(line, scan);
+    if (keeping === true && sent < line.length) emit(line.slice(sent));
+    afterSceneLine(line, scan);
+    // 줄바꿈은 살아남은 줄에만 붙인다 — 걸러진 줄은 자리도 남기지 않는다
+    if (keeping !== false) emit("\n");
+    line = "";
+    sent = 0;
+    keeping = null;
   };
 
   return (delta: string) => {
     const parts = delta.split("\n");
     parts.forEach((part, i) => {
-      if (i > 0) {
-        // 닫히지 않은 채 줄이 끝난 헤더도 여기서 판정된다
-        decide();
-        // 줄바꿈은 살아남은 줄에만 붙인다 — 걸러진 줄은 자리도 남기지 않는다
-        if (keeping !== false) emit("\n");
-        startLine();
+      if (i > 0) endLine();
+      if (part.length > 0) {
+        line += part;
+        pump();
       }
-      if (part.length > 0) feedLine(part);
     });
   };
+}
+
+/** 평시 스트리밍 — 헤더·작업 로그·꺾쇠를 함께 걷는다 */
+export function filterSceneStream(emit: (delta: string) => void): (delta: string) => void {
+  return filterStream(emit, true);
+}
+
+/** 중계 스트리밍 — 꺾쇠 블록만 걷는다 (`sanitizeCasterText`와 같은 규칙) */
+export function filterCasterStream(emit: (delta: string) => void): (delta: string) => void {
+  return filterStream(emit, false);
 }
 
 export interface ParsedScene {

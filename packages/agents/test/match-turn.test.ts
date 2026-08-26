@@ -292,6 +292,73 @@ describe("경기 턴의 실패 — 어느 걸음이 흔들렸나", () => {
 });
 
 /**
+ * 중계가 되받아 쓴 **꺾쇠 블록**은 화면에도 저장에도 서지 않는다 (issue #649).
+ *
+ * `<targets>`는 코어가 읽으라고 넣어 준 입력 구조인데, 경기 턴만 위생의 문이 없어
+ * 그대로 감독이 읽는 자리에 섰다. 프롬프트로 눌러도 모델이 다시 뱉는 날이 오므로
+ * **문은 코어에 선다** — 그리고 화면과 저장 양쪽에 같은 것이 선다
+ * (docs/llm/prompts.md §1).
+ */
+describe("중계 위생 — 꺾쇠 블록은 화면에도 저장에도 서지 않는다", () => {
+  const previousMode = process.env.LLM_MODE;
+  beforeEach(() => {
+    process.env.LLM_MODE = "real";
+    runTurn.mockReset();
+  });
+  afterEach(() => {
+    if (previousMode === undefined) delete process.env.LLM_MODE;
+    else process.env.LLM_MODE = previousMode;
+  });
+
+  /** 캐스터의 응답 — 도구는 없고 문장만 온다 */
+  const casted = (text: string) => ({
+    text,
+    history: { version: 1 as const, provider: "anthropic" as const, model: "test", messages: [] },
+    historyBase: 0,
+    usage: { inputTokens: 10, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    toolCallCount: 0,
+    stopReason: "completed" as const,
+  });
+
+  it("블록은 걷히고 구간 헤더와 이어쓰기는 남는다 — 스트리밍도 같다", async () => {
+    const state = matchState();
+    markEntered(state);
+    const scene = [
+      "[12']",
+      '<targets max="2">',
+      "1. 공간 노리기 (공격진 침투)",
+      "2. 라인 올리기 (압박 강화)",
+      "지금 노리는 곳 없음",
+      "</targets>",
+      "@중계: 브루노가 중거리 슛을 때립니다!",
+      "골키퍼가 가까스로 쳐냅니다.",
+    ].join("\n");
+    runTurn.mockImplementation(
+      async (req: { onText?: (delta: string) => void }): Promise<unknown> => {
+        // 실모드와 같은 모양으로 조각내 흘려보낸다 — 델타 경계가 블록 한복판에 걸린다
+        for (const delta of scene.match(/[\s\S]{1,7}/gu) ?? []) req.onText?.(delta);
+        return casted(scene);
+      },
+    );
+
+    const streamed: string[] = [];
+    const turn = await runGmTurn(state, "경기 진행", (d) => streamed.push(d), {
+      kind: "advance_match",
+    });
+
+    for (const text of [turn.text ?? "", streamed.join("")]) {
+      expect(text).not.toContain("<targets");
+      expect(text).not.toContain("</targets>");
+      expect(text).not.toContain("공간 노리기");
+      expect(text).toContain("@중계: 브루노가 중거리 슛을 때립니다!");
+      // 구간마다 새로 찍는 시각 헤더와 이어쓰기 줄은 그대로 남는다 (prompts.md §1)
+      expect(text).toContain("골키퍼가 가까스로 쳐냅니다.");
+      expect(text).toMatch(/^\[\d+'\]\n/u);
+    }
+  });
+});
+
+/**
  * 골 표식 — 화면이 골을 세우는 근거다. 한 경기를 완주시키는 값비싼 셋업이라
  * **한 판으로 표식의 모든 성질을 잰다**(수·스코어·득점자·우리 편 여부).
  */
